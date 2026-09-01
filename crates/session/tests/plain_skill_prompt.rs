@@ -1,5 +1,5 @@
 //! Integration tests for plain skill prompts: `$review do the work`
-//! submitted queued or steered, with NO `/sandbox` prefix.
+//! submitted queued or steered, with NO `/plan` prefix.
 //!
 //! Contracts:
 //! - the `$review` token activates the skill body and is stripped from the
@@ -61,7 +61,7 @@ fn mk_input(session_id: &str, delivery: Delivery, prompt: &str) -> SessionInput 
 }
 
 // ---------------------------------------------------------------------------
-// Compound control commands: `/sandbox review` and `/act review` (mode switch +
+// Compound control commands: `/plan review` and `/act review` (mode switch +
 // trailing argument run as a prompt in the new mode).
 // ---------------------------------------------------------------------------
 
@@ -102,7 +102,7 @@ impl Drop for HomeGuard {
     }
 }
 
-/// Plain `$review do the work` queued with NO `/sandbox` prefix: the skill body
+/// Plain `$review do the work` queued with NO `/plan` prefix: the skill body
 /// activates and the `$review` token is stripped, leaving "do the work" as the
 /// recorded prompt. Agent stays "act" (no switch).
 #[tokio::test]

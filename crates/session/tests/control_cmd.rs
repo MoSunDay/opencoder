@@ -1,10 +1,10 @@
-//! Integration tests for queueable control commands (/act, /sandbox,
+//! Integration tests for queueable control commands (/act, /plan,
 //! /act_clear_context, legacy /clear_context alias).
 //!
 //! Contracts:
-//! - idle_short_circuit: a bare "/sandbox" prompt switches agent with NO LLM
+//! - idle_short_circuit: a bare "/plan" prompt switches agent with NO LLM
 //!   call
-//! - queue_drains_control_cmds: a queue of ["/sandbox", "real prompt", "/act"]
+//! - queue_drains_control_cmds: a queue of ["/plan", "real prompt", "/act"]
 //!   is fully drained FIFO in a single run — leading/trailing control
 //!   commands are applied without LLM turns and the real prompt gets a
 //!   turn; the run finishes (Done) with an empty queue
@@ -69,7 +69,7 @@ fn mk_input(session_id: &str, delivery: Delivery, prompt: &str) -> SessionInput 
     }
 }
 
-/// Idle short-circuit: "/sandbox" switches agent immediately with zero LLM calls.
+/// Idle short-circuit: "/plan" switches agent immediately with zero LLM calls.
 #[tokio::test]
 async fn idle_short_circuit_switches_with_no_llm_call() {
     let store = mem_store().await;
@@ -89,7 +89,7 @@ async fn idle_short_circuit_switches_with_no_llm_call() {
 
     let events = Arc::new(std::sync::Mutex::new(Vec::new()));
     let ev_clone = events.clone();
-    run(&mut session, "/sandbox".into(), move |ev| {
+    run(&mut session, "/plan".into(), move |ev| {
         ev_clone.lock().unwrap().push(ev)
     })
     .await
@@ -100,11 +100,11 @@ async fn idle_short_circuit_switches_with_no_llm_call() {
     // explicit drop() is not reliably recognized by the lint.
     {
         let evs = events.lock().unwrap();
-        assert_eq!(session.agent.name, "sandbox", "agent switched to sandbox");
+        assert_eq!(session.agent.name, "plan", "agent switched to plan");
         assert!(
             evs.iter()
-                .any(|e| matches!(e, SessionEvent::AgentSwitch(a) if a == "sandbox")),
-            "AgentSwitch(sandbox) emitted"
+                .any(|e| matches!(e, SessionEvent::AgentSwitch(a) if a == "plan")),
+            "AgentSwitch(plan) emitted"
         );
         assert!(
             evs.iter().any(|e| matches!(e, SessionEvent::Done)),
@@ -119,10 +119,10 @@ async fn idle_short_circuit_switches_with_no_llm_call() {
 
     // Persisted to store.
     let meta = store.get_session("idle-sess").await.unwrap().unwrap();
-    assert_eq!(meta.agent.as_deref(), Some("sandbox"), "/sandbox persists");
+    assert_eq!(meta.agent.as_deref(), Some("plan"), "/plan persists");
 }
 
-/// Queue drain: ["/sandbox", "do work", "/act"] is fully drained FIFO in a
+/// Queue drain: ["/plan", "do work", "/act"] is fully drained FIFO in a
 /// single run — leading/trailing control commands are applied without LLM
 /// turns, the real prompt gets a turn, and the run finishes (Done) with an
 /// empty queue.
@@ -132,7 +132,7 @@ async fn queue_drains_control_cmds_between_real_prompts() {
     seed(&store, "drain-sess", "act").await;
 
     // The mock: kickoff turn (done), then "do work" turn (done).
-    // /sandbox and /act are applied without LLM calls.
+    // /plan and /act are applied without LLM calls.
     let mock = Arc::new(
         MockChatClient::new()
             .push_script(vec![done_turn("kickoff reply")])
@@ -150,9 +150,9 @@ async fn queue_drains_control_cmds_between_real_prompts() {
     .with_store(store.clone())
     .mark_session_created();
 
-    // Queue: /sandbox, "do work", /act
+    // Queue: /plan, "do work", /act
     store
-        .admit_input(&mk_input("drain-sess", Delivery::Queue, "/sandbox"))
+        .admit_input(&mk_input("drain-sess", Delivery::Queue, "/plan"))
         .await
         .unwrap();
     store
@@ -183,7 +183,7 @@ async fn queue_drains_control_cmds_between_real_prompts() {
     let evs = events.lock().unwrap();
 
     // After "kickoff" turn -> idle, the queue drains FIFO in a single run:
-    // /sandbox (no LLM), "do work" (LLM turn), then at the next idle boundary
+    // /plan (no LLM), "do work" (LLM turn), then at the next idle boundary
     // /act (no LLM) is applied and the queue empties -> Done.
     let agent_switches: Vec<&str> = evs
         .iter()
@@ -193,8 +193,8 @@ async fn queue_drains_control_cmds_between_real_prompts() {
         })
         .collect();
     assert!(
-        agent_switches.contains(&"sandbox"),
-        "/sandbox applied -> AgentSwitch(sandbox)"
+        agent_switches.contains(&"plan"),
+        "/plan applied -> AgentSwitch(plan)"
     );
     assert!(
         agent_switches.contains(&"act"),
@@ -225,7 +225,7 @@ async fn queue_drains_control_cmds_between_real_prompts() {
 #[tokio::test]
 async fn clear_context_survives_resume() {
     let store = mem_store().await;
-    seed(&store, "clear-sess", "sandbox").await;
+    seed(&store, "clear-sess", "plan").await;
 
     // Pre-populate with some messages in the store.
     let msgs = vec![
@@ -246,7 +246,7 @@ async fn clear_context_survives_resume() {
     let dir = tempfile::tempdir().unwrap();
     let mut session = SessionState::new(
         "clear-sess",
-        resolve_agent("sandbox").unwrap(),
+        resolve_agent("plan").unwrap(),
         config(),
         mock,
         dir.path().to_path_buf(),
@@ -279,8 +279,8 @@ async fn clear_context_survives_resume() {
             "transcript = seed marker + assistant response"
         );
         assert_eq!(
-            session.agent.name, "act",
-            "sandbox clear converges to act"
+            session.agent.name, "plan",
+            "ClearContext keeps the active agent"
         );
         assert!(session.handoff_seq.is_some(), "handoff_seq set");
         // The last assistant reply ("old answer") was preserved as the seed.
@@ -293,20 +293,11 @@ async fn clear_context_survives_resume() {
                 .any(|e| matches!(e, SessionEvent::TranscriptReset(_))),
             "TranscriptReset emitted"
         );
-        // Converged sandbox -> act: AgentSwitch(act) fires after the reset.
-        let reset_idx = evs
-            .iter()
-            .position(|e| matches!(e, SessionEvent::TranscriptReset(_)))
-            .expect("TranscriptReset emitted");
-        let switch_idx = evs
-            .iter()
-            .position(
-                |e| matches!(e, SessionEvent::AgentSwitch(a) if a == "act"),
-            )
-            .expect("AgentSwitch(act) emitted on sandbox clear");
+        // Clear no longer switches agents: the plan session stays plan.
         assert!(
-            switch_idx > reset_idx,
-            "AgentSwitch(act) must follow TranscriptReset, got {evs:?}"
+            evs.iter()
+                .all(|e| !matches!(e, SessionEvent::AgentSwitch(_))),
+            "clear must not emit AgentSwitch, got {evs:?}"
         );
         assert!(
             evs.iter().any(|e| matches!(e, SessionEvent::Done)),
@@ -331,8 +322,8 @@ async fn clear_context_survives_resume() {
         "resume reconstructs seed marker + assistant response"
     );
     assert_eq!(
-        resumed.agent.name, "act",
-        "resume keeps the converged act agent"
+        resumed.agent.name, "plan",
+        "resume keeps the active agent"
     );
     let marker_text = resumed.messages[0].text();
     assert!(
@@ -351,7 +342,7 @@ async fn clear_context_survives_resume() {
 #[tokio::test]
 async fn clear_context_seed_falls_through_to_llm_turn() {
     let store = mem_store().await;
-    seed(&store, "exec-sess", "sandbox").await;
+    seed(&store, "exec-sess", "plan").await;
 
     let msgs = vec![Message::user("u1", "implement feature X"), {
         let mut m = Message::assistant("a1");
@@ -366,7 +357,7 @@ async fn clear_context_seed_falls_through_to_llm_turn() {
     let dir = tempfile::tempdir().unwrap();
     let mut session = SessionState::new(
         "exec-sess",
-        resolve_agent("sandbox").unwrap(),
+        resolve_agent("plan").unwrap(),
         config(),
         mock.clone() as Arc<dyn ChatStream>,
         dir.path().to_path_buf(),
@@ -418,7 +409,7 @@ async fn clear_context_seed_falls_through_to_llm_turn() {
 #[tokio::test]
 async fn clear_context_no_assistant_text_survives_resume() {
     let store = mem_store().await;
-    seed(&store, "clear-noplan", "sandbox").await;
+    seed(&store, "clear-noplan", "plan").await;
 
     // Only user messages: no assistant plan text to hand off.
     let msgs = vec![
@@ -431,7 +422,7 @@ async fn clear_context_no_assistant_text_survives_resume() {
     let dir = tempfile::tempdir().unwrap();
     let mut session = SessionState::new(
         "clear-noplan",
-        resolve_agent("sandbox").unwrap(),
+        resolve_agent("plan").unwrap(),
         config(),
         mock,
         dir.path().to_path_buf(),
@@ -456,8 +447,8 @@ async fn clear_context_no_assistant_text_survives_resume() {
             "transcript collapsed to 1 fresh-start marker"
         );
         assert_eq!(
-            session.agent.name, "act",
-            "sandbox clear converges to act"
+            session.agent.name, "plan",
+            "ClearContext keeps the active agent"
         );
         assert!(session.handoff_seq.is_some(), "handoff_seq set");
         // No assistant text -> blank sentinel stored so resume reconstructs
@@ -478,8 +469,8 @@ async fn clear_context_no_assistant_text_survives_resume() {
         );
         assert!(
             evs.iter()
-                .any(|e| matches!(e, SessionEvent::AgentSwitch(a) if a == "act")),
-            "sandbox clear emits AgentSwitch(act), got {evs:?}"
+                .all(|e| !matches!(e, SessionEvent::AgentSwitch(_))),
+            "clear must not emit AgentSwitch, got {evs:?}"
         );
     }
 
@@ -499,8 +490,8 @@ async fn clear_context_no_assistant_text_survives_resume() {
         "resume reconstructs single fresh-start marker"
     );
     assert_eq!(
-        resumed.agent.name, "act",
-        "resume keeps the converged act agent"
+        resumed.agent.name, "plan",
+        "resume keeps the active agent"
     );
     let marker_text = resumed.messages[0].text();
     assert!(
@@ -534,9 +525,9 @@ async fn steered_control_cmd_not_recorded_as_user_text() {
     .with_store(store.clone())
     .mark_session_created();
 
-    // Steer "/sandbox" during the kickoff turn.
+    // Steer "/plan" during the kickoff turn.
     store
-        .admit_input(&mk_input("steer-sess", Delivery::Steer, "/sandbox"))
+        .admit_input(&mk_input("steer-sess", Delivery::Steer, "/plan"))
         .await
         .unwrap();
 
@@ -548,7 +539,7 @@ async fn steered_control_cmd_not_recorded_as_user_text() {
     .await
     .unwrap();
 
-    // "/sandbox" must NOT appear as a recorded user message.
+    // "/plan" must NOT appear as a recorded user message.
     let user_texts: Vec<String> = session
         .messages
         .iter()
@@ -556,13 +547,13 @@ async fn steered_control_cmd_not_recorded_as_user_text() {
         .map(|m| m.text())
         .collect();
     assert!(
-        !user_texts.iter().any(|t| t.contains("/sandbox")),
-        "/sandbox must not leak as user text: {:?}",
+        !user_texts.iter().any(|t| t.contains("/plan")),
+        "/plan must not leak as user text: {:?}",
         user_texts
     );
     assert_eq!(
-        session.agent.name, "sandbox",
-        "steered /sandbox switched agent"
+        session.agent.name, "plan",
+        "steered /plan switched agent"
     );
 
     // The bare steered control command is the whole intent: AgentSwitch is
@@ -571,8 +562,8 @@ async fn steered_control_cmd_not_recorded_as_user_text() {
         let evs = events.lock().unwrap();
         assert!(
             evs.iter()
-                .any(|e| matches!(e, SessionEvent::AgentSwitch(a) if a == "sandbox")),
-            "AgentSwitch(sandbox) emitted"
+                .any(|e| matches!(e, SessionEvent::AgentSwitch(a) if a == "plan")),
+            "AgentSwitch(plan) emitted"
         );
         assert!(
             evs.iter().any(|e| matches!(e, SessionEvent::Done)),
@@ -596,7 +587,7 @@ async fn steered_control_cmd_not_recorded_as_user_text() {
 #[tokio::test]
 async fn clear_context_sentinel_never_reaches_model_context() {
     let store = mem_store().await;
-    seed(&store, "sentinel-sess", "sandbox").await;
+    seed(&store, "sentinel-sess", "plan").await;
     store
         .append_messages("sentinel-sess", &[Message::user("u1", "old question")])
         .await
@@ -608,7 +599,7 @@ async fn clear_context_sentinel_never_reaches_model_context() {
     let dir = tempfile::tempdir().unwrap();
     let mut session = SessionState::new(
         "sentinel-sess",
-        resolve_agent("sandbox").unwrap(),
+        resolve_agent("plan").unwrap(),
         config(),
         mock.clone() as Arc<dyn ChatStream>,
         dir.path().to_path_buf(),

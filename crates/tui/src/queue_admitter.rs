@@ -114,7 +114,7 @@ pub fn submit(
 /// a failed admit stays recoverable via ↑.
 ///
 /// The input is only ADMITTED here, never delivered: a queued control command
-/// (`/sandbox`, `/act`, `/act_clear_context`) is applied by the runner at the
+/// (`/plan`, `/act`, `/act_clear_context`) is applied by the runner at the
 /// idle boundary, so a stranded row that a cancelled/idle drain never
 /// absorbs cannot touch the live transcript.
 pub(crate) fn admit_running(
@@ -130,7 +130,7 @@ pub(crate) fn admit_running(
 
 /// Deferred queue admission for a submission made while a turn is running
 /// (Tab-queue, and a Submit that reaches the running state via BackTab's
-/// compound `/sandbox …` / `/act_clear_context …`): the **raw** text is
+/// compound `/plan …` / `/act_clear_context …`): the **raw** text is
 /// admitted verbatim, `$name` tokens included. Skill resolution, activation
 /// and persistence all happen at CONSUMPTION time — the runner's
 /// `record_compound` at the idle boundary — never at submit time. (Eager
@@ -154,7 +154,7 @@ pub(crate) fn handle_queue(
     if raw.is_empty() {
         return;
     }
-    // Compound control commands (`/sandbox <content>`,
+    // Compound control commands (`/plan <content>`,
     // `/act_clear_context <content>`) are consumed by the runner's
     // control-command intercept: the agent switch / transcript fold is
     // applied and the trailing content runs as the next prompt —

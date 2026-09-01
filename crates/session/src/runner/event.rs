@@ -407,7 +407,7 @@ mod from_sse_tests {
                 is_error: true,
                 images: Vec::new(),
             },
-            SessionEvent::AgentSwitch("sandbox".into()),
+            SessionEvent::AgentSwitch("plan".into()),
             SessionEvent::ModelSwitch("openai/gpt-4o".into()),
             SessionEvent::Compaction("summary".into()),
             SessionEvent::CompactionDelta("cdelta".into()),

@@ -45,7 +45,7 @@ fn assert_no_dup_ids(msgs: &[Message]) {
 fn mk_session(store: Arc<dyn Store>, id: &str) -> SessionState {
     let mock = Arc::new(MockChatClient::new().push_script(vec![done("## Brief\n1. do X")]));
     let dir = tempfile::tempdir().unwrap();
-    let agent = resolve_agent("sandbox").unwrap();
+    let agent = resolve_agent("plan").unwrap();
     let mut s = SessionState::new(id, agent, config(), mock, dir.path().to_path_buf());
     s.store = Some(store);
     s
@@ -153,7 +153,7 @@ async fn handoff_steer_consumed_once() {
         .await
         .unwrap();
 
-    // admit a steer while the sandbox agent is idle (un-promoted)
+    // admit a steer while the plan agent is idle (un-promoted)
     store
         .admit_input(&SessionInput {
             seq: None,
@@ -192,7 +192,7 @@ async fn handoff_steer_consumed_once() {
     run(&mut session, String::new(), |_| {}).await.unwrap();
 
     let msgs = store.load_messages(&session.id).await.unwrap();
-    // sandbox user(1) + sandbox assistant(1) + steer-as-user(1) + act assistant(2) = 5
+    // plan user(1) + plan assistant(1) + steer-as-user(1) + act assistant(2) = 5
     let steer_count = msgs
         .iter()
         .filter(|m| m.text().contains("look at module X"))

@@ -1,12 +1,12 @@
-//! Bash command write-detection for sandbox-mode enforcement.
+//! Bash command write-detection for plan-mode enforcement.
 //!
-//! In sandbox mode the agent must not modify the system. Rather than removing
+//! In plan mode the agent must not modify the system. Rather than removing
 //! `bash` entirely (it's useful for `ls`, `cat`, `grep`, `find`), we classify
 //! each command as read-only or potentially-mutating and block the latter.
 //!
 //! The classifier is now a thin adapter over the [`opencoder-shellguard`]
 //! crate, which is derived from [rippy](https://github.com/mpecan/rippy)
-//! (MIT license, copyright the rippy authors). Sandbox policy: block all
+//! (MIT license, copyright the rippy authors). Plan policy: block all
 //! risk-bearing writes; release `/dev/null` and `/tmp`; the cwd / project
 //! directory is NOT released. `Allow` passes; `Ask`/`Deny` block.
 //!
@@ -25,13 +25,13 @@
 /// Verdict on whether a bash command may modify state.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BashVerdict {
-    /// Command appears read-only; safe to execute in sandbox mode.
+    /// Command appears read-only; safe to execute in plan mode.
     ReadOnly,
     /// Command is blocked; carries a human-readable reason shown to the model.
     WriteBlocked(String),
 }
 
-/// Classify a bash command for sandbox-mode enforcement by delegating to
+/// Classify a bash command for plan-mode enforcement by delegating to
 /// `opencoder_shellguard::classify` (derived from rippy, MIT). `Allow`
 /// passes; `Ask`/`Deny` block, carrying the classifier's human-readable
 /// reason (embedded verbatim in the tool error shown to the model).
@@ -62,25 +62,31 @@ pub fn classify_with_dir(command: &str, cwd: &std::path::Path) -> BashVerdict {
     }
 }
 
-/// Tool names a sandbox session may execute, mirroring the `sandbox` agent's
+/// Tool names a plan session may execute, mirroring the `plan` agent's
 /// `ToolFilter::Allow` list. `question` still has to clear the latent-skill
 /// gate downstream; `bash` additionally passes the shellguard classifier.
-const SANDBOX_ADMITTED: &[&str] = &["bash", "task", "question"];
+const PLAN_ADMITTED: &[&str] = &["bash", "task", "question"];
 
-/// Canonical model-facing denial for a sandbox interception. The wording is
-/// the retry-suppression contract: name the mode, state the read-only
-/// invariant, tell the model retries are futile, and point at the REAL
-/// escape hatch (`/act`; there is no `/agent` command).
-pub fn sandbox_denial(tool: &str, detail: &str) -> String {
-    format!(
-        "Blocked in sandbox mode: `{tool}` was not executed - sandbox mode is read-only and \
-         nothing may be written ({detail}). Do not retry: every write attempt fails while \
-         sandbox mode is active. To make changes, the user can switch to the act agent with `/act`."
-    )
+/// Canonical model-facing denial for a plan-mode interception (candidate
+/// wording, verbatim). The contract: name the mode, state the read-only
+/// invariant, and point at the real escape hatch — switch to the act agent
+/// via `/agent act`.
+pub fn plan_denial(tool: &str, detail: &str) -> String {
+    if tool == "bash" {
+        format!(
+            "Blocked in plan mode: this bash command modifies state ({detail}). \
+             Plan mode is read-only. To make changes, switch to the act agent (/agent act)."
+        )
+    } else {
+        format!(
+            "Blocked in plan mode: `{tool}` was not executed - {detail}. \
+             Plan mode is read-only. To make changes, switch to the act agent (/agent act)."
+        )
+    }
 }
 
-/// Sandbox execution gate for one tool call: `Some(denial)` refuses the call
-/// with the model-visible [`sandbox_denial`], `None` lets it proceed.
+/// Plan-mode execution gate for one tool call: `Some(denial)` refuses the call
+/// with the model-visible [`plan_denial`], `None` lets it proceed.
 ///
 /// `workdir` is the directory the call will execute in — for bash the
 /// per-call `workdir` input, else the session working dir (resolved by the
@@ -91,7 +97,7 @@ pub fn sandbox_denial(tool: &str, detail: &str) -> String {
 /// `touch f` while the write lands in the real workdir).
 ///
 /// Two layers, both fail-closed:
-/// - the session is sandbox but the tool is not admitted (a hallucinated or
+/// - the session is plan but the tool is not admitted (a hallucinated or
 ///   remembered builtin like `edit`, or an unadvertised MCP tool): refuse so
 ///   a write can never slip through a tool the model was never shown;
 /// - `bash` is admitted but the shellguard classifier flags the command as
@@ -102,16 +108,16 @@ pub fn gate(
     command: Option<&str>,
     workdir: &std::path::Path,
 ) -> Option<String> {
-    if *kind != opencoder_core::AgentKind::Sandbox {
+    if *kind != opencoder_core::AgentKind::Plan {
         return None;
     }
-    if tool != "bash" && !SANDBOX_ADMITTED.contains(&tool) {
-        return Some(sandbox_denial(tool, "tool is not available in sandbox mode"));
+    if tool != "bash" && !PLAN_ADMITTED.contains(&tool) {
+        return Some(plan_denial(tool, "this tool is not available in plan mode"));
     }
     if tool == "bash" {
         if let BashVerdict::WriteBlocked(reason) = classify_with_dir(command.unwrap_or(""), workdir)
         {
-            return Some(sandbox_denial("bash", &reason));
+            return Some(plan_denial("bash", &reason));
         }
     }
     None
@@ -250,6 +256,19 @@ pub(crate) fn strip_wrappers(cmd: &str) -> &str {
     }
 }
 
+/// A workdir OUTSIDE the /tmp release scope. The crate tree itself may sit
+/// under /tmp (which the shellguard releases wholesale), so tests that need
+/// a *plain* directory must not anchor on CARGO_MANIFEST_DIR or the process
+/// cwd.
+#[cfg(test)]
+pub(crate) fn plain_dir() -> tempfile::TempDir {
+    let home = std::env::var("HOME").expect("$HOME set");
+    tempfile::Builder::new()
+        .prefix("sg-plain-")
+        .tempdir_in(home)
+        .expect("writable $HOME for a non-released workdir")
+}
+
 #[cfg(test)]
 #[path = "bash_guard_compat_tests.rs"]
 mod compat_tests;
@@ -305,29 +324,27 @@ mod tests {
 
     #[test]
     fn denial_names_mode_forbids_retry_points_at_act() {
-        let msg = super::sandbox_denial("edit", "tool is not available in sandbox mode");
-        assert!(msg.contains("Blocked in sandbox mode"), "got: {msg}");
+        let msg = super::plan_denial("edit", "this tool is not available in plan mode");
+        assert!(msg.contains("Blocked in plan mode"), "got: {msg}");
         assert!(msg.contains("read-only"), "got: {msg}");
-        assert!(msg.contains("Do not retry"), "got: {msg}");
         assert!(msg.contains("`edit`"), "got: {msg}");
-        // The escape hatch must be the REAL command: `/act`, never `/agent act`.
-        assert!(msg.contains("`/act`"), "got: {msg}");
-        assert!(!msg.contains("/agent act"), "got: {msg}");
+        // The escape hatch must name the real path: the act agent.
+        assert!(msg.contains("switch to the act agent (/agent act)"), "got: {msg}");
     }
 
     #[test]
-    fn admitted_set_matches_sandbox_agent_tool_filter() {
-        let sandbox = opencoder_core::resolve_agent("sandbox").expect("sandbox agent");
-        for name in super::SANDBOX_ADMITTED {
+    fn admitted_set_matches_plan_agent_tool_filter() {
+        let plan = opencoder_core::resolve_agent("plan").expect("plan agent");
+        for name in super::PLAN_ADMITTED {
             assert!(
-                sandbox.tools.allows(name),
-                "gate admits {name} but the sandbox ToolFilter does not"
+                plan.tools.allows(name),
+                "gate admits {name} but the plan ToolFilter does not"
             );
         }
     }
 
     #[test]
-    fn gate_passes_non_sandbox_kinds_through() {
+    fn gate_passes_non_plan_kinds_through() {
         use opencoder_core::{resolve_agent, AgentKind};
         let anywhere = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
         for name in ["act", "explore"] {
@@ -338,7 +355,7 @@ mod tests {
                 "{name} must not be gated"
             );
         }
-        // Explicit non-sandbox kind is equally untouched.
+        // Explicit non-plan kind is equally untouched.
         assert_eq!(
             super::gate(&AgentKind::Act, "bash", Some("rm -rf /"), anywhere),
             None
@@ -346,17 +363,17 @@ mod tests {
     }
 
     #[test]
-    fn gate_refuses_unadmitted_tool_in_sandbox() {
+    fn gate_refuses_unadmitted_tool_in_plan() {
         use opencoder_core::resolve_agent;
-        let kind = resolve_agent("sandbox").unwrap().kind;
+        let kind = resolve_agent("plan").unwrap().kind;
         let anywhere = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
         for tool in ["edit", "bg", "mcp__fs__write"] {
             let denial = super::gate(&kind, tool, None, anywhere)
                 .unwrap_or_else(|| panic!("{tool} must be refused"));
-            assert!(denial.contains("Blocked in sandbox mode"), "got: {denial}");
+            assert!(denial.contains("Blocked in plan mode"), "got: {denial}");
         }
         // Admitted tools pass the first layer untouched.
-        for tool in super::SANDBOX_ADMITTED {
+        for tool in super::PLAN_ADMITTED {
             if *tool == "bash" {
                 continue; // covered by the classifier tests below
             }
@@ -369,34 +386,34 @@ mod tests {
     }
 
     #[test]
-    fn gate_blocks_mutating_bash_in_sandbox() {
+    fn gate_blocks_mutating_bash_in_plan() {
         use opencoder_core::resolve_agent;
-        let kind = resolve_agent("sandbox").unwrap().kind;
-        // A plain (non-/tmp) workdir: this crate's source tree.
-        let plain = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let kind = resolve_agent("plan").unwrap().kind;
+        // A plain (non-released) workdir.
+        let plain_dir = super::plain_dir();
+        let plain = plain_dir.path();
         assert!(super::gate(&kind, "bash", Some("ls -la"), plain).is_none());
         let denial = super::gate(&kind, "bash", Some("rm -rf ./f"), plain).expect("blocked");
-        assert!(denial.contains("Blocked in sandbox mode"), "got: {denial}");
+        assert!(denial.contains("Blocked in plan mode"), "got: {denial}");
     }
 
     #[test]
     fn gate_judges_bash_against_the_call_workdir_not_the_process_cwd() {
         use opencoder_core::resolve_agent;
-        let kind = resolve_agent("sandbox").unwrap().kind;
+        let kind = resolve_agent("plan").unwrap().kind;
         // The command is identical in both legs; only the effective workdir
-        // differs. The default process cwd is this crate's source tree (never
-        // released), so a gate still keyed on the process cwd would block the
-        // /tmp leg.
+        // differs. A gate still keyed on the process cwd (whatever the test
+        // runner's is) would mis-judge both legs.
         let tmp = std::path::Path::new("/tmp");
         assert_eq!(
             super::gate(&kind, "bash", Some("touch ./f"), tmp),
             None,
             "relative write under the /tmp workdir is released"
         );
-        let plain = tempfile::tempdir_in(env!("CARGO_MANIFEST_DIR")).unwrap();
+        let plain = super::plain_dir();
         let denial = super::gate(&kind, "bash", Some("touch ./f"), plain.path())
             .unwrap_or_else(|| panic!("same command must be blocked from a non-/tmp workdir"));
-        assert!(denial.contains("Blocked in sandbox mode"), "got: {denial}");
+        assert!(denial.contains("Blocked in plan mode"), "got: {denial}");
     }
 
     #[test]
@@ -407,7 +424,7 @@ mod tests {
             classify_with_dir("touch f", std::path::Path::new("/tmp")),
             BashVerdict::ReadOnly
         );
-        let plain = tempfile::tempdir_in(env!("CARGO_MANIFEST_DIR")).unwrap();
+        let plain = super::plain_dir();
         assert!(matches!(
             classify_with_dir("touch f", plain.path()),
             BashVerdict::WriteBlocked(_)

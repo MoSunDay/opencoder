@@ -40,7 +40,7 @@ pub struct Cli {
     /// wins over the stored model) and re-persists so later resumes honor it.
     #[arg(long, global = true, value_name = "MODEL")]
     pub model: Option<String>,
-    /// Override the agent for this run, as a builtin name (act/sandbox/explore/build).
+    /// Override the agent for this run, as a builtin name (act/plan/explore/build).
     /// New sessions use it as the primary agent and persist the choice; resuming
     /// with --agent re-applies it (explicit choice wins over the stored agent)
     /// and re-persists so later resumes honor it.
@@ -74,9 +74,9 @@ pub struct Cli {
 /// message instead of a late runtime error after resume bookkeeping ran.
 /// Validates against [`opencoder_core::resolve_agent`] (the same resolver the
 /// fresh-session and resume paths use) so no previously-accepted builtin is
-/// newly rejected. The removed plan/act dual mode spelled the read-only
-/// primary `plan`; that name now gets an explicit pointer to its `sandbox`
-/// replacement.
+/// newly rejected. The reverted sandbox-mode interlude spelled the read-only
+/// primary `sandbox`; that name now gets an explicit pointer to its `plan`
+/// restoration.
 pub fn parse_agent_name(s: &str) -> Result<String, String> {
     if opencoder_core::resolve_agent(s).is_some() {
         return Ok(s.to_string());
@@ -84,8 +84,8 @@ pub fn parse_agent_name(s: &str) -> Result<String, String> {
     let agents = opencoder_core::builtin_agents();
     let mut known: Vec<&str> = agents.iter().map(|a| a.name.as_str()).collect();
     known.sort_unstable();
-    let hint = if s == "plan" {
-        " (the 'plan' agent was renamed to 'sandbox')"
+    let hint = if s == "sandbox" {
+        " (the 'sandbox' agent was renamed back to 'plan')"
     } else {
         ""
     };

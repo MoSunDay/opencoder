@@ -276,12 +276,12 @@ pub async fn clear_others(conn: &Connection, keep_id: &str) -> Result<u64> {
 }
 
 /// Legacy agent-name normalization, applied on READ paths only: databases
-/// written before the plan/act split was removed may store `agent = 'plan'`
-/// for the read-only agent, which is now named `sandbox`. Resume must treat
-/// those rows as regular act sessions, so map `'plan'` -> `'act'`. The raw
+/// written during the sandbox-mode interlude store `agent = 'sandbox'` for
+/// the read-only agent, which is named `plan` again. Resume must land those
+/// rows on the restored plan agent, so map `'sandbox'` -> `'plan'`. The raw
 /// stored value is never rewritten.
 fn normalize_agent(agent: Option<String>) -> Option<String> {
-    agent.map(|a| if a == "plan" { "act".to_string() } else { a })
+    agent.map(|a| if a == "sandbox" { "plan".to_string() } else { a })
 }
 
 fn row_to_meta(r: &libsql::Row) -> Result<SessionMeta> {

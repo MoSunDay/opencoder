@@ -5,7 +5,7 @@
 //! - act WITHOUT a task-plan skill: `question` absent.
 //! - act WITH a task-plan body naming the skill in its first 500 chars: present.
 //! - act WITH a review body: still absent (question is task-plan-only).
-//! - sandbox: hidden unless a task-plan body is active (no agent exemptions).
+//! - plan: present regardless (base-prompt clarification protocol).
 
 use std::sync::Arc;
 
@@ -102,25 +102,12 @@ async fn act_with_review_skill_hides_question() {
 }
 
 #[tokio::test]
-async fn sandbox_without_skill_hides_question() {
-    // No agent exemptions: the sandbox allowlist still carries `question`,
-    // but without an active task-plan body the tool is not injected.
-    let (session, mock) = session_for("q-gate-sandbox", "sandbox", None);
-    let names = requested_tools(session, mock).await;
-    assert!(
-        !names.contains(&"question".to_string()),
-        "sandbox without a skill must NOT see question, got: {names:?}"
-    );
-}
-
-#[tokio::test]
-async fn sandbox_with_plan_skill_sees_question() {
-    let body = "# task-plan\n\n## Overview\n\nplan the launch; ask via question when blocked.";
-    let (session, mock) = session_for("q-gate-sandbox-plan", "sandbox", Some(body.into()));
+async fn plan_sees_question_without_any_skill() {
+    let (session, mock) = session_for("q-gate-plan", "plan", None);
     let names = requested_tools(session, mock).await;
     assert!(
         names.contains(&"question".to_string()),
-        "sandbox with an active task-plan body must see question, got: {names:?}"
+        "plan must always see question, got: {names:?}"
     );
 }
 

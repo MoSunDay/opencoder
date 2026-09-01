@@ -56,10 +56,10 @@ fn task_plan_act_system_prompt_strips_build_delegation() {
         .text()
         .contains("'build' (full tools)"));
 
-    // The sandbox agent prompt is pre-stripped; task-plan stripping is a
+    // The plan agent prompt is pre-stripped; task-plan stripping is a
     // no-op there, so the read-only contract is never weakened.
-    let sandbox = resolve_agent("sandbox").unwrap();
-    assert!(!build_system(&sandbox, dir, None, None)
+    let plan = resolve_agent("plan").unwrap();
+    assert!(!build_system(&plan, dir, None, None)
         .text()
         .contains("'build' (full tools)"));
 }
@@ -379,9 +379,9 @@ fn project_instructions_truncated_past_200kb_with_boundary_safe_cut() {
 }
 
 #[test]
-fn environment_block_marks_sandbox_mode_readonly() {
-    let block = environment_block(std::path::Path::new("/repo"), AgentKind::Sandbox);
-    assert!(block.contains("IN_SANDBOX_MODE"));
+fn environment_block_marks_plan_mode_readonly() {
+    let block = environment_block(std::path::Path::new("/repo"), AgentKind::Plan);
+    assert!(block.contains("IN_PLAN_MODE"));
     assert!(block.contains("read-only"));
     // Updated for the shellguard release set: the marker now names what IS
     // permitted (/tmp writes, /dev/null redirects) and states that the
@@ -393,8 +393,8 @@ fn environment_block_marks_sandbox_mode_readonly() {
 }
 
 #[test]
-fn environment_block_omits_sandbox_marker_in_act() {
+fn environment_block_omits_plan_marker_in_act() {
     let block = environment_block(std::path::Path::new("/repo"), AgentKind::Act);
-    assert!(!block.contains("IN_SANDBOX_MODE"));
+    assert!(!block.contains("IN_PLAN_MODE"));
     assert!(block.contains("Working directory: /repo"));
 }

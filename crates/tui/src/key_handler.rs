@@ -46,7 +46,7 @@ pub(crate) enum KeyAction {
     /// guard echoes the retained seed and lets Esc 回撤 before it lands.
     /// `rest` is the swallowed composer draft forwarded as the compound tail.
     ArmClearConfirm { rest: Option<String> },
-    /// Enter the sandbox-text editor (Shift+I in sandbox mode when idle).
+    /// Enter the plan-text editor (Shift+I in plan mode when idle).
     EnterPlanEdit,
     /// Activate a skill picked from the `$` menu, or clear the active skill
     /// (None) via the menu's dedicated clear row. app.rs routes both through
@@ -167,7 +167,7 @@ pub(crate) fn handle_key(
             return KeyAction::OpenKeymap;
         }
         // The plan/act mode-switch chords are gone (the plan/act toggle was
-        // removed; agent switches are `/act` / `/sandbox` control commands
+        // removed; agent switches are `/act` / `/plan` control commands
         // now), so the subagent-focus view handles only scroll, cancel, quit
         // and help.
         return KeyAction::None;
@@ -401,9 +401,9 @@ pub(crate) fn handle_key(
                 return KeyAction::None;
             }
             // Shift+I (uppercase I) enters plan-text edit — ONLY in the
-            // sandbox (read-only) agent, idle, and the input box is empty.
+            // plan (read-only) agent, idle, and the input box is empty.
             // Once the user starts typing, regular `I` insertion resumes.
-            if c == 'I' && agent == "sandbox" && !running && !input_disabled && input.is_empty() {
+            if c == 'I' && agent == "plan" && !running && !input_disabled && input.is_empty() {
                 return KeyAction::EnterPlanEdit;
             }
             if c == '$' {

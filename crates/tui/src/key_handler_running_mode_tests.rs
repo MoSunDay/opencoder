@@ -31,12 +31,12 @@ fn press_running_command(
         80,
         2,
         subagent_focused,
+        false, // sidecar_focused
         false,
         &mut undo_state,
         &mut queue_scroll,
         &mut file_menu,
-        Path::new("."),
-    );
+        Path::new("."));
     (action, input, cursor)
 }
 
@@ -71,12 +71,12 @@ fn press_ctrl_t(agent: &str, running: bool, input_disabled: bool) -> (KeyAction,
         80,
         2,
         input_disabled,
+        false,
         input_disabled,
         &mut undo_state,
         &mut queue_scroll,
         &mut file_menu,
-        Path::new("."),
-    );
+        Path::new("."));
     (action, input)
 }
 
@@ -191,11 +191,11 @@ fn backtab_in_plan_mode_arms_clear_context_confirm() {
             2,
             false,
             false,
+            false,
             &mut undo_state,
             &mut queue_scroll,
             &mut file_menu,
-            Path::new("."),
-        );
+            Path::new("."));
         (action, input)
     }
 
@@ -264,11 +264,11 @@ fn backtab_arm_then_esc_restores_the_raw_draft() {
             2,
             false,
             false,
+            false,
             &mut undo_state,
             &mut queue_scroll,
             &mut file_menu,
-            Path::new("."),
-        );
+            Path::new("."));
         let (rest, draft) = match action {
             KeyAction::ArmClearConfirm { rest, draft } => (rest, draft),
             other => panic!("expected ArmClearConfirm, got {other:?}"),
@@ -328,11 +328,11 @@ fn backtab_in_act_mode_switches_to_plan() {
             2,
             false,
             false,
+            false,
             &mut undo_state,
             &mut queue_scroll,
             &mut file_menu,
-            Path::new("."),
-        );
+            Path::new("."));
         (action, input)
     }
 

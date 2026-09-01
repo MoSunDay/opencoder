@@ -46,6 +46,17 @@ async fn seed(store: &Arc<dyn Store>, id: &str, agent: &str) {
         .unwrap();
 }
 
+/// String contents of every `user` message in a captured request payload
+/// (where the transient `[skill loaded]` body message rides).
+fn request_user_texts(req: &opencoder_llm::ChatRequest) -> Vec<String> {
+    req.messages
+        .iter()
+        .filter(|m| m.get("role").and_then(|r| r.as_str()) == Some("user"))
+        .filter_map(|m| m.get("content").and_then(|c| c.as_str()))
+        .map(str::to_string)
+        .collect()
+}
+
 fn mk_input(session_id: &str, delivery: Delivery, prompt: &str) -> SessionInput {
     SessionInput {
         seq: None,
@@ -117,13 +128,14 @@ async fn queue_plain_skill_prompt_resolves() {
         MockChatClient::new()
             .push_script(vec![done_turn("kickoff")])
             .push_script(vec![done_turn("work reply")]),
-    ) as Arc<dyn ChatStream>;
+    );
+    let client: Arc<dyn ChatStream> = mock.clone();
     let dir = tempfile::tempdir().unwrap();
     let mut session = SessionState::new(
         "plain-skill-queue",
         resolve_agent("act").unwrap(),
         config(),
-        mock,
+        client,
         dir.path().to_path_buf(),
     )
     .with_store(store.clone())
@@ -144,14 +156,14 @@ async fn queue_plain_skill_prompt_resolves() {
         session.agent.name, "act",
         "no agent switch for plain prompt"
     );
-    // One-shot: the skill was active DURING the run (its body was injected
-    // into the transcript) and is cleared once the run ends.
+    // One-shot: the skill was active DURING the run (its transient
+    // `[skill loaded]` body message rode a payload turn) and is cleared once
+    // the run ends.
     assert!(
-        session
-            .messages
+        mock.requests().iter().any(|req| request_user_texts(req)
             .iter()
-            .any(|m| m.text().starts_with("[skill loaded] ")),
-        "skill was active during the run (body injected)"
+            .any(|t| t.starts_with("[skill loaded] "))),
+        "skill was active during the run (body in the payload)"
     );
     assert!(
         session.skill_prompt_cloned().is_none(),
@@ -190,13 +202,14 @@ async fn steer_plain_skill_prompt_resolves() {
         MockChatClient::new()
             .push_script(vec![done_turn("kickoff")])
             .push_script(vec![done_turn("steered reply")]),
-    ) as Arc<dyn ChatStream>;
+    );
+    let client: Arc<dyn ChatStream> = mock.clone();
     let dir = tempfile::tempdir().unwrap();
     let mut session = SessionState::new(
         "plain-skill-steer",
         resolve_agent("act").unwrap(),
         config(),
-        mock,
+        client,
         dir.path().to_path_buf(),
     )
     .with_store(store.clone())
@@ -213,14 +226,13 @@ async fn steer_plain_skill_prompt_resolves() {
 
     run(&mut session, "kickoff".into(), |_| {}).await.unwrap();
 
-    // One-shot: activation is proven by the in-run body injection; the run's
-    // end clears the skill again.
+    // One-shot: activation is proven by the transient `[skill loaded]` body
+    // message in a run payload turn; the run's end clears the skill again.
     assert!(
-        session
-            .messages
+        mock.requests().iter().any(|req| request_user_texts(req)
             .iter()
-            .any(|m| m.text().starts_with("[skill loaded] ")),
-        "skill was active during the run (body injected)"
+            .any(|t| t.starts_with("[skill loaded] "))),
+        "skill was active during the run (body in the payload)"
     );
     assert!(
         session.skill_prompt_cloned().is_none(),

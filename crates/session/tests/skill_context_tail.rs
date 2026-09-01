@@ -1,23 +1,26 @@
 //! Skill-context tail injection — integration contract tests.
 //!
 //! Skill content never ships in the system prompt anymore (`build_system`
-//! takes no skill parameter): every LLM call derives one synthetic user
-//! message appended at the END of the payload (`skill_context::tail_reminder`)
-//! carrying (a) the `[skills]` catalog of config-enabled skills plus a
-//! lazy-load hint and (b) the `[active skill]` source path parsed from the
-//! body — a FALLBACK pointer that stays suppressed while the matching
-//! `[skill loaded]` body message is already on record (F3)
-//! `> Source:` prefix that `opencoder_core::body_with_source` writes. The
-//! message is transient — never recorded into `session.messages` — and is
-//! regenerated per call, so it survives compaction for free.
+//! takes no skill parameter): every LLM call derives synthetic user
+//! messages appended at the END of the payload — the transient
+//! `[skill loaded]` full-body message (`skill_context::
+//! transient_body_message`) plus the tail reminder
+//! (`skill_context::tail_reminder`) carrying (a) the `[skills]` catalog of
+//! config-enabled skills plus a lazy-load hint and (b) — only when the
+//! armed skill has no injectable body (degenerate empty-body case) — the
+//! `[active skill]` source path parsed from the `> Source:` prefix that
+//! `opencoder_core::body_with_source` writes. Both messages are transient —
+//! never recorded into `session.messages` — and are regenerated per call,
+//! so they survive compaction for free.
 //!
 //! Pinned against real request payloads captured by `MockChatClient`:
 //! 1. prefix-cache stability: the system message stays byte-identical while
 //!    catalog config and active-skill state flip mid-session;
 //! 2. catalog reminder shape: final payload message, directory + entries +
 //!    lazy-load guidance, disabled skills filtered out, never persisted;
-//! 3. active-skill path reminder keeps the system prompt clean (and the
-//!    legacy no-`> Source:` body parse contract);
+//! 3. active-skill body ships as the trailing `[skill loaded]` message and
+//!    keeps the system prompt clean (and the legacy no-`> Source:` body
+//!    parse contract);
 //! 4. subagent/workflow exclusion.
 //!
 //! Every test flips `$HOME` (`PreparedHome` under a shared `HOME_LOCK`) so
@@ -216,8 +219,8 @@ async fn system_prompt_bytes_stable_across_catalog_and_activation_changes() {
     );
 
     // The payload tail DID change: the catalog section appears, and the
-    // `[active skill]` pointer stays suppressed because turn 2 already
-    // carries the in-conversation `[skill loaded]` body message.
+    // `[active skill]` pointer stays silent because turn 2 already carries
+    // the transient `[skill loaded]` body message adjacent in the payload.
     let tail = last_user_content(second);
     assert!(tail.contains("[skills]"), "{tail}");
     assert!(!tail.contains("[active skill]"), "{tail}");
@@ -303,9 +306,9 @@ async fn skills_catalog_reminder_is_last_payload_message_and_never_persisted() {
 }
 
 /// 3a. Active-skill delivery: a `> Source:`-prefixed body reaches the model
-/// as the in-conversation `[skill loaded]` message; the `[active skill]`
-/// tail pointer is fallback-only and stays off while that marker is on
-/// record — the body text stays out of the system message either way.
+/// as the trailing transient `[skill loaded]` message; the `[active skill]`
+/// tail pointer stays silent while the body ships adjacent in the same
+/// payload — the body text stays out of the system message either way.
 #[tokio::test]
 async fn active_skill_body_ships_via_loaded_message_and_keeps_system_clean() {
     let home = PreparedHome::new();
@@ -329,16 +332,16 @@ async fn active_skill_body_ships_via_loaded_message_and_keeps_system_clean() {
     );
     let tail = last_user_content(req);
     assert!(
-        !tail.contains("[active skill]"),
-        "pointer suppressed while the loaded marker is on record: {tail}"
-    );
-    assert!(
         tail.contains("[skill loaded]") && tail.contains(&source.display().to_string()),
         "the loaded message names the skill's source file: {tail}"
     );
     assert!(
         tail.contains("alpha-BODY-CONTENT"),
         "the body ships once, inside the loaded message: {tail}"
+    );
+    assert!(
+        !tail.contains("[active skill]"),
+        "pointer silent while the body ships adjacent: {tail}"
     );
     assert!(
         !system_content(req).contains("[active skill]"),

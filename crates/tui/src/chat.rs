@@ -46,6 +46,8 @@ mod compaction_block;
 mod headers;
 #[path = "chat_stream.rs"]
 mod stream;
+#[path = "chat_sidecar.rs"]
+pub(crate) mod sidecar;
 pub(crate) use compaction_block::render_collapsible;
 
 impl ChatView {
@@ -295,15 +297,21 @@ impl ChatView {
             }
             SessionEvent::QueueConsumed { .. } => {}
             SessionEvent::SteerConsumed { seq, text } => {
+                // Model-facing echo only: a compound control command's tail,
+                // nothing for a bare command (applied inline, never
+                // recorded). Legacy persisted events fall back to the local
+                // mirror through the same normalization.
                 let display = if !text.is_empty() {
-                    sanitize_multiline(text).into_owned()
+                    opencoder_session::consumed_echo_text(text)
                 } else {
                     self.steer_items
                         .iter()
                         .find(|(s, _)| s == seq)
-                        .map(|(_, d)| d.clone())
-                        .unwrap_or_default()
+                        .and_then(|(_, d)| opencoder_session::consumed_echo_text(d))
                 };
+                let display = display
+                    .map(|d| sanitize_multiline(&d).into_owned())
+                    .unwrap_or_default();
                 if !display.is_empty() {
                     self.blocks.push(ChatBlock::User {
                         rendered: crate::markdown::render(&display),
@@ -314,6 +322,17 @@ impl ChatView {
             }
             SessionEvent::AutoPilot { phase, iteration } => {
                 self.status = format!("autopilot: {:?} #{}", phase, iteration);
+            }
+            // Sidecar frames fold into their dedicated block (see
+            // `sidecar::fold_sidecar`): Start pushes + auto-focuses the block,
+            // Child routes into the block's nested view, Turn finalizes it.
+            // Bare `LlmUsage` is NOT a sidecar frame — it already took the
+            // parent arm above, which is exactly how the sidecar's cost is
+            // accounted to the main task (tokens_total).
+            SessionEvent::SidecarStart { .. }
+            | SessionEvent::SidecarChild { .. }
+            | SessionEvent::SidecarTurn { .. } => {
+                sidecar::fold_sidecar(self, ev);
             }
         }
     }
@@ -637,6 +656,24 @@ impl ChatView {
                         ));
                     }
                     out.push(Line::from(spans));
+                }
+                // Header-only row; the focused body is swapped in wholesale by
+                // `compute_display` (same design as the subagent view swap).
+                ChatBlock::Sidecar {
+                    question,
+                    done,
+                    ok,
+                    answer,
+                    total_tokens,
+                    rounds,
+                    started_at_ms,
+                    elapsed_ms,
+                    ..
+                } => {
+                    out.extend(sidecar::flatten_sidecar(
+                        question, *done, *ok, answer, *total_tokens, *rounds,
+                        *started_at_ms, *elapsed_ms, anim_tick, now_ms,
+                    ));
                 }
             }
         }

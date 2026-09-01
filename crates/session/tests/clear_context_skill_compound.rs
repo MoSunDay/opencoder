@@ -11,7 +11,8 @@
 //!      -> skill_resolve::record_compound(rest) // extract_skill_tokens +
 //!                                              // discover_skills() (~/.opencoder/skills)
 //!                                              // -> re-arm + persist_active_skill
-//!      -> DrainOutcome::Prompt -> LLM turn     // payload carries [skill loaded] body
+//!      -> DrainOutcome::Prompt -> LLM turn     // payload carries the
+//!                                             // transient [skill loaded] body
 //!      -> run end -> clear_on_run_end          // memory None + store NULL again
 //! ```
 //!
@@ -84,8 +85,8 @@ fn user_texts(req: &ChatRequest) -> Vec<String> {
         .collect()
 }
 
-/// The one-shot activation proof: the persistent `[skill loaded]` full-body
-/// injection or the transient `[active skill]` tail pointer.
+/// The one-shot activation proof: the transient `[skill loaded]` full-body
+/// payload message or the transient `[active skill]` tail pointer.
 fn carries_skill_artifact(req: &ChatRequest) -> bool {
     user_texts(req)
         .iter()
@@ -267,8 +268,8 @@ async fn dollar_tail_rearms_task_plan_then_run_end_clears_store() {
     let tail_texts = user_texts(&requests[1]);
     assert!(
         tail_texts.iter().any(|t| t.contains("[skill loaded]")),
-        "task-plan must re-arm at consumption: expected the [skill loaded] \
-         body injection in the tail payload, got {tail_texts:?}"
+        "task-plan must re-arm at consumption: expected the transient \
+         [skill loaded] body message in the tail payload, got {tail_texts:?}"
     );
     assert!(
         tail_texts

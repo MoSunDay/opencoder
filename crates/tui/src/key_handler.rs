@@ -35,6 +35,12 @@ pub(crate) enum KeyAction {
     /// the parent agent — so it is rejected here. The input box is left
     /// untouched so the user can press Enter to steer the subagent instead.
     QueueUnsupported,
+    /// A `/sidecar <question>` submission (or a follow-up typed inside the
+    /// focused sidecar box). Routed to the sidecar actor — never through
+    /// steer/queue/prompt — so the main task keeps running untouched.
+    /// An empty question is the bare `/sidecar` form: re-focus an existing
+    /// sidecar box or flash the usage hint.
+    SidecarAsk(String),
     /// A textual mode command was submitted while a running subagent is
     /// focused (subagents have no mode concept, so it can neither steer the
     /// child nor be deferred to a parent boundary). The input remains
@@ -85,6 +91,10 @@ pub(crate) fn handle_key(
     inner_w: u16,
     prompt_w: u16,
     subagent_focused: bool,
+    // Whether the sidecar interaction box is focused (`chat.sidecar_focus`).
+    // Mutually exclusive with `subagent_focus`. While set, Enter always
+    // routes to the sidecar actor and Tab can never queue into the parent.
+    sidecar_focused: bool,
     input_disabled: bool,
     undo_state: &mut crate::undo::UndoState,
     queue_scroll: &mut u32,
@@ -284,6 +294,31 @@ pub(crate) fn handle_key(
             {
                 return KeyAction::ModeSwitchBlocked;
             }
+            // Sidecar focus: Enter is a follow-up question to the sidecar
+            // conversation — the parent's steer/submit paths are unreachable
+            // while the sidecar box is focused. Bare `/sidecar` (empty
+            // question) still lands here; the app arm re-focuses or flashes.
+            // The full `/sidecar <question>` form typed inside the box is
+            // normalized too: the prefix must never be echoed to the model.
+            if sidecar_focused {
+                input.clear();
+                *cursor_idx = 0;
+                *hist_idx = None;
+                crate::undo::reset(undo_state, input, *cursor_idx);
+                let question = opencoder_session::parse_sidecar_question(&text).unwrap_or(text);
+                return KeyAction::SidecarAsk(question);
+            }
+            // `/sidecar <question>` intercepts in BOTH states — idle and
+            // running. That is the whole point: the question goes to the
+            // sidecar actor directly, so the main task keeps running without
+            // being steered, queued or interrupted.
+            if let Some(question) = opencoder_session::parse_sidecar_question(&text) {
+                input.clear();
+                *cursor_idx = 0;
+                *hist_idx = None;
+                crate::undo::reset(undo_state, input, *cursor_idx);
+                return KeyAction::SidecarAsk(question);
+            }
             input.clear();
             *cursor_idx = 0;
             *hist_idx = None;
@@ -316,7 +351,9 @@ pub(crate) fn handle_key(
             // session and affect the parent agent — reject it (mode commands
             // included) instead, leaving the typed text so Enter can submit it
             // as a subagent steer.
-            if subagent_focused {
+            // Sidecar focus likewise: the queue targets the parent, which a
+            // sidecar follow-up must never leak into — Enter asks the sidecar.
+            if subagent_focused || sidecar_focused {
                 return KeyAction::QueueUnsupported;
             }
             input.clear();
@@ -533,6 +570,10 @@ mod queue_scroll_tests;
 #[cfg(test)]
 #[path = "key_handler_file_mention_tests.rs"]
 mod file_mention_tests;
+
+#[cfg(test)]
+#[path = "key_handler_sidecar_tests.rs"]
+mod sidecar_tests;
 
 #[cfg(test)]
 #[path = "key_handler_running_mode_tests.rs"]

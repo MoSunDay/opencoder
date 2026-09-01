@@ -21,12 +21,18 @@ pub mod tool_guard;
 pub mod tools;
 
 pub use control_cmd::{
-    apply as apply_control_cmd, clear_seed_text, is_clear_context_handoff, is_clear_context_seed,
-    parse as parse_control_cmd, seed_message, split_control_prefix, ControlCmd,
+    apply as apply_control_cmd, clear_seed_text, consumed_echo_text, is_clear_context_handoff,
+    is_clear_context_seed, parse as parse_control_cmd, seed_message, split_control_prefix,
+    ControlCmd,
 };
 pub use event_sink::{run_flusher, spawn_event_flusher, EventSink};
 pub use resume::{generate_title, resume, resume_and_replay};
 pub use runner::{run, run_once, run_with_images, SessionEvent};
+// Sidecar (TUI `/sidecar`): temporary Q&A loop over a context snapshot.
+// Zero persistence; cost flows to the parent as bare `LlmUsage` events.
+pub use runner::sidecar::{
+    new_conv, new_conv_from, parse_sidecar_question, run_sidecar_turn, SidecarConv, SidecarTurn,
+};
 pub use subagent_steer_gate::{SteerReservation, SubagentSteerGate};
 pub use tools::question::QuestionHub;
 
@@ -139,11 +145,13 @@ pub struct SessionState {
     pub last_usage: opencoder_llm::Usage,
     /// Optional durable store. When set, `record` persists each new message.
     pub store: Option<Arc<dyn Store>>,
-    /// Active skill instructions. NOT part of the system prompt — a
-    /// transient tail reminder (`skill_context::tail_reminder`) surfaces the
-    /// skill at LLM-call time; bodies carrying the `body_with_source`
-    /// `> Source:` prefix yield the `[active skill]` path reminder (the
-    /// model lazily reads the SKILL.md). `None` means no skill is active.
+    /// Active skill instructions. NOT part of the system prompt — the LLM
+    /// call derives transient skill context instead: `skill_context::
+    /// transient_body_message` ships the full body as a per-call `[skill
+    /// loaded]` payload message (never persisted), and
+    /// `skill_context::tail_reminder` surfaces the `[active skill]` source
+    /// path when no body could ship (the model then lazily reads the
+    /// SKILL.md). `None` means no skill is active.
     /// Set from the TUI `$` picker. One-shot lifetime: an activation lives
     /// only for the run that triggered it — `skill_lifecycle` clears it
     /// (memory + store) when that run ends, so later runs start skill-less.
@@ -305,9 +313,10 @@ impl SessionState {
         self
     }
 
-    /// Set the active skill instructions (surfaced as a transient tail
-    /// reminder by `skill_context::tail_reminder`; `body_with_source`-
-    /// prefixed bodies yield the `[active skill]` path reminder).
+    /// Set the active skill instructions (surfaced as transient per-call
+    /// skill context by `skill_context::transient_body_message` /
+    /// `tail_reminder`; `body_with_source`-prefixed bodies ship their full
+    /// body, bodyless ones fall back to the `[active skill]` path pointer).
     pub fn with_skill(self, skill_prompt: String) -> Self {
         *self.skill_prompt.lock().unwrap() = Some(skill_prompt);
         self

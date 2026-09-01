@@ -66,9 +66,9 @@ fn run_rows(rows: &[Row]) {
                     "blocked row `{cmd}` must carry a non-empty reason"
                 );
             }
-            (expect, verdict) => panic!(
-                "compat divergence for `{cmd}`: expected {expect:?}, got {verdict:?}"
-            ),
+            (expect, verdict) => {
+                panic!("compat divergence for `{cmd}`: expected {expect:?}, got {verdict:?}")
+            }
         }
     }
 }
@@ -274,9 +274,9 @@ fn compat_interpreter_rows() {
         // and allows the ones that provably write nothing.
         readonly("bash -c 'echo hi'"), // RELAXED (verified safe): payload `echo hi` writes nothing
         readonly("sh -c 'echo malicious'"), // RELAXED (verified safe): payload writes nothing
-        readonly("dash -c 'whoami'"), // RELAXED (verified safe): payload writes nothing
+        readonly("dash -c 'whoami'"),  // RELAXED (verified safe): payload writes nothing
         readonly("python -c 'print(1)'"), // RELAXED (verified safe): payload writes nothing
-        readonly("ruby -e 'puts 1'"), // RELAXED (verified safe): payload writes nothing
+        readonly("ruby -e 'puts 1'"),  // RELAXED (verified safe): payload writes nothing
         blocked("ruby -e 'File.delete(\"x\")'"), // payload analysis catches the delete (sanity boundary)
         // Version/help flags stay allowed.
         readonly("bash --version"),
@@ -336,10 +336,19 @@ fn compat_find_sed_xargs_rows() {
 fn compat_in_place_edits_are_blocked() {
     for (cmd, why) in [
         ("sed --in-place s/a/b/ f", "GNU long form"),
-        ("sed --in-place=.bak s/a/b/ f", "GNU long form with backup suffix"),
+        (
+            "sed --in-place=.bak s/a/b/ f",
+            "GNU long form with backup suffix",
+        ),
         ("sed -i.bak s/a/b/ f", "short form with glued backup suffix"),
-        ("perl -pi -e 's/a/b/' file", "clustered -pi hides -i from the -e harvest"),
-        ("ruby -pi -e 'puts 1' file", "clustered -pi hides -i from the -e analysis"),
+        (
+            "perl -pi -e 's/a/b/' file",
+            "clustered -pi hides -i from the -e harvest",
+        ),
+        (
+            "ruby -pi -e 'puts 1' file",
+            "clustered -pi hides -i from the -e analysis",
+        ),
     ] {
         let plain = super::plain_dir();
         match classify_with_dir(cmd, plain.path()) {

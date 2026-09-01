@@ -30,6 +30,34 @@ fn is_ask(c: &Classification) -> bool {
     matches!(c, Classification::Ask(_))
 }
 
+/// Plan mode maps `Allow && writes_state` to a block, so a read-only `cd`
+/// must carry non-writing provenance.
+#[test]
+fn cd_allow_is_not_a_state_write() {
+    for args in [
+        vec!["src"],
+        vec![".."],
+        vec!["/etc"],
+        vec!["/tmp"],
+        vec!["-"],
+        vec!["-P", "src"],
+        vec!["--", "/var"],
+    ] {
+        let args: Vec<String> = args.into_iter().map(String::from).collect();
+        let c = CD_HANDLER.classify(&HandlerContext {
+            working_directory: Path::new("/project"),
+            safe_scopes: &[],
+            ..HandlerContext::test("cd", &args)
+        });
+        // `clippy::panic` is denied workspace-wide (regression gate), so the
+        // allow-or-fail decision is a single assert instead of a match/panic.
+        assert!(
+            matches!(c, Classification::Allow(ref reason) if !reason.writes_state()),
+            "cd {args:?} must allow without a state write, got: {c:?}"
+        );
+    }
+}
+
 // cd with no args
 
 #[test]
@@ -76,52 +104,54 @@ fn cd_backtick_asks() {
 // relative paths within project
 
 #[test]
-fn cd_relative_subdir_asks() {
-    // sandbox: cwd is not a release set
-    assert!(is_ask(&classify("cd", &["src"])));
+fn cd_relative_subdir_allows() {
+    // cd writes no state; the resolvable destination keeps later relative
+    // operands judgeable (the analyzer re-aims its cwd).
+    assert!(is_allow(&classify("cd", &["src"])));
 }
 
 #[test]
-fn cd_relative_nested_asks() {
-    // sandbox: cwd is not a release set
-    assert!(is_ask(&classify("cd", &["src/handlers"])));
+fn cd_relative_nested_allows() {
+    assert!(is_allow(&classify("cd", &["src/handlers"])));
 }
 
 #[test]
-fn cd_dot_asks() {
-    // sandbox: cwd is not a release set
-    assert!(is_ask(&classify("cd", &["."])));
+fn cd_dot_allows() {
+    // cd writes no state; `.` is statically resolvable
+    assert!(is_allow(&classify("cd", &["."])));
 }
 
 #[test]
-fn cd_dotdot_from_subdir_asks() {
-    // CWD is a subdir — going up escapes the working_directory
-    assert!(is_ask(&classify_in("/project/src", "cd", &[".."], &[])));
+fn cd_dotdot_from_subdir_allows() {
+    // going up writes nothing; a later write would be judged against the
+    // resolved parent (the analyzer re-aims its cwd)
+    assert!(is_allow(&classify_in("/project/src", "cd", &[".."], &[])));
 }
 
 // relative paths escaping project
 
 #[test]
-fn cd_dotdot_from_root_asks() {
-    assert!(is_ask(&classify("cd", &[".."])));
+fn cd_dotdot_from_root_allows() {
+    assert!(is_allow(&classify("cd", &[".."])));
 }
 
 #[test]
-fn cd_relative_escape_asks() {
-    assert!(is_ask(&classify("cd", &["../../etc"])));
+fn cd_relative_escape_allows() {
+    // the cd itself is read-only; a write after it is still judged against
+    // the resolved destination
+    assert!(is_allow(&classify("cd", &["../../etc"])));
 }
 
 // absolute paths
 
 #[test]
-fn cd_absolute_within_project_asks() {
-    // sandbox: cwd is not a release set
-    assert!(is_ask(&classify("cd", &["/project/src"])));
+fn cd_absolute_within_project_allows() {
+    assert!(is_allow(&classify("cd", &["/project/src"])));
 }
 
 #[test]
-fn cd_absolute_outside_project_asks() {
-    assert!(is_ask(&classify("cd", &["/etc"])));
+fn cd_absolute_outside_project_allows() {
+    assert!(is_allow(&classify("cd", &["/etc"])));
 }
 
 // safe directories
@@ -137,9 +167,9 @@ fn cd_tmp_subdir_allows() {
 }
 
 #[test]
-fn cd_var_tmp_asks() {
-    // sandbox: the release set is exactly /dev/null + /tmp
-    assert!(is_ask(&classify("cd", &["/var/tmp"])));
+fn cd_var_tmp_allows() {
+    // outside the release set, but cd itself is a no-op on the filesystem
+    assert!(is_allow(&classify("cd", &["/var/tmp"])));
 }
 
 // config-allowed directories
@@ -165,8 +195,14 @@ fn cd_to_config_allowed_exact_allows() {
 }
 
 #[test]
-fn cd_outside_config_allowed_asks() {
-    assert!(is_ask(&classify_in("/project", "cd", &["/etc"], &["/opt/repos"])));
+fn cd_outside_config_allowed_allows() {
+    // cd is read-only regardless of scopes; pushd outside scopes still asks
+    assert!(is_allow(&classify_in(
+        "/project",
+        "cd",
+        &["/etc"],
+        &["/opt/repos"]
+    )));
 }
 
 #[test]
@@ -194,7 +230,7 @@ fn cd_multiple_allowed_dirs() {
         &["/home/user/work/bar"],
         &["/opt/repos", "/home/user/work"]
     )));
-    assert!(is_ask(&classify_in(
+    assert!(is_allow(&classify_in(
         "/project",
         "cd",
         &["/home/user/personal"],
@@ -205,25 +241,23 @@ fn cd_multiple_allowed_dirs() {
 // leading option flags shifting the destination
 
 #[test]
-fn cd_dash_p_outside_scope_asks() {
-    assert!(is_ask(&classify("cd", &["-P", "/etc"])));
+fn cd_dash_p_outside_scope_allows() {
+    assert!(is_allow(&classify("cd", &["-P", "/etc"])));
 }
 
 #[test]
-fn cd_dash_p_within_cwd_asks() {
-    // sandbox: cwd is not a release set
-    assert!(is_ask(&classify("cd", &["-P", "src"])));
+fn cd_dash_p_within_cwd_allows() {
+    assert!(is_allow(&classify("cd", &["-P", "src"])));
 }
 
 #[test]
-fn cd_double_dash_outside_scope_asks() {
-    assert!(is_ask(&classify("cd", &["--", "/etc"])));
+fn cd_double_dash_outside_scope_allows() {
+    assert!(is_allow(&classify("cd", &["--", "/etc"])));
 }
 
 #[test]
-fn cd_double_dash_within_cwd_asks() {
-    // sandbox: cwd is not a release set
-    assert!(is_ask(&classify("cd", &["--", "src"])));
+fn cd_double_dash_within_cwd_allows() {
+    assert!(is_allow(&classify("cd", &["--", "src"])));
 }
 
 #[test]
@@ -282,7 +316,10 @@ fn cd_remote_asks() {
 
 #[test]
 fn normalize_resolves_dotdot() {
-    assert_eq!(normalize_path(Path::new("/a/b/../c")), PathBuf::from("/a/c"));
+    assert_eq!(
+        normalize_path(Path::new("/a/b/../c")),
+        PathBuf::from("/a/c")
+    );
 }
 
 #[test]

@@ -52,3 +52,15 @@ subagent，而非继续用 bash。
   `latent.rs` deep-HOME fixture 补 `/skills` 路径段以镜像生产布局（seed/discover
   目标改 `root.join("skills")`）；`tui` 多个 `handle_key` 调用点补 `sidecar_focused`
   实参（与并发会话并行修复产生一次重复插入，已去重收敛）。
+
+## 终局门禁（2026-09-02 评审收口）
+
+- 冷跑私有 target `cargo test --workspace --no-fail-fast` → `=== END rc=101
+  05:16:20`：**247 个结果行 / 3855 passed / 1 failed**；唯一红
+  `nodes_smoke_proc::smoke_script_two_process_nodes_flow_passes`（95.00s 超时
+  签名，发生于 load~300 多会话风暴窗口）——脱离争抢后同树同 target 直证重跑
+  `ok（12.89s）`，归因环境牺牲品，非代码缺陷。
+- 需求直证：`bash_guard_plan_mode` 11 passed / 0 failed（0.29s），含
+  `plan_mode_allows_cd_navigation` 与
+  `plan_mode_blocks_unresolvable_cd_and_routes_to_explore` 两条原始需求验收；
+  写拦截三用例同轮全绿，写检测未削弱。

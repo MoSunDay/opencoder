@@ -32,15 +32,21 @@ pub struct Verdict {
     /// `$((...))`, etc.) when the analyzer was able to statically resolve all
     /// expansions. `None` when no resolution occurred or it failed.
     pub resolved_command: Option<String>,
+    /// True when an Allow verdict was granted only because the mutation lands
+    /// in a released scope. Strict read-only callers can reject these without
+    /// discarding the sandbox classifier's existing decision contract.
+    pub writes_state: bool,
 }
 
 impl Verdict {
     #[must_use]
     pub fn allow(reason: AllowReason) -> Self {
+        let writes_state = reason.writes_state();
         Self {
             decision: Decision::Allow,
             reason: reason.to_string(),
             resolved_command: None,
+            writes_state,
         }
     }
 
@@ -50,6 +56,7 @@ impl Verdict {
             decision: Decision::Ask,
             reason: reason.into(),
             resolved_command: None,
+            writes_state: false,
         }
     }
 
@@ -59,6 +66,7 @@ impl Verdict {
             decision: Decision::Deny,
             reason: reason.into(),
             resolved_command: None,
+            writes_state: false,
         }
     }
 
@@ -84,6 +92,7 @@ impl Verdict {
             return Self::ask("nothing to analyze");
         };
         let mut chosen = most_restrictive.clone();
+        chosen.writes_state = verdicts.iter().any(|verdict| verdict.writes_state);
         if chosen.resolved_command.is_none() {
             chosen.resolved_command = verdicts.iter().find_map(|v| v.resolved_command.clone());
         }
@@ -120,5 +129,14 @@ mod tests {
     fn combine_empty_fails_closed() {
         let combined = Verdict::combine(&[]);
         assert_eq!(combined.decision, Decision::Ask);
+    }
+
+    #[test]
+    fn combine_preserves_released_write_effect_across_allow_ties() {
+        let write = Verdict::allow(AllowReason::SafeDirWrite("/tmp/x".into()));
+        let read = Verdict::allow(AllowReason::SimpleSafe("ls".into()));
+        let combined = Verdict::combine(&[write, read]);
+        assert_eq!(combined.decision, Decision::Allow);
+        assert!(combined.writes_state);
     }
 }

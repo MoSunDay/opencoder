@@ -158,8 +158,8 @@ async fn seed_session(store: &Arc<dyn Store>, sid: &str) {
         .unwrap();
 }
 
-/// Same seeding as [`seed_session`] but the session starts as the sandbox
-/// agent — the convergence target for clear-context is act.
+/// Seed the legacy sandbox spelling. Store normalization resumes it as plan,
+/// whose clear-context convergence target is act.
 async fn seed_sandbox_session(store: &Arc<dyn Store>, sid: &str) {
     store
         .create_session(&SessionMeta {
@@ -599,7 +599,8 @@ async fn plan_session_emits_agent_switched_with_plan_value() {
     wait_idle(&state, sid).await;
 }
 
-/// A queued `/act_clear_context` in a SANDBOX session converges to act: after
+/// A queued `/act_clear_context` in a legacy sandbox (normalized plan) session
+/// converges to act: after
 /// the drain picks it up the boundary persists, `agent_switched` follows
 /// `transcript_reset`, the meta agent is `act`, and the sentinel boundary
 /// stops without a second LLM call (no assistant reply existed).
@@ -663,7 +664,7 @@ async fn queued_clear_context_in_sandbox_session_converges_to_act() {
     let switch_idx = events
         .iter()
         .position(|r| r.sse_kind.as_deref() == Some("agent_switched"))
-        .expect("agent_switched must persist for the sandbox convergence");
+        .expect("agent_switched must persist for the plan convergence");
     assert!(switch_idx > reset_idx, "agent_switched must follow transcript_reset, got {:?}",
         events.iter().map(|r| r.sse_kind.clone()).collect::<Vec<_>>());
 
@@ -672,7 +673,7 @@ async fn queued_clear_context_in_sandbox_session_converges_to_act() {
     assert_eq!(
         meta.agent.as_deref(),
         Some("act"),
-        "sandbox clear converges to act"
+        "plan clear converges to act"
     );
     assert!(opencoder_session::control_cmd::is_clear_context_handoff(
         meta.handoff_plan.as_deref().unwrap_or("")

@@ -2,7 +2,7 @@
 //! protection) instead of firing outright — from idle AND while running.
 //! Firing submits the canonical control-command prompt when idle and queues
 //! it verbatim when running. (An act session emits only `TranscriptReset` +
-//! `Done`; a sandbox session additionally converges to act with one extra
+//! `Done`; a plan session additionally converges to act with one extra
 //! `AgentSwitch`.)
 use super::*;
 

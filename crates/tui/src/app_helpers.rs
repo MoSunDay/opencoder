@@ -113,9 +113,8 @@ pub(crate) async fn initial_chat_view(
 /// Returns `true` when the key was consumed (caller should `continue` to the
 /// next event).
 ///
-/// No mode-switch chord exists here: the `switch_mode` bindings were removed
-/// along with the dual-mode system, so every unbound chord falls through to
-/// `handle_key` and is processed as ordinary text input.
+/// Mode switching is deliberately not intercepted here: Ctrl+T falls through
+/// to `handle_key`, which returns the explicit parent-agent switch action.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn pre_key_intercept(
     k: KeyEvent,

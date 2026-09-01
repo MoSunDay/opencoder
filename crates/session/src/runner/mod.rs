@@ -88,16 +88,15 @@ pub async fn run_with_registry(
     on_event: impl FnMut(SessionEvent) + Send,
 ) -> Result<()> {
     let mut on_event = on_event;
-    // True when a ClearContext with a preserved seed was applied and
-    // the transcript now holds a synthetic message awaiting an LLM execution
-    // turn (user_text was cleared). This keeps `drain_mode` false so run_loop
-    // makes the execution call instead of going idle. Both preserved flavours
-    // must continue running; only the blank sentinel (nothing preserved)
-    // stops without an LLM turn.
+    // True when ClearContext produced a synthetic input awaiting an LLM turn:
+    // a neutral act-mode seed or a plan→act execution directive. This keeps
+    // `drain_mode` false so run_loop executes instead of going idle. Only the
+    // blank sentinel (nothing preserved) stops without an LLM turn.
     let mut handoff_pending = false;
     // Control commands (/act, /plan) short-circuit without an LLM turn. A
     // compound input (/plan review) switches then runs the rest. EXCEPTION:
-    // /act_clear_context with a preserved seed falls through to run_loop.
+    // /act_clear_context with a seed or plan directive falls through to
+    // run_loop.
     if let Some((cmd, rest)) = crate::control_cmd::split_control_prefix(&user_text) {
         if let Err(e) = crate::control_cmd::apply(session, &cmd, &mut on_event).await {
             // This path returns before the one-shot wrapper; honor the
@@ -109,9 +108,8 @@ pub async fn run_with_registry(
             }
             return Err(e);
         }
-        // ClearContext with a preserved seed falls through to run_loop so the
-        // model sees the continuity context; blank sentinel path (nothing
-        // preserved) stops as before.
+        // ClearContext with a preserved seed/directive falls through to
+        // run_loop; blank sentinel path (nothing preserved) stops as before.
         if matches!(cmd, crate::control_cmd::ControlCmd::ClearContext)
             && !crate::control_cmd::is_clear_context_handoff(
                 session.handoff_plan.as_deref().unwrap_or(""),

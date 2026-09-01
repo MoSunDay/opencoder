@@ -41,6 +41,14 @@ pub(crate) enum ModeSwitch {
 }
 
 impl ModeSwitch {
+    pub(crate) fn for_agent(agent: &str) -> Self {
+        if agent == "act" {
+            Self::Act
+        } else {
+            Self::Plan
+        }
+    }
+
     fn prompt(self) -> &'static str {
         match self {
             ModeSwitch::Act => "/act",
@@ -49,7 +57,7 @@ impl ModeSwitch {
     }
 }
 
-/// Dispatch one of the three agent-switch slash commands through the worker.
+/// Dispatch an act/plan switch command through the worker.
 /// `run_with_registry` short-circuits them (no LLM call) and emits
 /// `AgentSwitch` / `TranscriptReset` + `Done`. No user echo — the popup path
 /// never calls `push_user`.

@@ -29,6 +29,10 @@ pub enum AllowReason {
     DeviceRedirect(String),
     /// A redirect whose target normalizes inside a released directory.
     SafeDirWrite(String),
+    /// A state-changing command whose operands all land in a released
+    /// directory. The sandbox policy may allow it, while stricter callers
+    /// (notably plan mode) can still identify and refuse the write.
+    ReleasedWrite(String),
     /// A quoted heredoc body: literal text, no expansion, no execution.
     Heredoc,
     /// Approved by a per-command handler.
@@ -39,6 +43,14 @@ impl AllowReason {
     /// Build a handler-provenance reason from a handler's description.
     pub fn handler(detail: impl Into<String>) -> Self {
         Self::Handler(detail.into())
+    }
+
+    /// Whether this approval represents a real state-changing write. Device
+    /// redirects are intentionally excluded: stdout/stderr and `/dev/null`
+    /// do not persist state, while a write under `/tmp` does.
+    #[must_use]
+    pub fn writes_state(&self) -> bool {
+        matches!(self, Self::SafeDirWrite(_) | Self::ReleasedWrite(_))
     }
 }
 
@@ -55,6 +67,7 @@ impl fmt::Display for AllowReason {
             Self::FdRedirect => f.write_str("fd redirect"),
             Self::DeviceRedirect(target) => write!(f, "redirect to {target}"),
             Self::SafeDirWrite(target) => write!(f, "redirect to {target} (safe dir)"),
+            Self::ReleasedWrite(detail) => f.write_str(detail),
             Self::Heredoc => f.write_str("heredoc"),
             Self::Handler(detail) => f.write_str(detail),
         }
@@ -77,5 +90,8 @@ mod tests {
             "redirect to /dev/null"
         );
         assert_eq!(AllowReason::FdRedirect.to_string(), "fd redirect");
+        assert!(AllowReason::SafeDirWrite("/tmp/x".into()).writes_state());
+        assert!(AllowReason::ReleasedWrite("touch within released dir".into()).writes_state());
+        assert!(!AllowReason::DeviceRedirect("/dev/null".into()).writes_state());
     }
 }

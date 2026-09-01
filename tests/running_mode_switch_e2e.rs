@@ -4,6 +4,7 @@
 //! textual mode commands (/plan ...) are admitted and applied by the runner
 //! at the idle boundary.
 
+use std::collections::VecDeque;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::process::{Command, Stdio};
@@ -78,6 +79,102 @@ impl BlockingStub {
         *self.release.0.lock().unwrap() = true;
         self.release.1.notify_all();
     }
+}
+
+/// Minimal OpenAI-compatible streaming server for real-binary happy-path
+/// coverage. Each connection consumes one scripted reply and records the JSON
+/// request body so the test can verify what crossed the actual HTTP boundary.
+struct CompletionStub {
+    port: u16,
+    requests: Arc<(Mutex<Vec<String>>, Condvar)>,
+}
+
+impl CompletionStub {
+    fn spawn(replies: impl IntoIterator<Item = &'static str>) -> Self {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let requests = Arc::new((Mutex::new(Vec::new()), Condvar::new()));
+        let requests_thread = requests.clone();
+        let replies = Arc::new(Mutex::new(replies.into_iter().collect::<VecDeque<_>>()));
+        std::thread::spawn(move || {
+            for stream in listener.incoming().flatten() {
+                let mut stream = stream;
+                let body = read_http_body(&mut stream);
+                requests_thread.0.lock().unwrap().push(body);
+                requests_thread.1.notify_all();
+                let reply = replies
+                    .lock()
+                    .unwrap()
+                    .pop_front()
+                    .expect("unexpected extra LLM request");
+                write_completion(&mut stream, reply);
+            }
+        });
+        Self { port, requests }
+    }
+
+    fn wait_for_requests(&self, count: usize) -> Vec<String> {
+        let deadline = Instant::now() + Duration::from_secs(20);
+        let mut requests = self.requests.0.lock().unwrap();
+        while requests.len() < count {
+            assert!(
+                Instant::now() < deadline,
+                "expected {count} LLM requests, got {}",
+                requests.len()
+            );
+            requests = self
+                .requests
+                .1
+                .wait_timeout(requests, Duration::from_millis(100))
+                .unwrap()
+                .0;
+        }
+        requests.clone()
+    }
+}
+
+fn read_http_body(stream: &mut TcpStream) -> String {
+    stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    let mut request = Vec::new();
+    let (header_end, content_len) = loop {
+        let mut chunk = [0u8; 8192];
+        let count = stream.read(&mut chunk).unwrap();
+        assert!(count > 0, "LLM request closed before headers completed");
+        request.extend_from_slice(&chunk[..count]);
+        let Some(end) = request.windows(4).position(|w| w == b"\r\n\r\n") else {
+            continue;
+        };
+        let headers = String::from_utf8_lossy(&request[..end]);
+        let content_len = headers
+            .lines()
+            .filter_map(|line| line.split_once(':'))
+            .find(|(name, _)| name.eq_ignore_ascii_case("content-length"))
+            .and_then(|(_, value)| value.trim().parse::<usize>().ok())
+            .expect("LLM request must carry content-length");
+        break (end + 4, content_len);
+    };
+    while request.len() < header_end + content_len {
+        let mut chunk = [0u8; 8192];
+        let count = stream.read(&mut chunk).unwrap();
+        assert!(count > 0, "LLM request closed before body completed");
+        request.extend_from_slice(&chunk[..count]);
+    }
+    String::from_utf8(request[header_end..header_end + content_len].to_vec()).unwrap()
+}
+
+fn write_completion(stream: &mut TcpStream, text: &str) {
+    let delta = serde_json::json!({"choices": [{"delta": {"content": text}}]});
+    let body = format!(
+        "data: {delta}\n\ndata: {{\"choices\":[{{\"delta\":{{}},\"finish_reason\":\"stop\"}}]}}\n\ndata: [DONE]\n\n"
+    );
+    let head = format!(
+        "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+        body.len()
+    );
+    stream.write_all(head.as_bytes()).unwrap();
+    stream.write_all(body.as_bytes()).unwrap();
 }
 
 struct ServerGuard(std::process::Child);
@@ -182,6 +279,27 @@ fn http(base: &str, method: &str, path: &str, body: &str) -> (u16, serde_json::V
     (status, json)
 }
 
+fn wait_for_session(
+    base: &str,
+    sid: &str,
+    label: &str,
+    ready: impl Fn(&serde_json::Value) -> bool,
+) -> serde_json::Value {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        let (status, session) = http(base, "GET", &format!("/api/sessions/{sid}"), "");
+        assert_eq!(
+            status, 200,
+            "failed to read session while waiting for {label}"
+        );
+        if ready(&session) {
+            return session;
+        }
+        assert!(Instant::now() < deadline, "timed out waiting for {label}");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
 #[test]
 fn real_server_rejects_running_mode_switches_until_idle() {
     let stub = BlockingStub::spawn();
@@ -279,4 +397,106 @@ fn real_server_rejects_running_mode_switches_until_idle() {
     }
     let (_, session) = http(&base, "GET", &format!("/api/sessions/{sid}"), "");
     assert_eq!(session["meta"]["agent"], "plan");
+}
+
+/// Real process + real HTTP + real OpenAI-SSE client: a plan answer must
+/// survive `/act_clear_context` as the sole execution directive, while the
+/// discarded planning prompt cannot leak into act or post-restart context.
+#[test]
+fn real_server_clear_context_executes_preserved_plan_in_act() {
+    const SID: &str = "plan-clear-handoff-e2e";
+    const PLAN: &str = "EXECUTE_DEPLOYMENT_PLAN_42";
+    const RESULT: &str = "ACT_EXECUTION_COMPLETE_42";
+    const RESUMED: &str = "RESUMED_ACT_COMPLETE_42";
+
+    let stub = CompletionStub::spawn([PLAN, RESULT, RESUMED]);
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(tmp.path().join(".opencoder")).unwrap();
+    std::fs::write(
+        tmp.path().join(".opencoder/config.json"),
+        format!(
+            r#"{{"model":"stub/m1","providers":{{"stub":{{"base_url":"http://127.0.0.1:{}/v1","api_key":"test-key","model":"m1"}}}}}}"#,
+            stub.port
+        ),
+    )
+    .unwrap();
+    std::fs::write(tmp.path().join(".opencoder/ap.json"), r#"{"mode":"off"}"#).unwrap();
+    let (server, base) = spawn_server(tmp.path());
+
+    // Prompting an absent id through the production endpoint creates a titled
+    // plan session, avoiding the unrelated automatic title-generation call.
+    let path = format!("/api/sessions/{SID}/prompt");
+    let original_prompt = "draft a rollout with obsolete planning chatter";
+    let first = serde_json::json!({
+        "prompt": original_prompt,
+        "delivery": "queue",
+        "agent": "plan"
+    })
+    .to_string();
+    assert_eq!(http(&base, "POST", &path, &first).0, 200);
+    wait_for_session(&base, SID, "plan reply", |session| {
+        session["draining"] == false && session["messages"].to_string().contains(PLAN)
+    });
+
+    let clear = r#"{"prompt":"/act_clear_context","delivery":"queue"}"#;
+    assert_eq!(http(&base, "POST", &path, clear).0, 200);
+    let session = wait_for_session(&base, SID, "act execution", |session| {
+        session["draining"] == false
+            && session["meta"]["agent"] == "act"
+            && session["messages"].to_string().contains(RESULT)
+    });
+
+    let requests = stub.wait_for_requests(2);
+    assert_eq!(requests.len(), 2, "handoff must make exactly one act call");
+    let act_request: serde_json::Value = serde_json::from_str(&requests[1]).unwrap();
+    let act_wire = act_request["messages"].to_string();
+    assert!(
+        act_wire.contains(PLAN),
+        "preserved plan missing from act request: {act_wire}"
+    );
+    assert!(
+        !act_wire.contains(original_prompt),
+        "cleared planning chatter leaked into act request: {act_wire}"
+    );
+
+    let stored_history = session["messages"].to_string();
+    assert!(stored_history.contains(PLAN) && stored_history.contains(RESULT));
+    // Clear-context is a resume boundary, not destructive history deletion.
+    // Restart the actual daemon and prove the boundary—not row removal—keeps
+    // pre-clear planning chatter out of the next model request.
+    assert!(
+        stored_history.contains(original_prompt),
+        "the boundary must not destructively delete history: {stored_history}"
+    );
+    assert!(
+        session["meta"]["handoff_seq"].is_number(),
+        "resume boundary was not persisted: {}",
+        session["meta"]
+    );
+
+    drop(server);
+    let (_resumed_server, resumed_base) = spawn_server(tmp.path());
+    let resume_prompt = "verify execution after daemon restart";
+    let resumed_body = serde_json::json!({
+        "prompt": resume_prompt,
+        "delivery": "queue"
+    })
+    .to_string();
+    assert_eq!(http(&resumed_base, "POST", &path, &resumed_body).0, 200);
+    let resumed = wait_for_session(&resumed_base, SID, "resumed act reply", |session| {
+        session["draining"] == false
+            && session["meta"]["agent"] == "act"
+            && session["messages"].to_string().contains(RESUMED)
+    });
+
+    let requests = stub.wait_for_requests(3);
+    let resumed_request: serde_json::Value = serde_json::from_str(&requests[2]).unwrap();
+    let resumed_wire = resumed_request["messages"].to_string();
+    assert!(resumed_wire.contains(PLAN) && resumed_wire.contains(RESULT));
+    assert!(resumed_wire.contains(resume_prompt));
+    assert!(
+        !resumed_wire.contains(original_prompt),
+        "resume boundary leaked cleared chatter after restart: {resumed_wire}"
+    );
+    assert_eq!(resumed["meta"]["agent"], "act");
 }

@@ -50,9 +50,13 @@ pub(super) async fn run_subagent(
     // Plan mode may only spawn read-only subagents: 'explore' (filesystem).
     // 'build' stays rejected so the model is never told it exists.
     if plan && kind != "explore" {
-        return ToolOutput::err(format!(
-            "Unknown subagent_type '{kind}'. Valid options: {}",
-            valid_subagent_options(hide_build)
+        return ToolOutput::err(crate::bash_guard::plan_denial(
+            "task",
+            &format!(
+                "requested subagent_type '{kind}' can perform implementation writes; \
+                 the only valid option here is {}",
+                valid_subagent_options(hide_build)
+            ),
         ));
     }
     let agent = match resolve_agent(&kind) {

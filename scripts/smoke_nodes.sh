@@ -61,14 +61,14 @@ req() {
   canonical="$(printf '%s\n%s\n%s\n%s' "${method}" "${pq}" "${ts}" "${body_hash}")"
   sig="$(printf '%s' "${canonical}" | openssl dgst -sha256 -hmac "${TOKEN}" -hex | awk '{print $NF}')"
   if [ -n "${body}" ]; then
-    curl -s -X "${method}" \
+    curl --noproxy '*' -s -X "${method}" \
       -H 'Content-Type: application/json' \
       -H "x-sig-timestamp: ${ts}" \
       -H "x-sig: ${sig}" \
       -d "${body}" \
       "${BASE}${pq}"
   else
-    curl -s -X "${method}" \
+    curl --noproxy '*' -s -X "${method}" \
       -H "x-sig-timestamp: ${ts}" \
       -H "x-sig: ${sig}" \
       "${BASE}${pq}"
@@ -91,7 +91,7 @@ SERVER_UP=""
 # 90s budget: a cold start of the debug binary can blow past 30s when a
 # parallel `cargo test --workspace` compile storm is hammering the box.
 for _ in $(seq 1 180); do
-  if curl -sf "${BASE}/api/time" >/dev/null 2>&1; then
+  if curl --noproxy '*' -sf "${BASE}/api/time" >/dev/null 2>&1; then
     SERVER_UP=1
     break
   fi

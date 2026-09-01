@@ -78,7 +78,7 @@ pub struct ListQuery {
 pub async fn list_sessions(
     State(state): State<Arc<AppState>>,
     Query(q): Query<ListQuery>,
-) -> Result<Response, Response> {
+) -> Response {
     let filter = SessionFilter {
         limit: q.limit.unwrap_or(50).clamp(1, 500),
         cursor: q.cursor,
@@ -89,12 +89,11 @@ pub async fn list_sessions(
         search: q.search,
         include_subagents: false,
     };
-    let items = state
-        .store
-        .list_sessions(&filter)
-        .await
-        .map_err(|e| error_500(format!("list_sessions: {e:#}")))?;
-    Ok(Json(json!({ "sessions": items })).into_response())
+    let items = match state.store.list_sessions(&filter).await {
+        Ok(items) => items,
+        Err(e) => return error_500(format!("list_sessions: {e:#}")),
+    };
+    Json(json!({ "sessions": items })).into_response()
 }
 
 pub async fn get_session(
@@ -148,16 +147,15 @@ pub async fn get_messages(
     messages_response(&state, &id).await
 }
 
-async fn messages_response(state: &AppState, id: &str) -> Result<Response, Response> {
+async fn messages_response(state: &AppState, id: &str) -> Response {
     let meta = match state.store.get_session(id).await {
         Ok(m) => m,
-        Err(e) => return Err(error_500(format!("get_session: {e:#}"))),
+        Err(e) => return error_500(format!("get_session: {e:#}")),
     };
-    let messages = state
-        .store
-        .load_messages(id)
-        .await
-        .map_err(|e| error_500(format!("load_messages: {e:#}")))?;
+    let messages = match state.store.load_messages(id).await {
+        Ok(messages) => messages,
+        Err(e) => return error_500(format!("load_messages: {e:#}")),
+    };
     // Run-state flag for the console: lets a client tell "stream live" from
     // "stream ended" without inferring from frames (found by real-browser
     // acceptance of the interrupt/reconnect flow).
@@ -168,10 +166,10 @@ async fn messages_response(state: &AppState, id: &str) -> Result<Response, Respo
         .get(id)
         .map(|h| h.draining.load(std::sync::atomic::Ordering::SeqCst))
         .unwrap_or(false);
-    Ok(Json(
+    Json(
         json!({ "id": id, "meta": meta, "messages": messages, "draining": draining }),
     )
-    .into_response())
+    .into_response()
 }
 
 #[derive(Deserialize)]

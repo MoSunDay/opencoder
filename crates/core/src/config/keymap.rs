@@ -15,6 +15,7 @@ pub const KEYMAP_INFO: &[(&str, &str)] = &[
     ("cursor_end", "Cursor to line end"),
     ("delete_word", "Delete word backward"),
     ("clear_input", "Clear input"),
+    ("switch_mode", "Toggle act/plan mode (keep context)"),
     ("paste_image", "Paste clipboard image"),
     ("undo", "Undo"),
     ("redo", "Redo"),
@@ -25,7 +26,7 @@ pub const KEYMAP_INFO: &[(&str, &str)] = &[
     ("copy_mode", "Toggle copy/selection mode"),
 ];
 
-/// Configuration for all 16 re-bindable global keyboard shortcuts. Each field
+/// Configuration for all 17 re-bindable global keyboard shortcuts. Each field
 /// holds a key-spec string parsed by the TUI's `parse_key_spec`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct KeymapConfig {
@@ -37,6 +38,8 @@ pub struct KeymapConfig {
     pub cursor_end: String,
     pub delete_word: String,
     pub clear_input: String,
+    #[serde(default = "default_switch_mode")]
+    pub switch_mode: String,
     pub paste_image: String,
     pub undo: String,
     pub redo: String,
@@ -58,6 +61,7 @@ impl Default for KeymapConfig {
             cursor_end: "ctrl+e".into(),
             delete_word: "ctrl+w".into(),
             clear_input: "ctrl+u".into(),
+            switch_mode: default_switch_mode(),
             paste_image: "ctrl+v".into(),
             undo: "ctrl+z".into(),
             redo: "ctrl+y".into(),
@@ -82,6 +86,7 @@ impl KeymapConfig {
             "cursor_end" => &self.cursor_end,
             "delete_word" => &self.delete_word,
             "clear_input" => &self.clear_input,
+            "switch_mode" => &self.switch_mode,
             "paste_image" => &self.paste_image,
             "undo" => &self.undo,
             "redo" => &self.redo,
@@ -105,6 +110,7 @@ impl KeymapConfig {
             "cursor_end" => self.cursor_end = value,
             "delete_word" => self.delete_word = value,
             "clear_input" => self.clear_input = value,
+            "switch_mode" => self.switch_mode = value,
             "paste_image" => self.paste_image = value,
             "undo" => self.undo = value,
             "redo" => self.redo = value,
@@ -117,6 +123,10 @@ impl KeymapConfig {
         }
         true
     }
+}
+
+fn default_switch_mode() -> String {
+    "ctrl+t".into()
 }
 
 #[cfg(test)]
@@ -134,6 +144,7 @@ mod tests {
         assert_eq!(d.cursor_end, "ctrl+e");
         assert_eq!(d.delete_word, "ctrl+w");
         assert_eq!(d.clear_input, "ctrl+u");
+        assert_eq!(d.switch_mode, "ctrl+t");
         assert_eq!(d.paste_image, "ctrl+v");
         assert_eq!(d.undo, "ctrl+z");
         assert_eq!(d.redo, "ctrl+y");
@@ -167,16 +178,15 @@ mod tests {
             .as_object()
             .expect("defaults are an object")
             .len();
-        assert_eq!(KEYMAP_INFO.len(), 16);
+        assert_eq!(KEYMAP_INFO.len(), 17);
         assert_eq!(KEYMAP_INFO.len(), fields, "KEYMAP_INFO must cover every field");
     }
 
-    /// Old user configs still carry the removed `switch_mode*` bindings
-    /// (the plan/act dual mode is gone). Plain `Deserialize` ignores unknown
-    /// fields, so a legacy keymap must load without error -- this guards
-    /// against re-introducing `deny_unknown_fields`.
+    /// Old user configs can still carry the two retired tab variants. Plain
+    /// `Deserialize` ignores those unknown fields while restoring the live
+    /// `switch_mode` binding.
     #[test]
-    fn legacy_keymap_with_removed_switch_mode_keys_still_loads() {
+    fn legacy_keymap_restores_switch_mode_and_ignores_retired_variants() {
         let legacy = r#"{
             "help": "ctrl+h",
             "quit": "ctrl+d",
@@ -200,6 +210,19 @@ mod tests {
         }"#;
         let cfg: KeymapConfig = serde_json::from_str(legacy).expect("legacy keymap loads");
         assert_eq!(cfg, KeymapConfig::default());
-        assert!(cfg.get("switch_mode").is_none());
+        assert_eq!(cfg.get("switch_mode"), Some("ctrl+t"));
+        assert!(cfg.get("switch_mode_clear").is_none());
+    }
+
+    #[test]
+    fn keymap_without_switch_mode_uses_ctrl_t_default() {
+        let json = serde_json::to_string(&KeymapConfig::default()).unwrap();
+        let mut value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        value
+            .as_object_mut()
+            .unwrap()
+            .remove("switch_mode");
+        let cfg: KeymapConfig = serde_json::from_value(value).expect("older keymap loads");
+        assert_eq!(cfg.switch_mode, "ctrl+t");
     }
 }

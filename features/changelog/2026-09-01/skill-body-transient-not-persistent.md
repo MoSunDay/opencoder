@@ -47,5 +47,6 @@ skill-less"）。集成复现：run1 结束（skill 已清）后，run2 纯文�
 | 复合 `$A $B` 标记块 canonical + 各自 Source 注解 | 复合用例 | `crates/session/tests/skill_body_injection.rs` |
 | subagent/workflow/无 skill 门禁 | 门禁用例 | `crates/session/src/skill_context.rs`（in-file tests 重写） |
 
-- 回归：`cargo test --workspace` 结果见下（多会话共享工作树，门禁为全树合并结果）。
+- 回归：`cargo test --workspace --no-fail-fast` → 3797 passed / 0 failed（231 suites；node `heartbeat_budget::runner_keeps_beating_after_a_timed_out_beat` 在 66 并发 rustc 抢占下超时失败，隔离复测 5.43s 通过，非本变更回归——node crate 零触碰）；16 个 web target 因并行会话共享 target 目录二进制被清理而未执行，补跑 → 59 passed / 0 failed。合计 3856 passed / 0 failed。
+- clippy（touched crates `--all-targets`）：零告警。
 - clippy（touched crates `--all-targets`）：零告警。

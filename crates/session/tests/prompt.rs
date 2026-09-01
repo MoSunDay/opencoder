@@ -381,20 +381,18 @@ fn project_instructions_truncated_past_200kb_with_boundary_safe_cut() {
 #[test]
 fn environment_block_marks_plan_mode_readonly() {
     let block = environment_block(std::path::Path::new("/repo"), AgentKind::Plan);
+    assert!(block.contains("MODE: plan (read-only)"));
     assert!(block.contains("IN_PLAN_MODE"));
     assert!(block.contains("read-only"));
-    // Updated for the shellguard release set: the marker now names what IS
-    // permitted (/tmp writes, /dev/null redirects) and states that the
-    // project/working directory is NOT writable, instead of the blanket
-    // "do not edit/write files".
-    assert!(block.contains("writes under /tmp"));
-    assert!(block.contains("redirects to /dev/null"));
-    assert!(block.contains("NOT writable"));
+    assert!(block.contains("do not edit or write files"));
+    assert!(block.contains("intercepted and returned in your context"));
+    assert!(block.contains("output a focused plan only"));
 }
 
 #[test]
 fn environment_block_omits_plan_marker_in_act() {
     let block = environment_block(std::path::Path::new("/repo"), AgentKind::Act);
+    assert!(!block.contains("MODE:"));
     assert!(!block.contains("IN_PLAN_MODE"));
     assert!(block.contains("Working directory: /repo"));
 }

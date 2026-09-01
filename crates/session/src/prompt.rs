@@ -234,11 +234,10 @@ pub fn environment_block(working_dir: &Path, kind: AgentKind) -> String {
     s.push_str(&format!("- Platform: {platform}-{arch}\n"));
     s.push_str(&format!("- Date: {date}\n"));
     s.push_str("- You have file system and shell access via your tools. Run tools in parallel when independent.\n");
-    // In plan mode the environment block carries a read-only marker so the
-    // model is discouraged from attempting edits/writes (mutating bash is
-    // intercepted anyway). Omitted in ACT mode to save tokens.
+    // Plan alone gets an explicit mode row. ACT intentionally omits the row:
+    // execution is the default and needs no extra mode description.
     if kind == AgentKind::Plan {
-        s.push_str("- IN_PLAN_MODE: read-only — writes under /tmp and redirects to /dev/null are permitted; everything else that modifies state is blocked, and the project/working directory is NOT writable. Investigate read-only and answer with findings only.\n");
+        s.push_str("- MODE: plan (read-only); IN_PLAN_MODE=true — do not edit or write files and do not execute implementation. Every state-changing operation is intercepted and returned in your context. If blocked, do not retry or find another write path; continue read-only analysis and output a focused plan only.\n");
     }
     s
 }

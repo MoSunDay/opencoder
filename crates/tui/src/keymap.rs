@@ -1,6 +1,6 @@
 //! Keymap engine: parses key-spec strings (e.g. `"ctrl+h"`) into `KeyCombo`
 //! structs that can match `KeyEvent` values. Used by `key_handler.rs` and
-//! `app_helpers.rs` to drive all 19 re-bindable shortcuts from config.
+//! `app_helpers.rs` to drive all 17 re-bindable shortcuts from config.
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use opencoder_core::{Config, KeymapConfig};
@@ -245,7 +245,7 @@ pub(crate) fn key_event_to_spec(k: KeyEvent) -> Option<String> {
     Some(parts.join("+"))
 }
 
-/// All 19 parsed key bindings, ready for O(1) matching in the event loop.
+/// All parsed key bindings, ready for O(1) matching in the event loop.
 pub(crate) struct KeyBindings {
     pub help: KeyCombo,
     pub quit: KeyCombo,
@@ -255,6 +255,7 @@ pub(crate) struct KeyBindings {
     pub cursor_end: KeyCombo,
     pub delete_word: KeyCombo,
     pub clear_input: KeyCombo,
+    pub switch_mode: KeyCombo,
     pub paste_image: KeyCombo,
     pub undo: KeyCombo,
     pub redo: KeyCombo,
@@ -280,6 +281,7 @@ impl KeyBindings {
             cursor_end: parse_or_default(&km.cursor_end, &d.cursor_end),
             delete_word: parse_or_default(&km.delete_word, &d.delete_word),
             clear_input: parse_or_default(&km.clear_input, &d.clear_input),
+            switch_mode: parse_or_default(&km.switch_mode, &d.switch_mode),
             paste_image: parse_or_default(&km.paste_image, &d.paste_image),
             undo: parse_or_default(&km.undo, &d.undo),
             redo: parse_or_default(&km.redo, &d.redo),

@@ -285,7 +285,8 @@ async fn steer_clear_context_mid_run_leaves_next_run_tail_free() {
     let mock = Arc::new(
         MockChatClient::new()
             .push_script(vec![bash_turn("turn-1")])
-            .push_script(vec![done_turn("plain work")]),
+            .push_script(vec![done_turn("continuity work")])
+            .push_script(vec![done_turn("plain follow-up")]),
     );
     let client: Arc<dyn ChatStream> = mock.clone();
     let (mut s, store, _dir) = preset_skill_session("tail-clear-steer", client).await
@@ -339,12 +340,17 @@ async fn steer_clear_context_mid_run_leaves_next_run_tail_free() {
         .await
         .unwrap();
 
-    // Release the gate; the turn boundary absorbs the steer, the run ends.
+    // Release the gate; the turn boundary absorbs the steer and runs the
+    // preserved continuity seed once, matching the idle/queue ingress paths.
     gate_tx.send(true).unwrap();
     let (s, res) = run_task.await.unwrap();
     res.unwrap();
 
     assert_cleared(&s, &store, "tail-clear-steer", "after steer run").await;
+    assert!(
+        !has_active_skill_tail(&mock.requests()[1]),
+        "clear-context continuation must not inherit the cleared skill tail"
+    );
 
     // Second run: no tail in its payload.
     let mut s = s;

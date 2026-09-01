@@ -41,12 +41,6 @@ mod steer_fire;
 #[path = "subagent_input.rs"]
 mod subagent_input;
 
-/// Animation tick rate for the running spinner (10 FPS).
-const ANIM_TICK_MS: u64 = 100;
-/// Body (info area) refresh interval -- the cached ChatView snapshot is rebuilt
-/// at this cadence (3 FPS), decoupling text layout from the fast spinner.
-const BODY_REFRESH_MS: u64 = 333;
-
 pub async fn run(opts: &TuiOpts) -> Result<()> {
     app_bootstrap::run(opts).await
 }
@@ -161,7 +155,7 @@ pub(super) async fn run_app(
     let supervisor_active = Arc::new(AtomicBool::new(true));
     crate::supervisor::spawn(heartbeat.clone(), Arc::clone(&supervisor_active));
     let (mut input_rx, _input_handle) = spawn_input_pump(heartbeat);
-    let mut anim_ticker = tokio::time::interval(Duration::from_millis(ANIM_TICK_MS));
+    let mut anim_ticker = tokio::time::interval(Duration::from_millis(app_loop::ANIM_TICK_MS));
     // Frame-rate limiter: redraw cadence is decided by the `/config` fps
     // (default 10 FPS). `Skip` prevents burst-fire catch-up after a stall.
     let mut frame_ms = config.tui_frame_ms();
@@ -169,7 +163,7 @@ pub(super) async fn run_app(
     frame_ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     // Body cache refresh ticker: rebuilds the cached ChatView snapshot at 3 FPS.
     // `Skip` prevents burst-fire catch-up after a stall.
-    let mut body_ticker = tokio::time::interval(Duration::from_millis(BODY_REFRESH_MS));
+    let mut body_ticker = tokio::time::interval(Duration::from_millis(app_loop::BODY_REFRESH_MS));
     body_ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut quitting = false; // render "shutting down…" frame before worker-shutdown wait
     let mut skip_next_render = false;
@@ -634,6 +628,13 @@ pub(super) async fn run_app(
                             }
                             KeyAction::ModeSwitchBlocked => {
                                 mode_flash = Some(mode_switch_busy_flash(anim_tick));
+                            }
+                            KeyAction::SwitchAgent(name) => {
+                                let mode = app_loop::ModeSwitch::for_agent(&name);
+                                if app_loop::dispatch_mode_switch(
+                                    mode, &cmd_tx, &mut cancel, &mut running, &mut follow, &mut chat,
+                                    &mut sys_tokens, &mut mode_flash, anim_tick, &workdir,
+                                ).await == app_loop::LoopFlow::Quit { break; }
                             }
                             KeyAction::SetSkill(opt) => {
                                 crate::skill_persist::apply_skill_selection(

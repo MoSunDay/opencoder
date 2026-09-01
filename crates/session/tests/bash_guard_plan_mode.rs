@@ -11,8 +11,8 @@
 //! - The act agent is unaffected (no guard).
 //! - bash classification happens in the call's effective workdir (the
 //!   `workdir` input, defaulting to the session working dir) — the same
-//!   directory the command runs in. A relative write released in a `/tmp`
-//!   workdir is blocked from a plain workdir, and vice versa.
+//!   directory the command runs in. Relative writes are blocked from both
+//!   `/tmp` and ordinary workdirs.
 
 use std::sync::Arc;
 
@@ -75,12 +75,8 @@ fn done_turn() -> LlmEvent {
 
 #[tokio::test]
 async fn plan_mode_blocks_write_command() {
-    // NOTE: the release set is `/tmp` + `/dev/null`, so the old target
-    // `/tmp/opencoder-test-guard` is now ALLOWED by policy. The guard proves
-    // its blocking behavior on a cwd-relative path issued from a per-call
-    // workdir that is a PLAIN directory (outside /tmp): the working directory
-    // is NOT released, and if the command ever ran it would land inside that
-    // test-controlled workdir.
+    // Use a cwd-relative target in a controlled plain directory. If the
+    // command ever ran, its effect would be observable inside this fixture.
     let workdir = plain_workdir("sg-guard-block-");
     let mock = Arc::new(
         MockChatClient::new()
@@ -92,7 +88,13 @@ async fn plan_mode_blocks_write_command() {
     );
     let dir = tempfile::tempdir().unwrap();
     let agent = resolve_agent("plan").unwrap();
-    let mut session = SessionState::new("guard-1", agent, config(), mock, dir.path().to_path_buf());
+    let mut session = SessionState::new(
+        "guard-1",
+        agent,
+        config(),
+        mock.clone(),
+        dir.path().to_path_buf(),
+    );
 
     let mut events = Vec::new();
     run(&mut session, "try to delete".into(), |ev| events.push(ev))
@@ -120,7 +122,17 @@ async fn plan_mode_blocks_write_command() {
             output.contains("/agent act"),
             "block must point at the real escape hatch (/agent act), got: {output}"
         );
+        assert!(output.contains("output a plan only"), "got: {output}");
     }
+
+    // The ToolOutput is appended before the next model round: the model sees
+    // both the read-only mode and the instruction to stop implementation.
+    let requests = mock.requests();
+    assert_eq!(requests.len(), 2);
+    let retry_context = serde_json::to_string(&requests[1].messages).unwrap();
+    assert!(retry_context.contains("Blocked in plan mode (read-only)"));
+    assert!(retry_context.contains("output a plan only"));
+    assert!(retry_context.contains("Do not retry"));
 }
 
 #[tokio::test]
@@ -330,12 +342,9 @@ fn tmp_released_workdir(tag: &str) -> tempfile::TempDir {
 }
 
 #[tokio::test]
-async fn plan_mode_releases_relative_write_in_tmp_call_workdir() {
-    // B2 regression, end to end: `touch newfile` is cwd-relative, so its
-    // verdict depends on WHERE the tool will run it. With an explicit /tmp
-    // workdir the write is released — even though the test process cwd (this
-    // crate's source tree) is NOT released. A gate still keyed on the process
-    // cwd would block this call and fail the test.
+async fn plan_mode_blocks_relative_write_in_tmp_call_workdir() {
+    // `/tmp` remains a shellguard sandbox release, but plan mode is stricter:
+    // it consumes the typed write-effect provenance and blocks the operation.
     let workdir = tmp_released_workdir("tmp-workdir");
     let mock = Arc::new(
         MockChatClient::new()
@@ -374,15 +383,13 @@ async fn plan_mode_releases_relative_write_in_tmp_call_workdir() {
         is_error, output, ..
     } = tool_end.unwrap()
     {
-        assert!(
-            !*is_error,
-            "relative write in a /tmp workdir must be released, output: {output}"
-        );
+        assert!(*is_error, "relative /tmp write must be blocked: {output}");
+        assert!(output.contains("Blocked in plan mode (read-only)"));
+        assert!(output.contains("output a plan only"));
     }
-    // The command really executed in the given workdir.
     assert!(
-        workdir.path().join("sg-newfile").exists(),
-        "`touch` must have run inside the /tmp workdir"
+        !workdir.path().join("sg-newfile").exists(),
+        "blocked /tmp write must never execute"
     );
 }
 

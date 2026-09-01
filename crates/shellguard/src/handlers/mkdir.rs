@@ -65,7 +65,9 @@ impl Handler for MkdirHandler {
         }
 
         if has_targets {
-            Classification::Allow(AllowReason::handler("mkdir within allowed scope"))
+            Classification::Allow(AllowReason::ReleasedWrite(
+                "mkdir within allowed scope".into(),
+            ))
         } else {
             Classification::Ask("mkdir (no directory specified)".into())
         }

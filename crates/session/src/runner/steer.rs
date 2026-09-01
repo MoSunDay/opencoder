@@ -138,8 +138,9 @@ pub(super) async fn has_pending_steers(session: &SessionState) -> bool {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum SteerApplyOutcome {
     /// Batch fully applied; run_loop proceeds to the LLM/drain step.
-    /// `recorded` tells the caller whether any item became a real user
-    /// message (used by the skip-LLM idle-drain decision).
+    /// `recorded` tells the caller whether any item supplied an LLM input: a
+    /// real user message or a preserved clear-context handoff directive (used
+    /// by the skip-LLM idle-drain decision).
     Continue { recorded: bool },
     /// Sentinel ClearContext or bare-control-command-only batch: `Done` was
     /// emitted, run_loop must end the turn without an LLM call.
@@ -206,6 +207,12 @@ pub(super) async fn apply_steer_batch(
                 && crate::control_cmd::is_clear_context_handoff(
                     session.handoff_plan.as_deref().unwrap_or(""),
                 );
+            if matches!(cmd, crate::control_cmd::ControlCmd::ClearContext) && !clear_sentinel {
+                // A seeded clear (including plan→act execution handoff) owns
+                // the next provider turn even though it is synthetic rather
+                // than a stored user message.
+                steer_recorded = true;
+            }
             // Compound (/plan review): record the rest as a real
             // user message in the new agent.
             if let Some(rest) = rest {

@@ -304,5 +304,8 @@ fn extract_cd_target(node: &Node) -> Option<String> {
 }
 
 pub(crate) fn most_restrictive(a: Verdict, b: Verdict) -> Verdict {
-    if a.decision >= b.decision { a } else { b }
+    let writes_state = a.writes_state || b.writes_state;
+    let mut chosen = if a.decision >= b.decision { a } else { b };
+    chosen.writes_state = writes_state;
+    chosen
 }

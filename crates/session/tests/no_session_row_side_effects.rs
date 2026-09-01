@@ -113,9 +113,9 @@ async fn clear_context_never_creates_row_and_keeps_history() {
     run(&mut session, "/clear_context".into(), |_| {}).await.unwrap();
 
     // The operation really applied: transcript collapsed to the marker and
-    // the plan session kept its agent.
+    // the plan session converged to act without creating another row.
     assert_eq!(session.messages.len(), 1, "transcript collapsed to marker");
-    assert_eq!(session.agent.name, "plan", "clear keeps the plan agent");
+    assert_eq!(session.agent.name, "act", "clear converges to act");
     assert_no_new_row(&spy, &store, &before_ids, before_creates, "/clear_context").await;
 
     // History is not lost: identical persisted rows before and after (the

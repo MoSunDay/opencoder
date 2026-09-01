@@ -1,11 +1,11 @@
 //! Regression test: a plan-mode agent cannot escape read-only restrictions
 //! by spawning a 'build' subagent via the task tool. The runner rejects any
-//! non-'explore' subagent_type in plan mode with an "Unknown subagent_type"
-//! error, emits no SubagentStart, and performs no writes.
+//! non-'explore' subagent_type in plan mode with the canonical model-facing
+//! read-only denial, emits no SubagentStart, and performs no writes.
 //!
 //! Contracts:
 //! - task tool call with subagent_type="build" from a plan agent produces
-//!   a ToolEnd with is_error=true and output containing "Unknown subagent_type".
+//!   a ToolEnd with is_error=true and output containing "Blocked in plan mode".
 //! - No SubagentStart event is emitted.
 //! - The error message must NOT advertise 'build' as a valid option (so the
 //!   model is not told the escape hatch exists). Echoing the rejected type name
@@ -92,8 +92,8 @@ async fn plan_mode_blocks_build_subagent() {
     {
         assert!(*is_error, "build subagent must be blocked in plan mode");
         assert!(
-            output.contains("Unknown subagent_type"),
-            "error must say 'Unknown subagent_type', got: {output}"
+            output.contains("Blocked in plan mode (read-only)"),
+            "error must identify the read-only plan mode, got: {output}"
         );
         assert!(
             output.contains("build"),
@@ -106,6 +106,8 @@ async fn plan_mode_blocks_build_subagent() {
             !output.contains("'build' (full tools)") && !output.contains("or 'build'"),
             "error must not advertise 'build' as a valid option, got: {output}"
         );
+        assert!(output.contains("output a plan only"), "got: {output}");
+        assert!(output.contains("Do not retry"), "got: {output}");
     }
 
     // No SubagentStart should have been emitted — the child never ran.

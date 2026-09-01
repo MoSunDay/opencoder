@@ -1,14 +1,20 @@
-//! Running-gate tests for the agent-switch slash dispatch (`/act`,
-//! `/plan`, `/clear_context`). A switch while a turn is in flight
+//! Running-gate tests for the agent-switch slash dispatch (`/act`, `/plan`).
+//! A switch while a turn is in flight
 //! (`running`) or a subagent is live is intercepted with an explicit busy
 //! marker — applying a switch mid-`run_session` would land at an arbitrary
 //! partial boundary. Same contract as `/compact`'s `SkipRunning`.
-//! Replaces the deleted Shift+Tab machinery tests (pure-switch flow was
-//! removed; all switching is prompt-driven now).
+//! Ctrl+T feeds this same gate after key handling; slash commands and the
+//! shortcut therefore share persistence, busy gating, and status updates.
 
 use super::*;
 
 use super::super::app_loop_actions::{dispatch_mode_switch, ModeSwitch};
+
+#[test]
+fn mode_switch_target_maps_primary_agent_names() {
+    assert_eq!(ModeSwitch::for_agent("act"), ModeSwitch::Act);
+    assert_eq!(ModeSwitch::for_agent("plan"), ModeSwitch::Plan);
+}
 
 /// Shared harness driving `dispatch_mode_switch` directly.
 async fn drive_mode_switch(

@@ -44,6 +44,60 @@ fn press_running_mode_command(command: &str, code: KeyCode) -> (KeyAction, Strin
     press_running_command(command, code, false)
 }
 
+fn press_ctrl_t(agent: &str, running: bool, input_disabled: bool) -> (KeyAction, String) {
+    let mut input = "draft stays".to_string();
+    let mut cursor = input.chars().count();
+    let mut hist_idx = None;
+    let mut scroll = 0;
+    let mut follow = true;
+    let mut last_esc = None;
+    let mut skill_menu = None;
+    let mut undo_state = crate::undo::init(&input, cursor);
+    let mut queue_scroll = 0;
+    let mut file_menu = None;
+    let action = handle_key(
+        KeyEvent::new(KeyCode::Char('t'), KeyModifiers::CONTROL),
+        &crate::keymap::KeyBindings::from_config(&opencoder_core::Config::default()),
+        &mut input,
+        &mut cursor,
+        &[],
+        &mut hist_idx,
+        running,
+        agent,
+        &mut scroll,
+        &mut follow,
+        &mut last_esc,
+        &mut skill_menu,
+        80,
+        2,
+        input_disabled,
+        input_disabled,
+        &mut undo_state,
+        &mut queue_scroll,
+        &mut file_menu,
+        Path::new("."),
+    );
+    (action, input)
+}
+
+#[test]
+fn ctrl_t_toggles_act_and_plan_without_touching_draft() {
+    for (agent, expected) in [("act", "plan"), ("plan", "act")] {
+        let (action, input) = press_ctrl_t(agent, false, false);
+        assert!(matches!(action, KeyAction::SwitchAgent(ref to) if to == expected));
+        assert_eq!(input, "draft stays", "mode toggle preserves the composer");
+    }
+}
+
+#[test]
+fn ctrl_t_reaches_app_gate_while_running_or_subagent_focused() {
+    for (running, input_disabled) in [(true, false), (false, true)] {
+        let (action, input) = press_ctrl_t("plan", running, input_disabled);
+        assert!(matches!(action, KeyAction::SwitchAgent(ref to) if to == "act"));
+        assert_eq!(input, "draft stays");
+    }
+}
+
 /// Enter on a mode command while the parent runs admits it as a steer: the
 /// runner applies it at the next turn boundary (delayed application).
 #[test]

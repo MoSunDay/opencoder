@@ -184,7 +184,7 @@ pub fn base_prompt_build() -> String {
 }
 
 const PLAN_SUFFIX: &str = "\
-PLAN mode (read-only): no edits/writes; mutating bash (file-writing redirects, rm, mv, git push, pip install, ...) is intercepted. \
+PLAN mode (read-only): no edits/writes and no implementation execution. Every state-changing tool attempt (including writes under /tmp) is intercepted and returned in context. If blocked, do not retry or look for another write path; focus on analysis and output a plan only. \
 Investigate via 'explore' subagents. \
 When an unstated assumption would shape your work, resolve it via the `question` tool -- prefer asking over assuming (you may ask several in one turn). Facts the repo, rules/, or tests can answer must be looked up first, not asked.";
 
@@ -266,12 +266,8 @@ mod tests {
         }
     }
 
-    /// The plan prompt is a general read-only preamble, NOT a plan
-    /// producer: the old Goal/TODO/Verify/Risks/Align template and the
-    /// "switch to act mode" handoff are gone. The clarification protocol now
-    /// lives exclusively in the task-plan skill, so the prompt must not
-    /// mention the `question` tool at all (the tool is latent-unlocked from
-    /// the active skill body, never advertised in a base prompt).
+    /// The plan prompt requires a focused plan without reviving the old rigid
+    /// Goal/TODO/Verify/Risks/Align template or an automatic act handoff.
     #[test]
     fn plan_prompt_is_read_only_with_question_guidance() {
         let plan = base_prompt_plan();
@@ -282,9 +278,11 @@ mod tests {
             "plan prompt must state its read-only constraints, got: {plan}"
         );
         assert!(
-            plan.contains("mutating bash"),
-            "plan prompt must note intercepted mutating bash, got: {plan}"
+            plan.contains("Every state-changing tool attempt"),
+            "plan prompt must note intercepted writes, got: {plan}"
         );
+        assert!(plan.contains("output a plan only"), "got: {plan}");
+        assert!(plan.contains("do not retry"), "got: {plan}");
 
         // No question-tool advertisement in the base prompt: clarification
         // guidance lives only in the task-plan skill body. (Generic prose

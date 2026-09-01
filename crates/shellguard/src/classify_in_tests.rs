@@ -59,6 +59,10 @@ fn relative_write_is_released_when_cwd_is_tmp() {
         Decision::Allow,
         "`touch f` must resolve under the released /tmp cwd, got {verdict:?}"
     );
+    assert!(
+        verdict.writes_state,
+        "released mutation must retain typed write provenance"
+    );
     cleanup_dir(&cwd);
 }
 
@@ -85,7 +89,21 @@ fn cwd_alone_flips_the_verdict_for_the_same_command() {
     let allowed = crate::classify_in("touch f", &released);
     let blocked = crate::classify_in("touch f", &plain);
     assert_eq!(allowed.decision, Decision::Allow, "got {allowed:?}");
+    assert!(allowed.writes_state, "released leg must be marked as a write");
     assert_ne!(blocked.decision, Decision::Allow, "got {blocked:?}");
     cleanup_dir(&released);
     cleanup_dir(&plain);
+}
+
+#[test]
+fn released_write_provenance_survives_compound_allow_ties() {
+    let cwd = tmp_release_cwd("compound-write");
+    let verdict = crate::classify_in("touch f && ls", &cwd);
+    assert_eq!(verdict.decision, Decision::Allow, "got {verdict:?}");
+    assert!(verdict.writes_state, "the trailing read must not mask the write");
+
+    let read = crate::classify_in("ls >/dev/null", &cwd);
+    assert_eq!(read.decision, Decision::Allow, "got {read:?}");
+    assert!(!read.writes_state, "/dev/null does not persist state");
+    cleanup_dir(&cwd);
 }

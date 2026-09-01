@@ -163,6 +163,9 @@ fn from_config_uses_defaults() {
     assert!(b
         .help
         .matches(&ev(KeyCode::Char('h'), KeyModifiers::CONTROL)));
+    assert!(b
+        .switch_mode
+        .matches(&ev(KeyCode::Char('t'), KeyModifiers::CONTROL)));
 }
 
 #[test]
@@ -187,4 +190,15 @@ fn from_config_falls_back_on_bad_spec() {
     assert!(b
         .help
         .matches(&ev(KeyCode::Char('h'), KeyModifiers::CONTROL)));
+}
+
+#[test]
+fn from_config_respects_custom_mode_switch_spec() {
+    let mut config = Config::default();
+    config.keymap.set("switch_mode", "f2".into());
+    let b = KeyBindings::from_config(&config);
+    assert!(b.switch_mode.matches(&ev(KeyCode::F(2), KeyModifiers::NONE)));
+    assert!(!b
+        .switch_mode
+        .matches(&ev(KeyCode::Char('t'), KeyModifiers::CONTROL)));
 }

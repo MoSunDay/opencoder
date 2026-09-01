@@ -25,7 +25,7 @@ import { Spin } from 'antd';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiGet, apiPost } from './api.js';
 import { openStream } from './sse.js';
-import { emptyStream, reduceFrame, turnsFromMessages, usageFromMessages, withUserTurn } from './reduce.js';
+import { consumedEchoText, emptyStream, reduceFrame, turnsFromMessages, usageFromMessages, withUserTurn } from './reduce.js';
 import { TranscriptView } from './transcript.jsx';
 import { DialogSidebar } from './chatSidebar.jsx';
 import { LOCAL_NODE, clearPreselect, useStore } from './store.js';
@@ -217,7 +217,10 @@ export function ChatPanel({ onNotice }) {
       }].concat(d));
       setDialogSel(sessionId);
     }
-    setStream((s) => withUserTurn(s, prompt)); // remote has no queue_consumed echo
+    // Remote dispatch has no queue_consumed echo (synthetic task session), so
+    // the optimistic user turn applies the echo contract itself: bare control
+    // commands render nothing, compounds render only the tail.
+    setStream((s) => withUserTurn(s, consumedEchoText(prompt)));
     startStream({ path: '/api/nodes/tasks/' + encodeURIComponent(taskId) + '/events', sessionId, after: 0 });
   };
 

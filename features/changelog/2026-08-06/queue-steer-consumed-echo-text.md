@@ -41,7 +41,7 @@ TUI 依赖本地 `queue_items` / `steer_items` 镜像查文本回显；但 **Web
 | 旧 payload 无 text 向后兼容 (queue) | queue_consumed_without_text_field_is_backward_compatible | crates/session/src/runner/event.rs |
 | 旧 payload 无 text 向后兼容 (steer) | steer_consumed_without_text_field_is_backward_compatible | crates/session/src/runner/event.rs |
 | queue 激活回显先于 TextDelta | queue_consumed_carries_text_and_precedes_output | crates/session/tests/queue_echo.rs |
-| /plan 复合命令 raw text 保留 | queue_consumed_compound_carries_raw_text | crates/session/tests/queue_echo.rs |
+| /plan 复合命令 raw text 保留 | queue_consumed_compound_carries_raw_text（2026-09-01 收敛为 model-facing echo 后更名 `queue_consumed_compound_carries_tail_text`，断言改为仅尾参） | crates/session/tests/queue_echo.rs |
 | TUI QueueConsumed 回显 user: | fold_queue_consumed_echoes_marker / fold_queue_consumed_unknown_seq_is_noop | crates/tui/src/app_loop_tests/mod.rs |
 | TUI SteerConsumed 回显 user: | steer_consumed_echoes_marker_and_drops_row / steer_consumed_unknown_seq_is_noop | crates/tui/src/chat_tests/steer_echo.rs |
 | plan_card SteerConsumed 回显 | steer_consumed_echoes_marker_and_drops_entry | crates/tui/src/chat_tests/plan_card.rs |

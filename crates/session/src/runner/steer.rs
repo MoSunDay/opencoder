@@ -189,9 +189,13 @@ pub(super) async fn apply_steer_batch(
             on_event(SessionEvent::Done);
             return Ok(SteerApplyOutcome::Cancelled);
         }
+        // Echo only what the model will see: the compound tail is recorded
+        // as the real user turn; a bare control command is applied inline
+        // with nothing recorded, so its echo is empty (display surfaces
+        // suppress empty echoes).
         on_event(SessionEvent::SteerConsumed {
             seq: *seq,
-            text: p.clone(),
+            text: crate::control_cmd::consumed_echo_text(p).unwrap_or_default(),
         });
         // Defensive: a steered control command is applied immediately and
         // NOT recorded as user text, so "/plan" never leaks to the LLM.

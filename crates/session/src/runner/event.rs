@@ -87,6 +87,36 @@ pub enum SessionEvent {
         id: String,
         ev: Box<SessionEvent>,
     },
+    /// A sidecar loop answered its first question: the temporary observer
+    /// session (`sidecar-<ulid>`) was created from a snapshot of the main
+    /// session's context and the question was handed to it. Display-only
+    /// lifecycle frame — never persisted (see [`SessionEvent::is_sidecar_frame`]).
+    SidecarStart {
+        id: String,
+        question: String,
+    },
+    /// A content frame from a running sidecar, tagged with the sidecar id so
+    /// the TUI can route it into the sidecar's foldable view. Like
+    /// `SubagentChild`, but the payload is **never** persisted: sidecar
+    /// content stays in memory, and its token cost reaches the durable layer
+    /// through the bare forwarded `LlmUsage` instead.
+    SidecarChild {
+        id: String,
+        ev: Box<SessionEvent>,
+    },
+    /// One sidecar question finished. `rounds` is the number of LLM rounds
+    /// the sidecar ran for this question and `total_tokens` the usage it
+    /// consumed (already accounted to the main task via the bare forwarded
+    /// `LlmUsage` frames). `answer` is the final assistant text (empty on
+    /// failure). Display-only — never persisted.
+    SidecarTurn {
+        id: String,
+        ok: bool,
+        answer: String,
+        elapsed_ms: u64,
+        total_tokens: u64,
+        rounds: usize,
+    },
     /// Emitted after compaction rewrites the transcript. Carries the new
     /// message list so display surfaces can rebuild their view.
     TranscriptReset(Vec<Message>),
@@ -95,10 +125,12 @@ pub enum SessionEvent {
     /// mirror instead of leaving a stale `[queued]` row until `Done`.
     QueueConsumed {
         seq: i64,
-        /// The consumed prompt text so display surfaces can echo it at the
+        /// The model-facing echo text so display surfaces can echo it at the
         /// exact activation instant — without this, stateless clients (web /
         /// CLI) cannot show the text until the turn finishes and `/messages`
-        /// is re-fetched. Defaults to empty for old persisted events.
+        /// is re-fetched. Carries only what entered context: a compound
+        /// control command's tail; a bare command echoes nothing (empty
+        /// text). Defaults to empty for old persisted events.
         #[serde(default)]
         text: String,
     },
@@ -107,7 +139,8 @@ pub enum SessionEvent {
     /// mirror instead of leaving a stale `steer` row until `Done`.
     SteerConsumed {
         seq: i64,
-        /// The promoted steer prompt text, same rationale as `QueueConsumed`.
+        /// The promoted steer prompt's model-facing echo text, same rationale
+        /// as `QueueConsumed` (compound tail only; bare commands stay empty).
         #[serde(default)]
         text: String,
     },
@@ -145,6 +178,9 @@ impl SessionEvent {
             SessionEvent::SubagentStart { .. } => "subagent_start",
             SessionEvent::SubagentEnd { .. } => "subagent_end",
             SessionEvent::SubagentChild { .. } => "subagent_child",
+            SessionEvent::SidecarStart { .. } => "sidecar_start",
+            SessionEvent::SidecarChild { .. } => "sidecar_child",
+            SessionEvent::SidecarTurn { .. } => "sidecar_turn",
             SessionEvent::AutoPilot { .. } => "autopilot",
             SessionEvent::TranscriptReset(_) => "transcript_reset",
             SessionEvent::QueueConsumed { .. } => "queue_consumed",
@@ -210,6 +246,23 @@ impl SessionEvent {
             SessionEvent::SubagentChild { id, ev } => {
                 serde_json::json!({ "id": id, "event": ev })
             }
+            SessionEvent::SidecarStart { id, question } => {
+                serde_json::json!({ "id": id, "question": question })
+            }
+            SessionEvent::SidecarChild { id, ev } => {
+                serde_json::json!({ "id": id, "event": ev })
+            }
+            SessionEvent::SidecarTurn {
+                id,
+                ok,
+                answer,
+                elapsed_ms,
+                total_tokens,
+                rounds,
+            } => serde_json::json!({
+                "id": id, "ok": ok, "answer": answer, "elapsed_ms": elapsed_ms,
+                "total_tokens": total_tokens, "rounds": rounds
+            }),
             SessionEvent::AutoPilot { phase, iteration } => {
                 serde_json::json!({ "phase": phase, "iteration": iteration })
             }
@@ -296,6 +349,25 @@ impl SessionEvent {
                     ev: Box::new(ev),
                 }
             }
+            "sidecar_start" => SessionEvent::SidecarStart {
+                id: data.get("id")?.as_str()?.to_string(),
+                question: data.get("question")?.as_str()?.to_string(),
+            },
+            "sidecar_child" => {
+                let ev: SessionEvent = serde_json::from_value(data.get("event")?.clone()).ok()?;
+                SessionEvent::SidecarChild {
+                    id: data.get("id")?.as_str()?.to_string(),
+                    ev: Box::new(ev),
+                }
+            }
+            "sidecar_turn" => SessionEvent::SidecarTurn {
+                id: data.get("id")?.as_str()?.to_string(),
+                ok: data.get("ok")?.as_bool().unwrap_or(false),
+                answer: data.get("answer")?.as_str()?.to_string(),
+                elapsed_ms: data.get("elapsed_ms")?.as_u64().unwrap_or(0),
+                total_tokens: data.get("total_tokens")?.as_u64().unwrap_or(0),
+                rounds: data.get("rounds").and_then(|v| v.as_u64()).unwrap_or(0) as usize,
+            },
             "transcript_reset" => {
                 // Wire payload is `{}`; the rebuilt message list is intentionally
                 // empty (see method doc). Callers re-fetch /messages if needed.
@@ -348,11 +420,29 @@ impl SessionEvent {
             SessionEvent::SubagentStart { .. }
             | SessionEvent::SubagentEnd { .. }
             | SessionEvent::SubagentChild { .. }
+            | SessionEvent::SidecarStart { .. }
+            | SessionEvent::SidecarChild { .. }
+            | SessionEvent::SidecarTurn { .. }
             | SessionEvent::AutoPilot { .. }
             | SessionEvent::QueueConsumed { .. }
             | SessionEvent::SteerConsumed { .. } => EventKind::Step,
             SessionEvent::TranscriptReset(_) => EventKind::Compaction,
         }
+    }
+
+    /// Sidecar content frames: display-only, **never persisted**. The
+    /// persistence gate (`EventSink::push`) drops them at the door, while
+    /// each sidecar LLM round is still accounted to the main task through
+    /// the bare forwarded `LlmUsage` event. Keeping this predicate in one
+    /// place lets every future persistence surface (session sink, TUI
+    /// mirror) derive the same rule instead of re-deriving it per site.
+    pub fn is_sidecar_frame(&self) -> bool {
+        matches!(
+            self,
+            SessionEvent::SidecarStart { .. }
+                | SessionEvent::SidecarChild { .. }
+                | SessionEvent::SidecarTurn { .. }
+        )
     }
 }
 
@@ -428,6 +518,22 @@ mod from_sse_tests {
                 id: "s1".into(),
                 ev: Box::new(SessionEvent::TextDelta("child text".into())),
             },
+            SessionEvent::SidecarStart {
+                id: "sidecar-1".into(),
+                question: "progress?".into(),
+            },
+            SessionEvent::SidecarChild {
+                id: "sidecar-1".into(),
+                ev: Box::new(SessionEvent::TextDelta("sidecar text".into())),
+            },
+            SessionEvent::SidecarTurn {
+                id: "sidecar-1".into(),
+                ok: true,
+                answer: "half done".into(),
+                elapsed_ms: 42,
+                total_tokens: 1234,
+                rounds: 1,
+            },
             SessionEvent::TranscriptReset(vec![Message::assistant("m1")]),
             SessionEvent::QueueConsumed {
                 seq: 7,
@@ -449,8 +555,8 @@ mod from_sse_tests {
         kinds.dedup();
         assert_eq!(
             kinds.len(),
-            21,
-            "expected all 21 unique kinds, got {kinds:?}"
+            24,
+            "expected all 24 unique kinds, got {kinds:?}"
         );
 
         for ev in &cases {
@@ -650,5 +756,44 @@ mod from_sse_tests {
             }
             other => panic!("expected AutoPilot, got {other:?}"),
         }
+    }
+
+    /// Exactly the three Sidecar* frames are persistence-gated; the bare
+    /// `LlmUsage` (the sidecar's cost-accounting channel) and every
+    /// Subagent* frame must stay persistable.
+    #[test]
+    fn is_sidecar_frame_marks_exactly_the_sidecar_variants() {
+        let sidecar: Vec<SessionEvent> = vec![
+            SessionEvent::SidecarStart {
+                id: "sc".into(),
+                question: "q".into(),
+            },
+            SessionEvent::SidecarChild {
+                id: "sc".into(),
+                ev: Box::new(SessionEvent::TextDelta("t".into())),
+            },
+            SessionEvent::SidecarTurn {
+                id: "sc".into(),
+                ok: true,
+                answer: "a".into(),
+                elapsed_ms: 1,
+                total_tokens: 2,
+                rounds: 1,
+            },
+        ];
+        assert!(sidecar.iter().all(|e| e.is_sidecar_frame()));
+        let keep: Vec<SessionEvent> = vec![
+            SessionEvent::LlmUsage {
+                total_tokens: 10,
+                input_tokens: 7,
+                output_tokens: 3,
+            },
+            SessionEvent::SubagentChild {
+                id: "s1".into(),
+                ev: Box::new(SessionEvent::Done),
+            },
+            SessionEvent::Done,
+        ];
+        assert!(keep.iter().all(|e| !e.is_sidecar_frame()));
     }
 }

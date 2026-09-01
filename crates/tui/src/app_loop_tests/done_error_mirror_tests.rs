@@ -349,3 +349,89 @@ async fn fold_error_when_cancelled_preserves_queue_items() {
     );
     assert_eq!(queue_items[0].0, 30);
 }
+
+/// A bare control command consumed from the queue echoes NOTHING: empty event
+/// text plus a raw mirror row must not resurrect the command as a user block
+/// (the mirror entry is still dropped by seq). Legacy raw event text
+/// normalizes to the compound tail.
+#[tokio::test]
+async fn fold_queue_consumed_bare_control_command_echoes_nothing() {
+    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let mut chat = ChatView::default();
+    let mut queue_items: Vec<(i64, String)> = vec![(30, "/plan".into())];
+    let mut running = true;
+    let mut cancelled = false;
+    let mut drain_pending = false;
+    let mut skip_next_render = false;
+    let mut follow = true;
+    let (cmd_tx, _cmd_rx) = mpsc::channel::<UiCmd>(64);
+    let mut cancel = CancellationToken::new();
+    let (_evt_tx, mut evt_rx) = mpsc::channel::<UiEvent>(64);
+    let mut notepad: Option<crate::notepad::NotepadView> = None;
+
+    let _flow = fold_ui_events(
+        Some(UiEvent::Session(SessionEvent::QueueConsumed {
+            seq: 30,
+            text: String::new(),
+        })),
+        &mut chat,
+        &store,
+        "test-session",
+        &mut queue_items,
+        &mut false,
+        &mut crate::queue_admitter::AdmitUiState::default(),
+        &mut running,
+        &mut cancelled,
+        &mut drain_pending,
+        &mut skip_next_render,
+        &mut follow,
+        &cmd_tx,
+        &mut cancel,
+        &mut evt_rx,
+        &mut notepad,
+        &mut None,
+        &opencoder_session::QuestionHub::new(),
+    )
+    .await;
+
+    assert!(
+        queue_items.is_empty(),
+        "the consumed entry is dropped by seq regardless of echo"
+    );
+    assert!(
+        !crate::chat::block_text(&chat).contains("User:"),
+        "a bare control command must not echo a user block"
+    );
+
+    // Legacy persisted event carrying the raw compound prefix: the display
+    // layer normalizes to the tail — the command token never shows.
+    let mut queue_items: Vec<(i64, String)> = vec![(31, "/plan review".into())];
+    let _flow = fold_ui_events(
+        Some(UiEvent::Session(SessionEvent::QueueConsumed {
+            seq: 31,
+            text: "/plan review".into(),
+        })),
+        &mut chat,
+        &store,
+        "test-session",
+        &mut queue_items,
+        &mut false,
+        &mut crate::queue_admitter::AdmitUiState::default(),
+        &mut running,
+        &mut cancelled,
+        &mut drain_pending,
+        &mut skip_next_render,
+        &mut follow,
+        &cmd_tx,
+        &mut cancel,
+        &mut evt_rx,
+        &mut notepad,
+        &mut None,
+        &opencoder_session::QuestionHub::new(),
+    )
+    .await;
+
+    let text = crate::chat::block_text(&chat);
+    assert!(text.contains("review"), "compound tail echoed: {text}");
+    assert!(!text.contains("/plan"), "token suppressed: {text}");
+}

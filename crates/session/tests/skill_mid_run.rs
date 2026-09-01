@@ -94,8 +94,9 @@ fn has_active_skill_reminder(req: &opencoder_llm::ChatRequest) -> bool {
     })
 }
 
-/// The skill body ships as the in-conversation `[skill loaded]` message
-/// naming `path` (the `[active skill]` tail pointer is fallback-only).
+/// The skill body ships as the transient per-call `[skill loaded]` payload
+/// message naming `path` (the `[active skill]` tail pointer is
+/// fallback-only).
 fn has_loaded_skill_message(req: &opencoder_llm::ChatRequest, path: &str) -> bool {
     req.messages.iter().any(|m| {
         m.get("role").and_then(|r| r.as_str()) == Some("user")
@@ -240,8 +241,8 @@ async fn skill_set_mid_run_appears_in_next_turn_tail_reminder() {
     );
 
     // Turn 2's system prompt still excludes the body; the skill arrives as
-    // the in-conversation `[skill loaded]` message (the `[active skill]`
-    // tail pointer is fallback-only and stays suppressed).
+    // the transient per-call `[skill loaded]` payload message (the
+    // `[active skill]` tail pointer is fallback-only and stays silent).
     let second_system = system_content(&requests[1]);
     assert!(
         !second_system.contains("MID-RUN-SKILL"),
@@ -368,9 +369,9 @@ async fn skill_set_mid_run_appears_in_queue_followup_turn() {
         "turn 1 payload must carry no [active skill] reminder"
     );
 
-    // Turn 3 (queue follow-up): the skill arrives via the in-conversation
-    // `[skill loaded]` message; the system prompt stays skill-free and the
-    // tail pointer stays suppressed.
+    // Turn 3 (queue follow-up): the skill arrives via the transient per-call
+    // `[skill loaded]` payload message; the system prompt stays skill-free
+    // and the tail pointer stays silent.
     let third_system = system_content(&requests[2]);
     assert!(
         !third_system.contains("QUEUE-SKILL"),

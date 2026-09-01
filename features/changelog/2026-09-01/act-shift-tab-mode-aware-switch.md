@@ -39,8 +39,8 @@ Shift+Tab 直接切回 plan（上下文保留），plan 模式 Shift+Tab 才是�
 
 ## 回归证据
 
-- `cargo test -p opencoder-tui --lib` → **1518 passed / 0 failed**（本刀收敛树实测，
-  含上表 5 例具名测试逐项 ok；并行切片合入后由收尾刀刷新全量口径）
+- `cargo test -p opencoder-tui --lib` → **1524 passed / 0 failed**（最终收敛树，
+  含上表 5 例具名测试逐项 ok；期间并行流重构 handle_key 签名后复验仍绿）
 - `cargo test -p opencoder-tui --test act_clear_context_fold` → 5 passed / 0 failed
 - `cargo test --workspace --no-fail-fast`（23:14 树快照）→ 除
   opencoder-session 3 个 target（并行迭代流当轮 in-flight，其中 latent 已于

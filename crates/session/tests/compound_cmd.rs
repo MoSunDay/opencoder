@@ -17,8 +17,8 @@ use opencoder_session::{run, SessionEvent, SessionState};
 use opencoder_store::{Delivery, LibsqlStore, SessionInput, Store};
 
 /// True when any user message of the captured request carries a skill
-/// artifact — the persistent `[skill loaded]` full-body injection or the
-/// transient `[active skill]` tail reminder. Under one-shot `$skill`
+/// artifact — the transient `[skill loaded]` full-body payload message or
+/// the transient `[active skill]` tail reminder. Under one-shot `$skill`
 /// semantics (see `skill_one_shot.rs`) this is THE activation proof: the
 /// skill lives exactly for the run that consumed the token.
 fn request_carries_skill(req: &opencoder_llm::ChatRequest) -> bool {

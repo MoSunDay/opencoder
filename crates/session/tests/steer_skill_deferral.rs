@@ -287,12 +287,12 @@ async fn steer_admitted_mid_turn_defers_skill_until_absorption() {
         "turn 1 payload never sees the token: {req1_text}"
     );
 
-    // Turn 2 carries the skill via the in-conversation `[skill loaded]`
-    // message (the tail pointer is fallback-only), token stripped.
+    // Turn 2 carries the skill via the transient per-call `[skill loaded]`
+    // payload message (the tail pointer stays silent), token stripped.
     let tail = last_user_content(&requests[1]);
     assert!(
         !tail.contains("[active skill]"),
-        "pointer suppressed while the loaded marker is present: {tail}"
+        "pointer silent while the body ships adjacent: {tail}"
     );
     assert!(
         requests[1].messages.iter().any(|m| {

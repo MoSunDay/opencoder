@@ -5,7 +5,8 @@
 //! triggered it. When that run ends — Done, Error, or cancel — the skill is
 //! cleared from memory (`skill_prompt` + `active_skill_names`) and from the
 //! store (`clear_skill`), so subsequent runs start skill-less: no
-//! `[active skill]` tail reminder, no fresh `[skill loaded]` injection, no
+//! `[active skill]` tail reminder, no `[skill loaded]` body payload (it was
+//! transient per-call anyway — run end stops the submission entirely), no
 //! resumed-session resurrection. The single deliberate exception: a crash
 //! MID-run leaves `sessions.skill` set, so the resumed run KEEPS the skill
 //! until it completes — then the same run-end clear lands.
@@ -149,9 +150,9 @@ async fn assert_cleared(session: &SessionState, store: &Arc<dyn Store>, id: &str
 // 1. Done clears
 // ---------------------------------------------------------------------------
 
-/// `$alpha do the thing` runs WITH the skill (tail reminder + one
-/// `[skill loaded]` injection during the run), and the Ok return leaves the
-/// skill cleared in memory AND on the store row.
+/// `$alpha do the thing` runs WITH the skill (tail reminder + the transient
+/// `[skill loaded]` body payload during the run), and the Ok return leaves
+/// the skill cleared in memory AND on the store row.
 #[tokio::test]
 async fn done_clears_skill_after_run() {
     let home = tempfile::tempdir().unwrap();
@@ -178,10 +179,10 @@ async fn done_clears_skill_after_run() {
         "token stripped, prompt recorded"
     );
     assert!(
-        s.messages
+        user_texts(&mock.requests()[0])
             .iter()
-            .any(|m| m.text().starts_with("[skill loaded] ")),
-        "body injected during the run"
+            .any(|t| t.starts_with("[skill loaded] ")),
+        "body shipped in the run's payload"
     );
     assert_eq!(mock.call_count(), 1, "exactly one LLM round");
 
@@ -272,8 +273,9 @@ async fn no_skill_run_keeps_skill_none() {
 // ---------------------------------------------------------------------------
 
 /// After the skill run completes, a second plain prompt must ship with NO
-/// `[active skill]` tail and NO newly injected `[skill loaded]` message —
-/// the one from run 1 remains in history, exactly once.
+/// `[active skill]` tail and NO `[skill loaded]` body at all — the payload
+/// message was transient per-call, so run end stopped its submission
+/// entirely (nothing persisted to replay).
 #[tokio::test]
 async fn second_run_has_no_skill_reminder() {
     let home = tempfile::tempdir().unwrap();
@@ -312,13 +314,9 @@ async fn second_run_has_no_skill_reminder() {
     );
     assert_eq!(
         loaded_marker_count(&second),
-        loaded_marker_count(&first),
-        "no NEW [skill loaded] injection in run 2 (history copy only)"
-    );
-    assert_eq!(
-        loaded_marker_count(&second),
-        1,
-        "exactly the one historical injection"
+        0,
+        "run 2 carries NO [skill loaded] body — run end stopped the transient \
+         submission entirely"
     );
 
     assert_cleared(&s, &store, "one-shot-second").await;
@@ -335,7 +333,7 @@ fn user_texts(req: &opencoder_llm::ChatRequest) -> Vec<String> {
 }
 
 /// User messages of a request whose text starts with the `[skill loaded]`
-/// marker line (the persistent full-body injection).
+/// marker line (the transient full-body payload message).
 fn loaded_marker_count(req: &opencoder_llm::ChatRequest) -> usize {
     user_texts(req)
         .iter()

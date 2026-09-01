@@ -66,26 +66,25 @@ pub(super) fn steer_queue_sources<'a>(
     subagent_focus: Option<usize>,
     queue_items: &'a [(i64, String)],
 ) -> (&'a [(i64, String)], &'a [(i64, String)]) {
-    if let Some(idx) = subagent_focus {
-        match chat.blocks.get(idx) {
-            Some(ChatBlock::Subagent {
-                view, done: false, ..
-            }) => (&view.steer_items, &[][..]),
-            _ => (&chat.steer_items, queue_items),
+    // Same liveness rule the `>` click path uses
+    // (`subagent_input::is_live_subagent_focus`): what the panel shows and
+    // where the click routes must never diverge.
+    if let Some(ChatBlock::Subagent { view, .. }) =
+        subagent_focus.and_then(|idx| chat.blocks.get(idx))
+    {
+        if super::subagent_input::is_live_subagent_focus(chat, subagent_focus) {
+            return (&view.steer_items, &[][..]);
         }
-    } else {
-        (&chat.steer_items, queue_items)
     }
+    (&chat.steer_items, queue_items)
 }
 
 /// Input is disabled only when a DONE subagent is focused (not when a running
 /// one is — the user can still steer it).
 pub(super) fn is_input_disabled(chat: &ChatView, subagent_focus: Option<usize>) -> bool {
-    subagent_focus.is_some_and(|idx| {
-        chat.blocks
-            .get(idx)
-            .is_none_or(|b| matches!(b, ChatBlock::Subagent { done: true, .. }))
-    })
+    // Done (or stale) focus disables the composer; a live subagent keeps it
+    // open so the user can still steer the child.
+    subagent_focus.is_some() && !super::subagent_input::is_live_subagent_focus(chat, subagent_focus)
 }
 
 /// Timer value shown after the latest body message.

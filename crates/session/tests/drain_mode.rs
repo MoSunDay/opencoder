@@ -293,9 +293,9 @@ async fn drain_mode_queue_skill_consumed() {
 
     // One-shot `$skill` semantics (see skill_one_shot.rs): the skill lives
     // exactly for the run that consumed the token. Activation is proven by
-    // the captured LLM request carrying a skill artifact ([skill loaded]
-    // body injection or [active skill] tail reminder); the run-end hook
-    // clears the skill afterwards.
+    // the captured LLM request carrying a skill artifact (the transient
+    // [skill loaded] body payload or [active skill] tail reminder); the
+    // run-end hook clears the skill afterwards.
     assert_eq!(
         mock.requests().len(),
         1,

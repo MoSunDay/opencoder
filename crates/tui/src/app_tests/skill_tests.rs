@@ -291,7 +291,7 @@ async fn start_turn_reports_false_when_worker_is_dead() {
     drop(cmd_rx); // worker gone — channel closed
     let mut cancel = CancellationToken::new();
     let ok =
-        crate::app::start_turn(&cmd_tx, &mut cancel, UiCmd::Prompt("hi".into(), Vec::new())).await;
+        crate::app_helpers::start_turn(&cmd_tx, &mut cancel, UiCmd::Prompt("hi".into(), Vec::new())).await;
     assert!(
         !ok,
         "start_turn must return false when the worker channel is closed"
@@ -347,11 +347,11 @@ fn double_esc_while_running_cancels() {
         2,
         false,
         false,
+        false,
         &mut undo_state,
         &mut queue_scroll,
         &mut file_menu,
-        workdir,
-    );
+        workdir);
     assert!(
         matches!(first, KeyAction::None),
         "first esc is a soft clear"
@@ -375,11 +375,11 @@ fn double_esc_while_running_cancels() {
         2,
         false,
         false,
+        false,
         &mut undo_state,
         &mut queue_scroll,
         &mut file_menu,
-        workdir,
-    );
+        workdir);
     assert!(
         matches!(second, KeyAction::Cancel),
         "double esc within the window must hard-abort"

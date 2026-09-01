@@ -1,11 +1,11 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 
 use anyhow::{anyhow, Context, Result};
-use opencoder_core::{resolve_agent, Config};
+use opencoder_core::{resolve_agent, AgentKind, Config};
 use opencoder_llm::{ChatClient, ChatStream};
 use opencoder_session::{generate_title, resume_and_replay as resume_session, SessionState};
 use opencoder_store::{SessionFilter, SessionPatch, Store};
@@ -38,7 +38,6 @@ pub fn rewrite_legacy_sandbox_prefix(prompt: &str) -> String {
         format!("/plan {rest}")
     }
 }
-
 
 /// Apply an `--agent` override (builtin name like plan/explore/build) to the
 /// config. Sets `config.agent.default` so the fresh-session path resolves it.
@@ -199,9 +198,7 @@ pub async fn run_headless(cli: &Cli, prompt: String) -> Result<()> {
     print_resume_summary(&session).await;
 
     if let Some(pf) = &cli.prompt_file {
-        let body = std::fs::read_to_string(pf)
-            .map_err(|e| anyhow!("--prompt-file {}: {e}", pf.display()))?;
-        session.agent.prompt = format!("{}\n\n{}", body.trim(), opencoder_core::tool_preamble());
+        apply_prompt_file(&mut session, pf)?;
     }
 
     // Extract and resolve $skill-name tokens from the prompt.
@@ -383,6 +380,34 @@ pub(crate) fn format_resume_summary(
 /// (otherwise resume shows nothing about restored subagent context). Mirrors
 /// the live `SubagentStart`/`SubagentEnd` glyph style. No-op when there are no
 /// subagent tasks (e.g. a fresh session).
+/// System-prompt replacement body for `--prompt-file`: the user's role text
+/// plus the standard bash/task tool preamble. In plan mode the preamble is
+/// stripped of the 'build' delegation advertisement first, so a custom
+/// prompt never re-introduces what `base_prompt_plan` removes. The user's
+/// own body text is left untouched; skill-activated stripping is re-checked
+/// per turn in `build_system` (no skill can be active at composition time).
+fn compose_custom_prompt(kind: AgentKind, body: &str) -> String {
+    let preamble = opencoder_core::tool_preamble();
+    let preamble = if opencoder_core::build_delegation_hidden(kind, false) {
+        opencoder_core::strip_build_delegation(preamble)
+    } else {
+        preamble.to_string()
+    };
+    format!("{}\n\n{}", body.trim(), preamble)
+}
+
+/// Read `--prompt-file` and store the composed system prompt on
+/// `session.agent.prompt`: the exact read→compose→assign seam `run_headless`
+/// (hence `main`) exercises for `--agent plan --prompt-file`. Plan agents
+/// strip the 'build' ad from the appended preamble, others keep it whole;
+/// `pub` so integration tests drive the real assignment path.
+pub fn apply_prompt_file(session: &mut SessionState, prompt_file: &Path) -> Result<()> {
+    let body = std::fs::read_to_string(prompt_file)
+        .map_err(|e| anyhow!("--prompt-file {}: {e}", prompt_file.display()))?;
+    session.agent.prompt = compose_custom_prompt(session.agent.kind, &body);
+    Ok(())
+}
+
 async fn print_resume_summary(session: &SessionState) {
     let store = match &session.store {
         Some(s) => s,
@@ -401,7 +426,7 @@ fn print_prompt_header(_session: &SessionState, prompt: &str) {
     // A slash command never enters the transcript: a bare command prints no
     // header at all (applied inline, nothing recorded) and a compound echoes
     // only its tail — mirroring what the model actually receives.
-    let shown = match opencoder_session::control_cmd::consumed_echo_text(prompt) {
+    let shown = match opencoder_session::consumed_echo_text(prompt) {
         Some(rest) => rest,
         None => return,
     };
@@ -753,5 +778,22 @@ mod tests {
         );
         // session agent unchanged by the failed reapply
         assert_eq!(s.agent.name, "act");
+    }
+
+    #[test]
+    fn prompt_file_plan_composition_omits_build_delegation() {
+        let composed = compose_custom_prompt(AgentKind::Plan, "Plan the migration.\n");
+        assert!(!composed.contains(opencoder_core::BUILD_DELEGATION_CLAUSE));
+        assert!(!composed.contains("'build'"));
+        // User body and the tool preamble survive the strip.
+        assert!(composed.starts_with("Plan the migration."));
+        assert!(composed.contains("## Tools"));
+    }
+
+    #[test]
+    fn prompt_file_act_composition_keeps_full_preamble() {
+        let composed = compose_custom_prompt(AgentKind::Act, "Act as reviewer.");
+        assert!(composed.contains(opencoder_core::BUILD_DELEGATION_CLAUSE));
+        assert!(composed.starts_with("Act as reviewer."));
     }
 }

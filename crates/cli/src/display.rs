@@ -79,6 +79,11 @@ pub(crate) fn print_event(ev: &SessionEvent) {
             }
         }
         SessionEvent::SubagentChild { .. } => {}
+        // Sidecar turns are surfaced by the sidecar workstream's own UX;
+        // headless output stays silent rather than inventing a rendering.
+        SessionEvent::SidecarStart { .. }
+        | SessionEvent::SidecarChild { .. }
+        | SessionEvent::SidecarTurn { .. } => {}
         SessionEvent::AutoPilot { phase, iteration } => {
             eprintln!("\n\x1b[35m\u{25c9} autopilot: {phase:?} (iteration {iteration})\x1b[0m");
         }

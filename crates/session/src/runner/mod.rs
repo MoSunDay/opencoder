@@ -26,6 +26,7 @@ mod execute;
 mod input_recovery;
 mod llm_call;
 mod registry;
+pub(crate) mod sidecar;
 mod steer;
 mod subagent;
 #[cfg(test)]
@@ -373,10 +374,6 @@ pub(crate) async fn run_loop(
             tool_failures.clear();
             bash_timeout_first = None;
         }
-
-        // Skill full-body injection: idempotent persistent `[skill loaded]`
-        // message so the model never burns a tool call reading the SKILL.md.
-        crate::skill_context::ensure_full_body_loaded(session).await;
 
         on_event(SessionEvent::LlmRoundStart {
             started_at_ms: now_ms(),

@@ -46,11 +46,11 @@ pub(super) fn run_handle(
         2,
         false,
         false,
+        false,
         &mut undo_state,
         &mut queue_scroll,
         &mut file_menu,
-        workdir,
-    )
+        workdir)
 }
 
 /// Like `run_handle` but with input disabled (subagent-focus view), used to
@@ -87,13 +87,13 @@ pub(super) fn run_handle_disabled(
         &mut skill_menu,
         80,
         2,
-        false,
         true,
+        false,
+        false,
         &mut undo_state,
         &mut queue_scroll,
         &mut file_menu,
-        workdir,
-    )
+        workdir)
 }
 
 /// Like `run_handle` but simulates a *focused running subagent*: input is
@@ -131,11 +131,11 @@ pub(super) fn run_handle_subagent(
         2,
         true,
         false,
+        false,
         &mut undo_state,
         &mut queue_scroll,
         &mut file_menu,
-        workdir,
-    )
+        workdir)
 }
 
 /// Like `run_handle` but exposes the skill-menu state so `$`-trigger and modal
@@ -172,11 +172,11 @@ pub(super) fn run_handle_menu(
         2,
         false,
         false,
+        false,
         &mut undo_state,
         &mut queue_scroll,
         &mut file_menu,
-        workdir,
-    )
+        workdir)
 }
 
 /// Full flow: a text recorded by `push_history` (what the Enter/Tab Steer and
@@ -217,11 +217,11 @@ fn up_arrow_recalls_recorded_steer_or_queue_text() {
         2,
         false,
         false,
+        false,
         &mut undo_state,
         &mut queue_scroll,
         &mut file_menu,
-        workdir,
-    );
+        workdir);
     assert!(matches!(action, KeyAction::None));
     assert_eq!(input, "steer while running");
     assert_eq!(cursor_idx, "steer while running".chars().count());
@@ -244,11 +244,11 @@ fn up_arrow_recalls_recorded_steer_or_queue_text() {
         2,
         false,
         false,
+        false,
         &mut undo_state,
         &mut queue_scroll,
         &mut file_menu,
-        workdir,
-    );
+        workdir);
     assert!(matches!(action, KeyAction::None));
     assert_eq!(input, "");
     assert_eq!(hist_idx, None);

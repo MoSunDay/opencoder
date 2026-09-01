@@ -53,7 +53,7 @@ fn push_user_records_history_and_echoes_transcript() {
     let mut chat = ChatView::default();
     let mut history: Vec<String> = Vec::new();
     let mut hist_idx: Option<usize> = None;
-    push_user(&mut chat, &mut history, &mut hist_idx, "hello world");
+    push_user(&mut chat, &mut history, &mut hist_idx, "hello world", "hello world");
     assert_eq!(history, vec!["hello world".to_string()]);
     assert_eq!(hist_idx, None);
     // push_user now creates a ChatBlock::User with markdown-rendered body.

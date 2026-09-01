@@ -106,6 +106,16 @@ pub fn builtin_agents() -> Vec<Agent> {
             ]),
         },
         Agent {
+            name: "sidecar".into(),
+            kind: AgentKind::Subagent,
+            mode: AgentMode::Subagent,
+            description: "Sidecar observer: a temporary bypass loop that answers questions about the main task's progress from a context snapshot. Read-only, makes no changes.".into(),
+            prompt: base_prompt_sidecar(),
+            tools: ToolFilter::Allow(vec![
+                "read".into(), "search".into(), "ls".into(),
+            ]),
+        },
+        Agent {
             name: "command".into(),
             kind: AgentKind::Command,
             mode: AgentMode::Primary,
@@ -158,6 +168,18 @@ pub fn strip_build_delegation(prompt: &str) -> String {
     prompt.replace(BUILD_DELEGATION_CLAUSE, "")
 }
 
+/// Single source of truth for whether the 'build' subagent must be absent
+/// from every model-facing surface (system prompt, tool schema, error
+/// copy): plan mode always (read-only contract), plus any mode while the
+/// task-plan skill is active (plan-only turns are not advertised
+/// implementation delegation). Prompt stripping (`base_prompt_plan`, the
+/// session's `build_system`, the CLI `--prompt-file` composer) and schema
+/// hiding (`hide_build_subagent`) must all derive from this predicate so
+/// the surfaces cannot drift.
+pub fn build_delegation_hidden(kind: AgentKind, task_plan_active: bool) -> bool {
+    kind == AgentKind::Plan || task_plan_active
+}
+
 pub fn base_prompt_plan() -> String {
     // Plan mode must not advertise the 'build' subagent: strip the build
     // delegation clause from the shared base prompt before appending the
@@ -180,6 +202,16 @@ pub fn base_prompt_build() -> String {
      inspect code, make edits, run bash commands, and verify your work. \
      Do not ask questions; infer reasonable defaults and proceed. \
      After finishing, briefly state what you changed and the key file paths."
+        .to_string()
+}
+
+pub fn base_prompt_sidecar() -> String {
+    "You are the sidecar observer of a main agent session: a temporary bypass loop that answers \
+     questions about the main task's progress, status, or plan. The user message carries a \
+     snapshot of the main session's conversation context as background - treat it as read-only \
+     reference material. You have read, search, and ls tools to check files when the snapshot is \
+     not enough. You CANNOT edit or write files and must never claim any change was made. \
+     Answer concisely and progress-oriented: what is done, what is in flight, what comes next."
         .to_string()
 }
 
@@ -257,13 +289,41 @@ mod tests {
             let a = resolve_agent(name).expect("primary agent registered");
             assert!(a.tools.allows("question"), "{name} must allow 'question'");
         }
-        for other in ["explore", "build", "command", "workflow"] {
+        for other in ["explore", "build", "sidecar", "command", "workflow"] {
             let a = resolve_agent(other).expect("agent registered");
             assert!(
                 !a.tools.allows("question"),
                 "{other} must not allow 'question'"
             );
         }
+    }
+
+    /// Pin down the `sidecar` observer's tool set: read-only inspection only
+    /// (read/search/ls), never mutating or delegation tools. The sidecar
+    /// answers questions about the main task from a context snapshot; it must
+    /// never be able to change state.
+    #[test]
+    fn sidecar_observer_is_read_only() {
+        let sidecar = resolve_agent("sidecar").expect("sidecar agent registered");
+        assert_eq!(sidecar.kind, AgentKind::Subagent);
+        assert_eq!(sidecar.mode, AgentMode::Subagent);
+        for allowed in &["read", "search", "ls"] {
+            assert!(
+                sidecar.tools.allows(allowed),
+                "sidecar must allow '{allowed}'"
+            );
+        }
+        for blocked in &["bash", "edit", "write", "task", "question"] {
+            assert!(
+                !sidecar.tools.allows(blocked),
+                "sidecar (read-only) must not allow '{blocked}'"
+            );
+        }
+        // The prompt states the observer contract: snapshot-in, progress-out,
+        // and no modification claims.
+        let prompt = sidecar.prompt;
+        assert!(prompt.contains("sidecar observer"), "got: {prompt}");
+        assert!(prompt.contains("CANNOT edit or write"), "got: {prompt}");
     }
 
     /// The plan prompt requires a focused plan without reviving the old rigid
@@ -349,5 +409,27 @@ mod tests {
                 "build (implementation) must not allow '{blocked}'"
             );
         }
+    }
+
+    /// The predicate every hide surface must derive from.
+    #[test]
+    fn build_delegation_hidden_matrix() {
+        assert!(build_delegation_hidden(AgentKind::Plan, false));
+        assert!(build_delegation_hidden(AgentKind::Plan, true));
+        assert!(!build_delegation_hidden(AgentKind::Act, false));
+        assert!(build_delegation_hidden(AgentKind::Act, true));
+        assert!(!build_delegation_hidden(AgentKind::Subagent, false));
+    }
+
+    /// The `--prompt-file` preamble is a strip target exactly like the
+    /// BASE_PROMPT: it must contain the clause (else stripping is a no-op
+    /// and the test below proves nothing) and lose every 'build' mention
+    /// after stripping.
+    #[test]
+    fn tool_preamble_build_clause_is_strip_target() {
+        assert!(tool_preamble().contains(BUILD_DELEGATION_CLAUSE));
+        let stripped = strip_build_delegation(tool_preamble());
+        assert!(!stripped.contains("'build'"));
+        assert!(stripped.contains("## Tools"));
     }
 }

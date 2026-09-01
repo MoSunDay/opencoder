@@ -36,7 +36,8 @@ pub(crate) fn handle_bash(
     history: &mut Vec<String>,
     hist_idx: &mut Option<usize>,
 ) {
-    crate::app_helpers::push_user(chat, history, hist_idx, &format!("!{cmd}"));
+    let echoed = format!("!{cmd}");
+    crate::app_helpers::push_user(chat, history, hist_idx, &echoed, &echoed);
     *bash_rx = Some(crate::bash_exec::spawn(cmd, workdir));
     chat.push_bash_tool(cmd);
 }

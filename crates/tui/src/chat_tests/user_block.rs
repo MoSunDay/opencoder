@@ -65,7 +65,7 @@ fn push_user_creates_user_block_with_markdown() {
     let mut chat = ChatView::default();
     let mut history: Vec<String> = Vec::new();
     let mut hist_idx: Option<usize> = None;
-    crate::app_helpers::push_user(&mut chat, &mut history, &mut hist_idx, "**bold** text");
+    crate::app_helpers::push_user(&mut chat, &mut history, &mut hist_idx, "**bold** text", "**bold** text");
 
     let user_blocks: Vec<_> = chat
         .blocks

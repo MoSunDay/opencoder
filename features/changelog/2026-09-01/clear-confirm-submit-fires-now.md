@@ -30,10 +30,20 @@ Commit: 71e7e1e (clear-confirm 倒计时内提交立即执行)
 | merge_typed 追加/取代/空白不动 arm | `merge_typed_appends_supersedes_and_ignores_blank` | `crates/tui/src/clear_confirm.rs` |
 | 倒计时内键入 + Enter 立即 fire 且复合尾部合并、composer 清空 | `enter_with_typed_text_fires_merged_rest_now` | `crates/tui/src/app_loop_dispatch_cmd_tests/act_clear.rs` |
 | 重键入 clear 命令取代 armed rest | `retyped_clear_command_supersedes_armed_rest` | `crates/tui/src/app_loop_dispatch_cmd_tests/act_clear.rs` |
+| BackTab-arm→Esc 回撤逐字节还原草稿（handle_key→arm→intercept 全链路） | `backtab_arm_then_esc_restores_the_raw_draft` | `crates/tui/src/key_handler_running_mode_tests.rs` |
+| BackTab arm 载荷 rest/draft 分离（raw 与 trimmed） | `backtab_in_plan_mode_arms_clear_context_confirm`（扩充） | `crates/tui/src/key_handler_running_mode_tests.rs` |
 
 - 既有测试不弱化：`intercept_enter_fires_and_leaves_arm_for_caller`（裸 Enter 仍提前 fire）、`esc_cancel_drops_countdown_chip`、`fired_guard_*` idle/running 双路径全部保留。
 - 全量回归：`cargo test --workspace` → 245 套件 / 3790 passed / 0 failed（TEST-EXIT=0；同轮曾出现 `tmux_bar::tests::hide_returns_none_outside_tmux` 并行环境竞态 flake——进程级 `TMUX` env 在 tmux 会话内被并行测试改写，solo 复跑 PASS，与本轮改动无关）
 - clippy：`cargo clippy --workspace --all-targets -- -D warnings` → 零警告（CLIPPY-EXIT=0）
+
+## 修复（评审缺口：Shift+Tab 入口 Esc 回撤丢草稿）
+
+评审实锤：BackTab arm 路径的 `ArmClearConfirm` 不携带回撤载荷，`restore_draft`
+恒为 `None`，Esc 回撤后草稿丢失，与本文档「Esc 回撤」语义相悖。已由
+`ArmClearConfirm { rest, draft }` 载荷补全修复——细节与测试清单统一收敛在
+[act-shift-tab-mode-aware-switch](act-shift-tab-mode-aware-switch.md)
+（模式感知 Shift+Tab 流的所有权文档）。
 
 ## Related Docs
 

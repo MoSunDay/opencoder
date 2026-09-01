@@ -213,10 +213,10 @@ async fn review_mode_runs_exactly_one_review_pass() {
 }
 
 /// mode=Review with a discoverable `review` skill: the review turn's request
-/// carries the skill via the in-conversation `[skill loaded]` message (the
-/// transient `[active skill]` tail is suppressed because the loaded marker is
-/// already present), and the skill is cleared once the pass finishes (it must
-/// not leak into the next user turn).
+/// carries the skill via the transient `[skill loaded]` payload message (the
+/// transient `[active skill]` tail stays silent because the body ships
+/// adjacent in the same payload), and the skill is cleared once the pass
+/// finishes (it must not leak into the next user turn).
 #[tokio::test]
 async fn review_mode_activates_then_clears_review_skill() {
     let home = tempfile::tempdir().unwrap();
@@ -247,16 +247,16 @@ async fn review_mode_activates_then_clears_review_skill() {
         !any_message_contains(&requests[0], "[active skill]"),
         "no skill may be active during the initial task"
     );
-    // The review turn carries the skill body as the `[skill loaded]` message
-    // (the `[active skill]` tail is fallback-only and stays off while the
-    // matching loaded marker is present in the transcript).
+    // The review turn carries the skill body as the transient `[skill
+    // loaded]` payload message (the `[active skill]` tail is fallback-only
+    // and stays off while the body ships adjacent in the same payload).
     assert!(
         any_message_contains(&requests[1], "[skill loaded]"),
         "the review skill must be active for the review turn"
     );
     assert!(
         !any_message_contains(&requests[1], "[active skill]"),
-        "tail must be suppressed while the loaded marker is present"
+        "tail must stay silent while the body message is present"
     );
     assert!(
         any_message_contains(&requests[1], &skill_md.to_string_lossy()),

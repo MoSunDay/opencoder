@@ -124,6 +124,9 @@ fn assert_line_accounting_matches(view: &ChatView) {
             ChatBlock::Subagent { .. } => {
                 expected += 1;
             }
+            ChatBlock::Sidecar { .. } => {
+                expected += 1; // header-only row, mirrors collect_headers
+            }
             ChatBlock::Plan { rendered, .. } => {
                 expected += 1 + rendered.len() + 1;
             }

@@ -264,13 +264,23 @@ pub fn context_meter(pct: u8) -> (String, Color) {
 }
 
 /// Agent chip foreground colour: warning colour in plan (read-only) mode,
-/// accent otherwise.
+/// accent otherwise. `sidecar` gets its own magenta hue so the focused
+/// sidecar chip is distinguishable from both act and plan.
 pub fn agent_chip_fg(agent: &str) -> Color {
     if agent == "plan" {
         warn_color()
+    } else if agent == "sidecar" {
+        sidecar_color()
     } else {
         accent()
     }
+}
+
+/// Sidecar accent hue (magenta): used by the `⇲ sidecar` block label and the
+/// `[sidecar]` mode chip while the sidecar box is focused. Distinct from the
+/// plan warn / act accent mapping so the three chips never collide.
+pub fn sidecar_color() -> Color {
+    Color::Magenta
 }
 
 /// Foreground of the parent status-bar mode dot + `[mode]` chip: the plain
@@ -422,6 +432,18 @@ mod tests {
         // The interlude `sandbox` spelling must no longer map to the plan hue.
         assert_eq!(agent_chip_fg("sandbox"), ACCENT);
         assert_eq!(agent_chip_fg(""), ACCENT);
+    }
+
+    #[test]
+    fn agent_chip_fg_sidecar_is_distinct_magenta() {
+        // The sidecar chip must be distinguishable from both act and plan,
+        // and must not leak into the plan_skill_active warn branch of
+        // `status_chip_fg` (that branch is act-only).
+        let sidecar = agent_chip_fg("sidecar");
+        assert_eq!(sidecar, sidecar_color());
+        assert_ne!(sidecar, agent_chip_fg("act"));
+        assert_ne!(sidecar, agent_chip_fg("plan"));
+        assert_eq!(status_chip_fg("sidecar", true), sidecar);
     }
 
     // -- status_chip_fg ----------------------------------------------------───────────

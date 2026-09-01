@@ -36,12 +36,15 @@ pub fn registry() -> HashMap<String, ToolArc> {
 }
 
 /// Whether the `build` subagent must be hidden from every prompt surface:
-/// **sandbox mode** always (read-only contract), plus any agent while the
+/// **plan mode** always (read-only contract; the kind was serialized as
+/// `sandbox` during the sandbox-mode interlude), plus any agent while the
 /// **task-plan skill** is active (plan-only turns are not advertised
-/// implementation delegation). Shared by the runner's schema build, the
-/// system prompt, and the token estimator so all three surfaces agree.
+/// implementation delegation). Thin projection of
+/// [`opencoder_core::build_delegation_hidden`]; shared by the runner's
+/// schema build, the system prompt, and the token estimator so all
+/// surfaces agree.
 pub fn hide_build_subagent(kind: AgentKind, skill_body: Option<&str>) -> bool {
-    kind == AgentKind::Plan || latent::task_plan_active(skill_body)
+    opencoder_core::build_delegation_hidden(kind, latent::task_plan_active(skill_body))
 }
 
 /// Project a (filtered) tool map into OpenAI function-calling JSON, applying the

@@ -185,8 +185,9 @@ async fn skill_activation_never_creates_session_row() {
         MockChatClient::new()
             .push_script(vec![done_turn("kickoff")])
             .push_script(vec![done_turn("work reply")]),
-    ) as Arc<dyn ChatStream>;
-    let mut session = mk_session("act", mock, store.clone());
+    );
+    let client: Arc<dyn ChatStream> = mock.clone();
+    let mut session = mk_session("act", client, store.clone());
 
     store.admit_input(&mk_queue_input("$review do the work")).await.unwrap();
 
@@ -195,13 +196,17 @@ async fn skill_activation_never_creates_session_row() {
 
     run(&mut session, "kickoff".into(), |_| {}).await.unwrap();
 
-    // Non-vacuous: the skill body was injected during the run.
+    // Non-vacuous: the skill rode the payload as the transient `[skill
+    // loaded]` message (the queued `$review` resolves at the idle-boundary
+    // drain, so the follow-up turn is the one that carries it).
     assert!(
-        session
+        mock.requests().iter().any(|req| req
             .messages
             .iter()
-            .any(|m| m.text().starts_with("[skill loaded] ")),
-        "skill was active during the run"
+            .filter(|m| m.get("role").and_then(|r| r.as_str()) == Some("user"))
+            .filter_map(|m| m.get("content").and_then(|c| c.as_str()))
+            .any(|t| t.starts_with("[skill loaded] "))),
+        "skill was active during the run (body in the payload)"
     );
     assert_no_new_row(&spy, &store, &before_ids, before_creates, "$skill").await;
 }

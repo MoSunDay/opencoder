@@ -8,9 +8,9 @@
 //! `[active skill]` reminder (and no latent-tool unlock); only after the
 //! drain consumes the item does `record_compound` resolve + activate +
 //! persist the skill, so the drained turn ships the skill body as the
-//! `[skill loaded]` message (the transient `[active skill]` tail is
-//! fallback-only and stays suppressed while that marker is on record) and
-//! the recorded user message is token-stripped.
+//! transient `[skill loaded]` payload message (the transient `[active
+//! skill]` tail is fallback-only and stays silent while the body ships
+//! adjacent) and the recorded user message is token-stripped.
 use std::sync::Arc;
 
 use opencoder_core::{resolve_agent, Config};
@@ -185,8 +185,9 @@ async fn queued_skill_fires_at_consumption_not_during_kickoff() {
     );
 
     // The drained turn resolves the skill at consumption: the body ships
-    // as the `[skill loaded]` message naming the source file, and the
-    // `[active skill]` tail stays suppressed while that marker is present.
+    // as the transient `[skill loaded]` payload message naming the source
+    // file, and the `[active skill]` tail stays silent while the body
+    // rides adjacent in the same payload.
     let drained = &requests[1];
     assert!(
         !system_content(drained).contains("haiku"),
@@ -205,7 +206,7 @@ async fn queued_skill_fires_at_consumption_not_during_kickoff() {
     );
     assert!(
         !last_user.contains("[active skill]"),
-        "tail must be suppressed while the loaded marker is present: {last_user}"
+        "tail must stay silent while the body message is present: {last_user}"
     );
 
     // The recorded user message is the clean text; the token never reaches

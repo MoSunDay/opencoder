@@ -55,11 +55,11 @@ impl Ctx {
             2,
             false,
             false,
+            false,
             &mut self.undo_state,
             &mut self.queue_scroll,
             &mut self.file_menu,
-            &self.workdir,
-        )
+            &self.workdir)
     }
 }
 

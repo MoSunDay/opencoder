@@ -9,15 +9,19 @@
 //! build-subagent stripping, latent `question` unlock intact) and the next
 //! normal completion clears it.
 //!
-//! Within the run the skill behaves exactly as before: the body is injected
-//! into the persistent transcript once (`skill_context::ensure_full_body_loaded`,
-//! guarded by the `[skill loaded]` marker scan) and every LLM round carries
-//! the transient `[active skill]` tail reminder. When the run ends — Done,
-//! Error, or cancel — [`clear_on_run_end`] wipes the skill from memory
+//! Within the run the skill behaves exactly as before: the full body rides
+//! as a TRANSIENT per-call payload message (`skill_context::
+//! transient_body_message`, a `[skill loaded] <path>` marker block + body,
+//! appended after the transcript by `runner/llm_call.rs`) only for the LLM
+//! rounds of the run that armed it — never recorded to the transcript or
+//! store — and every such round also carries the `[active skill]` tail
+//! reminder when no body could ship. When the run ends — Done, Error, or
+//! cancel — [`clear_on_run_end`] wipes the skill from memory
 //! (`skill_prompt` + `active_skill_names`) and best-effort from the store
 //! (`SessionPatch { clear_skill: true }`), so subsequent runs start
-//! skill-less: a second plain submit carries no reminder and unlocks no
-//! latent tools.
+//! skill-less: since the body was never persisted, run end stops its
+//! submission entirely (there is nothing to remove), a second plain submit
+//! carries no reminder and unlocks no latent tools.
 //!
 //! Why clear durably too: `resume` restores `skill_prompt` from the
 //! `sessions.skill` column, so leaving the row set would resurrect the skill

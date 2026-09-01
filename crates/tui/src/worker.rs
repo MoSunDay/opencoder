@@ -146,7 +146,8 @@ pub fn gate_clear_all(running: bool) -> ClearAllGate {
 }
 
 /// Gate for control-command dispatch (`/act`, `/plan`,
-/// `/act_clear_context` — and Shift+Tab, which arms its countdown guard).
+/// `/act_clear_context` — and Shift+Tab, which arms the countdown guard from
+/// plan mode and switches straight back to plan from act mode).
 /// Busy (`running` or a live subagent — callers precompute
 /// `running || subagents_running > 0`) means the worker is mid-`run_session`;
 /// starting a control-command turn then would race the in-flight turn at an
@@ -234,8 +235,20 @@ fn send_completed_assistant(
 /// clients can replay sessions driven by the TUI. Awaited (not fire-and-
 /// forget) so the event is durable before the worker proceeds — no loss on
 /// immediate exit. Used by non-run arms where no flusher
-/// is active.
-async fn persist_event(store: &Option<Arc<dyn Store>>, session_id: &str, sev: &SessionEvent) {
+/// is active. `pub(crate)` so the sidecar actor (`sidecar_ui`) reuses the
+/// exact same persistence shape for the bare `LlmUsage` records it forwards.
+pub(crate) async fn persist_event(
+    store: &Option<Arc<dyn Store>>,
+    session_id: &str,
+    sev: &SessionEvent,
+) {
+    // Sidecar frames are display-only: the sidecar conversation has no
+    // session/message rows and its content must never land in the main
+    // session's event log. Its cost is accounted to the main task through
+    // the *bare* `LlmUsage` events the child forwards, which DO persist.
+    if sev.is_sidecar_frame() {
+        return;
+    }
     if let Some(store) = store {
         let rec = SessionEventRecord {
             session_id: session_id.to_string(),
@@ -498,5 +511,7 @@ pub async fn process_cmd(
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
-#[cfg(test)]
 mod tests_reload;
+#[cfg(test)]
+#[path = "worker/tests_sidecar.rs"]
+mod tests_sidecar;

@@ -1,7 +1,7 @@
 use anyhow::Result;
 use crossterm::event::Event;
 use opencoder_core::Config;
-use opencoder_llm::{estimate, ChatStream};
+use opencoder_llm::ChatStream;
 use opencoder_session::SessionState;
 use opencoder_store::Store;
 use std::path::PathBuf;
@@ -19,7 +19,7 @@ use crate::menu::SkillMenu;
 use crate::model_menu::ModelMenu;
 use crate::queue_admitter;
 use crate::render::{MouseHits, Term};
-use crate::skill_persist::{act_plan_highlight, initial_skill_state, resolve_persist};
+use crate::skill_persist::{act_plan_highlight, initial_skill_state};
 use crate::task::{handle_task_key, TaskOutcome, TaskPicker};
 use crate::terminal::consume_modifier_or_release;
 use crate::worker::{process_cmd, UiCmd, UiEvent};
@@ -32,6 +32,8 @@ mod app_display;
 pub(crate) mod app_loop;
 #[path = "app_notepad.rs"]
 mod app_notepad;
+#[path = "app_submit.rs"]
+mod app_submit;
 #[path = "app_task.rs"]
 mod app_task;
 #[path = "steer_dispatch.rs"]
@@ -139,6 +141,13 @@ pub(super) async fn run_app(
         std::collections::HashMap::new();
     let (mut cmd_tx, mut cmd_rx) = mpsc::channel::<UiCmd>(64);
     let (evt_tx, mut evt_rx) = mpsc::channel::<UiEvent>(crate::worker::UI_EVENT_CAPACITY);
+
+    // Sidecar actor for THIS session — spawned before the worker task takes
+    // ownership of `evt_tx`/`session` (the actor clones what it needs from
+    // them). Reassigned by `app_task::switch_session` on every `/task` swap;
+    // dropping the old sender lets the old actor drain and exit.
+    let mut sidecar_ask =
+        crate::sidecar_ui::spawn_actor(&session, evt_tx.clone(), Some(Arc::clone(&store)));
 
     let worker = tokio::spawn(async move {
         let mut sess = session;
@@ -341,6 +350,7 @@ pub(super) async fn run_app(
                                         &mut child_runtime,
                                         &mut skill_handle,
                                         &mut question_hub,
+                                        &mut sidecar_ask,
                                     )
                                     .await?;
                                 }
@@ -476,6 +486,7 @@ pub(super) async fn run_app(
                                 .unwrap_or(78),
                             2,
                             subagent_focus.is_some(),
+                            chat.sidecar_focus,
                             input_disabled,
                             &mut undo_state,
                             &mut queue_scroll,
@@ -483,94 +494,24 @@ pub(super) async fn run_app(
                             &workdir,
                         ) {
                             KeyAction::Submit(text) => {
-                                if running {
-                                    // Submit while running is unreachable (Enter/Tab map to
-                                    // Steer/Queue when running) — no bare slash command can
-                                    // land here.
-                                    // Deferred: the raw text (tokens included) queues verbatim;
-                                    // the runner's record_compound resolves/activates/
-                                    // persists the skill at the idle boundary — never now,
-                                    // or it would fire inside the running turn.
-                                    queue_admitter::handle_queue(
-                                        &text, &admit_tx, &mut admit_st, &mut queue_items,
-                                        &mut pending_images, &session_id,
-                                    );
-                                    push_history(&mut history, &mut hist_idx, &text);
-                                    continue;
-                                }
-                                // Idle submit: the turn starts now, so eager skill
-                                // activation (and persistence) is the correct timing.
-                                let (clean, _unresolved) = resolve_persist(
-                                    &text, &mut active_skill, &mut active_skill_body,
-                                    &mut sys_tokens, &agent_name, &workdir, &skill_handle, &mut chat,
-                                    &store, &session_id,
-                                ).await;
-                                plan_skill_active = act_plan_highlight(active_skill.as_deref());
-                                let clean = clean.trim().to_string();
-                                let clean = crate::control_helpers::forward_skill_if_compound(&text, &clean);
-                                // Clear-context arm (both spellings, compound included):
-                                // countdown guard — unlike command::parse this keeps
-                                // the compound tail (previously leaked verbatim).
-                                if crate::clear_confirm::maybe_arm(&mut clear_confirm, &mut chat, &mut mode_flash, anim_tick, &clean, Some(clean.clone())) {
-                                    dirty = true;
-                                    continue;
-                                }
-                                // Intercept /annotation: open the editor instead of submitting
-                                if let Some(action) = crate::command::parse(&clean) {
-                                    // Unified slash-command dispatch: route recognized `/cmd`
-                                    // through the same handler as the `/` popup picker.
-                                    let f = app_loop::dispatch_slash_action(
-                                        action, &cmd_tx, &mut cancel, &mut chat,
-                                        &mut running, &mut follow, &store,
-                                        &session_id, &mut task_picker, &mut model_menu, &mut mcp_menu, &mut envs_menu, &mut cli_menu, &mut skill_toggle_menu,
-                                        &mut ap_menu, &mut cache_salt_menu, &agent_name,
-                                        &mut config, &workdir,
-                                        &mut mode_flash, anim_tick, &mut sys_tokens,
-                                        &mut plan_edit, &mut notepad, &mut clear_confirm,
-                                    )
-                                    .await;
-                                    match f {
-                                        app_loop::LoopFlow::Quit => break,
-                                        _ => push_history(&mut history, &mut hist_idx, &text),
-                                    }
-                                } else if clean.is_empty() {
-                                    if active_skill.is_some() {
-                                        if !text.is_empty() {
-                                            push_user(&mut chat, &mut history, &mut hist_idx, &text);
-                                        }
-                                        // Skill-only submit: send a trigger prompt naming the active skill so
-                                        // the model records a user turn and acts on the injected skill body.
-                                        let skill_name = active_skill.as_deref().unwrap_or("");
-                                        let trigger = skill_trigger(skill_name);
-                                        let image_uris = snapshot_image_uris(&pending_images);
-                                        if !start_turn(&cmd_tx, &mut cancel, UiCmd::Prompt(trigger, image_uris)).await
-                                        {
-                                            worker_dead(&mut chat);
-                                            break;
-                                        }
-                                        pending_images.clear();
-                                        task_elapsed_ms = 0;
-                                        running = true;
-                                        follow = true;
-                                        chat.begin_turn();
-                                        body_refresh_pending = true;
-                                    }
-                                } else {
-                                    push_user(&mut chat, &mut history, &mut hist_idx, &text);
-                                    chat.context_used += estimate(&clean) as u64;
-                                    let image_uris = snapshot_image_uris(&pending_images);
-                                    if !start_turn(&cmd_tx, &mut cancel, UiCmd::Prompt(clean, image_uris)).await
-                                    {
-                                        worker_dead(&mut chat);
-                                        break;
-                                    }
-                                    pending_images.clear();
-                                    task_elapsed_ms = 0;
-                                    cancelled = false;
-                                    running = true;
-                                    follow = true;
-                                    chat.begin_turn();
-                                    body_refresh_pending = true;
+                                if app_submit::handle_submit_action(
+                                    text, &mut running, &admit_tx, &mut admit_st,
+                                    &mut queue_items, &mut pending_images, &session_id,
+                                    &mut history, &mut hist_idx, &mut active_skill,
+                                    &mut active_skill_body, &mut sys_tokens, &agent_name,
+                                    &workdir, &skill_handle, &mut chat, &store,
+                                    &mut plan_skill_active, &mut clear_confirm, &mut mode_flash,
+                                    anim_tick, &mut plan_edit, &mut notepad, &mut task_picker,
+                                    &mut model_menu, &mut mcp_menu, &mut envs_menu,
+                                    &mut cli_menu, &mut skill_toggle_menu, &mut ap_menu,
+                                    &mut cache_salt_menu, &mut config, &cmd_tx, &mut cancel,
+                                    &mut task_elapsed_ms, &mut cancelled, &mut follow,
+                                    &mut body_refresh_pending,
+                                )
+                                .await
+                                    == app_loop::LoopFlow::Quit
+                                {
+                                    break;
                                 }
                             }
                             KeyAction::SubagentSteer(text) => {
@@ -628,6 +569,35 @@ pub(super) async fn run_app(
                             }
                             KeyAction::ModeSwitchBlocked => {
                                 mode_flash = Some(mode_switch_busy_flash(anim_tick));
+                            }
+                            KeyAction::SidecarAsk(question) => {
+                                if question.is_empty() {
+                                    // Bare `/sidecar`: re-focus an existing sidecar
+                                    // box, or nudge the user toward the real form.
+                                    if chat.blocks.iter().any(|b| {
+                                        matches!(b, crate::chat::ChatBlock::Sidecar { .. })
+                                    }) {
+                                        chat.sidecar_focus = true;
+                                        mode_flash =
+                                            Some((crate::sidecar_ui::SIDECAR_FOCUSED_FLASH.to_string(), anim_tick));
+                                    } else {
+                                        mode_flash =
+                                            Some((crate::sidecar_ui::SIDECAR_HINT_FLASH.to_string(), anim_tick));
+                                    }
+                                } else {
+                                    // Fire-and-forget into the sidecar actor: never
+                                    // blocks the UI loop, never touches steer/queue.
+                                    match sidecar_ask.try_send(question) {
+                                        Ok(()) => {
+                                            chat.sidecar_focus = true;
+                                            follow = true;
+                                        }
+                                        Err(_) => {
+                                            mode_flash =
+                                                Some((crate::sidecar_ui::SIDECAR_BUSY_FLASH.to_string(), anim_tick));
+                                        }
+                                    }
+                                }
                             }
                             KeyAction::SwitchAgent(name) => {
                                 let mode = app_loop::ModeSwitch::for_agent(&name);
@@ -782,10 +752,9 @@ pub(super) async fn run_app(
 }
 pub(crate) use crate::app_helpers::{
     apply_force_redraw, handle_mouse, initial_chat_view, mode_switch_busy_flash, on_resize_event,
-    poll_idle_resize, pre_key_intercept, push_history, push_user, queue_unsupported_flash,
-    snapshot_image_uris, start_turn, worker_dead, MouseOutcome,
+    poll_idle_resize, pre_key_intercept, push_history, queue_unsupported_flash, worker_dead,
+    MouseOutcome,
 };
-pub(crate) use crate::skill_display::skill_trigger;
 #[cfg(test)]
 #[path = "app_tests/mod.rs"]
 mod tests;

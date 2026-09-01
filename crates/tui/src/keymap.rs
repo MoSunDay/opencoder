@@ -107,7 +107,7 @@ fn normalize(mods: KeyModifiers, code: KeyCode) -> (KeyModifiers, KeyCode) {
     }
 }
 
-/// Parse a key-spec string like `"ctrl+h"`, `"alt+tab"`, `"ctrl+shift+tab"`
+/// Parse a key-spec string like `"ctrl+h"`, `"alt+tab"`, `"ctrl+t"`
 /// into a `KeyCombo`. Returns `None` on unparseable input.
 pub(crate) fn parse_key_spec(spec: &str) -> Option<KeyCombo> {
     let spec = spec.trim().to_lowercase();

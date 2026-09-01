@@ -49,8 +49,10 @@ pub(crate) enum KeyAction {
     /// of firing outright — the plan is preserved and handed to act. (Shift+Tab
     /// in act mode is the non-destructive way back: SwitchAgent("plan").)
     /// The guard keeps that boundary visible and lets Esc 回撤 before it lands.
-    /// `rest` is the swallowed composer draft forwarded as the compound tail.
-    ArmClearConfirm { rest: Option<String> },
+    /// `rest` is the swallowed composer draft forwarded as the compound tail;
+    /// `draft` is the same raw (untrimmed) text kept for the guard's Esc 回撤
+    /// to put back into the composer verbatim.
+    ArmClearConfirm { rest: Option<String>, draft: Option<String> },
     /// Enter the plan-text editor (Shift+I in plan mode when idle).
     EnterPlanEdit,
     /// Activate a skill picked from the `$` menu, or clear the active skill
@@ -338,14 +340,17 @@ pub(crate) fn handle_key(
                 return KeyAction::SwitchAgent("plan".into());
             }
             // Arm the clear-context countdown. The draft is forwarded as the
-            // compound rest; it is cleared from the composer now.
+            // compound rest; it is cleared from the composer now. The raw text
+            // rides along as `draft` so the guard's Esc (回撤) puts it back
+            // verbatim — arming must lose nothing.
+            let draft = (!input.is_empty()).then(|| input.clone());
             let rest = input.trim().to_string();
             let rest = (!rest.is_empty()).then_some(rest);
             input.clear();
             *cursor_idx = 0;
             *hist_idx = None;
             crate::undo::reset(undo_state, input, *cursor_idx);
-            KeyAction::ArmClearConfirm { rest }
+            KeyAction::ArmClearConfirm { rest, draft }
         }
         KeyCode::Esc => {
             // Double-Esc within the window while running => hard-abort.

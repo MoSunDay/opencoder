@@ -14,6 +14,8 @@ fn route_paste_into_main_composer_inserts_verbatim_text() {
     let mut chat = ChatView::default();
     let flow = route_paste(
         "plain text",
+        &mut None,
+        &mut None,
         false,
         false,
         false,
@@ -48,6 +50,8 @@ fn route_paste_swallowed_when_task_picker_open() {
     let mut chat = ChatView::default();
     let flow = route_paste(
         "plain text",
+        &mut None,
+        &mut None,
         true,
         false,
         false,
@@ -82,6 +86,8 @@ fn route_paste_swallowed_when_cache_salt_menu_open() {
     let mut chat = ChatView::default();
     let flow = route_paste(
         "plain text",
+        &mut None,
+        &mut None,
         false,
         true,
         false,
@@ -118,6 +124,8 @@ fn paste(
     let mut cm: Option<CommandMenu> = None;
     route_paste(
         pasted,
+        &mut None,
+        &mut None,
         false,
         false,
         false,
@@ -557,4 +565,124 @@ fn paste_quoted_file_path_emits_attach_marker() {
         "expected a clip marker, got: {:?}",
         markers
     );
+}
+
+/// An open annotation editor owns the paste verbatim: the payload is
+/// inserted literally into the vim buffer and never reaches the composer
+/// hidden underneath (the old fall-through corrupted `input` instead).
+#[test]
+fn route_paste_feeds_open_annotation_editor_verbatim() {
+    let mut pe = Some(crate::plan_edit::PlanEdit::new_annotation("seed".into()));
+    // Move the cursor to the end of the seed line ('A' appends at EOL).
+    let _ = crate::plan_edit::handle_plan_edit_key(
+        pe.as_mut().unwrap(),
+        crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Char('A'),
+            crossterm::event::KeyModifiers::NONE,
+        ),
+        80,
+        2,
+    );
+    let mut model_menu: Option<ModelMenu> = None;
+    let mut command_menu: Option<CommandMenu> = None;
+    let mut input = String::new();
+    let mut idx = 0usize;
+    let mut pending_images: Vec<(String, String)> = Vec::new();
+    let mut asm = crate::image_chunk::Assembly::new();
+    let mut chat = ChatView::default();
+    let flow = route_paste(
+        "\ntail",
+        &mut pe,
+        &mut None,
+        false,
+        false,
+        false,
+        false,
+        &mut model_menu,
+        &mut None,
+        &mut None,
+        &mut None,
+        &mut command_menu,
+        &mut None,
+        &mut input,
+        &mut idx,
+        &mut pending_images,
+        &mut asm,
+        &mut chat,
+        Path::new("."),
+    );
+    assert!(matches!(flow, LoopFlow::Redraw));
+    assert_eq!(pe.as_ref().unwrap().text(), "seed\ntail");
+    assert!(pe.as_ref().unwrap().is_modified());
+    assert!(input.is_empty(), "composer must not receive the payload");
+    assert_eq!(idx, 0);
+}
+
+/// The notepad owns every paste: with editor focus the payload lands in the
+/// vim buffer, with tree focus it is swallowed wholesale — the composer
+/// never sees it either way.
+#[test]
+fn route_paste_swallowed_by_notepad() {
+    let mut model_menu: Option<ModelMenu> = None;
+    let mut command_menu: Option<CommandMenu> = None;
+    let mut input = String::new();
+    let mut idx = 0usize;
+    let mut pending_images: Vec<(String, String)> = Vec::new();
+    let mut asm = crate::image_chunk::Assembly::new();
+    let mut chat = ChatView::default();
+
+    // Editor focus: the payload is inserted into the notepad vim buffer.
+    let mut view = Some(crate::notepad::NotepadView::new(std::env::temp_dir()));
+    view.as_mut().unwrap().focus = crate::notepad::Focus::Editor;
+    let flow = route_paste(
+        "np body",
+        &mut None,
+        &mut view,
+        false,
+        false,
+        false,
+        false,
+        &mut model_menu,
+        &mut None,
+        &mut None,
+        &mut None,
+        &mut command_menu,
+        &mut None,
+        &mut input,
+        &mut idx,
+        &mut pending_images,
+        &mut asm,
+        &mut chat,
+        Path::new("."),
+    );
+    assert!(matches!(flow, LoopFlow::Redraw));
+    assert!(view.as_ref().unwrap().editor.vim.text.contains("np body"));
+    assert!(input.is_empty());
+
+    // Tree focus (the default): swallowed, editor text untouched.
+    let mut view = Some(crate::notepad::NotepadView::new(std::env::temp_dir()));
+    let flow = route_paste(
+        "np body",
+        &mut None,
+        &mut view,
+        false,
+        false,
+        false,
+        false,
+        &mut model_menu,
+        &mut None,
+        &mut None,
+        &mut None,
+        &mut command_menu,
+        &mut None,
+        &mut input,
+        &mut idx,
+        &mut pending_images,
+        &mut asm,
+        &mut chat,
+        Path::new("."),
+    );
+    assert!(matches!(flow, LoopFlow::Redraw));
+    assert!(view.as_ref().unwrap().editor.vim.text.is_empty());
+    assert!(input.is_empty());
 }

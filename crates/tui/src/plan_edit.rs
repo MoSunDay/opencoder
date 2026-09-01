@@ -76,6 +76,12 @@ impl PlanEdit {
         self.vim.is_modified()
     }
 
+    /// Insert a terminal paste as literal text at the cursor (any editor
+    /// mode). Marks the buffer modified so the caller persists on `:wq`.
+    pub fn paste(&mut self, payload: &str) {
+        let _ = vim::paste_terminal(&mut self.vim, payload);
+    }
+
     /// Label for the editor border. Includes the in-progress command/search
     /// input when in those modes (e.g. `:wq` or `/foo`).
     pub fn mode_label(&self) -> String {
@@ -274,6 +280,16 @@ mod tests {
         assert_eq!(pe.kind(), EditKind::Annotation);
         assert_eq!(pe.title(), "edit annotation");
         assert!(!pe.is_modified());
+    }
+
+    #[test]
+    fn paste_inserts_verbatim_and_marks_modified() {
+        let mut pe = PlanEdit::new_annotation("seed".into());
+        // 'A' moves the cursor to the end of the seed line before pasting.
+        handle_plan_edit_key(&mut pe, key('A'), W, 2);
+        pe.paste("\nrest");
+        assert!(pe.is_modified());
+        assert_eq!(pe.text(), "seed\nrest");
     }
 
     #[test]

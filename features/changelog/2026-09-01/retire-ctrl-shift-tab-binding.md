@@ -38,7 +38,16 @@ Commit: (working-tree)
 
 ## 全量回归
 
-- `cargo test --workspace` → @REGRESSION@（收敛树上采集）
+- 提交快照隔离验证（commit 86ad027，独立 worktree）：`cargo test -p opencoder-tui --lib`
+  → 1509 passed / 0 failed；`cargo test -p opencoder-core --lib` → 195 passed / 0 failed
+  （含上表全部具名测试）。
+- 收敛工作树六 crate（core/llm/store/session/shellguard/tui）
+  `cargo test --no-fail-fast` → 3378 passed / 6 failed；逐 crate 复验 lib 单测后
+  仅余 sidecar 在途特性 1 例（`focused_sidecar_turn_with_running_parent_still_asks`，
+  非本轮改动面），其余全绿。
+- cli/web/node/todos 正被并行轮次改写（sidecar / prompt-file / task-plan），
+  构建间歇红；全 workspace 0-failed 由对应轮收敛后补跑。本轮验收口径 =
+  提交快照隔离验证 + 六 crate 回归。
 
 ## Related Docs
 

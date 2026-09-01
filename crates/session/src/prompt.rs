@@ -8,13 +8,17 @@ pub fn build_system(
     mcp_block: Option<&str>,
     skill_body: Option<&str>,
 ) -> Message {
-    // While the task-plan skill is active the prompt must not advertise the
-    // 'build' (implementation) subagent: plan-only turns are not driven
-    // toward implementation delegation. Same mechanism as sandbox mode,
-    // whose agent prompt is pre-stripped (making this replace a no-op
-    // there). Every other prompt passes through unchanged.
+    // Mirror `hide_build_subagent` through the shared core predicate: plan
+    // mode must never see the 'build' (implementation) delegation whatever
+    // prompt it carries (custom `--prompt-file` prompts included), and any
+    // mode strips while the task-plan skill drives plan-only turns. For the
+    // built-in plan prompt this replace is a no-op (stripped at
+    // construction); every other prompt passes through unchanged.
     let mut text = agent.prompt.clone();
-    if crate::tools::latent::task_plan_active(skill_body) {
+    if opencoder_core::build_delegation_hidden(
+        agent.kind,
+        crate::tools::latent::task_plan_active(skill_body),
+    ) {
         text = opencoder_core::strip_build_delegation(&text);
     }
 
@@ -314,7 +318,9 @@ pub fn _ts() -> i64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{cap_instructions, mcp_section, truncate_bytes, AGENTS_MD_MAX_BYTES};
+    use std::path::Path;
+
+    use super::{build_system, cap_instructions, mcp_section, truncate_bytes, AGENTS_MD_MAX_BYTES};
     use crate::mcp::ConnStatus;
 
     #[test]
@@ -397,5 +403,25 @@ mod tests {
                 AGENTS_MD_MAX_BYTES / 1024
             )
         );
+    }
+
+    #[test]
+    fn build_system_strips_build_clause_for_plan_custom_prompt() {
+        // A `--prompt-file` prompt carries the standard tool preamble, which
+        // advertises the build delegation. The plan kind must never surface
+        // it, whatever prompt is stored on the agent.
+        let mut agent = opencoder_core::resolve_agent("plan").expect("plan agent registered");
+        agent.prompt = format!("Custom role prompt.\n\n{}", opencoder_core::tool_preamble());
+        let msg = build_system(&agent, Path::new("."), None, None);
+        assert!(!msg.text().contains(opencoder_core::BUILD_DELEGATION_CLAUSE));
+        assert!(msg.text().contains("Custom role prompt."));
+    }
+
+    #[test]
+    fn build_system_keeps_preamble_for_act_custom_prompt() {
+        let mut agent = opencoder_core::resolve_agent("act").expect("act agent registered");
+        agent.prompt = format!("Custom role prompt.\n\n{}", opencoder_core::tool_preamble());
+        let msg = build_system(&agent, Path::new("."), None, None);
+        assert!(msg.text().contains(opencoder_core::BUILD_DELEGATION_CLAUSE));
     }
 }

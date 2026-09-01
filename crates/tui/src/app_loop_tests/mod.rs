@@ -25,6 +25,7 @@ mod done_error_mirror_tests;
 mod plan_chip_consume_tests;
 
 mod display_title_tests;
+mod sidecar_display_tests;
 mod tok_cost_idle_refresh_tests;
 
 #[cfg(test)]

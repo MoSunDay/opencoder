@@ -88,6 +88,25 @@ pub enum ChatBlock {
         started_at_ms: i64,
         elapsed_ms: Option<u64>,
     },
+    /// Sidecar Q/A block (`/sidecar <question>`): one block per sidecar
+    /// conversation, folding every follow-up turn into the same nested
+    /// `view`. Display-only — sidecar frames are never persisted; the
+    /// conversation's cost reaches the durable layer via bare `LlmUsage`.
+    /// Mirrors `Subagent`'s nested-ChatView shape without the task/registry
+    /// semantics: header-only flattening, body visible only while focused
+    /// (see `compute_display`'s view swap).
+    Sidecar {
+        id: String,
+        question: String,
+        view: ChatView,
+        done: bool,
+        ok: bool,
+        answer: Option<String>,
+        total_tokens: u64,
+        rounds: u32,
+        started_at_ms: i64,
+        elapsed_ms: u64,
+    },
     /// Read-only context card. Rendered on replay from the persisted
     /// `handoff_plan` meta (plan text, or a clear-context seed's preserved
     /// reply). `raw` holds the original markdown source so the plan editor
@@ -168,6 +187,12 @@ pub struct ChatView {
     /// First non-empty, non-slash user prompt — used to prefill the
     /// annotation editor when no explicit annotation has been saved.
     pub first_prompt: Option<String>,
+    /// Whether the sidecar interaction box is focused (body swapped for the
+    /// sidecar block's nested view, mode chip reads `sidecar`). Mutually
+    /// exclusive with a subagent focus: sidecar Enter routes to the sidecar
+    /// actor, never to the parent's steer/queue paths. Display-only state —
+    /// never persisted, cleared on `/task` switches.
+    pub sidecar_focus: bool,
 }
 
 /// Locates a `Thinking` block's header line for mouse hit-testing.

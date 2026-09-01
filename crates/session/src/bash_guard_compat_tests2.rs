@@ -5,7 +5,9 @@
 //!
 //! Same row format and divergence classes as `bash_guard_compat_tests.rs`.
 
-use super::{classify, classify_with_dir, cmd_base, strip_leading_sudo, strip_wrappers, BashVerdict};
+use super::{
+    classify, classify_with_dir, cmd_base, strip_leading_sudo, strip_wrappers, BashVerdict,
+};
 
 /// Expected verdict for a compat row.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,9 +45,9 @@ fn run_rows(rows: &[Row]) {
                     "blocked row `{cmd}` must carry a non-empty reason"
                 );
             }
-            (expect, verdict) => panic!(
-                "compat divergence for `{cmd}`: expected {expect:?}, got {verdict:?}"
-            ),
+            (expect, verdict) => {
+                panic!("compat divergence for `{cmd}`: expected {expect:?}, got {verdict:?}")
+            }
         }
     }
 }
@@ -77,15 +79,18 @@ fn compat_mutating_rows_stay_blocked() {
         blocked("pip install requests"), // blocked (unknown command) — over-block
         blocked("npm install express"),
         blocked("cargo install ripgrep"), // blocked (unknown command) — over-block
-        blocked("brew install htop"), // blocked (unknown command) — over-block
-        blocked("sudo rm file"), // blocked (unknown command) — over-block
-        blocked("sudo git push"), // blocked (unknown command) — over-block
+        blocked("brew install htop"),     // blocked (unknown command) — over-block
+        blocked("sudo rm file"),          // blocked (unknown command) — over-block
+        blocked("sudo git push"),         // blocked (unknown command) — over-block
     ]);
 }
 
 #[test]
 fn compat_inplace_editors_stay_blocked() {
-    run_rows(&[blocked("sed -i 's/a/b/' file"), blocked("perl -pe 's/a/b/'")]);
+    run_rows(&[
+        blocked("sed -i 's/a/b/' file"),
+        blocked("perl -pe 's/a/b/'"),
+    ]);
 }
 
 // ---------------------------------------------------------------------------
@@ -227,7 +232,10 @@ fn compat_blocked_reason_mentions_the_command() {
     // pinned on a non-release target instead.
     match classify("rm -rf /var/x") {
         BashVerdict::WriteBlocked(reason) => {
-            assert!(reason.contains("rm"), "reason should name the command: {reason}");
+            assert!(
+                reason.contains("rm"),
+                "reason should name the command: {reason}"
+            );
         }
         BashVerdict::ReadOnly => panic!("rm -rf /var/x must be blocked"),
     }

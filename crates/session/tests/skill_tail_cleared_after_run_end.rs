@@ -9,9 +9,12 @@
 //!   (b) store: the session row's `skill` column is NULL (defeats resume
 //!       resurrection),
 //!   (c) payload: every LLM request of any FOLLOWING run carries NO
-//!       `[active skill]` tail reminder — the synthetic trailing user message
-//!       `skill_context::tail_reminder` derives per call and
-//!       `runner/llm_call.rs` appends last to the payload.
+//!       `[active skill]` tail reminder and NO `[skill loaded]` body — the
+//!       synthetic trailing user messages `skill_context::tail_reminder` /
+//!       `skill_context::transient_body_message` derive per call and
+//!       `runner/llm_call.rs` append last to the payload; since the body
+//!       was never persisted, the run-end clear stops its submission
+//!       entirely.
 //!
 //! No src code is touched by this file: it only pins observed behavior.
 
@@ -73,8 +76,8 @@ fn has_active_skill_tail(req: &ChatRequest) -> bool {
     })
 }
 
-/// The armed skill ships as the in-conversation `[skill loaded]` message
-/// (the `[active skill]` tail pointer is fallback-only under F3).
+/// The armed skill ships as the transient per-call `[skill loaded]` body
+/// message (the `[active skill]` tail pointer is fallback-only under F3).
 fn has_loaded_skill_message(req: &ChatRequest) -> bool {
     req.messages.iter().any(|m| {
         m.get("role").and_then(|r| r.as_str()) == Some("user")
@@ -193,10 +196,16 @@ async fn preset_skill_tail_cleared_after_done_run() {
         .unwrap();
     let reqs = mock.requests();
     assert_eq!(reqs.len(), 2, "two runs -> exactly two LLM calls");
-    // 断言三: no message in run 2's payload contains "[active skill]".
+    // 断言三: run 2's payload carries NEITHER the "[active skill]" tail NOR
+    // the "[skill loaded]" body — the one-shot clear stopped both.
     assert!(
         !has_active_skill_tail(&reqs[1]),
         "run 2 request still carries the [active skill] tail: {:?}",
+        user_texts(&reqs[1])
+    );
+    assert!(
+        !has_loaded_skill_message(&reqs[1]),
+        "run 2 request still carries the [skill loaded] body: {:?}",
         user_texts(&reqs[1])
     );
 }
@@ -242,6 +251,11 @@ async fn preset_skill_tail_cleared_after_tool_call_run() {
     assert!(
         !has_active_skill_tail(&reqs[2]),
         "post-tool-run request still carries the [active skill] tail: {:?}",
+        user_texts(&reqs[2])
+    );
+    assert!(
+        !has_loaded_skill_message(&reqs[2]),
+        "post-tool-run request still carries the [skill loaded] body: {:?}",
         user_texts(&reqs[2])
     );
 }

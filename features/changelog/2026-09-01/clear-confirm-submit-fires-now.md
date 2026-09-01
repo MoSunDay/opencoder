@@ -43,10 +43,12 @@ Commit: 62ad7f0 (working-tree, clear-confirm 倒计时内提交立即执行)
 
 ## 本地部署
 
-- `cargo build --release --bin opencoder` 成功（`CARGO_TARGET_DIR=/data00/rust-build/cargo/default`），
-  产物版本为 `opencoder 0.1.0 (62ad7f0-dirty)`。
-- release 产物已原子替换 PATH 首选项 `/root/.local/bin/opencoder`；部署后 SHA-256 为
-  `f08d17090cfde76cbf361f17e958bef2f431a09c6019a9bc53d6299278eae1cf`，与构建产物一致。
+- `cargo build --release` 成功（`CARGO_TARGET_DIR=/data00/rust-build/cargo/default`）。
+  首次部署为提交前构建，版本 `opencoder 0.1.0 (62ad7f0-dirty)`（SHA-256 `f08d1709…`）；
+  落 commit `71e7e1e` 后从干净树重建，版本串收敛为 `opencoder 0.1.0 (71e7e1e)`。
+- 最终生效的 release 产物已原子替换 PATH 首选项 `/root/.local/bin/opencoder`；部署后 SHA-256 为
+  `e3accf1e4213df04fb193981a848f0fbfbbed5c6bf4f9e8b9151f79d4072f26d`，与构建产物一致，
+  可由 commit `71e7e1e` 复现。
 - 原二进制保留在
   `/root/.local/bin/opencoder.backup-before-clear-confirm-20260901`，可用于回退；
   部署时已在运行的进程仍使用旧映像，重新启动后加载新版本。

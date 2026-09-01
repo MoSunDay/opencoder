@@ -125,7 +125,7 @@ async fn queue_consumed_carries_text_and_precedes_output() {
     );
 }
 
-/// A compound queued prompt (`/sandbox <text>`) emits `QueueConsumed` carrying
+/// A compound queued prompt (`/plan <text>`) emits `QueueConsumed` carrying
 /// the *raw* text so the echo matches what the user typed, while the tail
 /// still reaches the LLM in the new mode.
 #[tokio::test]
@@ -136,7 +136,7 @@ async fn queue_consumed_compound_carries_raw_text() {
     let mock = Arc::new(
         MockChatClient::new()
             .push_script(stream_turn("kickoff"))
-            .push_script(stream_turn("sandbox reply")),
+            .push_script(stream_turn("plan reply")),
     ) as Arc<dyn ChatStream>;
 
     let dir = tempfile::tempdir().unwrap();
@@ -154,7 +154,7 @@ async fn queue_consumed_compound_carries_raw_text() {
         .admit_input(&mk_input(
             "echo-cmp",
             Delivery::Queue,
-            "/sandbox review the code",
+            "/plan review the code",
         ))
         .await
         .unwrap();
@@ -170,18 +170,18 @@ async fn queue_consumed_compound_carries_raw_text() {
     let evs = events.lock().unwrap();
 
     let carries = evs.iter().any(|e| {
-        matches!(e, SessionEvent::QueueConsumed { text, .. } if text == "/sandbox review the code")
+        matches!(e, SessionEvent::QueueConsumed { text, .. } if text == "/plan review the code")
     });
     assert!(
         carries,
-        "QueueConsumed must carry the raw compound text \"/sandbox review the code\""
+        "QueueConsumed must carry the raw compound text \"/plan review the code\""
     );
 
     let has_reply = evs
         .iter()
-        .any(|e| matches!(e, SessionEvent::TextDelta(t) if t.contains("sandbox reply")));
+        .any(|e| matches!(e, SessionEvent::TextDelta(t) if t.contains("plan reply")));
     assert!(
         has_reply,
-        "the /sandbox <text> tail must produce an LLM turn"
+        "the /plan <text> tail must produce an LLM turn"
     );
 }

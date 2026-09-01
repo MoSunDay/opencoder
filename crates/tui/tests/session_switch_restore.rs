@@ -1,6 +1,6 @@
 //! Regression lock: `/task` session switching restores per-session state.
 //!
-//! Switching between two stored sessions (A: model-x + sandbox, B: model-y +
+//! Switching between two stored sessions (A: model-x + plan, B: model-y +
 //! act) must bring back each session's own stored model and agent every time,
 //! in both directions:
 //!
@@ -157,8 +157,8 @@ fn assistant_msg(id: &str, text: &str) -> Message {
 async fn switch_restores_model_and_agent_both_ways() {
     let dir = tempfile::tempdir().unwrap();
     let store = mem_store().await;
-    seed_session(&store, SESSION_A, "act", "sandbox", MODEL_A).await;
-    seed_session(&store, SESSION_B, "sandbox", "act", MODEL_B).await;
+    seed_session(&store, SESSION_A, "act", "plan", MODEL_A).await;
+    seed_session(&store, SESSION_B, "plan", "act", MODEL_B).await;
     let client: Arc<dyn ChatStream> = Arc::new(MockChatClient::new());
 
     // A -> B: B comes back with ITS OWN stored model and agent.
@@ -176,7 +176,7 @@ async fn switch_restores_model_and_agent_both_ways() {
     assert_eq!(model_label, MODEL_A);
     assert_eq!(a.config.model, MODEL_A);
     assert_eq!(a.model, MODEL_A_BARE);
-    assert_eq!(a.agent.name, "sandbox", "agent chip restored for A");
+    assert_eq!(a.agent.name, "plan", "agent chip restored for A");
 
     // A -> B again: the round-trip is stable, not just a one-shot restore.
     let (b2, model_label) = switch_to(&store, SESSION_B, client, dir.path()).await;
@@ -186,7 +186,7 @@ async fn switch_restores_model_and_agent_both_ways() {
     assert_eq!(b2.agent.name, "act");
 
     // Switching never rewrites the other row's stored values.
-    for (id, agent, model) in [(SESSION_A, "sandbox", MODEL_A), (SESSION_B, "act", MODEL_B)] {
+    for (id, agent, model) in [(SESSION_A, "plan", MODEL_A), (SESSION_B, "act", MODEL_B)] {
         let meta = store.get_session(id).await.unwrap().unwrap();
         assert_eq!(meta.agent.as_deref(), Some(agent), "stored agent of {id}");
         assert_eq!(meta.model.as_deref(), Some(model), "stored model of {id}");
@@ -199,8 +199,8 @@ async fn switch_restores_model_and_agent_both_ways() {
 async fn switched_model_used_by_next_turn() {
     let dir = tempfile::tempdir().unwrap();
     let store = mem_store().await;
-    seed_session(&store, SESSION_A, "act", "sandbox", MODEL_A).await;
-    seed_session(&store, SESSION_B, "sandbox", "act", MODEL_B).await;
+    seed_session(&store, SESSION_A, "act", "plan", MODEL_A).await;
+    seed_session(&store, SESSION_B, "plan", "act", MODEL_B).await;
 
     let mock = Arc::new(MockChatClient::new());
     let (mut b, model_label) = switch_to(
@@ -239,8 +239,8 @@ async fn switched_model_used_by_next_turn() {
 async fn switch_rebuilds_chat_view_without_cross_talk() {
     let dir = tempfile::tempdir().unwrap();
     let store = mem_store().await;
-    seed_session(&store, SESSION_A, "act", "sandbox", MODEL_A).await;
-    seed_session(&store, SESSION_B, "sandbox", "act", MODEL_B).await;
+    seed_session(&store, SESSION_A, "act", "plan", MODEL_A).await;
+    seed_session(&store, SESSION_B, "plan", "act", MODEL_B).await;
     store
         .append_message(SESSION_A, &user_msg("u-a", "prompt for alpha"))
         .await
@@ -264,7 +264,7 @@ async fn switch_rebuilds_chat_view_without_cross_talk() {
     // Live session A, with interaction state deliberately drifted from fresh.
     let (a, _) = switch_to(&store, SESSION_A, client.clone(), dir.path()).await;
     let mut chat = replay_into_chat(&a.agent.name, &a.messages, &store, SESSION_A, 0).await;
-    assert_eq!(chat.agent, "sandbox", "live view chip shows A's agent");
+    assert_eq!(chat.agent, "plan", "live view chip shows A's agent");
     let mut history = vec!["alpha follow-up".to_string()];
     let mut scroll: u32 = 9;
     let mut follow = false;
@@ -368,5 +368,5 @@ async fn switch_rebuilds_chat_view_without_cross_talk() {
         !a_text.contains("beta"),
         "B's transcript must not bleed back into A's view, got: {a_text}"
     );
-    assert_eq!(chat.agent, "sandbox", "the chip is back on A's agent");
+    assert_eq!(chat.agent, "plan", "the chip is back on A's agent");
 }

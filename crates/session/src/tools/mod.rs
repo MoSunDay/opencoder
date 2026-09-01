@@ -41,7 +41,7 @@ pub fn registry() -> HashMap<String, ToolArc> {
 /// implementation delegation). Shared by the runner's schema build, the
 /// system prompt, and the token estimator so all three surfaces agree.
 pub fn hide_build_subagent(kind: AgentKind, skill_body: Option<&str>) -> bool {
-    kind == AgentKind::Sandbox || latent::task_plan_active(skill_body)
+    kind == AgentKind::Plan || latent::task_plan_active(skill_body)
 }
 
 /// Project a (filtered) tool map into OpenAI function-calling JSON, applying the
@@ -92,8 +92,8 @@ pub fn schema_for(tools: &HashMap<String, ToolArc>, hide_build: bool) -> Vec<Val
 /// schema array.
 ///
 /// The filtering logic mirrors `runner::llm_call::run_one_llm_call` exactly
-/// (agent allowlist ∧ latent-gating, no agent exemptions), so the estimate
-/// matches what the provider actually receives.
+/// (agent allowlist ∧ latent-gating, with the plan `question` exemption),
+/// so the estimate matches what the provider actually receives.
 pub fn estimate_tool_schema_tokens(
     agent: &opencoder_core::Agent,
     skill_body: Option<&str>,
@@ -138,9 +138,9 @@ mod tests {
     fn hide_build_subagent_matrix() {
         let plan = plan_skill_body();
         let lookalike = Some("> Source: /skills/my-task-plan/SKILL.md\n\nbody");
-        // Sandbox always hides; act hides only while task-plan is active.
-        assert!(hide_build_subagent(AgentKind::Sandbox, None));
-        assert!(hide_build_subagent(AgentKind::Sandbox, plan));
+        // Plan always hides; act hides only while task-plan is active.
+        assert!(hide_build_subagent(AgentKind::Plan, None));
+        assert!(hide_build_subagent(AgentKind::Plan, plan));
         assert!(!hide_build_subagent(AgentKind::Act, None));
         assert!(hide_build_subagent(AgentKind::Act, plan));
         assert!(!hide_build_subagent(AgentKind::Act, lookalike));
@@ -182,7 +182,7 @@ mod tests {
     }
 
     #[test]
-    fn sandbox_mode_task_schema_omits_build() {
+    fn plan_mode_task_schema_omits_build() {
         let tools = task_only();
         let schemas = schema_for(&tools, true);
         let func = &task_schema(&schemas)["function"];
@@ -190,11 +190,11 @@ mod tests {
         let desc = func["description"].as_str().unwrap();
         assert!(
             !desc.contains("build"),
-            "sandbox-mode task description must not mention 'build', got: {desc}"
+            "plan-mode task description must not mention 'build', got: {desc}"
         );
         assert!(
             desc.contains("explore"),
-            "sandbox-mode task description must mention 'explore', got: {desc}"
+            "plan-mode task description must mention 'explore', got: {desc}"
         );
 
         let subagent_type_desc = func["parameters"]["properties"]["subagent_type"]["description"]
@@ -202,18 +202,18 @@ mod tests {
             .unwrap();
         assert!(
             !subagent_type_desc.contains("build"),
-            "sandbox-mode subagent_type description must not mention 'build', got: {subagent_type_desc}"
+            "plan-mode subagent_type description must not mention 'build', got: {subagent_type_desc}"
         );
         assert!(
             subagent_type_desc.contains("explore"),
-            "sandbox-mode subagent_type description must mention 'explore', got: {subagent_type_desc}"
+            "plan-mode subagent_type description must mention 'explore', got: {subagent_type_desc}"
         );
 
         // Nothing build-related must leak anywhere in the parameters block.
         let params_str = func["parameters"].to_string();
         assert!(
             !params_str.contains("build"),
-            "sandbox-mode task parameters must not contain 'build' anywhere, got: {params_str}"
+            "plan-mode task parameters must not contain 'build' anywhere, got: {params_str}"
         );
     }
 
@@ -263,8 +263,8 @@ mod tests {
         // stable, sorted order. On the old unsorted code this assertion failed
         // ~randomly per process run.
         let tools = registry();
-        for kind in [AgentKind::Act, AgentKind::Sandbox] {
-            let hide_build = kind == AgentKind::Sandbox;
+        for kind in [AgentKind::Act, AgentKind::Plan] {
+            let hide_build = kind == AgentKind::Plan;
     let schemas = schema_for(&tools, hide_build);
             let names: Vec<&str> = schemas
                 .iter()
@@ -279,67 +279,56 @@ mod tests {
         }
     }
 
-    /// The `question` tool is latent and gated by the task-plan skill, with
-    /// no agent-kind exemptions: act and sandbox hide it without a skill and
-    /// see it only once a skill body naming the skill inside the first
-    /// 500 chars unlocks it. A `review` body must not unlock it, and the
-    /// command agent never sees it. The schema itself stays cheap
-    /// (<200 tokens).
+    /// The `question` tool is latent and gated by the task-plan skill:
+    /// the plan agent always sees it (its clarification protocol is part of
+    /// the base prompt), an act agent sees it only once a skill body whose
+    /// first 500 chars name the skill unlocks it, and non-primary agents never
+    /// do. The schema itself stays cheap (<200 tokens).
     #[test]
-    fn question_schema_is_task_plan_gated_and_compact() {
+    fn question_schema_is_plan_only_and_compact() {
         let reg = registry();
-        let sandbox = opencoder_core::resolve_agent("sandbox").unwrap();
+        let plan = opencoder_core::resolve_agent("plan").unwrap();
         let act = opencoder_core::resolve_agent("act").unwrap();
         let command = opencoder_core::resolve_agent("command").unwrap();
+
+        // Plan: question is visible with NO skill at all.
+        let plan_tokens = estimate_tool_schema_tokens(&plan, None, &reg);
+
+        // Act without a skill: question absent. With a task-plan body (the
+        // skill name inside the 500-char prefix window): present. A `review`
+        // body must NOT unlock it (question is task-plan-only).
+        let act_tokens = estimate_tool_schema_tokens(&act, None, &reg);
+        let plan_body = Some("# task-plan\n\n## Overview\n\nplan the work; ask via question");
+        let review_body = Some("# review\n\nevidence-driven check; use question when blocked");
+        let act_unlocked_plan = estimate_tool_schema_tokens(&act, plan_body, &reg);
+        let act_unlocked_review = estimate_tool_schema_tokens(&act, review_body, &reg);
+
+        // Isolate the question schema's own cost (plan always includes it).
         let mut without = reg.clone();
         without.remove("question");
-
-        // No skill: question absent for BOTH primary agents — no sandbox
-        // exemption, the schema count matches the registry minus question.
-        for agent in [&act, &sandbox] {
-            assert_eq!(
-                estimate_tool_schema_tokens(agent, None, &reg),
-                estimate_tool_schema_tokens(agent, None, &without),
-                "{:?} without a skill must not carry the question schema",
-                agent.kind
-            );
-        }
-
-        // A task-plan body naming the skill (and the tool) inside the
-        // 500-char prefix window unlocks it for both agents.
-        let plan_body = Some("# task-plan\n\n## Overview\n\nplan the work; ask via question");
-        let cost = estimate_tool_schema_tokens(&act, plan_body, &reg)
-            - estimate_tool_schema_tokens(&act, plan_body, &without);
-        for agent in [&act, &sandbox] {
-            let tokens = estimate_tool_schema_tokens(agent, plan_body, &reg);
-            assert_eq!(
-                tokens - estimate_tool_schema_tokens(agent, plan_body, &without),
-                cost,
-                "{:?} with an unlocked skill sees question at the same cost",
-                agent.kind
-            );
-            assert!(
-                tokens > estimate_tool_schema_tokens(agent, None, &reg),
-                "a task-plan body must unlock the question schema for {:?}",
-                agent.kind
-            );
-        }
-
-        // A `review` body must NOT unlock it (question is task-plan-only).
-        let review_body = Some("# review\n\nevidence-driven check; use question when blocked");
-        for agent in [&act, &sandbox] {
-            assert_eq!(
-                estimate_tool_schema_tokens(agent, review_body, &reg),
-                estimate_tool_schema_tokens(agent, review_body, &without),
-                "a review body must NOT unlock question for {:?}",
-                agent.kind
-            );
-        }
-
-        // The command agent never sees it, with or without a skill body.
+        let plan_without = estimate_tool_schema_tokens(&plan, None, &without);
+        let cost = plan_tokens - plan_without;
+        assert!(cost > 0, "plan agent must see the question schema");
         assert_eq!(
-            estimate_tool_schema_tokens(&command, plan_body, &reg),
-            estimate_tool_schema_tokens(&command, plan_body, &without),
+            act_unlocked_plan - estimate_tool_schema_tokens(&act, plan_body, &without),
+            cost,
+            "act agent with an unlocked skill sees question at the same cost"
+        );
+        assert!(
+            act_unlocked_plan > act_tokens,
+            "a task-plan body must unlock the question schema for act: {act_tokens} -> {act_unlocked_plan}"
+        );
+        assert_eq!(
+            act_unlocked_review, act_tokens,
+            "a review body must NOT unlock question for act (task-plan-only)"
+        );
+        assert!(
+            plan_tokens > act_tokens,
+            "plan must carry the question schema that a skill-less act lacks: {act_tokens} vs {plan_tokens}"
+        );
+        assert_eq!(
+            estimate_tool_schema_tokens(&command, None, &reg),
+            estimate_tool_schema_tokens(&command, None, &without),
             "command agent must NOT see the question schema"
         );
 
@@ -367,34 +356,34 @@ mod tests {
     }
 
     #[test]
-    fn estimate_tool_schema_tokens_sandbox_excludes_build_hint() {
-        // Sandbox mode rewrites the task tool description (no 'build' mention),
+    fn estimate_tool_schema_tokens_plan_excludes_build_hint() {
+        // Plan mode rewrites the task tool description (no 'build' mention),
         // so the estimate may differ slightly — but both must be non-trivial.
         let act_agent = opencoder_core::resolve_agent("act").expect("act agent");
-        let sandbox_agent = opencoder_core::resolve_agent("sandbox").expect("sandbox agent");
+        let plan_agent = opencoder_core::resolve_agent("plan").expect("plan agent");
         let reg = registry();
         let act_tokens = estimate_tool_schema_tokens(&act_agent, None, &reg);
-        let sandbox_tokens = estimate_tool_schema_tokens(&sandbox_agent, None, &reg);
+        let plan_tokens = estimate_tool_schema_tokens(&plan_agent, None, &reg);
         assert!(act_tokens > 200, "act tokens: {act_tokens}");
-        assert!(sandbox_tokens > 200, "sandbox tokens: {sandbox_tokens}");
+        assert!(plan_tokens > 200, "plan tokens: {plan_tokens}");
     }
 
     #[test]
     fn estimate_tool_schema_tokens_act_task_plan_matches_runner() {
         // The estimator must mirror the runner's schema build exactly. With
-        // task-plan active, act and sandbox see the SAME schema set (question
-        // unlocked, build hidden), so their estimates must coincide — if the
+        // task-plan active, act and plan see the SAME schema set (question
+        // visible, build hidden), so their estimates must coincide — if the
         // estimator forgot the task-plan build-strip, act would come out
         // strictly larger.
         let act_agent = opencoder_core::resolve_agent("act").expect("act agent");
-        let sandbox_agent = opencoder_core::resolve_agent("sandbox").expect("sandbox agent");
+        let plan_agent = opencoder_core::resolve_agent("plan").expect("plan agent");
         let reg = registry();
         let plan = Some("> Source: /home/u/.opencoder/skills/task-plan/SKILL.md\n\nbody");
         let act_plan = estimate_tool_schema_tokens(&act_agent, plan, &reg);
-        let sandbox_plan = estimate_tool_schema_tokens(&sandbox_agent, plan, &reg);
+        let plan_plan = estimate_tool_schema_tokens(&plan_agent, plan, &reg);
         assert_eq!(
-            act_plan, sandbox_plan,
-            "act+task-plan must estimate identically to sandbox+task-plan"
+            act_plan, plan_plan,
+            "act+task-plan must estimate identically to plan"
         );
     }
 }

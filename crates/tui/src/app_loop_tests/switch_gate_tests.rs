@@ -1,5 +1,5 @@
 //! Running-gate tests for the agent-switch slash dispatch (`/act`,
-//! `/sandbox`, `/clear_context`). A switch while a turn is in flight
+//! `/plan`, `/clear_context`). A switch while a turn is in flight
 //! (`running`) or a subagent is live is intercepted with an explicit busy
 //! marker — applying a switch mid-`run_session` would land at an arbitrary
 //! partial boundary. Same contract as `/compact`'s `SkipRunning`.
@@ -51,7 +51,7 @@ async fn drive_mode_switch(
 /// while running queues, see `app_loop_dispatch_cmd_tests/act_clear.rs`.)
 #[tokio::test]
 async fn mode_switch_while_running_is_busy_gated() {
-    for mode in [ModeSwitch::Act, ModeSwitch::Sandbox] {
+    for mode in [ModeSwitch::Act, ModeSwitch::Plan] {
         let (chat, running, sys_tokens, mode_flash, mut cmd_rx) =
             drive_mode_switch(mode, true, 0).await;
         assert!(running, "running must stay true (turn still active)");
@@ -74,7 +74,7 @@ async fn mode_switch_while_running_is_busy_gated() {
 /// A live subagent blocks the switch even when `running` is false.
 #[tokio::test]
 async fn mode_switch_while_subagent_live_is_busy_gated() {
-    for mode in [ModeSwitch::Act, ModeSwitch::Sandbox] {
+    for mode in [ModeSwitch::Act, ModeSwitch::Plan] {
         let (chat, running, _, _, mut cmd_rx) = drive_mode_switch(mode, false, 1).await;
         assert!(!running);
         assert!(
@@ -96,7 +96,7 @@ async fn mode_switch_while_subagent_live_is_busy_gated() {
 /// and flips the local running/follow state.
 #[tokio::test]
 async fn mode_switch_from_idle_submits_control_prompt() {
-    for (mode, prompt) in [(ModeSwitch::Act, "/act"), (ModeSwitch::Sandbox, "/sandbox")] {
+    for (mode, prompt) in [(ModeSwitch::Act, "/act"), (ModeSwitch::Plan, "/plan")] {
         let (chat, running, sys_tokens, mode_flash, mut cmd_rx) =
             drive_mode_switch(mode, false, 0).await;
         assert!(running, "the switch turn starts immediately");

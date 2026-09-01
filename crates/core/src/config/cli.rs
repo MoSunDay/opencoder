@@ -8,7 +8,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// Which agent sessions receive a registered integration (multi-select).
 ///
-/// `parent` covers every primary agent (act/sandbox/command); `explore`/`build`
+/// `parent` covers every primary agent (act/plan/command); `explore`/`build`
 /// target the read-only / implementation subagents by agent name. Serialized
 /// as an array of selected tags (e.g. `["explore","build"]`); legacy
 /// single-string values (`"parent"` / `"subagents"` / `"all"`) still load.
@@ -347,7 +347,7 @@ mod tests {
     fn allows_agent_matrix() {
         let parent_only = InjectionTarget::parent_only();
         assert!(parent_only.allows_agent("act", AgentMode::Primary));
-        assert!(parent_only.allows_agent("sandbox", AgentMode::Primary));
+        assert!(parent_only.allows_agent("plan", AgentMode::Primary));
         assert!(!parent_only.allows_agent("explore", AgentMode::Subagent));
         assert!(!parent_only.allows_agent("build", AgentMode::Subagent));
 

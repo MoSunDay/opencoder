@@ -1,15 +1,16 @@
-//! Headless submission contracts after the plan->sandbox rename (rules/01
-//! regression tests). The removed plan/act dual mode spelled the read-only
-//! switch `/plan`; the session layer now only parses `/sandbox`. Pinned here:
-//!   1. a legacy `/plan ...` submission is rewritten and reaches the runner
-//!      as the sandbox switch;
-//!   2. a bare legacy `/plan` switch stops without an LLM turn;
-//!   3. a live `/sandbox $skill-or-text` compound reaches the runner as the
-//!      sandbox switch and the trailing text still runs as the prompt.
+//! Headless submission contracts after the sandbox->plan rename (rules/01
+//! regression tests). The reverted sandbox-mode interlude spelled the
+//! read-only switch `/sandbox`; the canonical spelling is `/plan` again.
+//! Pinned here:
+//!   1. a legacy `/sandbox ...` submission is rewritten and reaches the runner
+//!      as the plan switch;
+//!   2. a bare legacy `/sandbox` switch stops without an LLM turn;
+//!   3. a live `/plan $skill-or-text` compound reaches the runner as the
+//!      plan switch and the trailing text still runs as the prompt.
 
 use std::sync::{Arc, Mutex};
 
-use opencoder_cli::run::rewrite_legacy_plan_prefix;
+use opencoder_cli::run::rewrite_legacy_sandbox_prefix;
 use opencoder_core::{resolve_agent, Config, Role};
 use opencoder_llm::{ChatStream, LlmEvent, MockChatClient};
 use opencoder_session::{run, SessionEvent, SessionState};
@@ -71,24 +72,24 @@ fn record_events() -> (Arc<Mutex<Vec<SessionEvent>>>, impl FnMut(SessionEvent) +
 }
 
 #[tokio::test]
-async fn legacy_plan_compound_reaches_runner_as_sandbox_switch() {
+async fn legacy_plan_compound_reaches_runner_as_plan_switch() {
     let mut session = make_session("legacy-plan-compound").await;
     // The regression shape: irregular spacing after the legacy token.
-    let prompt = rewrite_legacy_plan_prefix("/plan  draft the plan");
+    let prompt = rewrite_legacy_sandbox_prefix("/sandbox  draft the plan");
     let (events, on_event) = record_events();
     run(&mut session, prompt, on_event).await.unwrap();
 
     assert_eq!(
-        session.agent.name, "sandbox",
-        "legacy /plan compound must land on the sandbox agent"
+        session.agent.name, "plan",
+        "legacy /sandbox compound must land on the plan agent"
     );
     assert!(
         events
             .lock()
             .unwrap()
             .iter()
-            .any(|ev| matches!(ev, SessionEvent::AgentSwitch(a) if a == "sandbox")),
-        "runner must emit the sandbox AgentSwitch event"
+            .any(|ev| matches!(ev, SessionEvent::AgentSwitch(a) if a == "plan")),
+        "runner must emit the plan AgentSwitch event"
     );
     // Compound: the trailing text executed as a real prompt (recorded user
     // message + the mock LLM reply), not swallowed by the switch.
@@ -108,18 +109,18 @@ async fn legacy_plan_compound_reaches_runner_as_sandbox_switch() {
 }
 
 #[tokio::test]
-async fn legacy_plan_bare_switch_stops_without_llm_turn() {
-    let mut session = make_session("legacy-plan-bare").await;
-    let prompt = rewrite_legacy_plan_prefix("/plan");
+async fn legacy_sandbox_bare_switch_stops_without_llm_turn() {
+    let mut session = make_session("legacy-sandbox-bare").await;
+    let prompt = rewrite_legacy_sandbox_prefix("/sandbox");
     let (events, on_event) = record_events();
     run(&mut session, prompt, on_event).await.unwrap();
 
-    assert_eq!(session.agent.name, "sandbox");
+    assert_eq!(session.agent.name, "plan");
     let evs = events.lock().unwrap();
     assert!(
         evs.iter()
-            .any(|ev| matches!(ev, SessionEvent::AgentSwitch(a) if a == "sandbox")),
-        "bare switch must emit AgentSwitch(sandbox)"
+            .any(|ev| matches!(ev, SessionEvent::AgentSwitch(a) if a == "plan")),
+        "bare switch must emit AgentSwitch(plan)"
     );
     assert!(
         evs.iter().any(|ev| matches!(ev, SessionEvent::Done)),
@@ -132,27 +133,27 @@ async fn legacy_plan_bare_switch_stops_without_llm_turn() {
 }
 
 #[tokio::test]
-async fn sandbox_compound_switches_and_runs_rest() {
-    let mut session = make_session("sandbox-compound").await;
+async fn plan_compound_switches_and_runs_rest() {
+    let mut session = make_session("plan-compound").await;
     // Trailing text with an $skill token that matches nothing: the compound
     // must still switch and submit the rest (token stays literal).
     let (events, on_event) = record_events();
     run(
         &mut session,
-        "/sandbox $no-such-skill-x review the diff".to_string(),
+        "/plan $no-such-skill-x review the diff".to_string(),
         on_event,
     )
     .await
     .unwrap();
 
-    assert_eq!(session.agent.name, "sandbox");
+    assert_eq!(session.agent.name, "plan");
     assert!(
         events
             .lock()
             .unwrap()
             .iter()
-            .any(|ev| matches!(ev, SessionEvent::AgentSwitch(a) if a == "sandbox")),
-        "headless output must see the sandbox switch banner event"
+            .any(|ev| matches!(ev, SessionEvent::AgentSwitch(a) if a == "plan")),
+        "headless output must see the plan switch banner event"
     );
     let user = session
         .messages

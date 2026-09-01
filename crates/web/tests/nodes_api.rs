@@ -254,7 +254,7 @@ async fn dispatch_creates_task_and_hidden_synthetic_session() {
         (
             "POST",
             format!("/api/sessions/{sid}/agent"),
-            Some(r#"{"value":"sandbox"}"#.to_string()),
+            Some(r#"{"value":"plan"}"#.to_string()),
         ),
         (
             "POST",

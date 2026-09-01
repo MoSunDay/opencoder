@@ -59,14 +59,14 @@ async fn prompt_control_cmd_switches_agent_without_llm_turn() {
     let (evt_tx, mut evt_rx) = mpsc::channel::<UiEvent>(64);
     let mut sess = test_session("switch-cmd");
     let _ = process_cmd(
-        UiCmd::Prompt("/sandbox".into(), Vec::new()),
+        UiCmd::Prompt("/plan".into(), Vec::new()),
         &mut sess,
         &evt_tx,
     )
     .await;
-    assert_eq!(sess.agent.name, "sandbox", "pure prompt switches the agent");
+    assert_eq!(sess.agent.name, "plan", "pure prompt switches the agent");
     let saw_switch = std::iter::from_fn(|| evt_rx.try_recv().ok())
-        .any(|e| matches!(e, UiEvent::Session(SessionEvent::AgentSwitch(ref n)) if n == "sandbox"));
+        .any(|e| matches!(e, UiEvent::Session(SessionEvent::AgentSwitch(ref n)) if n == "plan"));
     assert!(saw_switch, "an AgentSwitch event must reach the UI bridge");
 }
 

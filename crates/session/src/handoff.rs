@@ -1,7 +1,7 @@
 //! Transcript handoff: collapse the live transcript into a single synthetic
 //! directive message.
 //!
-//! Used by the autopilot ACT phase: the read-only exploration pass (sandbox
+//! Used by the autopilot ACT phase: the read-only exploration pass (plan
 //! agent + review skill) produces a brief, then the transcript is reset so
 //! the act agent starts from only that brief — not the full exploration
 //! chatter (subagent noise, clarifying Q&A).
@@ -133,8 +133,8 @@ mod tests {
     fn newest_work_text_picks_newest_real_answer() {
         let msgs = vec![
             Message::user("u1", "explore X"),
-            assistant("a1", "sandbox", "older answer"),
-            assistant("a2", "sandbox", "newest answer"),
+            assistant("a1", "plan", "older answer"),
+            assistant("a2", "plan", "newest answer"),
         ];
         assert_eq!(newest_work_text(&msgs).as_deref(), Some("newest answer"));
     }
@@ -145,7 +145,7 @@ mod tests {
         // favour of the older real answer.
         let synthetic_newest = vec![
             Message::user("u1", "task"),
-            assistant("a2", "sandbox", "real answer"),
+            assistant("a2", "plan", "real answer"),
             synthetic_assistant("s1", "act", "summary head"),
         ];
         assert_eq!(
@@ -156,8 +156,8 @@ mod tests {
         // The newest real text is whitespace-only: skipped.
         let empty_newest = vec![
             Message::user("u1", "task"),
-            assistant("a2", "sandbox", "real answer"),
-            assistant("a3", "sandbox", "   "),
+            assistant("a2", "plan", "real answer"),
+            assistant("a3", "plan", "   "),
         ];
         assert_eq!(
             newest_work_text(&empty_newest).as_deref(),

@@ -29,12 +29,15 @@ fn tmp_release_cwd(tag: &str) -> PathBuf {
     dir
 }
 
-/// Unique scratch directory under this crate's source tree: a plain project
-/// directory that is never inside the release set.
+/// Unique scratch directory under $HOME: a plain directory that is never
+/// inside the release set (the crate tree itself may sit under /tmp, which
+/// the release scope covers wholesale).
 fn plain_project_cwd(tag: &str) -> PathBuf {
     static SEQ: AtomicUsize = AtomicUsize::new(0);
     let n = SEQ.fetch_add(1, Ordering::Relaxed);
-    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("target-classify-in-{n}-{tag}"));
+    let home = std::env::var("HOME").unwrap_or_default();
+    assert!(!home.is_empty(), "$HOME must be set for a plain fixture dir");
+    let dir = Path::new(&home).join(format!("shellguard-plain-{n}-{tag}"));
     assert!(
         std::fs::create_dir_all(&dir).is_ok(),
         "failed to create {dir:?}"

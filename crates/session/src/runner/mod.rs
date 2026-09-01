@@ -95,8 +95,8 @@ pub async fn run_with_registry(
     // must continue running; only the blank sentinel (nothing preserved)
     // stops without an LLM turn.
     let mut handoff_pending = false;
-    // Control commands (/act, /sandbox) short-circuit without an LLM turn. A
-    // compound input (/sandbox review) switches then runs the rest. EXCEPTION:
+    // Control commands (/act, /plan) short-circuit without an LLM turn. A
+    // compound input (/plan review) switches then runs the rest. EXCEPTION:
     // /act_clear_context with a preserved seed falls through to run_loop.
     if let Some((cmd, rest)) = crate::control_cmd::split_control_prefix(&user_text) {
         if let Err(e) = crate::control_cmd::apply(session, &cmd, &mut on_event).await {
@@ -129,7 +129,7 @@ pub async fn run_with_registry(
                 }
             }
         } else if let Some(rest) = rest {
-            // Compound (/sandbox review): switch done; fall through to recording
+            // Compound (/plan review): switch done; fall through to recording
             // which resolves `$skill` tokens and records user_text as prompt.
             user_text = rest;
         } else {
@@ -157,7 +157,7 @@ pub async fn run_with_registry(
     crate::dangling_tools::reconcile_dangling_tool_uses(session).await;
     // Resolve inline `$skill` tokens from the raw user text (headless path —
     // the TUI resolves before calling run). Covers both compound commands
-    // (`/sandbox $review do it`) and plain prompts (`$review do it`). After
+    // (`/plan $review do it`) and plain prompts (`$review do it`). After
     // stripping, text may be empty if only `$skill` tokens were provided.
     let prev_skill = session.skill_prompt_cloned();
     user_text = crate::skill_resolve::resolve_inline_skills(session, &user_text);
@@ -191,7 +191,7 @@ pub async fn run_with_registry(
     // one-shot review pass (no ACT/VERIFY), and `off` does nothing. A
     // session-scoped override (`effective_ap_mode`) wins over the config.
     // The review pass runs in ANY agent mode: it is read-only (no switch, no
-    // fold), so it is equally valid after an act run or a sandbox run.
+    // fold), so it is equally valid after an act run or a plan run.
     match session.effective_ap_mode() {
         opencoder_core::ApMode::Ap => {
             crate::autopilot::drive(session, registry, &mut on_event).await?;

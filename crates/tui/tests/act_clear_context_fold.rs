@@ -50,7 +50,7 @@ fn act_session(id: &str, mock: Arc<MockChatClient>, store: Arc<dyn Store>) -> Se
 fn sandbox_session(id: &str, mock: Arc<MockChatClient>, store: Arc<dyn Store>) -> SessionState {
     SessionState::new(
         id,
-        resolve_agent("sandbox").expect("sandbox agent"),
+        resolve_agent("plan").expect("plan agent"),
         Config {
             model: "m/g".into(),
             ..Config::default()
@@ -336,7 +336,7 @@ async fn act_switch_after_fold_is_pure_state_change() {
     store
         .create_session(&SessionMeta {
             id: "act-after-fold".into(),
-            agent: Some("sandbox".into()),
+            agent: Some("plan".into()),
             ..Default::default()
         })
         .await
@@ -344,7 +344,7 @@ async fn act_switch_after_fold_is_pure_state_change() {
 
     let mock = Arc::new(MockChatClient::new());
     let mut sess = act_session("act-after-fold", mock.clone(), store.clone());
-    sess.agent = resolve_agent("sandbox").unwrap();
+    sess.agent = resolve_agent("plan").unwrap();
     sess.messages = vec![opencoder_session::seed_message("the preserved say")];
     let before: Vec<String> = sess.messages.iter().map(|m| m.id.clone()).collect();
 
@@ -383,17 +383,17 @@ async fn act_switch_after_fold_is_pure_state_change() {
     );
 }
 
-/// Sandbox convergence: `/act_clear_context` from a sandbox session folds the
-/// transcript AND flips the agent to act - AgentSwitch(act) follows
-/// TranscriptReset, the seed still executes in exactly one LLM turn, and the
-/// convergence persists to the store.
+/// Plan fold: `/clear_context` from a plan session folds the transcript and
+/// KEEPS the plan agent - no AgentSwitch follows TranscriptReset, the seed
+/// still executes in exactly one LLM turn, and the plan agent persists to
+/// the store.
 #[tokio::test]
-async fn sandbox_clear_context_converges_to_act() {
+async fn plan_clear_context_folds_and_keeps_plan() {
     let store = mem_store().await;
     store
         .create_session(&SessionMeta {
-            id: "sandbox-fold".into(),
-            agent: Some("sandbox".into()),
+            id: "plan-fold".into(),
+            agent: Some("plan".into()),
             ..Default::default()
         })
         .await
@@ -402,46 +402,43 @@ async fn sandbox_clear_context_converges_to_act() {
     let mock = Arc::new(
         MockChatClient::new().push_script(vec![text_done("continuing from the preserved say")]),
     );
-    let mut sess = sandbox_session("sandbox-fold", mock.clone(), store.clone());
-    let say = assistant_with_text("a1", "the sandbox answer to keep");
-    seed_transcript(&store, "sandbox-fold", vec![say.clone()]).await;
+    let mut sess = sandbox_session("plan-fold", mock.clone(), store.clone());
+    let say = assistant_with_text("a1", "the plan answer to keep");
+    seed_transcript(&store, "plan-fold", vec![say.clone()]).await;
     sess.messages = vec![say];
 
     let (tx, mut rx) = mpsc::channel::<UiEvent>(64);
-    let quit = process_cmd(UiCmd::Prompt("/act_clear_context".into(), vec![]), &mut sess, &tx).await;
+    let quit = process_cmd(UiCmd::Prompt("/clear_context".into(), vec![]), &mut sess, &tx).await;
     assert!(!quit, "the fold must not signal quit");
     let events = drain(&mut rx).await;
 
-    let reset_idx = events
-        .iter()
-        .position(|e| matches!(e, UiEvent::Session(SessionEvent::TranscriptReset(_))))
-        .expect("TranscriptReset must be emitted");
-    let switch_idx = events
-        .iter()
-        .position(|e| matches!(
-            e,
-            UiEvent::Session(SessionEvent::AgentSwitch(ref n)) if n == "act"
-        ))
-        .expect("AgentSwitch(act) must be emitted for the sandbox convergence");
     assert!(
-        switch_idx > reset_idx,
-        "AgentSwitch(act) must follow TranscriptReset, got {events:?}"
+        events
+            .iter()
+            .any(|e| matches!(e, UiEvent::Session(SessionEvent::TranscriptReset(_)))),
+        "TranscriptReset must be emitted"
+    );
+    assert!(
+        events
+            .iter()
+            .all(|e| !matches!(e, UiEvent::Session(SessionEvent::AgentSwitch(_)))),
+        "clear must not switch agents, got {events:?}"
     );
     assert_eq!(
         mock.call_count(),
         1,
         "the seed executes in exactly one LLM turn"
     );
-    assert_eq!(sess.agent.name, "act", "the live session converges to act");
+    assert_eq!(sess.agent.name, "plan", "the live session keeps plan");
 
     let meta = store
-        .get_session("sandbox-fold")
+        .get_session("plan-fold")
         .await
         .unwrap()
         .expect("session row exists");
     assert_eq!(
         meta.agent.as_deref(),
-        Some("act"),
-        "the convergence persists to the store"
+        Some("plan"),
+        "the kept agent persists to the store"
     );
 }

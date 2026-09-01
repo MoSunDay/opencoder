@@ -554,7 +554,7 @@ mod tests {
     }
 
     // A keyboard steer is only ADMITTED here: the runner absorbs it at the
-    // next turn boundary, where a control command (/sandbox, /act,
+    // next turn boundary, where a control command (/plan, /act,
     // /act_clear_context) is applied. The admit itself must never touch the
     // agent chip or the transcript.
     #[tokio::test]
@@ -562,21 +562,21 @@ mod tests {
         let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
         store
             .create_session(&SessionMeta {
-                id: "steer-sandbox".into(),
+                id: "steer-plan".into(),
                 ..Default::default()
             })
             .await
             .unwrap();
 
         let mut chat = ChatView {
-            agent: "sandbox".into(),
+            agent: "plan".into(),
             ..Default::default()
         };
         let mut pending_images = Vec::new();
 
         let seq = admit_keyboard_steer(
             &store,
-            "steer-sandbox",
+            "steer-plan",
             "also cover the CLI flag",
             "also cover the CLI flag",
             &mut pending_images,
@@ -586,7 +586,7 @@ mod tests {
         .expect("admit must succeed");
 
         assert_eq!(
-            chat.agent, "sandbox",
+            chat.agent, "plan",
             "a steer admit must never switch the agent chip"
         );
         assert_eq!(
@@ -595,7 +595,7 @@ mod tests {
             "steer must be mirrored on the pending panel"
         );
         let pending = store
-            .pending_inputs("steer-sandbox", Delivery::Steer)
+            .pending_inputs("steer-plan", Delivery::Steer)
             .await
             .unwrap();
         assert_eq!(

@@ -65,7 +65,7 @@ async fn drain(rx: &mut mpsc::Receiver<UiEvent>) -> Vec<UiEvent> {
 
 /// While a turn is in flight the TUI gate refuses to start another one
 /// (SkipRunning), and only after the in-flight turn settles does a
-/// `/sandbox` submission apply — with no extra LLM call for the switch.
+/// `/plan` submission apply — with no extra LLM call for the switch.
 #[tokio::test]
 async fn control_command_waits_for_inflight_turn_to_settle() {
     let release = Arc::new(Notify::new());
@@ -124,14 +124,14 @@ async fn control_command_waits_for_inflight_turn_to_settle() {
 
     // Only now does the switch apply — and it applies without an LLM turn.
     let (tx2, mut rx2) = mpsc::channel::<UiEvent>(64);
-    let quit = process_cmd(UiCmd::Prompt("/sandbox".into(), vec![]), &mut sess, &tx2).await;
+    let quit = process_cmd(UiCmd::Prompt("/plan".into(), vec![]), &mut sess, &tx2).await;
     assert!(!quit);
     let switch_events = drain(&mut rx2).await;
     assert!(switch_events.iter().any(|e| matches!(
         e,
-        UiEvent::Session(SessionEvent::AgentSwitch(ref n)) if n == "sandbox"
+        UiEvent::Session(SessionEvent::AgentSwitch(ref n)) if n == "plan"
     )));
-    assert_eq!(sess.agent.name, "sandbox");
+    assert_eq!(sess.agent.name, "plan");
     assert_eq!(
         mock.call_count(),
         1,
@@ -179,14 +179,14 @@ async fn switch_events_never_interleave_a_running_turn() {
 
     // Now run the queued switch through the same worker and append its stream.
     let (tx2, mut rx2) = mpsc::channel::<UiEvent>(64);
-    let _ = process_cmd(UiCmd::Prompt("/sandbox".into(), vec![]), &mut sess, &tx2).await;
+    let _ = process_cmd(UiCmd::Prompt("/plan".into(), vec![]), &mut sess, &tx2).await;
     all.extend(drain(&mut rx2).await);
     let switch_pos = all
         .iter()
-        .position(|e| matches!(e, UiEvent::Session(SessionEvent::AgentSwitch(n)) if n == "sandbox"))
+        .position(|e| matches!(e, UiEvent::Session(SessionEvent::AgentSwitch(n)) if n == "plan"))
         .expect("the switch is announced after settle");
     assert!(
         switch_pos > turn_done_pos,
-        "AgentSwitch(sandbox) must follow the settled turn's TurnDone"
+        "AgentSwitch(plan) must follow the settled turn's TurnDone"
     );
 }

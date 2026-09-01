@@ -5,7 +5,7 @@
 //!
 //! Same row format and divergence classes as `bash_guard_compat_tests.rs`.
 
-use super::{classify, cmd_base, strip_leading_sudo, strip_wrappers, BashVerdict};
+use super::{classify, classify_with_dir, cmd_base, strip_leading_sudo, strip_wrappers, BashVerdict};
 
 /// Expected verdict for a compat row.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -29,9 +29,13 @@ fn readonly(cmd: &'static str) -> Row {
 
 /// Drive every row through the adapter; blocked rows must carry a non-empty
 /// reason because it is embedded verbatim in the tool error.
+/// Rows classify against a PLAIN (non-released) working directory: the
+/// corpus pins classifier verdicts, and the process cwd must never decide
+/// them (the crate tree itself may sit under the released /tmp).
 fn run_rows(rows: &[Row]) {
+    let plain = super::plain_dir();
     for Row(cmd, expect) in rows {
-        match (expect, classify(cmd)) {
+        match (expect, classify_with_dir(cmd, plain.path())) {
             (Expect::ReadOnly, BashVerdict::ReadOnly) => {}
             (Expect::Blocked, BashVerdict::WriteBlocked(reason)) => {
                 assert!(

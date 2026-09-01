@@ -4,7 +4,7 @@
 //! Contract split:
 //! - Admission-time mode changes (the `agent` field, POST /agent, POST
 //!   /handoff) stay 409 while draining — they rewrite session config.
-//! - Textual control commands (/sandbox, /act, /act_clear_context) are ADMITTED
+//! - Textual control commands (/plan, /act, /act_clear_context) are ADMITTED
 //!   while running (queue or steer) and applied by the runner at the next
 //!   idle/turn boundary, which structurally has no turn in flight.
 
@@ -194,10 +194,10 @@ async fn agent_field_and_dedicated_switch_paths_remain_409_while_running() {
     start_running_drain(&app, &store, sid, &llm).await;
 
     for (uri, body) in [
-        (format!("/api/sessions/{sid}/agent"), r#"{"value":"sandbox"}"#),
+        (format!("/api/sessions/{sid}/agent"), r#"{"value":"plan"}"#),
         (
             format!("/api/sessions/{sid}/prompt"),
-            r#"{"prompt":"ordinary text","agent":"sandbox","delivery":"queue"}"#,
+            r#"{"prompt":"ordinary text","agent":"plan","delivery":"queue"}"#,
         ),
         (format!("/api/sessions/{sid}/handoff"), r#"{"extra":"now"}"#),
     ] {
@@ -224,7 +224,7 @@ async fn agent_field_and_dedicated_switch_paths_remain_409_while_running() {
         &app,
         "POST",
         &format!("/api/sessions/{sid}/agent"),
-        r#"{"value":"sandbox"}"#,
+        r#"{"value":"plan"}"#,
     )
     .await;
     assert_eq!(idle_switch.status(), StatusCode::OK);
@@ -236,7 +236,7 @@ async fn agent_field_and_dedicated_switch_paths_remain_409_while_running() {
             .unwrap()
             .agent
             .as_deref(),
-        Some("sandbox")
+        Some("plan")
     );
 }
 
@@ -262,7 +262,7 @@ async fn queued_mode_command_admitted_while_running_applies_at_idle_boundary() {
         &app,
         "POST",
         &format!("/api/sessions/{sid}/prompt"),
-        r#"{"prompt":"/sandbox review","delivery":"queue","skill":"reviewer"}"#,
+        r#"{"prompt":"/plan review","delivery":"queue","skill":"reviewer"}"#,
     )
     .await;
     assert_eq!(
@@ -279,8 +279,8 @@ async fn queued_mode_command_admitted_while_running_applies_at_idle_boundary() {
     // The queued mode command sits pending, waiting for the idle boundary.
     let pending = store.pending_inputs(sid, Delivery::Queue).await.unwrap();
     assert!(
-        pending.iter().any(|i| i.prompt == "/sandbox review"),
-        "queued /sandbox review must be pending: {pending:?}"
+        pending.iter().any(|i| i.prompt == "/plan review"),
+        "queued /plan review must be pending: {pending:?}"
     );
 
     // Stop the hung run; the queue row survives.
@@ -288,7 +288,7 @@ async fn queued_mode_command_admitted_while_running_applies_at_idle_boundary() {
     handle.cancel.lock().await.cancel();
     wait_idle(&state, sid).await;
 
-    // A fresh drain consumes the queue: /sandbox applies at the idle boundary
+    // A fresh drain consumes the queue: /plan applies at the idle boundary
     // (agent flip persisted before the LLM turn), then "review" runs.
     let kick = request(
         &app,
@@ -299,10 +299,10 @@ async fn queued_mode_command_admitted_while_running_applies_at_idle_boundary() {
     .await;
     assert_eq!(kick.status(), StatusCode::OK);
 
-    wait_agent(&store, sid, "sandbox").await;
+    wait_agent(&store, sid, "plan").await;
     wait_for_event_kind(&store, sid, "agent_switched").await;
     let meta = store.get_session(sid).await.unwrap().unwrap();
-    assert_eq!(meta.agent.as_deref(), Some("sandbox"));
+    assert_eq!(meta.agent.as_deref(), Some("plan"));
 
     // Cleanup: stop the drain parked on the "review" LLM turn.
     let handle = state.handles.lock().await.get(sid).cloned().unwrap();
@@ -327,12 +327,12 @@ async fn steered_mode_command_admitted_while_running_applies_at_turn_boundary() 
 
     start_running_drain(&app, &store, sid, &llm).await;
 
-    // Bare "/sandbox" steer while the drain is stuck in the LLM call: 200.
+    // Bare "/plan" steer while the drain is stuck in the LLM call: 200.
     let admitted = request(
         &app,
         "POST",
         &format!("/api/sessions/{sid}/prompt"),
-        r#"{"prompt":"/sandbox","delivery":"steer"}"#,
+        r#"{"prompt":"/plan","delivery":"steer"}"#,
     )
     .await;
     assert_eq!(
@@ -344,7 +344,7 @@ async fn steered_mode_command_admitted_while_running_applies_at_turn_boundary() 
     // The steer fires turn_cancel; the runner absorbs it at the next turn
     // boundary and goes idle (bare command, no LLM call).
     wait_idle(&state, sid).await;
-    wait_agent(&store, sid, "sandbox").await;
+    wait_agent(&store, sid, "plan").await;
     wait_for_event_kind(&store, sid, "steer_consumed").await;
     wait_for_event_kind(&store, sid, "agent_switched").await;
     wait_for_event_kind(&store, sid, "done").await;
@@ -355,7 +355,7 @@ async fn steered_mode_command_admitted_while_running_applies_at_turn_boundary() 
     let messages = store.load_messages(sid).await.unwrap();
     assert!(messages
         .iter()
-        .all(|message| !message.text().contains("/sandbox")));
+        .all(|message| !message.text().contains("/plan")));
     assert!(store
         .pending_inputs(sid, Delivery::Steer)
         .await
@@ -455,15 +455,15 @@ async fn get_json(app: &axum::Router, uri: &str) -> (StatusCode, serde_json::Val
     (status, body)
 }
 
-/// Regression (plan -> sandbox rename): `POST /agent` accepts the `sandbox`
+/// Regression (sandbox -> plan rename): `POST /agent` accepts the `plan`
 /// agent — the persisted meta and the subsequent GET both reflect it — while
-/// the legacy `plan` name (`resolve_agent("plan")` is None) gets the standard
-/// unknown-agent 400 and leaves zero footprint.
+/// the interlude `sandbox` name (`resolve_agent("sandbox")` is None) gets the
+/// standard unknown-agent 400 and leaves zero footprint.
 #[tokio::test]
-async fn agent_switch_accepts_sandbox_and_rejects_legacy_plan() {
+async fn agent_switch_accepts_plan_and_rejects_legacy_sandbox() {
     let tmp = tempfile::tempdir().unwrap();
     let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
-    let sid = "switch-sandbox";
+    let sid = "switch-plan";
     seed_session(&store, sid).await;
     let llm = Arc::new(HangingStream {
         calls: AtomicUsize::new(0),
@@ -471,18 +471,18 @@ async fn agent_switch_accepts_sandbox_and_rejects_legacy_plan() {
     let state = seeded_state(&tmp, &store, llm.clone());
     let app = opencoder_web::build_app(state.clone(), None, false);
 
-    // sandbox: accepted, persisted, and visible on the next GET.
+    // plan: accepted, persisted, and visible on the next GET.
     let switched = request(
         &app,
         "POST",
         &format!("/api/sessions/{sid}/agent"),
-        r#"{"value":"sandbox"}"#,
+        r#"{"value":"plan"}"#,
     )
     .await;
     assert_eq!(
         switched.status(),
         StatusCode::OK,
-        "sandbox must be a switchable agent"
+        "plan must be a switchable agent"
     );
     assert_eq!(
         store
@@ -492,27 +492,27 @@ async fn agent_switch_accepts_sandbox_and_rejects_legacy_plan() {
             .unwrap()
             .agent
             .as_deref(),
-        Some("sandbox")
+        Some("plan")
     );
     let (status, body) = get_json(&app, &format!("/api/sessions/{sid}")).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(
-        body["meta"]["agent"], "sandbox",
-        "GET must report the sandbox agent: {body}"
+        body["meta"]["agent"], "plan",
+        "GET must report the plan agent: {body}"
     );
 
-    // The legacy name is not an agent anymore: standard unknown-agent 400.
+    // The interlude name is not an agent anymore: standard unknown-agent 400.
     let legacy = request(
         &app,
         "POST",
         &format!("/api/sessions/{sid}/agent"),
-        r#"{"value":"plan"}"#,
+        r#"{"value":"sandbox"}"#,
     )
     .await;
     assert_eq!(
         legacy.status(),
         StatusCode::BAD_REQUEST,
-        "plan must not be switchable"
+        "sandbox must not be switchable"
     );
     let bytes = axum::body::to_bytes(legacy.into_body(), 4096).await.unwrap();
     let err: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
@@ -527,22 +527,22 @@ async fn agent_switch_accepts_sandbox_and_rejects_legacy_plan() {
 
     // Zero footprint: rejected switch left meta + live override untouched.
     let meta = store.get_session(sid).await.unwrap().unwrap();
-    assert_eq!(meta.agent.as_deref(), Some("sandbox"));
+    assert_eq!(meta.agent.as_deref(), Some("plan"));
     let handle = state.handles.lock().await.get(sid).cloned().unwrap();
     assert_eq!(
         handle.overrides.lock().await.agent.as_deref(),
-        Some("sandbox")
+        Some("plan")
     );
 }
 
-/// Regression (wire contract): the events a sandbox session emits include an
-/// `agent_switched` frame whose value is "sandbox" — never the legacy "plan"
-/// value — so reconnect replays render the real agent name.
+/// Regression (wire contract): the events a plan session emits include an
+/// `agent_switched` frame whose value is "plan" — never the interlude
+/// "sandbox" value — so reconnect replays render the real agent name.
 #[tokio::test]
-async fn sandbox_session_emits_agent_switched_with_sandbox_value() {
+async fn plan_session_emits_agent_switched_with_plan_value() {
     let tmp = tempfile::tempdir().unwrap();
     let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
-    let sid = "sandbox-frame";
+    let sid = "plan-frame";
     seed_session(&store, sid).await;
     let llm = Arc::new(HangingStream {
         calls: AtomicUsize::new(0),
@@ -555,17 +555,17 @@ async fn sandbox_session_emits_agent_switched_with_sandbox_value() {
         &app,
         "POST",
         &format!("/api/sessions/{sid}/prompt"),
-        r#"{"prompt":"/sandbox","delivery":"steer"}"#,
+        r#"{"prompt":"/plan","delivery":"steer"}"#,
     )
     .await;
     assert_eq!(
         admitted.status(),
         StatusCode::OK,
-        "steered /sandbox must be admitted while running"
+        "steered /plan must be admitted while running"
     );
 
     wait_idle(&state, sid).await;
-    wait_agent(&store, sid, "sandbox").await;
+    wait_agent(&store, sid, "plan").await;
     wait_for_event_kind(&store, sid, "agent_switched").await;
 
     let events = store.events_after(sid, 0).await.unwrap();
@@ -581,16 +581,16 @@ async fn sandbox_session_emits_agent_switched_with_sandbox_value() {
     for record in &switched {
         assert_eq!(
             record.payload.get("agent").and_then(|v| v.as_str()),
-            Some("sandbox"),
-            "agent_switched payload must name sandbox: {}",
+            Some("plan"),
+            "agent_switched payload must name plan: {}",
             record.payload
         );
     }
     assert!(
         events
             .iter()
-            .all(|r| r.payload.get("agent").and_then(|v| v.as_str()) != Some("plan")),
-        "no frame may carry the legacy plan value"
+            .all(|r| r.payload.get("agent").and_then(|v| v.as_str()) != Some("sandbox")),
+        "no frame may carry the legacy sandbox value"
     );
 
     // Cleanup: the original drain is parked on the hanging LLM turn.

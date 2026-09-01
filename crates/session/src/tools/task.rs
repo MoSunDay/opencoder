@@ -13,7 +13,7 @@ impl Tool for TaskTool {
     fn description(&self) -> &str {
         // Canonical act-mode description. Schema generation routes through
         // [`description_for`] / [`parameters_for`] which adapt to the owning
-        // agent's kind (sandbox mode drops `build`); this trait method is a
+        // agent's kind (plan mode drops `build`); this trait method is a
         // fallback for any direct `tool.description()` consumer.
         "Launch a subagent to handle a delegated task in isolation. \
          The subagent has its own message history and tools, and returns a final summary. \
@@ -32,7 +32,7 @@ impl Tool for TaskTool {
 }
 
 /// Description of the `task` tool. `explore` is always advertised; `build`
-/// is shown only when `hide_build` is false (sandbox mode always hides it,
+/// is shown only when `hide_build` is false (plan mode always hides it,
 /// as does any agent while the task-plan skill is active).
 pub fn description_for(hide_build: bool) -> String {
     let prefix = "Launch a subagent to handle a delegated task in isolation. \

@@ -1,11 +1,16 @@
-//! `cd`/`pushd` destination scoping: allow only `cd -`, declared safe scopes,
-//! and the built-in release directories; everything else asks.
+//! `cd`/`pushd` destination scoping. `cd` itself writes nothing: it only
+//! re-aims the shell cwd for this invocation, and the analyzer re-aims the
+//! analysis cwd the same way, so a `cd` whose destination is statically
+//! resolvable is read-only and passes both sandbox and plan policy.
+//! Unresolvable destinations (variables, `~`, no-args home, unknown flags)
+//! still ask — later relative operands would be unjudgeable. `pushd` keeps
+//! destination scoping (safe scopes + release dirs); `popd` asks.
 //!
 //! Ported from rippy (MIT) https://github.com/mpecan/rippy
 
 use std::path::Path;
 
-use super::{Classification, Handler, HandlerContext, is_within_safe_dir, normalize_path};
+use super::{is_within_safe_dir, normalize_path, Classification, Handler, HandlerContext};
 use crate::verdict::AllowReason;
 
 pub(crate) static CD_HANDLER: CdHandler = CdHandler;
@@ -81,8 +86,17 @@ impl Handler for CdHandler {
             normalize_path(&ctx.working_directory.join(target))
         };
 
-        // Sandbox policy: the working directory is NOT a writable scope, so
-        // only a declared safe scope (or a built-in release dir) auto-passes.
+        // `cd` with a statically resolvable destination is read-only: no
+        // filesystem state changes, and `analyze_list` re-aims the analysis
+        // cwd from this same target, so every later relative operand is
+        // still judged against the directory it would really land in.
+        if ctx.command_name == "cd" {
+            return Classification::Allow(AllowReason::handler(format!("cd to {target}")));
+        }
+
+        // Sandbox policy (`pushd`): the working directory is NOT a writable
+        // scope, so only a declared safe scope (or a built-in release dir)
+        // auto-passes; the dirstack effect is not reasoned about.
         if is_within_safe_dir(&resolved, ctx.safe_scopes) {
             Classification::Allow(AllowReason::handler(format!(
                 "{} within allowed scope",
@@ -92,7 +106,6 @@ impl Handler for CdHandler {
             Classification::Ask(format!("{} to {target}", ctx.command_name))
         }
     }
-
 }
 
 #[cfg(test)]

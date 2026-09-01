@@ -240,8 +240,26 @@ export function reduceFrame(state, frame, nowMs) {
   }
 }
 
+// Control command heads (crates/session/src/control_cmd.rs::split_control_prefix).
+const CONTROL_HEADS = new Set(['/act', '/plan', '/act_clear_context', '/clear_context']);
+
+/// Mirror of crates/session/src/control_cmd.rs::consumed_echo_text — the one
+/// echo contract: a compound control submission echoes only its tail, a bare
+/// control command echoes nothing, plain text echoes verbatim.
+export function consumedEchoText(prompt) {
+  const text = typeof prompt === 'string' ? prompt : '';
+  const trimmed = text.trim();
+  const head = trimmed.split(/\s+/)[0] || '';
+  if (!CONTROL_HEADS.has(head)) {
+    return text;
+  }
+  return trimmed.slice(head.length).trim();
+}
+
 /// User prompt echo for flows where the server emits no echo frame (remote
-/// dispatch has no queue_consumed — the task session is synthetic).
+/// dispatch has no queue_consumed — the task session is synthetic). Feed it
+/// through consumedEchoText so the optimistic bubble matches what the server
+/// would have recorded — never the command token itself.
 export function withUserTurn(state, text) {
   if (!text) {
     return state;

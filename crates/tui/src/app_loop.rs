@@ -90,8 +90,25 @@ pub(crate) fn compute_display<'a>(
     // When viewing a subagent's perspective, swap in its child ChatView,
     // back-title, and its own context stats (instead of the parent's).
     // The body title keeps the "Ctrl+L back" hint.
+    // The focused sidecar box takes precedence (sidecar focus and a subagent
+    // focus are mutually exclusive): body = the sidecar block's nested view,
+    // mode chip reads `sidecar`, and the ctx meter reads the conversation's
+    // accumulated Turn tokens (the child's usage is forwarded bare, so the
+    // nested view itself never carries a context figure). The main task's
+    // `running` state is untouched — it is driven by the worker, not by
+    // sidecar turns.
     let (display_chat, display_title, display_ctx, display_sys, display_mode) =
-        if let Some(idx) = subagent_focus {
+        if let Some((view, question, total_tokens)) = crate::chat::sidecar::focused(chat) {
+            (
+                view,
+                Line::from(format!(
+                    "\u{2190} [Ctrl+L] back | \u{21f2}sidecar {question}"
+                )),
+                total_tokens,
+                sys_tokens,
+                "sidecar".to_string(),
+            )
+        } else if let Some(idx) = subagent_focus {
             match chat.blocks.get(idx) {
                 Some(crate::chat::ChatBlock::Subagent {
                     view, kind, prompt, ..
@@ -245,20 +262,27 @@ pub(crate) async fn fold_ui_events(
                     // Prefer the text carried by the event (robust against a
                     // saturated UI channel dropping the mirror update); fall
                     // back to the local mirror for old events without text.
+                    // The event text is already model-facing: the compound
+                    // tail for `/plan <args>`, empty for a bare control
+                    // command (applied inline, never echoed). Normalize again
+                    // here so legacy persisted events carrying the raw
+                    // prefix stay correct too; the local mirror falls back
+                    // through the same normalization.
                     let display = if !text.is_empty() {
-                        text.clone()
+                        opencoder_session::consumed_echo_text(text)
                     } else {
                         queue_items
                             .iter()
                             .find(|(s, _)| s == seq)
-                            .map(|(_, d)| d.clone())
-                            .unwrap_or_default()
+                            .and_then(|(_, d)| opencoder_session::consumed_echo_text(d))
                     };
-                    if !display.is_empty() {
-                        chat.blocks.push(crate::chat::ChatBlock::User {
-                            rendered: crate::markdown::render(&display),
-                        });
-                        chat.push_marker(Line::from(""));
+                    if let Some(display) = display {
+                        if !display.is_empty() {
+                            chat.blocks.push(crate::chat::ChatBlock::User {
+                                rendered: crate::markdown::render(&display),
+                            });
+                            chat.push_marker(Line::from(""));
+                        }
                     }
                     queue_items.retain(|(s, _)| s != seq);
                     // A queued input actually took effect: re-derive the

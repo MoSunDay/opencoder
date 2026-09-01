@@ -46,6 +46,7 @@ pub mod resize;
 pub mod scope_dialog;
 pub mod scrollbar;
 pub mod session_ui;
+pub mod sidecar_ui;
 pub mod skill_display;
 pub mod skill_menu;
 pub mod skill_persist;
@@ -63,6 +64,10 @@ pub mod undo;
 pub mod vim;
 pub mod welcome;
 pub mod worker;
+
+#[cfg(test)]
+#[path = "sidecar_ui_tests.rs"]
+mod sidecar_ui_tests;
 
 use std::path::PathBuf;
 

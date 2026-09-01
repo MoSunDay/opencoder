@@ -76,6 +76,10 @@ pub(crate) async fn switch_session(
     child_runtime: &mut ChildRuntimeHandles,
     skill_handle: &mut Arc<Mutex<Option<String>>>,
     question_hub: &mut Arc<opencoder_session::QuestionHub>,
+    // Ask sender of the OLD session's sidecar actor. Dropped here (the actor
+    // then drains and exits) and replaced by a fresh actor bound to the new
+    // session — sidecar history never crosses sessions.
+    sidecar_ask: &mut mpsc::Sender<String>,
 ) -> Result<()> {
     // Perform session switch.
     // Cancel the in-flight turn before Quit so the worker sees it promptly
@@ -148,6 +152,11 @@ pub(crate) async fn switch_session(
     let session_for_worker = new_session;
     let agent_name_for_tokens = session_for_worker.agent.name.clone();
     let workdir_for_tokens = session_for_worker.working_dir.clone();
+    // Fresh sidecar actor for the incoming session: drop the old sender (the
+    // old actor exits once it drains) and spawn against the NEW session with
+    // the NEW worker's event channel, before that channel/session move.
+    *sidecar_ask =
+        crate::sidecar_ui::spawn_actor(&session_for_worker, ntx.clone(), Some(store.clone()));
     tokio::spawn(async move {
         let mut sess = session_for_worker;
         while let Some(cmd) = n_cmd_rx.recv().await {
@@ -198,6 +207,9 @@ pub(crate) async fn switch_session(
             ..Default::default()
         },
     };
+    // Sidecar focus never survives a switch: the rebuilt transcript belongs to
+    // the new session, whose sidecar actor starts with an empty conversation.
+    chat.sidecar_focus = false;
     // Restore UI interaction state from cache,
     // or initialise fresh for a new session.
     if let Some(st) = restored {

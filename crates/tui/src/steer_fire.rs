@@ -92,7 +92,13 @@ pub(crate) fn fire_steer_interrupt(
     turn_cancel: &SharedCancel,
     chat: &ChatView,
 ) -> steer_dispatch::Action {
-    let sub_focused = subagent_focus.is_some();
+    // Liveness-aware focus: only a LIVE (`done == false`) subagent block
+    // routes `>` to the child. A done subagent or a stale block index must
+    // fall through to the PARENT path — the queue panel already shows the
+    // parent's steer rows in that state (`app_display::steer_queue_sources`),
+    // so the click must interrupt the parent and submit the steer instead of
+    // silently no-oping inside `fire_subagent_turn_cancel`.
+    let sub_focused = subagent_input::is_live_subagent_focus(chat, subagent_focus);
     // fire_child_cancels both checks AND cancels children. While a running
     // subagent is focused the `>` targets the CHILD's own turn token, so the
     // siblings are left untouched (no cascade).
@@ -194,6 +200,114 @@ mod tests {
         assert!(
             turn_cancel.lock().unwrap().is_cancelled(),
             "running parent with a pending steer must fire the turn_cancel"
+        );
+    }
+
+    // Stale-focus guard (G3): a focused subagent that is DONE must NOT swallow
+    // the click. The panel shows the parent's steer rows in that state
+    // (`app_display::steer_queue_sources`), so `>` must take the parent path
+    // and fire turn_cancel — before this fix the click silently no-oped
+    // inside `fire_subagent_turn_cancel` (no interrupt, no submit).
+    #[test]
+    fn done_subagent_focus_falls_back_to_parent_steer() {
+        let turn_cancel = fresh_cancel();
+        let mut chat = ChatView::default();
+        chat.blocks.push(crate::chat::ChatBlock::Subagent {
+            id: "task-1".into(),
+            child_session_id: "sub-1".into(),
+            kind: "explore".into(),
+            prompt: "p".into(),
+            view: ChatView::default(),
+            done: true,
+            ok: true,
+            cancelled: false,
+            summary: String::new(),
+            started_at_ms: 0,
+            elapsed_ms: None,
+        });
+        chat.steer_items.push((1, "stop now".into()));
+
+        let action = fire_steer_interrupt(
+            Some(0),
+            true,
+            &empty_cancels(),
+            &empty_turn_cancels(),
+            &turn_cancel,
+            &chat,
+        );
+
+        assert_eq!(action, steer_dispatch::Action::SteerParent);
+        assert!(
+            turn_cancel.lock().unwrap().is_cancelled(),
+            "done-subagent focus must fall back to the parent interrupt"
+        );
+    }
+
+    // G3 companion: a stale focus index (block replaced/shifted since the
+    // click target was registered) must likewise fall back to the parent path.
+    #[test]
+    fn stale_focus_index_falls_back_to_parent_steer() {
+        let turn_cancel = fresh_cancel();
+        let mut chat = ChatView::default();
+        chat.steer_items.push((1, "stop now".into()));
+
+        let action = fire_steer_interrupt(
+            Some(9),
+            true,
+            &empty_cancels(),
+            &empty_turn_cancels(),
+            &turn_cancel,
+            &chat,
+        );
+
+        assert_eq!(action, steer_dispatch::Action::SteerParent);
+        assert!(turn_cancel.lock().unwrap().is_cancelled());
+    }
+
+    // Live-subagent focus still targets ONLY the child's turn token: the
+    // parent's turn_cancel stays intact (the child absorbs its own steer).
+    #[test]
+    fn live_subagent_focus_targets_child_token_only() {
+        let turn_cancel = fresh_cancel();
+        let child_token: SharedCancel = fresh_cancel();
+        let child_turn_cancels = empty_turn_cancels();
+        child_turn_cancels
+            .lock()
+            .unwrap()
+            .insert("task-1".into(), child_token.clone());
+        let mut chat = ChatView::default();
+        chat.blocks.push(crate::chat::ChatBlock::Subagent {
+            id: "task-1".into(),
+            child_session_id: "sub-1".into(),
+            kind: "explore".into(),
+            prompt: "p".into(),
+            view: ChatView::default(),
+            done: false,
+            ok: false,
+            cancelled: false,
+            summary: String::new(),
+            started_at_ms: 0,
+            elapsed_ms: None,
+        });
+        chat.steer_items.push((1, "parent steer".into()));
+
+        let action = fire_steer_interrupt(
+            Some(0),
+            true,
+            &empty_cancels(),
+            &child_turn_cancels,
+            &turn_cancel,
+            &chat,
+        );
+
+        assert_eq!(action, steer_dispatch::Action::Subagent);
+        assert!(
+            child_token.lock().unwrap().is_cancelled(),
+            "live child focus must fire the child's turn token"
+        );
+        assert!(
+            !turn_cancel.lock().unwrap().is_cancelled(),
+            "live child focus must NOT interrupt the parent's turn"
         );
     }
 

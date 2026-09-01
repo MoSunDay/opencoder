@@ -128,6 +128,14 @@ pub(crate) fn pre_key_intercept(
     needs_clear: &mut bool,
 ) -> bool {
     *needs_clear = false;
+    // Sidecar ctx-switch: Esc exits to the parent view. The sidecar actor and
+    // its conversation keep running in the background — only the focus flips.
+    if chat.sidecar_focus && k.code == KeyCode::Esc {
+        chat.sidecar_focus = false;
+        *follow = true; // follow mode: render clamps scroll to bottom (render.rs)
+        *last_esc = None;
+        return true;
+    }
     // Subagent ctx-switch: Esc exits to parent view.
     if subagent_focus.is_some() && k.code == KeyCode::Esc {
         *subagent_focus = None;
@@ -143,6 +151,13 @@ pub(crate) fn pre_key_intercept(
                 view.collapse_all_collapsible();
             }
             *subagent_focus = None;
+            *last_esc = None;
+        }
+        // Same exit path for a focused sidecar box: collapse its nested view,
+        // then fall through to the parent-wide collapse below.
+        if chat.sidecar_focus {
+            crate::chat::sidecar::collapse_focused(chat);
+            chat.sidecar_focus = false;
             *last_esc = None;
         }
         chat.collapse_all_collapsible();
@@ -497,21 +512,27 @@ pub(crate) fn push_history(history: &mut Vec<String>, hist_idx: &mut Option<usiz
     *hist_idx = None;
 }
 
+/// Echo a submitted prompt: `echo` is the model-facing text rendered as the
+/// transcript user block (a compound control command's tail — the command
+/// token itself never echoes), `history_text` is the raw input kept for
+/// arrow-up recall. `first_prompt` (title source) stays keyed on the raw
+/// input so slash-prefixed inputs keep being excluded.
 pub(crate) fn push_user(
     chat: &mut ChatView,
     history: &mut Vec<String>,
     hist_idx: &mut Option<usize>,
-    text: &str,
+    echo: &str,
+    history_text: &str,
 ) {
     if chat.first_prompt.is_none() {
-        let t = text.trim();
+        let t = history_text.trim();
         if !t.is_empty() && !t.starts_with('/') {
             chat.first_prompt = Some(t.to_string());
         }
     }
-    push_history(history, hist_idx, text);
+    push_history(history, hist_idx, history_text);
     chat.blocks.push(crate::chat::ChatBlock::User {
-        rendered: crate::markdown::render(text),
+        rendered: crate::markdown::render(echo),
     });
     chat.push_marker(Line::from(""));
 }

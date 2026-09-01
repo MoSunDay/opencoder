@@ -20,8 +20,8 @@ fn flash_status_uses_the_same_visibility_rule() {
 }
 
 #[test]
-fn warn_flash_hue_covers_sandbox_plan_and_clear_guard() {
-    assert!(super::is_warn_flash("\u{2192} sandbox mode"));
+fn warn_flash_hue_covers_plan_act_and_clear_guard() {
+    assert!(super::is_warn_flash("\u{2192} plan mode"));
     assert!(super::is_warn_flash("\u{2192} edit plan"));
     assert!(super::is_warn_flash(
         "\u{2192} \u{280b} 5s \u{4e4b}\u{540e}\u{4ec5}\u{4fdd}\u{7559}\u{8ba1}\u{5212}\u{5e76}\u{6267}\u{884c}\u{2026}"

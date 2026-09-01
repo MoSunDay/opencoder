@@ -366,7 +366,7 @@ fn status_dot_stays_hidden_through_second_phase() {
                 render_status(
                     f,
                     area,
-                    "sandbox",
+                    "plan",
                     true,
                     "working\u{2026}",
                     tick,
@@ -384,7 +384,7 @@ fn status_dot_stays_hidden_through_second_phase() {
             "hidden phase must hide the dot at tick={tick}; got: {row}"
         );
         assert!(
-            row.starts_with("   [sandbox]"),
+            row.starts_with("   [plan]"),
             "mode chip must stay at the same column at tick={tick}; got: {row}"
         );
     }
@@ -411,11 +411,11 @@ fn status_dot_stays_steady_when_idle() {
     }
 }
 
-/// The sandbox mode chip renders as `[sandbox]` in the warning hue: the
+/// The plan mode chip renders as `[plan]` in the warning hue: the
 /// read-only agent is announced by name AND by colour (the removed plan
 /// agent never re-appears as a chip).
 #[test]
-fn status_bar_sandbox_chip_renders_in_warn_hue() {
+fn status_bar_plan_chip_renders_in_warn_hue() {
     use crate::theme::agent_chip_fg;
 
     let backend = TestBackend::new(120, 3);
@@ -423,19 +423,19 @@ fn status_bar_sandbox_chip_renders_in_warn_hue() {
     terminal
         .draw(|f| {
             let area = f.area();
-            render_status(f, area, "sandbox", false, "", 0, Some(0), 200000, 200000, 0);
+            render_status(f, area, "plan", false, "", 0, Some(0), 200000, 200000, 0);
         })
         .unwrap();
 
     let buf = terminal.backend().buffer();
     let row = row_text(buf, 0, 120);
     let chip_pos = row
-        .find("[sandbox]")
-        .expect("the sandbox chip text must render at the bottom-left");
+        .find("[plan]")
+        .expect("the plan chip text must render at the bottom-left");
     assert_eq!(
         buf.cell((chip_pos as u16, 0)).unwrap().fg,
-        agent_chip_fg("sandbox"),
-        "the chip must be painted in the sandbox (warn) hue"
+        agent_chip_fg("plan"),
+        "the chip must be painted in the plan (warn) hue"
     );
     
 

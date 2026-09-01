@@ -1,7 +1,7 @@
-//! Regression: a store session row persisted with the removed `plan` agent
-//! (pre-refactor plan mode) resumes through the session layer as the `act`
-//! agent — the pinned default. No panic, no dead agent reference, and the
-//! resumed session runs a normal turn.
+//! Regression: a store session row persisted with the interlude `sandbox`
+//! agent resumes through the session layer as the restored `plan` agent. No
+//! panic, no dead agent reference, and the resumed session runs a normal
+//! turn with the plan write guard active.
 
 use std::sync::Arc;
 
@@ -18,13 +18,13 @@ fn config() -> Config {
 }
 
 #[tokio::test]
-async fn legacy_plan_row_resumes_as_act_agent() {
+async fn legacy_sandbox_row_resumes_as_plan_agent() {
     let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
     store
         .create_session(&SessionMeta {
-            id: "legacy-plan".into(),
-            // The removed agent name, exactly as old rows persisted it.
-            agent: Some("plan".into()),
+            id: "legacy-sandbox".into(),
+            // The interlude agent name, exactly as those rows persisted it.
+            agent: Some("sandbox".into()),
             model: Some("m/g".into()),
             created_at: 0,
             updated_at: 0,
@@ -34,8 +34,8 @@ async fn legacy_plan_row_resumes_as_act_agent() {
         .unwrap();
     store
         .append_messages(
-            "legacy-plan",
-            &[opencoder_core::Message::user("u1", "old plan-mode work")],
+            "legacy-sandbox",
+            &[opencoder_core::Message::user("u1", "old sandbox-mode work")],
         )
         .await
         .unwrap();
@@ -48,7 +48,7 @@ async fn legacy_plan_row_resumes_as_act_agent() {
     }]));
     let resumed: SessionState = resume(
         store.clone(),
-        "legacy-plan",
+        "legacy-sandbox",
         config(),
         mock,
         dir.path().to_path_buf(),
@@ -56,19 +56,19 @@ async fn legacy_plan_row_resumes_as_act_agent() {
     .await
     .unwrap();
 
-    // The removed agent resolves to the default execution agent.
+    // The interlude name resolves to the restored plan agent.
     assert_eq!(
-        resumed.agent.name, "act",
-        "legacy `plan` rows must resume as the act agent"
+        resumed.agent.name, "plan",
+        "legacy `sandbox` rows must resume as the plan agent"
     );
     assert_eq!(
         resumed.agent.kind,
-        opencoder_core::AgentKind::Act,
-        "resolved agent carries the act kind (no sandbox-style write guard)"
+        opencoder_core::AgentKind::Plan,
+        "resolved agent carries the plan kind (write guard stays active)"
     );
     assert!(
-        resolve_agent("plan").is_none(),
-        "precondition: `plan` no longer resolves as a builtin agent"
+        resolve_agent("sandbox").is_none(),
+        "precondition: `sandbox` no longer resolves as a builtin agent"
     );
 
     // The resumed session is fully functional.

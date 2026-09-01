@@ -17,28 +17,30 @@ pub(crate) use crate::run_image::load_image_data_uris;
 
 pub(crate) use crate::model_override::{apply_model_override, reapply_resume_model};
 
-/// Legacy spelling compat for the removed plan/act dual mode: `/plan` was the
-/// old read-only mode switch; the session layer now only parses `/sandbox`.
-/// Rewrite a leading `/plan` control token (bare or compound) so scripted
-/// inputs and muscle memory keep landing on the sandbox agent. Anything that
-/// is not a leading control token passes through unchanged (mid-sentence
-/// mentions, `/planner`, plain prose). Pure so it is directly unit-testable.
-pub fn rewrite_legacy_plan_prefix(prompt: &str) -> String {
+/// Legacy spelling compat for the sandbox-mode interlude: `/sandbox` was the
+/// read-only mode switch while the dual mode was replaced; the canonical
+/// spelling is `/plan` again. Rewrite a leading `/sandbox` control token
+/// (bare or compound) so scripted inputs and muscle memory keep landing on
+/// the plan agent. Anything that is not a leading control token passes
+/// through unchanged (mid-sentence mentions, `/sandboxed`, plain prose).
+/// Pure so it is directly unit-testable.
+pub fn rewrite_legacy_sandbox_prefix(prompt: &str) -> String {
     let trimmed = prompt.trim();
-    let rest = match trimmed.strip_prefix("/plan") {
-        // `/plan` alone or `/plan ...` — never `/planner` or "the /plan doc".
+    let rest = match trimmed.strip_prefix("/sandbox") {
+        // `/sandbox` alone or `/sandbox ...` — never `/sandboxed` or "the
+        // /sandbox doc".
         Some(r) if r.is_empty() || r.starts_with(char::is_whitespace) => r.trim(),
         _ => return prompt.to_string(),
     };
     if rest.is_empty() {
-        "/sandbox".to_string()
+        "/plan".to_string()
     } else {
-        format!("/sandbox {rest}")
+        format!("/plan {rest}")
     }
 }
 
 
-/// Apply an `--agent` override (builtin name like sandbox/explore/build) to the
+/// Apply an `--agent` override (builtin name like plan/explore/build) to the
 /// config. Sets `config.agent.default` so the fresh-session path resolves it.
 /// Returns true when the config changed.
 pub(crate) fn apply_agent_override(config: &mut Config, agent: &Option<String>) -> bool {
@@ -74,12 +76,12 @@ pub(crate) fn reapply_resume_agent(
 }
 
 pub async fn run_headless(cli: &Cli, prompt: String) -> Result<()> {
-    // Legacy compat: the removed plan/act dual mode spelled the read-only
-    // switch `/plan`. The session layer no longer parses it, so an unrewritten
-    // submission would reach the model as plain text. Rewrite the control
-    // prefix before any resume/agent bookkeeping so every downstream consumer
-    // (skill stripping, compound forwarding, the runner) sees `/sandbox`.
-    let prompt = rewrite_legacy_plan_prefix(&prompt);
+    // Legacy compat: the sandbox-mode interlude spelled the read-only
+    // switch `/sandbox`. The canonical spelling is `/plan` again, so an
+    // unrewritten submission would reach the model as plain text. Rewrite the
+    // control prefix before any resume/agent bookkeeping so every downstream
+    // consumer (skill stripping, compound forwarding, the runner) sees `/plan`.
+    let prompt = rewrite_legacy_sandbox_prefix(&prompt);
     // --fork copies a resumed session, so it is meaningless without a resume
     // target. Without this guard, `--fork` on its own silently creates a fresh
     // session (pick_resume_id returns Ok(None) and cli.fork is never read).
@@ -229,7 +231,7 @@ pub async fn run_headless(cli: &Cli, prompt: String) -> Result<()> {
             opencoder_core::strip_resolved_skill_tokens(&prompt, &resolved_names)
         };
         // When skill stripping collapses a compound control command (e.g.
-        // "/sandbox $skill" -> "/sandbox"), forward the original text so the runner
+        // "/plan $skill" -> "/plan"), forward the original text so the runner
         // resolves the skill and injects the trigger instead of treating it as
         // a mode-switch-only no-op.
         if !names.is_empty()
@@ -414,30 +416,30 @@ mod tests {
     }
 
     #[test]
-    fn legacy_plan_prefix_rewrites_to_sandbox() {
+    fn legacy_sandbox_prefix_rewrites_to_plan() {
         // Compound with irregular spacing (the regression case from the
-        // removed plan/act dual mode) collapses to the live spelling.
+        // sandbox-mode interlude) collapses to the live plan spelling.
         assert_eq!(
-            rewrite_legacy_plan_prefix("/plan  draft the plan"),
-            "/sandbox draft the plan"
+            rewrite_legacy_sandbox_prefix("/sandbox  draft the plan"),
+            "/plan draft the plan"
         );
         // Bare switch and leading-whitespace variant.
-        assert_eq!(rewrite_legacy_plan_prefix("/plan"), "/sandbox");
-        assert_eq!(rewrite_legacy_plan_prefix("  /plan now"), "/sandbox now");
+        assert_eq!(rewrite_legacy_sandbox_prefix("/sandbox"), "/plan");
+        assert_eq!(rewrite_legacy_sandbox_prefix("  /sandbox now"), "/plan now");
         // Non-control text passes through untouched.
         assert_eq!(
-            rewrite_legacy_plan_prefix("explain /plan to me"),
-            "explain /plan to me"
+            rewrite_legacy_sandbox_prefix("explain /sandbox to me"),
+            "explain /sandbox to me"
         );
-        assert_eq!(rewrite_legacy_plan_prefix("/planner stuff"), "/planner stuff");
-        assert_eq!(rewrite_legacy_plan_prefix("hello world"), "hello world");
+        assert_eq!(rewrite_legacy_sandbox_prefix("/sandboxed stuff"), "/sandboxed stuff");
+        assert_eq!(rewrite_legacy_sandbox_prefix("hello world"), "hello world");
         // The live spelling must never be double-rewritten.
-        assert_eq!(rewrite_legacy_plan_prefix("/sandbox review"), "/sandbox review");
-        // And the rewritten compound is a live sandbox switch for the runner.
+        assert_eq!(rewrite_legacy_sandbox_prefix("/plan review"), "/plan review");
+        // And the rewritten compound is a live plan switch for the runner.
         assert!(matches!(
-            opencoder_session::split_control_prefix(&rewrite_legacy_plan_prefix("/plan draft")),
+            opencoder_session::split_control_prefix(&rewrite_legacy_sandbox_prefix("/sandbox draft")),
             Some((opencoder_session::ControlCmd::SwitchAgent(name), Some(rest)))
-                if name == "sandbox" && rest == "draft"
+                if name == "plan" && rest == "draft"
         ));
     }
 
@@ -642,10 +644,10 @@ mod tests {
     fn apply_agent_override_sets_default() {
         let mut cfg = Config::default();
         assert_eq!(cfg.agent.default, "act");
-        assert!(apply_agent_override(&mut cfg, &Some("sandbox".into())));
-        assert_eq!(cfg.agent.default, "sandbox");
+        assert!(apply_agent_override(&mut cfg, &Some("plan".into())));
+        assert_eq!(cfg.agent.default, "plan");
         // same value -> no change (returns false)
-        assert!(!apply_agent_override(&mut cfg, &Some("sandbox".into())));
+        assert!(!apply_agent_override(&mut cfg, &Some("plan".into())));
         // no override -> no change
         let mut cfg2 = Config::default();
         let before = cfg2.agent.default.clone();
@@ -669,13 +671,13 @@ mod tests {
             Arc::new(MockChatClient::new()) as Arc<dyn ChatStream>,
             std::path::PathBuf::from("/tmp"),
         );
-        // explicit --agent sandbox wins over the resumed "act"
-        let changed = reapply_resume_agent(&mut s, &Some("sandbox".into())).unwrap();
-        assert_eq!(changed.as_deref(), Some("sandbox"));
-        assert_eq!(s.agent.name, "sandbox");
+        // explicit --agent plan wins over the resumed "act"
+        let changed = reapply_resume_agent(&mut s, &Some("plan".into())).unwrap();
+        assert_eq!(changed.as_deref(), Some("plan"));
+        assert_eq!(s.agent.name, "plan");
         // same value -> no change, returns None
         assert_eq!(
-            reapply_resume_agent(&mut s, &Some("sandbox".into())).unwrap(),
+            reapply_resume_agent(&mut s, &Some("plan".into())).unwrap(),
             None
         );
         // no override -> no change, returns None
@@ -735,12 +737,12 @@ mod tests {
                 .contains("agent not found: nonexistent-agent"),
             "expected unknown-agent error, got: {err}"
         );
-        // The removed plan/act dual mode: "plan" is no longer a resolvable
-        // builtin, so an explicit --agent plan must be rejected too.
-        let err = reapply_resume_agent(&mut s, &Some("plan".into())).unwrap_err();
+        // The sandbox-mode interlude: "sandbox" is no longer a resolvable
+        // builtin, so an explicit --agent sandbox must be rejected too.
+        let err = reapply_resume_agent(&mut s, &Some("sandbox".into())).unwrap_err();
         assert!(
-            err.to_string().contains("agent not found: plan"),
-            "expected removed-plan-agent error, got: {err}"
+            err.to_string().contains("agent not found: sandbox"),
+            "expected removed-sandbox-agent error, got: {err}"
         );
         // session agent unchanged by the failed reapply
         assert_eq!(s.agent.name, "act");

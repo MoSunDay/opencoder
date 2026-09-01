@@ -3,30 +3,30 @@ use crate::chat::ChatView;
 use crate::theme::{agent_chip_fg, mode_flash_bg};
 use opencoder_session::SessionEvent;
 
-/// Issue #6: the `[agent]` status chip is Yellow in sandbox (read-only) mode
+/// Issue #6: the `[agent]` status chip is Yellow in plan (read-only) mode
 /// and Cyan for every other agent. Guards against a regression to the old
 /// uniform Magenta.
 #[test]
-fn agent_chip_color_is_yellow_for_sandbox_cyan_otherwise() {
-    assert_eq!(agent_chip_fg("sandbox"), Color::Yellow);
+fn agent_chip_color_is_yellow_for_plan_cyan_otherwise() {
+    assert_eq!(agent_chip_fg("plan"), Color::Yellow);
     assert_eq!(agent_chip_fg("act"), Color::Cyan);
-    // The plan agent is gone; its legacy name must not map to the
-    // sandbox hue anymore.
-    assert_eq!(agent_chip_fg("plan"), Color::Cyan);
+    // The interlude `sandbox` spelling is gone; it must not map to the
+    // plan hue anymore.
+    assert_eq!(agent_chip_fg("sandbox"), Color::Cyan);
     assert_eq!(agent_chip_fg("explore"), Color::Cyan);
     assert_eq!(agent_chip_fg(""), Color::Cyan);
 }
 
-/// Issue #6: the sandbox/act mode-flash chip background is Yellow for
-/// sandbox, Cyan for act. Both the agent chip and the flash share the same
+/// Issue #6: the plan/act mode-flash chip background is Yellow for
+/// plan, Cyan for act. Both the agent chip and the flash share the same
 /// theme mapping, so they never visually disagree.
 #[test]
-fn mode_flash_bg_matches_sandbox_yellow_act_cyan() {
+fn mode_flash_bg_matches_plan_yellow_act_cyan() {
     assert_eq!(mode_flash_bg(true), Color::Yellow);
     assert_eq!(mode_flash_bg(false), Color::Cyan);
-    // The two theme helpers agree on sandbox/act, so the chip and flash
+    // The two theme helpers agree on plan/act, so the chip and flash
     // always render the same hue.
-    assert_eq!(agent_chip_fg("sandbox"), mode_flash_bg(true));
+    assert_eq!(agent_chip_fg("plan"), mode_flash_bg(true));
     assert_eq!(agent_chip_fg("act"), mode_flash_bg(false));
 }
 
@@ -259,9 +259,9 @@ fn ap_chip_reflects_autopilot_mode() {
     }
 }
 
-/// Mode-flash chip colouring contract: ONLY the definite sandbox-family
-/// flashes — "→ sandbox mode" (agent switch via /sandbox) and "→ edit plan"
-/// (the plan-text editor, entered from the sandbox agent) — participate in
+/// Mode-flash chip colouring contract: ONLY the definite plan-family
+/// flashes — "→ plan mode" (agent switch via /plan) and "→ edit plan"
+/// (the plan-text editor, entered from the plan agent) — participate in
 /// the two-colour scheme. Every other flash — the busy hint ("⏳ busy — mode
 /// switch blocked, retry when idle"), "→ act mode", and any future neutral
 /// text that merely CONTAINS "plan" — renders on the accent background.
@@ -369,7 +369,7 @@ fn mode_flash_chip_two_colour_only_for_definite_switch() {
     };
 
     // Definite mode-switch flashes keep the two-colour scheme.
-    check("\u{2192} sandbox mode", "sandbox mode", true);
+    check("\u{2192} plan mode", "plan mode", true);
     check("\u{2192} edit plan", "edit plan", true);
     check("\u{2192} act mode", "act mode", false);
     // Busy hint: accent — it is not a completed switch.

@@ -11,7 +11,11 @@ pub enum AgentMode {
 #[serde(rename_all = "lowercase")]
 pub enum AgentKind {
     Act,
-    Sandbox,
+    /// The read-only planning mode. During the sandbox-mode interlude this
+    /// kind was serialized as `"sandbox"`; the alias keeps old persisted
+    /// payloads (session state, events) deserializing after the revert.
+    #[serde(alias = "sandbox")]
+    Plan,
     Subagent,
     Command,
     Workflow,
@@ -67,14 +71,14 @@ pub fn builtin_agents() -> Vec<Agent> {
             tools: ToolFilter::Allow(vec!["bash".into(), "task".into(), "question".into()]),
         },
         Agent {
-            name: "sandbox".into(),
-            kind: AgentKind::Sandbox,
+            name: "plan".into(),
+            kind: AgentKind::Plan,
             mode: AgentMode::Primary,
-            description: "Read-only sandbox agent. Explores and answers questions; mutating operations are intercepted.".into(),
-            prompt: base_prompt_sandbox(),
+            description: "Read-only plan agent. Explores and answers questions; mutating operations are intercepted.".into(),
+            prompt: base_prompt_plan(),
             tools: ToolFilter::Allow(vec![
                 "bash".into(), "task".into(),
-                // Structured clarification: the sandbox agent asks over
+                // Structured clarification: the plan agent asks over
                 // assuming when an unstated assumption would shape the work.
                 // Repo/rules/test facts are looked up, not asked.
                 "question".into(),
@@ -128,7 +132,7 @@ pub fn base_prompt_act() -> String {
 /// It advertises the `bash` and `task` tools and the `explore`/`build`
 /// delegation, so a user-supplied role prompt still drives correct tool use.
 /// The `'build'` delegation clause matches the substring targeted by
-/// `base_prompt_sandbox` for build-stripping in sandbox mode.
+/// `base_prompt_plan` for build-stripping in plan mode.
 pub fn tool_preamble() -> &'static str {
     "## Tools
 - You have two tools: bash (terminal ops: git, builds, tests, running scripts) and task (to spawn subagents).
@@ -139,12 +143,12 @@ pub fn tool_preamble() -> &'static str {
 "
 }
 
-pub fn base_prompt_sandbox() -> String {
-    // Sandbox mode must not advertise the 'build' subagent: strip the build
+pub fn base_prompt_plan() -> String {
+    // Plan mode must not advertise the 'build' subagent: strip the build
     // delegation clause from the shared base prompt before appending the
-    // sandbox suffix. Act mode keeps the full BASE_PROMPT unchanged.
+    // plan suffix. Act mode keeps the full BASE_PROMPT unchanged.
     let base = BASE_PROMPT.replace(", 'build' (full tools) for implementation", "");
-    format!("{base}\n\n{}", SANDBOX_SUFFIX)
+    format!("{base}\n\n{}", PLAN_SUFFIX)
 }
 
 pub fn base_prompt_explore() -> String {
@@ -164,8 +168,8 @@ pub fn base_prompt_build() -> String {
         .to_string()
 }
 
-const SANDBOX_SUFFIX: &str = "\
-SANDBOX mode (read-only): no edits/writes; mutating bash (file-writing redirects, rm, mv, git push, pip install, ...) is intercepted. \
+const PLAN_SUFFIX: &str = "\
+PLAN mode (read-only): no edits/writes; mutating bash (file-writing redirects, rm, mv, git push, pip install, ...) is intercepted. \
 Investigate via 'explore' subagents. \
 When an unstated assumption would shape your work, resolve it via the `question` tool -- prefer asking over assuming (you may ask several in one turn). Facts the repo, rules/, or tests can answer must be looked up first, not asked.";
 
@@ -194,46 +198,46 @@ You are OpenCoder, a high-performance coding agent in a terminal.
 mod tests {
     use super::*;
 
-    /// Guards the `.replace()` in `base_prompt_sandbox()`: if BASE_PROMPT's
+    /// Guards the `.replace()` in `base_prompt_plan()`: if BASE_PROMPT's
     /// wording ever drifts so the replace becomes a no-op, the build subagent
-    /// advertisement silently leaks into the sandbox prompt. These assertions
+    /// advertisement silently leaks into the plan prompt. These assertions
     /// fail loudly instead.
     #[test]
-    fn sandbox_prompt_strips_build_subagent_advertisement() {
-        // The exact substring targeted by `.replace()` in base_prompt_sandbox().
+    fn plan_prompt_strips_build_subagent_advertisement() {
+        // The exact substring targeted by `.replace()` in base_prompt_plan().
         // If this assertion fails, BASE_PROMPT has changed — update the
         // `.replace()` call to match the new wording.
         let replace_target = ", 'build' (full tools) for implementation";
         assert!(
             base_prompt_act().contains(replace_target),
             "BASE_PROMPT no longer contains the '.replace()' target substring \
-             {replace_target:?}. Update the .replace() call in base_prompt_sandbox()."
+             {replace_target:?}. Update the .replace() call in base_prompt_plan()."
         );
 
-        let sandbox = base_prompt_sandbox();
+        let plan = base_prompt_plan();
 
-        // Safety property: the sandbox prompt must not advertise 'build'.
+        // Safety property: the plan prompt must not advertise 'build'.
         assert!(
-            !sandbox.contains("'build' (full tools)"),
-            "sandbox prompt must not advertise the 'build' subagent, got: {sandbox}"
+            !plan.contains("'build' (full tools)"),
+            "plan prompt must not advertise the 'build' subagent, got: {plan}"
         );
 
         // Sanity: the 'explore' advertisement must survive (the replace should
         // only strip the build clause, not the entire delegation line).
         assert!(
-            sandbox.contains("'explore' (read-only)"),
-            "sandbox prompt must still advertise 'explore', got: {sandbox}"
+            plan.contains("'explore' (read-only)"),
+            "plan prompt must still advertise 'explore', got: {plan}"
         );
     }
 
     /// `question` is allowlisted for the two primary agents that may surface
-    /// clarification prompts: `sandbox` asks over assuming, and `act` is
+    /// clarification prompts: `plan` asks over assuming, and `act` is
     /// allowlisted here (runtime visibility is gated elsewhere). Subagents
     /// never ask -- zero schema token cost. Structural guard (rules/01)
     /// against filter drift.
     #[test]
-    fn question_tool_is_sandbox_and_act_only() {
-        for name in ["sandbox", "act"] {
+    fn question_tool_is_plan_and_act_only() {
+        for name in ["plan", "act"] {
             let a = resolve_agent(name).expect("primary agent registered");
             assert!(a.tools.allows("question"), "{name} must allow 'question'");
         }
@@ -246,47 +250,47 @@ mod tests {
         }
     }
 
-    /// The sandbox prompt is a general read-only preamble, NOT a plan
+    /// The plan prompt is a general read-only preamble, NOT a plan
     /// producer: the old Goal/TODO/Verify/Risks/Align template and the
     /// "switch to act mode" handoff are gone. Pins the read-only constraints
     /// and the ask-over-assume guidance (batched questions allowed;
     /// repo/rules/test facts looked up, not asked).
     #[test]
-    fn sandbox_prompt_is_read_only_with_question_guidance() {
-        let sandbox = base_prompt_sandbox();
+    fn plan_prompt_is_read_only_with_question_guidance() {
+        let plan = base_prompt_plan();
 
         // Read-only constraints survive the rename.
         assert!(
-            sandbox.contains("read-only"),
-            "sandbox prompt must state its read-only constraints, got: {sandbox}"
+            plan.contains("read-only"),
+            "plan prompt must state its read-only constraints, got: {plan}"
         );
         assert!(
-            sandbox.contains("mutating bash"),
-            "sandbox prompt must note intercepted mutating bash, got: {sandbox}"
+            plan.contains("mutating bash"),
+            "plan prompt must note intercepted mutating bash, got: {plan}"
         );
 
         // Question-tool clarification guidance.
         assert!(
-            sandbox.contains("prefer asking over assuming"),
-            "sandbox prompt must default to asking instead of assuming, got: {sandbox}"
+            plan.contains("prefer asking over assuming"),
+            "plan prompt must default to asking instead of assuming, got: {plan}"
         );
         assert!(
-            sandbox.contains("you may ask several in one turn"),
-            "sandbox prompt must advertise batched clarification, got: {sandbox}"
+            plan.contains("you may ask several in one turn"),
+            "plan prompt must advertise batched clarification, got: {plan}"
         );
         assert!(
-            sandbox.contains("looked up first, not asked"),
-            "sandbox prompt must defer repo/rules/test facts to lookup, got: {sandbox}"
+            plan.contains("looked up first, not asked"),
+            "plan prompt must defer repo/rules/test facts to lookup, got: {plan}"
         );
 
         // Plan-template semantics are gone.
         assert!(
-            !sandbox.contains("Goal / TODO / Verify / Risks / Align"),
-            "sandbox prompt must not require the plan template sections, got: {sandbox}"
+            !plan.contains("Goal / TODO / Verify / Risks / Align"),
+            "plan prompt must not require the plan template sections, got: {plan}"
         );
         assert!(
-            !sandbox.contains("act mode"),
-            "sandbox prompt must not hand off to a plan/act mode switch, got: {sandbox}"
+            !plan.contains("act mode"),
+            "plan prompt must not hand off to a plan/act mode switch, got: {plan}"
         );
     }
 

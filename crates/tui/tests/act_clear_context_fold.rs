@@ -318,7 +318,7 @@ async fn act_switch_after_fold_is_pure_state_change() {
     store
         .create_session(&SessionMeta {
             id: "act-after-fold".into(),
-            agent: Some("sandbox".into()),
+            agent: Some("plan".into()),
             ..Default::default()
         })
         .await
@@ -326,7 +326,7 @@ async fn act_switch_after_fold_is_pure_state_change() {
 
     let mock = Arc::new(MockChatClient::new());
     let mut sess = act_session("act-after-fold", mock.clone(), store.clone());
-    sess.agent = resolve_agent("sandbox").unwrap();
+    sess.agent = resolve_agent("plan").unwrap();
     sess.messages = vec![opencoder_session::seed_message("the preserved say")];
     let before: Vec<String> = sess.messages.iter().map(|m| m.id.clone()).collect();
 

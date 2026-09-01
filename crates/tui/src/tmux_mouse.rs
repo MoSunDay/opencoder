@@ -72,7 +72,7 @@ pub fn restore(prev: Option<bool>) {
 // Note (rules/01 I/O-wrapper exemption): `current_mouse` / `set_mouse` /
 // `inside_tmux` shell out to the `tmux` binary or read the process
 // environment. They are pure I/O wrappers that cannot run in a tmux-less CI
-// sandbox, so they are not unit-tested directly. The only business logic --
+// plan, so they are not unit-tested directly. The only business logic --
 // parsing the mouse string -- is extracted into `parse_mouse` and covered
 // below.
 

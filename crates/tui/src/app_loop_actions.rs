@@ -1,4 +1,4 @@
-//! Agent-switch slash-command dispatch (`/act`, `/sandbox`,
+//! Agent-switch slash-command dispatch (`/act`, `/plan`,
 //! `/act_clear_context`) extracted from `app_loop.rs` to keep that file under
 //! the 800-line iteration cap. The three commands share one gate-and-start
 //! flow: a running/subagent busy gate, then submission of the control-command
@@ -37,14 +37,14 @@ use crate::worker::{gate_compact, gate_switch, CompactGate, SwitchGate, UiCmd};
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum ModeSwitch {
     Act,
-    Sandbox,
+    Plan,
 }
 
 impl ModeSwitch {
     fn prompt(self) -> &'static str {
         match self {
             ModeSwitch::Act => "/act",
-            ModeSwitch::Sandbox => "/sandbox",
+            ModeSwitch::Plan => "/plan",
         }
     }
 }
@@ -109,7 +109,7 @@ pub(crate) async fn dispatch_mode_switch(
 /// Returns [`LoopFlow::Proceed`] for commands that only open a menu or
 /// render chrome (Task, Fork, Model, Config, Mcp, CacheSalt, Annotation,
 /// Notepad, Ps, Stop, Ap). For mode-switch commands
-/// (Act, Sandbox, ClearContext, Compact) returns whatever the gate-and-start
+/// (Act, Plan, ClearContext, Compact) returns whatever the gate-and-start
 /// flow yields (typically [`LoopFlow::Proceed`] or [`LoopFlow::Quit`]).
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn dispatch_slash_action(
@@ -227,9 +227,9 @@ pub(crate) async fn dispatch_slash_action(
             )
             .await;
         }
-        SlashAction::Sandbox => {
+        SlashAction::Plan => {
             return dispatch_mode_switch(
-                ModeSwitch::Sandbox,
+                ModeSwitch::Plan,
                 cmd_tx,
                 cancel,
                 running,

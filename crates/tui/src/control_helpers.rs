@@ -1,4 +1,4 @@
-//! TUI helpers for control-command (`/act`, `/sandbox`, `/act_clear_context`)
+//! TUI helpers for control-command (`/act`, `/plan`, `/act_clear_context`)
 //! input handling. Functions are consumed by the idle/steer/queue submit
 //! paths in `app.rs`.
 
@@ -7,7 +7,7 @@
 mod tests;
 
 /// When skill-token stripping collapses a compound control command (e.g.
-/// "/sandbox $review" -> "/sandbox") to a bare command, forward the original
+/// "/plan $review" -> "/plan") to a bare command, forward the original
 /// text so the runner's compound-command path resolves the skill and injects
 /// the trigger. Otherwise return the cleaned text unchanged.
 pub(crate) fn forward_skill_if_compound(raw: &str, clean: &str) -> String {

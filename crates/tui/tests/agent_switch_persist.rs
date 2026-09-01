@@ -1,4 +1,4 @@
-//! `/sandbox` and `/act` are PURE state switches driven through the worker:
+//! `/plan` and `/act` are PURE state switches driven through the worker:
 //! they persist the new agent (so `resume()` and the /task picker see it),
 //! emit `AgentSwitch` for the chip, and never fold the transcript or record a
 //! user message.
@@ -69,35 +69,35 @@ fn transcript_fingerprint(sess: &SessionState) -> Vec<String> {
         .collect()
 }
 
-/// `/sandbox` persists the switch and resume() restores the sandbox agent —
-/// the same session comes back sandbox after a process restart.
+/// `/plan` persists the switch and resume() restores the plan agent —
+/// the same session comes back plan after a process restart.
 #[tokio::test]
-async fn sandbox_switch_persists_and_survives_resume() {
-    let (mut sess, mock, store) = running_session("switch-sandbox", "act").await;
+async fn plan_switch_persists_and_survives_resume() {
+    let (mut sess, mock, store) = running_session("switch-plan", "act").await;
     let before = transcript_fingerprint(&sess);
 
-    let events = submit(&mut sess, "/sandbox").await;
+    let events = submit(&mut sess, "/plan").await;
     assert!(events.iter().any(|e| matches!(
         e,
-        UiEvent::Session(SessionEvent::AgentSwitch(ref n)) if n == "sandbox"
+        UiEvent::Session(SessionEvent::AgentSwitch(ref n)) if n == "plan"
     )));
-    assert_eq!(sess.agent.name, "sandbox");
+    assert_eq!(sess.agent.name, "plan");
     assert_eq!(
         mock.call_count(),
         0,
         "a pure switch consumes no LLM turn"
     );
 
-    let meta = store.get_session("switch-sandbox").await.unwrap().unwrap();
+    let meta = store.get_session("switch-plan").await.unwrap().unwrap();
     assert_eq!(
         meta.agent.as_deref(),
-        Some("sandbox"),
+        Some("plan"),
         "the switch must persist to the store"
     );
 
     let resumed = resume(
         store.clone(),
-        "switch-sandbox",
+        "switch-plan",
         Config::default(),
         Arc::new(MockChatClient::new()) as Arc<dyn opencoder_llm::ChatStream>,
         std::env::temp_dir(),
@@ -105,7 +105,7 @@ async fn sandbox_switch_persists_and_survives_resume() {
     .await
     .expect("resume succeeds");
     assert_eq!(
-        resumed.agent.name, "sandbox",
+        resumed.agent.name, "plan",
         "resume must honor the persisted agent switch"
     );
 
@@ -119,8 +119,8 @@ async fn sandbox_switch_persists_and_survives_resume() {
 /// `/act` switches back the same way: persisted, announced, transcript-safe.
 #[tokio::test]
 async fn act_roundtrip_back_is_persisted() {
-    let (mut sess, mock, store) = running_session("switch-roundtrip", "sandbox").await;
-    sess.agent = resolve_agent("sandbox").unwrap();
+    let (mut sess, mock, store) = running_session("switch-roundtrip", "plan").await;
+    sess.agent = resolve_agent("plan").unwrap();
 
     let events = submit(&mut sess, "/act").await;
     assert!(events.iter().any(|e| matches!(
@@ -156,7 +156,7 @@ async fn switch_never_folds_or_records() {
     let (mut sess, mock, store) = running_session("switch-no-fold", "act").await;
     let before = transcript_fingerprint(&sess);
 
-    let events = submit(&mut sess, "/sandbox").await;
+    let events = submit(&mut sess, "/plan").await;
     assert!(
         !events
             .iter()
@@ -184,7 +184,7 @@ async fn switch_never_folds_or_records() {
     }]);
     let (tx, mut rx) = mpsc::channel::<UiEvent>(64);
     let quit = process_cmd(
-        UiCmd::Prompt("continue in sandbox".into(), vec![]),
+        UiCmd::Prompt("continue in plan".into(), vec![]),
         &mut sess,
         &tx,
     )
@@ -195,7 +195,7 @@ async fn switch_never_folds_or_records() {
     assert!(
         sess.messages
             .iter()
-            .any(|m| !m.synthetic && m.text().contains("continue in sandbox")),
+            .any(|m| !m.synthetic && m.text().contains("continue in plan")),
         "the follow-up prompt is recorded as a real user message"
     );
 }

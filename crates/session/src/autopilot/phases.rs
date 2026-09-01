@@ -46,7 +46,7 @@ pub(super) fn activate_skill(session: &SessionState, name: &str) {
     session.set_skill(body);
 }
 
-/// PLAN phase: switch to the sandbox agent (read-only explorer), activate the
+/// PLAN phase: switch to the plan agent (read-only explorer), activate the
 /// task-plan skill (which unlocks the latent `question` tool), inject the
 /// continuation prompt, and run one loop.
 pub async fn run_plan_phase(
@@ -55,7 +55,7 @@ pub async fn run_plan_phase(
     on_event: &mut (dyn FnMut(SessionEvent) + Send),
     state: &ApState,
 ) -> Result<()> {
-    switch_agent(session, "sandbox", on_event);
+    switch_agent(session, "plan", on_event);
     activate_skill(session, "task-plan");
     let mut msg = Message::user(new_id(), continuation_prompt(&state.goal));
     msg.synthetic = true;

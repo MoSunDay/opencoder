@@ -269,14 +269,14 @@ fn rs_alias_defaults() {
 #[test]
 fn run_subcommand_accepts_global_agent_flag() {
     // --agent is global, so it works on `run` and the bare prompt path.
-    let cli = parse(&["opencoder", "run", "--agent", "sandbox", "design the api"]);
+    let cli = parse(&["opencoder", "run", "--agent", "plan", "design the api"]);
     match cli.command {
         Some(opencoder_cli::Command::Run { prompt }) => {
             assert_eq!(prompt, vec!["design the api".to_string()]);
         }
         _ => panic!("expected Run"),
     }
-    assert_eq!(cli.agent.as_deref(), Some("sandbox"));
+    assert_eq!(cli.agent.as_deref(), Some("plan"));
 }
 
 #[test]
@@ -288,18 +288,26 @@ fn bare_prompt_accepts_global_agent_flag() {
 }
 
 #[test]
-fn agent_flag_rejects_removed_plan_agent_with_rename_hint() {
-    // The removed plan/act dual mode: `--agent plan` must fail at parse time
-    // (not late, after resume bookkeeping) and point at the `sandbox` rename.
-    let err = Cli::try_parse_from(["opencoder", "--agent", "plan", "hi"]).unwrap_err();
+fn agent_flag_accepts_restored_plan_agent() {
+    // plan is the canonical read-only primary again: `--agent plan` must
+    // parse (the sandbox-mode interlude spelling is what gets rejected).
+    let cli = Cli::try_parse_from(["opencoder", "--agent", "plan", "hi"]).unwrap();
+    assert_eq!(cli.agent.as_deref(), Some("plan"));
+}
+
+#[test]
+fn agent_flag_rejects_removed_sandbox_agent_with_rename_hint() {
+    // The sandbox-mode interlude: `--agent sandbox` must fail at parse time
+    // (not late, after resume bookkeeping) and point at the `plan` restore.
+    let err = Cli::try_parse_from(["opencoder", "--agent", "sandbox", "hi"]).unwrap_err();
     let msg = err.to_string();
     assert!(
-        msg.contains("invalid value 'plan'"),
+        msg.contains("invalid value 'sandbox'"),
         "expected clap invalid-value error, got: {msg}"
     );
     assert!(
-        msg.contains("sandbox"),
-        "error must mention the sandbox replacement, got: {msg}"
+        msg.contains("renamed back to 'plan'"),
+        "error must mention the plan restoration, got: {msg}"
     );
 }
 
@@ -320,7 +328,7 @@ fn agent_flag_accepts_documented_primaries() {
     // Every primary documented on the flag parses; other resolvable builtins
     // (command/workflow) stay accepted so the parser never over-restricts
     // beyond `resolve_agent`.
-    for name in ["act", "sandbox", "explore", "build", "command", "workflow"] {
+    for name in ["act", "plan", "explore", "build", "command", "workflow"] {
         let cli = parse(&["opencoder", "--agent", name, "hi"]);
         assert_eq!(cli.agent.as_deref(), Some(name), "agent {name} must parse");
     }

@@ -5,7 +5,7 @@
 //! - act WITHOUT a task-plan skill: `question` absent.
 //! - act WITH a task-plan body naming the skill in its first 500 chars: present.
 //! - act WITH a review body: still absent (question is task-plan-only).
-//! - sandbox: present regardless (base-prompt clarification protocol).
+//! - plan: present regardless (base-prompt clarification protocol).
 
 use std::sync::Arc;
 
@@ -102,12 +102,12 @@ async fn act_with_review_skill_hides_question() {
 }
 
 #[tokio::test]
-async fn sandbox_sees_question_without_any_skill() {
-    let (session, mock) = session_for("q-gate-sandbox", "sandbox", None);
+async fn plan_sees_question_without_any_skill() {
+    let (session, mock) = session_for("q-gate-plan", "plan", None);
     let names = requested_tools(session, mock).await;
     assert!(
         names.contains(&"question".to_string()),
-        "sandbox must always see question, got: {names:?}"
+        "plan must always see question, got: {names:?}"
     );
 }
 

@@ -1,4 +1,4 @@
-//! Regression: `/sandbox` -> `/act` is a PURE state switch in both
+//! Regression: `/plan` -> `/act` is a PURE state switch in both
 //! directions. Switching never folds the transcript, never emits
 //! `TranscriptReset`, and persists the agent to the store. A switch onto the
 //! agent already in charge (`/act` on an act session) is a total no-op: no
@@ -69,7 +69,7 @@ fn make_session(
 }
 
 #[tokio::test]
-async fn sandbox_then_act_round_trip_folds_nothing() {
+async fn plan_then_act_round_trip_folds_nothing() {
     let store = mem_store().await;
     seed(&store, "roundtrip", "act").await;
 
@@ -84,16 +84,16 @@ async fn sandbox_then_act_round_trip_folds_nothing() {
         .await;
     let before: Vec<String> = session.messages.iter().map(|m| m.id.clone()).collect();
 
-    // /sandbox: agent switches, transcript untouched.
+    // /plan: agent switches, transcript untouched.
     let mut evs = Vec::new();
-    run(&mut session, "/sandbox".into(), |ev| evs.push(ev))
+    run(&mut session, "/plan".into(), |ev| evs.push(ev))
         .await
         .unwrap();
-    assert_eq!(session.agent.name, "sandbox");
+    assert_eq!(session.agent.name, "plan");
     assert!(
         evs.iter()
-            .any(|e| matches!(e, SessionEvent::AgentSwitch(a) if a == "sandbox")),
-        "AgentSwitch(sandbox) emitted, got: {evs:?}"
+            .any(|e| matches!(e, SessionEvent::AgentSwitch(a) if a == "plan")),
+        "AgentSwitch(plan) emitted, got: {evs:?}"
     );
     assert!(
         !evs.iter()

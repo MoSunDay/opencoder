@@ -333,7 +333,7 @@ async fn llm_failure_leaves_queue_pending_without_resubmit() {
 }
 
 /// Zero-resubmit (store failure): with a persistently failing
-/// `update_session`, the queued "/sandbox" errors in `persist_agent`, which
+/// `update_session`, the queued "/plan" errors in `persist_agent`, which
 /// propagates out of run_loop and fails the run. The in-place P1-3 guard
 /// unpromotes the failed item, so the invariant is no-strand at the store
 /// layer: both items remain PENDING (visible, recoverable), never
@@ -346,7 +346,7 @@ async fn store_failure_leaves_queue_pending_unpromoted() {
 
     let (_dir, mut s) = session(failing.clone(), mock_reply());
     seed(&failing).await;
-    admit(&failing, "q0", Delivery::Queue, "/sandbox").await;
+    admit(&failing, "q0", Delivery::Queue, "/plan").await;
     admit(&failing, "q1", Delivery::Queue, "plain follow-up").await;
 
     let outcome = run(&mut s, "".into(), |_| {}).await;
@@ -364,7 +364,7 @@ async fn store_failure_leaves_queue_pending_unpromoted() {
         "second queue item must remain pending, not stranded: {texts:?}"
     );
     assert!(
-        texts.contains(&"/sandbox"),
+        texts.contains(&"/plan"),
         "the failed item itself must be unpromoted back to pending: {texts:?}"
     );
     assert_eq!(

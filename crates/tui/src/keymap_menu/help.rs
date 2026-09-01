@@ -23,9 +23,9 @@ pub const HELP: &str = "\
   Alt+回车            插入换行（多行输入）
   $                选择并插入技能 -> $name；提交时加载
   /                命令选择: /task（会话）, /config（设置）, /model（模型）, /compact（压缩）
-                   /sandbox（只读沙箱） /act（执行） /act_clear_context（清空上下
+                   /plan（只读探索） /act（执行） /act_clear_context（清空上下
                    文，倒计时确认）
-  Shift+I          编辑计划（sandbox 模式、空闲时）: i/a 编辑, :wq 保存, :q! 放弃
+  Shift+I          编辑计划（plan 模式、空闲时）: i/a 编辑, :wq 保存, :q! 放弃
   Ctrl+G          复制模式: 交还终端原生拖拽选择（正文去装饰全宽显示）, 终端快捷键复制, Esc/Ctrl+G 退出
   Esc              关闭帮助/弹窗/清空输入
   Esc Esc          双击 Esc 中断运行中的任务
@@ -194,14 +194,14 @@ mod tests {
     }
 
     #[test]
-    fn help_matches_sandbox_world() {
+    fn help_matches_plan_world() {
         // The plan/act dual-mode key machinery is gone: no Ctrl+T / Alt+Tab /
         // Ctrl+Shift+Tab mode toggles may be advertised. Shift+Tab is the
-        // clear-context submit, and the slash menu documents /sandbox.
+        // clear-context submit, and the slash menu documents /plan.
         assert!(!HELP.contains("切换 plan / act"));
         assert!(!HELP.contains("仅切换模式"));
         assert!(HELP.contains("/act_clear_context"));
-        assert!(HELP.contains("/sandbox"));
+        assert!(HELP.contains("/plan"));
         assert!(HELP.contains("Shift+I"));
     }
 

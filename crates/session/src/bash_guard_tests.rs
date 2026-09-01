@@ -325,7 +325,7 @@ fn tee_to_real_file_blocked() {
 }
 
 /// Regression for bug B1: command wrappers (`env`, `nohup`, `timeout`, …) used
-/// to mask the real command so sandbox-mode writes slipped through as ReadOnly.
+/// to mask the real command so plan-mode writes slipped through as ReadOnly.
 /// `classify_segment` now strips wrappers before extracting the command name.
 #[test]
 fn wrapper_commands_dont_mask_writes() {
@@ -436,13 +436,13 @@ fn strip_wrappers_unwraps_delegating_prefixes() {
 }
 
 // ---------------------------------------------------------------------------
-// Sandbox-mode write-guard: separator coverage.
+// Plan-mode write-guard: separator coverage.
 //
 // `split_segments` must treat the shell background operator `&` and a literal
 // newline `\n` as command separators, otherwise a mutating command hidden
 // behind a read-only prefix (`echo ok & rm -rf /tmp/x`,
 // `echo ok\nrm -rf /tmp/x`) collapses into a single read-only-looking segment
-// and silently bypasses sandbox-mode write protection.
+// and silently bypasses plan-mode write protection.
 // ---------------------------------------------------------------------------
 
 /// A mutating command after a bare `&` (shell background operator) is now
@@ -466,7 +466,7 @@ fn classify_detects_write_after_newline() {
 }
 
 /// Two read-only commands joined by a bare `&` stay read-only — the fix
-/// splits on `&` but neither segment mutates, so sandbox mode must NOT over-block.
+/// splits on `&` but neither segment mutates, so plan mode must NOT over-block.
 #[test]
 fn classify_bare_ampersand_between_readonly_stays_readonly() {
     assert_eq!(classify("echo a & echo b"), BashVerdict::ReadOnly);

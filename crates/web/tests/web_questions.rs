@@ -1,4 +1,4 @@
-//! Closed-loop integration tests for the web `question` bridge: a sandbox
+//! Closed-loop integration tests for the web `question` bridge: a plan
 //! agent turn whose LLM round returns a `question` tool call blocks mid-drain until
 //! the HTTP endpoints answer/skip it, then the follow-up LLM round completes
 //! the turn. Driven through the real router with a `MockChatClient` (no
@@ -101,7 +101,7 @@ async fn wait_for_transcript(store: &Arc<dyn Store>, id: &str, needle: &str) {
     panic!("transcript never contained {needle:?}");
 }
 
-async fn create_sandbox_session(app: &axum::Router) -> String {
+async fn create_plan_session(app: &axum::Router) -> String {
     let resp = app
         .clone()
         .oneshot(
@@ -109,7 +109,7 @@ async fn create_sandbox_session(app: &axum::Router) -> String {
                 .method("POST")
                 .uri("/api/sessions")
                 .header("content-type", "application/json")
-                .body(Body::from(r#"{"agent":"sandbox"}"#))
+                .body(Body::from(r#"{"agent":"plan"}"#))
                 .unwrap(),
         )
         .await
@@ -121,7 +121,7 @@ async fn create_sandbox_session(app: &axum::Router) -> String {
     body["id"].as_str().unwrap().to_string()
 }
 
-async fn post_sandbox_prompt(app: &axum::Router, id: &str, prompt: &str) {
+async fn post_plan_prompt(app: &axum::Router, id: &str, prompt: &str) {
     let resp = app
         .clone()
         .oneshot(
@@ -130,7 +130,7 @@ async fn post_sandbox_prompt(app: &axum::Router, id: &str, prompt: &str) {
                 .uri(format!("/api/sessions/{id}/prompt"))
                 .header("content-type", "application/json")
                 .body(Body::from(
-                    json!({"agent":"sandbox","prompt":prompt}).to_string(),
+                    json!({"agent":"plan","prompt":prompt}).to_string(),
                 ))
                 .unwrap(),
         )
@@ -173,8 +173,8 @@ async fn answer_flows_into_tool_result_and_completes_the_turn() {
         .push_script(vec![text_round("the answer will use pg")])
         .with_default(vec![text_round("t")]);
     let (app, store) = app(mock).await;
-    let id = create_sandbox_session(&app).await;
-    post_sandbox_prompt(&app, &id, "explore something ambiguous").await;
+    let id = create_plan_session(&app).await;
+    post_plan_prompt(&app, &id, "explore something ambiguous").await;
 
     let q = wait_for_question(&app, &id).await;
     assert_eq!(q["id"].as_str(), Some("call_q1"));
@@ -207,8 +207,8 @@ async fn skip_resolves_tool_to_skipped_reply() {
         .push_script(vec![question_round()])
         .with_default(vec![text_round("ok, proceeding")]);
     let (app, store) = app(mock).await;
-    let id = create_sandbox_session(&app).await;
-    post_sandbox_prompt(&app, &id, "explore something ambiguous").await;
+    let id = create_plan_session(&app).await;
+    post_plan_prompt(&app, &id, "explore something ambiguous").await;
 
     wait_for_question(&app, &id).await;
     let (status, body) = post(
@@ -227,7 +227,7 @@ async fn skip_resolves_tool_to_skipped_reply() {
 async fn unknown_call_id_and_empty_answer_are_rejected() {
     let mock = MockChatClient::new().with_default(vec![text_round("t")]);
     let (app, _store) = app(mock).await;
-    let id = create_sandbox_session(&app).await;
+    let id = create_plan_session(&app).await;
 
     let (status, body) = post(
         &app,
@@ -262,7 +262,7 @@ async fn unknown_call_id_and_empty_answer_are_rejected() {
 async fn list_questions_empty_is_200_with_array() {
     let mock = MockChatClient::new().with_default(vec![text_round("t")]);
     let (app, _store) = app(mock).await;
-    let id = create_sandbox_session(&app).await;
+    let id = create_plan_session(&app).await;
     let resp = app
         .clone()
         .oneshot(
@@ -291,7 +291,7 @@ async fn last_subscriber_disconnect_abandons_waiting_question() {
         .push_script(vec![question_round()])
         .with_default(vec![text_round("proceeding alone")]);
     let (app, store) = app(mock).await;
-    let id = create_sandbox_session(&app).await;
+    let id = create_plan_session(&app).await;
 
     // Subscribe BEFORE prompting: this request creates the handle and holds
     // the only subscriber slot.
@@ -308,7 +308,7 @@ async fn last_subscriber_disconnect_abandons_waiting_question() {
     assert_eq!(resp.status(), StatusCode::OK);
     let mut stream = resp.into_body().into_data_stream();
 
-    post_sandbox_prompt(&app, &id, "explore something ambiguous").await;
+    post_plan_prompt(&app, &id, "explore something ambiguous").await;
     let q = wait_for_question(&app, &id).await;
     assert_eq!(q["id"].as_str(), Some("call_q1"));
 

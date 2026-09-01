@@ -1,6 +1,6 @@
 //! Integration tests: latent tools (`question`, `ssh_pty`) are hidden from the
 //! model by default and only appear when their owning skill is activated —
-//! with one exemption: the sandbox agent always sees `question` (its
+//! with one exemption: the plan agent always sees `question` (its
 //! clarification protocol is part of the base prompt).
 
 use std::collections::HashSet;
@@ -103,13 +103,13 @@ fn question_not_unlocked_by_mentioning_the_tool_name() {
     );
 }
 
-fn sandbox_visible_tools(skill_body: Option<&str>) -> Vec<String> {
-    let sandbox = resolve_agent("sandbox").unwrap();
+fn plan_visible_tools(skill_body: Option<&str>) -> Vec<String> {
+    let plan = resolve_agent("plan").unwrap();
     let reg = registry();
     let unlocked: HashSet<&str> = latent::unlocked_from_body(skill_body);
     let mut names: Vec<String> = reg
         .keys()
-        .filter(|n| latent::is_visible(n, &sandbox, &unlocked))
+        .filter(|n| latent::is_visible(n, &plan, &unlocked))
         .cloned()
         .collect();
     names.sort();
@@ -117,13 +117,13 @@ fn sandbox_visible_tools(skill_body: Option<&str>) -> Vec<String> {
 }
 
 #[test]
-fn sandbox_always_sees_question_without_any_skill() {
-    let names = sandbox_visible_tools(None);
+fn plan_always_sees_question_without_any_skill() {
+    let names = plan_visible_tools(None);
     assert!(
         names.contains(&"question".to_string()),
-        "sandbox must see question with no skill at all, got: {names:?}"
+        "plan must see question with no skill at all, got: {names:?}"
     );
-    // The exemption is question-scoped: ssh_pty stays latent for sandbox.
+    // The exemption is question-scoped: ssh_pty stays latent for plan.
     assert!(!names.contains(&"ssh_pty".to_string()));
 }
 

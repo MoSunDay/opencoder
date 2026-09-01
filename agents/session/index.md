@@ -38,7 +38,7 @@ agent 运行时核心。驱动「接收输入 → 调 LLM → 执行工具 → �
 ## 主流程
 CLI/HTTP 入口 → 建/恢复 SessionState（store 可选）→ `run(session, prompt, on_event)` → run_loop 循环到 Done / interrupt / doom-loop 守卫 → （CLI）异步 generate_title。
 
-empty prompt = drain / continuation 模式：不 push 合成 user msg，直接进 run_loop（web drain 依赖 store 中已 admit 的 steer/queue 提供输入；TUI Shift+Tab 派发 `/act_clear_context`，plan 指令或 act continuity seed 置 `handoff_pending` 后执行，无内容哨兵则停在干净状态）。
+empty prompt = drain / continuation 模式：不 push 合成 user msg，直接进 run_loop（web drain 依赖 store 中已 admit 的 steer/queue 提供输入；TUI plan 模式 Shift+Tab 派发 `/act_clear_context`（act 下 Shift+Tab 是切 plan 的纯模式切换，不派发），plan 指令或 act continuity seed 置 `handoff_pending` 后执行，无内容哨兵则停在干净状态）。
 
 ## 两段式 delivery：steer / queue drain 契约
 

@@ -1,8 +1,9 @@
 //! Worker-level integration tests for `/clear_context` (alias
 //! `/act_clear_context`): the fold must preserve the newest assistant reply
 //! as a neutral continuity seed, execute it in exactly one LLM turn, persist
-//! a resume boundary, and leave an act session's agent untouched — while a
-//! sandbox session converges to act (one extra `AgentSwitch`).
+//! a resume boundary, and leave an act session's agent untouched. From plan,
+//! the preserved reply becomes an execution directive and the agent switches
+//! to act before that turn runs.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -47,7 +48,7 @@ fn act_session(id: &str, mock: Arc<MockChatClient>, store: Arc<dyn Store>) -> Se
     .mark_session_created()
 }
 
-fn sandbox_session(id: &str, mock: Arc<MockChatClient>, store: Arc<dyn Store>) -> SessionState {
+fn plan_session(id: &str, mock: Arc<MockChatClient>, store: Arc<dyn Store>) -> SessionState {
     SessionState::new(
         id,
         resolve_agent("plan").expect("plan agent"),
@@ -153,8 +154,7 @@ async fn clear_context_folds_transcript_and_feeds_seed_to_model() {
     );
 
     // (2) The fold keeps the agent for an already-act session: no
-    // AgentSwitch, agent still act. (The sandbox variant converges to act —
-    // see `sandbox_clear_context_converges_to_act` below.)
+    // AgentSwitch, agent still act.
     assert!(
         !events
             .iter()
@@ -383,12 +383,10 @@ async fn act_switch_after_fold_is_pure_state_change() {
     );
 }
 
-/// Plan fold: `/clear_context` from a plan session folds the transcript and
-/// KEEPS the plan agent - no AgentSwitch follows TranscriptReset, the seed
-/// still executes in exactly one LLM turn, and the plan agent persists to
-/// the store.
+/// Plan fold: preserve the plan as a directive, switch to act after the reset,
+/// execute exactly one LLM turn, and persist the converged agent.
 #[tokio::test]
-async fn plan_clear_context_folds_and_keeps_plan() {
+async fn plan_clear_context_hands_off_and_executes_under_act() {
     let store = mem_store().await;
     store
         .create_session(&SessionMeta {
@@ -402,7 +400,7 @@ async fn plan_clear_context_folds_and_keeps_plan() {
     let mock = Arc::new(
         MockChatClient::new().push_script(vec![text_done("continuing from the preserved say")]),
     );
-    let mut sess = sandbox_session("plan-fold", mock.clone(), store.clone());
+    let mut sess = plan_session("plan-fold", mock.clone(), store.clone());
     let say = assistant_with_text("a1", "the plan answer to keep");
     seed_transcript(&store, "plan-fold", vec![say.clone()]).await;
     sess.messages = vec![say];
@@ -412,24 +410,24 @@ async fn plan_clear_context_folds_and_keeps_plan() {
     assert!(!quit, "the fold must not signal quit");
     let events = drain(&mut rx).await;
 
-    assert!(
-        events
-            .iter()
-            .any(|e| matches!(e, UiEvent::Session(SessionEvent::TranscriptReset(_)))),
-        "TranscriptReset must be emitted"
-    );
-    assert!(
-        events
-            .iter()
-            .all(|e| !matches!(e, UiEvent::Session(SessionEvent::AgentSwitch(_)))),
-        "clear must not switch agents, got {events:?}"
-    );
+    let reset_idx = events
+        .iter()
+        .position(|e| matches!(e, UiEvent::Session(SessionEvent::TranscriptReset(_))))
+        .expect("TranscriptReset must be emitted");
+    let switch_idx = events
+        .iter()
+        .position(|e| matches!(e, UiEvent::Session(SessionEvent::AgentSwitch(name)) if name == "act"))
+        .expect("AgentSwitch(act) must be emitted");
+    assert!(reset_idx < switch_idx, "reset precedes switch: {events:?}");
+    let reset = reset_transcript(&events);
+    assert!(reset[0].text().contains("Execute it now"));
+    assert!(reset[0].text().contains("the plan answer to keep"));
     assert_eq!(
         mock.call_count(),
         1,
-        "the seed executes in exactly one LLM turn"
+        "the plan directive executes in exactly one LLM turn"
     );
-    assert_eq!(sess.agent.name, "plan", "the live session keeps plan");
+    assert_eq!(sess.agent.name, "act");
 
     let meta = store
         .get_session("plan-fold")
@@ -438,7 +436,8 @@ async fn plan_clear_context_folds_and_keeps_plan() {
         .expect("session row exists");
     assert_eq!(
         meta.agent.as_deref(),
-        Some("plan"),
-        "the kept agent persists to the store"
+        Some("act"),
+        "the converged agent persists to the store"
     );
+    assert_eq!(meta.handoff_plan.as_deref(), Some("the plan answer to keep"));
 }

@@ -356,6 +356,7 @@ mod tests {
 
     #[tokio::test]
     async fn bash_normal_completion() {
+        let _g = test_registry_mutex().lock().await;
         let tool = BashTool;
         let input = json!({"command": "echo hello; echo world >&2"});
         let out = tool.execute(input, &ctx()).await.unwrap();
@@ -380,6 +381,7 @@ mod tests {
 
     #[tokio::test]
     async fn bash_failure_appends_exit_code() {
+        let _g = test_registry_mutex().lock().await;
         let tool = BashTool;
         let input = json!({"command": "echo oops; exit 7"});
         let out = tool.execute(input, &ctx()).await.unwrap();

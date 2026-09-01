@@ -14,8 +14,9 @@ use crate::theme;
 pub const HELP: &str = "\
 快捷键列表：
 
-  Shift+Tab        清空上下文并接续执行 (/act_clear_context)：保留最后回复作
-                   上下文；先倒计时确认，Esc 回撤 / Enter 提前执行
+  Ctrl+T          保留上下文，在 act / plan 间切换（仅空闲边界生效）
+  Shift+Tab        保留计划、切换到 act 并开始执行 (/act_clear_context)；
+                   先倒计时确认，Esc 回撤 / Enter 提前执行
                    输入框有内容时作为附加需求一并提交（运行中则排队，空闲边界生效）
   Enter            提交（空闲） / 转向（运行中，下一轮生效）
   Tab              提交（空闲） / 排队跟进（运行中，完成后提交）
@@ -195,14 +196,17 @@ mod tests {
 
     #[test]
     fn help_matches_plan_world() {
-        // The plan/act dual-mode key machinery is gone: no Ctrl+T / Alt+Tab /
-        // Ctrl+Shift+Tab mode toggles may be advertised. Shift+Tab is the
-        // clear-context submit, and the slash menu documents /plan.
-        assert!(!HELP.contains("切换 plan / act"));
+        // Ctrl+T is the sole context-preserving toggle. The retired Alt+Tab /
+        // Ctrl+Shift+Tab variants stay hidden; Shift+Tab is the guarded
+        // plan-to-act execution handoff.
+        assert!(HELP.contains("Ctrl+T"));
+        assert!(HELP.contains("act / plan"));
         assert!(!HELP.contains("仅切换模式"));
         assert!(HELP.contains("/act_clear_context"));
         assert!(HELP.contains("/plan"));
         assert!(HELP.contains("Shift+I"));
+        assert!(!HELP.contains("Alt+Tab"));
+        assert!(!HELP.contains("Ctrl+Shift+Tab"));
     }
 
     #[test]

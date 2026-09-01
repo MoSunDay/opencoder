@@ -113,7 +113,7 @@ impl Handler for SandboxReleaseHandler {
             }
         }
         match offending {
-            None => Classification::Allow(AllowReason::handler(format!(
+            None => Classification::Allow(AllowReason::ReleasedWrite(format!(
                 "{} within released dir",
                 ctx.command_name
             ))),

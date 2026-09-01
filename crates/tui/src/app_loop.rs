@@ -32,6 +32,11 @@ use crate::task::TaskPicker;
 use crate::theme;
 use crate::worker::{UiCmd, UiEvent};
 
+/// Animation tick rate for the running spinner (10 FPS).
+pub(crate) const ANIM_TICK_MS: u64 = 100;
+/// Body refresh cadence (3 FPS), decoupled from the fast spinner.
+pub(crate) const BODY_REFRESH_MS: u64 = 333;
+
 /// Translation of the `continue` / `break` control flow that lived inside the
 /// extracted loop blocks. `Proceed` means fall through to the rest of the loop
 /// body (the block did neither `continue` nor `break`); `Redraw` was a
@@ -604,8 +609,8 @@ pub(crate) use app_loop_paste::{handle_paste_event, paste_clipboard_image};
 mod app_loop_actions;
 
 pub(crate) use app_loop_actions::{
-    cancel_running_turn, confirm_tick, dispatch_slash_action, handle_confirm_key,
-    steer_submit_after_mouse,
+    cancel_running_turn, confirm_tick, dispatch_mode_switch, dispatch_slash_action,
+    handle_confirm_key, steer_submit_after_mouse, ModeSwitch,
 };
 #[cfg(test)]
 pub(crate) use app_loop_actions::fire_clear_confirm;

@@ -4,14 +4,15 @@
 //! behavior-compat surface of bash_guard as it stood just before the
 //! shellguard swap): every
 //! row is a command string → expected verdict, decided against the
-//! rippy-derived `opencoder-shellguard` classifier (release set `/tmp` +
-//! `/dev/null`; cwd/project dir NOT released; execution risk never released;
-//! any command substitution fails closed).
+//! rippy-derived `opencoder-shellguard` classifier plus the strict plan
+//! adapter: persistent writes are blocked even under sandbox-released `/tmp`;
+//! non-persistent `/dev/null`/fd redirects stay allowed; cwd/project writes
+//! and command-substitution risk fail closed.
 //!
 //! Divergence classes used in the tags below:
 //! - `KEEP` (untagged): old and new verdicts agree.
-//! - `RELEASE`: old WriteBlocked **only** because the write target was under
-//!   `/tmp` or `/dev/null` — flipped to ReadOnly by the declared release set.
+//! - `RELEASE`: historical shellguard release behavior; plan now consumes
+//!   typed write provenance and blocks persistent `/tmp` mutations.
 //! - `RETARGETED`: the danger was the STRUCTURE (wrapper/substitution/
 //!   compound bypass) but the target happened to be `/tmp`; the target moved
 //!   to a non-release path so the structural invariant stays provable.
@@ -173,30 +174,26 @@ fn compat_devnull_boundary_rows() {
         // Trailing path chars are NOT /dev/null (component boundary holds).
         blocked("ls 2>/dev/nullx"),
         blocked("echo x > f >/dev/null"),
-        // RELEASE-BOUNDARY: `/dev/null/sneaky` is now allowed — /dev/null is
-        // in the release set, and a path *under* a character device can never
-        // be created (open() fails with ENOTDIR on any POSIX system), so the
-        // write is impossible, not merely allowed. The old lexical guard
-        // blocked it; the new classifier treats it as within the release dir.
-        readonly("ls > /dev/null/sneaky"), // OVER-BLOCK inverse, verified impossible write
+        // Only the exact device redirect is non-persistent. A nested path is
+        // represented as a released-scope write and strict plan blocks it.
+        blocked("ls > /dev/null/sneaky"),
     ]);
 }
 
 #[test]
 fn compat_tmp_release_flips() {
-    // SANDBOX RELEASE: /tmp + /dev/null are the declared release set — these
-    // rows were blocked by the old guard ONLY because their target was /tmp.
+    // Shellguard may release /tmp for sandbox use, but plan mode rejects every
+    // persistent write using the verdict's typed write provenance.
     run_rows(&[
-        readonly("echo x > /tmp/a.log"),
-        readonly("echo x >> /tmp/x"),
-        readonly("rm -rf /tmp"),
-        readonly("rm -rf /tmp/build"),
-        readonly("touch /tmp/x"),
-        readonly("echo x > /tmp/x"),
-        // RELEASE (whole-command shape): every operand lands in /tmp.
-        readonly("mv /tmp/a /tmp/b"),
-        readonly("cp /tmp/a /tmp/b"),
-        readonly("cd /tmp && rm -rf /tmp/x"),
+        blocked("echo x > /tmp/a.log"),
+        blocked("echo x >> /tmp/x"),
+        blocked("rm -rf /tmp"),
+        blocked("rm -rf /tmp/build"),
+        blocked("touch /tmp/x"),
+        blocked("echo x > /tmp/x"),
+        blocked("mv /tmp/a /tmp/b"),
+        blocked("cp /tmp/a /tmp/b"),
+        blocked("cd /tmp && rm -rf /tmp/x"),
     ]);
 }
 
@@ -285,11 +282,10 @@ fn compat_interpreter_rows() {
         readonly("bash --version"),
         readonly("python3 --version"),
         readonly("node --version"),
-        // SANDBOX RELEASE vs RETARGET pair: the -c recursion releases a /tmp
-        // payload but must still catch the same payload on a real path.
-        readonly("bash -c 'rm -rf /tmp/x'"), // SANDBOX RELEASE: /tmp + /dev/null are the declared release set
+        // Both sandbox-released and ordinary write targets are blocked.
+        blocked("bash -c 'rm -rf /tmp/x'"),
         blocked("bash -c 'rm -rf /var/x'"), // RETARGETED: was /tmp (now released); structural invariant must hold
-        readonly("zsh -c 'touch /tmp/pwned'"), // SANDBOX RELEASE: /tmp + /dev/null are the declared release set
+        blocked("zsh -c 'touch /tmp/pwned'"),
         blocked("zsh -c 'touch /var/x'"), // RETARGETED: was /tmp (now released); structural invariant must hold
     ]);
 }
@@ -310,15 +306,15 @@ fn compat_find_sed_xargs_rows() {
         blocked("find . -execdir chmod +x {} +"),
         readonly("find . -type f -name '*.go'"),
         readonly("find . -printf '%p\\n'"),
-        readonly("find /tmp -delete"), // SANDBOX RELEASE: /tmp + /dev/null are the declared release set
+        blocked("find /tmp -delete"),
         blocked("find /var/tmp/oc-compat-dead -delete"), // RETARGETED: was /tmp (now released); structural invariant must hold
-        readonly("find . -fprint /tmp/out"), // SANDBOX RELEASE: /tmp + /dev/null are the declared release set
+        blocked("find . -fprint /tmp/out"),
         blocked("find . -fprint /var/out"), // RETARGETED: was /tmp (now released); structural invariant must hold
-        readonly("find . -fprintf /tmp/out '%p\\n'"), // SANDBOX RELEASE: /tmp + /dev/null are the declared release set
+        blocked("find . -fprintf /tmp/out '%p\\n'"),
         blocked("find . -fprintf /var/out '%p\\n'"), // RETARGETED: was /tmp (now released); structural invariant must hold
-        readonly("find . -fls /tmp/out"), // SANDBOX RELEASE: /tmp + /dev/null are the declared release set
+        blocked("find . -fls /tmp/out"),
         blocked("find . -fls /var/out"), // RETARGETED: was /tmp (now released); structural invariant must hold
-        readonly("find . -fprint0 /tmp/out"), // SANDBOX RELEASE: /tmp + /dev/null are the declared release set
+        blocked("find . -fprint0 /tmp/out"),
         blocked("find . -fprint0 /var/out"), // RETARGETED: was /tmp (now released); structural invariant must hold
         // sed short form is detected; read-only sed stays allowed.
         blocked("sed -i 's/a/b/' file"),

@@ -40,10 +40,15 @@ pub(crate) enum KeyAction {
     /// child nor be deferred to a parent boundary). The input remains
     /// untouched so the user can retry at an idle boundary.
     ModeSwitchBlocked,
+    /// Ctrl+T: preserve the transcript and toggle the parent between act and
+    /// plan. The app-level running/subagent gate decides whether the switch
+    /// can land at this boundary.
+    SwitchAgent(String),
     Cancel,
     /// Shift+Tab: arm the clear-context countdown confirm instead of firing
-    /// outright — the fold drops all context except the last reply, so the
-    /// guard echoes the retained seed and lets Esc 回撤 before it lands.
+    /// outright — plan mode preserves the plan and hands it to act, while
+    /// other modes fold to a continuity seed. The guard keeps that boundary
+    /// visible and lets Esc 回撤 before it lands.
     /// `rest` is the swallowed composer draft forwarded as the compound tail.
     ArmClearConfirm { rest: Option<String> },
     /// Enter the plan-text editor (Shift+I in plan mode when idle).
@@ -166,10 +171,9 @@ pub(crate) fn handle_key(
         if bindings.help.matches(&k) {
             return KeyAction::OpenKeymap;
         }
-        // The plan/act mode-switch chords are gone (the plan/act toggle was
-        // removed; agent switches are `/act` / `/plan` control commands
-        // now), so the subagent-focus view handles only scroll, cancel, quit
-        // and help.
+        if bindings.switch_mode.matches(&k) {
+            return KeyAction::SwitchAgent(next_primary_agent(agent).into());
+        }
         return KeyAction::None;
     }
 
@@ -220,6 +224,9 @@ pub(crate) fn handle_key(
             crate::undo::snapshot(undo_state, input, *cursor_idx, false);
         }
         return KeyAction::None;
+    }
+    if bindings.switch_mode.matches(&k) {
+        return KeyAction::SwitchAgent(next_primary_agent(agent).into());
     }
     if bindings.paste_image.matches(&k) {
         return KeyAction::Clip;
@@ -430,6 +437,14 @@ pub(crate) fn handle_key(
             KeyAction::None
         }
         _ => KeyAction::None,
+    }
+}
+
+fn next_primary_agent(agent: &str) -> &'static str {
+    if agent == "plan" {
+        "act"
+    } else {
+        "plan"
     }
 }
 

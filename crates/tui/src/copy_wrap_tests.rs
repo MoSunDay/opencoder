@@ -109,11 +109,14 @@ fn soft_boundary_skips_moveto_and_relies_on_terminal_wrap() {
     let (mut b, buf, _plan) = wrapped(true, 5, &[false, true, false]);
     run(&mut b, &cells);
     let got = out(&buf);
-    // MoveTo(0,0) + "abcde" + (no MoveTo!) + "fgh" + style reset.
-    assert_eq!(
-        got,
-        concat!("\x1b[1;1Habcde", "fgh", "\x1b[39m\x1b[49m\x1b[59m\x1b[0m")
-    );
+    // The wrapped stream must be byte-identical to the current crossterm
+    // backend except for the one intentionally suppressed row move. Deriving
+    // the style-reset suffix keeps this contract stable across equivalent
+    // crossterm encodings (`CSI m` versus separate 39/49/59 resets).
+    let (mut plain_backend, plain_buf) = plain();
+    run(&mut plain_backend, &cells);
+    let expected = out(&plain_buf).replacen("\x1b[2;1H", "", 1);
+    assert_eq!(got, expected);
     assert!(
         !got.contains("\x1b[2;1H"),
         "soft boundary must skip MoveTo: {got:?}"

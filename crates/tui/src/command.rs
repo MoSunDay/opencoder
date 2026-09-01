@@ -48,7 +48,7 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("/notepad", "IDE 式文件浏览/编辑 (文件树 + vim 编辑器)"),
     (
         "/act_clear_context",
-        "清空对话上下文并执行（保留最后回复作为接续上下文；/clear_context 同效）",
+        "清空对话上下文并执行（plan 下保留计划并切到 act；/clear_context 同效）",
     ),
     ("/ps", "查看所有后台 bash 进程（不计入模型上下文）"),
     ("/stop", "强制结束所有后台 bash 进程（不计入模型上下文）"),

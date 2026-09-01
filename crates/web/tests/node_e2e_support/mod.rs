@@ -66,6 +66,7 @@ impl Drop for Server {
 
 pub fn http() -> reqwest::Client {
     reqwest::Client::builder()
+        .no_proxy()
         .timeout(Duration::from_secs(30))
         .build()
         .unwrap()
@@ -76,6 +77,7 @@ pub fn http() -> reqwest::Client {
 /// would amputate the stream mid-run and masquerade as frame loss.
 pub fn http_sse() -> reqwest::Client {
     reqwest::Client::builder()
+        .no_proxy()
         .connect_timeout(Duration::from_secs(30))
         .build()
         .unwrap()

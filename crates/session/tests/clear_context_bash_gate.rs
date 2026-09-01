@@ -1,11 +1,6 @@
-//! Single-chain evidence for the merged clear-context contract:
-//! `/clear_context` no longer switches agents (plan stays plan), so a clear
-//! alone must NOT unblock bash writes — the very next turn's mutating write
-//! stays BLOCKED ("Blocked in plan mode"; the blocking half of that
-//! classification contract is pinned in `bash_guard_plan_mode.rs`). Only an
-//! EXPLICIT `/act …` switch unblocks: the targeted directory actually
-//! disappears, proving the command ran instead of merely reporting no
-//! block, and the switch is what let it through.
+//! Single-chain evidence for the plan execution handoff: the clear preserves
+//! the plan, switches to act, and therefore unblocks the next mutating bash
+//! call. The targeted directory actually disappears, proving the command ran.
 //!
 //! The write legs use `rm -rf`, which the shellguard classifier denies even
 //! inside the `/tmp` release scope (the workdir tempdir lives under the
@@ -86,7 +81,7 @@ fn assistant_say(id: &str, text: &str) -> Message {
 }
 
 #[tokio::test]
-async fn clear_keeps_plan_gate_then_explicit_act_unblocks() {
+async fn clear_switches_to_act_and_unblocks_next_write() {
     let store = mem_store().await;
     seed(&store, "plan-clear-bash").await;
     let msgs = vec![
@@ -104,20 +99,13 @@ async fn clear_keeps_plan_gate_then_explicit_act_unblocks() {
     // the run: the sentinels created inside it carry the actual-ran proof.
     let workdir = plain_workdir();
     let wd = workdir.path().to_str().unwrap().to_string();
-    // Script for run 1 (post-clear seed turn) + run 2 (blocked write + ack)
-    // + run 3 (post-switch write + wrap-up). Order must be exact.
+    // Script for run 1 (post-handoff execution) + run 2 (write + wrap-up).
     let mock = Arc::new(
         MockChatClient::new()
             .push_script(vec![done_turn("cleared")])
             .push_script(vec![bash_write_turn(
                 "bash-1",
                 "rm -rf ./opencoder-still-protected",
-                &wd,
-            )])
-            .push_script(vec![done_turn("understood")])
-            .push_script(vec![bash_write_turn(
-                "bash-2",
-                "rm -rf ./opencoder-act-target",
                 &wd,
             )])
             .push_script(vec![done_turn("write done")]),
@@ -136,45 +124,40 @@ async fn clear_keeps_plan_gate_then_explicit_act_unblocks() {
     .mark_session_created();
     session.messages = msgs.clone();
 
-    // -- Run 1: the clear itself. Keeps plan, no switch, gate untouched.
+    // -- Run 1: preserve the plan and switch before executing it.
     let events = Arc::new(std::sync::Mutex::new(Vec::new()));
     let ev_clone = events.clone();
-    run(&mut session, "/clear_context".into(), move |ev| {
+    run(&mut session, "/act_clear_context".into(), move |ev| {
         ev_clone.lock().unwrap().push(ev)
     })
     .await
     .unwrap();
     {
         let evs = events.lock().unwrap();
-        assert_eq!(session.agent.name, "plan", "clear keeps the plan agent");
+        assert_eq!(session.agent.name, "act", "clear converges to act");
         assert!(
             evs.iter()
                 .any(|e| matches!(e, SessionEvent::TranscriptReset(_))),
             "TranscriptReset emitted, got {evs:?}"
         );
-        assert!(
-            evs.iter()
-                .all(|e| !matches!(e, SessionEvent::AgentSwitch(_))),
-            "clear must not switch agents, got {evs:?}"
-        );
+        assert!(evs
+            .iter()
+            .any(|e| matches!(e, SessionEvent::AgentSwitch(name) if name == "act")));
     }
-    // Persistence agrees: still plan after the clear.
+    // Persistence agrees: resume cannot resurrect plan mode.
     let meta = store
         .get_session("plan-clear-bash")
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(meta.agent.as_deref(), Some("plan"), "clear persists plan");
+    assert_eq!(meta.agent.as_deref(), Some("act"), "clear persists act");
 
-    // Sentinel the mutating legs will target: still present after the
-    // plan leg, gone after the act leg. Std-fs writes, not bash, so the
-    // sentinels exist regardless of the gate.
+    // Sentinel the mutating leg will target. Std-fs creates it; bash must
+    // remove it under act.
     let wd_path = workdir.path();
     std::fs::create_dir_all(wd_path.join("opencoder-still-protected")).unwrap();
-    std::fs::create_dir_all(wd_path.join("opencoder-act-target")).unwrap();
 
-    // -- Run 2: the very next write is still gated. A clear alone must not
-    // unblock bash, exactly because the session never left plan mode.
+    // -- Run 2: the next write is allowed because the handoff left plan.
     let events = Arc::new(std::sync::Mutex::new(Vec::new()));
     let ev_clone = events.clone();
     run(&mut session, "try a write".into(), move |ev| {
@@ -184,7 +167,7 @@ async fn clear_keeps_plan_gate_then_explicit_act_unblocks() {
     .unwrap();
     {
         let evs = events.lock().unwrap();
-        assert_eq!(session.agent.name, "plan", "write attempt stays plan");
+        assert_eq!(session.agent.name, "act", "write runs under act");
         let tool_idx = evs
             .iter()
             .position(|e| matches!(e, SessionEvent::ToolEnd { name, .. } if name == "bash"))
@@ -193,70 +176,24 @@ async fn clear_keeps_plan_gate_then_explicit_act_unblocks() {
             is_error, output, ..
         } = &evs[tool_idx]
         {
-            assert!(*is_error, "plan gate must block the write, output: {output}");
-            assert!(
-                output.contains("Blocked in plan mode"),
-                "denial must name plan mode, got: {output}"
-            );
-            assert!(
-                output.contains("/agent act"),
-                "denial must point at the real escape hatch, got: {output}"
-            );
-        }
-    }
-    assert_eq!(mock.call_count(), 3, "clear + blocked write + ack turns");
-    assert!(
-        workdir.path().join("opencoder-still-protected").is_dir(),
-        "the gated write must never have run: the sentinel survives"
-    );
-
-    // -- Run 3: the EXPLICIT `/act …` switch is what unblocks. The write
-    // executes for real (its effect lands in the call workdir).
-    let events = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let ev_clone = events.clone();
-    run(&mut session, "/act make the write".into(), move |ev| {
-        ev_clone.lock().unwrap().push(ev)
-    })
-    .await
-    .unwrap();
-    {
-        let evs = events.lock().unwrap();
-        assert_eq!(session.agent.name, "act", "explicit /act switched to act");
-        let switch_idx = evs
-            .iter()
-            .position(|e| matches!(e, SessionEvent::AgentSwitch(a) if a == "act"))
-            .expect("AgentSwitch(act) emitted");
-        let tool_idx = evs
-            .iter()
-            .position(|e| matches!(e, SessionEvent::ToolEnd { name, .. } if name == "bash"))
-            .expect("bash ToolEnd emitted");
-        assert!(
-            switch_idx < tool_idx,
-            "the write must execute strictly after the switch, got {evs:?}"
-        );
-        if let SessionEvent::ToolEnd {
-            is_error, output, ..
-        } = &evs[tool_idx]
-        {
-            assert!(!*is_error, "act agent must not gate bash, output: {output}");
+            assert!(!*is_error, "act write must run, output: {output}");
             assert!(
                 !output.contains("Blocked in plan mode"),
-                "post-switch act agent must not gate bash, output: {output}"
+                "act write must not hit the plan gate: {output}"
             );
         }
     }
-
-    // The command really executed: its effect landed in the call workdir.
+    assert_eq!(mock.call_count(), 3, "clear + write + completion turns");
     assert!(
-        !workdir.path().join("opencoder-act-target").exists(),
-        "bash write must have actually run in the call workdir"
+        !workdir.path().join("opencoder-still-protected").exists(),
+        "bash write must execute in the call workdir"
     );
 
-    // The explicit switch persisted for resume.
+    // The handoff switch remains persisted.
     let meta = store
         .get_session("plan-clear-bash")
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(meta.agent.as_deref(), Some("act"), "switch persists");
+    assert_eq!(meta.agent.as_deref(), Some("act"));
 }

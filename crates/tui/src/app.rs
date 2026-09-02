@@ -436,6 +436,9 @@ pub(super) async fn run_app(
                                 &mut plan_edit,
                                 &mut notepad,
                                 &mut clear_confirm,
+                                &admit_tx, &mut admit_st,
+                                &mut queue_items, &mut pending_images,
+                                &mut history, &mut hist_idx,
                             )
                             .await
                             {
@@ -587,7 +590,7 @@ pub(super) async fn run_app(
                                 } else {
                                     // Fire-and-forget into the sidecar actor: never
                                     // blocks the UI loop, never touches steer/queue.
-                                    match sidecar_ask.try_send(crate::sidecar_ui::SidecarAsk::Question(question)) {
+                                    match sidecar_ask.try_send(question) {
                                         Ok(()) => {
                                             chat.sidecar_focus = true;
                                             follow = true;
@@ -604,6 +607,9 @@ pub(super) async fn run_app(
                                 if app_loop::dispatch_mode_switch(
                                     mode, &cmd_tx, &mut cancel, &mut running, &mut follow, &mut chat,
                                     &mut sys_tokens, &mut mode_flash, anim_tick, &workdir,
+                                    &session_id, &admit_tx, &mut admit_st,
+                                    &mut queue_items, &mut pending_images,
+                                    &mut history, &mut hist_idx,
                                 ).await == app_loop::LoopFlow::Quit { break; }
                             }
                             KeyAction::SetSkill(opt) => {
@@ -676,7 +682,7 @@ pub(super) async fn run_app(
                     Event::Paste(pasted) => {
                         // Modal-priority paste routing (mirrors Event::Key); empty pastes try a silent clipboard-image read. (clippy's collapsible_match suggestion would put an `.await` in a match guard, which Rust forbids.)
                         #[allow(clippy::collapsible_match)]
-                        if app_loop::handle_paste_event(&pasted, &mut plan_edit, &mut notepad, ap_menu.is_some(), task_picker.is_some(), cache_salt_menu.is_some(), keymap_menu.is_some(), skill_toggle_menu.is_some(), &mut model_menu, &mut mcp_menu, &mut envs_menu, &mut cli_menu, &mut command_menu, &mut question_menu, &mut input, &mut cursor_idx, &mut pending_images, &mut img_asm, &mut chat, &workdir).await { continue; }
+                        if app_loop::handle_paste_event(&pasted, &mut plan_edit, &mut notepad, task_picker.is_some(), cache_salt_menu.is_some(), keymap_menu.is_some(), skill_toggle_menu.is_some(), &mut model_menu, &mut mcp_menu, &mut envs_menu, &mut cli_menu, &mut command_menu, &mut question_menu, &mut input, &mut cursor_idx, &mut pending_images, &mut img_asm, &mut chat, &workdir).await { continue; }
                     }
                     _ => {}
                 }
@@ -704,7 +710,7 @@ pub(super) async fn run_app(
                     &mut plan_skill_active, &mut admit_st, &mut running,
                     &mut cancelled, &mut drain_pending, &mut skip_next_render, &mut follow,
                     &cmd_tx, &mut cancel, &mut evt_rx, &mut notepad,
-                    &mut question_menu, &question_hub, &sidecar_ask,
+                    &mut question_menu, &question_hub,
                 )
                 .await;
                 match np_flow {

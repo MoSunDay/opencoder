@@ -63,6 +63,8 @@ async fn dispatch_popup(
     Option<crate::clear_confirm::ClearConfirm>,
     Option<(String, u32)>,
     Vec<String>,
+    Vec<(i64, String)>,
+    mpsc::Receiver<crate::queue_admitter::AdmitReq>,
 ) {
     let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
     let mut running = running;
@@ -80,6 +82,12 @@ async fn dispatch_popup(
     let (cmd_tx, cmd_rx) = mpsc::channel::<UiCmd>(64);
     let mut cancel = CancellationToken::new();
     let mut clear_confirm: Option<crate::clear_confirm::ClearConfirm> = None;
+    let mut admit_st = crate::queue_admitter::AdmitUiState::default();
+    let (admit_tx, admit_rx) = mpsc::channel(8);
+    let mut queue_items: Vec<(i64, String)> = Vec::new();
+    let mut pending_images: Vec<(String, String)> = Vec::new();
+    let mut history: Vec<String> = Vec::new();
+    let mut hist_idx: Option<usize> = None;
 
     let flow = dispatch_command(
         command_menu,
@@ -111,10 +119,16 @@ async fn dispatch_popup(
         &mut None,
         &mut None,
         &mut clear_confirm,
+        &admit_tx,
+        &mut admit_st,
+        &mut queue_items,
+        &mut pending_images,
+        &mut history,
+        &mut hist_idx,
     )
     .await;
     let chat_markers = marker_texts(chat);
-    (flow, cmd_rx, running, clear_confirm, mode_flash, chat_markers)
+    (flow, cmd_rx, running, clear_confirm, mode_flash, chat_markers, queue_items, admit_rx)
 }
 
 /// Marker lines currently in the chat, as flat strings (assert helper).
@@ -166,25 +180,33 @@ async fn slash_act_from_idle_submits_prompt() {
     }
 }
 
-/// `/plan` while running is refused by the busy gate: no command, running
-/// unchanged, and a `[switch] busy` marker is pushed.
+/// `/plan` while running is submitted-but-not-applied (steer/queue
+/// semantics): the raw command text queues verbatim for the runner's
+/// idle-boundary intercept — no command is sent to the worker, `running`
+/// stays true, and no `[switch] busy` refusal marker is needed because the
+/// keystroke is never lost (it lands in the queue panel).
 #[tokio::test]
-async fn slash_plan_while_running_is_busy_gated() {
+async fn slash_plan_while_running_queues_for_idle_boundary() {
     let mut chat = ChatView::default();
     let mut menu = menu_for("plan");
-    let (flow, mut cmd_rx, running, ..) = dispatch_popup(&mut menu, &mut chat, true, "act").await;
+    let (flow, mut cmd_rx, running, .., queue_items, mut admit_rx) =
+        dispatch_popup(&mut menu, &mut chat, true, "act").await;
     assert!(matches!(flow, LoopFlow::Proceed));
     assert!(running, "running must stay true (turn still active)");
     assert!(
         cmd_rx.try_recv().is_err(),
         "no command should be sent while running"
     );
+    assert_eq!(
+        queue_items,
+        vec![(-1, "/plan".to_string())],
+        "the raw /plan row must be queued for the idle boundary"
+    );
+    let req = admit_rx.try_recv().expect("the admit request must fire");
+    assert_eq!(req.display, "/plan");
     assert!(
-        chat.blocks
-            .iter()
-            .any(|b| matches!(b, ChatBlock::Marker(lines)
-            if lines.iter().any(|l| l.to_string().contains("busy")))),
-        "a [switch] busy marker must be pushed; blocks: {:?}",
-        chat.blocks
+        !chat.blocks.iter().any(|b| matches!(b, ChatBlock::Marker(lines)
+        if lines.iter().any(|l| l.to_string().contains("busy")))),
+        "no busy refusal marker: the submit always lands (queued)"
     );
 }

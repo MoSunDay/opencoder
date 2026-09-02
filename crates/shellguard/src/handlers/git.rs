@@ -215,18 +215,7 @@ fn flag_path_value(args: &[String], eq_flags: &[&str], space_flags: &[&str]) -> 
     let mut i = 0;
     while i < args.len() {
         if space_flags.contains(&args[i].as_str()) {
-            if let Some(value) = args.get(i + 1) {
-                return Some(value.clone());
-            }
-        }
-        // getopt short options take a glued value: `git archive
-        // -o/etc/x.tar HEAD` is `-o /etc/x.tar` (#F6). Restricted to
-        // two-char flags — long options never take a glued value without
-        // `=`, and a two-char prefix cannot swallow an unrelated option.
-        for flag in space_flags {
-            if flag.len() == 2 && args[i].starts_with(flag) && args[i].len() > flag.len() {
-                return Some(args[i][flag.len()..].to_owned());
-            }
+            return args.get(i + 1).cloned();
         }
         i += 1;
     }

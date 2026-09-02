@@ -1,4 +1,4 @@
-Commit: d4714fd (working-tree, re-clear 保留已持久化交接边界)
+Commit: af71944
 
 # OpenCoder 能力地图
 

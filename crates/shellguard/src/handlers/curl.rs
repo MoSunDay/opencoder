@@ -49,6 +49,57 @@ fn has_bundled_write_flag(args: &[String]) -> bool {
     })
 }
 
+/// Collect EVERY `-o`/`--output` write target, in the spellings curl accepts:
+/// space-separated (`-o f`, `--output f`), `=`-attached (`--output=f`),
+/// short-glued (`-of`) and trailing a boolean cluster (`-sSof`, `-sSo f`).
+///
+/// curl parses a single-dash cluster until a value-taking option letter, so
+/// everything after an `o` is the output filename — but only when the letters
+/// before it are all known booleans; otherwise the `o` belongs to some other
+/// option's glued value and is left alone.
+fn curl_output_targets(args: &[String]) -> Vec<String> {
+    let mut targets = Vec::new();
+    let mut i = 0;
+    while i < args.len() {
+        let arg = &args[i];
+        if arg == "--output" {
+            if let Some(value) = args.get(i + 1) {
+                targets.push(value.clone());
+            }
+            i += 2;
+            continue;
+        }
+        if let Some(value) = arg.strip_prefix("--output=") {
+            if !value.is_empty() {
+                targets.push(value.to_owned());
+            }
+            i += 1;
+            continue;
+        }
+        if arg.starts_with('-') && !arg.starts_with("--") {
+            let cluster: Vec<char> = arg.chars().skip(1).collect();
+            if let Some(p) = cluster.iter().position(|c| *c == 'o') {
+                if cluster[..p].iter().all(|c| CURL_BOOLEAN_CLUSTER_FLAGS.contains(c)) {
+                    let glued: String = cluster[p + 1..].iter().collect();
+                    if glued.is_empty() {
+                        // `-o f` / `-sSo f`: the value rides the next token.
+                        if let Some(value) = args.get(i + 1) {
+                            targets.push(value.clone());
+                        }
+                        i += 2;
+                        continue;
+                    }
+                    targets.push(glued);
+                    i += 1;
+                    continue;
+                }
+            }
+        }
+        i += 1;
+    }
+    targets
+}
+
 impl Handler for CurlHandler {
     fn commands(&self) -> &[&str] {
         &["curl"]
@@ -76,11 +127,15 @@ impl Handler for CurlHandler {
             return Classification::Ask("curl --config".into());
         }
 
-        // -o/--output: report redirect targets
-        if let Some(output) = get_flag_value(ctx.args, &["-o", "--output"]) {
+        // -o/--output: EVERY write target routes through the redirect
+        // pipeline. get_flag_value saw only the first space-separated
+        // `-o f`, so `--output=/etc/x`, a glued `-o/etc/x` or a second `-o`
+        // slipped past entirely (#F5).
+        let outputs = curl_output_targets(ctx.args);
+        if !outputs.is_empty() {
             return Classification::WithRedirects(
                 AllowReason::handler("curl with output file"),
-                vec![output],
+                outputs,
             );
         }
 
@@ -123,5 +178,65 @@ mod tests {
         ];
         let result = CURL_HANDLER.classify(&HandlerContext::test("curl", &args));
         assert!(matches!(result, Classification::WithRedirects(..)));
+    }
+
+    /// #F5: every output-flag spelling and occurrence must yield a redirect
+    /// target — `=`-attached, glued, clustered, and multiple `-o`s.
+    #[test]
+    fn every_output_spelling_yields_a_target() {
+        let targets_of = |args: &[&str]| -> Option<Vec<String>> {
+            let owned: Vec<String> = args.iter().map(|s| (*s).to_owned()).collect();
+            match CURL_HANDLER.classify(&HandlerContext::test("curl", &owned)) {
+                Classification::WithRedirects(_, refs) => Some(refs),
+                _ => None,
+            }
+        };
+        assert_eq!(
+            targets_of(&["--output=/etc/x", "https://e.com"]),
+            Some(vec!["/etc/x".to_owned()])
+        );
+        assert_eq!(
+            targets_of(&["-o/etc/x", "https://e.com"]),
+            Some(vec!["/etc/x".to_owned()])
+        );
+        // Only the first `-o` used to be seen.
+        assert_eq!(
+            targets_of(&["-o", "/tmp/a", "-o", "/etc/b", "https://e.com"]),
+            Some(vec!["/tmp/a".to_owned(), "/etc/b".to_owned()])
+        );
+        // Boolean cluster with the value glued after `o`.
+        assert_eq!(targets_of(&["-sSof", "https://e.com"]), Some(vec!["f".to_owned()]));
+        // `o` at the end of a cluster takes the next token.
+        assert_eq!(
+            targets_of(&["-sSo", "/etc/x", "https://e.com"]),
+            Some(vec!["/etc/x".to_owned()])
+        );
+        // Uppercase `-O` is server-named, never a parsed target.
+        assert!(matches!(
+            CURL_HANDLER.classify(&HandlerContext::test(
+                "curl",
+                &["-O".to_owned(), "https://e.com".to_owned()]
+            )),
+            Classification::Ask(_)
+        ));
+    }
+
+    /// The redirect pipeline decides released vs non-released targets; the
+    /// handler's job is only to surface every target.
+    #[test]
+    fn output_targets_surface_for_the_redirect_pipeline() {
+        for target in ["/tmp/f", "/etc/x"] {
+            assert!(matches!(
+                CURL_HANDLER.classify(&HandlerContext::test(
+                    "curl",
+                    &[
+                        "-o".to_owned(),
+                        target.to_owned(),
+                        "https://e.com".to_owned()
+                    ]
+                )),
+                Classification::WithRedirects(..)
+            ));
+        }
     }
 }

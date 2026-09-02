@@ -87,6 +87,7 @@ async fn jump_btn_click_works_after_recent_body_click() {
         thinking_btns: Vec::new(),
         subagent_btns: Vec::new(),
         tool_btns: Vec::new(),
+        tool_call_btns: Vec::new(),
         compaction_btns: Vec::new(),
         keymap_btns: Vec::new(),
         total_rows: 0,
@@ -197,6 +198,7 @@ async fn thinking_header_toggles_even_right_after_another_click() {
         }],
         subagent_btns: Vec::new(),
         tool_btns: Vec::new(),
+        tool_call_btns: Vec::new(),
         compaction_btns: Vec::new(),
         keymap_btns: Vec::new(),
         total_rows: 0,
@@ -271,6 +273,7 @@ async fn compaction_header_click_toggles_collapse() {
         thinking_btns: Vec::new(),
         subagent_btns: Vec::new(),
         tool_btns: Vec::new(),
+        tool_call_btns: Vec::new(),
         compaction_btns: vec![crate::render::CompactionBtn {
             block_idx: crate::chat::ChatView::compaction_headers(&chat)[0].block_idx,
             rect: header_rect,
@@ -531,4 +534,116 @@ async fn clicking_tool_group_line_cycles_three_states() {
         matches!(state(&chat), ToolGroupState::Collapsed),
         "miss-click must not cycle the group"
     );
+}
+
+/// Clicking a tool-call header row (List state) toggles ONLY that call's
+/// output. Exercises the exact `tool_call_btns` → `handle_mouse` →
+/// `toggle_tool_call_at` wiring the renderer feeds, and proves the call-row
+/// dispatch precedes the group-line cycle.
+#[tokio::test]
+async fn clicking_tool_call_row_toggles_only_that_call() {
+    use crate::chat::{ChatBlock, ToolGroupState};
+    use crate::render::{ToolBtn, ToolCallBtn};
+
+    let mut chat = ChatView::default();
+    for (id, cmd) in [("a", "echo A"), ("b", "echo B")] {
+        chat.apply(&SessionEvent::ToolStart {
+            id: id.into(),
+            name: "bash".into(),
+            input: serde_json::json!({"command": cmd}),
+        });
+        chat.apply(&SessionEvent::ToolEnd {
+            id: id.into(),
+            name: "bash".into(),
+            output: format!("{id}-out"),
+            is_error: false,
+            images: Vec::new(),
+        });
+    }
+    chat.cycle_tool_group_at(0); // Collapsed -> List
+    let state = |c: &ChatView| match c.blocks.first() {
+        Some(ChatBlock::ToolGroup { state, .. }) => *state,
+        other => panic!("expected a ToolGroup first, got {other:?}"),
+    };
+    let expanded = |c: &ChatView| match c.blocks.first() {
+        Some(ChatBlock::ToolGroup { calls, .. }) => {
+            calls.iter().map(|x| x.expanded).collect::<Vec<_>>()
+        }
+        other => panic!("expected a ToolGroup first, got {other:?}"),
+    };
+    assert!(matches!(state(&chat), ToolGroupState::List));
+
+    // Call header rows sit on rows 1 (call 0) and 2 (call 1) of the body.
+    // `kind` picks which button list gets the rect; `click_row` is where the
+    // synthetic click lands.
+    async fn drive(
+        chat: &mut ChatView,
+        kind: &str,
+        call_idx: usize,
+        rect_row: u16,
+        click_row: u16,
+    ) {
+        let body = Rect::new(0, 0, 80, 12);
+        let mut hits = empty_hits(body);
+        match kind {
+            "call" => hits.tool_call_btns.push(ToolCallBtn {
+                block_idx: 0,
+                call_idx,
+                rect: Rect::new(0, rect_row, 80, 1),
+            }),
+            _ => hits.tool_btns.push(ToolBtn {
+                block_idx: 0,
+                rect: Rect::new(0, rect_row, 80, 1),
+            }),
+        }
+        let click = MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 3,
+            row: click_row,
+            modifiers: KeyModifiers::NONE,
+        };
+        let mut scroll = 0u32;
+        let mut follow = true;
+        let mut subagent_focus: Option<usize> = None;
+        let mut subagent_sys = 0u64;
+        let mut queue_items: Vec<(i64, String)> = vec![];
+        let store = StubStore;
+        let mut queue_scroll: u32 = 0;
+        let mut pending_images = vec![];
+        handle_mouse(
+            click,
+            &hits,
+            &mut scroll,
+            &mut follow,
+            chat,
+            &mut subagent_focus,
+            &mut subagent_sys,
+            Path::new("."),
+            &mut queue_items,
+            "s",
+            &store,
+            &mut queue_scroll,
+            &mut pending_images,
+        )
+        .await;
+    }
+
+    // Click call 0's header row: toggles call 0 only, state stays List.
+    drive(&mut chat, "call", 0, 1, 1).await;
+    assert_eq!(expanded(&chat), vec![true, false]);
+    assert!(matches!(state(&chat), ToolGroupState::List));
+
+    // Click call 1's header row: toggles call 1 only.
+    drive(&mut chat, "call", 1, 2, 2).await;
+    assert_eq!(expanded(&chat), vec![true, true]);
+
+    // Click call 0's row again: collapses just call 0.
+    drive(&mut chat, "call", 0, 1, 1).await;
+    assert_eq!(expanded(&chat), vec![false, true]);
+
+    // A group-line click still cycles the group (List -> Results) and leaves
+    // the per-call flags untouched.
+    drive(&mut chat, "group", 0, 0, 0).await;
+    assert!(matches!(state(&chat), ToolGroupState::Results));
+    assert_eq!(expanded(&chat), vec![false, true]);
 }

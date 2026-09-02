@@ -141,6 +141,7 @@ fn replay_one_prefetched_tool_image_renders() {
             output: Vec::new(),
             started_at_ms: Some(0),
             elapsed_ms: Some(0),
+            expanded: false,
         }],
         state: crate::chat::ToolGroupState::Collapsed,
     });

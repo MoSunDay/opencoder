@@ -62,7 +62,8 @@ static SIMPLE_SAFE: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
         "unexpand",
         "rev",
         "tac",
-        "shuf",
+        // shuf/iconv have a dedicated handler (their -o/--output writes an
+        // arbitrary file, so they must not blanket-Allow)
         // Encoding/hashing
         "base64",
         "base32",
@@ -152,9 +153,11 @@ static SIMPLE_SAFE: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
         "tokei",
         "cloc",
         "scc",
-        "hyperfine",
+        // hyperfine has a dedicated handler (it runs each argument string
+        // through the shell, so it must not blanket-Allow)
         // Encoding
-        "iconv",
+        // iconv has a dedicated handler (its -o/--output writes an arbitrary
+        // file, so it must not blanket-Allow)
         // dos2unix/unix2dos have a dedicated handler (rewrite the named file in place by default)
         // Disk/fs info
         "mount",
@@ -307,6 +310,16 @@ mod tests {
         }
         for cmd in ["rm", "sudo", "curl", "sh", "mv"] {
             assert!(!is_simple_safe(cmd), "{cmd} must not be simple-safe");
+        }
+    }
+
+    /// #F4: hyperfine runs each argument through the shell and
+    /// shuf/iconv write via `-o`, so none of them may blanket-Allow.
+    #[test]
+    fn shell_executing_and_flag_writing_tools_are_not_simple_safe() {
+        for cmd in ["hyperfine", "shuf", "iconv"] {
+            assert!(!is_simple_safe(cmd), "{cmd} must not be simple-safe");
+            assert!(!is_dynamic_arg_safe(cmd), "{cmd} must not be dynamic-arg-safe");
         }
     }
 

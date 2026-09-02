@@ -6,7 +6,7 @@
 
 use super::{
     assistant_rows, ChatBlock, ChatView, CompactionHeader, SubagentHeader, ThinkingHeader,
-    ToolGroupState, ToolHeader,
+    ToolCallHeader, ToolGroupState, ToolHeader,
 };
 
 impl ChatView {
@@ -31,10 +31,19 @@ impl ChatView {
         self.collect_headers().2
     }
 
+    /// Return each tool call's header row inside `List`-state ToolGroup
+    /// blocks, as `(block_idx, call_idx, header_line_idx)`. Mirrors
+    /// `thinking_headers`; used to build click hit-rects for individual
+    /// function calls (clicking toggles that call's output only).
+    pub fn tool_call_headers(&self) -> Vec<ToolCallHeader> {
+        self.collect_headers().4
+    }
+
     /// Single pass over all blocks computing the header line index of every
     /// Thinking / Subagent / Tool block, using the identical per-block line
     /// accounting that `flatten_with()` emits. Keeping the accounting in one
     /// place guarantees hit-rect indices stay aligned with the live render.
+    #[allow(clippy::type_complexity)]
     pub(crate) fn collect_headers(
         &self,
     ) -> (
@@ -42,11 +51,13 @@ impl ChatView {
         Vec<SubagentHeader>,
         Vec<ToolHeader>,
         Vec<CompactionHeader>,
+        Vec<ToolCallHeader>,
     ) {
         let mut think = Vec::new();
         let mut sub = Vec::new();
         let mut tool = Vec::new();
         let mut compaction = Vec::new();
+        let mut tool_calls = Vec::new();
         let mut line_idx = 0usize;
         for (block_idx, block) in self.blocks.iter().enumerate() {
             match block {
@@ -89,12 +100,23 @@ impl ChatView {
                         header_line_idx: line_idx,
                     });
                     // Mirrors flatten_with exactly: the group line always;
-                    // + calls.len() headers + 1 trailing blank in List;
-                    // + per call (header + output + blank) in Results.
+                    // per call (header + output + blank when that call is
+                    // expanded) in List, then one trailing blank; per call
+                    // (header + output + blank) in Results.
                     line_idx += 1;
                     match state {
                         ToolGroupState::Collapsed => {}
-                        ToolGroupState::List => line_idx += calls.len() + 1,
+                        ToolGroupState::List => {
+                            for (call_idx, c) in calls.iter().enumerate() {
+                                tool_calls.push(ToolCallHeader {
+                                    block_idx,
+                                    call_idx,
+                                    header_line_idx: line_idx,
+                                });
+                                line_idx += 1 + if c.expanded { 1 + c.output.len() } else { 0 };
+                            }
+                            line_idx += 1; // trailing blank
+                        }
                         ToolGroupState::Results => {
                             for c in calls {
                                 line_idx += 2 + c.output.len();
@@ -141,6 +163,6 @@ impl ChatView {
                 }
             }
         }
-        (think, sub, tool, compaction)
+        (think, sub, tool, compaction, tool_calls)
     }
 }

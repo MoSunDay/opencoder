@@ -38,61 +38,12 @@ pub(crate) use status_bar::resolve_ctx_used;
 pub(crate) use status_bar::SPINNER;
 
 /// Mouse hit-targets exported by `render` for the event loop to test clicks
-/// and wheel scrolls against. Recomputed every frame.
-#[derive(Default)]
-pub(crate) struct MouseHits {
-    pub jump_btn: Option<Rect>,
-    pub top_btn: Option<Rect>,
-    pub body: Option<Rect>,
-    /// Queue/steer panel area (Some while the panel is visible), used by the
-    /// scroll-wheel handler to scroll the panel instead of the body.
-    pub queue_panel: Option<Rect>,
-    /// Cached total pending entries (steer + queue) from the last render.
-    /// Mirrors `total_rows` for the body: lets the wheel handler clamp the
-    /// queue scroll without re-deriving the panel contents.
-    pub queue_total: usize,
-    pub queue_btns: Vec<QueueBtn>,
-    /// Clickable ✕ delete buttons on pending-image attachment badges; one
-    /// per attachment row, recomputed every frame.
-    pub attach_del_btns: Vec<AttachDelBtn>,
-    /// Clickable Thinking-block header rows; clicking toggles collapse.
-    /// One entry per Thinking block currently visible in the body viewport.
-    pub thinking_btns: Vec<ThinkingBtn>,
-    /// Clickable Subagent-block header rows; clicking toggles collapse.
-    pub subagent_btns: Vec<SubagentBtn>,
-    /// Clickable ToolGroup header rows; clicking cycles the group through
-    /// Collapsed → List → Results. One entry per ToolGroup block currently
-    /// visible in the body viewport.
-    pub tool_btns: Vec<ToolBtn>,
-    /// Clickable Compaction-block header rows; clicking toggles collapse.
-    pub compaction_btns: Vec<CompactionBtn>,
-    pub keymap_btns: Vec<Rect>,
-    /// Cached total content rows from the last render_body call. Used by
-    /// the scroll-wheel handler to clamp scroll without re-flattening.
-    pub total_rows: usize,
-}
-
-/// A clickable Thinking-block header. `block_idx` indexes `ChatView::blocks`;
-/// `rect` is the on-screen row of the header line.
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct ThinkingBtn {
-    pub block_idx: usize,
-    pub rect: Rect,
-}
-
-/// A clickable Subagent-block header.
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct SubagentBtn {
-    pub block_idx: usize,
-    pub rect: Rect,
-}
-
-/// A clickable ToolGroup header (the group line).
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct ToolBtn {
-    pub block_idx: usize,
-    pub rect: Rect,
-}
+/// and wheel scrolls against. Recomputed every frame. The struct and the
+/// button types live in `render_hits.rs` next to their recorders; re-exported
+/// here so `crate::render::MouseHits` paths stay stable.
+pub(crate) use hit_records::{
+    CompactionBtn, MouseHits, SubagentBtn, ThinkingBtn, ToolBtn, ToolCallBtn,
+};
 
 pub(crate) fn in_rect(r: Rect, col: u16, row: u16) -> bool {
     col >= r.x && col < r.x + r.width && row >= r.y && row < r.y + r.height
@@ -171,6 +122,7 @@ pub(crate) fn render<B: Backend + 'static>(
             hits.thinking_btns.clear();
             hits.subagent_btns.clear();
             hits.tool_btns.clear();
+            hits.tool_call_btns.clear();
             hits.compaction_btns.clear();
             hits.keymap_btns.clear();
             // Copy mode: undecorated fullscreen editor text — no tree
@@ -256,6 +208,7 @@ pub(crate) fn render<B: Backend + 'static>(
         hits.thinking_btns.clear();
         hits.subagent_btns.clear();
         hits.tool_btns.clear();
+        hits.tool_call_btns.clear();
         hits.compaction_btns.clear();
         hits.keymap_btns.clear();
         if !plan_active {
@@ -274,6 +227,7 @@ pub(crate) fn render<B: Backend + 'static>(
                 &mut hits.thinking_btns,
                 &mut hits.subagent_btns,
                 &mut hits.tool_btns,
+                &mut hits.tool_call_btns,
                 &mut hits.compaction_btns,
                 viewport,
                 is_top_level,
@@ -436,6 +390,7 @@ fn render_body(
     thinking_btns: &mut Vec<ThinkingBtn>,
     subagent_btns: &mut Vec<SubagentBtn>,
     tool_btns: &mut Vec<ToolBtn>,
+    tool_call_btns: &mut Vec<ToolCallBtn>,
     compaction_btns: &mut Vec<CompactionBtn>,
     viewport: &mut Option<ViewportCache>,
     is_top_level: bool,
@@ -516,6 +471,16 @@ fn render_body(
     );
     hit_records::record_tool_hits(
         chat, cache, text_w, scroll_y, content_h, inner.x, inner.y, tool_btns,
+    );
+    hit_records::record_tool_call_hits(
+        chat,
+        cache,
+        text_w,
+        scroll_y,
+        content_h,
+        inner.x,
+        inner.y,
+        tool_call_btns,
     );
     hit_records::record_compaction_hits(
         chat,
@@ -781,7 +746,6 @@ fn render_status_chip(f: &mut Frame, composer_area: Rect, text: &str, bg: Color)
 mod hit_records;
 #[path = "render_popups.rs"]
 mod popups;
-pub(crate) use hit_records::CompactionBtn;
 #[cfg(test)]
 #[path = "render_tests/mod.rs"]
 mod tests;

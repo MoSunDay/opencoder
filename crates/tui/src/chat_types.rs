@@ -237,6 +237,10 @@ pub struct ToolCall {
     /// `None` while the call is still running — drives the group line's
     /// running hint.
     pub elapsed_ms: Option<u64>,
+    /// Show this call's `output` under its header while the group is in the
+    /// `List` state (`Results` always shows every output). Toggled by
+    /// clicking the call's header row; reset by `collapse_all_collapsible`.
+    pub expanded: bool,
 }
 
 /// Locates a `ToolGroup` block's group line for mouse hit-testing (clicking
@@ -244,6 +248,16 @@ pub struct ToolCall {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ToolHeader {
     pub block_idx: usize,
+    pub header_line_idx: usize,
+}
+
+/// Locates one call's header row (`▸ name args`) inside a `ToolGroup` shown
+/// in the `List` state, for mouse hit-testing (clicking toggles that call's
+/// output only, leaving sibling calls untouched).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ToolCallHeader {
+    pub block_idx: usize,
+    pub call_idx: usize,
     pub header_line_idx: usize,
 }
 

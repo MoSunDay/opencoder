@@ -39,13 +39,14 @@ pub(super) async fn run_one_llm_call(
     );
     let mut to_send = vec![system];
     to_send.extend(session.messages.iter().cloned());
-    // Transient skill context (full body + reminder): derived per call,
-    // appended LAST and never persisted, so activating a skill never
-    // mutates the payload's persisted prefix — and run end drops the skill,
-    // which stops the submission entirely. The system prompt itself is
-    // rebuilt on every call and re-reads AGENTS.md from disk, so it is NOT
-    // byte-stable across calls when AGENTS.md changes on disk.
-    if let Some(body) = crate::skill_context::transient_body_message(session) {
+    // Skill body rides the payload of the FIRST round of an activation ONLY
+    // (deliver_body_once flips the session gate): rounds 2..N carry no skill
+    // body — no per-round token waste, no duplicate block after the newest
+    // tool results. The delivered marker names the source path, so the model
+    // can `read` the SKILL.md again when it needs the skipped body. The tail
+    // reminder below stays a per-call fallback for the degenerate empty-body
+    // case.
+    if let Some(body) = crate::skill_context::deliver_body_once(session) {
         to_send.push(body);
     }
     if let Some(tail) = crate::skill_context::tail_reminder(session) {

@@ -1,4 +1,4 @@
-Commit: (working-tree, sidecar 提交即时回显)
+Commit: 946f170
 
 # TUI `/sidecar`：去掉帮助文案，提交问题即时回显（消灭"提交后卡住"观感）
 

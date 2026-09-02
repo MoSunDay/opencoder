@@ -1,6 +1,6 @@
 # Message.display 字段——用户原样输入成为所有回显面的单一事实源
 
-Commit: (working-tree)
+Commit: c3ec226
 
 ## 背景
 

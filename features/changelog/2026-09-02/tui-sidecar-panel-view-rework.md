@@ -1,6 +1,6 @@
 # TUI sidecar 面板迁出块流：`SidecarPanel` + `Box<ChatView>`（不变量闭合，block_idx 首次稳定）
 
-Commit: (working-tree)
+Commit: 946f170
 
 ## 背景
 

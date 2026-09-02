@@ -1,6 +1,6 @@
 # steer/queue 面板 ✕/`>` 点击失效——宽度模型与渲染 oracle 统一 + 命中矩形加宽 + 子镜像 retain 补漏
 
-Commit: af71944 (working-tree, 未提交)
+Commit: 3adc115
 
 ## 背景
 
@@ -36,10 +36,10 @@ Commit: af71944 (working-tree, 未提交)
 
 - `cargo test -p opencoder-tui`：lib 1602 passed + 全部集成套件 0 failed。
 - 本修复相关的 10 个测试（composer 宽度 ×3、queue_panel 几何 ×1、渲染级对齐 ×3、鼠标行为 ×3）在当前工作树单独复跑全绿。
-- `cargo test --workspace --no-fail-fast`：1918+ passed；唯二确定性失败为**既存 WIP 陈旧钉**（见下），修复后 `-p opencoder-store --test schema_v4_migration` 复跑 2/2 通过。
+- `cargo test --workspace --no-fail-fast`：最终门 0 failed（隔离 worktree @ 3adc115 复验：249 test targets / 3914 passed / exit 0，含 doctest；并行任务 working-tree 中间态曾致 1918 阶段唯二确定性失败，均非本变更引入，见下）。
 - `cargo clippy -p opencoder-tui --all-targets` 0 warning；`cargo fmt` 已套用。
 
-## 既存失败修复（非本症状引入，为过回归门顺带收敛）
+## 既存失败修复（非本症状引入，为过回归门顺带收敛；均为 working-tree 阶段动作，schema 钉修正属并行 schema WIP，未随本 Commit 落库）
 
 - `crates/store/tests/schema_v4_migration.rs`：工作树既存的 schema v13→v14 WIP 已把 `SCHEMA_VERSION` 提到 14 并同步了 `display_text.rs`，但漏改本文件两处「latest = 13」断言（报错自证：DB 为 14、断言期望 13）。按 WIP 自身方向机械修正 13→14，全量回归由此解阻。
 - tui 侧 doctest 编译失败（`chat::ToolGroupState` 路径）属**另一并行任务的 ToolGroupState 迁移中间态**（chat.rs/replay.rs 在本次验证进行中仍在被持续改写），不属本修复半径，未代为收口，留待该任务自身的回归门处理。

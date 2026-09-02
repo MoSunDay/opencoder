@@ -80,6 +80,7 @@ async fn dispatch_popup(
     let mut mode_flash: Option<(String, u32)> = None;
     let mut sys_tokens = 0u64;
     let (cmd_tx, cmd_rx) = mpsc::channel::<UiCmd>(64);
+    let (sidecar_tx, _sidecar_rx) = mpsc::channel::<crate::sidecar_ui::SidecarCmd>(8);
     let mut cancel = CancellationToken::new();
     let mut clear_confirm: Option<crate::clear_confirm::ClearConfirm> = None;
     let mut admit_st = crate::queue_admitter::AdmitUiState::default();
@@ -95,6 +96,7 @@ async fn dispatch_popup(
         &cmd_tx,
         &mut cancel,
         chat,
+        &sidecar_tx,
         &mut running,
         &mut follow,
         &store,

@@ -122,10 +122,10 @@ impl ChatView {
                     line_idx += 1; // header only — no inline expansion
                 }
                 ChatBlock::Sidecar { .. } => {
-                    // Header-only row (no hit-registered click target yet) —
-                    // the focused body is swapped in by `compute_display`, so
-                    // the flat transcript carries exactly one line per block.
-                    line_idx += 1;
+                    // Zero lines: the sidecar bypass Q/A never shows in the
+                    // flat main transcript (focused body is swapped in by
+                    // `compute_display`; `sidecar::purge` removes the block
+                    // on exit).
                 }
                 ChatBlock::Plan { rendered, .. } => {
                     line_idx += 1 + rendered.len() + 1;

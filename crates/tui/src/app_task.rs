@@ -79,7 +79,7 @@ pub(crate) async fn switch_session(
     // Ask sender of the OLD session's sidecar actor. Dropped here (the actor
     // then drains and exits) and replaced by a fresh actor bound to the new
     // session — sidecar history never crosses sessions.
-    sidecar_ask: &mut mpsc::Sender<String>,
+    sidecar_ask: &mut mpsc::Sender<crate::sidecar_ui::SidecarCmd>,
 ) -> Result<()> {
     // Perform session switch.
     // Cancel the in-flight turn before Quit so the worker sees it promptly

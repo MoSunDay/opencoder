@@ -657,24 +657,12 @@ impl ChatView {
                     }
                     out.push(Line::from(spans));
                 }
-                // Header-only row; the focused body is swapped in wholesale by
-                // `compute_display` (same design as the subagent view swap).
-                ChatBlock::Sidecar {
-                    question,
-                    done,
-                    ok,
-                    answer,
-                    total_tokens,
-                    rounds,
-                    started_at_ms,
-                    elapsed_ms,
-                    ..
-                } => {
-                    out.extend(sidecar::flatten_sidecar(
-                        question, *done, *ok, answer, *total_tokens, *rounds,
-                        *started_at_ms, *elapsed_ms, anim_tick, now_ms,
-                    ));
-                }
+                // ZERO rows in the main transcript: the sidecar bypass Q/A
+                // leaves no trace there. While focused, `compute_display`
+                // swaps the whole body for the block's nested view; while
+                // unfocused the block is simply invisible (`sidecar::purge`
+                // removes it on exit anyway).
+                ChatBlock::Sidecar { .. } => {}
             }
         }
         out

@@ -114,10 +114,12 @@ async fn fired_guard_submits_canonical_prompt_when_idle() {
     assert!(admit_rx.try_recv().is_err(), "idle fire must not queue");
 }
 
-/// Firing the guard while running queues the compound command verbatim —
-/// the runner applies it at the idle boundary.
+/// Expiry firing while running (the unattended countdown path) queues the
+/// compound command verbatim — the runner applies it at the idle boundary —
+/// and echoes a queued marker so the fire is never silent. Nothing is
+/// cancelled: nobody confirmed, so the in-flight turn survives.
 #[tokio::test]
-async fn fired_guard_queues_compound_when_running() {
+async fn expired_guard_queues_compound_when_running() {
     let mut chat = ChatView {
         agent: "act".into(),
         ..Default::default()
@@ -158,10 +160,123 @@ async fn fired_guard_queues_compound_when_running() {
     assert!(running, "the in-flight turn stays untouched");
     assert!(
         cmd_rx.try_recv().is_err(),
-        "running fire must not start a new turn"
+        "expiry fire must not start a new turn"
     );
-    let req = admit_rx.try_recv().expect("running fire must queue");
+    let req = admit_rx.try_recv().expect("expiry fire must queue");
     assert_eq!(req.display, "/act_clear_context then run checks");
+    assert!(
+        chat.blocks
+            .iter()
+            .any(|b| matches!(b, ChatBlock::Marker(lines)
+                if lines.iter().any(|l| l.to_string().contains("[clear] 已排队")))),
+        "the queue deferral must be echoed as a marker; blocks: {:?}",
+        chat.blocks
+    );
+    assert!(
+        !chat.blocks
+            .iter()
+            .any(|b| matches!(b, ChatBlock::Marker(lines)
+                if lines.iter().any(|l| l.to_string().contains("[interrupted]")))),
+        "expiry never interrupts the running turn"
+    );
+}
+
+/// Manual confirmation while a turn runs (second Shift+Tab / Enter on the
+/// armed guard) fires NOW: the running turn is interrupted first (the same
+/// cancel semantics as the double-Esc hard-abort) and the clear turn starts
+/// immediately — no idle-boundary wait, no queue detour.
+#[tokio::test]
+async fn manual_confirm_while_running_interrupts_and_fires_now() {
+    let mut chat = ChatView {
+        agent: "act".into(),
+        ..Default::default()
+    };
+    let mut clear_confirm = None;
+    let mut mode_flash: Option<(String, u32)> = None;
+    let mut input = String::new();
+    let mut cursor_idx = 0;
+    let mut undo_state = crate::undo::UndoState::default();
+    let mut running = true;
+    let mut follow = false;
+    let mut sys_tokens = 0u64;
+    let mut history: Vec<String> = Vec::new();
+    let mut hist_idx = None;
+    let mut queue_items: Vec<(i64, String)> = Vec::new();
+    let mut pending_images: Vec<(String, String)> = Vec::new();
+    let mut admit_st = crate::queue_admitter::AdmitUiState::default();
+    let (admit_tx, mut admit_rx) = mpsc::channel(8);
+    let (cmd_tx, mut cmd_rx) = mpsc::channel::<UiCmd>(64);
+    let mut cancel = CancellationToken::new();
+    let mut child_runtime = crate::worker::ChildRuntimeHandles {
+        cancels: Default::default(),
+        turn_cancels: Default::default(),
+        steer_gates: Default::default(),
+    };
+    let mut cancelled = false;
+
+    crate::clear_confirm::engage(
+        &mut clear_confirm,
+        &mut chat,
+        &mut mode_flash,
+        0,
+        Some("finish the summary".into()),
+        None,
+    );
+
+    let backtab = KeyEvent::new(KeyCode::BackTab, KeyModifiers::NONE);
+    crate::app::app_loop::handle_confirm_key(
+        &mut clear_confirm,
+        backtab,
+        &mut input,
+        &mut cursor_idx,
+        &mut undo_state,
+        &mut chat,
+        &cmd_tx,
+        &mut cancel,
+        &mut running,
+        &mut follow,
+        &mut sys_tokens,
+        &mut mode_flash,
+        0,
+        std::path::Path::new("."),
+        &admit_tx,
+        &mut admit_st,
+        &mut queue_items,
+        &mut pending_images,
+        "test",
+        &mut history,
+        &mut hist_idx,
+        &mut child_runtime,
+        &mut cancelled,
+    )
+    .await;
+
+    assert!(clear_confirm.is_none(), "the manual confirm consumes the arm");
+    assert!(
+        cancelled,
+        "the running turn is hard-cancelled (double-Esc semantics)"
+    );
+    assert!(
+        chat.blocks
+            .iter()
+            .any(|b| matches!(b, ChatBlock::Marker(lines)
+                if lines.iter().any(|l| l.to_string().contains("[interrupted] stopping")))),
+        "the interruption must be visible; blocks: {:?}",
+        chat.blocks
+    );
+    // The clear turn starts immediately on the fresh idle path.
+    match drain_cmd(&mut cmd_rx) {
+        UiCmd::Prompt(text, _) => assert_eq!(
+            text, "/act_clear_context finish the summary",
+            "the manual confirm submits the compound prompt right away"
+        ),
+        other => panic!("expected immediate Prompt, got {other:?}"),
+    }
+    assert!(running, "the clear turn is the new running turn");
+    assert!(
+        admit_rx.try_recv().is_err(),
+        "manual confirm never queues — it interrupts instead"
+    );
 }
 
 /// Shift+Tab and typing the command are ONE path: every spelling parses to
@@ -221,6 +336,12 @@ async fn esc_cancel_drops_countdown_chip() {
     let (admit_tx, _admit_rx) = mpsc::channel(8);
     let (cmd_tx, mut cmd_rx) = mpsc::channel::<UiCmd>(64);
     let mut cancel = CancellationToken::new();
+    let mut child_runtime = crate::worker::ChildRuntimeHandles {
+        cancels: Default::default(),
+        turn_cancels: Default::default(),
+        steer_gates: Default::default(),
+    };
+    let mut cancelled = false;
 
     crate::clear_confirm::engage(
         &mut clear_confirm,
@@ -256,6 +377,8 @@ async fn esc_cancel_drops_countdown_chip() {
         "test",
         &mut history,
         &mut hist_idx,
+        &mut child_runtime,
+        &mut cancelled,
     )
     .await;
 
@@ -302,6 +425,12 @@ async fn enter_with_typed_text_fires_merged_rest_now() {
     let (admit_tx, mut admit_rx) = mpsc::channel(8);
     let (cmd_tx, mut cmd_rx) = mpsc::channel::<UiCmd>(64);
     let mut cancel = CancellationToken::new();
+    let mut child_runtime = crate::worker::ChildRuntimeHandles {
+        cancels: Default::default(),
+        turn_cancels: Default::default(),
+        steer_gates: Default::default(),
+    };
+    let mut cancelled = false;
 
     crate::clear_confirm::engage(
         &mut clear_confirm,
@@ -337,6 +466,8 @@ async fn enter_with_typed_text_fires_merged_rest_now() {
             "test",
             &mut history,
             &mut hist_idx,
+            &mut child_runtime,
+            &mut cancelled,
         )
         .await;
     }
@@ -367,6 +498,8 @@ async fn enter_with_typed_text_fires_merged_rest_now() {
         "test",
         &mut history,
         &mut hist_idx,
+        &mut child_runtime,
+        &mut cancelled,
     )
     .await;
 
@@ -407,6 +540,12 @@ async fn retyped_clear_command_supersedes_armed_rest() {
     let (admit_tx, _admit_rx) = mpsc::channel(8);
     let (cmd_tx, mut cmd_rx) = mpsc::channel::<UiCmd>(64);
     let mut cancel = CancellationToken::new();
+    let mut child_runtime = crate::worker::ChildRuntimeHandles {
+        cancels: Default::default(),
+        turn_cancels: Default::default(),
+        steer_gates: Default::default(),
+    };
+    let mut cancelled = false;
 
     crate::clear_confirm::engage(
         &mut clear_confirm,
@@ -441,6 +580,8 @@ async fn retyped_clear_command_supersedes_armed_rest() {
             "test",
             &mut history,
             &mut hist_idx,
+            &mut child_runtime,
+            &mut cancelled,
         )
         .await;
     }
@@ -467,6 +608,8 @@ async fn retyped_clear_command_supersedes_armed_rest() {
         "test",
         &mut history,
         &mut hist_idx,
+        &mut child_runtime,
+        &mut cancelled,
     )
     .await;
 
@@ -505,6 +648,12 @@ async fn shift_tab_repress_fires_armed_guard_now() {
     let (admit_tx, _admit_rx) = mpsc::channel(8);
     let (cmd_tx, mut cmd_rx) = mpsc::channel::<UiCmd>(64);
     let mut cancel = CancellationToken::new();
+    let mut child_runtime = crate::worker::ChildRuntimeHandles {
+        cancels: Default::default(),
+        turn_cancels: Default::default(),
+        steer_gates: Default::default(),
+    };
+    let mut cancelled = false;
 
     crate::clear_confirm::engage(
         &mut clear_confirm,
@@ -538,6 +687,8 @@ async fn shift_tab_repress_fires_armed_guard_now() {
         "test",
         &mut history,
         &mut hist_idx,
+        &mut child_runtime,
+        &mut cancelled,
     )
     .await;
 

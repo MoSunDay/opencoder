@@ -54,15 +54,14 @@ pub enum ChatBlock {
         collapsed: bool,
         streaming: bool,
     },
-    /// Tool invocation: a header line plus its (full) output lines. `collapsed`
-    /// hides the output behind a click-to-expand header, mirroring Thinking.
-    Tool {
-        id: String,
-        header: Line<'static>,
-        output: Vec<Line<'static>>,
-        collapsed: bool,
-        started_at_ms: i64,
-        elapsed_ms: Option<u64>,
+    /// A run of consecutive tool calls (one assistant turn's calls between
+    /// text/image/marker blocks form one group; any other block splits the
+    /// run). Group-level three-state display, cycled by clicking the group
+    /// line: Collapsed → List → Results → Collapsed. Ctrl+L resets every
+    /// group to Collapsed.
+    ToolGroup {
+        calls: Vec<ToolCall>,
+        state: ToolGroupState,
     },
     /// Inline image attachment rendered as half-block ASCII art.
     /// `filename` is the display name; `rendered` is the pre-computed
@@ -211,7 +210,37 @@ pub struct SubagentHeader {
     pub header_line_idx: usize,
 }
 
-/// Locates a `Tool` block's header line for mouse hit-testing.
+/// Display state of a `ChatBlock::ToolGroup` — the single source of truth for
+/// how the group renders (there is no per-call collapse flag to drift).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ToolGroupState {
+    /// One line: `▸ N function calls` (plus a spinner hint while any call is
+    /// unfinished). Default for new groups and after Ctrl+L.
+    #[default]
+    Collapsed,
+    /// Group line + each call's header line (tool name + arg summary, no
+    /// output).
+    List,
+    /// List + each call's full output lines.
+    Results,
+}
+
+/// One tool call inside a `ChatBlock::ToolGroup`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ToolCall {
+    pub id: String,
+    /// `▸ name args` header line, shown in the List/Results states.
+    pub header: Line<'static>,
+    /// Sanitized output lines, shown in the Results state.
+    pub output: Vec<Line<'static>>,
+    pub started_at_ms: Option<i64>,
+    /// `None` while the call is still running — drives the group line's
+    /// running hint.
+    pub elapsed_ms: Option<u64>,
+}
+
+/// Locates a `ToolGroup` block's group line for mouse hit-testing (clicking
+/// cycles the group's display state).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ToolHeader {
     pub block_idx: usize,

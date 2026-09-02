@@ -508,3 +508,7 @@ mod replay_duration_tests;
 #[cfg(test)]
 #[path = "session_ui/terminal_safety_tests.rs"]
 mod terminal_safety_tests;
+
+#[cfg(test)]
+#[path = "session_ui/handoff_card_tests.rs"]
+mod handoff_card_tests;

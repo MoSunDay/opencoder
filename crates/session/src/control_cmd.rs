@@ -233,7 +233,31 @@ fn fold_to_continuity_seed(session: &mut SessionState) {
             let last_say = last_say.trim().to_string();
             (seed_message(&last_say), clear_seed_marker(&last_say))
         }
-        None => (fresh_start_message(), CLEAR_CONTEXT_SENTINEL.to_string()),
+        None => {
+            // No assistant text in the live transcript. The common cause is a
+            // RE-clear (second Shift+Tab confirm, resume-then-clear, clear
+            // before any act output): the transcript here holds ONLY
+            // synthetic messages — the previous clear's boundary marker —
+            // which `last_assistant_text` can never see again. If that
+            // previous clear preserved a boundary (a directive display or a
+            // continuity seed in `handoff_plan`), re-fold it AS-IS instead of
+            // overwriting it with the blank sentinel: the sentinel would
+            // silently drop the preserved plan both from the UI (the Plan
+            // card rebuild filters it) and from the model. The marker
+            // rebuild mirrors resume.rs so the in-memory transcript and a
+            // later resume reconstruct the exact same flavour.
+            match session.handoff_plan.clone() {
+                Some(prev) if !prev.is_empty() && !is_clear_context_handoff(&prev) => {
+                    if is_clear_context_seed(&prev) {
+                        (seed_message(clear_seed_text(&prev)), prev)
+                    } else {
+                        (crate::handoff::handoff_message(&prev), prev)
+                    }
+                }
+                // Genuinely nothing preserved anywhere: blank fresh start.
+                _ => (fresh_start_message(), CLEAR_CONTEXT_SENTINEL.to_string()),
+            }
+        }
     };
     for url in &preserved_images {
         marker.blocks.push(ContentBlock::Image {

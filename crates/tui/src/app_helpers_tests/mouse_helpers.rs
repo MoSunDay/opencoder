@@ -3,6 +3,7 @@
 //! `ChatView` builder so tests are independent of the markdown renderer.
 
 use crate::app_helpers::*;
+use crate::render::MouseHits;
 use async_trait::async_trait;
 use opencoder_core::Message;
 use opencoder_session::SessionEvent;
@@ -12,9 +13,21 @@ use opencoder_store::{
 };
 use ratatui::layout::Rect;
 
-/// Minimal `Store` stub whose every method panics. The mouse-copy code paths
-/// tested here never touch the store.
-pub struct StubStore;
+/// Minimal `Store` stub whose every method panics except `delete_input`,
+/// which succeeds and records the deleted seq so queue-panel delete-path
+/// tests can assert on it.
+pub struct StubStore {
+    /// Seqs successfully removed via `delete_input`, in call order.
+    pub deleted: std::sync::Mutex<Vec<i64>>,
+}
+
+impl Default for StubStore {
+    fn default() -> Self {
+        Self {
+            deleted: std::sync::Mutex::new(Vec::new()),
+        }
+    }
+}
 
 #[async_trait]
 impl opencoder_store::Store for StubStore {
@@ -66,8 +79,9 @@ impl opencoder_store::Store for StubStore {
     async fn claim_next_queue(&self, _: &str) -> anyhow::Result<Option<(i64, SessionInput)>> {
         unimplemented!()
     }
-    async fn delete_input(&self, _: i64) -> anyhow::Result<()> {
-        unimplemented!()
+    async fn delete_input(&self, id: i64) -> anyhow::Result<()> {
+        self.deleted.lock().unwrap().push(id);
+        Ok(())
     }
     async fn swap_input_order(&self, _: &str, _: i64, _: i64) -> anyhow::Result<()> {
         unimplemented!()

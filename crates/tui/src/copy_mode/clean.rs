@@ -443,7 +443,11 @@ mod tests {
         run(&[
             ("closed group", &["\u{25b8} 1 step"], None),
             ("open group plural", &["\u{25be} 3 steps"], None),
-            ("group + spinner", &["\u{25b8} 2 steps", "\u{280b} running "], None),
+            (
+                "group + spinner",
+                &["\u{25b8} 2 steps", "\u{280b} running "],
+                None,
+            ),
         ]);
     }
 
@@ -451,7 +455,11 @@ mod tests {
     fn group_row_lookalikes_survive() {
         run(&[
             ("no count", &["\u{25b8} step"], Some("\u{25b8} step")),
-            ("non-digit count", &["\u{25b8} x steps"], Some("\u{25b8} x steps")),
+            (
+                "non-digit count",
+                &["\u{25b8} x steps"],
+                Some("\u{25b8} x steps"),
+            ),
             ("missing arrow", &["1 step"], Some("1 step")),
             (
                 "spinner-less tail span is not a group row",

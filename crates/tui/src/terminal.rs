@@ -33,8 +33,8 @@ pub struct TerminalGuard;
 
 impl TerminalGuard {
     /// Put the terminal into TUI mode (raw + alt-screen + cursor style + mouse
-    /// capture + Kitty keyboard enhancement + bracketed paste) and install the
-    /// panic hook.
+    /// capture + Kitty keyboard enhancement + bracketed paste), install the
+    /// panic hook, and arm the process-wide signal guard.
     pub fn enter() -> Result<Self> {
         enable_raw_mode()?;
         let mut stdout = std::io::stdout();
@@ -81,6 +81,15 @@ impl TerminalGuard {
                 Self::write_panic_log(info);
             }
         }));
+
+        // Signal guard: from this millisecond on, a termination signal
+        // (SIGHUP/SIGINT/SIGQUIT/SIGTERM) restores the terminal before the
+        // process dies — otherwise mouse capture stays enabled in the host
+        // terminal and every later click/drag prints escape garbage into the
+        // shell. Armed here (not in the liveness supervisor) so the boot
+        // window before the supervisor is spawned is covered too. Idempotent
+        // process-wide singleton — see `signal_guard`.
+        crate::signal_guard::arm_once();
 
         Ok(TerminalGuard)
     }

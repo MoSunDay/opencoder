@@ -1,13 +1,14 @@
-//! Per-call expansion inside a `List`-state `ToolGroup` (Phase 1 of clickable
-//! function calls): clicking a call's `▸ name args` row toggles ONLY that
-//! call's output. `Results` stays fully expanded, `Collapsed` shows no call
-//! rows, and Ctrl+L (`collapse_all_collapsible`) resets every call.
+//! Per-row drill-down inside an open `StepGroup` (Phase 2 of clickable
+//! function calls): clicking a rendered row toggles ONLY that target — a
+//! step row flips that step open/closed, a call header row toggles ONLY that
+//! call's output. Rows are enumerated by the group's VISIBLE targets
+//! (step rows, plus each open step's call rows, in render order).
 
 use super::super::*;
 
-/// Two-call group built through the real event path (calls keep start order;
-/// each output lands in its own call by id).
-fn two_call_group() -> ChatView {
+/// Two-step group built through the real event path (sequential calls split
+/// into two steps; each output lands in its own call by id).
+fn two_step_group() -> ChatView {
     let mut v = ChatView::default();
     for (id, cmd, out) in [("a", "echo A", "A-out"), ("b", "echo B", "B-out")] {
         v.apply(&SessionEvent::ToolStart {
@@ -26,17 +27,28 @@ fn two_call_group() -> ChatView {
     v
 }
 
-fn group_state(v: &ChatView) -> ToolGroupState {
+fn group_open(v: &ChatView) -> bool {
     match v.blocks.first() {
-        Some(ChatBlock::ToolGroup { state, .. }) => *state,
-        other => panic!("expected a ToolGroup first, got {other:?}"),
+        Some(ChatBlock::StepGroup { open, .. }) => *open,
+        other => panic!("expected a StepGroup first, got {other:?}"),
     }
+}
+
+/// Open the group and both of its steps; returns the view.
+fn fully_open(mut v: ChatView) -> ChatView {
+    v.toggle_step_group_at(0);
+    v.toggle_tool_call_at(0, 0); // step 1 open
+    v.toggle_tool_call_at(0, 2); // step 2 open (walk grew by call 0's row)
+    v
 }
 
 fn expanded(v: &ChatView) -> Vec<bool> {
     match v.blocks.first() {
-        Some(ChatBlock::ToolGroup { calls, .. }) => calls.iter().map(|c| c.expanded).collect(),
-        other => panic!("expected a ToolGroup first, got {other:?}"),
+        Some(ChatBlock::StepGroup { steps, .. }) => steps
+            .iter()
+            .flat_map(|s| s.calls.iter().map(|c| c.expanded))
+            .collect(),
+        other => panic!("expected a StepGroup first, got {other:?}"),
     }
 }
 
@@ -48,39 +60,62 @@ fn flatten_text(v: &ChatView) -> Vec<String> {
 }
 
 #[test]
-fn toggle_expands_only_that_call_in_list_state() {
-    let mut v = two_call_group();
-    v.cycle_tool_group_at(0);
-    assert!(matches!(group_state(&v), ToolGroupState::List));
-    assert_eq!(expanded(&v), vec![false, false], "calls start collapsed");
+fn toggle_step_row_opens_only_that_step() {
+    let mut v = two_step_group();
+    v.toggle_step_group_at(0);
+    assert!(group_open(&v));
 
+    // Walk is [Step(1), Step(2)]: target 0 opens step 1 only.
     v.toggle_tool_call_at(0, 0);
-    assert_eq!(expanded(&v), vec![true, false], "only call 0 toggled");
     let rows = flatten_text(&v);
     let joined = rows.join("\n");
-    assert!(joined.contains("A-out"), "call 0 output visible: {joined}");
     assert!(
-        !joined.contains("B-out"),
-        "call 1 output stays hidden: {joined}"
+        joined.contains("echo A"),
+        "step 1 call row visible: {joined}"
     );
-
-    // The other call's header row is still rendered.
     assert!(
-        rows.iter().any(|r| r.contains("echo B")),
-        "call 1 header kept"
+        !joined.contains("echo B"),
+        "step 2 stays collapsed: {joined}"
     );
 
     // Second toggle collapses it again.
     v.toggle_tool_call_at(0, 0);
+    assert!(
+        !flatten_text(&v).join("\n").contains("echo A"),
+        "closing the step hides its rows"
+    );
+}
+
+#[test]
+fn toggle_expands_only_that_call_in_open_step() {
+    let mut v = fully_open(two_step_group());
+    assert_eq!(expanded(&v), vec![false, false], "calls start collapsed");
+
+    // Walk is [S1, call a, S2, call b]: target 1 is call a's header.
+    v.toggle_tool_call_at(0, 1);
+    assert_eq!(expanded(&v), vec![true, false], "only call a toggled");
+    let joined = flatten_text(&v).join("\n");
+    assert!(joined.contains("A-out"), "call a output visible: {joined}");
+    assert!(
+        !joined.contains("B-out"),
+        "call b output stays hidden: {joined}"
+    );
+    assert!(
+        flatten_text(&v).iter().any(|r| r.contains("echo B")),
+        "call b's header row is still rendered"
+    );
+
+    // Second toggle collapses it again.
+    v.toggle_tool_call_at(0, 1);
     assert_eq!(expanded(&v), vec![false, false]);
     assert!(!flatten_text(&v).join("\n").contains("A-out"));
 }
 
 #[test]
 fn toggling_one_call_leaves_sibling_output_hidden() {
-    let mut v = two_call_group();
-    v.cycle_tool_group_at(0);
-    v.toggle_tool_call_at(0, 1);
+    let mut v = fully_open(two_step_group());
+    // Walk is [S1, call a, S2, call b]: target 3 is call b's header.
+    v.toggle_tool_call_at(0, 3);
     assert_eq!(expanded(&v), vec![false, true]);
     let joined = flatten_text(&v).join("\n");
     assert!(joined.contains("B-out"));
@@ -88,59 +123,29 @@ fn toggling_one_call_leaves_sibling_output_hidden() {
 }
 
 #[test]
-fn results_state_stays_fully_expanded_and_ignores_toggle() {
-    let mut v = two_call_group();
-    v.cycle_tool_group_at(0); // List
-    v.cycle_tool_group_at(0); // Results
-    v.toggle_tool_call_at(0, 0);
+fn expanded_call_keeps_ladder_shape() {
+    let mut v = fully_open(two_step_group());
+    v.toggle_tool_call_at(0, 1); // expand call a
     let rows = flatten_text(&v);
-    let joined = rows.join("\n");
-    assert!(joined.contains("A-out") && joined.contains("B-out"));
-    assert_eq!(
-        expanded(&v),
-        vec![false, false],
-        "Results ignores the per-call flag"
-    );
-    // Line count identical to an untouched Results group.
-    let mut baseline = two_call_group();
-    baseline.cycle_tool_group_at(0);
-    baseline.cycle_tool_group_at(0);
-    assert_eq!(rows.len(), flatten_text(&baseline).len());
-}
-
-#[test]
-fn collapsed_group_toggle_is_a_noop() {
-    let mut v = two_call_group();
-    assert!(matches!(group_state(&v), ToolGroupState::Collapsed));
-    v.toggle_tool_call_at(0, 0);
-    assert_eq!(expanded(&v), vec![false, false]);
-    assert_eq!(v.flatten().len(), 1, "collapsed group renders one line");
-}
-
-#[test]
-fn expanded_call_renders_output_and_separator_rows() {
-    let mut v = two_call_group();
-    v.cycle_tool_group_at(0);
-    v.toggle_tool_call_at(0, 0);
-    let rows = flatten_text(&v);
-    // group line, a header, a output, separator, b header, trailing blank.
-    assert_eq!(rows.len(), 6);
-    assert!(rows[1].contains("echo A"));
-    assert!(rows[2].contains("A-out"));
-    assert!(rows[3].is_empty(), "blank separator after expanded output");
-    assert!(rows[4].contains("echo B"));
+    // group row, S1, a header, a output, separator, S2, b header, blank.
+    assert_eq!(rows.len(), 8);
+    assert!(rows[1].contains("Step(1)"));
+    assert!(rows[2].contains("echo A"));
+    assert!(rows[3].contains("A-out"));
+    assert!(rows[4].is_empty(), "blank separator after expanded output");
+    assert!(rows[5].contains("Step(2)"));
+    assert!(rows[6].contains("echo B"));
 }
 
 #[test]
 fn collapse_all_resets_expanded_calls() {
-    let mut v = two_call_group();
-    v.cycle_tool_group_at(0);
-    v.toggle_tool_call_at(0, 0);
-    v.toggle_tool_call_at(0, 1);
+    let mut v = fully_open(two_step_group());
+    v.toggle_tool_call_at(0, 1); // call a
+    v.toggle_tool_call_at(0, 3); // call b
     assert_eq!(expanded(&v), vec![true, true]);
 
     v.collapse_all_collapsible();
-    assert!(matches!(group_state(&v), ToolGroupState::Collapsed));
+    assert!(!group_open(&v));
     assert_eq!(
         expanded(&v),
         vec![false, false],
@@ -150,36 +155,45 @@ fn collapse_all_resets_expanded_calls() {
 
 #[test]
 fn out_of_range_toggle_is_a_noop() {
-    let mut v = two_call_group();
-    v.cycle_tool_group_at(0);
+    let mut v = two_step_group();
+    v.toggle_step_group_at(0);
     v.toggle_tool_call_at(9, 0);
     v.toggle_tool_call_at(0, 9);
     assert_eq!(expanded(&v), vec![false, false]);
+    assert!(group_open(&v), "unrelated indices must not touch the group");
 }
 
 #[test]
-fn call_header_rows_collected_only_in_list_state() {
-    let mut v = two_call_group();
-    assert!(v.tool_call_headers().is_empty(), "Collapsed: no call rows");
+fn step_and_call_rows_collected_only_when_visible() {
+    let mut v = two_step_group();
+    assert!(
+        v.tool_call_headers().is_empty(),
+        "closed group: no clickable rows"
+    );
 
-    v.cycle_tool_group_at(0); // List
+    v.toggle_step_group_at(0);
     let headers = v.tool_call_headers();
-    assert_eq!(headers.len(), 2);
+    assert_eq!(headers.len(), 2, "both step rows are clickable");
     assert_eq!(headers[0].block_idx, 0);
     assert_eq!(headers[0].call_idx, 0);
     assert_eq!(headers[1].call_idx, 1);
-    // Group line is row 0; call headers follow it one row apart while both
-    // calls are collapsed.
+    // Group row is line 0; the two step rows follow one row apart.
     assert_eq!(headers[0].header_line_idx + 1, headers[1].header_line_idx);
 
-    // Expanding call 0 shifts call 1's header down by output + separator.
+    // Opening step 1 inserts its call row into the walk and shifts step 2.
     v.toggle_tool_call_at(0, 0);
     let headers = v.tool_call_headers();
-    assert_eq!(headers[0].header_line_idx + 3, headers[1].header_line_idx);
+    assert_eq!(headers.len(), 3);
+    assert_eq!(headers[1].call_idx, 1, "call a's row joined the walk");
+    assert_eq!(headers[2].call_idx, 2, "step 2 moved to flat index 2");
+    assert_eq!(headers[0].header_line_idx + 2, headers[2].header_line_idx);
 
-    v.cycle_tool_group_at(0); // Results
-    assert!(
-        v.tool_call_headers().is_empty(),
-        "Results: no per-call toggle"
-    );
+    // Expanding call a shifts step 2's row down by output + separator.
+    v.toggle_tool_call_at(0, 1);
+    let headers = v.tool_call_headers();
+    assert_eq!(headers[0].header_line_idx + 4, headers[2].header_line_idx);
+
+    // Closing the group hides every row again.
+    v.toggle_step_group_at(0);
+    assert!(v.tool_call_headers().is_empty());
 }

@@ -45,6 +45,11 @@ mod helpers;
 pub use helpers::block_text;
 pub(crate) use helpers::{push_duration_span, short, summarize};
 
+#[path = "chat_step_render.rs"]
+mod step_render;
+#[path = "chat_steps.rs"]
+mod steps;
+
 #[path = "compaction_block.rs"]
 mod compaction_block;
 #[path = "chat_context.rs"]
@@ -56,6 +61,7 @@ pub(crate) mod sidecar;
 #[path = "chat_stream.rs"]
 mod stream;
 pub(crate) use compaction_block::render_collapsible;
+pub(crate) use steps::{coalesce_steps, merge_or_new_step, single_step_group, StepTarget};
 
 impl ChatView {
     pub fn apply(&mut self, ev: &SessionEvent) {
@@ -101,6 +107,11 @@ impl ChatView {
                     return;
                 }
                 self.finalize_assistant();
+                // The trailing run of consecutive Thinking blocks becomes this
+                // round's step-thinking (rendered markdown, step-local, out of
+                // the main flow). Strictly trailing: thinking followed by an
+                // answer block stays a standalone Thinking block.
+                let thinking = steps::pop_trailing_thinking(&mut self.blocks);
                 let call = ToolCall {
                     id: id.clone(),
                     header: Line::from(vec![
@@ -117,15 +128,15 @@ impl ChatView {
                     elapsed_ms: None,
                     expanded: false,
                 };
-                // Consecutive tool calls join the trailing group (keeping its
-                // display state); any other block in between splits the run
-                // into a new, Collapsed group.
+                // Consecutive tool calls of the same round join the trailing
+                // step; once its last call finished a NEW step opens (the
+                // sequential-calls-in-one-round split). Any other block in
+                // between starts a fresh, collapsed group.
                 match self.blocks.last_mut() {
-                    Some(ChatBlock::ToolGroup { calls, .. }) => calls.push(call),
-                    _ => self.blocks.push(ChatBlock::ToolGroup {
-                        calls: vec![call],
-                        state: ToolGroupState::Collapsed,
-                    }),
+                    Some(ChatBlock::StepGroup { steps: s, .. }) => {
+                        steps::merge_or_new_step(s, thinking, call)
+                    }
+                    _ => self.blocks.push(steps::single_step_group(call, thinking)),
                 }
             }
             SessionEvent::ToolEnd {
@@ -150,19 +161,27 @@ impl ChatView {
                     .take(TOOL_OUTPUT_LINES)
                     .map(|l| Line::from(Span::styled(format!("  {l}"), Style::default().fg(color))))
                     .collect();
-                // Route by id: walk groups newest-first, calls newest-first,
-                // so parallel calls each land in their own slot.
+                // Route by id: walk groups newest-first, steps newest-first,
+                // calls newest-first, so parallel calls each land in their
+                // own slot.
                 let target = self.blocks.iter().enumerate().rev().find_map(|(gi, blk)| {
-                    if let ChatBlock::ToolGroup { calls, .. } = blk {
-                        calls.iter().rposition(|c| c.id == *id).map(|ci| (gi, ci))
+                    if let ChatBlock::StepGroup { steps, .. } = blk {
+                        steps
+                            .iter()
+                            .enumerate()
+                            .rev()
+                            .find_map(|(si, s)| {
+                                s.calls.iter().rposition(|c| c.id == *id).map(|ci| (si, ci))
+                            })
+                            .map(|(si, ci)| (gi, si, ci))
                     } else {
                         None
                     }
                 });
                 match target {
-                    Some((gi, ci)) => {
-                        if let ChatBlock::ToolGroup { calls, .. } = &mut self.blocks[gi] {
-                            let c = &mut calls[ci];
+                    Some((gi, si, ci)) => {
+                        if let ChatBlock::StepGroup { steps, .. } = &mut self.blocks[gi] {
+                            let c = &mut steps[si].calls[ci];
                             c.output.extend(out);
                             if let Some(started) = c.started_at_ms {
                                 c.elapsed_ms = Some(
@@ -173,9 +192,10 @@ impl ChatView {
                     }
                     None => {
                         // Orphan ToolEnd (lost ToolStart): synthesize a
-                        // finished single-call group so the output is kept.
-                        self.blocks.push(ChatBlock::ToolGroup {
-                            calls: vec![ToolCall {
+                        // finished single-call step group so the output is
+                        // kept.
+                        self.blocks.push(steps::single_step_group(
+                            ToolCall {
                                 id: id.clone(),
                                 header: Line::from(Span::styled(
                                     "\u{25b8} (output)",
@@ -185,9 +205,9 @@ impl ChatView {
                                 started_at_ms: None,
                                 elapsed_ms: Some(0),
                                 expanded: false,
-                            }],
-                            state: ToolGroupState::Collapsed,
-                        });
+                            },
+                            Vec::new(),
+                        ));
                     }
                 }
                 // Render tool-returned images inline after the text output.
@@ -415,48 +435,67 @@ impl ChatView {
         }
     }
 
-    /// Cycle the tool group at `block_idx` through its three display states:
-    /// Collapsed → List → Results → Collapsed (mouse click handler). No-op if
-    /// the index is out of range or not a ToolGroup block.
-    pub fn cycle_tool_group_at(&mut self, block_idx: usize) {
-        if let Some(ChatBlock::ToolGroup { state, .. }) = self.blocks.get_mut(block_idx) {
-            *state = match *state {
-                ToolGroupState::Collapsed => ToolGroupState::List,
-                ToolGroupState::List => ToolGroupState::Results,
-                ToolGroupState::Results => ToolGroupState::Collapsed,
-            };
+    /// Toggle the open/closed state of the step GROUP at `block_idx` (mouse
+    /// click handler on the group row). No-op if the index is out of range or
+    /// not a StepGroup block.
+    pub fn toggle_step_group_at(&mut self, block_idx: usize) {
+        if let Some(ChatBlock::StepGroup { open, .. }) = self.blocks.get_mut(block_idx) {
+            *open = !*open;
         }
     }
 
-    /// Toggle the expanded output of the single call at `call_idx` inside the
-    /// ToolGroup at `block_idx` (mouse click handler on a call header row).
-    /// Only meaningful in the `List` state — `Collapsed` renders no call rows
-    /// and `Results` shows every output regardless — so the flag is left
-    /// untouched there. No-op if either index is out of range.
+    /// Legacy alias kept for the mouse handlers: clicking a group row toggles
+    /// the whole group.
+    pub fn cycle_tool_group_at(&mut self, block_idx: usize) {
+        self.toggle_step_group_at(block_idx);
+    }
+
+    /// Toggle the click target at flat index `call_idx` inside the StepGroup
+    /// at `block_idx` (mouse click handler on a rendered step/call row). The
+    /// index walks the group's VISIBLE rows — the step rows plus each open
+    /// step's call header rows, in render order — exactly what
+    /// `visible_targets` and `collect_headers` enumerate, so the toggled row
+    /// is the row that was clicked. A step target flips the step open/closed;
+    /// a call target toggles that single call's output. No-op if either index
+    /// is out of range.
     pub fn toggle_tool_call_at(&mut self, block_idx: usize, call_idx: usize) {
-        if let Some(ChatBlock::ToolGroup { calls, state }) = self.blocks.get_mut(block_idx) {
-            if matches!(state, ToolGroupState::List) {
-                if let Some(c) = calls.get_mut(call_idx) {
+        let Some(ChatBlock::StepGroup { steps, .. }) = self.blocks.get_mut(block_idx) else {
+            return;
+        };
+        let Some(target) = steps::visible_targets(steps).get(call_idx).copied() else {
+            return;
+        };
+        match target {
+            StepTarget::Step(si) => {
+                if let Some(s) = steps.get_mut(si) {
+                    s.open = !s.open;
+                }
+            }
+            StepTarget::Call(si, ci) => {
+                if let Some(c) = steps.get_mut(si).and_then(|s| s.calls.get_mut(ci)) {
                     c.expanded = !c.expanded;
                 }
             }
         }
     }
 
-    /// Collapse every collapsible block (Thinking + Compaction + ToolGroup)
+    /// Collapse every collapsible block (Thinking + Compaction + StepGroup)
     /// in this view. Bound to Ctrl+L: clears any expanded reasoning blocks and
-    /// resets every tool group to Collapsed in one keystroke (also applied to
-    /// a child subagent view before exiting it).
+    /// closes every step group, step and expanded call output in one
+    /// keystroke (also applied to a child subagent view before exiting it).
     pub fn collapse_all_collapsible(&mut self) {
         for block in &mut self.blocks {
             match block {
                 ChatBlock::Thinking { collapsed, .. } | ChatBlock::Compaction { collapsed, .. } => {
                     *collapsed = true;
                 }
-                ChatBlock::ToolGroup { calls, state } => {
-                    *state = ToolGroupState::Collapsed;
-                    for c in calls.iter_mut() {
-                        c.expanded = false;
+                ChatBlock::StepGroup { steps, open } => {
+                    *open = false;
+                    for s in steps {
+                        s.open = false;
+                        for c in &mut s.calls {
+                            c.expanded = false;
+                        }
                     }
                 }
                 _ => {}
@@ -544,65 +583,8 @@ impl ChatView {
                         Style::default().fg(theme::compaction_color()),
                     ));
                 }
-                ChatBlock::ToolGroup { calls, state } => {
-                    let n = calls.len();
-                    // Group line: `▸ N function calls` (arrow flips to ▾ once
-                    // expanded) + a live spinner hint while any call in the
-                    // group is still running.
-                    let arrow = if matches!(state, ToolGroupState::Collapsed) {
-                        "\u{25b8}"
-                    } else {
-                        "\u{25be}"
-                    };
-                    let mut spans = vec![Span::styled(
-                        format!(
-                            "{arrow} {n} function call{} ",
-                            if n == 1 { "" } else { "s" }
-                        ),
-                        Style::default()
-                            .fg(theme::accent())
-                            .add_modifier(Modifier::BOLD),
-                    )];
-                    if calls.iter().any(|c| c.elapsed_ms.is_none()) {
-                        spans.push(Span::styled(
-                            format!("{} running ", SPINNER[(anim_tick as usize) % SPINNER.len()]),
-                            Style::default().fg(theme::warn_color()),
-                        ));
-                    }
-                    match state {
-                        ToolGroupState::Collapsed => {
-                            out.push(Line::from(spans));
-                        }
-                        ToolGroupState::List => {
-                            spans.push(Span::styled(
-                                "[\u{2193}]",
-                                Style::default().fg(theme::muted()),
-                            ));
-                            out.push(Line::from(spans));
-                            for c in calls {
-                                out.extend(types::indented(std::slice::from_ref(&c.header), 2));
-                                // Per-call expansion: only the toggled call
-                                // shows its output in the List state.
-                                if c.expanded {
-                                    out.extend(c.output.iter().cloned());
-                                    out.push(Line::from(""));
-                                }
-                            }
-                            out.push(Line::from(""));
-                        }
-                        ToolGroupState::Results => {
-                            spans.push(Span::styled(
-                                "[\u{2191}]",
-                                Style::default().fg(theme::muted()),
-                            ));
-                            out.push(Line::from(spans));
-                            for c in calls {
-                                out.extend(types::indented(std::slice::from_ref(&c.header), 2));
-                                out.extend(c.output.iter().cloned());
-                                out.push(Line::from(""));
-                            }
-                        }
-                    }
+                ChatBlock::StepGroup { steps, open } => {
+                    step_render::flatten_step_group(&mut out, steps, *open, anim_tick);
                 }
                 ChatBlock::Image { filename, rendered } => {
                     out.push(Line::from(Span::styled(
@@ -641,11 +623,11 @@ impl ChatView {
                     elapsed_ms,
                     ..
                 } => {
-                    let tool_count = view
+                    let step_count = view
                         .blocks
                         .iter()
                         .filter_map(|b| match b {
-                            ChatBlock::ToolGroup { calls, .. } => Some(calls.len()),
+                            ChatBlock::StepGroup { steps, .. } => Some(steps.len()),
                             _ => None,
                         })
                         .sum::<usize>();
@@ -677,7 +659,7 @@ impl ChatView {
                         Span::styled(prompt.clone(), Style::default().fg(theme::muted())),
                         Span::raw(" "),
                         Span::styled(
-                            format!("{mark} {status_word}, {tool_count} tools"),
+                            format!("{mark} {status_word}, {step_count} steps"),
                             Style::default().fg(mark_color),
                         ),
                     ];

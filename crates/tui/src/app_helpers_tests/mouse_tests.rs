@@ -452,13 +452,12 @@ async fn attach_del_click_removes_only_clicked_image() {
     assert_eq!(chat.steer_items.len(), 0, "no steer side effects");
 }
 
-/// Clicking a ToolGroup's group line cycles the three display states
-/// Collapsed → List → Results → Collapsed. This exercises the exact
-/// `tool_btns` → `handle_mouse` → `cycle_tool_group_at` wiring the renderer
-/// feeds.
+/// Clicking a StepGroup's group row toggles the whole group open/closed. This
+/// exercises the exact `tool_btns` → `handle_mouse` → `toggle_step_group_at`
+/// (kept name: `cycle_tool_group_at`) wiring the renderer feeds.
 #[tokio::test]
-async fn clicking_tool_group_line_cycles_three_states() {
-    use crate::chat::{ChatBlock, ToolGroupState};
+async fn clicking_tool_group_line_toggles_group_open_closed() {
+    use crate::chat::ChatBlock;
     use crate::render::ToolBtn;
 
     let mut chat = ChatView::default();
@@ -475,13 +474,13 @@ async fn clicking_tool_group_line_cycles_three_states() {
         images: Vec::new(),
     });
 
-    let state = |c: &ChatView| -> ToolGroupState {
+    let open = |c: &ChatView| -> bool {
         match c.blocks.first() {
-            Some(ChatBlock::ToolGroup { state, .. }) => *state,
-            other => panic!("expected a ToolGroup first, got {other:?}"),
+            Some(ChatBlock::StepGroup { open, .. }) => *open,
+            other => panic!("expected a StepGroup first, got {other:?}"),
         }
     };
-    assert!(matches!(state(&chat), ToolGroupState::Collapsed));
+    assert!(!open(&chat), "groups are born collapsed");
 
     async fn drive(chat: &mut ChatView, row: u16) {
         let body = Rect::new(0, 0, 80, 12);
@@ -522,28 +521,25 @@ async fn clicking_tool_group_line_cycles_three_states() {
         .await;
     }
 
-    drive(&mut chat, 5).await; // first click: Collapsed -> List
-    assert!(matches!(state(&chat), ToolGroupState::List));
-    drive(&mut chat, 5).await; // second click: List -> Results
-    assert!(matches!(state(&chat), ToolGroupState::Results));
-    drive(&mut chat, 5).await; // third click: Results -> Collapsed
-    assert!(matches!(state(&chat), ToolGroupState::Collapsed));
+    drive(&mut chat, 5).await; // first click: closed -> open
+    assert!(open(&chat));
+    drive(&mut chat, 5).await; // second click: open -> closed
+    assert!(!open(&chat));
 
-    // A click outside every button rect must not cycle anything.
+    // A click outside every button rect must not toggle anything.
     drive(&mut chat, 0).await;
-    assert!(
-        matches!(state(&chat), ToolGroupState::Collapsed),
-        "miss-click must not cycle the group"
-    );
+    assert!(!open(&chat), "miss-click must not toggle the group");
 }
 
-/// Clicking a tool-call header row (List state) toggles ONLY that call's
-/// output. Exercises the exact `tool_call_btns` → `handle_mouse` →
-/// `toggle_tool_call_at` wiring the renderer feeds, and proves the call-row
-/// dispatch precedes the group-line cycle.
+/// Clicking a rendered step/call row inside an open StepGroup toggles ONLY
+/// that target. Exercises the exact `tool_call_btns` → `handle_mouse` →
+/// `toggle_tool_call_at` wiring the renderer feeds, and proves the row
+/// dispatch precedes the group-row toggle. `call_idx` indexes the group's
+/// VISIBLE rows: the step rows, plus each open step's call header rows in
+/// render order.
 #[tokio::test]
-async fn clicking_tool_call_row_toggles_only_that_call() {
-    use crate::chat::{ChatBlock, ToolGroupState};
+async fn clicking_step_or_call_row_toggles_only_that_target() {
+    use crate::chat::ChatBlock;
     use crate::render::{ToolBtn, ToolCallBtn};
 
     let mut chat = ChatView::default();
@@ -561,18 +557,19 @@ async fn clicking_tool_call_row_toggles_only_that_call() {
             images: Vec::new(),
         });
     }
-    chat.cycle_tool_group_at(0); // Collapsed -> List
+    chat.toggle_step_group_at(0); // open the group (steps stay collapsed)
     let state = |c: &ChatView| match c.blocks.first() {
-        Some(ChatBlock::ToolGroup { state, .. }) => *state,
-        other => panic!("expected a ToolGroup first, got {other:?}"),
+        Some(ChatBlock::StepGroup { open, .. }) => *open,
+        other => panic!("expected a StepGroup first, got {other:?}"),
     };
     let expanded = |c: &ChatView| match c.blocks.first() {
-        Some(ChatBlock::ToolGroup { calls, .. }) => {
-            calls.iter().map(|x| x.expanded).collect::<Vec<_>>()
-        }
-        other => panic!("expected a ToolGroup first, got {other:?}"),
+        Some(ChatBlock::StepGroup { steps, .. }) => steps
+            .iter()
+            .flat_map(|s| s.calls.iter().map(|x| x.expanded))
+            .collect::<Vec<_>>(),
+        other => panic!("expected a StepGroup first, got {other:?}"),
     };
-    assert!(matches!(state(&chat), ToolGroupState::List));
+    assert!(state(&chat));
 
     // Call header rows sit on rows 1 (call 0) and 2 (call 1) of the body.
     // `kind` picks which button list gets the rect; `click_row` is where the
@@ -629,24 +626,25 @@ async fn clicking_tool_call_row_toggles_only_that_call() {
         .await;
     }
 
-    // Click call 0's header row: toggles call 0 only, state stays List.
-    drive(&mut chat, "call", 0, 1, 1).await;
+    // With both steps collapsed the visible walk is [Step(1), Step(2)];
+    // opening a step inserts its call header rows into the walk.
+    drive(&mut chat, "call", 0, 0, 0).await; // Step(1) row -> step opens
+    drive(&mut chat, "call", 1, 1, 1).await; // call a header -> expands a only
     assert_eq!(expanded(&chat), vec![true, false]);
-    assert!(matches!(state(&chat), ToolGroupState::List));
 
-    // Click call 1's header row: toggles call 1 only.
-    drive(&mut chat, "call", 1, 2, 2).await;
+    drive(&mut chat, "call", 2, 2, 2).await; // Step(2) row -> step opens
+    drive(&mut chat, "call", 3, 3, 3).await; // call b header -> expands b
     assert_eq!(expanded(&chat), vec![true, true]);
 
-    // Click call 0's row again: collapses just call 0.
-    drive(&mut chat, "call", 0, 1, 1).await;
-    assert_eq!(expanded(&chat), vec![false, true]);
+    // Click call b's row again: collapses just call b.
+    drive(&mut chat, "call", 3, 3, 3).await;
+    assert_eq!(expanded(&chat), vec![true, false]);
 
-    // A group-line click still cycles the group (List -> Results) and leaves
-    // the per-call flags untouched.
+    // A group-row click still toggles the whole group (open -> closed here)
+    // and leaves the per-call flags untouched.
     drive(&mut chat, "group", 0, 0, 0).await;
-    assert!(matches!(state(&chat), ToolGroupState::Results));
-    assert_eq!(expanded(&chat), vec![false, true]);
+    assert!(!state(&chat));
+    assert_eq!(expanded(&chat), vec![true, false]);
 }
 
 /// Regression: control-strip hit rects are 2 cells wide (separator space +

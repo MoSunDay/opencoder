@@ -13,7 +13,9 @@
 
 use ratatui::text::{Line, Span};
 
-use crate::chat::{PLAN_HEADER, ROLE_SAY_HEADER, ROLE_USER_HEADER};
+use crate::chat::{
+    PLAN_HEADER, ROLE_SAY_HEADER, ROLE_USER_HEADER, STEP_ROW_CLOSED_PREFIX, STEP_ROW_OPEN_PREFIX,
+};
 use crate::markdown::{
     CODE_BOTTOM, CODE_ROW_EMPTY, CODE_ROW_PREFIX, CODE_TOP_PREFIX, QUOTE_PREFIX, RULE_LINE,
 };
@@ -37,6 +39,8 @@ pub(crate) enum LineKind {
     Rule,
     /// `╸─ plan ─╸` plan header — dropped.
     PlanHeader,
+    /// `❯ Step(n)` / `▸ Step(n)` step row — dropped (chrome).
+    StepRow,
 }
 
 /// Classify a rendered line and report its decoration slot width in
@@ -83,6 +87,12 @@ fn classify_spans(spans: &[Span<'_>]) -> Option<(LineKind, usize)> {
         if t == PLAN_HEADER {
             return Some((LineKind::PlanHeader, 0));
         }
+        // Step rows carry the step label as ONE span after the indent gutter;
+        // a markdown row could only collide by literally opening with
+        // `❯ Step(` / `▸ Step(` as its entire first span.
+        if t.starts_with(STEP_ROW_OPEN_PREFIX) || t.starts_with(STEP_ROW_CLOSED_PREFIX) {
+            return Some((LineKind::StepRow, 0));
+        }
         // `┌ {label} ` with any (possibly empty) label. A code *content* row
         // can never match: it always carries a `│ ` prefix span first.
         if t.starts_with(CODE_TOP_PREFIX) && t.ends_with(' ') && !t.contains('\n') {
@@ -120,7 +130,8 @@ pub fn clean_line(line: &Line<'_>) -> Option<String> {
         | LineKind::CodeTop
         | LineKind::CodeBottom
         | LineKind::Rule
-        | LineKind::PlanHeader => None,
+        | LineKind::PlanHeader
+        | LineKind::StepRow => None,
         // Code payloads stay verbatim (only the `│ `/`│` slot goes); text
         // rows additionally lose a `▎ ` quote prefix inside their first
         // content span, since blockquotes push it into the text span.

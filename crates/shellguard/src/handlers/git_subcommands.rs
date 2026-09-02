@@ -5,38 +5,12 @@
 //! The safe sets live here as named constants rather than inline match arms so
 //! each classifier documents its own guard data in one place.
 
-use super::{Classification, has_flag, has_flag_or_prefixed};
+use super::{Classification, has_flag};
 use crate::verdict::AllowReason;
 
 /// `git branch` flags that create, delete, rename or re-point a branch.
 pub(super) const BRANCH_MODIFY_FLAGS: &[&str] =
     &["-d", "-D", "-m", "-M", "-c", "-C", "--set-upstream-to"];
-
-/// `git branch` flags that launch an editor: `--edit-description` runs
-/// `$GIT_EDITOR` (falling back through `EDITOR` to `vi`) on the branch
-/// description, i.e. arbitrary command execution through the environment
-/// (#F11).
-///
-/// Editor survey across the other read-listed git subcommands — everything
-/// else that can open an editor is already gated:
-/// - `git config --edit` sits in `CONFIG_WRITE_FLAGS`;
-/// - `git notes edit` falls outside `NOTES_SAFE`;
-/// - `commit`/`add`/`merge`/`rebase` (including `merge --no-edit`, which
-///   merely *suppresses* the editor) are in `ASK_SUBCOMMANDS`;
-/// - `git tag` has no editor flag (annotations go via `-m`).
-pub(super) const BRANCH_EDITOR_FLAGS: &[&str] = &["--edit-description"];
-
-pub(super) fn classify_branch(args: &[String]) -> Classification {
-    if has_flag(args, BRANCH_EDITOR_FLAGS) {
-        Classification::Ask("git branch --edit-description (launches $GIT_EDITOR)".into())
-    } else if has_flag_or_prefixed(args, BRANCH_MODIFY_FLAGS) {
-        // has_flag_or_prefixed, not has_flag: `--set-upstream-to=origin/x`
-        // is the same branch re-pointing as the spaced form.
-        Classification::Ask("git branch (modify)".into())
-    } else {
-        Classification::Allow(AllowReason::handler("git branch (list)"))
-    }
-}
 
 /// `git tag` deletion flags.
 pub(super) const TAG_DELETE_FLAGS: &[&str] = &["-d", "--delete"];
@@ -65,6 +39,14 @@ pub(super) const LFS_SAFE: &[&str] = &["fetch", "ls-files", "status", "env", "ve
 
 fn sub_of(args: &[String]) -> &str {
     args.first().map_or("", String::as_str)
+}
+
+pub(super) fn classify_branch(args: &[String]) -> Classification {
+    if has_flag(args, BRANCH_MODIFY_FLAGS) {
+        Classification::Ask("git branch (modify)".into())
+    } else {
+        Classification::Allow(AllowReason::handler("git branch (list)"))
+    }
 }
 
 pub(super) fn classify_tag(args: &[String]) -> Classification {

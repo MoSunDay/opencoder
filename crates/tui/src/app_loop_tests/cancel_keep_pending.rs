@@ -176,8 +176,6 @@ async fn fold_error_resyncs_steer_mirror_from_store() {
     let (_evt_tx, mut evt_rx) = mpsc::channel::<UiEvent>(64);
     let mut notepad: Option<crate::notepad::NotepadView> = None;
 
-    let (sidecar_ask, _sidecar_ask_rx) =
-        mpsc::channel::<crate::sidecar_ui::SidecarAsk>(8);
     let _flow = fold_ui_events(
         Some(UiEvent::Session(SessionEvent::Error("boom".into()))),
         &mut chat,
@@ -197,7 +195,6 @@ async fn fold_error_resyncs_steer_mirror_from_store() {
         &mut notepad,
         &mut None,
         &opencoder_session::QuestionHub::new(),
-        &sidecar_ask,
     )
     .await;
 

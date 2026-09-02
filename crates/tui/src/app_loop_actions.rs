@@ -62,10 +62,15 @@ impl ModeSwitch {
 /// `AgentSwitch` / `TranscriptReset` + `Done`. No user echo — the popup path
 /// never calls `push_user`.
 ///
-/// RUNNING-GATE: while a turn is in flight (`running`), all three are refused
-/// with a `[switch] busy — retry when idle` marker — an agent switch mid-turn
-/// would start the next turn with a stale agent at an arbitrary partial
-/// boundary (mirrors `/compact`'s `SkipRunning`).
+/// SUBMIT-ALWAYS / APPLY-AT-IDLE (steer/queue semantics — mirrors the
+/// `fire_clear_confirm` running arm): the switch can always be submitted,
+/// but it only TAKES EFFECT at a non-running boundary. Idle starts the
+/// control-command turn now; while a turn is in flight (`running`) the raw
+/// command text queues verbatim and the runner applies it via the idle-boundary
+/// drain intercept — a mid-turn switch never lands at an arbitrary partial
+/// boundary, and the keystroke is never lost. A live subagent does not count
+/// as busy: the parent session is idle, exactly when steer/queue entries are
+/// consumed automatically.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn dispatch_mode_switch(
     mode: ModeSwitch,
@@ -78,8 +83,15 @@ pub(crate) async fn dispatch_mode_switch(
     mode_flash: &mut Option<(String, u32)>,
     anim_tick: u32,
     workdir: &Path,
+    session_id: &str,
+    admit_tx: &mpsc::Sender<crate::queue_admitter::AdmitReq>,
+    admit_st: &mut crate::queue_admitter::AdmitUiState,
+    queue_items: &mut Vec<(i64, String)>,
+    pending_images: &mut Vec<(String, String)>,
+    history: &mut Vec<String>,
+    hist_idx: &mut Option<usize>,
 ) -> LoopFlow {
-    match gate_switch(*running || chat.subagents_running > 0) {
+    match gate_switch(*running) {
         SwitchGate::Run => {
             let name = mode.prompt().trim_start_matches('/');
             *sys_tokens = sys_tokens_for(name, workdir, None);
@@ -99,10 +111,20 @@ pub(crate) async fn dispatch_mode_switch(
             chat.begin_turn();
         }
         SwitchGate::SkipRunning => {
-            chat.push_marker(Line::from(Span::styled(
-                "[switch] busy \u{2014} retry when idle",
-                Style::default().fg(theme::warn_color()),
-            )));
+            // Queue the raw command text (steer/queue semantics: submit now,
+            // runner applies it at the idle boundary). No sys_tokens/mode
+            // flash here — the switch has not landed yet; the AgentSwitch
+            // event folds it when the runner consumes the row. Same running
+            // arm shape as `fire_clear_confirm`.
+            crate::queue_admitter::handle_queue(
+                mode.prompt(),
+                admit_tx,
+                admit_st,
+                queue_items,
+                pending_images,
+                session_id,
+            );
+            crate::app_helpers::push_history(history, hist_idx, mode.prompt());
         }
     }
     LoopFlow::Proceed
@@ -118,7 +140,9 @@ pub(crate) async fn dispatch_mode_switch(
 /// render chrome (Task, Fork, Model, Config, Mcp, CacheSalt, Annotation,
 /// Notepad, Ps, Stop, Ap). For mode-switch commands
 /// (Act, Plan, ClearContext, Compact) returns whatever the gate-and-start
-/// flow yields (typically [`LoopFlow::Proceed`] or [`LoopFlow::Quit`]).
+/// flow yields (typically [`LoopFlow::Proceed`] or [`LoopFlow::Quit`]). While
+/// a turn is running, Act/Plan queue through `admit_tx` (apply at the idle
+/// boundary) instead of starting a turn — see `dispatch_mode_switch`.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn dispatch_slash_action(
     action: SlashAction,
@@ -146,6 +170,12 @@ pub(crate) async fn dispatch_slash_action(
     plan_edit: &mut Option<crate::plan_edit::PlanEdit>,
     notepad: &mut Option<crate::notepad::NotepadView>,
     clear_confirm: &mut Option<crate::clear_confirm::ClearConfirm>,
+    admit_tx: &mpsc::Sender<crate::queue_admitter::AdmitReq>,
+    admit_st: &mut crate::queue_admitter::AdmitUiState,
+    queue_items: &mut Vec<(i64, String)>,
+    pending_images: &mut Vec<(String, String)>,
+    history: &mut Vec<String>,
+    hist_idx: &mut Option<usize>,
 ) -> LoopFlow {
     match action {
         SlashAction::Task => {
@@ -232,6 +262,13 @@ pub(crate) async fn dispatch_slash_action(
                 mode_flash,
                 anim_tick,
                 workdir,
+                session_id,
+                admit_tx,
+                admit_st,
+                queue_items,
+                pending_images,
+                history,
+                hist_idx,
             )
             .await;
         }
@@ -247,6 +284,13 @@ pub(crate) async fn dispatch_slash_action(
                 mode_flash,
                 anim_tick,
                 workdir,
+                session_id,
+                admit_tx,
+                admit_st,
+                queue_items,
+                pending_images,
+                history,
+                hist_idx,
             )
             .await;
         }
@@ -383,15 +427,10 @@ pub(crate) async fn fire_clear_confirm(
     let name = crate::clear_confirm::CLEAR_CONTEXT_CMD.trim_start_matches('/');
     *sys_tokens = sys_tokens_for(name, workdir, None);
     *mode_flash = Some((format!("\u{2192} {name} mode"), anim_tick));
-    // Idle fire mirrors the submit path: pending_images snapshot rides along
-    // with the compound prompt and the stash is cleared — leftovers would
-    // otherwise silently attach to the user's NEXT ordinary submission.
-    let image_uris = crate::app_helpers::snapshot_image_uris(pending_images);
-    if !start_turn(cmd_tx, cancel, UiCmd::Prompt(text, image_uris)).await {
+    if !start_turn(cmd_tx, cancel, UiCmd::Prompt(text, Vec::new())).await {
         worker_dead(chat);
         return LoopFlow::Quit;
     }
-    pending_images.clear();
     *running = true;
     *follow = true;
     chat.begin_turn();

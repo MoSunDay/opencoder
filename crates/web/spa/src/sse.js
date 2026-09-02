@@ -7,7 +7,9 @@
 //     same reducer (the terminal frame of a finished run is always the head,
 //     so a capped tail still converges — an uncapped replay of a fast stream
 //     freezes the console, found by real-browser acceptance);
-//   * a terminal done/error frame closes the stream for good.
+//   * a terminal done/error frame closes the stream for good, EXCEPT an
+//     `error` frame carrying `data.lag` (server-side consumer lag, api.rs
+//     map_broadcast_result) — that one is a re-sync signal and reconnects.
 //
 // openStream({ path, sessionId, after, onFrame, onStatus, signal }) →
 // { abort() }. `path` must NOT carry an ?after= param; this module owns the
@@ -22,8 +24,14 @@ const REPLAY_CAP_FRAMES = 400;
 const MAX_ATTEMPTS = 5;
 
 export function openStream({ path, sessionId, after, onFrame, onStatus, signal }) {
-  const ctrl = new AbortController();
+  // `ctrl` is the CURRENT connection's abort controller: restart() swaps it
+  // after aborting so the replacement stream gets a fresh signal.
+  let ctrl = new AbortController();
   let stopped = false;
+  // True once restart() retired the live connection: its readLoop must stop
+  // consuming buffered blocks immediately (they would double-deliver what the
+  // replacement stream is about to replay).
+  let retired = false;
   let attempts = 0;
   let backoff = BACKOFF_START_MS;
   let lastSeq = 0;
@@ -103,6 +111,15 @@ export function openStream({ path, sessionId, after, onFrame, onStatus, signal }
     if (typeof onFrame === 'function') {
       onFrame(frame);
     }
+    // Server-side consumer lag carries a `lag` marker (api.rs
+    // map_broadcast_result): we fell behind the broadcast, but the RUN is
+    // usually still going. Treat it as a re-sync signal — reconnect from the
+    // persisted head — never as a terminal error (that used to freeze the
+    // tab on `error` forever while the run kept producing).
+    if (frame.event === 'error' && frame.data && Number.isFinite(frame.data.lag)) {
+      restart();
+      return;
+    }
     if (frame.event === 'done' || frame.event === 'error') {
       stop(); // terminal for the subscribed task: never reconnect
     }
@@ -114,7 +131,7 @@ export function openStream({ path, sessionId, after, onFrame, onStatus, signal }
     let buffer = '';
     for (;;) {
       const { done, value } = await reader.read();
-      if (stopped) {
+      if (stopped || retired) {
         try {
           reader.cancel();
         } catch {
@@ -131,15 +148,39 @@ export function openStream({ path, sessionId, after, onFrame, onStatus, signal }
         const block = buffer.slice(0, sep);
         buffer = buffer.slice(sep + 2);
         handleBlock(block);
-        if (stopped) {
+        if (stopped || retired) {
+          // Blocks still buffered on a retired connection are dropped: the
+          // reconnect replay covers them from the cursor.
           return;
         }
       }
+    }
+    if (stopped || retired) {
+      return; // restart()/stop() already owns the reconnection decision
     }
     // Server closed cleanly WITHOUT a terminal frame (proxy timeout, server
     // restart mid-run). Mirror of sse.js's error → tryReconnect path: retry
     // from the last cursor; the attempt cap ends pathological loops. (A clean
     // close is never the normal end — finished tasks carry a done frame.)
+    scheduleReconnect();
+  }
+
+  /// Retire the CURRENT connection without closing the stream: abort its
+  /// controller (the old readLoop dies with a silent AbortError) but keep the
+  /// stream logically open — `stopped` stays false, no 'closed' is reported —
+  /// then reconnect from the persisted head. This is the lag path (P0-2): the
+  /// server keeps its merged stream alive after a Lagged recv error, so
+  /// scheduling a reconnect while the old readLoop kept running delivered
+  /// every frame twice (old + new stream racing) and stacked one connection
+  /// per repeated lag frame until some terminal frame aborted the shared
+  /// controller. restart() guarantees at most one live connection.
+  function restart() {
+    if (stopped) {
+      return;
+    }
+    retired = true;
+    ctrl.abort();
+    ctrl = new AbortController();
     scheduleReconnect();
   }
 
@@ -191,10 +232,11 @@ export function openStream({ path, sessionId, after, onFrame, onStatus, signal }
     if (stopped) {
       return;
     }
+    retired = false; // this connection owns the stream until the next restart()
     const pathAndQuery = path + (path.includes('?') ? '&' : '?') + 'after=' + after;
     try {
       const resp = await signFetch('GET', pathAndQuery, undefined, { signal: ctrl.signal });
-      if (stopped) {
+      if (stopped || retired) {
         return;
       }
       if (!resp.ok || !resp.body) {

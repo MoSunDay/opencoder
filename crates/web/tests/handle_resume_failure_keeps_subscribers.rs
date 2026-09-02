@@ -131,6 +131,25 @@ async fn resume_failure_keeps_handle_with_live_subscribers() {
     // The subscriber is still attached: an event broadcast on the live handle
     // must arrive on its receiver (a NEW handle/tx would leave it stranded).
     drop(map);
+
+    // First, the resume-failure terminal frame itself must have reached this
+    // subscriber (P1: failed resumes broadcast an `error` instead of dying
+    // silently — this is what un-hangs a connected SSE stream).
+    let first = tokio::time::timeout(Duration::from_secs(2), rx.recv())
+        .await
+        .expect("subscriber must receive the resume-failure frame")
+        .expect("receiver must not be closed");
+    assert_eq!(first.kind, "error");
+    assert!(
+        first.data["error"]
+            .as_str()
+            .unwrap_or("")
+            .contains("resume failed"),
+        "frame must name the resume failure, got: {first:?}"
+    );
+
+    // Then a later broadcast on the kept handle still arrives: the receiver
+    // was never orphaned.
     let sent = SseEvt {
         kind: "done".into(),
         data: serde_json::json!({"still":"attached"}),

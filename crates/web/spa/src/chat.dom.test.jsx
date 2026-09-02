@@ -40,6 +40,18 @@ const hangingStreamResponse = () => new Response(
   { status: 200, headers: { 'content-type': 'text/event-stream' } },
 );
 
+/// Same, but the controller is captured so a test can push SSE blocks into
+/// the "live" stream (terminal error frames, lag re-sync, …).
+let liveEventCtl = null;
+const controlledStreamResponse = () => new Response(
+  new ReadableStream({
+    start(controller) {
+      liveEventCtl = controller;
+    },
+  }),
+  { status: 200, headers: { 'content-type': 'text/event-stream' } },
+);
+
 const installRouter = () => {
   hits = [];
   vi.stubGlobal('fetch', vi.fn((input, opts = {}) => {
@@ -49,12 +61,20 @@ const installRouter = () => {
     if (url.includes('/api/time')) {
       return jsonResponse({ server_time_ms: Date.now() });
     }
+    // Live-stream and dispatch routes first: the broad /api/nodes catch-all
+    // below used to shadow them, so node-task streams
+    // (/api/nodes/tasks/:id/events) and node dispatch POSTs
+    // (/api/nodes/:id/tasks) answered { nodes: [] } and a remote stream
+    // could never be driven from a test. /events still precedes /sessions
+    // so /events?after=N never falls into the sessions rule.
+    if (url.includes('/events')) {
+      return controlledStreamResponse();
+    }
+    if (url.includes('/tasks') && method === 'POST') {
+      return jsonResponse({ task_id: 't1', session_id: 'rs1' });
+    }
     if (url.includes('/api/nodes')) {
       return jsonResponse({ nodes: [] });
-    }
-    // Longest suffixes first: /events?after=N must not fall into /sessions.
-    if (url.includes('/events')) {
-      return hangingStreamResponse();
     }
     if (url.includes('/seq')) {
       return jsonResponse({ seq: 0 });
@@ -81,6 +101,7 @@ const deprecationHits = () => consoleLog.error.concat(consoleLog.warn)
   .filter((line) => /deprecated/i.test(line));
 
 beforeEach(() => {
+  liveEventCtl = null;
   localStorage.clear();
   clearCredentials();
   setState({ page: 'chat', preselectNode: null, nodes: [], conn: 'init' });
@@ -186,6 +207,101 @@ describe('ChatPanel full chain (Sender → signed POST → SSE)', () => {
     });
     await waitFor(() => {
       expect(hits.some((h) => h.method === 'POST' && h.url.includes('/interrupt'))).toBe(true);
+    });
+  });
+
+  it('releases the composer on a terminal error frame (busy must not latch)', async () => {
+    // F4: only status==='done' used to reset busy, so a run ending in error
+    // left the Sender loading forever and questionModal polling a dead stream.
+    const { container, textarea } = await mountChat();
+    await act(async () => {
+      fireEvent.change(textarea, { target: { value: '会失败的任务' } });
+    });
+    await act(async () => {
+      fireEvent.keyDown(container.querySelector('textarea.ant-sender-input'), { key: 'Enter', keyCode: 13 });
+    });
+    await waitFor(() => {
+      expect(container.querySelector('.ant-sender-actions-btn-loading-button')).toBeTruthy();
+    });
+    await waitFor(() => {
+      expect(liveEventCtl).toBeTruthy();
+    });
+    const enc = new TextEncoder();
+    await act(async () => {
+      liveEventCtl.enqueue(enc.encode(
+        'event: error\ndata: ' + JSON.stringify({ error: 'boom' }) + '\n\n',
+      ));
+    });
+    await waitFor(() => {
+      expect(container.querySelector('.ant-sender-actions-btn-loading-button')).toBeFalsy();
+    });
+  });
+
+  it('keeps the typed input when a remote run is already busy', async () => {
+    // Composite busy gate: while a remote task streams, Enter must neither
+    // dispatch a second task nor clear the composer. The @ant-design/x
+    // Sender itself refuses onSubmit while loading (Sender.js triggerSend
+    // `!loading`), and send()'s own busy guards back that up — the F3 fix
+    // moved setInput('') behind those guards so the remote-busy early return
+    // can never silently swallow the typed prompt.
+    setState({ page: 'chat', preselectNode: 'node-1', nodes: [], conn: 'init' });
+    const { container, textarea } = await mountChat();
+    await act(async () => {
+      fireEvent.change(textarea, { target: { value: '第一个远程任务' } });
+    });
+    await act(async () => {
+      fireEvent.keyDown(container.querySelector('textarea.ant-sender-input'), { key: 'Enter', keyCode: 13 });
+    });
+    await waitFor(() => {
+      expect(hits.some((h) => h.url.includes('/nodes/node-1/tasks'))).toBe(true);
+    });
+    expect(container.querySelector('.ant-sender-actions-btn-loading-button')).toBeTruthy();
+
+    // Second prompt while the remote run streams: input must survive.
+    await act(async () => {
+      fireEvent.change(textarea, { target: { value: '第二个输入不能丢' } });
+    });
+    await act(async () => {
+      fireEvent.keyDown(container.querySelector('textarea.ant-sender-input'), { key: 'Enter', keyCode: 13 });
+    });
+    await waitFor(() => {
+      expect(container.querySelector('textarea.ant-sender-input').value).toBe('第二个输入不能丢');
+    });
+    expect(hits.filter((h) => h.url.includes('/tasks') && h.method === 'POST')).toHaveLength(1);
+  });
+
+  it('releases the composer when a FIRST remote dispatch reaches a terminal frame (no dialog selected yet)', async () => {
+    // Fresh-remote busy latch: sendRemote only used to backfill dialogSel
+    // when one was already selected, so the terminal-frame effect
+    // early-returned on !dialogSel — the Sender stayed loading after
+    // done/error until the user clicked some dialog. Both halves are pinned:
+    // the terminal frame releases busy, and the backfilled selection makes
+    // the done → store reload fire (that GET only happens when dialogSel is
+    // set — removing the sendRemote backfill turns the last assertion red).
+    setState({ page: 'chat', preselectNode: 'node-1', nodes: [], conn: 'init' });
+    const { container, textarea } = await mountChat();
+    await act(async () => {
+      fireEvent.change(textarea, { target: { value: '首个远程任务' } });
+    });
+    await act(async () => {
+      fireEvent.keyDown(container.querySelector('textarea.ant-sender-input'), { key: 'Enter', keyCode: 13 });
+    });
+    await waitFor(() => {
+      expect(hits.some((h) => h.url.includes('/nodes/node-1/tasks'))).toBe(true);
+    });
+    expect(container.querySelector('.ant-sender-actions-btn-loading-button')).toBeTruthy();
+
+    const enc = new TextEncoder();
+    await act(async () => {
+      liveEventCtl.enqueue(enc.encode('event: done\ndata: {}\n\n'));
+    });
+    await waitFor(() => {
+      expect(container.querySelector('.ant-sender-actions-btn-loading-button')).toBeFalsy();
+    });
+    // dialogSel was backfilled to 'rs1' → the done path reloads that session
+    // from the store (fetch mock answers {} → streamed turns are kept).
+    await waitFor(() => {
+      expect(hits.some((h) => h.url === '/api/sessions/rs1')).toBe(true);
     });
   });
 });

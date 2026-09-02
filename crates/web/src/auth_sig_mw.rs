@@ -103,7 +103,7 @@ pub async fn require_sig(
         Err(_) => {
             return (
                 StatusCode::PAYLOAD_TOO_LARGE,
-                Json(json!({ "error": "body too large to verify" })),
+                Json(json!({ "ok": false, "error": "body too large to verify" })),
             )
                 .into_response()
         }
@@ -154,7 +154,7 @@ pub async fn require_sig(
 }
 
 fn deny(status: StatusCode, why: &str) -> Response {
-    (status, Json(json!({ "error": why }))).into_response()
+    (status, Json(json!({ "ok": false, "error": why }))).into_response()
 }
 
 #[cfg(test)]

@@ -5,7 +5,7 @@
 
 use std::path::Path;
 
-use super::{Classification, Handler, HandlerContext, is_within_safe_dir, normalize_path};
+use super::{is_within_safe_dir, normalize_path, Classification, Handler, HandlerContext};
 use crate::verdict::AllowReason;
 
 pub(crate) static MKDIR_HANDLER: MkdirHandler = MkdirHandler;

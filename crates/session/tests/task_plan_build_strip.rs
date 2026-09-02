@@ -159,7 +159,10 @@ async fn task_plan_unknown_subagent_type_error_omits_build() {
         .iter()
         .find_map(|ev| match ev {
             opencoder_session::SessionEvent::ToolEnd {
-                name, output, is_error, ..
+                name,
+                output,
+                is_error,
+                ..
             } if *is_error && name == "task" => Some(output.clone()),
             _ => None,
         })
@@ -269,7 +272,10 @@ async fn aborted_run_keeps_task_plan_completed_run_clears_it() {
         .unwrap();
     let req = &mock.requests()[reqs_before];
     assert!(
-        req.messages[0]["content"].as_str().unwrap().contains(BUILD_CLAUSE),
+        req.messages[0]["content"]
+            .as_str()
+            .unwrap()
+            .contains(BUILD_CLAUSE),
         "post-completion runs advertise build again"
     );
 }

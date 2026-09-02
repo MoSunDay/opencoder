@@ -17,11 +17,13 @@ use opencoder_session::{run, SessionEvent, SessionState};
 use opencoder_store::{LibsqlStore, SessionMeta, Store};
 
 fn mock_client() -> Arc<dyn ChatStream> {
-    Arc::new(MockChatClient::new().with_default(vec![LlmEvent::Completed {
-        text: "ok".into(),
-        tool_calls: vec![],
-        usage: None,
-    }]))
+    Arc::new(
+        MockChatClient::new().with_default(vec![LlmEvent::Completed {
+            text: "ok".into(),
+            tool_calls: vec![],
+            usage: None,
+        }]),
+    )
 }
 
 /// Session wired to an in-memory store (mirrors the runner test fixtures) so
@@ -56,19 +58,18 @@ async fn make_session(id: &str) -> SessionState {
         model: "m/g".into(),
         ..Default::default()
     };
-    SessionState::new(id, agent, config, mock_client(), std::env::temp_dir())
-        .with_store(store)
+    SessionState::new(id, agent, config, mock_client(), std::env::temp_dir()).with_store(store)
 }
 
-fn record_events() -> (Arc<Mutex<Vec<SessionEvent>>>, impl FnMut(SessionEvent) + Send) {
+fn record_events() -> (
+    Arc<Mutex<Vec<SessionEvent>>>,
+    impl FnMut(SessionEvent) + Send,
+) {
     let events: Arc<Mutex<Vec<SessionEvent>>> = Arc::new(Mutex::new(Vec::new()));
     let sink = events.clone();
-    (
-        events,
-        move |ev: SessionEvent| {
-            sink.lock().unwrap().push(ev);
-        },
-    )
+    (events, move |ev: SessionEvent| {
+        sink.lock().unwrap().push(ev);
+    })
 }
 
 #[tokio::test]

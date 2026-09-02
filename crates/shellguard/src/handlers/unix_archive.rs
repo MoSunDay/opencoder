@@ -5,7 +5,9 @@
 //!
 //! Ported from rippy (MIT) https://github.com/mpecan/rippy
 
-use super::{Classification, Handler, HandlerContext, SubcommandHandler, has_flag, is_sole_help_flag};
+use super::{
+    has_flag, is_sole_help_flag, Classification, Handler, HandlerContext, SubcommandHandler,
+};
 use crate::verdict::AllowReason;
 
 const TAR_PROGRAM_EXEC_LONG: &[&str] = &[
@@ -56,7 +58,6 @@ impl Handler for TarHandler {
         }
         class
     }
-
 }
 
 impl TarHandler {
@@ -173,7 +174,6 @@ impl Handler for UnzipHandler {
         }
         Classification::Ask("unzip (extract)".into())
     }
-
 }
 
 /// unzip mode letters that make the invocation read-only: list, test, verbose

@@ -489,10 +489,7 @@ mod tests {
     fn parse_control_commands() {
         assert_eq!(parse("/act"), Some(SlashAction::Act));
         assert_eq!(parse("/plan"), Some(SlashAction::Plan));
-        assert_eq!(
-            parse("/act_clear_context"),
-            Some(SlashAction::ClearContext)
-        );
+        assert_eq!(parse("/act_clear_context"), Some(SlashAction::ClearContext));
         // Legacy alias of /act_clear_context must keep parsing.
         assert_eq!(parse("/clear_context"), Some(SlashAction::ClearContext));
         assert_eq!(parse(" /plan "), Some(SlashAction::Plan));

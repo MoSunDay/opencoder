@@ -7,8 +7,8 @@ use std::sync::{Arc, Mutex};
 use opencoder_core::{message::now_ms, Config, Role};
 use opencoder_llm::ChatClient;
 use opencoder_session::{
-    run as run_session, run_with_images,
-    spawn_event_flusher, SessionEvent, SessionState, SharedCancel, SubagentSteerGate,
+    run as run_session, run_with_images, spawn_event_flusher, SessionEvent, SessionState,
+    SharedCancel, SubagentSteerGate,
 };
 use opencoder_store::{SessionEventRecord, Store};
 use tokio::sync::mpsc;

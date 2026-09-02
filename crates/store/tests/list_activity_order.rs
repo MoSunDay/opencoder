@@ -5,9 +5,7 @@
 //! deliberately does not (history backfill must not masquerade as activity).
 
 use opencoder_core::Message;
-use opencoder_store::{
-    LibsqlStore, SessionFilter, SessionMeta, Store, TASK_TYPE_PARENT,
-};
+use opencoder_store::{LibsqlStore, SessionFilter, SessionMeta, Store, TASK_TYPE_PARENT};
 
 async fn mem() -> LibsqlStore {
     LibsqlStore::open_memory().await.unwrap()
@@ -43,11 +41,26 @@ fn msg(text: &str, created_at: i64) -> Message {
 async fn seed(store: &LibsqlStore) {
     // Activity order (desc): s_hot(9_000) > s_mid(5_000) > s_old(1_000) >
     // s_never(300: updated_at=0 -> falls back to created_at) > s_import(100).
-    store.create_session(&meta("s_hot", 9_000, 9_000)).await.unwrap();
-    store.create_session(&meta("s_mid", 1_500, 5_000)).await.unwrap();
-    store.create_session(&meta("s_old", 1_000, 1_000)).await.unwrap();
-    store.create_session(&meta("s_never", 300, 0)).await.unwrap();
-    store.create_session(&meta("s_import", 100, 0)).await.unwrap();
+    store
+        .create_session(&meta("s_hot", 9_000, 9_000))
+        .await
+        .unwrap();
+    store
+        .create_session(&meta("s_mid", 1_500, 5_000))
+        .await
+        .unwrap();
+    store
+        .create_session(&meta("s_old", 1_000, 1_000))
+        .await
+        .unwrap();
+    store
+        .create_session(&meta("s_never", 300, 0))
+        .await
+        .unwrap();
+    store
+        .create_session(&meta("s_import", 100, 0))
+        .await
+        .unwrap();
 }
 
 async fn list_ids(store: &LibsqlStore, filter: &SessionFilter) -> Vec<String> {
@@ -75,27 +88,42 @@ async fn orders_by_recent_activity_not_creation() {
 #[tokio::test]
 async fn append_message_bumps_activity_monotonically() {
     let store = mem().await;
-    store.create_session(&meta("s1", 1_000, 1_000)).await.unwrap();
-    store.create_session(&meta("s2", 2_000, 2_000)).await.unwrap();
+    store
+        .create_session(&meta("s1", 1_000, 1_000))
+        .await
+        .unwrap();
+    store
+        .create_session(&meta("s2", 2_000, 2_000))
+        .await
+        .unwrap();
     // s2 leads before any traffic.
     assert_eq!(
         list_ids(&store, &SessionFilter::default()).await,
         vec!["s2", "s1"]
     );
     // A new message on s1 floats it above s2.
-    store.append_message("s1", &msg("hello", 5_000)).await.unwrap();
+    store
+        .append_message("s1", &msg("hello", 5_000))
+        .await
+        .unwrap();
     assert_eq!(
         list_ids(&store, &SessionFilter::default()).await,
         vec!["s1", "s2"]
     );
     // Out-of-order (older) backfill must NOT regress the activity stamp.
-    store.append_message("s1", &msg("late backfill", 2_500)).await.unwrap();
+    store
+        .append_message("s1", &msg("late backfill", 2_500))
+        .await
+        .unwrap();
     assert_eq!(
         list_ids(&store, &SessionFilter::default()).await,
         vec!["s1", "s2"],
         "MAX(updated_at, msg ts) keeps the stamp monotonic"
     );
-    let item = &store.list_sessions(&SessionFilter::default()).await.unwrap()[0];
+    let item = &store
+        .list_sessions(&SessionFilter::default())
+        .await
+        .unwrap()[0];
     assert_eq!(item.updated_at, 5_000);
 }
 
@@ -144,8 +172,14 @@ async fn invalid_cursor_is_an_error() {
 #[tokio::test]
 async fn import_does_not_masquerade_as_activity() {
     let store = mem().await;
-    store.create_session(&meta("live", 1_000, 1_000)).await.unwrap();
-    store.create_session(&meta("imported", 100, 0)).await.unwrap();
+    store
+        .create_session(&meta("live", 1_000, 1_000))
+        .await
+        .unwrap();
+    store
+        .create_session(&meta("imported", 100, 0))
+        .await
+        .unwrap();
     // Bulk history load onto the imported session: high message timestamps,
     // but this is a backfill, not user activity.
     store

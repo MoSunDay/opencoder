@@ -142,11 +142,7 @@ async fn steered_compound_plan_switches_then_runs_rest() {
     .mark_session_created();
 
     store
-        .admit_input(&mk_input(
-            "steer-compound",
-            Delivery::Steer,
-            "/plan review",
-        ))
+        .admit_input(&mk_input("steer-compound", Delivery::Steer, "/plan review"))
         .await
         .unwrap();
 
@@ -177,8 +173,9 @@ async fn steered_compound_plan_switches_then_runs_rest() {
             "SteerConsumed must carry the compound tail \"review\""
         );
         assert!(
-            !evs.iter()
-                .any(|e| matches!(e, SessionEvent::SteerConsumed { text, .. } if text.contains("/plan"))),
+            !evs.iter().any(
+                |e| matches!(e, SessionEvent::SteerConsumed { text, .. } if text.contains("/plan"))
+            ),
             "the /plan token must never be echoed"
         );
     }

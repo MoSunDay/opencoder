@@ -6,7 +6,10 @@ use rable::{Node, NodeKind};
 
 use crate::ast;
 
-use super::{literal_if_inert, resolve_param_expansion, resolve_word, strip_outer_quotes, VarLookup, WordResolution};
+use super::{
+    literal_if_inert, resolve_param_expansion, resolve_word, strip_outer_quotes, VarLookup,
+    WordResolution,
+};
 
 pub(crate) fn resolve_word_kind(kind: &NodeKind, vars: &dyn VarLookup) -> WordResolution {
     match kind {
@@ -314,4 +317,3 @@ fn char_range(start: char, end: char) -> Vec<String> {
         (e..=s).rev().map(|b| (b as char).to_string()).collect()
     }
 }
-

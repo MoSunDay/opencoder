@@ -64,15 +64,18 @@ Commit: (working-tree, sidecar 面板注册化 + 销毁语义收敛 + review 收
 | 行数账目对齐 flatten（Sidecar 臂 0 行） | `line_accounting_matches` | `chat_tests/line_accounting.rs` |
 
 ## 全量回归
-- `cargo test -p opencoder-tui` → lib 1566 passed / 0 failed（含
-  `sidecar_reset_discards_backlogged_follow_ups`），integration 全部套件绿；
-  `cargo clippy -p opencoder-tui --all-targets` 零警告。
-- `cargo test --workspace --no-fail-fast` → 246 套件 ok；唯三红为
-  `crates/session/tests/` 的 `skill_body_injection`/`skill_mid_run`/
-  `skill_tail_cleared_after_run_end`——其它会话并行 WIP（工作树
-  `skill_context.rs` 未提交改动）所致，与本变更（crates/tui + 文档，零
-  session 侧 diff）无关；`opencoder-llm` retry 两测试本轮未红。
-- 行数：`sidecar_ui.rs` ~300 行（≤400 上限内）。
+- 实施轮：`cargo test -p opencoder-tui` → lib 1566 passed / 0 failed（含
+  `sidecar_reset_discards_backlogged_follow_ups`），`cargo clippy -p
+  opencoder-tui --all-targets` 零警告；`cargo test --workspace
+  --no-fail-fast` 唯三红为 `crates/session/tests/` 的
+  `skill_body_injection`/`skill_mid_run`/`skill_tail_cleared_after_run_end`
+  ——其它会话并行 WIP（工作树 `skill_context.rs` 未提交改动）所致，与本
+  变更（crates/tui + 文档，零 session 侧 diff）无关。
+- 收口复跑（skill WIP 已落库后）：`cargo test -p opencoder-tui` → lib
+  1654 passed / 0 failed；`cargo test --workspace` → 3792 passed / 0
+  failed 全绿，实施轮唯三红全部清零；`cargo clippy -p opencoder-tui
+  --all-targets` 零警告。
+- 行数：`sidecar_ui.rs` 293 行（≤400 上限内）。
 
 ## Impact Surface
 - TUI 面板入口/退出交互、popup 命令清单；session 侧与持久化契约零变更。

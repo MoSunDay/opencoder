@@ -80,7 +80,10 @@ mod tests {
 
     #[test]
     fn display_renders_wire_reason_strings() {
-        assert_eq!(AllowReason::SimpleSafe("ls".into()).to_string(), "ls is safe");
+        assert_eq!(
+            AllowReason::SimpleSafe("ls".into()).to_string(),
+            "ls is safe"
+        );
         assert_eq!(
             AllowReason::SafeDirWrite("/tmp/a.log".into()).to_string(),
             "redirect to /tmp/a.log (safe dir)"

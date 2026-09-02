@@ -49,7 +49,11 @@ async fn assert_no_new_row(
         before_creates,
         "{ctx}: create_session must not fire"
     );
-    assert_eq!(parent_ids(store).await, before_ids, "{ctx}: parent set forked");
+    assert_eq!(
+        parent_ids(store).await,
+        before_ids,
+        "{ctx}: parent set forked"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -66,12 +70,19 @@ async fn assert_bare_switch_no_new_row(seed_agent: &str, cmd: &str, expect_agent
 
     run(&mut session, cmd.into(), |_| {}).await.unwrap();
 
-    assert_eq!(session.agent.name, expect_agent, "{cmd} must apply (non-vacuous)");
+    assert_eq!(
+        session.agent.name, expect_agent,
+        "{cmd} must apply (non-vacuous)"
+    );
     assert_no_new_row(&spy, &store, &before_ids, before_creates, cmd).await;
 
     // The switch persisted in place (update_session on the same row).
     let meta = store.get_session(SESS).await.unwrap().unwrap();
-    assert_eq!(meta.agent.as_deref(), Some(expect_agent), "{cmd}: persisted in place");
+    assert_eq!(
+        meta.agent.as_deref(),
+        Some(expect_agent),
+        "{cmd}: persisted in place"
+    );
 }
 
 #[tokio::test]
@@ -110,7 +121,9 @@ async fn clear_context_never_creates_row_and_keeps_history() {
     let before_ids = parent_ids(&store).await;
     let before_creates = spy.creates();
 
-    run(&mut session, "/clear_context".into(), |_| {}).await.unwrap();
+    run(&mut session, "/clear_context".into(), |_| {})
+        .await
+        .unwrap();
 
     // The operation really applied: transcript collapsed to the marker and
     // the plan session converged to act without creating another row.
@@ -162,11 +175,18 @@ async fn model_switch_never_creates_session_row() {
         .await
         .unwrap();
 
-    assert_eq!(session.config.model, "other/mini", "switch must apply (non-vacuous)");
+    assert_eq!(
+        session.config.model, "other/mini",
+        "switch must apply (non-vacuous)"
+    );
     assert_no_new_row(&spy, &store, &before_ids, before_creates, "/model").await;
 
     let meta = store.get_session(SESS).await.unwrap().unwrap();
-    assert_eq!(meta.model.as_deref(), Some("other/mini"), "model persisted in place");
+    assert_eq!(
+        meta.model.as_deref(),
+        Some("other/mini"),
+        "model persisted in place"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -189,7 +209,10 @@ async fn skill_activation_never_creates_session_row() {
     let client: Arc<dyn ChatStream> = mock.clone();
     let mut session = mk_session("act", client, store.clone());
 
-    store.admit_input(&mk_queue_input("$review do the work")).await.unwrap();
+    store
+        .admit_input(&mk_queue_input("$review do the work"))
+        .await
+        .unwrap();
 
     let before_ids = parent_ids(&store).await;
     let before_creates = spy.creates();
@@ -252,7 +275,11 @@ async fn listing_stays_parent_only_across_control_ops() {
 
     // Sanity: the child row exists and is visible only when widened.
     let default_ids = parent_ids(&store).await;
-    assert_eq!(default_ids, vec![SESS.to_string()], "default list is parent-only");
+    assert_eq!(
+        default_ids,
+        vec![SESS.to_string()],
+        "default list is parent-only"
+    );
     let widened: Vec<String> = store
         .list_sessions(&SessionFilter {
             include_subagents: true,
@@ -263,7 +290,10 @@ async fn listing_stays_parent_only_across_control_ops() {
         .into_iter()
         .map(|s| s.id)
         .collect();
-    assert!(widened.contains(&child_id.to_string()), "child row exists (non-vacuous)");
+    assert!(
+        widened.contains(&child_id.to_string()),
+        "child row exists (non-vacuous)"
+    );
 
     // Drive a real control op on the parent session.
     let mut session = mk_session("act", Arc::new(MockChatClient::new()), store.clone());

@@ -195,8 +195,8 @@ pub async fn apply(
             // fold: retain the newest real plan under HANDOFF_PREFIX so the
             // next act turn has an explicit instruction to implement it.
             // Other modes keep the existing neutral last-say seed contract.
-            let directive_ready = plan_to_act
-                && crate::handoff::reset_to_directive(session, "").is_some();
+            let directive_ready =
+                plan_to_act && crate::handoff::reset_to_directive(session, "").is_some();
             if !directive_ready {
                 fold_to_continuity_seed(session);
             }
@@ -340,10 +340,7 @@ mod tests {
     #[test]
     fn parse_bare_commands() {
         assert_eq!(parse("/act"), Some(ControlCmd::SwitchAgent("act".into())));
-        assert_eq!(
-            parse("/plan"),
-            Some(ControlCmd::SwitchAgent("plan".into()))
-        );
+        assert_eq!(parse("/plan"), Some(ControlCmd::SwitchAgent("plan".into())));
         assert_eq!(parse("/clear_context"), Some(ControlCmd::ClearContext));
         // Legacy spelling still parses so persisted inputs stay deterministic.
         assert_eq!(parse("/act_clear_context"), Some(ControlCmd::ClearContext));
@@ -411,7 +408,10 @@ mod tests {
         );
         // Compound echoes only the tail: the command token is applied inline
         // and never recorded, so it must never be echoed either.
-        assert_eq!(consumed_echo_text("/plan review"), Some("review".to_string()));
+        assert_eq!(
+            consumed_echo_text("/plan review"),
+            Some("review".to_string())
+        );
         assert_eq!(
             consumed_echo_text("/act_clear_context finish the summary"),
             Some("finish the summary".to_string())
@@ -677,11 +677,7 @@ mod tests {
 
         let _ = collect_events(&mut session, ControlCmd::ClearContext);
 
-        assert_eq!(
-            session.skill_prompt_cloned(),
-            None,
-            "skill body cleared"
-        );
+        assert_eq!(session.skill_prompt_cloned(), None, "skill body cleared");
         assert!(
             session.active_skill_names_cloned().is_empty(),
             "active_skill_names must be cleared with the body"

@@ -21,8 +21,7 @@ use crate::verdict::{AllowReason, Verdict};
 /// Reason for an arithmetic context carrying a substitution bash resolves by
 /// running a command. Matches the wording `resolve` already emits for the same
 /// hazard so the two paths read alike.
-pub(crate) const EXPANSION_ASK: &str =
-    "shell expansion (command substitution requires execution)";
+pub(crate) const EXPANSION_ASK: &str = "shell expansion (command substitution requires execution)";
 
 const MAX_DEPTH: usize = 256;
 
@@ -114,7 +113,9 @@ impl Analyzer {
         if let Error::TooComplex(detail) = err {
             return Verdict::ask(format!("command is too complex to analyze: {detail}"));
         }
-        Verdict::ask(format!("rippy could not parse this command ({err}); approve manually"))
+        Verdict::ask(format!(
+            "rippy could not parse this command ({err}); approve manually"
+        ))
     }
 
     pub(crate) fn analyze_nodes(&mut self, nodes: &[Node], cwd: &Path, depth: usize) -> Verdict {

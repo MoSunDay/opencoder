@@ -162,7 +162,10 @@ async fn queue_consumed_compound_tokens_light_on_any_task_plan_hit() {
         })),
         &mut plan_flag
     );
-    assert!(plan_flag, "any $task-plan token in a compound input lights the chip");
+    assert!(
+        plan_flag,
+        "any $task-plan token in a compound input lights the chip"
+    );
 }
 
 /// A consumed input naming only a *different* skill must NOT light the chip

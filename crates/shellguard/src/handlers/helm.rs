@@ -1,6 +1,8 @@
 //! Ported from rippy (MIT) https://github.com/mpecan/rippy
 
-use super::{Classification, Handler, HandlerContext, has_flag, has_flag_or_prefixed, is_sole_help_flag};
+use super::{
+    has_flag, has_flag_or_prefixed, is_sole_help_flag, Classification, Handler, HandlerContext,
+};
 use crate::verdict::AllowReason;
 
 pub(crate) static HELM_HANDLER: HelmHandler = HelmHandler;
@@ -86,7 +88,6 @@ impl Handler for HelmHandler {
 
         Classification::Ask(format!("helm {sub}"))
     }
-
 }
 
 // Behavioral coverage lives in rippy's command catalog (not ported) — every

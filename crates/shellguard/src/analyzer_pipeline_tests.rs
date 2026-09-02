@@ -1,8 +1,8 @@
 //! Pipeline-level tests: parser failure handling, compound commands, nesting
 //! depth, and dispatcher behaviour over the ported rippy core.
 
+use crate::test_support::{analyze_with, MockLookup};
 use crate::verdict::Decision;
-use crate::test_support::{MockLookup, analyze_with};
 
 fn lk(pairs: &[(&str, &str)]) -> MockLookup {
     let mut l = MockLookup::new();
@@ -33,14 +33,22 @@ fn pipe_blocks_when_one_side_blocks() {
 
 #[test]
 fn and_allows_when_both_sides_allow() {
-    let v = analyze_with("/tmp".into(), lk(&[("FOO", "bar")]), "echo $FOO && cat /tmp/a.txt");
+    let v = analyze_with(
+        "/tmp".into(),
+        lk(&[("FOO", "bar")]),
+        "echo $FOO && cat /tmp/a.txt",
+    );
     assert_eq!(v.decision, Decision::Allow, "got {v:?}");
 }
 
 #[test]
 fn and_blocks_when_one_side_blocks() {
     // The cwd is a project dir (never released), so `rm x` targets it.
-    let v = analyze_with("/home/user/project".into(), MockLookup::new(), "cat /tmp/a.txt && rm x");
+    let v = analyze_with(
+        "/home/user/project".into(),
+        MockLookup::new(),
+        "cat /tmp/a.txt && rm x",
+    );
     assert_eq!(v.decision, Decision::Ask, "got {v:?}");
     assert!(v.reason.contains("rm"), "reason: {}", v.reason);
 }
@@ -80,7 +88,11 @@ fn command_substitution_is_fail_closed() {
 fn process_substitution_is_asked() {
     let v = analyze_with("/tmp".into(), MockLookup::new(), "cat <(ls)");
     assert_eq!(v.decision, Decision::Ask, "got {v:?}");
-    assert!(v.reason.contains("process substitution"), "reason: {}", v.reason);
+    assert!(
+        v.reason.contains("process substitution"),
+        "reason: {}",
+        v.reason
+    );
 }
 
 #[test]
@@ -105,7 +117,11 @@ fn allowlisted_commands_allow() {
 fn redirect_to_devnull_is_reported_in_reason() {
     let v = analyze_with("/tmp".into(), MockLookup::new(), "ls > /dev/null");
     assert_eq!(v.decision, Decision::Allow, "got {v:?}");
-    assert!(v.reason.contains("redirect to /dev/null"), "reason: {}", v.reason);
+    assert!(
+        v.reason.contains("redirect to /dev/null"),
+        "reason: {}",
+        v.reason
+    );
 }
 
 #[test]

@@ -1,6 +1,6 @@
 //! Ported from rippy (MIT) https://github.com/mpecan/rippy
 
-use super::{Classification, Handler, HandlerContext, get_flag_value, is_sole_help_flag};
+use super::{get_flag_value, is_sole_help_flag, Classification, Handler, HandlerContext};
 use crate::verdict::AllowReason;
 
 pub(crate) static DOCKER_HANDLER: DockerHandler = DockerHandler;
@@ -68,7 +68,6 @@ impl Handler for DockerHandler {
             Classification::Ask(desc)
         }
     }
-
 }
 
 fn classify_grouped_noun(ctx: &HandlerContext, noun: &str) -> Classification {

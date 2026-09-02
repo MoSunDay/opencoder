@@ -9,11 +9,11 @@ use std::path::Path;
 use rable::{Node, NodeKind};
 
 use super::{
-    Analyzer, EXPANSION_ASK, MAX_RESOLUTION_DEPTH, MAX_RESOLVED_LEN, annotate_with_resolution,
+    annotate_with_resolution, Analyzer, EXPANSION_ASK, MAX_RESOLUTION_DEPTH, MAX_RESOLVED_LEN,
 };
-use crate::handlers::canonicalize_existing_ancestor;
 use crate::allowlists;
 use crate::ast;
+use crate::handlers::canonicalize_existing_ancestor;
 use crate::handlers::{self, Classification, HandlerContext};
 use crate::resolve;
 use crate::verdict::{AllowReason, Verdict};

@@ -3,11 +3,11 @@
 //! iteration caps.
 
 use crate::app_helpers::pre_key_intercept;
-use tokio::sync::mpsc;
 use crate::chat::{ChatBlock, ChatView};
 use crate::keymap::KeyBindings;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use opencoder_session::SessionEvent;
+use tokio::sync::mpsc;
 
 /// Build a parent view with a collapsible thinking block and one Subagent
 /// block whose child view also has an (expanded) thinking block.
@@ -228,9 +228,15 @@ fn esc_destroys_the_sidecar_panel() {
     );
 
     assert!(consumed);
-    assert!(matches!(sidecar_rx.try_recv(), Ok(crate::sidecar_ui::SidecarCmd::Reset)));
+    assert!(matches!(
+        sidecar_rx.try_recv(),
+        Ok(crate::sidecar_ui::SidecarCmd::Reset)
+    ));
     assert!(
-        !chat.blocks.iter().any(|b| matches!(b, ChatBlock::Sidecar { .. })),
+        !chat
+            .blocks
+            .iter()
+            .any(|b| matches!(b, ChatBlock::Sidecar { .. })),
         "ESC must purge every sidecar block"
     );
     assert!(!chat.sidecar_focus, "focus released");
@@ -285,16 +291,25 @@ fn ctrl_l_destroys_the_sidecar_then_collapses_parent() {
     );
 
     assert!(consumed);
-    assert!(matches!(sidecar_rx.try_recv(), Ok(crate::sidecar_ui::SidecarCmd::Reset)));
+    assert!(matches!(
+        sidecar_rx.try_recv(),
+        Ok(crate::sidecar_ui::SidecarCmd::Reset)
+    ));
     assert!(
-        !chat.blocks.iter().any(|b| matches!(b, ChatBlock::Sidecar { .. })),
+        !chat
+            .blocks
+            .iter()
+            .any(|b| matches!(b, ChatBlock::Sidecar { .. })),
         "Ctrl+L must purge every sidecar block"
     );
     assert!(!chat.sidecar_focus);
     assert!(
         matches!(
             chat.blocks.first(),
-            Some(ChatBlock::Thinking { collapsed: true, .. })
+            Some(ChatBlock::Thinking {
+                collapsed: true,
+                ..
+            })
         ),
         "parent collapse still ran"
     );

@@ -214,7 +214,9 @@ mod tests {
 
         let mut unset = analyzer_for_test(PathBuf::from("/project"), MockLookup::new());
         assert_eq!(
-            unset.analyze(subject).map_or(Decision::Deny, |v| v.decision),
+            unset
+                .analyze(subject)
+                .map_or(Decision::Deny, |v| v.decision),
             Decision::Allow
         );
 

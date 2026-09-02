@@ -211,7 +211,10 @@ pub struct HomeGuard {
 
 pub fn lock_home(home: &std::path::Path) -> HomeGuard {
     let _lock = HOME_MUTEX.lock().unwrap();
-    let prev = (std::env::var_os("HOME"), std::env::var_os("XDG_CONFIG_HOME"));
+    let prev = (
+        std::env::var_os("HOME"),
+        std::env::var_os("XDG_CONFIG_HOME"),
+    );
     std::env::set_var("HOME", home);
     std::env::set_var("XDG_CONFIG_HOME", home);
     HomeGuard { prev, _lock }

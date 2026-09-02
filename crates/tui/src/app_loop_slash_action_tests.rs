@@ -430,7 +430,10 @@ async fn slash_action_sidecar_idle_opens_fresh_panel() {
         "exactly the fresh placeholder block"
     );
     assert!(
-        matches!(sidecar_rx.try_recv(), Ok(crate::sidecar_ui::SidecarCmd::Reset)),
+        matches!(
+            sidecar_rx.try_recv(),
+            Ok(crate::sidecar_ui::SidecarCmd::Reset)
+        ),
         "entry must send Reset to the actor"
     );
     assert!(cmd_rx.try_recv().is_err(), "no UiCmd is sent");
@@ -510,7 +513,10 @@ async fn slash_action_sidecar_running_still_opens_panel() {
     assert!(matches!(flow, LoopFlow::Proceed));
     assert!(running, "the parent turn keeps running");
     assert!(chat.sidecar_focus, "panel opened despite the running turn");
-    assert!(matches!(sidecar_rx.try_recv(), Ok(crate::sidecar_ui::SidecarCmd::Reset)));
+    assert!(matches!(
+        sidecar_rx.try_recv(),
+        Ok(crate::sidecar_ui::SidecarCmd::Reset)
+    ));
     assert!(
         cmd_rx.try_recv().is_err(),
         "no parent UiCmd is sent (bypass path)"

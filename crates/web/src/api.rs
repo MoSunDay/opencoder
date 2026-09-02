@@ -166,10 +166,8 @@ async fn messages_response(state: &AppState, id: &str) -> Response {
         .get(id)
         .map(|h| h.draining.load(std::sync::atomic::Ordering::SeqCst))
         .unwrap_or(false);
-    Json(
-        json!({ "id": id, "meta": meta, "messages": messages, "draining": draining }),
-    )
-    .into_response()
+    Json(json!({ "id": id, "meta": meta, "messages": messages, "draining": draining }))
+        .into_response()
 }
 
 #[derive(Deserialize)]

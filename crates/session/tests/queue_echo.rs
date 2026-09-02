@@ -233,9 +233,9 @@ async fn queue_consumed_compound_carries_tail_text() {
 
     // The echo is model-facing: only the tail (what record_compound records
     // into context), never the `/plan` token itself.
-    let carries = evs.iter().any(|e| {
-        matches!(e, SessionEvent::QueueConsumed { text, .. } if text == "review the code")
-    });
+    let carries = evs.iter().any(
+        |e| matches!(e, SessionEvent::QueueConsumed { text, .. } if text == "review the code"),
+    );
     assert!(
         carries,
         "QueueConsumed must carry the compound tail \"review the code\", not the raw command"
@@ -248,8 +248,5 @@ async fn queue_consumed_compound_carries_tail_text() {
     let has_reply = evs
         .iter()
         .any(|e| matches!(e, SessionEvent::TextDelta(t) if t.contains("plan reply")));
-    assert!(
-        has_reply,
-        "the /plan <text> tail must produce an LLM turn"
-    );
+    assert!(has_reply, "the /plan <text> tail must produce an LLM turn");
 }

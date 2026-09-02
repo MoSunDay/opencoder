@@ -1,6 +1,6 @@
 //! Ported from rippy (MIT) https://github.com/mpecan/rippy
 
-use super::{Classification, Handler, HandlerContext, has_flag, is_sole_help_flag};
+use super::{has_flag, is_sole_help_flag, Classification, Handler, HandlerContext};
 use crate::verdict::AllowReason;
 
 pub(crate) static NPM_HANDLER: NpmHandler = NpmHandler;
@@ -98,7 +98,6 @@ impl Handler for NpmHandler {
             Classification::Ask(desc)
         }
     }
-
 }
 
 fn classify_config(ctx: &HandlerContext) -> Classification {

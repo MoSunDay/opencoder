@@ -243,11 +243,7 @@ async fn idle_drain_under_hard_cancel_keeps_queued_mode_cmd_pending() {
     assert!(matches!(action, IdleAction::Done), "got {action:?}");
     assert_eq!(session.agent.name, "plan", "mode must not switch");
     let meta = store.get_session(&session.id).await.unwrap().unwrap();
-    assert_eq!(
-        meta.agent.as_deref(),
-        Some("plan"),
-        "store row unchanged"
-    );
+    assert_eq!(meta.agent.as_deref(), Some("plan"), "store row unchanged");
     let pending = store
         .pending_inputs(&session.id, Delivery::Queue)
         .await
@@ -340,11 +336,7 @@ async fn steer_batch_hard_cancel_unpromotes_remaining_mode_cmd() {
 
     assert_eq!(session.agent.name, "plan", "mode must not switch");
     let meta = store.get_session(&session.id).await.unwrap().unwrap();
-    assert_eq!(
-        meta.agent.as_deref(),
-        Some("plan"),
-        "store row unchanged"
-    );
+    assert_eq!(meta.agent.as_deref(), Some("plan"), "store row unchanged");
     assert!(
         !events
             .iter()

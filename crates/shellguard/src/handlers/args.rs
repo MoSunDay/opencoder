@@ -168,7 +168,10 @@ mod tests {
     #[test]
     fn sole_help_flag_requires_single_argument() {
         assert!(is_sole_help_flag(&args(&["--help"]), &["--help", "-h"]));
-        assert!(!is_sole_help_flag(&args(&["-m", "--help"]), &["--help", "-h"]));
+        assert!(!is_sole_help_flag(
+            &args(&["-m", "--help"]),
+            &["--help", "-h"]
+        ));
     }
 
     #[test]
@@ -181,10 +184,22 @@ mod tests {
     fn clustered_flag_found_in_clusters_with_and_without_suffix() {
         let value_flags = ['e', 'E', 'I', 'M'];
         assert!(has_clustered_short_flag(&args(&["-pi"]), 'i', &value_flags));
-        assert!(has_clustered_short_flag(&args(&["-pi.bak", "-e", "x"]), 'i', &value_flags));
-        assert!(has_clustered_short_flag(&args(&["-ipe", "s/a/b/"]), 'i', &value_flags));
+        assert!(has_clustered_short_flag(
+            &args(&["-pi.bak", "-e", "x"]),
+            'i',
+            &value_flags
+        ));
+        assert!(has_clustered_short_flag(
+            &args(&["-ipe", "s/a/b/"]),
+            'i',
+            &value_flags
+        ));
         assert!(has_clustered_short_flag(&args(&["-i"]), 'i', &value_flags));
-        assert!(has_clustered_short_flag(&args(&["-w", "-i"]), 'i', &value_flags));
+        assert!(has_clustered_short_flag(
+            &args(&["-w", "-i"]),
+            'i',
+            &value_flags
+        ));
     }
 
     #[test]
@@ -192,16 +207,40 @@ mod tests {
         let value_flags = ['e', 'E', 'I', 'M'];
         // `-Ilib` / `-MList::Util`: uppercase value flags stop the scan, so
         // their glued values are never read as flags.
-        assert!(!has_clustered_short_flag(&args(&["-Ilib"]), 'i', &value_flags));
-        assert!(!has_clustered_short_flag(&args(&["-MList::Util", "-e", "1"]), 'i', &value_flags));
+        assert!(!has_clustered_short_flag(
+            &args(&["-Ilib"]),
+            'i',
+            &value_flags
+        ));
+        assert!(!has_clustered_short_flag(
+            &args(&["-MList::Util", "-e", "1"]),
+            'i',
+            &value_flags
+        ));
         // A value flag ends the cluster: letters after it are its value.
-        assert!(!has_clustered_short_flag(&args(&["-pei"]), 'i', &value_flags));
+        assert!(!has_clustered_short_flag(
+            &args(&["-pei"]),
+            'i',
+            &value_flags
+        ));
         // Plain clusters without the wanted letter.
-        assert!(!has_clustered_short_flag(&args(&["-pe", "puts 1"]), 'i', &value_flags));
+        assert!(!has_clustered_short_flag(
+            &args(&["-pe", "puts 1"]),
+            'i',
+            &value_flags
+        ));
         // The wanted letter in a separate VALUE token is not a flag.
-        assert!(!has_clustered_short_flag(&args(&["-e", "print \"i\""]), 'i', &value_flags));
+        assert!(!has_clustered_short_flag(
+            &args(&["-e", "print \"i\""]),
+            'i',
+            &value_flags
+        ));
         // Long options and the bare `-` stdin marker are not clusters.
-        assert!(!has_clustered_short_flag(&args(&["--in-place"]), 'i', &value_flags));
+        assert!(!has_clustered_short_flag(
+            &args(&["--in-place"]),
+            'i',
+            &value_flags
+        ));
         assert!(!has_clustered_short_flag(&args(&["-"]), 'i', &value_flags));
     }
 }
@@ -213,10 +252,7 @@ mod tests {
 /// (`-r`, `--force`, `-m644`) are skipped, never treated as operands.
 /// The token following a flag in `value_flags` is metadata (a mode, an owner,
 /// a size) rather than a path, so it is skipped too.
-pub(crate) fn positional_operands(
-    args: &[String],
-    value_flags: &[&str],
-) -> Vec<String> {
+pub(crate) fn positional_operands(args: &[String], value_flags: &[&str]) -> Vec<String> {
     let mut operands = Vec::new();
     let mut end_of_flags = false;
     let mut skip_next = false;

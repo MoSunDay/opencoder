@@ -54,10 +54,12 @@ pub(crate) fn fold_sidecar(chat: &mut ChatView, sev: &SessionEvent) -> bool {
             let adopted = chat
                 .blocks
                 .iter_mut()
-                .any(|b| {
-                    matches!(b, ChatBlock::Sidecar { id: bid, .. } if bid.is_empty())
-                });
-            if let Some(ChatBlock::Sidecar { id: bid, question: bq, .. }) = chat
+                .any(|b| matches!(b, ChatBlock::Sidecar { id: bid, .. } if bid.is_empty()));
+            if let Some(ChatBlock::Sidecar {
+                id: bid,
+                question: bq,
+                ..
+            }) = chat
                 .blocks
                 .iter_mut()
                 .find(|b| matches!(b, ChatBlock::Sidecar { id: bid, .. } if bid.is_empty()))
@@ -170,4 +172,3 @@ pub(crate) fn purge(chat: &mut ChatView) {
         .retain(|b| !matches!(b, ChatBlock::Sidecar { .. }));
     chat.sidecar_focus = false;
 }
-

@@ -56,7 +56,9 @@ async fn setup_session(id: &str) -> Arc<dyn Store> {
         .append_message(id, &Message::user("u1", "plan something"))
         .await
         .unwrap();
-    store.append_message(id, &assistant_with_plan()).await
+    store
+        .append_message(id, &assistant_with_plan())
+        .await
         .unwrap();
 
     // Persist the handoff boundary via update_session — exactly what the

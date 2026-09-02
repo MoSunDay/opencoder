@@ -175,10 +175,26 @@ pub(super) async fn run(opts: &TuiOpts) -> Result<()> {
         ("session", session_ms),
         ("terminal", terminal_ms),
     ];
-    tracing::info!(config_client_ms, store_ms, mirror_ms, session_ms, terminal_ms,
-        total_ms = t_total.elapsed().as_millis() as u64, "tui bootstrap stages");
-    if let Some((stage, ms)) = stages.iter().copied().max_by_key(|s| s.1).filter(|s| s.1 > 1000) {
-        tracing::warn!(slowest_stage = stage, slowest_ms = ms, "slow tui bootstrap stage");
+    tracing::info!(
+        config_client_ms,
+        store_ms,
+        mirror_ms,
+        session_ms,
+        terminal_ms,
+        total_ms = t_total.elapsed().as_millis() as u64,
+        "tui bootstrap stages"
+    );
+    if let Some((stage, ms)) = stages
+        .iter()
+        .copied()
+        .max_by_key(|s| s.1)
+        .filter(|s| s.1 > 1000)
+    {
+        tracing::warn!(
+            slowest_stage = stage,
+            slowest_ms = ms,
+            "slow tui bootstrap stage"
+        );
     }
 
     let result = super::run_app(

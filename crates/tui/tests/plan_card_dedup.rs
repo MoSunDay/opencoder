@@ -43,7 +43,10 @@ async fn setup_session_with_history(id: &str) -> Arc<dyn Store> {
         .append_message(id, &Message::user("u1", "plan something"))
         .await
         .unwrap();
-    store.append_message(id, &assistant_with_plan()).await.unwrap();
+    store
+        .append_message(id, &assistant_with_plan())
+        .await
+        .unwrap();
     store
         .update_session(
             id,
@@ -84,7 +87,10 @@ async fn transcript_plus_handoff_message_render_exactly_one_card() {
     );
     // The transcript content is still rendered around the single card.
     let raw = format!("{:?}", chat.blocks);
-    assert!(raw.contains("plan something"), "user row rendered, got: {raw}");
+    assert!(
+        raw.contains("plan something"),
+        "user row rendered, got: {raw}"
+    );
 }
 
 /// Replaying the SAME payload again (resume again / TranscriptReset
@@ -146,5 +152,8 @@ async fn seed_boundary_replaces_the_stale_plan_card() {
         !raw.contains("<<OPENCODER_CLEAR_SEED>>"),
         "the raw seed marker never reaches the UI, got: {raw}"
     );
-    assert!(raw.contains("step one"), "preserved text visible, got: {raw}");
+    assert!(
+        raw.contains("step one"),
+        "preserved text visible, got: {raw}"
+    );
 }

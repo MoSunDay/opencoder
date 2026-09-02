@@ -87,7 +87,9 @@ pub(crate) fn command_text(cc: &ClearConfirm) -> String {
 /// Whole seconds left before the armed clear fires on its own.
 pub(crate) fn remaining_secs(cc: &ClearConfirm, now: Instant) -> u64 {
     let elapsed = now.duration_since(cc.armed_at).as_millis() as u64;
-    CLEAR_CONFIRM_WINDOW_MS.saturating_sub(elapsed).div_ceil(1000)
+    CLEAR_CONFIRM_WINDOW_MS
+        .saturating_sub(elapsed)
+        .div_ceil(1000)
 }
 
 pub(crate) fn expired(cc: &ClearConfirm, now: Instant) -> bool {
@@ -167,7 +169,9 @@ pub(crate) fn intercept(
         KeyCode::Enter => {
             // Shift+Enter / Alt+Enter still insert a newline (multi-line
             // input) instead of firing — same as the live composer.
-            if k.modifiers.intersects(KeyModifiers::SHIFT | KeyModifiers::ALT) {
+            if k.modifiers
+                .intersects(KeyModifiers::SHIFT | KeyModifiers::ALT)
+            {
                 let (s, i) = crate::composer::insert_newline(input, *cursor_idx);
                 *input = s;
                 *cursor_idx = i;
@@ -184,9 +188,9 @@ pub(crate) fn intercept(
         // style), and letting it fire would turn a chord that used to be a
         // harmless mode switch into an immediate destructive clear.
         KeyCode::BackTab
-            if !k.modifiers.intersects(
-                KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER,
-            ) =>
+            if !k
+                .modifiers
+                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER) =>
         {
             Some(ConfirmFlow::Fire)
         }
@@ -226,7 +230,9 @@ pub(crate) fn intercept(
         KeyCode::Char(c) => {
             // Alt+Char (tmux escape-time Esc merge) and Ctrl combos never
             // reach the input box — same ghost-garbage guard as the composer.
-            if k.modifiers.intersects(KeyModifiers::ALT | KeyModifiers::CONTROL) {
+            if k.modifiers
+                .intersects(KeyModifiers::ALT | KeyModifiers::CONTROL)
+            {
                 return None;
             }
             let (s, i) = crate::composer::insert_char(input, *cursor_idx, c);
@@ -277,9 +283,7 @@ pub(crate) fn tick(
 
 /// Cancel feedback: the fold was withdrawn (回撤) — nothing was lost.
 pub(crate) fn push_cancel_marker(chat: &mut ChatView) {
-    chat.push_marker(marker_line(
-        "[clear] 已取消（回撤）— 上下文未清空".into(),
-    ));
+    chat.push_marker(marker_line("[clear] 已取消（回撤）— 上下文未清空".into()));
 }
 
 fn marker_line(text: String) -> Line<'static> {
@@ -318,13 +322,20 @@ mod tests {
         let bare = arm(None, None);
         assert_eq!(command_text(&bare), "/act_clear_context");
         let compound = arm(Some("finish the summary".into()), None);
-        assert_eq!(command_text(&compound), "/act_clear_context finish the summary");
+        assert_eq!(
+            command_text(&compound),
+            "/act_clear_context finish the summary"
+        );
     }
 
     #[test]
     fn remaining_and_expiry_track_the_window() {
         let armed_at = Instant::now() - Duration::from_millis(2_000);
-        let cc = ClearConfirm { armed_at, rest: None, restore_draft: None };
+        let cc = ClearConfirm {
+            armed_at,
+            rest: None,
+            restore_draft: None,
+        };
         assert_eq!(remaining_secs(&cc, Instant::now()), 3);
         assert!(!expired(&cc, Instant::now()));
         let spent = ClearConfirm {
@@ -343,7 +354,13 @@ mod tests {
         let mut cursor = 0;
         let mut undo = crate::undo::init(&input, cursor);
         assert_eq!(
-            intercept(&mut cc, &mut input, &mut cursor, &mut undo, key(KeyCode::Enter)),
+            intercept(
+                &mut cc,
+                &mut input,
+                &mut cursor,
+                &mut undo,
+                key(KeyCode::Enter)
+            ),
             Some(ConfirmFlow::Fire)
         );
         assert!(cc.is_some(), "caller takes the arm to execute");
@@ -356,7 +373,13 @@ mod tests {
         let mut cursor = 0;
         let mut undo = crate::undo::init(&input, cursor);
         assert_eq!(
-            intercept(&mut cc, &mut input, &mut cursor, &mut undo, key(KeyCode::Esc)),
+            intercept(
+                &mut cc,
+                &mut input,
+                &mut cursor,
+                &mut undo,
+                key(KeyCode::Esc)
+            ),
             Some(ConfirmFlow::Cancel)
         );
         assert!(cc.is_none());
@@ -373,15 +396,36 @@ mod tests {
         // Typing lands in the composer so a real submission can be made
         // during the window.
         assert_eq!(
-            intercept(&mut cc, &mut input, &mut cursor, &mut undo, key(KeyCode::Char('x'))),
+            intercept(
+                &mut cc,
+                &mut input,
+                &mut cursor,
+                &mut undo,
+                key(KeyCode::Char('x'))
+            ),
             None
         );
-        assert_eq!(intercept(&mut cc, &mut input, &mut cursor, &mut undo, key(KeyCode::Char('y'))), None);
+        assert_eq!(
+            intercept(
+                &mut cc,
+                &mut input,
+                &mut cursor,
+                &mut undo,
+                key(KeyCode::Char('y'))
+            ),
+            None
+        );
         assert_eq!(input, "xy");
         assert_eq!(cursor, 2);
         assert!(cc.is_some(), "editing must not disturb the arm");
         assert_eq!(
-            intercept(&mut cc, &mut input, &mut cursor, &mut undo, key(KeyCode::Backspace)),
+            intercept(
+                &mut cc,
+                &mut input,
+                &mut cursor,
+                &mut undo,
+                key(KeyCode::Backspace)
+            ),
             None
         );
         assert_eq!(input, "x");
@@ -399,7 +443,10 @@ mod tests {
         let alt_x = KeyEvent::new(KeyCode::Char('x'), KeyModifiers::ALT);
         let ctrl_x = KeyEvent::new(KeyCode::Char('x'), KeyModifiers::CONTROL);
         for k in [alt_x, ctrl_x] {
-            assert_eq!(intercept(&mut cc, &mut input, &mut cursor, &mut undo, k), None);
+            assert_eq!(
+                intercept(&mut cc, &mut input, &mut cursor, &mut undo, k),
+                None
+            );
         }
         assert_eq!(input, "x", "Alt/Ctrl combos must stay inert");
     }
@@ -429,7 +476,13 @@ mod tests {
         let mut undo = crate::undo::init(&input, cursor);
         // The same chord that armed the guard confirms it.
         assert_eq!(
-            intercept(&mut cc, &mut input, &mut cursor, &mut undo, key(KeyCode::BackTab)),
+            intercept(
+                &mut cc,
+                &mut input,
+                &mut cursor,
+                &mut undo,
+                key(KeyCode::BackTab)
+            ),
             Some(ConfirmFlow::Fire)
         );
         assert!(cc.is_some(), "the arm stays for the caller to take");
@@ -442,7 +495,13 @@ mod tests {
         assert_eq!(input, "", "the confirm chord must not edit");
         // Plain Tab (follow-up/submit) stays inert while armed.
         assert_eq!(
-            intercept(&mut cc, &mut input, &mut cursor, &mut undo, key(KeyCode::Tab)),
+            intercept(
+                &mut cc,
+                &mut input,
+                &mut cursor,
+                &mut undo,
+                key(KeyCode::Tab)
+            ),
             None
         );
         assert!(cc.is_some());
@@ -470,10 +529,8 @@ mod tests {
             None
         );
         // Super (cmd/win) mutations are filtered the same way.
-        let super_backtab = KeyEvent::new(
-            KeyCode::BackTab,
-            KeyModifiers::SUPER | KeyModifiers::SHIFT,
-        );
+        let super_backtab =
+            KeyEvent::new(KeyCode::BackTab, KeyModifiers::SUPER | KeyModifiers::SHIFT);
         assert_eq!(
             intercept(&mut cc, &mut input, &mut cursor, &mut undo, super_backtab),
             None
@@ -519,7 +576,14 @@ mod tests {
         let mut flash: Option<(String, u32)> = None;
         assert!(!maybe_arm(&mut cc, &mut chat, &mut flash, 0, "/act", None));
         assert!(cc.is_none());
-        assert!(maybe_arm(&mut cc, &mut chat, &mut flash, 0, "/clear_context tail", Some("t".into())));
+        assert!(maybe_arm(
+            &mut cc,
+            &mut chat,
+            &mut flash,
+            0,
+            "/clear_context tail",
+            Some("t".into())
+        ));
         let armed = cc.expect("legacy spelling must arm too");
         assert_eq!(armed.rest, Some("tail".into()));
         assert_eq!(armed.restore_draft, Some("t".into()));
@@ -536,7 +600,11 @@ mod tests {
             })
             .flatten()
             .collect();
-        assert_eq!(markers.len(), 1, "exactly one countdown marker: {markers:?}");
+        assert_eq!(
+            markers.len(),
+            1,
+            "exactly one countdown marker: {markers:?}"
+        );
         assert!(
             markers[0].contains("5s 之后仅保留计划并执行"),
             "countdown marker: {:?}",

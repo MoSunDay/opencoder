@@ -1,6 +1,9 @@
 //! Ported from rippy (MIT) https://github.com/mpecan/rippy
 
-use super::{Classification, Handler, HandlerContext, first_positional, get_flag_value, has_flag, is_sole_help_flag};
+use super::{
+    first_positional, get_flag_value, has_flag, is_sole_help_flag, Classification, Handler,
+    HandlerContext,
+};
 use crate::python_safety::is_python_source_safe;
 use crate::verdict::AllowReason;
 
@@ -78,7 +81,6 @@ impl Handler for PythonHandler {
         }
         Classification::Ask("python script execution".into())
     }
-
 }
 
 #[cfg(test)]

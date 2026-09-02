@@ -25,8 +25,8 @@ use opencoder_session::{new_conv_from, run_sidecar_turn, SessionEvent, SessionSt
 use opencoder_store::Store;
 use tokio::sync::mpsc;
 
-use crate::chat::ChatView;
 use crate::chat::ChatBlock;
+use crate::chat::ChatView;
 use crate::worker::{persist_event, UiEvent};
 
 /// Channel depth for pending sidecar commands. Small by design: the actor
@@ -150,7 +150,10 @@ pub(crate) fn spawn_actor(
                     // regardless).
                     let _ = tx_for_cb.try_send(UiEvent::Session(ev));
                 };
-                if run_sidecar_turn(&mut active, &q, &mut on_event).await.is_err() {
+                if run_sidecar_turn(&mut active, &q, &mut on_event)
+                    .await
+                    .is_err()
+                {
                     // The turn's own sink normally reports the outcome; a
                     // hard actor-level failure still owes the UI a terminal
                     // frame.
@@ -198,10 +201,10 @@ pub(crate) fn spawn_actor(
                     TurnEnd::Cmd(Some(SidecarCmd::Reset)) => {
                         handle.abort();
                         let _ = handle.await; // join: the usage collector is now final
-                        // Destroy = destroy EVERYTHING: a queued follow-up
-                        // must not outlive the destroyed panel, or it would
-                        // rebuild the conversation and keep burning tokens
-                        // after the user left.
+                                              // Destroy = destroy EVERYTHING: a queued follow-up
+                                              // must not outlive the destroyed panel, or it would
+                                              // rebuild the conversation and keep burning tokens
+                                              // after the user left.
                         backlog.clear();
                         break;
                     }
@@ -286,7 +289,8 @@ pub(crate) fn exit_panel(chat: &mut ChatView, ask: &mpsc::Sender<SidecarCmd>) {
 // ── Composer flash strings (single source of truth, test-pinned) ────────────
 
 /// `/sidecar` entered the (fresh) panel.
-pub(crate) const SIDECAR_ENTER_FLASH: &str = "\u{2937} sidecar 已就绪 · 输入问题回车 · Ctrl+L 销毁返回";
+pub(crate) const SIDECAR_ENTER_FLASH: &str =
+    "\u{2937} sidecar 已就绪 · 输入问题回车 · Ctrl+L 销毁返回";
 /// Ask channel full or actor gone: retry shortly.
 pub(crate) const SIDECAR_BUSY_FLASH: &str = "⏳ sidecar busy — retry in a moment";
 /// Title hint for the freshly entered (question-less) panel.

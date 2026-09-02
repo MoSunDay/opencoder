@@ -20,9 +20,7 @@ use opencoder_web::handle::sse_from_session_event;
 fn all_variants() -> Vec<SessionEvent> {
     use opencoder_session::autopilot::ApPhase;
     vec![
-        SessionEvent::LlmRoundStart {
-            started_at_ms: 1,
-        },
+        SessionEvent::LlmRoundStart { started_at_ms: 1 },
         SessionEvent::LlmRoundEnd,
         SessionEvent::LlmUsage {
             total_tokens: 10,

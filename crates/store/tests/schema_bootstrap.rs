@@ -103,10 +103,7 @@ async fn fresh_open_then_reopen_is_idempotent() {
         let conn = store.conn().await.unwrap();
 
         let session = store.get_session("boot-s1").await.unwrap();
-        assert!(
-            session.is_some(),
-            "session must survive re-open #{reopen}"
-        );
+        assert!(session.is_some(), "session must survive re-open #{reopen}");
         assert_eq!(
             count_schema_version_rows(&conn).await,
             1,

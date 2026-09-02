@@ -78,10 +78,8 @@ pub fn builtin_agents() -> Vec<Agent> {
             prompt: base_prompt_plan(),
             tools: ToolFilter::Allow(vec![
                 "bash".into(), "task".into(),
-                // Structured clarification: the plan agent asks over
-                // assuming when an unstated assumption would shape the work.
-                // Repo/rules/test facts are looked up, not asked.
-                // Latent: surfaced only while the task-plan skill is active.
+                // Latent tool: gated by the task-plan skill everywhere;
+                // the plan-kind exemption lives in tools::latent::is_visible.
                 "question".into(),
             ]),
         },
@@ -217,8 +215,7 @@ pub fn base_prompt_sidecar() -> String {
 
 const PLAN_SUFFIX: &str = "\
 PLAN mode (read-only): no edits/writes and no implementation execution. Every state-changing tool attempt (including writes under /tmp) is intercepted and returned in context. If blocked, do not retry or look for another write path; focus on analysis and output a plan only. \
-Investigate via 'explore' subagents. \
-When an unstated assumption would shape your work, resolve it via the `question` tool -- prefer asking over assuming (you may ask several in one turn). Facts the repo, rules/, or tests can answer must be looked up first, not asked.";
+Investigate via 'explore' subagents.";
 
 const BASE_PROMPT: &str = "\
 You are OpenCoder, a high-performance coding agent in a terminal.
@@ -278,11 +275,11 @@ mod tests {
         );
     }
 
-    /// `question` is allowlisted for the two primary agents that may surface
-    /// clarification prompts: `plan` asks over assuming, and `act` is
-    /// allowlisted here (runtime visibility is gated elsewhere). Subagents
-    /// never ask -- zero schema token cost. Structural guard (rules/01)
-    /// against filter drift.
+    /// `question` is allowlisted for the two primary agents only (`plan` is
+    /// exempt from latent gating, `act` needs the task-plan skill unlock;
+    /// runtime visibility is gated elsewhere). Subagents never see it --
+    /// zero schema token cost. Structural guard (rules/01) against filter
+    /// drift.
     #[test]
     fn question_tool_is_plan_and_act_only() {
         for name in ["plan", "act"] {
@@ -329,7 +326,7 @@ mod tests {
     /// The plan prompt requires a focused plan without reviving the old rigid
     /// Goal/TODO/Verify/Risks/Align template or an automatic act handoff.
     #[test]
-    fn plan_prompt_is_read_only_with_question_guidance() {
+    fn plan_prompt_is_read_only_without_question_advertisement() {
         let plan = base_prompt_plan();
 
         // Read-only constraints survive the rename.
@@ -344,22 +341,21 @@ mod tests {
         assert!(plan.contains("output a plan only"), "got: {plan}");
         assert!(plan.contains("do not retry"), "got: {plan}");
 
-        // No question-tool advertisement in the base prompt: clarification
-        // guidance lives only in the task-plan skill body. (Generic prose
+        // No question-tool advertisement in the base prompt: the tool's
+        // description lives ONLY in the task-plan skill body. (Generic prose
         // like "without asking questions" is fine — only the backticked
         // tool name or an explicit tool mention advertises the schema.)
-        assert!(
-            plan.contains("prefer asking over assuming"),
-            "plan prompt must default to asking instead of assuming, got: {plan}"
-        );
-        assert!(
-            plan.contains("you may ask several in one turn"),
-            "plan prompt must advertise batched clarification, got: {plan}"
-        );
-        assert!(
-            plan.contains("looked up first, not asked"),
-            "plan prompt must defer repo/rules/test facts to lookup, got: {plan}"
-        );
+        for banned in [
+            "`question`",
+            "prefer asking over assuming",
+            "several in one turn",
+            "looked up first, not asked",
+        ] {
+            assert!(
+                !plan.contains(banned),
+                "plan prompt must not advertise the question tool ({banned}), got: {plan}"
+            );
+        }
 
         // Plan-template semantics are gone.
         assert!(

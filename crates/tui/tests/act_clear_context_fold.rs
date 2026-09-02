@@ -10,7 +10,9 @@ use std::time::Duration;
 
 use opencoder_core::{resolve_agent, Config, ContentBlock, Message, Role};
 use opencoder_llm::{LlmEvent, MockChatClient};
-use opencoder_session::{is_clear_context_handoff, is_clear_context_seed, resume, SessionEvent, SessionState};
+use opencoder_session::{
+    is_clear_context_handoff, is_clear_context_seed, resume, SessionEvent, SessionState,
+};
 use opencoder_store::{LibsqlStore, SessionMeta, Store};
 use opencoder_tui::worker::{process_cmd, UiCmd, UiEvent};
 use tokio::sync::mpsc;
@@ -130,13 +132,22 @@ async fn clear_context_folds_transcript_and_feeds_seed_to_model() {
     ];
 
     let (tx, mut rx) = mpsc::channel::<UiEvent>(64);
-    let quit = process_cmd(UiCmd::Prompt("/clear_context".into(), vec![]), &mut sess, &tx).await;
+    let quit = process_cmd(
+        UiCmd::Prompt("/clear_context".into(), vec![]),
+        &mut sess,
+        &tx,
+    )
+    .await;
     assert!(!quit, "the fold must not signal quit");
     let events = drain(&mut rx).await;
 
     // (1) TranscriptReset carries exactly one synthetic seed message.
     let reset = reset_transcript(&events);
-    assert_eq!(reset.len(), 1, "reset transcript must hold one seed message");
+    assert_eq!(
+        reset.len(),
+        1,
+        "reset transcript must hold one seed message"
+    );
     let seed = &reset[0];
     assert!(seed.synthetic, "the seed must be a synthetic message");
     let seed_body = seed.text();
@@ -206,11 +217,14 @@ async fn clear_context_folds_transcript_and_feeds_seed_to_model() {
         resumed.messages.len(),
         2,
         "resume rebuilds seed + post-boundary reply only, got {:?}",
-        resumed.messages.iter().map(|m| m.text()).collect::<Vec<_>>()
+        resumed
+            .messages
+            .iter()
+            .map(|m| m.text())
+            .collect::<Vec<_>>()
     );
     assert!(
-        resumed.messages[0].synthetic
-            && resumed.messages[0].text().contains("continuity context"),
+        resumed.messages[0].synthetic && resumed.messages[0].text().contains("continuity context"),
         "resume reconstructs the synthetic seed marker"
     );
     assert!(
@@ -239,11 +253,19 @@ async fn clear_context_without_assistant_text_stops_without_llm_turn() {
     let mock = Arc::new(MockChatClient::new());
     let mut sess = act_session("clear-blank", mock.clone(), store.clone());
     let unanswered = Message::user("u1", "a request that was never answered");
-    store.append_message("clear-blank", &unanswered).await.unwrap();
+    store
+        .append_message("clear-blank", &unanswered)
+        .await
+        .unwrap();
     sess.messages = vec![unanswered];
 
     let (tx, mut rx) = mpsc::channel::<UiEvent>(64);
-    let quit = process_cmd(UiCmd::Prompt("/clear_context".into(), vec![]), &mut sess, &tx).await;
+    let quit = process_cmd(
+        UiCmd::Prompt("/clear_context".into(), vec![]),
+        &mut sess,
+        &tx,
+    )
+    .await;
     assert!(!quit);
     let events = drain(&mut rx).await;
 
@@ -320,8 +342,7 @@ async fn compound_clear_context_runs_trailing_text_as_prompt() {
         "the trailing text must be recorded as a real user prompt, got {user_bodies:?}"
     );
     assert!(
-        sess
-            .messages
+        sess.messages
             .iter()
             .any(|m| m.synthetic && m.text().contains("the plan is ready to execute")),
         "the preserved say still travels as the seed"
@@ -406,7 +427,12 @@ async fn plan_clear_context_hands_off_and_executes_under_act() {
     sess.messages = vec![say];
 
     let (tx, mut rx) = mpsc::channel::<UiEvent>(64);
-    let quit = process_cmd(UiCmd::Prompt("/clear_context".into(), vec![]), &mut sess, &tx).await;
+    let quit = process_cmd(
+        UiCmd::Prompt("/clear_context".into(), vec![]),
+        &mut sess,
+        &tx,
+    )
+    .await;
     assert!(!quit, "the fold must not signal quit");
     let events = drain(&mut rx).await;
 
@@ -416,7 +442,9 @@ async fn plan_clear_context_hands_off_and_executes_under_act() {
         .expect("TranscriptReset must be emitted");
     let switch_idx = events
         .iter()
-        .position(|e| matches!(e, UiEvent::Session(SessionEvent::AgentSwitch(name)) if name == "act"))
+        .position(
+            |e| matches!(e, UiEvent::Session(SessionEvent::AgentSwitch(name)) if name == "act"),
+        )
         .expect("AgentSwitch(act) must be emitted");
     assert!(reset_idx < switch_idx, "reset precedes switch: {events:?}");
     let reset = reset_transcript(&events);
@@ -439,5 +467,8 @@ async fn plan_clear_context_hands_off_and_executes_under_act() {
         Some("act"),
         "the converged agent persists to the store"
     );
-    assert_eq!(meta.handoff_plan.as_deref(), Some("the plan answer to keep"));
+    assert_eq!(
+        meta.handoff_plan.as_deref(),
+        Some("the plan answer to keep")
+    );
 }

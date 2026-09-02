@@ -52,8 +52,8 @@ fn pin_autopilot_off(workdir: &std::path::Path) {
 async fn hung_heartbeat_times_out_within_injected_budget() {
     let (base, st) = support::spawn_stub().await;
     st.hang_heartbeats_for(Duration::from_secs(2));
-    let uplink = Uplink::with_heartbeat_timeout(&base, support::TOKEN, Duration::from_millis(100))
-        .unwrap();
+    let uplink =
+        Uplink::with_heartbeat_timeout(&base, support::TOKEN, Duration::from_millis(100)).unwrap();
 
     let t0 = Instant::now();
     let out = uplink.heartbeat(support::STUB_NODE_ID).await;

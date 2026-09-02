@@ -6,16 +6,9 @@ description: Periodic memory-consolidation pass over repository local memory (ag
 # repo-local-dreaming —— 记忆整理（做梦）契约
 
 ## 角色
-周期性「做梦」整理仓库本地记忆：根据**现状**（代码基线）与**时间线**（changelog/git log）回顾全部记忆文档，整合冗余、修剪过期、保留当下状态快照。与 `repo-local-memory` 的分工：`repo-local-memory` 是**每次迭代的 repair-on-touch 最小更新**；本 skill 是**低频全量整理/固化**，二者不互替。**绝不改动 changelog**（`features/changelog/*` 是唯一时间线，永不合并、重写或删除既有条目；做梦产物是否记新 changelog 条目由用户决定，本 skill 不自动写）。
+周期性「做梦」整理仓库本地记忆：根据**现状**（代码基线）与**时间线**（changelog/git log）回顾全部记忆文档，整合冗余、修剪过期、保留当下状态快照。与迭代内记忆维护的分工：迭代内维护是**每次迭代的 repair-on-touch 最小更新**；本 skill 是**低频全量整理/固化**，二者不互替。**绝不改动 changelog**（`features/changelog/*` 是唯一时间线，永不合并、重写或删除既有条目；做梦产物是否记新 changelog 条目由用户决定，本 skill 不自动写）。
 
 > **只读代码、只写记忆**：不修改业务代码、不跑构建（验证记忆主张时可只读检查代码）。
-
-## 何时使用
-- 用户说「做梦 / 整理记忆 / consolidate memory / dream」。
-- 多轮迭代后记忆文档出现重复描述同一事实、或互相矛盾。
-- 文档与代码漂移（主张已不被代码支撑）。
-- 结构性超限（单文件 >400 行、目录 >10 子文件）需要拆分。
-- 里程碑后固化一次快照。
 
 ## 输入
 - 当前代码基线：`git rev-parse HEAD`。
@@ -26,8 +19,7 @@ description: Periodic memory-consolidation pass over repository local memory (ag
 
 ### 1. 盘点与漂移检测
 - 枚举全部记忆文件 + 行数 + 每目录文件数。
-- 对每份稳定文档抽样主张与代码对照（证据优先级同 `repo-local-memory`：代码/接口 > 测试 > 既有文档）。
-- 标记 `redundant / stale / drifted / split-needed`。
+- 对每份稳定文档抽样主张与代码对照（证据优先级同迭代内记忆维护：代码/接口 > 测试 > 既有文档）。
 
 ### 2. 整合
 - 同一事实多处重复 → 保留最强锚点（最贴近对应代码的那份），其余改为相对链接。
@@ -68,7 +60,7 @@ description: Periodic memory-consolidation pass over repository local memory (ag
 - **changelog 是唯一时间线**。
 - **整合是去冗余不是压信息**：删重复不删事实。
 - **结构上限是硬性的**：宁拆勿超。
-- **语言策略沿用 `repo-local-memory`**：简体中文正文，路径/符号/sha 原样。
+- **语言策略沿用迭代内记忆维护**：简体中文正文，路径/符号/sha 原样。
 
 ## 与其它 skill 的衔接
-`repo-local-memory`（迭代内最小更新）→ 本 skill（周期全量整理）→ `summary`（任务级回顾）；整理产物需要提交时走 `submit`。
+迭代内最小更新 → 本 skill（周期全量整理）→ 任务级回顾；整理产物需要提交时走提交流程。

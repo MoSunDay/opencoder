@@ -145,11 +145,7 @@ async fn clear_switches_to_act_and_unblocks_next_write() {
             .any(|e| matches!(e, SessionEvent::AgentSwitch(name) if name == "act")));
     }
     // Persistence agrees: resume cannot resurrect plan mode.
-    let meta = store
-        .get_session("plan-clear-bash")
-        .await
-        .unwrap()
-        .unwrap();
+    let meta = store.get_session("plan-clear-bash").await.unwrap().unwrap();
     assert_eq!(meta.agent.as_deref(), Some("act"), "clear persists act");
 
     // Sentinel the mutating leg will target. Std-fs creates it; bash must
@@ -190,10 +186,6 @@ async fn clear_switches_to_act_and_unblocks_next_write() {
     );
 
     // The handoff switch remains persisted.
-    let meta = store
-        .get_session("plan-clear-bash")
-        .await
-        .unwrap()
-        .unwrap();
+    let meta = store.get_session("plan-clear-bash").await.unwrap().unwrap();
     assert_eq!(meta.agent.as_deref(), Some("act"));
 }

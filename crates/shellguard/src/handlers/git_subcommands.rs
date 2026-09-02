@@ -5,7 +5,7 @@
 //! The safe sets live here as named constants rather than inline match arms so
 //! each classifier documents its own guard data in one place.
 
-use super::{Classification, has_flag};
+use super::{has_flag, Classification};
 use crate::verdict::AllowReason;
 
 /// `git branch` flags that create, delete, rename or re-point a branch.

@@ -289,10 +289,7 @@ pub fn render_task_picker(f: &mut Frame, area: Rect, picker: &TaskPicker) {
         } else {
             Style::default()
         };
-        let preview = Span::styled(
-            task_row::preview_line(&s.preview, PREVIEW_W),
-            preview_style,
-        );
+        let preview = Span::styled(task_row::preview_line(&s.preview, PREVIEW_W), preview_style);
         items.push(ListItem::new(Text::from(vec![
             Line::from(headline),
             Line::from(preview),

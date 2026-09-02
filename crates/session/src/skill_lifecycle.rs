@@ -304,19 +304,13 @@ mod tests {
         ) -> anyhow::Result<Vec<i64>> {
             self.inner.append_messages(sid, msgs).await
         }
-        async fn load_messages(
-            &self,
-            sid: &str,
-        ) -> anyhow::Result<Vec<opencoder_core::Message>> {
+        async fn load_messages(&self, sid: &str) -> anyhow::Result<Vec<opencoder_core::Message>> {
             self.inner.load_messages(sid).await
         }
         async fn last_message_seq(&self, sid: &str) -> anyhow::Result<i64> {
             self.inner.last_message_seq(sid).await
         }
-        async fn admit_input(
-            &self,
-            input: &opencoder_store::SessionInput,
-        ) -> anyhow::Result<i64> {
+        async fn admit_input(&self, input: &opencoder_store::SessionInput) -> anyhow::Result<i64> {
             self.inner.admit_input(input).await
         }
         async fn pending_inputs(
@@ -446,7 +440,8 @@ mod tests {
         );
         assert!(s.skill_prompt_cloned().is_none(), "memory cleared");
         assert!(
-            probe.inner
+            probe
+                .inner
                 .get_session("sess-skill-lifecycle")
                 .await
                 .unwrap()
@@ -548,11 +543,10 @@ mod tests {
             let store = mem_store_with_row().await;
             let working_dir = std::env::temp_dir().join("opencoder-skill-lifecycle-tests");
             let mock = match aborted_by {
-                "cancel" => MockChatClient::new().push_hang(std::sync::Arc::new(
-                    tokio::sync::Notify::new(),
-                )),
-                _ => MockChatClient::new()
-                    .push_script(vec![LlmEvent::Error("boom".into())]),
+                "cancel" => {
+                    MockChatClient::new().push_hang(std::sync::Arc::new(tokio::sync::Notify::new()))
+                }
+                _ => MockChatClient::new().push_script(vec![LlmEvent::Error("boom".into())]),
             };
             let mut s = SessionState::new(
                 "sess-skill-lifecycle",

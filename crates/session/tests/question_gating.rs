@@ -5,7 +5,7 @@
 //! - act WITHOUT a task-plan skill: `question` absent.
 //! - act WITH a task-plan body naming the skill in its first 500 chars: present.
 //! - act WITH a review body: still absent (question is task-plan-only).
-//! - plan: present regardless (base-prompt clarification protocol).
+//! - plan: present regardless (plan-kind parity exemption).
 
 use std::sync::Arc;
 

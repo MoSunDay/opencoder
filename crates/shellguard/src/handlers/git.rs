@@ -5,7 +5,7 @@
 //! Ported from rippy (MIT) https://github.com/mpecan/rippy
 
 use super::git_guard::{check_config_overrides, check_repo_path_flags};
-use super::{Classification, Handler, HandlerContext, git_subcommands, has_flag, positional_args};
+use super::{git_subcommands, has_flag, positional_args, Classification, Handler, HandlerContext};
 use crate::verdict::AllowReason;
 
 pub(crate) static GIT_HANDLER: GitHandler = GitHandler;
@@ -151,7 +151,6 @@ impl Handler for GitHandler {
             _ => Classification::Ask(desc),
         }
     }
-
 }
 
 /// Dispatch a `SAFE_SUBCOMMANDS` member to its flag-aware classifier, falling

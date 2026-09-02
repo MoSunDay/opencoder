@@ -1,6 +1,9 @@
 //! Ported from rippy (MIT) https://github.com/mpecan/rippy
 
-use super::{Classification, Handler, HandlerContext, first_positional, get_flag_value, has_flag, has_flag_or_prefixed, is_sole_help_flag};
+use super::{
+    first_positional, get_flag_value, has_flag, has_flag_or_prefixed, is_sole_help_flag,
+    Classification, Handler, HandlerContext,
+};
 use crate::node_safety::is_node_source_safe;
 use crate::verdict::AllowReason;
 
@@ -95,7 +98,6 @@ impl Handler for NodeHandler {
         }
         Classification::Ask(format!("{} script execution", ctx.command_name))
     }
-
 }
 
 fn classify_inline(cmd: &str, source: &str) -> Classification {
@@ -200,7 +202,11 @@ mod tests {
     #[test]
     fn script_file_dangerous_asks() {
         let dir = temp_dir("fs");
-        write_file(&dir, "evil.js", "require('child_process').execSync('rm -rf /')");
+        write_file(
+            &dir,
+            "evil.js",
+            "require('child_process').execSync('rm -rf /')",
+        );
         let args = vec!["evil.js".into()];
         let ctx = HandlerContext {
             working_directory: &dir,

@@ -4,7 +4,7 @@
 //! Ported from rippy (MIT) https://github.com/mpecan/rippy
 
 use super::{
-    Classification, Handler, HandlerContext, has_flag, has_flag_or_prefixed, has_glued_short_flag,
+    has_flag, has_flag_or_prefixed, has_glued_short_flag, Classification, Handler, HandlerContext,
 };
 use crate::verdict::AllowReason;
 pub(crate) static SED_HANDLER: SedHandler = SedHandler;
@@ -28,7 +28,6 @@ impl Handler for SedHandler {
 
         Classification::Allow(AllowReason::handler("sed (filter)"))
     }
-
 }
 
 /// In-place edit detection: the bare short flag (`-i`), a glued backup suffix
@@ -158,7 +157,10 @@ mod tests {
     fn asks(args: &[&str]) {
         let args: Vec<String> = args.iter().map(|s| (*s).to_owned()).collect();
         assert!(
-            matches!(SED_HANDLER.classify(&non_release_ctx(&args)), Classification::Ask(_)),
+            matches!(
+                SED_HANDLER.classify(&non_release_ctx(&args)),
+                Classification::Ask(_)
+            ),
             "expected Ask for {args:?}"
         );
     }
@@ -166,7 +168,10 @@ mod tests {
     fn allows(args: &[&str]) {
         let args: Vec<String> = args.iter().map(|s| (*s).to_owned()).collect();
         assert!(
-            matches!(SED_HANDLER.classify(&non_release_ctx(&args)), Classification::Allow(_)),
+            matches!(
+                SED_HANDLER.classify(&non_release_ctx(&args)),
+                Classification::Allow(_)
+            ),
             "expected Allow for {args:?}"
         );
     }
@@ -187,7 +192,7 @@ mod tests {
         allows(&["s/a/b/", "f"]); // no -i
         allows(&["-n", "1p", "f"]);
         allows(&["-e", "s/a/b/", "f"]); // --expression style still screened
-        // Tokens that merely begin with a dash but are not `-i` stay allowed.
+                                        // Tokens that merely begin with a dash but are not `-i` stay allowed.
         allows(&["--quiet", "s/a/b/", "f"]);
     }
 

@@ -18,7 +18,10 @@ fn assistant_with_text(id: &str, text: &str) -> Message {
     m
 }
 
-async fn running_session(id: &str, agent: &str) -> (SessionState, Arc<MockChatClient>, Arc<dyn Store>) {
+async fn running_session(
+    id: &str,
+    agent: &str,
+) -> (SessionState, Arc<MockChatClient>, Arc<dyn Store>) {
     let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
     store
         .create_session(&SessionMeta {
@@ -82,11 +85,7 @@ async fn plan_switch_persists_and_survives_resume() {
         UiEvent::Session(SessionEvent::AgentSwitch(ref n)) if n == "plan"
     )));
     assert_eq!(sess.agent.name, "plan");
-    assert_eq!(
-        mock.call_count(),
-        0,
-        "a pure switch consumes no LLM turn"
-    );
+    assert_eq!(mock.call_count(), 0, "a pure switch consumes no LLM turn");
 
     let meta = store.get_session("switch-plan").await.unwrap().unwrap();
     assert_eq!(

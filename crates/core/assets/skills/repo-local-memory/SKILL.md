@@ -15,7 +15,7 @@ Local memory is for:
 
 Local memory is not:
 - git history
-- a PR summary
+- a PR recap
 - a commit log
 - a task diary
 

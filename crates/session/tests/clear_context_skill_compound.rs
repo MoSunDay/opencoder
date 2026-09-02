@@ -23,9 +23,9 @@
 
 use std::sync::Arc;
 
-use opencoder_core::{Config, Role, resolve_agent};
+use opencoder_core::{resolve_agent, Config, Role};
 use opencoder_llm::{ChatRequest, ChatStream, LlmEvent, MockChatClient, Usage};
-use opencoder_session::{SessionState, run};
+use opencoder_session::{run, SessionState};
 use opencoder_store::{Delivery, LibsqlStore, SessionInput, SessionMeta, SessionPatch, Store};
 
 async fn mem_store() -> Arc<dyn Store> {

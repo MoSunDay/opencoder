@@ -1,6 +1,6 @@
 //! Ported from rippy (MIT) https://github.com/mpecan/rippy
 
-use super::{Classification, Handler, HandlerContext, get_flag_value, is_sole_help_flag};
+use super::{get_flag_value, is_sole_help_flag, Classification, Handler, HandlerContext};
 use crate::verdict::AllowReason;
 
 pub(crate) static GH_HANDLER: GhHandler = GhHandler;
@@ -54,7 +54,6 @@ impl Handler for GhHandler {
             _ => Classification::Ask(format!("gh {sub}")),
         }
     }
-
 }
 
 const FIELD_FLAGS: &[&str] = &["-f", "-F", "--raw-field", "--field"];

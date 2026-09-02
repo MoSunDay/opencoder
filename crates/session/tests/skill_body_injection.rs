@@ -277,7 +277,9 @@ async fn excluded_agents_and_skill_less_sessions_get_no_body() {
         run(&mut s, "scoped".into(), |_| {}).await.unwrap();
 
         assert!(
-            !s.messages.iter().any(|m| m.text().contains("[skill loaded]")),
+            !s.messages
+                .iter()
+                .any(|m| m.text().contains("[skill loaded]")),
             "{agent}: no transcript injection"
         );
         assert!(
@@ -321,7 +323,9 @@ async fn empty_body_skill_ships_no_body_but_keeps_tail_pointer() {
         "fallback pointer names the source path: {last}"
     );
     assert!(
-        !s.messages.iter().any(|m| m.text().contains("[skill loaded]")),
+        !s.messages
+            .iter()
+            .any(|m| m.text().contains("[skill loaded]")),
         "nothing persisted"
     );
 }

@@ -1,6 +1,8 @@
 //! Ported from rippy (MIT) https://github.com/mpecan/rippy
 
-use super::{Classification, Handler, HandlerContext, get_flag_value, is_sole_help_flag, positional_args};
+use super::{
+    get_flag_value, is_sole_help_flag, positional_args, Classification, Handler, HandlerContext,
+};
 use crate::verdict::AllowReason;
 
 /// Verbs across gcloud/az resource trees that mutate state, checked against
@@ -84,7 +86,6 @@ impl Handler for KubectlHandler {
             Classification::Ask(desc)
         }
     }
-
 }
 
 const KUBECTL_CONFIG_SAFE: &[&str] = &[
@@ -244,7 +245,6 @@ impl Handler for AwsHandler {
 
         Classification::Ask(format!("aws {service} {action}"))
     }
-
 }
 
 // gcloud
@@ -313,7 +313,6 @@ impl Handler for GcloudHandler {
             Classification::Ask(format!("gcloud {}", ctx.args.join(" ")))
         }
     }
-
 }
 
 // az
@@ -362,7 +361,6 @@ impl Handler for AzHandler {
             Classification::Ask(format!("az {}", ctx.args.join(" ")))
         }
     }
-
 }
 
 #[cfg(test)]

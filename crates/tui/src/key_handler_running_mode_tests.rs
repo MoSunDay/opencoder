@@ -36,7 +36,8 @@ fn press_running_command(
         &mut undo_state,
         &mut queue_scroll,
         &mut file_menu,
-        Path::new("."));
+        Path::new("."),
+    );
     (action, input, cursor)
 }
 
@@ -76,7 +77,8 @@ fn press_ctrl_t(agent: &str, running: bool, input_disabled: bool) -> (KeyAction,
         &mut undo_state,
         &mut queue_scroll,
         &mut file_menu,
-        Path::new("."));
+        Path::new("."),
+    );
     (action, input)
 }
 
@@ -102,12 +104,7 @@ fn ctrl_t_reaches_app_gate_while_running_or_subagent_focused() {
 /// runner applies it at the next turn boundary (delayed application).
 #[test]
 fn running_enter_mode_command_becomes_steer() {
-    for command in [
-        "/plan",
-        "/act",
-        "/plan review this",
-        "/clear_context now",
-    ] {
+    for command in ["/plan", "/act", "/plan review this", "/clear_context now"] {
         let (action, input, _) = press_running_mode_command(command, KeyCode::Enter);
         assert!(matches!(action, KeyAction::Steer(text) if text == command));
         assert!(input.is_empty(), "steer clears the input line");
@@ -195,7 +192,8 @@ fn backtab_in_plan_mode_arms_clear_context_confirm() {
             &mut undo_state,
             &mut queue_scroll,
             &mut file_menu,
-            Path::new("."));
+            Path::new("."),
+        );
         (action, input)
     }
 
@@ -268,7 +266,8 @@ fn backtab_arm_then_esc_restores_the_raw_draft() {
             &mut undo_state,
             &mut queue_scroll,
             &mut file_menu,
-            Path::new("."));
+            Path::new("."),
+        );
         let (rest, draft) = match action {
             KeyAction::ArmClearConfirm { rest, draft } => (rest, draft),
             other => panic!("expected ArmClearConfirm, got {other:?}"),
@@ -332,7 +331,8 @@ fn backtab_in_act_mode_switches_to_plan() {
             &mut undo_state,
             &mut queue_scroll,
             &mut file_menu,
-            Path::new("."));
+            Path::new("."),
+        );
         (action, input)
     }
 

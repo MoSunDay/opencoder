@@ -73,4 +73,3 @@ async fn delivery_parse_and_as_str_roundtrip() {
     assert_eq!(Delivery::parse("   "), None);
     assert_eq!(Delivery::parse(" stear "), None, "a typo must stay invalid");
 }
-

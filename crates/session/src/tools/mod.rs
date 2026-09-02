@@ -152,7 +152,10 @@ mod tests {
     #[test]
     fn act_task_plan_task_schema_omits_build() {
         let tools = task_only();
-        let schemas = schema_for(&tools, hide_build_subagent(AgentKind::Act, plan_skill_body()));
+        let schemas = schema_for(
+            &tools,
+            hide_build_subagent(AgentKind::Act, plan_skill_body()),
+        );
         let func = &task_schema(&schemas)["function"];
 
         let desc = func["description"].as_str().unwrap();
@@ -268,7 +271,7 @@ mod tests {
         let tools = registry();
         for kind in [AgentKind::Act, AgentKind::Plan] {
             let hide_build = kind == AgentKind::Plan;
-    let schemas = schema_for(&tools, hide_build);
+            let schemas = schema_for(&tools, hide_build);
             let names: Vec<&str> = schemas
                 .iter()
                 .map(|v| v["function"]["name"].as_str().unwrap())
@@ -283,8 +286,8 @@ mod tests {
     }
 
     /// The `question` tool is latent and gated by the task-plan skill:
-    /// the plan agent always sees it (its clarification protocol is part of
-    /// the base prompt), an act agent sees it only once a skill body whose
+    /// the plan agent always sees it (plan-kind parity exemption), an act
+    /// agent sees it only once a skill body whose
     /// first 500 chars name the skill unlocks it, and non-primary agents never
     /// do. The schema itself stays cheap (<200 tokens).
     #[test]

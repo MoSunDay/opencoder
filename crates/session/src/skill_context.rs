@@ -156,20 +156,8 @@ fn body_and_pointer(session: &SessionState) -> (Option<Message>, Option<String>)
     let body = prompt
         .strip_prefix("> Source: ")
         .and_then(|rest| rest.split_once("\n\n"))
-        .map(|(_, body)| body);
-    // A `> Source: <path>` prompt with NO blank line has no separable body:
-    // shipping the raw prompt would echo the annotation line back as
-    // instructions, so degrade to the pointer path — same degenerate
-    // treatment as the empty parsed body below. A body that merely does not
-    // START with the prefix (legacy text naming a path mid-body) keeps
-    // shipping verbatim.
-    let body = match body {
-        Some(body) => body,
-        None if prompt.starts_with("> Source: ") => {
-            return (None, Some(paths[0].to_string()));
-        }
-        None => prompt,
-    };
+        .map(|(_, body)| body)
+        .unwrap_or(prompt);
     // A skill whose parsed body is empty (frontmatter-only file) carries
     // nothing beyond its source path: no message to append, and the tail
     // reminder keeps the fallback pointer.
@@ -433,30 +421,6 @@ mod tests {
             transient_body_message(&s).is_none(),
             "empty parsed body ships nothing"
         );
-    }
-
-    /// `> Source: <path>` WITHOUT a blank line carries no separable body:
-    /// the raw prompt (annotation line included) must not ship as the body —
-    /// the fallback is the pointer path, like the empty-body case.
-    #[test]
-    fn body_message_none_when_source_line_has_no_body() {
-        let s = act_session();
-        s.set_skill(Some("> Source: /skills/x/SKILL.md".into()));
-        let (body, pointer) = body_and_pointer(&s);
-        assert!(
-            body.is_none(),
-            "annotation-only prompt must not ship as body"
-        );
-        assert_eq!(
-            pointer.as_deref(),
-            Some("/skills/x/SKILL.md"),
-            "pointer path is the only remaining context"
-        );
-        assert!(transient_body_message(&s).is_none());
-        // The tail reminder surfaces the pointer instead.
-        let reminder = tail_reminder(&s).expect("pointer must keep the reminder alive");
-        assert!(reminder.text().contains("[active skill]"), "{reminder:?}");
-        assert!(reminder.text().contains("/skills/x/SKILL.md"));
     }
 
     // ------------------------------------------------------------------

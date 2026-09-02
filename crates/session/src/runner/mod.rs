@@ -217,12 +217,6 @@ pub(crate) async fn run_loop(
     // streak so their distinct PIDs are preserved.
     let mut bash_timeout_first: Option<(String, Value)> = None;
     let mut skip_llm = false;
-    // Set when a compaction attempt comes back with nothing foldable
-    // (Ok(None)): re-arming the trigger every round would only burn attempts
-    // and spam warnings, so THIS run stops firing should_compact. A fresh run
-    // re-arms. The hard-limit gate is unaffected: it still runs — and can
-    // still fail the run — whenever an attempt does happen.
-    let mut compaction_unproductive = false;
     // Consecutive drain-mode ConsumeNext steps without an intervening LLM
     // turn or steer absorption. A persistent claim failure mixed with
     // successful pending reads would otherwise hot-spin the loop; capping
@@ -315,9 +309,7 @@ pub(crate) async fn run_loop(
             }
         }
 
-        // An earlier Ok(None) proved nothing is foldable yet: skip the
-        // trigger for the rest of this run instead of retrying every round.
-        if compaction::should_compact(session) && !compaction_unproductive {
+        if compaction::should_compact(session) {
             // Retry compaction a few times (transient LLM failures like rate
             // limits are common) before giving up. On final failure return Err
             // so the caller decides what to do — falling through to
@@ -352,9 +344,6 @@ pub(crate) async fn run_loop(
                             tracing::warn!(
                                 "compaction found nothing to summarize; transcript fits under the hard context limit, proceeding uncompacted"
                             );
-                            // Nothing was foldable, so stop re-attempting on
-                            // every round of THIS run (a fresh run re-arms).
-                            compaction_unproductive = true;
                             break;
                         }
                         last_err = Some(anyhow!(

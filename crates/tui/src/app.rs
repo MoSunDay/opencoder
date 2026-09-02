@@ -582,18 +582,20 @@ pub(super) async fn run_app(
                                 if question.is_empty() {
                                     crate::sidecar_ui::enter_panel(&mut chat, &sidecar_ask);
                                     follow = true;
-                                    mode_flash = Some((
-                                        crate::sidecar_ui::SIDECAR_ENTER_FLASH.to_string(),
-                                        anim_tick,
-                                    ));
                                 } else if !chat.sidecar_focus {
                                     // Entering WITH a question: same fresh-panel
                                     // contract, then fire the ask immediately.
                                     crate::sidecar_ui::enter_panel(&mut chat, &sidecar_ask);
                                     match sidecar_ask
-                                        .try_send(crate::sidecar_ui::SidecarCmd::Ask(question))
+                                        .try_send(crate::sidecar_ui::SidecarCmd::Ask(question.clone()))
                                     {
-                                        Ok(()) => follow = true,
+                                        Ok(()) => {
+                                            // Instant echo: the actor needs a beat to
+                                            // build its conv before SidecarStart; the
+                                            // Busy path must NOT echo.
+                                            crate::sidecar_ui::echo_question(&mut chat, &question);
+                                            follow = true;
+                                        }
                                         Err(_) => {
                                             mode_flash = Some((
                                                 crate::sidecar_ui::SIDECAR_BUSY_FLASH.to_string(),
@@ -608,9 +610,10 @@ pub(super) async fn run_app(
                                     // never blocks the UI loop, never touches
                                     // steer/queue.
                                     match sidecar_ask
-                                        .try_send(crate::sidecar_ui::SidecarCmd::Ask(question))
+                                        .try_send(crate::sidecar_ui::SidecarCmd::Ask(question.clone()))
                                     {
                                         Ok(()) => {
+                                            crate::sidecar_ui::echo_question(&mut chat, &question);
                                             chat.sidecar_focus = true;
                                             follow = true;
                                         }

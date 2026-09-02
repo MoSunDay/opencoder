@@ -173,7 +173,8 @@ async fn expired_guard_queues_compound_when_running() {
         chat.blocks
     );
     assert!(
-        !chat.blocks
+        !chat
+            .blocks
             .iter()
             .any(|b| matches!(b, ChatBlock::Marker(lines)
                 if lines.iter().any(|l| l.to_string().contains("[interrupted]")))),
@@ -251,7 +252,10 @@ async fn manual_confirm_while_running_interrupts_and_fires_now() {
     )
     .await;
 
-    assert!(clear_confirm.is_none(), "the manual confirm consumes the arm");
+    assert!(
+        clear_confirm.is_none(),
+        "the manual confirm consumes the arm"
+    );
     assert!(
         cancelled,
         "the running turn is hard-cancelled (double-Esc semantics)"

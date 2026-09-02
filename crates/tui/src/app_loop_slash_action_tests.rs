@@ -421,14 +421,11 @@ async fn slash_action_sidecar_idle_opens_fresh_panel() {
     assert!(matches!(flow, LoopFlow::Proceed));
     assert!(!running, "opening the panel must not start a turn");
     assert!(chat.sidecar_focus, "panel is focused");
-    assert_eq!(
-        chat.blocks
-            .iter()
-            .filter(|b| matches!(b, ChatBlock::Sidecar { .. }))
-            .count(),
-        1,
-        "exactly the fresh placeholder block"
-    );
+    let p = chat
+        .sidecar
+        .as_ref()
+        .expect("fresh panel is stored on the view");
+    assert!(p.id.is_empty(), "placeholder panel has an empty id");
     assert!(
         matches!(
             sidecar_rx.try_recv(),
@@ -438,8 +435,8 @@ async fn slash_action_sidecar_idle_opens_fresh_panel() {
     );
     assert!(cmd_rx.try_recv().is_err(), "no UiCmd is sent");
     assert!(
-        matches!(&mode_flash, Some((msg, _)) if msg == crate::sidecar_ui::SIDECAR_ENTER_FLASH),
-        "composer carries the enter flash, got {mode_flash:?}"
+        mode_flash.is_none(),
+        "panel entry needs no help flash — the empty panel title carries the nav, got {mode_flash:?}"
     );
     assert!(follow, "body follows the panel");
 }

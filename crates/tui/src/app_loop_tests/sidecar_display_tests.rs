@@ -5,7 +5,7 @@
 
 use super::*;
 
-use crate::chat::{block_text, ChatBlock};
+use crate::chat::{block_text, SidecarPanel};
 
 fn line_text(line: &Line<'_>) -> String {
     line.spans.iter().map(|s| s.content.as_ref()).collect()
@@ -66,10 +66,7 @@ fn focused_sidecar_swaps_body_mode_and_title() {
     );
     assert_eq!(
         ds.display_ctx,
-        match &chat.blocks[0] {
-            ChatBlock::Sidecar { total_tokens, .. } => *total_tokens,
-            other => panic!("expected Sidecar block, got {other:?}"),
-        },
+        chat.sidecar.as_ref().expect("panel").total_tokens,
         "ctx meter reads the sidecar conversation's accumulated tokens"
     );
 }
@@ -93,33 +90,27 @@ fn unfocused_sidecar_restores_the_parent_body() {
     );
 }
 
-/// Freshly entered panel (empty placeholder): the body swaps in empty, the
-/// title carries the enter hint instead of a question echo.
+/// Freshly entered panel (empty placeholder): the body swaps in empty and the
+/// title keeps only the nav element — no help hint, the question echoes in the
+/// body the moment it is submitted.
 #[test]
-fn empty_placeholder_panel_shows_the_enter_hint() {
+fn empty_placeholder_panel_title_is_nav_only() {
     let mut chat = ChatView {
         agent: "act".to_string(),
         ..ChatView::default()
     };
-    chat.blocks.push(ChatBlock::Sidecar {
-        id: String::new(),
-        question: String::new(),
-        view: ChatView::default(),
-        done: false,
-        ok: false,
-        answer: None,
-        total_tokens: 0,
-        rounds: 0,
-        started_at_ms: 0,
-        elapsed_ms: 0,
-    });
+    chat.sidecar = Some(SidecarPanel::default());
     chat.sidecar_focus = true;
     let ds = display_of(&chat);
     assert_eq!(ds.display_mode, "sidecar");
     let title = line_text(&ds.display_title);
     assert!(
-        title.contains(crate::sidecar_ui::SIDECAR_EMPTY_HINT),
-        "empty panel title must carry the enter hint, got {title}"
+        title.contains("Ctrl+L") && title.contains("sidecar"),
+        "empty panel title keeps the nav element, got {title}"
+    );
+    assert!(
+        !title.contains("输入问题") && !title.contains("就绪") && !title.contains("销毁返回"),
+        "no help copy in the empty panel title, got {title}"
     );
 }
 

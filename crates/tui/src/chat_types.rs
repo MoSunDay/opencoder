@@ -86,25 +86,6 @@ pub enum ChatBlock {
         started_at_ms: i64,
         elapsed_ms: Option<u64>,
     },
-    /// Sidecar Q/A block (`/sidecar <question>`): one block per sidecar
-    /// conversation, folding every follow-up turn into the same nested
-    /// `view`. Display-only — sidecar frames are never persisted; the
-    /// conversation's cost reaches the durable layer via bare `LlmUsage`.
-    /// Mirrors `Subagent`'s nested-ChatView shape without the task/registry
-    /// semantics: header-only flattening, body visible only while focused
-    /// (see `compute_display`'s view swap).
-    Sidecar {
-        id: String,
-        question: String,
-        view: ChatView,
-        done: bool,
-        ok: bool,
-        answer: Option<String>,
-        total_tokens: u64,
-        rounds: u32,
-        started_at_ms: i64,
-        elapsed_ms: u64,
-    },
     /// Read-only context card. Rendered on replay from the persisted
     /// `handoff_plan` meta (plan text, or a clear-context seed's preserved
     /// reply). `raw` holds the original markdown source so the plan editor
@@ -114,6 +95,30 @@ pub enum ChatBlock {
         rendered: Vec<Line<'static>>,
         raw: String,
     },
+}
+
+/// The `/sidecar` Q/A panel state, held OUTSIDE `blocks` (field
+/// `ChatView::sidecar`). It is ephemeral display state, not a transcript
+/// block: it must never perturb the streaming invariants on `blocks`
+/// (reasoning/text delta tail-merging, tool-group tail merge, finalize).
+/// Display-only — sidecar frames are never persisted; the conversation's
+/// cost reaches the durable layer via bare `LlmUsage`. The panel renders
+/// ZERO lines in the flat transcript (the focused body is swapped in by
+/// `compute_display`; `chat::sidecar::purge` clears the field on exit).
+#[derive(Default, Clone, Debug, PartialEq)]
+pub struct SidecarPanel {
+    pub id: String,
+    pub question: String,
+    /// The panel's own nested transcript. `Box` breaks the type recursion
+    /// (the panel is held by value in `ChatView::sidecar`).
+    pub view: Box<ChatView>,
+    pub done: bool,
+    pub ok: bool,
+    pub answer: Option<String>,
+    pub total_tokens: u64,
+    pub rounds: u32,
+    pub started_at_ms: i64,
+    pub elapsed_ms: u64,
 }
 
 #[derive(Default, Clone, Debug, PartialEq)]
@@ -186,11 +191,15 @@ pub struct ChatView {
     /// annotation editor when no explicit annotation has been saved.
     pub first_prompt: Option<String>,
     /// Whether the sidecar interaction box is focused (body swapped for the
-    /// sidecar block's nested view, mode chip reads `sidecar`). Mutually
+    /// sidecar panel's nested view, mode chip reads `sidecar`). Mutually
     /// exclusive with a subagent focus: sidecar Enter routes to the sidecar
     /// actor, never to the parent's steer/queue paths. Display-only state —
     /// never persisted, cleared on `/task` switches.
     pub sidecar_focus: bool,
+    /// The `/sidecar` Q/A panel while it is open (never inside `blocks` —
+    /// see `SidecarPanel`). Cleared on exit (ESC / Ctrl+L) and on `/task`
+    /// switches; `None` plus `sidecar_focus == false` is the closed state.
+    pub sidecar: Option<SidecarPanel>,
 }
 
 /// Locates a `Thinking` block's header line for mouse hit-testing.

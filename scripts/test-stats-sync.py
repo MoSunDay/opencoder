@@ -311,6 +311,27 @@ def test_cross_session_same_msg_id():
     tgt.close(); src.close()
 
 
+def test_collect_changes_skips_empty_db():
+    print("test_collect_changes_skips_empty_db")
+    tmp = tempfile.mkdtemp()
+    # 0-byte opencoder.db files appear in the wild (uninitialized projects);
+    # one of them must not abort the whole sweep (2026-09-02 incident).
+    empty = os.path.join(tmp, "proj-empty")
+    os.makedirs(empty)
+    open(os.path.join(empty, "opencoder.db"), "wb").close()
+    src_path = os.path.join(tmp, "proj-good", "opencoder.db")
+    os.makedirs(os.path.dirname(src_path))
+    src = make_source_db(src_path)
+    insert_session(src, "S1", created=1000, updated=2000)
+    insert_msg(src, "M1", "S1",
+               {"input_tokens": 10, "output_tokens": 2, "total_tokens": 12},
+               created=1500)
+    src.commit(); src.close()
+    changes = m.collect_changes(tmp, 0)
+    check("skips empty db, keeps good one", len(changes) == 1, changes)
+    check("session from good db", changes[0][1]["id"] == "S1")
+
+
 def main():
     test_parse_usage()
     test_parse_model()
@@ -321,6 +342,7 @@ def main():
     test_sync_idempotent()
     test_incremental_watermark()
     test_cross_session_same_msg_id()
+    test_collect_changes_skips_empty_db()
     print(f"\n{PASS} passed, {FAIL} failed")
     return 1 if FAIL else 0
 

@@ -52,6 +52,10 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ),
     ("/ps", "查看所有后台 bash 进程（不计入模型上下文）"),
     ("/stop", "强制结束所有后台 bash 进程（不计入模型上下文）"),
+    (
+        "/sidecar",
+        "旁路快照问答：进入临时问询界面，ESC 返回即销毁不留痕（token 计入主任务）",
+    ),
     ("/ap", "选择 autopilot 模式 (off / 完全自动 / 自动 review)"),
 ];
 
@@ -84,6 +88,9 @@ pub enum SlashAction {
     /// Display-only: open the autopilot mode menu (never enters model
     /// context).
     Ap,
+    /// `/sidecar` — enter the bypass Q/A panel (never enters model context;
+    /// destroy-on-entry / destroy-on-exit).
+    Sidecar,
 }
 
 /// Outcome of a keystroke while the command popup is open. `Dispatch` carries
@@ -208,6 +215,7 @@ pub fn parse(input: &str) -> Option<SlashAction> {
         "cli" => Some(SlashAction::Cli),
         "skill" | "sk" => Some(SlashAction::Skill),
         "ps" => Some(SlashAction::Ps),
+        "sidecar" => Some(SlashAction::Sidecar),
         "stop" => Some(SlashAction::Stop),
         "ap" => Some(SlashAction::Ap),
         _ => None,
@@ -232,6 +240,7 @@ fn dispatch(name: &str) -> Option<SlashAction> {
         "/skill" => Some(SlashAction::Skill),
         "/ps" => Some(SlashAction::Ps),
         "/stop" => Some(SlashAction::Stop),
+        "/sidecar" => Some(SlashAction::Sidecar),
         "/ap" => Some(SlashAction::Ap),
         _ => None,
     }
@@ -752,6 +761,21 @@ mod tests {
     #[test]
     fn dispatch_notepad() {
         assert_eq!(dispatch("/notepad"), Some(SlashAction::Notepad));
+    }
+
+    #[test]
+    fn parse_sidecar() {
+        assert_eq!(parse("/sidecar"), Some(SlashAction::Sidecar));
+        // The free-text composer intercept (`parse_sidecar_question`) claims
+        // `/sidecar <question>` before Submit, so `parse` only ever sees the
+        // bare token — anything after it is NOT a popup command.
+        assert_eq!(parse("/sidecar extra"), None);
+    }
+
+    #[test]
+    fn dispatch_sidecar() {
+        assert_eq!(dispatch("/sidecar"), Some(SlashAction::Sidecar));
+        assert!(COMMANDS.iter().any(|(name, _)| *name == "/sidecar"));
     }
 
     #[test]

@@ -38,8 +38,9 @@ pub(crate) enum KeyAction {
     /// A `/sidecar <question>` submission (or a follow-up typed inside the
     /// focused sidecar box). Routed to the sidecar actor — never through
     /// steer/queue/prompt — so the main task keeps running untouched.
-    /// An empty question is the bare `/sidecar` form: re-focus an existing
-    /// sidecar box or flash the usage hint.
+    /// An empty question is the bare `/sidecar` form: enter a FRESH panel
+    /// (destroy-on-entry: the previous conversation is reset and the empty
+    /// panel shows its enter hint).
     SidecarAsk(String),
     /// A textual mode command was submitted while a running subagent is
     /// focused (subagents have no mode concept, so it can neither steer the
@@ -298,9 +299,11 @@ pub(crate) fn handle_key(
             // Sidecar focus: Enter is a follow-up question to the sidecar
             // conversation — the parent's steer/submit paths are unreachable
             // while the sidecar box is focused. Bare `/sidecar` (empty
-            // question) still lands here; the app arm re-focuses or flashes.
-            // The full `/sidecar <question>` form typed inside the box is
-            // normalized too: the prefix must never be echoed to the model.
+            // question) still lands here; the app arm enters a FRESH panel
+            // (destroy-on-entry — the old conversation is reset, the empty
+            // panel shows its enter hint). The full `/sidecar <question>`
+            // form typed inside the box is normalized too: the prefix must
+            // never be echoed to the model.
             if sidecar_focused {
                 input.clear();
                 *cursor_idx = 0;

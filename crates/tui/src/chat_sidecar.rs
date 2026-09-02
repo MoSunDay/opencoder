@@ -1,8 +1,9 @@
-//! Sidecar (`/sidecar <question>`) folding and flattening — extracted from
-//! `chat.rs` to keep that file within its line budget. The sidecar block
-//! mirrors the subagent block's design: content streams into a nested
-//! [`ChatView`] (body visible only while focused, via `compute_display`'s
-//! swap) and the flattened transcript carries a single header line.
+//! Sidecar (`/sidecar`) folding — extracted from `chat.rs` to keep that
+//! file within its line budget. The sidecar block mirrors the subagent
+//! block's design: content streams into a nested [`ChatView`] whose body is
+//! visible only while focused, via `compute_display`'s swap. The block
+//! contributes ZERO lines to the flat main transcript (the bypass Q/A leaves
+//! no trace there; [`purge`] removes every block on exit).
 //!
 //! Persistence contract (mirrors the session-side gate): sidecar frames are
 //! display-only. The child's `LlmUsage` arrives **bare** (never wrapped in
@@ -10,14 +11,9 @@
 //! exactly like a main-task round — this module deliberately skips `LlmUsage`
 //! inner frames to avoid double counting.
 
-use ratatui::style::{Modifier, Style};
-use ratatui::text::{Line, Span};
-
 use opencoder_session::SessionEvent;
 
-use super::types::SPINNER;
-use crate::chat::{push_duration_span, short, ChatBlock, ChatView};
-use crate::theme;
+use crate::chat::{short, ChatBlock, ChatView};
 
 /// True when the event is one of the three `Sidecar*` lifecycle frames.
 fn is_sidecar_frame(sev: &SessionEvent) -> bool {
@@ -45,21 +41,47 @@ pub(crate) fn fold_sidecar(chat: &mut ChatView, sev: &SessionEvent) -> bool {
     }
     match sev {
         SessionEvent::SidecarStart { id, question } => {
-            chat.blocks.push(ChatBlock::Sidecar {
-                id: id.clone(),
-                question: short(question, 90),
-                view: ChatView {
-                    llm_round_started_at_ms: Some(opencoder_core::message::now_ms()),
-                    ..Default::default()
-                },
-                done: false,
-                ok: false,
-                answer: None,
-                total_tokens: 0,
-                rounds: 0,
-                started_at_ms: opencoder_core::message::now_ms(),
-                elapsed_ms: 0,
-            });
+            // Only an OPEN panel accepts a Start: panel entry pushed the
+            // empty placeholder and set the focus. A Start arriving with the
+            // panel closed is a late frame from an already-destroyed
+            // conversation (exit / `/task` switch) — swallowed.
+            if !chat.sidecar_focus {
+                return true;
+            }
+            // Adopt the placeholder block (empty id) in place instead of
+            // pushing a second block: the panel block IS the placeholder
+            // until the conversation's first Start arrives.
+            let adopted = chat
+                .blocks
+                .iter_mut()
+                .any(|b| {
+                    matches!(b, ChatBlock::Sidecar { id: bid, .. } if bid.is_empty())
+                });
+            if let Some(ChatBlock::Sidecar { id: bid, question: bq, .. }) = chat
+                .blocks
+                .iter_mut()
+                .find(|b| matches!(b, ChatBlock::Sidecar { id: bid, .. } if bid.is_empty()))
+            {
+                *bid = id.clone();
+                *bq = short(question, 90);
+            }
+            if !adopted {
+                chat.blocks.push(ChatBlock::Sidecar {
+                    id: id.clone(),
+                    question: short(question, 90),
+                    view: ChatView {
+                        llm_round_started_at_ms: Some(opencoder_core::message::now_ms()),
+                        ..Default::default()
+                    },
+                    done: false,
+                    ok: false,
+                    answer: None,
+                    total_tokens: 0,
+                    rounds: 0,
+                    started_at_ms: opencoder_core::message::now_ms(),
+                    elapsed_ms: 0,
+                });
+            }
             chat.sidecar_focus = true;
         }
         SessionEvent::SidecarChild { id, ev } => {
@@ -138,88 +160,14 @@ pub(crate) fn focused(chat: &ChatView) -> Option<(&ChatView, &str, u64)> {
     })
 }
 
-/// Collapse every collapsible block of the focused sidecar's nested view
-/// (the Ctrl+L exit path mirrors the subagent one). No-op without focus.
-pub(crate) fn collapse_focused(chat: &mut ChatView) {
-    if !chat.sidecar_focus {
-        return;
-    }
-    if let Some(ChatBlock::Sidecar { view, .. }) = chat
-        .blocks
-        .iter_mut()
-        .rev()
-        .find(|b| matches!(b, ChatBlock::Sidecar { .. }))
-    {
-        view.collapse_all_collapsible();
-    }
+/// Destroy every sidecar block and drop the focus. The exit path (ESC /
+/// Ctrl+L) and the panel entry both funnel through here so the main
+/// transcript never keeps a sidecar trace: the bypass Q/A is temporary, not
+/// a transcript artifact. Late frames for the removed ids are swallowed by
+/// `fold_sidecar`'s id lookups.
+pub(crate) fn purge(chat: &mut ChatView) {
+    chat.blocks
+        .retain(|b| !matches!(b, ChatBlock::Sidecar { .. }));
+    chat.sidecar_focus = false;
 }
 
-/// Flatten the sidecar block into its single header row:
-/// `⇲ sidecar <question> [● running/done/failed · Ntok · Xs] <answer summary>`
-/// Mirrors the subagent header's span structure (bold label, accent kind,
-/// muted prompt, status mark, duration) so copy-mode and hit-testing see the
-/// same one-line shape.
-#[allow(clippy::too_many_arguments)] // header rendering needs the full block state
-pub(crate) fn flatten_sidecar(
-    question: &str,
-    done: bool,
-    ok: bool,
-    answer: &Option<String>,
-    total_tokens: u64,
-    rounds: u32,
-    started_at_ms: i64,
-    elapsed_ms: u64,
-    anim_tick: u32,
-    now_ms: i64,
-) -> Vec<Line<'static>> {
-    let (mark, mark_color, status_word) = if done {
-        if ok {
-            ("\u{2714}", theme::ok_color(), "done")
-        } else {
-            ("\u{2718}", theme::err_color(), "failed")
-        }
-    } else {
-        (
-            SPINNER[(anim_tick as usize) % SPINNER.len()],
-            theme::warn_color(),
-            "running",
-        )
-    };
-    let live_elapsed = if done {
-        elapsed_ms
-    } else {
-        (now_ms - started_at_ms).max(0) as u64
-    };
-    let mut spans = vec![
-        Span::styled(
-            "\u{2937} sidecar ",
-            Style::default()
-                .fg(theme::sidecar_color())
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(question.to_string(), Style::default().fg(theme::muted())),
-        Span::raw(" "),
-        Span::styled(mark.to_string(), Style::default().fg(mark_color)),
-        Span::raw(" "),
-        Span::styled(status_word.to_string(), Style::default().fg(mark_color)),
-        Span::raw(format!(" · {rounds}r · {total_tokens}tok")),
-    ];
-    push_duration_span(&mut spans, started_at_ms, Some(live_elapsed), now_ms);
-    if done {
-        if let Some(a) = answer {
-            let summary = short(a, 120);
-            if !summary.is_empty() {
-                spans.push(Span::raw("  "));
-                spans.push(Span::styled(
-                    summary,
-                    Style::default().fg(if ok {
-                        theme::muted()
-                    } else {
-                        theme::err_color()
-                    }),
-                ));
-            }
-        }
-    }
-    vec![Line::from(spans)]
-}

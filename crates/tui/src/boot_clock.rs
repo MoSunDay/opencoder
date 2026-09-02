@@ -58,12 +58,8 @@ pub fn mark() {
     // A clock failure (`mark_candidate` -> None) must not write the mark:
     // the UNMARKED sentinel stays and first-frame logging stays off.
     if let Some(now) = mark_candidate(unix_ms()) {
-        let _ = BOOT_MARK_MS.compare_exchange(
-            UNMARKED_MS,
-            now,
-            Ordering::Relaxed,
-            Ordering::Relaxed,
-        );
+        let _ =
+            BOOT_MARK_MS.compare_exchange(UNMARKED_MS, now, Ordering::Relaxed, Ordering::Relaxed);
     }
 }
 
@@ -73,8 +69,11 @@ pub fn mark() {
 /// (and any race between two frames) log nothing.
 pub fn note_first_frame() {
     let start_ms = BOOT_MARK_MS.load(Ordering::Relaxed);
-    let Some(ms) = frame_log_ms(start_ms, unix_ms(), FIRST_FRAME_NOTED.load(Ordering::Relaxed))
-    else {
+    let Some(ms) = frame_log_ms(
+        start_ms,
+        unix_ms(),
+        FIRST_FRAME_NOTED.load(Ordering::Relaxed),
+    ) else {
         return;
     };
     // First writer wins: a racing frame must not double-log.

@@ -67,8 +67,8 @@ pub(super) async fn run_one_llm_call(
                         name,
                     );
             }
-            // Plan always sees `question` (base-prompt clarification
-            // protocol); other agents need the task-plan skill unlock.
+            // Plan always sees `question` (plan-kind parity exemption);
+            // other agents need the task-plan skill unlock.
             crate::tools::latent::is_visible(name.as_str(), &session.agent, &unlocked)
         })
         .map(|(k, v)| (k.clone(), v.clone()))

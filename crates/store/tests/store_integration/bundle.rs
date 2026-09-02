@@ -118,4 +118,3 @@ async fn bundle_export_import_roundtrip() {
     let msgs3 = store2.load_messages("parent-1").await.unwrap();
     assert_eq!(msgs3.len(), 4, "re-import must not duplicate");
 }
-

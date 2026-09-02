@@ -290,8 +290,12 @@ async fn start_turn_reports_false_when_worker_is_dead() {
     let (cmd_tx, cmd_rx) = mpsc::channel::<UiCmd>(8);
     drop(cmd_rx); // worker gone — channel closed
     let mut cancel = CancellationToken::new();
-    let ok =
-        crate::app_helpers::start_turn(&cmd_tx, &mut cancel, UiCmd::Prompt("hi".into(), Vec::new())).await;
+    let ok = crate::app_helpers::start_turn(
+        &cmd_tx,
+        &mut cancel,
+        UiCmd::Prompt("hi".into(), Vec::new()),
+    )
+    .await;
     assert!(
         !ok,
         "start_turn must return false when the worker channel is closed"
@@ -351,7 +355,8 @@ fn double_esc_while_running_cancels() {
         &mut undo_state,
         &mut queue_scroll,
         &mut file_menu,
-        workdir);
+        workdir,
+    );
     assert!(
         matches!(first, KeyAction::None),
         "first esc is a soft clear"
@@ -379,7 +384,8 @@ fn double_esc_while_running_cancels() {
         &mut undo_state,
         &mut queue_scroll,
         &mut file_menu,
-        workdir);
+        workdir,
+    );
     assert!(
         matches!(second, KeyAction::Cancel),
         "double esc within the window must hard-abort"
@@ -562,5 +568,7 @@ fn resume_mirror_backfill_keeps_unskilled_session_gray() {
         crate::skill_display::skill_mirror_from_body(initial_body);
     assert_eq!(active_skill, None);
     assert_eq!(active_skill_body, None);
-    assert!(!crate::skill_persist::act_plan_highlight(active_skill.as_deref()));
+    assert!(!crate::skill_persist::act_plan_highlight(
+        active_skill.as_deref()
+    ));
 }

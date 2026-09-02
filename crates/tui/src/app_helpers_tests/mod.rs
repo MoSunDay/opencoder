@@ -53,7 +53,13 @@ fn push_user_records_history_and_echoes_transcript() {
     let mut chat = ChatView::default();
     let mut history: Vec<String> = Vec::new();
     let mut hist_idx: Option<usize> = None;
-    push_user(&mut chat, &mut history, &mut hist_idx, "hello world", "hello world");
+    push_user(
+        &mut chat,
+        &mut history,
+        &mut hist_idx,
+        "hello world",
+        "hello world",
+    );
     assert_eq!(history, vec!["hello world".to_string()]);
     assert_eq!(hist_idx, None);
     // push_user now creates a ChatBlock::User with markdown-rendered body.
@@ -155,7 +161,10 @@ fn paste_non_file_text_returned_verbatim() {
 #[test]
 fn ctrl_t_passes_to_mode_handler_ctrl_l_clears_ctrl_f_redraws() {
     let (sidecar_tx, _sidecar_rx) = mpsc::channel::<crate::sidecar_ui::SidecarCmd>(8);
-    fn run(key: KeyEvent, sidecar_tx: &mpsc::Sender<crate::sidecar_ui::SidecarCmd>) -> (bool, String, usize, bool, bool) {
+    fn run(
+        key: KeyEvent,
+        sidecar_tx: &mpsc::Sender<crate::sidecar_ui::SidecarCmd>,
+    ) -> (bool, String, usize, bool, bool) {
         let mut chat = ChatView::default();
         let mut subagent_focus: Option<usize> = None;
         let mut follow = false;

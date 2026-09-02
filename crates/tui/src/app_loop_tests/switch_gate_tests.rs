@@ -76,7 +76,15 @@ async fn drive_mode_switch(
     )
     .await;
     assert!(matches!(flow, LoopFlow::Proceed));
-    (chat, running, sys_tokens, mode_flash, cmd_rx, queue_items, admit_rx)
+    (
+        chat,
+        running,
+        sys_tokens,
+        mode_flash,
+        cmd_rx,
+        queue_items,
+        admit_rx,
+    )
 }
 
 /// A turn in flight queues the switch instead of applying it (steer/queue
@@ -91,7 +99,10 @@ async fn mode_switch_while_running_queues_for_idle_boundary() {
         let (chat, running, sys_tokens, mode_flash, mut cmd_rx, queue_items, mut admit_rx) =
             drive_mode_switch(mode, true, 0).await;
         assert!(running, "running must stay true (turn still active)");
-        assert_eq!(sys_tokens, 42, "sys_tokens untouched: switch not applied yet");
+        assert_eq!(
+            sys_tokens, 42,
+            "sys_tokens untouched: switch not applied yet"
+        );
         assert!(mode_flash.is_none(), "no mode flash: switch not landed yet");
         assert!(
             cmd_rx.try_recv().is_err(),
@@ -105,7 +116,10 @@ async fn mode_switch_while_running_queues_for_idle_boundary() {
         let req = admit_rx.try_recv().expect("the admit request must fire");
         assert_eq!(req.display, prompt);
         assert!(
-            !chat.blocks.iter().any(|b| matches!(b, crate::chat::ChatBlock::Marker(lines)
+            !chat
+                .blocks
+                .iter()
+                .any(|b| matches!(b, crate::chat::ChatBlock::Marker(lines)
             if lines.iter().any(|l| l.to_string().contains("busy")))),
             "no busy refusal marker: the submit always lands (queued) for {mode:?}"
         );
@@ -119,7 +133,10 @@ async fn mode_switch_while_running_queues_for_idle_boundary() {
 async fn mode_switch_with_live_subagent_runs_at_parent_idle_boundary() {
     for (mode, prompt) in [(ModeSwitch::Act, "/act"), (ModeSwitch::Plan, "/plan")] {
         let (chat, running, _, _, mut cmd_rx, _, _) = drive_mode_switch(mode, false, 1).await;
-        assert!(running, "the switch turn starts at the idle parent boundary");
+        assert!(
+            running,
+            "the switch turn starts at the idle parent boundary"
+        );
         let first = cmd_rx.try_recv().expect("the switch must be submitted");
         assert!(matches!(first, UiCmd::ResetCancel(_)));
         match cmd_rx.try_recv().unwrap() {

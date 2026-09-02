@@ -197,7 +197,9 @@ fn from_config_respects_custom_mode_switch_spec() {
     let mut config = Config::default();
     config.keymap.set("switch_mode", "f2".into());
     let b = KeyBindings::from_config(&config);
-    assert!(b.switch_mode.matches(&ev(KeyCode::F(2), KeyModifiers::NONE)));
+    assert!(b
+        .switch_mode
+        .matches(&ev(KeyCode::F(2), KeyModifiers::NONE)));
     assert!(!b
         .switch_mode
         .matches(&ev(KeyCode::Char('t'), KeyModifiers::CONTROL)));

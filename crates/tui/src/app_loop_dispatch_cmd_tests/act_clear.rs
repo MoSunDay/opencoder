@@ -28,7 +28,11 @@ async fn slash_clear_context_arms_countdown_guard() {
     assert_eq!(cc.rest, None);
     let (chip, _) = flash.expect("countdown chip must be raised");
     assert!(chip.contains("之后仅保留计划并执行"), "chip: {chip}");
-    assert_eq!(markers.len(), 1, "exactly one countdown marker: {markers:?}");
+    assert_eq!(
+        markers.len(),
+        1,
+        "exactly one countdown marker: {markers:?}"
+    );
     assert!(
         markers[0].contains("5s 之后仅保留计划并执行"),
         "countdown marker: {:?}",
@@ -53,7 +57,10 @@ async fn slash_clear_context_while_running_arms_guard() {
         cmd_rx.try_recv().is_err(),
         "no command should be sent while running"
     );
-    assert!(confirm.is_some(), "the guard must be armed even while running");
+    assert!(
+        confirm.is_some(),
+        "the guard must be armed even while running"
+    );
 }
 
 /// Firing the guard from idle submits the canonical control-command prompt
@@ -78,10 +85,22 @@ async fn fired_guard_submits_canonical_prompt_when_idle() {
     let mut cancel = CancellationToken::new();
     let flow = crate::app::app_loop::fire_clear_confirm(
         crate::clear_confirm::arm(Some("finish the summary".into()), None),
-        &cmd_tx, &mut cancel, &mut running, &mut follow, &mut chat,
-        &mut sys_tokens, &mut mode_flash, 0, std::path::Path::new("."),
-        &admit_tx, &mut admit_st, &mut queue_items, &mut pending_images,
-        "test", &mut history, &mut hist_idx,
+        &cmd_tx,
+        &mut cancel,
+        &mut running,
+        &mut follow,
+        &mut chat,
+        &mut sys_tokens,
+        &mut mode_flash,
+        0,
+        std::path::Path::new("."),
+        &admit_tx,
+        &mut admit_st,
+        &mut queue_items,
+        &mut pending_images,
+        "test",
+        &mut history,
+        &mut hist_idx,
     )
     .await;
     assert!(matches!(flow, LoopFlow::Proceed));
@@ -117,10 +136,22 @@ async fn fired_guard_queues_compound_when_running() {
     let mut cancel = CancellationToken::new();
     let flow = crate::app::app_loop::fire_clear_confirm(
         crate::clear_confirm::arm(Some("then run checks".into()), None),
-        &cmd_tx, &mut cancel, &mut running, &mut follow, &mut chat,
-        &mut sys_tokens, &mut mode_flash, 0, std::path::Path::new("."),
-        &admit_tx, &mut admit_st, &mut queue_items, &mut pending_images,
-        "test", &mut history, &mut hist_idx,
+        &cmd_tx,
+        &mut cancel,
+        &mut running,
+        &mut follow,
+        &mut chat,
+        &mut sys_tokens,
+        &mut mode_flash,
+        0,
+        std::path::Path::new("."),
+        &admit_tx,
+        &mut admit_st,
+        &mut queue_items,
+        &mut pending_images,
+        "test",
+        &mut history,
+        &mut hist_idx,
     )
     .await;
     assert!(matches!(flow, LoopFlow::Proceed));
@@ -156,8 +187,7 @@ fn backtab_and_typed_clear_context_are_one_path() {
     // A Shift+Tab with a draft forwards it as the compound rest of the SAME
     // command — equivalent to typing "/act_clear_context <draft>".
     let typed = format!("{CLEAR_CONTEXT_CMD} finish the summary");
-    let (cmd, rest) =
-        opencoder_session::split_control_prefix(&typed).expect("compound must parse");
+    let (cmd, rest) = opencoder_session::split_control_prefix(&typed).expect("compound must parse");
     assert!(matches!(cmd, opencoder_session::ControlCmd::ClearContext));
     assert_eq!(rest, Some("finish the summary".into()));
     assert_eq!(
@@ -205,11 +235,26 @@ async fn esc_cancel_drops_countdown_chip() {
 
     let esc = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
     crate::app::app_loop::handle_confirm_key(
-        &mut clear_confirm, esc, &mut input, &mut cursor_idx,
-        &mut undo_state, &mut chat, &cmd_tx, &mut cancel,
-        &mut running, &mut follow, &mut sys_tokens, &mut mode_flash,
-        0, std::path::Path::new("."), &admit_tx, &mut admit_st,
-        &mut queue_items, &mut pending_images, "test", &mut history,
+        &mut clear_confirm,
+        esc,
+        &mut input,
+        &mut cursor_idx,
+        &mut undo_state,
+        &mut chat,
+        &cmd_tx,
+        &mut cancel,
+        &mut running,
+        &mut follow,
+        &mut sys_tokens,
+        &mut mode_flash,
+        0,
+        std::path::Path::new("."),
+        &admit_tx,
+        &mut admit_st,
+        &mut queue_items,
+        &mut pending_images,
+        "test",
+        &mut history,
         &mut hist_idx,
     )
     .await;
@@ -217,7 +262,9 @@ async fn esc_cancel_drops_countdown_chip() {
     assert!(mode_flash.is_none(), "the countdown chip must be gone");
     assert!(clear_confirm.is_none(), "the guard must be torn down");
     assert!(
-        chat.blocks.iter().any(|b| matches!(b, ChatBlock::Marker(lines)
+        chat.blocks
+            .iter()
+            .any(|b| matches!(b, ChatBlock::Marker(lines)
         if lines.iter().any(|l| l.to_string().contains("已取消（回撤）")))),
         "a cancel (回撤) marker must be pushed; blocks: {:?}",
         chat.blocks
@@ -257,21 +304,41 @@ async fn enter_with_typed_text_fires_merged_rest_now() {
     let mut cancel = CancellationToken::new();
 
     crate::clear_confirm::engage(
-        &mut clear_confirm, &mut chat, &mut mode_flash, 0,
-        Some("then run checks".into()), None,
+        &mut clear_confirm,
+        &mut chat,
+        &mut mode_flash,
+        0,
+        Some("then run checks".into()),
+        None,
     );
 
     // Type the task into the live composer during the window, then submit.
     for c in "and lint".chars() {
         let k = KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE);
         crate::app::app_loop::handle_confirm_key(
-            &mut clear_confirm, k, &mut input, &mut cursor_idx,
-            &mut undo_state, &mut chat, &cmd_tx, &mut cancel,
-            &mut running, &mut follow, &mut sys_tokens, &mut mode_flash,
-            0, std::path::Path::new("."), &admit_tx, &mut admit_st,
-            &mut queue_items, &mut pending_images, "test", &mut history,
+            &mut clear_confirm,
+            k,
+            &mut input,
+            &mut cursor_idx,
+            &mut undo_state,
+            &mut chat,
+            &cmd_tx,
+            &mut cancel,
+            &mut running,
+            &mut follow,
+            &mut sys_tokens,
+            &mut mode_flash,
+            0,
+            std::path::Path::new("."),
+            &admit_tx,
+            &mut admit_st,
+            &mut queue_items,
+            &mut pending_images,
+            "test",
+            &mut history,
             &mut hist_idx,
-        ).await;
+        )
+        .await;
     }
     assert!(clear_confirm.is_some(), "typing must not disturb the arm");
     assert_eq!(input, "and lint", "the typed task sits in the composer");
@@ -279,13 +346,29 @@ async fn enter_with_typed_text_fires_merged_rest_now() {
 
     let enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
     crate::app::app_loop::handle_confirm_key(
-        &mut clear_confirm, enter, &mut input, &mut cursor_idx,
-        &mut undo_state, &mut chat, &cmd_tx, &mut cancel,
-        &mut running, &mut follow, &mut sys_tokens, &mut mode_flash,
-        0, std::path::Path::new("."), &admit_tx, &mut admit_st,
-        &mut queue_items, &mut pending_images, "test", &mut history,
+        &mut clear_confirm,
+        enter,
+        &mut input,
+        &mut cursor_idx,
+        &mut undo_state,
+        &mut chat,
+        &cmd_tx,
+        &mut cancel,
+        &mut running,
+        &mut follow,
+        &mut sys_tokens,
+        &mut mode_flash,
+        0,
+        std::path::Path::new("."),
+        &admit_tx,
+        &mut admit_st,
+        &mut queue_items,
+        &mut pending_images,
+        "test",
+        &mut history,
         &mut hist_idx,
-    ).await;
+    )
+    .await;
 
     assert!(clear_confirm.is_none(), "the guard must be consumed");
     assert!(running, "the submission fires immediately from idle");
@@ -326,30 +409,66 @@ async fn retyped_clear_command_supersedes_armed_rest() {
     let mut cancel = CancellationToken::new();
 
     crate::clear_confirm::engage(
-        &mut clear_confirm, &mut chat, &mut mode_flash, 0,
-        Some("stale rest".into()), None,
+        &mut clear_confirm,
+        &mut chat,
+        &mut mode_flash,
+        0,
+        Some("stale rest".into()),
+        None,
     );
 
     for c in "/act_clear_context fresh".chars() {
         let k = KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE);
         crate::app::app_loop::handle_confirm_key(
-            &mut clear_confirm, k, &mut input, &mut cursor_idx,
-            &mut undo_state, &mut chat, &cmd_tx, &mut cancel,
-            &mut running, &mut follow, &mut sys_tokens, &mut mode_flash,
-            0, std::path::Path::new("."), &admit_tx, &mut admit_st,
-            &mut queue_items, &mut pending_images, "test", &mut history,
+            &mut clear_confirm,
+            k,
+            &mut input,
+            &mut cursor_idx,
+            &mut undo_state,
+            &mut chat,
+            &cmd_tx,
+            &mut cancel,
+            &mut running,
+            &mut follow,
+            &mut sys_tokens,
+            &mut mode_flash,
+            0,
+            std::path::Path::new("."),
+            &admit_tx,
+            &mut admit_st,
+            &mut queue_items,
+            &mut pending_images,
+            "test",
+            &mut history,
             &mut hist_idx,
-        ).await;
+        )
+        .await;
     }
     let enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
     crate::app::app_loop::handle_confirm_key(
-        &mut clear_confirm, enter, &mut input, &mut cursor_idx,
-        &mut undo_state, &mut chat, &cmd_tx, &mut cancel,
-        &mut running, &mut follow, &mut sys_tokens, &mut mode_flash,
-        0, std::path::Path::new("."), &admit_tx, &mut admit_st,
-        &mut queue_items, &mut pending_images, "test", &mut history,
+        &mut clear_confirm,
+        enter,
+        &mut input,
+        &mut cursor_idx,
+        &mut undo_state,
+        &mut chat,
+        &cmd_tx,
+        &mut cancel,
+        &mut running,
+        &mut follow,
+        &mut sys_tokens,
+        &mut mode_flash,
+        0,
+        std::path::Path::new("."),
+        &admit_tx,
+        &mut admit_st,
+        &mut queue_items,
+        &mut pending_images,
+        "test",
+        &mut history,
         &mut hist_idx,
-    ).await;
+    )
+    .await;
 
     assert!(clear_confirm.is_none());
     match drain_cmd(&mut cmd_rx) {
@@ -388,19 +507,39 @@ async fn shift_tab_repress_fires_armed_guard_now() {
     let mut cancel = CancellationToken::new();
 
     crate::clear_confirm::engage(
-        &mut clear_confirm, &mut chat, &mut mode_flash, 0,
-        Some("finish the summary".into()), None,
+        &mut clear_confirm,
+        &mut chat,
+        &mut mode_flash,
+        0,
+        Some("finish the summary".into()),
+        None,
     );
 
     let backtab = KeyEvent::new(KeyCode::BackTab, KeyModifiers::NONE);
     crate::app::app_loop::handle_confirm_key(
-        &mut clear_confirm, backtab, &mut input, &mut cursor_idx,
-        &mut undo_state, &mut chat, &cmd_tx, &mut cancel,
-        &mut running, &mut follow, &mut sys_tokens, &mut mode_flash,
-        0, std::path::Path::new("."), &admit_tx, &mut admit_st,
-        &mut queue_items, &mut pending_images, "test", &mut history,
+        &mut clear_confirm,
+        backtab,
+        &mut input,
+        &mut cursor_idx,
+        &mut undo_state,
+        &mut chat,
+        &cmd_tx,
+        &mut cancel,
+        &mut running,
+        &mut follow,
+        &mut sys_tokens,
+        &mut mode_flash,
+        0,
+        std::path::Path::new("."),
+        &admit_tx,
+        &mut admit_st,
+        &mut queue_items,
+        &mut pending_images,
+        "test",
+        &mut history,
         &mut hist_idx,
-    ).await;
+    )
+    .await;
 
     assert!(clear_confirm.is_none(), "the re-press must consume the arm");
     assert_eq!(input, "", "the confirm chord must not edit");

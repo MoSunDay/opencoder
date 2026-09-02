@@ -63,7 +63,10 @@ mod tests {
     /// green). Guard the contract at the embedded-bytes level.
     #[test]
     fn bundle_bootstraps_the_react_root() {
-        assert!(INDEX_HTML.contains(r#"id="root""#), "shell must carry the #root mount node");
+        assert!(
+            INDEX_HTML.contains(r#"id="root""#),
+            "shell must carry the #root mount node"
+        );
         let js = String::from_utf8_lossy(APP_JS);
         assert!(js.contains("createRoot"), "bundle must create a React root");
         assert!(

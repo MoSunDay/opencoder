@@ -34,13 +34,13 @@ fn est_session(name: &str) -> SessionState {
         "t",
         opencoder_core::resolve_agent(name).unwrap(),
         opencoder_core::Config::default(),
-        std::sync::Arc::new(
-            opencoder_llm::MockChatClient::new().with_default(vec![opencoder_llm::LlmEvent::Completed {
+        std::sync::Arc::new(opencoder_llm::MockChatClient::new().with_default(vec![
+            opencoder_llm::LlmEvent::Completed {
                 text: "ok".into(),
                 tool_calls: vec![],
                 usage: None,
-            }]),
-        ),
+            },
+        ])),
         std::path::Path::new("/tmp").into(),
     )
 }
@@ -66,7 +66,10 @@ fn estimated_tokens_counts_transient_skill_body() {
 
     // Neutral body: matches no latent skill, so the ONLY change to the
     // estimate is the transient body term itself.
-    let body = format!("> Source: /skills/rev/SKILL.md\n\n{}", "REV-STEP\n".repeat(4000));
+    let body = format!(
+        "> Source: /skills/rev/SKILL.md\n\n{}",
+        "REV-STEP\n".repeat(4000)
+    );
     s.set_skill(Some(body.clone()));
     let armed = estimated_tokens(&s);
 

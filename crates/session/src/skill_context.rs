@@ -423,7 +423,9 @@ mod tests {
 
         s.set_skill(Some(sourced("/skills/rev/SKILL.md", "REV-BODY")));
         let msg = deliver_body_once(&s).expect("first call delivers");
-        assert!(msg.text().starts_with("[skill loaded] /skills/rev/SKILL.md"));
+        assert!(msg
+            .text()
+            .starts_with("[skill loaded] /skills/rev/SKILL.md"));
         assert!(s.skill_body_delivered(), "gate flipped by the delivery");
 
         assert!(
@@ -435,7 +437,8 @@ mod tests {
         s.set_skill(Some(sourced("/skills/review/SKILL.md", "NEXT-BODY")));
         let msg2 = deliver_body_once(&s).expect("fresh activation delivers again");
         assert!(
-            msg2.text().starts_with("[skill loaded] /skills/review/SKILL.md"),
+            msg2.text()
+                .starts_with("[skill loaded] /skills/review/SKILL.md"),
             "the new body ships, not the stale one"
         );
         assert!(deliver_body_once(&s).is_none(), "spent again");
@@ -465,10 +468,7 @@ mod tests {
         for name in ["explore", "workflow"] {
             let s = session_named(name);
             s.set_skill(Some("> Source: /skills/x/SKILL.md\n\nX-BODY".into()));
-            assert!(
-                body_message(&s).is_none(),
-                "{name} never receives the body"
-            );
+            assert!(body_message(&s).is_none(), "{name} never receives the body");
         }
     }
 
@@ -498,7 +498,9 @@ mod tests {
     #[test]
     fn body_message_single_skill_shape() {
         let s = act_session();
-        s.set_skill(Some("> Source: /skills/rev/SKILL.md\n\nREV-STEP-1\nREV-STEP-2".into()));
+        s.set_skill(Some(
+            "> Source: /skills/rev/SKILL.md\n\nREV-STEP-1\nREV-STEP-2".into(),
+        ));
         let msg = body_message(&s).expect("armed with a body -> message");
         assert!(msg.synthetic, "transient, never recorded");
         assert_eq!(msg.role, Role::User);
@@ -521,9 +523,7 @@ mod tests {
              > Source: /skills/beta/SKILL.md\n\nBETA-BODY"
                 .into(),
         ));
-        let text = body_message(&s)
-            .expect("compound body ships")
-            .text();
+        let text = body_message(&s).expect("compound body ships").text();
         assert_eq!(
             text,
             "[skill loaded] /skills/alpha/SKILL.md\n\
@@ -536,9 +536,7 @@ mod tests {
              > Source: /skills/alpha/SKILL.md\n\nALPHA-BODY"
                 .into(),
         ));
-        let flipped = body_message(&s)
-            .expect("same set, other order")
-            .text();
+        let flipped = body_message(&s).expect("same set, other order").text();
         let block =
             "[skill loaded] /skills/alpha/SKILL.md\n[skill loaded] /skills/beta/SKILL.md\n\n";
         assert!(

@@ -1,7 +1,9 @@
 //! Ported from rippy (MIT) https://github.com/mpecan/rippy
 
-use super::getopt::{OptionName, OptionSpec, scan_options};
-use super::{Classification, Handler, HandlerContext, has_flag, is_sole_help_flag, positional_args};
+use super::getopt::{scan_options, OptionName, OptionSpec};
+use super::{
+    has_flag, is_sole_help_flag, positional_args, Classification, Handler, HandlerContext,
+};
 use crate::sql::classify_sql;
 use crate::verdict::AllowReason;
 
@@ -57,7 +59,6 @@ impl Handler for PsqlHandler {
         }
         Classification::Ask("psql (interactive)".into())
     }
-
 }
 
 /// Classify one psql option occurrence, or `None` if it carries no SQL.
@@ -114,7 +115,6 @@ impl Handler for MysqlHandler {
             .reduce(least_safe)
             .unwrap_or_else(|| Classification::Ask("mysql (interactive)".into()))
     }
-
 }
 
 // sqlite3
@@ -142,7 +142,6 @@ impl Handler for Sqlite3Handler {
         }
         Classification::Ask("sqlite3 (interactive)".into())
     }
-
 }
 
 fn classify_sql_command(tool: &str, sql: &str) -> Classification {

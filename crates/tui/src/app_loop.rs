@@ -209,6 +209,7 @@ pub(crate) async fn fold_ui_events(
     _notepad: &mut Option<crate::notepad::NotepadView>,
     question_menu: &mut Option<crate::question_menu::QuestionMenu>,
     question_hub: &std::sync::Arc<opencoder_session::QuestionHub>,
+    sidecar_ask: &mpsc::Sender<crate::sidecar_ui::SidecarAsk>,
 ) -> LoopFlow {
     let ev = match maybe_ev {
         Some(ev) => ev,
@@ -248,6 +249,15 @@ pub(crate) async fn fold_ui_events(
                 }
                 if let SessionEvent::TranscriptReset(msgs) = &sev {
                     crate::session_ui::rebuild_after_reset(chat, msgs, store, session_id).await;
+                    // The rebuild wiped the sidecar blocks (zero persistence),
+                    // but the sidecar actor still holds the pre-reset
+                    // conversation — follow-up frames for its old id would be
+                    // swallowed by the rebuilt view forever. Tell the actor to
+                    // drop the conversation so the next question re-snapshots
+                    // the fresh transcript and emits a new SidecarStart.
+                    // try_send keeps the event loop non-blocking; the FIFO ask
+                    // channel guarantees any later question lands after it.
+                    let _ = sidecar_ask.try_send(crate::sidecar_ui::SidecarAsk::Reset);
                 } else {
                     hidden_reasoning_append = matches!(sev, SessionEvent::ReasoningDelta(_))
                         && chat.last_open_thinking_collapsed();

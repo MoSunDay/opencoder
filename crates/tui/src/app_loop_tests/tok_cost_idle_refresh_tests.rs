@@ -45,6 +45,8 @@ async fn turn_final_usage_batch_is_idle_and_paint_eligible() {
 
     macro_rules! fold {
         ($ev:expr) => {
+            let (sidecar_ask, _sidecar_ask_rx) =
+                mpsc::channel::<crate::sidecar_ui::SidecarAsk>(8);
             fold_ui_events(
                 $ev,
                 &mut chat,
@@ -64,6 +66,7 @@ async fn turn_final_usage_batch_is_idle_and_paint_eligible() {
                 &mut notepad,
                 &mut None,
                 &opencoder_session::QuestionHub::new(),
+                &sidecar_ask,
             )
             .await
         };

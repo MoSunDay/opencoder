@@ -26,6 +26,8 @@ async fn fold_fixture() -> (
 
 macro_rules! fold {
     ($chat:expr, $store:expr, $cmd_tx:expr, $evt_rx:expr, $cancel:expr, $ev:expr, $flag:expr) => {
+        let (sidecar_ask, _sidecar_ask_rx) =
+            mpsc::channel::<crate::sidecar_ui::SidecarAsk>(8);
         fold_ui_events(
             $ev,
             &mut $chat,
@@ -45,6 +47,7 @@ macro_rules! fold {
             &mut None,
             &mut None,
             &opencoder_session::QuestionHub::new(),
+            &sidecar_ask,
         )
         .await
     };

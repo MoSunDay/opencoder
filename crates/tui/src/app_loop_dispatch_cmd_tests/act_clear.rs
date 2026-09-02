@@ -412,3 +412,55 @@ async fn shift_tab_repress_fires_armed_guard_now() {
         other => panic!("expected canonical Prompt, got {other:?}"),
     }
 }
+
+/// F6: the idle fire mirrors the submit path — pending images ride along
+/// with the compound prompt AND the stash is cleared, so leftovers can never
+/// silently attach to the user's next ordinary submission.
+#[tokio::test]
+async fn fired_guard_idle_carries_and_clears_pending_images() {
+    let mut chat = ChatView {
+        agent: "act".into(),
+        ..Default::default()
+    };
+    let mut running = false;
+    let mut follow = false;
+    let mut sys_tokens = 0u64;
+    let mut mode_flash: Option<(String, u32)> = None;
+    let mut history: Vec<String> = Vec::new();
+    let mut hist_idx = None;
+    let mut queue_items: Vec<(i64, String)> = Vec::new();
+    let mut pending_images: Vec<(String, String)> = vec![(
+        "data:image/png;base64,QUJD".into(),
+        "clipboard.png".into(),
+    )];
+    let mut admit_st = crate::queue_admitter::AdmitUiState::default();
+    let (admit_tx, mut admit_rx) = mpsc::channel(8);
+    let (cmd_tx, mut cmd_rx) = mpsc::channel::<UiCmd>(64);
+    let mut cancel = CancellationToken::new();
+    let flow = crate::app::app_loop::fire_clear_confirm(
+        crate::clear_confirm::arm(Some("describe the shot".into()), None),
+        &cmd_tx, &mut cancel, &mut running, &mut follow, &mut chat,
+        &mut sys_tokens, &mut mode_flash, 0, std::path::Path::new("."),
+        &admit_tx, &mut admit_st, &mut queue_items, &mut pending_images,
+        "test", &mut history, &mut hist_idx,
+    )
+    .await;
+    assert!(matches!(flow, LoopFlow::Proceed));
+    assert!(running, "the clear turn starts from idle");
+    match drain_cmd(&mut cmd_rx) {
+        UiCmd::Prompt(text, images) => {
+            assert_eq!(text, "/act_clear_context describe the shot");
+            assert_eq!(
+                images,
+                vec!["data:image/png;base64,QUJD".to_string()],
+                "pending images must ride along with the idle fire"
+            );
+        }
+        other => panic!("expected compound Prompt, got {other:?}"),
+    }
+    assert!(
+        pending_images.is_empty(),
+        "the stash must be cleared so leftovers cannot leak into the next submission"
+    );
+    assert!(admit_rx.try_recv().is_err(), "idle fire must not queue");
+}

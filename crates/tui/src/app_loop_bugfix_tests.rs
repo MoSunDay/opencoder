@@ -65,6 +65,8 @@ async fn fold_stale_turndone_keeps_newer_turn_running() {
     let (_evt_tx, mut evt_rx) = mpsc::channel::<UiEvent>(64);
 
     let mut notepad: Option<crate::notepad::NotepadView> = None;
+    let (sidecar_ask, _sidecar_ask_rx) =
+        mpsc::channel::<crate::sidecar_ui::SidecarAsk>(8);
     let _flow = fold_ui_events(
         Some(UiEvent::TurnDone("act".into())),
         &mut chat,
@@ -84,6 +86,7 @@ async fn fold_stale_turndone_keeps_newer_turn_running() {
         &mut notepad,
         &mut None,
         &opencoder_session::QuestionHub::new(),
+        &sidecar_ask,
     )
     .await;
 
@@ -151,6 +154,8 @@ async fn done_with_pending_queue_arms_drain_pending() {
     let (_evt_tx, mut evt_rx) = mpsc::channel::<UiEvent>(64);
 
     let mut notepad: Option<crate::notepad::NotepadView> = None;
+    let (sidecar_ask, _sidecar_ask_rx) =
+        mpsc::channel::<crate::sidecar_ui::SidecarAsk>(8);
     let _flow = fold_ui_events(
         Some(UiEvent::Session(SessionEvent::Done)),
         &mut chat,
@@ -170,6 +175,7 @@ async fn done_with_pending_queue_arms_drain_pending() {
         &mut notepad,
         &mut None,
         &opencoder_session::QuestionHub::new(),
+        &sidecar_ask,
     )
     .await;
 
@@ -223,6 +229,8 @@ async fn done_with_empty_store_goes_idle() {
     let (_evt_tx, mut evt_rx) = mpsc::channel::<UiEvent>(64);
 
     let mut notepad: Option<crate::notepad::NotepadView> = None;
+    let (sidecar_ask, _sidecar_ask_rx) =
+        mpsc::channel::<crate::sidecar_ui::SidecarAsk>(8);
     let _flow = fold_ui_events(
         Some(UiEvent::Session(SessionEvent::Done)),
         &mut chat,
@@ -242,6 +250,7 @@ async fn done_with_empty_store_goes_idle() {
         &mut notepad,
         &mut None,
         &opencoder_session::QuestionHub::new(),
+        &sidecar_ask,
     )
     .await;
 
@@ -279,6 +288,8 @@ async fn drain_pending_restart_with_dead_worker_quits() {
     drop(cmd_rx);
 
     let mut notepad: Option<crate::notepad::NotepadView> = None;
+    let (sidecar_ask, _sidecar_ask_rx) =
+        mpsc::channel::<crate::sidecar_ui::SidecarAsk>(8);
     let flow = fold_ui_events(
         Some(UiEvent::TurnDone("act".into())),
         &mut chat,
@@ -298,6 +309,7 @@ async fn drain_pending_restart_with_dead_worker_quits() {
         &mut notepad,
         &mut None,
         &opencoder_session::QuestionHub::new(),
+        &sidecar_ask,
     )
     .await;
 
@@ -335,6 +347,8 @@ async fn first_reasoning_delta_renders_then_hidden_appends_are_coalesced() {
     let (_evt_tx, mut evt_rx) = mpsc::channel::<UiEvent>(64);
 
     let mut notepad: Option<crate::notepad::NotepadView> = None;
+    let (sidecar_ask, _sidecar_ask_rx) =
+        mpsc::channel::<crate::sidecar_ui::SidecarAsk>(8);
     fold_ui_events(
         Some(UiEvent::Session(SessionEvent::ReasoningDelta(
             "first".into(),
@@ -356,6 +370,7 @@ async fn first_reasoning_delta_renders_then_hidden_appends_are_coalesced() {
         &mut notepad,
         &mut None,
         &opencoder_session::QuestionHub::new(),
+        &sidecar_ask,
     )
     .await;
     assert!(
@@ -364,6 +379,8 @@ async fn first_reasoning_delta_renders_then_hidden_appends_are_coalesced() {
     );
 
     let mut notepad: Option<crate::notepad::NotepadView> = None;
+    let (sidecar_ask, _sidecar_ask_rx) =
+        mpsc::channel::<crate::sidecar_ui::SidecarAsk>(8);
     fold_ui_events(
         Some(UiEvent::Session(SessionEvent::ReasoningDelta(
             " second".into(),
@@ -385,6 +402,7 @@ async fn first_reasoning_delta_renders_then_hidden_appends_are_coalesced() {
         &mut notepad,
         &mut None,
         &opencoder_session::QuestionHub::new(),
+        &sidecar_ask,
     )
     .await;
     assert!(
@@ -417,6 +435,8 @@ async fn coalesced_first_reasoning_batch_still_renders_thinking_header() {
         .unwrap();
 
     let mut notepad: Option<crate::notepad::NotepadView> = None;
+    let (sidecar_ask, _sidecar_ask_rx) =
+        mpsc::channel::<crate::sidecar_ui::SidecarAsk>(8);
     fold_ui_events(
         Some(UiEvent::Session(SessionEvent::ReasoningDelta(
             "first".into(),
@@ -438,6 +458,7 @@ async fn coalesced_first_reasoning_batch_still_renders_thinking_header() {
         &mut notepad,
         &mut None,
         &opencoder_session::QuestionHub::new(),
+        &sidecar_ask,
     )
     .await;
     assert!(
@@ -477,6 +498,8 @@ async fn turn_done_reconciles_agent_when_agent_switch_dropped() {
     let (_evt_tx, mut evt_rx) = mpsc::channel::<UiEvent>(64);
 
     let mut notepad: Option<crate::notepad::NotepadView> = None;
+    let (sidecar_ask, _sidecar_ask_rx) =
+        mpsc::channel::<crate::sidecar_ui::SidecarAsk>(8);
     let _flow = fold_ui_events(
         Some(UiEvent::TurnDone("act".into())),
         &mut chat,
@@ -496,6 +519,7 @@ async fn turn_done_reconciles_agent_when_agent_switch_dropped() {
         &mut notepad,
         &mut None,
         &opencoder_session::QuestionHub::new(),
+        &sidecar_ask,
     )
     .await;
 
@@ -611,5 +635,78 @@ fn tick_clock_false_to_true_excludes_idle_gap() {
     assert!(
         task > after_turn1,
         "task time must grow after the turn-2 baseline snap"
+    );
+}
+
+// ----- F3: TranscriptReset must reach the sidecar actor as a Reset signal -----
+
+/// A live `TranscriptReset` rebuilds the chat view (sidecar blocks wiped —
+/// zero persistence) and must tell the sidecar actor to drop its pre-reset
+/// conversation: follow-up frames for the old id would otherwise be swallowed
+/// by the rebuilt view forever and `/sidecar` would look dead.
+#[tokio::test]
+async fn transcript_reset_signals_the_sidecar_actor() {
+    use opencoder_store::LibsqlStore;
+
+    let store: Arc<dyn opencoder_store::Store> =
+        Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let mut chat = ChatView {
+        agent: "act".into(),
+        ..ChatView::default()
+    };
+    // A live sidecar block (the thing the reset is about to wipe).
+    chat.apply(&SessionEvent::SidecarStart {
+        id: "sidecar-pre".into(),
+        question: "重置前问题?".into(),
+    });
+    let mut queue_items: Vec<(i64, String)> = Vec::new();
+    let mut running = false;
+    let mut cancelled = false;
+    let mut drain_pending = false;
+    let mut skip_next_render = false;
+    let mut follow = true;
+    let (cmd_tx, _cmd_rx) = mpsc::channel::<UiCmd>(64);
+    let mut cancel = CancellationToken::new();
+    let (_evt_tx, mut evt_rx) = mpsc::channel::<UiEvent>(64);
+    let mut notepad: Option<crate::notepad::NotepadView> = None;
+    let (sidecar_ask, mut sidecar_ask_rx) =
+        mpsc::channel::<crate::sidecar_ui::SidecarAsk>(8);
+
+    let _flow = fold_ui_events(
+        Some(UiEvent::Session(SessionEvent::TranscriptReset(Vec::new()))),
+        &mut chat,
+        &store,
+        "sidecar-reset-test",
+        &mut queue_items,
+        &mut false,
+        &mut crate::queue_admitter::AdmitUiState::default(),
+        &mut running,
+        &mut cancelled,
+        &mut drain_pending,
+        &mut skip_next_render,
+        &mut follow,
+        &cmd_tx,
+        &mut cancel,
+        &mut evt_rx,
+        &mut notepad,
+        &mut None,
+        &opencoder_session::QuestionHub::new(),
+        &sidecar_ask,
+    )
+    .await;
+
+    // The rebuild wiped the sidecar block from the view…
+    assert!(
+        !chat
+            .blocks
+            .iter()
+            .any(|b| matches!(b, crate::chat::ChatBlock::Sidecar { .. })),
+        "the rebuilt view must drop the zero-persistence sidecar block"
+    );
+    // …and the actor is told to drop the stale conversation.
+    let signal = sidecar_ask_rx.try_recv().expect("Reset must be sent");
+    assert!(
+        matches!(signal, crate::sidecar_ui::SidecarAsk::Reset),
+        "expected SidecarAsk::Reset, got {signal:?}"
     );
 }

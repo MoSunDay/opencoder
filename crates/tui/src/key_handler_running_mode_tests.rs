@@ -345,3 +345,173 @@ fn backtab_in_act_mode_switches_to_plan() {
         assert_eq!(input, "some draft", "mode switch preserves the composer");
     }
 }
+
+// ----- Shift+Tab chord hardening: focus guard, modifier filter, spellings -----
+
+/// Drive Shift+Tab (either spelling) through `handle_key` with explicit
+/// agent / focus / modifier knobs — the shared harness for the chord tests.
+#[allow(clippy::too_many_arguments)]
+fn press_shift_tab(
+    agent: &str,
+    code: KeyCode,
+    mods: KeyModifiers,
+    running: bool,
+    subagent_focused: bool,
+    sidecar_focused: bool,
+) -> (KeyAction, String) {
+    let mut input = "steer text".to_string();
+    let mut cursor = input.chars().count();
+    let mut hist_idx = None;
+    let mut scroll = 0;
+    let mut follow = true;
+    let mut last_esc = None;
+    let mut skill_menu = None;
+    let mut undo_state = crate::undo::init(&input, cursor);
+    let mut queue_scroll = 0;
+    let mut file_menu = None;
+    let action = handle_key(
+        KeyEvent::new(code, mods),
+        &crate::keymap::KeyBindings::from_config(&opencoder_core::Config::default()),
+        &mut input,
+        &mut cursor,
+        &[],
+        &mut hist_idx,
+        running,
+        agent,
+        &mut scroll,
+        &mut follow,
+        &mut last_esc,
+        &mut skill_menu,
+        80,
+        2,
+        subagent_focused,
+        sidecar_focused,
+        false,
+        &mut undo_state,
+        &mut queue_scroll,
+        &mut file_menu,
+        Path::new("."));
+    (action, input)
+}
+
+/// F1: the plan-mode arm is a parent-session operation — while a running
+/// subagent (or the sidecar box) is focused the chord must stay inert with
+/// the draft intact, otherwise the armed guard would swallow the next Enter
+/// and merge the pane's steer/ask text into the destructive clear command.
+#[test]
+fn backtab_arm_never_arms_when_subagent_or_sidecar_focused() {
+    for (subagent_focused, sidecar_focused) in [(true, false), (false, true), (true, true)] {
+        let (action, input) = press_shift_tab(
+            "plan",
+            KeyCode::BackTab,
+            KeyModifiers::NONE,
+            true,
+            subagent_focused,
+            sidecar_focused,
+        );
+        assert!(
+            matches!(action, KeyAction::None),
+            "focused pane ({subagent_focused}, {sidecar_focused}) must not arm, got {action:?}"
+        );
+        assert_eq!(input, "steer text", "inert chord keeps the draft");
+    }
+}
+
+/// F2: the retired ctrl+shift+tab lands as BackTab+CONTROL|SHIFT on many
+/// terminals — it must neither arm (plan) nor switch (act). Alt/Super
+/// mutations are filtered the same way.
+#[test]
+fn backtab_with_ctrl_alt_super_never_arms_or_switches() {
+    let ctrl_shift = KeyModifiers::CONTROL | KeyModifiers::SHIFT;
+    for mods in [
+        ctrl_shift,
+        KeyModifiers::ALT | KeyModifiers::SHIFT,
+        KeyModifiers::SUPER | KeyModifiers::SHIFT,
+        KeyModifiers::CONTROL,
+    ] {
+        for agent in ["plan", "act"] {
+            let (action, input) =
+                press_shift_tab(agent, KeyCode::BackTab, mods, false, false, false);
+            assert!(
+                matches!(action, KeyAction::None),
+                "agent={agent} mods={mods:?} must stay inert, got {action:?}"
+            );
+            assert_eq!(input, "steer text", "inert chord keeps the draft");
+        }
+    }
+}
+
+/// F7: terminals that report Shift+Tab as (Tab, SHIFT) get the same
+/// mode-aware action as BackTab — arm in plan mode (payload identical).
+#[test]
+fn tab_shift_spelling_arms_like_backtab_in_plan_mode() {
+    let (action, input) = press_shift_tab(
+        "plan",
+        KeyCode::Tab,
+        KeyModifiers::SHIFT,
+        false,
+        false,
+        false,
+    );
+    match action {
+        KeyAction::ArmClearConfirm { rest, draft } => {
+            assert_eq!(rest, Some("steer text".into()));
+            assert_eq!(draft, Some("steer text".into()));
+        }
+        other => panic!("expected ArmClearConfirm, got {other:?}"),
+    }
+    assert!(input.is_empty(), "arming clears the input line");
+}
+
+/// F7: (Tab, SHIFT) in act mode switches to plan exactly like BackTab.
+#[test]
+fn tab_shift_spelling_switches_to_plan_in_act_mode() {
+    for running in [false, true] {
+        let (action, input) = press_shift_tab(
+            "act",
+            KeyCode::Tab,
+            KeyModifiers::SHIFT,
+            running,
+            false,
+            false,
+        );
+        assert!(
+            matches!(action, KeyAction::SwitchAgent(ref to) if to == "plan"),
+            "act + (Tab, SHIFT) must switch to plan, got {action:?}"
+        );
+        assert_eq!(input, "steer text", "mode switch preserves the composer");
+    }
+}
+
+/// F7: (Tab, SHIFT) honours the same focus guard — a focused running
+/// subagent must not get its pane hijacked by the parent arm.
+#[test]
+fn tab_shift_spelling_never_arms_when_subagent_focused() {
+    let (action, input) = press_shift_tab(
+        "plan",
+        KeyCode::Tab,
+        KeyModifiers::SHIFT,
+        true,
+        true,
+        false,
+    );
+    assert!(matches!(action, KeyAction::None), "got {action:?}");
+    assert_eq!(input, "steer text");
+
+    // (Tab, SHIFT) with a Ctrl mutation is NOT the chord: handle_key's
+    // "swallow any remaining Ctrl+key" guard stops it long before the Tab
+    // arms — so it can neither arm nor queue.
+    let (action, input) = press_shift_tab(
+        "plan",
+        KeyCode::Tab,
+        KeyModifiers::SHIFT | KeyModifiers::CONTROL,
+        true,
+        false,
+        false,
+    );
+    assert!(
+        matches!(action, KeyAction::None),
+        "ctrl-mutated (Tab, SHIFT) must stay inert, got {action:?}"
+    );
+    assert_eq!(input, "steer text", "the draft survives");
+}

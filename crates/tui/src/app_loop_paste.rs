@@ -86,6 +86,9 @@ fn push_attach_marker(chat: &mut ChatView, n: usize, label: &str) {
 ///   composer hidden underneath);
 /// - notepad open -> insert verbatim when the vim editor has focus (search
 ///   box or tree focus swallows); either way the composer never sees it;
+/// - `/ap` mode popup (ap_menu) has no text field: modal isolation swallows
+///   the paste (mirrors the `Event::Key` chain, where the popup intercepts
+///   every key);
 /// - task picker / cache-salt menu open -> modal isolation (no text fields),
 ///   swallow the paste;
 /// - model menu open -> feed the trimmed payload to its focused field via
@@ -104,6 +107,7 @@ pub(crate) fn route_paste(
     pasted: &str,
     plan_edit: &mut Option<crate::plan_edit::PlanEdit>,
     notepad: &mut Option<crate::notepad::NotepadView>,
+    ap_menu_open: bool,
     task_picker_open: bool,
     cache_salt_menu_open: bool,
     keymap_menu_open: bool,
@@ -134,8 +138,11 @@ pub(crate) fn route_paste(
         }
         return LoopFlow::Redraw;
     }
-    if task_picker_open || cache_salt_menu_open || keymap_menu_open || skill_toggle_menu_open {
-        // No text fields here -- modal isolation: swallow the paste.
+    if ap_menu_open || task_picker_open || cache_salt_menu_open || keymap_menu_open || skill_toggle_menu_open {
+        // No text fields here -- modal isolation: swallow the paste. The
+        // `/ap` popup sits in the Event::Key chain too (app.rs intercepts
+        // every key while it is open), so the paste must not leak through to
+        // the composer hidden behind it.
         return LoopFlow::Redraw;
     }
     // Modal fields never resolve drag-and-drop file paths; only strip the
@@ -252,6 +259,7 @@ pub(crate) async fn handle_paste_event(
     pasted: &str,
     plan_edit: &mut Option<crate::plan_edit::PlanEdit>,
     notepad: &mut Option<crate::notepad::NotepadView>,
+    ap_menu_open: bool,
     task_picker_open: bool,
     cache_salt_menu_open: bool,
     keymap_menu_open: bool,
@@ -279,6 +287,7 @@ pub(crate) async fn handle_paste_event(
             pasted,
             plan_edit,
             notepad,
+            ap_menu_open,
             task_picker_open,
             cache_salt_menu_open,
             keymap_menu_open,

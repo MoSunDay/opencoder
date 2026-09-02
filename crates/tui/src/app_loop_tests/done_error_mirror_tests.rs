@@ -76,6 +76,8 @@ async fn fold_error_resyncs_mirrors_from_store() {
     let (_evt_tx, mut evt_rx) = mpsc::channel::<UiEvent>(64);
 
     let mut notepad: Option<crate::notepad::NotepadView> = None;
+    let (sidecar_ask, _sidecar_ask_rx) =
+        mpsc::channel::<crate::sidecar_ui::SidecarAsk>(8);
     let _flow = fold_ui_events(
         Some(UiEvent::Session(SessionEvent::Error(
             "llm api failure".into(),
@@ -97,6 +99,7 @@ async fn fold_error_resyncs_mirrors_from_store() {
         &mut notepad,
         &mut None,
         &opencoder_session::QuestionHub::new(),
+        &sidecar_ask,
     )
     .await;
 
@@ -142,6 +145,8 @@ async fn fold_done_clears_queue_items() {
     let (_evt_tx, mut evt_rx) = mpsc::channel::<UiEvent>(64);
 
     let mut notepad: Option<crate::notepad::NotepadView> = None;
+    let (sidecar_ask, _sidecar_ask_rx) =
+        mpsc::channel::<crate::sidecar_ui::SidecarAsk>(8);
     let _flow = fold_ui_events(
         Some(UiEvent::Session(SessionEvent::Done)),
         &mut chat,
@@ -161,6 +166,7 @@ async fn fold_done_clears_queue_items() {
         &mut notepad,
         &mut None,
         &opencoder_session::QuestionHub::new(),
+        &sidecar_ask,
     )
     .await;
 
@@ -198,6 +204,8 @@ async fn fold_queue_consumed_echoes_marker_and_drops_entry() {
 
     let before = crate::chat::block_text(&chat);
     let mut notepad: Option<crate::notepad::NotepadView> = None;
+    let (sidecar_ask, _sidecar_ask_rx) =
+        mpsc::channel::<crate::sidecar_ui::SidecarAsk>(8);
     let _flow = fold_ui_events(
         Some(UiEvent::Session(SessionEvent::QueueConsumed {
             seq: 30,
@@ -220,6 +228,7 @@ async fn fold_queue_consumed_echoes_marker_and_drops_entry() {
         &mut notepad,
         &mut None,
         &opencoder_session::QuestionHub::new(),
+        &sidecar_ask,
     )
     .await;
 
@@ -264,6 +273,8 @@ async fn fold_queue_consumed_unknown_seq_is_noop() {
 
     let before = crate::chat::block_text(&chat);
     let mut notepad: Option<crate::notepad::NotepadView> = None;
+    let (sidecar_ask, _sidecar_ask_rx) =
+        mpsc::channel::<crate::sidecar_ui::SidecarAsk>(8);
     let _flow = fold_ui_events(
         Some(UiEvent::Session(SessionEvent::QueueConsumed {
             seq: 999,
@@ -286,6 +297,7 @@ async fn fold_queue_consumed_unknown_seq_is_noop() {
         &mut notepad,
         &mut None,
         &opencoder_session::QuestionHub::new(),
+        &sidecar_ask,
     )
     .await;
 
@@ -315,6 +327,8 @@ async fn fold_error_when_cancelled_preserves_queue_items() {
     let (_evt_tx, mut evt_rx) = mpsc::channel::<UiEvent>(64);
 
     let mut notepad: Option<crate::notepad::NotepadView> = None;
+    let (sidecar_ask, _sidecar_ask_rx) =
+        mpsc::channel::<crate::sidecar_ui::SidecarAsk>(8);
     let _flow = fold_ui_events(
         Some(UiEvent::Session(SessionEvent::Error("stale".into()))),
         &mut chat,
@@ -334,6 +348,7 @@ async fn fold_error_when_cancelled_preserves_queue_items() {
         &mut notepad,
         &mut None,
         &opencoder_session::QuestionHub::new(),
+        &sidecar_ask,
     )
     .await;
 
@@ -369,6 +384,8 @@ async fn fold_queue_consumed_bare_control_command_echoes_nothing() {
     let (_evt_tx, mut evt_rx) = mpsc::channel::<UiEvent>(64);
     let mut notepad: Option<crate::notepad::NotepadView> = None;
 
+    let (sidecar_ask, _sidecar_ask_rx) =
+        mpsc::channel::<crate::sidecar_ui::SidecarAsk>(8);
     let _flow = fold_ui_events(
         Some(UiEvent::Session(SessionEvent::QueueConsumed {
             seq: 30,
@@ -391,6 +408,7 @@ async fn fold_queue_consumed_bare_control_command_echoes_nothing() {
         &mut notepad,
         &mut None,
         &opencoder_session::QuestionHub::new(),
+        &sidecar_ask,
     )
     .await;
 
@@ -406,6 +424,8 @@ async fn fold_queue_consumed_bare_control_command_echoes_nothing() {
     // Legacy persisted event carrying the raw compound prefix: the display
     // layer normalizes to the tail — the command token never shows.
     let mut queue_items: Vec<(i64, String)> = vec![(31, "/plan review".into())];
+    let (sidecar_ask, _sidecar_ask_rx) =
+        mpsc::channel::<crate::sidecar_ui::SidecarAsk>(8);
     let _flow = fold_ui_events(
         Some(UiEvent::Session(SessionEvent::QueueConsumed {
             seq: 31,
@@ -428,6 +448,7 @@ async fn fold_queue_consumed_bare_control_command_echoes_nothing() {
         &mut notepad,
         &mut None,
         &opencoder_session::QuestionHub::new(),
+        &sidecar_ask,
     )
     .await;
 

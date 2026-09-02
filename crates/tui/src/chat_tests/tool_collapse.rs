@@ -397,13 +397,13 @@ fn tool_end_error_colors_output_red() {
 }
 
 #[test]
-fn cycle_tool_group_at_is_noop_for_non_tool_blocks() {
+fn toggle_step_group_at_is_noop_for_non_tool_blocks() {
     let mut v = ChatView::default();
     v.apply(&SessionEvent::TextDelta("hello".into()));
     v.apply(&SessionEvent::Done);
     // Index 0 is an Assistant block, not a StepGroup — cycling must be a
     // no-op.
-    v.cycle_tool_group_at(0);
+    v.toggle_step_group_at(0);
     assert!(
         block_text(&v).contains("hello"),
         "non-tool cycle must not corrupt state"

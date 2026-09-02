@@ -225,6 +225,7 @@ fn copy_mode_drops_step_chrome_but_keeps_content() {
 
     let mut saw_step_row = false;
     let mut saw_say_header = false;
+    let mut saw_group_row = false;
     let mut copied = Vec::new();
     for line in v.flatten() {
         let text: String = line.spans.iter().map(|s| s.content.clone()).collect();
@@ -234,7 +235,8 @@ fn copy_mode_drops_step_chrome_but_keeps_content() {
                     text.contains("Step(")
                         || text.contains("Say:")
                         || text.is_empty()
-                        || text.starts_with(' '),
+                        || text.starts_with(' ')
+                        || text.contains("step"),
                     "only decoration rows may drop: {text:?}"
                 );
                 if text.contains("Step(") {
@@ -243,15 +245,90 @@ fn copy_mode_drops_step_chrome_but_keeps_content() {
                 if text.contains("Say:") {
                     saw_say_header = true;
                 }
+                if text.contains("step") {
+                    saw_group_row = true;
+                }
             }
             Some(payload) => copied.push(payload),
         }
     }
     assert!(saw_step_row, "precondition: step rows were rendered");
     assert!(saw_say_header, "precondition: Say header was rendered");
+    assert!(saw_group_row, "precondition: the group row was rendered");
     let joined = copied.join("\n");
     assert!(joined.contains("copy me"), "thinking body is copyable");
     assert!(joined.contains("t1-out"), "call output is copyable");
     assert!(!joined.contains("Step("), "step labels are chrome");
+    assert!(!joined.contains("1 step"), "group rows are chrome");
     assert!(!joined.contains("Say:"), "role header is chrome");
+}
+
+#[test]
+fn orphan_tool_end_joins_the_trailing_group_like_replay() {
+    // Orphan ToolEnd (lost ToolStart) must fold into the trailing group —
+    // the same fold replay's `coalesce_steps` applies to adjacent groups —
+    // so an anomalous transcript renders identically before and after
+    // resume.
+    fn groups(v: &ChatView) -> Vec<&Vec<Step>> {
+        v.blocks
+            .iter()
+            .filter_map(|b| match b {
+                ChatBlock::StepGroup { steps, .. } => Some(steps),
+                _ => None,
+            })
+            .collect()
+    }
+    let tail_output = |steps: &[Step]| -> String {
+        steps
+            .last()
+            .unwrap()
+            .calls
+            .last()
+            .unwrap()
+            .output
+            .iter()
+            .map(|l| {
+                l.spans
+                    .iter()
+                    .map(|s| s.content.clone())
+                    .collect::<String>()
+            })
+            .collect()
+    };
+
+    // Live: the synthetic step joins the trailing group — its finished call
+    // forces a fresh step, never a second group.
+    let mut live = ChatView::default();
+    call_tool(&mut live, "t1");
+    live.apply(&SessionEvent::ToolEnd {
+        id: "ghost".into(),
+        name: "bash".into(),
+        output: "ghost-out".into(),
+        is_error: false,
+        images: Vec::new(),
+    });
+    let live_groups = groups(&live);
+    assert_eq!(live_groups.len(), 1, "orphan must not open a second group");
+    assert_eq!(live_groups[0].len(), 2, "finished call forces a fresh step");
+    assert!(
+        tail_output(live_groups[0]).contains("ghost-out"),
+        "orphan output is kept"
+    );
+
+    // Replay of the same anomaly: the orphan ToolResult's synthetic group is
+    // folded by `coalesce_steps` — one group, two steps, same output.
+    let (a1, t1) = replay_tool_round("a1", "t1", None);
+    let mut ghost = Message::assistant("ghost-res");
+    ghost.role = Role::Tool;
+    ghost.blocks = vec![ContentBlock::ToolResult {
+        tool_use_id: "ghost".into(),
+        content: "ghost-out".into(),
+        is_error: false,
+        images: Vec::new(),
+    }];
+    let chat = replay_messages("act", &[a1, t1, ghost]);
+    let replay_groups = groups(&chat);
+    assert_eq!(replay_groups.len(), 1, "resume folds the orphan too");
+    assert_eq!(replay_groups[0].len(), 2);
+    assert!(tail_output(replay_groups[0]).contains("ghost-out"));
 }

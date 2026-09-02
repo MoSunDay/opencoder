@@ -148,16 +148,23 @@ pub struct SessionState {
     /// Optional durable store. When set, `record` persists each new message.
     pub store: Option<Arc<dyn Store>>,
     /// Active skill instructions. NOT part of the system prompt — the LLM
-    /// call derives transient skill context instead: `skill_context::
-    /// transient_body_message` ships the full body as a per-call `[skill
-    /// loaded]` payload message (never persisted), and
+    /// call ships the body ONCE per activation instead: `skill_context::
+    /// deliver_body_once` attaches a `[skill loaded]` payload message to the
+    /// FIRST LLM round that observes the skill and flips
+    /// `skill_body_delivered`, so rounds 2..N carry no body (the marker's
+    /// source path lets the model `read` the SKILL.md again when needed).
     /// `skill_context::tail_reminder` surfaces the `[active skill]` source
-    /// path when no body could ship (the model then lazily reads the
-    /// SKILL.md). `None` means no skill is active.
+    /// path when no body could ship. `None` means no skill is active.
     /// Set from the TUI `$` picker. One-shot lifetime: an activation lives
     /// only for the run that triggered it — `skill_lifecycle` clears it
     /// (memory + store) when that run ends, so later runs start skill-less.
     pub skill_prompt: Arc<Mutex<Option<String>>>,
+    /// One-shot body delivery ledger: flipped by
+    /// `skill_context::deliver_body_once` the first time the armed body
+    /// rides an LLM payload, so rounds 2..N of the run carry no skill body.
+    /// Reset by every `set_skill` (new activation -> new delivery) and by
+    /// the run-end clear, so a resumed/pre-set skill re-delivers once.
+    skill_body_delivered: Arc<Mutex<bool>>,
     /// Names of skills currently activated via `$name` tokens. Used to
     /// unlock latent tools (ssh_pty) in the runner filter. Shares the
     /// one-shot lifetime of `skill_prompt` (cleared together at run end).
@@ -243,6 +250,7 @@ impl SessionState {
             last_usage: opencoder_llm::Usage::default(),
             store: None,
             skill_prompt: Arc::new(Mutex::new(None)),
+            skill_body_delivered: Arc::new(Mutex::new(false)),
             active_skill_names: Arc::new(Mutex::new(HashSet::new())),
             persisted_count: 0,
             session_created: false,
@@ -315,10 +323,11 @@ impl SessionState {
         self
     }
 
-    /// Set the active skill instructions (surfaced as transient per-call
-    /// skill context by `skill_context::transient_body_message` /
-    /// `tail_reminder`; `body_with_source`-prefixed bodies ship their full
-    /// body, bodyless ones fall back to the `[active skill]` path pointer).
+    /// Set the active skill instructions (delivered ONCE per activation on
+    /// the first LLM payload by `skill_context::deliver_body_once`;
+    /// `body_with_source`-prefixed bodies ship their full body, bodyless
+    /// ones fall back to the `[active skill]` path pointer via
+    /// `tail_reminder`).
     pub fn with_skill(self, skill_prompt: String) -> Self {
         *self.skill_prompt.lock().unwrap() = Some(skill_prompt);
         self
@@ -345,8 +354,24 @@ impl SessionState {
     /// Update the active skill instructions in place. `None` clears the
     /// skill. One-shot semantics: whatever is set here is cleared at the end
     /// of the run that observes it (`skill_lifecycle::clear_on_run_end`).
+    /// Every write also resets the one-shot body-delivery gate
+    /// (`skill_context::deliver_body_once`), so a fresh activation ships its
+    /// body once again on the next LLM round.
     pub fn set_skill(&self, body: Option<String>) {
         *self.skill_prompt.lock().unwrap() = body;
+        *self.skill_body_delivered.lock().unwrap() = false;
+    }
+
+    /// Whether the armed skill's body has already ridden an LLM payload
+    /// during this activation (`skill_context::deliver_body_once` ledger).
+    pub fn skill_body_delivered(&self) -> bool {
+        *self.skill_body_delivered.lock().unwrap()
+    }
+
+    /// Flip the one-shot body-delivery ledger (runner-side only; see
+    /// `skill_context::deliver_body_once`).
+    pub fn set_skill_body_delivered(&self, delivered: bool) {
+        *self.skill_body_delivered.lock().unwrap() = delivered;
     }
 
     /// Apply a hot-reloaded config: swap the client, model, and config in

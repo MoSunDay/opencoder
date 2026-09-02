@@ -215,9 +215,11 @@ fn seed_in_writes_all_packs_on_fresh_dir() {
 }
 
 #[test]
-fn seed_builtin_skills_does_not_clobber_existing_files() {
+fn seed_builtin_skills_backs_up_then_overwrites_user_edits() {
     let root = tempfile::tempdir().unwrap();
-    // Pre-create one skill dir with user-authored content.
+    // Pre-create one skill dir with user-authored content: builtin seeding
+    // updates on drift, so the shipped asset wins while the edit is backed
+    // up to `<file>.user.bak`.
     let user_file = root.path().join("do-and-done").join("SKILL.md");
     std::fs::create_dir_all(user_file.parent().unwrap()).unwrap();
     std::fs::write(&user_file, "user-authored\n").unwrap();
@@ -232,17 +234,28 @@ fn seed_builtin_skills_does_not_clobber_existing_files() {
 
     seed_builtin_skills_in(root.path()).expect("seed");
 
-    // Existing user file must be preserved...
+    // Drifted builtin file: ship version wins, user edit backed up...
+    assert_ne!(
+        std::fs::read_to_string(&user_file).unwrap(),
+        "user-authored\n",
+        "builtin seed must propagate the shipped asset over drifted content"
+    );
     assert_eq!(
         std::fs::read_to_string(&user_file).unwrap(),
-        "user-authored\n"
+        include_str!("../assets/skills/do-and-done/SKILL.md"),
+        "seeded content must equal the freshly shipped asset"
     );
+    assert_eq!(
+        std::fs::read_to_string(user_file.with_file_name("SKILL.md.user.bak")).unwrap(),
+        "user-authored\n",
+        "user edit must be backed up before the overwrite"
+    );
+    // ...while files at paths the built-in no longer ships are never
+    // re-seeded built-in content.
     assert_eq!(
         std::fs::read_to_string(&user_reference).unwrap(),
         "user-reference\n"
     );
-    // ...and the built-in no longer ships the removed reference, so the
-    // surviving copy is the user's, never re-seeded built-in content.
     assert_ne!(
         std::fs::read_to_string(&user_reference).unwrap(),
         "# Any Home task-plan protocol\n",
@@ -271,8 +284,11 @@ fn seed_in_adds_missing_skills_to_partial_dir() {
 
     seed_builtin_skills_in(r).expect("seed");
 
-    // Existing user file preserved (never clobbered).
-    assert_eq!(std::fs::read_to_string(&user).unwrap(), "user-authored\n");
+    // Existing user file is drifted: ship version wins, edit backed up.
+    assert_eq!(
+        std::fs::read_to_string(user.with_file_name("SKILL.md.user.bak")).unwrap(),
+        "user-authored\n"
+    );
     // Skills that were missing are now written — including ones added after
     // the original install.
     assert!(r.join("task-plan").join("SKILL.md").exists());
@@ -327,6 +343,9 @@ fn dep_gated_skills_do_not_clobber_existing() {
     // chrome-headless user file also preserved.
     let chrome_body = std::fs::read_to_string(root.join("chrome-headless/SKILL.md")).unwrap();
     assert_eq!(chrome_body, "my custom chrome skill");
+
+    // Never-clobber implies no backup churn either.
+    assert!(!root.join("ssh-pty/SKILL.md.user.bak").exists());
 }
 
 #[test]
@@ -354,9 +373,9 @@ fn body_with_source_emits_path_annotation_then_body() {
 }
 
 #[test]
-fn seeded_review_skill_requires_codex_evidence_review() {
-    // Review follows the Codex say-and-replay evidence model, then adds the
-    // blast-radius and go-live decision responsibilities of a release review.
+fn seeded_review_skill_requires_five_question_recap() {
+    // Review answers five mandatory questions — answering them well IS the
+    // output (no fixed output template) — then rules go-live readiness.
     let root = tempfile::tempdir().unwrap();
     seed_builtin_skills_in(root.path()).expect("seed");
     let body = std::fs::read_to_string(root.path().join("review/SKILL.md")).unwrap();
@@ -366,34 +385,30 @@ fn seeded_review_skill_requires_codex_evidence_review() {
         "frontmatter description missing"
     );
     for section in [
-        "重建需求与完成标准",
-        "建立评审维度与完成度",
-        "以当次证据审查当前状态",
-        "审查全局影响与发布责任",
-        "梳理卡点与对齐事项",
-        "裁决上线状态",
+        "问一：原始需求目标",
+        "问二：做了哪些事情及完成度",
+        "问三：卡点",
+        "问四：逐项验证+证据",
+        "问五：下一步 TODO",
+        "## 上线结论",
     ] {
         assert!(body.contains(section), "review skill missing `{section}`");
     }
     assert!(
-        body.contains("需求完成百分比"),
-        "review must quantify requirement completion"
+        body.contains("completed/total") && body.contains("向下取整"),
+        "review must quantify completion as completed/total with a floored percentage"
     );
     assert!(
-        body.contains("怎么验证") && body.contains("证据是什么"),
-        "review must separate verification method from evidence"
+        body.contains("没有证据 = 没有通过") && body.contains("当次实跑"),
+        "review evidence must be per-run fresh evidence"
     );
     assert!(
-        body.contains("当次新鲜证据"),
-        "review evidence must identify freshness"
-    );
-    assert!(
-        body.contains("授权、审批、权限、凭证"),
-        "review must proactively surface delivery blockers"
-    );
-    assert!(
-        body.contains("`go-live ready`") && body.contains("`not ready`"),
+        body.contains("go-live ready") && body.contains("not ready"),
         "review must rule go-live readiness"
+    );
+    assert!(
+        !body.contains("Output Shape") && !body.contains("goal:"),
+        "review must not carry the retired REVIEW output template"
     );
 }
 
@@ -480,7 +495,10 @@ fn seeded_task_plan_skill_requires_launch_closure_contract() {
         "## 4. 遗漏复查与交付可读性",
         "## Plan Output Schema",
     ] {
-        assert!(checklist.contains(kept), "checklist missing kept section `{kept}`");
+        assert!(
+            checklist.contains(kept),
+            "checklist missing kept section `{kept}`"
+        );
     }
     // Fresh-seed contract: the retired Any Home protocol must NOT be
     // re-seeded into a fresh install, while the launch-closure checklist
@@ -573,7 +591,11 @@ fn seeded_review_skill_requires_no_question_tool() {
     seed_builtin_skills_in(root.path()).expect("seed");
     let body = std::fs::read_to_string(root.path().join("review/SKILL.md")).unwrap();
     assert!(body.contains("name: review"), "frontmatter name missing");
-    for guidance in ["澄清协议", "不把提问当侦察手段", "assumptions:"] {
+    for guidance in [
+        "不把提问当侦察手段",
+        "assumptions:",
+        "不调用 `question` 工具",
+    ] {
         assert!(body.contains(guidance), "review missing `{guidance}`");
     }
     assert!(

@@ -142,12 +142,17 @@ pub async fn get_events(
 /// Highest persisted event seq for a session (0 if none). A remote client uses
 /// this to snapshot before posting a prompt so it only streams the events
 /// produced by its own turn.
-pub async fn get_event_seq(
-    State(state): State<Arc<AppState>>,
-    Path(id): Path<String>,
-) -> impl IntoResponse {
+pub async fn get_event_seq(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Response {
+    // Aligned with get_events: an unknown session is a 404, not a synthetic
+    // `{seq: 0}` — a truncated id used to look like "no events yet" and made
+    // the client replay from 0 (a full false transcript) instead of failing.
+    match state.store.get_session(&id).await {
+        Ok(Some(_)) => {}
+        Ok(None) => return error_404("session not found"),
+        Err(e) => return error_500(format!("get_session: {e:#}")),
+    }
     let seq = state.store.last_event_seq(&id).await.unwrap_or(0);
-    Json(json!({ "id": id, "seq": seq }))
+    Json(json!({ "id": id, "seq": seq })).into_response()
 }
 
 fn error_404(msg: &str) -> Response {

@@ -6,7 +6,7 @@
 
 use super::{
     assistant_rows, ChatBlock, ChatView, CompactionHeader, SubagentHeader, ThinkingHeader,
-    ToolCallHeader, ToolGroupState, ToolHeader,
+    ToolCallHeader, ToolHeader,
 };
 
 impl ChatView {
@@ -31,10 +31,12 @@ impl ChatView {
         self.collect_headers().2
     }
 
-    /// Return each tool call's header row inside `List`-state ToolGroup
-    /// blocks, as `(block_idx, call_idx, header_line_idx)`. Mirrors
-    /// `thinking_headers`; used to build click hit-rects for individual
-    /// function calls (clicking toggles that call's output only).
+    /// Return each clickable row inside open `StepGroup` blocks — step rows
+    /// and (while a step is open) its call header rows, in render order — as
+    /// `(block_idx, call_idx, header_line_idx)`. `call_idx` is the FLAT index
+    /// into that visible-row walk (shared shape with
+    /// `super::steps::visible_targets`), so clicking resolves exactly the
+    /// rendered row.
     pub fn tool_call_headers(&self) -> Vec<ToolCallHeader> {
         self.collect_headers().4
     }
@@ -94,34 +96,43 @@ impl ChatView {
                         line_idx += text.lines().count();
                     }
                 }
-                ChatBlock::ToolGroup { calls, state } => {
+                ChatBlock::StepGroup { steps, open } => {
                     tool.push(ToolHeader {
                         block_idx,
                         header_line_idx: line_idx,
                     });
-                    // Mirrors flatten_with exactly: the group line always;
-                    // per call (header + output + blank when that call is
-                    // expanded) in List, then one trailing blank; per call
-                    // (header + output + blank) in Results.
+                    // Mirrors `flatten_step_group` exactly: the group row
+                    // always; while the group is open, per step the step row,
+                    // and while THAT step is open its `❯ Say:` header +
+                    // thinking lines and per call (header + output + blank
+                    // when the call is expanded); one trailing blank.
                     line_idx += 1;
-                    match state {
-                        ToolGroupState::Collapsed => {}
-                        ToolGroupState::List => {
-                            for (call_idx, c) in calls.iter().enumerate() {
-                                tool_calls.push(ToolCallHeader {
-                                    block_idx,
-                                    call_idx,
-                                    header_line_idx: line_idx,
-                                });
-                                line_idx += 1 + if c.expanded { 1 + c.output.len() } else { 0 };
+                    if *open {
+                        let mut call_idx = 0usize;
+                        for step in steps.iter() {
+                            tool_calls.push(ToolCallHeader {
+                                block_idx,
+                                call_idx,
+                                header_line_idx: line_idx,
+                            });
+                            call_idx += 1;
+                            line_idx += 1; // step row
+                            if step.open {
+                                if !step.thinking.is_empty() {
+                                    line_idx += 1 + step.thinking.len();
+                                }
+                                for c in &step.calls {
+                                    tool_calls.push(ToolCallHeader {
+                                        block_idx,
+                                        call_idx,
+                                        header_line_idx: line_idx,
+                                    });
+                                    call_idx += 1;
+                                    line_idx += 1 + if c.expanded { 1 + c.output.len() } else { 0 };
+                                }
                             }
-                            line_idx += 1; // trailing blank
                         }
-                        ToolGroupState::Results => {
-                            for c in calls {
-                                line_idx += 2 + c.output.len();
-                            }
-                        }
+                        line_idx += 1; // trailing blank
                     }
                 }
                 ChatBlock::Compaction {

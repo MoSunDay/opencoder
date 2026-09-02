@@ -114,8 +114,8 @@ impl ChatView {
 
 /// Add bash-command helper methods to [`ChatView`].
 impl ChatView {
-    /// Push a placeholder single-call `ChatBlock::ToolGroup` for a `!cmd`
-    /// execution. The group starts in the Results state so the user sees the
+    /// Push a placeholder single-call `ChatBlock::StepGroup` for a `!cmd`
+    /// execution, fully expanded (group + step + output) so the user sees the
     /// command running with its output. Call [`finish_bash_tool`] to fill in
     /// the output and collapse the group.
     pub(crate) fn push_bash_tool(&mut self, cmd: &str) {
@@ -123,21 +123,25 @@ impl ChatView {
         use ratatui::style::{Modifier, Style};
         use ratatui::text::{Line, Span};
         self.finalize_assistant();
-        self.blocks.push(crate::chat::ChatBlock::ToolGroup {
-            calls: vec![crate::chat::ToolCall {
-                id: format!("bash-{}", now_ms()),
-                header: Line::from(Span::styled(
-                    format!("\u{25b8} {}", sanitize_single_line(cmd)),
-                    Style::default()
-                        .fg(theme::accent())
-                        .add_modifier(Modifier::BOLD),
-                )),
-                output: Vec::new(),
-                started_at_ms: Some(now_ms()),
-                elapsed_ms: None,
-                expanded: false,
+        self.blocks.push(crate::chat::ChatBlock::StepGroup {
+            steps: vec![crate::chat::Step {
+                thinking: Vec::new(),
+                calls: vec![crate::chat::ToolCall {
+                    id: format!("bash-{}", now_ms()),
+                    header: Line::from(Span::styled(
+                        format!("\u{25b8} {}", sanitize_single_line(cmd)),
+                        Style::default()
+                            .fg(theme::accent())
+                            .add_modifier(Modifier::BOLD),
+                    )),
+                    output: Vec::new(),
+                    started_at_ms: Some(now_ms()),
+                    elapsed_ms: None,
+                    expanded: true,
+                }],
+                open: true,
             }],
-            state: crate::chat::ToolGroupState::Results,
+            open: true,
         });
     }
 
@@ -163,25 +167,31 @@ impl ChatView {
             .collect();
         // Newest group holding an unfinished `bash-` call.
         let target = self.blocks.iter().enumerate().rev().find_map(|(gi, blk)| {
-            if let crate::chat::ChatBlock::ToolGroup { calls, .. } = blk {
-                calls
+            if let crate::chat::ChatBlock::StepGroup { steps, .. } = blk {
+                steps
                     .iter()
-                    .position(|c| c.id.starts_with("bash-") && c.elapsed_ms.is_none())
-                    .map(|ci| (gi, ci))
+                    .enumerate()
+                    .find_map(|(si, s)| {
+                        s.calls
+                            .iter()
+                            .position(|c| c.id.starts_with("bash-") && c.elapsed_ms.is_none())
+                            .map(|ci| (si, ci))
+                    })
+                    .map(|(si, ci)| (gi, si, ci))
             } else {
                 None
             }
         });
-        if let Some((gi, ci)) = target {
-            if let crate::chat::ChatBlock::ToolGroup { calls, state } = &mut self.blocks[gi] {
-                let c = &mut calls[ci];
+        if let Some((gi, si, ci)) = target {
+            if let crate::chat::ChatBlock::StepGroup { steps, open } = &mut self.blocks[gi] {
+                let c = &mut steps[si].calls[ci];
                 c.output = out;
                 if let Some(started) = c.started_at_ms {
                     c.elapsed_ms = Some(((ts - started).max(0)) as u64);
                 }
                 // Equivalent of the old "collapse once finished": back to the
                 // single group line.
-                *state = crate::chat::ToolGroupState::Collapsed;
+                *open = false;
             }
         }
     }

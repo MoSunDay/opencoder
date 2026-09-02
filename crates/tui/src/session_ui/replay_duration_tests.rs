@@ -1,4 +1,4 @@
-//! Regression tests for duration/running rendering on replayed tool groups.
+//! Regression tests for duration/running rendering on replayed step groups.
 //!
 //! Replayed tool calls carry no wall-clock timing from the persisted
 //! `Message`s. They must be marked finished (`elapsed_ms: Some(0)`) so the
@@ -40,12 +40,12 @@ fn replayed_tool_block_omits_duration_span() {
     let group = chat
         .blocks
         .iter()
-        .find(|b| matches!(b, ChatBlock::ToolGroup { .. }))
-        .expect("should have a ToolGroup block");
+        .find(|b| matches!(b, ChatBlock::StepGroup { .. }))
+        .expect("should have a StepGroup block");
 
     match group {
-        ChatBlock::ToolGroup { calls, .. } => {
-            assert_eq!(calls[0].elapsed_ms, Some(0));
+        ChatBlock::StepGroup { steps, .. } => {
+            assert_eq!(steps[0].calls[0].elapsed_ms, Some(0));
         }
         _ => unreachable!(),
     }
@@ -59,7 +59,7 @@ fn replayed_tool_block_omits_duration_span() {
     // this fixture legitimately contains the word "running".
     let group_line: String = lines
         .iter()
-        .find(|l| l.spans.iter().any(|s| s.content.contains("function call")))
+        .find(|l| l.spans.iter().any(|s| s.content.contains("1 step")))
         .expect("group line should be present")
         .spans
         .iter()
@@ -102,12 +102,12 @@ fn replayed_orphan_tool_result_omits_duration_span() {
     let group = chat
         .blocks
         .iter()
-        .find(|b| matches!(b, ChatBlock::ToolGroup { .. }))
-        .expect("should have a fallback ToolGroup block");
+        .find(|b| matches!(b, ChatBlock::StepGroup { .. }))
+        .expect("should have a fallback StepGroup block");
 
     match group {
-        ChatBlock::ToolGroup { calls, .. } => {
-            assert_eq!(calls[0].elapsed_ms, Some(0));
+        ChatBlock::StepGroup { steps, .. } => {
+            assert_eq!(steps[0].calls[0].elapsed_ms, Some(0));
         }
         _ => unreachable!(),
     }

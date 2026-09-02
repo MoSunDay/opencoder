@@ -300,7 +300,7 @@ mod tests {
     fn replay_reconstructs_tool_blocks() {
         // Assistant message with a ToolUse, followed by a Role::Tool message
         // carrying the matching ToolResult. Replay must produce a
-        // ChatBlock::ToolGroup with the correct call id, header, and appended output.
+        // ChatBlock::StepGroup with the correct call id, header, and appended output.
         let mut asst = Message::assistant("a1");
         asst.blocks.push(ContentBlock::text("Running a command."));
         asst.blocks.push(ContentBlock::ToolUse {
@@ -321,13 +321,14 @@ mod tests {
             .blocks
             .iter()
             .filter_map(|b| match b {
-                ChatBlock::ToolGroup { calls, .. } => Some(calls),
+                ChatBlock::StepGroup { steps, .. } => Some(steps),
                 _ => None,
             })
             .collect();
-        assert_eq!(groups.len(), 1, "expected one tool group");
-        assert_eq!(groups[0].len(), 1, "expected one call in the group");
-        let call = &groups[0][0];
+        assert_eq!(groups.len(), 1, "expected one step group");
+        let calls: Vec<_> = groups[0].iter().flat_map(|s| s.calls.iter()).collect();
+        assert_eq!(calls.len(), 1, "expected one call in the group");
+        let call = calls[0];
         assert_eq!(call.id, "t1");
         let text: String = call
             .header
@@ -358,8 +359,8 @@ mod tests {
             chat.blocks.iter().any(|b| {
                 matches!(
                     b,
-                    ChatBlock::ToolGroup { calls, .. }
-                        if calls.iter().any(|c| c.id == "t9")
+                    ChatBlock::StepGroup { steps, .. }
+                        if steps.iter().any(|s| s.calls.iter().any(|c| c.id == "t9"))
                 )
             }),
             "tool-only assistant turn must not be skipped; got: {:?}",
@@ -404,12 +405,12 @@ mod tests {
             .blocks
             .iter()
             .filter_map(|b| match b {
-                ChatBlock::ToolGroup { calls, .. } => Some(calls),
+                ChatBlock::StepGroup { steps, .. } => Some(steps),
                 _ => None,
             })
             .collect();
         assert_eq!(groups.len(), 1, "the two calls form one group");
-        let tools = &groups[0];
+        let tools: Vec<_> = groups[0].iter().flat_map(|s| s.calls.iter()).collect();
         assert_eq!(tools.len(), 2, "expected two calls in the group");
         assert_eq!(tools[0].id, "p1");
         assert_eq!(tools[1].id, "p2");
@@ -421,14 +422,14 @@ mod tests {
                 .collect()
         };
         assert!(
-            out(&tools[0]).contains("one"),
+            out(tools[0]).contains("one"),
             "p1 output: {}",
-            out(&tools[0])
+            out(tools[0])
         );
         assert!(
-            out(&tools[1]).contains("two"),
+            out(tools[1]).contains("two"),
             "p2 output: {}",
-            out(&tools[1])
+            out(tools[1])
         );
     }
 

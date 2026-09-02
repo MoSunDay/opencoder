@@ -1,6 +1,6 @@
 //! `!cmd` local bash-tool helpers (`push_bash_tool` / `finish_bash_tool`):
-//! a single-call `ToolGroup` that starts in the Results state (output visible
-//! while the command runs) and collapses once the command finishes.
+//! a single-call `StepGroup` that starts fully expanded (output visible while
+//! the command runs) and collapses once the command finishes.
 
 use super::super::*;
 
@@ -9,19 +9,19 @@ fn push_bash_tool_starts_in_results_state() {
     let mut v = ChatView::default();
     v.push_bash_tool("echo hi");
     match v.blocks.last() {
-        Some(ChatBlock::ToolGroup { calls, state, .. }) => {
-            assert_eq!(calls.len(), 1);
+        Some(ChatBlock::StepGroup { steps, open, .. }) => {
+            assert_eq!(steps.len(), 1);
             assert!(
-                matches!(state, ToolGroupState::Results),
-                "local `!cmd` runs visible from the start (Results state)"
+                *open && steps[0].open && steps[0].calls[0].expanded,
+                "local `!cmd` runs visible from the start (fully expanded)"
             );
             assert!(
-                calls[0].id.starts_with("bash-"),
+                steps[0].calls[0].id.starts_with("bash-"),
                 "synthetic id: {:?}",
-                calls[0].id
+                steps[0].calls[0].id
             );
         }
-        other => panic!("expected ChatBlock::ToolGroup as last block, got {other:?}"),
+        other => panic!("expected ChatBlock::StepGroup as last block, got {other:?}"),
     }
 }
 
@@ -32,8 +32,9 @@ fn finish_bash_tool_fills_output_and_collapses() {
     v.finish_bash_tool("hello\nworld");
 
     match v.blocks.last() {
-        Some(ChatBlock::ToolGroup { calls, state, .. }) => {
-            let call = &calls[0];
+        Some(ChatBlock::StepGroup { steps, open, .. }) => {
+            let call = &steps[0].calls[0];
+            let state = open;
             assert!(
                 !call.output.is_empty(),
                 "output must contain lines after finish_bash_tool"
@@ -48,16 +49,13 @@ fn finish_bash_tool_fills_output_and_collapses() {
                 joined.contains("hello") && joined.contains("world"),
                 "output must preserve both lines; got {joined:?}"
             );
-            assert!(
-                matches!(state, ToolGroupState::Collapsed),
-                "group must collapse once the command finishes"
-            );
+            assert!(!*state, "group must collapse once the command finishes");
             assert!(
                 call.elapsed_ms.is_some(),
                 "elapsed_ms must be recorded after finish_bash_tool"
             );
         }
-        other => panic!("expected ChatBlock::ToolGroup as last block, got {other:?}"),
+        other => panic!("expected ChatBlock::StepGroup as last block, got {other:?}"),
     }
 }
 
@@ -71,8 +69,8 @@ fn finish_bash_tool_aborted_message() {
     v.finish_bash_tool("(command aborted)");
 
     match v.blocks.last() {
-        Some(ChatBlock::ToolGroup { calls, .. }) => {
-            let joined: String = calls[0]
+        Some(ChatBlock::StepGroup { steps, .. }) => {
+            let joined: String = steps[0].calls[0]
                 .output
                 .iter()
                 .flat_map(|l| l.spans.iter())
@@ -83,6 +81,6 @@ fn finish_bash_tool_aborted_message() {
                 "aborted output must be visible in the call; got {joined:?}"
             );
         }
-        other => panic!("expected ChatBlock::ToolGroup as last block, got {other:?}"),
+        other => panic!("expected ChatBlock::StepGroup as last block, got {other:?}"),
     }
 }

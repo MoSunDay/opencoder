@@ -14,13 +14,16 @@ use opencoder_store::{Store, SubagentStatus, SubagentTaskRecord};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
-use crate::chat::{short, summarize, ChatBlock, ChatView, TOOL_OUTPUT_LINES};
+use crate::chat::{
+    short, summarize, ChatBlock, ChatView, ToolCall, ToolGroupState, TOOL_OUTPUT_LINES,
+};
 use crate::terminal_text::{sanitize_multiline, sanitize_single_line};
 use crate::theme;
 
-/// Replay a single persisted message into `chat`: reconstruct `Assistant` text and
-/// `Tool` blocks (header from `ToolUse`, output from matching `ToolResult`),
-/// mirroring the live `ChatView::apply` path for resumed/compacted sessions.
+/// Replay a single persisted message into `chat`: reconstruct `Assistant` text
+/// and `ToolGroup` blocks (headers from `ToolUse`, outputs from matching
+/// `ToolResult`s), mirroring the live `ChatView::apply` path (consecutive
+/// calls group together) for resumed/compacted sessions.
 pub(super) fn replay_one(
     chat: &mut ChatView,
     msg: &Message,
@@ -120,7 +123,7 @@ pub(super) fn replay_one(
                     if name == "task" {
                         continue;
                     }
-                    chat.blocks.push(ChatBlock::Tool {
+                    let call = ToolCall {
                         id: id.clone(),
                         header: Line::from(vec![
                             Span::styled(
@@ -132,10 +135,21 @@ pub(super) fn replay_one(
                             Span::styled(summarize(input), Style::default().fg(theme::muted())),
                         ]),
                         output: Vec::new(),
-                        collapsed: true,
-                        started_at_ms: 0,
+                        // Replayed calls carry no wall-clock timing: mark them
+                        // finished (elapsed 0) so no epoch-scale live timer or
+                        // "running" hint renders on resume.
+                        started_at_ms: Some(0),
                         elapsed_ms: Some(0),
-                    });
+                    };
+                    // Same grouping rule as the live path: consecutive calls
+                    // join the trailing group, anything else splits the run.
+                    match chat.blocks.last_mut() {
+                        Some(ChatBlock::ToolGroup { calls, .. }) => calls.push(call),
+                        _ => chat.blocks.push(ChatBlock::ToolGroup {
+                            calls: vec![call],
+                            state: ToolGroupState::Collapsed,
+                        }),
+                    }
                 }
             }
         }
@@ -162,31 +176,39 @@ pub(super) fn replay_one(
                             Line::from(Span::styled(format!("  {l}"), Style::default().fg(color)))
                         })
                         .collect();
-                    if let Some(ChatBlock::Tool { output: o, .. }) = chat
-                        .blocks
-                        .iter_mut()
-                        .rev()
-                        .find(|blk| {
-                            matches!(blk, ChatBlock::Tool { id: bid, .. } if bid == tool_use_id)
-                        }) {
-                        o.extend(out);
+                    let target = chat.blocks.iter().enumerate().rev().find_map(|(gi, blk)| {
+                        if let ChatBlock::ToolGroup { calls, .. } = blk {
+                            calls
+                                .iter()
+                                .rposition(|c| c.id == *tool_use_id)
+                                .map(|ci| (gi, ci))
+                        } else {
+                            None
+                        }
+                    });
+                    if let Some((gi, ci)) = target {
+                        if let ChatBlock::ToolGroup { calls, .. } = &mut chat.blocks[gi] {
+                            calls[ci].output.extend(out);
+                        }
                     } else {
                         // Skip fallback for "task" tools — their output is
-                        // shown via the Subagent block, not a Tool block.
+                        // shown via the Subagent block, not a ToolGroup.
                         let has_subagent = chat.blocks.iter().any(|b| {
                             matches!(b, ChatBlock::Subagent { id: bid, .. } if bid == tool_use_id)
                         });
                         if !has_subagent {
-                            chat.blocks.push(ChatBlock::Tool {
-                                id: tool_use_id.clone(),
-                                header: Line::from(Span::styled(
-                                    "\u{25b8} (output)",
-                                    Style::default().fg(theme::accent()),
-                                )),
-                                output: out,
-                                collapsed: true,
-                                started_at_ms: 0,
-                                elapsed_ms: Some(0),
+                            chat.blocks.push(ChatBlock::ToolGroup {
+                                calls: vec![ToolCall {
+                                    id: tool_use_id.clone(),
+                                    header: Line::from(Span::styled(
+                                        "\u{25b8} (output)",
+                                        Style::default().fg(theme::accent()),
+                                    )),
+                                    output: out,
+                                    started_at_ms: None,
+                                    elapsed_ms: Some(0),
+                                }],
+                                state: ToolGroupState::Collapsed,
                             });
                         }
                     }

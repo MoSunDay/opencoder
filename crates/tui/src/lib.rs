@@ -47,6 +47,7 @@ pub mod scope_dialog;
 pub mod scrollbar;
 pub mod session_ui;
 pub mod sidecar_ui;
+pub mod signal_guard;
 pub mod skill_display;
 pub mod skill_menu;
 pub mod skill_persist;

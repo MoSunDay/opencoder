@@ -6,7 +6,7 @@
 
 use super::{
     assistant_rows, ChatBlock, ChatView, CompactionHeader, SubagentHeader, ThinkingHeader,
-    ToolHeader,
+    ToolGroupState, ToolHeader,
 };
 
 impl ChatView {
@@ -83,15 +83,24 @@ impl ChatView {
                         line_idx += text.lines().count();
                     }
                 }
-                ChatBlock::Tool {
-                    output, collapsed, ..
-                } => {
+                ChatBlock::ToolGroup { calls, state } => {
                     tool.push(ToolHeader {
                         block_idx,
                         header_line_idx: line_idx,
                     });
-                    // Header always rendered; output + trailing blank only when expanded.
-                    line_idx += 1 + if *collapsed { 0 } else { output.len() + 1 };
+                    // Mirrors flatten_with exactly: the group line always;
+                    // + calls.len() headers + 1 trailing blank in List;
+                    // + per call (header + output + blank) in Results.
+                    line_idx += 1;
+                    match state {
+                        ToolGroupState::Collapsed => {}
+                        ToolGroupState::List => line_idx += calls.len() + 1,
+                        ToolGroupState::Results => {
+                            for c in calls {
+                                line_idx += 2 + c.output.len();
+                            }
+                        }
+                    }
                 }
                 ChatBlock::Compaction {
                     text, collapsed, ..

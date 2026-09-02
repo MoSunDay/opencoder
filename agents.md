@@ -1,4 +1,4 @@
-Commit: (working-tree, skill run-end 清除收敛 + bash_guard 换壳 shellguard + act chip task-plan 高亮)
+Commit: af71944
 
 # OpenCoder 逻辑地图
 

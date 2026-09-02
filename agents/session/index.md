@@ -1,4 +1,4 @@
-Commit: d4714fd (working-tree, re-clear 保留已持久化交接边界——fold 不再覆写 sentinel)
+Commit: af71944
 
 # session 模块
 

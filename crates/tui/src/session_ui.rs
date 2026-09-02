@@ -300,7 +300,7 @@ mod tests {
     fn replay_reconstructs_tool_blocks() {
         // Assistant message with a ToolUse, followed by a Role::Tool message
         // carrying the matching ToolResult. Replay must produce a
-        // ChatBlock::Tool with the correct id, header, and appended output.
+        // ChatBlock::ToolGroup with the correct call id, header, and appended output.
         let mut asst = Message::assistant("a1");
         asst.blocks.push(ContentBlock::text("Running a command."));
         asst.blocks.push(ContentBlock::ToolUse {
@@ -317,23 +317,23 @@ mod tests {
             images: Vec::new(),
         }];
         let chat = replay_messages("act", &[asst, tool_msg]);
-        let tools: Vec<_> = chat
+        let groups: Vec<_> = chat
             .blocks
             .iter()
             .filter_map(|b| match b {
-                ChatBlock::Tool {
-                    id, header, output, ..
-                } => Some((id, header, output)),
+                ChatBlock::ToolGroup { calls, .. } => Some(calls),
                 _ => None,
             })
             .collect();
-        assert_eq!(tools.len(), 1, "expected one tool block");
-        assert_eq!(tools[0].0, "t1");
-        let text: String = tools[0]
-            .1
+        assert_eq!(groups.len(), 1, "expected one tool group");
+        assert_eq!(groups[0].len(), 1, "expected one call in the group");
+        let call = &groups[0][0];
+        assert_eq!(call.id, "t1");
+        let text: String = call
+            .header
             .spans
             .iter()
-            .chain(tools[0].2.iter().flat_map(|l| l.spans.iter()))
+            .chain(call.output.iter().flat_map(|l| l.spans.iter()))
             .map(|s| s.content.clone())
             .collect();
         assert!(
@@ -355,9 +355,13 @@ mod tests {
         });
         let chat = replay_messages("act", &[asst]);
         assert!(
-            chat.blocks
-                .iter()
-                .any(|b| matches!(b, ChatBlock::Tool { id, .. } if id == "t9")),
+            chat.blocks.iter().any(|b| {
+                matches!(
+                    b,
+                    ChatBlock::ToolGroup { calls, .. }
+                        if calls.iter().any(|c| c.id == "t9")
+                )
+            }),
             "tool-only assistant turn must not be skipped; got: {:?}",
             chat.blocks
         );
@@ -396,31 +400,36 @@ mod tests {
             },
         ];
         let chat = replay_messages("act", &[asst, tool_msg]);
-        let tools: Vec<_> = chat
+        let groups: Vec<_> = chat
             .blocks
             .iter()
             .filter_map(|b| match b {
-                ChatBlock::Tool { id, output, .. } => Some((id, output)),
+                ChatBlock::ToolGroup { calls, .. } => Some(calls),
                 _ => None,
             })
             .collect();
-        assert_eq!(tools.len(), 2, "expected two tool blocks");
-        assert_eq!(tools[0].0, "p1");
-        assert_eq!(tools[1].0, "p2");
-        let out0: String = tools[0]
-            .1
-            .iter()
-            .flat_map(|l| l.spans.iter())
-            .map(|s| s.content.clone())
-            .collect();
-        let out1: String = tools[1]
-            .1
-            .iter()
-            .flat_map(|l| l.spans.iter())
-            .map(|s| s.content.clone())
-            .collect();
-        assert!(out0.contains("one"), "p1 output: {out0}");
-        assert!(out1.contains("two"), "p2 output: {out1}");
+        assert_eq!(groups.len(), 1, "the two calls form one group");
+        let tools = &groups[0];
+        assert_eq!(tools.len(), 2, "expected two calls in the group");
+        assert_eq!(tools[0].id, "p1");
+        assert_eq!(tools[1].id, "p2");
+        let out = |c: &crate::chat::ToolCall| -> String {
+            c.output
+                .iter()
+                .flat_map(|l| l.spans.iter())
+                .map(|s| s.content.clone())
+                .collect()
+        };
+        assert!(
+            out(&tools[0]).contains("one"),
+            "p1 output: {}",
+            out(&tools[0])
+        );
+        assert!(
+            out(&tools[1]).contains("two"),
+            "p2 output: {}",
+            out(&tools[1])
+        );
     }
 
     // -----------------------------------------------------------------------

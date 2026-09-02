@@ -348,6 +348,29 @@ pub(crate) fn handle_key(
                 KeyAction::Submit(text)
             }
         }
+        // Shift+Tab spelled as (Tab, SHIFT): several terminals (kitty
+        // REPORT_ALL_KEYS_AS_ESCAPE_CODES among them) report the chord this
+        // way instead of BackTab. Same chord, same mode-aware action — the
+        // plain queue/submit Tab arm below must not swallow it (on those
+        // terminals it would submit the draft instead of arming/switching).
+        // CONTROL/ALT/SUPER variants fall through to the plain Tab arm, same
+        // as pre-regression behavior.
+        KeyCode::Tab
+            if k.modifiers.contains(KeyModifiers::SHIFT)
+                && !k.modifiers.intersects(
+                    KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER,
+                ) =>
+        {
+            shift_tab_action(
+                agent,
+                input,
+                cursor_idx,
+                hist_idx,
+                subagent_focused,
+                sidecar_focused,
+                undo_state,
+            )
+        }
         KeyCode::Tab => {
             // Tab = follow-up (queue) when running; normal submit when idle.
             if input.trim().is_empty() {
@@ -373,29 +396,25 @@ pub(crate) fn handle_key(
                 KeyAction::Submit(text)
             }
         }
-        KeyCode::BackTab => {
-            // Shift+Tab is mode-aware: in act mode it switches back to the
-            // read-only plan agent — a non-destructive switch (context
-            // preserved), so no countdown guard is needed; the dispatcher
-            // applies it now when idle and queues it at the idle boundary
-            // while running (steer/queue semantics). In plan mode it arms
-            // the clear-context countdown (see ArmClearConfirm):
-            // keep the plan, fold into act and execute.
-            if agent == "act" {
-                return KeyAction::SwitchAgent("plan".into());
-            }
-            // Arm the clear-context countdown. The draft is forwarded as the
-            // compound rest; it is cleared from the composer now. The raw text
-            // rides along as `draft` so the guard's Esc (回撤) puts it back
-            // verbatim — arming must lose nothing.
-            let draft = (!input.is_empty()).then(|| input.clone());
-            let rest = input.trim().to_string();
-            let rest = (!rest.is_empty()).then_some(rest);
-            input.clear();
-            *cursor_idx = 0;
-            *hist_idx = None;
-            crate::undo::reset(undo_state, input, *cursor_idx);
-            KeyAction::ArmClearConfirm { rest, draft }
+        // CONTROL/ALT/SUPER chord variants are filtered off: the retired
+        // ctrl+shift+tab is reported by many terminals as BackTab+CONTROL|SHIFT
+        // and must stay inert — never arm the guard, never switch modes. This
+        // mirrors the confirm side (`clear_confirm::intercept`): a chord that
+        // cannot confirm the guard must not be able to arm it either.
+        KeyCode::BackTab
+            if !k
+                .modifiers
+                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER) =>
+        {
+            shift_tab_action(
+                agent,
+                input,
+                cursor_idx,
+                hist_idx,
+                subagent_focused,
+                sidecar_focused,
+                undo_state,
+            )
         }
         KeyCode::Esc => {
             // Double-Esc within the window while running => hard-abort.
@@ -496,6 +515,46 @@ pub(crate) fn handle_key(
         }
         _ => KeyAction::None,
     }
+}
+
+/// Shared Shift+Tab action — both spellings (`BackTab`, and `(Tab, SHIFT)`
+/// as reported by some terminals) route here. Mode-aware: in act mode it
+/// switches back to the read-only plan agent — a non-destructive switch
+/// (context preserved), so no countdown guard is needed; the busy gate in
+/// the dispatcher still defers it to an idle boundary. In plan mode it arms
+/// the clear-context countdown (see `ArmClearConfirm`): keep the plan, fold
+/// into act and execute. The arm is a PARENT-session operation: while a
+/// running subagent or the sidecar box is focused it must not arm — the
+/// armed guard would swallow the next Enter (merging the steer / sidecar-ask
+/// text meant for the focused pane into the compound clear command), so the
+/// chord is inert there, mirroring the plain Tab arm's QueueUnsupported gate.
+fn shift_tab_action(
+    agent: &str,
+    input: &mut String,
+    cursor_idx: &mut usize,
+    hist_idx: &mut Option<usize>,
+    subagent_focused: bool,
+    sidecar_focused: bool,
+    undo_state: &mut crate::undo::UndoState,
+) -> KeyAction {
+    if agent == "act" {
+        return KeyAction::SwitchAgent("plan".into());
+    }
+    if subagent_focused || sidecar_focused {
+        return KeyAction::None;
+    }
+    // Arm the clear-context countdown. The draft is forwarded as the
+    // compound rest; it is cleared from the composer now. The raw text
+    // rides along as `draft` so the guard's Esc (回撤) puts it back
+    // verbatim — arming must lose nothing.
+    let draft = (!input.is_empty()).then(|| input.clone());
+    let rest = input.trim().to_string();
+    let rest = (!rest.is_empty()).then_some(rest);
+    input.clear();
+    *cursor_idx = 0;
+    *hist_idx = None;
+    crate::undo::reset(undo_state, input, *cursor_idx);
+    KeyAction::ArmClearConfirm { rest, draft }
 }
 
 fn next_primary_agent(agent: &str) -> &'static str {

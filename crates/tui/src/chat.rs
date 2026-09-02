@@ -94,7 +94,7 @@ impl ChatView {
                     return;
                 }
                 self.finalize_assistant();
-                self.blocks.push(ChatBlock::Tool {
+                let call = ToolCall {
                     id: id.clone(),
                     header: Line::from(vec![
                         Span::styled(
@@ -106,10 +106,19 @@ impl ChatView {
                         Span::styled(summarize(input), Style::default().fg(theme::muted())),
                     ]),
                     output: Vec::new(),
-                    collapsed: true,
-                    started_at_ms: opencoder_core::message::now_ms(),
+                    started_at_ms: Some(opencoder_core::message::now_ms()),
                     elapsed_ms: None,
-                });
+                };
+                // Consecutive tool calls join the trailing group (keeping its
+                // display state); any other block in between splits the run
+                // into a new, Collapsed group.
+                match self.blocks.last_mut() {
+                    Some(ChatBlock::ToolGroup { calls, .. }) => calls.push(call),
+                    _ => self.blocks.push(ChatBlock::ToolGroup {
+                        calls: vec![call],
+                        state: ToolGroupState::Collapsed,
+                    }),
+                }
             }
             SessionEvent::ToolEnd {
                 id,
@@ -133,32 +142,44 @@ impl ChatView {
                     .take(TOOL_OUTPUT_LINES)
                     .map(|l| Line::from(Span::styled(format!("  {l}"), Style::default().fg(color))))
                     .collect();
-                if let Some(ChatBlock::Tool {
-                    output: o,
-                    started_at_ms,
-                    elapsed_ms,
-                    ..
-                }) = self
-                    .blocks
-                    .iter_mut()
-                    .rev()
-                    .find(|b| matches!(b, ChatBlock::Tool { id: bid, .. } if bid == id))
-                {
-                    o.extend(out);
-                    *elapsed_ms =
-                        Some(((opencoder_core::message::now_ms() - *started_at_ms).max(0)) as u64);
-                } else {
-                    self.blocks.push(ChatBlock::Tool {
-                        id: id.clone(),
-                        header: Line::from(Span::styled(
-                            "\u{25b8} (output)",
-                            Style::default().fg(theme::accent()),
-                        )),
-                        output: out,
-                        collapsed: true,
-                        started_at_ms: opencoder_core::message::now_ms(),
-                        elapsed_ms: None,
-                    });
+                // Route by id: walk groups newest-first, calls newest-first,
+                // so parallel calls each land in their own slot.
+                let target = self.blocks.iter().enumerate().rev().find_map(|(gi, blk)| {
+                    if let ChatBlock::ToolGroup { calls, .. } = blk {
+                        calls.iter().rposition(|c| c.id == *id).map(|ci| (gi, ci))
+                    } else {
+                        None
+                    }
+                });
+                match target {
+                    Some((gi, ci)) => {
+                        if let ChatBlock::ToolGroup { calls, .. } = &mut self.blocks[gi] {
+                            let c = &mut calls[ci];
+                            c.output.extend(out);
+                            if let Some(started) = c.started_at_ms {
+                                c.elapsed_ms = Some(
+                                    ((opencoder_core::message::now_ms() - started).max(0)) as u64,
+                                );
+                            }
+                        }
+                    }
+                    None => {
+                        // Orphan ToolEnd (lost ToolStart): synthesize a
+                        // finished single-call group so the output is kept.
+                        self.blocks.push(ChatBlock::ToolGroup {
+                            calls: vec![ToolCall {
+                                id: id.clone(),
+                                header: Line::from(Span::styled(
+                                    "\u{25b8} (output)",
+                                    Style::default().fg(theme::accent()),
+                                )),
+                                output: out,
+                                started_at_ms: None,
+                                elapsed_ms: Some(0),
+                            }],
+                            state: ToolGroupState::Collapsed,
+                        });
+                    }
                 }
                 // Render tool-returned images inline after the text output.
                 for url in images {
@@ -385,24 +406,31 @@ impl ChatView {
         }
     }
 
-    /// Toggle collapse on the tool-output block at `block_idx` (mouse click
-    /// handler). No-op if the index is out of range or not a Tool block.
-    pub fn toggle_tool_at(&mut self, block_idx: usize) {
-        if let Some(ChatBlock::Tool { collapsed, .. }) = self.blocks.get_mut(block_idx) {
-            *collapsed = !*collapsed;
+    /// Cycle the tool group at `block_idx` through its three display states:
+    /// Collapsed → List → Results → Collapsed (mouse click handler). No-op if
+    /// the index is out of range or not a ToolGroup block.
+    pub fn cycle_tool_group_at(&mut self, block_idx: usize) {
+        if let Some(ChatBlock::ToolGroup { state, .. }) = self.blocks.get_mut(block_idx) {
+            *state = match *state {
+                ToolGroupState::Collapsed => ToolGroupState::List,
+                ToolGroupState::List => ToolGroupState::Results,
+                ToolGroupState::Results => ToolGroupState::Collapsed,
+            };
         }
     }
 
-    /// Collapse every collapsible block (Thinking + Tool output) in this view.
-    /// Bound to Ctrl+L: clears any expanded reasoning/tool-output blocks in one
-    /// keystroke (also applied to a child subagent view before exiting it).
+    /// Collapse every collapsible block (Thinking + Compaction + ToolGroup)
+    /// in this view. Bound to Ctrl+L: clears any expanded reasoning blocks and
+    /// resets every tool group to Collapsed in one keystroke (also applied to
+    /// a child subagent view before exiting it).
     pub fn collapse_all_collapsible(&mut self) {
         for block in &mut self.blocks {
             match block {
-                ChatBlock::Thinking { collapsed, .. }
-                | ChatBlock::Tool { collapsed, .. }
-                | ChatBlock::Compaction { collapsed, .. } => {
+                ChatBlock::Thinking { collapsed, .. } | ChatBlock::Compaction { collapsed, .. } => {
                     *collapsed = true;
+                }
+                ChatBlock::ToolGroup { state, .. } => {
+                    *state = ToolGroupState::Collapsed;
                 }
                 _ => {}
             }
@@ -529,41 +557,58 @@ impl ChatView {
                         Style::default().fg(theme::compaction_color()),
                     ));
                 }
-                ChatBlock::Tool {
-                    header,
-                    output,
-                    collapsed,
-                    ..
-                } => {
-                    if *collapsed {
-                        let n = output.len();
-                        let mut spans = header.spans.clone();
-                        if n > 0 {
+                ChatBlock::ToolGroup { calls, state } => {
+                    let n = calls.len();
+                    // Group line: `▸ N function calls` (arrow flips to ▾ once
+                    // expanded) + a live spinner hint while any call in the
+                    // group is still running.
+                    let arrow = if matches!(state, ToolGroupState::Collapsed) {
+                        "\u{25b8}"
+                    } else {
+                        "\u{25be}"
+                    };
+                    let mut spans = vec![Span::styled(
+                        format!(
+                            "{arrow} {n} function call{} ",
+                            if n == 1 { "" } else { "s" }
+                        ),
+                        Style::default()
+                            .fg(theme::accent())
+                            .add_modifier(Modifier::BOLD),
+                    )];
+                    if calls.iter().any(|c| c.elapsed_ms.is_none()) {
+                        spans.push(Span::styled(
+                            format!("{} running ", SPINNER[(anim_tick as usize) % SPINNER.len()]),
+                            Style::default().fg(theme::warn_color()),
+                        ));
+                    }
+                    match state {
+                        ToolGroupState::Collapsed => {
+                            out.push(Line::from(spans));
+                        }
+                        ToolGroupState::List => {
                             spans.push(Span::styled(
-                                format!(" [\u{2193} {n}]"),
+                                "[\u{2193}]",
                                 Style::default().fg(theme::muted()),
                             ));
+                            out.push(Line::from(spans));
+                            for c in calls {
+                                out.extend(types::indented(std::slice::from_ref(&c.header), 2));
+                            }
+                            out.push(Line::from(""));
                         }
-                        out.push(Line::from(spans));
-                    } else {
-                        let mut spans = header.spans.clone();
-                        // Expanded: flip the header's leading prefix arrow
-                        // from U+25B8 (right-pointing) to U+25BE (down-
-                        // pointing) so the prefix mirrors the toggle state.
-                        if let Some(first) = spans.first_mut() {
-                            let flipped = match first.content.strip_prefix('\u{25b8}') {
-                                Some(rest) => format!("\u{25be}{rest}"),
-                                None => first.content.to_string(),
-                            };
-                            first.content = flipped.into();
+                        ToolGroupState::Results => {
+                            spans.push(Span::styled(
+                                "[\u{2191}]",
+                                Style::default().fg(theme::muted()),
+                            ));
+                            out.push(Line::from(spans));
+                            for c in calls {
+                                out.extend(types::indented(std::slice::from_ref(&c.header), 2));
+                                out.extend(c.output.iter().cloned());
+                                out.push(Line::from(""));
+                            }
                         }
-                        spans.push(Span::styled(
-                            " [\u{2191}]",
-                            Style::default().fg(theme::muted()),
-                        ));
-                        out.push(Line::from(spans));
-                        out.extend(output.iter().cloned());
-                        out.push(Line::from(""));
                     }
                 }
                 ChatBlock::Image { filename, rendered } => {
@@ -606,8 +651,11 @@ impl ChatView {
                     let tool_count = view
                         .blocks
                         .iter()
-                        .filter(|b| matches!(b, ChatBlock::Tool { .. }))
-                        .count();
+                        .filter_map(|b| match b {
+                            ChatBlock::ToolGroup { calls, .. } => Some(calls.len()),
+                            _ => None,
+                        })
+                        .sum::<usize>();
                     // Status badge: animated spinner/check/cross/cancelled +
                     // word. The running spinner uses the live anim_tick.
                     let (mark, mark_color, status_word) = if *cancelled {

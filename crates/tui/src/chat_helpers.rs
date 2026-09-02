@@ -114,31 +114,34 @@ impl ChatView {
 
 /// Add bash-command helper methods to [`ChatView`].
 impl ChatView {
-    /// Push a placeholder `ChatBlock::Tool` for a `!cmd` execution.
-    /// The block is expanded (not collapsed) so the user sees the command
-    /// running. Call [`finish_bash_tool`] to fill in the output.
+    /// Push a placeholder single-call `ChatBlock::ToolGroup` for a `!cmd`
+    /// execution. The group starts in the Results state so the user sees the
+    /// command running with its output. Call [`finish_bash_tool`] to fill in
+    /// the output and collapse the group.
     pub(crate) fn push_bash_tool(&mut self, cmd: &str) {
         use crate::theme;
         use ratatui::style::{Modifier, Style};
         use ratatui::text::{Line, Span};
         self.finalize_assistant();
-        self.blocks.push(crate::chat::ChatBlock::Tool {
-            id: format!("bash-{}", now_ms()),
-            header: Line::from(Span::styled(
-                format!("\u{25b8} {}", sanitize_single_line(cmd)),
-                Style::default()
-                    .fg(theme::accent())
-                    .add_modifier(Modifier::BOLD),
-            )),
-            output: Vec::new(),
-            collapsed: false,
-            started_at_ms: now_ms(),
-            elapsed_ms: None,
+        self.blocks.push(crate::chat::ChatBlock::ToolGroup {
+            calls: vec![crate::chat::ToolCall {
+                id: format!("bash-{}", now_ms()),
+                header: Line::from(Span::styled(
+                    format!("\u{25b8} {}", sanitize_single_line(cmd)),
+                    Style::default()
+                        .fg(theme::accent())
+                        .add_modifier(Modifier::BOLD),
+                )),
+                output: Vec::new(),
+                started_at_ms: Some(now_ms()),
+                elapsed_ms: None,
+            }],
+            state: crate::chat::ToolGroupState::Results,
         });
     }
 
-    /// Fill the output of the most recent unfinished `bash-` tool block,
-    /// collapse it, and record elapsed time.
+    /// Fill the output of the most recent unfinished `bash-` tool call,
+    /// collapse its group, and record elapsed time.
     pub(crate) fn finish_bash_tool(&mut self, output: &str) {
         use crate::chat::TOOL_OUTPUT_LINES;
         use crate::terminal_text::sanitize_multiline;
@@ -157,22 +160,28 @@ impl ChatView {
                 ))
             })
             .collect();
-        if let Some(crate::chat::ChatBlock::Tool {
-            output: o,
-            started_at_ms,
-            elapsed_ms,
-            collapsed,
-            ..
-        }) = self.blocks.iter_mut().rev().find(|b| {
-            matches!(
-                b,
-                crate::chat::ChatBlock::Tool { id, elapsed_ms, .. }
-                    if id.starts_with("bash-") && elapsed_ms.is_none()
-            )
-        }) {
-            *o = out;
-            *elapsed_ms = Some(((ts - *started_at_ms).max(0)) as u64);
-            *collapsed = true;
+        // Newest group holding an unfinished `bash-` call.
+        let target = self.blocks.iter().enumerate().rev().find_map(|(gi, blk)| {
+            if let crate::chat::ChatBlock::ToolGroup { calls, .. } = blk {
+                calls
+                    .iter()
+                    .position(|c| c.id.starts_with("bash-") && c.elapsed_ms.is_none())
+                    .map(|ci| (gi, ci))
+            } else {
+                None
+            }
+        });
+        if let Some((gi, ci)) = target {
+            if let crate::chat::ChatBlock::ToolGroup { calls, state } = &mut self.blocks[gi] {
+                let c = &mut calls[ci];
+                c.output = out;
+                if let Some(started) = c.started_at_ms {
+                    c.elapsed_ms = Some(((ts - started).max(0)) as u64);
+                }
+                // Equivalent of the old "collapse once finished": back to the
+                // single group line.
+                *state = crate::chat::ToolGroupState::Collapsed;
+            }
         }
     }
 }

@@ -396,10 +396,13 @@ pub(crate) async fn cancel_running_turn(
     *follow = true;
 }
 
-/// Fire an armed clear-context confirm. While running the compound command
-/// text queues verbatim (the runner applies it at the idle boundary, tail
-/// included); idle starts the control-command turn now, mirroring the
-/// `dispatch_mode_switch` Run arm.
+/// Fire an armed clear-context confirm at its (unattended) expiry or from
+/// idle. While running the compound command text queues verbatim (the runner
+/// applies it at the idle boundary, tail included) with an explicit queued
+/// marker so the fire is never silent; idle starts the control-command turn
+/// now, mirroring the `dispatch_mode_switch` Run arm. Manual confirmation
+/// (second Shift+Tab / Enter) routes through [`fire_clear_confirm_now`]
+/// instead — it interrupts the running turn rather than queueing.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn fire_clear_confirm(
     cc: crate::clear_confirm::ClearConfirm,
@@ -430,6 +433,13 @@ pub(crate) async fn fire_clear_confirm(
             pending_images,
             session_id,
         );
+        // Unattended expiry is conservative (queue at the idle boundary), so
+        // the queue panel row alone could read as a swallowed key — echo the
+        // deferral into the transcript explicitly.
+        chat.push_marker(Line::from(Span::styled(
+            "[clear] 已排队——当前轮结束后执行\u{2026}",
+            Style::default().fg(theme::warn_color()),
+        )));
         crate::app_helpers::push_history(history, hist_idx, &text);
         return LoopFlow::Proceed;
     }
@@ -455,12 +465,53 @@ pub(crate) async fn fire_clear_confirm(
     LoopFlow::Proceed
 }
 
-/// Armed-guard key handling with all side effects: fire early on Enter
-/// (`fire_clear_confirm`) — the composer text typed during the live window
-/// merges into the compound rest first, so a submission executes right away
-/// with what was typed — cancel on Esc (回撤 marker + draft restore), let
-/// plain editing keys through. Returns true when the worker died firing
-/// (caller quits).
+/// Manual confirmation (a second Shift+Tab or Enter on the armed guard)
+/// fires NOW instead of queueing: a human explicitly asked for the fold, so
+/// the running turn is interrupted first — cancel token + child cancels +
+/// interrupted marker, the same `cancel_running_turn` semantics as the
+/// double-Esc hard-abort — and the clear turn starts immediately on the
+/// fresh idle path. The unattended expiry (`confirm_tick`) keeps the
+/// conservative queue-at-idle-boundary semantics: nobody confirmed, so the
+/// in-flight turn is never killed on a timer.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn fire_clear_confirm_now(
+    cc: crate::clear_confirm::ClearConfirm,
+    cmd_tx: &mpsc::Sender<UiCmd>,
+    cancel: &mut CancellationToken,
+    running: &mut bool,
+    follow: &mut bool,
+    chat: &mut ChatView,
+    sys_tokens: &mut u64,
+    mode_flash: &mut Option<(String, u32)>,
+    anim_tick: u32,
+    workdir: &Path,
+    admit_tx: &mpsc::Sender<crate::queue_admitter::AdmitReq>,
+    admit_st: &mut crate::queue_admitter::AdmitUiState,
+    queue_items: &mut Vec<(i64, String)>,
+    pending_images: &mut Vec<(String, String)>,
+    session_id: &str,
+    history: &mut Vec<String>,
+    hist_idx: &mut Option<usize>,
+    child_runtime: &mut crate::worker::ChildRuntimeHandles,
+    cancelled: &mut bool,
+) -> LoopFlow {
+    if *running {
+        cancel_running_turn(chat, cancel, child_runtime, running, cancelled, follow).await;
+    }
+    fire_clear_confirm(
+        cc, cmd_tx, cancel, running, follow, chat, sys_tokens, mode_flash, anim_tick, workdir,
+        admit_tx, admit_st, queue_items, pending_images, session_id, history, hist_idx,
+    )
+    .await
+}
+
+/// Armed-guard key handling with all side effects: fire early on Enter or a
+/// second Shift+Tab (`fire_clear_confirm_now` — a manual confirm interrupts
+/// the running turn and starts the clear turn immediately) — the composer
+/// text typed during the live window merges into the compound rest first, so
+/// a submission executes right away with what was typed — cancel on Esc (回撤
+/// marker + draft restore), let plain editing keys through. Returns true when
+/// the worker died firing (caller quits).
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn handle_confirm_key(
     clear_confirm: &mut Option<crate::clear_confirm::ClearConfirm>,
@@ -484,6 +535,8 @@ pub(crate) async fn handle_confirm_key(
     session_id: &str,
     history: &mut Vec<String>,
     hist_idx: &mut Option<usize>,
+    child_runtime: &mut crate::worker::ChildRuntimeHandles,
+    cancelled: &mut bool,
 ) -> bool {
     match crate::clear_confirm::intercept(clear_confirm, input, cursor_idx, undo_state, k) {
         Some(crate::clear_confirm::ConfirmFlow::Fire) => {
@@ -496,7 +549,7 @@ pub(crate) async fn handle_confirm_key(
                 *cursor_idx = 0;
                 crate::undo::reset(undo_state, input, 0);
                 return matches!(
-                    fire_clear_confirm(
+                    fire_clear_confirm_now(
                         cc,
                         cmd_tx,
                         cancel,
@@ -514,6 +567,8 @@ pub(crate) async fn handle_confirm_key(
                         session_id,
                         history,
                         hist_idx,
+                        child_runtime,
+                        cancelled,
                     )
                     .await,
                     LoopFlow::Quit

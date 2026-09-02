@@ -20,7 +20,7 @@ use crate::chat::ChatView;
 use crate::render::SPINNER;
 use crate::theme;
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
 /// Countdown window before the armed clear-context fires on its own.
 pub(crate) const CLEAR_CONFIRM_WINDOW_MS: u64 = 5_000;
@@ -165,6 +165,14 @@ pub(crate) fn intercept(
     undo_state: &mut crate::undo::UndoState,
     k: KeyEvent,
 ) -> Option<ConfirmFlow> {
+    // Kitty event-types terminals (REPORT_EVENT_TYPES) deliver BOTH the
+    // Press and the Release half of every key. The Release half must never
+    // act: a released Shift+Tab would fire the guard the instant the chord
+    // lands — the countdown would never be visible. Plain terminals emit
+    // Press-only events, so this guard is a no-op there.
+    if k.kind == KeyEventKind::Release {
+        return None;
+    }
     match k.code {
         KeyCode::Enter => {
             // Shift+Enter / Alt+Enter still insert a newline (multi-line
@@ -298,6 +306,37 @@ mod tests {
 
     fn key(code: KeyCode) -> KeyEvent {
         KeyEvent::new(code, KeyModifiers::empty())
+    }
+
+    fn released(code: KeyCode, mods: KeyModifiers) -> KeyEvent {
+        KeyEvent::new_with_kind(code, mods, crossterm::event::KeyEventKind::Release)
+    }
+
+    /// Kitty event-types terminals deliver Press + Release for every key;
+    /// the Release half must never act — otherwise a released Shift+Tab
+    /// fires the guard the instant the chord lands and the countdown never
+    /// shows, and a released Enter double-fires after the Press already did.
+    #[test]
+    fn release_events_never_fire_or_edit() {
+        let mut cc: Option<ClearConfirm> = Some(arm(Some("rest".into()), None));
+        let mut input = String::new();
+        let mut cursor = 0;
+        let mut undo = crate::undo::UndoState::default();
+        for k in [
+            released(KeyCode::BackTab, KeyModifiers::empty()),
+            released(KeyCode::Tab, KeyModifiers::SHIFT),
+            released(KeyCode::Enter, KeyModifiers::empty()),
+            released(KeyCode::Esc, KeyModifiers::empty()),
+            released(KeyCode::Char('x'), KeyModifiers::empty()),
+        ] {
+            assert_eq!(
+                intercept(&mut cc, &mut input, &mut cursor, &mut undo, k),
+                None,
+                "Release half must stay inert: {k:?}"
+            );
+        }
+        assert!(cc.is_some(), "the arm survives every Release");
+        assert_eq!(input, "", "a released char must not edit the composer");
     }
 
     #[test]

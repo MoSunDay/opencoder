@@ -186,8 +186,8 @@ fn body_and_pointer(session: &SessionState) -> (Option<Message>, Option<String>)
 /// it, hence the explicit name check.
 ///
 /// The `[active skill]` section is a FALLBACK pointer, not a standing
-/// announcement: while the armed skill's body is in the transcript
-/// ([`body_message`], injected once by [`ensure_body_once`]), the pointer
+/// announcement: once the armed skill's body has been delivered
+/// ([`deliver_body_once`], exactly once per activation), the pointer
 /// would only make the model parrot "the <skill> skill is active" on every
 /// turn, so it stays silent. It fires solely for an armed skill
 /// whose parsed body is empty, where pointing at the source file is the
@@ -271,11 +271,12 @@ pub fn injectable_body(body: &str, path: &str) -> String {
 /// Build the ONE-SHOT skill body message: the ACTIVE skills' paths + merged
 /// body (marker block + blank line + [`injectable_body`] output), or `None`
 /// when there is nothing to ship. Pure: derived from session state alone,
-/// `synthetic=true`. The caller records it to the transcript exactly once
-/// ([`ensure_body_once`]; runners carry it via the transcript from then on),
-/// and run end (`skill_lifecycle::clear_on_run_end`) drops the skill, which
-/// stops further submissions. A compound prompt (`$A $B`) ships as ONE
-/// message keyed by the whole path set; bodies over ~20K tokens ship
+/// `synthetic=true`. [`deliver_body_once`] ships it EXACTLY ONCE per
+/// activation by flipping the session's delivery gate — the message is
+/// transient (never recorded to the transcript or store), and run end
+/// (`skill_lifecycle::clear_on_run_end`) drops the skill and resets the
+/// gate, stopping further deliveries. A compound prompt (`$A $B`) ships as
+/// ONE message keyed by the whole path set; bodies over ~20K tokens ship
 /// truncated with a continuation notice.
 pub fn body_message(session: &SessionState) -> Option<Message> {
     body_and_pointer(session).0

@@ -41,15 +41,24 @@ fn marker_n(n: usize) -> ChatBlock {
     ChatBlock::Marker((0..n).map(|_| Line::from(Span::raw(""))).collect())
 }
 
-/// Build a collapsed tool block (header + output). Collapsed tool emits 1 line.
+/// Build one tool call with `out_lines` output lines.
+fn tool_call(id: &str, out_lines: usize) -> ToolCall {
+    ToolCall {
+        id: id.into(),
+        header: Line::from(Span::raw(format!("\u{25b8} {id}"))),
+        output: (0..out_lines)
+            .map(|_| Line::from(Span::raw("out")))
+            .collect(),
+        started_at_ms: Some(0),
+        elapsed_ms: Some(0),
+    }
+}
+
+/// Build a single-call collapsed tool group. Collapsed group emits 1 line.
 fn tool_collapsed() -> ChatBlock {
-    ChatBlock::Tool {
-        id: "t".into(),
-        header: Line::from(Span::raw("bash")),
-        output: vec![Line::from(Span::raw("hi"))],
-        collapsed: true,
-        started_at_ms: 0,
-        elapsed_ms: None,
+    ChatBlock::ToolGroup {
+        calls: vec![tool_call("t", 1)],
+        state: ToolGroupState::Collapsed,
     }
 }
 
@@ -100,17 +109,17 @@ fn assert_line_accounting_matches(view: &ChatView) {
                     expected += text.lines().count();
                 }
             }
-            ChatBlock::Tool {
-                header,
-                output,
-                collapsed,
-                ..
-            } => {
-                if *collapsed {
-                    expected += 1;
-                } else {
-                    expected += 1 + output.len() + 1;
-                    let _ = header;
+            ChatBlock::ToolGroup { calls, state } => {
+                // Mirrors the ToolGroup arm in collect_headers.
+                expected += 1;
+                match state {
+                    ToolGroupState::Collapsed => {}
+                    ToolGroupState::List => expected += calls.len() + 1,
+                    ToolGroupState::Results => {
+                        for c in calls {
+                            expected += 2 + c.output.len();
+                        }
+                    }
                 }
             }
             ChatBlock::Image { rendered, .. } => {
@@ -242,11 +251,11 @@ fn mixed_sequence_alignment() {
         "header_line_idx {idx} out of range (flat len {})",
         flat.len()
     );
-    // The line at that index must carry the tool header content "bash".
+    // The line at that index must be the group line (call count).
     let line_text: String = flat[idx].spans.iter().map(|s| s.content.clone()).collect();
     assert!(
-        line_text.contains("bash"),
-        "header_line_idx {idx} points at {:?}, expected the tool header",
+        line_text.contains("1 function call"),
+        "header_line_idx {idx} points at {:?}, expected the tool group line",
         line_text
     );
     // Expected tool header position = 3 + 4 + 2 + 3 + 3 + 1 = 16.
@@ -268,5 +277,54 @@ fn empty_image_followed_by_tool_alignment() {
     // After fix: header at index 3 (0=image header,1=placeholder,2=blank,3=tool).
     assert_eq!(idx, 3);
     let line_text: String = flat[idx].spans.iter().map(|s| s.content.clone()).collect();
-    assert!(line_text.contains("bash"), "got {:?}", line_text);
+    assert!(line_text.contains("1 function call"), "got {:?}", line_text);
+}
+
+#[test]
+fn tool_group_three_state_alignment() {
+    // The ToolGroup line accounting must match flatten_with in EVERY display
+    // state — this is the invariant that keeps click hit-rects aligned.
+    // 2 calls with 1 and 2 output lines:
+    //   Collapsed = 1; List = 1 + 2 + 1; Results = 1 + (2+1) + (2+2).
+    let mk = |state| {
+        view_with(vec![
+            ChatBlock::ToolGroup {
+                calls: vec![tool_call("a", 1), tool_call("b", 2)],
+                state,
+            },
+            marker_n(1),
+        ])
+    };
+    let v = mk(ToolGroupState::Collapsed);
+    assert_line_accounting_matches(&v);
+    assert_eq!(v.flatten().len(), 1 + 1);
+
+    let v = mk(ToolGroupState::List);
+    assert_line_accounting_matches(&v);
+    assert_eq!(v.flatten().len(), 1 + 2 + 1 + 1);
+
+    let v = mk(ToolGroupState::Results);
+    assert_line_accounting_matches(&v);
+    assert_eq!(v.flatten().len(), 1 + 3 + 4 + 1);
+}
+
+#[test]
+fn tool_group_running_call_keeps_alignment() {
+    // An unfinished call (elapsed_ms == None) adds a spinner SPAN to the
+    // group line — never an extra line. Accounting must stay identical.
+    let v = view_with(vec![
+        ChatBlock::ToolGroup {
+            calls: vec![ToolCall {
+                id: "r".into(),
+                header: Line::from(Span::raw("\u{25b8} bash")),
+                output: Vec::new(),
+                started_at_ms: Some(0),
+                elapsed_ms: None,
+            }],
+            state: ToolGroupState::Collapsed,
+        },
+        marker_n(1),
+    ]);
+    assert_line_accounting_matches(&v);
+    assert_eq!(v.flatten().len(), 2);
 }

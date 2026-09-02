@@ -48,6 +48,12 @@ async fn slash_action_compact_idle_starts_turn() {
     let mut sys_tokens = 0u64;
     let (cmd_tx, mut cmd_rx) = mpsc::channel::<UiCmd>(64);
     let mut cancel = CancellationToken::new();
+    let mut admit_st = crate::queue_admitter::AdmitUiState::default();
+    let (admit_tx, _admit_rx) = mpsc::channel(8);
+    let mut queue_items: Vec<(i64, String)> = Vec::new();
+    let mut pending_images: Vec<(String, String)> = Vec::new();
+    let mut history: Vec<String> = Vec::new();
+    let mut hist_idx: Option<usize> = None;
 
     let flow = dispatch_slash_action(
         SlashAction::Compact,
@@ -75,6 +81,12 @@ async fn slash_action_compact_idle_starts_turn() {
         &mut None,
         &mut None,
         &mut None,
+        &admit_tx,
+        &mut admit_st,
+        &mut queue_items,
+        &mut pending_images,
+        &mut history,
+        &mut hist_idx,
     )
     .await;
 
@@ -110,6 +122,12 @@ async fn slash_action_compact_running_pushes_busy_marker() {
     let mut sys_tokens = 0u64;
     let (cmd_tx, mut cmd_rx) = mpsc::channel::<UiCmd>(64);
     let mut cancel = CancellationToken::new();
+    let mut admit_st = crate::queue_admitter::AdmitUiState::default();
+    let (admit_tx, mut admit_rx) = mpsc::channel(8);
+    let mut queue_items: Vec<(i64, String)> = Vec::new();
+    let mut pending_images: Vec<(String, String)> = Vec::new();
+    let mut history: Vec<String> = Vec::new();
+    let mut hist_idx: Option<usize> = None;
 
     let flow = dispatch_slash_action(
         SlashAction::Compact,
@@ -137,6 +155,12 @@ async fn slash_action_compact_running_pushes_busy_marker() {
         &mut None,
         &mut None,
         &mut None,
+        &admit_tx,
+        &mut admit_st,
+        &mut queue_items,
+        &mut pending_images,
+        &mut history,
+        &mut hist_idx,
     )
     .await;
 
@@ -145,6 +169,10 @@ async fn slash_action_compact_running_pushes_busy_marker() {
     assert!(
         cmd_rx.try_recv().is_err(),
         "no command should be sent while a turn is running"
+    );
+    assert!(
+        admit_rx.try_recv().is_err(),
+        "compact is not a control command: nothing queues"
     );
     assert!(
         chat.blocks.iter().any(|b| matches!(
@@ -176,6 +204,12 @@ async fn slash_action_skill_parses_and_opens_toggle_menu() {
     let mut sys_tokens = 0u64;
     let (cmd_tx, mut cmd_rx) = mpsc::channel::<UiCmd>(64);
     let mut cancel = CancellationToken::new();
+    let mut admit_st = crate::queue_admitter::AdmitUiState::default();
+    let (admit_tx, mut admit_rx) = mpsc::channel(8);
+    let mut queue_items: Vec<(i64, String)> = Vec::new();
+    let mut pending_images: Vec<(String, String)> = Vec::new();
+    let mut history: Vec<String> = Vec::new();
+    let mut hist_idx: Option<usize> = None;
 
     assert_eq!(crate::command::parse("/skill"), Some(SlashAction::Skill));
     assert_eq!(crate::command::parse("/sk"), Some(SlashAction::Skill));
@@ -206,6 +240,12 @@ async fn slash_action_skill_parses_and_opens_toggle_menu() {
         &mut None,
         &mut None,
         &mut None,
+        &admit_tx,
+        &mut admit_st,
+        &mut queue_items,
+        &mut pending_images,
+        &mut history,
+        &mut hist_idx,
     )
     .await;
 
@@ -221,6 +261,7 @@ async fn slash_action_skill_parses_and_opens_toggle_menu() {
         cmd_rx.try_recv().is_err(),
         "opening the modal must not send a UiCmd"
     );
+    assert!(admit_rx.try_recv().is_err(), "menu dispatch must not queue");
 }
 
 /// `/ap` parses to `SlashAction::Ap` and the dispatch opens the tri-state
@@ -244,6 +285,12 @@ async fn slash_action_ap_parses_and_opens_mode_menu() {
     let mut sys_tokens = 0u64;
     let (cmd_tx, mut cmd_rx) = mpsc::channel::<UiCmd>(64);
     let mut cancel = CancellationToken::new();
+    let mut admit_st = crate::queue_admitter::AdmitUiState::default();
+    let (admit_tx, mut admit_rx) = mpsc::channel(8);
+    let mut queue_items: Vec<(i64, String)> = Vec::new();
+    let mut pending_images: Vec<(String, String)> = Vec::new();
+    let mut history: Vec<String> = Vec::new();
+    let mut hist_idx: Option<usize> = None;
 
     assert_eq!(crate::command::parse("/ap"), Some(SlashAction::Ap));
 
@@ -273,6 +320,12 @@ async fn slash_action_ap_parses_and_opens_mode_menu() {
         &mut None,
         &mut None,
         &mut None,
+        &admit_tx,
+        &mut admit_st,
+        &mut queue_items,
+        &mut pending_images,
+        &mut history,
+        &mut hist_idx,
     )
     .await;
 
@@ -287,4 +340,5 @@ async fn slash_action_ap_parses_and_opens_mode_menu() {
         cmd_rx.try_recv().is_err(),
         "opening the modal must not send a UiCmd"
     );
+    assert!(admit_rx.try_recv().is_err(), "menu dispatch must not queue");
 }

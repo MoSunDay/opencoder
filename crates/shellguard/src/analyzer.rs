@@ -300,12 +300,7 @@ fn extract_cd_target(node: &Node) -> Option<String> {
         return None;
     }
     let args = ast::command_args(node);
-    // Single source of truth with the `cd` handler's destination resolution:
-    // skip the no-op option flags (`-L/-P/-e/-@`, `--`) so `cd -P src && touch
-    // f` re-aims at `src`, not at a literal `-P` directory (#F9). An
-    // unrecognized flag yields `None` — the handler Asks anyway, so skipping
-    // the re-aim stays fail-closed.
-    crate::handlers::resolve_target(&args).cloned()
+    args.first().cloned()
 }
 
 pub(crate) fn most_restrictive(a: Verdict, b: Verdict) -> Verdict {

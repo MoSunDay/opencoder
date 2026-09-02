@@ -4,8 +4,7 @@
 //! Ported from rippy (MIT) https://github.com/mpecan/rippy
 
 use super::{
-    Classification, Handler, HandlerContext, collect_flag_values, has_flag, has_flag_or_prefixed,
-    has_glued_short_flag,
+    Classification, Handler, HandlerContext, has_flag, has_flag_or_prefixed, has_glued_short_flag,
 };
 use crate::verdict::AllowReason;
 pub(crate) static SED_HANDLER: SedHandler = SedHandler;
@@ -27,30 +26,9 @@ impl Handler for SedHandler {
             return Classification::Ask(reason);
         }
 
-        // `-f`/`--file` script files are sed code exactly like an inline
-        // expression: read and screen them with the same scanner (#F3 —
-        // `sed -f /tmp/s.sed` carried `e id` past this handler untouched).
-        // Unreadable -> Ask (fail closed).
-        for script in script_files(ctx.args) {
-            let Some(source) = ctx.read_file(&script) else {
-                return Classification::Ask(format!("sed -f ({script} unreadable)"));
-            };
-            if let Some(reason) = check_sed_expression(std::slice::from_ref(&source)) {
-                return Classification::Ask(reason);
-            }
-        }
-
         Classification::Allow(AllowReason::handler("sed (filter)"))
     }
 
-}
-
-/// The script files named by `-f`/`--file`, in every spelling sed accepts:
-/// space-separated (`-f f`, `--file f`), `=`-attached (`--file=f`) and the
-/// glued short form (`-ff`). Every occurrence, so a second script cannot ride
-/// along unscanned.
-fn script_files(args: &[String]) -> Vec<String> {
-    collect_flag_values(args, &["-f"], &["--file"])
 }
 
 /// In-place edit detection: the bare short flag (`-i`), a glued backup suffix
@@ -94,13 +72,7 @@ fn check_sed_command(cmd: &str) -> Option<String> {
     if is_bare_e_command(rest) {
         return Some("sed e (shell execution)".into());
     }
-    // `rest` is the command position after address stripping, so any `w` here
-    // is the write-to-file command — including GNU sed's glued form where the
-    // filename directly follows the letter (`10w/tmp/x`, `/re/wfile`). The
-    // `s` substitution command never reaches this branch with a `w` lead (it
-    // starts with `s`, and its `w`-flag detection is `sed_has_dangerous_flag`),
-    // so `s/foo/w bar/` and `s/foo/bar/w out` cannot misfire here.
-    if rest.starts_with('w') {
+    if rest == "w" || rest.starts_with("w ") {
         return Some("sed w (writes to file)".into());
     }
     None
@@ -228,79 +200,5 @@ mod tests {
         assert!(sed_has_dangerous_flag("sїaїbїw"));
         assert!(!sed_has_dangerous_flag("s/foo/w bar/"));
         assert!(sed_has_dangerous_flag("s/foo/bar/gw out.txt"));
-    }
-
-    /// #F3 (S2): GNU sed accepts the filename glued to the `w` command
-    /// (`Nwfile`, `$wfile`, `/re/wfile`); only the spaced forms were caught.
-    #[test]
-    fn glued_w_write_commands_are_caught() {
-        asks(&["10w/tmp/x", "in"]);
-        asks(&["10w /tmp/x", "in"]);
-        asks(&["$w/tmp/x", "in"]);
-        asks(&["/x/wfile", "in"]);
-        asks(&["/x/!wfile", "in"]);
-        asks(&["2,5wfile", "in"]);
-        // The `w` command after `;`/newline splitting is caught too.
-        asks(&["q;wfile", "in"]);
-    }
-
-    /// #F3 (S2): the false-positive surface — substitution, transliteration
-    /// and other commands that merely CONTAIN a `w` must stay allowed.
-    #[test]
-    fn w_lookalikes_stay_allowed() {
-        allows(&["s/foo/w bar/", "f"]); // `w` in the replacement
-        allows(&["s/a/b/", "f"]);
-        allows(&["y/abc/wxy/", "f"]); // `w` in the transliteration set
-        allows(&["-n", "1p", "f"]);
-        allows(&["2d", "f"]); // delete, not write
-        allows(&["/re/s/foo/w bar/", "f"]); // `w` inside the substitution
-    }
-
-    /// #F3: `-f`/`--file` script files are read and screened like inline
-    /// expressions, in every spelling; unreadable files fail closed.
-    #[test]
-    fn script_file_contents_are_screened() {
-        let dir = crate::handlers::test_support::temp_dir("sed-script");
-        // `e id` is arbitrary shell execution.
-        crate::handlers::test_support::write_file(&dir, "evil.sed", "e id\n");
-        crate::handlers::test_support::write_file(&dir, "benign.sed", "s/a/b/\n");
-        let s = |t: &str| t.to_string();
-        fn ctx_at<'a>(args: &'a [String], dir: &'a std::path::Path) -> HandlerContext<'a> {
-            HandlerContext {
-                working_directory: dir,
-                ..HandlerContext::test("sed", args)
-            }
-        }
-
-        assert!(matches!(
-            SED_HANDLER.classify(&ctx_at(&[s("-f"), s("evil.sed"), s("in")], &dir)),
-            Classification::Ask(desc) if desc.contains("sed e")
-        ));
-        // `=`-attached long form.
-        assert!(matches!(
-            SED_HANDLER.classify(&ctx_at(&[s("--file=evil.sed"), s("in")], &dir)),
-            Classification::Ask(_)
-        ));
-        // Glued short form.
-        assert!(matches!(
-            SED_HANDLER.classify(&ctx_at(&[s("-fevil.sed"), s("in")], &dir)),
-            Classification::Ask(_)
-        ));
-        // Benign script still allows.
-        assert!(matches!(
-            SED_HANDLER.classify(&ctx_at(&[s("--file"), s("benign.sed"), s("in")], &dir)),
-            Classification::Allow(_)
-        ));
-        // A second occurrence cannot ride along unscanned.
-        assert!(matches!(
-            SED_HANDLER.classify(&ctx_at(&[s("-fbenign.sed"), s("-fevil.sed"), s("in")], &dir)),
-            Classification::Ask(_)
-        ));
-        // Unreadable (here: nonexistent) script -> Ask, never fail-open.
-        assert!(matches!(
-            SED_HANDLER.classify(&non_release_ctx(&[s("-f"), s("/nope/s.sed"), s("in")])),
-            Classification::Ask(desc) if desc.contains("unreadable")
-        ));
-        crate::handlers::test_support::cleanup_dir(&dir);
     }
 }

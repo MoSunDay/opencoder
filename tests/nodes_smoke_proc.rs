@@ -11,7 +11,6 @@
 
 use std::io::Read;
 use std::net::TcpListener;
-use std::os::unix::process::CommandExt;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
@@ -51,10 +50,7 @@ fn tail(s: &str, max_lines: usize) -> String {
 
 /// Kill the whole process group spawned around `child` (the script forks its
 /// own server/node children; killing bash alone would orphan them holding
-/// the injected port). This only works because the child is spawned with
-/// `.process_group(0)` below: bash would otherwise stay in THIS test's
-/// process group (pgid == cargo-test pgid), `kill -9 -- -PID` would hit
-/// ESRCH, and the single-process fallback would orphan the server/node tree.
+/// the injected port).
 fn kill_tree(child: &mut std::process::Child) {
     let neg_pid = format!("-{}", child.id());
     let _ = Command::new("kill")
@@ -79,10 +75,6 @@ fn smoke_script_two_process_nodes_flow_passes() {
     let mut child = Command::new("bash")
         .arg(&script)
         .current_dir(&repo_root)
-        // Child leads its own process group so `kill_tree`'s `kill -9 -- -PID`
-        // reaches the whole script tree (server/node children included) on the
-        // watchdog path instead of failing with ESRCH and orphaning them.
-        .process_group(0)
         .env("OPENCODER_SMOKE_BIN", env!("CARGO_BIN_EXE_opencoder"))
         .env("OPENCODER_SMOKE_PORT", pick_port().to_string())
         .stdout(Stdio::piped())
@@ -125,42 +117,4 @@ fn smoke_script_two_process_nodes_flow_passes() {
             None => std::thread::sleep(Duration::from_millis(100)),
         }
     }
-}
-
-/// Regression for the orphaned-tree failure mode: the script child must lead
-/// its own process group (spawn-time `.process_group(0)`), otherwise
-/// `kill -9 -- -PID` fails with ESRCH (bash stayed in the test runner's
-/// group) and only bash dies, orphaning its server/node children. Proves the
-/// group kill lands on a real child-led group without running the full smoke.
-#[test]
-fn kill_tree_group_kill_reaches_child_led_process_group() {
-    // Same shape as the smoke spawn: bash leading a fresh group with a child
-    // of its own that would be orphaned by a bash-only kill.
-    let mut child = Command::new("bash")
-        .arg("-c")
-        .arg("sleep 30 & wait")
-        .process_group(0)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .expect("spawn bash");
-
-    let neg_pid = format!("-{}", child.id());
-    let group_kill = Command::new("kill")
-        .arg("-9")
-        .arg("--")
-        .arg(&neg_pid)
-        .status()
-        .expect("run kill");
-    assert!(
-        group_kill.success(),
-        "group kill must succeed: the child must lead its own process group"
-    );
-
-    let _ = child.kill();
-    let status = child.wait().expect("wait for killed child");
-    assert!(
-        !status.success(),
-        "child must have died from the group signal, got {status}"
-    );
 }

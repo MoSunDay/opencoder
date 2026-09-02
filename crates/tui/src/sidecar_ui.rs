@@ -27,47 +27,27 @@ use crate::worker::{persist_event, UiEvent};
 /// answers serially, and a deep backlog would surprise the user.
 const ASK_CHANNEL_CAPACITY: usize = 8;
 
-/// Payload of the ask channel. Besides a question, the UI loop forwards a
-/// `Reset` whenever the main transcript was rebuilt (`TranscriptReset` —
-/// compaction / `/act_clear_context`): the live conversation snapshot the
-/// pre-reset transcript and its display blocks were wiped from the rebuilt
-/// view, so the conversation must be dropped — the next question re-snapshots
-/// the fresh transcript and emits a new `SidecarStart` (a new block).
-#[derive(Debug, Clone)]
-pub(crate) enum SidecarAsk {
-    Question(String),
-    Reset,
-}
-
 /// Spawn the resident sidecar actor for `session`. Returns the ask sender;
-/// a [`SidecarAsk::Question`] text must be non-empty (empty is the bare
-/// `/sidecar` focus-only form and is handled entirely in the UI layer).
-/// The actor exits once every sender clone is dropped (e.g. after a `/task`
-/// switch, which also respawns a fresh actor — history never crosses sessions).
+/// the question text must be non-empty (empty is the bare `/sidecar`
+/// focus-only form and is handled entirely in the UI layer). The actor exits
+/// once every sender clone is dropped (e.g. after a `/task` switch).
 pub(crate) fn spawn_actor(
     session: &SessionState,
     evt_tx: mpsc::Sender<UiEvent>,
     store: Option<Arc<dyn Store>>,
-) -> mpsc::Sender<SidecarAsk> {
+) -> mpsc::Sender<String> {
     // Capture everything the actor needs before the session moves into the
     // worker task (`SessionState` is not `Clone` by design).
     let config = session.config.clone();
     let client = session.client.clone();
     let working_dir = session.working_dir.clone();
     let session_id = session.id.clone();
-    let (ask_tx, mut ask_rx) = mpsc::channel::<SidecarAsk>(ASK_CHANNEL_CAPACITY);
+    let (ask_tx, mut ask_rx) = mpsc::channel::<String>(ASK_CHANNEL_CAPACITY);
     tokio::spawn(async move {
-        // One conversation per actor; follow-ups continue it until a Reset.
+        // One conversation per actor; follow-ups continue it.
         let mut conv: Option<SidecarConv> = None;
-        while let Some(msg) = ask_rx.recv().await {
-            let question = match msg {
-                SidecarAsk::Reset => {
-                    conv = None;
-                    continue;
-                }
-                SidecarAsk::Question(q) => q,
-            };
-            let question = question.trim().to_string();
+        while let Some(raw) = ask_rx.recv().await {
+            let question = raw.trim().to_string();
             if question.is_empty() {
                 continue; // focus-only ask: nothing to run
             }
@@ -114,13 +94,6 @@ pub(crate) fn spawn_actor(
             // persisted after the turn (the FnMut callback cannot await).
             let usage: Arc<Mutex<Vec<SessionEvent>>> = Arc::new(Mutex::new(Vec::new()));
             let usage_for_cb = usage.clone();
-            // Terminal frames (`SidecarTurn` — the child's own failure is
-            // always expressed as `SidecarTurn { ok: false }`) are buffered
-            // here and delivered with awaited `send`s after the turn: a
-            // lossy `try_send` under UI-channel backpressure would drop the
-            // final frame and leave the block stuck "running" forever.
-            let terminal: Arc<Mutex<Vec<SessionEvent>>> = Arc::new(Mutex::new(Vec::new()));
-            let terminal_for_cb = terminal.clone();
             let tx_for_cb = evt_tx.clone();
             let mut on_event = move |ev: SessionEvent| {
                 if matches!(ev, SessionEvent::LlmUsage { .. }) {
@@ -128,30 +101,14 @@ pub(crate) fn spawn_actor(
                         g.push(ev.clone());
                     }
                 }
-                if matches!(ev, SessionEvent::SidecarTurn { .. }) {
-                    if let Ok(mut t) = terminal_for_cb.lock() {
-                        t.push(ev);
-                    }
-                    return;
-                }
-                // Display path for high-frequency deltas: best-effort; the
-                // bounded UI channel may shed them under pressure (usage
-                // records persist regardless).
+                // Display path: best-effort; the bounded UI channel may shed
+                // deltas under pressure (usage records persist regardless).
                 let _ = tx_for_cb.try_send(UiEvent::Session(ev));
             };
-            let turn_failed = run_sidecar_turn(active, &question, &mut on_event)
+            if run_sidecar_turn(active, &question, &mut on_event)
                 .await
-                .is_err();
-            // Awaited delivery of the terminal frame(s): ordered after the
-            // turn's deltas (already queued by the closure above). The buffer
-            // is cloned out of the lock first — the guard must never be held
-            // across the awaits below (the actor future has to stay Send).
-            let terminal_frames: Vec<SessionEvent> =
-                terminal.lock().map(|t| t.clone()).unwrap_or_default();
-            for ev in terminal_frames {
-                let _ = evt_tx.send(UiEvent::Session(ev)).await;
-            }
-            if turn_failed {
+                .is_err()
+            {
                 // The turn's own sink normally reports the outcome; a hard
                 // actor-level failure still owes the UI a terminal frame.
                 let _ = evt_tx

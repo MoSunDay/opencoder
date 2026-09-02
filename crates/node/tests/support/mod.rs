@@ -59,10 +59,6 @@ pub struct Inner {
     /// early; once the instant passes (or it was never set) the beat is
     /// served normally.
     pub hang_heartbeats_until: Option<Instant>,
-    /// Same wedge simulation for claim polls (claim budget tests). Parked
-    /// claims touch no shared state and hand out nothing; once the instant
-    /// passes the poll is served normally.
-    pub hang_claims_until: Option<Instant>,
 }
 
 pub struct Stub {
@@ -139,14 +135,6 @@ impl Stub {
     pub fn hang_heartbeats_for(&self, d: Duration) {
         self.lock().hang_heartbeats_until = Some(Instant::now() + d);
     }
-
-    /// Make every claim poll park for `d` before answering. Callers with a
-    /// claim budget shorter than `d` observe a client-side timeout; polls
-    /// arriving after the window lapses are served normally, which is what
-    /// makes the recovery assertions deterministic.
-    pub fn hang_claims_for(&self, d: Duration) {
-        self.lock().hang_claims_until = Some(Instant::now() + d);
-    }
 }
 
 /// Tiny unique-suffix helper (avoids an extra dev-only dependency).
@@ -212,13 +200,6 @@ pub struct ClaimQuery {
 }
 
 async fn claim(State(st): State<Arc<Stub>>, Query(q): Query<ClaimQuery>) -> Response {
-    let hang_until = st.lock().hang_claims_until;
-    if let Some(until) = hang_until {
-        let now = Instant::now();
-        if now < until {
-            tokio::time::sleep(until - now).await;
-        }
-    }
     let mut g = st.lock();
     // Server contract: durable task preferred; control rides along only when
     // no durable task was due. 204 when both absent.

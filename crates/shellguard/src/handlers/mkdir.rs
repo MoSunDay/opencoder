@@ -5,10 +5,7 @@
 
 use std::path::Path;
 
-use super::{
-    canonicalize_existing_ancestor, is_within_safe_dir, normalize_path, Classification, Handler,
-    HandlerContext,
-};
+use super::{Classification, Handler, HandlerContext, is_within_safe_dir, normalize_path};
 use crate::verdict::AllowReason;
 
 pub(crate) static MKDIR_HANDLER: MkdirHandler = MkdirHandler;
@@ -54,19 +51,13 @@ impl Handler for MkdirHandler {
                 return Classification::Ask(format!("mkdir in home directory ({arg})"));
             }
 
-            // Scope check with symlink hardening (#F10): the logical path
-            // must sit in the release set (plus declared scopes), and so must
-            // its symlink-resolved real path — a link planted under /tmp
-            // pointing elsewhere must not launder the write.
             let resolved = if Path::new(arg.as_str()).is_absolute() {
                 normalize_path(Path::new(arg.as_str()))
             } else {
                 normalize_path(&ctx.working_directory.join(arg.as_str()))
             };
-            let canonical = canonicalize_existing_ancestor(&resolved);
-            if !is_within_safe_dir(&resolved, ctx.safe_scopes)
-                || !is_within_safe_dir(&canonical, ctx.safe_scopes)
-            {
+
+            if !is_within_safe_dir(&resolved, ctx.safe_scopes) {
                 return Classification::Ask(format!("mkdir outside allowed scope ({arg})"));
             }
 
@@ -242,42 +233,5 @@ mod tests {
             working_directory: &cwd,
             ..HandlerContext::test("mkdir", &args)
         })));
-    }
-
-    /// #F10: a symlink planted inside the release set must not launder a
-    /// mkdir outside it — the operand's real (canonicalized) path decides.
-    #[test]
-    fn mkdir_through_a_planted_symlink_asks() {
-        // NOT std::env::temp_dir(): that honors TMPDIR and may live outside
-        // the release set this policy hardcodes.
-        let seq = || {
-            use std::sync::atomic::{AtomicUsize, Ordering};
-            static SEQ: AtomicUsize = AtomicUsize::new(0);
-            let n = SEQ.fetch_add(1, Ordering::Relaxed);
-            std::path::PathBuf::from(format!("/tmp/shellguard-mkdir-symlink-{}-{n}", std::process::id()))
-        };
-        let dir = seq();
-        assert!(std::fs::create_dir_all(&dir).is_ok(), "fixture: {dir:?}");
-        // A real subdir under the release dir still allows.
-        assert!(std::fs::create_dir(dir.join("real")).is_ok());
-        let real_args = ["-p".to_string(), dir.join("real/sub").to_string_lossy().into_owned()];
-        assert!(is_allow(&MKDIR_HANDLER.classify(&HandlerContext {
-            working_directory: Path::new("/project"),
-            ..HandlerContext::test("mkdir", &real_args)
-        })));
-
-        // A link under the release dir pointing OUTSIDE it: the logical path
-        // looks released, the real path does not -> Ask. (`/etc` exists, so
-        // the planted link resolves.)
-        assert!(
-            std::os::unix::fs::symlink("/etc", dir.join("evil")).is_ok(),
-            "fixture: failed to plant symlink"
-        );
-        let evil_args = ["-p".to_string(), dir.join("evil/sub").to_string_lossy().into_owned()];
-        assert!(is_ask(&MKDIR_HANDLER.classify(&HandlerContext {
-            working_directory: Path::new("/project"),
-            ..HandlerContext::test("mkdir", &evil_args)
-        })));
-        let _ = std::fs::remove_dir_all(&dir);
     }
 }

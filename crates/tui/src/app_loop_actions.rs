@@ -383,10 +383,15 @@ pub(crate) async fn fire_clear_confirm(
     let name = crate::clear_confirm::CLEAR_CONTEXT_CMD.trim_start_matches('/');
     *sys_tokens = sys_tokens_for(name, workdir, None);
     *mode_flash = Some((format!("\u{2192} {name} mode"), anim_tick));
-    if !start_turn(cmd_tx, cancel, UiCmd::Prompt(text, Vec::new())).await {
+    // Idle fire mirrors the submit path: pending_images snapshot rides along
+    // with the compound prompt and the stash is cleared — leftovers would
+    // otherwise silently attach to the user's NEXT ordinary submission.
+    let image_uris = crate::app_helpers::snapshot_image_uris(pending_images);
+    if !start_turn(cmd_tx, cancel, UiCmd::Prompt(text, image_uris)).await {
         worker_dead(chat);
         return LoopFlow::Quit;
     }
+    pending_images.clear();
     *running = true;
     *follow = true;
     chat.begin_turn();

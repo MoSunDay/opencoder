@@ -10,7 +10,7 @@ use opencoder_session::{SessionEvent, SessionState};
 use opencoder_store::{LibsqlStore, Store};
 use tokio::sync::mpsc;
 
-use crate::sidecar_ui::spawn_actor;
+use crate::sidecar_ui::{spawn_actor, SidecarAsk};
 use crate::worker::UiEvent;
 
 const SID: &str = "actor-sid";
@@ -116,14 +116,14 @@ async fn sidecar_actor_answers_follow_ups_without_persisting_content() {
     let ask = spawn_actor(&session, evt_tx, Some(store.clone()));
 
     // Question 1: lazily builds the conversation (snapshot + SidecarStart).
-    ask.send("第一个问题?".into()).await.unwrap();
+    ask.send(SidecarAsk::Question("第一个问题?".into())).await.unwrap();
     wait_until("first SidecarTurn", || {
         !sidecar_turns(&seen.lock().unwrap()).is_empty()
     })
     .await;
 
     // Question 2: the SAME conversation continues (exactly one SidecarStart).
-    ask.send("第二个问题?".into()).await.unwrap();
+    ask.send(SidecarAsk::Question("第二个问题?".into())).await.unwrap();
     wait_until("second SidecarTurn", || {
         sidecar_turns(&seen.lock().unwrap()).len() >= 2
     })
@@ -226,4 +226,103 @@ async fn llm_usage_row_count(store: &Arc<dyn Store>) -> usize {
         .iter()
         .filter(|r| r.sse_kind.as_deref() == Some("llm_usage"))
         .count()
+}
+
+/// F3: a `TranscriptReset` (compaction / `/act_clear_context`) rebuilds the
+/// main view and wipes the zero-persistence sidecar blocks, while the actor's
+/// conversation still snapshots the PRE-reset transcript. The `Reset` signal
+/// must drop that conversation: the next question opens a FRESH conversation
+/// (new `SidecarStart` → the UI gets a new block again) instead of emitting
+/// orphan Child/Turn frames for the old id that the rebuilt view swallows.
+#[tokio::test]
+async fn sidecar_reset_reopens_conversation_with_fresh_start() {
+    let store = seeded_store().await;
+    let mock = Arc::new(
+        MockChatClient::new()
+            .push_script(vec![done("重置前答案", 5)])
+            .push_script(vec![done("重置后答案", 9)]),
+    );
+    let session = SessionState::new(
+        SID,
+        resolve_agent("act").unwrap(),
+        Config::default(),
+        mock.clone(),
+        std::env::temp_dir(),
+    );
+    let (evt_tx, evt_rx) = mpsc::channel::<UiEvent>(256);
+    let seen = collector(evt_rx);
+    let ask = spawn_actor(&session, evt_tx, Some(store.clone()));
+
+    // First conversation: one Start, one Turn, single id.
+    ask.send(SidecarAsk::Question("重置前问题?".into())).await.unwrap();
+    wait_until("pre-reset SidecarTurn", || {
+        !sidecar_turns(&seen.lock().unwrap()).is_empty()
+    })
+    .await;
+
+    // The main transcript was folded and re-persisted (TranscriptReset path).
+    store
+        .append_messages(SID, &[Message::user("m3", "重置后的新背景")])
+        .await
+        .unwrap();
+
+    // UI-side rebuild signal: drop the pre-reset conversation.
+    ask.send(SidecarAsk::Reset).await.unwrap();
+
+    // Follow-up AFTER the reset: must open a NEW conversation, not emit
+    // orphan frames for the old (swallowed) id.
+    ask.send(SidecarAsk::Question("重置后问题?".into())).await.unwrap();
+    wait_until("post-reset SidecarTurn", || {
+        sidecar_turns(&seen.lock().unwrap()).len() >= 2
+    })
+    .await;
+    drop(ask);
+
+    let events = seen.lock().unwrap().clone();
+    let starts: Vec<(String, String)> = events
+        .iter()
+        .filter_map(|ev| match ev {
+            SessionEvent::SidecarStart { id, question } => {
+                Some((id.clone(), question.clone()))
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        starts.len(),
+        2,
+        "the post-reset question must emit a fresh SidecarStart, starts: {starts:?}"
+    );
+    assert_ne!(
+        starts[0].0, starts[1].0,
+        "the rebuilt conversation must carry a new id"
+    );
+    assert_eq!(starts[1].1, "重置后问题?");
+
+    // Both turns belong to their own conversation's id — no cross-talk.
+    let turns: Vec<String> = events
+        .iter()
+        .filter_map(|ev| match ev {
+            SessionEvent::SidecarTurn { id, .. } => Some(id.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(turns.len(), 2);
+    assert_eq!(turns[0], starts[0].0);
+    assert_eq!(turns[1], starts[1].0);
+
+    // The fresh conversation re-snapshots the store: its context carries the
+    // post-reset transcript rows, never the pre-reset Q/A (same assertion
+    // style as the continuity test above — JSON of the request messages).
+    let reqs = mock.requests();
+    assert_eq!(reqs.len(), 2, "one LLM round per question");
+    let second = serde_json::to_string(&reqs[1].messages).unwrap();
+    assert!(
+        second.contains("重置后的新背景"),
+        "the fresh conversation snapshots the POST-reset transcript"
+    );
+    assert!(
+        second.contains("重置后问题?"),
+        "the new question is asked in the fresh conversation"
+    );
 }

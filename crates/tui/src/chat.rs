@@ -192,22 +192,28 @@ impl ChatView {
                     }
                     None => {
                         // Orphan ToolEnd (lost ToolStart): synthesize a
-                        // finished single-call step group so the output is
-                        // kept.
-                        self.blocks.push(steps::single_step_group(
-                            ToolCall {
-                                id: id.clone(),
-                                header: Line::from(Span::styled(
-                                    "\u{25b8} (output)",
-                                    Style::default().fg(theme::accent()),
-                                )),
-                                output: out,
-                                started_at_ms: None,
-                                elapsed_ms: Some(0),
-                                expanded: false,
-                            },
-                            Vec::new(),
-                        ));
+                        // finished single-call step so the output is kept,
+                        // folded into the trailing group when one exists —
+                        // the same fold replay's `coalesce_steps` applies to
+                        // adjacent groups — so the transcript renders
+                        // identically before and after resume.
+                        let call = ToolCall {
+                            id: id.clone(),
+                            header: Line::from(Span::styled(
+                                "\u{25b8} (output)",
+                                Style::default().fg(theme::accent()),
+                            )),
+                            output: out,
+                            started_at_ms: None,
+                            elapsed_ms: Some(0),
+                            expanded: false,
+                        };
+                        match self.blocks.last_mut() {
+                            Some(ChatBlock::StepGroup { steps: s, .. }) => {
+                                steps::merge_or_new_step(s, Vec::new(), call)
+                            }
+                            _ => self.blocks.push(steps::single_step_group(call, Vec::new())),
+                        }
                     }
                 }
                 // Render tool-returned images inline after the text output.
@@ -442,12 +448,6 @@ impl ChatView {
         if let Some(ChatBlock::StepGroup { open, .. }) = self.blocks.get_mut(block_idx) {
             *open = !*open;
         }
-    }
-
-    /// Legacy alias kept for the mouse handlers: clicking a group row toggles
-    /// the whole group.
-    pub fn cycle_tool_group_at(&mut self, block_idx: usize) {
-        self.toggle_step_group_at(block_idx);
     }
 
     /// Toggle the click target at flat index `call_idx` inside the StepGroup

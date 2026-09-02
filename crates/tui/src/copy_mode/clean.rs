@@ -41,6 +41,9 @@ pub(crate) enum LineKind {
     PlanHeader,
     /// `❯ Step(n)` / `▸ Step(n)` step row — dropped (chrome).
     StepRow,
+    /// `▸ N steps` / `▾ N steps` group row (optionally + spinner span) —
+    /// dropped (chrome).
+    GroupRow,
 }
 
 /// Classify a rendered line and report its decoration slot width in
@@ -99,7 +102,40 @@ fn classify_spans(spans: &[Span<'_>]) -> Option<(LineKind, usize)> {
             return Some((LineKind::CodeTop, 0));
         }
     }
+    if is_group_row(spans) {
+        return Some((LineKind::GroupRow, 0));
+    }
     None
+}
+
+/// `true` for a StepGroup's group row: one span `▸ N steps` / `▾ N steps`
+/// (count non-empty), optionally followed by the `⠋ running ` spinner span.
+/// The label is pure navigation chrome — a markdown row could only collide
+/// by being exactly such a label (same caveat as StepRow).
+fn is_group_row(spans: &[Span<'_>]) -> bool {
+    let (label, spinner) = match spans {
+        [label] => (label, None),
+        [label, spinner] => (label, Some(spinner)),
+        _ => return false,
+    };
+    if spinner.is_some_and(|sp| !sp.content.ends_with("running ")) {
+        return false;
+    }
+    let t = label.content.as_ref();
+    let Some(body) = t
+        .strip_prefix('\u{25b8}')
+        .or_else(|| t.strip_prefix('\u{25be}'))
+        .and_then(|b| b.strip_prefix(' '))
+    else {
+        return false;
+    };
+    let Some(count) = body
+        .strip_suffix(" steps")
+        .or_else(|| body.strip_suffix(" step"))
+    else {
+        return false;
+    };
+    !count.is_empty() && count.bytes().all(|b| b.is_ascii_digit())
 }
 
 /// Width of `s` when it is a pure ASCII-space gutter span of 1..=8 columns.
@@ -131,7 +167,8 @@ pub fn clean_line(line: &Line<'_>) -> Option<String> {
         | LineKind::CodeBottom
         | LineKind::Rule
         | LineKind::PlanHeader
-        | LineKind::StepRow => None,
+        | LineKind::StepRow
+        | LineKind::GroupRow => None,
         // Code payloads stay verbatim (only the `│ `/`│` slot goes); text
         // rows additionally lose a `▎ ` quote prefix inside their first
         // content span, since blockquotes push it into the text span.
@@ -399,5 +436,34 @@ mod tests {
     fn plain_text_concatenates_spans() {
         assert_eq!(plain_text(&line_of(&["a", "b", "c"])), "abc");
         assert_eq!(plain_text(&Line::from("")), "");
+    }
+
+    #[test]
+    fn step_group_rows_are_dropped_with_and_without_spinner() {
+        run(&[
+            ("closed group", &["\u{25b8} 1 step"], None),
+            ("open group plural", &["\u{25be} 3 steps"], None),
+            ("group + spinner", &["\u{25b8} 2 steps", "\u{280b} running "], None),
+        ]);
+    }
+
+    #[test]
+    fn group_row_lookalikes_survive() {
+        run(&[
+            ("no count", &["\u{25b8} step"], Some("\u{25b8} step")),
+            ("non-digit count", &["\u{25b8} x steps"], Some("\u{25b8} x steps")),
+            ("missing arrow", &["1 step"], Some("1 step")),
+            (
+                "spinner-less tail span is not a group row",
+                &["\u{25b8} 2 steps", "extra"],
+                Some("\u{25b8} 2 stepsextra"),
+            ),
+            // Three spans can never be a group row (label + spinner max).
+            (
+                "three spans",
+                &["\u{25b8} 2 steps", "\u{280b} running ", "x"],
+                Some("\u{25b8} 2 steps\u{280b} running x"),
+            ),
+        ]);
     }
 }

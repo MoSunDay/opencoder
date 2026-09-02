@@ -498,11 +498,21 @@ fn seeded_task_plan_skill_requires_question_tool_guidance() {
     for guidance in [
         "澄清协议",
         "question",
-        "可在同一轮多问",
+        "同一轮可对多个独立决策点分别调用",
         "不把提问当侦察手段",
         "assumptions:",
     ] {
         assert!(body.contains(guidance), "task-plan missing `{guidance}`");
+    }
+    // Full parameter + usage contract lives IN the skill text (the user's
+    // single documentation surface); the tool JSON schema stays minimal.
+    for usage in [
+        "`question`（string，必填）",
+        "`options`（string[]，可选）",
+        r#"调用示例：`{"question":"#,
+        "工具结果即用户所选答案或原文答复",
+    ] {
+        assert!(body.contains(usage), "task-plan missing `{usage}`");
     }
 }
 

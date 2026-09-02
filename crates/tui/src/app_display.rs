@@ -12,9 +12,9 @@ use crate::chat::{ChatBlock, ChatView};
 use crate::theme;
 
 /// Display width (terminal columns) of the jump-to-top `⬆` arrow label on the
-/// body's top-border row: `"    ⬆    "` (4 spaces + wide ⬆ + 4 spaces). Must
+/// body's top-border row: `"    ⬆    "` (4 spaces + 1-col ⬆ + 4 spaces). Must
 /// stay in sync with the literal rendered in `render.rs` (guarded by a test).
-pub(super) const TOP_ARROW_W: u16 = 10;
+pub(super) const TOP_ARROW_W: u16 = 9;
 
 /// Compose the top-level body title `Line` for the non-subagent view.
 ///
@@ -226,7 +226,7 @@ mod tests {
 
     /// `TOP_ARROW_W` must match the literal rendered in `render.rs` so the
     /// `compose_top_title` padding reserves exactly the arrow's display width.
-    /// The label is `"    ⬆    "` (4 spaces + wide ⬆ + 4 spaces).
+    /// The label is `"    ⬆    "` (4 spaces + 1-col ⬆ + 4 spaces).
     #[test]
     fn top_arrow_width_matches_label() {
         assert_eq!(

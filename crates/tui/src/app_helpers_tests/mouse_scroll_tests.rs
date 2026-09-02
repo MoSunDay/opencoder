@@ -4,7 +4,7 @@
 
 use super::mouse_helpers::*;
 use crate::app_helpers::*;
-use crossterm::event::KeyModifiers;
+use crossterm::event::{KeyModifiers, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
 
 fn scroll_down() -> MouseEvent {
@@ -54,7 +54,7 @@ async fn scrolldown_in_subagent_view_uses_child_content() {
     let mut subagent_focus = Some(sub_idx);
     let mut subagent_sys = 0u64;
     let mut queue_items: Vec<(i64, String)> = Vec::new();
-    let store = StubStore;
+    let store = StubStore::default();
     let mut queue_scroll: u32 = 0;
 
     handle_mouse(
@@ -100,7 +100,7 @@ async fn scrolldown_uses_parent_when_no_subagent_focused() {
     let mut subagent_focus: Option<usize> = None;
     let mut subagent_sys = 0u64;
     let mut queue_items: Vec<(i64, String)> = Vec::new();
-    let store = StubStore;
+    let store = StubStore::default();
     let mut queue_scroll: u32 = 0;
 
     handle_mouse(
@@ -157,7 +157,7 @@ async fn scrollup_advances_faster_than_default() {
     let mut subagent_sys = 0u64;
     let mut queue_items: Vec<(i64, String)> = vec![];
     let mut queue_scroll: u32 = 0;
-    let store = StubStore;
+    let store = StubStore::default();
 
     handle_mouse(
         scroll_up(),

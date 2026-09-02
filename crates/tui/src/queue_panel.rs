@@ -138,7 +138,8 @@ pub(crate) fn apply_swap(items: &mut [(i64, String)], a: i64, b: i64) {
 /// `" \u{25b2} \u{25bc} \u{2715}"` occupies the last 6 columns, so the glyphs
 /// sit at `width-5` (up), `width-3` (down), `width-1` (delete). The renderer
 /// pads the row's head to `width-6` so the strip lands exactly here, keeping
-/// the visible glyph position aligned with the hit rect. Callers must only
+/// the visible glyph position aligned with the hit rect (each glyph's rect
+/// spans `[glyph_x-1, glyph_x]` via `glyph_hit_rect`). Callers must only
 /// invoke this for clickable rows (`width > 10`), so the subtraction is safe.
 pub(crate) fn btn_x_offsets(width: u16) -> [u16; 3] {
     [width - 5, width - 3, width - 1]
@@ -148,10 +149,20 @@ pub(crate) fn btn_x_offsets(width: u16) -> [u16; 3] {
 /// control glyphs for a panel of the given width. The 4-wide trailing strip
 /// `" \u{2715} >"` occupies the last 4 columns, so delete sits at `width-3`
 /// and submit at `width-1`. Mirrors `btn_x_offsets` but for the shorter
-/// steer-row control strip. Callers must only invoke this for clickable rows
+/// steer-row control strip (rects span `[glyph_x-1, glyph_x]` via
+/// `glyph_hit_rect`). Callers must only invoke this for clickable rows
 /// (`width > 8`), so the subtraction is safe.
 pub(crate) fn steer_btn_x_offsets(width: u16) -> [u16; 2] {
     [width - 3, width - 1]
+}
+
+/// Hit rect for one control glyph: two cells wide, covering the separator
+/// space to the glyph's left plus the glyph itself. Width > 1 keeps a click
+/// alive against small pad/width drift so a near-miss on the glyph column
+/// still lands. `glyph_x` is the glyph column relative to the panel's left
+/// edge; always >= 1 for clickable rows, so no underflow is possible.
+pub(crate) fn glyph_hit_rect(area_x: u16, glyph_x: u16, y: u16) -> Rect {
+    Rect::new(area_x + glyph_x.saturating_sub(1), y, 2, 1)
 }
 
 /// Compute the visible window of the queue/steer panel: which entry index the
@@ -237,8 +248,8 @@ pub(crate) fn render_queue_panel(
     // Clickable rows reserve a trailing control strip. Queue rows use a
     // 6-column strip (" \u{25b2} \u{25bc} \u{2715}": up/down/delete); steer
     // rows use a 4-column strip (" \u{2715} >": delete/submit). Very narrow
-    // terminals render without controls. Each control glyph gets a 1-cell
-    // hit rect.
+    // terminals render without controls. Each control glyph gets a 2-cell
+    // hit rect (separator space + glyph).
     for e in visible {
         let btn_w = if e.is_steer { 4usize } else { 6usize };
         let clickable = e.seq.is_some() && avail_w > btn_w + 4;
@@ -270,12 +281,12 @@ pub(crate) fn render_queue_panel(
                 btns.push(QueueBtn {
                     seq,
                     action: QueueBtnAction::Delete,
-                    rect: Rect::new(area.x + del_x, y, 1, 1),
+                    rect: glyph_hit_rect(area.x, del_x, y),
                 });
                 btns.push(QueueBtn {
                     seq,
                     action: QueueBtnAction::Submit,
-                    rect: Rect::new(area.x + sub_x, y, 1, 1),
+                    rect: glyph_hit_rect(area.x, sub_x, y),
                 });
             } else {
                 // Queue row: " ▲ ▼ ✕" — up/down/delete.
@@ -287,17 +298,17 @@ pub(crate) fn render_queue_panel(
                 btns.push(QueueBtn {
                     seq,
                     action: QueueBtnAction::Up,
-                    rect: Rect::new(area.x + up_x, y, 1, 1),
+                    rect: glyph_hit_rect(area.x, up_x, y),
                 });
                 btns.push(QueueBtn {
                     seq,
                     action: QueueBtnAction::Down,
-                    rect: Rect::new(area.x + down_x, y, 1, 1),
+                    rect: glyph_hit_rect(area.x, down_x, y),
                 });
                 btns.push(QueueBtn {
                     seq,
                     action: QueueBtnAction::Delete,
-                    rect: Rect::new(area.x + del_x, y, 1, 1),
+                    rect: glyph_hit_rect(area.x, del_x, y),
                 });
             }
         }
@@ -387,6 +398,33 @@ mod tests {
         apply_swap(&mut it, 10, 30);
         let seqs: Vec<i64> = it.iter().map(|(s, _)| *s).collect();
         assert_eq!(seqs, vec![30, 20, 10]);
+    }
+
+    #[test]
+    fn glyph_hit_rect_spans_separator_and_glyph() {
+        // Two cells wide, ending exactly on the glyph column.
+        assert_eq!(glyph_hit_rect(10, 79, 4), Rect::new(88, 4, 2, 1));
+
+        // Steer strip: the delete and submit rects stay disjoint.
+        let [del_x, sub_x] = steer_btn_x_offsets(80);
+        let del = glyph_hit_rect(0, del_x, 0);
+        let sub = glyph_hit_rect(0, sub_x, 0);
+        assert!(del.x + del.width <= sub.x, "steer rects must not overlap");
+
+        // Queue strip: three disjoint rects ending inside the content area.
+        let [up_x, down_x, del_x] = btn_x_offsets(80);
+        let rects = [
+            glyph_hit_rect(0, up_x, 0),
+            glyph_hit_rect(0, down_x, 0),
+            glyph_hit_rect(0, del_x, 0),
+        ];
+        for w in rects.windows(2) {
+            assert!(
+                w[0].x + w[0].width <= w[1].x,
+                "queue rects must not overlap"
+            );
+        }
+        assert_eq!(rects[2].x + rects[2].width, 80);
     }
 
     #[test]

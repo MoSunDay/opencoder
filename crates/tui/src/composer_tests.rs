@@ -312,19 +312,51 @@ fn char_width_zero_width_combining_and_joiners() {
 }
 
 #[test]
-fn char_width_extended_wide_emoji_ranges() {
-    assert_eq!(char_width('⌚'), 2); // U+231A watch
-    assert_eq!(char_width('⏩'), 2); // U+23E9 fast-forward
-    assert_eq!(char_width('\u{25FD}'), 2); // U+25FD white medium small square
-    assert_eq!(char_width('☔'), 2); // U+2614 umbrella with rain
-    assert_eq!(char_width('♑'), 2); // U+2651 capricorn (zodiac)
-    assert_eq!(char_width('♿'), 2); // U+267F wheelchair
-    assert_eq!(char_width('✂'), 2); // U+2702 scissors
-    assert_eq!(char_width('\u{2934}'), 2); // U+2934 arrow pointing rightwards
-    assert_eq!(char_width('⭐'), 2); // U+2B50 star
-    assert_eq!(char_width('⬅'), 2); // U+2B05 left arrow
-    assert_eq!(char_width('📋'), 2); // U+1F4CB clipboard (existing range)
+fn char_width_matches_unicode_width_oracle() {
+    // `char_width` delegates to unicode-width — the same width oracle ratatui
+    // lays out with. These pins guard against any regression to the old
+    // hand-written approximation, whose dingbat guesses (2 columns) pushed
+    // the queue panel's control strip off its hit rects.
+
+    // Dingbats / symbols that render 1 column (the old model guessed 2):
+    assert_eq!(char_width('\u{2715}'), 1); // ✕ delete glyph
+    assert_eq!(char_width('\u{2713}'), 1); // ✓ check mark
+    assert_eq!(char_width('\u{2702}'), 1); // ✂ scissors
+    assert_eq!(char_width('\u{2764}'), 1); // ❤ heart (text presentation)
+    assert_eq!(char_width('\u{2934}'), 1); // north-east arrow
+    assert_eq!(char_width('\u{2B05}'), 1); // ⬅ left arrow
+    assert_eq!(char_width('\u{2B06}'), 1); // ⬆ up arrow
+
+    // Genuinely wide (2 columns):
+    assert_eq!(char_width('\u{231A}'), 2); // ⌚ watch
+    assert_eq!(char_width('\u{23E9}'), 2); // ⏩ fast-forward
+    assert_eq!(char_width('\u{25FD}'), 2); // small square
+    assert_eq!(char_width('\u{2614}'), 2); // ☔ umbrella with rain
+    assert_eq!(char_width('\u{2651}'), 2); // ♑ capricorn
+    assert_eq!(char_width('\u{267F}'), 2); // ♿ wheelchair
+    assert_eq!(char_width('\u{2B50}'), 2); // ⭐ star
+    assert_eq!(char_width('\u{1F4CB}'), 2); // 📋 clipboard
+    assert_eq!(char_width('\u{4E2D}'), 2); // 中 CJK ideograph
     assert_eq!(char_width('\u{20000}'), 2); // CJK extension B (plane 2)
+
+    // Control characters are invisible (width 0):
+    assert_eq!(char_width('\u{0}'), 0);
+    assert_eq!(char_width('\u{1F}'), 0);
+    assert_eq!(char_width('\u{9B}'), 0); // C1 (CSI)
+}
+
+#[test]
+fn str_width_is_sequence_aware_like_ratatui() {
+    // str-level width must match what ratatui renders: presentation
+    // sequences collapse to one wide glyph, not a per-char sum.
+    assert_eq!(str_width("\u{2715}"), 1); // ✕ delete glyph (regression pin)
+    assert_eq!(str_width("\u{2764}\u{FE0F}"), 2); // ❤️ = one 2-col emoji
+    assert_eq!(str_width("\u{2764}"), 1); // ❤ without VS16 stays 1 col
+    assert_eq!(str_width("\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}"), 2); // ZWJ family emoji renders as one glyph
+    assert_eq!(str_width("\u{1F1F9}\u{1F1FC}"), 2); // regional flag
+    assert_eq!(str_width("1\u{FE0F}\u{20E3}"), 2); // keycap sequence
+    assert_eq!(str_width("e\u{0300}"), 1); // decomposed e-grave
+    assert_eq!(str_width("a\u{0308}b"), 2); // a + diaeresis + b
 }
 
 #[test]

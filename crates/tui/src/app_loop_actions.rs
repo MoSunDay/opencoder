@@ -328,10 +328,6 @@ pub(crate) async fn dispatch_slash_action(
             // conversation, so the next question sees a fresh snapshot.
             crate::sidecar_ui::enter_panel(chat, sidecar_ask);
             *follow = true;
-            *mode_flash = Some((
-                crate::sidecar_ui::SIDECAR_ENTER_FLASH.to_string(),
-                anim_tick,
-            ));
         }
     }
     LoopFlow::Proceed
@@ -499,8 +495,23 @@ pub(crate) async fn fire_clear_confirm_now(
         cancel_running_turn(chat, cancel, child_runtime, running, cancelled, follow).await;
     }
     fire_clear_confirm(
-        cc, cmd_tx, cancel, running, follow, chat, sys_tokens, mode_flash, anim_tick, workdir,
-        admit_tx, admit_st, queue_items, pending_images, session_id, history, hist_idx,
+        cc,
+        cmd_tx,
+        cancel,
+        running,
+        follow,
+        chat,
+        sys_tokens,
+        mode_flash,
+        anim_tick,
+        workdir,
+        admit_tx,
+        admit_st,
+        queue_items,
+        pending_images,
+        session_id,
+        history,
+        hist_idx,
     )
     .await
 }

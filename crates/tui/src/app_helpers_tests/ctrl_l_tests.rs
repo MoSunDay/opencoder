@@ -3,7 +3,7 @@
 //! iteration caps.
 
 use crate::app_helpers::pre_key_intercept;
-use crate::chat::{ChatBlock, ChatView};
+use crate::chat::{ChatBlock, ChatView, SidecarPanel};
 use crate::keymap::KeyBindings;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use opencoder_session::SessionEvent;
@@ -280,8 +280,8 @@ fn ctrl_l_without_subagent_returns_to_follow_mode() {
 }
 
 /// ESC on a focused sidecar DESTROYS the panel: `SidecarCmd::Reset` reaches
-/// the actor (in-flight turn aborted, conversation dropped) and every
-/// sidecar block is purged from the transcript.
+/// the actor (in-flight turn aborted, conversation dropped) and the panel
+/// field is cleared.
 #[test]
 fn esc_destroys_the_sidecar_panel() {
     let (sidecar_tx, mut sidecar_rx) = mpsc::channel::<crate::sidecar_ui::SidecarCmd>(8);
@@ -289,17 +289,10 @@ fn esc_destroys_the_sidecar_panel() {
         sidecar_focus: true,
         ..ChatView::default()
     };
-    chat.blocks.push(ChatBlock::Sidecar {
+    chat.sidecar = Some(SidecarPanel {
         id: "sc-1".into(),
         question: "q".into(),
-        view: ChatView::default(),
-        done: false,
-        ok: false,
-        answer: None,
-        total_tokens: 0,
-        rounds: 0,
-        started_at_ms: 0,
-        elapsed_ms: 0,
+        ..Default::default()
     });
 
     let mut subagent_focus: Option<usize> = None;
@@ -326,13 +319,7 @@ fn esc_destroys_the_sidecar_panel() {
         sidecar_rx.try_recv(),
         Ok(crate::sidecar_ui::SidecarCmd::Reset)
     ));
-    assert!(
-        !chat
-            .blocks
-            .iter()
-            .any(|b| matches!(b, ChatBlock::Sidecar { .. })),
-        "ESC must purge every sidecar block"
-    );
+    assert!(chat.sidecar.is_none(), "ESC must destroy the sidecar panel");
     assert!(!chat.sidecar_focus, "focus released");
     assert!(follow);
     assert_eq!(input, "草稿".to_string(), "draft untouched");
@@ -347,17 +334,10 @@ fn ctrl_l_destroys_the_sidecar_then_collapses_parent() {
         sidecar_focus: true,
         ..ChatView::default()
     };
-    chat.blocks.push(ChatBlock::Sidecar {
+    chat.sidecar = Some(SidecarPanel {
         id: "sc-1".into(),
         question: "q".into(),
-        view: ChatView::default(),
-        done: false,
-        ok: false,
-        answer: None,
-        total_tokens: 0,
-        rounds: 0,
-        started_at_ms: 0,
-        elapsed_ms: 0,
+        ..Default::default()
     });
     chat.blocks.push(ChatBlock::Thinking {
         text: "思考中...".into(),
@@ -390,11 +370,8 @@ fn ctrl_l_destroys_the_sidecar_then_collapses_parent() {
         Ok(crate::sidecar_ui::SidecarCmd::Reset)
     ));
     assert!(
-        !chat
-            .blocks
-            .iter()
-            .any(|b| matches!(b, ChatBlock::Sidecar { .. })),
-        "Ctrl+L must purge every sidecar block"
+        chat.sidecar.is_none(),
+        "Ctrl+L must destroy the sidecar panel"
     );
     assert!(!chat.sidecar_focus);
     assert!(

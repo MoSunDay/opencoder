@@ -91,7 +91,7 @@ pub(crate) fn compute_display<'a>(
     // back-title, and its own context stats (instead of the parent's).
     // The body title keeps the "Ctrl+L back" hint.
     // The focused sidecar box takes precedence (sidecar focus and a subagent
-    // focus are mutually exclusive): body = the sidecar block's nested view,
+    // focus are mutually exclusive): body = the sidecar panel's nested view,
     // mode chip reads `sidecar`, and the ctx meter reads the conversation's
     // accumulated Turn tokens (the child's usage is forwarded bare, so the
     // nested view itself never carries a context figure). The main task's
@@ -100,12 +100,10 @@ pub(crate) fn compute_display<'a>(
     let (display_chat, display_title, display_ctx, display_sys, display_mode) =
         if let Some((view, question, total_tokens)) = crate::chat::sidecar::focused(chat) {
             // A question-less block is the freshly entered empty panel: the
-            // title carries the input hint instead of an empty echo.
+            // title keeps only the nav element (the submitted question now
+            // echoes into the body, so no input hint is needed).
             let title = if question.is_empty() {
-                format!(
-                    "\u{2190} [Ctrl+L] back | \u{21f2}sidecar {}",
-                    crate::sidecar_ui::SIDECAR_EMPTY_HINT
-                )
+                "\u{2190} [Ctrl+L] back | \u{21f2}sidecar".to_string()
             } else {
                 format!("\u{2190} [Ctrl+L] back | \u{21f2}sidecar {question}")
             };

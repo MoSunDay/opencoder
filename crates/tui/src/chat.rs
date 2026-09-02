@@ -379,9 +379,9 @@ impl ChatView {
             SessionEvent::AutoPilot { phase, iteration } => {
                 self.status = format!("autopilot: {:?} #{}", phase, iteration);
             }
-            // Sidecar frames fold into their dedicated block (see
-            // `sidecar::fold_sidecar`): Start pushes + auto-focuses the block,
-            // Child routes into the block's nested view, Turn finalizes it.
+            // Sidecar frames fold into the panel field `chat.sidecar` (see
+            // `sidecar::fold_sidecar`): Start claims/creates the panel,
+            // Child routes into the panel's nested view, Turn finalizes it.
             // Bare `LlmUsage` is NOT a sidecar frame — it already took the
             // parent arm above, which is exactly how the sidecar's cost is
             // accounted to the main task (tokens_total).
@@ -680,12 +680,6 @@ impl ChatView {
                     }
                     out.push(Line::from(spans));
                 }
-                // ZERO rows in the main transcript: the sidecar bypass Q/A
-                // leaves no trace there. While focused, `compute_display`
-                // swaps the whole body for the block's nested view; while
-                // unfocused the block is simply invisible (`sidecar::purge`
-                // removes it on exit anyway).
-                ChatBlock::Sidecar { .. } => {}
             }
         }
         out

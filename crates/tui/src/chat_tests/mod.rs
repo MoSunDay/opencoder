@@ -8,6 +8,7 @@ mod image_render;
 mod line_accounting;
 mod plan_card;
 mod sidecar_fold;
+mod sidecar_stream_isolation;
 mod steer_echo;
 mod step_group;
 mod subagent;

@@ -9,6 +9,7 @@ mod line_accounting;
 mod plan_card;
 mod sidecar_fold;
 mod steer_echo;
+mod step_group;
 mod subagent;
 mod terminal_safety;
 mod thinking_state;

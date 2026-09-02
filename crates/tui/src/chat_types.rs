@@ -54,15 +54,14 @@ pub enum ChatBlock {
         collapsed: bool,
         streaming: bool,
     },
-    /// A run of consecutive tool calls (one assistant turn's calls between
-    /// text/image/marker blocks form one group; any other block splits the
-    /// run). Group-level three-state display, cycled by clicking the group
-    /// line: Collapsed → List → Results → Collapsed. Ctrl+L resets every
-    /// group to Collapsed.
-    ToolGroup {
-        calls: Vec<ToolCall>,
-        state: ToolGroupState,
-    },
+    /// One assistant round's tool activity: its thinking plus its function
+    /// calls, grouped into collapsible steps. Consecutive calls between
+    /// text/image/marker blocks form one group (any other block splits the
+    /// run); steps split at round boundaries (a finished call followed by a
+    /// new `ToolStart`). Three-level drill-down, toggled by clicking:
+    /// group row → step row → single call's output. Ctrl+L resets every
+    /// level.
+    StepGroup { steps: Vec<Step>, open: bool },
     /// Inline image attachment rendered as half-block ASCII art.
     /// `filename` is the display name; `rendered` is the pre-computed
     /// half-block `Line` set (empty when rendering failed → placeholder).
@@ -210,50 +209,60 @@ pub struct SubagentHeader {
     pub header_line_idx: usize,
 }
 
-/// Display state of a `ChatBlock::ToolGroup` — the single source of truth for
-/// how the group renders (there is no per-call collapse flag to drift).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum ToolGroupState {
-    /// One line: `▸ N function calls` (plus a spinner hint while any call is
-    /// unfinished). Default for new groups and after Ctrl+L.
-    #[default]
-    Collapsed,
-    /// Group line + each call's header line (tool name + arg summary, no
-    /// output).
-    List,
-    /// List + each call's full output lines.
-    Results,
+/// One step inside a `ChatBlock::StepGroup`: a single assistant round's
+/// thinking (as rendered markdown lines) plus that round's function calls.
+/// The step's content is visible only while both the group and the step are
+/// open; each call's output additionally requires `ToolCall::expanded`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Step {
+    /// Rendered markdown of the round's thinking. Empty when the round went
+    /// straight to tools (or its thinking stayed a standalone `Thinking`
+    /// block because assistant text trailed it).
+    pub thinking: Vec<Line<'static>>,
+    pub calls: Vec<ToolCall>,
+    /// Whether this step's Say header + thinking + call rows render.
+    pub open: bool,
 }
 
-/// One tool call inside a `ChatBlock::ToolGroup`.
+/// One tool call inside a step of a `ChatBlock::StepGroup`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ToolCall {
     pub id: String,
-    /// `▸ name args` header line, shown in the List/Results states.
+    /// `▸ name args` header line, shown on the call's row.
     pub header: Line<'static>,
-    /// Sanitized output lines, shown in the Results state.
+    /// Sanitized output lines, shown while the call is expanded.
     pub output: Vec<Line<'static>>,
     pub started_at_ms: Option<i64>,
     /// `None` while the call is still running — drives the group line's
-    /// running hint.
+    /// running hint (and the step-boundary heuristic: a finished call means
+    /// the next `ToolStart` opens a new step).
     pub elapsed_ms: Option<u64>,
-    /// Show this call's `output` under its header while the group is in the
-    /// `List` state (`Results` always shows every output). Toggled by
-    /// clicking the call's header row; reset by `collapse_all_collapsible`.
+    /// Show this call's `output` under its header. Requires the enclosing
+    /// group and step to be open. Toggled by clicking the call's header row;
+    /// reset by `collapse_all_collapsible`.
     pub expanded: bool,
 }
 
-/// Locates a `ToolGroup` block's group line for mouse hit-testing (clicking
-/// cycles the group's display state).
+/// Exact text prefixes of a `StepGroup`'s step row (`❯ Step(n)` when the
+/// step is open, `▸ Step(n)` when collapsed). Declared here so copy-mode's
+/// structured cleaner matches the render shape at compile time.
+pub(crate) const STEP_ROW_OPEN_PREFIX: &str = "\u{276f} Step(";
+pub(crate) const STEP_ROW_CLOSED_PREFIX: &str = "\u{25b8} Step(";
+
+/// Locates a `StepGroup` block's group line for mouse hit-testing (clicking
+/// toggles the group open/closed).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ToolHeader {
     pub block_idx: usize,
     pub header_line_idx: usize,
 }
 
-/// Locates one call's header row (`▸ name args`) inside a `ToolGroup` shown
-/// in the `List` state, for mouse hit-testing (clicking toggles that call's
-/// output only, leaving sibling calls untouched).
+/// Locates one clickable row inside an open `StepGroup` — a step row or a
+/// call header row — for mouse hit-testing. `call_idx` is the block's flat
+/// *visible-target index*: the row's position among the group's currently
+/// rendered rows (steps first, then that step's calls — see
+/// `visible_targets`). Clicking toggles exactly that target (step collapse
+/// or single-call output), leaving siblings untouched.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ToolCallHeader {
     pub block_idx: usize,

@@ -15,15 +15,18 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
 use crate::chat::{
-    short, summarize, ChatBlock, ChatView, ToolCall, ToolGroupState, TOOL_OUTPUT_LINES,
+    coalesce_steps, merge_or_new_step, short, single_step_group, summarize, ChatBlock, ChatView,
+    ToolCall, TOOL_OUTPUT_LINES,
 };
 use crate::terminal_text::{sanitize_multiline, sanitize_single_line};
 use crate::theme;
 
 /// Replay a single persisted message into `chat`: reconstruct `Assistant` text
-/// and `ToolGroup` blocks (headers from `ToolUse`, outputs from matching
-/// `ToolResult`s), mirroring the live `ChatView::apply` path (consecutive
-/// calls group together) for resumed/compacted sessions.
+/// and `ChatBlock::StepGroup` blocks (headers from `ToolUse`, outputs from
+/// matching `ToolResult`s), mirroring the live `ChatView::apply` path
+/// (consecutive calls join the trailing group) for resumed/compacted
+/// sessions. Thinking folding into steps happens once, via `coalesce_steps`
+/// at the end of replay.
 pub(super) fn replay_one(
     chat: &mut ChatView,
     msg: &Message,
@@ -143,13 +146,16 @@ pub(super) fn replay_one(
                         expanded: false,
                     };
                     // Same grouping rule as the live path: consecutive calls
-                    // join the trailing group, anything else splits the run.
+                    // join the trailing group, anything else starts a new,
+                    // collapsed group. Replayed calls are born finished
+                    // (`elapsed_ms: Some(0)`), so each lands in its own step
+                    // of the group — resume cannot distinguish parallel from
+                    // sequential calls, and per-call steps stay honest.
                     match chat.blocks.last_mut() {
-                        Some(ChatBlock::ToolGroup { calls, .. }) => calls.push(call),
-                        _ => chat.blocks.push(ChatBlock::ToolGroup {
-                            calls: vec![call],
-                            state: ToolGroupState::Collapsed,
-                        }),
+                        Some(ChatBlock::StepGroup { steps: s, .. }) => {
+                            merge_or_new_step(s, Vec::new(), call)
+                        }
+                        _ => chat.blocks.push(single_step_group(call, Vec::new())),
                     }
                 }
             }
@@ -178,28 +184,35 @@ pub(super) fn replay_one(
                         })
                         .collect();
                     let target = chat.blocks.iter().enumerate().rev().find_map(|(gi, blk)| {
-                        if let ChatBlock::ToolGroup { calls, .. } = blk {
-                            calls
+                        if let ChatBlock::StepGroup { steps, .. } = blk {
+                            steps
                                 .iter()
-                                .rposition(|c| c.id == *tool_use_id)
-                                .map(|ci| (gi, ci))
+                                .enumerate()
+                                .rev()
+                                .find_map(|(si, s)| {
+                                    s.calls
+                                        .iter()
+                                        .rposition(|c| c.id == *tool_use_id)
+                                        .map(|ci| (si, ci))
+                                })
+                                .map(|(si, ci)| (gi, si, ci))
                         } else {
                             None
                         }
                     });
-                    if let Some((gi, ci)) = target {
-                        if let ChatBlock::ToolGroup { calls, .. } = &mut chat.blocks[gi] {
-                            calls[ci].output.extend(out);
+                    if let Some((gi, si, ci)) = target {
+                        if let ChatBlock::StepGroup { steps, .. } = &mut chat.blocks[gi] {
+                            steps[si].calls[ci].output.extend(out);
                         }
                     } else {
                         // Skip fallback for "task" tools — their output is
-                        // shown via the Subagent block, not a ToolGroup.
+                        // shown via the Subagent block, not a StepGroup.
                         let has_subagent = chat.blocks.iter().any(|b| {
                             matches!(b, ChatBlock::Subagent { id: bid, .. } if bid == tool_use_id)
                         });
                         if !has_subagent {
-                            chat.blocks.push(ChatBlock::ToolGroup {
-                                calls: vec![ToolCall {
+                            chat.blocks.push(single_step_group(
+                                ToolCall {
                                     id: tool_use_id.clone(),
                                     header: Line::from(Span::styled(
                                         "\u{25b8} (output)",
@@ -209,9 +222,9 @@ pub(super) fn replay_one(
                                     started_at_ms: None,
                                     elapsed_ms: Some(0),
                                     expanded: false,
-                                }],
-                                state: ToolGroupState::Collapsed,
-                            });
+                                },
+                                Vec::new(),
+                            ));
                         }
                     }
                     // Render tool-returned images inline after the text output.
@@ -319,6 +332,10 @@ pub async fn replay_into_chat(
         push_subagent_block(&mut chat, block);
     }
 
+    // Fold replayed blocks into the step model: trailing `Thinking` runs
+    // merge into the following StepGroup's first step and adjacent groups
+    // coalesce — the same shape the live streaming path produces.
+    coalesce_steps(&mut chat.blocks);
     // Full transcript token count for ctx% (system prompt added at render).
     chat.context_used = estimate_messages_for_display(messages) as u64;
     // Compaction truncates the message list, so the usage sum above can only
@@ -557,6 +574,8 @@ pub fn replay_messages(agent_name: &str, messages: &[Message]) -> ChatView {
     for msg in messages {
         replay_one(&mut chat, msg, &empty);
     }
+    // Same fold as `replay_into_chat` — one shared step-shape guarantee.
+    coalesce_steps(&mut chat.blocks);
     chat.context_used = estimate_messages_for_display(messages) as u64;
     chat
 }

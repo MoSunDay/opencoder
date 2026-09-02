@@ -32,12 +32,13 @@ pub(crate) struct MouseHits {
     pub thinking_btns: Vec<ThinkingBtn>,
     /// Clickable Subagent-block header rows; clicking toggles collapse.
     pub subagent_btns: Vec<SubagentBtn>,
-    /// Clickable ToolGroup header rows; clicking cycles the group through
-    /// Collapsed → List → Results. One entry per ToolGroup block currently
-    /// visible in the body viewport.
+    /// Clickable StepGroup group rows; clicking toggles the whole group
+    /// open/closed. One entry per StepGroup block currently visible in the
+    /// body viewport.
     pub tool_btns: Vec<ToolBtn>,
-    /// Clickable tool-call header rows (`▸ name args`) inside `List`-state
-    /// ToolGroups; clicking toggles that single call's output only.
+    /// Clickable rows inside open `StepGroup` blocks — step rows and each
+    /// open step's call header rows, in render order; clicking toggles that
+    /// step, or that single call's output only.
     pub tool_call_btns: Vec<ToolCallBtn>,
     /// Clickable Compaction-block header rows; clicking toggles collapse.
     pub compaction_btns: Vec<CompactionBtn>,
@@ -62,16 +63,17 @@ pub(crate) struct SubagentBtn {
     pub rect: Rect,
 }
 
-/// A clickable ToolGroup header (the group line).
+/// A clickable StepGroup group row (the `▸ N steps` line).
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct ToolBtn {
     pub block_idx: usize,
     pub rect: Rect,
 }
 
-/// A clickable tool-call header row inside a `List`-state ToolGroup.
-/// `call_idx` indexes the group's `calls`; clicking toggles only that call's
-/// output.
+/// A clickable row inside an open `StepGroup`. `call_idx` is the FLAT index
+/// into the group's visible rows (step rows + open steps' call header rows,
+/// render order — the same walk `collect_headers` and `visible_targets`
+/// enumerate); clicking toggles that step or that call's output.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct ToolCallBtn {
     pub block_idx: usize,
@@ -221,10 +223,10 @@ pub(super) fn record_compaction_hits(
     }
 }
 
-/// Populate `out` with one `ToolCallBtn` per tool-call header row that is
-/// currently visible inside the body viewport. Only `List`-state groups emit
-/// call rows (Collapsed shows none; Results shows every output regardless),
-/// so mirrors `record_tool_hits` over `tool_call_headers`.
+/// Populate `out` with one `ToolCallBtn` per clickable row (step rows + call
+/// header rows) that is currently visible inside the body viewport. Only
+/// open groups emit these rows (a closed group renders only its group row),
+/// mirroring `record_tool_hits` over `tool_call_headers`.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn record_tool_call_hits(
     chat: &ChatView,

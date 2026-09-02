@@ -18,7 +18,7 @@ pub const HELP: &str = "\
   Shift+Tab        act 模式：切换到 plan（保留上下文，空闲边界生效）；
                    plan 模式：保留计划、切换到 act 并开始执行
                    (/act_clear_context)；先倒计时确认：Esc 回撤，
-                   提交（Enter）立即执行；倒计时内可继续输入，
+                   提交（Enter）或再按一次 Shift+Tab 立即执行；倒计时内可继续输入，
                    提交的输入并入附加需求（运行中则排队，空闲边界生效）
   Enter            提交（空闲） / 转向（运行中，下一轮生效）
   Tab              提交（空闲） / 排队跟进（运行中，完成后提交）

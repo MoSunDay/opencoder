@@ -5,8 +5,9 @@
 //! alias) — arm a short countdown instead of firing immediately. While armed
 //! a single transcript marker counts down and the status chip (spinner frame
 //! included) animates; the composer stays live so a real submission can be
-//! typed during the window, and a submission (`Enter`) fires early with the
-//! typed text folded into the compound rest; `Esc` cancels (回撤) and
+//! typed during the window, and a submission (`Enter`) — or a second
+//! Shift+Tab, the guard's own chord doubling as its confirm — fires early
+//! with the typed text folded into the compound rest; `Esc` cancels (回撤) and
 //! restores any swallowed draft. Pure state + key/tick decisions —
 //! no I/O — so the misop guard is trivially testable.
 
@@ -145,8 +146,10 @@ pub(crate) fn maybe_arm(
     }
 }
 
-/// Keys stay live while armed: a submission (`Enter`) fires early — the
-/// composer text typed during the window merges into the compound rest first
+/// Keys stay live while armed: a submission (`Enter`) — or a second
+/// Shift+Tab (`BackTab`/Tab+SHIFT, the chord that armed the guard;
+/// Ctrl/Alt/Super chord variants stay inert) — fires early —
+/// the composer text typed during the window merges into the compound rest first
 /// (see [`merge_typed`], applied by the caller) — `Esc` cancels (回撤 —
 /// restores the swallowed draft), plain composer editing (chars / Backspace /
 /// Left / Right, Shift|Alt+Enter newline) keeps working so the task to run
@@ -171,6 +174,28 @@ pub(crate) fn intercept(
                 crate::undo::snapshot(undo_state, input, *cursor_idx, false);
                 return None;
             }
+            Some(ConfirmFlow::Fire)
+        }
+        // A second Shift+Tab is an explicit "go now" — the chord that armed
+        // the guard doubles as its confirm. BackTab arrives with the SHIFT
+        // flag stripped on some terminals; Tab+SHIFT is the same chord.
+        // CONTROL/ALT/SUPER chord variants are never the confirm: the retired
+        // ctrl+shift+tab lands here as BackTab+CONTROL|SHIFT (pane-switch
+        // style), and letting it fire would turn a chord that used to be a
+        // harmless mode switch into an immediate destructive clear.
+        KeyCode::BackTab
+            if !k.modifiers.intersects(
+                KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER,
+            ) =>
+        {
+            Some(ConfirmFlow::Fire)
+        }
+        KeyCode::Tab
+            if k.modifiers.contains(KeyModifiers::SHIFT)
+                && !k.modifiers.intersects(
+                    KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER,
+                ) =>
+        {
             Some(ConfirmFlow::Fire)
         }
         KeyCode::Esc => {
@@ -394,6 +419,74 @@ mod tests {
         assert_eq!(input, "ab\n");
         assert_eq!(cursor, 3);
         assert!(cc.is_some(), "the arm must survive a newline insert");
+    }
+
+    #[test]
+    fn intercept_shift_tab_repress_fires_like_submit() {
+        let mut cc = Some(arm(None, None));
+        let mut input = String::new();
+        let mut cursor = 0;
+        let mut undo = crate::undo::init(&input, cursor);
+        // The same chord that armed the guard confirms it.
+        assert_eq!(
+            intercept(&mut cc, &mut input, &mut cursor, &mut undo, key(KeyCode::BackTab)),
+            Some(ConfirmFlow::Fire)
+        );
+        assert!(cc.is_some(), "the arm stays for the caller to take");
+        // Tab+SHIFT is the same chord (BackTab ≡ Tab+SHIFT).
+        let tab_shift = KeyEvent::new(KeyCode::Tab, KeyModifiers::SHIFT);
+        assert_eq!(
+            intercept(&mut cc, &mut input, &mut cursor, &mut undo, tab_shift),
+            Some(ConfirmFlow::Fire)
+        );
+        assert_eq!(input, "", "the confirm chord must not edit");
+        // Plain Tab (follow-up/submit) stays inert while armed.
+        assert_eq!(
+            intercept(&mut cc, &mut input, &mut cursor, &mut undo, key(KeyCode::Tab)),
+            None
+        );
+        assert!(cc.is_some());
+    }
+
+    #[test]
+    fn intercept_ctrl_alt_shift_tab_chords_stay_inert() {
+        let mut cc = Some(arm(None, None));
+        let mut input = String::new();
+        let mut cursor = 0;
+        let mut undo = crate::undo::init(&input, cursor);
+        // Ctrl/Alt chord variants are terminal pane-switch style — never the
+        // guard's confirm, so they fall through inert with the arm intact.
+        let ctrl_backtab = KeyEvent::new(
+            KeyCode::BackTab,
+            KeyModifiers::CONTROL | KeyModifiers::SHIFT,
+        );
+        assert_eq!(
+            intercept(&mut cc, &mut input, &mut cursor, &mut undo, ctrl_backtab),
+            None
+        );
+        let alt_tab_shift = KeyEvent::new(KeyCode::Tab, KeyModifiers::ALT | KeyModifiers::SHIFT);
+        assert_eq!(
+            intercept(&mut cc, &mut input, &mut cursor, &mut undo, alt_tab_shift),
+            None
+        );
+        // Super (cmd/win) mutations are filtered the same way.
+        let super_backtab = KeyEvent::new(
+            KeyCode::BackTab,
+            KeyModifiers::SUPER | KeyModifiers::SHIFT,
+        );
+        assert_eq!(
+            intercept(&mut cc, &mut input, &mut cursor, &mut undo, super_backtab),
+            None
+        );
+        let super_tab_shift =
+            KeyEvent::new(KeyCode::Tab, KeyModifiers::SUPER | KeyModifiers::SHIFT);
+        assert_eq!(
+            intercept(&mut cc, &mut input, &mut cursor, &mut undo, super_tab_shift),
+            None
+        );
+        assert!(cc.is_some(), "inert chords must not drop the arm");
+        assert_eq!(input, "", "inert chords must not edit the composer");
+        assert_eq!(cursor, 0);
     }
 
     #[test]

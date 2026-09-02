@@ -287,7 +287,7 @@ async fn steer_admitted_mid_turn_defers_skill_until_absorption() {
         "turn 1 payload never sees the token: {req1_text}"
     );
 
-    // Turn 2 carries the skill via the transient per-call `[skill loaded]`
+    // Turn 2 carries the skill via the one-shot `[skill loaded]`
     // payload message (the tail pointer stays silent), token stripped.
     let tail = last_user_content(&requests[1]);
     assert!(

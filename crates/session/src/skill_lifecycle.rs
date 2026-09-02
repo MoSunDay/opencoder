@@ -9,13 +9,14 @@
 //! build-subagent stripping, latent `question` unlock intact) and the next
 //! normal completion clears it.
 //!
-//! Within the run the skill behaves exactly as before: the full body rides
-//! as a TRANSIENT per-call payload message (`skill_context::
-//! transient_body_message`, a `[skill loaded] <path>` marker block + body,
-//! appended after the transcript by `runner/llm_call.rs`) only for the LLM
-//! rounds of the run that armed it — never recorded to the transcript or
-//! store — and every such round also carries the `[active skill]` tail
-//! reminder when no body could ship. When the run ends — Done, Error, or
+//! Within the run the skill body ships ONCE: `skill_context::
+//! deliver_body_once` attaches a `[skill loaded] <path>` marker block + body
+//! payload message to the FIRST LLM round that observes the armed skill and
+//! flips the session delivery gate — later rounds of the run carry NO skill
+//! body (no per-round token waste, no re-appended per-call tail block); the
+//! marker's source path lets the model `read` the SKILL.md again when
+//! needed. The `[active skill]` tail reminder stays a fallback for the
+//! degenerate empty-body case. When the run ends — Done, Error, or
 //! cancel — [`clear_on_run_end`] wipes the skill from memory
 //! (`skill_prompt` + `active_skill_names`) and best-effort from the store
 //! (`SessionPatch { clear_skill: true }`), so subsequent runs start

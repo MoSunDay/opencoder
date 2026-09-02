@@ -4,7 +4,7 @@
 //! takes no skill parameter): every LLM call derives synthetic user
 //! messages appended at the END of the payload — the transient
 //! `[skill loaded]` full-body message (`skill_context::
-//! transient_body_message`) plus the tail reminder
+//! body_message`) plus the tail reminder
 //! (`skill_context::tail_reminder`) carrying (a) the `[skills]` catalog of
 //! config-enabled skills plus a lazy-load hint and (b) — only when the
 //! armed skill has no injectable body (degenerate empty-body case) — the

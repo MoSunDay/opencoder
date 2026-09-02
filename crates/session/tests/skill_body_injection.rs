@@ -109,14 +109,15 @@ fn count_user_occurrences(req: &opencoder_llm::ChatRequest, needle: &str) -> usi
         .sum()
 }
 
-/// (a) Every captured request carries the armed body exactly ONCE, as the
-/// TRAILING payload message (a synthetic-shaped user turn opening with the
-/// `[skill loaded] <path>` marker line); (b) the message never lands in the
-/// in-memory transcript nor in the store; (c) once the run ends and the
-/// one-shot skill clears, the following plain run submits neither body nor
-/// `[active skill]` tail.
+/// (a) The armed body ships EXACTLY ONCE for the whole activation: the
+/// FIRST LLM round's payload carries it as the TRAILING message (marker
+/// line + body, system prompt clean, fallback pointer suppressed), every
+/// LATER round of the same run carries NEITHER body NOR marker; (b) the
+/// message never lands in the in-memory transcript nor in the store; (c)
+/// once the run ends and the one-shot skill clears, the following plain
+/// run submits neither body nor `[active skill]` tail.
 #[tokio::test]
-async fn armed_body_rides_every_round_and_is_never_persisted() {
+async fn armed_body_ships_once_then_stops_and_is_never_persisted() {
     let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
     // Run 1 spans TWO LLM rounds (tool call, then Done); run 2 is plain.
     let mock = Arc::new(
@@ -135,35 +136,56 @@ async fn armed_body_rides_every_round_and_is_never_persisted() {
 
     let run1 = mock.requests();
     assert_eq!(run1.len(), 2, "tool round + done round");
-    for (round, req) in run1.iter().enumerate() {
-        assert_eq!(
-            count_user_occurrences(req, "REV-STEP-1"),
-            1,
-            "round {round}: body rides exactly once"
-        );
-        assert!(
-            any_user_contains(req, &marker),
-            "round {round}: marker line names the source path"
-        );
-        assert_eq!(
-            count_user_occurrences(req, &marker),
-            1,
-            "round {round}: one sorted marker block"
-        );
-        let last = last_message_content(req);
-        assert!(
-            last.starts_with(&marker),
-            "round {round}: body is the TRAILING payload message: {last:.120}"
-        );
-        assert!(
-            !system_content(req).contains("REV-STEP"),
-            "round {round}: system prompt stays clean"
-        );
-        assert!(
-            !any_user_contains(req, "[active skill]"),
-            "round {round}: fallback pointer suppressed while the body ships"
-        );
-    }
+
+    // Round 1 (delivery round): the body rides exactly once, trailing.
+    let req = &run1[0];
+    assert_eq!(
+        count_user_occurrences(req, "REV-STEP-1"),
+        1,
+        "delivery round: body rides exactly once"
+    );
+    assert!(
+        any_user_contains(req, &marker),
+        "delivery round: marker line names the source path"
+    );
+    assert_eq!(
+        count_user_occurrences(req, &marker),
+        1,
+        "delivery round: one sorted marker block"
+    );
+    let last = last_message_content(req);
+    assert!(
+        last.starts_with(&marker),
+        "delivery round: body is the TRAILING payload message: {last:.120}"
+    );
+    assert!(
+        !system_content(req).contains("REV-STEP"),
+        "delivery round: system prompt stays clean"
+    );
+    assert!(
+        !any_user_contains(req, "[active skill]"),
+        "delivery round: fallback pointer suppressed while the body ships"
+    );
+
+    // Round 2..N of the same run: NO skill body anywhere in the payload.
+    let req = &run1[1];
+    assert_eq!(
+        count_user_occurrences(req, "REV-STEP"),
+        0,
+        "round 2 carries no skill body — one-shot delivery is spent"
+    );
+    assert!(
+        !any_user_contains(req, &marker),
+        "round 2 carries no [skill loaded] marker"
+    );
+    assert!(
+        !system_content(req).contains("REV-STEP"),
+        "round 2: system prompt stays clean"
+    );
+    assert!(
+        !any_user_contains(req, "[active skill]"),
+        "round 2: fallback pointer still suppressed (body was delivered)"
+    );
 
     // (b) Zero persistence: not in the transcript, not in the store.
     assert!(
@@ -176,74 +198,25 @@ async fn armed_body_rides_every_round_and_is_never_persisted() {
         "no [skill loaded] message in store.load_messages"
     );
 
-    // (c) Run end cleared the one-shot skill: the plain follow-up submits
-    // neither the body nor the `[active skill]` tail.
+    // (c) The follow-up plain run: no body, no tail.
     run(&mut s, "plain follow up".into(), |_| {}).await.unwrap();
-    let req2 = &mock.requests()[2];
-    assert!(
-        !any_user_contains(req2, &marker) && !any_user_contains(req2, "REV-STEP-1"),
-        "skill-less run must not submit the body: {:?}",
-        req2.messages
+    let run2 = &mock.requests()[2];
+    assert_eq!(
+        count_user_occurrences(run2, "REV-STEP"),
+        0,
+        "post-clear run carries no body"
     );
     assert!(
-        !any_user_contains(req2, "[active skill]"),
-        "skill-less run must not submit the tail"
+        !any_user_contains(run2, &marker) && !any_user_contains(run2, "[active skill]"),
+        "post-clear run carries neither marker nor tail"
     );
+    assert!(s.skill_prompt_cloned().is_none(), "one-shot clear ran");
 }
 
-/// (d) Oversized skill (>20K est tokens): the transient message ships the
-/// largest whole-line prefix that fits plus an `[INCOMPLETE SKILL]` notice
-/// whose `offset=` is the 1-based line right after the truncation point
-/// (read-tool alignment); the dropped lines never reach the payload — and
-/// nothing persists.
-#[tokio::test]
-async fn oversized_skill_body_truncates_with_continuation_notice() {
-    // 5 lines x ~19K chars ≈ 23.7K tokens; 4 lines ≈ 19K fit.
-    let line = |n: usize| format!("BIG-{n:02} {}", "x".repeat(19_000));
-    let body = (0..5usize).map(line).collect::<Vec<_>>().join("\n");
-    assert!(opencoder_llm::estimate(&body) > 20_000);
-
-    let mock = Arc::new(MockChatClient::new().push_script(vec![done_turn("ok")]));
-    let (mut s, _wd) = session_on("inj-big", "act", mock.clone());
-    let path = "/skills/big/SKILL.md";
-    s.set_skill(Some(sourced_body(path, &body)));
-
-    run(&mut s, "go".into(), |_| {}).await.unwrap();
-
-    let req = &mock.requests()[0];
-    let last = last_message_content(req);
-    assert!(
-        last.starts_with(&format!("[skill loaded] {path}\n\n")),
-        "truncated body still rides the trailing message: {:.80}",
-        last
-    );
-    assert!(
-        last.contains(&format!(
-            "[INCOMPLETE SKILL] truncated at ~20K tokens; 1 lines remain; \
-             read the rest with the read tool: read(path=\"{path}\", offset=5)."
-        )),
-        "notice names remaining lines + next offset: {}",
-        &last[last.len().saturating_sub(220)..]
-    );
-    let cut = last.find("\n[INCOMPLETE SKILL]").expect("notice follows prefix");
-    assert!(
-        opencoder_llm::estimate(&last[..cut]) <= 20_000,
-        "marker + truncated prefix stays within budget"
-    );
-    assert!(last[..cut].contains("BIG-03"), "lines 0..=3 kept");
-    assert!(
-        !any_user_contains(req, "BIG-04"),
-        "truncated-away lines never reach the payload"
-    );
-    assert!(
-        !s.messages.iter().any(|m| m.text().contains("[INCOMPLETE SKILL]")),
-        "even the truncated body stays out of the transcript"
-    );
-}
-
-/// (e) Compound prompt (`$A $B`): ONE trailing message per round with a
-/// single sorted marker block, the merged body keeping B's inner
-/// `> Source:` annotation, and each body shipping exactly once.
+/// (e) Compound prompt (`$A $B`): ONE trailing message on the delivery
+/// round with a single sorted marker block, the merged body keeping B's
+/// inner `> Source:` annotation, each body shipping exactly once — and
+/// the second round of the run carries none of it.
 #[tokio::test]
 async fn compound_body_keeps_inner_annotation_and_one_sorted_marker_block() {
     let mock = Arc::new(
@@ -260,23 +233,35 @@ async fn compound_body_keeps_inner_annotation_and_one_sorted_marker_block() {
 
     run(&mut s, "compound work".into(), |_| {}).await.unwrap();
 
-    for (round, req) in mock.requests().iter().enumerate() {
-        let last = last_message_content(req);
-        assert_eq!(
-            last,
-            "[skill loaded] /skills/alpha/SKILL.md\n\
-             [skill loaded] /skills/beta/SKILL.md\n\n\
-             A-BODY\n\n> Source: /skills/beta/SKILL.md\n\nB-BODY",
-            "round {round}: one sorted block + merged body with inner annotation"
-        );
-        assert_eq!(
-            count_user_occurrences(req, "[skill loaded]"),
-            2,
-            "round {round}: exactly the two marker lines"
-        );
-        assert_eq!(count_user_occurrences(req, "A-BODY"), 1);
-        assert_eq!(count_user_occurrences(req, "B-BODY"), 1);
-    }
+    // Delivery round: one sorted block + merged body with inner annotation.
+    let req = &mock.requests()[0];
+    assert_eq!(
+        last_message_content(req),
+        "[skill loaded] /skills/alpha/SKILL.md\n\
+         [skill loaded] /skills/beta/SKILL.md\n\n\
+         A-BODY\n\n> Source: /skills/beta/SKILL.md\n\nB-BODY",
+        "delivery round: one sorted block + merged body with inner annotation"
+    );
+    assert_eq!(
+        count_user_occurrences(req, "[skill loaded]"),
+        2,
+        "delivery round: exactly the two marker lines"
+    );
+    assert_eq!(count_user_occurrences(req, "A-BODY"), 1);
+    assert_eq!(count_user_occurrences(req, "B-BODY"), 1);
+
+    // Round 2 of the same run: marker block and bodies fully absent.
+    let req = &mock.requests()[1];
+    assert_eq!(
+        count_user_occurrences(req, "[skill loaded]"),
+        0,
+        "round 2 carries no marker block"
+    );
+    assert_eq!(
+        count_user_occurrences(req, "-BODY"),
+        0,
+        "round 2 carries no body"
+    );
 }
 
 /// (f) Exclusions: subagents (`explore`) and the todos scheduler

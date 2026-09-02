@@ -94,7 +94,7 @@ fn has_active_skill_reminder(req: &opencoder_llm::ChatRequest) -> bool {
     })
 }
 
-/// The skill body ships as the transient per-call `[skill loaded]` payload
+/// The skill body ships as the one-shot `[skill loaded]` payload
 /// message naming `path` (the `[active skill]` tail pointer is
 /// fallback-only).
 fn has_loaded_skill_message(req: &opencoder_llm::ChatRequest, path: &str) -> bool {
@@ -241,7 +241,7 @@ async fn skill_set_mid_run_appears_in_next_turn_tail_reminder() {
     );
 
     // Turn 2's system prompt still excludes the body; the skill arrives as
-    // the transient per-call `[skill loaded]` payload message (the
+    // the one-shot `[skill loaded]` payload message (the
     // `[active skill]` tail pointer is fallback-only and stays silent).
     let second_system = system_content(&requests[1]);
     assert!(
@@ -268,7 +268,7 @@ async fn skill_set_mid_run_appears_in_next_turn_tail_reminder() {
 /// 2. Turn 2: done → idle → consume queue → continue
 /// 3. Turn 3: done → idle → no queue → Done
 #[tokio::test]
-async fn skill_set_mid_run_appears_in_queue_followup_turn() {
+async fn skill_set_mid_run_delivers_once_before_queue_followup() {
     let store = mem_store().await;
     let mock: Arc<MockChatClient> = Arc::new(
         MockChatClient::new()
@@ -369,22 +369,29 @@ async fn skill_set_mid_run_appears_in_queue_followup_turn() {
         "turn 1 payload must carry no [active skill] reminder"
     );
 
-    // Turn 3 (queue follow-up): the skill arrives via the transient per-call
-    // `[skill loaded]` payload message; the system prompt stays skill-free
-    // and the tail pointer stays silent.
-    let third_system = system_content(&requests[2]);
+    // The skill set mid-run arrives via the ONE-SHOT `[skill loaded]`
+    // payload message on the FIRST round that observes it (turn 2, the
+    // post-bash round) — and ONLY that round: the queue follow-up (turn 3)
+    // carries no skill body at all, the delivered marker being the model's
+    // pointer back to the source file. The system prompt stays skill-free
+    // and the tail pointer stays silent throughout.
+    let second_system = system_content(&requests[1]);
     assert!(
-        !third_system.contains("QUEUE-SKILL"),
-        "skill bodies never ship in the system prompt: {third_system}"
+        !second_system.contains("QUEUE-SKILL"),
+        "skill bodies never ship in the system prompt: {second_system}"
     );
-    let tail = last_user_content(&requests[2]);
+    let second_tail = last_user_content(&requests[1]);
     assert!(
-        !tail.contains("[active skill]"),
-        "pointer suppressed while the loaded marker is present: {tail}"
+        !second_tail.contains("[active skill]"),
+        "pointer suppressed while the loaded marker is present: {second_tail}"
     );
     assert!(
-        has_loaded_skill_message(&requests[2], "/skills/queue/SKILL.md"),
-        "turn 3 (queue follow-up) receives the skill via the [skill loaded] message"
+        has_loaded_skill_message(&requests[1], "/skills/queue/SKILL.md"),
+        "turn 2 (first round observing the mid-run skill) delivers the body once"
+    );
+    assert!(
+        !has_loaded_skill_message(&requests[2], "/skills/queue/SKILL.md"),
+        "turn 3 (queue follow-up) carries NO skill body — one-shot delivery spent"
     );
 }
 

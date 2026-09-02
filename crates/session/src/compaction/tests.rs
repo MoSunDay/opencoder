@@ -29,6 +29,60 @@ fn assistant_with_tool(id: &str) -> Message {
     m
 }
 
+fn est_session(name: &str) -> SessionState {
+    SessionState::new(
+        "t",
+        opencoder_core::resolve_agent(name).unwrap(),
+        opencoder_core::Config::default(),
+        std::sync::Arc::new(
+            opencoder_llm::MockChatClient::new().with_default(vec![opencoder_llm::LlmEvent::Completed {
+                text: "ok".into(),
+                tool_calls: vec![],
+                usage: None,
+            }]),
+        ),
+        std::path::Path::new("/tmp").into(),
+    )
+}
+
+/// F1 regression: the armed skill's body ships as a transient per-call
+/// message that is never persisted to `session.messages`, so the token
+/// estimate must count it explicitly. Without this term a large armed skill
+/// pushes the real payload past the compaction budget / hard limit while
+/// `estimated_tokens` stays flat (late compaction, over-admission).
+#[test]
+fn estimated_tokens_counts_transient_skill_body() {
+    let mut s = est_session("act");
+    s.messages.push(Message::user("u1", "task"));
+    let skillless = estimated_tokens(&s);
+
+    // Neutral body: matches no latent skill, so the ONLY change to the
+    // estimate is the transient body term itself.
+    let body = format!("> Source: /skills/rev/SKILL.md\n\n{}", "REV-STEP\n".repeat(4000));
+    s.set_skill(Some(body.clone()));
+    let armed = estimated_tokens(&s);
+
+    let body_msg = crate::skill_context::transient_body_message(&s).expect("armed act -> body");
+    let body_est = estimate(&body_msg.text()) as u64;
+    assert!(body_est > 0, "sanity: body has mass");
+    assert!(
+        armed - skillless >= body_est,
+        "estimate must cover the transient body: skillless={skillless} armed={armed} body_est={body_est}"
+    );
+    // Budget contract decomposition: messages AND body both fit under the
+    // armed estimate (tail/system/tool terms only ever add).
+    assert!(
+        armed >= estimate_messages(&s.messages) as u64 + body_est,
+        "armed estimate >= messages + transient body"
+    );
+
+    // Gating parity: subagents never receive the body, so there is nothing
+    // transient to count for them.
+    let mut sub = est_session("explore");
+    sub.messages.push(Message::user("u2", "task"));
+    sub.set_skill(Some(body));
+    assert!(crate::skill_context::transient_body_message(&sub).is_none());
+}
 #[test]
 fn split_index_assistant_after_tool_is_turn_boundary() {
     // Single user task with 3 tool roundtrips — common coding-agent shape.

@@ -4,8 +4,13 @@ use ratatui::text::{Line, Span};
 use crate::terminal_text::{sanitize_line, sanitize_multiline, sanitize_single_line};
 use crate::theme;
 
-use opencoder_llm::estimate;
 use opencoder_session::SessionEvent;
+
+// Test modules under `chat_tests/` glob-import this scope and use `estimate`
+// in token-accounting assertions (it previously lived here for
+// `track_context`, now in `chat_context.rs`).
+#[cfg(test)]
+use opencoder_llm::estimate;
 
 // ── Exact flattened header shapes (single source of truth) ────────────────
 // These headers are emitted as single spans with exactly these contents, and
@@ -42,6 +47,8 @@ pub(crate) use helpers::{push_duration_span, short, summarize};
 
 #[path = "compaction_block.rs"]
 mod compaction_block;
+#[path = "chat_context.rs"]
+mod context;
 #[path = "chat_headers.rs"]
 mod headers;
 #[path = "chat_sidecar.rs"]
@@ -108,6 +115,7 @@ impl ChatView {
                     output: Vec::new(),
                     started_at_ms: Some(opencoder_core::message::now_ms()),
                     elapsed_ms: None,
+                    expanded: false,
                 };
                 // Consecutive tool calls join the trailing group (keeping its
                 // display state); any other block in between splits the run
@@ -176,6 +184,7 @@ impl ChatView {
                                 output: out,
                                 started_at_ms: None,
                                 elapsed_ms: Some(0),
+                                expanded: false,
                             }],
                             state: ToolGroupState::Collapsed,
                         });
@@ -419,6 +428,21 @@ impl ChatView {
         }
     }
 
+    /// Toggle the expanded output of the single call at `call_idx` inside the
+    /// ToolGroup at `block_idx` (mouse click handler on a call header row).
+    /// Only meaningful in the `List` state — `Collapsed` renders no call rows
+    /// and `Results` shows every output regardless — so the flag is left
+    /// untouched there. No-op if either index is out of range.
+    pub fn toggle_tool_call_at(&mut self, block_idx: usize, call_idx: usize) {
+        if let Some(ChatBlock::ToolGroup { calls, state }) = self.blocks.get_mut(block_idx) {
+            if matches!(state, ToolGroupState::List) {
+                if let Some(c) = calls.get_mut(call_idx) {
+                    c.expanded = !c.expanded;
+                }
+            }
+        }
+    }
+
     /// Collapse every collapsible block (Thinking + Compaction + ToolGroup)
     /// in this view. Bound to Ctrl+L: clears any expanded reasoning blocks and
     /// resets every tool group to Collapsed in one keystroke (also applied to
@@ -429,51 +453,14 @@ impl ChatView {
                 ChatBlock::Thinking { collapsed, .. } | ChatBlock::Compaction { collapsed, .. } => {
                     *collapsed = true;
                 }
-                ChatBlock::ToolGroup { state, .. } => {
+                ChatBlock::ToolGroup { calls, state } => {
                     *state = ToolGroupState::Collapsed;
+                    for c in calls.iter_mut() {
+                        c.expanded = false;
+                    }
                 }
                 _ => {}
             }
-        }
-    }
-
-    /// Accumulate estimated token counts for this view's OWN transcript only.
-    /// Child subagent tokens are excluded — each child ChatView tracks its own
-    /// subtree via its own `apply` (events route through `SubagentChild`).
-    fn track_context(&mut self, ev: &SessionEvent) {
-        // Note: TextDelta/ReasoningDelta are intentionally NOT counted here.
-        // Counting per-delta made the status bar's ctx% indicator jump on
-        // every token.
-        // Instead they are counted once at round boundaries via
-        // `finalize_assistant` (and `append_text_delta` for the
-        // reasoning → text transition). The discrete events below are kept
-        // immediate since they are low-frequency and not part of streaming.
-        match ev {
-            SessionEvent::ToolStart { input, .. } => {
-                self.context_used += estimate(&input.to_string()) as u64;
-            }
-            SessionEvent::ToolEnd { output, .. } => {
-                self.context_used += estimate(output) as u64;
-            }
-            SessionEvent::SubagentEnd { summary, .. } => {
-                self.context_used += estimate(summary) as u64;
-            }
-            SessionEvent::Compaction(c) => {
-                self.context_used = estimate(c) as u64;
-            }
-            // Queue-consumed and steer-consumed prompts are real user messages
-            // the model sees in context. Previously they were echoed as
-            // ChatBlock::User but silently absent from context_used, causing
-            // the ctx meter to under-report by the full token size of every
-            // queued/steered prompt — the main source of "displayed 70k but
-            // compaction triggered at 128k" confusion.
-            SessionEvent::QueueConsumed { text, .. } => {
-                self.context_used += estimate(text) as u64;
-            }
-            SessionEvent::SteerConsumed { text, .. } => {
-                self.context_used += estimate(text) as u64;
-            }
-            _ => {}
         }
     }
 
@@ -594,6 +581,12 @@ impl ChatView {
                             out.push(Line::from(spans));
                             for c in calls {
                                 out.extend(types::indented(std::slice::from_ref(&c.header), 2));
+                                // Per-call expansion: only the toggled call
+                                // shows its output in the List state.
+                                if c.expanded {
+                                    out.extend(c.output.iter().cloned());
+                                    out.push(Line::from(""));
+                                }
                             }
                             out.push(Line::from(""));
                         }

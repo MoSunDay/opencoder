@@ -36,6 +36,7 @@ fn draw(
                 &mut Vec::new(),
                 &mut Vec::new(),
                 &mut Vec::new(),
+                &mut Vec::new(),
                 &mut None,
                 true,
                 tail_ms,

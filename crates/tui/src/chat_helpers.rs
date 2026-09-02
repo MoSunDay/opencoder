@@ -135,6 +135,7 @@ impl ChatView {
                 output: Vec::new(),
                 started_at_ms: Some(now_ms()),
                 elapsed_ms: None,
+                expanded: false,
             }],
             state: crate::chat::ToolGroupState::Results,
         });

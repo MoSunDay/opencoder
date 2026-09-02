@@ -392,8 +392,6 @@ mod tests {
 
     // ---- HOME isolation for discover_skills (mirrors tests/drain_mode.rs) ----
 
-    static HOME_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
     struct HomeGuard {
         prev_home: Option<std::ffi::OsString>,
         prev_xdg: Option<std::ffi::OsString>,
@@ -401,7 +399,7 @@ mod tests {
     }
 
     fn lock_home(home: &std::path::Path) -> HomeGuard {
-        let _lock = HOME_MUTEX.lock().unwrap();
+        let _lock = crate::test_env::env_lock();
         let prev_home = std::env::var_os("HOME");
         let prev_xdg = std::env::var_os("XDG_CONFIG_HOME");
         std::env::set_var("HOME", home);

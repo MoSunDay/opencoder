@@ -11,7 +11,7 @@
 //!   (c) payload: every LLM request of any FOLLOWING run carries NO
 //!       `[active skill]` tail reminder and NO `[skill loaded]` body — the
 //!       synthetic trailing user messages `skill_context::tail_reminder` /
-//!       `skill_context::transient_body_message` derive per call and
+//!       `skill_context::body_message` derive per call and
 //!       `runner/llm_call.rs` append last to the payload; since the body
 //!       was never persisted, the run-end clear stops its submission
 //!       entirely.
@@ -76,8 +76,8 @@ fn has_active_skill_tail(req: &ChatRequest) -> bool {
     })
 }
 
-/// The armed skill ships as the transient per-call `[skill loaded]` body
-/// message (the `[active skill]` tail pointer is fallback-only under F3).
+/// The armed skill ships as the one-shot `[skill loaded]` body message
+/// (the `[active skill]` tail pointer is fallback-only under F3).
 fn has_loaded_skill_message(req: &ChatRequest) -> bool {
     req.messages.iter().any(|m| {
         m.get("role").and_then(|r| r.as_str()) == Some("user")
@@ -237,8 +237,12 @@ async fn preset_skill_tail_cleared_after_tool_call_run() {
         "run 1 spans a tool round: two requests"
     );
     assert!(
-        reqs_after_run1.iter().all(has_loaded_skill_message),
-        "every run-1 round carries the loaded skill body while the skill is active"
+        has_loaded_skill_message(&reqs_after_run1[0]),
+        "run-1 round 1 (delivery round) carries the loaded skill body"
+    );
+    assert!(
+        !has_loaded_skill_message(&reqs_after_run1[1]),
+        "run-1 round 2 carries NO skill body — the one-shot delivery is spent"
     );
 
     assert_cleared(&s, &store, "tail-clear-tools", "after run 1 (tool run)").await;

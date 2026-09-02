@@ -83,12 +83,15 @@ pub(crate) fn estimated_tokens(session: &SessionState) -> u64 {
                 .unwrap_or(0),
         )
         .saturating_add(
-            // The armed skill's body ships as a transient per-call message
-            // (never persisted), so `estimate_messages(&session.messages)`
-            // cannot see it — count it here or large armed skills push the
-            // real payload past the budget while the estimate stays flat
-            // (late compaction, hard-limit gate over-admission).
-            crate::skill_context::transient_body_message(session)
+            // The armed skill's body rides ONLY the first post-activation
+            // LLM payload (never persisted), so
+            // `estimate_messages(&session.messages)` cannot see it while it
+            // is still undelivered — count it here or a large armed skill
+            // pushes that first real payload past the budget (late
+            // compaction, hard-limit gate over-admission).
+            (!session.skill_body_delivered())
+                .then(|| crate::skill_context::body_message(session))
+                .flatten()
                 .map(|m| estimate(&m.text()))
                 .unwrap_or(0),
         );

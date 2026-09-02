@@ -210,6 +210,9 @@ pub async fn resume(
         // (sole exception: `abort_keeps_skill` keeps an aborted task-plan,
         // so an interrupted plan survives to be delivered after resume).
         skill_prompt: Arc::new(Mutex::new(meta.skill.clone())),
+        // A restored (crash-mid-run) skill re-delivers its body ONCE on the
+        // resumed run's first LLM round — the delivery gate starts unspent.
+        skill_body_delivered: Arc::new(Mutex::new(false)),
         active_skill_names: Arc::new(Mutex::new(crate::resume_helpers::infer_skill_names(
             &meta.skill,
         ))),

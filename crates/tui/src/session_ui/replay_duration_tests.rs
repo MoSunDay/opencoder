@@ -15,6 +15,7 @@ use std::collections::HashMap;
 #[test]
 fn replayed_tool_block_omits_duration_span() {
     let msg = Message {
+        display: None,
         id: "a1".into(),
         role: Role::Assistant,
         blocks: vec![
@@ -81,6 +82,7 @@ fn replayed_tool_block_omits_duration_span() {
 #[test]
 fn replayed_orphan_tool_result_omits_duration_span() {
     let msg = Message {
+        display: None,
         id: "tr1".into(),
         role: Role::Tool,
         blocks: vec![ContentBlock::ToolResult {
@@ -119,6 +121,7 @@ fn replayed_orphan_tool_result_omits_duration_span() {
 #[test]
 fn replayed_reasoning_restored_as_thinking_block() {
     let msg = Message {
+        display: None,
         id: "r1".into(),
         role: Role::Assistant,
         blocks: vec![

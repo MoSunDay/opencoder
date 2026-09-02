@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use libsql::Connection;
 
-const SCHEMA_VERSION: i64 = 13;
+const SCHEMA_VERSION: i64 = 14;
 
 // Order invariant: busy_timeout must precede any locking statement, and
 // synchronous=NORMAL must be applied BEFORE journal_mode=WAL. Switching a
@@ -54,6 +54,7 @@ CREATE TABLE IF NOT EXISTS messages (
   usage_json  TEXT NOT NULL,
   created_at  INTEGER NOT NULL,
   synthetic   INTEGER NOT NULL DEFAULT 0,
+  display     TEXT,
   mode        TEXT,
   summary     INTEGER NOT NULL DEFAULT 0
 )";
@@ -329,6 +330,14 @@ async fn bootstrap_tx(conn: &Connection) -> Result<()> {
 /// to say which partial upgrades ran, the full pass from the bottom is the
 /// only correct entry, and it is safe for exactly the reasons above.
 async fn migrate(conn: &Connection, from: i64) -> Result<()> {
+    if from < 14 {
+        // v14: verbatim display text on messages — the echo-side single
+        // source of truth. User messages record the raw input (`$skill`
+        // tokens included) here while `blocks_json` keeps the post-
+        // resolution clean text the LLM consumes. Nullable so existing rows
+        // stay valid: display layers fall back to the text blocks.
+        add_column_if_absent(conn, "messages", "display", "TEXT").await?;
+    }
     if from < 13 {
         // v13: last observed/declared address per node (fleet UI column).
         add_column_if_absent(conn, "nodes", "last_addr", "TEXT").await?;

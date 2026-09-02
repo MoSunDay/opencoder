@@ -67,6 +67,7 @@ fn session_meta(id: &str, agent: &str) -> SessionMeta {
 
 fn parent_task_turn(task_id: &str) -> Message {
     Message {
+        display: None,
         id: "a1".into(),
         role: Role::Assistant,
         blocks: vec![

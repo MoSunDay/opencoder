@@ -9,6 +9,7 @@ fn collect_head_images_gathers_user_and_tool_images() {
         detail: None,
     });
     let t = Message {
+        display: None,
         id: "t1".into(),
         role: Role::Tool,
         blocks: vec![ContentBlock::ToolResult {
@@ -77,6 +78,7 @@ fn strip_images_removes_image_blocks_and_keeps_text() {
 #[test]
 fn strip_images_clears_tool_result_images() {
     let m = Message {
+        display: None,
         id: "t1".into(),
         role: Role::Tool,
         blocks: vec![ContentBlock::ToolResult {

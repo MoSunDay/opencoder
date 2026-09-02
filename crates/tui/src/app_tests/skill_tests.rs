@@ -265,17 +265,6 @@ fn flash_visible_handles_wraparound() {
     assert!(!flash_visible(u32::MAX, 99, 5));
 }
 
-#[test]
-fn skill_trigger_names_the_active_skill() {
-    assert_eq!(
-        crate::skill_display::skill_trigger("repo-memory"),
-        "The `repo-memory` skill is now active. Begin executing its instructions immediately."
-    );
-    // The trigger is identical across Submit/Steer/Queue so a pure-skill
-    // submission behaves consistently regardless of the submit verb.
-    assert!(crate::skill_display::skill_trigger("x").contains("`x`"));
-}
-
 /// `start_turn` must report failure when the worker command channel has no
 /// consumer — the exact signature of a dead worker task (panic or unexpected
 /// exit). The main loop relies on this `false` to surface a marker and exit

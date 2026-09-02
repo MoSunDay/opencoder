@@ -314,6 +314,7 @@ async fn in_process_continue_reconciles_preexisting_dangling_non_task() {
         .await;
     session
         .record(opencoder_core::Message {
+            display: None,
             id: opencoder_session::runner::new_id(),
             role: opencoder_core::Role::Assistant,
             blocks: vec![ContentBlock::ToolUse {

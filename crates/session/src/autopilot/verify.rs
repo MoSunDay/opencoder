@@ -294,6 +294,7 @@ mod tests {
 
     fn tool_use_msg(id: &str, use_id: &str) -> Message {
         Message {
+            display: None,
             id: id.into(),
             role: Role::Assistant,
             blocks: vec![ContentBlock::ToolUse {
@@ -311,6 +312,7 @@ mod tests {
 
     fn tool_result_msg(id: &str, use_id: &str) -> Message {
         Message {
+            display: None,
             id: id.into(),
             role: Role::Tool,
             blocks: vec![ContentBlock::ToolResult {

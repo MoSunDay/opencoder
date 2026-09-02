@@ -16,6 +16,7 @@ fn route_paste_into_main_composer_inserts_verbatim_text() {
         "plain text",
         &mut None,
         &mut None,
+        false, // ap_menu_open
         false,
         false,
         false,
@@ -52,6 +53,7 @@ fn route_paste_swallowed_when_task_picker_open() {
         "plain text",
         &mut None,
         &mut None,
+        false, // ap_menu_open
         true,
         false,
         false,
@@ -88,6 +90,7 @@ fn route_paste_swallowed_when_cache_salt_menu_open() {
         "plain text",
         &mut None,
         &mut None,
+        false, // ap_menu_open
         false,
         true,
         false,
@@ -126,6 +129,7 @@ fn paste(
         pasted,
         &mut None,
         &mut None,
+        false, // ap_menu_open
         false,
         false,
         false,
@@ -594,6 +598,7 @@ fn route_paste_feeds_open_annotation_editor_verbatim() {
         "\ntail",
         &mut pe,
         &mut None,
+        false, // ap_menu_open
         false,
         false,
         false,
@@ -638,6 +643,7 @@ fn route_paste_swallowed_by_notepad() {
         "np body",
         &mut None,
         &mut view,
+        false, // ap_menu_open
         false,
         false,
         false,
@@ -665,6 +671,7 @@ fn route_paste_swallowed_by_notepad() {
         "np body",
         &mut None,
         &mut view,
+        false, // ap_menu_open
         false,
         false,
         false,
@@ -685,4 +692,45 @@ fn route_paste_swallowed_by_notepad() {
     assert!(matches!(flow, LoopFlow::Redraw));
     assert!(view.as_ref().unwrap().editor.vim.text.is_empty());
     assert!(input.is_empty());
+}
+
+/// The `/ap` mode popup has no text field, but it sits in the `Event::Key`
+/// chain (app.rs intercepts every key while open) — the paste routing must
+/// mirror that and swallow the payload instead of letting it reach the
+/// composer hidden behind the popup.
+#[test]
+fn route_paste_swallowed_when_ap_menu_open() {
+    let mut model_menu: Option<ModelMenu> = None;
+    let mut command_menu: Option<CommandMenu> = None;
+    let mut input = String::from("draft behind the popup");
+    let mut idx = 3usize;
+    let mut pending_images: Vec<(String, String)> = Vec::new();
+    let mut asm = crate::image_chunk::Assembly::new();
+    let mut chat = ChatView::default();
+    let flow = route_paste(
+        "plain text",
+        &mut None,
+        &mut None,
+        true, // ap_menu_open
+        false,
+        false,
+        false,
+        false,
+        &mut model_menu,
+        &mut None,
+        &mut None,
+        &mut None,
+        &mut command_menu,
+        &mut None,
+        &mut input,
+        &mut idx,
+        &mut pending_images,
+        &mut asm,
+        &mut chat,
+        Path::new("."),
+    );
+    assert!(matches!(flow, LoopFlow::Redraw), "popup must own the paste");
+    assert_eq!(input, "draft behind the popup", "composer untouched");
+    assert_eq!(idx, 3);
+    assert!(pending_images.is_empty());
 }

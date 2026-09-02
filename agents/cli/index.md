@@ -26,7 +26,7 @@ clap 命令前端 + headless 运行时。解析全局 flag 与子命令（run/tu
 - 裸 prompt / `run`：`run_headless` → 一次性 run → `[session <id>]`。
 - `--continue`：`pick_resume_id` 取 `list_sessions(limit=1)` 最新 → resume。
 - `--session <id> [--fork]`：resume 指定 id；`--fork` 先复制。
-- `session show <id> [--json]`：默认按 `[role] text()` 打印（仅 Text 块）；`--json` 打印完整状态。
+- `session show <id> [--json]`：默认按 `[role] display||text()` 打印（仅 Text 块；display 为 verbatim 原文，旧行回退 text()，`show_message_line_prefers_display_then_blocks`）；`--json` 打印完整状态。
 - `session export <id> -o <file>` / `session import <file>`：见 [agents/store](../store/index.md) 的 bundle。
 
 ## e2e 测试套件

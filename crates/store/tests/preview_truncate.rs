@@ -34,6 +34,7 @@ fn meta(id: &str) -> SessionMeta {
 
 fn user_msg(id: &str, blocks: Vec<ContentBlock>) -> Message {
     Message {
+        display: None,
         id: id.into(),
         role: Role::User,
         blocks,

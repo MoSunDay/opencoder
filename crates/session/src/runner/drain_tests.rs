@@ -26,6 +26,7 @@ async fn drain_mode_step_proceeds_when_transcript_ends_with_tool_result() {
     let (mut session, _store) = make_session("drain-tool-test").await;
 
     session.messages.push(opencoder_core::Message {
+        display: None,
         id: "tool-1".into(),
         role: Role::Tool,
         blocks: vec![],

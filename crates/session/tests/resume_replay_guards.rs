@@ -20,6 +20,7 @@ use common::*;
 /// "timed out" result the subagent timeout path persists).
 fn tool_result_msg(id: &str, content: &str, is_error: bool) -> Message {
     Message {
+        display: None,
         id: format!("{id}-result"),
         role: Role::Tool,
         blocks: vec![ContentBlock::ToolResult {

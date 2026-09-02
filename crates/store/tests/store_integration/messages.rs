@@ -5,6 +5,36 @@ use crate::common::{conv, fresh, make_session};
 use opencoder_core::{ContentBlock, Message, Role};
 use opencoder_store::{LibsqlStore, Store};
 
+/// v14 `messages.display` column: the verbatim echo text round-trips through
+/// SQLite, and legacy NULL rows load as `None` (fallback to blocks).
+#[tokio::test]
+async fn display_column_round_trips_and_legacy_rows_load_as_none() {
+    let (_dir, store) = fresh().await;
+    make_session(&store, "sd", 1).await;
+
+    let mut with_display = Message::user("du1", " fix the bug");
+    with_display.display = Some("$review fix the bug".into());
+    let legacy = Message::user("du2", "old prompt");
+    store
+        .append_messages("sd", &[with_display, legacy])
+        .await
+        .unwrap();
+
+    let loaded = store.load_messages("sd").await.unwrap();
+    assert_eq!(loaded.len(), 2);
+    assert_eq!(loaded[0].display.as_deref(), Some("$review fix the bug"));
+    assert_eq!(loaded[0].text(), " fix the bug");
+    assert!(
+        loaded[1].display.is_none(),
+        "legacy NULL display loads as None"
+    );
+
+    // The load_after tail path (compacted sessions) carries display too.
+    let tail = store.load_messages_after("sd", 1).await.unwrap();
+    assert_eq!(tail.len(), 1);
+    assert!(tail[0].display.is_none());
+}
+
 #[tokio::test]
 async fn append_and_load_preserves_all_roles_and_blocks() {
     let (_dir, store) = fresh().await;
@@ -37,6 +67,7 @@ async fn append_and_load_preserves_all_roles_and_blocks() {
         {
             let id = "t1";
             Message {
+                display: None,
                 id: id.into(),
                 role: Role::Tool,
                 blocks: vec![ContentBlock::ToolResult {

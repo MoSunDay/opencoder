@@ -67,6 +67,7 @@ fn assistant_with_tool(id: &str, tool_id: &str) -> Message {
 /// A tool-result message (simulates the tool execution result).
 fn tool_result(id: &str, tool_id: &str, content: &str) -> Message {
     Message {
+        display: None,
         id: id.into(),
         role: Role::Tool,
         blocks: vec![ContentBlock::ToolResult {

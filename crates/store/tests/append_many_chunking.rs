@@ -14,6 +14,7 @@ use tempfile::TempDir;
 
 fn msg(id: &str) -> Message {
     Message {
+        display: None,
         id: id.into(),
         role: Role::User,
         blocks: vec![ContentBlock::text(format!("body for {id}"))],

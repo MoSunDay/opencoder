@@ -45,6 +45,7 @@ async fn make_session(store: &LibsqlStore, id: &str) {
 
 fn assistant(id: &str, text: &str) -> Message {
     Message {
+        display: None,
         id: id.into(),
         role: Role::Assistant,
         blocks: vec![ContentBlock::text(text)],
@@ -128,6 +129,7 @@ use opencoder_tui::chat::ChatBlock;
 
 fn assistant_with_task(id: &str, task_id: &str) -> Message {
     Message {
+        display: None,
         id: id.into(),
         role: Role::Assistant,
         blocks: vec![

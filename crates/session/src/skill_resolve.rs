@@ -164,11 +164,14 @@ pub async fn record_compound(session: &mut SessionState, rest: &str, images: &[S
         if resolved_now {
             let mut msg = Message::user(new_id(), SKILL_TRIGGER);
             msg.synthetic = true;
+            // Echo contract: replay surfaces show the verbatim input (the
+            // `$name` token included), never the injected trigger body.
+            msg.display = Some(rest.clone());
             session.record(msg).await;
         }
         return;
     }
-    let m = Message::user_with_images(new_id(), text, images);
+    let m = Message::user_with_display(new_id(), text, Some(rest.clone()), images);
     session.record(m).await;
 }
 
@@ -313,6 +316,52 @@ mod tests {
         assert!(
             s.skill_prompt_cloned().is_some(),
             "skill activated by the token"
+        );
+    }
+
+    /// Echo contract: the recorded message keeps the verbatim input (token
+    /// included) as `display`; `text()` carries only the cleaned prompt.
+    #[tokio::test]
+    async fn record_compound_display_is_verbatim_input() {
+        let mut s = make_session();
+        s.agent = resolve_agent("plan").unwrap();
+        {
+            let _guard = lock_home(tempfile::tempdir().unwrap().path());
+            opencoder_core::seed_builtin_skills();
+            record_compound(&mut s, "$review fix the bug", &[]).await;
+        }
+        assert_eq!(s.messages.len(), 1);
+        assert_eq!(
+            s.messages[0].text().trim(),
+            "fix the bug",
+            "text() is the clean prompt the LLM consumes"
+        );
+        assert_eq!(
+            s.messages[0].display.as_deref(),
+            Some("$review fix the bug"),
+            "display is the verbatim echo"
+        );
+        assert!(!s.messages[0].text().contains("$review"));
+    }
+
+    /// Pure-skill queue/steer submit: the injected SKILL_TRIGGER carries the
+    /// verbatim token as display so replay surfaces show the user's input.
+    #[tokio::test]
+    async fn record_compound_pure_skill_display_is_verbatim_token() {
+        let mut s = make_session();
+        s.agent = resolve_agent("plan").unwrap();
+        {
+            let _guard = lock_home(tempfile::tempdir().unwrap().path());
+            opencoder_core::seed_builtin_skills();
+            record_compound(&mut s, "$review", &[]).await;
+        }
+        assert_eq!(s.messages.len(), 1);
+        assert_eq!(s.messages[0].text(), SKILL_TRIGGER);
+        assert!(s.messages[0].synthetic);
+        assert_eq!(
+            s.messages[0].display.as_deref(),
+            Some("$review"),
+            "trigger replays as the user's own `$review`"
         );
     }
 

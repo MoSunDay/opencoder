@@ -1,6 +1,6 @@
 # Message.display verbatim 回显契约
 
-Commit: af71944
+Commit: c3ec226
 
 ## 背景
 

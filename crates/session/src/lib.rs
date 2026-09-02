@@ -17,6 +17,8 @@ pub mod skill_lifecycle;
 pub mod skill_resolve;
 pub mod streamline;
 pub mod subagent_steer_gate;
+#[cfg(test)]
+pub(crate) mod test_env;
 pub mod tool_guard;
 pub mod tools;
 

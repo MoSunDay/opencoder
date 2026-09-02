@@ -667,7 +667,7 @@ pub(crate) async fn handle_mouse(
             for btn in &hits.tool_btns {
                 if in_rect(btn.rect, m.column, m.row) {
                     if let Some(v) = collapse_view(chat, *subagent_focus) {
-                        ChatView::toggle_tool_at(v, btn.block_idx);
+                        ChatView::cycle_tool_group_at(v, btn.block_idx);
                     }
                     consumed = true;
                     break;

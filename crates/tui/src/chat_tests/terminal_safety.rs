@@ -45,7 +45,9 @@ fn every_dynamic_chat_block_uses_the_same_terminal_safety_boundary() {
         is_error: false,
         images: Vec::new(),
     });
-    view.toggle_tool_at(1);
+    // Cycle the group to Results so the (sanitized) output lines render.
+    view.cycle_tool_group_at(1);
+    view.cycle_tool_group_at(1);
     view.apply(&SessionEvent::CompactionDelta(dirty.into()));
     view.apply(&SessionEvent::Status(dirty.into()));
     view.apply(&SessionEvent::Error(dirty.into()));

@@ -105,6 +105,100 @@ fn ctrl_l_exits_subagent_and_returns_to_follow_mode() {
     assert_all_thinking_collapsed(&chat);
 }
 
+/// Ctrl+L resets every ToolGroup (parent AND focused child) to the Collapsed
+/// state — expanded List/Results groups are one keystroke away from the
+/// single count line.
+#[test]
+fn ctrl_l_resets_tool_groups_to_collapsed() {
+    use opencoder_session::SessionEvent;
+
+    let (mut chat, sub_idx) = chat_with_subagent();
+    // Give both views a finished tool group and expand it to Results.
+    chat.apply(&SessionEvent::ToolStart {
+        id: "p".into(),
+        name: "bash".into(),
+        input: serde_json::json!({"command": "ls"}),
+    });
+    chat.apply(&SessionEvent::ToolEnd {
+        id: "p".into(),
+        name: "bash".into(),
+        output: "out".into(),
+        is_error: false,
+        images: Vec::new(),
+    });
+    if let ChatBlock::Subagent { view, .. } = &mut chat.blocks[sub_idx] {
+        view.apply(&SessionEvent::ToolStart {
+            id: "c".into(),
+            name: "bash".into(),
+            input: serde_json::json!({"command": "ls"}),
+        });
+        view.apply(&SessionEvent::ToolEnd {
+            id: "c".into(),
+            name: "bash".into(),
+            output: "out".into(),
+            is_error: false,
+            images: Vec::new(),
+        });
+        for h in view.tool_headers() {
+            view.cycle_tool_group_at(h.block_idx);
+            view.cycle_tool_group_at(h.block_idx); // -> Results
+        }
+    }
+    for h in chat.tool_headers() {
+        chat.cycle_tool_group_at(h.block_idx);
+        chat.cycle_tool_group_at(h.block_idx); // -> Results
+    }
+
+    let mut subagent_focus = Some(sub_idx);
+    let mut follow = false;
+    let mut last_esc = None;
+    let mut input = String::new();
+    let mut cursor = 0usize;
+    let mut needs_clear = false;
+    let (sidecar_tx, _sidecar_rx) = mpsc::channel::<crate::sidecar_ui::SidecarCmd>(8);
+    let consumed = pre_key_intercept(
+        KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL),
+        &KeyBindings::default(),
+        &mut subagent_focus,
+        &mut follow,
+        &mut last_esc,
+        &mut chat,
+        &mut input,
+        &mut cursor,
+        &mut needs_clear,
+        &sidecar_tx,
+    );
+    assert!(consumed, "Ctrl+L must be consumed");
+
+    let all_collapsed = |v: &ChatView| {
+        v.blocks.iter().all(|b| {
+            !matches!(
+                b,
+                ChatBlock::ToolGroup {
+                    state: crate::chat::ToolGroupState::List,
+                    ..
+                }
+            ) && !matches!(
+                b,
+                ChatBlock::ToolGroup {
+                    state: crate::chat::ToolGroupState::Results,
+                    ..
+                }
+            )
+        })
+    };
+    assert!(
+        all_collapsed(&chat),
+        "parent tool groups must be Collapsed after Ctrl+L"
+    );
+    if let ChatBlock::Subagent { view, .. } = &chat.blocks[sub_idx] {
+        assert!(
+            all_collapsed(view),
+            "child tool groups must be Collapsed after Ctrl+L"
+        );
+    }
+}
+
 /// Esc exits a focused subagent view back to the parent at FOLLOW MODE
 /// (bottom of the view) — same reset-to-live semantics as Ctrl+L, without
 /// the collapse / input-clear side effects.

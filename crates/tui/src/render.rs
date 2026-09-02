@@ -60,8 +60,9 @@ pub(crate) struct MouseHits {
     pub thinking_btns: Vec<ThinkingBtn>,
     /// Clickable Subagent-block header rows; clicking toggles collapse.
     pub subagent_btns: Vec<SubagentBtn>,
-    /// Clickable Tool-block header rows; clicking toggles collapse.
-    /// One entry per Tool block currently visible in the body viewport.
+    /// Clickable ToolGroup header rows; clicking cycles the group through
+    /// Collapsed → List → Results. One entry per ToolGroup block currently
+    /// visible in the body viewport.
     pub tool_btns: Vec<ToolBtn>,
     /// Clickable Compaction-block header rows; clicking toggles collapse.
     pub compaction_btns: Vec<CompactionBtn>,
@@ -86,7 +87,7 @@ pub(crate) struct SubagentBtn {
     pub rect: Rect,
 }
 
-/// A clickable Tool-block header.
+/// A clickable ToolGroup header (the group line).
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct ToolBtn {
     pub block_idx: usize,

@@ -67,3 +67,29 @@ skill-less"）。集成复现：run1 结束（skill 已清）后，run2 纯文�
 其后共享树上并行会话的 shellguard 换壳 WIP（19 文件未提交）引入 1 个
 bash_guard compat 失败（`compat_find_sed_xargs_rows`），与本修复无关——本
 修复仅触碰 `crates/session/src/compaction/{mod,tests}.rs`。
+
+## 后记二：F1 契约测试 HOME 竞态修复——crate 级 env 锁（2026-09-02，commit 663c3bc）
+
+后记一的契约测试 `estimated_tokens_counts_transient_skill_body` 在共享树上
+3 跑 2 挂。byte 级根因：`estimated_tokens` 每次调用经 `skills_dir()` 活读
+`HOME`，两次快照横跨并发测试的 HOME 翻转窗口时，armed 快照丢失全局指令段
+（`load_instructions` 把 `$HOME/.opencoder` 列为首候选；实测
+`/root/.opencoder/AGENTS.MD` 637 字符 ≈165 est tokens，恰好闭合
+`skillless=900 / armed=9745 / body_est=9010` 的差量算术）。机制：
+`skill_resolve::lock_home` 自带 mutex 只互斥**写者**，作为**读者**的本测试
+不持锁。
+
+修复（纯测试侧，4 文件，全部 `#[cfg(test)]` 门控）：新增
+`crates/session/src/test_env.rs::env_lock()` crate 级单一互斥量，写者
+（`lock_home` 弃用本地 `HOME_MUTEX`）与读者（跨两次快照断言）统一持锁，
+把翻转窗口串行化——确定性由构造保证，非概率性通过。
+
+- skill 过滤器连跑 5 轮 × 113 项 → 565 passed / 0 failed（修复前挂率 ~67%）
+- 落库后全量 workspace 门禁覆盖合并树（`cargo test --workspace
+  --no-fail-fast`）→ **3908 passed / 0 failed（249 suites）**
+- clippy（`--workspace --all-targets -- -D warnings`）→ 零告警
+- 首轮全量中 `nodes_ops` 测试二进制被并行会话共享 target 目录清理竞态吞掉
+  （`never executed, No such file or directory`），非测试失败；`--no-fail-fast`
+  重跑全绿，与 f42eb40 记录的同类先例一致。
+- 残留同源加固点（可选）：`bash_guard::plain_dir()` 测试助手在 `$HOME` 下建
+  tempdir，并发翻转期间理论上可被提前回收，历次全量未观测到。

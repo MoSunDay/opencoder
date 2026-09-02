@@ -55,5 +55,5 @@ description: Task retrospective at any checkpoint (done/paused/handoff). Produce
 
 ## 与其它 skill 的衔接
 - 完成实现（`do-and-done`）后，summary 产出回顾；review 做 go-live 评审；submit 做提交。
-- summary 是只读回顾，不替代 review 的证据评审与 go-live 裁决，也不替代 submit 的提交动作。
+- summary 是只读回顾，不替代 review 的逻辑评审与 go-live 裁决，也不替代 submit 的提交动作。
 - 触及区 memory（`agents/*`、`features/*`）若需更新，按 `repo-local-memory` 处理，summary 本身不改文件。

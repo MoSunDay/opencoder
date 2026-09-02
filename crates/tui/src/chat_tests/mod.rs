@@ -2,6 +2,7 @@ use super::*;
 use crate::composer;
 
 mod agent_switch;
+mod bash_tool;
 mod compaction_state;
 mod image_render;
 mod line_accounting;

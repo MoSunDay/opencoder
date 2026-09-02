@@ -447,3 +447,88 @@ async fn attach_del_click_removes_only_clicked_image() {
     );
     assert_eq!(chat.steer_items.len(), 0, "no steer side effects");
 }
+
+/// Clicking a ToolGroup's group line cycles the three display states
+/// Collapsed → List → Results → Collapsed. This exercises the exact
+/// `tool_btns` → `handle_mouse` → `cycle_tool_group_at` wiring the renderer
+/// feeds.
+#[tokio::test]
+async fn clicking_tool_group_line_cycles_three_states() {
+    use crate::chat::{ChatBlock, ToolGroupState};
+    use crate::render::ToolBtn;
+
+    let mut chat = ChatView::default();
+    chat.apply(&SessionEvent::ToolStart {
+        id: "t1".into(),
+        name: "bash".into(),
+        input: serde_json::json!({"command": "ls"}),
+    });
+    chat.apply(&SessionEvent::ToolEnd {
+        id: "t1".into(),
+        name: "bash".into(),
+        output: "done".into(),
+        is_error: false,
+        images: Vec::new(),
+    });
+
+    let state = |c: &ChatView| -> ToolGroupState {
+        match c.blocks.first() {
+            Some(ChatBlock::ToolGroup { state, .. }) => *state,
+            other => panic!("expected a ToolGroup first, got {other:?}"),
+        }
+    };
+    assert!(matches!(state(&chat), ToolGroupState::Collapsed));
+
+    async fn drive(chat: &mut ChatView, row: u16) {
+        let body = Rect::new(0, 0, 80, 12);
+        let mut hits = empty_hits(body);
+        hits.tool_btns.push(ToolBtn {
+            block_idx: 0,
+            rect: Rect::new(0, 5, 80, 1),
+        });
+        let click = MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 3,
+            row,
+            modifiers: KeyModifiers::NONE,
+        };
+        let mut scroll = 0u32;
+        let mut follow = true;
+        let mut subagent_focus: Option<usize> = None;
+        let mut subagent_sys = 0u64;
+        let mut queue_items: Vec<(i64, String)> = vec![];
+        let store = StubStore;
+        let mut queue_scroll: u32 = 0;
+        let mut pending_images = vec![];
+        handle_mouse(
+            click,
+            &hits,
+            &mut scroll,
+            &mut follow,
+            chat,
+            &mut subagent_focus,
+            &mut subagent_sys,
+            Path::new("."),
+            &mut queue_items,
+            "s",
+            &store,
+            &mut queue_scroll,
+            &mut pending_images,
+        )
+        .await;
+    }
+
+    drive(&mut chat, 5).await; // first click: Collapsed -> List
+    assert!(matches!(state(&chat), ToolGroupState::List));
+    drive(&mut chat, 5).await; // second click: List -> Results
+    assert!(matches!(state(&chat), ToolGroupState::Results));
+    drive(&mut chat, 5).await; // third click: Results -> Collapsed
+    assert!(matches!(state(&chat), ToolGroupState::Collapsed));
+
+    // A click outside every button rect must not cycle anything.
+    drive(&mut chat, 0).await;
+    assert!(
+        matches!(state(&chat), ToolGroupState::Collapsed),
+        "miss-click must not cycle the group"
+    );
+}

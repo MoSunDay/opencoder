@@ -133,14 +133,16 @@ fn replay_one_prefetched_tool_image_renders() {
     };
 
     let mut chat = ChatView::default();
-    // Need a matching Tool block for the ToolResult to attach output.
-    chat.blocks.push(ChatBlock::Tool {
-        id: "t1".into(),
-        header: Line::from("test"),
-        output: Vec::new(),
-        collapsed: false,
-        started_at_ms: 0,
-        elapsed_ms: None,
+    // Need a matching ToolGroup call for the ToolResult to attach output.
+    chat.blocks.push(ChatBlock::ToolGroup {
+        calls: vec![crate::chat::ToolCall {
+            id: "t1".into(),
+            header: Line::from("test"),
+            output: Vec::new(),
+            started_at_ms: Some(0),
+            elapsed_ms: Some(0),
+        }],
+        state: crate::chat::ToolGroupState::Collapsed,
     });
     replay_one(&mut chat, &msg, &prefetched);
 

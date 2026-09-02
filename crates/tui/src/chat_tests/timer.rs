@@ -66,7 +66,7 @@ fn done_subagent_hides_subsecond() {
 // --- Self-heal: recover missing round anchor when LlmRoundStart was dropped ---
 
 /// When the round-start anchor is `None` (LlmRoundStart dropped by a saturated
-/// channel), a `TextDelta` must re-anchor the timer so `[turn cost]` still shows.
+/// channel), a `TextDelta` must re-anchor the timer so `[call cost]` still shows.
 #[test]
 fn streaming_delta_self_heals_missing_round_start() {
     let mut v = ChatView::default();
@@ -127,7 +127,7 @@ fn round_end_clears_self_healed_anchor() {
 }
 
 /// A delta routed into a subagent via `SubagentChild` self-heals the CHILD
-/// view's anchor (the recursive `view.apply(ev)` path), so `[turn cost]` is
+/// view's anchor (the recursive `view.apply(ev)` path), so `[call cost]` is
 /// recovered inside the subagent fold too.
 #[test]
 fn subagent_child_delta_self_heals_child_view() {
@@ -158,7 +158,7 @@ fn subagent_child_delta_self_heals_child_view() {
     );
 }
 
-/// LlmRoundEnd freezes the round cost so [turn cost] stays visible between
+/// LlmRoundEnd freezes the round cost so [call cost] stays visible between
 /// rounds; the next LlmRoundStart resets it to None (new round). Done clears
 /// both the live anchor and the frozen value.
 #[test]

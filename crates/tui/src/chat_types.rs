@@ -124,13 +124,13 @@ pub struct ChatView {
     pub status: String,
     /// Start of the currently-running provider/model round. Display-only:
     /// this value never becomes a persisted model message or prompt content.
-    /// While `Some`, `[turn cost]` counts up live. Cleared on `LlmRoundEnd`
+    /// While `Some`, `[call cost]` counts up live. Cleared on `LlmRoundEnd`
     /// (transferring the final value to `frozen_round_ms`), `Done`, `Error`.
     pub llm_round_started_at_ms: Option<i64>,
     /// Frozen final elapsed of the most recent completed LLM round. Set by
     /// `LlmRoundEnd`, cleared by the next `LlmRoundStart` (reset), `Done`,
     /// `Error`. While `llm_round_started_at_ms` is `None` and this is `Some`,
-    /// `[turn cost]` holds the frozen value so the timer stays visible during
+    /// `[call cost]` holds the frozen value so the timer stays visible during
     /// inter-round tool execution instead of disappearing.
     pub frozen_round_ms: Option<u64>,
     /// Session-lifetime real token consumption, accumulated from

@@ -145,14 +145,14 @@ fn tok_cost_dropped_on_narrow_width() {
 }
 
 #[test]
-fn tok_cost_border_appends_turn_cost_segment_when_timing() {
+fn tok_cost_border_appends_call_cost_segment_when_timing() {
     let mut v = ChatView::default();
     v.apply(&SessionEvent::TextDelta("hi".into()));
     v.apply(&SessionEvent::Done);
     let buf = draw(&v, 60, 10, true, false, 42_000);
     let bottom = row_text(&buf, buf.area.bottom() - 1, buf.area.width);
     assert!(
-        bottom.contains("[tok cost 0] · [turn cost 42s]"),
+        bottom.contains("[tok cost 0] · [call cost 42s]"),
         "active turn appends the turn-cost segment after tok cost; got: {bottom}"
     );
 }
@@ -167,13 +167,13 @@ fn tok_cost_border_drops_turn_segment_before_tok_on_narrow_width() {
     let buf = draw(&v, 40, 10, false, false, 42_000);
     let bottom = row_text(&buf, buf.area.bottom() - 1, buf.area.width);
     assert!(
-        bottom.contains("[tok cost 0]") && !bottom.contains("turn cost 42s"),
+        bottom.contains("[tok cost 0]") && !bottom.contains("call cost 42s"),
         "graded dropping keeps tok, drops turn; got: {bottom}"
     );
 }
 
 /// The bottom-border corners keep a colour hierarchy: the
-/// `[tok cost]`/`[turn cost]` labels render in the warn colour — the same
+/// `[tok cost]`/`[call cost]` labels render in the warn colour — the same
 /// as the status bar's task timer and running-spinner spans — the `·`
 /// separator is muted, and the live `跟随中…` follow indicator keeps the
 /// accent.
@@ -200,7 +200,7 @@ fn tok_cost_corner_quiet_and_follow_indicator_accent() {
         if sym == "[" && tok_fg.is_none() {
             tok_fg = Some((cell.fg, cell.modifier));
         } else if sym == "t" && seen_tok_label {
-            // First `t` after the tok label closes belongs to [turn cost ...
+            // First `t` after the tok label closes belongs to [call cost ...
             turn_fg = Some((cell.fg, cell.modifier));
             seen_tok_label = false;
         } else if sym == "]" && tok_fg.is_some() && turn_fg.is_none() {
@@ -219,7 +219,7 @@ fn tok_cost_corner_quiet_and_follow_indicator_accent() {
     assert_eq!(
         turn_fg,
         Some((warn_style.fg.unwrap(), warn_style.add_modifier)),
-        "turn cost label must match the task-timer warn colour"
+        "call cost label must match the task-timer warn colour"
     );
     assert_eq!(sep_fg, Some(theme::muted()), "separator must be muted");
     assert_eq!(

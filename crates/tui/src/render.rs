@@ -482,7 +482,7 @@ fn render_body(
     let cache = viewport.as_ref().unwrap();
     let total_rows = cache.total_rows();
 
-    // The [turn cost] timer lives on the bottom border (after [tok cost], see
+    // The [call cost] timer lives on the bottom border (after [tok cost], see
     // rounded_block_line_tok), so the content window takes the full height.
     let content_h = visible_h;
 

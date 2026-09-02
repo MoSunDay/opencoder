@@ -154,7 +154,7 @@ pub fn rounded_block_line(title: &Line<'static>) -> Block<'static> {
 }
 
 /// [`rounded_block_line`] plus a session-lifetime `[tok cost]` label (and,
-/// when `turn_ms > 0`, a `·`-separated `[turn cost]` duration) on the bottom
+/// when `turn_ms > 0`, a `·`-separated `[call cost]` duration) on the bottom
 /// border's left corner — the fourth info corner of the body block (right-
 /// bottom holds the follow indicator). Both segments render in the warn
 /// colour — the same as the status bar's task timer and running-spinner
@@ -164,7 +164,7 @@ pub fn rounded_block_line(title: &Line<'static>) -> Block<'static> {
 /// guards narrow terminals with graded dropping: when the `[tok cost]`
 /// segment alone could collide with the right-bottom indicator (which
 /// reserves ~10 display columns at the right edge) the whole label is
-/// dropped; when only the `[turn cost]` addition would overflow, just the
+/// dropped; when only the `[call cost]` addition would overflow, just the
 /// tok segment is kept. `turn_ms == 0` omits the turn segment entirely.
 /// Pure builder — no globals.
 pub fn rounded_block_line_tok(
@@ -179,7 +179,7 @@ pub fn rounded_block_line_tok(
         crate::fmt::format_tokens_cost_m(tokens_total)
     );
     let turn = if turn_ms > 0 {
-        format!("[turn cost {}]", crate::fmt::format_run_duration(turn_ms))
+        format!("[call cost {}]", crate::fmt::format_run_duration(turn_ms))
     } else {
         String::new()
     };

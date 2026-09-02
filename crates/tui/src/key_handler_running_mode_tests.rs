@@ -352,7 +352,12 @@ fn backtab_in_act_mode_switches_to_plan() {
 /// The plain Tab arm (queue/submit) must never swallow the chord.
 #[test]
 fn tab_shift_spelling_arms_or_switches_like_backtab() {
-    fn run(code: KeyCode, mods: KeyModifiers, agent: &str, input_text: &str) -> (KeyAction, String) {
+    fn run(
+        code: KeyCode,
+        mods: KeyModifiers,
+        agent: &str,
+        input_text: &str,
+    ) -> (KeyAction, String) {
         let mut input = input_text.to_string();
         let mut cursor = input.chars().count();
         let mut hist_idx = None;
@@ -409,7 +414,10 @@ fn tab_shift_spelling_arms_or_switches_like_backtab() {
             matches!(action, KeyAction::SwitchAgent(ref to) if to == "plan"),
             "{code:?} in act mode must switch to plan, got {action:?}"
         );
-        assert_eq!(input, "draft stays", "{code:?} switch preserves the composer");
+        assert_eq!(
+            input, "draft stays",
+            "{code:?} switch preserves the composer"
+        );
     }
 }
 
@@ -458,7 +466,11 @@ fn ctrl_alt_shift_tab_chords_never_arm_or_switch() {
 
     // BackTab + CONTROL/ALT/SUPER: fully inert in both modes — no arm, no
     // switch, draft untouched.
-    for mods in [KeyModifiers::CONTROL, KeyModifiers::ALT, KeyModifiers::SUPER] {
+    for mods in [
+        KeyModifiers::CONTROL,
+        KeyModifiers::ALT,
+        KeyModifiers::SUPER,
+    ] {
         for agent in ["plan", "act"] {
             let (action, input) = run(KeyCode::BackTab, mods, agent);
             assert!(
@@ -472,12 +484,19 @@ fn ctrl_alt_shift_tab_chords_never_arm_or_switch() {
     // (Tab, SHIFT+CONTROL) misses the shift_tab arm and is swallowed by the
     // generic Ctrl-combo guard — never an arm, never a mode switch, and it
     // can never leak into the plain Tab queue/submit arm either.
-    let (action, input) = run(KeyCode::Tab, KeyModifiers::SHIFT | KeyModifiers::CONTROL, "plan");
+    let (action, input) = run(
+        KeyCode::Tab,
+        KeyModifiers::SHIFT | KeyModifiers::CONTROL,
+        "plan",
+    );
     assert!(
         matches!(action, KeyAction::None),
         "Tab+SHIFT+CONTROL must be swallowed inert, got {action:?}"
     );
-    assert_eq!(input, "draft stays", "the swallowed chord preserves the draft");
+    assert_eq!(
+        input, "draft stays",
+        "the swallowed chord preserves the draft"
+    );
 }
 
 /// The arm is a PARENT-session operation: while a running subagent (or the

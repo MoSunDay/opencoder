@@ -146,11 +146,10 @@ fn body_call_cost_timer_not_mixed_into_tool_output() {
         is_error: false,
         images: vec![],
     });
-    // Cycle the tool group to Results so its output is visible (collapsed
-    // hides output behind the group line, but the group line is itself a
-    // content line that the old code would append the timer to).
-    v.cycle_tool_group_at(0);
-    v.cycle_tool_group_at(0);
+    // Toggle the group twice (net closed): the group line is itself a
+    // content line that the renderer appends the timer to.
+    v.toggle_step_group_at(0);
+    v.toggle_step_group_at(0);
     v.apply(&SessionEvent::Done);
 
     let backend = TestBackend::new(60, 10);

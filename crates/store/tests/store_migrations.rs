@@ -3,7 +3,9 @@
 //! Each test hand-writes an OLD on-disk schema (v1 / v2 / stale-version) with
 //! `libsql::Builder`, then reopens through `LibsqlStore::open` to trigger
 //! bootstrap -> migrate(), and asserts the resulting schema/version/behavior:
-//! - schema_migration_versioning: bootstrap records schema version 7
+//! - schema_migration_versioning: bootstrap records the latest schema version
+//! - schema_migration_v13_to_v14_adds_message_display: v13 messages gain the
+//!   verbatim `display` column (NULL for existing rows)
 //! - schema_migration_v1_to_v2_adds_sse_kind: v1 events gain sse_kind (NULL)
 //! - schema_migration_v2_to_v3_adds_handoff_and_skill: v2 sessions gain the
 //!   v3 handoff_seq/handoff_plan/skill columns
@@ -32,7 +34,7 @@ async fn schema_migration_versioning() {
     let mut rows = stmt.query(()).await.unwrap();
     let r = rows.next().await.unwrap().expect("version row exists");
     let v: i64 = r.get(0).unwrap();
-    assert_eq!(v, 13, "schema_version must be latest (13) after bootstrap");
+    assert_eq!(v, 14, "schema_version must be latest (14) after bootstrap");
 }
 
 #[tokio::test]
@@ -106,7 +108,7 @@ async fn schema_migration_v1_to_v2_adds_sse_kind() {
         let mut rows = stmt.query(()).await.unwrap();
         let r = rows.next().await.unwrap().unwrap();
         let v: i64 = r.get(0).unwrap();
-        assert_eq!(v, 13, "schema version must be latest (13) after migration");
+        assert_eq!(v, 14, "schema version must be latest (14) after migration");
     }
 
     // New events can be stored with sse_kind and read back.
@@ -138,7 +140,7 @@ async fn schema_migration_v1_to_v2_adds_sse_kind() {
     let mut rows = stmt.query(()).await.unwrap();
     let r = rows.next().await.unwrap().unwrap();
     let v: i64 = r.get(0).unwrap();
-    assert_eq!(v, 13, "schema version stays 13 after idempotent re-open");
+    assert_eq!(v, 14, "schema version stays 14 after idempotent re-open");
 }
 
 #[tokio::test]
@@ -234,7 +236,10 @@ async fn schema_migration_v2_to_v3_adds_handoff_and_skill() {
         let mut rows = stmt.query(()).await.unwrap();
         let r = rows.next().await.unwrap().unwrap();
         let v: i64 = r.get(0).unwrap();
-        assert_eq!(v, 13, "schema version must be 13 after v2→v3 migration");
+        assert_eq!(
+            v, 14,
+            "schema version must be latest (14) after v2→v3 migration"
+        );
     }
 
     // (4) Idempotent: reopening again does not re-run migration or error, and
@@ -249,7 +254,7 @@ async fn schema_migration_v2_to_v3_adds_handoff_and_skill() {
     let mut rows = stmt.query(()).await.unwrap();
     let r = rows.next().await.unwrap().unwrap();
     let v: i64 = r.get(0).unwrap();
-    assert_eq!(v, 13, "schema version stays 13 after idempotent re-open");
+    assert_eq!(v, 14, "schema version stays 14 after idempotent re-open");
 }
 
 #[tokio::test]
@@ -337,7 +342,7 @@ async fn schema_migration_is_idempotent_when_column_already_exists() {
         let mut rows = stmt.query(()).await.unwrap();
         let r = rows.next().await.unwrap().unwrap();
         let v: i64 = r.get(0).unwrap();
-        assert_eq!(v, 13, "schema version must be latest (13) after migration");
+        assert_eq!(v, 14, "schema version must be latest (14) after migration");
     }
 
     // A freshly appended event still round-trips its sse_kind.
@@ -367,7 +372,7 @@ async fn schema_migration_is_idempotent_when_column_already_exists() {
     let mut rows = stmt.query(()).await.unwrap();
     let r = rows.next().await.unwrap().unwrap();
     let v: i64 = r.get(0).unwrap();
-    assert_eq!(v, 13, "schema version stays 13 after idempotent re-open");
+    assert_eq!(v, 14, "schema version stays 14 after idempotent re-open");
 }
 
 /// v6 -> v7: reopening a faithful v6 database (sessions WITHOUT
@@ -450,7 +455,10 @@ async fn schema_migration_v6_to_v7_adds_summary_images() {
         let mut rows = stmt.query(()).await.unwrap();
         let r = rows.next().await.unwrap().unwrap();
         let v: i64 = r.get(0).unwrap();
-        assert_eq!(v, 13, "schema version must be 13 after v6->v7 migration");
+        assert_eq!(
+            v, 14,
+            "schema version must be latest (14) after v6->v7 migration"
+        );
     }
 }
 
@@ -561,7 +569,10 @@ async fn schema_migration_v7_to_v8_adds_requirement() {
         let mut rows = stmt.query(()).await.unwrap();
         let r = rows.next().await.unwrap().unwrap();
         let v: i64 = r.get(0).unwrap();
-        assert_eq!(v, 13, "schema version must be 13 after v7->v8 migration");
+        assert_eq!(
+            v, 14,
+            "schema version must be latest (14) after v7->v8 migration"
+        );
     }
 }
 
@@ -673,7 +684,10 @@ async fn schema_migration_v10_to_v11_adds_autopilot_mode() {
         let mut rows = stmt.query(()).await.unwrap();
         let r = rows.next().await.unwrap().unwrap();
         let v: i64 = r.get(0).unwrap();
-        assert_eq!(v, 13, "schema version must be 13 after v10->v11 migration");
+        assert_eq!(
+            v, 14,
+            "schema version must be latest (14) after v10->v11 migration"
+        );
     }
 }
 
@@ -712,4 +726,91 @@ async fn bootstrap_creates_subagent_task_id_index() {
         1,
         "idx_subagent_task_id stays singular across reopens"
     );
+}
+
+/// v13 -> v14: `messages.display` (verbatim echo text) is added as a nullable
+/// column; existing rows read back as `None` and new rows round-trip.
+#[tokio::test]
+async fn schema_migration_v13_to_v14_adds_message_display() {
+    use libsql::Builder;
+    use opencoder_core::Message;
+
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("migrate-v14.db");
+
+    // Phase 1: hand-write a v13 messages table (full v13 column set, NO
+    // display) plus a matching sessions table, and stamp version 13.
+    {
+        let db = Builder::new_local(&db_path).build().await.unwrap();
+        let conn = db.connect().unwrap();
+        conn.execute("CREATE TABLE schema_version (version INTEGER NOT NULL)", ())
+            .await
+            .unwrap();
+        conn.execute(
+            "CREATE TABLE sessions (               id TEXT PRIMARY KEY, title TEXT, agent TEXT, model TEXT, workdir_hash TEXT,               created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,               summary TEXT, summary_seq INTEGER, summary_images_json TEXT,               handoff_seq INTEGER, handoff_plan TEXT, skill TEXT,               task_type TEXT NOT NULL DEFAULT 'parent', requirement TEXT,               plan_snapshot TEXT, plan_input_count INTEGER NOT NULL DEFAULT 0,               autopilot_mode TEXT)",
+            (),
+        )
+        .await
+        .unwrap();
+        conn.execute(
+            "CREATE TABLE messages (               seq INTEGER PRIMARY KEY AUTOINCREMENT,               id TEXT NOT NULL,               session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,               role TEXT NOT NULL, agent TEXT, model TEXT,               blocks_json TEXT NOT NULL, usage_json TEXT NOT NULL,               created_at INTEGER NOT NULL, synthetic INTEGER NOT NULL DEFAULT 0,               mode TEXT, summary INTEGER NOT NULL DEFAULT 0)",
+            (),
+        )
+        .await
+        .unwrap();
+        conn.execute("INSERT INTO schema_version (version) VALUES (13)", ())
+            .await
+            .unwrap();
+        conn.execute(
+            "INSERT INTO sessions (id, created_at, updated_at) VALUES ('s13', 1, 1)",
+            (),
+        )
+        .await
+        .unwrap();
+        conn.execute(
+            "INSERT INTO messages (id, session_id, role, blocks_json, usage_json, created_at, synthetic)              VALUES ('m0', 's13', 'user', '[{\"kind\":\"text\",\"text\":\"old\"}]', '{}', 1, 0)",
+            (),
+        )
+        .await
+        .unwrap();
+    }
+
+    // Phase 2: reopen — migrate(conn, 13) runs the `if from < 14` block.
+    let store = LibsqlStore::open(&db_path).await.unwrap();
+
+    // (1) The display column now exists on messages.
+    {
+        let conn = store.conn().await.unwrap();
+        let stmt = conn.prepare("PRAGMA table_info(messages)").await.unwrap();
+        let mut rows = stmt.query(()).await.unwrap();
+        let mut found = false;
+        while let Some(row) = rows.next().await.unwrap() {
+            let name: String = row.get(1).unwrap();
+            if name == "display" {
+                found = true;
+                break;
+            }
+        }
+        assert!(
+            found,
+            "messages.display column must exist after v13->v14 migration"
+        );
+    }
+
+    // (2) The pre-existing row survives and reads back as display=None.
+    let loaded = store.load_messages("s13").await.unwrap();
+    assert_eq!(loaded.len(), 1);
+    assert_eq!(loaded[0].text(), "old");
+    assert!(
+        loaded[0].display.is_none(),
+        "v13 row: display reads as NULL after migration"
+    );
+
+    // (3) New messages round-trip the display column through the migrated DB.
+    let mut msg = Message::user("m1", " fix it");
+    msg.display = Some("$review fix it".into());
+    store.append_messages("s13", &[msg]).await.unwrap();
+    let loaded = store.load_messages("s13").await.unwrap();
+    assert_eq!(loaded.len(), 2);
+    assert_eq!(loaded[1].display.as_deref(), Some("$review fix it"));
 }

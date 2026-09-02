@@ -188,6 +188,58 @@ mod tests {
         m
     }
 
+    /// Echo contract: a synthetic skill trigger carrying the verbatim input
+    /// as `display` IS rendered (as the user's own words), while display-less
+    /// synthetic messages stay skipped.
+    #[test]
+    fn replay_renders_skill_trigger_display_and_skips_bare_synthetic() {
+        let mut trigger = make_user("u1", "The active skill is now in effect.", true);
+        trigger.display = Some("$review".to_string());
+        let msgs = vec![trigger, make_user("u2", "[compaction summary]", true)];
+        let chat = replay_messages("act", &msgs);
+        let joined: String = chat
+            .flatten()
+            .iter()
+            .flat_map(|l| l.spans.iter())
+            .map(|s| s.content.clone())
+            .collect::<String>();
+        assert!(
+            joined.contains("$review"),
+            "verbatim token must render on replay: {joined}"
+        );
+        assert!(
+            !joined.contains("active skill is now in effect"),
+            "resolved trigger body must never surface: {joined}"
+        );
+        assert!(
+            !joined.contains("compaction summary"),
+            "display-less synthetic user message must stay skipped: {joined}"
+        );
+    }
+
+    /// A real user turn's `display` (verbatim input, token included) wins
+    /// over the recorded clean text on replay.
+    #[test]
+    fn replay_prefers_display_over_recorded_blocks_for_user_turns() {
+        let mut m = make_user("u1", " fix the bug", false);
+        m.display = Some("$review fix the bug".to_string());
+        let chat = replay_messages("act", &[m]);
+        let joined: String = chat
+            .flatten()
+            .iter()
+            .flat_map(|l| l.spans.iter())
+            .map(|s| s.content.clone())
+            .collect::<String>();
+        assert!(joined.contains("$review fix the bug"), "display: {joined}");
+        assert!(
+            !joined.contains(
+                " fix the bug
+"
+            ) && joined.contains("$review fix the bug"),
+            "clean text alone must not render when display exists: {joined}"
+        );
+    }
+
     #[test]
     fn replay_skips_synthetic_user_messages() {
         // Synthetic user messages (steer/queue promotion, agent-switch
@@ -448,6 +500,7 @@ mod tests {
         use opencoder_core::{ContentBlock, Message, MessageUsage, Role};
         let uri = tiny_png_data_uri();
         let tool_msg = Message {
+            display: None,
             id: "m-tool".into(),
             role: Role::Tool,
             blocks: vec![ContentBlock::ToolResult {
@@ -479,6 +532,7 @@ mod tests {
     fn replay_tool_message_without_images_no_image_block() {
         use opencoder_core::{ContentBlock, Message, MessageUsage, Role};
         let tool_msg = Message {
+            display: None,
             id: "m-tool2".into(),
             role: Role::Tool,
             blocks: vec![ContentBlock::ToolResult {

@@ -152,6 +152,7 @@ pub async fn resume(
     if !dangling.is_empty() {
         let n_dangling = dangling.len();
         let synthetic = Message {
+            display: None,
             id: crate::runner::new_id(),
             role: Role::Tool,
             blocks: dangling,
@@ -326,6 +327,7 @@ pub async fn resume_and_replay(
     // via its dangling-`tool_use` reconciliation.
     if !backfill.is_empty() {
         let tool_msg = Message {
+            display: None,
             id: crate::runner::new_id(),
             role: Role::Tool,
             blocks: backfill,
@@ -505,6 +507,7 @@ pub async fn replay_cancelled_tasks(session: &mut SessionState, has_new_input: b
         return;
     }
     let tool_msg = Message {
+        display: None,
         id: crate::runner::new_id(),
         role: Role::Tool,
         blocks: backfill,
@@ -548,6 +551,7 @@ async fn abandon_cancelled_tasks(
         );
     }
     let tool_msg = Message {
+        display: None,
         id: crate::runner::new_id(),
         role: Role::Tool,
         blocks: backfill,

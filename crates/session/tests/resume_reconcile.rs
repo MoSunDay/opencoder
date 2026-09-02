@@ -457,6 +457,7 @@ async fn resume_does_not_inject_when_tool_result_already_present() {
         .await
         .unwrap();
     let mut tool_msg = Message {
+        display: None,
         id: "t1".into(),
         role: Role::Tool,
         blocks: vec![ContentBlock::ToolResult {

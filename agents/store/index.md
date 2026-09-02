@@ -41,7 +41,7 @@ schema 当前为 v10：
 - Resume：上层读取 SessionMeta、压缩摘要和保留消息，Store 不推断 agent 行为。
 - Bundle：`src/bundle.rs` 递归导出/导入 Session 与 subagent 树，不包含 Config 或 API key。
 - TODO：create workflow → 按 generation 原子 commit projection/event → list/load/events-after；interrupt、resume 和 debug projection 都以这些数据为源。
-- Migration：bootstrap 幂等创建当前表，再按 `schema_version` 增量迁移；旧数据库保持可打开。整段 bootstrap 在单个 `BEGIN IMMEDIATE` 事务内（17 条 DDL 不再各自隐式提交，失败整体回滚）。
+- Migration：bootstrap 幂等创建当前表，再按 `schema_version` 增量迁移；旧数据库保持可打开。整段 bootstrap 在单个 `BEGIN IMMEDIATE` 事务内（17 条 DDL 不再各自隐式提交，失败整体回滚）。v14：`messages.display` TEXT 列（`add_column_if_absent` 守卫、可空）承载回显原文，INSERT/load/load_after 全链路读写（row index 8）；列可空故旧二进制显式列名语句不受影响，可随时回滚。
 
 ## 依赖与接口
 

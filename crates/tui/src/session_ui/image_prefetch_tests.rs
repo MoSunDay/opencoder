@@ -32,6 +32,7 @@ fn replay_one_renders_prefetched_http_image() {
     prefetched.insert(url.to_string(), red_png_bytes());
 
     let msg = Message {
+        display: None,
         id: "u1".into(),
         role: Role::User,
         blocks: vec![
@@ -74,6 +75,7 @@ fn replay_one_http_image_without_prefetch_is_placeholder() {
     let empty: HashMap<String, Vec<u8>> = HashMap::new();
 
     let msg = Message {
+        display: None,
         id: "u2".into(),
         role: Role::User,
         blocks: vec![
@@ -117,6 +119,7 @@ fn replay_one_prefetched_tool_image_renders() {
     prefetched.insert(url.to_string(), red_png_bytes());
 
     let msg = Message {
+        display: None,
         id: "m-tool".into(),
         role: Role::Tool,
         blocks: vec![ContentBlock::ToolResult {
@@ -170,6 +173,7 @@ async fn prefetch_skips_data_uris_and_collects_http() {
     // data URIs are skipped (not attempted as network fetches).
     let data_uri = "data:image/png;base64,iVBORw0KGgo=";
     let msgs = vec![Message {
+        display: None,
         id: "u1".into(),
         role: Role::User,
         blocks: vec![
@@ -200,6 +204,7 @@ use super::replay::prefetch_image_bytes_with;
 fn http_msg(urls: &[&str]) -> Vec<Message> {
     urls.iter()
         .map(|u| Message {
+            display: None,
             id: format!("m-{u}"),
             role: Role::User,
             blocks: vec![

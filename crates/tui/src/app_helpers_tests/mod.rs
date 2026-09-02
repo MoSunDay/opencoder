@@ -548,8 +548,9 @@ async fn skill_only_submit_while_running_drains_images_via_queue() {
         vec![("data:image/png;base64,AAAA".into(), "img1.png".into())];
 
     // Step 1: snapshot WITHOUT clearing (images survive a failed admit).
-    let skill_name = "my-skill";
-    let trigger = crate::skill_display::skill_trigger(skill_name);
+    // Skill-only submits queue the RAW `$name` text (verbatim admission);
+    // the runner resolves it and injects its own trigger at consumption.
+    let trigger = "$my-skill".to_string();
     let image_uris = crate::app_helpers::snapshot_image_uris(&pending_images);
 
     // Step 2: admit as a queued input (mirrors the else branch).

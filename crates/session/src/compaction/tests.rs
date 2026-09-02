@@ -3,6 +3,7 @@ use opencoder_core::{ContentBlock, MessageUsage};
 
 fn tool_msg(id: &str, tool_use_id: &str) -> Message {
     Message {
+        display: None,
         id: id.into(),
         role: Role::Tool,
         blocks: vec![ContentBlock::ToolResult {

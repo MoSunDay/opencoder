@@ -355,6 +355,7 @@ pub(super) async fn entry_drain_mode(
     has_text: bool,
     has_images: bool,
     handoff_pending: bool,
+    trigger_display: Option<String>,
 ) -> bool {
     let has_skill = session.skill_prompt_cloned().is_some();
     let drain_mode = !has_text
@@ -364,6 +365,11 @@ pub(super) async fn entry_drain_mode(
     if has_skill && !has_text && !drain_mode {
         let mut msg = Message::user(new_id(), crate::skill_resolve::SKILL_TRIGGER);
         msg.synthetic = true;
+        // Echo contract: when this trigger stands in for a verbatim user
+        // submit (`$name` alone), replay surfaces show the raw input instead
+        // of the injected trigger body. `None` (empty resubmit / resume
+        // re-trigger) keeps the message replay-skipped.
+        msg.display = trigger_display;
         session.record(msg).await;
     }
     drain_mode

@@ -5,8 +5,8 @@ use opencoder_core::{ContentBlock, Message, MessageUsage, Role};
 use crate::types::{ImportReport, MessageRow};
 
 const INSERT_MESSAGE: &str = "\
-INSERT INTO messages (id, session_id, role, agent, model, blocks_json, usage_json, created_at, synthetic, mode, summary)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 0)";
+INSERT INTO messages (id, session_id, role, agent, model, blocks_json, usage_json, created_at, synthetic, display, mode, summary)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 0)";
 
 /// Maximum number of messages inserted per transaction in batch operations.
 /// Keeping transactions bounded prevents WAL bloat and reduces lock
@@ -63,6 +63,7 @@ async fn append_chunk_in_tx(
                     usage_json,
                     m.created_at,
                     m.synthetic as i64,
+                    m.display.as_deref(),
                 ],
             )
             .await
@@ -90,7 +91,7 @@ async fn append_chunk_in_tx(
 
 pub async fn load(conn: &Connection, session_id: &str) -> Result<Vec<Message>> {
     let stmt = conn
-        .prepare("SELECT id, role, agent, model, blocks_json, usage_json, created_at, synthetic FROM messages WHERE session_id = ? ORDER BY seq ASC")
+        .prepare("SELECT id, role, agent, model, blocks_json, usage_json, created_at, synthetic, display FROM messages WHERE session_id = ? ORDER BY seq ASC")
         .await?;
     let mut rows = stmt.query(params![session_id]).await?;
     let mut out = Vec::new();
@@ -115,7 +116,7 @@ pub async fn load_after(
     // all rows, matching the trait-default semantics.
     let skip_count = skip_count.max(0);
     let stmt = conn
-        .prepare("SELECT id, role, agent, model, blocks_json, usage_json, created_at, synthetic FROM messages WHERE session_id = ? ORDER BY seq ASC LIMIT -1 OFFSET ?")
+        .prepare("SELECT id, role, agent, model, blocks_json, usage_json, created_at, synthetic, display FROM messages WHERE session_id = ? ORDER BY seq ASC LIMIT -1 OFFSET ?")
         .await?;
     let mut rows = stmt.query(params![session_id, skip_count]).await?;
     let mut out = Vec::new();
@@ -209,6 +210,7 @@ async fn import_chunk_in_tx(conn: &Connection, session_id: &str, msgs: &[Message
                     usage_json,
                     m.created_at,
                     m.synthetic as i64,
+                    m.display.as_deref(),
                 ],
             )
             .await?;
@@ -245,6 +247,7 @@ fn row_to_message(r: &libsql::Row) -> Result<Message> {
         usage,
         created_at,
         synthetic: synthetic_i != 0,
+        display: r.get(8)?,
     })
 }
 

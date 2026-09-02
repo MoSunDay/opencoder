@@ -1,4 +1,4 @@
-//! Provider-round lifecycle used by the TUI `[turn cost]` display.
+//! Provider-round lifecycle used by the TUI `[call cost]` display.
 
 use std::sync::{Arc, Mutex};
 
@@ -91,7 +91,7 @@ async fn each_model_message_gets_one_round_covering_all_its_tools() {
         session
             .messages
             .iter()
-            .all(|message| !message.text().contains("[turn cost")),
+            .all(|message| !message.text().contains("[call cost")),
         "display timing must never enter model messages/context"
     );
 }
@@ -108,7 +108,7 @@ async fn terminal_text_round_ends_before_done() {
         .iter()
         .position(|e| matches!(e, SessionEvent::Done))
         .expect("task terminal event");
-    assert!(end < done, "terminal tasks must hide turn cost before Done");
+    assert!(end < done, "terminal tasks must hide call cost before Done");
 }
 
 /// `Usage` carried by a `Completed` event, exercising the LlmUsage emission.

@@ -10,7 +10,7 @@
 //! the selection fight.
 //!
 //! While active, the body is re-rendered full-width with render decoration
-//! stripped — no rounded border, no scrollbar column, no `[turn cost]` row,
+//! stripped — no rounded border, no scrollbar column, no `[call cost]` row,
 //! no border indicators; per row the indent gutter and code-frame prefixes
 //! (`│ `, `▎ `) are removed and pure-decoration rows (role headers
 //! `❯ User:`/`❯ Say:`, thematic breaks, `┌ lang`/`└───` code frames, plan
@@ -155,7 +155,7 @@ pub(crate) fn handle_key(
 // ── Clean-view layer ─────────────────────────────────────────────────────
 
 /// Render the transcript for copy mode: full width, no block/border, no
-/// scrollbar, no `[turn cost]` row, no border indicators — every visible row
+/// scrollbar, no `[call cost]` row, no border indicators — every visible row
 /// is already clean text so terminal-native selection spans it directly.
 /// Reuses the shared viewport cache; the width check naturally rebuilds it
 /// when toggling in/out of copy mode (full width vs inner).

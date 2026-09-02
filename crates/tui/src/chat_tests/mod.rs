@@ -27,7 +27,7 @@ fn llm_round_lifecycle_is_display_only_and_resets_at_boundary() {
     assert_eq!(v.llm_round_started_at_ms, Some(1000));
     let before = block_text(&v);
     assert!(before.contains("working"));
-    assert!(!before.contains("turn cost"));
+    assert!(!before.contains("call cost"));
 
     v.apply(&SessionEvent::LlmRoundEnd);
     assert_eq!(v.llm_round_started_at_ms, None);

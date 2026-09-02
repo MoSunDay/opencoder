@@ -13,15 +13,19 @@
 //!    bumping its heartbeat; no key ever reaches the main loop. Process alive,
 //!    screen static, all keys dead — exactly the report.
 //!
-//! 2. **Termination signals** (`SIGHUP`/`SIGTERM`/…) that default-terminate the
-//!    process *without* running `TerminalGuard::drop`, leaving the terminal in
-//!    raw mode + alt-screen (a "bricked" terminal needing `reset`).
+//! 2. ~~Termination signals~~ — moved to [`crate::signal_guard`], which is
+//!    armed by `TerminalGuard::enter()` itself and therefore covers the whole
+//!    captured-terminal lifetime (including the boot window *before* this
+//!    supervisor is spawned). The supervisor no longer registers signals:
+//!    exactly one writer must own the restore sequences, or two racing
+//!    `restore()` calls could interleave identical escape sequences into
+//!    garbage.
 //!
 //! The supervisor runs on a **dedicated OS thread** (immune to tokio runtime
-//! starvation from the busy-loop burning a core) and, on either condition,
-//! restores the terminal and exits cleanly. Sessions are persisted to the
-//! `Store` on every write, so the user restarts and `--continue`s instead of
-//! staring at a frozen screen.
+//! starvation from the busy-loop burning a core) and, on a wedge, restores the
+//! terminal and exits cleanly. Sessions are persisted to the `Store` on every
+//! write, so the user restarts and `--continue`s instead of staring at a
+//! frozen screen.
 //!
 //! Why not "recover and stay alive"? Once crossterm wedges it holds the one
 //! global event mutex; a fresh collector thread cannot read events either, and
@@ -32,9 +36,6 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
-
-use signal_hook::consts::{SIGHUP, SIGINT, SIGQUIT, SIGTERM};
-use signal_hook::flag;
 
 use crate::terminal::TerminalGuard;
 
@@ -88,75 +89,39 @@ impl Default for Heartbeat {
     }
 }
 
-/// Why the supervisor tripped.
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
-pub(crate) enum Trip {
-    Signal,
-    InputWedge,
-}
-
-/// Pure decision: should the supervisor restore+exit?
+/// Pure decision: is the input collector wedged?
 ///
 /// Factored out (no threads, no `process::exit`) so the exact thresholds are
 /// unit-testable. `active` is flipped false by the main loop when it begins a
 /// normal shutdown — the heartbeat stalls once the pump is dropped, which is
-/// expected then, not a wedge. Signals are honoured regardless of `active`.
-pub(crate) fn trip_reason(
-    now_ms: u64,
-    last_alive_ms: u64,
-    any_signal: bool,
-    active: bool,
-    wedge_ms: u64,
-) -> Option<Trip> {
-    if any_signal {
-        return Some(Trip::Signal);
-    }
-    if active && now_ms.saturating_sub(last_alive_ms) > wedge_ms {
-        return Some(Trip::InputWedge);
-    }
-    None
+/// expected then, not a wedge. Signals are NOT handled here: they belong to
+/// [`crate::signal_guard`] (armed from `TerminalGuard::enter()`).
+pub(crate) fn is_wedged(now_ms: u64, last_alive_ms: u64, active: bool, wedge_ms: u64) -> bool {
+    active && now_ms.saturating_sub(last_alive_ms) > wedge_ms
 }
 
 /// The stderr message printed after the terminal is restored, just before the
 /// supervisor exits the process. Pure so the user-facing copy (binary name,
 /// `--continue` hint) is unit-testable without spawning threads.
-pub(crate) fn exit_message(reason: Trip) -> String {
-    format!(
-        "opencoder: input collector {reason:?} — terminal restored, exiting. \
-         Reopen with `opencoder --continue` to resume this session."
-    )
-}
-
-/// Best-effort signal → flag registration. Returns `None` on failure; the
-/// heartbeat watchdog still covers tty death if a registration fails.
-fn watch_signal(signum: i32) -> Option<Arc<AtomicBool>> {
-    let flag = Arc::new(AtomicBool::new(false));
-    match flag::register(signum, Arc::clone(&flag)) {
-        Ok(_) => Some(flag),
-        Err(_) => None,
-    }
+pub(crate) fn exit_message() -> String {
+    "opencoder: input collector InputWedge — terminal restored, exiting. Reopen with `opencoder --continue` to resume this session."
+        .to_string()
 }
 
 /// Spawn the supervisor thread. On a trip it restores the terminal and exits the
 /// process (the session is already persisted, so the user can `--continue`).
 ///
 /// Polls every [`POLL_INTERVAL`]; on a healthy system the decision
-/// ([`trip_reason`]) returns `None` forever. The thread is detached — it dies
+/// ([`is_wedged`]) stays false forever. The thread is detached — it dies
 /// with the process on a normal exit, and is the thing that *makes* the process
 /// exit on an abnormal one.
 pub(crate) fn spawn(heartbeat: Heartbeat, active: Arc<AtomicBool>) {
-    let signals = [SIGHUP, SIGINT, SIGQUIT, SIGTERM]
-        .iter()
-        .filter_map(|&s| watch_signal(s))
-        .collect::<Vec<_>>();
     let wedge_ms = WEDGE_TIMEOUT.as_millis() as u64;
     thread::spawn(move || loop {
         thread::sleep(POLL_INTERVAL);
-        let any_signal = signals.iter().any(|f| f.load(Ordering::Relaxed));
-        if let Some(reason) = trip_reason(
+        if is_wedged(
             heartbeat.now_ms(),
             heartbeat.last_ms(),
-            any_signal,
             active.load(Ordering::Relaxed),
             wedge_ms,
         ) {
@@ -165,7 +130,7 @@ pub(crate) fn spawn(heartbeat: Heartbeat, active: Arc<AtomicBool>) {
             // interface. Once `restore()` has left the alternate screen stderr
             // is safely visible (or harmlessly discarded if the tty is gone).
             TerminalGuard::restore();
-            let _ = writeln!(std::io::stderr(), "{}", exit_message(reason));
+            let _ = writeln!(std::io::stderr(), "{}", exit_message());
             std::process::exit(0);
         }
     });
@@ -177,27 +142,25 @@ mod tests {
 
     #[test]
     fn exit_message_leads_with_opencoder_and_resume_hint() {
-        for reason in [Trip::Signal, Trip::InputWedge] {
-            let msg = exit_message(reason);
-            assert!(
-                msg.starts_with("opencoder:"),
-                "must lead with binary name: {msg}"
-            );
-            assert!(
-                msg.contains("opencoder --continue"),
-                "must advertise the resume hint: {msg}"
-            );
-            assert!(
-                msg.contains(&format!("{reason:?}")),
-                "must name the trip reason: {msg}"
-            );
-            // Word-boundary check: the old bare `opencode` name must be gone.
-            // (`opencoder` contains `opencode`, so plain contains() would lie.)
-            assert!(
-                !msg.contains("opencode ") && !msg.contains("opencode:"),
-                "stale bare `opencode` name in copy: {msg}"
-            );
-        }
+        let msg = exit_message();
+        assert!(
+            msg.starts_with("opencoder:"),
+            "must lead with binary name: {msg}"
+        );
+        assert!(
+            msg.contains("opencoder --continue"),
+            "must advertise the resume hint: {msg}"
+        );
+        assert!(
+            msg.contains("InputWedge"),
+            "must name the trip reason: {msg}"
+        );
+        // Word-boundary check: the old bare `opencode` name must be gone.
+        // (`opencoder` contains `opencode`, so plain contains() would lie.)
+        assert!(
+            !msg.contains("opencode ") && !msg.contains("opencode:"),
+            "stale bare `opencode` name in copy: {msg}"
+        );
     }
 
     #[test]
@@ -213,44 +176,29 @@ mod tests {
     }
 
     #[test]
-    fn trip_reason_no_trip_when_fresh_and_quiet() {
+    fn is_wedged_false_when_fresh_and_quiet() {
         let now = 10_000;
         let last = 9_990; // 10 ms stale — far under the 5 s wedge window
-        assert_eq!(trip_reason(now, last, false, true, 5_000), None);
+        assert!(!is_wedged(now, last, true, 5_000));
     }
 
     #[test]
-    fn trip_reason_wedge_when_stale_and_active() {
+    fn is_wedged_true_when_stale_and_active() {
         let now = 10_000;
         let last = 4_000; // 6 s stale > 5 s
-        assert_eq!(
-            trip_reason(now, last, false, true, 5_000),
-            Some(Trip::InputWedge)
-        );
+        assert!(is_wedged(now, last, true, 5_000));
     }
 
     #[test]
-    fn trip_reason_ignores_staleness_during_shutdown() {
+    fn is_wedged_ignores_staleness_during_shutdown() {
         // `active = false` (normal shutdown, pump dropped) → never a wedge.
-        let now = 10_000;
-        let last = 0; // very stale
-        assert_eq!(trip_reason(now, last, false, false, 5_000), None);
+        assert!(!is_wedged(10_000, 0, false, 5_000));
     }
 
     #[test]
-    fn trip_reason_signal_wins_regardless_of_active_or_staleness() {
-        // Even mid-shutdown, a termination signal must trigger a clean exit.
-        assert_eq!(trip_reason(0, 0, true, false, 5_000), Some(Trip::Signal));
-        assert_eq!(trip_reason(9, 9, true, true, 5_000), Some(Trip::Signal));
-    }
-
-    #[test]
-    fn trip_reason_boundary_is_strictly_greater() {
+    fn is_wedged_boundary_is_strictly_greater() {
         // Exactly at the wedge window is NOT a trip (off-by-one safety).
-        assert_eq!(trip_reason(5_000, 0, false, true, 5_000), None);
-        assert_eq!(
-            trip_reason(5_001, 0, false, true, 5_000),
-            Some(Trip::InputWedge)
-        );
+        assert!(!is_wedged(5_000, 0, true, 5_000));
+        assert!(is_wedged(5_001, 0, true, 5_000));
     }
 }

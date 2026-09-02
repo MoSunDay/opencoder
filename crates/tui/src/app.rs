@@ -294,7 +294,7 @@ pub(super) async fn run_app(
                 dirty = true;
                 match ev {
                     Event::Key(k) => {
-                        // Armed clear-context guard: Enter fires, Esc 回撤, rest inert.
+                        // Armed clear-context guard: Enter or a second Shift+Tab fires, Esc 回撤, rest inert.
                         if clear_confirm.is_some() {
                             if app_loop::handle_confirm_key(&mut clear_confirm, k, &mut input, &mut cursor_idx, &mut undo_state, &mut chat, &cmd_tx, &mut cancel, &mut running, &mut follow, &mut sys_tokens, &mut mode_flash, anim_tick, &workdir, &admit_tx, &mut admit_st, &mut queue_items, &mut pending_images, &session_id, &mut history, &mut hist_idx).await { break; }
                             dirty = true;

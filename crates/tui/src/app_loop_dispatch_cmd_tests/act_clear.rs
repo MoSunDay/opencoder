@@ -360,3 +360,55 @@ async fn retyped_clear_command_supersedes_armed_rest() {
         other => panic!("expected canonical Prompt, got {other:?}"),
     }
 }
+
+/// A second Shift+Tab while the countdown is armed confirms immediately —
+/// the chord that armed the guard doubles as its confirm, firing the armed
+/// rest (no typed text to merge) as the canonical prompt.
+#[tokio::test]
+async fn shift_tab_repress_fires_armed_guard_now() {
+    let mut chat = ChatView {
+        agent: "act".into(),
+        ..Default::default()
+    };
+    let mut clear_confirm = None;
+    let mut mode_flash: Option<(String, u32)> = None;
+    let mut input = String::new();
+    let mut cursor_idx = 0;
+    let mut undo_state = crate::undo::UndoState::default();
+    let mut running = false;
+    let mut follow = false;
+    let mut sys_tokens = 0u64;
+    let mut history: Vec<String> = Vec::new();
+    let mut hist_idx = None;
+    let mut queue_items: Vec<(i64, String)> = Vec::new();
+    let mut pending_images: Vec<(String, String)> = Vec::new();
+    let mut admit_st = crate::queue_admitter::AdmitUiState::default();
+    let (admit_tx, _admit_rx) = mpsc::channel(8);
+    let (cmd_tx, mut cmd_rx) = mpsc::channel::<UiCmd>(64);
+    let mut cancel = CancellationToken::new();
+
+    crate::clear_confirm::engage(
+        &mut clear_confirm, &mut chat, &mut mode_flash, 0,
+        Some("finish the summary".into()), None,
+    );
+
+    let backtab = KeyEvent::new(KeyCode::BackTab, KeyModifiers::NONE);
+    crate::app::app_loop::handle_confirm_key(
+        &mut clear_confirm, backtab, &mut input, &mut cursor_idx,
+        &mut undo_state, &mut chat, &cmd_tx, &mut cancel,
+        &mut running, &mut follow, &mut sys_tokens, &mut mode_flash,
+        0, std::path::Path::new("."), &admit_tx, &mut admit_st,
+        &mut queue_items, &mut pending_images, "test", &mut history,
+        &mut hist_idx,
+    ).await;
+
+    assert!(clear_confirm.is_none(), "the re-press must consume the arm");
+    assert_eq!(input, "", "the confirm chord must not edit");
+    match drain_cmd(&mut cmd_rx) {
+        UiCmd::Prompt(text, _) => assert_eq!(
+            text, "/act_clear_context finish the summary",
+            "the armed rest fires verbatim as the canonical prompt"
+        ),
+        other => panic!("expected canonical Prompt, got {other:?}"),
+    }
+}

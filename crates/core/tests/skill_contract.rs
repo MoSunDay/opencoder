@@ -463,10 +463,17 @@ fn seeded_task_plan_skill_requires_launch_closure_contract() {
     let references = root.path().join("task-plan/references");
     let checklist =
         std::fs::read_to_string(references.join("launch-closure-plan-checklist.md")).unwrap();
+    // Sections 4-8.1 (feature/data-security/regression/launch-window/
+    // freshness checklists) were deliberately removed from the shipped
+    // reference: the five anchors in SKILL.md already cover verification,
+    // and the deep release-window/freshness detail bloated every plan.
     assert!(
-        checklist.contains("持续保鲜与稳定性"),
-        "launch checklist must preserve evidence maturity checks"
+        !checklist.contains("持续保鲜与稳定性"),
+        "removed freshness section must not re-seed into the checklist"
     );
+    for kept in ["需求与现状审查", "根因与缺口识别", "代码与模块影响", "遗漏复查与交付可读性", "Plan Output Schema"] {
+        assert!(checklist.contains(kept), "checklist missing kept section `{kept}`");
+    }
     // Fresh-seed contract: the retired Any Home protocol must NOT be
     // re-seeded into a fresh install, while the launch-closure checklist
     // (its replacement reference) still lands.

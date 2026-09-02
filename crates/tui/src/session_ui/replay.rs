@@ -140,6 +140,7 @@ pub(super) fn replay_one(
                         // "running" hint renders on resume.
                         started_at_ms: Some(0),
                         elapsed_ms: Some(0),
+                        expanded: false,
                     };
                     // Same grouping rule as the live path: consecutive calls
                     // join the trailing group, anything else splits the run.
@@ -207,6 +208,7 @@ pub(super) fn replay_one(
                                     output: out,
                                     started_at_ms: None,
                                     elapsed_ms: Some(0),
+                                    expanded: false,
                                 }],
                                 state: ToolGroupState::Collapsed,
                             });

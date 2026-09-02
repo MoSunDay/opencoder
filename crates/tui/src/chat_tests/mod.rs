@@ -14,6 +14,7 @@ mod terminal_safety;
 mod thinking_state;
 mod timer;
 mod tok_cost;
+mod tool_call_expand;
 mod tool_collapse;
 mod user_block;
 

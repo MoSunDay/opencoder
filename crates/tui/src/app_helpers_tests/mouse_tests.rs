@@ -454,7 +454,7 @@ async fn attach_del_click_removes_only_clicked_image() {
 
 /// Clicking a StepGroup's group row toggles the whole group open/closed. This
 /// exercises the exact `tool_btns` → `handle_mouse` → `toggle_step_group_at`
-/// (kept name: `cycle_tool_group_at`) wiring the renderer feeds.
+/// wiring the renderer feeds.
 #[tokio::test]
 async fn clicking_tool_group_line_toggles_group_open_closed() {
     use crate::chat::ChatBlock;

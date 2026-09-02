@@ -3,6 +3,7 @@
 //! The input is treated as a single line (multi-line wrap is a future addition).
 //! The cursor is a char index; its on-screen column is the unicode *display*
 //! width of the text before it, offset by the prompt prefix `❯ `.
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 /// Display column (0-based) of the cursor within the input text, given the
 /// char index. Uses unicode-width so CJK / wide chars advance correctly.
@@ -17,50 +18,22 @@ pub fn cursor_column(input: &str, char_idx: usize) -> u16 {
     col.min(u16::MAX as usize) as u16
 }
 
-/// Display width of a char (0 for zero-width, 1 for most, 2 for wide
-/// CJK/fullwidth/emoji). Approximates Unicode East Asian Width without
-/// pulling in the unicode-width crate for the TUI.
+/// Display width of a char (0 for zero-width/control, 1 for most, 2 for wide
+/// CJK/fullwidth/emoji). Delegates to the `unicode-width` crate — the same
+/// width oracle ratatui lays out with — so every pad/truncate/cursor computed
+/// here can never disagree with what actually lands on screen. A divergence
+/// here is what used to shove the queue panel's control strip off its hit
+/// rects (e.g. dingbats U+2702..=U+27B0 were guessed 2 wide but render 1).
 pub fn char_width(ch: char) -> usize {
-    let cp = ch as u32;
-    // --- Zero-width: NUL, combining marks, joiners, variation selectors ---
-    if cp == 0
-        || (0x0300..=0x036F).contains(&cp) // combining diacritical marks
-        || (0x200B..=0x200D).contains(&cp) // ZWSP, ZWNJ, ZWJ
-        || (0xFE00..=0xFE0F).contains(&cp) // variation selectors
-        || cp == 0xFEFF
-    // BOM / zero-width no-break space
-    {
-        return 0;
-    }
-    // --- Wide (2 columns): CJK, fullwidth, and common emoji ranges ---
-    if (0x1100..=0x115F).contains(&cp) // Hangul Jamo
-        || (0x231A..=0x231B).contains(&cp) // watch, hourglass
-        || (0x23E9..=0x23F3).contains(&cp) // media control emoji
-        || (0x25FD..=0x25FE).contains(&cp) // small squares
-        || (0x2614..=0x2615).contains(&cp) // umbrella, hot beverage
-        || (0x2648..=0x2653).contains(&cp) // zodiac signs
-        || (0x267F..=0x26FA).contains(&cp) // misc transport/symbols
-        || (0x2702..=0x27B0).contains(&cp) // dingbats
-        || (0x2934..=0x2935).contains(&cp) // arrows
-        || (0x2B05..=0x2B55).contains(&cp) // arrows, geometric shapes
-        || (0x2E80..=0xA4CF).contains(&cp) // CJK radicals -> Yi
-        || (0xAC00..=0xD7A3).contains(&cp) // Hangul syllables
-        || (0xF900..=0xFAFF).contains(&cp) // CJK compat ideographs
-        || (0xFE30..=0xFE4F).contains(&cp) // CJK compat forms
-        || (0xFF00..=0xFF60).contains(&cp) // fullwidth forms
-        || (0xFFE0..=0xFFE6).contains(&cp) // fullwidth signs
-        || (0x1F300..=0x1FAFF).contains(&cp) // emoji & symbols (SMP)
-        || (0x20000..=0x3FFFD).contains(&cp)
-    // CJK extension B and beyond
-    {
-        return 2;
-    }
-    1
+    // `None` = control character (C0/C1): invisible, contributes 0 columns.
+    UnicodeWidthChar::width(ch).unwrap_or(0).min(2)
 }
 
-/// Display width of a string: sum of per-char widths.
+/// Display width of a string, sequence-aware: `unicode-width`'s str-level
+/// width handles emoji presentation sequences (heart + VS16 -> 2) and
+/// grapheme clusters exactly like ratatui's renderer, unlike a per-char sum.
 pub fn str_width(s: &str) -> usize {
-    s.chars().map(char_width).sum()
+    UnicodeWidthStr::width(s)
 }
 
 /// Whether a character must not be inserted directly into the composer.

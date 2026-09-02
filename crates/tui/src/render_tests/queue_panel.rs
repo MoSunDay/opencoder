@@ -1,5 +1,5 @@
 use super::*;
-use crate::queue_panel::render_queue_panel;
+use crate::queue_panel::{render_queue_panel, QueueBtn, QueueBtnAction};
 
 /// The queue panel renders steer items with the `↳ steer` prefix and queue
 /// items with `[queued]`, and caps display at 3 rows.
@@ -142,7 +142,8 @@ fn queue_panel_overflow_windows_and_scrollbar() {
         .filter(|b| b.seq == 1 && b.action == QueueBtnAction::Delete)
         .collect::<Vec<_>>();
     assert_eq!(del.len(), 1, "one delete button for the oldest row");
-    assert_eq!(del[0].rect.x, 78, "delete glyph 1 col left of scrollbar");
+    // glyph_hit_rect spans [glyph_x-1, glyph_x]: del_x = 78 → rect starts 77.
+    assert_eq!(del[0].rect.x, 77, "delete hit rect covers separator+glyph");
     assert_eq!(del[0].rect.y, 0);
 
     // scroll = max_scroll (2) → newest entries visible, thumb at the bottom.
@@ -192,10 +193,165 @@ fn queue_panel_overflow_hit_rects_track_shifted_glyphs() {
     for b in &btns {
         let x = b.rect.x; // area.x == 0 in this terminal
         match b.action {
-            QueueBtnAction::Up => assert_eq!(x, expected[0], "up glyph col"),
-            QueueBtnAction::Down => assert_eq!(x, expected[1], "down glyph col"),
-            QueueBtnAction::Delete => assert_eq!(x, expected[2], "delete glyph col"),
+            // glyph_hit_rect spans [glyph_x-1, glyph_x], so each rect starts
+            // one col left of its glyph offset.
+            QueueBtnAction::Up => assert_eq!(x, expected[0] - 1, "up glyph col"),
+            QueueBtnAction::Down => assert_eq!(x, expected[1] - 1, "down glyph col"),
+            QueueBtnAction::Delete => assert_eq!(x, expected[2] - 1, "delete glyph col"),
             QueueBtnAction::Submit => panic!("queue rows never carry a submit button"),
         }
+    }
+}
+
+/// Render the panel in a `w`×`h` TestBackend; return the emitted hit rects
+/// plus a buffer snapshot for glyph-level assertions.
+fn render_panel(
+    w: u16,
+    h: u16,
+    steers: &[(i64, String)],
+    queues: &[(i64, String)],
+    scroll: u32,
+) -> (Vec<QueueBtn>, ratatui::buffer::Buffer) {
+    let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
+    let mut btns: Vec<QueueBtn> = Vec::new();
+    terminal
+        .draw(|f| {
+            let area = f.area();
+            render_queue_panel(f, area, steers, queues, scroll, &mut btns);
+        })
+        .unwrap();
+    (btns, terminal.backend().buffer().clone())
+}
+
+/// Symbol rendered at one buffer cell ("" when out of bounds).
+fn symbol(buf: &ratatui::buffer::Buffer, x: u16, y: u16) -> String {
+    buf.cell((x, y))
+        .map(|c| c.symbol().to_string())
+        .unwrap_or_default()
+}
+
+/// Assert a 2-wide rect whose glyph column holds `glyph` and whose left
+/// column is the separator space.
+fn assert_rect_on_glyph(
+    buf: &ratatui::buffer::Buffer,
+    b: &QueueBtn,
+    action: QueueBtnAction,
+    glyph: &str,
+) {
+    assert_eq!(
+        b.rect.width, 2,
+        "{action:?} rect must span separator + glyph"
+    );
+    assert_eq!(
+        symbol(buf, b.rect.x + 1, b.rect.y),
+        glyph,
+        "{action:?} glyph column does not hold the rendered glyph"
+    );
+    assert_eq!(
+        symbol(buf, b.rect.x, b.rect.y),
+        " ",
+        "{action:?} rect's separator column is not blank"
+    );
+}
+
+/// Core regression: each recorded hit rect must contain the glyph ratatui
+/// actually renders. The old composer width model diverged from
+/// unicode-width on dingbats (✓ ✕ ✂ counted as 2 cols, render as 1), so the
+/// right-aligning pad came up short and the whole strip — both buttons
+/// together — drifted off its rects onto blank cells.
+#[test]
+fn steer_btn_rects_contain_rendered_glyphs_dingbat_text() {
+    let steers: Vec<(i64, String)> = vec![(
+        7,
+        "\u{2702} \u{2713} \u{2715} \u{2702} fix the dingbat bug".into(),
+    )];
+    let (btns, buf) = render_panel(80, 5, &steers, &[], 0);
+    assert_rect_on_glyph(
+        &buf,
+        btns.iter()
+            .find(|b| b.action == QueueBtnAction::Delete)
+            .expect("delete btn"),
+        QueueBtnAction::Delete,
+        "\u{2715}",
+    );
+    assert_rect_on_glyph(
+        &buf,
+        btns.iter()
+            .find(|b| b.action == QueueBtnAction::Submit)
+            .expect("submit btn"),
+        QueueBtnAction::Submit,
+        ">",
+    );
+}
+
+/// Same alignment property for queue rows, with a wide emoji/ZWJ head that
+/// only the sequence-aware width model measures correctly.
+#[test]
+fn queue_btn_rects_contain_rendered_glyphs_emoji_text() {
+    let queues: Vec<(i64, String)> = vec![(
+        9,
+        "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467} then run lint".into(),
+    )];
+    let (btns, buf) = render_panel(80, 5, &[], &queues, 0);
+    assert_rect_on_glyph(
+        &buf,
+        btns.iter()
+            .find(|b| b.action == QueueBtnAction::Up)
+            .expect("up btn"),
+        QueueBtnAction::Up,
+        "\u{25b2}",
+    );
+    assert_rect_on_glyph(
+        &buf,
+        btns.iter()
+            .find(|b| b.action == QueueBtnAction::Down)
+            .expect("down btn"),
+        QueueBtnAction::Down,
+        "\u{25bc}",
+    );
+    assert_rect_on_glyph(
+        &buf,
+        btns.iter()
+            .find(|b| b.action == QueueBtnAction::Delete)
+            .expect("del btn"),
+        QueueBtnAction::Delete,
+        "\u{2715}",
+    );
+}
+
+/// With the scrollbar taking the rightmost column, the strip shifts one
+/// column left and its rects must follow — still on the glyphs, never
+/// spilling onto the scrollbar itself.
+#[test]
+fn steer_btn_rects_stay_on_glyphs_with_scrollbar_overflow() {
+    let steers: Vec<(i64, String)> = (0..5)
+        .map(|i| {
+            (
+                i,
+                format!(
+                    "\u{2713} \u{2764}\u{FE0F} \u{2702} steer row {i} — keep the strip aligned"
+                ),
+            )
+        })
+        .collect();
+    let (btns, buf) = render_panel(80, 5, &steers, &[], 0);
+    assert_eq!(btns.len(), 6, "3 visible rows × 2 buttons");
+    for b in &btns {
+        let glyph = if b.action == QueueBtnAction::Delete {
+            "\u{2715}"
+        } else {
+            ">"
+        };
+        assert_eq!(
+            symbol(&buf, b.rect.x + 1, b.rect.y),
+            glyph,
+            "{:?} glyph off its rect at x={}",
+            b.action,
+            b.rect.x
+        );
+        assert!(
+            b.rect.x + b.rect.width <= 79,
+            "rect must not cover the scrollbar column"
+        );
     }
 }

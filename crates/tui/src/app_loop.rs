@@ -99,11 +99,19 @@ pub(crate) fn compute_display<'a>(
     // sidecar turns.
     let (display_chat, display_title, display_ctx, display_sys, display_mode) =
         if let Some((view, question, total_tokens)) = crate::chat::sidecar::focused(chat) {
+            // A question-less block is the freshly entered empty panel: the
+            // title carries the input hint instead of an empty echo.
+            let title = if question.is_empty() {
+                format!(
+                    "\u{2190} [Ctrl+L] back | \u{21f2}sidecar {}",
+                    crate::sidecar_ui::SIDECAR_EMPTY_HINT
+                )
+            } else {
+                format!("\u{2190} [Ctrl+L] back | \u{21f2}sidecar {question}")
+            };
             (
                 view,
-                Line::from(format!(
-                    "\u{2190} [Ctrl+L] back | \u{21f2}sidecar {question}"
-                )),
+                Line::from(title),
                 total_tokens,
                 sys_tokens,
                 "sidecar".to_string(),
@@ -418,6 +426,7 @@ pub(crate) async fn dispatch_command(
     cmd_tx: &mpsc::Sender<UiCmd>,
     cancel: &mut CancellationToken,
     chat: &mut ChatView,
+    sidecar_ask: &mpsc::Sender<crate::sidecar_ui::SidecarCmd>,
     running: &mut bool,
     follow: &mut bool,
     store: &Arc<dyn Store>,
@@ -461,6 +470,7 @@ pub(crate) async fn dispatch_command(
                 cmd_tx,
                 cancel,
                 chat,
+                sidecar_ask,
                 running,
                 follow,
                 store,

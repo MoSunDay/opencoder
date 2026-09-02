@@ -125,7 +125,9 @@ fn assert_line_accounting_matches(view: &ChatView) {
                 expected += 1;
             }
             ChatBlock::Sidecar { .. } => {
-                expected += 1; // header-only row, mirrors collect_headers
+                // Ephemeral panel: flatten_with emits ZERO lines (exit
+                // purges the block entirely; the Q/A is never a transcript
+                // artifact).
             }
             ChatBlock::Plan { rendered, .. } => {
                 expected += 1 + rendered.len() + 1;

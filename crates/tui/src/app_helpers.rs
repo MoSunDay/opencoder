@@ -126,12 +126,15 @@ pub(crate) fn pre_key_intercept(
     input: &mut String,
     cursor_idx: &mut usize,
     needs_clear: &mut bool,
+    sidecar_ask: &mpsc::Sender<crate::sidecar_ui::SidecarCmd>,
 ) -> bool {
     *needs_clear = false;
-    // Sidecar ctx-switch: Esc exits to the parent view. The sidecar actor and
-    // its conversation keep running in the background — only the focus flips.
+    // Sidecar ctx-switch: Esc DESTROYS the sidecar — the actor drops its
+    // conversation (aborting an in-flight turn; partial usage still lands on
+    // the main session) and every sidecar block is purged from the
+    // transcript, so the parent view carries zero sidecar trace.
     if chat.sidecar_focus && k.code == KeyCode::Esc {
-        chat.sidecar_focus = false;
+        crate::sidecar_ui::exit_panel(chat, sidecar_ask);
         *follow = true; // follow mode: render clamps scroll to bottom (render.rs)
         *last_esc = None;
         return true;
@@ -153,11 +156,11 @@ pub(crate) fn pre_key_intercept(
             *subagent_focus = None;
             *last_esc = None;
         }
-        // Same exit path for a focused sidecar box: collapse its nested view,
-        // then fall through to the parent-wide collapse below.
+        // Same exit path for a focused sidecar box: DESTROY it (the sidecar
+        // is a temporary bypass, not a transcript artifact), then fall
+        // through to the parent-wide collapse below.
         if chat.sidecar_focus {
-            crate::chat::sidecar::collapse_focused(chat);
-            chat.sidecar_focus = false;
+            crate::sidecar_ui::exit_panel(chat, sidecar_ask);
             *last_esc = None;
         }
         chat.collapse_all_collapsible();

@@ -427,7 +427,7 @@ pub(super) async fn run_app(
                         if command_menu.is_some() {
                             match app_loop::dispatch_command(
                                 &mut command_menu, k, &cmd_tx, &mut cancel, &mut chat,
-                                &mut running, &mut follow, &store,
+                                &sidecar_ask, &mut running, &mut follow, &store,
                                 &session_id, &mut task_picker, &mut model_menu, &mut mcp_menu, &mut envs_menu, &mut cli_menu, &mut skill_toggle_menu, &mut ap_menu,
                                 &mut cache_salt_menu, &mut keymap_menu, &agent_name,
                                 &mut input, &mut cursor_idx,
@@ -459,6 +459,7 @@ pub(super) async fn run_app(
                             &mut input,
                             &mut cursor_idx,
                             &mut needs_clear,
+                            &sidecar_ask,
                         ) {
                             apply_force_redraw(
                                 needs_clear,
@@ -502,7 +503,7 @@ pub(super) async fn run_app(
                                     &mut queue_items, &mut pending_images, &session_id,
                                     &mut history, &mut hist_idx, &mut active_skill,
                                     &mut active_skill_body, &mut sys_tokens, &agent_name,
-                                    &workdir, &skill_handle, &mut chat, &store,
+                                    &workdir, &skill_handle, &mut chat, &sidecar_ask, &store,
                                     &mut plan_skill_active, &mut clear_confirm, &mut mode_flash,
                                     anim_tick, &mut plan_edit, &mut notepad, &mut task_picker,
                                     &mut model_menu, &mut mcp_menu, &mut envs_menu,
@@ -574,30 +575,50 @@ pub(super) async fn run_app(
                                 mode_flash = Some(mode_switch_busy_flash(anim_tick));
                             }
                             KeyAction::SidecarAsk(question) => {
+                                // Bare `/sidecar`: enter a FRESH panel — destroy
+                                // any previous conversation (the next ask rebuilds
+                                // from a fresh store snapshot) and show the empty
+                                // panel.
                                 if question.is_empty() {
-                                    // Bare `/sidecar`: re-focus an existing sidecar
-                                    // box, or nudge the user toward the real form.
-                                    if chat.blocks.iter().any(|b| {
-                                        matches!(b, crate::chat::ChatBlock::Sidecar { .. })
-                                    }) {
-                                        chat.sidecar_focus = true;
-                                        mode_flash =
-                                            Some((crate::sidecar_ui::SIDECAR_FOCUSED_FLASH.to_string(), anim_tick));
-                                    } else {
-                                        mode_flash =
-                                            Some((crate::sidecar_ui::SIDECAR_HINT_FLASH.to_string(), anim_tick));
+                                    crate::sidecar_ui::enter_panel(&mut chat, &sidecar_ask);
+                                    follow = true;
+                                    mode_flash = Some((
+                                        crate::sidecar_ui::SIDECAR_ENTER_FLASH.to_string(),
+                                        anim_tick,
+                                    ));
+                                } else if !chat.sidecar_focus {
+                                    // Entering WITH a question: same fresh-panel
+                                    // contract, then fire the ask immediately.
+                                    crate::sidecar_ui::enter_panel(&mut chat, &sidecar_ask);
+                                    match sidecar_ask
+                                        .try_send(crate::sidecar_ui::SidecarCmd::Ask(question))
+                                    {
+                                        Ok(()) => follow = true,
+                                        Err(_) => {
+                                            mode_flash = Some((
+                                                crate::sidecar_ui::SIDECAR_BUSY_FLASH.to_string(),
+                                                anim_tick,
+                                            ));
+                                        }
                                     }
                                 } else {
-                                    // Fire-and-forget into the sidecar actor: never
-                                    // blocks the UI loop, never touches steer/queue.
-                                    match sidecar_ask.try_send(question) {
+                                    // Follow-up inside the focused panel: the SAME
+                                    // conversation continues (no reset — Q/A
+                                    // continuity). Fire-and-forget into the actor:
+                                    // never blocks the UI loop, never touches
+                                    // steer/queue.
+                                    match sidecar_ask
+                                        .try_send(crate::sidecar_ui::SidecarCmd::Ask(question))
+                                    {
                                         Ok(()) => {
                                             chat.sidecar_focus = true;
                                             follow = true;
                                         }
                                         Err(_) => {
-                                            mode_flash =
-                                                Some((crate::sidecar_ui::SIDECAR_BUSY_FLASH.to_string(), anim_tick));
+                                            mode_flash = Some((
+                                                crate::sidecar_ui::SIDECAR_BUSY_FLASH.to_string(),
+                                                anim_tick,
+                                            ));
                                         }
                                     }
                                 }

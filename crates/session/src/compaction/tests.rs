@@ -52,6 +52,13 @@ fn est_session(name: &str) -> SessionState {
 /// `estimated_tokens` stays flat (late compaction, over-admission).
 #[test]
 fn estimated_tokens_counts_transient_skill_body() {
+    // `estimated_tokens` resolves the live skill catalog through
+    // `skills_dir()` on EVERY call, so the two snapshots below must not
+    // straddle a concurrent test's HOME flip: a populated vs empty catalog
+    // shifts the `[skills]` reminder term (~165 tokens for a real catalog)
+    // into the delta and trips the body-coverage assertion. Hold the
+    // process-wide env lock across both calls so both see one snapshot.
+    let _env = crate::test_env::env_lock();
     let mut s = est_session("act");
     s.messages.push(Message::user("u1", "task"));
     let skillless = estimated_tokens(&s);

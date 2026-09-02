@@ -6,6 +6,7 @@ use opencoder_core::{ContentBlock, Message, MessageUsage, Role};
 fn replay_sanitizes_old_persisted_text_without_mutating_the_message() {
     let dirty = "old\r\x1b[2J\x08\u{009b}new";
     let message = Message {
+        display: None,
         id: "assistant".into(),
         role: Role::Assistant,
         blocks: vec![

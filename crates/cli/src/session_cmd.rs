@@ -137,7 +137,7 @@ pub async fn session_dispatch(sub: &SessionSub, cli: &Cli) -> Result<()> {
                 anyhow::bail!("session not found: {id}");
             }
             for m in store.load_messages(id).await? {
-                println!("[{:?}] {}", m.role, m.text());
+                println!("{}", show_message_line(&m));
             }
             Ok(())
         }
@@ -227,6 +227,14 @@ pub(crate) async fn open_store(workdir: &Path) -> Result<LibsqlStore> {
     LibsqlStore::open(data_dir.join("opencoder.db")).await
 }
 
+/// One transcript line for `session show`: role tag plus the message text.
+/// Echo contract: prefer the verbatim `display` (raw user input, `$skill`
+/// tokens included); fall back to the recorded blocks for legacy rows.
+fn show_message_line(m: &opencoder_core::Message) -> String {
+    let text = m.display.clone().unwrap_or_else(|| m.text());
+    format!("[{:?}] {}", m.role, text)
+}
+
 /// One-line active-env note for `config show` (None when no env is active).
 pub fn active_env_banner() -> Option<String> {
     opencoder_core::config::envs::active_env().map(|name| format!("active env: {name}"))
@@ -245,7 +253,33 @@ pub(crate) fn config_show_json(cfg: &Config) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::models_summary;
-    use opencoder_core::Config;
+    use opencoder_core::{Config, ContentBlock, Message, Role};
+
+    /// Echo contract for the `session show` text view: the verbatim display
+    /// text wins; a legacy row without `display` falls back to `text()`.
+    #[test]
+    fn show_message_line_prefers_display_then_blocks() {
+        let mut m = Message::user("m1", " fix the bug");
+        m.display = Some("$review fix the bug".into());
+        assert_eq!(super::show_message_line(&m), "[User] $review fix the bug");
+
+        let legacy = Message::user("m2", "legacy prompt");
+        assert_eq!(super::show_message_line(&legacy), "[User] legacy prompt");
+
+        let mut tool = Message {
+            id: "m3".into(),
+            role: Role::Assistant,
+            blocks: vec![ContentBlock::text("done")],
+            model: None,
+            agent: None,
+            usage: Default::default(),
+            created_at: 0,
+            synthetic: false,
+            display: None,
+        };
+        tool.display = Some("kept".into());
+        assert_eq!(super::show_message_line(&tool), "[Assistant] kept");
+    }
 
     #[test]
     fn active_env_banner_tracks_active_env() {
@@ -433,6 +467,7 @@ mod tests {
             .await
             .unwrap();
         let msg = Message {
+            display: None,
             id: "m1".into(),
             role: Role::Assistant,
             blocks: vec![

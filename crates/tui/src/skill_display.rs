@@ -1,21 +1,11 @@
 //! Pure helpers around pure-skill (`$name`) submissions and persisted skill
 //! bodies.
 //!
-//! The trigger text is what the idle Submit sends (the LLM needs the full
-//! instruction); queued/steered submissions defer entirely — the raw text
-//! (token included) is admitted and the runner's `record_compound` resolves
-//! it at the idle boundary.
-
-/// Build the synthetic prompt sent when a user submits ONLY a skill token
-/// (`$name` with no accompanying text) while idle — i.e. a pure-skill
-/// submission. The skill itself is surfaced via the context-tail reminder;
-/// this trigger text just records a user turn and tells the model to begin
-/// acting on the skill. (The running paths no longer build triggers here:
-/// a queued/steered `$name` is admitted verbatim and `record_compound`
-/// injects its own `SKILL_TRIGGER` at consumption.)
-pub(crate) fn skill_trigger(skill_name: &str) -> String {
-    format!("The `{skill_name}` skill is now active. Begin executing its instructions immediately.")
-}
+//! Skill-only submissions send the raw `$name` text; resolution and the
+//! synthetic `SKILL_TRIGGER` injection happen at the runner's consumption
+//! boundary (`record_compound` / `entry_drain_mode`), which records the
+//! verbatim token as `Message.display` so replay surfaces echo the user's
+//! own input — never a resolved trigger body.
 
 /// Derive a display skill name from a persisted body's `> Source:` prefix
 /// (`.../skills/<name>/SKILL.md` -> `<name>`). Used to re-sync the TUI's
@@ -57,12 +47,6 @@ pub(crate) fn skill_mirror_from_body(body: Option<String>) -> (Option<String>, O
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn skill_trigger_names_the_active_skill() {
-        assert!(skill_trigger("repo-memory").contains("`repo-memory`"));
-        assert!(skill_trigger("x").contains("`x`"));
-    }
 
     #[test]
     fn name_derived_from_source_prefix() {

@@ -199,6 +199,7 @@ fn estimate_chars_counts_tool_result_images_at_fixed_cost() {
     // which would dwarf compaction budgets.
     let huge = format!("data:image/png;base64,{}", "A".repeat(200_000));
     let m = Message {
+        display: None,
         id: "m1".into(),
         role: opencoder_core::Role::Tool,
         blocks: vec![ContentBlock::ToolResult {

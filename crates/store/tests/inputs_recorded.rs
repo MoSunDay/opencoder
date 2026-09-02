@@ -293,7 +293,7 @@ async fn migration_v9_to_v10_backfills_recorded_for_promoted_rows() {
             .expect("version row")
             .get(0)
             .unwrap();
-        assert_eq!(v, 13, "schema version must be latest (13) after migration");
+        assert_eq!(v, 14, "schema version must be latest (14) after migration");
 
         // Backfill: pre-existing promoted row treated as consumed.
         let (p_prom, rec_prom) = input_state(&conn, seq_promoted).await;

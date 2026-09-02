@@ -164,16 +164,16 @@ pub(crate) async fn handle_submit_action(
             _ => push_history(history, hist_idx, &text),
         }
     } else if clean.is_empty() {
-        if active_skill.is_some() {
-            if !text.is_empty() {
-                push_user(chat, history, hist_idx, &text, &text);
-            }
-            // Skill-only submit: send a trigger prompt naming the active skill so
-            // the model records a user turn and acts on the injected skill body.
-            let skill_name = active_skill.as_deref().unwrap_or("");
-            let trigger = crate::skill_display::skill_trigger(skill_name);
+        if active_skill.is_some() && !text.is_empty() {
+            push_user(chat, history, hist_idx, &text, &text);
+            // Skill-only submit: the RAW `$name` goes to the runner, which
+            // resolves it at the consumption boundary and records a synthetic
+            // `SKILL_TRIGGER` carrying the verbatim token as `Message.display`
+            // — echo/replay surfaces show the user's input, never a resolved
+            // trigger body. (The runner-side activation is idempotent against
+            // resolve_persist's: same body lands on the shared handle.)
             let image_uris = snapshot_image_uris(pending_images);
-            if !start_turn(cmd_tx, cancel, UiCmd::Prompt(trigger, image_uris)).await {
+            if !start_turn(cmd_tx, cancel, UiCmd::Prompt(text.clone(), image_uris)).await {
                 worker_dead(chat);
                 return LoopFlow::Quit;
             }
@@ -185,13 +185,11 @@ pub(crate) async fn handle_submit_action(
             *body_refresh_pending = true;
         }
     } else {
-        // Echo only the model-facing text: a
-        // compound control command (`/plan
-        // review`) echoes just its tail — the
-        // command token is applied inline and
-        // never recorded. History keeps the raw
-        // input for arrow-up recall.
-        let echo = opencoder_session::consumed_echo_text(&clean).unwrap_or_else(|| text.clone());
+        // Echo the VERBATIM input: the compound tail keeps its `$skill`
+        // tokens (`/plan $review` echoes `$review`) — recorded `blocks` stay
+        // clean for the LLM, the echo is display-only. History keeps the
+        // raw input for arrow-up recall.
+        let echo = opencoder_session::consumed_echo_text(&text).unwrap_or_else(|| text.clone());
         push_user(chat, history, hist_idx, &echo, &text);
         chat.context_used += estimate(&clean) as u64;
         let image_uris = snapshot_image_uris(pending_images);

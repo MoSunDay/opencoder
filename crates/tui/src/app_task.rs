@@ -207,9 +207,11 @@ pub(crate) async fn switch_session(
             ..Default::default()
         },
     };
-    // Sidecar focus never survives a switch: the rebuilt transcript belongs to
-    // the new session, whose sidecar actor starts with an empty conversation.
+    // Sidecar focus + panel state never survive a switch: the rebuilt
+    // transcript belongs to the new session, whose sidecar actor starts with
+    // an empty conversation.
     chat.sidecar_focus = false;
+    chat.sidecar = None;
     // Restore UI interaction state from cache,
     // or initialise fresh for a new session.
     if let Some(st) = restored {
@@ -444,6 +446,7 @@ mod tests {
 
     fn user_msg(id: &str, text: &str) -> Message {
         Message {
+            display: None,
             id: id.into(),
             role: opencoder_core::Role::User,
             blocks: vec![opencoder_core::ContentBlock::text(text)],
@@ -457,6 +460,7 @@ mod tests {
 
     fn assistant_task_use(id: &str, tool_use_id: &str) -> Message {
         Message {
+            display: None,
             id: id.into(),
             role: opencoder_core::Role::Assistant,
             blocks: vec![opencoder_core::ContentBlock::ToolUse {

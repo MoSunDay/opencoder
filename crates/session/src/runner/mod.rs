@@ -159,6 +159,10 @@ pub async fn run_with_registry(
     // (`/plan $review do it`) and plain prompts (`$review do it`). After
     // stripping, text may be empty if only `$skill` tokens were provided.
     let prev_skill = session.skill_prompt_cloned();
+    // Capture the verbatim input BEFORE resolution: `display` records the
+    // raw prompt (`$skill` tokens included) for every echo surface, while
+    // the resolved clean text below is what the LLM consumes.
+    let raw_user_text = user_text.clone();
     user_text = crate::skill_resolve::resolve_inline_skills(session, &user_text);
     // Consumption-time activation must also reach the store (queue/steer
     // drains persist inside record_compound; this is the direct-prompt
@@ -170,11 +174,20 @@ pub async fn run_with_registry(
     // injection + pending-first priority: see drain::entry_drain_mode).
     let has_text = !user_text.trim().is_empty();
     let has_images = !images.is_empty();
+    // Verbatim echo text: the raw prompt as typed (may be emptied by skill
+    // resolution — then it rides the entry trigger instead of a record).
+    let verbatim = (!raw_user_text.trim().is_empty()).then(|| raw_user_text.clone());
     if has_text || has_images {
-        let user = Message::user_with_images(new_id(), user_text, &images);
+        // has_text => verbatim is Some (raw non-empty); images-only => raw
+        // was empty, so verbatim is None and the record stays fallback-clean.
+        let user = Message::user_with_display(new_id(), user_text, verbatim.clone(), &images);
         session.record(user).await;
     }
-    let drain_mode = entry_drain_mode(session, has_text, has_images, handoff_pending).await;
+    // A pure-skill submit (tokens stripped to empty) surfaces its trigger
+    // through entry_drain_mode; hand the verbatim input along so the
+    // injected trigger replays as the user's own words.
+    let drain_mode =
+        entry_drain_mode(session, has_text, has_images, handoff_pending, verbatim).await;
     // Zero-resubmit: a failed run must NOT re-submit admitted inputs.
     // Queue/steer rows stay pending (or are unpromoted in place by the
     // P1-3/F2 guards) and are consumed by the NEXT successful run —
@@ -525,6 +538,7 @@ pub(crate) async fn run_loop(
                         })
                         .collect();
                     let doom_msg = Message {
+                        display: None,
                         id: new_id(),
                         role: Role::Tool,
                         blocks: doom_blocks,
@@ -687,6 +701,7 @@ pub(crate) async fn run_loop(
                 .collect();
             if !non_replayable.is_empty() {
                 let tool_msg = Message {
+                    display: None,
                     id: new_id(),
                     role: Role::Tool,
                     blocks: non_replayable,
@@ -705,6 +720,7 @@ pub(crate) async fn run_loop(
             break;
         }
         let tool_msg = Message {
+            display: None,
             id: new_id(),
             role: Role::Tool,
             blocks: tool_blocks,

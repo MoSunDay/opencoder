@@ -5,8 +5,9 @@
 //! triggered it. When that run ends — Done, Error, or cancel — the skill is
 //! cleared from memory (`skill_prompt` + `active_skill_names`) and from the
 //! store (`clear_skill`), so subsequent runs start skill-less: no
-//! `[active skill]` tail reminder, no `[skill loaded]` body payload (it was
-//! transient per-call anyway — run end stops the submission entirely), no
+//! `[active skill]` tail reminder, no `[skill loaded]` body payload (the
+//! delivery was one-shot and nothing persisted — run end stops the
+//! submission entirely), no
 //! resumed-session resurrection. The single deliberate exception: a crash
 //! MID-run leaves `sessions.skill` set, so the resumed run KEEPS the skill
 //! until it completes — then the same run-end clear lands.
@@ -274,7 +275,7 @@ async fn no_skill_run_keeps_skill_none() {
 
 /// After the skill run completes, a second plain prompt must ship with NO
 /// `[active skill]` tail and NO `[skill loaded]` body at all — the payload
-/// message was transient per-call, so run end stopped its submission
+/// message was one-shot and unpersisted, so run end stopped its submission
 /// entirely (nothing persisted to replay).
 #[tokio::test]
 async fn second_run_has_no_skill_reminder() {

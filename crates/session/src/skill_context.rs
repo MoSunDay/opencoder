@@ -1,29 +1,32 @@
-//! Transient skill context: per-call body payload + tail reminder.
+//! Skill body delivery: ONE-SHOT per activation + tail reminder.
 //!
 //! Skill bodies do not ship in the system prompt — appending them there
 //! would rewrite the payload's first bytes on every activation, destroying
-//! whatever prefix-cache hits those bytes enjoyed. Instead every LLM call
-//! derives, from session state alone, the skill context appended at the END
-//! of the request payload: never recorded to the transcript or store, never
-//! replayed. (Note: the system prompt as a whole is re-derived per call and
-//! re-reads AGENTS.md from disk, so it is not byte-stable across calls; the
-//! tail design only keeps skill activation from rewriting it.) That context
-//! carries (a) the ACTIVE skills' paths + merged body as ONE `synthetic`
-//! user message ([`transient_body_message`], a `[skill loaded] <path>`
-//! marker line per source path — sorted, set-canonical) so the model no
-//! longer burns a tool call reading the SKILL.md, (b) a catalog of
-//! config-enabled skills (lazy-load hint for `~/.opencoder/skills`) and
-//! (c) — only in the degenerate empty-body case — the active skill's source
-//! path (from the `> Source:` prefix `body_with_source` writes).
+//! whatever prefix-cache hits those bytes enjoyed. Instead the ACTIVE
+//! skills' paths + merged body ship as ONE `synthetic` user message
+//! ([`body_message`], a `[skill loaded] <path>` marker line per source
+//! path — sorted, set-canonical) attached to the payload of the FIRST LLM
+//! round that observes the armed skill, and ONLY that round: the delivery
+//! gate ([`deliver_body_once`]) flips after the one shipment, so rounds
+//! 2..N of the run carry NO skill body at all — no per-round token waste,
+//! no cache-hostile duplicate block after the newest tool results. The
+//! marker line names the source path, so a model that needs the skipped
+//! body again just `read`s the SKILL.md (the same continuation the
+//! `[INCOMPLETE SKILL]` notice already teaches).
 //!
-//! "Transient" is the one-shot contract: the body message exists only while
-//! the skill is armed, is re-derived for EVERY LLM round of that run, and
-//! run end (`skill_lifecycle::clear_on_run_end`) drops the skill — so
-//! subsequent runs submit neither body nor reminder. Because nothing is
-//! persisted, compaction and resume need no marker-scan re-injection: every
-//! armed round re-derives the message from session state. Bodies over ~20K
-//! tokens ship as a whole-line prefix plus an `[INCOMPLETE SKILL]`
-//! continuation notice (same style as the read tool's `[INCOMPLETE READ]`).
+//! The message is never recorded to the transcript or store, and never
+//! replayed — the in-memory delivery flag (`skill_body_delivered`, reset
+//! by every `set_skill` and by the run-end clear) is the only ledger, so
+//! compaction and resume need no marker-scan bookkeeping: a resume of a
+//! crash-mid-run skill re-delivers once on its first round. That context
+//! carries (a) the ACTIVE skills' paths + merged body so the model no
+//! longer burns a tool call reading the SKILL.md, (b) a catalog of
+//! config-enabled skills on the tail reminder (lazy-load hint for
+//! `~/.opencoder/skills`) and (c) — only in the degenerate empty-body
+//! case — the active skill's source path (from the `> Source:` prefix
+//! `body_with_source` writes). Bodies over ~20K tokens ship as a
+//! whole-line prefix plus an `[INCOMPLETE SKILL]` continuation notice
+//! (same style as the read tool's `[INCOMPLETE READ]`).
 
 use std::path::Path;
 
@@ -131,7 +134,7 @@ pub fn reminder_text(catalog: &[(String, String)], active_path: Option<&str>) ->
 /// only while the skill is armed AND carries an injectable body; the
 /// pointer is reserved for the degenerate armed-without-body case
 /// (frontmatter-only file — nothing to ship, so pointing at the source file
-/// is all the context there is). Shared by [`transient_body_message`] and
+/// is all the context there is). Shared by [`body_message`] and
 /// [`tail_reminder`] so the two never disagree. Gating: Primary agents
 /// only, `workflow` (the todos scheduler, itself Primary-mode) excluded.
 fn body_and_pointer(session: &SessionState) -> (Option<Message>, Option<String>) {
@@ -183,10 +186,10 @@ fn body_and_pointer(session: &SessionState) -> (Option<Message>, Option<String>)
 /// it, hence the explicit name check.
 ///
 /// The `[active skill]` section is a FALLBACK pointer, not a standing
-/// announcement: while the armed skill ships its body every round
-/// ([`transient_body_message`], appended adjacent in the same payload), the
-/// pointer would only make the model parrot "the <skill> skill is active"
-/// on every turn, so it stays silent. It fires solely for an armed skill
+/// announcement: while the armed skill's body is in the transcript
+/// ([`body_message`], injected once by [`ensure_body_once`]), the pointer
+/// would only make the model parrot "the <skill> skill is active" on every
+/// turn, so it stays silent. It fires solely for an armed skill
 /// whose parsed body is empty, where pointing at the source file is the
 /// only context available.
 pub fn tail_reminder(session: &SessionState) -> Option<Message> {
@@ -265,18 +268,38 @@ pub fn injectable_body(body: &str, path: &str) -> String {
     }
 }
 
-/// Transient per-call message carrying the ACTIVE skills' paths + merged
+/// Build the ONE-SHOT skill body message: the ACTIVE skills' paths + merged
 /// body (marker block + blank line + [`injectable_body`] output), or `None`
 /// when there is nothing to ship. Pure: derived from session state alone,
-/// `synthetic=true`, and NEVER recorded to the transcript or store —
-/// `runner/llm_call.rs` appends it after the transcript for every LLM round
-/// of the run that armed the skill, and run end
-/// (`skill_lifecycle::clear_on_run_end`) drops the skill, which stops the
-/// submission entirely (nothing persisted to remove). A compound prompt
-/// (`$A $B`) ships as ONE message keyed by the whole path set; bodies over
-/// ~20K tokens ship truncated with a continuation notice.
-pub fn transient_body_message(session: &SessionState) -> Option<Message> {
+/// `synthetic=true`. The caller records it to the transcript exactly once
+/// ([`ensure_body_once`]; runners carry it via the transcript from then on),
+/// and run end (`skill_lifecycle::clear_on_run_end`) drops the skill, which
+/// stops further submissions. A compound prompt (`$A $B`) ships as ONE
+/// message keyed by the whole path set; bodies over ~20K tokens ship
+/// truncated with a continuation notice.
+pub fn body_message(session: &SessionState) -> Option<Message> {
     body_and_pointer(session).0
+}
+
+/// Deliver the armed skills' body EXACTLY ONCE per activation: the first
+/// call after a skill arm returns [`body_message`] for the payload tail and
+/// flips the session's delivery gate; every later round of that run (and
+/// every later call) returns `None` — rounds 2..N carry NO skill body, the
+/// `[skill loaded] <path>` marker on the delivered message being the
+/// model's pointer back to the source file. Subagents and the `workflow`
+/// scheduler never receive skill context (same gate as
+/// [`body_and_pointer`]). The gate resets on every `set_skill` (new
+/// activation -> new delivery) and at run end.
+pub fn deliver_body_once(session: &SessionState) -> Option<Message> {
+    if session.agent.mode != AgentMode::Primary || session.agent.name == "workflow" {
+        return None;
+    }
+    if session.skill_body_delivered() {
+        return None;
+    }
+    let msg = body_message(session)?;
+    session.set_skill_body_delivered(true);
+    Some(msg)
 }
 
 #[cfg(test)]
@@ -386,7 +409,50 @@ mod tests {
     }
 
     // ------------------------------------------------------------------
-    // transient_body_message: gating
+    // deliver_body_once: the one-shot gate
+    // ------------------------------------------------------------------
+
+    /// Exactly-once: the first call after arming returns the body message
+    /// and flips the gate; every later call returns None until a fresh
+    /// `set_skill` (new activation) resets the gate. Skill-less sessions
+    /// and the excluded agents (subagents, `workflow`) never deliver.
+    #[test]
+    fn deliver_body_once_is_one_shot_per_activation() {
+        let s = act_session();
+        assert!(deliver_body_once(&s).is_none(), "skill-less -> None");
+
+        s.set_skill(Some(sourced("/skills/rev/SKILL.md", "REV-BODY")));
+        let msg = deliver_body_once(&s).expect("first call delivers");
+        assert!(msg.text().starts_with("[skill loaded] /skills/rev/SKILL.md"));
+        assert!(s.skill_body_delivered(), "gate flipped by the delivery");
+
+        assert!(
+            deliver_body_once(&s).is_none(),
+            "second call: delivery already spent"
+        );
+
+        // A new activation re-arms the gate -> one fresh delivery.
+        s.set_skill(Some(sourced("/skills/review/SKILL.md", "NEXT-BODY")));
+        let msg2 = deliver_body_once(&s).expect("fresh activation delivers again");
+        assert!(
+            msg2.text().starts_with("[skill loaded] /skills/review/SKILL.md"),
+            "the new body ships, not the stale one"
+        );
+        assert!(deliver_body_once(&s).is_none(), "spent again");
+
+        for name in ["explore", "workflow"] {
+            let s = session_named(name);
+            s.set_skill(Some("> Source: /skills/x/SKILL.md\n\nX-BODY".into()));
+            assert!(
+                deliver_body_once(&s).is_none(),
+                "{name} never receives the body"
+            );
+            assert!(!s.skill_body_delivered(), "{name}: gate untouched");
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // body_message: gating
     // ------------------------------------------------------------------
 
     /// Skill-less sessions get no body message, and the exclusion set
@@ -395,12 +461,12 @@ mod tests {
     #[test]
     fn body_message_gating() {
         let s = act_session();
-        assert!(transient_body_message(&s).is_none(), "skill-less -> None");
+        assert!(body_message(&s).is_none(), "skill-less -> None");
         for name in ["explore", "workflow"] {
             let s = session_named(name);
             s.set_skill(Some("> Source: /skills/x/SKILL.md\n\nX-BODY".into()));
             assert!(
-                transient_body_message(&s).is_none(),
+                body_message(&s).is_none(),
                 "{name} never receives the body"
             );
         }
@@ -413,18 +479,18 @@ mod tests {
         let s = act_session();
         s.set_skill(Some("LEGACY-BODY-WITHOUT-PREFIX".into()));
         assert!(
-            transient_body_message(&s).is_none(),
+            body_message(&s).is_none(),
             "legacy body has no path to name"
         );
         s.set_skill(Some("> Source: /skills/e/SKILL.md\n\n   \n".into()));
         assert!(
-            transient_body_message(&s).is_none(),
+            body_message(&s).is_none(),
             "empty parsed body ships nothing"
         );
     }
 
     // ------------------------------------------------------------------
-    // transient_body_message: shape
+    // body_message: shape
     // ------------------------------------------------------------------
 
     /// Single skill: `[skill loaded] <path>` marker line, blank line, then
@@ -433,7 +499,7 @@ mod tests {
     fn body_message_single_skill_shape() {
         let s = act_session();
         s.set_skill(Some("> Source: /skills/rev/SKILL.md\n\nREV-STEP-1\nREV-STEP-2".into()));
-        let msg = transient_body_message(&s).expect("armed with a body -> message");
+        let msg = body_message(&s).expect("armed with a body -> message");
         assert!(msg.synthetic, "transient, never recorded");
         assert_eq!(msg.role, Role::User);
         assert_eq!(
@@ -455,7 +521,7 @@ mod tests {
              > Source: /skills/beta/SKILL.md\n\nBETA-BODY"
                 .into(),
         ));
-        let text = transient_body_message(&s)
+        let text = body_message(&s)
             .expect("compound body ships")
             .text();
         assert_eq!(
@@ -470,7 +536,7 @@ mod tests {
              > Source: /skills/alpha/SKILL.md\n\nALPHA-BODY"
                 .into(),
         ));
-        let flipped = transient_body_message(&s)
+        let flipped = body_message(&s)
             .expect("same set, other order")
             .text();
         let block =
@@ -500,7 +566,7 @@ mod tests {
         let s = act_session();
         s.set_skill(Some(sourced("/skills/big/SKILL.md", &body)));
 
-        let text = transient_body_message(&s)
+        let text = body_message(&s)
             .expect("truncation still ships a message")
             .text();
         assert!(
@@ -532,10 +598,10 @@ mod tests {
     // ------------------------------------------------------------------
 
     /// The `[active skill]` tail is a FALLBACK pointer, not a standing
-    /// announcement: while the armed skill ships its body every round (the
-    /// message rides adjacent in the same payload), the pointer stays
-    /// silent — repeating it every turn only makes the model parrot "the
-    /// <skill> skill is active". It fires solely for an armed skill whose
+    /// announcement: while the armed skill's body has shipped (one-shot,
+    /// first round after activation), the pointer stays silent — repeating
+    /// it every turn only makes the model parrot "the <skill> skill is
+    /// active". It fires solely for an armed skill whose
     /// parsed body is empty, where the source path is all the context
     /// there is. It never depends on transcript contents, so compaction
     /// and resume need no re-pointing: the armed rounds re-derive

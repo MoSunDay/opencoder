@@ -1,4 +1,4 @@
-Commit: 8709349 (working-tree, act/plan 切换交接与 plan 严格只读上下文)
+Commit: 7a3edc8 (review 五问回退 + 内置包 seeding update-on-drift)
 
 # core 模块
 

@@ -107,3 +107,41 @@ fn released_write_provenance_survives_compound_allow_ties() {
     assert!(!read.writes_state, "/dev/null does not persist state");
     cleanup_dir(&cwd);
 }
+
+/// #F9: the analyzer's cwd re-aim skips `cd` option flags exactly like the
+/// `cd` handler (single implementation). `cd -P <released> && touch f` must
+/// judge `touch f` against the released directory — taking `args.first()`
+/// literally re-aimed at a `-P` subdirectory of the project instead.
+#[test]
+fn cd_option_flag_is_skipped_when_re_aiming_the_analysis_cwd() {
+    let released = tmp_release_cwd("cd-flag-aim");
+    let plain = plain_project_cwd("cd-flag-aim");
+    let command = format!("cd -P {} && touch f", released.display());
+    let verdict = crate::classify_in(&command, &plain);
+    assert_eq!(
+        verdict.decision,
+        Decision::Allow,
+        "`touch f` after `cd -P` into a released dir must be judged there, got {verdict:?}"
+    );
+    assert!(verdict.writes_state, "the released write must stay typed");
+    // Without the flag skip the write was judged at <plain>/-P/f and Asked.
+    cleanup_dir(&released);
+    cleanup_dir(&plain);
+}
+
+/// #F9 counter-direction: an unrecognized `cd` flag Asks (handler) and the
+/// list's re-aim is skipped entirely rather than guessed.
+#[test]
+fn cd_unknown_flag_still_asks_in_a_compound_list() {
+    let released = tmp_release_cwd("cd-unknown-flag");
+    let plain = plain_project_cwd("cd-unknown-flag");
+    let command = format!("cd -Z {} && touch f", released.display());
+    let verdict = crate::classify_in(&command, &plain);
+    assert_ne!(
+        verdict.decision,
+        Decision::Allow,
+        "an unknown cd flag must not release the trailing write, got {verdict:?}"
+    );
+    cleanup_dir(&released);
+    cleanup_dir(&plain);
+}

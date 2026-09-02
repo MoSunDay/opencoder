@@ -105,15 +105,15 @@ fn ctrl_l_exits_subagent_and_returns_to_follow_mode() {
     assert_all_thinking_collapsed(&chat);
 }
 
-/// Ctrl+L resets every ToolGroup (parent AND focused child) to the Collapsed
-/// state — expanded List/Results groups are one keystroke away from the
+/// Ctrl+L resets every StepGroup (parent AND focused child) to the collapsed
+/// state — expanded groups/steps/call outputs are one keystroke away from the
 /// single count line.
 #[test]
 fn ctrl_l_resets_tool_groups_to_collapsed() {
     use opencoder_session::SessionEvent;
 
     let (mut chat, sub_idx) = chat_with_subagent();
-    // Give both views a finished tool group and expand it to Results.
+    // Give both views a finished tool group, open it, its step, and the call.
     chat.apply(&SessionEvent::ToolStart {
         id: "p".into(),
         name: "bash".into(),
@@ -140,13 +140,19 @@ fn ctrl_l_resets_tool_groups_to_collapsed() {
             images: Vec::new(),
         });
         for h in view.tool_headers() {
-            view.cycle_tool_group_at(h.block_idx);
-            view.cycle_tool_group_at(h.block_idx); // -> Results
+            view.toggle_step_group_at(h.block_idx);
+            if let ChatBlock::StepGroup { steps, .. } = &mut view.blocks[h.block_idx] {
+                steps[0].open = true;
+            }
+            view.toggle_tool_call_at(h.block_idx, 1); // step's call -> expanded
         }
     }
     for h in chat.tool_headers() {
-        chat.cycle_tool_group_at(h.block_idx);
-        chat.cycle_tool_group_at(h.block_idx); // -> Results
+        chat.toggle_step_group_at(h.block_idx);
+        if let ChatBlock::StepGroup { steps, .. } = &mut chat.blocks[h.block_idx] {
+            steps[0].open = true;
+        }
+        chat.toggle_tool_call_at(h.block_idx, 1); // step's call -> expanded
     }
 
     let mut subagent_focus = Some(sub_idx);
@@ -171,30 +177,24 @@ fn ctrl_l_resets_tool_groups_to_collapsed() {
     assert!(consumed, "Ctrl+L must be consumed");
 
     let all_collapsed = |v: &ChatView| {
-        v.blocks.iter().all(|b| {
-            !matches!(
-                b,
-                ChatBlock::ToolGroup {
-                    state: crate::chat::ToolGroupState::List,
-                    ..
-                }
-            ) && !matches!(
-                b,
-                ChatBlock::ToolGroup {
-                    state: crate::chat::ToolGroupState::Results,
-                    ..
-                }
-            )
+        v.blocks.iter().all(|b| match b {
+            ChatBlock::StepGroup { steps, open } => {
+                !open
+                    && steps
+                        .iter()
+                        .all(|s| !s.open && s.calls.iter().all(|c| !c.expanded))
+            }
+            _ => true,
         })
     };
     assert!(
         all_collapsed(&chat),
-        "parent tool groups must be Collapsed after Ctrl+L"
+        "parent step groups must be collapsed after Ctrl+L"
     );
     if let ChatBlock::Subagent { view, .. } = &chat.blocks[sub_idx] {
         assert!(
             all_collapsed(view),
-            "child tool groups must be Collapsed after Ctrl+L"
+            "child step groups must be collapsed after Ctrl+L"
         );
     }
 }

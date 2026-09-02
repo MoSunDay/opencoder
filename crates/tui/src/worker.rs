@@ -148,17 +148,17 @@ pub fn gate_clear_all(running: bool) -> ClearAllGate {
 /// Gate for control-command dispatch (`/act`, `/plan`,
 /// `/act_clear_context` — and Shift+Tab, which arms the countdown guard from
 /// plan mode and switches straight back to plan from act mode).
-/// Busy (`running` or a live subagent — callers precompute
-/// `running || subagents_running > 0`) means the worker is mid-`run_session`;
-/// starting a control-command turn then would race the in-flight turn at an
-/// arbitrary partial boundary. Refuse until idle (clean turn boundary).
+/// Busy (`running` — the caller passes the parent session's state; a live
+/// subagent does NOT count: the parent is idle, exactly when steer/queue
+/// entries are consumed automatically) means the worker is mid-
+/// `run_session`; starting a control-command turn then would race the
+/// in-flight turn at an arbitrary partial boundary.
 /// Pure so the running-guard is unit-testable independent of the async event
 /// loop.
 ///
-/// While busy the command is NOT silently dropped: the dispatcher shows a
-/// `[switch] busy` marker, and a Shift+Tab / typed submit that reaches the
-/// running branch queues the raw text for the runner's idle-boundary
-/// intercept instead of starting a turn.
+/// While busy the switch is SUBMITTED, not applied (steer/queue semantics):
+/// the dispatcher queues the raw command text for the runner's idle-boundary
+/// intercept instead of starting a turn — apply-at-idle, never refused.
 #[derive(Debug, PartialEq, Eq)]
 pub enum SwitchGate {
     Run,

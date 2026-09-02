@@ -97,65 +97,6 @@ pub(crate) fn get_flag_values(args: &[String], flags: &[&str]) -> Vec<String> {
     values
 }
 
-/// Collect the value of EVERY occurrence of a flag, across all three
-/// spellings value-taking options accept: space-separated (`-o f`,
-/// `--output f`), `=`-attached (`--output=f`) and short-glued (`-of`,
-/// `-o=/f`).
-///
-/// SECURITY: `get_flag_value` reads only the first space-separated
-/// occurrence, so `--output=/etc/x`, a glued `-o/etc/x` or a second `-o`
-/// slipped past output-target checks entirely (#F5). Long options never take
-/// a glued value without `=`, so short-glue is restricted to two-char flags;
-/// one leading `=` is stripped from a glued short value (pflag-style tools
-/// accept `-o=/f`).
-pub(crate) fn collect_flag_values(
-    args: &[String],
-    short_flags: &[&str],
-    long_flags: &[&str],
-) -> Vec<String> {
-    let mut values = Vec::new();
-    let mut i = 0;
-    while i < args.len() {
-        let arg = &args[i];
-        if short_flags.contains(&arg.as_str()) || long_flags.contains(&arg.as_str()) {
-            if let Some(value) = args.get(i + 1) {
-                values.push(value.clone());
-            }
-            i += 2;
-            continue;
-        }
-        let mut consumed = false;
-        for flag in long_flags {
-            if let Some(value) = arg
-                .strip_prefix(flag)
-                .and_then(|rest| rest.strip_prefix('='))
-            {
-                if !value.is_empty() {
-                    values.push(value.to_owned());
-                }
-                consumed = true;
-                break;
-            }
-        }
-        if consumed {
-            i += 1;
-            continue;
-        }
-        for flag in short_flags {
-            if flag.len() == 2 && arg.starts_with(flag) && arg.len() > flag.len() {
-                let raw = &arg[flag.len()..];
-                let value = raw.strip_prefix('=').unwrap_or(raw);
-                if !value.is_empty() {
-                    values.push(value.to_owned());
-                }
-                break;
-            }
-        }
-        i += 1;
-    }
-    values
-}
-
 /// Detect a flag letter inside a CLUSTERED short-flag token, e.g. perl/ruby's
 /// in-place `-i` hidden in `-pi`, `-ipe` or `-pi.bak`.
 ///
@@ -234,50 +175,6 @@ mod tests {
     fn get_flag_values_collects_every_occurrence() {
         let values = get_flag_values(&args(&["-e", "a", "-e", "b"]), &["-e"]);
         assert_eq!(values, vec!["a".to_string(), "b".to_string()]);
-    }
-
-    #[test]
-    fn collect_flag_values_reads_every_spelling_and_occurrence() {
-        // Space-separated, `=`-attached, glued short, `=`-glued short, and a
-        // second occurrence: get_flag_value sees only the first of these.
-        let values = collect_flag_values(
-            &args(&["-o", "/tmp/a", "--output=/etc/b", "-o/etc/c", "-o=/d", "-o", "/tmp/e"]),
-            &["-o"],
-            &["--output"],
-        );
-        assert_eq!(
-            values,
-            vec![
-                "/tmp/a".to_string(),
-                "/etc/b".to_string(),
-                "/etc/c".to_string(),
-                "/d".to_string(),
-                "/tmp/e".to_string(),
-            ]
-        );
-        // Long-flag values via a space, and a value flag that must not
-        // swallow a longer unrelated name.
-        let values = collect_flag_values(
-            &args(&["--input", "/tmp/m", "--input=/tmp/n", "--input-dir=/elsewhere"]),
-            &[],
-            &["--input"],
-        );
-        assert_eq!(
-            values,
-            vec!["/tmp/m".to_string(), "/tmp/n".to_string()]
-        );
-    }
-
-    #[test]
-    fn collect_flag_values_ignores_non_flag_tokens_and_empty_values() {
-        assert!(collect_flag_values(&args(&["-o"]), &["-o"], &["--output"]).is_empty());
-        assert!(collect_flag_values(&args(&["--output="]), &[], &["--output"]).is_empty());
-        // A dash token that merely begins with the flag letter (`-ovation`)
-        // is a glued value; a token it does not prefix is skipped.
-        let values = collect_flag_values(&args(&["x", "-ovation"]), &["-o"], &["--output"]);
-        assert_eq!(values, vec!["vation".to_string()]);
-        // Long flag matching stops before `=`: `--output-dir` is not `--output`.
-        assert!(collect_flag_values(&args(&["--output-dir=/x"]), &[], &["--output"]).is_empty());
     }
 
     #[test]

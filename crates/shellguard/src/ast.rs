@@ -353,16 +353,13 @@ const fn word_value(node: &Node) -> Option<&str> {
 /// could corrupt paren tracking and drop the `HereDoc` node. Pin `rable >=
 /// 0.1.14` when touching this helper.
 ///
-/// Scope note (updated #F4): the checks here are intentionally not tightened
-/// further (e.g., restricting to literally `cat` or `words.len() == 1`).
-/// `SIMPLE_SAFE` is a read-only-viewer allowlist (`cat`, `head`, `grep`,
-/// `xxd`, …). Its entries carry no command-execution primitive: anything that
-/// hands an argument to a shell (`hyperfine`) or writes a file from a flag
-/// (`shuf`/`iconv -o`) lives behind a dedicated handler instead of this list,
-/// so a non-`cat` entry with flags and a quoted heredoc is still safe
-/// data-passing. The existing conditions (`SIMPLE_SAFE` +
-/// all-redirects-quoted-heredocs + no word-expansions) are already
-/// structurally tight; the rable 0.1.14 fix makes them *reliable*.
+/// Scope note: the checks here are intentionally not tightened further
+/// (e.g., restricting to literally `cat` or `words.len() == 1`). `SIMPLE_SAFE`
+/// is a read-only-viewer allowlist (`cat`, `head`, `grep`, `xxd`, …) with no
+/// command-execution primitives, so a non-`cat` entry with flags and a
+/// quoted heredoc is still safe data-passing. The existing conditions
+/// (`SIMPLE_SAFE` + all-redirects-quoted-heredocs + no word-expansions) are
+/// already structurally tight; the rable 0.1.14 fix makes them *reliable*.
 #[must_use]
 pub fn is_safe_heredoc_substitution(command: &Node) -> bool {
     let NodeKind::Command {

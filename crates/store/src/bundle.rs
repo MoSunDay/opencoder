@@ -228,6 +228,7 @@ mod tests {
 
     fn sample_bundle() -> SessionBundle {
         let msg = Message {
+            display: None,
             id: "msg1".into(),
             role: Role::User,
             blocks: vec![ContentBlock::Text {

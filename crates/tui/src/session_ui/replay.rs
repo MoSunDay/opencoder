@@ -34,22 +34,29 @@ pub(super) fn replay_one(
 ) {
     match msg.role {
         Role::User => {
-            // Synthetic user messages (plan->act handoff, compaction summaries,
-            // pure-skill triggers) are internal — skip `user:` blocks on replay.
-            // Steer/queue promotions are real user input and ARE rendered so the
-            // user sees their queued/steered prompts after resume.
-            if msg.synthetic {
+            // Synthetic user messages (plan->act handoff, compaction summaries)
+            // are internal — skip `user:` blocks on replay. Skill triggers are
+            // the exception: they carry the verbatim input as `display`, which
+            // IS rendered. Steer/queue promotions are real user input and ARE
+            // rendered (via `display`, tokens included) so the user sees their
+            // prompts verbatim after resume.
+            if msg.synthetic && msg.display.is_none() {
                 return;
             }
-            let text: String = msg
-                .blocks
-                .iter()
-                .filter_map(|b| match b {
-                    ContentBlock::Text { text } => Some(text.as_str()),
-                    _ => None,
-                })
-                .collect::<Vec<_>>()
-                .join("");
+            // Echo contract: `display` is the verbatim input single source of
+            // truth; fall back to the recorded blocks for legacy rows.
+            let text: String = match &msg.display {
+                Some(d) => d.clone(),
+                None => msg
+                    .blocks
+                    .iter()
+                    .filter_map(|b| match b {
+                        ContentBlock::Text { text } => Some(text.as_str()),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+                    .join(""),
+            };
             let text = sanitize_multiline(&text).into_owned();
             if chat.first_prompt.is_none() {
                 let t = text.trim();

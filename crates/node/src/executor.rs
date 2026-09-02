@@ -85,9 +85,10 @@ pub async fn execute(
         opencoder_session::spawn_event_flusher(Some(deps.store.clone()), task.session_id.clone());
 
     // Batched remote upload pipeline: the sync event callback cannot await,
-    // so it only enqueues complete batches; a dedicated uploader consumes them
-    // IN ORDER (unbounded channel preserves batch order) with bounded retry.
-    let (batch_tx, mut batch_rx) = tokio::sync::mpsc::unbounded_channel::<NodeEventBatch>();
+    // so it only enqueues complete batches; a dedicated uploader task consumes
+    // them IN ORDER (unbounded channel preserves batch order) with bounded
+    // retry.
+    let (batch_tx, batch_rx) = tokio::sync::mpsc::unbounded_channel::<NodeEventBatch>();
     let batcher = Arc::new(Mutex::new(Batcher::new()));
     let on_event = {
         let batcher = Arc::clone(&batcher);
@@ -108,6 +109,16 @@ pub async fn execute(
         session_id = %task.session_id,
         "node task executing"
     );
+    // The uploader runs CONCURRENTLY with the drain. Deferring it to run end
+    // would leave every batch queued in the unbounded channel for the whole
+    // task (unbounded memory on long runs) and keep the server's event stream
+    // blank until the terminal state. `Uplink` is a cheap `Clone` (reqwest
+    // handle + strings), so the task owns its own handle.
+    let uploader = {
+        let uplink = uplink.clone();
+        let task_id = task.task_id.clone();
+        tokio::spawn(uploader(uplink, task_id, batch_rx))
+    };
     let result = run_with_cancel(
         &mut session,
         task.prompt.clone(),
@@ -117,19 +128,24 @@ pub async fn execute(
     )
     .await;
 
-    // Final partial batch, then stop the uploader; guarantee the tail flush
-    // of local persistence BEFORE reporting a terminal state.
+    // Final partial batch, then close the channel so the concurrent uploader
+    // drains and exits; the upload tail must land before the terminal status.
     let tail = lock_batcher(&batcher).take();
     if !tail.is_empty() {
         let _ = batch_tx.send(NodeEventBatch { events: tail });
     }
     drop(batch_tx);
+    // Join the uploader first: every queued batch is on the wire (or dropped
+    // after bounded retry) before the terminal state is reported.
+    if let Err(e) = uploader.await {
+        warn!(task_id = %task.task_id, error = %e, "event uploader task failed");
+    }
     // `sink` already dropped with the consumed closure: the channel is
-    // closed, so awaiting the flusher guarantees the final local flush.
+    // closed, so awaiting the flusher guarantees the final local flush
+    // BEFORE reporting a terminal state (web parity with the drain surface).
     if let Err(e) = flusher.await {
         warn!(task_id = %task.task_id, error = %e, "local event flush failed");
     }
-    uploader(uplink, &task.task_id, &mut batch_rx).await;
 
     let report = terminal_report(cancel.is_cancelled(), result.as_ref().err());
     if let Err(e) = uplink
@@ -191,15 +207,20 @@ async fn await_flag(rx: &mut watch::Receiver<bool>) {
 
 /// Ordered uploader: drains every queued batch; each upload retries up to
 /// three times with linear backoff, then logs-and-drops (warn-only).
+/// Drain the batch channel IN ORDER until it closes, uploading each batch
+/// with bounded retry (a flaky uplink never breaks a healthy local run).
+/// Spawned by [`execute`] BEFORE the drain starts so batches flow upstream
+/// WHILE the task executes; `execute` closes the channel after the tail
+/// batch and joins this task before reporting a terminal status.
 async fn uploader(
-    uplink: &Uplink,
-    tid: &str,
-    rx: &mut tokio::sync::mpsc::UnboundedReceiver<NodeEventBatch>,
+    uplink: Uplink,
+    tid: String,
+    mut rx: tokio::sync::mpsc::UnboundedReceiver<NodeEventBatch>,
 ) {
     const ATTEMPTS: usize = 3;
     while let Some(batch) = rx.recv().await {
         for attempt in 0..ATTEMPTS {
-            match uplink.upload_events(tid, batch.clone()).await {
+            match uplink.upload_events(&tid, batch.clone()).await {
                 Ok(()) => break,
                 Err(e) => {
                     if attempt + 1 == ATTEMPTS {

@@ -186,7 +186,19 @@ impl Drop for ServerGuard {
     }
 }
 
-fn spawn_server(workdir: &std::path::Path) -> (ServerGuard, String) {
+fn spawn_server(
+    workdir: &std::path::Path,
+    scratch: &std::path::Path,
+) -> (ServerGuard, String) {
+    // Per-run scratch root pinned into the server's environment — same
+    // hygiene as scripts/smoke_nodes.sh: `TMP` for any temp staging and
+    // `XDG_DATA_HOME` for the persistent store root (`data_dir_for(workdir)`
+    // resolves to <XDG_DATA_HOME>/opencoder/<digest(workdir)>). Without the
+    // pin every run leaves a DB behind under the real ~/.local/share. The
+    // scratch is owned by the CALLER and shared across every server spawn of
+    // one test, so the restart-resume flow still reads the same store; the
+    // caller's TempDir reclaims it at test end.
+    std::fs::create_dir_all(scratch.join("xdg")).unwrap();
     let mut server = ServerGuard(
         Command::new(BIN)
             .arg("--workdir")
@@ -201,6 +213,8 @@ fn spawn_server(workdir: &std::path::Path) -> (ServerGuard, String) {
                 "--token",
                 TOKEN,
             ])
+            .env("TMP", scratch)
+            .env("XDG_DATA_HOME", scratch.join("xdg"))
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .spawn()
@@ -314,7 +328,10 @@ fn real_server_rejects_running_mode_switches_until_idle() {
     )
     .unwrap();
     std::fs::write(tmp.path().join(".opencoder/ap.json"), r#"{"mode":"off"}"#).unwrap();
-    let (_server, base) = spawn_server(tmp.path());
+    // Shared per-test scratch: TMP + XDG_DATA_HOME of every server spawn in
+    // this test, so the restart below reads the same pinned store.
+    let scratch = tempfile::tempdir().unwrap();
+    let (_server, base) = spawn_server(tmp.path(), scratch.path());
 
     let (status, created) = http(&base, "POST", "/api/sessions", r#"{"agent":"act"}"#);
     assert_eq!(status, 200);
@@ -421,7 +438,11 @@ fn real_server_clear_context_executes_preserved_plan_in_act() {
     )
     .unwrap();
     std::fs::write(tmp.path().join(".opencoder/ap.json"), r#"{"mode":"off"}"#).unwrap();
-    let (server, base) = spawn_server(tmp.path());
+    // Shared per-test scratch: both spawns (initial + restart) pin TMP and
+    // XDG_DATA_HOME here, so the resume reads the same store; the TempDir
+    // reclaims the DB at test end instead of littering ~/.local/share.
+    let scratch = tempfile::tempdir().unwrap();
+    let (server, base) = spawn_server(tmp.path(), scratch.path());
 
     // Prompting an absent id through the production endpoint creates a titled
     // plan session, avoiding the unrelated automatic title-generation call.
@@ -475,7 +496,7 @@ fn real_server_clear_context_executes_preserved_plan_in_act() {
     );
 
     drop(server);
-    let (_resumed_server, resumed_base) = spawn_server(tmp.path());
+    let (_resumed_server, resumed_base) = spawn_server(tmp.path(), scratch.path());
     let resume_prompt = "verify execution after daemon restart";
     let resumed_body = serde_json::json!({
         "prompt": resume_prompt,

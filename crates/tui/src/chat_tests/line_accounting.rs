@@ -143,11 +143,6 @@ fn assert_line_accounting_matches(view: &ChatView) {
             ChatBlock::Subagent { .. } => {
                 expected += 1;
             }
-            ChatBlock::Sidecar { .. } => {
-                // Ephemeral panel: flatten_with emits ZERO lines (exit
-                // purges the block entirely; the Q/A is never a transcript
-                // artifact).
-            }
             ChatBlock::Plan { rendered, .. } => {
                 expected += 1 + rendered.len() + 1;
             }

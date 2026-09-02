@@ -1,6 +1,6 @@
 //! Ported from rippy (MIT) https://github.com/mpecan/rippy
 
-use super::{Classification, Handler, HandlerContext, get_flag_value, is_sole_help_flag};
+use super::{Classification, Handler, HandlerContext, collect_flag_values, is_sole_help_flag};
 use crate::verdict::AllowReason;
 
 pub(crate) static GH_HANDLER: GhHandler = GhHandler;
@@ -98,7 +98,11 @@ fn field_values(args: &[String]) -> impl Iterator<Item = String> + '_ {
 }
 
 fn classify_api(ctx: &HandlerContext) -> Classification {
-    if let Some(method) = get_flag_value(ctx.args, &["-X", "--method"]) {
+    // Every spelling of the method flag (`-X POST`, `--method POST`,
+    // `--method=POST`, glued `-XPOST`) and every occurrence — get_flag_value
+    // saw only the first space-separated form, so `--method=POST` bypassed
+    // the write-method check entirely (#F5).
+    for method in collect_flag_values(ctx.args, &["-X"], &["--method"]) {
         if UNSAFE_METHODS.contains(&method.to_uppercase().as_str()) {
             return Classification::Ask(format!("gh api -X {method}"));
         }
@@ -118,14 +122,14 @@ fn classify_api(ctx: &HandlerContext) -> Classification {
         return Classification::Ask("gh api (field flag implies write)".into());
     }
 
-    // --input reads from a file — try to inspect contents
-    if let Some(path) = get_flag_value(ctx.args, &["--input"]) {
+    // --input reads from a file — try to inspect contents. All spellings and
+    // all occurrences, same as the method flag (#F5).
+    for path in collect_flag_values(ctx.args, &[], &["--input"]) {
         if let Some(content) = ctx.read_file(&path) {
-            return if is_graphql_mutation(&content) {
-                Classification::Ask("gh api --input (GraphQL mutation)".into())
-            } else {
-                Classification::Allow(AllowReason::handler("gh api --input (query)"))
-            };
+            if is_graphql_mutation(&content) {
+                return Classification::Ask("gh api --input (GraphQL mutation)".into());
+            }
+            continue;
         }
         return Classification::Ask("gh api (--input, cannot verify contents)".into());
     }
@@ -159,7 +163,7 @@ fn classify_resource(ctx: &HandlerContext, resource: &str) -> Classification {
 mod tests {
 
     use super::*;
-    use crate::handlers::test_support::{temp_dir, write_file};
+    use crate::handlers::test_support::{cleanup_dir, temp_dir, write_file};
 
     // Pure gh command->decision cases (api GET/POST/DELETE/mutation/missing-input,
     // pr/issue actions, status, help) are covered by
@@ -228,5 +232,71 @@ mod tests {
         };
         let result = GH_HANDLER.classify(&ctx);
         assert!(matches!(result, Classification::Ask(_)));
+    }
+
+    /// #F5: `--method=POST` (and every other spelling of `-X`) must hit the
+    /// write-method check — get_flag_value saw only the space-separated form.
+    #[test]
+    fn every_method_spelling_is_checked() {
+        for argv in [
+            vec!["api", "-X", "POST", "repos/o/r/issues"],
+            vec!["api", "--method", "POST", "repos/o/r/issues"],
+            vec!["api", "--method=POST", "repos/o/r/issues"],
+            vec!["api", "-XPOST", "repos/o/r/issues"],
+            vec!["api", "-X", "get", "-X", "DELETE", "repos/o/r/issues"],
+        ] {
+            let owned: Vec<String> = argv.iter().map(|s| (*s).to_owned()).collect();
+            assert!(
+                matches!(
+                    GH_HANDLER.classify(&HandlerContext::test("gh", &owned)),
+                    Classification::Ask(_)
+                ),
+                "gh {argv:?} must Ask"
+            );
+        }
+        // The read direction stays allowed in the same spellings.
+        for argv in [
+            vec!["api", "-X", "GET", "repos/o/r"],
+            vec!["api", "--method=GET", "repos/o/r"],
+            vec!["api", "-XGET", "repos/o/r"],
+        ] {
+            let owned: Vec<String> = argv.iter().map(|s| (*s).to_owned()).collect();
+            assert!(
+                matches!(
+                    GH_HANDLER.classify(&HandlerContext::test("gh", &owned)),
+                    Classification::Allow(_)
+                ),
+                "gh {argv:?} must Allow"
+            );
+        }
+    }
+
+    /// #F5: `--input=/tmp/m.txt` (the `=` form) must be inspected exactly
+    /// like `--input /tmp/m.txt`.
+    #[test]
+    fn input_file_eq_form_is_inspected() {
+        let dir = temp_dir("fs");
+        write_file(&dir, "mutate.graphql", "mutation { addStar }");
+        for argv in [
+            vec!["api", "--input", "mutate.graphql", "graphql"],
+            vec!["api", "--input=mutate.graphql", "graphql"],
+        ] {
+            let owned: Vec<String> = argv.iter().map(|s| (*s).to_owned()).collect();
+            let ctx = HandlerContext {
+                working_directory: &dir,
+                ..HandlerContext::test("gh", &owned)
+            };
+            assert!(
+                matches!(GH_HANDLER.classify(&ctx), Classification::Ask(_)),
+                "gh {argv:?} must Ask on a mutation document"
+            );
+        }
+        // Unreadable `=`-form input fails closed too.
+        let owned: Vec<String> = vec!["api".into(), "--input=/nope/x.graphql".into(), "repos/o/r".into()];
+        assert!(matches!(
+            GH_HANDLER.classify(&HandlerContext::test("gh", &owned)),
+            Classification::Ask(_)
+        ));
+        cleanup_dir(&dir);
     }
 }

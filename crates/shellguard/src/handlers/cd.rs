@@ -24,7 +24,11 @@ const CD_KNOWN_FLAGS: &[&str] = &["-L", "-P", "-e", "-@"];
 /// destination. Returns `None` (fail closed) if a leading flag is not one of
 /// the known no-op flags, since an unrecognized flag could shift or consume
 /// the destination in ways this handler can't reason about.
-fn resolve_target(args: &[String]) -> Option<&String> {
+///
+/// Shared with the analyzer's cwd re-aim (`extract_cd_target`), so both agree
+/// on where a `cd` lands — `cd -P src && touch f` must re-aim at `src`, not
+/// at a literal `-P` directory (#F9).
+pub(crate) fn resolve_target(args: &[String]) -> Option<&String> {
     let mut i = 0;
     while i < args.len() {
         let arg = &args[i];

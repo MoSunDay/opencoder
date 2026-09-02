@@ -13,14 +13,15 @@ mod scope;
 pub(crate) mod test_support;
 
 pub(crate) use args::{
-    first_positional, get_flag_value, get_flag_values, has_clustered_short_flag, has_flag,
-    has_flag_or_prefixed, has_glued_short_flag, is_sole_help_flag, positional_args,
+    collect_flag_values, first_positional, get_flag_value, get_flag_values, has_clustered_short_flag,
+    has_flag, has_flag_or_prefixed, has_glued_short_flag, is_sole_help_flag, positional_args,
     positional_operands,
 };
 pub(crate) use scope::{
     canonicalize_existing_ancestor, is_within_release_dir, is_within_safe_dir, normalize_path,
     operand_in_release,
 };
+pub(crate) use cd::resolve_target;
 
 mod ansible;
 mod cd;
@@ -248,6 +249,8 @@ fn build_registry() -> HashMap<&'static str, &'static dyn Handler> {
         &unix_misc::MKTEMP_HANDLER,
         &unix_misc::TEE_HANDLER,
         &unix_misc::SORT_HANDLER,
+        &unix_misc::OUTPUT_FLAG_HANDLER,
+        &unix_misc::HYPERFINE_HANDLER,
         &unix_misc::OPEN_HANDLER,
         &unix_misc::YQ_HANDLER,
         &unix_misc::DOS2UNIX_HANDLER,
@@ -294,7 +297,10 @@ mod registry_tests {
     /// unique command names over the same handler statics.
     #[test]
     fn registry_matches_rippy_command_surface() {
-        assert_eq!(handler_count(), 90 + 11);
+        // Sandbox delta count: 11 release/sandbox handlers beyond rippy's 90,
+        // plus shuf/iconv/hyperfine promoted out of SIMPLE_SAFE into their own
+        // handlers (#F4: argument-shell execution / -o file writes).
+        assert_eq!(handler_count(), 90 + 11 + 3);
         for name in ["cd", "git", "kubectl", "sqlite3", "awk", "7zz", "python3.14", "tokf"] {
             assert!(get_handler(name).is_some(), "{name} missing from registry");
         }

@@ -1,6 +1,6 @@
 //! Ported from rippy (MIT) https://github.com/mpecan/rippy
 
-use super::{Classification, Handler, HandlerContext, get_flag_value, is_sole_help_flag};
+use super::{Classification, Handler, HandlerContext, collect_flag_values, is_sole_help_flag};
 use crate::verdict::AllowReason;
 
 pub(crate) static DOCKER_HANDLER: DockerHandler = DockerHandler;
@@ -117,10 +117,14 @@ fn classify_exec(ctx: &HandlerContext) -> Classification {
 }
 
 fn classify_export_save(ctx: &HandlerContext, sub: &str) -> Classification {
-    if let Some(output) = get_flag_value(ctx.args, &["-o", "--output"]) {
+    // Every output-flag spelling and occurrence: `--output=/etc/x.tar` and a
+    // glued `-o/etc/x.tar` returned no value from get_flag_value at all, which
+    // misreported the write as "stdout" and Allowed it (#F5).
+    let outputs = collect_flag_values(ctx.args, &["-o"], &["--output"]);
+    if !outputs.is_empty() {
         return Classification::WithRedirects(
             AllowReason::handler(format!("{} {sub} with output file", ctx.command_name)),
-            vec![output],
+            outputs,
         );
     }
     Classification::Allow(AllowReason::handler(format!(
@@ -208,5 +212,62 @@ mod tests {
         ];
         let result = DOCKER_HANDLER.classify(&HandlerContext::test("docker", &args));
         assert!(matches!(result, Classification::WithRedirects(..)));
+    }
+
+    /// #F5: the `=`-attached and glued spellings returned no value from
+    /// get_flag_value and misreported the write as "stdout" (Allow). Every
+    /// spelling must surface the target.
+    #[test]
+    fn every_output_spelling_surfaces_the_target() {
+        let targets_of = |args: &[&str]| -> Option<Vec<String>> {
+            let owned: Vec<String> = args.iter().map(|s| (*s).to_owned()).collect();
+            match DOCKER_HANDLER.classify(&HandlerContext::test("docker", &owned)) {
+                Classification::WithRedirects(_, refs) => Some(refs),
+                _ => None,
+            }
+        };
+        assert_eq!(
+            targets_of(&["save", "--output=/etc/x.tar", "img"]),
+            Some(vec!["/etc/x.tar".to_owned()])
+        );
+        assert_eq!(
+            targets_of(&["save", "-o/etc/x.tar", "img"]),
+            Some(vec!["/etc/x.tar".to_owned()])
+        );
+        assert_eq!(
+            targets_of(&["save", "-o=/etc/x.tar", "img"]),
+            Some(vec!["/etc/x.tar".to_owned()])
+        );
+        // Both occurrences, so a released first target cannot launder the
+        // second one.
+        assert_eq!(
+            targets_of(&["save", "-o", "/tmp/ok.tar", "-o", "/etc/x.tar", "img"]),
+            Some(vec!["/tmp/ok.tar".to_owned(), "/etc/x.tar".to_owned()])
+        );
+        assert_eq!(
+            targets_of(&["export", "--output=/etc/x.tar", "ctr"]),
+            Some(vec!["/etc/x.tar".to_owned()])
+        );
+    }
+
+    /// #F5 pin: `load`/`import` have no stdout Allow branch at all, so they
+    /// fail closed regardless of flag spelling.
+    #[test]
+    fn docker_load_import_fail_closed_in_every_spelling() {
+        for argv in [
+            vec!["load"],
+            vec!["load", "--input", "/tmp/x.tar"],
+            vec!["load", "--input=/tmp/x.tar"],
+            vec!["import", "-"],
+        ] {
+            let owned: Vec<String> = argv.iter().map(|s| (*s).to_owned()).collect();
+            assert!(
+                matches!(
+                    DOCKER_HANDLER.classify(&HandlerContext::test("docker", &owned)),
+                    Classification::Ask(_)
+                ),
+                "docker {argv:?} must Ask"
+            );
+        }
     }
 }

@@ -39,11 +39,16 @@ pub fn should_compact(session: &SessionState) -> bool {
     reported != 0 && reported >= budget
 }
 
-/// Estimated tokens of the conversation about to be sent (system + messages).
+/// Estimated tokens of the conversation about to be sent (system + messages
+/// + transient skill payload).
 ///
 /// The global `~/.opencoder/AGENTS.md` ships in the system prompt (see
 /// `build_system`), so its tokens count toward the compaction budget exactly
 /// like any other context the model actually consumes.
+///
+/// The armed skill's body rides the payload as a transient message that is
+/// never persisted to `session.messages`, so it is counted explicitly below;
+/// omitting it made compaction fire late on large skills.
 ///
 /// Also used by the runner's hard-limit gate: when compaction has nothing to
 /// summarize, the request may still proceed if this estimate fits under the
@@ -74,6 +79,16 @@ pub(crate) fn estimated_tokens(session: &SessionState) -> u64 {
         .saturating_add(estimate(&system.text()))
         .saturating_add(
             crate::skill_context::tail_reminder(session)
+                .map(|m| estimate(&m.text()))
+                .unwrap_or(0),
+        )
+        .saturating_add(
+            // The armed skill's body ships as a transient per-call message
+            // (never persisted), so `estimate_messages(&session.messages)`
+            // cannot see it — count it here or large armed skills push the
+            // real payload past the budget while the estimate stays flat
+            // (late compaction, hard-limit gate over-admission).
+            crate::skill_context::transient_body_message(session)
                 .map(|m| estimate(&m.text()))
                 .unwrap_or(0),
         );

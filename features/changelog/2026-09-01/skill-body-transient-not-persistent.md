@@ -49,4 +49,21 @@ skill-less"）。集成复现：run1 结束（skill 已清）后，run2 纯文�
 
 - 回归：`cargo test --workspace --no-fail-fast` → 3797 passed / 0 failed（231 suites；node `heartbeat_budget::runner_keeps_beating_after_a_timed_out_beat` 在 66 并发 rustc 抢占下超时失败，隔离复测 5.43s 通过，非本变更回归——node crate 零触碰）；16 个 web target 因并行会话共享 target 目录二进制被清理而未执行，补跑 → 59 passed / 0 failed。合计 3856 passed / 0 failed。
 - clippy（touched crates `--all-targets`）：零告警。
-- clippy（touched crates `--all-targets`）：零告警。
+
+## 后记：token 估算补计瞬时正文（F1 评审闭环，2026-09-02）
+
+正文由「持久化消息」改为「瞬时携带」后，`compaction::estimated_tokens`（以
+`session.messages` 为准）失去了正文计入面：armed 大 skill 时估算最高低估
+~20K est tokens，波及两个消费方——压缩触发阈值（compaction 预算）与 runner
+硬上限放行门（超窗请求可能被放行）。修复：估算在 tail reminder 项之后追加
+`skill_context::transient_body_message` 一项（瞬时正文与持久化消息在预算口径
+下重新等价）；`estimated_tokens` doc 注明该组成。
+
+回归测试 `estimated_tokens_counts_transient_skill_body`
+（`crates/session/src/compaction/tests.rs`）钉住：armed 估算增量 ≥ 瞬时正文
+估算、`估算 ≥ estimate_messages(messages) + 正文`、subagent 门禁不携带正文。
+门禁：`cargo test -p opencoder-session` → 789 passed / 0 failed（修复时点
+快照，lib 427 + 集成全套）；clippy（touched crate `--all-targets`）零告警。
+其后共享树上并行会话的 shellguard 换壳 WIP（19 文件未提交）引入 1 个
+bash_guard compat 失败（`compat_find_sed_xargs_rows`），与本修复无关——本
+修复仅触碰 `crates/session/src/compaction/{mod,tests}.rs`。

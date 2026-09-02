@@ -376,6 +376,9 @@ fn body_with_source_emits_path_annotation_then_body() {
 fn seeded_review_skill_requires_five_question_recap() {
     // Review answers five mandatory questions — answering them well IS the
     // output (no fixed output template) — then rules go-live readiness.
+    // The review is a pure logic review: it checks the change's own logic
+    // plus the logic impact on modules the change could touch, and never
+    // demands test/regression execution.
     let root = tempfile::tempdir().unwrap();
     seed_builtin_skills_in(root.path()).expect("seed");
     let body = std::fs::read_to_string(root.path().join("review/SKILL.md")).unwrap();
@@ -388,7 +391,7 @@ fn seeded_review_skill_requires_five_question_recap() {
         "问一：原始需求目标",
         "问二：做了哪些事情及完成度",
         "问三：卡点",
-        "问四：逐项验证+证据",
+        "问四：逐项逻辑核查",
         "问五：下一步 TODO",
         "## 上线结论",
     ] {
@@ -399,8 +402,12 @@ fn seeded_review_skill_requires_five_question_recap() {
         "review must quantify completion as completed/total with a floored percentage"
     );
     assert!(
-        body.contains("没有证据 = 没有通过") && body.contains("当次实跑"),
-        "review evidence must be per-run fresh evidence"
+        body.contains("逻辑本身") && body.contains("变更潜在影响"),
+        "review must focus on the change's own logic and the logic impact on affected modules"
+    );
+    assert!(
+        !body.contains("当次实跑") && !body.contains("复测"),
+        "review must not demand fresh test/regression runs as evidence"
     );
     assert!(
         body.contains("go-live ready") && body.contains("not ready"),
@@ -626,5 +633,28 @@ fn seeded_workflow_skills_consume_launch_closure_plan() {
     assert!(
         executor.contains("闭环计划") && executor.contains("go-live ready"),
         "executor must drive the closure plan through fresh review"
+    );
+}
+
+#[test]
+fn seeded_submit_skill_consumes_review_logic_recap() {
+    // submit consumes review's per-item logic recap (pure logic review, no
+    // run evidence since the 2026-09-02 logic-only retune); the gate-green
+    // premise is anchored to do-and-done's own verification plus the
+    // rules/02 iteration regression gate, not to review-run evidence.
+    let root = tempfile::tempdir().unwrap();
+    seed_builtin_skills_in(root.path()).expect("seed");
+    let body = std::fs::read_to_string(root.path().join("submit/SKILL.md")).unwrap();
+    assert!(
+        body.contains("逐项逻辑核查与影响面汇总"),
+        "submit must consume review's logic recap, not a run-evidence summary"
+    );
+    assert!(
+        !body.contains("证据汇总"),
+        "submit must not reference the retired review run-evidence summary"
+    );
+    assert!(
+        body.contains("go-live ready") && body.contains("rules/02") && body.contains("迭代回归"),
+        "submit's gate-green premise must cite do-and-done verification + rules/02 iteration gate"
     );
 }

@@ -54,6 +54,10 @@ pub async fn review_pass(
     // No agent switch: the reviewer stays on whatever agent completed the
     // initial task (review is read-only, so act and plan both qualify).
     activate_review_skill(session);
+    // The prompt's "do NOT run tests" directive is instructional, not an
+    // enforced sandbox: the reviewer stays on the task's original agent (act
+    // keeps bash), so the logic-only scope rests on this prompt plus the
+    // review skill contract, not on tool gating.
     let goal = super::extract_goal(session);
     let mut msg = Message::user(new_id(), review_prompt(&goal));
     msg.synthetic = true;

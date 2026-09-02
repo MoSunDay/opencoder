@@ -55,12 +55,17 @@ pub fn verify_user_prompt(goal: &str) -> String {
 
 /// User turn for the one-shot review pass (`autopilot.mode = "review"`).
 /// Anchors the review to the original goal; the review skill body rides in
-/// the system prompt (activated by `activate_review_skill`).
+/// the system prompt (activated by `activate_review_skill`). The pass is a
+/// pure logic review: it judges the change's own logic plus the logic impact
+/// on modules the change could touch — it never runs tests or regressions.
 pub fn review_prompt(goal: &str) -> String {
     format!(
         "Review the work completed toward this goal: {goal}\n\n\
-         Review the current state of the work — correctness, completeness, and \
-         any defects or risks. Do NOT redo or extend the work; produce a \
-         focused review of what was done. Keep it short and actionable."
+         Review the logic of what was done — whether the change's own logic \
+         holds (branches, boundaries, consistency with existing conventions) \
+         and how the change could impact the logic of modules it touches \
+         (callers, shared types, invariants). Do NOT run tests or regression \
+         suites and do NOT redo or extend the work; keep the review static and \
+         logic-focused. Keep it short and actionable."
     )
 }

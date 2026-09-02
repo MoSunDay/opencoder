@@ -60,7 +60,10 @@ pub(crate) enum KeyAction {
     /// `rest` is the swallowed composer draft forwarded as the compound tail;
     /// `draft` is the same raw (untrimmed) text kept for the guard's Esc 回撤
     /// to put back into the composer verbatim.
-    ArmClearConfirm { rest: Option<String>, draft: Option<String> },
+    ArmClearConfirm {
+        rest: Option<String>,
+        draft: Option<String>,
+    },
     /// Enter the plan-text editor (Shift+I in plan mode when idle).
     EnterPlanEdit,
     /// Activate a skill picked from the `$` menu, or clear the active skill

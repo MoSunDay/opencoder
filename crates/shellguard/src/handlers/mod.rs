@@ -23,6 +23,7 @@ pub(crate) use scope::{
 };
 
 mod ansible;
+mod awk;
 mod cd;
 mod cloud;
 mod curl;
@@ -43,10 +44,9 @@ mod perl;
 mod python;
 mod python_tools;
 mod ruby;
-mod shell;
 mod sandbox_release;
 mod sed;
-mod awk;
+mod shell;
 mod system;
 mod task_runners;
 mod unix_archive;
@@ -295,7 +295,16 @@ mod registry_tests {
     #[test]
     fn registry_matches_rippy_command_surface() {
         assert_eq!(handler_count(), 90 + 11);
-        for name in ["cd", "git", "kubectl", "sqlite3", "awk", "7zz", "python3.14", "tokf"] {
+        for name in [
+            "cd",
+            "git",
+            "kubectl",
+            "sqlite3",
+            "awk",
+            "7zz",
+            "python3.14",
+            "tokf",
+        ] {
             assert!(get_handler(name).is_some(), "{name} missing from registry");
         }
         // Sandbox delta: rm/chmod ARE registered (the sandbox release handler
@@ -304,7 +313,10 @@ mod registry_tests {
         for name in ["sudo", "shred"] {
             assert!(get_handler(name).is_none(), "{name} must stay unregistered");
         }
-        for name in ["rm", "mv", "cp", "touch", "ln", "chmod", "chown", "chgrp", "install", "truncate", "rmdir"] {
+        for name in [
+            "rm", "mv", "cp", "touch", "ln", "chmod", "chown", "chgrp", "install", "truncate",
+            "rmdir",
+        ] {
             assert!(
                 get_handler(name).is_some(),
                 "{name} must be registered by the sandbox release handler"

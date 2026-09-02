@@ -1,8 +1,8 @@
 //! Ported from rippy (MIT) https://github.com/mpecan/rippy
 
 use super::{
-    Classification, Handler, HandlerContext, first_positional, get_flag_values,
-    has_clustered_short_flag, is_sole_help_flag,
+    first_positional, get_flag_values, has_clustered_short_flag, is_sole_help_flag, Classification,
+    Handler, HandlerContext,
 };
 use crate::perl_safety::is_perl_source_safe;
 use crate::verdict::AllowReason;
@@ -62,7 +62,6 @@ impl Handler for PerlHandler {
         }
         Classification::Ask("perl script execution".into())
     }
-
 }
 
 #[cfg(test)]
@@ -85,7 +84,10 @@ mod tests {
     fn asks(args: &[&str]) {
         let args: Vec<String> = args.iter().map(|s| (*s).to_owned()).collect();
         assert!(
-            matches!(PERL_HANDLER.classify(&non_release_ctx(&args)), Classification::Ask(_)),
+            matches!(
+                PERL_HANDLER.classify(&non_release_ctx(&args)),
+                Classification::Ask(_)
+            ),
             "expected Ask for {args:?}"
         );
     }
@@ -93,7 +95,10 @@ mod tests {
     fn allows(args: &[&str]) {
         let args: Vec<String> = args.iter().map(|s| (*s).to_owned()).collect();
         assert!(
-            matches!(PERL_HANDLER.classify(&non_release_ctx(&args)), Classification::Allow(_)),
+            matches!(
+                PERL_HANDLER.classify(&non_release_ctx(&args)),
+                Classification::Allow(_)
+            ),
             "expected Allow for {args:?}"
         );
     }

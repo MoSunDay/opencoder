@@ -728,10 +728,9 @@ async fn node_task_events_frames_carry_seq_as_sse_id() {
         let Some(data) = block.lines().find_map(|l| l.strip_prefix("data: ")) else {
             continue; // keep-alive comment blocks carry no data line
         };
-        let payload = serde_json::to_string(
-            &serde_json::from_str::<serde_json::Value>(data.trim()).unwrap(),
-        )
-        .unwrap();
+        let payload =
+            serde_json::to_string(&serde_json::from_str::<serde_json::Value>(data.trim()).unwrap())
+                .unwrap();
         let seq = seq_of_payload
             .get(&payload)
             .unwrap_or_else(|| panic!("streamed payload must be a persisted one: {data}"));

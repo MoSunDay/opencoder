@@ -77,7 +77,8 @@ async fn prompt_clear_context_folds_transcript_and_emits_reset() {
     let mut sess = test_session("clear-cmd");
     let mut say = Message::assistant("a1");
     say.blocks.push(ContentBlock::text("the latest say"));
-    sess.messages.push(say);let _ = process_cmd(
+    sess.messages.push(say);
+    let _ = process_cmd(
         UiCmd::Prompt(crate::clear_confirm::CLEAR_CONTEXT_CMD.into(), Vec::new()),
         &mut sess,
         &evt_tx,
@@ -86,7 +87,10 @@ async fn prompt_clear_context_folds_transcript_and_emits_reset() {
     assert_eq!(sess.messages.len(), 1, "transcript folds to one seed");
     let saw_reset = std::iter::from_fn(|| evt_rx.try_recv().ok())
         .any(|e| matches!(e, UiEvent::Session(SessionEvent::TranscriptReset(_))));
-    assert!(saw_reset, "a TranscriptReset event must reach the UI bridge");
+    assert!(
+        saw_reset,
+        "a TranscriptReset event must reach the UI bridge"
+    );
 }
 
 // F1 + G1 guard: after a `/task` switch, all parent and child runtime

@@ -527,11 +527,11 @@ mod tests {
 
     #[test]
     fn consumed_text_with_plan_token_arms_the_highlight() {
-        assert!(plan_highlight_from_consumed_text("$task-plan plan the work"));
-        // Any hit among multiple tokens arms it.
         assert!(plan_highlight_from_consumed_text(
-            "$review then $task-plan"
+            "$task-plan plan the work"
         ));
+        // Any hit among multiple tokens arms it.
+        assert!(plan_highlight_from_consumed_text("$review then $task-plan"));
         // Token mid-text, no other text at all.
         assert!(plan_highlight_from_consumed_text("$task-plan"));
     }

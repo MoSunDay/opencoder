@@ -8,7 +8,9 @@ use std::time::Duration;
 
 use opencoder_core::{resolve_agent, Config, ContentBlock, Message};
 use opencoder_llm::{LlmEvent, MockChatClient};
-use opencoder_session::{is_clear_context_handoff, is_clear_context_seed, SessionEvent, SessionState};
+use opencoder_session::{
+    is_clear_context_handoff, is_clear_context_seed, SessionEvent, SessionState,
+};
 use opencoder_store::{LibsqlStore, SessionMeta, Store};
 use opencoder_tui::worker::{process_cmd, UiCmd, UiEvent};
 use tokio::sync::mpsc;
@@ -27,7 +29,10 @@ fn assistant_with_text(id: &str, text: &str) -> Message {
     m
 }
 
-async fn session_with_transcript(id: &str, msgs: Vec<Message>) -> (SessionState, Arc<MockChatClient>, Arc<dyn Store>) {
+async fn session_with_transcript(
+    id: &str,
+    msgs: Vec<Message>,
+) -> (SessionState, Arc<MockChatClient>, Arc<dyn Store>) {
     let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
     store
         .create_session(&SessionMeta {
@@ -42,9 +47,7 @@ async fn session_with_transcript(id: &str, msgs: Vec<Message>) -> (SessionState,
     }
     // Any seeded fold falls through to one execution turn; give it a
     // deterministic completion so the turn lands a reply.
-    let mock = Arc::new(
-        MockChatClient::new().with_default(vec![text_done("ack from the model")]),
-    );
+    let mock = Arc::new(MockChatClient::new().with_default(vec![text_done("ack from the model")]));
     let mut sess = SessionState::new(
         id,
         resolve_agent("act").unwrap(),
@@ -116,8 +119,14 @@ async fn newest_assistant_text_is_preserved_even_with_trailing_user_turns() {
         1,
         "a preserved say executes exactly one seeded turn"
     );
-    let meta = store.get_session("provenance-trailing").await.unwrap().unwrap();
-    assert!(is_clear_context_seed(meta.handoff_plan.as_deref().unwrap_or("")));
+    let meta = store
+        .get_session("provenance-trailing")
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(is_clear_context_seed(
+        meta.handoff_plan.as_deref().unwrap_or("")
+    ));
 
     // The seeded execution turn's reply is the only new content.
     assert_eq!(sess.messages.len(), 2, "seed + execution reply");
@@ -157,9 +166,17 @@ async fn empty_assistant_text_degrades_to_blank_sentinel() {
         0,
         "the sentinel path stops without an LLM turn"
     );
-    let meta = store.get_session("provenance-empty").await.unwrap().unwrap();
-    assert!(is_clear_context_handoff(meta.handoff_plan.as_deref().unwrap_or("")));
-    assert!(!is_clear_context_seed(meta.handoff_plan.as_deref().unwrap_or("")));
+    let meta = store
+        .get_session("provenance-empty")
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(is_clear_context_handoff(
+        meta.handoff_plan.as_deref().unwrap_or("")
+    ));
+    assert!(!is_clear_context_seed(
+        meta.handoff_plan.as_deref().unwrap_or("")
+    ));
 }
 
 /// Repeated clears are deterministic and monotone: clear -> seed; clear again
@@ -203,7 +220,11 @@ async fn repeated_clears_are_deterministic_seed_then_sentinel() {
             && second_marker.contains("ack from the model"),
         "the newest say (the execution reply) is re-preserved on every clear, got: {second_marker}"
     );
-    assert_eq!(mock.call_count(), 2, "still exactly one turn per seeded fold");
+    assert_eq!(
+        mock.call_count(),
+        2,
+        "still exactly one turn per seeded fold"
+    );
 }
 
 /// A synthetic marker can never serve as provenance for the NEXT fold: after
@@ -228,9 +249,5 @@ async fn blank_sentinel_never_arms_a_later_seed() {
     // (counter/flag) can flip the outcome.
     let second = clear(&mut sess).await;
     assert!(reset_marker(&second).contains("starting fresh"));
-    assert_eq!(
-        mock.call_count(),
-        0,
-        "repeated blank clears stay turn-free"
-    );
+    assert_eq!(mock.call_count(), 0, "repeated blank clears stay turn-free");
 }

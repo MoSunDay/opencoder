@@ -5,9 +5,10 @@
 //! itself). A latent tool passes the agent allowlist but is still withheld
 //! unless its owning skill's name is in the session's `active_skill_names` set.
 //!
-//! The plan agent is exempt for `question`: its clarification protocol is
-//! part of the agent's base prompt, so the tool is always visible there (see
-//! the visibility predicates in `runner::llm_call` / `tools::estimate_tool_schema_tokens`).
+//! The plan agent is exempt for `question` (legacy plan-mode parity): the
+//! tool is always visible there even without the task-plan skill — whose
+//! text is the tool's single documentation surface (see the visibility
+//! predicates in `runner::llm_call` / `tools::estimate_tool_schema_tokens`).
 
 use std::collections::HashSet;
 
@@ -34,9 +35,9 @@ const QUESTION_SKILLS: &[&str] = &["task-plan"];
 
 /// The full visibility rule for a registry tool under the latent-gating
 /// layer: agent allowlist ∧ latent unlock — with one plan exemption.
-/// The plan agent's clarification protocol lives in its base prompt, so
-/// `question` is ALWAYS visible there (bypasses latent gating, matching the
-/// pre-refactor plan-mode behavior). Every other agent (act, subagents) must
+/// `question` is ALWAYS visible for the plan agent (bypasses latent gating,
+/// matching the pre-refactor plan-mode behavior; its usage guidance lives in
+/// the task-plan skill text, not in any base prompt). Every other agent (act, subagents) must
 /// unlock `question` through the task-plan skill; `ssh_pty` is
 /// skill-gated everywhere. Shared by the runner's tool filter and the token
 /// estimator so the advertised schema array and its cost estimate never drift.

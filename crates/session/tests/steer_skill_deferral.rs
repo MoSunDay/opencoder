@@ -297,12 +297,9 @@ async fn steer_admitted_mid_turn_defers_skill_until_absorption() {
     assert!(
         requests[1].messages.iter().any(|m| {
             m.get("role").and_then(|r| r.as_str()) == Some("user")
-                && m.get("content")
-                    .and_then(|c| c.as_str())
-                    .is_some_and(|c| {
-                        c.starts_with("[skill loaded] ")
-                            && c.contains("skills/review/SKILL.md")
-                    })
+                && m.get("content").and_then(|c| c.as_str()).is_some_and(|c| {
+                    c.starts_with("[skill loaded] ") && c.contains("skills/review/SKILL.md")
+                })
         }),
         "turn 2 receives the skill via the [skill loaded] message naming its source"
     );

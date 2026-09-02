@@ -4,8 +4,8 @@
 //! Ported from rippy (MIT) https://github.com/mpecan/rippy
 
 use super::{
-    Classification, Handler, HandlerContext, has_flag, has_flag_or_prefixed, is_sole_help_flag,
-    positional_args,
+    has_flag, has_flag_or_prefixed, is_sole_help_flag, positional_args, Classification, Handler,
+    HandlerContext,
 };
 use crate::verdict::AllowReason;
 
@@ -29,7 +29,6 @@ impl Handler for WgetHandler {
         }
         Classification::Ask("wget (download)".into())
     }
-
 }
 
 // mktemp
@@ -49,7 +48,6 @@ impl Handler for MktempHandler {
         }
         Classification::Ask("mktemp".into())
     }
-
 }
 
 // tee
@@ -78,7 +76,6 @@ impl Handler for TeeHandler {
             files.iter().map(|f| (*f).to_owned()).collect(),
         )
     }
-
 }
 
 // sort
@@ -109,7 +106,6 @@ impl Handler for SortHandler {
         }
         Classification::Allow(AllowReason::handler("sort"))
     }
-
 }
 
 /// Extract the path from an attached `sort` output flag: `--output=path` or `-oPATH`.
@@ -144,7 +140,6 @@ impl Handler for OpenHandler {
         }
         Classification::Ask("open".into())
     }
-
 }
 
 // yq
@@ -164,7 +159,6 @@ impl Handler for YqHandler {
         }
         Classification::Allow(AllowReason::handler("yq (filter)"))
     }
-
 }
 
 // dos2unix / unix2dos
@@ -207,7 +201,6 @@ impl Handler for Dos2UnixHandler {
         }
         Classification::Ask(format!("{} (in-place conversion)", ctx.command_name))
     }
-
 }
 
 /// Classify `-n`/`--newfile` mode: positional operands must form (in, out)

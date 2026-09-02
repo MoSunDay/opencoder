@@ -201,7 +201,6 @@ pub(crate) fn resolve_word(node: &Node, vars: &dyn VarLookup) -> WordResolution 
     expand::resolve_word_kind(&node.kind, vars)
 }
 
-
 fn literal_if_inert(text: &str, what: &str) -> WordResolution {
     if ast::has_shell_expansion_pattern(text) || has_process_substitution(text) {
         WordResolution::Unresolvable {

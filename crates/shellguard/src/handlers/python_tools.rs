@@ -1,6 +1,6 @@
 //! Ported from rippy (MIT) https://github.com/mpecan/rippy
 
-use super::{Classification, Handler, HandlerContext, has_flag};
+use super::{has_flag, Classification, Handler, HandlerContext};
 use crate::verdict::AllowReason;
 
 // uv
@@ -63,7 +63,6 @@ impl Handler for UvHandler {
 
         Classification::Ask(format!("uv {sub}"))
     }
-
 }
 
 // ruff
@@ -84,7 +83,6 @@ impl Handler for RuffHandler {
         }
         Classification::Allow(AllowReason::handler(format!("ruff {sub}")))
     }
-
 }
 
 // black
@@ -104,7 +102,6 @@ impl Handler for BlackHandler {
         }
         Classification::Ask("black (format)".into())
     }
-
 }
 
 #[cfg(test)]

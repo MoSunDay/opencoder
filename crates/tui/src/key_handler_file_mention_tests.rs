@@ -59,7 +59,8 @@ impl Ctx {
             &mut self.undo_state,
             &mut self.queue_scroll,
             &mut self.file_menu,
-            &self.workdir)
+            &self.workdir,
+        )
     }
 }
 

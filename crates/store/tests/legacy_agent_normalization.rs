@@ -25,7 +25,10 @@ async fn legacy_sandbox_agent_reads_back_as_plan_on_all_read_paths() {
     {
         let conn = store.conn().await.unwrap();
         let updated = conn
-            .execute("UPDATE sessions SET agent = 'sandbox' WHERE id = 'legacy'", ())
+            .execute(
+                "UPDATE sessions SET agent = 'sandbox' WHERE id = 'legacy'",
+                (),
+            )
             .await
             .unwrap();
         assert_eq!(updated, 1, "exactly one row must carry the legacy value");

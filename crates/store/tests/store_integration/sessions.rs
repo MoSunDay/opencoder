@@ -211,4 +211,3 @@ async fn session_handoff_and_skill_fields_round_trip() {
     assert_eq!(m1.agent.as_deref(), Some("act"));
     assert!(m1.summary_seq.is_none());
 }
-

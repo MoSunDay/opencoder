@@ -471,7 +471,15 @@ fn seeded_task_plan_skill_requires_launch_closure_contract() {
         !checklist.contains("持续保鲜与稳定性"),
         "removed freshness section must not re-seed into the checklist"
     );
-    for kept in ["需求与现状审查", "根因与缺口识别", "代码与模块影响", "遗漏复查与交付可读性", "Plan Output Schema"] {
+    // Pinned WITH section numbers: kept sections stay contiguous 1..4
+    // (renumbered after 4-8.1 removal — no gap like the stale `## 9.`).
+    for kept in [
+        "## 1. 需求与现状审查",
+        "## 2. 根因与缺口识别",
+        "## 3. 代码与模块影响",
+        "## 4. 遗漏复查与交付可读性",
+        "## Plan Output Schema",
+    ] {
         assert!(checklist.contains(kept), "checklist missing kept section `{kept}`");
     }
     // Fresh-seed contract: the retired Any Home protocol must NOT be

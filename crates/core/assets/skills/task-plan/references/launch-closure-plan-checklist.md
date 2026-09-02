@@ -29,7 +29,7 @@
 - 严格 consumer 是否排在 canonical producer 之后发布，并有旧 consumer 消费新 wire 的过渡证据；是否避免为旧歧义 wire 增加长期兼容 fallback
 - list/detail/callback/polling 等读写面是否返回相同 identity、状态和错误语义
 
-## 9. 遗漏复查与交付可读性
+## 4. 遗漏复查与交付可读性
 
 - 计划是否按依赖顺序，而不是按想到的顺序排列
 - 每个动作是否说明目的、位置、具体操作、预期结果、验收方式、失败处理和完成判定

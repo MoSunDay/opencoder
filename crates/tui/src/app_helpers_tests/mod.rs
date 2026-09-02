@@ -154,7 +154,8 @@ fn paste_non_file_text_returned_verbatim() {
 /// (without the forced redraw — that moved to Ctrl+F).
 #[test]
 fn ctrl_t_passes_to_mode_handler_ctrl_l_clears_ctrl_f_redraws() {
-    fn run(key: KeyEvent) -> (bool, String, usize, bool, bool) {
+    let (sidecar_tx, _sidecar_rx) = mpsc::channel::<crate::sidecar_ui::SidecarCmd>(8);
+    fn run(key: KeyEvent, sidecar_tx: &mpsc::Sender<crate::sidecar_ui::SidecarCmd>) -> (bool, String, usize, bool, bool) {
         let mut chat = ChatView::default();
         let mut subagent_focus: Option<usize> = None;
         let mut follow = false;
@@ -172,6 +173,7 @@ fn ctrl_t_passes_to_mode_handler_ctrl_l_clears_ctrl_f_redraws() {
             &mut input,
             &mut cursor,
             &mut needs_clear,
+            sidecar_tx,
         );
         (consumed, input, cursor, needs_clear, follow)
     }
@@ -181,7 +183,7 @@ fn ctrl_t_passes_to_mode_handler_ctrl_l_clears_ctrl_f_redraws() {
     let ctrl_f = KeyEvent::new(KeyCode::Char('f'), KeyModifiers::CONTROL);
 
     // Ctrl+T must pass through untouched for handle_key to switch modes.
-    let (t_consumed, t_input, t_cursor, t_clear, t_follow) = run(ctrl_t);
+    let (t_consumed, t_input, t_cursor, t_clear, t_follow) = run(ctrl_t, &sidecar_tx);
     assert!(
         !t_consumed,
         "Ctrl+T must NOT be consumed by pre_key_intercept"
@@ -196,7 +198,7 @@ fn ctrl_t_passes_to_mode_handler_ctrl_l_clears_ctrl_f_redraws() {
 
     // Ctrl+L still collapses thinking / clears the input, but no longer
     // forces the full-screen redraw (that is Ctrl+F's job now).
-    let (l_consumed, l_input, l_cursor, l_clear, l_follow) = run(ctrl_l);
+    let (l_consumed, l_input, l_cursor, l_clear, l_follow) = run(ctrl_l, &sidecar_tx);
     assert!(l_consumed, "Ctrl+L must be consumed by pre_key_intercept");
     assert!(l_input.is_empty(), "Ctrl+L must clear the input");
     assert_eq!(l_cursor, 0, "Ctrl+L must reset the cursor");
@@ -211,7 +213,7 @@ fn ctrl_t_passes_to_mode_handler_ctrl_l_clears_ctrl_f_redraws() {
 
     // Ctrl+F: force redraw only — consumes the key, sets needs_clear, and
     // leaves the input / cursor untouched.
-    let (f_consumed, f_input, f_cursor, f_clear, f_follow) = run(ctrl_f);
+    let (f_consumed, f_input, f_cursor, f_clear, f_follow) = run(ctrl_f, &sidecar_tx);
     assert!(f_consumed, "Ctrl+F must be consumed by pre_key_intercept");
     assert_eq!(
         f_input, "hello world",

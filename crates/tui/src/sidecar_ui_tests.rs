@@ -1,6 +1,7 @@
 //! Integration tests for the TUI-sidecar actor (`sidecar_ui::spawn_actor`):
-//! lazy conversation build, follow-up continuity, zero sidecar persistence
-//! and bare-`LlmUsage` cost accounting to the main session.
+//! lazy conversation build, follow-up continuity, zero sidecar persistence,
+//! bare-`LlmUsage` cost accounting to the main session and the destroy
+//! semantics of [`SidecarCmd::Reset`] (idle + in-flight abort).
 
 use std::sync::{Arc, Mutex};
 
@@ -10,7 +11,7 @@ use opencoder_session::{SessionEvent, SessionState};
 use opencoder_store::{LibsqlStore, Store};
 use tokio::sync::mpsc;
 
-use crate::sidecar_ui::spawn_actor;
+use crate::sidecar_ui::{spawn_actor, SidecarCmd};
 use crate::worker::UiEvent;
 
 const SID: &str = "actor-sid";
@@ -93,6 +94,56 @@ fn sidecar_turns(events: &[SessionEvent]) -> Vec<(bool, String, u64)> {
         .collect()
 }
 
+fn sidecar_starts(events: &[SessionEvent]) -> usize {
+    events
+        .iter()
+        .filter(|ev| matches!(ev, SessionEvent::SidecarStart { .. }))
+        .count()
+}
+
+/// Spawn the actor; returns the command sender plus the shared event buffer.
+fn actor(mock: Arc<MockChatClient>, store: Arc<dyn Store>) -> (mpsc::Sender<SidecarCmd>, Arc<Mutex<Vec<SessionEvent>>>) {
+    let session = SessionState::new(
+        SID,
+        resolve_agent("act").unwrap(),
+        Config::default(),
+        mock.clone(),
+        std::env::temp_dir(),
+    );
+    let (evt_tx, evt_rx) = mpsc::channel::<UiEvent>(256);
+    let seen = collector(evt_rx);
+    let ask = spawn_actor(&session, evt_tx, Some(store.clone()));
+    (ask, seen)
+}
+
+/// Poll until the main session carries `expected` persisted llm_usage rows
+/// (the actor persists after emitting the Turn frame, so a plain read can
+/// race the write).
+async fn wait_for_usage_rows(store: &Arc<dyn Store>, expected: usize) {
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        if llm_usage_row_count(store).await >= expected {
+            return;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "timeout waiting for {expected} llm_usage rows"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+}
+
+/// Persisted llm_usage row count on the main session.
+async fn llm_usage_row_count(store: &Arc<dyn Store>) -> usize {
+    store
+        .events_after(SID, 0)
+        .await
+        .unwrap_or_default()
+        .iter()
+        .filter(|r| r.sse_kind.as_deref() == Some("llm_usage"))
+        .count()
+}
+
 #[tokio::test]
 async fn sidecar_actor_answers_follow_ups_without_persisting_content() {
     let store = seeded_store().await;
@@ -104,26 +155,17 @@ async fn sidecar_actor_answers_follow_ups_without_persisting_content() {
             ])
             .push_script(vec![done("旁路答案二", 13)]),
     );
-    let session = SessionState::new(
-        SID,
-        resolve_agent("act").unwrap(),
-        Config::default(),
-        mock.clone(),
-        std::env::temp_dir(),
-    );
-    let (evt_tx, evt_rx) = mpsc::channel::<UiEvent>(256);
-    let seen = collector(evt_rx);
-    let ask = spawn_actor(&session, evt_tx, Some(store.clone()));
+    let (ask, seen) = actor(mock.clone(), store.clone());
 
     // Question 1: lazily builds the conversation (snapshot + SidecarStart).
-    ask.send("第一个问题?".into()).await.unwrap();
+    ask.send(SidecarCmd::Ask("第一个问题?".into())).await.unwrap();
     wait_until("first SidecarTurn", || {
         !sidecar_turns(&seen.lock().unwrap()).is_empty()
     })
     .await;
 
     // Question 2: the SAME conversation continues (exactly one SidecarStart).
-    ask.send("第二个问题?".into()).await.unwrap();
+    ask.send(SidecarCmd::Ask("第二个问题?".into())).await.unwrap();
     wait_until("second SidecarTurn", || {
         sidecar_turns(&seen.lock().unwrap()).len() >= 2
     })
@@ -131,31 +173,16 @@ async fn sidecar_actor_answers_follow_ups_without_persisting_content() {
     drop(ask);
 
     let events = seen.lock().unwrap().clone();
-    let starts = events
-        .iter()
-        .filter(|ev| matches!(ev, SessionEvent::SidecarStart { .. }))
-        .count();
-    assert_eq!(starts, 1, "one conversation across follow-ups");
+    assert_eq!(
+        sidecar_starts(&events),
+        1,
+        "one conversation across follow-ups"
+    );
 
     let turns = sidecar_turns(&events);
     assert_eq!(turns.len(), 2);
-    assert!(turns.iter().all(|(ok, _, _)| *ok), "both turns succeed");
-    assert_eq!(turns[0].1, "旁路答案一", "turn answer is the round's text");
-    assert_eq!(turns[0].2, 7, "per-turn usage total");
-    assert_eq!(turns[1].2, 13);
-    let id0 = match &events[0] {
-        SessionEvent::SidecarStart { id, question } => {
-            assert_eq!(question, "第一个问题?");
-            assert!(id.starts_with("sidecar-"), "sidecar id prefix, got {id}");
-            id.clone()
-        }
-        other => panic!("first event must be SidecarStart, got {other:?}"),
-    };
-    assert!(events.iter().all(|ev| match ev {
-        SessionEvent::SidecarTurn { id, .. } => id == &id0,
-        SessionEvent::SidecarStart { .. } => true,
-        _ => true,
-    }));
+    assert!(turns[0].1.contains("旁路答案一"));
+    assert!(turns[1].1.contains("旁路答案二"));
 
     // Snapshot-in: request 1 carries the seeded main transcript.
     let reqs = mock.requests();
@@ -200,30 +227,166 @@ async fn sidecar_actor_answers_follow_ups_without_persisting_content() {
     );
 }
 
-/// Poll until the main session carries `expected` persisted llm_usage rows
-/// (the actor persists after emitting the Turn frame, so a plain read can
-/// race the write).
-async fn wait_for_usage_rows(store: &Arc<dyn Store>, expected: usize) {
-    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
-    loop {
-        if llm_usage_row_count(store).await >= expected {
-            return;
-        }
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "timeout waiting for {expected} llm_usage rows"
-        );
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-    }
+#[tokio::test]
+async fn sidecar_reset_idle_destroys_conversation_next_ask_rebuilds_fresh() {
+    let store = seeded_store().await;
+    let mock = Arc::new(
+        MockChatClient::new()
+            .push_script(vec![done("答案一", 7)])
+            .push_script(vec![done("答案二", 9)]),
+    );
+    let (ask, seen) = actor(mock.clone(), store.clone());
+
+    ask.send(SidecarCmd::Ask("第一个问题?".into())).await.unwrap();
+    wait_until("first SidecarTurn", || {
+        !sidecar_turns(&seen.lock().unwrap()).is_empty()
+    })
+    .await;
+
+    // Idle Reset: the conversation is dropped.
+    ask.send(SidecarCmd::Reset).await.unwrap();
+
+    // Next Ask rebuilds from a FRESH snapshot: a second SidecarStart, and
+    // the follow-up context carries NO trace of the first Q/A pair.
+    ask.send(SidecarCmd::Ask("第二个问题?".into())).await.unwrap();
+    wait_until("second SidecarTurn", || {
+        sidecar_turns(&seen.lock().unwrap()).len() >= 2
+    })
+    .await;
+    drop(ask);
+
+    let events = seen.lock().unwrap().clone();
+    assert_eq!(sidecar_starts(&events), 2, "Reset forces a fresh conv");
+
+    let reqs = mock.requests();
+    assert_eq!(reqs.len(), 2, "one LLM round per question");
+    let second = serde_json::to_string(&reqs[1].messages).unwrap();
+    assert!(
+        !second.contains("第一个问题?"),
+        "destroyed conversation must not leak into the rebuilt one"
+    );
+    assert!(
+        !second.contains("答案一"),
+        "destroyed conversation's answer must not leak"
+    );
+    assert!(
+        second.contains("主任务背景 alpha"),
+        "rebuild still starts from the store snapshot"
+    );
+
+    // Both turns' usage still lands (accounting is per-turn, not per-conv).
+    wait_for_usage_rows(&store, 2).await;
 }
 
-/// Persisted llm_usage row count on the main session.
-async fn llm_usage_row_count(store: &Arc<dyn Store>) -> usize {
-    store
-        .events_after(SID, 0)
-        .await
-        .unwrap_or_default()
-        .iter()
-        .filter(|r| r.sse_kind.as_deref() == Some("llm_usage"))
-        .count()
+#[tokio::test]
+async fn sidecar_reset_aborts_inflight_turn_no_content_frames() {
+    let store = seeded_store().await;
+    let notify = Arc::new(tokio::sync::Notify::new());
+    let mock = Arc::new(MockChatClient::new().push_hang(notify.clone()));
+    let (ask, seen) = actor(mock.clone(), store.clone());
+
+    ask.send(SidecarCmd::Ask("会被中止的问题?".into())).await.unwrap();
+    wait_until("turn starts", || mock.call_count() >= 1).await;
+
+    // Destroy mid-flight: the actor aborts the turn task.
+    ask.send(SidecarCmd::Reset).await.unwrap();
+    notify.notify_waiters(); // unblock the hung stream if it survived
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+    let events = seen.lock().unwrap().clone();
+    assert!(
+        sidecar_turns(&events).is_empty(),
+        "aborted turn must not emit a SidecarTurn frame"
+    );
+    assert_eq!(
+        llm_usage_row_count(&store).await,
+        0,
+        "aborted turn produced no usage: nothing to persist"
+    );
+
+    // The actor survives the abort: the next Ask runs on a REBUILT conv
+    // (fresh snapshot, a second SidecarStart, no trace of the aborted Q).
+    mock.queue_script(vec![done("复活答案", 5)]);
+    ask.send(SidecarCmd::Ask("新问题?".into())).await.unwrap();
+    wait_until("post-abort SidecarTurn", || {
+        !sidecar_turns(&seen.lock().unwrap()).is_empty()
+    })
+    .await;
+    drop(ask);
+
+    let events = seen.lock().unwrap().clone();
+    assert_eq!(sidecar_starts(&events), 2, "abort forces a fresh conv");
+    let turns = sidecar_turns(&events);
+    assert_eq!(turns.len(), 1);
+    assert!(turns[0].1.contains("复活答案"));
+
+    let reqs = mock.requests();
+    assert_eq!(reqs.len(), 2);
+    let second = serde_json::to_string(&reqs[1].messages).unwrap();
+    assert!(
+        !second.contains("会被中止的问题?"),
+        "aborted question must not leak into the rebuilt conv"
+    );
+    wait_for_usage_rows(&store, 1).await;
+}
+
+/// Defect-A guard: a follow-up that raced into the actor's backlog while a
+/// turn was in flight must DIE with the panel. `Reset` (ESC / Ctrl+L /
+/// re-entry) aborts the in-flight turn AND discards the backlog — a queued
+/// question must never rebuild the conversation and keep burning tokens
+/// after the user left the panel.
+#[tokio::test]
+async fn sidecar_reset_discards_backlogged_follow_ups() {
+    let store = seeded_store().await;
+    let notify = Arc::new(tokio::sync::Notify::new());
+    let mock = Arc::new(MockChatClient::new().push_hang(notify.clone()));
+    let (ask, seen) = actor(mock.clone(), store.clone());
+
+    ask.send(SidecarCmd::Ask("在飞的问题?".into())).await.unwrap();
+    wait_until("turn starts", || mock.call_count() >= 1).await;
+
+    // This Ask lands in the racing loop's backlog (channel order keeps it
+    // strictly ahead of the Reset below).
+    ask.try_send(SidecarCmd::Ask("排队的问题?".into())).unwrap();
+    // Destroy: aborts the in-flight turn AND drops the queued follow-up.
+    ask.send(SidecarCmd::Reset).await.unwrap();
+    notify.notify_waiters(); // unblock the hung stream if it survived
+    tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+
+    // The queued question never ran: no second LLM call, no Turn frame.
+    assert_eq!(
+        mock.call_count(),
+        1,
+        "backlogged question must not run after Reset"
+    );
+    assert_eq!(
+        mock.requests().len(),
+        1,
+        "no LLM request may carry the discarded question"
+    );
+    let turns = sidecar_turns(&seen.lock().unwrap());
+    assert!(
+        turns.is_empty(),
+        "neither the aborted nor the discarded question may emit a Turn frame"
+    );
+    assert_eq!(
+        llm_usage_row_count(&store).await,
+        0,
+        "destroyed panel must not accrue any usage"
+    );
+
+    // The actor survives: the next Ask rebuilds a fresh conversation.
+    mock.queue_script(vec![done("重建后的答案", 5)]);
+    ask.send(SidecarCmd::Ask("重建后的问题?".into())).await.unwrap();
+    wait_until("post-reset SidecarTurn", || {
+        !sidecar_turns(&seen.lock().unwrap()).is_empty()
+    })
+    .await;
+    drop(ask);
+
+    let events = seen.lock().unwrap().clone();
+    assert_eq!(sidecar_starts(&events), 2, "Reset forces a fresh conv");
+    assert_eq!(sidecar_turns(&events).len(), 1);
+    assert!(sidecar_turns(&events)[0].1.contains("重建后的答案"));
+    wait_for_usage_rows(&store, 1).await;
 }

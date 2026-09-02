@@ -35,3 +35,25 @@ fn lagged_is_surfaced_as_error_not_dropped() {
         "msg should mention the count, got: {msg}"
     );
 }
+
+/// Wire contract with the SPA (`spa/src/sse.js`): the lag frame carries a
+/// numeric `lag` field so the client can distinguish the recoverable
+/// "consumer fell behind → reconnect from the persisted head" case from a
+/// terminal run `error` (which must stay terminal and never reconnect).
+#[test]
+fn lagged_error_carries_numeric_lag_marker() {
+    let out = map_broadcast_result(Err(BroadcastStreamRecvError::Lagged(7))).unwrap();
+    assert_eq!(
+        out.data.get("lag").and_then(|v| v.as_i64()),
+        Some(7),
+        "synthetic lag error must carry {{\"lag\": n}} for the SPA reconnect path"
+    );
+    // A real run error has no `lag` field — that asymmetry IS the contract.
+    let real = SseEvt {
+        kind: "error".into(),
+        data: serde_json::json!({ "error": "boom" }),
+        ts: 1,
+        seq: None,
+    };
+    assert!(real.data.get("lag").is_none());
+}

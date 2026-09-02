@@ -20,9 +20,11 @@ async fn main() -> Result<()> {
     };
     init_logging(cli.verbose, log_sink.as_deref());
 
-    // Seed the built-in skill packs into ~/.opencoder/skills. Incremental:
-    // missing skills are written, existing files are never clobbered, so a
-    // binary upgrade lands new built-in skills on the next startup.
+    // Seed the built-in skill packs into ~/.opencoder/skills. Incremental
+    // with update-on-drift: missing skills are written, drifted files are
+    // backed up to <file>.user.bak and overwritten with the shipped asset,
+    // so a binary upgrade lands new/fixed built-in skills on the next
+    // startup (dep-gated skills stay never-clobbered).
     opencoder_core::seed_builtin_skills();
     opencoder_core::seed_dep_gated_skills();
     opencoder_core::write_install_script();

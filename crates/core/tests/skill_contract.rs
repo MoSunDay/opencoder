@@ -598,11 +598,7 @@ fn seeded_review_skill_requires_no_question_tool() {
     seed_builtin_skills_in(root.path()).expect("seed");
     let body = std::fs::read_to_string(root.path().join("review/SKILL.md")).unwrap();
     assert!(body.contains("name: review"), "frontmatter name missing");
-    for guidance in [
-        "不把提问当侦察手段",
-        "assumptions:",
-        "不调用 `question` 工具",
-    ] {
+    for guidance in ["不把提问当侦察手段", "assumptions:", "不向用户提问"] {
         assert!(body.contains(guidance), "review missing `{guidance}`");
     }
     assert!(
@@ -613,6 +609,85 @@ fn seeded_review_skill_requires_no_question_tool() {
         !body.contains("task-plan"),
         "review must not carry the task-plan token (it would hijack the question unlock)"
     );
+}
+
+/// Built-in skills are SELF-CONTAINED: no skill asset may carry another
+/// built-in skill's name. The plan -> execute -> review -> submit workflow
+/// is orchestrated by the caller / system prompt, never encoded inside the
+/// skills themselves (不要在 skill 里写 skill 衔接). A stray cross-skill
+/// token is also an unlock hazard: `task-plan` inside another body's
+/// Source-less 500-char prefix would silently hijack the latent `question`
+/// unlock (see session-side `tools::latent`).
+#[test]
+fn seeded_builtin_skills_carry_no_cross_skill_references() {
+    let root = tempfile::tempdir().unwrap();
+    seed_builtin_skills_in(root.path()).expect("seed builtins");
+    std::fs::write(root.path().join(DEPS_SENTINEL), "").unwrap();
+    seed_dep_gated_skills_in(root.path()).expect("seed dep-gated");
+
+    let names = [
+        "task-plan",
+        "do-and-done",
+        "repo-local-memory",
+        "repo-local-dreaming",
+        "say-and-replay",
+        "review",
+        "submit",
+        "summary",
+        "ssh-pty",
+        "chrome-headless",
+    ];
+    for skill in names {
+        let mut stack = vec![root.path().join(skill)];
+        while let Some(dir) = stack.pop() {
+            for entry in std::fs::read_dir(&dir).unwrap() {
+                let path = entry.unwrap().path();
+                if path.is_dir() {
+                    stack.push(path);
+                    continue;
+                }
+                if path.extension().and_then(|e| e.to_str()) != Some("md") {
+                    continue;
+                }
+                let body = std::fs::read_to_string(&path).unwrap();
+                for other in names {
+                    if other == skill {
+                        continue;
+                    }
+                    assert!(
+                        !body.contains(other),
+                        "{skill} asset {:?} must not reference `{other}`: skills stay self-contained",
+                        path.strip_prefix(root.path()).unwrap()
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// The `question` tool is documented in exactly ONE place: the task-plan
+/// skill, its sole owner and unlocker. Every other built-in skill must stay
+/// silent about the tool — describing it elsewhere teaches models to call a
+/// tool that remains latent outside plan context.
+#[test]
+fn seeded_question_tool_docs_live_only_in_task_plan() {
+    let root = tempfile::tempdir().unwrap();
+    seed_builtin_skills_in(root.path()).expect("seed");
+    for skill in [
+        "do-and-done",
+        "repo-local-memory",
+        "repo-local-dreaming",
+        "say-and-replay",
+        "review",
+        "submit",
+        "summary",
+    ] {
+        let body = std::fs::read_to_string(root.path().join(skill).join("SKILL.md")).unwrap();
+        assert!(
+            !body.contains("question 工具") && !body.contains("`question`"),
+            "{skill} must not describe the `question` tool — task-plan is its only doc surface"
+        );
+    }
 }
 
 #[test]

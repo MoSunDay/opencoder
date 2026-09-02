@@ -3,7 +3,10 @@
 //!
 //! Ported from rippy (MIT) https://github.com/mpecan/rippy
 
-use super::{Classification, Handler, HandlerContext, get_flag_value, has_flag_or_prefixed, has_glued_short_flag};
+use super::{
+    get_flag_value, has_flag_or_prefixed, has_glued_short_flag, Classification, Handler,
+    HandlerContext,
+};
 use crate::verdict::AllowReason;
 pub(crate) static AWK_HANDLER: AwkHandler = AwkHandler;
 
@@ -40,7 +43,6 @@ impl Handler for AwkHandler {
             ctx.command_name
         )))
     }
-
 }
 
 /// Whether a code-loading flag is present in any spelling: bare (`-f`),

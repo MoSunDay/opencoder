@@ -40,7 +40,6 @@ impl Handler for ShellHandler {
 
         Classification::Ask(format!("{} (interactive)", ctx.command_name))
     }
-
 }
 
 #[cfg(test)]

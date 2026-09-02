@@ -281,7 +281,13 @@ pub async fn clear_others(conn: &Connection, keep_id: &str) -> Result<u64> {
 /// rows on the restored plan agent, so map `'sandbox'` -> `'plan'`. The raw
 /// stored value is never rewritten.
 fn normalize_agent(agent: Option<String>) -> Option<String> {
-    agent.map(|a| if a == "sandbox" { "plan".to_string() } else { a })
+    agent.map(|a| {
+        if a == "sandbox" {
+            "plan".to_string()
+        } else {
+            a
+        }
+    })
 }
 
 fn row_to_meta(r: &libsql::Row) -> Result<SessionMeta> {

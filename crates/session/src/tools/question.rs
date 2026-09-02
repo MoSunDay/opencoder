@@ -1,9 +1,9 @@
 //! `question` — structured clarification channel between the model and a
-//! human user. The model calls the tool whenever an unstated assumption
-//! would shape the plan (repo/rules/test facts are looked up first); an
-//! attached interactive frontend (TUI) opens a dialog, and the
-//! chosen answer is fed back as the tool result *in the same turn*, so the
-//! model continues with the answer in context instead of guessing.
+//! human user. Model-facing usage guidance lives ONLY in the task-plan
+//! skill text (single documentation surface); the tool schema below stays a
+//! terse pointer. An attached interactive frontend (TUI) opens a dialog, and
+//! the chosen answer is fed back as the tool result *in the same turn*, so
+//! the model continues with the answer in context instead of guessing.
 //!
 //! Answer transport is a shared [`QuestionHub`] (`Arc`), NOT a `UiCmd`:
 //! `process_cmd(UiCmd::Prompt)` awaits the whole turn, so an answer queued
@@ -196,9 +196,7 @@ impl Tool for QuestionTool {
     }
 
     fn description(&self) -> &str {
-        "Ask the user a clarifying question. Prefer asking over assuming whenever an unstated \
-         assumption would shape the plan; look up repo/rules/test facts first instead of asking. \
-         You may ask several in one turn (one per call)."
+        "Ask the user a clarifying question. Usage guidance: task-plan skill."
     }
 
     fn parameters(&self) -> Value {
@@ -324,36 +322,36 @@ mod tests {
         assert!(hub.is_attached());
     }
 
-    /// Pins the description semantics (rules/01): the per-turn cap is gone —
-    /// several calls per turn are fine (one question per call) — and the
-    /// behavior is ask-by-default: prefer asking over assuming, with the old
-    /// conservative "Use ONLY when genuinely ambiguous" gate removed.
-    /// Repo/rules/test facts must be looked up, not asked.
+    /// Pins the description contract (rules/01): the schema is a terse
+    /// identity + pointer only. Every usage guideline (ask-by-default,
+    /// lookup before asking, one question per call, several calls per turn,
+    /// skip fallback) lives solely in the task-plan skill text — the tool's
+    /// single documentation surface — and must never creep back here.
     #[test]
-    fn description_allows_several_questions_per_turn() {
+    fn description_defers_guidance_to_task_plan_skill() {
         let tool = QuestionTool::new(QuestionHub::new());
         let d = tool.description();
         let lower = d.to_lowercase();
         assert!(
-            !lower.contains("at most one"),
-            "per-turn cap must be gone: {d}"
+            lower.contains("clarifying question"),
+            "schema must keep the terse identity line: {d}"
         );
         assert!(
-            lower.contains("several in one turn"),
-            "batched wording must be advertised: {d}"
+            lower.contains("task-plan"),
+            "schema must point at the task-plan skill for guidance: {d}"
         );
-        assert!(
-            lower.contains("prefer asking over assuming"),
-            "ask-by-default wording must be advertised: {d}"
-        );
-        assert!(
-            lower.contains("look up"),
-            "lookup-before-ask wording must be advertised: {d}"
-        );
-        assert!(
-            !lower.contains("use only"),
-            "the old conservative gate must be removed: {d}"
-        );
+        for banned in [
+            "prefer asking over assuming",
+            "several in one turn",
+            "look up",
+            "use only",
+            "at most one",
+        ] {
+            assert!(
+                !lower.contains(banned),
+                "usage guidance must stay in the task-plan skill, not the schema ({banned}): {d}"
+            );
+        }
     }
 
     #[tokio::test]

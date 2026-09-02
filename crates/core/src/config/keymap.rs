@@ -179,7 +179,11 @@ mod tests {
             .expect("defaults are an object")
             .len();
         assert_eq!(KEYMAP_INFO.len(), 17);
-        assert_eq!(KEYMAP_INFO.len(), fields, "KEYMAP_INFO must cover every field");
+        assert_eq!(
+            KEYMAP_INFO.len(),
+            fields,
+            "KEYMAP_INFO must cover every field"
+        );
     }
 
     /// Old user configs can still carry the retired Alt+Tab variant. Plain
@@ -217,10 +221,7 @@ mod tests {
     fn keymap_without_switch_mode_uses_ctrl_t_default() {
         let json = serde_json::to_string(&KeymapConfig::default()).unwrap();
         let mut value: serde_json::Value = serde_json::from_str(&json).unwrap();
-        value
-            .as_object_mut()
-            .unwrap()
-            .remove("switch_mode");
+        value.as_object_mut().unwrap().remove("switch_mode");
         let cfg: KeymapConfig = serde_json::from_value(value).expect("older keymap loads");
         assert_eq!(cfg.switch_mode, "ctrl+t");
     }

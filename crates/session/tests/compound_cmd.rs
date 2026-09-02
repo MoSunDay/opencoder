@@ -182,11 +182,7 @@ async fn queue_compound_plan_arg_switches_then_runs() {
     .mark_session_created();
 
     store
-        .admit_input(&mk_input(
-            "compound-queue",
-            Delivery::Queue,
-            "/plan review",
-        ))
+        .admit_input(&mk_input("compound-queue", Delivery::Queue, "/plan review"))
         .await
         .unwrap();
 

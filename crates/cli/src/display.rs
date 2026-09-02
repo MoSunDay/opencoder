@@ -188,6 +188,9 @@ mod tests {
         assert!(transcript_reset_banner(1).contains("1 message folded"));
         assert!(transcript_reset_banner(3).contains("3 messages folded"));
         let banner = transcript_reset_banner(0);
-        assert!(banner.contains("context cleared"), "banner must mark the fold: {banner}");
+        assert!(
+            banner.contains("context cleared"),
+            "banner must mark the fold: {banner}"
+        );
     }
 }

@@ -142,4 +142,3 @@ async fn list_sessions_carries_skill_body_for_picker_tag() {
     let plain = items.iter().find(|s| s.id == "plain").expect("plain row");
     assert_eq!(plain.skill, None, "sessions without a skill must list None");
 }
-

@@ -294,7 +294,10 @@ async fn phantom_question_call_blocked_when_skill_not_active() {
         "the run continues with the error tool result in context"
     );
     assert!(
-        reqs[1].tools.iter().any(|t| t["function"]["name"] == "question"),
+        reqs[1]
+            .tools
+            .iter()
+            .any(|t| t["function"]["name"] == "question"),
         "the plan schema keeps advertising question (plan always sees it)"
     );
 }

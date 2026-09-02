@@ -130,7 +130,16 @@ async fn dispatch_popup(
     )
     .await;
     let chat_markers = marker_texts(chat);
-    (flow, cmd_rx, running, clear_confirm, mode_flash, chat_markers, queue_items, admit_rx)
+    (
+        flow,
+        cmd_rx,
+        running,
+        clear_confirm,
+        mode_flash,
+        chat_markers,
+        queue_items,
+        admit_rx,
+    )
 }
 
 /// Marker lines currently in the chat, as flat strings (assert helper).
@@ -138,7 +147,9 @@ fn marker_texts(chat: &ChatView) -> Vec<String> {
     chat.blocks
         .iter()
         .filter_map(|b| match b {
-            ChatBlock::Marker(lines) => Some(lines.iter().map(|l| l.to_string()).collect::<Vec<_>>()),
+            ChatBlock::Marker(lines) => {
+                Some(lines.iter().map(|l| l.to_string()).collect::<Vec<_>>())
+            }
             _ => None,
         })
         .flatten()
@@ -155,7 +166,8 @@ async fn slash_plan_from_idle_submits_prompt() {
             ..Default::default()
         };
         let mut menu = menu_for("plan");
-        let (flow, mut cmd_rx, running, ..) = dispatch_popup(&mut menu, &mut chat, false, "act").await;
+        let (flow, mut cmd_rx, running, ..) =
+            dispatch_popup(&mut menu, &mut chat, false, "act").await;
         assert!(matches!(flow, LoopFlow::Proceed));
         assert!(running, "the switch turn starts immediately from idle");
         match drain_cmd(&mut cmd_rx) {
@@ -207,7 +219,10 @@ async fn slash_plan_while_running_queues_for_idle_boundary() {
     let req = admit_rx.try_recv().expect("the admit request must fire");
     assert_eq!(req.display, "/plan");
     assert!(
-        !chat.blocks.iter().any(|b| matches!(b, ChatBlock::Marker(lines)
+        !chat
+            .blocks
+            .iter()
+            .any(|b| matches!(b, ChatBlock::Marker(lines)
         if lines.iter().any(|l| l.to_string().contains("busy")))),
         "no busy refusal marker: the submit always lands (queued)"
     );

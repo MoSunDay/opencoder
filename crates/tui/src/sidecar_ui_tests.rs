@@ -102,7 +102,10 @@ fn sidecar_starts(events: &[SessionEvent]) -> usize {
 }
 
 /// Spawn the actor; returns the command sender plus the shared event buffer.
-fn actor(mock: Arc<MockChatClient>, store: Arc<dyn Store>) -> (mpsc::Sender<SidecarCmd>, Arc<Mutex<Vec<SessionEvent>>>) {
+fn actor(
+    mock: Arc<MockChatClient>,
+    store: Arc<dyn Store>,
+) -> (mpsc::Sender<SidecarCmd>, Arc<Mutex<Vec<SessionEvent>>>) {
     let session = SessionState::new(
         SID,
         resolve_agent("act").unwrap(),
@@ -158,14 +161,18 @@ async fn sidecar_actor_answers_follow_ups_without_persisting_content() {
     let (ask, seen) = actor(mock.clone(), store.clone());
 
     // Question 1: lazily builds the conversation (snapshot + SidecarStart).
-    ask.send(SidecarCmd::Ask("第一个问题?".into())).await.unwrap();
+    ask.send(SidecarCmd::Ask("第一个问题?".into()))
+        .await
+        .unwrap();
     wait_until("first SidecarTurn", || {
         !sidecar_turns(&seen.lock().unwrap()).is_empty()
     })
     .await;
 
     // Question 2: the SAME conversation continues (exactly one SidecarStart).
-    ask.send(SidecarCmd::Ask("第二个问题?".into())).await.unwrap();
+    ask.send(SidecarCmd::Ask("第二个问题?".into()))
+        .await
+        .unwrap();
     wait_until("second SidecarTurn", || {
         sidecar_turns(&seen.lock().unwrap()).len() >= 2
     })
@@ -237,7 +244,9 @@ async fn sidecar_reset_idle_destroys_conversation_next_ask_rebuilds_fresh() {
     );
     let (ask, seen) = actor(mock.clone(), store.clone());
 
-    ask.send(SidecarCmd::Ask("第一个问题?".into())).await.unwrap();
+    ask.send(SidecarCmd::Ask("第一个问题?".into()))
+        .await
+        .unwrap();
     wait_until("first SidecarTurn", || {
         !sidecar_turns(&seen.lock().unwrap()).is_empty()
     })
@@ -248,7 +257,9 @@ async fn sidecar_reset_idle_destroys_conversation_next_ask_rebuilds_fresh() {
 
     // Next Ask rebuilds from a FRESH snapshot: a second SidecarStart, and
     // the follow-up context carries NO trace of the first Q/A pair.
-    ask.send(SidecarCmd::Ask("第二个问题?".into())).await.unwrap();
+    ask.send(SidecarCmd::Ask("第二个问题?".into()))
+        .await
+        .unwrap();
     wait_until("second SidecarTurn", || {
         sidecar_turns(&seen.lock().unwrap()).len() >= 2
     })
@@ -285,7 +296,9 @@ async fn sidecar_reset_aborts_inflight_turn_no_content_frames() {
     let mock = Arc::new(MockChatClient::new().push_hang(notify.clone()));
     let (ask, seen) = actor(mock.clone(), store.clone());
 
-    ask.send(SidecarCmd::Ask("会被中止的问题?".into())).await.unwrap();
+    ask.send(SidecarCmd::Ask("会被中止的问题?".into()))
+        .await
+        .unwrap();
     wait_until("turn starts", || mock.call_count() >= 1).await;
 
     // Destroy mid-flight: the actor aborts the turn task.
@@ -342,7 +355,9 @@ async fn sidecar_reset_discards_backlogged_follow_ups() {
     let mock = Arc::new(MockChatClient::new().push_hang(notify.clone()));
     let (ask, seen) = actor(mock.clone(), store.clone());
 
-    ask.send(SidecarCmd::Ask("在飞的问题?".into())).await.unwrap();
+    ask.send(SidecarCmd::Ask("在飞的问题?".into()))
+        .await
+        .unwrap();
     wait_until("turn starts", || mock.call_count() >= 1).await;
 
     // This Ask lands in the racing loop's backlog (channel order keeps it
@@ -377,7 +392,9 @@ async fn sidecar_reset_discards_backlogged_follow_ups() {
 
     // The actor survives: the next Ask rebuilds a fresh conversation.
     mock.queue_script(vec![done("重建后的答案", 5)]);
-    ask.send(SidecarCmd::Ask("重建后的问题?".into())).await.unwrap();
+    ask.send(SidecarCmd::Ask("重建后的问题?".into()))
+        .await
+        .unwrap();
     wait_until("post-reset SidecarTurn", || {
         !sidecar_turns(&seen.lock().unwrap()).is_empty()
     })

@@ -16,7 +16,7 @@ pub mod version;
 
 pub use agent::BUILD_DELEGATION_CLAUSE;
 pub use agent::{
-    builtin_agents, build_delegation_hidden, resolve_agent, strip_build_delegation, tool_preamble,
+    build_delegation_hidden, builtin_agents, resolve_agent, strip_build_delegation, tool_preamble,
     Agent, AgentKind, AgentMode, ToolFilter,
 };
 pub use config::envs::{

@@ -118,4 +118,3 @@ async fn jsonl_import_roundtrip() {
         .unwrap();
     assert_eq!(report2.sessions, 0, "second run skips existing");
 }
-

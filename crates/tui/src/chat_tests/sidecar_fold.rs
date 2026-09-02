@@ -44,7 +44,10 @@ fn sidecar_block(v: &ChatView) -> Option<&ChatBlock> {
 
 /// Mirror the real entry: only an OPEN panel (placeholder + focus) accepts
 /// `SidecarStart` frames — every conversation test opens the panel first.
-fn open_panel() -> (ChatView, tokio::sync::mpsc::Sender<crate::sidecar_ui::SidecarCmd>) {
+fn open_panel() -> (
+    ChatView,
+    tokio::sync::mpsc::Sender<crate::sidecar_ui::SidecarCmd>,
+) {
     let (tx, _rx) = tokio::sync::mpsc::channel::<crate::sidecar_ui::SidecarCmd>(1);
     let mut v = ChatView::default();
     crate::sidecar_ui::enter_panel(&mut v, &tx);
@@ -280,7 +283,9 @@ fn purge_removes_every_sidecar_block_and_the_focus() {
 
     crate::chat::sidecar::purge(&mut v);
     assert!(
-        !v.blocks.iter().any(|b| matches!(b, ChatBlock::Sidecar { .. })),
+        !v.blocks
+            .iter()
+            .any(|b| matches!(b, ChatBlock::Sidecar { .. })),
         "every sidecar block is gone"
     );
     assert!(!v.sidecar_focus, "focus is released");
@@ -322,4 +327,3 @@ fn start_with_closed_panel_is_swallowed() {
     );
     assert!(!v.sidecar_focus, "and must not steal the focus");
 }
-

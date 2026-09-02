@@ -1,6 +1,6 @@
 //! Ported from rippy (MIT) https://github.com/mpecan/rippy
 
-use super::{Classification, Handler, HandlerContext, has_flag};
+use super::{has_flag, Classification, Handler, HandlerContext};
 use crate::ast;
 use crate::verdict::AllowReason;
 
@@ -52,7 +52,6 @@ impl Handler for EnvHandler {
         // Delegate inner command
         Classification::Recurse(positionals.join(" "))
     }
-
 }
 
 /// Extract the payload of a GNU `env` split-string option (`-S`, `-SSTR`,
@@ -126,7 +125,6 @@ impl Handler for XargsHandler {
         }
         Classification::Recurse(inner.join(" "))
     }
-
 }
 
 /// Skip xargs flags (including flags that take value arguments) to find the inner command.

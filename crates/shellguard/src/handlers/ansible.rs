@@ -1,6 +1,9 @@
 //! Ported from rippy (MIT) https://github.com/mpecan/rippy
 
-use super::{Classification, Handler, HandlerContext, get_flag_value, has_flag, has_flag_or_prefixed, has_glued_short_flag};
+use super::{
+    get_flag_value, has_flag, has_flag_or_prefixed, has_glued_short_flag, Classification, Handler,
+    HandlerContext,
+};
 use crate::verdict::AllowReason;
 
 /// Extensions that indicate a static inventory file rather than a dynamic
@@ -52,7 +55,6 @@ impl Handler for AnsibleHandler {
             _ => Classification::Ask(format!("{} (unknown ansible command)", ctx.command_name)),
         }
     }
-
 }
 
 fn classify_lint(ctx: &HandlerContext) -> Classification {

@@ -6,7 +6,7 @@ description: Stage only meaningful files for commit (explicitly exclude cache/bu
 # submit —— 暂存 + changelog + 提交契约
 
 ## 角色
-提交契约。在 `review` 给出 `go-live ready` 之后介入，把已验证的变更**干净地**提交：只暂存有意义的文件、生成 changelog、按仓库风格 commit。
+提交契约。在评审给出 `go-live ready` 之后介入，把已验证的变更**干净地**提交：只暂存有意义的文件、生成 changelog、按仓库风格 commit。
 
 > **不可逆边界**：本 skill 只做 `git add`（精准）+ `git commit`。**不 push、不 amend、不 force、不动 remote**。需要 push 时单独停下上报人工。
 
@@ -16,7 +16,7 @@ description: Stage only meaningful files for commit (explicitly exclude cache/bu
 - `cargo clippy --workspace --all-targets -- -D warnings` → 零警告。
 - `cargo build --workspace` → 编译干净。
 
-任一不过 → **不提交**，回 `do-and-done` 修复。
+任一不过 → **不提交**，回实现循环修复。
 
 ## 暂存策略（只暂存有意义的文件）
 
@@ -84,7 +84,7 @@ Commit: (working-tree, pre-initial-commit)
 - [既有相关 changelog](../<date>/<file>.md)
 ```
 - 同时把 changelog 文件加入本次提交（与代码同 commit）。
-- 触及区 memory（`agents/*`、`features/*`）按 `repo-local-memory` 做 repair-on-touch，一并暂存。
+- 触及区 memory（`agents/*`、`features/*`）按记忆维护规范做 repair-on-touch，一并暂存。
 
 ## commit message 规范（conventional + 仓库风格）
 跟随仓库 `git log` 既有风格（参考最近提交）：
@@ -114,7 +114,8 @@ git commit -m "<type>(<scope>): <摘要>"
 - **绝不**自行 `git push` / `--amend` / `--force` / 改 remote / 删分支。需要 push 时**停下上报**：列清待批操作、当前 commit hash、未决项，交还人工。
 - 提交本身（`git commit`）在本 skill 范围内授权执行；push 及以上不可逆操作不在内。
 
-## 与其它 skill 的衔接
-- 仅在 `review` 给出 `go-live ready` 后执行（gate 已绿——由 do-and-done 的实现验证与 rules/02 迭代回归 gate 保证；review 只产出逻辑评审，不再产出实跑证据）。
-- 消费 `task-plan` 的闭环计划和 `review` 的逐项逻辑核查与影响面汇总，作为 changelog/commit message 的素材来源。
+## 与评审/实现循环的衔接
+
+- 仅在评审给出 `go-live ready` 后执行（gate 已绿——由实现循环自身的实现验证与 `rules/02` 迭代回归 gate 保证；评审只产出逻辑评审，不再产出实跑运行证据）。
+- 消费闭环计划与评审的逐项逻辑核查与影响面汇总，作为 changelog/commit message 的素材来源。
 - 提交完成 → 输出 commit hash + 变更摘要 + （如需 push）待批上报。

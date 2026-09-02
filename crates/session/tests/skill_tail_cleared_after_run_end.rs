@@ -23,7 +23,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use opencoder_core::{Config, ToolArc};
-use opencoder_llm::{ChatStream, ChatRequest, CompletedToolCall, LlmEvent, MockChatClient, Usage};
+use opencoder_llm::{ChatRequest, ChatStream, CompletedToolCall, LlmEvent, MockChatClient, Usage};
 use opencoder_session::runner::run_with_registry;
 use opencoder_session::{resume, run, SessionEvent, SessionState};
 use opencoder_store::{Delivery, LibsqlStore, SessionInput, SessionMeta, SessionPatch, Store};
@@ -134,7 +134,14 @@ async fn preset_skill_session(
         .unwrap();
 
     let dir = tempfile::tempdir().unwrap();
-    let s = resume(store.clone(), id, config(), client, dir.path().to_path_buf()).await?;
+    let s = resume(
+        store.clone(),
+        id,
+        config(),
+        client,
+        dir.path().to_path_buf(),
+    )
+    .await?;
     assert_eq!(
         s.skill_prompt_cloned().as_deref(),
         Some(SKILL_BODY),
@@ -173,7 +180,8 @@ async fn preset_skill_tail_cleared_after_done_run() {
             .push_script(vec![done_turn("plain work")]),
     );
     let client: Arc<dyn ChatStream> = mock.clone();
-    let (mut s, store, _dir) = preset_skill_session("tail-clear-done", client).await
+    let (mut s, store, _dir) = preset_skill_session("tail-clear-done", client)
+        .await
         .unwrap_or_else(|e| panic!("fixture: {e}"));
 
     // Run 1 on the pre-set skill, driven to Done.
@@ -191,9 +199,7 @@ async fn preset_skill_tail_cleared_after_done_run() {
     assert_cleared(&s, &store, "tail-clear-done", "after run 1 (Done)").await;
 
     // Run 2: a plain prompt — its payload must carry NO tail anywhere.
-    run(&mut s, "plain follow up".into(), |_| {})
-        .await
-        .unwrap();
+    run(&mut s, "plain follow up".into(), |_| {}).await.unwrap();
     let reqs = mock.requests();
     assert_eq!(reqs.len(), 2, "two runs -> exactly two LLM calls");
     // 断言三: run 2's payload carries NEITHER the "[active skill]" tail NOR
@@ -224,7 +230,8 @@ async fn preset_skill_tail_cleared_after_tool_call_run() {
             .push_script(vec![done_turn("plain work")]),
     );
     let client: Arc<dyn ChatStream> = mock.clone();
-    let (mut s, store, _dir) = preset_skill_session("tail-clear-tools", client).await
+    let (mut s, store, _dir) = preset_skill_session("tail-clear-tools", client)
+        .await
         .unwrap_or_else(|e| panic!("fixture: {e}"));
 
     // Run 1: two LLM rounds (tool call, then Done).
@@ -247,9 +254,7 @@ async fn preset_skill_tail_cleared_after_tool_call_run() {
 
     assert_cleared(&s, &store, "tail-clear-tools", "after run 1 (tool run)").await;
 
-    run(&mut s, "plain follow up".into(), |_| {})
-        .await
-        .unwrap();
+    run(&mut s, "plain follow up".into(), |_| {}).await.unwrap();
     let reqs = mock.requests();
     assert_eq!(reqs.len(), 3, "run 2 adds exactly one request");
     assert!(
@@ -307,27 +312,25 @@ async fn steer_clear_context_mid_run_leaves_next_run_tail_free() {
             .push_script(vec![done_turn("plain follow-up")]),
     );
     let client: Arc<dyn ChatStream> = mock.clone();
-    let (mut s, store, _dir) = preset_skill_session("tail-clear-steer", client).await
+    let (mut s, store, _dir) = preset_skill_session("tail-clear-steer", client)
+        .await
         .unwrap_or_else(|e| panic!("fixture: {e}"));
 
     let (gate_tx, gate_rx) = tokio::sync::watch::channel(false);
     let mut registry: HashMap<String, ToolArc> = HashMap::new();
-    registry.insert("gate".into(), Arc::new(GateTool("gate", gate_rx)) as ToolArc);
+    registry.insert(
+        "gate".into(),
+        Arc::new(GateTool("gate", gate_rx)) as ToolArc,
+    );
 
     let started = Arc::new(AtomicBool::new(false));
     let started_flag = started.clone();
     let run_task = tokio::spawn(async move {
-        let res = run_with_registry(
-            &mut s,
-            "kickoff".into(),
-            Vec::new(),
-            &registry,
-            move |ev| {
-                if matches!(ev, SessionEvent::ToolStart { .. }) {
-                    started_flag.store(true, Ordering::SeqCst);
-                }
-            },
-        )
+        let res = run_with_registry(&mut s, "kickoff".into(), Vec::new(), &registry, move |ev| {
+            if matches!(ev, SessionEvent::ToolStart { .. }) {
+                started_flag.store(true, Ordering::SeqCst);
+            }
+        })
         .await;
         (s, res)
     });
@@ -372,9 +375,7 @@ async fn steer_clear_context_mid_run_leaves_next_run_tail_free() {
 
     // Second run: no tail in its payload.
     let mut s = s;
-    run(&mut s, "plain follow up".into(), |_| {})
-        .await
-        .unwrap();
+    run(&mut s, "plain follow up".into(), |_| {}).await.unwrap();
     let reqs = mock.requests();
     let last = reqs.last().unwrap();
     assert!(

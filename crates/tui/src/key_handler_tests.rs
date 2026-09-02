@@ -69,7 +69,8 @@ fn handle_key_disabled_blocks_char() {
         &mut undo_state,
         &mut queue_scroll,
         &mut file_menu,
-        workdir);
+        workdir,
+    );
     assert!(matches!(action, KeyAction::None));
     assert!(input.is_empty());
 }
@@ -110,7 +111,8 @@ fn handle_key_disabled_blocks_enter() {
         &mut undo_state,
         &mut queue_scroll,
         &mut file_menu,
-        workdir);
+        workdir,
+    );
     assert!(matches!(action, KeyAction::None));
 }
 
@@ -150,7 +152,8 @@ fn handle_key_disabled_allows_scroll() {
         &mut undo_state,
         &mut queue_scroll,
         &mut file_menu,
-        workdir);
+        workdir,
+    );
     assert!(matches!(action, KeyAction::None));
     assert_eq!(scroll, 30);
     assert!(!follow);
@@ -192,7 +195,8 @@ fn handle_key_disabled_allows_quit() {
         &mut undo_state,
         &mut queue_scroll,
         &mut file_menu,
-        workdir);
+        workdir,
+    );
     assert!(matches!(action, KeyAction::Quit));
 }
 
@@ -232,7 +236,8 @@ fn ctrl_v_returns_clip() {
         &mut undo_state,
         &mut queue_scroll,
         &mut file_menu,
-        workdir);
+        workdir,
+    );
     assert!(matches!(action, KeyAction::Clip));
 }
 
@@ -278,7 +283,8 @@ fn undo_restores_previous_text() {
             &mut undo_state,
             &mut queue_scroll,
             &mut file_menu,
-            workdir);
+            workdir,
+        );
     }
     assert_eq!(input, "hi");
 
@@ -304,7 +310,8 @@ fn undo_restores_previous_text() {
         &mut undo_state,
         &mut queue_scroll,
         &mut file_menu,
-        workdir);
+        workdir,
+    );
     assert_eq!(input, "");
 
     // Ctrl+Y redoes
@@ -329,7 +336,8 @@ fn undo_restores_previous_text() {
         &mut undo_state,
         &mut queue_scroll,
         &mut file_menu,
-        workdir);
+        workdir,
+    );
     assert_eq!(input, "hi");
 }
 
@@ -370,7 +378,8 @@ fn undo_after_backspace() {
         &mut undo_state,
         &mut queue_scroll,
         &mut file_menu,
-        workdir);
+        workdir,
+    );
     assert_eq!(input, "hell");
 
     // Undo
@@ -395,7 +404,8 @@ fn undo_after_backspace() {
         &mut undo_state,
         &mut queue_scroll,
         &mut file_menu,
-        workdir);
+        workdir,
+    );
     assert_eq!(input, "hello");
 }
 
@@ -440,7 +450,8 @@ fn up_arrow_browses_history_when_single_row() {
         &mut undo_state,
         &mut queue_scroll,
         &mut file_menu,
-        workdir);
+        workdir,
+    );
     assert_eq!(input, "older");
     assert_eq!(hist_idx, Some(0));
 }
@@ -485,7 +496,8 @@ fn up_arrow_moves_cursor_when_multi_row() {
         &mut undo_state,
         &mut queue_scroll,
         &mut file_menu,
-        workdir);
+        workdir,
+    );
     // Cursor moved up, input unchanged, history not browsed.
     assert!(cursor < cursor_before, "cursor should move up");
     assert_eq!(input, input_text);
@@ -531,7 +543,8 @@ fn handle_key_alt_char_is_dropped_not_inserted() {
         &mut undo_state,
         &mut queue_scroll,
         &mut file_menu,
-        workdir);
+        workdir,
+    );
     assert!(matches!(action, KeyAction::None));
     assert!(input.is_empty());
     assert_eq!(cursor, 0);
@@ -575,7 +588,8 @@ fn handle_key_alt_f_still_moves_word() {
         &mut undo_state,
         &mut queue_scroll,
         &mut file_menu,
-        workdir);
+        workdir,
+    );
     assert!(matches!(action, KeyAction::None));
     assert_eq!(input, "hello");
     assert_eq!(
@@ -620,7 +634,8 @@ fn bang_prefix_returns_bash_action() {
         &mut undo_state,
         &mut queue_scroll,
         &mut file_menu,
-        workdir);
+        workdir,
+    );
     assert!(matches!(action, KeyAction::Bash(ref cmd) if cmd == "ls"));
     assert!(
         input.is_empty(),
@@ -665,7 +680,8 @@ fn bang_prefix_with_spaces_returns_bash() {
         &mut undo_state,
         &mut queue_scroll,
         &mut file_menu,
-        workdir);
+        workdir,
+    );
     assert!(matches!(action, KeyAction::Bash(ref cmd) if cmd == "echo hi"));
     assert!(
         input.is_empty(),
@@ -709,7 +725,8 @@ fn bare_bang_is_noop() {
         &mut undo_state,
         &mut queue_scroll,
         &mut file_menu,
-        workdir);
+        workdir,
+    );
     assert!(matches!(action, KeyAction::None));
     assert!(input.is_empty(), "input must be cleared even on bare bang");
 }
@@ -751,7 +768,8 @@ fn bang_prefix_works_while_running() {
         &mut undo_state,
         &mut queue_scroll,
         &mut file_menu,
-        workdir);
+        workdir,
+    );
     assert!(matches!(action, KeyAction::Bash(ref cmd) if cmd == "ls"));
     assert!(
         input.is_empty(),

@@ -7,8 +7,8 @@
 //! `pub(crate)` items are re-exported from `app_loop.rs`, so the call sites
 //! in `dispatch_command` stay thin.
 
-use std::path::Path;
 use crossterm::event::KeyEvent;
+use std::path::Path;
 
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
@@ -328,7 +328,10 @@ pub(crate) async fn dispatch_slash_action(
             // conversation, so the next question sees a fresh snapshot.
             crate::sidecar_ui::enter_panel(chat, sidecar_ask);
             *follow = true;
-            *mode_flash = Some((crate::sidecar_ui::SIDECAR_ENTER_FLASH.to_string(), anim_tick));
+            *mode_flash = Some((
+                crate::sidecar_ui::SIDECAR_ENTER_FLASH.to_string(),
+                anim_tick,
+            ));
         }
     }
     LoopFlow::Proceed
@@ -420,7 +423,12 @@ pub(crate) async fn fire_clear_confirm(
     let text = crate::clear_confirm::command_text(&cc);
     if *running {
         crate::queue_admitter::handle_queue(
-            &text, admit_tx, admit_st, queue_items, pending_images, session_id,
+            &text,
+            admit_tx,
+            admit_st,
+            queue_items,
+            pending_images,
+            session_id,
         );
         crate::app_helpers::push_history(history, hist_idx, &text);
         return LoopFlow::Proceed;
@@ -489,9 +497,23 @@ pub(crate) async fn handle_confirm_key(
                 crate::undo::reset(undo_state, input, 0);
                 return matches!(
                     fire_clear_confirm(
-                        cc, cmd_tx, cancel, running, follow, chat, sys_tokens, mode_flash,
-                        anim_tick, workdir, admit_tx, admit_st, queue_items, pending_images,
-                        session_id, history, hist_idx,
+                        cc,
+                        cmd_tx,
+                        cancel,
+                        running,
+                        follow,
+                        chat,
+                        sys_tokens,
+                        mode_flash,
+                        anim_tick,
+                        workdir,
+                        admit_tx,
+                        admit_st,
+                        queue_items,
+                        pending_images,
+                        session_id,
+                        history,
+                        hist_idx,
                     )
                     .await,
                     LoopFlow::Quit
@@ -536,9 +558,23 @@ pub(crate) async fn confirm_tick(
     if let Some(cc) = crate::clear_confirm::tick(clear_confirm, mode_flash, anim_tick) {
         return matches!(
             fire_clear_confirm(
-                cc, cmd_tx, cancel, running, follow, chat, sys_tokens, mode_flash,
-                anim_tick, workdir, admit_tx, admit_st, queue_items, pending_images,
-                session_id, history, hist_idx,
+                cc,
+                cmd_tx,
+                cancel,
+                running,
+                follow,
+                chat,
+                sys_tokens,
+                mode_flash,
+                anim_tick,
+                workdir,
+                admit_tx,
+                admit_st,
+                queue_items,
+                pending_images,
+                session_id,
+                history,
+                hist_idx,
             )
             .await,
             LoopFlow::Quit

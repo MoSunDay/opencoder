@@ -368,8 +368,7 @@ pub(crate) fn sys_tokens_for(agent_name: &str, workdir: &Path, skill: Option<&st
         Some(a) => a,
         None => return 0,
     };
-    let text =
-        opencoder_session::prompt::build_system(&agent, workdir, None, skill).text();
+    let text = opencoder_session::prompt::build_system(&agent, workdir, None, skill).text();
     let registry = opencoder_session::tools::registry();
     let tool_tokens =
         opencoder_session::tools::estimate_tool_schema_tokens(&agent, skill, &registry);

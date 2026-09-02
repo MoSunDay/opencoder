@@ -13,7 +13,10 @@ pub(crate) fn temp_dir(tag: &str) -> PathBuf {
     static SEQ: AtomicUsize = AtomicUsize::new(0);
     let n = SEQ.fetch_add(1, Ordering::Relaxed);
     let dir = std::env::temp_dir().join(format!("shellguard-{}-{n}-{tag}", std::process::id()));
-    assert!(std::fs::create_dir_all(&dir).is_ok(), "failed to create {dir:?}");
+    assert!(
+        std::fs::create_dir_all(&dir).is_ok(),
+        "failed to create {dir:?}"
+    );
     dir
 }
 

@@ -408,23 +408,33 @@ async fn steered_clear_context_on_act_session_keeps_agent() {
             .iter()
             .any(|r| r.sse_kind.as_deref() == Some("agent_switched")),
         "clear-context must keep the active agent (no agent_switched): {:?}",
-        events.iter().filter_map(|r| r.sse_kind.clone()).collect::<Vec<_>>()
+        events
+            .iter()
+            .filter_map(|r| r.sse_kind.clone())
+            .collect::<Vec<_>>()
     );
     assert!(
         !events
             .iter()
             .any(|r| r.sse_kind.as_deref() == Some("plan_handoff")),
         "the legacy plan_handoff frame is gone; got {:?}",
-        events.iter().filter_map(|r| r.sse_kind.clone()).collect::<Vec<_>>()
+        events
+            .iter()
+            .filter_map(|r| r.sse_kind.clone())
+            .collect::<Vec<_>>()
     );
 
     // No assistant reply existed, so the boundary persisted the blank
     // fresh-start sentinel (`handoff_plan` = clear-context marker).
     let meta = store.get_session(sid).await.unwrap().unwrap();
     assert_eq!(meta.agent.as_deref(), Some("act"), "agent unchanged");
-    assert!(opencoder_session::control_cmd::is_clear_context_handoff(
-        meta.handoff_plan.as_deref().unwrap_or("")
-    ), "blank clear must persist the sentinel, got {:?}", meta.handoff_plan);
+    assert!(
+        opencoder_session::control_cmd::is_clear_context_handoff(
+            meta.handoff_plan.as_deref().unwrap_or("")
+        ),
+        "blank clear must persist the sentinel, got {:?}",
+        meta.handoff_plan
+    );
 
     // Sentinel path stops without another LLM call; the command never
     // reaches the transcript.
@@ -514,7 +524,9 @@ async fn agent_switch_accepts_plan_and_rejects_legacy_sandbox() {
         StatusCode::BAD_REQUEST,
         "sandbox must not be switchable"
     );
-    let bytes = axum::body::to_bytes(legacy.into_body(), 4096).await.unwrap();
+    let bytes = axum::body::to_bytes(legacy.into_body(), 4096)
+        .await
+        .unwrap();
     let err: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(err["ok"], false);
     assert!(
@@ -529,10 +541,7 @@ async fn agent_switch_accepts_plan_and_rejects_legacy_sandbox() {
     let meta = store.get_session(sid).await.unwrap().unwrap();
     assert_eq!(meta.agent.as_deref(), Some("plan"));
     let handle = state.handles.lock().await.get(sid).cloned().unwrap();
-    assert_eq!(
-        handle.overrides.lock().await.agent.as_deref(),
-        Some("plan")
-    );
+    assert_eq!(handle.overrides.lock().await.agent.as_deref(), Some("plan"));
 }
 
 /// Regression (wire contract): the events a plan session emits include an
@@ -576,7 +585,10 @@ async fn plan_session_emits_agent_switched_with_plan_value() {
     assert!(
         !switched.is_empty(),
         "an agent_switched frame must be persisted: {:?}",
-        events.iter().map(|r| r.sse_kind.clone()).collect::<Vec<_>>()
+        events
+            .iter()
+            .map(|r| r.sse_kind.clone())
+            .collect::<Vec<_>>()
     );
     for record in &switched {
         assert_eq!(
@@ -665,8 +677,14 @@ async fn queued_clear_context_in_sandbox_session_converges_to_act() {
         .iter()
         .position(|r| r.sse_kind.as_deref() == Some("agent_switched"))
         .expect("agent_switched must persist for the plan convergence");
-    assert!(switch_idx > reset_idx, "agent_switched must follow transcript_reset, got {:?}",
-        events.iter().map(|r| r.sse_kind.clone()).collect::<Vec<_>>());
+    assert!(
+        switch_idx > reset_idx,
+        "agent_switched must follow transcript_reset, got {:?}",
+        events
+            .iter()
+            .map(|r| r.sse_kind.clone())
+            .collect::<Vec<_>>()
+    );
 
     // The converged agent persists with the boundary.
     let meta = store.get_session(sid).await.unwrap().unwrap();
@@ -675,11 +693,13 @@ async fn queued_clear_context_in_sandbox_session_converges_to_act() {
         Some("act"),
         "plan clear converges to act"
     );
-    assert!(opencoder_session::control_cmd::is_clear_context_handoff(
-        meta.handoff_plan.as_deref().unwrap_or("")
-    ),
-    "the clear (no assistant reply) must persist the sentinel, got {:?}",
-    meta.handoff_plan);
+    assert!(
+        opencoder_session::control_cmd::is_clear_context_handoff(
+            meta.handoff_plan.as_deref().unwrap_or("")
+        ),
+        "the clear (no assistant reply) must persist the sentinel, got {:?}",
+        meta.handoff_plan
+    );
 
     // Sentinel path stops without another LLM call; the command never
     // reaches the transcript.

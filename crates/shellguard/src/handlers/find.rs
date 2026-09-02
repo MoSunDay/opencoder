@@ -7,7 +7,7 @@
 //! (`/dev/null`, `/tmp`) with the symlink re-check. `-ok`/`-okdir` stay Ask and
 //! `-exec` stays Recurse, exactly as in rippy.
 
-use super::{Classification, Handler, HandlerContext, has_flag, operand_in_release};
+use super::{has_flag, operand_in_release, Classification, Handler, HandlerContext};
 use crate::verdict::AllowReason;
 
 pub(crate) static FIND_HANDLER: FindHandler = FindHandler;

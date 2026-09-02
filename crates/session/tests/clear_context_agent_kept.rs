@@ -67,11 +67,7 @@ fn assistant_say(id: &str, text: &str) -> Message {
     m
 }
 
-fn plan_session(
-    id: &str,
-    mock: Arc<MockChatClient>,
-    store: &Arc<dyn Store>,
-) -> SessionState {
+fn plan_session(id: &str, mock: Arc<MockChatClient>, store: &Arc<dyn Store>) -> SessionState {
     let dir = tempfile::tempdir().unwrap();
     SessionState::new(
         id,
@@ -112,7 +108,10 @@ fn assert_reset_then_act(evs: &[SessionEvent]) {
 async fn plan_idle_bare_clear_hands_off_and_persists() {
     let store = mem_store().await;
     seed(&store, "keep-clear", "plan").await;
-    let msgs = vec![Message::user("u1", "old question"), assistant_say("a1", "old answer")];
+    let msgs = vec![
+        Message::user("u1", "old question"),
+        assistant_say("a1", "old answer"),
+    ];
     store.append_messages("keep-clear", &msgs).await.unwrap();
 
     let mock = Arc::new(MockChatClient::new().push_script(vec![done_turn("seeded reply")]));
@@ -130,11 +129,7 @@ async fn plan_idle_bare_clear_hands_off_and_persists() {
     {
         let evs = events.lock().unwrap();
         assert_eq!(session.agent.name, "act", "clear converges to act");
-        assert_eq!(
-            mock.call_count(),
-            1,
-            "exactly the seed execution turn ran"
-        );
+        assert_eq!(mock.call_count(), 1, "exactly the seed execution turn ran");
         assert_reset_then_act(&evs);
         assert!(evs.iter().any(|e| matches!(e, SessionEvent::Done)));
     }
@@ -142,10 +137,7 @@ async fn plan_idle_bare_clear_hands_off_and_persists() {
         session.messages[0].text().contains("Execute it now"),
         "plan becomes an execution directive"
     );
-    assert_eq!(
-        session.handoff_plan.as_deref(),
-        Some("old answer")
-    );
+    assert_eq!(session.handoff_plan.as_deref(), Some("old answer"));
     let meta = store.get_session("keep-clear").await.unwrap().unwrap();
     assert_eq!(meta.agent.as_deref(), Some("act"));
 
@@ -175,10 +167,7 @@ async fn plan_sentinel_clear_stops_without_llm() {
         Message::user("u1", "old question"),
         Message::user("u2", "another question"),
     ];
-    store
-        .append_messages("keep-blank", &msgs)
-        .await
-        .unwrap();
+    store.append_messages("keep-blank", &msgs).await.unwrap();
 
     let mock = Arc::new(MockChatClient::new());
     let mut session = plan_session("keep-blank", mock.clone(), &store);
@@ -193,7 +182,10 @@ async fn plan_sentinel_clear_stops_without_llm() {
     .unwrap();
 
     let evs = events.lock().unwrap();
-    assert_eq!(session.agent.name, "act", "blank clear still converges to act");
+    assert_eq!(
+        session.agent.name, "act",
+        "blank clear still converges to act"
+    );
     assert_eq!(mock.call_count(), 0, "sentinel stops without an LLM call");
     assert_eq!(
         session.handoff_plan.as_deref(),
@@ -210,11 +202,11 @@ async fn plan_sentinel_clear_stops_without_llm() {
 async fn plan_queue_drain_clears_before_real_prompt() {
     let store = mem_store().await;
     seed(&store, "keep-queue", "plan").await;
-    let msgs = vec![Message::user("u1", "old question"), assistant_say("a1", "old answer")];
-    store
-        .append_messages("keep-queue", &msgs)
-        .await
-        .unwrap();
+    let msgs = vec![
+        Message::user("u1", "old question"),
+        assistant_say("a1", "old answer"),
+    ];
+    store.append_messages("keep-queue", &msgs).await.unwrap();
 
     // Turns: kickoff, seed execution, real prompt.
     let mock = Arc::new(
@@ -227,7 +219,11 @@ async fn plan_queue_drain_clears_before_real_prompt() {
     session.messages = msgs.clone();
 
     store
-        .admit_input(&mk_input("keep-queue", Delivery::Queue, "/act_clear_context"))
+        .admit_input(&mk_input(
+            "keep-queue",
+            Delivery::Queue,
+            "/act_clear_context",
+        ))
         .await
         .unwrap();
     let _seq = store
@@ -273,11 +269,11 @@ async fn plan_queue_drain_clears_before_real_prompt() {
 async fn plan_steer_clear_hands_off_and_executes() {
     let store = mem_store().await;
     seed(&store, "keep-steer", "plan").await;
-    let msgs = vec![Message::user("u1", "old question"), assistant_say("a1", "old answer")];
-    store
-        .append_messages("keep-steer", &msgs)
-        .await
-        .unwrap();
+    let msgs = vec![
+        Message::user("u1", "old question"),
+        assistant_say("a1", "old answer"),
+    ];
+    store.append_messages("keep-steer", &msgs).await.unwrap();
 
     let mock = Arc::new(MockChatClient::new().push_script(vec![done_turn("executed")]));
     let mut session = plan_session("keep-steer", mock.clone(), &store);
@@ -326,11 +322,11 @@ async fn plan_steer_clear_hands_off_and_executes() {
 async fn plan_compound_clear_runs_rest_under_act() {
     let store = mem_store().await;
     seed(&store, "keep-compound", "plan").await;
-    let msgs = vec![Message::user("u1", "old question"), assistant_say("a1", "old answer")];
-    store
-        .append_messages("keep-compound", &msgs)
-        .await
-        .unwrap();
+    let msgs = vec![
+        Message::user("u1", "old question"),
+        assistant_say("a1", "old answer"),
+    ];
+    store.append_messages("keep-compound", &msgs).await.unwrap();
 
     let mock = Arc::new(MockChatClient::new().push_script(vec![done_turn("review done")]));
     let mut session = plan_session("keep-compound", mock.clone(), &store);
@@ -338,9 +334,11 @@ async fn plan_compound_clear_runs_rest_under_act() {
 
     let events = Arc::new(std::sync::Mutex::new(Vec::new()));
     let ev_clone = events.clone();
-    run(&mut session, "/act_clear_context review".into(), move |ev| {
-        ev_clone.lock().unwrap().push(ev)
-    })
+    run(
+        &mut session,
+        "/act_clear_context review".into(),
+        move |ev| ev_clone.lock().unwrap().push(ev),
+    )
     .await
     .unwrap();
 

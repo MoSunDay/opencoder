@@ -315,8 +315,7 @@ fn agent_flag_rejects_removed_sandbox_agent_with_rename_hint() {
 fn agent_flag_rejects_unknown_names_at_parse_time() {
     // Any non-builtin fails the same way --agent validation is not silently
     // downgraded to the default agent.
-    let err =
-        Cli::try_parse_from(["opencoder", "--agent", "nonexistent-agent", "hi"]).unwrap_err();
+    let err = Cli::try_parse_from(["opencoder", "--agent", "nonexistent-agent", "hi"]).unwrap_err();
     assert!(
         err.to_string().contains("nonexistent-agent"),
         "error must name the offending value, got: {err}"

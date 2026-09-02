@@ -6,7 +6,7 @@
 
 use std::path::Path;
 
-use super::{Classification, HandlerContext, is_within_safe_dir, normalize_path};
+use super::{is_within_safe_dir, normalize_path, Classification, HandlerContext};
 
 /// Config keys `-c`/`--config-env` may set without asking. Deliberately an
 /// allowlist, not a denylist: any key not listed here (core.pager,
@@ -56,7 +56,10 @@ pub(crate) fn check_repo_path_flags(ctx: &HandlerContext) -> Option<Classificati
 /// If `arg` is a repo-redirect flag, return the `(flag-label, target-path)` it
 /// points at — handling both `--git-dir PATH` (value in `next`) and the
 /// attached `--git-dir=PATH` form.
-pub(crate) fn repo_redirect_target<'a>(arg: &'a str, next: Option<&'a String>) -> Option<(&'a str, &'a str)> {
+pub(crate) fn repo_redirect_target<'a>(
+    arg: &'a str,
+    next: Option<&'a String>,
+) -> Option<(&'a str, &'a str)> {
     if REPO_PATH_FLAGS.contains(&arg) {
         return next.map(|v| (arg, v.as_str()));
     }

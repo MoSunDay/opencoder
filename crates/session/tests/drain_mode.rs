@@ -110,20 +110,13 @@ async fn drain_mode_queue_plan_switches_before_llm() {
     .mark_session_created();
 
     store
-        .admit_input(&mk_input(
-            "dr-plan",
-            Delivery::Queue,
-            "/plan review code",
-        ))
+        .admit_input(&mk_input("dr-plan", Delivery::Queue, "/plan review code"))
         .await
         .unwrap();
 
     let evs = drain_run(&mut session).await;
 
-    assert_eq!(
-        session.agent.name, "plan",
-        "switched to plan before LLM"
-    );
+    assert_eq!(session.agent.name, "plan", "switched to plan before LLM");
     assert!(
         evs.iter()
             .any(|e| matches!(e, SessionEvent::AgentSwitch(a) if a == "plan")),

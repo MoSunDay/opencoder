@@ -1,7 +1,7 @@
 //! Integration tests: latent tools (`question`, `ssh_pty`) are hidden from the
 //! model by default and only appear when their owning skill is activated —
-//! with one exemption: the plan agent always sees `question` (its
-//! clarification protocol is part of the base prompt).
+//! with one exemption: the plan agent always sees `question` (plan-kind
+//! parity; its usage guidance lives in the task-plan skill text).
 
 use std::collections::HashSet;
 

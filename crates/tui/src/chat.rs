@@ -44,10 +44,10 @@ pub(crate) use helpers::{push_duration_span, short, summarize};
 mod compaction_block;
 #[path = "chat_headers.rs"]
 mod headers;
-#[path = "chat_stream.rs"]
-mod stream;
 #[path = "chat_sidecar.rs"]
 pub(crate) mod sidecar;
+#[path = "chat_stream.rs"]
+mod stream;
 pub(crate) use compaction_block::render_collapsible;
 
 impl ChatView {

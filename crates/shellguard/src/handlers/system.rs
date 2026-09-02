@@ -1,6 +1,6 @@
 //! Ported from rippy (MIT) https://github.com/mpecan/rippy
 
-use super::{Classification, Handler, HandlerContext, has_flag};
+use super::{has_flag, Classification, Handler, HandlerContext};
 use crate::verdict::AllowReason;
 
 // fd
@@ -31,7 +31,6 @@ impl Handler for FdHandler {
         }
         Classification::Allow(AllowReason::handler("fd (search only)"))
     }
-
 }
 
 // dmesg
@@ -51,7 +50,6 @@ impl Handler for DmesgHandler {
         }
         Classification::Allow(AllowReason::handler("dmesg (read)"))
     }
-
 }
 
 // ip
@@ -100,7 +98,6 @@ impl Handler for IpHandler {
             )))
         }
     }
-
 }
 
 // ifconfig
@@ -123,7 +120,6 @@ impl Handler for IfconfigHandler {
             Classification::Ask("ifconfig (modify interface)".into())
         }
     }
-
 }
 
 #[cfg(test)]

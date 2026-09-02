@@ -399,12 +399,9 @@ async fn get_messages_exposes_draining_flag() {
     let read = |state: Arc<opencoder_web::AppState>| {
         let state = state.clone();
         async move {
-            let resp = opencoder_web::api::get_messages(
-                State(state),
-                Path("DR".to_string()),
-            )
-            .await
-            .into_response();
+            let resp = opencoder_web::api::get_messages(State(state), Path("DR".to_string()))
+                .await
+                .into_response();
             let body = axum::body::to_bytes(resp.into_body(), 1 << 20)
                 .await
                 .unwrap();

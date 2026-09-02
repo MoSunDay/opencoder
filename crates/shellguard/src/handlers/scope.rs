@@ -53,7 +53,9 @@ pub(crate) fn is_within_safe_dir(path: &Path, extra_scopes: &[std::path::PathBuf
 /// this check (the release dirs are world-writable).
 #[must_use]
 pub(crate) fn is_within_release_dir(path: &Path) -> bool {
-    RELEASE_DIRECTORIES.iter().any(|safe| path.starts_with(safe))
+    RELEASE_DIRECTORIES
+        .iter()
+        .any(|safe| path.starts_with(safe))
 }
 
 #[cfg(test)]
@@ -150,7 +152,11 @@ mod operand_scope_tests {
 
     #[test]
     fn missing_and_existing_released_paths_both_pass() {
-        assert!(operand_in_release("/tmp/definitely-missing-file", Path::new("/project"), &[]));
+        assert!(operand_in_release(
+            "/tmp/definitely-missing-file",
+            Path::new("/project"),
+            &[]
+        ));
         assert!(operand_in_release("/dev/null", Path::new("/project"), &[]));
     }
 

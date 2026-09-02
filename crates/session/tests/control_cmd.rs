@@ -278,10 +278,7 @@ async fn clear_context_survives_resume() {
         assert_eq!(session.agent.name, "act");
         assert!(session.handoff_seq.is_some(), "handoff_seq set");
         // The last assistant plan is the handoff display payload.
-        assert_eq!(
-            session.handoff_plan.as_deref(),
-            Some("old answer")
-        );
+        assert_eq!(session.handoff_plan.as_deref(), Some("old answer"));
         assert!(
             evs.iter()
                 .any(|e| matches!(e, SessionEvent::TranscriptReset(_))),
@@ -528,10 +525,7 @@ async fn steered_control_cmd_not_recorded_as_user_text() {
         "/plan must not leak as user text: {:?}",
         user_texts
     );
-    assert_eq!(
-        session.agent.name, "plan",
-        "steered /plan switched agent"
-    );
+    assert_eq!(session.agent.name, "plan", "steered /plan switched agent");
 
     // The bare steered control command is the whole intent: AgentSwitch is
     // emitted, the run goes Done, and NO LLM turn is consumed.
@@ -748,5 +742,4 @@ async fn clear_context_seeds_last_say_never_directive() {
             "no AgentSwitch on clear_context, got {evs:?}"
         );
     }
-
 }

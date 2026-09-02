@@ -7,7 +7,7 @@
 //! fail-closed default Ask even when every operand is already released, so
 //! this handler allows exactly the released subset and Asks otherwise.
 
-use super::{Classification, Handler, HandlerContext, operand_in_release, positional_operands};
+use super::{operand_in_release, positional_operands, Classification, Handler, HandlerContext};
 use crate::verdict::AllowReason;
 
 pub(crate) static SANDBOX_RELEASE_HANDLER: SandboxReleaseHandler = SandboxReleaseHandler;
@@ -42,8 +42,7 @@ fn metadata_value_flags(command: &str) -> &'static [&'static str] {
 /// metadata flag values, minus a leading MODE/OWNER spec that is not a path
 /// (`chmod +x f`, `chown user:group f`, `chgrp staff f`).
 fn path_operands(ctx: &HandlerContext) -> Vec<String> {
-    let mut operands =
-        positional_operands(ctx.args, metadata_value_flags(ctx.command_name));
+    let mut operands = positional_operands(ctx.args, metadata_value_flags(ctx.command_name));
     if matches!(ctx.command_name, "chmod" | "chown" | "chgrp") {
         if let Some(first) = operands.first() {
             let spec = match ctx.command_name {

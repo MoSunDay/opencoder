@@ -328,7 +328,10 @@ mod tests {
             assert!(is_dynamic_arg_safe(cmd), "{cmd} should allow dynamic args");
         }
         for cmd in ["less", "more", "man", "fzf", "mount", "stty"] {
-            assert!(!is_dynamic_arg_safe(cmd), "{cmd} must stay dynamic-arg-unsafe");
+            assert!(
+                !is_dynamic_arg_safe(cmd),
+                "{cmd} must stay dynamic-arg-unsafe"
+            );
         }
     }
 }

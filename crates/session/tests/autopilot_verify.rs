@@ -8,7 +8,9 @@ use std::sync::{Arc, Mutex};
 
 use opencoder_core::{resolve_agent, AutoPilotConfig, Config, Message};
 use opencoder_llm::{ChatStream, CompletedToolCall, LlmEvent, MockChatClient, Usage};
-use opencoder_session::autopilot::{drive, verify, ApOutcome, ApState, VerifyFailure, VerifyVerdict};
+use opencoder_session::autopilot::{
+    drive, verify, ApOutcome, ApState, VerifyFailure, VerifyVerdict,
+};
 use opencoder_session::tools::registry;
 use opencoder_session::{SessionEvent, SessionState};
 
@@ -234,4 +236,3 @@ async fn verify_snapshot_truncates_transcript_to_window() {
 }
 
 // ── store-boundary accounting across iterations ──────────────────────────
-

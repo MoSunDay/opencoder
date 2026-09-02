@@ -463,10 +463,16 @@ mod tests {
             rewrite_legacy_sandbox_prefix("explain /sandbox to me"),
             "explain /sandbox to me"
         );
-        assert_eq!(rewrite_legacy_sandbox_prefix("/sandboxed stuff"), "/sandboxed stuff");
+        assert_eq!(
+            rewrite_legacy_sandbox_prefix("/sandboxed stuff"),
+            "/sandboxed stuff"
+        );
         assert_eq!(rewrite_legacy_sandbox_prefix("hello world"), "hello world");
         // The live spelling must never be double-rewritten.
-        assert_eq!(rewrite_legacy_sandbox_prefix("/plan review"), "/plan review");
+        assert_eq!(
+            rewrite_legacy_sandbox_prefix("/plan review"),
+            "/plan review"
+        );
         // And the rewritten compound is a live plan switch for the runner.
         assert!(matches!(
             opencoder_session::split_control_prefix(&rewrite_legacy_sandbox_prefix("/sandbox draft")),

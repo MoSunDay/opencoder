@@ -1,6 +1,6 @@
 //! Ported from rippy (MIT) https://github.com/mpecan/rippy
 
-use super::{Classification, Handler, HandlerContext, first_positional};
+use super::{first_positional, Classification, Handler, HandlerContext};
 use crate::verdict::AllowReason;
 
 // just
@@ -47,7 +47,6 @@ impl Handler for JustHandler {
         let sub = ctx.args.first().map_or("", String::as_str);
         Classification::Ask(format!("just {sub}"))
     }
-
 }
 
 // mise
@@ -94,7 +93,6 @@ impl Handler for MiseHandler {
         }
         Classification::Ask(format!("mise {sub}"))
     }
-
 }
 
 /// Classify `mise tasks ...`. Bare `tasks` lists tasks (read-only), but the
@@ -165,7 +163,6 @@ impl Handler for TokfHandler {
 
         Classification::Ask(format!("tokf {sub}"))
     }
-
 }
 
 #[cfg(test)]

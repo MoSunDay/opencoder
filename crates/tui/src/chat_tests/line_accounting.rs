@@ -51,6 +51,7 @@ fn tool_call(id: &str, out_lines: usize) -> ToolCall {
             .collect(),
         started_at_ms: Some(0),
         elapsed_ms: Some(0),
+        expanded: false,
     }
 }
 
@@ -114,7 +115,12 @@ fn assert_line_accounting_matches(view: &ChatView) {
                 expected += 1;
                 match state {
                     ToolGroupState::Collapsed => {}
-                    ToolGroupState::List => expected += calls.len() + 1,
+                    ToolGroupState::List => {
+                        for c in calls {
+                            expected += 1 + if c.expanded { 1 + c.output.len() } else { 0 };
+                        }
+                        expected += 1; // trailing blank
+                    }
                     ToolGroupState::Results => {
                         for c in calls {
                             expected += 2 + c.output.len();
@@ -309,6 +315,49 @@ fn tool_group_three_state_alignment() {
 }
 
 #[test]
+fn tool_group_list_with_expanded_call_keeps_alignment() {
+    // Per-call expansion in the List state: only call "a" shows its output.
+    // Group line (1) + a (header 1 + blank 1 + 1 output) + b (header 1)
+    // + trailing blank (1) + marker (1) = 7. The call-header hit rows must
+    // point at the `▸` lines, and expanding a call must shift the rows after
+    // it by exactly its output + separator.
+    let mut calls = vec![tool_call("a", 1), tool_call("b", 2)];
+    calls[0].expanded = true;
+    let v = view_with(vec![
+        ChatBlock::ToolGroup {
+            calls,
+            state: ToolGroupState::List,
+        },
+        marker_n(1),
+    ]);
+    assert_line_accounting_matches(&v);
+    assert_eq!(v.flatten().len(), 1 + 3 + 1 + 1 + 1);
+
+    let call_headers = v.tool_call_headers();
+    assert_eq!(call_headers.len(), 2, "both call rows are clickable");
+    assert_eq!(call_headers[0].call_idx, 0);
+    assert_eq!(call_headers[0].header_line_idx, 1, "first call header");
+    assert_eq!(
+        call_headers[1].header_line_idx, 4,
+        "second call header sits after the expanded output + separator"
+    );
+    // Each recorded row must actually be that call's `▸` header line.
+    let flat = v.flatten();
+    for h in &call_headers {
+        let text: String = flat[h.header_line_idx]
+            .spans
+            .iter()
+            .map(|s| s.content.clone())
+            .collect();
+        assert!(
+            text.trim_start().starts_with("\u{25b8} "),
+            "row {} is not a call header: {text:?}",
+            h.header_line_idx
+        );
+    }
+}
+
+#[test]
 fn tool_group_running_call_keeps_alignment() {
     // An unfinished call (elapsed_ms == None) adds a spinner SPAN to the
     // group line — never an extra line. Accounting must stay identical.
@@ -320,6 +369,7 @@ fn tool_group_running_call_keeps_alignment() {
                 output: Vec::new(),
                 started_at_ms: Some(0),
                 elapsed_ms: None,
+                expanded: false,
             }],
             state: ToolGroupState::Collapsed,
         },

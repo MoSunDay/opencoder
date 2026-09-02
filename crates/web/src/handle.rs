@@ -17,7 +17,7 @@ use opencoder_session::compaction;
 use opencoder_session::handoff;
 use opencoder_session::tools::registry as build_registry;
 use opencoder_session::{resume_and_replay as resume_session, run, SessionEvent};
-use opencoder_store::{Delivery, EventKind, SessionInput, SessionPatch, Store};
+use opencoder_store::{Delivery, EventKind, SessionEventRecord, SessionInput, SessionPatch, Store};
 use tokio::sync::{broadcast, mpsc, Mutex};
 use tokio_util::sync::CancellationToken;
 use tracing::warn;
@@ -40,6 +40,70 @@ pub fn sse_from_session_event(_session_id: &str, ev: &SessionEvent) -> (SseEvt, 
         },
         ev.coarse_kind(),
     )
+}
+
+/// Broadcast + persist a session event from OUTSIDE a drain (switch endpoints,
+/// resume-failure terminal frames). Live SSE subscribers receive the frame
+/// immediately; the `session_events` append keeps replay (`?after=`) faithful
+/// — the exact broadcast+sink contract `apply_drain_cmd` uses, for callers
+/// that hold no `EventSink`.
+///
+/// Order is persist-then-broadcast: a subscriber arriving in the gap between
+/// the two steps queries replay AFTER the append, so the row (seq > its
+/// baseline) seeds the overlap fingerprint set and the live copy is swallowed
+/// by `sse_dedup::forward_live` — delivered exactly once. Broadcast-first left
+/// that subscriber with NEITHER copy: the live send had already flown by and
+/// the replay query predated the row.
+///
+/// Store-write failures are warn-only: the live frame still goes out and a
+/// missing replay row degrades gracefully.
+pub(crate) async fn broadcast_persist_event(
+    store: &Arc<dyn Store>,
+    handle: &SessionHandle,
+    session_id: &str,
+    ev: SessionEvent,
+) {
+    let (sse, kind) = sse_from_session_event(session_id, &ev);
+    let rec = SessionEventRecord {
+        session_id: session_id.to_string(),
+        kind,
+        payload: ev.sse_data(),
+        ts: opencoder_core::message::now_ms(),
+        seq: None,
+        sse_kind: Some(ev.sse_kind().to_string()),
+    };
+    if let Err(e) = store.append_event(&rec).await {
+        warn!(session_id, error = %e, event = ev.sse_kind(), "broadcast event persist failed");
+    }
+    let _ = handle.tx.send(sse);
+}
+
+/// P1 contract: a run that ends in `Err` owes the SSE consumer a terminal
+/// `error` frame EVEN WHEN the runner surfaced none (control-command apply
+/// failure, a store write failing mid-run, …) — otherwise the stream hangs
+/// open forever with no terminal frame while `draining` resets. Runs that
+/// already emitted their own `Error` are left alone: duplicating would
+/// double-report the failure (and break the exactly-one-Error contract pinned
+/// by `drain_no_restart_on_error`).
+pub(crate) async fn ensure_run_error_frame(
+    store: &Arc<dyn Store>,
+    handle: &SessionHandle,
+    session_id: &str,
+    result: &Result<()>,
+    run_emitted_error: bool,
+) {
+    if let Err(e) = result {
+        if run_emitted_error {
+            return;
+        }
+        broadcast_persist_event(
+            store,
+            handle,
+            session_id,
+            SessionEvent::Error(format!("{e:#}")),
+        )
+        .await;
+    }
 }
 
 /// Per-session runtime state shared across HTTP requests, SSE subscribers, and
@@ -573,6 +637,17 @@ async fn drain_to_completion(
         Ok(s) => s,
         Err(e) => {
             warn!(session_id, error = %e, "drain: cannot resume (session row missing?)");
+            // TUI worker contract (worker.rs): a drain that cannot even start
+            // still owes its SSE subscribers a terminal frame. Without this
+            // broadcast the stream hangs open with no Error and no Done while
+            // `draining` resets below — a silently dead UI.
+            broadcast_persist_event(
+                &store,
+                &handle,
+                session_id,
+                SessionEvent::Error(format!("drain: resume failed: {e:#}")),
+            )
+            .await;
             let mut map = handles.lock().await;
             // Only reclaim the map entry when nobody is listening. Live SSE
             // subscribers still hold THIS handle's broadcast receiver: removing
@@ -625,12 +700,21 @@ async fn drain_to_completion(
     // successful drain instead of being silently retried inside this failing
     // one. Deliberate semantic change of the former bounded drain-restart
     // loop; the drops below run exactly once, after this single attempt.
+    let mut run_emitted_error = false;
     let result = run(&mut session, String::new(), |ev| {
+        if matches!(ev, SessionEvent::Error(_)) {
+            run_emitted_error = true;
+        }
         let (sse, _kind) = sse_from_session_event(&sid, &ev);
         let _ = tx.send(sse);
         let _ = sink.push(&ev);
     })
     .await;
+
+    // Terminal-frame guarantee BEFORE drain commands run: a failed run must
+    // surface an `error` frame even when the runner emitted none (see
+    // ensure_run_error_frame). Emitted first so no later Done can mask it.
+    ensure_run_error_frame(&store, &handle, &sid, &result, run_emitted_error).await;
 
     // Apply endpoint-forwarded drain commands (autopilot/annotation/...)
     // once the run settles.

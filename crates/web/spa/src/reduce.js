@@ -13,6 +13,47 @@ export function deltaTextOf(data) {
   return typeof v === 'string' ? v : '';
 }
 
+/// A `subagent_child` frame's `event` field is the nested SessionEvent in
+/// serde's externally tagged form (`{"TextDelta": "..."}`), NOT the SSE wire
+/// form (`{event: 'text_delta', data: {...}}`). Convert: PascalCase variant →
+/// snake_case event name; newtype string payloads (TextDelta / Status /
+/// Error / CompactionDelta / ReasoningDelta) wrap into the `{text}` /
+/// `{error}` object shape the SSE payloads use, so reduceFrame can fold them
+/// unchanged. Returns null for anything unrecognizable.
+export function nestedEventOf(raw) {
+  if (!raw || typeof raw !== 'object') {
+    return null;
+  }
+  const keys = Object.keys(raw);
+  if (keys.length !== 1) {
+    return null;
+  }
+  const event = keys[0].replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase();
+  // Newtype string variants wrap into the field name their SSE payload uses.
+  const stringField = {
+    text_delta: 'text', reasoning_delta: 'text', compaction_delta: 'text',
+    status: 'status', error: 'error',
+  }[event];
+  const payload = stringField && typeof raw[keys[0]] === 'string'
+    ? { [stringField]: raw[keys[0]] }
+    : raw[keys[0]];
+  return { event, data: payload || {} };
+}
+
+/// Index of the open subagent turn for tool-call `id` (last match wins — ids
+/// are unique per run, but a resumed transcript replays them in order).
+function subagentIndex(turns, id) {
+  if (!id) {
+    return -1;
+  }
+  for (let i = turns.length - 1; i >= 0; i -= 1) {
+    if (turns[i].kind === 'subagent' && turns[i].id === id) {
+      return i;
+    }
+  }
+  return -1;
+}
+
 export function emptyStream() {
   return { turns: [], usage: null, status: 'idle', error: null };
 }
@@ -51,6 +92,18 @@ export function turnsFromMessages(messages) {
   const list = Array.isArray(messages) ? messages : [];
   for (const m of list) {
     const role = (m && m.role) || 'assistant';
+    // Echo contract (mirrors the TUI replay): synthetic user messages are
+    // internal and skipped, UNLESS they carry a verbatim `display` text —
+    // skill triggers record the raw `$name` input there. Real user turns
+    // prefer `display` over the recorded blocks so the transcript shows the
+    // user's input verbatim (`$skill` tokens included), never the resolved
+    // clean text the LLM consumes.
+    if (role === 'user' && m && m.synthetic && !m.display) {
+      continue;
+    }
+    const displayText = role === 'user' && m && typeof m.display === 'string' && m.display !== ''
+      ? m.display
+      : null;
     for (const b of (m && m.blocks) || []) {
       const bkind = (b && (b.kind || b.type)) || '';
       if (bkind === 'tool_result') {
@@ -59,6 +112,10 @@ export function turnsFromMessages(messages) {
           turns[open] = { ...turns[open], output: fmtValue(b.output !== undefined && b.output !== null ? b.output : b.content), isError: !!b.is_error };
           continue;
         }
+      }
+      if (displayText && bkind === 'text') {
+        turns.push({ kind: 'text', role, text: displayText });
+        continue;
       }
       turns.push(...blockToTurns(role, b));
     }
@@ -231,10 +288,92 @@ export function reduceFrame(state, frame, nowMs) {
       return withTurns(state, state.turns.concat([{ kind: 'sys', text: 'agent → ' + String(data.agent || '') }]));
     case 'model_switched':
       return withTurns(state, state.turns.concat([{ kind: 'sys', text: 'model → ' + String(data.model || '') }]));
+    case 'subagent_start': {
+      // Foldable block per subagent (TUI chat.rs parity), keyed by the
+      // tool-call id; `subagent_child` frames fold into it via reduceFrame.
+      const turn = {
+        kind: 'subagent',
+        id: data.id || null,
+        name: data.kind || 'subagent',
+        prompt: typeof data.prompt === 'string' ? data.prompt : '',
+        childSessionId: data.child_session_id || null,
+        status: 'running',
+        ok: null,
+        summary: null,
+        events: [],
+        usage: null,
+        startedAt: nowMs,
+      };
+      return withTurns(state, closeOpenText(state.turns.slice()).concat([turn]));
+    }
+    case 'subagent_child': {
+      const idx = subagentIndex(state.turns, data.id);
+      if (idx < 0) {
+        return state;
+      }
+      const nested = nestedEventOf(data.event);
+      if (!nested) {
+        return state;
+      }
+      const turns = state.turns.slice();
+      const t = turns[idx];
+      const child = reduceFrame(
+        { turns: t.events, usage: t.usage, status: t.status, error: null },
+        nested,
+        nowMs,
+      );
+      turns[idx] = {
+        ...t,
+        events: child.turns,
+        usage: child.usage || t.usage,
+        status: child.status === 'done' || child.status === 'error' ? child.status : t.status,
+      };
+      return withTurns(state, turns);
+    }
+    case 'subagent_end': {
+      const idx = subagentIndex(state.turns, data.id);
+      if (idx < 0) {
+        return state;
+      }
+      const turns = state.turns.slice();
+      turns[idx] = {
+        ...turns[idx],
+        status: data.cancelled ? 'cancelled' : (data.ok ? 'done' : 'error'),
+        ok: !!data.ok && !data.cancelled,
+        summary: typeof data.summary === 'string' ? data.summary : null,
+      };
+      return withTurns(state, turns);
+    }
+    case 'compaction_delta': {
+      const text = typeof data.text === 'string' ? data.text : '';
+      return text ? withTurns(state, state.turns.concat([{ kind: 'sys', text: '🗜 ' + text }])) : state;
+    }
+    case 'autopilot': {
+      const phase = String(data.phase || '').toLowerCase();
+      const it = Number.isFinite(data.iteration) ? data.iteration : null;
+      return withTurns(state, state.turns.concat([{ kind: 'sys', text: '🛸 autopilot ' + phase + (it !== null ? ' #' + it : '') }]));
+    }
+    case 'interrupted':
+      return withTurns(state, state.turns.concat([{ kind: 'sys', text: '⏹ interrupted' }]));
+    case 'transcript_reset':
+      // Wire payload is `{}` (runner/event.rs) — the collapsed transcript
+      // cannot be rebuilt from the frame. chat.jsx reacts to this event by
+      // re-fetching the store snapshot (same path as `done`); here we only
+      // close the open text turn so a lost reload still renders sanely.
+      return { ...state, turns: closeOpenText(state.turns.slice()) };
     case 'done':
       return { ...state, status: 'done', turns: closeOpenText(state.turns.slice()) };
-    case 'error':
+    case 'error': {
+      // A lag-marked error (api.rs map_broadcast_result) is a consumer
+      // re-sync signal, not a run failure: sse.js restarts from the persisted
+      // head while the run keeps producing. Folding it terminal would latch
+      // status 'error' mid-run — and, since chat.jsx releases busy on terminal
+      // errors, would free the composer for a still-running turn.
+      if (data && Number.isFinite(data.lag)) {
+        return state;
+      }
       return { ...state, status: 'error', error: String(data.error || data.message || 'error'), turns: closeOpenText(state.turns.slice()) };
+    }
     default:
       return state;
   }

@@ -157,6 +157,10 @@ def compute_session_payload(session, messages):
     """
     target_id = "enc_" + session["id"]
     model_json = parse_model(session.get("model"))
+    # Per-message model wins; session model is only the fallback. Message-level
+    # `messages.model` is authoritative: sessions with NULL model (subagents)
+    # and sessions that switched models mid-run would otherwise be mis- or
+    # un-attributed (e.g. glm-5.3-flash usage landing in "unknown"/"glm-5.3").
 
     msg_payloads = []
     tokens_list = []
@@ -167,6 +171,7 @@ def compute_session_payload(session, messages):
             continue
         msg_id = target_id + "_" + msg["id"]
         ts = int(msg.get("created_at", 0) or 0)
+        msg_model = parse_model(msg.get("model") or session.get("model"))
         msg_payloads.append({
             "msg_id": msg_id,
             "part_id": msg_id + "_sf",
@@ -179,8 +184,8 @@ def compute_session_payload(session, messages):
                 "path": {"cwd": "/", "root": "/"},
                 "cost": 0,
                 "tokens": tok,
-                "modelID": model_json["id"],
-                "providerID": model_json["providerID"],
+                "modelID": msg_model["id"],
+                "providerID": msg_model["providerID"],
                 "time": {"created": ts, "completed": ts},
                 "finish": "stop",
             },

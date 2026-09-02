@@ -35,8 +35,18 @@ const READ_TIMEOUT: Duration = Duration::from_secs(120);
 /// (`MissedTickBehavior::Skip` collapses the beats that elapsed in flight),
 /// so timeouts never stack; a beat that fails FAST (weak network) costs no
 /// liveness at all — the loop just waits for the next tick, which is the
-/// built-in single retry. See also `runner::DEFAULT_HEARTBEAT_INTERVAL`.
+/// built-in single retry. The claim arm shares this budget family
+/// ([`CLAIM_TIMEOUT`]), so the same arithmetic bounds both arms. See also
+/// `runner::DEFAULT_HEARTBEAT_INTERVAL`.
 pub const HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Identical short budget for one claim poll. The idle loop runs its
+/// heartbeat and claim arms on the SAME `select!`, so an unbounded claim
+/// (the 120s [`READ_TIMEOUT`]) would silence the beat for up to ~2 minutes —
+/// far past the server liveness window (`STALE_AFTER_MS = 20s`) — making a
+/// live idle node look lost and delaying its own recovery by that much.
+/// Worst silent gap stays the documented `timeout + tick ≈ 10s < 20s`.
+pub const CLAIM_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Worker-side REST client handle. Cheap to clone (`reqwest::Client` is an
 /// internal Arc), so per-task background duties can own a copy.
@@ -46,29 +56,42 @@ pub struct Uplink {
     base: String,
     token: String,
     /// Per-heartbeat round-trip budget; defaults to [`HEARTBEAT_TIMEOUT`],
-    /// injectable for tests via [`Uplink::with_heartbeat_timeout`].
+    /// injectable for tests via [`Uplink::with_timeouts`].
     heartbeat_timeout: Duration,
+    /// Per-claim round-trip budget; defaults to [`CLAIM_TIMEOUT`].
+    claim_timeout: Duration,
 }
 
 impl Uplink {
     /// Build an uplink against `base` (trailing slashes trimmed) with the
     /// resolved bearer token. Transport construction errors are fatal here.
     pub fn new(base: &str, token: &str) -> Result<Self> {
-        Uplink::with_heartbeat_timeout(base, token, HEARTBEAT_TIMEOUT)
+        Uplink::with_timeouts(base, token, HEARTBEAT_TIMEOUT, CLAIM_TIMEOUT)
     }
 
     /// Like [`Uplink::new`], but overrides the per-heartbeat round-trip
-    /// budget ([`HEARTBEAT_TIMEOUT`] by default). This is the injection seam
-    /// for tests: shrinking it to milliseconds proves timeout-then-recovery
-    /// deterministically instead of waiting on real network stalls.
-    /// Production callers always use [`Uplink::new`].
+    /// budget ([`HEARTBEAT_TIMEOUT`] by default) and keeps the claim budget
+    /// at [`CLAIM_TIMEOUT`]. Production callers always use [`Uplink::new`].
     pub fn with_heartbeat_timeout(base: &str, token: &str, d: Duration) -> Result<Self> {
+        Uplink::with_timeouts(base, token, d, CLAIM_TIMEOUT)
+    }
+
+    /// Full injection seam: both short round-trip budgets shrinkable to
+    /// milliseconds, which proves timeout-then-recovery deterministically
+    /// instead of waiting on real network stalls.
+    pub fn with_timeouts(
+        base: &str,
+        token: &str,
+        heartbeat_timeout: Duration,
+        claim_timeout: Duration,
+    ) -> Result<Self> {
         let http = build_http_client_with_read_timeout(None, READ_TIMEOUT)?;
         Ok(Uplink {
             http,
             base: base.trim_end_matches('/').to_string(),
             token: token.to_string(),
-            heartbeat_timeout: d,
+            heartbeat_timeout,
+            claim_timeout,
         })
     }
 
@@ -128,6 +151,11 @@ impl Uplink {
 
     /// GET /api/nodes/tasks/claim?node_id= — FIFO single-active claim.
     ///
+    /// The WHOLE round trip is bounded by [`CLAIM_TIMEOUT`]: this call runs
+    /// on the idle runner's `select!` next to the heartbeat arm, so a wedged
+    /// server must degrade to a plain `Err` (logged, retried next tick)
+    /// instead of silencing the beat past the server's liveness window.
+    ///
     /// The reply is the [`ClaimResponse`] envelope: a durable task and/or a
     /// control task (P3 message relay). `204 No Content` maps to an empty
     /// envelope (both fields `None`), so callers need no special case.
@@ -136,15 +164,24 @@ impl Uplink {
             "/api/nodes/tasks/claim?node_id={}",
             urlencode_component(node_id)
         );
-        let resp = self
-            .signed_request(reqwest::Method::GET, &pq, None::<&serde_json::Value>)
-            .await
-            .context("claim task")?;
-        if resp.status() == reqwest::StatusCode::NO_CONTENT {
-            return Ok(ClaimResponse::default());
+        let round_trip = async {
+            let resp = self
+                .signed_request(reqwest::Method::GET, &pq, None::<&serde_json::Value>)
+                .await
+                .context("claim task")?;
+            if resp.status() == reqwest::StatusCode::NO_CONTENT {
+                return Ok(ClaimResponse::default());
+            }
+            let resp = ensure_ok(resp, "claim task").await?;
+            resp.json().await.context("claim task json")
+        };
+        match tokio::time::timeout(self.claim_timeout, round_trip).await {
+            Ok(res) => res,
+            Err(_) => Err(anyhow::anyhow!(
+                "claim timed out after {:?} (CLAIM_TIMEOUT budget)",
+                self.claim_timeout
+            )),
         }
-        let resp = ensure_ok(resp, "claim task").await?;
-        resp.json().await.context("claim task json")
     }
 
     /// POST /api/nodes/tasks/:tid/events — upload one ordered event batch.

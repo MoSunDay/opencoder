@@ -25,8 +25,9 @@ use opencoder_session::{new_conv_from, run_sidecar_turn, SessionEvent, SessionSt
 use opencoder_store::Store;
 use tokio::sync::mpsc;
 
-use crate::chat::ChatBlock;
-use crate::chat::ChatView;
+use ratatui::text::Line;
+
+use crate::chat::{ChatBlock, ChatView, SidecarPanel};
 use crate::worker::{persist_event, UiEvent};
 
 /// Channel depth for pending sidecar commands. Small by design: the actor
@@ -252,20 +253,21 @@ fn send_reset(ask: &mpsc::Sender<SidecarCmd>) {
 /// Enter the sidecar panel on a clean slate. Entry ALWAYS destroys the
 /// previous sidecar conversation: the actor is told to drop its
 /// [`SidecarConv`] (aborting an in-flight turn; partial usage still lands on
-/// the main session), every sidecar block is purged from the transcript and
-/// an empty panel block takes focus. The next `Ask` rebuilds the
-/// conversation from a fresh store snapshot — which is why re-entering never
-/// shows stale context.
+/// the main session), the panel field is purged and an empty panel takes
+/// focus. The next `Ask` rebuilds the conversation from a fresh store
+/// snapshot — which is why re-entering never shows stale context.
 pub(crate) fn enter_panel(chat: &mut ChatView, ask: &mpsc::Sender<SidecarCmd>) {
     send_reset(ask);
     crate::chat::sidecar::purge(chat);
-    // Empty panel anchor: a sidecar block with no id (real conversations
-    // always start with the `sidecar-` prefix) and no question. The first
-    // `SidecarStart` frame adopts it in place.
-    chat.blocks.push(ChatBlock::Sidecar {
+    // Empty panel anchor: the panel lives in `chat.sidecar`, NOT in
+    // `blocks`, so in-flight main-task streaming blocks stay tail-merged
+    // while the panel is open. Real conversations always start with the
+    // `sidecar-` prefix, so the empty `id` marks it fresh for the first
+    // `SidecarStart` frame to adopt in place.
+    chat.sidecar = Some(SidecarPanel {
         id: String::new(),
         question: String::new(),
-        view: ChatView::default(),
+        view: Box::new(ChatView::default()),
         done: false,
         ok: false,
         answer: None,
@@ -278,20 +280,30 @@ pub(crate) fn enter_panel(chat: &mut ChatView, ask: &mpsc::Sender<SidecarCmd>) {
 }
 
 /// Exit the sidecar panel (ESC / Ctrl+L): destroy, don't hide. The actor
-/// drops its conversation (aborting an in-flight turn) and every sidecar
-/// block is purged from the transcript, so the main view carries zero
-/// sidecar trace afterwards.
+/// drops its conversation (aborting an in-flight turn) and the panel field
+/// is cleared, so the main view carries zero sidecar trace afterwards.
 pub(crate) fn exit_panel(chat: &mut ChatView, ask: &mpsc::Sender<SidecarCmd>) {
     send_reset(ask);
     crate::chat::sidecar::purge(chat);
 }
 
-// ── Composer flash strings (single source of truth, test-pinned) ────────────
-
-/// `/sidecar` entered the (fresh) panel.
-pub(crate) const SIDECAR_ENTER_FLASH: &str =
-    "\u{2937} sidecar 已就绪 · 输入问题回车 · Ctrl+L 销毁返回";
 /// Ask channel full or actor gone: retry shortly.
 pub(crate) const SIDECAR_BUSY_FLASH: &str = "⏳ sidecar busy — retry in a moment";
-/// Title hint for the freshly entered (question-less) panel.
-pub(crate) const SIDECAR_EMPTY_HINT: &str = "输入问题回车提问 · Ctrl+L 销毁返回";
+
+/// Echo a submitted question into the panel's nested view so the user sees
+/// it the moment they press Enter. The actor must first load a store
+/// snapshot and build its [`SidecarConv`] before the first `SidecarStart`
+/// frame adopts the placeholder — without this echo the question is
+/// invisible for that whole beat (the "submitted and stuck" feel). Mirrors
+/// the main transcript's `push_user`: markdown-rendered `ChatBlock::User` +
+/// blank marker. `SidecarStart` adoption keeps the nested view, so the echo
+/// survives into the titled panel exactly once (frames never re-echo); no
+/// open panel (late exit / purge) is a no-op.
+pub(crate) fn echo_question(chat: &mut ChatView, question: &str) {
+    if let Some(panel) = chat.sidecar.as_mut() {
+        panel.view.blocks.push(ChatBlock::User {
+            rendered: crate::markdown::render(question),
+        });
+        panel.view.push_marker(Line::from(""));
+    }
+}

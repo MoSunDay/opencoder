@@ -11,6 +11,7 @@
 //!      regression this pins; the signal guard now arms at
 //!      `TerminalGuard::enter()`.
 //!   2. Sends Ctrl+D for the normal quit path.
+//!
 //! Both must emit the full restoration payload (`?1000l…?1006l` mouse off,
 //! `?2004l` paste off, `?1049l` leave alt-screen).
 //!
@@ -48,11 +49,7 @@ fn have(tool: &str) -> bool {
 /// (distinguishes it from the `script`/`sh` wrappers and any unrelated
 /// instances on the machine). None when it cannot be uniquely resolved.
 fn find_opencoder_pid(marker: &str) -> Option<i32> {
-    let out = Command::new("pgrep")
-        .arg("-f")
-        .arg(marker)
-        .output()
-        .ok()?;
+    let out = Command::new("pgrep").arg("-f").arg(marker).output().ok()?;
     let text = String::from_utf8_lossy(&out.stdout);
     for line in text.lines() {
         let pid: i32 = line.trim().parse().ok()?;
@@ -65,7 +62,10 @@ fn find_opencoder_pid(marker: &str) -> Option<i32> {
 }
 
 /// Spawn the TUI under a pty; returns (child, captured output, stdin handle).
-fn spawn_tui(home: &std::path::Path, workdir: &std::path::Path) -> (Proc, Arc<Mutex<Vec<u8>>>, std::process::ChildStdin) {
+fn spawn_tui(
+    home: &std::path::Path,
+    workdir: &std::path::Path,
+) -> (Proc, Arc<Mutex<Vec<u8>>>, std::process::ChildStdin) {
     let cmd = format!("exec {BIN} tui --workdir {}", workdir.display());
     let mut child = Command::new("script")
         .args(["-q", "-f", "-c", &cmd, "/dev/null"])
@@ -97,7 +97,12 @@ fn spawn_tui(home: &std::path::Path, workdir: &std::path::Path) -> (Proc, Arc<Mu
 fn wait_for(captured: &Arc<Mutex<Vec<u8>>>, needle: &[u8], what: &str) {
     let deadline = Instant::now() + Duration::from_secs(30);
     while Instant::now() < deadline {
-        if captured.lock().unwrap().windows(needle.len()).any(|w| w == needle) {
+        if captured
+            .lock()
+            .unwrap()
+            .windows(needle.len())
+            .any(|w| w == needle)
+        {
             return;
         }
         std::thread::sleep(Duration::from_millis(100));
@@ -137,8 +142,8 @@ fn sigterm_after_capture_restores_terminal() {
     std::thread::sleep(Duration::from_millis(500)); // let the guard thread arm
 
     let marker = format!("{}", workdir.path().display());
-    let pid = find_opencoder_pid(&marker)
-        .expect("opencoder process not found under the pty wrapper");
+    let pid =
+        find_opencoder_pid(&marker).expect("opencoder process not found under the pty wrapper");
     let ok = Command::new("kill")
         .arg("-TERM")
         .arg(pid.to_string())

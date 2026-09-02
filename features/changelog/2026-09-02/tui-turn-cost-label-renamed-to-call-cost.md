@@ -1,6 +1,6 @@
 # TUI 轮计时器文案收敛——`[turn cost xs]` → `[call cost xs]`
 
-Commit: (working-tree, 标签语义对齐)
+Commit: bb986ff (标签语义对齐)
 
 ## 背景
 

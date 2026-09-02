@@ -18,6 +18,7 @@ use tracing::warn;
 
 use opencoder_core::Config;
 use opencoder_llm::{ChatClient, ChatStream};
+use opencoder_session::SessionEvent;
 use opencoder_store::{Delivery, EventKind, SessionFilter, SessionMeta, SessionPatch};
 
 use crate::handle::{admit_and_drain_guarded, AdmissionError, SseEvt};
@@ -380,6 +381,17 @@ pub async fn post_agent(
         return error_500(format!("update_session: {e:#}"));
     }
     handle.overrides.lock().await.agent = Some(body.value.clone());
+    // TUI parity (worker.rs control_cmd): a switch is a visible event. Live
+    // SSE subscribers get the frame; the append keeps replay faithful
+    // (reduce.js renders `agent_switched`). Idle-only by the 409 above, so
+    // the append cannot interleave with a run's event sequence.
+    crate::handle::broadcast_persist_event(
+        &state.store,
+        &handle,
+        &id,
+        SessionEvent::AgentSwitch(body.value.clone()),
+    )
+    .await;
     Json(json!({ "ok": true, "agent": body.value })).into_response()
 }
 
@@ -443,6 +455,14 @@ pub async fn post_model(
         }
     }
     handle.overrides.lock().await.model = Some(body.value.clone());
+    // TUI parity: same broadcast+persist contract as POST /agent above.
+    crate::handle::broadcast_persist_event(
+        &state.store,
+        &handle,
+        &id,
+        SessionEvent::ModelSwitch(body.value.clone()),
+    )
+    .await;
     Json(json!({ "ok": true, "model": body.value })).into_response()
 }
 
@@ -673,7 +693,13 @@ pub(crate) fn event_kind_str(k: EventKind) -> &'static str {
 /// to be silently dropped (`r.ok()`), which could swallow a terminal
 /// `done`/`error` event and freeze the UI (busy never resets). Now it is
 /// surfaced as a synthetic `error` event so the client knows it must re-sync.
-/// Pure so the lag handling is directly unit-testable.
+///
+/// The `lag` field is a wire CONTRACT with the SPA (`spa/src/sse.js`): a lag
+/// frame means "this consumer fell behind, re-connect from the persisted
+/// head" — the run itself is usually still fine. Without the marker the client
+/// cannot distinguish this recoverable case from a terminal run error and
+/// would close the stream for good. Pure so the lag handling is directly
+/// unit-testable.
 pub fn map_broadcast_result(
     r: Result<SseEvt, tokio_stream::wrappers::errors::BroadcastStreamRecvError>,
 ) -> Option<SseEvt> {
@@ -681,7 +707,7 @@ pub fn map_broadcast_result(
         Ok(evt) => Some(evt),
         Err(tokio_stream::wrappers::errors::BroadcastStreamRecvError::Lagged(n)) => Some(SseEvt {
             kind: "error".into(),
-            data: json!({ "error": format!("event lag: {n} events dropped") }),
+            data: json!({ "error": format!("event lag: {n} events dropped"), "lag": n }),
             ts: opencoder_core::message::now_ms(),
             seq: None,
         }),

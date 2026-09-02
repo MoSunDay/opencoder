@@ -23,7 +23,11 @@ export async function signFetch(method, pathAndQuery, bodyObj, opts = {}) {
     if (bodyText) {
       headers['content-type'] = 'application/json';
     }
-    return fetch(pathAndQuery, {
+    // `urlFor` prefixes the configured server base ('' = same-origin). Without
+    // it every signed request after a cross-origin login hit THIS origin and
+    // 404'd (only /api/time worked — it is signature-exempt and already
+    // base-prefixed in time.js).
+    return fetch(urlFor(pathAndQuery), {
       method: m,
       headers,
       body: bodyText || undefined,

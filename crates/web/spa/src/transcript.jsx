@@ -6,6 +6,8 @@
 //   tool   → placement start, variant borderless, 🔧 collapse with
 //            duration + error tag + input/output paragraphs
 //   sys    → placement start, variant borderless, centered secondary text
+//   subagent → placement start, variant borderless, 🤖 fold block with
+//            status tag + child replay drill-in (subagentBlock.jsx)
 // UsageFooter / StatusTag (moved from render.jsx verbatim in spirit) stay
 // below the list; the empty-state hint keeps the old wording contract.
 
@@ -13,6 +15,7 @@ import { Bubble } from '@ant-design/x';
 import { Collapse, Tag, Typography } from 'antd';
 import { fmtDuration } from './format.js';
 import { isEmptyTranscript, itemsFromTurns, usageLine } from './bubbleItems.js';
+import { SubagentContent } from './subagentBlock.jsx';
 
 const { Text, Paragraph } = Typography;
 
@@ -163,6 +166,13 @@ const BUBBLE_ROLES = {
     placement: 'start',
     variant: 'borderless',
     contentRender: (content) => <SysContent turn={content} />,
+  },
+  // Subagent fold block: header + status + drill-in replay live in
+  // subagentBlock.jsx; the bubble itself stays borderless like tool rows.
+  subagent: {
+    placement: 'start',
+    variant: 'borderless',
+    contentRender: (content) => <SubagentContent turn={content} />,
   },
 };
 

@@ -16,6 +16,10 @@ fn sidecar_chat() -> ChatView {
         agent: "act".to_string(),
         ..ChatView::default()
     };
+    // Real entry flow: `/sidecar` pushes the placeholder and opens the panel;
+    // only an OPEN panel accepts the conversation's SidecarStart.
+    let (tx, _rx) = tokio::sync::mpsc::channel::<crate::sidecar_ui::SidecarCmd>(1);
+    crate::sidecar_ui::enter_panel(&mut chat, &tx);
     chat.apply(&SessionEvent::SidecarStart {
         id: "sc-1".into(),
         question: "这段代码做什么?".into(),
@@ -70,11 +74,13 @@ fn focused_sidecar_swaps_body_mode_and_title() {
     );
 }
 
-/// Unfocused (Esc exit): the plain parent transcript returns.
+/// Unfocused (destroy exit): the plain parent transcript returns and the
+/// sidecar block contributes ZERO lines — the bypass Q/A is not a
+/// transcript artifact.
 #[test]
 fn unfocused_sidecar_restores_the_parent_body() {
     let mut chat = sidecar_chat();
-    chat.sidecar_focus = false;
+    crate::chat::sidecar::purge(&mut chat);
     let ds = display_of(&chat);
     assert_eq!(ds.display_mode, "act");
     assert!(
@@ -82,8 +88,38 @@ fn unfocused_sidecar_restores_the_parent_body() {
         "child content hidden again after exit"
     );
     assert!(
-        block_text(ds.display_chat).contains("sidecar"),
-        "the header row stays visible in the parent transcript"
+        !block_text(ds.display_chat).contains("sidecar"),
+        "the block leaves zero trace in the parent transcript"
+    );
+}
+
+/// Freshly entered panel (empty placeholder): the body swaps in empty, the
+/// title carries the enter hint instead of a question echo.
+#[test]
+fn empty_placeholder_panel_shows_the_enter_hint() {
+    let mut chat = ChatView {
+        agent: "act".to_string(),
+        ..ChatView::default()
+    };
+    chat.blocks.push(ChatBlock::Sidecar {
+        id: String::new(),
+        question: String::new(),
+        view: ChatView::default(),
+        done: false,
+        ok: false,
+        answer: None,
+        total_tokens: 0,
+        rounds: 0,
+        started_at_ms: 0,
+        elapsed_ms: 0,
+    });
+    chat.sidecar_focus = true;
+    let ds = display_of(&chat);
+    assert_eq!(ds.display_mode, "sidecar");
+    let title = line_text(&ds.display_title);
+    assert!(
+        title.contains(crate::sidecar_ui::SIDECAR_EMPTY_HINT),
+        "empty panel title must carry the enter hint, got {title}"
     );
 }
 

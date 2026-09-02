@@ -138,7 +138,7 @@ pub(crate) async fn dispatch_mode_switch(
 ///
 /// Returns [`LoopFlow::Proceed`] for commands that only open a menu or
 /// render chrome (Task, Fork, Model, Config, Mcp, CacheSalt, Annotation,
-/// Notepad, Ps, Stop, Ap). For mode-switch commands
+/// Notepad, Ps, Stop, Ap, Sidecar). For mode-switch commands
 /// (Act, Plan, ClearContext, Compact) returns whatever the gate-and-start
 /// flow yields (typically [`LoopFlow::Proceed`] or [`LoopFlow::Quit`]). While
 /// a turn is running, Act/Plan queue through `admit_tx` (apply at the idle
@@ -149,6 +149,7 @@ pub(crate) async fn dispatch_slash_action(
     cmd_tx: &mpsc::Sender<UiCmd>,
     cancel: &mut CancellationToken,
     chat: &mut ChatView,
+    sidecar_ask: &mpsc::Sender<crate::sidecar_ui::SidecarCmd>,
     running: &mut bool,
     follow: &mut bool,
     store: &Arc<dyn Store>,
@@ -319,6 +320,15 @@ pub(crate) async fn dispatch_slash_action(
         }
         SlashAction::Ap => {
             *ap_menu = Some(crate::ap_menu::ApMenu::new(config));
+        }
+        SlashAction::Sidecar => {
+            // Bypass semantics: the panel opens even mid-turn — the sidecar
+            // never touches the parent's steer/queue/prompt paths, so the
+            // running gate does not apply. Entry destroys the previous
+            // conversation, so the next question sees a fresh snapshot.
+            crate::sidecar_ui::enter_panel(chat, sidecar_ask);
+            *follow = true;
+            *mode_flash = Some((crate::sidecar_ui::SIDECAR_ENTER_FLASH.to_string(), anim_tick));
         }
     }
     LoopFlow::Proceed

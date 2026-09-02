@@ -42,11 +42,20 @@ fn sidecar_block(v: &ChatView) -> Option<&ChatBlock> {
         .find(|b| matches!(b, ChatBlock::Sidecar { .. }))
 }
 
+/// Mirror the real entry: only an OPEN panel (placeholder + focus) accepts
+/// `SidecarStart` frames — every conversation test opens the panel first.
+fn open_panel() -> (ChatView, tokio::sync::mpsc::Sender<crate::sidecar_ui::SidecarCmd>) {
+    let (tx, _rx) = tokio::sync::mpsc::channel::<crate::sidecar_ui::SidecarCmd>(1);
+    let mut v = ChatView::default();
+    crate::sidecar_ui::enter_panel(&mut v, &tx);
+    (v, tx)
+}
+
 /// `SidecarStart` pushes exactly one `Sidecar` block and auto-focuses the
 /// sidecar box (the user lands in it without an extra keystroke).
 #[test]
 fn sidecar_start_pushes_block_and_auto_focuses() {
-    let mut v = ChatView::default();
+    let (mut v, _tx) = open_panel();
     v.apply(&sc_start("sc-1", "这段代码做什么?"));
     assert!(sidecar_block(&v).is_some(), "block must be pushed");
     assert!(v.sidecar_focus, "Start must auto-focus the sidecar box");
@@ -66,7 +75,7 @@ fn sidecar_start_pushes_block_and_auto_focuses() {
 /// the old one is never re-focused by the new Start.
 #[test]
 fn second_start_pushes_a_second_block() {
-    let mut v = ChatView::default();
+    let (mut v, _tx) = open_panel();
     v.apply(&sc_start("sc-1", "q1"));
     v.apply(&sc_turn("sc-1", true, "a1", 10, 1));
     v.apply(&sc_start("sc-2", "q2"));
@@ -84,7 +93,7 @@ fn second_start_pushes_a_second_block() {
 /// in by `compute_display`).
 #[test]
 fn sidecar_child_text_streams_into_block_not_parent() {
-    let mut v = ChatView::default();
+    let (mut v, _tx) = open_panel();
     v.apply(&sc_start("sc-1", "q"));
     v.apply(&sc_child(
         "sc-1",
@@ -111,7 +120,7 @@ fn sidecar_child_text_streams_into_block_not_parent() {
 /// (a late frame after a `/task` switch must not corrupt the new view).
 #[test]
 fn sidecar_child_for_unknown_id_is_swallowed() {
-    let mut v = ChatView::default();
+    let (mut v, _tx) = open_panel();
     v.apply(&sc_start("sc-1", "q"));
     v.apply(&sc_child(
         "sc-other",
@@ -128,7 +137,7 @@ fn sidecar_child_for_unknown_id_is_swallowed() {
 /// already accumulated it).
 #[test]
 fn sidecar_child_llm_usage_is_not_double_counted() {
-    let mut v = ChatView::default();
+    let (mut v, _tx) = open_panel();
     v.apply(&sc_start("sc-1", "q"));
     let parent_before = v.tokens_total;
     let ctx_before = v.real_context_tokens;
@@ -154,7 +163,7 @@ fn sidecar_child_llm_usage_is_not_double_counted() {
 /// it accumulates `tokens_total` — that is the cost-accounting contract.
 #[test]
 fn bare_llm_usage_accounts_sidecar_cost_to_the_parent() {
-    let mut v = ChatView::default();
+    let (mut v, _tx) = open_panel();
     v.apply(&sc_start("sc-1", "q"));
     v.apply(&SessionEvent::LlmUsage {
         total_tokens: 500,
@@ -169,7 +178,7 @@ fn bare_llm_usage_accounts_sidecar_cost_to_the_parent() {
 /// follow-up turns).
 #[test]
 fn sidecar_turn_finalizes_and_follow_ups_accumulate() {
-    let mut v = ChatView::default();
+    let (mut v, _tx) = open_panel();
     v.apply(&sc_start("sc-1", "q1"));
     v.apply(&sc_turn("sc-1", true, "第一个答案", 100, 1));
     match sidecar_block(&v) {
@@ -214,7 +223,7 @@ fn sidecar_turn_finalizes_and_follow_ups_accumulate() {
 /// non-empty-answer contract (empty answers never overwrite a previous one).
 #[test]
 fn failed_turn_keeps_previous_answer_and_reports_failure() {
-    let mut v = ChatView::default();
+    let (mut v, _tx) = open_panel();
     v.apply(&sc_start("sc-1", "q"));
     v.apply(&sc_turn("sc-1", true, "好的", 10, 1));
     v.apply(&sc_turn("sc-1", false, "", 0, 0));
@@ -234,78 +243,83 @@ fn failed_turn_keeps_previous_answer_and_reports_failure() {
     }
 }
 
-/// Flattening carries exactly ONE header row per sidecar block (the focused
-/// body is swapped in by `compute_display`), and the header carries the
-/// question, the done status and the answer summary.
+/// The flat main transcript carries ZERO sidecar lines: the focused body is
+/// swapped in by `compute_display` and exit purges the block — the bypass
+/// Q/A is not a transcript artifact.
 #[test]
-fn flatten_carries_one_header_line_with_status_and_summary() {
-    let mut v = ChatView::default();
+fn flatten_emits_zero_lines_for_sidecar_blocks() {
+    let (mut v, _tx) = open_panel();
     v.apply(&sc_start("sc-1", "进度怎么样?"));
     v.apply(&sc_child(
         "sc-1",
         SessionEvent::TextDelta("内部delta".into()),
     ));
     let running = v.flatten_with(0, 1_000);
-    assert_eq!(
-        running
-            .iter()
-            .filter(|l| line_text(l).contains("sidecar"))
-            .count(),
-        1,
-        "exactly one header row while running"
-    );
-    let running_text = running
-        .iter()
-        .map(|l| line_text(l))
-        .find(|t| t.contains("sidecar"))
-        .unwrap();
-    assert!(running_text.contains("进度怎么样?"), "question is echoed");
-    assert!(running_text.contains("running"), "live status word");
     assert!(
-        !running_text.contains("内部delta"),
-        "child content stays out of the flat header"
+        !running.iter().any(|l| line_text(l).contains("sidecar")),
+        "running panel leaves no flat trace"
     );
 
     v.apply(&sc_turn("sc-1", true, "全部完成", 70, 1));
     let done_lines = v.flatten_with(0, 1_000);
-    let done_text = done_lines
-        .iter()
-        .map(|l| line_text(l))
-        .find(|t| t.contains("sidecar"))
-        .unwrap();
-    assert!(done_text.contains("done"), "terminal status word");
-    assert!(done_text.contains("全部完成"), "answer summary is echoed");
-    assert!(done_text.contains("70tok"), "token total is displayed");
-    assert!(done_text.contains("1r"), "round count is displayed");
-    assert_eq!(
-        done_lines.len(),
-        running.len(),
-        "header-only row: no body growth"
-    );
-}
-
-/// `focused` gates on `sidecar_focus` and returns the LAST sidecar block's
-/// view + question; `collapse_focused` collapses its nested view and is a
-/// no-op without focus.
-#[test]
-fn focused_and_collapse_follow_the_sidecar_focus_flag() {
-    let mut v = ChatView::default();
     assert!(
-        crate::chat::sidecar::focused(&v).is_none(),
-        "no focus, no swap"
+        !done_lines.iter().any(|l| line_text(l).contains("sidecar")),
+        "finished panel leaves no flat trace either"
     );
-    v.apply(&sc_start("sc-1", "q"));
-    let (view, question, tokens) = crate::chat::sidecar::focused(&v).expect("focused after Start");
-    assert_eq!(question, "q");
-    assert_eq!(tokens, 0, "no Turn yet: zero accumulated tokens");
-    assert_eq!(
-        view.blocks.len(),
-        0,
-        "the swapped view is the block's own nested ChatView"
-    );
-
-    crate::chat::sidecar::collapse_focused(&mut v);
-    v.sidecar_focus = false;
-    crate::chat::sidecar::collapse_focused(&mut v); // no-op, must not panic
-    assert!(crate::chat::sidecar::focused(&v).is_none());
 }
+
+/// `purge` (the ESC / Ctrl+L exit path) removes every sidecar block and
+/// drops the focus — the destroy contract the transcript relies on.
+#[test]
+fn purge_removes_every_sidecar_block_and_the_focus() {
+    let (mut v, _tx) = open_panel();
+    v.apply(&sc_start("sc-1", "q1"));
+    v.apply(&sc_turn("sc-1", true, "a1", 10, 1));
+    v.apply(&sc_start("sc-2", "q2"));
+    assert!(v.sidecar_focus);
+
+    crate::chat::sidecar::purge(&mut v);
+    assert!(
+        !v.blocks.iter().any(|b| matches!(b, ChatBlock::Sidecar { .. })),
+        "every sidecar block is gone"
+    );
+    assert!(!v.sidecar_focus, "focus is released");
+}
+
+/// The panel's Start adopts the placeholder in place: one block total, the
+/// placeholder's empty id replaced by the real conversation id.
+#[test]
+fn start_adopts_the_placeholder_in_place() {
+    let (mut v, _tx) = open_panel();
+    v.apply(&sc_start("sc-1", "这段代码做什么?"));
+    let count = v
+        .blocks
+        .iter()
+        .filter(|b| matches!(b, ChatBlock::Sidecar { .. }))
+        .count();
+    assert_eq!(count, 1, "placeholder adopted, not a second block");
+    match sidecar_block(&v) {
+        Some(ChatBlock::Sidecar { id, question, .. }) => {
+            assert_eq!(id, "sc-1");
+            assert_eq!(question, "这段代码做什么?");
+        }
+        other => panic!("expected Sidecar block, got {other:?}"),
+    }
+}
+
+/// A Start arriving while the panel is CLOSED (exit / `/task` switch) is a
+/// late frame from a destroyed conversation — swallowed, no block, no focus.
+#[test]
+fn start_with_closed_panel_is_swallowed() {
+    let mut v = ChatView {
+        sidecar_focus: false,
+        ..ChatView::default()
+    };
+    v.apply(&sc_start("sc-1", "迟到的问题"));
+    assert!(
+        sidecar_block(&v).is_none(),
+        "late Start must not push a zombie block"
+    );
+    assert!(!v.sidecar_focus, "and must not steal the focus");
+}
+

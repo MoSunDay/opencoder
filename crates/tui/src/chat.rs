@@ -459,6 +459,9 @@ impl ChatView {
         self.submitted = true;
         self.status.clear();
         self.turn_block_start = self.blocks.len();
+        // A new admitted turn invalidates the previous run's Say anchor: a
+        // repair without a fresh Say must insert, not overwrite.
+        self.round_assistant_idx = None;
         self.llm_round_started_at_ms = Some(opencoder_core::message::now_ms());
         self.frozen_round_ms = None;
     }
@@ -473,6 +476,10 @@ impl ChatView {
     pub fn reanchor_turn_after_user_echo(&mut self) {
         steps::set_turn_progress(&mut self.blocks, self.turn_block_start, false);
         self.turn_block_start = self.blocks.len();
+        // The echo opens a new turn boundary — same invalidation as
+        // `begin_turn`: the pre-echo Say anchor must not survive as a
+        // repair target for the post-echo run.
+        self.round_assistant_idx = None;
     }
 
     /// Push a non-streamed line and ensure the next TextDelta starts a new

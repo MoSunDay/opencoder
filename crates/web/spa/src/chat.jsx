@@ -35,7 +35,7 @@ import { Button, Input, Modal, Segmented, Space, Spin, Typography } from 'antd';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiGet, apiPost } from './api.js';
 import { openStream } from './sse.js';
-import { consumedEchoText, emptyStream, reduceFrame, turnsFromMessages, usageFromMessages, withUserTurn } from './reduce.js';
+import { consumedEchoText, emptyStream, ensurePendingEcho, reduceFrame, turnsFromMessages, usageFromMessages, withUserTurn } from './reduce.js';
 import { TranscriptView } from './transcript.jsx';
 import { DialogSidebar } from './chatSidebar.jsx';
 import { QueuePanel } from './queuePanel.jsx';
@@ -162,7 +162,17 @@ export function ChatPanel({ onNotice }) {
       const j = await apiGet('/api/sessions/' + encodeURIComponent(sid));
       const msgs = (j && j.messages) || [];
       if (msgs.length && aliveRef.current) {
-        setStream((s) => ({ ...s, turns: turnsFromMessages(msgs), usage: usageFromMessages(msgs) }));
+        setStream((s) => ({
+          ...s,
+          // TUI /act_clear_context <tail> parity (rebuild_after_reset): the
+          // reset fires inside the admitted turn, so the store snapshot has
+          // NOT recorded the echo yet — re-push the user boundary if the
+          // rebuilt turns lack it. The functional update reads the LIVE
+          // pendingEcho; on the done path it is already null and the snapshot
+          // itself carries the echo → no-op, behavior unchanged.
+          turns: ensurePendingEcho(turnsFromMessages(msgs), s.pendingEcho),
+          usage: usageFromMessages(msgs),
+        }));
       }
     } catch {
       setStream((s) => ({ ...s, turns: s.turns.length ? s.turns : currentTurns }));
@@ -173,10 +183,24 @@ export function ChatPanel({ onNotice }) {
     if (streamRef.current) {
       streamRef.current.abort();
     }
+    // startStream RESETS the whole stream state, so a caller's optimistic
+    // user echo must ride IN via initialTurns (pushing it before this call is
+    // a guaranteed wipe). A fresh run never sees a steer/queue echo frame
+    // first, so the optimistic turn is the run's ONLY user anchor — mirror
+    // the TUI push_user + pending_turn_echo pair: seed pendingEcho from the
+    // last initial turn when it is a user text turn (bare control commands
+    // echo nothing → empty initialTurns → null), so a transcript_reset
+    // rebuild (reloadAfterDone → ensurePendingEcho) re-pushes the boundary.
+    const initialList = Array.isArray(initialTurns) ? initialTurns : [];
+    const lastInitial = initialList[initialList.length - 1];
+    const initialPendingEcho = lastInitial && lastInitial.kind === 'text' && lastInitial.role === 'user'
+      ? lastInitial.text
+      : null;
     setStream({
       ...emptyStream(),
       turns: initialTurns || [],
       usage: initialUsage || null,
+      pendingEcho: initialPendingEcho,
       status: 'streaming',
     });
     streamRef.current = openStream({
@@ -209,17 +233,27 @@ export function ChatPanel({ onNotice }) {
   }, [onNotice, reloadAfterDone]);
 
   /// seq head → signed /events stream (sendLocal + 压缩 share the open path).
-  const openLocalStream = useCallback(async (sid) => {
-    // Snapshot the persisted head BEFORE posting so this stream carries only
-    // this turn's events (api_events.rs get_event_seq doc), then open SSE.
-    let after = 0;
-    try {
-      const q = await apiGet('/api/sessions/' + encodeURIComponent(sid) + '/seq');
-      after = (q && q.seq) || 0;
-    } catch {
-      after = 0;
+  /// `after` is the pre-POST seq head owned by the caller; when omitted we
+  /// fall back to fetching /seq here (best-effort, no ordering guarantee —
+  /// callers that need only-this-turn's events must snapshot BEFORE posting).
+  /// `initialTurns` threads the caller's optimistic echo turns into
+  /// startStream's reset state (see startStream's comment).
+  const openLocalStream = useCallback(async (sid, after, initialTurns) => {
+    let head = after;
+    if (head === undefined) {
+      try {
+        const q = await apiGet('/api/sessions/' + encodeURIComponent(sid) + '/seq');
+        head = (q && q.seq) || 0;
+      } catch {
+        head = 0;
+      }
     }
-    startStream({ path: '/api/sessions/' + encodeURIComponent(sid) + '/events', sessionId: sid, after });
+    startStream({
+      path: '/api/sessions/' + encodeURIComponent(sid) + '/events',
+      sessionId: sid,
+      after: head,
+      initialTurns,
+    });
   }, [startStream]);
 
   const sendLocal = async (prompt, delivery) => {
@@ -233,12 +267,29 @@ export function ChatPanel({ onNotice }) {
         first_created_at: Date.now(), last_created_at: Date.now(), task_count: null,
       }].concat(d));
     }
+    // Snapshot the persisted head BEFORE the POST: if /seq is fetched after
+    // the prompt is admitted, events emitted in between get seq ≤ head and
+    // are never replayed — this turn's first frames would be lost forever.
+    let after = 0;
+    try {
+      const q = await apiGet('/api/sessions/' + encodeURIComponent(sid) + '/seq');
+      after = (q && q.seq) || 0;
+    } catch {
+      after = 0;
+    }
     const ack = await apiPost('/api/sessions/' + encodeURIComponent(sid) + '/prompt',
       { prompt, delivery: delivery === 'queue' ? 'queue' : 'steer' });
     if (ack && ack.ok === false) {
       throw new Error(ack.error || 'prompt 被拒绝');
     }
-    await openLocalStream(sid);
+    // Optimistic echo, injected THROUGH the stream reset (TUI push_user
+    // parity): a fresh run carries no steer/queue echo frame, so this echo is
+    // the run's only user anchor and must render immediately — no waiting on
+    // server frames. consumedEchoText applies the echo contract: compound
+    // control commands echo only their tail; a bare control command echoes
+    // nothing → no bubble at all.
+    const echo = consumedEchoText(prompt);
+    await openLocalStream(sid, after, echo ? [{ kind: 'text', role: 'user', text: echo }] : []);
   };
 
   const sendRemote = async (prompt) => {
@@ -425,10 +476,20 @@ export function ChatPanel({ onNotice }) {
         return;
       }
       try {
+        // Same pre-POST snapshot as sendLocal: Compaction/TranscriptReset
+        // frames emitted between the POST ack and a late /seq fetch would be
+        // skipped forever.
+        let after = 0;
+        try {
+          const q = await apiGet('/api/sessions/' + encodeURIComponent(sid) + '/seq');
+          after = (q && q.seq) || 0;
+        } catch {
+          after = 0;
+        }
         await apiPost('/api/sessions/' + encodeURIComponent(sid) + '/compact');
         setBusy(true);
         setConnecting(true);
-        await openLocalStream(sid); // compaction deltas arrive on the stream
+        await openLocalStream(sid, after); // compaction deltas arrive on the stream
       } catch (e) {
         setConnecting(false);
         setBusy(false);

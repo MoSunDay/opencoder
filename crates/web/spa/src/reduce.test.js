@@ -1,6 +1,6 @@
 // vitest smoke tests for the pure transcript reducers (reduce.js).
 import { describe, expect, it } from 'vitest';
-import { consumedEchoText, deltaTextOf, emptyStream, nestedEventOf, reduceFrame, turnsFromMessages, withUserTurn } from './reduce.js';
+import { consumedEchoText, deltaTextOf, emptyStream, ensurePendingEcho, nestedEventOf, reduceFrame, turnsFromMessages, withUserTurn } from './reduce.js';
 
 describe('turnsFromMessages', () => {
   it('flattens text/tool blocks and attaches tool_result to the open call', () => {
@@ -17,13 +17,15 @@ describe('turnsFromMessages', () => {
     ]);
     expect(turns).toHaveLength(3);
     expect(turns[0]).toMatchObject({ kind: 'text', role: 'user', text: 'hi' });
-    expect(turns[1]).toMatchObject({ kind: 'steps', role: 'assistant' });
-    expect(turns[1].progressActive).toBe(false);
-    // One assistant message's non-task tool_uses = ONE step inside a steps
-    // turn; the same-message tool_result backfills the buffered call by id.
-    expect(turns[1].steps).toHaveLength(1);
-    expect(turns[1].steps[0].calls[0]).toMatchObject({ kind: 'tool', name: 'bash', output: 'a.txt', isError: false });
-    expect(turns[2]).toMatchObject({ kind: 'text', role: 'assistant', text: 'working' });
+    // The leading text block CLOSES the round: it lands above, and the
+    // message's non-task tool_uses form ONE step inside a NEW steps turn
+    // below it (floor contract); the same-message tool_result backfills the
+    // buffered call by id.
+    expect(turns[1]).toMatchObject({ kind: 'text', role: 'assistant', text: 'working' });
+    expect(turns[2]).toMatchObject({ kind: 'steps', role: 'assistant' });
+    expect(turns[2].progressActive).toBe(false);
+    expect(turns[2].steps).toHaveLength(1);
+    expect(turns[2].steps[0].calls[0]).toMatchObject({ kind: 'tool', name: 'bash', output: 'a.txt', isError: false });
     // serde wire tag is `kind` (crates/core/src/message.rs) — the real
     // contract; a `type`-only matcher returned [] and blanked every store
     // replay (caught by real-browser acceptance).
@@ -45,6 +47,48 @@ describe('turnsFromMessages', () => {
       kind: 'steps',
       steps: [{ thinking: 'thinking', calls: [{ kind: 'tool', name: 'bash', output: 'a.txt', isError: false }] }],
     });
+  });
+
+  // Pairing contract (TUI replay block-order): one user input owns one or
+  // MORE pairs of (n Steps + Say) — each non-empty assistant text block
+  // closes its sub-turn, so the tool round AFTER a Say opens a fresh ladder
+  // below it instead of merging into the group above. Tool results arrive
+  // as `role: 'tool'` carrier messages (core Role enum; synthetic user rows
+  // are skipped entirely).
+  it('pairs Say-closed sub-turns: [user, steps[a], say mid, steps[b], say final]', () => {
+    const turns = turnsFromMessages([
+      { role: 'user', blocks: [{ kind: 'text', text: 'go' }] },
+      { role: 'assistant', blocks: [{ kind: 'tool_use', id: 'a', name: 'bash', input: {} }] },
+      { role: 'tool', blocks: [{ kind: 'tool_result', tool_use_id: 'a', output: 'A', is_error: false }] },
+      { role: 'assistant', blocks: [{ kind: 'text', text: 'mid say' }] },
+      { role: 'assistant', blocks: [{ kind: 'tool_use', id: 'b', name: 'read', input: {} }] },
+      { role: 'tool', blocks: [{ kind: 'tool_result', tool_use_id: 'b', output: 'B', is_error: false }] },
+      { role: 'assistant', blocks: [{ kind: 'text', text: 'final say' }] },
+    ]);
+    expect(turns.map((t) => t.kind)).toEqual(['text', 'steps', 'text', 'steps', 'text']);
+    expect(turns[0]).toMatchObject({ role: 'user', text: 'go' });
+    expect(turns[1].steps[0].calls.map((c) => c.id)).toEqual(['a']);
+    expect(turns[1].steps[0].calls[0]).toMatchObject({ output: 'A', isError: false });
+    expect(turns[2]).toMatchObject({ kind: 'text', role: 'assistant', text: 'mid say' });
+    expect(turns[3].steps[0].calls.map((c) => c.id)).toEqual(['b']);
+    expect(turns[3].steps[0].calls[0]).toMatchObject({ output: 'B', isError: false });
+    expect(turns[4]).toMatchObject({ kind: 'text', role: 'assistant', text: 'final say' });
+  });
+
+  it('skips empty assistant text blocks (TUI replay parity): neither render nor close', () => {
+    const turns = turnsFromMessages([
+      {
+        role: 'assistant',
+        blocks: [
+          { kind: 'tool_use', id: 'a', name: 'bash', input: {} },
+          { kind: 'text', text: '   ' },
+          { kind: 'text', text: 'done' },
+        ],
+      },
+    ]);
+    expect(turns.map((t) => t.kind)).toEqual(['steps', 'text']);
+    expect(turns[0].steps[0].calls.map((c) => c.id)).toEqual(['a']);
+    expect(turns[1]).toMatchObject({ role: 'assistant', text: 'done' });
   });
 
   it('tolerates missing messages/blocks', () => {
@@ -285,12 +329,13 @@ describe('subagent folding', () => {
     st = reduceFrame(st, { event: 'subagent_child', data: { id: 'sa1', event: { TextDelta: 'hello' } } }, 1);
     st = reduceFrame(st, { event: 'subagent_child', data: { id: 'sa1', event: { ToolStart: { id: 't1', name: 'bash', input: { cmd: 'ls' } } } } }, 2);
     expect(st.turns[0].events).toHaveLength(2);
-    expect(st.turns[0].events[0]).toMatchObject({
+    // The child folds through the same reduceFrame: its Say is a floor, so
+    // the tool call joins a NEW steps ladder BELOW the text.
+    expect(st.turns[0].events[0]).toMatchObject({ kind: 'text', text: 'hello' });
+    expect(st.turns[0].events[1]).toMatchObject({
       kind: 'steps',
       steps: [{ calls: [{ kind: 'tool', id: 't1', name: 'bash', output: null }] }],
     });
-    // Child tool calls fold into the SAME steps ladder as the main stream.
-    expect(st.turns[0].events[1]).toMatchObject({ kind: 'text', text: 'hello' });
   });
 
   it('closes the block from subagent_end with ok/summary/cancelled', () => {
@@ -340,5 +385,79 @@ describe('status-line frames', () => {
     st = reduceFrame(st, { event: 'transcript_reset', data: {} }, 1);
     expect(st.turns).toHaveLength(1);
     expect(st.turns[0].open).toBeFalsy();
+  });
+});
+
+// TUI pending_turn_echo parity (chat_types.rs / replay.rs rebuild_after_reset):
+// the in-flight turn's user echo is remembered from submit/steer/queue echo
+// until done/error, survives transcript_reset, and a store-snapshot rebuild
+// re-pushes it when the snapshot lacks it (ensurePendingEcho).
+describe('pendingEcho (TUI pending_turn_echo parity)', () => {
+  it('steer/queue consumed echoes are remembered as pendingEcho', () => {
+    let s = reduceFrame(emptyStream(), { event: 'queue_consumed', data: { text: 'tail summary' } }, 0);
+    expect(s.pendingEcho).toBe('tail summary');
+    // A later steer in the same run replaces the remembered echo.
+    s = reduceFrame(s, { event: 'steer_consumed', data: { text: 'second steer' } }, 1);
+    expect(s.pendingEcho).toBe('second steer');
+  });
+
+  it('transcript_reset preserves pendingEcho; done/error clear it', () => {
+    let s = reduceFrame(emptyStream(), { event: 'steer_consumed', data: { text: 'tail' } }, 0);
+    s = reduceFrame(s, { event: 'transcript_reset', data: {} }, 1);
+    // The reset rebuilds from a snapshot that has NOT recorded the echo yet.
+    expect(s.pendingEcho).toBe('tail');
+    s = reduceFrame(s, { event: 'done', data: {} }, 2);
+    expect(s.pendingEcho).toBe(null);
+
+    let e = reduceFrame(emptyStream(), { event: 'queue_consumed', data: { text: 'boom tail' } }, 0);
+    e = reduceFrame(e, { event: 'error', data: { error: 'x' } }, 1);
+    expect(e.pendingEcho).toBe(null);
+    // A lag-marked error is a consumer re-sync, not a terminal — echo survives.
+    let lag = reduceFrame(emptyStream(), { event: 'steer_consumed', data: { text: 'lag tail' } }, 0);
+    lag = reduceFrame(lag, { event: 'error', data: { error: 'lag', lag: 3 } }, 1);
+    expect(lag.pendingEcho).toBe('lag tail');
+  });
+
+  it('withUserTurn attaches pendingEcho to the optimistic state', () => {
+    const s = withUserTurn(emptyStream(), 'optimistic');
+    expect(s.pendingEcho).toBe('optimistic');
+    // Empty text keeps the state untouched (no anchor to remember).
+    expect(withUserTurn(emptyStream(), '').pendingEcho).toBe(null);
+  });
+});
+
+describe('ensurePendingEcho (reset rebuild re-push, TUI rebuild_after_reset)', () => {
+  it('appends the echo when the snapshot lacks it', () => {
+    const turns = [
+      { kind: 'text', role: 'user', text: 'old prompt' },
+      { kind: 'text', role: 'assistant', text: '压缩后的上下文' },
+    ];
+    const out = ensurePendingEcho(turns, '收尾总结');
+    expect(out).toHaveLength(3);
+    expect(out[2]).toEqual({ kind: 'text', role: 'user', text: '收尾总结' });
+    // Pure: the input turns array is left untouched.
+    expect(turns).toHaveLength(2);
+  });
+
+  it('appends the echo when the rebuilt turns have no user turn at all', () => {
+    expect(ensurePendingEcho([{ kind: 'text', role: 'assistant', text: 'ok' }], 'tail'))
+      .toEqual([
+        { kind: 'text', role: 'assistant', text: 'ok' },
+        { kind: 'text', role: 'user', text: 'tail' },
+      ]);
+  });
+
+  it('is a no-op when the last user turn already carries the echo', () => {
+    const turns = [
+      { kind: 'text', role: 'assistant', text: 'ok' },
+      { kind: 'text', role: 'user', text: 'same tail' },
+    ];
+    expect(ensurePendingEcho(turns, 'same tail')).toBe(turns);
+  });
+
+  it('is a no-op for an empty (or whitespace) echo', () => {
+    const turns = [{ kind: 'text', role: 'user', text: 'hi' }];
+    expect(ensurePendingEcho(turns, '')).toBe(turns);
+    expect(ensurePendingEcho(turns, '   ')).toBe(turns);
   });
 });

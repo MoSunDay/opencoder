@@ -53,24 +53,41 @@ describe('steps ladder (live, mirror of chat_steps.rs)', () => {
     expect(s.turns.every((t) => t.kind !== 'think')).toBe(true);
   });
 
-  it('(c2) think → Say → think interleave: both runs land in ONE step, the steps turn sits BEFORE the Say', () => {
+  it('(c2) think → Say → think: the second reasoning opens a NEW ladder BELOW the Say', () => {
     let s = emptyStream();
     s = reduceFrame(s, { event: 'reasoning_delta', data: { text: 'first ' } }, 1);
     s = reduceFrame(s, { event: 'text_delta', data: { text: 'mid Say' } }, 2);
     s = reduceFrame(s, { event: 'reasoning_delta', data: { text: 'second' } }, 3);
-    // The walk rides back over the OPEN Say into the ladder behind it.
-    expect(s.turns.map((x) => x.kind)).toEqual(['steps', 'text']);
+    // The Say closed the first Turn: later reasoning belongs to the NEXT
+    // round's own ladder, placed under the text.
+    expect(s.turns.map((x) => x.kind)).toEqual(['steps', 'text', 'steps']);
     expect(s.turns[0].steps).toHaveLength(1);
-    expect(s.turns[0].steps[0].thinking).toBe('first second');
+    expect(s.turns[0].steps[0]).toMatchObject({ thinking: 'first ', calls: [] });
     expect(s.turns[1]).toMatchObject({ kind: 'text', role: 'assistant', text: 'mid Say' });
+    expect(s.turns[2].steps).toHaveLength(1);
+    expect(s.turns[2].steps[0]).toMatchObject({ thinking: 'second', calls: [] });
     s = reduceFrame(s, { event: 'tool_start', data: { id: 'a', name: 'bash', input: {} } }, 4);
-    // Say is presentation inside this Turn: the call joins the existing
-    // reasoning Step and no second group is manufactured.
-    expect(s.turns.map((x) => x.kind)).toEqual(['steps', 'text']);
-    expect(s.turns[0].steps).toHaveLength(1);
-    expect(s.turns[0].steps[0].thinking).toBe('first second');
-    expect(s.turns[0].steps[0].calls[0]).toMatchObject({ id: 'a', output: null });
+    // The call joins the NEW ladder under the Say, never the frozen one above.
+    expect(s.turns.map((x) => x.kind)).toEqual(['steps', 'text', 'steps']);
+    expect(s.turns[2].steps).toHaveLength(1);
+    expect(s.turns[2].steps[0].thinking).toBe('second');
+    expect(s.turns[2].steps[0].calls[0]).toMatchObject({ id: 'a', output: null });
+    expect(s.turns[0].steps[0].calls).toEqual([]);
     expect(s.turns.every((t) => t.kind !== 'think')).toBe(true);
+  });
+
+  it('(c2d) a new Say freezes the ladder ABOVE it and the next round re-arms', () => {
+    let s = withUserTurn(emptyStream(), 'go');
+    s = reduceFrame(s, { event: 'reasoning_delta', data: { text: 'r1' } }, 1);
+    expect(s.turns[1].progressActive).toBe(true);
+    s = reduceFrame(s, { event: 'text_delta', data: { text: 'say one' } }, 2);
+    // The Say-opening delta settles the ladder it closes — permanently.
+    expect(s.turns[1].progressActive).toBe(false);
+    s = reduceFrame(s, { event: 'reasoning_delta', data: { text: 'r2' } }, 3);
+    s = reduceFrame(s, { event: 'tool_start', data: { id: 'b', name: 'bash', input: {} } }, 4);
+    expect(s.turns.map((x) => x.kind)).toEqual(['text', 'steps', 'text', 'steps']);
+    expect(s.turns[1].progressActive).toBe(false);
+    expect(s.turns[3].progressActive).toBe(true);
   });
 
   it('(c2b) reasoning after a finished round opens a NEW think-only step in the same ladder', () => {
@@ -138,16 +155,44 @@ describe('steps ladder (live, mirror of chat_steps.rs)', () => {
     expect(s.turns.every((t) => t.kind !== 'think')).toBe(true);
   });
 
-  it('(d) Say between calls does not open a Step without new thinking', () => {
+  it('(d) a call after a Say joins a NEW ladder below it (its own Turn)', () => {
     let s = emptyStream();
     s = reduceFrame(s, { event: 'tool_start', data: { id: 'a', name: 'bash', input: {} } }, 1);
     s = reduceFrame(s, { event: 'tool_end', data: { id: 'a', name: 'bash', output: 'x', is_error: false } }, 2);
     s = reduceFrame(s, { event: 'text_delta', data: { text: 'interlude answer' } }, 3);
     s = reduceFrame(s, { event: 'tool_start', data: { id: 'b', name: 'read', input: {} } }, 4);
-    expect(s.turns.map((x) => x.kind)).toEqual(['steps', 'text']);
+    expect(s.turns.map((x) => x.kind)).toEqual(['steps', 'text', 'steps']);
     expect(s.turns[0].steps).toHaveLength(1);
-    expect(s.turns[0].steps[0].calls.map((call) => call.id)).toEqual(['a', 'b']);
+    expect(s.turns[0].steps[0].calls.map((call) => call.id)).toEqual(['a']);
     expect(s.turns[1]).toMatchObject({ kind: 'text', role: 'assistant', text: 'interlude answer' });
+    expect(s.turns[2].steps).toHaveLength(1);
+    expect(s.turns[2].steps[0].thinking).toBe('');
+    expect(s.turns[2].steps[0].calls.map((call) => call.id)).toEqual(['b']);
+  });
+
+  it('(d2) tool a → Say → tool b → Say: two ladders, round 2 re-arms and freezes at its OWN Say', () => {
+    let s = emptyStream();
+    s = reduceFrame(s, { event: 'tool_start', data: { id: 'a', name: 'bash', input: {} } }, 1);
+    s = reduceFrame(s, { event: 'tool_end', data: { id: 'a', name: 'bash', output: 'A', is_error: false } }, 2);
+    s = reduceFrame(s, { event: 'text_delta', data: { text: 'mid say' } }, 3);
+    // The first Say froze the ladder it closed…
+    expect(s.turns[0].progressActive).toBe(false);
+    s = reduceFrame(s, { event: 'tool_start', data: { id: 'b', name: 'read', input: {} } }, 4);
+    // …and round 2's call opened a FRESH ladder below the Say, progress
+    // re-armed: settle froze only the closing ladder, never the new one.
+    expect(s.turns.map((x) => x.kind)).toEqual(['steps', 'text', 'steps']);
+    expect(s.turns[0].steps[0].calls.map((call) => call.id)).toEqual(['a']);
+    expect(s.turns[0].progressActive).toBe(false);
+    expect(s.turns[2].progressActive).toBe(true);
+    s = reduceFrame(s, { event: 'tool_end', data: { id: 'b', name: 'read', output: 'B', is_error: false } }, 5);
+    expect(s.turns[2].progressActive).toBe(true); // alive through the inter-round gap
+    s = reduceFrame(s, { event: 'text_delta', data: { text: 'final say' } }, 6);
+    // …and frozen again exactly when ITS Say starts streaming.
+    expect(s.turns.map((x) => x.kind)).toEqual(['steps', 'text', 'steps', 'text']);
+    expect(s.turns[2].steps[0].calls.map((call) => call.id)).toEqual(['b']);
+    expect(s.turns[2].progressActive).toBe(false);
+    expect(s.turns[0].progressActive).toBe(false);
+    expect(s.turns[3]).toMatchObject({ kind: 'text', role: 'assistant', text: 'final say' });
   });
 
   it('(e) orphan tool_end synthesizes a finished call folded into the ladder', () => {
@@ -241,17 +286,36 @@ describe('steps ladder (snapshot, message-pair semantics)', () => {
     expect(turns[1].steps[0].thinking).toBe('plan');
   });
 
-  it('(k) reasoning before a mid-run Say folds into the FOLLOWING round (live parity)', () => {
-    // Say mid-run, tools after it: the reasoning joins the later step and
-    // the Say stays a top-level bubble — same fold as the live
-    // absorbSegmentThinking (c).
+  it('(k) a text block closes the round: reasoning folds call-less ABOVE it, later tools open a NEW ladder BELOW', () => {
+    // Text block == floor, unconditionally: no lookahead keeps the think
+    // pending for a later tool round (the old contract) — the Say owns it.
     const turns = turnsFromMessages([
       { role: 'assistant', blocks: [{ kind: 'reasoning', text: 'hmm' }, { kind: 'text', text: 'let me check' }] },
       { role: 'assistant', blocks: [{ kind: 'tool_use', id: 'a', name: 'bash', input: {} }] },
     ]);
-    expect(turns.map((t) => t.kind)).toEqual(['steps', 'text']);
-    expect(turns[0].steps[0].thinking).toBe('hmm');
+    expect(turns.map((t) => t.kind)).toEqual(['steps', 'text', 'steps']);
+    expect(turns[0].steps[0]).toMatchObject({ thinking: 'hmm', calls: [] });
     expect(turns[1]).toMatchObject({ kind: 'text', role: 'assistant', text: 'let me check' });
+    expect(turns[2].steps).toHaveLength(1);
+    expect(turns[2].steps[0].thinking).toBe('');
+    expect(turns[2].steps[0].calls.map((c) => c.id)).toEqual(['a']);
+  });
+
+  it('(k2) an image marker never closes the round — the next ladder lands below the Say, above the marker', () => {
+    const turns = turnsFromMessages([
+      { role: 'assistant', blocks: [{ kind: 'tool_use', id: 'a', name: 'bash', input: {} }] },
+      { role: 'assistant', blocks: [{ kind: 'text', text: 'mid say' }] },
+      { role: 'assistant', blocks: [{ kind: 'image_url', url: 'x.png' }] },
+      { role: 'assistant', blocks: [{ kind: 'tool_use', id: 'b', name: 'read', input: {} }] },
+    ]);
+    // The image turn is presentation, NOT a Say (TUI parity: Image blocks
+    // never close a turn): the floor stays below the Say, so round 2's
+    // ladder inserts there and pushes the marker down.
+    expect(turns.map((t) => t.kind)).toEqual(['steps', 'text', 'steps', 'text']);
+    expect(turns[0].steps[0].calls.map((c) => c.id)).toEqual(['a']);
+    expect(turns[1]).toMatchObject({ kind: 'text', role: 'assistant', text: 'mid say' });
+    expect(turns[2].steps[0].calls.map((c) => c.id)).toEqual(['b']);
+    expect(turns[3]).toMatchObject({ kind: 'text', role: 'assistant', text: '[image]', image: true });
   });
 
   it('(l) reasoning + text with NO tool after folds the think run into a call-less step', () => {
@@ -301,6 +365,7 @@ it('live SSE and snapshot replay produce the same Turn/Step/call hierarchy', () 
   live = reduceFrame(live, { event: 'tool_start', data: { id: 'b', name: 'read', input: {} } }, 6);
   live = reduceFrame(live, { event: 'tool_end', data: { id: 'b', name: 'read', output: 'B' } }, 7);
   live = reduceFrame(live, { event: 'text_delta', data: { text: 'done' } }, 8);
+  live = reduceFrame(live, { event: 'done', data: {} }, 9);
 
   const replay = turnsFromMessages([
     { role: 'user', blocks: [{ kind: 'text', text: 'go' }] },
@@ -329,6 +394,11 @@ it('live SSE and snapshot replay produce the same Turn/Step/call hierarchy', () 
     })));
 
   expect(hierarchy(live.turns)).toEqual(hierarchy(replay));
-  expect(hierarchy(live.turns)).toHaveLength(1);
-  expect(hierarchy(live.turns)[0]).toHaveLength(2);
+  // One submission, TWO rounds: the turns alternate [steps, say, steps, say].
+  expect(live.turns.map((t) => t.kind)).toEqual(['text', 'steps', 'text', 'steps', 'text']);
+  expect(replay.map((t) => t.kind)).toEqual(['text', 'steps', 'text', 'steps', 'text']);
+  expect(hierarchy(live.turns)).toHaveLength(2);
+  expect(hierarchy(live.turns)[0]).toHaveLength(1);
+  expect(hierarchy(live.turns)[1]).toHaveLength(2);
+  expect(live.turns.every((t) => t.progressActive !== true)).toBe(true);
 });

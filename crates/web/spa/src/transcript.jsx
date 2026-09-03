@@ -79,8 +79,10 @@ function TextContent({ turn }) {
 }
 
 /// One visual assistant Turn. `itemsFromTurns` merges all adjacent step
-/// segments into one ladder and keeps speech as visible Say content. The
-/// resulting top-level shape is always one `N Steps` summary plus Say.
+/// segments into one ladder and keeps the closing Say as visible speech —
+/// the run ends at its Say, so a ladder streamed after it renders as its own
+/// Turn. The resulting top-level shape is always one `N Steps` summary plus
+/// Say.
 function AssistantTurnContent({ turn }) {
   const steps = turn && Array.isArray(turn.steps) ? turn.steps : [];
   const say = turn && Array.isArray(turn.say) ? turn.say : [];
@@ -95,6 +97,11 @@ function AssistantTurnContent({ turn }) {
       {say.map((part, index) => {
         if (part.kind === 'think') {
           return <ThinkContent key={'think:' + index} turn={part} />;
+        }
+        if (part.kind === 'sys') {
+          // Absorbed retry/status row (bubbleItems): render as the centered
+          // sys line inside the bubble tail, not as an AI text part.
+          return <SysContent key={'sys:' + index} turn={part} />;
         }
         return (
           <div key={'say:' + index} style={{ marginTop: 8 }}>
@@ -150,7 +157,8 @@ const BUBBLE_ROLES = {
     contentRender: (content) => <ThinkContent turn={content} />,
   },
   // Defensive standalone step ladder. Normal steps+Say runs are grouped by
-  // itemsFromTurns into assistantTurn above.
+  // itemsFromTurns into assistantTurn above; this only fires for turns the
+  // grouping walk cannot attach (e.g. non-assistant role).
   steps: {
     placement: 'start',
     variant: 'borderless',

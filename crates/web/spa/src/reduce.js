@@ -14,7 +14,6 @@ import {
   backfillStepsCall,
   closeOpenText,
   flushPendingThink,
-  placeThinkingStep,
   settleTurnProgress,
 } from './steps/reducer.js';
 
@@ -68,7 +67,11 @@ function subagentIndex(turns, id) {
 }
 
 export function emptyStream() {
-  return { turns: [], usage: null, status: 'idle', error: null };
+  // pendingEcho: the in-flight turn's user echo (TUI chat_types.rs
+  // pending_turn_echo parity) — remembered from submit/steer/queue echo until
+  // done/error, kept across transcript_reset so the store-snapshot rebuild
+  // can re-push the user boundary (ensurePendingEcho).
+  return { turns: [], usage: null, status: 'idle', error: null, pendingEcho: null };
 }
 
 function blockToTurns(role, b) {
@@ -93,60 +96,29 @@ function blockToTurns(role, b) {
     return [{ kind: 'tool', role, id: b.tool_use_id || b.id || null, name: 'result', input: null, output: fmtValue(out), isError: !!b.is_error, durationMs: null }];
   }
   if (kind === 'image' || kind === 'image_url') {
-    return [{ kind: 'text', role, text: '[image]' }];
+    // Presentation marker, never a Say: `image:true` keeps it from closing
+    // the sub-turn (TUI parity: Image blocks never close a turn).
+    return [{ kind: 'text', role, text: '[image]', image: true }];
   }
   return [];
 }
 
-/// A real user message ends the current assistant segment: synthetic user
-/// rows without `display` are message-pair tool-result carriers (internal),
-/// everything user-visible (real prompts, `$skill` display echoes) is a
-/// boundary for thinking absorption.
-function isSegmentBoundary(m) {
-  return !!(m && m.role === 'user' && !(m.synthetic && !m.display));
-}
-
-/// Snapshot messages → turns. Message-pair semantics ported from the TUI
-/// replay's coalesce_steps: reasoning buffers into a pending-think until the
-/// next step consumes it; each assistant message's non-task tool_uses form
-/// ONE step appended at message end, folded into the one steps turn owned by
-/// the current user segment even when Say/status rows interleave. A
-/// tool-turn's thinking lives INSIDE its
-/// step (live parity with absorbSegmentThinking — no free-floating think
-/// turn above the ladder): an assistant Say folds the pending think run
-/// when NO non-task tool_use remains ahead in the same user segment (a
-/// lookahead pre-pass) — as a call-less step, never a top-level think turn;
-/// the same fold applies to reasoning before a user boundary and to the
-/// trailing run at the end of the walk. The user/synthetic/display echo
-/// contracts are unchanged.
+/// Snapshot messages → turns. Message-pair semantics now mirror the TUI
+/// replay's BLOCK-ORDER walk (replay.rs): one user input owns one or MORE
+/// pairs of (n Steps + Say) - a non-empty assistant Text block is a Say that
+/// CLOSES the current sub-turn, so its buffered round (and any dangling
+/// reasoning) flushes into the ladder ABOVE the Say, and every tool_use
+/// after it opens a NEW ladder BELOW it. Empty assistant text blocks vanish
+/// like in the replay; image markers render but never close. Reasoning
+/// buffers into a pending-think that the next round's first tool_use
+/// consumes (cross-message), else folds as a call-less step at the next
+/// Say/boundary/walk end. The user/synthetic/display echo contracts are
+/// unchanged.
 export function turnsFromMessages(messages) {
   const turns = [];
   const list = Array.isArray(messages) ? messages : [];
   let pendingThink = '';
-  // Lookahead pre-pass. `stepToolAt[mi]` = last non-task tool_use block
-  // index of message mi (-1 none); `toolAhead[mi]` = whether any non-task
-  // tool_use sits in a LATER message before the next user boundary (task
-  // handles are not steps — they never absorb thinking, mirroring the live
-  // task branch). Backward recurrence: the range for mi is {mi+1} plus the
-  // range for mi+1 unless mi+1 is itself a boundary.
   const blocksOf = (m) => (m && m.blocks) || [];
-  const isStepToolBlock = (b) =>
-    (b && (b.kind || b.type)) === 'tool_use' && ((b && b.name) || 'tool') !== 'task';
-  const stepToolAt = list.map((m) => {
-    let idx = -1;
-    blocksOf(m).forEach((b, i) => {
-      if (isStepToolBlock(b)) {
-        idx = i;
-      }
-    });
-    return idx;
-  });
-  const toolAhead = new Array(list.length + 1).fill(false);
-  for (let i = list.length - 1; i >= 0; i -= 1) {
-    const next = list[i + 1];
-    toolAhead[i] = !!(next && !isSegmentBoundary(next)
-      && (blocksOf(next).some(isStepToolBlock) || toolAhead[i + 1]));
-  }
   for (let mi = 0; mi < list.length; mi += 1) {
     const m = list[mi];
     const role = (m && m.role) || 'assistant';
@@ -173,18 +145,32 @@ export function turnsFromMessages(messages) {
         continue;
       }
       if (bkind === 'text') {
-        // A Say folds the pending think run ONLY when this user segment
-        // holds no further tool round (pure-text round). When tools follow
-        // (same message or a later one before the next user boundary), the
-        // think stays pending and folds into that round's step, exactly like
-        // the live absorbSegmentThinking. User text blocks are segment
-        // boundaries themselves — always fold.
-        const toolsFollow = stepToolAt[mi] > bi || toolAhead[mi];
-        if (pendingThink && (role !== 'assistant' || !toolsFollow)) {
-          // No tool round will consume the run: fold it into the ladder as a
-          // call-less step (TUI flush_pending_thinking parity) instead of
-          // leaving a top-level think turn.
-          placeThinkingStep(turns, pendingThink);
+        const text = typeof (b && b.text) === 'string' ? b.text : '';
+        if (role === 'assistant') {
+          if (text.trim() === '') {
+            // Mirror the TUI replay: empty Say blocks vanish - they neither
+            // render nor close the sub-turn.
+            continue;
+          }
+          // A non-empty assistant Text block is a Say: it CLOSES the current
+          // sub-turn (TUI replay walks blocks in order - a Text block closes
+          // the turn; tool_uses after it belong to the NEXT ladder). Flush
+          // the buffered round into the ladder ABOVE the Say first.
+          if (roundCalls.length > 0) {
+            appendStepTurn(turns, roundThinking || pendingThink, roundCalls);
+            roundThinking = '';
+            roundCalls = [];
+            pendingThink = '';
+          } else if (pendingThink) {
+            appendStepTurn(turns, pendingThink, []);
+            pendingThink = '';
+          }
+        } else if (pendingThink) {
+          // A user text block is a segment boundary: the previous segment's
+          // dangling reasoning folds into ITS ladder (floor-aware - below
+          // the last Say, above the echo), never into the next segment's
+          // round.
+          appendStepTurn(turns, pendingThink, []);
           pendingThink = '';
         }
         if (displayText) {
@@ -249,8 +235,11 @@ export function turnsFromMessages(messages) {
       appendStepTurn(turns, roundThinking, roundCalls);
     }
   }
+  // Trailing reasoning no tool round ever consumes (a pure-text round, or a
+  // turn cut off before its Say): a call-less step into the current group,
+  // or a NEW group below the last Say via the floor-aware insert.
   if (pendingThink) {
-    placeThinkingStep(turns, pendingThink);
+    appendStepTurn(turns, pendingThink, []);
     pendingThink = '';
   }
   return turns;
@@ -390,11 +379,12 @@ export function reduceFrame(state, frame, nowMs) {
         flushed.push(call);
         return withTurns(state, flushed);
       }
-      // Step-ladder fold: EVERY think turn of this user segment becomes the
-      // round's step thinking (crossing over Say, which stays top-level — a
-      // tool turn never leaves free-floating thinking above it), then the
-      // call joins the trailing Step regardless of completion/round timing;
-      // only a later Thinking run opens the next Step.
+      // Step-ladder fold: any legacy think turn above the last user echo
+      // becomes the round's step thinking, then the call joins the ladder
+      // the floor-aware helpers locate - the one under the LAST Say when a
+      // Say already closed this sub-turn's predecessor (fresh ladder below
+      // it), else the turn's own group. Only a later Thinking run opens the
+      // next Step.
       const thinking = absorbSegmentThinking(turns);
       appendStepCall(turns, thinking, call, true);
       return withTurns(state, turns);
@@ -452,14 +442,18 @@ export function reduceFrame(state, frame, nowMs) {
       // ladder before the echo lands (a later tool_start can never cross it).
       const turns = closeOpenText(flushPendingThink(settleTurnProgress(state.turns)));
       turns.push({ kind: 'text', role: 'user', text });
-      return withTurns(state, turns);
+      // Remember the echo (TUI pending_turn_echo): a mid-run transcript_reset
+      // rebuilds from a store snapshot that has not recorded it yet.
+      return withTurns({ ...state, pendingEcho: text }, turns);
     }
     case 'status': {
       const text = typeof data.status === 'string' ? data.status : '';
-      // Status is presentation inside the admitted Turn. Fold any legacy
+      // Status is presentation inside the admitted sub-turn. Fold any legacy
       // top-level think run before placing the marker; the canonical steps
-      // item remains discoverable across it until a real user boundary.
-      return text ? withTurns(state, flushPendingThink(state.turns).concat([{ kind: 'sys', text }])) : state;
+      // item stays discoverable across it until a Say or user echo lands.
+      // bubbleItems absorbs the row into the adjacent assistant run so a
+      // mid-run badge never splits the [steps … say] bubble.
+      return withTurns(state, flushPendingThink(state.turns).concat([{ kind: 'sys', text }]));
     }
     case 'compaction': {
       const summary = typeof data.summary === 'string' ? data.summary : 'compacted';
@@ -544,13 +538,21 @@ export function reduceFrame(state, frame, nowMs) {
       // cannot be rebuilt from the frame. chat.jsx reacts to this event by
       // re-fetching the store snapshot (same path as `done`); here we only
       // close the open text turn so a lost reload still renders sanely.
+      // pendingEcho is INTENTIONALLY preserved: the reset fires inside the
+      // admitted turn (compound `/act_clear_context <tail>`), and the store
+      // snapshot has not recorded the echo yet — the reload re-pushes it
+      // (ensurePendingEcho, TUI rebuild_after_reset parity).
       return { ...state, turns: closeOpenText(settleTurnProgress(state.turns)) };
     case 'done':
       // A pure-text round (or the turn's final Say round) folds its think
       // turns into a call-less step — no think turn survives above the ladder.
+      // Turn complete: its echo must never resurface on a later rebuild
+      // (TUI parity — a bare /act_clear_context mid-run must not resurrect
+      // the previous turn's prompt).
       return {
         ...state,
         status: 'done',
+        pendingEcho: null,
         turns: closeOpenText(flushPendingThink(settleTurnProgress(state.turns))),
       };
     case 'error': {
@@ -566,6 +568,7 @@ export function reduceFrame(state, frame, nowMs) {
         ...state,
         status: 'error',
         error: String(data.error || data.message || 'error'),
+        pendingEcho: null,
         turns: closeOpenText(flushPendingThink(settleTurnProgress(state.turns))),
       };
     }
@@ -598,9 +601,34 @@ export function withUserTurn(state, text) {
   if (!text) {
     return state;
   }
+  // Also remember the echo as pendingEcho: a mid-run transcript_reset rebuild
+  // must re-push this boundary if the store snapshot lacks it.
   return withTurns(
-    state,
+    { ...state, pendingEcho: text },
     closeOpenText(flushPendingThink(settleTurnProgress(state.turns)))
       .concat([{ kind: 'text', role: 'user', text }]),
   );
+}
+
+/// Mirror of the TUI's rebuild_after_reset echo re-push
+/// (session_ui/replay.rs): after a mid-run TranscriptReset the transcript is
+/// rebuilt from the store snapshot, but the admitted turn's echo (e.g. the
+/// tail of a compound `/act_clear_context <tail>`) is recorded only AFTER the
+/// reset fired — the snapshot lacks it, and without re-pushing, the running
+/// turn loses its user boundary (its steps merge into the previous turn).
+/// If `echo` is non-empty and the LAST user text turn in `turns` does not
+/// already carry it, append a user echo turn; otherwise return `turns`
+/// unchanged (including an empty echo — nothing to anchor).
+export function ensurePendingEcho(turns, echo) {
+  const text = typeof echo === 'string' ? echo : '';
+  if (!text.trim()) {
+    return turns;
+  }
+  const list = Array.isArray(turns) ? turns : [];
+  for (let i = list.length - 1; i >= 0; i -= 1) {
+    if (list[i] && list[i].kind === 'text' && list[i].role === 'user') {
+      return list[i].text === text ? list : list.concat([{ kind: 'text', role: 'user', text }]);
+    }
+  }
+  return list.concat([{ kind: 'text', role: 'user', text }]);
 }

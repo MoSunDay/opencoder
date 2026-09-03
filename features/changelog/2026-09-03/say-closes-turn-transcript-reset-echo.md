@@ -50,7 +50,7 @@ Turn 契约 `1 Turn = n Steps + Say` 存在两处漏洞：
 
 - `cargo test -p opencoder-tui --lib`：全绿（含新增 4 例 + 更新 3 例）。
 - 按用户指示本轮跳过 clippy/test（fmt 已过）；下一轮迭代前需补全量回归。
-- SPA 无代码变更（其 reducer 本就以 Text 块推进回合边界，无此缺陷）。
+- SPA 当时未改——此判断**有误**：其 reducer 以 user 边界聚合单一阶梯，Say 不收合；已由 [N Steps 与 Say 成对](say-pairs-steps-all-surfaces.md) 修正。
 
 ## Related Docs
 

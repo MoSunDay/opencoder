@@ -23,6 +23,11 @@ import { clearCredentials, setCredentials, setState } from './store.js';
 // Every request is recorded so assertions can inspect method + signed body.
 let hits = [];
 
+// Per-session bodies for GET /api/sessions/:id — the done / transcript_reset
+// reload paths. Default {} (empty snapshot → streamed turns kept); a test
+// seeds an entry to simulate what the store has (or has NOT) recorded.
+let sessionSnapshots = {};
+
 const jsonResponse = (body) => Promise.resolve({
   ok: true,
   status: 200,
@@ -87,6 +92,9 @@ const installRouter = () => {
     }
     if (url === '/api/sessions' || url.startsWith('/api/sessions?')) {
       return method === 'POST' ? jsonResponse({ id: 's1' }) : jsonResponse({ sessions: [] });
+    }
+    if (/^\/api\/sessions\/[^/]+$/.test(url)) {
+      return jsonResponse(sessionSnapshots[url.slice('/api/sessions/'.length)] || {});
     }
     return jsonResponse({});
   }));
@@ -186,6 +194,32 @@ describe('ChatPanel full chain (Sender → signed POST → SSE)', () => {
     await waitFor(() => {
       expect(hits.some((h) => h.url.includes('/api/sessions/s1/events'))).toBe(true);
     });
+  });
+
+  it('snapshots the /seq head BEFORE posting the prompt (lost-frame race)', async () => {
+    const { container, textarea } = await mountChat();
+    await act(async () => {
+      fireEvent.change(textarea, { target: { value: 'race' } });
+    });
+    await act(async () => {
+      fireEvent.keyDown(container.querySelector('textarea.ant-sender-input'), { key: 'Enter', keyCode: 13 });
+    });
+    // Wait for the whole chain (session create → seq → prompt ack → stream),
+    // then assert ORDERING via hits: entries are pushed synchronously, so
+    // findIndex is a faithful call-order record.
+    await waitFor(() => {
+      expect(hits.some((h) => h.url.includes('/api/sessions/s1/events'))).toBe(true);
+    });
+    const promptIdx = hits.findIndex((h) => h.method === 'POST' && h.url.includes('/prompt'));
+    const seqIdx = hits.findIndex((h) => h.method === 'GET' && /\/api\/sessions\/[^/]+\/seq/.test(h.url));
+    const eventsIdx = hits.findIndex((h) => h.url.includes('/api/sessions/s1/events'));
+    // If the /seq head is fetched AFTER the prompt POST, events the run emits
+    // between the ack and that late fetch get seq ≤ head and are never
+    // replayed on the stream — this turn's first frames are lost forever.
+    expect(promptIdx).toBeGreaterThan(-1);
+    expect(seqIdx).toBeGreaterThan(-1);
+    expect(seqIdx).toBeLessThan(promptIdx);
+    expect(eventsIdx).toBeGreaterThan(promptIdx);
   });
 
   it('swaps in the Sender stop button while busy and posts interrupt on click', async () => {
@@ -303,5 +337,103 @@ describe('ChatPanel full chain (Sender → signed POST → SSE)', () => {
     await waitFor(() => {
       expect(hits.some((h) => h.url === '/api/sessions/rs1')).toBe(true);
     });
+  });
+});
+
+// TUI parity for the two composer/transcript gaps: the optimistic user echo
+// on a fresh local submit (push_user — no waiting on any server frame) and
+// the pending_turn_echo re-push after a transcript_reset rebuild whose store
+// snapshot has not recorded the echo yet (rebuild_after_reset).
+describe('ChatPanel optimistic echo & transcript_reset rebuild', () => {
+  const mountChat = async () => {
+    setCredentials('smoke-token', '');
+    const { container } = render(<ChatPanel />);
+    const textarea = await waitFor(() => {
+      const el = container.querySelector('textarea.ant-sender-input');
+      expect(el).toBeTruthy();
+      return el;
+    });
+    return { container, textarea };
+  };
+
+  it('renders the optimistic user bubble right after a fresh local submit (no frames yet)', async () => {
+    const { container, textarea } = await mountChat();
+    await act(async () => {
+      fireEvent.change(textarea, { target: { value: '马上开始' } });
+    });
+    await act(async () => {
+      fireEvent.keyDown(container.querySelector('textarea.ant-sender-input'), { key: 'Enter', keyCode: 13 });
+    });
+    // A fresh run carries NO steer/queue echo frame, so the optimistic echo
+    // is the run's only user anchor (TUI push_user): it must render before
+    // any stream frame — injected via startStream's initialTurns so the
+    // stream reset cannot swallow it.
+    await waitFor(() => {
+      const bubble = container.querySelector('.ant-bubble-end');
+      expect(bubble).toBeTruthy();
+      expect(bubble.textContent).toContain('马上开始');
+    });
+    // No terminal frame arrived yet → still streaming, composer busy.
+    expect(container.querySelector('.ant-sender-actions-btn-loading-button')).toBeTruthy();
+  });
+
+  it('renders no optimistic bubble for a bare control command submit', async () => {
+    const { container, textarea } = await mountChat();
+    await act(async () => {
+      fireEvent.change(textarea, { target: { value: '/act' } });
+    });
+    await act(async () => {
+      fireEvent.keyDown(container.querySelector('textarea.ant-sender-input'), { key: 'Enter', keyCode: 13 });
+    });
+    // consumedEchoText('/act') === '' — a bare control command echoes nothing
+    // (the runner applies it inline), so the opened stream renders no bubble.
+    await waitFor(() => {
+      expect(hits.some((h) => h.url.includes('/events'))).toBe(true);
+    });
+    expect(container.querySelectorAll('.ant-bubble')).toHaveLength(0);
+  });
+
+  it('re-pushes the pending echo after transcript_reset when the store snapshot lacks it', async () => {
+    // The /act_clear_context <tail> scenario (TUI rebuild_after_reset): the
+    // compound submission echoes its tail locally; the runner applies
+    // ClearContext mid-run and the transcript resets, but the snapshot the
+    // rebuild re-fetches has NOT recorded the tail yet — without the re-push
+    // (ensurePendingEcho on pendingEcho) the rebuilt transcript ends at the
+    // folded context and the running turn loses its user anchor.
+    sessionSnapshots.s1 = {
+      messages: [{ role: 'assistant', blocks: [{ kind: 'text', text: '压缩后的上下文' }] }],
+    };
+    const { container, textarea } = await mountChat();
+    await act(async () => {
+      fireEvent.change(textarea, { target: { value: '/act_clear_context 收尾总结' } });
+    });
+    await act(async () => {
+      fireEvent.keyDown(container.querySelector('textarea.ant-sender-input'), { key: 'Enter', keyCode: 13 });
+    });
+    // Optimistic echo = the compound tail only; the command head never echoes.
+    await waitFor(() => {
+      const bubble = container.querySelector('.ant-bubble-end');
+      expect(bubble).toBeTruthy();
+      expect(bubble.textContent).toContain('收尾总结');
+    });
+    await waitFor(() => {
+      expect(liveEventCtl).toBeTruthy();
+    });
+    const enc = new TextEncoder();
+    await act(async () => {
+      liveEventCtl.enqueue(enc.encode('event: transcript_reset\ndata: {}\n\n'));
+    });
+    // The rebuild fetched the assistant-only snapshot and re-pushed the echo:
+    // the rebuilt transcript ENDS with the user bubble.
+    await waitFor(() => {
+      expect(hits.some((h) => h.url === '/api/sessions/s1')).toBe(true);
+    });
+    await waitFor(() => {
+      const ends = container.querySelectorAll('.ant-bubble-end');
+      expect(ends).toHaveLength(1);
+      expect(ends[0].textContent).toContain('收尾总结');
+    });
+    expect(screen.getByText('压缩后的上下文')).toBeTruthy();
+    expect(container.querySelectorAll('.ant-bubble')).toHaveLength(2);
   });
 });

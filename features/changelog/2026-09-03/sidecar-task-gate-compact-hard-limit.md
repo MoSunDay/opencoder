@@ -4,7 +4,7 @@ Commit: a783fb1
 
 ## Context
 
-两条独立于 Say 配对工作的 session 缺陷（bugfix brief round 2 的 #2/#7；同 brief 的 #4/#6 已随 [N Steps 与 Say 成对](say-pairs-steps-all-surfaces.md) 落地；#3/#5 中 SPA seq 竞态的一半已随该篇 chat.jsx/chat.dom.test.jsx 落地，SSE resync 去重仍未做，保持 open）：
+两条独立于 Say 配对工作的 session 缺陷（bugfix brief round 2 的 #2/#7；同 brief 的 #4/#6 已随 [N Steps 与 Say 成对](say-pairs-steps-all-surfaces.md) 落地；#3/#5 中 SPA seq 竞态的一半已随该篇 chat.jsx/chat.dom.test.jsx 落地，SSE resync 去重已随后续 [SSE resync 水位重建](sse-resync-applyfloor-watermark.md) 收口）：
 
 1. **sidecar 借 `task` 外泄写能力**：`execute_call_with_timeout` 对 `task` 早于通用门返回，sidecar 可 spawn 全写能力 build 子代理改仓库——5f06260 给了只读 bash 门，却留下这个更大的口子。
 2. **手动压缩越过上下文窗口静默劣化**：`compaction.auto=false` 时 `should_compact` 恒 false，transcript 超模型窗口后每问必 400/劣化且无从得知该拉哪个杆。

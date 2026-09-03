@@ -187,3 +187,113 @@ describe('sse lag contract', () => {
     stream.abort();
   });
 });
+
+describe('sse resync dedup + onResync watermark (round-2 #5)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    signFetchMock.mockReset();
+    apiGetMock.mockReset();
+  });
+
+  /// sseResponse with `id:` lines — the persisted row seq rides the id line.
+  function sseResponseIds(frames) {
+    const enc = new TextEncoder();
+    const payload = frames
+      .map((f) => 'event: ' + f.event + '\n' + (f.id ? 'id: ' + f.id + '\n' : '') + 'data: ' + JSON.stringify(f.data || {}) + '\n\n')
+      .join('');
+    return {
+      ok: true,
+      status: 200,
+      body: new ReadableStream({
+        start(controller) {
+          controller.enqueue(enc.encode(payload));
+        },
+      }),
+    };
+  }
+
+  it('exposes the id-line seq on the frame and drops repeats at/below the delivered seq', async () => {
+    signFetchMock.mockResolvedValueOnce(sseResponseIds([
+      { event: 'text_delta', data: { text: 'a' }, id: 5 },
+      { event: 'text_delta', data: { text: 'a' }, id: 5 }, // exact repeat
+      { event: 'text_delta', data: { text: 'b' }, id: 4 }, // below watermark
+      { event: 'text_delta', data: { text: 'c' }, id: 6 },
+      { event: 'text_delta', data: { text: 'live' } }, // no seq: never deduped
+    ]));
+    const frames = [];
+    const statuses = [];
+    const stream = openStream({
+      path: '/api/sessions/s1/events',
+      sessionId: 's1',
+      after: 0,
+      onFrame: (f) => frames.push(f),
+      onStatus: (s) => statuses.push(s),
+    });
+    await flush();
+    expect(frames.map((f) => f.seq)).toEqual([5, 6, null]);
+    expect(frames.map((f) => f.data.text)).toEqual(['a', 'c', 'live']);
+    expect(statuses.filter((s) => s === 'live')).toHaveLength(5); // repeats still prove liveness
+    stream.abort();
+  });
+
+  it('a lag re-sync with onResync reconnects above the returned floor and skips the legacy /seq fetch', async () => {
+    const connA = liveStream();
+    const connB = liveStream();
+    signFetchMock.mockResolvedValueOnce(connA.resp).mockResolvedValueOnce(connB.resp);
+    const frames = [];
+    const resyncArgs = [];
+    const stream = openStream({
+      path: '/api/sessions/s1/events',
+      sessionId: 's1',
+      after: 0,
+      onFrame: (f) => frames.push(f),
+      onResync: async (lastSeq) => {
+        resyncArgs.push(lastSeq);
+        return 42; // the app rebuilt its state from the snapshot at seq 42
+      },
+    });
+    await flush();
+    connA.push('error', { error: 'event lag: 5 events dropped', lag: 5 });
+    await flush();
+    await vi.advanceTimersByTimeAsync(1000);
+    await flush();
+    expect(resyncArgs).toEqual([0]);
+    expect(apiGetMock).not.toHaveBeenCalled(); // onResync owns the cursor
+    expect(signFetchMock).toHaveBeenCalledTimes(2);
+    expect(signFetchMock.mock.calls[1][1]).toContain('after=42');
+    // The replacement stream runs to its terminal frame normally.
+    connB.push('done', {});
+    await flush();
+    expect(frames.map((f) => f.event)).toEqual(['error', 'done']);
+    stream.abort();
+  });
+
+  it('a throwing onResync falls back to the capped legacy cursor', async () => {
+    const connA = liveStream();
+    const connB = liveStream();
+    signFetchMock.mockResolvedValueOnce(connA.resp).mockResolvedValueOnce(connB.resp);
+    apiGetMock.mockResolvedValue({ seq: 1000 });
+    const stream = openStream({
+      path: '/api/sessions/s1/events',
+      sessionId: 's1',
+      after: 0,
+      onFrame: () => {},
+      onResync: async () => {
+        throw new Error('snapshot unavailable');
+      },
+    });
+    await flush();
+    connA.push('error', { error: 'event lag: 9 events dropped', lag: 9 });
+    await flush();
+    await vi.advanceTimersByTimeAsync(1000);
+    await flush();
+    expect(apiGetMock).toHaveBeenCalledTimes(1); // legacy path re-read /seq
+    expect(signFetchMock).toHaveBeenCalledTimes(2);
+    expect(signFetchMock.mock.calls[1][1]).toContain('after=600'); // max(0, 1000-400)
+    stream.abort();
+  });
+});

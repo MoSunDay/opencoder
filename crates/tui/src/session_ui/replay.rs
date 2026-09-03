@@ -24,7 +24,7 @@ use crate::theme;
 /// Replay a single persisted message into `chat`: reconstruct `Assistant` text
 /// and `ChatBlock::StepGroup` blocks (headers from `ToolUse`, outputs from
 /// matching `ToolResult`s), mirroring the live `ChatView::apply` path
-/// (consecutive calls join the trailing group) for resumed/compacted
+/// (calls accumulate in the trailing step until new Thinking) for resumed/compacted
 /// sessions. Thinking folding into steps happens once, via `coalesce_steps`
 /// at the end of replay.
 pub(super) fn replay_one(
@@ -157,10 +157,9 @@ pub(super) fn replay_one(
                 })
                 .collect();
             if !calls.is_empty() {
-                // Persisted assistant-message boundaries are explicit LLM
-                // rounds: all parallel tool_use blocks in this message share
-                // ONE Step. `coalesce_steps` later folds every round in the
-                // surrounding user Turn into one canonical StepGroup.
+                // All tool_use blocks in this message enter one provisional
+                // Step. `coalesce_steps` later merges consecutive call-only
+                // steps and keeps only new Thinking as a Step boundary.
                 chat.blocks.push(ChatBlock::StepGroup {
                     steps: vec![Step {
                         thinking_raw: String::new(),

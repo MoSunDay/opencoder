@@ -7,7 +7,8 @@ pub(super) fn thinking_view() -> ChatView {
     let mut v = ChatView::default();
     v.apply(&SessionEvent::ReasoningDelta("think-a-1\nthink-a-2".into()));
     v.apply(&SessionEvent::TextDelta("answer".into()));
-    v.apply(&SessionEvent::Done);
+    // Mid-stream on purpose: a standalone Thinking block only exists while
+    // the turn runs — `Done` flushes it into the step ladder.
     v
 }
 

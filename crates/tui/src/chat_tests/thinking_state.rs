@@ -23,7 +23,8 @@ fn thinking_headers_match_flatten_line_indices() {
     // Two thinking blocks separated by an assistant block.
     v.apply(&SessionEvent::ReasoningDelta("think-a".into()));
     v.apply(&SessionEvent::TextDelta("hi".into()));
-    v.apply(&SessionEvent::Done);
+    // No Done: both thinking blocks stay standalone mid-stream (a Done flush
+    // folds the first into the step ladder).
     v.apply(&SessionEvent::ReasoningDelta("think-b-1\nthink-b-2".into()));
 
     let flat = v.flatten();
@@ -60,7 +61,7 @@ fn toggle_thinking_at_toggles_specific_block() {
     let mut v = ChatView::default();
     v.apply(&SessionEvent::ReasoningDelta("first".into()));
     v.apply(&SessionEvent::TextDelta("between".into()));
-    v.apply(&SessionEvent::Done);
+    // No Done: both thinking blocks stay standalone mid-stream.
     v.apply(&SessionEvent::ReasoningDelta("second".into()));
 
     let headers = v.thinking_headers();
@@ -84,7 +85,7 @@ fn collapse_all_collapsible_collapses_every_thinking_block() {
     // Two thinking blocks separated by an assistant block.
     v.apply(&SessionEvent::ReasoningDelta("think-a".into()));
     v.apply(&SessionEvent::TextDelta("hi".into()));
-    v.apply(&SessionEvent::Done);
+    // No Done: both thinking blocks stay standalone mid-stream.
     v.apply(&SessionEvent::ReasoningDelta("think-b\nthink-c".into()));
 
     let headers = v.thinking_headers();
@@ -314,9 +315,13 @@ fn completed_answer_creates_say_when_every_text_delta_was_dropped() {
     v.apply(&SessionEvent::Done);
     v.reconcile_completed_assistant("recovered answer");
 
+    // The pending Thinking was flushed into a call-less step at Done; the
+    // recovered Say lands AFTER the ladder (it is the turn's conclusion).
     assert!(matches!(
         v.blocks[0],
-        ChatBlock::Thinking { sealed: true, .. }
+        ChatBlock::StepGroup { ref steps, .. } if !steps.is_empty()
+            && !steps[0].thinking.is_empty()
+            && steps[0].calls.is_empty()
     ));
     assert!(matches!(
         v.blocks[1],

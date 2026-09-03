@@ -99,11 +99,12 @@ function isSegmentBoundary(m) {
 /// ONE step appended at message end, folded into the trailing steps turn
 /// when the messages are adjacent. A tool-turn's thinking lives INSIDE its
 /// step (live parity with absorbSegmentThinking — no free-floating think
-/// turn above the ladder): an assistant Say only flushes the pending think
-/// standalone when NO non-task tool_use remains ahead in the same user
-/// segment (a lookahead pre-pass); a pure-text round keeps its top-level
-/// think turn as before, and so does reasoning before a user boundary.
-/// The user/synthetic/display echo contracts are unchanged.
+/// turn above the ladder): an assistant Say folds the pending think run
+/// when NO non-task tool_use remains ahead in the same user segment (a
+/// lookahead pre-pass) — as a call-less step, never a top-level think turn;
+/// the same fold applies to reasoning before a user boundary and to the
+/// trailing run at the end of the walk. The user/synthetic/display echo
+/// contracts are unchanged.
 export function turnsFromMessages(messages) {
   const turns = [];
   const list = Array.isArray(messages) ? messages : [];
@@ -158,15 +159,18 @@ export function turnsFromMessages(messages) {
         continue;
       }
       if (bkind === 'text') {
-        // A Say flushes the pending think standalone ONLY when this user
-        // segment holds no further tool round (pure-text round — current
-        // behavior). When tools follow (same message or a later one before
-        // the next user boundary), the think stays pending and folds into
-        // that round's step, exactly like the live absorbSegmentThinking.
-        // User text blocks are segment boundaries themselves — always flush.
+        // A Say folds the pending think run ONLY when this user segment
+        // holds no further tool round (pure-text round). When tools follow
+        // (same message or a later one before the next user boundary), the
+        // think stays pending and folds into that round's step, exactly like
+        // the live absorbSegmentThinking. User text blocks are segment
+        // boundaries themselves — always fold.
         const toolsFollow = stepToolAt[mi] > bi || toolAhead[mi];
         if (pendingThink && (role !== 'assistant' || !toolsFollow)) {
-          turns.push({ kind: 'think', role: 'assistant', text: pendingThink });
+          // No tool round will consume the run: fold it into the ladder as a
+          // call-less step (TUI flush_pending_thinking parity) instead of
+          // leaving a top-level think turn.
+          placeThinkingStep(turns, pendingThink);
           pendingThink = '';
         }
         if (displayText) {
@@ -232,7 +236,8 @@ export function turnsFromMessages(messages) {
     }
   }
   if (pendingThink) {
-    turns.push({ kind: 'think', role: 'assistant', text: pendingThink });
+    placeThinkingStep(turns, pendingThink);
+    pendingThink = '';
   }
   return turns;
 }
@@ -314,12 +319,13 @@ function openCallMatches(call, id) {
 /// pop_trailing_thinking): absorb EVERY assistant think turn of the current
 /// user segment into the next step's thinking — crossing OVER Say text
 /// turns, which stay in place as top-level bubbles. A turn that issues tool
-/// calls must never leave free-floating think turns above the ladder; only
-/// pure-text rounds (no tool call ever arrives) keep their top-level think
-/// turn, because nothing calls this. The walk stops at the first boundary
-/// turn: a user echo, a sys marker, a task tool row, a subagent block, or an
-/// earlier steps group (its rounds are already closed). Text concatenates
-/// earliest-first across the popped runs. Mutates only the caller's copy.
+/// calls must never leave free-floating think turns above the ladder; a
+/// pure-text round's run is folded into a call-less step by
+/// placeThinkingStep once no tool call ever arrives (flushPendingThink).
+/// The walk stops at the first boundary turn: a user echo, a sys marker, a
+/// task tool row, a subagent block, or an earlier steps group (its rounds
+/// are already closed). Text concatenates earliest-first across the popped
+/// runs. Mutates only the caller's copy.
 function absorbSegmentThinking(turns) {
   let thinking = '';
   for (let i = turns.length - 1; i >= 0; i -= 1) {
@@ -335,6 +341,51 @@ function absorbSegmentThinking(turns) {
     break;
   }
   return thinking;
+}
+
+/// Place already-collected `thinking` into the steps ladder at a point where
+/// no tool call will consume it (done/error frames, user echoes, subagent
+/// rows, snapshot boundaries). Mirrors the TUI's place_thinking_step: walk
+/// back over the trailing run of assistant text turns (Say stays top-level
+/// and transparent); a trailing steps turn gains the thinking as a call-less
+/// step; any other turn (user echo, sys marker, tool row, subagent) caps the
+/// run and a fresh single-step turn is inserted before it. Mutates+returns
+/// `turns`.
+function placeThinkingStep(turns, thinking) {
+  if (!thinking) {
+    return turns;
+  }
+  let insertAt = turns.length;
+  for (let i = turns.length - 1; i >= 0; i -= 1) {
+    const t = turns[i];
+    if (t && t.kind === 'text' && t.role === 'assistant') {
+      insertAt = i; // Say speech rides transparently.
+      continue;
+    }
+    if (t && t.kind === 'steps' && t.role === 'assistant') {
+      turns[i] = { ...t, steps: t.steps.concat([{ thinking, calls: [] }]) };
+      return turns;
+    }
+    insertAt = i + 1; // right after the boundary turn — same segment.
+    break;
+  }
+  turns.splice(insertAt, 0, {
+    kind: 'steps',
+    role: 'assistant',
+    steps: [{ thinking, calls: [] }],
+  });
+  return turns;
+}
+
+/// Flush every free-floating think turn of the current user segment into the
+/// ladder as a call-less step (absorbSegmentThinking collects + removes them
+/// across Say, placeThinkingStep files the result). Thinking therefore never
+/// survives above the ladder at rest — the live mirror of the TUI's
+/// flush_pending_thinking.
+function flushPendingThink(turns) {
+  const copy = turns.slice();
+  const thinking = absorbSegmentThinking(copy);
+  return placeThinkingStep(copy, thinking);
 }
 
 /// Mirror of boundary_needed: a new call must NOT merge into the trailing
@@ -486,9 +537,12 @@ export function reduceFrame(state, frame, nowMs) {
       };
       if (data.name === 'task') {
         // Subagent handle: keeps TODAY's flat tool turn — the 🤖 subagent
-        // block renders the child; task calls never join a step.
-        turns.push(call);
-        return withTurns(state, turns);
+        // block renders the child; task calls never join a step. The round's
+        // pending think run folds into the ladder first (no ToolStart can
+        // absorb it behind the flat row).
+        const flushed = flushPendingThink(turns);
+        flushed.push(call);
+        return withTurns(state, flushed);
       }
       // Step-ladder fold: EVERY think turn of this user segment becomes the
       // round's step thinking (crossing over Say, which stays top-level — a
@@ -548,22 +602,26 @@ export function reduceFrame(state, frame, nowMs) {
       if (!text) {
         return state;
       }
-      const turns = closeOpenText(state.turns.slice());
+      // Hard segment boundary: fold the pre-boundary think run into the
+      // ladder before the echo lands (a later tool_start can never cross it).
+      const turns = closeOpenText(flushPendingThink(state.turns));
       turns.push({ kind: 'text', role: 'user', text });
       return withTurns(state, turns);
     }
     case 'status': {
       const text = typeof data.status === 'string' ? data.status : '';
-      return text ? withTurns(state, state.turns.concat([{ kind: 'sys', text }])) : state;
+      // sys turns are transcript boundaries (TUI push_marker parity): fold
+      // the pending think run into the ladder before the marker lands.
+      return text ? withTurns(state, flushPendingThink(state.turns).concat([{ kind: 'sys', text }])) : state;
     }
     case 'compaction': {
       const summary = typeof data.summary === 'string' ? data.summary : 'compacted';
-      return withTurns(state, closeOpenText(state.turns.slice()).concat([{ kind: 'sys', text: '🗜 ' + summary }]));
+      return withTurns(state, closeOpenText(flushPendingThink(state.turns)).concat([{ kind: 'sys', text: '🗜 ' + summary }]));
     }
     case 'agent_switched':
-      return withTurns(state, state.turns.concat([{ kind: 'sys', text: 'agent → ' + String(data.agent || '') }]));
+      return withTurns(state, flushPendingThink(state.turns).concat([{ kind: 'sys', text: 'agent → ' + String(data.agent || '') }]));
     case 'model_switched':
-      return withTurns(state, state.turns.concat([{ kind: 'sys', text: 'model → ' + String(data.model || '') }]));
+      return withTurns(state, flushPendingThink(state.turns).concat([{ kind: 'sys', text: 'model → ' + String(data.model || '') }]));
     case 'subagent_start': {
       // Foldable block per subagent (TUI chat.rs parity), keyed by the
       // tool-call id; `subagent_child` frames fold into it via reduceFrame.
@@ -580,7 +638,7 @@ export function reduceFrame(state, frame, nowMs) {
         usage: null,
         startedAt: nowMs,
       };
-      return withTurns(state, closeOpenText(state.turns.slice()).concat([turn]));
+      return withTurns(state, closeOpenText(flushPendingThink(state.turns)).concat([turn]));
     }
     case 'subagent_child': {
       const idx = subagentIndex(state.turns, data.id);
@@ -638,7 +696,9 @@ export function reduceFrame(state, frame, nowMs) {
       // close the open text turn so a lost reload still renders sanely.
       return { ...state, turns: closeOpenText(state.turns.slice()) };
     case 'done':
-      return { ...state, status: 'done', turns: closeOpenText(state.turns.slice()) };
+      // A pure-text round (or the turn's final Say round) folds its think
+      // turns into a call-less step — no think turn survives above the ladder.
+      return { ...state, status: 'done', turns: closeOpenText(flushPendingThink(state.turns)) };
     case 'error': {
       // A lag-marked error (api.rs map_broadcast_result) is a consumer
       // re-sync signal, not a run failure: sse.js restarts from the persisted
@@ -648,7 +708,7 @@ export function reduceFrame(state, frame, nowMs) {
       if (data && Number.isFinite(data.lag)) {
         return state;
       }
-      return { ...state, status: 'error', error: String(data.error || data.message || 'error'), turns: closeOpenText(state.turns.slice()) };
+      return { ...state, status: 'error', error: String(data.error || data.message || 'error'), turns: closeOpenText(flushPendingThink(state.turns)) };
     }
     default:
       return state;
@@ -679,5 +739,5 @@ export function withUserTurn(state, text) {
   if (!text) {
     return state;
   }
-  return withTurns(state, closeOpenText(state.turns.slice()).concat([{ kind: 'text', role: 'user', text }]));
+  return withTurns(state, closeOpenText(flushPendingThink(state.turns)).concat([{ kind: 'text', role: 'user', text }]));
 }

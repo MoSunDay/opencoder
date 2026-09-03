@@ -148,29 +148,163 @@ fn thinking_across_assistant_text_is_absorbed_into_the_step() {
 }
 
 #[test]
-fn pure_text_turn_keeps_its_standalone_thinking_block() {
-    // A round with NO tool call keeps its independent collapsible Thinking
-    // block — there is no step to fold into, and the thinking is not lost.
+fn pure_text_turn_folds_thinking_into_a_call_less_step() {
+    // A round with NO tool call still keeps its reasoning inside the ladder:
+    // at run end the pending Thinking folds into a call-less step, so no
+    // top-level Thinking block survives and Say stays the bare conclusion.
     let mut v = ChatView::default();
     v.apply(&SessionEvent::ReasoningDelta("just talking".into()));
     v.apply(&SessionEvent::TextDelta("the answer".into()));
     v.apply(&SessionEvent::Done);
 
     assert!(
-        v.blocks
+        !v.blocks
             .iter()
             .any(|b| matches!(b, ChatBlock::Thinking { .. })),
-        "pure-text turn keeps a standalone Thinking block"
+        "no standalone Thinking block survives a pure-text turn"
     );
-    assert!(!v
+    let groups: Vec<&Vec<Step>> = v
         .blocks
         .iter()
-        .any(|b| matches!(b, ChatBlock::StepGroup { .. })));
+        .filter_map(|b| match b {
+            ChatBlock::StepGroup { steps, .. } => Some(steps),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(groups.len(), 1, "exactly one ladder for the turn");
+    assert_eq!(groups[0].len(), 1, "one call-less step");
+    assert!(groups[0][0].calls.is_empty());
+    let body: String = groups[0][0]
+        .thinking
+        .iter()
+        .flat_map(|l| l.spans.iter())
+        .map(|s| s.content.clone())
+        .collect();
+    assert!(body.contains("just talking"), "got {body:?}");
+    // The ladder sits before the Say; the group row counts the step.
+    let group_idx = v
+        .blocks
+        .iter()
+        .position(|b| matches!(b, ChatBlock::StepGroup { .. }))
+        .unwrap();
+    let say_idx = v
+        .blocks
+        .iter()
+        .position(|b| matches!(b, ChatBlock::Assistant { .. }))
+        .unwrap();
+    assert!(group_idx < say_idx, "ladder before Say");
     let flat = lines(&v);
     assert!(
-        flat.iter().any(|l| l.contains("Thinking")),
-        "standalone thinking renders its own header: {flat:?}"
+        flat.iter().any(|l| l.contains("1 step")),
+        "group row counts the call-less step: {flat:?}"
     );
+}
+
+#[test]
+fn tool_turn_final_round_folds_its_say_round_thinking() {
+    // The turn's FINAL round (thinking + Say, no tool call) folds into the
+    // trailing group as one more call-less step — the ladder never leaks a
+    // top-level Thinking block, and the Say stays outside the ladder.
+    let mut v = ChatView::default();
+    call_tool(&mut v, "t1");
+    v.apply(&SessionEvent::ReasoningDelta("final mull".into()));
+    v.apply(&SessionEvent::TextDelta("conclusion".into()));
+    v.apply(&SessionEvent::Done);
+
+    assert!(
+        !v.blocks
+            .iter()
+            .any(|b| matches!(b, ChatBlock::Thinking { .. })),
+        "final-round thinking must not leak above the ladder"
+    );
+    let steps = first_group(&v);
+    assert_eq!(steps.len(), 2, "tool round + Say round");
+    assert!(!steps[0].calls.is_empty());
+    assert!(steps[1].calls.is_empty(), "Say round is call-less");
+    let body: String = steps[1]
+        .thinking
+        .iter()
+        .flat_map(|l| l.spans.iter())
+        .map(|s| s.content.clone())
+        .collect::<String>();
+    assert!(body.contains("final mull"), "got {body:?}");
+}
+
+#[test]
+fn error_turn_folds_pending_thinking_into_the_ladder() {
+    // An errored run must not strand a top-level Thinking block either.
+    let mut v = ChatView::default();
+    v.apply(&SessionEvent::ReasoningDelta("doomed mull".into()));
+    v.apply(&SessionEvent::Error("boom".into()));
+
+    assert!(
+        !v.blocks
+            .iter()
+            .any(|b| matches!(b, ChatBlock::Thinking { .. })),
+        "error run folds pending thinking into the ladder"
+    );
+    let steps = first_group(&v);
+    assert_eq!(steps.len(), 1);
+    assert!(steps[0].calls.is_empty());
+}
+
+#[test]
+fn user_echo_flushes_pre_boundary_thinking_into_the_ladder() {
+    // A steer echo is a hard segment boundary: the pre-boundary thinking can
+    // never be absorbed by a later ToolStart, so it folds right there.
+    let mut v = ChatView::default();
+    v.apply(&SessionEvent::ReasoningDelta("pre-steer mull".into()));
+    v.apply(&SessionEvent::SteerConsumed {
+        seq: 1,
+        text: "steered prompt".into(),
+    });
+    assert!(
+        !v.blocks
+            .iter()
+            .any(|b| matches!(b, ChatBlock::Thinking { .. })),
+        "pre-boundary thinking folds at the echo, not later"
+    );
+    let steps = first_group(&v);
+    assert_eq!(steps.len(), 1);
+    assert!(steps[0].calls.is_empty());
+}
+
+#[test]
+fn mid_conversation_flush_lands_after_the_user_prompt() {
+    // Turn two of a real conversation: the walk-back must place the ladder
+    // AFTER the user's prompt (same segment), never above it.
+    let mut v = ChatView::default();
+    v.apply(&SessionEvent::TextDelta("first answer".into()));
+    v.apply(&SessionEvent::Done);
+    // App layer pushes the user echo directly (no SessionEvent for it).
+    v.blocks.push(ChatBlock::User {
+        rendered: crate::markdown::render("second prompt"),
+    });
+    let prompt_idx = v.blocks.len() - 1;
+    v.apply(&SessionEvent::ReasoningDelta("mulling turn two".into()));
+    v.apply(&SessionEvent::TextDelta("second answer".into()));
+    v.apply(&SessionEvent::Done);
+
+    assert!(
+        !v.blocks
+            .iter()
+            .any(|b| matches!(b, ChatBlock::Thinking { .. })),
+        "no standalone Thinking block survives"
+    );
+    match &v.blocks[prompt_idx + 1] {
+        ChatBlock::StepGroup { steps, .. } => {
+            assert_eq!(steps.len(), 1);
+            assert!(steps[0].calls.is_empty());
+            let body: String = steps[0]
+                .thinking
+                .iter()
+                .flat_map(|l| l.spans.iter())
+                .map(|s| s.content.clone())
+                .collect();
+            assert!(body.contains("mulling turn two"));
+        }
+        other => panic!("expected ladder right after the prompt, got {other:?}"),
+    }
 }
 
 fn replay_tool_round(asst_id: &str, tool_id: &str, reasoning: Option<&str>) -> (Message, Message) {
@@ -249,7 +383,10 @@ fn replay_absorbs_thinking_behind_assistant_text_like_the_live_path() {
 }
 
 #[test]
-fn replay_keeps_thinking_without_a_following_group_standalone() {
+fn replay_folds_thinking_without_a_following_group_into_the_ladder() {
+    // Old-format transcripts (pre-ladder flush) carry the pure-text round's
+    // Thinking standalone; replay folds it into a call-less step exactly
+    // like the live path, so resumed sessions never re-leak thinking.
     let mut asst = Message::assistant("a1");
     asst.blocks.push(ContentBlock::Reasoning {
         text: "silent pondering".into(),
@@ -258,15 +395,30 @@ fn replay_keeps_thinking_without_a_following_group_standalone() {
     let chat = replay_messages("act", &[asst]);
 
     assert!(
-        chat.blocks
+        !chat
+            .blocks
             .iter()
             .any(|b| matches!(b, ChatBlock::Thinking { .. })),
-        "thinking with no following step group keeps its own rendering path"
+        "old-format pure-text rounds fold into the ladder on replay"
     );
-    assert!(!chat
+    let groups: Vec<&Vec<Step>> = chat
         .blocks
         .iter()
-        .any(|b| matches!(b, ChatBlock::StepGroup { .. })));
+        .filter_map(|b| match b {
+            ChatBlock::StepGroup { steps, .. } => Some(steps),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(groups.len(), 1);
+    assert_eq!(groups[0].len(), 1);
+    assert!(groups[0][0].calls.is_empty());
+    let body: String = groups[0][0]
+        .thinking
+        .iter()
+        .flat_map(|l| l.spans.iter())
+        .map(|s| s.content.clone())
+        .collect::<String>();
+    assert!(body.contains("silent pondering"), "got {body:?}");
 }
 
 #[test]

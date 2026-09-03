@@ -172,7 +172,8 @@ async fn thinking_header_toggles_even_right_after_another_click() {
         "secret reasoning here".into(),
     ));
     chat.apply(&SessionEvent::TextDelta("answer".into()));
-    chat.apply(&SessionEvent::Done);
+    // No Done: the pending Thinking block stays standalone mid-stream (a Done
+    // flush would fold it into the step ladder before the click runs).
     // Collapsed by default: the reasoning content must NOT be visible yet.
     assert!(
         !chat.flatten().iter().any(|l| l

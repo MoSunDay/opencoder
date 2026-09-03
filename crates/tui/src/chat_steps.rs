@@ -8,12 +8,14 @@
 //! does (sequential calls in one round thereby split; parallel calls stay
 //! together).
 //!
-//! Thinking absorption: a round WITH tool calls keeps its reasoning strictly
-//! step-local — the pending `Thinking` blocks trailing the flow (even behind
-//! the turn's own `Assistant` speech) are folded into the step the next
-//! `ToolStart` opens, and never survive as top-level `Thinking` blocks. A
-//! pure-text round (no tool call follows) keeps its standalone `Thinking`
-//! block. `coalesce_steps` applies the same fold on replay.
+//! Thinking absorption: every round's reasoning lives strictly step-local —
+//! the pending `Thinking` blocks trailing the flow (even behind the turn's
+//! own `Assistant` speech) are folded into the step the next `ToolStart`
+//! opens, and a round whose NO tool call ever follows (pure-text round, or a
+//! turn's final Say round) is flushed into a call-less step at the run-end /
+//! boundary pushes via `flush_pending_thinking`. Thinking therefore never
+//! survives as a top-level block at rest. `coalesce_steps` applies the same
+//! fold on replay.
 
 use ratatui::text::Line;
 
@@ -107,6 +109,76 @@ pub(crate) fn single_step_group(call: ToolCall, thinking: Vec<Line<'static>>) ->
     }
 }
 
+/// A fresh single-step group holding only `thinking` (no function calls) —
+/// the ladder shape for a pure-text round at flush time. Starts fully
+/// collapsed (group + step), mirroring `single_step_group`.
+pub(crate) fn thinking_step_group(thinking: Vec<Line<'static>>) -> ChatBlock {
+    ChatBlock::StepGroup {
+        steps: vec![Step {
+            thinking,
+            calls: Vec::new(),
+            open: false,
+            calls_open: false,
+        }],
+        open: false,
+    }
+}
+
+/// Place already-rendered `thinking` into the step ladder at a point where no
+/// tool call will consume it (run end, or a boundary push). Walking backwards
+/// over the trailing run of `Assistant` blocks — the turn's own speech, still
+/// transparent exactly like the absorb walk — a trailing `StepGroup` of this
+/// turn gains the thinking as a call-less step; any other block (User echo,
+/// Marker, Subagent, ...) caps the run, and a fresh single-step group is
+/// inserted before the speech (or the boundary itself when no speech
+/// trails). Returns the insert position when a NEW group was inserted, so
+/// callers can keep block-index bookkeeping (e.g. `hidden_assistant_idx`)
+/// consistent. Pure w.r.t. everything but `blocks`.
+pub(crate) fn place_thinking_step(
+    blocks: &mut Vec<ChatBlock>,
+    thinking: Vec<Line<'static>>,
+) -> Option<usize> {
+    if thinking.is_empty() {
+        return None;
+    }
+    let mut insert_at = blocks.len();
+    for i in (0..blocks.len()).rev() {
+        match &mut blocks[i] {
+            ChatBlock::Assistant { .. } => insert_at = i,
+            ChatBlock::StepGroup { steps, .. } => {
+                steps.push(Step {
+                    thinking,
+                    calls: Vec::new(),
+                    open: false,
+                    calls_open: false,
+                });
+                return None;
+            }
+            _ => {
+                // The thinking streamed after this boundary (it was the
+                // absorb walk's stop block) — the ladder belongs to the
+                // current segment, i.e. right AFTER the boundary block.
+                insert_at = i + 1;
+                break;
+            }
+        }
+    }
+    blocks.insert(insert_at, thinking_step_group(thinking));
+    Some(insert_at)
+}
+
+/// Flush the pending `Thinking` run into the ladder: `absorb_pending_thinking`
+/// collects + removes the trailing blocks (Assistant-transparent, boundary-
+/// capped), then [`place_thinking_step`] files them as a call-less step.
+/// Called at every push where no `ToolStart` can follow — run end (Done /
+/// Error), user-echo, subagent, marker, compaction, `!cmd` — so the invariant
+/// "thinking exists only at the tail or inside the ladder" holds after every
+/// event.
+pub(crate) fn flush_pending_thinking(blocks: &mut Vec<ChatBlock>) -> Option<usize> {
+    let thinking = absorb_pending_thinking(blocks);
+    place_thinking_step(blocks, thinking)
+}
+
 /// Absorb the round's pending `Thinking` blocks from the tail of `blocks`,
 /// returning their rendered markdown in transcript order and removing the
 /// blocks. Walking backwards, `Assistant` blocks are transparent — they are
@@ -160,9 +232,12 @@ pub(crate) fn absorb_pending_thinking(blocks: &mut Vec<ChatBlock>) -> Vec<Line<'
 /// `StepGroup`s into one group. The trailing run may sit further back,
 /// behind the turn's own `Assistant` speech — those blocks are absorbed too
 /// (same boundaries as `absorb_pending_thinking`), so a replayed tool turn
-/// renders with the same step-local thinking as the live path. Standalone
-/// `Thinking` blocks (not followed by a group — pure-text rounds) keep their
-/// own rendering path. Pure w.r.t. everything but the argument.
+/// renders with the same step-local thinking as the live path. Thinking no
+/// tool round ever consumes (pure-text rounds, a turn's trailing Say round)
+/// folds into a call-less step at the same boundaries the live path flushes
+/// at — user/subagent/marker pushes and the end of the list — so old
+/// transcripts replay into the ladder identically. Pure w.r.t. everything
+/// but the argument.
 pub(crate) fn coalesce_steps(blocks: &mut Vec<ChatBlock>) {
     let mut out: Vec<ChatBlock> = Vec::with_capacity(blocks.len());
     let mut pending: Vec<ChatBlock> = Vec::new();
@@ -172,8 +247,8 @@ pub(crate) fn coalesce_steps(blocks: &mut Vec<ChatBlock>) {
             ChatBlock::StepGroup { mut steps, open } => {
                 if steps.is_empty() {
                     // Defensive: a zero-step group carries nothing; the
-                    // pending thinking stays standalone.
-                    out.append(&mut pending);
+                    // pending thinking still joins the ladder.
+                    place_thinking_step(&mut out, take_rendered_thinking(&mut pending));
                     continue;
                 }
                 // Thinking that trails inside `out` behind the turn's own
@@ -186,13 +261,20 @@ pub(crate) fn coalesce_steps(blocks: &mut Vec<ChatBlock>) {
                     _ => out.push(ChatBlock::StepGroup { steps, open }),
                 }
             }
+            ChatBlock::Assistant { .. } => {
+                // Speech is transparent for the pending thinking run — it
+                // rides along until the next group (folds there) or the next
+                // boundary / end of list (folds into a call-less step),
+                // exactly like the live walk.
+                out.push(block);
+            }
             other => {
-                out.append(&mut pending);
+                place_thinking_step(&mut out, take_rendered_thinking(&mut pending));
                 out.push(other);
             }
         }
     }
-    out.append(&mut pending);
+    place_thinking_step(&mut out, take_rendered_thinking(&mut pending));
     *blocks = out;
 }
 

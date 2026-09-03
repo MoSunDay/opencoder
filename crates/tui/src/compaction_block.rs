@@ -60,6 +60,7 @@ impl ChatView {
     /// visible while the summarizing LLM call runs, not only after it finishes.
     pub(crate) fn open_compaction_streaming(&mut self, t: &str) {
         self.finalize_assistant();
+        self.flush_pending_thinking();
         if let Some(ChatBlock::Compaction {
             text,
             streaming: true,

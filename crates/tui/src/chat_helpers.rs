@@ -124,6 +124,7 @@ impl ChatView {
         use ratatui::style::{Modifier, Style};
         use ratatui::text::{Line, Span};
         self.finalize_assistant();
+        self.flush_pending_thinking();
         self.blocks.push(crate::chat::ChatBlock::StepGroup {
             steps: vec![crate::chat::Step {
                 thinking: Vec::new(),

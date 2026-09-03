@@ -1,4 +1,4 @@
-Commit: (working-tree, 基于 4bafa6c：评审证据链闭合后的 TODO 跟进)
+Commit: ba5a4b0
 
 # 评审跟进：Say 配对收尾——顺序不变量锁 + 帧级 e2e + 瞬态失败溯源
 

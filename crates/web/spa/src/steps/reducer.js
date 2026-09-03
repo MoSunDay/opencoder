@@ -1,6 +1,7 @@
 // Pure Step-ladder reducers shared by snapshot replay and live SSE folding.
 // One visible user turn owns one `steps` item regardless of interleaved Say,
-// status, task, or image presentation items. A Step is one assistant round.
+// status, task, or image presentation items. A Step is one reasoning run plus
+// every function call before the next reasoning run.
 
 function lastUserBoundary(turns) {
   for (let i = turns.length - 1; i >= 0; i -= 1) {
@@ -46,9 +47,9 @@ function turnHasSay(turns) {
   return false;
 }
 
-function stepBoundaryNeeded(steps) {
+function reasoningStartsStep(steps) {
   const last = steps[steps.length - 1];
-  return !last || (Array.isArray(last.calls) && last.calls.some((call) => call.output !== null));
+  return !last || (Array.isArray(last.calls) && last.calls.length > 0);
 }
 
 export function appendThinkDelta(turns, text) {
@@ -67,7 +68,7 @@ export function appendThinkDelta(turns, text) {
   const group = copy[index];
   const steps = group.steps.slice();
   const last = steps[steps.length - 1];
-  if (stepBoundaryNeeded(steps)) {
+  if (reasoningStartsStep(steps)) {
     steps.push({ thinking: text, calls: [] });
   } else {
     steps[steps.length - 1] = { ...last, thinking: (last.thinking || '') + text };
@@ -143,7 +144,7 @@ export function flushPendingThink(turns) {
   return placeThinkingStep(copy, thinking);
 }
 
-export function mergeOrNewStep(turns, thinking, call, activateProgress = false) {
+export function appendStepCall(turns, thinking, call, activateProgress = false) {
   const progressAllowed = !turnHasSay(turns);
   const index = turnStepsIndex(turns);
   if (index < 0) {
@@ -156,13 +157,13 @@ export function mergeOrNewStep(turns, thinking, call, activateProgress = false) 
   const group = turns[index];
   const steps = group.steps.slice();
   const last = steps[steps.length - 1];
-  if (stepBoundaryNeeded(steps)) {
+  if (!last || (thinking && reasoningStartsStep(steps))) {
     steps.push({ thinking, calls: [call] });
   } else {
     steps[steps.length - 1] = {
       ...last,
       thinking: thinking ? (last.thinking || '') + thinking : (last.thinking || ''),
-      calls: last.calls.concat([call]),
+      calls: (Array.isArray(last.calls) ? last.calls : []).concat([call]),
     };
   }
   turns[index] = {
@@ -172,16 +173,26 @@ export function mergeOrNewStep(turns, thinking, call, activateProgress = false) 
   };
 }
 
-// Snapshot message boundary is an explicit assistant-round boundary, so its
-// calls always append as a fresh Step while the surrounding user Turn keeps
-// one canonical group.
+// Snapshot messages preserve provider-round boundaries, but those are not
+// Step boundaries. A message with no new thinking keeps appending calls to
+// the current Step; new thinking starts the next Step.
 export function appendStepTurn(turns, thinking, calls) {
   const index = turnStepsIndex(turns);
   if (index >= 0) {
     const group = turns[index];
+    const steps = group.steps.slice();
+    const last = steps[steps.length - 1];
+    if (!thinking && last) {
+      steps[steps.length - 1] = {
+        ...last,
+        calls: (Array.isArray(last.calls) ? last.calls : []).concat(calls),
+      };
+    } else {
+      steps.push({ thinking, calls });
+    }
     turns[index] = {
       ...group,
-      steps: group.steps.concat([{ thinking, calls }]),
+      steps,
     };
     return;
   }

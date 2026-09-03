@@ -11,6 +11,12 @@ use super::{ChatBlock, ChatView};
 
 impl ChatView {
     pub(super) fn append_text_delta(&mut self, text: &str) {
+        // The progress hint belongs to the pre-Say phase. Remove it on the
+        // first real Say chunk, not at ToolEnd, so the inter-round gap stays
+        // visibly alive without overlapping the answer itself.
+        if !text.is_empty() {
+            super::steps::set_turn_progress(&mut self.blocks, self.turn_block_start, false);
+        }
         self.seal_open_thinking();
         if let Some(ChatBlock::Assistant {
             raw, done: false, ..
@@ -27,32 +33,21 @@ impl ChatView {
     }
 
     pub(super) fn append_reasoning_delta(&mut self, reasoning: &str) {
-        // Keep the round's sole Assistant at the tail while inserting every
-        // later Thinking segment before it. Moving the enum value is cheap and
-        // preserves the accumulated raw/rendered buffers without cloning.
-        let assistant = matches!(
-            self.blocks.last(),
-            Some(ChatBlock::Assistant { done: false, .. })
-        )
-        .then(|| self.blocks.pop().expect("last block checked above"));
-
-        if let Some(ChatBlock::Thinking {
-            text,
-            sealed: false,
-            ..
-        }) = self.blocks.last_mut()
-        {
-            text.push_str(reasoning);
-        } else {
-            self.blocks.push(ChatBlock::Thinking {
-                text: reasoning.to_string(),
-                collapsed: true,
-                sealed: false,
-            });
-        }
-
-        if let Some(assistant) = assistant {
-            self.blocks.push(assistant);
+        // Thinking is a structural part of a step: the delta streams
+        // straight into the ladder (see `steps::append_step_thinking_delta`).
+        // The admitted turn boundary, not block adjacency, owns the ladder:
+        // interleaved Say blocks stay in place while reasoning updates the
+        // turn's one StepGroup.
+        if let Some(at) = super::steps::append_step_thinking_delta(
+            &mut self.blocks,
+            self.turn_block_start,
+            reasoning,
+        ) {
+            if let Some(h) = self.hidden_assistant_idx {
+                if h >= at {
+                    self.hidden_assistant_idx = Some(h + 1);
+                }
+            }
         }
     }
 
@@ -86,6 +81,39 @@ impl ChatView {
                 *done = true;
             }
         }
+        // Round end for the ladder: account the streamed step thinking once
+        // (per-step `sealed` flag). Disclosure state is user-owned: sealing
+        // must not close a turn or step the user opened while it streamed.
+        self.seal_trailing_step();
+    }
+
+    /// Seal the trailing step's streamed thinking into `context_used`
+    /// (idempotent via `Step::sealed`) without changing any disclosure state.
+    /// An interleaved round's finalized Say rides on top of its group, so the
+    /// walk skips trailing sealed Assistants.
+    fn seal_trailing_step(&mut self) {
+        let floor = self.turn_block_start.min(self.blocks.len());
+        let Some(idx) = self.blocks[floor..]
+            .iter()
+            .position(|block| matches!(block, ChatBlock::StepGroup { .. }))
+            .map(|relative| floor + relative)
+        else {
+            return;
+        };
+        let ChatBlock::StepGroup { steps, .. } = &mut self.blocks[idx] else {
+            unreachable!("step-group index was matched above");
+        };
+        // Only an UNSEALED trailing step belongs to the round being
+        // finalized. Sealed groups are past rounds' and must not be touched.
+        if let Some(step) = steps.last_mut() {
+            if !step.sealed {
+                self.context_used += estimate(&step.thinking_raw) as u64;
+                // Finalization is the one eager render for a hidden step;
+                // streaming deltas themselves remain O(1) source appends.
+                super::steps::render_step_thinking(step);
+                step.sealed = true;
+            }
+        }
     }
 
     /// Replace the current turn's streamed parent answer with the reliable
@@ -96,6 +124,8 @@ impl ChatView {
         if completed.is_empty() {
             return;
         }
+
+        super::steps::set_turn_progress(&mut self.blocks, self.turn_block_start, false);
 
         let floor = self.turn_block_start.min(self.blocks.len());
         let assistant_idx = self.blocks[floor..]
@@ -142,19 +172,28 @@ impl ChatView {
         );
     }
 
-    /// True when the current round has a collapsed, unsealed Thinking block.
-    /// During interleaving it sits immediately before the open Assistant.
+    /// True when the current round's unsealed step reasoning is hidden by a
+    /// collapsed turn or step. Used to coalesce invisible delta-only batches.
     pub fn last_open_thinking_collapsed(&self) -> bool {
-        self.open_thinking_index().is_some_and(|idx| {
-            matches!(
-                self.blocks.get(idx),
-                Some(ChatBlock::Thinking {
-                    collapsed: true,
-                    sealed: false,
-                    ..
-                })
-            )
-        })
+        let floor = self.turn_block_start.min(self.blocks.len());
+        let step_hidden = self.blocks[floor..].iter().find_map(|block| match block {
+            ChatBlock::StepGroup { steps, open, .. } => steps
+                .last()
+                .filter(|step| !step.sealed)
+                .map(|step| !*open || !step.open),
+            _ => None,
+        });
+        step_hidden == Some(true)
+            || self.open_thinking_index().is_some_and(|idx| {
+                matches!(
+                    self.blocks.get(idx),
+                    Some(ChatBlock::Thinking {
+                        collapsed: true,
+                        sealed: false,
+                        ..
+                    })
+                )
+            })
     }
 
     fn seal_open_thinking(&mut self) {

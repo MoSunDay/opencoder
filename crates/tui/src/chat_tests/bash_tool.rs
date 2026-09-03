@@ -1,8 +1,7 @@
 //! `!cmd` local bash-tool helpers (`push_bash_tool` / `finish_bash_tool`):
 //! a single-call `StepGroup` that starts fully expanded through every
-//! ladder level (group → step → calls list → output, so the output is
-//! visible while the command runs) and collapses back to the closed group
-//! row once the command finishes.
+//! ladder level (turn → step → function-call result, so the output is
+//! visible while the command runs) and remains expanded when output arrives.
 
 use super::super::*;
 
@@ -11,10 +10,18 @@ fn push_bash_tool_starts_in_results_state() {
     let mut v = ChatView::default();
     v.push_bash_tool("echo hi");
     match v.blocks.last() {
-        Some(ChatBlock::StepGroup { steps, open, .. }) => {
+        Some(ChatBlock::StepGroup {
+            steps,
+            open,
+            progress_active,
+        }) => {
             assert_eq!(steps.len(), 1);
             assert!(
-                *open && steps[0].open && steps[0].calls_open && steps[0].calls[0].expanded,
+                *open
+                    && steps[0].open
+                    && steps[0].calls_open
+                    && steps[0].calls[0].expanded
+                    && *progress_active,
                 "local `!cmd` runs visible from the start (whole ladder expanded)"
             );
             assert!(
@@ -28,13 +35,17 @@ fn push_bash_tool_starts_in_results_state() {
 }
 
 #[test]
-fn finish_bash_tool_fills_output_and_collapses() {
+fn finish_bash_tool_fills_output_without_closing_the_ladder() {
     let mut v = ChatView::default();
     v.push_bash_tool("echo hi");
     v.finish_bash_tool("hello\nworld");
 
     match v.blocks.last() {
-        Some(ChatBlock::StepGroup { steps, open, .. }) => {
+        Some(ChatBlock::StepGroup {
+            steps,
+            open,
+            progress_active,
+        }) => {
             let call = &steps[0].calls[0];
             assert!(
                 !call.output.is_empty(),
@@ -51,8 +62,8 @@ fn finish_bash_tool_fills_output_and_collapses() {
                 "output must preserve both lines; got {joined:?}"
             );
             assert!(
-                !*open && !steps[0].open && !steps[0].calls_open && !call.expanded,
-                "every ladder level must collapse once the command finishes"
+                *open && steps[0].open && steps[0].calls_open && call.expanded && !*progress_active,
+                "new output must preserve every expanded ladder level"
             );
             assert!(
                 call.elapsed_ms.is_some(),

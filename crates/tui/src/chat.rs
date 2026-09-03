@@ -64,7 +64,7 @@ pub(crate) mod sidecar;
 #[path = "chat_stream.rs"]
 mod stream;
 pub(crate) use compaction_block::render_collapsible;
-pub(crate) use steps::{coalesce_steps, merge_or_new_step, single_step_group, StepTarget};
+pub(crate) use steps::{coalesce_steps, single_step_group, StepTarget};
 
 impl ChatView {
     pub fn apply(&mut self, ev: &SessionEvent) {
@@ -101,7 +101,7 @@ impl ChatView {
             }
             // Stream the summary into an expanded block so it is visible while
             // the summarizing LLM call runs. The final `Compaction(summary)`
-            // event (below) finalizes + collapses it.
+            // event replaces the text without changing disclosure state.
             SessionEvent::CompactionDelta(t) => {
                 self.open_compaction_streaming(&sanitize_multiline(t));
             }
@@ -132,16 +132,20 @@ impl ChatView {
                     elapsed_ms: None,
                     expanded: false,
                 };
-                // Consecutive tool calls of the same round join the trailing
-                // step; once its last call finished a NEW step opens (the
-                // sequential-calls-in-one-round split). Any other block in
-                // between starts a fresh group (its first step closed).
-                match self.blocks.last_mut() {
-                    Some(ChatBlock::StepGroup { steps: s, .. }) => {
-                        steps::merge_or_new_step(s, thinking, call)
+                // Every non-task call in this admitted user turn joins its
+                // ONE canonical group; Say and presentation blocks are not
+                // structural boundaries. Finished calls still open a new
+                // Step through the shared round-boundary heuristic.
+                if let Some(at) =
+                    steps::merge_turn_call(&mut self.blocks, self.turn_block_start, thinking, call)
+                {
+                    if let Some(h) = self.hidden_assistant_idx {
+                        if h >= at {
+                            self.hidden_assistant_idx = Some(h + 1);
+                        }
                     }
-                    _ => self.blocks.push(steps::single_step_group(call, thinking)),
                 }
+                steps::set_turn_progress(&mut self.blocks, self.turn_block_start, true);
             }
             SessionEvent::ToolEnd {
                 id,
@@ -212,11 +216,17 @@ impl ChatView {
                             elapsed_ms: Some(0),
                             expanded: false,
                         };
-                        match self.blocks.last_mut() {
-                            Some(ChatBlock::StepGroup { steps: s, .. }) => {
-                                steps::merge_or_new_step(s, Vec::new(), call)
+                        if let Some(at) = steps::merge_turn_call(
+                            &mut self.blocks,
+                            self.turn_block_start,
+                            Vec::new(),
+                            call,
+                        ) {
+                            if let Some(h) = self.hidden_assistant_idx {
+                                if h >= at {
+                                    self.hidden_assistant_idx = Some(h + 1);
+                                }
                             }
-                            _ => self.blocks.push(steps::single_step_group(call, Vec::new())),
                         }
                     }
                 }
@@ -336,6 +346,7 @@ impl ChatView {
                 self.hidden_assistant_idx = None;
                 self.reconcile_orphaned_subagents();
                 self.finalize_assistant();
+                steps::set_turn_progress(&mut self.blocks, self.turn_block_start, false);
                 // A round with no tool call (pure-text turn, or the turn's
                 // final Say round) folds its pending Thinking into a call-less
                 // step — thinking never survives outside the ladder.
@@ -349,6 +360,7 @@ impl ChatView {
                 self.hidden_assistant_idx = None;
                 self.reconcile_orphaned_subagents();
                 self.finalize_assistant();
+                steps::set_turn_progress(&mut self.blocks, self.turn_block_start, false);
                 self.flush_pending_thinking();
                 self.blocks
                     .push(ChatBlock::Marker(vec![Line::from(Span::styled(
@@ -425,6 +437,9 @@ impl ChatView {
     /// the previous turn) must be cleared so it does not leak into the status
     /// bar of the freshly-started turn. The transcript blocks are untouched.
     pub fn begin_turn(&mut self) {
+        // A missing terminal display event must not leave the previous turn's
+        // progress animation alive after a new prompt is admitted.
+        steps::set_turn_progress(&mut self.blocks, self.turn_block_start, false);
         self.submitted = true;
         self.status.clear();
         self.turn_block_start = self.blocks.len();
@@ -462,15 +477,14 @@ impl ChatView {
 
     /// Toggle the click target at flat index `call_idx` inside the StepGroup
     /// at `block_idx` (mouse click handler on a rendered ladder row). The
-    /// index walks the group's VISIBLE rows — the group row, then (while the
-    /// group is open) each step row, then (while a step is open) its calls
-    /// aggregation row, then (while the call list is open) each call header
-    /// row, in render order — exactly what `visible_targets` and
+    /// index walks the turn's VISIBLE rows — the turn row, then (while it is
+    /// open) each step row, then (while a step is open) its calls aggregation
+    /// row, then (while that list is open) each function-call row, in render
+    /// order — exactly what `visible_targets` and
     /// `collect_headers` enumerate, so the toggled row is the row that was
-    /// clicked. A group target flips the group's fold; a step target flips
-    /// that step; a calls target flips that step's call list; a call target
-    /// toggles that single call's output. No-op if either index is out of
-    /// range.
+    /// clicked. A turn target flips its steps; a step target flips that
+    /// step; a calls target flips the aggregate list; a call target toggles
+    /// that single call's result. No-op if either index is out of range.
     pub fn toggle_tool_call_at(&mut self, block_idx: usize, call_idx: usize) {
         let Some(ChatBlock::StepGroup { open, steps, .. }) = self.blocks.get_mut(block_idx) else {
             return;
@@ -483,6 +497,9 @@ impl ChatView {
             StepTarget::Step(si) => {
                 if let Some(s) = steps.get_mut(si) {
                     s.open = !s.open;
+                    if s.open {
+                        steps::render_step_thinking(s);
+                    }
                 }
             }
             StepTarget::Calls(si) => {
@@ -500,9 +517,9 @@ impl ChatView {
 
     /// Collapse every collapsible block (Thinking + Compaction + StepGroup)
     /// in this view. Bound to Ctrl+L: clears any expanded reasoning blocks
-    /// and closes every level of the tool ladder — group fold, step folds,
-    /// calls-list folds and expanded call outputs — in one keystroke (the
-    /// group row itself always stays rendered; also applied to a child
+    /// and closes every level of the tool ladder — turn fold, step folds,
+    /// calls-list folds and expanded call results — in one keystroke (the turn row itself
+    /// always stays rendered; also applied to a child
     /// subagent view before exiting it).
     pub fn collapse_all_collapsible(&mut self) {
         for block in &mut self.blocks {
@@ -510,7 +527,7 @@ impl ChatView {
                 ChatBlock::Thinking { collapsed, .. } | ChatBlock::Compaction { collapsed, .. } => {
                     *collapsed = true;
                 }
-                ChatBlock::StepGroup { open, steps } => {
+                ChatBlock::StepGroup { open, steps, .. } => {
                     *open = false;
                     for s in steps {
                         s.open = false;
@@ -526,7 +543,7 @@ impl ChatView {
     }
 
     /// Flatten all blocks into a single `Vec<Line>` for rendering, using
-    /// `anim_tick` only to advance the running-subagent spinner. Delegated to
+    /// `anim_tick` advances running subagent and step-progress spinners. Delegated to
     /// by `flatten()` (which passes `0`) for non-render callers (selection,
     /// scroll-counting, tests) — line counts are identical across tick values,
     /// so hit-rects and selection math stay aligned with the live render.
@@ -605,8 +622,18 @@ impl ChatView {
                         Style::default().fg(theme::compaction_color()),
                     ));
                 }
-                ChatBlock::StepGroup { steps, open, .. } => {
-                    step_render::flatten_step_group(&mut out, *open, steps, anim_tick);
+                ChatBlock::StepGroup {
+                    steps,
+                    open,
+                    progress_active,
+                } => {
+                    step_render::flatten_step_group(
+                        &mut out,
+                        *open,
+                        *progress_active,
+                        steps,
+                        anim_tick,
+                    );
                 }
                 ChatBlock::Image { filename, rendered } => {
                     out.push(Line::from(Span::styled(
@@ -681,7 +708,7 @@ impl ChatView {
                         Span::styled(prompt.clone(), Style::default().fg(theme::muted())),
                         Span::raw(" "),
                         Span::styled(
-                            format!("{mark} {status_word}, {step_count} steps"),
+                            format!("{mark} {status_word}, {step_count} Steps"),
                             Style::default().fg(mark_color),
                         ),
                     ];

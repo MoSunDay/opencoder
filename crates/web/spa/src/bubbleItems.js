@@ -29,15 +29,68 @@ function turnKey(turn, index) {
   return kind + ':' + index;
 }
 
-/// turns → Bubble.List items. Always returns an array; never throws on
-/// null/undefined input (an empty transcript renders the hint instead).
+function isAssistantTurnPart(turn) {
+  if (!turn || turn.role !== 'assistant') {
+    return false;
+  }
+  return turn.kind === 'steps' || turn.kind === 'text' || turn.kind === 'think';
+}
+
+/// Reduced transcript segments → Bubble.List items. A maximal adjacent run
+/// containing a steps ladder is one assistant turn item, so its collapsed
+/// default is exactly one `N Steps` summary plus Say in one bubble. Multiple
+/// reducer step segments merge into that single count; speech keeps its own
+/// order at Turn level. Ordinary text-only replies retain the existing
+/// ai-item shape. Always returns an array and never throws on null/undefined.
 export function itemsFromTurns(turns) {
   const list = Array.isArray(turns) ? turns : [];
-  return list.map((turn, index) => ({
-    key: turnKey(turn, index),
-    role: roleOfTurn(turn),
-    content: turn,
-  }));
+  const items = [];
+  for (let index = 0; index < list.length;) {
+    const turn = list[index];
+    if (!isAssistantTurnPart(turn)) {
+      items.push({ key: turnKey(turn, index), role: roleOfTurn(turn), content: turn });
+      index += 1;
+      continue;
+    }
+    let end = index;
+    let hasSteps = false;
+    const parts = [];
+    while (end < list.length && isAssistantTurnPart(list[end])) {
+      const part = list[end];
+      parts.push(part);
+      hasSteps ||= part.kind === 'steps';
+      end += 1;
+    }
+    if (hasSteps) {
+      const stepParts = parts.filter((part) => part.kind === 'steps');
+      const steps = stepParts.flatMap((part) => (
+        Array.isArray(part.steps) ? part.steps : []
+      ));
+      const say = parts.filter((part) => part.kind !== 'steps');
+      const hasSay = say.some((part) => (
+        part.kind === 'text' && typeof part.text === 'string' && part.text.length > 0
+      ));
+      const progressActive = hasSay
+        ? false
+        : (stepParts.some((part) => part.progressActive === true)
+          ? true
+          : (stepParts.every((part) => part.progressActive === false) ? false : undefined));
+      items.push({
+        key: 'assistant-turn:' + index,
+        role: 'assistantTurn',
+        content: {
+          kind: 'assistant_turn', role: 'assistant', steps, say, progressActive,
+        },
+      });
+    } else {
+      parts.forEach((part, offset) => {
+        const partIndex = index + offset;
+        items.push({ key: turnKey(part, partIndex), role: roleOfTurn(part), content: part });
+      });
+    }
+    index = end;
+  }
+  return items;
 }
 
 function finiteOr(value, fallback) {

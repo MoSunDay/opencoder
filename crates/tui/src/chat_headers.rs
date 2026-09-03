@@ -26,8 +26,8 @@ impl ChatView {
         self.collect_headers().1
     }
 
-    /// Return each clickable row inside `StepGroup` blocks — the group row,
-    /// the step rows, the calls aggregation rows, and the call header rows,
+    /// Return each clickable row inside `StepGroup` blocks — the turn row,
+    /// the step rows, calls aggregation rows, and function-call header rows,
     /// in render order — as `(block_idx, call_idx, header_line_idx)`.
     /// `call_idx` is the FLAT index into that visible-row walk (shared shape
     /// with `super::steps::visible_targets`), so clicking resolves exactly
@@ -92,13 +92,12 @@ impl ChatView {
                 }
                 ChatBlock::StepGroup { steps, open, .. } => {
                     // Mirrors `flatten_step_group` exactly (three-level
-                    // ladder): the group row always (a clickable target);
-                    // while the group is open, per step the step row (target),
+                    // ladder): the turn row always (a clickable target);
+                    // while the turn is open, per step the step row (target),
                     // and while THAT step is open its `💭 Thinking` header +
-                    // thinking lines plus — when it holds calls — the
-                    // aggregation row (target) and, while the call list is
-                    // open, each call header row (target; + output + blank
-                    // when the call is expanded); one trailing blank.
+                    // thinking lines plus the calls aggregation row (target),
+                    // then each call header while that list is open (target;
+                    // + result + blank when the call is expanded); one trailing blank.
                     let mut call_idx = 0usize;
                     tool_calls.push(ToolCallHeader {
                         block_idx,

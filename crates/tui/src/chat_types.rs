@@ -56,7 +56,8 @@ pub enum ChatBlock {
     },
     /// One assistant turn's tool activity, folded into a three-level
     /// drill-down ladder: turn → step → function call.
-    /// The admitted user-turn boundary owns one group; intervening Say,
+    /// Every user input (submit, consumed steer, consumed queued prompt)
+    /// owns one group anchored below its echo; intervening Say,
     /// image, marker, or subagent blocks do not split it. A Step is Thinking
     /// plus every function call until the next Thinking run. The group renders ONE
     /// clickable `▸ N Steps` row at col 0 (collapsed by default); opening it

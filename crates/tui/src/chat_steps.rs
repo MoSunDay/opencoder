@@ -8,6 +8,10 @@
 //! does (sequential calls in one round thereby split; parallel calls stay
 //! together).
 //!
+//! A user turn owns exactly one `StepGroup`: live updates use the explicit
+//! `turn_block_start` boundary, while replay canonicalizes message pairs at
+//! real `User` blocks. Assistant Say and presentation blocks never split it.
+//!
 //! Thinking absorption: every round's reasoning lives strictly step-local —
 //! the pending `Thinking` blocks trailing the flow (even behind the turn's
 //! own `Assistant` speech) are folded into the step the next `ToolStart`
@@ -21,10 +25,10 @@ use ratatui::text::Line;
 
 use super::{ChatBlock, Step, ToolCall};
 
-/// One clickable row inside a `StepGroup`'s three-level ladder: the group
-/// row (toggles the whole group), a step row (toggles that step), a calls
-/// aggregation row (toggles that step's call list), or a call header row
-/// (toggles that single call's output).
+/// One clickable row inside a `StepGroup`'s three-level ladder: the turn row
+/// (toggles all steps), a step row (toggles that step), a calls aggregation
+/// row (toggles that step's call list), or a function-call row (toggles that
+/// call's result).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum StepTarget {
     Group,
@@ -34,9 +38,9 @@ pub(crate) enum StepTarget {
 }
 
 /// The group's currently rendered click targets, in visual order: the group
-/// row always; while the group is open each step row; while a step is open
-/// (and holds calls) its aggregation row; while the call list is open each
-/// call header row. Mirrors the `collect_headers` walk exactly, so
+/// row always; while the turn is open each step row; while a step is open,
+/// its calls aggregation row; while that list is open, each function-call
+/// row. Mirrors the `collect_headers` walk exactly, so
 /// `ToolCallHeader::call_idx` indexes this list and `toggle_tool_call_at`
 /// resolves the same row the renderer drew.
 pub(crate) fn visible_targets(open: bool, steps: &[Step]) -> Vec<StepTarget> {
@@ -77,18 +81,25 @@ pub(crate) fn merge_or_new_step(
     mut thinking: Vec<Line<'static>>,
     call: ToolCall,
 ) {
+    let thinking_raw = span_text(&thinking);
     if boundary_needed(steps) {
         steps.push(Step {
+            thinking_raw,
             thinking,
+            thinking_dirty: false,
             calls: vec![call],
             open: false,
             calls_open: false,
+            sealed: true,
         });
         return;
     }
     if let Some(s) = steps.last_mut() {
         if !thinking.is_empty() {
-            s.thinking.append(&mut thinking);
+            s.thinking_raw.push_str(&thinking_raw);
+            if !s.thinking_dirty {
+                s.thinking.append(&mut thinking);
+            }
         }
         s.calls.push(call);
     }
@@ -96,16 +107,168 @@ pub(crate) fn merge_or_new_step(
 
 /// A fresh single-step group carrying `call` (live `ToolStart` with no
 /// trailing group, replayed group seeds, orphan synthesis). Starts fully
-/// collapsed (group + step + calls list + call output).
+/// collapsed (turn + step + calls list + call result). The group is settled
+/// by default; live callers explicitly activate progress when appropriate.
 pub(crate) fn single_step_group(call: ToolCall, thinking: Vec<Line<'static>>) -> ChatBlock {
+    let thinking_raw = span_text(&thinking);
     ChatBlock::StepGroup {
         steps: vec![Step {
+            thinking_raw,
             thinking,
+            thinking_dirty: false,
             calls: vec![call],
             open: false,
             calls_open: false,
+            sealed: true,
         }],
         open: false,
+        progress_active: false,
+    }
+}
+
+/// Set the progress animation on the canonical StepGroup owned by the
+/// current admitted user turn. Presentation blocks inside the turn are
+/// ignored; the first group after `turn_start` is the single source of truth.
+pub(crate) fn set_turn_progress(blocks: &mut [ChatBlock], turn_start: usize, active: bool) -> bool {
+    let floor = turn_start.min(blocks.len());
+    // Say is the terminal presentation of a Step. Once non-empty assistant
+    // output exists in this admitted turn, later reasoning/tool frames must
+    // not re-arm the progress indicator on the already-finished ladder.
+    let active = active && !turn_has_say(&blocks[floor..]);
+    let Some(group) = blocks[floor..]
+        .iter_mut()
+        .find(|block| matches!(block, ChatBlock::StepGroup { .. }))
+    else {
+        return false;
+    };
+    let ChatBlock::StepGroup {
+        progress_active, ..
+    } = group
+    else {
+        unreachable!("step-group was matched above");
+    };
+    *progress_active = active;
+    true
+}
+
+fn turn_has_say(blocks: &[ChatBlock]) -> bool {
+    blocks
+        .iter()
+        .any(|block| matches!(block, ChatBlock::Assistant { raw, .. } if !raw.is_empty()))
+}
+
+/// Concatenate already-rendered spans as a plain-text fallback for replayed
+/// or one-shot step construction. Live streaming never round-trips through
+/// this lossy representation; it accumulates `Step::thinking_raw` instead.
+pub(crate) fn span_text(lines: &[Line<'static>]) -> String {
+    let mut out = String::new();
+    for line in lines {
+        for span in &line.spans {
+            out.push_str(&span.content);
+        }
+    }
+    out
+}
+
+/// Stream one reasoning delta straight into the ladder — thinking is a
+/// structural part of a step, never a top-level block. The trailing group's
+/// last step receives the delta when the round is still open (no finished
+/// calls); otherwise a new step opens. A fresh group is pushed when the
+/// round has no ladder yet. Streaming updates never change disclosure state:
+/// the turn and step stay
+/// closed by default, so the stable top-level view remains `N Steps + Say`.
+///
+/// An open streaming `Assistant` (the round's Say) rides on top of the
+/// ladder: the caller pops it before calling and pushes it back after, so
+/// the delta always addresses the group underneath.
+pub(crate) fn append_step_thinking_delta(
+    blocks: &mut Vec<ChatBlock>,
+    turn_start: usize,
+    delta: &str,
+) -> Option<usize> {
+    if delta.is_empty() {
+        return None;
+    }
+    let floor = turn_start.min(blocks.len());
+    let should_show_progress = !turn_has_say(&blocks[floor..]);
+    let found = blocks[floor..]
+        .iter()
+        .position(|block| matches!(block, ChatBlock::StepGroup { .. }))
+        .map(|relative| floor + relative);
+    let (group_idx, inserted_at) = match found {
+        Some(idx) => (idx, None),
+        None => {
+            blocks.insert(
+                floor,
+                ChatBlock::StepGroup {
+                    steps: Vec::new(),
+                    open: false,
+                    progress_active: should_show_progress,
+                },
+            );
+            (floor, Some(floor))
+        }
+    };
+    if let ChatBlock::StepGroup {
+        steps,
+        open,
+        progress_active,
+    } = &mut blocks[group_idx]
+    {
+        *progress_active = should_show_progress;
+        if boundary_needed(steps) {
+            steps.push(Step {
+                thinking_raw: delta.to_string(),
+                thinking: Vec::new(),
+                thinking_dirty: true,
+                calls: Vec::new(),
+                open: false,
+                calls_open: false,
+                sealed: false,
+            });
+        } else if let Some(step) = steps.last_mut() {
+            step.thinking_raw.push_str(delta);
+            if *open && step.open {
+                render_step_thinking(step);
+            } else {
+                step.thinking_dirty = true;
+            }
+        }
+    }
+    inserted_at
+}
+
+/// Add a call to the one canonical ladder owned by the current user turn.
+/// `turn_start` is the live boundary set by `ChatView::begin_turn`; Say,
+/// image, marker, and subagent blocks inside that turn never manufacture a
+/// second top-level group. A newly-created group is inserted at the boundary
+/// so the settled order is always `N Steps` followed by the turn's Say.
+pub(crate) fn merge_turn_call(
+    blocks: &mut Vec<ChatBlock>,
+    turn_start: usize,
+    thinking: Vec<Line<'static>>,
+    call: ToolCall,
+) -> Option<usize> {
+    let floor = turn_start.min(blocks.len());
+    if let Some(idx) = blocks[floor..]
+        .iter()
+        .position(|block| matches!(block, ChatBlock::StepGroup { .. }))
+        .map(|relative| floor + relative)
+    {
+        if let ChatBlock::StepGroup { steps, .. } = &mut blocks[idx] {
+            merge_or_new_step(steps, thinking, call);
+        }
+        return None;
+    }
+    blocks.insert(floor, single_step_group(call, thinking));
+    Some(floor)
+}
+
+/// Materialize accumulated reasoning only when a step is visible.
+pub(crate) fn render_step_thinking(step: &mut Step) {
+    if step.thinking_dirty {
+        step.thinking = crate::markdown::render(&step.thinking_raw);
+        step.thinking_dirty = false;
     }
 }
 
@@ -113,14 +276,19 @@ pub(crate) fn single_step_group(call: ToolCall, thinking: Vec<Line<'static>>) ->
 /// the ladder shape for a pure-text round at flush time. Starts fully
 /// collapsed (group + step), mirroring `single_step_group`.
 pub(crate) fn thinking_step_group(thinking: Vec<Line<'static>>) -> ChatBlock {
+    let thinking_raw = span_text(&thinking);
     ChatBlock::StepGroup {
         steps: vec![Step {
+            thinking_raw,
             thinking,
+            thinking_dirty: false,
             calls: Vec::new(),
             open: false,
             calls_open: false,
+            sealed: true,
         }],
         open: false,
+        progress_active: false,
     }
 }
 
@@ -147,10 +315,13 @@ pub(crate) fn place_thinking_step(
             ChatBlock::Assistant { .. } => insert_at = i,
             ChatBlock::StepGroup { steps, .. } => {
                 steps.push(Step {
+                    thinking_raw: span_text(&thinking),
                     thinking,
+                    thinking_dirty: false,
                     calls: Vec::new(),
                     open: false,
                     calls_open: false,
+                    sealed: true,
                 });
                 return None;
             }
@@ -244,7 +415,11 @@ pub(crate) fn coalesce_steps(blocks: &mut Vec<ChatBlock>) {
     for block in blocks.drain(..) {
         match block {
             ChatBlock::Thinking { .. } => pending.push(block),
-            ChatBlock::StepGroup { mut steps, open } => {
+            ChatBlock::StepGroup {
+                mut steps,
+                open,
+                progress_active,
+            } => {
                 if steps.is_empty() {
                     // Defensive: a zero-step group carries nothing; the
                     // pending thinking still joins the ladder.
@@ -255,10 +430,26 @@ pub(crate) fn coalesce_steps(blocks: &mut Vec<ChatBlock>) {
                 // assistant speech belongs to this round as well.
                 let mut absorbed = absorb_pending_thinking(&mut out);
                 absorbed.append(&mut take_rendered_thinking(&mut pending));
-                steps[0].thinking.append(&mut absorbed);
+                let mut absorbed_raw = span_text(&absorbed);
+                absorbed_raw.push_str(&steps[0].thinking_raw);
+                steps[0].thinking_raw = absorbed_raw;
+                absorbed.append(&mut steps[0].thinking);
+                steps[0].thinking = absorbed;
+                steps[0].thinking_dirty = false;
                 match out.last_mut() {
-                    Some(ChatBlock::StepGroup { steps: prev, .. }) => prev.append(&mut steps),
-                    _ => out.push(ChatBlock::StepGroup { steps, open }),
+                    Some(ChatBlock::StepGroup {
+                        steps: prev,
+                        progress_active: prev_progress,
+                        ..
+                    }) => {
+                        prev.append(&mut steps);
+                        *prev_progress |= progress_active;
+                    }
+                    _ => out.push(ChatBlock::StepGroup {
+                        steps,
+                        open,
+                        progress_active,
+                    }),
                 }
             }
             ChatBlock::Assistant { .. } => {
@@ -275,6 +466,80 @@ pub(crate) fn coalesce_steps(blocks: &mut Vec<ChatBlock>) {
         }
     }
     place_thinking_step(&mut out, take_rendered_thinking(&mut pending));
+    normalize_turn_groups(&mut out);
+    *blocks = out;
+}
+
+/// Canonicalize replay into one StepGroup per user turn. Persisted sessions
+/// are message-pair streams, so Assistant Say and tool-result carrier rows
+/// can sit between tool rounds; those are presentation details, not Turn
+/// boundaries. The real user echo is the boundary. The merged group is
+/// placed before the turn's first Assistant speech, matching the live path's
+/// `turn_block_start` insertion and the default `N Steps + Say` order.
+fn normalize_turn_groups(blocks: &mut Vec<ChatBlock>) {
+    fn append_segment(out: &mut Vec<ChatBlock>, segment: &mut Vec<ChatBlock>) {
+        let insert_at = segment
+            .iter()
+            .position(|block| {
+                matches!(
+                    block,
+                    ChatBlock::Assistant { .. } | ChatBlock::StepGroup { .. }
+                )
+            })
+            .unwrap_or(segment.len());
+        let mut steps = Vec::new();
+        let mut open = false;
+        let mut progress_active = false;
+        for block in segment.iter_mut() {
+            if let ChatBlock::StepGroup {
+                steps: group_steps,
+                open: group_open,
+                progress_active: group_progress,
+            } = block
+            {
+                steps.append(group_steps);
+                open |= *group_open;
+                progress_active |= *group_progress;
+            }
+        }
+        if steps.is_empty() {
+            out.append(segment);
+            return;
+        }
+        let mut inserted = false;
+        for (idx, block) in segment.drain(..).enumerate() {
+            if idx == insert_at {
+                out.push(ChatBlock::StepGroup {
+                    steps: std::mem::take(&mut steps),
+                    open,
+                    progress_active,
+                });
+                inserted = true;
+            }
+            if !matches!(block, ChatBlock::StepGroup { .. }) {
+                out.push(block);
+            }
+        }
+        if !inserted {
+            out.push(ChatBlock::StepGroup {
+                steps,
+                open,
+                progress_active,
+            });
+        }
+    }
+
+    let mut out = Vec::with_capacity(blocks.len());
+    let mut segment = Vec::new();
+    for block in blocks.drain(..) {
+        if matches!(block, ChatBlock::User { .. }) {
+            append_segment(&mut out, &mut segment);
+            out.push(block);
+        } else {
+            segment.push(block);
+        }
+    }
+    append_segment(&mut out, &mut segment);
     *blocks = out;
 }
 
@@ -297,7 +562,9 @@ mod tests {
     #[test]
     fn visible_targets_mirror_the_three_level_ladder() {
         let step = |open: bool, calls_open: bool, calls: usize| Step {
+            thinking_raw: String::new(),
             thinking: Vec::new(),
+            thinking_dirty: false,
             calls: (0..calls)
                 .map(|i| ToolCall {
                     id: format!("c{i}"),
@@ -310,6 +577,7 @@ mod tests {
                 .collect(),
             open,
             calls_open,
+            sealed: true,
         };
         let steps = vec![
             step(false, false, 2),
@@ -318,8 +586,8 @@ mod tests {
         ];
         // Group closed: only the group row.
         assert_eq!(visible_targets(false, &steps), vec![StepTarget::Group]);
-        // Group open: step rows; open steps add the aggregation row; only a
-        // calls_open step adds its call rows.
+        // Turn open: every step row is present; open steps add the calls
+        // aggregation row, and only a calls-open step adds its call rows.
         assert_eq!(
             visible_targets(true, &steps),
             vec![

@@ -55,16 +55,22 @@ pub enum ChatBlock {
         streaming: bool,
     },
     /// One assistant turn's tool activity, folded into a three-level
-    /// drill-down ladder: group → step → calls list → single call output.
-    /// Consecutive calls between text/image/marker blocks form one group
-    /// (any other block splits the run); steps split at round boundaries (a
-    /// finished call followed by a new `ToolStart`). The group renders ONE
-    /// clickable `▸ N steps` row at col 0 (collapsed by default); opening it
-    /// lists the step rows, opening a step reveals its thinking + a
-    /// clickable `▸ N function calls` aggregation row, and opening that
-    /// lists the call header rows (a single call's output expands
-    /// individually). Ctrl+L resets every level.
-    StepGroup { steps: Vec<Step>, open: bool },
+    /// drill-down ladder: turn → step → function call.
+    /// The admitted user-turn boundary owns one group; intervening Say,
+    /// image, marker, or subagent blocks do not split it. Steps split at round
+    /// boundaries (a finished call followed by a new `ToolStart`). The group renders ONE
+    /// clickable `▸ N Steps` row at col 0 (collapsed by default); opening it
+    /// lists the step rows, opening a step reveals its thinking plus a
+    /// `N Function calls` aggregation row, and opening that row reveals the
+    /// individual calls. Opening a call reveals only that call's result.
+    /// `progress_active` drives the group-row animation until Say begins and
+    /// cannot be reactivated after non-empty Say output exists.
+    /// Ctrl+L resets every disclosure level.
+    StepGroup {
+        steps: Vec<Step>,
+        open: bool,
+        progress_active: bool,
+    },
     /// Inline image attachment rendered as half-block ASCII art.
     /// `filename` is the display name; `rendered` is the pre-computed
     /// half-block `Line` set (empty when rendering failed → placeholder).
@@ -223,24 +229,36 @@ pub struct SubagentHeader {
 
 /// One step inside a `ChatBlock::StepGroup`: a single assistant round's
 /// thinking (as rendered markdown lines) plus that round's function calls.
-/// The step's row renders only while the enclosing group is open; its
+/// The step's row renders only while the enclosing turn is open; its
 /// content (thinking + calls aggregation row) is visible only while the
-/// step is open; the call rows additionally require `calls_open`; a single
-/// call's output additionally requires `ToolCall::expanded`.
+/// step is open; individual call rows additionally require `calls_open`;
+/// a single call's result additionally requires `ToolCall::expanded`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Step {
+    /// Sanitized source accumulated from live reasoning deltas. Keeping the
+    /// source avoids lossy rendered-text round trips (notably trailing
+    /// whitespace and Markdown delimiters) before each re-render.
+    pub thinking_raw: String,
     /// Rendered markdown of the round's thinking. Empty when the round went
     /// straight to tools. A round with tools NEVER leaves a standalone
     /// `Thinking` block behind — its reasoning is absorbed here (see
     /// `steps::absorb_pending_thinking`).
     pub thinking: Vec<Line<'static>>,
+    /// Whether `thinking_raw` has advanced beyond `thinking`. Collapsed
+    /// streaming steps only append source; opening the step materializes the
+    /// markdown once, avoiding an O(n²) full re-render on every hidden delta.
+    pub thinking_dirty: bool,
     pub calls: Vec<ToolCall>,
-    /// Whether this step's Thinking header + thinking + calls aggregation
-    /// row render.
+    /// Whether this step's Thinking content + calls aggregation row render.
     pub open: bool,
-    /// Whether the aggregation row's call header list renders (level 3 of
-    /// the ladder). Requires `open`.
+    /// Whether this step's individual function-call rows render. Requires
+    /// `open`; each call result remains independently collapsible.
     pub calls_open: bool,
+    /// Whether this step's streaming thinking has been accounted into
+    /// `context_used` already (mirrors the top-level `Thinking::sealed`
+    /// flag). Rendered on demand by `steps::render_step_thinking`, sealed once
+    /// per step at round finalize.
+    pub sealed: bool,
 }
 
 /// One tool call inside a step of a `ChatBlock::StepGroup`.
@@ -268,21 +286,18 @@ pub struct ToolCall {
 pub(crate) const STEP_ROW_OPEN_PREFIX: &str = "\u{276f} Step(";
 pub(crate) const STEP_ROW_CLOSED_PREFIX: &str = "\u{25b8} Step(";
 
-/// Exact text prefixes of the group row (`❯ N steps` when the group is
-/// open, `▸ N steps` when collapsed — the trailing space is part of the
-/// prefix) and of the per-step calls aggregation row, which reuses the same
-/// fold glyphs (`❯ N function calls` / `▸ N function calls`). Declared here
-/// so the renderer and copy-mode's structured cleaner share one shape.
+/// Exact text prefixes shared by the turn row (`❯ N Steps` / `▸ N Steps`)
+/// and the per-step calls aggregation row (`❯ N Function calls` /
+/// `▸ N Function calls`). The trailing space is part of the prefix.
 pub(crate) const GROUP_ROW_OPEN_PREFIX: &str = "\u{276f} ";
 pub(crate) const GROUP_ROW_CLOSED_PREFIX: &str = "\u{25b8} ";
 
-/// Locates one clickable row inside a `StepGroup` — the group row, a step
-/// row, a calls aggregation row, or a call header row — for mouse
+/// Locates one clickable row inside a `StepGroup` — the turn row, a step
+/// row, a calls aggregation row, or a function-call header row — for mouse
 /// hit-testing. `call_idx` is the block's flat *visible-target index*: the
 /// row's position among the group's currently rendered rows (see
-/// `visible_targets`). Clicking toggles exactly that target (group fold,
-/// step fold, calls-list fold, or single-call output), leaving siblings
-/// untouched.
+/// `visible_targets`). Clicking toggles exactly that target (turn fold,
+/// step fold, calls list, or single-call result), leaving siblings untouched.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ToolCallHeader {
     pub block_idx: usize,

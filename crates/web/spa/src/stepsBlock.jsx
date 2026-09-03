@@ -3,20 +3,27 @@
 // role:'assistant', steps:[{thinking, calls:[toolCall,…]}]} — the SPA port
 // of the TUI's ChatBlock::StepGroup ladder (crates/tui/src/chat_steps.rs).
 // Interaction model (collapsed content stays OUT of the DOM until drilled):
-//   L0  ❯ 2 steps [running|error]  ← GROUP Collapse (ghost, default CLOSED)
-//         — the ONLY thing a collapsed steps bubble renders; running while
-//           any call is open (output===null), red error once nothing runs
+//   L0  ❯ 2 Steps [running|error]  ← TURN Collapse (ghost, default CLOSED)
+//         — the ONLY thing a collapsed steps bubble renders; running from
+//           reasoning/tool activity until Say begins, then red on any error
 //   L1    ❯ Step(1) [error]        ← per-step Collapse (default closed);
 //         red tag when any of THIS step's calls failed
 //   L2      💭 Thinking (text)      ← thinking renders DIRECTLY (mono grey
 //         paragraph + label line) — no ghost collapse inside a step
-//          ❯ 1 function call       ← calls-AGGREGATE Collapse (ghost)
-//   L3        🔧 bash · 1.2s        ← per-call ToolContent (input/output)
-// Clicking L0 reveals the step rows, L2 the thinking + aggregate row, L3 the
-// call rows. Say text never enters this block: reduce.js keeps it a
-// top-level ai bubble AFTER the steps turn. ThinkContent stays exported for
-// transcript.jsx's independent `think` turns (pure-text rounds); ToolContent
-// is shared by the L3 rows and the flat `tool` turns (task handles). The
+//          ❯ 1 Function call       ← calls-AGGREGATE Collapse (ghost)
+//   L3        🔧 bash · 1.2s        ← per-call Collapse (input/result)
+// Clicking L0 reveals the step rows, clicking a step reveals its thinking
+// and calls aggregate, opening that aggregate reveals call rows, and clicking
+// one call reveals only that call's result. Every level starts closed,
+// including while streaming. Ctrl+L / ⤒ 收起 remount
+// the bubbles (epoch key), resetting them to the stable `N Steps + Say`
+// turn summary.
+// Say text never enters this component: reduce.js keeps it as a sibling
+// segment and bubbleItems.js places both segments in the same visual Turn.
+// ThinkContent stays exported for
+// transcript.jsx's independent `think` turns (history/defense only — the
+// live path streams reasoning straight into steps); ToolContent
+// is shared by the L3 rows and flat `tool` turns (task handles). The
 // import is one-way (transcript → stepsBlock), no cycle.
 
 import { Collapse, Tag, Typography } from 'antd';
@@ -116,10 +123,9 @@ function StepThinking({ text }) {
 }
 
 /// One step row (L1 → L2): label `❯ Step(k)` (+ red error tag when any of
-/// the step's calls failed — the call count moved to the aggregate row, so
-/// no `· n calls` suffix here). Children: the step's thinking rendered
-/// directly, then the calls-aggregate collapse whose children are the
-/// per-call ToolContent rows (L3).
+/// the step's calls failed). Children: the step's thinking rendered
+/// directly, followed by a calls aggregation whose children are the
+/// individually collapsible ToolContent rows.
 function StepCollapse({ step, index }) {
   const k = index + 1;
   const list = (step && Array.isArray(step.calls)) ? step.calls : [];
@@ -148,7 +154,7 @@ function StepCollapse({ step, index }) {
                   key: 'calls:' + k,
                   label: (
                     <span style={{ fontFamily: MONO, fontSize: 12 }}>
-                      ❯ {list.length} function call{list.length === 1 ? '' : 's'}
+                      ❯ {list.length} Function call{list.length === 1 ? '' : 's'}
                     </span>
                   ),
                   children: list.map((call, ci) => (
@@ -164,15 +170,20 @@ function StepCollapse({ step, index }) {
   );
 }
 
-/// Group row (L0): ONE ghost Collapse for the whole turn — label `❯ N
-/// step(s)` + running/error tag; default CLOSED, so a collapsed steps bubble
+/// Turn row (L0): ONE ghost Collapse for the whole turn — label `❯ N
+/// Step(s)` + running/error tag; default CLOSED, so a collapsed steps bubble
 /// shows only this row (the ladder renders on drill-down). `running` while
-/// any call is open (`output === null`); `error` only once nothing is
-/// running (a finished round can still fail).
+/// `progressActive` stays true from reasoning/tool activity until Say begins;
+/// `error` appears only once progress settles. Older hand-built turns without
+/// that field fall back to the open-call test. It remains closed by default
+/// while streaming, so disclosure state never jumps as frames arrive.
 export function StepsContent({ turn }) {
   const steps = turn && Array.isArray(turn.steps) ? turn.steps : [];
   const calls = steps.flatMap((s) => ((s && Array.isArray(s.calls)) ? s.calls : []));
-  const running = calls.some((c) => c && c.output === null);
+  const openCall = calls.some((c) => c && c.output === null);
+  const running = typeof turn.progressActive === 'boolean'
+    ? turn.progressActive
+    : openCall;
   const errored = calls.some((c) => c && c.isError);
   return (
     <Collapse
@@ -182,9 +193,9 @@ export function StepsContent({ turn }) {
         key: 'steps',
         label: (
           <span style={{ fontFamily: MONO, fontSize: 12 }}>
-            ❯ {steps.length} step{steps.length === 1 ? '' : 's'}
-            {running ? <Tag color="processing" style={{ marginLeft: 8 }}>running</Tag> : null}
-            {!running && errored ? <Tag color="red" style={{ marginLeft: 8 }}>error</Tag> : null}
+            ❯ {steps.length} Step{steps.length === 1 ? '' : 's'}
+            {running ? <Tag color="processing" style={{ marginLeft: 12 }}>running</Tag> : null}
+            {!running && errored ? <Tag color="red" style={{ marginLeft: 12 }}>error</Tag> : null}
           </span>
         ),
         children: steps.map((step, i) => (

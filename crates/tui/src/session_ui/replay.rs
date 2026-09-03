@@ -21,6 +21,36 @@ use crate::chat::{
 use crate::terminal_text::{sanitize_multiline, sanitize_single_line};
 use crate::theme;
 
+/// Emit one replay segment as a ladder: pre-Say reasoning plus the segment's
+/// calls form the turn's StepGroup (a call-less step when the turn only
+/// thought before speaking). Mirrors the live path's grouping rules; pure
+/// w.r.t. the passed buffers (drains both on flush).
+fn flush_segment(
+    chat: &mut ChatView,
+    seg_thinking: &mut Vec<String>,
+    seg_calls: &mut Vec<ToolCall>,
+) {
+    if seg_thinking.is_empty() && seg_calls.is_empty() {
+        return;
+    }
+    let thinking_raw = seg_thinking.join("");
+    seg_thinking.clear();
+    let steps = vec![Step {
+        thinking_raw,
+        thinking: Vec::new(),
+        thinking_dirty: false,
+        calls: std::mem::take(seg_calls),
+        open: false,
+        calls_open: false,
+        sealed: true,
+    }];
+    chat.blocks.push(ChatBlock::StepGroup {
+        steps,
+        open: false,
+        progress_active: false,
+    });
+}
+
 /// Replay a single persisted message into `chat`: reconstruct `Assistant` text
 /// and `ChatBlock::StepGroup` blocks (headers from `ToolUse`, outputs from
 /// matching `ToolResult`s), mirroring the live `ChatView::apply` path
@@ -98,42 +128,30 @@ pub(super) fn replay_one(
             if msg.usage.total_tokens > 0 {
                 chat.real_context_tokens = Some(msg.usage.total_tokens);
             }
-            // Live streaming groups every reasoning segment before the round's
-            // sole Assistant block. Rebuild in the same order so resume never
-            // flips `Thinking -> Say` into `Say -> Thinking`.
+            // Rebuild in BLOCK ORDER, mirroring the live path's Turn
+            // contract: a Text block (Say) CLOSES a Turn — reasoning/tool
+            // blocks that follow it belong to the NEXT turn's ladder, not
+            // the one above the Say. Segments between Says accumulate
+            // exactly like live rounds within one turn. `coalesce_steps`
+            // later merges call-only steps that share a turn.
+            let mut seg_thinking: Vec<String> = Vec::new();
+            let mut seg_calls: Vec<ToolCall> = Vec::new();
             for b in &msg.blocks {
-                if let ContentBlock::Reasoning { text } = b {
-                    chat.blocks.push(ChatBlock::Thinking {
-                        text: sanitize_multiline(text).into_owned(),
-                        collapsed: true,
-                        sealed: true,
-                    });
-                }
-            }
-            let text: String = msg
-                .blocks
-                .iter()
-                .filter_map(|b| match b {
-                    ContentBlock::Text { text } => Some(text.as_str()),
-                    _ => None,
-                })
-                .collect::<Vec<_>>()
-                .join("");
-            let text = sanitize_multiline(&text).into_owned();
-            if !text.is_empty() {
-                let rendered = crate::markdown::render(&text);
-                chat.blocks.push(ChatBlock::Assistant {
-                    raw: text,
-                    rendered,
-                    done: true,
-                });
-            }
-            let calls: Vec<ToolCall> = msg
-                .blocks
-                .iter()
-                .filter_map(|b| match b {
+                match b {
+                    ContentBlock::Reasoning { text } => {
+                        seg_thinking.push(sanitize_multiline(text).into_owned());
+                    }
+                    ContentBlock::Text { text } if !text.trim().is_empty() => {
+                        flush_segment(chat, &mut seg_thinking, &mut seg_calls);
+                        let raw = sanitize_multiline(text).into_owned();
+                        chat.blocks.push(ChatBlock::Assistant {
+                            raw,
+                            rendered: crate::markdown::render(text),
+                            done: true,
+                        });
+                    }
                     ContentBlock::ToolUse { id, name, input } if name != "task" => {
-                        Some(ToolCall {
+                        seg_calls.push(ToolCall {
                             id: id.clone(),
                             header: Line::from(vec![
                                 Span::styled(
@@ -151,29 +169,14 @@ pub(super) fn replay_one(
                             started_at_ms: Some(0),
                             elapsed_ms: Some(0),
                             expanded: false,
-                        })
+                        });
                     }
-                    _ => None,
-                })
-                .collect();
-            if !calls.is_empty() {
-                // All tool_use blocks in this message enter one provisional
-                // Step. `coalesce_steps` later merges consecutive call-only
-                // steps and keeps only new Thinking as a Step boundary.
-                chat.blocks.push(ChatBlock::StepGroup {
-                    steps: vec![Step {
-                        thinking_raw: String::new(),
-                        thinking: Vec::new(),
-                        thinking_dirty: false,
-                        calls,
-                        open: false,
-                        calls_open: false,
-                        sealed: true,
-                    }],
-                    open: false,
-                    progress_active: false,
-                });
+                    _ => {}
+                }
             }
+            // Trailing segment after the last Say (or the whole message
+            // when it never spoke): its ladder follows the same contract.
+            flush_segment(chat, &mut seg_thinking, &mut seg_calls);
         }
         Role::Tool => {
             for b in &msg.blocks {
@@ -386,12 +389,32 @@ pub async fn rebuild_after_reset(
     let saved_submitted = chat.submitted;
     let saved_first_prompt = chat.first_prompt.clone();
     let saved_tokens_total = chat.tokens_total;
+    let saved_turn_echo = chat.pending_turn_echo.clone();
     *chat = replay_into_chat(&agent, msgs, store, session_id, saved_tokens_total).await;
     chat.annotation_text = saved_annotation_text;
     chat.submitted = saved_submitted;
     chat.first_prompt = saved_first_prompt;
-    // The reset happened inside the admitted turn; reliable
-    // completion repair must never target pre-reset blocks.
+    chat.pending_turn_echo = saved_turn_echo;
+    // The reset happened inside the admitted turn (e.g. the compound
+    // `/act_clear_context <tail>` that triggered it), and the folded
+    // transcript cannot contain that turn's prompt yet — it is recorded
+    // after the reset fires. Without re-pushing the echo, the running
+    // turn's ladder and Say would render with NO user boundary below the
+    // rebuilt blocks, reading as steps accumulated into the previous turn
+    // and Says glued together. Restore the boundary, then anchor the
+    // ladder below it.
+    if let Some(echo) = chat
+        .pending_turn_echo
+        .as_ref()
+        .filter(|e| !e.trim().is_empty())
+    {
+        let rendered = crate::markdown::render(echo);
+        chat.blocks.push(crate::chat::ChatBlock::User { rendered });
+        chat.blocks.push(crate::chat::ChatBlock::Marker(vec![
+            ratatui::text::Line::from(""),
+        ]));
+    }
+    // Reliable completion repair must never target pre-reset blocks.
     chat.turn_block_start = chat.blocks.len();
 }
 

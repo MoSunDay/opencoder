@@ -243,3 +243,40 @@ fn consecutive_turns_render_steps_then_say_each() {
     let say2 = joined.find("second say").unwrap();
     assert!(steps1 < say1 && say1 < prompt2 && prompt2 < steps2 && steps2 < say2);
 }
+
+// ----- pending_turn_echo: the echo memory that survives TranscriptReset -----
+
+/// A consumed steer's echo is remembered: a subsequent TranscriptReset
+/// rebuild (steered `/act_clear_context <tail>`) re-pushes it as the running
+/// turn's user boundary instead of orphaning the ladder.
+#[test]
+fn steer_consumed_echo_is_remembered_for_reset_restore() {
+    let mut v = ChatView::default();
+    v.blocks.push(ChatBlock::User {
+        rendered: crate::markdown::render("first"),
+    });
+    v.begin_turn();
+    v.apply(&SessionEvent::SteerConsumed {
+        seq: 1,
+        text: "/act_clear_context 实现贪吃蛇".into(),
+    });
+    assert_eq!(v.pending_turn_echo.as_deref(), Some("实现贪吃蛇"));
+    // Done retires the memory: a later bare reset must not resurrect it.
+    v.apply(&SessionEvent::Done);
+    assert!(v.pending_turn_echo.is_none());
+}
+
+/// A bare control command (empty echo, applied inline) never touches the
+/// running turn's remembered echo.
+#[test]
+fn bare_control_consumed_leaves_pending_echo_untouched() {
+    let mut v = ChatView {
+        pending_turn_echo: Some("original prompt".into()),
+        ..Default::default()
+    };
+    v.apply(&SessionEvent::SteerConsumed {
+        seq: 7,
+        text: String::new(),
+    });
+    assert_eq!(v.pending_turn_echo.as_deref(), Some("original prompt"));
+}

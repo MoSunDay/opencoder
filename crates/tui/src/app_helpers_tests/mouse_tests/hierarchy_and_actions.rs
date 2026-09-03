@@ -144,6 +144,7 @@ async fn clicking_step_or_call_row_toggles_only_that_target() {
 
     let mut chat = ChatView::default();
     for (id, cmd) in [("a", "echo A"), ("b", "echo B")] {
+        chat.apply(&SessionEvent::ReasoningDelta(format!("think {id}")));
         chat.apply(&SessionEvent::ToolStart {
             id: id.into(),
             name: "bash".into(),

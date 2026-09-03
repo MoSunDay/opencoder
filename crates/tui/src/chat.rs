@@ -134,8 +134,8 @@ impl ChatView {
                 };
                 // Every non-task call in this admitted user turn joins its
                 // ONE canonical group; Say and presentation blocks are not
-                // structural boundaries. Finished calls still open a new
-                // Step through the shared round-boundary heuristic.
+                // structural boundaries. Calls keep accumulating in the
+                // current Step until a later Thinking run opens the next.
                 if let Some(at) =
                     steps::merge_turn_call(&mut self.blocks, self.turn_block_start, thinking, call)
                 {

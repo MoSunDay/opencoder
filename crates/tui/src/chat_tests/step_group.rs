@@ -1,4 +1,4 @@
-//! Step = one assistant round (thinking + that round's calls). This file
+//! Step = one Thinking run plus all calls until the next Thinking. This file
 //! pins the step-shape guarantees that the other chat_tests only touch
 //! obliquely: the live thinking-absorption path, replay's `coalesce_steps`
 //! fold, the zero-click collapsed ladder, and copy-mode chrome stripping

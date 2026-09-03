@@ -37,21 +37,37 @@ export function usageTextOf(usage) {
 /// A subagent turn ({events, usage}) → compact line descriptors for both the
 /// collapsed block body and the drill-in replay (child streams fold into the
 /// SAME reduce.js turn shapes, so one renderer covers live and replay).
+/// `steps` events (the child's step ladder) flatten to ONE line per call —
+/// the child's step thinking is intentionally not listed at this density.
 export function childLines(turn) {
   const t = turn || {};
   const list = Array.isArray(t.events) ? t.events : [];
-  const lines = list.map((ev, i) => {
+  const lines = [];
+  list.forEach((ev, i) => {
     const kind = (ev && ev.kind) || 'text';
+    if (kind === 'steps') {
+      let j = 0;
+      for (const step of (ev && ev.steps) || []) {
+        for (const call of (step && step.calls) || []) {
+          lines.push({ key: 'tool:' + i + ':' + j, kind: 'tool', text: call.name || 'tool', isError: !!call.isError });
+          j += 1;
+        }
+      }
+      return;
+    }
     if (kind === 'tool') {
-      return { key: 'tool:' + i, kind: 'tool', text: (ev && ev.name) || 'tool', isError: !!(ev && ev.isError) };
+      lines.push({ key: 'tool:' + i, kind: 'tool', text: (ev && ev.name) || 'tool', isError: !!(ev && ev.isError) });
+      return;
     }
     if (kind === 'think') {
-      return { key: 'think:' + i, kind: 'think', text: (ev && ev.text) || '' };
+      lines.push({ key: 'think:' + i, kind: 'think', text: (ev && ev.text) || '' });
+      return;
     }
     if (kind === 'sys') {
-      return { key: 'sys:' + i, kind: 'sys', text: (ev && ev.text) || '' };
+      lines.push({ key: 'sys:' + i, kind: 'sys', text: (ev && ev.text) || '' });
+      return;
     }
-    return { key: 'text:' + i, kind: 'text', text: (ev && ev.text) || '' };
+    lines.push({ key: 'text:' + i, kind: 'text', text: (ev && ev.text) || '' });
   });
   const usage = usageTextOf(t.usage);
   if (usage) {

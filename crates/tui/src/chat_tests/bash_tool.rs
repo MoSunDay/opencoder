@@ -1,6 +1,7 @@
 //! `!cmd` local bash-tool helpers (`push_bash_tool` / `finish_bash_tool`):
-//! a single-call `StepGroup` that starts fully expanded (output visible while
-//! the command runs) and collapses once the command finishes.
+//! a single-call `StepGroup` that starts with its step + output expanded
+//! (output visible while the command runs) and collapses the step once the
+//! command finishes.
 
 use super::super::*;
 
@@ -9,11 +10,11 @@ fn push_bash_tool_starts_in_results_state() {
     let mut v = ChatView::default();
     v.push_bash_tool("echo hi");
     match v.blocks.last() {
-        Some(ChatBlock::StepGroup { steps, open, .. }) => {
+        Some(ChatBlock::StepGroup { steps }) => {
             assert_eq!(steps.len(), 1);
             assert!(
-                *open && steps[0].open && steps[0].calls[0].expanded,
-                "local `!cmd` runs visible from the start (fully expanded)"
+                steps[0].open && steps[0].calls[0].expanded,
+                "local `!cmd` runs visible from the start (step + output expanded)"
             );
             assert!(
                 steps[0].calls[0].id.starts_with("bash-"),
@@ -32,9 +33,8 @@ fn finish_bash_tool_fills_output_and_collapses() {
     v.finish_bash_tool("hello\nworld");
 
     match v.blocks.last() {
-        Some(ChatBlock::StepGroup { steps, open, .. }) => {
+        Some(ChatBlock::StepGroup { steps }) => {
             let call = &steps[0].calls[0];
-            let state = open;
             assert!(
                 !call.output.is_empty(),
                 "output must contain lines after finish_bash_tool"
@@ -49,7 +49,10 @@ fn finish_bash_tool_fills_output_and_collapses() {
                 joined.contains("hello") && joined.contains("world"),
                 "output must preserve both lines; got {joined:?}"
             );
-            assert!(!*state, "group must collapse once the command finishes");
+            assert!(
+                !steps[0].open && !call.expanded,
+                "step + output must collapse once the command finishes"
+            );
             assert!(
                 call.elapsed_ms.is_some(),
                 "elapsed_ms must be recorded after finish_bash_tool"

@@ -150,7 +150,6 @@ fn replay_one_prefetched_tool_image_renders() {
             }],
             open: false,
         }],
-        open: false,
     });
     replay_one(&mut chat, &msg, &prefetched);
 

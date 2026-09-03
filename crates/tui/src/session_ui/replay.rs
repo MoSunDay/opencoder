@@ -153,8 +153,8 @@ pub(super) fn replay_one(
                         expanded: false,
                     };
                     // Same grouping rule as the live path: consecutive calls
-                    // join the trailing group, anything else starts a new,
-                    // collapsed group. Replayed calls are born finished
+                    // join the trailing group, anything else starts a new
+                    // group (first step closed). Replayed calls are born finished
                     // (`elapsed_ms: Some(0)`), so each lands in its own step
                     // of the group — resume cannot distinguish parallel from
                     // sequential calls, and per-call steps stay honest.

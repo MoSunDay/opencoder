@@ -22,6 +22,9 @@ use opencoder_llm::estimate;
 pub(crate) const ROLE_USER_HEADER: &str = "\u{276f} User:";
 /// `ChatBlock::Assistant` header row.
 pub(crate) const ROLE_SAY_HEADER: &str = "\u{276f} Say:";
+/// Header row above an open step's folded thinking (inside a `StepGroup`),
+/// and of the standalone expanded Thinking block.
+pub(crate) const STEP_THINKING_HEADER: &str = "\u{1f4ad} Thinking";
 /// `ChatBlock::Plan` header row.
 pub(crate) const PLAN_HEADER: &str = "\u{2576}\u{2500} plan \u{2500}\u{2574}";
 
@@ -131,7 +134,7 @@ impl ChatView {
                 // Consecutive tool calls of the same round join the trailing
                 // step; once its last call finished a NEW step opens (the
                 // sequential-calls-in-one-round split). Any other block in
-                // between starts a fresh, collapsed group.
+                // between starts a fresh group (its first step closed).
                 match self.blocks.last_mut() {
                     Some(ChatBlock::StepGroup { steps: s, .. }) => {
                         steps::merge_or_new_step(s, thinking, call)
@@ -441,15 +444,6 @@ impl ChatView {
         }
     }
 
-    /// Toggle the open/closed state of the step GROUP at `block_idx` (mouse
-    /// click handler on the group row). No-op if the index is out of range or
-    /// not a StepGroup block.
-    pub fn toggle_step_group_at(&mut self, block_idx: usize) {
-        if let Some(ChatBlock::StepGroup { open, .. }) = self.blocks.get_mut(block_idx) {
-            *open = !*open;
-        }
-    }
-
     /// Toggle the click target at flat index `call_idx` inside the StepGroup
     /// at `block_idx` (mouse click handler on a rendered step/call row). The
     /// index walks the group's VISIBLE rows — the step rows plus each open
@@ -480,17 +474,17 @@ impl ChatView {
     }
 
     /// Collapse every collapsible block (Thinking + Compaction + StepGroup)
-    /// in this view. Bound to Ctrl+L: clears any expanded reasoning blocks and
-    /// closes every step group, step and expanded call output in one
-    /// keystroke (also applied to a child subagent view before exiting it).
+    /// in this view. Bound to Ctrl+L: clears any expanded reasoning blocks
+    /// and closes every step and expanded call output in one keystroke (the
+    /// static `≡ N steps` marker and the step rows always stay rendered;
+    /// also applied to a child subagent view before exiting it).
     pub fn collapse_all_collapsible(&mut self) {
         for block in &mut self.blocks {
             match block {
                 ChatBlock::Thinking { collapsed, .. } | ChatBlock::Compaction { collapsed, .. } => {
                     *collapsed = true;
                 }
-                ChatBlock::StepGroup { steps, open } => {
-                    *open = false;
+                ChatBlock::StepGroup { steps } => {
                     for s in steps {
                         s.open = false;
                         for c in &mut s.calls {
@@ -583,8 +577,8 @@ impl ChatView {
                         Style::default().fg(theme::compaction_color()),
                     ));
                 }
-                ChatBlock::StepGroup { steps, open } => {
-                    step_render::flatten_step_group(&mut out, steps, *open, anim_tick);
+                ChatBlock::StepGroup { steps } => {
+                    step_render::flatten_step_group(&mut out, steps, anim_tick);
                 }
                 ChatBlock::Image { filename, rendered } => {
                     out.push(Line::from(Span::styled(

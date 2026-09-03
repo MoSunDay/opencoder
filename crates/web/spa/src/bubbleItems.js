@@ -3,15 +3,15 @@
 // rules (stable keys, role naming, usage footer text) are unit-tested in the
 // pure-node suite without a DOM.
 //
-// Turn shapes come from reduce.js: {kind:'text'|'think'|'tool'|'sys',
+// Turn shapes come from reduce.js: {kind:'text'|'think'|'tool'|'steps'|'sys',
 // role:'user'|'assistant', text?, name?, input?, output?, isError?,
-// durationMs?, open?}. X's BubbleContentType accepts AnyObject, so items carry
-// the whole turn as `content` and the per-role contentRender in transcript.jsx
-// unpacks it.
+// durationMs?, open?, steps?}. X's BubbleContentType accepts AnyObject, so
+// items carry the whole turn as `content` and the per-role contentRender in
+// transcript.jsx unpacks it.
 
 /// Map a turn to a Bubble.List role key. Text turns split by chat role
-/// (user → right-aligned 'user', everything else → 'ai'); think/tool/sys pass
-/// through so each keeps its own borderless content renderer.
+/// (user → right-aligned 'user', everything else → 'ai'); think/tool/steps/
+/// sys pass through so each keeps its own borderless content renderer.
 export function roleOfTurn(turn) {
   const kind = (turn && turn.kind) || 'text';
   if (kind === 'text') {

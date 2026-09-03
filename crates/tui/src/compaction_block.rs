@@ -117,6 +117,6 @@ impl ChatView {
     /// Return each Compaction block's `(block_idx, header_line_idx)`, where
     /// `header_line_idx` is the index in `flatten()` of its header line.
     pub fn compaction_headers(&self) -> Vec<CompactionHeader> {
-        self.collect_headers().3
+        self.collect_headers().2
     }
 }

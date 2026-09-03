@@ -371,7 +371,6 @@ async fn notepad_fullscreen_hides_chat_and_clears_hits() {
     assert!(hits.queue_btns.is_empty());
     assert!(hits.thinking_btns.is_empty());
     assert!(hits.subagent_btns.is_empty());
-    assert!(hits.tool_btns.is_empty());
     assert!(hits.compaction_btns.is_empty());
 
     let text = buffer_text(terminal.backend().buffer());

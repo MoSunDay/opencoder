@@ -2,9 +2,9 @@
 //!
 //! A group is the canonical ladder for one admitted user Turn; assistant
 //! text, image, marker, and subagent presentation do not split it. Within a
-//! group a step is one assistant round: a call merges into the trailing step while
-//! that step holds no finished call, otherwise a NEW step opens (sequential
-//! calls split, parallel calls share a step). Default render is ONE
+//! group a step is one Thinking run plus every function call that follows;
+//! sequential and parallel calls both accumulate until new Thinking opens
+//! the next step. Default render is ONE
 //! clickable group row `▸ N Steps`; clicking it lists the step rows,
 //! clicking a step row reveals its thinking + `N Function calls`, opening
 //! that aggregate lists calls, and clicking a call row expands only that
@@ -104,9 +104,9 @@ fn parallel_tool_calls_form_one_group_and_route_by_id() {
 }
 
 #[test]
-fn sequential_calls_split_into_steps() {
-    // One round with two SEQUENTIAL calls: once the first call finished, the
-    // next start opens a NEW step of the same group.
+fn sequential_calls_without_new_thinking_stay_in_one_step() {
+    // Call completion is not a Step boundary. Until a new Thinking run
+    // appears, sequential calls accumulate in the same function-call list.
     let mut v = ChatView::default();
     v.apply(&SessionEvent::ToolStart {
         id: "a".into(),
@@ -127,15 +127,38 @@ fn sequential_calls_split_into_steps() {
     });
     let grps = groups(&v);
     assert_eq!(grps.len(), 1, "sequential calls stay in one group");
-    assert_eq!(grps[0].1.len(), 2, "finished call forces a new step");
+    assert_eq!(grps[0].1.len(), 1, "calls alone do not create steps");
     assert_eq!(grps[0].1[0].calls[0].id, "a");
-    assert_eq!(grps[0].1[1].calls[0].id, "b");
+    assert_eq!(grps[0].1[0].calls[1].id, "b");
+}
+
+#[test]
+fn new_thinking_opens_step_even_when_previous_call_is_still_running() {
+    let mut v = ChatView::default();
+    v.apply(&SessionEvent::ToolStart {
+        id: "a".into(),
+        name: "bash".into(),
+        input: serde_json::json!({"command": "sleep 1"}),
+    });
+    v.apply(&SessionEvent::ReasoningDelta("next thought".into()));
+    v.apply(&SessionEvent::ToolStart {
+        id: "b".into(),
+        name: "bash".into(),
+        input: serde_json::json!({"command": "echo B"}),
+    });
+
+    let steps = groups(&v)[0].1;
+    assert_eq!(steps.len(), 2, "new Thinking is the Step boundary");
+    assert_eq!(steps[0].calls[0].id, "a");
+    assert_eq!(steps[1].calls[0].id, "b");
+    assert!(steps[1].thinking_raw.contains("next thought"));
 }
 
 #[test]
 fn collapsed_by_default_renders_single_group_row() {
     let mut v = ChatView::default();
     for id in ["a", "b"] {
+        v.apply(&SessionEvent::ReasoningDelta(format!("think {id}")));
         v.apply(&SessionEvent::ToolStart {
             id: id.into(),
             name: "bash".into(),
@@ -282,11 +305,13 @@ fn terminal_event_clears_progress_when_no_say_arrives() {
 
 #[test]
 fn toggling_the_ladder_reveals_each_level() {
-    // Two sequential calls, no thinking. Default = group row + blank = 2;
-    // group open = + 2 step rows = 4; step 1 open = + calls row = 5;
-    // calls open = + call row = 6; call expanded = + output + blank = 8.
+    // Two Thinking + call pairs. Default = group row + blank = 2;
+    // group open = + 2 step rows = 4; step 1 open = Thinking header/body +
+    // calls row = 7; calls open = + call row = 8; call expanded = + output = 9
+    // plus the trailing blank = 10 total.
     let mut v = ChatView::default();
     for id in ["a", "b"] {
+        v.apply(&SessionEvent::ReasoningDelta(format!("think {id}")));
         v.apply(&SessionEvent::ToolStart {
             id: id.into(),
             name: "bash".into(),
@@ -325,34 +350,34 @@ fn toggling_the_ladder_reveals_each_level() {
     // Open step 1: thinking/calls summary appears, but call rows stay hidden.
     v.toggle_tool_call_at(0, 1);
     let open_step = flatten_text(&v);
-    assert_eq!(open_step.len(), 5);
+    assert_eq!(open_step.len(), 7);
     assert!(
         open_step[1].contains("\u{276f} Step(1)"),
         "opened step row: {:?}",
         open_step[1]
     );
     assert!(
-        open_step[2].contains("1 Function call"),
+        open_step[4].contains("1 Function call"),
         "function-call aggregate row: {:?}",
-        open_step[2]
+        open_step[4]
     );
     assert!(!open_step.join("\n").contains("echo a"));
 
     // Open the aggregate: the call row appears without its result.
     v.toggle_tool_call_at(0, 2);
     let calls_open = flatten_text(&v);
-    assert_eq!(calls_open.len(), 6);
-    assert!(calls_open[3].contains("echo a"));
+    assert_eq!(calls_open.len(), 8);
+    assert!(calls_open[5].contains("echo a"));
     assert!(!calls_open.join("\n").contains("a-out"));
 
     // Click the function call: its result appears.
     v.toggle_tool_call_at(0, 3);
     let expanded = flatten_text(&v);
-    assert_eq!(expanded.len(), 8, "call result + blank join the ladder");
+    assert_eq!(expanded.len(), 10, "call result + blank join the ladder");
     assert!(
-        expanded[4].contains("a-out"),
+        expanded[6].contains("a-out"),
         "output visible: {:?}",
-        expanded[4]
+        expanded[6]
     );
 
     // Re-toggling the group collapses the whole ladder; the group row stays.

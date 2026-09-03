@@ -117,7 +117,7 @@ fn replay_folds_thinking_without_a_following_group_into_the_ladder() {
 #[test]
 fn replay_merges_adjacent_tool_rounds_into_one_group() {
     // Two consecutive assistant tool rounds (no user text in between) must
-    // collapse into ONE StepGroup carrying one step per round.
+    // collapse into ONE StepGroup and, without new Thinking, ONE Step.
     let (a1, t1) = replay_tool_round("a1", "t1", None);
     let (a2, t2) = replay_tool_round("a2", "t2", None);
     let chat = replay_messages("act", &[a1, t1, a2, t2]);
@@ -131,7 +131,7 @@ fn replay_merges_adjacent_tool_rounds_into_one_group() {
         })
         .collect();
     assert_eq!(groups.len(), 1, "adjacent groups merge: {groups:?}");
-    assert_eq!(groups[0].len(), 2, "one step per round");
+    assert_eq!(groups[0].len(), 1, "provider rounds do not create steps");
     let ids: Vec<&str> = groups[0]
         .iter()
         .flat_map(|s| s.calls.iter())
@@ -238,7 +238,11 @@ fn orphan_tool_end_joins_the_trailing_group_like_replay() {
     let chat = replay_messages("act", &[a1, t1, ghost]);
     let replay_groups = groups(&chat);
     assert_eq!(replay_groups.len(), 1, "resume folds the orphan too");
-    assert_eq!(replay_groups[0].len(), 2);
+    assert_eq!(
+        replay_groups[0].len(),
+        1,
+        "an orphan call without new Thinking stays in the current Step"
+    );
     assert!(tail_output(replay_groups[0]).contains("ghost-out"));
 }
 

@@ -57,8 +57,8 @@ pub enum ChatBlock {
     /// One assistant turn's tool activity, folded into a three-level
     /// drill-down ladder: turn → step → function call.
     /// The admitted user-turn boundary owns one group; intervening Say,
-    /// image, marker, or subagent blocks do not split it. Steps split at round
-    /// boundaries (a finished call followed by a new `ToolStart`). The group renders ONE
+    /// image, marker, or subagent blocks do not split it. A Step is Thinking
+    /// plus every function call until the next Thinking run. The group renders ONE
     /// clickable `▸ N Steps` row at col 0 (collapsed by default); opening it
     /// lists the step rows, opening a step reveals its thinking plus a
     /// `N Function calls` aggregation row, and opening that row reveals the
@@ -227,8 +227,8 @@ pub struct SubagentHeader {
     pub header_line_idx: usize,
 }
 
-/// One step inside a `ChatBlock::StepGroup`: a single assistant round's
-/// thinking (as rendered markdown lines) plus that round's function calls.
+/// One step inside a `ChatBlock::StepGroup`: one Thinking run (as rendered
+/// markdown lines) plus every function call before the next Thinking run.
 /// The step's row renders only while the enclosing turn is open; its
 /// content (thinking + calls aggregation row) is visible only while the
 /// step is open; individual call rows additionally require `calls_open`;
@@ -270,9 +270,8 @@ pub struct ToolCall {
     /// Sanitized output lines, shown while the call is expanded.
     pub output: Vec<Line<'static>>,
     pub started_at_ms: Option<i64>,
-    /// `None` while the call is still running — drives the group marker's
-    /// running hint (and the step-boundary heuristic: a finished call means
-    /// the next `ToolStart` opens a new step).
+    /// `None` while the call is still running — drives call timing/output
+    /// state only; call completion is not a Step boundary.
     pub elapsed_ms: Option<u64>,
     /// Show this call's `output` under its header. Requires the enclosing
     /// step to be open. Toggled by clicking the call's header row; reset by

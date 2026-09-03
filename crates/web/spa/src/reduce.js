@@ -7,13 +7,13 @@
 
 import {
   absorbSegmentThinking,
+  appendStepCall,
   appendStepTurn,
   appendThinkDelta,
   backfillBufferedCall,
   backfillStepsCall,
   closeOpenText,
   flushPendingThink,
-  mergeOrNewStep,
   placeThinkingStep,
   settleTurnProgress,
 } from './steps/reducer.js';
@@ -393,10 +393,10 @@ export function reduceFrame(state, frame, nowMs) {
       // Step-ladder fold: EVERY think turn of this user segment becomes the
       // round's step thinking (crossing over Say, which stays top-level — a
       // tool turn never leaves free-floating thinking above it), then the
-      // call merges into the trailing step while it holds no finished call
-      // (sequential rounds split, parallel calls stay together).
+      // call joins the trailing Step regardless of completion/round timing;
+      // only a later Thinking run opens the next Step.
       const thinking = absorbSegmentThinking(turns);
-      mergeOrNewStep(turns, thinking, call, true);
+      appendStepCall(turns, thinking, call, true);
       return withTurns(state, turns);
     }
     case 'tool_end': {
@@ -433,7 +433,7 @@ export function reduceFrame(state, frame, nowMs) {
       // Orphan end (lost start): synthesize a FINISHED call so the output is
       // kept, folded into the trailing group when one exists — the same fold
       // replay's coalesce applies to adjacent groups.
-      mergeOrNewStep(turns, '', {
+      appendStepCall(turns, '', {
         kind: 'tool', role: 'assistant', id,
         name: data.name || 'result', input: null,
         output: out, isError: isErr, durationMs: dur ?? 0,

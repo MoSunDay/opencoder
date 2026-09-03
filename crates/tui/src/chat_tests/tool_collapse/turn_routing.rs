@@ -26,12 +26,12 @@ fn text_between_calls_stays_in_one_turn_and_routes_by_id() {
         name: "bash".into(),
         input: serde_json::json!({"command": "two"}),
     });
-    // Say is presentation inside the same admitted turn: one group, two
-    // Steps because one of the earlier parallel calls finished before t2.
+    // Say is presentation inside the same admitted turn. It is not Thinking,
+    // so t2 remains in the same Step and the same function-call aggregate.
     let grps = group_calls(&v);
     assert_eq!(grps.len(), 1, "one admitted turn owns one group");
     assert_eq!(grps[0].len(), 3);
-    assert_eq!(groups(&v)[0].1.len(), 2, "round boundary opens Step(2)");
+    assert_eq!(groups(&v)[0].1.len(), 1, "only new Thinking opens Step(2)");
 
     // Ending the older group's call after the newer group exists must still
     // route into the older group by id.

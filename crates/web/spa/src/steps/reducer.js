@@ -48,9 +48,12 @@ function turnInsertIndex(turns) {
   return turnFloor(turns);
 }
 
-// Whether a Say sits at/after the floor. Practically false - the floor sits
-// below the LAST Say by construction - kept as the scoped progress gate.
-// The freeze itself happens in settleTurnProgress, on the Say's first chunk.
+// Whether a Say sits at/after the floor. Structurally impossible: turnFloor
+// returns the index immediately after the LAST Say (a user text turn caps
+// the backwards walk the same way), so by construction no Say can exist
+// at/after the floor and this is always false. Kept only as defense-in-depth
+// for the scoped progress gate; the actual freeze happens in
+// settleTurnProgress, on the Say's first chunk.
 function turnHasSay(turns) {
   const floor = turnFloor(turns);
   for (let i = floor; i < turns.length; i += 1) {

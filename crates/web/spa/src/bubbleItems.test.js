@@ -44,7 +44,7 @@ describe('itemsFromTurns', () => {
     expect(items[0].content.open).toBe(true);
   });
 
-  it('passes a steps turn through as its own role carrying the ladder as content', () => {
+  it('wraps a steps segment as one visual assistant Turn', () => {
     expect(roleOfTurn({ kind: 'steps' })).toBe('steps');
     expect(roleOfTurn({ kind: 'steps', role: 'assistant' })).toBe('steps');
     const turn = {
@@ -55,9 +55,33 @@ describe('itemsFromTurns', () => {
     const items = itemsFromTurns([{ kind: 'text', role: 'user', text: 'go' }, turn]);
     expect(items).toHaveLength(2);
     expect(items[0].role).toBe('user');
-    expect(items[1].role).toBe('steps');
-    expect(items[1].key).toBe('steps:1');
-    expect(items[1].content).toBe(turn); // transcript.jsx StepsContent unpacks it
+    expect(items[1].role).toBe('assistantTurn');
+    expect(items[1].key).toBe('assistant-turn:1');
+    expect(items[1].content.steps).toEqual(turn.steps);
+    expect(items[1].content.say).toEqual([]);
+  });
+
+  it('groups adjacent steps and Say into one assistant Turn item', () => {
+    const steps = { kind: 'steps', role: 'assistant', progressActive: true, steps: [] };
+    const say = { kind: 'text', role: 'assistant', text: 'done' };
+    const items = itemsFromTurns([steps, say]);
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ role: 'assistantTurn', key: 'assistant-turn:0' });
+    expect(items[0].content.steps).toEqual([]);
+    expect(items[0].content.say).toEqual([say]);
+    expect(items[0].content.progressActive).toBe(false);
+  });
+
+  it('merges multiple reducer step segments into one Turn step count', () => {
+    const a = { kind: 'steps', role: 'assistant', progressActive: false, steps: [{ thinking: 'a', calls: [] }] };
+    const mid = { kind: 'text', role: 'assistant', text: 'working' };
+    const b = { kind: 'steps', role: 'assistant', progressActive: true, steps: [{ thinking: 'b', calls: [] }] };
+    const done = { kind: 'text', role: 'assistant', text: 'done' };
+    const items = itemsFromTurns([a, mid, b, done]);
+    expect(items).toHaveLength(1);
+    expect(items[0].content.steps).toEqual([...a.steps, ...b.steps]);
+    expect(items[0].content.say).toEqual([mid, done]);
+    expect(items[0].content.progressActive).toBe(false);
   });
 
   it('maps an empty-text think turn and a failed tool turn unchanged', () => {

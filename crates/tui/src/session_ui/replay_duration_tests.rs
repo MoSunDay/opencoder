@@ -60,7 +60,7 @@ fn replayed_tool_block_omits_duration_span() {
     // this fixture legitimately contains the word "running".
     let group_line: String = lines
         .iter()
-        .find(|l| l.spans.iter().any(|s| s.content.contains("1 step")))
+        .find(|l| l.spans.iter().any(|s| s.content.contains("1 Step")))
         .expect("group marker should be present")
         .spans
         .iter()

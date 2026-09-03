@@ -115,10 +115,10 @@ impl ChatView {
 /// Add bash-command helper methods to [`ChatView`].
 impl ChatView {
     /// Push a placeholder single-call `ChatBlock::StepGroup` for a `!cmd`
-    /// execution, fully expanded through every ladder level (group → step →
-    /// calls list → output) so the user sees the command running with its
-    /// output. Call [`finish_bash_tool`] to fill in the output and collapse
-    /// the ladder again.
+    /// execution, fully expanded through every ladder level (turn → step →
+    /// function-call result) so the user sees the command running with its
+    /// output. Call [`finish_bash_tool`] to fill in the output without
+    /// changing the user's disclosure state.
     pub(crate) fn push_bash_tool(&mut self, cmd: &str) {
         use crate::theme;
         use ratatui::style::{Modifier, Style};
@@ -127,7 +127,9 @@ impl ChatView {
         self.flush_pending_thinking();
         self.blocks.push(crate::chat::ChatBlock::StepGroup {
             steps: vec![crate::chat::Step {
+                thinking_raw: String::new(),
                 thinking: Vec::new(),
+                thinking_dirty: false,
                 calls: vec![crate::chat::ToolCall {
                     id: format!("bash-{}", now_ms()),
                     header: Line::from(Span::styled(
@@ -143,14 +145,16 @@ impl ChatView {
                 }],
                 open: true,
                 calls_open: true,
+                sealed: true,
             }],
             open: true,
+            progress_active: true,
         });
     }
 
     /// Fill the output of the most recent unfinished `bash-` tool call and
-    /// collapse every level of its ladder (group, step, calls list, output),
-    /// recording elapsed time.
+    /// record elapsed time. The ladder's disclosure state is left untouched;
+    /// only user actions (including Ctrl+L) may close expanded content.
     pub(crate) fn finish_bash_tool(&mut self, output: &str) {
         use crate::chat::TOOL_OUTPUT_LINES;
         use crate::terminal_text::sanitize_multiline;
@@ -187,18 +191,18 @@ impl ChatView {
             }
         });
         if let Some((gi, si, ci)) = target {
-            if let crate::chat::ChatBlock::StepGroup { open, steps, .. } = &mut self.blocks[gi] {
+            if let crate::chat::ChatBlock::StepGroup {
+                steps,
+                progress_active,
+                ..
+            } = &mut self.blocks[gi]
+            {
                 let c = &mut steps[si].calls[ci];
                 c.output = out;
                 if let Some(started) = c.started_at_ms {
                     c.elapsed_ms = Some(((ts - started).max(0)) as u64);
                 }
-                // Equivalent of the old "collapse once finished": back to the
-                // closed group row.
-                c.expanded = false;
-                steps[si].open = false;
-                steps[si].calls_open = false;
-                *open = false;
+                *progress_active = false;
             }
         }
     }

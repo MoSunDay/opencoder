@@ -15,29 +15,37 @@ fn open_panel(v: &mut ChatView) -> tokio::sync::mpsc::Sender<crate::sidecar_ui::
     tx
 }
 
-/// Every Thinking block currently in the transcript.
-fn thinking_blocks(v: &ChatView) -> Vec<&ChatBlock> {
+/// Number of step groups currently in the transcript.
+fn step_groups(v: &ChatView) -> usize {
     v.blocks
         .iter()
-        .filter(|b| matches!(b, ChatBlock::Thinking { .. }))
+        .filter(|b| matches!(b, ChatBlock::StepGroup { .. }))
+        .count()
+}
+
+/// Steps of the first step group.
+fn first_steps(v: &ChatView) -> &Vec<Step> {
+    v.blocks
+        .iter()
+        .find_map(|b| match b {
+            ChatBlock::StepGroup { steps, .. } => Some(steps),
+            _ => None,
+        })
+        .expect("expected a step group")
+}
+
+/// Concatenated thinking text of the first group's steps, in order.
+fn thinking_text(v: &ChatView) -> String {
+    first_steps(v)
+        .iter()
+        .map(|step| step.thinking_raw.as_str())
         .collect()
 }
 
-/// Concatenated text of every Thinking block, in block order.
-fn thinking_text(v: &ChatView) -> String {
-    v.blocks
-        .iter()
-        .filter_map(|b| match b {
-            ChatBlock::Thinking { text, .. } => Some(text.as_str()),
-            _ => None,
-        })
-        .collect::<Vec<_>>()
-        .concat()
-}
-
 /// Reasoning deltas flowing either side of `/sidecar` panel entry must land
-/// in ONE Thinking block: the panel must not split the in-flight block, and
-/// exit must leave the transcript exactly as it was.
+/// in ONE step of ONE group (live reasoning streams into the ladder): the
+/// panel must not split the in-flight step, and exit must leave the
+/// transcript exactly as it was.
 #[test]
 fn reasoning_delta_keeps_one_thinking_block_across_panel_entry() {
     let mut v = ChatView::default();
@@ -46,20 +54,17 @@ fn reasoning_delta_keeps_one_thinking_block_across_panel_entry() {
     assert!(v.sidecar.is_some(), "panel is stored on the view field");
 
     v.apply(&SessionEvent::ReasoningDelta("part two".into()));
+    assert_eq!(step_groups(&v), 1, "panel entry must not open a new group");
     assert_eq!(
-        thinking_blocks(&v).len(),
+        first_steps(&v).len(),
         1,
-        "panel entry must not split the Thinking block"
+        "panel entry must not split the step"
     );
     assert_eq!(thinking_text(&v), "part one part two");
 
     crate::sidecar_ui::exit_panel(&mut v, &tx);
     assert!(v.sidecar.is_none(), "exit clears the panel field");
-    assert_eq!(
-        thinking_blocks(&v).len(),
-        1,
-        "exit leaves the transcript untouched"
-    );
+    assert_eq!(step_groups(&v), 1, "exit leaves the transcript untouched");
     assert_eq!(thinking_text(&v), "part one part two");
 }
 
@@ -114,14 +119,26 @@ fn panel_entry_does_not_seal_or_split_thinking_before_assistant() {
     v.apply(&SessionEvent::TextDelta(" answer2".into()));
     v.finalize_assistant();
 
+    // Live reasoning never leaves the ladder: the interleaved round settles
+    // as [StepGroup(both thinking fragments), Assistant] — nothing extra.
     assert_eq!(
         v.blocks.len(),
-        3,
-        "[Thinking, Thinking, Assistant] exactly — nothing extra"
+        2,
+        "[StepGroup, Assistant] exactly — nothing extra"
     );
     assert!(
-        matches!(v.blocks.first(), Some(ChatBlock::Thinking { .. })),
-        "the Thinking group stays in front"
+        matches!(v.blocks.first(), Some(ChatBlock::StepGroup { .. })),
+        "the step group stays in front"
+    );
+    assert_eq!(
+        step_groups(&v),
+        1,
+        "panel entry must not open a second group"
+    );
+    assert_eq!(
+        first_steps(&v).len(),
+        1,
+        "the round's reasoning stays in one step"
     );
     assert!(
         matches!(

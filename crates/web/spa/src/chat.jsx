@@ -35,7 +35,7 @@ import { Button, Input, Modal, Segmented, Space, Spin, Typography } from 'antd';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiGet, apiPost } from './api.js';
 import { openStream } from './sse.js';
-import { consumedEchoText, emptyStream, ensurePendingEcho, reduceFrame, turnsFromMessages, usageFromMessages, withUserTurn } from './reduce.js';
+import { consumedEchoText, emptyStream, ensurePendingEcho, reduceFrame, resyncState, turnsFromMessages, usageFromMessages, withUserTurn } from './reduce.js';
 import { TranscriptView } from './transcript.jsx';
 import { DialogSidebar } from './chatSidebar.jsx';
 import { QueuePanel } from './queuePanel.jsx';
@@ -227,6 +227,40 @@ export function ChatPanel({ onNotice }) {
           if (onNotice) {
             onNotice('SSE 流连接失败（已重试 5 次）');
           }
+        }
+      },
+      // Round-2 #5 resync: every reconnect (lag re-sync or retry) rebuilds
+      // the fold state from the store snapshot at the /seq watermark instead
+      // of folding the replay tail into the dirty live state — live frames
+      // carry no seq, so replaying after=lastSeq would re-fold every frame
+      // consumed since the last id'd one (doubled text, duplicated tool
+      // rows, re-pushed echo turns). The snapshot's `draining` flag also
+      // closes the finished-while-disconnected gap: a run that ended during
+      // the outage has its terminal frame at seq ≤ head (never replayed), so
+      // a non-draining rebuild lands status 'done' and releases busy instead
+      // of latching 'streaming' forever. Returns null on failure → sse.js
+      // falls back to the capped legacy cursor (today's behavior).
+      onResync: async () => {
+        if (!sessionId) {
+          return null;
+        }
+        const sid = sessionId;
+        try {
+          const q = await apiGet('/api/sessions/' + encodeURIComponent(sid) + '/seq');
+          const head = q && typeof q.seq === 'number' ? q.seq : 0;
+          const j = await apiGet('/api/sessions/' + encodeURIComponent(sid));
+          if (!aliveRef.current) {
+            return null;
+          }
+          setStream((s) => resyncState({
+            messages: (j && j.messages) || [],
+            draining: !!(j && j.draining),
+            headSeq: head,
+            pendingEcho: s.pendingEcho,
+          }));
+          return head;
+        } catch {
+          return null;
         }
       },
     });

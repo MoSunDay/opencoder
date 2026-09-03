@@ -1,6 +1,6 @@
 // vitest smoke tests for the pure transcript reducers (reduce.js).
 import { describe, expect, it } from 'vitest';
-import { consumedEchoText, deltaTextOf, emptyStream, ensurePendingEcho, nestedEventOf, reduceFrame, turnsFromMessages, withUserTurn } from './reduce.js';
+import { consumedEchoText, deltaTextOf, emptyStream, ensurePendingEcho, nestedEventOf, reduceFrame, resyncState, turnsFromMessages, withUserTurn } from './reduce.js';
 
 describe('turnsFromMessages', () => {
   it('flattens text/tool blocks and attaches tool_result to the open call', () => {
@@ -459,5 +459,73 @@ describe('ensurePendingEcho (reset rebuild re-push, TUI rebuild_after_reset)', (
     const turns = [{ kind: 'text', role: 'user', text: 'hi' }];
     expect(ensurePendingEcho(turns, '')).toBe(turns);
     expect(ensurePendingEcho(turns, '   ')).toBe(turns);
+  });
+});
+
+describe('applySeq watermark (resync dedup)', () => {
+  it('drops a seq-carrying frame at/below applySeq, folds and stamps above it; live frames never move it', () => {
+    let s = emptyStream();
+    expect(s.applySeq).toBe(null);
+    // Replayed frame with seq folds and sets the watermark.
+    s = reduceFrame(s, { event: 'text_delta', data: { text: 'a' }, seq: 12 }, 1);
+    expect(s.applySeq).toBe(12);
+    expect(s.turns.at(-1).text).toBe('a');
+    // Same-seq repeat (replay overlap): dropped verbatim.
+    const dup = reduceFrame(s, { event: 'text_delta', data: { text: 'b' }, seq: 12 }, 2);
+    expect(dup).toBe(s);
+    // Below-watermark frame: dropped even further back.
+    expect(reduceFrame(s, { event: 'text_delta', data: { text: 'c' }, seq: 11 }, 3)).toBe(s);
+    // Above-watermark frame folds and advances.
+    s = reduceFrame(s, { event: 'text_delta', data: { text: 'd' }, seq: 13 }, 4);
+    expect(s.applySeq).toBe(13);
+    expect(s.turns.at(-1).text).toBe('ad');
+    // Live broadcast (no seq — emitted before the flusher persists): always
+    // folds, watermark untouched.
+    s = reduceFrame(s, { event: 'text_delta', data: { text: 'e' } }, 5);
+    expect(s.applySeq).toBe(13);
+    expect(s.turns.at(-1).text).toBe('ade');
+  });
+
+  it('a state without applySeq (nested child folds) folds seq-carrying frames freely', () => {
+    // subagent_child recursion builds bare { turns, usage, status, error }
+    // states — undefined watermark must not drop anything.
+    const bare = { turns: [], usage: null, status: 'streaming', error: null };
+    const s = reduceFrame(bare, { event: 'text_delta', data: { text: 'x' }, seq: 7 }, 1);
+    expect(s.turns.at(-1).text).toBe('x');
+    expect(s.applySeq).toBe(7);
+  });
+});
+
+describe('resyncState (snapshot rebuild at the watermark)', () => {
+  const messages = () => [
+    { role: 'user', blocks: [{ type: 'text', text: '跑测试' }] },
+    { role: 'assistant', blocks: [{ type: 'text', text: '快照真相' }] },
+  ];
+
+  it('rebuilds turns from the snapshot at headSeq and keeps a draining run streaming with its pending echo re-pushed', () => {
+    // Snapshot lacks the admitted turn's echo (the run is mid-flight, its
+    // user message not yet visible to this read): ensurePendingEcho
+    // re-pushes the user boundary so the replayed tail keeps its anchor.
+    const s = resyncState({ messages: [], draining: true, headSeq: 30, pendingEcho: '跑测试' });
+    expect(s.status).toBe('streaming');
+    expect(s.applySeq).toBe(30);
+    expect(s.pendingEcho).toBe('跑测试');
+    expect(s.turns.map((t) => t.text)).toEqual(['跑测试']);
+    // Frames at/below the watermark can never double-fold into the rebuild.
+    expect(reduceFrame(s, { event: 'text_delta', data: { text: '旧帧' }, seq: 30 }, 1)).toBe(s);
+  });
+
+  it('a finished run (draining false) lands terminal done with the echo consumed', () => {
+    const s = resyncState({ messages: messages(), draining: false, headSeq: 31, pendingEcho: '跑测试' });
+    expect(s.status).toBe('done');
+    expect(s.pendingEcho).toBe(null);
+    expect(s.turns.map((t) => t.text)).toEqual(['跑测试', '快照真相']);
+    expect(s.applySeq).toBe(31);
+  });
+
+  it('a missing headSeq leaves the watermark unset (no frame is below nothing)', () => {
+    const s = resyncState({ messages: [], draining: true });
+    expect(s.applySeq).toBe(null);
+    expect(s.turns).toEqual([]);
   });
 });

@@ -17,19 +17,45 @@ impl ChatView {
         if !text.is_empty() {
             super::steps::set_turn_progress(&mut self.blocks, self.turn_block_start, false);
         }
-        self.seal_open_thinking();
-        if let Some(ChatBlock::Assistant {
-            raw, done: false, ..
-        }) = self.blocks.last_mut()
-        {
-            raw.push_str(text);
-            return;
+        let extends_open_say = matches!(
+            self.blocks.last(),
+            Some(ChatBlock::Assistant { done: false, .. })
+        );
+        if extends_open_say {
+            self.seal_open_thinking();
+            if let Some(ChatBlock::Assistant {
+                raw, done: false, ..
+            }) = self.blocks.last_mut()
+            {
+                raw.push_str(text);
+                return;
+            }
         }
+        // A NEW Say block closes the current Turn. Any pending Thinking
+        // run streamed just before this Say belongs to the turn being
+        // closed — fold it into that turn's ladder first (a call-less step
+        // when no calls preceded), so thinking never survives outside the
+        // ladder. Mirrors the pre-echo flush on user boundaries.
+        self.flush_pending_thinking();
+        // Closing a Turn is also the ladder's accounting boundary: seal the
+        // closing turn's trailing step NOW so its thinking lands in
+        // `context_used` exactly once, even before the round ends.
+        self.seal_trailing_step();
         self.blocks.push(ChatBlock::Assistant {
             raw: text.to_string(),
             rendered: Vec::new(),
             done: false,
         });
+        // A NEW Say block closes the current Turn: the contract is
+        // `1 Turn = n Steps + Say`, and one submission may contain SEVERAL
+        // such turns (the agent speaks between tool phases). Everything the
+        // model does AFTER this Say belongs to the NEXT turn — its
+        // thinking/calls must open a fresh ladder BELOW the Say instead of
+        // merging into the group above it. Advancing the turn floor past the
+        // Say makes every ladder lookup (merge walk, thinking delta, pending
+        // flush) start below it, so the old group can never be reached
+        // again. The progress hint was already frozen above.
+        self.turn_block_start = self.blocks.len();
     }
 
     pub(super) fn append_reasoning_delta(&mut self, reasoning: &str) {
@@ -69,16 +95,25 @@ impl ChatView {
     /// Idempotence comes from the per-block `sealed` and `done` flags.
     pub fn finalize_assistant(&mut self) {
         self.seal_open_thinking();
-        if let Some(ChatBlock::Assistant {
-            raw,
-            rendered,
-            done,
-        }) = self.blocks.last_mut()
-        {
-            if !*done {
-                self.context_used += estimate(raw) as u64;
-                *rendered = crate::markdown::render(raw);
-                *done = true;
+        // The round's Say is the last OPEN Assistant, not necessarily the
+        // last block: closing the Say may already have opened the NEXT
+        // turn's ladder beneath it.
+        let open_idx = self
+            .blocks
+            .iter()
+            .rposition(|block| matches!(block, ChatBlock::Assistant { done: false, .. }));
+        if let Some(idx) = open_idx {
+            if let Some(ChatBlock::Assistant {
+                raw,
+                rendered,
+                done,
+            }) = self.blocks.get_mut(idx)
+            {
+                if !*done {
+                    self.context_used += estimate(raw) as u64;
+                    *rendered = crate::markdown::render(raw);
+                    *done = true;
+                }
             }
         }
         // Round end for the ladder: account the streamed step thinking once
@@ -92,11 +127,15 @@ impl ChatView {
     /// An interleaved round's finalized Say rides on top of its group, so the
     /// walk skips trailing sealed Assistants.
     fn seal_trailing_step(&mut self) {
-        let floor = self.turn_block_start.min(self.blocks.len());
-        let Some(idx) = self.blocks[floor..]
+        // A Say closes its Turn and advances the turn floor below itself,
+        // so the first-from-floor search can no longer see the closing
+        // turn's ladder. The ladder that may still hold an UNSEALED
+        // trailing step is always the LAST group in the flow: every
+        // earlier turn's steps were sealed at their own closing boundary.
+        let Some(idx) = self
+            .blocks
             .iter()
-            .position(|block| matches!(block, ChatBlock::StepGroup { .. }))
-            .map(|relative| floor + relative)
+            .rposition(|block| matches!(block, ChatBlock::StepGroup { .. }))
         else {
             return;
         };
@@ -128,12 +167,17 @@ impl ChatView {
         super::steps::set_turn_progress(&mut self.blocks, self.turn_block_start, false);
 
         let floor = self.turn_block_start.min(self.blocks.len());
-        let assistant_idx = self.blocks[floor..]
+        // The turn being reconciled is the one whose Say closed LAST — the
+        // final Assistant in the flow — which may sit ABOVE `turn_block_start`
+        // once that Say advanced the floor to open the next turn's ladder.
+        let assistant_idx = self
+            .blocks
             .iter()
-            .rposition(|block| matches!(block, ChatBlock::Assistant { .. }))
-            .map(|relative| floor + relative);
+            .rposition(|block| matches!(block, ChatBlock::Assistant { .. }));
 
-        self.seal_thinking_range(floor, assistant_idx.unwrap_or(self.blocks.len()));
+        if let Some(idx) = assistant_idx.filter(|idx| *idx > floor) {
+            self.seal_thinking_range(floor, idx);
+        }
         if let Some(idx) = assistant_idx {
             if let ChatBlock::Assistant {
                 raw,

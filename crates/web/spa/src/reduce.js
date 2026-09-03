@@ -71,7 +71,12 @@ export function emptyStream() {
   // pending_turn_echo parity) — remembered from submit/steer/queue echo until
   // done/error, kept across transcript_reset so the store-snapshot rebuild
   // can re-push the user boundary (ensurePendingEcho).
-  return { turns: [], usage: null, status: 'idle', error: null, pendingEcho: null };
+  // applySeq: the persisted-seq watermark — the highest event seq whose
+  // effects are already folded into `turns` (null = no seq'd frame folded
+  // yet). Resync (sse.js onResync → resyncState) sets it from the /seq head
+  // so a replay at/below the watermark can never double-fold; live broadcast
+  // frames carry no seq and never move it.
+  return { turns: [], usage: null, status: 'idle', error: null, pendingEcho: null, applySeq: null };
 }
 
 function blockToTurns(role, b) {
@@ -335,7 +340,24 @@ function usageOf(data) {
 /// Fold one SSE frame ({event, data}) into the stream state. `nowMs` is
 /// injected (purity): tool duration falls back to arrival-time delta when the
 /// frames carry no duration field (none do today — verified in runner/event.rs).
+/// Fold one frame into the stream state with the applySeq watermark guard
+/// (round-2 #5 resync dedup): a frame that carries a persisted seq at/below
+/// `state.applySeq` is already reflected in `turns` — either folded on an
+/// earlier connection or covered by a snapshot rebuild — and is dropped
+/// verbatim (a replay overlap used to double text, synthesize orphan tool
+/// rows and re-push echo turns). Frames without a seq (live broadcasts are
+/// emitted before the async event flusher persists them, so they can never
+/// carry one) always fold; folding a seq'd frame advances the watermark.
 export function reduceFrame(state, frame, nowMs) {
+  const seq = frame && Number.isFinite(frame.seq) ? frame.seq : null;
+  if (seq !== null && state.applySeq !== null && state.applySeq !== undefined && seq <= state.applySeq) {
+    return state;
+  }
+  const next = foldFrame(state, frame, nowMs);
+  return seq === null ? next : { ...next, applySeq: seq };
+}
+
+function foldFrame(state, frame, nowMs) {
   const event = frame && frame.event;
   const data = (frame && frame.data) || {};
   switch (event) {
@@ -631,4 +653,31 @@ export function ensurePendingEcho(turns, echo) {
     }
   }
   return list.concat([{ kind: 'text', role: 'user', text }]);
+}
+
+/// Resync rebuild (round-2 #5): a reconnecting stream must NOT fold its
+/// replay tail into the dirty live state — live frames carry no seq, so the
+/// client cannot tell which of them the replay re-delivers, and every frame
+/// consumed since the last id'd one would double-fold. Instead the fold state
+/// is rebuilt from the store snapshot at a watermark: `headSeq` is the /seq
+/// head read BEFORE the snapshot fetch, so (i) everything persisted ≤ head
+/// has its message effects in the snapshot and is never replayed, (ii) the
+/// replay stream opens after=head and only carries the future tail. The
+/// snapshot's `draining` flag closes the finished-while-disconnected gap: a
+/// run that ended during the outage has its terminal frame at seq ≤ head
+/// (never replayed), so a non-draining rebuild lands terminal `done` and
+/// releases busy instead of latching 'streaming' forever. The in-flight
+/// turn's partial text truncates at the watermark (its message row lands
+/// only at turn end) and converges on the done → snapshot reload. Pure.
+export function resyncState({ messages, draining, headSeq, pendingEcho }) {
+  const msgs = Array.isArray(messages) ? messages : [];
+  const echo = typeof pendingEcho === 'string' ? pendingEcho : null;
+  return {
+    ...emptyStream(),
+    status: draining ? 'streaming' : 'done',
+    turns: ensurePendingEcho(turnsFromMessages(msgs), echo),
+    usage: usageFromMessages(msgs),
+    applySeq: Number.isFinite(headSeq) ? headSeq : null,
+    pendingEcho: draining ? echo : null,
+  };
 }

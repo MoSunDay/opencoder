@@ -7,6 +7,10 @@
 //     same reducer (the terminal frame of a finished run is always the head,
 //     so a capped tail still converges — an uncapped replay of a fast stream
 //     freezes the console, found by real-browser acceptance);
+//   * on reconnect, an optional `onResync` callback owns the cursor: it
+//     rebuilds the caller's fold state from the store snapshot at a /seq
+//     watermark and returns that floor (frames at/below it are already
+//     reflected); without it the capped-tail cursor below applies;
 //   * a terminal done/error frame closes the stream for good, EXCEPT an
 //     `error` frame carrying `data.lag` (server-side consumer lag, api.rs
 //     map_broadcast_result) — that one is a re-sync signal and reconnects.
@@ -23,7 +27,7 @@ const BACKOFF_CAP_MS = 15000;
 const REPLAY_CAP_FRAMES = 400;
 const MAX_ATTEMPTS = 5;
 
-export function openStream({ path, sessionId, after, onFrame, onStatus, signal }) {
+export function openStream({ path, sessionId, after, onFrame, onStatus, onResync, signal }) {
   // `ctrl` is the CURRENT connection's abort controller: restart() swaps it
   // after aborting so the replacement stream gets a fresh signal.
   let ctrl = new AbortController();
@@ -67,6 +71,7 @@ export function openStream({ path, sessionId, after, onFrame, onStatus, signal }
   /// Parse one SSE block (lines up to a blank line) → {event, data} | null.
   function parseBlock(block) {
     let event = 'message';
+    let idSeq = null;
     const dataLines = [];
     for (const rawLine of block.split('\n')) {
       const line = rawLine.replace(/\r$/, '');
@@ -80,7 +85,7 @@ export function openStream({ path, sessionId, after, onFrame, onStatus, signal }
       } else if (line.startsWith('id:')) {
         const n = parseInt(line.slice(3).trim(), 10);
         if (Number.isFinite(n)) {
-          lastSeq = n;
+          idSeq = n;
         }
       }
     }
@@ -94,10 +99,12 @@ export function openStream({ path, sessionId, after, onFrame, onStatus, signal }
     } catch {
       data = { raw };
     }
-    if (data && typeof data.seq === 'number') {
-      lastSeq = data.seq;
-    }
-    return { event, data };
+    // The persisted row seq rides the SSE `id:` line (api_events.rs); a few
+    // node-uploaded payloads also carry it inside data. Either way it lands
+    // on the frame as `seq` — reduce.js folds it into the applySeq watermark
+    // and handleBlock dedups transport-level repeats against lastSeq.
+    const dataSeq = data && typeof data.seq === 'number' && Number.isFinite(data.seq) ? data.seq : null;
+    return { event, data, seq: idSeq !== null ? idSeq : dataSeq };
   }
 
   function handleBlock(block) {
@@ -108,6 +115,18 @@ export function openStream({ path, sessionId, after, onFrame, onStatus, signal }
     attempts = 0; // any frame proves the stream is alive
     backoff = BACKOFF_START_MS;
     report('live');
+    // Transport dedup (mirror of the server's tier-1 check): a frame whose
+    // seq sits at/below the last seq we DELIVERED is a replay repeat — drop
+    // it whole (no onFrame, no lag/terminal handling: the original copy
+    // already made those decisions). lastSeq only ever advances here, so an
+    // ascending replay never trips the guard.
+    const seq = frame.seq !== null && Number.isFinite(frame.seq) ? frame.seq : null;
+    if (seq !== null && seq <= lastSeq) {
+      return;
+    }
+    if (seq !== null) {
+      lastSeq = seq;
+    }
     if (typeof onFrame === 'function') {
       onFrame(frame);
     }
@@ -216,6 +235,23 @@ export function openStream({ path, sessionId, after, onFrame, onStatus, signal }
   /// and folding them all back in freezes the tab; a finished run's terminal
   /// frame IS the head, so the capped tail still converges).
   async function reconnectCursor() {
+    // Resync protocol (round-2 #5): when the app supplies `onResync` it owns
+    // the re-sync — it rebuilds the fold state from the store snapshot at a
+    // /seq watermark and returns that floor; we stream strictly above it.
+    // Without a rebuild the replay tail folds into the dirty live state and
+    // every frame consumed since the last id'd one double-folds (live frames
+    // carry no seq, so the client cannot dedup them against the replay).
+    // Never regress below the last seq actually delivered.
+    if (typeof onResync === 'function') {
+      try {
+        const floor = await onResync(lastSeq);
+        if (Number.isFinite(floor) && floor >= 0) {
+          return Math.max(lastSeq, floor);
+        }
+      } catch {
+        /* snapshot unavailable: fall through to the capped legacy cursor */
+      }
+    }
     if (!sessionId) {
       return lastSeq;
     }

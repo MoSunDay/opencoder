@@ -402,6 +402,13 @@ impl ChatView {
                         rendered: crate::markdown::render(&display),
                     });
                     self.push_marker(Line::from(""));
+                    // The echoed steer is a NEW user input: per the Turn
+                    // contract (1 turn = n steps + say) the rounds it
+                    // triggers own a FRESH ladder below the echo — they must
+                    // never merge into the previous turn's group. The
+                    // pre-steer ladder is complete (it never gets its own
+                    // say), so its progress animation is frozen here.
+                    self.reanchor_turn_after_user_echo();
                 }
                 self.steer_items.retain(|(s, _)| s != seq);
             }
@@ -445,6 +452,18 @@ impl ChatView {
         self.turn_block_start = self.blocks.len();
         self.llm_round_started_at_ms = Some(opencoder_core::message::now_ms());
         self.frozen_round_ms = None;
+    }
+
+    /// Re-anchor the live ladder floor after a user echo landed mid-flow
+    /// (steer consumption, queue consumption): the echoed input opens a NEW
+    /// Turn, so later steps/calls build a fresh `StepGroup` below the echo
+    /// instead of merging into the previous turn's group. The previous
+    /// group's progress animation is frozen — that turn ended without its
+    /// own say and will never animate again. Mirrors the SPA's
+    /// user-boundary rule in `steps/reducer.js` (`lastUserBoundary`).
+    pub fn reanchor_turn_after_user_echo(&mut self) {
+        steps::set_turn_progress(&mut self.blocks, self.turn_block_start, false);
+        self.turn_block_start = self.blocks.len();
     }
 
     /// Push a non-streamed line and ensure the next TextDelta starts a new

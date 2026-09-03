@@ -197,3 +197,46 @@ fn tool_start_merges_into_the_tail_group_across_panel_entry() {
         other => panic!("expected a single StepGroup, got {other:?}"),
     }
 }
+
+/// The echoed question anchors the panel's turn: the sidecar's step ladder
+/// must render BELOW the prompt. Regression: `echo_question` pushed the User
+/// block without re-anchoring `turn_block_start`, so the first reasoning
+/// delta inserted the StepGroup at the turn floor 0 — ABOVE the echo.
+#[test]
+fn panel_ladder_lands_below_the_echoed_question() {
+    let mut v = ChatView::default();
+    let _tx = open_panel(&mut v);
+    crate::sidecar_ui::echo_question(&mut v, "总结这个函数");
+    v.apply(&SessionEvent::SidecarStart {
+        id: "sc-1".into(),
+        question: "总结这个函数".into(),
+    });
+    v.apply(&SessionEvent::SidecarChild {
+        id: "sc-1".into(),
+        ev: Box::new(SessionEvent::ReasoningDelta("先看代码".into())),
+    });
+    let panel = v.sidecar.as_ref().expect("panel alive");
+    let user_idx = panel
+        .view
+        .blocks
+        .iter()
+        .position(|b| matches!(b, ChatBlock::User { .. }))
+        .expect("echoed question block");
+    let group_idx = panel
+        .view
+        .blocks
+        .iter()
+        .position(|b| matches!(b, ChatBlock::StepGroup { .. }))
+        .expect("panel step ladder");
+    assert!(
+        group_idx > user_idx,
+        "ladder must render below the echoed question (user@{user_idx}, ladder@{group_idx})"
+    );
+    let text = block_text(&panel.view);
+    let prompt = text.find("总结这个函数").expect("prompt text");
+    let ladder = text.find("1 Step").expect("ladder marker");
+    assert!(
+        prompt < ladder,
+        "flattened panel renders the prompt before the ladder: {text:?}"
+    );
+}

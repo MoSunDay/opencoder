@@ -265,7 +265,7 @@ pub(super) async fn run_app(
                     input_disabled,
                     tail_ms,
                     task_elapsed_ms,
-                    subagent_focus.is_none(),
+                    app_loop::body_is_top_level(&chat, subagent_focus),
                     config.autopilot.mode,
                     &display_mode,
                     plan_skill_active,

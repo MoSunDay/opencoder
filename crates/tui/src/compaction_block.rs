@@ -78,20 +78,17 @@ impl ChatView {
     }
 
     /// Finalize the compaction block with the complete summary. If the last
-    /// block is a streaming Compaction, overwrite its text with the final
-    /// summary and collapse it; otherwise create a fresh collapsed block (the
-    /// streamed block was destroyed, e.g. by a `TranscriptReset` replay).
+    /// block is a streaming Compaction, overwrite its text while preserving
+    /// its current disclosure state; otherwise create a fresh collapsed block
+    /// (the streamed block was destroyed, e.g. by a `TranscriptReset` replay).
     pub(crate) fn finalize_compaction(&mut self, summary: &str) {
         self.finalize_assistant();
         if let Some(ChatBlock::Compaction {
-            text,
-            collapsed,
-            streaming,
+            text, streaming, ..
         }) = self.blocks.last_mut()
         {
             if *streaming {
                 *text = summary.to_string();
-                *collapsed = true;
                 *streaming = false;
                 return;
             }

@@ -21,7 +21,8 @@ fn thinking_delta_is_sanitized_once_before_it_reaches_rendering() {
     view.apply(&SessionEvent::ReasoningDelta(
         "old\rNEW\x08\x1b[2J\u{009b}31m\tline".into(),
     ));
-    view.toggle_thinking_at(0);
+    view.toggle_tool_call_at(0, 0);
+    view.toggle_tool_call_at(0, 1);
 
     let text = flattened_text(&view);
     assert_no_terminal_controls(&text);

@@ -32,9 +32,8 @@ pub(crate) struct MouseHits {
     pub thinking_btns: Vec<ThinkingBtn>,
     /// Clickable Subagent-block header rows; clicking toggles collapse.
     pub subagent_btns: Vec<SubagentBtn>,
-    /// Clickable rows inside `StepGroup` blocks — step rows and each open
-    /// step's call header rows, in render order; clicking toggles that
-    /// step, or that single call's output only.
+    /// Clickable rows inside `StepGroup` blocks — turn, step, and each open
+    /// step's function-call rows, in render order.
     pub tool_call_btns: Vec<ToolCallBtn>,
     /// Clickable Compaction-block header rows; clicking toggles collapse.
     pub compaction_btns: Vec<CompactionBtn>,
@@ -60,10 +59,10 @@ pub(crate) struct SubagentBtn {
 }
 
 /// A clickable row inside a `StepGroup`'s ladder. `call_idx` is the FLAT
-/// index into the group's visible rows (group row, step rows, calls
-/// aggregation rows, call header rows in render order — the same walk
+/// index into the group's visible rows (turn row, step rows, function-call
+/// rows in render order — the same walk
 /// `collect_headers` and `visible_targets` enumerate); clicking toggles that
-/// group / step / calls list / single call's output.
+/// turn / step / single call's result.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct ToolCallBtn {
     pub block_idx: usize,
@@ -181,9 +180,8 @@ pub(super) fn record_compaction_hits(
 }
 
 /// Populate `out` with one `ToolCallBtn` per clickable ladder row that is
-/// currently visible inside the body viewport: the group rows, the step rows
-/// (while their group is open), the calls aggregation rows (while their step
-/// is open) and the call header rows (while their step's call list is open).
+/// currently visible inside the body viewport: turn rows, step rows (while
+/// their turn is open), and function-call rows (while their step is open).
 #[allow(clippy::too_many_arguments)]
 pub(super) fn record_tool_call_hits(
     chat: &ChatView,

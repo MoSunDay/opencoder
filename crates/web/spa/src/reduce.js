@@ -5,6 +5,19 @@
 //   * reduceFrame(state, frame, nowMs) — fold one SSE frame into the live
 //     stream state. Both return NEW state objects (no mutation).
 
+import {
+  absorbSegmentThinking,
+  appendStepTurn,
+  appendThinkDelta,
+  backfillBufferedCall,
+  backfillStepsCall,
+  closeOpenText,
+  flushPendingThink,
+  mergeOrNewStep,
+  placeThinkingStep,
+  settleTurnProgress,
+} from './steps/reducer.js';
+
 /// Payload of text/reasoning deltas: the server (runner/event.rs) uses `text`;
 /// node worker uploads may carry `delta` (node_protocol.rs) — accept both.
 export function deltaTextOf(data) {
@@ -96,8 +109,9 @@ function isSegmentBoundary(m) {
 /// Snapshot messages → turns. Message-pair semantics ported from the TUI
 /// replay's coalesce_steps: reasoning buffers into a pending-think until the
 /// next step consumes it; each assistant message's non-task tool_uses form
-/// ONE step appended at message end, folded into the trailing steps turn
-/// when the messages are adjacent. A tool-turn's thinking lives INSIDE its
+/// ONE step appended at message end, folded into the one steps turn owned by
+/// the current user segment even when Say/status rows interleave. A
+/// tool-turn's thinking lives INSIDE its
 /// step (live parity with absorbSegmentThinking — no free-floating think
 /// turn above the ladder): an assistant Say folds the pending think run
 /// when NO non-task tool_use remains ahead in the same user segment (a
@@ -293,189 +307,8 @@ function appendDelta(state, kind, text) {
   return withTurns(state, turns);
 }
 
-function closeOpenText(turns) {
-  const last = turns[turns.length - 1];
-  if (last && last.kind === 'text' && last.open) {
-    const copy = turns.slice();
-    copy[copy.length - 1] = { ...last, open: false };
-    return copy;
-  }
-  return turns;
-}
-
-// --- steps ladder (port of crates/tui/src/chat_steps.rs) --------------------
-// Non-task tool calls fold into `{kind:'steps', role:'assistant', steps:[{
-// thinking, calls:[toolCall,…]}]}` turns. A step is one assistant round (its
-// thinking plus that round's calls); the trailing `steps` turn groups
-// consecutive rounds. A toolCall keeps the flat tool-turn fields verbatim.
-
-/// findOpenTool-style id compatibility: an open call (`output === null`)
-/// matches when either side carries no id (older frames/rows) or they equal.
-function openCallMatches(call, id) {
-  return call && call.output === null && (!id || !call.id || call.id === id);
-}
-
-/// Segment thinking absorption (SPA-side extension of the TUI's
-/// pop_trailing_thinking): absorb EVERY assistant think turn of the current
-/// user segment into the next step's thinking — crossing OVER Say text
-/// turns, which stay in place as top-level bubbles. A turn that issues tool
-/// calls must never leave free-floating think turns above the ladder; a
-/// pure-text round's run is folded into a call-less step by
-/// placeThinkingStep once no tool call ever arrives (flushPendingThink).
-/// The walk stops at the first boundary turn: a user echo, a sys marker, a
-/// task tool row, a subagent block, or an earlier steps group (its rounds
-/// are already closed). Text concatenates earliest-first across the popped
-/// runs. Mutates only the caller's copy.
-function absorbSegmentThinking(turns) {
-  let thinking = '';
-  for (let i = turns.length - 1; i >= 0; i -= 1) {
-    const t = turns[i];
-    if (t && t.kind === 'think' && t.role === 'assistant') {
-      thinking = (t.text || '') + thinking;
-      turns.splice(i, 1);
-      continue;
-    }
-    if (t && t.kind === 'text' && t.role === 'assistant') {
-      continue; // Say stays a top-level bubble; thinking crosses it.
-    }
-    break;
-  }
-  return thinking;
-}
-
-/// Place already-collected `thinking` into the steps ladder at a point where
-/// no tool call will consume it (done/error frames, user echoes, subagent
-/// rows, snapshot boundaries). Mirrors the TUI's place_thinking_step: walk
-/// back over the trailing run of assistant text turns (Say stays top-level
-/// and transparent); a trailing steps turn gains the thinking as a call-less
-/// step; any other turn (user echo, sys marker, tool row, subagent) caps the
-/// run and a fresh single-step turn is inserted before it. Mutates+returns
-/// `turns`.
-function placeThinkingStep(turns, thinking) {
-  if (!thinking) {
-    return turns;
-  }
-  let insertAt = turns.length;
-  for (let i = turns.length - 1; i >= 0; i -= 1) {
-    const t = turns[i];
-    if (t && t.kind === 'text' && t.role === 'assistant') {
-      insertAt = i; // Say speech rides transparently.
-      continue;
-    }
-    if (t && t.kind === 'steps' && t.role === 'assistant') {
-      turns[i] = { ...t, steps: t.steps.concat([{ thinking, calls: [] }]) };
-      return turns;
-    }
-    insertAt = i + 1; // right after the boundary turn — same segment.
-    break;
-  }
-  turns.splice(insertAt, 0, {
-    kind: 'steps',
-    role: 'assistant',
-    steps: [{ thinking, calls: [] }],
-  });
-  return turns;
-}
-
-/// Flush every free-floating think turn of the current user segment into the
-/// ladder as a call-less step (absorbSegmentThinking collects + removes them
-/// across Say, placeThinkingStep files the result). Thinking therefore never
-/// survives above the ladder at rest — the live mirror of the TUI's
-/// flush_pending_thinking.
-function flushPendingThink(turns) {
-  const copy = turns.slice();
-  const thinking = absorbSegmentThinking(copy);
-  return placeThinkingStep(copy, thinking);
-}
-
-/// Mirror of boundary_needed: a new call must NOT merge into the trailing
-/// step once that step already holds a finished call.
-function stepBoundaryNeeded(steps) {
-  const last = steps[steps.length - 1];
-  return !last || last.calls.some((c) => c.output !== null);
-}
-
-/// Mirror of merge_or_new_step, lifted to turn level: append `call` to the
-/// trailing step of the trailing `steps` turn while it holds no finished
-/// call (concatenating `thinking` onto it, lossless), else push a NEW step —
-/// into the trailing `steps` turn when the tail is one, else a fresh turn.
-function mergeOrNewStep(turns, thinking, call) {
-  const tail = turns[turns.length - 1];
-  if (!tail || tail.kind !== 'steps' || !Array.isArray(tail.steps)) {
-    turns.push({ kind: 'steps', role: 'assistant', steps: [{ thinking, calls: [call] }] });
-    return;
-  }
-  const steps = tail.steps.slice();
-  const lastStep = steps[steps.length - 1];
-  if (stepBoundaryNeeded(steps)) {
-    steps.push({ thinking, calls: [call] });
-  } else {
-    steps[steps.length - 1] = {
-      ...lastStep,
-      thinking: thinking ? (lastStep.thinking || '') + thinking : (lastStep.thinking || ''),
-      calls: lastStep.calls.concat([call]),
-    };
-  }
-  turns[turns.length - 1] = { ...tail, steps };
-}
-
-/// Snapshot end-of-message flush: ONE step per assistant message (its whole
-/// round). Folded into the trailing `steps` turn only when the tail is one —
-/// nothing else was emitted since, so the messages are adjacent (coalesce_
-/// steps merges runs of adjacent groups); otherwise a new `steps` turn.
-/// Unlike mergeOrNewStep it never merges calls into the trailing step.
-function appendStepTurn(turns, thinking, calls) {
-  const tail = turns[turns.length - 1];
-  if (tail && tail.kind === 'steps' && Array.isArray(tail.steps)) {
-    turns[turns.length - 1] = { ...tail, steps: tail.steps.concat([{ thinking, calls }]) };
-    return;
-  }
-  turns.push({ kind: 'steps', role: 'assistant', steps: [{ thinking, calls }] });
-}
-
-/// Backfill a finished tool_end / tool_result by id: walk turns newest→
-/// oldest, steps newest→oldest, calls newest→oldest (TUI routing — parallel
-/// calls each land in their own slot); the first open matching call receives
-/// `apply(call)` through immutable copies of turn/step/call. True = hit.
-function backfillStepsCall(turns, id, apply) {
-  for (let i = turns.length - 1; i >= 0; i -= 1) {
-    const t = turns[i];
-    if (!t || t.kind !== 'steps' || !Array.isArray(t.steps)) {
-      continue;
-    }
-    for (let s = t.steps.length - 1; s >= 0; s -= 1) {
-      const step = t.steps[s];
-      const calls = (step && Array.isArray(step.calls)) ? step.calls : [];
-      for (let c = calls.length - 1; c >= 0; c -= 1) {
-        if (openCallMatches(calls[c], id)) {
-          const nextCalls = calls.slice();
-          nextCalls[c] = apply(calls[c]);
-          const nextSteps = t.steps.slice();
-          nextSteps[s] = { ...step, calls: nextCalls };
-          turns[i] = { ...t, steps: nextSteps };
-          return true;
-        }
-      }
-    }
-  }
-  return false;
-}
-
-/// Same backfill over a message's not-yet-flushed round buffer (snapshot
-/// walk): returns the patched copy, or null when nothing matched.
-function backfillBufferedCall(calls, id, apply) {
-  if (!Array.isArray(calls)) {
-    return null;
-  }
-  for (let c = calls.length - 1; c >= 0; c -= 1) {
-    if (openCallMatches(calls[c], id)) {
-      const next = calls.slice();
-      next[c] = apply(calls[c]);
-      return next;
-    }
-  }
-  return null;
-}
+// Turn/Step transforms are isolated in `steps/reducer.js` and shared by
+// snapshot replay plus live SSE folding.
 
 /// Snapshot messages → aggregated usage for the footer. Store rows carry
 /// per-message usage; a reloaded console has no llm_usage frame to remember,
@@ -517,10 +350,23 @@ export function reduceFrame(state, frame, nowMs) {
   const event = frame && frame.event;
   const data = (frame && frame.data) || {};
   switch (event) {
-    case 'text_delta':
-      return appendDelta(state, 'text', deltaTextOf(data));
-    case 'reasoning_delta':
-      return appendDelta(state, 'think', deltaTextOf(data));
+    case 'text_delta': {
+      const text = deltaTextOf(data);
+      if (!text) {
+        return state;
+      }
+      return appendDelta(
+        withTurns(state, settleTurnProgress(state.turns)),
+        'text',
+        text,
+      );
+    }
+    case 'reasoning_delta': {
+      // Streams straight into the steps ladder (think-only step) — a
+      // top-level think turn no longer exists on the live path.
+      const text = deltaTextOf(data);
+      return text ? withTurns(state, appendThinkDelta(state.turns, text)) : state;
+    }
     case 'tool_start':
     case 'tool_update': {
       const turns = closeOpenText(state.turns.slice());
@@ -550,7 +396,7 @@ export function reduceFrame(state, frame, nowMs) {
       // call merges into the trailing step while it holds no finished call
       // (sequential rounds split, parallel calls stay together).
       const thinking = absorbSegmentThinking(turns);
-      mergeOrNewStep(turns, thinking, call);
+      mergeOrNewStep(turns, thinking, call, true);
       return withTurns(state, turns);
     }
     case 'tool_end': {
@@ -604,14 +450,15 @@ export function reduceFrame(state, frame, nowMs) {
       }
       // Hard segment boundary: fold the pre-boundary think run into the
       // ladder before the echo lands (a later tool_start can never cross it).
-      const turns = closeOpenText(flushPendingThink(state.turns));
+      const turns = closeOpenText(flushPendingThink(settleTurnProgress(state.turns)));
       turns.push({ kind: 'text', role: 'user', text });
       return withTurns(state, turns);
     }
     case 'status': {
       const text = typeof data.status === 'string' ? data.status : '';
-      // sys turns are transcript boundaries (TUI push_marker parity): fold
-      // the pending think run into the ladder before the marker lands.
+      // Status is presentation inside the admitted Turn. Fold any legacy
+      // top-level think run before placing the marker; the canonical steps
+      // item remains discoverable across it until a real user boundary.
       return text ? withTurns(state, flushPendingThink(state.turns).concat([{ kind: 'sys', text }])) : state;
     }
     case 'compaction': {
@@ -688,17 +535,24 @@ export function reduceFrame(state, frame, nowMs) {
       return withTurns(state, state.turns.concat([{ kind: 'sys', text: '🛸 autopilot ' + phase + (it !== null ? ' #' + it : '') }]));
     }
     case 'interrupted':
-      return withTurns(state, state.turns.concat([{ kind: 'sys', text: '⏹ interrupted' }]));
+      return withTurns(
+        state,
+        settleTurnProgress(state.turns).concat([{ kind: 'sys', text: '⏹ interrupted' }]),
+      );
     case 'transcript_reset':
       // Wire payload is `{}` (runner/event.rs) — the collapsed transcript
       // cannot be rebuilt from the frame. chat.jsx reacts to this event by
       // re-fetching the store snapshot (same path as `done`); here we only
       // close the open text turn so a lost reload still renders sanely.
-      return { ...state, turns: closeOpenText(state.turns.slice()) };
+      return { ...state, turns: closeOpenText(settleTurnProgress(state.turns)) };
     case 'done':
       // A pure-text round (or the turn's final Say round) folds its think
       // turns into a call-less step — no think turn survives above the ladder.
-      return { ...state, status: 'done', turns: closeOpenText(flushPendingThink(state.turns)) };
+      return {
+        ...state,
+        status: 'done',
+        turns: closeOpenText(flushPendingThink(settleTurnProgress(state.turns))),
+      };
     case 'error': {
       // A lag-marked error (api.rs map_broadcast_result) is a consumer
       // re-sync signal, not a run failure: sse.js restarts from the persisted
@@ -708,7 +562,12 @@ export function reduceFrame(state, frame, nowMs) {
       if (data && Number.isFinite(data.lag)) {
         return state;
       }
-      return { ...state, status: 'error', error: String(data.error || data.message || 'error'), turns: closeOpenText(flushPendingThink(state.turns)) };
+      return {
+        ...state,
+        status: 'error',
+        error: String(data.error || data.message || 'error'),
+        turns: closeOpenText(flushPendingThink(settleTurnProgress(state.turns))),
+      };
     }
     default:
       return state;
@@ -739,5 +598,9 @@ export function withUserTurn(state, text) {
   if (!text) {
     return state;
   }
-  return withTurns(state, closeOpenText(flushPendingThink(state.turns)).concat([{ kind: 'text', role: 'user', text }]));
+  return withTurns(
+    state,
+    closeOpenText(flushPendingThink(settleTurnProgress(state.turns)))
+      .concat([{ kind: 'text', role: 'user', text }]),
+  );
 }

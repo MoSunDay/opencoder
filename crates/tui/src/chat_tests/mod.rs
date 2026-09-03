@@ -61,19 +61,33 @@ fn text_delta_appends_to_assistant_block() {
 }
 
 #[test]
-fn reasoning_delta_creates_thinking_block() {
+fn reasoning_delta_streams_into_a_closed_step() {
+    // Thinking is a structural part of a step, but streaming never changes
+    // disclosure state: the default remains the Turn-level `N Steps` row.
     let mut v = ChatView::default();
     v.apply(&SessionEvent::ReasoningDelta("analyzing".into()));
-    let flat = v.flatten();
-    // Collapsed by default: header shows "Thinking"
-    assert!(flat
-        .iter()
-        .any(|l| { l.spans.iter().any(|s| s.content.contains("Thinking")) }));
-    // Content hidden when collapsed
+    assert!(matches!(
+        v.blocks[0],
+        ChatBlock::StepGroup { open: false, .. }
+    ));
+    let step = &match &v.blocks[0] {
+        ChatBlock::StepGroup { steps, .. } => &steps[0],
+        _ => unreachable!(),
+    };
+    assert!(!step.open, "streaming step starts closed");
+    assert_eq!(step.thinking_raw, "analyzing");
+    assert!(
+        step.thinking.is_empty(),
+        "hidden markdown is rendered lazily"
+    );
+    assert!(step.thinking_dirty);
     assert!(!block_text(&v).contains("analyzing"));
-    // Expand via block index and verify content
-    v.toggle_thinking_at(0);
-    assert!(block_text(&v).contains("analyzing"));
+    assert!(
+        !v.blocks
+            .iter()
+            .any(|b| matches!(b, ChatBlock::Thinking { .. })),
+        "no standalone Thinking block in the live flow"
+    );
 }
 
 #[test]
@@ -251,20 +265,19 @@ fn ctx_counts_reasoning_once_at_finalize() {
     v.apply(&SessionEvent::ReasoningDelta("think ".into()));
     v.apply(&SessionEvent::ReasoningDelta("more".into()));
     assert_eq!(v.context_used, 0, "reasoning not counted while streaming");
-    // Reasoning -> text transition seals the thinking block and counts it
-    // once, before the assistant text is counted.
+    // The Say streams on top of the ladder; the step stays unsealed until
+    // the round finalizes.
     v.apply(&SessionEvent::TextDelta("answer".into()));
     assert_eq!(
-        v.context_used,
-        estimate("think more") as u64,
-        "reasoning counted once on transition; answer not yet counted"
+        v.context_used, 0,
+        "step thinking counts at round finalize, not on the text transition"
     );
     v.apply(&SessionEvent::Done);
     assert_eq!(
         v.context_used,
         estimate("think more") as u64 + estimate("answer") as u64
     );
-    // Re-finalizing must not double-count.
+    // Re-finalizing must not double-count (per-step `sealed` flag).
     v.finalize_assistant();
     assert_eq!(
         v.context_used,

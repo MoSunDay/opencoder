@@ -139,7 +139,9 @@ fn replay_one_prefetched_tool_image_renders() {
     // Need a matching StepGroup call for the ToolResult to attach output.
     chat.blocks.push(ChatBlock::StepGroup {
         steps: vec![crate::chat::Step {
+            thinking_raw: String::new(),
             thinking: Vec::new(),
+            thinking_dirty: false,
             calls: vec![crate::chat::ToolCall {
                 id: "t1".into(),
                 header: Line::from("test"),
@@ -150,8 +152,10 @@ fn replay_one_prefetched_tool_image_renders() {
             }],
             open: false,
             calls_open: false,
+            sealed: false,
         }],
         open: false,
+        progress_active: false,
     });
     replay_one(&mut chat, &msg, &prefetched);
 

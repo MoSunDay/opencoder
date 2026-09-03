@@ -1,9 +1,23 @@
 use super::super::*;
 
+/// The top-level Thinking block is a legacy/replay shape (live reasoning
+/// streams into the step ladder) — these tests build it directly to keep the
+/// block machinery (collapse/toggle/headers) covered.
+fn legacy_thinking_view(runs: &[(&str, bool)]) -> ChatView {
+    let mut v = ChatView::default();
+    for &(text, sealed) in runs {
+        v.blocks.push(ChatBlock::Thinking {
+            text: text.into(),
+            collapsed: true,
+            sealed,
+        });
+    }
+    v
+}
+
 #[test]
 fn thinking_block_collapses() {
-    let mut v = ChatView::default();
-    v.apply(&SessionEvent::ReasoningDelta("line1\nline2\nline3".into()));
+    let mut v = legacy_thinking_view(&[("line1\nline2\nline3", false)]);
     // Collapsed by default: header only, content hidden
     let text = block_text(&v);
     assert!(text.contains("Thinking"));
@@ -19,13 +33,14 @@ fn thinking_block_collapses() {
 
 #[test]
 fn thinking_headers_match_flatten_line_indices() {
-    let mut v = ChatView::default();
     // Two thinking blocks separated by an assistant block.
-    v.apply(&SessionEvent::ReasoningDelta("think-a".into()));
+    let mut v = legacy_thinking_view(&[("think-a", false)]);
     v.apply(&SessionEvent::TextDelta("hi".into()));
-    // No Done: both thinking blocks stay standalone mid-stream (a Done flush
-    // folds the first into the step ladder).
-    v.apply(&SessionEvent::ReasoningDelta("think-b-1\nthink-b-2".into()));
+    v.blocks.push(ChatBlock::Thinking {
+        text: "think-b-1\nthink-b-2".into(),
+        collapsed: true,
+        sealed: false,
+    });
 
     let flat = v.flatten();
     let headers = v.thinking_headers();
@@ -58,35 +73,41 @@ fn thinking_headers_match_flatten_line_indices() {
 
 #[test]
 fn toggle_thinking_at_toggles_specific_block() {
-    let mut v = ChatView::default();
-    v.apply(&SessionEvent::ReasoningDelta("first".into()));
+    // Legacy shape: two Thinking blocks separated by an assistant, built
+    // directly (live reasoning goes into the step ladder).
+    let mut v = legacy_thinking_view(&[("first run", false)]);
     v.apply(&SessionEvent::TextDelta("between".into()));
-    // No Done: both thinking blocks stay standalone mid-stream.
-    v.apply(&SessionEvent::ReasoningDelta("second".into()));
+    v.blocks.push(ChatBlock::Thinking {
+        text: "second run".into(),
+        collapsed: true,
+        sealed: false,
+    });
 
     let headers = v.thinking_headers();
     assert_eq!(headers.len(), 2);
     // Both collapsed initially.
-    assert!(!block_text(&v).contains("first"));
-    assert!(!block_text(&v).contains("second"));
+    assert!(!block_text(&v).contains("first run"));
+    assert!(!block_text(&v).contains("second run"));
     // Toggle only the first: its content shows, second stays hidden.
     v.toggle_thinking_at(headers[0].block_idx);
-    assert!(block_text(&v).contains("first"));
-    assert!(!block_text(&v).contains("second"));
+    assert!(block_text(&v).contains("first run"));
+    assert!(!block_text(&v).contains("second run"));
     // Out-of-range / non-thinking index is a no-op.
     v.toggle_thinking_at(999);
     v.toggle_thinking_at(headers[0].block_idx + 1); // assistant block index
-    assert!(block_text(&v).contains("first"));
+    assert!(block_text(&v).contains("first run"));
 }
 
 #[test]
 fn collapse_all_collapsible_collapses_every_thinking_block() {
-    let mut v = ChatView::default();
     // Two thinking blocks separated by an assistant block.
-    v.apply(&SessionEvent::ReasoningDelta("think-a".into()));
+    let mut v = legacy_thinking_view(&[("think-a", false)]);
     v.apply(&SessionEvent::TextDelta("hi".into()));
-    // No Done: both thinking blocks stay standalone mid-stream.
-    v.apply(&SessionEvent::ReasoningDelta("think-b\nthink-c".into()));
+    v.blocks.push(ChatBlock::Thinking {
+        text: "think-b\nthink-c".into(),
+        collapsed: true,
+        sealed: false,
+    });
 
     let headers = v.thinking_headers();
     assert_eq!(headers.len(), 2);
@@ -129,15 +150,13 @@ fn last_open_thinking_collapsed_empty_view() {
 
 #[test]
 fn last_open_thinking_collapsed_true_when_collapsed() {
-    let mut view = ChatView::default();
-    view.apply(&SessionEvent::ReasoningDelta("thinking...".into()));
+    let view = legacy_thinking_view(&[("thinking...", false)]);
     assert!(view.last_open_thinking_collapsed());
 }
 
 #[test]
 fn last_open_thinking_collapsed_false_when_expanded() {
-    let mut view = ChatView::default();
-    view.apply(&SessionEvent::ReasoningDelta("thinking...".into()));
+    let mut view = legacy_thinking_view(&[("thinking...", false)]);
     // Toggle expands the (only) thinking block at index 0.
     view.toggle_thinking_at(0);
     assert!(!view.last_open_thinking_collapsed());
@@ -145,18 +164,15 @@ fn last_open_thinking_collapsed_false_when_expanded() {
 
 #[test]
 fn last_open_thinking_collapsed_false_when_last_block_not_thinking() {
-    let mut view = ChatView::default();
-    view.apply(&SessionEvent::ReasoningDelta("thinking...".into()));
-    // A TextDelta seals the thinking block and opens an assistant block.
+    let mut view = legacy_thinking_view(&[("thinking...", true)]);
+    // A sealed thinking block followed by an assistant block.
     view.apply(&SessionEvent::TextDelta("answer".into()));
     assert!(!view.last_open_thinking_collapsed());
 }
 
 #[test]
 fn last_open_thinking_collapsed_false_when_sealed() {
-    let mut view = ChatView::default();
-    view.apply(&SessionEvent::ReasoningDelta("thinking...".into()));
-    view.apply(&SessionEvent::Done);
+    let view = legacy_thinking_view(&[("thinking...", true)]);
     assert!(!view.last_open_thinking_collapsed());
 }
 
@@ -165,9 +181,8 @@ fn last_open_thinking_collapsed_false_when_sealed() {
 /// accidentally removed from the shared `render_collapsible`.
 #[test]
 fn thinking_header_shows_line_count_when_collapsed() {
-    let mut v = ChatView::default();
     // Body is 4 lines.
-    v.apply(&SessionEvent::ReasoningDelta("l1\nl2\nl3\nl4".into()));
+    let mut v = legacy_thinking_view(&[("l1\nl2\nl3\nl4", false)]);
 
     // Collapsed: header carries the line count.
     let flat = v.flatten();
@@ -202,8 +217,15 @@ fn interleaved_reasoning_keeps_one_losslessly_joined_assistant() {
         "通过，无失败。统计总数并写 changelog。".into(),
     ));
 
-    assert!(matches!(v.blocks[0], ChatBlock::Thinking { .. }));
-    assert!(matches!(v.blocks[1], ChatBlock::Thinking { .. }));
+    // Live reasoning streams into the step ladder: both segments land in the
+    // same step's thinking, and the interleaved Say rides above the group.
+    assert!(matches!(v.blocks[0], ChatBlock::StepGroup { .. }));
+    let thinking = match &v.blocks[0] {
+        ChatBlock::StepGroup { steps, .. } => steps[0].thinking_raw.clone(),
+        _ => unreachable!("first block must be the step group"),
+    };
+    assert!(thinking.contains("plan regression"), "got {thinking:?}");
+    assert!(thinking.contains("record totals"), "got {thinking:?}");
     let assistants: Vec<_> = v
         .blocks
         .iter()
@@ -226,18 +248,34 @@ fn interleaved_reasoning_keeps_one_losslessly_joined_assistant() {
 }
 
 #[test]
-fn interleaved_open_thinking_still_uses_collapsed_render_gate() {
+fn collapsed_live_reasoning_stays_raw_until_the_step_opens() {
     let mut v = ChatView::default();
     v.apply(&SessionEvent::ReasoningDelta("first".into()));
     v.apply(&SessionEvent::TextDelta("answer".into()));
     v.apply(&SessionEvent::ReasoningDelta("second".into()));
 
+    // The step is structurally present but hidden, so deltas only append raw
+    // source and the render loop may skip a delta-only frame.
     assert!(
         v.last_open_thinking_collapsed(),
-        "open Thinking immediately before Assistant must remain detectable"
+        "collapsed step reasoning is not visible"
     );
-    v.toggle_thinking_at(1);
-    assert!(!v.last_open_thinking_collapsed());
+    let (thinking_raw, thinking_empty) = match &v.blocks[0] {
+        ChatBlock::StepGroup { steps, .. } => {
+            (steps[0].thinking_raw.clone(), steps[0].thinking.is_empty())
+        }
+        _ => unreachable!("first block must be the step group"),
+    };
+    assert_eq!(thinking_raw, "firstsecond");
+    assert!(thinking_empty);
+
+    v.toggle_tool_call_at(0, 0);
+    v.toggle_tool_call_at(0, 1);
+    let thinking = match &v.blocks[0] {
+        ChatBlock::StepGroup { steps, .. } => crate::chat::steps::span_text(&steps[0].thinking),
+        _ => unreachable!("first block must be the step group"),
+    };
+    assert_eq!(thinking, "firstsecond");
 }
 
 #[test]

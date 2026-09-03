@@ -24,9 +24,10 @@ fn replay_tool_round(asst_id: &str, tool_id: &str, reasoning: Option<&str>) -> (
 
 #[test]
 fn replay_absorbs_thinking_behind_assistant_text_like_the_live_path() {
-    // Replay's coalesce fold must cross Assistant blocks exactly like the
-    // live path: [Thinking, Assistant(text), ToolUse] folds the thinking
-    // into the step and keeps the assistant text top-level.
+    // [Reasoning, Assistant(text), ToolUse] mirrors the live contract: the
+    // Say CLOSES its sub-turn, so the thinking folds (already rendered)
+    // into that sub-turn's call-less step above the Say, and the ToolUse
+    // opens its own ladder below it.
     let mut asst = Message::assistant("a1");
     asst.blocks.push(ContentBlock::Reasoning {
         text: "ponder replay".into(),
@@ -55,7 +56,9 @@ fn replay_absorbs_thinking_behind_assistant_text_like_the_live_path() {
             _ => None,
         })
         .collect();
-    assert_eq!(groups.len(), 1);
+    // The Say caps the first sub-turn: its ladder (call-less thinking step)
+    // stays above, and the tool round below the Say owns its own ladder.
+    assert_eq!(groups.len(), 2);
     let body: String = groups[0][0]
         .thinking
         .iter()
@@ -66,6 +69,13 @@ fn replay_absorbs_thinking_behind_assistant_text_like_the_live_path() {
         body.contains("ponder replay"),
         "thinking behind assistant text must fold into the step: {body:?}"
     );
+    assert!(groups[0][0].calls.is_empty());
+    let below: Vec<&str> = groups[1]
+        .iter()
+        .flat_map(|s| s.calls.iter())
+        .map(|c| c.id.as_str())
+        .collect();
+    assert_eq!(below, ["t1"]);
     assert!(
         !chat
             .blocks
@@ -335,7 +345,10 @@ fn live_and_replay_share_one_turn_with_the_same_two_steps() {
     let mut user = Message::user("u1", "go");
     user.synthetic = false;
     let (mut a1, t1) = replay_tool_round("a1", "a", Some("first"));
-    a1.blocks.push(ContentBlock::text("checking"));
+    // Persisted block order mirrors the live stream above: the Say
+    // "checking" closes the first sub-turn BEFORE the next tool phase
+    // opens, so its ladder stays above and the calls land below the Say.
+    a1.blocks.insert(1, ContentBlock::text("checking"));
     a1.blocks.push(ContentBlock::ToolUse {
         id: "a2".into(),
         name: "bash".into(),
@@ -376,7 +389,72 @@ fn live_and_replay_share_one_turn_with_the_same_two_steps() {
             .collect::<Vec<_>>()
     };
     assert_eq!(shape(&live), shape(&replay));
-    assert_eq!(shape(&live).len(), 1);
-    assert_eq!(shape(&live)[0].len(), 2);
-    assert_eq!(shape(&live)[0][0].1, ["a", "a2"]);
+    // The Say "checking" closes the first sub-turn: one call-less thinking
+    // ladder above it, one two-step ladder below — same pairing live and on
+    // replay.
+    assert_eq!(shape(&live).len(), 2);
+    assert_eq!(shape(&live)[0].len(), 1);
+    assert_eq!(shape(&live)[0][0].1, Vec::<String>::new());
+    assert_eq!(shape(&live)[1].len(), 2);
+    assert_eq!(shape(&live)[1][0].1, ["a", "a2"]);
+}
+
+#[test]
+fn replay_pairs_each_ladder_with_its_own_say() {
+    // The step-ladder contract is `1 Turn = n Steps + Say`: a Say CLOSES
+    // its sub-turn, so the round after it opens a fresh ladder BELOW the
+    // Say. Replay must mirror the live pairing — GROUP / SAY / GROUP / SAY
+    // — and never hoist the later round's steps into the ladder above the
+    // first Say.
+    let mut user = Message::user("u1", "go");
+    user.synthetic = false;
+    let (a1, t1) = replay_tool_round("a1", "a", Some("first"));
+    let mut mid = Message::assistant("a2");
+    mid.blocks.push(ContentBlock::text("mid say"));
+    let (b1, t2) = replay_tool_round("b1", "b", Some("second"));
+    let mut fin = Message::assistant("b2");
+    fin.blocks.push(ContentBlock::text("final say"));
+    let chat = replay_messages("act", &[user, a1, t1, mid, b1, t2, fin]);
+
+    #[derive(Debug, PartialEq, Eq)]
+    enum Kind {
+        User,
+        Marker,
+        Group(Vec<String>),
+        Say(&'static str),
+        Other,
+    }
+    let order: Vec<Kind> = chat
+        .blocks
+        .iter()
+        .map(|block| match block {
+            ChatBlock::User { .. } => Kind::User,
+            ChatBlock::Marker(_) => Kind::Marker,
+            ChatBlock::StepGroup { steps, .. } => Kind::Group(
+                steps
+                    .iter()
+                    .flat_map(|step| step.calls.iter())
+                    .map(|call| call.id.clone())
+                    .collect(),
+            ),
+            ChatBlock::Assistant { raw, .. } => match raw.as_str() {
+                "mid say" => Kind::Say("mid say"),
+                "final say" => Kind::Say("final say"),
+                _ => Kind::Say("unexpected say"),
+            },
+            _ => Kind::Other,
+        })
+        .collect();
+    assert_eq!(
+        order,
+        [
+            Kind::User,
+            Kind::Marker,
+            Kind::Group(vec!["a".into()]),
+            Kind::Say("mid say"),
+            Kind::Group(vec!["b".into()]),
+            Kind::Say("final say"),
+        ],
+        "each ladder pairs with its own closing Say: {order:?}"
+    );
 }

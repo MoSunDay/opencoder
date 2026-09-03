@@ -7,6 +7,7 @@ mod compaction_state;
 mod image_render;
 mod line_accounting;
 mod plan_card;
+mod reconcile_repair;
 mod sidecar_fold;
 mod sidecar_stream_isolation;
 mod steer_echo;

@@ -61,27 +61,67 @@ describe('itemsFromTurns', () => {
     expect(items[1].content.say).toEqual([]);
   });
 
-  it('groups adjacent steps and Say into one assistant Turn item', () => {
+  it('ends the run at its Say: steps + presentation parts + Say are ONE assistant Turn item', () => {
     const steps = { kind: 'steps', role: 'assistant', progressActive: true, steps: [] };
+    // Image markers and empty texts are presentation — they ride inside the
+    // run and never close it; only the non-empty Say does.
+    const image = { kind: 'text', role: 'assistant', text: '[image]', image: true };
+    const empty = { kind: 'text', role: 'assistant', text: '' };
     const say = { kind: 'text', role: 'assistant', text: 'done' };
-    const items = itemsFromTurns([steps, say]);
+    const items = itemsFromTurns([steps, image, empty, say]);
     expect(items).toHaveLength(1);
     expect(items[0]).toMatchObject({ role: 'assistantTurn', key: 'assistant-turn:0' });
     expect(items[0].content.steps).toEqual([]);
-    expect(items[0].content.say).toEqual([say]);
+    expect(items[0].content.say).toEqual([image, empty, say]);
     expect(items[0].content.progressActive).toBe(false);
   });
 
-  it('merges multiple reducer step segments into one Turn step count', () => {
+  it('absorbs a mid-run sys status row: [steps, sys, say] stays ONE bubble', () => {
+    // rules/01 regression (SPA #6): a non-empty mid-run Status (the retry
+    // badge) used to land between the ladder and the Say, splitting the
+    // assistant Turn into two bubbles. sys rows are presentation — they ride
+    // inside the open run like image markers and empty texts.
+    const steps = { kind: 'steps', role: 'assistant', progressActive: true, steps: [{ thinking: 't', calls: [] }] };
+    const badge = { kind: 'sys', role: 'sys', text: 'retry 1/3' };
+    const say = { kind: 'text', role: 'assistant', text: 'done' };
+    const items = itemsFromTurns([steps, badge, say]);
+    expect(items).toHaveLength(1);
+    expect(items[0].role).toBe('assistantTurn');
+    expect(items[0].content.steps).toEqual(steps.steps);
+    expect(items[0].content.say).toEqual([badge, say]);
+  });
+
+  it('keeps a sys row WITHOUT an adjacent open run standalone', () => {
+    // A sys row before any assistant part (or after a Say closed the run)
+    // still renders as its own centered line — absorption only applies
+    // INSIDE an open run.
+    const sys = { kind: 'sys', role: 'sys', text: 'note' };
+    const say = { kind: 'text', role: 'assistant', text: 'hi' };
+    const items = itemsFromTurns([say, sys]);
+    expect(items.map((i) => i.role)).toEqual(['ai', 'sys']);
+  });
+
+  it('splits [steps, say, steps, say] into two assistant Turn items (one Say each)', () => {
     const a = { kind: 'steps', role: 'assistant', progressActive: false, steps: [{ thinking: 'a', calls: [] }] };
     const mid = { kind: 'text', role: 'assistant', text: 'working' };
-    const b = { kind: 'steps', role: 'assistant', progressActive: true, steps: [{ thinking: 'b', calls: [] }] };
+    const b = {
+      kind: 'steps', role: 'assistant', progressActive: true,
+      steps: [{ thinking: 'b', calls: [] }, { thinking: 'b2', calls: [] }],
+    };
     const done = { kind: 'text', role: 'assistant', text: 'done' };
     const items = itemsFromTurns([a, mid, b, done]);
-    expect(items).toHaveLength(1);
-    expect(items[0].content.steps).toEqual([...a.steps, ...b.steps]);
-    expect(items[0].content.say).toEqual([mid, done]);
+    expect(items).toHaveLength(2);
+    expect(items.map((i) => i.role)).toEqual(['assistantTurn', 'assistantTurn']);
+    // First bubble: its own steps count + its own trailing Say.
+    expect(items[0].key).toBe('assistant-turn:0');
+    expect(items[0].content.steps).toEqual(a.steps);
+    expect(items[0].content.say).toEqual([mid]);
     expect(items[0].content.progressActive).toBe(false);
+    // The Say CLOSED the first bubble — the next steps part opens a new one.
+    expect(items[1].key).toBe('assistant-turn:2');
+    expect(items[1].content.steps).toEqual([...b.steps]);
+    expect(items[1].content.say).toEqual([done]);
+    expect(items[1].content.progressActive).toBe(false); // its own Say settles it
   });
 
   it('maps an empty-text think turn and a failed tool turn unchanged', () => {

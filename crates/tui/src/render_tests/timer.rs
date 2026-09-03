@@ -28,7 +28,6 @@ fn render_body_with_tail(content: &str, tail_ms: u64, width: u16, height: u16) -
                 &mut Vec::new(),
                 &mut Vec::new(),
                 &mut Vec::new(),
-                &mut Vec::new(),
                 &mut None,
                 true,
                 tail_ms,
@@ -146,10 +145,10 @@ fn body_call_cost_timer_not_mixed_into_tool_output() {
         is_error: false,
         images: vec![],
     });
-    // Toggle the group twice (net closed): the group line is itself a
-    // content line that the renderer appends the timer to.
-    v.toggle_step_group_at(0);
-    v.toggle_step_group_at(0);
+    // Cycle a step open/closed (net closed): the group marker line is itself
+    // a content line that the renderer appends the timer to.
+    v.toggle_tool_call_at(0, 0);
+    v.toggle_tool_call_at(0, 0);
     v.apply(&SessionEvent::Done);
 
     let backend = TestBackend::new(60, 10);
@@ -169,7 +168,6 @@ fn body_call_cost_timer_not_mixed_into_tool_output() {
                 &mut None,
                 &mut None,
                 &mut None,
-                &mut Vec::new(),
                 &mut Vec::new(),
                 &mut Vec::new(),
                 &mut Vec::new(),
@@ -236,7 +234,6 @@ fn body_timer_visible_when_scrolled_away_from_tail() {
                 &mut None,
                 &mut None,
                 &mut None,
-                &mut Vec::new(),
                 &mut Vec::new(),
                 &mut Vec::new(),
                 &mut Vec::new(),

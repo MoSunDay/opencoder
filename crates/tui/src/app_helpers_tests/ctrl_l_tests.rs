@@ -106,14 +106,14 @@ fn ctrl_l_exits_subagent_and_returns_to_follow_mode() {
 }
 
 /// Ctrl+L resets every StepGroup (parent AND focused child) to the collapsed
-/// state — expanded groups/steps/call outputs are one keystroke away from the
-/// single count line.
+/// state — open steps and expanded call outputs are one keystroke away from
+/// the static marker + closed step rows.
 #[test]
 fn ctrl_l_resets_tool_groups_to_collapsed() {
     use opencoder_session::SessionEvent;
 
     let (mut chat, sub_idx) = chat_with_subagent();
-    // Give both views a finished tool group, open it, its step, and the call.
+    // Give both views a finished tool group, open its step and the call.
     chat.apply(&SessionEvent::ToolStart {
         id: "p".into(),
         name: "bash".into(),
@@ -139,20 +139,18 @@ fn ctrl_l_resets_tool_groups_to_collapsed() {
             is_error: false,
             images: Vec::new(),
         });
-        for h in view.tool_headers() {
-            view.toggle_step_group_at(h.block_idx);
-            if let ChatBlock::StepGroup { steps, .. } = &mut view.blocks[h.block_idx] {
+        for b in view.blocks.iter_mut() {
+            if let ChatBlock::StepGroup { steps } = b {
                 steps[0].open = true;
+                steps[0].calls[0].expanded = true;
             }
-            view.toggle_tool_call_at(h.block_idx, 1); // step's call -> expanded
         }
     }
-    for h in chat.tool_headers() {
-        chat.toggle_step_group_at(h.block_idx);
-        if let ChatBlock::StepGroup { steps, .. } = &mut chat.blocks[h.block_idx] {
+    for b in chat.blocks.iter_mut() {
+        if let ChatBlock::StepGroup { steps } = b {
             steps[0].open = true;
+            steps[0].calls[0].expanded = true;
         }
-        chat.toggle_tool_call_at(h.block_idx, 1); // step's call -> expanded
     }
 
     let mut subagent_focus = Some(sub_idx);
@@ -178,12 +176,9 @@ fn ctrl_l_resets_tool_groups_to_collapsed() {
 
     let all_collapsed = |v: &ChatView| {
         v.blocks.iter().all(|b| match b {
-            ChatBlock::StepGroup { steps, open } => {
-                !open
-                    && steps
-                        .iter()
-                        .all(|s| !s.open && s.calls.iter().all(|c| !c.expanded))
-            }
+            ChatBlock::StepGroup { steps } => steps
+                .iter()
+                .all(|s| !s.open && s.calls.iter().all(|c| !c.expanded)),
             _ => true,
         })
     };

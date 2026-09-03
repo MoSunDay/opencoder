@@ -68,6 +68,33 @@ describe('childLines / helpers (pure)', () => {
     expect(childLines({ events: [], usage: null })).toEqual([]);
   });
 
+  it('flattens a steps-shaped child event to one line per call (thinking skipped)', () => {
+    const lines = childLines({
+      events: [
+        {
+          kind: 'steps',
+          steps: [
+            { thinking: 'plan first', calls: [
+              { kind: 'tool', name: 'bash', output: null, isError: false },
+              { kind: 'tool', name: 'read', output: 'x', isError: true },
+            ] },
+            { thinking: '', calls: [
+              { kind: 'tool', name: 'grep', output: 'y', isError: false },
+            ] },
+          ],
+        },
+      ],
+      usage: null,
+    });
+    expect(lines).toEqual([
+      { key: 'tool:0:0', kind: 'tool', text: 'bash', isError: false },
+      { key: 'tool:0:1', kind: 'tool', text: 'read', isError: true },
+      { key: 'tool:0:2', kind: 'tool', text: 'grep', isError: false },
+    ]);
+    // Degenerate steps events tolerate missing arrays.
+    expect(childLines({ events: [{ kind: 'steps' }, { kind: 'steps', steps: null }], usage: null })).toEqual([]);
+  });
+
   it('maps statuses to tag colors and formats usage', () => {
     expect(statusColorOf('running')).toBe('processing');
     expect(statusColorOf('done')).toBe('success');

@@ -12,7 +12,7 @@ use ratatui::text::Line;
 
 use super::{ChatBlock, Step, ToolCall};
 
-/// One clickable row inside an open `StepGroup`: a step row (toggles the
+/// One clickable row inside a `StepGroup`: a step row (toggles the
 /// step) or a call header row (toggles that single call's output).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum StepTarget {
@@ -80,7 +80,6 @@ pub(crate) fn single_step_group(call: ToolCall, thinking: Vec<Line<'static>>) ->
             calls: vec![call],
             open: false,
         }],
-        open: false,
     }
 }
 
@@ -112,7 +111,7 @@ pub(crate) fn coalesce_steps(blocks: &mut Vec<ChatBlock>) {
     for block in blocks.drain(..) {
         match block {
             ChatBlock::Thinking { .. } => pending.push(block),
-            ChatBlock::StepGroup { mut steps, open } => {
+            ChatBlock::StepGroup { mut steps } => {
                 if !pending.is_empty() {
                     if let Some(first) = steps.first_mut() {
                         let mut absorbed = take_rendered_thinking(&mut pending);
@@ -124,7 +123,7 @@ pub(crate) fn coalesce_steps(blocks: &mut Vec<ChatBlock>) {
                 if !steps.is_empty() {
                     match out.last_mut() {
                         Some(ChatBlock::StepGroup { steps: prev, .. }) => prev.append(&mut steps),
-                        _ => out.push(ChatBlock::StepGroup { steps, open }),
+                        _ => out.push(ChatBlock::StepGroup { steps }),
                     }
                 }
                 out.append(&mut pending);

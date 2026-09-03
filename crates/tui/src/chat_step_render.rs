@@ -1,31 +1,29 @@
-//! Flattening for `ChatBlock::StepGroup` — the three-level tool ladder
-//! (group → step → single call output). Extracted from `chat.rs` for the
-//! line gate; `collect_headers` (chat_headers.rs) mirrors this line
-//! accounting exactly so hit-rects stay aligned with the live render.
+//! Flattening for `ChatBlock::StepGroup` — the two-level tool ladder
+//! (step → single call output) under a static `≡ N steps` marker.
+//! Extracted from `chat.rs` for the line gate; `collect_headers`
+//! (chat_headers.rs) mirrors this line accounting exactly so hit-rects stay
+//! aligned with the live render.
 
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
-use super::{theme, Step, ROLE_SAY_HEADER, SPINNER, STEP_ROW_CLOSED_PREFIX, STEP_ROW_OPEN_PREFIX};
+use super::{
+    theme, Step, SPINNER, STEP_ROW_CLOSED_PREFIX, STEP_ROW_OPEN_PREFIX, STEP_THINKING_HEADER,
+};
 
-/// Append one `StepGroup` block's lines to `out`. Ladder:
-/// group row (col 0) → per step: step row (indent 2) →, while the step is
-/// open, its `❯ Say:` thinking block (header indent 4, body indent 8) and
-/// each call's header row (indent 4) plus that call's output (indent 4) when
-/// individually expanded. Trailing blank only while the group is open, so a
-/// collapsed group costs exactly one line.
-pub(crate) fn flatten_step_group(
-    out: &mut Vec<Line<'static>>,
-    steps: &[Step],
-    open: bool,
-    anim_tick: u32,
-) {
+/// Append one `StepGroup` block's lines to `out`. Shape: a static marker row
+/// `≡ N steps` (col 0, never clickable/collapsible) + a live spinner hint
+/// while any call anywhere in the group is still running, then per step:
+/// the step row (indent 2) always renders; while the step is open, its
+/// `💭 Thinking` block (header indent 4, body indent 8) and each call's
+/// header row (indent 4) plus that call's output (indent 4) when
+/// individually expanded. One trailing blank line after the rows.
+pub(crate) fn flatten_step_group(out: &mut Vec<Line<'static>>, steps: &[Step], anim_tick: u32) {
     let n = steps.len();
-    // Group row: `▸ N steps` (arrow flips to ▾ once expanded) + a live
-    // spinner hint while any call anywhere in the group is still running.
-    let arrow = if open { "\u{25be}" } else { "\u{25b8}" };
+    // Static marker row: `≡ N steps` + a live spinner hint while any call
+    // anywhere in the group is still running.
     let mut spans = vec![Span::styled(
-        format!("{arrow} {n} step{}", if n == 1 { "" } else { "s" }),
+        format!("\u{2261} {n} step{}", if n == 1 { "" } else { "s" }),
         Style::default()
             .fg(theme::accent())
             .add_modifier(Modifier::BOLD),
@@ -37,9 +35,6 @@ pub(crate) fn flatten_step_group(
         ));
     }
     out.push(Line::from(spans));
-    if !open {
-        return;
-    }
     for (si, step) in steps.iter().enumerate() {
         let step_open = step.open;
         out.push(Line::from(vec![
@@ -66,9 +61,9 @@ pub(crate) fn flatten_step_group(
             out.push(Line::from(vec![
                 Span::raw("    "),
                 Span::styled(
-                    ROLE_SAY_HEADER,
+                    STEP_THINKING_HEADER,
                     Style::default()
-                        .fg(theme::ok_color())
+                        .fg(theme::pink())
                         .add_modifier(Modifier::BOLD),
                 ),
             ]));

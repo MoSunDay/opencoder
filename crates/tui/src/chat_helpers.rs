@@ -115,9 +115,9 @@ impl ChatView {
 /// Add bash-command helper methods to [`ChatView`].
 impl ChatView {
     /// Push a placeholder single-call `ChatBlock::StepGroup` for a `!cmd`
-    /// execution, fully expanded (group + step + output) so the user sees the
+    /// execution, fully expanded (step + output) so the user sees the
     /// command running with its output. Call [`finish_bash_tool`] to fill in
-    /// the output and collapse the group.
+    /// the output and collapse the step again.
     pub(crate) fn push_bash_tool(&mut self, cmd: &str) {
         use crate::theme;
         use ratatui::style::{Modifier, Style};
@@ -141,12 +141,11 @@ impl ChatView {
                 }],
                 open: true,
             }],
-            open: true,
         });
     }
 
     /// Fill the output of the most recent unfinished `bash-` tool call,
-    /// collapse its group, and record elapsed time.
+    /// collapse its step, and record elapsed time.
     pub(crate) fn finish_bash_tool(&mut self, output: &str) {
         use crate::chat::TOOL_OUTPUT_LINES;
         use crate::terminal_text::sanitize_multiline;
@@ -183,15 +182,16 @@ impl ChatView {
             }
         });
         if let Some((gi, si, ci)) = target {
-            if let crate::chat::ChatBlock::StepGroup { steps, open } = &mut self.blocks[gi] {
+            if let crate::chat::ChatBlock::StepGroup { steps } = &mut self.blocks[gi] {
                 let c = &mut steps[si].calls[ci];
                 c.output = out;
                 if let Some(started) = c.started_at_ms {
                     c.elapsed_ms = Some(((ts - started).max(0)) as u64);
                 }
                 // Equivalent of the old "collapse once finished": back to the
-                // single group line.
-                *open = false;
+                // static marker + closed step row.
+                c.expanded = false;
+                steps[si].open = false;
             }
         }
     }

@@ -2,7 +2,7 @@
 //!
 //! Replayed tool calls carry no wall-clock timing from the persisted
 //! `Message`s. They must be marked finished (`elapsed_ms: Some(0)`) so the
-//! group line shows neither a live timer nor the "running" spinner hint on
+//! group marker shows neither a live timer nor the "running" spinner hint on
 //! `--continue`/resume.
 
 use super::replay::replay_one;
@@ -11,7 +11,7 @@ use opencoder_core::{ContentBlock, Message, MessageUsage, Role};
 use std::collections::HashMap;
 
 /// Replaying an assistant ToolUse must mark the call done
-/// (`elapsed_ms: Some(0)`) so the group line shows no running hint.
+/// (`elapsed_ms: Some(0)`) so the group marker shows no running hint.
 #[test]
 fn replayed_tool_block_omits_duration_span() {
     let msg = Message {
@@ -61,7 +61,7 @@ fn replayed_tool_block_omits_duration_span() {
     let group_line: String = lines
         .iter()
         .find(|l| l.spans.iter().any(|s| s.content.contains("1 step")))
-        .expect("group line should be present")
+        .expect("group marker should be present")
         .spans
         .iter()
         .map(|s| s.content.as_ref())
@@ -69,7 +69,7 @@ fn replayed_tool_block_omits_duration_span() {
 
     assert!(
         !group_line.contains("running"),
-        "replayed group line must not show the running hint: {group_line}"
+        "replayed group marker must not show the running hint: {group_line}"
     );
     assert!(
         !group_line.contains(&garbage),

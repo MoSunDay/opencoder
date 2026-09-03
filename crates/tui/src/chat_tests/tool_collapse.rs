@@ -4,9 +4,9 @@
 //! calls (assistant text, image, marker) splits the run. Within a group a
 //! step is one assistant round: a call merges into the trailing step while
 //! that step holds no finished call, otherwise a NEW step opens (sequential
-//! calls split, parallel calls share a step). Default render is a single
-//! collapsed line carrying the step count; clicking the group row toggles
-//! the whole group; Ctrl+L collapses every group/step/call again.
+//! calls split, parallel calls share a step). Default render is a static
+//! `≡ N steps` marker with every step row listed below it; clicking a step
+//! row toggles that step; Ctrl+L collapses every step/call again.
 
 use super::super::*;
 
@@ -148,15 +148,20 @@ fn collapsed_by_default_renders_single_count_line() {
         });
     }
     let lines = flatten_text(&v);
-    assert_eq!(lines.len(), 1, "collapsed group renders exactly one line");
+    // Marker + both step rows + trailing blank.
+    assert_eq!(lines.len(), 4, "default render: marker + step rows + blank");
     assert!(
-        lines[0].contains("2 steps"),
-        "collapsed line carries the step count: {:?}",
+        lines[0].contains("\u{2261} 2 steps"),
+        "static marker carries the step count: {:?}",
         lines[0]
     );
-    // Collapsed hides all call headers and outputs.
-    assert!(!lines[0].contains("echo A"));
-    assert!(!lines[0].contains("A-out"));
+    assert!(
+        lines[1].contains("\u{25b8} Step(1)") && lines[2].contains("\u{25b8} Step(2)"),
+        "every step row renders by default: {lines:?}"
+    );
+    // Closed steps hide all call headers and outputs.
+    assert!(!lines.iter().any(|l| l.contains("echo a")));
+    assert!(!lines.iter().any(|l| l.contains("a-out")));
 
     // Singular grammar for a single-step group (two parallel calls = one
     // step).
@@ -174,12 +179,13 @@ fn collapsed_by_default_renders_single_count_line() {
         images: Vec::new(),
     });
     let solo = flatten_text(&v1);
-    assert_eq!(solo.len(), 1);
+    assert_eq!(solo.len(), 3, "marker + one step row + blank");
     assert!(
         solo[0].contains("1 step") && !solo[0].contains("steps"),
         "single step uses singular: {:?}",
         solo[0]
     );
+    assert!(solo[1].contains("Step(1)"));
 }
 
 #[test]
@@ -211,8 +217,8 @@ fn running_hint_in_group_line_while_call_unfinished() {
 
 #[test]
 fn toggling_steps_reveals_the_ladder() {
-    // Two sequential calls, no thinking. Collapsed = 1 line; group open =
-    // group row + 2 step rows + trailing blank = 4; a step opened adds its
+    // Two sequential calls, no thinking. Default = marker + 2 step rows +
+    // trailing blank = 4; a step opened adds its
     // call header = 5; the call expanded adds output + blank = 7.
     let mut v = ChatView::default();
     for id in ["a", "b"] {
@@ -229,14 +235,11 @@ fn toggling_steps_reveals_the_ladder() {
             images: Vec::new(),
         });
     }
-    assert_eq!(v.flatten().len(), 1, "collapsed");
-
-    v.toggle_step_group_at(0);
     let list = flatten_text(&v);
-    assert_eq!(list.len(), 4, "open = group row + 2 step rows + blank");
+    assert_eq!(list.len(), 4, "default = marker + 2 step rows + blank");
     assert!(
-        list[0].contains("\u{25be}"),
-        "expanded marker: {:?}",
+        list[0].contains("\u{2261} 2 steps"),
+        "static marker: {:?}",
         list[0]
     );
     assert!(
@@ -245,7 +248,7 @@ fn toggling_steps_reveals_the_ladder() {
     );
 
     // Open step 1: its row flips to the open glyph and its call header row
-    // appears (no thinking -> no Say row).
+    // appears (no thinking -> no Thinking row).
     v.toggle_tool_call_at(0, 0);
     let open_step = flatten_text(&v);
     assert_eq!(open_step.len(), 5);
@@ -270,19 +273,16 @@ fn toggling_steps_reveals_the_ladder() {
         expanded[3]
     );
 
-    // Re-toggling the step collapses it (and its rows) again.
+    // Re-toggling the step collapses it (and its rows) again; the static
+    // marker and every step row stay rendered.
     v.toggle_tool_call_at(0, 0);
     assert_eq!(v.flatten().len(), 4, "step closed removes its rows");
-
-    // Closing the group returns to the single count line.
-    v.toggle_step_group_at(0);
-    assert_eq!(v.flatten().len(), 1, "group closed -> one line");
+    let closed = flatten_text(&v);
     assert!(
-        matches!(
-            v.blocks.last(),
-            Some(ChatBlock::StepGroup { open: false, .. })
-        ),
-        "group must be closed after the round trip"
+        closed[0].contains("\u{2261} 2 steps")
+            && closed[1].contains("\u{25b8} Step(1)")
+            && closed[2].contains("\u{25b8} Step(2)"),
+        "marker + step rows persist: {closed:?}"
     );
 }
 
@@ -397,20 +397,6 @@ fn tool_end_error_colors_output_red() {
 }
 
 #[test]
-fn toggle_step_group_at_is_noop_for_non_tool_blocks() {
-    let mut v = ChatView::default();
-    v.apply(&SessionEvent::TextDelta("hello".into()));
-    v.apply(&SessionEvent::Done);
-    // Index 0 is an Assistant block, not a StepGroup — cycling must be a
-    // no-op.
-    v.toggle_step_group_at(0);
-    assert!(
-        block_text(&v).contains("hello"),
-        "non-tool cycle must not corrupt state"
-    );
-}
-
-#[test]
 fn collapse_all_collapsible_resets_groups_and_thinking() {
     let mut v = ChatView::default();
     v.apply(&SessionEvent::ReasoningDelta("reason".into()));
@@ -430,10 +416,11 @@ fn collapse_all_collapsible_resets_groups_and_thinking() {
     for h in v.thinking_headers() {
         v.toggle_thinking_at(h.block_idx);
     }
-    for h in v.tool_headers() {
-        v.toggle_step_group_at(h.block_idx);
-        v.toggle_tool_call_at(h.block_idx, 0); // step open
-        v.toggle_tool_call_at(h.block_idx, 1); // call output expanded
+    for b in v.blocks.iter_mut() {
+        if let ChatBlock::StepGroup { steps } = b {
+            steps[0].open = true;
+            steps[0].calls[0].expanded = true; // call output expanded
+        }
     }
     v.collapse_all_collapsible();
     for b in &v.blocks {
@@ -441,8 +428,7 @@ fn collapse_all_collapsible_resets_groups_and_thinking() {
             ChatBlock::Thinking { collapsed, .. } => {
                 assert!(*collapsed, "thinking must be collapsed");
             }
-            ChatBlock::StepGroup { steps, open } => {
-                assert!(!open, "group must be closed after Ctrl+L");
+            ChatBlock::StepGroup { steps } => {
                 assert!(
                     steps
                         .iter()
@@ -456,7 +442,7 @@ fn collapse_all_collapsible_resets_groups_and_thinking() {
 }
 
 #[test]
-fn tool_headers_line_index_lands_on_group_line() {
+fn step_row_line_index_lands_on_the_step_row() {
     let mut v = ChatView::default();
     v.apply(&SessionEvent::TextDelta("preamble\nsecond".into()));
     v.apply(&SessionEvent::Done);
@@ -465,8 +451,8 @@ fn tool_headers_line_index_lands_on_group_line() {
         name: "bash".into(),
         input: serde_json::json!({"command": "echo x"}),
     });
-    let headers = v.tool_headers();
-    assert_eq!(headers.len(), 1, "expected exactly one tool header");
+    let headers = v.tool_call_headers();
+    assert_eq!(headers.len(), 1, "expected exactly one step-row header");
     let flat = v.flatten();
     let header_line: String = flat[headers[0].header_line_idx]
         .spans
@@ -474,8 +460,8 @@ fn tool_headers_line_index_lands_on_group_line() {
         .map(|s| s.content.clone())
         .collect();
     assert!(
-        header_line.contains("1 step"),
-        "header_line_idx must land on the group line; got: {header_line:?}"
+        header_line.contains("Step(1)"),
+        "header_line_idx must land on the step row; got: {header_line:?}"
     );
 }
 

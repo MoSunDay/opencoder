@@ -32,12 +32,8 @@ pub(crate) struct MouseHits {
     pub thinking_btns: Vec<ThinkingBtn>,
     /// Clickable Subagent-block header rows; clicking toggles collapse.
     pub subagent_btns: Vec<SubagentBtn>,
-    /// Clickable StepGroup group rows; clicking toggles the whole group
-    /// open/closed. One entry per StepGroup block currently visible in the
-    /// body viewport.
-    pub tool_btns: Vec<ToolBtn>,
-    /// Clickable rows inside open `StepGroup` blocks — step rows and each
-    /// open step's call header rows, in render order; clicking toggles that
+    /// Clickable rows inside `StepGroup` blocks — step rows and each open
+    /// step's call header rows, in render order; clicking toggles that
     /// step, or that single call's output only.
     pub tool_call_btns: Vec<ToolCallBtn>,
     /// Clickable Compaction-block header rows; clicking toggles collapse.
@@ -59,13 +55,6 @@ pub(crate) struct ThinkingBtn {
 /// A clickable Subagent-block header.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct SubagentBtn {
-    pub block_idx: usize,
-    pub rect: Rect,
-}
-
-/// A clickable StepGroup group row (the `▸ N steps` line).
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct ToolBtn {
     pub block_idx: usize,
     pub rect: Rect,
 }
@@ -148,39 +137,6 @@ pub(super) fn record_subagent_hits(
     }
 }
 
-/// Populate `out` with one `ToolBtn` per Tool-block header line that is
-/// currently visible inside the body viewport. Mirrors `record_thinking_hits`.
-#[allow(clippy::too_many_arguments)]
-pub(super) fn record_tool_hits(
-    chat: &ChatView,
-    cache: &ViewportCache,
-    text_w: u16,
-    scroll_y: usize,
-    visible_h: usize,
-    x: u16,
-    y0: u16,
-    out: &mut Vec<ToolBtn>,
-) {
-    let headers = chat.tool_headers();
-    if headers.is_empty() || visible_h == 0 || text_w == 0 || cache.total_rows() == 0 {
-        return;
-    }
-    let viewport_bottom = scroll_y + visible_h;
-    for h in headers {
-        let header_row = cache.row_of_line(h.header_line_idx);
-        if header_row >= viewport_bottom {
-            break;
-        }
-        if header_row >= scroll_y {
-            let screen_y = y0.saturating_add((header_row - scroll_y) as u16);
-            out.push(ToolBtn {
-                block_idx: h.block_idx,
-                rect: Rect::new(x, screen_y, text_w, 1),
-            });
-        }
-    }
-}
-
 /// A clickable Compaction-block header. Mirrors `ThinkingBtn`; clicking
 /// toggles the block's collapse state.
 #[derive(Clone, Copy, Debug)]
@@ -224,9 +180,9 @@ pub(super) fn record_compaction_hits(
 }
 
 /// Populate `out` with one `ToolCallBtn` per clickable row (step rows + call
-/// header rows) that is currently visible inside the body viewport. Only
-/// open groups emit these rows (a closed group renders only its group row),
-/// mirroring `record_tool_hits` over `tool_call_headers`.
+/// header rows) that is currently visible inside the body viewport. Step
+/// rows always render under the static group marker; open steps additionally
+/// emit their call header rows.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn record_tool_call_hits(
     chat: &ChatView,

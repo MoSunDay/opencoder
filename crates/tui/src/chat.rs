@@ -263,6 +263,10 @@ impl ChatView {
                 self.subagents_running = self.subagents_running.saturating_add(1);
                 self.subagents_total = self.subagents_total.saturating_add(1);
                 self.finalize_assistant();
+                // The task-tool round streams no absorbable ToolStart; flush
+                // its pending Thinking BEFORE the hidden-index lookup below so
+                // the computed index already accounts for a possible insert.
+                self.flush_pending_thinking();
                 // On the SECOND concurrent subagent, begin withholding the
                 // parent's preamble assistant text (issue #5). It renders zero
                 // lines until every sibling finishes, then reappears in one shot.
@@ -332,6 +336,10 @@ impl ChatView {
                 self.hidden_assistant_idx = None;
                 self.reconcile_orphaned_subagents();
                 self.finalize_assistant();
+                // A round with no tool call (pure-text turn, or the turn's
+                // final Say round) folds its pending Thinking into a call-less
+                // step — thinking never survives outside the ladder.
+                self.flush_pending_thinking();
                 self.blocks.push(ChatBlock::Marker(vec![Line::from("")]));
             }
             SessionEvent::Error(e) => {
@@ -341,6 +349,7 @@ impl ChatView {
                 self.hidden_assistant_idx = None;
                 self.reconcile_orphaned_subagents();
                 self.finalize_assistant();
+                self.flush_pending_thinking();
                 self.blocks
                     .push(ChatBlock::Marker(vec![Line::from(Span::styled(
                         format!("error: {}", sanitize_single_line(e)),
@@ -373,6 +382,10 @@ impl ChatView {
                     .map(|d| sanitize_multiline(&d).into_owned())
                     .unwrap_or_default();
                 if !display.is_empty() {
+                    // Segment boundary: the pre-boundary pending Thinking can
+                    // never be absorbed by a later ToolStart (the walk stops
+                    // here) — fold it into the ladder before the echo lands.
+                    self.flush_pending_thinking();
                     self.blocks.push(ChatBlock::User {
                         rendered: crate::markdown::render(&display),
                     });
@@ -423,6 +436,7 @@ impl ChatView {
     /// assistant block instead of merging into a prior one.
     pub fn push_marker(&mut self, line: Line<'static>) {
         self.finalize_assistant();
+        self.flush_pending_thinking();
         self.blocks
             .push(ChatBlock::Marker(vec![sanitize_line(line)]));
     }
@@ -432,6 +446,7 @@ impl ChatView {
     /// commands (e.g. `/ps`) whose multi-line echo never reaches the model.
     pub fn push_marker_lines(&mut self, lines: Vec<Line<'static>>) {
         self.finalize_assistant();
+        self.flush_pending_thinking();
         self.blocks.push(ChatBlock::Marker(
             lines.into_iter().map(sanitize_line).collect(),
         ));

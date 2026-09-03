@@ -56,6 +56,20 @@ impl ChatView {
         }
     }
 
+    /// Fold any pending Thinking run into the step ladder (see
+    /// `steps::flush_pending_thinking`) and keep `hidden_assistant_idx`
+    /// pointing at the same block when the flush inserts a group at or
+    /// before it. No-op without pending thinking.
+    pub(crate) fn flush_pending_thinking(&mut self) {
+        if let Some(at) = super::steps::flush_pending_thinking(&mut self.blocks) {
+            if let Some(h) = self.hidden_assistant_idx {
+                if h >= at {
+                    self.hidden_assistant_idx = Some(h + 1);
+                }
+            }
+        }
+    }
+
     /// Finalize the current round's trailing Thinking/Assistant group.
     /// Idempotence comes from the per-block `sealed` and `done` flags.
     pub fn finalize_assistant(&mut self) {

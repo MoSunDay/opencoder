@@ -13,6 +13,12 @@
 // stable signal). Every response ends with a finish_reason frame (a missing
 // one makes the client treat the stream as Truncated and retry) and the
 // final text round carries usage {10,5,15}.
+// A client that dies mid-stream is LOGGED (client_gone_before_finish /
+// stream_write_error / res_error): Node silently discards writes to an
+// aborted response, so the observable mock-side signal is res 'close' firing
+// before the plan's frames completed. The stream then ends without a
+// finish_reason frame -> the client reports Truncated; both sides stay
+// diagnosable instead of the failure being masked as a clean stop.
 //   no tools                      -> short text "mock title" (title gen etc.)
 //   last=tool   + STEER-B         -> Say "Steer-B handled."      (4x300ms)
 //   last=tool   + STEER-A only    -> Say "Initial findings are in." (8x700ms)
@@ -196,6 +202,11 @@ function handle(req, res) {
       'cache-control': 'no-cache',
       connection: 'keep-alive',
     });
+    res.on('error', (e) => logLine({ event: 'res_error', error: (e && e.message) || String(e) }));
+    let finished = false;
+    res.on('close', () => { // also fires after a normal end: only the cut-short case logs
+      if (!finished) logLine({ event: 'client_gone_before_finish', plan: plan.tag });
+    });
     try {
       if (plan.kind === 'tool') {
         callSeq += 1;
@@ -205,7 +216,13 @@ function handle(req, res) {
       } else {
         await writeSay(res, plan.text, plan.chunks, plan.delay || 0);
       }
-    } catch {}
+    } catch (e) {
+      // Recorded, not swallowed: the stream below still ends with [DONE] but
+      // NO finish_reason frame, so the client sees Truncated — both sides stay
+      // observable instead of the failure being masked as a clean stop.
+      logLine({ event: 'stream_write_error', error: (e && e.message) || String(e) });
+    }
+    finished = true;
     res.end('data: [DONE]\n\n');
   });
 }

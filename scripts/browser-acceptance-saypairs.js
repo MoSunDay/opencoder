@@ -10,7 +10,8 @@
 // self-signs every request; node-side setup/queries reuse the same HMAC.
 // Scenarios: (a) 多回合交替 + 12px 间距 (b) /act_clear_context 在途回显
 // (c) steer 拆梯. Env: SHOTS (default /tmp/uitest/shots-saypairs), CHROME_PATH,
-// KEEP=1 keeps the temp workdir. Exit 0 iff every step PASSes.
+// KEEP=1 keeps the temp workdir. Exit 0 iff every step PASSes and the
+// browser console stayed clean (pageerror/console.error).
 //
 // Browser reality (documented deviation): @ant-design/x Sender refuses
 // onSubmit while `loading` (Sender.js triggerSend `!loading`), so Enter cannot
@@ -39,6 +40,7 @@ const ECHO_B = 'STEER-B 场景c 转向';
 const results = [];
 const consoleErrors = [];
 let apiPromptPosts = 0; // POSTs to /prompt issued by the BROWSER (Enter path)
+let snapshotFetches = 0; // browser GET /api/sessions/:id (reloadAfterDone / reset rebuild)
 let page;
 let mockChild = null;
 let daemonChild = null;
@@ -208,6 +210,23 @@ async function waitDraining(signed, want, timeoutMs) {
     await sleep(300);
   }
 } // GET /api/sessions/:id .draining is the run-liveness probe
+// Deterministic done-settle: instead of a fixed sleep, wait for the store-
+// snapshot refetch the SPA issues on done (reloadAfterDone GET
+// /api/sessions/:id), then let two rAFs flush the React rebuild.
+async function doneRebuild(signed, timeoutMs) {
+  // Deterministic ONLY under an anchor that beats the reload: callers gate on
+  // waitText of the FINAL Say chunk, and the mock's writeSay sleeps `delay`
+  // (>=300ms) AFTER the last chunk, so the 200ms waitText poll always observes
+  // the text before the stop frame -> done -> reload can race the base.
+  const base = snapshotFetches;
+  await waitDraining(signed, false, timeoutMs);
+  const deadline = Date.now() + timeoutMs;
+  while (snapshotFetches <= base) {
+    if (Date.now() > deadline) throw new Error(`snapshot refetch not seen after done (${snapshotFetches}<=${base})`);
+    await sleep(150);
+  }
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+} // done => draining=false AND a fresh snapshot GET has rebuilt the DOM
 
 const waitText = (text, timeoutMs) => page.waitForFunction(
   (t) => document.body.innerText.includes(t), text, { timeout: timeoutMs, polling: 200 });
@@ -224,6 +243,20 @@ const waitUserEcho = async (exactText, timeoutMs) => {
 const waitAnyRunningTag = (timeoutMs) => page.waitForFunction(
   () => [...document.querySelectorAll('.ant-bubble-list .ant-bubble .ant-tag')].some((t) => t.textContent.trim() === 'running'),
   undefined, { timeout: timeoutMs, polling: 150 });
+// b2's deterministic done-settle (the assertions below re-check it one-shot):
+// echo visible exactly once, as the LAST bubble, no running tag, and the
+// Sender's loading button gone (busy released by the done terminal frame).
+const waitEchoSettledLast = (text, timeoutMs) => page.waitForFunction((t) => {
+  const bubbles = [...document.querySelectorAll('.ant-bubble-list .ant-bubble')];
+  const last = bubbles[bubbles.length - 1];
+  const once = bubbles.filter((b) => (b.innerText || '').includes(t)).length === 1;
+  const running = [...document.querySelectorAll('.ant-bubble-list .ant-bubble .ant-tag')]
+    .some((x) => x.textContent.trim() === 'running');
+  const loading = document.querySelector('.ant-sender-actions-btn-loading-button') !== null;
+  const norm = (b) => (b.innerText || '').replace(/^❯\s*/, '').trim();
+  return bubbles.length > 0 && once && !running && !loading && !!last
+    && last.classList.contains('ant-bubble-end') && norm(last) === t;
+}, text, { timeout: timeoutMs, polling: 200 });
 
 async function steer(signed, text) { // same delivery the SPA uses for steers
   const r = await signed('POST', `/api/sessions/${sessionId}/prompt`, { prompt: text, delivery: 'steer' });
@@ -242,6 +275,7 @@ async function steer(signed, text) { // same delivery the SPA uses for steers
   }, null, 2) + '\n');
   log(`workdir=${workdir} mock=:${mockPort} daemon=:${daemonPort}`);
 
+  try { // startup inside try: launch failures must still run the finally teardown
   await startMock(mockPort);
   await startDaemon(daemonPort, workdir);
   browser = await chromium.launch({
@@ -258,8 +292,8 @@ async function steer(signed, text) { // same delivery the SPA uses for steers
       try { const j = await r.json(); if (j && j.id) sessionId = j.id; } catch {}
     }
     if (url.includes('/prompt') && m === 'POST') apiPromptPosts += 1;
+    if (m === 'GET' && /\/api\/sessions\/[^/?]+$/.test(url)) snapshotFetches += 1;
   });
-  try {
     await step('00_bootstrap_auth_seed', async () => {
       await page.addInitScript((t) => localStorage.setItem('oc_token', t), TOKEN);
       await page.goto(BASE + '/', { waitUntil: 'domcontentloaded', timeout: 30000 });
@@ -278,8 +312,7 @@ async function steer(signed, text) { // same delivery the SPA uses for steers
       assert(b.header === '❯ 1 Step', `ladder1 header=${b.header}, want ❯ 1 Step`);
       await shot('a1-running-tag');
       await waitText('Say-第一回合-done', 20000);
-      await waitDraining(signed, false, 20000);
-      await sleep(400); // done -> store-snapshot reload
+      await doneRebuild(signed, 20000);
     });
     await step('a2_turn1_frozen_ladder_say8px_drill', async () => {
       const b = await bubbleInfo({ type: 'ladder', v: 0 });
@@ -297,8 +330,7 @@ async function steer(signed, text) { // same delivery the SPA uses for steers
       await submit('第二回合 继续执行');
       await waitAnyRunningTag(20000);
       await waitText('Say-第二回合-done', 20000);
-      await waitDraining(signed, false, 20000);
-      await sleep(400);
+      await doneRebuild(signed, 20000);
       const l1 = await bubbleInfo({ type: 'ladder', v: 0 });
       const l2 = await bubbleInfo({ type: 'ladder', v: 1 });
       assert(l2 && l2.header === '❯ 1 Step', `ladder2 missing/header wrong: ${JSON.stringify(l2)}`);
@@ -330,8 +362,14 @@ async function steer(signed, text) { // same delivery the SPA uses for steers
       await shot('b1-echo-landed');
     });
     await step('b2_echo_survives_reset_once_last', async () => {
+      // The final Say is EMPTY — no waitText anchor, and the whole done tail
+      // (echo -> reset -> done -> reload, ~50ms on the mock) can fit inside
+      // waitUserEcho's 150ms poll interval, so a fetch-count base captured
+      // after b1 may already include the done reload. Poll the end-state
+      // contract itself instead: echo exactly once, as the last bubble, no
+      // running tag, composer released.
       await waitDraining(signed, false, 20000);
-      await sleep(500); // transcript_reset -> snapshot refetch -> done reload
+      await waitEchoSettledLast('收尾总结', 20000);
       const echo = await bubbleInfo({ type: 'containsEnd', v: '收尾总结' });
       assert(echo && echo.text.replace(/^❯\s*/, '') === '收尾总结', `echo must be EXACTLY the tail: ${JSON.stringify(echo)}`);
       assert(await countContains('收尾总结') === 1, 'echo duplicated across bubbles');
@@ -368,8 +406,7 @@ async function steer(signed, text) { // same delivery the SPA uses for steers
       const b = await bubbleInfo({ type: 'ladderBelow', v: ECHO_B });
       assert(b && b.running, 'ladder-B running tag missing during its tool round');
       await waitText('Steer-B handled.', 20000);
-      await waitDraining(signed, false, 20000);
-      await sleep(500); // done -> reloadAfterDone rebuilds from the store snapshot
+      await doneRebuild(signed, 20000);
       const bDone = await bubbleInfo({ type: 'ladderBelow', v: ECHO_B });
       assert(!bDone.running && bDone.says.length === 1 && bDone.says[0].text === 'Steer-B handled.'
         && bDone.says[0].marginTop === '8px', `ladder-B final: ${JSON.stringify(bDone)}`);
@@ -382,13 +419,14 @@ async function steer(signed, text) { // same delivery the SPA uses for steers
       await isBelow({ type: 'containsEnd', v: ECHO_B }, { type: 'ladderBelow', v: ECHO_B });
       await shot('c3-final-split-state');
     });
-    process.exitCode = results.every((r) => r.startsWith('PASS')) ? 0 : 1;
+    if (consoleErrors.length) log('WARN: browser console errors: ' + JSON.stringify(consoleErrors));
+    process.exitCode = results.every((r) => r.startsWith('PASS')) && consoleErrors.length === 0 ? 0 : 1;
   } catch (e) {
     log('ABORT: ' + e.message.split('\n')[0]);
     process.exitCode = 1;
   } finally {
     console.log('SUMMARY ' + JSON.stringify({ sessionId, mockPort, daemonPort, results, consoleErrors }, null, 2));
-    await browser.close().catch(() => {});
+    if (browser) await browser.close().catch(() => {}); // null when startup failed early
     killTree(daemonChild);
     killTree(mockChild);
     if (!process.env.KEEP) {

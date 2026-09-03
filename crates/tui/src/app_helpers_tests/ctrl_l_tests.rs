@@ -152,8 +152,11 @@ fn ctrl_l_resets_tool_groups_to_collapsed() {
         if let ChatBlock::StepGroup { steps, open, .. } = b {
             *open = true;
             steps[0].open = true;
-            steps[0].calls_open = true;
-            steps[0].calls[0].expanded = true;
+            // A flushed thinking-only step (no calls) has no call levels.
+            if !steps[0].calls.is_empty() {
+                steps[0].calls_open = true;
+                steps[0].calls[0].expanded = true;
+            }
         }
     }
 

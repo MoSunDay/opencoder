@@ -341,14 +341,16 @@ describe('steps ladder (live, mirror of chat_steps.rs)', () => {
     expect(s.turns[1].steps[0].thinking).toBe('first second');
   });
 
-  it('(c3) user and sys boundaries stop the absorption — thinking before them stays top-level', () => {
-    // Steer/queue echo is a user turn: a hard segment boundary.
+  it('(c3) user and sys boundaries fold the pre-boundary think run into a call-less step', () => {
+    // Steer/queue echo is a user turn: a hard segment boundary. The
+    // pre-boundary think run folds right there — segment attribution is
+    // preserved (it stays before the echo), just inside the ladder.
     let s = emptyStream();
     s = reduceFrame(s, { event: 'reasoning_delta', data: { text: 'old segment' } }, 1);
     s = reduceFrame(s, { event: 'queue_consumed', data: { text: 'steered' } }, 2);
     s = reduceFrame(s, { event: 'tool_start', data: { id: 'a', name: 'bash', input: {} } }, 3);
-    expect(s.turns.map((x) => x.kind)).toEqual(['think', 'text', 'steps']);
-    expect(s.turns[0]).toMatchObject({ kind: 'think', text: 'old segment' });
+    expect(s.turns.map((x) => x.kind)).toEqual(['steps', 'text', 'steps']);
+    expect(s.turns[0].steps[0]).toMatchObject({ thinking: 'old segment', calls: [] });
     expect(s.turns[1]).toMatchObject({ kind: 'text', role: 'user', text: 'steered' });
     expect(s.turns[2].steps[0].thinking).toBe('');
     // sys markers (status/compaction) are boundaries too.
@@ -356,17 +358,19 @@ describe('steps ladder (live, mirror of chat_steps.rs)', () => {
     t = reduceFrame(t, { event: 'reasoning_delta', data: { text: 'pre-marker' } }, 1);
     t = reduceFrame(t, { event: 'status', data: { status: 'thinking' } }, 2);
     t = reduceFrame(t, { event: 'tool_start', data: { id: 'a', name: 'bash', input: {} } }, 3);
-    expect(t.turns.map((x) => x.kind)).toEqual(['think', 'sys', 'steps']);
+    expect(t.turns.map((x) => x.kind)).toEqual(['steps', 'sys', 'steps']);
+    expect(t.turns[0].steps[0]).toMatchObject({ thinking: 'pre-marker', calls: [] });
     expect(t.turns[2].steps[0].thinking).toBe('');
   });
 
-  it('(c4) a pure-text round (no tool call ever) keeps its top-level think turn', () => {
+  it('(c4) a pure-text round (no tool call ever) folds its think run into a call-less step at done', () => {
     let s = emptyStream();
     s = reduceFrame(s, { event: 'reasoning_delta', data: { text: 'ponder' } }, 1);
     s = reduceFrame(s, { event: 'text_delta', data: { text: 'final answer' } }, 2);
     s = reduceFrame(s, { event: 'done', data: {} }, 3);
-    expect(s.turns.map((x) => x.kind)).toEqual(['think', 'text']);
-    expect(s.turns[0]).toMatchObject({ kind: 'think', text: 'ponder' });
+    expect(s.turns.map((x) => x.kind)).toEqual(['steps', 'text']);
+    expect(s.turns[0].steps[0]).toMatchObject({ thinking: 'ponder', calls: [] });
+    expect(s.turns[1]).toMatchObject({ kind: 'text', text: 'final answer' });
   });
 
   it('(d) Say between two rounds opens a NEW steps turn (Say stays top-level)', () => {
@@ -483,13 +487,13 @@ describe('steps ladder (snapshot, message-pair semantics)', () => {
     expect(turns[1].steps[0].thinking).toBe('hmm');
   });
 
-  it('(l) reasoning + text with NO tool after keeps the standalone think turn', () => {
+  it('(l) reasoning + text with NO tool after folds the think run into a call-less step', () => {
     const turns = turnsFromMessages([
       { role: 'user', blocks: [{ kind: 'text', text: 'q' }] },
       { role: 'assistant', blocks: [{ kind: 'reasoning', text: 'final thought' }, { kind: 'text', text: 'done' }] },
     ]);
-    expect(turns.map((t) => t.kind)).toEqual(['text', 'think', 'text']);
-    expect(turns[1]).toMatchObject({ kind: 'think', text: 'final thought' });
+    expect(turns.map((t) => t.kind)).toEqual(['text', 'steps', 'text']);
+    expect(turns[1].steps[0]).toMatchObject({ thinking: 'final thought', calls: [] });
   });
 
   it('(m) a user boundary stops the fold — reasoning belongs to the PREVIOUS segment', () => {
@@ -498,16 +502,20 @@ describe('steps ladder (snapshot, message-pair semantics)', () => {
       { role: 'user', blocks: [{ kind: 'text', text: 'q2' }] },
       { role: 'assistant', blocks: [{ kind: 'tool_use', id: 'z', name: 'bash', input: {} }] },
     ]);
-    expect(turns.map((t) => t.kind)).toEqual(['think', 'text', 'text', 'steps']);
-    expect(turns[0]).toMatchObject({ kind: 'think', text: 'a1' });
+    expect(turns.map((t) => t.kind)).toEqual(['steps', 'text', 'text', 'steps']);
+    // The reasoning stays BEFORE the user boundary (previous segment) — now
+    // inside a call-less step instead of a bare think turn.
+    expect(turns[0].steps[0]).toMatchObject({ thinking: 'a1', calls: [] });
     expect(turns[3].steps[0].thinking).toBe('');
   });
 
-  it('flushes trailing pending reasoning standalone at the end of the walk', () => {
+  it('folds trailing pending reasoning into a call-less step at the end of the walk', () => {
     const turns = turnsFromMessages([
       { role: 'assistant', blocks: [{ kind: 'reasoning', text: 'dangling thought' }] },
     ]);
-    expect(turns).toEqual([{ kind: 'think', role: 'assistant', text: 'dangling thought' }]);
+    expect(turns).toEqual([
+      { kind: 'steps', role: 'assistant', steps: [{ thinking: 'dangling thought', calls: [] }] },
+    ]);
   });
 });
 

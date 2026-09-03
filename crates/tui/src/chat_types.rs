@@ -207,12 +207,6 @@ pub struct ChatView {
     /// child subagent tokens, which live on the child ChatView). Used to
     /// show context stats when viewing a subagent's perspective.
     pub context_used: u64,
-    /// Index of the parent's assistant block whose content is withheld while
-    /// MULTIPLE subagents are in flight (see issue #5). The block renders zero
-    /// lines in `flatten_with` and is excluded from header line-accounting so
-    /// hit-rects stay aligned. Cleared once all subagents finish (the content
-    /// then appears in one shot).
-    pub hidden_assistant_idx: Option<usize>,
     /// Explicitly saved annotation text (from /annotation editor).
     pub annotation_text: Option<String>,
     /// First non-empty, non-slash user prompt — used to prefill the

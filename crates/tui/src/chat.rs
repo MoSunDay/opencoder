@@ -7,8 +7,7 @@ use crate::theme;
 use opencoder_session::SessionEvent;
 
 // Test modules under `chat_tests/` glob-import this scope and use `estimate`
-// in token-accounting assertions (it previously lived here for
-// `track_context`, now in `chat_context.rs`).
+// in token-accounting assertions.
 #[cfg(test)]
 use opencoder_llm::estimate;
 
@@ -136,15 +135,7 @@ impl ChatView {
                 // ONE canonical group; Say and presentation blocks are not
                 // structural boundaries. Calls keep accumulating in the
                 // current Step until a later Thinking run opens the next.
-                if let Some(at) =
-                    steps::merge_turn_call(&mut self.blocks, self.turn_block_start, thinking, call)
-                {
-                    if let Some(h) = self.hidden_assistant_idx {
-                        if h >= at {
-                            self.hidden_assistant_idx = Some(h + 1);
-                        }
-                    }
-                }
+                steps::merge_turn_call(&mut self.blocks, self.turn_block_start, thinking, call);
                 steps::set_turn_progress(&mut self.blocks, self.turn_block_start, true);
             }
             SessionEvent::ToolEnd {
@@ -216,18 +207,12 @@ impl ChatView {
                             elapsed_ms: Some(0),
                             expanded: false,
                         };
-                        if let Some(at) = steps::merge_turn_call(
+                        steps::merge_turn_call(
                             &mut self.blocks,
                             self.turn_block_start,
                             Vec::new(),
                             call,
-                        ) {
-                            if let Some(h) = self.hidden_assistant_idx {
-                                if h >= at {
-                                    self.hidden_assistant_idx = Some(h + 1);
-                                }
-                            }
-                        }
+                        );
                     }
                 }
                 // Render tool-returned images inline after the text output.
@@ -273,22 +258,9 @@ impl ChatView {
                 self.subagents_running = self.subagents_running.saturating_add(1);
                 self.subagents_total = self.subagents_total.saturating_add(1);
                 self.finalize_assistant();
-                // The task-tool round streams no absorbable ToolStart; flush
-                // its pending Thinking BEFORE the hidden-index lookup below so
-                // the computed index already accounts for a possible insert.
+                // The task-tool round streams no absorbable ToolStart: flush
+                // its pending Thinking into the ladder (never outside it).
                 self.flush_pending_thinking();
-                // On the SECOND concurrent subagent, begin withholding the
-                // parent's preamble assistant text (issue #5). It renders zero
-                // lines until every sibling finishes, then reappears in one shot.
-                if self.subagents_running == 2 && self.hidden_assistant_idx.is_none() {
-                    self.hidden_assistant_idx = self
-                        .blocks
-                        .iter()
-                        .enumerate()
-                        .rev()
-                        .find(|(_, b)| matches!(b, ChatBlock::Assistant { .. }))
-                        .map(|(i, _)| i);
-                }
                 self.blocks.push(ChatBlock::Subagent {
                     id: id.clone(),
                     child_session_id: child_session_id.clone(),
@@ -335,15 +307,11 @@ impl ChatView {
                 // Mark done immediately — each subagent's status/summary should
                 // surface as soon as it finishes, not be buffered behind siblings.
                 self.mark_subagent_done(id, *ok, *cancelled, summary);
-                if self.subagents_running == 0 {
-                    self.hidden_assistant_idx = None;
-                }
             }
             SessionEvent::Done => {
                 self.llm_round_started_at_ms = None;
                 self.frozen_round_ms = None;
                 self.subagents_running = 0;
-                self.hidden_assistant_idx = None;
                 // Turn complete: its echo must never resurface on a later
                 // rebuild (a bare `/act_clear_context` mid-run would
                 // otherwise resurrect the previous turn's prompt).
@@ -361,7 +329,6 @@ impl ChatView {
                 self.llm_round_started_at_ms = None;
                 self.frozen_round_ms = None;
                 self.subagents_running = 0;
-                self.hidden_assistant_idx = None;
                 self.pending_turn_echo = None;
                 self.reconcile_orphaned_subagents();
                 self.finalize_assistant();
@@ -584,7 +551,7 @@ impl ChatView {
     /// so hit-rects and selection math stay aligned with the live render.
     pub fn flatten_with(&self, anim_tick: u32, now_ms: i64) -> Vec<Line<'static>> {
         let mut out = Vec::with_capacity(self.blocks.len() * 2);
-        for (block_idx, block) in self.blocks.iter().enumerate() {
+        for block in self.blocks.iter() {
             match block {
                 ChatBlock::Marker(lines) => out.extend(lines.iter().cloned()),
                 ChatBlock::User { rendered } => {
@@ -601,13 +568,7 @@ impl ChatView {
                     rendered,
                     done,
                 } => {
-                    // Withheld while multiple subagents run (issue #5): render
-                    // zero lines so hit-rect/selection indices stay aligned.
-                    if self.is_withheld(block_idx) {
-                        continue;
-                    }
-                    // Visual header so assistant output has its own labelled region,
-                    // mirroring the `user:` marker on user prompts.
+                    // Visual `say:` header — mirrors the `user:` marker on prompts.
                     out.push(Line::from(Span::styled(
                         ROLE_SAY_HEADER,
                         Style::default()
@@ -618,12 +579,10 @@ impl ChatView {
                     if *done {
                         out.extend(types::indented(rendered, 4));
                     } else {
-                        // Mirrors `flush_code` (markdown.rs): split the raw
-                        // stream on `\n` and drop only the single trailing
-                        // empty element produced by a terminating newline, so
-                        // it does not render as an extra blank body line.
-                        // Interior blank lines are preserved. Shared with
-                        // `collect_headers` so the two can never diverge.
+                        // Mirrors `flush_code` (markdown.rs) and
+                        // `collect_headers`: split the raw stream on `\n` and
+                        // drop only the single trailing empty element from a
+                        // terminating newline (interior blanks preserved).
                         let rows = assistant_rows(raw);
                         for l in rows {
                             let l = l.strip_suffix('\r').unwrap_or(l);
@@ -773,15 +732,6 @@ impl ChatView {
     /// scroll-counting, tests). Line counts match `flatten_with` exactly.
     pub fn flatten(&self) -> Vec<Line<'static>> {
         self.flatten_with(0, opencoder_core::message::now_ms())
-    }
-
-    /// Whether the block at `idx` is currently withheld from the rendered
-    /// output — the parent's preamble assistant block while MULTIPLE
-    /// subagents are in flight (issue #5). `flatten_with` and both header
-    /// line-accounting functions consult this so hit-rects stay aligned with
-    /// what's on screen.
-    fn is_withheld(&self, idx: usize) -> bool {
-        self.hidden_assistant_idx == Some(idx) && self.subagents_running >= 1
     }
 
     /// Mark the subagent block matching `id` as done. If no block exists

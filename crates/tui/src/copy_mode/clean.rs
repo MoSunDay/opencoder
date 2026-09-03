@@ -14,8 +14,8 @@
 use ratatui::text::{Line, Span};
 
 use crate::chat::{
-    PLAN_HEADER, ROLE_SAY_HEADER, ROLE_USER_HEADER, STEP_ROW_CLOSED_PREFIX, STEP_ROW_OPEN_PREFIX,
-    STEP_THINKING_HEADER,
+    GROUP_ROW_CLOSED_PREFIX, GROUP_ROW_OPEN_PREFIX, PLAN_HEADER, ROLE_SAY_HEADER, ROLE_USER_HEADER,
+    STEP_ROW_CLOSED_PREFIX, STEP_ROW_OPEN_PREFIX, STEP_THINKING_HEADER,
 };
 use crate::markdown::{
     CODE_BOTTOM, CODE_ROW_EMPTY, CODE_ROW_PREFIX, CODE_TOP_PREFIX, QUOTE_PREFIX, RULE_LINE,
@@ -42,9 +42,12 @@ pub(crate) enum LineKind {
     PlanHeader,
     /// `❯ Step(n)` / `▸ Step(n)` step row — dropped (chrome).
     StepRow,
-    /// `≡ N steps` static group marker row (optionally + spinner span) —
+    /// `❯ N steps` / `▸ N steps` group row (optionally + spinner span) —
     /// dropped (chrome).
     GroupRow,
+    /// `❯ N function calls` / `▸ N function calls` calls aggregation row —
+    /// dropped (chrome).
+    CallsRow,
     /// `💭 Thinking` header row (standalone expanded block, or an open
     /// step's folded thinking) — dropped.
     ThinkingHeader,
@@ -112,33 +115,51 @@ fn classify_spans(spans: &[Span<'_>]) -> Option<(LineKind, usize)> {
     if is_group_row(spans) {
         return Some((LineKind::GroupRow, 0));
     }
+    if is_calls_row(spans) {
+        return Some((LineKind::CallsRow, 0));
+    }
     None
 }
 
-/// `true` for a StepGroup's static marker row: one span `≡ N steps` (count
-/// non-empty), optionally followed by the `⠋ running ` spinner span. The
-/// label is pure navigation chrome — a markdown row could only collide by
-/// being exactly such a label (same caveat as StepRow).
-fn is_group_row(spans: &[Span<'_>]) -> bool {
+/// Match one fold-glyph count row — a single label span `{❯|▸} {count}{unit}`
+/// (unit given as its plural/singular suffixes), optionally followed by the
+/// `⠋ running ` spinner span — returning the count. Shared by the group row
+/// (`N step(s)`) and the calls aggregation row (`N function call(s)`); both
+/// labels are pure navigation chrome, so a markdown row could only collide
+/// by being exactly such a label (same caveat as StepRow).
+fn count_row_label(spans: &[Span<'_>], plural: &str, singular: &str) -> Option<u32> {
     let (label, spinner) = match spans {
         [label] => (label, None),
         [label, spinner] => (label, Some(spinner)),
-        _ => return false,
+        _ => return None,
     };
     if spinner.is_some_and(|sp| !sp.content.ends_with("running ")) {
-        return false;
+        return None;
     }
     let t = label.content.as_ref();
-    let Some(body) = t.strip_prefix('\u{2261}').and_then(|b| b.strip_prefix(' ')) else {
-        return false;
-    };
-    let Some(count) = body
-        .strip_suffix(" steps")
-        .or_else(|| body.strip_suffix(" step"))
-    else {
-        return false;
-    };
-    !count.is_empty() && count.bytes().all(|b| b.is_ascii_digit())
+    let body = t
+        .strip_prefix(GROUP_ROW_OPEN_PREFIX)
+        .or_else(|| t.strip_prefix(GROUP_ROW_CLOSED_PREFIX))?;
+    let count = body
+        .strip_suffix(plural)
+        .or_else(|| body.strip_suffix(singular))?;
+    if count.is_empty() || !count.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    count.parse().ok()
+}
+
+/// `true` for the group's L0 row: one span `{❯|▸} N steps` (count non-empty,
+/// digits), optionally followed by the `⠋ running ` spinner span.
+fn is_group_row(spans: &[Span<'_>]) -> bool {
+    count_row_label(spans, " steps", " step").is_some()
+}
+
+/// `true` for a step's calls aggregation row: one span
+/// `{❯|▸} N function calls` (count non-empty, digits) — rendered behind the
+/// step's 4-space gutter, which `classify` strips before matching here.
+fn is_calls_row(spans: &[Span<'_>]) -> bool {
+    count_row_label(spans, " function calls", " function call").is_some()
 }
 
 /// Width of `s` when it is a pure ASCII-space gutter span of 1..=8 columns.
@@ -172,7 +193,8 @@ pub fn clean_line(line: &Line<'_>) -> Option<String> {
         | LineKind::Rule
         | LineKind::PlanHeader
         | LineKind::StepRow
-        | LineKind::GroupRow => None,
+        | LineKind::GroupRow
+        | LineKind::CallsRow => None,
         // Code payloads stay verbatim (only the `│ `/`│` slot goes); text
         // rows additionally lose a `▎ ` quote prefix inside their first
         // content span, since blockquotes push it into the text span.
@@ -427,7 +449,13 @@ mod tests {
             (&[PLAN_HEADER], LineKind::PlanHeader, 0),
             (&[STEP_THINKING_HEADER], LineKind::ThinkingHeader, 0),
             (&["    ", STEP_THINKING_HEADER], LineKind::ThinkingHeader, 4),
-            (&["\u{2261} 2 steps"], LineKind::GroupRow, 0),
+            (&["\u{25b8} 2 steps"], LineKind::GroupRow, 0),
+            (&["\u{276f} 1 step"], LineKind::GroupRow, 0),
+            (
+                &["    ", "\u{25b8} 2 function calls"],
+                LineKind::CallsRow,
+                4,
+            ),
             (&["\u{250c} rust "], LineKind::CodeTop, 0),
             (&[CODE_ROW_PREFIX, "x"], LineKind::CodeRow, 2),
             (&[CODE_ROW_EMPTY], LineKind::CodeRow, 1),
@@ -456,13 +484,38 @@ mod tests {
     }
 
     #[test]
-    fn step_group_rows_are_dropped_with_and_without_spinner() {
+    fn group_rows_are_dropped_with_and_without_spinner() {
         run(&[
-            ("singular marker", &["\u{2261} 1 step"], None),
-            ("plural marker", &["\u{2261} 3 steps"], None),
+            ("closed singular", &["\u{25b8} 1 step"], None),
+            ("closed plural", &["\u{25b8} 3 steps"], None),
+            ("open marker", &["\u{276f} 2 steps"], None),
+            ("open singular", &["\u{276f} 1 step"], None),
             (
                 "marker + spinner",
-                &["\u{2261} 2 steps", "\u{280b} running "],
+                &["\u{25b8} 2 steps", "\u{280b} running "],
+                None,
+            ),
+            (
+                "open marker + spinner",
+                &["\u{276f} 1 step", "\u{2824} running "],
+                None,
+            ),
+        ]);
+    }
+
+    #[test]
+    fn calls_aggregation_rows_are_dropped() {
+        run(&[
+            (
+                "closed singular",
+                &["    ", "\u{25b8} 1 function call"],
+                None,
+            ),
+            ("open plural", &["    ", "\u{276f} 3 function calls"], None),
+            ("no gutter", &["\u{25b8} 2 function calls"], None),
+            (
+                "double-digit",
+                &["    ", "\u{276f} 12 function calls"],
                 None,
             ),
         ]);
@@ -471,30 +524,36 @@ mod tests {
     #[test]
     fn group_row_lookalikes_survive() {
         run(&[
-            ("no count", &["\u{2261} step"], Some("\u{2261} step")),
+            ("no count", &["\u{25b8} step"], Some("\u{25b8} step")),
             (
                 "non-digit count",
-                &["\u{2261} x steps"],
-                Some("\u{2261} x steps"),
+                &["\u{25b8} x steps"],
+                Some("\u{25b8} x steps"),
             ),
             ("missing glyph", &["1 step"], Some("1 step")),
-            // The old folded arrow glyphs no longer open a group row — a
+            // The old static marker glyph no longer opens a group row — a
             // leftover-looking span is plain content.
             (
-                "old arrow glyph is content",
-                &["\u{25b8} 2 steps"],
-                Some("\u{25b8} 2 steps"),
+                "old static marker is content",
+                &["\u{2261} 2 steps"],
+                Some("\u{2261} 2 steps"),
             ),
             (
                 "spinner-less tail span is not a group row",
-                &["\u{2261} 2 steps", "extra"],
-                Some("\u{2261} 2 stepsextra"),
+                &["\u{25b8} 2 steps", "extra"],
+                Some("\u{25b8} 2 stepsextra"),
             ),
             // Three spans can never be a group row (label + spinner max).
             (
                 "three spans",
-                &["\u{2261} 2 steps", "\u{280b} running ", "x"],
-                Some("\u{2261} 2 steps\u{280b} running x"),
+                &["\u{25b8} 2 steps", "\u{280b} running ", "x"],
+                Some("\u{25b8} 2 steps\u{280b} running x"),
+            ),
+            // Spinner span that does not end in `running ` is content.
+            (
+                "tail span is not a spinner",
+                &["\u{25b8} 2 steps", "\u{280b} paused"],
+                Some("\u{25b8} 2 steps\u{280b} paused"),
             ),
         ]);
     }

@@ -110,11 +110,12 @@ impl ChatView {
                     return;
                 }
                 self.finalize_assistant();
-                // The trailing run of consecutive Thinking blocks becomes this
-                // round's step-thinking (rendered markdown, step-local, out of
-                // the main flow). Strictly trailing: thinking followed by an
-                // answer block stays a standalone Thinking block.
-                let thinking = steps::pop_trailing_thinking(&mut self.blocks);
+                // The round's pending Thinking blocks become this round's
+                // step-thinking (rendered markdown, step-local, out of the
+                // main flow). The backwards walk crosses Assistant blocks
+                // (the turn's own speech) but stops at any other block, so
+                // the previous user segment's thinking is never absorbed.
+                let thinking = steps::absorb_pending_thinking(&mut self.blocks);
                 let call = ToolCall {
                     id: id.clone(),
                     header: Line::from(vec![
@@ -445,24 +446,33 @@ impl ChatView {
     }
 
     /// Toggle the click target at flat index `call_idx` inside the StepGroup
-    /// at `block_idx` (mouse click handler on a rendered step/call row). The
-    /// index walks the group's VISIBLE rows — the step rows plus each open
-    /// step's call header rows, in render order — exactly what
-    /// `visible_targets` and `collect_headers` enumerate, so the toggled row
-    /// is the row that was clicked. A step target flips the step open/closed;
-    /// a call target toggles that single call's output. No-op if either index
-    /// is out of range.
+    /// at `block_idx` (mouse click handler on a rendered ladder row). The
+    /// index walks the group's VISIBLE rows — the group row, then (while the
+    /// group is open) each step row, then (while a step is open) its calls
+    /// aggregation row, then (while the call list is open) each call header
+    /// row, in render order — exactly what `visible_targets` and
+    /// `collect_headers` enumerate, so the toggled row is the row that was
+    /// clicked. A group target flips the group's fold; a step target flips
+    /// that step; a calls target flips that step's call list; a call target
+    /// toggles that single call's output. No-op if either index is out of
+    /// range.
     pub fn toggle_tool_call_at(&mut self, block_idx: usize, call_idx: usize) {
-        let Some(ChatBlock::StepGroup { steps, .. }) = self.blocks.get_mut(block_idx) else {
+        let Some(ChatBlock::StepGroup { open, steps, .. }) = self.blocks.get_mut(block_idx) else {
             return;
         };
-        let Some(target) = steps::visible_targets(steps).get(call_idx).copied() else {
+        let Some(target) = steps::visible_targets(*open, steps).get(call_idx).copied() else {
             return;
         };
         match target {
+            StepTarget::Group => *open = !*open,
             StepTarget::Step(si) => {
                 if let Some(s) = steps.get_mut(si) {
                     s.open = !s.open;
+                }
+            }
+            StepTarget::Calls(si) => {
+                if let Some(s) = steps.get_mut(si) {
+                    s.calls_open = !s.calls_open;
                 }
             }
             StepTarget::Call(si, ci) => {
@@ -475,18 +485,21 @@ impl ChatView {
 
     /// Collapse every collapsible block (Thinking + Compaction + StepGroup)
     /// in this view. Bound to Ctrl+L: clears any expanded reasoning blocks
-    /// and closes every step and expanded call output in one keystroke (the
-    /// static `≡ N steps` marker and the step rows always stay rendered;
-    /// also applied to a child subagent view before exiting it).
+    /// and closes every level of the tool ladder — group fold, step folds,
+    /// calls-list folds and expanded call outputs — in one keystroke (the
+    /// group row itself always stays rendered; also applied to a child
+    /// subagent view before exiting it).
     pub fn collapse_all_collapsible(&mut self) {
         for block in &mut self.blocks {
             match block {
                 ChatBlock::Thinking { collapsed, .. } | ChatBlock::Compaction { collapsed, .. } => {
                     *collapsed = true;
                 }
-                ChatBlock::StepGroup { steps } => {
+                ChatBlock::StepGroup { open, steps } => {
+                    *open = false;
                     for s in steps {
                         s.open = false;
+                        s.calls_open = false;
                         for c in &mut s.calls {
                             c.expanded = false;
                         }
@@ -577,8 +590,8 @@ impl ChatView {
                         Style::default().fg(theme::compaction_color()),
                     ));
                 }
-                ChatBlock::StepGroup { steps } => {
-                    step_render::flatten_step_group(&mut out, steps, anim_tick);
+                ChatBlock::StepGroup { steps, open, .. } => {
+                    step_render::flatten_step_group(&mut out, *open, steps, anim_tick);
                 }
                 ChatBlock::Image { filename, rendered } => {
                     out.push(Line::from(Span::styled(

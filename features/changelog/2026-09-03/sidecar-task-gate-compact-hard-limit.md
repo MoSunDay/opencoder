@@ -1,4 +1,4 @@
-Commit: (working-tree, 基于 2677992)
+Commit: a783fb1
 
 # sidecar `task` 封堵 + 手动压缩硬上限熔断（sidecar 豁免）
 

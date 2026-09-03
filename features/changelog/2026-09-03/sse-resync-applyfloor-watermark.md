@@ -1,3 +1,5 @@
+Commit: ebea34a
+
 # SSE resync 水位重建：重连去重 + applySeq 水位（round-2 #5 收口）
 
 ## Context

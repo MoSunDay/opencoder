@@ -55,13 +55,14 @@ pub enum ChatBlock {
         streaming: bool,
     },
     /// One assistant round's tool activity: its thinking plus its function
-    /// calls, grouped into collapsible steps. Consecutive calls between
-    /// text/image/marker blocks form one group (any other block splits the
-    /// run); steps split at round boundaries (a finished call followed by a
-    /// new `ToolStart`). Three-level drill-down, toggled by clicking:
-    /// group row → step row → single call's output. Ctrl+L resets every
-    /// level.
-    StepGroup { steps: Vec<Step>, open: bool },
+    /// calls, grouped into steps. Consecutive calls between text/image/marker
+    /// blocks form one group (any other block splits the run); steps split
+    /// at round boundaries (a finished call followed by a new `ToolStart`).
+    /// The group renders a static `≡ N steps` marker (not clickable, not
+    /// collapsible); every step row always renders below it. Two-level
+    /// drill-down, toggled by clicking: step row → single call's output.
+    /// Ctrl+L resets every level.
+    StepGroup { steps: Vec<Step> },
     /// Inline image attachment rendered as half-block ASCII art.
     /// `filename` is the display name; `rendered` is the pre-computed
     /// half-block `Line` set (empty when rendering failed → placeholder).
@@ -220,8 +221,9 @@ pub struct SubagentHeader {
 
 /// One step inside a `ChatBlock::StepGroup`: a single assistant round's
 /// thinking (as rendered markdown lines) plus that round's function calls.
-/// The step's content is visible only while both the group and the step are
-/// open; each call's output additionally requires `ToolCall::expanded`.
+/// The step's row always renders; its content is visible only while the
+/// step is open; each call's output additionally requires
+/// `ToolCall::expanded`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Step {
     /// Rendered markdown of the round's thinking. Empty when the round went
@@ -229,7 +231,7 @@ pub struct Step {
     /// block because assistant text trailed it).
     pub thinking: Vec<Line<'static>>,
     pub calls: Vec<ToolCall>,
-    /// Whether this step's Say header + thinking + call rows render.
+    /// Whether this step's Thinking header + thinking + call rows render.
     pub open: bool,
 }
 
@@ -242,13 +244,13 @@ pub struct ToolCall {
     /// Sanitized output lines, shown while the call is expanded.
     pub output: Vec<Line<'static>>,
     pub started_at_ms: Option<i64>,
-    /// `None` while the call is still running — drives the group line's
+    /// `None` while the call is still running — drives the group marker's
     /// running hint (and the step-boundary heuristic: a finished call means
     /// the next `ToolStart` opens a new step).
     pub elapsed_ms: Option<u64>,
     /// Show this call's `output` under its header. Requires the enclosing
-    /// group and step to be open. Toggled by clicking the call's header row;
-    /// reset by `collapse_all_collapsible`.
+    /// step to be open. Toggled by clicking the call's header row; reset by
+    /// `collapse_all_collapsible`.
     pub expanded: bool,
 }
 
@@ -258,15 +260,7 @@ pub struct ToolCall {
 pub(crate) const STEP_ROW_OPEN_PREFIX: &str = "\u{276f} Step(";
 pub(crate) const STEP_ROW_CLOSED_PREFIX: &str = "\u{25b8} Step(";
 
-/// Locates a `StepGroup` block's group line for mouse hit-testing (clicking
-/// toggles the group open/closed).
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct ToolHeader {
-    pub block_idx: usize,
-    pub header_line_idx: usize,
-}
-
-/// Locates one clickable row inside an open `StepGroup` — a step row or a
+/// Locates one clickable row inside a `StepGroup` — a step row or a
 /// call header row — for mouse hit-testing. `call_idx` is the block's flat
 /// *visible-target index*: the row's position among the group's currently
 /// rendered rows (steps first, then that step's calls — see

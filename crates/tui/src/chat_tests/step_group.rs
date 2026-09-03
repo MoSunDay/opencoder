@@ -1,7 +1,8 @@
 //! Step = one assistant round (thinking + that round's calls). This file
 //! pins the step-shape guarantees that the other chat_tests only touch
 //! obliquely: the live thinking-folding path, replay's `coalesce_steps`
-//! fold, and copy-mode chrome stripping for the three-level ladder.
+//! fold, and copy-mode chrome stripping for the two-level (step → call)
+//! ladder under the static `≡ N steps` marker.
 
 use super::super::*;
 
@@ -81,18 +82,17 @@ fn trailing_thinking_folds_into_the_step_not_the_flow() {
         .collect::<String>();
     assert!(body.contains("reading the layout"));
 
-    v.toggle_step_group_at(0);
-    if let ChatBlock::StepGroup { steps, .. } = &mut v.blocks[0] {
+    if let ChatBlock::StepGroup { steps } = &mut v.blocks[0] {
         steps[0].open = true;
     }
     let flat = lines(&v);
     assert!(
-        flat.iter().any(|l| l.contains("Say:")),
-        "opened step must render its thinking behind a Say header: {flat:?}"
+        flat.iter().any(|l| l.contains("Thinking")),
+        "opened step must render its thinking behind a Thinking header: {flat:?}"
     );
     assert!(flat.iter().any(|l| l.contains("reading the layout")));
-    // Sanity: the group header is the plain step count (thinking excluded).
-    assert_eq!(flat[0], "\u{25be} 1 step");
+    // Sanity: the static marker is the plain step count (thinking excluded).
+    assert_eq!(flat[0], "\u{2261} 1 step");
 }
 
 #[test]
@@ -216,15 +216,14 @@ fn copy_mode_drops_step_chrome_but_keeps_content() {
     let mut v = ChatView::default();
     v.apply(&SessionEvent::ReasoningDelta("copy me".into()));
     call_tool(&mut v, "t1");
-    // Open the whole ladder: group → step → single call output.
-    v.toggle_step_group_at(0);
-    if let ChatBlock::StepGroup { steps, .. } = &mut v.blocks[0] {
+    // Open the ladder: step → single call output.
+    if let ChatBlock::StepGroup { steps } = &mut v.blocks[0] {
         steps[0].open = true;
     }
     v.toggle_tool_call_at(0, 1);
 
     let mut saw_step_row = false;
-    let mut saw_say_header = false;
+    let mut saw_thinking_header = false;
     let mut saw_group_row = false;
     let mut copied = Vec::new();
     for line in v.flatten() {
@@ -233,7 +232,7 @@ fn copy_mode_drops_step_chrome_but_keeps_content() {
             None => {
                 assert!(
                     text.contains("Step(")
-                        || text.contains("Say:")
+                        || text.contains("Thinking")
                         || text.is_empty()
                         || text.starts_with(' ')
                         || text.contains("step"),
@@ -242,8 +241,8 @@ fn copy_mode_drops_step_chrome_but_keeps_content() {
                 if text.contains("Step(") {
                     saw_step_row = true;
                 }
-                if text.contains("Say:") {
-                    saw_say_header = true;
+                if text.contains("Thinking") {
+                    saw_thinking_header = true;
                 }
                 if text.contains("step") {
                     saw_group_row = true;
@@ -253,14 +252,17 @@ fn copy_mode_drops_step_chrome_but_keeps_content() {
         }
     }
     assert!(saw_step_row, "precondition: step rows were rendered");
-    assert!(saw_say_header, "precondition: Say header was rendered");
-    assert!(saw_group_row, "precondition: the group row was rendered");
+    assert!(
+        saw_thinking_header,
+        "precondition: Thinking header was rendered"
+    );
+    assert!(saw_group_row, "precondition: the group marker was rendered");
     let joined = copied.join("\n");
     assert!(joined.contains("copy me"), "thinking body is copyable");
     assert!(joined.contains("t1-out"), "call output is copyable");
     assert!(!joined.contains("Step("), "step labels are chrome");
-    assert!(!joined.contains("1 step"), "group rows are chrome");
-    assert!(!joined.contains("Say:"), "role header is chrome");
+    assert!(!joined.contains("1 step"), "group markers are chrome");
+    assert!(!joined.contains("Thinking"), "thinking header is chrome");
 }
 
 #[test]
@@ -331,4 +333,41 @@ fn orphan_tool_end_joins_the_trailing_group_like_replay() {
     assert_eq!(replay_groups.len(), 1, "resume folds the orphan too");
     assert_eq!(replay_groups[0].len(), 2);
     assert!(tail_output(replay_groups[0]).contains("ghost-out"));
+}
+
+#[test]
+fn multi_round_turn_renders_marker_steps_and_answer_without_any_click() {
+    // The user's core display requirement: after a multi-round turn the
+    // static marker `≡ N steps`, EVERY step row, and the top-level final
+    // answer block are all visible in the default (no-click) render.
+    let mut v = ChatView::default();
+    for id in ["t1", "t2"] {
+        v.apply(&SessionEvent::ReasoningDelta(format!("think {id}")));
+        call_tool(&mut v, id);
+    }
+    v.apply(&SessionEvent::TextDelta("all done".into()));
+    v.apply(&SessionEvent::Done);
+
+    let flat = lines(&v);
+    assert!(
+        flat.iter().any(|l| l.contains("\u{2261} 2 steps")),
+        "static marker must render without a click: {flat:?}"
+    );
+    assert!(
+        flat.iter().any(|l| l.contains("\u{25b8} Step(1)")),
+        "step 1 row must render closed by default: {flat:?}"
+    );
+    assert!(
+        flat.iter().any(|l| l.contains("\u{25b8} Step(2)")),
+        "step 2 row must render closed by default: {flat:?}"
+    );
+    assert!(
+        flat.iter().any(|l| l.contains("\u{276f} Say:")),
+        "final answer block stays top-level and visible: {flat:?}"
+    );
+    // Closed steps still hide their content by default.
+    assert!(
+        !flat.iter().any(|l| l.contains("echo x")),
+        "closed steps keep call rows hidden: {flat:?}"
+    );
 }

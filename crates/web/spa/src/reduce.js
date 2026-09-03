@@ -85,11 +85,17 @@ function blockToTurns(role, b) {
   return [];
 }
 
-/// Snapshot messages → turns. A tool_result block attaches to the open
-/// tool_use turn before it when one exists (same visual row, like the TUI).
+/// Snapshot messages → turns. Message-pair semantics ported from the TUI
+/// replay's coalesce_steps: reasoning buffers into a pending-think until the
+/// next step consumes it (or a text block / the walk's end flushes it
+/// standalone); each assistant message's non-task tool_uses form ONE step
+/// appended at message end, folded into the trailing steps turn when the
+/// messages are adjacent. The user/synthetic/display echo contracts are
+/// unchanged.
 export function turnsFromMessages(messages) {
   const turns = [];
   const list = Array.isArray(messages) ? messages : [];
+  let pendingThink = '';
   for (const m of list) {
     const role = (m && m.role) || 'assistant';
     // Echo contract (mirrors the TUI replay): synthetic user messages are
@@ -104,21 +110,85 @@ export function turnsFromMessages(messages) {
     const displayText = role === 'user' && m && typeof m.display === 'string' && m.display !== ''
       ? m.display
       : null;
+    let roundCalls = [];
+    let roundThinking = '';
     for (const b of (m && m.blocks) || []) {
       const bkind = (b && (b.kind || b.type)) || '';
+      if (bkind === 'reasoning') {
+        pendingThink += (b && b.text) || '';
+        continue;
+      }
+      if (bkind === 'text') {
+        // Thinking followed by Say stays standalone (only the strictly
+        // trailing run may be absorbed into a step).
+        if (pendingThink) {
+          turns.push({ kind: 'think', role: 'assistant', text: pendingThink });
+          pendingThink = '';
+        }
+        if (displayText) {
+          turns.push({ kind: 'text', role, text: displayText });
+          continue;
+        }
+        turns.push(...blockToTurns(role, b));
+        continue;
+      }
+      if (bkind === 'tool_use') {
+        const name = (b && b.name) || 'tool';
+        if (name === 'task') {
+          // Subagent handle keeps today's flat tool turn.
+          turns.push(...blockToTurns(role, b));
+          continue;
+        }
+        // The FIRST tool_use of the message consumes the pending thinking as
+        // the step's thinking (coalesce absorbs a trailing thinking run into
+        // the next group's first step).
+        if (roundCalls.length === 0) {
+          roundThinking = pendingThink;
+          pendingThink = '';
+        }
+        roundCalls.push({
+          kind: 'tool',
+          role,
+          id: (b && (b.id || b.tool_use_id)) || null,
+          name,
+          input: fmtValue(b && b.input),
+          output: null,
+          isError: false,
+          durationMs: null,
+          startedAt: null,
+        });
+        continue;
+      }
       if (bkind === 'tool_result') {
-        const open = findOpenTool(turns, b.tool_use_id || b.id);
-        if (open) {
-          turns[open] = { ...turns[open], output: fmtValue(b.output !== undefined && b.output !== null ? b.output : b.content), isError: !!b.is_error };
+        const rid = (b && (b.tool_use_id || b.id)) || null;
+        const out = fmtValue(b && b.output !== undefined && b.output !== null ? b.output : b.content);
+        const patch = (c) => ({ ...c, output: out, isError: !!(b && b.is_error) });
+        // Same-message results land in the round buffer before the step is
+        // flushed; older groups backfill by id newest-first; task rows keep
+        // the legacy flat path.
+        const buffered = backfillBufferedCall(roundCalls, rid, patch);
+        if (buffered) {
+          roundCalls = buffered;
+          continue;
+        }
+        if (backfillStepsCall(turns, rid, patch)) {
+          continue;
+        }
+        const open = findOpenTool(turns, rid);
+        if (open >= 0) {
+          turns[open] = { ...turns[open], output: out, isError: !!(b && b.is_error) };
           continue;
         }
       }
-      if (displayText && bkind === 'text') {
-        turns.push({ kind: 'text', role, text: displayText });
-        continue;
-      }
       turns.push(...blockToTurns(role, b));
     }
+    // End of assistant message: its whole round is ONE step (n calls).
+    if (role === 'assistant' && roundCalls.length > 0) {
+      appendStepTurn(turns, roundThinking, roundCalls);
+    }
+  }
+  if (pendingThink) {
+    turns.push({ kind: 'think', role: 'assistant', text: pendingThink });
   }
   return turns;
 }
@@ -184,6 +254,124 @@ function closeOpenText(turns) {
   return turns;
 }
 
+// --- steps ladder (port of crates/tui/src/chat_steps.rs) --------------------
+// Non-task tool calls fold into `{kind:'steps', role:'assistant', steps:[{
+// thinking, calls:[toolCall,…]}]}` turns. A step is one assistant round (its
+// thinking plus that round's calls); the trailing `steps` turn groups
+// consecutive rounds. A toolCall keeps the flat tool-turn fields verbatim.
+
+/// findOpenTool-style id compatibility: an open call (`output === null`)
+/// matches when either side carries no id (older frames/rows) or they equal.
+function openCallMatches(call, id) {
+  return call && call.output === null && (!id || !call.id || call.id === id);
+}
+
+/// Mirror of pop_trailing_thinking: pop the STRICTLY-TRAILING run of
+/// assistant think turns, concatenating their text earliest-first into the
+/// next step's thinking. Thinking followed by Say stays standalone (the text
+/// turn trails, not the thinking). Mutates only the caller's private copy.
+function popTrailingThinking(turns) {
+  let thinking = '';
+  while (turns.length > 0) {
+    const last = turns[turns.length - 1];
+    if (!last || last.kind !== 'think' || last.role !== 'assistant') {
+      break;
+    }
+    thinking = (last.text || '') + thinking;
+    turns.pop();
+  }
+  return thinking;
+}
+
+/// Mirror of boundary_needed: a new call must NOT merge into the trailing
+/// step once that step already holds a finished call.
+function stepBoundaryNeeded(steps) {
+  const last = steps[steps.length - 1];
+  return !last || last.calls.some((c) => c.output !== null);
+}
+
+/// Mirror of merge_or_new_step, lifted to turn level: append `call` to the
+/// trailing step of the trailing `steps` turn while it holds no finished
+/// call (concatenating `thinking` onto it, lossless), else push a NEW step —
+/// into the trailing `steps` turn when the tail is one, else a fresh turn.
+function mergeOrNewStep(turns, thinking, call) {
+  const tail = turns[turns.length - 1];
+  if (!tail || tail.kind !== 'steps' || !Array.isArray(tail.steps)) {
+    turns.push({ kind: 'steps', role: 'assistant', steps: [{ thinking, calls: [call] }] });
+    return;
+  }
+  const steps = tail.steps.slice();
+  const lastStep = steps[steps.length - 1];
+  if (stepBoundaryNeeded(steps)) {
+    steps.push({ thinking, calls: [call] });
+  } else {
+    steps[steps.length - 1] = {
+      ...lastStep,
+      thinking: thinking ? (lastStep.thinking || '') + thinking : (lastStep.thinking || ''),
+      calls: lastStep.calls.concat([call]),
+    };
+  }
+  turns[turns.length - 1] = { ...tail, steps };
+}
+
+/// Snapshot end-of-message flush: ONE step per assistant message (its whole
+/// round). Folded into the trailing `steps` turn only when the tail is one —
+/// nothing else was emitted since, so the messages are adjacent (coalesce_
+/// steps merges runs of adjacent groups); otherwise a new `steps` turn.
+/// Unlike mergeOrNewStep it never merges calls into the trailing step.
+function appendStepTurn(turns, thinking, calls) {
+  const tail = turns[turns.length - 1];
+  if (tail && tail.kind === 'steps' && Array.isArray(tail.steps)) {
+    turns[turns.length - 1] = { ...tail, steps: tail.steps.concat([{ thinking, calls }]) };
+    return;
+  }
+  turns.push({ kind: 'steps', role: 'assistant', steps: [{ thinking, calls }] });
+}
+
+/// Backfill a finished tool_end / tool_result by id: walk turns newest→
+/// oldest, steps newest→oldest, calls newest→oldest (TUI routing — parallel
+/// calls each land in their own slot); the first open matching call receives
+/// `apply(call)` through immutable copies of turn/step/call. True = hit.
+function backfillStepsCall(turns, id, apply) {
+  for (let i = turns.length - 1; i >= 0; i -= 1) {
+    const t = turns[i];
+    if (!t || t.kind !== 'steps' || !Array.isArray(t.steps)) {
+      continue;
+    }
+    for (let s = t.steps.length - 1; s >= 0; s -= 1) {
+      const step = t.steps[s];
+      const calls = (step && Array.isArray(step.calls)) ? step.calls : [];
+      for (let c = calls.length - 1; c >= 0; c -= 1) {
+        if (openCallMatches(calls[c], id)) {
+          const nextCalls = calls.slice();
+          nextCalls[c] = apply(calls[c]);
+          const nextSteps = t.steps.slice();
+          nextSteps[s] = { ...step, calls: nextCalls };
+          turns[i] = { ...t, steps: nextSteps };
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
+/// Same backfill over a message's not-yet-flushed round buffer (snapshot
+/// walk): returns the patched copy, or null when nothing matched.
+function backfillBufferedCall(calls, id, apply) {
+  if (!Array.isArray(calls)) {
+    return null;
+  }
+  for (let c = calls.length - 1; c >= 0; c -= 1) {
+    if (openCallMatches(calls[c], id)) {
+      const next = calls.slice();
+      next[c] = apply(calls[c]);
+      return next;
+    }
+  }
+  return null;
+}
+
 /// Snapshot messages → aggregated usage for the footer. Store rows carry
 /// per-message usage; a reloaded console has no llm_usage frame to remember,
 /// so sum the rows (all-zero/absent → null, no empty footer).
@@ -231,7 +419,7 @@ export function reduceFrame(state, frame, nowMs) {
     case 'tool_start':
     case 'tool_update': {
       const turns = closeOpenText(state.turns.slice());
-      turns.push({
+      const call = {
         kind: 'tool',
         role: 'assistant',
         id: data.id || data.tool_use_id || null,
@@ -241,27 +429,60 @@ export function reduceFrame(state, frame, nowMs) {
         isError: false,
         durationMs: num(data.duration_ms) || num(data.duration),
         startedAt: nowMs,
-      });
+      };
+      if (data.name === 'task') {
+        // Subagent handle: keeps TODAY's flat tool turn — the 🤖 subagent
+        // block renders the child; task calls never join a step.
+        turns.push(call);
+        return withTurns(state, turns);
+      }
+      // Step-ladder fold: the strictly-trailing think run becomes this
+      // round's step thinking, then the call merges into the trailing step
+      // while it holds no finished call (sequential rounds split, parallel
+      // calls stay together).
+      const thinking = popTrailingThinking(turns);
+      mergeOrNewStep(turns, thinking, call);
       return withTurns(state, turns);
     }
     case 'tool_end': {
-      const turns = state.turns.slice();
-      const idx = findOpenTool(turns, data.id || data.tool_use_id);
       const out = fmtValue(data.output !== undefined ? data.output : data.content);
       const isErr = !!data.is_error;
       const dur = num(data.duration_ms) || num(data.duration);
-      if (idx >= 0) {
-        const t = turns[idx];
-        turns[idx] = {
-          ...t,
-          name: t.name === 'result' ? (data.name || t.name) : t.name,
-          output: out,
-          isError: isErr || t.isError,
-          durationMs: dur || (t.startedAt ? Math.max(0, nowMs - t.startedAt) : null),
-        };
-      } else {
-        turns.push({ kind: 'tool', role: 'assistant', id: data.id || null, name: data.name || 'result', input: null, output: out, isError: isErr, durationMs: dur });
+      const id = data.id || data.tool_use_id || null;
+      const turns = state.turns.slice();
+      if (data.name === 'task') {
+        // Subagent handle: legacy flat backfill, verbatim.
+        const idx = findOpenTool(turns, id);
+        if (idx >= 0) {
+          const t = turns[idx];
+          turns[idx] = {
+            ...t,
+            name: t.name === 'result' ? (data.name || t.name) : t.name,
+            output: out,
+            isError: isErr || t.isError,
+            durationMs: dur || (t.startedAt ? Math.max(0, nowMs - t.startedAt) : null),
+          };
+        } else {
+          turns.push({ kind: 'tool', role: 'assistant', id, name: data.name || 'result', input: null, output: out, isError: isErr, durationMs: dur });
+        }
+        return withTurns(state, turns);
       }
+      if (backfillStepsCall(turns, id, (c) => ({
+        ...c,
+        output: out,
+        isError: isErr || c.isError,
+        durationMs: dur || (c.startedAt ? Math.max(0, nowMs - c.startedAt) : null),
+      }))) {
+        return withTurns(state, turns);
+      }
+      // Orphan end (lost start): synthesize a FINISHED call so the output is
+      // kept, folded into the trailing group when one exists — the same fold
+      // replay's coalesce applies to adjacent groups.
+      mergeOrNewStep(turns, '', {
+        kind: 'tool', role: 'assistant', id,
+        name: data.name || 'result', input: null,
+        output: out, isError: isErr, durationMs: dur ?? 0,
+      });
       return withTurns(state, turns);
     }
     case 'llm_usage':

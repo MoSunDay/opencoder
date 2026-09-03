@@ -1,8 +1,8 @@
-//! Per-row drill-down inside an open `StepGroup` (Phase 2 of clickable
-//! function calls): clicking a rendered row toggles ONLY that target — a
-//! step row flips that step open/closed, a call header row toggles ONLY that
-//! call's output. Rows are enumerated by the group's VISIBLE targets
-//! (step rows, plus each open step's call rows, in render order).
+//! Per-row drill-down inside a `StepGroup` (Phase 2 of clickable function
+//! calls): clicking a rendered row toggles ONLY that target — a step row
+//! flips that step open/closed, a call header row toggles ONLY that call's
+//! output. Rows are enumerated by the group's VISIBLE targets (step rows,
+//! plus each open step's call rows, in render order).
 
 use super::super::*;
 
@@ -27,16 +27,8 @@ fn two_step_group() -> ChatView {
     v
 }
 
-fn group_open(v: &ChatView) -> bool {
-    match v.blocks.first() {
-        Some(ChatBlock::StepGroup { open, .. }) => *open,
-        other => panic!("expected a StepGroup first, got {other:?}"),
-    }
-}
-
-/// Open the group and both of its steps; returns the view.
+/// Open both of the group's steps; returns the view.
 fn fully_open(mut v: ChatView) -> ChatView {
-    v.toggle_step_group_at(0);
     v.toggle_tool_call_at(0, 0); // step 1 open
     v.toggle_tool_call_at(0, 2); // step 2 open (walk grew by call 0's row)
     v
@@ -44,7 +36,7 @@ fn fully_open(mut v: ChatView) -> ChatView {
 
 fn expanded(v: &ChatView) -> Vec<bool> {
     match v.blocks.first() {
-        Some(ChatBlock::StepGroup { steps, .. }) => steps
+        Some(ChatBlock::StepGroup { steps }) => steps
             .iter()
             .flat_map(|s| s.calls.iter().map(|c| c.expanded))
             .collect(),
@@ -62,8 +54,6 @@ fn flatten_text(v: &ChatView) -> Vec<String> {
 #[test]
 fn toggle_step_row_opens_only_that_step() {
     let mut v = two_step_group();
-    v.toggle_step_group_at(0);
-    assert!(group_open(&v));
 
     // Walk is [Step(1), Step(2)]: target 0 opens step 1 only.
     v.toggle_tool_call_at(0, 0);
@@ -127,7 +117,7 @@ fn expanded_call_keeps_ladder_shape() {
     let mut v = fully_open(two_step_group());
     v.toggle_tool_call_at(0, 1); // expand call a
     let rows = flatten_text(&v);
-    // group row, S1, a header, a output, separator, S2, b header, blank.
+    // marker, S1, a header, a output, separator, S2, b header, blank.
     assert_eq!(rows.len(), 8);
     assert!(rows[1].contains("Step(1)"));
     assert!(rows[2].contains("echo A"));
@@ -145,39 +135,39 @@ fn collapse_all_resets_expanded_calls() {
     assert_eq!(expanded(&v), vec![true, true]);
 
     v.collapse_all_collapsible();
-    assert!(!group_open(&v));
     assert_eq!(
         expanded(&v),
         vec![false, false],
         "Ctrl+L must reset every call's expanded flag"
+    );
+    let joined = flatten_text(&v).join("\n");
+    assert!(
+        joined.contains("Step(1)") && joined.contains("Step(2)"),
+        "Ctrl+L keeps the step rows rendered: {joined}"
     );
 }
 
 #[test]
 fn out_of_range_toggle_is_a_noop() {
     let mut v = two_step_group();
-    v.toggle_step_group_at(0);
     v.toggle_tool_call_at(9, 0);
     v.toggle_tool_call_at(0, 9);
-    assert_eq!(expanded(&v), vec![false, false]);
-    assert!(group_open(&v), "unrelated indices must not touch the group");
+    assert_eq!(
+        expanded(&v),
+        vec![false, false],
+        "unrelated indices must not touch the calls"
+    );
 }
 
 #[test]
-fn step_and_call_rows_collected_only_when_visible() {
+fn step_and_call_rows_collected_while_visible() {
     let mut v = two_step_group();
-    assert!(
-        v.tool_call_headers().is_empty(),
-        "closed group: no clickable rows"
-    );
-
-    v.toggle_step_group_at(0);
     let headers = v.tool_call_headers();
-    assert_eq!(headers.len(), 2, "both step rows are clickable");
+    assert_eq!(headers.len(), 2, "both step rows are always clickable");
     assert_eq!(headers[0].block_idx, 0);
     assert_eq!(headers[0].call_idx, 0);
     assert_eq!(headers[1].call_idx, 1);
-    // Group row is line 0; the two step rows follow one row apart.
+    // Marker line is 0; the two step rows follow one row apart.
     assert_eq!(headers[0].header_line_idx + 1, headers[1].header_line_idx);
 
     // Opening step 1 inserts its call row into the walk and shifts step 2.
@@ -193,7 +183,7 @@ fn step_and_call_rows_collected_only_when_visible() {
     let headers = v.tool_call_headers();
     assert_eq!(headers[0].header_line_idx + 4, headers[2].header_line_idx);
 
-    // Closing the group hides every row again.
-    v.toggle_step_group_at(0);
-    assert!(v.tool_call_headers().is_empty());
+    // Closing the step removes its call row from the walk again.
+    v.toggle_tool_call_at(0, 0);
+    assert_eq!(v.tool_call_headers().len(), 2);
 }

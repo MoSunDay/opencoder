@@ -44,6 +44,22 @@ describe('itemsFromTurns', () => {
     expect(items[0].content.open).toBe(true);
   });
 
+  it('passes a steps turn through as its own role carrying the ladder as content', () => {
+    expect(roleOfTurn({ kind: 'steps' })).toBe('steps');
+    expect(roleOfTurn({ kind: 'steps', role: 'assistant' })).toBe('steps');
+    const turn = {
+      kind: 'steps',
+      role: 'assistant',
+      steps: [{ thinking: 'round one', calls: [{ kind: 'tool', name: 'bash', output: null, isError: false }] }],
+    };
+    const items = itemsFromTurns([{ kind: 'text', role: 'user', text: 'go' }, turn]);
+    expect(items).toHaveLength(2);
+    expect(items[0].role).toBe('user');
+    expect(items[1].role).toBe('steps');
+    expect(items[1].key).toBe('steps:1');
+    expect(items[1].content).toBe(turn); // transcript.jsx StepsContent unpacks it
+  });
+
   it('maps an empty-text think turn and a failed tool turn unchanged', () => {
     const turns = [
       { kind: 'think', role: 'assistant', text: '' },

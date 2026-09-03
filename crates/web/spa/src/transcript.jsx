@@ -3,18 +3,30 @@
 //   user   → placement end,   variant filled   (❯ avatar, monospace body)
 //   ai     → placement start, variant outlined (◉ avatar, monospace body)
 //   think  → placement start, variant borderless, ghost 💭 Thinking collapse
+//   steps  → placement start, variant borderless, STEP LADDER (stepsBlock.
+//            jsx): a static `≡ N steps [running|error]` marker row plus one
+//            always-visible per-step Collapse row (❯ Step(k) · n calls) —
+//            NO outer group collapse; inside an open step: the round's
+//            💭 thinking + per-call 🔧 collapses. Mirrors the TUI StepGroup.
 //   tool   → placement start, variant borderless, 🔧 collapse with
-//            duration + error tag + input/output paragraphs
+//            duration + error tag + input/output paragraphs (flat rows now
+//            only for `task` — the subagent handle; renderer lives in
+//            stepsBlock.jsx alongside the ladder)
 //   sys    → placement start, variant borderless, centered secondary text
 //   subagent → placement start, variant borderless, 🤖 fold block with
 //            status tag + child replay drill-in (subagentBlock.jsx)
+// Assistant Say stays a TOP-LEVEL ai bubble — never folded into a group.
+// Collapse-all: Ctrl/Cmd+L (window keydown) or the `⤒ 收起` link bumps an
+// epoch key on Bubble.List, remounting every bubble so all Collapses (step
+// rows, call rows, subagent blocks) reset closed.
 // UsageFooter / StatusTag (moved from render.jsx verbatim in spirit) stay
 // below the list; the empty-state hint keeps the old wording contract.
 
+import { useEffect, useState } from 'react';
 import { Bubble } from '@ant-design/x';
-import { Collapse, Tag, Typography } from 'antd';
-import { fmtDuration } from './format.js';
+import { Tag, Typography } from 'antd';
 import { isEmptyTranscript, itemsFromTurns, usageLine } from './bubbleItems.js';
+import { StepsContent, ThinkContent, ToolContent } from './stepsBlock.jsx';
 import { SubagentContent } from './subagentBlock.jsx';
 
 const { Text, Paragraph } = Typography;
@@ -63,70 +75,9 @@ function TextContent({ turn }) {
   );
 }
 
-/// Reasoning row: ghost collapse, renders even with empty text so a
-/// reasoning-only frame still leaves a visible trace (old ThinkTurn feel).
-function ThinkContent({ turn }) {
-  return (
-    <Collapse
-      size="small"
-      ghost
-      items={[{
-        key: 'think',
-        label: <span style={{ fontSize: 12 }}>💭 Thinking</span>,
-        children: (
-          <Paragraph
-            style={{
-              fontFamily: MONO, fontSize: 12,
-              whiteSpace: 'pre-wrap', color: '#8c8c8c', marginBottom: 0,
-            }}
-          >
-            {turn.text || ''}
-          </Paragraph>
-        ),
-      }]}
-    />
-  );
-}
-
-/// Tool row: 🔧 name · duration, red error tag, input/output paragraphs
-/// inside the collapse (old ToolTurn, minus the outer margins the bubble
-/// padding now provides).
-function ToolContent({ turn }) {
-  const dur = fmtDuration(turn.durationMs);
-  return (
-    <Collapse
-      size="small"
-      items={[{
-        key: 'tool',
-        label: (
-          <span style={{ fontFamily: MONO, fontSize: 12 }}>
-            🔧 {turn.name || 'tool'}
-            {dur ? <Text type="secondary"> · {dur}</Text> : null}
-            {turn.isError ? <Tag color="red" style={{ marginLeft: 8 }}>error</Tag> : null}
-          </span>
-        ),
-        children: (
-          <>
-            {turn.input ? (
-              <Paragraph style={{ fontFamily: MONO, fontSize: 12, whiteSpace: 'pre-wrap', marginBottom: 4 }}>
-                <Text type="secondary">input:</Text>
-                {'\n'}
-                {turn.input}
-              </Paragraph>
-            ) : null}
-            {turn.output ? (
-              <Paragraph style={{ fontFamily: MONO, fontSize: 12, whiteSpace: 'pre-wrap', marginBottom: 0 }}>
-                <Text type="secondary">output:</Text>
-                {'\n'}
-                {turn.output}
-              </Paragraph>
-            ) : null}
-          </>
-        ),
-      }]}
-    />
-  );
-}
+/// Reasoning and tool rows live in stepsBlock.jsx (ThinkContent /
+/// ToolContent, moved there verbatim when the step ladder landed) — the
+/// think/tool/steps bubbles below all render through them.
 
 /// System status lines: centered, secondary, small.
 function SysContent({ turn }) {
@@ -156,6 +107,12 @@ const BUBBLE_ROLES = {
     placement: 'start',
     variant: 'borderless',
     contentRender: (content) => <ThinkContent turn={content} />,
+  },
+  // Step ladder (stepsBlock.jsx): marker + always-visible step rows.
+  steps: {
+    placement: 'start',
+    variant: 'borderless',
+    contentRender: (content) => <StepsContent turn={content} />,
   },
   tool: {
     placement: 'start',
@@ -212,12 +169,38 @@ export function EmptyHint({ text }) {
 
 export function TranscriptView({ turns, usage, status, error, emptyText }) {
   const empty = isEmptyTranscript(turns, usage);
+  // Collapse-all epoch: Ctrl/Cmd+L (or the ⤒ link) bumps the key on
+  // Bubble.List, remounting every bubble so all Collapses reset closed —
+  // step rows, call rows and subagent blocks alike. Say bubbles remount
+  // too but hold no local state, so nothing visually changes for them.
+  const [epoch, setEpoch] = useState(0);
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === 'l' && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        setEpoch(epoch + 1);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [epoch]);
   return (
     <div>
       {empty ? (
         <EmptyHint text={emptyText || '暂无消息'} />
       ) : (
-        <Bubble.List items={itemsFromTurns(turns)} role={BUBBLE_ROLES} autoScroll />
+        <>
+          <div style={{ textAlign: 'right' }}>
+            <Typography.Link
+              onClick={() => setEpoch(epoch + 1)}
+              type="secondary"
+              style={{ fontFamily: MONO, fontSize: 12 }}
+            >
+              ⤒ 收起
+            </Typography.Link>
+          </div>
+          <Bubble.List key={epoch} items={itemsFromTurns(turns)} role={BUBBLE_ROLES} autoScroll />
+        </>
       )}
       <UsageFooter usage={usage} />
       <StatusTag status={status} error={error} />

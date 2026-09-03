@@ -15,6 +15,7 @@ use ratatui::text::{Line, Span};
 
 use crate::chat::{
     PLAN_HEADER, ROLE_SAY_HEADER, ROLE_USER_HEADER, STEP_ROW_CLOSED_PREFIX, STEP_ROW_OPEN_PREFIX,
+    STEP_THINKING_HEADER,
 };
 use crate::markdown::{
     CODE_BOTTOM, CODE_ROW_EMPTY, CODE_ROW_PREFIX, CODE_TOP_PREFIX, QUOTE_PREFIX, RULE_LINE,
@@ -41,9 +42,12 @@ pub(crate) enum LineKind {
     PlanHeader,
     /// `❯ Step(n)` / `▸ Step(n)` step row — dropped (chrome).
     StepRow,
-    /// `▸ N steps` / `▾ N steps` group row (optionally + spinner span) —
+    /// `≡ N steps` static group marker row (optionally + spinner span) —
     /// dropped (chrome).
     GroupRow,
+    /// `💭 Thinking` header row (standalone expanded block, or an open
+    /// step's folded thinking) — dropped.
+    ThinkingHeader,
 }
 
 /// Classify a rendered line and report its decoration slot width in
@@ -81,6 +85,9 @@ fn classify_spans(spans: &[Span<'_>]) -> Option<(LineKind, usize)> {
         if t == ROLE_USER_HEADER || t == ROLE_SAY_HEADER {
             return Some((LineKind::RoleHeader, 0));
         }
+        if t == STEP_THINKING_HEADER {
+            return Some((LineKind::ThinkingHeader, 0));
+        }
         if t == RULE_LINE {
             return Some((LineKind::Rule, 0));
         }
@@ -108,10 +115,10 @@ fn classify_spans(spans: &[Span<'_>]) -> Option<(LineKind, usize)> {
     None
 }
 
-/// `true` for a StepGroup's group row: one span `▸ N steps` / `▾ N steps`
-/// (count non-empty), optionally followed by the `⠋ running ` spinner span.
-/// The label is pure navigation chrome — a markdown row could only collide
-/// by being exactly such a label (same caveat as StepRow).
+/// `true` for a StepGroup's static marker row: one span `≡ N steps` (count
+/// non-empty), optionally followed by the `⠋ running ` spinner span. The
+/// label is pure navigation chrome — a markdown row could only collide by
+/// being exactly such a label (same caveat as StepRow).
 fn is_group_row(spans: &[Span<'_>]) -> bool {
     let (label, spinner) = match spans {
         [label] => (label, None),
@@ -122,11 +129,7 @@ fn is_group_row(spans: &[Span<'_>]) -> bool {
         return false;
     }
     let t = label.content.as_ref();
-    let Some(body) = t
-        .strip_prefix('\u{25b8}')
-        .or_else(|| t.strip_prefix('\u{25be}'))
-        .and_then(|b| b.strip_prefix(' '))
-    else {
+    let Some(body) = t.strip_prefix('\u{2261}').and_then(|b| b.strip_prefix(' ')) else {
         return false;
     };
     let Some(count) = body
@@ -163,6 +166,7 @@ pub fn clean_line(line: &Line<'_>) -> Option<String> {
     let (kind, _) = classify(line);
     match kind {
         LineKind::RoleHeader
+        | LineKind::ThinkingHeader
         | LineKind::CodeTop
         | LineKind::CodeBottom
         | LineKind::Rule
@@ -249,6 +253,7 @@ mod tests {
         run(&[
             ("role user header", &[ROLE_USER_HEADER], None),
             ("role say header", &[ROLE_SAY_HEADER], None),
+            ("thinking header", &[STEP_THINKING_HEADER], None),
             ("plan header", &[PLAN_HEADER], None),
             ("rule line", &[RULE_LINE], None),
             ("code bottom frame", &[CODE_BOTTOM], None),
@@ -258,6 +263,12 @@ mod tests {
             (
                 "role header behind 4-gutter",
                 &["    ", ROLE_SAY_HEADER],
+                None,
+            ),
+            // An open step's folded-thinking header sits behind a 4-gutter.
+            (
+                "thinking header behind 4-gutter",
+                &["    ", STEP_THINKING_HEADER],
                 None,
             ),
             ("rule behind 4-gutter", &["    ", RULE_LINE], None),
@@ -349,10 +360,13 @@ mod tests {
                 &["\u{25b8} bash ls -la"],
                 Some("\u{25b8} bash ls -la"),
             ),
+            // A COLLAPSED standalone Thinking header carries the line count
+            // in the same span, so it does not exact-match the chrome shape
+            // and survives verbatim.
             (
-                "thinking header",
-                &["\u{1f4ad} Thinking"],
-                Some("\u{1f4ad} Thinking"),
+                "collapsed thinking header keeps count",
+                &["\u{1f4ad} Thinking (3 lines)"],
+                Some("\u{1f4ad} Thinking (3 lines)"),
             ),
             // Tool/thinking body rows merge their 2-space lead into the
             // content span — no all-space gutter span, nothing to strip.
@@ -411,6 +425,9 @@ mod tests {
             (&[RULE_LINE], LineKind::Rule, 0),
             (&[CODE_BOTTOM], LineKind::CodeBottom, 0),
             (&[PLAN_HEADER], LineKind::PlanHeader, 0),
+            (&[STEP_THINKING_HEADER], LineKind::ThinkingHeader, 0),
+            (&["    ", STEP_THINKING_HEADER], LineKind::ThinkingHeader, 4),
+            (&["\u{2261} 2 steps"], LineKind::GroupRow, 0),
             (&["\u{250c} rust "], LineKind::CodeTop, 0),
             (&[CODE_ROW_PREFIX, "x"], LineKind::CodeRow, 2),
             (&[CODE_ROW_EMPTY], LineKind::CodeRow, 1),
@@ -441,11 +458,11 @@ mod tests {
     #[test]
     fn step_group_rows_are_dropped_with_and_without_spinner() {
         run(&[
-            ("closed group", &["\u{25b8} 1 step"], None),
-            ("open group plural", &["\u{25be} 3 steps"], None),
+            ("singular marker", &["\u{2261} 1 step"], None),
+            ("plural marker", &["\u{2261} 3 steps"], None),
             (
-                "group + spinner",
-                &["\u{25b8} 2 steps", "\u{280b} running "],
+                "marker + spinner",
+                &["\u{2261} 2 steps", "\u{280b} running "],
                 None,
             ),
         ]);
@@ -454,23 +471,30 @@ mod tests {
     #[test]
     fn group_row_lookalikes_survive() {
         run(&[
-            ("no count", &["\u{25b8} step"], Some("\u{25b8} step")),
+            ("no count", &["\u{2261} step"], Some("\u{2261} step")),
             (
                 "non-digit count",
-                &["\u{25b8} x steps"],
-                Some("\u{25b8} x steps"),
+                &["\u{2261} x steps"],
+                Some("\u{2261} x steps"),
             ),
-            ("missing arrow", &["1 step"], Some("1 step")),
+            ("missing glyph", &["1 step"], Some("1 step")),
+            // The old folded arrow glyphs no longer open a group row — a
+            // leftover-looking span is plain content.
+            (
+                "old arrow glyph is content",
+                &["\u{25b8} 2 steps"],
+                Some("\u{25b8} 2 steps"),
+            ),
             (
                 "spinner-less tail span is not a group row",
-                &["\u{25b8} 2 steps", "extra"],
-                Some("\u{25b8} 2 stepsextra"),
+                &["\u{2261} 2 steps", "extra"],
+                Some("\u{2261} 2 stepsextra"),
             ),
             // Three spans can never be a group row (label + spinner max).
             (
                 "three spans",
-                &["\u{25b8} 2 steps", "\u{280b} running ", "x"],
-                Some("\u{25b8} 2 steps\u{280b} running x"),
+                &["\u{2261} 2 steps", "\u{280b} running ", "x"],
+                Some("\u{2261} 2 steps\u{280b} running x"),
             ),
         ]);
     }

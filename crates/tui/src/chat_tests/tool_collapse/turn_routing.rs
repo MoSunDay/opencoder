@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn text_between_calls_stays_in_one_turn_and_routes_by_id() {
+fn text_between_calls_splits_its_turn_and_routes_by_id() {
     let mut v = ChatView::default();
     v.apply(&SessionEvent::ToolStart {
         id: "t1".into(),
@@ -26,11 +26,18 @@ fn text_between_calls_stays_in_one_turn_and_routes_by_id() {
         name: "bash".into(),
         input: serde_json::json!({"command": "two"}),
     });
-    // Say is presentation inside the same admitted turn. It is not Thinking,
-    // so t2 remains in the same Step and the same function-call aggregate.
+    // The Say is not Thinking, but it CLOSES its sub-turn (`1 Turn = n Steps
+    // + Say`): t1/parallel stay in the first ladder, and t2 — arriving after
+    // the Say — opens the NEXT ladder below it instead of joining the one
+    // above. Inside each ladder, only a new Thinking run opens Step(2).
     let grps = group_calls(&v);
-    assert_eq!(grps.len(), 1, "one admitted turn owns one group");
-    assert_eq!(grps[0].len(), 3);
+    assert_eq!(grps.len(), 2, "each Say-closed sub-turn owns its ladder");
+    assert_eq!(
+        grps[0].len(),
+        2,
+        "calls before the Say stay in the first ladder"
+    );
+    assert_eq!(grps[1].len(), 1, "calls after the Say open the next ladder");
     assert_eq!(groups(&v)[0].1.len(), 1, "only new Thinking opens Step(2)");
 
     // Ending the older group's call after the newer group exists must still
@@ -49,7 +56,7 @@ fn text_between_calls_stays_in_one_turn_and_routes_by_id() {
             .any(|l| l.spans.iter().any(|s| s.content.contains("first-out"))),
         "output must land in the older group's call"
     );
-    assert_eq!(groups(&v).len(), 1);
+    assert_eq!(groups(&v).len(), 2);
 }
 
 #[test]
@@ -182,8 +189,9 @@ fn step_row_line_index_lands_on_the_step_row() {
         name: "bash".into(),
         input: serde_json::json!({"command": "echo x"}),
     });
-    // Collapsed ladder: exactly one target — the group row. The existing Say
-    // makes the Step terminal, so a later call cannot re-arm its spinner.
+    // Collapsed ladder: exactly one target — the group row. The Say closed
+    // the previous sub-turn, so this call opens a NEW ladder below it whose
+    // spinner is legitimately armed while the tool runs.
     let (group_idx, group_line) = {
         let headers = v.tool_call_headers();
         assert_eq!(headers.len(), 1, "expected exactly the group-row header");
@@ -195,8 +203,9 @@ fn step_row_line_index_lands_on_the_step_row() {
         (headers[0].header_line_idx, line)
     };
     assert!(
-        group_line.contains("1 Step") && !group_line.contains("running"),
-        "header_line_idx must land on the group row; got: {group_line:?}"
+        group_line.contains("1 Step") && group_line.contains("running"),
+        "header_line_idx must land on the group row with the re-armed \
+         new-turn spinner; got: {group_line:?}"
     );
 
     // Open the group: the step row becomes the second target and must land

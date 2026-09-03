@@ -305,5 +305,9 @@ pub(crate) fn echo_question(chat: &mut ChatView, question: &str) {
             rendered: crate::markdown::render(question),
         });
         panel.view.push_marker(Line::from(""));
+        // The echo is this panel-turn's anchor: re-anchor the ladder floor
+        // BELOW it (mirrors the main transcript's queue-consumed echo) so the
+        // turn's `N Steps` group renders after the prompt — never above it.
+        panel.view.reanchor_turn_after_user_echo();
     }
 }

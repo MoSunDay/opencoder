@@ -1,6 +1,9 @@
 //! Step = one Thinking run plus all calls until the next Thinking. This file
 //! pins the step-shape guarantees that the other chat_tests only touch
-//! obliquely: the live thinking-absorption path, replay's `coalesce_steps`
+//! obliquely: the live thinking-absorption path, replay's `coalesce_steps`,
+//! and the Turn contract (1 turn = n steps + say; every user input — submit,
+//! steer consumption, queue consumption — anchors a NEW ladder, see
+//! `step_group/turn_boundary.rs`)
 //! fold, the zero-click collapsed ladder, and copy-mode chrome stripping
 //! for the three-level (turn → step → function call) drill-down.
 
@@ -308,7 +311,7 @@ fn mid_conversation_flush_lands_after_the_user_prompt() {
 }
 
 #[test]
-fn begin_turn_is_the_only_live_step_group_boundary() {
+fn user_inputs_are_the_only_live_step_group_boundaries() {
     let mut v = ChatView::default();
     call_tool(&mut v, "first");
     v.apply(&SessionEvent::TextDelta("say one".into()));
@@ -334,6 +337,37 @@ fn begin_turn_is_the_only_live_step_group_boundary() {
 
 #[path = "step_group/replay.rs"]
 mod replay;
+#[path = "step_group/turn_boundary.rs"]
+mod turn_boundary;
 
 #[path = "step_group/disclosure.rs"]
 mod disclosure;
+
+/// Expanding a step mid-stream must not freeze its thinking: after the
+/// expand-time render cleared `thinking_dirty`, further deltas of the same
+/// reasoning run kept accumulating in `thinking_raw` but never re-rendered —
+/// the visible thinking stopped at the expand-time snapshot.
+#[test]
+fn expanded_step_keeps_streaming_new_thinking_deltas() {
+    let mut v = ChatView::default();
+    v.apply(&SessionEvent::ReasoningDelta("first chunk ".into()));
+    // Expand the ladder: open the group row, then the step row.
+    v.toggle_tool_call_at(0, 0); // StepTarget::Group
+    v.toggle_tool_call_at(0, 1); // StepTarget::Step(0)
+    let expanded = lines(&v).join("\n");
+    assert!(
+        expanded.contains("first chunk"),
+        "expanded step renders the streamed thinking: {expanded:?}"
+    );
+    // More of the SAME reasoning run arrives while the step is open.
+    v.apply(&SessionEvent::ReasoningDelta("second chunk".into()));
+    let streamed = lines(&v).join("\n");
+    assert!(
+        streamed.contains("second chunk"),
+        "post-expand deltas must keep rendering: {streamed:?}"
+    );
+    assert!(
+        streamed.find("first chunk") < streamed.find("second chunk"),
+        "thinking renders in stream order: {streamed:?}"
+    );
+}

@@ -75,6 +75,14 @@ pub(crate) struct DisplayState<'a> {
 /// (subtle workdir, muted separators, accent model, pink thinking level). The
 /// mode remains in the bottom status bar. Pure: reads state, returns the values; the caller assigns them.
 #[allow(clippy::too_many_arguments)]
+/// Whether the body currently shows the TOP-LEVEL main transcript — the only
+/// context where the empty-session tutorial may appear. A focused sidecar
+/// panel (or a subagent child view) is never top level: the sidecar's fresh
+/// empty nested view must show a bare panel, not the welcome tutorial.
+pub(crate) fn body_is_top_level(chat: &ChatView, subagent_focus: Option<usize>) -> bool {
+    subagent_focus.is_none() && !chat.sidecar_focus
+}
+
 pub(crate) fn compute_display<'a>(
     chat: &'a ChatView,
     subagent_focus: Option<usize>,
@@ -288,6 +296,14 @@ pub(crate) async fn fold_ui_events(
                                 rendered: crate::markdown::render(&display),
                             });
                             chat.push_marker(Line::from(""));
+                            // The queued prompt opens a NEW Turn: re-anchor
+                            // the ladder floor BELOW the echo (`begin_turn`
+                            // ran at the drain restart, before the echo
+                            // landed) so this turn's steps render as their
+                            // own `N Steps` group after the prompt — never
+                            // above it, never merged with the previous
+                            // turn's group.
+                            chat.reanchor_turn_after_user_echo();
                         }
                     }
                     queue_items.retain(|(s, _)| s != seq);

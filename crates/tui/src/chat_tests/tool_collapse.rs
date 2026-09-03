@@ -4,9 +4,11 @@
 //! calls (assistant text, image, marker) splits the run. Within a group a
 //! step is one assistant round: a call merges into the trailing step while
 //! that step holds no finished call, otherwise a NEW step opens (sequential
-//! calls split, parallel calls share a step). Default render is a static
-//! `≡ N steps` marker with every step row listed below it; clicking a step
-//! row toggles that step; Ctrl+L collapses every step/call again.
+//! calls split, parallel calls share a step). Default render is ONE
+//! clickable group row `▸ N steps`; clicking it lists the step rows,
+//! clicking a step row reveals its thinking + `▸ N function calls`
+//! aggregation row, clicking that lists the call rows, and clicking a call
+//! row expands that call's output; Ctrl+L collapses every level again.
 
 use super::super::*;
 
@@ -131,7 +133,7 @@ fn sequential_calls_split_into_steps() {
 }
 
 #[test]
-fn collapsed_by_default_renders_single_count_line() {
+fn collapsed_by_default_renders_single_group_row() {
     let mut v = ChatView::default();
     for id in ["a", "b"] {
         v.apply(&SessionEvent::ToolStart {
@@ -148,18 +150,20 @@ fn collapsed_by_default_renders_single_count_line() {
         });
     }
     let lines = flatten_text(&v);
-    // Marker + both step rows + trailing blank.
-    assert_eq!(lines.len(), 4, "default render: marker + step rows + blank");
+    // Group row + trailing blank: the whole ladder is one clickable row.
+    assert_eq!(lines.len(), 2, "default render: group row + blank");
     assert!(
-        lines[0].contains("\u{2261} 2 steps"),
-        "static marker carries the step count: {:?}",
+        lines[0].contains("\u{25b8} 2 steps"),
+        "collapsed group row carries the step count: {:?}",
         lines[0]
     );
     assert!(
-        lines[1].contains("\u{25b8} Step(1)") && lines[2].contains("\u{25b8} Step(2)"),
-        "every step row renders by default: {lines:?}"
+        !lines[0].contains("\u{276f}"),
+        "closed group must use the closed glyph: {:?}",
+        lines[0]
     );
-    // Closed steps hide all call headers and outputs.
+    // Step rows, call headers and outputs are all folded away.
+    assert!(!lines.iter().any(|l| l.contains("Step(")));
     assert!(!lines.iter().any(|l| l.contains("echo a")));
     assert!(!lines.iter().any(|l| l.contains("a-out")));
 
@@ -179,13 +183,12 @@ fn collapsed_by_default_renders_single_count_line() {
         images: Vec::new(),
     });
     let solo = flatten_text(&v1);
-    assert_eq!(solo.len(), 3, "marker + one step row + blank");
+    assert_eq!(solo.len(), 2, "group row + blank");
     assert!(
         solo[0].contains("1 step") && !solo[0].contains("steps"),
         "single step uses singular: {:?}",
         solo[0]
     );
-    assert!(solo[1].contains("Step(1)"));
 }
 
 #[test]
@@ -216,10 +219,11 @@ fn running_hint_in_group_line_while_call_unfinished() {
 }
 
 #[test]
-fn toggling_steps_reveals_the_ladder() {
-    // Two sequential calls, no thinking. Default = marker + 2 step rows +
-    // trailing blank = 4; a step opened adds its
-    // call header = 5; the call expanded adds output + blank = 7.
+fn toggling_the_ladder_reveals_each_level() {
+    // Two sequential calls, no thinking. Default = group row + blank = 2;
+    // group open = + 2 step rows = 4; step 1 open = + aggregation row = 5;
+    // call list open = + call header = 6; call expanded = + output + blank
+    // = 8.
     let mut v = ChatView::default();
     for id in ["a", "b"] {
         v.apply(&SessionEvent::ToolStart {
@@ -236,20 +240,30 @@ fn toggling_steps_reveals_the_ladder() {
         });
     }
     let list = flatten_text(&v);
-    assert_eq!(list.len(), 4, "default = marker + 2 step rows + blank");
+    assert_eq!(list.len(), 2, "default = group row + blank");
     assert!(
-        list[0].contains("\u{2261} 2 steps"),
-        "static marker: {:?}",
+        list[0].contains("\u{25b8} 2 steps"),
+        "collapsed group row: {:?}",
         list[0]
     );
+
+    // Open the group: both closed step rows appear.
+    v.toggle_tool_call_at(0, 0);
+    let open_group = flatten_text(&v);
+    assert_eq!(open_group.len(), 4);
     assert!(
-        list[1].contains("\u{25b8} Step(1)") && list[2].contains("\u{25b8} Step(2)"),
-        "both steps render collapsed rows: {list:?}"
+        open_group[0].contains("\u{276f} 2 steps"),
+        "open group glyph: {:?}",
+        open_group[0]
+    );
+    assert!(
+        open_group[1].contains("\u{25b8} Step(1)") && open_group[2].contains("\u{25b8} Step(2)"),
+        "both steps render collapsed rows: {open_group:?}"
     );
 
-    // Open step 1: its row flips to the open glyph and its call header row
-    // appears (no thinking -> no Thinking row).
-    v.toggle_tool_call_at(0, 0);
+    // Open step 1: its aggregation row appears (no thinking → no Thinking
+    // row).
+    v.toggle_tool_call_at(0, 1);
     let open_step = flatten_text(&v);
     assert_eq!(open_step.len(), 5);
     assert!(
@@ -258,31 +272,43 @@ fn toggling_steps_reveals_the_ladder() {
         open_step[1]
     );
     assert!(
-        open_step[2].contains("echo a"),
-        "call header: {:?}",
+        open_step[2].contains("\u{25b8} 1 function call"),
+        "aggregation row: {:?}",
         open_step[2]
     );
 
-    // Expand that call (flat target 1 = step 1's call): output + blank.
-    v.toggle_tool_call_at(0, 1);
-    let expanded = flatten_text(&v);
-    assert_eq!(expanded.len(), 7, "call output + blank join the ladder");
+    // Open the call list: the call header row appears.
+    v.toggle_tool_call_at(0, 2);
+    let open_calls = flatten_text(&v);
+    assert_eq!(open_calls.len(), 6);
     assert!(
-        expanded[3].contains("a-out"),
-        "output visible: {:?}",
-        expanded[3]
+        open_calls[2].contains("\u{276f} 1 function call"),
+        "opened aggregation glyph: {:?}",
+        open_calls[2]
+    );
+    assert!(
+        open_calls[3].contains("echo a"),
+        "call header: {:?}",
+        open_calls[3]
     );
 
-    // Re-toggling the step collapses it (and its rows) again; the static
-    // marker and every step row stay rendered.
-    v.toggle_tool_call_at(0, 0);
-    assert_eq!(v.flatten().len(), 4, "step closed removes its rows");
-    let closed = flatten_text(&v);
+    // Expand that call: output + blank join the ladder.
+    v.toggle_tool_call_at(0, 3);
+    let expanded = flatten_text(&v);
+    assert_eq!(expanded.len(), 8, "call output + blank join the ladder");
     assert!(
-        closed[0].contains("\u{2261} 2 steps")
-            && closed[1].contains("\u{25b8} Step(1)")
-            && closed[2].contains("\u{25b8} Step(2)"),
-        "marker + step rows persist: {closed:?}"
+        expanded[4].contains("a-out"),
+        "output visible: {:?}",
+        expanded[4]
+    );
+
+    // Re-toggling the group collapses the whole ladder; the group row stays.
+    v.toggle_tool_call_at(0, 0);
+    let closed = flatten_text(&v);
+    assert_eq!(closed.len(), 2, "group closed folds every level");
+    assert!(
+        closed[0].contains("\u{25b8} 2 steps"),
+        "group row persists: {closed:?}"
     );
 }
 
@@ -399,7 +425,6 @@ fn tool_end_error_colors_output_red() {
 #[test]
 fn collapse_all_collapsible_resets_groups_and_thinking() {
     let mut v = ChatView::default();
-    v.apply(&SessionEvent::ReasoningDelta("reason".into()));
     v.apply(&SessionEvent::ToolStart {
         id: "t".into(),
         name: "bash".into(),
@@ -412,13 +437,20 @@ fn collapse_all_collapsible_resets_groups_and_thinking() {
         is_error: false,
         images: Vec::new(),
     });
+    // A pure-text round keeps a standalone Thinking block (a tool round
+    // would absorb its thinking into the step).
+    v.apply(&SessionEvent::ReasoningDelta("reason".into()));
+    v.apply(&SessionEvent::TextDelta("spoken".into()));
+    v.apply(&SessionEvent::Done);
     // Expand everything so they are observably NOT collapsed beforehand.
     for h in v.thinking_headers() {
         v.toggle_thinking_at(h.block_idx);
     }
     for b in v.blocks.iter_mut() {
-        if let ChatBlock::StepGroup { steps } = b {
+        if let ChatBlock::StepGroup { open, steps, .. } = b {
+            *open = true;
             steps[0].open = true;
+            steps[0].calls_open = true; // call list open
             steps[0].calls[0].expanded = true; // call output expanded
         }
     }
@@ -428,12 +460,13 @@ fn collapse_all_collapsible_resets_groups_and_thinking() {
             ChatBlock::Thinking { collapsed, .. } => {
                 assert!(*collapsed, "thinking must be collapsed");
             }
-            ChatBlock::StepGroup { steps } => {
+            ChatBlock::StepGroup { open, steps, .. } => {
                 assert!(
-                    steps
-                        .iter()
-                        .all(|s| !s.open && s.calls.iter().all(|c| !c.expanded)),
-                    "steps and call outputs must be collapsed after Ctrl+L"
+                    !*open
+                        && steps.iter().all(|s| {
+                            !s.open && !s.calls_open && s.calls.iter().all(|c| !c.expanded)
+                        }),
+                    "every ladder level must be collapsed after Ctrl+L"
                 );
             }
             _ => {}
@@ -451,17 +484,41 @@ fn step_row_line_index_lands_on_the_step_row() {
         name: "bash".into(),
         input: serde_json::json!({"command": "echo x"}),
     });
-    let headers = v.tool_call_headers();
-    assert_eq!(headers.len(), 1, "expected exactly one step-row header");
-    let flat = v.flatten();
-    let header_line: String = flat[headers[0].header_line_idx]
+    // Collapsed ladder: exactly one target — the group row (with its live
+    // spinner hint, since the call is still running).
+    let (group_idx, group_line) = {
+        let headers = v.tool_call_headers();
+        assert_eq!(headers.len(), 1, "expected exactly the group-row header");
+        let line: String = v.flatten()[headers[0].header_line_idx]
+            .spans
+            .iter()
+            .map(|s| s.content.clone())
+            .collect();
+        (headers[0].header_line_idx, line)
+    };
+    assert!(
+        group_line.contains("1 step") && group_line.contains("running"),
+        "header_line_idx must land on the group row; got: {group_line:?}"
+    );
+
+    // Open the group: the step row becomes the second target and must land
+    // exactly one line below the group row.
+    // `Done` leaves a marker block, so the group lands at index 2.
+    v.toggle_tool_call_at(2, 0);
+    let step_idx = v.tool_call_headers()[1].header_line_idx;
+    let step_line: String = v.flatten()[step_idx]
         .spans
         .iter()
         .map(|s| s.content.clone())
         .collect();
     assert!(
-        header_line.contains("Step(1)"),
-        "header_line_idx must land on the step row; got: {header_line:?}"
+        step_line.contains("Step(1)"),
+        "header_line_idx must land on the step row; got: {step_line:?}"
+    );
+    assert_eq!(
+        step_idx,
+        group_idx + 1,
+        "step row directly follows the group row"
     );
 }
 

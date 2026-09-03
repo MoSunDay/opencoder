@@ -59,10 +59,11 @@ pub(crate) struct SubagentBtn {
     pub rect: Rect,
 }
 
-/// A clickable row inside an open `StepGroup`. `call_idx` is the FLAT index
-/// into the group's visible rows (step rows + open steps' call header rows,
-/// render order — the same walk `collect_headers` and `visible_targets`
-/// enumerate); clicking toggles that step or that call's output.
+/// A clickable row inside a `StepGroup`'s ladder. `call_idx` is the FLAT
+/// index into the group's visible rows (group row, step rows, calls
+/// aggregation rows, call header rows in render order — the same walk
+/// `collect_headers` and `visible_targets` enumerate); clicking toggles that
+/// group / step / calls list / single call's output.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct ToolCallBtn {
     pub block_idx: usize,
@@ -179,10 +180,10 @@ pub(super) fn record_compaction_hits(
     }
 }
 
-/// Populate `out` with one `ToolCallBtn` per clickable row (step rows + call
-/// header rows) that is currently visible inside the body viewport. Step
-/// rows always render under the static group marker; open steps additionally
-/// emit their call header rows.
+/// Populate `out` with one `ToolCallBtn` per clickable ladder row that is
+/// currently visible inside the body viewport: the group rows, the step rows
+/// (while their group is open), the calls aggregation rows (while their step
+/// is open) and the call header rows (while their step's call list is open).
 #[allow(clippy::too_many_arguments)]
 pub(super) fn record_tool_call_hits(
     chat: &ChatView,

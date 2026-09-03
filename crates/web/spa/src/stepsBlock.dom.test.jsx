@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
-// StepsBlock DOM smoke: a `steps` turn renders the static `≡ N steps`
-// marker and BOTH per-step rows immediately (NO group collapse — the ladder
-// is always visible), with thinking/call content hidden until a step header
-// is clicked; call rows then expand to their input/output paragraphs.
-// Collapse-all is exercised both ways: Ctrl+L on window and the `⤒ 收起`
-// link bump the epoch key on Bubble.List, remounting every bubble closed.
+// StepsBlock DOM drill-down: the THREE-LEVEL ladder (group row → step rows →
+// thinking + calls-aggregate → per-call rows). Zero clicks render ONLY the
+// L0 group row (`❯ 2 steps [running|error]`); each level needs one click to
+// reveal the next. Say stays a separate top-level ai bubble AFTER the steps
+// bubble. Collapse-all works both ways: Ctrl+L on window and the `⤒ 收起`
+// link bump the epoch key on Bubble.List, remounting every bubble so all
+// (uncontrolled) Collapses reset closed.
 // ./sse.js is module-mocked like subagentBlock.dom.test.jsx (transitively
 // imported via subagentBlock.jsx; no drill-in is opened here).
 
@@ -50,74 +51,136 @@ afterEach(() => {
   cleanup();
 });
 
-describe('StepsContent ladder', () => {
-  it('renders the marker and both step rows immediately, content hidden', () => {
+describe('StepsContent three-level drill-down', () => {
+  it('renders ONLY the group row at zero clicks — the whole ladder stays out of the DOM', () => {
     mount();
-    expect(screen.getByText(/≡ 2 steps/)).toBeTruthy();
+    expect(screen.getByText('❯ 2 steps')).toBeTruthy();
+    // L1 step rows, L2 thinking + aggregate row, L3 call rows: all hidden.
+    expect(screen.queryByText(/❯ Step\(1\)/)).toBeNull();
+    expect(screen.queryByText(/❯ Step\(2\)/)).toBeNull();
+    expect(screen.queryByText('💭 Thinking')).toBeNull();
+    expect(screen.queryByText(/function call/)).toBeNull();
+    expect(screen.queryByText(/🔧 bash/)).toBeNull();
+    expect(screen.queryByText('ls -la')).toBeNull();
+    expect(screen.queryByText('total 8')).toBeNull();
+  });
+
+  it('clicking the group row reveals the step rows; thinking stays hidden (L0 → L1)', () => {
+    mount();
+    fireEvent.click(screen.getByText('❯ 2 steps'));
     expect(screen.getByText(/❯ Step\(1\)/)).toBeTruthy();
     expect(screen.getByText(/❯ Step\(2\)/)).toBeTruthy();
-    // Default closed: neither the step thinking nor the call row is rendered.
+    // Not drilled into Step(1) yet: no thinking, no aggregate row, no calls.
+    expect(screen.queryByText('💭 Thinking')).toBeNull();
     expect(screen.queryByText('look at the repo first')).toBeNull();
+    expect(screen.queryByText(/function call/)).toBeNull();
     expect(screen.queryByText(/🔧 bash/)).toBeNull();
   });
 
-  it('shows running while a call is open, error once a finished call failed', () => {
-    const running = stepsTurn();
-    running.steps[0].calls[0].output = null;
-    mount([running]);
-    expect(screen.getByText('running')).toBeTruthy();
-    expect(screen.queryByText('error')).toBeNull();
-
-    cleanup();
-    const errored = stepsTurn();
-    errored.steps[0].calls[0].isError = true;
-    mount([errored]);
-    // Marker-level error (nothing running) + the errored step's own tag.
-    expect(screen.getAllByText('error').length).toBeGreaterThanOrEqual(2);
-    expect(screen.queryByText('running')).toBeNull();
+  it('clicking a step row shows thinking DIRECTLY + the calls-aggregate row (L1 → L2)', () => {
+    mount();
+    fireEvent.click(screen.getByText('❯ 2 steps'));
+    fireEvent.click(screen.getByText(/❯ Step\(1\)/));
+    // Thinking is a direct render inside the step — no ghost collapse level.
+    expect(screen.getByText('💭 Thinking')).toBeTruthy();
+    expect(screen.getByText('look at the repo first')).toBeTruthy();
+    // The step's calls collapsed behind the aggregate row.
+    expect(screen.getByText('❯ 1 function call')).toBeTruthy();
+    expect(screen.queryByText(/🔧 bash/)).toBeNull();
   });
 
-  it('expands a step to its thinking row + call row, then the call to input/output', () => {
-    const { container } = mount();
-    const headers = container.querySelectorAll('.ant-collapse-header');
-    fireEvent.click(headers[0]); // ❯ Step(1)
-    expect(screen.getByText('💭 Thinking')).toBeTruthy();
+  it('clicking the aggregate row reveals call rows but not their payloads (L2 → L3)', () => {
+    mount();
+    fireEvent.click(screen.getByText('❯ 2 steps'));
+    fireEvent.click(screen.getByText(/❯ Step\(1\)/));
+    fireEvent.click(screen.getByText('❯ 1 function call'));
     expect(screen.getByText(/🔧 bash/)).toBeTruthy();
-    // The think row is itself a collapsed collapse: its text stays hidden.
-    expect(screen.queryByText('look at the repo first')).toBeNull();
-    // Open the call row → exact fixture strings for input/output.
+    expect(screen.queryByText('ls -la')).toBeNull();
+    expect(screen.queryByText('total 8')).toBeNull();
+  });
+
+  it('clicking a single call row expands its exact input/output', () => {
+    mount();
+    fireEvent.click(screen.getByText('❯ 2 steps'));
+    fireEvent.click(screen.getByText(/❯ Step\(1\)/));
+    fireEvent.click(screen.getByText('❯ 1 function call'));
     fireEvent.click(screen.getByText(/🔧 bash/));
     expect(screen.getByText('ls -la')).toBeTruthy();
     expect(screen.getByText('total 8')).toBeTruthy();
   });
 
-  it('Ctrl+L collapses everything expanded; step rows remain', () => {
-    const { container } = mount();
-    fireEvent.click(container.querySelectorAll('.ant-collapse-header')[0]);
+  it('Ctrl+L collapses the fully-drilled ladder back to the lone group row', () => {
+    mount();
+    fireEvent.click(screen.getByText('❯ 2 steps'));
+    fireEvent.click(screen.getByText(/❯ Step\(1\)/));
+    fireEvent.click(screen.getByText('❯ 1 function call'));
     fireEvent.click(screen.getByText(/🔧 bash/));
     expect(screen.getByText('total 8')).toBeTruthy();
     fireEvent.keyDown(window, { key: 'l', ctrlKey: true });
-    expect(screen.getByText(/≡ 2 steps/)).toBeTruthy();
-    expect(screen.getByText(/❯ Step\(1\)/)).toBeTruthy();
-    expect(screen.getByText(/❯ Step\(2\)/)).toBeTruthy();
+    expect(screen.getByText('❯ 2 steps')).toBeTruthy();
+    expect(screen.queryByText(/❯ Step\(1\)/)).toBeNull();
+    expect(screen.queryByText('look at the repo first')).toBeNull();
+    expect(screen.queryByText(/function call/)).toBeNull();
     expect(screen.queryByText(/🔧 bash/)).toBeNull();
     expect(screen.queryByText('total 8')).toBeNull();
   });
 
   it('the ⤒ 收起 link resets the ladder the same way', () => {
-    const { container } = mount();
-    fireEvent.click(container.querySelectorAll('.ant-collapse-header')[1]); // Step(2)
-    expect(screen.getByText(/🔧 read/)).toBeTruthy();
+    mount();
+    fireEvent.click(screen.getByText('❯ 2 steps'));
+    fireEvent.click(screen.getByText(/❯ Step\(2\)/));
+    expect(screen.getByText('❯ 1 function call')).toBeTruthy();
     fireEvent.click(screen.getByText('⤒ 收起'));
-    expect(screen.getByText(/❯ Step\(2\)/)).toBeTruthy();
-    expect(screen.queryByText(/🔧 read/)).toBeNull();
+    expect(screen.getByText('❯ 2 steps')).toBeTruthy();
+    expect(screen.queryByText(/❯ Step\(2\)/)).toBeNull();
+    expect(screen.queryByText(/function call/)).toBeNull();
+  });
+
+  it('shows the running tag on the group row while a call is open', () => {
+    const running = stepsTurn();
+    running.steps[0].calls[0].output = null;
+    mount([running]);
+    expect(screen.getByText('running')).toBeTruthy();
+    expect(screen.queryByText('error')).toBeNull();
+  });
+
+  it('shows the error tag on the group row (and on the failed step once expanded)', () => {
+    const errored = stepsTurn();
+    errored.steps[0].calls[0].isError = true;
+    mount([errored]);
+    // Zero clicks: only the group-row tag is in the document.
+    expect(screen.getByText('error')).toBeTruthy();
+    expect(screen.queryByText('running')).toBeNull();
+    fireEvent.click(screen.getByText('❯ 2 steps'));
+    // Step(1) carries the failed call → its own red tag next to the label.
+    expect(screen.getAllByText('error').length).toBe(2);
+  });
+
+  it('singular/plural labels: 1 step → `❯ 1 step`; 2 calls → `❯ 2 function calls`', () => {
+    const one = {
+      kind: 'steps',
+      role: 'assistant',
+      steps: [{
+        thinking: '',
+        calls: [
+          { kind: 'tool', role: 'assistant', id: 'a', name: 'bash', input: 'x', output: 'y', isError: false, durationMs: 10, startedAt: 0 },
+          { kind: 'tool', role: 'assistant', id: 'b', name: 'read', input: 'x', output: 'y', isError: false, durationMs: 10, startedAt: 0 },
+        ],
+      }],
+    };
+    mount([one]);
+    expect(screen.getByText('❯ 1 step')).toBeTruthy();
+    expect(screen.queryByText(/❯ 1 steps/)).toBeNull();
+    fireEvent.click(screen.getByText('❯ 1 step'));
+    fireEvent.click(screen.getByText(/❯ Step\(1\)/));
+    expect(screen.getByText('❯ 2 function calls')).toBeTruthy();
   });
 
   it('renders Say as a separate top-level bubble AFTER the steps bubble', () => {
     const { container } = mount([stepsTurn(), { kind: 'text', role: 'assistant', text: 'all done here' }]);
     expect(container.querySelectorAll('.ant-bubble')).toHaveLength(2);
-    const marker = screen.getByText(/≡ 2 steps/);
+    const group = screen.getByText('❯ 2 steps');
     const say = screen.getByText('all done here');
-    expect(marker.compareDocumentPosition(say) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(group.compareDocumentPosition(say) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });

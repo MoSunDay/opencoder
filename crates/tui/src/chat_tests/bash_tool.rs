@@ -1,7 +1,8 @@
 //! `!cmd` local bash-tool helpers (`push_bash_tool` / `finish_bash_tool`):
-//! a single-call `StepGroup` that starts with its step + output expanded
-//! (output visible while the command runs) and collapses the step once the
-//! command finishes.
+//! a single-call `StepGroup` that starts fully expanded through every
+//! ladder level (group → step → calls list → output, so the output is
+//! visible while the command runs) and collapses back to the closed group
+//! row once the command finishes.
 
 use super::super::*;
 
@@ -10,11 +11,11 @@ fn push_bash_tool_starts_in_results_state() {
     let mut v = ChatView::default();
     v.push_bash_tool("echo hi");
     match v.blocks.last() {
-        Some(ChatBlock::StepGroup { steps }) => {
+        Some(ChatBlock::StepGroup { steps, open, .. }) => {
             assert_eq!(steps.len(), 1);
             assert!(
-                steps[0].open && steps[0].calls[0].expanded,
-                "local `!cmd` runs visible from the start (step + output expanded)"
+                *open && steps[0].open && steps[0].calls_open && steps[0].calls[0].expanded,
+                "local `!cmd` runs visible from the start (whole ladder expanded)"
             );
             assert!(
                 steps[0].calls[0].id.starts_with("bash-"),
@@ -33,7 +34,7 @@ fn finish_bash_tool_fills_output_and_collapses() {
     v.finish_bash_tool("hello\nworld");
 
     match v.blocks.last() {
-        Some(ChatBlock::StepGroup { steps }) => {
+        Some(ChatBlock::StepGroup { steps, open, .. }) => {
             let call = &steps[0].calls[0];
             assert!(
                 !call.output.is_empty(),
@@ -50,8 +51,8 @@ fn finish_bash_tool_fills_output_and_collapses() {
                 "output must preserve both lines; got {joined:?}"
             );
             assert!(
-                !steps[0].open && !call.expanded,
-                "step + output must collapse once the command finishes"
+                !*open && !steps[0].open && !steps[0].calls_open && !call.expanded,
+                "every ladder level must collapse once the command finishes"
             );
             assert!(
                 call.elapsed_ms.is_some(),

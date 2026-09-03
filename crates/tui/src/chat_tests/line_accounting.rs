@@ -55,14 +55,17 @@ fn tool_call(id: &str, out_lines: usize) -> ToolCall {
     }
 }
 
-/// Build a single-call closed step group: marker + step row + blank = 3.
+/// Build a single-call step group in its default (collapsed) state: the
+/// group row + trailing blank = 2 lines.
 fn step_group_closed() -> ChatBlock {
     ChatBlock::StepGroup {
         steps: vec![Step {
             thinking: Vec::new(),
             calls: vec![tool_call("t", 1)],
             open: false,
+            calls_open: false,
         }],
+        open: false,
     }
 }
 
@@ -113,17 +116,26 @@ fn assert_line_accounting_matches(view: &ChatView) {
                     expected += text.lines().count();
                 }
             }
-            ChatBlock::StepGroup { steps } => {
-                // Mirrors the StepGroup arm in collect_headers.
-                expected += 1; // static marker row
-                for s in steps {
-                    expected += 1; // step row
-                    if s.open {
-                        if !s.thinking.is_empty() {
-                            expected += 1 + s.thinking.len();
-                        }
-                        for c in &s.calls {
-                            expected += 1 + if c.expanded { 1 + c.output.len() } else { 0 };
+            ChatBlock::StepGroup { steps, open } => {
+                // Mirrors the StepGroup arm in collect_headers: group row,
+                // then the three-level ladder while open, then one blank.
+                expected += 1; // group row
+                if *open {
+                    for s in steps {
+                        expected += 1; // step row
+                        if s.open {
+                            if !s.thinking.is_empty() {
+                                expected += 1 + s.thinking.len();
+                            }
+                            if !s.calls.is_empty() {
+                                expected += 1; // calls aggregation row
+                                if s.calls_open {
+                                    for c in &s.calls {
+                                        expected +=
+                                            1 + if c.expanded { 1 + c.output.len() } else { 0 };
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -239,14 +251,14 @@ fn mixed_sequence_alignment() {
         assistant_streaming("q\nr"), // 3 lines
         assistant_done(2),           // 3 lines
         marker_n(1),                 // 1 line
-        step_group_closed(),         // 3 lines
+        step_group_closed(),         // 2 lines (group row + blank)
     ]);
     assert_line_accounting_matches(&v);
 
-    // Verify the step-row header_line_idx points at the actual step row.
+    // Verify the group-row header_line_idx points at the actual group row.
     let flat = v.flatten();
     let headers = v.tool_call_headers();
-    assert_eq!(headers.len(), 1, "expected exactly one step row");
+    assert_eq!(headers.len(), 1, "expected exactly the group row");
     let idx = headers[0].header_line_idx;
     assert!(
         idx < flat.len(),
@@ -255,12 +267,12 @@ fn mixed_sequence_alignment() {
     );
     let line_text: String = flat[idx].spans.iter().map(|s| s.content.clone()).collect();
     assert!(
-        line_text.contains("Step(1)"),
-        "header_line_idx {idx} points at {:?}, expected the step row",
+        line_text.contains("1 step"),
+        "header_line_idx {idx} points at {:?}, expected the group row",
         line_text
     );
-    // Expected step row position = 3 + 4 + 2 + 3 + 3 + 1 (marker) + 1 = 17.
-    assert_eq!(idx, 17, "step row should land at line 17");
+    // Expected group-row position = 3 + 4 + 2 + 3 + 3 + 1 (marker) = 16.
+    assert_eq!(idx, 16, "group row should land at line 16");
 }
 
 #[test]
@@ -275,20 +287,22 @@ fn empty_image_followed_by_tool_alignment() {
     let headers = v.tool_call_headers();
     assert_eq!(headers.len(), 1);
     let idx = headers[0].header_line_idx;
-    // 0=image header, 1=placeholder, 2=blank, 3=group marker, 4=step row.
-    assert_eq!(idx, 4);
+    // 0=image header, 1=placeholder, 2=blank, 3=group row (collapsed group).
+    assert_eq!(idx, 3);
     let line_text: String = flat[idx].spans.iter().map(|s| s.content.clone()).collect();
-    assert!(line_text.contains("Step(1)"), "got {:?}", line_text);
+    assert!(line_text.contains("1 step"), "got {:?}", line_text);
 }
 
 #[test]
 fn step_group_ladder_depth_alignment() {
     // The StepGroup line accounting must match flatten_with at EVERY ladder
     // depth — this is the invariant that keeps click hit-rects aligned.
-    // 2 steps with 1 and 2 output lines:
-    //   steps closed                 = 1 + 2 + 1
-    //   steps open, calls expanded   = 1 + (1+1+1+1) + (1+1+1) + 1
-    let mk = |open_steps: bool, expand: bool| {
+    // 2 steps (1 call each, outputs 1 and 2 lines):
+    //   group closed                       = 1 + 1
+    //   group open, steps closed           = 1 + 2 + 1
+    //   group open, steps open, calls shut = 1 + (1+1)*2 + 1
+    //   fully open, call "a" expanded      = 1 + (1+1+1+3) + (1+1+1) + 1
+    let mk = |group_open: bool, open_steps: bool, calls_open: bool, expand: bool| {
         let mut a = tool_call("a", 1);
         a.expanded = expand;
         view_with(vec![
@@ -298,52 +312,51 @@ fn step_group_ladder_depth_alignment() {
                         thinking: Vec::new(),
                         calls: vec![a],
                         open: open_steps,
+                        calls_open,
                     },
                     Step {
                         thinking: Vec::new(),
                         calls: vec![tool_call("b", 2)],
                         open: open_steps,
+                        calls_open,
                     },
                 ],
+                open: group_open,
             },
             marker_n(1),
         ])
     };
-    let v = view_with(vec![
-        ChatBlock::StepGroup {
-            steps: vec![Step {
-                thinking: Vec::new(),
-                calls: vec![tool_call("a", 1)],
-                open: false,
-            }],
-        },
-        marker_n(1),
-    ]);
-    assert_line_accounting_matches(&v);
-    // marker + step row + blank + marker_n.
-    assert_eq!(v.flatten().len(), 3 + 1);
 
-    let v = mk(false, false);
+    // Collapsed group (the default): group row + trailing blank only.
+    let v = mk(false, false, false, false);
     assert_line_accounting_matches(&v);
-    // marker + 2 step rows + blank + marker_n.
+    assert_eq!(v.flatten().len(), 2 + 1);
+
+    // Group open, steps closed: group row + 2 step rows + blank.
+    let v = mk(true, false, false, false);
+    assert_line_accounting_matches(&v);
     assert_eq!(v.flatten().len(), 4 + 1);
 
-    let v = mk(true, true);
+    // Steps open, call lists shut: + aggregation row per step.
+    let v = mk(true, true, false, false);
     assert_line_accounting_matches(&v);
-    // Only call "a" is expanded; "b" renders its header only:
-    // marker(1) + S1(1) + a hdr(1) + a out(1) + blank(1) + S2(1) + b hdr(1)
-    // + trailing blank(1) + marker(1) = 9.
-    assert_eq!(v.flatten().len(), 9);
+    assert_eq!(v.flatten().len(), 6 + 1);
+
+    // Fully open; only call "a" is expanded so it also renders its 1 output
+    // line + separator blank:
+    // group(1) + S1(1)+agg(1)+a hdr(1)+a out(1)+sep(1)
+    //          + S2(1)+agg(1)+b hdr(1) + trailing blank(1) + marker(1) = 11.
+    let v = mk(true, true, true, true);
+    assert_line_accounting_matches(&v);
+    assert_eq!(v.flatten().len(), 11);
 }
 
 #[test]
 fn step_group_with_expanded_call_keeps_alignment() {
-    // Per-call expansion in an open step: only call "a" shows its output.
-    // Marker (1) + S1 row (1) + a (header 1 + blank 1 + 1 output)
-    // + S2 row (1) + b header (1) + trailing blank (1) + marker (1) = 9.
-    // The recorded hit rows must point at the rendered step/call rows, and
-    // expanding a call must shift the rows after it by exactly its output +
-    // separator.
+    // Per-call expansion in an open call list: only call "a" shows its
+    // output. The recorded hit rows must point at the rendered group/step/
+    // aggregation/call rows, and expanding a call must shift the rows after
+    // it by exactly its output + separator.
     let mut a = tool_call("a", 1);
     a.expanded = true;
     let v = view_with(vec![
@@ -353,39 +366,48 @@ fn step_group_with_expanded_call_keeps_alignment() {
                     thinking: Vec::new(),
                     calls: vec![a],
                     open: true,
+                    calls_open: true,
                 },
                 Step {
                     thinking: Vec::new(),
                     calls: vec![tool_call("b", 2)],
                     open: true,
+                    calls_open: true,
                 },
             ],
+            open: true,
         },
         marker_n(1),
     ]);
     assert_line_accounting_matches(&v);
-    // marker(1) + S1 row(1) + a (hdr + out + blank = 3) + S2 row(1)
-    // + b hdr(1) + trailing blank(1) + marker(1) = 9.
-    assert_eq!(v.flatten().len(), 1 + 1 + 3 + 1 + 1 + 1 + 1);
+    // group(1) + S1 row(1) + agg(1) + a hdr(1) + a out(1) + sep(1)
+    // + S2 row(1) + agg(1) + b hdr(1) + trailing blank(1) + marker(1) = 11.
+    assert_eq!(v.flatten().len(), 11);
 
     let call_headers = v.tool_call_headers();
     assert_eq!(
         call_headers.len(),
-        4,
-        "2 step rows + 2 call header rows (b not expanded but its row renders)"
+        7,
+        "group row + 2 step rows + 2 aggregation rows + 2 call header rows"
     );
-    assert_eq!(call_headers[0].call_idx, 0, "step 1 row");
-    assert_eq!(call_headers[0].header_line_idx, 1);
-    assert_eq!(call_headers[1].call_idx, 1, "call a's header row");
-    assert_eq!(call_headers[1].header_line_idx, 2);
+    assert_eq!(call_headers[0].call_idx, 0, "group row");
+    assert_eq!(call_headers[0].header_line_idx, 0);
+    assert_eq!(call_headers[1].call_idx, 1, "step 1 row");
+    assert_eq!(call_headers[1].header_line_idx, 1);
+    assert_eq!(call_headers[2].call_idx, 2, "step 1 aggregation row");
+    assert_eq!(call_headers[2].header_line_idx, 2);
+    assert_eq!(call_headers[3].call_idx, 3, "call a's header row");
+    assert_eq!(call_headers[3].header_line_idx, 3);
     assert_eq!(
-        call_headers[2].header_line_idx, 5,
+        call_headers[4].header_line_idx, 6,
         "step 2 sits after the expanded output + separator"
     );
-    assert_eq!(call_headers[3].call_idx, 3, "call b's header row");
-    assert_eq!(call_headers[3].header_line_idx, 6);
-    // Each recorded row must be a step row (`❯`/`▸ Step(`) or a call
-    // header line (`▸ `).
+    assert_eq!(call_headers[5].header_line_idx, 7, "step 2 aggregation row");
+    assert_eq!(call_headers[6].call_idx, 6, "call b's header row");
+    assert_eq!(call_headers[6].header_line_idx, 8);
+    // Each recorded row must be the group row (`{❯|▸} N step(s)`), a step
+    // row (`{❯|▸} Step(N)`), an aggregation row (`{❯|▸} N function call(s)`)
+    // or a call header line — all share the `{❯|▸} ` gutter prefix.
     let flat = v.flatten();
     for h in &call_headers {
         let text: String = flat[h.header_line_idx]
@@ -395,10 +417,8 @@ fn step_group_with_expanded_call_keeps_alignment() {
             .collect();
         let t = text.trim_start();
         assert!(
-            t.starts_with("\u{25b8} ")
-                || t.starts_with("\u{276f} Step(")
-                || t.starts_with("\u{25b8} Step("),
-            "row {} is not a step/call row: {text:?}",
+            t.starts_with("\u{25b8} ") || t.starts_with("\u{276f} "),
+            "row {} is not a ladder row: {text:?}",
             h.header_line_idx
         );
     }
@@ -407,7 +427,7 @@ fn step_group_with_expanded_call_keeps_alignment() {
 #[test]
 fn step_group_running_call_keeps_alignment() {
     // An unfinished call (elapsed_ms == None) adds a spinner SPAN to the
-    // marker row — never an extra line. Accounting must stay identical.
+    // group row — never an extra line. Accounting must stay identical.
     let v = view_with(vec![
         ChatBlock::StepGroup {
             steps: vec![Step {
@@ -421,10 +441,23 @@ fn step_group_running_call_keeps_alignment() {
                     expanded: false,
                 }],
                 open: false,
+                calls_open: false,
             }],
+            open: false,
         },
         marker_n(1),
     ]);
     assert_line_accounting_matches(&v);
-    assert_eq!(v.flatten().len(), 3 + 1);
+    // group row + trailing blank + marker_n.
+    assert_eq!(v.flatten().len(), 2 + 1);
+    // The spinner hint rides on the group row itself.
+    let row: String = v.flatten()[0]
+        .spans
+        .iter()
+        .map(|s| s.content.clone())
+        .collect();
+    assert!(
+        row.contains("running"),
+        "group row should hint running: {row:?}"
+    );
 }

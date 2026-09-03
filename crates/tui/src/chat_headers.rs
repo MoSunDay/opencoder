@@ -26,13 +26,12 @@ impl ChatView {
         self.collect_headers().1
     }
 
-    /// Return each clickable row inside `StepGroup` blocks — step rows and
-    /// (while a step is open) its call header rows, in render order — as
-    /// `(block_idx, call_idx, header_line_idx)`. `call_idx` is the FLAT index
-    /// into that visible-row walk (shared shape with
-    /// `super::steps::visible_targets`), so clicking resolves exactly the
-    /// rendered row. The static `≡ N steps` marker is never clickable and is
-    /// only counted for line accounting.
+    /// Return each clickable row inside `StepGroup` blocks — the group row,
+    /// the step rows, the calls aggregation rows, and the call header rows,
+    /// in render order — as `(block_idx, call_idx, header_line_idx)`.
+    /// `call_idx` is the FLAT index into that visible-row walk (shared shape
+    /// with `super::steps::visible_targets`), so clicking resolves exactly
+    /// the rendered row.
     pub fn tool_call_headers(&self) -> Vec<ToolCallHeader> {
         self.collect_headers().3
     }
@@ -91,35 +90,57 @@ impl ChatView {
                         line_idx += text.lines().count();
                     }
                 }
-                ChatBlock::StepGroup { steps } => {
-                    // Mirrors `flatten_step_group` exactly: the static group
-                    // marker row always (counted for line accounting but NOT
-                    // clickable); per step the step row always, and while THAT
-                    // step is open its `💭 Thinking` header + thinking lines
-                    // and per call (header + output + blank when the call is
-                    // expanded); one trailing blank.
-                    line_idx += 1;
+                ChatBlock::StepGroup { steps, open, .. } => {
+                    // Mirrors `flatten_step_group` exactly (three-level
+                    // ladder): the group row always (a clickable target);
+                    // while the group is open, per step the step row (target),
+                    // and while THAT step is open its `💭 Thinking` header +
+                    // thinking lines plus — when it holds calls — the
+                    // aggregation row (target) and, while the call list is
+                    // open, each call header row (target; + output + blank
+                    // when the call is expanded); one trailing blank.
                     let mut call_idx = 0usize;
-                    for step in steps.iter() {
-                        tool_calls.push(ToolCallHeader {
-                            block_idx,
-                            call_idx,
-                            header_line_idx: line_idx,
-                        });
-                        call_idx += 1;
-                        line_idx += 1; // step row
-                        if step.open {
-                            if !step.thinking.is_empty() {
-                                line_idx += 1 + step.thinking.len();
-                            }
-                            for c in &step.calls {
-                                tool_calls.push(ToolCallHeader {
-                                    block_idx,
-                                    call_idx,
-                                    header_line_idx: line_idx,
-                                });
-                                call_idx += 1;
-                                line_idx += 1 + if c.expanded { 1 + c.output.len() } else { 0 };
+                    tool_calls.push(ToolCallHeader {
+                        block_idx,
+                        call_idx,
+                        header_line_idx: line_idx,
+                    });
+                    call_idx += 1;
+                    line_idx += 1; // group row
+                    if *open {
+                        for step in steps.iter() {
+                            tool_calls.push(ToolCallHeader {
+                                block_idx,
+                                call_idx,
+                                header_line_idx: line_idx,
+                            });
+                            call_idx += 1;
+                            line_idx += 1; // step row
+                            if step.open {
+                                if !step.thinking.is_empty() {
+                                    line_idx += 1 + step.thinking.len();
+                                }
+                                if !step.calls.is_empty() {
+                                    tool_calls.push(ToolCallHeader {
+                                        block_idx,
+                                        call_idx,
+                                        header_line_idx: line_idx,
+                                    });
+                                    call_idx += 1;
+                                    line_idx += 1; // calls aggregation row
+                                    if step.calls_open {
+                                        for c in &step.calls {
+                                            tool_calls.push(ToolCallHeader {
+                                                block_idx,
+                                                call_idx,
+                                                header_line_idx: line_idx,
+                                            });
+                                            call_idx += 1;
+                                            line_idx +=
+                                                1 + if c.expanded { 1 + c.output.len() } else { 0 };
+                                        }
+                                    }
+                                }
                             }
                         }
                     }

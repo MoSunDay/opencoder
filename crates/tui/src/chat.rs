@@ -344,6 +344,10 @@ impl ChatView {
                 self.frozen_round_ms = None;
                 self.subagents_running = 0;
                 self.hidden_assistant_idx = None;
+                // Turn complete: its echo must never resurface on a later
+                // rebuild (a bare `/act_clear_context` mid-run would
+                // otherwise resurrect the previous turn's prompt).
+                self.pending_turn_echo = None;
                 self.reconcile_orphaned_subagents();
                 self.finalize_assistant();
                 steps::set_turn_progress(&mut self.blocks, self.turn_block_start, false);
@@ -358,6 +362,7 @@ impl ChatView {
                 self.frozen_round_ms = None;
                 self.subagents_running = 0;
                 self.hidden_assistant_idx = None;
+                self.pending_turn_echo = None;
                 self.reconcile_orphaned_subagents();
                 self.finalize_assistant();
                 steps::set_turn_progress(&mut self.blocks, self.turn_block_start, false);
@@ -402,6 +407,10 @@ impl ChatView {
                         rendered: crate::markdown::render(&display),
                     });
                     self.push_marker(Line::from(""));
+                    // Remember the echo across a TranscriptReset rebuild (a
+                    // steered `/act_clear_context <tail>` resets the view
+                    // right after this event, before the tail is recorded).
+                    self.pending_turn_echo = Some(display.clone());
                     // The echoed steer is a NEW user input: per the Turn
                     // contract (1 turn = n steps + say) the rounds it
                     // triggers own a FRESH ladder below the echo — they must

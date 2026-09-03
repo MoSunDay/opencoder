@@ -369,10 +369,17 @@ pub(crate) fn absorb_pending_thinking(blocks: &mut Vec<ChatBlock>) -> Vec<Line<'
     for (i, block) in blocks.iter().enumerate().rev() {
         match block {
             ChatBlock::Assistant { .. } => continue,
-            ChatBlock::Thinking { text, .. } => {
+            // A sealed run is already counted and rendered where it sits —
+            // only an UNSEALED run is "pending" and may fold into a ladder.
+            ChatBlock::Thinking {
+                text,
+                sealed: false,
+                ..
+            } => {
                 texts.push(text.clone());
                 drop_idx.push(i);
             }
+            ChatBlock::Thinking { sealed: true, .. } => break,
             _ => break,
         }
     }

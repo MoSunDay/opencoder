@@ -74,7 +74,6 @@ pub(crate) struct DisplayState<'a> {
 /// when one is focused. The top-level title grades its segments by importance
 /// (subtle workdir, muted separators, accent model, pink thinking level). The
 /// mode remains in the bottom status bar. Pure: reads state, returns the values; the caller assigns them.
-#[allow(clippy::too_many_arguments)]
 /// Whether the body currently shows the TOP-LEVEL main transcript — the only
 /// context where the empty-session tutorial may appear. A focused sidecar
 /// panel (or a subagent child view) is never top level: the sidecar's fresh
@@ -83,6 +82,7 @@ pub(crate) fn body_is_top_level(chat: &ChatView, subagent_focus: Option<usize>) 
     subagent_focus.is_none() && !chat.sidecar_focus
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn compute_display<'a>(
     chat: &'a ChatView,
     subagent_focus: Option<usize>,
@@ -296,6 +296,10 @@ pub(crate) async fn fold_ui_events(
                                 rendered: crate::markdown::render(&display),
                             });
                             chat.push_marker(Line::from(""));
+                            // Remember the echo across a TranscriptReset
+                            // rebuild (a queued `/act_clear_context <tail>`
+                            // resets the view right after this event).
+                            chat.pending_turn_echo = Some(display.clone());
                             // The queued prompt opens a NEW Turn: re-anchor
                             // the ladder floor BELOW the echo (`begin_turn`
                             // ran at the drain restart, before the echo

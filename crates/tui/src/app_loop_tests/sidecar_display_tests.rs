@@ -137,3 +137,29 @@ fn focused_sidecar_ctx_is_scoped_to_the_sidecar_view() {
     assert_eq!(ds.display_ctx, 12, "sidecar ctx excludes the parent spend");
     assert_eq!(ds.display_sys, 777, "system-prompt tokens are shared");
 }
+
+/// Entering `/sidecar` must not surface the empty-session tutorial: the
+/// focused panel's fresh nested view is display-swapped into the body, and
+/// the tutorial gate (`body_is_top_level`) must treat it as non-top-level —
+/// same rule as a focused subagent child view.
+#[test]
+fn focused_sidecar_body_is_not_top_level() {
+    let mut chat = ChatView {
+        agent: "act".to_string(),
+        ..ChatView::default()
+    };
+    assert!(
+        super::body_is_top_level(&chat, None),
+        "plain main transcript is top level"
+    );
+    chat.sidecar = Some(SidecarPanel::default());
+    chat.sidecar_focus = true;
+    assert!(
+        !super::body_is_top_level(&chat, None),
+        "focused sidecar panel is not top level (no tutorial in the panel body)"
+    );
+    assert!(
+        !super::body_is_top_level(&chat, Some(0)),
+        "focused subagent child view is not top level"
+    );
+}

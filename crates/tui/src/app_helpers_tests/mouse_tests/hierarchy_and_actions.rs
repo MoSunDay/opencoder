@@ -310,3 +310,116 @@ async fn clicking_step_or_call_row_toggles_only_that_target() {
     );
     assert_eq!(flat.len(), 2, "collapsed group = group row + blank");
 }
+
+/// While the sidecar panel is focused, its body renders the panel's nested
+/// view — step-row hit rects carry PANEL-relative block indices. The click
+/// must toggle the panel view's ladder, never the main transcript behind it
+/// (regression: `collapse_view` ignored `sidecar_focus` and toggled the main
+/// view at the same index, so the sidecar ladder was click-dead and a same-
+/// index main group silently flipped).
+#[tokio::test]
+async fn sidecar_step_row_click_toggles_the_panel_view_not_the_main_transcript() {
+    let mut chat = ChatView::default();
+    // Main transcript carries its own (different) collapsed group at the
+    // same block index — it must stay untouched by the panel click.
+    chat.apply(&SessionEvent::ReasoningDelta("main think".into()));
+    chat.apply(&SessionEvent::ToolStart {
+        id: "m1".into(),
+        name: "bash".into(),
+        input: "echo main".into(),
+    });
+
+    let (tx, _rx) = tokio::sync::mpsc::channel::<crate::sidecar_ui::SidecarCmd>(1);
+    crate::sidecar_ui::enter_panel(&mut chat, &tx);
+    crate::sidecar_ui::echo_question(&mut chat, "面板问题");
+    chat.apply(&SessionEvent::SidecarStart {
+        id: "sc-1".into(),
+        question: "面板问题".into(),
+    });
+    chat.apply(&SessionEvent::SidecarChild {
+        id: "sc-1".into(),
+        ev: Box::new(SessionEvent::ReasoningDelta("panel think".into())),
+    });
+    chat.apply(&SessionEvent::SidecarChild {
+        id: "sc-1".into(),
+        ev: Box::new(SessionEvent::ToolStart {
+            id: "p1".into(),
+            name: "bash".into(),
+            input: "echo panel".into(),
+        }),
+    });
+
+    // Body hit map recorded against the RENDERED (panel) view: the group row
+    // carries the panel-relative block index of the ladder (behind the echoed
+    // prompt) and visible-target 0 (the group row).
+    let panel_block_idx = chat
+        .sidecar
+        .as_ref()
+        .and_then(|p| {
+            p.view
+                .blocks
+                .iter()
+                .position(|b| matches!(b, crate::chat::ChatBlock::StepGroup { .. }))
+        })
+        .expect("panel ladder exists");
+    let body = Rect::new(0, 0, 80, 12);
+    let mut hits = empty_hits(body);
+    hits.tool_call_btns.push(crate::render::ToolCallBtn {
+        block_idx: panel_block_idx,
+        call_idx: 0,
+        rect: Rect::new(2, 1, 30, 1),
+    });
+
+    let mut scroll = 0u32;
+    let mut follow = true;
+    let mut subagent_focus: Option<usize> = None;
+    let mut subagent_sys = 0u64;
+    let mut queue_items: Vec<(i64, String)> = Vec::new();
+    let mut queue_scroll = 0u32;
+    let store = StubStore::default();
+
+    handle_mouse(
+        MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 5,
+            row: 1,
+            modifiers: KeyModifiers::NONE,
+        },
+        &hits,
+        &mut scroll,
+        &mut follow,
+        &mut chat,
+        &mut subagent_focus,
+        &mut subagent_sys,
+        Path::new("."),
+        &mut queue_items,
+        "s",
+        &store,
+        &mut queue_scroll,
+        &mut vec![],
+    )
+    .await;
+
+    let panel_group_open = chat
+        .sidecar
+        .as_ref()
+        .and_then(|p| {
+            p.view.blocks.get(panel_block_idx).and_then(|b| match b {
+                crate::chat::ChatBlock::StepGroup { open, .. } => Some(*open),
+                _ => None,
+            })
+        })
+        .expect("panel ladder block");
+    assert!(
+        panel_group_open,
+        "the click must open the PANEL view's ladder"
+    );
+    let main_group_open = matches!(
+        chat.blocks.first(),
+        Some(crate::chat::ChatBlock::StepGroup { open: true, .. })
+    );
+    assert!(
+        !main_group_open,
+        "the main transcript's same-index group must stay collapsed"
+    );
+}

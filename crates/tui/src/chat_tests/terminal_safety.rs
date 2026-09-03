@@ -45,10 +45,10 @@ fn every_dynamic_chat_block_uses_the_same_terminal_safety_boundary() {
         is_error: false,
         images: Vec::new(),
     });
-    // Toggle the group twice (net closed): dirty content must survive the
+    // Cycle a step open/closed (net closed): dirty content must survive the
     // toggle path untouched.
-    view.toggle_step_group_at(1);
-    view.toggle_step_group_at(1);
+    view.toggle_tool_call_at(1, 0);
+    view.toggle_tool_call_at(1, 0);
     view.apply(&SessionEvent::CompactionDelta(dirty.into()));
     view.apply(&SessionEvent::Status(dirty.into()));
     view.apply(&SessionEvent::Error(dirty.into()));

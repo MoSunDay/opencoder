@@ -145,21 +145,11 @@ pub(crate) async fn handle_mouse(
                 }
             }
             // Click a single tool call's header row (List state): toggle only
-            // that call's output. Checked BEFORE the group line so the finer
-            // target wins when rects ever overlap.
+            // that call's output.
             for btn in &hits.tool_call_btns {
                 if in_rect(btn.rect, m.column, m.row) {
                     if let Some(v) = collapse_view(chat, *subagent_focus) {
                         ChatView::toggle_tool_call_at(v, btn.block_idx, btn.call_idx);
-                    }
-                    consumed = true;
-                    break;
-                }
-            }
-            for btn in &hits.tool_btns {
-                if in_rect(btn.rect, m.column, m.row) {
-                    if let Some(v) = collapse_view(chat, *subagent_focus) {
-                        ChatView::toggle_step_group_at(v, btn.block_idx);
                     }
                     consumed = true;
                     break;

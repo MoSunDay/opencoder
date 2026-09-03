@@ -41,9 +41,7 @@ pub(crate) use status_bar::SPINNER;
 /// and wheel scrolls against. Recomputed every frame. The struct and the
 /// button types live in `render_hits.rs` next to their recorders; re-exported
 /// here so `crate::render::MouseHits` paths stay stable.
-pub(crate) use hit_records::{
-    CompactionBtn, MouseHits, SubagentBtn, ThinkingBtn, ToolBtn, ToolCallBtn,
-};
+pub(crate) use hit_records::{CompactionBtn, MouseHits, SubagentBtn, ThinkingBtn, ToolCallBtn};
 
 pub(crate) fn in_rect(r: Rect, col: u16, row: u16) -> bool {
     col >= r.x && col < r.x + r.width && row >= r.y && row < r.y + r.height
@@ -121,7 +119,6 @@ pub(crate) fn render<B: Backend + 'static>(
             hits.attach_del_btns.clear();
             hits.thinking_btns.clear();
             hits.subagent_btns.clear();
-            hits.tool_btns.clear();
             hits.tool_call_btns.clear();
             hits.compaction_btns.clear();
             hits.keymap_btns.clear();
@@ -207,7 +204,6 @@ pub(crate) fn render<B: Backend + 'static>(
         hits.attach_del_btns.clear();
         hits.thinking_btns.clear();
         hits.subagent_btns.clear();
-        hits.tool_btns.clear();
         hits.tool_call_btns.clear();
         hits.compaction_btns.clear();
         hits.keymap_btns.clear();
@@ -226,7 +222,6 @@ pub(crate) fn render<B: Backend + 'static>(
                 &mut hits.top_btn,
                 &mut hits.thinking_btns,
                 &mut hits.subagent_btns,
-                &mut hits.tool_btns,
                 &mut hits.tool_call_btns,
                 &mut hits.compaction_btns,
                 viewport,
@@ -389,7 +384,6 @@ fn render_body(
     top_btn: &mut Option<Rect>,
     thinking_btns: &mut Vec<ThinkingBtn>,
     subagent_btns: &mut Vec<SubagentBtn>,
-    tool_btns: &mut Vec<ToolBtn>,
     tool_call_btns: &mut Vec<ToolCallBtn>,
     compaction_btns: &mut Vec<CompactionBtn>,
     viewport: &mut Option<ViewportCache>,
@@ -468,9 +462,6 @@ fn render_body(
         inner.x,
         inner.y,
         subagent_btns,
-    );
-    hit_records::record_tool_hits(
-        chat, cache, text_w, scroll_y, content_h, inner.x, inner.y, tool_btns,
     );
     hit_records::record_tool_call_hits(
         chat,

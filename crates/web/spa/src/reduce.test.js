@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { consumedEchoText, deltaTextOf, emptyStream, nestedEventOf, reduceFrame, turnsFromMessages, withUserTurn } from './reduce.js';
 
 describe('turnsFromMessages', () => {
-  it('flattens text/tool blocks and attaches tool_result to the open tool', () => {
+  it('flattens text/tool blocks and attaches tool_result to the open call', () => {
     const turns = turnsFromMessages([
       { role: 'user', blocks: [{ type: 'text', text: 'hi' }] },
       {
@@ -17,6 +17,12 @@ describe('turnsFromMessages', () => {
     ]);
     expect(turns).toHaveLength(3);
     expect(turns[0]).toMatchObject({ kind: 'text', role: 'user', text: 'hi' });
+    expect(turns[1]).toMatchObject({ kind: 'text', role: 'assistant', text: 'working' });
+    // One assistant message's non-task tool_uses = ONE step inside a steps
+    // turn; the same-message tool_result backfills the buffered call by id.
+    expect(turns[2]).toMatchObject({ kind: 'steps', role: 'assistant' });
+    expect(turns[2].steps).toHaveLength(1);
+    expect(turns[2].steps[0].calls[0]).toMatchObject({ kind: 'tool', name: 'bash', output: 'a.txt', isError: false });
     // serde wire tag is `kind` (crates/core/src/message.rs) — the real
     // contract; a `type`-only matcher returned [] and blanked every store
     // replay (caught by real-browser acceptance).
@@ -32,9 +38,12 @@ describe('turnsFromMessages', () => {
       },
     ]);
     expect(wire[0]).toMatchObject({ kind: 'text', role: 'user', text: 'wire-hi' });
-    expect(wire[1]).toMatchObject({ kind: 'think', role: 'assistant', text: 'thinking' });
-    expect(wire[2]).toMatchObject({ kind: 'tool', name: 'bash', output: 'a.txt', isError: false });
-    expect(turns[2]).toMatchObject({ kind: 'tool', name: 'bash', output: 'a.txt', isError: false });
+    // The trailing reasoning run is absorbed into the step's thinking
+    // (coalesce_steps) instead of staying a standalone think turn.
+    expect(wire[1]).toMatchObject({
+      kind: 'steps',
+      steps: [{ thinking: 'thinking', calls: [{ kind: 'tool', name: 'bash', output: 'a.txt', isError: false }] }],
+    });
   });
 
   it('tolerates missing messages/blocks', () => {
@@ -100,18 +109,19 @@ describe('reduceFrame', () => {
     expect(s.turns.map((t) => t.text)).toEqual(['a', 'b']);
   });
 
-  it('pairs tool_start/tool_end and derives duration from arrival times', () => {
+  it('pairs tool_start/tool_end into a step and derives duration from arrival times', () => {
     let s = emptyStream();
     s = reduceFrame(s, { event: 'tool_start', data: { id: 'x', name: 'bash', input: { cmd: 'ls' } } }, 1000);
     s = reduceFrame(s, { event: 'tool_end', data: { id: 'x', name: 'bash', output: 'ok', is_error: false } }, 2500);
-    expect(s.turns[0]).toMatchObject({ kind: 'tool', name: 'bash', output: 'ok', durationMs: 1500 });
+    expect(s.turns[0]).toMatchObject({ kind: 'steps', role: 'assistant' });
+    expect(s.turns[0].steps[0].calls[0]).toMatchObject({ kind: 'tool', name: 'bash', output: 'ok', durationMs: 1500 });
   });
 
   it('prefers an explicit duration_ms on the end frame', () => {
     let s = emptyStream();
     s = reduceFrame(s, { event: 'tool_start', data: { id: 'x', name: 't', input: {} } }, 1000);
     s = reduceFrame(s, { event: 'tool_end', data: { id: 'x', output: 'o', duration_ms: 42 } }, 9999);
-    expect(s.turns[0].durationMs).toBe(42);
+    expect(s.turns[0].steps[0].calls[0].durationMs).toBe(42);
   });
 
   it('records llm_usage and terminal error state', () => {
@@ -248,7 +258,11 @@ describe('subagent folding', () => {
     st = reduceFrame(st, { event: 'subagent_child', data: { id: 'sa1', event: { ToolStart: { id: 't1', name: 'bash', input: { cmd: 'ls' } } } } }, 2);
     expect(st.turns[0].events).toHaveLength(2);
     expect(st.turns[0].events[0]).toMatchObject({ kind: 'text', text: 'hello' });
-    expect(st.turns[0].events[1]).toMatchObject({ kind: 'tool', name: 'bash' });
+    // Child tool calls fold into the SAME steps ladder as the main stream.
+    expect(st.turns[0].events[1]).toMatchObject({
+      kind: 'steps',
+      steps: [{ calls: [{ kind: 'tool', id: 't1', name: 'bash', output: null }] }],
+    });
   });
 
   it('closes the block from subagent_end with ok/summary/cancelled', () => {
@@ -263,6 +277,153 @@ describe('subagent folding', () => {
   it('ignores child frames for unknown ids', () => {
     const st = reduceFrame(emptyStream(), { event: 'subagent_child', data: { id: 'nope', event: { Done: {} } } }, 0);
     expect(st.turns).toHaveLength(0);
+  });
+});
+
+describe('steps ladder (live, mirror of chat_steps.rs)', () => {
+  const startCall = (id, name, at) => reduceFrame(
+    emptyStream(),
+    { event: 'tool_start', data: { id, name, input: { cmd: id } } },
+    at,
+  );
+
+  it('(a) same-round parallel calls merge into ONE step and both backfill', () => {
+    let s = emptyStream();
+    s = reduceFrame(s, { event: 'tool_start', data: { id: 'a', name: 'bash', input: {} } }, 1000);
+    s = reduceFrame(s, { event: 'tool_start', data: { id: 'b', name: 'read', input: {} } }, 1100);
+    s = reduceFrame(s, { event: 'tool_end', data: { id: 'a', name: 'bash', output: 'out-a', is_error: false } }, 2000);
+    s = reduceFrame(s, { event: 'tool_end', data: { id: 'b', name: 'read', output: 'out-b', is_error: true } }, 2100);
+    expect(s.turns).toHaveLength(1);
+    expect(s.turns[0].steps).toHaveLength(1);
+    const calls = s.turns[0].steps[0].calls;
+    expect(calls).toHaveLength(2);
+    expect(calls[0]).toMatchObject({ id: 'a', name: 'bash', output: 'out-a', isError: false, durationMs: 1000 });
+    expect(calls[1]).toMatchObject({ id: 'b', name: 'read', output: 'out-b', isError: true, durationMs: 1000 });
+  });
+
+  it('(b) sequential rounds (A ends before B starts) open TWO steps in ONE group', () => {
+    let s = emptyStream();
+    s = reduceFrame(s, { event: 'tool_start', data: { id: 'a', name: 'bash', input: {} } }, 1);
+    s = reduceFrame(s, { event: 'tool_end', data: { id: 'a', name: 'bash', output: 'x', is_error: false } }, 2);
+    s = reduceFrame(s, { event: 'tool_start', data: { id: 'b', name: 'read', input: {} } }, 3);
+    expect(s.turns).toHaveLength(1);
+    expect(s.turns[0].kind).toBe('steps');
+    expect(s.turns[0].steps).toHaveLength(2);
+    expect(s.turns[0].steps[0].calls[0]).toMatchObject({ id: 'a', output: 'x' });
+    expect(s.turns[0].steps[1].calls[0]).toMatchObject({ id: 'b', output: null });
+  });
+
+  it('(c) absorbs the strictly-trailing think run; thinking before Say stays standalone', () => {
+    let s = emptyStream();
+    s = reduceFrame(s, { event: 'reasoning_delta', data: { text: 'plan it' } }, 1);
+    s = reduceFrame(s, { event: 'tool_start', data: { id: 'a', name: 'bash', input: {} } }, 2);
+    expect(s.turns).toHaveLength(1);
+    expect(s.turns[0].steps[0].thinking).toBe('plan it');
+    // Flush case: the Say text turn trails the thinking, so the thinking is
+    // NOT absorbed — it stays a standalone think turn before the Say.
+    let t = emptyStream();
+    t = reduceFrame(t, { event: 'reasoning_delta', data: { text: 'before say' } }, 1);
+    t = reduceFrame(t, { event: 'text_delta', data: { text: 'Say!' } }, 2);
+    t = reduceFrame(t, { event: 'tool_start', data: { id: 'a', name: 'bash', input: {} } }, 3);
+    expect(t.turns.map((x) => x.kind)).toEqual(['think', 'text', 'steps']);
+    expect(t.turns[0]).toMatchObject({ kind: 'think', text: 'before say' });
+    expect(t.turns[1]).toMatchObject({ kind: 'text', role: 'assistant', text: 'Say!' });
+    expect(t.turns[2].steps[0].thinking).toBe('');
+  });
+
+  it('(d) Say between two rounds opens a NEW steps turn (Say stays top-level)', () => {
+    let s = emptyStream();
+    s = reduceFrame(s, { event: 'tool_start', data: { id: 'a', name: 'bash', input: {} } }, 1);
+    s = reduceFrame(s, { event: 'tool_end', data: { id: 'a', name: 'bash', output: 'x', is_error: false } }, 2);
+    s = reduceFrame(s, { event: 'text_delta', data: { text: 'interlude answer' } }, 3);
+    s = reduceFrame(s, { event: 'tool_start', data: { id: 'b', name: 'read', input: {} } }, 4);
+    expect(s.turns.map((x) => x.kind)).toEqual(['steps', 'text', 'steps']);
+    expect(s.turns[1]).toMatchObject({ kind: 'text', role: 'assistant', text: 'interlude answer' });
+  });
+
+  it('(e) orphan tool_end synthesizes a finished call folded into the ladder', () => {
+    const s = reduceFrame(emptyStream(), { event: 'tool_end', data: { id: 'ghost', name: 'bash', output: 'late', is_error: true } }, 5);
+    expect(s.turns).toHaveLength(1);
+    expect(s.turns[0].kind).toBe('steps');
+    expect(s.turns[0].steps[0].calls[0]).toMatchObject({
+      id: 'ghost', name: 'bash', input: null, output: 'late', isError: true, durationMs: 0,
+    });
+  });
+
+  it('(f) the task tool keeps its flat tool turn (subagent block renders it)', () => {
+    let s = emptyStream();
+    s = reduceFrame(s, { event: 'tool_start', data: { id: 'task1', name: 'task', input: { prompt: 'x' } } }, 1);
+    expect(s.turns).toHaveLength(1);
+    expect(s.turns[0]).toMatchObject({ kind: 'tool', name: 'task', output: null });
+    s = reduceFrame(s, { event: 'tool_end', data: { id: 'task1', name: 'task', output: 'child done', is_error: false } }, 2);
+    expect(s.turns).toHaveLength(1);
+    expect(s.turns[0]).toMatchObject({ kind: 'tool', name: 'task', output: 'child done' });
+  });
+
+  it('tool_update follows tool_start folding (same shape, open call)', () => {
+    const s = startCall('u1', 'bash', 7);
+    expect(s.turns[0]).toMatchObject({ kind: 'steps' });
+    expect(s.turns[0].steps[0].calls[0]).toMatchObject({ id: 'u1', name: 'bash', output: null, startedAt: 7 });
+  });
+});
+
+describe('steps ladder (snapshot, message-pair semantics)', () => {
+  it('(g) reasoning + 2 tool_use + results + Say → text, steps(backfilled), text', () => {
+    const turns = turnsFromMessages([
+      { role: 'user', blocks: [{ kind: 'text', text: 'go' }] },
+      {
+        role: 'assistant',
+        blocks: [
+          { kind: 'reasoning', text: 'must run tools' },
+          { kind: 'tool_use', id: 'a', name: 'bash', input: { cmd: 'ls' } },
+          { kind: 'tool_use', id: 'b', name: 'read', input: { path: 'x' } },
+        ],
+      },
+      {
+        role: 'tool',
+        blocks: [
+          { kind: 'tool_result', tool_use_id: 'a', output: 'ls-out', is_error: false },
+          { kind: 'tool_result', tool_use_id: 'b', output: 'read-err', is_error: true },
+        ],
+      },
+      { role: 'assistant', blocks: [{ kind: 'text', text: 'final answer' }] },
+    ]);
+    expect(turns.map((t) => t.kind)).toEqual(['text', 'steps', 'text']);
+    expect(turns[0]).toMatchObject({ role: 'user', text: 'go' });
+    expect(turns[1].steps).toHaveLength(1);
+    expect(turns[1].steps[0].thinking).toBe('must run tools');
+    expect(turns[1].steps[0].calls.map((c) => c.name)).toEqual(['bash', 'read']);
+    expect(turns[1].steps[0].calls[0]).toMatchObject({ output: 'ls-out', isError: false });
+    expect(turns[1].steps[0].calls[1]).toMatchObject({ output: 'read-err', isError: true });
+    // Say is a TOP-LEVEL text turn after the group, never folded in.
+    expect(turns[2]).toMatchObject({ kind: 'text', role: 'assistant', text: 'final answer' });
+  });
+
+  it('(h) two adjacent assistant tool messages fold into ONE steps turn, 2 steps', () => {
+    const turns = turnsFromMessages([
+      { role: 'assistant', blocks: [{ kind: 'tool_use', id: 'a', name: 'bash', input: {} }] },
+      { role: 'assistant', blocks: [{ kind: 'tool_use', id: 'b', name: 'read', input: {} }] },
+    ]);
+    expect(turns).toHaveLength(1);
+    expect(turns[0].kind).toBe('steps');
+    expect(turns[0].steps).toHaveLength(2);
+    expect(turns[0].steps.map((st) => st.calls[0].id)).toEqual(['a', 'b']);
+  });
+
+  it('(i) a task tool_use stays a flat tool turn and takes its result', () => {
+    const turns = turnsFromMessages([
+      { role: 'assistant', blocks: [{ kind: 'tool_use', id: 't1', name: 'task', input: { prompt: 'x' } }] },
+      { role: 'user', blocks: [{ kind: 'tool_result', tool_use_id: 't1', output: 'child summary', is_error: false }] },
+    ]);
+    expect(turns).toHaveLength(1);
+    expect(turns[0]).toMatchObject({ kind: 'tool', name: 'task', output: 'child summary', isError: false });
+  });
+
+  it('flushes trailing pending reasoning standalone at the end of the walk', () => {
+    const turns = turnsFromMessages([
+      { role: 'assistant', blocks: [{ kind: 'reasoning', text: 'dangling thought' }] },
+    ]);
+    expect(turns).toEqual([{ kind: 'think', role: 'assistant', text: 'dangling thought' }]);
   });
 });
 

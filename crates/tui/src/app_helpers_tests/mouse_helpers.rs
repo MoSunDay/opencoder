@@ -123,7 +123,6 @@ pub fn empty_hits(body: Rect) -> MouseHits {
         attach_del_btns: Vec::new(),
         thinking_btns: Vec::new(),
         subagent_btns: Vec::new(),
-        tool_btns: Vec::new(),
         tool_call_btns: Vec::new(),
         compaction_btns: Vec::new(),
         keymap_btns: Vec::new(),

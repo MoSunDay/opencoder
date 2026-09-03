@@ -1,6 +1,6 @@
 # TUI+SPA 工具调用 step 阶梯恒展开重构
 
-Commit: (working-tree, step 阶梯去组级折叠，TUI 与 Web SPA 同步对齐)
+Commit: 2539b78
 
 ## 背景
 

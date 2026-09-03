@@ -114,6 +114,9 @@ const deprecationHits = () => consoleLog.error.concat(consoleLog.warn)
 beforeEach(() => {
   liveEventCtl = null;
   seqHead = 0;
+  sessionSnapshots = {};
+  consoleLog.error.length = 0; // keep spy identity; per-test deprecation gate
+  consoleLog.warn.length = 0;
   localStorage.clear();
   clearCredentials();
   setState({ page: 'chat', preselectNode: null, nodes: [], conn: 'init' });

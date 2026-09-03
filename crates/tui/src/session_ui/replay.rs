@@ -15,8 +15,8 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
 use crate::chat::{
-    coalesce_steps, merge_or_new_step, short, single_step_group, summarize, ChatBlock, ChatView,
-    ToolCall, TOOL_OUTPUT_LINES,
+    coalesce_steps, short, single_step_group, summarize, ChatBlock, ChatView, Step, ToolCall,
+    TOOL_OUTPUT_LINES,
 };
 use crate::terminal_text::{sanitize_multiline, sanitize_single_line};
 use crate::theme;
@@ -128,43 +128,52 @@ pub(super) fn replay_one(
                     done: true,
                 });
             }
-            for b in &msg.blocks {
-                if let ContentBlock::ToolUse { id, name, input } = b {
-                    if name == "task" {
-                        continue;
+            let calls: Vec<ToolCall> = msg
+                .blocks
+                .iter()
+                .filter_map(|b| match b {
+                    ContentBlock::ToolUse { id, name, input } if name != "task" => {
+                        Some(ToolCall {
+                            id: id.clone(),
+                            header: Line::from(vec![
+                                Span::styled(
+                                    format!("\u{25b8} {} ", sanitize_single_line(name)),
+                                    Style::default()
+                                        .fg(theme::accent())
+                                        .add_modifier(Modifier::BOLD),
+                                ),
+                                Span::styled(summarize(input), Style::default().fg(theme::muted())),
+                            ]),
+                            output: Vec::new(),
+                            // Replayed calls carry no wall-clock timing: mark them
+                            // finished (elapsed 0) so no epoch-scale live timer or
+                            // "running" hint renders on resume.
+                            started_at_ms: Some(0),
+                            elapsed_ms: Some(0),
+                            expanded: false,
+                        })
                     }
-                    let call = ToolCall {
-                        id: id.clone(),
-                        header: Line::from(vec![
-                            Span::styled(
-                                format!("\u{25b8} {} ", sanitize_single_line(name)),
-                                Style::default()
-                                    .fg(theme::accent())
-                                    .add_modifier(Modifier::BOLD),
-                            ),
-                            Span::styled(summarize(input), Style::default().fg(theme::muted())),
-                        ]),
-                        output: Vec::new(),
-                        // Replayed calls carry no wall-clock timing: mark them
-                        // finished (elapsed 0) so no epoch-scale live timer or
-                        // "running" hint renders on resume.
-                        started_at_ms: Some(0),
-                        elapsed_ms: Some(0),
-                        expanded: false,
-                    };
-                    // Same grouping rule as the live path: consecutive calls
-                    // join the trailing group, anything else starts a new
-                    // group (first step closed). Replayed calls are born finished
-                    // (`elapsed_ms: Some(0)`), so each lands in its own step
-                    // of the group — resume cannot distinguish parallel from
-                    // sequential calls, and per-call steps stay honest.
-                    match chat.blocks.last_mut() {
-                        Some(ChatBlock::StepGroup { steps: s, .. }) => {
-                            merge_or_new_step(s, Vec::new(), call)
-                        }
-                        _ => chat.blocks.push(single_step_group(call, Vec::new())),
-                    }
-                }
+                    _ => None,
+                })
+                .collect();
+            if !calls.is_empty() {
+                // Persisted assistant-message boundaries are explicit LLM
+                // rounds: all parallel tool_use blocks in this message share
+                // ONE Step. `coalesce_steps` later folds every round in the
+                // surrounding user Turn into one canonical StepGroup.
+                chat.blocks.push(ChatBlock::StepGroup {
+                    steps: vec![Step {
+                        thinking_raw: String::new(),
+                        thinking: Vec::new(),
+                        thinking_dirty: false,
+                        calls,
+                        open: false,
+                        calls_open: false,
+                        sealed: true,
+                    }],
+                    open: false,
+                    progress_active: false,
+                });
             }
         }
         Role::Tool => {

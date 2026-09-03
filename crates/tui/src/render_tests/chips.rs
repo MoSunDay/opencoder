@@ -1,5 +1,5 @@
 use super::*;
-use crate::chat::ChatView;
+use crate::chat::{ChatBlock, ChatView};
 use crate::theme::{agent_chip_fg, mode_flash_bg};
 use opencoder_session::SessionEvent;
 
@@ -60,9 +60,13 @@ fn header_line_indices_aligned_with_flatten_while_withheld() {
     });
     // Thinking block after the subagents: its header_line_idx is the
     // canary — if the withheld preamble were counted it would overshoot.
-    v.apply(&SessionEvent::ReasoningDelta(
-        "post\ndispatch\nanalysis".into(),
-    ));
+    // Legacy shape built directly (live reasoning goes into the ladder):
+    // the header canary keeps guarding the withheld-preamble accounting.
+    v.blocks.push(ChatBlock::Thinking {
+        text: "post\ndispatch\nanalysis".into(),
+        collapsed: true,
+        sealed: true,
+    });
 
     assert!(
         v.hidden_assistant_idx.is_some(),

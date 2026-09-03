@@ -2,6 +2,8 @@
 
 Commit: (working-tree, TUI 工具调用组级三态折叠)
 
+> 历史实现，当前交互已由 [Turn / Step / Function call 三级层级纠正](../2026-09-03/turn-step-function-call-hierarchy.md) 取代；下文保留当时设计与回归证据。
+
 ## 背景
 
 - 原渲染模型是每个 tool call 一个 `ChatBlock::Tool` 块、一行 `▸ name args [↓ N]`，并行/连续调用在 transcript 里逐行铺开，视觉噪音大。

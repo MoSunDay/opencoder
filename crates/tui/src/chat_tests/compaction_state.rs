@@ -3,7 +3,7 @@ use super::super::*;
 /// CompactionDelta events stream into an EXPANDED block so the summary is
 /// visible while the summarizing LLM call runs. The first delta opens the
 /// block; subsequent deltas append to it; the final `Compaction(summary)`
-/// event finalizes (overwrites text + collapses) it.
+/// event finalizes it without changing its disclosure state.
 #[test]
 fn compaction_delta_streams_into_expanded_block() {
     let mut v = ChatView::default();
@@ -22,19 +22,39 @@ fn compaction_delta_streams_into_expanded_block() {
     assert_eq!(v.blocks.len(), 1);
     assert!(block_text(&v).contains("streamed-chunk more"));
 
-    // The final Compaction event finalizes the block: collapsed, full text.
+    // The final Compaction event finalizes the block: still expanded, full text.
     v.apply(&SessionEvent::Compaction("final-summary".into()));
     assert_eq!(
         v.blocks.len(),
         1,
         "final Compaction must not add a second block"
     );
-    assert!(v.last_compaction_collapsed());
-    // Collapsed: the streamed chunks are gone (overwritten + hidden).
+    assert!(
+        !v.last_compaction_collapsed(),
+        "final output must not close the expanded streaming block"
+    );
+    // The streamed chunks are gone (overwritten), while the final text stays visible.
     assert!(!block_text(&v).contains("streamed-chunk"));
-    // Expanding reveals the final summary text.
-    v.toggle_compaction_at(0);
     assert!(block_text(&v).contains("final-summary"));
+}
+
+#[test]
+fn compaction_updates_preserve_a_user_closed_stream() {
+    let mut v = ChatView::default();
+    v.apply(&SessionEvent::CompactionDelta("first".into()));
+    v.toggle_compaction_at(0);
+    assert!(v.last_compaction_collapsed(), "user closed the stream");
+
+    v.apply(&SessionEvent::CompactionDelta(" second".into()));
+    assert!(
+        v.last_compaction_collapsed(),
+        "a later delta must not reopen user-closed content"
+    );
+    v.apply(&SessionEvent::Compaction("final".into()));
+    assert!(
+        v.last_compaction_collapsed(),
+        "final output must preserve the user's closed state"
+    );
 }
 
 /// When the streaming block was destroyed between deltas and the final event

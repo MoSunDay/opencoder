@@ -9,7 +9,13 @@ fn plan_card_line_count_matches_flatten() {
         rendered: crate::markdown::render("line one\nline two"),
         raw: "line one\nline two".to_string(),
     });
-    v.apply(&SessionEvent::ReasoningDelta("think".into()));
+    // Legacy shape built directly: live reasoning streams into the step
+    // ladder, so this accounting canary keeps using a top-level block.
+    v.blocks.push(ChatBlock::Thinking {
+        text: "think".into(),
+        collapsed: true,
+        sealed: true,
+    });
 
     let flat = v.flatten();
     let headers = v.thinking_headers();

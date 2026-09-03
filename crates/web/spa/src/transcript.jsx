@@ -1,16 +1,16 @@
 // transcript.jsx — chat transcript on @ant-design/x Bubble.List (T3
-// migration of render.jsx). Each reduce.js turn becomes one bubble item:
+// migration of render.jsx). Reduced assistant segments that contain a step
+// ladder become one visual Turn bubble:
 //   user   → placement end,   variant filled   (❯ avatar, monospace body)
 //   ai     → placement start, variant outlined (◉ avatar, monospace body)
 //   think  → placement start, variant borderless, ghost 💭 Thinking collapse
 //            (standalone turns — pure-text rounds; a tool round's thinking
 //            lives INSIDE its step, see below)
-//   steps  → placement start, variant borderless, THREE-LEVEL drill ladder
-//            (stepsBlock.jsx): ONE collapsed group row `❯ N steps
-//            [running|error]` (L0) → per-step rows `❯ Step(k)` (L1) → the
-//            step's 💭 thinking rendered DIRECTLY + a `❯ N function calls`
-//            aggregate row (L2) → per-call 🔧 collapses (L3). Say stays a
-//            separate TOP-LEVEL ai bubble after the steps turn.
+//   assistantTurn → placement start, outlined Turn containing collapsed
+//            `❯ N Steps [running|error]` + visible Say. Opening the Turn
+//            reveals Step rows; opening a Step reveals Thinking + an
+//            N-function-calls aggregate; opening it reveals calls, and an
+//            individual call reveals its result.
 //   tool   → placement start, variant borderless, 🔧 collapse with
 //            duration + error tag + input/output paragraphs (flat rows now
 //            only for `task` — the subagent handle; renderer lives in
@@ -18,7 +18,7 @@
 //   sys    → placement start, variant borderless, centered secondary text
 //   subagent → placement start, variant borderless, 🤖 fold block with
 //            status tag + child replay drill-in (subagentBlock.jsx)
-// Assistant Say stays a TOP-LEVEL ai bubble — never folded into a group.
+// Assistant Say stays visible at the Turn level — never folded into Steps.
 // Collapse-all: Ctrl/Cmd+L (window keydown) or the `⤒ 收起` link bumps an
 // epoch key on Bubble.List, remounting every bubble so all Collapses (step
 // rows, call rows, subagent blocks) reset closed.
@@ -78,6 +78,34 @@ function TextContent({ turn }) {
   );
 }
 
+/// One visual assistant Turn. `itemsFromTurns` merges all adjacent step
+/// segments into one ladder and keeps speech as visible Say content. The
+/// resulting top-level shape is always one `N Steps` summary plus Say.
+function AssistantTurnContent({ turn }) {
+  const steps = turn && Array.isArray(turn.steps) ? turn.steps : [];
+  const say = turn && Array.isArray(turn.say) ? turn.say : [];
+  return (
+    <div>
+      <StepsContent turn={{
+        kind: 'steps',
+        role: 'assistant',
+        steps,
+        progressActive: turn && turn.progressActive,
+      }} />
+      {say.map((part, index) => {
+        if (part.kind === 'think') {
+          return <ThinkContent key={'think:' + index} turn={part} />;
+        }
+        return (
+          <div key={'say:' + index} style={{ marginTop: 8 }}>
+            <TextContent turn={part} />
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 /// Reasoning and tool rows live in stepsBlock.jsx (ThinkContent /
 /// ToolContent, moved there verbatim when the step ladder landed) — the
 /// think/tool/steps bubbles below all render through them.
@@ -106,12 +134,23 @@ const BUBBLE_ROLES = {
     avatar: <RoleAvatar glyph="◉" color="#9254de" />,
     contentRender: (content) => <TextContent turn={content} />,
   },
+  assistantTurn: {
+    placement: 'start',
+    variant: 'outlined',
+    avatar: <RoleAvatar glyph="◉" color="#9254de" />,
+    contentRender: (content) => <AssistantTurnContent turn={content} />,
+  },
+  // Defensive/history only: since reasoning_delta streams straight into the
+  // steps ladder (reduce.js appendThinkDelta), the live path no longer
+  // produces `think` turns — this role only renders turns built by older
+  // reducers / hand-built fixtures.
   think: {
     placement: 'start',
     variant: 'borderless',
     contentRender: (content) => <ThinkContent turn={content} />,
   },
-  // Step ladder (stepsBlock.jsx): one collapsed group row → 3-level drill.
+  // Defensive standalone step ladder. Normal steps+Say runs are grouped by
+  // itemsFromTurns into assistantTurn above.
   steps: {
     placement: 'start',
     variant: 'borderless',

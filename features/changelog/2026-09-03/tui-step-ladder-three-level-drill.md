@@ -2,6 +2,8 @@
 
 Commit: 9b999cf
 
+> 历史实现，当前交互已由 [Turn / Step / Function call 三级层级纠正](turn-step-function-call-hierarchy.md) 取代；下文保留当时设计与回归证据。
+
 ## 背景
 
 - 2539b78 的恒展开模型（静态 `≡ N steps` + 步行恒可见 + call 平铺 indent 4）在步数多时占屏过高；thinking 吸收只吃「严格尾随」think run——think → Say → tool 的轮次会把顶层 `💭 Thinking` 块留下来。

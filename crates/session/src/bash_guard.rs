@@ -125,6 +125,15 @@ pub fn sidecar_denial(tool: &str, detail: &str) -> String {
     }
 }
 
+/// Admitted-tool table plus denial context: (allowed tools, reason for an
+/// unadmitted tool, per-tool denial message builder). Both tables are
+/// compile-time constants, hence 'static.
+type GateRule = (
+    &'static [&'static str],
+    &'static str,
+    fn(&str, &str) -> String,
+);
+
 /// Read-only execution gate for one tool call: `Some(denial)` refuses the
 /// call with the model-visible [`plan_denial`] / [`sidecar_denial`], `None`
 /// lets it proceed. Gated sessions: plan mode and the sidecar loop; every
@@ -151,7 +160,7 @@ pub fn gate(
     command: Option<&str>,
     workdir: &std::path::Path,
 ) -> Option<String> {
-    let (admitted, unadmitted_detail, denial): (&[&str], &str, fn(&str, &str) -> String) =
+    let (admitted, unadmitted_detail, denial): GateRule =
         if *kind == opencoder_core::AgentKind::Plan {
             (
                 PLAN_ADMITTED,

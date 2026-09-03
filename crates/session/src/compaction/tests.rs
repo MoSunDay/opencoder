@@ -343,3 +343,24 @@ fn transcript_collapse_resets_reported_usage() {
         "compaction must reset stale reported usage"
     );
 }
+
+/// rules/01 regression (brief #7): with `compaction.auto` off the runner's
+/// hard-limit gate is the only backstop before a guaranteed context-length
+/// 400. `exceeds_hard_limit` must fire on the physical model window (not the
+/// compaction threshold) so it stays meaningful for manual compaction.
+#[test]
+fn exceeds_hard_limit_fires_when_transcript_passes_the_model_window() {
+    let mut session = est_session("act");
+    // A window smaller than even the empty system prompt: the estimate can
+    // only be over it.
+    session.config.context_limit = Some(1);
+    assert!(super::exceeds_hard_limit(&session));
+}
+
+#[test]
+fn exceeds_hard_limit_stays_false_with_headroom() {
+    let session = est_session("act");
+    // Default model window with an (almost) empty transcript: plenty of
+    // headroom, no manual-compaction abort.
+    assert!(!super::exceeds_hard_limit(&session));
+}

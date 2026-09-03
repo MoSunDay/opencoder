@@ -35,7 +35,14 @@ fn thinking_block_collapses() {
 fn thinking_headers_match_flatten_line_indices() {
     // Two thinking blocks separated by an assistant block.
     let mut v = legacy_thinking_view(&[("think-a", false)]);
-    v.apply(&SessionEvent::TextDelta("hi".into()));
+    // Built directly: a streamed Say would close its turn and fold the
+    // pending thinking into the ladder, but these tests target the legacy
+    // top-level Thinking block machinery itself.
+    v.blocks.push(ChatBlock::Assistant {
+        raw: "hi".into(),
+        rendered: Vec::new(),
+        done: true,
+    });
     v.blocks.push(ChatBlock::Thinking {
         text: "think-b-1\nthink-b-2".into(),
         collapsed: true,
@@ -74,9 +81,14 @@ fn thinking_headers_match_flatten_line_indices() {
 #[test]
 fn toggle_thinking_at_toggles_specific_block() {
     // Legacy shape: two Thinking blocks separated by an assistant, built
-    // directly (live reasoning goes into the step ladder).
+    // directly (live reasoning goes into the step ladder, and a streamed
+    // Say would close its turn and fold the pending thinking away).
     let mut v = legacy_thinking_view(&[("first run", false)]);
-    v.apply(&SessionEvent::TextDelta("between".into()));
+    v.blocks.push(ChatBlock::Assistant {
+        raw: "between".into(),
+        rendered: Vec::new(),
+        done: true,
+    });
     v.blocks.push(ChatBlock::Thinking {
         text: "second run".into(),
         collapsed: true,
@@ -102,7 +114,13 @@ fn toggle_thinking_at_toggles_specific_block() {
 fn collapse_all_collapsible_collapses_every_thinking_block() {
     // Two thinking blocks separated by an assistant block.
     let mut v = legacy_thinking_view(&[("think-a", false)]);
-    v.apply(&SessionEvent::TextDelta("hi".into()));
+    // Built directly: a streamed Say would close its turn and fold the
+    // pending thinking into the ladder (see `append_text_delta`).
+    v.blocks.push(ChatBlock::Assistant {
+        raw: "hi".into(),
+        rendered: Vec::new(),
+        done: true,
+    });
     v.blocks.push(ChatBlock::Thinking {
         text: "think-b\nthink-c".into(),
         collapsed: true,
@@ -249,7 +267,10 @@ fn interleaved_reasoning_opens_a_new_turn_under_each_say() {
         .iter()
         .filter(|line| line.spans.iter().any(|span| span.content.contains("Say:")))
         .count();
-    assert_eq!(say_headers, 1, "one LLM round must render one Say header");
+    assert_eq!(
+        say_headers, 2,
+        "each Say of the pairing contract renders its own header"
+    );
 }
 
 #[test]
@@ -271,14 +292,18 @@ fn collapsed_live_reasoning_stays_raw_until_the_step_opens() {
         v.last_open_thinking_collapsed(),
         "collapsed step reasoning is not visible"
     );
-    let (thinking_raw, thinking_empty) = match &v.blocks[0] {
-        ChatBlock::StepGroup { steps, .. } => {
-            (steps[0].thinking_raw.clone(), steps[0].thinking.is_empty())
-        }
+    let (thinking_raw, thinking_rendered) = match &v.blocks[0] {
+        ChatBlock::StepGroup { steps, .. } => (
+            steps[0].thinking_raw.clone(),
+            crate::chat::steps::span_text(&steps[0].thinking),
+        ),
         _ => unreachable!("first block must be the step group"),
     };
     assert_eq!(thinking_raw, "first");
-    assert!(thinking_empty);
+    // Closing the Say sealed turn 1's step: its thinking is rendered then
+    // and there (counted exactly once), so the closed turn carries the
+    // rendered body already.
+    assert_eq!(thinking_rendered, "first");
     let (raw2, empty2) = match &v.blocks[2] {
         ChatBlock::StepGroup { steps, .. } => {
             (steps[0].thinking_raw.clone(), steps[0].thinking.is_empty())

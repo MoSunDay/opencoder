@@ -115,11 +115,12 @@ fn replayed_orphan_tool_result_omits_duration_span() {
     }
 }
 
-/// Replaying an assistant message carrying Reasoning blocks must restore them
-/// as collapsed `ChatBlock::Thinking` blocks — so the `💭 Thinking` label
-/// survives resume / compaction (mirrors the live ReasoningDelta path).
+/// Replaying an assistant message carrying Reasoning blocks must fold them
+/// into the ladder as a rendered, call-less step ABOVE the Say — mirroring
+/// the live path (`1 Turn = n Steps + Say`); no top-level `Thinking` block
+/// survives resume / compaction.
 #[test]
-fn replayed_reasoning_restored_as_thinking_block() {
+fn replayed_reasoning_folds_into_the_ladder_step() {
     let msg = Message {
         display: None,
         id: "r1".into(),
@@ -142,37 +143,44 @@ fn replayed_reasoning_restored_as_thinking_block() {
     let mut chat = ChatView::default();
     replay_one(&mut chat, &msg, &HashMap::new());
 
-    let thinking = chat
+    assert!(
+        !chat
+            .blocks
+            .iter()
+            .any(|b| matches!(b, ChatBlock::Thinking { .. })),
+        "replayed reasoning lives inside the ladder, not a top-level block"
+    );
+    let group_idx = chat
         .blocks
         .iter()
-        .find(|b| matches!(b, ChatBlock::Thinking { .. }))
-        .expect("Reasoning block must be restored as a Thinking block");
-
-    match thinking {
-        ChatBlock::Thinking {
-            text,
-            collapsed,
-            sealed,
-        } => {
-            assert_eq!(text, "think hard");
-            assert!(*collapsed, "replayed thinking starts collapsed");
-            assert!(*sealed, "replayed thinking is sealed (not streaming)");
+        .position(|b| matches!(b, ChatBlock::StepGroup { .. }))
+        .expect("Reasoning block must fold into the ladder's step");
+    match &chat.blocks[group_idx] {
+        ChatBlock::StepGroup { steps, .. } => {
+            assert_eq!(steps.len(), 1);
+            assert_eq!(steps[0].thinking_raw, "think hard");
+            let rendered: String = steps[0]
+                .thinking
+                .iter()
+                .flat_map(|l| l.spans.iter())
+                .map(|s| s.content.clone())
+                .collect();
+            assert!(
+                rendered.contains("think hard"),
+                "replayed step thinking is rendered eagerly: {rendered:?}"
+            );
+            assert!(steps[0].calls.is_empty());
         }
         _ => unreachable!(),
     }
 
-    let thinking_idx = chat
-        .blocks
-        .iter()
-        .position(|b| matches!(b, ChatBlock::Thinking { .. }))
-        .expect("thinking index");
     let assistant_idx = chat
         .blocks
         .iter()
         .position(|b| matches!(b, ChatBlock::Assistant { .. }))
         .expect("assistant text block must still be replayed");
     assert!(
-        thinking_idx < assistant_idx,
+        group_idx < assistant_idx,
         "replay must preserve the live Thinking-before-Say order"
     );
 }

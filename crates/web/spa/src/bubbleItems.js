@@ -36,12 +36,22 @@ function isAssistantTurnPart(turn) {
   return turn.kind === 'steps' || turn.kind === 'text' || turn.kind === 'think';
 }
 
-/// Reduced transcript segments → Bubble.List items. A maximal adjacent run
-/// containing a steps ladder is one assistant turn item, so its collapsed
-/// default is exactly one `N Steps` summary plus Say in one bubble. Multiple
-/// reducer step segments merge into that single count; speech keeps its own
-/// order at Turn level. Ordinary text-only replies retain the existing
-/// ai-item shape. Always returns an array and never throws on null/undefined.
+/// A run part closes the bubble only when it is a Say - non-empty assistant
+/// text without the `image` marker (presentation rows never close a Turn).
+function isSayPart(part) {
+  return !!(part && part.kind === 'text' && part.role === 'assistant'
+    && typeof part.text === 'string' && part.text.length > 0 && !part.image);
+}
+
+/// Reduced transcript segments → Bubble.List items. A maximal adjacent run of
+/// assistant parts containing a steps ladder is one assistant Turn item, and
+/// the run ENDS at its Say: the closing speech is the bubble's tail (plus any
+/// preceding think/empty parts), so under the pairing contract - one user
+/// input alternates [steps, say, steps, say...] - a steps part AFTER a Say
+/// starts the NEXT item with its own step count and its own Say. Multiple
+/// adjacent step segments before the Say still merge into that single count.
+/// Ordinary text-only replies retain the existing ai-item shape. Always
+/// returns an array and never throws on null/undefined.
 export function itemsFromTurns(turns) {
   const list = Array.isArray(turns) ? turns : [];
   const items = [];
@@ -55,11 +65,26 @@ export function itemsFromTurns(turns) {
     let end = index;
     let hasSteps = false;
     const parts = [];
-    while (end < list.length && isAssistantTurnPart(list[end])) {
+    while (end < list.length) {
       const part = list[end];
-      parts.push(part);
-      hasSteps ||= part.kind === 'steps';
-      end += 1;
+      if (isAssistantTurnPart(part)) {
+        parts.push(part);
+        end += 1;
+        hasSteps ||= part.kind === 'steps';
+        // A Say ends the run INCLUSIVELY - the speech is the Turn's tail,
+        // never a middle part (image markers and empty texts do not close).
+        if (isSayPart(part)) {
+          break;
+        }
+      } else if (part && part.kind === 'sys' && parts.length > 0) {
+        // A sys status row inside an open run is presentation (the retry
+        // badge), not a Turn boundary - absorb it so the run's
+        // [steps ... say] stays ONE bubble instead of splitting in two.
+        parts.push(part);
+        end += 1;
+      } else {
+        break;
+      }
     }
     if (hasSteps) {
       const stepParts = parts.filter((part) => part.kind === 'steps');

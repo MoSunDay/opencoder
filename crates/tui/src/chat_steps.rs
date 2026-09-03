@@ -6,9 +6,10 @@
 //! Function-call completion and provider-round boundaries do not split a
 //! step: calls keep accumulating until the next reasoning run begins.
 //!
-//! A user turn owns exactly one `StepGroup`: live updates use the explicit
-//! `turn_block_start` boundary, while replay canonicalizes message pairs at
-//! real `User` blocks. Assistant Say and presentation blocks never split it.
+//! A user turn owns one `StepGroup` per Say-closed sub-turn: live updates
+//! use the explicit `turn_block_start` boundary (advanced below every
+//! newly-opened Say), while replay canonicalizes message pairs at real
+//! `User` blocks and the `Assistant` Says that cap each sub-turn.
 //! Every user input is a Turn boundary — a submit (`ChatView::begin_turn`),
 //! a consumed steer, or a consumed queued prompt re-anchors the floor below
 //! its echo (`ChatView::reanchor_turn_after_user_echo`), so each turn
@@ -480,12 +481,18 @@ pub(crate) fn coalesce_steps(blocks: &mut Vec<ChatBlock>) {
     *blocks = out;
 }
 
-/// Canonicalize replay into one StepGroup per user turn. Persisted sessions
-/// are message-pair streams, so Assistant Say and tool-result carrier rows
+/// Canonicalize replay into one StepGroup per Say-closed sub-turn.
+/// Persisted sessions are message-pair streams, so tool-result carrier rows
 /// can sit between tool rounds; those are presentation details, not Turn
-/// boundaries. The real user echo is the boundary. The merged group is
-/// placed before the turn's first Assistant speech, matching the live path's
-/// `turn_block_start` insertion and the default `N Steps + Say` order.
+/// boundaries. The canonical unit is the sub-turn a Say CLOSES — the same
+/// floor the live path enforces by advancing `turn_block_start` below every
+/// newly-opened Say (see `chat_stream.rs` and
+/// `features/changelog/2026-09-03/say-closes-turn-transcript-reset-echo.md`)
+/// — so a later ladder never merges back above the Say that closed its
+/// turn, and the user echo still opens a fresh ladder. Each sub-segment's
+/// groups merge into ONE ladder placed at the segment's first StepGroup
+/// (a sub-segment holds no Assistant, so that position degrades from the
+/// legacy first-Assistant rule), keeping the default `N Steps + Say` order.
 fn normalize_turn_groups(blocks: &mut Vec<ChatBlock>) {
     fn append_segment(out: &mut Vec<ChatBlock>, segment: &mut Vec<ChatBlock>) {
         let insert_at = segment
@@ -554,7 +561,12 @@ fn normalize_turn_groups(blocks: &mut Vec<ChatBlock>) {
     let mut out = Vec::with_capacity(blocks.len());
     let mut segment = Vec::new();
     for block in blocks.drain(..) {
-        if matches!(block, ChatBlock::User { .. }) {
+        if matches!(block, ChatBlock::User { .. } | ChatBlock::Assistant { .. }) {
+            // The user echo opens a fresh ladder, and a Say CLOSES its
+            // sub-turn: both cap the accumulated segment here, so
+            // StepGroups that follow a Say can never merge back above it —
+            // the replay mirror of the live path advancing
+            // `turn_block_start` below every newly-opened Say.
             append_segment(&mut out, &mut segment);
             out.push(block);
         } else {
@@ -627,6 +639,8 @@ mod tests {
     #[test]
     fn absorb_pending_thinking_walks_back_over_assistant_blocks() {
         let mk = |blocks: Vec<ChatBlock>| blocks;
+        // Both runs UNSEALED: only an unsealed run is "pending" and may
+        // fold; the Assistant speech in between is transparent.
         let mut blocks = mk(vec![
             ChatBlock::User {
                 rendered: Vec::new(),
@@ -634,7 +648,7 @@ mod tests {
             ChatBlock::Thinking {
                 text: "first".into(),
                 collapsed: true,
-                sealed: true,
+                sealed: false,
             },
             ChatBlock::Assistant {
                 raw: String::new(),
@@ -644,7 +658,7 @@ mod tests {
             ChatBlock::Thinking {
                 text: "second".into(),
                 collapsed: true,
-                sealed: true,
+                sealed: false,
             },
             ChatBlock::Assistant {
                 raw: "say".into(),
@@ -668,6 +682,44 @@ mod tests {
         assert!(!blocks
             .iter()
             .any(|b| matches!(b, ChatBlock::Thinking { .. })));
+
+        // A sealed run is already counted + rendered where it sits: the
+        // backwards walk STOPS at it, so an older sealed run never folds a
+        // second time.
+        let mut sealed_case = mk(vec![
+            ChatBlock::Thinking {
+                text: "old".into(),
+                collapsed: true,
+                sealed: true,
+            },
+            ChatBlock::Assistant {
+                raw: "mid".into(),
+                rendered: Vec::new(),
+                done: true,
+            },
+            ChatBlock::Thinking {
+                text: "new".into(),
+                collapsed: true,
+                sealed: false,
+            },
+            ChatBlock::Assistant {
+                raw: "say".into(),
+                rendered: Vec::new(),
+                done: true,
+            },
+        ]);
+        let absorbed = absorb_pending_thinking(&mut sealed_case);
+        let joined: String = absorbed
+            .iter()
+            .flat_map(|l| l.spans.iter())
+            .map(|s| s.content.clone())
+            .collect();
+        assert!(
+            joined.contains("new"),
+            "only the pending run folds: {joined:?}"
+        );
+        assert!(!joined.contains("old"), "sealed runs stay put: {joined:?}");
+        assert_eq!(sealed_case.len(), 3, "only the unsealed block is removed");
     }
 
     #[test]

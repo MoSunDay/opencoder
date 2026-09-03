@@ -1,9 +1,13 @@
 //! One-round streaming reducer for interleaved reasoning and answer deltas.
 //!
-//! Providers may emit `reasoning -> text -> reasoning -> text` in one LLM
-//! round. The transcript invariant is multiple Thinking blocks followed by at
-//! most one Assistant block; answer fragments are never split merely because
-//! reasoning resumed between them.
+//! Providers may emit `reasoning -> text -> reasoning -> text` within one
+//! LLM round. The transcript contract is `1 Turn = n Steps + Say`: every
+//! newly-opened Say CLOSES its turn (`append_text_delta` advances
+//! `turn_block_start` below it), so reasoning that resumes after a Say
+//! opens the NEXT turn's ladder below the Say instead of joining the group
+//! above it — `think -> text -> think -> text` therefore replays as
+//! `GROUP / SAY / GROUP / SAY`, each ladder paired with its own closing
+//! Say.
 
 use opencoder_llm::estimate;
 
@@ -46,6 +50,10 @@ impl ChatView {
             rendered: Vec::new(),
             done: false,
         });
+        // Anchor the run's Say for the reliable-completion repair: the turn
+        // floor is about to advance ABOVE this block, so `reconcile` cannot
+        // rediscover it by search without risking the previous turn's Say.
+        self.round_assistant_idx = Some(self.blocks.len() - 1);
         // A NEW Say block closes the current Turn: the contract is
         // `1 Turn = n Steps + Say`, and one submission may contain SEVERAL
         // such turns (the agent speaks between tool phases). Everything the
@@ -167,13 +175,17 @@ impl ChatView {
         super::steps::set_turn_progress(&mut self.blocks, self.turn_block_start, false);
 
         let floor = self.turn_block_start.min(self.blocks.len());
-        // The turn being reconciled is the one whose Say closed LAST — the
-        // final Assistant in the flow — which may sit ABOVE `turn_block_start`
-        // once that Say advanced the floor to open the next turn's ladder.
+        // The block to repair is the Say THIS run opened (`round_assistant_idx`),
+        // NOT "the last Assistant in the flow": when every `TextDelta` of the
+        // run was shed under backpressure the last Assistant belongs to the
+        // PREVIOUS turn, and overwriting it would collapse two prompts into
+        // one answer. The anchor is kept (not consumed): a duplicate
+        // AssistantFinal re-repairs the same block idempotently instead of
+        // inserting a second Say. Turn admission (`begin_turn` /
+        // `reanchor_turn_after_user_echo`) and whole-view rebuilds clear it.
         let assistant_idx = self
-            .blocks
-            .iter()
-            .rposition(|block| matches!(block, ChatBlock::Assistant { .. }));
+            .round_assistant_idx
+            .filter(|idx| matches!(self.blocks.get(*idx), Some(ChatBlock::Assistant { .. })));
 
         if let Some(idx) = assistant_idx.filter(|idx| *idx > floor) {
             self.seal_thinking_range(floor, idx);

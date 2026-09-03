@@ -98,9 +98,9 @@ fn text_delta_keeps_one_assistant_block_across_panel_entry() {
 
 /// Interleaved reasoning + text around panel entry: the panel must neither
 /// seal the open Thinking nor split/reorder anything — the transcript must
-/// be identical to the same stream WITHOUT a panel entry. (The reducer
-/// itself starts a second Thinking block once a TextDelta sealed the first;
-/// that is by design, panel or not.)
+/// be identical to the same stream WITHOUT a panel entry. (Every Say closes
+/// its own sub-turn — `1 Turn = n Steps + Say` — so the interleaved round
+/// settles as two ladder/Say pairs, panel or not.)
 #[test]
 fn panel_entry_does_not_seal_or_split_thinking_before_assistant() {
     let mut baseline = ChatView::default();
@@ -119,12 +119,13 @@ fn panel_entry_does_not_seal_or_split_thinking_before_assistant() {
     v.apply(&SessionEvent::TextDelta(" answer2".into()));
     v.finalize_assistant();
 
-    // Live reasoning never leaves the ladder: the interleaved round settles
-    // as [StepGroup(both thinking fragments), Assistant] — nothing extra.
+    // Live reasoning never leaves the ladder and each Say closes its own
+    // sub-turn: the interleaved round settles as
+    // [StepGroup, Assistant, StepGroup, Assistant] — nothing extra.
     assert_eq!(
         v.blocks.len(),
-        2,
-        "[StepGroup, Assistant] exactly — nothing extra"
+        4,
+        "[Group, Say, Group, Say] exactly — nothing extra"
     );
     assert!(
         matches!(v.blocks.first(), Some(ChatBlock::StepGroup { .. })),
@@ -132,13 +133,13 @@ fn panel_entry_does_not_seal_or_split_thinking_before_assistant() {
     );
     assert_eq!(
         step_groups(&v),
-        1,
-        "panel entry must not open a second group"
+        2,
+        "the pairing contract's two ladders — panel entry adds none"
     );
     assert_eq!(
         first_steps(&v).len(),
         1,
-        "the round's reasoning stays in one step"
+        "each turn's reasoning stays in one step"
     );
     assert!(
         matches!(
@@ -147,17 +148,36 @@ fn panel_entry_does_not_seal_or_split_thinking_before_assistant() {
         ),
         "exactly one finalized Assistant at the tail"
     );
-    let thinking = thinking_text(&v);
+    let all_thinking: String = v
+        .blocks
+        .iter()
+        .filter_map(|b| match b {
+            ChatBlock::StepGroup { steps, .. } => Some(
+                steps
+                    .iter()
+                    .map(|step| step.thinking_raw.as_str())
+                    .collect::<String>(),
+            ),
+            _ => None,
+        })
+        .collect();
     assert!(
-        thinking.contains("think") && thinking.contains("think2"),
-        "both reasoning fragments survive, got {thinking:?}"
+        all_thinking.contains("think") && all_thinking.contains("think2"),
+        "both reasoning fragments survive, got {all_thinking:?}"
     );
-    if let Some(ChatBlock::Assistant { raw, .. }) = v.blocks.last() {
-        assert!(
-            raw.contains("answer") && raw.contains("answer2"),
-            "both answer fragments survive, got {raw:?}"
-        );
-    }
+    let answers: Vec<&str> = v
+        .blocks
+        .iter()
+        .filter_map(|block| match block {
+            ChatBlock::Assistant { raw, .. } => Some(raw.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        answers,
+        ["answer", " answer2"],
+        "each Say keeps its own answer fragment"
+    );
     // The core regression pin: panel entry perturbed nothing.
     assert_eq!(
         v.blocks, baseline.blocks,

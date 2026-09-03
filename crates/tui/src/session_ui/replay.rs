@@ -35,9 +35,14 @@ fn flush_segment(
     }
     let thinking_raw = seg_thinking.join("");
     seg_thinking.clear();
+    // Render eagerly, mirroring the live path (thinking is rendered markdown
+    // the moment it is absorbed into a step): replayed steps carry the
+    // rendered body too, so `.thinking` readers (disclosure, copy mode) see
+    // it without waiting for a lazy render pass that replay never runs.
+    let thinking = crate::markdown::render(&thinking_raw);
     let steps = vec![Step {
         thinking_raw,
-        thinking: Vec::new(),
+        thinking,
         thinking_dirty: false,
         calls: std::mem::take(seg_calls),
         open: false,

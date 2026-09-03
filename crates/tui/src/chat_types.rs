@@ -170,6 +170,15 @@ pub struct ChatView {
     /// `TextDelta` chunks dropped by the bounded worker channel without ever
     /// overwriting an Assistant block from an earlier turn.
     pub turn_block_start: usize,
+    /// Index of the Say block the CURRENT run opened last (`append_text_delta`
+    /// sets it on every new Assistant push; a Say closes its turn and advances
+    /// `turn_block_start` above it, so the floor alone cannot tell "this run's
+    /// Say" from "the previous turn's Say" apart). `reconcile_completed_assistant`
+    /// consumes it: present → repair that block in place; absent (every
+    /// `TextDelta` of the run was shed) → INSERT a recovered Say, never
+    /// overwrite the earlier turn's answer. Cleared on turn admission and by
+    /// the whole-view rebuilds (`rebuild_after_reset` replaces the view).
+    pub round_assistant_idx: Option<usize>,
     /// Verbatim echo of the currently admitted turn's user input (submit,
     /// steer consumption, or queue consumption). `TranscriptReset` rebuilds
     /// the whole view from the folded transcript, which lands BEFORE the

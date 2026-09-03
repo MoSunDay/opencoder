@@ -1,21 +1,38 @@
 // Pure Step-ladder reducers shared by snapshot replay and live SSE folding.
-// One visible user turn owns one `steps` item regardless of interleaved Say,
-// status, task, or image presentation items. A Step is one reasoning run plus
-// every function call before the next reasoning run.
+// Turn contract (TUI parity, chat_steps.rs + chat_stream.rs): ONE user input
+// owns one or MORE pairs of (n Steps + Say). A Say (non-empty assistant
+// text) CLOSES the current sub-turn: reasoning/tool turns that arrive after
+// it open a FRESH ladder BELOW the Say and never merge into the group above
+// it, so one submission alternates [steps, say, steps, say...]. A Step is
+// one reasoning run plus every function call before the next reasoning run.
 
-function lastUserBoundary(turns) {
-  for (let i = turns.length - 1; i >= 0; i -= 1) {
-    const turn = turns[i];
-    if (turn && turn.kind === 'text' && turn.role === 'user') {
-      return i;
-    }
-  }
-  return -1;
+// A Say is non-empty assistant text. An `image:true` marker text turn is
+// presentation, NOT a Say (TUI parity: Image blocks never close a turn).
+function isSayTurn(turn) {
+  return !!(turn && turn.kind === 'text' && turn.role === 'assistant'
+    && typeof turn.text === 'string' && turn.text.length > 0 && !turn.image);
 }
 
+// The turn floor: where the CURRENT sub-turn's ladder lives. Scanning
+// backwards, the LAST Say wins (the floor sits right below it - TUI
+// chat_stream.rs advances turn_block_start past every new Say); a user text
+// turn caps the walk first when no Say followed the echo; 0 when neither
+// exists yet.
+function turnFloor(turns) {
+  for (let i = turns.length - 1; i >= 0; i -= 1) {
+    const turn = turns[i];
+    if (isSayTurn(turn) || (turn && turn.kind === 'text' && turn.role === 'user')) {
+      return i + 1;
+    }
+  }
+  return 0;
+}
+
+// FIRST steps turn at/after the floor (TUI parity: position() over
+// blocks[floor..] - the group above a closing Say is out of reach).
 function turnStepsIndex(turns) {
-  const boundary = lastUserBoundary(turns);
-  for (let i = boundary + 1; i < turns.length; i += 1) {
+  const floor = turnFloor(turns);
+  for (let i = floor; i < turns.length; i += 1) {
     const turn = turns[i];
     if (turn && turn.kind === 'steps' && turn.role === 'assistant') {
       return i;
@@ -24,27 +41,37 @@ function turnStepsIndex(turns) {
   return -1;
 }
 
+// A new ladder inserts AT the floor, pushing later presentation rows down
+// (TUI parity: merge_turn_call inserts at turn_block_start, so the settled
+// order is always `N Steps` followed by the sub-turn's Say).
 function turnInsertIndex(turns) {
-  const boundary = lastUserBoundary(turns);
-  for (let i = boundary + 1; i < turns.length; i += 1) {
-    const turn = turns[i];
-    if (turn && turn.kind === 'text' && turn.role === 'assistant') {
-      return i;
-    }
-  }
-  return boundary + 1;
+  return turnFloor(turns);
 }
 
+// Whether a Say sits at/after the floor. Practically false - the floor sits
+// below the LAST Say by construction - kept as the scoped progress gate.
+// The freeze itself happens in settleTurnProgress, on the Say's first chunk.
 function turnHasSay(turns) {
-  const boundary = lastUserBoundary(turns);
-  for (let i = boundary + 1; i < turns.length; i += 1) {
-    const turn = turns[i];
-    if (turn && turn.kind === 'text' && turn.role === 'assistant'
-      && typeof turn.text === 'string' && turn.text.length > 0) {
+  const floor = turnFloor(turns);
+  for (let i = floor; i < turns.length; i += 1) {
+    if (isSayTurn(turns[i])) {
       return true;
     }
   }
   return false;
+}
+
+// Legacy-fold boundary: the last user text turn. Top-level think items only
+// exist in old states; the fold recovers every one of them above the user
+// echo (Says are transparent, exactly like TUI absorb_pending_thinking).
+function lastUserBoundary(turns) {
+  for (let i = turns.length - 1; i >= 0; i -= 1) {
+    const turn = turns[i];
+    if (turn && turn.kind === 'text' && turn.role === 'user') {
+      return i;
+    }
+  }
+  return -1;
 }
 
 function reasoningStartsStep(steps) {
@@ -87,10 +114,13 @@ export function closeOpenText(turns) {
   return turns;
 }
 
-// Settle the current user turn's progress animation without mutating the
-// input array. ToolEnd intentionally does not call this: progress remains
-// visible through the inter-round gap and stops only when Say begins or the
-// run reaches a terminal boundary.
+// Freeze the progress animation of the FIRST steps group at/after the floor
+// - the ladder the incoming Say is about to close - without mutating the
+// input array (TUI parity: set_turn_progress(false) fires on the Say's first
+// chunk, before the new Say lands, so the next ladder below re-arms fresh).
+// ToolEnd intentionally does not call this: progress stays visible through
+// the inter-round gap and stops only when Say begins or the run reaches a
+// terminal boundary.
 export function settleTurnProgress(turns) {
   const index = turnStepsIndex(turns);
   if (index < 0 || turns[index].progressActive === false) {
@@ -102,7 +132,10 @@ export function settleTurnProgress(turns) {
 }
 
 // Compatibility fold for old states that still contain top-level think
-// items. Mutates only the caller-owned copy.
+// items (the live path streams reasoning straight into the ladder). Recovers
+// every think turn above the last user echo - Says are transparent, exactly
+// like TUI absorb_pending_thinking - so no think item survives outside the
+// ladder. Mutates only the caller-owned copy.
 export function absorbSegmentThinking(turns) {
   let thinking = '';
   const boundary = lastUserBoundary(turns);
@@ -116,23 +149,34 @@ export function absorbSegmentThinking(turns) {
   return thinking;
 }
 
+// TUI parity with chat_steps.rs::place_thinking_step: file an orphan
+// thinking run at a point where no tool call can consume it (run end, or a
+// boundary push). Walking backwards, a Say is TRANSPARENT - remembered as
+// the fallback insert position, because the run streamed BEFORE that speech;
+// a steps turn absorbs the run as a call-less step; any other turn caps the
+// walk and a fresh single-step ladder is inserted right after the cap. When
+// the walk exhausts, the ladder lands at the last-seen Say index (ABOVE that
+// Say), else at the end. Mutates only the caller-owned array.
 export function placeThinkingStep(turns, thinking) {
   if (!thinking) {
     return turns;
   }
-  const index = turnStepsIndex(turns);
-  if (index >= 0) {
-    const group = turns[index];
-    turns[index] = {
-      ...group,
-      steps: group.steps.concat([{ thinking, calls: [] }]),
-    };
-    return turns;
+  let insertAt = turns.length;
+  for (let i = turns.length - 1; i >= 0; i -= 1) {
+    const turn = turns[i];
+    if (isSayTurn(turn)) {
+      insertAt = i;
+      continue;
+    }
+    if (turn && turn.kind === 'steps' && turn.role === 'assistant') {
+      turns[i] = { ...turn, steps: turn.steps.concat([{ thinking, calls: [] }]) };
+      return turns;
+    }
+    insertAt = i + 1;
+    break;
   }
-  turns.splice(turnInsertIndex(turns), 0, {
-    kind: 'steps',
-    role: 'assistant',
-    progressActive: false,
+  turns.splice(insertAt, 0, {
+    kind: 'steps', role: 'assistant', progressActive: false,
     steps: [{ thinking, calls: [] }],
   });
   return turns;
@@ -173,9 +217,12 @@ export function appendStepCall(turns, thinking, call, activateProgress = false) 
   };
 }
 
-// Snapshot messages preserve provider-round boundaries, but those are not
-// Step boundaries. A message with no new thinking keeps appending calls to
-// the current Step; new thinking starts the next Step.
+// Snapshot step fold: appended into the ladder the floor-aware helpers
+// locate (the FIRST steps turn at/after the floor - below the LAST Say - or
+// a fresh group inserted AT the floor), the SAME positioning the live
+// reducers use, which is what keeps live SSE and snapshot replay in shape
+// parity. A round with no new thinking keeps appending calls to the current
+// Step; new thinking starts the next Step.
 export function appendStepTurn(turns, thinking, calls) {
   const index = turnStepsIndex(turns);
   if (index >= 0) {

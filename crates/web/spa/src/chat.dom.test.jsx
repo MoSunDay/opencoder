@@ -27,6 +27,9 @@ let hits = [];
 // reload paths. Default {} (empty snapshot → streamed turns kept); a test
 // seeds an entry to simulate what the store has (or has NOT) recorded.
 let sessionSnapshots = {};
+/// What every GET /seq answers — the persisted event head. Tests move it to
+/// simulate the run racing ahead of a lagged tab.
+let seqHead = 0;
 
 const jsonResponse = (body) => Promise.resolve({
   ok: true,
@@ -82,7 +85,7 @@ const installRouter = () => {
       return jsonResponse({ nodes: [] });
     }
     if (url.includes('/seq')) {
-      return jsonResponse({ seq: 0 });
+      return jsonResponse({ seq: seqHead });
     }
     if (url.includes('/prompt')) {
       return jsonResponse({ ok: true });
@@ -110,6 +113,7 @@ const deprecationHits = () => consoleLog.error.concat(consoleLog.warn)
 
 beforeEach(() => {
   liveEventCtl = null;
+  seqHead = 0;
   localStorage.clear();
   clearCredentials();
   setState({ page: 'chat', preselectNode: null, nodes: [], conn: 'init' });
@@ -436,4 +440,112 @@ describe('ChatPanel optimistic echo & transcript_reset rebuild', () => {
     expect(screen.getByText('压缩后的上下文')).toBeTruthy();
     expect(container.querySelectorAll('.ant-bubble')).toHaveLength(2);
   });
+});
+
+describe('ChatPanel resync (lag → snapshot rebuild at the /seq watermark)', () => {
+  const mountChat = async () => {
+    setCredentials('smoke-token', '');
+    const { container } = render(<ChatPanel />);
+    const textarea = await waitFor(() => {
+      const el = container.querySelector('textarea.ant-sender-input');
+      expect(el).toBeTruthy();
+      return el;
+    });
+    return { container, textarea };
+  };
+
+  it('rebuilds from the snapshot on lag, drops at/below-watermark frames, keeps the live tail', async () => {
+    // The run raced ahead while the tab was behind: head is 30 and the store
+    // snapshot holds the truth. draining=true keeps the run live.
+    seqHead = 30;
+    sessionSnapshots['s1'] = {
+      draining: true,
+      messages: [
+        { role: 'user', blocks: [{ type: 'text', text: '帮我跑测试' }] },
+        { role: 'assistant', blocks: [{ type: 'text', text: '快照真相' }] },
+      ],
+    };
+    const { container, textarea } = await mountChat();
+    await act(async () => {
+      fireEvent.change(textarea, { target: { value: '继续' } });
+    });
+    await act(async () => {
+      fireEvent.keyDown(container.querySelector('textarea.ant-sender-input'), { key: 'Enter', keyCode: 13 });
+    });
+    await waitFor(() => {
+      expect(hits.some((h) => h.url.includes('/api/sessions/s1/events'))).toBe(true);
+    });
+    const enc = new TextEncoder();
+    // Live frames carry no id (broadcast precedes persistence) — they fold
+    // into the dirty state.
+    await act(async () => {
+      liveEventCtl.enqueue(enc.encode('event: text_delta\ndata: {"text":"局部"}\n\n'));
+    });
+    await waitFor(() => {
+      expect(screen.getByText('局部')).toBeTruthy();
+    });
+    // Server-side consumer lag: the re-sync signal.
+    await act(async () => {
+      liveEventCtl.enqueue(enc.encode('event: error\ndata: {"error":"event lag: 5 events dropped","lag":5}\n\n'));
+    });
+    // Backoff (1s, real timers) → onResync: /seq head 30 + snapshot rebuild.
+    await new Promise((r) => setTimeout(r, 1200));
+    await waitFor(() => {
+      expect(hits.some((h) => h.method === 'GET' && h.url.includes('/api/sessions/s1/events?after=30'))).toBe(true);
+    });
+    // The dirty live tail is REPLACED by the snapshot truth…
+    await waitFor(() => {
+      expect(screen.getByText('快照真相')).toBeTruthy();
+    });
+    expect(screen.queryByText('局部')).toBe(null);
+    // …and the replacement connection rejects below-watermark repeats
+    // (id: 12 ≤ applySeq 30) while folding the future live tail.
+    await act(async () => {
+      liveEventCtl.enqueue(enc.encode('event: text_delta\nid: 12\ndata: {"text":"旧帧"}\n\n'));
+      liveEventCtl.enqueue(enc.encode('event: text_delta\ndata: {"text":"尾部"}\n\n'));
+    });
+    await waitFor(() => {
+      expect(screen.getByText('尾部')).toBeTruthy();
+    });
+    expect(screen.queryByText('旧帧')).toBe(null);
+  }, 15000);
+
+  it('a run that finished while disconnected lands done (draining flag), not latched streaming', async () => {
+    seqHead = 30;
+    sessionSnapshots['s1'] = {
+      draining: false,
+      messages: [
+        { role: 'user', blocks: [{ type: 'text', text: '收尾' }] },
+        { role: 'assistant', blocks: [{ type: 'text', text: '终局快照' }] },
+      ],
+    };
+    const { container, textarea } = await mountChat();
+    await act(async () => {
+      fireEvent.change(textarea, { target: { value: '继续' } });
+    });
+    await act(async () => {
+      fireEvent.keyDown(container.querySelector('textarea.ant-sender-input'), { key: 'Enter', keyCode: 13 });
+    });
+    await waitFor(() => {
+      expect(hits.some((h) => h.url.includes('/api/sessions/s1/events'))).toBe(true);
+    });
+    const enc = new TextEncoder();
+    await act(async () => {
+      liveEventCtl.enqueue(enc.encode('event: error\ndata: {"error":"event lag: 2 events dropped","lag":2}\n\n'));
+    });
+    // The terminal done frame fired at seq ≤ 30 — it is NEVER replayed; the
+    // resync's draining=false rebuild must close the run instead of latching
+    // 'streaming' forever (busy release → composer freed).
+    await new Promise((r) => setTimeout(r, 1200));
+    await waitFor(() => {
+      expect(screen.getByText('终局快照')).toBeTruthy();
+    });
+    await waitFor(() => {
+      expect(screen.queryByText('streaming…')).toBe(null);
+    });
+    // Composer is freed: the stop (loading) button is gone.
+    await waitFor(() => {
+      expect(container.querySelector('.ant-sender-actions-btn-loading-button')).toBe(null);
+    });
+  }, 15000);
 });

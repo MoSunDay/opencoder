@@ -22,16 +22,16 @@ describe('steps ladder (live, mirror of chat_steps.rs)', () => {
     expect(calls[1]).toMatchObject({ id: 'b', name: 'read', output: 'out-b', isError: true, durationMs: 1000 });
   });
 
-  it('(b) sequential rounds (A ends before B starts) open TWO steps in ONE group', () => {
+  it('(b) sequential calls without new thinking stay in ONE step', () => {
     let s = emptyStream();
     s = reduceFrame(s, { event: 'tool_start', data: { id: 'a', name: 'bash', input: {} } }, 1);
     s = reduceFrame(s, { event: 'tool_end', data: { id: 'a', name: 'bash', output: 'x', is_error: false } }, 2);
     s = reduceFrame(s, { event: 'tool_start', data: { id: 'b', name: 'read', input: {} } }, 3);
     expect(s.turns).toHaveLength(1);
     expect(s.turns[0].kind).toBe('steps');
-    expect(s.turns[0].steps).toHaveLength(2);
+    expect(s.turns[0].steps).toHaveLength(1);
     expect(s.turns[0].steps[0].calls[0]).toMatchObject({ id: 'a', output: 'x' });
-    expect(s.turns[0].steps[1].calls[0]).toMatchObject({ id: 'b', output: null });
+    expect(s.turns[0].steps[0].calls[1]).toMatchObject({ id: 'b', output: null });
   });
 
   it('(c) reasoning_delta streams straight into the ladder — a think-only step, never a top-level think turn', () => {
@@ -84,6 +84,17 @@ describe('steps ladder (live, mirror of chat_steps.rs)', () => {
     expect(s.turns[0].steps[1]).toMatchObject({ thinking: 'next round', calls: [] });
   });
 
+  it('(c2b-2) new reasoning opens a Step even while the previous call is running', () => {
+    let s = emptyStream();
+    s = reduceFrame(s, { event: 'tool_start', data: { id: 'a', name: 'bash', input: {} } }, 1);
+    s = reduceFrame(s, { event: 'reasoning_delta', data: { text: 'next thought' } }, 2);
+    s = reduceFrame(s, { event: 'tool_start', data: { id: 'b', name: 'read', input: {} } }, 3);
+    expect(s.turns[0].steps).toHaveLength(2);
+    expect(s.turns[0].steps[0].calls.map((call) => call.id)).toEqual(['a']);
+    expect(s.turns[0].steps[1]).toMatchObject({ thinking: 'next thought' });
+    expect(s.turns[0].steps[1].calls.map((call) => call.id)).toEqual(['b']);
+  });
+
   it('(c2c) reasoning after a closed boundary (tail is a user turn) inserts the steps turn right after it', () => {
     let s = withUserTurn(emptyStream(), 'do the thing');
     s = reduceFrame(s, { event: 'reasoning_delta', data: { text: 'fresh round' } }, 1);
@@ -127,14 +138,15 @@ describe('steps ladder (live, mirror of chat_steps.rs)', () => {
     expect(s.turns.every((t) => t.kind !== 'think')).toBe(true);
   });
 
-  it('(d) Say between two rounds opens a NEW Step in the same Turn group', () => {
+  it('(d) Say between calls does not open a Step without new thinking', () => {
     let s = emptyStream();
     s = reduceFrame(s, { event: 'tool_start', data: { id: 'a', name: 'bash', input: {} } }, 1);
     s = reduceFrame(s, { event: 'tool_end', data: { id: 'a', name: 'bash', output: 'x', is_error: false } }, 2);
     s = reduceFrame(s, { event: 'text_delta', data: { text: 'interlude answer' } }, 3);
     s = reduceFrame(s, { event: 'tool_start', data: { id: 'b', name: 'read', input: {} } }, 4);
     expect(s.turns.map((x) => x.kind)).toEqual(['steps', 'text']);
-    expect(s.turns[0].steps).toHaveLength(2);
+    expect(s.turns[0].steps).toHaveLength(1);
+    expect(s.turns[0].steps[0].calls.map((call) => call.id)).toEqual(['a', 'b']);
     expect(s.turns[1]).toMatchObject({ kind: 'text', role: 'assistant', text: 'interlude answer' });
   });
 
@@ -196,15 +208,15 @@ describe('steps ladder (snapshot, message-pair semantics)', () => {
     expect(turns[2]).toMatchObject({ kind: 'text', role: 'assistant', text: 'final answer' });
   });
 
-  it('(h) two adjacent assistant tool messages fold into ONE steps turn, 2 steps', () => {
+  it('(h) adjacent tool messages without new thinking fold into ONE step', () => {
     const turns = turnsFromMessages([
       { role: 'assistant', blocks: [{ kind: 'tool_use', id: 'a', name: 'bash', input: {} }] },
       { role: 'assistant', blocks: [{ kind: 'tool_use', id: 'b', name: 'read', input: {} }] },
     ]);
     expect(turns).toHaveLength(1);
     expect(turns[0].kind).toBe('steps');
-    expect(turns[0].steps).toHaveLength(2);
-    expect(turns[0].steps.map((st) => st.calls[0].id)).toEqual(['a', 'b']);
+    expect(turns[0].steps).toHaveLength(1);
+    expect(turns[0].steps[0].calls.map((call) => call.id)).toEqual(['a', 'b']);
   });
 
   it('(i) a task tool_use stays a flat tool turn and takes its result', () => {

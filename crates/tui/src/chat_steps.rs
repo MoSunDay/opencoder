@@ -2,11 +2,9 @@
 //! by BOTH the live streaming path (`ChatView::apply`) and replay
 //! (`session_ui::replay`), so step boundaries never drift between them.
 //!
-//! A step is one assistant round: its thinking plus that round's function
-//! calls. Boundary heuristic: a new `ToolStart` merges into the trailing
-//! step while it still holds no finished call, and opens a NEW step once it
-//! does (sequential calls in one round thereby split; parallel calls stay
-//! together).
+//! A step is one reasoning run plus every function call that follows it.
+//! Function-call completion and provider-round boundaries do not split a
+//! step: calls keep accumulating until the next reasoning run begins.
 //!
 //! A user turn owns exactly one `StepGroup`: live updates use the explicit
 //! `turn_block_start` boundary, while replay canonicalizes message pairs at
@@ -63,26 +61,23 @@ pub(crate) fn visible_targets(open: bool, steps: &[Step]) -> Vec<StepTarget> {
     out
 }
 
-/// Step-boundary judgment shared by the live and replay paths: `true` when a
-/// new call must NOT merge into the trailing step (it already holds a
-/// finished call), i.e. a new step opens.
-fn boundary_needed(steps: &[Step]) -> bool {
+/// A reasoning delta starts a new step after the previous step has already
+/// reached calls (or was explicitly sealed). Further deltas of the same
+/// reasoning run append to the still-open, call-less step.
+fn reasoning_starts_step(steps: &[Step]) -> bool {
     match steps.last() {
-        Some(s) => s.calls.iter().any(|c| c.elapsed_ms.is_some()),
+        Some(s) => !s.calls.is_empty() || s.sealed,
         None => true,
     }
 }
 
-/// Append `call` to `steps` honoring the shared boundary heuristic, attaching
-/// `thinking` (rendered markdown lines) to the step it opens — or, when
-/// merging, to the trailing step. Every level of the ladder starts closed.
-pub(crate) fn merge_or_new_step(
-    steps: &mut Vec<Step>,
-    mut thinking: Vec<Line<'static>>,
-    call: ToolCall,
-) {
+/// Append `call` to the current reasoning-owned step. Calls never create a
+/// boundary themselves: sequential and parallel calls both accumulate until
+/// a later reasoning run opens the next step. `thinking` is a compatibility
+/// input for callers folding an old top-level Thinking block.
+fn append_step_call(steps: &mut Vec<Step>, mut thinking: Vec<Line<'static>>, call: ToolCall) {
     let thinking_raw = span_text(&thinking);
-    if boundary_needed(steps) {
+    if steps.is_empty() || (!thinking.is_empty() && reasoning_starts_step(steps)) {
         steps.push(Step {
             thinking_raw,
             thinking,
@@ -171,10 +166,10 @@ pub(crate) fn span_text(lines: &[Line<'static>]) -> String {
 }
 
 /// Stream one reasoning delta straight into the ladder — thinking is a
-/// structural part of a step, never a top-level block. The trailing group's
-/// last step receives the delta when the round is still open (no finished
-/// calls); otherwise a new step opens. A fresh group is pushed when the
-/// round has no ladder yet. Streaming updates never change disclosure state:
+/// structural part of a step, never a top-level block. The first delta after
+/// one or more calls opens a new step; later deltas append there, and every
+/// call before the next reasoning run remains in the preceding step. A fresh
+/// group is pushed when the turn has no ladder yet. Streaming updates never change disclosure state:
 /// the turn and step stay
 /// closed by default, so the stable top-level view remains `N Steps + Say`.
 ///
@@ -216,7 +211,7 @@ pub(crate) fn append_step_thinking_delta(
     } = &mut blocks[group_idx]
     {
         *progress_active = should_show_progress;
-        if boundary_needed(steps) {
+        if reasoning_starts_step(steps) {
             steps.push(Step {
                 thinking_raw: delta.to_string(),
                 thinking: Vec::new(),
@@ -256,7 +251,7 @@ pub(crate) fn merge_turn_call(
         .map(|relative| floor + relative)
     {
         if let ChatBlock::StepGroup { steps, .. } = &mut blocks[idx] {
-            merge_or_new_step(steps, thinking, call);
+            append_step_call(steps, thinking, call);
         }
         return None;
     }
@@ -487,7 +482,7 @@ fn normalize_turn_groups(blocks: &mut Vec<ChatBlock>) {
                 )
             })
             .unwrap_or(segment.len());
-        let mut steps = Vec::new();
+        let mut steps: Vec<Step> = Vec::new();
         let mut open = false;
         let mut progress_active = false;
         for block in segment.iter_mut() {
@@ -497,7 +492,19 @@ fn normalize_turn_groups(blocks: &mut Vec<ChatBlock>) {
                 progress_active: group_progress,
             } = block
             {
-                steps.append(group_steps);
+                for mut step in group_steps.drain(..) {
+                    let has_thinking = !step.thinking_raw.is_empty() || !step.thinking.is_empty();
+                    if !has_thinking {
+                        if let Some(previous) = steps.last_mut() {
+                            previous.calls.append(&mut step.calls);
+                            previous.open |= step.open;
+                            previous.calls_open |= step.calls_open;
+                            previous.sealed &= step.sealed;
+                            continue;
+                        }
+                    }
+                    steps.push(step);
+                }
                 open |= *group_open;
                 progress_active |= *group_progress;
             }

@@ -110,7 +110,7 @@ pub fn builtin_agents() -> Vec<Agent> {
             description: "Sidecar observer: a temporary bypass loop that answers questions about the main task's progress from a context snapshot. Read-only, makes no changes.".into(),
             prompt: base_prompt_sidecar(),
             tools: ToolFilter::Allow(vec![
-                "read".into(), "search".into(), "ls".into(),
+                "read".into(), "search".into(), "ls".into(), "bash".into(),
             ]),
         },
         Agent {
@@ -207,8 +207,10 @@ pub fn base_prompt_sidecar() -> String {
     "You are the sidecar observer of a main agent session: a temporary bypass loop that answers \
      questions about the main task's progress, status, or plan. The user message carries a \
      snapshot of the main session's conversation context as background - treat it as read-only \
-     reference material. You have read, search, and ls tools to check files when the snapshot is \
-     not enough. You CANNOT edit or write files and must never claim any change was made. \
+     reference material. You have read, search, and ls tools, plus bash for read-only \
+     inspection commands (git log, grep, wc) when the snapshot is not enough. Every \
+     state-changing bash command is intercepted and refused - do not retry or look for \
+     another write path. You CANNOT edit or write files and must never claim any change was made. \
      Answer concisely and progress-oriented: what is done, what is in flight, what comes next."
         .to_string()
 }
@@ -296,30 +298,35 @@ mod tests {
     }
 
     /// Pin down the `sidecar` observer's tool set: read-only inspection only
-    /// (read/search/ls), never mutating or delegation tools. The sidecar
-    /// answers questions about the main task from a context snapshot; it must
-    /// never be able to change state.
+    /// (read/search/ls plus a classifier-gated bash), never mutating or
+    /// delegation tools. The sidecar answers questions about the main task
+    /// from a context snapshot; it must never be able to change state.
     #[test]
     fn sidecar_observer_is_read_only() {
         let sidecar = resolve_agent("sidecar").expect("sidecar agent registered");
         assert_eq!(sidecar.kind, AgentKind::Subagent);
         assert_eq!(sidecar.mode, AgentMode::Subagent);
-        for allowed in &["read", "search", "ls"] {
+        for allowed in &["read", "search", "ls", "bash"] {
             assert!(
                 sidecar.tools.allows(allowed),
                 "sidecar must allow '{allowed}'"
             );
         }
-        for blocked in &["bash", "edit", "write", "task", "question"] {
+        for blocked in &["edit", "write", "task", "question"] {
             assert!(
                 !sidecar.tools.allows(blocked),
                 "sidecar (read-only) must not allow '{blocked}'"
             );
         }
         // The prompt states the observer contract: snapshot-in, progress-out,
-        // and no modification claims.
+        // read-only bash, and no modification claims.
         let prompt = sidecar.prompt;
         assert!(prompt.contains("sidecar observer"), "got: {prompt}");
+        assert!(
+            prompt.contains("read-only inspection commands"),
+            "got: {prompt}"
+        );
+        assert!(prompt.contains("intercepted and refused"), "got: {prompt}");
         assert!(prompt.contains("CANNOT edit or write"), "got: {prompt}");
     }
 

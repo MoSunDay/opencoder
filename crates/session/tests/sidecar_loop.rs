@@ -344,3 +344,75 @@ async fn sidecar_child_error_does_not_leak() {
         .iter()
         .any(|e| matches!(e, SessionEvent::SidecarTurn { ok: false, .. })));
 }
+
+/// A parent snapshot that is already over the compaction threshold must NOT
+/// make the sidecar compact: the child transcript is a borrowed snapshot, not
+/// this loop's durable history. Compacting would (a) pay an extra LLM summary
+/// round per question and (b) replace the snapshot with a summary, so follow-up
+/// turns would lose the very context they exist to answer from.
+#[tokio::test]
+async fn sidecar_never_compacts_over_threshold_snapshot() {
+    let (mut parent, _store, mock) = parent_session().await;
+    // Lower the threshold BEFORE seeding so the seeded history alone trips it:
+    // the test must prove the snapshot (not something this turn adds) is the
+    // trigger — otherwise it would pass vacuously.
+    parent.config.compaction.context_threshold = 10;
+    seed_history(&mut parent).await;
+    assert!(
+        opencoder_session::compaction::should_compact(&parent),
+        "precondition: the parent snapshot alone must trip the compaction gate"
+    );
+    let parent_before_len = parent.messages.len();
+    let parent_texts: Vec<String> = parent.messages.iter().map(|m| m.text()).collect();
+
+    mock.queue_script(vec![done("phase one done: tokenizer", 111, 100, 11)]);
+
+    let mut conv = new_conv(&parent).await.unwrap();
+    assert!(
+        !conv.child.config.compaction.auto,
+        "sidecar child must disable auto compaction"
+    );
+
+    let (events, cb) = collector();
+    let mut cb = cb;
+    let turn = run_sidecar_turn(&mut conv, "progress?", &mut cb)
+        .await
+        .unwrap();
+
+    assert!(turn.ok, "turn must succeed");
+    assert_eq!(
+        turn.rounds, 1,
+        "a compaction round would consume a second LLM round"
+    );
+
+    let evs = events.lock().unwrap().clone();
+    for ev in &evs {
+        if let SessionEvent::SidecarChild { ev: inner, .. } = ev {
+            assert!(
+                !matches!(
+                    inner.as_ref(),
+                    SessionEvent::Compaction(_) | SessionEvent::TranscriptReset(_)
+                ),
+                "sidecar must not emit {inner:?}"
+            );
+        }
+        assert!(
+            !matches!(
+                ev,
+                SessionEvent::Compaction(_) | SessionEvent::TranscriptReset(_)
+            ),
+            "sidecar must not emit {ev:?}"
+        );
+    }
+
+    // The snapshot survived intact: the parent prefix is untouched, the turn
+    // only appended the Q/A pair.
+    assert_eq!(conv.child.messages.len(), parent_before_len + 2);
+    for (i, want) in parent_texts.iter().enumerate() {
+        assert_eq!(
+            &conv.child.messages[i].text(),
+            want,
+            "snapshot message {i} must survive verbatim"
+        );
+    }
+}

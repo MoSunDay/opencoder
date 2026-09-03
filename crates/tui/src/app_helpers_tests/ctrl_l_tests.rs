@@ -140,15 +140,19 @@ fn ctrl_l_resets_tool_groups_to_collapsed() {
             images: Vec::new(),
         });
         for b in view.blocks.iter_mut() {
-            if let ChatBlock::StepGroup { steps } = b {
+            if let ChatBlock::StepGroup { steps, open, .. } = b {
+                *open = true;
                 steps[0].open = true;
+                steps[0].calls_open = true;
                 steps[0].calls[0].expanded = true;
             }
         }
     }
     for b in chat.blocks.iter_mut() {
-        if let ChatBlock::StepGroup { steps } = b {
+        if let ChatBlock::StepGroup { steps, open, .. } = b {
+            *open = true;
             steps[0].open = true;
+            steps[0].calls_open = true;
             steps[0].calls[0].expanded = true;
         }
     }
@@ -176,9 +180,12 @@ fn ctrl_l_resets_tool_groups_to_collapsed() {
 
     let all_collapsed = |v: &ChatView| {
         v.blocks.iter().all(|b| match b {
-            ChatBlock::StepGroup { steps } => steps
-                .iter()
-                .all(|s| !s.open && s.calls.iter().all(|c| !c.expanded)),
+            ChatBlock::StepGroup { steps, open } => {
+                !*open
+                    && steps
+                        .iter()
+                        .all(|s| !s.open && !s.calls_open && s.calls.iter().all(|c| !c.expanded))
+            }
             _ => true,
         })
     };

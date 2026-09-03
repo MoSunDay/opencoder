@@ -9,6 +9,11 @@
 //! A user turn owns exactly one `StepGroup`: live updates use the explicit
 //! `turn_block_start` boundary, while replay canonicalizes message pairs at
 //! real `User` blocks. Assistant Say and presentation blocks never split it.
+//! Every user input is a Turn boundary — a submit (`ChatView::begin_turn`),
+//! a consumed steer, or a consumed queued prompt re-anchors the floor below
+//! its echo (`ChatView::reanchor_turn_after_user_echo`), so each turn
+//! renders its own `N Steps + Say` pair and never merges into a previous
+//! turn's ladder.
 //!
 //! Thinking absorption: every round's reasoning lives strictly step-local —
 //! the pending `Thinking` blocks trailing the flow (even behind the turn's
@@ -223,10 +228,13 @@ pub(crate) fn append_step_thinking_delta(
             });
         } else if let Some(step) = steps.last_mut() {
             step.thinking_raw.push_str(delta);
+            // Mark dirty BEFORE the visibility-gated render: the expand-time
+            // render (`toggle_tool_call_at`) already cleared the flag, so a
+            // visible step would otherwise freeze on its first delta after
+            // being expanded — new thinking output stops appearing.
+            step.thinking_dirty = true;
             if *open && step.open {
                 render_step_thinking(step);
-            } else {
-                step.thinking_dirty = true;
             }
         }
     }

@@ -435,3 +435,111 @@ async fn fold_queue_consumed_bare_control_command_echoes_nothing() {
     assert!(text.contains("review"), "compound tail echoed: {text}");
     assert!(!text.contains("/plan"), "token suppressed: {text}");
 }
+
+/// The QueueConsumed echo re-anchors the live ladder floor below the echo
+/// (app-layer half of the Turn contract): the queued turn's `N Steps` group
+/// must render AFTER its own prompt echo — `begin_turn` ran at the drain
+/// restart before the echo landed, so without the re-anchor the group would
+/// be inserted at the stale floor ABOVE the echo (and, before that fix,
+/// post-boundary rounds merged into the previous turn's ladder).
+#[tokio::test]
+async fn fold_queue_consumed_reanchors_ladder_below_echo() {
+    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let mut chat = ChatView::default();
+    // A settled previous turn with its own ladder, so a stale floor would
+    // find and merge into it.
+    chat.blocks.push(crate::chat::ChatBlock::User {
+        rendered: crate::markdown::render("first prompt"),
+    });
+    chat.begin_turn();
+    chat.apply(&SessionEvent::ToolStart {
+        id: "c1".into(),
+        name: "bash".into(),
+        input: serde_json::json!({"command": "echo x"}),
+    });
+    chat.apply(&SessionEvent::ToolEnd {
+        id: "c1".into(),
+        name: "bash".into(),
+        output: "o1".into(),
+        is_error: false,
+        images: Vec::new(),
+    });
+    chat.apply(&SessionEvent::Done);
+
+    // Drain restart at TurnDone: begin_turn sets the floor BEFORE the echo.
+    chat.begin_turn();
+    let floor_before = chat.turn_block_start;
+
+    let mut queue_items: Vec<(i64, String)> = vec![(30, "queued prompt X".into())];
+    let mut running = true;
+    let mut cancelled = false;
+    let mut drain_pending = false;
+    let mut skip_next_render = false;
+    let mut follow = true;
+    let (cmd_tx, _cmd_rx) = mpsc::channel::<UiCmd>(64);
+    let mut cancel = CancellationToken::new();
+    let (_evt_tx, mut evt_rx) = mpsc::channel::<UiEvent>(64);
+    let mut notepad: Option<crate::notepad::NotepadView> = None;
+    let _flow = fold_ui_events(
+        Some(UiEvent::Session(SessionEvent::QueueConsumed {
+            seq: 30,
+            text: "queued prompt X".into(),
+        })),
+        &mut chat,
+        &store,
+        "test-session",
+        &mut queue_items,
+        &mut false,
+        &mut crate::queue_admitter::AdmitUiState::default(),
+        &mut running,
+        &mut cancelled,
+        &mut drain_pending,
+        &mut skip_next_render,
+        &mut follow,
+        &cmd_tx,
+        &mut cancel,
+        &mut evt_rx,
+        &mut notepad,
+        &mut None,
+        &opencoder_session::QuestionHub::new(),
+    )
+    .await;
+
+    // The echo lands AT the stale floor position (blocks were exactly
+    // floor_before long when begin_turn ran).
+    let echo_idx = chat
+        .blocks
+        .iter()
+        .enumerate()
+        .filter(|(i, b)| *i >= floor_before && matches!(b, crate::chat::ChatBlock::User { .. }))
+        .map(|(i, _)| i)
+        .next()
+        .expect("echo landed at/after the stale floor");
+    assert!(
+        chat.turn_block_start > echo_idx,
+        "floor must move below the echo (got {} vs echo {})",
+        chat.turn_block_start,
+        echo_idx
+    );
+
+    // The queued turn's first tool round lands BELOW the echo.
+    chat.apply(&SessionEvent::ToolStart {
+        id: "c2".into(),
+        name: "bash".into(),
+        input: serde_json::json!({"command": "echo y"}),
+    });
+    let group_positions: Vec<usize> = chat
+        .blocks
+        .iter()
+        .enumerate()
+        .filter_map(|(i, b)| match b {
+            crate::chat::ChatBlock::StepGroup { .. } => Some(i),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(group_positions.len(), 2, "queued turn owns a new ladder");
+    assert!(
+        group_positions[1] > echo_idx,
+        "queued ladder must render below its prompt echo"
+    );
+}

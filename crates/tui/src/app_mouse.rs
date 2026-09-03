@@ -27,6 +27,12 @@ pub(crate) enum MouseOutcome {
 /// when one is active, else the parent. `None` (click still consumed) for a
 /// stale or non-Subagent focus index.
 pub(crate) fn collapse_view(chat: &mut ChatView, focus: Option<usize>) -> Option<&mut ChatView> {
+    // A focused sidecar panel swaps the body for its nested view, so body
+    // click targets carry panel-relative block indices — the toggle must land
+    // on the panel view, never on the main transcript behind it.
+    if chat.sidecar_focus {
+        return chat.sidecar.as_mut().map(|p| &mut *p.view);
+    }
     let i = match focus {
         None => return Some(chat),
         Some(i) => i,

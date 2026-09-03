@@ -449,10 +449,12 @@ async fn attach_del_click_removes_only_clicked_image() {
     assert_eq!(chat.steer_items.len(), 0, "no steer side effects");
 }
 
-/// Clicking a rendered step/call row toggles ONLY that target. Exercises the
+/// Clicking a rendered ladder row toggles ONLY that target. Exercises the
 /// exact `tool_call_btns` → `handle_mouse` → `toggle_tool_call_at` wiring
-/// the renderer feeds. `call_idx` indexes the group's VISIBLE rows: the step
-/// rows, plus each open step's call header rows in render order.
+/// the renderer feeds. `call_idx` indexes the group's VISIBLE rows: the
+/// group row, then (while open) each step row, then (while the step is
+/// open) its calls aggregation row, then (while the list is open) each
+/// call header row — in render order.
 #[tokio::test]
 async fn clicking_step_or_call_row_toggles_only_that_target() {
     use crate::chat::ChatBlock;
@@ -473,18 +475,28 @@ async fn clicking_step_or_call_row_toggles_only_that_target() {
             images: Vec::new(),
         });
     }
-    let step_open = |c: &ChatView| match c.blocks.first() {
-        Some(ChatBlock::StepGroup { steps }) => steps.iter().map(|s| s.open).collect::<Vec<_>>(),
+    let state = |c: &ChatView| match c.blocks.first() {
+        Some(ChatBlock::StepGroup { steps, open }) => (
+            *open,
+            steps.iter().map(|s| s.open).collect::<Vec<_>>(),
+            steps.iter().map(|s| s.calls_open).collect::<Vec<_>>(),
+            steps
+                .iter()
+                .flat_map(|s| s.calls.iter().map(|x| x.expanded))
+                .collect::<Vec<_>>(),
+        ),
         other => panic!("expected a StepGroup first, got {other:?}"),
     };
-    let expanded = |c: &ChatView| match c.blocks.first() {
-        Some(ChatBlock::StepGroup { steps }) => steps
-            .iter()
-            .flat_map(|s| s.calls.iter().map(|x| x.expanded))
-            .collect::<Vec<_>>(),
-        other => panic!("expected a StepGroup first, got {other:?}"),
-    };
-    assert_eq!(step_open(&chat), vec![false, false], "steps start closed");
+    assert_eq!(
+        state(&chat),
+        (
+            false,
+            vec![false, false],
+            vec![false, false],
+            vec![false, false]
+        ),
+        "whole ladder starts collapsed"
+    );
 
     // `call_idx` picks the target row; `rect_row` is the rect's screen row
     // and `click_row` is where the synthetic click lands.
@@ -528,21 +540,90 @@ async fn clicking_step_or_call_row_toggles_only_that_target() {
         .await;
     }
 
-    // With both steps collapsed the visible walk is [Step(1), Step(2)];
-    // opening a step inserts its call header rows into the walk.
-    drive(&mut chat, 0, 0, 0).await; // Step(1) row -> step opens
-    assert_eq!(step_open(&chat), vec![true, false]);
-    drive(&mut chat, 1, 1, 1).await; // call a header -> expands a only
-    assert_eq!(expanded(&chat), vec![true, false]);
+    // L0: collapsed group shows ONLY the group row; clicking it opens the
+    // group and reveals the step rows.
+    drive(&mut chat, 0, 0, 0).await; // group row -> group opens
+    assert_eq!(
+        state(&chat),
+        (
+            true,
+            vec![false, false],
+            vec![false, false],
+            vec![false, false]
+        )
+    );
 
-    drive(&mut chat, 2, 2, 2).await; // Step(2) row -> step opens
-    drive(&mut chat, 3, 3, 3).await; // call b header -> expands b
-    assert_eq!(expanded(&chat), vec![true, true]);
+    // L1: [Group, Step1, Step2]; click Step(1) -> its ladder level opens.
+    drive(&mut chat, 1, 1, 1).await; // Step(1) row -> step opens
+    assert_eq!(
+        state(&chat),
+        (
+            true,
+            vec![true, false],
+            vec![false, false],
+            vec![false, false]
+        )
+    );
 
-    // Click call b's row again: collapses just call b (the step stays open).
-    drive(&mut chat, 3, 3, 3).await;
-    assert_eq!(expanded(&chat), vec![true, false]);
-    assert_eq!(step_open(&chat), vec![true, true]);
+    // L2: [Group, Step1, Calls1, Step2]; the aggregation row opens the list.
+    drive(&mut chat, 2, 2, 2).await; // calls aggregation row -> list opens
+    assert_eq!(
+        state(&chat),
+        (
+            true,
+            vec![true, false],
+            vec![true, false],
+            vec![false, false]
+        )
+    );
+
+    // L3: [Group, Step1, Calls1, call-a, Step2]; click a's header -> a only.
+    drive(&mut chat, 3, 3, 3).await; // call a header -> expands a only
+    assert_eq!(
+        state(&chat),
+        (
+            true,
+            vec![true, false],
+            vec![true, false],
+            vec![true, false]
+        )
+    );
+
+    // Step(2)'s row follows a's expanded output in the walk.
+    drive(&mut chat, 4, 4, 4).await; // Step(2) row -> step opens
+    assert_eq!(
+        state(&chat),
+        (true, vec![true, true], vec![true, false], vec![true, false])
+    );
+    drive(&mut chat, 5, 5, 5).await; // Step(2) aggregation row -> list opens
+    drive(&mut chat, 6, 6, 6).await; // call b header -> expands b
+    assert_eq!(
+        state(&chat),
+        (true, vec![true, true], vec![true, true], vec![true, true])
+    );
+
+    // Click call b's row again: collapses just call b (step + list stay open).
+    drive(&mut chat, 6, 6, 6).await;
+    assert_eq!(
+        state(&chat),
+        (true, vec![true, true], vec![true, true], vec![true, false])
+    );
+
+    // Click the group row again: the group folds away (state below is kept
+    // but hidden — one click re-reveals the whole ladder).
+    drive(&mut chat, 0, 0, 0).await;
+    assert_eq!(
+        state(&chat),
+        (false, vec![true, true], vec![true, true], vec![true, false]),
+        "group toggle must not reset inner ladder state"
+    );
+    let flat = chat.flatten();
+    let row: String = flat[0].spans.iter().map(|s| s.content.clone()).collect();
+    assert!(
+        row.starts_with("\u{25b8} "),
+        "group row re-collapsed: {row:?}"
+    );
+    assert_eq!(flat.len(), 2, "collapsed group = group row + blank");
 }
 
 /// Regression: control-strip hit rects are 2 cells wide (separator space +

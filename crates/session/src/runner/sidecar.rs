@@ -107,6 +107,11 @@ async fn build_sidecar_conv(
     // subagent): a sidecar answers and stops, never drives its own
     // PLAN->ACT->VERIFY loop after the scoped question.
     child.config.autopilot.mode = ApMode::Off;
+    // The transcript is a borrowed snapshot of the parent, not this loop's own
+    // durable history: never compact. Without this, a parent near its compaction
+    // threshold would make every sidecar question first pay a compaction LLM
+    // round (and replace the snapshot with a summary) before answering.
+    child.config.compaction.auto = false;
     // Deliberately NOT `.with_store()`: record/persist become no-ops, so the
     // sidecar leaves zero rows in the store (zero-persistence loop contract).
     child.messages = snapshot;

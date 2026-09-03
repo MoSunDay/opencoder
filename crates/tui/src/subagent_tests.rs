@@ -1,15 +1,14 @@
 use super::*;
 
-/// Issue #5: with MULTIPLE concurrent subagents, the parent's preamble
-/// text is withheld (renders zero lines) until every sibling finishes.
-/// Each sibling's completion summary surfaces immediately on its own
-/// `SubagentEnd` — the preamble reappears once all are done.
+/// With MULTIPLE concurrent subagents, the parent's preamble text stays
+/// visible the whole time (Say is never withheld). Each sibling's
+/// completion summary surfaces immediately on its own `SubagentEnd`.
 #[test]
-fn multiple_subagents_withhold_output_until_all_done() {
+fn multiple_subagents_keep_preamble_visible() {
     let mut v = ChatView::default();
     // Parent preamble text precedes the subagent dispatch.
     v.apply(&SessionEvent::TextDelta("launching investigators".into()));
-    // Two concurrent subagents (a single one would NOT trigger withholding).
+    // Two concurrent subagents.
     v.apply(&SessionEvent::SubagentStart {
         id: "a".into(),
         kind: "explore".into(),
@@ -25,15 +24,12 @@ fn multiple_subagents_withhold_output_until_all_done() {
 
     assert_eq!(v.subagents_running, 2);
     assert!(
-        v.hidden_assistant_idx.is_some(),
-        "preamble hidden once 2 run"
-    );
-    assert!(
-        !block_text(&v).contains("launching investigators"),
-        "preamble withheld while subagents run"
+        block_text(&v).contains("launching investigators"),
+        "preamble stays visible while subagents run"
     );
 
-    // First sibling finishes — its summary surfaces immediately.
+    // First sibling finishes — its summary surfaces immediately, and the
+    // preamble remains on screen.
     v.apply(&SessionEvent::SubagentEnd {
         id: "a".into(),
         ok: true,
@@ -45,8 +41,12 @@ fn multiple_subagents_withhold_output_until_all_done() {
         block_text(&v).contains("result-a"),
         "first summary shown immediately while sibling still runs"
     );
+    assert!(
+        block_text(&v).contains("launching investigators"),
+        "preamble still visible while a sibling runs"
+    );
 
-    // Last sibling finishes — preamble revealed; both summaries visible.
+    // Last sibling finishes — preamble plus both summaries all visible.
     v.apply(&SessionEvent::SubagentEnd {
         id: "b".into(),
         ok: true,
@@ -54,14 +54,10 @@ fn multiple_subagents_withhold_output_until_all_done() {
         summary: "result-b".into(),
     });
     assert_eq!(v.subagents_running, 0);
-    assert!(
-        v.hidden_assistant_idx.is_none(),
-        "preamble revealed once all done"
-    );
     let text = block_text(&v);
     assert!(
         text.contains("launching investigators"),
-        "preamble reappears"
+        "preamble visible after all done"
     );
     assert!(text.contains("result-a"), "first summary shown after flush");
     assert!(
@@ -70,11 +66,10 @@ fn multiple_subagents_withhold_output_until_all_done() {
     );
 }
 
-/// A SINGLE subagent must NOT trigger withholding: its summary surfaces
-/// immediately on its own end, and no preamble is hidden (regression guard
-/// for the "multiple only" gate in issue #5).
+/// A SINGLE subagent never hides the preamble: its summary surfaces
+/// immediately on its own end.
 #[test]
-fn single_subagent_does_not_withhold() {
+fn single_subagent_preamble_visible() {
     let mut v = ChatView::default();
     v.apply(&SessionEvent::TextDelta("preamble".into()));
     v.apply(&SessionEvent::SubagentStart {
@@ -83,8 +78,6 @@ fn single_subagent_does_not_withhold() {
         prompt: "p".into(),
         child_session_id: "c".into(),
     });
-    // Single subagent: never reaches running==2, so no hiding.
-    assert!(v.hidden_assistant_idx.is_none());
     assert!(
         block_text(&v).contains("preamble"),
         "preamble still visible"
@@ -127,10 +120,10 @@ fn block_text_for_tick(v: &ChatView, tick: u32) -> String {
         .collect()
 }
 
-/// Issue #5 failure path: when one sibling FAILS (`ok: false`) while
-/// another still runs, the failed summary surfaces immediately with its
-/// "failed" status and red styling intact. Guards the `ok` flag's
-/// round-trip through `mark_subagent_done`.
+/// Failure path: when one sibling FAILS (`ok: false`) while another still
+/// runs, the failed summary surfaces immediately with its "failed" status
+/// and red styling intact. Guards the `ok` flag's round-trip through
+/// `mark_subagent_done`.
 #[test]
 fn failed_subagent_summary_shows_immediately_with_sibling() {
     let mut v = ChatView::default();
@@ -147,7 +140,6 @@ fn failed_subagent_summary_shows_immediately_with_sibling() {
         prompt: "pb".into(),
         child_session_id: "cb".into(),
     });
-    assert!(v.hidden_assistant_idx.is_some());
 
     // First sibling FAILS — shown immediately.
     v.apply(&SessionEvent::SubagentEnd {
@@ -162,7 +154,7 @@ fn failed_subagent_summary_shows_immediately_with_sibling() {
         "failed summary shown immediately while sibling runs"
     );
 
-    // Last sibling succeeds — preamble revealed; both summaries visible.
+    // Last sibling succeeds — preamble and both summaries all visible.
     v.apply(&SessionEvent::SubagentEnd {
         id: "b".into(),
         ok: true,
@@ -172,19 +164,17 @@ fn failed_subagent_summary_shows_immediately_with_sibling() {
     let text = block_text(&v);
     assert!(text.contains("crashed"), "failed summary still shown");
     assert!(text.contains("ok-b"), "ok summary shown");
-    assert!(text.contains("preamble"), "preamble revealed");
+    assert!(text.contains("preamble"), "preamble visible");
     // Status words reflect each subagent's outcome.
     assert!(text.contains("failed"), "failed subagent shows 'failed'");
     assert!(text.contains("done"), "ok subagent shows 'done'");
-    assert!(v.hidden_assistant_idx.is_none());
 }
 
-/// Issue #5 safety flush: if a turn ends (`Done`) while subagents are
-/// still marked running (e.g. interrupted mid-dispatch), the preamble must
-/// be un-hidden and pending ends flushed so the UI never freezes with
-/// hidden content. This is the recovery path for an abnormal turn end.
+/// Safety flush: if a turn ends (`Done`) while subagents are still marked
+/// running (e.g. interrupted mid-dispatch), the running count must reset so
+/// the status-bar badge recovers. The preamble stays visible throughout.
 #[test]
-fn done_while_subagents_running_reveals_preamble() {
+fn done_while_subagents_running_resets_count() {
     let mut v = ChatView::default();
     v.apply(&SessionEvent::TextDelta("preamble".into()));
     v.apply(&SessionEvent::SubagentStart {
@@ -199,16 +189,11 @@ fn done_while_subagents_running_reveals_preamble() {
         prompt: "pb".into(),
         child_session_id: "cb".into(),
     });
-    assert!(v.hidden_assistant_idx.is_some());
     assert_eq!(v.subagents_running, 2);
 
     // Turn ends abnormally — no SubagentEnd events arrived.
     v.apply(&SessionEvent::Done);
 
-    assert!(
-        v.hidden_assistant_idx.is_none(),
-        "Done must reveal preamble"
-    );
     assert_eq!(v.subagents_running, 0, "Done must reset running count");
     assert!(
         block_text(&v).contains("preamble"),

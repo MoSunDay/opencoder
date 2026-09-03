@@ -64,11 +64,6 @@ impl ChatView {
                     rendered,
                     done,
                 } => {
-                    // Withheld preamble renders zero lines (issue #5); skip it
-                    // so header line indices stay aligned with `flatten_with`.
-                    if self.is_withheld(block_idx) {
-                        continue;
-                    }
                     // +1 for the "say:" header line emitted by flatten().
                     line_idx += 1;
                     line_idx += if *done {

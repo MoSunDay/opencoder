@@ -1,8 +1,8 @@
 //! Step = one assistant round (thinking + that round's calls). This file
 //! pins the step-shape guarantees that the other chat_tests only touch
-//! obliquely: the live thinking-folding path, replay's `coalesce_steps`
-//! fold, and copy-mode chrome stripping for the two-level (step → call)
-//! ladder under the static `≡ N steps` marker.
+//! obliquely: the live thinking-absorption path, replay's `coalesce_steps`
+//! fold, the zero-click collapsed ladder, and copy-mode chrome stripping
+//! for the three-level (group → step → calls list → single call) drill-down.
 
 use super::super::*;
 
@@ -19,6 +19,16 @@ fn lines(v: &ChatView) -> Vec<String> {
                 .collect::<String>()
         })
         .collect()
+}
+
+fn first_group_mut(v: &mut ChatView) -> &mut Vec<Step> {
+    v.blocks
+        .iter_mut()
+        .find_map(|b| match b {
+            ChatBlock::StepGroup { steps, .. } => Some(steps),
+            _ => None,
+        })
+        .expect("expected a step group")
 }
 
 fn first_group(v: &ChatView) -> &Vec<Step> {
@@ -51,7 +61,8 @@ fn call_tool(v: &mut ChatView, id: &str) {
 fn trailing_thinking_folds_into_the_step_not_the_flow() {
     // Live path: a Reasoning run that immediately precedes a tool call is
     // that round's step-thinking — it leaves the main block flow and is
-    // only visible once both the group and the step are opened.
+    // only visible once the group, the step (and, for calls, the call list)
+    // are opened.
     let mut v = ChatView::default();
     v.apply(&SessionEvent::ReasoningDelta("reading the layout".into()));
     assert!(
@@ -66,52 +77,100 @@ fn trailing_thinking_folds_into_the_step_not_the_flow() {
         !v.blocks
             .iter()
             .any(|b| matches!(b, ChatBlock::Thinking { .. })),
-        "trailing thinking must not stay a standalone block"
+        "thinking must leave the main flow once the round opens a step"
     );
-    let steps = first_group(&v);
-    assert_eq!(steps.len(), 1);
-    let body = steps[0]
+    let body: String = first_group(&v)[0]
         .thinking
         .iter()
-        .map(|l| {
-            l.spans
-                .iter()
-                .map(|s| s.content.clone())
-                .collect::<String>()
-        })
+        .flat_map(|l| l.spans.iter())
+        .map(|s| s.content.clone())
         .collect::<String>();
     assert!(body.contains("reading the layout"));
 
-    if let ChatBlock::StepGroup { steps } = &mut v.blocks[0] {
-        steps[0].open = true;
+    // Zero clicks: only the closed group row renders.
+    let flat = lines(&v);
+    assert_eq!(flat.len(), 2, "closed group = group row + blank: {flat:?}");
+    assert_eq!(flat[0], "\u{25b8} 1 step");
+
+    // Group open, then step open: the step row renders, then its thinking
+    // behind the Thinking header.
+    if let ChatBlock::StepGroup { open, .. } = &mut v.blocks[0] {
+        *open = true;
     }
+    let flat = lines(&v);
+    assert!(
+        flat.iter().any(|l| l.contains("\u{25b8} Step(1)")),
+        "opened group must list the closed step row: {flat:?}"
+    );
+    assert!(
+        !flat.iter().any(|l| l.contains("reading the layout")),
+        "step thinking stays hidden until the step opens"
+    );
+
+    first_group_mut(&mut v)[0].open = true;
     let flat = lines(&v);
     assert!(
         flat.iter().any(|l| l.contains("Thinking")),
         "opened step must render its thinking behind a Thinking header: {flat:?}"
     );
     assert!(flat.iter().any(|l| l.contains("reading the layout")));
-    // Sanity: the static marker is the plain step count (thinking excluded).
-    assert_eq!(flat[0], "\u{2261} 1 step");
 }
 
 #[test]
-fn thinking_before_answer_text_stays_standalone() {
-    // Strictly trailing: a round that streams answer text after its
-    // reasoning keeps that Thinking block in the flow; the later call
-    // opens a thinking-less step.
+fn thinking_across_assistant_text_is_absorbed_into_the_step() {
+    // The turn's own speech is never a boundary: a round that streamed
+    // interim text between its reasoning and its tool call still folds that
+    // thinking into the step — no top-level Thinking block survives.
     let mut v = ChatView::default();
     v.apply(&SessionEvent::ReasoningDelta("mulling".into()));
     v.apply(&SessionEvent::TextDelta("here is the plan".into()));
     call_tool(&mut v, "t1");
 
     assert!(
+        !v.blocks
+            .iter()
+            .any(|b| matches!(b, ChatBlock::Thinking { .. })),
+        "a tool round's thinking must be absorbed even behind assistant text"
+    );
+    assert!(
+        v.blocks
+            .iter()
+            .any(|b| matches!(b, ChatBlock::Assistant { .. })),
+        "the interim speech itself stays in the flow"
+    );
+    let body: String = first_group(&v)[0]
+        .thinking
+        .iter()
+        .flat_map(|l| l.spans.iter())
+        .map(|s| s.content.clone())
+        .collect::<String>();
+    assert!(body.contains("mulling"), "got {body:?}");
+}
+
+#[test]
+fn pure_text_turn_keeps_its_standalone_thinking_block() {
+    // A round with NO tool call keeps its independent collapsible Thinking
+    // block — there is no step to fold into, and the thinking is not lost.
+    let mut v = ChatView::default();
+    v.apply(&SessionEvent::ReasoningDelta("just talking".into()));
+    v.apply(&SessionEvent::TextDelta("the answer".into()));
+    v.apply(&SessionEvent::Done);
+
+    assert!(
         v.blocks
             .iter()
             .any(|b| matches!(b, ChatBlock::Thinking { .. })),
-        "non-trailing thinking must survive as its own block"
+        "pure-text turn keeps a standalone Thinking block"
     );
-    assert!(first_group(&v)[0].thinking.is_empty());
+    assert!(!v
+        .blocks
+        .iter()
+        .any(|b| matches!(b, ChatBlock::StepGroup { .. })));
+    let flat = lines(&v);
+    assert!(
+        flat.iter().any(|l| l.contains("Thinking")),
+        "standalone thinking renders its own header: {flat:?}"
+    );
 }
 
 fn replay_tool_round(asst_id: &str, tool_id: &str, reasoning: Option<&str>) -> (Message, Message) {
@@ -137,29 +196,77 @@ fn replay_tool_round(asst_id: &str, tool_id: &str, reasoning: Option<&str>) -> (
 }
 
 #[test]
-fn replay_folds_thinking_into_the_first_step() {
-    let (a1, t1) = replay_tool_round("a1", "t1", Some("plan the edit"));
-    let chat = replay_messages("act", &[a1, t1]);
+fn replay_absorbs_thinking_behind_assistant_text_like_the_live_path() {
+    // Replay's coalesce fold must cross Assistant blocks exactly like the
+    // live path: [Thinking, Assistant(text), ToolUse] folds the thinking
+    // into the step and keeps the assistant text top-level.
+    let mut asst = Message::assistant("a1");
+    asst.blocks.push(ContentBlock::Reasoning {
+        text: "ponder replay".into(),
+    });
+    asst.blocks.push(ContentBlock::text("interim note"));
+    asst.blocks.push(ContentBlock::ToolUse {
+        id: "t1".into(),
+        name: "bash".into(),
+        input: serde_json::json!({"command": "echo x"}),
+    });
+    let mut tool_msg = Message::assistant("t1-res");
+    tool_msg.role = Role::Tool;
+    tool_msg.blocks = vec![ContentBlock::ToolResult {
+        tool_use_id: "t1".into(),
+        content: "t1-out".into(),
+        is_error: false,
+        images: Vec::new(),
+    }];
+    let chat = replay_messages("act", &[asst, tool_msg]);
 
+    let groups: Vec<_> = chat
+        .blocks
+        .iter()
+        .filter_map(|b| match b {
+            ChatBlock::StepGroup { steps, .. } => Some(steps),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(groups.len(), 1);
+    let body: String = groups[0][0]
+        .thinking
+        .iter()
+        .flat_map(|l| l.spans.iter())
+        .map(|s| s.content.clone())
+        .collect();
+    assert!(
+        body.contains("ponder replay"),
+        "thinking behind assistant text must fold into the step: {body:?}"
+    );
     assert!(
         !chat
             .blocks
             .iter()
             .any(|b| matches!(b, ChatBlock::Thinking { .. })),
-        "replay must fold thinking into the step, not leave it in the flow"
+        "no top-level Thinking block survives next to a tool round"
     );
-    let steps = first_group(&chat);
-    let body: String = steps[0]
-        .thinking
+}
+
+#[test]
+fn replay_keeps_thinking_without_a_following_group_standalone() {
+    let mut asst = Message::assistant("a1");
+    asst.blocks.push(ContentBlock::Reasoning {
+        text: "silent pondering".into(),
+    });
+    asst.blocks.push(ContentBlock::text("the answer"));
+    let chat = replay_messages("act", &[asst]);
+
+    assert!(
+        chat.blocks
+            .iter()
+            .any(|b| matches!(b, ChatBlock::Thinking { .. })),
+        "thinking with no following step group keeps its own rendering path"
+    );
+    assert!(!chat
+        .blocks
         .iter()
-        .map(|l| {
-            l.spans
-                .iter()
-                .map(|s| s.content.clone())
-                .collect::<String>()
-        })
-        .collect();
-    assert!(body.contains("plan the edit"));
+        .any(|b| matches!(b, ChatBlock::StepGroup { .. })));
 }
 
 #[test]
@@ -189,79 +296,68 @@ fn replay_merges_adjacent_tool_rounds_into_one_group() {
 }
 
 #[test]
-fn replay_keeps_thinking_without_a_following_group_standalone() {
-    let mut asst = Message::assistant("a1");
-    asst.blocks.push(ContentBlock::Reasoning {
-        text: "silent pondering".into(),
-    });
-    asst.blocks.push(ContentBlock::text("the answer"));
-    let chat = replay_messages("act", &[asst]);
-
-    assert!(
-        chat.blocks
-            .iter()
-            .any(|b| matches!(b, ChatBlock::Thinking { .. })),
-        "thinking with no following step group keeps its own rendering path"
-    );
-    assert!(!chat
-        .blocks
-        .iter()
-        .any(|b| matches!(b, ChatBlock::StepGroup { .. })));
-}
-
-#[test]
-fn copy_mode_drops_step_chrome_but_keeps_content() {
+fn copy_mode_drops_ladder_chrome_but_keeps_call_content() {
     use crate::copy_mode::clean::clean_line;
 
     let mut v = ChatView::default();
     v.apply(&SessionEvent::ReasoningDelta("copy me".into()));
     call_tool(&mut v, "t1");
-    // Open the ladder: step → single call output.
-    if let ChatBlock::StepGroup { steps } = &mut v.blocks[0] {
+    // Open the whole ladder: group → step → call list → single call output.
+    if let ChatBlock::StepGroup { open, steps, .. } = &mut v.blocks[0] {
+        *open = true;
         steps[0].open = true;
+        steps[0].calls_open = true;
     }
-    v.toggle_tool_call_at(0, 1);
+    v.toggle_tool_call_at(0, 3); // walk: [Group, Step, Calls, Call] → call
 
-    let mut saw_step_row = false;
-    let mut saw_thinking_header = false;
     let mut saw_group_row = false;
+    let mut saw_step_row = false;
+    let mut saw_calls_row = false;
+    let mut saw_thinking_header = false;
     let mut copied = Vec::new();
     for line in v.flatten() {
         let text: String = line.spans.iter().map(|s| s.content.clone()).collect();
         match clean_line(&line) {
             None => {
-                assert!(
-                    text.contains("Step(")
-                        || text.contains("Thinking")
-                        || text.is_empty()
-                        || text.starts_with(' ')
-                        || text.contains("step"),
-                    "only decoration rows may drop: {text:?}"
-                );
+                if text.contains("step") && !text.contains("Step(") {
+                    saw_group_row = true;
+                }
                 if text.contains("Step(") {
                     saw_step_row = true;
                 }
+                if text.contains("function call") {
+                    saw_calls_row = true;
+                }
                 if text.contains("Thinking") {
                     saw_thinking_header = true;
-                }
-                if text.contains("step") {
-                    saw_group_row = true;
                 }
             }
             Some(payload) => copied.push(payload),
         }
     }
-    assert!(saw_step_row, "precondition: step rows were rendered");
+    assert!(saw_group_row, "precondition: the group row was rendered");
+    assert!(saw_step_row, "precondition: the step row was rendered");
+    assert!(
+        saw_calls_row,
+        "precondition: the calls aggregation row was rendered"
+    );
     assert!(
         saw_thinking_header,
-        "precondition: Thinking header was rendered"
+        "precondition: the Thinking header was rendered"
     );
-    assert!(saw_group_row, "precondition: the group marker was rendered");
     let joined = copied.join("\n");
     assert!(joined.contains("copy me"), "thinking body is copyable");
     assert!(joined.contains("t1-out"), "call output is copyable");
+    assert!(
+        joined.contains("\u{25b8} bash"),
+        "the call header row is content, not chrome: {joined:?}"
+    );
     assert!(!joined.contains("Step("), "step labels are chrome");
-    assert!(!joined.contains("1 step"), "group markers are chrome");
+    assert!(!joined.contains("1 step"), "group rows are chrome");
+    assert!(
+        !joined.contains("function call"),
+        "calls aggregation rows are chrome"
+    );
     assert!(!joined.contains("Thinking"), "thinking header is chrome");
 }
 
@@ -289,36 +385,10 @@ fn orphan_tool_end_joins_the_trailing_group_like_replay() {
             .unwrap()
             .output
             .iter()
-            .map(|l| {
-                l.spans
-                    .iter()
-                    .map(|s| s.content.clone())
-                    .collect::<String>()
-            })
+            .flat_map(|l| l.spans.iter())
+            .map(|s| s.content.clone())
             .collect()
     };
-
-    // Live: the synthetic step joins the trailing group — its finished call
-    // forces a fresh step, never a second group.
-    let mut live = ChatView::default();
-    call_tool(&mut live, "t1");
-    live.apply(&SessionEvent::ToolEnd {
-        id: "ghost".into(),
-        name: "bash".into(),
-        output: "ghost-out".into(),
-        is_error: false,
-        images: Vec::new(),
-    });
-    let live_groups = groups(&live);
-    assert_eq!(live_groups.len(), 1, "orphan must not open a second group");
-    assert_eq!(live_groups[0].len(), 2, "finished call forces a fresh step");
-    assert!(
-        tail_output(live_groups[0]).contains("ghost-out"),
-        "orphan output is kept"
-    );
-
-    // Replay of the same anomaly: the orphan ToolResult's synthetic group is
-    // folded by `coalesce_steps` — one group, two steps, same output.
     let (a1, t1) = replay_tool_round("a1", "t1", None);
     let mut ghost = Message::assistant("ghost-res");
     ghost.role = Role::Tool;
@@ -336,10 +406,10 @@ fn orphan_tool_end_joins_the_trailing_group_like_replay() {
 }
 
 #[test]
-fn multi_round_turn_renders_marker_steps_and_answer_without_any_click() {
-    // The user's core display requirement: after a multi-round turn the
-    // static marker `≡ N steps`, EVERY step row, and the top-level final
-    // answer block are all visible in the default (no-click) render.
+fn multi_round_turn_zero_click_shows_only_group_row_and_say() {
+    // The user's core display requirement: with no clicks a tool turn shows
+    // exactly ONE clickable group row (collapsed glyph) plus the top-level
+    // final Say; steps, calls and thinking are all folded away.
     let mut v = ChatView::default();
     for id in ["t1", "t2"] {
         v.apply(&SessionEvent::ReasoningDelta(format!("think {id}")));
@@ -350,24 +420,27 @@ fn multi_round_turn_renders_marker_steps_and_answer_without_any_click() {
 
     let flat = lines(&v);
     assert!(
-        flat.iter().any(|l| l.contains("\u{2261} 2 steps")),
-        "static marker must render without a click: {flat:?}"
-    );
-    assert!(
-        flat.iter().any(|l| l.contains("\u{25b8} Step(1)")),
-        "step 1 row must render closed by default: {flat:?}"
-    );
-    assert!(
-        flat.iter().any(|l| l.contains("\u{25b8} Step(2)")),
-        "step 2 row must render closed by default: {flat:?}"
+        flat.iter().any(|l| l.contains("\u{25b8} 2 steps")),
+        "collapsed group row with the closed prefix: {flat:?}"
     );
     assert!(
         flat.iter().any(|l| l.contains("\u{276f} Say:")),
         "final answer block stays top-level and visible: {flat:?}"
     );
-    // Closed steps still hide their content by default.
+    assert!(
+        !flat.iter().any(|l| l.contains("Step(")),
+        "step rows are hidden until the group opens: {flat:?}"
+    );
     assert!(
         !flat.iter().any(|l| l.contains("echo x")),
-        "closed steps keep call rows hidden: {flat:?}"
+        "call headers stay hidden: {flat:?}"
+    );
+    assert!(
+        !flat.iter().any(|l| l.contains("think t")),
+        "step thinking stays hidden: {flat:?}"
+    );
+    assert!(
+        !flat.iter().any(|l| l.contains("-out")),
+        "call outputs stay hidden: {flat:?}"
     );
 }

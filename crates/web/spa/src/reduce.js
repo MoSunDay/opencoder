@@ -85,18 +85,55 @@ function blockToTurns(role, b) {
   return [];
 }
 
+/// A real user message ends the current assistant segment: synthetic user
+/// rows without `display` are message-pair tool-result carriers (internal),
+/// everything user-visible (real prompts, `$skill` display echoes) is a
+/// boundary for thinking absorption.
+function isSegmentBoundary(m) {
+  return !!(m && m.role === 'user' && !(m.synthetic && !m.display));
+}
+
 /// Snapshot messages → turns. Message-pair semantics ported from the TUI
 /// replay's coalesce_steps: reasoning buffers into a pending-think until the
-/// next step consumes it (or a text block / the walk's end flushes it
-/// standalone); each assistant message's non-task tool_uses form ONE step
-/// appended at message end, folded into the trailing steps turn when the
-/// messages are adjacent. The user/synthetic/display echo contracts are
-/// unchanged.
+/// next step consumes it; each assistant message's non-task tool_uses form
+/// ONE step appended at message end, folded into the trailing steps turn
+/// when the messages are adjacent. A tool-turn's thinking lives INSIDE its
+/// step (live parity with absorbSegmentThinking — no free-floating think
+/// turn above the ladder): an assistant Say only flushes the pending think
+/// standalone when NO non-task tool_use remains ahead in the same user
+/// segment (a lookahead pre-pass); a pure-text round keeps its top-level
+/// think turn as before, and so does reasoning before a user boundary.
+/// The user/synthetic/display echo contracts are unchanged.
 export function turnsFromMessages(messages) {
   const turns = [];
   const list = Array.isArray(messages) ? messages : [];
   let pendingThink = '';
-  for (const m of list) {
+  // Lookahead pre-pass. `stepToolAt[mi]` = last non-task tool_use block
+  // index of message mi (-1 none); `toolAhead[mi]` = whether any non-task
+  // tool_use sits in a LATER message before the next user boundary (task
+  // handles are not steps — they never absorb thinking, mirroring the live
+  // task branch). Backward recurrence: the range for mi is {mi+1} plus the
+  // range for mi+1 unless mi+1 is itself a boundary.
+  const blocksOf = (m) => (m && m.blocks) || [];
+  const isStepToolBlock = (b) =>
+    (b && (b.kind || b.type)) === 'tool_use' && ((b && b.name) || 'tool') !== 'task';
+  const stepToolAt = list.map((m) => {
+    let idx = -1;
+    blocksOf(m).forEach((b, i) => {
+      if (isStepToolBlock(b)) {
+        idx = i;
+      }
+    });
+    return idx;
+  });
+  const toolAhead = new Array(list.length + 1).fill(false);
+  for (let i = list.length - 1; i >= 0; i -= 1) {
+    const next = list[i + 1];
+    toolAhead[i] = !!(next && !isSegmentBoundary(next)
+      && (blocksOf(next).some(isStepToolBlock) || toolAhead[i + 1]));
+  }
+  for (let mi = 0; mi < list.length; mi += 1) {
+    const m = list[mi];
     const role = (m && m.role) || 'assistant';
     // Echo contract (mirrors the TUI replay): synthetic user messages are
     // internal and skipped, UNLESS they carry a verbatim `display` text —
@@ -112,16 +149,23 @@ export function turnsFromMessages(messages) {
       : null;
     let roundCalls = [];
     let roundThinking = '';
-    for (const b of (m && m.blocks) || []) {
+    const blocks = blocksOf(m);
+    for (let bi = 0; bi < blocks.length; bi += 1) {
+      const b = blocks[bi];
       const bkind = (b && (b.kind || b.type)) || '';
       if (bkind === 'reasoning') {
         pendingThink += (b && b.text) || '';
         continue;
       }
       if (bkind === 'text') {
-        // Thinking followed by Say stays standalone (only the strictly
-        // trailing run may be absorbed into a step).
-        if (pendingThink) {
+        // A Say flushes the pending think standalone ONLY when this user
+        // segment holds no further tool round (pure-text round — current
+        // behavior). When tools follow (same message or a later one before
+        // the next user boundary), the think stays pending and folds into
+        // that round's step, exactly like the live absorbSegmentThinking.
+        // User text blocks are segment boundaries themselves — always flush.
+        const toolsFollow = stepToolAt[mi] > bi || toolAhead[mi];
+        if (pendingThink && (role !== 'assistant' || !toolsFollow)) {
           turns.push({ kind: 'think', role: 'assistant', text: pendingThink });
           pendingThink = '';
         }
@@ -266,19 +310,29 @@ function openCallMatches(call, id) {
   return call && call.output === null && (!id || !call.id || call.id === id);
 }
 
-/// Mirror of pop_trailing_thinking: pop the STRICTLY-TRAILING run of
-/// assistant think turns, concatenating their text earliest-first into the
-/// next step's thinking. Thinking followed by Say stays standalone (the text
-/// turn trails, not the thinking). Mutates only the caller's private copy.
-function popTrailingThinking(turns) {
+/// Segment thinking absorption (SPA-side extension of the TUI's
+/// pop_trailing_thinking): absorb EVERY assistant think turn of the current
+/// user segment into the next step's thinking — crossing OVER Say text
+/// turns, which stay in place as top-level bubbles. A turn that issues tool
+/// calls must never leave free-floating think turns above the ladder; only
+/// pure-text rounds (no tool call ever arrives) keep their top-level think
+/// turn, because nothing calls this. The walk stops at the first boundary
+/// turn: a user echo, a sys marker, a task tool row, a subagent block, or an
+/// earlier steps group (its rounds are already closed). Text concatenates
+/// earliest-first across the popped runs. Mutates only the caller's copy.
+function absorbSegmentThinking(turns) {
   let thinking = '';
-  while (turns.length > 0) {
-    const last = turns[turns.length - 1];
-    if (!last || last.kind !== 'think' || last.role !== 'assistant') {
-      break;
+  for (let i = turns.length - 1; i >= 0; i -= 1) {
+    const t = turns[i];
+    if (t && t.kind === 'think' && t.role === 'assistant') {
+      thinking = (t.text || '') + thinking;
+      turns.splice(i, 1);
+      continue;
     }
-    thinking = (last.text || '') + thinking;
-    turns.pop();
+    if (t && t.kind === 'text' && t.role === 'assistant') {
+      continue; // Say stays a top-level bubble; thinking crosses it.
+    }
+    break;
   }
   return thinking;
 }
@@ -436,11 +490,12 @@ export function reduceFrame(state, frame, nowMs) {
         turns.push(call);
         return withTurns(state, turns);
       }
-      // Step-ladder fold: the strictly-trailing think run becomes this
-      // round's step thinking, then the call merges into the trailing step
-      // while it holds no finished call (sequential rounds split, parallel
-      // calls stay together).
-      const thinking = popTrailingThinking(turns);
+      // Step-ladder fold: EVERY think turn of this user segment becomes the
+      // round's step thinking (crossing over Say, which stays top-level — a
+      // tool turn never leaves free-floating thinking above it), then the
+      // call merges into the trailing step while it holds no finished call
+      // (sequential rounds split, parallel calls stay together).
+      const thinking = absorbSegmentThinking(turns);
       mergeOrNewStep(turns, thinking, call);
       return withTurns(state, turns);
     }

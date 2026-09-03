@@ -3,11 +3,14 @@
 //   user   → placement end,   variant filled   (❯ avatar, monospace body)
 //   ai     → placement start, variant outlined (◉ avatar, monospace body)
 //   think  → placement start, variant borderless, ghost 💭 Thinking collapse
-//   steps  → placement start, variant borderless, STEP LADDER (stepsBlock.
-//            jsx): a static `≡ N steps [running|error]` marker row plus one
-//            always-visible per-step Collapse row (❯ Step(k) · n calls) —
-//            NO outer group collapse; inside an open step: the round's
-//            💭 thinking + per-call 🔧 collapses. Mirrors the TUI StepGroup.
+//            (standalone turns — pure-text rounds; a tool round's thinking
+//            lives INSIDE its step, see below)
+//   steps  → placement start, variant borderless, THREE-LEVEL drill ladder
+//            (stepsBlock.jsx): ONE collapsed group row `❯ N steps
+//            [running|error]` (L0) → per-step rows `❯ Step(k)` (L1) → the
+//            step's 💭 thinking rendered DIRECTLY + a `❯ N function calls`
+//            aggregate row (L2) → per-call 🔧 collapses (L3). Say stays a
+//            separate TOP-LEVEL ai bubble after the steps turn.
 //   tool   → placement start, variant borderless, 🔧 collapse with
 //            duration + error tag + input/output paragraphs (flat rows now
 //            only for `task` — the subagent handle; renderer lives in
@@ -108,7 +111,7 @@ const BUBBLE_ROLES = {
     variant: 'borderless',
     contentRender: (content) => <ThinkContent turn={content} />,
   },
-  // Step ladder (stepsBlock.jsx): marker + always-visible step rows.
+  // Step ladder (stepsBlock.jsx): one collapsed group row → 3-level drill.
   steps: {
     placement: 'start',
     variant: 'borderless',

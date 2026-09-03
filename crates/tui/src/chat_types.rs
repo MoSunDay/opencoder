@@ -54,15 +54,17 @@ pub enum ChatBlock {
         collapsed: bool,
         streaming: bool,
     },
-    /// One assistant round's tool activity: its thinking plus its function
-    /// calls, grouped into steps. Consecutive calls between text/image/marker
-    /// blocks form one group (any other block splits the run); steps split
-    /// at round boundaries (a finished call followed by a new `ToolStart`).
-    /// The group renders a static `≡ N steps` marker (not clickable, not
-    /// collapsible); every step row always renders below it. Two-level
-    /// drill-down, toggled by clicking: step row → single call's output.
-    /// Ctrl+L resets every level.
-    StepGroup { steps: Vec<Step> },
+    /// One assistant turn's tool activity, folded into a three-level
+    /// drill-down ladder: group → step → calls list → single call output.
+    /// Consecutive calls between text/image/marker blocks form one group
+    /// (any other block splits the run); steps split at round boundaries (a
+    /// finished call followed by a new `ToolStart`). The group renders ONE
+    /// clickable `▸ N steps` row at col 0 (collapsed by default); opening it
+    /// lists the step rows, opening a step reveals its thinking + a
+    /// clickable `▸ N function calls` aggregation row, and opening that
+    /// lists the call header rows (a single call's output expands
+    /// individually). Ctrl+L resets every level.
+    StepGroup { steps: Vec<Step>, open: bool },
     /// Inline image attachment rendered as half-block ASCII art.
     /// `filename` is the display name; `rendered` is the pre-computed
     /// half-block `Line` set (empty when rendering failed → placeholder).
@@ -221,18 +223,24 @@ pub struct SubagentHeader {
 
 /// One step inside a `ChatBlock::StepGroup`: a single assistant round's
 /// thinking (as rendered markdown lines) plus that round's function calls.
-/// The step's row always renders; its content is visible only while the
-/// step is open; each call's output additionally requires
-/// `ToolCall::expanded`.
+/// The step's row renders only while the enclosing group is open; its
+/// content (thinking + calls aggregation row) is visible only while the
+/// step is open; the call rows additionally require `calls_open`; a single
+/// call's output additionally requires `ToolCall::expanded`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Step {
     /// Rendered markdown of the round's thinking. Empty when the round went
-    /// straight to tools (or its thinking stayed a standalone `Thinking`
-    /// block because assistant text trailed it).
+    /// straight to tools. A round with tools NEVER leaves a standalone
+    /// `Thinking` block behind — its reasoning is absorbed here (see
+    /// `steps::absorb_pending_thinking`).
     pub thinking: Vec<Line<'static>>,
     pub calls: Vec<ToolCall>,
-    /// Whether this step's Thinking header + thinking + call rows render.
+    /// Whether this step's Thinking header + thinking + calls aggregation
+    /// row render.
     pub open: bool,
+    /// Whether the aggregation row's call header list renders (level 3 of
+    /// the ladder). Requires `open`.
+    pub calls_open: bool,
 }
 
 /// One tool call inside a step of a `ChatBlock::StepGroup`.
@@ -260,12 +268,21 @@ pub struct ToolCall {
 pub(crate) const STEP_ROW_OPEN_PREFIX: &str = "\u{276f} Step(";
 pub(crate) const STEP_ROW_CLOSED_PREFIX: &str = "\u{25b8} Step(";
 
-/// Locates one clickable row inside a `StepGroup` — a step row or a
-/// call header row — for mouse hit-testing. `call_idx` is the block's flat
-/// *visible-target index*: the row's position among the group's currently
-/// rendered rows (steps first, then that step's calls — see
-/// `visible_targets`). Clicking toggles exactly that target (step collapse
-/// or single-call output), leaving siblings untouched.
+/// Exact text prefixes of the group row (`❯ N steps` when the group is
+/// open, `▸ N steps` when collapsed — the trailing space is part of the
+/// prefix) and of the per-step calls aggregation row, which reuses the same
+/// fold glyphs (`❯ N function calls` / `▸ N function calls`). Declared here
+/// so the renderer and copy-mode's structured cleaner share one shape.
+pub(crate) const GROUP_ROW_OPEN_PREFIX: &str = "\u{276f} ";
+pub(crate) const GROUP_ROW_CLOSED_PREFIX: &str = "\u{25b8} ";
+
+/// Locates one clickable row inside a `StepGroup` — the group row, a step
+/// row, a calls aggregation row, or a call header row — for mouse
+/// hit-testing. `call_idx` is the block's flat *visible-target index*: the
+/// row's position among the group's currently rendered rows (see
+/// `visible_targets`). Clicking toggles exactly that target (group fold,
+/// step fold, calls-list fold, or single-call output), leaving siblings
+/// untouched.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ToolCallHeader {
     pub block_idx: usize,

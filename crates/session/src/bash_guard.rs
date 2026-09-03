@@ -1,16 +1,19 @@
-//! Bash command write-detection for plan-mode enforcement.
+//! Bash command write-detection for read-only session enforcement (plan
+//! mode and the sidecar bypass loop).
 //!
-//! In plan mode the agent must not modify the system. Rather than removing
-//! `bash` entirely (it's useful for `ls`, `cat`, `grep`, `find`), we classify
-//! each command as read-only or potentially-mutating and block the latter.
+//! In plan mode the agent must not modify the system, and the sidecar — a
+//! temporary Q&A loop over a snapshot of the main session — shares that
+//! invariant. Rather than removing `bash` entirely (it's useful for `ls`,
+//! `cat`, `grep`, `find`), we classify each command as read-only or
+//! potentially-mutating and block the latter.
 //!
 //! The classifier is now a thin adapter over the [`opencoder-shellguard`]
 //! crate, which is derived from [rippy](https://github.com/mpecan/rippy)
-//! (MIT license, copyright the rippy authors). Plan policy: block all
+//! (MIT license, copyright the rippy authors). Plan/sidecar policy: block all
 //! risk-bearing writes. Shellguard still identifies sandbox-released `/tmp`
-//! writes, but plan mode rejects those too: only non-persistent device/fd
-//! redirects remain harmless. `Ask`/`Deny` and any state-writing `Allow`
-//! verdict block.
+//! writes, but the read-only sessions reject those too: only non-persistent
+//! device/fd redirects remain harmless. `Ask`/`Deny` and any state-writing
+//! `Allow` verdict block.
 //!
 //! Classification is cwd-relative (a bare `touch f` means "write `f` in the
 //! working directory"), so the cwd handed to [`classify_with_dir`] MUST be
@@ -71,6 +74,11 @@ pub fn classify_with_dir(command: &str, cwd: &std::path::Path) -> BashVerdict {
 /// gate downstream; `bash` additionally passes the shellguard classifier.
 const PLAN_ADMITTED: &[&str] = &["bash", "task", "question"];
 
+/// Tool names a sidecar session may execute, mirroring the sidecar agent's
+/// `ToolFilter::Allow` list. Read-only inspection only: `bash` additionally
+/// passes the shellguard classifier.
+const SIDECAR_ADMITTED: &[&str] = &["read", "search", "ls", "bash"];
+
 /// Canonical model-facing denial for a plan-mode interception (candidate
 /// wording, verbatim). The contract: name the mode, state the read-only
 /// invariant, tell the model to stop implementation attempts, route context
@@ -96,8 +104,31 @@ pub fn plan_denial(tool: &str, detail: &str) -> String {
     }
 }
 
-/// Plan-mode execution gate for one tool call: `Some(denial)` refuses the call
-/// with the model-visible [`plan_denial`], `None` lets it proceed.
+/// Canonical model-facing denial for a sidecar interception. Same shape as
+/// [`plan_denial`] but scoped to the read-only Q&A loop: name the session,
+/// state the invariant, forbid retries and alternate write paths, and point
+/// at the real escape hatch — the main session.
+pub fn sidecar_denial(tool: &str, detail: &str) -> String {
+    if tool == "bash" {
+        format!(
+            "Blocked in sidecar (read-only Q&A): this bash command modifies state ({detail}) \
+             and was not executed. Do not retry or attempt another write. Gather what you need \
+             with read-only commands (read, search, git log) or answer directly from the snapshot \
+             context. This sidecar cannot make changes; to make changes, return to the main session."
+        )
+    } else {
+        format!(
+            "Blocked in sidecar (read-only Q&A): `{tool}` was not executed - {detail}. \
+             Do not retry or attempt another write. Answer from the snapshot context; \
+             read-only inspection only. To make changes, return to the main session."
+        )
+    }
+}
+
+/// Read-only execution gate for one tool call: `Some(denial)` refuses the
+/// call with the model-visible [`plan_denial`] / [`sidecar_denial`], `None`
+/// lets it proceed. Gated sessions: plan mode and the sidecar loop; every
+/// other session (including other `Subagent`-kind agents) passes through.
 ///
 /// `workdir` is the directory the call will execute in — for bash the
 /// per-call `workdir` input, else the session working dir (resolved by the
@@ -108,27 +139,41 @@ pub fn plan_denial(tool: &str, detail: &str) -> String {
 /// `touch f` while the write lands in the real workdir).
 ///
 /// Two layers, both fail-closed:
-/// - the session is plan but the tool is not admitted (a hallucinated or
+/// - the session is read-only but the tool is not admitted (a hallucinated or
 ///   remembered builtin like `edit`, or an unadvertised MCP tool): refuse so
 ///   a write can never slip through a tool the model was never shown;
 /// - `bash` is admitted but the shellguard classifier flags the command as
 ///   mutating: refuse with the classifier's reason.
 pub fn gate(
     kind: &opencoder_core::AgentKind,
+    agent_name: &str,
     tool: &str,
     command: Option<&str>,
     workdir: &std::path::Path,
 ) -> Option<String> {
-    if *kind != opencoder_core::AgentKind::Plan {
-        return None;
-    }
-    if tool != "bash" && !PLAN_ADMITTED.contains(&tool) {
-        return Some(plan_denial(tool, "this tool is not available in plan mode"));
+    let (admitted, unadmitted_detail, denial): (&[&str], &str, fn(&str, &str) -> String) =
+        if *kind == opencoder_core::AgentKind::Plan {
+            (
+                PLAN_ADMITTED,
+                "this tool is not available in plan mode",
+                plan_denial,
+            )
+        } else if agent_name == "sidecar" {
+            (
+                SIDECAR_ADMITTED,
+                "this tool is not available in the sidecar",
+                sidecar_denial,
+            )
+        } else {
+            return None;
+        };
+    if tool != "bash" && !admitted.contains(&tool) {
+        return Some(denial(tool, unadmitted_detail));
     }
     if tool == "bash" {
         if let BashVerdict::WriteBlocked(reason) = classify_with_dir(command.unwrap_or(""), workdir)
         {
-            return Some(plan_denial("bash", &reason));
+            return Some(denial("bash", &reason));
         }
     }
     None
@@ -420,20 +465,31 @@ mod tests {
     }
 
     #[test]
+    fn admitted_set_matches_sidecar_agent_tool_filter() {
+        let sidecar = opencoder_core::resolve_agent("sidecar").expect("sidecar agent");
+        for name in super::SIDECAR_ADMITTED {
+            assert!(
+                sidecar.tools.allows(name),
+                "gate admits {name} but the sidecar ToolFilter does not"
+            );
+        }
+    }
+
+    #[test]
     fn gate_passes_non_plan_kinds_through() {
         use opencoder_core::{resolve_agent, AgentKind};
         let anywhere = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
         for name in ["act", "explore"] {
             let agent = resolve_agent(name).unwrap();
             assert_eq!(
-                super::gate(&agent.kind, "edit", Some("x"), anywhere),
+                super::gate(&agent.kind, &agent.name, "edit", Some("x"), anywhere),
                 None,
                 "{name} must not be gated"
             );
         }
         // Explicit non-plan kind is equally untouched.
         assert_eq!(
-            super::gate(&AgentKind::Act, "bash", Some("rm -rf /"), anywhere),
+            super::gate(&AgentKind::Act, "act", "bash", Some("rm -rf /"), anywhere),
             None
         );
     }
@@ -441,10 +497,10 @@ mod tests {
     #[test]
     fn gate_refuses_unadmitted_tool_in_plan() {
         use opencoder_core::resolve_agent;
-        let kind = resolve_agent("plan").unwrap().kind;
+        let agent = resolve_agent("plan").unwrap();
         let anywhere = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
         for tool in ["edit", "bg", "mcp__fs__write"] {
-            let denial = super::gate(&kind, tool, None, anywhere)
+            let denial = super::gate(&agent.kind, &agent.name, tool, None, anywhere)
                 .unwrap_or_else(|| panic!("{tool} must be refused"));
             assert!(denial.contains("Blocked in plan mode"), "got: {denial}");
         }
@@ -454,7 +510,7 @@ mod tests {
                 continue; // covered by the classifier tests below
             }
             assert_eq!(
-                super::gate(&kind, tool, None, anywhere),
+                super::gate(&agent.kind, &agent.name, tool, None, anywhere),
                 None,
                 "{tool} admitted"
             );
@@ -464,29 +520,81 @@ mod tests {
     #[test]
     fn gate_blocks_mutating_bash_in_plan() {
         use opencoder_core::resolve_agent;
-        let kind = resolve_agent("plan").unwrap().kind;
+        let agent = resolve_agent("plan").unwrap();
         // A plain (non-released) workdir.
         let plain_dir = super::plain_dir();
         let plain = plain_dir.path();
-        assert!(super::gate(&kind, "bash", Some("ls -la"), plain).is_none());
-        let denial = super::gate(&kind, "bash", Some("rm -rf ./f"), plain).expect("blocked");
+        assert!(super::gate(&agent.kind, &agent.name, "bash", Some("ls -la"), plain).is_none());
+        let denial = super::gate(&agent.kind, &agent.name, "bash", Some("rm -rf ./f"), plain)
+            .expect("blocked");
         assert!(denial.contains("Blocked in plan mode"), "got: {denial}");
     }
 
     #[test]
     fn gate_blocks_writes_in_released_and_plain_call_workdirs() {
         use opencoder_core::resolve_agent;
-        let kind = resolve_agent("plan").unwrap().kind;
+        let agent = resolve_agent("plan").unwrap();
         // The command is identical in both legs. Shellguard reports different
         // provenance, but strict plan policy blocks both write effects.
         let tmp = std::path::Path::new("/tmp");
-        let tmp_denial = super::gate(&kind, "bash", Some("touch ./f"), tmp)
+        let tmp_denial = super::gate(&agent.kind, &agent.name, "bash", Some("touch ./f"), tmp)
             .expect("relative write under /tmp is still a write in plan mode");
         assert!(tmp_denial.contains("output a plan only"));
         let plain = super::plain_dir();
-        let denial = super::gate(&kind, "bash", Some("touch ./f"), plain.path())
-            .unwrap_or_else(|| panic!("same command must be blocked from a plain workdir"));
+        let denial = super::gate(
+            &agent.kind,
+            &agent.name,
+            "bash",
+            Some("touch ./f"),
+            plain.path(),
+        )
+        .unwrap_or_else(|| panic!("same command must be blocked from a plain workdir"));
         assert!(denial.contains("Blocked in plan mode"), "got: {denial}");
+    }
+
+    #[test]
+    fn gate_blocks_mutating_bash_in_sidecar() {
+        use opencoder_core::resolve_agent;
+        let agent = resolve_agent("sidecar").unwrap();
+        // The sidecar is a Subagent-kind session: gating keys on the agent
+        // name, so a bare AgentKind check would let writes through.
+        assert_eq!(agent.kind, opencoder_core::AgentKind::Subagent);
+        let plain_dir = super::plain_dir();
+        let plain = plain_dir.path();
+        assert!(super::gate(&agent.kind, &agent.name, "bash", Some("ls -la"), plain).is_none());
+        assert!(super::gate(
+            &agent.kind,
+            &agent.name,
+            "bash",
+            Some("git log --oneline -5"),
+            plain
+        )
+        .is_none());
+        for cmd in ["rm -rf ./f", "touch ./f"] {
+            let denial = super::gate(&agent.kind, &agent.name, "bash", Some(cmd), plain)
+                .unwrap_or_else(|| panic!("{cmd} must be blocked"));
+            assert!(denial.contains("Blocked in sidecar"), "got: {denial}");
+        }
+    }
+
+    #[test]
+    fn gate_refuses_unadmitted_tool_in_sidecar() {
+        use opencoder_core::resolve_agent;
+        let agent = resolve_agent("sidecar").unwrap();
+        let anywhere = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        for tool in ["edit", "task", "question"] {
+            let denial = super::gate(&agent.kind, &agent.name, tool, None, anywhere)
+                .unwrap_or_else(|| panic!("{tool} must be refused"));
+            assert!(denial.contains("Blocked in sidecar"), "got: {denial}");
+        }
+        // Admitted read-only tools pass the first layer untouched.
+        for tool in ["read", "search", "ls"] {
+            assert_eq!(
+                super::gate(&agent.kind, &agent.name, tool, None, anywhere),
+                None,
+                "{tool} admitted"
+            );
+        }
     }
 
     #[test]

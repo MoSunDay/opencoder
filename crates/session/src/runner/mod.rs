@@ -322,6 +322,25 @@ pub(crate) async fn run_loop(
             }
         }
 
+        // Hard-limit gate for manual compaction: with `compaction.auto`
+        // off nothing will shrink the transcript, so a request past the
+        // model's context window is a guaranteed 400/degradation. Abort the
+        // run with an actionable hint instead. (Auto mode is handled below.)
+        // Sidecar is exempt: its transcript is a borrowed parent snapshot
+        // with auto-compaction deliberately forced off (runner/sidecar.rs),
+        // so this gate would fail every question near the parent's window
+        // with an unexecutable "/compact" hint - let a genuine provider
+        // context-length error surface honestly instead.
+        if session.agent.name != "sidecar"
+            && !session.config.compaction.auto
+            && compaction::exceeds_hard_limit(session)
+        {
+            on_event(SessionEvent::Error(
+                compaction::MANUAL_COMPACT_HINT.to_string(),
+            ));
+            return Err(anyhow!(compaction::MANUAL_COMPACT_HINT));
+        }
+
         if compaction::should_compact(session) {
             // Retry compaction a few times (transient LLM failures like rate
             // limits are common) before giving up. On final failure return Err

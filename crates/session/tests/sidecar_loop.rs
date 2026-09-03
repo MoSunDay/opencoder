@@ -416,3 +416,43 @@ async fn sidecar_never_compacts_over_threshold_snapshot() {
         );
     }
 }
+
+/// Bug-fix #7: the sidecar is exempt from the manual-compaction hard-limit
+/// gate. Its transcript is a borrowed parent snapshot with `compaction.auto`
+/// deliberately forced off (`runner/sidecar.rs::build_sidecar_conv`), so with
+/// the parent near its context window the gate aborted EVERY question with a
+/// "/compact" hint that is unexecutable in sidecar context - and the snapshot
+/// can never shrink, so it failed permanently instead of surfacing the real
+/// provider error.
+#[tokio::test]
+async fn sidecar_answers_when_parent_snapshot_exceeds_hard_limit() {
+    let (mut parent, _store, mock) = parent_session().await;
+    seed_history(&mut parent).await;
+    // Absurdly small physical window: even the system prompt exceeds 1 token.
+    // The child clones this config in `new_conv` and forces auto=false, so
+    // `exceeds_hard_limit(child)` is trivially true.
+    parent.config.context_limit = Some(1);
+
+    mock.queue_script(vec![done("still answering", 10, 5, 5)]);
+
+    let mut conv = new_conv(&parent).await.unwrap();
+    let (events, cb) = collector();
+    let mut cb = cb;
+    let turn = run_sidecar_turn(&mut conv, "progress?", &mut cb)
+        .await
+        .unwrap();
+
+    assert!(turn.ok, "turn must succeed, answer was: {}", turn.answer);
+    assert!(
+        turn.answer.contains("still answering"),
+        "answer was: {}",
+        turn.answer
+    );
+    // No unexecutable "/compact" hint may reach the parent-side stream.
+    let evs = events.lock().unwrap().clone();
+    assert!(
+        !evs.iter()
+            .any(|e| matches!(e, SessionEvent::Error(m) if m.contains("/compact"))),
+        "unexpected /compact hint in parent stream: {evs:?}"
+    );
+}

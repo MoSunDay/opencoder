@@ -98,6 +98,20 @@ pub(super) async fn execute_call_with_timeout(
     timeout: Option<Duration>,
 ) -> ToolOutput {
     if tc.name == "task" {
+        // Plan admission admits `task` for evidence gathering, but the
+        // sidecar kind is read-only-only by contract: gate the spawn here
+        // (before any child session is created) so a sidecar cannot farm
+        // mutations out to a full write-capable subagent. Same denial text
+        // as the generic gate for a consistent UX.
+        if let Some(denial) = crate::bash_guard::gate(
+            &session.agent.kind,
+            &session.agent.name,
+            "task",
+            None,
+            &session.working_dir,
+        ) {
+            return ToolOutput::err(denial);
+        }
         // The subagent runs as a child session and may legitimately take many
         // minutes, so it is exempt from the leaf-tool `DEFAULT_TOOL_TIMEOUT`.
         // It still gets its own (generous) deadline + the cancel guard so a
@@ -792,6 +806,45 @@ mod tests {
         assert!(
             session.child_steer_gates.lock().unwrap().is_empty(),
             "child_steer_gates must be empty after force_cancel"
+        );
+    }
+
+    #[tokio::test]
+    async fn sidecar_cannot_farm_mutations_out_via_task() {
+        // rules/01 regression (brief #2): the generic gate never sees `task`
+        // (it early-returns above), so a sidecar could spawn a full
+        // write-capable subagent and mutate the repo through it. The spawn
+        // must be denied with the standard sidecar denial, before any child
+        // session is created.
+        let session = SessionState::new(
+            "sess-sidecar-task",
+            resolve_agent("sidecar").unwrap(),
+            Config::default(),
+            Arc::new(MockChatClient::new()) as Arc<dyn ChatStream>,
+            std::env::temp_dir().join("opencoder-execute-tests"),
+        );
+        let registry: HashMap<String, ToolArc> = HashMap::new();
+        let mut noop: Box<dyn FnMut(SessionEvent) + Send> = Box::new(|_| {});
+        let sink: Sink<'_> = Arc::new(Mutex::new(&mut *noop));
+        let tc = CompletedToolCall {
+            id: "tc-sidecar".into(),
+            name: "task".into(),
+            input: json!({
+                "description": "edit files",
+                "prompt": "mutate the working tree",
+                "agent": "build"
+            }),
+        };
+        let out = execute_call_with_timeout(&tc, &session, &registry, &sink, None).await;
+        assert!(
+            out.is_error,
+            "sidecar task spawn must be denied, got: {}",
+            out.content
+        );
+        assert!(
+            out.content.contains("Blocked in sidecar"),
+            "expected the sidecar denial, got: {}",
+            out.content
         );
     }
 }

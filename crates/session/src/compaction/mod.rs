@@ -39,6 +39,25 @@ pub fn should_compact(session: &SessionState) -> bool {
     reported != 0 && reported >= budget
 }
 
+/// Hint emitted when a manual-compaction session crosses the hard context
+/// limit: auto-compaction is off, so the run is aborted instead of silently
+/// degrading. Tells the user exactly which lever to pull.
+pub const MANUAL_COMPACT_HINT: &str =
+    "context window exhausted: run /compact to summarize the transcript, or enable compaction.auto";
+
+/// Hard-limit check that applies even when auto-compaction is OFF: the
+/// transcript (estimated or model-reported) no longer fits the model's
+/// context window at all, so the next request would 400/degrade. Unlike
+/// `should_compact` this is not a threshold preference — it is a physical
+/// limit of the configured model.
+pub fn exceeds_hard_limit(session: &SessionState) -> bool {
+    let context_limit = session.config.context_limit();
+    estimated_tokens(session) >= context_limit || {
+        let reported = reported_tokens(session);
+        reported != 0 && reported >= context_limit
+    }
+}
+
 /// Estimated tokens of the conversation about to be sent (system + messages
 /// + transient skill payload).
 ///

@@ -304,8 +304,8 @@ pub(crate) fn thinking_step_group(thinking: Vec<Line<'static>>) -> ChatBlock {
 /// Marker, Subagent, ...) caps the run, and a fresh single-step group is
 /// inserted before the speech (or the boundary itself when no speech
 /// trails). Returns the insert position when a NEW group was inserted, so
-/// callers can keep block-index bookkeeping (e.g. `hidden_assistant_idx`)
-/// consistent. Pure w.r.t. everything but `blocks`.
+/// callers that track block positions can account for the shift.
+/// Pure w.r.t. everything but `blocks`.
 pub(crate) fn place_thinking_step(
     blocks: &mut Vec<ChatBlock>,
     thinking: Vec<Line<'static>>,

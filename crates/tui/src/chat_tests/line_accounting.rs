@@ -85,7 +85,7 @@ fn assert_line_accounting_matches(view: &ChatView) {
     // between collect_headers and flatten_with is caught regardless of which
     // side regresses. (collect_headers is private, so we mirror its math.)
     let mut expected = 0usize;
-    for (block_idx, block) in view.blocks.iter().enumerate() {
+    for block in view.blocks.iter() {
         match block {
             ChatBlock::Marker(lines) => expected += lines.len(),
             ChatBlock::User { rendered } => expected += 1 + rendered.len(),
@@ -94,9 +94,6 @@ fn assert_line_accounting_matches(view: &ChatView) {
                 rendered,
                 done,
             } => {
-                if view.is_withheld_pub(block_idx) {
-                    continue;
-                }
                 expected += 1;
                 expected += if *done {
                     rendered.len()
@@ -165,17 +162,6 @@ fn assert_line_accounting_matches(view: &ChatView) {
         actual, expected,
         "flatten_with emitted {actual} lines but collect_headers accounts {expected}"
     );
-}
-
-/// Expose the private `is_withheld` for the test mirror. Implemented as an
-/// extension trait so the production struct stays untouched.
-trait WithheldPub {
-    fn is_withheld_pub(&self, idx: usize) -> bool;
-}
-impl WithheldPub for ChatView {
-    fn is_withheld_pub(&self, idx: usize) -> bool {
-        self.hidden_assistant_idx == Some(idx) && self.subagents_running >= 1
-    }
 }
 
 fn view_with(blocks: Vec<ChatBlock>) -> ChatView {

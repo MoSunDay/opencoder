@@ -72,31 +72,18 @@ impl ChatView {
         // The admitted turn boundary, not block adjacency, owns the ladder:
         // interleaved Say blocks stay in place while reasoning updates the
         // turn's one StepGroup.
-        if let Some(at) = super::steps::append_step_thinking_delta(
+        super::steps::append_step_thinking_delta(
             &mut self.blocks,
             self.turn_block_start,
             reasoning,
-        ) {
-            if let Some(h) = self.hidden_assistant_idx {
-                if h >= at {
-                    self.hidden_assistant_idx = Some(h + 1);
-                }
-            }
-        }
+        );
     }
 
     /// Fold any pending Thinking run into the step ladder (see
-    /// `steps::flush_pending_thinking`) and keep `hidden_assistant_idx`
-    /// pointing at the same block when the flush inserts a group at or
-    /// before it. No-op without pending thinking.
+    /// `steps::flush_pending_thinking`). No-op without pending thinking —
+    /// thinking never survives outside the ladder.
     pub(crate) fn flush_pending_thinking(&mut self) {
-        if let Some(at) = super::steps::flush_pending_thinking(&mut self.blocks) {
-            if let Some(h) = self.hidden_assistant_idx {
-                if h >= at {
-                    self.hidden_assistant_idx = Some(h + 1);
-                }
-            }
-        }
+        super::steps::flush_pending_thinking(&mut self.blocks);
     }
 
     /// Finalize the current round's trailing Thinking/Assistant group.

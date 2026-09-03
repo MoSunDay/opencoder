@@ -27,6 +27,7 @@ mod plan_chip_consume_tests;
 mod display_title_tests;
 mod sidecar_display_tests;
 mod tok_cost_idle_refresh_tests;
+mod transcript_reset_echo_tests;
 
 #[cfg(test)]
 #[path = "../app_loop_plan_edit_tests.rs"]

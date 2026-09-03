@@ -265,12 +265,14 @@ fn ctx_counts_reasoning_once_at_finalize() {
     v.apply(&SessionEvent::ReasoningDelta("think ".into()));
     v.apply(&SessionEvent::ReasoningDelta("more".into()));
     assert_eq!(v.context_used, 0, "reasoning not counted while streaming");
-    // The Say streams on top of the ladder; the step stays unsealed until
-    // the round finalizes.
+    // The Say CLOSES the turn and is the ladder's accounting boundary:
+    // its steps seal here (counted once), while the Say's own tokens stay
+    // uncounted until the round finalizes.
     v.apply(&SessionEvent::TextDelta("answer".into()));
     assert_eq!(
-        v.context_used, 0,
-        "step thinking counts at round finalize, not on the text transition"
+        v.context_used,
+        estimate("think more") as u64,
+        "step thinking counts at the Say that closes its turn"
     );
     v.apply(&SessionEvent::Done);
     assert_eq!(

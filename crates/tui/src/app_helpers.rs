@@ -535,6 +535,13 @@ pub(crate) fn push_user(
         rendered: crate::markdown::render(echo),
     });
     chat.push_marker(Line::from(""));
+    // Remember the echo across a TranscriptReset rebuild: a compound control
+    // command (`/act_clear_context <tail>`) resets the view after this push
+    // but before the tail is recorded, which would otherwise orphan the new
+    // turn's ladder with no user boundary.
+    if !echo.trim().is_empty() {
+        chat.pending_turn_echo = Some(echo.to_string());
+    }
 }
 
 pub(crate) use opencoder_core::data_dir_for;

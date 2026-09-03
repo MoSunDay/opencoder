@@ -207,7 +207,7 @@ fn thinking_header_shows_line_count_when_collapsed() {
 }
 
 #[test]
-fn interleaved_reasoning_keeps_one_losslessly_joined_assistant() {
+fn interleaved_reasoning_opens_a_new_turn_under_each_say() {
     let mut v = ChatView::default();
     v.apply(&SessionEvent::LlmRoundStart { started_at_ms: 1 });
     v.apply(&SessionEvent::ReasoningDelta("plan regression".into()));
@@ -217,15 +217,20 @@ fn interleaved_reasoning_keeps_one_losslessly_joined_assistant() {
         "通过，无失败。统计总数并写 changelog。".into(),
     ));
 
-    // Live reasoning streams into the step ladder: both segments land in the
-    // same step's thinking, and the interleaved Say rides above the group.
-    assert!(matches!(v.blocks[0], ChatBlock::StepGroup { .. }));
-    let thinking = match &v.blocks[0] {
+    // Contract: `1 Turn = n Steps + Say`; one submission may hold several
+    // turns. The first Say closes turn 1 ("plan regression" is ITS ladder);
+    // the reasoning after it opens turn 2's ladder BELOW the Say and the
+    // second Say closes that turn. Nothing merges across a closed Say.
+    let thinking_of = |v: &ChatView, group_idx: usize| match &v.blocks[group_idx] {
         ChatBlock::StepGroup { steps, .. } => steps[0].thinking_raw.clone(),
-        _ => unreachable!("first block must be the step group"),
+        _ => unreachable!("block {group_idx} must be a step group"),
     };
-    assert!(thinking.contains("plan regression"), "got {thinking:?}");
-    assert!(thinking.contains("record totals"), "got {thinking:?}");
+    assert!(matches!(v.blocks[0], ChatBlock::StepGroup { .. }));
+    assert!(matches!(v.blocks[1], ChatBlock::Assistant { .. }));
+    assert!(matches!(v.blocks[2], ChatBlock::StepGroup { .. }));
+    assert!(matches!(v.blocks[3], ChatBlock::Assistant { .. }));
+    assert_eq!(thinking_of(&v, 0), "plan regression");
+    assert_eq!(thinking_of(&v, 2), "record totals");
     let assistants: Vec<_> = v
         .blocks
         .iter()
@@ -236,7 +241,7 @@ fn interleaved_reasoning_keeps_one_losslessly_joined_assistant() {
         .collect();
     assert_eq!(
         assistants,
-        ["全量回归通过，无失败。统计总数并写 changelog。"]
+        ["全量回归", "通过，无失败。统计总数并写 changelog。"]
     );
 
     let say_headers = v
@@ -254,8 +259,14 @@ fn collapsed_live_reasoning_stays_raw_until_the_step_opens() {
     v.apply(&SessionEvent::TextDelta("answer".into()));
     v.apply(&SessionEvent::ReasoningDelta("second".into()));
 
-    // The step is structurally present but hidden, so deltas only append raw
-    // source and the render loop may skip a delta-only frame.
+    // The Say in between closed turn 1 ("first" is ITS sealed ladder) and
+    // opened turn 2 BELOW it, so "second" streams into the new group at
+    // blocks[2] — never back into the closed turn's step.
+    assert!(matches!(v.blocks[1], ChatBlock::Assistant { .. }));
+    assert!(matches!(v.blocks[2], ChatBlock::StepGroup { .. }));
+
+    // The trailing step is structurally present but hidden, so deltas only
+    // append raw source and the render loop may skip a delta-only frame.
     assert!(
         v.last_open_thinking_collapsed(),
         "collapsed step reasoning is not visible"
@@ -266,16 +277,24 @@ fn collapsed_live_reasoning_stays_raw_until_the_step_opens() {
         }
         _ => unreachable!("first block must be the step group"),
     };
-    assert_eq!(thinking_raw, "firstsecond");
+    assert_eq!(thinking_raw, "first");
     assert!(thinking_empty);
-
-    v.toggle_tool_call_at(0, 0);
-    v.toggle_tool_call_at(0, 1);
-    let thinking = match &v.blocks[0] {
-        ChatBlock::StepGroup { steps, .. } => crate::chat::steps::span_text(&steps[0].thinking),
-        _ => unreachable!("first block must be the step group"),
+    let (raw2, empty2) = match &v.blocks[2] {
+        ChatBlock::StepGroup { steps, .. } => {
+            (steps[0].thinking_raw.clone(), steps[0].thinking.is_empty())
+        }
+        _ => unreachable!("third block must be the step group"),
     };
-    assert_eq!(thinking, "firstsecond");
+    assert_eq!(raw2, "second");
+    assert!(empty2);
+
+    v.toggle_tool_call_at(2, 0);
+    v.toggle_tool_call_at(2, 1);
+    let thinking = match &v.blocks[2] {
+        ChatBlock::StepGroup { steps, .. } => crate::chat::steps::span_text(&steps[0].thinking),
+        _ => unreachable!("third block must be the step group"),
+    };
+    assert_eq!(thinking, "second");
 }
 
 #[test]
@@ -289,8 +308,12 @@ fn interleaved_round_finalization_counts_once_and_hard_bounds_next_round() {
     let expected =
         estimate("think-a") as u64 + estimate("think-b") as u64 + estimate("answer-a") as u64;
     assert_eq!(v.context_used, expected);
+    // The Say closed its Turn and the reasoning that followed opened the
+    // NEXT turn's ladder below it: the last block is that ladder, and the
+    // Say itself (blocks[1]) is the one finalized by this round end.
+    assert!(matches!(v.blocks.last(), Some(ChatBlock::StepGroup { .. })));
     assert!(matches!(
-        v.blocks.last(),
+        v.blocks.get(1),
         Some(ChatBlock::Assistant { done: true, .. })
     ));
 

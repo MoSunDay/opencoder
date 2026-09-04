@@ -195,6 +195,26 @@ pub(crate) fn tick_clock(
     }
 }
 
+/// Whether an input event should prompt an immediate frame render.
+///
+/// The main loop renders only when `dirty && render_pending`; before this
+/// predicate was wired in, the only steady-state source of `render_pending`
+/// was the fps-configured `frame_ticker` (default 10 FPS = 100ms/帧), so key
+/// echo waited an average ~50ms (worst ~100ms) — visibly laggy for IME/CJK
+/// input where the user watches the screen to confirm each commit. Marking
+/// every Key/Paste/Mouse/Resize event as render-prompting decouples input
+/// echo latency from the fps setting (frames are ratatui diffs, so unchanged
+/// state renders an empty diff; idle CPU is unaffected).
+pub(crate) fn input_event_prompts_frame(ev: &crossterm::event::Event) -> bool {
+    matches!(
+        ev,
+        crossterm::event::Event::Key(_)
+            | crossterm::event::Event::Mouse(_)
+            | crossterm::event::Event::Paste(_)
+            | crossterm::event::Event::Resize(_, _)
+    )
+}
+
 /// Body of the `maybe_ev = evt_rx.recv()` select arm: drain all queued
 /// `UiEvent`s and fold them into the chat / queue state. Returns
 /// [`LoopFlow::Quit`] when the worker channel closed (`recv()` gave `None`),
@@ -629,6 +649,10 @@ pub(crate) mod tests;
 #[cfg(test)]
 #[path = "app_loop_bugfix_tests.rs"]
 mod bugfix_tests;
+
+#[cfg(test)]
+#[path = "app_loop_render_prompt_tests.rs"]
+mod render_prompt_tests;
 
 #[path = "app_loop_model.rs"]
 mod app_loop_model;

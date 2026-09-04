@@ -104,6 +104,14 @@ pub async fn run_topic(
 ) -> Result<TopicMeta> {
     let mut meta = fs_store::load_topic(&cfg.team_root, team_name, topic_id)?;
     if meta.status == TOPIC_FINISHED && meta.finish_reason.as_deref() != Some(FINISH_ERROR) {
+        // `terminal::finish` writes the NFS metadata first and flips the
+        // store's ledger rows second; a crash in between leaves `executing`
+        // rows behind. The flip is idempotent, so converge it here before
+        // the no-op return instead of leaving the rows stuck forever.
+        store
+            .finish_team_topic_run(topic_id)
+            .await
+            .context("finish team topic runs")?;
         return Ok(meta); // terminal and not resumable: idempotent no-op
     }
     if meta.status != TOPIC_EXECUTING {
@@ -155,6 +163,7 @@ pub async fn run_topic(
             Stage::Sub { sub } => {
                 stage_sub(&ctx, &mut meta, &member_ids, &cancel, sub, cursor.turn).await?
             }
+            Stage::Record { sub } => stage_record(&ctx, &mut meta, cursor.turn, sub).await?,
             Stage::Closing => {
                 stage_closing(&ctx, &mut meta, &mut hint, &mut pending_plan, cursor.turn).await?
             }
@@ -167,4 +176,4 @@ pub async fn run_topic(
 
 mod stages;
 
-use stages::{stage_closing, stage_plan, stage_sub};
+use stages::{stage_closing, stage_plan, stage_record, stage_sub};

@@ -7,8 +7,11 @@ mod common;
 use std::sync::Arc;
 
 use common::*;
-use opencoder_store::{Store, TEAM_RUN_FINISHED};
-use opencoder_team::{err, fs_store, layout, ok, MockDispatcher};
+use opencoder_store::{Store, TeamTopicRunRecord, TEAM_RUN_EXECUTING, TEAM_RUN_FINISHED};
+use opencoder_team::{
+    err, fs_store, layout, ok, Ambiguity, MockDispatcher, PlanRecord, ResultRecord, SummaryRecord,
+    RESULT_ANSWER,
+};
 use serde_json::json;
 
 fn plan(question: &str, participants: &[String]) -> String {
@@ -318,4 +321,153 @@ async fn errored_topic_resumes_from_disk_without_replaying_done_work() {
         "answered members are not re-dispatched"
     );
     assert!(resume.calls_for(&members[1].id).is_empty());
+}
+
+#[tokio::test]
+async fn aligned_summary_crash_residue_records_turn_without_phantom_subturn() {
+    let fx = fixture(2, 3).await;
+    let (captain, members) = make_team(&fx, 2).await;
+    let member_ids = ids(&members);
+    let topic_id = start(&fx, "崩溃残留").await;
+
+    // Crash residue for turn 1 sub 0: an ALIGNED summary is already on disk
+    // — with a non-empty ambiguity, which the naive cursor would have read
+    // as "dispatch a follow-up sub-turn" — but `meta.turns` was never pushed
+    // and `save_topic` never ran (crash between the summary write and the
+    // metadata push).
+    let root = fx.root();
+    fs_store::write_plan(
+        root,
+        TEAM,
+        &topic_id,
+        &PlanRecord {
+            turn: 1,
+            question: "目录怎么组织".to_string(),
+            participants: member_ids.clone(),
+            rationale: "全员参与".to_string(),
+        },
+    )
+    .unwrap();
+    for (i, id) in member_ids.iter().enumerate() {
+        fs_store::write_result(
+            root,
+            TEAM,
+            &topic_id,
+            &ResultRecord {
+                node_id: id.clone(),
+                turn: 1,
+                sub_turn: 0,
+                kind: RESULT_ANSWER.to_string(),
+                answer: format!("成员{i}的回答"),
+                ok: true,
+                error: None,
+                created_at: 1_000,
+            },
+        )
+        .unwrap();
+    }
+    fs_store::write_summary(
+        root,
+        TEAM,
+        &topic_id,
+        1,
+        0,
+        &SummaryRecord {
+            summary: "已对齐".to_string(),
+            aligned: true,
+            ambiguities: vec![Ambiguity {
+                node_id: members[0].id.clone(),
+                question: "残留歧义".to_string(),
+            }],
+            created_at: 1_000,
+        },
+    )
+    .unwrap();
+
+    // Scripted ONLY with the captain's closing decision: any phantom member
+    // dispatch would exhaust the script and derail the run.
+    let mock = Arc::new(
+        MockDispatcher::new().reply(
+            &captain.id,
+            vec![ok(closing_complete("最终结论：按功能分目录"))],
+        ),
+    );
+    let meta = run(&fx, mock.clone(), &topic_id).await;
+
+    assert_eq!(meta.status, "finished");
+    assert_eq!(meta.finish_reason.as_deref(), Some("complete"));
+    assert_eq!(
+        meta.final_summary.as_deref(),
+        Some("最终结论：按功能分目录")
+    );
+    assert_eq!(meta.turns.len(), 1);
+    assert_eq!(meta.turns[0].turn, 1);
+    assert!(meta.turns[0].aligned);
+    assert_eq!(meta.turns[0].sub_turns, 1);
+    assert_eq!(meta.turns[0].participants, member_ids);
+    assert!(
+        !layout::sub_dir(root, TEAM, &topic_id, 1, 1)
+            .unwrap()
+            .exists(),
+        "no phantom sub-turn directory is created"
+    );
+    assert!(
+        mock.calls_for(&members[0].id).is_empty() && mock.calls_for(&members[1].id).is_empty(),
+        "no member is re-dispatched into the phantom sub-turn"
+    );
+}
+
+#[tokio::test]
+async fn finished_topic_retry_converges_executing_ledger_rows() {
+    let fx = fixture(3, 2).await;
+    let (captain, members) = make_team(&fx, 2).await;
+    let member_ids = ids(&members);
+    let topic_id = start(&fx, "账本收敛").await;
+
+    // Minimal happy path to a `complete` finish (ledger rows all flipped).
+    let mock = MockDispatcher::with_store(fx.store.clone())
+        .reply(
+            &captain.id,
+            vec![
+                ok(plan("只跑一轮", &member_ids)),
+                ok(summary("全员一致", true, &[])),
+                ok(closing_complete("结论")),
+            ],
+        )
+        .reply(&members[0].id, vec![ok("答A")])
+        .reply(&members[1].id, vec![ok("答B")]);
+    let meta = run(&fx, Arc::new(mock), &topic_id).await;
+    assert_eq!(meta.finish_reason.as_deref(), Some("complete"));
+
+    // Simulate a crash between the NFS metadata write and the ledger flip:
+    // re-mark every (topic, node) row back to `executing`.
+    let stale = fx.store.list_team_topic_runs(&topic_id).await.unwrap();
+    assert_eq!(stale.len(), 3, "captain + both members have ledger rows");
+    for row in &stale {
+        fx.store
+            .upsert_team_topic_run(&TeamTopicRunRecord {
+                topic_id: row.topic_id.clone(),
+                node_id: row.node_id.clone(),
+                status: TEAM_RUN_EXECUTING.to_string(),
+                created_at: row.created_at,
+            })
+            .await
+            .unwrap();
+    }
+    let stuck = fx.store.list_team_topic_runs(&topic_id).await.unwrap();
+    assert!(stuck.iter().all(|r| r.status == TEAM_RUN_EXECUTING));
+
+    // The retry takes the finished-topic early exit (no dispatch) but must
+    // still converge the missed ledger flips.
+    let empty = Arc::new(MockDispatcher::new());
+    let again = run(&fx, empty.clone(), &topic_id).await;
+    assert_eq!(again.status, "finished");
+    assert_eq!(again.finish_reason.as_deref(), Some("complete"));
+    assert_eq!(empty.call_count(), 0, "no dispatch on a finished topic");
+    let rows = fx.store.list_team_topic_runs(&topic_id).await.unwrap();
+    assert_eq!(rows.len(), 3);
+    assert!(
+        rows.iter().all(|r| r.status == TEAM_RUN_FINISHED),
+        "stuck executing rows are converged by the retry"
+    );
 }

@@ -11,7 +11,9 @@ use std::time::{Duration, Instant};
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use opencoder_store::{LibsqlStore, NodeRecord, Store};
+use opencoder_store::{
+    LibsqlStore, NodeRecord, Store, TeamTopicRunRecord, TEAM_RUN_EXECUTING, TEAM_RUN_FINISHED,
+};
 use opencoder_team::fs_store;
 use opencoder_team::types::{MemberRef, TeamMember, TeamMeta, TopicMeta};
 use opencoder_team::{ok, MockDispatcher, TeamDispatcher, TeamRunConfig};
@@ -667,6 +669,44 @@ async fn resume_accepts_error_topics_and_rejects_terminal_ones() {
     )
     .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+// M2' regression: `terminal::finish` saves the terminal metadata before
+// flipping the ledger rows; a crash in between leaves `disk
+// finished(complete) + ledger executing`, and the runtime's own converge
+// branch is unreachable (resume 409s before spawning). The 409 rejection
+// itself must converge the rows — any resume retry clears the residue.
+#[tokio::test]
+async fn resume_rejection_converges_stale_executing_ledger() {
+    let env = env().await;
+    let captain = register(&env, "captain-l").await;
+    let member = register(&env, "member-l").await;
+    hand_team(&env.team_root, &captain, &member, "lima");
+    let tid = hand_topic(&env.team_root, "lima", "finished", Some("complete"), 1_000);
+    // Crash residue: the pairing row never got flipped.
+    env.store
+        .upsert_team_topic_run(&TeamTopicRunRecord {
+            topic_id: tid.clone(),
+            node_id: member.id.clone(),
+            status: TEAM_RUN_EXECUTING.to_string(),
+            created_at: 1_234,
+        })
+        .await
+        .unwrap();
+
+    let app = plain_app(&env, Arc::new(MockDispatcher::new()));
+    let uri = format!("/api/teams/lima/topics/{tid}/resume");
+    let (status, body) = call(&app, "POST", &uri, None).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    let runs = env.store.list_team_topic_runs(&tid).await.unwrap();
+    assert_eq!(runs.len(), 1);
+    assert_eq!(runs[0].status, TEAM_RUN_FINISHED);
+
+    // Idempotent: retrying the rejection keeps the ledger converged.
+    let (status, _) = call(&app, "POST", &uri, None).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    let runs = env.store.list_team_topic_runs(&tid).await.unwrap();
+    assert!(runs.iter().all(|r| r.status == TEAM_RUN_FINISHED));
 }
 
 // ── cross-team listing ────────────────────────────────────────────────────

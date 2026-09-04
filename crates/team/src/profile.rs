@@ -16,15 +16,21 @@ use opencoder_core::message::now_ms;
 
 /// Interview every member once, store its self-described capabilities.
 /// Members whose interview fails keep their existing capabilities.
+///
+/// Each successful interview is merged narrowly: the team is re-loaded fresh
+/// from disk and only that member's `capabilities` + `profiled_at` are
+/// patched before saving, so concurrent management edits (captain swap,
+/// membership add/remove, other profile writes) are never rolled back.
 pub async fn profile_team(
     dispatcher: Arc<dyn TeamDispatcher>,
     cfg: &TeamRunConfig,
     team_name: &str,
 ) -> Result<TeamMeta> {
-    let mut team = fs_store::load_team(&cfg.team_root, team_name)?;
+    let team = fs_store::load_team(&cfg.team_root, team_name)?;
     let prompt = prompts::profile_prompt();
-    for member in team.members.iter_mut() {
-        let node_id = member.node_id.clone();
+    // Snapshot of node ids up front: the member set may change under us.
+    let node_ids: Vec<String> = team.members.iter().map(|m| m.node_id.clone()).collect();
+    for node_id in node_ids {
         match ask_json(
             dispatcher.as_ref(),
             None,
@@ -35,19 +41,25 @@ pub async fn profile_team(
         .await
         {
             Ok(decision) => {
+                let mut fresh = fs_store::load_team(&cfg.team_root, team_name)?;
+                let Some(member) = fresh.members.iter_mut().find(|m| m.node_id == node_id) else {
+                    tracing::info!(node = %node_id, "member removed concurrently; dropping profile result");
+                    continue;
+                };
                 member.capabilities = decision
                     .capabilities
                     .into_iter()
                     .map(|c| c.trim().to_string())
                     .collect();
                 member.profiled_at = Some(now_ms());
+                fresh.updated_at = now_ms();
+                // Saving after each member also bounds crash loss to one interview.
+                fs_store::save_team(&cfg.team_root, &fresh)?;
             }
             Err(error) => {
                 tracing::warn!(node = %node_id, error = %format!("{error:#}"), "member profile failed")
             }
         }
     }
-    team.updated_at = now_ms();
-    fs_store::save_team(&cfg.team_root, &team)?;
-    Ok(team)
+    fs_store::load_team(&cfg.team_root, team_name)
 }

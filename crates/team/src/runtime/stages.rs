@@ -157,6 +157,33 @@ pub(super) async fn stage_sub(
     Ok(None)
 }
 
+/// Crash-residue folding: the largest existing summary is `aligned` but the
+/// turn is not yet in `meta.turns` (crash between the `summary.json` write
+/// and the metadata push). Mirror of `stage_sub`'s aligned branch — read the
+/// on-disk artifacts, record the turn, save. No member is re-dispatched.
+/// Idempotent by construction: after `save_topic` the cursor derives Closing.
+pub(super) async fn stage_record(
+    ctx: &TopicCtx<'_>,
+    meta: &mut TopicMeta,
+    turn: usize,
+    sub: usize,
+) -> Result<Option<TopicMeta>> {
+    let plan = fs_store::read_turn_plan(&ctx.cfg.team_root, &meta.team_name, ctx.topic_id, turn)?
+        .context("turn plan missing")?;
+    let summary =
+        fs_store::read_summary(&ctx.cfg.team_root, &meta.team_name, ctx.topic_id, turn, sub)?
+            .context("aligned summary missing")?;
+    meta.turns.push(TopicTurnMeta {
+        turn,
+        question: plan.question,
+        participants: plan.participants,
+        aligned: summary.aligned,
+        sub_turns: sub + 1,
+    });
+    fs_store::save_topic(&ctx.cfg.team_root, meta)?; // next loop: closing
+    Ok(None)
+}
+
 /// Outcome of a summary step: the record, or the terminal meta when the
 /// captain decision failed and the topic was finished with `error`.
 enum SummaryOutcome {

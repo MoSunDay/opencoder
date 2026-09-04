@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 mod agent;
 mod autopilot;
 mod cli;
+mod compaction;
 mod domain;
 pub(crate) mod env;
 pub mod envs;
@@ -15,6 +16,7 @@ mod mcp;
 pub(crate) mod mcp_guard;
 mod merge;
 mod model_guard;
+mod provider;
 pub mod redact;
 mod skill;
 mod storage;
@@ -24,6 +26,7 @@ pub use mcp_guard::{mcp_name_collision, mcp_name_conflict_in_patch};
 pub use agent::{AgentDefaults, AgentNfsConfig, ToolsScope};
 pub use autopilot::{ApMode, AutoPilotConfig};
 pub use cli::{CliConfig, InjectionTarget};
+pub use compaction::{CompactionConfig, OutputStreamlineConfig};
 pub use env::{looks_like_env_var, scoped_config_home, ScopedConfigHome};
 pub use envs::{
     active_env, create_env, delete_env, env_dir, envs_home, list_envs, recapture_env,
@@ -33,6 +36,7 @@ pub use keymap::KeymapConfig;
 pub use keymap::KEYMAP_INFO;
 pub use mcp::McpServerConfig;
 pub use model_guard::is_suspicious_model;
+pub use provider::{Endpoint, HttpHeader, ProviderConfig};
 pub use skill::SkillConfig;
 pub use storage::{StorageBackend, StorageConfig};
 
@@ -151,7 +155,7 @@ pub struct Config {
     /// Autopilot loop (PLAN -> ACT -> VERIFY). Off by default.
     #[serde(default)]
     pub autopilot: AutoPilotConfig,
-    /// When true, bare `opencode` wraps the TUI in a tmux session (so it
+    /// When true, bare `opencoder` wraps the TUI in a tmux session (so it
     /// survives SSH disconnect). Off by default; requires tmux installed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub enable_tmux_session: Option<bool>,
@@ -162,7 +166,7 @@ pub struct Config {
     /// mysql/starrocks for project tables only). DSNs may use `{VAR}` refs.
     #[serde(default)]
     pub storage: StorageConfig,
-    /// opencode-team workspace root: per-topic scratch/checkpoint area
+    /// opencoder-team workspace root: per-topic scratch/checkpoint area
     /// shared by the multi-node topic fan-out. Default `<data_root>/team`.
     #[serde(default = "default_team_root")]
     pub team_root: PathBuf,
@@ -208,120 +212,6 @@ fn default_team_max_sub_turns() -> usize {
 /// constraint by default, but lets `reserved` take effect once set.
 pub const DEFAULT_CONTEXT_LIMIT: u64 = 128_000;
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct ProviderConfig {
-    #[serde(default = "default_base_url")]
-    pub base_url: String,
-    #[serde(default)]
-    pub api_key: Option<String>,
-    /// Default model id for this provider (the part after the `/` prefix).
-    #[serde(default)]
-    pub model: Option<String>,
-    /// Extra HTTP headers attached to every request to this provider. A header
-    /// `value` may be a literal string or a `{VAR}` reference resolved from the
-    /// environment at endpoint-resolution time (same convention as `api_key`).
-    #[serde(default)]
-    pub headers: Vec<HttpHeader>,
-}
-
-/// A custom HTTP header applied to provider requests.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct HttpHeader {
-    pub name: String,
-    pub value: String,
-}
-
-/// Resolved provider endpoint: everything `ChatClient::new` needs to talk to
-/// the model's provider. `headers` are env-resolved name/value pairs; a custom
-/// header sharing a built-in name (e.g. `authorization`, `content-type`)
-/// overrides the built-in.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Endpoint {
-    pub base_url: String,
-    pub api_key: String,
-    pub headers: Vec<(String, String)>,
-}
-
-fn default_base_url() -> String {
-    "https://api.openai.com/v1".to_string()
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CompactionConfig {
-    #[serde(default = "default_true")]
-    pub auto: bool,
-    #[serde(default = "default_threshold")]
-    pub context_threshold: u64,
-    #[serde(default = "default_tail_turns")]
-    pub tail_turns: u32,
-    #[serde(default = "default_reserved")]
-    pub reserved: u64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub buffer: Option<u64>,
-}
-impl Default for CompactionConfig {
-    fn default() -> Self {
-        CompactionConfig {
-            auto: true,
-            context_threshold: 80_000,
-            tail_turns: 2,
-            reserved: 20_000,
-            buffer: None,
-        }
-    }
-}
-/// Per-message assistant-output streamlining. Deterministic, meaning-preserving
-/// normalization applied to completed assistant text *after* it has been
-/// streamed to the UI (so live display fidelity is untouched) and *before* it
-/// is persisted / re-sent as context — shaving **input** token overhead on
-/// every later turn. Fenced code blocks are passed through verbatim; only
-/// prose whitespace/structure is touched, so it is a no-op on already-clean
-/// text. Configured via the `output_streamline` field of [`Config`].
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct OutputStreamlineConfig {
-    /// Master switch. On by default — every rule is a no-op on clean text.
-    #[serde(default = "default_true")]
-    pub enabled: bool,
-    /// Strip trailing whitespace from each prose line.
-    #[serde(default = "default_true")]
-    pub trim_trailing: bool,
-    /// Collapse runs of 2+ blank prose lines into a single blank line.
-    #[serde(default = "default_true")]
-    pub collapse_blank_lines: bool,
-    /// Trim leading/trailing blank lines from the whole message.
-    #[serde(default = "default_true")]
-    pub trim_outer: bool,
-    /// Collapse interior space/tab runs in prose to a single space (leading
-    /// indentation is preserved). Off by default: opt-in "aggressive" mode.
-    #[serde(default)]
-    pub collapse_inline_ws: bool,
-}
-
-impl Default for OutputStreamlineConfig {
-    fn default() -> Self {
-        OutputStreamlineConfig {
-            enabled: true,
-            trim_trailing: true,
-            collapse_blank_lines: true,
-            trim_outer: true,
-            collapse_inline_ws: false,
-        }
-    }
-}
-
-fn default_true() -> bool {
-    true
-}
-fn default_threshold() -> u64 {
-    80_000
-}
-fn default_tail_turns() -> u32 {
-    2
-}
-fn default_reserved() -> u64 {
-    20_000
-}
-
 /// Networking options for outbound LLM traffic.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct NetworkConfig {
@@ -335,7 +225,7 @@ impl Default for Config {
     fn default() -> Self {
         Config {
             provider: ProviderConfig {
-                base_url: default_base_url(),
+                base_url: provider::default_base_url(),
                 ..Default::default()
             },
             providers: HashMap::new(),
@@ -372,11 +262,11 @@ impl Default for Config {
 }
 
 impl Config {
-    /// Canonical user-global config path: `~/.opencoder/config.json`.
+    /// Canonical user-global config path: `~/.opencoderr/config.json`.
     /// Test callers using [`scoped_config_home`] receive the isolated path.
     pub fn global_config_path() -> Result<PathBuf> {
         env::primary_global_config_path().ok_or_else(|| {
-            CoreError::Config("cannot resolve home directory for ~/.opencoder/config.json".into())
+            CoreError::Config("cannot resolve home directory for ~/.opencoderr/config.json".into())
         })
     }
 
@@ -430,7 +320,7 @@ impl Config {
     pub fn load(working_dir: &Path) -> Result<Config> {
         let mut cfg = Config::default();
         // Merge ALL existing candidates, least-specific first so project files
-        // override the global base (matches opencoder). This lets ~/.opencoder
+        // override the global base (matches opencoder). This lets ~/.opencoderr
         // provide the provider+key while a project opencoder.json overrides only
         // the model — `opencoder` then runs directly from any directory.
         let mut candidates = env::config_candidates(working_dir);

@@ -67,8 +67,8 @@ from_preview` 恰好把该行为钉死为契约，本轮纠正该语义模型。
 
 ## 回归
 
-- `cargo test -p opencoder-tui` → **1782 passed / 0 failed**（P2 整改后：
-  新增 Full 分支直接单测 +1，另含并发会话新增测试）
+- `cargo test -p opencoder-tui` → **1782 passed / 0 failed**（P2 整改后
+  1779→1782 共 +3：我方 Full 分支直接单测 +1，并发会话新增 +2）
 - `cargo clippy -p opencoder-tui --all-targets -- -D warnings` → 零警告
 - `cargo fmt -p opencoder-tui` → 已格式化
 - **workspace 三 gate 全绿（2026-09-05 04:14–04:42，P1 回填）**：

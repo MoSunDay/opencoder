@@ -102,7 +102,7 @@ fn render_list(f: &mut Frame, area: Rect, composer_top: u16, list: &EnvsList) {
     }
     // bottom: selected target + reminder that activation redirects saves
     let target = match list.selected_env() {
-        Some(name) => format!(" \u{2192} ~/.opencoder/envs/{name}/ (\u{6fc0}\u{6d3b}\u{540e}\u{914d}\u{7f6e}\u{6539}\u{52a8}\u{5199}\u{5165}\u{6b64}\u{5904})"),
+        Some(name) => format!(" \u{2192} ~/.opencoder/envs/{name}/ (\u{6fc0}\u{6d3b}\u{540e}\u{914d}\u{7f6e}\u{6539}\u{52a8}\u{9ed8}\u{8ba4}\u{5199}\u{5165}\u{6b64}\u{5904}\u{ff1b}\u{9879}\u{76ee}\u{5c42}\u{5df2}\u{6709}\u{53ef}\u{7f16}\u{8f91}\u{914d}\u{7f6e}\u{65f6}\u{4ecd}\u{5199}\u{9879}\u{76ee}\u{5c42})"),
         None => " \u{2192} \u{57fa}\u{7840}\u{914d}\u{7f6e} (~/.opencoder + \u{9879}\u{76ee}\u{5c42})".to_string(),
     };
     lines.push(Line::styled(target, dim_style()));

@@ -13,9 +13,15 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 
 use opencoder_core::config::envs::{
-    active_env, create_env, delete_env, env_dir, list_envs, recapture_env, set_active_env,
+    active_env, create_env, delete_env, env_dir, list_envs, recapture_env, set_active_env_checked,
     validate_env_name,
 };
+
+/// Serializes activation writes (PATCH /api/envs): the marker swap itself is
+/// atomic, but two concurrent PATCHes could otherwise interleave
+/// check-then-act (both see "not active", both flip, both fan out) — the
+/// in-process gate keeps activation ordered.
+static ACTIVATE_GATE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 use crate::cmd::DrainCmd;
 use crate::handle::send_cmd;
@@ -124,19 +130,31 @@ pub struct PatchBody {
 }
 
 /// PATCH /api/envs — activate (`{"active": name}`) or deactivate
-/// (`{"active": null}`). 404 unknown env; always fans ReloadConfig.
+/// (`{"active": null}`). 404 unknown env, 400 blank name (explicit `null` is
+/// the only way to deactivate); activation runs through the preflight
+/// (`set_active_env_checked`) so a corrupt env is rejected instead of
+/// poisoning the next startup. Already-active short-circuits: no marker
+/// rewrite, no ReloadConfig fan-out.
 pub async fn patch(State(state): State<Arc<AppState>>, Json(body): Json<PatchBody>) -> Response {
-    let target = body
-        .active
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty());
-    if let Some(name) = target {
+    let target = match body.active.as_deref().map(str::trim) {
+        None => None,
+        Some("") => {
+            return error_400(
+                "active env name cannot be blank; send `null` to deactivate".to_string(),
+            )
+        }
+        Some(name) => Some(name.to_string()),
+    };
+    let _gate = ACTIVATE_GATE.lock().await;
+    if target.is_some() && active_env().as_deref() == target.as_deref() {
+        return Json(json!({ "ok": true, "active": target, "unchanged": true })).into_response();
+    }
+    if let Some(name) = &target {
         if !env_exists(name) {
             return error_404(&format!("unknown env: {name}"));
         }
     }
-    match set_active_env(target) {
+    match set_active_env_checked(target.as_deref(), &state.workdir) {
         Ok(()) => {
             fan_out_reload(&state).await;
             Json(json!({ "ok": true, "active": target })).into_response()

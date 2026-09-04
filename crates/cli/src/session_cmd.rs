@@ -19,11 +19,14 @@ pub async fn config_dispatch(cli: &Cli, sub: &Option<ConfigSub>) -> Result<()> {
     match sub {
         Some(ConfigSub::Show) | None => {
             let workdir = current_workdir(cli)?;
-            let cfg = Config::load(&workdir)?;
+            // Banner BEFORE load: when the active env's config is corrupt the
+            // load below fails, and the banner is the hint that names the
+            // layer to deactivate/repair.
             if let Some(banner) = active_env_banner() {
                 // stderr: stdout stays pure machine-readable JSON.
                 eprintln!("{banner}");
             }
+            let cfg = Config::load(&workdir)?;
             println!("{}", config_show_json(&cfg)?);
             Ok(())
         }

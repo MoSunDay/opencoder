@@ -201,3 +201,71 @@ fn dispatch_keeps_previous_candidate_for_retry_recovery_context() {
     assert_eq!(todo.last_error, None);
     assert_eq!(todo.next_context_mode, None);
 }
+
+/// T-1: an external interrupt must not permanently deadlock a
+/// max_attempts=1 TODO. The interrupted item (no verdict on the work) stays
+/// dispatchable on resume: runnable() proposes it and validate_dispatch
+/// exempts it from the attempt gate. A plain failure verdict still burns
+/// the budget (dispatch increments the attempt).
+#[test]
+fn interrupted_todo_at_exhausted_attempts_stays_dispatchable() {
+    let workflow = spec_with(1);
+    let state = dispatch_new(
+        &workflow,
+        domain::initial_state(&workflow, "run".into(), "p".into()),
+        "t1",
+    );
+
+    // External interrupt (execution_failed(interrupted=true) shape): the
+    // item keeps Interrupted + its session, with attempt == max_attempts.
+    let interrupted =
+        transitions::execution_failed(&workflow, state, "t1", "ctrl-c".into(), true).unwrap();
+    assert_eq!(interrupted.todos["t1"].status, TodoStatus::Interrupted);
+    assert!(domain::runnable(&workflow, &interrupted)
+        .unwrap()
+        .contains(&"t1".to_string()));
+
+    let request = DispatchTodo {
+        todo_id: "t1".into(),
+        context_mode: ContextMode::Resume,
+    };
+    transitions::validate_dispatch(
+        &workflow,
+        &interrupted,
+        &[request.clone()],
+        &[(request, "session".into())],
+    )
+    .expect("interrupted TODO must stay dispatchable on resume");
+}
+
+/// T-1 contrast: an interrupted TODO without a session pointer keeps the
+/// plain gate (nothing to resume into, and a New dispatch would silently
+/// grow attempts past the budget).
+#[test]
+fn interrupted_todo_without_session_still_hits_attempt_gate() {
+    let workflow = spec_with(1);
+    let state = dispatch_new(
+        &workflow,
+        domain::initial_state(&workflow, "run".into(), "p".into()),
+        "t1",
+    );
+    let mut interrupted = state;
+    {
+        let todo = interrupted.todos.get_mut("t1").unwrap();
+        todo.status = TodoStatus::Interrupted;
+        todo.active_session_id = None;
+    }
+
+    let request = DispatchTodo {
+        todo_id: "t1".into(),
+        context_mode: ContextMode::New,
+    };
+    let error = transitions::validate_dispatch(
+        &workflow,
+        &interrupted,
+        &[request.clone()],
+        &[(request, "session".into())],
+    )
+    .unwrap_err();
+    assert!(format!("{error}").contains("exhausted max_attempts"));
+}

@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use opencoder_store::Store;
 use tokio::task::JoinSet;
 
-use crate::{execution, parent, persistence, runner::Runtime, transitions, types::*};
+use crate::{domain, execution, parent, persistence, runner::Runtime, transitions, types::*};
 
 pub async fn execute(
     runtime: &Runtime,
@@ -264,7 +264,22 @@ pub(crate) fn validate_acceptance(
         }
         AcceptanceDecision::Rewind {
             milestone_todo_id, ..
-        } => transitions::rewind(spec, state.clone(), milestone_todo_id, String::new()).map(|_| ()),
+        } => {
+            // The TODO under acceptance must live inside the rewound subtree
+            // (or be the milestone itself). Rewinding an unrelated milestone
+            // would leave this TODO stuck in Accepting — a status runnable()
+            // never proposes and only this acceptance flow can exit — a
+            // permanent deadlock. Rejected as a correctable decision so the
+            // parent re-asks.
+            let subtree = domain::descendants(spec, milestone_todo_id);
+            if milestone_todo_id != todo_id && !subtree.contains(todo_id) {
+                anyhow::bail!(
+                    "cannot rewind to milestone {milestone_todo_id}: \
+                     TODO {todo_id} is not part of its subtree"
+                );
+            }
+            transitions::rewind(spec, state.clone(), milestone_todo_id, String::new()).map(|_| ())
+        }
         AcceptanceDecision::Fail { .. } => Ok(()),
     }
 }

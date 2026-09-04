@@ -314,3 +314,166 @@ async fn activation_fans_reload_config_to_live_handles() {
         other => panic!("expected ReloadConfig, got {other:?}"),
     }
 }
+
+/// P2: a blank `active` name must be a 400, not a silent deactivation —
+/// only explicit `null` deactivates.
+#[tokio::test]
+async fn patch_rejects_blank_active_name_with_400() {
+    let state = state().await;
+    let _iso = opencoder_core::scoped_config_home(state.workdir.clone());
+    call(
+        app(state.clone()),
+        "POST",
+        "/api/envs",
+        Some(serde_json::json!({"name": "blank"})),
+    )
+    .await;
+    let (status, v) = call(
+        app(state.clone()),
+        "PATCH",
+        "/api/envs",
+        Some(serde_json::json!({"active": "   "})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{v}");
+    assert_eq!(
+        opencoder_core::config::envs::active_env(),
+        None,
+        "blank name must not deactivate the active env"
+    );
+}
+
+/// E-2: activating an env whose config.json is corrupt must be rejected (500)
+/// with the marker rolled back — otherwise the next process start fails hard
+/// while activation itself reported ok.
+#[tokio::test]
+async fn patch_rejects_env_with_unresolvable_config() {
+    let state = state().await;
+    let _iso = opencoder_core::scoped_config_home(state.workdir.clone());
+    call(
+        app(state.clone()),
+        "POST",
+        "/api/envs",
+        Some(serde_json::json!({"name": "broken"})),
+    )
+    .await;
+    std::fs::write(
+        state
+            .workdir
+            .join(".opencoder")
+            .join("envs")
+            .join("broken")
+            .join("config.json"),
+        "{ not json",
+    )
+    .unwrap();
+
+    let (status, v) = call(
+        app(state.clone()),
+        "PATCH",
+        "/api/envs",
+        Some(serde_json::json!({"active": "broken"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR, "{v}");
+    assert!(
+        v["error"].as_str().unwrap_or("").contains("unresolvable"),
+        "the resolution error must surface: {v}"
+    );
+    assert_eq!(
+        opencoder_core::config::envs::active_env(),
+        None,
+        "failed preflight must restore the previous marker state"
+    );
+}
+
+/// P2: re-activating the already-active env short-circuits — ok response,
+/// no marker rewrite, no ReloadConfig fan-out.
+#[tokio::test]
+async fn patch_repeated_activation_short_circuits() {
+    let state = state().await;
+    let _iso = opencoder_core::scoped_config_home(state.workdir.clone());
+    call(
+        app(state.clone()),
+        "POST",
+        "/api/envs",
+        Some(serde_json::json!({"name": "same"})),
+    )
+    .await;
+
+    let handle = opencoder_web::handle::SessionHandle::new();
+    let mut cmd_rx = handle
+        .cmd_rx
+        .lock()
+        .unwrap()
+        .take()
+        .expect("fresh handle carries a receiver");
+    state.handles.lock().await.insert("s1".to_string(), handle);
+
+    let (status, _) = call(
+        app(state.clone()),
+        "PATCH",
+        "/api/envs",
+        Some(serde_json::json!({"active": "same"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let _ = cmd_rx.try_recv(); // drain the first (real) activation fan-out
+
+    let (status, v) = call(
+        app(state.clone()),
+        "PATCH",
+        "/api/envs",
+        Some(serde_json::json!({"active": "same"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert_eq!(v["unchanged"], true, "repeat activation reports unchanged");
+    assert!(
+        cmd_rx.try_recv().is_err(),
+        "re-activation must not fan ReloadConfig out again"
+    );
+}
+
+/// E-3: concurrent activation PATCHes serialize on the in-process gate —
+/// every response is 200 and the marker file stays parseable (never torn).
+#[tokio::test]
+async fn concurrent_activation_keeps_marker_intact() {
+    let state = state().await;
+    let _iso = opencoder_core::scoped_config_home(state.workdir.clone());
+    for name in ["a", "b", "c"] {
+        call(
+            app(state.clone()),
+            "POST",
+            "/api/envs",
+            Some(serde_json::json!({"name": name})),
+        )
+        .await;
+    }
+
+    let mut tasks = Vec::new();
+    for name in ["a", "b", "c", "a", "b", "c"] {
+        let state = state.clone();
+        tasks.push(tokio::spawn(async move {
+            let (status, v) = call(
+                app(state),
+                "PATCH",
+                "/api/envs",
+                Some(serde_json::json!({ "active": name })),
+            )
+            .await;
+            (status, v)
+        }));
+    }
+    for task in tasks {
+        let (status, v) = task.await.unwrap();
+        assert_eq!(status, StatusCode::OK, "{v}");
+    }
+    let marker = state.workdir.join(".opencoder").join("envs").join("active");
+    let raw = std::fs::read_to_string(&marker).unwrap();
+    let name = raw.trim();
+    assert!(
+        ["a", "b", "c"].contains(&name),
+        "marker must hold exactly one valid env name, got {raw:?}"
+    );
+}

@@ -240,7 +240,9 @@ pub(crate) fn save_domain(
         }
     }
     let pretty = serde_json::to_string_pretty(&root)?;
-    std::fs::write(&target, pretty)?;
+    // E-1: same owner-only contract as config.json — domain files saved into
+    // the active env dir may embed provider api keys.
+    super::envs::write_config_save(&target, &pretty)?;
     Ok(target)
 }
 

@@ -369,6 +369,193 @@ async fn ordered_forwarder_drops_only_repairable_parent_text() {
     ));
     assert!(rx.try_recv().is_err(), "parent TextDelta must be shed");
 }
+/// 让 forwarder 任务把 pending 队列处理到下一个 await 点（current_thread
+/// 运行时下，几次 yield 足以让它消费完所有已入队事件）。
+async fn pump_forwarder() {
+    for _ in 0..4 {
+        tokio::task::yield_now().await;
+    }
+}
+
+/// 压力下被丢弃(shed)的 TextDelta 若携带 `'\n'`，下一个送达的 delta 必须
+/// 带上分隔换行：被中断的回合没有 AssistantFinal 修复，行界一旦丢失就会
+/// 永久冻结成「多行贴在一起」。
+#[tokio::test]
+async fn forwarder_shedding_preserves_line_breaks() {
+    let (tx, mut rx) = mpsc::channel::<UiEvent>(DELTA_MIN_CAPACITY + 1);
+    tx.send(UiEvent::TurnDone("sentinel".into())).await.unwrap();
+    assert_eq!(tx.capacity(), DELTA_MIN_CAPACITY);
+    let (pending, forwarder) = spawn_ui_event_forwarder(tx);
+
+    forward_event(&pending, SessionEvent::TextDelta("head ".into()));
+    forward_event(&pending, SessionEvent::TextDelta("sep\ntail2\n".into()));
+    // 先让 forwarder 在低压下处理完（两个 delta 均被 shed）。
+    pump_forwarder().await;
+    // 再腾出容量：下一个 delta 不再处于丢弃阈值之下。
+    assert!(matches!(rx.recv().await, Some(UiEvent::TurnDone(_))));
+    forward_event(&pending, SessionEvent::TextDelta("tail3\n".into()));
+    drop(pending);
+    forwarder.await.unwrap();
+
+    assert!(
+        matches!(rx.recv().await, Some(UiEvent::Session(SessionEvent::TextDelta(t))) if t == "\ntail3\n"),
+        "next delivered delta must carry the separator for the shed line break"
+    );
+    assert!(rx.try_recv().is_err());
+}
+
+/// shed 的块不含换行（同一行内的丢弃）→ 下一个 delta 原样送达，不得插入
+/// 多余换行把一行拆成两行。
+#[tokio::test]
+async fn forwarder_shed_without_newline_adds_no_separator() {
+    let (tx, mut rx) = mpsc::channel::<UiEvent>(DELTA_MIN_CAPACITY + 1);
+    tx.send(UiEvent::TurnDone("sentinel".into())).await.unwrap();
+    let (pending, forwarder) = spawn_ui_event_forwarder(tx);
+
+    forward_event(&pending, SessionEvent::TextDelta("mid".into()));
+    pump_forwarder().await;
+    assert!(matches!(rx.recv().await, Some(UiEvent::TurnDone(_))));
+    forward_event(&pending, SessionEvent::TextDelta("line\n".into()));
+    drop(pending);
+    forwarder.await.unwrap();
+
+    assert!(
+        matches!(rx.recv().await, Some(UiEvent::Session(SessionEvent::TextDelta(t))) if t == "line\n"),
+        "no stray separator when the shed chunk carried no line break"
+    );
+}
+
+/// 欠下的分隔换行不得越过回合边界泄漏：LlmRoundEnd 封口当前 Say 后，
+/// 下一回合首个 delta 不得带前导空行。
+#[tokio::test]
+async fn forwarder_shed_separator_does_not_leak_past_round_end() {
+    // +2 容量、2 个哨兵：弹出后余量越过阈值，交付阶段的 delta 不会被
+    // 再次判定为可丢弃。
+    let (tx, mut rx) = mpsc::channel::<UiEvent>(DELTA_MIN_CAPACITY + 2);
+    for _ in 0..2 {
+        tx.send(UiEvent::TurnDone("sentinel".into())).await.unwrap();
+    }
+    let (pending, forwarder) = spawn_ui_event_forwarder(tx);
+
+    forward_event(&pending, SessionEvent::TextDelta("a\nb\n".into()));
+    pump_forwarder().await;
+    for _ in 0..2 {
+        assert!(matches!(rx.recv().await, Some(UiEvent::TurnDone(_))));
+    }
+    forward_event(&pending, SessionEvent::LlmRoundEnd);
+    forward_event(&pending, SessionEvent::TextDelta("next".into()));
+    drop(pending);
+    forwarder.await.unwrap();
+
+    assert!(matches!(rx.recv().await, Some(UiEvent::Session(SessionEvent::LlmRoundEnd))));
+    assert!(
+        matches!(rx.recv().await, Some(UiEvent::Session(SessionEvent::TextDelta(t))) if t == "next"),
+        "round boundary consumes the owed separator"
+    );
+}
+
+/// 下一个 delta 自身以换行开头时不再叠加分隔符。
+#[tokio::test]
+async fn forwarder_shed_separator_not_doubled_when_next_starts_with_newline() {
+    let (tx, mut rx) = mpsc::channel::<UiEvent>(DELTA_MIN_CAPACITY + 1);
+    tx.send(UiEvent::TurnDone("sentinel".into())).await.unwrap();
+    let (pending, forwarder) = spawn_ui_event_forwarder(tx);
+
+    forward_event(&pending, SessionEvent::TextDelta("x\n".into()));
+    pump_forwarder().await;
+    assert!(matches!(rx.recv().await, Some(UiEvent::TurnDone(_))));
+    forward_event(&pending, SessionEvent::TextDelta("\nrest".into()));
+    drop(pending);
+    forwarder.await.unwrap();
+
+    assert!(
+        matches!(rx.recv().await, Some(UiEvent::Session(SessionEvent::TextDelta(t))) if t == "\nrest"),
+        "separator must not double when the next delta already starts with one"
+    );
+}
+
+/// 中途压缩(TranscriptReset)把消息列表整体替换后，完成回合的可靠
+/// AssistantFinal 仍须送达：修复地板要跟随重置后的消息数，而不是停留在
+/// 压缩前的越界下标（旧代码 `get(floor..)` 返回 None → 修复静默丢失，
+/// 被丢弃的 delta 行界就永久冻结）。
+#[tokio::test]
+async fn prompt_after_midrun_compaction_still_sends_completed_answer() {
+    use opencoder_llm::{LlmEvent, MockChatClient, Usage};
+
+    let mock = MockChatClient::new()
+        .push_script(vec![
+            LlmEvent::TextDelta("intermediate".into()),
+            LlmEvent::Completed {
+                text: "intermediate say".into(),
+                tool_calls: vec![opencoder_llm::CompletedToolCall {
+                    id: "c1".into(),
+                    name: "bash".into(),
+                    input: serde_json::json!({"command": "echo x"}),
+                }],
+                usage: Some(Usage {
+                    input_tokens: 100_000,
+                    output_tokens: 1,
+                    total_tokens: 100_001,
+                    ..Default::default()
+                }),
+            },
+        ])
+        // 压缩摘要调用（small_model 走同一个 client）。
+        .push_script(vec![LlmEvent::Completed {
+            text: "compaction summary".into(),
+            tool_calls: Vec::new(),
+            usage: None,
+        }])
+        // 压缩后的最终回答。
+        .push_script(vec![LlmEvent::Completed {
+            text: "final answer".into(),
+            tool_calls: Vec::new(),
+            usage: None,
+        }]);
+    let mut sess = SessionState::new(
+        "compact-final",
+        opencoder_core::resolve_agent("act").unwrap(),
+        {
+            let mut cfg = opencoder_core::Config::default();
+            cfg.compaction.context_threshold = 50_000;
+            cfg
+        },
+        Arc::new(mock),
+        std::env::temp_dir(),
+    );
+    // 预置一段长转录，使 run 开始时的 message_floor 远大于压缩后的消息数。
+    for i in 0..40 {
+        sess.messages.push(opencoder_core::Message::user(
+            "seed",
+            &format!("seed message {i} {}", "x".repeat(80)),
+        ));
+    }
+    let (evt_tx, mut evt_rx) = mpsc::channel::<UiEvent>(256);
+
+    assert!(
+        !process_cmd(
+            UiCmd::Prompt("question".into(), Vec::new()),
+            &mut sess,
+            &evt_tx
+        )
+        .await
+    );
+    let mut saw_reset = false;
+    let mut final_answer: Option<String> = None;
+    while let Ok(event) = evt_rx.try_recv() {
+        match event {
+            UiEvent::Session(SessionEvent::TranscriptReset(_)) => saw_reset = true,
+            UiEvent::AssistantFinal(text) => final_answer = Some(text),
+            _ => {}
+        }
+    }
+    assert!(saw_reset, "test premise: compaction actually ran mid-run");
+    assert_eq!(
+        final_answer.as_deref(),
+        Some("final answer"),
+        "reliable completed answer must survive the mid-run compaction"
+    );
+}
 
 #[test]
 fn completed_assistant_text_is_scoped_to_messages_added_by_current_turn() {

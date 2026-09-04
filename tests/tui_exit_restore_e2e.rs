@@ -229,3 +229,50 @@ fn normal_quit_absorbs_kitty_release_reports() {
         "kitty release reports must be absorbed on quit, never leaked into the          shell stream: {text:?}"
     );
 }
+
+/// Onboarding-wizard quit must absorb DELAYED kitty release reports.
+///
+/// Distinct from [`normal_quit_absorbs_kitty_release_reports`]: there the
+/// reports ride in the SAME write as the press, so even a drain-less exit
+/// often consumes them during pump teardown — the assert can pass by luck.
+/// The user-visible garbage (`0;5:3u` after an IME toggle) is the report
+/// arriving milliseconds AFTER the press: the unfixed wizard exits ~15ms
+/// after Ctrl+D, stranding the report in the tty queue for the next reader
+/// (the shell) to echo. The fresh-HOME spawn intentionally rides the
+/// onboarding path (no credentials configured); the wizard's Exit arm is the
+/// seam that historically skipped the quit drain entirely.
+#[test]
+fn onboarding_quit_absorbs_delayed_kitty_release_reports() {
+    if !(have("script") && have("pgrep")) {
+        eprintln!("skipping: script/pgrep not available");
+        return;
+    }
+    // Fresh HOME: no ~/.opencoder/config.json → build_ready_client fails →
+    // the onboarding wizard owns the terminal instead of the app loop.
+    let home = tempfile::tempdir().expect("home tmp");
+    let workdir = tempfile::tempdir().expect("workdir tmp");
+    let (_proc, captured, mut stdin) = spawn_tui(home.path(), workdir.path());
+
+    wait_for(&captured, b"\x1b[?1000h", "mouse-capture enable");
+    std::thread::sleep(Duration::from_millis(800)); // let the wizard frame settle
+
+    // Press alone, then the release 30ms later — beyond the unfixed exit
+    // (~15ms), well inside the fixed drain's 80ms quiet window.
+    stdin.write_all(b"\x04").expect("send Ctrl+D press");
+    std::thread::sleep(Duration::from_millis(30));
+    stdin
+        .write_all(b"\x1b[100;5:3u")
+        .expect("send delayed Ctrl+D release report");
+
+    wait_for(&captured, b"\x1b[?1049l", "restoration after wizard quit");
+    std::thread::sleep(Duration::from_millis(300));
+    assert_restored(&captured, "onboarding quit with delayed kitty release");
+
+    let binding = captured.lock().unwrap().clone();
+    let text = String::from_utf8_lossy(&binding);
+    assert!(
+        !text.contains(";5:3u"),
+        "delayed kitty release report must be absorbed by the onboarding exit \
+         drain, never stranded for the shell to echo: {text:?}"
+    );
+}

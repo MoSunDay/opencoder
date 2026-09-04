@@ -20,7 +20,8 @@ use anyhow::Result;
 use crossterm::cursor::SetCursorStyle;
 use crossterm::event::{
     DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture, KeyCode,
-    KeyEvent, KeyEventKind, ModifierKeyCode,
+    KeyEvent, KeyEventKind, KeyboardEnhancementFlags, ModifierKeyCode,
+    PushKeyboardEnhancementFlags,
 };
 use crossterm::execute;
 use crossterm::terminal::{
@@ -34,26 +35,22 @@ pub struct TerminalGuard;
 impl TerminalGuard {
     /// Put the terminal into TUI mode (raw + alt-screen + cursor style + mouse
     /// capture + Kitty keyboard enhancement + bracketed paste), install the
-    /// panic hook, and arm the process-wide signal guard.
+    /// panic hook, and arm the process-wide signal guard. The Kitty flags are
+    /// pushed strictly *after* entering the alternate screen — see
+    /// [`write_enter`] for why the ordering is load-bearing.
     pub fn enter() -> Result<Self> {
         enable_raw_mode()?;
+        // Compose the whole setup into one buffer and write it once — mirrors
+        // `restore` (also buffered), so two racing writers can never interleave
+        // partial escape sequences into terminal garbage.
+        let mut setup = String::new();
+        // Writing to a String is infallible.
+        let _ = write_enter(&mut setup);
         let mut stdout = std::io::stdout();
+        if let Err(e) = stdout
+            .write_all(setup.as_bytes())
+            .and_then(|_| stdout.flush())
         {
-            use crossterm::event::{KeyboardEnhancementFlags, PushKeyboardEnhancementFlags};
-            // Best-effort: terminals without the Kitty protocol ignore this.
-            let flags = KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
-                | KeyboardEnhancementFlags::REPORT_ALTERNATE_KEYS
-                | KeyboardEnhancementFlags::REPORT_EVENT_TYPES
-                | KeyboardEnhancementFlags::REPORT_ALL_KEYS_AS_ESCAPE_CODES;
-            let _ = execute!(stdout, PushKeyboardEnhancementFlags(flags));
-        }
-        if let Err(e) = execute!(
-            stdout,
-            EnterAlternateScreen,
-            SetCursorStyle::SteadyBar,
-            EnableMouseCapture,
-            EnableBracketedPaste,
-        ) {
             let _ = disable_raw_mode();
             return Err(e.into());
         }
@@ -216,8 +213,48 @@ pub(crate) fn consume_modifier_or_release(
     k.kind == KeyEventKind::Release
 }
 
+/// Kitty keyboard-enhancement flags requested while the TUI owns the terminal.
+/// Best-effort: terminals without the protocol ignore the push.
+fn kitty_enhancement_flags() -> KeyboardEnhancementFlags {
+    KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
+        | KeyboardEnhancementFlags::REPORT_ALTERNATE_KEYS
+        | KeyboardEnhancementFlags::REPORT_EVENT_TYPES
+        | KeyboardEnhancementFlags::REPORT_ALL_KEYS_AS_ESCAPE_CODES
+}
+
+/// Write the ANSI setup sequences (enter the alternate screen, cursor style,
+/// mouse capture, bracketed paste, push Kitty keyboard enhancement) to `w`.
+/// Single source of truth for what `TerminalGuard::enter` emits — factored out
+/// so the exact payload and ordering are unit-testable without a real TTY.
+/// Targets the unix ANSI path.
+///
+/// ORDERING IS LOAD-BEARING: the Kitty flags must be pushed *after*
+/// `EnterAlternateScreen` (and popped before `LeaveAlternateScreen` in
+/// [`write_restore`]). The keyboard-enhancement flag stack is maintained
+/// per-screen by spec-conforming terminals (kitty, ghostty, recent wezterm /
+/// foot): entering the alternate screen saves the main screen's stack and the
+/// alternate screen gets its own state, which is discarded on exit. Pushing on
+/// the main screen and popping inside the alternate screen therefore pops the
+/// *wrong* stack — the main screen keeps a live
+/// `REPORT_ALL_KEYS_AS_ESCAPE_CODES` entry after the app exits, and every key
+/// typed into the shell arrives as a raw `CSI <cp>;<mods>:<event> u` sequence
+/// (garbage like `0;5:3u`) with all keys apparently dead. Keeping the
+/// push/pop bracket strictly inside the alternate-screen session is balanced
+/// under both per-screen and global-stack terminal implementations.
+fn write_enter<W: fmt::Write>(w: &mut W) -> fmt::Result {
+    use crossterm::Command;
+    EnterAlternateScreen.write_ansi(w)?;
+    SetCursorStyle::SteadyBar.write_ansi(w)?;
+    EnableMouseCapture.write_ansi(w)?;
+    EnableBracketedPaste.write_ansi(w)?;
+    PushKeyboardEnhancementFlags(kitty_enhancement_flags()).write_ansi(w)?;
+    Ok(())
+}
+
 /// Write the ANSI restoration sequences (pop Kitty enhancement, disable mouse
-/// capture, disable bracketed paste, leave the alternate screen) to `w`. Single
+/// capture, disable bracketed paste, leave the alternate screen) to `w`. The
+/// pop precedes `LeaveAlternateScreen` so it lands on the same (alternate)
+/// screen the push in [`write_enter`] landed on — see there for why. Single
 /// source of truth for what `TerminalGuard::restore` emits — factored out so
 /// the exact payload is unit-testable without a real TTY. Targets the unix ANSI
 /// path.
@@ -451,6 +488,78 @@ mod tests {
         assert!(
             got.contains(&want_alt),
             "missing leave-alt-screen sequence: {got:?}"
+        );
+    }
+
+    /// The setup payload must enter the alternate screen BEFORE pushing the
+    /// Kitty keyboard-enhancement flags. Spec-conforming terminals (kitty,
+    /// ghostty, recent wezterm/foot) maintain the enhancement-flag stack
+    /// per-screen: a push issued on the main screen survives the alt-screen
+    /// round-trip, and after exit the shell receives raw `CSI u` sequences for
+    /// every keypress (`0;5:3u`-style garbage, keys dead). See `write_enter`.
+    #[test]
+    fn write_enter_pushes_kitty_only_inside_alt_screen() {
+        use crossterm::Command;
+
+        let mut want_alt = String::new();
+        let _ = EnterAlternateScreen.write_ansi(&mut want_alt);
+        let mut want_push = String::new();
+        let _ = PushKeyboardEnhancementFlags(kitty_enhancement_flags()).write_ansi(&mut want_push);
+        let mut want_mouse = String::new();
+        let _ = EnableMouseCapture.write_ansi(&mut want_mouse);
+        let mut want_paste = String::new();
+        let _ = EnableBracketedPaste.write_ansi(&mut want_paste);
+
+        let mut got = String::new();
+        write_enter(&mut got).unwrap();
+
+        let (alt_at, push_at) = (
+            got.find(&want_alt)
+                .unwrap_or_else(|| panic!("missing enter-alt-screen sequence: {got:?}")),
+            got.find(&want_push)
+                .unwrap_or_else(|| panic!("missing push-kitty sequence: {got:?}")),
+        );
+        assert!(
+            alt_at < push_at,
+            "Kitty push must come after entering the alternate screen: {got:?}"
+        );
+        assert!(
+            got.contains(&want_mouse),
+            "missing enable-mouse sequence: {got:?}"
+        );
+        assert!(
+            got.contains(&want_paste),
+            "missing enable-bracketed-paste sequence: {got:?}"
+        );
+    }
+
+    /// The restoration payload must pop the Kitty flags BEFORE leaving the
+    /// alternate screen, so the pop balances the push from `write_enter` on
+    /// the same (alternate) screen under per-screen-stack terminals. Popping
+    /// after `LeaveAlternateScreen` would pop the main screen's stack and
+    /// re-introduce the post-exit `CSI u` key leak.
+    #[test]
+    fn write_restore_pops_kitty_before_leaving_alt_screen() {
+        use crossterm::event::PopKeyboardEnhancementFlags;
+        use crossterm::Command;
+
+        let mut want_pop = String::new();
+        let _ = PopKeyboardEnhancementFlags.write_ansi(&mut want_pop);
+        let mut want_alt = String::new();
+        let _ = LeaveAlternateScreen.write_ansi(&mut want_alt);
+
+        let mut got = String::new();
+        write_restore(&mut got).unwrap();
+
+        let (pop_at, alt_at) = (
+            got.find(&want_pop)
+                .unwrap_or_else(|| panic!("missing pop-kitty sequence: {got:?}")),
+            got.find(&want_alt)
+                .unwrap_or_else(|| panic!("missing leave-alt-screen sequence: {got:?}")),
+        );
+        assert!(
+            pop_at < alt_at,
+            "Kitty pop must come before leaving the alternate screen: {got:?}"
         );
     }
 

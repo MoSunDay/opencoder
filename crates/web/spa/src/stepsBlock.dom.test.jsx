@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 // StepsBlock DOM drill-down: Turn → Step → Function call. Zero clicks render
-// the collapsed `❯ 2 Steps` summary plus Say in ONE assistant bubble. Opening
+// the collapsed `❯ 2 Steps` (or, once the turn has its own Say, the
+// `❯ Say(2 steps): {preview}` header) summary plus Say in ONE assistant
+// bubble. Opening
 // the Turn reveals Steps; opening a Step reveals Thinking + N Function calls;
 // opening that aggregate reveals call rows, and a call reveals its result.
 // Collapse-all works both ways: Ctrl+L on window and the `⤒ 收起`
@@ -167,10 +169,39 @@ describe('StepsContent three-level drill-down', () => {
     expect(tag).toBeTruthy();
     expect(tag.style.marginLeft).toBe('12px');
     expect(screen.queryByText('error')).toBeNull();
-    cleanup();
-    // Even stale reducer state cannot show Running beside an existing Say.
+  });
+
+  it('a Say without sayActive retires the running tag and the header becomes the Say row', () => {
+    // Even stale reducer state cannot show Running beside an existing Say:
+    // once a Say streams in, the header switches to the Say form and the
+    // running tag rides `sayActive` only (missing flag → no tag).
+    const running = stepsTurn();
     running.progressActive = true;
     mount([running, { kind: 'text', role: 'assistant', text: 'Say started' }]);
+    expect(screen.queryByText('running')).toBeNull();
+    expect(screen.getByText('❯ Say(2 steps): Say started')).toBeTruthy();
+    expect(screen.queryByText('❯ 2 Steps')).toBeNull();
+  });
+
+  it('keeps the running tag ON the Say row while sayActive (12px gap)', () => {
+    const streaming = stepsTurn();
+    mount([
+      { ...streaming, sayStreaming: true },
+      { kind: 'text', role: 'assistant', text: 'partial answer line one\nmore below' },
+    ]);
+    const tag = screen.getByText('running');
+    expect(tag).toBeTruthy();
+    expect(tag.style.marginLeft).toBe('12px');
+    expect(screen.getByText('❯ Say(2 steps): partial answer line one')).toBeTruthy();
+    expect(screen.queryByText('error')).toBeNull();
+  });
+
+  it('shows the Say-row error tag once running settles and a call failed', () => {
+    const errored = stepsTurn();
+    errored.steps[0].calls[0].isError = true;
+    mount([errored, { kind: 'text', role: 'assistant', text: 'finished with a failure' }]);
+    expect(screen.getByText('❯ Say(2 steps): finished with a failure')).toBeTruthy();
+    expect(screen.getByText('error')).toBeTruthy();
     expect(screen.queryByText('running')).toBeNull();
   });
 
@@ -251,10 +282,54 @@ describe('StepsContent three-level drill-down', () => {
   });
 
   it('renders `N Steps + Say` as one visual Turn bubble', () => {
-    const { container } = mount([stepsTurn(), { kind: 'text', role: 'assistant', text: 'all done here' }]);
+    const { container } = mount([
+      stepsTurn(),
+      { kind: 'text', role: 'assistant', text: 'all done here\nand the details follow' },
+    ]);
     expect(container.querySelectorAll('.ant-bubble')).toHaveLength(1);
-    const group = screen.getByText('❯ 2 Steps');
-    const say = screen.getByText('all done here');
+    // The Say merged INTO the header: label switches to the Say form with
+    // the step count and the Say's first-line preview. The body below skips
+    // that duplicated first line (③) — only the remaining lines render.
+    const group = screen.getByText('❯ Say(2 steps): all done here');
+    const say = screen.getByText('and the details follow');
     expect(group.compareDocumentPosition(say) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+});
+
+// ② 头部行与正文的真实空行间距 + ③ 正文与头部 preview 的首行去重。
+// 口径见 sayText.js：头部 preview 与被跳过的首行共用同一份拼接。
+describe('Say body spacing & first-line dedup (② ③)', () => {
+  const spacingWrap = (container) => Array.from(container.querySelectorAll('div'))
+    .find((el) => el.style.marginTop === '16px');
+
+  it('multi-line Say: body skips the preview-duplicated first line and keeps a 16px gap below the header', () => {
+    const { container } = mount([
+      stepsTurn(),
+      { kind: 'text', role: 'assistant', text: 'line one\nline two\nline three' },
+    ]);
+    expect(screen.getByText('❯ Say(2 steps): line one')).toBeTruthy();
+    // 首行已由头部渲染，正文不再重复。
+    expect(screen.queryByText('line one')).toBeNull();
+    // 其余行照常渲染（testing-library 会把换行归一化为空格）。
+    expect(screen.getByText('line two line three')).toBeTruthy();
+    // ② 真实空行间距：正文块 marginTop 16px（TUI 头部后插一空行的对齐）。
+    const wrap = spacingWrap(container);
+    expect(wrap).toBeTruthy();
+    expect(wrap.textContent).toContain('line two');
+  });
+
+  it('single-line Say: no body block at all — no leftover spacing or empty node', () => {
+    const { container } = mount([
+      stepsTurn(),
+      { kind: 'text', role: 'assistant', text: 'all done here' },
+    ]);
+    expect(screen.getByText('❯ Say(2 steps): all done here')).toBeTruthy();
+    // 单行 Say 与 preview 一字不差 → 正文整块不渲染。
+    expect(screen.queryByText('all done here')).toBeNull();
+    // 无残留间距节点（没有任何 16px 的正文块包装）。
+    expect(spacingWrap(container)).toBeUndefined();
+    // Turn 泡内没有任何 Typography 段落 —— 不残留空文本块。
+    const bubble = screen.getByText('❯ Say(2 steps): all done here').closest('.ant-bubble');
+    expect(bubble.querySelectorAll('.ant-typography')).toHaveLength(0);
   });
 });

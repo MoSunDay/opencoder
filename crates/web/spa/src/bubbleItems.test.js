@@ -59,6 +59,28 @@ describe('itemsFromTurns', () => {
     expect(items[1].key).toBe('assistant-turn:1');
     expect(items[1].content.steps).toEqual(turn.steps);
     expect(items[1].content.say).toEqual([]);
+    // sayActive is always a boolean: false when no steps part carries the
+    // sayStreaming flag (snapshot replay turns never do).
+    expect(items[1].content.sayActive).toBe(false);
+  });
+
+  it('propagates sayActive from the streaming steps part while progressActive still freezes at its Say', () => {
+    const streaming = {
+      kind: 'steps', role: 'assistant', progressActive: false, sayStreaming: true,
+      steps: [{ thinking: 't', calls: [] }],
+    };
+    const say = { kind: 'text', role: 'assistant', text: 'partial' };
+    const items = itemsFromTurns([streaming, say]);
+    expect(items[0].content.sayActive).toBe(true);
+    // The hasSay → false progressActive override stays untouched: running
+    // ownership MOVED to the Say row (sayActive), progress stays frozen.
+    expect(items[0].content.progressActive).toBe(false);
+    // A live (still-working, say-less) ladder keeps progressActive true and
+    // sayActive false.
+    const armed = { kind: 'steps', role: 'assistant', progressActive: true, steps: [] };
+    const armedItems = itemsFromTurns([armed]);
+    expect(armedItems[0].content.progressActive).toBe(true);
+    expect(armedItems[0].content.sayActive).toBe(false);
   });
 
   it('ends the run at its Say: steps + presentation parts + Say are ONE assistant Turn item', () => {

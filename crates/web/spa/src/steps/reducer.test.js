@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { emptyStream, reduceFrame, turnsFromMessages, withUserTurn } from '../reduce.js';
+import { clearSayStreaming, markSayStreaming } from './reducer.js';
 
 describe('steps ladder (live, mirror of chat_steps.rs)', () => {
   const startCall = (id, name, at) => reduceFrame(
@@ -401,4 +402,94 @@ it('live SSE and snapshot replay produce the same Turn/Step/call hierarchy', () 
   expect(hierarchy(live.turns)[0]).toHaveLength(1);
   expect(hierarchy(live.turns)[1]).toHaveLength(2);
   expect(live.turns.every((t) => t.progressActive !== true)).toBe(true);
+});
+
+describe('sayStreaming lifecycle (Say-row running ownership)', () => {
+  const streamRound = () => {
+    let s = emptyStream();
+    s = reduceFrame(s, { event: 'reasoning_delta', data: { text: 'think' } }, 1);
+    s = reduceFrame(s, { event: 'tool_start', data: { id: 'a', name: 'bash', input: {} } }, 2);
+    s = reduceFrame(s, { event: 'tool_end', data: { id: 'a', name: 'bash', output: 'x', is_error: false } }, 3);
+    return s;
+  };
+
+  it('(s1) the first Say chunk marks the ladder it closes; later chunks keep the flag', () => {
+    const s = streamRound();
+    expect(s.turns[0].sayStreaming).toBeFalsy();
+    let t = reduceFrame(s, { event: 'text_delta', data: { text: 'hello' } }, 4);
+    expect(t.turns[0].sayStreaming).toBe(true);
+    expect(t.turns[1].sayStreaming).toBeFalsy(); // the Say turn itself is not a steps turn
+    t = reduceFrame(t, { event: 'text_delta', data: { text: ' world' } }, 5);
+    expect(t.turns[0].sayStreaming).toBe(true);
+    // Idempotent marking: no second write.
+    expect(t.turns[0].progressActive).toBe(false);
+  });
+
+  it('(s2) fresh-ladder reasoning below the Say clears the flag (appendThinkDelta new-turn branch)', () => {
+    let s = streamRound();
+    s = reduceFrame(s, { event: 'text_delta', data: { text: 'first say' } }, 4);
+    expect(s.turns[0].sayStreaming).toBe(true);
+    s = reduceFrame(s, { event: 'reasoning_delta', data: { text: 'next ladder' } }, 5);
+    expect(s.turns).toHaveLength(3); // [steps, say, steps]
+    expect(s.turns[0].sayStreaming).toBe(false);
+    expect(s.turns[2].sayStreaming).toBeFalsy();
+  });
+
+  it('(s2b) a fresh ladder from a tool_start below the Say clears the flag too (appendStepCall)', () => {
+    let s = streamRound();
+    s = reduceFrame(s, { event: 'text_delta', data: { text: 'first say' } }, 4);
+    expect(s.turns[0].sayStreaming).toBe(true);
+    s = reduceFrame(s, { event: 'tool_start', data: { id: 'b', name: 'read', input: {} } }, 5);
+    expect(s.turns).toHaveLength(3);
+    expect(s.turns[0].sayStreaming).toBe(false);
+    expect(s.turns[2].sayStreaming).toBeFalsy();
+  });
+
+  it('(s3) done and error clear the flag — no running survives a terminal boundary', () => {
+    let s = streamRound();
+    s = reduceFrame(s, { event: 'text_delta', data: { text: 'first say' } }, 4);
+    expect(s.turns[0].sayStreaming).toBe(true);
+    let t = reduceFrame(s, { event: 'done', data: {} }, 5);
+    expect(t.turns[0].sayStreaming).toBe(false);
+    t = reduceFrame(s, { event: 'error', data: { error: 'boom' } }, 5);
+    expect(t.turns[0].sayStreaming).toBe(false);
+  });
+
+  it('(s4) same-sub-turn appends without a Say never touch the flag', () => {
+    let s = emptyStream();
+    s = reduceFrame(s, { event: 'reasoning_delta', data: { text: 'a' } }, 1);
+    expect(s.turns[0].sayStreaming).toBeFalsy();
+    // Same ladder, next step (new reasoning run): still no Say, no flag.
+    s = reduceFrame(s, { event: 'reasoning_delta', data: { text: 'b' } }, 2);
+    expect(s.turns).toHaveLength(1);
+    expect(s.turns[0].sayStreaming).toBeFalsy();
+    // Same ladder, parallel call: still untouched.
+    s = reduceFrame(s, { event: 'tool_start', data: { id: 'x', name: 'bash', input: {} } }, 2);
+    expect(s.turns).toHaveLength(1);
+    expect(s.turns[0].sayStreaming).toBeFalsy();
+  });
+
+  it('(s5) mark/clear are copy-on-write, idempotent, and flag-less arrays pass through', () => {
+    const plain = [{ kind: 'steps', role: 'assistant', progressActive: true, steps: [] }];
+    const marked = markSayStreaming(plain);
+    expect(marked).not.toBe(plain);
+    expect(marked[0].sayStreaming).toBe(true);
+    expect(plain[0].sayStreaming).toBeUndefined(); // input untouched
+    expect(markSayStreaming(marked)).toBe(marked); // already marked → same array
+    const cleared = clearSayStreaming(marked);
+    expect(cleared).not.toBe(marked);
+    expect(cleared[0].sayStreaming).toBe(false);
+    expect(clearSayStreaming(cleared)).toBe(cleared); // no flag → same array
+    expect(clearSayStreaming(plain)).toBe(plain);
+    // markSayStreaming targets the FIRST steps turn at/after the floor — a
+    // ladder below an older Say, never the older turn itself.
+    const two = [
+      { kind: 'steps', role: 'assistant', progressActive: false, sayStreaming: false, steps: [] },
+      { kind: 'text', role: 'assistant', text: 'say one' },
+      { kind: 'steps', role: 'assistant', progressActive: true, steps: [] },
+    ];
+    const markedSecond = markSayStreaming(two);
+    expect(markedSecond[0].sayStreaming).toBe(false);
+    expect(markedSecond[2].sayStreaming).toBe(true);
+  });
 });

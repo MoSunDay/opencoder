@@ -171,6 +171,24 @@ pub(crate) fn span_text(lines: &[Line<'static>]) -> String {
     out
 }
 
+/// The insert floor for a NEW ladder: when a turn-boundary blank Marker sits
+/// exactly at `floor`, insert BELOW it — the new turn's ladder must not slip
+/// between the previous Say's body and its boundary blank (that stranded the
+/// stale marker mid-turn and stacked a second blank under the pair).
+/// Non-blank markers (errors, system lines) keep the ladder below them.
+fn insert_floor(blocks: &[ChatBlock], floor: usize) -> usize {
+    match blocks.get(floor) {
+        Some(ChatBlock::Marker(lines))
+            if lines
+                .iter()
+                .all(|l| l.spans.iter().all(|s| s.content.trim().is_empty())) =>
+        {
+            floor + 1
+        }
+        _ => floor,
+    }
+}
+
 /// Stream one reasoning delta straight into the ladder — thinking is a
 /// structural part of a step, never a top-level block. The first delta after
 /// one or more calls opens a new step; later deltas append there, and every
@@ -199,15 +217,16 @@ pub(crate) fn append_step_thinking_delta(
     let (group_idx, inserted_at) = match found {
         Some(idx) => (idx, None),
         None => {
+            let at = insert_floor(blocks, floor);
             blocks.insert(
-                floor,
+                at,
                 ChatBlock::StepGroup {
                     steps: Vec::new(),
                     open: false,
                     progress_active: should_show_progress,
                 },
             );
-            (floor, Some(floor))
+            (at, Some(at))
         }
     };
     if let ChatBlock::StepGroup {
@@ -264,8 +283,9 @@ pub(crate) fn merge_turn_call(
         }
         return None;
     }
-    blocks.insert(floor, single_step_group(call, thinking));
-    Some(floor)
+    let at = insert_floor(blocks, floor);
+    blocks.insert(at, single_step_group(call, thinking));
+    Some(at)
 }
 
 /// Materialize accumulated reasoning only when a step is visible.

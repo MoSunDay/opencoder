@@ -30,7 +30,7 @@ pub(crate) const PLAN_HEADER: &str = "\u{2576}\u{2500} plan \u{2500}\u{2574}";
 /// Body lines of streaming assistant `raw`, mirroring `flatten_with`: drop the
 /// single trailing empty element from a terminating newline (interior blanks kept).
 /// Shared by `collect_headers` and `flatten_with` so they never diverge (A2/A3).
-fn assistant_rows(raw: &str) -> Vec<&str> {
+pub(crate) fn assistant_rows(raw: &str) -> Vec<&str> {
     let mut rows: Vec<&str> = raw.split('\n').collect();
     if rows.last().is_some_and(|s| s.is_empty()) {
         rows.pop();
@@ -45,10 +45,11 @@ pub use types::*;
 #[path = "chat_helpers.rs"]
 mod helpers;
 pub use helpers::block_text;
-pub(crate) use helpers::{push_duration_span, short, summarize};
+pub(crate) use helpers::{push_duration_span, short, summarize, tool_output_lines};
 
 #[path = "chat_step_render.rs"]
 mod step_render;
+pub(crate) use step_render::SayHeader;
 #[path = "chat_steps.rs"]
 mod steps;
 
@@ -56,6 +57,8 @@ mod steps;
 mod compaction_block;
 #[path = "chat_context.rs"]
 mod context;
+#[path = "chat_flatten.rs"]
+mod flatten;
 #[path = "chat_headers.rs"]
 mod headers;
 #[path = "chat_sidecar.rs"]
@@ -154,12 +157,9 @@ impl ChatView {
                 } else {
                     theme::muted()
                 };
-                let clean_output = sanitize_multiline(output);
-                let out: Vec<Line<'static>> = clean_output
-                    .lines()
-                    .take(TOOL_OUTPUT_LINES)
-                    .map(|l| Line::from(Span::styled(format!("  {l}"), Style::default().fg(color))))
-                    .collect();
+                // Shared capture: trailing blank lines are dropped so the
+                // structural blank after the expanded output stays the only one.
+                let out = tool_output_lines(output, color);
                 // Route by id: walk groups newest-first, steps newest-first,
                 // calls newest-first, so parallel calls each land in their
                 // own slot.
@@ -323,7 +323,12 @@ impl ChatView {
                 // final Say round) folds its pending Thinking into a call-less
                 // step — thinking never survives outside the ladder.
                 self.flush_pending_thinking();
-                self.blocks.push(ChatBlock::Marker(vec![Line::from("")]));
+                // Exactly one blank after the turn (User:-block parity): a
+                // tool-final turn ends on its ladder's own trailing blank, so
+                // the boundary marker must not stack a second one.
+                if !self.last_block_ends_blank() {
+                    self.blocks.push(ChatBlock::Marker(vec![Line::from("")]));
+                }
             }
             SessionEvent::Error(e) => {
                 self.llm_round_started_at_ms = None;
@@ -542,196 +547,6 @@ impl ChatView {
                 _ => {}
             }
         }
-    }
-
-    /// Flatten all blocks into a single `Vec<Line>` for rendering, using
-    /// `anim_tick` advances running subagent and step-progress spinners. Delegated to
-    /// by `flatten()` (which passes `0`) for non-render callers (selection,
-    /// scroll-counting, tests) — line counts are identical across tick values,
-    /// so hit-rects and selection math stay aligned with the live render.
-    pub fn flatten_with(&self, anim_tick: u32, now_ms: i64) -> Vec<Line<'static>> {
-        let mut out = Vec::with_capacity(self.blocks.len() * 2);
-        for block in self.blocks.iter() {
-            match block {
-                ChatBlock::Marker(lines) => out.extend(lines.iter().cloned()),
-                ChatBlock::User { rendered } => {
-                    out.push(Line::from(Span::styled(
-                        ROLE_USER_HEADER,
-                        Style::default()
-                            .fg(theme::user_color())
-                            .add_modifier(Modifier::BOLD),
-                    )));
-                    out.extend(types::indented(rendered, 4));
-                }
-                ChatBlock::Assistant {
-                    raw,
-                    rendered,
-                    done,
-                } => {
-                    // Visual `say:` header — mirrors the `user:` marker on prompts.
-                    out.push(Line::from(Span::styled(
-                        ROLE_SAY_HEADER,
-                        Style::default()
-                            .fg(theme::ok_color())
-                            .add_modifier(Modifier::BOLD),
-                    )));
-                    let indent = Span::raw("    ");
-                    if *done {
-                        out.extend(types::indented(rendered, 4));
-                    } else {
-                        // Mirrors `flush_code` (markdown.rs) and
-                        // `collect_headers`: split the raw stream on `\n` and
-                        // drop only the single trailing empty element from a
-                        // terminating newline (interior blanks preserved).
-                        let rows = assistant_rows(raw);
-                        for l in rows {
-                            let l = l.strip_suffix('\r').unwrap_or(l);
-                            out.push(Line::from(vec![indent.clone(), Span::raw(l.to_string())]));
-                        }
-                    }
-                }
-                ChatBlock::Thinking {
-                    text, collapsed, ..
-                } => {
-                    out.extend(render_collapsible(
-                        "\u{1f4ad}",
-                        "Thinking",
-                        text,
-                        *collapsed,
-                        Style::default()
-                            .fg(theme::pink())
-                            .add_modifier(Modifier::BOLD),
-                        Style::default().fg(theme::muted()),
-                    ));
-                }
-                ChatBlock::Compaction {
-                    text, collapsed, ..
-                } => {
-                    out.extend(render_collapsible(
-                        "\u{1f4dd}",
-                        "Compaction",
-                        text,
-                        *collapsed,
-                        Style::default().fg(theme::compaction_color()),
-                        Style::default().fg(theme::compaction_color()),
-                    ));
-                }
-                ChatBlock::StepGroup {
-                    steps,
-                    open,
-                    progress_active,
-                } => {
-                    step_render::flatten_step_group(
-                        &mut out,
-                        *open,
-                        *progress_active,
-                        steps,
-                        anim_tick,
-                    );
-                }
-                ChatBlock::Image { filename, rendered } => {
-                    out.push(Line::from(Span::styled(
-                        format!("[image: {filename}]"),
-                        Style::default().fg(theme::muted()),
-                    )));
-                    if rendered.is_empty() {
-                        out.push(Line::from(Span::styled(
-                            "  (unable to render)",
-                            Style::default().fg(theme::muted()),
-                        )));
-                    } else {
-                        out.extend(types::indented(rendered, 4));
-                    }
-                    out.push(Line::from(""));
-                }
-                ChatBlock::Plan { rendered, .. } => {
-                    out.push(Line::from(Span::styled(
-                        PLAN_HEADER,
-                        Style::default()
-                            .fg(theme::warn_color())
-                            .add_modifier(Modifier::BOLD),
-                    )));
-                    out.extend(types::indented(rendered, 2));
-                    out.push(Line::from(""));
-                }
-                ChatBlock::Subagent {
-                    kind,
-                    prompt,
-                    view,
-                    done,
-                    ok,
-                    cancelled,
-                    summary,
-                    started_at_ms,
-                    elapsed_ms,
-                    ..
-                } => {
-                    let step_count = view
-                        .blocks
-                        .iter()
-                        .filter_map(|b| match b {
-                            ChatBlock::StepGroup { steps, .. } => Some(steps.len()),
-                            _ => None,
-                        })
-                        .sum::<usize>();
-                    // Status badge: animated spinner/check/cross/cancelled +
-                    // word. The running spinner uses the live anim_tick.
-                    let (mark, mark_color, status_word) = if *cancelled {
-                        ("\u{2298}", theme::muted(), "cancelled")
-                    } else if *done {
-                        if *ok {
-                            ("\u{2714}", theme::ok_color(), "done")
-                        } else {
-                            ("\u{2718}", theme::err_color(), "failed")
-                        }
-                    } else {
-                        (
-                            SPINNER[(anim_tick as usize) % SPINNER.len()],
-                            theme::warn_color(),
-                            "running",
-                        )
-                    };
-                    let mut spans = vec![
-                        Span::styled(
-                            "\u{2937} subagent ",
-                            Style::default()
-                                .fg(theme::info_color())
-                                .add_modifier(Modifier::BOLD),
-                        ),
-                        Span::styled(format!("[{kind}] "), Style::default().fg(theme::accent())),
-                        Span::styled(prompt.clone(), Style::default().fg(theme::muted())),
-                        Span::raw(" "),
-                        Span::styled(
-                            format!("{mark} {status_word}, {step_count} Steps"),
-                            Style::default().fg(mark_color),
-                        ),
-                    ];
-                    push_duration_span(&mut spans, *started_at_ms, *elapsed_ms, now_ms);
-                    spans.push(Span::styled(
-                        " [\u{2192} view]",
-                        Style::default().fg(theme::muted()),
-                    ));
-                    if *done && !summary.is_empty() {
-                        spans.push(Span::styled(
-                            format!("  {summary}"),
-                            Style::default().fg(if *cancelled || *ok {
-                                theme::muted()
-                            } else {
-                                theme::err_color()
-                            }),
-                        ));
-                    }
-                    out.push(Line::from(spans));
-                }
-            }
-        }
-        out
-    }
-
-    /// Non-animated flatten for callers that don't render (selection extract,
-    /// scroll-counting, tests). Line counts match `flatten_with` exactly.
-    pub fn flatten(&self) -> Vec<Line<'static>> {
-        self.flatten_with(0, opencoder_core::message::now_ms())
     }
 
     /// Mark the subagent block matching `id` as done. If no block exists

@@ -184,3 +184,48 @@ fn normal_quit_restores_terminal() {
     std::thread::sleep(Duration::from_millis(300));
     assert_restored(&captured, "normal quit");
 }
+
+/// Normal quit while a Kitty-keyboard-protocol terminal is still reporting
+/// key events. The quitting keypress (here Ctrl+D) is physically released
+/// milliseconds after the press; under REPORT_EVENT_TYPES +
+/// REPORT_ALL_KEYS_AS_ESCAPE_CODES the terminal sends those releases as
+/// `CSI ..;1:3u` reports. If opencoder exits without absorbing them, the
+/// stranded bytes are echoed by the shell at the prompt as literal garbage
+/// (`442;1:3u`, `0;1:3u`) — visible only without tmux (tmux discards the
+/// pane's leftover input instead).
+///
+/// This pins the observable contract: the exit still emits the full
+/// restoration payload, and no CSI-u key-report residue trails the exit (with
+/// the fix the reports are popped-then-drained; without it they would surface
+/// through a real shell echoing the tty leftovers).
+#[test]
+fn normal_quit_absorbs_kitty_release_reports() {
+    if !(have("script") && have("pgrep")) {
+        eprintln!("skipping: script/pgrep not available");
+        return;
+    }
+    let home = tempfile::tempdir().expect("home tmp");
+    let workdir = tempfile::tempdir().expect("workdir tmp");
+    let (_proc, captured, mut stdin) = spawn_tui(home.path(), workdir.path());
+
+    wait_for(&captured, b"\x1b[?1000h", "mouse-capture enable");
+    std::thread::sleep(Duration::from_millis(800)); // let the first frame settle
+
+    // Ctrl+D press followed immediately by the release reports a Kitty-
+    // protocol terminal emits for the same physical keys (D release, then
+    // the Ctrl modifier releases).
+    stdin
+        .write_all(b"\x04\x1b[100;1:3u\x1b[57442;1:3u\x1b[57441;1:3u")
+        .expect("send Ctrl+D + simulated kitty release reports");
+
+    wait_for(&captured, b"\x1b[?1049l", "restoration after quit");
+    std::thread::sleep(Duration::from_millis(300));
+    assert_restored(&captured, "normal quit with kitty releases");
+
+    let binding = captured.lock().unwrap().clone();
+    let text = String::from_utf8_lossy(&binding);
+    assert!(
+        !text.contains(";1:3u"),
+        "kitty release reports must be absorbed on quit, never leaked into the          shell stream: {text:?}"
+    );
+}

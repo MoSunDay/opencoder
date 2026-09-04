@@ -15,8 +15,8 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
 use crate::chat::{
-    coalesce_steps, short, single_step_group, summarize, ChatBlock, ChatView, Step, ToolCall,
-    TOOL_OUTPUT_LINES,
+    coalesce_steps, short, single_step_group, summarize, tool_output_lines, ChatBlock, ChatView,
+    Step, ToolCall,
 };
 use crate::terminal_text::{sanitize_multiline, sanitize_single_line};
 use crate::theme;
@@ -198,14 +198,7 @@ pub(super) fn replay_one(
                     } else {
                         theme::muted()
                     };
-                    let clean_content = sanitize_multiline(content);
-                    let out: Vec<Line<'static>> = clean_content
-                        .lines()
-                        .take(TOOL_OUTPUT_LINES)
-                        .map(|l| {
-                            Line::from(Span::styled(format!("  {l}"), Style::default().fg(color)))
-                        })
-                        .collect();
+                    let out = tool_output_lines(content, color);
                     let target = chat.blocks.iter().enumerate().rev().find_map(|(gi, blk)| {
                         if let ChatBlock::StepGroup { steps, .. } = blk {
                             steps

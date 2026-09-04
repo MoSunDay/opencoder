@@ -118,7 +118,39 @@ fn classify_spans(spans: &[Span<'_>]) -> Option<(LineKind, usize)> {
     if is_calls_row(spans) {
         return Some((LineKind::CallsRow, 0));
     }
+    if is_say_pair_header(spans) {
+        return Some((LineKind::RoleHeader, 0));
+    }
     None
+}
+
+/// `true` for the merged StepGroup+Say pair header: one styled
+/// `{❯|▸} Say(n step{s}): ` label span (count digits, singular/plural),
+/// optionally followed by the preview and `⠋ running ` spinner spans.
+/// Navigation chrome like the standalone role headers — the Say body below
+/// carries the same first line, so dropping the row in copy mode loses
+/// nothing. A markdown row could only collide by literally opening with the
+/// glyph + `Say(` label as its entire first span.
+fn is_say_pair_header(spans: &[Span<'_>]) -> bool {
+    let Some(first) = spans.first() else {
+        return false;
+    };
+    let t = first.content.as_ref();
+    let Some(body) = t
+        .strip_prefix(GROUP_ROW_OPEN_PREFIX)
+        .or_else(|| t.strip_prefix(GROUP_ROW_CLOSED_PREFIX))
+    else {
+        return false;
+    };
+    let Some(inner) = body.strip_prefix("Say(") else {
+        return false;
+    };
+    let Some((count, tail)) = inner.split_once(" step") else {
+        return false;
+    };
+    !count.is_empty()
+        && count.bytes().all(|b| b.is_ascii_digit())
+        && (tail == "): " || tail == "s): ")
 }
 
 /// Match one fold-glyph count row — a single label span `{❯|▸} {count}{unit}`

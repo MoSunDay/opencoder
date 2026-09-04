@@ -108,8 +108,10 @@ function decide(messages, hasTools) {
   }
   // last.role === 'user' (a fresh prompt or a consumed steer boundary).
   if (any.includes('STEER-B')) {
-    // sleep widens B's running-tag window so the browser can catch the split.
-    return { kind: 'tool', command: 'sleep 4 && echo steer-b ' + nonce, gap: 300, tag: 'tool-steer-b' };
+    // sleep widens B's running-tag window so the browser can catch the split:
+    // 8s comfortably covers the steer-admit latency (~3s) + the acceptance
+    // script's post-steer assertions before c2 polls for the running tag.
+    return { kind: 'tool', command: 'sleep 8 && echo steer-b ' + nonce, gap: 300, tag: 'tool-steer-b' };
   }
   if (any.includes('SLOW')) {
     return { kind: 'say', text: 'Slowly done. 慢速完成', chunks: 10, delay: 600, tag: 'slow-final' };

@@ -228,18 +228,19 @@ fn consecutive_turns_render_steps_then_say_each() {
         .collect();
     let joined = text.join("\n");
     assert!(
-        joined.contains("2 Steps"),
-        "turn one renders its collapsed N Steps row: {joined:?}"
+        joined.contains("Say(2 steps): first say"),
+        "turn one renders its merged collapsed header: {joined:?}"
     );
     assert!(
-        joined.contains("1 Step"),
-        "turn two renders its own collapsed row: {joined:?}"
+        joined.contains("Say(1 step): second say"),
+        "turn two renders its own merged header: {joined:?}"
     );
-    // Order contract: each turn's Steps row precedes that turn's Say.
-    let steps1 = joined.find("2 Steps").unwrap();
+    // Order contract: each turn's merged header precedes that turn's Say
+    // body; the second prompt sits between the two pairs.
+    let steps1 = joined.find("Say(2 steps)").unwrap();
     let say1 = joined.find("first say").unwrap();
     let prompt2 = joined.find("second prompt").unwrap();
-    let steps2 = joined.find("1 Step").unwrap();
+    let steps2 = joined.find("Say(1 step)").unwrap();
     let say2 = joined.find("second say").unwrap();
     assert!(steps1 < say1 && say1 < prompt2 && prompt2 < steps2 && steps2 < say2);
 }

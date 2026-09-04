@@ -16,8 +16,8 @@ pub mod ts_registry;
 pub mod types;
 
 pub use brain_types::{
-    BrainCapabilityDetail, BrainCapabilityRecord, BrainEngInputRecord, BrainVectorHit,
-    BrainVectorWrite,
+    BrainCapabilityDetail, BrainCapabilityRecord, BrainEngInputRecord, BrainPlanRecord,
+    BrainVectorHit, BrainVectorWrite,
 };
 pub use bundle::{
     export_bundle, import_bundle, read_bundle, write_bundle, SessionBundle, SubagentBundle,
@@ -38,9 +38,9 @@ pub use team_types::{TeamTopicRunRecord, TEAM_RUN_EXECUTING, TEAM_RUN_FINISHED};
 pub use todo_types::{TodoEventRecord, TodoItemRecord, TodoWorkflowRecord, TodoWorkflowSummary};
 pub use ts_registry::{TsRecord, TsRegistry};
 pub use types::{
-    DagDefRecord, DagEventRecord, DagRunRecord, Delivery, EventKind, ImportReport, MessageRow,
-    NodeRecord, NodeTaskRecord, NodeTaskStatus, SessionEventRecord, SessionFilter, SessionInput,
-    SessionListItem, SessionMeta, SessionPatch, SubagentStatus, SubagentTaskRecord, TASK_TYPE_NODE,
-    TASK_TYPE_PARENT, TASK_TYPE_PROJECT, TASK_TYPE_SUBAGENT, TASK_TYPE_TODO,
+    ConvergedDagRun, DagDefRecord, DagEventRecord, DagRunRecord, Delivery, EventKind, ImportReport,
+    MessageRow, NodeRecord, NodeTaskRecord, NodeTaskStatus, SessionEventRecord, SessionFilter,
+    SessionInput, SessionListItem, SessionMeta, SessionPatch, SubagentStatus, SubagentTaskRecord,
+    TASK_TYPE_NODE, TASK_TYPE_PARENT, TASK_TYPE_PROJECT, TASK_TYPE_SUBAGENT, TASK_TYPE_TODO,
     TASK_TYPE_TODO_WORKFLOW,
 };

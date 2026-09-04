@@ -6,7 +6,7 @@ use super::chat_tables::{
 };
 use super::team_runs::{CREATE_INDEX_TEAM_TOPIC_RUNS_TOPIC, CREATE_TEAM_TOPIC_RUNS};
 
-const SCHEMA_VERSION: i64 = 17;
+const SCHEMA_VERSION: i64 = 18;
 
 // Order invariant: busy_timeout must precede any locking statement, and
 // synchronous=NORMAL must be applied BEFORE journal_mode=WAL. Switching a
@@ -203,6 +203,21 @@ CREATE TABLE IF NOT EXISTS brain_vectors (
 /// the brain catalog's `get`/`list` reads off full table scans.
 const CREATE_INDEX_BRAIN_ENG_INPUTS: &str =
     "CREATE INDEX IF NOT EXISTS idx_brain_eng_inputs_cap ON brain_eng_inputs(capability_id)";
+/// Decision-tree plans over the capability library (v18): the brain's
+/// dynamic planner stores one row per generated tree; dispatch looks the
+/// newest row for a situation digest up to reuse it (the digest + created_at
+/// index backs that "latest per digest" scan).
+const CREATE_BRAIN_PLANS: &str = "\
+CREATE TABLE IF NOT EXISTS brain_plans (
+  id TEXT PRIMARY KEY,
+  situation TEXT NOT NULL,
+  situation_digest TEXT NOT NULL,
+  chat_model TEXT NOT NULL,
+  tree_json TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+)";
+const CREATE_INDEX_BRAIN_PLANS_DIGEST: &str =
+    "CREATE INDEX IF NOT EXISTS idx_brain_plans_digest ON brain_plans(situation_digest, created_at)";
 
 /// DAG workflow tables (v16): definitions, dispatched runs, node-uploaded
 /// events. No FK constraints on purpose (same policy as the project tables):
@@ -336,6 +351,7 @@ async fn bootstrap_tx(conn: &Connection) -> Result<()> {
     conn.execute(CREATE_BRAIN_CAPABILITIES, ()).await?;
     conn.execute(CREATE_BRAIN_ENG_INPUTS, ()).await?;
     conn.execute(CREATE_BRAIN_VECTORS, ()).await?;
+    conn.execute(CREATE_BRAIN_PLANS, ()).await?;
     conn.execute(CREATE_PROJECT_GOALS, ()).await?;
     conn.execute(CREATE_PROJECT_MILESTONES, ()).await?;
     conn.execute(CREATE_PROJECT_TODOS, ()).await?;
@@ -405,6 +421,9 @@ async fn bootstrap_tx(conn: &Connection) -> Result<()> {
     // Same post-migrate placement: the team ledger physically exists either
     // via the CREATE batch (fresh DBs) or the v17 migration (old DBs).
     conn.execute(CREATE_INDEX_TEAM_TOPIC_RUNS_TOPIC, ()).await?;
+    // Same post-migrate placement: brain plans physically exist either via
+    // the CREATE batch (fresh DBs) or the v18 migration (old DBs).
+    conn.execute(CREATE_INDEX_BRAIN_PLANS_DIGEST, ()).await?;
     Ok(())
 }
 
@@ -426,8 +445,13 @@ async fn bootstrap_tx(conn: &Connection) -> Result<()> {
 /// to say which partial upgrades ran, the full pass from the bottom is the
 /// only correct entry, and it is safe for exactly the reasons above.
 async fn migrate(conn: &Connection, from: i64) -> Result<()> {
+    if from < 18 {
+        // v18: brain decision-tree plans. CREATE IF NOT EXISTS keeps this
+        // idempotent; the digest index lands in the post-batch.
+        conn.execute(CREATE_BRAIN_PLANS, ()).await?;
+    }
     if from < 17 {
-        // v17: team topic-run ledger (opencode-team fan-out). CREATE IF NOT
+        // v17: team topic-run ledger (opencoder-team fan-out). CREATE IF NOT
         // EXISTS keeps this idempotent; the index lands in the post-batch.
         conn.execute(CREATE_TEAM_TOPIC_RUNS, ()).await?;
     }

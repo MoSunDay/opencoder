@@ -34,7 +34,7 @@ async fn schema_migration_versioning() {
     let mut rows = stmt.query(()).await.unwrap();
     let r = rows.next().await.unwrap().expect("version row exists");
     let v: i64 = r.get(0).unwrap();
-    assert_eq!(v, 17, "schema_version must be latest (17) after bootstrap");
+    assert_eq!(v, 18, "schema_version must be latest (18) after bootstrap");
 }
 
 #[tokio::test]
@@ -108,7 +108,7 @@ async fn schema_migration_v1_to_v2_adds_sse_kind() {
         let mut rows = stmt.query(()).await.unwrap();
         let r = rows.next().await.unwrap().unwrap();
         let v: i64 = r.get(0).unwrap();
-        assert_eq!(v, 17, "schema version must be latest (17) after migration");
+        assert_eq!(v, 18, "schema version must be latest (18) after migration");
     }
 
     // New events can be stored with sse_kind and read back.
@@ -140,7 +140,7 @@ async fn schema_migration_v1_to_v2_adds_sse_kind() {
     let mut rows = stmt.query(()).await.unwrap();
     let r = rows.next().await.unwrap().unwrap();
     let v: i64 = r.get(0).unwrap();
-    assert_eq!(v, 17, "schema version stays 17 after idempotent re-open");
+    assert_eq!(v, 18, "schema version stays 18 after idempotent re-open");
 }
 
 #[tokio::test]
@@ -237,8 +237,8 @@ async fn schema_migration_v2_to_v3_adds_handoff_and_skill() {
         let r = rows.next().await.unwrap().unwrap();
         let v: i64 = r.get(0).unwrap();
         assert_eq!(
-            v, 17,
-            "schema version must be latest (17) after v2→v3 migration"
+            v, 18,
+            "schema version must be latest (18) after v2→v3 migration"
         );
     }
 
@@ -254,7 +254,7 @@ async fn schema_migration_v2_to_v3_adds_handoff_and_skill() {
     let mut rows = stmt.query(()).await.unwrap();
     let r = rows.next().await.unwrap().unwrap();
     let v: i64 = r.get(0).unwrap();
-    assert_eq!(v, 17, "schema version stays 17 after idempotent re-open");
+    assert_eq!(v, 18, "schema version stays 18 after idempotent re-open");
 }
 
 #[tokio::test]
@@ -342,7 +342,7 @@ async fn schema_migration_is_idempotent_when_column_already_exists() {
         let mut rows = stmt.query(()).await.unwrap();
         let r = rows.next().await.unwrap().unwrap();
         let v: i64 = r.get(0).unwrap();
-        assert_eq!(v, 17, "schema version must be latest (17) after migration");
+        assert_eq!(v, 18, "schema version must be latest (18) after migration");
     }
 
     // A freshly appended event still round-trips its sse_kind.
@@ -372,7 +372,7 @@ async fn schema_migration_is_idempotent_when_column_already_exists() {
     let mut rows = stmt.query(()).await.unwrap();
     let r = rows.next().await.unwrap().unwrap();
     let v: i64 = r.get(0).unwrap();
-    assert_eq!(v, 17, "schema version stays 17 after idempotent re-open");
+    assert_eq!(v, 18, "schema version stays 18 after idempotent re-open");
 }
 
 /// v6 -> v7: reopening a faithful v6 database (sessions WITHOUT
@@ -456,8 +456,8 @@ async fn schema_migration_v6_to_v7_adds_summary_images() {
         let r = rows.next().await.unwrap().unwrap();
         let v: i64 = r.get(0).unwrap();
         assert_eq!(
-            v, 17,
-            "schema version must be latest (17) after v6->v7 migration"
+            v, 18,
+            "schema version must be latest (18) after v6->v7 migration"
         );
     }
 }
@@ -570,8 +570,8 @@ async fn schema_migration_v7_to_v8_adds_requirement() {
         let r = rows.next().await.unwrap().unwrap();
         let v: i64 = r.get(0).unwrap();
         assert_eq!(
-            v, 17,
-            "schema version must be latest (17) after v7->v8 migration"
+            v, 18,
+            "schema version must be latest (18) after v7->v8 migration"
         );
     }
 }
@@ -685,8 +685,8 @@ async fn schema_migration_v10_to_v11_adds_autopilot_mode() {
         let r = rows.next().await.unwrap().unwrap();
         let v: i64 = r.get(0).unwrap();
         assert_eq!(
-            v, 17,
-            "schema version must be latest (17) after v10->v11 migration"
+            v, 18,
+            "schema version must be latest (18) after v10->v11 migration"
         );
     }
 }
@@ -815,7 +815,7 @@ async fn schema_migration_v13_to_v14_adds_message_display() {
     assert_eq!(loaded[1].display.as_deref(), Some("$review fix it"));
 }
 
-/// v16 -> v17: the `team_topic_runs` ledger (opencode-team fan-out) must
+/// v16 -> v17: the `team_topic_runs` ledger (opencoder-team fan-out) must
 /// exist and be writable after upgrading a hand-written v16 database. The
 /// nodes table is pre-created in its v16 shape (v12-era DDL, unchanged since)
 /// so the ledger's FK parent exists exactly as a real v16 database would
@@ -861,7 +861,7 @@ async fn schema_migration_v16_to_v17_adds_team_topic_runs() {
         let mut rows = stmt.query(()).await.unwrap();
         let r = rows.next().await.unwrap().expect("version row exists");
         let v: i64 = r.get(0).unwrap();
-        assert_eq!(v, 17, "schema version must be 17 after v16 migration");
+        assert_eq!(v, 18, "schema version must be 17 after v16 migration");
     }
 
     // (2) The table exists (write proves it) and the pre-existing nodes

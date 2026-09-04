@@ -27,10 +27,15 @@ SPA disclosure 不变量：Bubble/Turn/call 稳定 key 保留 Collapse 实例，
 `AppState.nodes: Arc<NodeHub>`（`src/nodes_state.rs`）：task_session_id → `broadcast::Sender<SseEvt>` 映射 + 纯函数 `compute_status`（staleness 20s，按 server 收包时钟记账）。节点端点分居 `api_nodes.rs`（注册表半区：list/register/heartbeat/delete/tasks 派发与列表/cancel）与 `api_nodes_ops.rs`（claim、事件批上传→append_events 带回 seq 后广播、终态上报追加 done/error 收束帧）；浏览器 SSE 桥在 `sse_nodes.rs`，强制复用 `sse_dedup::forward_live` 两级去重（先订阅后查库）。合成 session（task_type="node"）被 `reject_node_session` 在 prompt/agent/model/interrupt/fork/compact/handoff/skill 等 mutation 端点一律 409；`list_sessions` 即使 include_subagents 也排除 node 型。
 
 ## brain 面（/api/brain）
-- 六路由 CRUD+search（`src/api_brain.rs`）挂 `/api` 前缀（HMAC 签名自动覆盖）；错误映射 typed：`opencoder_brain::EmbeddingFailed` → 502（serve 降级时接 bail-only `UnavailableClient`，服务照常启动）、validate → 400、not found → 404（typed `opencoder_brain::BrainNotFound` downcast 判定，零字符串分界）、store I/O → 500。详见 [agents/brain](../brain/index.md)。
+- 九路由 CRUD+search+动态规划（`src/api_brain.rs`）挂 `/api` 前缀（HMAC 签名自动覆盖）；错误映射 typed：`opencoder_brain::EmbeddingFailed` → 502（serve 降级时接 bail-only `UnavailableClient`，服务照常启动）、validate → 400、not found → 404（typed `opencoder_brain::BrainNotFound`/`PlanNotFound` downcast 判定，零字符串分界）、规划 LLM 故障 → 502（typed `PlanGenerationFailed`）、store I/O/树损坏 → 500。动态规划三路由：`POST /api/brain/plans`（建树 201）、`GET /plans/:id`、`POST /dispatch`（带 plan_id 精确路由；缺省按情况摘要缓存复用/先规划，`replan` 强制）。详见 [agents/brain](../brain/index.md)。
 
 ## 组队面（/api/teams，2026-09-04）
 `AppState.team: Arc<TeamWebState>`（`src/team_state.rs`）：`run: TeamRunConfig`（team_root+轮数界，未显式配置的根重定到 workdir 数据目录）+ 可注入 `dispatcher: Arc<dyn TeamDispatcher>`（生产 `NodeDispatcher`，测试脚本化 Mock）+ `hub: TeamHub`。路由分居 `api_teams.rs`（团队半区：GET/POST `/api/teams`、PATCH `/api/teams/:name`（改队长）、POST `.../members`（增删成员，队长不可移出）、POST `.../profile`（202 后台能力画像））与 `api_teams_topics.rs`（话题半区：GET/POST `/api/teams/:name/topics`（创建 201：`start_topic` 落 executing 元信息 + `spawn_topic_runtime`）、GET `.../topics/:tid`（整棵讨论树）、POST `.../cancel`（幂等双路径：活运行时走 token，无运行时（重启遗留/error）直接落盘 `finished(cancelled)`）、POST `.../resume`（202，executing 孤儿与 finished(error) 可续，其余/在跑 409）、GET `/api/topics?team=` 跨团队列表）。`TeamHub`（`src/team_hub.rs`）是进程内 topic 运行时注册表——每话题一个 CancelToken，条目=「有活 task」而非「未完成」；运行时权威状态全在共享目录（磁盘游标，见 [agents/team](../team/index.md)）。SPA 新增「组队」「话题」二级导航 tab（`teamPanel`/`topicsPanel`/`topicDetail`）。
+
+## 项目管理面（/api/project，2026-09-04）
+
+- `AppState.project: Arc<ProjectService>`（`service.rs::new()` 同步便宜，`serve()` 中 `open_project_store` 后 `init`；store 打开失败 fallback libsql 并 warn）。**未 init 时所有 /api/project 路由 503**。
+- 四文件分域：`api_project.rs`（goals/milestones CRUD）、`api_project_todos.rs`（todo CRUD，PATCH 不暴露 status/plan_md）、`api_project_runs.rs`（overview / plan / execute / list_todo_runs / cancel_run）、`api_project_util.rs`（共享解析/映射）。运行生命周期全在 opencoder-project crate，web 只做 HTTP 适配（404/409/503 形状见 `tests/web_project{,_runs}.rs`）。
 
 ## 主流程
 POST /prompt（`src/api.rs`）：仅 body.agent 属于 idle-only transition（改写会话 agent 配置，draining 时 409 且不写 skill、input、message 或 agent meta）；文本模式命令照常 admit——steer 打断当前 turn 后由 runner 于 turn 边界应用，queue 于 idle 边界应用。cheap busy check 先于 config/client 构建，guarded admission 在 lifecycle 锁内再次裁决；普通 prompt 仍按解析 body → load config → 建 ChatClient → `ensure_session_row` → guarded admit → 返回 `{admitted_seq}`（非阻塞）。
@@ -70,3 +75,5 @@ POST `/api/sessions/:id/subagents/:task_id/steer`：模式控制文本先返回 
 
 - `api_dag.rs`：def CRUD + dispatch + run 查询；`api_nodes_dag.rs`：claim（单活跃/节点，BEGIN IMMEDIATE CAS，FIFO `(created_at,rowid)`）+ 节点事件/状态上报（终态补写合成 `run_finished`）；`sse_dag.rs`：run 事件 SSE（id=seq，Last-Event-ID 续传）；`dag_state.rs`：进程级 `OnceLock<DagHub>` 事件广播；`api_nodes.rs` lost 收束把 running/cancelling 折叠 error("node lost")。
 - SPA「DAG」面板：defs/runs/拓扑图（@xyflow + dagre）。
+
+- **版本化 agent 管理面（2026-09-04）**：`api_agents.rs`（卡片 CRUD + `PATCH /api/agents/active` 激活——`set_active_agent_checked` preflight（prompt 引用解析失败回滚 marker）+ 仅变化时 fan_out ReloadConfig）、`api_agent_resources.rs`（共享池 `prompts|skills|tools|memory` 版本 CRUD/rollback/文件读取；写校验：路径安全、b64、1.5MiB 上限、按 category 的文件形态；被引用资源 DELETE 409 带 referenced_by；reload 策略=仅生效 agent 链路受影响时 fan_out）、`api_agent_nfs.rs`（`GET/POST /api/agents/nfs` 生命周期，进程级 NFS_SLOT；daemon 启动时 `agent.nfs.enabled` 自启动，失败仅 log）。SPA「Agent 配置」面板：`agentsConfig/agentDetail/promptEditor/agentNfsCard`（版本下拉、回滚、soul/how/output 编辑保存即新版本、mount 提示）。详见 [agents/agents](../agents/index.md)。

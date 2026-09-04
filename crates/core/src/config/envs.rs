@@ -96,7 +96,10 @@ pub fn active_env() -> Option<String> {
 
 /// Set (`Some`) or clear (`None`) the active-env marker. Setting requires the
 /// env to exist; the marker is written last so readers never see a marker
-/// pointing at a half-built env.
+/// pointing at a half-built env. The marker is replaced atomically (temp
+/// file + rename), so a concurrent or interrupted writer can never leave a
+/// torn marker behind — a half-written name would silently re-resolve to
+/// "no env" (or a wrong env) while the caller reported success.
 pub fn set_active_env(name: Option<&str>) -> io::Result<()> {
     let root = envs_home()
         .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "cannot resolve ~/.opencoder"))?;
@@ -113,7 +116,7 @@ pub fn set_active_env(name: Option<&str>) -> io::Result<()> {
                 }
             }
             std::fs::create_dir_all(&root)?;
-            std::fs::write(root.join(ACTIVE_MARKER), format!("{n}\n"))
+            write_marker_atomic(&root, &format!("{n}\n"))
         }
         None => match std::fs::remove_file(root.join(ACTIVE_MARKER)) {
             Ok(()) => Ok(()),
@@ -121,6 +124,67 @@ pub fn set_active_env(name: Option<&str>) -> io::Result<()> {
             Err(e) => Err(e),
         },
     }
+}
+
+/// Atomically replace the marker: write + fsync a unique temp sibling, then
+/// rename over the target (atomic on unix within the same directory). A
+/// best-effort directory fsync makes the rename durable too.
+fn write_marker_atomic(root: &Path, body: &str) -> io::Result<()> {
+    let marker = root.join(ACTIVE_MARKER);
+    let unique = format!(
+        "{ACTIVE_MARKER}.tmp-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.subsec_nanos())
+            .unwrap_or(0)
+    );
+    let temp = root.join(unique);
+    let write = || -> io::Result<()> {
+        let mut file = std::fs::File::create(&temp)?;
+        io::Write::write_all(&mut file, body.as_bytes())?;
+        file.sync_all()?;
+        drop(file);
+        std::fs::rename(&temp, &marker)?;
+        #[cfg(unix)]
+        if let Ok(dir) = std::fs::File::open(root) {
+            let _ = dir.sync_all();
+        }
+        Ok(())
+    };
+    match write() {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            // Never leave the temp sibling behind on failure.
+            let _ = std::fs::remove_file(&temp);
+            Err(e)
+        }
+    }
+}
+
+/// [`set_active_env`] plus an activation preflight: after flipping the
+/// marker to `Some(name)`, prove the resulting layer chain still resolves
+/// ([`super::Config::load`] dry-run). A corrupt env config.json would
+/// otherwise make the *next* process start fail hard while activation itself
+/// reported success. On a failed dry-run the previous marker state is
+/// restored and the resolution error is surfaced. Deactivation (`None`) is
+/// passed through unchanged.
+pub fn set_active_env_checked(name: Option<&str>, working_dir: &Path) -> io::Result<()> {
+    let previous = active_env();
+    set_active_env(name)?;
+    let Some(n) = name else {
+        return Ok(());
+    };
+    if let Err(e) = super::Config::load(working_dir) {
+        // Roll back to the pre-activation marker state (ignore secondary
+        // errors — the resolution error is the one that matters).
+        let _ = set_active_env(previous.as_deref());
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("env `{n}` leaves the config unresolvable: {e:#}"),
+        ));
+    }
+    Ok(())
 }
 
 /// List env names (directories under `envs/`), sorted. The marker reserved
@@ -143,29 +207,68 @@ pub fn list_envs() -> Vec<String> {
     names
 }
 
+/// True when `path` lives under the env root (`~/.opencoder/envs/`). Files
+/// there may embed provider api keys, so every write into that subtree is
+/// held to the owner-only contract.
+pub(crate) fn is_under_envs_home(path: &Path) -> bool {
+    match envs_home() {
+        Some(root) => path.starts_with(root),
+        None => false,
+    }
+}
+
+/// Persist a config save to `target` (body already pretty-printed). Env-layer
+/// files are created owner-only (0o600) on unix, mirroring the capture path
+/// ([`write_private_json`]) and [`super::Config::ensure_global_config`]; a
+/// pre-existing env file that predates the contract (e.g. written by an
+/// older binary with a plain `fs::write`) is chmod-converged on the next
+/// save, since `OpenOptions::mode` only applies at creation time.
+pub(crate) fn write_config_save(target: &Path, body: &str) -> io::Result<()> {
+    let private = is_under_envs_home(target);
+    let result = write_file_maybe_private(target, body, private);
+    #[cfg(unix)]
+    if private && result.is_ok() {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(target, std::fs::Permissions::from_mode(0o600));
+    }
+    result
+}
+
 /// Pretty-write `value` to `path` (creating parents). Captured env files may
 /// embed provider api keys, so they get owner-only permissions on unix,
 /// mirroring [`super::Config::ensure_global_config`].
 fn write_private_json(path: &Path, value: &serde_json::Value) -> Result<()> {
+    let body = format!("{}\n", serde_json::to_string_pretty(value)?);
+    write_file_maybe_private(path, &body, true).with_context(|| format!("write {}", path.display()))
+}
+
+/// Shared write core: owner-only permissions on unix when `private`.
+fn write_file_maybe_private(path: &Path, body: &str, private: bool) -> io::Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let body = format!("{}\n", serde_json::to_string_pretty(value)?);
     #[cfg(unix)]
     {
-        use std::os::unix::fs::OpenOptionsExt;
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
         let mut options = std::fs::OpenOptions::new();
-        options.write(true).create(true).truncate(true).mode(0o600);
-        options
-            .open(path)
-            .with_context(|| format!("write {}", path.display()))?
-            .write_all(body.as_bytes())?;
+        options.write(true).create(true).truncate(true);
+        if private {
+            options.mode(0o600);
+        }
+        let mut file = options.open(path)?;
+        let result = file.write_all(body.as_bytes());
+        if private && result.is_ok() {
+            // OpenOptions::mode only applies at creation; converge a
+            // pre-existing file that predates the contract.
+            let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+        }
+        result?;
+        return Ok(());
     }
     #[cfg(not(unix))]
     {
-        std::fs::write(path, body)?;
+        std::fs::write(path, body)
     }
-    Ok(())
 }
 
 // (write_all needs io::Write in scope on unix)

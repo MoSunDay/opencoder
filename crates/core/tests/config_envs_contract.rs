@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 use opencoder_core::{
     active_env, create_env, delete_env, list_envs, recapture_env, scoped_config_home,
-    set_active_env, ApMode, Config,
+    set_active_env, set_active_env_checked, ApMode, Config,
 };
 
 fn write_json(path: &Path, body: &str) {
@@ -389,5 +389,135 @@ fn autopilot_mode_follows_env_activation_switch_and_deactivation() {
         Config::load(work.path()).unwrap().autopilot.mode,
         ApMode::Off,
         "deactivation restores the base ap.json"
+    );
+}
+
+/// E-1: config/domain saves that land in the active env dir must be
+/// owner-only (0o600) — these files embed provider api keys. A pre-existing
+/// env file written before the contract (plain 0644) is chmod-converged by
+/// the next save.
+#[cfg(unix)]
+#[test]
+fn env_layer_saves_are_owner_only() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let home = tempfile::tempdir().unwrap();
+    let work = tempfile::tempdir().unwrap();
+    let _iso = scoped_config_home(home.path().to_path_buf());
+    base_world(home.path(), work.path());
+    set_active_env(Some("work")).unwrap();
+
+    // config.json save: new file in the env dir -> 0600
+    let written = Config::save(work.path(), &serde_json::json!({"model": "env/mo"})).unwrap();
+    let mode = std::fs::metadata(&written).unwrap().permissions().mode() & 0o7777;
+    assert_eq!(
+        format!("{mode:o}"),
+        "600",
+        "env config.json save must be 0600"
+    );
+
+    // mcp.json domain save: same contract
+    let written = Config::save(
+        work.path(),
+        &serde_json::json!({"mcp_servers": {"e1": {"enabled": true, "command": "e1"}}}),
+    )
+    .unwrap();
+    let mode = std::fs::metadata(&written).unwrap().permissions().mode() & 0o7777;
+    assert_eq!(format!("{mode:o}"), "600", "env domain save must be 0600");
+
+    // Convergence: a 0644 file that predates the contract is repaired on the
+    // next save into it.
+    let env_config = env_file(home.path(), "work", "config.json");
+    std::fs::set_permissions(&env_config, std::fs::Permissions::from_mode(0o644)).unwrap();
+    Config::save(work.path(), &serde_json::json!({"fps": 12})).unwrap();
+    let mode = std::fs::metadata(&env_config).unwrap().permissions().mode() & 0o7777;
+    assert_eq!(
+        format!("{mode:o}"),
+        "600",
+        "pre-existing env file must converge to 0600"
+    );
+
+    // Non-env targets keep the default behavior (no forced 0600): save into
+    // a project dir with no existing candidates creates opencoder.json.
+    set_active_env(None).unwrap();
+    drop(_iso); // release the scoped global home before re-scoping
+    let fresh_home = tempfile::tempdir().unwrap();
+    let _iso2 = scoped_config_home(fresh_home.path().to_path_buf());
+    let fresh = tempfile::tempdir().unwrap();
+    let project = fresh.path().join("opencoder.json");
+    Config::save(fresh.path(), &serde_json::json!({"fps": 30})).unwrap();
+    let mode = std::fs::metadata(&project).unwrap().permissions().mode() & 0o7777;
+    assert_ne!(
+        format!("{mode:o}"),
+        "600",
+        "project saves are not forced to 0600"
+    );
+}
+
+/// E-2: activation preflight — a corrupt env config.json must be rejected by
+/// `set_active_env_checked` (instead of poisoning the next process start),
+/// with the previous marker state restored. A resolvable env activates
+/// normally, and deactivation passes through.
+#[test]
+fn activation_preflight_rejects_unresolvable_env_and_restores_marker() {
+    let home = tempfile::tempdir().unwrap();
+    let work = tempfile::tempdir().unwrap();
+    let _iso = scoped_config_home(home.path().to_path_buf());
+    base_world(home.path(), work.path());
+
+    // Good env: activates and stays active.
+    make_env(home.path(), "good", r#"{"model":"good/m"}"#);
+    set_active_env_checked(Some("good"), work.path()).unwrap();
+    assert_eq!(active_env().as_deref(), Some("good"));
+    assert_eq!(Config::load(work.path()).unwrap().model, "good/m");
+
+    // Corrupt env: rejected, marker restored to "good".
+    write_json(&env_file(home.path(), "bad", "config.json"), "{ not json");
+    let error = set_active_env_checked(Some("bad"), work.path()).unwrap_err();
+    assert!(
+        error.to_string().contains("unresolvable"),
+        "error must name the resolution failure: {error}"
+    );
+    assert_eq!(
+        active_env().as_deref(),
+        Some("good"),
+        "failed preflight must restore the previous activation"
+    );
+    assert_eq!(Config::load(work.path()).unwrap().model, "good/m");
+
+    // From no-activation: failed preflight clears the marker again.
+    set_active_env_checked(None, work.path()).unwrap();
+    let error = set_active_env_checked(Some("bad"), work.path()).unwrap_err();
+    assert!(error.to_string().contains("unresolvable"));
+    assert_eq!(active_env(), None, "no env may be left active");
+}
+
+/// E-3: the active marker is replaced atomically (temp + rename) — the
+/// marker file must never carry a temp sibling's name, and rapid rewrites
+/// always leave exactly one parseable name.
+#[test]
+fn rapid_marker_rewrites_stay_parseable() {
+    let home = tempfile::tempdir().unwrap();
+    let work = tempfile::tempdir().unwrap();
+    let _iso = scoped_config_home(home.path().to_path_buf());
+    base_world(home.path(), work.path());
+    make_env(home.path(), "x", "{}");
+    make_env(home.path(), "y", "{}");
+
+    for name in ["x", "y", "x", "y", "y"] {
+        set_active_env(Some(name)).unwrap();
+        assert_eq!(active_env().as_deref(), Some(name));
+    }
+    // No temp siblings left behind.
+    let entries: Vec<String> = std::fs::read_dir(home.path().join(".opencoder").join("envs"))
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .map(|e| e.file_name().to_string_lossy().to_string())
+        .collect();
+    assert!(
+        entries
+            .iter()
+            .all(|n| n == "x" || n == "y" || n == "work" || n == "active"),
+        "no temp marker siblings may survive: {entries:?}"
     );
 }

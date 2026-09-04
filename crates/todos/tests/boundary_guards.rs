@@ -439,3 +439,68 @@ async fn resume_persists_running_before_first_dispatch() {
         .await
         .expect("resume task finished after hang release");
 }
+
+/// T-2: a rewind to an unrelated milestone must not strand the TODO under
+/// acceptance in `Accepting` forever (runnable() never proposes Accepting,
+/// and only this acceptance flow can exit it). The decision is rejected and
+/// corrected instead; the workflow runs to completion.
+#[tokio::test]
+async fn acceptance_rewind_to_unrelated_milestone_is_corrected() {
+    // Two independent todos: "root" will be the milestone, "step-1" the
+    // unrelated accepting todo the rewind decision targets.
+    let mut workflow = spec(false);
+    workflow.todos.push(TodoSpec {
+        id: "root".into(),
+        title: "root".into(),
+        requirement_background: "independent root".into(),
+        instructions: "return the candidate".into(),
+        depends_on: vec![],
+        agent: "act".into(),
+        max_attempts: 3,
+        acceptance: AcceptanceSpec {
+            criteria: "candidate exists".into(),
+            required_tool_calls: vec![],
+        },
+        metadata: serde_json::Value::Null,
+    });
+    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let mock = Arc::new(
+        MockChatClient::new()
+            // root passes and is marked as the milestone.
+            .push_script(dispatch("root", "new"))
+            .push_script(done(CANDIDATE))
+            .push_script(done(
+                r#"{"operation":"accept","reason":"ok","mark_milestone":true}"#,
+            ))
+            // step-1 accepted... no wait: the rewind decision arrives during
+            // step-1's acceptance, pointing at the unrelated "root" milestone.
+            .push_script(dispatch("step-1", "new"))
+            .push_script(done(CANDIDATE))
+            // Invalid: root is a milestone but step-1 is not in its subtree.
+            .push_script(done(
+                r#"{"operation":"rewind","milestone_todo_id":"root","reason":"drift"}"#,
+            ))
+            .push_script(done(
+                r#"{"operation":"accept","reason":"ok","mark_milestone":false}"#,
+            ))
+            .push_script(done(r#"{"operation":"complete","reason":"all passed"}"#)),
+    );
+    let temp = tempfile::tempdir().unwrap();
+    let state = runtime(&store, mock.clone(), temp.path())
+        .run_new_with_id(workflow, "run-t2".into())
+        .await
+        .unwrap();
+    assert_eq!(state.status, WorkflowStatus::Completed);
+    assert_eq!(state.todos["step-1"].status, TodoStatus::Passed);
+    assert_eq!(
+        mock.call_count(),
+        8,
+        "the unrelated rewind consumed exactly one correction re-ask"
+    );
+    let events = kinds(&store, "run-t2").await;
+    assert!(
+        !events.iter().any(|kind| kind == "workflow_rewound"),
+        "no rewind to the unrelated milestone may be applied"
+    );
+    assert!(!events.iter().any(|kind| kind == "runtime_error"));
+}

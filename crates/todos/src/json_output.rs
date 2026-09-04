@@ -15,15 +15,35 @@ pub fn parse<T: DeserializeOwned>(raw: &str) -> Result<T> {
     } else {
         return Ok(serde_json::from_str(trimmed)?);
     };
-    let body_start = start + marker_len;
-    let relative_end = trimmed[body_start..]
-        .find("```")
-        .ok_or_else(|| anyhow::anyhow!("unterminated JSON fence"))?;
-    let body_end = body_start + relative_end;
-    if trimmed[body_end + 3..].contains("```") {
-        anyhow::bail!("multiple JSON fences are not a structured response");
+    let body = &trimmed[start + marker_len..];
+    // The closing fence is the LAST bare ``` line (a raw newline followed by
+    // ``` and nothing but whitespace to the end). Scanning for the first ```
+    // truncates a JSON document that itself embeds backticks (e.g. a fenced
+    // code snippet inside a result string) — inside JSON strings raw
+    // newlines are escaped, so an embedded fence can never sit at a bare
+    // line start and only the real closing fence matches.
+    let mut close = None;
+    let mut from = 0;
+    while let Some(rel) = body[from..].find("\n```") {
+        let at = from + rel;
+        if body[at + 4..].trim().is_empty() {
+            close = Some(at);
+        }
+        from = at + 4;
     }
-    Ok(serde_json::from_str(trimmed[body_start..body_end].trim())?)
+    let close = close.ok_or_else(|| anyhow::anyhow!("unterminated JSON fence"))?;
+    let inner = body[..close].trim();
+    let value: T = serde_json::from_str(inner).map_err(|e| {
+        if inner.contains("```") {
+            // Unparseable AND still carrying fence marks: more than one
+            // top-level fence (an embedded backtick run inside a valid
+            // document parses above and never reaches this branch).
+            anyhow::anyhow!("multiple JSON fences are not a structured response")
+        } else {
+            anyhow::anyhow!(e)
+        }
+    })?;
+    Ok(value)
 }
 
 #[cfg(test)]
@@ -57,5 +77,15 @@ mod tests {
     #[test]
     fn rejects_multiple_fences() {
         assert!(parse::<serde_json::Value>("```json\n{}\n``` then ```json\n{}\n```").is_err());
+    }
+
+    /// T-12: a JSON string value may itself contain ``` (a fenced snippet in
+    /// a result field). The first ``` must not truncate the document.
+    #[test]
+    fn accepts_fenced_json_embedding_backticks() {
+        let raw = "```json\n{\"summary\":\"see\\n```rust\\nfn a(){}\\n```\",\"ok\":true}\n```";
+        let value: serde_json::Value = parse(raw).unwrap();
+        assert_eq!(value["ok"], true);
+        assert!(value["summary"].as_str().unwrap().contains("fn a(){}"));
     }
 }

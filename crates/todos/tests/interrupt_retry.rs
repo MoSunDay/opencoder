@@ -4,9 +4,12 @@
 //! (reloading the freshest state, re-deriving the terminal check) instead of
 //! failing the interrupt.
 
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc,
+use std::{
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    time::Duration,
 };
 
 use opencoder_core::{Config, Message};
@@ -171,6 +174,46 @@ impl Store for ConflictOnceStore {
     }
 }
 
+const CANDIDATE: &str = r#"{"status":"candidate","summary":"done","result":"ok","verification":"checked","evidence_refs":[],"recovery_context":{"summary":"done","refs":[]}}"#;
+
+fn done(text: &str) -> Vec<LlmEvent> {
+    vec![LlmEvent::Completed {
+        text: text.into(),
+        tool_calls: Vec::new(),
+        usage: None,
+    }]
+}
+
+fn dispatch(todo_id: &str, context_mode: &str) -> Vec<LlmEvent> {
+    done(&format!(
+        r#"{{"operation":"dispatch","todos":[{{"todo_id":"{todo_id}","context_mode":"{context_mode}"}}],"reason":"ready"}}"#
+    ))
+}
+
+async fn load(store: &Arc<dyn Store>, id: &str) -> WorkflowState {
+    opencoder_todos::persistence::load(store, id)
+        .await
+        .unwrap()
+        .expect("workflow must be persisted")
+        .1
+}
+
+/// Poll the durable item projections until the TODO shows as running.
+async fn wait_until_running(store: &Arc<dyn Store>, workflow_id: &str) {
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        let items = store.list_todo_items(workflow_id).await.unwrap();
+        if items.iter().any(|item| item.status == "running") {
+            return;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "todo in {workflow_id} never reached running"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
 fn spec() -> WorkflowSpec {
     WorkflowSpec {
         schema_version: 1,
@@ -240,4 +283,84 @@ async fn interrupt_retries_past_generation_conflict() {
         .collect();
     assert_eq!(interrupts.len(), 1);
     assert_eq!(interrupts[0].payload["reason"], "retry me");
+}
+
+/// T-1: with max_attempts=1, an external interrupt mid-execution must not
+/// permanently deadlock the TODO. Before the fix, reconcile_interrupted (and
+/// execution_failed(interrupted=true)) left the item Interrupted with
+/// attempt == max_attempts; runnable() kept proposing it while
+/// validate_dispatch refused every dispatch ("exhausted max_attempts"), so
+/// each resume burned the correction budget and suspended again. The
+/// interrupted item has no verdict on the work, so it must stay
+/// dispatchable and the resume must run to completion.
+#[tokio::test]
+async fn max_attempt_one_todo_survives_external_interrupt_and_resumes() {
+    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let hang = Arc::new(tokio::sync::Notify::new());
+    let mock = Arc::new(
+        MockChatClient::new()
+            .push_script(dispatch("step-1", "new"))
+            .push_hang(hang.clone()),
+    );
+    let temp = tempfile::tempdir().unwrap();
+    let run_runtime = Arc::new(Runtime {
+        store: store.clone(),
+        client: mock,
+        config: Config::default(),
+        workdir: temp.path().to_path_buf(),
+        debug_root: None,
+        cancel: CancellationToken::new(),
+    });
+    let spawned = {
+        let rt = run_runtime.clone();
+        tokio::spawn(async move {
+            let mut workflow = spec();
+            workflow.todos[0].max_attempts = 1;
+            rt.run_new_with_id(workflow, "run-t1".into()).await
+        })
+    };
+
+    wait_until_running(&store, "run-t1").await;
+    opencoder_todos::interrupt(&store, "run-t1", "external stop")
+        .await
+        .unwrap();
+    hang.notify_one();
+
+    let outcome = tokio::time::timeout(Duration::from_secs(10), spawned)
+        .await
+        .expect("run task finished after external interrupt")
+        .unwrap();
+    if let Ok(finished) = &outcome {
+        assert_eq!(finished.status, WorkflowStatus::Suspended);
+    }
+    let parked = load(&store, "run-t1").await;
+    assert_eq!(parked.status, WorkflowStatus::Suspended);
+    assert_eq!(parked.todos["step-1"].status, TodoStatus::Interrupted);
+    assert_eq!(parked.todos["step-1"].attempt, 1);
+
+    // Resume must not deadlock on the exhausted attempt budget.
+    let mock2 = Arc::new(
+        MockChatClient::new()
+            .push_script(dispatch("step-1", "resume"))
+            .push_script(done(CANDIDATE))
+            .push_script(done(
+                r#"{"operation":"accept","reason":"ok","mark_milestone":false}"#,
+            ))
+            .push_script(done(r#"{"operation":"complete","reason":"all passed"}"#)),
+    );
+    let resumed = Runtime {
+        store: store.clone(),
+        client: mock2,
+        config: Config::default(),
+        workdir: temp.path().to_path_buf(),
+        debug_root: None,
+        cancel: CancellationToken::new(),
+    }
+    .resume("run-t1")
+    .await
+    .expect("resume must progress past the interrupted max_attempts=1 TODO");
+
+    assert_eq!(resumed.status, WorkflowStatus::Completed);
+    assert_eq!(resumed.todos["step-1"].status, TodoStatus::Passed);
+    assert_eq!(resumed.todos["step-1"].attempt, 2);
 }

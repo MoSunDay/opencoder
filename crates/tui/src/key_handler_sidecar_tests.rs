@@ -25,6 +25,7 @@ fn press(code: KeyCode, text: &str, running: bool, sidecar_focused: bool) -> (Ke
         &[],
         &mut hist_idx,
         running,
+        false,
         "act",
         &mut scroll,
         &mut follow,

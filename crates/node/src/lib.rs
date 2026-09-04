@@ -23,6 +23,28 @@ use tokio::sync::watch;
 
 pub use runner::{NodeOpts, DEFAULT_CLAIM_INTERVAL, DEFAULT_HEARTBEAT_INTERVAL, REGISTER_ATTEMPTS};
 
+/// Extension point the agent binary injects: claim + execute DAG runs.
+/// Keeps the node crate free of the VM/runc dependency chain — the loop
+/// here only knows the trait, the agent wires in the real scheduler
+/// (`opencoder-dag-runtime`) plus its session/LLM dependencies.
+#[async_trait::async_trait]
+pub trait DagHook: Send + Sync {
+    /// Poll for the next due DAG run for this node (`None` = nothing due).
+    async fn claim(
+        &self,
+        node_id: &str,
+    ) -> anyhow::Result<Option<opencoder_dag::protocol::DagClaimedRun>>;
+
+    /// Execute one claimed run to a terminal status. `cancel_rx` carries the
+    /// same heartbeater/shutdown-fed flag as the prompt-task path (`true` =
+    /// abort); the implementation reports its own terminal status upstream.
+    async fn execute(
+        &self,
+        run: opencoder_dag::protocol::DagClaimedRun,
+        cancel_rx: watch::Receiver<bool>,
+    ) -> anyhow::Result<()>;
+}
+
 /// Resolve once the watched boolean flag turns `true`. A dropped sender parks
 /// forever instead of synthesizing a flip: cancellation must come from an
 /// explicit `send(true)`, never from teardown races.
@@ -65,6 +87,7 @@ mod tests {
             claim_interval: Duration::from_millis(1500),
             version: env!("CARGO_PKG_VERSION").into(),
             local_store_dir: None,
+            dag: None,
         };
         let err = opts.validate().unwrap_err().to_string();
         assert!(

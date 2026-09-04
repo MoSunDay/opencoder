@@ -99,7 +99,9 @@ pub(super) async fn run(opts: &TuiOpts) -> Result<()> {
             // Unknown id — this is the tmux launch path where `ts_start`
             // allocated an id but deliberately did NOT seed a session row.
             // Create a fresh session that persists lazily on first record.
-            let agent_name = config.agent.default.clone();
+            // Fresh-session agent choice: --agent > active file-agent marker
+            // > config default (headless run-path parity).
+            let agent_name = crate::fresh_agent_name(opts, &config);
             let agent = resolve_agent(&agent_name)
                 .or_else(|| resolve_agent("act"))
                 .context("agent")?;
@@ -129,7 +131,9 @@ pub(super) async fn run(opts: &TuiOpts) -> Result<()> {
             .await?
         }
     } else {
-        let agent_name = config.agent.default.clone();
+        // Fresh-session agent choice: --agent > active file-agent marker
+        // > config default (headless run-path parity).
+        let agent_name = crate::fresh_agent_name(opts, &config);
         let agent = resolve_agent(&agent_name)
             .or_else(|| resolve_agent("act"))
             .context("agent")?;

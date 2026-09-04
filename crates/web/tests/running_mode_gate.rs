@@ -131,11 +131,14 @@ fn seeded_state(
     llm: Arc<HangingStream>,
 ) -> Arc<opencoder_web::AppState> {
     Arc::new(opencoder_web::AppState {
+        brain: opencoder_web::api_brain::mock_brain(store.clone()),
         store: store.clone(),
         workdir: tmp.path().to_path_buf(),
         handles: opencoder_web::handle::new_handle_map(),
         nodes: Arc::new(opencoder_web::nodes_state::NodeHub::new()),
         controls: Arc::new(opencoder_web::control_state::ControlHub::new()),
+        team: opencoder_web::team_state::mock(),
+        project: opencoder_web::ProjectService::new(),
         client_override: Some(llm),
     })
 }

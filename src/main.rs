@@ -1,5 +1,3 @@
-use std::path::PathBuf;
-
 use anyhow::Result;
 use clap::Parser;
 use opencoder_cli::{init_logging, Cli, Command};
@@ -45,43 +43,9 @@ async fn main() -> Result<()> {
             client,
             opts,
         }) => match opencoder_cli::daemon::daemon_mode(*server, *client, opts.remote.as_deref()) {
-            Ok(opencoder_cli::daemon::DaemonAction::Server) => {
-                opencoder_cli::server::server_run(
-                    &cli,
-                    opts.host.clone(),
-                    opts.port,
-                    opts.web,
-                    opts.token.clone(),
-                )
-                .await
-            }
-            Ok(opencoder_cli::daemon::DaemonAction::Client) => {
-                // Node keeps the CLIENT token semantics (never auto-generate):
-                // a missing flag+env pair fails fast here with the same
-                // OPENCODER_SERVER_TOKEN usage error as before.
-                let resolved_token =
-                    opencoder_cli::daemon::resolve_client_token(opts.token.clone())?;
-                let name = opts
-                    .name
-                    .clone()
-                    .unwrap_or_else(opencoder_cli::daemon::default_node_name);
-                let workdir = cli.workdir.clone().unwrap_or_else(|| {
-                    std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
-                });
-                opencoder_node::run_node(
-                    opencoder_node::NodeOpts {
-                        name,
-                        remote: opts.remote.clone().unwrap_or_default(),
-                        token: resolved_token,
-                        workdir,
-                        heartbeat_interval: opencoder_node::DEFAULT_HEARTBEAT_INTERVAL,
-                        claim_interval: opencoder_node::DEFAULT_CLAIM_INTERVAL,
-                        version: env!("CARGO_PKG_VERSION").to_string(),
-                        local_store_dir: None,
-                    },
-                    None,
-                )
-                .await
+            Ok(action) => {
+                println!("{}", opencoder_cli::daemon::migration_hint(action, opts));
+                Ok(())
             }
             // Unreachable while clap enforces exactly-one-of, but the pure
             // validator stays total so this arm can never panic.
@@ -144,6 +108,7 @@ fn opts_from_cli(cli: &Cli) -> opencoder_tui::TuiOpts {
     opencoder_tui::TuiOpts::new(cli.workdir.clone())
         .with_session(cli.session.clone())
         .with_model(cli.model.clone())
+        .with_agent(cli.agent.clone())
 }
 
 fn join(parts: Vec<String>) -> String {

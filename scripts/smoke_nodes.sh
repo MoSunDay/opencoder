@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# Two-process distributed-nodes smoke: one real `opencode daemon --server`
-# plus one real `opencode daemon --client` worker. Exercises the fleet
+# Two-process distributed-nodes smoke: one real `opencoder-server`
+# plus one real `opencoder-agent` worker. Exercises the fleet
 # surface over plain curl (no test harness, no LLM round-trip assumed):
 #   ✅ 1  worker registers and reports idle
 #   ✅ 2  dispatch accepts a task (task_id + fresh `status:"pending"` field)
 #   ✅ 3  task reaches a terminal state (done OR error — error counts too,
-#         since the smoke runs with whatever LLM config this machine has)
+#         the worker runs against a seeded loopback LLM stub, so the outcome
+#         is deterministic and needs zero credentials)
 #   ✅ 4  task-plane read API: single-task detail (+last_event_seq), the
 #         fleet-wide filtered list (?status=&node_id=), and the
 #         session→task reverse lookup
@@ -13,8 +14,9 @@
 #   METHOD\npath_and_query\nts_ms\nsha256_hex(body)
 # signed into the `x-sig` / `x-sig-timestamp` headers. `/` , `/static/*` and
 # `/api/time` stay unsigned — the readiness probe uses `/api/time`.
-# Injection points: OPENCODER_SMOKE_BIN (prebuilt binary path — the cargo
-# wrapper test injects the debug binary to skip the release build) and
+# Injection points: OPENCODER_SMOKE_SERVER_BIN / OPENCODER_SMOKE_AGENT_BIN
+# (prebuilt binary paths — the cargo wrapper test injects the debug binaries
+# to skip the release build) and
 # OPENCODER_SMOKE_PORT (listen port, avoids clashing with parallel tests).
 # Requires: cargo, curl, python3, openssl, GNU date (no jq). Keep assertions
 # python3-only.
@@ -24,17 +26,30 @@ PORT="${OPENCODER_SMOKE_PORT:-18733}"
 TOKEN="local-smoke-token"
 BASE="http://127.0.0.1:${PORT}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-BIN="${OPENCODER_SMOKE_BIN:-${ROOT}/target/release/opencoder}"
 # Unique per run: ck1 selects by name, so a fixed name could bind to a stale
 # registry entry left behind by an earlier run.
 NODE_NAME="smoke-node-$$"
 
-if [ -z "${OPENCODER_SMOKE_BIN:-}" ]; then
-  echo "== building release binary =="
-  # NOTE: the `opencoder` binary is the ROOT package target (src/main.rs);
-  # building -p opencoder-cli only produces that crate's library.
-  cargo build --release --bin opencoder
+if [ -z "${OPENCODER_SMOKE_SERVER_BIN:-}" ] || [ -z "${OPENCODER_SMOKE_AGENT_BIN:-}" ]; then
+  echo "== building release fleet binaries =="
+  # NOTE: the fleet pair lives in its own crates (crates/server,
+  # crates/agent); anchor on the packages, not the bin names below.
+  cargo build --release -p opencoder-server -p opencoder-agent
 fi
+# The fleet binaries carry the package spelling (`opencoder-server` /
+# `opencoder-agent`, matching the `opencode daemon` migration hint) while
+# some docs spell them without the `r`. Probe both release paths, package
+# spelling first, so the script tracks whichever way the naming settles.
+# Explicit injection always wins.
+probe_release_bin() {
+  local name="$1" fallback="$2" path
+  for path in "${ROOT}/target/release/${name}" "${ROOT}/target/release/${fallback}"; do
+    [ -x "${path}" ] && { printf '%s' "${path}"; return 0; }
+  done
+  printf '%s' "${ROOT}/target/release/${name}"
+}
+SERVER_BIN="${OPENCODER_SMOKE_SERVER_BIN:-$(probe_release_bin opencoder-server opencode-server)}"
+AGENT_BIN="${OPENCODER_SMOKE_AGENT_BIN:-$(probe_release_bin opencoder-agent opencode-agent)}"
 
 TMP="$(mktemp -d /tmp/opencoder-smoke-nodes.XXXXXX)"
 SRV_PID=""
@@ -75,14 +90,12 @@ req() {
   fi
 }
 
-echo "== starting server (daemon --server) on :${PORT} =="
-# `--workdir` is a GLOBAL flag: it must precede the `daemon` subcommand. A
-# per-run workdir pins the server store inside ${TMP}: data_dir_for(workdir)
+echo "== starting server (opencoder-server) on :${PORT} =="
+# A per-run workdir pins the server store inside ${TMP}: data_dir_for(workdir)
 # is <XDG_DATA_HOME>/opencoder/<digest(workdir)>, so pointing XDG_DATA_HOME at
 # ${TMP} keeps the node registry out of the shared persistent DB entirely and
 # lets cleanup's `rm -rf ${TMP}` reclaim it — no cross-run entry can poison ck1.
-XDG_DATA_HOME="${TMP}/xdg" "${BIN}" --workdir "${TMP}/srv" daemon --server --host 127.0.0.1 --port "${PORT}" --token "${TOKEN}" \
-  >"${TMP}/server.log" 2>&1 &
+XDG_DATA_HOME="${TMP}/xdg" "${SERVER_BIN}" --workdir "${TMP}/srv" --host 127.0.0.1 --port "${PORT}" --token "${TOKEN}" >"${TMP}/server.log" 2>&1 &
 SRV_PID=$!
 
 # Readiness probe over the UNSIGNED clock-bootstrap endpoint: never blocked
@@ -103,13 +116,17 @@ if [ -z "${SERVER_UP}" ]; then
   exit 1
 fi
 
-echo "== starting worker node '${NODE_NAME}' (daemon --client) =="
-mkdir -p "${TMP}/work"
-# `--workdir` is a GLOBAL flag: it must precede the `daemon` subcommand.
+echo "== starting worker node '${NODE_NAME}' (opencoder-agent) =="
+# Seed a deterministic loopback LLM config so worker startup never depends on
+# this machine's global config: checkpoint 3 accepts `error` as terminal, so
+# the unreachable loopback provider keeps the run deterministic with zero
+# credentials.
+mkdir -p "${TMP}/work/.opencoder"
+cat > "${TMP}/work/.opencoder/config.json" <<'EOF'
+{"model":"stub/m1","providers":{"stub":{"base_url":"http://127.0.0.1:9/v1","api_key":"smoke-dummy-key","model":"m1"}}}
+EOF
 # same XDG redirect: the worker's local task store dies with ${TMP} too.
-XDG_DATA_HOME="${TMP}/xdg" "${BIN}" --workdir "${TMP}/work" daemon --client \
-  --name "${NODE_NAME}" --remote "${BASE}" --token "${TOKEN}" \
-  >"${TMP}/node.log" 2>&1 &
+XDG_DATA_HOME="${TMP}/xdg" "${AGENT_BIN}" --workdir "${TMP}/work" --remote "${BASE}" --token "${TOKEN}" --name "${NODE_NAME}" --workflow-root "${TMP}/workflow" >"${TMP}/node.log" 2>&1 &
 NODE_PID=$!
 
 # ✅ checkpoint 1: registration — node visible AND idle. NOTE: every probing

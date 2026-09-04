@@ -1,6 +1,7 @@
 //! 合并对（`StepGroup` + 相邻 Say）的正文去重与空行纪律：头部行
-//! `Say(n steps): <preview>` 之后必须空出一行再接正文；正文首个非空行
-//! 与 preview trim 相等时不再重复输出（单行 Say 整块隐藏）。这里逐组合
+//! `Say(n steps): <preview>` 之后必须空出一行再接正文；preview 与正文
+//! 同口径（done = 渲染后首行、流式 = raw 首行），正文首个非空行与
+//! preview trim 相等时不再重复输出（单行 Say 整块隐藏）。这里逐组合
 //! 钉死「恰好一个尾部空行」不变量：多行正文 / 单行正文 / 空正文 /
 //! 首行不等（不跳过）/ 前导空行 / 展开态，以及「每子轮计数不累加」契约。
 
@@ -33,11 +34,13 @@ fn lines(v: &ChatView) -> Vec<String> {
         .collect()
 }
 
-/// Body-dedup combination: when the Say's first RENDERED line does not trim-
-/// equal the raw preview (a markdown heading renders without its `#`), the
-/// body stays FULL — the skip is exact-equality only, never prefix matching.
+/// Markdown-first-line contract: the done preview is the RENDERED first
+/// line (no raw `#`/`**`/`-` markers in the header) and the body dedup
+/// compares against that same rendered text — the heading line is NOT
+/// repeated below the header in rendered form, only markdown's own
+/// separator blank and the rest of the body render.
 #[test]
-fn merged_pair_keeps_full_body_when_first_line_differs_from_preview() {
+fn merged_pair_renders_markdown_preview_and_skips_it_in_body() {
     let mut v = ChatView::default();
     v.apply(&SessionEvent::ReasoningDelta("think".into()));
     call_tool(&mut v, "t1");
@@ -45,21 +48,71 @@ fn merged_pair_keeps_full_body_when_first_line_differs_from_preview() {
     v.apply(&SessionEvent::Done);
 
     let flat = lines(&v);
-    // The preview keeps the RAW first line (`# heading`); the rendered body
-    // starts with the styled heading text (plus markdown's own separator) —
-    // not trim-equal, so nothing is skipped and the body renders in full
-    // below the header's separator blank.
     assert_eq!(
         flat,
         vec![
-            "\u{25b8} Say(1 step): # heading",
+            "\u{25b8} Say(1 step): heading",
             "",
-            "    heading",
             "    ",
             "    body line",
             "",
         ],
-        "no trim-equal first line -> no skip: {flat:?}"
+        "rendered preview + body skips that line: {flat:?}"
+    );
+}
+
+/// A plain (markdown-free) first line still skips in the body — plain text
+/// renders to itself, so the done preview equals the first body row and the
+/// pair shows the header plus the remaining lines. A single-line Say skips
+/// to an all-blank rest and hides the whole body (the header IS the pair).
+/// The Full branch (first rendered row differs from the preview) is now
+/// unreachable through the pipeline — see the direct unit test below.
+#[test]
+fn plain_first_line_still_skips_in_body() {
+    let mut v = ChatView::default();
+    v.apply(&SessionEvent::ReasoningDelta("think".into()));
+    call_tool(&mut v, "t1");
+    v.apply(&SessionEvent::TextDelta("alpha\nbeta".into()));
+    v.apply(&SessionEvent::Done);
+    assert_eq!(
+        lines(&v),
+        vec!["\u{25b8} Say(1 step): alpha", "", "    beta", "",],
+    );
+
+    // Single-line plain Say: after skipping the preview line the rest is
+    // all blank -> the whole body hides, the header row is the entire pair.
+    let mut v = ChatView::default();
+    v.apply(&SessionEvent::ReasoningDelta("think".into()));
+    call_tool(&mut v, "t1");
+    v.apply(&SessionEvent::TextDelta("same".into()));
+    v.apply(&SessionEvent::Done);
+    assert!(lines(&v).contains(&"\u{25b8} Say(1 step): same".to_string()));
+}
+
+/// Defensive coverage for the Full branch of `merged_say_body`: a preview
+/// that differs from every row keeps the FULL body rendered. Structurally
+/// unreachable through `merged_say_body_decision` since the preview/rendered
+/// unification — the done preview IS the first rendered non-empty row (same
+/// `line_text` source), so trim-equality holds by construction; this pins
+/// the pure function's contract for any future caller passing a foreign
+/// preview (e.g. a truncated one).
+#[test]
+fn merged_say_body_full_when_preview_differs_from_every_row() {
+    use super::super::step_render::{merged_say_body, SayBody};
+    assert_eq!(
+        merged_say_body("preview", &["alpha", "beta"]),
+        SayBody::Full
+    );
+    // Leading blank rows only precede the compared first non-empty row.
+    assert_eq!(
+        merged_say_body("preview", &["", "  ", "alpha"]),
+        SayBody::Full
+    );
+    // "Differs" is judged AFTER trim: whitespace-only inequality is equality
+    // -> Skip, not Full.
+    assert_eq!(
+        merged_say_body("alpha", &["  alpha  ", "beta"]),
+        SayBody::Skip(1)
     );
 }
 

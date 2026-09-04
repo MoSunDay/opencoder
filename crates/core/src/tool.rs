@@ -14,6 +14,10 @@ pub struct ToolContext {
     /// `config.network.proxy` from the session so tools honor the configured
     /// proxy; env fallbacks are applied at use time via `effective_proxy`.
     pub proxy: Option<String>,
+    /// Colon-joined extra PATH dirs for agent-private tools
+    /// (`agents/<name>/tools/v{n}/…`). `None` = no injection (builtin
+    /// agents and plain sessions never set it).
+    pub tools_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

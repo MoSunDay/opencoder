@@ -34,7 +34,7 @@ async fn schema_migration_versioning() {
     let mut rows = stmt.query(()).await.unwrap();
     let r = rows.next().await.unwrap().expect("version row exists");
     let v: i64 = r.get(0).unwrap();
-    assert_eq!(v, 14, "schema_version must be latest (14) after bootstrap");
+    assert_eq!(v, 17, "schema_version must be latest (17) after bootstrap");
 }
 
 #[tokio::test]
@@ -108,7 +108,7 @@ async fn schema_migration_v1_to_v2_adds_sse_kind() {
         let mut rows = stmt.query(()).await.unwrap();
         let r = rows.next().await.unwrap().unwrap();
         let v: i64 = r.get(0).unwrap();
-        assert_eq!(v, 14, "schema version must be latest (14) after migration");
+        assert_eq!(v, 17, "schema version must be latest (17) after migration");
     }
 
     // New events can be stored with sse_kind and read back.
@@ -140,7 +140,7 @@ async fn schema_migration_v1_to_v2_adds_sse_kind() {
     let mut rows = stmt.query(()).await.unwrap();
     let r = rows.next().await.unwrap().unwrap();
     let v: i64 = r.get(0).unwrap();
-    assert_eq!(v, 14, "schema version stays 14 after idempotent re-open");
+    assert_eq!(v, 17, "schema version stays 17 after idempotent re-open");
 }
 
 #[tokio::test]
@@ -237,8 +237,8 @@ async fn schema_migration_v2_to_v3_adds_handoff_and_skill() {
         let r = rows.next().await.unwrap().unwrap();
         let v: i64 = r.get(0).unwrap();
         assert_eq!(
-            v, 14,
-            "schema version must be latest (14) after v2→v3 migration"
+            v, 17,
+            "schema version must be latest (17) after v2→v3 migration"
         );
     }
 
@@ -254,7 +254,7 @@ async fn schema_migration_v2_to_v3_adds_handoff_and_skill() {
     let mut rows = stmt.query(()).await.unwrap();
     let r = rows.next().await.unwrap().unwrap();
     let v: i64 = r.get(0).unwrap();
-    assert_eq!(v, 14, "schema version stays 14 after idempotent re-open");
+    assert_eq!(v, 17, "schema version stays 17 after idempotent re-open");
 }
 
 #[tokio::test]
@@ -342,7 +342,7 @@ async fn schema_migration_is_idempotent_when_column_already_exists() {
         let mut rows = stmt.query(()).await.unwrap();
         let r = rows.next().await.unwrap().unwrap();
         let v: i64 = r.get(0).unwrap();
-        assert_eq!(v, 14, "schema version must be latest (14) after migration");
+        assert_eq!(v, 17, "schema version must be latest (17) after migration");
     }
 
     // A freshly appended event still round-trips its sse_kind.
@@ -372,7 +372,7 @@ async fn schema_migration_is_idempotent_when_column_already_exists() {
     let mut rows = stmt.query(()).await.unwrap();
     let r = rows.next().await.unwrap().unwrap();
     let v: i64 = r.get(0).unwrap();
-    assert_eq!(v, 14, "schema version stays 14 after idempotent re-open");
+    assert_eq!(v, 17, "schema version stays 17 after idempotent re-open");
 }
 
 /// v6 -> v7: reopening a faithful v6 database (sessions WITHOUT
@@ -456,8 +456,8 @@ async fn schema_migration_v6_to_v7_adds_summary_images() {
         let r = rows.next().await.unwrap().unwrap();
         let v: i64 = r.get(0).unwrap();
         assert_eq!(
-            v, 14,
-            "schema version must be latest (14) after v6->v7 migration"
+            v, 17,
+            "schema version must be latest (17) after v6->v7 migration"
         );
     }
 }
@@ -570,8 +570,8 @@ async fn schema_migration_v7_to_v8_adds_requirement() {
         let r = rows.next().await.unwrap().unwrap();
         let v: i64 = r.get(0).unwrap();
         assert_eq!(
-            v, 14,
-            "schema version must be latest (14) after v7->v8 migration"
+            v, 17,
+            "schema version must be latest (17) after v7->v8 migration"
         );
     }
 }
@@ -685,8 +685,8 @@ async fn schema_migration_v10_to_v11_adds_autopilot_mode() {
         let r = rows.next().await.unwrap().unwrap();
         let v: i64 = r.get(0).unwrap();
         assert_eq!(
-            v, 14,
-            "schema version must be latest (14) after v10->v11 migration"
+            v, 17,
+            "schema version must be latest (17) after v10->v11 migration"
         );
     }
 }
@@ -813,4 +813,93 @@ async fn schema_migration_v13_to_v14_adds_message_display() {
     let loaded = store.load_messages("s13").await.unwrap();
     assert_eq!(loaded.len(), 2);
     assert_eq!(loaded[1].display.as_deref(), Some("$review fix it"));
+}
+
+/// v16 -> v17: the `team_topic_runs` ledger (opencode-team fan-out) must
+/// exist and be writable after upgrading a hand-written v16 database. The
+/// nodes table is pre-created in its v16 shape (v12-era DDL, unchanged since)
+/// so the ledger's FK parent exists exactly as a real v16 database would
+/// have it, and register_node works against the pre-existing table.
+#[tokio::test]
+async fn schema_migration_v16_to_v17_adds_team_topic_runs() {
+    use libsql::Builder;
+    use opencoder_store::{TeamTopicRunRecord, TEAM_RUN_EXECUTING, TEAM_RUN_FINISHED};
+
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("migrate-v17.db");
+
+    // Phase 1: hand-write a v16 database — nodes registry + version stamp 16.
+    // team_topic_runs deliberately absent: that is what v17 adds.
+    {
+        let db = Builder::new_local(&db_path).build().await.unwrap();
+        let conn = db.connect().unwrap();
+        conn.execute("CREATE TABLE schema_version (version INTEGER NOT NULL)", ())
+            .await
+            .unwrap();
+        conn.execute(
+            "CREATE TABLE nodes (               id            TEXT PRIMARY KEY,               name          TEXT NOT NULL UNIQUE,               version       TEXT,               workdir       TEXT,               first_seen    INTEGER NOT NULL,               last_seen_at  INTEGER NOT NULL,               last_status   TEXT NOT NULL DEFAULT 'online',               last_task_id  TEXT,               last_addr     TEXT)",
+            (),
+        )
+        .await
+        .unwrap();
+        conn.execute("INSERT INTO schema_version (version) VALUES (16)", ())
+            .await
+            .unwrap();
+    }
+
+    // Phase 2: reopen — bootstrap's CREATE batch stamps the missing table,
+    // migrate(conn, 16) runs the `if from < 17` block, version lands at 17.
+    let store = LibsqlStore::open(&db_path).await.unwrap();
+
+    // (1) The version bumped to 17.
+    {
+        let conn = store.conn().await.unwrap();
+        let stmt = conn
+            .prepare("SELECT version FROM schema_version LIMIT 1")
+            .await
+            .unwrap();
+        let mut rows = stmt.query(()).await.unwrap();
+        let r = rows.next().await.unwrap().expect("version row exists");
+        let v: i64 = r.get(0).unwrap();
+        assert_eq!(v, 17, "schema version must be 17 after v16 migration");
+    }
+
+    // (2) The table exists (write proves it) and the pre-existing nodes
+    // table is reused — register lands in the hand-written registry.
+    let node = store
+        .register_node("node-v16", Some("v1"), None, None, 1_000)
+        .await
+        .unwrap();
+    assert_eq!(node.name, "node-v16");
+    assert_eq!(node.first_seen, 1_000);
+
+    store
+        .upsert_team_topic_run(&TeamTopicRunRecord {
+            topic_id: "topic-mig".into(),
+            node_id: node.id.clone(),
+            status: TEAM_RUN_EXECUTING.into(),
+            created_at: 1_234,
+        })
+        .await
+        .unwrap();
+    store.finish_team_topic_run("topic-mig").await.unwrap();
+    let runs = store.list_team_topic_runs("topic-mig").await.unwrap();
+    assert_eq!(runs.len(), 1);
+    assert_eq!(runs[0].status, TEAM_RUN_FINISHED);
+    assert_eq!(runs[0].created_at, 1_234);
+
+    // (3) The topic index landed too (post-migrate batch).
+    {
+        let conn = store.conn().await.unwrap();
+        let stmt = conn
+            .prepare(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_team_topic_runs_topic'",
+            )
+            .await
+            .unwrap();
+        let mut rows = stmt.query(()).await.unwrap();
+        let r = rows.next().await.unwrap().unwrap();
+        let n: i64 = r.get(0).unwrap();
+        assert_eq!(n, 1, "idx_team_topic_runs_topic must exist after migration");
+    }
 }

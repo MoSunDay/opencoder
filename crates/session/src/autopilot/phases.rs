@@ -17,6 +17,8 @@ use crate::SessionState;
 
 /// Switch the active agent, emitting an `AgentSwitch` event so surfaces stay
 /// in sync. Falls back to the current agent if the requested name is unknown.
+/// The agent pool snapshots (tools PATH dirs + skill roots) follow the switch
+/// so a phase running on a builtin agent drops a file agent's private pools.
 pub(super) fn switch_agent(
     session: &mut SessionState,
     name: &str,
@@ -24,12 +26,13 @@ pub(super) fn switch_agent(
 ) {
     if let Some(agent) = resolve_agent(name) {
         session.agent = agent;
+        crate::agent_pools::refresh(session);
     }
     on_event(SessionEvent::AgentSwitch(session.agent.name.clone()));
 }
 
-/// Hardcode the review skill for the review pass. Always discovers the
-/// `"review"` skill from `~/.opencoder/skills`; a missing skill body is a
+/// Hardcode the review skill for the review pass. Discovers the `"review"`
+/// skill through the session's agent-aware roots; a missing skill body is a
 /// no-op (skill set to `None`).
 pub(super) fn activate_review_skill(session: &SessionState) {
     activate_skill(session, "review");
@@ -38,8 +41,10 @@ pub(super) fn activate_review_skill(session: &SessionState) {
 /// Activate a discovered skill by name for this session. A missing skill is a
 /// no-op (`set_skill(None)`-equivalent: nothing is injected). The body is
 /// wrapped with its source path so the model can resolve skill-relative assets.
+/// Discovery is session-agent-aware: the agent's private skill pools shadow
+/// same-name global skills.
 pub(super) fn activate_skill(session: &SessionState, name: &str) {
-    let body = opencoder_core::skill::discover()
+    let body = crate::agent_pools::discover_session_skills(session)
         .into_iter()
         .find(|s| s.name == name)
         .map(|s| opencoder_core::body_with_source(&s));

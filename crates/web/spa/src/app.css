@@ -22,3 +22,122 @@ body {
   word-break: break-word;
   margin: 0;
 }
+
+/* ===== DAG 工作流面板 ===== */
+/* Live graph node boxes (fixed size mirrors dagLayout.js NODE_W/NODE_H). */
+.dag-node {
+  width: 176px;
+  min-height: 52px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1.5px solid #d9d9d9;
+  background: #fafafa;
+  font-size: 12px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+.dag-node-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.dag-node-name {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dag-node-kind {
+  margin-left: auto;
+  color: #8c8c8c;
+  font-size: 11px;
+}
+.dag-node-status {
+  margin-top: 4px;
+  color: #595959;
+}
+.dag-node--pending { border-color: #d9d9d9; background: #fafafa; }
+.dag-node--running {
+  border-color: #1677ff;
+  background: #e6f4ff;
+  animation: dag-node-pulse 1.6s ease-in-out infinite;
+}
+.dag-node--done { border-color: #52c41a; background: #f6ffed; }
+.dag-node--error { border-color: #ff4d4f; background: #fff2f0; }
+.dag-node--skipped {
+  border-color: #d9d9d9;
+  background: #f5f5f5;
+  color: #8c8c8c;
+  border-style: dashed;
+}
+.dag-node--selected { box-shadow: 0 0 0 2px #1677ff; }
+@keyframes dag-node-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(22, 119, 255, 0.35); }
+  50% { box-shadow: 0 0 0 6px rgba(22, 119, 255, 0.08); }
+}
+
+/* Detail layout: graph left, event feed right. */
+.dag-detail {
+  display: flex;
+  gap: 12px;
+  align-items: stretch;
+  height: 560px;
+}
+.dag-detail-graph {
+  flex: 1 1 62%;
+  min-width: 0;
+  border: 1px solid #f0f0f0;
+  border-radius: 8px;
+  overflow: hidden;
+}
+.dag-detail-empty {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+.dag-detail-side {
+  flex: 1 1 38%;
+  min-width: 280px;
+  max-width: 460px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+}
+
+/* Reverse-chronological event feed. */
+.dag-feed {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  border: 1px solid #f0f0f0;
+  border-radius: 8px;
+  padding: 4px 8px;
+}
+.dag-event {
+  padding: 8px 4px;
+  border-bottom: 1px dashed #f0f0f0;
+}
+.dag-event:last-child { border-bottom: none; }
+.dag-event-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.dag-event-extra {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #595959;
+}
+.dag-event-pre {
+  margin: 6px 0 0;
+  padding: 6px 8px;
+  background: #fafafa;
+  border-radius: 6px;
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 180px;
+  overflow-y: auto;
+}

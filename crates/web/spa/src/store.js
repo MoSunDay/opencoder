@@ -13,10 +13,12 @@ export const LOCAL_NODE_LABEL = '本机 (server 本机引擎)';
 let state = {
   token: localStorage.getItem(TOKEN_KEY) || '',
   base: localStorage.getItem(BASE_KEY) ?? '',
-  page: 'nodes', // 'nodes' | 'chat'
+  page: 'nodes', // 'nodes' | 'chat' | 'dag' | 'team' | 'topics' | 'topic_detail'
   preselectNode: null, // node id the fleet tab asked chat to open
   nodes: [], // last fleet snapshot shared between tabs
   conn: 'init', // 'init' | 'ok' | 'fail'
+  topicsTeamFilter: null, // team name the topics tab is filtered to (null = all)
+  topicDetail: null, // {teamName, topicId} while page === 'topic_detail'
 };
 
 const listeners = new Set();
@@ -56,7 +58,10 @@ export function setCredentials(token, base) {
 export function clearCredentials() {
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(BASE_KEY);
-  setState({ token: '', base: '', conn: 'init', nodes: [], preselectNode: null });
+  setState({
+    token: '', base: '', conn: 'init', nodes: [], preselectNode: null,
+    topicsTeamFilter: null, topicDetail: null,
+  });
 }
 
 /// Origin-prefixing helper shared by api.js / time.js / sse.js.
@@ -83,4 +88,26 @@ export function clearPreselect() {
   if (state.preselectNode !== null) {
     setState({ preselectNode: null });
   }
+}
+
+/// 组队 tab "查看话题" → jump to the topics tab pre-filtered to that team
+/// (same param-riding pattern as openChatForNode).
+export function openTopicsForTeam(teamName) {
+  setState({ page: 'topics', topicsTeamFilter: teamName || null, topicDetail: null });
+}
+
+/// Topics row "详情" → topic detail page; {teamName, topicId} ride the store.
+export function openTopicDetail(teamName, topicId) {
+  setState({ page: 'topic_detail', topicDetail: { teamName, topicId } });
+}
+
+/// Topic detail back button → topic list (keeps the team filter intact).
+export function closeTopicDetail() {
+  setState({ page: 'topics', topicDetail: null });
+}
+
+/// The topics tab's filter Select writes the same field
+/// openTopicsForTeam arms, keeping one source of truth.
+export function setTopicsTeamFilter(teamName) {
+  setState({ topicsTeamFilter: teamName || null });
 }

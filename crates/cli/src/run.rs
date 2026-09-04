@@ -5,7 +5,7 @@ use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 
 use anyhow::{anyhow, Context, Result};
-use opencoder_core::{resolve_agent, AgentKind, Config};
+use opencoder_core::{effective_default_agent, resolve_agent, AgentKind, Config};
 use opencoder_llm::{ChatClient, ChatStream};
 use opencoder_session::{generate_title, resume_and_replay as resume_session, SessionState};
 use opencoder_store::{SessionFilter, SessionPatch, Store};
@@ -16,6 +16,8 @@ use crate::Cli;
 pub(crate) use crate::run_image::load_image_data_uris;
 
 pub(crate) use crate::model_override::{apply_model_override, reapply_resume_model};
+
+pub(crate) use crate::agent_override::{apply_agent_override, reapply_resume_agent};
 
 /// Legacy spelling compat for the sandbox-mode interlude: `/sandbox` was the
 /// read-only mode switch while the dual mode was replaced; the canonical
@@ -37,41 +39,6 @@ pub fn rewrite_legacy_sandbox_prefix(prompt: &str) -> String {
     } else {
         format!("/plan {rest}")
     }
-}
-
-/// Apply an `--agent` override (builtin name like plan/explore/build) to the
-/// config. Sets `config.agent.default` so the fresh-session path resolves it.
-/// Returns true when the config changed.
-pub(crate) fn apply_agent_override(config: &mut Config, agent: &Option<String>) -> bool {
-    if let Some(a) = agent {
-        if config.agent.default != *a {
-            config.agent.default = a.clone();
-            return true;
-        }
-    }
-    false
-}
-
-/// Re-apply an explicit `--agent` to a resumed session. `resume()` restores the
-/// stored agent into the session, so an explicit `--agent` must win here. Returns
-/// the new agent name when the session was changed (caller persists it), else None.
-pub(crate) fn reapply_resume_agent(
-    session: &mut SessionState,
-    agent: &Option<String>,
-) -> Result<Option<String>> {
-    let name = match agent.as_ref() {
-        Some(n) => n,
-        None => return Ok(None),
-    };
-    if session.agent.name == *name {
-        return Ok(None);
-    }
-    // `name` here is always an explicit --agent value (we returned early on
-    // None), so an unknown name must error rather than silently resolve to
-    // "act".
-    let resolved = resolve_agent(name).ok_or_else(|| anyhow!("agent not found: {name}"))?;
-    session.agent = resolved;
-    Ok(Some(name.clone()))
 }
 
 pub async fn run_headless(cli: &Cli, prompt: String) -> Result<()> {
@@ -131,15 +98,13 @@ pub async fn run_headless(cli: &Cli, prompt: String) -> Result<()> {
         )
         .await?
     } else {
-        let agent_name = config.agent.default.as_str();
-        // Only fall back to "act" when no agent name was configured at all.
-        // An explicit but unknown name (e.g. a typo via --agent or config) must
-        // error rather than silently resolve to "act".
-        let agent = if agent_name.is_empty() {
-            resolve_agent("act").ok_or_else(|| anyhow!("agent not found: act"))?
-        } else {
-            resolve_agent(agent_name).ok_or_else(|| anyhow!("agent not found: {agent_name}"))?
-        };
+        // Priority: explicit --agent (folded into the config above by
+        // apply_agent_override) > active file-agent marker > cfg.agent.default
+        // > "act". An explicit but unknown name (e.g. a typo via --agent or
+        // config) must error rather than silently resolve to "act".
+        let agent_name = effective_default_agent(cli.agent.as_deref(), &config);
+        let agent =
+            resolve_agent(&agent_name).ok_or_else(|| anyhow!("agent not found: {agent_name}"))?;
         let mut s = SessionState::new(
             opencoder_session::runner::new_id(),
             agent,
@@ -678,50 +643,6 @@ mod tests {
         assert_eq!(resolved.as_deref(), Some(session_id));
     }
 
-    #[test]
-    fn apply_agent_override_sets_default() {
-        let mut cfg = Config::default();
-        assert_eq!(cfg.agent.default, "act");
-        assert!(apply_agent_override(&mut cfg, &Some("plan".into())));
-        assert_eq!(cfg.agent.default, "plan");
-        // same value -> no change (returns false)
-        assert!(!apply_agent_override(&mut cfg, &Some("plan".into())));
-        // no override -> no change
-        let mut cfg2 = Config::default();
-        let before = cfg2.agent.default.clone();
-        assert!(!apply_agent_override(&mut cfg2, &None));
-        assert_eq!(cfg2.agent.default, before);
-    }
-
-    #[test]
-    fn reapply_resume_agent_overrides_stored_agent() {
-        use opencoder_core::resolve_agent;
-        use opencoder_llm::{ChatStream, MockChatClient};
-        use opencoder_session::SessionState;
-        use std::sync::Arc;
-        // simulate a session resumed with the default "act" agent
-        let cfg = Config::default();
-        let agent = resolve_agent("act").unwrap();
-        let mut s = SessionState::new(
-            "s1",
-            agent,
-            cfg,
-            Arc::new(MockChatClient::new()) as Arc<dyn ChatStream>,
-            std::path::PathBuf::from("/tmp"),
-        );
-        // explicit --agent plan wins over the resumed "act"
-        let changed = reapply_resume_agent(&mut s, &Some("plan".into())).unwrap();
-        assert_eq!(changed.as_deref(), Some("plan"));
-        assert_eq!(s.agent.name, "plan");
-        // same value -> no change, returns None
-        assert_eq!(
-            reapply_resume_agent(&mut s, &Some("plan".into())).unwrap(),
-            None
-        );
-        // no override -> no change, returns None
-        assert_eq!(reapply_resume_agent(&mut s, &None).unwrap(), None);
-    }
-
     #[tokio::test]
     async fn fork_without_session_or_continue_errors() {
         use clap::Parser;
@@ -751,39 +672,6 @@ mod tests {
             err.to_string().contains("no sessions to --continue"),
             "expected empty-continue error, got: {err}"
         );
-    }
-
-    #[test]
-    fn reapply_resume_agent_rejects_unknown_name() {
-        use opencoder_llm::{ChatStream, MockChatClient};
-        use opencoder_session::SessionState;
-        use std::sync::Arc;
-        // A typo'd/explicit-but-unknown agent name must error rather than
-        // silently resolving to "act".
-        let cfg = Config::default();
-        let agent = resolve_agent("act").unwrap();
-        let mut s = SessionState::new(
-            "s1",
-            agent,
-            cfg,
-            Arc::new(MockChatClient::new()) as Arc<dyn ChatStream>,
-            std::path::PathBuf::from("/tmp"),
-        );
-        let err = reapply_resume_agent(&mut s, &Some("nonexistent-agent".into())).unwrap_err();
-        assert!(
-            err.to_string()
-                .contains("agent not found: nonexistent-agent"),
-            "expected unknown-agent error, got: {err}"
-        );
-        // The sandbox-mode interlude: "sandbox" is no longer a resolvable
-        // builtin, so an explicit --agent sandbox must be rejected too.
-        let err = reapply_resume_agent(&mut s, &Some("sandbox".into())).unwrap_err();
-        assert!(
-            err.to_string().contains("agent not found: sandbox"),
-            "expected removed-sandbox-agent error, got: {err}"
-        );
-        // session agent unchanged by the failed reapply
-        assert_eq!(s.agent.name, "act");
     }
 
     #[test]

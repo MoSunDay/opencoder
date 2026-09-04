@@ -73,12 +73,14 @@ mod sidecar_ui_tests;
 use std::path::PathBuf;
 
 use anyhow::Result;
+use opencoder_core::Config;
 
 #[derive(Default)]
 pub struct TuiOpts {
     pub workdir: Option<PathBuf>,
     pub session: Option<String>,
     pub model: Option<String>,
+    pub agent: Option<String>,
 }
 
 impl TuiOpts {
@@ -87,6 +89,7 @@ impl TuiOpts {
             workdir,
             session: None,
             model: None,
+            agent: None,
         }
     }
 
@@ -99,6 +102,20 @@ impl TuiOpts {
         self.model = model;
         self
     }
+
+    pub fn with_agent(mut self, agent: Option<String>) -> Self {
+        self.agent = agent;
+        self
+    }
+}
+
+/// The initial agent name for a fresh TUI session: an explicit `--agent`
+/// override > the active file-agent marker > `config.agent.default` > "act"
+/// — the same effective-default chain the headless run path uses
+/// (`opencoder_core::agent::effective_default_agent`). Pure so the
+/// bootstrap choice is directly unit-testable.
+pub fn fresh_agent_name(opts: &TuiOpts, config: &Config) -> String {
+    opencoder_core::effective_default_agent(opts.agent.as_deref(), config)
 }
 
 pub async fn run_tui(opts: &TuiOpts) -> Result<()> {

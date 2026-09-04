@@ -268,6 +268,7 @@ mod tests {
             working_dir: std::env::temp_dir(),
             max_output: 4096,
             proxy: None,
+            tools_path: None,
         }
     }
 

@@ -80,6 +80,7 @@ async fn call_echo_tool_via_registry() {
         working_dir: std::path::PathBuf::from("."),
         max_output: 4096,
         proxy: None,
+        tools_path: None,
     };
     let out = echo
         .execute(serde_json::json!({"text": "hello world"}), &ctx)
@@ -109,6 +110,7 @@ async fn call_add_tool_returns_sum() {
         working_dir: std::path::PathBuf::from("."),
         max_output: 4096,
         proxy: None,
+        tools_path: None,
     };
     let out = add
         .execute(serde_json::json!({"a": 7, "b": 35}), &ctx)

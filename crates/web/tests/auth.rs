@@ -26,11 +26,14 @@ async fn app() -> axum::Router {
 async fn app_with_web(web: bool) -> axum::Router {
     let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
     let state = Arc::new(opencoder_web::AppState {
+        brain: opencoder_web::api_brain::mock_brain(store.clone()),
         store,
         workdir: std::env::temp_dir(),
         handles: opencoder_web::handle::new_handle_map(),
         nodes: Arc::new(opencoder_web::nodes_state::NodeHub::new()),
         controls: Arc::new(opencoder_web::control_state::ControlHub::new()),
+        team: opencoder_web::team_state::mock(),
+        project: opencoder_web::ProjectService::new(),
         client_override: None,
     });
     opencoder_web::build_app(state, Some(TOKEN.into()), web)

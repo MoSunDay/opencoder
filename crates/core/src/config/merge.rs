@@ -10,6 +10,7 @@ pub(super) fn has_editable_key(root: &serde_json::Value) -> bool {
     };
     if obj.contains_key("model")
         || obj.contains_key("small_model")
+        || obj.contains_key("embedding_model")
         || obj.contains_key("max_tokens")
         || obj.contains_key("reasoning_effort")
         || obj.contains_key("interleaved_thinking")
@@ -150,6 +151,9 @@ pub(super) fn merge_into(cfg: &mut Config, value: serde_json::Value) {
         if let Some(small) = obj.get("small_model").and_then(|v| v.as_str()) {
             cfg.small_model = Some(small.to_string());
         }
+        if let Some(embedding) = obj.get("embedding_model").and_then(|v| v.as_str()) {
+            cfg.embedding_model = Some(embedding.to_string());
+        }
         if let Some(cl) = obj.get("context_limit").and_then(|v| v.as_u64()) {
             cfg.context_limit = Some(cl);
         }
@@ -175,6 +179,17 @@ pub(super) fn merge_into(cfg: &mut Config, value: serde_json::Value) {
         }
         if let Some(fps) = obj.get("fps").and_then(|v| v.as_u64()) {
             cfg.fps = Some(fps.clamp(1, 30) as u32);
+        }
+        if let Some(p) = obj.get("team_root").and_then(|v| v.as_str()) {
+            if !p.is_empty() {
+                cfg.team_root = std::path::PathBuf::from(p);
+            }
+        }
+        if let Some(v) = obj.get("team_max_turns").and_then(|v| v.as_u64()) {
+            cfg.team_max_turns = v.min(usize::MAX as u64) as usize;
+        }
+        if let Some(v) = obj.get("team_max_sub_turns").and_then(|v| v.as_u64()) {
+            cfg.team_max_sub_turns = v.min(usize::MAX as u64) as usize;
         }
         if let Some(p) = obj.get("provider").and_then(|v| v.as_object()) {
             if let Some(b) = p.get("base_url").and_then(|v| v.as_str()) {
@@ -245,6 +260,24 @@ pub(super) fn merge_into(cfg: &mut Config, value: serde_json::Value) {
         if let Some(a) = obj.get("agent").and_then(|v| v.as_object()) {
             if let Some(d) = a.get("default").and_then(|v| v.as_str()) {
                 cfg.agent.default = d.to_string();
+            }
+            if let Some(d) = a.get("agents_dir").and_then(|v| v.as_str()) {
+                cfg.agent.agents_dir = Some(std::path::PathBuf::from(d));
+            }
+            if let Some(d) = a.get("share_dir").and_then(|v| v.as_str()) {
+                cfg.agent.share_dir = Some(std::path::PathBuf::from(d));
+            }
+            if let Some(t) = a.get("tools_scope") {
+                if let Ok(parsed) = serde_json::from_value(t.clone()) {
+                    cfg.agent.tools_scope = parsed;
+                }
+            }
+            // NFS block: partial objects keep their serde defaults, so
+            // `{"agent":{"nfs":{"port":0}}}` only overrides the port.
+            if let Some(n) = a.get("nfs") {
+                if let Ok(parsed) = serde_json::from_value(n.clone()) {
+                    cfg.agent.nfs = parsed;
+                }
             }
         }
         if let Some(n) = obj.get("network").and_then(|v| v.as_object()) {
@@ -449,5 +482,41 @@ mod tests {
         assert_eq!(cfg.provider.headers[0].value, "abc-123");
         assert_eq!(cfg.provider.headers[1].name, "X-Org");
         assert_eq!(cfg.provider.headers[1].value, "acme");
+    }
+
+    /// Regression for the `agent` block merge: previously only `default`
+    /// merged, so `agents_dir` / `share_dir` / `tools_scope` and the whole
+    /// `nfs` sub-block set in a config file were silently dropped — leaving
+    /// `agent.nfs.enabled` unreachable from disk (dead daemon autostart) and
+    /// `agents_dir` unable to steer the NFS export root.
+    #[test]
+    fn merge_agent_block_dirs_tools_scope_and_nfs() {
+        let mut cfg = Config::default();
+        let value = serde_json::json!({
+            "agent": {
+                "default": "plan",
+                "agents_dir": "/custom/agents",
+                "share_dir": "/mnt/share",
+                "tools_scope": "all",
+                "nfs": { "enabled": true, "port": 0, "host": "0.0.0.0" }
+            }
+        });
+        merge_into(&mut cfg, value);
+
+        assert_eq!(cfg.agent.default, "plan");
+        assert_eq!(
+            cfg.agent.agents_dir.as_deref(),
+            Some(std::path::Path::new("/custom/agents"))
+        );
+        assert_eq!(
+            cfg.agent.share_dir.as_deref(),
+            Some(std::path::Path::new("/mnt/share"))
+        );
+        assert_eq!(cfg.agent.tools_scope, crate::config::ToolsScope::All);
+        assert!(cfg.agent.nfs.enabled, "nfs.enabled must merge from disk");
+        assert_eq!(cfg.agent.nfs.port, 0);
+        assert_eq!(cfg.agent.nfs.host, "0.0.0.0");
+        // Unspecified nfs fields keep their serde defaults.
+        assert!(cfg.agent.nfs.read_only);
     }
 }

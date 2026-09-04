@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 opencoder-core.workspace = true
+opencoder-dag.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 anyhow.workspace = true
@@ -17,6 +18,18 @@ async-trait.workspace = true
 libsql.workspace = true
 ulid.workspace = true
 
+# Optional project-data backends. StarRocks speaks the MySQL wire protocol,
+# so both map to the same sqlx mysql driver; the feature choice only records
+# intent for DDL/tx behavior branching. Untyped `sqlx::query` only — the
+# macros feature is deliberately NOT enabled (it would require a
+# compile-time database URL); rustls, never native-tls/openssl.
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls", "mysql"], optional = true }
+
 [dev-dependencies]
 tempfile.workspace = true
 libsql.workspace = true
+
+[features]
+default = []
+mysql = ["dep:sqlx"]
+starrocks = ["dep:sqlx"]

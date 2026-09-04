@@ -76,4 +76,6 @@ export async function apiJson(method, pathAndQuery, bodyObj, opts = {}) {
 
 export const apiGet = (path, opts) => apiJson('GET', path, undefined, opts);
 export const apiPost = (path, body, opts) => apiJson('POST', path, body === undefined ? {} : body, opts);
+export const apiPut = (path, body, opts) => apiJson('PUT', path, body === undefined ? {} : body, opts);
+export const apiPatch = (path, body, opts) => apiJson('PATCH', path, body === undefined ? {} : body, opts);
 export const apiDel = (path, opts) => apiJson('DELETE', path, undefined, opts);

@@ -9,7 +9,6 @@ opencoder-core.workspace = true
 opencoder-llm.workspace = true
 opencoder-session.workspace = true
 opencoder-store.workspace = true
-opencoder-web.workspace = true
 opencoder-todos.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true

@@ -362,7 +362,7 @@ pub async fn post_agent(
     // before any persistence or handle mutation.
     if !opencoder_core::resolve_agent(&body.value).is_some_and(|a| a.is_primary()) {
         return error_400(format!(
-            "unknown agent {:?}: expected \"act\" or \"plan\"",
+            "unknown agent {:?}: expected a builtin agent (act/plan) or a configured file agent name",
             body.value
         ));
     }

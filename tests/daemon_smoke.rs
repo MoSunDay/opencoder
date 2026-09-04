@@ -1,6 +1,6 @@
-//! Process-level smoke for the unified `opencode daemon` entry point.
+//! Process-level smoke for the split fleet binaries.
 //!
-//! Boots one real `daemon --server` (port 0) plus one real `daemon --client`
+//! Boots one real `opencoder-server` (port 0) plus one real `opencoder-agent`
 //! worker against it, then walks the HMAC signature contract over raw TCP:
 //! the SPA shell and `/api/time` stay unsigned, every other route demands
 //! `x-sig-timestamp` + `x-sig` (401 when missing/stale/tampered, 409 on exact
@@ -12,6 +12,8 @@
 //! would not even error (clap would read it as a free-form prompt and launch
 //! a live agent), so nothing here ever spawns them.
 
+mod support;
+
 use std::fs::File;
 use std::io::{Read, Write};
 use std::net::TcpStream;
@@ -20,7 +22,6 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use opencoder_core::auth_sig;
 
-const BIN: &str = env!("CARGO_BIN_EXE_opencoder");
 const TOKEN: &str = "daemon-smoke-token";
 const NODE_NAME: &str = "smoke-node-1";
 
@@ -41,33 +42,28 @@ impl Drop for Proc {
     }
 }
 
-/// Start `daemon --server` on an OS-picked port; return the guard plus the
+/// Start `opencoder-server` on an OS-picked port; return the guard plus the
 /// base URL parsed from the `listening on http://` stdout line. The blocking
-/// read is fine: the daemon prints the line promptly after binding.
+/// read is fine: the server prints the line promptly after binding.
 fn spawn_server(workdir: &std::path::Path) -> (Proc, String) {
     let mut server = Proc(
-        Command::new(BIN)
+        Command::new(support::sibling_bin(support::SERVER_BIN))
             .arg("--workdir")
             .arg(workdir)
-            .args([
-                "daemon",
-                "--server",
-                "--host",
-                "127.0.0.1",
-                "--port",
-                "0",
-                "--token",
-                TOKEN,
-            ])
+            .args(["--host", "127.0.0.1", "--port", "0", "--token", TOKEN])
+            // Keep the per-workdir SQLite store (data_dir_for →
+            // <XDG_DATA_HOME>/opencoder/<digest(workdir)>) inside the test's
+            // tempdir instead of polluting the real HOME.
+            .env("XDG_DATA_HOME", workdir.join("xdg"))
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .spawn()
-            .expect("spawn daemon --server"),
+            .expect("spawn opencoder-server"),
     );
     let deadline = Instant::now() + Duration::from_secs(30);
     let mut output = String::new();
     loop {
-        assert!(Instant::now() < deadline, "daemon --server did not start");
+        assert!(Instant::now() < deadline, "opencoder-server did not start");
         let mut buf = [0u8; 1024];
         let count = server
             .0
@@ -89,21 +85,37 @@ fn spawn_server(workdir: &std::path::Path) -> (Proc, String) {
     }
 }
 
-/// Start `daemon --client` pointing at `remote`; stderr lands in `log` so a
+/// Start `opencoder-agent` pointing at `remote`; stderr lands in `log` so a
 /// failure prints the node's own words instead of a bare assert.
+///
+/// DAG claiming stays ON (no --no-dag): the DAG hook's eager construction
+/// (uplink + local store + LLM client from the seeded stub config) succeeds
+/// offline because client construction never dials, and the node runner
+/// downgrades failed DAG claim polls to warnings — so the default worker
+/// wiring is exercised for free while the heartbeat test stays deterministic.
 fn spawn_node(workdir: &std::path::Path, remote: &str, log: &std::path::Path) -> Proc {
     let stderr = File::create(log).expect("create node stderr capture file");
     Proc(
-        Command::new(BIN)
+        Command::new(support::sibling_bin(support::AGENT_BIN))
             .arg("--workdir")
             .arg(workdir)
             .args([
-                "daemon", "--client", "--remote", remote, "--token", TOKEN, "--name", NODE_NAME,
+                "--remote",
+                remote,
+                "--token",
+                TOKEN,
+                "--name",
+                NODE_NAME,
+                "--workflow-root",
             ])
+            .arg(workdir.join("workflow"))
+            // Same store hygiene as the server spawn: the agent's local
+            // store (opened eagerly by the DAG hook) dies with the tempdir.
+            .env("XDG_DATA_HOME", workdir.join("xdg"))
             .stdout(Stdio::null())
             .stderr(Stdio::from(stderr))
             .spawn()
-            .expect("spawn daemon --client"),
+            .expect("spawn opencoder-agent"),
     )
 }
 
@@ -302,7 +314,7 @@ fn daemon_server_and_client_end_to_end() {
     // Heartbeat loop still running: the worker never exits on its own.
     assert!(
         node.0.try_wait().expect("try_wait node").is_none(),
-        "daemon --client exited early\n--- node stderr ---\n{}",
+        "opencoder-agent exited early\n--- node stderr ---\n{}",
         tail(&node_log, 30)
     );
 }

@@ -1,0 +1,22 @@
+[package]
+name = "opencoder-project"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+opencoder-core.workspace = true
+opencoder-llm.workspace = true
+opencoder-session.workspace = true
+opencoder-store.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+ulid.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+async-trait.workspace = true

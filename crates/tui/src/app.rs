@@ -481,7 +481,7 @@ pub(super) async fn run_app(
                             &mut cursor_idx,
                             &history,
                             &mut hist_idx,
-                            running,
+                            running, chat.subagents_running > 0,
                             &agent_name,
                             &mut scroll,
                             &mut follow,

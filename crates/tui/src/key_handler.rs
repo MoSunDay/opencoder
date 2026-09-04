@@ -88,6 +88,11 @@ pub(crate) fn handle_key(
     history: &[String],
     hist_idx: &mut Option<usize>,
     running: bool,
+    // Whether any subagents are live (`chat.subagents_running > 0`). The
+    // parent turn may already report idle while its subagent batch is still
+    // draining (autopilot stage gap, cancel grace, reabsorb tail), so Tab's
+    // queue-vs-submit arm must treat live subagents as busy too.
+    subagents_running: bool,
     agent: &str,
     scroll: &mut u32,
     follow: &mut bool,
@@ -371,7 +376,8 @@ pub(crate) fn handle_key(
             )
         }
         KeyCode::Tab => {
-            // Tab = follow-up (queue) when running; normal submit when idle.
+            // Tab = follow-up (queue) when busy (running turn OR live
+            // subagents); normal submit only when fully idle.
             if input.trim().is_empty() {
                 return KeyAction::None;
             }
@@ -389,7 +395,7 @@ pub(crate) fn handle_key(
             *cursor_idx = 0;
             *hist_idx = None;
             crate::undo::reset(undo_state, input, *cursor_idx);
-            if running {
+            if running || subagents_running {
                 KeyAction::Queue(text)
             } else {
                 KeyAction::Submit(text)

@@ -8,14 +8,14 @@ use tokio::sync::Mutex;
 
 use crate::store::Store;
 use crate::types::{
-    DagDefRecord, DagEventRecord, DagRunRecord, Delivery, ImportReport, MessageRow, NodeRecord,
-    NodeTaskRecord, NodeTaskStatus, SessionEventRecord, SessionFilter, SessionInput,
+    ConvergedDagRun, DagDefRecord, DagEventRecord, DagRunRecord, Delivery, ImportReport, MessageRow,
+    NodeRecord, NodeTaskRecord, NodeTaskStatus, SessionEventRecord, SessionFilter, SessionInput,
     SessionListItem, SessionMeta, SessionPatch, SubagentTaskRecord,
 };
 use crate::{
-    BrainCapabilityDetail, BrainCapabilityRecord, BrainEngInputRecord, BrainVectorHit,
-    BrainVectorWrite, TeamTopicRunRecord, TodoEventRecord, TodoItemRecord, TodoWorkflowRecord,
-    TodoWorkflowSummary,
+    BrainCapabilityDetail, BrainCapabilityRecord, BrainEngInputRecord, BrainPlanRecord,
+    BrainVectorHit, BrainVectorWrite, TeamTopicRunRecord, TodoEventRecord, TodoItemRecord,
+    TodoWorkflowRecord, TodoWorkflowSummary,
 };
 
 mod brain;
@@ -471,6 +471,21 @@ impl Store for LibsqlStore {
         brain::search(&self.conn, model, query_emb, limit).await
     }
 
+    async fn save_brain_plan(&self, plan: &BrainPlanRecord) -> Result<()> {
+        let _guard = self.db_lock.lock().await;
+        brain::save_plan(&self.conn, plan).await
+    }
+
+    async fn get_brain_plan(&self, id: &str) -> Result<Option<BrainPlanRecord>> {
+        let _guard = self.db_lock.lock().await;
+        brain::get_plan(&self.conn, id).await
+    }
+
+    async fn latest_brain_plan_for(&self, digest: &str) -> Result<Option<BrainPlanRecord>> {
+        let _guard = self.db_lock.lock().await;
+        brain::latest_plan_by_digest(&self.conn, digest).await
+    }
+
     async fn register_node(
         &self,
         name: &str,
@@ -618,6 +633,16 @@ impl Store for LibsqlStore {
         let _guard = self.db_lock.lock().await;
         dag::update_status(&self.conn, run_id, status, error, now_ms).await
     }
+    async fn finalize_dag_run(
+        &self,
+        run_id: &str,
+        status: opencoder_dag::DagRunStatus,
+        error: Option<&str>,
+        now_ms: i64,
+    ) -> Result<i64> {
+        let _guard = self.db_lock.lock().await;
+        dag::finalize_run(&self.conn, run_id, status, error, now_ms).await
+    }
     async fn cancel_dag_run(&self, run_id: &str, now_ms: i64) -> Result<()> {
         let _guard = self.db_lock.lock().await;
         dag::cancel(&self.conn, run_id, now_ms).await
@@ -651,12 +676,12 @@ impl Store for LibsqlStore {
         &self,
         now_ms: i64,
         stale_ms: i64,
-    ) -> Result<Vec<DagRunRecord>> {
+    ) -> Result<Vec<ConvergedDagRun>> {
         let _guard = self.db_lock.lock().await;
         dag::converge_lost(&self.conn, now_ms, stale_ms).await
     }
 
-    // Team topic runs (opencode-team fan-out ledger).
+    // Team topic runs (opencoder-team fan-out ledger).
     async fn upsert_team_topic_run(&self, rec: &TeamTopicRunRecord) -> Result<()> {
         let _guard = self.db_lock.lock().await;
         team_runs::upsert(&self.conn, rec).await

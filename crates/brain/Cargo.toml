@@ -10,7 +10,5 @@ opencoder-store.workspace = true
 anyhow.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-ulid.workspace = true
-
-[dev-dependencies]
 tokio.workspace = true
+ulid.workspace = true

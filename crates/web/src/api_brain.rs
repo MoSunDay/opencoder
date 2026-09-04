@@ -219,6 +219,175 @@ pub async fn search(State(state): State<Arc<AppState>>, Json(body): Json<SearchB
     }
 }
 
+// ─── dynamic planning (decision trees over the capability library) ──────
+
+/// Body of `POST /api/brain/plans`.
+#[derive(Debug, Deserialize)]
+pub struct PlanBody {
+    pub situation: String,
+    /// Vector candidates fed to the planner; `None` → [`DEFAULT_SEARCH_K`]
+    /// clamped to [`MAX_SEARCH_K`] (same policy as search).
+    pub top_k: Option<u32>,
+    /// Planner chat model; `None` → the runtime's configured default
+    /// (production: the config small model).
+    pub model: Option<String>,
+}
+
+/// Body of `POST /api/brain/dispatch`.
+#[derive(Debug, Deserialize)]
+pub struct DispatchBody {
+    pub situation: String,
+    /// Route through one persisted plan; omit to auto-pick: the newest
+    /// cached plan for this situation digest, planning one first when there
+    /// is nothing to reuse.
+    pub plan_id: Option<String>,
+    /// Candidate count when a fresh plan must be minted.
+    pub top_k: Option<u32>,
+    /// Force re-planning even when a cached plan exists (default false).
+    pub replan: Option<bool>,
+    /// Planner chat model override (same default chain as `POST /plans`).
+    pub model: Option<String>,
+}
+
+/// Map planner/dispatch failures: unknown plan id → 404 (typed
+/// `PlanNotFound`), embed outage and planner-LLM faults → 502 (typed
+/// `EmbeddingFailed` / `PlanGenerationFailed`), anything else (store I/O,
+/// corrupt stored tree) → 500.
+fn map_plan_error(op: &str, err: anyhow::Error) -> Response {
+    if let Some(e) = err.downcast_ref::<opencoder_brain::PlanNotFound>() {
+        error_404(&e.to_string())
+    } else if err
+        .downcast_ref::<opencoder_brain::EmbeddingFailed>()
+        .is_some()
+    {
+        error_502(format!("{err:#}"))
+    } else if err
+        .downcast_ref::<opencoder_brain::PlanGenerationFailed>()
+        .is_some()
+    {
+        error_502(format!("{op}: {err:#}"))
+    } else {
+        error_500(format!("{op}: {err:#}"))
+    }
+}
+
+/// Resolve the planner chat model from a request override, falling back to
+/// the runtime's configured default.
+fn planner_model(state: &AppState, model: &Option<String>) -> String {
+    model
+        .as_deref()
+        .map(str::trim)
+        .filter(|m| !m.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| state.brain.chat_model().to_string())
+}
+
+/// POST /api/brain/plans — plan a decision tree for one situation: embed →
+/// vector-retrieve candidates → framework-prompt LLM call → validated tree
+/// (branch topics pre-embedded) → persisted. Empty situation → 400; empty
+/// library / LLM faults → 502; embed outage → 502.
+pub async fn create_plan(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<PlanBody>,
+) -> Response {
+    let situation = body.situation.trim();
+    if situation.is_empty() {
+        return error_400("situation must not be empty".to_string());
+    }
+    let top_k = body
+        .top_k
+        .unwrap_or(DEFAULT_SEARCH_K)
+        .clamp(1, MAX_SEARCH_K);
+    match state
+        .brain
+        .plan_decision_tree(
+            &planner_model(&state, &body.model),
+            situation,
+            top_k,
+            opencoder_core::message::now_ms(),
+        )
+        .await
+    {
+        Ok((plan, tree)) => (
+            StatusCode::CREATED,
+            Json(json!({ "ok": true, "plan": plan, "tree": tree })),
+        )
+            .into_response(),
+        Err(e) => map_plan_error("plan decision tree", e),
+    }
+}
+
+/// GET /api/brain/plans/:id — one persisted plan (record + parsed tree) or
+/// 404. A record whose `tree_json` no longer parses is a 500 (storage
+/// corruption, never a client fault).
+pub async fn get_plan(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Response {
+    match state.store.get_brain_plan(&id).await {
+        Ok(Some(plan)) => {
+            match serde_json::from_str::<opencoder_brain::DecisionTree>(&plan.tree_json) {
+                Ok(tree) => Json(json!({ "ok": true, "plan": plan, "tree": tree })).into_response(),
+                Err(e) => error_500(format!("get brain plan {id}: stored tree is corrupt: {e}")),
+            }
+        }
+        Ok(None) => error_404(&format!("brain plan not found: {id}")),
+        Err(e) => error_500(format!("get brain plan: {e:#}")),
+    }
+}
+
+/// POST /api/brain/dispatch — route one situation to a capability. With
+/// `plan_id`: through that exact plan (unknown id → 404). Without: the
+/// dynamic scheduler — reuse the newest cached plan for the situation
+/// digest, minting one first when needed (`replan` forces a fresh plan).
+pub async fn dispatch(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<DispatchBody>,
+) -> Response {
+    let situation = body.situation.trim();
+    if situation.is_empty() {
+        return error_400("situation must not be empty".to_string());
+    }
+    let top_k = body
+        .top_k
+        .unwrap_or(DEFAULT_SEARCH_K)
+        .clamp(1, MAX_SEARCH_K);
+    let plan_id = body
+        .plan_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+        .map(str::to_string);
+    let model = planner_model(&state, &body.model);
+    let outcome = match plan_id {
+        Some(id) => state
+            .brain
+            .dispatch_decision_tree(&id, situation)
+            .await
+            .map(|(plan, outcome)| (plan.id, outcome, false)),
+        None => state
+            .brain
+            .dispatch_or_plan(
+                &model,
+                situation,
+                top_k,
+                body.replan.unwrap_or(false),
+                opencoder_core::message::now_ms(),
+            )
+            .await
+            .map(|d| (d.record.id, d.outcome, d.planned_fresh)),
+    };
+    match outcome {
+        Ok((plan_id, outcome, planned_fresh)) => Json(json!({
+            "ok": true,
+            "plan_id": plan_id,
+            "capability_id": outcome.capability_id,
+            "reason": outcome.reason,
+            "path": outcome.path,
+            "planned_fresh": planned_fresh,
+        }))
+        .into_response(),
+        Err(e) => map_plan_error("dispatch brain plan", e),
+    }
+}
+
 // ─── client fallbacks ──────────────────────────────────────────────────
 
 /// Bail-only `ChatStream` for the degraded serve() path: when the LLM config

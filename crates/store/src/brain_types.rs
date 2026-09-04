@@ -42,6 +42,28 @@ pub struct BrainVectorHit {
     pub distance: f64,
 }
 
+/// One persisted decision-tree plan — the output of the brain's dynamic
+/// planner (framework prompt + vector-retrieved capability manifest → LLM →
+/// validated tree). `tree_json` is the serialized [`opencoder_brain`]
+/// `DecisionTree` kept opaque here: the store only persists and fetches it,
+/// the brain crate owns the domain. `situation_digest` (stable hash of the
+/// originating situation text) lets dispatch reuse a cached plan for a
+/// repeat situation instead of re-planning.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BrainPlanRecord {
+    pub id: String,
+    /// The originating situation text the tree was planned for.
+    pub situation: String,
+    /// Stable digest of `situation` — the dispatch cache key.
+    pub situation_digest: String,
+    /// Chat model that produced the tree (provenance for audits/replanning).
+    pub chat_model: String,
+    /// Serialized decision tree (branch topics already carry their topic
+    /// vectors, so dispatch needs exactly one embed of the live situation).
+    pub tree_json: String,
+    pub created_at: i64,
+}
+
 /// Precomputed embedding payload for one capability — the runtime embeds
 /// BEFORE persisting, then hands these bytes to the combined store methods
 /// so the capability row, its exemplar inputs and its vector commit (or

@@ -51,29 +51,33 @@ pub(crate) async fn handle_envs_outcome(
     match handle_envs_key(envs_menu, k) {
         EnvsOutcome::Idle => {}
         EnvsOutcome::Cancel => *envs_menu = None,
-        EnvsOutcome::Activate(name) => match opencoder_core::set_active_env(Some(&name)) {
-            Ok(()) => {
-                *envs_menu = None;
-                refresh_after_env_change(
-                    format!("activated \u{2192} {name}"),
-                    client,
-                    config,
-                    model_label,
-                    compaction_threshold,
-                    context_limit,
-                    frame_ms,
-                    frame_ticker,
-                    cmd_tx,
-                    chat,
-                    workdir,
-                )
-                .await;
+        // Preflighted activation: a corrupt env must be rejected here, not
+        // on the next process start.
+        EnvsOutcome::Activate(name) => {
+            match opencoder_core::set_active_env_checked(Some(&name), workdir) {
+                Ok(()) => {
+                    *envs_menu = None;
+                    refresh_after_env_change(
+                        format!("activated \u{2192} {name}"),
+                        client,
+                        config,
+                        model_label,
+                        compaction_threshold,
+                        context_limit,
+                        frame_ms,
+                        frame_ticker,
+                        cmd_tx,
+                        chat,
+                        workdir,
+                    )
+                    .await;
+                }
+                Err(e) => {
+                    err_marker(chat, format!("activate failed: {e}"));
+                    *envs_menu = Some(EnvsMenu::List(EnvsList::discover()));
+                }
             }
-            Err(e) => {
-                err_marker(chat, format!("activate failed: {e}"));
-                *envs_menu = Some(EnvsMenu::List(EnvsList::discover()));
-            }
-        },
+        }
         EnvsOutcome::Deactivate => match opencoder_core::set_active_env(None) {
             Ok(()) => {
                 *envs_menu = None;

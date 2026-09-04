@@ -655,9 +655,11 @@ impl Config {
     /// Pick the file to persist config edits to. Rule (project-first, global
     /// fallback): the first existing candidate that already holds any of the
     /// editable keys; if none, create the project-local `./opencoder.json`.
-    /// While an env is active the env's config.json is the terminal target:
+    /// While an env is active the candidate chain is cut at the env layer:
     /// global/XDG candidates are skipped so `/model`-style edits land in the
-    /// env and the base files stay pristine for deactivation.
+    /// env and the global base files stay pristine for deactivation. The
+    /// project-first rule still wins when a project-layer file already
+    /// carries editable keys — such edits keep going to the project file.
     pub fn save_target(working_dir: &Path) -> PathBuf {
         let active = envs::active_env();
         let mut candidates = env::config_candidates_with(working_dir, active.as_deref());
@@ -785,7 +787,9 @@ impl Config {
             }
         }
         let pretty = serde_json::to_string_pretty(&root)?;
-        std::fs::write(target, pretty)?;
+        // E-1: a save landing in the active env dir must honor the 0o600
+        // owner-only contract (api keys live in these files).
+        envs::write_config_save(target, &pretty)?;
         Ok(target.to_path_buf())
     }
 }

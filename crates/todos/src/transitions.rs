@@ -49,7 +49,19 @@ pub fn validate_dispatch(
             .find(|todo| todo.id == request.todo_id)
             .expect("validated spec");
         let todo = state.todos.get(&request.todo_id).expect("validated state");
-        if todo.attempt >= spec_todo.max_attempts {
+        // An externally interrupted TODO keeps a dispatch path: the interrupt
+        // produced no verdict on the work, so it must not deadlock the
+        // workflow. With the plain gate, max_attempts=1 + a mid-run interrupt
+        // leaves an Interrupted todo that runnable() keeps proposing while
+        // this check refuses every dispatch — each resume burns the
+        // correction budget and suspends again, forever. Mirrors
+        // execution_failed(interrupted=true), which deliberately keeps
+        // Interrupted at exhausted attempts. The re-dispatch consumes a
+        // fresh attempt (dispatch increments), so a subsequent verdict on
+        // the work (plain failure) still lands on Failed.
+        let interrupted_with_session =
+            todo.status == TodoStatus::Interrupted && todo.active_session_id.is_some();
+        if !interrupted_with_session && todo.attempt >= spec_todo.max_attempts {
             bail!("TODO {} exhausted max_attempts", request.todo_id);
         }
         match request.context_mode {

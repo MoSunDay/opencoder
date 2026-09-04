@@ -291,7 +291,12 @@ pub(super) async fn run_app(
                         break;
                     }
                 };
+                // 输入即帧：Key/Paste/Mouse/Resize 立即置 render_pending，
+                // 按键回显不再等待 fps 帧周期的下一个 tick。
                 dirty = true;
+                if app_loop::input_event_prompts_frame(&ev) {
+                    render_pending = true;
+                }
                 match ev {
                     Event::Key(k) => {
                         // Armed clear-context guard: Enter or a second Shift+Tab fires, Esc 回撤, rest inert.

@@ -1,4 +1,4 @@
-//! # opencode-team
+//! # opencoder-team
 //!
 //! Multi-agent team-discussion orchestration runtime. A **team** (captain +
 //! members, each backed by a registered worker node) discusses a **topic**

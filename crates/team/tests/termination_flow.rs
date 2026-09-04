@@ -4,11 +4,18 @@
 
 mod common;
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
+use anyhow::{anyhow, Result};
+use async_trait::async_trait;
 use common::*;
 use opencoder_store::{Store, TeamTopicRunRecord, TEAM_RUN_EXECUTING, TEAM_RUN_FINISHED};
-use opencoder_team::{err, fs_store, ok, profile_team, CancelToken, MockDispatcher};
+use opencoder_team::{
+    err, fs_store, ok, profile_team, CancelToken, MockDispatcher, TeamDispatcher, TeamMember,
+};
 use serde_json::json;
 
 #[tokio::test]
@@ -94,4 +101,80 @@ async fn profile_team_fans_out_and_persists_capabilities() {
 
 fn fresh_ulid() -> String {
     ulid::Ulid::new().to_string()
+}
+
+/// Scripts one JSON profile reply per node; on the first `ask`, before
+/// replying, simulates a concurrent management edit: a third registered
+/// member is appended to `team.json` on the share (interior mutability, no
+/// classes/inheritance).
+struct ConcurrentAddDispatcher {
+    root: PathBuf,
+    third_id: String,
+    third_name: String,
+    replies: Mutex<HashMap<String, String>>,
+    edited: AtomicBool,
+}
+
+#[async_trait]
+impl TeamDispatcher for ConcurrentAddDispatcher {
+    async fn ask(&self, _topic: Option<&str>, node_id: &str, _prompt: &str) -> Result<String> {
+        if !self.edited.swap(true, Ordering::SeqCst) {
+            let mut team = fs_store::load_team(&self.root, TEAM).unwrap();
+            team.members.push(TeamMember {
+                node_id: self.third_id.clone(),
+                name: self.third_name.clone(),
+                capabilities: Vec::new(),
+                profiled_at: None,
+            });
+            team.updated_at = 2_000;
+            fs_store::save_team(&self.root, &team).unwrap();
+        }
+        self.replies
+            .lock()
+            .expect("scripted replies lock")
+            .remove(node_id)
+            .ok_or_else(|| anyhow!("no scripted reply left for node {node_id}"))
+    }
+}
+
+#[tokio::test]
+async fn profile_narrow_merge_preserves_concurrent_membership_edit() {
+    let fx = fixture(3, 2).await;
+    let (captain, members) = make_team(&fx, 2).await;
+    let third = register(&fx.store, "late-member").await;
+
+    let mut replies = HashMap::new();
+    replies.insert(
+        members[0].id.clone(),
+        json!({"capabilities": ["Rust 异步运行时"]}).to_string(),
+    );
+    replies.insert(
+        members[1].id.clone(),
+        json!({"capabilities": ["前端 React"]}).to_string(),
+    );
+    let dispatcher = Arc::new(ConcurrentAddDispatcher {
+        root: fx.root().to_path_buf(),
+        third_id: third.id.clone(),
+        third_name: third.name.clone(),
+        replies: Mutex::new(replies),
+        edited: AtomicBool::new(false),
+    });
+
+    let meta = profile_team(dispatcher, &fx.cfg, TEAM).await.unwrap();
+
+    assert_eq!(meta.members.len(), 3, "concurrent membership add survives");
+    let member_of = |id: &str| meta.members.iter().find(|m| m.node_id == id).unwrap();
+    let first = member_of(&members[0].id);
+    assert_eq!(first.capabilities, vec!["Rust 异步运行时"]);
+    assert!(first.profiled_at.is_some());
+    let second = member_of(&members[1].id);
+    assert_eq!(second.capabilities, vec!["前端 React"]);
+    assert!(second.profiled_at.is_some());
+    let added = member_of(&third.id);
+    assert!(
+        added.capabilities.is_empty(),
+        "concurrently added member untouched by profiling"
+    );
+    assert!(added.profiled_at.is_none());
+    assert_eq!(meta.captain.node_id, captain.id, "captain unchanged");
 }

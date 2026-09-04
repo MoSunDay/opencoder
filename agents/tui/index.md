@@ -1,4 +1,4 @@
-Commit: 2677992
+Commit: e899495
 
 # tui 模块
 
@@ -46,7 +46,7 @@ ratatui + crossterm 交互界面。3-region 布局、事件循环、鼠标命中
 
 **tmux resize clear**（`src/resize.rs`）：显式 `Resize` 事件与每帧尺寸轮询发现变化时，统一执行 `autoresize()` + `clear()`。ratatui 会把 pane 扩展后的新单元格视为空白、不产生 diff，真 clear 同时清掉 tmux 持久的物理 grid 并重置 diff baseline，防止隐藏状态栏或 pane 缩放后信息区旧字符透出。清屏/尺寸 I/O 失败直接上报，不以部分刷新状态继续。
 
-**终端帧契约**（`src/frame.rs` + `src/render.rs`）：所有环境统一使用 ratatui `Terminal<CrosstermBackend<Stdout>>` 的增量 diff；应用不再发送 DECSET 2026、不再在 tmux 内逐帧废弃 diff baseline，也不再给每个 cell 注入绝对光标移动。tmux 自己维护 pane grid 并负责 tmux→client 的差分输出，应用侧扩大为完整帧或逐 cell 定位既不能约束该下游链路，反而会把每次动画 tick 放大为整屏输出并触发 tmux/iTerm2 闪屏。启动、resume 与真实 resize 仍执行一次生命周期 clear，用户显式 force-redraw 仍可单次 clear；稳态帧绝不 clear，只输出实际变化和用于擦除缩短内容的空格。共享滚动条继续使用背景色空格，避免字体 fallback。Unicode 内容保持原样；外层终端必须与 tmux 使用一致的 Unicode 宽度规则（iTerm2 关闭 ambiguous double-width，并启用 Unicode 9+ widths）。
+**终端帧契约**（`src/frame.rs` + `src/render.rs`）：所有环境统一使用 ratatui `Terminal<CrosstermBackend<Stdout>>` 的增量 diff；应用不再发送 DECSET 2026、不再在 tmux 内逐帧废弃 diff baseline，也不再给每个 cell 注入绝对光标移动。tmux 自己维护 pane grid 并负责 tmux→client 的差分输出，应用侧扩大为完整帧或逐 cell 定位既不能约束该下游链路，反而会把每次动画 tick 放大为整屏输出并触发 tmux/iTerm2 闪屏。启动、resume 与真实 resize 仍执行一次生命周期 clear，用户显式 force-redraw 仍可单次 clear；稳态帧绝不 clear，只输出实际变化和用于擦除缩短内容的空格。共享滚动条继续使用背景色空格，避免字体 fallback。Unicode 内容保持原样；外层终端必须与 tmux 使用一致的 Unicode 宽度规则（iTerm2 关闭 ambiguous double-width，并启用 Unicode 9+ widths）。Kitty 键盘增强的 push/pop 必须严格包在备屏会话内（`write_enter` 先 `EnterAlternateScreen` 后 push、`write_restore` 先 pop 后 `LeaveAlternateScreen`）：协议的增强标志栈按 screen 维护，push 落主屏、pop 落备屏会把 push 留在主屏栈上——退出后终端仍处于 `REPORT_ALL_KEYS_AS_ESCAPE_CODES`，shell 逐键回显 `CSI u` 乱码且按键全部失效（kitty/ghostty/新版 wezterm/foot 复现，全局栈实现与 tmux 不透传时不可见）；enter/restore 序列各自单缓冲一次写出，顺序不变量由 `write_enter_pushes_kitty_only_inside_alt_screen` / `write_restore_pops_kitty_before_leaving_alt_screen` 钉死。
 
 - **render**：`display_chat` / `display_title` / `display_ctx` / `display_sys` = subagent_focus 时取子 ChatView 及其 `context_used` + 缓存的 `subagent_sys`（进入时 `sys_tokens_for(kind, workdir, None)` 算一次），否则取 `&chat` + `chat.context_used` / `sys_tokens`。`display_agent` = focus 时 `← [Ctrl+L] back | ⇲sub [kind] prompt`。
 - **Session 事件**：`chat.apply(&sev)` 内部调 `track_context` 更新当前 view；SubagentChild 路由到子 ChatView。TranscriptReset/resume 经 `session_ui::replay_into_chat` 重建并回填 `context_used`。worker 为每条命令创建单一有序异步转发器连接同步 LLM callback 与有界 UI mpsc：接近满时只允许丢弃顶层 `TextDelta`，SubagentChild delta、ReasoningDelta、TranscriptReset 与生命周期事件均按原序等待容量；同一队列随后投递 `UiEvent::AssistantFinal` 完成态和 `TurnDone`。`reconcile_completed_assistant` 在 `turn_block_start` 之后校准或补建唯一 Say，即使全部父级正文 delta 被丢也不缺字、不覆盖旧轮；`TurnDone` 可靠收口 agent、markdown 与孤儿 subagent 状态。

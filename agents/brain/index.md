@@ -1,4 +1,4 @@
-Commit: pending（共享工作树并行迭代中，随 brain 功能一并收口提交）
+Commit: 8ca4d0e（统一收口落库，348 文件含 brain 全量；尾笔 66a3247 补最后一笔 changelog）
 
 # opencoder-brain — 项目目标/能力库
 

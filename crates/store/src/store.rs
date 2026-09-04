@@ -8,9 +8,9 @@ use crate::types::{
     SessionMeta, SessionPatch, SubagentTaskRecord,
 };
 use crate::{
-    BrainCapabilityDetail, BrainCapabilityRecord, BrainEngInputRecord, BrainVectorHit,
-    BrainVectorWrite, TeamTopicRunRecord, TodoEventRecord, TodoItemRecord, TodoWorkflowRecord,
-    TodoWorkflowSummary,
+    BrainCapabilityDetail, BrainCapabilityRecord, BrainEngInputRecord, BrainPlanRecord,
+    BrainVectorHit, BrainVectorWrite, TeamTopicRunRecord, TodoEventRecord, TodoItemRecord,
+    TodoWorkflowRecord, TodoWorkflowSummary,
 };
 
 /// Storage abstraction — the single seam that lets us swap libsql for another
@@ -332,6 +332,20 @@ pub trait Store: Send + Sync {
             self.backend_name()
         )
     }
+    /// Persist one decision-tree plan (see [`BrainPlanRecord`]). Ids are
+    /// fresh ULIDs from the brain runtime, so this is a plain INSERT.
+    async fn save_brain_plan(&self, _plan: &BrainPlanRecord) -> Result<()> {
+        anyhow::bail!("brain plans are not supported by {}", self.backend_name())
+    }
+    /// Fetch one decision-tree plan by id (`None` if absent).
+    async fn get_brain_plan(&self, _id: &str) -> Result<Option<BrainPlanRecord>> {
+        anyhow::bail!("brain plans are not supported by {}", self.backend_name())
+    }
+    /// Newest decision-tree plan for a situation digest — the dispatch-side
+    /// cache probe (`None` when nothing was planned for this digest yet).
+    async fn latest_brain_plan_for(&self, _digest: &str) -> Result<Option<BrainPlanRecord>> {
+        anyhow::bail!("brain plans are not supported by {}", self.backend_name())
+    }
 
     /// Register (or re-register) a worker node by its unique `name`. A new
     /// name gets a fresh ULID; a known name keeps its `id` so dispatched tasks
@@ -520,6 +534,18 @@ pub trait Store: Send + Sync {
     ) -> Result<crate::types::DagRunRecord> {
         anyhow::bail!("dag store API is not supported by {}", self.backend_name())
     }
+    /// Terminal status move + synthetic `run_finished` event in ONE
+    /// transaction; returns the event seq. Same error contract as
+    /// [`Store::update_dag_run_status`] ("not found" / "illegal").
+    async fn finalize_dag_run(
+        &self,
+        _run_id: &str,
+        _status: opencoder_dag::DagRunStatus,
+        _error: Option<&str>,
+        _now_ms: i64,
+    ) -> Result<i64> {
+        anyhow::bail!("dag store API is not supported by {}", self.backend_name())
+    }
     /// Mark a run `cancelling` (or `cancelled` straight from `pending`);
     /// the node observes it via the heartbeat piggyback and aborts.
     async fn cancel_dag_run(&self, _run_id: &str, _now_ms: i64) -> Result<()> {
@@ -553,16 +579,17 @@ pub trait Store: Send + Sync {
     }
     /// Lost-node sweep for DAG runs — same semantics as
     /// [`Store::converge_lost_node_tasks`]: `running | cancelling` runs of
-    /// heartbeat-stale nodes become `error("node lost")`.
+    /// heartbeat-stale nodes become `error("node lost")`; each converged run
+    /// carries its in-transaction `run_finished` seq.
     async fn converge_lost_dag_runs(
         &self,
         _now_ms: i64,
         _stale_ms: i64,
-    ) -> Result<Vec<crate::types::DagRunRecord>> {
+    ) -> Result<Vec<crate::types::ConvergedDagRun>> {
         anyhow::bail!("dag store API is not supported by {}", self.backend_name())
     }
 
-    // ------------- Team topic runs (opencode-team fan-out) -----------------
+    // ------------- Team topic runs (opencoder-team fan-out) -----------------
     //
     // The durable (topic, node) pairing ledger of the multi-node team
     // runtime. Pure persistence: scheduling lives above the Store.

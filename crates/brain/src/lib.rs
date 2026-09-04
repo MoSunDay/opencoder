@@ -17,9 +17,13 @@
 
 pub mod domain;
 pub mod error;
+pub mod plan;
+pub mod planning;
 pub mod runtime;
 pub mod types;
 
-pub use error::{BrainNotFound, EmbeddingFailed};
+pub use error::{BrainNotFound, EmbeddingFailed, PlanGenerationFailed, PlanNotFound};
+pub use plan::{DecisionTree, DispatchOutcome, PlanNode};
+pub use planning::{situation_digest, Dispatched, PLANNER_FRAMEWORK_PROMPT};
 pub use runtime::Runtime;
 pub use types::CapabilityInput;

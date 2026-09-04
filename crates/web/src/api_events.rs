@@ -2,6 +2,13 @@
 //! budget: `GET /events` (persisted replay + live broadcast with two-tier
 //! dedup, subscriber-slot drop guard) and `GET /seq` (reconnect cursor).
 //! Re-exported through `crate::api` so handler paths stay stable.
+//!
+//! Pre-subscribe gap 桥接：客户端在 POST /prompt 之后才建立 SSE 连接，事件
+//! 若在 subscribe 之前广播、且回放查询 `events_after` 执行时仍未落库
+//! （event flusher 对 delta 攒批滞后），既不在直播流也不在回放里，对该连接
+//! 永久丢失。`SessionHandle::subscribe_recent` 在 subscribe 原子地附赠一份
+//! 近期广播 ring 快照，本 handler 把其中未被回放覆盖（指纹/seq 去重后仍
+//! 存活）的条目补发在回放之后，弥合该窗口。
 
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -54,15 +61,20 @@ pub async fn get_events(
     // persisted at query time, not received via broadcast). With subscribe-first
     // every post-subscribe broadcast is captured by the live stream; any overlap
     // with the replay window is deduplicated below.
-    let (rx, created) = {
+    //
+    // 只在 map 锁内拿 handle Arc 并占订阅位；ring 快照（`subscribe_recent`，
+    // 持 handle 自己的 recent 锁）放到 map 锁释放之后做，避免嵌套持锁的
+    // 锁序问题。
+    let (handle, created) = {
         let mut map = state.handles.lock().await;
         let created = !map.contains_key(&id);
         let handle = map.entry(id.clone()).or_insert_with(SessionHandle::new);
         // Track this subscriber so the handle this request may have created is
         // evicted (see `release_events_subscriber`) once everyone disconnects.
         handle.subscribers.fetch_add(1, Ordering::SeqCst);
-        (handle.tx.subscribe(), created)
+        (Arc::clone(handle), created)
     };
+    let (rx, ring) = handle.subscribe_recent();
 
     // P0-1: Capture the persisted-seq baseline BEFORE querying `events_after`.
     // `last_event_seq` returns the current max persisted seq; reading it AFTER
@@ -100,7 +112,23 @@ pub async fn get_events(
     let max_replay_seq: i64 = persisted.iter().filter_map(|e| e.seq).max().unwrap_or(-1);
     let seen = crate::sse_dedup::seed_seen(&persisted, baseline);
 
-    let replay = futures::stream::iter(persisted);
+    // Pre-subscribe gap 桥接：ring 里「已落库」的条目上面 replay 已覆盖
+    // （指纹/seq 去重消费掉），「未落库」的条目（flusher 攒批滞后）在这里
+    // 补发。顺序安全：flusher 单通道 FIFO 且结构性事件会先冲刷挂起 delta，
+    // 因此任何未落库 ring 条目的发射序必然晚于全部已落库条目，直接接在
+    // replay 之后即保持全局时序。
+    //
+    // 桥接用独立的多重集（`seed_bridge_seen`，覆盖整个回放窗口而非仅重叠
+    // 窗口）：ring 里 subscribe 前就已落库的条目 seq <= baseline，若沿用
+    // `seen` 的 baseline 过滤将无法命中指纹而被补发，与 replay 双发；该
+    // 集合只在此处同步消费、不接触直播流，无 P0-1 历史指纹误吞直播的风险。
+    let bridge_seen = crate::sse_dedup::seed_bridge_seen(&persisted);
+    let bridged: Vec<SseEvt> = ring
+        .into_iter()
+        .filter(|e| crate::sse_dedup::forward_live(e, &bridge_seen, max_replay_seq))
+        .collect();
+
+    let replay = futures::stream::iter(persisted).chain(futures::stream::iter(bridged));
     let live =
         tokio_stream::wrappers::BroadcastStream::new(rx)
             .filter_map(|r| async move { crate::api::map_broadcast_result(r) })

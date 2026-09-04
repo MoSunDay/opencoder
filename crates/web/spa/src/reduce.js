@@ -12,8 +12,10 @@ import {
   appendThinkDelta,
   backfillBufferedCall,
   backfillStepsCall,
+  clearSayStreaming,
   closeOpenText,
   flushPendingThink,
+  markSayStreaming,
   settleTurnProgress,
 } from './steps/reducer.js';
 
@@ -285,6 +287,14 @@ function withTurns(state, turns) {
   return { ...state, turns };
 }
 
+// Terminal/boundary settle: freeze the ladder's progress AND retire every
+// Say-row running hint (sayStreaming) so no run outlives the sub-turn —
+// done, error, interrupted, transcript_reset, a user echo (queue/steer/
+// withUserTurn) all end the currently-streaming Say for good.
+function settleTerminal(turns) {
+  return clearSayStreaming(settleTurnProgress(turns));
+}
+
 function appendDelta(state, kind, text) {
   if (!text) {
     return state;
@@ -366,8 +376,13 @@ function foldFrame(state, frame, nowMs) {
       if (!text) {
         return state;
       }
+      // Order invariant (reduce.order.test.js): the ladder settles BEFORE
+      // the Say lands; markSayStreaming then hands the "running" hint to the
+      // Say row (same target turn — it stays "running" until a fresh ladder
+      // opens below the Say or a terminal boundary arrives); appendDelta
+      // appends/extends the Say LAST.
       return appendDelta(
-        withTurns(state, settleTurnProgress(state.turns)),
+        withTurns(state, markSayStreaming(settleTurnProgress(state.turns))),
         'text',
         text,
       );
@@ -462,7 +477,22 @@ function foldFrame(state, frame, nowMs) {
       }
       // Hard segment boundary: fold the pre-boundary think run into the
       // ladder before the echo lands (a later tool_start can never cross it).
-      const turns = closeOpenText(flushPendingThink(settleTurnProgress(state.turns)));
+      const settled = closeOpenText(flushPendingThink(settleTerminal(state.turns)));
+      // Optimistic-echo dedup (TUI pending_turn_echo contract): a locally
+      // predicted echo (chat.jsx's optimistic flag) and the server's echo
+      // frame are the SAME user boundary — when the last turn is that
+      // prediction with identical text, fold instead of pushing a second
+      // bubble; the flag comes off so the turn is now the authoritative
+      // echo. Anything else keeps the plain push below.
+      const last = settled.length > 0 ? settled[settled.length - 1] : null;
+      if (last && last.kind === 'text' && last.role === 'user'
+        && last.text === text && last.optimistic === true) {
+        const authoritative = { ...last };
+        delete authoritative.optimistic;
+        return withTurns({ ...state, pendingEcho: text },
+          settled.slice(0, -1).concat([authoritative]));
+      }
+      const turns = settled.slice();
       turns.push({ kind: 'text', role: 'user', text });
       // Remember the echo (TUI pending_turn_echo): a mid-run transcript_reset
       // rebuilds from a store snapshot that has not recorded it yet.
@@ -553,7 +583,7 @@ function foldFrame(state, frame, nowMs) {
     case 'interrupted':
       return withTurns(
         state,
-        settleTurnProgress(state.turns).concat([{ kind: 'sys', text: '⏹ interrupted' }]),
+        settleTerminal(state.turns).concat([{ kind: 'sys', text: '⏹ interrupted' }]),
       );
     case 'transcript_reset':
       // Wire payload is `{}` (runner/event.rs) — the collapsed transcript
@@ -564,7 +594,7 @@ function foldFrame(state, frame, nowMs) {
       // admitted turn (compound `/act_clear_context <tail>`), and the store
       // snapshot has not recorded the echo yet — the reload re-pushes it
       // (ensurePendingEcho, TUI rebuild_after_reset parity).
-      return { ...state, turns: closeOpenText(settleTurnProgress(state.turns)) };
+      return { ...state, turns: closeOpenText(settleTerminal(state.turns)) };
     case 'done':
       // A pure-text round (or the turn's final Say round) folds its think
       // turns into a call-less step — no think turn survives above the ladder.
@@ -575,7 +605,7 @@ function foldFrame(state, frame, nowMs) {
         ...state,
         status: 'done',
         pendingEcho: null,
-        turns: closeOpenText(flushPendingThink(settleTurnProgress(state.turns))),
+        turns: closeOpenText(flushPendingThink(settleTerminal(state.turns))),
       };
     case 'error': {
       // A lag-marked error (api.rs map_broadcast_result) is a consumer
@@ -591,7 +621,7 @@ function foldFrame(state, frame, nowMs) {
         status: 'error',
         error: String(data.error || data.message || 'error'),
         pendingEcho: null,
-        turns: closeOpenText(flushPendingThink(settleTurnProgress(state.turns))),
+        turns: closeOpenText(flushPendingThink(settleTerminal(state.turns))),
       };
     }
     default:
@@ -618,17 +648,22 @@ export function consumedEchoText(prompt) {
 /// User prompt echo for flows where the server emits no echo frame (remote
 /// dispatch has no queue_consumed — the task session is synthetic). Feed it
 /// through consumedEchoText so the optimistic bubble matches what the server
-/// would have recorded — never the command token itself.
-export function withUserTurn(state, text) {
+/// would have recorded — never the command token itself. `optimistic` marks
+/// the turn as a LOCAL prediction: a later steer/queue_consumed frame with
+/// the SAME text folds into it (dedup below) instead of rendering twice.
+export function withUserTurn(state, text, optimistic) {
   if (!text) {
     return state;
   }
   // Also remember the echo as pendingEcho: a mid-run transcript_reset rebuild
   // must re-push this boundary if the store snapshot lacks it.
+  const echoTurn = { kind: 'text', role: 'user', text };
+  if (optimistic) {
+    echoTurn.optimistic = true;
+  }
   return withTurns(
     { ...state, pendingEcho: text },
-    closeOpenText(flushPendingThink(settleTurnProgress(state.turns)))
-      .concat([{ kind: 'text', role: 'user', text }]),
+    closeOpenText(flushPendingThink(settleTerminal(state.turns))).concat([echoTurn]),
   );
 }
 

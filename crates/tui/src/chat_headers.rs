@@ -6,8 +6,8 @@
 //! Extracted from `chat.rs` for the line gate; behavior unchanged.
 
 use super::{
-    assistant_rows, ChatBlock, ChatView, CompactionHeader, SubagentHeader, ThinkingHeader,
-    ToolCallHeader,
+    assistant_rows, step_render, ChatBlock, ChatView, CompactionHeader, SubagentHeader,
+    ThinkingHeader, ToolCallHeader,
 };
 
 impl ChatView {
@@ -55,6 +55,9 @@ impl ChatView {
         let mut compaction = Vec::new();
         let mut tool_calls = Vec::new();
         let mut line_idx = 0usize;
+        let merged_say = |i: usize| -> bool {
+            matches!(self.blocks.get(i + 1), Some(ChatBlock::Assistant { .. }))
+        };
         for (block_idx, block) in self.blocks.iter().enumerate() {
             match block {
                 ChatBlock::Marker(lines) => line_idx += lines.len(),
@@ -64,12 +67,30 @@ impl ChatView {
                     rendered,
                     done,
                 } => {
-                    // +1 for the "say:" header line emitted by flatten().
-                    line_idx += 1;
-                    line_idx += if *done {
+                    let merged = matches!(
+                        block_idx.checked_sub(1).and_then(|i| self.blocks.get(i)),
+                        Some(ChatBlock::StepGroup { .. })
+                    );
+                    // +1 for the "say:" header line emitted by flatten() —
+                    // skipped when this Say is merged into the preceding
+                    // StepGroup's header row (the group emitted the merged
+                    // `Say(n steps)` row and this block renders body only).
+                    if !merged {
+                        line_idx += 1;
+                    }
+                    // 合并对正文行数镜像：跳过与 preview 重复的首个非空行
+                    // （单行 Say / 空正文整块隐藏）—— 与 `flatten_with` 的
+                    // Assistant 分支逐行同步，hit-rect 才能对齐。
+                    let total = if *done {
                         rendered.len()
                     } else {
                         assistant_rows(raw).len()
+                    };
+                    line_idx += if merged {
+                        step_render::merged_say_body_decision(raw, rendered, *done)
+                            .visible_len(total)
+                    } else {
+                        total
                     };
                 }
                 ChatBlock::Thinking {
@@ -92,7 +113,18 @@ impl ChatView {
                     // and while THAT step is open its `💭 Thinking` header +
                     // thinking lines plus the calls aggregation row (target),
                     // then each call header while that list is open (target;
-                    // + result + blank when the call is expanded); one trailing blank.
+                    // + result + blank when the call is expanded); one trailing
+                    // blank, merged into the final expanded call's separator.
+                    //
+                    // ADJACENT-pair merge: when the next block is this turn's
+                    // Say (`Assistant`), the standalone `N Steps` row is
+                    // replaced by the merged `Say(n steps): <preview>` header
+                    // — the group target (call_idx 0) stays on that row, and
+                    // the header's separator blank right below terminates the
+                    // CLOSED pair (no ladder rows, no second trailing blank;
+                    // the Say body follows with its first line deduped
+                    // against the preview).
+                    let say_merged = merged_say(block_idx);
                     let mut call_idx = 0usize;
                     tool_calls.push(ToolCallHeader {
                         block_idx,
@@ -100,7 +132,13 @@ impl ChatView {
                         header_line_idx: line_idx,
                     });
                     call_idx += 1;
-                    line_idx += 1; // group row
+                    line_idx += 1; // group row (or merged Say header row)
+                    if say_merged {
+                        // 合并头部行之后的空行（与 `flatten_step_group` 同
+                        // 步）：闭合时兼任整对的尾部空行，展开时隔开头部
+                        // 与 ladder。
+                        line_idx += 1;
+                    }
                     if *open {
                         for step in steps.iter() {
                             tool_calls.push(ToolCallHeader {
@@ -138,7 +176,17 @@ impl ChatView {
                             }
                         }
                     }
-                    line_idx += 1; // trailing blank
+                    // Exactly one blank after the group: when the last
+                    // visible row is an expanded call, its separator blank
+                    // (counted above) IS the trailing blank — don't add
+                    // another.
+                    let ends_on_expanded_call = *open
+                        && steps.last().is_some_and(|s| {
+                            s.open && s.calls_open && s.calls.last().is_some_and(|c| c.expanded)
+                        });
+                    if !ends_on_expanded_call && !(say_merged && !*open) {
+                        line_idx += 1; // trailing blank
+                    }
                 }
                 ChatBlock::Compaction {
                     text, collapsed, ..

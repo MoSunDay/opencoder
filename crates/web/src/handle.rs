@@ -6,7 +6,7 @@
 //! /events replays persisted events after a cursor, then forwards the live
 //! broadcast — so any process (or browser tab) sees a consistent stream.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 
@@ -17,7 +17,7 @@ use opencoder_session::compaction;
 use opencoder_session::handoff;
 use opencoder_session::tools::registry as build_registry;
 use opencoder_session::{resume_and_replay as resume_session, run, SessionEvent};
-use opencoder_store::{Delivery, EventKind, SessionEventRecord, SessionInput, SessionPatch, Store};
+use opencoder_store::{Delivery, EventKind, SessionInput, SessionPatch, Store};
 use tokio::sync::{broadcast, mpsc, Mutex};
 use tokio_util::sync::CancellationToken;
 use tracing::warn;
@@ -42,74 +42,22 @@ pub fn sse_from_session_event(_session_id: &str, ev: &SessionEvent) -> (SseEvt, 
     )
 }
 
-/// Broadcast + persist a session event from OUTSIDE a drain (switch endpoints,
-/// resume-failure terminal frames). Live SSE subscribers receive the frame
-/// immediately; the `session_events` append keeps replay (`?after=`) faithful
-/// — the exact broadcast+sink contract `apply_drain_cmd` uses, for callers
-/// that hold no `EventSink`.
-///
-/// Order is persist-then-broadcast: a subscriber arriving in the gap between
-/// the two steps queries replay AFTER the append, so the row (seq > its
-/// baseline) seeds the overlap fingerprint set and the live copy is swallowed
-/// by `sse_dedup::forward_live` — delivered exactly once. Broadcast-first left
-/// that subscriber with NEITHER copy: the live send had already flown by and
-/// the replay query predated the row.
-///
-/// Store-write failures are warn-only: the live frame still goes out and a
-/// missing replay row degrades gracefully.
-pub(crate) async fn broadcast_persist_event(
-    store: &Arc<dyn Store>,
-    handle: &SessionHandle,
-    session_id: &str,
-    ev: SessionEvent,
-) {
-    let (sse, kind) = sse_from_session_event(session_id, &ev);
-    let rec = SessionEventRecord {
-        session_id: session_id.to_string(),
-        kind,
-        payload: ev.sse_data(),
-        ts: opencoder_core::message::now_ms(),
-        seq: None,
-        sse_kind: Some(ev.sse_kind().to_string()),
-    };
-    if let Err(e) = store.append_event(&rec).await {
-        warn!(session_id, error = %e, event = ev.sse_kind(), "broadcast event persist failed");
-    }
-    let _ = handle.tx.send(sse);
-}
-
-/// P1 contract: a run that ends in `Err` owes the SSE consumer a terminal
-/// `error` frame EVEN WHEN the runner surfaced none (control-command apply
-/// failure, a store write failing mid-run, …) — otherwise the stream hangs
-/// open forever with no terminal frame while `draining` resets. Runs that
-/// already emitted their own `Error` are left alone: duplicating would
-/// double-report the failure (and break the exactly-one-Error contract pinned
-/// by `drain_no_restart_on_error`).
-pub(crate) async fn ensure_run_error_frame(
-    store: &Arc<dyn Store>,
-    handle: &SessionHandle,
-    session_id: &str,
-    result: &Result<()>,
-    run_emitted_error: bool,
-) {
-    if let Err(e) = result {
-        if run_emitted_error {
-            return;
-        }
-        broadcast_persist_event(
-            store,
-            handle,
-            session_id,
-            SessionEvent::Error(format!("{e:#}")),
-        )
-        .await;
-    }
-}
-
 /// Per-session runtime state shared across HTTP requests, SSE subscribers, and
 /// the background drain task.
 pub struct SessionHandle {
     pub tx: broadcast::Sender<SseEvt>,
+    /// pre-subscribe gap 桥接：近期已广播事件的环形快照。
+    ///
+    /// SSE 客户端通常在 POST /prompt 之后才建立连接，而 drain 侧的事件落库走
+    /// 异步 flusher（`event_sink` 对 delta 攒批），因此存在一个窗口：事件已
+    /// `broadcast` 但客户端尚未 subscribe、且回放查询 `events_after` 执行时还
+    /// 未落库 —— 该事件对这条连接永久丢失（实测 reasoning_delta 丢失导致直播
+    /// 态布局与 done 后快照重建不一致）。此 ring 让订阅者在 subscribe 原子地
+    /// 拿到「已广播」快照，由 `get_events` 补发其中未被回放覆盖的条目。
+    ///
+    /// 容量与 `event_sink::CAPACITY`(4096) 对齐：flusher 批次上限 512，环形
+    /// 缓冲只需覆盖 flusher 攒批滞后 + 订阅延迟，4096 足以兜住整个在途 turn。
+    pub recent: std::sync::Mutex<VecDeque<SseEvt>>,
     pub cancel: Mutex<CancellationToken>,
     pub overrides: Mutex<RuntimeOverrides>,
     pub draining: AtomicBool,
@@ -148,12 +96,43 @@ pub struct SessionHandle {
 
 const BROADCAST_CAPACITY: usize = 256;
 
+/// 近期广播环形缓冲容量：与 `event_sink::CAPACITY`(4096) 对齐。flusher 的
+/// delta 批次上限是 512（条数）/8KB，环形缓冲只需覆盖「flusher 攒批滞后 +
+/// 订阅延迟」即可保证不丢，4096 与 flusher channel 同量级兜底。
+const RING_CAP: usize = 4096;
+
+impl SessionHandle {
+    /// 广播一条 SSE 事件：先入 ring、再发直播流。
+    ///
+    /// 锁序是关键：append(ring) 与 send(tx) 在同一把 `recent` 锁内完成，而
+    /// `subscribe_recent` 的「subscribe(tx) + ring 快照」也持同一把锁，两者
+    /// 互斥。由此保证：subscribe 之前广播的事件必然已写进快照（不会丢），
+    /// subscribe 之后广播的事件必然只走直播流（不会因快照双发）。
+    /// `broadcast::Sender::send` 本身非阻塞，锁内调用安全。
+    pub fn broadcast_evt(&self, sse: SseEvt) {
+        let mut ring = self.recent.lock().expect("recent ring poisoned");
+        ring.push_back(sse.clone());
+        while ring.len() > RING_CAP {
+            ring.pop_front();
+        }
+        let _ = self.tx.send(sse);
+    }
+
+    /// 订阅直播流并原子地取得 ring 快照（见 `broadcast_evt` 的锁序说明）。
+    /// 快照返回后调用方自行用回放窗口做指纹/seq 去重，只补发未落库条目。
+    pub fn subscribe_recent(&self) -> (broadcast::Receiver<SseEvt>, Vec<SseEvt>) {
+        let ring = self.recent.lock().expect("recent ring poisoned");
+        (self.tx.subscribe(), ring.iter().cloned().collect())
+    }
+}
+
 impl SessionHandle {
     pub fn new() -> Arc<Self> {
         let (tx, _rx) = broadcast::channel::<SseEvt>(BROADCAST_CAPACITY);
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel::<DrainCmd>();
         Arc::new(SessionHandle {
             tx,
+            recent: std::sync::Mutex::new(VecDeque::new()),
             cancel: Mutex::new(CancellationToken::new()),
             overrides: Mutex::new(RuntimeOverrides::default()),
             draining: AtomicBool::new(false),
@@ -270,7 +249,9 @@ impl<S> Drop for DropGuardStream<S> {
     }
 }
 
-pub(crate) use crate::handle_lifecycle::release_events_subscriber;
+pub(crate) use crate::handle_lifecycle::{
+    broadcast_persist_event, ensure_run_error_frame, release_events_subscriber,
+};
 
 /// Admit a prompt durably, then ensure exactly one drain task is running.
 #[allow(clippy::too_many_arguments)]
@@ -481,7 +462,7 @@ pub async fn send_cmd(handles: &HandleMap, session_id: &str, cmd: DrainCmd) -> b
 async fn apply_drain_cmd(
     session: &mut opencoder_session::SessionState,
     cmd: DrainCmd,
-    tx: &broadcast::Sender<SseEvt>,
+    handle: &SessionHandle,
     sink: &opencoder_session::EventSink,
     sid: &str,
     workdir: &std::path::Path,
@@ -491,9 +472,11 @@ async fn apply_drain_cmd(
     // the `sink.push`, drain-command events (Compaction, Done,
     // TranscriptReset, …) would never reach disk, so an SSE
     // reconnect replay (`?after=<seq>`) would silently miss them.
+    // 广播走 `broadcast_evt`（ring + 直播），与主回调同一条 pre-subscribe
+    // gap 桥接路径。
     let mut broadcast = |ev: SessionEvent| {
         let (sse, _) = sse_from_session_event(sid, &ev);
-        let _ = tx.send(sse);
+        handle.broadcast_evt(sse);
         let _ = sink.push(&ev);
     };
     match cmd {
@@ -583,14 +566,14 @@ async fn apply_drain_cmd(
 async fn process_drain_cmds(
     session: &mut opencoder_session::SessionState,
     rx_guard: &mut CmdRxGuard,
-    tx: &broadcast::Sender<SseEvt>,
+    handle: &SessionHandle,
     sink: &opencoder_session::EventSink,
     sid: &str,
     workdir: &std::path::Path,
 ) {
     if let Some(rx) = rx_guard.rx.as_mut() {
         while let Ok(cmd) = rx.try_recv() {
-            apply_drain_cmd(session, cmd, tx, sink, sid, workdir).await;
+            apply_drain_cmd(session, cmd, handle, sink, sid, workdir).await;
         }
     }
 }
@@ -690,7 +673,9 @@ async fn drain_to_completion(
     session.question_hub = handle.question_hub.clone();
     handle.question_hub.attach();
 
-    let tx = handle.tx.clone();
+    // 广播句柄克隆进回调：`broadcast_evt` 同时写 ring（pre-subscribe gap
+    // 桥接）与直播通道，取代裸 `tx.send`。
+    let bcast = Arc::clone(&handle);
     let sid = session_id.to_string();
     let (sink, flusher) =
         opencoder_session::spawn_event_flusher(Some(store.clone()), session_id.to_string());
@@ -706,7 +691,7 @@ async fn drain_to_completion(
             run_emitted_error = true;
         }
         let (sse, _kind) = sse_from_session_event(&sid, &ev);
-        let _ = tx.send(sse);
+        bcast.broadcast_evt(sse);
         let _ = sink.push(&ev);
     })
     .await;
@@ -718,7 +703,7 @@ async fn drain_to_completion(
 
     // Apply endpoint-forwarded drain commands (autopilot/annotation/...)
     // once the run settles.
-    process_drain_cmds(&mut session, &mut rx_guard, &tx, &sink, &sid, &workdir).await;
+    process_drain_cmds(&mut session, &mut rx_guard, &handle, &sink, &sid, &workdir).await;
 
     // Best-effort title generation after the FIRST successful completion of a
     // drain (mirrors `crates/cli/src/run.rs`): runs while the event sink is
@@ -731,6 +716,13 @@ async fn drain_to_completion(
     drop(sink);
     if let Err(e) = flusher.await {
         warn!(session_id, error = %e, "final event flush failed");
+    }
+    // flusher 已排空：此刻 ring 中所有条目必然已落库（或已按丢批策略放弃），
+    // 回放可全覆盖，清空 ring。否则一次空闲期重连（after=最新 seq、回放为
+    // 空）会把上一 turn 的广播尾巴当「新事件」整体重发。ring 的职责只是
+    // 覆盖 flusher 攒批滞后 + 订阅延迟，drain 收束后即失去意义。
+    if let Ok(mut ring) = handle.recent.lock() {
+        ring.clear();
     }
     drop(rx_guard);
     if let Err(e) = result {

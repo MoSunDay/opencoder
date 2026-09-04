@@ -1,6 +1,8 @@
-use crate::chat::ChatView;
+use crate::chat::{ChatView, TOOL_OUTPUT_LINES};
 use crate::composer;
-use crate::terminal_text::sanitize_single_line;
+use crate::terminal_text::{sanitize_multiline, sanitize_single_line};
+use ratatui::style::{Color, Style};
+use ratatui::text::{Line, Span};
 
 use opencoder_core::message::now_ms;
 
@@ -35,6 +37,23 @@ pub(crate) fn summarize(input: &serde_json::Value) -> String {
 /// emoji text no longer overflows its visual budget.
 pub(crate) fn short(s: &str, n: usize) -> String {
     composer::truncate_to_width(&sanitize_single_line(s.trim()), n)
+}
+
+/// Captured tool-output rows for an expanded function call: sanitize, cap at
+/// `TOOL_OUTPUT_LINES`, indent 2, style with `color`. Trailing blank lines are
+/// dropped here so the single structural blank rendered after the output (the
+/// `User:`-block parity separator) stays the ONLY trailing blank — outputs
+/// that end in newlines must never grow extra separators. Interior blanks are
+/// preserved.
+pub(crate) fn tool_output_lines(text: &str, color: Color) -> Vec<Line<'static>> {
+    let clean = sanitize_multiline(text);
+    let mut rows: Vec<&str> = clean.lines().take(TOOL_OUTPUT_LINES).collect();
+    while rows.last().is_some_and(|l| l.trim().is_empty()) {
+        rows.pop();
+    }
+    rows.into_iter()
+        .map(|l| Line::from(Span::styled(format!("  {l}"), Style::default().fg(color))))
+        .collect()
 }
 
 /// Read the concatenated text content of all blocks (for testing).
@@ -156,23 +175,9 @@ impl ChatView {
     /// record elapsed time. The ladder's disclosure state is left untouched;
     /// only user actions (including Ctrl+L) may close expanded content.
     pub(crate) fn finish_bash_tool(&mut self, output: &str) {
-        use crate::chat::TOOL_OUTPUT_LINES;
-        use crate::terminal_text::sanitize_multiline;
         use crate::theme;
-        use ratatui::style::Style;
-        use ratatui::text::{Line, Span};
         let ts = now_ms();
-        let clean = sanitize_multiline(output);
-        let out: Vec<Line<'static>> = clean
-            .lines()
-            .take(TOOL_OUTPUT_LINES)
-            .map(|l| {
-                Line::from(Span::styled(
-                    format!("  {l}"),
-                    Style::default().fg(theme::muted()),
-                ))
-            })
-            .collect();
+        let out = tool_output_lines(output, theme::muted());
         // Newest group holding an unfinished `bash-` call.
         let target = self.blocks.iter().enumerate().rev().find_map(|(gi, blk)| {
             if let crate::chat::ChatBlock::StepGroup { steps, .. } = blk {

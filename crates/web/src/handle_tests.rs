@@ -2,6 +2,7 @@
 //! eviction, release semantics). Extracted from `handle.rs` via
 //! `#[path]` so the runtime file stays under the repo line cap.
 use super::*;
+use opencoder_store::SessionEventRecord;
 use std::sync::atomic::Ordering;
 
 #[tokio::test]

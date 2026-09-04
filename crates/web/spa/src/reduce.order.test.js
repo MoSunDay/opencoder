@@ -33,6 +33,9 @@ describe('reduce ordering (settle-before-append at the folding layer)', () => {
     // (ii) the frozen ladder's progress flag is already cleared when the
     // say lands, and its call is finished (in-progress cleared by tool_end).
     expect(s.turns[1].progressActive).toBe(false);
+    // (ii-b) markSayStreaming ran too (after settle, before append): the
+    // Say-row running hint is armed on the same turn the settle froze.
+    expect(s.turns[1].sayStreaming).toBe(true);
     expect(s.turns[1].steps).toHaveLength(1);
     expect(s.turns[1].steps[0]).toMatchObject({ thinking: 'need the tree' });
     expect(s.turns[1].steps[0].calls[0]).toMatchObject({ id: 'a', output: 'src target', isError: false });
@@ -48,6 +51,9 @@ describe('reduce ordering (settle-before-append at the folding layer)', () => {
     expect(s.turns[2]).toMatchObject({ kind: 'text', role: 'assistant', text: 'Done. the tree is flat.' });
     expect(s.turns[2].open).toBe(true);
     expect(s.turns[1].progressActive).toBe(false);
+    // Continuation never re-arms the flag either — it stays armed for the
+    // Say row of THIS sub-turn.
+    expect(s.turns[1].sayStreaming).toBe(true);
     expect(s.turns[1].steps[0].calls.map((c) => c.id)).toEqual(['a']);
   });
 
@@ -66,6 +72,10 @@ describe('reduce ordering (settle-before-append at the folding layer)', () => {
     expect(s.turns[3].steps[0].calls.map((c) => c.id)).toEqual(['b']);
     // The frozen ladder above stays untouched: still one step, one call.
     expect(s.turns[1].progressActive).toBe(false);
+    // Fresh-ladder activity retired the Say-row running hint on the pair-1
+    // ladder (appendThinkDelta's new-turn branch clears it).
+    expect(s.turns[1].sayStreaming).toBe(false);
+    expect(s.turns[3].sayStreaming).toBeFalsy();
     expect(s.turns[1].steps).toHaveLength(1);
     expect(s.turns[1].steps[0]).toMatchObject({ thinking: 'need the tree' });
     expect(s.turns[1].steps[0].calls.map((c) => c.id)).toEqual(['a']);

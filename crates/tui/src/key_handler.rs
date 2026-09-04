@@ -348,9 +348,8 @@ pub(crate) fn handle_key(
                 KeyAction::Submit(text)
             }
         }
-        // Shift+Tab spelled as (Tab, SHIFT): several terminals (kitty
-        // REPORT_ALL_KEYS_AS_ESCAPE_CODES among them) report the chord this
-        // way instead of BackTab. Same chord, same mode-aware action — the
+        // Shift+Tab spelled as (Tab, SHIFT): several terminals report the
+        // chord this way instead of BackTab. Same chord, same mode-aware action — the
         // plain queue/submit Tab arm below must not swallow it (on those
         // terminals it would submit the draft instead of arming/switching).
         // CONTROL/ALT/SUPER variants fall through to the plain Tab arm, same

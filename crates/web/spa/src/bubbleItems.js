@@ -100,11 +100,17 @@ export function itemsFromTurns(turns) {
         : (stepParts.some((part) => part.progressActive === true)
           ? true
           : (stepParts.every((part) => part.progressActive === false) ? false : undefined));
+      // Say-row running ownership: a sayStreaming ladder (its Say is
+      // streaming) keeps the Turn's "running" hint alive ON THE SAY ROW even
+      // though progressActive froze — until fresh ladder activity or a
+      // terminal boundary retires the flag. Stays false without any flag
+      // (snapshot replay turns never carry one).
+      const sayActive = stepParts.some((part) => part.sayStreaming === true);
       items.push({
         key: 'assistant-turn:' + index,
         role: 'assistantTurn',
         content: {
-          kind: 'assistant_turn', role: 'assistant', steps, say, progressActive,
+          kind: 'assistant_turn', role: 'assistant', steps, say, progressActive, sayActive,
         },
       });
     } else {

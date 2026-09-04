@@ -346,8 +346,8 @@ fn backtab_in_act_mode_switches_to_plan() {
     }
 }
 
-/// Shift+Tab spelled as (Tab, SHIFT) — kitty REPORT_ALL_KEYS_AS_ESCAPE_CODES
-/// terminals report the chord this way — must take the same mode-aware path
+/// Shift+Tab spelled as (Tab, SHIFT) — some terminals report the chord this
+/// way — must take the same mode-aware path
 /// as BackTab: arm the countdown in plan mode, switch to plan in act mode.
 /// The plain Tab arm (queue/submit) must never swallow the chord.
 #[test]

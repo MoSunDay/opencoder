@@ -66,6 +66,13 @@ pub enum ChatBlock {
     /// individual calls. Opening a call reveals only that call's result.
     /// `progress_active` drives the group-row animation until Say begins and
     /// cannot be reactivated after non-empty Say output exists.
+    /// ADJACENT-pair merge: when this group's next block is its turn's Say,
+    /// the standalone `N Steps` row is replaced by one merged header
+    /// `{❯|▸} Say(n step{s}): <say first line>` that both toggles the
+    /// ladder and previews the Say; the spinner survives on that row while
+    /// the Say streams last, and the closed pair emits no trailing blank
+    /// (the Say body follows directly). Clicking the merged header toggles
+    /// the ladder exactly like the `N Steps` row did.
     /// Ctrl+L resets every disclosure level.
     StepGroup {
         steps: Vec<Step>,

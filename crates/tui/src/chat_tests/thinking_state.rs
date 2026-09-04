@@ -262,14 +262,16 @@ fn interleaved_reasoning_opens_a_new_turn_under_each_say() {
         ["全量回归", "通过，无失败。统计总数并写 changelog。"]
     );
 
+    // Each Say merges into its preceding group: `{glyph} Say(n step{s}):`
+    // — one merged header per turn pair.
     let say_headers = v
         .flatten()
         .iter()
-        .filter(|line| line.spans.iter().any(|span| span.content.contains("Say:")))
+        .filter(|line| line.spans.iter().any(|span| span.content.contains("Say(")))
         .count();
     assert_eq!(
         say_headers, 2,
-        "each Say of the pairing contract renders its own header"
+        "each Say of the pairing contract renders its own merged header"
     );
 }
 
@@ -383,11 +385,20 @@ fn completed_answer_repairs_dropped_chunks_without_touching_previous_turn() {
         })
         .collect();
     assert_eq!(assistants, ["old answer", "全量回归通过，无失败。"]);
-    assert_eq!(
+    // Turn one is pure text (standalone `❯ Say:` header); the repaired turn
+    // has a ladder (merged `Say(n steps)` header) — exactly one Say per turn.
+    let count_say_rows = |v: &ChatView| {
         v.flatten()
             .iter()
-            .filter(|line| line.spans.iter().any(|span| span.content.contains("Say:")))
-            .count(),
+            .filter(|line| {
+                line.spans
+                    .iter()
+                    .any(|span| span.content.contains("Say(") || span.content.contains("Say:"))
+            })
+            .count()
+    };
+    assert_eq!(
+        count_say_rows(&v),
         2,
         "one Say per turn remains after completed-text repair"
     );
@@ -417,7 +428,15 @@ fn completed_answer_creates_say_when_every_text_delta_was_dropped() {
             ..
         } if raw == "recovered answer"
     ));
-    assert!(matches!(v.blocks[2], ChatBlock::Marker(_)));
+    // A StepGroup self-terminates with its own trailing blank, so Done must
+    // NOT stack a boundary marker after it ("exactly one blank after the
+    // turn"): the recovered Say is the turn's final block.
+    assert_eq!(
+        v.blocks.len(),
+        2,
+        "no boundary marker after a self-terminating StepGroup: {:?}",
+        v.blocks
+    );
     assert_eq!(
         v.context_used,
         estimate("thinking") as u64 + estimate("recovered answer") as u64

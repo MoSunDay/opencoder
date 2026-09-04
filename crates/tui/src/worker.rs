@@ -199,11 +199,47 @@ fn spawn_ui_event_forwarder(
 ) -> (mpsc::UnboundedSender<UiEvent>, tokio::task::JoinHandle<()>) {
     let (pending_tx, mut pending_rx) = mpsc::unbounded_channel::<UiEvent>();
     let handle = tokio::spawn(async move {
+        // A shed TextDelta may be the chunk that carried the `'\n'` separating
+        // it from the next delivered chunk. Dropping it silently fuses two
+        // lines in the Say the UI assembled from the surviving deltas — and a
+        // CANCELLED turn never receives the `AssistantFinal` repair, so the
+        // fusion would freeze on screen forever. Track whether any shed delta
+        // carried a line break and re-insert exactly one separator ahead of
+        // the next delivered TextDelta: the lost text stays lost (by design —
+        // completion repairs it), but the line structure survives every path,
+        // interrupted or not.
+        let mut shed_line_break = false;
         while let Some(event) = pending_rx.recv().await {
             let droppable = matches!(&event, UiEvent::Session(sev) if is_droppable_delta(sev));
             if droppable && tx.capacity() <= DELTA_MIN_CAPACITY {
+                if let UiEvent::Session(SessionEvent::TextDelta(text)) = &event {
+                    shed_line_break |= text.contains('\n');
+                }
                 continue;
             }
+            let event = match event {
+                UiEvent::Session(SessionEvent::TextDelta(mut text)) => {
+                    if shed_line_break && !text.starts_with('\n') {
+                        text.insert(0, '\n');
+                    }
+                    shed_line_break = false;
+                    UiEvent::Session(SessionEvent::TextDelta(text))
+                }
+                // Turn and round boundaries seal the Say the pending
+                // separator belonged to; a fresh Say must not inherit it as
+                // a stray leading blank line. `TranscriptReset` rebuilds the
+                // whole view, dropping any open Say with it.
+                UiEvent::Session(
+                    sev @ (SessionEvent::LlmRoundEnd
+                    | SessionEvent::TranscriptReset(_)
+                    | SessionEvent::Done
+                    | SessionEvent::Error(_)),
+                ) => {
+                    shed_line_break = false;
+                    UiEvent::Session(sev)
+                }
+                other => other,
+            };
             if tx.send(event).await.is_err() {
                 break;
             }
@@ -272,18 +308,34 @@ pub async fn process_cmd(
     let (ui_tx, ui_forwarder) = spawn_ui_event_forwarder(evt_tx.clone());
     let quit = match cmd {
         UiCmd::Prompt(prompt, images) => {
-            let message_floor = sess.messages.len();
-            let tx = ui_tx.clone();
+            // Repair floor for the reliable `AssistantFinal`: the message
+            // count at run start, EXCEPT that a mid-run compaction
+            // (`TranscriptReset`) replaces the whole message list with a
+            // short summary, shifting every index below the stale floor —
+            // the completed answer would then be invisible to
+            // `completed_assistant_text` and the shed-delta repair silently
+            // lost. Track the reset so the floor follows the new list.
+            let message_floor = std::sync::atomic::AtomicUsize::new(sess.messages.len());
             let (sink, flusher) = spawn_event_flusher(sess.store.clone(), sess.id.clone());
             let sink_for_run = sink.clone();
             let res = if images.is_empty() {
+                let tx = ui_tx.clone();
+                let floor = &message_floor;
                 run_session(sess, prompt, move |sev| {
+                    if let SessionEvent::TranscriptReset(msgs) = &sev {
+                        floor.store(msgs.len(), std::sync::atomic::Ordering::Relaxed);
+                    }
                     let _ = sink_for_run.push(&sev);
                     forward_event(&tx, sev);
                 })
                 .await
             } else {
+                let tx = ui_tx.clone();
+                let floor = &message_floor;
                 run_with_images(sess, prompt, images, move |sev| {
+                    if let SessionEvent::TranscriptReset(msgs) = &sev {
+                        floor.store(msgs.len(), std::sync::atomic::Ordering::Relaxed);
+                    }
                     let _ = sink_for_run.push(&sev);
                     forward_event(&tx, sev);
                 })
@@ -298,7 +350,11 @@ pub async fn process_cmd(
             // performs a final flush — guaranteeing zero event loss this turn.
             drop(sink);
             let _ = flusher.await;
-            send_completed_assistant(&ui_tx, sess, message_floor);
+            send_completed_assistant(
+                &ui_tx,
+                sess,
+                message_floor.load(std::sync::atomic::Ordering::Relaxed),
+            );
             let _ = ui_tx.send(UiEvent::TurnDone(sess.agent.name.clone()));
             false
         }

@@ -1,4 +1,4 @@
-Commit: pending（随本轮动态规划能力统一提交，落库后回填）
+Commit: 1ac4afa（feat 落库；docs 回填本笔）
 
 # opencoder-brain：动态规划调度——框架提示词 + 向量表 → 决策树 → 按情况动态路由
 

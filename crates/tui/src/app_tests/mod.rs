@@ -37,6 +37,7 @@ pub(super) fn run_handle(
         &history,
         &mut hist_idx,
         running,
+        false,
         agent,
         &mut scroll,
         &mut follow,
@@ -81,6 +82,7 @@ pub(super) fn run_handle_disabled(
         &history,
         &mut hist_idx,
         false,
+        false,
         agent,
         &mut scroll,
         &mut follow,
@@ -89,6 +91,52 @@ pub(super) fn run_handle_disabled(
         80,
         2,
         true,
+        false,
+        false,
+        &mut undo_state,
+        &mut queue_scroll,
+        &mut file_menu,
+        workdir,
+    )
+}
+
+/// Like `run_handle` but simulates the idle-parent-with-live-subagents
+/// window (autopilot stage gap, cancel grace, reabsorb tail): `running`
+/// is false while `subagents_running` is true, so Tab must stay on the
+/// queue arm.
+pub(super) fn run_handle_subagents_busy(
+    k: KeyEvent,
+    input: &mut String,
+    cursor_idx: &mut usize,
+    agent: &str,
+) -> KeyAction {
+    let history: Vec<String> = vec![];
+    let mut hist_idx = None;
+    let mut scroll = 0u32;
+    let mut follow = true;
+    let mut last_esc: Option<Instant> = None;
+    let mut skill_menu: Option<SkillMenu> = None;
+    let mut undo_state = crate::undo::init("", 0);
+    let mut queue_scroll: u32 = 0;
+    let mut file_menu: Option<crate::file_menu::FileMenu> = None;
+    let workdir = std::path::Path::new(".");
+    handle_key(
+        k,
+        &crate::keymap::KeyBindings::from_config(&opencoder_core::Config::default()),
+        input,
+        cursor_idx,
+        &history,
+        &mut hist_idx,
+        false,
+        true,
+        agent,
+        &mut scroll,
+        &mut follow,
+        &mut last_esc,
+        &mut skill_menu,
+        80,
+        2,
+        false,
         false,
         false,
         &mut undo_state,
@@ -124,6 +172,7 @@ pub(super) fn run_handle_subagent(
         &history,
         &mut hist_idx,
         true,
+        false,
         agent,
         &mut scroll,
         &mut follow,
@@ -165,6 +214,7 @@ pub(super) fn run_handle_menu(
         cursor_idx,
         &history,
         &mut hist_idx,
+        false,
         false,
         "act",
         &mut scroll,
@@ -212,6 +262,7 @@ fn up_arrow_recalls_recorded_steer_or_queue_text() {
         &history,
         &mut hist_idx,
         true,
+        false,
         "act",
         &mut scroll,
         &mut follow,
@@ -240,6 +291,7 @@ fn up_arrow_recalls_recorded_steer_or_queue_text() {
         &history,
         &mut hist_idx,
         true,
+        false,
         "act",
         &mut scroll,
         &mut follow,

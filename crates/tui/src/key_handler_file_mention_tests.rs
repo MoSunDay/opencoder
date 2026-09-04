@@ -46,6 +46,7 @@ impl Ctx {
             &history,
             &mut self.hist_idx,
             false,
+            false,
             "act",
             &mut self.scroll,
             &mut self.follow,

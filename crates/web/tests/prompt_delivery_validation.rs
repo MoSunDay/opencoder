@@ -30,11 +30,14 @@ async fn state() -> Arc<opencoder_web::AppState> {
         );
     Arc::new(opencoder_web::AppState {
         client_override: Some(mock),
+        brain: opencoder_web::api_brain::mock_brain(store.clone()),
         store,
         workdir: tempfile::tempdir().unwrap().keep(),
         handles: opencoder_web::handle::new_handle_map(),
         nodes: Arc::new(opencoder_web::nodes_state::NodeHub::new()),
         controls: Arc::new(opencoder_web::control_state::ControlHub::new()),
+        team: opencoder_web::team_state::mock(),
+        project: opencoder_web::ProjectService::new(),
     })
 }
 
@@ -202,11 +205,14 @@ async fn model_error_precedes_and_differs_from_api_key_error() {
     let workdir = tempfile::tempdir().unwrap().keep();
     let state = Arc::new(opencoder_web::AppState {
         client_override: None,
+        brain: opencoder_web::api_brain::mock_brain(store.clone()),
         store,
         workdir: workdir.clone(),
         handles: opencoder_web::handle::new_handle_map(),
         nodes: Arc::new(opencoder_web::nodes_state::NodeHub::new()),
         controls: Arc::new(opencoder_web::control_state::ControlHub::new()),
+        team: opencoder_web::team_state::mock(),
+        project: opencoder_web::ProjectService::new(),
     });
     let _iso = opencoder_core::scoped_config_home(workdir);
 

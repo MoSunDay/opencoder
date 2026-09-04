@@ -18,6 +18,7 @@ fn merge_project_file_overrides_defaults() {
         r#"{
             "model": "zhipuai-coding-plan/glm-5.2",
             "small_model": "cheap/mini",
+            "embedding_model": "text-embedding-3-large",
             "context_limit": 60000,
             "compaction": { "auto": true, "context_threshold": 40000, "reserved": 8000, "tail_turns": 3 }
         }"#,
@@ -31,6 +32,7 @@ fn merge_project_file_overrides_defaults() {
     assert_eq!(cfg.small_model.as_deref(), Some("cheap/mini"));
     assert_eq!(cfg.small_model_id(), "mini");
     assert_eq!(cfg.small_model_or_primary(), "mini");
+    assert_eq!(cfg.embedding_model_id(), "text-embedding-3-large");
     assert_eq!(cfg.context_limit(), 60000);
     assert_eq!(cfg.compaction.context_threshold, 40000);
     assert_eq!(cfg.compaction.reserved, 8000);
@@ -42,6 +44,7 @@ fn env_overrides_project_file() {
     let _g = ENV_LOCK.lock().unwrap();
     std::env::set_var("OPENCODER_MODEL", "env/model-from-env");
     std::env::set_var("OPENCODER_SMALL_MODEL", "env/small");
+    std::env::set_var("OPENCODER_EMBEDDING_MODEL", "env/embed");
     std::env::set_var("OPENCODER_CONTEXT_LIMIT", "99999");
     std::env::remove_var("OPENAI_BASE_URL");
 
@@ -55,6 +58,7 @@ fn env_overrides_project_file() {
 
     std::env::remove_var("OPENCODER_MODEL");
     std::env::remove_var("OPENCODER_SMALL_MODEL");
+    std::env::remove_var("OPENCODER_EMBEDDING_MODEL");
     std::env::remove_var("OPENCODER_CONTEXT_LIMIT");
 
     assert_eq!(
@@ -62,6 +66,11 @@ fn env_overrides_project_file() {
         "OPENCODER_MODEL wins over file"
     );
     assert_eq!(cfg.small_model.as_deref(), Some("env/small"));
+    assert_eq!(
+        cfg.embedding_model_id(),
+        "embed",
+        "env embedding_model wins"
+    );
     assert_eq!(cfg.context_limit(), 99999);
 }
 
@@ -144,12 +153,74 @@ fn braces_api_key_resolves_env_var() {
 #[test]
 fn defaults_when_no_config_present() {
     let _g = ENV_LOCK.lock().unwrap();
+    std::env::remove_var("OPENCODER_TEAM_ROOT");
+    std::env::remove_var("OPENCODER_TEAM_MAX_TURNS");
+    std::env::remove_var("OPENCODER_TEAM_MAX_SUB_TURNS");
     let (_home_guard, dir) = isolated_home();
     let cfg = Config::load(dir.path()).unwrap();
     assert_eq!(cfg.context_limit(), opencoder_core::DEFAULT_CONTEXT_LIMIT);
     assert_eq!(cfg.compaction.reserved, 20_000);
     assert!(cfg.compaction.auto);
     assert_eq!(cfg.agent.default, "act");
+    assert_eq!(
+        cfg.team_root,
+        opencoder_core::data_root().join("team"),
+        "team_root defaults to <data_root>/team"
+    );
+    assert_eq!(cfg.team_max_turns, 8);
+    assert_eq!(cfg.team_max_sub_turns, 3);
+}
+
+#[test]
+fn team_config_file_merge_and_env_overrides() {
+    let _g = ENV_LOCK.lock().unwrap();
+    let (_home_guard, dir) = isolated_home();
+    fs::write(
+        dir.path().join("opencoder.json"),
+        r#"{
+            "team_root": "/tmp/team-file-root",
+            "team_max_turns": 12,
+            "team_max_sub_turns": 5
+        }"#,
+    )
+    .unwrap();
+
+    // Unset -> file values win over the defaults.
+    std::env::remove_var("OPENCODER_TEAM_ROOT");
+    std::env::remove_var("OPENCODER_TEAM_MAX_TURNS");
+    std::env::remove_var("OPENCODER_TEAM_MAX_SUB_TURNS");
+    let cfg = Config::load(dir.path()).unwrap();
+    assert_eq!(cfg.team_root, std::path::Path::new("/tmp/team-file-root"));
+    assert_eq!(cfg.team_max_turns, 12);
+    assert_eq!(cfg.team_max_sub_turns, 5);
+
+    // Env beats the file.
+    std::env::set_var("OPENCODER_TEAM_ROOT", "/tmp/team-env-root");
+    std::env::set_var("OPENCODER_TEAM_MAX_TURNS", "20");
+    std::env::set_var("OPENCODER_TEAM_MAX_SUB_TURNS", "6");
+    let cfg = Config::load(dir.path()).unwrap();
+    assert_eq!(
+        cfg.team_root,
+        std::path::Path::new("/tmp/team-env-root"),
+        "OPENCODER_TEAM_ROOT wins over file"
+    );
+    assert_eq!(cfg.team_max_turns, 20, "OPENCODER_TEAM_MAX_TURNS wins");
+    assert_eq!(
+        cfg.team_max_sub_turns, 6,
+        "OPENCODER_TEAM_MAX_SUB_TURNS wins"
+    );
+
+    // A garbage turn budget is ignored (file value stands), not coerced.
+    std::env::set_var("OPENCODER_TEAM_MAX_TURNS", "many");
+    let cfg = Config::load(dir.path()).unwrap();
+    assert_eq!(
+        cfg.team_max_turns, 12,
+        "non-numeric OPENCODER_TEAM_MAX_TURNS must be ignored"
+    );
+
+    std::env::remove_var("OPENCODER_TEAM_ROOT");
+    std::env::remove_var("OPENCODER_TEAM_MAX_TURNS");
+    std::env::remove_var("OPENCODER_TEAM_MAX_SUB_TURNS");
 }
 
 #[test]

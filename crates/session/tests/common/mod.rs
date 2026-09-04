@@ -7,6 +7,8 @@
 
 #![allow(dead_code)] // each consuming test crate uses a different subset
 
+pub mod agent_fixtures;
+
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 

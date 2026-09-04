@@ -1,0 +1,60 @@
+/* project.css — 项目 module styles. Vite extracts every imported CSS into
+   the single dist/static/app.css output, so panel-local rules live here
+   instead of growing the shared src/app.css (sibling-agent merge safety). */
+
+/* Markdown bodies rendered by src/project/markdown.jsx. */
+.md-body {
+  font-size: 13px;
+  line-height: 1.7;
+  color: rgba(0, 0, 0, 0.88);
+  word-break: break-word;
+}
+.md-body--empty {
+  color: rgba(0, 0, 0, 0.35);
+}
+.md-body h1, .md-body h2, .md-body h3, .md-body h4 {
+  margin: 0.6em 0 0.35em;
+  font-size: 1.05em;
+}
+.md-body h1 { font-size: 1.25em; }
+.md-body p { margin: 0.35em 0; }
+.md-body ul, .md-body ol { margin: 0.35em 0; padding-left: 1.5em; }
+.md-body code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.06);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.92em;
+}
+.md-body pre {
+  margin: 0.45em 0;
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: #f6f8fa;
+  overflow-x: auto;
+}
+.md-body pre code {
+  padding: 0;
+  background: none;
+}
+.md-body blockquote {
+  margin: 0.45em 0;
+  padding: 2px 12px;
+  border-left: 3px solid #d9d9d9;
+  color: rgba(0, 0, 0, 0.55);
+}
+.md-body table { border-collapse: collapse; margin: 0.45em 0; }
+.md-body th, .md-body td {
+  border: 1px solid #e5e7eb;
+  padding: 4px 10px;
+}
+.md-body a { color: #1677ff; }
+.md-body img { max-width: 100%; }
+
+/* Timeline run card inside todoDrawer. */
+.proj-run-card {
+  padding: 8px 10px;
+  border: 1px solid #f0f0f0;
+  border-radius: 6px;
+  background: #fafafa;
+}

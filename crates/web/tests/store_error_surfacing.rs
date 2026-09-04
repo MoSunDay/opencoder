@@ -144,6 +144,16 @@ impl Store for ErrorStore {
     ) -> anyhow::Result<Vec<opencoder_store::NodeTaskRecord>> {
         self.inner.converge_lost_node_tasks(now_ms, stale_ms).await
     }
+    // DAG lost-sweep runs on the same read path; forward or the trait's
+    // default impl would bail("dag store API is not supported") and 500 the
+    // listing under this decorator.
+    async fn converge_lost_dag_runs(
+        &self,
+        now_ms: i64,
+        stale_ms: i64,
+    ) -> anyhow::Result<Vec<opencoder_store::DagRunRecord>> {
+        self.inner.converge_lost_dag_runs(now_ms, stale_ms).await
+    }
 }
 
 /// Build an AppState backed by `store`, with a fresh tempdir workdir and a
@@ -152,11 +162,14 @@ async fn state_with_store(store: Arc<dyn Store>) -> Arc<opencoder_web::AppState>
     let workdir = tempfile::tempdir().unwrap().keep();
     Arc::new(opencoder_web::AppState {
         client_override: Some(Arc::new(MockChatClient::new()) as Arc<dyn ChatStream>),
+        brain: opencoder_web::api_brain::mock_brain(store.clone()),
         store,
         workdir,
         handles: opencoder_web::handle::new_handle_map(),
         nodes: Arc::new(opencoder_web::nodes_state::NodeHub::new()),
         controls: Arc::new(opencoder_web::control_state::ControlHub::new()),
+        team: opencoder_web::team_state::mock(),
+        project: opencoder_web::ProjectService::new(),
     })
 }
 

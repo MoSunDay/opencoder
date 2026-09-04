@@ -1,0 +1,26 @@
+[package]
+name = "opencoder-agent"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "opencoder-agent"
+path = "src/main.rs"
+
+[dependencies]
+opencoder-core.workspace = true
+opencoder-node.workspace = true
+opencoder-dag.workspace = true
+opencoder-dag-runtime.workspace = true
+opencoder-llm.workspace = true
+opencoder-store.workspace = true
+anyhow.workspace = true
+async-trait.workspace = true
+clap.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

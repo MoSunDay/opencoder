@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+opencode-agents.workspace = true
 opencoder-core.workspace = true
 opencoder-llm.workspace = true
 opencoder-shellguard.workspace = true

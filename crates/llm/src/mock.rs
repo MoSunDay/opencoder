@@ -17,11 +17,47 @@ enum ScriptEntry {
     Hang(Arc<tokio::sync::Notify>),
 }
 
+/// Dimension of every vector produced by the mock embedder. `pub` so upper
+/// layers can size their assertions against it.
+pub const MOCK_EMBED_DIM: usize = 8;
+
+/// FNV-1a over `bytes`, seeded with `seed` (used to derive one component per
+/// dimension). Pure and stable across platforms (wrapping arithmetic only).
+fn fnv1a(seed: u32, bytes: &[u8]) -> u32 {
+    let mut hash = 0x811c_9dc5u32 ^ seed;
+    for byte in bytes {
+        hash ^= u32::from(*byte);
+        hash = hash.wrapping_mul(0x0100_0193);
+    }
+    hash
+}
+
+/// Deterministic unit-length embedding for one text: component `i` is the
+/// FNV-1a hash of the text bytes seeded with `i`, mapped into `(0, 1)`; the
+/// whole vector is then L2-normalized so cosine similarity is just a dot
+/// product. Same text ⇒ same vector; different texts almost surely differ.
+fn mock_embedding(text: &str) -> Vec<f32> {
+    let mut vec: Vec<f32> = (0..MOCK_EMBED_DIM as u32)
+        .map(|i| {
+            let h = fnv1a(i, text.as_bytes());
+            ((f64::from(h) + 0.5) / (f64::from(u32::MAX) + 1.0)) as f32
+        })
+        .collect();
+    let norm: f32 = vec.iter().map(|c| c * c).sum::<f32>().sqrt();
+    if norm > 0.0 {
+        for component in &mut vec {
+            *component /= norm;
+        }
+    }
+    vec
+}
+
 /// Builder-friendly mock. Push one script per expected `chat_stream` call.
 pub struct MockChatClient {
     requests: Mutex<Vec<ChatRequest>>,
     scripts: Mutex<VecDeque<ScriptEntry>>,
     default: Mutex<Option<Vec<LlmEvent>>>,
+    embed_calls: Mutex<Vec<(Vec<String>, String)>>,
 }
 
 impl MockChatClient {
@@ -30,6 +66,7 @@ impl MockChatClient {
             requests: Mutex::new(Vec::new()),
             scripts: Mutex::new(VecDeque::new()),
             default: Mutex::new(None),
+            embed_calls: Mutex::new(Vec::new()),
         }
     }
 
@@ -80,6 +117,11 @@ impl MockChatClient {
     pub fn call_count(&self) -> usize {
         self.requests.lock().unwrap().len()
     }
+
+    /// Every `embed` call so far as `(texts, model)`, in call order.
+    pub fn embed_calls(&self) -> Vec<(Vec<String>, String)> {
+        self.embed_calls.lock().unwrap().clone()
+    }
 }
 
 impl Default for MockChatClient {
@@ -121,6 +163,15 @@ impl ChatStream for MockChatClient {
 
     fn backend(&self) -> &'static str {
         "mock"
+    }
+
+    fn embed(&self, texts: &[String], model: &str) -> Result<Vec<Vec<f32>>> {
+        // Deterministic, offline: hash-derived unit vectors in input order.
+        self.embed_calls
+            .lock()
+            .unwrap()
+            .push((texts.to_vec(), model.to_string()));
+        Ok(texts.iter().map(|t| mock_embedding(t)).collect())
     }
 }
 
@@ -168,5 +219,63 @@ mod tests {
 
         // The hang entry is consumed exactly once; the queue is now empty.
         assert!(mock.chat_stream(req()).is_err());
+    }
+
+    // ---- deterministic embeddings ----
+
+    fn norm(v: &[f32]) -> f32 {
+        v.iter().map(|c| c * c).sum::<f32>().sqrt()
+    }
+
+    #[test]
+    fn embed_is_deterministic_and_unit_length() {
+        let mock = MockChatClient::new();
+        let texts = vec!["hello world".to_string(), "other".to_string()];
+        let a = mock.embed(&texts, "text-embedding-3-small").unwrap();
+        let b = mock.embed(&texts, "text-embedding-3-small").unwrap();
+        // Same texts ⇒ identical vectors, one per input, right dimension.
+        assert_eq!(a.len(), 2);
+        assert_eq!(a, b);
+        assert!(a.iter().all(|v| v.len() == MOCK_EMBED_DIM));
+        // Unit L2 norm ⇒ cosine semantics work via plain dot products.
+        for v in &a {
+            assert!((norm(v) - 1.0).abs() < 1e-5, "norm was {}", norm(v));
+            assert!(v.iter().all(|c| *c > 0.0), "components must be in (0,1]");
+        }
+    }
+
+    #[test]
+    fn embed_distinguishes_different_texts() {
+        let mock = MockChatClient::new();
+        let a = mock
+            .embed(&["alpha".to_string()][..], "m")
+            .unwrap()
+            .remove(0);
+        let b = mock
+            .embed(&["beta".to_string()][..], "m")
+            .unwrap()
+            .remove(0);
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn embed_records_calls_with_model() {
+        let mock = MockChatClient::new();
+        let texts = vec!["one".to_string(), "two".to_string()];
+        mock.embed(&texts, "text-embedding-3-large").unwrap();
+        let calls = mock.embed_calls();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].0, texts);
+        assert_eq!(calls[0].1, "text-embedding-3-large");
+        // embed never touches the chat script queue.
+        assert_eq!(mock.call_count(), 0);
+    }
+
+    #[test]
+    fn embed_forwards_through_arc() {
+        let mock = Arc::new(MockChatClient::new());
+        let stream: std::sync::Arc<MockChatClient> = mock.clone();
+        let _ = ChatStream::embed(&stream, &["x".into()][..], "m").unwrap();
+        assert_eq!(mock.embed_calls().len(), 1);
     }
 }

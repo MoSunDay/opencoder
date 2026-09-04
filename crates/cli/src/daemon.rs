@@ -1,16 +1,19 @@
-//! `opencode daemon` support: mode validation, client-mode token resolution,
-//! and node-name derivation. Pure decisions live here so the dispatch arm in
-//! the binary stays a thin match and every rule is unit-testable without a
-//! server, a parser, or a network.
+//! `opencode daemon` support: role validation + the migration hint.
+//!
+//! The fleet roles moved into dedicated binaries (three-binary split):
+//! `opencoder-server` (web API + SPA + DAG dispatch) and `opencoder-agent`
+//! (prompt tasks + node-side DAG execution). The `daemon` subcommand keeps
+//! parsing its old flags so existing scripts get a clean, greppable pointer
+//! instead of a parse error, then prints the migration hint and exits 0.
 
-use anyhow::{anyhow, Result};
+use crate::DaemonOpts;
 
-/// Which fleet role `opencode daemon` should run.
+/// Which fleet role `opencode daemon` was asked to run (now migrated).
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum DaemonAction {
-    /// Run the web server (registry + fleet dispatch + local engine).
+    /// Run the web server — now `opencoder-server`.
     Server,
-    /// Register this machine as an execution node.
+    /// Register this machine as an execution node — now `opencoder-agent`.
     Client,
 }
 
@@ -40,57 +43,53 @@ pub fn daemon_mode(
     }
 }
 
-/// Resolve the daemon CLIENT (node) bearer token: `--token` flag, then the
-/// `OPENCODER_SERVER_TOKEN` environment variable. Unlike the server side, a
-/// node NEVER auto-generates a token (an invented token could never
-/// authenticate against the remote server).
-pub fn resolve_client_token(flag: Option<String>) -> Result<String> {
-    resolve_client_token_from(
-        flag,
-        std::env::var("OPENCODER_SERVER_TOKEN").ok().as_deref(),
-    )
-}
-
-/// Pure core of [`resolve_client_token`] with the env value passed in, so the
-/// flag / env / missing paths are all deterministic and unit-testable.
-pub fn resolve_client_token_from(flag: Option<String>, env: Option<&str>) -> Result<String> {
-    if let Some(t) = flag {
-        return Ok(t);
-    }
-    env.filter(|t| !t.trim().is_empty())
-        .map(str::to_owned)
-        .ok_or_else(|| anyhow!("no token: pass --token <T> or set OPENCODER_SERVER_TOKEN"))
-}
-
-/// Default node `--name`: lowercase machine hostname trimmed to DNS-label
-/// charset, disambiguated with a short process-local suffix so two nodes on
-/// one host (or a container fleet sharing a hostname) stay distinct.
-pub fn default_node_name() -> String {
-    let raw = std::env::var("HOSTNAME")
-        .or_else(|_| std::env::var("COMPUTERNAME"))
-        .unwrap_or_else(|_| "opencoder-node".into());
-    let mut slug: String = raw
-        .to_lowercase()
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || c == '-' || c == '.' {
-                c
-            } else {
-                '-'
+/// The operator-facing migration pointer for the migrated daemon roles.
+/// Echoes the parsed flags into the suggested command line so the hint is
+/// copy-pasteable.
+pub fn migration_hint(action: DaemonAction, opts: &DaemonOpts) -> String {
+    match action {
+        DaemonAction::Server => {
+            let mut cmd = format!("opencoder-server --host {} --port {}", opts.host, opts.port);
+            if !opts.web {
+                cmd.push_str(" --web=false");
             }
-        })
-        .collect();
-    if slug.is_empty() {
-        slug = "opencoder-node".into();
+            if let Some(t) = &opts.token {
+                cmd.push_str(&format!(" --token {t}"));
+            }
+            format!(
+                "daemon --server has moved to the dedicated server binary.\n  run: {cmd}\n  (opencode no longer embeds the web API; see `opencoder-server --help`)"
+            )
+        }
+        DaemonAction::Client => {
+            let remote = opts.remote.clone().unwrap_or_default();
+            let mut cmd = format!("opencoder-agent --remote {remote}");
+            if let Some(n) = &opts.name {
+                cmd.push_str(&format!(" --name {n}"));
+            }
+            if let Some(t) = &opts.token {
+                cmd.push_str(&format!(" --token {t}"));
+            }
+            format!(
+                "daemon --client has moved to the dedicated agent binary.\n  run: {cmd}\n  (prompt tasks and DAG workflow runs now execute on `opencoder-agent`; see `opencoder-agent --help`)"
+            )
+        }
     }
-    let short = ulid::Ulid::new().to_string().to_lowercase();
-    let tail: String = short.chars().rev().take(6).collect();
-    format!("{slug}-{tail}")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn opts(remote: Option<&str>) -> DaemonOpts {
+        DaemonOpts {
+            host: "127.0.0.1".into(),
+            port: 8080,
+            web: true,
+            token: None,
+            remote: remote.map(str::to_string),
+            name: None,
+        }
+    }
 
     // -- daemon_mode --------------------------------------------------------
 
@@ -120,72 +119,48 @@ mod tests {
     }
 
     #[test]
-    fn both_roles_err_even_though_clap_already_rejects_the_pair() {
-        let err = daemon_mode(true, true, Some("http://x")).unwrap_err();
+    fn both_roles_rejected() {
+        assert!(daemon_mode(true, true, Some("u")).is_err());
+    }
+
+    #[test]
+    fn no_role_rejected() {
+        assert!(daemon_mode(false, false, None).is_err());
+    }
+
+    // -- migration_hint -----------------------------------------------------
+
+    #[test]
+    fn server_hint_names_the_new_binary_and_flags() {
+        let mut o = opts(None);
+        o.host = "0.0.0.0".into();
+        o.port = 9090;
+        let hint = migration_hint(DaemonAction::Server, &o);
         assert!(
-            err.contains("--server") && err.contains("--client"),
-            "error must name both flags: {err}"
+            hint.contains("opencoder-server --host 0.0.0.0 --port 9090"),
+            "{hint}"
         );
     }
 
     #[test]
-    fn neither_role_errs_with_usage_hint() {
-        // Unreachable through the parser (clap enforces exactly-one) but the
-        // function must stay total.
-        let err = daemon_mode(false, false, None).unwrap_err();
+    fn server_hint_echoes_token_and_web_off() {
+        let mut o = opts(None);
+        o.token = Some("TKN".into());
+        o.web = false;
+        let hint = migration_hint(DaemonAction::Server, &o);
+        assert!(hint.contains("--token TKN"), "{hint}");
+        assert!(hint.contains("--web=false"), "{hint}");
+    }
+
+    #[test]
+    fn client_hint_carries_remote_name_token() {
+        let mut o = opts(Some("http://s:8080"));
+        o.name = Some("gpu-1".into());
+        o.token = Some("TKN".into());
+        let hint = migration_hint(DaemonAction::Client, &o);
         assert!(
-            err.contains("--server") && err.contains("--client"),
-            "error must advertise both roles: {err}"
+            hint.contains("opencoder-agent --remote http://s:8080 --name gpu-1 --token TKN"),
+            "{hint}"
         );
-    }
-
-    // -- resolve_client_token_from ------------------------------------------
-
-    #[test]
-    fn client_token_flag_wins_over_env() {
-        let t = resolve_client_token_from(Some("explicit".into()), Some("from-env")).unwrap();
-        assert_eq!(t, "explicit");
-    }
-
-    #[test]
-    fn client_token_env_used_when_flag_absent() {
-        let t = resolve_client_token_from(None, Some("from-env")).unwrap();
-        assert_eq!(t, "from-env");
-    }
-
-    #[test]
-    fn client_token_blank_env_is_treated_as_missing() {
-        for blank in [None, Some(""), Some("   ")] {
-            let err = resolve_client_token_from(None, blank)
-                .expect_err("blank env must not authenticate");
-            assert!(
-                err.to_string().contains("OPENCODER_SERVER_TOKEN"),
-                "error must mention OPENCODER_SERVER_TOKEN: {err}"
-            );
-        }
-    }
-
-    #[test]
-    fn client_token_never_auto_generates() {
-        // Distinguishing property vs the server resolver: the missing path is
-        // an error, never a fresh ULID.
-        assert!(resolve_client_token_from(None, None).is_err());
-    }
-
-    // -- default_node_name --------------------------------------------------
-
-    #[test]
-    fn default_node_name_is_nonempty_dns_label_with_unique_suffix() {
-        let a = default_node_name();
-        let b = default_node_name();
-        assert!(!a.is_empty() && !b.is_empty());
-        assert_ne!(a, b, "process-local suffix must disambiguate calls");
-        for name in [a, b] {
-            assert!(
-                name.chars()
-                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '.'),
-                "name must be lowercase DNS-label charset: {name}"
-            );
-        }
     }
 }

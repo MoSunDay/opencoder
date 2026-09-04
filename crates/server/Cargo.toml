@@ -1,0 +1,23 @@
+[package]
+name = "opencoder-server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "opencoder-server"
+path = "src/main.rs"
+
+[dependencies]
+opencoder-core.workspace = true
+opencoder-web.workspace = true
+opencoder-store.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+ulid.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

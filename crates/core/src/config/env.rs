@@ -70,8 +70,10 @@ fn config_home_dir() -> Option<PathBuf> {
 /// [`primary_global_config_path`] *and* the domain config files
 /// (`mcp.json` / `cli.json` / `skills.json`). Kept here so domain-file
 /// discovery shares the exact home resolution (and therefore the
-/// [`scoped_config_home`] test override) of `config.json`.
-pub(super) fn global_opencode_home() -> Option<PathBuf> {
+/// [`scoped_config_home`] test override) of `config.json`. `pub(crate)` so
+/// sibling modules outside `config` (e.g. `agent::meta`'s agents root) share
+/// the exact same home resolution instead of re-deriving it.
+pub(crate) fn global_opencode_home() -> Option<PathBuf> {
     config_home_dir().map(|home| home.join(".opencoder"))
 }
 
@@ -94,7 +96,7 @@ fn config_xdg_dir() -> Option<PathBuf> {
 /// Read an env var, *unless* a test isolation override is active on this
 /// thread — in which case return `None` so host env never contaminates the
 /// isolated config under test.
-pub(super) fn env_get(name: &str) -> Option<String> {
+pub(crate) fn env_get(name: &str) -> Option<String> {
     if isolated_home().is_some() {
         None
     } else {
@@ -150,6 +152,11 @@ pub(super) fn apply_env(cfg: &mut Config) {
             cfg.small_model = Some(m);
         }
     }
+    if let Some(m) = env_get("OPENCODER_EMBEDDING_MODEL") {
+        if !m.is_empty() {
+            cfg.embedding_model = Some(m);
+        }
+    }
     if let Some(b) = env_get("OPENAI_BASE_URL") {
         if !b.is_empty() {
             let normalized = b.trim_end_matches('/').to_string();
@@ -188,6 +195,34 @@ pub(super) fn apply_env(cfg: &mut Config) {
             _ => {}
         }
     }
+    // opencode-team overlay: workspace root + turn budgets. Same strictness
+    // as OPENCODER_CONTEXT_LIMIT — a non-numeric turn budget is warned about
+    // rather than silently coerced.
+    if let Some(v) = env_get("OPENCODER_TEAM_ROOT") {
+        if !v.is_empty() {
+            cfg.team_root = PathBuf::from(v);
+        }
+    }
+    if let Some(v) = env_get("OPENCODER_TEAM_MAX_TURNS") {
+        match parse_plain_usize(&v) {
+            Some(n) => cfg.team_max_turns = n,
+            None if !v.is_empty() => tracing::warn!(
+                value = %v,
+                "invalid OPENCODER_TEAM_MAX_TURNS (expected a plain usize, e.g. `8`); ignoring"
+            ),
+            None => {}
+        }
+    }
+    if let Some(v) = env_get("OPENCODER_TEAM_MAX_SUB_TURNS") {
+        match parse_plain_usize(&v) {
+            Some(n) => cfg.team_max_sub_turns = n,
+            None if !v.is_empty() => tracing::warn!(
+                value = %v,
+                "invalid OPENCODER_TEAM_MAX_SUB_TURNS (expected a plain usize, e.g. `3`); ignoring"
+            ),
+            None => {}
+        }
+    }
     // Proxy overlay: explicit OPENCODER_PROXY wins, then ALL_PROXY. Only set
     // when the user has not already configured `network.proxy` directly.
     if cfg.network.proxy.is_none() {
@@ -221,9 +256,16 @@ pub(super) fn parse_context_limit(raw: &str) -> Option<u64> {
     raw.parse::<u64>().ok()
 }
 
+/// Parse an `OPENCODER_TEAM_MAX_TURNS` / `OPENCODER_TEAM_MAX_SUB_TURNS`
+/// value: a plain `usize` literal with the same strictness (no trimming,
+/// no sign, no exponents) as [`parse_context_limit`]. Pure.
+pub(super) fn parse_plain_usize(raw: &str) -> Option<usize> {
+    raw.parse::<usize>().ok()
+}
+
 #[cfg(test)]
 mod tests {
-    use super::parse_context_limit;
+    use super::{parse_context_limit, parse_plain_usize};
 
     #[test]
     fn parse_context_limit_accepts_plain_u64() {
@@ -257,5 +299,21 @@ mod tests {
             None,
             "u64 overflow"
         );
+    }
+
+    #[test]
+    fn parse_plain_usize_accepts_and_rejects_like_context_limit() {
+        assert_eq!(parse_plain_usize("8"), Some(8));
+        assert_eq!(parse_plain_usize("0"), Some(0));
+        assert_eq!(
+            parse_plain_usize("18446744073709551615"),
+            Some(usize::MAX),
+            "usize::MAX literal is still a plain usize"
+        );
+        assert_eq!(parse_plain_usize("abc"), None, "non-numeric");
+        assert_eq!(parse_plain_usize(""), None, "empty is not a number");
+        assert_eq!(parse_plain_usize("-1"), None, "negative");
+        assert_eq!(parse_plain_usize(" 8"), None, "leading space: no trimming");
+        assert_eq!(parse_plain_usize("8 "), None, "trailing space: no trimming");
     }
 }

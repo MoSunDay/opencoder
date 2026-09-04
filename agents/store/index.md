@@ -20,16 +20,19 @@ Commit: (working-tree, sandbox 回退为 plan：恢复 plan/act 双模式回切�
 - `run_tx`（`src/libsql_store/tx.rs`）：显式 BEGIN/COMMIT/ROLLBACK，避免 async 取消时 `libsql::Transaction::Drop` panic。
 - Session 类型（`src/types.rs`）：`SessionMeta`、`SessionPatch`、Input/Event/Subagent records；`task_type` 区分 parent、subagent、todo_workflow 和 todo。
 - TODO 类型（`src/todo_types.rs`）：`TodoWorkflowRecord`、`TodoItemRecord`、`TodoEventRecord` 和列表摘要。
+- 组队台账类型（`src/team_types.rs`，v17）：`TeamTopicRunRecord`——opencode-team 话题 × node 的持久配对行（status `executing|finished`，`created_at` 首插冻结），运行时在 Store 之上，Store 只持久化（实现见 `libsql_store/team_runs.rs`）。
 
 ## Schema 与一致性
 
-schema 当前为 v10：
+schema 随迭代推进（最新以 `src/libsql_store/schema.rs::SCHEMA_VERSION` 为准；brain 三表于 v15 落地，team 台账表于 v17 落地）：
 
 - Session 面：`sessions`、`messages`、`session_inputs`、`session_events`、`subagent_tasks` 及 ts registry 相关结构。
 - TODO 面：`todo_workflows` 保存 spec/state/generation；`todo_items` 保存每项 projection；`todo_events` 保存有序不可变 transition。
 - v9 migration 从既有 v8 数据库新增 TODO 表和索引，不修改既有 Session 数据。
 - v10 migration 给 `session_inputs` 加 `recorded` 消费标记（NOT NULL DEFAULT 0）：promote（含再提升）时重置 0，消费后 `mark_inputs_recorded` 置 1；promoted-but-unrecorded 孤儿行（崩溃/硬中止残留）由 `recover_orphan_inputs` 翻回 pending；迁移落地时既有 promoted 行一次性回填 recorded=1。
 - v10 migration 给 sessions 加 plan 阶段落库两列（`plan_snapshot TEXT`、`plan_input_count INTEGER NOT NULL DEFAULT 0`）——plan/act 双模式删除后运行时已不再读写这两列，保留仅为兼容旧库 schema（读路径 `normalize_agent` 把存量 `agent='plan'` 归一为 `act`，原始行不重写）。
+- brain 三表（v15）：`brain_capabilities` / `brain_eng_inputs`（ON DELETE CASCADE，position 定序）/ `brain_vectors`（LE f32 BLOB，检索用 bundled `vector_distance_cos` + model 过滤防跨模型 dim 错配）；写入走 `create/update_brain_capability_with_vector` **单事务组合写**（capability+eng_inputs+vector 同提交/回滚，向量由 brain runtime 预嵌入后经 `BrainVectorWrite` 传入），另有逐步 `upsert_brain_vector` 供直接使用。
+- `team_topic_runs`（v17）：opencode-team 话题扇出的 `(topic_id, node_id)` 台账，PK(topic_id,node_id)、`node_id` FK→`nodes` ON DELETE CASCADE；`upsert` 冲突臂只刷 `status`（`created_at` 首插冻结，刷新不重启计时钟）、`finish` 全行翻 `finished`（幂等，未知 topic 0 行即成功）、`list` 按 `created_at, rowid` 定序（ULID 非单调不可排序）。`Store` trait 三方法（`upsert/finish/list_team_topic_run*`）默认 bail，libsql 完整实现；v16→v17 迁移补表（CREATE IF NOT EXISTS，索引落 post-batch）。
 - `commit_todo_transition` 在单事务内更新 workflow、替换 TODO projection 并追加 event；workflow update 带 expected generation，陈旧父进程不能覆盖 interrupt 或其他 writer。
 - Foreign key 将 parent/active TODO Session 关联到 `sessions`，因此 dispatch 先创建 Session，再提交 active reference。
 - 消息批量写按 200 条分块；WAL 使用 30 秒 busy timeout 和被动 checkpoint。
@@ -54,6 +57,7 @@ schema 当前为 v10：
 - `tests/schema_bootstrap.rs`：建库后 synchronous 生效值、同路径重开幂等（version 单行 + integrity_check）、并发打开。
 - `tests/store_integration/`（目录目标，按职责分模块）：会话 CRUD/patch、消息往返、事务回滚、取消安全和崩溃恢复等 P0 行为契约（WAL 并发压力另见 `store_concurrency.rs`）。
 - `tests/todos_workflow.rs`：TODO 投影+事件原子提交、generation 冲突、v8→v9 migration。
+- `tests/team_runs.rs`：upsert 往返且 `created_at` 冻结、`finish` 全行翻转、节点删除级联；`tests/store_migrations.rs` 覆盖 v16→v17 建表。
 - `tests/legacy_agent_normalization.rs`：interlude 存量 `agent='sandbox'` 行在全部读路径（get/list/fork 等）归一为 `plan`，原始行不被重写。
 - `tests/store_perf.rs`：持久化性能门槛。
 - `src/bundle.rs` 相关测试：Session 树导入导出与幂等性。

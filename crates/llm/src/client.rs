@@ -19,10 +19,10 @@ use crate::tool_call::{CompletedToolCall, ToolAccumulator};
 
 #[derive(Clone)]
 pub struct ChatClient {
-    http: reqwest::Client,
-    base_url: String,
-    api_key: String,
-    headers: Vec<(String, String)>,
+    pub(crate) http: reqwest::Client,
+    pub(crate) base_url: String,
+    pub(crate) api_key: String,
+    pub(crate) headers: Vec<(String, String)>,
     /// Event-level idle watchdog: if no decoded SSE event arrives within this
     /// window, the stream is treated as interrupted (and retried). Independent
     /// of the HTTP client's byte-level `read_timeout`, which catches total
@@ -96,6 +96,9 @@ impl ChatClient {
 impl ChatStream for ChatClient {
     fn chat_stream(&self, req: ChatRequest) -> Result<mpsc::Receiver<LlmEvent>> {
         ChatClient::chat_stream(self, req)
+    }
+    fn embed(&self, texts: &[String], model: &str) -> Result<Vec<Vec<f32>>> {
+        crate::embed::embeddings_via(self, texts, model)
     }
 }
 

@@ -41,19 +41,27 @@ fn scenario(seed: u64) {
     let rounds = 2 + rng.below(3) as usize; // 2..4
     for r in 0..rounds {
         submit(&mut v, &format!("p{}", r));
-        v.apply(&SessionEvent::LlmRoundStart { started_at_ms: 1000 + r as i64 });
+        v.apply(&SessionEvent::LlmRoundStart {
+            started_at_ms: 1000 + r as i64,
+        });
         let chunks = 1 + rng.below(3) as usize;
         for c in 0..chunks {
             // 行完整 delta（以 \n 收尾）：块间拼接只会出现在行边界，
             // 这样「单行同时含 l1 与 l2」才唯一对应换行丢失。
-            v.apply(&SessionEvent::TextDelta(format!("r{}c{}l1\nr{}c{}l2\n", r, c, r, c)));
+            v.apply(&SessionEvent::TextDelta(format!(
+                "r{}c{}l1\nr{}c{}l2\n",
+                r, c, r, c
+            )));
         }
         let interrupted = rng.below(2) == 0;
         if interrupted {
             v.push_marker(Line::from("[interrupted] stopping…"));
             // 尾随 delta：取消传播竞态下仍可能到达
             if rng.below(2) == 0 {
-                v.apply(&SessionEvent::TextDelta(format!("r{}taill1\nr{}taill2\n", r, r)));
+                v.apply(&SessionEvent::TextDelta(format!(
+                    "r{}taill1\nr{}taill2\n",
+                    r, r
+                )));
             }
             v.apply(&SessionEvent::Status("interrupted".into()));
             if rng.below(2) == 0 {
@@ -61,7 +69,10 @@ fn scenario(seed: u64) {
             }
         } else {
             v.apply(&SessionEvent::LlmRoundEnd);
-            v.reconcile_completed_assistant(&format!("r{}final A\nr{}final B\nr{}final C", r, r, r));
+            v.reconcile_completed_assistant(&format!(
+                "r{}final A\nr{}final B\nr{}final C",
+                r, r, r
+            ));
         }
         v.apply(&SessionEvent::Done);
     }

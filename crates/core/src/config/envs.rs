@@ -263,7 +263,7 @@ fn write_file_maybe_private(path: &Path, body: &str, private: bool) -> io::Resul
             let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
         }
         result?;
-        return Ok(());
+        Ok(())
     }
     #[cfg(not(unix))]
     {

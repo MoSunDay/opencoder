@@ -11,7 +11,8 @@
 //! - v14 → v15 migration creates the three brain tables
 
 use opencoder_store::{
-    BrainCapabilityRecord, BrainEngInputRecord, BrainVectorWrite, LibsqlStore, Store,
+    BrainCapabilityRecord, BrainEngInputRecord, BrainPlanRecord, BrainVectorWrite, LibsqlStore,
+    Store,
 };
 use tempfile::TempDir;
 
@@ -420,10 +421,10 @@ async fn migration_v14_to_v15_creates_brain_tables() {
 
     let store = LibsqlStore::open(&db_path).await.unwrap();
 
-    // Schema version bumped to the latest (17).
+    // Schema version bumped to the latest (18).
     assert_eq!(
         scalar_i64(&store, "SELECT version FROM schema_version LIMIT 1").await,
-        17
+        18
     );
 
     // All three brain tables now exist.
@@ -456,4 +457,126 @@ async fn migration_v14_to_v15_creates_brain_tables() {
         .unwrap();
     assert_eq!(hits.len(), 1);
     assert_eq!(hits[0].capability.id, "cap-m");
+}
+
+fn plan(id: &str, digest: &str, created_at: i64) -> BrainPlanRecord {
+    BrainPlanRecord {
+        id: id.to_string(),
+        situation: format!("situation for {id}"),
+        situation_digest: digest.to_string(),
+        chat_model: "test-chat".to_string(),
+        tree_json: format!("{{\"threshold\":0.35,\"root\":{{\"id\":\"l1\",\"kind\":\"leaf\",\"capability_id\":\"{id}\"}}}}"),
+        created_at,
+    }
+}
+
+/// save → get by id → latest-by-digest (newest wins, same-millisecond ties
+/// break on rowid) → miss for an unknown digest.
+#[tokio::test]
+async fn plan_save_get_and_latest_by_digest_roundtrip() {
+    let store = LibsqlStore::open_memory().await.unwrap();
+    assert!(store
+        .get_brain_plan("brain-plan-none")
+        .await
+        .unwrap()
+        .is_none());
+    assert!(store
+        .latest_brain_plan_for("no-such-digest")
+        .await
+        .unwrap()
+        .is_none());
+
+    store
+        .save_brain_plan(&plan("brain-plan-a", "dig1", 1_000))
+        .await
+        .unwrap();
+    store
+        .save_brain_plan(&plan("brain-plan-b", "dig1", 2_000))
+        .await
+        .unwrap();
+    store
+        .save_brain_plan(&plan("brain-plan-c", "dig2", 3_000))
+        .await
+        .unwrap();
+
+    let got = store.get_brain_plan("brain-plan-b").await.unwrap().unwrap();
+    assert_eq!(got.situation_digest, "dig1");
+    assert_eq!(got.chat_model, "test-chat");
+    assert!(got.tree_json.contains("brain-plan-b"));
+
+    let latest = store.latest_brain_plan_for("dig1").await.unwrap().unwrap();
+    assert_eq!(latest.id, "brain-plan-b", "newest created_at wins");
+    let other = store.latest_brain_plan_for("dig2").await.unwrap().unwrap();
+    assert_eq!(other.id, "brain-plan-c");
+}
+
+/// Same-millisecond ties on (digest, created_at) break on rowid: the row
+/// inserted LAST is the newest plan.
+#[tokio::test]
+async fn plan_latest_breaks_same_millisecond_ties_on_rowid() {
+    let store = LibsqlStore::open_memory().await.unwrap();
+    store
+        .save_brain_plan(&plan("brain-plan-x", "dig", 5_000))
+        .await
+        .unwrap();
+    store
+        .save_brain_plan(&plan("brain-plan-y", "dig", 5_000))
+        .await
+        .unwrap();
+    let latest = store.latest_brain_plan_for("dig").await.unwrap().unwrap();
+    assert_eq!(latest.id, "brain-plan-y");
+}
+
+/// v17 → v18: a hand-built v17 database gains `brain_plans` (and its digest
+/// index) on reopen, and the plan API round-trips through the migrated
+/// schema. Mirrors the hand-written-old-schema pattern above.
+#[tokio::test]
+async fn migration_v17_to_v18_creates_brain_plans() {
+    let dir: TempDir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("brain-plans-migrate.db");
+    {
+        let db = libsql::Builder::new_local(&db_path).build().await.unwrap();
+        let conn = db.connect().unwrap();
+        conn.execute("CREATE TABLE schema_version (version INTEGER NOT NULL)", ())
+            .await
+            .unwrap();
+        conn.execute("INSERT INTO schema_version (version) VALUES (17)", ())
+            .await
+            .unwrap();
+    }
+
+    let store = LibsqlStore::open(&db_path).await.unwrap();
+    assert_eq!(
+        scalar_i64(&store, "SELECT version FROM schema_version LIMIT 1").await,
+        18
+    );
+    assert_eq!(
+        scalar_i64(
+            &store,
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='brain_plans'"
+        )
+        .await,
+        1
+    );
+    assert_eq!(
+        scalar_i64(
+            &store,
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_brain_plans_digest'"
+        )
+        .await,
+        1
+    );
+    store
+        .save_brain_plan(&plan("brain-plan-m", "dig-m", 1))
+        .await
+        .unwrap();
+    assert_eq!(
+        store
+            .get_brain_plan("brain-plan-m")
+            .await
+            .unwrap()
+            .unwrap()
+            .id,
+        "brain-plan-m"
+    );
 }

@@ -81,3 +81,6 @@ from_preview` 恰好把该行为钉死为契约，本轮纠正该语义模型。
     文件 `crates/web/src/api_agent_nfs.rs` 的 `opencode_core` 未解析 import
     （拼写，04:14 由对方修复）；其余 crate（含 opencoder-tui）在所有轮次
     均编译通过，红果与本轮 tui 变更无关
+- 落地：主面随并发会话统一提交 `8ca4d0e`（2026-09-05 04:58:21，348 文件
+  含本特性全部 tui 路径）；本文件 +3 分解微项随 `66a3247`；提交后独立
+  复验三 gate 绿（fmt / clippy -D warnings / test，1782/0，05:15–05:24）。

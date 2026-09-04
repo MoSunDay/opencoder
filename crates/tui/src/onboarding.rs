@@ -168,6 +168,16 @@ pub(crate) async fn run(
     .await;
 
     active.store(false, Ordering::Relaxed);
+    // Quit-path quiesce for the wizard's own exit: without this, the release
+    // report of the quitting keypress (Esc / Ctrl+D) strands in the tty input
+    // queue and the shell echoes it as `0;5:3u`-style garbage — same failure
+    // the app loop guards against with its post-loop `drain_shutdown`. The
+    // `Ready` arm needs no absorb: it hands the live terminal to `run_app`,
+    // whose own pump keeps draining the tty. Only `Exit` (and the pump-gone
+    // `Exit`) leaves the tty unowned, so quiesce exactly those paths.
+    if matches!(result, Ok(OnboardingOutcome::Exit)) {
+        crate::input::drain_shutdown(&mut input_rx).await;
+    }
     drop(input_rx);
     result
 }

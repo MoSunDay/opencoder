@@ -52,3 +52,10 @@
 
 - 节点执行 DAG 需 `--workflow-root`（默认 data 目录下）；runc 模式需先 `opencode-agent dag prepare-rootfs` + 自备 python 解释器树。
 - 旧 `opencode daemon --server|--client` 调用方按 `daemon` 打印的指引迁移。
+
+## 全量回归（2026-09-05 实测）
+
+- 排除并发 WIP（opencode-agents 为并行团队新 crate）后的 workspace 全量：**140 套件 / 3260 passed / 0 failed**。
+- 补充 opencoder-web + opencoder-server + opencoder-session：**158 套件 / 1095 passed / 0 failed**。
+- 根目录进程级 smoke（新二进制）：daemon_smoke 1、running_mode_switch_e2e 1、nodes_smoke_proc 2 全绿；`scripts/smoke_nodes.sh` 端到端实跑通过（4 检查点）。
+- runc 实测：runc 1.1.12 + python rootfs fixture 下 `sandbox::runc::tests::runc_step_smoke` 绿。

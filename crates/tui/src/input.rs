@@ -306,6 +306,63 @@ pub fn spawn_input_pump(
     (rx, handle)
 }
 
+/// How long the shutdown drain waits without an event before declaring the
+/// input stream quiet. Key-release reports arrive within tens of milliseconds
+/// of the quitting keypress, so 80 ms absorbs them without delaying exit.
+const DRAIN_QUIET: Duration = Duration::from_millis(80);
+
+/// Hard cap on the shutdown drain. Bounds the added exit latency even when
+/// input keeps arriving (held key auto-repeat, a drag) so quitting never
+/// feels wedged.
+const DRAIN_CAP: Duration = Duration::from_millis(300);
+
+/// Quit-path input absorb: quiesce the terminal's reporting modes, then drain
+/// the event channel for a bounded quiet window, discarding everything still
+/// in flight.
+///
+/// Why: the quitting keypress (Ctrl+D, the final Enter of `/exit`) is still
+/// physically held when shutdown starts. Under the Kitty keyboard protocol
+/// (pushed by [`crate::terminal::TerminalGuard::enter`]) its release/repeat
+/// arrives as `CSI ..;1:3u` reports; events that land after the pump stops are
+/// stranded in the tty input queue and — outside tmux, which discards the
+/// pane's leftover input — the shell echoes the CSI tails as garbage
+/// (`442;1:3u`, `0;1:3u`) at the prompt. The quiesce pop stops new reports
+/// from being generated; this drain absorbs the ones already in flight. Events
+/// typed ahead during the (≤ [`DRAIN_CAP`]) window are discarded too — the app
+/// is quitting, so there is nothing left to deliver them to.
+///
+/// The channel (not the tty) is drained so the pump thread stays the only
+/// crossterm reader; `rx` must not have another consumer at this point (the
+/// main loop has already exited).
+pub(crate) async fn drain_shutdown(rx: &mut mpsc::Receiver<Event>) {
+    crate::terminal::quiesce_input_reporting();
+    drain_until_quiet(rx, DRAIN_QUIET, DRAIN_CAP).await;
+}
+
+/// Bounded quiet-window drain over the event channel. Discards every event;
+/// stops at the first quiet window (no event for `quiet`), at the `cap`
+/// deadline, or when the channel closes — whichever comes first. Isolated from
+/// [`drain_shutdown`] (no tty side effects) so tests can shrink the durations
+/// and stay deterministic.
+async fn drain_until_quiet(rx: &mut mpsc::Receiver<Event>, quiet: Duration, cap: Duration) {
+    let deadline = Instant::now() + cap;
+    loop {
+        let now = Instant::now();
+        if now >= deadline {
+            break;
+        }
+        let wait = quiet.min(deadline - now);
+        match tokio::time::timeout(wait, rx.recv()).await {
+            // Event in flight: discard it and restart the quiet window.
+            Ok(Some(_)) => continue,
+            // Channel closed (pump gone): nothing left to absorb.
+            Ok(None) => break,
+            // Quiet window elapsed with nothing arriving: input stream is dry.
+            Err(_) => break,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -327,6 +384,97 @@ mod tests {
             }
             thread::sleep(Duration::from_millis(50));
         }
+    }
+
+    // ── Shutdown drain (bounded quiet-window absorb) ──
+
+    async fn push_all(tx: &tokio::sync::mpsc::Sender<Event>, evs: &[Event]) {
+        for ev in evs {
+            tx.send(ev.clone()).await.unwrap();
+        }
+    }
+
+    /// Queued in-flight events (kitty release/repeat reports of the quitting
+    /// keypress, mouse, paste) are all discarded; after the quiet window the
+    /// channel is empty.
+    #[tokio::test]
+    async fn drain_discards_in_flight_events_then_stops_on_quiet() {
+        let (tx, mut rx) = mpsc::channel::<Event>(16);
+        push_all(
+            &tx,
+            &[
+                key(KeyCode::Enter),
+                key(KeyCode::Esc),
+                key(KeyCode::Char('d')),
+            ],
+        )
+        .await;
+        // Keep the sender alive: dropping it would hit the (instant)
+        // channel-closed branch — covered by
+        // `drain_returns_promptly_when_channel_closed` — and skip the
+        // quiet-window wait this test exists to verify.
+        let _keep_alive = &tx;
+
+        let started = Instant::now();
+        drain_until_quiet(&mut rx, Duration::from_millis(20), Duration::from_secs(5)).await;
+
+        assert!(
+            started.elapsed() >= Duration::from_millis(20),
+            "must wait out the quiet window before declaring the stream dry"
+        );
+        assert!(
+            rx.try_recv().is_err(),
+            "every in-flight event must be discarded, none left for the shell"
+        );
+    }
+
+    /// Input arriving continuously (held-key auto-repeat) must not stretch the
+    /// drain past the hard cap — quitting stays bounded even under fire.
+    #[tokio::test]
+    async fn drain_is_bounded_by_cap_when_events_keep_arriving() {
+        let (tx, mut rx) = mpsc::channel::<Event>(256);
+        let feeder = tokio::spawn(async move {
+            for _ in 0..100 {
+                if tx.send(key(KeyCode::Char('x'))).await.is_err() {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        });
+
+        let started = Instant::now();
+        drain_until_quiet(
+            &mut rx,
+            Duration::from_millis(80),
+            Duration::from_millis(150),
+        )
+        .await;
+        let elapsed = started.elapsed();
+
+        assert!(
+            elapsed >= Duration::from_millis(140),
+            "cap window must actually elapse under continuous input: {elapsed:?}"
+        );
+        assert!(
+            elapsed < Duration::from_millis(600),
+            "drain must stay bounded by the cap, not by the feeder: {elapsed:?}"
+        );
+        feeder.abort();
+    }
+
+    /// A closed channel (pump already gone) must end the drain immediately —
+    /// no point waiting out the quiet window on nothing.
+    #[tokio::test]
+    async fn drain_returns_promptly_when_channel_closed() {
+        let (tx, mut rx) = mpsc::channel::<Event>(4);
+        drop(tx);
+
+        let started = Instant::now();
+        drain_until_quiet(&mut rx, Duration::from_secs(5), Duration::from_secs(10)).await;
+        assert!(
+            started.elapsed() < Duration::from_millis(200),
+            "closed channel must not wait out the quiet window"
+        );
     }
 
     // ── Esc-tail guard (pure state machine) ──

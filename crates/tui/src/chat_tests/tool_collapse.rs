@@ -245,12 +245,17 @@ fn running_hint_persists_until_say_begins() {
     );
     v.apply(&SessionEvent::TextDelta("final answer".into()));
     let line = &flatten_text(&v)[0];
+    // The running hint MOVES onto the merged Say header while the Say
+    // streams last — it retires from the pre-Say group row, it does not
+    // vanish: the pair header now carries the live indicator.
     assert!(
-        !line.contains("running"),
-        "the first non-empty Say chunk must settle progress: {line:?}"
+        line.contains("Say(1 step): final answer") && line.contains("running"),
+        "the first non-empty Say chunk hands the hint to the merged header: {line:?}"
     );
 
-    // Say is terminal for the ladder: later frames cannot re-arm it.
+    // Say is terminal for the ladder: later frames cannot re-arm it —
+    // post-Say activity (new ladder below the Say) retires the hint for
+    // good, exactly like the old pre-Say row.
     v.apply(&SessionEvent::ReasoningDelta("one more check".into()));
     assert!(!flatten_text(&v)[0].contains("running"));
     v.apply(&SessionEvent::ToolStart {

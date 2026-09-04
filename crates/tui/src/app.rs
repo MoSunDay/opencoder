@@ -777,6 +777,13 @@ pub(super) async fn run_app(
             }
         }
     }
+    // Quit-path terminal quiesce: stop the terminal from reporting further
+    // input (Kitty pop + mouse/paste off) and absorb the release/repeat
+    // reports of the quitting keypress before they can strand in the tty
+    // queue and be echoed as `442;1:3u`-style garbage by the shell (no tmux).
+    // Must run BEFORE `finish` while raw mode is still on, so drained bytes
+    // are never echoed by the tty line discipline.
+    crate::input::drain_shutdown(&mut input_rx).await;
     app_bootstrap::finish(&supervisor_active, cmd_tx, worker).await;
     Ok(session_id)
 }

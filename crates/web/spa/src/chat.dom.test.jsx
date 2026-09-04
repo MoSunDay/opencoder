@@ -443,6 +443,39 @@ describe('ChatPanel optimistic echo & transcript_reset rebuild', () => {
     expect(screen.getByText('压缩后的上下文')).toBeTruthy();
     expect(container.querySelectorAll('.ant-bubble')).toHaveLength(2);
   });
+
+  it('dedups the server echo frame against the optimistic bubble (one user bubble live)', async () => {
+    // 直播回显去重（TUI pending_turn_echo 契约）：本地乐观回显与服务端
+    // steer_consumed 帧是同一条 user 边界 —— 帧文本与乐观回显完全相同时
+    // 折叠去重，直播期间不再显示两条；done 重建后本来就只剩一条。
+    const { container, textarea } = await mountChat();
+    await act(async () => {
+      fireEvent.change(textarea, { target: { value: '马上开始' } });
+    });
+    await act(async () => {
+      fireEvent.keyDown(container.querySelector('textarea.ant-sender-input'), { key: 'Enter', keyCode: 13 });
+    });
+    await waitFor(() => {
+      expect(liveEventCtl).toBeTruthy();
+      expect(container.querySelector('.ant-bubble-end')).toBeTruthy();
+    });
+    const enc = new TextEncoder();
+    await act(async () => {
+      liveEventCtl.enqueue(enc.encode('event: steer_consumed\ndata: {"text":"马上开始"}\n\n'));
+    });
+    // 相同文本的服务端回显折叠进乐观回显：仍只有一条 user 泡。
+    await waitFor(() => {
+      expect(container.querySelectorAll('.ant-bubble-end')).toHaveLength(1);
+    });
+    expect(container.querySelectorAll('.ant-bubble-end')[0].textContent).toContain('马上开始');
+    // 不同文本的回显（下一轮 steer）正常追加为第二条。
+    await act(async () => {
+      liveEventCtl.enqueue(enc.encode('event: steer_consumed\ndata: {"text":"换个方向"}\n\n'));
+    });
+    await waitFor(() => {
+      expect(container.querySelectorAll('.ant-bubble-end')).toHaveLength(2);
+    });
+  });
 });
 
 describe('ChatPanel resync (lag → snapshot rebuild at the /seq watermark)', () => {

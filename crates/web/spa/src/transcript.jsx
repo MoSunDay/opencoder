@@ -30,6 +30,7 @@ import { Bubble } from '@ant-design/x';
 import { Tag, Typography } from 'antd';
 import { isEmptyTranscript, itemsFromTurns, usageLine } from './bubbleItems.js';
 import { StepsContent, ThinkContent, ToolContent } from './stepsBlock.jsx';
+import { sayBodyParts, sayPreview } from './sayText.js';
 import { SubagentContent } from './subagentBlock.jsx';
 
 const { Text, Paragraph } = Typography;
@@ -82,33 +83,40 @@ function TextContent({ turn }) {
 /// segments into one ladder and keeps the closing Say as visible speech —
 /// the run ends at its Say, so a ladder streamed after it renders as its own
 /// Turn. The resulting top-level shape is always one `N Steps` summary plus
-/// Say.
+/// Say. The WHOLE content (including the Say segment, sayActive and
+/// progressActive) travels into StepsContent: the Say header reads its
+/// single-line preview and the Say-row running tag from it, while the Say
+/// BODY still renders below as sibling nodes.
 function AssistantTurnContent({ turn }) {
-  const steps = turn && Array.isArray(turn.steps) ? turn.steps : [];
   const say = turn && Array.isArray(turn.say) ? turn.say : [];
+  // 头部标签已经渲染了正文首个非空行（preview）：正文跳过该行，单行 Say
+  // 不再与 preview 一字不差地重复；去完为空则整个正文块不渲染 —— 不残留
+  // 任何间距或空节点。口径见 sayText.js（与头部共用同一份拼接）。
+  const body = sayBodyParts(say, sayPreview(say));
   return (
     <div>
-      <StepsContent turn={{
-        kind: 'steps',
-        role: 'assistant',
-        steps,
-        progressActive: turn && turn.progressActive,
-      }} />
-      {say.map((part, index) => {
-        if (part.kind === 'think') {
-          return <ThinkContent key={'think:' + index} turn={part} />;
-        }
-        if (part.kind === 'sys') {
-          // Absorbed retry/status row (bubbleItems): render as the centered
-          // sys line inside the bubble tail, not as an AI text part.
-          return <SysContent key={'sys:' + index} turn={part} />;
-        }
-        return (
-          <div key={'say:' + index} style={{ marginTop: 8 }}>
-            <TextContent turn={part} />
-          </div>
-        );
-      })}
+      <StepsContent turn={turn} />
+      {body.length > 0 ? (
+        // TUI 对齐（头部行后插一空行）：正文块与头部保持 16px 的真实块级
+        // 间距，不再与 `❯ Say(N steps)` 行挤在一起。
+        <div style={{ marginTop: 16 }}>
+          {body.map((part, index) => {
+            if (part.kind === 'think') {
+              return <ThinkContent key={'think:' + index} turn={part} />;
+            }
+            if (part.kind === 'sys') {
+              // Absorbed retry/status row (bubbleItems): render as the centered
+              // sys line inside the bubble tail, not as an AI text part.
+              return <SysContent key={'sys:' + index} turn={part} />;
+            }
+            return (
+              <div key={'say:' + index} style={index === 0 ? undefined : { marginTop: 8 }}>
+                <TextContent turn={part} />
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
     </div>
   );
 }

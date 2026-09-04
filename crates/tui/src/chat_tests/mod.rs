@@ -8,6 +8,8 @@ mod image_render;
 mod line_accounting;
 mod plan_card;
 mod reconcile_repair;
+mod say_pair;
+mod say_pair_dedup;
 mod sidecar_fold;
 mod sidecar_stream_isolation;
 mod steer_echo;
@@ -19,6 +21,7 @@ mod timer;
 mod tok_cost;
 mod tool_call_expand;
 mod tool_collapse;
+mod tool_output_blank;
 mod user_block;
 
 #[test]

@@ -321,9 +321,13 @@ export function ChatPanel({ onNotice }) {
     // the run's only user anchor and must render immediately — no waiting on
     // server frames. consumedEchoText applies the echo contract: compound
     // control commands echo only their tail; a bare control command echoes
-    // nothing → no bubble at all.
+    // nothing → no bubble at all. `optimistic` marks the turn as a LOCAL
+    // prediction: a later steer/queue_consumed frame echoing the SAME text
+    // folds into it instead of pushing a duplicate (reduce.js dedup).
     const echo = consumedEchoText(prompt);
-    await openLocalStream(sid, after, echo ? [{ kind: 'text', role: 'user', text: echo }] : []);
+    await openLocalStream(sid, after, echo
+      ? [{ kind: 'text', role: 'user', text: echo, optimistic: true }]
+      : []);
   };
 
   const sendRemote = async (prompt) => {
@@ -359,8 +363,9 @@ export function ChatPanel({ onNotice }) {
     }
     // Remote dispatch has no queue_consumed echo (synthetic task session), so
     // the optimistic user turn applies the echo contract itself: bare control
-    // commands render nothing, compounds render only the tail.
-    setStream((s) => withUserTurn(s, consumedEchoText(prompt)));
+    // commands render nothing, compounds render only the tail. `optimistic`
+    // marks the local prediction (reduce.js dedups a same-text echo frame).
+    setStream((s) => withUserTurn(s, consumedEchoText(prompt), true));
     startStream({ path: '/api/nodes/tasks/' + encodeURIComponent(taskId) + '/events', sessionId, after: 0 });
   };
 

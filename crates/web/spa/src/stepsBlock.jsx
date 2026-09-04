@@ -5,7 +5,11 @@
 // Interaction model (collapsed content stays OUT of the DOM until drilled):
 //   L0  ❯ 2 Steps [running|error]  ← TURN Collapse (ghost, default CLOSED)
 //         — the ONLY thing a collapsed steps bubble renders; running from
-//           reasoning/tool activity until Say begins, then red on any error
+//           reasoning/tool activity until Say begins, then red on any error.
+//         With the turn's own Say: the header becomes the Say row
+//           `❯ Say(N step{s}): {first-line preview}` and the running tag
+//           rides THERE (driven by sayActive, the sayStreaming ladder flag)
+//           until the sub-turn's ladder ends.
 //   L1    ❯ Step(1) [error]        ← per-step Collapse (default closed);
 //         red tag when any of THIS step's calls failed
 //   L2      💭 Thinking (text)      ← thinking renders DIRECTLY (mono grey
@@ -18,8 +22,10 @@
 // including while streaming. Ctrl+L / ⤒ 收起 remount
 // the bubbles (epoch key), resetting them to the stable `N Steps + Say`
 // turn summary.
-// Say text never enters this component: reduce.js keeps it as a sibling
-// segment and bubbleItems.js places both segments in the same visual Turn.
+// Only the Say's single-line preview enters this component (inside the
+// header label above); the Say BODY never does: reduce.js keeps it as a
+// sibling segment and bubbleItems.js places both segments in the same visual
+// Turn, transcript.jsx renders the full text below this component.
 // ThinkContent stays exported for
 // transcript.jsx's independent `think` turns (history/defense only — the
 // live path streams reasoning straight into steps); ToolContent
@@ -28,6 +34,7 @@
 
 import { Collapse, Tag, Typography } from 'antd';
 import { fmtDuration } from './format.js';
+import { sayPreview } from './sayText.js';
 
 const { Text, Paragraph } = Typography;
 
@@ -170,20 +177,41 @@ function StepCollapse({ step, index }) {
   );
 }
 
-/// Turn row (L0): ONE ghost Collapse for the whole turn — label `❯ N
-/// Step(s)` + running/error tag; default CLOSED, so a collapsed steps bubble
-/// shows only this row (the ladder renders on drill-down). `running` while
-/// `progressActive` stays true from reasoning/tool activity until Say begins;
-/// `error` appears only once progress settles. Older hand-built turns without
-/// that field fall back to the open-call test. It remains closed by default
-/// while streaming, so disclosure state never jumps as frames arrive.
+/// Say header preview: imported from sayText.js and shared with the
+/// body-side first-line dedup (transcript.jsx) — one concatenation basis for
+/// both sides, so the header preview and the skipped body line can never
+/// drift apart. `image:true` marker rows are presentation, NOT Say text (TUI
+/// parity: Image blocks never close a turn) and never feed the preview; an
+/// empty/whitespace Say leaves the preview empty (bare colon).
+
+/// Turn row (L0): ONE ghost Collapse for the whole turn — default CLOSED, so
+/// a collapsed steps bubble shows only this row (the ladder renders on
+/// drill-down). Two label modes:
+///   * no Say yet: `❯ N Step(s)`; `running` while `progressActive` stays
+///     true from reasoning/tool activity until Say begins (older hand-built
+///     turns without that field fall back to the open-call test);
+///   * the turn's own Say: `❯ Say(N step{s}): {first-line preview}` — the
+///     running tag MOVES onto the Say row (driven by `sayActive`, the
+///     sayStreaming ladder flag from the reducer) so the hint survives the
+///     Say until the sub-turn's ladder really ends; `error` still shows once
+///     running settles. Clicking the Say row still drills the SAME Collapse
+///     (uncontrolled — no activeKey).
+/// Say text: only the first non-blank line (preview) rides in the label —
+/// the full Say body renders outside, as this component's sibling (see the
+/// header comment). Disclosure state never jumps as frames arrive.
 export function StepsContent({ turn }) {
   const steps = turn && Array.isArray(turn.steps) ? turn.steps : [];
   const calls = steps.flatMap((s) => ((s && Array.isArray(s.calls)) ? s.calls : []));
   const openCall = calls.some((c) => c && c.output === null);
-  const running = typeof turn.progressActive === 'boolean'
-    ? turn.progressActive
-    : openCall;
+  const say = turn && Array.isArray(turn.say) ? turn.say : [];
+  // Same Say test bubbleItems.js uses for its progressActive freeze (image
+  // markers count — they ride in the say segment like any non-step part).
+  const hasSay = say.some((part) => (
+    part && part.kind === 'text' && typeof part.text === 'string' && part.text.length > 0
+  ));
+  const running = hasSay
+    ? turn.sayActive === true
+    : (typeof turn.progressActive === 'boolean' ? turn.progressActive : openCall);
   const errored = calls.some((c) => c && c.isError);
   return (
     <Collapse
@@ -193,7 +221,9 @@ export function StepsContent({ turn }) {
         key: 'steps',
         label: (
           <span style={{ fontFamily: MONO, fontSize: 12 }}>
-            ❯ {steps.length} Step{steps.length === 1 ? '' : 's'}
+            {hasSay
+              ? `❯ Say(${steps.length} step${steps.length === 1 ? '' : 's'}): ${sayPreview(say)}`
+              : `❯ ${steps.length} Step${steps.length === 1 ? '' : 's'}`}
             {running ? <Tag color="processing" style={{ marginLeft: 12 }}>running</Tag> : null}
             {!running && errored ? <Tag color="red" style={{ marginLeft: 12 }}>error</Tag> : null}
           </span>

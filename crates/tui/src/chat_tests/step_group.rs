@@ -196,9 +196,11 @@ fn pure_text_turn_folds_thinking_into_a_call_less_step() {
         .unwrap();
     assert!(group_idx < say_idx, "ladder before Say");
     let flat = lines(&v);
+    // The call-less step is visible only through the MERGED Say header —
+    // the pair folds the count into `{glyph} Say(n step{s}): <preview>`.
     assert!(
-        flat.iter().any(|l| l.contains("1 Step")),
-        "group row counts the call-less step: {flat:?}"
+        flat.iter().any(|l| l.contains("Say(1 step): the answer")),
+        "merged pair header counts the call-less step: {flat:?}"
     );
 }
 
@@ -369,5 +371,29 @@ fn expanded_step_keeps_streaming_new_thinking_deltas() {
     assert!(
         streamed.find("first chunk") < streamed.find("second chunk"),
         "thinking renders in stream order: {streamed:?}"
+    );
+}
+
+#[test]
+fn tool_turn_boundary_keeps_exactly_one_trailing_blank() {
+    // Done after a tool turn must not stack a second boundary blank on the
+    // ladder's own trailing blank ("User:"-block parity): the merged pair
+    // ends on its Say body, so the single boundary blank terminates it.
+    let mut v = ChatView::default();
+    v.apply(&SessionEvent::ReasoningDelta("think".into()));
+    call_tool(&mut v, "solo");
+    // Pre-Say: the standalone group row carries the live running hint.
+    assert_eq!(lines(&v), vec!["\u{25b8} 1 Step  \u{280b} running ", ""]);
+    v.apply(&SessionEvent::TextDelta("spoken".into()));
+    assert_eq!(
+        lines(&v),
+        vec!["\u{25b8} Say(1 step): spoken  \u{280b} running ", ""],
+        "the Say streams under the merged header (body first line deduped), spinner moved onto it"
+    );
+    v.apply(&SessionEvent::Done);
+    assert_eq!(
+        lines(&v),
+        vec!["\u{25b8} Say(1 step): spoken", ""],
+        "single-line Say: header + blank, exactly one trailing blank"
     );
 }

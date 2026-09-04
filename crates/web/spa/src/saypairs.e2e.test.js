@@ -33,22 +33,32 @@ describe('(a) two rounds in one run alternate [N Steps + Say] x 2', () => {
     s = reduceFrame(s, { event: 'tool_end', data: { id: 'r1b', name: 'read', output: 'fn main() {}', is_error: false, duration_ms: 80 } }, 1290);
     expect(s.turns.map((t) => t.kind)).toEqual(['text', 'steps']);
 
-    // Say 1 streams in chunks: its FIRST chunk freezes the ladder it closes.
+    // Say 1 streams in chunks: its FIRST chunk freezes the ladder it closes
+    // AND hands the running hint to the Say row (sayStreaming) — the ladder
+    // stays "running" through the whole Say even though progress froze.
     s = reduceFrame(s, { event: 'text_delta', data: { text: 'First round done.' } }, 1300);
     const ladder1 = s.turns[1];
     expect(ladder1.progressActive).toBe(false);
+    expect(ladder1.sayStreaming).toBe(true);
     s = reduceFrame(s, { event: 'text_delta', data: { text: ' Two calls used.' } }, 1310);
     expect(s.turns[2]).toMatchObject({ kind: 'text', role: 'assistant', text: 'First round done. Two calls used.' });
+    // Continuation chunks keep the flag on the same (pair-1) ladder.
+    expect(s.turns[1].sayStreaming).toBe(true);
 
-    // Round 2 opens a FRESH ladder strictly BELOW Say 1, re-armed.
+    // Round 2 opens a FRESH ladder strictly BELOW Say 1, re-armed. The new
+    // ladder activity retires pair-1's Say-row running hint.
     s = reduceFrame(s, { event: 'reasoning_delta', data: { text: 'tighten up' } }, 1400);
+    expect(s.turns[1].sayStreaming).toBe(false);
+    expect(s.turns[3].sayStreaming).toBeFalsy();
     s = reduceFrame(s, { event: 'tool_start', data: { id: 'r2a', name: 'bash', input: { cmd: 'cargo test' } } }, 1410);
     s = reduceFrame(s, { event: 'tool_end', data: { id: 'r2a', name: 'bash', output: '12 passed', is_error: false, duration_ms: 900 } }, 2310);
     const ladder2 = s.turns[3];
     expect(ladder2.progressActive).toBe(true);
 
-    // Say 2 freezes the round-2 ladder exactly when it starts streaming.
+    // Say 2 freezes the round-2 ladder exactly when it starts streaming —
+    // and takes over the running hint for pair 2.
     s = reduceFrame(s, { event: 'text_delta', data: { text: 'All green.' } }, 2320);
+    expect(s.turns[3].sayStreaming).toBe(true);
     s = reduceFrame(s, { event: 'done', data: {} }, 2330);
 
     // Settled transcript: [user, steps, say, steps, say].
@@ -78,6 +88,11 @@ describe('(a) two rounds in one run alternate [N Steps + Say] x 2', () => {
     expect(s.turns[1].progressActive).toBe(false);
     expect(s.turns[3].progressActive).toBe(false);
     expect(s.turns[4]).toMatchObject({ kind: 'text', role: 'assistant', text: 'All green.', open: false });
+    // Say-row running per pair: pair 2's Say activated its own flag (asserted
+    // right after its first chunk), and the terminal done retired BOTH hints
+    // — no running survives the terminal boundary.
+    expect(s.turns[1].sayStreaming).toBe(false);
+    expect(s.turns[3].sayStreaming).toBe(false);
 
     // The second ladder sits strictly BELOW the first Say (index order).
     const say1 = indexOfKind(s.turns, 'text', 1);
@@ -160,16 +175,23 @@ describe('(c) steer consumption opens a fresh ladder', () => {
     s = reduceFrame(s, { event: 'tool_end', data: { id: 'c1', name: 'bash', output: '3 hits', is_error: false, duration_ms: 60 } }, 1070);
     s = reduceFrame(s, { event: 'text_delta', data: { text: 'Initial findings are in.' } }, 1080);
 
-    // Round-1 Say closed its ladder: snapshot the frozen group.
+    // Round-1 Say closed its ladder: snapshot the frozen group. The Say row
+    // carries the running hint (sayStreaming) while its sub-turn is the
+    // live one — the steer boundary below ends it.
     expect(s.turns.map((t) => t.kind)).toEqual(['text', 'steps', 'text']);
     const ladder1 = s.turns[1];
     expect(ladder1.progressActive).toBe(false);
+    expect(ladder1.sayStreaming).toBe(true);
 
     // Mid-run steer: steer_consumed pushes the user echo (a hard segment
     // boundary - it also closes the previous Say) and remembers pendingEcho.
     s = reduceFrame(s, { event: 'steer_consumed', data: { text: 'also check the error paths' } }, 1100);
     expect(s.pendingEcho).toBe('also check the error paths');
     expect(s.turns.find((t) => t.text === 'Initial findings are in.').open).toBe(false);
+    // The boundary settles the ladder terminal-side: the round-1 Say row's
+    // running hint retires with it (only field ever touched — everything
+    // else stays deep-equal to the frozen snapshot).
+    expect(s.turns[1].sayStreaming).toBe(false);
 
     // Round 2 reasoning + call: the user boundary CAPS the backwards walk -
     // nothing merges into the closed group above Say 1.
@@ -189,9 +211,10 @@ describe('(c) steer consumption opens a fresh ladder', () => {
     // Re-armed: its own Say has not arrived yet.
     expect(ladder2.progressActive).toBe(true);
 
-    // The round-1 ladder is untouched by the steer boundary (deep-equal to
-    // the frozen snapshot; the walk never reached above the user echo).
-    expect(s.turns[1]).toEqual(ladder1);
+    // The round-1 ladder is untouched by the steer boundary beyond the
+    // retired sayStreaming hint (deep-equal to the frozen snapshot; the walk
+    // never reached above the user echo).
+    expect(s.turns[1]).toEqual({ ...ladder1, sayStreaming: false });
     expect(s.turns[1].progressActive).toBe(false);
     expect(callIds(s.turns[1])).toEqual(['c1']);
     expect(s.turns[1].steps).toHaveLength(1);

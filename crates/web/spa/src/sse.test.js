@@ -240,6 +240,37 @@ describe('sse resync dedup + onResync watermark (round-2 #5)', () => {
     stream.abort();
   });
 
+  // Regression (saypairs c1/c2): steer/queue_consumed carry the INPUT-row seq
+  // inside data (TUI queue identity, restarts at 1 per session). Mid-run the
+  // event watermark is already far above it, so treating data.seq as the
+  // event seq made handleBlock drop the LIVE steer echo as a "replay repeat"
+  // — the echo only reappeared ~10s later from the done rebuild. The id: line
+  // is the only event-seq source; payload seq must stay off frame.seq.
+  it('a live steer_consumed whose data.seq sits below the watermark is still delivered (payload seq is not the event seq)', async () => {
+    signFetchMock.mockResolvedValueOnce(sseResponseIds([
+      { event: 'text_delta', data: { text: 'a' }, id: 5 },
+      // Live steer echo: no id: line (not yet persisted), data.seq = 2 is the
+      // session_inputs row seq — must NOT be lifted onto frame.seq.
+      { event: 'steer_consumed', data: { seq: 2, text: 'STEER-B 转向' } },
+      { event: 'text_delta', data: { text: 'b' }, id: 6 },
+    ]));
+    const frames = [];
+    const stream = openStream({
+      path: '/api/sessions/s1/events',
+      sessionId: 's1',
+      after: 0,
+      onFrame: (f) => frames.push(f),
+      onStatus: () => {},
+    });
+    await flush();
+    expect(frames.map((f) => f.event)).toEqual(['text_delta', 'steer_consumed', 'text_delta']);
+    const steer = frames[1];
+    expect(steer.seq).toBe(null);
+    expect(steer.data.text).toBe('STEER-B 转向');
+    expect(steer.data.seq).toBe(2); // payload field survives untouched
+    stream.abort();
+  });
+
   it('a lag re-sync with onResync reconnects above the returned floor and skips the legacy /seq fetch', async () => {
     const connA = liveStream();
     const connB = liveStream();

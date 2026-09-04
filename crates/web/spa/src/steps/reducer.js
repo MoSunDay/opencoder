@@ -87,13 +87,19 @@ export function appendThinkDelta(turns, text) {
   const progressActive = !turnHasSay(copy);
   const index = turnStepsIndex(copy);
   if (index < 0) {
-    copy.splice(turnInsertIndex(copy), 0, {
+    // A fresh ladder can only open BELOW the streaming Say here (the floor
+    // sits under the LAST Say) - new ladder activity ends the sub-turn the
+    // Say was closing, so its Say-row running hint retires first. Appends
+    // into an EXISTING ladder (same sub-turn, no Say yet) never reach this
+    // branch and never touch the flag.
+    const cleared = clearSayStreaming(copy);
+    cleared.splice(turnInsertIndex(cleared), 0, {
       kind: 'steps',
       role: 'assistant',
       progressActive,
       steps: [{ thinking: text, calls: [] }],
     });
-    return copy;
+    return cleared;
   }
   const group = copy[index];
   const steps = group.steps.slice();
@@ -132,6 +138,55 @@ export function settleTurnProgress(turns) {
   const copy = turns.slice();
   copy[index] = { ...copy[index], progressActive: false };
   return copy;
+}
+
+// Say-row running ownership (TUI-parity render model): when a Say starts
+// streaming it does NOT make "running" vanish - the hint MOVES from the step
+// count onto the Say row and stays there until the sub-turn's ladder really
+// ends (a fresh ladder opens below the Say, or the run reaches a terminal
+// boundary). `sayStreaming` rides on the SAME turn settleTurnProgress
+// freezes (the FIRST steps group at/after the floor - the ladder the
+// incoming Say closes). Copy-on-write: already marked → same array.
+export function markSayStreaming(turns) {
+  const index = turnStepsIndex(turns);
+  if (index < 0 || turns[index].sayStreaming === true) {
+    return turns;
+  }
+  const copy = turns.slice();
+  copy[index] = { ...copy[index], sayStreaming: true };
+  return copy;
+}
+
+// Retire every Say-row running hint: a terminal boundary or fresh-ladder
+// activity ended the sub-turn whose Say was streaming. Only steps turns
+// carrying the flag are copied (others keep their object identity); when NO
+// turn carries it the input array is returned unchanged.
+export function clearSayStreaming(turns) {
+  const list = Array.isArray(turns) ? turns : [];
+  const flagged = (turn) => !!(turn && turn.kind === 'steps' && turn.role === 'assistant'
+    && turn.sayStreaming === true);
+  if (!list.some(flagged)) {
+    return list;
+  }
+  const copy = list.slice();
+  for (let i = 0; i < copy.length; i += 1) {
+    if (flagged(copy[i])) {
+      copy[i] = { ...copy[i], sayStreaming: false };
+    }
+  }
+  return copy;
+}
+
+// In-place twin of clearSayStreaming for the mutator-style reducers
+// (appendStepCall splices the caller-owned array directly).
+function clearSayStreamingInPlace(turns) {
+  for (let i = 0; i < turns.length; i += 1) {
+    const turn = turns[i];
+    if (turn && turn.kind === 'steps' && turn.role === 'assistant'
+      && turn.sayStreaming === true) {
+      turns[i] = { ...turn, sayStreaming: false };
+    }
+  }
 }
 
 // Compatibility fold for old states that still contain top-level think
@@ -195,6 +250,10 @@ export function appendStepCall(turns, thinking, call, activateProgress = false) 
   const progressAllowed = !turnHasSay(turns);
   const index = turnStepsIndex(turns);
   if (index < 0) {
+    // Fresh ladder BELOW the streaming Say (same ownership move as
+    // appendThinkDelta): retire the Say-row running hint on the older turns
+    // before the new one lands.
+    clearSayStreamingInPlace(turns);
     turns.splice(turnInsertIndex(turns), 0, {
       kind: 'steps', role: 'assistant', progressActive: activateProgress && progressAllowed,
       steps: [{ thinking, calls: [call] }],

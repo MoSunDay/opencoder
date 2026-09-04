@@ -38,7 +38,7 @@ queue-vs-submit 臂选择错误。`chat.subagents_running`（chat_types.rs）
 
 - 仅 `crates/tui`：`key_handler.rs`（+参数+分支条件）、`app.rs`
   （同行实参替换）；Steer/Enter/鼠标/mode-switch 路径零变化。
-- 全部 38 处 `handle_key` 调用点机械补 `false` 实参（6 个测试文件）。
+- 全部 48 处 `handle_key` 调用点机械补 `false` 实参（8 个测试文件）。
 
 ## 测试清单（rules/01、02、03）
 

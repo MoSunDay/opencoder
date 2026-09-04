@@ -1,4 +1,4 @@
-//! Pure path/validation helpers for the opencode-team NFS layout.
+//! Pure path/validation helpers for the opencoder-team NFS layout.
 //!
 //! ```text
 //! <team_root>/<team_name>/team.json                                  ← 团队元信息

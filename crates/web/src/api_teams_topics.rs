@@ -125,6 +125,9 @@ pub async fn cancel_topic(
 /// (resume is derived from the on-disk tree). Only `executing` orphans (a
 /// server restart left them mid-run) and `finished(error)` topics may
 /// resume; anything else answers 409, as does an already-running topic.
+/// That 409 first converges the topic's ledger rows (idempotent flip): the
+/// runtime saves terminal metadata BEFORE flipping the store rows, and this
+/// rejection is the only production entry left for that crash residue.
 pub async fn resume_topic(
     State(state): State<Arc<AppState>>,
     Path((name, tid)): Path<(String, String)>,
@@ -140,6 +143,12 @@ pub async fn resume_topic(
     let resumable =
         meta.status == TOPIC_EXECUTING || meta.finish_reason.as_deref() == Some(FINISH_ERROR);
     if !resumable {
+        // Crash residue `disk finished + ledger executing` can never reach
+        // `run_topic`'s own converge branch (we refuse before spawning), so
+        // converge the idempotent flip right here on the rejection path.
+        if let Err(e) = state.store.finish_team_topic_run(&tid).await {
+            return error_500(format!("finish_team_topic_run: {e:#}"));
+        }
         return error_409(&format!(
             "topic is {} ({}); only executing or finished(error) topics can resume",
             meta.status,

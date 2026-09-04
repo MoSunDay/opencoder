@@ -21,10 +21,17 @@ use crate::types::CapabilityInput;
 /// ids sortable and collision-free, mirroring the `todo-` id style.
 pub const ID_PREFIX: &str = "brain";
 
+/// Prefix for every persisted decision-tree plan id (`brain-plan-{ULID}`).
+pub const PLAN_ID_PREFIX: &str = "brain-plan";
+
 pub struct Runtime {
-    store: Arc<dyn Store>,
-    client: Arc<dyn ChatStream>,
-    model: String,
+    pub(crate) store: Arc<dyn Store>,
+    pub(crate) client: Arc<dyn ChatStream>,
+    pub(crate) model: String,
+    /// Chat model the dynamic planner prompts under (the framework-prompt
+    /// LLM call in `planning.rs`). Defaults to the embedding model id; the
+    /// production wiring overrides it with the config's small model.
+    pub(crate) chat_model: String,
 }
 
 impl Runtime {
@@ -33,11 +40,24 @@ impl Runtime {
         client: Arc<dyn ChatStream>,
         model: impl Into<String>,
     ) -> Self {
+        let model = model.into();
         Self {
+            chat_model: model.clone(),
             store,
             client,
-            model: model.into(),
+            model,
         }
+    }
+
+    /// Override the planner chat model (builder; see `chat_model`).
+    pub fn with_chat_model(mut self, model: impl Into<String>) -> Self {
+        self.chat_model = model.into();
+        self
+    }
+
+    /// The chat model the dynamic planner prompts under.
+    pub fn chat_model(&self) -> &str {
+        &self.chat_model
     }
 
     /// The embedding model every vector write/search is scoped to. Exposed so
@@ -144,8 +164,17 @@ impl Runtime {
     /// error, a cardinality mismatch, an empty vector — is carried as the
     /// typed [`EmbeddingFailed`] marker (the upstream chain folded into
     /// `detail`), which the web layer maps to a 502 via `downcast_ref`.
-    fn embed_one(&self, text: &str) -> Result<Vec<f32>> {
-        let mut vecs = match self.client.embed(&[text.to_string()], &self.model) {
+    pub(crate) fn embed_one(&self, text: &str) -> Result<Vec<f32>> {
+        let mut vecs = self.embed_many(&[text.to_string()])?;
+        let emb = vecs.pop().expect("cardinality checked in embed_many");
+        Ok(emb)
+    }
+
+    /// Embed a batch: every upstream failure (HTTP error, cardinality
+    /// mismatch, empty vector) is carried as the typed [`EmbeddingFailed`]
+    /// marker; on success every returned vector is non-empty.
+    pub(crate) fn embed_many(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
+        let vecs = match self.client.embed(texts, &self.model) {
             Ok(vecs) => vecs,
             Err(e) => {
                 return Err(anyhow::Error::new(EmbeddingFailed {
@@ -153,18 +182,17 @@ impl Runtime {
                 }))
             }
         };
-        if vecs.len() != 1 {
+        if vecs.len() != texts.len() {
             return Err(anyhow::Error::new(EmbeddingFailed {
-                detail: format!("expected 1 vector, got {}", vecs.len()),
+                detail: format!("expected {} vectors, got {}", texts.len(), vecs.len()),
             }));
         }
-        let emb = vecs.pop().expect("length checked above");
-        if emb.is_empty() {
+        if vecs.iter().any(|v| v.is_empty()) {
             return Err(anyhow::Error::new(EmbeddingFailed {
                 detail: "model returned an empty vector".to_string(),
             }));
         }
-        Ok(emb)
+        Ok(vecs)
     }
 }
 

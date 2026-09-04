@@ -6,8 +6,8 @@ use anyhow::{Context, Result};
 use libsql::{params, Connection, Row};
 
 use crate::{
-    BrainCapabilityDetail, BrainCapabilityRecord, BrainEngInputRecord, BrainVectorHit,
-    BrainVectorWrite,
+    BrainCapabilityDetail, BrainCapabilityRecord, BrainEngInputRecord, BrainPlanRecord,
+    BrainVectorHit, BrainVectorWrite,
 };
 
 /// INSERT a capability plus its exemplar inputs in one transaction. Input
@@ -186,6 +186,72 @@ pub async fn search(
         });
     }
     Ok(out)
+}
+
+/// INSERT one decision-tree plan. `id` is a fresh ULID minted by the brain
+/// runtime, so a plain INSERT (no upsert) is correct — a collision would be
+/// a ULID collision.
+pub async fn save_plan(conn: &Connection, plan: &BrainPlanRecord) -> Result<()> {
+    conn.execute(
+        "INSERT INTO brain_plans (id,situation,situation_digest,chat_model,tree_json,created_at) VALUES (?1,?2,?3,?4,?5,?6)",
+        params![
+            plan.id.as_str(),
+            plan.situation.as_str(),
+            plan.situation_digest.as_str(),
+            plan.chat_model.as_str(),
+            plan.tree_json.as_str(),
+            plan.created_at
+        ],
+    )
+    .await
+    .context("insert brain plan")?;
+    Ok(())
+}
+
+/// Fetch one plan by id (`None` if absent).
+pub async fn get_plan(conn: &Connection, id: &str) -> Result<Option<BrainPlanRecord>> {
+    let mut rows = conn
+        .query(
+            "SELECT id,situation,situation_digest,chat_model,tree_json,created_at FROM brain_plans WHERE id=?1",
+            params![id],
+        )
+        .await?;
+    match rows.next().await? {
+        Some(row) => Ok(Some(row_plan(&row)?)),
+        None => Ok(None),
+    }
+}
+
+/// Newest plan for a situation digest — the dispatch-side cache probe. Ties
+/// on `created_at` (same millisecond) break on `rowid` so the "latest" pick
+/// is total-order stable, mirroring the node-task FIFO convention.
+pub async fn latest_plan_by_digest(
+    conn: &Connection,
+    digest: &str,
+) -> Result<Option<BrainPlanRecord>> {
+    let mut rows = conn
+        .query(
+            "SELECT id,situation,situation_digest,chat_model,tree_json,created_at FROM brain_plans \
+             WHERE situation_digest=?1 ORDER BY created_at DESC, rowid DESC LIMIT 1",
+            params![digest],
+        )
+        .await?;
+    match rows.next().await? {
+        Some(row) => Ok(Some(row_plan(&row)?)),
+        None => Ok(None),
+    }
+}
+
+/// Column order shared by every brain_plans SELECT.
+fn row_plan(row: &Row) -> Result<BrainPlanRecord> {
+    Ok(BrainPlanRecord {
+        id: row.get(0)?,
+        situation: row.get(1)?,
+        situation_digest: row.get(2)?,
+        chat_model: row.get(3)?,
+        tree_json: row.get(4)?,
+        created_at: row.get(5)?,
+    })
 }
 
 async fn insert_capability(conn: &Connection, c: &BrainCapabilityRecord) -> Result<()> {

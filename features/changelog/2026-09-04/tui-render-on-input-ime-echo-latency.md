@@ -1,4 +1,4 @@
-Commit: (working-tree, 待提交)
+Commit: e6f9c19
 
 # TUI 输入即帧：按键/IME 回显不再等待 fps 帧周期，门控延迟归零
 

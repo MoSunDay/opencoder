@@ -157,6 +157,22 @@ fn tab_while_idle_submits() {
 }
 
 #[test]
+fn tab_with_live_subagents_admits_queue() {
+    // Idle parent + live subagents (autopilot stage gap, cancel grace,
+    // reabsorb tail): Tab must queue, not submit — the queued item is
+    // consumed by the same serial worker after the subagent batch ends.
+    let mut input = String::from("follow-up");
+    let mut idx = 9;
+    let action = run_handle_subagents_busy(
+        key(KeyCode::Tab, KeyModifiers::NONE),
+        &mut input,
+        &mut idx,
+        "act",
+    );
+    assert!(matches!(action, KeyAction::Queue(ref t) if t == "follow-up"));
+}
+
+#[test]
 fn tab_on_focused_subagent_rejected_not_queued() {
     // Focusing a *running* subagent enables input (Enter => steer) but Tab
     // must NOT queue: a queue is admitted to the parent session and would

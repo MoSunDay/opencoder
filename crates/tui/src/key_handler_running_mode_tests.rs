@@ -23,6 +23,7 @@ fn press_running_command(
         &[],
         &mut hist_idx,
         true,
+        false,
         "act",
         &mut scroll,
         &mut follow,
@@ -64,6 +65,7 @@ fn press_ctrl_t(agent: &str, running: bool, input_disabled: bool) -> (KeyAction,
         &[],
         &mut hist_idx,
         running,
+        false,
         agent,
         &mut scroll,
         &mut follow,
@@ -118,6 +120,54 @@ fn running_tab_mode_command_becomes_queue() {
     let command = "/plan later";
     let (action, input, _) = press_running_mode_command(command, KeyCode::Tab);
     assert!(matches!(action, KeyAction::Queue(text) if text == command));
+    assert!(input.is_empty(), "queue clears the input line");
+}
+
+/// Bug case: the parent turn already reports idle (`running = false`) while
+/// its subagent batch is still draining — autopilot stage gap (PLAN Done →
+/// ACT dispatches task subagents), cancel grace window, or reabsorb tail.
+/// Tab must still queue: a submit would bypass the queue row and start a new
+/// run immediately, betraying the follow-up intent.
+#[test]
+fn idle_tab_with_live_subagents_becomes_queue() {
+    let mut input = "after the subagents finish".to_string();
+    let mut cursor = input.chars().count();
+    let mut hist_idx = None;
+    let mut scroll = 0;
+    let mut follow = true;
+    let mut last_esc = None;
+    let mut skill_menu = None;
+    let mut undo_state = crate::undo::init(&input, cursor);
+    let mut queue_scroll = 0;
+    let mut file_menu = None;
+    let action = handle_key(
+        KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE),
+        &crate::keymap::KeyBindings::from_config(&opencoder_core::Config::default()),
+        &mut input,
+        &mut cursor,
+        &[],
+        &mut hist_idx,
+        false,
+        true, // subagents_running: live subagents keep Tab on the queue arm
+        "act",
+        &mut scroll,
+        &mut follow,
+        &mut last_esc,
+        &mut skill_menu,
+        80,
+        2,
+        false,
+        false,
+        false,
+        &mut undo_state,
+        &mut queue_scroll,
+        &mut file_menu,
+        Path::new("."),
+    );
+    assert!(
+        matches!(action, KeyAction::Queue(ref t) if t == "after the subagents finish"),
+        "idle + live subagents must queue, got {action:?}"
+    );
     assert!(input.is_empty(), "queue clears the input line");
 }
 
@@ -178,6 +228,7 @@ fn backtab_in_plan_mode_arms_clear_context_confirm() {
             &mut cursor,
             &[],
             &mut hist_idx,
+            false,
             false,
             "plan",
             &mut scroll,
@@ -253,6 +304,7 @@ fn backtab_arm_then_esc_restores_the_raw_draft() {
             &[],
             &mut hist_idx,
             false,
+            false,
             "plan",
             &mut scroll,
             &mut follow,
@@ -318,6 +370,7 @@ fn backtab_in_act_mode_switches_to_plan() {
             &[],
             &mut hist_idx,
             running,
+            false,
             "act",
             &mut scroll,
             &mut follow,
@@ -375,6 +428,7 @@ fn tab_shift_spelling_arms_or_switches_like_backtab() {
             &mut cursor,
             &[],
             &mut hist_idx,
+            false,
             false,
             agent,
             &mut scroll,
@@ -445,6 +499,7 @@ fn ctrl_alt_shift_tab_chords_never_arm_or_switch() {
             &mut cursor,
             &[],
             &mut hist_idx,
+            false,
             false,
             agent,
             &mut scroll,
@@ -524,6 +579,7 @@ fn shift_tab_with_focused_subagent_never_arms() {
             &[],
             &mut hist_idx,
             true,
+            false,
             "plan",
             &mut scroll,
             &mut follow,

@@ -1,4 +1,4 @@
-Commit: pending（共享工作树多会话并行迭代中，brain 功能未单独提交，随收口会话统一落盘）
+Commit: 8ca4d0e（统一收口落库，348 文件含 brain 全量；尾笔 66a3247 补最后一笔 changelog）
 
 # opencoder-brain：项目目标/能力库——录入、语义向量检索与 Web「项目目标」面板
 
@@ -78,4 +78,4 @@ Commit: pending（共享工作树多会话并行迭代中，brain 功能未单�
 - 定向 gate（本轮独立复跑核证）：`cargo test -p opencoder-brain`（10 lib + 8 runtime 全绿）、`-p opencoder-llm`（166 例：111 lib + 10 embeddings + connect_retry/headers/lower_messages/mock_contract 等）、`-p opencoder-store --lib`（25）、`-p opencoder-web --test web_brain`（6）；`cargo clippy -p opencoder-{brain,llm,web,store} --all-targets` 0 warning。
 - `cargo test --workspace --no-fail-fast`（本轮首次拿到**完整**计数——此前两轮被 fail-fast 截断误读）：**291/294 suite ok、4350 passed**；仅 3 个失败 suite，全为根 crate 进程级冒烟（`daemon_smoke` / `nodes_smoke_proc` / `running_mode_switch_e2e`，共 4 例），根因同源：server 迁移批次已把 `opencode daemon --server` 改为重定向专用 `opencode-server` 二进制（实测打印 "has moved to the dedicated server binary"），三文件仍 spawn 旧入口等待该批次配套更新（`crates/server` dev-deps 已备 tempfile 而测试未落、迁移 changelog 未写、03:02 仍在编辑 `crates/agents`+`web/tests`）——不在 brain 改动面，且当日已有两起并行同文件编辑竞态（子代理实测编辑丢失），不代改。
 - 另：本轮 workspace 编译面曾被并行实时编辑两次打断（store `project_factory.rs` E0277 等），均其自行修复后恢复。
-- Commit：维持 pending——统一提交条件（并行批次收口 + workspace 全绿）未满足；**收口判据已量化：上述 3 个冒烟 suite 转绿 + server 迁移 changelog 落盘后即可统一落库并回填 hash**。
+- Commit：已落库——收口判据（3 个冒烟 suite 转绿，由归属会话完成）达成后，workspace 全量 gate 绿（300 suite / 4382 例 / clippy -D warnings 0）随即统一提交：8ca4d0e（348 文件统一收口，共享 index 由并行会话抢先发出，内容一致）+ 66a3247（尾笔 changelog）。

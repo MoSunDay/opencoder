@@ -8,21 +8,32 @@ use tokio::sync::Mutex;
 
 use crate::store::Store;
 use crate::types::{
-    Delivery, ImportReport, MessageRow, NodeRecord, NodeTaskRecord, NodeTaskStatus,
-    SessionEventRecord, SessionFilter, SessionInput, SessionListItem, SessionMeta, SessionPatch,
-    SubagentTaskRecord,
+    DagDefRecord, DagEventRecord, DagRunRecord, Delivery, ImportReport, MessageRow, NodeRecord,
+    NodeTaskRecord, NodeTaskStatus, SessionEventRecord, SessionFilter, SessionInput,
+    SessionListItem, SessionMeta, SessionPatch, SubagentTaskRecord,
 };
-use crate::{TodoEventRecord, TodoItemRecord, TodoWorkflowRecord, TodoWorkflowSummary};
+use crate::{
+    BrainCapabilityDetail, BrainCapabilityRecord, BrainEngInputRecord, BrainVectorHit,
+    BrainVectorWrite, TeamTopicRunRecord, TodoEventRecord, TodoItemRecord, TodoWorkflowRecord,
+    TodoWorkflowSummary,
+};
 
+mod brain;
+mod chat_tables;
+mod dag;
+mod dag_events;
 mod events;
 mod inputs;
 mod messages;
 mod node_state;
 mod node_tasks;
 mod nodes;
+mod project;
+mod project_runs;
 pub(crate) mod schema;
 mod sessions;
 mod subagent_tasks;
+mod team_runs;
 mod todos;
 mod tx;
 
@@ -385,6 +396,81 @@ impl Store for LibsqlStore {
         todos::events_after(&self.conn, workflow_id, after_seq).await
     }
 
+    async fn create_brain_capability(
+        &self,
+        capability: &BrainCapabilityRecord,
+        eng_inputs: &[BrainEngInputRecord],
+    ) -> Result<()> {
+        let _guard = self.db_lock.lock().await;
+        brain::create(&self.conn, capability, eng_inputs).await
+    }
+
+    async fn update_brain_capability(
+        &self,
+        capability: &BrainCapabilityRecord,
+        eng_inputs: &[BrainEngInputRecord],
+    ) -> Result<()> {
+        let _guard = self.db_lock.lock().await;
+        brain::update(&self.conn, capability, eng_inputs).await
+    }
+
+    async fn delete_brain_capability(&self, id: &str) -> Result<()> {
+        let _guard = self.db_lock.lock().await;
+        brain::delete(&self.conn, id).await
+    }
+
+    async fn get_brain_capability(&self, id: &str) -> Result<Option<BrainCapabilityDetail>> {
+        let _guard = self.db_lock.lock().await;
+        brain::get(&self.conn, id).await
+    }
+
+    async fn list_brain_capabilities(&self) -> Result<Vec<BrainCapabilityDetail>> {
+        let _guard = self.db_lock.lock().await;
+        brain::list(&self.conn).await
+    }
+
+    async fn upsert_brain_vector(
+        &self,
+        capability_id: &str,
+        dim: i64,
+        model: &str,
+        emb: &[u8],
+        updated_at: i64,
+    ) -> Result<()> {
+        let _guard = self.db_lock.lock().await;
+        brain::upsert_vector(&self.conn, capability_id, dim, model, emb, updated_at).await
+    }
+
+    async fn create_brain_capability_with_vector(
+        &self,
+        capability: &BrainCapabilityRecord,
+        eng_inputs: &[BrainEngInputRecord],
+        vector: &BrainVectorWrite,
+    ) -> Result<()> {
+        let _guard = self.db_lock.lock().await;
+        brain::create_with_vector(&self.conn, capability, eng_inputs, vector).await
+    }
+
+    async fn update_brain_capability_with_vector(
+        &self,
+        capability: &BrainCapabilityRecord,
+        eng_inputs: &[BrainEngInputRecord],
+        vector: &BrainVectorWrite,
+    ) -> Result<()> {
+        let _guard = self.db_lock.lock().await;
+        brain::update_with_vector(&self.conn, capability, eng_inputs, vector).await
+    }
+
+    async fn search_brain_vectors(
+        &self,
+        model: &str,
+        query_emb: &[u8],
+        limit: u32,
+    ) -> Result<Vec<BrainVectorHit>> {
+        let _guard = self.db_lock.lock().await;
+        brain::search(&self.conn, model, query_emb, limit).await
+    }
+
     async fn register_node(
         &self,
         name: &str,
@@ -496,6 +582,92 @@ impl Store for LibsqlStore {
     ) -> Result<Vec<NodeTaskRecord>> {
         let _guard = self.db_lock.lock().await;
         node_tasks::converge_lost(&self.conn, now_ms, stale_ms).await
+    }
+
+    async fn upsert_dag_def(&self, def: &DagDefRecord) -> Result<()> {
+        let _guard = self.db_lock.lock().await;
+        dag::upsert_def(&self.conn, def).await
+    }
+    async fn list_dag_defs(&self) -> Result<Vec<DagDefRecord>> {
+        let _guard = self.db_lock.lock().await;
+        dag::list_defs(&self.conn).await
+    }
+    async fn get_dag_def(&self, id: &str) -> Result<Option<DagDefRecord>> {
+        let _guard = self.db_lock.lock().await;
+        dag::get_def(&self.conn, id).await
+    }
+    async fn delete_dag_def(&self, id: &str) -> Result<()> {
+        let _guard = self.db_lock.lock().await;
+        dag::delete_def(&self.conn, id).await
+    }
+    async fn dispatch_dag_run(&self, run: &DagRunRecord) -> Result<DagRunRecord> {
+        let _guard = self.db_lock.lock().await;
+        dag::dispatch(&self.conn, run).await
+    }
+    async fn claim_next_dag_run(&self, node_id: &str, now_ms: i64) -> Result<Option<DagRunRecord>> {
+        let _guard = self.db_lock.lock().await;
+        dag::claim_next(&self.conn, node_id, now_ms).await
+    }
+    async fn update_dag_run_status(
+        &self,
+        run_id: &str,
+        status: opencoder_dag::DagRunStatus,
+        error: Option<&str>,
+        now_ms: i64,
+    ) -> Result<DagRunRecord> {
+        let _guard = self.db_lock.lock().await;
+        dag::update_status(&self.conn, run_id, status, error, now_ms).await
+    }
+    async fn cancel_dag_run(&self, run_id: &str, now_ms: i64) -> Result<()> {
+        let _guard = self.db_lock.lock().await;
+        dag::cancel(&self.conn, run_id, now_ms).await
+    }
+    async fn cancelling_dag_runs(&self, node_id: &str) -> Result<Vec<String>> {
+        let _guard = self.db_lock.lock().await;
+        dag::cancelling_runs(&self.conn, node_id).await
+    }
+    async fn get_dag_run(&self, id: &str) -> Result<Option<DagRunRecord>> {
+        let _guard = self.db_lock.lock().await;
+        dag::get_run(&self.conn, id).await
+    }
+    async fn list_dag_runs(&self, limit: u32) -> Result<Vec<DagRunRecord>> {
+        let _guard = self.db_lock.lock().await;
+        dag::list_runs(&self.conn, limit).await
+    }
+    async fn append_dag_events(&self, events: &[DagEventRecord]) -> Result<Vec<i64>> {
+        let _guard = self.db_lock.lock().await;
+        dag_events::append_events(&self.conn, events).await
+    }
+    async fn dag_events_after(
+        &self,
+        run_id: &str,
+        after: i64,
+        limit: u32,
+    ) -> Result<Vec<DagEventRecord>> {
+        let _guard = self.db_lock.lock().await;
+        dag_events::events_after(&self.conn, run_id, after, limit).await
+    }
+    async fn converge_lost_dag_runs(
+        &self,
+        now_ms: i64,
+        stale_ms: i64,
+    ) -> Result<Vec<DagRunRecord>> {
+        let _guard = self.db_lock.lock().await;
+        dag::converge_lost(&self.conn, now_ms, stale_ms).await
+    }
+
+    // Team topic runs (opencode-team fan-out ledger).
+    async fn upsert_team_topic_run(&self, rec: &TeamTopicRunRecord) -> Result<()> {
+        let _guard = self.db_lock.lock().await;
+        team_runs::upsert(&self.conn, rec).await
+    }
+    async fn finish_team_topic_run(&self, topic_id: &str) -> Result<()> {
+        let _guard = self.db_lock.lock().await;
+        team_runs::finish(&self.conn, topic_id).await
+    }
+    async fn list_team_topic_runs(&self, topic_id: &str) -> Result<Vec<TeamTopicRunRecord>> {
+        let _guard = self.db_lock.lock().await;
+        team_runs::list(&self.conn, topic_id).await
     }
 
     async fn import_messages(

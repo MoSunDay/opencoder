@@ -26,8 +26,12 @@ fn interrupt_then_resubmit_keeps_multiline_breaks() {
 
     // ── 回合 1：流式中被打断 ──
     submit(&mut v, "do something");
-    v.apply(&SessionEvent::LlmRoundStart { started_at_ms: 1000 });
-    v.apply(&SessionEvent::TextDelta("first partial line\nsecond partial line".into()));
+    v.apply(&SessionEvent::LlmRoundStart {
+        started_at_ms: 1000,
+    });
+    v.apply(&SessionEvent::TextDelta(
+        "first partial line\nsecond partial line".into(),
+    ));
     // Ctrl+C：TUI 本地 marker（cancel_running_turn）
     v.push_marker(Line::from("[interrupted] stopping…"));
     // runner 终结事件
@@ -36,7 +40,9 @@ fn interrupt_then_resubmit_keeps_multiline_breaks() {
 
     // ── 回合 2：立即再提交，多行回答 ──
     submit(&mut v, "retry");
-    v.apply(&SessionEvent::LlmRoundStart { started_at_ms: 2000 });
+    v.apply(&SessionEvent::LlmRoundStart {
+        started_at_ms: 2000,
+    });
     v.apply(&SessionEvent::TextDelta("alpha\nbeta\ngamma".into()));
     v.apply(&SessionEvent::LlmRoundEnd);
     v.apply(&SessionEvent::Done);
@@ -45,9 +51,18 @@ fn interrupt_then_resubmit_keeps_multiline_breaks() {
     for (i, l) in ls.iter().enumerate() {
         println!("{:3}|{}", i, l);
     }
-    let alpha = ls.iter().position(|l| l.contains("alpha")).expect("alpha line");
-    assert!(ls[alpha + 1].contains("beta"), "beta must be its own line, got {ls:?}");
-    assert!(ls[alpha + 2].contains("gamma"), "gamma must be its own line, got {ls:?}");
+    let alpha = ls
+        .iter()
+        .position(|l| l.contains("alpha"))
+        .expect("alpha line");
+    assert!(
+        ls[alpha + 1].contains("beta"),
+        "beta must be its own line, got {ls:?}"
+    );
+    assert!(
+        ls[alpha + 2].contains("gamma"),
+        "gamma must be its own line, got {ls:?}"
+    );
 }
 
 /// 两次中断-再提交的交替稳定性：第 3 回合的换行表现必须与第 2 回合一致。
@@ -57,7 +72,9 @@ fn repeated_interrupt_resubmit_stays_consistent() {
     for round in 0..3 {
         let first = format!("round{} line1", round);
         submit(&mut v, &format!("prompt{}", round));
-        v.apply(&SessionEvent::LlmRoundStart { started_at_ms: 1000 + round });
+        v.apply(&SessionEvent::LlmRoundStart {
+            started_at_ms: 1000 + round,
+        });
         v.apply(&SessionEvent::TextDelta(first));
         v.push_marker(Line::from("[interrupted] stopping…"));
         v.apply(&SessionEvent::Status("interrupted".into()));
@@ -93,9 +110,13 @@ fn interrupt_tool_turn_then_resubmit_multiline() {
     // ── 回合 1：工具 + 多行 Say，完成后被打断前的完整流 ──
     submit(&mut v, "list files");
     v.begin_turn();
-    v.apply(&SessionEvent::LlmRoundStart { started_at_ms: 1000 });
+    v.apply(&SessionEvent::LlmRoundStart {
+        started_at_ms: 1000,
+    });
     call_tool(&mut v, "t1");
-    v.apply(&SessionEvent::TextDelta("partial tool answer\nline2".into()));
+    v.apply(&SessionEvent::TextDelta(
+        "partial tool answer\nline2".into(),
+    ));
     // Ctrl+C 中断
     v.push_marker(Line::from("[interrupted] stopping…"));
     v.apply(&SessionEvent::Status("interrupted".into()));
@@ -103,9 +124,13 @@ fn interrupt_tool_turn_then_resubmit_multiline() {
 
     // ── 回合 2：再提交，工具 + 多行最终回答 ──
     submit(&mut v, "again");
-    v.apply(&SessionEvent::LlmRoundStart { started_at_ms: 2000 });
+    v.apply(&SessionEvent::LlmRoundStart {
+        started_at_ms: 2000,
+    });
     call_tool(&mut v, "t2");
-    v.apply(&SessionEvent::TextDelta("final alpha\nfinal beta\nfinal gamma".into()));
+    v.apply(&SessionEvent::TextDelta(
+        "final alpha\nfinal beta\nfinal gamma".into(),
+    ));
     v.apply(&SessionEvent::LlmRoundEnd);
     v.reconcile_completed_assistant("final alpha\nfinal beta\nfinal gamma");
     v.apply(&SessionEvent::Done);

@@ -31,11 +31,14 @@ async fn app() -> (Router, Arc<opencoder_web::AppState>) {
     let workdir = std::env::temp_dir();
     let state = Arc::new(opencoder_web::AppState {
         client_override: None,
+        brain: opencoder_web::api_brain::mock_brain(store.clone()),
         store: store.clone(),
         workdir: workdir.clone(),
         handles: opencoder_web::handle::new_handle_map(),
         nodes: Arc::new(opencoder_web::nodes_state::NodeHub::new()),
         controls: Arc::new(opencoder_web::control_state::ControlHub::new()),
+        team: opencoder_web::team_state::mock(),
+        project: opencoder_web::ProjectService::new(),
     });
     let app = Router::new()
         .route(
@@ -501,11 +504,14 @@ async fn app_with_workdir(workdir: std::path::PathBuf) -> (Router, Arc<opencoder
     let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
     let state = Arc::new(opencoder_web::AppState {
         client_override: None,
+        brain: opencoder_web::api_brain::mock_brain(store.clone()),
         store: store.clone(),
         workdir,
         handles: opencoder_web::handle::new_handle_map(),
         nodes: Arc::new(opencoder_web::nodes_state::NodeHub::new()),
         controls: Arc::new(opencoder_web::control_state::ControlHub::new()),
+        team: opencoder_web::team_state::mock(),
+        project: opencoder_web::ProjectService::new(),
     });
     let app = Router::new()
         .route(

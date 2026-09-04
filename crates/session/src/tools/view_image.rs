@@ -68,6 +68,7 @@ mod tests {
             working_dir: workdir,
             max_output: 4096,
             proxy: None,
+            tools_path: None,
         }
     }
 

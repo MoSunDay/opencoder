@@ -554,3 +554,24 @@ fn save_without_mcp_servers_key_is_unaffected() {
     Config::save(dir.path(), &serde_json::json!({ "model": "prov/model" }))
         .expect("non-mcp patches must not trip the guard");
 }
+
+#[test]
+fn embedding_model_id_defaults_to_openai_small() {
+    let cfg = Config::default();
+    assert_eq!(cfg.embedding_model, None);
+    assert_eq!(cfg.embedding_model_id(), "text-embedding-3-small");
+}
+
+#[test]
+fn embedding_model_id_returns_configured_value_stripping_prefix() {
+    let cfg = Config {
+        embedding_model: Some("openai/text-embedding-3-large".into()),
+        ..Config::default()
+    };
+    assert_eq!(cfg.embedding_model_id(), "text-embedding-3-large");
+    let cfg = Config {
+        embedding_model: Some("bge-m3".into()),
+        ..Config::default()
+    };
+    assert_eq!(cfg.embedding_model_id(), "bge-m3");
+}

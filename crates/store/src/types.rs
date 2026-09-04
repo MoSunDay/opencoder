@@ -9,6 +9,8 @@ pub const TASK_TYPE_SUBAGENT: &str = "subagent";
 pub const TASK_TYPE_TODO_WORKFLOW: &str = "todo_workflow";
 /// Full primary session assigned to one focused TODO.
 pub const TASK_TYPE_TODO: &str = "todo";
+/// Primary session assigned to a project-module todo run.
+pub const TASK_TYPE_PROJECT: &str = "project";
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SessionMeta {
@@ -494,4 +496,55 @@ pub struct MessageRow {
     pub blocks: serde_json::Value,
     /// Emitter clock (epoch ms) persisted with the row.
     pub created_at: i64,
+}
+
+/// Persisted DAG definition (`dag_defs`): the spec under its stable id.
+/// `spec.name` is unique — upsert replaces the row with the same name.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DagDefRecord {
+    pub id: String,
+    pub name: String,
+    /// Raw spec JSON (`spec_json`) — parsed lazily by readers.
+    pub spec_json: String,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+/// One dispatched workflow run (`dag_runs`). The `spec_json` SNAPSHOT is
+/// copied at dispatch time so later def edits never mutate an in-flight
+/// run. `node_id` is `None` while queued for "any node" and set at claim.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DagRunRecord {
+    pub id: String,
+    pub dag_id: String,
+    /// Display name captured from the spec snapshot at dispatch.
+    pub name: String,
+    pub spec_json: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub node_id: Option<String>,
+    pub status: opencoder_dag::DagRunStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    pub created_at: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub claimed_at: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finished_at: Option<i64>,
+}
+
+/// One node-uploaded DAG event (`dag_events`, append-only). The browser UI's
+/// step state is a pure projection of this stream; the server keeps NO
+/// per-step scheduling state.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DagEventRecord {
+    /// Row seq — the SSE `Last-Event-ID` replay cursor.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seq: Option<i64>,
+    pub run_id: String,
+    pub kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub step: Option<String>,
+    #[serde(default)]
+    pub payload: serde_json::Value,
+    pub at_ms: i64,
 }

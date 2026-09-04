@@ -3,7 +3,7 @@ Commit: (working-tree, daemon 统一入口 + 全量签名 + SPA 内嵌)
 # node 模块
 
 ## 职责
-把一台机器变成集群的执行节点：`opencode daemon --client --remote <server>` 常驻进程，用共享 token（`--token` 或 `OPENCODER_SERVER_TOKEN`，永不自动生成）对 server 全量 HMAC 签名注册，领取任务后**在本机配置与 LLM 凭证下**跑完整 agent session，事件实时回传 server。本地 libsql 同步落一份完整 transcript（经与 web drain 相同的 `spawn_event_flusher`，零额外代码）。
+把一台机器变成集群的执行节点：`opencoder-agent --remote <server>` 常驻进程（原 `opencode daemon --client`），用共享 token（`--token` 或 `OPENCODER_SERVER_TOKEN`，永不自动生成）对 server 全量 HMAC 签名注册，领取任务后**在本机配置与 LLM 凭证下**跑完整 agent session，事件实时回传 server。本地 libsql 同步落一份完整 transcript（经与 web drain 相同的 `spawn_event_flusher`，零额外代码）。
 
 ## 边界与非目标
 - 只做出站 HTTP（heartbeat/claim/upload/status），**永不接受入站连接**；不信任 server 下发的任何模型/密钥——执行端凭证全在本地。
@@ -21,3 +21,9 @@ Commit: (working-tree, daemon 统一入口 + 全量签名 + SPA 内嵌)
 
 ## 相关模块
 - server 半区：[agents/web](../web/index.md)（REST+SSE 桥、NodeHub broadcast）；协议：[agents/core](../core/index.md) `node_protocol.rs`；持久化：[agents/store](../store/index.md)（nodes/node_tasks 表 + 合成 session task_type="node"）。
+
+## DAG 扩展点
+
+- `DagHook` trait（claim/execute）：`NodeOpts.dag: Option<Arc<dyn DagHook>>`，由 `opencode-agent` 注入（node crate 不依赖 VM/runc 链）。
+- runner idle 轮询：无 prompt task 时尝试 DAG claim，单活跃 run 串行执行；专属 heartbeater 把应答里的 `cancel_run_ids` 翻成该 run 的 cancel flag。
+- uplink 增补：`dag_claim`（GET /api/nodes/dag/claim，204→None）、`dag_events`（POST 批量事件）、`dag_status`（POST 终态）。

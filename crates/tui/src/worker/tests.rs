@@ -447,7 +447,10 @@ async fn forwarder_shed_separator_does_not_leak_past_round_end() {
     drop(pending);
     forwarder.await.unwrap();
 
-    assert!(matches!(rx.recv().await, Some(UiEvent::Session(SessionEvent::LlmRoundEnd))));
+    assert!(matches!(
+        rx.recv().await,
+        Some(UiEvent::Session(SessionEvent::LlmRoundEnd))
+    ));
     assert!(
         matches!(rx.recv().await, Some(UiEvent::Session(SessionEvent::TextDelta(t))) if t == "next"),
         "round boundary consumes the owed separator"
@@ -527,7 +530,7 @@ async fn prompt_after_midrun_compaction_still_sends_completed_answer() {
     for i in 0..40 {
         sess.messages.push(opencoder_core::Message::user(
             "seed",
-            &format!("seed message {i} {}", "x".repeat(80)),
+            format!("seed message {i} {}", "x".repeat(80)),
         ));
     }
     let (evt_tx, mut evt_rx) = mpsc::channel::<UiEvent>(256);

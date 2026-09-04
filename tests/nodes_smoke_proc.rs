@@ -3,11 +3,15 @@
 //! distributed-nodes smoke no longer depends on a human remembering to run
 //! a shell script outside CI. The script itself stays the single source of
 //! truth for assertions: this wrapper only injects the freshly built debug
-//! binary (`OPENCODER_SMOKE_BIN`) and a random port
+//! binaries (`OPENCODER_SMOKE_SERVER_BIN`/`OPENCODER_SMOKE_AGENT_BIN`, the
+//! split fleet pair) and a random port
 //! (`OPENCODER_SMOKE_PORT`, avoids colliding with parallel tests), enforces
 //! an outer watchdog timeout (the script's internal curl polls never time
 //! out on their own), and verifies the success marker. Checkpoint 3 in the
-//! script allows `error` as terminal task state, so no LLM config is needed.
+//! script allows `error` as terminal task state, so the script's seeded
+//! loopback LLM stub keeps the run deterministic with zero credentials.
+
+mod support;
 
 use std::io::Read;
 use std::net::TcpListener;
@@ -15,7 +19,7 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 /// Hard ceiling for the whole script run (build is skipped via the injected
-/// binary; server+node startup and the 4 checkpoints fit well inside this).
+/// binaries; server+node startup and the 4 checkpoints fit well inside this).
 const TIMEOUT_SECS: u64 = 300;
 /// Success marker printed by scripts/smoke_nodes.sh after all checkpoints.
 const PASSED_MARKER: &str = "SMOKE NODES PASSED";
@@ -75,7 +79,14 @@ fn smoke_script_two_process_nodes_flow_passes() {
     let mut child = Command::new("bash")
         .arg(&script)
         .current_dir(&repo_root)
-        .env("OPENCODER_SMOKE_BIN", env!("CARGO_BIN_EXE_opencoder"))
+        .env(
+            "OPENCODER_SMOKE_SERVER_BIN",
+            support::sibling_bin(support::SERVER_BIN),
+        )
+        .env(
+            "OPENCODER_SMOKE_AGENT_BIN",
+            support::sibling_bin(support::AGENT_BIN),
+        )
         .env("OPENCODER_SMOKE_PORT", pick_port().to_string())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

@@ -1,3 +1,4 @@
+mod agent_override;
 pub mod daemon;
 pub mod display;
 pub mod exit_tips;
@@ -5,7 +6,6 @@ pub mod install_tools;
 pub mod model_override;
 pub mod run;
 mod run_image;
-pub mod server;
 pub mod session_cmd;
 pub mod todos_cmd;
 pub mod ts;
@@ -506,5 +506,54 @@ mod tests {
             daemon::daemon_mode(false, true, Some("u")).unwrap(),
             daemon::DaemonAction::Client
         );
+    }
+
+    // -- `--agent` value parser contract -----------------------------------
+
+    /// Shared lock + file-agent fixture for tests that touch the
+    /// process-global agents-root override (see `agent_override::tests`).
+    use crate::agent_override::tests::{write_file_agent, OVERRIDE_LOCK};
+
+    #[test]
+    fn parse_agent_name_accepts_a_file_agent() {
+        use opencoder_core::agent::set_agents_dir_override;
+        let dir = tempfile::tempdir().unwrap();
+        let _g = OVERRIDE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        set_agents_dir_override(Some(dir.path().to_path_buf()));
+        write_file_agent(dir.path(), "writer", "Writer soul.");
+        // Same resolver as the fresh-session path, so a resolvable file
+        // agent must clear the parse-time gate.
+        assert_eq!(parse_agent_name("writer").unwrap(), "writer");
+    }
+
+    #[test]
+    fn parse_agent_name_rejects_unknown_names() {
+        use opencoder_core::agent::set_agents_dir_override;
+        // Point the root at an EMPTY tempdir so the machine's real
+        // ~/.opencoder/agents can never leak a name into this test.
+        let dir = tempfile::tempdir().unwrap();
+        let _g = OVERRIDE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        set_agents_dir_override(Some(dir.path().to_path_buf()));
+        let err = parse_agent_name("no-such-agent").unwrap_err();
+        assert!(
+            err.contains("unknown agent 'no-such-agent'"),
+            "expected unknown-agent rejection, got: {err}"
+        );
+    }
+
+    #[test]
+    fn parse_agent_name_still_accepts_builtins() {
+        for name in ["act", "plan", "explore", "build"] {
+            assert_eq!(parse_agent_name(name).unwrap(), name);
+        }
+    }
+
+    #[test]
+    fn tui_subcommand_carries_the_global_agent_flag() {
+        // `--agent` is a global arg, so `opencoder tui --agent X` parses and
+        // main's opts_from_cli can pass it into TuiOpts.
+        let cli = Cli::try_parse_from(["opencode", "tui", "--agent", "plan"]).unwrap();
+        assert_eq!(cli.agent.as_deref(), Some("plan"));
+        assert!(matches!(cli.command, Some(Command::Tui)));
     }
 }

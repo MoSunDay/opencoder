@@ -1,3 +1,4 @@
+pub mod agent_pools;
 pub mod autopilot;
 pub mod bash_guard;
 pub mod compaction;
@@ -144,6 +145,19 @@ pub struct SessionState {
     pub working_dir: PathBuf,
     pub config: Config,
     pub client: Arc<dyn ChatStream>,
+    /// Agent-private tool dirs for the CURRENT agent (file-based agents'
+    /// `current.tools` pool, or every pool under `ToolsScope::All`). Empty
+    /// for builtin agents. Snapshot of [`crate::agent_pools::tools_path_for`];
+    /// refreshed wherever the session agent or config changes (see
+    /// [`crate::agent_pools::refresh`]). The runner hands a colon-joined
+    /// copy to the bash tool so agent-private executables resolve on PATH.
+    pub tools_path: Vec<PathBuf>,
+    /// Agent-private skill-pool roots for the CURRENT agent (0–1 entries,
+    /// empty for builtins). Snapshot of [`crate::agent_pools::skill_roots_for`];
+    /// the live-session skill choke points (`skill_resolve`, autopilot)
+    /// discover these BEFORE the global skills dir so a `/agent`-switched
+    /// session uses its own agent's skills (first-wins shadowing).
+    pub skill_roots: Vec<PathBuf>,
     pub last_usage: opencoder_llm::Usage,
     /// Optional durable store. When set, `record` persists each new message.
     pub store: Option<Arc<dyn Store>>,
@@ -238,6 +252,8 @@ impl SessionState {
         working_dir: PathBuf,
     ) -> Self {
         let model = config.model_id().to_string();
+        let tools_path = crate::agent_pools::tools_path_for(&config, &agent.name);
+        let skill_roots = crate::agent_pools::skill_roots_for(&agent.name);
         SessionState {
             id: id.into(),
             messages: Vec::new(),
@@ -247,6 +263,8 @@ impl SessionState {
             working_dir,
             config,
             client,
+            tools_path,
+            skill_roots,
             last_usage: opencoder_llm::Usage::default(),
             store: None,
             skill_prompt: Arc::new(Mutex::new(None)),
@@ -378,20 +396,25 @@ impl SessionState {
     /// place. The caller builds `new_client` (e.g. from the new base_url/key)
     /// so this module stays decoupled from the concrete `ChatClient`. Used by
     /// the TUI `/model` menu via `UiCmd::ReloadConfig` at the turn boundary.
+    /// Also refreshes the agent pool snapshots — a reload may flip
+    /// `agent.tools_scope`, move the agents root, or change the pools on disk.
     pub fn apply_config_reload(&mut self, new_cfg: Config, new_client: Arc<dyn ChatStream>) {
         self.client = new_client;
         self.model = new_cfg.model_id().to_string();
         self.config = new_cfg;
+        crate::agent_pools::refresh(self);
     }
 
     /// Apply a hot-reloaded config but keep the existing client. Used when
     /// the new endpoint/client cannot be constructed (e.g. missing api_key)
     /// so that at least the `model` and `config` fields stay consistent with
     /// the on-disk config — the live session keeps the old client until the
-    /// next successful reload.
+    /// next successful reload. Refreshes the agent pool snapshots all the
+    /// same (see [`Self::apply_config_reload`]).
     pub fn apply_config_reload_keep_client(&mut self, new_cfg: Config) {
         self.model = new_cfg.model_id().to_string();
         self.config = new_cfg;
+        crate::agent_pools::refresh(self);
     }
 
     /// Push a message to the in-memory transcript AND persist it if a store is

@@ -121,11 +121,12 @@ describe('App shell landmarks (antd 6 under jsdom)', () => {
     expect(screen.getByText('本机 (server 本机引擎)')).toBeTruthy();
   });
 
-  it('renders the brand and the two menu landmarks', () => {
+  it('renders the brand and the menu landmarks', () => {
     setCredentials('smoke-token', '');
     render(<App />);
     expect(screen.getByText(/Opencoder Fleet/)).toBeTruthy();
     expect(screen.getByText('Opencoder 列表')).toBeTruthy();
     expect(screen.getByText('会话交互')).toBeTruthy();
+    expect(screen.getByText('DAG 工作流')).toBeTruthy();
   });
 });

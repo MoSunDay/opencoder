@@ -7,7 +7,11 @@ use crate::types::{
     ImportReport, MessageRow, SessionEventRecord, SessionFilter, SessionInput, SessionListItem,
     SessionMeta, SessionPatch, SubagentTaskRecord,
 };
-use crate::{TodoEventRecord, TodoItemRecord, TodoWorkflowRecord, TodoWorkflowSummary};
+use crate::{
+    BrainCapabilityDetail, BrainCapabilityRecord, BrainEngInputRecord, BrainVectorHit,
+    BrainVectorWrite, TeamTopicRunRecord, TodoEventRecord, TodoItemRecord, TodoWorkflowRecord,
+    TodoWorkflowSummary,
+};
 
 /// Storage abstraction — the single seam that lets us swap libsql for another
 /// Rust SQLite implementation later without touching upper layers.
@@ -215,6 +219,120 @@ pub trait Store: Send + Sync {
         )
     }
 
+    /// Persist a new brain capability together with its exemplar inputs in
+    /// one transaction (project goals / capability library). Step-wise write:
+    /// no embedding row is touched, so runtime paths must prefer
+    /// [`create_brain_capability_with_vector`], which commits capability +
+    /// eng_inputs + vector atomically; this variant stays for direct
+    /// store-level tooling/tests.
+    async fn create_brain_capability(
+        &self,
+        _capability: &BrainCapabilityRecord,
+        _eng_inputs: &[BrainEngInputRecord],
+    ) -> Result<()> {
+        anyhow::bail!(
+            "brain capabilities are not supported by {}",
+            self.backend_name()
+        )
+    }
+    /// Update every capability field and replace its exemplar inputs
+    /// atomically. Step-wise write: the embedding row is left untouched, so
+    /// runtime paths must prefer [`update_brain_capability_with_vector`],
+    /// which swaps content + eng_inputs + vector in one transaction (no
+    /// stale-vector window); this variant stays for direct store-level
+    /// tooling/tests.
+    async fn update_brain_capability(
+        &self,
+        _capability: &BrainCapabilityRecord,
+        _eng_inputs: &[BrainEngInputRecord],
+    ) -> Result<()> {
+        anyhow::bail!(
+            "brain capabilities are not supported by {}",
+            self.backend_name()
+        )
+    }
+    /// Delete a capability; exemplar inputs and vectors cascade.
+    async fn delete_brain_capability(&self, _id: &str) -> Result<()> {
+        anyhow::bail!(
+            "brain capabilities are not supported by {}",
+            self.backend_name()
+        )
+    }
+    /// Fetch one capability with its ordered exemplar inputs.
+    async fn get_brain_capability(&self, _id: &str) -> Result<Option<BrainCapabilityDetail>> {
+        anyhow::bail!(
+            "brain capabilities are not supported by {}",
+            self.backend_name()
+        )
+    }
+    /// Fetch every capability (newest first) with its exemplar inputs.
+    async fn list_brain_capabilities(&self) -> Result<Vec<BrainCapabilityDetail>> {
+        anyhow::bail!(
+            "brain capabilities are not supported by {}",
+            self.backend_name()
+        )
+    }
+    /// Insert-or-replace the embedding for a capability. `emb` is the
+    /// little-endian f32 byte encoding shared with vector search.
+    async fn upsert_brain_vector(
+        &self,
+        _capability_id: &str,
+        _dim: i64,
+        _model: &str,
+        _emb: &[u8],
+        _updated_at: i64,
+    ) -> Result<()> {
+        anyhow::bail!(
+            "brain capabilities are not supported by {}",
+            self.backend_name()
+        )
+    }
+    /// Create a capability, replace its exemplar inputs and upsert its
+    /// embedding in ONE transaction. The vector is embedded by the caller
+    /// (brain runtime) beforehand and passed in as raw bytes, eliminating the
+    /// cross-table partial-write window where a capability row is persisted
+    /// but its vector is missing.
+    async fn create_brain_capability_with_vector(
+        &self,
+        _capability: &BrainCapabilityRecord,
+        _eng_inputs: &[BrainEngInputRecord],
+        _vector: &BrainVectorWrite,
+    ) -> Result<()> {
+        anyhow::bail!(
+            "brain capabilities are not supported by {}",
+            self.backend_name()
+        )
+    }
+    /// Update every capability field, replace its exemplar inputs and
+    /// INSERT OR REPLACE its embedding in ONE transaction. The vector is
+    /// embedded by the caller (brain runtime) beforehand and passed in as
+    /// raw bytes, eliminating the cross-table partial-write window where the
+    /// capability content is new but a stale old vector still answers search.
+    async fn update_brain_capability_with_vector(
+        &self,
+        _capability: &BrainCapabilityRecord,
+        _eng_inputs: &[BrainEngInputRecord],
+        _vector: &BrainVectorWrite,
+    ) -> Result<()> {
+        anyhow::bail!(
+            "brain capabilities are not supported by {}",
+            self.backend_name()
+        )
+    }
+    /// Nearest-neighbour cosine-distance search over stored embeddings,
+    /// scoped to one embedding model, ascending by distance.
+    async fn search_brain_vectors(
+        &self,
+        _model: &str,
+        _query_emb: &[u8],
+        _limit: u32,
+    ) -> Result<Vec<BrainVectorHit>> {
+        anyhow::bail!(
+            "brain capabilities are not supported by {}",
+            self.backend_name()
+        )
+    }
+
     /// Register (or re-register) a worker node by its unique `name`. A new
     /// name gets a fresh ULID; a known name keeps its `id` so dispatched tasks
     /// keep their foreign key, while version/workdir/last_seen_at are
@@ -351,6 +469,118 @@ pub trait Store: Send + Sync {
         _stale_ms: i64,
     ) -> Result<Vec<crate::types::NodeTaskRecord>> {
         anyhow::bail!("node store API is not supported by {}", self.backend_name())
+    }
+
+    // ---------------- DAG workflow store API (node-side scheduling) ----------
+    //
+    // The server stores defs/runs/events and runs the SAME claim /
+    // cancel-piggyback / lost-sweep protocols as node_tasks; the node
+    // executes the whole workflow. See `opencoder_dag` for the domain.
+
+    /// Upsert a DAG definition by `spec.name` (id stays stable across edits).
+    async fn upsert_dag_def(&self, _def: &crate::types::DagDefRecord) -> Result<()> {
+        anyhow::bail!("dag store API is not supported by {}", self.backend_name())
+    }
+    async fn list_dag_defs(&self) -> Result<Vec<crate::types::DagDefRecord>> {
+        anyhow::bail!("dag store API is not supported by {}", self.backend_name())
+    }
+    async fn get_dag_def(&self, _id: &str) -> Result<Option<crate::types::DagDefRecord>> {
+        anyhow::bail!("dag store API is not supported by {}", self.backend_name())
+    }
+    async fn delete_dag_def(&self, _id: &str) -> Result<()> {
+        anyhow::bail!("dag store API is not supported by {}", self.backend_name())
+    }
+    /// Enqueue a run: validates nothing (the web layer validates the spec),
+    /// snapshots `spec_json`, and inserts `pending`. A pinned `node_id`
+    /// restricts claiming to that node; `None` means any node.
+    async fn dispatch_dag_run(
+        &self,
+        _run: &crate::types::DagRunRecord,
+    ) -> Result<crate::types::DagRunRecord> {
+        anyhow::bail!("dag store API is not supported by {}", self.backend_name())
+    }
+    /// FIFO claim of the oldest pending run this `node_id` may take
+    /// (pinned-to-node or unpinned), CAS-guarded inside `BEGIN IMMEDIATE`;
+    /// `None` when the node already runs a DAG run or nothing is due.
+    async fn claim_next_dag_run(
+        &self,
+        _node_id: &str,
+        _now_ms: i64,
+    ) -> Result<Option<crate::types::DagRunRecord>> {
+        anyhow::bail!("dag store API is not supported by {}", self.backend_name())
+    }
+    /// Terminal or intermediate status move along the run state machine
+    /// (`transition_allowed` grid); terminal writes stamp `finished_at`.
+    async fn update_dag_run_status(
+        &self,
+        _run_id: &str,
+        _status: opencoder_dag::DagRunStatus,
+        _error: Option<&str>,
+        _now_ms: i64,
+    ) -> Result<crate::types::DagRunRecord> {
+        anyhow::bail!("dag store API is not supported by {}", self.backend_name())
+    }
+    /// Mark a run `cancelling` (or `cancelled` straight from `pending`);
+    /// the node observes it via the heartbeat piggyback and aborts.
+    async fn cancel_dag_run(&self, _run_id: &str, _now_ms: i64) -> Result<()> {
+        anyhow::bail!("dag store API is not supported by {}", self.backend_name())
+    }
+    /// `cancelling` runs of `node_id` — the heartbeat piggyback payload.
+    async fn cancelling_dag_runs(&self, _node_id: &str) -> Result<Vec<String>> {
+        anyhow::bail!("dag store API is not supported by {}", self.backend_name())
+    }
+    async fn get_dag_run(&self, _id: &str) -> Result<Option<crate::types::DagRunRecord>> {
+        anyhow::bail!("dag store API is not supported by {}", self.backend_name())
+    }
+    async fn list_dag_runs(&self, _limit: u32) -> Result<Vec<crate::types::DagRunRecord>> {
+        anyhow::bail!("dag store API is not supported by {}", self.backend_name())
+    }
+    /// Append node-uploaded events (append-only; assigns `seq`).
+    async fn append_dag_events(
+        &self,
+        _events: &[crate::types::DagEventRecord],
+    ) -> Result<Vec<i64>> {
+        anyhow::bail!("dag store API is not supported by {}", self.backend_name())
+    }
+    /// Replay slice for the run SSE (`seq > after`, ascending).
+    async fn dag_events_after(
+        &self,
+        _run_id: &str,
+        _after: i64,
+        _limit: u32,
+    ) -> Result<Vec<crate::types::DagEventRecord>> {
+        anyhow::bail!("dag store API is not supported by {}", self.backend_name())
+    }
+    /// Lost-node sweep for DAG runs — same semantics as
+    /// [`Store::converge_lost_node_tasks`]: `running | cancelling` runs of
+    /// heartbeat-stale nodes become `error("node lost")`.
+    async fn converge_lost_dag_runs(
+        &self,
+        _now_ms: i64,
+        _stale_ms: i64,
+    ) -> Result<Vec<crate::types::DagRunRecord>> {
+        anyhow::bail!("dag store API is not supported by {}", self.backend_name())
+    }
+
+    // ------------- Team topic runs (opencode-team fan-out) -----------------
+    //
+    // The durable (topic, node) pairing ledger of the multi-node team
+    // runtime. Pure persistence: scheduling lives above the Store.
+
+    /// Insert or refresh one `(topic_id, node_id)` run row. When the row
+    /// already exists only `status` moves — `created_at` keeps its original
+    /// value, so refreshing a pairing never restarts the run's clock.
+    async fn upsert_team_topic_run(&self, _rec: &TeamTopicRunRecord) -> Result<()> {
+        anyhow::bail!("team store API is not supported by {}", self.backend_name())
+    }
+    /// Flip EVERY row of `topic_id` to `finished` (the topic is done; nodes
+    /// still executing converge on their next write). No-op for unknown topics.
+    async fn finish_team_topic_run(&self, _topic_id: &str) -> Result<()> {
+        anyhow::bail!("team store API is not supported by {}", self.backend_name())
+    }
+    /// All run rows of `topic_id`, oldest `created_at` first.
+    async fn list_team_topic_runs(&self, _topic_id: &str) -> Result<Vec<TeamTopicRunRecord>> {
+        anyhow::bail!("team store API is not supported by {}", self.backend_name())
     }
 
     async fn import_messages(&self, session_id: &str, msgs: &[Message]) -> Result<ImportReport> {

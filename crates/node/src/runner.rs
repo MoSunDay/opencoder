@@ -66,6 +66,11 @@ pub struct NodeOpts {
     /// ([`opencoder_core::data_dir_for`] on workdir) so a server and a node
     /// sharing one machine share one store.
     pub local_store_dir: Option<PathBuf>,
+    /// Agent-binary extension for DAG workflow runs: when set, an idle claim
+    /// tick with no prompt task due also polls a DAG run and executes it
+    /// serially (same single-active policy). `None` = this node is a plain
+    /// prompt-task worker (e.g. `opencode-agent --no-dag`).
+    pub dag: Option<Arc<dyn crate::DagHook>>,
 }
 
 impl NodeOpts {
@@ -188,6 +193,27 @@ pub async fn run_node(opts: NodeOpts, override_client: Option<Arc<dyn ChatStream
                                 &inflight,
                             )
                             .await;
+                        } else if let Some(hook) = opts.dag.as_ref() {
+                            // No prompt task due: an agent binary also polls
+                            // the DAG queue. Single-active policy is the same
+                            // (serial execution inside this arm).
+                            match hook.claim(&node_id).await {
+                                Ok(Some(run)) => {
+                                    run_dag_run(
+                                        &uplink,
+                                        &store,
+                                        &inflight,
+                                        &opts,
+                                        hook,
+                                        run,
+                                        &node_id,
+                                        &shutdown_rx,
+                                    )
+                                    .await;
+                                }
+                                Ok(None) => {}
+                                Err(e) => warn!(error = %e, "dag claim poll failed"),
+                            }
                         }
                     }
                     Err(e) => warn!(error = %e, "claim poll failed"),
@@ -270,6 +296,98 @@ async fn run_task(
     // The heartbeater parks once the executor reported a terminal state;
     // abort only cleans up that parked waiter.
     hb.abort();
+}
+
+/// Execute ONE claimed DAG run serially under its own heartbeater — the
+/// exact same shape as [`run_task`], but the executor is the injected
+/// [`crate::DagHook`] (the agent binary's DAG runtime) and cancellation is
+/// signalled through the heartbeat's `cancel_run_ids`. The hook reports its
+/// own terminal status upstream; this wrapper only keeps liveness fresh and
+/// folds errors into warnings, like the task path.
+#[allow(clippy::too_many_arguments)]
+async fn run_dag_run(
+    uplink: &Uplink,
+    store: &Arc<dyn Store>,
+    inflight: &Inflight,
+    opts: &NodeOpts,
+    hook: &Arc<dyn crate::DagHook>,
+    run: opencoder_dag::protocol::DagClaimedRun,
+    node_id: &str,
+    shutdown_rx: &watch::Receiver<bool>,
+) {
+    info!(
+        run_id = %run.run_id,
+        dag_id = %run.dag_id,
+        steps = run.spec.steps.len(),
+        "claimed dag run"
+    );
+    let (cancel_tx, cancel_rx) = watch::channel(false);
+    let hb = spawn_dag_heartbeater(
+        uplink.clone(),
+        Arc::clone(store),
+        inflight.clone(),
+        node_id.to_string(),
+        opts.heartbeat_interval,
+        run.run_id.clone(),
+        cancel_tx.clone(),
+    );
+
+    // Shutdown converges through the SAME cancel flag as a server-side stop,
+    // so exactly one reporting protocol exists (the hook reports cancelled).
+    let fwd_tx = cancel_tx.clone();
+    let mut fwd_shutdown = shutdown_rx.clone();
+    tokio::spawn(async move {
+        crate::await_flag(&mut fwd_shutdown).await;
+        info!("shutdown observed during dag run; requesting local cancellation");
+        let _ = fwd_tx.send(true);
+    });
+
+    match hook.execute(run, cancel_rx).await {
+        Ok(()) => info!("dag run finished"),
+        Err(e) => warn!(error = %e, "dag run ended with error"),
+    }
+    hb.abort();
+}
+
+/// Per-run heartbeat duty loop for DAG runs: mirrors [`spawn_heartbeater`]
+/// but the cancel piggyback is `cancel_run_ids`. Exits as soon as this run's
+/// cancellation is observed; control tasks are still served detached so a
+/// long workflow never starves the message-relay channel.
+fn spawn_dag_heartbeater(
+    uplink: Uplink,
+    store: Arc<dyn Store>,
+    inflight: Inflight,
+    node_id: String,
+    interval: Duration,
+    run_id: String,
+    cancel_tx: watch::Sender<bool>,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let mut tick = tokio::time::interval(interval);
+        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            tick.tick().await;
+            match uplink.heartbeat(&node_id).await {
+                Ok(resp) => {
+                    if resp.cancel_run_ids.iter().any(|id| id == &run_id) {
+                        info!(%run_id, "dag run cancellation observed on heartbeat");
+                        let _ = cancel_tx.send(true);
+                        return;
+                    }
+                    for task in resp.controls {
+                        spawn_control(
+                            uplink.clone(),
+                            Arc::clone(&store),
+                            inflight.clone(),
+                            node_id.clone(),
+                            task,
+                        );
+                    }
+                }
+                Err(e) => warn!(%run_id, error = %e, "busy heartbeat failed"),
+            }
+        }
+    })
 }
 
 /// Per-task heartbeat duty loop. Exits as soon as cancellation for THIS task

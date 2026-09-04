@@ -207,6 +207,9 @@ fn dispatch_keeps_previous_candidate_for_retry_recovery_context() {
 /// dispatchable on resume: runnable() proposes it and validate_dispatch
 /// exempts it from the attempt gate. A plain failure verdict still burns
 /// the budget (dispatch increments the attempt).
+// The clone below is load-bearing: the same call moves `request` into the
+// pairs argument, so a borrowed `from_ref` cannot coexist with that move.
+#[allow(clippy::cloned_ref_to_slice_refs)]
 #[test]
 fn interrupted_todo_at_exhausted_attempts_stays_dispatchable() {
     let workflow = spec_with(1);
@@ -241,6 +244,9 @@ fn interrupted_todo_at_exhausted_attempts_stays_dispatchable() {
 /// T-1 contrast: an interrupted TODO without a session pointer keeps the
 /// plain gate (nothing to resume into, and a New dispatch would silently
 /// grow attempts past the budget).
+// The clone below is load-bearing: the same call moves `request` into the
+// pairs argument, so a borrowed `from_ref` cannot coexist with that move.
+#[allow(clippy::cloned_ref_to_slice_refs)]
 #[test]
 fn interrupted_todo_without_session_still_hits_attempt_gate() {
     let workflow = spec_with(1);

@@ -3,10 +3,11 @@ Commit: (working-tree, sandbox 回退为 plan：恢复 plan/act 双模式回切�
 # llm 模块
 
 ## 职责
-OpenAI 兼容流式客户端 + LLM 抽象口子 + token 估算器。
+OpenAI 兼容流式客户端 + LLM 抽象口子 + `/embeddings` + token 估算器。
 
 ## 关键抽象
-- `ChatStream` trait（`src/stream.rs`）：`fn chat_stream(&self, req) -> Result<Receiver<LlmEvent>>`。`ChatClient`（真，reqwest+SSE）与 `MockChatClient`（测试，FIFO 脚本回放 + 请求录制）共同实现。这是 session 运行时可零 token 测试的接缝。
+- `ChatStream` trait（`src/stream.rs`）：`fn chat_stream(&self, req) -> Result<Receiver<LlmEvent>>`。`ChatClient`（真，reqwest+SSE）与 `MockChatClient`（测试，FIFO 脚本回放 + 请求录制）共同实现。这是 session 运行时可零 token 测试的接缝。`embed(&[String], model)` 默认 bail；`MockChatClient` 实现为 8 维确定性单位向量（同文本同向量），`embed_calls()` 可断言。
+- embed（`src/embed.rs`）：`ChatClient` 非流式 POST `/embeddings`（`build_embed_body`/`parse_embeddings_response` 纯函数化，按 `data[i].index` 归位，数量强校验）；`post_embeddings` 复用 `retry.rs` 纯重试策略——send 错误/408/425/429/5xx 重试，`EMBED_MAX_ATTEMPTS=3` 次尝试（指数退避+jitter）+ 每请求 60s 总超时 `EMBED_REQUEST_TIMEOUT`，解析/数量校验错误不重试；可重试状态采纳 `Retry-After`（整数秒或 HTTP-date，与 chat 路径同款 `retry_delay`：floor 1s / cap 120s / 与指数退避取大，单次 sleep）；`embeddings_via` 同步桥（多线程 runtime `block_in_place` / 否则独立线程 current-thread runtime）。
 - `ChatClient`（`src/client.rs`）：POST `/chat/completions`，SSE 解码（`src/sse.rs`），工具调用累积（`src/tool_call.rs::ToolAccumulator`）。消息 lowering（`src/message.rs`）把 core Message 转 OpenAI JSON。流处理在 `tokio::spawn` 任务中跑，事件经 `mpsc::channel(128)` 投递；reqwest Client 超时 1800s / connect 30s。流错误时发 `LlmEvent::Error`（而非直接返回 Err——rx 端仍能收已缓冲事件）。重试分**两层独立预算**（策略集中在 `src/retry.rs`）：①**连接前** `MAX_ATTEMPTS=5`（`connect_with_retry`，连接/HTTP 状态码失败），②**连接后中途** `MAX_STREAM_ATTEMPTS=3`（`run_stream` 包裹 `run_stream_once`，覆盖 chunk 读取错误 / 截断流（无 `finish_reason`）/ idle 停滞三类中断）。中途重试丢弃全部累积状态（`text_buf`/`tools`/`usage`/`finished`/`decoder`）从头生成、emit `Retrying` 后重连——持久化文本永远来自单个 `Completed` 帧，绝不拼接。预算耗尽：chunk/idle → `Error`；截断 → 尽力而为 `Completed`（保留部分文本）。server `Retry-After` 提示被采纳但有界：floor 1s、cap `RETRY_AFTER_MAX_SECS=120`，与本地 backoff 取 max（`retry.rs::retry_delay`），防 `429 + Retry-After: 86400` 拖死会话。`idle_timeout` 内移入 `ChatClient`（`new_with_read_timeout(..., config.stream_idle_timeout(), ...)`），消费方不再各自守 idle。runner 收 `Retrying` 时清 delta buffer 并发 `Status` 事件显示 `↻ retry N/M` 徽标。
 - `SseDecoder`（`src/sse.rs`）：字节级 SSE 解码器。`push(chunk)` 累积 + `drain()` 返回完整 data 帧。关键：`from_utf8` 失败时保留尾部不完整多字节序列（char 跨 TCP 读分裂），仅处理合法前缀——避免丢帧。`data: [DONE]` 终止信号正确识别。
 - 重试策略（`src/retry.rs`）：纯函数模块，无 I/O。`MAX_ATTEMPTS` / `MAX_STREAM_ATTEMPTS` 两个独立预算；`is_retryable_status`（408/425/429/500/502/503/504 白名单）；`AttemptOutcome` → `RetryDecision` 的纯判定 `retry_decision`；`backoff_millis`（500ms × 2^(n-1) + 抖动）；`StreamInterruption { ChunkError, Truncated, IdleTimeout }` + `should_retry_stream_interruption`（三者均重试）。把最易出 off-by-one 的边界逻辑抽出来穷尽单测。

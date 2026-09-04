@@ -99,6 +99,7 @@ async fn send_without_session_returns_error() {
         working_dir: std::path::PathBuf::from("/tmp"),
         max_output: 4096,
         proxy: None,
+        tools_path: None,
     };
     let input = serde_json::json!({"action": "send", "command": "ls"});
     let out = SshPtyTool.execute(input, &ctx).await.unwrap();
@@ -118,6 +119,7 @@ async fn connect_rejects_injection_in_host() {
         working_dir: std::path::PathBuf::from("/tmp"),
         max_output: 4096,
         proxy: None,
+        tools_path: None,
     };
     let input = serde_json::json!({
         "action": "connect",
@@ -140,6 +142,7 @@ async fn connect_rejects_injection_in_port() {
         working_dir: std::path::PathBuf::from("/tmp"),
         max_output: 4096,
         proxy: None,
+        tools_path: None,
     };
     let input = serde_json::json!({
         "action": "connect",
@@ -162,6 +165,7 @@ async fn send_rejects_interactive_command() {
         working_dir: std::path::PathBuf::from("/tmp"),
         max_output: 4096,
         proxy: None,
+        tools_path: None,
     };
     let input = serde_json::json!({
         "action": "send",
@@ -182,6 +186,7 @@ async fn status_without_session_reports_none() {
         working_dir: std::path::PathBuf::from("/tmp"),
         max_output: 4096,
         proxy: None,
+        tools_path: None,
     };
     let input = serde_json::json!({"action": "status"});
     let out = SshPtyTool.execute(input, &ctx).await.unwrap();
@@ -199,6 +204,7 @@ async fn unknown_action_returns_error() {
         working_dir: std::path::PathBuf::from("/tmp"),
         max_output: 4096,
         proxy: None,
+        tools_path: None,
     };
     let input = serde_json::json!({"action": "foobar"});
     let out = SshPtyTool.execute(input, &ctx).await.unwrap();

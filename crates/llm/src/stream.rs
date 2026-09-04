@@ -17,6 +17,12 @@ pub trait ChatStream: Send + Sync {
     fn backend(&self) -> &'static str {
         "chat"
     }
+
+    /// Embed texts via an OpenAI-compatible `/embeddings` endpoint.
+    /// Returns one vector per input text, in input order.
+    fn embed(&self, _texts: &[String], _model: &str) -> Result<Vec<Vec<f32>>> {
+        anyhow::bail!("embeddings are not supported by {}", self.backend())
+    }
 }
 
 impl<T: ChatStream + ?Sized> ChatStream for std::sync::Arc<T> {
@@ -25,5 +31,8 @@ impl<T: ChatStream + ?Sized> ChatStream for std::sync::Arc<T> {
     }
     fn backend(&self) -> &'static str {
         (**self).backend()
+    }
+    fn embed(&self, texts: &[String], model: &str) -> Result<Vec<Vec<f32>>> {
+        (**self).embed(texts, model)
     }
 }

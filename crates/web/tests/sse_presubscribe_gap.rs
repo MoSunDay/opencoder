@@ -39,11 +39,14 @@ async fn make_state() -> Arc<AppState> {
     let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
     Arc::new(AppState {
         client_override: None,
+        brain: opencoder_web::api_brain::mock_brain(store.clone()),
         store,
         workdir: std::env::temp_dir(),
         handles: opencoder_web::handle::new_handle_map(),
         nodes: Arc::new(opencoder_web::nodes_state::NodeHub::new()),
         controls: Arc::new(opencoder_web::control_state::ControlHub::new()),
+        team: opencoder_web::team_state::mock(),
+        project: opencoder_web::ProjectService::new(),
     })
 }
 

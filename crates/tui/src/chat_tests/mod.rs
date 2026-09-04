@@ -5,6 +5,8 @@ mod agent_switch;
 mod bash_tool;
 mod compaction_state;
 mod image_render;
+mod interrupt_fuzz;
+mod interrupt_resubmit;
 mod line_accounting;
 mod plan_card;
 mod reconcile_repair;

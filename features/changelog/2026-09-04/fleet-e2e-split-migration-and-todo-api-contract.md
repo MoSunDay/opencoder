@@ -1,4 +1,4 @@
-Commit: (working-tree, 待提交)
+Commit: 8ca4d0e
 
 # Fleet e2e 迁移三二进制 + TODO workflows API 契约打磨
 

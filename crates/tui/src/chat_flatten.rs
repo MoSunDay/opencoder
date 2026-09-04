@@ -127,8 +127,12 @@ impl ChatView {
                     // it. Any other follower (Marker/Subagent/...) keeps the
                     // standalone layout.
                     let say = match self.blocks.get(bi + 1) {
-                        Some(ChatBlock::Assistant { raw, done, .. }) => Some(SayHeader {
+                        Some(ChatBlock::Assistant {
                             raw,
+                            done,
+                            rendered,
+                        }) => Some(SayHeader {
+                            preview: step_render::say_preview_for(raw, rendered, *done),
                             // Live `running` hint survives only while the Say
                             // streams and nothing follows it: once Done (or
                             // a new step ladder) lands the hint is over.

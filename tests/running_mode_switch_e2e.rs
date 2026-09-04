@@ -3,6 +3,13 @@
 //! `agent` field on /prompt) refuse with 409 and persist nothing, while
 //! textual mode commands (/plan ...) are admitted and applied by the runner
 //! at the idle boundary.
+//!
+//! P0 note: the server process is now the dedicated `opencoder-server` binary
+//! (formerly `opencode daemon --server`); the "running mode switch" under
+//! test here is the plan/act agent-mode switching, which survived the
+//! three-binary split unchanged.
+
+mod support;
 
 use std::collections::VecDeque;
 use std::io::{Read, Write};
@@ -13,7 +20,6 @@ use std::time::{Duration, Instant};
 
 use opencoder_core::auth_sig;
 
-const BIN: &str = env!("CARGO_BIN_EXE_opencoder");
 const TOKEN: &str = "running-mode-e2e-token";
 
 struct BlockingStub {
@@ -188,19 +194,14 @@ impl Drop for ServerGuard {
 
 fn spawn_server(workdir: &std::path::Path) -> (ServerGuard, String) {
     let mut server = ServerGuard(
-        Command::new(BIN)
+        Command::new(support::sibling_bin(support::SERVER_BIN))
             .arg("--workdir")
             .arg(workdir)
-            .args([
-                "daemon",
-                "--server",
-                "--host",
-                "127.0.0.1",
-                "--port",
-                "0",
-                "--token",
-                TOKEN,
-            ])
+            .args(["--host", "127.0.0.1", "--port", "0", "--token", TOKEN])
+            // Keep the per-workdir SQLite store inside the test's tempdir;
+            // the workdir is stable across the restart below, so the digest
+            // (and therefore the persisted sessions) survive the respawn.
+            .env("XDG_DATA_HOME", workdir.join("xdg"))
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .spawn()
@@ -209,7 +210,7 @@ fn spawn_server(workdir: &std::path::Path) -> (ServerGuard, String) {
     let deadline = Instant::now() + Duration::from_secs(30);
     let mut output = String::new();
     loop {
-        assert!(Instant::now() < deadline, "server did not start");
+        assert!(Instant::now() < deadline, "opencoder-server did not start");
         let mut buf = [0u8; 1024];
         let count = server
             .0
@@ -462,7 +463,7 @@ fn real_server_clear_context_executes_preserved_plan_in_act() {
     let stored_history = session["messages"].to_string();
     assert!(stored_history.contains(PLAN) && stored_history.contains(RESULT));
     // Clear-context is a resume boundary, not destructive history deletion.
-    // Restart the actual daemon and prove the boundary—not row removal—keeps
+    // Restart the actual opencoder-server and prove the boundary—not row removal—keeps
     // pre-clear planning chatter out of the next model request.
     assert!(
         stored_history.contains(original_prompt),

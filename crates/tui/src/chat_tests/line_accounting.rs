@@ -176,7 +176,7 @@ pub(super) fn assert_line_accounting_matches(view: &ChatView) {
                     && steps.last().is_some_and(|s| {
                         s.open && s.calls_open && s.calls.last().is_some_and(|c| c.expanded)
                     });
-                if !ends_on_expanded_call && !(!*open && say_merged_after_group) {
+                if !ends_on_expanded_call && (*open || !say_merged_after_group) {
                     expected += 1; // trailing blank
                 }
             }

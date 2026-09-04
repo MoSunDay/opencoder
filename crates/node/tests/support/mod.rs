@@ -189,6 +189,7 @@ async fn heartbeat(State(st): State<Arc<Stub>>, Path(_id): Path<String>) -> Resp
     Json(NodeHeartbeatResponse {
         server_time_ms: 0,
         cancel_task_ids: ids,
+        cancel_run_ids: vec![],
         controls,
     })
     .into_response()

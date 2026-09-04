@@ -5,15 +5,22 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+opencode-agents.workspace = true
+opencoder-brain.workspace = true
 opencoder-core.workspace = true
+opencoder-dag.workspace = true
 opencoder-llm.workspace = true
+opencoder-project.workspace = true
 opencoder-session.workspace = true
 opencoder-store.workspace = true
+opencoder-todos.workspace = true
+opencoder-team.workspace = true
 tokio.workspace = true
 tokio-stream = { workspace = true, features = ["sync"] }
 tokio-util = { workspace = true, features = ["rt"] }
 futures.workspace = true
 axum = { version = "0.7", features = ["ws"] }
+base64.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 anyhow.workspace = true
@@ -21,6 +28,7 @@ tracing.workspace = true
 dirs.workspace = true
 chrono.workspace = true
 uuid = { workspace = true }
+ulid = { workspace = true }
 
 [dev-dependencies]
 async-trait.workspace = true
@@ -31,6 +39,8 @@ libsql.workspace = true
 opencoder-llm.workspace = true
 # Phase-4 e2e: drive a REAL worker node against the REAL build_app server.
 opencoder-node.workspace = true
+# DAG e2e: the node-side runtime claims + executes runs against the server.
+opencoder-dag-runtime.workspace = true
 reqwest = { workspace = true }
 tower = { version = "0.5", features = ["util"] }
 uuid = { workspace = true }

@@ -35,14 +35,19 @@ pub struct NodeRegisterResponse {
 ///
 /// `server_time_ms` lets the node reconcile clocks; `cancel_task_ids` carries
 /// every `cancelling` task this node must abort before its next heartbeat.
-/// `controls` piggybacks queued control tasks ([`ControlTask`]) so a BUSY
-/// worker (which never polls claim) still learns about them — the heartbeat is
-/// the only channel a busy node is guaranteed to listen on. The request body
-/// may be an empty object and carries no data today.
+/// `cancel_run_ids` is the same piggyback for DAG workflow runs (`cancelling`
+/// runs the node's workflow executor must abort). `controls` piggybacks
+/// queued control tasks ([`ControlTask`]) so a BUSY worker (which never polls
+/// claim) still learns about them — the heartbeat is the only channel a busy
+/// node is guaranteed to listen on. The request body may be an empty object
+/// and carries no data today.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NodeHeartbeatResponse {
     pub server_time_ms: i64,
     pub cancel_task_ids: Vec<String>,
+    /// DAG runs this node must abort (usually empty; omitted from the wire).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cancel_run_ids: Vec<String>,
     /// Control tasks handed to this node opportunistically (usually empty).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub controls: Vec<ControlTask>,
@@ -432,6 +437,7 @@ mod tests {
         let hb = NodeHeartbeatResponse {
             server_time_ms: 5,
             cancel_task_ids: vec![],
+            cancel_run_ids: vec![],
             controls: vec![sample_control("01JCTL")],
         };
         let wire = serde_json::to_string(&hb).unwrap();
@@ -443,10 +449,44 @@ mod tests {
         let quiet = serde_json::to_string(&NodeHeartbeatResponse {
             server_time_ms: 5,
             cancel_task_ids: vec![],
+            cancel_run_ids: vec![],
             controls: vec![],
         })
         .unwrap();
         assert!(!quiet.contains("controls"), "{quiet}");
+    }
+
+    /// Heartbeat reply: `cancel_run_ids` follows the same wire-compat rules
+    /// as `controls` — absent decodes empty, populated round-trips, empty is
+    /// omitted entirely (older servers / plain stubs stay decodable).
+    #[test]
+    fn heartbeat_response_cancel_run_ids_default_roundtrip_and_omission() {
+        let legacy: NodeHeartbeatResponse =
+            serde_json::from_str(r#"{"server_time_ms":1,"cancel_task_ids":["t"]}"#).unwrap();
+        assert!(
+            legacy.cancel_run_ids.is_empty(),
+            "absent cancel_run_ids default empty"
+        );
+
+        let hb = NodeHeartbeatResponse {
+            server_time_ms: 5,
+            cancel_task_ids: vec!["t1".into()],
+            cancel_run_ids: vec!["01JDAGRUN".into()],
+            controls: vec![],
+        };
+        let wire = serde_json::to_string(&hb).unwrap();
+        assert!(wire.contains("cancel_run_ids"), "{wire}");
+        let back: NodeHeartbeatResponse = serde_json::from_str(&wire).unwrap();
+        assert_eq!(back.cancel_run_ids, vec!["01JDAGRUN".to_string()]);
+
+        let quiet = serde_json::to_string(&NodeHeartbeatResponse {
+            server_time_ms: 5,
+            cancel_task_ids: vec![],
+            cancel_run_ids: vec![],
+            controls: vec![],
+        })
+        .unwrap();
+        assert!(!quiet.contains("cancel_run_ids"), "{quiet}");
     }
 
     /// Dispatch request: `session_id` is optional (plain dispatch keeps its

@@ -174,6 +174,11 @@ pub async fn resume(
 
     let n = messages.len();
     let model = config.model_id().to_string();
+    // Agent pool snapshots follow the agent the persisted session names
+    // (meta.agent, config default, then act fallback) — a resumed file-agent
+    // session gets its tool dirs and skill roots back.
+    let tools_path = crate::agent_pools::tools_path_for(&config, &agent.name);
+    let skill_roots = crate::agent_pools::skill_roots_for(&agent.name);
 
     // Handoff supersedes compaction: if a handoff boundary exists, any
     // residual compaction metadata (summary_seq / summary / summary_images)
@@ -201,6 +206,8 @@ pub async fn resume(
         working_dir,
         config,
         client,
+        tools_path,
+        skill_roots,
         last_usage: opencoder_llm::Usage::default(),
         store: Some(store),
         // Restore the persisted skill. Under one-shot semantics a normally

@@ -1,7 +1,12 @@
 use anyhow::{Context, Result};
 use libsql::Connection;
 
-const SCHEMA_VERSION: i64 = 14;
+use super::chat_tables::{
+    CREATE_EVENTS, CREATE_INPUTS, CREATE_MESSAGES, CREATE_SESSIONS, CREATE_SUBAGENT_TASKS,
+};
+use super::team_runs::{CREATE_INDEX_TEAM_TOPIC_RUNS_TOPIC, CREATE_TEAM_TOPIC_RUNS};
+
+const SCHEMA_VERSION: i64 = 17;
 
 // Order invariant: busy_timeout must precede any locking statement, and
 // synchronous=NORMAL must be applied BEFORE journal_mode=WAL. Switching a
@@ -21,80 +26,6 @@ const PRAGMAS: &[&str] = &[
 
 const CREATE_SCHEMA_VERSION: &str =
     "CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)";
-const CREATE_SESSIONS: &str = "\
-CREATE TABLE IF NOT EXISTS sessions (
-  id           TEXT PRIMARY KEY,
-  title        TEXT,
-  agent        TEXT,
-  model        TEXT,
-  workdir_hash TEXT,
-  created_at   INTEGER NOT NULL,
-  updated_at   INTEGER NOT NULL,
-  summary      TEXT,
-  summary_seq      INTEGER,
-  summary_images_json TEXT,
-  handoff_seq  INTEGER,
-  handoff_plan TEXT,
-  skill        TEXT,
-  task_type    TEXT NOT NULL DEFAULT 'parent',
-  requirement  TEXT,
-  plan_snapshot TEXT,
-  plan_input_count INTEGER NOT NULL DEFAULT 0,
-  autopilot_mode TEXT
-)";
-const CREATE_MESSAGES: &str = "\
-CREATE TABLE IF NOT EXISTS messages (
-  seq         INTEGER PRIMARY KEY AUTOINCREMENT,
-  id          TEXT NOT NULL,
-  session_id  TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-  role        TEXT NOT NULL,
-  agent       TEXT,
-  model       TEXT,
-  blocks_json TEXT NOT NULL,
-  usage_json  TEXT NOT NULL,
-  created_at  INTEGER NOT NULL,
-  synthetic   INTEGER NOT NULL DEFAULT 0,
-  display     TEXT,
-  mode        TEXT,
-  summary     INTEGER NOT NULL DEFAULT 0
-)";
-const CREATE_INPUTS: &str = "\
-CREATE TABLE IF NOT EXISTS session_inputs (
-  seq          INTEGER PRIMARY KEY AUTOINCREMENT,
-  id           TEXT NOT NULL,
-  session_id   TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-  delivery     TEXT NOT NULL,
-  prompt       TEXT NOT NULL,
-  images_json  TEXT NOT NULL DEFAULT '[]',
-  display_text TEXT,
-  admitted_seq INTEGER NOT NULL,
-  promoted_seq INTEGER,
-  recorded     INTEGER NOT NULL DEFAULT 0
-)";
-const CREATE_EVENTS: &str = "\
-CREATE TABLE IF NOT EXISTS session_events (
-  seq          INTEGER PRIMARY KEY AUTOINCREMENT,
-  session_id   TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-  type         TEXT NOT NULL,
-  payload_json TEXT NOT NULL,
-  sse_kind     TEXT,
-  ts           INTEGER NOT NULL
-)";
-const CREATE_SUBAGENT_TASKS: &str = "\
-CREATE TABLE IF NOT EXISTS subagent_tasks (
-  seq               INTEGER PRIMARY KEY AUTOINCREMENT,
-  task_id           TEXT NOT NULL,
-  parent_session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-  child_session_id  TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-  parent_message_id TEXT,
-  agent             TEXT NOT NULL,
-  prompt            TEXT NOT NULL,
-  result            TEXT,
-  status            TEXT NOT NULL,
-  ok                INTEGER,
-  started_at        INTEGER NOT NULL,
-  completed_at      INTEGER
-)";
 const CREATE_TODO_WORKFLOWS: &str = "\
 CREATE TABLE IF NOT EXISTS todo_workflows (
   id TEXT PRIMARY KEY,
@@ -180,6 +111,143 @@ CREATE TABLE IF NOT EXISTS node_tasks (
 /// plus the oldest-pending FIFO scan), so the index covers both branches.
 const CREATE_INDEX_NODE_TASKS_STATUS: &str =
     "CREATE INDEX IF NOT EXISTS idx_node_tasks_node_status ON node_tasks(node_id, status)";
+/// Project-module tables (v15). No FK constraints on purpose: the project
+/// store cascades deletes explicitly (see `libsql_store/project.rs`) so
+/// every backend behaves the same.
+const CREATE_PROJECT_GOALS: &str = "\
+CREATE TABLE IF NOT EXISTS project_goals (
+  id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  detail_md TEXT,
+  status TEXT NOT NULL,
+  sort_key INTEGER NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+)";
+const CREATE_PROJECT_MILESTONES: &str = "\
+CREATE TABLE IF NOT EXISTS project_milestones (
+  id TEXT PRIMARY KEY,
+  goal_id TEXT NOT NULL,
+  title TEXT NOT NULL,
+  detail_md TEXT,
+  status TEXT NOT NULL,
+  sort_key INTEGER NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+)";
+const CREATE_PROJECT_TODOS: &str = "\
+CREATE TABLE IF NOT EXISTS project_todos (
+  id TEXT PRIMARY KEY,
+  milestone_id TEXT,
+  title TEXT NOT NULL,
+  draft TEXT NOT NULL,
+  plan_md TEXT,
+  status TEXT NOT NULL,
+  agent TEXT NOT NULL,
+  active_session_id TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+)";
+const CREATE_PROJECT_TODO_RUNS: &str = "\
+CREATE TABLE IF NOT EXISTS project_todo_runs (
+  id TEXT PRIMARY KEY,
+  todo_id TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  version INTEGER NOT NULL,
+  plan_md TEXT,
+  output_md TEXT,
+  agent TEXT NOT NULL,
+  session_id TEXT,
+  status TEXT NOT NULL,
+  started_at INTEGER NOT NULL,
+  finished_at INTEGER,
+  created_at INTEGER NOT NULL
+)";
+const CREATE_INDEX_PROJECT_MILESTONES_GOAL: &str =
+    "CREATE INDEX IF NOT EXISTS idx_project_milestones_goal ON project_milestones(goal_id)";
+const CREATE_INDEX_PROJECT_TODOS_MILESTONE: &str =
+    "CREATE INDEX IF NOT EXISTS idx_project_todos_milestone ON project_todos(milestone_id)";
+const CREATE_INDEX_PROJECT_TODO_RUNS_TODO: &str =
+    "CREATE INDEX IF NOT EXISTS idx_project_todo_runs_todo ON project_todo_runs(todo_id)";
+const CREATE_BRAIN_CAPABILITIES: &str = "\
+CREATE TABLE IF NOT EXISTS brain_capabilities (
+  id TEXT PRIMARY KEY,
+  capability_type TEXT NOT NULL,
+  summary TEXT NOT NULL,
+  input_desc TEXT NOT NULL,
+  output_desc TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+)";
+const CREATE_BRAIN_ENG_INPUTS: &str = "\
+CREATE TABLE IF NOT EXISTS brain_eng_inputs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  capability_id TEXT NOT NULL REFERENCES brain_capabilities(id) ON DELETE CASCADE,
+  content TEXT NOT NULL,
+  position INTEGER NOT NULL
+)";
+/// Embeddings for the brain capability library. `emb` holds the vector as
+/// little-endian f32 bytes — the encoding libsql's bundled `vector32()`
+/// accepts directly (blob binding, verified by the brain_store integration
+/// test), so `vector_distance_cos(v.emb, vector32(?))` needs no conversion.
+/// `capability_id` is the PK: one (latest) embedding per capability.
+const CREATE_BRAIN_VECTORS: &str = "\
+CREATE TABLE IF NOT EXISTS brain_vectors (
+  capability_id TEXT PRIMARY KEY REFERENCES brain_capabilities(id) ON DELETE CASCADE,
+  dim INTEGER NOT NULL,
+  model TEXT NOT NULL,
+  emb BLOB NOT NULL,
+  updated_at INTEGER NOT NULL
+)";
+/// Exemplar-input lookups are per-capability ordered scans; the index keeps
+/// the brain catalog's `get`/`list` reads off full table scans.
+const CREATE_INDEX_BRAIN_ENG_INPUTS: &str =
+    "CREATE INDEX IF NOT EXISTS idx_brain_eng_inputs_cap ON brain_eng_inputs(capability_id)";
+
+/// DAG workflow tables (v16): definitions, dispatched runs, node-uploaded
+/// events. No FK constraints on purpose (same policy as the project tables):
+/// `dag_runs.spec_json` is a dispatch-time snapshot, so runs intentionally
+/// outlive def edits, and a deleted node leaves its runs to the lost-node
+/// sweep instead of a cascade.
+const CREATE_DAG_DEFS: &str = "\
+CREATE TABLE IF NOT EXISTS dag_defs (
+  id         TEXT PRIMARY KEY,
+  name       TEXT NOT NULL UNIQUE,
+  spec_json  TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+)";
+const CREATE_DAG_RUNS: &str = "\
+CREATE TABLE IF NOT EXISTS dag_runs (
+  id          TEXT PRIMARY KEY,
+  dag_id      TEXT NOT NULL,
+  name        TEXT NOT NULL,
+  spec_json   TEXT NOT NULL,
+  node_id     TEXT,
+  status      TEXT NOT NULL,
+  error       TEXT,
+  created_at  INTEGER NOT NULL,
+  claimed_at  INTEGER,
+  finished_at INTEGER
+)";
+const CREATE_DAG_EVENTS: &str = "\
+CREATE TABLE IF NOT EXISTS dag_events (
+  seq     INTEGER PRIMARY KEY AUTOINCREMENT,
+  run_id  TEXT NOT NULL,
+  kind    TEXT NOT NULL,
+  step    TEXT,
+  payload TEXT NOT NULL,
+  at_ms   INTEGER NOT NULL
+)";
+/// DAG claim polling filters by `(status, node_id)`: the oldest-pending FIFO
+/// scan (`status='pending' AND (node_id IS NULL OR node_id=?)`) plus the
+/// single-active-run guard (`node_id=? AND status='running'`), so the index
+/// covers both branches (same rationale as the node_tasks index).
+const CREATE_INDEX_DAG_RUNS_STATUS_NODE: &str =
+    "CREATE INDEX IF NOT EXISTS idx_dag_runs_status_node ON dag_runs(status, node_id)";
+/// Run-SSE replay scans `run_id` with a `seq > after` cursor, ascending.
+const CREATE_INDEX_DAG_EVENTS_RUN_SEQ: &str =
+    "CREATE INDEX IF NOT EXISTS idx_dag_events_run_seq ON dag_events(run_id, seq)";
 
 /// Apply WAL + safety pragmas to a single connection. Cheap to call per-acquire.
 ///
@@ -265,6 +333,17 @@ async fn bootstrap_tx(conn: &Connection) -> Result<()> {
     conn.execute(CREATE_TODO_EVENTS, ()).await?;
     conn.execute(CREATE_NODES, ()).await?;
     conn.execute(CREATE_NODE_TASKS, ()).await?;
+    conn.execute(CREATE_BRAIN_CAPABILITIES, ()).await?;
+    conn.execute(CREATE_BRAIN_ENG_INPUTS, ()).await?;
+    conn.execute(CREATE_BRAIN_VECTORS, ()).await?;
+    conn.execute(CREATE_PROJECT_GOALS, ()).await?;
+    conn.execute(CREATE_PROJECT_MILESTONES, ()).await?;
+    conn.execute(CREATE_PROJECT_TODOS, ()).await?;
+    conn.execute(CREATE_PROJECT_TODO_RUNS, ()).await?;
+    conn.execute(CREATE_DAG_DEFS, ()).await?;
+    conn.execute(CREATE_DAG_RUNS, ()).await?;
+    conn.execute(CREATE_DAG_EVENTS, ()).await?;
+    conn.execute(CREATE_TEAM_TOPIC_RUNS, ()).await?;
     conn.execute(CREATE_INDEX_MSG, ()).await?;
     conn.execute(CREATE_INDEX_IN, ()).await?;
     conn.execute(CREATE_INDEX_EV, ()).await?;
@@ -309,6 +388,23 @@ async fn bootstrap_tx(conn: &Connection) -> Result<()> {
     // (via the CREATE batch above) or after the v12 migration creates them,
     // so — like the task_type index — it must run AFTER `migrate`.
     conn.execute(CREATE_INDEX_NODE_TASKS_STATUS, ()).await?;
+    // Same post-migrate placement: brain tables physically exist either via
+    // the CREATE batch above (fresh DBs) or the v15 migration (old DBs).
+    conn.execute(CREATE_INDEX_BRAIN_ENG_INPUTS, ()).await?;
+    conn.execute(CREATE_INDEX_PROJECT_MILESTONES_GOAL, ())
+        .await?;
+    conn.execute(CREATE_INDEX_PROJECT_TODOS_MILESTONE, ())
+        .await?;
+    conn.execute(CREATE_INDEX_PROJECT_TODO_RUNS_TODO, ())
+        .await?;
+    // Same post-migrate placement as the indexes above: the dag tables
+    // physically exist either via the CREATE batch (fresh DBs) or the v16
+    // migration (old DBs).
+    conn.execute(CREATE_INDEX_DAG_RUNS_STATUS_NODE, ()).await?;
+    conn.execute(CREATE_INDEX_DAG_EVENTS_RUN_SEQ, ()).await?;
+    // Same post-migrate placement: the team ledger physically exists either
+    // via the CREATE batch (fresh DBs) or the v17 migration (old DBs).
+    conn.execute(CREATE_INDEX_TEAM_TOPIC_RUNS_TOPIC, ()).await?;
     Ok(())
 }
 
@@ -330,6 +426,31 @@ async fn bootstrap_tx(conn: &Connection) -> Result<()> {
 /// to say which partial upgrades ran, the full pass from the bottom is the
 /// only correct entry, and it is safe for exactly the reasons above.
 async fn migrate(conn: &Connection, from: i64) -> Result<()> {
+    if from < 17 {
+        // v17: team topic-run ledger (opencode-team fan-out). CREATE IF NOT
+        // EXISTS keeps this idempotent; the index lands in the post-batch.
+        conn.execute(CREATE_TEAM_TOPIC_RUNS, ()).await?;
+    }
+    if from < 16 {
+        // v16: DAG workflow tables (defs/runs/events). CREATE IF NOT EXISTS
+        // keeps this idempotent; indexes land in the post-batch.
+        conn.execute(CREATE_DAG_DEFS, ()).await?;
+        conn.execute(CREATE_DAG_RUNS, ()).await?;
+        conn.execute(CREATE_DAG_EVENTS, ()).await?;
+    }
+    if from < 15 {
+        // v15: project-module tables (goals/milestones/todos/runs) plus the
+        // brain capability library (capabilities/exemplar-inputs/vectors).
+        // CREATE IF NOT EXISTS keeps this idempotent; indexes land in the
+        // post-batch.
+        conn.execute(CREATE_PROJECT_GOALS, ()).await?;
+        conn.execute(CREATE_PROJECT_MILESTONES, ()).await?;
+        conn.execute(CREATE_PROJECT_TODOS, ()).await?;
+        conn.execute(CREATE_PROJECT_TODO_RUNS, ()).await?;
+        conn.execute(CREATE_BRAIN_CAPABILITIES, ()).await?;
+        conn.execute(CREATE_BRAIN_ENG_INPUTS, ()).await?;
+        conn.execute(CREATE_BRAIN_VECTORS, ()).await?;
+    }
     if from < 14 {
         // v14: verbatim display text on messages — the echo-side single
         // source of truth. User messages record the raw input (`$skill`

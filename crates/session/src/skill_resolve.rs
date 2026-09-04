@@ -16,7 +16,7 @@
 use std::collections::HashSet;
 
 use opencoder_core::message::now_ms;
-use opencoder_core::{body_with_source, discover_skills, extract_skill_tokens, Message, Skill};
+use opencoder_core::{body_with_source, extract_skill_tokens, Message, Skill};
 use opencoder_store::SessionPatch;
 
 use crate::runner::new_id;
@@ -115,11 +115,17 @@ pub fn resolve_inline_skills_with(
     (clean, unresolved)
 }
 
-/// Discover skills from `~/.opencoder/skills` and resolve inline `$name`
+/// Discover the session's skills (its agent's private pools FIRST, then
+/// `~/.opencoder/skills` — first-wins shadowing) and resolve inline `$name`
 /// tokens in `text`, activating resolved skills on the session. Returns the
 /// cleaned text (tokens stripped); unresolved names are silently ignored.
 pub fn resolve_inline_skills(session: &SessionState, text: &str) -> String {
-    let clean = resolve_inline_skills_with(session, text, &discover_skills()).0;
+    let clean = resolve_inline_skills_with(
+        session,
+        text,
+        &crate::agent_pools::discover_session_skills(session),
+    )
+    .0;
     // Expand `@path` mentions to absolute paths before the message is
     // recorded (direct-prompt path; steer/queue get the same treatment
     // via the head hook in `record_compound`).
@@ -145,7 +151,9 @@ pub async fn record_compound(session: &mut SessionState, rest: &str, images: &[S
     // message (and the model request) carry full paths — the steer/queue
     // twin of the tail hook in `resolve_inline_skills`.
     let rest = &crate::mention_resolve::expand_mentions(rest, &session.working_dir);
-    let skills = discover_skills();
+    // Session-agent-aware discovery (agent pools shadow the global skills
+    // dir): the steer/queue twin of `resolve_inline_skills` above.
+    let skills = crate::agent_pools::discover_session_skills(session);
     let prev_skill = session.skill_prompt_cloned();
     let (text, unresolved) = resolve_inline_skills_with(session, rest, &skills);
     persist_active_skill(session, &prev_skill).await;

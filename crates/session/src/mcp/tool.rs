@@ -144,6 +144,7 @@ mod tests {
             working_dir: std::path::PathBuf::from("."),
             max_output: 4096,
             proxy: None,
+            tools_path: None,
         };
         let out = tools[0]
             .execute(serde_json::json!({"a": 1, "b": 2}), &ctx)
@@ -190,6 +191,7 @@ mod tests {
             working_dir: std::path::PathBuf::from("."),
             max_output: 4096,
             proxy: None,
+            tools_path: None,
         };
         let out = tools[0].execute(serde_json::json!({}), &ctx).await.unwrap();
         assert!(out.is_error);

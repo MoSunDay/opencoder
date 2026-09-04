@@ -29,11 +29,14 @@ pub async fn spawn_server() -> Server {
     let store: Arc<dyn opencoder_store::Store> =
         Arc::new(LibsqlStore::open_memory().await.unwrap());
     let state = Arc::new(opencoder_web::AppState {
+        brain: opencoder_web::api_brain::mock_brain(Arc::clone(&store)),
         store: Arc::clone(&store),
         workdir: std::env::temp_dir(),
         handles: opencoder_web::handle::new_handle_map(),
         nodes: Arc::new(opencoder_web::nodes_state::NodeHub::new()),
         controls: Arc::new(opencoder_web::control_state::ControlHub::new()),
+        team: opencoder_web::team_state::mock(),
+        project: opencoder_web::ProjectService::new(),
         client_override: Some(Arc::new(MockChatClient::new())),
     });
     let app = opencoder_web::build_app(state, Some(TOKEN.to_string()), true);
@@ -229,6 +232,7 @@ pub fn node_opts(
         claim_interval: Duration::from_millis(30),
         version: env!("CARGO_PKG_VERSION").to_string(),
         local_store_dir: Some(data.to_path_buf()),
+        dag: None,
     }
 }
 

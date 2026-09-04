@@ -30,6 +30,7 @@ fn test_opts(base: &str, workdir: &std::path::Path, data: &std::path::Path) -> N
         claim_interval: Duration::from_millis(50),
         version: env!("CARGO_PKG_VERSION").into(),
         local_store_dir: Some(data.to_path_buf()),
+        dag: None,
     }
 }
 

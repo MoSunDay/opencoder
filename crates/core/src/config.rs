@@ -4,20 +4,24 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+mod agent;
 mod autopilot;
 mod cli;
 mod domain;
-mod env;
+pub(crate) mod env;
 pub mod envs;
 mod keymap;
 mod mcp;
 pub(crate) mod mcp_guard;
 mod merge;
+mod model_guard;
 pub mod redact;
 mod skill;
+mod storage;
 
 pub use mcp_guard::{mcp_name_collision, mcp_name_conflict_in_patch};
 
+pub use agent::{AgentDefaults, AgentNfsConfig, ToolsScope};
 pub use autopilot::{ApMode, AutoPilotConfig};
 pub use cli::{CliConfig, InjectionTarget};
 pub use env::{looks_like_env_var, scoped_config_home, ScopedConfigHome};
@@ -28,7 +32,11 @@ pub use envs::{
 pub use keymap::KeymapConfig;
 pub use keymap::KEYMAP_INFO;
 pub use mcp::McpServerConfig;
+pub use model_guard::is_suspicious_model;
 pub use skill::SkillConfig;
+pub use storage::{StorageBackend, StorageConfig};
+
+use model_guard::warn_if_suspicious_model;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -53,6 +61,9 @@ pub struct Config {
     pub model: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub small_model: Option<String>,
+    /// Model id for `/embeddings` calls; `None` → [`Config::embedding_model_id`]'s default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub embedding_model: Option<String>,
     #[serde(default)]
     pub agent: AgentDefaults,
     #[serde(default)]
@@ -147,6 +158,20 @@ pub struct Config {
     /// User-configurable keyboard shortcuts (see [`KEYMAP_INFO`]).
     #[serde(default)]
     pub keymap: KeymapConfig,
+    /// Project-data storage backend selection (libsql default; optional
+    /// mysql/starrocks for project tables only). DSNs may use `{VAR}` refs.
+    #[serde(default)]
+    pub storage: StorageConfig,
+    /// opencode-team workspace root: per-topic scratch/checkpoint area
+    /// shared by the multi-node topic fan-out. Default `<data_root>/team`.
+    #[serde(default = "default_team_root")]
+    pub team_root: PathBuf,
+    /// Max outer turns per team topic run. Default 8.
+    #[serde(default = "default_team_max_turns")]
+    pub team_max_turns: usize,
+    /// Max inner (sub) turns per outer turn of a team topic run. Default 3.
+    #[serde(default = "default_team_max_sub_turns")]
+    pub team_max_sub_turns: usize,
 }
 
 fn default_interleaved_thinking() -> Option<bool> {
@@ -161,46 +186,27 @@ fn is_none_interleaved(v: &Option<bool>) -> bool {
     v.is_none()
 }
 
-/// Warn (without rewriting) when the configured `model` looks like a stale or
-/// malformed value that would silently break requests. Only logs — never
-/// mutates the user's config. Catches legacy values such as single-char or
-/// placeholder strings so they are not silently written back to config.json.
-/// Pure predicate: is the `model` string malformed (empty, too short on
-/// either side of the `/`, or too short unscoped)? `pub` for cli/web checks.
-pub fn is_suspicious_model(model: &str) -> bool {
-    if model.is_empty() {
-        return true;
-    }
-    match model.split_once('/') {
-        Some((provider, mid)) => provider.len() < 2 || mid.len() < 2,
-        None => model.len() < 3,
-    }
-}
-
-pub(crate) fn warn_if_suspicious_model(model: &str) {
-    if is_suspicious_model(model) {
-        tracing::warn!(
-            model = %model,
-            "config `model` looks malformed (expected `provider/model`, e.g. `openai/gpt-4o`); fix the `model` field in your config file or set the matching env var if this is a stale value"
-        );
-    }
-}
-
 fn default_model() -> String {
     "openai/gpt-4o-mini".to_string()
+}
+
+// `<data_root>/team` sits beside, not inside, any single workdir's data dir.
+fn default_team_root() -> PathBuf {
+    crate::data_dir::data_root().join("team")
+}
+
+fn default_team_max_turns() -> usize {
+    8
+}
+
+fn default_team_max_sub_turns() -> usize {
+    3
 }
 
 /// Default context window assumed when neither config nor a model registry
 /// supplies one. Large enough that the `context_threshold` is the binding
 /// constraint by default, but lets `reserved` take effect once set.
 pub const DEFAULT_CONTEXT_LIMIT: u64 = 128_000;
-
-/// Serde default for [`AgentDefaults::default`], kept in sync with the
-/// `Default` impl so deserializing `{}` yields `"act"` rather than `""`.
-/// (Returns `String` to match the field type for `#[serde(default = ...)]`.)
-fn default_agent_name() -> String {
-    "act".to_string()
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ProviderConfig {
@@ -238,19 +244,6 @@ pub struct Endpoint {
 
 fn default_base_url() -> String {
     "https://api.openai.com/v1".to_string()
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AgentDefaults {
-    #[serde(default = "default_agent_name")]
-    pub default: String,
-}
-impl Default for AgentDefaults {
-    fn default() -> Self {
-        AgentDefaults {
-            default: "act".to_string(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -351,6 +344,7 @@ impl Default for Config {
             skills: HashMap::new(),
             model: default_model(),
             small_model: None,
+            embedding_model: None,
             agent: AgentDefaults::default(),
             compaction: CompactionConfig::default(),
             output_streamline: OutputStreamlineConfig::default(),
@@ -369,6 +363,10 @@ impl Default for Config {
             autopilot: AutoPilotConfig::default(),
             enable_tmux_session: None,
             keymap: KeymapConfig::default(),
+            storage: StorageConfig::default(),
+            team_root: default_team_root(),
+            team_max_turns: default_team_max_turns(),
+            team_max_sub_turns: default_team_max_sub_turns(),
         }
     }
 }
@@ -529,6 +527,16 @@ impl Config {
     /// primary model id when no small_model is configured.
     pub fn small_model_or_primary(&self) -> &str {
         self.small_model_id()
+    }
+    /// Bare model id for `/embeddings` request bodies (provider prefix after
+    /// the `/` stripped, same as `small_model_id`). Falls back to OpenAI's
+    /// `text-embedding-3-small` when `embedding_model` is unset; embeddings
+    /// ride the primary provider's `resolve_endpoint`.
+    pub fn embedding_model_id(&self) -> &str {
+        match &self.embedding_model {
+            Some(s) => s.split_once('/').map(|(_, m)| m).unwrap_or(s),
+            None => "text-embedding-3-small",
+        }
     }
     pub fn api_key(&self) -> Result<String> {
         self.api_key_for(self.provider_id())

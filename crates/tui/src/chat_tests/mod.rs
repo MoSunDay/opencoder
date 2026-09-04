@@ -17,6 +17,7 @@ mod sidecar_stream_isolation;
 mod steer_echo;
 mod step_group;
 mod subagent;
+mod subagent_dispatch_say;
 mod terminal_safety;
 mod thinking_state;
 mod timer;

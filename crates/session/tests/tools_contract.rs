@@ -15,6 +15,7 @@ fn ctx(dir: &Path) -> ToolContext {
         working_dir: dir.to_path_buf(),
         max_output: 4096,
         proxy: None,
+        tools_path: None,
     }
 }
 

@@ -32,6 +32,10 @@ Commit: 860831d22fad968737c366c93b4cf70fc1f4c010
 7. interrupt 或运行错误持久化为 `suspended`（terminal(Suspended) 把 Running/CandidateReady/Accepting 回滚为 `Interrupted` 并清空 stale candidate）；resume 先把中断中的 TODO 归约为可恢复状态，在 `workflow_resumed` 提交即持久化 `status=Running`（不额外 bump generation，维持 CAS 每提交 +1 不变量），再继续父决策循环；`resume` 拒绝 `status==Running` 的工作流防双驱动（错误信息含 `opencoder todos interrupt <id>` 接管指引）。interrupt 与并发提交撞 generation 冲突时有界重试（reload 后重判终态，上限 3 次），不再直接停车。
 8. 容错硬化：非 Running 状态的迟到结果（Ok 与 Err 两侧对称，外部中断/同批 rewind 后）记日志丢弃不炸整轮；Blocked 项 attempt 耗尽归 `Failed` 而非永久跳过；dispatch 保留 `last_error`/`next_context_mode`（修订上下文不丢，仅清 candidate）；父 Session summary 不写入工作流状态；所有父决策与验收先在克隆状态上干跑校验（`validate_decision`/`validate_acceptance`），失败限次纠错重问（同 session，超限 suspend/bail），重复 `MarkMilestone` 幂等跳过；`validate_spec` 在提交期校验每个 todo 的 agent 可解析、is_primary、非 workflow、id 路径安全（`/`、`..`、`\0` 拒绝，防 `--debug` 投影逃逸），依赖环检测为迭代 DFS（深链不栈溢出）。`validate_dispatch` 的 max_attempts 门禁对 `Interrupted && active_session_id.is_some()` 放行（与 `execution_failed(interrupted=true)` 落 Interrupted 判据镜像；再 dispatch 仍计数，普通失败照常落 Failed）——外部中断的 TODO 不因 attempt 耗尽而卡死 resume。`validate_acceptance` 的 Rewind 支路要求 milestone 是当前 TODO 自身或其祖先（`descendants(spec, milestone_todo_id)` 包含 todo_id），否则报 "cannot rewind to milestone {id}: TODO {id} is not part of its subtree" 走纠错重问。
 
+## Web 管理面（2026-09-04）
+
+模板/env/工具存于 NFS 兼容 share 树（core `share_fs`：`<share>/todo|env|agent/tools`，`context.json` 即 WorkflowSpec）；web `/api/todo/*` 提供管理与 run 分发（env 绑定经 `spec.metadata.env/env_tools` 传入），workflow 事件 SSE 走 store 轮询（`crates/web/src/todo_hub.rs`），跨进程 interrupt/resume 依赖既有 generation CAS。
+
 ## 依赖与接口
 
 - 依赖 `opencoder-session` 执行父/子 Primary Session，依赖 `opencoder-store` 保存状态，依赖 `opencoder-llm` 的可替换 `ChatStream`。

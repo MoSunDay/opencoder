@@ -183,6 +183,54 @@ impl Uplink {
         let _ = ensure_ok(resp, "report status").await?;
         Ok(())
     }
+
+    /// GET /api/nodes/dag/claim?node_id= — FIFO single-active DAG-run claim.
+    /// `204 No Content` maps to `None`; `200` carries the run plus its own
+    /// spec snapshot.
+    pub async fn dag_claim(&self, node_id: &str) -> Result<Option<opencoder_dag::DagClaimedRun>> {
+        let pq = format!(
+            "/api/nodes/dag/claim?node_id={}",
+            urlencode_component(node_id)
+        );
+        let resp = self
+            .signed_request(reqwest::Method::GET, &pq, None::<&serde_json::Value>)
+            .await
+            .context("claim dag run")?;
+        if resp.status() == reqwest::StatusCode::NO_CONTENT {
+            return Ok(None);
+        }
+        let resp = ensure_ok(resp, "claim dag run").await?;
+        let run = resp.json().await.context("claim dag run json")?;
+        Ok(Some(run))
+    }
+
+    /// POST /api/nodes/dag/runs/:rid/events — upload one ordered event batch.
+    pub async fn dag_events(&self, batch: &opencoder_dag::DagEventBatch) -> Result<()> {
+        let resp = self
+            .signed_request(
+                reqwest::Method::POST,
+                &format!("/api/nodes/dag/runs/{}/events", batch.run_id),
+                Some(batch),
+            )
+            .await
+            .context("upload dag events")?;
+        let _ = ensure_ok(resp, "upload dag events").await?;
+        Ok(())
+    }
+
+    /// POST /api/nodes/dag/runs/:rid/status — terminal run transition report.
+    pub async fn dag_status(&self, report: &opencoder_dag::DagStatusReport) -> Result<()> {
+        let resp = self
+            .signed_request(
+                reqwest::Method::POST,
+                &format!("/api/nodes/dag/runs/{}/status", report.run_id),
+                Some(report),
+            )
+            .await
+            .context("report dag status")?;
+        let _ = ensure_ok(resp, "report dag status").await?;
+        Ok(())
+    }
 }
 
 impl Uplink {

@@ -61,6 +61,27 @@ pub(crate) const BASH_TIMEOUT_MARKER: &str = "[bash-timeout:";
 
 pub struct BashTool;
 
+/// Prepend the agent-tools PATH export to the script bash actually runs.
+/// The tool runs `bash -lc` — a LOGIN shell recomputes `PATH` from
+/// `/etc/profile`, so env injection (`cmd.env("PATH", …)`) would be dropped
+/// before the user command executes; the only durable channel is a literal
+/// `export PATH=…` line at the top of the script itself.
+///
+/// Fail-safe sanitization: `"` or `$` in the joined dirs skips injection
+/// entirely (they would break out of the double-quoted assignment). The
+/// dirs come from our own agents-root pools, but a hostile path must never
+/// become script text. `None`/empty ⇒ the command verbatim.
+fn script_with_tools_path(command: &str, tools_path: Option<&str>) -> String {
+    match tools_path {
+        Some(joined)
+            if !joined.is_empty() && !joined.contains('"') && !joined.contains('$') =>
+        {
+            format!("export PATH=\"{joined}\":$PATH\n{command}")
+        }
+        _ => command.to_string(),
+    }
+}
+
 /// Merge captured stdout and stderr into one string, prefixing stderr with a
 /// `[stderr]` marker so the two streams stay distinguishable. Empty inputs
 /// produce empty output (no placeholder) so callers can decide their own
@@ -119,9 +140,14 @@ impl Tool for BashTool {
             .map(std::path::PathBuf::from)
             .unwrap_or_else(|| ctx.working_dir.clone());
 
+        // The EXECUTED script gets the agent-tools PATH export prepended; the
+        // timeout scanner above and every display/echo surface keep the
+        // ORIGINAL command text (`ToolStart` carries the raw input JSON).
+        let script = script_with_tools_path(resolved.command, ctx.tools_path.as_deref());
+
         let mut cmd = tokio::process::Command::new("bash");
         cmd.arg("-lc")
-            .arg(resolved.command)
+            .arg(script)
             .current_dir(&workdir)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
@@ -351,6 +377,7 @@ mod tests {
             working_dir: std::env::current_dir().unwrap(),
             max_output: 100_000,
             proxy: None,
+            tools_path: None,
         }
     }
 

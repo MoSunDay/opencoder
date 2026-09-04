@@ -1,0 +1,30 @@
+[package]
+name = "opencoder-dag-runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+opencoder-core.workspace = true
+opencoder-dag.workspace = true
+opencoder-llm.workspace = true
+opencoder-session.workspace = true
+opencoder-store.workspace = true
+opencoder-node.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+futures.workspace = true
+anyhow.workspace = true
+async-trait.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+tracing.workspace = true
+ulid.workspace = true
+rustpython-vm = "0.5"
+
+[dev-dependencies]
+tempfile.workspace = true
+opencoder-llm.workspace = true
+axum = { version = "0.7", features = ["json"] }
+tokio = { workspace = true, features = ["test-util"] }

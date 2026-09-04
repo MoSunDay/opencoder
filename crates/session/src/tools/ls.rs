@@ -70,6 +70,7 @@ mod tests {
             working_dir: dir.path().to_path_buf(),
             max_output: 4096,
             proxy: None,
+            tools_path: None,
         }
     }
 

@@ -53,11 +53,14 @@ async fn state() -> Arc<opencoder_web::AppState> {
     std::fs::create_dir_all(&workdir).ok();
     Arc::new(opencoder_web::AppState {
         client_override: Some(Arc::new(MockChatClient::new()) as Arc<dyn ChatStream>),
+        brain: opencoder_web::api_brain::mock_brain(store.clone()),
         store,
         workdir,
         handles: opencoder_web::handle::new_handle_map(),
         nodes: Arc::new(opencoder_web::nodes_state::NodeHub::new()),
         controls: Arc::new(opencoder_web::control_state::ControlHub::new()),
+        team: opencoder_web::team_state::mock(),
+        project: opencoder_web::ProjectService::new(),
     })
 }
 
@@ -77,11 +80,14 @@ async fn state_with_reply(text: &str) -> Arc<opencoder_web::AppState> {
     std::fs::create_dir_all(&workdir).ok();
     Arc::new(opencoder_web::AppState {
         client_override: Some(mock),
+        brain: opencoder_web::api_brain::mock_brain(store.clone()),
         store,
         workdir,
         handles: opencoder_web::handle::new_handle_map(),
         nodes: Arc::new(opencoder_web::nodes_state::NodeHub::new()),
         controls: Arc::new(opencoder_web::control_state::ControlHub::new()),
+        team: opencoder_web::team_state::mock(),
+        project: opencoder_web::ProjectService::new(),
     })
 }
 

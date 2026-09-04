@@ -75,6 +75,31 @@ pub async fn list_nodes(State(state): State<Arc<AppState>>) -> Response {
             );
         }
     }
+    // Same opportunistic sweep for DAG runs: `running | cancelling` runs of
+    // heartbeat-stale nodes converge to `error("node lost")`, and each one
+    // gets its synthetic `run_finished` frame (persisted + fanned out on the
+    // DagHub) so event-projection UIs see the termination. Fan-out failure
+    // degrades to a log line for the same reason as above.
+    let swept_runs = match state
+        .store
+        .converge_lost_dag_runs(now, STALE_AFTER_MS)
+        .await
+    {
+        Ok(records) => records,
+        Err(e) => return error_500(format!("converge_lost_dag_runs: {e:#}")),
+    };
+    for r in &swept_runs {
+        if let Err(e) =
+            crate::api_nodes_dag::emit_run_finished(&state, &r.id, "error", Some("node lost"), now)
+                .await
+        {
+            tracing::warn!(
+                run_id = %r.id,
+                error = %e,
+                "lost-node sweep: failed to emit terminal dag run_finished frame"
+            );
+        }
+    }
     // Fresh DB rows carry raw statuses written by store transitions
     // (`online`/`idle`/`busy`); liveness is layered on top per-request via
     // [`compute_status`], so a missing heartbeat crosses into `lost`.
@@ -161,10 +186,26 @@ pub async fn post_heartbeat(
     // guaranteed to reach it: hand out up to HEARTBEAT_CONTROL_BATCH queued
     // control tasks (P3 message relay) alongside the cancel commands.
     let controls = state.controls.pop_many(&id, HEARTBEAT_CONTROL_BATCH).await;
+    // DAG cancel piggyback: a busy worker executing a workflow also never
+    // polls claim, so its cancellation requests ride this same beat. A store
+    // failure must NEVER fail the beat itself (liveness > completeness):
+    // degrade to an empty list and let the next beat retry.
+    let cancel_run_ids = match state.store.cancelling_dag_runs(&id).await {
+        Ok(ids) => ids,
+        Err(e) => {
+            tracing::warn!(
+                node_id = %id,
+                error = %e,
+                "cancelling_dag_runs failed; heartbeat continues with empty cancel_run_ids"
+            );
+            Vec::new()
+        }
+    };
     match state.store.heartbeat_node(&id, now).await {
         Ok(cancel_task_ids) => Json(NodeHeartbeatResponse {
             server_time_ms: now,
             cancel_task_ids,
+            cancel_run_ids,
             controls,
         })
         .into_response(),

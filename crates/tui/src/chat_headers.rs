@@ -184,7 +184,7 @@ impl ChatView {
                         && steps.last().is_some_and(|s| {
                             s.open && s.calls_open && s.calls.last().is_some_and(|c| c.expanded)
                         });
-                    if !ends_on_expanded_call && !(say_merged && !*open) {
+                    if !ends_on_expanded_call && (!say_merged || *open) {
                         line_idx += 1; // trailing blank
                     }
                 }

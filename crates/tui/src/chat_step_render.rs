@@ -47,8 +47,13 @@ use super::{
 /// visible below). `streaming` keeps the `running` hint alive on this row
 /// while the Say itself streams with nothing appended after it — the hint
 /// leaves the pre-Say group row only to move here, not to vanish.
-pub(crate) struct SayHeader<'a> {
-    pub raw: &'a str,
+pub(crate) struct SayHeader {
+    /// Header inline preview, computed once via [`say_preview_for`]: the
+    /// first non-empty line RENDERED (markdown applied) once the Say is
+    /// done, the raw first line while it streams. The body dedup compares
+    /// against the SAME string, so the header never shows raw markdown and
+    /// never repeats itself below.
+    pub preview: String,
     pub streaming: bool,
 }
 
@@ -59,6 +64,34 @@ pub(crate) fn say_preview(raw: &str) -> &str {
         .map(str::trim)
         .find(|l| !l.is_empty())
         .unwrap_or("")
+}
+
+/// done Say 的渲染结果里首个非空行文本（trim）：markdown 渲染后的口径
+/// 与 [`merged_say_body`] 逐行取的 `line_text` 完全一致。
+fn rendered_preview(rendered: &[Line<'static>]) -> String {
+    rendered
+        .iter()
+        .map(line_text)
+        .map(|t| t.trim().to_string())
+        .find(|l| !l.is_empty())
+        .unwrap_or_default()
+}
+
+/// 合并对头部 preview 的唯一口径：done 取 markdown 渲染后的首个非空行
+/// （头部不露 `#`/`**`/`-` 这类原始标记，正文也不再把该行换个形态重复
+/// 一遍）；流式取 raw 首行（与流式正文行同源，同口径去重）。done 但
+/// 渲染结果为空时回退 raw，保证头部始终有 preview。
+pub(crate) fn say_preview_for(raw: &str, rendered: &[Line<'static>], done: bool) -> String {
+    if done {
+        let rendered = rendered_preview(rendered);
+        if rendered.is_empty() {
+            say_preview(raw).to_string()
+        } else {
+            rendered
+        }
+    } else {
+        say_preview(raw).to_string()
+    }
 }
 
 /// 合并对里 Say 正文的去重判定（三态）。头部行已经用 preview 展示了正文
@@ -127,19 +160,19 @@ pub(crate) fn merged_say_body_decision(
     rendered: &[Line<'static>],
     done: bool,
 ) -> SayBody {
-    let preview = say_preview(raw);
+    let preview = say_preview_for(raw, rendered, done);
     if done {
         let texts: Vec<String> = rendered.iter().map(line_text).collect();
-        merged_say_body(preview, &texts)
+        merged_say_body(&preview, &texts)
     } else {
-        merged_say_body(preview, &super::assistant_rows(raw))
+        merged_say_body(&preview, &super::assistant_rows(raw))
     }
 }
 
 /// The merged pair header: `{glyph} Say(n step{s}): <preview>` plus the live
 /// spinner while the Say streams. Same glyph grammar as the group row
 /// (`❯` open / `▸` closed) so every collapsible row reads alike.
-fn say_header_line(open: bool, n: usize, say: &SayHeader<'_>, anim_tick: u32) -> Line<'static> {
+fn say_header_line(open: bool, n: usize, say: &SayHeader, anim_tick: u32) -> Line<'static> {
     let mut spans = vec![Span::styled(
         format!(
             "{}Say({} step{}): ",
@@ -155,9 +188,8 @@ fn say_header_line(open: bool, n: usize, say: &SayHeader<'_>, anim_tick: u32) ->
             .fg(theme::ok_color())
             .add_modifier(Modifier::BOLD),
     )];
-    let preview = say_preview(say.raw);
-    if !preview.is_empty() {
-        spans.push(Span::raw(preview.to_string()));
+    if !say.preview.is_empty() {
+        spans.push(Span::raw(say.preview.clone()));
     }
     if say.streaming {
         spans.push(Span::styled(
@@ -177,7 +209,7 @@ pub(crate) fn flatten_step_group(
     progress_active: bool,
     steps: &[Step],
     anim_tick: u32,
-    say: Option<SayHeader<'_>>,
+    say: Option<SayHeader>,
 ) {
     let n = steps.len();
     match say {

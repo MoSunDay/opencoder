@@ -21,7 +21,7 @@ pub use agent::{
 };
 pub use config::envs::{
     active_env, create_env, delete_env, env_dir, envs_home, list_envs, recapture_env,
-    set_active_env, validate_env_name,
+    set_active_env, set_active_env_checked, validate_env_name,
 };
 pub use config::{
     looks_like_env_var, scoped_config_home, AgentDefaults, ApMode, AutoPilotConfig, CliConfig,

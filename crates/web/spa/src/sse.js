@@ -99,12 +99,16 @@ export function openStream({ path, sessionId, after, onFrame, onStatus, onResync
     } catch {
       data = { raw };
     }
-    // The persisted row seq rides the SSE `id:` line (api_events.rs); a few
-    // node-uploaded payloads also carry it inside data. Either way it lands
-    // on the frame as `seq` — reduce.js folds it into the applySeq watermark
-    // and handleBlock dedups transport-level repeats against lastSeq.
-    const dataSeq = data && typeof data.seq === 'number' && Number.isFinite(data.seq) ? data.seq : null;
-    return { event, data, seq: idSeq !== null ? idSeq : dataSeq };
+    // ONLY the SSE `id:` line is the persisted event-row seq (api_events.rs):
+    // it feeds reduce.js's applySeq watermark and handleBlock's transport
+    // dedup. A `seq` field INSIDE data is a different namespace — e.g.
+    // steer/queue_consumed carry the session_inputs row seq (TUI queue-row
+    // identity), which restarts from 1 each session and stays far below the
+    // event watermark mid-run. Lifting it onto frame.seq made the transport
+    // dedup silently DROP the live steer echo as a "replay repeat" (the echo
+    // then only reappeared after the done rebuild), and let applySeq regress
+    // the resync cursor. Live frames not yet persisted simply carry seq null.
+    return { event, data, seq: idSeq };
   }
 
   function handleBlock(block) {

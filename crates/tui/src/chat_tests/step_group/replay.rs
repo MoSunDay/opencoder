@@ -271,12 +271,13 @@ fn multi_round_turn_zero_click_shows_only_group_row_and_say() {
 
     let flat = lines(&v);
     assert!(
-        flat.iter().any(|l| l.contains("\u{25b8} 2 Steps")),
-        "collapsed group row with the closed prefix: {flat:?}"
+        flat.iter()
+            .any(|l| l.contains("\u{25b8} Say(2 steps): all done")),
+        "collapsed pair renders ONE merged Say header with the step count: {flat:?}"
     );
     assert!(
-        flat.iter().any(|l| l.contains("\u{276f} Say:")),
-        "final answer block stays top-level and visible: {flat:?}"
+        !flat.iter().any(|l| l.contains("\u{276f} Say:")),
+        "the standalone Say header is folded into the merged row: {flat:?}"
     );
     assert!(
         !flat.iter().any(|l| l.contains("Step(")),

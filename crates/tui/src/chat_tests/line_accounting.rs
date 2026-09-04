@@ -77,7 +77,7 @@ fn step_group_closed() -> ChatBlock {
 /// `collect_headers` (which feeds mouse hit-rects via `*_headers()`) must sum
 /// to exactly the number of lines `flatten_with` emits. If any single block
 /// mis-counts, the total drifts and `expected != actual`.
-fn assert_line_accounting_matches(view: &ChatView) {
+pub(super) fn assert_line_accounting_matches(view: &ChatView) {
     let actual = view.flatten_with(0, 0).len();
 
     // Reconstruct the expected total by running the SAME per-block accounting
@@ -85,7 +85,16 @@ fn assert_line_accounting_matches(view: &ChatView) {
     // between collect_headers and flatten_with is caught regardless of which
     // side regresses. (collect_headers is private, so we mirror its math.)
     let mut expected = 0usize;
-    for block in view.blocks.iter() {
+    for (bi, block) in view.blocks.iter().enumerate() {
+        // ADJACENT-pair merge (see flatten_with): a StepGroup whose NEXT
+        // block is the turn's Say renders one merged header row and the Say
+        // renders body only — both sides of the pair lose one line.
+        let say_merged_after_group =
+            matches!(view.blocks.get(bi + 1), Some(ChatBlock::Assistant { .. }));
+        let say_merged_into_group = bi
+            .checked_sub(1)
+            .and_then(|i| view.blocks.get(i))
+            .is_some_and(|b| matches!(b, ChatBlock::StepGroup { .. }));
         match block {
             ChatBlock::Marker(lines) => expected += lines.len(),
             ChatBlock::User { rendered } => expected += 1 + rendered.len(),
@@ -94,11 +103,21 @@ fn assert_line_accounting_matches(view: &ChatView) {
                 rendered,
                 done,
             } => {
-                expected += 1;
-                expected += if *done {
+                if !say_merged_into_group {
+                    expected += 1;
+                }
+                let total = if *done {
                     rendered.len()
                 } else {
                     assistant_rows(raw).len()
+                };
+                // 合并对正文行数：跳过与 preview 重复的首个非空行（单行
+                // Say / 空正文整块隐藏）—— 与 flatten_with 同口径。
+                expected += if say_merged_into_group {
+                    super::super::step_render::merged_say_body_decision(raw, rendered, *done)
+                        .visible_len(total)
+                } else {
+                    total
                 };
             }
             ChatBlock::Thinking {
@@ -118,10 +137,20 @@ fn assert_line_accounting_matches(view: &ChatView) {
                 }
             }
             ChatBlock::StepGroup { steps, open, .. } => {
-                // Mirrors the StepGroup arm in collect_headers: group row,
-                // then the three-level ladder while open, then one blank.
+                // Mirrors the StepGroup arm in collect_headers: group row
+                // (or merged Say header when the next block is the Say) plus
+                // its separator blank, then the three-level ladder while
+                // open, then one trailing blank — the LADDER blank is
+                // skipped for a CLOSED merged pair (the header's separator
+                // blank already terminates it).
                 expected += 1; // group row
-                if *open {
+                if say_merged_after_group {
+                    // 合并头部行之后的空行（与 flatten_step_group 同步）。
+                    expected += 1;
+                }
+                if !*open && say_merged_after_group {
+                    // merged closed pair: no trailing blank
+                } else if *open {
                     for s in steps {
                         expected += 1; // step row
                         if s.open {
@@ -140,7 +169,16 @@ fn assert_line_accounting_matches(view: &ChatView) {
                         }
                     }
                 }
-                expected += 1; // trailing blank
+                // Exactly one blank after the group: a final expanded
+                // call's separator blank (counted per call above) doubles as
+                // the trailing blank.
+                let ends_on_expanded_call = *open
+                    && steps.last().is_some_and(|s| {
+                        s.open && s.calls_open && s.calls.last().is_some_and(|c| c.expanded)
+                    });
+                if !ends_on_expanded_call && !(!*open && say_merged_after_group) {
+                    expected += 1; // trailing blank
+                }
             }
             ChatBlock::Image { rendered, .. } => {
                 expected +=

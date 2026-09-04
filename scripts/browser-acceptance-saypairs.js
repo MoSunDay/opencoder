@@ -8,7 +8,8 @@
 // then drives the committed dist bundle in system chromium, auth seeded
 // BEFORE first load via addInitScript(localStorage.oc_token) so the SPA
 // self-signs every request; node-side setup/queries reuse the same HMAC.
-// Scenarios: (a) 多回合交替 + 12px 间距 (b) /act_clear_context 在途回显
+// Scenarios: (a) 多回合交替 + 合并 Say 行（❯ Say(N steps): preview，正文
+// 与 preview 首行去重、单行 Say 无正文块、间距=空行） (b) /act_clear_context 在途回显
 // (c) steer 拆梯. Env: SHOTS (default /tmp/uitest/shots-saypairs), CHROME_PATH,
 // KEEP=1 keeps the temp workdir. Exit 0 iff every step PASSes and the
 // browser console stayed clean (pageerror/console.error).
@@ -130,7 +131,7 @@ async function probe(spec) {
   return page.evaluate((s) => {
     const bubbles = [...document.querySelectorAll('.ant-bubble-list .ant-bubble')];
     const txt = (b) => (b.innerText || '').replace(/\s+/g, ' ').trim();
-    const isLadder = (b) => /❯ \d+ Steps?/.test(txt(b));
+    const isLadder = (b) => /❯ (?:\d+ Steps?|Say\(\d+ steps?\))/.test(txt(b));
     const echoIdx = (v) => bubbles.findIndex((b) => b.classList.contains('ant-bubble-end') && txt(b).includes(v));
     const nearLadder = (from, dir) => {
       for (let i = from + dir; i >= 0 && i < bubbles.length; i += dir) if (isLadder(bubbles[i])) return i;
@@ -147,8 +148,8 @@ async function probe(spec) {
     const findIdx = (sel) => bubbles.findIndex(matchers[sel.type](sel.v));
     const info = (b) => {
       const tag = [...b.querySelectorAll('.ant-tag')].find((t) => t.textContent.trim() === 'running') || null;
-      const says = [...b.querySelectorAll('div')].filter((d) => d.style.marginTop === '8px' && txt(d));
-      const headerM = txt(b).match(/❯ (\d+) Steps?/);
+      const says = [...b.querySelectorAll('div')].filter((d) => d.style.marginTop === '16px' && txt(d));
+      const headerM = txt(b).match(/❯ Say\(\d+ steps?\)|❯ \d+ Steps?/);
       return {
         end: b.classList.contains('ant-bubble-end'), text: txt(b).slice(0, 220),
         header: headerM ? headerM[0] : null, running: !!tag,
@@ -178,8 +179,8 @@ async function isBelow(above, below) {
 
 /// Drill the nth ladder: L0 `❯ N Steps` -> `❯ Step(k)` -> `❯ N Function
 /// call(s)` -> `🔧 bash`. Open collapses are skipped (antd headers toggle).
-async function drillLadder(n) {
-  const ladder = page.locator('.ant-bubble-list .ant-bubble').filter({ hasText: /❯ \d+ Steps?/ }).nth(n);
+async function drillLadder(n, hasText = /❯ (?:\d+ Steps?|Say\(\d+ steps?\))/) {
+  const ladder = page.locator('.ant-bubble-list .ant-bubble').filter({ hasText }).nth(n);
   for (let i = 0; i < 4; i++) {
     const header = ladder.locator('.ant-collapse-header').nth(i);
     if ((await header.count()) === 0) break;
@@ -231,11 +232,16 @@ async function doneRebuild(signed, timeoutMs) {
 const waitText = (text, timeoutMs) => page.waitForFunction(
   (t) => document.body.innerText.includes(t), text, { timeout: timeoutMs, polling: 200 });
 // User echo bubbles render TUI-parity "❯ " before the text: strip it.
-const waitUserEcho = async (exactText, timeoutMs) => {
+const waitUserEcho = async (exactText, timeoutMs, requireLast = true) => {
   try {
-    await page.waitForFunction((t) => [...document.querySelectorAll('.ant-bubble-end')]
-      .some((b) => (b.innerText || '').trim().replace(/^❯\s*/, '') === t),
-    exactText, { timeout: timeoutMs, polling: 150 });
+    // `requireLast=false` for mid-run steers: `.ant-bubble-end` marks only the
+    // list's tail, and the steered-in ladder renders immediately below the
+    // echo — the strict form stays false until the run's done rebuild.
+    await page.waitForFunction((a) => {
+      const [t, last] = a;
+      return [...document.querySelectorAll(last ? '.ant-bubble-end' : '.ant-bubble')]
+        .some((b) => (b.innerText || '').trim().replace(/^❯\s*/, '') === t);
+    }, [exactText, requireLast], { timeout: timeoutMs, polling: 150 });
   } catch (e) {
     throw new Error(`${e.message.split('\n')[0]} | echo=${exactText} bubbles=${JSON.stringify(await bubblesDump())}`);
   }
@@ -316,9 +322,9 @@ async function steer(signed, text) { // same delivery the SPA uses for steers
     });
     await step('a2_turn1_frozen_ladder_say8px_drill', async () => {
       const b = await bubbleInfo({ type: 'ladder', v: 0 });
-      assert(!b.running && b.header === '❯ 1 Step', `ladder1 must be frozen: ${JSON.stringify(b)}`);
-      assert(b.says.length === 1 && b.says[0].text === 'Say-第一回合-done' && b.says[0].marginTop === '8px',
-        `say1 wrapper: ${JSON.stringify(b.says)}`);
+      assert(!b.running && b.header === '❯ Say(1 step)', `ladder1 must be frozen with its Say row: ${JSON.stringify(b)}`);
+      assert(b.text.includes('❯ Say(1 step): Say-第一回合-done'), `say1 preview missing from merged header: ${b.text}`);
+      assert(b.says.length === 0, `single-line Say must NOT render a body block (preview dedup): ${JSON.stringify(b.says)}`);
       await drillLadder(0);
       const d = await bubbleInfo({ type: 'ladder', v: 0 });
       assert(d.text.includes('❯ Step(1)') && d.text.includes('❯ 1 Function call'), `ladder1 drill incomplete: ${d.text}`);
@@ -333,10 +339,10 @@ async function steer(signed, text) { // same delivery the SPA uses for steers
       await doneRebuild(signed, 20000);
       const l1 = await bubbleInfo({ type: 'ladder', v: 0 });
       const l2 = await bubbleInfo({ type: 'ladder', v: 1 });
-      assert(l2 && l2.header === '❯ 1 Step', `ladder2 missing/header wrong: ${JSON.stringify(l2)}`);
+      assert(l2 && l2.header === '❯ Say(1 step)', `ladder2 missing/header wrong: ${JSON.stringify(l2)}`);
       assert(!l1.running && !l2.running, 'running tags must not survive done');
-      assert(l2.says.length === 1 && l2.says[0].text === 'Say-第二回合-done' && l2.says[0].marginTop === '8px',
-        `say2 wrapper: ${JSON.stringify(l2.says)}`);
+      assert(l2.text.includes('❯ Say(1 step): Say-第二回合-done'), `say2 preview missing: ${l2.text}`);
+      assert(l2.says.length === 0, `single-line Say must NOT render a body block: ${JSON.stringify(l2.says)}`);
       await isBelow({ type: 'containsEnd', v: '第一回合' }, { type: 'ladder', v: 0 });
       await isBelow({ type: 'ladder', v: 0 }, { type: 'containsEnd', v: '第二回合' });
       await isBelow({ type: 'containsEnd', v: '第二回合' }, { type: 'ladder', v: 1 });
@@ -378,6 +384,7 @@ async function steer(signed, text) { // same delivery the SPA uses for steers
         `last bubble is not the echo: ${JSON.stringify(all[all.length - 1] || null)}`);
       await shot('b2-after-reset-done');
     });
+    let cSteerP = null; // c-scenario steer POST, awaited after c2's done rebuild
     await step('c1_steer_interrupts_say_ladder_frozen', async () => {
       await submit(ECHO_A);
       // A's round 1 runs `sleep 1 && echo hi N` — wait for the running tag,
@@ -388,17 +395,21 @@ async function steer(signed, text) { // same delivery the SPA uses for steers
       // Real contract (web/src/handle.rs): a steer POST fires turn_cancel —
       // the in-flight Say is cut and its partial text discarded; A's ladder
       // freezes at the completed round-1 step and B owns the next turn.
-      await steer(signed, ECHO_B);
-      await waitUserEcho(ECHO_B, 20000); // steer_consumed echo on the open stream
-      const dump = await bubblesDump();
-      log(`c1 bubbles=${JSON.stringify(dump.map((b) => b.text.slice(0, 60)))}`);
-      assert(await probe({ op: 'laddersAbove', v: ECHO_B }) === 1, 'exactly ladder-A above the echo-B');
+      // Fire-and-await-later: the steer POST's response lands only after the
+      // NEXT LLM round completes (daemon admit contract), which would consume
+      // ladder-B's whole running window before c2 could observe it. The echo
+      // itself arrives via the steer_consumed broadcast long before that.
+      cSteerP = steer(signed, ECHO_B);
+      await waitUserEcho(ECHO_B, 20000, false); // steer_consumed echo on the open stream
+      // Say-merged ladders (❯ Say(N steps)) now also count as ladders, so the
+      // old `laddersAbove === 1` count is meaningless; assert DIRECT adjacency:
+      // the bubble right above echo-B must be ladder-A (interrupted, Say discarded).
       const a = await bubbleInfo({ type: 'ladderAbove', v: ECHO_B });
-      assert(!a.running && a.header === '❯ 1 Step', `ladder-A must be frozen at ❯ 1 Step: ${JSON.stringify(a)}`);
-      await drillLadder(0);
-      const pre = await bubbleInfo({ type: 'ladderAbove', v: ECHO_B });
-      assert(/hi \d/.test(pre.text), `ladder-A drilled output missing: ${pre.text}`);
+      assert(!a.running && a.header === '❯ Say(1 step)', `ladder-A must be frozen at ❯ Say(1 step): ${JSON.stringify(a)}`);
       await shot('c1-ladder1-frozen');
+      // NOTE: the drill moved to c2's tail — c1 post-steer work must stay short
+      // enough to leave ladder-B's running window (sleep 4 + 4x300ms say) alive
+      // for c2's split-moment assertion.
     });
     await step('c2_ladder2_below_echoB_then_say2', async () => {
       await waitAnyRunningTag(20000); // ladder-B's own tool round (sleep 4)
@@ -407,9 +418,10 @@ async function steer(signed, text) { // same delivery the SPA uses for steers
       assert(b && b.running, 'ladder-B running tag missing during its tool round');
       await waitText('Steer-B handled.', 20000);
       await doneRebuild(signed, 20000);
+      await cSteerP; // by now the steer POST has certainly resolved
       const bDone = await bubbleInfo({ type: 'ladderBelow', v: ECHO_B });
-      assert(!bDone.running && bDone.says.length === 1 && bDone.says[0].text === 'Steer-B handled.'
-        && bDone.says[0].marginTop === '8px', `ladder-B final: ${JSON.stringify(bDone)}`);
+      assert(!bDone.running && bDone.header === '❯ Say(1 step)' && bDone.text.includes('Steer-B handled.')
+        && bDone.says.length === 0, `ladder-B final: ${JSON.stringify(bDone)}`);
       const aAfter = await bubbleInfo({ type: 'ladderAbove', v: ECHO_B });
       assert(!aAfter.running && aAfter.header === '❯ 1 Step' && aAfter.says.length === 0,
         `ladder-A must stay frozen at 1 step with the interrupted Say discarded: ${JSON.stringify(aAfter)}`);
@@ -418,6 +430,12 @@ async function steer(signed, text) { // same delivery the SPA uses for steers
       await isBelow({ type: 'ladderAbove', v: ECHO_B }, { type: 'containsEnd', v: ECHO_B });
       await isBelow({ type: 'containsEnd', v: ECHO_B }, { type: 'ladderBelow', v: ECHO_B });
       await shot('c3-final-split-state');
+      // Drill ladder-A post-done: the interrupted ladder still exposes its
+      // completed round-1 step output (ladder-A is the only no-Say ladder left).
+      await drillLadder(0, /❯ \d+ Steps?/);
+      const pre = await bubbleInfo({ type: 'ladderAbove', v: ECHO_B });
+      assert(/hi \d/.test(pre.text), `ladder-A drilled output missing: ${pre.text}`);
+      await shot('c3-ladder-a-drilled');
     });
     if (consoleErrors.length) log('WARN: browser console errors: ' + JSON.stringify(consoleErrors));
     process.exitCode = results.every((r) => r.startsWith('PASS')) && consoleErrors.length === 0 ? 0 : 1;

@@ -7,7 +7,10 @@ use libsql::{params, Connection};
 
 use crate::types::DagEventRecord;
 
-const INSERT_EVENT: &str =
+/// Shared with [`super::dag`] so the in-transaction synthetic
+/// `run_finished` inserts (finalize / lost-sweep) reuse the exact same SQL
+/// instead of duplicating it.
+pub(super) const INSERT_EVENT: &str =
     "INSERT INTO dag_events (run_id, kind, step, payload, at_ms) VALUES (?, ?, ?, ?, ?)";
 
 /// Persist a batch of node-uploaded events in one transaction through ONE

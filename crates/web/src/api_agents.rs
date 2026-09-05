@@ -221,7 +221,9 @@ pub struct PatchActiveBody {
 
 /// PATCH /api/agents/active — activate (`{"active": name}`) or deactivate
 /// (`{"active": null}`). The preflight parses the card and resolves its
-/// `current.prompt` pool reference to a live version dir;
+/// `current.prompt` pool reference to a live version dir; a card with NO
+/// prompt reference is rejected before the marker settles (it would
+/// resolve to `None` and reads would silently fall back to `act`);
 /// `set_active_agent_checked` rolls the marker back when it fails.
 /// ReloadConfig fans out only when the value actually changed.
 pub async fn patch_active(
@@ -247,15 +249,19 @@ pub async fn patch_active(
         }
     }
     // Preflight: card parses (again, atomically) and its prompt reference
-    // resolves to a pool version dir — activating a broken chain must fail
-    // BEFORE the marker settles (rollback happens inside on failure).
+    // is present and resolves to a pool version dir — activating a broken
+    // chain OR a promptless card (which reads would silently downgrade to
+    // `act`) must fail BEFORE the marker settles (rollback happens inside
+    // on failure).
     let preflight = || -> Result<(), String> {
         let Some(name) = &target else {
             return Ok(());
         };
         let card = read_agent_meta(name).ok_or_else(|| format!("card `{name}` unreadable"))?;
         match card.current.prompt.as_deref() {
-            None => Ok(()),
+            None => Err(format!(
+                "card `{name}` has no prompt reference — not a resolvable agent (reads would silently fall back to act)"
+            )),
             Some(res) => resource_current_version_dir("prompts", res)
                 .map(|_| ())
                 .ok_or_else(|| format!("prompt resource `{res}` has no live version")),

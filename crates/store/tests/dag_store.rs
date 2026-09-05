@@ -209,6 +209,52 @@ async fn pinned_run_only_claimable_by_pinned_node() {
     assert_eq!(claimed.id, "r-pin");
 }
 
+/// A `cancelling` run still holds the node's single-active slot (the busy
+/// guard counts `running` AND `cancelling`, mirroring node_tasks): a
+/// mid-cancel node cannot start a second run until the current one lands in
+/// a terminal state and frees the slot.
+#[tokio::test]
+async fn claim_blocked_while_cancelling() {
+    let (_dir, store) = fresh().await;
+    let node = register(&store, "n1", 1_000).await;
+    dispatch(&store, "r-1", None, 1_500).await;
+    dispatch(&store, "r-2", None, 1_600).await;
+
+    let first = store
+        .claim_next_dag_run(&node.id, 1_700)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(first.id, "r-1");
+    store.cancel_dag_run("r-1", 1_800).await.unwrap();
+    assert_eq!(
+        store.get_dag_run("r-1").await.unwrap().unwrap().status,
+        DagRunStatus::Cancelling
+    );
+
+    // cancelling is not terminal — the busy slot must stay taken.
+    assert!(
+        store
+            .claim_next_dag_run(&node.id, 1_900)
+            .await
+            .unwrap()
+            .is_none(),
+        "cancelling must block a fresh claim"
+    );
+
+    // Terminal collapse frees the slot; the queued run becomes claimable.
+    store
+        .update_dag_run_status("r-1", DagRunStatus::Cancelled, None, 2_000)
+        .await
+        .unwrap();
+    let second = store
+        .claim_next_dag_run(&node.id, 2_100)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(second.id, "r-2");
+}
+
 // ── status transitions / cancel ───────────────────────────────────────────
 
 #[tokio::test]
@@ -257,6 +303,70 @@ async fn status_transitions_stamp_finished_and_freeze_terminal() {
         .await
         .unwrap_err();
     assert!(err.to_string().contains("not found"), "got: {err}");
+}
+
+/// `finalize_dag_run` lands the terminal status AND its synthetic
+/// `run_finished` frame in ONE transaction: the returned seq points at a
+/// durable frame row, re-finalizing a terminal run bails "illegal" (web maps
+/// to 409) and unknown ids bail "not found" (web maps to 404) without
+/// appending anything.
+#[tokio::test]
+async fn finalize_commits_status_and_frame_atomically() {
+    let (_dir, store) = fresh().await;
+    let node = register(&store, "n1", 1_000).await;
+    dispatch(&store, "r-ok", None, 1_500).await;
+    store.claim_next_dag_run(&node.id, 1_600).await.unwrap();
+
+    let seq = store
+        .finalize_dag_run("r-ok", DagRunStatus::Done, None, 2_000)
+        .await
+        .unwrap();
+    assert!(seq > 0);
+
+    let done = store.get_dag_run("r-ok").await.unwrap().unwrap();
+    assert_eq!(done.status, DagRunStatus::Done);
+    assert_eq!(done.finished_at, Some(2_000));
+
+    let frames = store.dag_events_after("r-ok", 0, 10).await.unwrap();
+    assert_eq!(frames.len(), 1, "exactly one synthetic frame: {frames:?}");
+    assert_eq!(frames[0].kind, "run_finished");
+    assert_eq!(frames[0].seq, Some(seq));
+    assert_eq!(frames[0].step, None);
+    assert_eq!(frames[0].payload["status"], "done");
+    assert!(frames[0].payload.get("error").is_none());
+    assert_eq!(frames[0].at_ms, 2_000);
+
+    // Terminal freeze: re-finalizing bails "illegal".
+    let err = store
+        .finalize_dag_run("r-ok", DagRunStatus::Error, Some("late"), 2_100)
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("illegal"), "got: {err}");
+
+    // Unknown ids bail "not found" and append nothing.
+    let err = store
+        .finalize_dag_run("ghost", DagRunStatus::Done, None, 2_200)
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("not found"), "got: {err}");
+    assert_eq!(
+        store.dag_events_after("r-ok", 0, 10).await.unwrap().len(),
+        1,
+        "failed finalizes append no frames"
+    );
+
+    // Error reports carry their text through to the frame payload.
+    dispatch(&store, "r-err", None, 2_300).await;
+    store.claim_next_dag_run(&node.id, 2_400).await.unwrap();
+    let seq_err = store
+        .finalize_dag_run("r-err", DagRunStatus::Error, Some("boom"), 2_500)
+        .await
+        .unwrap();
+    let err_frames = store.dag_events_after("r-err", 0, 10).await.unwrap();
+    assert_eq!(err_frames.len(), 1);
+    assert_eq!(err_frames[0].seq, Some(seq_err));
+    assert_eq!(err_frames[0].payload["status"], "error");
+    assert_eq!(err_frames[0].payload["error"], "boom");
 }
 
 /// `pending -> cancelled` directly (terminal stamped); `running ->
@@ -341,29 +451,42 @@ async fn events_assign_ascending_seqs_and_paginate_by_cursor() {
 #[tokio::test]
 async fn lost_sweep_converges_running_and_cancelling() {
     let (_dir, store) = fresh().await;
-    let stale = register(&store, "stale-node", 1_000).await;
+    let stale_a = register(&store, "stale-a", 1_000).await;
+    let stale_b = register(&store, "stale-b", 1_000).await;
     let alive = register(&store, "alive-node", 1_301).await; // gap 100 < 400
 
-    // Stale node: one cancelling run (cancelling does not block a fresh
-    // claim) plus one running run.
-    dispatch(&store, "r-can", Some(&stale.id), 1_100).await;
-    store.claim_next_dag_run(&stale.id, 1_150).await.unwrap();
+    // Stale node A: one claimed run asked to cancel (now `cancelling`).
+    dispatch(&store, "r-can", Some(&stale_a.id), 1_100).await;
+    store.claim_next_dag_run(&stale_a.id, 1_150).await.unwrap();
     store.cancel_dag_run("r-can", 1_200).await.unwrap();
-    dispatch(&store, "r-run", Some(&stale.id), 1_210).await;
-    store.claim_next_dag_run(&stale.id, 1_250).await.unwrap();
+    // Stale node B: one still-`running` run — a SEPARATE node, because the
+    // fixed busy guard keeps a cancelling node from claiming anything new.
+    dispatch(&store, "r-run", Some(&stale_b.id), 1_210).await;
+    store.claim_next_dag_run(&stale_b.id, 1_250).await.unwrap();
     // Fresh node keeps its running run; an unpinned pending row waits.
     dispatch(&store, "r-live", Some(&alive.id), 1_100).await;
     store.claim_next_dag_run(&alive.id, 1_150).await.unwrap();
     dispatch(&store, "r-pend", None, 1_300).await;
 
     let converged = store.converge_lost_dag_runs(1_401, STALE_MS).await.unwrap();
-    let mut ids: Vec<&str> = converged.iter().map(|r| r.id.as_str()).collect();
+    let mut ids: Vec<&str> = converged.iter().map(|c| c.record.id.as_str()).collect();
     ids.sort_unstable();
     assert_eq!(ids, ["r-can", "r-run"]);
-    for r in &converged {
-        assert_eq!(r.status, DagRunStatus::Error);
-        assert_eq!(r.error.as_deref(), Some("node lost"));
-        assert_eq!(r.finished_at, Some(1_401));
+    for c in &converged {
+        assert_eq!(c.record.status, DagRunStatus::Error);
+        assert_eq!(c.record.error.as_deref(), Some("node lost"));
+        assert_eq!(c.record.finished_at, Some(1_401));
+        // The synthetic final frame landed in the SAME transaction as the
+        // flip: the returned seq points at a durable `run_finished` row.
+        assert!(c.run_finished_seq > 0, "seq must be assigned");
+        let frames = store.dag_events_after(&c.record.id, 0, 10).await.unwrap();
+        let frame = frames
+            .iter()
+            .find(|f| f.kind == "run_finished")
+            .expect("run_finished frame");
+        assert_eq!(frame.seq, Some(c.run_finished_seq));
+        assert_eq!(frame.payload["status"], "error");
+        assert_eq!(frame.payload["error"], "node lost");
     }
     let live = store.get_dag_run("r-live").await.unwrap().unwrap();
     assert_eq!(live.status, DagRunStatus::Running);

@@ -3,7 +3,7 @@
 //! write per-step artifacts, stream events upstream, honor cancellation,
 //! and fold the terminal status (`run_outcome`: cancelled > error > done).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -13,8 +13,8 @@ use opencoder_core::message::now_ms;
 use opencoder_dag::artifacts::{run_root, validate_run_id, validate_step_slug};
 use opencoder_dag::protocol::DagClaimedRun;
 use opencoder_dag::{
-    ready_steps, run_outcome, validate, DagRunStatus, DagSpec, DagStatusReport, StepKind,
-    StepOutcome, StepOutputs, StepStates,
+    ready_steps, run_outcome, validate, DagRunStatus, DagSpec, DagStatusReport, SandboxMode,
+    StepKind, StepOutcome, StepOutputs, StepStates,
 };
 use opencoder_node::uplink::Uplink;
 use tokio::sync::watch;
@@ -110,12 +110,39 @@ pub async fn execute_run(
     let mut outputs: StepOutputs = BTreeMap::new();
     let mut step_errors: BTreeMap<String, String> = BTreeMap::new();
     let mut inflight: JoinSet<StepDone> = JoinSet::new();
+    // Steps currently executing. `ready_steps` only excludes steps whose
+    // outcome already landed in `states`, so this set fills that blind
+    // spot: without it, every completion would re-dispatch the step's
+    // still-running siblings (duplicate sessions, events, artifacts).
+    let mut inflight_names: BTreeSet<String> = BTreeSet::new();
     let mut cancel_rx = cancel_rx;
 
     let terminal = loop {
         if *cancel_rx.borrow_and_update() {
             run_cancel.cancel();
-            drain_inflight(&mut inflight, &mut states).await;
+            // Drain in-flight steps through `record_step` — the same path
+            // the main loop uses — so a cancelled run keeps their artifacts
+            // and `step_done` frames; a state-only fold would lose both.
+            // Each task converges quickly once its child token fired; the
+            // executor's own outcome (usually `Cancelled`) wins.
+            while let Some(res) = inflight.join_next().await {
+                match res {
+                    Ok(d) => {
+                        inflight_names.remove(&d.name);
+                        record_step(
+                            d,
+                            &mut states,
+                            &mut outputs,
+                            &mut step_errors,
+                            &deps.workflow_root,
+                            &run,
+                            &sink,
+                        )
+                        .await;
+                    }
+                    Err(e) => warn!(error = %e, "dag step task failed during cancel drain"),
+                }
+            }
             mark_unfinished(
                 &run.spec,
                 &mut states,
@@ -132,13 +159,21 @@ pub async fn execute_run(
 
         // Spawn ready steps while concurrency budget remains; excess ready
         // steps stay queued (recomputed next round, so no starvation).
-        for name in ready_steps(&run.spec, &states) {
+        // Steps already in flight are filtered out: `ready_steps` cannot
+        // see them (no outcome in `states` yet) and would re-dispatch them.
+        // Collected first so the filter's borrow of the set ends here.
+        let ready: Vec<String> = ready_steps(&run.spec, &states)
+            .into_iter()
+            .filter(|n| !inflight_names.contains(n))
+            .collect();
+        for name in ready {
             if inflight.len() >= MAX_CONCURRENT_STEPS {
                 break;
             }
             let Some(step) = run.spec.steps.iter().find(|s| s.name == name) else {
                 continue;
             };
+            inflight_names.insert(name.clone());
             let ctx = StepCtx {
                 run_id: run.run_id.clone(),
                 spec: run.spec.clone(),
@@ -205,8 +240,16 @@ pub async fn execute_run(
             biased;
             _ = await_flag(&mut cancel_rx) => { /* loop head handles it */ }
             done = inflight.join_next() => {
-                if let Some(Ok(d)) = done {
-                    record_step(d, &mut states, &mut outputs, &mut step_errors, &deps.workflow_root, &run, &sink).await;
+                // A completed step must not be re-dispatched before its
+                // outcome lands in `states`: `ready_steps` only consults
+                // `states`, so the inflight set covers that blind spot.
+                match done {
+                    Some(Ok(d)) => {
+                        inflight_names.remove(&d.name);
+                        record_step(d, &mut states, &mut outputs, &mut step_errors, &deps.workflow_root, &run, &sink).await;
+                    }
+                    Some(Err(e)) => warn!(error = %e, "dag step task failed"),
+                    None => {}
                 }
             }
         }
@@ -223,6 +266,22 @@ pub async fn execute_run(
 /// Dispatch one step by kind, wrapped in its per-step wall-clock budget.
 /// A timeout cancels the step token and folds to `Error("step timeout")`.
 async fn execute_step(ctx: &StepCtx, exec: &ExecDeps, cancel: CancellationToken) -> StepResult {
+    // runc python steps own their timeout: the sandbox driver enforces its
+    // own budget and its KILL + `delete --force` cleanup tail must run
+    // after a timeout — an outer `tokio::time::timeout` would drop the
+    // future first and swallow the cleanup, leaking the container. The
+    // in-process VM (threads that cannot be interrupted) and agent steps
+    // keep the outer budget: folding them to Error on timeout is the
+    // documented behavior.
+    if matches!(
+        &ctx.step.kind,
+        StepKind::Python {
+            sandbox: Some(SandboxMode::Runc),
+            ..
+        }
+    ) {
+        return execute_python_step(ctx).await;
+    }
     let fut = async {
         match &ctx.step.kind {
             StepKind::Agent { .. } => execute_agent_step(ctx, exec, cancel.clone()).await,
@@ -244,19 +303,6 @@ async fn execute_step(ctx: &StepCtx, exec: &ExecDeps, cancel: CancellationToken)
                 }
             }
         },
-    }
-}
-
-/// Reap in-flight tasks after a cancel: each converges quickly once its
-/// child token fired; their own outcomes (usually `Cancelled`) win.
-async fn drain_inflight(inflight: &mut JoinSet<StepDone>, states: &mut StepStates) {
-    while let Some(res) = inflight.join_next().await {
-        match res {
-            Ok(d) => {
-                states.insert(d.name, d.result.outcome);
-            }
-            Err(e) => warn!(error = %e, "dag step task failed during cancel drain"),
-        }
     }
 }
 

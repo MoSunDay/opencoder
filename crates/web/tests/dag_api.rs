@@ -346,3 +346,63 @@ async fn event_upload_validates_run_kind_and_run_id() {
     assert_eq!(s, StatusCode::OK, "{b}");
     assert_eq!(b["accepted"], 2);
 }
+
+/// A terminal run closes its event stream: uploads after the terminal status
+/// report are 409'd and nothing new is persisted (the only frame the
+/// terminal move adds is the store's own synthetic `run_finished`).
+#[tokio::test]
+async fn events_rejected_after_terminal_status() {
+    let ctx = app().await;
+    let node = register(&ctx.app, "worker-3").await;
+    let def_id = upsert_def(&ctx.app).await;
+    let rid = dispatch(&ctx.app, &def_id, Some(&node)).await;
+    let _ = claim(&ctx.app, &node).await;
+
+    // Live run: uploads land.
+    let (s, b) = upload(
+        &ctx.app,
+        &rid,
+        serde_json::json!([{"kind":"run_started","at_ms":1}]),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{b}");
+    let before = ctx
+        .store
+        .dag_events_after(&rid, 0, 100)
+        .await
+        .unwrap()
+        .len();
+
+    // Terminal report, same envelope the node sends.
+    let (s, b) = send(
+        &ctx.app,
+        req(
+            "POST",
+            &format!("/api/nodes/dag/runs/{rid}/status"),
+            Some(format!(r#"{{"run_id":"{rid}","status":"done"}}"#)),
+        ),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{b}");
+
+    // Post-terminal upload: 409, and the stream must not grow.
+    let (s, b) = upload(
+        &ctx.app,
+        &rid,
+        serde_json::json!([{"kind":"step_done","step":"fetch","at_ms":2}]),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CONFLICT, "{b}");
+    assert!(
+        b["error"].as_str().unwrap().contains("event stream closed"),
+        "{b}"
+    );
+    let after = ctx.store.dag_events_after(&rid, 0, 100).await.unwrap();
+    assert_eq!(
+        after.len(),
+        before + 1,
+        "only the synthetic run_finished frame was appended"
+    );
+    assert_eq!(after.last().unwrap().kind, "run_finished");
+    assert_eq!(after.last().unwrap().payload["status"], "done");
+}

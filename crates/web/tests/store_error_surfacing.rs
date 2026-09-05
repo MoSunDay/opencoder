@@ -151,7 +151,7 @@ impl Store for ErrorStore {
         &self,
         now_ms: i64,
         stale_ms: i64,
-    ) -> anyhow::Result<Vec<opencoder_store::DagRunRecord>> {
+    ) -> anyhow::Result<Vec<opencoder_store::ConvergedDagRun>> {
         self.inner.converge_lost_dag_runs(now_ms, stale_ms).await
     }
 }

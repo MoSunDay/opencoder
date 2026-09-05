@@ -11,6 +11,7 @@ pub(super) fn has_editable_key(root: &serde_json::Value) -> bool {
     if obj.contains_key("model")
         || obj.contains_key("small_model")
         || obj.contains_key("embedding_model")
+        || obj.contains_key("embedding_provider")
         || obj.contains_key("max_tokens")
         || obj.contains_key("reasoning_effort")
         || obj.contains_key("interleaved_thinking")
@@ -153,6 +154,9 @@ pub(super) fn merge_into(cfg: &mut Config, value: serde_json::Value) {
         }
         if let Some(embedding) = obj.get("embedding_model").and_then(|v| v.as_str()) {
             cfg.embedding_model = Some(embedding.to_string());
+        }
+        if let Some(provider) = obj.get("embedding_provider").and_then(|v| v.as_str()) {
+            cfg.embedding_provider = Some(provider.to_string());
         }
         if let Some(cl) = obj.get("context_limit").and_then(|v| v.as_u64()) {
             cfg.context_limit = Some(cl);

@@ -3,7 +3,7 @@
 //! An env is a directory holding one complete opencoder config snapshot:
 //! `config.json` plus the four domain files (`mcp.json` / `cli.json` /
 //! `skills.json` / `ap.json`). While an env is active — the marker file
-//! `<global_opencode_home>/envs/active` holds its name and the env directory
+//! `<global_opencoder_home>/envs/active` holds its name and the env directory
 //! exists — config resolution gains an env layer between the project files
 //! and the global home:
 //!
@@ -12,7 +12,7 @@
 //!
 //! A stale marker (env dir deleted) deactivates silently: [`active_env`]
 //! returns `None` and resolution falls back to base behavior. All paths go
-//! through [`super::env::global_opencode_home`], so the `scoped_config_home`
+//! through [`super::env::global_opencoder_home`], so the `scoped_config_home`
 //! test override isolates envs too. Pure functions over the filesystem — no
 //! process-env reads, no mutable globals.
 
@@ -21,7 +21,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, bail, Context, Result};
 
-use super::env::global_opencode_home;
+use super::env::global_opencoder_home;
 
 /// Marker file under `envs/`: one line, the active env's name.
 const ACTIVE_MARKER: &str = "active";
@@ -44,7 +44,7 @@ const MAX_NAME_LEN: usize = 48;
 
 /// `~/.opencoder/envs/` — the env root (never created by read-only calls).
 pub fn envs_home() -> Option<PathBuf> {
-    global_opencode_home().map(|home| home.join("envs"))
+    global_opencoder_home().map(|home| home.join("envs"))
 }
 
 /// `~/.opencoder/envs/<name>/` for a validated `name`.

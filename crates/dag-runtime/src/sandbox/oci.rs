@@ -153,7 +153,7 @@ pub fn write_bundle(dir: &Path, spec: &BundleSpec) -> Result<PathBuf> {
         .unwrap_or(false);
     if !is_real_dir {
         bail!(
-            "shared rootfs unusable at {}: it must be a REAL directory (missing, or a symlink — runc rejects symlinks; move/copy the tree or bind-mount it). Run `opencode-agent dag prepare-rootfs` / place a python interpreter tree there",
+            "shared rootfs unusable at {}: it must be a REAL directory (missing, or a symlink — runc rejects symlinks; move/copy the tree or bind-mount it). Run `opencoder-agent dag prepare-rootfs` / place a python interpreter tree there",
             shared.display()
         );
     }
@@ -184,7 +184,7 @@ pub fn write_bundle(dir: &Path, spec: &BundleSpec) -> Result<PathBuf> {
 }
 
 /// Scaffold a rootfs template at `out` — the backend of
-/// `opencode-agent dag prepare-rootfs`. Creates the documented directory
+/// `opencoder-agent dag prepare-rootfs`. Creates the documented directory
 /// skeleton + README and copies the host resolv.conf when present; it does
 /// NOT download anything (no network use at prepare time).
 pub fn write_rootfs_template(out: &Path) -> Result<()> {

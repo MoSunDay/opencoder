@@ -341,7 +341,7 @@ pub(crate) fn format_resume_summary(
 }
 
 /// Print a one-line summary of the resumed session's subagent tasks so a
-/// headless `opencode -s` user can see prior dispatches and their outcomes
+/// headless `opencoder -s` user can see prior dispatches and their outcomes
 /// (otherwise resume shows nothing about restored subagent context). Mirrors
 /// the live `SubagentStart`/`SubagentEnd` glyph style. No-op when there are no
 /// subagent tasks (e.g. a fresh session).

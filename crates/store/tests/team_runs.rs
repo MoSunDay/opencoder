@@ -1,5 +1,5 @@
 //! Functional tests for the team topic-run store API (`team_topic_runs`) —
-//! the (topic, node) fan-out ledger of the opencode-team runtime.
+//! the (topic, node) fan-out ledger of the opencoder-team runtime.
 //!
 //! Behavior contracts:
 //! - upsert_list_roundtrip_and_created_at_stability: two nodes on one topic

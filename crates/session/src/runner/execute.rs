@@ -400,7 +400,6 @@ fn fmt_dur(d: Duration) -> String {
     }
 }
 
-
 #[cfg(test)]
 #[path = "execute_tests.rs"]
 mod tests;

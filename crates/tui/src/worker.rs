@@ -438,7 +438,7 @@ pub async fn process_cmd(
             }
             // Persist the switched model to the store so resume() honors it
             // (otherwise the stale `sessions.model` column reverts the switch
-            // on the next /task resume or `opencode -s <id>` restart). Only
+            // on the next /task resume or `opencoder -s <id>` restart). Only
             // when the model string actually changed: `/ap` and pure
             // max_iterations saves also land here, and must not surface a
             // spurious `[model]` marker or rewrite the store column.

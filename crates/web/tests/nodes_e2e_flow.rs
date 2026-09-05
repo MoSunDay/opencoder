@@ -1,5 +1,5 @@
 //! Process-level e2e, full-state-machine half: a REAL worker node
-//! (`opencode_node::run_node`, mock LLM scripted) registers against a REAL
+//! (`opencoder_node::run_node`, mock LLM scripted) registers against a REAL
 //! `build_app` server on 127.0.0.1:random-port and this test plays the
 //! browser over HTTP:
 //!   register → node idle → dispatch → SSE stream receives the canonical

@@ -5,7 +5,7 @@
 //! at the idle boundary.
 //!
 //! P0 note: the server process is now the dedicated `opencoder-server` binary
-//! (formerly `opencode daemon --server`); the "running mode switch" under
+//! (formerly `opencoder daemon --server`); the "running mode switch" under
 //! test here is the plan/act agent-mode switching, which survived the
 //! three-binary split unchanged.
 

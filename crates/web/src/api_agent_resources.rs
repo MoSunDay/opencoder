@@ -1,7 +1,7 @@
 //! `/api/agents/resources/:cat` — the four shared, independently versioned
 //! pools (`prompts|skills|tools|memory`) that agent cards reference by
-//! name. Writes go through `opencode_agents` (atomic temp-dir + rename
-//! version swaps); reads through `opencode_core::agent`. ReloadConfig fans
+//! name. Writes go through `opencoder_agents` (atomic temp-dir + rename
+//! version swaps); reads through `opencoder_core::agent`. ReloadConfig fans
 //! out only when the ACTIVE card's chain names the written resource (see
 //! [`crate::api_agents::active_chain_references`]) — every other write is
 //! a silent disk write.
@@ -18,7 +18,7 @@ use base64::Engine;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use opencode_agents::{rollback_resource, save_resource_version, VersionFile};
+use opencoder_agents::{rollback_resource, save_resource_version, VersionFile};
 use opencoder_core::agent::{
     category_dir, list_agents, list_resources, read_agent_meta, read_resource_meta,
     resource_version_dir, validate_resource_name, AGENT_CATEGORIES,

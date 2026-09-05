@@ -16,7 +16,9 @@ pub struct ProjectContext {
 /// 不带任何前言、结语或代码围栏包装。
 pub fn plan_prompt(cx: &ProjectContext) -> String {
     let mut out = String::new();
-    out.push_str("你是一名资深工程规划助手。请把下面这份粗略待办草稿整理成一份完整、可执行的实施方案。\n\n");
+    out.push_str(
+        "你是一名资深工程规划助手。请把下面这份粗略待办草稿整理成一份完整、可执行的实施方案。\n\n",
+    );
     out.push_str("背景：\n");
     out.push_str(&format!("- 目标：{}\n", cx.goal_title));
     if let Some(detail) = &cx.goal_detail_md {
@@ -28,7 +30,11 @@ pub fn plan_prompt(cx: &ProjectContext) -> String {
     } else if let Some(title) = &cx.milestone_title {
         out.push_str(&format!("- 里程碑：{}\n", title));
     }
-    out.push_str(&format!("\n待办：{}\n草稿：{}\n", cx.todo_title, cx.todo_draft.trim()));
+    out.push_str(&format!(
+        "\n待办：{}\n草稿：{}\n",
+        cx.todo_title,
+        cx.todo_draft.trim()
+    ));
     out.push_str(
         "\n要求：\n\
          1. 方案需覆盖实施步骤、涉及文件/模块、验证方式与完成标准，逐条可执行。\n\
@@ -56,7 +62,11 @@ pub fn execute_prompt(cx: &ProjectContext, plan_md: &str, version: i64, resume: 
     } else {
         out.push_str(&format!("\n执行版本：第 {} 版。\n", version));
     }
-    out.push_str(&format!("\n实施方案（第 {} 版）：\n{}\n", version, plan_md.trim()));
+    out.push_str(&format!(
+        "\n实施方案（第 {} 版）：\n{}\n",
+        version,
+        plan_md.trim()
+    ));
     out.push_str(
         "\n完成标准：方案中的每一项都已实现并验证通过（运行/测试/构建可用），全部完成后简要汇报结果。\n",
     );

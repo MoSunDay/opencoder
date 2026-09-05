@@ -138,7 +138,7 @@ fn spawn_listener(root: PathBuf, opts: &NfsServerOpts) -> anyhow::Result<NfsServ
     let done = Arc::new(AtomicBool::new(false));
     let done_flag = done.clone();
     let thread = std::thread::Builder::new()
-        .name("opencode-nfs".to_string())
+        .name("opencoder-nfs".to_string())
         .spawn(move || {
             let rt = match tokio::runtime::Builder::new_current_thread()
                 .enable_all()

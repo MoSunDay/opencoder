@@ -89,7 +89,13 @@ pub fn make_executable(path: &Path) {
 }
 
 /// Write an agent reference card referencing the given pools by name.
-pub fn write_agent_card(root: &Path, name: &str, prompt: Option<&str>, skills: Option<&str>, tools: Option<&str>) {
+pub fn write_agent_card(
+    root: &Path,
+    name: &str,
+    prompt: Option<&str>,
+    skills: Option<&str>,
+    tools: Option<&str>,
+) {
     let dir = root.join(name);
     std::fs::create_dir_all(&dir).expect("agent dir");
     let opt = |v: Option<&str>| match v {
@@ -108,8 +114,21 @@ pub fn write_agent_card(root: &Path, name: &str, prompt: Option<&str>, skills: O
 /// A complete file agent: prompt pool (soul body `SOUL-<name>`), optional
 /// skills pool carrying one `alpha` skill, optional tools pool carrying an
 /// executable `probe-tool` printing `PROBE-<version>`.
-pub fn write_full_agent(root: &Path, name: &str, with_skills: bool, with_tools: bool, tool_version: u32) {
-    write_pool_version(root, "prompts", name, 1, "soul.md", &format!("SOUL-{name} identity"));
+pub fn write_full_agent(
+    root: &Path,
+    name: &str,
+    with_skills: bool,
+    with_tools: bool,
+    tool_version: u32,
+) {
+    write_pool_version(
+        root,
+        "prompts",
+        name,
+        1,
+        "soul.md",
+        &format!("SOUL-{name} identity"),
+    );
     if with_skills {
         write_pool_version(
             root,
@@ -130,7 +149,12 @@ pub fn write_full_agent(root: &Path, name: &str, with_skills: bool, with_tools: 
             "probe-tool",
             &format!("#!/bin/sh\necho PROBE-v{v}\n"),
         );
-        make_executable(&root.join("tools/t").join(format!("v{v}")).join("probe-tool"));
+        make_executable(
+            &root
+                .join("tools/t")
+                .join(format!("v{v}"))
+                .join("probe-tool"),
+        );
     }
     write_agent_card(
         root,

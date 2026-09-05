@@ -70,7 +70,7 @@ pub async fn run(
 
 /// Like [`run`] but attaches `images` (data URIs or URLs) as `Image` content
 /// blocks to the first user message, enabling multimodal/vision prompts from
-/// the headless CLI (`opencode run "..." --image ./a.png`).
+/// the headless CLI (`opencoder run "..." --image ./a.png`).
 pub async fn run_with_images(
     session: &mut SessionState,
     user_text: String,

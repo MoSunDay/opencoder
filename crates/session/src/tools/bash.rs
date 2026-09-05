@@ -73,9 +73,7 @@ pub struct BashTool;
 /// become script text. `None`/empty ⇒ the command verbatim.
 fn script_with_tools_path(command: &str, tools_path: Option<&str>) -> String {
     match tools_path {
-        Some(joined)
-            if !joined.is_empty() && !joined.contains('"') && !joined.contains('$') =>
-        {
+        Some(joined) if !joined.is_empty() && !joined.contains('"') && !joined.contains('$') => {
             format!("export PATH=\"{joined}\":$PATH\n{command}")
         }
         _ => command.to_string(),

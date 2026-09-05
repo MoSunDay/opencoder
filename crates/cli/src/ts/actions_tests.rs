@@ -32,7 +32,7 @@ fn bare_ts_always_builds_new_tmux_session_command() {
     assert!(!outside.iter().any(|arg| arg == "-d"));
     assert_eq!(inside[0], "new-session");
     assert!(inside.iter().any(|arg| arg == "-d"));
-    assert!(inside.iter().any(|arg| arg == "opencode-01ABC"));
+    assert!(inside.iter().any(|arg| arg == "opencoder-01ABC"));
     assert!(inside.iter().any(|arg| arg == "/work/repo"));
 }
 
@@ -45,7 +45,7 @@ fn managed_target_resolves_list_prefix_full_id_and_tmux_index() {
     assert_eq!(resolve_managed_id("01ABCDEF", &tmux, &[]).unwrap(), full_id);
     assert_eq!(resolve_managed_id(full_id, &tmux, &[]).unwrap(), full_id);
     assert_eq!(
-        resolve_managed_id(&format!("opencode-{full_id}"), &tmux, &[]).unwrap(),
+        resolve_managed_id(&format!("opencoder-{full_id}"), &tmux, &[]).unwrap(),
         full_id
     );
     assert_eq!(resolve_managed_id("$7", &tmux, &[]).unwrap(), full_id);

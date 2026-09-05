@@ -75,7 +75,9 @@ async fn call(
     };
     let resp = app.oneshot(req).await.unwrap();
     let status = resp.status();
-    let bytes = axum::body::to_bytes(resp.into_body(), 1 << 20).await.unwrap();
+    let bytes = axum::body::to_bytes(resp.into_body(), 1 << 20)
+        .await
+        .unwrap();
     let v = serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null);
     (status, v)
 }
@@ -120,7 +122,11 @@ async fn nfs_lifecycle_start_reuse_stop_and_failure() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(v["started"], false);
     assert_eq!(v["status"]["running"], true);
-    assert_eq!(v["status"]["port"].as_u64(), Some(port), "port must be reused");
+    assert_eq!(
+        v["status"]["port"].as_u64(),
+        Some(port),
+        "port must be reused"
+    );
 
     // GET while running ⇒ live snapshot.
     let (status, v) = call(router.clone(), "GET", "/api/agents/nfs", None).await;

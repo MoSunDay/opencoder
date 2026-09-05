@@ -19,12 +19,12 @@ pub use compose::compose_prompt;
 pub use meta::{
     active_agent, agent_dir, agents_dir, list_agents, read_agent_meta, set_active_agent,
     set_active_agent_checked, set_agents_dir_override, validate_agent_name, AgentHistoryEntry,
-    AgentMeta, AgentRefs, AgentReferences,
+    AgentMeta, AgentReferences, AgentRefs,
 };
 pub use resource::{
     active_skill_roots, active_tools_dirs, agent_skill_roots, agent_tools_dirs, all_tools_dirs,
     category_dir, list_resources, read_resource_meta, resource_current_version_dir,
-    resource_version_dir, validate_resource_name, AGENT_CATEGORIES, ResourceMeta,
+    resource_version_dir, tools_paths, validate_resource_name, ResourceMeta, AGENT_CATEGORIES,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -712,14 +712,24 @@ mod tests {
         let memdir = root.join("memory").join("longterm").join("v1");
         std::fs::create_dir_all(&memdir).unwrap();
         std::fs::write(memdir.join("memory.md"), "  prefers small commits.  \n\n").unwrap();
-        write_agent_card(root, "withmem", Some("default"), None, None, Some("longterm"));
+        write_agent_card(
+            root,
+            "withmem",
+            Some("default"),
+            None,
+            None,
+            Some("longterm"),
+        );
         write_agent_card(root, "nomem", Some("default"), None, None, None);
         write_agent_card(root, "stalemem", Some("default"), None, None, Some("ghost"));
         let with = resolve_agent("withmem").unwrap().prompt;
         assert!(with.ends_with("# Soul\nsoul body\n\n# Memory\nprefers small commits."));
         assert!(!resolve_agent("nomem").unwrap().prompt.contains("# Memory"));
         assert!(
-            !resolve_agent("stalemem").unwrap().prompt.contains("# Memory"),
+            !resolve_agent("stalemem")
+                .unwrap()
+                .prompt
+                .contains("# Memory"),
             "a stale memory ref must append nothing"
         );
     }

@@ -1,4 +1,4 @@
-"""Web-layer e2e scenarios (boots a real ``opencode serve``).
+"""Web-layer e2e scenarios (boots a real ``opencoder serve``).
 
 E11: two-segment delivery contract (steer + queue) — the only CLI-unreachable
      feature (steer/queue are HTTP-only via ``Delivery``).
@@ -6,7 +6,7 @@ E15: cancel/interrupt of a running turn, then prove the session still works.
 E18b: autopilot PLAN->ACT->VERIFY surfaced as SSE events (independent serve so
       the extra autopilot turns cannot perturb E15's interrupt timing).
 
-Both boot a real ``opencode serve`` and drive it over HTTP. The server ALWAYS
+Both boot a real ``opencoder serve`` and drive it over HTTP. The server ALWAYS
 enables bearer-token auth (auto-generates a ULID if none is provided), so the
 harness starts serve with a fixed known token and sends
 ``Authorization: Bearer <token>`` on every request. Stdlib only (urllib) so
@@ -82,8 +82,15 @@ def _collect_bounded(proc: subprocess.Popen, secs: float = 5.0) -> tuple[str, st
     return (out or "")[:2000], (err or "")[:2000]
 
 
+def _server_bin(bin_path: str) -> str:
+    """The fleet server ships as its own binary; resolve `opencoder-server`
+    from the same cargo target dir as the main `opencoder` binary."""
+    sibling = os.path.join(os.path.dirname(os.path.abspath(bin_path)), "opencoder-server")
+    return sibling if os.path.isfile(sibling) else bin_path
+
+
 def _boot_serve(bin_path: str, cfg: dict, label: str) -> tuple | None:
-    """Boot one `opencode serve` on a fresh port with `cfg` written to its
+    """Boot one `opencoder-server` on a fresh port with `cfg` written to its
     workdir; wait for /api/health. Returns (proc, base, port, webdir) or None
     when the server never became ready (stdout/stderr captured into a note).
     A failed boot (health timeout or instant death, e.g. a bind race on the
@@ -96,7 +103,7 @@ def _boot_serve(bin_path: str, cfg: dict, label: str) -> tuple | None:
         retry_note = "" if attempt == 1 else " — retry with fresh port"
         print(f"== {label}: booting serve on port {port} (token auth on){retry_note} ==")
         proc = subprocess.Popen(
-            [bin_path, "--workdir", webdir, "serve",
+            [_server_bin(bin_path), "--workdir", webdir,
              "--host", "127.0.0.1", "--port", str(port),
              "--token", _E2E_TOKEN],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,

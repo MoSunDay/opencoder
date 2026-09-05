@@ -3,7 +3,7 @@
 //! Every crate that opens a SQLite store (CLI, TUI, Web) must derive the
 //! *same* on-disk data dir for the same workdir, otherwise sessions created in
 //! one process are invisible to another — surfacing as "session not found" and
-//! a detached `opencode[exited]` pane. This module owns the single canonical
+//! a detached `opencoder[exited]` pane. This module owns the single canonical
 //! algorithm so the three former call sites can no longer drift.
 
 use std::hash::{Hash, Hasher};
@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 ///
 /// Each workdir's store lives in a `<data_root>/<hash>` subdirectory (see
 /// [`data_dir_for`]). Exposed as its own function so global operations (e.g.
-/// `opencode ts -l`) can scan *every* per-workdir store regardless of the
+/// `opencoder ts -l`) can scan *every* per-workdir store regardless of the
 /// current directory — the same algorithm used by [`data_dir_for`] cannot
 /// drift from it.
 pub fn data_root() -> PathBuf {

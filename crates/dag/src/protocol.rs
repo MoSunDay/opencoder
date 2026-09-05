@@ -2,7 +2,7 @@
 //!
 //! Mirrors the role of `opencoder_core::node_protocol`: pure data shared by
 //! the server chain (`opencoder-web`) and the agent chain
-//! (`opencoder-dag-runtime` / `opencode-agent`), so a wire-shape change
+//! (`opencoder-dag-runtime` / `opencoder-agent`), so a wire-shape change
 //! fails to compile on both sides. The SERVER only stores and forwards; all
 //! execution happens on the claiming node.
 

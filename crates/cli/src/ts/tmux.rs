@@ -77,7 +77,7 @@ pub(crate) fn current_session_name() -> Result<Option<String>> {
 /// One managed tmux session observed via `list-sessions`.
 #[derive(Debug, Clone)]
 pub(crate) struct ManagedSession {
-    /// tmux session name, e.g. `opencode-01H...`.
+    /// tmux session name, e.g. `opencoder-01H...`.
     pub name: String,
     /// tmux global id, e.g. `$3`.
     #[allow(dead_code)]
@@ -115,7 +115,7 @@ pub(crate) fn parse_list_line(line: &str) -> Option<ManagedSession> {
     })
 }
 
-/// All managed (`opencode-*`) tmux sessions, newest first. Returns an empty vec
+/// All managed (`opencoder-*`) tmux sessions, newest first. Returns an empty vec
 /// (not an error) when tmux is absent or has no server / no managed sessions.
 pub(crate) fn list_managed() -> Result<Vec<ManagedSession>> {
     let bin = match which_tmux() {
@@ -166,9 +166,9 @@ mod tests {
 
     #[test]
     fn parse_list_line_managed_and_unmanaged() {
-        let line = "opencode-01HZ\t$2\t1700000000\t1\t/root/proj";
+        let line = "opencoder-01HZ\t$2\t1700000000\t1\t/root/proj";
         let m = parse_list_line(line).expect("managed line parses");
-        assert_eq!(m.name, "opencode-01HZ");
+        assert_eq!(m.name, "opencoder-01HZ");
         assert_eq!(m.tmux_id, "$2");
         assert_eq!(m.created, 1700000000);
         assert_eq!(m.attached, 1);

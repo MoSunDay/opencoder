@@ -8,8 +8,8 @@
 //! `config.json` candidates):
 //!
 //! - project: `<working_dir>/.opencoder/<domain>.json`
-//! - env: `<global_opencode_home>/envs/<name>/<domain>.json` (active env only)
-//! - global: `<global_opencode_home>/<domain>.json` (the home behind
+//! - env: `<global_opencoder_home>/envs/<name>/<domain>.json` (active env only)
+//! - global: `<global_opencoder_home>/<domain>.json` (the home behind
 //!   [`super::env::primary_global_config_path`], so the `scoped_config_home`
 //!   override applies; XDG dirs are NOT consulted for domain files).
 
@@ -52,11 +52,11 @@ pub(crate) fn project_domain_path(working_dir: &Path, key: &str) -> PathBuf {
     working_dir.join(".opencoder").join(file)
 }
 
-/// Global-scope domain file: `<global_opencode_home>/<domain>.json`. `None`
+/// Global-scope domain file: `<global_opencoder_home>/<domain>.json`. `None`
 /// when the key is not a domain key or the home directory is unresolvable.
 pub(crate) fn global_domain_path(key: &str) -> Option<PathBuf> {
     let file = domain_file_name(key).unwrap_or(NOT_A_DOMAIN_FILE);
-    super::env::global_opencode_home().map(|home| home.join(file))
+    super::env::global_opencoder_home().map(|home| home.join(file))
 }
 
 /// Env-scope domain file: `~/.opencoder/envs/<name>/<domain>.json` while an

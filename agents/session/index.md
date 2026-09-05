@@ -60,6 +60,7 @@ steer 与 queue 都是「先以 pending 落库（`admitted_seq` 列、`promoted_
 
 测试锚点：`steer_followup.rs`（`steer_promotes_at_turn_boundary`、`multiple_steers_at_one_boundary_promoted_once`——3 条 steer 同边界全部提交、`queue_drains_all_fifo_in_single_run_then_done`、`steer_consumed_carries_pk_seq_not_admitted_seq`、`durable_pending_input_survives_until_drain`）；`control_cmd.rs::queue_drains_control_cmds_between_real_prompts`（队列 `[/plan,prompt,/act]`：前导控制命令不耗 turn、真实 prompt 跑 turn 后继续排空、尾部 `/act` 同样被应用，队列清空才 Done）。
 
+- **文件化 agent 会话接线**：`/agent <名>` 控制命令（`control_cmd.rs`）切换到任意 builtin/文件 agent——整结构体替换 + persist + `AgentSwitch` 事件 + 刷新 `SessionState.tools_path/skill_roots`；未知名发 Error 事件（不再静默）；`/agent` 裸命令列出可用 agent。bash 工具（`tools/bash.rs`）在 `ctx.tools_path` 存在时向 `-lc` 脚本**前缀**注入一行 `export PATH=...`（login shell 会重算 PATH，env 注入无效，必须脚本前缀）；展示/超时扫描仍用原始命令文本。session 侧 skill 收口点用 `discover_all([state.skill_roots, 全局])`（切 agent 后随会话走，遮蔽全局同名）。回归：`tests/agent_switch_file.rs`、`tests/agent_tools_path.rs`、`tests/agent_skill_pools.rs`、`tests/resume_file_agent.rs`。
 ## 依赖与接口
 - 依赖：opencoder-core、opencoder-llm（ChatStream）、opencoder-store（Store）、tokio-util（CancellationToken）。
 - 内部模块：`mcp`（`src/mcp/`）— MCP 客户端实现。经 stdio transport 拉起配置的 MCP server 子进程，按 JSON-RPC 2.0 协议通信；发现远端工具并以 `mcp__{server}__{tool}` 前缀注册为标准 `Tool`（`tools_for(session_id)`），LLM 经 function-calling 调用如同内建工具。连接由 process-global 连接池管理（`pool.rs`：`static MCP_POOL`，键为 session_id → per-session 连接 map；`sync/cleanup/status_for` 维护生命周期）。

@@ -1,4 +1,4 @@
-//! `opencode ts` (alias `rs`) -- run the TUI inside a tmux session that
+//! `opencoder ts` (alias `rs`) -- run the TUI inside a tmux session that
 //! survives SSH disconnect. A bare `ts`/`rs` always starts a fresh managed
 //! session; `ts -l` lists them **globally**, `ts -r <id>` reattaches, and
 //! `ts -d <id>` removes one exact managed session.
@@ -11,15 +11,15 @@
 //! started — plain `tui`/`run` sessions and never-started empty seeds are
 //! never listed.
 //!
-//! tmux is engaged ONLY when `opencode ts`/`rs` is used. Plain `tui`, `run`,
+//! tmux is engaged ONLY when `opencoder ts`/`rs` is used. Plain `tui`, `run`,
 //! headless and server commands are completely unaffected.
 //!
 //! Safety: every tmux argument is passed via `Command::arg(...)` -- tmux runs
 //! the pane command with execvp, never a shell -- so session names cannot
 //! inject shell metacharacters.
 //!
-//! Naming contract: a managed tmux session is named `opencode-<ulid>` where the
-//! ulid is also a real opencode session id (seeded into the store). That gives
+//! Naming contract: a managed tmux session is named `opencoder-<ulid>` where the
+//! ulid is also a real opencoder session id (seeded into the store). That gives
 //! one stable id shared by tmux and the session store, so `ts -l` can show
 //! `/task`-style info and `ts -r <id>` resolves unambiguously. Each store also
 //! carries a canonical `workdir` marker, so stopped sessions keep their path

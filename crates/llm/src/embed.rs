@@ -138,8 +138,11 @@ async fn post_embeddings(
         };
 
         let status = resp.status();
-        if retry_decision(AttemptOutcome::from_status(status), attempt, EMBED_MAX_ATTEMPTS)
-            == RetryDecision::Retry
+        if retry_decision(
+            AttemptOutcome::from_status(status),
+            attempt,
+            EMBED_MAX_ATTEMPTS,
+        ) == RetryDecision::Retry
         {
             // Capture `Retry-After` BEFORE draining the body (headers stay
             // readable after `text()`, but reading first keeps the intent

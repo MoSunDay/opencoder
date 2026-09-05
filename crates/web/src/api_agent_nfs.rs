@@ -1,5 +1,5 @@
 //! `/api/agents/nfs` — lifecycle control for the read-only NFSv3 export
-//! of the agents root (`opencode_agents::serve`). GET reports the live
+//! of the agents root (`opencoder_agents::serve`). GET reports the live
 //! snapshot; POST `{enabled}` starts/stops the server explicitly.
 //!
 //! State lives in a process-global slot (one NFS server per daemon — the
@@ -20,7 +20,7 @@ use std::sync::Arc;
 use axum::extract::State;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
-use opencode_agents::{
+use opencoder_agents::{
     default_opts_from_config, nfs_status, spawn_nfs_server, NfsServerHandle, NfsServerStatus,
 };
 use opencoder_core::Config;

@@ -60,7 +60,7 @@ pub fn effective_share_dir(config: Option<&crate::Config>) -> Option<PathBuf> {
             return Some(d);
         }
     }
-    crate::config::env::global_opencode_home().map(|home| home.join("share"))
+    crate::config::env::global_opencoder_home().map(|home| home.join("share"))
 }
 
 /// Name rule shared by template/env/tool names and versions: non-empty,

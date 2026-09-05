@@ -253,11 +253,12 @@ fn fresh_ladder_lands_below_a_boundary_blank_marker() {
     );
 }
 
-/// Copy mode strips the merged header as role chrome: the row vanishes from
-/// the copied payload (the Say's first line lives only on that header — the
-/// rendered body no longer repeats it).
+/// Copy mode keeps the merged pair header's PREVIEW payload: the Say's
+/// first line lives ONLY on that header (the rendered body skips it, and a
+/// single-line Say renders body-hidden), so the header is not role chrome —
+/// only its label span is (see copy_mode::clean::say_pair_payload).
 #[test]
-fn copy_mode_strips_the_merged_header() {
+fn copy_mode_keeps_the_merged_header_preview() {
     let mut v = ChatView::default();
     v.apply(&SessionEvent::ReasoningDelta("think".into()));
     call_tool(&mut v, "t1");
@@ -266,8 +267,9 @@ fn copy_mode_strips_the_merged_header() {
 
     let flat = v.flatten();
     let header = &flat[0];
-    assert!(
-        crate::copy_mode::clean::clean_line(header).is_none(),
-        "the merged header is chrome like `❯ Say:`"
+    assert_eq!(
+        crate::copy_mode::clean::clean_line(header).as_deref(),
+        Some("answer"),
+        "the merged header carries the Say's only rendering of its first line"
     );
 }

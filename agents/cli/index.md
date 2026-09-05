@@ -7,8 +7,8 @@ clap 命令前端 + headless 运行时。解析全局 flag 与子命令（run/tu
 
 ## 边界与非目标
 - 不做终端渲染（TUI 在 `opencoder_tui`）、不做 HTTP 服务实现（web 在 `opencoder_web`）。
-- 不持有长期运行态——headless 一次性 run 完即退；`daemon` 子命令仅打印迁移指引（`opencoder-server` / `opencode-agent`），不再内嵌 web。
-- 非目标：headless `run` 不直接暴露 steer/queue 两段式 delivery（那是 web `POST /prompt` 的 `delivery` 字段；`--delivery` 旗标转发随已删除的 `client` 子命令移除，远端节点模式由 `opencode-agent` 二进制承接）；CLI headless 单 prompt。
+- 不持有长期运行态——headless 一次性 run 完即退；`daemon` 子命令仅打印迁移指引（`opencoder-server` / `opencoder-agent`），不再内嵌 web。
+- 非目标：headless `run` 不直接暴露 steer/queue 两段式 delivery（那是 web `POST /prompt` 的 `delivery` 字段；`--delivery` 旗标转发随已删除的 `client` 子命令移除，远端节点模式由 `opencoder-agent` 二进制承接）；CLI headless 单 prompt。
 
 ## 关键抽象
 - `Cli`（`src/lib.rs`）：全局 flag `--model/--agent/--image/--workdir/--session/--continue/--fork/--verbose/--prompt-file`（`--agent` 以内建名覆盖本次运行的 agent，`parse_agent_name` 在 clap 解析期校验——interlude 已移除的 `sandbox` 名报错并提示 renamed back to `plan`；新会话作为 primary agent 持久化该选择；resume 时显式选择胜过已存 agent 并重新持久化；store 中 interlude legacy `agent='sandbox'` 行在读路径归一化为 `plan`，见 [agents/store](../store/index.md)） + `Command::{Run, Tui, Ts, Daemon, Config, Models, Session, Todos, InstallTools, Update}`（`Update` 无参，用内置提示词经 `run_headless` 委托代理执行自更新：clone latest main → build → 原子替换 PATH 二进制；`InstallTools` 见 `cli/src/install_tools.rs`，探测+安装 tmux 等可选依赖）（`Ts` 别名 `rs`；裸 `ts`/`rs` 在 tmux 内外都恒新建 `opencode-<ulid>` tmux session，tmux 内用 detached-create + `switch-client`，不再退化为 inline TUI。`registry.rs` 打开**中央索引** `<data_root>/ts.db`（`TsRegistry`，store crate），首次缺少 `migrated` 标记时做一次性迁移：分页扫描各 per-workdir store，把 `model IS NULL`（旧 ts 标记）会话导入 registry，幂等 upsert + 末尾打标记、崩溃安全；此后 `-l`/`-r`/`-d`/`-c` 全部只查索引，不再扫 store。`register()`（`ts_start`/TUI 镜像）只写 registry，不再写 per-workdir `workdir` marker；`-l` 先列 live tmux（真实 workdir 来自 pane path）再列 registry stopped 行，marker 图例 `*`=attached、`·`=live(detached)、`-`=stopped；排序：非 stopped（attached/live）优先，再按 workdir 路径升序、组内按创建时间倒序；`-r <id>` / `-d <id>` 把前缀在 live tmux 与 registry 中解析为唯一完整 ID（跨 store 重复 id 由 `INSERT OR REPLACE` 收敛，不再报歧义）；`-r` 从任意目录按记录路径重连/冷启动，`-c` 清理 stopped registry 行及其 store 内容，`-d` 对非当前 live tmux 先 kill 再删；普通 `tui`/`run` 会话不进 registry（TUI 侧由 `TsMirrorStore` 在 `ts.db` 存在时镜像 ts 会话的 title/preview/delete））+ trailing `prompt`。
@@ -57,3 +57,5 @@ clap 命令前端 + headless 运行时。解析全局 flag 与子命令（run/tu
 - headless 事件渲染：`run::tests::{summarize_input_extracts_command, truncate_adds_ellipsis}`
 - e2e 场景契约：`scripts/e2e/cli_scenarios.py`（E1–E19）、`scripts/e2e/todos_scenarios.py`（E19b/E19c）、`scripts/e2e/web_scenarios.py`（E11/E15/E18b）、`scripts/e2e/config_scenarios.py`（E20，免 key 配置面）
 ios.py`（E20，免 key 配置面）
+
+- **--agent 全链与默认链**：`--agent`（global flag）→ `agent_override.rs::apply_agent_override` 折入 config → fresh 路径 `effective_default_agent(cli > ~/.opencoder/agents/active marker > agent.default > act)`（`run.rs`）；resume 经 `reapply_resume_agent`→`resolve_agent`（文件 agent 名持久化后可原样恢复，未知回退 act）。TUI 侧 `TuiOpts.agent` 透传（`src/main.rs` → `tui::fresh_agent_name`，`app_bootstrap.rs` 两条 fresh 路径统一走默认链）。`parse_agent_name` 硬校验 `resolve_agent`，文件 agent 天然放行。测试：`agent_override.rs` 内嵌 + `tests/bootstrap_agent_override.rs`。

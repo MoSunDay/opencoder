@@ -1,4 +1,4 @@
-//! `opencode ts` actions: start / list / resume / cleanup.
+//! `opencoder ts` actions: start / list / resume / cleanup.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::ffi::OsString;
@@ -20,7 +20,7 @@ use super::tmux::{
     ManagedSession,
 };
 
-/// `opencode ts`/`rs` (bare). A bare `ts`/`rs` **always creates a fresh
+/// `opencoder ts`/`rs` (bare). A bare `ts`/`rs` **always creates a fresh
 /// session**; it never reuses an existing live one. This avoids the surprising
 /// case where running `ts` in repo B silently attached to a session created in
 /// repo A. To resume an existing session use `ts -r <id>`.
@@ -67,7 +67,7 @@ pub(crate) async fn ts_start(cli: &Cli) -> Result<()> {
 /// shortcut is an explicit `--session <id>` whose tmux session already exists.
 /// Returns the name to attach to, if any.
 ///
-/// `exists` reflects whether the tmux session named `opencode-<id>` is live.
+/// `exists` reflects whether the tmux session named `opencoder-<id>` is live.
 pub(crate) fn explicit_attach_target(session_arg: Option<&str>, exists: bool) -> Option<String> {
     match session_arg {
         Some(id) if exists => Some(session_name(id)),
@@ -143,10 +143,10 @@ fn classify(id: &str, tmux_by_id: &HashMap<String, &ManagedSession>) -> TmuxStat
 const LIST_LEGEND: &str =
     "resume: opencoder ts -r <id>   delete: opencoder ts -d <id>   clean: opencoder ts -c";
 
-/// `opencode ts -l` -- global unified panel across every workdir.
+/// `opencoder ts -l` -- global unified panel across every workdir.
 ///
 /// The list is **tmux-first and global**: every live managed tmux session
-/// (`opencode-*`, from `tmux list-sessions`) is shown with the tmux pane's
+/// (`opencoder-*`, from `tmux list-sessions`; the legacy `opencode-*` prefix is still recognized) is shown with the tmux pane's
 /// actual workdir (`pane_current_path`, `$HOME` abbreviated to `~`), enriched
 /// with registry info for the session id. Stopped sessions come from the
 /// central ts registry (`<data_root>/ts.db`, one indexed query) — rows are ts
@@ -289,7 +289,7 @@ fn sort_rows(rows: &mut [GlobalRow]) {
     });
 }
 
-/// `opencode ts -r <id>` -- resume/attach a live session, or cold-start a
+/// `opencoder ts -r <id>` -- resume/attach a live session, or cold-start a
 /// stopped one from its registry record.
 pub(crate) async fn ts_resume(cli: &Cli, target: &str) -> Result<()> {
     let tmux = list_managed()?;
@@ -328,7 +328,7 @@ pub(crate) async fn ts_resume(cli: &Cli, target: &str) -> Result<()> {
     spawn_session(&workdir, &id)
 }
 
-/// `opencode ts -c` -- delete stopped ts sessions from every workdir.
+/// `opencoder ts -c` -- delete stopped ts sessions from every workdir.
 pub(crate) async fn ts_cleanup(_cli: &Cli) -> Result<()> {
     let tmux = list_managed()?;
     let registry = open_registry().await?;
@@ -368,7 +368,7 @@ pub(crate) async fn ts_cleanup(_cli: &Cli) -> Result<()> {
     Ok(())
 }
 
-/// `opencode ts -d <id>` -- remove one exact global managed session.
+/// `opencoder ts -d <id>` -- remove one exact global managed session.
 /// A live tmux instance is terminated first, then its registry record is
 /// deleted and its Store content removed. Deleting the caller's current tmux
 /// session is refused because killing its pane would interrupt the Store

@@ -1,6 +1,6 @@
 //! Central registry for tmux-owned (`ts`) sessions.
 //!
-//! Before this module, `opencode ts -l` scanned **every** per-workdir store
+//! Before this module, `opencoder ts -l` scanned **every** per-workdir store
 //! under the data root — opening each `opencoder.db`, paging all sessions,
 //! reading a `workdir` marker file — then filtered `model IS NULL` in memory.
 //! All ts commands now read this single index (`<data_root>/ts.db`) instead;

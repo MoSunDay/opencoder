@@ -82,7 +82,7 @@ fn unique_temp_name(target: &Path) -> String {
     let stem = target
         .file_name()
         .and_then(|n| n.to_str())
-        .unwrap_or("opencode.tmp");
+        .unwrap_or("opencoder.tmp");
     format!("{stem}.tmp-{}-{}", std::process::id(), nanos())
 }
 

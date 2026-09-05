@@ -143,7 +143,7 @@ fn ref_fields(refs: &AgentRefs) -> [(&'static str, Option<String>); 4] {
 /// is already there; the agents root / agent dir are created as needed.
 pub fn create_agent(name: &str, refs: AgentRefs) -> io::Result<()> {
     validate_agent_name(name).map_err(invalid_input)?;
-    let dir = agent_dir(name).ok_or_else(|| not_found("cannot resolve ~/.opencode"))?;
+    let dir = agent_dir(name).ok_or_else(|| not_found("cannot resolve ~/.opencoder"))?;
     let card = dir.join("meta.json");
     if card.exists() {
         return Err(io::Error::new(

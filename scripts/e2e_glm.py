@@ -41,7 +41,7 @@ def main() -> int:
     if args.only != "web":
         total += cli_scenarios.run_all(bin_path, api_key)
         # Todos workflow suite (E19b/E19c): CLI-mode only — it drives real
-        # model sessions through `opencode todos` and needs the API key.
+        # model sessions through `opencoder todos` and needs the API key.
         total += todos_scenarios.run_all(bin_path, api_key)
     if args.only != "cli" and not args.skip_web:
         total += web_scenarios.run_all(bin_path, api_key)

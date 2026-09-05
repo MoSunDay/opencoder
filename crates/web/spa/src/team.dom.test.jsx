@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-// Team/topics DOM smoke (opencode-team Phase 4): the three new panels render
+// Team/topics DOM smoke (opencoder-team Phase 4): the three new panels render
 // their landmarks from a mocked api module — same contract style as
 // queuePanel.dom.test.jsx. Everything above the protocol layer runs for
 // real, including the store wiring (openTopicsForTeam / openTopicDetail).

@@ -2,7 +2,7 @@
 //!
 //! Web API + SPA + DAG dispatch/record ONLY: it never executes workflows and
 //! never links the VM/runc chain (those live in `opencoder-agent`). Extracted
-//! from the former `opencode daemon --server` arm when the project split
+//! from the former `opencoder daemon --server` arm when the project split
 //! into three binaries (tui/cli, server, agent).
 
 use std::path::PathBuf;
@@ -14,7 +14,7 @@ use clap::Parser;
 #[command(
     name = "opencoder-server",
     version,
-    about = "opencode fleet control plane: web API + SPA + DAG dispatch (no local execution)"
+    about = "opencoder fleet control plane: web API + SPA + DAG dispatch (no local execution)"
 )]
 struct Args {
     /// Bind host.

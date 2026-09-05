@@ -7,7 +7,7 @@ pub const TEAM_RUN_EXECUTING: &str = "executing";
 pub const TEAM_RUN_FINISHED: &str = "finished";
 
 /// One row of the `team_topic_runs` ledger: which node is (or was) working
-/// which team topic. The opencode-team runtime fans a topic out to N nodes;
+/// which team topic. The opencoder-team runtime fans a topic out to N nodes;
 /// this table is the durable pairing record — `status` starts `executing`
 /// and flips to `finished` (per-row upsert or topic-wide `finish`), while
 /// `created_at` is frozen at first insert so a refresh never restarts the

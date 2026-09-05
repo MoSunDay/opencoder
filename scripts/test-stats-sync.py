@@ -230,7 +230,7 @@ def test_sync_basic():
     npart = tgt.execute("SELECT count(*) FROM part WHERE session_id='enc_S1'").fetchone()[0]
     check("2 messages in db", nmsg == 2)
     check("2 parts in db", npart == 2)
-    # session tokens == sum of message tokens (opencode invariant)
+    # session tokens == sum of message tokens (opencoder invariant)
     tot = 0
     for (data,) in tgt.execute("SELECT data FROM message WHERE session_id='enc_S1'"):
         tot += json.loads(data)["tokens"]["input"]

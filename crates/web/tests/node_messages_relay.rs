@@ -4,7 +4,7 @@
 //! server echoes the slice back — without persisting anything durable-side.
 //!
 //! Process-level e2e over the REAL router + REAL worker
-//! (`opencode_node::run_node`, mock LLM), same harness as the fleet flow
+//! (`opencoder_node::run_node`, mock LLM), same harness as the fleet flow
 //! tests. The worker-facing half (slice selection, local-store reads,
 //! claim/heartbeat delivery, dedup) is covered by `runner_control.rs` and the
 //! `control.rs` unit tests; this file pins the HTTP contract:

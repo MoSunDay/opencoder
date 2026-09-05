@@ -14,7 +14,7 @@ use crate::project::ProjectStore;
 use crate::project_types::{
     ProjectGoalPatch, ProjectGoalRecord, ProjectGoalStatus, ProjectMilestonePatch,
     ProjectMilestoneRecord, ProjectMilestoneStatus, ProjectTodoPatch, ProjectTodoRecord,
-    ProjectTodoRunPatch, ProjectTodoRunRecord,
+    ProjectTodoRunPatch, ProjectTodoRunRecord, ProjectTodoRunStatus, ProjectTodoStatus,
 };
 
 const GOAL_COLS: &str = "id, title, detail_md, status, sort_key, created_at, updated_at";
@@ -344,6 +344,22 @@ impl ProjectStore for LibsqlStore {
         let conn = self.conn().await?;
         super::project_runs::patch_todo(&conn, id, patch, now_ms).await
     }
+    async fn claim_todo_running(&self, id: &str, now_ms: i64) -> Result<bool> {
+        let _guard = self.db_lock.lock().await;
+        let conn = self.conn().await?;
+        super::project_runs::claim_todo_running(&conn, id, now_ms).await
+    }
+    async fn patch_todo_when(
+        &self,
+        id: &str,
+        when: ProjectTodoStatus,
+        patch: &ProjectTodoPatch,
+        now_ms: i64,
+    ) -> Result<bool> {
+        let _guard = self.db_lock.lock().await;
+        let conn = self.conn().await?;
+        super::project_runs::patch_todo_when(&conn, id, when, patch, now_ms).await
+    }
     async fn delete_todo(&self, id: &str) -> Result<bool> {
         let _guard = self.db_lock.lock().await;
         let conn = self.conn().await?;
@@ -375,6 +391,17 @@ impl ProjectStore for LibsqlStore {
         let conn = self.conn().await?;
         super::project_runs::patch_todo_run(&conn, id, patch, now_ms).await
     }
+    async fn patch_todo_run_when(
+        &self,
+        id: &str,
+        when: ProjectTodoRunStatus,
+        patch: &ProjectTodoRunPatch,
+        now_ms: i64,
+    ) -> Result<bool> {
+        let _guard = self.db_lock.lock().await;
+        let conn = self.conn().await?;
+        super::project_runs::patch_todo_run_when(&conn, id, when, patch, now_ms).await
+    }
     async fn get_todo_run(&self, id: &str) -> Result<Option<ProjectTodoRunRecord>> {
         let _guard = self.db_lock.lock().await;
         let conn = self.conn().await?;
@@ -384,6 +411,11 @@ impl ProjectStore for LibsqlStore {
         let _guard = self.db_lock.lock().await;
         let conn = self.conn().await?;
         super::project_runs::list_todo_runs(&conn, todo_id).await
+    }
+    async fn list_running_todo_runs(&self) -> Result<Vec<ProjectTodoRunRecord>> {
+        let _guard = self.db_lock.lock().await;
+        let conn = self.conn().await?;
+        super::project_runs::list_running_todo_runs(&conn).await
     }
     async fn next_todo_version(&self, todo_id: &str) -> Result<i64> {
         let _guard = self.db_lock.lock().await;

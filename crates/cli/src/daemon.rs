@@ -1,4 +1,4 @@
-//! `opencode daemon` support: role validation + the migration hint.
+//! `opencoder daemon` support: role validation + the migration hint.
 //!
 //! The fleet roles moved into dedicated binaries (three-binary split):
 //! `opencoder-server` (web API + SPA + DAG dispatch) and `opencoder-agent`
@@ -8,7 +8,7 @@
 
 use crate::DaemonOpts;
 
-/// Which fleet role `opencode daemon` was asked to run (now migrated).
+/// Which fleet role `opencoder daemon` was asked to run (now migrated).
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum DaemonAction {
     /// Run the web server — now `opencoder-server`.
@@ -17,7 +17,7 @@ pub enum DaemonAction {
     Client,
 }
 
-/// Pure mode validation for `opencode daemon`. Clap already enforces
+/// Pure mode validation for `opencoder daemon`. Clap already enforces
 /// exactly-one-of (--server / --client) at parse time; this mirrors the rule
 /// so the dispatch arm is total and the contract is testable without a
 /// parser. `--remote` is only enforced here (not at parse time) so the usage

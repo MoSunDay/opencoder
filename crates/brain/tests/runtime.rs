@@ -202,7 +202,8 @@ async fn update_unknown_id_fails() {
         .unwrap_err();
     // Typed marker, not a plain context: the web layer downcasts on the type.
     assert!(
-        err.downcast_ref::<opencoder_brain::BrainNotFound>().is_some(),
+        err.downcast_ref::<opencoder_brain::BrainNotFound>()
+            .is_some(),
         "must be the typed BrainNotFound marker, got: {err:#}"
     );
     // Display keeps the historical body shape the HTTP 404 asserts on.

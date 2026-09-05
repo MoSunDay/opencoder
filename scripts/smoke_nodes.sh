@@ -37,7 +37,7 @@ if [ -z "${OPENCODER_SMOKE_SERVER_BIN:-}" ] || [ -z "${OPENCODER_SMOKE_AGENT_BIN
   cargo build --release -p opencoder-server -p opencoder-agent
 fi
 # The fleet binaries carry the package spelling (`opencoder-server` /
-# `opencoder-agent`, matching the `opencode daemon` migration hint) while
+# `opencoder-agent`, matching the `opencoder daemon` migration hint) while
 # some docs spell them without the `r`. Probe both release paths, package
 # spelling first, so the script tracks whichever way the naming settles.
 # Explicit injection always wins.
@@ -48,8 +48,8 @@ probe_release_bin() {
   done
   printf '%s' "${ROOT}/target/release/${name}"
 }
-SERVER_BIN="${OPENCODER_SMOKE_SERVER_BIN:-$(probe_release_bin opencoder-server opencode-server)}"
-AGENT_BIN="${OPENCODER_SMOKE_AGENT_BIN:-$(probe_release_bin opencoder-agent opencode-agent)}"
+SERVER_BIN="${OPENCODER_SMOKE_SERVER_BIN:-$(probe_release_bin opencoder-server opencoder-server)}"
+AGENT_BIN="${OPENCODER_SMOKE_AGENT_BIN:-$(probe_release_bin opencoder-agent opencoder-agent)}"
 
 TMP="$(mktemp -d /tmp/opencoder-smoke-nodes.XXXXXX)"
 SRV_PID=""

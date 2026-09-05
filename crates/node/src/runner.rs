@@ -69,7 +69,7 @@ pub struct NodeOpts {
     /// Agent-binary extension for DAG workflow runs: when set, an idle claim
     /// tick with no prompt task due also polls a DAG run and executes it
     /// serially (same single-active policy). `None` = this node is a plain
-    /// prompt-task worker (e.g. `opencode-agent --no-dag`).
+    /// prompt-task worker (e.g. `opencoder-agent --no-dag`).
     pub dag: Option<Arc<dyn crate::DagHook>>,
 }
 

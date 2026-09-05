@@ -16,9 +16,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{
     context,
-    plan_gen::{
-        close_run, forget_spawn, latest_new_assistant, patch_todo_status, runtime_setup,
-    },
+    plan_gen::{close_run, forget_spawn, latest_new_assistant, patch_todo_status, runtime_setup},
     service::Deps,
 };
 
@@ -118,7 +116,14 @@ pub async fn drive(
 ) {
     if let Err(e) = run_execute(&deps, &run_id, &todo, &cx, version, &cancel).await {
         tracing::warn!(run_id = %run_id, error = %e, "project execute run failed");
-        close_run(&deps, &run_id, ProjectTodoRunStatus::Failed, Some(format!("{e:#}")), None).await;
+        close_run(
+            &deps,
+            &run_id,
+            ProjectTodoRunStatus::Failed,
+            Some(format!("{e:#}")),
+            None,
+        )
+        .await;
         patch_todo_status(&deps, &todo.id, ProjectTodoStatus::Failed, None).await;
     }
     forget_spawn(&deps, &run_id);
@@ -183,7 +188,14 @@ async fn finish_execute_run(
                 patch_todo_status(deps, todo_id, ProjectTodoStatus::Done, None).await;
             }
             None if cancel.is_cancelled() => {
-                close_run(deps, run_id, ProjectTodoRunStatus::Cancelled, None, session_id).await;
+                close_run(
+                    deps,
+                    run_id,
+                    ProjectTodoRunStatus::Cancelled,
+                    None,
+                    session_id,
+                )
+                .await;
                 patch_todo_status(deps, todo_id, ProjectTodoStatus::Planned, None).await;
             }
             None => {
@@ -199,7 +211,14 @@ async fn finish_execute_run(
             }
         },
         Err(_) if cancel.is_cancelled() => {
-            close_run(deps, run_id, ProjectTodoRunStatus::Cancelled, None, session_id).await;
+            close_run(
+                deps,
+                run_id,
+                ProjectTodoRunStatus::Cancelled,
+                None,
+                session_id,
+            )
+            .await;
             patch_todo_status(deps, todo_id, ProjectTodoStatus::Planned, None).await;
         }
         Err(e) => {

@@ -19,6 +19,7 @@ use crate::project::ProjectStore;
 use crate::project_types::{
     ProjectGoalPatch, ProjectGoalRecord, ProjectMilestonePatch, ProjectMilestoneRecord,
     ProjectTodoPatch, ProjectTodoRecord, ProjectTodoRunPatch, ProjectTodoRunRecord,
+    ProjectTodoRunStatus, ProjectTodoStatus,
 };
 
 pub mod ddl;
@@ -123,6 +124,19 @@ impl ProjectStore for SqlProjectStore {
     async fn patch_todo(&self, id: &str, patch: &ProjectTodoPatch, now_ms: i64) -> Result<bool> {
         project_crud_runs::patch_todo(&self.pool, self.starrocks, id, patch, now_ms).await
     }
+    async fn claim_todo_running(&self, id: &str, now_ms: i64) -> Result<bool> {
+        project_crud_runs::claim_todo_running(&self.pool, self.starrocks, id, now_ms).await
+    }
+    async fn patch_todo_when(
+        &self,
+        id: &str,
+        when: ProjectTodoStatus,
+        patch: &ProjectTodoPatch,
+        now_ms: i64,
+    ) -> Result<bool> {
+        project_crud_runs::patch_todo_when(&self.pool, self.starrocks, id, when, patch, now_ms)
+            .await
+    }
     async fn delete_todo(&self, id: &str) -> Result<bool> {
         project_crud_runs::delete_todo(&self.pool, self.starrocks, id).await
     }
@@ -144,11 +158,24 @@ impl ProjectStore for SqlProjectStore {
     ) -> Result<bool> {
         project_crud_runs::patch_todo_run(&self.pool, self.starrocks, id, patch, now_ms).await
     }
+    async fn patch_todo_run_when(
+        &self,
+        id: &str,
+        when: ProjectTodoRunStatus,
+        patch: &ProjectTodoRunPatch,
+        now_ms: i64,
+    ) -> Result<bool> {
+        project_crud_runs::patch_todo_run_when(&self.pool, self.starrocks, id, when, patch, now_ms)
+            .await
+    }
     async fn get_todo_run(&self, id: &str) -> Result<Option<ProjectTodoRunRecord>> {
         project_crud_runs::get_todo_run(&self.pool, self.starrocks, id).await
     }
     async fn list_todo_runs(&self, todo_id: &str) -> Result<Vec<ProjectTodoRunRecord>> {
         project_crud_runs::list_todo_runs(&self.pool, self.starrocks, todo_id).await
+    }
+    async fn list_running_todo_runs(&self) -> Result<Vec<ProjectTodoRunRecord>> {
+        project_crud_runs::list_running_todo_runs(&self.pool, self.starrocks).await
     }
     async fn next_todo_version(&self, todo_id: &str) -> Result<i64> {
         project_crud_runs::next_todo_version(&self.pool, self.starrocks, todo_id).await

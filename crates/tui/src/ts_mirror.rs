@@ -1,6 +1,6 @@
 //! Best-effort mirror of ts-owned sessions into the central ts registry.
 //!
-//! `opencode ts` sessions live in the cli registry (`<data_root>/ts.db`); the
+//! `opencoder ts` sessions live in the cli registry (`<data_root>/ts.db`); the
 //! TUI itself only persists to its per-workdir store. This wrapper sits between
 //! the TUI and that store and mirrors the durable index columns (title,
 //! preview) the cli needs for `ts -l`/`ts -r`. Plain `tui`/`run` sessions are

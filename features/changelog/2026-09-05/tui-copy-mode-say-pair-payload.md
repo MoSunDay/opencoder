@@ -1,4 +1,4 @@
-Commit: (working-tree, 待提交)
+Commit: bf012b2
 
 # TUI copy 模式：`Say(n steps)` 合并头保留 preview 载荷（Say 内容不再丢失）
 

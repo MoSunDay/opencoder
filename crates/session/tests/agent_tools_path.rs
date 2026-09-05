@@ -74,7 +74,14 @@ async fn make_session(
 fn agent_with_tool(root: &std::path::Path, version: u32) {
     // The agent needs a resolvable soul (prompts pool) or `resolve_agent`
     // cannot switch to it at all.
-    write_pool_version(root, "prompts", "worker", 1, "soul.md", "SOUL-worker identity");
+    write_pool_version(
+        root,
+        "prompts",
+        "worker",
+        1,
+        "soul.md",
+        "SOUL-worker identity",
+    );
     write_pool_version(
         root,
         "tools",
@@ -83,7 +90,12 @@ fn agent_with_tool(root: &std::path::Path, version: u32) {
         "probe-tool",
         &format!("#!/bin/sh\necho PROBE-v{version}\n"),
     );
-    make_executable(&root.join("tools/t").join(format!("v{version}")).join("probe-tool"));
+    make_executable(
+        &root
+            .join("tools/t")
+            .join(format!("v{version}"))
+            .join("probe-tool"),
+    );
     write_agent_card(root, "worker", Some("worker"), None, Some("t"));
 }
 
@@ -101,7 +113,11 @@ async fn bash_resolves_pooled_tool_and_input_stays_verbatim() {
     agent_with_tool(&fx.agents, 1);
 
     let store = mem_store().await;
-    let mock = Arc::new(MockChatClient::new().push_script(bash_turns()[0].clone()).push_script(bash_turns()[1].clone()));
+    let mock = Arc::new(
+        MockChatClient::new()
+            .push_script(bash_turns()[0].clone())
+            .push_script(bash_turns()[1].clone()),
+    );
     let dir = tempfile::tempdir().unwrap();
     let mut session = make_session(&store, "s1", mock, dir.path()).await;
 
@@ -144,7 +160,11 @@ async fn without_pool_behaves_as_before() {
     write_agent_card(&fx.agents, "toolless", None, None, None);
 
     let store = mem_store().await;
-    let mock = Arc::new(MockChatClient::new().push_script(bash_turns()[0].clone()).push_script(bash_turns()[1].clone()));
+    let mock = Arc::new(
+        MockChatClient::new()
+            .push_script(bash_turns()[0].clone())
+            .push_script(bash_turns()[1].clone()),
+    );
     let dir = tempfile::tempdir().unwrap();
     let mut session = make_session(&store, "s2", mock, dir.path()).await;
 

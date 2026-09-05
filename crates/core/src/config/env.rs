@@ -73,7 +73,7 @@ fn config_home_dir() -> Option<PathBuf> {
 /// [`scoped_config_home`] test override) of `config.json`. `pub(crate)` so
 /// sibling modules outside `config` (e.g. `agent::meta`'s agents root) share
 /// the exact same home resolution instead of re-deriving it.
-pub(crate) fn global_opencode_home() -> Option<PathBuf> {
+pub(crate) fn global_opencoder_home() -> Option<PathBuf> {
     config_home_dir().map(|home| home.join(".opencoder"))
 }
 
@@ -83,7 +83,7 @@ pub(crate) fn global_opencode_home() -> Option<PathBuf> {
 /// [`scoped_config_home`] therefore isolates both discovery and first-run
 /// creation without mutating process-wide environment variables.
 pub(super) fn primary_global_config_path() -> Option<PathBuf> {
-    global_opencode_home().map(|home| home.join("config.json"))
+    global_opencoder_home().map(|home| home.join("config.json"))
 }
 
 /// Resolve the XDG config dir: the thread-local override when a test set it
@@ -195,7 +195,7 @@ pub(super) fn apply_env(cfg: &mut Config) {
             _ => {}
         }
     }
-    // opencode-team overlay: workspace root + turn budgets. Same strictness
+    // opencoder-team overlay: workspace root + turn budgets. Same strictness
     // as OPENCODER_CONTEXT_LIMIT — a non-numeric turn budget is warned about
     // rather than silently coerced.
     if let Some(v) = env_get("OPENCODER_TEAM_ROOT") {

@@ -132,14 +132,18 @@ fn agent_ref_current_dir(reference: Option<String>, cat: &str) -> Option<PathBuf
 /// current version dir (0–1 entries; silent empty).
 pub fn agent_skill_roots(agent_name: &str) -> Vec<PathBuf> {
     let reference = read_agent_meta(agent_name).and_then(|m| m.current.skills);
-    agent_ref_current_dir(reference, "skills").into_iter().collect()
+    agent_ref_current_dir(reference, "skills")
+        .into_iter()
+        .collect()
 }
 
 /// Tool dirs for one agent: `current.tools` ref → shared tools pool
 /// current version dir (0–1 entries; silent empty).
 pub fn agent_tools_dirs(agent_name: &str) -> Vec<PathBuf> {
     let reference = read_agent_meta(agent_name).and_then(|m| m.current.tools);
-    agent_ref_current_dir(reference, "tools").into_iter().collect()
+    agent_ref_current_dir(reference, "tools")
+        .into_iter()
+        .collect()
 }
 
 /// Skill roots of the active agent (empty when there is none).
@@ -163,4 +167,115 @@ pub fn all_tools_dirs() -> Vec<PathBuf> {
         .iter()
         .filter_map(|name| resource_current_version_dir("tools", name))
         .collect()
+}
+
+/// Resolve the tool directories a session should expose (the read path
+/// behind `agent.tools_scope`):
+///
+/// - `All` → current version dirs of **every** tools resource (union surface);
+/// - `Active` + explicit agent name → that agent's `current.tools` ref;
+/// - `Active` + `None` → the active agent's (empty when no marker).
+pub fn tools_paths(scope: crate::config::ToolsScope, agent: Option<&str>) -> Vec<PathBuf> {
+    match scope {
+        crate::config::ToolsScope::All => all_tools_dirs(),
+        crate::config::ToolsScope::Active => match agent {
+            Some(name) => agent_tools_dirs(name),
+            None => active_tools_dirs(),
+        },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::agent::meta::tests::OVERRIDE_LOCK;
+    use crate::agent::meta::{set_active_agent, set_agents_dir_override, AgentMeta, AgentRefs};
+    use crate::config::ToolsScope;
+
+    /// Point the agents root at a fresh tempdir under the shared override
+    /// lock (the override is process-global; tests must hold the lock for
+    /// their whole body to avoid racing `meta`/`agent::tests` fixtures).
+    fn scoped() -> (tempfile::TempDir, std::sync::MutexGuard<'static, ()>) {
+        let dir = tempfile::tempdir().unwrap();
+        let guard = OVERRIDE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        set_agents_dir_override(Some(dir.path().to_path_buf()));
+        (dir, guard)
+    }
+
+    /// `tools/<name>/v{v}/` with one file plus a `meta.json` whose
+    /// `current` points at `v` (serde-built from [`ResourceMeta`] so the
+    /// on-disk shape can never drift from the reader).
+    fn make_tools(root: &std::path::Path, name: &str, v: u32) {
+        let res = root.join("tools").join(name);
+        let vdir = res.join(format!("v{v}"));
+        std::fs::create_dir_all(&vdir).unwrap();
+        std::fs::write(vdir.join("run.sh"), b"x").unwrap();
+        std::fs::write(
+            res.join("meta.json"),
+            serde_json::to_string(&ResourceMeta {
+                name: name.into(),
+                current: v,
+                history: vec![v],
+                ..Default::default()
+            })
+            .unwrap(),
+        )
+        .unwrap();
+    }
+
+    /// One agent reference card `<name>/meta.json` whose `current.tools`
+    /// is `tools` (None = no tools ref).
+    fn make_agent(root: &std::path::Path, name: &str, tools: Option<&str>) {
+        std::fs::create_dir_all(root.join(name)).unwrap();
+        std::fs::write(
+            root.join(name).join("meta.json"),
+            serde_json::to_string(&AgentMeta {
+                name: name.into(),
+                current: AgentRefs {
+                    tools: tools.map(Into::into),
+                    ..Default::default()
+                },
+                ..Default::default()
+            })
+            .unwrap(),
+        )
+        .unwrap();
+    }
+
+    /// Three scopes + no-ref emptiness + `current` bump all in one
+    /// fixture: `All` unions every pool's current dir, `Active` follows
+    /// the named/active agent's `current.tools` ref, and a bumped
+    /// `current` moves the resolved dir (the read side never consults
+    /// history).
+    #[test]
+    fn tools_paths_covers_all_three_scopes() {
+        let (tmp, _g) = scoped();
+        let root = tmp.path();
+        make_tools(root, "a", 1);
+        make_tools(root, "b", 1);
+        make_agent(root, "worker", Some("b"));
+        make_agent(root, "bare", None);
+        set_active_agent(Some("worker")).unwrap();
+
+        // All → union of every tools resource's current version dir.
+        let all = tools_paths(ToolsScope::All, None);
+        assert_eq!(all.len(), 2);
+        // Active + explicit name → that agent's tools ref.
+        let named = tools_paths(ToolsScope::Active, Some("worker"));
+        assert_eq!(named, vec![root.join("tools/b/v1")]);
+        // Active + None → the active agent's tools ref.
+        assert_eq!(tools_paths(ToolsScope::Active, None), named);
+        // An agent with no tools ref resolves to the empty surface.
+        assert!(tools_paths(ToolsScope::Active, Some("bare")).is_empty());
+
+        // Bumping the pool's current moves the resolved dir.
+        make_tools(root, "b", 2);
+        assert_eq!(
+            tools_paths(ToolsScope::Active, Some("worker")),
+            vec![root.join("tools/b/v2")]
+        );
+        assert_eq!(read_resource_meta("tools", "b").unwrap().current, 2);
+
+        set_agents_dir_override(None);
+    }
 }

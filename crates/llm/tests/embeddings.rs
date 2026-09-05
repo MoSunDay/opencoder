@@ -273,7 +273,10 @@ async fn embed_retries_transient_500_then_succeeds() {
     // same request and succeed. Exactly one retry (2 requests total), which
     // also proves the body/headers are rebuilt per attempt.
     let (base_url, captured) = start_many(vec![
-        err_resp("500 Internal Server Error", r#"{"error":{"message":"blip"}}"#),
+        err_resp(
+            "500 Internal Server Error",
+            r#"{"error":{"message":"blip"}}"#,
+        ),
         ok(one_entry_payload()),
     ]);
     let vecs = ChatStream::embed(&client(&base_url), &["x".to_string()], "m")
@@ -292,7 +295,10 @@ async fn embed_honors_retry_after_header_on_429() {
     // already unit-tested in `retry.rs`; no test here sleeps near it.)
     let (base_url, captured) = start_many(vec![
         with_header(
-            err_resp("429 Too Many Requests", r#"{"error":{"message":"slow down"}}"#),
+            err_resp(
+                "429 Too Many Requests",
+                r#"{"error":{"message":"slow down"}}"#,
+            ),
             "retry-after",
             "0",
         ),
@@ -331,12 +337,21 @@ async fn embed_exhausts_retry_budget_on_persistent_500() {
     // Three 500s exhaust the 1-initial + 2-retry budget: the third failure is
     // terminal, the message carries the attempts context, and a fourth
     // request is never issued.
-    let err500 = || err_resp("500 Internal Server Error", r#"{"error":{"message":"down"}}"#);
+    let err500 = || {
+        err_resp(
+            "500 Internal Server Error",
+            r#"{"error":{"message":"down"}}"#,
+        )
+    };
     let (base_url, captured) = start_many(vec![err500(), err500(), err500()]);
     let err = ChatStream::embed(&client(&base_url), &["x".to_string()], "m")
         .expect_err("persistent 500 must fail");
     let msg = format!("{err:#}");
     assert!(msg.contains("500"), "status missing: {msg}");
     assert!(msg.contains("after 3 attempts"), "attempts missing: {msg}");
-    assert_eq!(captured.lock().unwrap().len(), 3, "budget is exactly 3 attempts");
+    assert_eq!(
+        captured.lock().unwrap().len(),
+        3,
+        "budget is exactly 3 attempts"
+    );
 }

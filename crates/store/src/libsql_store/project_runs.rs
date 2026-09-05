@@ -38,16 +38,13 @@ pub async fn create_todo(conn: &Connection, rec: &ProjectTodoRecord) -> Result<(
     Ok(())
 }
 
-/// Dynamic `SET` from the patch's `Some` fields; always stamps
-/// `updated_at = now_ms`. `Option<Option<String>>` fields distinguish "leave
-/// unchanged" (outer `None`) from "clear to NULL" (`Some(None)`). Returns
-/// `false` when the id does not exist.
-pub async fn patch_todo(
-    conn: &Connection,
-    id: &str,
+/// The `SET` clause fragments + bound values shared by `patch_todo` and its
+/// expected-status CAS variant — pure projection of the patch's `Some`
+/// fields, no I/O. `Option<Option<String>>` fields distinguish "leave
+/// unchanged" (outer `None`) from "clear to NULL" (`Some(None)`).
+fn todo_set_fragment(
     patch: &crate::project_types::ProjectTodoPatch,
-    now_ms: i64,
-) -> Result<bool> {
+) -> (Vec<&'static str>, Vec<Value>) {
     let mut sets: Vec<&'static str> = Vec::new();
     let mut vals: Vec<Value> = Vec::new();
     if let Some(v) = patch.title.as_deref() {
@@ -78,6 +75,18 @@ pub async fn patch_todo(
         sets.push("active_session_id = ?");
         vals.push(v.as_deref().into());
     }
+    (sets, vals)
+}
+
+/// Dynamic `SET` from the patch's `Some` fields; always stamps
+/// `updated_at = now_ms`. Returns `false` when the id does not exist.
+pub async fn patch_todo(
+    conn: &Connection,
+    id: &str,
+    patch: &crate::project_types::ProjectTodoPatch,
+    now_ms: i64,
+) -> Result<bool> {
+    let (mut sets, mut vals) = todo_set_fragment(patch);
     sets.push("updated_at = ?");
     vals.push(now_ms.into());
     let sql = format!("UPDATE project_todos SET {} WHERE id = ?", sets.join(", "));
@@ -128,6 +137,47 @@ pub async fn get_todo(conn: &Connection, id: &str) -> Result<Option<ProjectTodoR
         Some(r) => Ok(Some(row_to_todo(&r)?)),
         None => Ok(None),
     }
+}
+
+/// Expected-status CAS (`SET status = 'running' WHERE id = ? AND status <>
+/// 'running'`): exactly one concurrent caller can flip a todo into running.
+/// `false` = not found or already running; both mean "no claim".
+pub async fn claim_todo_running(conn: &Connection, id: &str, now_ms: i64) -> Result<bool> {
+    let running = ProjectTodoStatus::Running.as_str();
+    let n = conn
+        .execute(
+            "UPDATE project_todos SET status = ?1, updated_at = ?2 WHERE id = ?3 AND status <> ?1",
+            params![running, now_ms, id],
+        )
+        .await
+        .context("claim project todo running")?;
+    Ok(n > 0)
+}
+
+/// Expected-status CAS variant of `patch_todo`: `WHERE id = ? AND status = ?`.
+/// Applies only while the row still holds `when`; `false` = not found or the
+/// state moved on (someone else won the write).
+pub async fn patch_todo_when(
+    conn: &Connection,
+    id: &str,
+    when: ProjectTodoStatus,
+    patch: &crate::project_types::ProjectTodoPatch,
+    now_ms: i64,
+) -> Result<bool> {
+    let (mut sets, mut vals) = todo_set_fragment(patch);
+    sets.push("updated_at = ?");
+    vals.push(now_ms.into());
+    let sql = format!(
+        "UPDATE project_todos SET {} WHERE id = ? AND status = ?",
+        sets.join(", ")
+    );
+    vals.push(id.into());
+    vals.push(when.as_str().into());
+    let n = conn
+        .execute(&sql, vals)
+        .await
+        .context("patch project todo (expected status)")?;
+    Ok(n > 0)
 }
 
 /// `milestone_id == None` lists ALL todos (backlog included); ordered by
@@ -194,12 +244,10 @@ pub async fn create_todo_run(conn: &Connection, rec: &ProjectTodoRunRecord) -> R
     Ok(())
 }
 
-pub async fn patch_todo_run(
-    conn: &Connection,
-    id: &str,
-    patch: &ProjectTodoRunPatch,
-    _now_ms: i64,
-) -> Result<bool> {
+/// The `SET` clause fragments + bound values shared by `patch_todo_run` and
+/// its expected-status CAS variant — pure projection of the patch's `Some`
+/// fields, no I/O. Plain `Option<String>` fields set, never clear.
+fn run_set_fragment(patch: &ProjectTodoRunPatch) -> (Vec<&'static str>, Vec<Value>) {
     let mut sets: Vec<&'static str> = Vec::new();
     let mut vals: Vec<Value> = Vec::new();
     if let Some(v) = patch.plan_md.as_deref() {
@@ -222,6 +270,16 @@ pub async fn patch_todo_run(
         sets.push("finished_at = ?");
         vals.push(v.into());
     }
+    (sets, vals)
+}
+
+pub async fn patch_todo_run(
+    conn: &Connection,
+    id: &str,
+    patch: &ProjectTodoRunPatch,
+    _now_ms: i64,
+) -> Result<bool> {
+    let (sets, mut vals) = run_set_fragment(patch);
     // The runs table has no updated_at column (created_at + finished_at span
     // its lifecycle), so the now_ms parameter stays unused; it exists for
     // signature uniformity with the other patch_* methods.
@@ -234,6 +292,32 @@ pub async fn patch_todo_run(
         .execute(&sql, vals)
         .await
         .context("patch project todo run")?;
+    Ok(n > 0)
+}
+
+/// Expected-status CAS variant of `patch_todo_run`: `WHERE id = ? AND
+/// status = ?`. Applies only while the run row still holds `when` — a
+/// stale convergence must not relabel a row the driver already closed.
+pub async fn patch_todo_run_when(
+    conn: &Connection,
+    id: &str,
+    when: ProjectTodoRunStatus,
+    patch: &ProjectTodoRunPatch,
+    _now_ms: i64,
+) -> Result<bool> {
+    let (sets, mut vals) = run_set_fragment(patch);
+    // Runs have no updated_at; `_now_ms` stays unused for signature
+    // uniformity with the other patch_* methods.
+    let sql = format!(
+        "UPDATE project_todo_runs SET {} WHERE id = ? AND status = ?",
+        sets.join(", ")
+    );
+    vals.push(id.into());
+    vals.push(when.as_str().into());
+    let n = conn
+        .execute(&sql, vals)
+        .await
+        .context("patch project todo run (expected status)")?;
     Ok(n > 0)
 }
 
@@ -258,6 +342,24 @@ pub async fn list_todo_runs(conn: &Connection, todo_id: &str) -> Result<Vec<Proj
         ))
         .await?;
     let mut rows = stmt.query(params![todo_id]).await?;
+    let mut out = Vec::new();
+    while let Some(r) = rows.next().await? {
+        out.push(row_to_run(&r)?);
+    }
+    Ok(out)
+}
+
+/// Every run row currently in the `running` state (any todo, any kind) —
+/// feeds the opportunistic stale-run sweep.
+pub async fn list_running_todo_runs(conn: &Connection) -> Result<Vec<ProjectTodoRunRecord>> {
+    let stmt = conn
+        .prepare(&format!(
+            "SELECT {RUN_COLS} FROM project_todo_runs WHERE status = ?1"
+        ))
+        .await?;
+    let mut rows = stmt
+        .query(params![ProjectTodoRunStatus::Running.as_str()])
+        .await?;
     let mut out = Vec::new();
     while let Some(r) = rows.next().await? {
         out.push(row_to_run(&r)?);

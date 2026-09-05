@@ -12,15 +12,17 @@ OpenCoder 是完全独立、从零实现的 Rust 原生编码代理。单二进�
 - [agents/session](agents/session/index.md) — 会话运行时核心：drain 主循环（steer/queue 提升）、工具注册（内建 + MCP + latent：ssh_pty/question 按 skill 解锁）、subagent 调度（explore/build + libsql 追踪）、plan 只读 bash 写拦截（bash_guard → shellguard 分类核，cwd 对齐）、控制命令（/act、/plan、/act_clear_context）、压缩、resume、title 生成、cancel。
 - [agents/core](agents/core/index.md) — 共享类型与 Config（模型/压缩/上下文窗口/small_model 全配置化）。
 - [agents/web](agents/web/index.md) — axum HTTP + SSE 会话管理（prompt admit + 事件流 + 运行时切换 + interrupt）；全量 HMAC 请求签名中间件（token+timestamp+sig，±5min、重放 409）+ 编译期内嵌 React18+antd SPA（`spa/dist` 固定文件名 include_bytes! 白名单伺服）。
-- [agents/cli](agents/cli/index.md) — clap 前端 + headless 运行时（run/tui/ts/daemon/config/models/session/todos/update/install-tools 子命令，`ts` 别名 `rs`；`daemon` 子命令仅打印迁移指引（P0 拆分：server→`opencoder-server`、node→`opencode-agent`）；--continue/--session/--fork/--model/--image；`session show --json` 深度观测面）。
+- [agents/cli](agents/cli/index.md) — clap 前端 + headless 运行时（run/tui/ts/daemon/config/models/session/todos/update/install-tools 子命令，`ts` 别名 `rs`；`daemon` 子命令仅打印迁移指引（P0 拆分：server→`opencoder-server`、node→`opencoder-agent`）；--continue/--session/--fork/--model/--image；`session show --json` 深度观测面）。
 - [agents/node](agents/node/index.md) — 分布式执行节点运行时（新 crate）：注册→心跳/claim 轮询→本地 Config+LLM 凭证跑任务→事件批量回传 server；纯出站 HTTP，无入站连接；`DagHook` 扩展点（claim/execute，idle 轮询 DAG run 单活跃串行执行，取消经心跳 `cancel_run_ids` 捎带）。
 - [agents/dag](agents/dag/index.md) — DAG workflow 纯域 + 线协议（spec/validate、ready_steps/run_outcome/render_context、`/workflow/<run_id>/<step>/` 工件契约、protocol DTO LOCKED）：server 校验与节点执行共享的唯一契约。
-- [agents/dag-runtime](agents/dag-runtime/index.md) — 节点侧 DAG 执行运行时（新 crate）：JoinSet 有界调度 + 事件批量上行 + agent step（真 session）/python step（内嵌 RustPython VM 或 runc OCI 沙箱）+ `prepare-rootfs` 脚手架。仅 `opencode-agent` 链接。
+- [agents/dag-runtime](agents/dag-runtime/index.md) — 节点侧 DAG 执行运行时（新 crate）：JoinSet 有界调度 + 事件批量上行 + agent step（真 session）/python step（内嵌 RustPython VM 或 runc OCI 沙箱）+ `prepare-rootfs` 脚手架。仅 `opencoder-agent` 链接。
 - [agents/server](agents/server/index.md) — `opencoder-server` 二进制：web 服务薄入口，不链接 VM/runc。
-- [agents/agent](agents/agent/index.md) — `opencode-agent` 二进制：fleet worker（node 运行时 + DAG hook）。
+- [agents/agent](agents/agent/index.md) — `opencoder-agent` 二进制：fleet worker（node 运行时 + DAG hook）。
 - [agents/tui](agents/tui/index.md) — ratatui 交互界面。
 - [agents/todos](agents/todos/index.md) — 持久化 TODO 工作流运行时：父 Workflow Session 调度和验收，每个 TODO 使用独立 Primary Session 执行，支持依赖、并发、恢复、回退与可选 debug 投影。
+- [agents/project](agents/project/index.md) — 用户策展的项目跟踪运行时（新 crate）：goal→milestone→todo 三级，todo 走「草稿→plan agent 生成方案→act agent 执行」生命周期，执行 resume 同一会话持续推进，`project_todo_runs` 版本留痕可取消；复用 session 直驱范式（非 todos 编排），项目数据走独立 `ProjectStore` 接缝（默认 libsql 同实例，feature-gate 可选 mysql/starrocks）。
 - [agents/brain](agents/brain/index.md) — 项目目标/能力库（新 crate）：能力条目（类型/描述/输入/输出/工程输入）录入 + 语义向量检索；embed 走 OpenAI 兼容 `/embeddings`（`ChatStream::embed`），向量存 libsql bundled `vector_distance_cos`（BLOB=LE f32），store schema v15 三张 brain 表，web `/api/brain/*` + SPA「项目目标」tab。
+- [agents/agents](agents/agents/index.md) — 版本化自定义 Agent（opencoder-agents crate）：共享池（prompts/skills/tools/memory/<名>/v{n}，版本只增、回滚=切指针）+ 引用卡（agents/<名>/meta.json 四字段引用，多 agent 共享同一资源）+ active marker；读路径在 core `agent::{meta,resource,compose}`（resolve_agent 文件 fallback、effective_default 四级默认链、skill 多根遮蔽），写路径/NFS 只读导出（nfsserve 0.11，真实 mount 验证）在本 crate；session `/agent` 切换 + bash PATH 脚本前缀注入，web `/api/agents*` + SPA「Agent 配置」。
 
 ## 关键抽象
 

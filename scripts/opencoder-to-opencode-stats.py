@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""opencoder -> opencode token-usage incremental sync.
+"""opencoder -> opencoder token-usage incremental sync.
 
 Reads opencoder per-project SQLite DBs
 (~/.local/share/opencoder/<hash>/opencoder.db), aggregates assistant-message
-token usage, and writes session + message + part rows into the opencode global
+token usage, and writes session + message + part rows into the opencoder global
 database (~/.local/share/opencode/opencode.db) so that opencode's usage stats
 reflect opencoder consumption.
 
@@ -23,7 +23,7 @@ import sys
 from datetime import datetime, timezone
 
 HOME = os.path.expanduser("~")
-OPENCODE_DIR = os.path.join(HOME, ".local", "share", "opencode")
+OPENCODE_DIR = os.path.join(HOME, ".local", "share", "opencoder")
 OPENCODE_DB = os.path.join(OPENCODE_DIR, "opencode.db")
 ENCODER_DIR = os.path.join(HOME, ".local", "share", "opencoder")
 STATE_FILE = os.path.join(OPENCODE_DIR, ".opencoder-sync.json")
@@ -101,7 +101,7 @@ def read_assistant_messages(db_path: str, session_id: str) -> list:
     return [dict(r) for r in rows]
 
 def parse_usage(raw):
-    """Map an opencoder usage_json blob into an opencode `tokens` dict."""
+    """Map an opencoder usage_json blob into an opencoder `tokens` dict."""
     u = json.loads(raw) if isinstance(raw, str) else dict(raw or {})
     inp = int(u.get("input_tokens", 0) or 0)
     out = int(u.get("output_tokens", 0) or 0)
@@ -150,7 +150,7 @@ def _has_tokens(t):
     )
 
 def compute_session_payload(session, messages):
-    """Build the opencode write payload for one session, or None to skip.
+    """Build the opencoder write payload for one session, or None to skip.
 
     Pure: no DB access. Deterministic target ids (`enc_<source_id>`) make the
     write idempotent: re-sync deletes the prior messages/parts then re-inserts.
@@ -215,7 +215,7 @@ def compute_session_payload(session, messages):
         "msg_payloads": msg_payloads,
     }
 
-# Column order for the opencode `session` row (must stay aligned with the
+# Column order for the opencoder `session` row (must stay aligned with the
 # values tuple produced by _session_values below).
 _SESSION_COLS = [
     "id", "project_id", "workspace_id", "parent_id", "slug", "directory", "path",
@@ -326,7 +326,7 @@ def collect_changes(encoder_dir, offset):
     Tolerates empty/uninitialized per-project DBs (0-byte files with no
     tables): skip them with a warning instead of failing the whole run,
     which would freeze the watermark and starve opencode.db (and kaboo's
-    opencode tool type) until the stray file is removed.
+    opencoder tool type) until the stray file is removed.
     """
     changes = []
     for db in find_encoder_dbs(encoder_dir):

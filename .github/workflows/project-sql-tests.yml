@@ -1,0 +1,140 @@
+# CI wiring for the feature-gated SQL backends of the project tables
+# (`crates/store/src/sql_store/*`, features `mysql` / `starrocks`, default-off).
+#
+# Coverage:
+# - mysql:     hosted-runner job against a `mysql:8.4` service container.
+# - starrocks: opt-in job on a self-hosted runner (see the comment on the job).
+# - lint:      workspace-wide fmt + clippy, plus feature-gated sql_store coverage.
+#
+# Credentials policy: no real credentials in this file. The mysql password is
+# a job-scoped one-time value for an ephemeral container; the StarRocks DSN is
+# injected from a repository secret and never persisted in the repo.
+#
+# Bootstrap semantics (verified against `sql_store::open`): the DSN must point
+# at an EXISTING database — `open` applies idempotent `CREATE TABLE IF NOT
+# EXISTS` DDL itself but never issues `CREATE DATABASE`. For mysql we get the
+# database for free via the image's `MYSQL_DATABASE` init env.
+name: project-sql-tests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "crates/store/**"
+      - "crates/project/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/project-sql-tests.yml"
+  pull_request:
+    paths:
+      - "crates/store/**"
+      - "crates/project/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/project-sql-tests.yml"
+  workflow_dispatch:
+
+# Least privilege; newer runs on the same ref supersede stale ones.
+permissions:
+  contents: read
+
+concurrency:
+  group: project-sql-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  mysql:
+    name: mysql 8.4 project store contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          # Ephemeral one-time values, only meaningful for this container.
+          MYSQL_ROOT_PASSWORD: opencoder-ci
+          # The image entrypoint creates this database on first init, which
+          # is what the DSN below (and sql_store::open) expects to exist.
+          MYSQL_DATABASE: opencoder_store_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h127.0.0.1 -popencoder-ci"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      # Format expected by sqlx MySqlConnectOptions::from_str (mysql:// URL).
+      # Plain TCP without TLS is fine: sqlx handles caching_sha2_password.
+      OC_TEST_MYSQL_DSN: mysql://root:opencoder-ci@127.0.0.1:3306/opencoder_store_test
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Verify mysql is up and the test database exists
+        run: |
+          docker exec mysql mysql -uroot -popencoder-ci \
+            -e "SELECT VERSION(); SHOW DATABASES LIKE 'opencoder_store_test';"
+
+      - name: cargo test sql_project_store (mysql feature)
+        run: cargo test -p opencoder-store --features mysql --test sql_project_store
+
+  starrocks:
+    name: starrocks project store contract (opt-in)
+    # Why not a service container: the official starrocks/starrocks image
+    # boots FE+BE as sibling processes and needs --privileged plus raised
+    # ulimits (the BE raises nofile) — neither is expressible through GitHub
+    # job containers on hosted runners. So this job is opt-in: register a
+    # self-hosted runner that can reach a StarRocks FE, create the test
+    # database there (sql_store::open creates the tables, not the database),
+    # and set repository secret OC_TEST_STARROCKS_DSN, e.g.
+    #   mysql://user:pass@fe-host:9030/opencoder_store_test
+    # Opt-in is the boolean repository variable OC_TEST_STARROCKS_ENABLED:
+    # the gate must use `vars.` because the secrets context is not available
+    # in a job-level `if`. The DSN value itself comes from the secret
+    # OC_TEST_STARROCKS_DSN, so it is never exposed to repo readers (unlike
+    # repository variables). If the secret is unset/empty, the test layer's
+    # empty-DSN check skips cleanly.
+    if: vars.OC_TEST_STARROCKS_ENABLED == 'true'
+    runs-on: self-hosted
+    timeout-minutes: 45
+    env:
+      OC_TEST_STARROCKS_DSN: ${{ secrets.OC_TEST_STARROCKS_DSN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: cargo test sql_project_store (starrocks feature)
+        run: cargo test -p opencoder-store --features starrocks --test sql_project_store
+
+  lint:
+    name: fmt + clippy (store / project)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+
+      # Workspace-wide gates (fmt/clippy are clean tree-wide as of this
+      # writing). The extra store-only step pulls sqlx via
+      # `--features mysql,starrocks` so clippy also covers the feature-gated
+      # sql_store sources, not just the default build.
+      - name: cargo fmt (workspace)
+        run: cargo fmt --all -- --check
+
+      - name: cargo clippy (workspace)
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: cargo clippy (store, sql features)
+        run: cargo clippy -p opencoder-store --all-targets --features mysql,starrocks -- -D warnings

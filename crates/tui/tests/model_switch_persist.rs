@@ -3,7 +3,7 @@
 //! The TUI `/model` menu hot-swaps the model at a turn boundary via
 //! `UiCmd::ReloadConfig`. Previously the swap touched only the in-memory
 //! `SessionState`; the persisted `sessions.model` column was never updated,
-//! so the next `resume()` (`opencode -s <id>`) reverted the model to the
+//! so the next `resume()` (`opencoder -s <id>`) reverted the model to the
 //! stale stored value.
 //!
 //! These tests prove the fix end-to-end:
@@ -126,7 +126,7 @@ async fn model_switch_survives_resume() {
     let _ = rx.recv().await.expect("ModelSwitch event forwarded");
 
     // Resume the *same* session with the OLD default config (as
-    // `opencode -s <id>` would pass). resume() must prefer the persisted
+    // `opencoder -s <id>` would pass). resume() must prefer the persisted
     // model rather than reverting to gpt-4o-mini.
     let resumed = resume(
         store.clone(),

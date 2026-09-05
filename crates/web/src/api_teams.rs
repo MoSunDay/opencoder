@@ -2,7 +2,7 @@
 //! handover, membership add/remove and background capability profiling.
 //! Topic orchestration (create / list / detail / cancel / resume,
 //! `/api/topics`) lives in [`crate::api_teams_topics`]; both halves are wired
-//! by [`routes`]. Handlers are pure composition over `opencode_team` — the
+//! by [`routes`]. Handlers are pure composition over `opencoder_team` — the
 //! run/turn semantics live in that crate; this layer only maps outcomes onto
 //! HTTP statuses (400 invalid input · 404 unknown team · 409 conflict).
 

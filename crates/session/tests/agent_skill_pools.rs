@@ -70,11 +70,31 @@ async fn agent_skill_shadows_global_and_global_only_still_resolves() {
     // carries a DIFFERENT `alpha` body that must win after the switch.
     write_global_skill(&fx.home, "alpha", "GLOBAL-ALPHA body");
     write_global_skill(&fx.home, "gamma", "GLOBAL-GAMMA body");
-    write_pool_version(&fx.agents, "skills", "alpha-set", 1, "alpha/SKILL.md", "AGENT-ALPHA body");
+    write_pool_version(
+        &fx.agents,
+        "skills",
+        "alpha-set",
+        1,
+        "alpha/SKILL.md",
+        "AGENT-ALPHA body",
+    );
     // The agent needs a resolvable soul (prompts pool) or `resolve_agent`
     // cannot switch to it at all.
-    write_pool_version(&fx.agents, "prompts", "worker", 1, "soul.md", "SOUL-worker identity");
-    write_agent_card(&fx.agents, "worker", Some("worker"), Some("alpha-set"), None);
+    write_pool_version(
+        &fx.agents,
+        "prompts",
+        "worker",
+        1,
+        "soul.md",
+        "SOUL-worker identity",
+    );
+    write_agent_card(
+        &fx.agents,
+        "worker",
+        Some("worker"),
+        Some("alpha-set"),
+        None,
+    );
 
     let store = mem_store().await;
     let mock = Arc::new(
@@ -89,7 +109,8 @@ async fn agent_skill_shadows_global_and_global_only_still_resolves() {
     // Baseline: before the switch, the global alpha body is discovered.
     // Resolved bodies land on the session's skill prompt, not in the
     // returned (token-stripped) text.
-    let before = opencoder_session::skill_resolve::resolve_inline_skills(&session, "use $alpha and $gamma");
+    let before =
+        opencoder_session::skill_resolve::resolve_inline_skills(&session, "use $alpha and $gamma");
     assert!(
         !before.contains("$alpha") && !before.contains("$gamma") && before.contains("and"),
         "tokens stripped, rest verbatim: {before}"
@@ -105,9 +126,15 @@ async fn agent_skill_shadows_global_and_global_only_still_resolves() {
     );
 
     events(&mut session, "/agent worker").await;
-    assert_eq!(session.agent.name, "worker", "file agent resolved and applied");
+    assert_eq!(
+        session.agent.name, "worker",
+        "file agent resolved and applied"
+    );
     assert!(
-        session.skill_roots.iter().any(|p| p.to_string_lossy().contains("alpha-set")),
+        session
+            .skill_roots
+            .iter()
+            .any(|p| p.to_string_lossy().contains("alpha-set")),
         "agent skill root pinned: {:?}",
         session.skill_roots
     );
@@ -132,9 +159,29 @@ async fn agent_skill_shadows_global_and_global_only_still_resolves() {
 async fn switch_back_restores_global_only_discovery() {
     let fx = scoped_agent_roots();
     write_global_skill(&fx.home, "alpha", "GLOBAL-ALPHA body");
-    write_pool_version(&fx.agents, "skills", "alpha-set", 1, "alpha/SKILL.md", "AGENT-ALPHA body");
-    write_pool_version(&fx.agents, "prompts", "worker", 1, "soul.md", "SOUL-worker identity");
-    write_agent_card(&fx.agents, "worker", Some("worker"), Some("alpha-set"), None);
+    write_pool_version(
+        &fx.agents,
+        "skills",
+        "alpha-set",
+        1,
+        "alpha/SKILL.md",
+        "AGENT-ALPHA body",
+    );
+    write_pool_version(
+        &fx.agents,
+        "prompts",
+        "worker",
+        1,
+        "soul.md",
+        "SOUL-worker identity",
+    );
+    write_agent_card(
+        &fx.agents,
+        "worker",
+        Some("worker"),
+        Some("alpha-set"),
+        None,
+    );
 
     let store = mem_store().await;
     let mock = Arc::new(MockChatClient::new().push_script(done_turn()));
@@ -144,7 +191,10 @@ async fn switch_back_restores_global_only_discovery() {
     events(&mut session, "/agent worker").await;
     events(&mut session, "/agent act").await;
     assert!(
-        session.skill_roots.iter().all(|p| !p.to_string_lossy().contains("alpha-set")),
+        session
+            .skill_roots
+            .iter()
+            .all(|p| !p.to_string_lossy().contains("alpha-set")),
         "agent roots dropped on builtin switch: {:?}",
         session.skill_roots
     );

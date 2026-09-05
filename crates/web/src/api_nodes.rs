@@ -76,25 +76,34 @@ pub async fn list_nodes(State(state): State<Arc<AppState>>) -> Response {
         }
     }
     // Same opportunistic sweep for DAG runs: `running | cancelling` runs of
-    // heartbeat-stale nodes converge to `error("node lost")`, and each one
-    // gets its synthetic `run_finished` frame (persisted + fanned out on the
-    // DagHub) so event-projection UIs see the termination. Fan-out failure
-    // degrades to a log line for the same reason as above.
+    // heartbeat-stale nodes converge to `error("node lost")` with their
+    // synthetic `run_finished` frame persisted in the SAME store transaction
+    // (the frame can never be lost to a crash between commit and append);
+    // this loop only fans the committed frames out on the DagHub so
+    // event-projection UIs see the termination. Fan-out failure degrades to
+    // a log line for the same reason as above — the frame stays replayable
+    // from the store.
     let swept_runs = match state
         .store
         .converge_lost_dag_runs(now, STALE_AFTER_MS)
         .await
     {
-        Ok(records) => records,
+        Ok(runs) => runs,
         Err(e) => return error_500(format!("converge_lost_dag_runs: {e:#}")),
     };
-    for r in &swept_runs {
-        if let Err(e) =
-            crate::api_nodes_dag::emit_run_finished(&state, &r.id, "error", Some("node lost"), now)
-                .await
+    for c in &swept_runs {
+        if let Err(e) = crate::api_nodes_dag::publish_run_finished(
+            &state,
+            &c.record.id,
+            "error",
+            Some("node lost"),
+            now,
+            c.run_finished_seq,
+        )
+        .await
         {
             tracing::warn!(
-                run_id = %r.id,
+                run_id = %c.record.id,
                 error = %e,
                 "lost-node sweep: failed to emit terminal dag run_finished frame"
             );

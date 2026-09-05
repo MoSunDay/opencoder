@@ -10,7 +10,7 @@ use anyhow::{Context, Result};
 use libsql::{params, params::IntoParams, Connection};
 use opencoder_dag::{transition_allowed, DagRunStatus};
 
-use crate::types::{DagDefRecord, DagRunRecord};
+use crate::types::{ConvergedDagRun, DagDefRecord, DagRunRecord};
 
 const DEF_COLS: &str = "id, name, spec_json, created_at, updated_at";
 const RUN_COLS: &str =
@@ -98,7 +98,8 @@ pub async fn dispatch(conn: &Connection, run: &DagRunRecord) -> Result<DagRunRec
 }
 
 /// Atomically claim the oldest pending run this node may take (pinned to it
-/// or unpinned). Returns `None` when the node already has a `running` run
+/// or unpinned). Returns `None` when the node already has a
+/// `running`/`cancelling` run
 /// (single-active-run policy) or nothing is due. The CAS
 /// `UPDATE ... WHERE status='pending'` (never RETURNING) makes losing racers
 /// see zero rows; they retry the scan a bounded few times, then give up.
@@ -109,10 +110,12 @@ pub async fn claim_next(
 ) -> Result<Option<DagRunRecord>> {
     super::tx::run_tx(conn, "BEGIN IMMEDIATE", || async move {
         for _ in 0..CLAIM_ATTEMPTS {
-            // (a) Single active run per node.
+            // (a) Single active run per node — `running` AND `cancelling`
+            // both hold the slot (same guard as node_tasks::claim_next): a
+            // mid-cancel node must not start a second run.
             let busy = first(
                 conn,
-                "SELECT 1 FROM dag_runs WHERE node_id = ?1 AND status = 'running' LIMIT 1",
+                "SELECT 1 FROM dag_runs WHERE node_id = ?1 AND status IN ('running','cancelling') LIMIT 1",
                 params![node_id],
                 |r| Ok(r.get::<i64>(0)?),
             )
@@ -183,6 +186,43 @@ pub async fn update_status(
         get_run(conn, run_id)
             .await?
             .ok_or_else(|| anyhow::anyhow!("update_dag_run_status: dag run {run_id} vanished"))
+    })
+    .await
+}
+
+/// Terminal status move + synthetic `run_finished` event in ONE transaction
+/// (web's `post_status` path): a crash between the status flip and the frame
+/// append is impossible, so a terminal run is never left without its final
+/// frame. Returns the assigned event `seq`. Same error contract as
+/// [`update_status`]: missing rows bail "not found", invalid moves bail
+/// "illegal" (web maps them to 404/409).
+pub async fn finalize_run(
+    conn: &Connection,
+    run_id: &str,
+    status: DagRunStatus,
+    error: Option<&str>,
+    now_ms: i64,
+) -> Result<i64> {
+    super::tx::run_tx(conn, "BEGIN IMMEDIATE", || async move {
+        let from = current_status(conn, run_id)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("finalize_dag_run: dag run {run_id} not found"))?;
+        if !transition_allowed(from, status) {
+            anyhow::bail!("illegal dag run transition {from} -> {status} for run {run_id}");
+        }
+        let finished_at = if status.is_terminal() {
+            Some(now_ms)
+        } else {
+            None
+        };
+        exec(
+            conn,
+            "UPDATE dag_runs SET status = ?2, error = ?3, finished_at = ?4 WHERE id = ?1",
+            params![run_id, status.as_str(), error, finished_at],
+            "finalize dag_run status",
+        )
+        .await?;
+        insert_run_finished(conn, run_id, status.as_str(), error, now_ms).await
     })
     .await
 }
@@ -275,7 +315,8 @@ async fn current_status(conn: &Connection, run_id: &str) -> Result<Option<DagRun
 
 /// Collapse zombie runs of lost nodes: every `running`/`cancelling` run of a
 /// node whose heartbeat is older than `stale_ms` becomes `error("node lost")`
-/// stamped `finished_at`, in one transaction. Exclusive age bound (exactly
+/// stamped `finished_at`, with its synthetic `run_finished` frame appended in
+/// the SAME transaction, in one transaction. Exclusive age bound (exactly
 /// `stale_ms` old is still fresh), matching
 /// [`super::node_tasks::converge_lost`]; `pending` rows never block claiming
 /// and terminal rows are frozen, so the sweep is idempotent.
@@ -283,7 +324,7 @@ pub async fn converge_lost(
     conn: &Connection,
     now_ms: i64,
     stale_ms: i64,
-) -> Result<Vec<DagRunRecord>> {
+) -> Result<Vec<ConvergedDagRun>> {
     super::tx::run_tx(conn, "BEGIN IMMEDIATE", || async move {
         // (a) Snapshot candidate ids: active runs of heartbeat-stale nodes
         // (unclaimed rows have NULL node_id and drop out of the JOIN).
@@ -295,7 +336,11 @@ pub async fn converge_lost(
             |r| Ok(r.get::<String>(0)?),
         )
         .await?;
-        // (b) Conditional CAS per row (no RETURNING, same as claim).
+        // (b) Conditional CAS per row (no RETURNING, same as claim); each
+        // winner also gets its in-transaction `run_finished` frame, so the
+        // committed status can never outlive a missing final frame. The seq
+        // is read as `max(seq)` under the held write lock.
+        let mut out = Vec::new();
         for id in &ids {
             let changed = exec(
                 conn,
@@ -308,12 +353,13 @@ pub async fn converge_lost(
             if changed == 0 {
                 continue; // raced away between select and update
             }
-        }
-        // (c) Read the converged rows back in selection order.
-        let mut out = Vec::new();
-        for id in &ids {
+            let run_finished_seq =
+                insert_run_finished(conn, id, "error", Some("node lost"), now_ms).await?;
             if let Some(record) = get_run(conn, id).await? {
-                out.push(record);
+                out.push(ConvergedDagRun {
+                    record,
+                    run_finished_seq,
+                });
             }
         }
         Ok(out)
@@ -322,6 +368,40 @@ pub async fn converge_lost(
 }
 
 // ── helpers / row mapping ─────────────────────────────────────────────────
+
+/// Append the synthetic `run_finished` frame for `run_id` and return its seq.
+/// MUST run inside an open write transaction: the seq is recovered as
+/// `max(seq)` under the held write lock, so no racing writer can interleave.
+/// Payload matches what the persisted row would carry:
+/// `{"status": ...}` + optional `"error"`.
+async fn insert_run_finished(
+    conn: &Connection,
+    run_id: &str,
+    status: &str,
+    error: Option<&str>,
+    at_ms: i64,
+) -> Result<i64> {
+    let mut payload = serde_json::json!({ "status": status });
+    if let Some(err) = error {
+        payload["error"] = serde_json::json!(err);
+    }
+    let payload_json = serde_json::to_string(&payload).context("serialize run_finished payload")?;
+    exec(
+        conn,
+        super::dag_events::INSERT_EVENT,
+        params![run_id, "run_finished", None::<&str>, payload_json, at_ms],
+        "insert run_finished dag_event",
+    )
+    .await?;
+    first(
+        conn,
+        "SELECT seq FROM dag_events ORDER BY seq DESC LIMIT 1",
+        (),
+        |r| Ok(r.get::<i64>(0)?),
+    )
+    .await?
+    .ok_or_else(|| anyhow::anyhow!("run_finished seq for dag run {run_id} vanished"))
+}
 
 /// `execute` + `context` — the shared write-half boilerplate.
 async fn exec(

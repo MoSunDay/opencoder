@@ -548,3 +548,12 @@ pub struct DagEventRecord {
     pub payload: serde_json::Value,
     pub at_ms: i64,
 }
+
+/// One lost-node-converged DAG run plus the seq of its synthetic terminal
+/// `run_finished` event — appended in the SAME transaction as the status
+/// flip, so a terminal run can never be left without its final frame.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConvergedDagRun {
+    pub record: DagRunRecord,
+    pub run_finished_seq: i64,
+}

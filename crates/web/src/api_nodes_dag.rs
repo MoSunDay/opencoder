@@ -54,23 +54,30 @@ pub async fn claim(State(state): State<Arc<AppState>>, Query(q): Query<DagClaimQ
 /// POST /api/nodes/dag/runs/:rid/events — persist a node's event batch, then
 /// publish each row (with its assigned seq) to the run's hub subscribers.
 ///
-/// Guard order: unknown run ⇒ 404; body `run_id` mismatch ⇒ 400; any unknown
-/// event kind ⇒ 400 (the whole batch is rejected — partial persist of an
-/// invalid batch would corrupt the step projection).
+/// Guard order: unknown run ⇒ 404; body `run_id` mismatch ⇒ 400; terminal
+/// run ⇒ 409 (the event stream closed with its synthetic `run_finished`
+/// frame); any unknown event kind ⇒ 400 (the whole batch is rejected —
+/// partial persist of an invalid batch would corrupt the step projection).
 pub async fn post_events(
     State(state): State<Arc<AppState>>,
     Path(rid): Path<String>,
     Json(batch): Json<DagEventBatch>,
 ) -> Response {
-    match state.store.get_dag_run(&rid).await {
-        Ok(Some(_)) => {}
+    let run = match state.store.get_dag_run(&rid).await {
+        Ok(Some(run)) => run,
         Ok(None) => return error_404("dag run not found"),
         Err(e) => return error_500(format!("get_dag_run: {e:#}")),
-    }
+    };
     if batch.run_id != rid {
         return error_400(format!(
             "batch run_id {} does not match path run_id {rid}",
             batch.run_id
+        ));
+    }
+    if run.status.is_terminal() {
+        return error_409(&format!(
+            "dag run {rid} is terminal ({}) — event stream closed",
+            run.status.as_str()
         ));
     }
     if let Some(bad) = batch
@@ -120,8 +127,9 @@ pub async fn post_events(
 }
 
 /// POST /api/nodes/dag/runs/:rid/status — terminal report. Persists the
-/// transition, then appends + publishes one synthetic `run_finished` event so
-/// event-projection UIs see completion without polling the run row.
+/// transition AND the synthetic `run_finished` event in one store
+/// transaction, then publishes the frame so event-projection UIs see
+/// completion without polling the run row.
 pub async fn post_status(
     State(state): State<Arc<AppState>>,
     Path(rid): Path<String>,
@@ -143,28 +151,32 @@ pub async fn post_status(
         Err(e) => return error_500(format!("get_dag_run: {e:#}")),
     }
     let now = chrono::Utc::now().timestamp_millis();
-    if let Err(e) = state
+    let seq = match state
         .store
-        .update_dag_run_status(&rid, status, report.error.as_deref(), now)
+        .finalize_dag_run(&rid, status, report.error.as_deref(), now)
         .await
     {
-        let msg = format!("update_dag_run_status: {e:#}");
-        if msg.contains("not found") {
-            return error_404("dag run not found");
+        Ok(seq) => seq,
+        Err(e) => {
+            let msg = format!("finalize_dag_run: {e:#}");
+            if msg.contains("not found") {
+                return error_404("dag run not found");
+            }
+            // Illegal transitions (e.g. double-terminal) surface as conflicts;
+            // anything else is a store failure.
+            if !msg.contains("illegal") {
+                return error_500(msg);
+            }
+            return error_409(&msg);
         }
-        // Illegal transitions (e.g. double-terminal) surface as conflicts;
-        // anything else is a store failure.
-        if !msg.contains("illegal") {
-            return error_500(msg);
-        }
-        return error_409(&msg);
-    }
-    if let Err(e) = emit_run_finished(
+    };
+    if let Err(e) = publish_run_finished(
         &state,
         &rid,
         report.status.as_str(),
         report.error.as_deref(),
         now,
+        seq,
     )
     .await
     {
@@ -173,35 +185,25 @@ pub async fn post_status(
     Json(json!({ "ok": true, "run_id": rid, "status": report.status })).into_response()
 }
 
-/// Persist + fan out the synthetic `run_finished` frame for a terminal
-/// transition (status report or lost-node sweep). Durable first, live second;
-/// the assigned `seq` rides on the wire frame so SSE reconnects resume
-/// cleanly. Shared by `api_nodes::list_nodes` (sweep) and [`post_status`].
-pub(crate) async fn emit_run_finished(
-    state: &AppState,
+/// Publish the synthetic `run_finished` frame for a terminal transition
+/// (status report or lost-node sweep). Persistence already happened in the
+/// SAME store transaction as the status flip ([`Store::finalize_dag_run`] /
+/// [`Store::converge_lost_dag_runs`]) — this is the live DagHub half only,
+/// building the identical payload the persisted row carries; the assigned
+/// `seq` rides on the wire frame so SSE reconnects resume cleanly. Shared by
+/// `api_nodes::list_nodes` (sweep) and [`post_status`].
+pub(crate) async fn publish_run_finished(
+    _state: &AppState,
     run_id: &str,
     status: &str,
     error: Option<&str>,
     at_ms: i64,
+    seq: i64,
 ) -> Result<(), String> {
     let mut payload = json!({ "status": status });
     if let Some(err) = error {
         payload["error"] = json!(err);
     }
-    let record = DagEventRecord {
-        seq: None,
-        run_id: run_id.to_string(),
-        kind: "run_finished".to_string(),
-        step: None,
-        payload: payload.clone(),
-        at_ms,
-    };
-    let seqs = state
-        .store
-        .append_dag_events(std::slice::from_ref(&record))
-        .await
-        .map_err(|e| format!("append_dag_events: {e:#}"))?;
-    let seq = seqs.first().copied().unwrap_or(0);
     shared_dag_hub()
         .publish(
             run_id,

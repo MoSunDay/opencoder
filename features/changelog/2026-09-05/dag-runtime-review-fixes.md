@@ -46,4 +46,6 @@
 
 ## 全量回归（2026-09-05 实测）
 
-见本文件末尾附表（workspace `--no-fail-fast`）。
+- workspace `cargo test --workspace --no-fail-fast`：**302 套件 / 4418 passed / 0 failed**（较初测 +2，为并行团队后续合入用例；提交前复跑同数字全绿）（含全部 DAG 相关套件、进程级 daemon_smoke/nodes_smoke、schema_bootstrap）。
+- `cargo clippy -p opencoder-dag-runtime -p opencoder-store -p opencoder-web --all-targets`：0 告警；`cargo fmt -- --check` 通过。
+- 备注：高负载（load >100，多团队共树并行）时段 `daemon_smoke`（20s 节点注册窗口）与 `schema_bootstrap` 曾出现时序性 flake，两者单独复跑均绿，与本次改动无关（本次改动不触及 schema/迁移与节点注册路径）。

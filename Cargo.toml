@@ -58,7 +58,6 @@ opencoder-session = { path = "crates/session" }
 opencoder-shellguard = { path = "crates/shellguard" }
 opencoder-tui    = { path = "crates/tui" }
 opencoder-web    = { path = "crates/web" }
-opencoder-client  = { path = "crates/client" }
 opencoder-cli    = { path = "crates/cli" }
 opencoder-todos  = { path = "crates/todos" }
 opencoder-project = { path = "crates/project" }
@@ -67,7 +66,7 @@ opencoder-dag    = { path = "crates/dag" }
 opencoder-dag-runtime = { path = "crates/dag-runtime" }
 opencoder-server = { path = "crates/server" }
 opencoder-agent  = { path = "crates/agent" }
-opencode-agents  = { path = "crates/agents" }
+opencoder-agents  = { path = "crates/agents" }
 opencoder-brain  = { path = "crates/brain" }
 opencoder-team   = { path = "crates/team" }
 

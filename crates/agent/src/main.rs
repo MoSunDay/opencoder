@@ -4,7 +4,7 @@
 //! workflow runs, and executes them locally: agent steps through the real
 //! session runner, python steps through the embedded RustPython VM (or an
 //! `runc` container), artifacts under the node-local `workflow_root`. The
-//! VM/runc dependency chain lives ONLY here — the main `opencode` binary
+//! VM/runc dependency chain lives ONLY here — the main `opencoder` binary
 //! and `opencoder-server` never link it.
 //!
 //! Node (client) token semantics are inherited from the node crate: the
@@ -20,7 +20,7 @@ use clap::{Parser, Subcommand};
 #[command(
     name = "opencoder-agent",
     version,
-    about = "opencode fleet worker: prompt tasks + node-side DAG workflow execution"
+    about = "opencoder fleet worker: prompt tasks + node-side DAG workflow execution"
 )]
 struct Args {
     #[command(subcommand)]
@@ -292,9 +292,14 @@ mod tests {
 
     #[test]
     fn dag_prepare_rootfs_args_parse() {
-        let args =
-            Args::try_parse_from(["opencoder-agent", "dag", "prepare-rootfs", "--out", "/tmp/x"])
-                .expect("dag prepare-rootfs must parse");
+        let args = Args::try_parse_from([
+            "opencoder-agent",
+            "dag",
+            "prepare-rootfs",
+            "--out",
+            "/tmp/x",
+        ])
+        .expect("dag prepare-rootfs must parse");
         match args.command {
             Some(AgentCommand::Dag {
                 command: DagCommand::PrepareRootfs { out },

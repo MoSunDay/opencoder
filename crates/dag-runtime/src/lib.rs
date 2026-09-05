@@ -1,5 +1,5 @@
 //! Node-side DAG workflow runtime: the scheduling loop plus per-kind step
-//! executors. Linked ONLY by the `opencode-agent` binary chain.
+//! executors. Linked ONLY by the `opencoder-agent` binary chain.
 //!
 //! Layering:
 //! - [`runtime`] — the whole-run loop: parse the claimed spec snapshot,
@@ -29,4 +29,4 @@ pub use dag_events::{
 pub use exec::{execute_agent_step, execute_python_step, ExecDeps, StepCtx, StepResult};
 pub use runtime::{execute_run, RunDeps, MAX_CONCURRENT_STEPS};
 
-pub const RUNTIME_NAME: &str = "opencode-dag-runtime";
+pub const RUNTIME_NAME: &str = "opencoder-dag-runtime";

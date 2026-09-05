@@ -128,7 +128,7 @@ fn session_subcommands() {
 fn session_and_continue_conflict_globally() {
     // Bug 12 contract, kept after the client subcommand removal: --session and
     // --continue remain mutually exclusive on the top-level Cli.
-    let cli3 = Cli::try_parse_from(["opencode", "--session", "01ABC", "--continue"]);
+    let cli3 = Cli::try_parse_from(["opencoder", "--session", "01ABC", "--continue"]);
     assert!(
         cli3.is_err(),
         "--session and --continue must conflict in top-level Cli"
@@ -187,7 +187,7 @@ fn ts_subcommand_parses_resume_target() {
 
 #[test]
 fn ts_subcommand_defaults_to_no_flags() {
-    // Bare `opencode ts` -> Ts with every flag at its default.
+    // Bare `opencoder ts` -> Ts with every flag at its default.
     let cli = parse(&["opencoder", "ts"]);
     match cli.command {
         Some(Command::Ts {
@@ -281,7 +281,7 @@ fn run_subcommand_accepts_global_agent_flag() {
 
 #[test]
 fn bare_prompt_accepts_global_agent_flag() {
-    // bare `opencode --agent explore "..."` also populates the global flag.
+    // bare `opencoder --agent explore "..."` also populates the global flag.
     let cli = parse(&["opencoder", "--agent", "explore", "explain it"]);
     assert_eq!(cli.agent.as_deref(), Some("explore"));
     assert!(!cli.prompt.is_empty());

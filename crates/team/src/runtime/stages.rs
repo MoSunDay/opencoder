@@ -110,7 +110,7 @@ pub(super) async fn stage_sub(
             // Member failures are tolerated: the summary decision sees the
             // failure and the topic keeps moving.
             Err(error) => {
-            tracing::warn!(node = node_id, error = %format!("{error:#}"), "member dispatch failed");
+                tracing::warn!(node = node_id, error = %format!("{error:#}"), "member dispatch failed");
                 result_record(
                     node_id,
                     turn,

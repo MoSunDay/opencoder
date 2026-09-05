@@ -103,10 +103,9 @@ async fn hung_tool_returns_timeout_error() {
 #[tokio::test]
 async fn fast_tool_is_unaffected_by_timeout() {
     let session = make_session();
-    let registry: HashMap<String, ToolArc> =
-        [("fast".to_string(), Arc::new(FastTool) as ToolArc)]
-            .into_iter()
-            .collect();
+    let registry: HashMap<String, ToolArc> = [("fast".to_string(), Arc::new(FastTool) as ToolArc)]
+        .into_iter()
+        .collect();
     let mut noop: Box<dyn FnMut(SessionEvent) + Send> = Box::new(|_| {});
     let sink: Sink<'_> = Arc::new(Mutex::new(&mut *noop));
     let tc = CompletedToolCall {

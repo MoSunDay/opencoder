@@ -6,8 +6,8 @@
 //! a warning when unset — no credentials ever live in the repo. When set,
 //! they run one compact CRUD contract through the `Arc<dyn ProjectStore>`
 //! seam: create goal → patch → milestone → todo → run v1 via
-//! next_todo_version → list orders → plan_md clear-to-NULL → cascade
-//! deletes.
+//! next_todo_version → list orders → plan_md clear-to-NULL → expected-status
+//! CAS (todo claim-rollback + terminal-run convergence) → cascade deletes.
 
 #[cfg(any(feature = "mysql", feature = "starrocks"))]
 mod gated {
@@ -226,6 +226,86 @@ mod gated {
                 .unwrap_or(false)
         })
         .await;
+
+        // Expected-status CAS pair (todo + run) through the same seam. This
+        // contract only runs against a live server (DSN-gated above — it
+        // env-skips locally because no MySQL/StarRocks is running there);
+        // writes assert their boolean result directly, read-backs that must
+        // observe a write go through `eventually` (StarRocks commits async).
+        // Lost CAS: the todo is still Draft, so expecting Planned loses and
+        // must not flip it to Failed.
+        assert!(
+            !p.patch_todo_when(
+                &todo,
+                ProjectTodoStatus::Planned,
+                &ProjectTodoPatch {
+                    status: Some(ProjectTodoStatus::Failed),
+                    ..Default::default()
+                },
+                ts + 7,
+            )
+            .await
+            .unwrap(),
+            "todo CAS with a wrong expected status loses"
+        );
+        // Won CAS: claim -> Running, then a CAS expecting Running rolls the
+        // row back to Planned (the claim-rollback shape).
+        assert!(p.claim_todo_running(&todo, ts + 8).await.unwrap());
+        assert!(
+            p.patch_todo_when(
+                &todo,
+                ProjectTodoStatus::Running,
+                &ProjectTodoPatch {
+                    status: Some(ProjectTodoStatus::Planned),
+                    ..Default::default()
+                },
+                ts + 9,
+            )
+            .await
+            .unwrap(),
+            "claim-rollback CAS wins"
+        );
+        eventually("todo rolled back to planned", || async {
+            p.get_todo(&todo)
+                .await
+                .unwrap()
+                .map(|t| t.status == ProjectTodoStatus::Planned)
+                .unwrap_or(false)
+        })
+        .await;
+        // Run CAS: converging the terminal run (Done above) while expecting
+        // Running loses; the still-Running run2 converges to Failed.
+        assert!(
+            !p.patch_todo_run_when(
+                &run_id,
+                ProjectTodoRunStatus::Running,
+                &opencoder_store::ProjectTodoRunPatch {
+                    status: Some(ProjectTodoRunStatus::Failed),
+                    finished_at: Some(ts + 9),
+                    ..Default::default()
+                },
+                ts + 9,
+            )
+            .await
+            .unwrap(),
+            "convergence of a terminal run loses"
+        );
+        assert!(
+            p.patch_todo_run_when(
+                &run2,
+                ProjectTodoRunStatus::Running,
+                &opencoder_store::ProjectTodoRunPatch {
+                    status: Some(ProjectTodoRunStatus::Failed),
+                    output_md: Some("converged".into()),
+                    finished_at: Some(ts + 9),
+                    ..Default::default()
+                },
+                ts + 9,
+            )
+            .await
+            .unwrap(),
+            "convergence of a running run wins"
+        );
 
         // plan_md set, then cleared to NULL via Some(None).
         assert!(p

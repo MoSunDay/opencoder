@@ -82,7 +82,10 @@ async fn switch_to_file_agent_switches_soul_and_pools() {
         "AgentSwitch(worker) emitted, got: {evs:?}"
     );
     assert_eq!(session.agent.name, "worker");
-    assert!(!session.tools_path.is_empty(), "tools pool snapshot refreshed");
+    assert!(
+        !session.tools_path.is_empty(),
+        "tools pool snapshot refreshed"
+    );
     assert!(
         session
             .skill_roots
@@ -92,7 +95,13 @@ async fn switch_to_file_agent_switches_soul_and_pools() {
         session.skill_roots
     );
     assert_eq!(
-        store.get_session("s1").await.unwrap().unwrap().agent.as_deref(),
+        store
+            .get_session("s1")
+            .await
+            .unwrap()
+            .unwrap()
+            .agent
+            .as_deref(),
         Some("worker"),
         "agent persisted"
     );
@@ -100,7 +109,10 @@ async fn switch_to_file_agent_switches_soul_and_pools() {
     // Builtin agents remain addressable and the pools flip back.
     events(&mut session, "/agent plan").await;
     assert_eq!(session.agent.name, "plan");
-    assert!(session.tools_path.is_empty(), "builtin agent drops file tools");
+    assert!(
+        session.tools_path.is_empty(),
+        "builtin agent drops file tools"
+    );
 }
 
 #[tokio::test]
@@ -157,7 +169,13 @@ async fn unknown_agent_fails_soft_and_keeps_state() {
     );
     assert_eq!(session.agent.name, "worker", "agent unchanged");
     assert_eq!(
-        store.get_session("s3").await.unwrap().unwrap().agent.as_deref(),
+        store
+            .get_session("s3")
+            .await
+            .unwrap()
+            .unwrap()
+            .agent
+            .as_deref(),
         Some("worker"),
         "store unchanged"
     );
@@ -183,10 +201,19 @@ async fn bare_agent_lists_pool_with_current_marker() {
             _ => None,
         })
         .expect("Status listing event");
-    assert!(listing.contains("agents:"), "listing header present: {listing}");
+    assert!(
+        listing.contains("agents:"),
+        "listing header present: {listing}"
+    );
     assert!(listing.contains("worker"), "file agents listed: {listing}");
-    assert!(listing.contains("zeta"), "all file agents listed: {listing}");
-    assert!(listing.contains("*act"), "current builtin marked: {listing}");
+    assert!(
+        listing.contains("zeta"),
+        "all file agents listed: {listing}"
+    );
+    assert!(
+        listing.contains("*act"),
+        "current builtin marked: {listing}"
+    );
     assert_eq!(mock.requests().len(), 0, "listing spends no turn");
 }
 
@@ -203,7 +230,13 @@ async fn compound_agent_switch_runs_rest_under_new_agent() {
     events(&mut session, "/agent worker do the thing").await;
     assert_eq!(session.agent.name, "worker", "switch applied");
     assert_eq!(
-        store.get_session("s5").await.unwrap().unwrap().agent.as_deref(),
+        store
+            .get_session("s5")
+            .await
+            .unwrap()
+            .unwrap()
+            .agent
+            .as_deref(),
         Some("worker"),
         "switch persisted before running the remainder"
     );
@@ -214,7 +247,9 @@ async fn compound_agent_switch_runs_rest_under_new_agent() {
     assert!(
         msgs.iter().any(|m| {
             m.get("role").and_then(|r| r.as_str()) == Some("user")
-                && m.get("content").map(|c| c.to_string().contains("do the thing")).unwrap_or(false)
+                && m.get("content")
+                    .map(|c| c.to_string().contains("do the thing"))
+                    .unwrap_or(false)
         }),
         "remainder recorded as the user turn: {msgs:?}"
     );

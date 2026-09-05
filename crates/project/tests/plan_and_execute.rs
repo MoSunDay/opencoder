@@ -1,6 +1,7 @@
 //! 端到端集成：plan/execute 直驱运行（真 store + MockChatClient）。
 //! 覆盖方案生成回写、执行输出持久化 + 同会话续跑（持续推进）、中途取消
-//! 回退 Planned、前置拒绝与 overview 树形结构。
+//! 回退 Planned、前置拒绝与 overview 树形结构、execute run 启动时落
+//! plan_md 方案快照。
 
 use std::{
     sync::Arc,
@@ -10,9 +11,10 @@ use std::{
 use opencoder_llm::{ChatStream, CompletedToolCall, LlmEvent, MockChatClient};
 use opencoder_project::ProjectService;
 use opencoder_store::{
-    LibsqlStore, ProjectGoalRecord, ProjectGoalStatus, ProjectMilestoneRecord,
-    ProjectMilestoneStatus, ProjectStore, ProjectTodoRecord, ProjectTodoPatch, ProjectTodoStatus,
-    ProjectTodoRunKind, ProjectTodoRunStatus, Store, TASK_TYPE_PROJECT,
+    LibsqlStore, ProjectGoalPatch, ProjectGoalRecord, ProjectGoalStatus, ProjectMilestonePatch,
+    ProjectMilestoneRecord, ProjectMilestoneStatus, ProjectStore, ProjectTodoPatch,
+    ProjectTodoRecord, ProjectTodoRunKind, ProjectTodoRunPatch, ProjectTodoRunRecord,
+    ProjectTodoRunStatus, ProjectTodoStatus, Store, TASK_TYPE_PROJECT,
 };
 
 fn done(text: &str) -> Vec<LlmEvent> {
@@ -104,7 +106,11 @@ async fn seed_milestone(projects: &Arc<dyn ProjectStore>, id: &str, goal_id: &st
         .unwrap();
 }
 
-async fn seed_todo(projects: &Arc<dyn ProjectStore>, id: &str, milestone_id: Option<&str>) -> String {
+async fn seed_todo(
+    projects: &Arc<dyn ProjectStore>,
+    id: &str,
+    milestone_id: Option<&str>,
+) -> String {
     let now = 1000;
     projects
         .create_todo(&ProjectTodoRecord {
@@ -296,6 +302,32 @@ async fn start_execute_rejects_unplanned_and_running_todos() {
 }
 
 #[tokio::test]
+async fn execute_run_snapshots_plan_md_at_start() {
+    let h = harness(vec![done("执行完成")]).await;
+    let todo_id = seed_todo(&h.projects, "t1", None).await;
+    h.projects
+        .patch_todo(
+            &todo_id,
+            &ProjectTodoPatch {
+                plan_md: Some(Some("# 方案快照\n1. 步骤一".into())),
+                status: Some(ProjectTodoStatus::Planned),
+                ..Default::default()
+            },
+            2000,
+        )
+        .await
+        .unwrap();
+
+    let run_id = h.service.start_execute(&todo_id).await.unwrap();
+    // 启动即快照：run 行携带执行起点的方案正文，与 todo.plan_md 一致。
+    let run = h.projects.get_todo_run(&run_id).await.unwrap().unwrap();
+    assert_eq!(run.kind, ProjectTodoRunKind::Execute);
+    assert_eq!(run.plan_md.as_deref(), Some("# 方案快照\n1. 步骤一"));
+    let todo = h.projects.get_todo(&todo_id).await.unwrap().unwrap();
+    assert_eq!(todo.plan_md, run.plan_md);
+}
+
+#[tokio::test]
 async fn overview_tree_shape() {
     let h = harness(vec![]).await;
     seed_goal(&h.projects, "g1").await;
@@ -316,4 +348,227 @@ async fn overview_tree_shape() {
     let backlog = tree["backlog"].as_array().unwrap();
     assert_eq!(backlog.len(), 1);
     assert_eq!(backlog[0]["id"], "t-backlog");
+}
+
+#[tokio::test]
+async fn execute_proceeds_after_stale_plan_run_is_converged() {
+    let h = harness(vec![done("执行完成")]).await;
+    let todo_id = seed_todo(&h.projects, "t1", None).await;
+    h.projects
+        .patch_todo(
+            &todo_id,
+            &ProjectTodoPatch {
+                plan_md: Some(Some("# 方案".into())),
+                status: Some(ProjectTodoStatus::Planned),
+                ..Default::default()
+            },
+            2000,
+        )
+        .await
+        .unwrap();
+    // 崩溃残留：plan run 行 running、不在注册表、超 grace（5 分钟）——
+    // 不再阻塞执行，机会式收敛为 Failed 后放行。
+    let stale_started = opencoder_core::message::now_ms() - 301_000;
+    h.projects
+        .create_todo_run(&ProjectTodoRunRecord {
+            id: "prun-stale".into(),
+            todo_id: todo_id.clone(),
+            kind: ProjectTodoRunKind::Plan,
+            version: 1,
+            plan_md: None,
+            output_md: None,
+            agent: "plan".into(),
+            session_id: None,
+            status: ProjectTodoRunStatus::Running,
+            started_at: stale_started,
+            finished_at: None,
+            created_at: stale_started,
+        })
+        .await
+        .unwrap();
+
+    let run_id = h.service.start_execute(&todo_id).await.unwrap();
+    let run = wait_run_done(&h.projects, &run_id).await;
+    assert_eq!(run.status, ProjectTodoRunStatus::Done);
+    assert_eq!(run.output_md.as_deref(), Some("执行完成"));
+    let stale = h
+        .projects
+        .get_todo_run("prun-stale")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(stale.status, ProjectTodoRunStatus::Failed);
+    assert_eq!(
+        stale.output_md.as_deref(),
+        Some("stale run converged: driver lost (restart/panic)")
+    );
+    let todo = h.projects.get_todo(&todo_id).await.unwrap().unwrap();
+    assert_eq!(todo.status, ProjectTodoStatus::Done);
+}
+
+/// 故障注入包装：全部转发内层 store，唯独 `create_todo_run` 一律失败——
+/// 验证 claim 补偿回滚（create 失败时 todo 不得滞留 Running、不留悬空
+/// run 行）。镜像 web 测试的 FailingStore 委托模式。
+struct CreateRunFailingStore {
+    inner: Arc<LibsqlStore>,
+}
+
+#[async_trait::async_trait]
+impl ProjectStore for CreateRunFailingStore {
+    fn project_backend_name(&self) -> &'static str {
+        self.inner.project_backend_name()
+    }
+    async fn create_goal(&self, rec: &ProjectGoalRecord) -> anyhow::Result<()> {
+        self.inner.create_goal(rec).await
+    }
+    async fn patch_goal(
+        &self,
+        id: &str,
+        patch: &ProjectGoalPatch,
+        now_ms: i64,
+    ) -> anyhow::Result<bool> {
+        self.inner.patch_goal(id, patch, now_ms).await
+    }
+    async fn delete_goal(&self, id: &str) -> anyhow::Result<bool> {
+        self.inner.delete_goal(id).await
+    }
+    async fn list_goals(&self) -> anyhow::Result<Vec<ProjectGoalRecord>> {
+        self.inner.list_goals().await
+    }
+    async fn create_milestone(&self, rec: &ProjectMilestoneRecord) -> anyhow::Result<()> {
+        self.inner.create_milestone(rec).await
+    }
+    async fn patch_milestone(
+        &self,
+        id: &str,
+        patch: &ProjectMilestonePatch,
+        now_ms: i64,
+    ) -> anyhow::Result<bool> {
+        self.inner.patch_milestone(id, patch, now_ms).await
+    }
+    async fn delete_milestone(&self, id: &str) -> anyhow::Result<bool> {
+        self.inner.delete_milestone(id).await
+    }
+    async fn list_milestones(
+        &self,
+        goal_id: Option<&str>,
+    ) -> anyhow::Result<Vec<ProjectMilestoneRecord>> {
+        self.inner.list_milestones(goal_id).await
+    }
+    async fn create_todo(&self, rec: &ProjectTodoRecord) -> anyhow::Result<()> {
+        self.inner.create_todo(rec).await
+    }
+    async fn patch_todo(
+        &self,
+        id: &str,
+        patch: &ProjectTodoPatch,
+        now_ms: i64,
+    ) -> anyhow::Result<bool> {
+        self.inner.patch_todo(id, patch, now_ms).await
+    }
+    async fn claim_todo_running(&self, id: &str, now_ms: i64) -> anyhow::Result<bool> {
+        self.inner.claim_todo_running(id, now_ms).await
+    }
+    async fn patch_todo_when(
+        &self,
+        id: &str,
+        when: ProjectTodoStatus,
+        patch: &ProjectTodoPatch,
+        now_ms: i64,
+    ) -> anyhow::Result<bool> {
+        self.inner.patch_todo_when(id, when, patch, now_ms).await
+    }
+    async fn delete_todo(&self, id: &str) -> anyhow::Result<bool> {
+        self.inner.delete_todo(id).await
+    }
+    async fn get_todo(&self, id: &str) -> anyhow::Result<Option<ProjectTodoRecord>> {
+        self.inner.get_todo(id).await
+    }
+    async fn list_todos(
+        &self,
+        milestone_id: Option<&str>,
+    ) -> anyhow::Result<Vec<ProjectTodoRecord>> {
+        self.inner.list_todos(milestone_id).await
+    }
+    async fn create_todo_run(&self, _rec: &ProjectTodoRunRecord) -> anyhow::Result<()> {
+        Err(anyhow::anyhow!("injected create failure"))
+    }
+    async fn patch_todo_run(
+        &self,
+        id: &str,
+        patch: &ProjectTodoRunPatch,
+        now_ms: i64,
+    ) -> anyhow::Result<bool> {
+        self.inner.patch_todo_run(id, patch, now_ms).await
+    }
+    async fn patch_todo_run_when(
+        &self,
+        id: &str,
+        when: ProjectTodoRunStatus,
+        patch: &ProjectTodoRunPatch,
+        now_ms: i64,
+    ) -> anyhow::Result<bool> {
+        self.inner
+            .patch_todo_run_when(id, when, patch, now_ms)
+            .await
+    }
+    async fn get_todo_run(&self, id: &str) -> anyhow::Result<Option<ProjectTodoRunRecord>> {
+        self.inner.get_todo_run(id).await
+    }
+    async fn list_todo_runs(&self, todo_id: &str) -> anyhow::Result<Vec<ProjectTodoRunRecord>> {
+        self.inner.list_todo_runs(todo_id).await
+    }
+    async fn list_running_todo_runs(&self) -> anyhow::Result<Vec<ProjectTodoRunRecord>> {
+        self.inner.list_running_todo_runs().await
+    }
+    async fn next_todo_version(&self, todo_id: &str) -> anyhow::Result<i64> {
+        self.inner.next_todo_version(todo_id).await
+    }
+}
+
+#[tokio::test]
+async fn create_run_failure_rolls_back_claim() {
+    let store = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let dir = tempfile::tempdir().unwrap();
+    let service = ProjectService::new();
+    service
+        .init(
+            store.clone(),
+            Arc::new(CreateRunFailingStore {
+                inner: store.clone(),
+            }),
+            dir.path().to_path_buf(),
+            None,
+        )
+        .await
+        .unwrap();
+    let todo_id = seed_todo(&(store.clone() as Arc<dyn ProjectStore>), "t1", None).await;
+    store
+        .patch_todo(
+            &todo_id,
+            &ProjectTodoPatch {
+                plan_md: Some(Some("# 方案".into())),
+                status: Some(ProjectTodoStatus::Planned),
+                ..Default::default()
+            },
+            2000,
+        )
+        .await
+        .unwrap();
+
+    let err = service.start_execute(&todo_id).await.unwrap_err();
+    assert!(
+        err.to_string().contains("create execute run"),
+        "got: {err:#}"
+    );
+
+    // claim 已被条件回滚：todo 回到 Planned（而非滞留 Running），且没有
+    // execute run 行残留。
+    let todo = store.get_todo(&todo_id).await.unwrap().unwrap();
+    assert_eq!(todo.status, ProjectTodoStatus::Planned);
+    let runs = store.list_todo_runs(&todo_id).await.unwrap();
+    assert!(
+        runs.iter().all(|r| r.kind != ProjectTodoRunKind::Execute),
+        "no execute run row should exist, got {runs:?} kinds"
+    );
 }

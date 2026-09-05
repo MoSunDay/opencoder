@@ -14,6 +14,7 @@
 pub mod context;
 mod execute;
 pub mod plan_gen;
+mod recover;
 pub mod service;
 
 pub use context::ProjectContext;

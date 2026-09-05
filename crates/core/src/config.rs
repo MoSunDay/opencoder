@@ -68,6 +68,12 @@ pub struct Config {
     /// Model id for `/embeddings` calls; `None` → [`Config::embedding_model_id`]'s default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub embedding_model: Option<String>,
+    /// Provider name whose endpoint serves `/embeddings` calls; `None` →
+    /// embeddings ride the primary provider (see [`Config::resolve_embedding_endpoint`]).
+    /// Lets chat stay on a remote provider while embeddings run on a local
+    /// model server (e.g. ollama with bge-m3).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub embedding_provider: Option<String>,
     #[serde(default)]
     pub agent: AgentDefaults,
     #[serde(default)]
@@ -235,6 +241,7 @@ impl Default for Config {
             model: default_model(),
             small_model: None,
             embedding_model: None,
+            embedding_provider: None,
             agent: AgentDefaults::default(),
             compaction: CompactionConfig::default(),
             output_streamline: OutputStreamlineConfig::default(),
@@ -262,11 +269,11 @@ impl Default for Config {
 }
 
 impl Config {
-    /// Canonical user-global config path: `~/.opencoderr/config.json`.
+    /// Canonical user-global config path: `~/.opencoder/config.json`.
     /// Test callers using [`scoped_config_home`] receive the isolated path.
     pub fn global_config_path() -> Result<PathBuf> {
         env::primary_global_config_path().ok_or_else(|| {
-            CoreError::Config("cannot resolve home directory for ~/.opencoderr/config.json".into())
+            CoreError::Config("cannot resolve home directory for ~/.opencoder/config.json".into())
         })
     }
 
@@ -320,7 +327,7 @@ impl Config {
     pub fn load(working_dir: &Path) -> Result<Config> {
         let mut cfg = Config::default();
         // Merge ALL existing candidates, least-specific first so project files
-        // override the global base (matches opencoder). This lets ~/.opencoderr
+        // override the global base (matches opencoder). This lets ~/.opencoder
         // provide the provider+key while a project opencoder.json overrides only
         // the model — `opencoder` then runs directly from any directory.
         let mut candidates = env::config_candidates(working_dir);
@@ -421,7 +428,8 @@ impl Config {
     /// Bare model id for `/embeddings` request bodies (provider prefix after
     /// the `/` stripped, same as `small_model_id`). Falls back to OpenAI's
     /// `text-embedding-3-small` when `embedding_model` is unset; embeddings
-    /// ride the primary provider's `resolve_endpoint`.
+    /// hit [`Config::resolve_embedding_endpoint`] (primary provider unless
+    /// `embedding_provider` names a dedicated one).
     pub fn embedding_model_id(&self) -> &str {
         match &self.embedding_model {
             Some(s) => s.split_once('/').map(|(_, m)| m).unwrap_or(s),
@@ -538,6 +546,36 @@ impl Config {
             api_key: self.api_key_for(name)?,
             headers,
         })
+    }
+
+    /// Endpoint for `/embeddings` calls. `None` → the primary provider's
+    /// [`Endpoint`](resolve_endpoint); `Some(name)` → that registered
+    /// provider's base_url/api_key/headers, so a local embedding server can
+    /// serve brain vectors while chat stays on the primary provider. An
+    /// unregistered name is an error naming it (never a silent fallback —
+    /// embeddings silently hitting the wrong server is a data-integrity bug:
+    /// vectors from different models are not comparable).
+    pub fn resolve_embedding_endpoint(&self) -> Result<Endpoint> {
+        match &self.embedding_provider {
+            Some(name) if name != self.provider_id() => {
+                let p = self.provider_for(name).ok_or_else(|| {
+                    CoreError::Config(format!(
+                        "unknown embedding_provider `{name}`: not in the `providers` registry"
+                    ))
+                })?;
+                let headers: Vec<(String, String)> = p
+                    .headers
+                    .iter()
+                    .map(|h| (h.name.clone(), env::resolve_env(&h.value)))
+                    .collect();
+                Ok(Endpoint {
+                    base_url: p.base_url.clone(),
+                    api_key: self.api_key_for(name)?,
+                    headers,
+                })
+            }
+            _ => self.resolve_endpoint(),
+        }
     }
 
     /// Effective TUI frame rate (FPS), clamped to 1..=30. `None` -> 10.

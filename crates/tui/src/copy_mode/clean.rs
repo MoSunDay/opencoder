@@ -9,7 +9,10 @@
 //! independent all-space spans whose width carries the slot exactly — no
 //! 4-vs-2-space guessing — and rows that merely *contain* decoration glyphs
 //! (e.g. `---` YAML frontmatter inside a fenced block, which carries a `│ `
-//! prefix span) are content, not chrome, and survive verbatim.
+//! prefix span) are content, not chrome, and survive verbatim. The merged
+//! `{❯|▸} Say(n step{s}): ` pair header is half-chrome: its label and live
+//! spinner spans go, but its preview span is the Say's first line and
+//! survives (see [`LineKind::SayPairHeader`]).
 
 use ratatui::text::{Line, Span};
 
@@ -48,6 +51,12 @@ pub(crate) enum LineKind {
     /// `❯ N Function calls` / `▸ N Function calls` aggregation row —
     /// dropped (chrome).
     CallsRow,
+    /// `{❯|▸} Say(n step{s}): ` merged pair header — the label span (and the
+    /// live `⠋ running ` spinner span) are chrome, but the preview payload
+    /// span is the Say's first line and must survive: the body below SKIPS
+    /// that line (preview dedup, `merged_say_body`) and a single-line Say
+    /// renders body-hidden, so this row is the ONLY place that line exists.
+    SayPairHeader,
     /// `💭 Thinking` header row (standalone expanded block, or an open
     /// step's folded thinking) — dropped.
     ThinkingHeader,
@@ -119,7 +128,7 @@ fn classify_spans(spans: &[Span<'_>]) -> Option<(LineKind, usize)> {
         return Some((LineKind::CallsRow, 0));
     }
     if is_say_pair_header(spans) {
-        return Some((LineKind::RoleHeader, 0));
+        return Some((LineKind::SayPairHeader, 0));
     }
     None
 }
@@ -127,9 +136,12 @@ fn classify_spans(spans: &[Span<'_>]) -> Option<(LineKind, usize)> {
 /// `true` for the merged StepGroup+Say pair header: one styled
 /// `{❯|▸} Say(n step{s}): ` label span (count digits, singular/plural),
 /// optionally followed by the preview and `⠋ running ` spinner spans.
-/// Navigation chrome like the standalone role headers — the Say body below
-/// carries the same first line, so dropping the row in copy mode loses
-/// nothing. A markdown row could only collide by literally opening with the
+/// Half-chrome (unlike the standalone role headers): the Say body below
+/// SKIPS its preview line (a single-line Say renders body-hidden entirely),
+/// so the header's preview payload is the ONLY rendering of that line;
+/// only the label/spinner spans are chrome (see
+/// [`LineKind::SayPairHeader`] / [`say_pair_payload`]). A markdown row
+/// could only collide by literally opening with the
 /// glyph + `Say(` label as its entire first span.
 fn is_say_pair_header(spans: &[Span<'_>]) -> bool {
     let Some(first) = spans.first() else {
@@ -216,6 +228,9 @@ pub fn plain_text(line: &Line<'_>) -> String {
 pub fn clean_line(line: &Line<'_>) -> Option<String> {
     let (kind, _) = classify(line);
     match kind {
+        // The merged pair header's preview span IS the Say's first line —
+        // and its only rendering once the body dedup kicks in.
+        LineKind::SayPairHeader => say_pair_payload(skip_gutter(line.spans.as_slice())),
         LineKind::RoleHeader
         | LineKind::ThinkingHeader
         | LineKind::CodeTop
@@ -231,6 +246,24 @@ pub fn clean_line(line: &Line<'_>) -> Option<String> {
         LineKind::CodeRow => Some(payload_text(line, false)),
         LineKind::Text => Some(payload_text(line, true)),
     }
+}
+
+/// Payload of the merged Say pair header: the preview span between the
+/// label span and the (optional) trailing live-spinner span. `None` when
+/// there is no preview (whitespace-only Say — nothing to copy).
+fn say_pair_payload(spans: &[Span<'_>]) -> Option<String> {
+    // spans[0] is the label (validated by `is_say_pair_header`); the
+    // spinner span shape is `"  {glyph} running "` (two leading spaces +
+    // `running ` tail — same grammar `count_row_label` matches).
+    let mut rest = spans.get(1..).unwrap_or(&[]);
+    if let Some(last) = rest.last() {
+        let t = last.content.as_ref();
+        if t.starts_with("  ") && t.ends_with("running ") {
+            rest = &rest[..rest.len() - 1];
+        }
+    }
+    let preview = rest.first().map(|s| s.content.trim()).unwrap_or_default();
+    (!preview.is_empty()).then(|| preview.to_string())
 }
 
 /// Concatenate the line's span payload after removing decoration slots
@@ -486,6 +519,12 @@ mod tests {
                 LineKind::CallsRow,
                 4,
             ),
+            (&["\u{25b8} Say(1 step): ", "x"], LineKind::SayPairHeader, 0),
+            (
+                &["\u{276f} Say(2 steps): ", "x", "  \u{280b} running "],
+                LineKind::SayPairHeader,
+                0,
+            ),
             (&["\u{250c} rust "], LineKind::CodeTop, 0),
             (&[CODE_ROW_PREFIX, "x"], LineKind::CodeRow, 2),
             (&[CODE_ROW_EMPTY], LineKind::CodeRow, 1),
@@ -511,6 +550,38 @@ mod tests {
     fn plain_text_concatenates_spans() {
         assert_eq!(plain_text(&line_of(&["a", "b", "c"])), "abc");
         assert_eq!(plain_text(&Line::from("")), "");
+    }
+
+    #[test]
+    fn say_pair_headers_keep_preview_payload() {
+        run(&[
+            (
+                "closed singular + preview",
+                &["\u{25b8} Say(1 step): ", "the answer"],
+                Some("the answer"),
+            ),
+            (
+                "open plural + preview",
+                &["\u{276f} Say(2 steps): ", "first line"],
+                Some("first line"),
+            ),
+            (
+                "preview + live spinner",
+                &["\u{25b8} Say(1 step): ", "ans", "  \u{280b} running "],
+                Some("ans"),
+            ),
+            (
+                "streaming, empty preview",
+                &["\u{276f} Say(1 step): ", "  \u{280b} running "],
+                None,
+            ),
+            ("no preview span", &["\u{25b8} Say(1 step): "], None),
+            (
+                "whitespace-only preview",
+                &["\u{25b8} Say(1 step): ", "   "],
+                None,
+            ),
+        ]);
     }
 
     #[test]

@@ -1,4 +1,4 @@
-Commit: af71944（工作树态，未提交）
+Commit: 3d971f0
 
 # Agent 激活 preflight 拒绝无 prompt 卡（修复静默失效）
 

@@ -142,7 +142,7 @@ fn default_opts_from_config_roundtrip() {
 /// Real-client e2e: mount the export with `mount.nfs` and read the
 /// tree through the kernel. Ignored by default — it needs
 /// root/CAP_SYS_ADMIN, an installed `mount.nfs` and the nfs client
-/// modules. Run with `cargo test -p opencode-agents -- --ignored`.
+/// modules. Run with `cargo test -p opencoder-agents -- --ignored`.
 #[test]
 #[ignore = "manual: needs mount privileges + nfs client"]
 fn manual_mount_e2e() {

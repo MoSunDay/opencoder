@@ -199,9 +199,15 @@ fn resource_meta_and_version_dirs_follow_current() {
     let root = dir.path();
     make_resource(root, "prompts", "default", 1, &[("soul.md", "s1")]);
     let meta = read_resource_meta("prompts", "default").unwrap();
-    assert_eq!((meta.name.as_str(), meta.current, meta.history.as_slice()), ("default", 1, &[1][..]));
+    assert_eq!(
+        (meta.name.as_str(), meta.current, meta.history.as_slice()),
+        ("default", 1, &[1][..])
+    );
     let v1 = root.join("prompts").join("default").join("v1");
-    assert_eq!(resource_current_version_dir("prompts", "default"), Some(v1.clone()));
+    assert_eq!(
+        resource_current_version_dir("prompts", "default"),
+        Some(v1.clone())
+    );
     // Pure path computation: no existence check, any version number.
     assert_eq!(
         resource_version_dir("prompts", "default", 7),
@@ -243,7 +249,10 @@ fn list_resources_sorted_silent_and_filtered() {
     make_resource(root, "tools", "alpha", 1, &[]);
     std::fs::create_dir_all(root.join("tools").join("a b")).unwrap(); // stray dir
     std::fs::write(root.join("tools").join("plain.txt"), "x").unwrap(); // plain file
-    assert_eq!(list_resources("tools"), vec!["alpha".to_string(), "zeta".to_string()]);
+    assert_eq!(
+        list_resources("tools"),
+        vec!["alpha".to_string(), "zeta".to_string()]
+    );
     assert!(list_resources("prompts").is_empty());
     assert!(list_resources("nosuch").is_empty());
 }
@@ -261,7 +270,7 @@ fn agent_ref_helpers_and_all_tools_dirs_shape() {
     make_resource(root, "tools", "zeta", 1, &[("run.sh", "")]);
     make_resource(root, "tools", "alpha", 3, &[("fmt", "")]);
     make_resource(root, "tools", "noversion", 0, &[]); // current 0 ⇒ skipped
-    // Cards: full ref, stale ref, no ref.
+                                                       // Cards: full ref, stale ref, no ref.
     let card = |name: &str, skills: Option<&str>, tools: Option<&str>| {
         std::fs::create_dir_all(root.join(name)).unwrap();
         std::fs::write(

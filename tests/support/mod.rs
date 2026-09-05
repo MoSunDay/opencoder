@@ -10,11 +10,11 @@ use std::path::PathBuf;
 /// `allow(dead_code)`: every test file pulls in this whole module, and not
 /// every file spawns both fleet binaries.
 #[allow(dead_code)]
-pub const SERVER_BIN: &[&str] = &["opencoder-server", "opencode-server"];
+pub const SERVER_BIN: &[&str] = &["opencoder-server", "opencoder-server"];
 
 /// Candidate names for the fleet worker binary, in priority order.
 #[allow(dead_code)]
-pub const AGENT_BIN: &[&str] = &["opencoder-agent", "opencode-agent"];
+pub const AGENT_BIN: &[&str] = &["opencoder-agent", "opencoder-agent"];
 
 /// Resolve a workspace-sibling binary from the same target dir as this
 /// test binary, trying `candidates` in priority order and returning the
@@ -29,8 +29,8 @@ pub const AGENT_BIN: &[&str] = &["opencoder-agent", "opencode-agent"];
 ///
 /// Candidates (not a single name) because the fleet binaries carry the
 /// package spelling (`opencoder-server`/`opencoder-agent`, matching the
-/// `opencode daemon` migration hint) while some docs spell them without
-/// the `r` (`opencode-server`/`opencode-agent`). Probing the package
+/// `opencoder daemon` migration hint) while some docs spell them without
+/// the `r` (`opencoder-server`/`opencoder-agent`). Probing the package
 /// spelling first with the documented one as fallback keeps these tests
 /// green whichever way the naming settles.
 pub fn sibling_bin(candidates: &[&str]) -> PathBuf {

@@ -278,7 +278,7 @@ impl SessionEvent {
 
     /// Reconstruct a `SessionEvent` from an SSE event-name (`sse_kind`) and its
     /// payload (`sse_data`). This is the inverse of `sse_kind()` + `sse_data()`,
-    /// letting a remote client (`opencode client`) rebuild the structured event
+    /// letting a remote client (`opencoder client`) rebuild the structured event
     /// stream from a server's `/events` SSE wire format.
     ///
     /// Returns `None` for an unrecognized `kind`. `TranscriptReset` carries no

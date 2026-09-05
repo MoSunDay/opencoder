@@ -386,12 +386,10 @@ async fn aligned_summary_crash_residue_records_turn_without_phantom_subturn() {
 
     // Scripted ONLY with the captain's closing decision: any phantom member
     // dispatch would exhaust the script and derail the run.
-    let mock = Arc::new(
-        MockDispatcher::new().reply(
-            &captain.id,
-            vec![ok(closing_complete("最终结论：按功能分目录"))],
-        ),
-    );
+    let mock = Arc::new(MockDispatcher::new().reply(
+        &captain.id,
+        vec![ok(closing_complete("最终结论：按功能分目录"))],
+    ));
     let meta = run(&fx, mock.clone(), &topic_id).await;
 
     assert_eq!(meta.status, "finished");

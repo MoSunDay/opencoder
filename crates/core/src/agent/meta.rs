@@ -21,14 +21,14 @@ use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 
-use crate::config::env::global_opencode_home;
+use crate::config::env::global_opencoder_home;
 
 // The shared-pool read path lives in `resource.rs`; re-exported here so
 // `agent::meta::*` remains the single import surface for the agents root.
 pub use super::resource::{
     active_skill_roots, active_tools_dirs, agent_skill_roots, agent_tools_dirs, all_tools_dirs,
     category_dir, list_resources, read_resource_meta, resource_current_version_dir,
-    resource_version_dir, validate_resource_name, AGENT_CATEGORIES, ResourceMeta,
+    resource_version_dir, validate_resource_name, ResourceMeta, AGENT_CATEGORIES,
 };
 
 /// Marker file under the agents root: one line, the active agent's name.
@@ -125,7 +125,7 @@ pub fn set_agents_dir_override(dir: Option<PathBuf>) {
 }
 
 /// The agents root: (a) process-global override, (b) `OPENCODER_AGENTS_DIR`
-/// (blank ignored), (c) `<global_opencode_home()>/agents`. Never created.
+/// (blank ignored), (c) `<global_opencoder_home()>/agents`. Never created.
 pub fn agents_dir() -> Option<PathBuf> {
     if let Some(dir) = override_dir() {
         return Some(dir);
@@ -136,7 +136,7 @@ pub fn agents_dir() -> Option<PathBuf> {
             return Some(PathBuf::from(t));
         }
     }
-    global_opencode_home().map(|home| home.join("agents"))
+    global_opencoder_home().map(|home| home.join("agents"))
 }
 
 /// `agents/<name>/` for a validated name (validation first: no traversal

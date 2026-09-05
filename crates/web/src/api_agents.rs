@@ -1,6 +1,6 @@
 //! `/api/agents` — REST surface for file-based custom agents
 //! (`~/.opencoder/agents/`): reference cards + the active marker. Reads go
-//! through `opencode_core::agent`, writes through `opencode_agents`; the
+//! through `opencoder_core::agent`, writes through `opencoder_agents`; the
 //! shared, versioned resource pools the cards reference live in
 //! [`crate::api_agent_resources`]. Anything that can change the ACTIVE
 //! agent's chain fans `DrainCmd::ReloadConfig` out to live sessions
@@ -17,7 +17,7 @@ use axum::Json;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use opencode_agents::{create_agent, delete_agent, update_agent_refs};
+use opencoder_agents::{create_agent, delete_agent, update_agent_refs};
 use opencoder_core::agent::{
     active_agent, list_agents, read_agent_meta, resource_current_version_dir, set_active_agent,
     set_active_agent_checked, validate_agent_name, AgentRefs,

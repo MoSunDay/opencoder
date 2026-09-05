@@ -46,17 +46,13 @@ pub async fn create_todo(pool: &MySqlPool, starrocks: bool, rec: &ProjectTodoRec
     Ok(())
 }
 
-/// Dynamic `SET` from the patch's `Some` fields; always stamps
-/// `updated_at = now_ms`. `Option<Option<String>>` fields distinguish "leave
-/// unchanged" (outer `None`) from "clear to NULL" (`Some(None)`). Returns
-/// `false` when the id does not exist.
-pub async fn patch_todo(
-    pool: &MySqlPool,
-    starrocks: bool,
-    id: &str,
+/// The `SET` fragments + bound args shared by `patch_todo` and its
+/// expected-status CAS variant — pure projection of the patch's `Some`
+/// fields, no I/O. `Option<Option<String>>` fields distinguish "leave
+/// unchanged" (outer `None`) from "clear to NULL" (`Some(None)`).
+fn todo_set_fragment(
     patch: &crate::project_types::ProjectTodoPatch,
-    now_ms: i64,
-) -> Result<bool> {
+) -> (Vec<&'static str>, Vec<Arg>) {
     let mut sets: Vec<&'static str> = Vec::new();
     let mut args: Vec<Arg> = Vec::new();
     if let Some(v) = &patch.title {
@@ -87,6 +83,19 @@ pub async fn patch_todo(
         sets.push("active_session_id = ?");
         args.push(Arg::TextOrNull(v.clone()));
     }
+    (sets, args)
+}
+
+/// Dynamic `SET` from the patch's `Some` fields; always stamps
+/// `updated_at = now_ms`. Returns `false` when the id does not exist.
+pub async fn patch_todo(
+    pool: &MySqlPool,
+    starrocks: bool,
+    id: &str,
+    patch: &crate::project_types::ProjectTodoPatch,
+    now_ms: i64,
+) -> Result<bool> {
+    let (mut sets, mut args) = todo_set_fragment(patch);
     sets.push("updated_at = ?");
     args.push(Arg::Int(now_ms));
     args.push(Arg::Text(id.to_string()));
@@ -134,6 +143,64 @@ pub async fn get_todo(
     )
     .await?;
     row.as_ref().map(row_to_todo).transpose()
+}
+
+/// Expected-status CAS (`SET status = 'running' WHERE id = ? AND status <>
+/// 'running'`): exactly one concurrent caller can flip a todo into running.
+/// `false` = not found or already running; both mean "no claim". Note the
+/// matched-rows/changed-rows ambiguity of MySQL's affected count does not
+/// apply: the WHERE clause guarantees any matched row is also changed (it
+/// was not 'running' before).
+pub async fn claim_todo_running(
+    pool: &MySqlPool,
+    starrocks: bool,
+    id: &str,
+    now_ms: i64,
+) -> Result<bool> {
+    let running = ProjectTodoStatus::Running.as_str().to_string();
+    let n = exec_write(
+        pool,
+        starrocks,
+        "UPDATE project_todos SET status = ?, updated_at = ? WHERE id = ? AND status <> ?",
+        vec![
+            Arg::Text(running.clone()),
+            Arg::Int(now_ms),
+            Arg::Text(id.to_string()),
+            Arg::Text(running),
+        ],
+    )
+    .await
+    .context("claim project todo running")?;
+    Ok(n > 0)
+}
+
+/// Expected-status CAS variant of `patch_todo`: `WHERE id = ? AND status = ?`.
+/// `false` = not found or the state moved on (someone else won the write).
+/// MySQL's affected-rows count reports changed rows only, but the
+/// `WHERE status = ?` guard means any matched row is also changed PROVIDED
+/// the patched status differs from `when` — callers must never set
+/// `patch.status == when` or a no-op SET would read as a lost CAS.
+pub async fn patch_todo_when(
+    pool: &MySqlPool,
+    starrocks: bool,
+    id: &str,
+    when: ProjectTodoStatus,
+    patch: &crate::project_types::ProjectTodoPatch,
+    now_ms: i64,
+) -> Result<bool> {
+    let (mut sets, mut args) = todo_set_fragment(patch);
+    sets.push("updated_at = ?");
+    args.push(Arg::Int(now_ms));
+    let sql = format!(
+        "UPDATE project_todos SET {} WHERE id = ? AND status = ?",
+        sets.join(", ")
+    );
+    args.push(Arg::Text(id.to_string()));
+    args.push(Arg::Text(when.as_str().to_string()));
+    let n = exec_write(pool, starrocks, &sql, args)
+        .await
+        .context("patch project todo (expected status)")?;
+    Ok(n > 0)
 }
 
 /// `milestone_id == None` lists ALL todos (backlog included); ordered by
@@ -204,16 +271,12 @@ pub async fn create_todo_run(
     Ok(())
 }
 
-pub async fn patch_todo_run(
-    pool: &MySqlPool,
-    starrocks: bool,
-    id: &str,
-    patch: &ProjectTodoRunPatch,
-    _now_ms: i64,
-) -> Result<bool> {
+/// The `SET` fragments + bound args shared by `patch_todo_run` and its
+/// expected-status CAS variant — pure projection of the patch's `Some`
+/// fields, no I/O. Plain `Option<String>` fields set, never clear.
+fn run_set_fragment(patch: &ProjectTodoRunPatch) -> (Vec<&'static str>, Vec<Arg>) {
     let mut sets: Vec<&'static str> = Vec::new();
     let mut args: Vec<Arg> = Vec::new();
-    // Plain Option<String> fields: Some(v) sets, never clears.
     if let Some(v) = &patch.plan_md {
         sets.push("plan_md = ?");
         args.push(Arg::Text(v.clone()));
@@ -234,6 +297,17 @@ pub async fn patch_todo_run(
         sets.push("finished_at = ?");
         args.push(Arg::Int(v));
     }
+    (sets, args)
+}
+
+pub async fn patch_todo_run(
+    pool: &MySqlPool,
+    starrocks: bool,
+    id: &str,
+    patch: &ProjectTodoRunPatch,
+    _now_ms: i64,
+) -> Result<bool> {
+    let (sets, mut args) = run_set_fragment(patch);
     // No updated_at column on runs (created_at + finished_at span the
     // lifecycle); now_ms stays unused for signature uniformity, same as the
     // libsql impl.
@@ -245,6 +319,34 @@ pub async fn patch_todo_run(
     let n = exec_write(pool, starrocks, &sql, args)
         .await
         .context("patch project todo run")?;
+    Ok(n > 0)
+}
+
+/// Expected-status CAS variant of `patch_todo_run`: `WHERE id = ? AND
+/// status = ?`. `false` = not found or the row is no longer in `when` —
+/// a stale convergence must not relabel a row the driver already closed.
+/// Same matched-vs-changed caveat as `patch_todo_when` (and the same
+/// guarantee from the `WHERE status = ?` guard): any matched row is also
+/// changed provided the patched status differs from `when`. Runs have no
+/// updated_at, so `_now_ms` stays unused for signature uniformity.
+pub async fn patch_todo_run_when(
+    pool: &MySqlPool,
+    starrocks: bool,
+    id: &str,
+    when: ProjectTodoRunStatus,
+    patch: &ProjectTodoRunPatch,
+    _now_ms: i64,
+) -> Result<bool> {
+    let (sets, mut args) = run_set_fragment(patch);
+    let sql = format!(
+        "UPDATE project_todo_runs SET {} WHERE id = ? AND status = ?",
+        sets.join(", ")
+    );
+    args.push(Arg::Text(id.to_string()));
+    args.push(Arg::Text(when.as_str().to_string()));
+    let n = exec_write(pool, starrocks, &sql, args)
+        .await
+        .context("patch project todo run (expected status)")?;
     Ok(n > 0)
 }
 
@@ -276,6 +378,24 @@ pub async fn list_todo_runs(
             "SELECT {RUN_COLS} FROM project_todo_runs WHERE todo_id = ? ORDER BY version DESC"
         ),
         &[Arg::Text(todo_id.to_string())],
+    )
+    .await?;
+    rows.iter().map(row_to_run).collect()
+}
+
+/// Every run row currently in the `running` state (any todo, any kind) —
+/// feeds the opportunistic stale-run sweep.
+pub async fn list_running_todo_runs(
+    pool: &MySqlPool,
+    starrocks: bool,
+) -> Result<Vec<ProjectTodoRunRecord>> {
+    let rows = exec_read_all(
+        pool,
+        starrocks,
+        &format!("SELECT {RUN_COLS} FROM project_todo_runs WHERE status = ?"),
+        &[Arg::Text(
+            ProjectTodoRunStatus::Running.as_str().to_string(),
+        )],
     )
     .await?;
     rows.iter().map(row_to_run).collect()

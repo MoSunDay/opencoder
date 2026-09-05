@@ -1,6 +1,6 @@
 //! Contract tests for `GET /api/sessions/:id/subagents` (api_subagents.rs):
 //! the durable subagent-task listing that backs the SPA's post-refresh card
-//! restore and child-transcript drill-down, and `opencode client session
+//! restore and child-transcript drill-down, and `opencoder client session
 //! tasks`. Assertions: field shape (id/kind/status/child_session_id/prompt/
 //! parent_message_id/created_at/updated_at), 200 on an empty list, 404 when
 //! the parent session does not exist. Uses the full `build_app` router so

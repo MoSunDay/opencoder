@@ -21,7 +21,7 @@ use serde_json::Value;
 use tokio::sync::oneshot;
 
 /// Fixed tool result when no interactive listener is attached (headless
-/// `opencode run`, web sessions). The model must proceed on its own judgment.
+/// `opencoder run`, web sessions). The model must proceed on its own judgment.
 pub const NO_LISTENER_REPLY: &str = "No interactive user is attached to this session. \
      Proceed with your best judgment and state the assumption in the plan.";
 
@@ -30,7 +30,7 @@ pub const NO_LISTENER_REPLY: &str = "No interactive user is attached to this ses
 pub const SKIPPED_REPLY: &str = "User skipped the question. Proceed with your best judgment.";
 
 /// What the model asked, mirrored from the tool call so a non-TUI frontend
-/// (web question cards, `opencode client`) can render the question without
+/// (web question cards, `opencoder client`) can render the question without
 /// scraping the transcript.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QuestionPayload {

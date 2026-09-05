@@ -8,6 +8,12 @@
 //! - milestone_crud_and_goal_filter: CRUD under a goal + list_milestones filter
 //! - todo_patch_semantics_including_clear_to_null: Option<Option<String>>
 //!   clears plan_md/milestone_id to NULL; backlog vs milestone todos list
+//! - claim_todo_running_cas_and_running_run_listing: expected-status CAS
+//!   (planned -> claim true, re-claim/unknown -> false, no re-stamp) and
+//!   list_running_todo_runs filters to running rows only
+//! - conditional_patch_cas_applies_only_in_expected_state: patch_todo_when /
+//!   patch_todo_run_when apply only while the row still holds the expected
+//!   status (claim-rollback, plan-writeback race, terminal-run convergence)
 //! - run_versions_and_listing_order: next_todo_version numbering (empty = 1),
 //!   newest-first listing, patch stamps status/finished_at
 //! - cascades: delete_goal removes milestone+todo+runs; delete_todo removes
@@ -276,6 +282,217 @@ async fn run_versions_and_listing_order() {
     assert_eq!(r2.finished_at, Some(99));
     assert!(r2.status.is_terminal());
     assert!(p.get_todo_run("missing").await.unwrap().is_none());
+}
+
+#[tokio::test]
+async fn claim_todo_running_cas_and_running_run_listing() {
+    let (_dir, _store, p) = fresh().await;
+    p.create_todo(&todo("t1", None, 1)).await.unwrap();
+    assert!(p
+        .patch_todo(
+            "t1",
+            &ProjectTodoPatch {
+                status: Some(ProjectTodoStatus::Planned),
+                ..Default::default()
+            },
+            10,
+        )
+        .await
+        .unwrap());
+
+    // Planned -> the claim wins and flips the row to running.
+    assert!(p.claim_todo_running("t1", 20).await.unwrap());
+    let t1 = p.get_todo("t1").await.unwrap().unwrap();
+    assert_eq!(t1.status, ProjectTodoStatus::Running);
+    assert_eq!(t1.updated_at, 20);
+
+    // Already running -> no claim; the row is not re-stamped.
+    assert!(!p.claim_todo_running("t1", 30).await.unwrap());
+    let t1 = p.get_todo("t1").await.unwrap().unwrap();
+    assert_eq!(t1.status, ProjectTodoStatus::Running);
+    assert_eq!(t1.updated_at, 20, "a lost claim must not re-stamp");
+
+    // Unknown id -> no claim, not an error (patch_* convention).
+    assert!(!p.claim_todo_running("nope", 40).await.unwrap());
+
+    // list_running_todo_runs: only the running rows, across todos.
+    p.create_todo(&todo("t2", None, 2)).await.unwrap();
+    run(p.as_ref(), "r1", "t1", 50).await; // helper seeds status running
+    run(p.as_ref(), "r2", "t2", 60).await;
+    assert!(p
+        .patch_todo_run(
+            "r2",
+            &ProjectTodoRunPatch {
+                status: Some(ProjectTodoRunStatus::Done),
+                finished_at: Some(99),
+                ..Default::default()
+            },
+            99,
+        )
+        .await
+        .unwrap());
+    let running = p.list_running_todo_runs().await.unwrap();
+    assert_eq!(
+        running.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(),
+        vec!["r1"],
+        "only the still-running run row is listed"
+    );
+    assert_eq!(running[0].todo_id, "t1");
+    assert_eq!(running[0].status, ProjectTodoRunStatus::Running);
+}
+
+#[tokio::test]
+async fn conditional_patch_cas_applies_only_in_expected_state() {
+    let (_dir, _store, p) = fresh().await;
+    p.create_todo(&todo("t1", None, 1)).await.unwrap();
+
+    // Lost CAS (wrong expected status): false, and the row is untouched —
+    // still Draft with its original updated_at.
+    assert!(!p
+        .patch_todo_when(
+            "t1",
+            ProjectTodoStatus::Planned,
+            &ProjectTodoPatch {
+                status: Some(ProjectTodoStatus::Failed),
+                ..Default::default()
+            },
+            10,
+        )
+        .await
+        .unwrap());
+    let t1 = p.get_todo("t1").await.unwrap().unwrap();
+    assert_eq!(t1.status, ProjectTodoStatus::Draft);
+    assert_eq!(t1.updated_at, 1, "a lost CAS must not re-stamp");
+
+    // Won CAS: matching expected status applies and flips the row.
+    assert!(p
+        .patch_todo_when(
+            "t1",
+            ProjectTodoStatus::Draft,
+            &ProjectTodoPatch {
+                status: Some(ProjectTodoStatus::Planned),
+                ..Default::default()
+            },
+            11,
+        )
+        .await
+        .unwrap());
+    assert_eq!(
+        p.get_todo("t1").await.unwrap().unwrap().status,
+        ProjectTodoStatus::Planned
+    );
+
+    // Claim-rollback shape: the claim wins (Running), then a CAS still
+    // expecting Running rolls the row back to the pre-claim status.
+    assert!(p.claim_todo_running("t1", 12).await.unwrap());
+    assert!(p
+        .patch_todo_when(
+            "t1",
+            ProjectTodoStatus::Running,
+            &ProjectTodoPatch {
+                status: Some(ProjectTodoStatus::Planned),
+                ..Default::default()
+            },
+            13,
+        )
+        .await
+        .unwrap());
+
+    // Unknown id: false, not an error (patch_* convention).
+    assert!(!p
+        .patch_todo_when(
+            "missing",
+            ProjectTodoStatus::Running,
+            &ProjectTodoPatch {
+                status: Some(ProjectTodoStatus::Failed),
+                ..Default::default()
+            },
+            14,
+        )
+        .await
+        .unwrap());
+
+    // Plan-writeback racing execute: after a fresh claim the todo is
+    // Running, so a writeback still expecting Planned loses and must not
+    // clobber plan_md.
+    assert!(p.claim_todo_running("t1", 15).await.unwrap());
+    assert!(!p
+        .patch_todo_when(
+            "t1",
+            ProjectTodoStatus::Planned,
+            &ProjectTodoPatch {
+                status: Some(ProjectTodoStatus::Planned),
+                plan_md: Some(Some("# new".to_string())),
+                ..Default::default()
+            },
+            15,
+        )
+        .await
+        .unwrap());
+    let t1 = p.get_todo("t1").await.unwrap().unwrap();
+    assert_eq!(t1.status, ProjectTodoStatus::Running);
+    assert_eq!(t1.plan_md, None, "a lost plan writeback keeps plan_md");
+
+    // Run CAS: seed a running run, then try to converge it as if it were
+    // already Done — lost, the row stays Running/finished_at None.
+    run(p.as_ref(), "r1", "t1", 20).await;
+    assert!(!p
+        .patch_todo_run_when(
+            "r1",
+            ProjectTodoRunStatus::Done,
+            &ProjectTodoRunPatch {
+                status: Some(ProjectTodoRunStatus::Failed),
+                finished_at: Some(99),
+                ..Default::default()
+            },
+            20,
+        )
+        .await
+        .unwrap());
+    let r1 = p.get_todo_run("r1").await.unwrap().unwrap();
+    assert_eq!(r1.status, ProjectTodoRunStatus::Running);
+    assert_eq!(r1.finished_at, None);
+
+    // Panic/stale convergence on a running row: wins, flips to Failed.
+    assert!(p
+        .patch_todo_run_when(
+            "r1",
+            ProjectTodoRunStatus::Running,
+            &ProjectTodoRunPatch {
+                status: Some(ProjectTodoRunStatus::Failed),
+                output_md: Some("converged".to_string()),
+                finished_at: Some(21),
+                ..Default::default()
+            },
+            21,
+        )
+        .await
+        .unwrap());
+    let r1 = p.get_todo_run("r1").await.unwrap().unwrap();
+    assert_eq!(r1.status, ProjectTodoRunStatus::Failed);
+    assert_eq!(r1.output_md.as_deref(), Some("converged"));
+    assert_eq!(r1.finished_at, Some(21));
+
+    // The same convergence replayed on the now-terminal row must not
+    // relabel it — the row is no longer Running.
+    assert!(!p
+        .patch_todo_run_when(
+            "r1",
+            ProjectTodoRunStatus::Running,
+            &ProjectTodoRunPatch {
+                status: Some(ProjectTodoRunStatus::Failed),
+                output_md: Some("converged".to_string()),
+                finished_at: Some(21),
+                ..Default::default()
+            },
+            22,
+        )
+        .await
+        .unwrap());
+    assert_eq!(
+        p.get_todo_run("r1").await.unwrap().unwrap().status,
+        ProjectTodoRunStatus::Failed
+    );
 }
 
 #[tokio::test]

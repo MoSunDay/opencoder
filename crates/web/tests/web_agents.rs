@@ -1,7 +1,7 @@
 //! `/api/agents` REST contract tests. The agents root lives behind a
-//! process-global override (`opencode_core::agent::set_agents_dir_override`),
+//! process-global override (`opencoder_core::agent::set_agents_dir_override`),
 //! so every test holds ONE static lock for its whole body (mirrors the
-//! `opencode-agents` testutil). Thin router + oneshot (same shape as
+//! `opencoder-agents` testutil). Thin router + oneshot (same shape as
 //! `web_envs.rs`); reload fan-out is observed through a stolen drain-cmd
 //! receiver, exactly like the envs activation test.
 

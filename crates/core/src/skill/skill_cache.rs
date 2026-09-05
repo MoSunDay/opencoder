@@ -324,5 +324,4 @@ mod tests {
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].name, "solo");
     }
-
 }

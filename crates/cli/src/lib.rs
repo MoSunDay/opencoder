@@ -121,7 +121,7 @@ pub enum Command {
         list: bool,
         /// Globally resume/attach by id (live: attach; stopped: cold-start in
         /// its recorded workdir). Accepts a unique displayed id prefix, a full
-        /// `opencode-<id>`/bare id, or `$index`.
+        /// `opencoder-<id>`/bare id, or `$index`.
         #[arg(short, long, conflicts_with_all = ["list", "clean", "delete"])]
         resume: Option<String>,
         /// Globally delete stopped ts-owned sessions no longer running in tmux.
@@ -178,7 +178,7 @@ pub enum Command {
     Update,
 }
 
-/// Shared flag bundle for `opencode daemon`, flattened into the [`Command::Daemon`]
+/// Shared flag bundle for `opencoder daemon`, flattened into the [`Command::Daemon`]
 /// subcommand. Server-only flags (`--host`/`--port`/`--web`) are ignored in
 /// client mode and vice versa (`--remote`/`--name`); every field is plain
 /// data so the dispatch arm stays a pure match on [`daemon::DaemonAction`].
@@ -404,13 +404,13 @@ mod tests {
     fn daemon_without_a_role_fails_to_parse() {
         // The daemon_mode ArgGroup is required: a bare `daemon` must be
         // rejected at parse time, never fall through to dispatch.
-        let res = Cli::try_parse_from(["opencode", "daemon"]);
+        let res = Cli::try_parse_from(["opencoder", "daemon"]);
         assert!(res.is_err(), "bare `daemon` must fail (exactly-one role)");
     }
 
     #[test]
     fn daemon_server_only_parses() {
-        let cli = Cli::try_parse_from(["opencode", "daemon", "--server"]).unwrap();
+        let cli = Cli::try_parse_from(["opencoder", "daemon", "--server"]).unwrap();
         match cli.command {
             Some(Command::Daemon {
                 server,
@@ -432,7 +432,14 @@ mod tests {
     #[test]
     fn daemon_client_with_remote_parses() {
         let cli = Cli::try_parse_from([
-            "opencode", "daemon", "--client", "--remote", "http://x", "--name", "gpu-1", "--token",
+            "opencoder",
+            "daemon",
+            "--client",
+            "--remote",
+            "http://x",
+            "--name",
+            "gpu-1",
+            "--token",
             "TKN",
         ])
         .unwrap();
@@ -456,7 +463,12 @@ mod tests {
     fn daemon_server_and_client_conflict() {
         // enforced twice: the explicit conflicts_with AND the single-shot group
         let res = Cli::try_parse_from([
-            "opencode", "daemon", "--server", "--client", "--remote", "u",
+            "opencoder",
+            "daemon",
+            "--server",
+            "--client",
+            "--remote",
+            "u",
         ]);
         assert!(res.is_err(), "--server + --client must fail");
     }
@@ -464,7 +476,14 @@ mod tests {
     #[test]
     fn daemon_server_flags_parse_server_tuning() {
         let cli = Cli::try_parse_from([
-            "opencode", "daemon", "--server", "--host", "0.0.0.0", "--port", "9090", "--token",
+            "opencoder",
+            "daemon",
+            "--server",
+            "--host",
+            "0.0.0.0",
+            "--port",
+            "9090",
+            "--token",
             "abc",
         ])
         .unwrap();
@@ -482,9 +501,9 @@ mod tests {
     fn daemon_client_defaults_leave_name_and_token_unset() {
         // The CLI layer never consults the env: a missing --token parses fine
         // and is enforced at dispatch (resolve_client_token -> run_node gate).
-        let a = Cli::try_parse_from(["opencode", "daemon", "--client", "--remote", "http://x"])
+        let a = Cli::try_parse_from(["opencoder", "daemon", "--client", "--remote", "http://x"])
             .unwrap();
-        let b = Cli::try_parse_from(["opencode", "daemon", "--client", "--remote", "http://x"])
+        let b = Cli::try_parse_from(["opencoder", "daemon", "--client", "--remote", "http://x"])
             .unwrap();
         match (a.command, b.command) {
             (Some(Command::Daemon { opts: o1, .. }), Some(Command::Daemon { opts: o2, .. })) => {
@@ -552,7 +571,7 @@ mod tests {
     fn tui_subcommand_carries_the_global_agent_flag() {
         // `--agent` is a global arg, so `opencoder tui --agent X` parses and
         // main's opts_from_cli can pass it into TuiOpts.
-        let cli = Cli::try_parse_from(["opencode", "tui", "--agent", "plan"]).unwrap();
+        let cli = Cli::try_parse_from(["opencoder", "tui", "--agent", "plan"]).unwrap();
         assert_eq!(cli.agent.as_deref(), Some("plan"));
         assert!(matches!(cli.command, Some(Command::Tui)));
     }

@@ -13,7 +13,7 @@ set -euo pipefail
 OP_DIR="${HOME}/.opencoder"
 SENTINEL="${OP_DIR}/skills/.skills-deps"
 
-echo "=== opencode optional skill dependencies ==="
+echo "=== opencoder optional skill dependencies ==="
 echo ""
 
 # --- detect package manager ---
@@ -51,6 +51,6 @@ echo "=== Done ==="
 echo "Sentinel written: $SENTINEL"
 echo ""
 echo "Next steps:"
-echo "  1. Restart opencode (or run 'opencode tui')."
+echo "  1. Restart opencoder (or run 'opencoder tui')."
 echo "  2. Press \$ in the TUI — ssh-pty skill now appears."
 echo "  3. Type {\$ssh-pty} to activate it."

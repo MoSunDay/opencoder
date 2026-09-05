@@ -22,7 +22,7 @@ use crate::SessionState;
 /// (`All` = every registered tools pool, `Active` = the named agent's
 /// `current.tools` ref). Builtin agents without a file card yield empty.
 pub fn tools_path_for(cfg: &Config, agent_name: &str) -> Vec<PathBuf> {
-    opencode_agents::tools_paths(cfg.agent.tools_scope, Some(agent_name))
+    opencoder_core::agent::tools_paths(cfg.agent.tools_scope, Some(agent_name))
 }
 
 /// Skill-pool roots of `agent_name` (its `current.skills` ref's current
@@ -120,12 +120,22 @@ mod tests {
     /// tools pool, all referenced by the card.
     fn write_agent(root: &Path, name: &str, skills_ref: Option<&str>, tools_ref: Option<&str>) {
         write_pool(root, "prompts", name, "soul.md", "soul");
-        write_pool(root, "skills", "alpha-set", "alpha/SKILL.md", "agent alpha body");
+        write_pool(
+            root,
+            "skills",
+            "alpha-set",
+            "alpha/SKILL.md",
+            "agent alpha body",
+        );
         write_pool(root, "tools", "t", "probe-tool", "#!/bin/sh\necho probe\n");
         let refs = format!(
             "{{\"current\": {{\"prompt\": \"{name}\", \"skills\": {sj}, \"tools\": {tj}}}}}",
-            sj = skills_ref.map(|s| format!("\"{s}\"")).unwrap_or("null".into()),
-            tj = tools_ref.map(|s| format!("\"{s}\"")).unwrap_or("null".into()),
+            sj = skills_ref
+                .map(|s| format!("\"{s}\""))
+                .unwrap_or("null".into()),
+            tj = tools_ref
+                .map(|s| format!("\"{s}\""))
+                .unwrap_or("null".into()),
         );
         std::fs::create_dir_all(root.join(name)).unwrap();
         std::fs::write(root.join(name).join("meta.json"), refs).unwrap();
@@ -183,7 +193,10 @@ mod tests {
         s.agent = resolve_agent("worker").unwrap();
         refresh(&mut s);
         assert_eq!(s.tools_path, vec![agents.path().join("tools/t/v1")]);
-        assert_eq!(s.skill_roots, vec![agents.path().join("skills/alpha-set/v1")]);
+        assert_eq!(
+            s.skill_roots,
+            vec![agents.path().join("skills/alpha-set/v1")]
+        );
 
         // Scope flip via config reload also flows through refresh.
         let mut cfg_all = Config::default();

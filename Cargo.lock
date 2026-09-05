@@ -2372,22 +2372,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 
 [[package]]
-name = "opencode-agents"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "chrono",
- "nfsserve",
- "opencoder-core",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
- "tracing",
-]
-
-[[package]]
 name = "opencoder"
 version = "0.1.0"
 dependencies = [
@@ -2419,6 +2403,22 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "opencoder-agents"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "nfsserve",
+ "opencoder-core",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -2599,7 +2599,6 @@ dependencies = [
  "grep-searcher",
  "ignore",
  "libc",
- "opencode-agents",
  "opencoder-core",
  "opencoder-llm",
  "opencoder-shellguard",
@@ -2719,7 +2718,7 @@ dependencies = [
  "dirs",
  "futures",
  "libsql",
- "opencode-agents",
+ "opencoder-agents",
  "opencoder-brain",
  "opencoder-core",
  "opencoder-dag",

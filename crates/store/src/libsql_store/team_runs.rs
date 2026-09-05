@@ -1,5 +1,5 @@
 //! Team topic-run persistence (`team_topic_runs`) — the (topic, node)
-//! fan-out ledger of the opencode-team runtime.
+//! fan-out ledger of the opencoder-team runtime.
 //!
 //! Free functions over a raw `Connection`, mirroring sibling submodules
 //! (`brain.rs` / `project_runs.rs`). The DDL constants live here (not in

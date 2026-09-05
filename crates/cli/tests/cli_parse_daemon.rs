@@ -8,7 +8,7 @@ fn parse(args: &[&str]) -> Cli {
 #[test]
 fn daemon_server_mode_parses_host_port_and_token() {
     let cli = parse(&[
-        "opencode",
+        "opencoder",
         "daemon",
         "--server",
         "--port",
@@ -33,7 +33,13 @@ fn daemon_server_mode_parses_host_port_and_token() {
     // The server branch still accepts --token (resolved server-side: flag,
     // then OPENCODER_SERVER_TOKEN, then auto-generate).
     let cli2 = parse(&[
-        "opencode", "daemon", "--server", "--port", "1", "--token", "abc",
+        "opencoder",
+        "daemon",
+        "--server",
+        "--port",
+        "1",
+        "--token",
+        "abc",
     ]);
     match cli2.command {
         Some(Command::Daemon { opts, .. }) => {
@@ -48,7 +54,7 @@ fn daemon_bare_invocation_is_rejected() {
     // Exactly one of --server / --client is required: clap must reject a bare
     // `daemon` instead of letting it fall through to dispatch.
     assert!(
-        Cli::try_parse_from(["opencode", "daemon"]).is_err(),
+        Cli::try_parse_from(["opencoder", "daemon"]).is_err(),
         "bare `daemon` must fail to parse"
     );
 }
@@ -56,7 +62,12 @@ fn daemon_bare_invocation_is_rejected() {
 #[test]
 fn daemon_server_and_client_are_mutually_exclusive() {
     let res = Cli::try_parse_from([
-        "opencode", "daemon", "--server", "--client", "--remote", "u",
+        "opencoder",
+        "daemon",
+        "--server",
+        "--client",
+        "--remote",
+        "u",
     ]);
     assert!(res.is_err(), "--server + --client must fail to parse");
 }
@@ -64,7 +75,7 @@ fn daemon_server_and_client_are_mutually_exclusive() {
 #[test]
 fn daemon_client_mode_parses_name_token_and_remote() {
     let cli = parse(&[
-        "opencode",
+        "opencoder",
         "--workdir",
         "/tmp/nodework",
         "daemon",
@@ -100,7 +111,7 @@ fn daemon_client_mode_parses_name_token_and_remote() {
 fn daemon_client_without_remote_still_parses_remote_is_enforced_at_dispatch() {
     // Parse stays permissive; the --remote requirement is enforced by
     // daemon_mode() at dispatch with a plain usage error (see daemon.rs).
-    let cli = parse(&["opencode", "daemon", "--client"]);
+    let cli = parse(&["opencoder", "daemon", "--client"]);
     match cli.command {
         Some(Command::Daemon { client, opts, .. }) => {
             assert!(client);

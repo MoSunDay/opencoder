@@ -2,7 +2,7 @@
 //!
 //! This crate is deliberately dependency-light (serde only) so BOTH the
 //! server chain (`opencoder-web` / `opencoder-server`) and the agent chain
-//! (`opencode-agent` / `opencoder-dag-runtime`) can share one source of
+//! (`opencoder-agent` / `opencoder-dag-runtime`) can share one source of
 //! truth for:
 //!
 //! - [`spec`] — the persisted workflow spec (`dag_defs.spec_json`) and its
@@ -32,7 +32,9 @@ pub use artifacts::{
     context_dir, meta_value, output_snapshot, run_root, step_dir, validate_step_slug,
     MAX_SNAPSHOT_BYTES,
 };
-pub use domain::{ready_steps, render_context, run_outcome, topo_order, validate, StepOutputs, StepStates};
+pub use domain::{
+    ready_steps, render_context, run_outcome, topo_order, validate, StepOutputs, StepStates,
+};
 pub use protocol::{
     DagClaimedRun, DagDefUpsertRequest, DagDefView, DagDispatchRequest, DagDispatchResponse,
     DagEventBatch, DagEventIn, DagEventView, DagRunView, DagStatusReport,

@@ -315,7 +315,7 @@ impl SessionState {
         self
     }
 
-    /// Mark this session as ts-owned (e.g. launched via `opencode ts`, which
+    /// Mark this session as ts-owned (e.g. launched via `opencoder ts`, which
     /// allocates an id without seeding a session row). On the first `persist`
     /// the session row is written with `agent: None` / `model: None`, the
     /// ts-ownership marker that distinguishes it from normal sessions.

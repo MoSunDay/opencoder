@@ -116,13 +116,15 @@ pub async fn serve(
             .await?;
     }
 
-    // Brain (capability library) rides the primary provider's endpoint — the
-    // exact Config::load → resolve_endpoint → ChatClient chain the
+    // Brain (capability library) rides the dedicated embedding endpoint when
+    // `embedding_provider` is configured (local embedding server), else the
+    // primary provider's — the exact Config::load → resolve_embedding_endpoint
+    // → ChatClient chain the
     // `DrainCmd::ReloadConfig` branch in `handle.rs` uses (proxy, headers and
     // read-timeout included). Any failure degrades to a bail-only client so
     // serve() still boots and brain routes answer a clear 502.
     let brain = match opencoder_core::Config::load(&workdir) {
-        Ok(cfg) => match cfg.resolve_endpoint() {
+        Ok(cfg) => match cfg.resolve_embedding_endpoint() {
             Ok(ep) => match opencoder_llm::ChatClient::new_with_read_timeout(
                 &ep.base_url,
                 &ep.api_key,

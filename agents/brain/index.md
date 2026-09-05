@@ -16,7 +16,7 @@ Commit: 8ca4d0e（统一收口落库，348 文件含 brain 全量；尾笔 66a32
 ## 依赖方向与接缝
 
 - 向量存 store schema v15 三张表（`brain_capabilities` / `brain_eng_inputs` / `brain_vectors`，详见 [agents/store](../store/index.md)）；`search_brain_vectors` 内置 model 过滤（规避跨模型 dim 不匹配）。
-- embed 走 `ChatStream::embed`（OpenAI 兼容 `/embeddings`，默认 bail，Mock 为 8 维确定性单位向量）——见 [agents/llm](../llm/index.md)；模型由 `Config::embedding_model`（默认 `text-embedding-3-small`）配置，复用主 endpoint。
+- embed 走 `ChatStream::embed`（OpenAI 兼容 `/embeddings`，默认 bail，Mock 为 8 维确定性单位向量）——见 [agents/llm](../llm/index.md)；模型由 `Config::embedding_model`（默认 `text-embedding-3-small`）配置；端点经 `Config::resolve_embedding_endpoint()`——`embedding_provider` 指定独立 provider（如本地 ollama bge-m3），否则回落主 endpoint（web 生产装配同此，未知 provider 点名报错不静默回落）。
 - 决策树计划存 store schema v18 `brain_plans`（+ `idx_brain_plans_digest`，`latest_brain_plan_for` 按 created_at DESC,rowid DESC 取最新）；tree_json 内嵌 topic 向量，读取零额外查询。
 - web 层 `api_brain.rs` 九条路由挂 `/api` 前缀（自动受 HMAC 签名保护），SPA「项目目标」tab；embed 失败→502、`PlanNotFound`→404、`PlanGenerationFailed`→502。见 [agents/web](../web/index.md)。
 

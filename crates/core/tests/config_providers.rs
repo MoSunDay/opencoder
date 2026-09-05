@@ -494,6 +494,101 @@ fn merged_with_is_pure_and_uses_config_merge_rules() {
 /// Isolate HOME + XDG_CONFIG_HOME into a temp dir so `Config::load` from `dir`
 /// does not pick up the developer's real global config. Returns the home guard
 /// (keep it alive for the test body) and a clean working-dir tempdir.
+/// A dedicated `embedding_provider` routes `/embeddings` to its endpoint
+/// (local embedding server) while chat stays on the primary provider.
+#[test]
+fn embedding_provider_routes_embeddings_to_dedicated_endpoint() {
+    let _g = ENV_LOCK.lock().unwrap();
+    let (_home_guard, dir) = isolated_home();
+    fs::write(
+        dir.path().join("opencoder.json"),
+        r#"{
+            "model": "glm/glm-5.3",
+            "embedding_model": "bge-m3",
+            "embedding_provider": "local",
+            "providers": {
+                "glm": {
+                    "base_url": "https://open.bigmodel.cn/api/coding/paas/v4",
+                    "api_key": "sk-glm"
+                },
+                "local": {
+                    "base_url": "http://127.0.0.1:11434/v1",
+                    "api_key": "ollama",
+                    "headers": [{"name": "X-Probe", "value": "embed"}]
+                }
+            }
+        }"#,
+    )
+    .unwrap();
+    let cfg = Config::load(dir.path()).unwrap();
+
+    // Chat endpoint is untouched by the embedding override.
+    let chat = cfg.resolve_endpoint().unwrap();
+    assert_eq!(chat.base_url, "https://open.bigmodel.cn/api/coding/paas/v4");
+    // Embeddings hit the dedicated provider, model id comes from embedding_model.
+    let emb = cfg.resolve_embedding_endpoint().unwrap();
+    assert_eq!(emb.base_url, "http://127.0.0.1:11434/v1");
+    assert_eq!(emb.api_key, "ollama");
+    assert_eq!(
+        emb.headers,
+        vec![("X-Probe".to_string(), "embed".to_string())]
+    );
+    assert_eq!(cfg.embedding_model_id(), "bge-m3");
+}
+
+/// Without `embedding_provider`, embeddings ride the primary provider.
+#[test]
+fn embedding_endpoint_defaults_to_primary_without_embedding_provider() {
+    let _g = ENV_LOCK.lock().unwrap();
+    let (_home_guard, dir) = isolated_home();
+    fs::write(
+        dir.path().join("opencoder.json"),
+        r#"{
+            "model": "glm/glm-5.3",
+            "embedding_model": "embedding-3",
+            "providers": {
+                "glm": {
+                    "base_url": "https://open.bigmodel.cn/api/coding/paas/v4",
+                    "api_key": "sk-glm"
+                }
+            }
+        }"#,
+    )
+    .unwrap();
+    let cfg = Config::load(dir.path()).unwrap();
+    let chat = cfg.resolve_endpoint().unwrap();
+    let emb = cfg.resolve_embedding_endpoint().unwrap();
+    assert_eq!(emb.base_url, chat.base_url);
+    assert_eq!(emb.api_key, chat.api_key);
+}
+
+/// An unregistered `embedding_provider` is an error naming it — never a
+/// silent fallback (vectors from the wrong server are incomparable).
+#[test]
+fn unknown_embedding_provider_is_an_error_naming_it() {
+    let _g = ENV_LOCK.lock().unwrap();
+    let (_home_guard, dir) = isolated_home();
+    fs::write(
+        dir.path().join("opencoder.json"),
+        r#"{
+            "model": "glm/glm-5.3",
+            "embedding_provider": "ghost",
+            "providers": {
+                "glm": {
+                    "base_url": "https://open.bigmodel.cn/api/coding/paas/v4",
+                    "api_key": "sk-glm"
+                }
+            }
+        }"#,
+    )
+    .unwrap();
+    let cfg = Config::load(dir.path()).unwrap();
+    let err = cfg.resolve_embedding_endpoint().unwrap_err().to_string();
+    assert!(err.contains("ghost"), "error must name the provider: {err}");
+    // Chat resolution is unaffected by the bad embedding provider.
+    assert!(cfg.resolve_endpoint().is_ok());
+}
+
 fn isolated_home() -> (HomeGuard, tempfile::TempDir) {
     let home = tempfile::tempdir().unwrap();
     let prev_home = std::env::var_os("HOME");

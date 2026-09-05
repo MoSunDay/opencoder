@@ -14,7 +14,9 @@
 //! no border indicators; per row the indent gutter and code-frame prefixes
 //! (`│ `, `▎ `) are removed and pure-decoration rows (role headers
 //! `❯ User:`/`❯ Say:`, thematic breaks, `┌ lang`/`└───` code frames, plan
-//! headers) are dropped. Stripping is *structured*: [`clean`] matches the
+//! headers) are dropped; the merged `{❯|▸} Say(n step{s}): ` pair header
+//! keeps its preview payload (label/spinner stripped — the body below
+//! skips that line). Stripping is *structured*: [`clean`] matches the
 //! exact span shapes the renderers declare as constants, and the scroll
 //! geometry runs on the cleaned line set ([`CleanModel`]), so dropped rows
 //! leave no blank band and the first visible row is never over-skipped.
@@ -24,6 +26,8 @@
 //! returns to the latest content, and Home jumps to the beginning.
 
 pub mod clean;
+#[cfg(test)]
+mod clean_say_tests;
 
 use std::cell::RefCell;
 use std::rc::Rc;

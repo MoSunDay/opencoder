@@ -1,5 +1,7 @@
 # opencode→opencoder 全仓命名统一 + 三二进制拆分验证 + 主二进制去 nfsserve
 
+日期：2026-09-04 ｜ 提交：6cb5ea1
+
 ## Context
 
 用户指出产品名是 **opencoder**，但仓库残留大量少-r 的 `opencode` 拼写：fleet worker 的 bin 名就叫

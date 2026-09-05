@@ -1,6 +1,6 @@
 # opencoder-project：评审修复轮续（claim 回滚 / plan-execute 互斥 / 条件收敛 / CI 密级）
 
-日期：2026-09-05 ｜ 提交：(working tree)
+日期：2026-09-05 ｜ 提交：6cb5ea1
 
 ## 动机
 

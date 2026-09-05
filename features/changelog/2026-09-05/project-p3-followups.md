@@ -1,6 +1,6 @@
 # opencoder-project：评审遗留 P3 清偿（stale plan 自愈 / lost-driver 取消收敛 / store trait 契约文档）
 
-日期：2026-09-05 ｜ 提交：(working tree)
+日期：2026-09-05 ｜ 提交：6cb5ea1
 
 ## 动机
 

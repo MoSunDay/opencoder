@@ -1,5 +1,7 @@
 # 项目管理模块（opencoder-project + /api/project + SPA「项目」tab）
 
+日期：2026-09-04 ｜ 提交：6cb5ea1
+
 ## 动机
 
 TODO 工作流（todos crate）是 LLM 自治的：父会话自己拆解、执行、验收。用户缺少一个**手工策展**的层次——目标 → 里程碑 → 待办——来主导方向，再借 agent 能力把每个待办做实：粗略草稿 → plan agent 生成完整实施方案 → act agent 执行落地，可反复执行、版本留痕、随时取消。

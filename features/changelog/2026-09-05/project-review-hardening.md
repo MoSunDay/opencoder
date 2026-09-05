@@ -1,6 +1,6 @@
 # opencoder-project：评审修复轮（execute CAS / panic 收敛 / plan 快照 / SPA 净化 / CI 接线）
 
-日期：2026-09-05 ｜ 提交：(working tree)
+日期：2026-09-05 ｜ 提交：6cb5ea1
 
 ## 动机
 

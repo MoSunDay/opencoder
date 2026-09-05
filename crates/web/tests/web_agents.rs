@@ -115,6 +115,19 @@ fn expect_silent(rx: &mut tokio::sync::mpsc::UnboundedReceiver<opencoder_web::cm
     assert!(rx.try_recv().is_err(), "unexpected ReloadConfig fan-out");
 }
 
+/// Write a live `prompts/<name>` pool (meta current=v1 + one version dir) —
+/// the minimum `resource_current_version_dir` needs to resolve.
+fn seed_prompt_pool(root: &std::path::Path, name: &str) {
+    let dir = root.join("prompts").join(name);
+    std::fs::create_dir_all(dir.join("v1")).unwrap();
+    std::fs::write(
+        dir.join("meta.json"),
+        serde_json::json!({ "name": name, "current": 1, "history": [1] }).to_string(),
+    )
+    .unwrap();
+    std::fs::write(dir.join("v1").join("soul.md"), "seeded prompt\n").unwrap();
+}
+
 #[tokio::test]
 async fn empty_root_lists_null_active() {
     let state = state().await;
@@ -130,16 +143,24 @@ async fn empty_root_lists_null_active() {
 async fn cards_crud_activation_and_listing() {
     let state = state().await;
     let _scoped = scoped();
-    for name in ["b", "a"] {
-        let (status, v) = call(
-            app(state.clone()),
-            "POST",
-            "/api/agents",
-            Some(serde_json::json!({ "name": name })),
-        )
-        .await;
-        assert_eq!(status, StatusCode::CREATED, "{v}");
-    }
+    seed_prompt_pool(_scoped.0.path(), "pack");
+    // "b" carries a live prompt ref (activatable); "a" stays plain.
+    let (status, v) = call(
+        app(state.clone()),
+        "POST",
+        "/api/agents",
+        Some(serde_json::json!({ "name": "b", "current": { "prompt": "pack" } })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{v}");
+    let (status, v) = call(
+        app(state.clone()),
+        "POST",
+        "/api/agents",
+        Some(serde_json::json!({ "name": "a" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{v}");
     // Duplicate ⇒ 409; reserved/illegal names ⇒ 400.
     let (status, v) = call(
         app(state.clone()),
@@ -230,11 +251,12 @@ async fn cards_crud_activation_and_listing() {
 async fn repeat_activation_fans_reload_once() {
     let state = state().await;
     let _scoped = scoped();
+    seed_prompt_pool(_scoped.0.path(), "pack");
     call(
         app(state.clone()),
         "POST",
         "/api/agents",
-        Some(serde_json::json!({ "name": "same" })),
+        Some(serde_json::json!({ "name": "same", "current": { "prompt": "pack" } })),
     )
     .await;
     let mut cmd_rx = live_handle(&state, "s1").await;
@@ -278,11 +300,12 @@ async fn repeat_activation_fans_reload_once() {
 async fn blank_active_name_is_400_not_deactivation() {
     let state = state().await;
     let _scoped = scoped();
+    seed_prompt_pool(_scoped.0.path(), "pack");
     call(
         app(state.clone()),
         "POST",
         "/api/agents",
-        Some(serde_json::json!({ "name": "on" })),
+        Some(serde_json::json!({ "name": "on", "current": { "prompt": "pack" } })),
     )
     .await;
     call(
@@ -313,12 +336,19 @@ async fn blank_active_name_is_400_not_deactivation() {
 async fn put_fans_reload_only_for_active_card() {
     let state = state().await;
     let _scoped = scoped();
-    for name in ["hot", "cold"] {
+    seed_prompt_pool(_scoped.0.path(), "old-pack");
+    seed_prompt_pool(_scoped.0.path(), "pack");
+    // "hot" holds a live prompt ref (activatable); "cold" stays plain.
+    let bodies = [
+        ("hot", serde_json::json!({ "prompt": "old-pack" })),
+        ("cold", serde_json::json!({})),
+    ];
+    for (name, current) in bodies {
         call(
             app(state.clone()),
             "POST",
             "/api/agents",
-            Some(serde_json::json!({ "name": name })),
+            Some(serde_json::json!({ "name": name, "current": current })),
         )
         .await;
     }
@@ -358,11 +388,12 @@ async fn put_fans_reload_only_for_active_card() {
 async fn delete_active_card_clears_marker_and_fans_reload() {
     let state = state().await;
     let _scoped = scoped();
+    seed_prompt_pool(_scoped.0.path(), "pack");
     call(
         app(state.clone()),
         "POST",
         "/api/agents",
-        Some(serde_json::json!({ "name": "gone" })),
+        Some(serde_json::json!({ "name": "gone", "current": { "prompt": "pack" } })),
     )
     .await;
     call(
@@ -389,11 +420,12 @@ async fn delete_active_card_clears_marker_and_fans_reload() {
 async fn patch_preflight_missing_prompt_rolls_back() {
     let state = state().await;
     let _scoped = scoped();
+    seed_prompt_pool(_scoped.0.path(), "pack");
     call(
         app(state.clone()),
         "POST",
         "/api/agents",
-        Some(serde_json::json!({ "name": "plain" })),
+        Some(serde_json::json!({ "name": "plain", "current": { "prompt": "pack" } })),
     )
     .await;
     call(
@@ -424,6 +456,58 @@ async fn patch_preflight_missing_prompt_rolls_back() {
         "preflight failure must be 4xx: {status} {v}"
     );
     assert_eq!(v["ok"], false);
+    // Rollback: the marker still names the previous agent.
+    let (_, v) = call(app(state.clone()), "GET", "/api/agents", None).await;
+    assert_eq!(v["active"], "plain", "marker must roll back: {v}");
+}
+
+/// Activating a card with NO prompt reference must be rejected (it would
+/// resolve to None and silently fall back to act) and roll the marker back.
+#[tokio::test]
+async fn patch_preflight_promptless_card_rejected_and_rolls_back() {
+    let state = state().await;
+    let _scoped = scoped();
+    seed_prompt_pool(_scoped.0.path(), "pack");
+    call(
+        app(state.clone()),
+        "POST",
+        "/api/agents",
+        Some(serde_json::json!({ "name": "plain", "current": { "prompt": "pack" } })),
+    )
+    .await;
+    let (status, v) = call(
+        app(state.clone()),
+        "PATCH",
+        "/api/agents/active",
+        Some(serde_json::json!({ "active": "plain" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+
+    // "empty" parses but has no prompt reference at all.
+    call(
+        app(state.clone()),
+        "POST",
+        "/api/agents",
+        Some(serde_json::json!({ "name": "empty" })),
+    )
+    .await;
+    let (status, v) = call(
+        app(state.clone()),
+        "PATCH",
+        "/api/agents/active",
+        Some(serde_json::json!({ "active": "empty" })),
+    )
+    .await;
+    assert!(
+        status == StatusCode::BAD_REQUEST || status == StatusCode::UNPROCESSABLE_ENTITY,
+        "promptless activation must be 4xx: {status} {v}"
+    );
+    assert_eq!(v["ok"], false);
+    assert!(
+        v["error"].as_str().unwrap().contains("prompt"),
+        "error must mention the missing prompt: {v}"
+    );
     // Rollback: the marker still names the previous agent.
     let (_, v) = call(app(state.clone()), "GET", "/api/agents", None).await;
     assert_eq!(v["active"], "plain", "marker must roll back: {v}");

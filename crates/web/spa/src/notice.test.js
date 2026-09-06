@@ -32,6 +32,7 @@ describe('normalizeNotice', () => {
     expect(normalizeNotice({ type: 'success' })).toEqual({ type: 'error', text: '' }); // 缺 text
     expect(normalizeNotice({ type: 'success', text: 42 })).toEqual({ type: 'error', text: '' }); // text 非字符串
     expect(normalizeNotice({ text: '目标已创建' })).toEqual({ type: 'error', text: '' }); // 缺 type
+    expect(normalizeNotice({ type: '非法值', text: '目标已创建' })).toEqual({ type: 'error', text: '' }); // type 不在白名单
     expect(normalizeNotice(123)).toEqual({ type: 'error', text: '' });
   });
 });

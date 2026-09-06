@@ -5,8 +5,10 @@
 //! the same in-process engine, and `.gitignore` / `.ignore` / hidden files are
 //! honoured exactly as ripgrep does by default.
 
+use std::collections::HashSet;
 use std::io;
 use std::path::Path;
+use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
 use async_trait::async_trait;
@@ -92,9 +94,18 @@ impl Tool for SearchTool {
                 let _ = searcher.search_path(&matcher, &base, &mut collector);
             } else {
                 let mut wb = WalkBuilder::new(&base);
-                // Follow symlinks (parity with the former grep tool); the `ignore`
-                // walker performs its own loop/cycle detection so this is safe.
+                // Follow symlinks (parity with the former grep tool), but never
+                // re-enter a directory: the walker's built-in loop detection only
+                // catches a directory reappearing in its own ancestor chain. Links
+                // whose hops are distinct directories (`/proc/<pid>/root` resolves
+                // to `/`, sysfs `subsystem/devices` chains grow new paths every
+                // hop) defeat it and expand the walk exponentially without ever
+                // terminating. The `dir_first_visit` guard prunes any physical
+                // directory already visited once, bounding the walk to one visit
+                // per directory while still following links.
                 wb.follow_links(true);
+                let visited: Arc<Mutex<HashSet<(u64, u64)>>> = Arc::new(Mutex::new(HashSet::new()));
+                wb.filter_entry(move |e| dir_first_visit(e, &visited));
                 if let Some(inc) = include.as_deref() {
                     if let Ok(built) = ov_build(&base, inc) {
                         wb.overrides(built);
@@ -129,6 +140,35 @@ impl Tool for SearchTool {
         .unwrap_or_else(|e| ToolOutput::err(format!("search task failed: {e}")));
 
         Ok(out)
+    }
+}
+
+/// Re-entry guard for symlink-following walks: returns `true` only the first
+/// time a physical directory (identified by `(dev, ino)`) is seen. Symlinks
+/// may be followed, but a directory already visited anywhere earlier in the
+/// walk is pruned, so no directory is ever re-entered. Without this, link
+/// chains such as `/proc/<pid>/root` (distinct hop dirs, same target `/`)
+/// turn the walk into an unbounded, core-pinning traversal.
+fn dir_first_visit(e: &ignore::DirEntry, visited: &Mutex<HashSet<(u64, u64)>>) -> bool {
+    if !e.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+        return true;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        match e.metadata() {
+            Ok(md) => {
+                let mut seen = visited.lock().expect("search walk dedup lock poisoned");
+                seen.insert((md.dev(), md.ino()))
+            }
+            // Un-stat-able directory: let the walker surface the error itself.
+            Err(_) => true,
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = visited;
+        true
     }
 }
 
@@ -240,5 +280,117 @@ mod tests {
         let out = tool.execute(json!({ "pattern": "" }), &ctx).await.unwrap();
         assert!(out.is_error, "empty pattern must be an error");
         assert!(out.content.contains("non-empty"));
+    }
+
+    /// Procfs-style blowup: a chain of distinct directories, each reached by
+    /// two sibling symlinks, ending in a non-matching file. Every hop is a
+    /// *different* directory, so ancestor-chain loop detection never fires and
+    /// there is no match cap to short-circuit; without the re-entry guard the
+    /// walker explores 2^N paths (2^25 here) and pins a core. With the guard
+    /// it must finish in milliseconds and report no matches.
+    #[tokio::test]
+    async fn search_terminates_on_distinct_hop_link_fanout() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut prev = dir.path().join("lvl0");
+        std::fs::create_dir(&prev).unwrap();
+        for i in 1..=25u32 {
+            let next = dir.path().join(format!("lvl{i}"));
+            std::fs::create_dir(&next).unwrap();
+            std::os::unix::fs::symlink(&next, prev.join("x")).unwrap();
+            std::os::unix::fs::symlink(&next, prev.join("y")).unwrap();
+            prev = next;
+        }
+        writeln!(
+            std::fs::File::create(prev.join("end.txt")).unwrap(),
+            "unrelated"
+        )
+        .unwrap();
+        let ctx = ctx_for(&dir);
+        let tool = SearchTool;
+        let out = tokio::time::timeout(
+            std::time::Duration::from_secs(30),
+            tool.execute(json!({ "pattern": "never_matches_anything" }), &ctx),
+        )
+        .await
+        .expect("search must terminate on link fan-out")
+        .unwrap();
+        assert!(!out.is_error, "{}", out.content);
+        assert_eq!(out.content, "no matches");
+    }
+
+    /// A plain a->b->a symlink cycle must terminate and still find matches.
+    #[tokio::test]
+    async fn search_terminates_on_symlink_cycle() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = dir.path().join("a");
+        let b = dir.path().join("b");
+        std::fs::create_dir(&a).unwrap();
+        std::fs::create_dir(&b).unwrap();
+        let mut f = std::fs::File::create(a.join("f.txt")).unwrap();
+        writeln!(f, "cycle needle").unwrap();
+        std::os::unix::fs::symlink(&b, a.join("to_b")).unwrap();
+        std::os::unix::fs::symlink(&a, b.join("to_a")).unwrap();
+        let ctx = ctx_for(&dir);
+        let tool = SearchTool;
+        let out = tokio::time::timeout(
+            std::time::Duration::from_secs(30),
+            tool.execute(json!({ "pattern": "cycle needle" }), &ctx),
+        )
+        .await
+        .expect("search must terminate on symlink cycle")
+        .unwrap();
+        assert!(!out.is_error, "{}", out.content);
+        assert!(out.content.contains("cycle needle"), "{}", out.content);
+    }
+
+    /// Several sibling links into the same physical directory: links are
+    /// followed, but the target must be searched exactly once.
+    #[tokio::test]
+    async fn search_no_dir_reentry_via_sibling_links() {
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().join("real");
+        std::fs::create_dir(&real).unwrap();
+        let mut f = std::fs::File::create(real.join("needle.txt")).unwrap();
+        writeln!(f, "golden needle").unwrap();
+        for l in ["l1", "l2", "l3"] {
+            std::os::unix::fs::symlink(&real, dir.path().join(l)).unwrap();
+        }
+        let ctx = ctx_for(&dir);
+        let tool = SearchTool;
+        let out = tool
+            .execute(json!({ "pattern": "golden needle" }), &ctx)
+            .await
+            .unwrap();
+        assert!(!out.is_error, "{}", out.content);
+        let hits = out
+            .content
+            .lines()
+            .filter(|l| l.contains("golden needle"))
+            .count();
+        assert_eq!(
+            hits, 1,
+            "a physical dir must be searched exactly once, got: {}",
+            out.content
+        );
+    }
+
+    /// Following is preserved: a symlinked directory passed as `path` still
+    /// gets searched.
+    #[tokio::test]
+    async fn search_follows_symlinked_base_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().join("real");
+        std::fs::create_dir(&real).unwrap();
+        let mut f = std::fs::File::create(real.join("greet.txt")).unwrap();
+        writeln!(f, "via link").unwrap();
+        std::os::unix::fs::symlink(&real, dir.path().join("lnk")).unwrap();
+        let ctx = ctx_for(&dir);
+        let tool = SearchTool;
+        let out = tool
+            .execute(json!({ "pattern": "via link", "path": "lnk" }), &ctx)
+            .await
+            .unwrap();
+        assert!(!out.is_error, "{}", out.content);
+        assert!(out.content.contains("via link"), "{}", out.content);
     }
 }

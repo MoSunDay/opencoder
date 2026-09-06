@@ -1,11 +1,15 @@
 // @vitest-environment jsdom
-// Team/topics DOM smoke (opencoder-team Phase 4): the three new panels render
-// their landmarks from a mocked api module — same contract style as
-// queuePanel.dom.test.jsx. Everything above the protocol layer runs for
-// real, including the store wiring (openTopicsForTeam / openTopicDetail).
+// Team/topics DOM smoke against the fleet IA panels — fleet/teams.jsx and
+// fleet/executions.jsx are the maintained sources behind the 组队/全部执行
+// tabs (the pre-fleet top-level copies were deleted); topicDetail.jsx keeps
+// its legacy deep-view describe below. Landmarks render from a mocked api
+// module — same contract style as queuePanel.dom.test.jsx /
+// fleet/fleet.dom.test.jsx. Everything above the protocol layer (api.js
+// requests + the sse.js event stream) runs for real, including the
+// ExecutionDetail drawer where 取消/恢复 live now.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 const { apiGetMock, apiPostMock, apiPatchMock } = vi.hoisted(() => ({
   apiGetMock: vi.fn(),
@@ -18,41 +22,45 @@ vi.mock('./api.js', () => ({
   apiPatch: apiPatchMock,
   apiDel: vi.fn(),
 }));
+// ExecutionDetail consumes a live event stream; sse.js sits on the same
+// protocol/transport layer as api.js, so stub it with a no-op stream instead
+// of letting fetch-retry timers race the assertions.
+vi.mock('./sse.js', () => ({ openStream: () => ({ abort() {} }) }));
 
 import './test/setup-dom.js';
-import { TeamPanel } from './teamPanel.jsx';
+import { FleetTeamsPanel as TeamPanel } from './fleet/teams.jsx';
 import { TopicDetailPanel } from './topicDetail.jsx';
-import { TopicsPanel } from './topicsPanel.jsx';
+import { ExecutionsPanel as TopicsPanel } from './fleet/executions.jsx';
 import { clearCredentials, getState, setState } from './store.js';
 
 const T0 = 1700000000000;
 
 const nodesFixture = {
   nodes: [
-    { id: 'n1', name: 'alpha', status: 'online' },
-    { id: 'n2', name: 'beta', status: 'idle' },
+    { id: 'n1', name: 'alpha', online: true, kinds: ['agent', 'team'], snapshot: { ready: true, cpu_capacity: 8, active_agent_loops: 2 } },
+    { id: 'n2', name: 'beta', online: false, kinds: ['agent', 'team'] },
   ],
 };
+
+const agentsFixture = { agents: [{ name: 'act' }, { name: 'explore' }] };
 
 const teamsFixture = {
   teams: [
     {
       name: 't1',
-      captain: { node_id: 'n1', name: 'alpha' },
+      captain: 'm1',
       members: [
-        { node_id: 'n1', name: 'alpha', capabilities: ['rust', 'web'], profiled_at: T0 },
-        { node_id: 'n2', name: 'beta', capabilities: [], profiled_at: null },
+        { id: 'm1', agent: 'act', role: '协调任务并汇总结果', node_id: 'n1', online: true },
+        { id: 'm2', agent: 'review', role: '代码评审' },
       ],
-      created_at: T0,
-      updated_at: T0,
     },
   ],
 };
 
-const topicsFixture = {
-  topics: [
-    { topic_id: 'tp1', team_name: 't1', title: '调研话题', requirement: 'r', status: 'executing', finish_reason: null, created_at: T0, finished_at: null },
-    { topic_id: 'tp2', team_name: 't1', title: '完结话题', requirement: 'r', status: 'finished', finish_reason: 'max_turns', created_at: T0, finished_at: T0 },
+const executionsFixture = {
+  executions: [
+    { id: 'ex-running', kind: 'agent', status: 'running', created_at: T0, node_id: 'n1' },
+    { id: 'ex-error', kind: 'team', status: 'error', created_at: T0, node_id: 'n2' },
   ],
 };
 
@@ -88,21 +96,29 @@ const installApi = () => {
     if (p.startsWith('/api/nodes')) {
       return Promise.resolve(nodesFixture);
     }
+    if (p.startsWith('/api/agents')) {
+      return Promise.resolve(agentsFixture);
+    }
+    if (p.startsWith('/api/executions?')) {
+      // the kind filter narrows the list page, mirroring the real endpoint
+      const rows = p.includes('kind=team')
+        ? executionsFixture.executions.filter((row) => row.kind === 'team')
+        : executionsFixture.executions;
+      return Promise.resolve({ executions: rows });
+    }
+    if (p.startsWith('/api/executions/')) {
+      return Promise.resolve({}); // drawer detail GET / message pages: empty payloads are valid
+    }
     if (p.startsWith('/api/teams/t1/topics/tp1')) {
       return Promise.resolve(detailFixture);
-    }
-    if (p.startsWith('/api/teams/t1/topics')) {
-      return Promise.resolve({ topics: topicsFixture.topics });
-    }
-    if (p.startsWith('/api/topics')) {
-      return Promise.resolve(topicsFixture);
     }
     if (p.startsWith('/api/teams')) {
       return Promise.resolve(teamsFixture);
     }
     return Promise.resolve({});
   });
-  apiPostMock.mockReset().mockResolvedValue({ ok: true, accepted: true });
+  // POSTs echo their body so a dispatched execution carries its id into the detail drawer.
+  apiPostMock.mockReset().mockImplementation(async (_path, body) => ({ ...(body || {}), ok: true }));
   apiPatchMock.mockReset().mockResolvedValue({ team: teamsFixture.teams[0] });
 };
 
@@ -118,80 +134,149 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
+/// antd inserts a space inside two-CJK-char buttons ("编 辑"), so match
+/// buttons on whitespace-squashed textContent (same trick as
+/// agentDetail.dom.test.jsx / fleet.dom.test.jsx).
+const findButton = (txt) => screen.getAllByRole('button')
+  .find((b) => (b.textContent || '').replace(/\s+/g, '') === txt);
+
+/// Open an antd Select and pick the dropdown option with the exact label —
+/// the same interaction helper agentDetail.dom.test.jsx uses (options render
+/// in a body-level portal, so scope the search to .ant-select-item-option).
+const pickSelectOption = async (selectEl, label) => {
+  await act(async () => {
+    fireEvent.mouseDown(selectEl);
+  });
+  const option = await waitFor(() => {
+    const hit = [...document.querySelectorAll('.ant-select-item-option')]
+      .find((o) => o.getAttribute('title') === label || o.textContent === label);
+    expect(hit).toBeTruthy();
+    return hit;
+  });
+  await act(async () => {
+    fireEvent.click(option);
+  });
+  return option;
+};
+
 describe('TeamPanel', () => {
-  it('renders the team row with captain, capability digest and all row actions', async () => {
+  it('renders the team row with captain, member digest and both row actions', async () => {
     render(<TeamPanel onNotice={() => {}} />);
     expect(await screen.findByText('t1')).toBeTruthy();
-    expect(screen.getByText('alpha')).toBeTruthy();
-    expect(screen.getByText('rust / web')).toBeTruthy();
-    expect(screen.getByText('改队长')).toBeTruthy();
-    expect(screen.getByText('成员管理')).toBeTruthy();
-    expect(screen.getByText('发起话题')).toBeTruthy();
-    expect(screen.getByText('查看话题')).toBeTruthy();
-    expect(screen.getByText('能力画像')).toBeTruthy();
+    expect(screen.getByText('团队组队')).toBeTruthy(); // page header via PAGE_META
+    expect(screen.getByText('m1')).toBeTruthy(); // 队长 column
+    expect(screen.getByText('act')).toBeTruthy(); // member agent Tag
+    expect(screen.getByText(/协调任务并汇总结果 · 在线/)).toBeTruthy(); // digest + member node state
+    expect(screen.getByText('review')).toBeTruthy();
+    expect(screen.getByText('代码评审')).toBeTruthy();
+    expect(findButton('编辑')).toBeTruthy();
+    expect(findButton('启动团队')).toBeTruthy();
+    expect(findButton('创建团队')).toBeTruthy();
+    expect(findButton('刷新')).toBeTruthy();
   });
 
-  it('opens the create-team modal with captain candidates from /api/nodes', async () => {
+  it('opens the create-team modal with the member-agent picker fed by /api/agents', async () => {
     render(<TeamPanel onNotice={() => {}} />);
-    fireEvent.click(await screen.findByText('新建团队'));
-    expect(await screen.findByText('队长（单选）')).toBeTruthy();
-    expect(screen.getAllByText('alpha').length).toBeGreaterThan(0);
-    expect(screen.getByText('beta')).toBeTruthy();
+    fireEvent.click(await screen.findByText('创建团队'));
+    expect(await screen.findByText('团队成员与职责')).toBeTruthy();
+    expect(screen.getByLabelText('团队名称')).toBeTruthy();
+    expect(screen.getByLabelText('队长的成员 ID')).toBeTruthy();
+    expect(screen.getByPlaceholderText('成员 ID')).toBeTruthy(); // default member row
+    fireEvent.mouseDown(screen.getByRole('combobox')); // the member's Agent picker
+    // scope to the dropdown options (antd portals them outside the modal and
+    // jsdom may render holders twice, so getByText is ambiguous here)
+    await waitFor(() => {
+      const labels = [...document.querySelectorAll('.ant-select-item-option')]
+        .map((o) => o.getAttribute('title') || o.textContent);
+      expect(labels).toEqual(expect.arrayContaining(['act', 'explore'])); // from /api/agents
+    });
+    expect(apiGetMock).toHaveBeenCalledWith('/api/agents');
+    fireEvent.click(screen.getByText('添加成员'));
+    expect(screen.getAllByPlaceholderText('成员 ID')).toHaveLength(2); // the add action grows the form
+    expect(findButton('保存团队')).toBeTruthy();
   });
 
-  it('查看话题 arms the topics tab with the team filter', async () => {
+  it('启动团队 arms the launch modal with the team name and node candidates from /api/nodes', async () => {
     render(<TeamPanel onNotice={() => {}} />);
-    fireEvent.click(await screen.findByText('查看话题'));
-    expect(getState().page).toBe('topics');
-    expect(getState().topicsTeamFilter).toBe('t1');
+    fireEvent.click(await screen.findByText('启动团队'));
+    expect(await screen.findByText('启动 t1')).toBeTruthy();
+    expect(screen.getByText(/整个团队会在同一个执行节点内完成/)).toBeTruthy();
+    expect(screen.getByLabelText('任务要求')).toBeTruthy();
+    await act(async () => {
+      fireEvent.mouseDown(screen.getByRole('combobox')); // 执行节点 picker
+    });
+    // the '' option is both the selected value and a dropdown option
+    expect((await screen.findAllByText('自动调度（活跃 loop / CPU 最低）')).length).toBeGreaterThan(1);
+    expect(screen.getByText('alpha · 2 loops / 8 CPU')).toBeTruthy(); // node label from the snapshot
+    expect(apiGetMock).toHaveBeenCalledWith('/api/nodes');
   });
 
-  it('dispatches a profiling task on confirm', async () => {
+  it('dispatches a team execution on confirm and opens its detail drawer', async () => {
     render(<TeamPanel onNotice={() => {}} />);
     await screen.findByText('t1');
-    fireEvent.click(screen.getByText('能力画像'));
-    // antd inserts a space inside two-CJK-char buttons ("派 发"); anchored so
-    // the Popconfirm title 派发能力画像？ does not match.
-    fireEvent.click(await screen.findByText(/^派\s*发$/));
+    fireEvent.click(screen.getByText('启动团队'));
+    expect(await screen.findByText('启动 t1')).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('任务要求'), { target: { value: '准备发布' } });
+    // antd inserts a space inside two-CJK-char buttons ("启 动"), so match the
+    // squashed text the same way fleet.dom.test.jsx does.
+    const submit = [...document.querySelectorAll('.ant-modal button')]
+      .find((button) => button.textContent.replace(/\s+/g, '') === '启动');
+    expect(submit).toBeTruthy();
+    fireEvent.click(submit);
     await act(async () => {});
-    expect(apiPostMock).toHaveBeenCalledWith('/api/teams/t1/profile', {});
+    expect(apiPostMock).toHaveBeenCalledWith('/api/executions', expect.objectContaining({
+      kind: 'team',
+      target: 't1',
+      input: { prompt: '准备发布' },
+      id: expect.stringMatching(/^team-/),
+    }));
+    expect(await screen.findByText(/^team-[a-f0-9]{32}$/)).toBeTruthy(); // drawer title = dispatched id
+    expect(screen.getByText('刷新明细')).toBeTruthy();
   });
 });
 
 describe('TopicsPanel', () => {
-  it('renders both topics with status tags and row actions', async () => {
+  it('renders both executions with type labels, node state tags and status tags', async () => {
     setState({ page: 'topics' });
     render(<TopicsPanel onNotice={() => {}} />);
-    expect(await screen.findByText('调研话题')).toBeTruthy();
-    expect(screen.getByText('完结话题')).toBeTruthy();
-    expect(screen.getByText('执行中')).toBeTruthy();
-    expect(screen.getByText('轮数上限')).toBeTruthy();
-    expect(screen.getAllByText('详情')).toHaveLength(2);
-    expect(screen.getByText('取消')).toBeTruthy(); // executing only
-    expect(screen.getByText('恢复')).toBeTruthy(); // finished non-complete only
-    expect(screen.getByText('max_turns')).toBeTruthy();
+    expect(await screen.findByText('ex-running')).toBeTruthy();
+    expect(screen.getByText('ex-error')).toBeTruthy();
+    expect(screen.getByText('舰队全部执行记录与团队过滤')).toBeTruthy(); // page header via PAGE_META
+    expect(screen.getAllByText('Agent')).toHaveLength(2); // launch-form kind value + 类型 cell
+    expect(screen.getByText('Team')).toBeTruthy();
+    expect(screen.getByText('运行中')).toBeTruthy(); // STATUS_META via ui/statusTag
+    expect(screen.getByText('失败')).toBeTruthy();
+    expect(screen.getByText('在线')).toBeTruthy(); // n1 node state tag
+    expect(screen.getByText('离线')).toBeTruthy(); // n2 node state tag
+    expect(screen.getByText('启动执行')).toBeTruthy();
   });
 
-  it('filters by team when armed through openTopicsForTeam', async () => {
-    const { openTopicsForTeam } = await import('./store.js');
-    openTopicsForTeam('t1');
-    expect(getState().topicsTeamFilter).toBe('t1');
-    render(<TopicsPanel onNotice={() => {}} />);
-    await screen.findByText('调研话题');
-    expect(apiGetMock).toHaveBeenCalledWith('/api/topics?team=t1');
-  });
-
-  it('hits cancel then resume on the action buttons', async () => {
+  it('filters the list by kind through the 执行类型筛选 select', async () => {
     setState({ page: 'topics' });
     render(<TopicsPanel onNotice={() => {}} />);
-    await screen.findByText('调研话题');
-    fireEvent.click(screen.getByText('取消'));
-    fireEvent.click(await screen.findByText('取消话题'));
+    await screen.findByText('ex-running');
+    await pickSelectOption(document.querySelector('[aria-label="执行类型筛选"]'), 'Team');
+    await waitFor(() => expect(apiGetMock).toHaveBeenCalledWith('/api/executions?limit=50&kind=team'));
+    expect(await screen.findByText('ex-error')).toBeTruthy();
+    expect(screen.queryByText('ex-running')).toBeNull(); // filtered page replaced the rows
+  });
+
+  it('hits cancel then resume on the detail drawer action buttons', async () => {
+    setState({ page: 'topics' });
+    render(<TopicsPanel onNotice={() => {}} />);
+    fireEvent.click(await screen.findByText('ex-running')); // ID link opens ExecutionDetail
+    expect(findButton('刷新明细')).toBeTruthy();
+    expect(findButton('取消（终止）').disabled).toBe(false); // running → cancel armed
+    expect(findButton('在原节点恢复').disabled).toBe(true); // running → resume disarmed
+    fireEvent.click(findButton('取消（终止）'));
     await act(async () => {});
-    expect(apiPostMock).toHaveBeenCalledWith('/api/teams/t1/topics/tp1/cancel', {});
-    fireEvent.click(screen.getByText('恢复'));
+    expect(apiPostMock).toHaveBeenCalledWith('/api/executions/ex-running/commands', { action: 'cancel', input: {} });
+    fireEvent.click(findButton('ex-error')); // switch the drawer to the failed run
+    await waitFor(() => expect(findButton('在原节点恢复').disabled).toBe(false));
+    expect(findButton('取消（终止）').disabled).toBe(true); // error → cancel disarmed
+    fireEvent.click(findButton('在原节点恢复'));
     await act(async () => {});
-    expect(apiPostMock).toHaveBeenCalledWith('/api/teams/t1/topics/tp2/resume', {});
+    expect(apiPostMock).toHaveBeenCalledWith('/api/executions/ex-error/commands', { action: 'resume', input: {} });
   });
 });
 

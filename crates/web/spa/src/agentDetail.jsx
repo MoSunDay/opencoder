@@ -12,6 +12,7 @@ import {
 import { useCallback, useEffect, useState } from 'react';
 import { apiGet, apiPatch, apiPost, apiPut } from './api.js';
 import { REF_FIELDS, resolvedNames, resourceOptions, versionOptions } from './agentsItems.js';
+import { err } from './notice.js';
 import { PromptEditor } from './promptEditor.jsx';
 
 const { Text, Title } = Typography;
@@ -34,7 +35,7 @@ function ResourceRefTab({ field, cat, label, meta, resources, onNotice, onCardSa
       onCardSaved();
     } catch (e) {
       if (onNotice) {
-        onNotice('更新引用失败: ' + (e && e.message));
+        onNotice(err('更新引用失败: ' + (e && e.message)));
       }
     }
   };
@@ -52,7 +53,7 @@ function ResourceRefTab({ field, cat, label, meta, resources, onNotice, onCardSa
       onCardSaved();
     } catch (e) {
       if (onNotice) {
-        onNotice('回滚失败: ' + (e && e.message));
+        onNotice(err('回滚失败: ' + (e && e.message)));
       }
     }
   };
@@ -144,7 +145,7 @@ export function AgentDetail({ name, resources, onNotice, onChanged, onBack }) {
       setMeta((j && j.meta) || null);
     } catch (e) {
       if (onNotice) {
-        onNotice('获取 agent 详情失败: ' + (e && e.message));
+        onNotice(err('获取 agent 详情失败: ' + (e && e.message)));
       }
     } finally {
       setLoading(false);
@@ -169,7 +170,7 @@ export function AgentDetail({ name, resources, onNotice, onChanged, onBack }) {
     } catch (e) {
       // 400/404 = prompt 预检失败等，服务端 error 字段已并入 e.message
       if (onNotice) {
-        onNotice('激活失败: ' + (e && e.message));
+        onNotice(err('激活失败: ' + (e && e.message)));
       }
     }
   };

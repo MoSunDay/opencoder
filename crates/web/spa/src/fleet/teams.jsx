@@ -4,6 +4,7 @@ import { apiGet, apiPost } from '../api.js';
 import { PageShell } from '../shell/pageShell.jsx';
 import { ExecutionDetail } from './detail.jsx';
 import { newId, nodeOptions } from './model.js';
+import { err } from '../notice.js';
 
 export function FleetTeamsPanel({ onNotice }) {
   const [rows, setRows] = useState([]); const [nodes, setNodes] = useState([]); const [agents, setAgents] = useState([]);
@@ -15,7 +16,7 @@ export function FleetTeamsPanel({ onNotice }) {
       setRows(a.teams); setNodes(b.nodes);
       const entries = Array.isArray(c) ? c : (c.agents || []);
       setAgents(entries.map((a) => ({ value: a.name || a.id, label: a.name || a.id })));
-    } catch (e) { onNotice(e.message); }
+    } catch (e) { onNotice(err(e.message)); }
   }, [onNotice]);
   useEffect(() => { load(); }, [load]);
   const edit = (row) => {
@@ -23,8 +24,8 @@ export function FleetTeamsPanel({ onNotice }) {
   };
   const save = async (values) => {
     setBusy(true);
-    try { await apiPost('/api/teams', values); onNotice(''); setEditing(false); await load(); }
-    catch (e) { onNotice(e.message); }
+    try { await apiPost('/api/teams', values); onNotice(err('')); setEditing(false); await load(); }
+    catch (e) { onNotice(err(e.message)); }
     finally { setBusy(false); }
   };
   const run = async (values) => {
@@ -32,8 +33,8 @@ export function FleetTeamsPanel({ onNotice }) {
     const signature = JSON.stringify(request);
     if (attempt.current?.signature !== signature) attempt.current = { signature, id: newId('team') };
     setBusy(true);
-    try { const result = await apiPost('/api/executions', { ...request, id: attempt.current.id }); onNotice(''); attempt.current = null; setLaunch(null); setDetail(result); }
-    catch (e) { onNotice(`${e.message}；再次启动会继续确认同一执行`); }
+    try { const result = await apiPost('/api/executions', { ...request, id: attempt.current.id }); onNotice(err('')); attempt.current = null; setLaunch(null); setDetail(result); }
+    catch (e) { onNotice(err(`${e.message}；再次启动会继续确认同一执行`)); }
     finally { setBusy(false); }
   };
   return <PageShell page="team">

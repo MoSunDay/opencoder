@@ -11,6 +11,7 @@ import { TimeText } from '../ui/timeText.jsx';
 import { CANCELLABLE, NodeBadge, RunStatusTag } from './runBits.jsx';
 import { useStore } from '../store.js';
 import { RunDetail } from './runDetail.jsx';
+import { err } from '../notice.js';
 
 const { Text } = Typography;
 
@@ -36,7 +37,7 @@ export function RunsTable({ onNotice, refreshSignal, focusRunId, onDetailClosed 
         setRows(Array.isArray(list) ? list : []);
       } catch (e) {
         if (!silent && alive.current && onNotice) {
-          onNotice('获取运行列表失败: ' + (e && e.message));
+          onNotice(err('获取运行列表失败: ' + (e && e.message)));
         }
       } finally {
         if (alive.current && !silent) {
@@ -75,7 +76,7 @@ export function RunsTable({ onNotice, refreshSignal, focusRunId, onDetailClosed 
         })
         .catch((e) => {
           if (onNotice) {
-            onNotice('打开运行失败: ' + (e && e.message));
+            onNotice(err('打开运行失败: ' + (e && e.message)));
           }
         });
     }
@@ -87,7 +88,7 @@ export function RunsTable({ onNotice, refreshSignal, focusRunId, onDetailClosed 
       await load(true);
     } catch (e) {
       if (onNotice) {
-        onNotice('取消运行失败: ' + (e && e.message));
+        onNotice(err('取消运行失败: ' + (e && e.message)));
       }
     }
   };

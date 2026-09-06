@@ -10,7 +10,7 @@
 import { Alert, Badge, Button, ConfigProvider, Layout, Menu, Segmented, Select, Tooltip, Typography } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import dayjs from 'dayjs';
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import 'dayjs/locale/zh-cn';
 import { AgentsPanel } from './agentsConfig.jsx';
@@ -37,6 +37,7 @@ import {
   selectOptionsOf,
 } from './nav.js';
 import { clearCredentials, setState, useStore } from './store.js';
+import { normalizeNotice } from './notice.js';
 import { theme } from './theme.js';
 import { bootUrlCredential } from './boot.js';
 
@@ -104,7 +105,13 @@ const SHEET_PAGES = new Set(['chat']);
 
 function App() {
   const { token, page } = useStore();
-  const [notice, setNotice] = useState('');
+  // Panel→shell notices carry {type, text} (notice.js); normalizeNotice
+  // keeps legacy bare-string call sites safe. Empty text (the onNotice('')
+  // clear convention) renders nothing.
+  const [notice, setNotice] = useState(null);
+  // Stable identity: panels key useCallback/useEffect deps on onNotice — a
+  // fresh inline arrow per render would re-arm their load effects forever.
+  const notify = useCallback((v) => setNotice(normalizeNotice(v)), []);
   // Active category is pure derivation from `page` — clicking a category
   // simply navigates to its home page (nav.js), no extra store field.
   const category = categoryOf(page);
@@ -166,25 +173,25 @@ function App() {
                 options={selectOptionsOf(category)}
                 onChange={goPage}
               />
-              {notice ? (
+              {notice && notice.text ? (
                 <Alert
                   className="fleet-notice"
-                  type="error"
+                  type={notice.type}
                   showIcon
                   closable={{ 'aria-label': '关闭' }}
-                  title={notice}
-                  onClose={() => setNotice('')}
+                  title={notice.text}
+                  onClose={() => setNotice(null)}
                 />
               ) : null}
               {token ? (
                 <div className={SHEET_PAGES.has(page) ? 'fleet-sheet' : undefined}>
-                  <PageBody page={page} onNotice={setNotice} />
+                  <PageBody page={page} onNotice={notify} />
                 </div>
               ) : null}
             </Content>
           </Layout>
         </Layout>
-        <LoginModal open={!token} onConnected={() => setNotice('')} />
+        <LoginModal open={!token} onConnected={() => setNotice(null)} />
       </div>
     </ConfigProvider>
   );

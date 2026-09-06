@@ -14,6 +14,7 @@ import { REF_FIELDS, refCells, resourceOptions } from './agentsItems.js';
 import { AgentDetail } from './agentDetail.jsx';
 import { AgentNfsCard } from './agentNfsCard.jsx';
 import { ExecutionDetail } from './fleet/detail.jsx';
+import { err } from './notice.js';
 import { newId, nodeOptions } from './fleet/model.js';
 import { PageShell } from './shell/pageShell.jsx';
 
@@ -36,7 +37,7 @@ function CreateAgentModal({ open, resources, onClose, onCreated, onNotice }) {
       message.success('已创建');
       onCreated(values.name);
     } catch (e) {
-      onNotice('新建 agent 失败: ' + (e && e.message));
+      onNotice(err('新建 agent 失败: ' + (e && e.message)));
     } finally {
       setSaving(false);
     }
@@ -102,7 +103,7 @@ export function AgentsPanel({ onNotice }) {
         memory: (memory && memory.resources) || [],
       });
     } catch (e) {
-      onNotice('获取 agent 列表失败: ' + (e && e.message));
+      onNotice(err('获取 agent 列表失败: ' + (e && e.message)));
     } finally {
       setLoading(false);
     }
@@ -119,7 +120,7 @@ export function AgentsPanel({ onNotice }) {
       message.success(value ? `已激活 ${value}` : '已恢复默认链');
       load();
     } catch (e) {
-      onNotice('切换生效 agent 失败: ' + (e && e.message));
+      onNotice(err('切换生效 agent 失败: ' + (e && e.message)));
       load(); // 回滚到服务端视角
     }
   };
@@ -130,7 +131,7 @@ export function AgentsPanel({ onNotice }) {
       message.success('已删除');
       load();
     } catch (e) {
-      onNotice('删除 agent 失败: ' + (e && e.message));
+      onNotice(err('删除 agent 失败: ' + (e && e.message)));
     }
   };
 
@@ -143,7 +144,7 @@ export function AgentsPanel({ onNotice }) {
       const accepted = await apiPost('/api/executions', { ...request, id: launchAttempt.current.id });
       launchAttempt.current = null; setLaunch(null); setExecution(accepted);
     } catch (e) {
-      onNotice(`${e.message}；再次启动会继续确认同一执行`);
+      onNotice(err(`${e.message}；再次启动会继续确认同一执行`));
     } finally { setLaunching(false); }
   };
 

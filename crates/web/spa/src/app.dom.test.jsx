@@ -57,7 +57,7 @@ const jsonResponse = (body, status = 200) => Promise.resolve({
   json: () => Promise.resolve(body),
 });
 
-const installFetchRouter = ({ rejectToken, failNodes } = {}) => {
+const installFetchRouter = ({ rejectToken, failNodes, withGoal } = {}) => {
   vi.stubGlobal('fetch', vi.fn((input, init) => {
     const url = typeof input === 'string' ? input : String((input && input.url) || '');
     if (url.includes('/api/nodes')) {
@@ -72,6 +72,14 @@ const installFetchRouter = ({ rejectToken, failNodes } = {}) => {
     }
     if (url.includes('/api/sessions')) {
       return jsonResponse({ sessions: [] });
+    }
+    if (withGoal && url.includes('/api/project/overview')) {
+      // Seed one active goal: GoalsTab's EMPTY branch carries no MdEditModal,
+      // so the create-goal modal only exists once a goal is in the list.
+      return jsonResponse({
+        goals: [{ id: 'g-seed', title: '既有目标', status: 'active', sort: 0, milestones: [] }],
+        backlog: [],
+      });
     }
     return jsonResponse({});
   }));
@@ -219,10 +227,36 @@ describe('App shell landmarks (antd 6 under jsdom)', () => {
     // shell now renders as an antd Alert (role=alert) instead of red text.
     const alert = await screen.findByRole('alert');
     expect(alert.textContent).toContain('节点服务不可用');
+    // R1: the shell renders the notice's own severity — a load failure stays
+    // a red error Alert (ant-alert-error), not a generic one.
+    expect(alert.className).toContain('ant-alert-error');
     // Closable: the close button carries an explicit aria-label, and closing
     // it clears the notice (asserted before the 3s poll can re-arm it).
     fireEvent.click(within(alert).getByRole('button', { name: '关闭' }));
     await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
+  });
+
+  it('renders a success Alert after a real goal-create round-trip on the project page', async () => {
+    setCredentials('smoke-token', '');
+    setState({ page: 'project' });
+    installFetchRouter({ withGoal: true });
+    render(<App />);
+    // Real interaction flow: open the goals tab, 新建目标 modal, fill the
+    // form, submit — the fetch router answers 200 so GoalsTab reports
+    // ok('目标已创建') and the shell paints it green (R1 fix).
+    fireEvent.click(await screen.findByRole('tab', { name: '项目目标' }));
+    await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
+    fireEvent.click(await screen.findByText('新建目标'));
+    await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
+    fireEvent.change(screen.getByPlaceholderText('一句话标题'), { target: { value: '新目标' } });
+    // antd auto-inserts a space between the CJK glyphs (保 存) — strip it.
+    const save = [...document.querySelectorAll('button')].find((b) => b.textContent.replace(/\s+/g, '') === '保存');
+    expect(save).toBeTruthy();
+    fireEvent.click(save);
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toContain('目标已创建');
+    expect(alert.className).toContain('ant-alert-success');
+    expect(alert.className).not.toContain('ant-alert-error');
   });
 
   it('logs out from the Header: token cleared, login gate reopens', async () => {

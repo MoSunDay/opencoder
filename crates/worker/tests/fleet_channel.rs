@@ -28,7 +28,15 @@ async fn server_routes_by_id_and_disconnect_does_not_stop_accepted_work() {
     let service: Arc<dyn NodeService> = Arc::new(node.clone());
     let channel = tokio::spawn(async move { fleet::run(&url, "test-token", service).await });
     tokio::time::timeout(std::time::Duration::from_secs(5), async {
-        while !state.hub.views().await.iter().any(|n| n.online) {
+        // Scheduling (select_node) requires a snapshot with ready=true; waiting
+        // for online alone races the first submit into 503.
+        while !state
+            .hub
+            .views()
+            .await
+            .iter()
+            .any(|n| n.online && n.snapshot.as_ref().is_some_and(|s| s.ready))
+        {
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }
     })
@@ -103,7 +111,15 @@ async fn server_routes_by_id_and_disconnect_does_not_stop_accepted_work() {
     let service: Arc<dyn NodeService> = Arc::new(node.clone());
     let reconnect = tokio::spawn(async move { fleet::run(&url, "test-token", service).await });
     tokio::time::timeout(std::time::Duration::from_secs(5), async {
-        while !state.hub.views().await.iter().any(|n| n.online) {
+        // Scheduling (select_node) requires a snapshot with ready=true; waiting
+        // for online alone races the first submit into 503.
+        while !state
+            .hub
+            .views()
+            .await
+            .iter()
+            .any(|n| n.online && n.snapshot.as_ref().is_some_and(|s| s.ready))
+        {
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }
     })

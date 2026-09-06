@@ -9,7 +9,7 @@
 - 测试基建（`support/`）：MockNode 表驱动脚本 + 真协议回退（Create 日志幂等、64KiB 产物分片）；本轮新增旋钮：`set_events_more`（more 分页）、`set_events_status`（SSE 错误帧）、`set_snapshot_opts`（busy/ready 派生 + 单调 snapshot sequence）、`set_admission_reply`（freeze/reopen 拒绝路径）、`set_create_reply`/`clear_create_reply`（428 重试）、`set_artifact_raw`（不一致分片元数据 502 矩阵）、`journal_ids`、`freezes_count`、`Harness::req_bytes`（raw body + 任意 header，如 `last-event-id`）。
 - 24 个模块、155 用例（原 46 → 155），全部确定性（有界轮询/超时，无盲等）。
 - 纯函数式：表驱动断言 + 无隐藏状态机，遵循仓库禁 class 规则；新文件均 <400 行、迭代文件 <800 行。
-- 分层定位（rules/03）：本套件属集成层——MockChatClient 驱动、随常规 `cargo test` 运行；「e2e」指部署拓扑保真（真 `build_app` 路由 + 真 WS 节点协议 + 真 HTTP 客户端），真 LLM 端到端仍归 `scripts/e2e-glm.sh`。
+- 分层定位（rules/03）：本套件属集成层——MockChatClient 驱动、随常规 `cargo test` 运行；「e2e」指部署拓扑保真（真 `build_app` 路由 + 真 WS 节点协议 + 真 HTTP 客户端），真 LLM 端到端仍归 `scripts/e2e-glm.sh`。rules/03 判层标准已同步修正：按「真外部服务」判层，不再以 `tests/e2e/` 路径字面归第 3 层。
 
 ## Impact Surface
 

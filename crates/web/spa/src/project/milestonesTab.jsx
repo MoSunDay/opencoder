@@ -10,6 +10,7 @@ import { apiDel, apiPatch, apiPost } from '../api.js';
 import { MilestoneStatusTag } from './labels.jsx';
 import { Markdown } from './markdown.jsx';
 import { MdEditModal } from './mdModal.jsx';
+import { err, ok, warn } from '../notice.js';
 
 const { Text } = Typography;
 
@@ -40,22 +41,22 @@ export function MilestonesTab({ overview, refresh, onNotice }) {
   const save = async (v) => {
     const body = editing ? v : { ...v, goal_id: createGoal };
     if (!editing && !body.goal_id) {
-      onNotice('请选择所属目标');
+      onNotice(warn('请选择所属目标'));
       return false;
     }
     try {
       if (editing) {
         await apiPatch(msPath(editing.id), body);
-        onNotice('里程碑已更新');
+        onNotice(ok('里程碑已更新'));
       } else {
         await apiPost('/api/project/milestones', body);
-        onNotice('里程碑已创建');
+        onNotice(ok('里程碑已创建'));
       }
       setOpen(false);
       refresh();
       return true;
     } catch (e) {
-      onNotice('保存里程碑失败: ' + (e && e.message));
+      onNotice(err('保存里程碑失败: ' + (e && e.message)));
       return false;
     }
   };
@@ -65,17 +66,17 @@ export function MilestonesTab({ overview, refresh, onNotice }) {
       await apiPatch(msPath(m.id), { status });
       refresh();
     } catch (e) {
-      onNotice('切换里程碑状态失败: ' + (e && e.message));
+      onNotice(err('切换里程碑状态失败: ' + (e && e.message)));
     }
   };
 
   const remove = async (m) => {
     try {
       await apiDel(msPath(m.id));
-      onNotice('里程碑已删除');
+      onNotice(ok('里程碑已删除'));
       refresh();
     } catch (e) {
-      onNotice('删除里程碑失败: ' + (e && e.message));
+      onNotice(err('删除里程碑失败: ' + (e && e.message)));
     }
   };
 

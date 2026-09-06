@@ -23,6 +23,7 @@ vi.mock('../sse.js', () => ({
 }));
 
 import '../test/setup-dom.js';
+import { err } from '../notice.js';
 import { DefsTab } from './defsTab.jsx';
 import { DefEditor } from './defEditor.jsx';
 import { RunsTable } from './runsTable.jsx';
@@ -81,13 +82,13 @@ describe('DefsTab', () => {
     expect(await screen.findByText(/整个工作流会在同一个节点完成/)).toBeTruthy();
     fireEvent.click(await screen.findByText('确认派发'));
     await waitFor(() => expect(apiPostMock).toHaveBeenCalledTimes(1));
-    expect(onNotice).toHaveBeenLastCalledWith(expect.stringContaining('connection lost'));
+    expect(onNotice).toHaveBeenLastCalledWith(err(expect.stringContaining('connection lost')));
     await waitFor(() => expect(screen.getByText('确认派发').closest('button').disabled).toBe(false));
     fireEvent.click(screen.getByText('确认派发'));
     await waitFor(() => expect(apiPostMock).toHaveBeenCalledTimes(2));
     expect(apiPostMock.mock.calls[0][1].id).toBe(apiPostMock.mock.calls[1][1].id);
     expect(apiPostMock).toHaveBeenLastCalledWith('/api/dag/defs/dag-etl/dispatch', { id: expect.stringMatching(/^dag-/) });
-    expect(onNotice).toHaveBeenLastCalledWith('');
+    expect(onNotice).toHaveBeenLastCalledWith(err(''));
     expect(onDispatched).toHaveBeenCalledWith('run-new12345678');
   });
 

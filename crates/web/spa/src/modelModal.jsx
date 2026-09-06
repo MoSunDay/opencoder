@@ -8,6 +8,7 @@
 import { Button, Modal, Radio, Typography } from 'antd';
 import { useEffect, useState } from 'react';
 import { apiGet, apiPost } from './api.js';
+import { err, ok } from './notice.js';
 
 const { Text } = Typography;
 
@@ -46,12 +47,12 @@ export function ModelModal({ open, sessionId, onClose, onNotice }) {
     try {
       await apiPost('/api/sessions/' + encodeURIComponent(sessionId) + '/model', { value: sel });
       if (onNotice) {
-        onNotice('模型已切换: ' + sel);
+        onNotice(ok('模型已切换: ' + sel));
       }
       onClose();
     } catch (e) {
       if (onNotice) {
-        onNotice('切换模型失败: ' + ((e && e.message) || ''));
+        onNotice(err('切换模型失败: ' + ((e && e.message) || '')));
       }
     }
     setBusy(false);

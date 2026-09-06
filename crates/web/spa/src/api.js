@@ -1,6 +1,6 @@
 // api.js — Bearer-authenticated fetch plumbing shared by JSON and SSE callers.
 
-import { clearCredentials, getState, setConn, urlFor } from './store.js';
+import { clearToken, getState, setConn, urlFor } from './store.js';
 
 function token() {
   return getState().token;
@@ -22,7 +22,9 @@ export async function authFetch(method, pathAndQuery, bodyObj, opts = {}) {
     signal: opts.signal,
   });
   if (response.status === 401) {
-    clearCredentials();
+    // Only the token was rejected — keep the server base so the reopened
+    // login modal (and a URL-delivered base) survives the 401.
+    clearToken();
   }
   return response;
 }

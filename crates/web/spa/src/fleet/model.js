@@ -4,14 +4,10 @@ export const CREATABLE_KINDS = [
 ].map(([value, label]) => ({ value, label }));
 export const KINDS = [...CREATABLE_KINDS, { value: 'system', label: '历史系统执行' }];
 export const KIND_LABELS = Object.fromEntries(KINDS.map(({ value, label }) => [value, label]));
-export const STATUS_LABELS = {
-  pending: '等待节点确认', running: '运行中', idle: '等待继续', cancelling: '取消中',
-  interrupted: '已中断', cancelled: '已取消', done: '已完成', error: '失败',
-};
-export const STATUS_COLORS = {
-  pending: 'default', running: 'processing', idle: 'blue', cancelling: 'warning',
-  interrupted: 'orange', cancelled: 'default', done: 'success', error: 'error',
-};
+// 执行状态表已搬进 src/ui/statusTag.jsx（全控制台唯一状态→视觉映射）；这里
+// re-export 保持旧导入路径（executions/detail/todoRunsPanel）零改动，文案
+// 与颜色逐字不变（DOM 测试守卫）。
+export { STATUS_COLORS, STATUS_LABELS } from '../ui/statusTag.jsx';
 export function newId(kind) {
   const bytes = crypto.getRandomValues(new Uint8Array(16));
   return `${kind}-${Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')}`;

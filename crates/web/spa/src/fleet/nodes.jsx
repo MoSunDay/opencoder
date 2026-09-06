@@ -1,7 +1,9 @@
-import { Button, Input, Modal, Select, Space, Table, Tag } from 'antd';
+import { Button, Input, Modal, Select, Space, Table } from 'antd';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiGet, apiPost } from '../api.js';
 import { setState } from '../store.js';
+import { PageShell } from '../shell/pageShell.jsx';
+import { StatusTag } from '../ui/statusTag.jsx';
 import { ExecutionDetail } from './detail.jsx';
 import { newId } from './model.js';
 
@@ -29,15 +31,14 @@ export function FleetNodesPanel({ onNotice }) {
     } catch (e) { onNotice(e.message); }
     finally { setBusy(false); }
   };
-  return <>
-    <Button onClick={load} style={{ marginBottom: 12 }}>刷新节点</Button>
+  return <PageShell page="nodes" extra={<Button onClick={load}>刷新节点</Button>}>
     <Table scroll={{ x: 'max-content' }} locale={{ emptyText: '暂无 Opencoder 节点' }} rowKey="id" dataSource={rows} columns={[
-      { title: '节点', dataIndex: 'name', render: (v, r) => <Space orientation="vertical"><b>{v}</b><small>{r.id}</small></Space> },
-      { title: '状态', render: (_, r) => <Tag color={r.online && r.snapshot?.ready ? 'green' : 'red'}>{r.online ? (r.snapshot?.resource_error || '在线') : '离线'}</Tag> },
+      { title: '节点', dataIndex: 'name', render: (v, r) => <Space orientation="vertical"><b>{v}</b><small style={{ fontFamily: 'var(--oc-mono, monospace)' }}>{r.id}</small></Space> },
+      { title: '状态', render: (_, r) => <StatusTag status={r.online ? 'online' : 'offline'} label={r.online ? (r.snapshot?.resource_error || '在线') : '离线'} color={r.online && r.snapshot?.ready ? 'success' : 'error'} /> },
       { title: '可用 CPU', render: (_, r) => r.snapshot?.cpu_capacity ?? '—' },
       { title: '活跃 agent loops', render: (_, r) => r.snapshot?.active_agent_loops ?? '—' },
       { title: 'loops / CPU', render: (_, r) => r.snapshot ? (r.snapshot.active_agent_loops / r.snapshot.cpu_capacity).toFixed(2) : '—' },
-      { title: '维护 agent', dataIndex: 'maintenance_agent_id' },
+      { title: '维护 agent', dataIndex: 'maintenance_agent_id', render: (v) => <span style={{ fontFamily: 'var(--oc-mono, monospace)' }}>{v || '—'}</span> },
       { title: '操作', render: (_, r) => <Button disabled={!r.online} onClick={() => { setSelected(r); setResult(null); }}>维护节点</Button> },
     ]} />
     <Modal open={!!selected} title={`节点维护 · ${selected?.name || ''}`} onCancel={() => setSelected(null)} footer={null} width={800}>
@@ -51,5 +52,5 @@ export function FleetNodesPanel({ onNotice }) {
       </Space>
     </Modal>
     {detail && <ExecutionDetail id={detail.id} summary={detail} onClose={() => setDetail(null)} onNotice={onNotice} />}
-  </>;
+  </PageShell>;
 }

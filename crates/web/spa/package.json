@@ -10,6 +10,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@ant-design/icons": "^6.3.2",
     "@ant-design/x": "^2.9.0",
     "@dagrejs/dagre": "^3.1.1",
     "@xyflow/react": "^12.11.6",

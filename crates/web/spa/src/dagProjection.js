@@ -211,31 +211,9 @@ export function graphFromSpec(spec, stepStates, opts = {}) {
   return { nodes: layoutGraph(nodes, edges, opts), edges };
 }
 
-/// runStatusTag(status) → antd Tag color token for a DagRunView.status.
-export function runStatusTag(status) {
-  const map = {
-    pending: 'default',
-    running: 'processing',
-    cancelling: 'orange',
-    done: 'success',
-    error: 'red',
-    cancelled: 'grey',
-  };
-  return map[String(status || '')] || 'default';
-}
-
-/// runStatusLabel(status) → Chinese label for the same status vocabulary.
-export function runStatusLabel(status) {
-  const map = {
-    pending: '排队中',
-    running: '运行中',
-    cancelling: '取消中',
-    done: '已完成',
-    error: '失败',
-    cancelled: '已取消',
-  };
-  return map[String(status || '')] || String(status || '-');
-}
+/// runStatusTag/runStatusLabel were removed in iteration 3: the status →
+/// (color, 中文) mapping now lives in ONE place — src/ui/statusTag.jsx — and
+/// runBits/runDetail consume it directly.
 
 /// nodeBadgeText(nodeId, emptyText) — 执行节点 badge text: the claiming
 /// node id, or the unclaimed hint while the run waits in the queue.

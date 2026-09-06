@@ -3,7 +3,7 @@
 import { Alert, Button, Form, Input, Modal, Typography } from 'antd';
 import { useEffect, useState } from 'react';
 import { apiGet } from './api.js';
-import { setCredentials, clearCredentials } from './store.js';
+import { BASE_KEY, embeddedBase, setCredentials, clearToken } from './store.js';
 
 const { Text } = Typography;
 
@@ -14,19 +14,15 @@ export function LoginModal({ open, onConnected }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
 
-  // Credentials never enter URLs. Strip the retired query parameter while
-  // preserving unrelated navigation parameters and fragments.
+  // Link login (?token= / #token=) is adopted in boot.js BEFORE mount;
+  // this modal only handles interactive logins.
+  // Prefill: stored base, else the build-time embedded base (VITE_OC_BASE).
   useEffect(() => {
-    const url = new URL(window.location.href);
-    if (url.searchParams.has('token')) {
-      url.searchParams.delete('token');
-      window.history.replaceState(null, '', url.pathname + url.search + url.hash);
-    }
     if (!open) {
       return;
     }
     form.setFieldsValue({
-      base: localStorage.getItem('oc_base') ?? '',
+      base: localStorage.getItem(BASE_KEY) ?? embeddedBase(),
       token: '',
     });
   }, [open, form]);
@@ -47,7 +43,9 @@ export function LoginModal({ open, onConnected }) {
       onConnected?.();
       setBusy(false);
     } catch (e) {
-      clearCredentials();
+      // Failed probe: drop the token but keep the base the user/URL gave —
+      // retrying with the same address and a fixed token is the common path.
+      clearToken();
       setErr('连接失败: ' + (e && e.message));
       setBusy(false);
     }
@@ -78,7 +76,7 @@ export function LoginModal({ open, onConnected }) {
         <Form.Item name="token" label="共享密钥 (Token)">
           <Input.Password placeholder="共享密钥" autoFocus />
         </Form.Item>
-        {err ? <Alert type="error" showIcon message={err} style={{ marginBottom: 16 }} /> : null}
+        {err ? <Alert type="error" showIcon title={err} style={{ marginBottom: 16 }} /> : null}
         <Button type="primary" htmlType="submit" loading={busy} block>
           连接
         </Button>

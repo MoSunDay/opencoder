@@ -18,6 +18,14 @@ function assetName(assetInfo) {
 export default defineConfig({
   base: './',
   plugins: [react()],
+  test: {
+    // Cap forks pool: uncapped, vitest spawns ~nproc (16) parallel jsdom
+    // environments and slow antd DOM suites cross the 5s testTimeout under
+    // load (brainPanel/nav flakes, reproducible only in full-suite runs).
+    poolOptions: {
+      forks: { minForks: 1, maxForks: 4 },
+    },
+  },
   build: {
     outDir: 'dist',
     emptyOutDir: true,

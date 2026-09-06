@@ -11,8 +11,6 @@ import {
   nodeBadgeText,
   outputPreview,
   projectStepStatuses,
-  runStatusLabel,
-  runStatusTag,
   specSteps,
 } from './dagProjection.js';
 
@@ -228,24 +226,9 @@ describe('dropCycleEdges', () => {
   });
 });
 
+// display tokens: runStatusTag/runStatusLabel moved to src/ui/statusTag.jsx
+// (console-wide mapping); their contract is covered by statusTag.dom.test.jsx.
 describe('display tokens', () => {
-  it('runStatusTag maps every DagRunView status to an antd color token', () => {
-    expect(runStatusTag('pending')).toBe('default');
-    expect(runStatusTag('running')).toBe('processing');
-    expect(runStatusTag('cancelling')).toBe('orange');
-    expect(runStatusTag('done')).toBe('success');
-    expect(runStatusTag('error')).toBe('red');
-    expect(runStatusTag('cancelled')).toBe('grey');
-    expect(runStatusTag(undefined)).toBe('default');
-    expect(runStatusTag('weird')).toBe('default');
-  });
-
-  it('runStatusLabel is Chinese with a raw fallback', () => {
-    expect(runStatusLabel('running')).toBe('运行中');
-    expect(runStatusLabel('cancelled')).toBe('已取消');
-    expect(runStatusLabel('nope')).toBe('nope');
-  });
-
   it('nodeBadgeText shows the node id or the unclaimed hint', () => {
     expect(nodeBadgeText('node-42')).toBe('node-42');
     expect(nodeBadgeText(null)).toBe('任意节点排队中');

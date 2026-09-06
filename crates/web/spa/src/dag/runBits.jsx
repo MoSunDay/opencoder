@@ -3,8 +3,9 @@
 // the table ↔ detail modules never import each other sideways.
 
 import { Tag, Tooltip, Typography } from 'antd';
-import { nodeBadgeText, runStatusLabel, runStatusTag } from '../dagProjection.js';
+import { nodeBadgeText } from '../dagProjection.js';
 import { useStore } from '../store.js';
+import { StatusTag } from '../ui/statusTag.jsx';
 
 const { Text } = Typography;
 
@@ -12,8 +13,10 @@ const { Text } = Typography;
 /// cancelling); terminal rows freeze (crates/dag transitions).
 export const CANCELLABLE = ['pending', 'running', 'cancelling'];
 
+/// The run status Tag is the console-wide StatusTag (src/ui/statusTag.jsx):
+/// one mapping table for color + 文案 across every panel.
 export function RunStatusTag({ status }) {
-  return <Tag color={runStatusTag(status)}>{runStatusLabel(status)}</Tag>;
+  return <StatusTag status={status} />;
 }
 
 /// 执行节点 badge: node name (fleet snapshot) with the raw id in a Tooltip;

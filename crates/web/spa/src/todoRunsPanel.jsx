@@ -4,13 +4,13 @@
 // 流在 workflow_completed/workflow_failed 后服务器即关流，这里主动 abort，
 // 避免 sse.js 把「干净关闭」当作断线去空重连。
 
-import { Button, Card, Col, Empty, Row, Space, Table, Tag, Tooltip, Typography } from 'antd';
+import { Button, Card, Col, Empty, Row, Space, Table, Tooltip, Typography } from 'antd';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiGet, apiPost } from './api.js';
-import { absTime, relTime } from './format.js';
 import { openStream } from './sse.js';
 import { ExecutionDetail } from './fleet/detail.jsx';
-import { STATUS_COLORS, STATUS_LABELS } from './fleet/model.js';
+import { StatusTag } from './ui/statusTag.jsx';
+import { TimeText } from './ui/timeText.jsx';
 
 const { Text } = Typography;
 
@@ -19,21 +19,9 @@ const MAX_EVENTS = 200;
 /// SSE 终帧事件名（服务器随后关流）。
 export const TERMINAL_KINDS = ['workflow_completed', 'workflow_failed'];
 
-const STATUS_COLOR = {
-  pending: 'default',
-  running: 'processing',
-  suspended: 'warning',
-  completed: 'success',
-  failed: 'error',
-};
-
-export function StatusTag({ status }) {
-  const s = String(status || '');
-  return <Tag color={STATUS_COLOR[s] || 'default'}>{s || '-'}</Tag>;
-}
-
+/// 工作流行上的节点执行状态 Tag（可能缺省 → 不渲染）。
 function ExecutionStatusTag({ status }) {
-  return status ? <Tag color={STATUS_COLORS[status]}>{STATUS_LABELS[status] || status}</Tag> : null;
+  return status ? <StatusTag status={status} /> : null;
 }
 
 export function workflowActions(workflowStatus, executionStatus) {
@@ -284,11 +272,11 @@ export function TodoRunsPanel({ onNotice, focusWorkflowId, onFocusConsumed }) {
 
   const wfCols = [
     { title: 'ID', dataIndex: 'id', key: 'id', ellipsis: true,
-      render: (v) => <Tooltip title={v}><span style={{ fontFamily: 'monospace' }}>{String(v || '').slice(0, 16)}…</span></Tooltip> },
+      render: (v) => <Tooltip title={v}><span style={{ fontFamily: 'var(--oc-mono, monospace)' }}>{String(v || '').slice(0, 16)}…</span></Tooltip> },
     { title: '状态', key: 'status', width: 170,
       render: (_, row) => <Space size={4}><Tooltip title="节点执行状态"><span><ExecutionStatusTag status={row.execution_status} /></span></Tooltip>{row.detail_error ? null : <Tooltip title="工作流状态"><span><StatusTag status={row.status} /></span></Tooltip>}</Space> },
     { title: '更新时间', dataIndex: 'updated_at', key: 'updated_at', width: 110,
-      render: (ts) => <Tooltip title={absTime(ts)}><span>{relTime(ts)}</span></Tooltip> },
+      render: (ts) => <TimeText ts={ts} /> },
   ];
 
   return (

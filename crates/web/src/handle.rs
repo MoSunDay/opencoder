@@ -17,7 +17,9 @@ use opencoder_session::compaction;
 use opencoder_session::handoff;
 use opencoder_session::tools::registry as build_registry;
 use opencoder_session::{resume_and_replay as resume_session, run, SessionEvent};
-use opencoder_store::{Delivery, EventKind, SessionInput, SessionPatch, Store};
+use opencoder_store::{
+    Delivery, EventKind, InputAdmission, InputConflict, SessionInput, SessionPatch, Store,
+};
 use tokio::sync::{broadcast, mpsc, Mutex};
 use tokio_util::sync::CancellationToken;
 use tracing::warn;
@@ -153,13 +155,23 @@ impl SessionHandle {
 #[derive(Debug)]
 pub enum AdmissionError {
     BusyModeSwitch,
+    InputConflict(InputConflict),
     Other(anyhow::Error),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DrainAdmission {
+    pub seq: i64,
+    /// This input is new or still pending, so the Web lifecycle owns driving
+    /// it. `false` means the stable input was already consumed.
+    pub driver_ensured: bool,
 }
 
 impl std::fmt::Display for AdmissionError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::BusyModeSwitch => write!(f, "mode switch refused while drain running"),
+            Self::InputConflict(error) => write!(f, "{error}"),
             Self::Other(error) => write!(f, "{error:#}"),
         }
     }
@@ -169,7 +181,10 @@ impl std::error::Error for AdmissionError {}
 
 impl From<anyhow::Error> for AdmissionError {
     fn from(error: anyhow::Error) -> Self {
-        Self::Other(error)
+        match error.downcast::<InputConflict>() {
+            Ok(conflict) => Self::InputConflict(conflict),
+            Err(error) => Self::Other(error),
+        }
     }
 }
 
@@ -267,9 +282,11 @@ pub async fn admit_and_drain(
     config: Config,
 ) -> Result<i64> {
     admit_and_drain_guarded(
-        handles, store, session_id, prompt, images, delivery, client, workdir, config, None, false,
+        handles, store, session_id, prompt, images, delivery, client, workdir, config, None, None,
+        false,
     )
     .await
+    .map(|admission| admission.seq)
     .map_err(anyhow::Error::new)
 }
 
@@ -292,9 +309,10 @@ pub async fn admit_and_drain_guarded(
     client: Arc<dyn ChatStream>,
     workdir: std::path::PathBuf,
     config: Config,
+    input_id: Option<String>,
     skill: Option<String>,
     agent_override: bool,
-) -> std::result::Result<i64, AdmissionError> {
+) -> std::result::Result<DrainAdmission, AdmissionError> {
     let (handle, lifecycle) =
         crate::handle_lifecycle::lock_session_lifecycle(&handles, session_id).await;
     if agent_override && handle.draining.load(Ordering::SeqCst) {
@@ -315,9 +333,10 @@ pub async fn admit_and_drain_guarded(
             // (store_error_surfacing.rs) after the admission refactor.
             .map_err(|e| anyhow::anyhow!("persist skill: {e:#}"))?;
     }
+    let idempotent = input_id.is_some();
     let input = SessionInput {
         seq: None,
-        id: uuid::Uuid::new_v4().to_string(),
+        id: input_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
         session_id: session_id.to_string(),
         delivery,
         prompt,
@@ -326,21 +345,46 @@ pub async fn admit_and_drain_guarded(
         admitted_seq: 0,
         promoted_seq: None,
     };
-    let seq = store.admit_input(&input).await?;
-    let started_new_drain = start_drain_locked(
-        handles.clone(),
-        store.clone(),
-        session_id,
-        client.clone(),
-        workdir.clone(),
-        config.clone(),
-        &handle,
-    )
-    .await;
+    let admission = if idempotent {
+        store.admit_input_once(&input).await?
+    } else {
+        InputAdmission {
+            seq: store.admit_input(&input).await?,
+            inserted: true,
+        }
+    };
+    // Capture an already-running driver while the session lifecycle lock is
+    // held. Even if that driver finishes before this call returns, callers
+    // have a durable credential that they must not start a second driver for
+    // this admission.
+    let driver_was_active = handle.draining.load(Ordering::SeqCst);
+    // A stable-id retry may refer to an already-consumed row. Starting a
+    // drain for that row would replay the session without a new input. A
+    // crash-retry whose original row is still pending must still drive it.
+    let needs_drain = admission.inserted
+        || store
+            .pending_inputs(session_id, delivery)
+            .await?
+            .iter()
+            .any(|row| row.seq == Some(admission.seq));
+    let started_new_drain = if needs_drain {
+        start_drain_locked(
+            handles.clone(),
+            store.clone(),
+            session_id,
+            client.clone(),
+            workdir.clone(),
+            config.clone(),
+            &handle,
+        )
+        .await
+    } else {
+        false
+    };
     drop(lifecycle);
-    if !started_new_drain {
+    if !started_new_drain && needs_drain {
         // Steers interrupt the current turn; queued inputs wait for idle.
-        if delivery == Delivery::Steer {
+        if admission.inserted && delivery == Delivery::Steer {
             opencoder_session::fire_turn_cancel(&handle.turn_cancel);
             opencoder_session::fire_child_cancels(&handle.child_cancels);
         }
@@ -397,10 +441,13 @@ pub async fn admit_and_drain_guarded(
             .await;
         });
     }
-    if started_new_drain {
+    if started_new_drain && admission.inserted {
         let _ = opencoder_session::fire_child_cancels(&handle.child_cancels);
     }
-    Ok(seq)
+    Ok(DrainAdmission {
+        seq: admission.seq,
+        driver_ensured: driver_was_active || needs_drain,
+    })
 }
 
 /// Ensure exactly one drain task is running WITHOUT admitting a prompt.

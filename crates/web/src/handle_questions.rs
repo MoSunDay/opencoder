@@ -110,9 +110,16 @@ pub(crate) async fn maybe_generate_title(
     if has_title {
         return;
     }
-    let _ = tokio::time::timeout(
+    let generation = tokio::time::timeout(
         std::time::Duration::from_secs(30),
         opencoder_session::generate_title(session),
-    )
-    .await;
+    );
+    if let Some(cancel) = &session.cancel {
+        tokio::select! {
+            _ = cancel.cancelled() => {}
+            _ = generation => {}
+        }
+    } else {
+        let _ = generation.await;
+    }
 }

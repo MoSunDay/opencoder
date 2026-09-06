@@ -33,13 +33,17 @@ set -euo pipefail
 PROGNAME="$(basename "$0")"
 
 DEST="${OPENCODER_INSTALL_DEST:-/usr/local/bin/opencoder}"
+DEST_EXPLICIT=0
 SOURCE=""
 NO_BUILD=0
 BACKUP="${OPENCODER_INSTALL_BACKUP:-0}"
+BUNDLE=""
+DEST_DIR=""
 
 usage() {
   cat <<USAGE
 Usage: $PROGNAME [--dest PATH] [--source PATH] [--no-build] [-h|--help]
+       $PROGNAME --bundle DIR [--dest-dir DIR] [--backup]
 
 Atomically install the opencoder release binary to a canonical path.
 
@@ -50,6 +54,8 @@ Options:
   --no-build      Skip \`cargo build --release\` (use the existing build).
   --backup        Copy the existing destination to <dest>.bak.<timestamp> before
                   overwriting. Default off. Or set \$OPENCODER_INSTALL_BACKUP=1.
+  --bundle DIR    Verify and install a three-binary platform release bundle.
+  --dest-dir DIR  Platform binary directory (default: /usr/local/bin).
   -h, --help      Show this help.
 
 Exit codes: 0 ok | 1 usage | 2 build | 3 source | 4 install | 5 self-check
@@ -58,14 +64,32 @@ USAGE
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --dest)     DEST="$2"; shift 2;;
+    --dest)     DEST="$2"; DEST_EXPLICIT=1; shift 2;;
     --source)   SOURCE="$2"; shift 2;;
     --no-build) NO_BUILD=1; shift;;
     --backup)   BACKUP=1; shift;;
+    --bundle)   BUNDLE="$2"; shift 2;;
+    --dest-dir) DEST_DIR="$2"; shift 2;;
     -h|--help)  usage; exit 0;;
     *) echo "$PROGNAME: unknown argument: $1" >&2; usage >&2; exit 1;;
   esac
 done
+
+if [[ -n "$BUNDLE" ]]; then
+  if [[ -n "$SOURCE" || "$DEST_EXPLICIT" -eq 1 ]]; then
+    echo "$PROGNAME: --bundle cannot be combined with --source or --dest" >&2
+    exit 1
+  fi
+  DEST_DIR="${DEST_DIR:-/usr/local/bin}"
+  args=(--bundle "$BUNDLE" --dest-dir "$DEST_DIR")
+  [[ "$BACKUP" == "0" ]] || args+=(--backup)
+  exec python3 "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/platform/install_bundle.py" "${args[@]}"
+fi
+
+if [[ -n "$DEST_DIR" ]]; then
+  echo "$PROGNAME: --dest-dir requires --bundle" >&2
+  exit 1
+fi
 
 # --- repo root (where Cargo.toml + .cargo/config.toml live) -----------------
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

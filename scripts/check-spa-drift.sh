@@ -11,8 +11,12 @@ spa="$repo_root/crates/web/spa"
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
-cp -r "$spa" "$tmp/spa"
-rm -rf "$tmp/spa/node_modules"
+mkdir "$tmp/spa"
+cp "$spa/package.json" "$spa/package-lock.json" "$spa/index.html" "$spa/vite.config.js" "$tmp/spa/"
+cp -R "$spa/src" "$tmp/spa/src"
+if [ -d "$spa/public" ]; then
+  cp -R "$spa/public" "$tmp/spa/public"
+fi
 
 if [ -d "$spa/node_modules" ]; then
   ln -s "$spa/node_modules" "$tmp/spa/node_modules"

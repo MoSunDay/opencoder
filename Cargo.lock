@@ -591,6 +591,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3d52eff69cd5e647efe296129160853a42795992097e8af39800e1060caeea9b"
 
 [[package]]
+name = "core-foundation"
+version = "0.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b2a6cd9ae233e7f62ba4e9353e81a88df7fc8a5987b8d445b4d90c879bd156f6"
+dependencies = [
+ "core-foundation-sys",
+ "libc",
+]
+
+[[package]]
 name = "core-foundation-sys"
 version = "0.8.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -980,6 +990,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cb4cb245038516f5f85277875cdaa4f7d2c9a0fa0468de06ed190163b1581fcf"
 dependencies = [
  "percent-encoding",
+]
+
+[[package]]
+name = "fs2"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9564fc758e15025b46aa6643b1b77d047d1a56a1aea6e01002ac0c7026876213"
+dependencies = [
+ "libc",
+ "winapi",
 ]
 
 [[package]]
@@ -1411,10 +1431,10 @@ dependencies = [
  "hyper",
  "hyper-util",
  "rustls",
+ "rustls-native-certs",
  "tokio",
  "tokio-rustls",
  "tower-service",
- "webpki-roots 1.0.8",
 ]
 
 [[package]]
@@ -2398,7 +2418,10 @@ dependencies = [
  "opencoder-dag-runtime",
  "opencoder-llm",
  "opencoder-node",
+ "opencoder-session",
  "opencoder-store",
+ "opencoder-worker",
+ "serde_json",
  "tempfile",
  "tokio",
  "tracing",
@@ -2457,6 +2480,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "opencoder-control"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "axum",
+ "base64",
+ "chrono",
+ "dirs",
+ "futures",
+ "opencoder-agents",
+ "opencoder-brain",
+ "opencoder-core",
+ "opencoder-dag",
+ "opencoder-llm",
+ "opencoder-node",
+ "opencoder-store",
+ "opencoder-todos",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tokio-stream",
+ "tower",
+ "tracing",
+ "ulid",
+ "uuid",
+]
+
+[[package]]
 name = "opencoder-core"
 version = "0.1.0"
 dependencies = [
@@ -2464,11 +2518,9 @@ dependencies = [
  "async-trait",
  "chrono",
  "dirs",
- "hmac",
  "reqwest",
  "serde",
  "serde_json",
- "sha2",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
@@ -2494,6 +2546,7 @@ dependencies = [
  "axum",
  "chrono",
  "futures",
+ "libc",
  "opencoder-core",
  "opencoder-dag",
  "opencoder-llm",
@@ -2545,9 +2598,11 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tokio",
+ "tokio-tungstenite",
  "tokio-util",
  "tower",
  "tracing",
+ "ulid",
 ]
 
 [[package]]
@@ -2575,14 +2630,13 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "opencoder-control",
  "opencoder-core",
  "opencoder-store",
- "opencoder-web",
  "tempfile",
  "tokio",
  "tracing",
  "tracing-subscriber",
- "ulid",
 ]
 
 [[package]]
@@ -2742,6 +2796,48 @@ dependencies = [
  "ulid",
  "uuid",
 ]
+
+[[package]]
+name = "opencoder-worker"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "axum",
+ "base64",
+ "fs2",
+ "futures",
+ "libc",
+ "opencoder-agents",
+ "opencoder-control",
+ "opencoder-core",
+ "opencoder-dag",
+ "opencoder-dag-runtime",
+ "opencoder-llm",
+ "opencoder-node",
+ "opencoder-project",
+ "opencoder-session",
+ "opencoder-store",
+ "opencoder-team",
+ "opencoder-todos",
+ "opencoder-web",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+ "tower",
+ "tracing",
+ "ulid",
+]
+
+[[package]]
+name = "openssl-probe"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7c87def4c32ab89d880effc9e097653c8da5d6ef28e6b539d313baaacfbafcbe"
 
 [[package]]
 name = "option-ext"
@@ -3345,6 +3441,7 @@ dependencies = [
  "pin-project-lite",
  "quinn",
  "rustls",
+ "rustls-native-certs",
  "rustls-pki-types",
  "serde",
  "serde_json",
@@ -3361,7 +3458,6 @@ dependencies = [
  "wasm-bindgen-futures",
  "wasm-streams",
  "web-sys",
- "webpki-roots 1.0.8",
 ]
 
 [[package]]
@@ -3469,6 +3565,18 @@ dependencies = [
  "rustls-webpki",
  "subtle",
  "zeroize",
+]
+
+[[package]]
+name = "rustls-native-certs"
+version = "0.8.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dab5152771c58876a2146916e53e35057e1a4dfa2b9df0f0305b07f611fdea4d"
+dependencies = [
+ "openssl-probe",
+ "rustls-pki-types",
+ "schannel",
+ "security-framework",
 ]
 
 [[package]]
@@ -3846,6 +3954,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "schannel"
+version = "0.1.29"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "91c1b7e4904c873ef0710c1f407dde2e6287de2bebc1bbbf7d430bb7cbffd939"
+dependencies = [
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "scoped-tls"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3856,6 +3973,29 @@ name = "scopeguard"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
+
+[[package]]
+name = "security-framework"
+version = "3.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b7f4bc775c73d9a02cde8bf7b2ec4c9d12743edf609006c7facc23998404cd1d"
+dependencies = [
+ "bitflags",
+ "core-foundation",
+ "core-foundation-sys",
+ "libc",
+ "security-framework-sys",
+]
+
+[[package]]
+name = "security-framework-sys"
+version = "2.17.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6ce2691df843ecc5d231c0b14ece2acc3efb62c0a398c7e1d875f3983ce020e3"
+dependencies = [
+ "core-foundation-sys",
+ "libc",
+]
 
 [[package]]
 name = "serde"
@@ -4480,7 +4620,11 @@ checksum = "edc5f74e248dc973e0dbb7b74c7e0d6fcc301c694ff50049504004ef4d0cdcd9"
 dependencies = [
  "futures-util",
  "log",
+ "rustls",
+ "rustls-native-certs",
+ "rustls-pki-types",
  "tokio",
+ "tokio-rustls",
  "tungstenite",
 ]
 
@@ -4630,6 +4774,8 @@ dependencies = [
  "httparse",
  "log",
  "rand 0.8.6",
+ "rustls",
+ "rustls-pki-types",
  "sha1",
  "thiserror 1.0.69",
  "utf-8",

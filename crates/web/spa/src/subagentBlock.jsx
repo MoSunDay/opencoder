@@ -2,7 +2,7 @@
 // subagent_start / subagent_child / subagent_end into one turn of kind
 // 'subagent' carrying the child's already-reduced `events`). TUI chat.rs
 // parity: one collapsible block per subagent, plus a drill-in modal that
-// replays the child session read-only from /events after=0 (same signed
+// replays the child session read-only from /events after=0 (same authenticated
 // stream as the main console, folded by the same reduceFrame — NOT a
 // Bubble.List, the block stays light). Self-contained: no props drilled
 // in from chat state.

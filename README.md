@@ -5,7 +5,7 @@
 <h1 align="center">OpenCoder</h1>
 
 <p align="center">
-  从零实现的 Rust 原生编码代理 · 单二进制 · 可替换的存储与 LLM 后端<br/>
+  从零实现的 Rust 原生编码代理 · CLI/TUI 与节点调度平台 · 可替换的存储与 LLM 后端<br/>
   A high-performance, minimal coding agent written in Rust.
 </p>
 
@@ -41,6 +41,8 @@
 ---
 
 OpenCoder 是一个完全独立、从零实现的 Rust 原生编码代理。它以单一二进制 `opencoder` 提供 **交互式 TUI**、**无头一次性运行**、**集中式 HTTP/SSE 服务端** 与 **远程瘦客户端** 四种工作形态。所有上层逻辑只依赖两个抽象口子 —— `Arc<dyn Store>` 与 `Arc<dyn ChatStream>` —— 因此持久化层（libsql）与 LLM 后端（OpenAI 兼容）均可替换。
+
+多节点平台由 `opencoder-server` 管理调度、`opencoder-agent` 执行任务，复用 Web 控制台；运行明细保存在所属节点。部署、NFS 资源共享与恢复语义见 [Agent 调度平台](docs/agent-platform.md)。
 
 ## ✨ 特性
 

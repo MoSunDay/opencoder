@@ -1,4 +1,4 @@
-Commit: 860831d22fad968737c366c93b4cf70fc1f4c010
+Commit: (working-tree, 基于 c1a1b2e78e1ccd4a3cc2ac6dc408a76d30bf46e6)
 
 # 持久化 TODO 工作流
 
@@ -18,5 +18,7 @@ Commit: 860831d22fad968737c366c93b4cf70fc1f4c010
 - Store 永远是权威数据。`--debug` 为 `run/resume` 生成 `<data-dir>/todos/<run-id>/task-info`、`process` 和 `sessions` 的可恢复索引投影；后续 `interrupt` 会同步已经存在的投影，但不会为非 debug 运行新建目录。
 - 结构化模型输出接受纯 JSON 或全文中唯一一个完整 JSON fence；多个 fence、未 fenced 的说明加 JSON 或无法唯一定位的输出仍按合同错误失败。
 - 非 completed 终态让 `run/resume` 返回非零（本地 Ctrl-C 挂起 130、其他终态 1），合同错误、模型 JSON 错误和持久化冲突不会降级为猜测性继续。`run/resume` 的 stdout 只含最终状态 JSON（`--json` 紧凑模式），`workflow_id=` 与进度输出在 stderr。
+
+平台 Web 启动 TODO 时，父工作流及所有子执行固定在所属 Node，模板环境绑定在派发时校验并形成快照，运行状态与事件不上传为 Server 明细。见 [Agent 平台](../agent-platform/index.md)。
 
 相关逻辑：[todos 模块](../../agents/todos/index.md)、[CLI](../../agents/cli/index.md)、[Store](../../agents/store/index.md)。

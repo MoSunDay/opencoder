@@ -18,7 +18,7 @@ vi.mock('./api.js', () => ({
   apiGet: vi.fn().mockResolvedValue({}),
   apiPost: vi.fn().mockResolvedValue({}),
   apiDel: vi.fn().mockResolvedValue({}),
-  signFetch: vi.fn(),
+  authFetch: vi.fn(),
 }));
 
 import './test/setup-dom.js';

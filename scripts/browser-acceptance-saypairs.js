@@ -7,7 +7,7 @@
 // --server` on a temp workdir (opencoder.json points the model at the mock),
 // then drives the committed dist bundle in system chromium, auth seeded
 // BEFORE first load via addInitScript(localStorage.oc_token) so the SPA
-// self-signs every request; node-side setup/queries reuse the same HMAC.
+// sends the shared Bearer token; node-side setup/queries use the same token.
 // Scenarios: (a) 多回合交替 + 合并 Say 行（❯ Say(N steps): preview，正文
 // 与 preview 首行去重、单行 Say 无正文块、间距=空行） (b) /act_clear_context 在途回显
 // (c) steer 拆梯. Env: SHOTS (default /tmp/uitest/shots-saypairs), CHROME_PATH,
@@ -17,7 +17,7 @@
 // Browser reality (documented deviation): @ant-design/x Sender refuses
 // onSubmit while `loading` (Sender.js triggerSend `!loading`), so Enter cannot
 // admit a steer on a busy run from the composer. Mid-run steers here go through
-// the SAME signed POST /api/sessions/:id/prompt {delivery:'steer'} the SPA
+// the SAME authenticated POST /api/sessions/:id/prompt {delivery:'steer'} the SPA
 // uses; the echo lands on the OPEN stream via the steer_consumed frame (tail).
 'use strict';
 
@@ -88,7 +88,7 @@ async function startMock(port) {
     throw new Error('mock not healthy: ' + err.join('') + e.message);
   });
   log(`mock up on :${port}`);
-} // startDaemon builds/spawns opencoder daemon with signed-token auth
+} // startDaemon builds/spawns opencoder daemon with Bearer-token auth
 async function startDaemon(port, workdir) {
   if (!fs.existsSync(BIN)) {
     log('building release binary...');
@@ -109,15 +109,12 @@ function killTree(child) { // process-group + direct SIGTERM, both best-effort
   try { process.kill(-child.pid, 'SIGTERM'); } catch {}
   try { child.kill('SIGTERM'); } catch {}
 }
-// node-side signed call (canonical: METHOD\npathAndQuery\nts\nsha256(body))
-function makeSigned(base) {
+// Node-side control call with the same Bearer credential as the SPA.
+function makeAuthed(base) {
   return async (method, pathAndQuery, bodyObj) => {
     const bodyText = bodyObj === undefined ? '' : JSON.stringify(bodyObj);
-    const ts = Date.now().toString();
-    const bodyHash = crypto.createHash('sha256').update(bodyText).digest('hex');
-    const sig = crypto.createHmac('sha256', TOKEN).update([method, pathAndQuery, ts, bodyHash].join('\n')).digest('hex');
     const res = await fetch(base + pathAndQuery, { method,
-      headers: { 'x-sig-timestamp': ts, 'x-sig': sig, ...(bodyText ? { 'content-type': 'application/json' } : {}) },
+      headers: { authorization: `Bearer ${TOKEN}`, ...(bodyText ? { 'content-type': 'application/json' } : {}) },
       body: bodyText || undefined });
     let json = null; try { json = await res.json(); } catch {}
     return { status: res.status, json };
@@ -202,10 +199,10 @@ async function ensureSessionId() { // sessionId is captured from POST /api/sessi
   assert(sessionId, 'sessionId not captured from POST /api/sessions');
 }
 
-async function waitDraining(signed, want, timeoutMs) {
+async function waitDraining(authed, want, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
-    const r = await signed('GET', `/api/sessions/${sessionId}`);
+    const r = await authed('GET', `/api/sessions/${sessionId}`);
     if (r.json && r.json.draining === want) return r.json;
     if (Date.now() > deadline) throw new Error(`draining!==${want} after ${timeoutMs}ms`);
     await sleep(300);
@@ -214,13 +211,13 @@ async function waitDraining(signed, want, timeoutMs) {
 // Deterministic done-settle: instead of a fixed sleep, wait for the store-
 // snapshot refetch the SPA issues on done (reloadAfterDone GET
 // /api/sessions/:id), then let two rAFs flush the React rebuild.
-async function doneRebuild(signed, timeoutMs) {
+async function doneRebuild(authed, timeoutMs) {
   // Deterministic ONLY under an anchor that beats the reload: callers gate on
   // waitText of the FINAL Say chunk, and the mock's writeSay sleeps `delay`
   // (>=300ms) AFTER the last chunk, so the 200ms waitText poll always observes
   // the text before the stop frame -> done -> reload can race the base.
   const base = snapshotFetches;
-  await waitDraining(signed, false, timeoutMs);
+  await waitDraining(authed, false, timeoutMs);
   const deadline = Date.now() + timeoutMs;
   while (snapshotFetches <= base) {
     if (Date.now() > deadline) throw new Error(`snapshot refetch not seen after done (${snapshotFetches}<=${base})`);
@@ -264,8 +261,8 @@ const waitEchoSettledLast = (text, timeoutMs) => page.waitForFunction((t) => {
     && last.classList.contains('ant-bubble-end') && norm(last) === t;
 }, text, { timeout: timeoutMs, polling: 200 });
 
-async function steer(signed, text) { // same delivery the SPA uses for steers
-  const r = await signed('POST', `/api/sessions/${sessionId}/prompt`, { prompt: text, delivery: 'steer' });
+async function steer(authed, text) { // same delivery the SPA uses for steers
+  const r = await authed('POST', `/api/sessions/${sessionId}/prompt`, { prompt: text, delivery: 'steer' });
   assert(r.status === 200 && r.json && r.json.ok !== false, `steer POST -> ${r.status} ${JSON.stringify(r.json)}`);
 }
 (async () => { // --- orchestration: mock -> daemon -> browser -> scenarios ---
@@ -273,7 +270,7 @@ async function steer(signed, text) { // same delivery the SPA uses for steers
   fs.mkdirSync(path.dirname(MOCK_LOG), { recursive: true });
   const mockPort = await freePort(); const daemonPort = await freePort();
   const workdir = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-saypairs-'));
-  const BASE = `http://127.0.0.1:${daemonPort}`; const signed = makeSigned(BASE);
+  const BASE = `http://127.0.0.1:${daemonPort}`; const authed = makeAuthed(BASE);
   fs.writeFileSync(path.join(workdir, 'opencoder.json'), JSON.stringify({
     providers: { 'mock-saypairs': { base_url: `http://127.0.0.1:${mockPort}/v1`, api_key: 'sk-dummy' } },
     model: 'mock-saypairs/m-1',
@@ -318,7 +315,7 @@ async function steer(signed, text) { // same delivery the SPA uses for steers
       assert(b.header === '❯ 1 Step', `ladder1 header=${b.header}, want ❯ 1 Step`);
       await shot('a1-running-tag');
       await waitText('Say-第一回合-done', 20000);
-      await doneRebuild(signed, 20000);
+      await doneRebuild(authed, 20000);
     });
     await step('a2_turn1_frozen_ladder_say8px_drill', async () => {
       const b = await bubbleInfo({ type: 'ladder', v: 0 });
@@ -336,7 +333,7 @@ async function steer(signed, text) { // same delivery the SPA uses for steers
       await submit('第二回合 继续执行');
       await waitAnyRunningTag(20000);
       await waitText('Say-第二回合-done', 20000);
-      await doneRebuild(signed, 20000);
+      await doneRebuild(authed, 20000);
       const l1 = await bubbleInfo({ type: 'ladder', v: 0 });
       const l2 = await bubbleInfo({ type: 'ladder', v: 1 });
       assert(l2 && l2.header === '❯ Say(1 step)', `ladder2 missing/header wrong: ${JSON.stringify(l2)}`);
@@ -354,7 +351,7 @@ async function steer(signed, text) { // same delivery the SPA uses for steers
       await submit('SLOW 场景b 慢速输出开始');
       await shot('b1-slow-streaming');
       // Type the compound command + Enter: the Sender loading gate refuses the
-      // submit (by design); the steer then goes via the signed POST below.
+      // submit (by design); the steer then goes via the authenticated POST below.
       await composer().fill('/act_clear_context 收尾总结');
       const postsBefore = apiPromptPosts;
       await composer().press('Enter');
@@ -363,7 +360,7 @@ async function steer(signed, text) { // same delivery the SPA uses for steers
       // App contract (web/src/handle.rs "Steers interrupt the current turn"):
       // the steer POST fires turn_cancel, cutting the slow in-flight Say, and
       // the consumed batch emits steer_consumed with the compound tail echo.
-      await steer(signed, '/act_clear_context 收尾总结');
+      await steer(authed, '/act_clear_context 收尾总结');
       await waitUserEcho('收尾总结', 20000); // steer_consumed echo on the open stream
       await shot('b1-echo-landed');
     });
@@ -374,7 +371,7 @@ async function steer(signed, text) { // same delivery the SPA uses for steers
       // after b1 may already include the done reload. Poll the end-state
       // contract itself instead: echo exactly once, as the last bubble, no
       // running tag, composer released.
-      await waitDraining(signed, false, 20000);
+      await waitDraining(authed, false, 20000);
       await waitEchoSettledLast('收尾总结', 20000);
       const echo = await bubbleInfo({ type: 'containsEnd', v: '收尾总结' });
       assert(echo && echo.text.replace(/^❯\s*/, '') === '收尾总结', `echo must be EXACTLY the tail: ${JSON.stringify(echo)}`);
@@ -399,7 +396,7 @@ async function steer(signed, text) { // same delivery the SPA uses for steers
       // NEXT LLM round completes (daemon admit contract), which would consume
       // ladder-B's whole running window before c2 could observe it. The echo
       // itself arrives via the steer_consumed broadcast long before that.
-      cSteerP = steer(signed, ECHO_B);
+      cSteerP = steer(authed, ECHO_B);
       await waitUserEcho(ECHO_B, 20000, false); // steer_consumed echo on the open stream
       // Say-merged ladders (❯ Say(N steps)) now also count as ladders, so the
       // old `laddersAbove === 1` count is meaningless; assert DIRECT adjacency:
@@ -417,7 +414,7 @@ async function steer(signed, text) { // same delivery the SPA uses for steers
       const b = await bubbleInfo({ type: 'ladderBelow', v: ECHO_B });
       assert(b && b.running, 'ladder-B running tag missing during its tool round');
       await waitText('Steer-B handled.', 20000);
-      await doneRebuild(signed, 20000);
+      await doneRebuild(authed, 20000);
       await cSteerP; // by now the steer POST has certainly resolved
       const bDone = await bubbleInfo({ type: 'ladderBelow', v: ECHO_B });
       assert(!bDone.running && bDone.header === '❯ Say(1 step)' && bDone.text.includes('Steer-B handled.')

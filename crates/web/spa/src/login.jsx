@@ -4,27 +4,30 @@ import { Alert, Button, Form, Input, Modal, Typography } from 'antd';
 import { useEffect, useState } from 'react';
 import { apiGet } from './api.js';
 import { setCredentials, clearCredentials } from './store.js';
-import { syncTime } from './time.js';
 
 const { Text } = Typography;
 
 /// Shown whenever no token is stored (`oc_token`). Closable: false — without
-/// a shared key every signed call 401s, so there is nothing to render behind.
-export function LoginModal({ open }) {
+/// a shared key every protected call 401s, so there is nothing to render behind.
+export function LoginModal({ open, onConnected }) {
   const [form] = Form.useForm();
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
 
-  // The vanilla frontend authenticates via ?token=… in the page URL; prefill
-  // from it so pasting a bookmarked link just works.
+  // Credentials never enter URLs. Strip the retired query parameter while
+  // preserving unrelated navigation parameters and fragments.
   useEffect(() => {
+    const url = new URL(window.location.href);
+    if (url.searchParams.has('token')) {
+      url.searchParams.delete('token');
+      window.history.replaceState(null, '', url.pathname + url.search + url.hash);
+    }
     if (!open) {
       return;
     }
-    const q = new URLSearchParams(location.search);
     form.setFieldsValue({
       base: localStorage.getItem('oc_base') ?? '',
-      token: q.get('token') || '',
+      token: '',
     });
   }, [open, form]);
 
@@ -40,8 +43,8 @@ export function LoginModal({ open }) {
     }
     setCredentials(token, base);
     try {
-      await syncTime(); // unsigned bootstrap; also proves reachability
-      await apiGet('/api/nodes'); // signed probe — proves the token works
+      await apiGet('/api/nodes'); // protected probe proves reachability + token
+      onConnected?.();
       setBusy(false);
     } catch (e) {
       clearCredentials();

@@ -26,7 +26,7 @@ pub mod api_todo_runs;
 pub mod api_todo_template_versions;
 pub mod api_todo_templates;
 pub mod api_todo_util;
-pub mod auth_sig_mw;
+pub mod auth_mw;
 pub mod cmd;
 pub mod control_state;
 pub mod dag_state;
@@ -79,6 +79,15 @@ pub struct AppState {
     pub team: Arc<TeamWebState>,
     pub brain: opencoder_brain::Runtime,
     pub client_override: Option<Arc<dyn opencoder_llm::ChatStream>>,
+}
+
+impl AppState {
+    pub async fn reload_agents(&self) {
+        let ids: Vec<String> = self.handles.lock().await.keys().cloned().collect();
+        for id in ids {
+            handle::send_cmd(&self.handles, &id, cmd::DrainCmd::ReloadConfig).await;
+        }
+    }
 }
 
 pub async fn serve(
@@ -156,7 +165,7 @@ pub async fn serve(
 
     // Team runtime deps: resolved run config (team_root beside this
     // workdir's DB unless explicitly configured) + the node dispatcher.
-    let team = crate::team_state::production(store.clone(), &workdir);
+    let team = crate::team_state::production(store.clone(), &workdir)?;
     if let Err(error) = tokio::fs::create_dir_all(&team.run.team_root).await {
         tracing::warn!(error = %error, "team root creation failed; team routes may fail until it exists");
     }
@@ -197,7 +206,7 @@ pub async fn serve(
     Ok(())
 }
 
-/// Build the application router. `token = Some(t)` enables HMAC signature
+/// Build the application router. `token = Some(t)` enables Bearer-token
 /// auth on every route (production); `token = None` skips the middleware (used
 /// by tests that build their own router with an injected `MockChatClient`).
 pub fn build_app(state: Arc<AppState>, token: Option<String>, web: bool) -> axum::Router {
@@ -496,14 +505,14 @@ pub fn build_app(state: Arc<AppState>, token: Option<String>, web: bool) -> axum
         // ── team orchestration (opencoder-team) ──────────────────────
         .merge(api_teams::routes())
         .route("/api/health", get(api::health))
-        // Unsigned clock bootstrap for signature clients (SPA).
-        .route("/api/time", get(auth_sig_mw::server_time))
+        // Unauthenticated compatibility/readiness time endpoint.
+        .route("/api/time", get(auth_mw::server_time))
         .with_state(state);
     if let Some(t) = token {
-        let sig = std::sync::Arc::new(auth_sig_mw::SigState::new(t));
+        let auth = std::sync::Arc::new(auth_mw::AuthState::new(t));
         app = app.layer(axum::middleware::from_fn_with_state(
-            Some(sig),
-            auth_sig_mw::require_sig,
+            Some(auth),
+            auth_mw::require_bearer,
         ));
     }
     app

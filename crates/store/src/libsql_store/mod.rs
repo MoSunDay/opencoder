@@ -1,25 +1,26 @@
 use std::path::Path;
-use std::time::Duration;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use async_trait::async_trait;
-use libsql::{Builder, Connection};
+use libsql::Connection;
 use tokio::sync::Mutex;
 
 use crate::store::Store;
 use crate::types::{
     ConvergedDagRun, DagDefRecord, DagEventRecord, DagRunRecord, Delivery, ImportReport,
-    MessageRow, NodeRecord, NodeTaskRecord, NodeTaskStatus, SessionEventRecord, SessionFilter,
-    SessionInput, SessionListItem, SessionMeta, SessionPatch, SubagentTaskRecord,
+    InputAdmission, MessageChunkPage, MessageRow, NodeRecord, NodeTaskRecord, NodeTaskStatus,
+    SessionEventPage, SessionEventRecord, SessionFilter, SessionInput, SessionListItem,
+    SessionMeta, SessionPatch, SubagentTaskRecord,
 };
 use crate::{
     BrainCapabilityDetail, BrainCapabilityRecord, BrainEngInputRecord, BrainPlanRecord,
-    BrainVectorHit, BrainVectorWrite, TeamTopicRunRecord, TodoEventRecord, TodoItemRecord,
-    TodoWorkflowRecord, TodoWorkflowSummary,
+    BrainVectorHit, BrainVectorWrite, TeamTopicRunRecord, TodoEventPage, TodoEventRecord,
+    TodoItemRecord, TodoWorkflowDetail, TodoWorkflowRecord, TodoWorkflowSummary,
 };
 
 mod brain;
 mod chat_tables;
+mod connection;
 mod dag;
 mod dag_events;
 mod events;
@@ -56,107 +57,19 @@ pub struct LibsqlStore {
     db_lock: Mutex<()>,
 }
 
-/// Whether `open` pays the post-bootstrap WAL checkpoint.
-///
-/// Pre-existing files do (merge the previous session's WAL back into the main
-/// database); freshly created files skip it (their WAL is empty by
-/// construction, and the checkpoint's fsyncs are the dominant cold-start
-/// stall on sync-heavy storage - see the comment in `open`). Pure free
-/// function, not a method, so the fresh-vs-existing gate stays unit-testable
-/// without a real file.
-fn should_checkpoint_wal(path_existed: bool) -> bool {
-    path_existed
-}
-
 impl LibsqlStore {
     /// Open (or create) a libsql database file and bootstrap the schema.
-    ///
-    /// Every stage is timed and the totals are logged at info level, so a
-    /// cold-start regression (e.g. an fsync storm during WAL header
-    /// initialization on ZFS) shows up as data instead of a silent hang.
     pub async fn open(path: impl AsRef<Path>) -> Result<Self> {
-        let path = path.as_ref();
-        // Fresh-file creations skip the post-bootstrap checkpoint: a TRUNCATE
-        // checkpoint's fsyncs are the dominant cold-start stall on sync-heavy
-        // storage (measured 46s of an 82s storm-window open). The WAL is the
-        // source of truth either way and `wal_autocheckpoint` compacts later.
-        let existed = path.exists();
-        let t_total = std::time::Instant::now();
-
-        let t_build = std::time::Instant::now();
-        let db = Builder::new_local(path)
-            .build()
-            .await
-            .with_context(|| format!("open libsql db at {}", path.display()))?;
-        let conn = db.connect().context("connect libsql")?;
-        let build_ms = t_build.elapsed().as_millis() as u64;
-
-        let t_pragma = std::time::Instant::now();
-        schema::apply_connection_pragmas(&conn).await?;
-        let _ = conn.busy_timeout(Duration::from_secs(30));
-        let pragma_ms = t_pragma.elapsed().as_millis() as u64;
-
-        let t_bootstrap = std::time::Instant::now();
-        schema::bootstrap(&conn).await?;
-        let bootstrap_ms = t_bootstrap.elapsed().as_millis() as u64;
-
-        let t_checkpoint = std::time::Instant::now();
-        if should_checkpoint_wal(existed) {
-            let _ = schema::checkpoint_wal(&conn).await;
-        }
-        let checkpoint_ms = t_checkpoint.elapsed().as_millis() as u64;
-
-        let store = LibsqlStore {
-            conn,
+        Ok(Self {
+            conn: connection::open_file(path.as_ref()).await?,
             db_lock: Mutex::new(()),
-        };
-
-        let total_ms = t_total.elapsed().as_millis() as u64;
-        let stages = [
-            ("build", build_ms),
-            ("pragmas", pragma_ms),
-            ("bootstrap", bootstrap_ms),
-            ("checkpoint", checkpoint_ms),
-        ];
-        tracing::info!(
-            backend = "libsql",
-            path = %path.display(),
-            build_ms,
-            pragma_ms,
-            bootstrap_ms,
-            checkpoint_ms,
-            total_ms,
-            "store opened"
-        );
-        if total_ms > 1000 || stages.iter().any(|&(_, ms)| ms > 1000) {
-            let (slowest_stage, slowest_ms) = stages
-                .into_iter()
-                .max_by_key(|&(_, ms)| ms)
-                .unwrap_or(("total", total_ms));
-            tracing::warn!(
-                backend = "libsql",
-                path = %path.display(),
-                slowest_stage,
-                slowest_ms,
-                total_ms,
-                "slow store open"
-            );
-        }
-        Ok(store)
+        })
     }
 
     /// Open an in-memory database (used by tests and ephemeral runs).
     pub async fn open_memory() -> Result<Self> {
-        let db = Builder::new_local(":memory:")
-            .build()
-            .await
-            .context("open in-memory db")?;
-        let conn = db.connect().context("connect in-memory")?;
-        schema::apply_connection_pragmas(&conn).await?;
-        let _ = conn.busy_timeout(Duration::from_secs(30));
-        schema::bootstrap(&conn).await?;
-        Ok(LibsqlStore {
-            conn,
+        Ok(Self {
+            conn: connection::open_memory().await?,
             db_lock: Mutex::new(()),
         })
     }
@@ -242,11 +155,27 @@ impl Store for LibsqlStore {
         let conn = self.conn().await?;
         messages::load_rows(&conn, session_id).await
     }
+    async fn load_message_page(
+        &self,
+        session_id: &str,
+        cursor: opencoder_core::fleet::MessageCursor,
+        chunk_bytes: usize,
+        raw_budget: usize,
+    ) -> Result<MessageChunkPage> {
+        let _guard = self.db_lock.lock().await;
+        let conn = self.conn().await?;
+        messages::load_page(&conn, session_id, cursor, chunk_bytes, raw_budget).await
+    }
 
     async fn admit_input(&self, input: &SessionInput) -> Result<i64> {
         let _guard = self.db_lock.lock().await;
         let conn = self.conn().await?;
         inputs::admit(&conn, input).await
+    }
+    async fn admit_input_once(&self, input: &SessionInput) -> Result<InputAdmission> {
+        let _guard = self.db_lock.lock().await;
+        let conn = self.conn().await?;
+        inputs::admit_once(&conn, input).await
     }
     async fn pending_inputs(
         &self,
@@ -317,6 +246,28 @@ impl Store for LibsqlStore {
         let conn = self.conn().await?;
         events::after(&conn, session_id, after_seq).await
     }
+    async fn events_page(
+        &self,
+        session_id: &str,
+        after_seq: i64,
+        limit: u32,
+        payload_budget: usize,
+    ) -> Result<SessionEventPage> {
+        let _guard = self.db_lock.lock().await;
+        let conn = self.conn().await?;
+        events::page(&conn, session_id, after_seq, limit, payload_budget).await
+    }
+    async fn event_payload_chunk(
+        &self,
+        session_id: &str,
+        seq: i64,
+        offset: u64,
+        max_bytes: usize,
+    ) -> Result<Option<crate::PayloadChunkRecord>> {
+        let _guard = self.db_lock.lock().await;
+        let conn = self.conn().await?;
+        events::payload_chunk(&conn, session_id, seq, offset, max_bytes).await
+    }
     async fn last_event_seq(&self, session_id: &str) -> Result<i64> {
         let _guard = self.db_lock.lock().await;
         let conn = self.conn().await?;
@@ -367,6 +318,11 @@ impl Store for LibsqlStore {
         todos::get(&self.conn, id).await
     }
 
+    async fn get_todo_workflow_detail(&self, id: &str) -> Result<Option<TodoWorkflowDetail>> {
+        let _guard = self.db_lock.lock().await;
+        todos::get_detail(&self.conn, id).await
+    }
+
     async fn list_todo_workflows(&self, limit: u32) -> Result<Vec<TodoWorkflowSummary>> {
         let _guard = self.db_lock.lock().await;
         todos::list(&self.conn, limit).await
@@ -375,6 +331,36 @@ impl Store for LibsqlStore {
     async fn list_todo_items(&self, workflow_id: &str) -> Result<Vec<TodoItemRecord>> {
         let _guard = self.db_lock.lock().await;
         todos::items(&self.conn, workflow_id).await
+    }
+    async fn list_todo_items_page(
+        &self,
+        workflow_id: &str,
+        after_ordinal: Option<i64>,
+        limit: u32,
+    ) -> Result<crate::TodoItemPage> {
+        let _guard = self.db_lock.lock().await;
+        todos::items_page(&self.conn, workflow_id, after_ordinal, limit).await
+    }
+    async fn todo_workflow_field_chunk(
+        &self,
+        workflow_id: &str,
+        field: &str,
+        offset: u64,
+        max_bytes: usize,
+    ) -> Result<Option<crate::PayloadChunkRecord>> {
+        let _guard = self.db_lock.lock().await;
+        todos::workflow_field_chunk(&self.conn, workflow_id, field, offset, max_bytes).await
+    }
+    async fn todo_item_field_chunk(
+        &self,
+        workflow_id: &str,
+        todo_id: &str,
+        field: &str,
+        offset: u64,
+        max_bytes: usize,
+    ) -> Result<Option<crate::PayloadChunkRecord>> {
+        let _guard = self.db_lock.lock().await;
+        todos::item_field_chunk(&self.conn, workflow_id, todo_id, field, offset, max_bytes).await
     }
 
     async fn commit_todo_transition(
@@ -394,6 +380,26 @@ impl Store for LibsqlStore {
     ) -> Result<Vec<TodoEventRecord>> {
         let _guard = self.db_lock.lock().await;
         todos::events_after(&self.conn, workflow_id, after_seq).await
+    }
+    async fn todo_events_page(
+        &self,
+        workflow_id: &str,
+        after_seq: i64,
+        limit: u32,
+        payload_budget: usize,
+    ) -> Result<TodoEventPage> {
+        let _guard = self.db_lock.lock().await;
+        todos::events_page(&self.conn, workflow_id, after_seq, limit, payload_budget).await
+    }
+    async fn todo_event_payload_chunk(
+        &self,
+        workflow_id: &str,
+        seq: i64,
+        offset: u64,
+        max_bytes: usize,
+    ) -> Result<Option<crate::PayloadChunkRecord>> {
+        let _guard = self.db_lock.lock().await;
+        todos::event_payload_chunk(&self.conn, workflow_id, seq, offset, max_bytes).await
     }
 
     async fn create_brain_capability(
@@ -703,27 +709,5 @@ impl Store for LibsqlStore {
         let _guard = self.db_lock.lock().await;
         let conn = self.conn().await?;
         messages::import(&conn, session_id, msgs).await
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::should_checkpoint_wal;
-
-    /// Bug 10: `open`'s `if existed` checkpoint gate had zero coverage. The
-    /// decision is extracted into the pure `should_checkpoint_wal`; both
-    /// branches are pinned here, and the integration side (existing-path
-    /// reopen converging with `integrity_check`) lives in
-    /// `tests/schema_bootstrap.rs`.
-    #[test]
-    fn checkpoint_gate_skips_fresh_file_and_runs_on_existing() {
-        assert!(
-            !should_checkpoint_wal(false),
-            "fresh file must skip the checkpoint (cold-start fsync guard)"
-        );
-        assert!(
-            should_checkpoint_wal(true),
-            "existing file must checkpoint its WAL"
-        );
     }
 }

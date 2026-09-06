@@ -29,6 +29,26 @@ sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio",
 tempfile.workspace = true
 libsql.workspace = true
 
+[[test]]
+name = "bounded_pagination"
+path = "tests/contracts/bounded_pagination.rs"
+
+[[test]]
+name = "fleet_report"
+path = "tests/contracts/fleet_report.rs"
+
+[[test]]
+name = "fleet_schema"
+path = "tests/contracts/fleet_schema.rs"
+
+[[test]]
+name = "input_idempotency"
+path = "tests/contracts/input_idempotency.rs"
+
+[[test]]
+name = "project_atomic_claim"
+path = "tests/contracts/project_atomic_claim.rs"
+
 [features]
 default = []
 mysql = ["dep:sqlx"]

@@ -18,6 +18,7 @@
 //! (a) process-global test override, (b) `OPENCODER_SHARE_DIR` env var,
 //! (c) `Config::agent.share_dir`, (d) `<global home>/share`.
 
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
@@ -131,18 +132,65 @@ pub fn agent_tool_path(root: &Path, version: &str, tool: &str) -> Result<PathBuf
 
 // ---- atomic IO ----
 
+/// Create a directory tree and durably publish every newly created entry.
+pub fn durable_create_dir_all(path: &Path) -> Result<()> {
+    if path.is_dir() {
+        return Ok(());
+    }
+    let mut missing = Vec::new();
+    let mut cursor = path.to_path_buf();
+    while !cursor.exists() {
+        missing.push(cursor.clone());
+        cursor = match cursor.parent() {
+            Some(parent) if !parent.as_os_str().is_empty() => parent.to_path_buf(),
+            _ => PathBuf::from("."),
+        };
+    }
+    if !cursor.is_dir() {
+        bail!(
+            "directory ancestor is not a directory: {}",
+            cursor.display()
+        );
+    }
+    std::fs::create_dir_all(path).with_context(|| format!("create {}", path.display()))?;
+    for directory in missing.iter().rev() {
+        std::fs::File::open(directory)
+            .and_then(|file| file.sync_all())
+            .with_context(|| format!("fsync {}", directory.display()))?;
+        if let Some(parent) = directory.parent() {
+            std::fs::File::open(parent)
+                .and_then(|file| file.sync_all())
+                .with_context(|| format!("fsync {}", parent.display()))?;
+        }
+    }
+    Ok(())
+}
+
 /// Atomic write: bytes land in a sibling tmp file, then `rename` swaps it in.
 /// Readers on an NFS mount observe either the old or the new file, never a
 /// torn one.
 pub fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
+        durable_create_dir_all(parent)?;
     }
     let n = TMP_COUNTER.fetch_add(1, Ordering::Relaxed);
     let tmp = path.with_extension(format!("tmp-{}-{}", std::process::id(), n));
-    std::fs::write(&tmp, bytes).with_context(|| format!("write {}", tmp.display()))?;
-    std::fs::rename(&tmp, path)
-        .with_context(|| format!("rename {} -> {}", tmp.display(), path.display()))?;
+    let mut file =
+        std::fs::File::create(&tmp).with_context(|| format!("create {}", tmp.display()))?;
+    file.write_all(bytes)
+        .with_context(|| format!("write {}", tmp.display()))?;
+    file.sync_all()
+        .with_context(|| format!("fsync {}", tmp.display()))?;
+    if let Err(error) = std::fs::rename(&tmp, path) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(error)
+            .with_context(|| format!("rename {} -> {}", tmp.display(), path.display()));
+    }
+    if let Some(parent) = path.parent() {
+        std::fs::File::open(parent)
+            .and_then(|directory| directory.sync_all())
+            .with_context(|| format!("fsync {}", parent.display()))?;
+    }
     Ok(())
 }
 

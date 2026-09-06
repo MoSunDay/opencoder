@@ -1,7 +1,9 @@
 use anyhow::{Context, Result};
 use libsql::{params, Connection};
 
-use crate::types::{EventKind, SessionEventRecord};
+use crate::types::{EventKind, SessionEventPage, SessionEventRecord};
+
+const EVENT_OVERHEAD_BYTES: usize = 512;
 
 const INSERT_EVENT: &str = "\
 INSERT INTO session_events (session_id, type, payload_json, sse_kind, ts)
@@ -109,6 +111,114 @@ pub async fn after(
         });
     }
     Ok(out)
+}
+
+pub async fn page(
+    conn: &Connection,
+    session_id: &str,
+    after_seq: i64,
+    limit: u32,
+    payload_budget: usize,
+) -> Result<SessionEventPage> {
+    let limit = limit.clamp(1, 200) as usize;
+    let mut rows = conn
+        .query(
+            "SELECT seq,type,sse_kind,ts,length(CAST(payload_json AS BLOB)) \
+             FROM session_events WHERE session_id=?1 AND seq>?2 ORDER BY seq ASC LIMIT ?3",
+            params![session_id, after_seq, limit as i64 + 1],
+        )
+        .await?;
+    let mut metas = Vec::with_capacity(limit + 1);
+    while let Some(row) = rows.next().await? {
+        metas.push((
+            row.get::<i64>(0)?,
+            row.get::<String>(1)?,
+            row.get::<Option<String>>(2)?,
+            row.get::<i64>(3)?,
+            row.get::<i64>(4)?.max(0) as usize,
+        ));
+    }
+    drop(rows);
+
+    let mut events = Vec::with_capacity(limit.min(metas.len()));
+    let mut used = 0usize;
+    for (seq, kind, sse_kind, ts, payload_len) in metas.iter().take(limit) {
+        let row_bytes = payload_len.saturating_add(EVENT_OVERHEAD_BYTES);
+        if row_bytes > payload_budget && events.is_empty() {
+            events.push(SessionEventRecord {
+                session_id: session_id.to_owned(),
+                kind: parse_kind(kind),
+                payload: serde_json::json!({
+                    "omitted": true,
+                    "reason": "event_payload_exceeds_page_budget",
+                    "total_bytes": payload_len,
+                    "read_via": "event_payload",
+                }),
+                ts: *ts,
+                seq: Some(*seq),
+                sse_kind: sse_kind.clone(),
+            });
+            break;
+        }
+        if used.saturating_add(row_bytes) > payload_budget {
+            break;
+        }
+        let mut payload_rows = conn
+            .query(
+                "SELECT payload_json FROM session_events WHERE session_id=?1 AND seq=?2",
+                params![session_id, *seq],
+            )
+            .await?;
+        let Some(row) = payload_rows.next().await? else {
+            anyhow::bail!("event {seq} disappeared during pagination");
+        };
+        let payload_json: String = row.get(0)?;
+        let payload = serde_json::from_str(&payload_json).unwrap_or_else(|error| {
+            tracing::warn!(session_id, seq, %error, "failed to deserialize event payload, using null");
+            serde_json::Value::Null
+        });
+        events.push(SessionEventRecord {
+            session_id: session_id.to_owned(),
+            kind: parse_kind(kind),
+            payload,
+            ts: *ts,
+            seq: Some(*seq),
+            sse_kind: sse_kind.clone(),
+        });
+        used += row_bytes;
+    }
+    let more = events.len() < metas.len();
+    Ok(SessionEventPage { events, more })
+}
+
+pub async fn payload_chunk(
+    conn: &Connection,
+    session_id: &str,
+    seq: i64,
+    offset: u64,
+    max_bytes: usize,
+) -> Result<Option<crate::PayloadChunkRecord>> {
+    let take = max_bytes.clamp(1, 64 * 1024) as i64;
+    let start = i64::try_from(offset)?.saturating_add(1);
+    let mut rows = conn
+        .query(
+            "SELECT length(CAST(payload_json AS BLOB)), \
+             CAST(substr(CAST(payload_json AS BLOB),?3,?4) AS BLOB) \
+             FROM session_events WHERE session_id=?1 AND seq=?2",
+            params![session_id, seq, start, take],
+        )
+        .await?;
+    let Some(row) = rows.next().await? else {
+        return Ok(None);
+    };
+    let total = row.get::<i64>(0)?.max(0) as u64;
+    if offset > total {
+        anyhow::bail!("event payload offset exceeds total bytes");
+    }
+    Ok(Some(crate::PayloadChunkRecord {
+        total_bytes: total,
+        bytes: row.get(1)?,
+    }))
 }
 
 fn kind_str(k: EventKind) -> &'static str {

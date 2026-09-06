@@ -39,7 +39,10 @@ pub(crate) fn spawn_run_driver<F, Fut>(
     F: FnOnce() -> Fut,
     Fut: Future<Output = ()> + Send + 'static,
 {
-    let handle: JoinHandle<()> = tokio::spawn(drive());
+    let handle: JoinHandle<()> = tokio::spawn(opencoder_core::agent::scope::with_root(
+        opencoder_core::agent::scope::current_root(),
+        drive(),
+    ));
     let deps = deps.clone();
     let run_id = run_id.to_string();
     let todo_id = todo_id.to_string();

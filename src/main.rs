@@ -5,6 +5,10 @@ use opencoder_cli::{init_logging, Cli, Command};
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
+    if cli.build_info {
+        println!("{}", opencoder_core::version::build_info_json());
+        return Ok(());
+    }
 
     // The TUI runs in the alternate screen + raw mode, so any log line written
     // to stdout/stderr overlays the interface as garbage. Route TUI logs to a

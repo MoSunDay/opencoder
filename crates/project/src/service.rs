@@ -13,8 +13,8 @@ use std::{
 use anyhow::{bail, Context as _, Result};
 use opencoder_llm::ChatStream;
 use opencoder_store::{
-    ProjectStore, ProjectTodoPatch, ProjectTodoRecord, ProjectTodoRunKind, ProjectTodoRunRecord,
-    ProjectTodoStatus, Store, TASK_TYPE_PROJECT,
+    ProjectStore, ProjectTodoRecord, ProjectTodoRunKind, ProjectTodoRunRecord, ProjectTodoStatus,
+    Store, TASK_TYPE_PROJECT,
 };
 use serde_json::{json, Value};
 use tokio_util::sync::CancellationToken;
@@ -182,52 +182,31 @@ impl ProjectService {
         let run_id = format!("prun-{}", ulid::Ulid::new());
         let version = deps.projects.next_todo_version(todo_id).await?;
         let now = opencoder_core::message::now_ms();
-        // Expected-status CAS：单条条件 UPDATE 关死「读后写」的 TOCTOU 窗口
-        // ——并发双击/多实例下只有一个调用方能赢；输家（未找到或已在
-        // running）与前置检查里的 "todo is running" 同语义报错。
+        let run = ProjectTodoRunRecord {
+            id: run_id.clone(),
+            todo_id: todo_id.to_string(),
+            kind: ProjectTodoRunKind::Execute,
+            version,
+            // 执行起点的方案快照：后续 plan 重新生成不会改写本次执行的
+            // 留痕（前置检查已保证 Some）。
+            plan_md: todo.plan_md.clone(),
+            output_md: None,
+            agent: todo.agent.clone(),
+            session_id: None,
+            status: opencoder_store::ProjectTodoRunStatus::Running,
+            started_at: now,
+            finished_at: None,
+            created_at: now,
+        };
+        // Store 的单事务 claim + INSERT 关死两个提交之间的崩溃窗口；并发
+        // 双击/多实例只有一个调用方能赢，插入失败会连同 claim 一起回滚。
         if !deps
             .projects
-            .claim_todo_running(todo_id, now)
+            .claim_todo_running_with_run(&run, now)
             .await
-            .context("claim todo running")?
+            .context("claim todo and create execute run")?
         {
             bail!("todo is running");
-        }
-        if let Err(e) = deps
-            .projects
-            .create_todo_run(&ProjectTodoRunRecord {
-                id: run_id.clone(),
-                todo_id: todo_id.to_string(),
-                kind: ProjectTodoRunKind::Execute,
-                version,
-                // 执行起点的方案快照：后续 plan 重新生成不会改写本次执行的
-                // 留痕（前置检查已保证 Some）。
-                plan_md: todo.plan_md.clone(),
-                output_md: None,
-                agent: todo.agent.clone(),
-                session_id: None,
-                status: opencoder_store::ProjectTodoRunStatus::Running,
-                started_at: now,
-                finished_at: None,
-                created_at: now,
-            })
-            .await
-        {
-            // claim 补偿回滚：create 失败时 run 行不存在，sweep 只扫 run 行，这条
-            // 悬死 Running 永远无法自愈。条件 CAS（仍 Running 才改写）放回 claim
-            // 前的状态；回滚自身失败只告警，原始错误照常上抛。
-            let rollback = ProjectTodoPatch {
-                status: Some(todo.status),
-                ..Default::default()
-            };
-            if let Err(rb) = deps
-                .projects
-                .patch_todo_when(todo_id, ProjectTodoStatus::Running, &rollback, now)
-                .await
-            {
-                tracing::error!(todo_id, error = %rb, "rollback todo claim after create run failure failed");
-            }
-            return Err(e).context("create execute run");
         }
         let token = spawn_run(&deps, &run_id);
         let drive_deps = deps.clone();

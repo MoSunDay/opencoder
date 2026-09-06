@@ -2,7 +2,7 @@ use anyhow::{bail, Context, Result};
 use libsql::{params, Connection};
 use tracing::warn;
 
-use crate::types::{Delivery, SessionInput};
+use crate::types::{Delivery, InputAdmission, InputConflict, SessionInput};
 
 const INSERT_INPUT: &str = "\
 INSERT INTO session_inputs (id, session_id, delivery, prompt, images_json, admitted_seq, promoted_seq, display_text)
@@ -29,6 +29,68 @@ pub async fn admit(conn: &Connection, input: &SessionInput) -> Result<i64> {
         last_input_seq_in_tx(conn, &input.session_id).await
     })
     .await
+}
+
+/// Admit exactly one semantic payload for `(session_id, id)`. The immediate
+/// transaction serializes independent store instances as well as this store's
+/// own connection, so retries across processes cannot pass a read/insert gap.
+pub async fn admit_once(conn: &Connection, input: &SessionInput) -> Result<InputAdmission> {
+    let images_json = serde_json::to_string(&input.images).context("serialize input images")?;
+    super::tx::run_tx(conn, "BEGIN IMMEDIATE", || async move {
+        let admitted_seq = next_admitted_seq(conn, &input.session_id).await?;
+        let inserted = conn
+            .execute(
+                "INSERT INTO session_inputs (id, session_id, delivery, prompt, images_json, admitted_seq, promoted_seq, display_text) \
+                 VALUES (?, ?, ?, ?, ?, ?, NULL, ?) \
+                 ON CONFLICT(session_id, id) DO NOTHING",
+                params![
+                    input.id.as_str(),
+                    input.session_id.as_str(),
+                    input.delivery.as_str(),
+                    input.prompt.as_str(),
+                    images_json.as_str(),
+                    admitted_seq,
+                    input.display_text.as_deref(),
+                ],
+            )
+            .await
+            .context("insert idempotent input")?
+            == 1;
+        let stmt = conn
+            .prepare("SELECT seq, delivery, prompt, images_json, display_text FROM session_inputs WHERE session_id = ? AND id = ?")
+            .await?;
+        let mut rows = stmt
+            .query(params![input.session_id.as_str(), input.id.as_str()])
+            .await?;
+        let row = rows.next().await?.context("idempotent input row missing")?;
+        let seq = row.get::<i64>(0)?;
+        let delivery = row.get::<String>(1)?;
+        let prompt = row.get::<String>(2)?;
+        let images: Vec<String> = serde_json::from_str(&row.get::<String>(3)?)
+            .context("decode stored input images")?;
+        let display_text = row.get::<Option<String>>(4)?;
+        if !same_semantic_payload(&delivery, &prompt, &images, display_text.as_deref(), input) {
+            bail!(InputConflict {
+                session_id: input.session_id.clone(),
+                input_id: input.id.clone(),
+            });
+        }
+        Ok(InputAdmission { seq, inserted })
+    })
+    .await
+}
+
+fn same_semantic_payload(
+    delivery: &str,
+    prompt: &str,
+    images: &[String],
+    display_text: Option<&str>,
+    input: &SessionInput,
+) -> bool {
+    delivery == input.delivery.as_str()
+        && prompt == input.prompt
+        && images == input.images
+        && display_text == input.display_text.as_deref()
 }
 
 pub async fn pending(

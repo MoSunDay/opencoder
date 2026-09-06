@@ -5,6 +5,8 @@
 //! banner and `/api/health` all read from here, so the commit id travels with
 //! every version surface. Non-git builds fall back to "unknown".
 
+use serde::Serialize;
+
 /// Package version (SemVer only), e.g. "0.1.0". Shown by `-V`.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -33,6 +35,13 @@ pub const VERSION_LONG: &str = match option_env!("OPENCODER_VERSION_LONG") {
     None => VERSION,
 };
 
+/// Digest of the SPA tree embedded by a platform release build. Development
+/// builds that do not use the release builder report `unknown` explicitly.
+pub const SPA_SHA256: &str = match option_env!("OPENCODER_SPA_SHA256") {
+    Some(value) => value,
+    None => "unknown",
+};
+
 /// Pure format helper: assemble a version string from parts. Independently
 /// unit-tested, and asserted to agree with the build-time baked constant.
 pub fn format_version(version: &str, commit: &str, dirty: bool) -> String {
@@ -46,6 +55,31 @@ pub fn format_version(version: &str, commit: &str, dirty: bool) -> String {
 /// The long version string (the build-time constant).
 pub fn long_version() -> &'static str {
     VERSION_LONG
+}
+
+#[derive(Debug, Serialize, PartialEq, Eq)]
+pub struct BuildInfo {
+    pub version: &'static str,
+    pub version_long: &'static str,
+    pub git_commit: &'static str,
+    pub git_dirty: bool,
+    pub protocol_version: u32,
+    pub spa_sha256: &'static str,
+}
+
+pub fn build_info() -> BuildInfo {
+    BuildInfo {
+        version: VERSION,
+        version_long: VERSION_LONG,
+        git_commit: GIT_COMMIT_FULL,
+        git_dirty: is_dirty(),
+        protocol_version: crate::fleet::PROTOCOL_VERSION,
+        spa_sha256: SPA_SHA256,
+    }
+}
+
+pub fn build_info_json() -> String {
+    serde_json::to_string(&build_info()).expect("build metadata is JSON serializable")
 }
 
 #[cfg(test)]
@@ -88,5 +122,17 @@ mod tests {
             "VERSION_LONG={VERSION_LONG} missing commit {GIT_COMMIT}"
         );
         assert!(VERSION_LONG.contains('(') && VERSION_LONG.contains(')'));
+    }
+
+    #[test]
+    fn build_info_uses_compiled_protocol_and_commit() {
+        let info = build_info();
+        assert_eq!(info.git_commit, GIT_COMMIT_FULL);
+        assert_eq!(info.protocol_version, crate::fleet::PROTOCOL_VERSION);
+        assert_eq!(info.spa_sha256, SPA_SHA256);
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&build_info_json()).unwrap()["version_long"],
+            VERSION_LONG
+        );
     }
 }

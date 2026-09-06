@@ -2,7 +2,7 @@
 // TodoPanel DOM smoke: 模板表渲染 fixture（demo / v1），展开行点「运行」命中
 // POST /api/todo/templates/:name/:version/run 并跳到「运行」tab；新建模板表单
 // 提交命中 POST /api/todo/templates。api.js 模块级 mock（同 queuePanel 模式）；
-// sse.js 另以替身 mock —— 它直连 signFetch，而 api.js 的 mock 工厂不含该导出。
+// sse.js 另以替身 mock —— 它直连 authFetch，而 api.js 的 mock 工厂不含该导出。
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -20,9 +20,11 @@ vi.mock('./api.js', () => ({
   apiDel: apiDelMock,
 }));
 vi.mock('./sse.js', () => ({ openStream: vi.fn(() => ({ abort: () => {} })) }));
+vi.mock('./fleet/detail.jsx', () => ({ ExecutionDetail: ({ id, summary }) => <div>execution-detail:{id}:{summary?.node_id}</div> }));
 
 import './test/setup-dom.js';
 import { TodoPanel } from './todoPanel.jsx';
+import { TodoRunsPanel, workflowActions } from './todoRunsPanel.jsx';
 
 /// antd 6 Button 对两字中文自动插空格（「创 建」），按 role + 去空白匹配。
 const findButton = (txt) => screen.getAllByRole('button')
@@ -42,6 +44,12 @@ const installApi = () => {
     }
     if (path === '/api/todo/templates/demo') {
       return Promise.resolve(detailFixture);
+    }
+    if (path === '/api/todo/workflows?limit=50') {
+      return Promise.resolve({ workflows: [{ id: 'todos-1', status: 'running', execution_status: 'running', execution_created_at: 1, node_id: 'node-a', updated_at: 2 }] });
+    }
+    if (path === '/api/todo/workflows/todos-1') {
+      return Promise.resolve({ workflow: { id: 'todos-1', status: 'running' }, items: [] });
     }
     return Promise.resolve({});
   });
@@ -64,7 +72,9 @@ describe('TodoPanel 模板 tab', () => {
   });
 
   it('expands a row and dispatches a run for the version', async () => {
-    render(<TodoPanel onNotice={() => {}} />);
+    const onNotice = vi.fn();
+    apiPostMock.mockRejectedValueOnce(new Error('connection lost')).mockResolvedValueOnce({ ok: true, workflow_id: 'todos-1' });
+    render(<TodoPanel onNotice={onNotice} />);
     await screen.findByText('demo');
     fireEvent.click(document.querySelector('.ant-table-row-expand-icon'));
     expect(await screen.findByText('未绑定 env')).toBeTruthy(); // 版本行 env 徽标
@@ -75,9 +85,13 @@ describe('TodoPanel 模板 tab', () => {
       .pop();
     expect(runBtn).toBeTruthy();
     fireEvent.click(runBtn);
-    await waitFor(() => {
-      expect(apiPostMock).toHaveBeenCalledWith('/api/todo/templates/demo/v1/run', {});
-    });
+    await waitFor(() => expect(apiPostMock).toHaveBeenCalledTimes(1));
+    expect(onNotice).toHaveBeenLastCalledWith(expect.stringContaining('connection lost'));
+    fireEvent.click(runBtn);
+    await waitFor(() => expect(apiPostMock).toHaveBeenCalledTimes(2));
+    expect(apiPostMock.mock.calls[0][1].id).toBe(apiPostMock.mock.calls[1][1].id);
+    expect(apiPostMock).toHaveBeenLastCalledWith('/api/todo/templates/demo/v1/run', { id: expect.stringMatching(/^todos-/) });
+    expect(onNotice).toHaveBeenLastCalledWith('已启动工作流: todos-1');
     // 成功后自动切到「运行」tab（聚焦 todos-1，替身 openStream 不炸即可）。
     await waitFor(() => {
       expect(apiGetMock).toHaveBeenCalledWith('/api/todo/workflows?limit=50');
@@ -100,5 +114,25 @@ describe('TodoPanel 模板 tab', () => {
     // 预填的最小示例 spec 原样随请求上行（含 wf-example / t1）。
     expect(body.spec.id).toBe('wf-example');
     expect(body.spec.todos[0].id).toBe('t1');
+  });
+});
+
+describe('TodoRunsPanel 执行控制', () => {
+  it('以节点执行状态决定恢复与终止操作', () => {
+    expect(workflowActions('suspended', 'cancelled')).toEqual({ interrupt: false, resume: false, cancel: false });
+    expect(workflowActions('failed', 'error')).toEqual({ interrupt: false, resume: true, cancel: false });
+    expect(workflowActions('suspended', 'interrupted')).toEqual({ interrupt: false, resume: true, cancel: true });
+  });
+
+  it('保留中断、取消与节点执行详情的独立语义', async () => {
+    render(<TodoRunsPanel onNotice={vi.fn()} />);
+    await screen.findByText(/todos-1/);
+    fireEvent.click(document.querySelector('tbody tr'));
+    fireEvent.click(await screen.findByText('中断（可恢复）'));
+    await waitFor(() => expect(apiPostMock).toHaveBeenCalledWith('/api/todo/workflows/todos-1/interrupt', {}));
+    fireEvent.click(screen.getByText('取消（终止）'));
+    await waitFor(() => expect(apiPostMock).toHaveBeenCalledWith('/api/executions/todos-1/commands', { action: 'cancel', input: {} }));
+    fireEvent.click(screen.getByText('执行详情'));
+    expect(await screen.findByText('execution-detail:todos-1:node-a')).toBeTruthy();
   });
 });

@@ -11,7 +11,7 @@ use async_trait::async_trait;
 use crate::project_types::{
     ProjectGoalPatch, ProjectGoalRecord, ProjectMilestonePatch, ProjectMilestoneRecord,
     ProjectTodoPatch, ProjectTodoRecord, ProjectTodoRunPatch, ProjectTodoRunRecord,
-    ProjectTodoRunStatus, ProjectTodoStatus,
+    ProjectTodoRunStatus, ProjectTodoRunSummary, ProjectTodoStatus, ProjectTodoSummary,
 };
 
 /// CRUD for the project module's four tables.
@@ -71,6 +71,17 @@ pub trait ProjectStore: Send + Sync {
     /// else owns the todo right now) — the TOCTOU-closed replacement for a
     /// read-then-patch pair.
     async fn claim_todo_running(&self, id: &str, now_ms: i64) -> Result<bool>;
+    /// Atomically claims the run's todo as `running` and inserts the run row.
+    /// `false` means the todo was absent or already running; in that case no
+    /// run row is written. Any insert/commit failure rolls the claim back.
+    ///
+    /// Backends that cannot provide a transaction spanning both tables must
+    /// fail before either write instead of degrading to two statements.
+    async fn claim_todo_running_with_run(
+        &self,
+        rec: &ProjectTodoRunRecord,
+        now_ms: i64,
+    ) -> Result<bool>;
     /// Expected-status CAS variant of `patch_todo`: applies the patch only
     /// when the row's current status equals `when` (and the id exists).
     /// Returns `true` iff applied. Cross-backend caveat: SQLite counts
@@ -88,6 +99,9 @@ pub trait ProjectStore: Send + Sync {
     /// Transactional cascade: the todo's runs, then the todo.
     async fn delete_todo(&self, id: &str) -> Result<bool>;
     async fn get_todo(&self, id: &str) -> Result<Option<ProjectTodoRecord>>;
+    async fn get_todo_summary(&self, _id: &str) -> Result<Option<ProjectTodoSummary>> {
+        anyhow::bail!("bounded project todo inspection is unsupported by this store")
+    }
     /// `milestone_id == None` lists ALL todos (backlog included); ordered by
     /// `created_at`.
     async fn list_todos(&self, milestone_id: Option<&str>) -> Result<Vec<ProjectTodoRecord>>;
@@ -115,8 +129,30 @@ pub trait ProjectStore: Send + Sync {
         now_ms: i64,
     ) -> Result<bool>;
     async fn get_todo_run(&self, id: &str) -> Result<Option<ProjectTodoRunRecord>>;
+    async fn get_todo_run_summary(&self, _id: &str) -> Result<Option<ProjectTodoRunSummary>> {
+        anyhow::bail!("bounded project run inspection is unsupported by this store")
+    }
     /// Newest version first.
     async fn list_todo_runs(&self, todo_id: &str) -> Result<Vec<ProjectTodoRunRecord>>;
+    async fn list_todo_runs_page(
+        &self,
+        _todo_id: &str,
+        _before_version: Option<i64>,
+        _limit: u32,
+    ) -> Result<crate::ProjectTodoRunPage> {
+        anyhow::bail!("bounded project run pagination is unsupported by this store")
+    }
+    async fn project_text_chunk(
+        &self,
+        _record_kind: &str,
+        _owner_id: &str,
+        _id: &str,
+        _field: &str,
+        _offset: u64,
+        _max_bytes: usize,
+    ) -> Result<Option<crate::PayloadChunkRecord>> {
+        anyhow::bail!("bounded project text reads are unsupported by this store")
+    }
     /// Every run row currently in the `running` state, across todos and
     /// kinds. Powers the opportunistic stale-run sweep (a running row whose
     /// driver no longer exists after a restart/panic).

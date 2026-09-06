@@ -247,6 +247,34 @@ pub struct SessionInput {
     pub promoted_seq: Option<i64>,
 }
 
+/// Result of admitting an input under a caller-supplied idempotency key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InputAdmission {
+    /// Stable database row sequence. Retries return the original value.
+    pub seq: i64,
+    /// True only for the call that created the durable row.
+    pub inserted: bool,
+}
+
+/// A reused input id whose semantic prompt payload differs from the original.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InputConflict {
+    pub session_id: String,
+    pub input_id: String,
+}
+
+impl std::fmt::Display for InputConflict {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "input id {:?} already exists for session {:?} with a different payload",
+            self.input_id, self.session_id
+        )
+    }
+}
+
+impl std::error::Error for InputConflict {}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum EventKind {
@@ -496,6 +524,36 @@ pub struct MessageRow {
     pub blocks: serde_json::Value,
     /// Emitter clock (epoch ms) persisted with the row.
     pub created_at: i64,
+}
+
+/// Bounded raw slice of one persisted `blocks_json` value. The slice is taken
+/// in SQL before libsql materializes it, so legacy oversized rows stay bounded.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MessageChunkRecord {
+    pub seq: i64,
+    pub role: String,
+    pub created_at: i64,
+    pub offset: u64,
+    pub total_bytes: u64,
+    pub bytes: Vec<u8>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MessageChunkPage {
+    pub chunks: Vec<MessageChunkRecord>,
+    pub next_cursor: Option<opencoder_core::fleet::MessageCursor>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SessionEventPage {
+    pub events: Vec<SessionEventRecord>,
+    pub more: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PayloadChunkRecord {
+    pub total_bytes: u64,
+    pub bytes: Vec<u8>,
 }
 
 /// Persisted DAG definition (`dag_defs`): the spec under its stable id.

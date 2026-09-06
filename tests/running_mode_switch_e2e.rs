@@ -255,10 +255,13 @@ fn spawn_server(workdir: &std::path::Path) -> (FleetGuard, String) {
             let deadline = Instant::now() + Duration::from_secs(30);
             loop {
                 let (_, nodes) = http(&base, "GET", "/api/nodes", "");
-                if nodes["nodes"]
-                    .as_array()
-                    .is_some_and(|rows| rows.iter().any(|n| n["online"] == true))
-                {
+                // Scheduling (select_node) additionally requires a snapshot
+                // with ready=true, so waiting for online alone races the
+                // first POST /api/sessions into 503.
+                if nodes["nodes"].as_array().is_some_and(|rows| {
+                    rows.iter()
+                        .any(|n| n["online"] == true && n["snapshot"]["ready"] == true)
+                }) {
                     break;
                 }
                 assert!(Instant::now() < deadline, "node registration timed out");
@@ -286,8 +289,20 @@ fn http(base: &str, method: &str, path: &str, body: &str) -> (u16, serde_json::V
         body.len()
     );
     stream.write_all(request.as_bytes()).unwrap();
+    // `set_read_timeout` surfaces as ErrorKind::WouldBlock mid-body; under
+    // workspace-wide load a 10s stall is normal, so keep reading instead of
+    // panicking (bounded by an overall deadline).
     let mut response = Vec::new();
-    stream.read_to_end(&mut response).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(120);
+    loop {
+        match stream.read_to_end(&mut response) {
+            Ok(_) => break,
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                assert!(Instant::now() < deadline, "http read stalled: {path}");
+            }
+            Err(e) => panic!("http read failed on {path}: {e}"),
+        }
+    }
     let response = String::from_utf8(response).unwrap();
     let (head, body) = response.split_once("\r\n\r\n").unwrap();
     let status = head

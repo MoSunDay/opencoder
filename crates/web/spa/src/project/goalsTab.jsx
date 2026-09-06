@@ -10,6 +10,7 @@ import { apiDel, apiPatch, apiPost } from '../api.js';
 import { GoalStatusTag } from './labels.jsx';
 import { Markdown } from './markdown.jsx';
 import { MdEditModal } from './mdModal.jsx';
+import { err, ok } from '../notice.js';
 
 const { Text } = Typography;
 
@@ -33,16 +34,16 @@ export function GoalsTab({ overview, refresh, onNotice }) {
     try {
       if (editing) {
         await apiPatch(goalPath(editing.id), v);
-        onNotice('目标已更新');
+        onNotice(ok('目标已更新'));
       } else {
         await apiPost('/api/project/goals', v);
-        onNotice('目标已创建');
+        onNotice(ok('目标已创建'));
       }
       setOpen(false);
       refresh();
       return true;
     } catch (e) {
-      onNotice('保存目标失败: ' + (e && e.message));
+      onNotice(err('保存目标失败: ' + (e && e.message)));
       return false;
     }
   };
@@ -51,20 +52,20 @@ export function GoalsTab({ overview, refresh, onNotice }) {
     const next = g.status === 'archived' ? 'active' : 'archived';
     try {
       await apiPatch(goalPath(g.id), { status: next });
-      onNotice(next === 'archived' ? '目标已归档' : '目标已重新激活');
+      onNotice(ok(next === 'archived' ? '目标已归档' : '目标已重新激活'));
       refresh();
     } catch (e) {
-      onNotice('切换状态失败: ' + (e && e.message));
+      onNotice(err('切换状态失败: ' + (e && e.message)));
     }
   };
 
   const remove = async (g) => {
     try {
       await apiDel(goalPath(g.id));
-      onNotice('目标已删除');
+      onNotice(ok('目标已删除'));
       refresh();
     } catch (e) {
-      onNotice('删除目标失败: ' + (e && e.message));
+      onNotice(err('删除目标失败: ' + (e && e.message)));
     }
   };
 

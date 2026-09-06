@@ -9,6 +9,7 @@ import { Artifacts } from './artifacts.jsx';
 import { DetailFields, PayloadWindows } from './detail/fields.jsx';
 import { WorkloadDetail } from './detail/workloads.jsx';
 import { Markdown } from '../project/markdown.jsx';
+import { err } from '../notice.js';
 
 const EVENT_TEXT_CHARS = 64 * 1024;
 const RETAINED_EVENT_CHARS = 2 * 1024 * 1024;
@@ -109,7 +110,7 @@ export function ExecutionDetail({ id, summary, onClose, onNotice }) {
   const command = async (action, input = {}) => {
     setBusy(true);
     try { await apiPost(`/api/executions/${encodeURIComponent(id)}/commands`, { action, input }); setPrompt(''); await load(); }
-    catch (e) { onNotice(e.message); }
+    catch (e) { onNotice(err(e.message)); }
     finally { setBusy(false); }
   };
   const execution = index;

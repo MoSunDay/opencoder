@@ -8,6 +8,7 @@ import { Button, Card, Descriptions, Space, Switch, Tag, Typography, message } f
 import { useCallback, useEffect, useState } from 'react';
 import { apiGet, apiPost } from './api.js';
 import { mountHint } from './agentsItems.js';
+import { err } from './notice.js';
 
 const { Paragraph, Text } = Typography;
 
@@ -23,7 +24,7 @@ export function AgentNfsCard({ onNotice }) {
       setStatus((j && j.status) || null);
     } catch (e) {
       if (onNotice) {
-        onNotice('获取 NFS 状态失败: ' + (e && e.message));
+        onNotice(err('获取 NFS 状态失败: ' + (e && e.message)));
       }
     } finally {
       setLoading(false);
@@ -42,7 +43,7 @@ export function AgentNfsCard({ onNotice }) {
       message.success(enabled ? 'NFS 导出已启动' : 'NFS 导出已停止');
     } catch (e) {
       if (onNotice) {
-        onNotice('切换 NFS 失败: ' + (e && e.message));
+        onNotice(err('切换 NFS 失败: ' + (e && e.message)));
       }
       load(); // 与服务端实际状态对齐（失败时开关不得停在错误档位）
     } finally {

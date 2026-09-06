@@ -116,7 +116,7 @@ export function ProgressPanel({ onNotice }) {
     apiGet(executionPagePath('project', null, RECENT_EXECUTIONS))
       .then((page) => {
         if (live) {
-          setExecutions((page && page.executions) || []);
+          setExecutions(page.executions || []);
         }
         return null;
       })

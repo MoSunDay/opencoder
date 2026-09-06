@@ -8,6 +8,7 @@
 import { Button, Card, Col, Divider, Form, Input, InputNumber, Row, Segmented, Select, Space, Spin, Typography, message } from 'antd';
 import { useEffect, useMemo, useState } from 'react';
 import { apiGet, apiPut } from './api.js';
+import { err } from './notice.js';
 
 const { TextArea } = Input;
 const { Text } = Typography;
@@ -126,7 +127,7 @@ export function TodoEditor({ templateName, version, onNotice, onClose }) {
         setEnvLoaded(bound);
       } catch (e) {
         if (onNotice) {
-          onNotice('加载模板版本失败: ' + (e && e.message));
+          onNotice(err('加载模板版本失败: ' + (e && e.message)));
         }
       } finally {
         if (alive) {
@@ -198,7 +199,7 @@ export function TodoEditor({ templateName, version, onNotice, onClose }) {
     } catch (e) {
       const msg = '保存失败: ' + (e && e.message);
       if (onNotice) {
-        onNotice(msg);
+        onNotice(err(msg));
       }
     } finally {
       setSaving(false);

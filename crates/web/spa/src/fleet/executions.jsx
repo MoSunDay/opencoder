@@ -6,6 +6,7 @@ import { StatusTag } from '../ui/statusTag.jsx';
 import { TimeText } from '../ui/timeText.jsx';
 import { ExecutionDetail } from './detail.jsx';
 import { CREATABLE_KINDS, KIND_LABELS, KINDS, executionPagePath, newId, nodeOptions } from './model.js';
+import { err } from '../notice.js';
 
 export function ExecutionsPanel({ onNotice }) {
   const [rows, setRows] = useState([]); const [nodes, setNodes] = useState([]);
@@ -29,7 +30,7 @@ export function ExecutionsPanel({ onNotice }) {
       }
       setNodes(b.nodes || []);
     }
-    catch (e) { onNotice(e.message); }
+    catch (e) { onNotice(err(e.message)); }
     finally { if (append) setLoadingMore(false); }
   }, [filter, onNotice]);
   useEffect(() => {
@@ -45,8 +46,8 @@ export function ExecutionsPanel({ onNotice }) {
     const signature = JSON.stringify(request);
     if (!attempt.current || attempt.current.signature !== signature) attempt.current = { signature, id: kind === 'project' ? `project-${values.target}` : newId(kind) };
     setBusy(true);
-    try { const result = await apiPost('/api/executions', { ...request, id: attempt.current.id }); onNotice(''); attempt.current = null; setDetail(result); await load('reset'); }
-    catch (e) { onNotice(`${e.message}；保持内容不变再次启动，会继续确认同一次执行`); }
+    try { const result = await apiPost('/api/executions', { ...request, id: attempt.current.id }); onNotice(err('')); attempt.current = null; setDetail(result); await load('reset'); }
+    catch (e) { onNotice(err(`${e.message}；保持内容不变再次启动，会继续确认同一次执行`)); }
     finally { setBusy(false); }
   };
   return <PageShell page="topics">

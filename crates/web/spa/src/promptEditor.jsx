@@ -7,6 +7,7 @@ import { Button, Card, Input, Typography, message } from 'antd';
 import { useEffect, useState } from 'react';
 import { apiGet, apiPut } from './api.js';
 import { b64DecodeText, b64EncodeText } from './agentsItems.js';
+import { err } from './notice.js';
 
 const { TextArea } = Input;
 const { Text } = Typography;
@@ -55,7 +56,7 @@ export function PromptEditor({ resourceName, onNotice, onSaved }) {
         setTexts({ soul: parts[0], how: parts[1], output: parts[2] });
       } catch (e) {
         if (alive && onNotice) {
-          onNotice('读取 prompt 失败: ' + (e && e.message));
+          onNotice(err('读取 prompt 失败: ' + (e && e.message)));
         }
       } finally {
         if (alive) {
@@ -85,7 +86,7 @@ export function PromptEditor({ resourceName, onNotice, onSaved }) {
       }
     } catch (e) {
       if (onNotice) {
-        onNotice('保存 prompt 失败: ' + (e && e.message));
+        onNotice(err('保存 prompt 失败: ' + (e && e.message)));
       }
     } finally {
       setSaving(false);

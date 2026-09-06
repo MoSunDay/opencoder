@@ -1,6 +1,7 @@
 import { Button, Select, Space } from 'antd';
 import { useEffect, useState } from 'react';
 import { downloadArtifact, prepareArtifactDownloads } from './download.js';
+import { err } from '../notice.js';
 export function Artifacts({ id, spec, onNotice }) {
   const [step, setStep] = useState(null); const [file, setFile] = useState('output.txt'); const [busy, setBusy] = useState(false);
   useEffect(() => { prepareArtifactDownloads().catch(() => {}); }, []);
@@ -8,7 +9,7 @@ export function Artifacts({ id, spec, onNotice }) {
     setBusy(true);
     try {
       await downloadArtifact(id, step, file);
-    } catch (e) { onNotice(e.message); }
+    } catch (e) { onNotice(err(e.message)); }
     finally { setBusy(false); }
   };
   return <Space style={{ marginTop: 16 }}>

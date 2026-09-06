@@ -8,6 +8,7 @@ import { Button, Card, Col, Empty, Form, Input, Popconfirm, Row, Select, Space, 
 import { useCallback, useEffect, useState } from 'react';
 import { apiDel, apiGet, apiPost, apiPut } from './api.js';
 import { PageShell } from './shell/pageShell.jsx';
+import { err } from './notice.js';
 
 const { TextArea } = Input;
 const { Text } = Typography;
@@ -68,7 +69,7 @@ function CreateEnvForm({ onNotice, onCreated }) {
       await apiPost('/api/todo/envs', { name: values.name, description: values.description || '' });
       onCreated(values.name);
     } catch (e) {
-      onNotice('新建 env 失败: ' + (e && e.message));
+      onNotice(err('新建 env 失败: ' + (e && e.message)));
     } finally {
       setSaving(false);
     }
@@ -129,7 +130,7 @@ function EnvEditor({ name, tools, onNotice, onSaved }) {
         setSelectedTools(Array.isArray(e.tools) ? e.tools : []);
         setRows(varsToRows(e.env_vars));
       })
-      .catch((e) => onNotice('获取 env 详情失败: ' + (e && e.message)))
+      .catch((e) => onNotice(err('获取 env 详情失败: ' + (e && e.message))))
       .finally(() => {
         if (alive) {
           setLoading(false);
@@ -154,7 +155,7 @@ function EnvEditor({ name, tools, onNotice, onSaved }) {
       }
     } catch (e) {
       // 400 = 工具引用无法解析等，服务端 error 字段已并入 e.message
-      onNotice('保存 env 失败: ' + (e && e.message));
+      onNotice(err('保存 env 失败: ' + (e && e.message)));
     } finally {
       setSaving(false);
     }
@@ -204,7 +205,7 @@ function ToolsSection({ tools, onNotice, onToolsChanged }) {
         onToolsChanged();
       }
     } catch (e) {
-      onNotice('导入工具失败: ' + (e && e.message));
+      onNotice(err('导入工具失败: ' + (e && e.message)));
     } finally {
       setImporting('');
     }
@@ -247,7 +248,7 @@ export function EnvsPanel({ onNotice }) {
       const j = await apiGet('/api/todo/envs');
       setEnvs((j && j.envs) || []);
     } catch (e) {
-      onNotice('获取 env 列表失败: ' + (e && e.message));
+      onNotice(err('获取 env 列表失败: ' + (e && e.message)));
     }
   }, [onNotice]);
 
@@ -256,7 +257,7 @@ export function EnvsPanel({ onNotice }) {
       const j = await apiGet('/api/todo/tools');
       setTools((j && j.tools) || []);
     } catch (e) {
-      onNotice('获取工具目录失败: ' + (e && e.message));
+      onNotice(err('获取工具目录失败: ' + (e && e.message)));
     }
   }, [onNotice]);
 
@@ -273,7 +274,7 @@ export function EnvsPanel({ onNotice }) {
       }
       loadEnvs();
     } catch (e) {
-      onNotice('删除 env 失败: ' + (e && e.message));
+      onNotice(err('删除 env 失败: ' + (e && e.message)));
     }
   };
 

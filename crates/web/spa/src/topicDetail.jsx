@@ -9,6 +9,7 @@
 import { Button, Card, Collapse, Space, Spin, Tag, Timeline, Typography } from 'antd';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiGet } from './api.js';
+import { err } from './notice.js';
 import { closeTopicDetail, useStore } from './store.js';
 import { PageShell } from './shell/pageShell.jsx';
 import {
@@ -112,7 +113,7 @@ export function TopicDetailPanel({ onNotice }) {
       setData(j || null);
     } catch (e) {
       if (!silent && alive.current && onNotice) {
-        onNotice('获取话题失败: ' + (e && e.message));
+        onNotice(err('获取话题失败: ' + (e && e.message)));
       }
     } finally {
       if (alive.current && !silent) {

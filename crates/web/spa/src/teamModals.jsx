@@ -12,6 +12,7 @@ import { Button, Input, Modal, Radio, Select, Space, Tag, Typography } from 'ant
 import { useEffect, useState } from 'react';
 import { apiPatch, apiPost } from './api.js';
 import { captainOptions, memberCapsText, nodeSelectOptions } from './teamItems.js';
+import { err, ok } from './notice.js';
 
 const { Text } = Typography;
 
@@ -41,12 +42,12 @@ export function CreateTeamModal({ open, nodes, onClose, onDone, onNotice }) {
         member_node_ids: members,
       });
       if (onNotice) {
-        onNotice('团队已创建: ' + name.trim());
+        onNotice(ok('团队已创建: ' + name.trim()));
       }
       onDone();
     } catch (e) {
       if (onNotice) {
-        onNotice('创建团队失败: ' + ((e && e.message) || ''));
+        onNotice(err('创建团队失败: ' + ((e && e.message) || '')));
       }
     }
     setBusy(false);
@@ -111,12 +112,12 @@ export function CaptainModal({ team, nodes, onClose, onDone, onNotice }) {
     try {
       await apiPatch('/api/teams/' + encodeURIComponent(team.name), { captain_node_id: sel });
       if (onNotice) {
-        onNotice('队长已更新: ' + team.name);
+        onNotice(ok('队长已更新: ' + team.name));
       }
       onDone();
     } catch (e) {
       if (onNotice) {
-        onNotice('更新队长失败: ' + ((e && e.message) || ''));
+        onNotice(err('更新队长失败: ' + ((e && e.message) || '')));
       }
     }
     setBusy(false);
@@ -166,12 +167,12 @@ export function MembersModal({ team, nodes, onClose, onDone, onNotice }) {
     try {
       await apiPost('/api/teams/' + encodeURIComponent(team.name) + '/members', { add: adds, remove: removes });
       if (onNotice) {
-        onNotice('成员已更新: ' + team.name);
+        onNotice(ok('成员已更新: ' + team.name));
       }
       onDone();
     } catch (e) {
       if (onNotice) {
-        onNotice('更新成员失败: ' + ((e && e.message) || ''));
+        onNotice(err('更新成员失败: ' + ((e && e.message) || '')));
       }
     }
     setBusy(false);
@@ -241,12 +242,12 @@ export function TopicModal({ team, onClose, onCreated, onNotice }) {
         requirement: requirement.trim(),
       });
       if (onNotice) {
-        onNotice('话题已创建: ' + title.trim());
+        onNotice(ok('话题已创建: ' + title.trim()));
       }
       onCreated((j && j.topic) || {});
     } catch (e) {
       if (onNotice) {
-        onNotice('创建话题失败: ' + ((e && e.message) || ''));
+        onNotice(err('创建话题失败: ' + ((e && e.message) || '')));
       }
     }
     setBusy(false);

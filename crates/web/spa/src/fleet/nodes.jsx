@@ -6,6 +6,7 @@ import { PageShell } from '../shell/pageShell.jsx';
 import { StatusTag } from '../ui/statusTag.jsx';
 import { ExecutionDetail } from './detail.jsx';
 import { newId } from './model.js';
+import { err } from '../notice.js';
 
 export function FleetNodesPanel({ onNotice }) {
   const [rows, setRows] = useState([]); const [selected, setSelected] = useState(null);
@@ -14,7 +15,7 @@ export function FleetNodesPanel({ onNotice }) {
   const attempt = useRef(null);
   const load = useCallback(async () => {
     try { const j = await apiGet('/api/nodes'); setRows(j.nodes); setState({ nodes: j.nodes }); }
-    catch (e) { onNotice(e.message); }
+    catch (e) { onNotice(err(e.message)); }
   }, [onNotice]);
   useEffect(() => { load(); const timer = setInterval(load, 3000); return () => clearInterval(timer); }, [load]);
   const perform = async () => {
@@ -27,8 +28,8 @@ export function FleetNodesPanel({ onNotice }) {
         body = { id: attempt.current.id, prompt: input };
       } else if (action === 'configure') body = JSON.parse(input);
       const reply = await apiPost(`/api/nodes/${encodeURIComponent(selected.id)}/maintenance`, { action, input: body });
-      onNotice(''); setResult(reply); if (action === 'ask') { setDetail(reply); attempt.current = null; } await load();
-    } catch (e) { onNotice(e.message); }
+      onNotice(err('')); setResult(reply); if (action === 'ask') { setDetail(reply); attempt.current = null; } await load();
+    } catch (e) { onNotice(err(e.message)); }
     finally { setBusy(false); }
   };
   return <PageShell page="nodes" extra={<Button onClick={load}>刷新节点</Button>}>

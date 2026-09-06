@@ -23,6 +23,7 @@ vi.mock('./sse.js', () => ({ openStream: vi.fn(() => ({ abort: () => {} })) }));
 vi.mock('./fleet/detail.jsx', () => ({ ExecutionDetail: ({ id, summary }) => <div>execution-detail:{id}:{summary?.node_id}</div> }));
 
 import './test/setup-dom.js';
+import { err, info } from './notice.js';
 import { TodoPanel } from './todoPanel.jsx';
 import { TodoRunsPanel, workflowActions } from './todoRunsPanel.jsx';
 
@@ -86,12 +87,12 @@ describe('TodoPanel 模板 tab', () => {
     expect(runBtn).toBeTruthy();
     fireEvent.click(runBtn);
     await waitFor(() => expect(apiPostMock).toHaveBeenCalledTimes(1));
-    expect(onNotice).toHaveBeenLastCalledWith(expect.stringContaining('connection lost'));
+    expect(onNotice).toHaveBeenLastCalledWith(err(expect.stringContaining('connection lost')));
     fireEvent.click(runBtn);
     await waitFor(() => expect(apiPostMock).toHaveBeenCalledTimes(2));
     expect(apiPostMock.mock.calls[0][1].id).toBe(apiPostMock.mock.calls[1][1].id);
     expect(apiPostMock).toHaveBeenLastCalledWith('/api/todo/templates/demo/v1/run', { id: expect.stringMatching(/^todos-/) });
-    expect(onNotice).toHaveBeenLastCalledWith('已启动工作流: todos-1');
+    expect(onNotice).toHaveBeenLastCalledWith(info('已启动工作流: todos-1'));
     // 成功后自动切到「运行」tab（聚焦 todos-1，替身 openStream 不炸即可）。
     await waitFor(() => {
       expect(apiGetMock).toHaveBeenCalledWith('/api/todo/workflows?limit=50');

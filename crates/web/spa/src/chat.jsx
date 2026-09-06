@@ -44,6 +44,7 @@ import { QuestionModal } from './questionModal.jsx';
 import { ModelModal } from './modelModal.jsx';
 import { commandsForInput, replaceToken, stripLastToken } from './commandMenu.js';
 import { LOCAL_NODE, clearPreselect, useStore } from './store.js';
+import { err, ok, warn } from './notice.js';
 
 const { Text } = Typography;
 
@@ -227,7 +228,7 @@ export function ChatPanel({ onNotice }) {
           setConnecting(false);
           setBusy(false);
           if (onNotice) {
-            onNotice('SSE 流连接失败（已重试 5 次）');
+            onNotice(err('SSE 流连接失败（已重试 5 次）'));
           }
         }
       },
@@ -383,7 +384,7 @@ export function ChatPanel({ onNotice }) {
           { prompt, delivery: delivery === 'queue' ? 'queue' : 'steer' });
       } catch (e) {
         if (onNotice) {
-          onNotice('发送失败: ' + ((e && e.message) || ''));
+          onNotice(err('发送失败: ' + ((e && e.message) || '')));
         }
         setInput(prompt);
       }
@@ -448,7 +449,7 @@ export function ChatPanel({ onNotice }) {
       }
     } catch (e) {
       if (onNotice) {
-        onNotice('中断失败: ' + ((e && e.message) || ''));
+        onNotice(err('中断失败: ' + ((e && e.message) || '')));
       }
     }
   };
@@ -503,13 +504,13 @@ export function ChatPanel({ onNotice }) {
         await apiPost('/api/sessions/' + encodeURIComponent(sid) + '/agent', { value: entry.value });
         setSessionAgent(entry.value === 'plan' ? 'plan' : 'act');
       } catch (e) {
-        notice('切换模式失败: ' + ((e && e.message) || ''));
+        notice(err('切换模式失败: ' + ((e && e.message) || '')));
       }
       return;
     }
     if (kind === 'compact') {
       if (!sid) {
-        notice('先选择或新建对话');
+        notice(warn('先选择或新建对话'));
         return;
       }
       try {
@@ -530,7 +531,7 @@ export function ChatPanel({ onNotice }) {
       } catch (e) {
         setConnecting(false);
         setBusy(false);
-        notice('压缩失败: ' + ((e && e.message) || ''));
+        notice(err('压缩失败: ' + ((e && e.message) || '')));
       }
       return;
     }
@@ -548,7 +549,7 @@ export function ChatPanel({ onNotice }) {
     }
     if (kind === 'fork') {
       if (!sid) {
-        notice('先选择或新建对话');
+        notice(warn('先选择或新建对话'));
         return;
       }
       try {
@@ -561,7 +562,7 @@ export function ChatPanel({ onNotice }) {
           await openDialog(j.id);
         }
       } catch (e) {
-        notice('fork 失败: ' + ((e && e.message) || ''));
+        notice(err('fork 失败: ' + ((e && e.message) || '')));
       }
       return;
     }
@@ -576,29 +577,29 @@ export function ChatPanel({ onNotice }) {
   const setAutopilot = async (mode) => {
     setApOpen(false);
     if (!dialogSel) {
-      notice('先选择或新建对话');
+      notice(warn('先选择或新建对话'));
       return;
     }
     try {
       await apiPost('/api/sessions/' + encodeURIComponent(dialogSel) + '/autopilot', { mode });
-      notice(mode ? 'autopilot → ' + mode : 'autopilot 已清除');
+      notice(ok(mode ? 'autopilot → ' + mode : 'autopilot 已清除'));
     } catch (e) {
-      notice('autopilot 设置失败: ' + ((e && e.message) || ''));
+      notice(err('autopilot 设置失败: ' + ((e && e.message) || '')));
     }
   };
 
   const setAnnotation = async (text) => {
     setAnnoOpen(false);
     if (!dialogSel) {
-      notice('先选择或新建对话');
+      notice(warn('先选择或新建对话'));
       return;
     }
     try {
       // AnnotationBody { text: Option<String> } — blank means CLEAR.
       await apiPost('/api/sessions/' + encodeURIComponent(dialogSel) + '/annotation', { text });
-      notice(text ? '批注已保存' : '批注已清除');
+      notice(ok(text ? '批注已保存' : '批注已清除'));
     } catch (e) {
-      notice('批注保存失败: ' + ((e && e.message) || ''));
+      notice(err('批注保存失败: ' + ((e && e.message) || '')));
     }
   };
 

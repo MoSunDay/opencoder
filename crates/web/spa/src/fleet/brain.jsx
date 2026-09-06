@@ -5,6 +5,7 @@ import { BrainPanel } from '../brainPanel.jsx';
 import { ExecutionDetail } from './detail.jsx';
 import { KINDS, newId, nodeOptions } from './model.js';
 import { PageShell } from '../shell/pageShell.jsx';
+import { err, ok } from '../notice.js';
 
 function Dispatch({ onNotice }) {
   const [capabilities, setCapabilities] = useState([]); const [nodes, setNodes] = useState([]);
@@ -13,16 +14,16 @@ function Dispatch({ onNotice }) {
   const [kind, setKind] = useState('agent'); const attempt = useRef(null); const [binding] = Form.useForm(); const [form] = Form.useForm();
   const load = async () => {
     try { const [a, b] = await Promise.all([apiGet('/api/brain/capabilities'), apiGet('/api/nodes')]); setCapabilities(a.capabilities || []); setNodes(b.nodes); }
-    catch (e) { onNotice(e.message); }
+    catch (e) { onNotice(err(e.message)); }
   };
   useEffect(() => { load(); }, []);
   const bind = async (values) => {
-    try { await apiPut(`/api/brain/capabilities/${encodeURIComponent(values.capability)}/target`, { kind, target: values.target }); onNotice('能力已绑定执行目标'); }
-    catch (e) { onNotice(e.message); }
+    try { await apiPut(`/api/brain/capabilities/${encodeURIComponent(values.capability)}/target`, { kind, target: values.target }); onNotice(ok('能力已绑定执行目标')); }
+    catch (e) { onNotice(err(e.message)); }
   };
   const choose = async (id) => {
     try { const j = await apiGet(`/api/brain/capabilities/${encodeURIComponent(id)}/target`); setKind(j.target?.kind || 'agent'); binding.setFieldValue('target', j.target?.target || ''); }
-    catch (e) { onNotice(e.message); }
+    catch (e) { onNotice(err(e.message)); }
   };
   const dispatch = async (execute) => {
     let values;
@@ -33,8 +34,8 @@ function Dispatch({ onNotice }) {
     setBusy(true);
     try {
       const result = await apiPost(execute ? '/api/brain/dispatch' : '/api/brain/preview', { ...body, request_id: attempt.current.requestId });
-      setDispatchError(''); onNotice(''); setPreview(result); if (result.execution) { setDetail(result.execution); attempt.current = null; }
-    } catch (e) { setDispatchError(e.message); onNotice(e.message); }
+      setDispatchError(''); onNotice(err('')); setPreview(result); if (result.execution) { setDetail(result.execution); attempt.current = null; }
+    } catch (e) { setDispatchError(e.message); onNotice(err(e.message)); }
     finally { setBusy(false); }
   };
   return <Space orientation="vertical" style={{ width: '100%' }}>

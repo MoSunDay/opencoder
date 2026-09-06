@@ -280,7 +280,17 @@ impl Fleet {
             nodes.push(node);
         }
         tokio::time::timeout(std::time::Duration::from_secs(10), async {
-            while state.hub.views().await.iter().filter(|n| n.online).count() != count {
+            // Scheduling (select_node) requires a snapshot with ready=true;
+            // waiting for online alone races the first submit into 503.
+            while state
+                .hub
+                .views()
+                .await
+                .iter()
+                .filter(|n| n.online && n.snapshot.as_ref().is_some_and(|s| s.ready))
+                .count()
+                != count
+            {
                 tokio::time::sleep(std::time::Duration::from_millis(10)).await;
             }
         })

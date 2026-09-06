@@ -221,6 +221,8 @@ fn verify_existing_trees(layout: &DirectoryLayout, source: &LegacyExecution) -> 
         }
         _ => {}
     }
+    // Symlink rejection is a hard gate: scan every entry first so that
+    // directory iteration order can never mask it behind other violations.
     for entry in std::fs::read_dir(&target)? {
         let entry = entry?;
         if entry.file_type()?.is_symlink() {
@@ -229,6 +231,9 @@ fn verify_existing_trees(layout: &DirectoryLayout, source: &LegacyExecution) -> 
                 entry.path().display()
             );
         }
+    }
+    for entry in std::fs::read_dir(&target)? {
+        let entry = entry?;
         let name = entry.file_name().to_string_lossy().into_owned();
         if name != RECEIPT_FILE && !expected.contains(&name) {
             bail!("current execution has data absent from legacy execution {id}");

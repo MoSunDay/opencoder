@@ -163,10 +163,10 @@ impl Hub {
     }
     pub async fn touch(&self, id: &str, generation: &str) -> bool {
         let mut state = self.state.lock().await;
-        if !state
+        if state
             .connections
             .get(id)
-            .is_some_and(|connection| connection.generation == generation)
+            .is_none_or(|connection| connection.generation != generation)
         {
             return false;
         }
@@ -232,10 +232,10 @@ impl Hub {
     }
     pub async fn detach(&self, id: &str, generation: &str) {
         let mut state = self.state.lock().await;
-        if !state
+        if state
             .connections
             .get(id)
-            .is_some_and(|c| c.generation == generation)
+            .is_none_or(|c| c.generation != generation)
         {
             return;
         }

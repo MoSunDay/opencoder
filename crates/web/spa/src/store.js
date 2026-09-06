@@ -15,11 +15,10 @@ let state = {
   // null (never stored) falls back to the build-time embedded base; an
   // explicitly stored '' still means same-origin and wins over the embed.
   base: localStorage.getItem(BASE_KEY) ?? embeddedBase(),
-  page: 'nodes', // 'nodes' | 'chat' | 'dag' | 'team' | 'topics' | 'topic_detail'
+  page: 'nodes', // 'nodes' | 'chat' | 'dag' | 'team' | 'topics'
   preselectNode: null, // node id the fleet tab asked chat to open
   nodes: [], // last fleet snapshot shared between tabs
   conn: 'init', // 'init' | 'ok' | 'fail'
-  topicDetail: null, // {teamName, topicId} while page === 'topic_detail'
 };
 
 const listeners = new Set();
@@ -67,7 +66,6 @@ export function clearCredentials() {
   localStorage.removeItem(BASE_KEY);
   setState({
     token: '', base: embeddedBase(), conn: 'init', nodes: [], preselectNode: null,
-    topicDetail: null,
   });
 }
 
@@ -79,7 +77,6 @@ export function clearToken() {
   localStorage.removeItem(TOKEN_KEY);
   setState({
     token: '', conn: 'init', nodes: [], preselectNode: null,
-    topicDetail: null,
   });
 }
 
@@ -107,14 +104,4 @@ export function clearPreselect() {
   if (state.preselectNode !== null) {
     setState({ preselectNode: null });
   }
-}
-
-/// Topics row "详情" → topic detail page; {teamName, topicId} ride the store.
-export function openTopicDetail(teamName, topicId) {
-  setState({ page: 'topic_detail', topicDetail: { teamName, topicId } });
-}
-
-/// Topic detail back button → topic list (drops the detail params).
-export function closeTopicDetail() {
-  setState({ page: 'topics', topicDetail: null });
 }

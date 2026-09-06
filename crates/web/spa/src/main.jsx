@@ -25,7 +25,6 @@ import { ProgressPanel } from './project/progressPanel.jsx';
 import { ProjectPanel } from './project/project.jsx';
 import { FleetTeamsPanel as TeamPanel } from './fleet/teams.jsx';
 import { TodoPanel } from './todoPanel.jsx';
-import { TopicDetailPanel } from './topicDetail.jsx';
 import { ExecutionsPanel as TopicsPanel } from './fleet/executions.jsx';
 import './app.css';
 import {
@@ -79,7 +78,6 @@ const PANELS = {
   chat: ChatPanel,
   team: TeamPanel,
   topics: TopicsPanel,
-  topic_detail: TopicDetailPanel,
   project: ProjectPanel,
   progress: ProgressPanel,
   ownerview: OwnerViewPanel,
@@ -116,13 +114,7 @@ function App() {
   // simply navigates to its home page (nav.js), no extra store field.
   const category = categoryOf(page);
 
-  // Direct nav lands on a fresh view: the topics tab drops any topic-detail
-  // params so the list opens clean.
   const goPage = (key) => {
-    if (key === 'topics') {
-      setState({ page: 'topics', topicDetail: null });
-      return;
-    }
     setState({ page: key });
   };
 

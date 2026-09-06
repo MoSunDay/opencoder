@@ -1,7 +1,7 @@
 // nav.test.js — pure-node unit tests for the IA single source of truth
-// (nav.js): category membership, sub-page folding and fallbacks, per-
-// category menu scoping, and PAGE_META coverage. No DOM here — the shell
-// rendering lives in app.dom.test.jsx.
+// (nav.js): category membership and fallbacks, per-category menu scoping,
+// and PAGE_META coverage. No DOM here — the shell rendering lives in
+// app.dom.test.jsx.
 
 import { isValidElement } from 'react';
 import { describe, expect, it } from 'vitest';
@@ -52,10 +52,6 @@ describe('categoryOf', () => {
     for (const item of ALL_ITEMS) {
       expect(categoryOf(item.page)).toBe(item.category);
     }
-  });
-
-  it('folds topic_detail onto the agent category (its parent topics page)', () => {
-    expect(categoryOf('topic_detail')).toBe('agent');
   });
 
   it('falls back to the default category for unknown pages', () => {
@@ -116,9 +112,8 @@ describe('menuOf / selectOptionsOf scoping', () => {
   });
 });
 
-describe('menuKey folding', () => {
-  it('folds topic_detail onto topics and keeps known pages verbatim', () => {
-    expect(menuKey('topic_detail')).toBe('topics');
+describe('menuKey fallbacks', () => {
+  it('keeps known pages verbatim', () => {
     for (const page of ALL_PAGES) {
       expect(menuKey(page)).toBe(page);
     }
@@ -139,8 +134,8 @@ describe('CATEGORY_OPTIONS / PAGE_META coverage', () => {
     ]);
   });
 
-  it('covers every page key (including topic_detail) exactly', () => {
-    const expected = [...ALL_PAGES, 'topic_detail'].sort();
+  it('covers every page key exactly', () => {
+    const expected = [...ALL_PAGES].sort();
     expect(Object.keys(PAGE_META).sort()).toEqual(expected);
   });
 

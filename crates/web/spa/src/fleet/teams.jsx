@@ -1,6 +1,7 @@
 import { Alert, Button, Form, Input, Modal, Select, Space, Table, Tag } from 'antd';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiGet, apiPost } from '../api.js';
+import { PageShell } from '../shell/pageShell.jsx';
 import { ExecutionDetail } from './detail.jsx';
 import { newId, nodeOptions } from './model.js';
 
@@ -35,7 +36,7 @@ export function FleetTeamsPanel({ onNotice }) {
     catch (e) { onNotice(`${e.message}；再次启动会继续确认同一执行`); }
     finally { setBusy(false); }
   };
-  return <>
+  return <PageShell page="team">
     <Space style={{ marginBottom: 12 }}><Button type="primary" onClick={() => edit(null)}>创建团队</Button><Button onClick={load}>刷新</Button></Space>
     <Table scroll={{ x: 'max-content' }} rowKey="name" dataSource={rows} columns={[
       { title: '团队', dataIndex: 'name' },
@@ -67,5 +68,5 @@ export function FleetTeamsPanel({ onNotice }) {
       </Form>
     </Modal>
     {detail && <ExecutionDetail id={detail.id} summary={detail} onClose={() => setDetail(null)} onNotice={onNotice} />}
-  </>;
+  </PageShell>;
 }

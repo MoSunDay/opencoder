@@ -17,9 +17,9 @@ import {
   frameToEvent,
   graphFromSpec,
   outputPreview,
-  runStatusLabel,
   STEP_RUNNING,
 } from '../dagProjection.js';
+import { statusLabel } from '../ui/statusTag.jsx';
 import { RunStatusTag, NodeBadge } from './runBits.jsx';
 import { ExecutionDetail } from '../fleet/detail.jsx';
 
@@ -74,7 +74,7 @@ function EventRow({ ev }) {
     const ok = !(ev.payload && ev.payload.ok === false);
     extra = ok ? '成功' : '失败' + (ev.payload && ev.payload.error ? ': ' + ev.payload.error : '');
   } else if (ev.kind === 'run_finished') {
-    extra = runStatusLabel(ev.payload && ev.payload.status) + (ev.payload && ev.payload.error ? ' · ' + ev.payload.error : '');
+    extra = statusLabel(ev.payload && ev.payload.status) + (ev.payload && ev.payload.error ? ' · ' + ev.payload.error : '');
   }
   const preview = ev.kind === 'step_done' ? outputPreview(ev.payload && ev.payload.output, 300) : '';
   return (

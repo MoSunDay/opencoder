@@ -10,6 +10,7 @@ import { Button, Card, Collapse, Space, Spin, Tag, Timeline, Typography } from '
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiGet } from './api.js';
 import { closeTopicDetail, useStore } from './store.js';
+import { PageShell } from './shell/pageShell.jsx';
 import {
   ambiguityText,
   fmtTime,
@@ -178,42 +179,44 @@ export function TopicDetailPanel({ onNotice }) {
   }
 
   return (
-    <div>
-      <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 12 }}>
-        <Button size="small" onClick={closeTopicDetail}>← 返回话题列表</Button>
-        <Text strong style={{ fontSize: 15 }}>{(topic && topic.title) || topicId}</Text>
-        <Tag color={status.color}>{status.label}</Tag>
-        <Tag>{(topic && topic.team_name) || teamName}</Tag>
-        <Text type="secondary">{fmtTime(topic && topic.created_at)}</Text>
-      </div>
-      <Spin spinning={loading}>
-        <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
-          <div style={{ width: 300, flexShrink: 0, overflow: 'auto', maxHeight: '70vh', borderRight: '1px solid #f0f0f0', paddingRight: 12 }}>
-            {timelineItems.length > 0 ? (
-              <Timeline items={timelineItems} />
-            ) : (
-              <Text type="secondary">暂无轮次{executing ? '，等待首个汇报计划…' : ''}</Text>
-            )}
-          </div>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            {sel ? (
-              <Space direction="vertical" size={12} style={{ width: '100%' }}>
-                <PlanCard plan={sel.plan} />
-                {(sel.sub_turns || []).map((sub) => (
-                  <SubTurnBlock key={sub.sub_turn} sub={sub} />
-                ))}
-              </Space>
-            ) : (
-              <Text type="secondary">选择左侧轮次查看汇报详情</Text>
-            )}
-            {topic && topic.status === 'finished' && topic.final_summary ? (
-              <Card size="small" title="最终总结" style={{ marginTop: 12 }}>
-                <Paragraph style={{ whiteSpace: 'pre-wrap', marginBottom: 0 }}>{topic.final_summary}</Paragraph>
-              </Card>
-            ) : null}
-          </div>
+    <PageShell page="topic_detail">
+      <div>
+        <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 12 }}>
+          <Button size="small" onClick={closeTopicDetail}>← 返回话题列表</Button>
+          <Text strong style={{ fontSize: 15 }}>{(topic && topic.title) || topicId}</Text>
+          <Tag color={status.color}>{status.label}</Tag>
+          <Tag>{(topic && topic.team_name) || teamName}</Tag>
+          <Text type="secondary">{fmtTime(topic && topic.created_at)}</Text>
         </div>
-      </Spin>
-    </div>
+        <Spin spinning={loading}>
+          <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
+            <div style={{ width: 300, flexShrink: 0, overflow: 'auto', maxHeight: '70vh', borderRight: '1px solid #f0f0f0', paddingRight: 12 }}>
+              {timelineItems.length > 0 ? (
+                <Timeline items={timelineItems} />
+              ) : (
+                <Text type="secondary">暂无轮次{executing ? '，等待首个汇报计划…' : ''}</Text>
+              )}
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              {sel ? (
+                <Space direction="vertical" size={12} style={{ width: '100%' }}>
+                  <PlanCard plan={sel.plan} />
+                  {(sel.sub_turns || []).map((sub) => (
+                    <SubTurnBlock key={sub.sub_turn} sub={sub} />
+                  ))}
+                </Space>
+              ) : (
+                <Text type="secondary">选择左侧轮次查看汇报详情</Text>
+              )}
+              {topic && topic.status === 'finished' && topic.final_summary ? (
+                <Card size="small" title="最终总结" style={{ marginTop: 12 }}>
+                  <Paragraph style={{ whiteSpace: 'pre-wrap', marginBottom: 0 }}>{topic.final_summary}</Paragraph>
+                </Card>
+              ) : null}
+            </div>
+          </div>
+        </Spin>
+      </div>
+    </PageShell>
   );
 }

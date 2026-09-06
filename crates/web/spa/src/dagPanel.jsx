@@ -5,6 +5,7 @@
 
 import { Tabs } from 'antd';
 import { useCallback, useState } from 'react';
+import { PageShell } from './shell/pageShell.jsx';
 import { DefsTab } from './dag/defsTab.jsx';
 import { RunsTable } from './dag/runsTable.jsx';
 

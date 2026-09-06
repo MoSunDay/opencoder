@@ -9,6 +9,7 @@ import {
 import { useCallback, useEffect, useState } from 'react';
 import { apiDel, apiGet, apiPost, apiPut } from './api.js';
 import { absTime, relTime } from './format.js';
+import { TimeText } from './ui/timeText.jsx';
 
 const { TextArea } = Input;
 const { Paragraph } = Typography;
@@ -154,11 +155,7 @@ export function BrainPanel() {
       dataIndex: ['capability', 'updated_at'],
       key: 'updated_at',
       width: 120,
-      render: (ts) => (
-        <Tooltip title={absTime(ts)}>
-          <span>{relTime(ts)}</span>
-        </Tooltip>
-      ),
+      render: (ts) => <TimeText ts={ts} />,
     },
     {
       title: '操作',

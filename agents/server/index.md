@@ -1,5 +1,7 @@
-# server — `opencoder-server` 二进制
+Commit: (working-tree, 基于 c1a1b2e78e1ccd4a3cc2ac6dc408a76d30bf46e6)
 
-`crates/server`：web 服务器的薄入口（P0 三分叉拆分产物）。组装 `opencoder-web` 的 AppState/router + LibsqlStore + 可选 token 鉴权，监听 HTTP/SSE。**不**链接 dag-runtime/VM/runc 链——DAG 调度在节点执行，server 只做 def/run 管理与事件汇聚（见 [agents/dag](../dag/index.md)、[agents/web](../web/index.md)）。
+# server — opencoder-server 二进制
 
-替代旧 `opencoder daemon --server`。DAG 面：`POST /api/dag/defs*`、`POST /api/dag/defs/:id/dispatch`、`GET /api/dag/runs*`、`GET /api/dag/runs/:id/events`（SSE，id=seq，Last-Event-ID 续传）、claim/事件/状态上报端点（`/api/nodes/dag/*`）。
+`crates/server` 解析监听地址、工作目录和 token，然后调用 [control](../control/index.md) 启动平台 Web 和调度。凭据来源为参数、`OPENCODER_SERVER_TOKEN` 或启动时生成。
+
+它不构建 Web 本地 session AppState，也不链接 session/team/project/DAG 执行引擎。全部执行分配给 [agent](../agent/index.md)，Server 只保存四字段运行索引并按 ID 查询所属节点。部署见 [Agent 平台](../../docs/agent-platform.md)。

@@ -1,5 +1,5 @@
-// sse.js — SSE over fetch streaming. EventSource is unusable here: it cannot
-// send the signature headers. Behavioral reference is the vanilla frontend's
+// sse.js — SSE over fetch streaming so the Bearer header can be attached.
+// Behavioral reference is the vanilla frontend's
 // crates/web/src/assets/sse.js, whose reconnect decisions are mirrored:
 //   * backoff 1s ×2 (cap 15s per product spec), reset on any received frame;
 //   * max 5 consecutive failures, then a terminal 'failed' status;
@@ -19,7 +19,7 @@
 // { abort() }. `path` must NOT carry an ?after= param; this module owns the
 // cursor, starting at `after` (0 = full replay).
 
-import { apiGet, signFetch } from './api.js';
+import { apiGet, authFetch } from './api.js';
 
 const BACKOFF_START_MS = 1000;
 const BACKOFF_CAP_MS = 15000;
@@ -275,7 +275,7 @@ export function openStream({ path, sessionId, after, onFrame, onStatus, onResync
     retired = false; // this connection owns the stream until the next restart()
     const pathAndQuery = path + (path.includes('?') ? '&' : '?') + 'after=' + after;
     try {
-      const resp = await signFetch('GET', pathAndQuery, undefined, { signal: ctrl.signal });
+      const resp = await authFetch('GET', pathAndQuery, undefined, { signal: ctrl.signal });
       if (stopped || retired) {
         return;
       }

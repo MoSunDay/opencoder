@@ -6,13 +6,16 @@ use anyhow::Result;
 use async_trait::async_trait;
 use opencoder_core::{json, Tool, ToolContext, ToolOutput};
 use serde_json::Value;
-use tokio::io::AsyncReadExt;
 
-use super::bg::{handoff, output_path, register, unregister, BgState};
+use super::bg::{drain_output, handoff, output_path, BgState, OutputStream};
 #[cfg(test)]
 use super::bg::{kill_all, list, test_registry_mutex};
 
+pub(super) mod process_group;
 mod timeout;
+
+#[cfg(unix)]
+use process_group::ProcessGroupGuard;
 
 /// Default enforced foreground deadline for a bash command (seconds). Command
 /// text may override it through [`timeout::resolve`]. When the
@@ -143,14 +146,19 @@ impl Tool for BashTool {
         // ORIGINAL command text (`ToolStart` carries the raw input JSON).
         let script = script_with_tools_path(resolved.command, ctx.tools_path.as_deref());
 
-        let mut cmd = tokio::process::Command::new("bash");
+        let supervised = crate::process::command("bash")?;
+        let (mut cmd, lease) = match supervised {
+            Some((command, lease)) => (command, Some(lease)),
+            None => (tokio::process::Command::new("bash"), None),
+        };
+        let supervised = lease.is_some();
         cmd.arg("-lc")
             .arg(script)
             .current_dir(&workdir)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .kill_on_drop(true);
+            .stderr(Stdio::piped());
+        crate::process::configure_owned_command(&mut cmd, supervised);
 
         // Detach the child from the controlling terminal. stdout/stderr are
         // already piped above, but without setsid() the child still shares our
@@ -161,13 +169,15 @@ impl Tool for BashTool {
         // in its own session makes /dev/tty unavailable, forcing all output
         // through the pipes we capture.
         #[cfg(unix)]
-        unsafe {
-            cmd.pre_exec(|| {
-                if libc::setsid() == -1 {
-                    return Err(std::io::Error::last_os_error());
-                }
-                Ok(())
-            });
+        if lease.is_none() {
+            unsafe {
+                cmd.pre_exec(|| {
+                    if libc::setsid() == -1 {
+                        return Err(std::io::Error::last_os_error());
+                    }
+                    Ok(())
+                });
+            }
         }
 
         // Spawn explicitly (instead of `cmd.output()`) so we control the timeout
@@ -191,11 +201,19 @@ impl Tool for BashTool {
         #[cfg(not(unix))]
         let _ = pid;
 
-        // Register the live process so the display-only `/ps` can list it and
-        // `/stop` can kill its process group while it runs in the foreground.
-        // The entry is removed below once `wait()` returns (or by `/stop`).
+        // RAII owns both descendant termination and registry cleanup. Moving
+        // this guard into handoff transfers ownership to the supervisor;
+        // dropping this future on cancellation performs the same cleanup.
         #[cfg(unix)]
-        register(pid, pgid, ctx.session_id.clone());
+        let mut process_group = if let Some(lease) = lease {
+            ProcessGroupGuard::registered_supervised(
+                pid,
+                ctx.session_id.clone(),
+                lease.spawned(child.id())?,
+            )?
+        } else {
+            ProcessGroupGuard::registered(pid, pgid, ctx.session_id.clone())
+        };
 
         // Shared capture state: incremental drain tasks push 8 KiB chunks here.
         // In the foreground phase this only buffers; after `handoff` the file
@@ -209,37 +227,13 @@ impl Tool for BashTool {
         // running command to the background supervisor without losing the pipe.
         let stdout_task: tokio::task::JoinHandle<()> = {
             let state = Arc::clone(&state);
-            let mut pipe = child.stdout.take().expect("stdout was piped");
-            tokio::spawn(async move {
-                let mut buf = [0u8; 8192];
-                loop {
-                    match pipe.read(&mut buf).await {
-                        Ok(0) => break,
-                        Ok(n) => {
-                            let mut st = state.lock().unwrap();
-                            st.push_stdout(&buf[..n]);
-                        }
-                        Err(_) => break,
-                    }
-                }
-            })
+            let pipe = child.stdout.take().expect("stdout was piped");
+            tokio::spawn(drain_output(pipe, state, OutputStream::Stdout, pgid))
         };
         let stderr_task: tokio::task::JoinHandle<()> = {
             let state = Arc::clone(&state);
-            let mut pipe = child.stderr.take().expect("stderr was piped");
-            tokio::spawn(async move {
-                let mut buf = [0u8; 8192];
-                loop {
-                    match pipe.read(&mut buf).await {
-                        Ok(0) => break,
-                        Ok(n) => {
-                            let mut st = state.lock().unwrap();
-                            st.push_stderr(&buf[..n]);
-                        }
-                        Err(_) => break,
-                    }
-                }
-            })
+            let pipe = child.stderr.take().expect("stderr was piped");
+            tokio::spawn(drain_output(pipe, state, OutputStream::Stderr, pgid))
         };
 
         // Race the natural exit against the resolved foreground timeout. When
@@ -248,14 +242,40 @@ impl Tool for BashTool {
         // the output. The runner does not impose its 600 s leaf-tool deadline
         // on bash either (see `runner::execute`) — bash has its own shorter
         // internal timeout, avoiding a race between the two deadlines.
-        let exit_status = match tokio::time::timeout(
-            Duration::from_secs(resolved.timeout_secs),
-            child.wait(),
-        )
-        .await
-        {
-            Ok(r) => r?,
-            Err(_) => {
+        let output_limit = state.lock().unwrap().output_limit_token();
+        enum ForegroundResult {
+            Exited(std::io::Result<std::process::ExitStatus>),
+            TimedOut,
+            OutputLimit,
+        }
+        let foreground = tokio::select! {
+            biased;
+            _ = output_limit.cancelled() => ForegroundResult::OutputLimit,
+            result = child.wait() => ForegroundResult::Exited(result),
+            _ = tokio::time::sleep(Duration::from_secs(resolved.timeout_secs)) => {
+                ForegroundResult::TimedOut
+            }
+        };
+        let exit_status = match foreground {
+            ForegroundResult::Exited(result) => result?,
+            ForegroundResult::OutputLimit => {
+                #[cfg(unix)]
+                process_group.terminate();
+                let _ = child.wait().await;
+                let _ = tokio::time::timeout(Duration::from_secs(2), async {
+                    let _ = stdout_task.await;
+                    let _ = stderr_task.await;
+                })
+                .await;
+                let error = state
+                    .lock()
+                    .unwrap()
+                    .output_limit_error()
+                    .unwrap_or("output_limit_exceeded")
+                    .to_string();
+                return Ok(ToolOutput::err(error));
+            }
+            ForegroundResult::TimedOut => {
                 // Timeout — hand the still-running command to the background
                 // supervisor so it keeps running. Capture whatever output has
                 // accumulated so far to include in the message.
@@ -267,15 +287,11 @@ impl Tool for BashTool {
                         let stderr = String::from_utf8_lossy(&st.stderr_buf);
                         merge_streams(&stdout, &stderr)
                     };
-                    handoff(
-                        pid,
-                        pgid,
-                        ctx.session_id.clone(),
-                        child,
-                        stdout_task,
-                        stderr_task,
-                        state,
-                    );
+                    if let Err(error) =
+                        handoff(pid, child, stdout_task, stderr_task, state, process_group).await
+                    {
+                        return Ok(ToolOutput::err(error));
+                    }
                     return Ok(ToolOutput {
                         content: format!(
                             "{BASH_TIMEOUT_MARKER} command timed out after {}s \u{2014} moved to background]\n\
@@ -304,22 +320,10 @@ impl Tool for BashTool {
                 }
             }
         };
-        // Natural completion (or a `/stop` group-kill, which makes `wait()`
-        // return a signal exit): remove the registry entry. Idempotent — a
-        // `/stop` that already removed it is a harmless no-op.
+        // Natural completion (or `/stop`) releases the entire process group.
+        // This also closes inherited pipe writers before the bounded drains.
         #[cfg(unix)]
-        unregister(pid);
-
-        // Kill the process group so any grandchildren that inherited the pipe
-        // write-ends die and the drain tasks reach EOF. Without this, a command
-        // like `cmd &` leaves a grandchild holding the pipe open and the drain
-        // awaits below hang forever — and bash is exempt from the runner's
-        // safety net (None deadline), so nothing breaks the hang. Mirrors the
-        // handoff supervisor's group kill in bg.rs.
-        #[cfg(unix)]
-        unsafe {
-            let _ = libc::kill(-pgid, libc::SIGKILL);
-        }
+        process_group.terminate();
 
         // Bounded drain: grandchildren are now dead so EOF is imminent, but cap
         // defensively (mirrors handoff's 2s ceiling in bg.rs). A process that
@@ -331,6 +335,9 @@ impl Tool for BashTool {
         .await;
         let (stdout, stderr) = {
             let st = state.lock().unwrap();
+            if let Some(error) = st.output_limit_error() {
+                return Ok(ToolOutput::err(error));
+            }
             (
                 String::from_utf8_lossy(&st.stdout_buf).to_string(),
                 String::from_utf8_lossy(&st.stderr_buf).to_string(),
@@ -421,6 +428,75 @@ mod tests {
             "failure must annotate exit code: {}",
             out.content
         );
+    }
+
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn bash_output_overflow_is_an_error_and_kills_the_group() {
+        let _g = test_registry_mutex().lock().await;
+        let tool = BashTool;
+        let input = json!({
+            "command": "timeout 30; dd if=/dev/zero bs=8388609 count=1 2>/dev/null"
+        });
+        let out = tokio::time::timeout(Duration::from_secs(10), tool.execute(input, &ctx()))
+            .await
+            .expect("overflow must terminate the command")
+            .unwrap();
+        assert!(
+            out.is_error,
+            "overflow must be a tool error: {}",
+            out.content
+        );
+        assert_eq!(
+            out.content,
+            "output_limit_exceeded: bash stdout exceeds 8388608 bytes"
+        );
+        assert!(list().is_empty(), "overflowed command must be unregistered");
+    }
+
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn background_output_overflow_stops_process_and_caps_file() {
+        let _g = test_registry_mutex().lock().await;
+        let tool = BashTool;
+        // Hide sleep behind a variable so the 1s test foreground timeout is
+        // retained. The output overflow happens after handoff.
+        let input = json!({
+            "command": "d=2; s=sleep; \"$s\" \"$d\"; dd if=/dev/zero bs=8388609 count=1 2>/dev/null; \"$s\" 30"
+        });
+        let out = tool.execute(input, &ctx()).await.unwrap();
+        assert!(
+            !out.is_error,
+            "handoff itself remains successful: {}",
+            out.content
+        );
+        let pid: u32 = out
+            .content
+            .lines()
+            .find_map(|line| line.strip_prefix("pid: "))
+            .expect("handoff pid")
+            .parse()
+            .unwrap();
+        let path = output_path(pid);
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while list().iter().any(|info| info.pid == pid) {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("overflow must terminate the background process");
+
+        let bytes = std::fs::read(&path).unwrap();
+        let marker = b"output_limit_exceeded: bash stdout exceeds 8388608 bytes";
+        assert!(
+            bytes.windows(marker.len()).any(|window| window == marker),
+            "background file must report the overflow"
+        );
+        assert!(
+            bytes.len() < super::super::bg::STREAM_OUTPUT_LIMIT_BYTES + 256,
+            "background file must stop at the stream limit"
+        );
+        let _ = std::fs::remove_file(path);
     }
 
     /// A short command (completes well under the test timeout of 1 s) returns
@@ -583,6 +659,57 @@ mod tests {
         assert!(
             !list().iter().any(|i| i.pid == pid),
             "completed bash should have unregistered pid {pid}"
+        );
+    }
+
+    #[tokio::test]
+    #[cfg(target_os = "linux")]
+    async fn dropping_tool_future_kills_descendants_and_unregisters() {
+        let _g = test_registry_mutex().lock().await;
+        let dir = tempfile::tempdir().unwrap();
+        let leader_file = dir.path().join("leader");
+        let child_file = dir.path().join("child");
+        let tool = BashTool;
+        let mut context = ctx();
+        context.working_dir = dir.path().to_path_buf();
+        let input = json!({
+            "command": format!(
+                "echo $$ > {}; sleep 300 & echo $! > {}; wait",
+                leader_file.display(),
+                child_file.display()
+            )
+        });
+        let execution = tokio::spawn(async move { tool.execute(input, &context).await });
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while !leader_file.exists() || !child_file.exists() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("bash and descendant started");
+        let leader: u32 = std::fs::read_to_string(&leader_file)
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        let descendant = std::fs::read_to_string(&child_file).unwrap();
+        assert!(list().iter().any(|entry| entry.pid == leader));
+
+        execution.abort();
+        let _ = execution.await;
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while std::path::Path::new("/proc")
+                .join(descendant.trim())
+                .exists()
+            {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("dropping bash future kills its descendant");
+        assert!(
+            !list().iter().any(|entry| entry.pid == leader),
+            "dropping the future must unregister the bash leader"
         );
     }
 

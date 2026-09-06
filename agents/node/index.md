@@ -1,29 +1,19 @@
-Commit: (working-tree, daemon 统一入口 + 全量签名 + SPA 内嵌)
+Commit: (working-tree, 基于 c1a1b2e78e1ccd4a3cc2ac6dc408a76d30bf46e6)
 
 # node 模块
 
-## 职责
-把一台机器变成集群的执行节点：`opencoder-agent --remote <server>` 常驻进程（原 `opencoder daemon --client`），用共享 token（`--token` 或 `OPENCODER_SERVER_TOKEN`，永不自动生成）对 server 全量 HMAC 签名注册，领取任务后**在本机配置与 LLM 凭证下**跑完整 agent session，事件实时回传 server。本地 libsql 同步落一份完整 transcript（经与 web drain 相同的 `spawn_event_flusher`，零额外代码）。
+平台的出站通信层位于 `crates/node/src/fleet/`。它不持有具体工作负载；[worker](../worker/index.md) 实现 `NodeService` 提供注册、负载、索引及执行 RPC。
 
-## 边界与非目标
-- 只做出站 HTTP（heartbeat/claim/upload/status），**永不接受入站连接**；不信任 server 下发的任何模型/密钥——执行端凭证全在本地。
-- v1 单节点同一时刻至多一个活跃任务（server 侧 claim 守卫），并行化是后续工作。
-- 不做任务自动重派：节点失联的任务由 server 标 error 收束，人工重发。
+## 通道
 
-## 关键抽象
-- `uplink.rs`：`Uplink{http,base,token}` REST 客户端，所有请求经单一 `signed_request` 出口按共享 token 做 HMAC-SHA256 签名（`x-sig-timestamp`/`x-sig`）；请求形状即 `opencoder_core::node_protocol` DTO（register/heartbeat/claim/events/status 五口子；心跳走独立 5s 短超时预算（`HEARTBEAT_TIMEOUT`，最坏静默间隙 ≈ 5s 超时 + 5s tick < server `STALE_AFTER_MS`=20s，约 2× 余量；控制面其余请求仍 120s），心跳携带的 control 任务经 `tokio::spawn` 脱离 tick 关键路径（`Inflight` mutex 下原子去重兜并发））。
-- `batcher.rs`：纯函数攒批器——32 条或 300ms 先到触发 flush；`push/should_flush/take` 可独立单测。
-- `executor.rs`：领到任务 → 本地 `LibsqlStore` + 本地 `Config` 构造 `ChatStream` → 复用 session crate 原语（`resume_and_replay` + `run()` + 事件回调攒批上传）；取消传导走 runner 提供的 watch channel 触发本地 turn cancel。
-- `runner.rs`：主循环——注册（同名顶替旧行）→ 心跳 tick(5s) 与 idle claim 轮询(1.5s) 双 interval select；任务串行执行。`client_override` 仅测试注入。
+- `client` 同步 Server 时间后签名 WebSocket 握手，注册路径带 node_id 避免多节点同毫秒签名冲突。
+- 5 秒心跳与 loop 变化通知上报快照和四字段索引；RPC 后先同步最新负载/索引，再回复确认。
+- 网络操作有超时、帧大小和并发上限。通道重连仅替换传输；已接受的操作脱离连接任务，断线不会中止节点执行。
+- `PeerBridge` 将 system 协调节点的维护请求转发给 Server；Server 验证协调执行的归属和状态，Node 间不直接连接。
+- `cpu` 从进程可用 CPU 与 cgroup quota 计算可用容量，支持小数 CPU。
 
-## 主流程
-注册成功后进入双 timer 循环：心跳维持在线并取回 `cancel_task_ids`（一拍内送达执行中任务）；claim 轮询领 FIFO 任务 → executor 全程上传事件批（失败有界退避仅告警）→ 终态上报 done/error/cancelled（cancel 亦由 server 端收束帧闭流）。
+协议及调度纯函数位于 [core](../core/index.md) `fleet`；Server 连接/预留状态位于 [control](../control/index.md)。
 
-## 相关模块
-- server 半区：[agents/web](../web/index.md)（REST+SSE 桥、NodeHub broadcast）；协议：[agents/core](../core/index.md) `node_protocol.rs`；持久化：[agents/store](../store/index.md)（nodes/node_tasks 表 + 合成 session task_type="node"）。
+## 兼容接口
 
-## DAG 扩展点
-
-- `DagHook` trait（claim/execute）：`NodeOpts.dag: Option<Arc<dyn DagHook>>`，由 `opencoder-agent` 注入（node crate 不依赖 VM/runc 链）。
-- runner idle 轮询：无 prompt task 时尝试 DAG claim，单活跃 run 串行执行；专属 heartbeater 把应答里的 `cancel_run_ids` 翻成该 run 的 cancel flag。
-- uplink 增补：`dag_claim`（GET /api/nodes/dag/claim，204→None）、`dag_events`（POST 批量事件）、`dag_status`（POST 终态）。
+旧 `run_node`、REST Uplink、claim/heartbeat/batcher 和 DagHook 留在库中供兼容接口与原测试使用，平台二进制不走该队列。Uplink 的 `LocalDagPersistence` 接缝供新 worker 把 DAG 事件、结果写在节点，避免向 Server 上传明细。DAG 引擎见 [dag-runtime](../dag-runtime/index.md)。

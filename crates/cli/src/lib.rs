@@ -25,6 +25,9 @@ use clap::{ArgGroup, Args, Parser, Subcommand};
 pub struct Cli {
     #[command(subcommand)]
     pub command: Option<Command>,
+    /// Print machine-readable version, commit and fleet protocol metadata.
+    #[arg(long, global = true)]
+    pub build_info: bool,
     #[arg(long, global = true)]
     pub workdir: Option<PathBuf>,
     /// Override the agent system prompt with the contents of this file.

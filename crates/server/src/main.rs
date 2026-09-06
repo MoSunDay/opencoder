@@ -1,22 +1,27 @@
 //! `opencoder-server` — the fleet control-plane binary.
 //!
-//! Web API + SPA + DAG dispatch/record ONLY: it never executes workflows and
+//! Web console, global definitions, brain and node scheduling: no local execution.
+//! It never executes workflows and
 //! never links the VM/runc chain (those live in `opencoder-agent`). Extracted
 //! from the former `opencoder daemon --server` arm when the project split
 //! into three binaries (tui/cli, server, agent).
 
 use std::path::PathBuf;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::Parser;
 
 #[derive(Parser, Debug)]
 #[command(
     name = "opencoder-server",
     version,
-    about = "opencoder fleet control plane: web API + SPA + DAG dispatch (no local execution)"
+    long_version = opencoder_core::version::VERSION_LONG,
+    about = "opencoder fleet control plane: web console, brain and node scheduling"
 )]
 struct Args {
+    /// Print machine-readable version, commit and fleet protocol metadata.
+    #[arg(long)]
+    build_info: bool,
     /// Bind host.
     #[arg(long, default_value = "127.0.0.1")]
     host: String,
@@ -26,46 +31,73 @@ struct Args {
     /// Serve the bundled web frontend.
     #[arg(long, default_value_t = true)]
     web: bool,
-    /// Bearer token: --token, then OPENCODER_SERVER_TOKEN, else an
-    /// auto-generated token printed to stderr for handing to clients.
-    #[arg(long)]
+    /// Bearer token. Mutually exclusive with --token-file.
+    #[arg(long, conflicts_with = "token_file")]
     token: Option<String>,
+    /// Read the Bearer token from a credential file.
+    #[arg(long, value_name = "PATH")]
+    token_file: Option<PathBuf>,
     /// Directory the server operates on (config + data dir discovery).
     #[arg(long)]
     workdir: Option<PathBuf>,
+    /// Control-plane persistent data directory. Defaults to the existing
+    /// per-workdir `server-v2` location when omitted.
+    #[arg(long)]
+    data_dir: Option<PathBuf>,
     /// Verbose logging (repeatable).
     #[arg(short, long, action = clap::ArgAction::Count)]
     verbose: u8,
 }
 
-/// Token priority: flag, env, then an auto-generated ULID printed to stderr.
-/// Same semantics as the old `cli::server::resolve_token` (the server side
-/// MAY invent a token because clients learn it from the operator).
-fn resolve_token(flag: Option<String>) -> String {
-    if let Some(t) = flag {
-        return t;
+fn token_value(value: String, source: &str) -> Result<String> {
+    let token = value.trim();
+    anyhow::ensure!(!token.is_empty(), "{source} contains an empty bearer token");
+    Ok(token.to_owned())
+}
+
+fn resolve_token(flag: Option<String>, file: Option<PathBuf>) -> Result<String> {
+    anyhow::ensure!(
+        flag.is_none() || file.is_none(),
+        "--token and --token-file are mutually exclusive"
+    );
+    if let Some(value) = flag {
+        return token_value(value, "--token");
     }
-    if let Ok(t) = std::env::var("OPENCODER_SERVER_TOKEN") {
-        if !t.trim().is_empty() {
-            return t;
-        }
+    if let Some(path) = file {
+        let value = std::fs::read_to_string(&path)
+            .with_context(|| format!("read token file {}", path.display()))?;
+        return token_value(value, "token file");
     }
-    let t = ulid::Ulid::new().to_string();
-    eprintln!("opencoder-server: generated bearer token: {t}");
-    eprintln!("  pass it to agents via --token or OPENCODER_SERVER_TOKEN");
-    t
+    match std::env::var("OPENCODER_SERVER_TOKEN") {
+        Ok(value) => token_value(value, "OPENCODER_SERVER_TOKEN"),
+        Err(_) => anyhow::bail!(
+            "server token required: pass --token, --token-file, or set OPENCODER_SERVER_TOKEN"
+        ),
+    }
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
+    if args.build_info {
+        println!("{}", opencoder_core::version::build_info_json());
+        return Ok(());
+    }
     opencoder_cli_compat::init_logging(args.verbose);
     let workdir = args
         .workdir
         .clone()
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-    let token = resolve_token(args.token);
-    opencoder_web::serve(args.host, args.port, args.web, workdir, token).await
+    let token = resolve_token(args.token, args.token_file)?;
+    opencoder_control::serve(
+        args.host,
+        args.port,
+        args.web,
+        workdir,
+        args.data_dir,
+        token,
+    )
+    .await
 }
 
 /// Tiny local logging bootstrap (the cli crate owns the shared one; the
@@ -88,23 +120,42 @@ mod opencoder_cli_compat {
 
 #[cfg(test)]
 mod tests {
-    use super::resolve_token;
+    use super::{resolve_token, Args};
+    use clap::Parser;
 
     /// The flag always wins and never consults the process env, so the
     /// assertion is deterministic regardless of OPENCODER_SERVER_TOKEN.
     #[test]
     fn resolve_token_param_wins() {
-        assert_eq!(resolve_token(Some("explicit".into())), "explicit");
+        assert_eq!(
+            resolve_token(Some("explicit".into()), None).unwrap(),
+            "explicit"
+        );
     }
 
     #[test]
-    fn resolve_token_generated_is_ulid_shaped() {
-        // No flag; isolate from a possible ambient env var by overriding it.
-        std::env::set_var("OPENCODER_SERVER_TOKEN", "  ");
-        let t = resolve_token(None);
-        assert!(
-            ulid::Ulid::from_string(&t).is_ok(),
-            "generated token must be a ULID: {t}"
+    fn token_file_is_trimmed_and_empty_file_is_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("token");
+        std::fs::write(&path, "case-Sensitive\n").unwrap();
+        assert_eq!(
+            resolve_token(None, Some(path.clone())).unwrap(),
+            "case-Sensitive"
         );
+        std::fs::write(&path, " \n").unwrap();
+        assert!(resolve_token(None, Some(path)).is_err());
+        assert!(resolve_token(None, Some(dir.path().join("missing"))).is_err());
+    }
+
+    #[test]
+    fn token_flags_are_mutually_exclusive() {
+        assert!(Args::try_parse_from([
+            "opencoder-server",
+            "--token",
+            "one",
+            "--token-file",
+            "/run/credentials/token"
+        ])
+        .is_err());
     }
 }

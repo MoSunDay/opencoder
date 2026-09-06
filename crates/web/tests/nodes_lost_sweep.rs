@@ -108,11 +108,10 @@ async fn dispatch(base: &str, node_id: &str, prompt: &str) -> (String, String) {
 /// The worker's own claiming surface — puts the task into `running`.
 async fn worker_claim(base: &str, node_id: &str) -> Option<String> {
     let path = format!("/api/nodes/tasks/claim?node_id={node_id}");
-    let (tsh, ts, sigh, sig) = support::sig_headers(TOKEN, "GET", &path, b"");
+    let (name, value) = support::auth_header(TOKEN);
     let r = node_e2e_support::http()
         .get(format!("{base}{path}"))
-        .header(tsh, ts)
-        .header(sigh, sig)
+        .header(name, value)
         .send()
         .await
         .unwrap();

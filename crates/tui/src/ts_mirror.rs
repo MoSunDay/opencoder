@@ -18,8 +18,8 @@ use anyhow::Result;
 use async_trait::async_trait;
 use opencoder_core::{Message, Role};
 use opencoder_store::{
-    Delivery, ImportReport, SessionEventRecord, SessionFilter, SessionInput, SessionListItem,
-    SessionMeta, SessionPatch, Store, SubagentTaskRecord, TsRecord, TsRegistry,
+    Delivery, ImportReport, InputAdmission, SessionEventRecord, SessionFilter, SessionInput,
+    SessionListItem, SessionMeta, SessionPatch, Store, SubagentTaskRecord, TsRecord, TsRegistry,
 };
 use tokio::sync::Mutex;
 
@@ -218,6 +218,10 @@ impl Store for TsMirrorStore {
 
     async fn admit_input(&self, input: &SessionInput) -> Result<i64> {
         self.inner.admit_input(input).await
+    }
+
+    async fn admit_input_once(&self, input: &SessionInput) -> Result<InputAdmission> {
+        self.inner.admit_input_once(input).await
     }
 
     async fn pending_inputs(

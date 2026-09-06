@@ -1,6 +1,10 @@
-Commit: 8ca4d0e（统一收口落库，348 文件含 brain 全量；尾笔 66a3247 补最后一笔 changelog）
+Commit: (working-tree, 基于 c1a1b2e78e1ccd4a3cc2ac6dc408a76d30bf46e6)
 
 # opencoder-brain — 项目目标/能力库
+
+## 平台调度接缝
+
+本 crate 保持能力库与决策树职责；[control](../control/index.md) 为能力绑定 agent/team/DAG/TODO 目标，preview 只查看路由，dispatch 通过统一执行入口派发并按 request_id 幂等。大脑定义和计划保存在新的 Server definitions 库，实际能力执行明细保存在 [worker](../worker/index.md) 的所属节点。
 
 能力库 = 「这个项目有什么能力/目标、怎么验收」的语义记忆：录入能力条目（类型/一句话描述/输入/输出/工程输入多行），嵌入为向量，按自然语言 query 语义检索。供人与 agent 查「要做什么、怎么算做好」。
 

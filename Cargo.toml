@@ -15,6 +15,8 @@ members = [
     "crates/dag",
     "crates/dag-runtime",
     "crates/server",
+    "crates/control",
+    "crates/worker",
     "crates/agent",
     "crates/agents",
     "crates/brain",
@@ -65,6 +67,8 @@ opencoder-node   = { path = "crates/node" }
 opencoder-dag    = { path = "crates/dag" }
 opencoder-dag-runtime = { path = "crates/dag-runtime" }
 opencoder-server = { path = "crates/server" }
+opencoder-control = { path = "crates/control" }
+opencoder-worker = { path = "crates/worker" }
 opencoder-agent  = { path = "crates/agent" }
 opencoder-agents  = { path = "crates/agents" }
 opencoder-brain  = { path = "crates/brain" }
@@ -77,7 +81,7 @@ futures = "0.3"
 async-trait = "0.1"
 libsql = { version = "0.9.30", default-features = false, features = ["core", "libsql-sys", "parser", "serde"] }
 tempfile = "3"
-reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls", "gzip", "socks"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls-native-roots", "gzip", "socks"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 anyhow = "1"
@@ -93,8 +97,6 @@ regex = "1"
 uuid = { version = "1", features = ["v4"] }
 pulldown-cmark = { version = "0.13", default-features = false }
 base64 = "0.22"
-hmac = "0.12"
-sha2 = "0.10"
 arboard = "3"
 nfsserve = "0.11"
 

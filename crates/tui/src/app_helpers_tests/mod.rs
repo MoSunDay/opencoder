@@ -390,7 +390,7 @@ async fn restore_pending_mirrors_restores_display_text_at_reload() {
     let q_seq = store.admit_input(&row).await.unwrap();
     // Steered input admitted without a display form (pre-display_text rows).
     let s_seq = store
-        .admit_input(&pending_row(0, sid, 2, Delivery::Steer, "steer me", None))
+        .admit_input(&pending_row(1, sid, 2, Delivery::Steer, "steer me", None))
         .await
         .unwrap();
 

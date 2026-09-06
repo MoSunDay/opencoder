@@ -39,6 +39,7 @@ impl StepCtx {
 }
 
 /// Terminal result of one step execution.
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct StepResult {
     pub outcome: StepOutcome,
     pub error: Option<String>,

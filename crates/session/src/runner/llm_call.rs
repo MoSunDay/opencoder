@@ -55,9 +55,15 @@ pub(super) async fn run_one_llm_call(
     let openai_msgs = lower_messages(&to_send);
 
     let unlocked = crate::tools::latent::unlocked_from_body(skill_body.as_deref());
+    let extensions = crate::extensions::tools(&session.id);
     let allowed: HashMap<String, ToolArc> = registry
         .iter()
         .filter(|(name, _)| {
+            if session.agent.kind == opencoder_core::AgentKind::Act
+                && extensions.iter().any(|t| t.name() == name.as_str())
+            {
+                return true;
+            }
             if crate::mcp::is_mcp_tool(name.as_str()) {
                 return session.agent.name != "workflow"
                     && mcp_tool_allowed(

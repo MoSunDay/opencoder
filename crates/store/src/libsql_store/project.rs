@@ -349,6 +349,15 @@ impl ProjectStore for LibsqlStore {
         let conn = self.conn().await?;
         super::project_runs::claim_todo_running(&conn, id, now_ms).await
     }
+    async fn claim_todo_running_with_run(
+        &self,
+        rec: &ProjectTodoRunRecord,
+        now_ms: i64,
+    ) -> Result<bool> {
+        let _guard = self.db_lock.lock().await;
+        let conn = self.conn().await?;
+        super::project_runs::claim_todo_running_with_run(&conn, rec, now_ms).await
+    }
     async fn patch_todo_when(
         &self,
         id: &str,
@@ -369,6 +378,11 @@ impl ProjectStore for LibsqlStore {
         let _guard = self.db_lock.lock().await;
         let conn = self.conn().await?;
         super::project_runs::get_todo(&conn, id).await
+    }
+    async fn get_todo_summary(&self, id: &str) -> Result<Option<crate::ProjectTodoSummary>> {
+        let _guard = self.db_lock.lock().await;
+        let conn = self.conn().await?;
+        super::project_runs::get_todo_summary(&conn, id).await
     }
     async fn list_todos(&self, milestone_id: Option<&str>) -> Result<Vec<ProjectTodoRecord>> {
         let _guard = self.db_lock.lock().await;
@@ -407,10 +421,47 @@ impl ProjectStore for LibsqlStore {
         let conn = self.conn().await?;
         super::project_runs::get_todo_run(&conn, id).await
     }
+    async fn get_todo_run_summary(&self, id: &str) -> Result<Option<crate::ProjectTodoRunSummary>> {
+        let _guard = self.db_lock.lock().await;
+        let conn = self.conn().await?;
+        super::project_runs::get_todo_run_summary(&conn, id).await
+    }
     async fn list_todo_runs(&self, todo_id: &str) -> Result<Vec<ProjectTodoRunRecord>> {
         let _guard = self.db_lock.lock().await;
         let conn = self.conn().await?;
         super::project_runs::list_todo_runs(&conn, todo_id).await
+    }
+    async fn list_todo_runs_page(
+        &self,
+        todo_id: &str,
+        before_version: Option<i64>,
+        limit: u32,
+    ) -> Result<crate::ProjectTodoRunPage> {
+        let _guard = self.db_lock.lock().await;
+        let conn = self.conn().await?;
+        super::project_runs::list_todo_runs_page(&conn, todo_id, before_version, limit).await
+    }
+    async fn project_text_chunk(
+        &self,
+        record_kind: &str,
+        owner_id: &str,
+        id: &str,
+        field: &str,
+        offset: u64,
+        max_bytes: usize,
+    ) -> Result<Option<crate::PayloadChunkRecord>> {
+        let _guard = self.db_lock.lock().await;
+        let conn = self.conn().await?;
+        super::project_runs::project_text_chunk(
+            &conn,
+            record_kind,
+            owner_id,
+            id,
+            field,
+            offset,
+            max_bytes,
+        )
+        .await
     }
     async fn list_running_todo_runs(&self) -> Result<Vec<ProjectTodoRunRecord>> {
         let _guard = self.db_lock.lock().await;

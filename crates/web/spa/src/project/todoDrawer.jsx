@@ -4,7 +4,7 @@
 // 删除。Runs come from GET /api/project/todos/:id/runs (newest version first)
 // and poll every 3s while any run is still running.
 
-import { Button, Collapse, Drawer, Input, Popconfirm, Space, Spin, Timeline, Typography } from 'antd';
+import { Alert, Button, Collapse, Drawer, Input, Popconfirm, Space, Spin, Timeline, Typography } from 'antd';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiDel, apiGet, apiPatch, apiPost } from '../api.js';
 import { setState } from '../store.js';
@@ -12,6 +12,7 @@ import { absTime } from '../format.js';
 import { RunStatusTag, TodoStatusTag, runKindLabel } from './labels.jsx';
 import { Markdown } from './markdown.jsx';
 import { flattenTodos } from './todosTab.jsx';
+import { ExecutionDetail } from '../fleet/detail.jsx';
 
 const { TextArea } = Input;
 const { Text, Paragraph } = Typography;
@@ -19,13 +20,13 @@ const { Text, Paragraph } = Typography;
 const RUN_POLL_MS = 3000;
 const todoPath = (id) => '/api/project/todos/' + encodeURIComponent(id);
 
-function RunItem({ run, onNotice, refreshRuns }) {
+function RunItem({ run, executionId, onNotice, refreshRuns }) {
   const [cancelling, setCancelling] = useState(false);
   const cancel = async () => {
     setCancelling(true);
     try {
-      const j = await apiPost('/api/project/runs/' + encodeURIComponent(run.id) + '/cancel');
-      onNotice(j && j.cancelled ? '运行已请求取消' : '该运行已结束，无需取消');
+      await apiPost('/api/executions/' + encodeURIComponent(executionId) + '/commands', { action: 'cancel', input: {} });
+      onNotice('执行已取消，不能恢复');
       refreshRuns();
     } catch (e) {
       onNotice('取消失败: ' + (e && e.message));
@@ -74,11 +75,14 @@ export function TodoDrawer({ todoId, overview, refresh, onClose, onNotice }) {
   const [runs, setRuns] = useState([]);
   const [draft, setDraft] = useState(null); // local edit buffer, null = unchanged
   const [acting, setActing] = useState(false);
+  const [executionOpen, setExecutionOpen] = useState(false);
   const timer = useRef(null);
   const alive = useRef(true);
 
   const todo = flattenTodos(overview).find((t) => t.id === todoId) || null;
-  const anyRunning = runs.some((r) => r.status === 'running');
+  const anyRunning = runs.some((r) => r.status === 'running')
+    || ['pending', 'running', 'cancelling'].includes(todo?.execution?.status);
+  const executionClosed = ['cancelled', 'done'].includes(todo?.execution?.status);
 
   // Stable loadRuns: the onNotice prop identity must not re-arm the runs
   // effect (same inline-arrow guard as ProjectPanel.load).
@@ -191,7 +195,7 @@ export function TodoDrawer({ todoId, overview, refresh, onClose, onNotice }) {
         <RunStatusTag status={r.status} />
       </Space>
     ),
-    content: <RunItem run={r} onNotice={onNotice} refreshRuns={() => loadRuns(true)} />,
+    content: <RunItem run={r} executionId={`project-${todoId}`} onNotice={onNotice} refreshRuns={() => loadRuns(true)} />,
   }));
 
   return (
@@ -212,6 +216,8 @@ export function TodoDrawer({ todoId, overview, refresh, onClose, onNotice }) {
               <Text type="secondary">里程碑：{milestoneLabel}</Text>
               <Text type="secondary">agent：{todo.agent || 'act'}</Text>
             </Space>
+            {todo.execution ? <Button size="small" style={{ marginTop: 8 }} onClick={() => setExecutionOpen(true)}>查看节点执行详情</Button> : null}
+            {executionClosed ? <Alert type="warning" showIcon style={{ marginTop: 8 }} title="该节点执行已终止，不能再次生成或执行计划" /> : null}
           </div>
           <div>
             <Paragraph style={{ marginBottom: 4 }}><Text type="secondary">草稿</Text></Paragraph>
@@ -239,7 +245,7 @@ export function TodoDrawer({ todoId, overview, refresh, onClose, onNotice }) {
             <Button
               size="small"
               style={{ marginTop: 8 }}
-              disabled={anyRunning}
+              disabled={anyRunning || executionClosed}
               loading={acting && !dirty}
               onClick={genPlan}
             >
@@ -270,6 +276,7 @@ export function TodoDrawer({ todoId, overview, refresh, onClose, onNotice }) {
       ) : (
         <Text type="secondary">未找到该 TODO（可能已被删除）</Text>
       )}
+      {executionOpen && <ExecutionDetail id={`project-${todoId}`} summary={todo?.execution} onClose={() => setExecutionOpen(false)} onNotice={onNotice} />}
     </Drawer>
   );
 }

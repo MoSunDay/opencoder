@@ -23,6 +23,12 @@ fn main() {
     println!("cargo:rustc-env=OPENCODER_GIT_COMMIT={short}");
     println!("cargo:rustc-env=OPENCODER_GIT_COMMIT_FULL={full}");
     println!("cargo:rustc-env=OPENCODER_GIT_DIRTY={}", u8::from(dirty));
+    println!("cargo:rerun-if-env-changed=OPENCODER_SPA_SHA256");
+    let spa_sha256 = std::env::var("OPENCODER_SPA_SHA256")
+        .ok()
+        .filter(|value| value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit()))
+        .unwrap_or_else(|| "unknown".to_string());
+    println!("cargo:rustc-env=OPENCODER_SPA_SHA256={spa_sha256}");
 
     let pkg = std::env::var("CARGO_PKG_VERSION").unwrap_or_else(|_| "0.0.0".to_string());
     println!(

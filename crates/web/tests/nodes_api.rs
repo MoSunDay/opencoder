@@ -59,7 +59,7 @@ async fn send(app: &axum::Router, req: Request<Body>) -> (StatusCode, serde_json
 fn req(method: &str, uri: &str, token: Option<&str>, body: Option<String>) -> Request<Body> {
     // Token present → sign (production auth path); absent → raw (negative 401 paths).
     if let Some(t) = token {
-        return support::signed_req(method, uri, t, body);
+        return support::authed_req(method, uri, t, body);
     }
     let b = Request::builder().method(method).uri(uri);
     match body {

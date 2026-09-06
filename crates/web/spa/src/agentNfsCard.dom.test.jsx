@@ -40,7 +40,7 @@ describe('AgentNfsCard', () => {
     expect(screen.getByText('127.0.0.1:2049')).toBeTruthy();
     expect(screen.getByText('/root/.opencoder/agents')).toBeTruthy();
     expect(screen.getByLabelText('nfs-mount-hint').textContent)
-      .toBe('mount -t nfs -o vers=3,tcp,port=2049,mountport=2049,nolock 127.0.0.1:/ <dir>');
+      .toBe('mount -t nfs -o ro,vers=3,tcp,port=2049,mountport=2049,nolock 127.0.0.1:/ <dir>');
   });
 
   it('flips the switch through POST /api/agents/nfs with enabled', async () => {

@@ -3,7 +3,7 @@
 //! the claimed run through the hook under its own heartbeater, and a
 //! heartbeat `cancel_run_ids` flip converges into the hook's cancel flag.
 //! Self-contained mini-stub (`support/` wire-contract style); the fake
-//! hook's `claim` goes through the REAL signed uplink (200/204 exercised).
+//! hook's `claim` goes through the real Bearer-authenticated uplink (200/204 exercised).
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -64,14 +64,6 @@ impl Stub {
     fn dag_claims(&self) -> usize {
         self.lock().dag_claims
     }
-}
-
-fn header_str(headers: &axum::http::HeaderMap, name: &str) -> String {
-    headers
-        .get(name)
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or_default()
-        .to_string()
 }
 
 async fn register(State(st): State<Arc<Stub>>, Json(body): Json<serde_json::Value>) -> Response {
@@ -135,37 +127,17 @@ async fn dag_status(
     StatusCode::OK
 }
 
-/// Same bearer+signature contract as the real server (mirrors `support/`).
-async fn auth(mut req: Request<axum::body::Body>, next: Next) -> Response {
-    use opencoder_core::auth_sig;
-    let (parts, body) = req.into_parts();
-    let bytes = axum::body::to_bytes(body, 2 * 1024 * 1024).await.unwrap();
-    let ts = header_str(&parts.headers, "x-sig-timestamp")
-        .parse::<i64>()
-        .unwrap_or_default();
-    let sig_raw = header_str(&parts.headers, "x-sig");
-    let pq = parts
-        .uri
-        .path_and_query()
-        .map(|p| p.as_str().to_string())
-        .unwrap_or_default();
-    let ok = auth_sig::verify(
-        TOKEN,
-        parts.method.as_str(),
-        &pq,
-        ts,
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_millis() as i64,
-        &bytes,
-        &sig_raw,
-    )
-    .is_ok();
-    if !ok {
+/// Same Bearer-token contract as the real server (mirrors `support/`).
+async fn auth(req: Request<axum::body::Body>, next: Next) -> Response {
+    let expected = format!("Bearer {TOKEN}");
+    let authorized = req
+        .headers()
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value == expected);
+    if !authorized {
         return StatusCode::UNAUTHORIZED.into_response();
     }
-    req = Request::from_parts(parts, axum::body::Body::from(bytes));
     next.run(req).await
 }
 
@@ -204,7 +176,7 @@ async fn wait_for<T>(secs: u64, mut probe: impl FnMut() -> Option<T>) -> T {
     }
 }
 
-/// Fake executor: `claim` uses the REAL signed uplink; `execute` records the
+/// Fake executor: `claim` uses the real Bearer-authenticated uplink; `execute` records the
 /// run and (optionally) parks until the runner flips the cancel flag.
 struct FakeHook {
     uplink: Uplink,

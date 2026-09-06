@@ -57,11 +57,10 @@ async fn relay(
 ) -> (reqwest::StatusCode, serde_json::Value) {
     let path = format!("/api/nodes/{node_id}/messages");
     let json = serde_json::to_vec(&body).unwrap();
-    let (tsh, ts, sigh, sig) = support::sig_headers(TOKEN, "POST", &path, &json);
+    let (name, value) = support::auth_header(TOKEN);
     let r = node_e2e_support::http()
         .post(format!("{base}{path}"))
-        .header(tsh, ts)
-        .header(sigh, sig)
+        .header(name, value)
         .header("content-type", "application/json")
         .body(json)
         .send()
@@ -79,11 +78,10 @@ async fn upload_result(
 ) -> (reqwest::StatusCode, serde_json::Value) {
     let path = format!("/api/nodes/{node_id}/control_result");
     let json = serde_json::to_vec(result).unwrap();
-    let (tsh, ts, sigh, sig) = support::sig_headers(TOKEN, "POST", &path, &json);
+    let (name, value) = support::auth_header(TOKEN);
     let r = node_e2e_support::http()
         .post(format!("{base}{path}"))
-        .header(tsh, ts)
-        .header(sigh, sig)
+        .header(name, value)
         .header("content-type", "application/json")
         .body(json)
         .send()
@@ -328,11 +326,10 @@ async fn dispatch_reuses_existing_session_and_rejects_unknown() {
     );
 
     let path = format!("/api/nodes/tasks/claim?node_id={node_id}");
-    let (tsh, ts, sigh, sig) = support::sig_headers(TOKEN, "GET", &path, b"");
+    let (name, value) = support::auth_header(TOKEN);
     let r = node_e2e_support::http()
         .get(format!("{base}{path}"))
-        .header(tsh, ts)
-        .header(sigh, sig)
+        .header(name, value)
         .send()
         .await
         .unwrap();

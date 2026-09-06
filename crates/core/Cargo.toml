@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+tokio = { workspace = true, features = ["rt"] }
 serde.workspace = true
 serde_json.workspace = true
 anyhow.workspace = true
@@ -14,8 +15,6 @@ chrono.workspace = true
 tracing.workspace = true
 dirs.workspace = true
 reqwest = { workspace = true }
-hmac.workspace = true
-sha2.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

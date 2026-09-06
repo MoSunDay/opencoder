@@ -12,7 +12,6 @@ use opencoder_dag::artifacts::{meta_value, output_snapshot, step_dir};
 use opencoder_dag::protocol::DagClaimedRun;
 use opencoder_dag::{DagSpec, StepOutcome, StepOutputs, StepStates};
 use serde_json::Value;
-use tracing::warn;
 
 use crate::dag_events::{step_done_event, RunEventSink};
 use crate::exec::StepResult;
@@ -32,13 +31,18 @@ pub(crate) async fn record_step(
     let StepDone {
         name,
         started_at_ms,
-        result,
+        mut result,
     } = d;
+    if let Err(error) =
+        write_step_artifacts(workflow_root, run, &name, started_at_ms, &result).await
+    {
+        result.outcome = StepOutcome::Error;
+        result.error = Some(format!("step artifact persistence failed: {error:#}"));
+    }
     let outcome = result.outcome;
     if let Some(err) = &result.error {
         step_errors.insert(name.clone(), err.clone());
     }
-    write_step_artifacts(workflow_root, run, &name, started_at_ms, &result).await;
     states.insert(name.clone(), outcome);
     outputs.insert(
         name.clone(),
@@ -53,54 +57,32 @@ pub(crate) async fn record_step(
 }
 
 /// Write `<step>/output.txt`, optional `output.json`, and `meta.json`.
-/// Artifact IO failures degrade the step to `Error` (reported, not fatal to
-/// the process) — but scheduling state still records the executor's own
-/// outcome; the run-level fold surfaces the write failure via step_errors.
+/// Artifact IO failure makes the step fail before dependent steps can run.
 pub(crate) async fn write_step_artifacts(
     workflow_root: &std::path::Path,
     run: &DagClaimedRun,
     name: &str,
     started_at_ms: i64,
     result: &StepResult,
-) {
-    let dir = match step_dir(workflow_root, &run.run_id, name) {
-        Ok(d) => d,
-        Err(e) => {
-            warn!(run_id = %run.run_id, step = %name, error = %e, "step dir rejected");
-            return;
-        }
-    };
-    let wrote = async {
-        tokio::fs::create_dir_all(&dir)
-            .await
-            .with_context(|| format!("{}", dir.display()))?;
-        if !result.output_text.is_empty() {
-            tokio::fs::write(dir.join("output.txt"), &result.output_text).await?;
-        }
-        if let Some(json) = &result.output_json {
-            tokio::fs::write(
-                dir.join("output.json"),
-                serde_json::to_string_pretty(json).unwrap_or_default(),
-            )
-            .await?;
-        }
-        let meta = meta_value(
-            name,
-            outcome_str(&result.outcome),
-            started_at_ms,
-            now_ms(),
-            result.error.as_deref(),
-        );
-        tokio::fs::write(
-            dir.join("meta.json"),
-            serde_json::to_string(&meta).unwrap_or_default(),
-        )
-        .await?;
-        Ok::<(), anyhow::Error>(())
-    };
-    if let Err(e) = wrote.await {
-        warn!(run_id = %run.run_id, step = %name, error = %e, "step artifact write failed");
-    }
+) -> anyhow::Result<()> {
+    let dir = step_dir(workflow_root, &run.run_id, name).map_err(anyhow::Error::msg)?;
+    tokio::fs::create_dir_all(&dir)
+        .await
+        .with_context(|| format!("{}", dir.display()))?;
+    crate::checkpoint::write(&dir.join("output.txt"), result.output_text.as_bytes())?;
+    crate::checkpoint::write(
+        &dir.join("output.json"),
+        &serde_json::to_vec(result.output_json.as_ref().unwrap_or(&Value::Null))?,
+    )?;
+    let meta = meta_value(
+        name,
+        outcome_str(&result.outcome),
+        started_at_ms,
+        now_ms(),
+        result.error.as_deref(),
+    );
+    crate::checkpoint::write(&dir.join("meta.json"), &serde_json::to_vec(&meta)?)?;
+    Ok(())
 }
 
 /// Give every step that never ran (cancelled run, or transitively blocked by
@@ -130,7 +112,15 @@ pub(crate) async fn mark_unfinished(
             output_json: None,
             session_id: None,
         };
-        write_step_artifacts(workflow_root, run, &step.name, now_ms(), &result).await;
+        if let Err(error) =
+            write_step_artifacts(workflow_root, run, &step.name, now_ms(), &result).await
+        {
+            states.insert(step.name.clone(), StepOutcome::Error);
+            step_errors.insert(
+                step.name.clone(),
+                format!("artifact persistence: {error:#}"),
+            );
+        }
         sink.emit(step_done_event(
             &step.name,
             outcome.is_success(),

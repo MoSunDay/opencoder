@@ -315,6 +315,7 @@ async fn post_prompt_returns_500_on_malformed_config() {
         axum::extract::State(state),
         axum::extract::Path("any-sid".to_string()),
         axum::extract::Json(opencoder_web::api::PromptBody {
+            input_id: None,
             prompt: "hi".into(),
             images: Vec::new(),
             delivery: None,

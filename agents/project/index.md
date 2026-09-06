@@ -1,6 +1,10 @@
-Commit: 6cb5ea1
+Commit: (working-tree, 基于 c1a1b2e78e1ccd4a3cc2ac6dc408a76d30bf46e6)
 
 # project 模块
+
+## 平台归属
+
+平台由 [control](../control/index.md) 保存项目结构，[worker](../worker/index.md) 使用本地 ProjectStore 运行本 crate。`project-<todo-id>` 固定归属节点，Plan、Act、新草稿 Plan 与恢复保持该节点；计划文本与 runs 在 Node，Server overview 查询后临时合并。`spawn_run_driver` 继承固定资源作用域。下面的 ProjectService 描述属于执行引擎，平台 Server 不初始化此运行时，也不连接旧 MySQL 项目库。
 
 ## 职责
 
@@ -10,7 +14,7 @@ Commit: 6cb5ea1
 
 - **不复用 todos crate 的编排**：那边是 LLM 自治 workflow（父会话调度 + candidate JSON 门禁 + 重试），这边只有 plan/execute 两种用户触发的直接驱动运行，没有状态机重试。
 - **复用 session 直驱范式**（参考 `crates/todos/src/execution.rs`）：`SessionState` + `opencoder_session::run/resume` + `spawn_event_flusher` 事件落库——运行会话可在「会话交互」页完整回放。
-- 会话/消息仍走 `Arc<dyn Store>`（libsql）；**项目数据走独立 `Arc<dyn ProjectStore>`** 接缝（默认 libsql 同实例，可选 feature-gate mysql/starrocks，见 [agents/store](../store/index.md)）。
+- 会话/消息仍走 `Arc<dyn Store>`（libsql）；**项目数据走独立 `Arc<dyn ProjectStore>`** 接缝（默认 libsql 同实例，可选 feature-gate mysql/starrocks，见 [agents/store](../store/index.md)）。Node 的 `opencoder-agent` 固定使用节点 `runtime.db` 的 libsql；旧 Web/CLI/TUI 进程才会读取可选的外置 Project backend。
 - todo 状态机服务层独占：`draft →(plan 成功) planned →(execute) running → done|failed`；execute 取消 → 回 `planned`；可从 done/failed/planned 重复 execute（新 version）。Web PATCH 不暴露 status/plan_md。
 
 ## 关键抽象
@@ -25,11 +29,11 @@ Commit: 6cb5ea1
 ## 主流程
 
 1. web `POST /api/project/todos/:id/plan` → `start_plan`：建 run(kind=plan, version=n, running) → spawn：建会话 → `run()`+flusher → 成功即 `todo.plan_md=output, status=planned`，run done；失败 run failed（todo 状态不动）。
-2. `POST /api/project/todos/:id/execute` → 校验有 plan 且非 running（plan run 进行中拒绝执行——plan/execute 互斥正向）→ 条件 CAS 把 todo 置 running（`claim_todo_running`，单条 UPDATE 关死并发重复执行的 TOCTOU）→ 建 run(kind=execute, plan_md=启动时方案快照)；建 run 失败会条件回滚 claim 前状态（不滞留 Running）→ spawn：resume 或新建 act 会话 → `run()` → 成功 todo done；取消 todo 回 planned；失败 todo failed（不会滞留 running）。plan 收尾的 todo 回写同为条件 CAS（`commit_plan_output`）：todo 被 execute 抢先 claim（Running）时丢弃回写，方案仍留痕于 run 行。
+2. `POST /api/project/todos/:id/execute` → 校验有 plan 且非 running（plan run 进行中拒绝执行——plan/execute 互斥正向）→ Store 在一个事务中条件 claim todo 并创建 run(kind=execute, plan_md=启动时方案快照)，并发仅一方成功，run 插入失败整体回滚，不会出现 Running todo 无 run → spawn：resume 或新建 act 会话 → `run()` → 成功 todo done；取消 todo 回 planned；失败 todo failed。plan 收尾的 todo 回写同为条件 CAS（`commit_plan_output`）：todo 被 execute 抢先 claim（Running）时丢弃回写，方案仍留痕于 run 行。libsql 与 MySQL 支持该原子执行入口；StarRocks 不支持跨表事务，execute 在写入前明确失败，CRUD/查询与 plan 留痕仍可用。
 3. `POST /api/project/runs/:rid/cancel` → token cancel → 驱动任务收敛终态并从 spawns 注销。
 
 ## 测试
 
 - 单元（内联）：prompt 组装 4 例；service 未初始化/未知取消 2 例；plan 收尾条件回写（Running 让路 / 非 Running 落 Planned / 行缺失）3 例；panic 收敛（终态标签不打花、run 已 Done 但 todo 悬 Running 补收敛）2 例 + plan 进行中拒绝执行 1 例。
-- 集成 `crates/project/tests/plan_and_execute.rs`：plan 生成回写 plan_md、执行建会话 + 二次执行 resume 同会话、中途取消回 planned、无 plan/running 拒绝、execute 启动快照 plan_md、create run 失败回滚 claim（故障注入包装）、overview 树形。
+- 集成 `crates/project/tests/plan_and_execute.rs`：plan 生成回写 plan_md、执行建会话 + 二次执行 resume 同会话、中途取消回 planned、无 plan/running 拒绝、execute 启动快照 plan_md、原子 claim 失败无状态变化、overview 树形；Store 独立覆盖并发唯一 winner 与 INSERT 失败事务回滚。
 - web 契约 `crates/web/tests/web_project{,_runs}.rs`（真签名 build_app）：CRUD、plan/execute/runs 生命周期、overview、409/404 形状。

@@ -13,8 +13,8 @@ use opencoder_core::message::now_ms;
 use opencoder_dag::artifacts::{run_root, validate_run_id, validate_step_slug};
 use opencoder_dag::protocol::DagClaimedRun;
 use opencoder_dag::{
-    ready_steps, run_outcome, validate, DagRunStatus, DagSpec, DagStatusReport, SandboxMode,
-    StepKind, StepOutcome, StepOutputs, StepStates,
+    ready_steps, run_outcome, validate, DagRunStatus, DagSpec, DagStatusReport, StepKind,
+    StepOutcome, StepOutputs, StepStates,
 };
 use opencoder_node::uplink::Uplink;
 use tokio::sync::watch;
@@ -23,7 +23,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 
 use crate::dag_events::{run_finished_event, run_started_event, step_started_event, RunEventSink};
-use crate::exec::{execute_agent_step, execute_python_step, ExecDeps, StepCtx, StepResult};
+use crate::exec::{execute_agent_step, ExecDeps, StepCtx, StepResult};
 use crate::step_io::{mark_unfinished, record_step};
 
 /// Upper bound on simultaneously executing steps; excess ready steps stay
@@ -32,7 +32,7 @@ pub const MAX_CONCURRENT_STEPS: usize = 4;
 
 /// Everything the run loop needs besides the claimed run itself.
 pub struct RunDeps {
-    /// Signed uplink for event batches + the terminal status report.
+    /// Bearer-authenticated uplink for event batches + the terminal status report.
     pub uplink: Arc<Uplink>,
     /// Shared per-step executor dependencies (store/client/workdir/config).
     pub exec: ExecDeps,
@@ -52,12 +52,29 @@ pub(crate) struct StepDone {
 ///
 /// Defensive by design: the server already validated the spec at dispatch,
 /// but a corrupted/edited snapshot still folds into a clean `error` report
-/// instead of wedging the worker. Status-post failures retry once then warn
-/// (the server's lost-run sweep converges the row eventually).
+/// instead of wedging the worker. Status delivery retries once, then returns
+/// the transport/persistence error to the execution owner.
 pub async fn execute_run(
     deps: RunDeps,
     run: DagClaimedRun,
     cancel_rx: watch::Receiver<bool>,
+) -> Result<DagRunStatus> {
+    execute_run_inner(deps, run, cancel_rx, false).await
+}
+
+/// Explicit same-node recovery skips only successfully persisted step checkpoints.
+pub async fn resume_run(
+    deps: RunDeps,
+    run: DagClaimedRun,
+    cancel_rx: watch::Receiver<bool>,
+) -> Result<DagRunStatus> {
+    execute_run_inner(deps, run, cancel_rx, true).await
+}
+async fn execute_run_inner(
+    deps: RunDeps,
+    run: DagClaimedRun,
+    cancel_rx: watch::Receiver<bool>,
+    resume: bool,
 ) -> Result<DagRunStatus> {
     let sink = RunEventSink::new(Arc::clone(&deps.uplink), run.run_id.clone());
     let exec = Arc::new(deps.exec);
@@ -108,6 +125,9 @@ pub async fn execute_run(
 
     let mut states: StepStates = BTreeMap::new();
     let mut outputs: StepOutputs = BTreeMap::new();
+    if resume {
+        crate::checkpoint::restore(&deps.workflow_root, &run, &mut states, &mut outputs)?;
+    }
     let mut step_errors: BTreeMap<String, String> = BTreeMap::new();
     let mut inflight: JoinSet<StepDone> = JoinSet::new();
     // Steps currently executing. `ready_steps` only excludes steps whose
@@ -258,7 +278,7 @@ pub async fn execute_run(
     let error_text = run_error_text(&run.spec, &states, &step_errors);
     sink.emit(run_finished_event(terminal.as_str(), error_text.as_deref()));
     sink.close().await;
-    report_status(&deps.uplink, &run.run_id, terminal, error_text.clone()).await;
+    report_status(&deps.uplink, &run.run_id, terminal, error_text.clone()).await?;
     info!(run_id = %run.run_id, status = %terminal, "dag run finished");
     Ok(terminal)
 }
@@ -266,26 +286,15 @@ pub async fn execute_run(
 /// Dispatch one step by kind, wrapped in its per-step wall-clock budget.
 /// A timeout cancels the step token and folds to `Error("step timeout")`.
 async fn execute_step(ctx: &StepCtx, exec: &ExecDeps, cancel: CancellationToken) -> StepResult {
-    // runc python steps own their timeout: the sandbox driver enforces its
-    // own budget and its KILL + `delete --force` cleanup tail must run
-    // after a timeout — an outer `tokio::time::timeout` would drop the
-    // future first and swallow the cleanup, leaking the container. The
-    // in-process VM (threads that cannot be interrupted) and agent steps
-    // keep the outer budget: folding them to Error on timeout is the
-    // documented behavior.
-    if matches!(
-        &ctx.step.kind,
-        StepKind::Python {
-            sandbox: Some(SandboxMode::Runc),
-            ..
-        }
-    ) {
-        return execute_python_step(ctx).await;
+    // Python owns its budget and cancellation so process/container cleanup
+    // completes before the runtime publishes the step's terminal status.
+    if matches!(&ctx.step.kind, StepKind::Python { .. }) {
+        return crate::exec::python::execute_python_step_cancellable(ctx, cancel).await;
     }
     let fut = async {
         match &ctx.step.kind {
             StepKind::Agent { .. } => execute_agent_step(ctx, exec, cancel.clone()).await,
-            StepKind::Python { .. } => execute_python_step(ctx).await,
+            StepKind::Python { .. } => unreachable!("Python dispatched above"),
         }
     };
     match ctx.step.timeout_secs {
@@ -329,9 +338,13 @@ fn run_error_text(
         })
 }
 
-/// Post the terminal status report: one retry, then warn (the server's
-/// lost-run sweep converges the row eventually).
-async fn report_status(uplink: &Uplink, run_id: &str, status: DagRunStatus, error: Option<String>) {
+/// Retry one transient failure, then surface the delivery error to the owner.
+async fn report_status(
+    uplink: &Uplink,
+    run_id: &str,
+    status: DagRunStatus,
+    error: Option<String>,
+) -> Result<()> {
     let report = DagStatusReport {
         run_id: run_id.to_string(),
         status: status.as_str().to_string(),
@@ -339,10 +352,19 @@ async fn report_status(uplink: &Uplink, run_id: &str, status: DagRunStatus, erro
     };
     for attempt in 0..2 {
         match uplink.dag_status(&report).await {
-            Ok(()) => return,
-            Err(e) => warn!(run_id, attempt, error = %e, "dag status report failed"),
+            Ok(()) => return Ok(()),
+            Err(error) => {
+                warn!(run_id, attempt, error = %error, "dag status report failed");
+                if attempt == 1 {
+                    return Err(
+                        error.context("DAG terminal status delivery failed after 2 attempts")
+                    );
+                }
+                tokio::time::sleep(Duration::from_millis(200)).await;
+            }
         }
     }
+    unreachable!("the second status attempt always returns")
 }
 
 /// Terminal-error path for runs that could not even start scheduling.
@@ -355,7 +377,7 @@ async fn fail_run(
     warn!(run_id = %run.run_id, error = %error, "dag run failed before scheduling");
     sink.emit(run_finished_event("error", Some(&error)));
     sink.close().await;
-    report_status(uplink, &run.run_id, DagRunStatus::Error, Some(error)).await;
+    report_status(uplink, &run.run_id, DagRunStatus::Error, Some(error)).await?;
     Ok(DagRunStatus::Error)
 }
 

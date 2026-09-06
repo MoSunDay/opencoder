@@ -8,14 +8,14 @@
 //!
 //! Routing contract: `/` returns the HTML shell, `/static/:name` serves the
 //! whitelisted build outputs. Both paths are auth-exempt (see
-//! `auth_sig_mw`) so the console loads before the token is entered; the
+//! `auth_mw`) so the console loads before the token is entered; the
 //! whitelist is deliberate — exempt means the route is reachable without a
 //! signature, not that arbitrary files are served.
 
 use std::sync::Arc;
 
 use axum::extract::{Path, State};
-use axum::http::{header, StatusCode};
+use axum::http::{header, HeaderName, StatusCode};
 use axum::response::{Html, IntoResponse, Response};
 
 use crate::AppState;
@@ -23,6 +23,7 @@ use crate::AppState;
 const INDEX_HTML: &str = include_str!("../spa/dist/index.html");
 const APP_JS: &[u8] = include_bytes!("../spa/dist/static/app.js");
 const APP_CSS: &[u8] = include_bytes!("../spa/dist/static/app.css");
+const DOWNLOAD_SW: &[u8] = include_bytes!("../spa/dist/static/download-sw.js");
 
 /// SPA shell: the compile-time-embedded `spa/dist/index.html`.
 pub async fn index(State(_state): State<Arc<AppState>>) -> Html<&'static str> {
@@ -35,6 +36,15 @@ pub async fn static_asset(Path(name): Path<String>) -> Response {
     match name.as_str() {
         "app.js" => asset_response(APP_JS, "application/javascript"),
         "app.css" => asset_response(APP_CSS, "text/css"),
+        "download-sw.js" => (
+            [
+                (header::CONTENT_TYPE, "application/javascript"),
+                (HeaderName::from_static("service-worker-allowed"), "/"),
+                (header::CACHE_CONTROL, "no-store"),
+            ],
+            DOWNLOAD_SW,
+        )
+            .into_response(),
         _ => StatusCode::NOT_FOUND.into_response(),
     }
 }

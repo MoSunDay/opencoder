@@ -23,6 +23,7 @@ vi.mock('../api.js', () => ({
   apiPatch: apiPatchMock,
   apiDel: apiDelMock,
 }));
+vi.mock('../fleet/detail.jsx', () => ({ ExecutionDetail: ({ id }) => <div>execution-detail:{id}</div> }));
 
 import '../test/setup-dom.js';
 import { ProjectPanel } from './project.jsx';
@@ -39,7 +40,7 @@ const overviewFixture = () => ({
           id: 'm1', goal_id: 'g1', title: 'M1 冲刺', detail_md: '', status: 'in_progress', sort: 0,
           created_at: T0, updated_at: T0,
           todos: [
-            { id: 't1', milestone_id: 'm1', title: '写发布说明', draft: '草稿内容', plan_md: '# Plan\n步骤', status: 'planned', agent: 'act', active_session_id: null, created_at: T0, updated_at: T0 },
+            { id: 't1', milestone_id: 'm1', title: '写发布说明', draft: '草稿内容', plan_md: '# Plan\n步骤', status: 'planned', agent: 'act', active_session_id: null, execution: { id: 'project-t1', kind: 'project', node_id: 'node-a', status: 'running', created_at: T0 }, created_at: T0, updated_at: T0 },
             { id: 't2', milestone_id: 'm1', title: '回归测试', draft: '跑全量', plan_md: null, status: 'draft', agent: 'act', active_session_id: null, created_at: T0, updated_at: T0 },
           ],
         },
@@ -164,9 +165,11 @@ describe('ProjectPanel', () => {
     });
     // v2 done run shows its session; v1 running run offers 取消.
     expect(screen.getByText(/sess-xyz/)).toBeTruthy();
+    fireEvent.click(screen.getByText('查看节点执行详情'));
+    expect(await screen.findByText('execution-detail:project-t1')).toBeTruthy();
     fireEvent.click(findButton('取消'));
     await waitFor(() => {
-      expect(apiPostMock).toHaveBeenCalledWith('/api/project/runs/r1/cancel');
+      expect(apiPostMock).toHaveBeenCalledWith('/api/executions/project-t1/commands', { action: 'cancel', input: {} });
     });
   });
 });

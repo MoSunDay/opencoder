@@ -18,8 +18,6 @@ use std::process::{Command, Stdio};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
-use opencoder_core::auth_sig;
-
 const TOKEN: &str = "running-mode-e2e-token";
 
 struct BlockingStub {
@@ -192,7 +190,12 @@ impl Drop for ServerGuard {
     }
 }
 
-fn spawn_server(workdir: &std::path::Path) -> (ServerGuard, String) {
+struct FleetGuard {
+    _server: ServerGuard,
+    _agent: ServerGuard,
+}
+
+fn spawn_server(workdir: &std::path::Path) -> (FleetGuard, String) {
     let mut server = ServerGuard(
         Command::new(support::sibling_bin(support::SERVER_BIN))
             .arg("--workdir")
@@ -230,16 +233,46 @@ fn spawn_server(workdir: &std::path::Path) -> (ServerGuard, String) {
                 .unwrap()
                 .trim()
                 .to_string();
-            return (server, base);
+            let agent = ServerGuard(
+                Command::new(support::sibling_bin(support::AGENT_BIN))
+                    .arg("--workdir")
+                    .arg(workdir)
+                    .arg("--data-dir")
+                    .arg(workdir.join("node-state"))
+                    .args([
+                        "--remote",
+                        &base,
+                        "--token",
+                        TOKEN,
+                        "--name",
+                        "mode-switch-node",
+                    ])
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .spawn()
+                    .expect("spawn node"),
+            );
+            let deadline = Instant::now() + Duration::from_secs(30);
+            loop {
+                let (_, nodes) = http(&base, "GET", "/api/nodes", "");
+                if nodes["nodes"]
+                    .as_array()
+                    .is_some_and(|rows| rows.iter().any(|n| n["online"] == true))
+                {
+                    break;
+                }
+                assert!(Instant::now() < deadline, "node registration timed out");
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            return (
+                FleetGuard {
+                    _server: server,
+                    _agent: agent,
+                },
+                base,
+            );
         }
     }
-}
-
-fn now_ms() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_millis() as i64
 }
 
 fn http(base: &str, method: &str, path: &str, body: &str) -> (u16, serde_json::Value) {
@@ -248,19 +281,9 @@ fn http(base: &str, method: &str, path: &str, body: &str) -> (u16, serde_json::V
     stream
         .set_read_timeout(Some(Duration::from_secs(10)))
         .unwrap();
-    // HMAC signature over THIS request (wire format: crates/core/src/auth_sig.rs).
-    // A fresh timestamp per call keeps every signature unique — resending the
-    // same ts+sig pair inside the replay window would be a 409, not a 200.
-    let ts = now_ms();
-    let sig = auth_sig::sign_hex(
-        TOKEN,
-        &auth_sig::canonical(method, path, ts, body.as_bytes()),
-    );
     let request = format!(
-        "{method} {path} HTTP/1.1\r\nhost: {host}\r\n{ts_header}: {ts}\r\n{sig_header}: {sig}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
-        body.len(),
-        ts_header = auth_sig::TS_HEADER,
-        sig_header = auth_sig::SIG_HEADER,
+        "{method} {path} HTTP/1.1\r\nhost: {host}\r\nauthorization: Bearer {TOKEN}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+        body.len()
     );
     stream.write_all(request.as_bytes()).unwrap();
     let mut response = Vec::new();
@@ -405,7 +428,7 @@ fn real_server_rejects_running_mode_switches_until_idle() {
 /// discarded planning prompt cannot leak into act or post-restart context.
 #[test]
 fn real_server_clear_context_executes_preserved_plan_in_act() {
-    const SID: &str = "plan-clear-handoff-e2e";
+    const SID: &str = "agent-plan-clear-handoff-e2e";
     const PLAN: &str = "EXECUTE_DEPLOYMENT_PLAN_42";
     const RESULT: &str = "ACT_EXECUTION_COMPLETE_42";
     const RESUMED: &str = "RESUMED_ACT_COMPLETE_42";
@@ -424,8 +447,11 @@ fn real_server_clear_context_executes_preserved_plan_in_act() {
     std::fs::write(tmp.path().join(".opencoder/ap.json"), r#"{"mode":"off"}"#).unwrap();
     let (server, base) = spawn_server(tmp.path());
 
-    // Prompting an absent id through the production endpoint creates a titled
-    // plan session, avoiding the unrelated automatic title-generation call.
+    // Durable node placement precedes the first prompt. A title avoids the
+    // unrelated automatic title-generation call.
+    let created =
+        serde_json::json!({"id":SID,"agent":"plan","title":"plan clear context"}).to_string();
+    assert_eq!(http(&base, "POST", "/api/sessions", &created).0, 200);
     let path = format!("/api/sessions/{SID}/prompt");
     let original_prompt = "draft a rollout with obsolete planning chatter";
     let first = serde_json::json!({

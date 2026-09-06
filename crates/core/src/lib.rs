@@ -1,5 +1,4 @@
 pub mod agent;
-pub mod auth_sig;
 pub mod config;
 pub mod data_dir;
 pub mod error;
@@ -26,11 +25,12 @@ pub use config::envs::{
     active_env, create_env, delete_env, env_dir, envs_home, list_envs, recapture_env,
     set_active_env, set_active_env_checked, validate_env_name,
 };
+pub use config::validate_team_turn_budgets;
 pub use config::{
     looks_like_env_var, scoped_config_home, AgentDefaults, ApMode, AutoPilotConfig, CliConfig,
     CompactionConfig, Config, Endpoint, HttpHeader, InjectionTarget, KeymapConfig, McpServerConfig,
     NetworkConfig, OutputStreamlineConfig, ProviderConfig, ScopedConfigHome, StorageBackend,
-    StorageConfig, DEFAULT_CONTEXT_LIMIT, KEYMAP_INFO,
+    StorageConfig, DEFAULT_CONTEXT_LIMIT, KEYMAP_INFO, TEAM_TURN_BUDGET_MAX,
 };
 pub use data_dir::{data_dir_for, data_root, workdir_hash};
 pub use tool_deps::{all_installed, check_tool_deps, ToolDepStatus};
@@ -53,3 +53,4 @@ pub use skill::{
 };
 pub use sse::SseEvt;
 pub use tool::{Tool, ToolArc, ToolContext, ToolOutput, ToolSchema};
+pub mod fleet;

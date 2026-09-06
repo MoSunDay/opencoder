@@ -23,6 +23,26 @@ body {
   margin: 0;
 }
 
+.execution-messages { margin-top: 16px; }
+.execution-message {
+  padding: 12px 0;
+  border-bottom: 1px solid #f0f0f0;
+  overflow-wrap: anywhere;
+}
+.execution-message-large,
+.execution-large-field { margin: 12px 0; }
+.execution-message-large pre,
+.execution-large-field pre {
+  max-height: 360px;
+  overflow: auto;
+  padding: 12px;
+  border: 1px solid #f0f0f0;
+  border-radius: 6px;
+  background: #fafafa;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 /* ===== DAG 工作流面板 ===== */
 /* Live graph node boxes (fixed size mirrors dagLayout.js NODE_W/NODE_H). */
 .dag-node {
@@ -140,4 +160,19 @@ body {
   word-break: break-word;
   max-height: 180px;
   overflow-y: auto;
+}
+
+/* Keep navigation and controls reachable on narrow consoles. */
+.fleet-mobile-nav { display: none; }
+.fleet-desktop-nav { max-width: 100%; overflow-x: auto; }
+@media (max-width: 767px) {
+  .fleet-sidebar { display: none; }
+  .fleet-mobile-nav { display: inline-flex; width: 100%; margin-bottom: 16px; }
+  .fleet-desktop-nav { display: none; }
+  .fleet-header { gap: 12px !important; padding: 0 12px !important; }
+  .fleet-content { padding: 12px !important; }
+  .dag-detail { height: auto; flex-direction: column; }
+  .dag-detail-graph { flex-basis: auto; height: 420px; }
+  .dag-detail-side { min-width: 0; max-width: none; max-height: 480px; }
+  .ant-drawer-content-wrapper { max-width: 100vw; }
 }

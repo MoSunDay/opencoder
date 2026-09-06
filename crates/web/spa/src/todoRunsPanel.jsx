@@ -9,6 +9,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiGet, apiPost } from './api.js';
 import { absTime, relTime } from './format.js';
 import { openStream } from './sse.js';
+import { ExecutionDetail } from './fleet/detail.jsx';
+import { STATUS_COLORS, STATUS_LABELS } from './fleet/model.js';
 
 const { Text } = Typography;
 
@@ -28,6 +30,24 @@ const STATUS_COLOR = {
 export function StatusTag({ status }) {
   const s = String(status || '');
   return <Tag color={STATUS_COLOR[s] || 'default'}>{s || '-'}</Tag>;
+}
+
+function ExecutionStatusTag({ status }) {
+  return status ? <Tag color={STATUS_COLORS[status]}>{STATUS_LABELS[status] || status}</Tag> : null;
+}
+
+export function workflowActions(workflowStatus, executionStatus) {
+  const closed = ['done', 'cancelled'].includes(executionStatus)
+    || ['completed', 'failed'].includes(workflowStatus);
+  return {
+    interrupt: executionStatus
+      ? ['pending', 'running', 'idle'].includes(executionStatus)
+      : ['pending', 'running'].includes(workflowStatus),
+    resume: executionStatus
+      ? ['interrupted', 'error'].includes(executionStatus)
+      : workflowStatus === 'suspended',
+    cancel: !closed,
+  };
 }
 
 /// 事件 payload 摘要：todo_id / status 优先，够定位即可。
@@ -100,8 +120,9 @@ function EventsFeed({ workflowId, onNotice, onTerminal }) {
   );
 }
 
-function WorkflowDetail({ workflowId, onNotice, onMutated }) {
+function WorkflowDetail({ workflowId, summary, onNotice, onMutated }) {
   const [detail, setDetail] = useState(null);
+  const [executionOpen, setExecutionOpen] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -122,7 +143,8 @@ function WorkflowDetail({ workflowId, onNotice, onMutated }) {
   const wf = (detail && detail.workflow) || null;
   const items = (detail && detail.items) || [];
   const status = wf ? String(wf.status || '') : '';
-  const terminal = status === 'completed' || status === 'failed';
+  const executionStatus = summary?.execution_status;
+  const actions = workflowActions(status, executionStatus);
 
   const interrupt = async () => {
     try {
@@ -152,6 +174,16 @@ function WorkflowDetail({ workflowId, onNotice, onMutated }) {
     }
   };
 
+  const cancel = async () => {
+    try {
+      await apiPost(`/api/executions/${encodeURIComponent(workflowId)}/commands`, { action: 'cancel', input: {} });
+      load();
+      if (onMutated) onMutated();
+    } catch (e) {
+      if (onNotice) onNotice('取消失败: ' + (e && e.message));
+    }
+  };
+
   const itemCols = [
     { title: 'TODO', dataIndex: 'todo_id', key: 'todo_id', width: 120, ellipsis: true },
     { title: '状态', dataIndex: 'status', key: 'status', width: 110,
@@ -166,14 +198,17 @@ function WorkflowDetail({ workflowId, onNotice, onMutated }) {
       <Card size="small" title={<Tooltip title={workflowId}><span>{String(workflowId).slice(0, 18)}…</span></Tooltip>}
         extra={(
           <Space>
-            <Button size="small" danger disabled={!wf || terminal} onClick={interrupt}>中断</Button>
-            <Button size="small" disabled={!wf || !(status === 'suspended' || status === 'pending')} onClick={resume}>恢复</Button>
+            <Button size="small" onClick={() => setExecutionOpen(true)}>执行详情</Button>
+            <Button size="small" disabled={!wf || !actions.interrupt} onClick={interrupt}>中断（可恢复）</Button>
+            <Button size="small" disabled={!wf || !actions.resume} onClick={resume}>在原节点恢复</Button>
+            <Button size="small" danger disabled={!wf || !actions.cancel} onClick={cancel}>取消（终止）</Button>
           </Space>
         )}
         style={{ marginBottom: 12 }}
       >
         {wf ? (
           <Space wrap size={16}>
+            <span>执行 <ExecutionStatusTag status={executionStatus} /></span>
             <span><StatusTag status={wf.status} /></span>
             <Text type="secondary">父会话: {wf.parent_session_id || '-'}</Text>
             <Text type="secondary">generation: {wf.generation === undefined ? '-' : wf.generation}</Text>
@@ -187,6 +222,7 @@ function WorkflowDetail({ workflowId, onNotice, onMutated }) {
       <Card size="small" title="事件流">
         <EventsFeed workflowId={workflowId} onNotice={onNotice} onTerminal={load} />
       </Card>
+      {executionOpen && <ExecutionDetail id={workflowId} summary={{ id: workflowId, kind: 'todos', node_id: summary?.node_id, status: summary?.execution_status || summary?.status, created_at: summary?.execution_created_at || summary?.created_at }} onClose={() => setExecutionOpen(false)} onNotice={onNotice} />}
     </div>
   );
 }
@@ -249,15 +285,15 @@ export function TodoRunsPanel({ onNotice, focusWorkflowId, onFocusConsumed }) {
   const wfCols = [
     { title: 'ID', dataIndex: 'id', key: 'id', ellipsis: true,
       render: (v) => <Tooltip title={v}><span style={{ fontFamily: 'monospace' }}>{String(v || '').slice(0, 16)}…</span></Tooltip> },
-    { title: '状态', dataIndex: 'status', key: 'status', width: 110,
-      render: (s) => <StatusTag status={s} /> },
+    { title: '状态', key: 'status', width: 170,
+      render: (_, row) => <Space size={4}><Tooltip title="节点执行状态"><span><ExecutionStatusTag status={row.execution_status} /></span></Tooltip>{row.detail_error ? null : <Tooltip title="工作流状态"><span><StatusTag status={row.status} /></span></Tooltip>}</Space> },
     { title: '更新时间', dataIndex: 'updated_at', key: 'updated_at', width: 110,
       render: (ts) => <Tooltip title={absTime(ts)}><span>{relTime(ts)}</span></Tooltip> },
   ];
 
   return (
-    <Row gutter={16}>
-      <Col span={10}>
+    <Row gutter={[16, 16]}>
+      <Col xs={24} lg={10}>
         <Card size="small" title="工作流" extra={<Button size="small" onClick={() => load(false)}>刷新</Button>}>
           <Table
             rowKey="id"
@@ -271,9 +307,9 @@ export function TodoRunsPanel({ onNotice, focusWorkflowId, onFocusConsumed }) {
           />
         </Card>
       </Col>
-      <Col span={14}>
+      <Col xs={24} lg={14}>
         {selectedId
-          ? <WorkflowDetail workflowId={selectedId} onNotice={onNotice} onMutated={() => load(true)} />
+          ? <WorkflowDetail workflowId={selectedId} summary={rows.find((row) => row.id === selectedId)} onNotice={onNotice} onMutated={() => load(true)} />
           : <Card size="small"><Empty description="点击左侧工作流查看详情" /></Card>}
       </Col>
     </Row>

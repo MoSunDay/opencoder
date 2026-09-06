@@ -6,7 +6,7 @@
 // The pure-node suites (reduce/sign) are frozen — DOM tests live only here.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 // main.jsx calls createRoot(document.getElementById('root')).render(<App/>)
 // at import time. That stray instance would double every landmark query (its
@@ -32,6 +32,7 @@ vi.mock('react-dom/client', async (importOriginal) => {
 // #root fixture that main.jsx's import-time mount requires.
 import './test/setup-dom.js';
 import App from './main.jsx';
+import { LoginModal } from './login.jsx';
 import { clearCredentials, setCredentials, setState } from './store.js';
 
 // Unmount the import-time stray app before any test renders its own <App/>.
@@ -39,9 +40,9 @@ for (const root of strayRoots.splice(0, strayRoots.length)) {
   root.unmount();
 }
 
-// fetch router — request shapes mirror api.js / time.js / chat.jsx: relative
-// paths with an empty same-origin base. /api/time → {server_time_ms},
-// /api/nodes → {nodes: []}, /api/sessions → {sessions: []}. Nothing here can
+// fetch router — request shapes mirror api.js / chat.jsx: relative paths with
+// an empty same-origin base. /api/nodes → {nodes: []}, /api/sessions →
+// {sessions: []}. Nothing here can
 // reach a network; unmatched paths resolve to an empty JSON body.
 const jsonResponse = (body) => Promise.resolve({
   ok: true,
@@ -52,9 +53,6 @@ const jsonResponse = (body) => Promise.resolve({
 const installFetchRouter = () => {
   vi.stubGlobal('fetch', vi.fn((input) => {
     const url = typeof input === 'string' ? input : String((input && input.url) || '');
-    if (url.includes('/api/time')) {
-      return jsonResponse({ server_time_ms: Date.now() });
-    }
     if (url.includes('/api/nodes')) {
       return jsonResponse({ nodes: [] });
     }
@@ -79,6 +77,7 @@ const deprecationHits = () => consoleLog.error.concat(consoleLog.warn)
 // starts from the same clean slate (fresh localStorage, no credentials, fleet
 // tab) so cases never leak state into each other.
 beforeEach(() => {
+  window.history.replaceState(null, '', '/');
   localStorage.clear();
   clearCredentials();
   setState({ page: 'nodes', preselectNode: null, nodes: [], conn: 'init' });
@@ -105,6 +104,36 @@ describe('App shell landmarks (antd 6 under jsdom)', () => {
     expect(screen.queryByText('暂无 Opencoder 节点')).toBeNull();
   });
 
+  it('notifies the app to clear stale request errors after a successful login', async () => {
+    const onConnected = vi.fn();
+    render(<LoginModal open onConnected={onConnected} />);
+    fireEvent.change(screen.getByLabelText('共享密钥 (Token)'), {
+      target: { value: 'correct-token' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /连\s*接/ }));
+    await waitFor(() => expect(onConnected).toHaveBeenCalledOnce());
+    expect(localStorage.getItem('oc_token')).toBe('correct-token');
+  });
+
+  it('removes retired token query parameters without importing them', async () => {
+    window.history.replaceState(null, '', '/?view=nodes&token=url-secret#fleet');
+    render(<App />);
+    expect(await screen.findByText('Opencoder Fleet · 登录')).toBeTruthy();
+    expect(window.location.search).toBe('?view=nodes');
+    expect(window.location.hash).toBe('#fleet');
+    expect(localStorage.getItem('oc_token')).toBeNull();
+  });
+
+  it('removes retired token query parameters for authenticated visitors too', async () => {
+    setCredentials('stored-token', '');
+    window.history.replaceState(null, '', '/?token=url-secret#fleet');
+    render(<App />);
+    expect(await screen.findByText('暂无 Opencoder 节点')).toBeTruthy();
+    expect(window.location.search).toBe('');
+    expect(window.location.hash).toBe('#fleet');
+    expect(localStorage.getItem('oc_token')).toBe('stored-token');
+  });
+
   it('shows the empty fleet table on the nodes page', async () => {
     setCredentials('smoke-token', '');
     setState({ page: 'nodes' });
@@ -118,15 +147,15 @@ describe('App shell landmarks (antd 6 under jsdom)', () => {
     setState({ page: 'chat' });
     render(<App />);
     expect(await screen.findByText(/选择或新建对话/)).toBeTruthy();
-    expect(screen.getByText('本机 (server 本机引擎)')).toBeTruthy();
+    expect(screen.getByText('自动调度 / 全部会话')).toBeTruthy();
   });
 
   it('renders the brand and the menu landmarks', () => {
     setCredentials('smoke-token', '');
     render(<App />);
     expect(screen.getByText(/Opencoder Fleet/)).toBeTruthy();
-    expect(screen.getByText('Opencoder 列表')).toBeTruthy();
-    expect(screen.getByText('会话交互')).toBeTruthy();
-    expect(screen.getByText('DAG 工作流')).toBeTruthy();
+    expect(screen.getByRole('menuitem', { name: 'Opencoder 列表' })).toBeTruthy();
+    expect(screen.getByRole('menuitem', { name: '会话交互' })).toBeTruthy();
+    expect(screen.getByRole('menuitem', { name: 'DAG 工作流' })).toBeTruthy();
   });
 });

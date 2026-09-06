@@ -246,7 +246,7 @@ async fn error_contract_400_404_502() {
     assert_eq!(st, StatusCode::NOT_FOUND, "{body}");
 }
 
-/// Brain routes live under `/api`, so they inherit the HMAC signature gate:
+/// Brain routes live under `/api`, so they inherit the Bearer-token gate:
 /// a token-protected app must reject an unsigned dispatch with 401.
 #[tokio::test]
 async fn unsigned_dispatch_request_is_401() {

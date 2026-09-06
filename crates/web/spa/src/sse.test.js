@@ -6,10 +6,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { openStream } from './sse.js';
 
-const signFetchMock = vi.fn();
+const authFetchMock = vi.fn();
 const apiGetMock = vi.fn();
 vi.mock('./api.js', () => ({
-  signFetch: (...a) => signFetchMock(...a),
+  authFetch: (...a) => authFetchMock(...a),
   apiGet: (...a) => apiGetMock(...a),
 }));
 
@@ -60,15 +60,15 @@ describe('sse lag contract', () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();
-    signFetchMock.mockReset();
+    authFetchMock.mockReset();
     apiGetMock.mockReset();
   });
 
   it('reconnects from the seq head after a lag-marked error frame', async () => {
-    signFetchMock.mockResolvedValueOnce(
+    authFetchMock.mockResolvedValueOnce(
       sseResponse([{ event: 'error', data: { error: 'event lag: 5 events dropped', lag: 5 } }]),
     );
-    signFetchMock.mockResolvedValueOnce(sseResponse([{ event: 'done', data: {} }]));
+    authFetchMock.mockResolvedValueOnce(sseResponse([{ event: 'done', data: {} }]));
     apiGetMock.mockResolvedValue({ seq: 42 });
 
     const frames = [];
@@ -91,8 +91,8 @@ describe('sse lag contract', () => {
     await vi.advanceTimersByTimeAsync(1000);
     await flush();
     expect(apiGetMock).toHaveBeenCalledWith('/api/sessions/s1/seq');
-    expect(signFetchMock).toHaveBeenCalledTimes(2);
-    expect(signFetchMock.mock.calls[1][1]).toContain('after=');
+    expect(authFetchMock).toHaveBeenCalledTimes(2);
+    expect(authFetchMock.mock.calls[1][1]).toContain('after=');
 
     // The second connection terminates normally.
     await vi.advanceTimersByTimeAsync(50);
@@ -108,8 +108,8 @@ describe('sse lag contract', () => {
     // (duplicate deltas) and repeated lag frames stacked connections.
     const connA = liveStream();
     const connB = liveStream();
-    signFetchMock.mockResolvedValueOnce(connA.resp);
-    signFetchMock.mockResolvedValueOnce(connB.resp);
+    authFetchMock.mockResolvedValueOnce(connA.resp);
+    authFetchMock.mockResolvedValueOnce(connB.resp);
     apiGetMock.mockResolvedValue({ seq: 100 });
 
     const frames = [];
@@ -140,7 +140,7 @@ describe('sse lag contract', () => {
     await vi.advanceTimersByTimeAsync(1000);
     await flush();
     expect(apiGetMock).toHaveBeenCalledTimes(1);
-    expect(signFetchMock).toHaveBeenCalledTimes(2);
+    expect(authFetchMock).toHaveBeenCalledTimes(2);
 
     // The replacement stream carries the run to its terminal frame.
     connB.push('done', {});
@@ -151,7 +151,7 @@ describe('sse lag contract', () => {
   });
 
   it('a real error frame (no lag marker) stays terminal', async () => {
-    signFetchMock.mockResolvedValueOnce(sseResponse([{ event: 'error', data: { error: 'boom' } }]));
+    authFetchMock.mockResolvedValueOnce(sseResponse([{ event: 'error', data: { error: 'boom' } }]));
     const frames = [];
     const statuses = [];
     const stream = openStream({
@@ -166,12 +166,12 @@ describe('sse lag contract', () => {
     await flush();
     expect(frames.map((f) => f.event)).toEqual(['error']);
     expect(statuses).toContain('closed');
-    expect(signFetchMock).toHaveBeenCalledTimes(1); // never reconnected
+    expect(authFetchMock).toHaveBeenCalledTimes(1); // never reconnected
     stream.abort();
   });
 
   it('a done frame still terminates the stream', async () => {
-    signFetchMock.mockResolvedValueOnce(sseResponse([{ event: 'done', data: {} }]));
+    authFetchMock.mockResolvedValueOnce(sseResponse([{ event: 'done', data: {} }]));
     const statuses = [];
     const stream = openStream({
       path: '/api/sessions/s1/events',
@@ -195,7 +195,7 @@ describe('sse resync dedup + onResync watermark (round-2 #5)', () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();
-    signFetchMock.mockReset();
+    authFetchMock.mockReset();
     apiGetMock.mockReset();
   });
 
@@ -217,7 +217,7 @@ describe('sse resync dedup + onResync watermark (round-2 #5)', () => {
   }
 
   it('exposes the id-line seq on the frame and drops repeats at/below the delivered seq', async () => {
-    signFetchMock.mockResolvedValueOnce(sseResponseIds([
+    authFetchMock.mockResolvedValueOnce(sseResponseIds([
       { event: 'text_delta', data: { text: 'a' }, id: 5 },
       { event: 'text_delta', data: { text: 'a' }, id: 5 }, // exact repeat
       { event: 'text_delta', data: { text: 'b' }, id: 4 }, // below watermark
@@ -247,7 +247,7 @@ describe('sse resync dedup + onResync watermark (round-2 #5)', () => {
   // — the echo only reappeared ~10s later from the done rebuild. The id: line
   // is the only event-seq source; payload seq must stay off frame.seq.
   it('a live steer_consumed whose data.seq sits below the watermark is still delivered (payload seq is not the event seq)', async () => {
-    signFetchMock.mockResolvedValueOnce(sseResponseIds([
+    authFetchMock.mockResolvedValueOnce(sseResponseIds([
       { event: 'text_delta', data: { text: 'a' }, id: 5 },
       // Live steer echo: no id: line (not yet persisted), data.seq = 2 is the
       // session_inputs row seq — must NOT be lifted onto frame.seq.
@@ -274,7 +274,7 @@ describe('sse resync dedup + onResync watermark (round-2 #5)', () => {
   it('a lag re-sync with onResync reconnects above the returned floor and skips the legacy /seq fetch', async () => {
     const connA = liveStream();
     const connB = liveStream();
-    signFetchMock.mockResolvedValueOnce(connA.resp).mockResolvedValueOnce(connB.resp);
+    authFetchMock.mockResolvedValueOnce(connA.resp).mockResolvedValueOnce(connB.resp);
     const frames = [];
     const resyncArgs = [];
     const stream = openStream({
@@ -294,8 +294,8 @@ describe('sse resync dedup + onResync watermark (round-2 #5)', () => {
     await flush();
     expect(resyncArgs).toEqual([0]);
     expect(apiGetMock).not.toHaveBeenCalled(); // onResync owns the cursor
-    expect(signFetchMock).toHaveBeenCalledTimes(2);
-    expect(signFetchMock.mock.calls[1][1]).toContain('after=42');
+    expect(authFetchMock).toHaveBeenCalledTimes(2);
+    expect(authFetchMock.mock.calls[1][1]).toContain('after=42');
     // The replacement stream runs to its terminal frame normally.
     connB.push('done', {});
     await flush();
@@ -306,7 +306,7 @@ describe('sse resync dedup + onResync watermark (round-2 #5)', () => {
   it('a throwing onResync falls back to the capped legacy cursor', async () => {
     const connA = liveStream();
     const connB = liveStream();
-    signFetchMock.mockResolvedValueOnce(connA.resp).mockResolvedValueOnce(connB.resp);
+    authFetchMock.mockResolvedValueOnce(connA.resp).mockResolvedValueOnce(connB.resp);
     apiGetMock.mockResolvedValue({ seq: 1000 });
     const stream = openStream({
       path: '/api/sessions/s1/events',
@@ -323,8 +323,8 @@ describe('sse resync dedup + onResync watermark (round-2 #5)', () => {
     await vi.advanceTimersByTimeAsync(1000);
     await flush();
     expect(apiGetMock).toHaveBeenCalledTimes(1); // legacy path re-read /seq
-    expect(signFetchMock).toHaveBeenCalledTimes(2);
-    expect(signFetchMock.mock.calls[1][1]).toContain('after=600'); // max(0, 1000-400)
+    expect(authFetchMock).toHaveBeenCalledTimes(2);
+    expect(authFetchMock.mock.calls[1][1]).toContain('after=600'); // max(0, 1000-400)
     stream.abort();
   });
 });

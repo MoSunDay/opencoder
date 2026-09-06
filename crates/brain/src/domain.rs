@@ -94,7 +94,9 @@ pub fn le_bytes_to_f32_slice(bytes: &[u8]) -> Result<Vec<f32>> {
         );
     }
     Ok(bytes
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
         .collect())
 }

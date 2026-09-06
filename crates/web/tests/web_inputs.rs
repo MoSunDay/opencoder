@@ -9,7 +9,7 @@ use std::time::Duration;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use opencoder_llm::{ChatStream, LlmEvent, MockChatClient};
-use opencoder_store::{LibsqlStore, Store};
+use opencoder_store::LibsqlStore;
 use serde_json::json;
 use tokio::sync::Notify;
 use tower::ServiceExt;
@@ -17,8 +17,10 @@ use tower::ServiceExt;
 /// App whose drain mock hangs on the FIRST LLM call (released via `notify`)
 /// and answers everything after with a plain Completed — so queued inputs
 /// admitted while the drain is stuck stay pending.
-async fn hanging_app(notify: Arc<Notify>) -> axum::Router {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+async fn hanging_fixture(
+    notify: Arc<Notify>,
+) -> (axum::Router, Arc<LibsqlStore>, Arc<MockChatClient>) {
+    let store = Arc::new(LibsqlStore::open_memory().await.unwrap());
     let workdir = tempfile::tempdir().unwrap().keep();
     std::fs::create_dir_all(workdir.join(".opencoder")).unwrap();
     std::fs::write(
@@ -26,25 +28,32 @@ async fn hanging_app(notify: Arc<Notify>) -> axum::Router {
         r#"{"mode":"off"}"#,
     )
     .unwrap();
-    let mock = MockChatClient::new()
-        .push_hang(notify)
-        .with_default(vec![LlmEvent::Completed {
-            text: "done".into(),
-            tool_calls: vec![],
-            usage: None,
-        }]);
+    let mock =
+        Arc::new(
+            MockChatClient::new()
+                .push_hang(notify)
+                .with_default(vec![LlmEvent::Completed {
+                    text: "done".into(),
+                    tool_calls: vec![],
+                    usage: None,
+                }]),
+        );
     let state = Arc::new(opencoder_web::AppState {
         brain: opencoder_web::api_brain::mock_brain(store.clone()),
-        store,
+        store: store.clone(),
         workdir,
         handles: opencoder_web::handle::new_handle_map(),
         nodes: Arc::new(opencoder_web::nodes_state::NodeHub::new()),
         controls: Arc::new(opencoder_web::control_state::ControlHub::new()),
         team: opencoder_web::team_state::mock(),
         project: opencoder_web::ProjectService::new(),
-        client_override: Some(Arc::new(mock) as Arc<dyn ChatStream>),
+        client_override: Some(mock.clone() as Arc<dyn ChatStream>),
     });
-    opencoder_web::build_app(state, None, false)
+    (opencoder_web::build_app(state, None, false), store, mock)
+}
+
+async fn hanging_app(notify: Arc<Notify>) -> axum::Router {
+    hanging_fixture(notify).await.0
 }
 
 async fn create_session(app: &axum::Router) -> String {
@@ -264,4 +273,72 @@ async fn list_inputs_defaults_to_steer_and_tolerates_unknown_session() {
         serde_json::from_slice(&axum::body::to_bytes(resp.into_body(), 4096).await.unwrap())
             .unwrap();
     assert_eq!(body["inputs"].as_array().map(Vec::len), Some(0));
+}
+
+#[tokio::test]
+async fn input_id_retry_returns_original_seq_without_restarting_a_live_turn() {
+    let notify = Arc::new(Notify::new());
+    let (app, _store, mock) = hanging_fixture(notify.clone()).await;
+    let id = create_session(&app).await;
+    let post = |prompt: &str| {
+        Request::builder()
+            .method("POST")
+            .uri(format!("/api/sessions/{id}/prompt"))
+            .header("content-type", "application/json")
+            .body(Body::from(
+                json!({"input_id":"initial-execution-1","prompt":prompt}).to_string(),
+            ))
+            .unwrap()
+    };
+
+    let first = app.clone().oneshot(post("hello")).await.unwrap();
+    assert_eq!(first.status(), StatusCode::OK);
+    let first_body: serde_json::Value =
+        serde_json::from_slice(&axum::body::to_bytes(first.into_body(), 4096).await.unwrap())
+            .unwrap();
+    assert_eq!(first_body["driver_ensured"], true);
+    for _ in 0..100 {
+        if mock.call_count() == 1 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert_eq!(mock.call_count(), 1, "first turn must be in flight");
+
+    let retry = app.clone().oneshot(post("hello")).await.unwrap();
+    assert_eq!(retry.status(), StatusCode::OK);
+    let retry_body: serde_json::Value =
+        serde_json::from_slice(&axum::body::to_bytes(retry.into_body(), 4096).await.unwrap())
+            .unwrap();
+    assert_eq!(retry_body["admitted_seq"], first_body["admitted_seq"]);
+    assert_eq!(retry_body["driver_ensured"], true);
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert_eq!(
+        mock.call_count(),
+        1,
+        "retry must not cancel/restart the turn"
+    );
+
+    let conflict = app.clone().oneshot(post("different")).await.unwrap();
+    assert_eq!(conflict.status(), StatusCode::CONFLICT);
+
+    notify.notify_one();
+
+    let mut consumed_retry = serde_json::Value::Null;
+    for _ in 0..100 {
+        let response = app.clone().oneshot(post("hello")).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        consumed_retry = serde_json::from_slice(
+            &axum::body::to_bytes(response.into_body(), 4096)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        if consumed_retry["driver_ensured"] == false {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert_eq!(consumed_retry["driver_ensured"], false);
+    assert_eq!(mock.call_count(), 1, "consumed retry must remain inert");
 }

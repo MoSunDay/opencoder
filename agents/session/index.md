@@ -1,6 +1,10 @@
-Commit: a783fb1
+Commit: (working-tree, 基于 c1a1b2e78e1ccd4a3cc2ac6dc408a76d30bf46e6)
 
 # session 模块
+
+## 节点嵌入边界
+
+[worker](../worker/index.md) 复用 session 引擎。`loop_registry`（`src/loop_registry/mod.rs`）用 RAII 按会话 ID 计数真实活动 loop，嵌套 drain 不重复计数，进入/退出通知 Node；`extensions`（`src/extensions/mod.rs`）提供按会话注册且带生命周期的工具，用于维护 agent。runner 入口位于 `runner/entry/`，传播任务局部资源根；resume 在固定资源作用域下严格解析 agent。`fork_session_with_id` 允许节点生成可路由 ID 后复用原有分叉语义。
 
 ## 职责
 agent 运行时核心。驱动「接收输入 → 调 LLM → 执行工具 → 持久化」的主循环，并实现两段式 delivery（steer/queue）、上下文压缩、会话恢复、title 生成、可中断（turn 边界 + mid-tool 硬中止）。

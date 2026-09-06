@@ -19,9 +19,11 @@ vi.mock('./api.js', () => ({
   apiPatch: apiPatchMock,
   apiDel: apiDelMock,
 }));
+vi.mock('./sse.js', () => ({ openStream: vi.fn(() => ({ abort: vi.fn() })) }));
 
 import './test/setup-dom.js';
 import { AgentsPanel } from './agentsConfig.jsx';
+import { ExecutionDetail } from './fleet/detail.jsx';
 
 /// antd 6 Button 对两字中文自动插空格（「新 建」），按 role + 去空白匹配。
 const findButton = (txt) => screen.getAllByRole('button')
@@ -155,4 +157,32 @@ describe('AgentsPanel', () => {
     // Modal 两次动效（开/关）在 jsdom 里各吃 ~1.5s，机器高负载下更长（同
     // chat.dom.test 的长测超时惯例，宽放到 20s）。
   }, 20000);
+
+  it('starts a configured agent and opens its node-owned execution', async () => {
+    apiPostMock.mockResolvedValueOnce({ id: 'agent-run-1', kind: 'agent', node_id: 'node-a', created_at: 1, status: 'pending' });
+    render(<AgentsPanel onNotice={() => {}} />);
+    await screen.findByText('Prompt: base');
+    fireEvent.click(screen.getAllByText(/^启\s*动$/)[0]);
+    fireEvent.change(await screen.findByLabelText('任务要求'), { target: { value: '检查发布状态' } });
+    fireEvent.click(findButton('启动并查看'));
+    await waitFor(() => {
+      const call = apiPostMock.mock.calls.find(([path]) => path === '/api/executions');
+      expect(call).toBeTruthy();
+      expect(call[1]).toMatchObject({ kind: 'agent', target: 'coder', node_id: null, input: { prompt: '检查发布状态' } });
+      expect(call[1].id).toMatch(/^agent-/);
+    });
+    expect(await screen.findByText('agent-run-1')).toBeTruthy();
+  }, 20000);
+
+  it('keeps index identity visible and disables controls while its node is offline', async () => {
+    apiGetMock.mockImplementation((path) => {
+      if (path === '/api/executions/agent-offline') return Promise.reject(Object.assign(new Error('offline'), { status: 503 }));
+      return Promise.resolve({ chunks: [], more: false });
+    });
+    render(<ExecutionDetail id="agent-offline" summary={{ id: 'agent-offline', kind: 'agent', node_id: 'node-away', created_at: 1, status: 'running' }} onClose={() => {}} onNotice={() => {}} />);
+    expect(await screen.findByText('所属节点当前离线，恢复连接后可读取明细和继续操作')).toBeTruthy();
+    expect(screen.getByText('node-away')).toBeTruthy();
+    expect(findButton('中断（可恢复）').disabled).toBe(true);
+    expect(findButton('取消（终止）').disabled).toBe(true);
+  }, 10000);
 });

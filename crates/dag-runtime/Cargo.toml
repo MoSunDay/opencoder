@@ -22,6 +22,7 @@ chrono.workspace = true
 tracing.workspace = true
 ulid.workspace = true
 rustpython-vm = "0.5"
+libc = "0.2"
 
 [dev-dependencies]
 tempfile.workspace = true

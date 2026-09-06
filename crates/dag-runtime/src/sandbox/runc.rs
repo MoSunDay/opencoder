@@ -1,122 +1,151 @@
-//! `runc` process driving for sandboxed python steps.
-//!
-//! Thin async wrappers around the `runc` binary (no shell, argv only).
-//! Lifetime contract of [`run_step`]: after it returns — success, non-zero
-//! exit, or timeout — a best-effort `runc delete --force` has been issued,
-//! so container ids never leak across steps.
+//! Bounded runc lifecycle: cancellation/timeout stops the container and
+//! reaps the launcher before returning; cleanup failures remain visible.
+use anyhow::{Context, Result};
+use std::{path::Path, process::Stdio, time::Duration};
+use tokio::{process::Command, time::timeout};
+use tokio_util::sync::CancellationToken;
 
-use std::path::Path;
-use std::process::Stdio;
-use std::time::Duration;
+mod recovery;
+pub use recovery::cleanup_owned_containers;
 
-use anyhow::{Context as _, Result};
-use tokio::io::AsyncReadExt as _;
-use tokio::process::Command;
-use tokio::time::timeout;
-
-/// Is a usable `runc` on PATH? (`runc --version`; no shell involved.)
 pub fn runc_available() -> bool {
     std::process::Command::new("runc")
         .arg("--version")
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status()
-        .map(|status| status.success())
-        .unwrap_or(false)
+        .is_ok_and(|status| status.success())
 }
 
-/// Run one OCI bundle to completion.
-///
-/// Returns `(exit_code, output)` where `output` is the captured stdout with
-/// stderr appended (`-- stderr --` separator) when non-empty. `exit_code` is
-/// `-1` when the process died to a signal (e.g. after our timeout KILL).
-///
-/// On `timeout_secs` elapse: `runc kill <id> KILL`, wait briefly for the run
-/// process to exit, `runc delete --force`, then `Err("runc step timeout")`.
-async fn run_step_inner(bundle_dir: &Path, id: &str) -> Result<(i32, String)> {
-    let mut child = Command::new("runc")
-        .arg("run")
-        .arg("--bundle")
-        .arg(bundle_dir)
-        .arg(id)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .context("failed to spawn runc")?;
-
-    let mut stdout_pipe = child.stdout.take().context("runc stdout not piped")?;
-    let mut stderr_pipe = child.stderr.take().context("runc stderr not piped")?;
-
-    // Drain both pipes concurrently with the wait — otherwise a chatty step
-    // deadlocks on a full pipe.
-    let mut out = Vec::new();
-    let mut err = Vec::new();
-    let (out_res, err_res, status) = futures::join!(
-        stdout_pipe.read_to_end(&mut out),
-        stderr_pipe.read_to_end(&mut err),
-        child.wait(),
-    );
-    out_res.context("read runc stdout")?;
-    err_res.context("read runc stderr")?;
-    let status = status.context("wait runc")?;
-
-    let mut text = String::from_utf8_lossy(&out).into_owned();
-    let err_text = String::from_utf8_lossy(&err).into_owned();
-    if !err_text.trim().is_empty() {
-        if !text.is_empty() && !text.ends_with('\n') {
-            text.push('\n');
-        }
-        text.push_str("-- stderr --\n");
-        text.push_str(&err_text);
-    }
-    Ok((status.code().unwrap_or(-1), text))
-}
-
-/// [`run_step_inner`] with the timeout + always-cleanup contract.
 pub async fn run_step(
     bundle_dir: &Path,
     id: &str,
     timeout_secs: Option<u64>,
 ) -> Result<(i32, String)> {
-    let result = match timeout_secs {
-        None => run_step_inner(bundle_dir, id).await,
-        Some(secs) => {
-            match timeout(Duration::from_secs(secs), run_step_inner(bundle_dir, id)).await {
-                Ok(inner) => inner,
-                Err(_elapsed) => {
-                    // Kill the container by id (the spawned runc process is
-                    // detached once the inner future is dropped), then let the
-                    // unconditional delete below reap it.
-                    kill(id).await;
-                    Err(anyhow::anyhow!("runc step timeout"))
-                }
-            }
+    run_step_cancellable(bundle_dir, id, timeout_secs, CancellationToken::new()).await
+}
+
+pub async fn run_step_cancellable(
+    bundle_dir: &Path,
+    id: &str,
+    timeout_secs: Option<u64>,
+    cancel: CancellationToken,
+) -> Result<(i32, String)> {
+    anyhow::ensure!(
+        !id.is_empty()
+            && id.len() <= 255
+            && id
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'),
+        "invalid container id"
+    );
+    anyhow::ensure!(!cancel.is_cancelled(), "runc step cancelled");
+    // A private state root prevents unrelated runtimes or test runs from
+    // colliding with this execution's container name.
+    let root = bundle_dir.join("runc-state");
+    std::fs::create_dir_all(&root)?;
+    let supervised = opencoder_session::process::runc_command("runc", &root, id)?;
+    let (mut command, lease) = match supervised {
+        Some((command, lease)) => (command, Some(lease)),
+        None => (Command::new("runc"), None),
+    };
+    let supervised = lease.is_some();
+    command
+        .arg("--root")
+        .arg(&root)
+        .args(["run", "--keep", "--bundle"])
+        .arg(bundle_dir)
+        .arg(id)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    opencoder_session::process::configure_owned_command(&mut command, supervised);
+    let mut child = command.spawn().context("spawn runc")?;
+    let mut supervisor = lease.map(|lease| lease.spawned(child.id())).transpose()?;
+    let stdout = child.stdout.take().context("runc stdout")?;
+    let stderr = child.stderr.take().context("runc stderr")?;
+    let deadline = async {
+        match timeout_secs {
+            Some(secs) => tokio::time::sleep(Duration::from_secs(secs)).await,
+            None => std::future::pending().await,
         }
     };
-    // Always reap the container, best-effort.
-    delete_force(id).await;
+    let result = tokio::select! {
+        biased;
+        _ = cancel.cancelled() => Err(anyhow::anyhow!("runc step cancelled")),
+        _ = deadline => Err(anyhow::anyhow!("runc step timeout")),
+        result = async {
+            let wait = async { Ok::<_, anyhow::Error>(child.wait().await?) };
+            let (out, err, status) = tokio::try_join!(
+                crate::sandbox::output_limit::read_bounded(
+                    stdout,
+                    "runc stdout",
+                    crate::sandbox::output_limit::STREAM_OUTPUT_LIMIT_BYTES,
+                ),
+                crate::sandbox::output_limit::read_bounded(
+                    stderr,
+                    "runc stderr",
+                    crate::sandbox::output_limit::STREAM_OUTPUT_LIMIT_BYTES,
+                ),
+                wait,
+            )?;
+            let mut text = String::from_utf8_lossy(&out).into_owned();
+            if !err.is_empty() {
+                text.push_str("\n-- stderr --\n");
+                text.push_str(&String::from_utf8_lossy(&err));
+            }
+            Ok((status.code().unwrap_or(-1), text))
+        } => result,
+    };
+    if let Some(supervisor) = &mut supervisor {
+        supervisor.terminate();
+    }
+    if child.try_wait()?.is_none() {
+        opencoder_session::process::wait_owned_child(&mut child, supervised)
+            .await
+            .context("reap runc owner")?;
+    }
+    let first_cleanup = delete_force(&root, id).await;
+    // Recheck after launcher exit: cancellation can race container creation.
+    // A successful second pass also resolves a transient first-pass race.
+    if let Err(error) = delete_force(&root, id).await {
+        anyhow::bail!(
+            "runc cleanup failed: {error:#}; first cleanup: {first_cleanup:?}; step: {result:?}"
+        );
+    }
     result
 }
 
-async fn kill(id: &str) {
-    let _ = Command::new("runc")
-        .args(["kill", id, "KILL"])
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .await;
-}
-
-async fn delete_force(id: &str) {
-    let _ = Command::new("runc")
+pub(super) async fn delete_force(root: &Path, id: &str) -> Result<()> {
+    if !root.join(id).exists() {
+        return Ok(());
+    }
+    let mut child = Command::new("runc")
+        .arg("--root")
+        .arg(root)
         .args(["delete", "--force", id])
+        .kill_on_drop(true)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
-        .status()
-        .await;
+        .spawn()
+        .context("spawn runc cleanup")?;
+    let status = match timeout(Duration::from_secs(5), child.wait()).await {
+        Ok(status) => status?,
+        Err(_) => {
+            child.kill().await.context("reap timed-out runc cleanup")?;
+            anyhow::bail!("runc delete exceeded 5s");
+        }
+    };
+    anyhow::ensure!(
+        status.success() || !root.join(id).exists(),
+        "runc delete failed: {status}"
+    );
+    anyhow::ensure!(
+        !root.join(id).exists(),
+        "runc container state remains after cleanup"
+    );
+    Ok(())
 }
 
 #[cfg(test)]
@@ -124,8 +153,8 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
-    /// Candidate fixture roots checked by [`runc_step_smoke`] (skips when
-    /// none exist — the must-pass tests are the pure OCI + VM ones).
+    /// Candidate fixture roots checked by the explicitly invoked manual tests.
+    /// Missing prerequisites fail the manual invocation.
     fn smoke_rootfs_candidates() -> Vec<PathBuf> {
         let mut roots = Vec::new();
         if let Ok(from_env) = std::env::var("DAG_TEST_ROOTFS") {
@@ -137,23 +166,16 @@ mod tests {
     }
 
     /// End-to-end smoke through a real runc when both runc and a prepared
-    /// rootfs fixture are present; otherwise reports and skips. Offline CI
-    /// environments exercise the OCI + VM unit tests instead.
+    /// rootfs fixture are present. Explicit manual invocation fails if either
+    /// prerequisite is absent; ordinary CI reports this test as ignored.
     #[tokio::test]
+    #[ignore = "manual: requires runc and prepared Python rootfs"]
     async fn runc_step_smoke() {
-        if !runc_available() {
-            eprintln!("skipping: runc not installed");
-            return;
-        }
-        // The shared rootfs must be a REAL directory named `rootfs` (runc
-        // rejects symlinks) — its parent plays workflow root for the smoke.
-        let Some(rootfs) = smoke_rootfs_candidates()
+        assert!(runc_available(), "runc not installed");
+        let rootfs = smoke_rootfs_candidates()
             .into_iter()
             .find(|p| p.is_dir() && p.file_name().is_some_and(|n| n == "rootfs"))
-        else {
-            eprintln!("skipping: no rootfs fixture (set DAG_TEST_ROOTFS to a directory named `rootfs` to enable)");
-            return;
-        };
+            .expect("set DAG_TEST_ROOTFS to a prepared directory named rootfs");
         let workflow_root = rootfs.parent().expect("fixture has a parent").to_path_buf();
         std::fs::create_dir_all(&workflow_root).unwrap();
 
@@ -164,8 +186,105 @@ mod tests {
             timeout_hint: Some(30),
         };
         let bundle = crate::sandbox::oci::write_bundle(&workflow_root.join("b"), &spec).unwrap();
-        let (code, out) = run_step(&bundle, "dag-smoke-test", Some(30)).await.unwrap();
+        // A container combines independently valid run and step IDs.
+        let id = format!("{}-{}", "r".repeat(64), "s".repeat(64));
+        let (code, out) = run_step(&bundle, &id, Some(30)).await.unwrap();
         assert_eq!(code, 0, "runc step output: {out}");
         assert!(out.contains("from runc"), "{out}");
+    }
+    #[tokio::test]
+    #[ignore = "manual: requires runc and prepared Python rootfs"]
+    async fn cancellation_and_timeout_remove_running_containers() {
+        assert!(runc_available());
+        let rootfs = smoke_rootfs_candidates()
+            .into_iter()
+            .find(|p| p.is_dir())
+            .expect("set DAG_TEST_ROOTFS");
+        let workflow = rootfs.parent().unwrap();
+        for timed_out in [false, true] {
+            let id = format!("dag-stop-{}", ulid::Ulid::new());
+            let spec = crate::sandbox::oci::BundleSpec {
+                run_root: workflow.join(&id), step_slug: "loop".into(),
+                code: "import time\nf = open('/workspace/context/loop/started', 'w')\nf.write('started')\nf.close()\nwhile True:\n    with open('/workspace/context/loop/ticks', 'a') as f: f.write('x')\n    time.sleep(0.01)".into(),
+                timeout_hint: timed_out.then_some(5),
+            };
+            let bundle =
+                crate::sandbox::oci::write_bundle(&workflow.join(format!("bundle-{id}")), &spec)
+                    .unwrap();
+            let cancel = CancellationToken::new();
+            let started = spec.run_root.join("loop/started");
+            let child_cancel = cancel.clone();
+            let child_bundle = bundle.clone();
+            let child_id = id.clone();
+            let execution = tokio::spawn(async move {
+                run_step_cancellable(
+                    &child_bundle,
+                    &child_id,
+                    timed_out.then_some(5),
+                    child_cancel,
+                )
+                .await
+            });
+            timeout(Duration::from_secs(15), async {
+                while !started.exists() {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            })
+            .await
+            .expect("container started");
+            if !timed_out {
+                cancel.cancel();
+            }
+            let error = timeout(Duration::from_secs(15), execution)
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap_err();
+            assert!(
+                error
+                    .to_string()
+                    .contains(if timed_out { "timeout" } else { "cancelled" }),
+                "{error:#}"
+            );
+            assert!(!bundle.join("runc-state").join(&id).exists());
+            let ticks = spec.run_root.join("loop/ticks");
+            let before = std::fs::read(&ticks).unwrap();
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            assert_eq!(
+                std::fs::read(ticks).unwrap(),
+                before,
+                "container kept running after terminal result"
+            );
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "manual: requires runc and prepared Python rootfs"]
+    async fn stdout_overflow_fails_and_removes_container() {
+        assert!(runc_available());
+        let rootfs = smoke_rootfs_candidates()
+            .into_iter()
+            .find(|path| path.is_dir())
+            .expect("set DAG_TEST_ROOTFS");
+        let workflow = rootfs.parent().unwrap();
+        let id = format!("dag-overflow-{}", ulid::Ulid::new());
+        let bundle_path = workflow.join(format!("bundle-{id}"));
+        let spec = crate::sandbox::oci::BundleSpec {
+            run_root: workflow.join(&id),
+            step_slug: "overflow".into(),
+            code: "print('x' * (8 * 1024 * 1024 + 1))".into(),
+            timeout_hint: Some(30),
+        };
+        let bundle = crate::sandbox::oci::write_bundle(&bundle_path, &spec).unwrap();
+        let error = run_step(&bundle, &id, Some(30)).await.unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("output_limit_exceeded: runc stdout exceeds 8388608 bytes"),
+            "{error:#}"
+        );
+        assert!(!bundle.join("runc-state").join(&id).exists());
+        let _ = std::fs::remove_dir_all(&bundle_path);
+        let _ = std::fs::remove_dir_all(&spec.run_root);
     }
 }

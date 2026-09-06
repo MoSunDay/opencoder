@@ -1,7 +1,7 @@
 // runDetail.jsx — single run view: LEFT live graph (React Flow + dagre
 // layout, statuses projected from the event fold), RIGHT reverse-chron event
 // feed. Live updates come from GET /api/dag/runs/:id/events through the
-// shared sse.js openStream (signed SSE, replay-then-live). On run_finished
+// shared sse.js openStream (Bearer-authenticated SSE, replay-then-live). On run_finished
 // the final status/error is applied to the header row, the runs table is
 // refreshed (onFinished) and the stream is closed.
 
@@ -21,6 +21,7 @@ import {
   STEP_RUNNING,
 } from '../dagProjection.js';
 import { RunStatusTag, NodeBadge } from './runBits.jsx';
+import { ExecutionDetail } from '../fleet/detail.jsx';
 
 const { Text } = Typography;
 
@@ -98,6 +99,7 @@ export function RunDetail({ run, onNotice, onClose, onFinished }) {
   const [events, setEvents] = useState([]); // ascending by seq (arrival for unpersisted)
   const [streamStatus, setStreamStatus] = useState('connecting');
   const [selected, setSelected] = useState(null); // clicked step node data
+  const [executionOpen, setExecutionOpen] = useState(false);
   const streamRef = useRef(null);
   const finishedRef = useRef(false);
   const alive = useRef(true);
@@ -110,7 +112,7 @@ export function RunDetail({ run, onNotice, onClose, onFinished }) {
     if (!id || !dagId) {
       return undefined;
     }
-    apiGet('/api/dag/defs/' + encodeURIComponent(dagId))
+    (current.spec ? Promise.resolve({ spec: current.spec }) : apiGet('/api/dag/defs/' + encodeURIComponent(dagId)))
       .then((def) => {
         if (alive.current) {
           setSpec(def && def.spec ? def.spec : null);
@@ -209,6 +211,7 @@ export function RunDetail({ run, onNotice, onClose, onFinished }) {
     <Space direction="vertical" size={12} style={{ width: '100%' }}>
       <Space wrap>
         <Button size="small" onClick={onClose}>← 返回运行列表</Button>
+        <Button size="small" onClick={() => setExecutionOpen(true)}>执行详情与产物</Button>
         <Text strong>运行 {String(current.id || '').slice(0, 8)}</Text>
         <RunStatusTag status={current.status} />
         <NodeBadge nodeId={current.node_id} status={current.status} />
@@ -272,6 +275,7 @@ export function RunDetail({ run, onNotice, onClose, onFinished }) {
           </div>
         </div>
       </div>
+      {executionOpen && <ExecutionDetail id={current.id} summary={{ id: current.id, kind: 'dag', node_id: current.node_id, status: current.status, created_at: current.created_at }} onClose={() => setExecutionOpen(false)} onNotice={onNotice} />}
     </Space>
   );
 }

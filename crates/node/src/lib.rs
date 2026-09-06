@@ -12,6 +12,7 @@
 pub mod batcher;
 pub mod control;
 pub mod executor;
+pub mod fleet;
 pub mod runner;
 pub mod uplink;
 

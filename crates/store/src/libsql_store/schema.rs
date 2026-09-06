@@ -6,7 +6,7 @@ use super::chat_tables::{
 };
 use super::team_runs::{CREATE_INDEX_TEAM_TOPIC_RUNS_TOPIC, CREATE_TEAM_TOPIC_RUNS};
 
-const SCHEMA_VERSION: i64 = 18;
+const SCHEMA_VERSION: i64 = 19;
 
 // Order invariant: busy_timeout must precede any locking statement, and
 // synchronous=NORMAL must be applied BEFORE journal_mode=WAL. Switching a
@@ -63,6 +63,8 @@ CREATE TABLE IF NOT EXISTS todo_events (
 const CREATE_INDEX_MSG: &str =
     "CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, seq)";
 const CREATE_INDEX_IN: &str = "CREATE INDEX IF NOT EXISTS idx_inputs_pending ON session_inputs(session_id, promoted_seq, delivery, admitted_seq)";
+const CREATE_INDEX_IN_ID: &str =
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_inputs_session_id ON session_inputs(session_id, id)";
 const CREATE_INDEX_EV: &str =
     "CREATE INDEX IF NOT EXISTS idx_events_session ON session_events(session_id, seq)";
 const CREATE_INDEX_SA_PARENT: &str =
@@ -424,6 +426,7 @@ async fn bootstrap_tx(conn: &Connection) -> Result<()> {
     // Same post-migrate placement: brain plans physically exist either via
     // the CREATE batch (fresh DBs) or the v18 migration (old DBs).
     conn.execute(CREATE_INDEX_BRAIN_PLANS_DIGEST, ()).await?;
+    conn.execute(CREATE_INDEX_IN_ID, ()).await?;
     Ok(())
 }
 
@@ -445,6 +448,12 @@ async fn bootstrap_tx(conn: &Connection) -> Result<()> {
 /// to say which partial upgrades ran, the full pass from the bottom is the
 /// only correct entry, and it is safe for exactly the reasons above.
 async fn migrate(conn: &Connection, from: i64) -> Result<()> {
+    if from < 19 {
+        // v19: the caller-provided input id is an idempotency key scoped to a
+        // session. This intentionally fails the whole bootstrap transaction
+        // for legacy duplicates, preserving the old rows and schema version.
+        conn.execute(CREATE_INDEX_IN_ID, ()).await?;
+    }
     if from < 18 {
         // v18: brain decision-tree plans. CREATE IF NOT EXISTS keeps this
         // idempotent; the digest index lands in the post-batch.

@@ -127,6 +127,9 @@ pub fn set_agents_dir_override(dir: Option<PathBuf>) {
 /// The agents root: (a) process-global override, (b) `OPENCODER_AGENTS_DIR`
 /// (blank ignored), (c) `<global_opencoder_home()>/agents`. Never created.
 pub fn agents_dir() -> Option<PathBuf> {
+    if let Some(root) = super::scope::current_root() {
+        return Some(root);
+    }
     if let Some(dir) = override_dir() {
         return Some(dir);
     }

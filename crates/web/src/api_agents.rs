@@ -30,8 +30,6 @@ use opencoder_core::agent::{
 /// `ACTIVATE_GATE` in `api_envs`.
 static ACTIVATE_GATE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
-use crate::cmd::DrainCmd;
-use crate::handle::send_cmd;
 use crate::AppState;
 
 fn error_400(msg: String) -> Response {
@@ -85,13 +83,7 @@ fn io_error_response(ctx: &str, e: io::Error) -> Response {
 /// `PATCH /api/config` and `/api/envs`): snapshot ids under the lock, then
 /// send unlocked. Shared with the resource endpoints.
 pub(crate) async fn fan_out_reload(state: &AppState) {
-    let session_ids: Vec<String> = {
-        let map = state.handles.lock().await;
-        map.keys().cloned().collect()
-    };
-    for sid in &session_ids {
-        send_cmd(&state.handles, sid, DrainCmd::ReloadConfig).await;
-    }
+    state.reload_agents().await;
 }
 
 /// Whether the ACTIVE agent's `current` card references the pool resource

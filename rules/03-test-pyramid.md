@@ -38,7 +38,7 @@ mod tests {
 
 ### 第 2 层：集成测试（integration）
 
-- **位置**：`crates/<crate>/tests/*.rs`
+- **位置**：`crates/<crate>/tests/*.rs`（含目录目标 `tests/<dir>/main.rs`）
 - **对象**：跨模块协作、持久化、Mock 驱动的业务流程
 - **要求**：用 `MockChatClient`（非真网络）、`tempdir`（非真文件系统）、`LibsqlStore::open_memory()`（非真数据库文件）
 - **示例**：`steer_followup.rs`、`recovery.rs`、`web_contract.rs`、`store_integration/`
@@ -55,10 +55,11 @@ async fn steer_promotes_at_turn_boundary_and_resets_step() {
 
 ### 第 3 层：端到端测试（e2e）
 
-- **位置**：`scripts/e2e-glm.sh` 或 `tests/e2e/`
+- **判层标准**：是否依赖真外部服务（真 LLM API key、真网络依赖）；**不以路径名判层**——随常规 `cargo test` 运行、由 `MockChatClient` 驱动的 `tests/e2e/` 目录目标属第 2 层
+- **位置**：`scripts/e2e-glm.sh`（典型形态）
 - **对象**：真 LLM、真文件系统、完整用户流程
 - **要求**：需要 API key；标记为手动 / CI 专属；不在常规 `cargo test` 中运行
-- **示例**：glm5.2 写贪吃蛇 / 雷霆战机、resume 跨进程
+- **示例**：glm5.2 写贪吃蛇 / 雷霆战机、resume 跨进程；反例：`crates/control/tests/e2e/`（Mock 驱动、随 `cargo test` 运行 → 判第 2 层）
 
 ## 放置决策树
 
@@ -69,7 +70,7 @@ async fn steer_promotes_at_turn_boundary_and_resets_step() {
     ├── 否 → 第 2 层（tests/ 目录，用 Mock）
     └── 是 → 需要真外部服务吗？
         ├── 否 → 第 2 层（tests/ 目录，用 Mock + tempdir）
-        └── 是 → 第 3 层（scripts/ 或 tests/e2e/）
+        └── 是 → 第 3 层（判层看服务真伪、非路径名；典型如 `scripts/e2e-glm.sh`）
 ```
 
 ## 禁止行为

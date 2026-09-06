@@ -116,12 +116,11 @@ function App() {
   // simply navigates to its home page (nav.js), no extra store field.
   const category = categoryOf(page);
 
-  // Direct nav lands on a fresh view: the topics tab drops the team filter
-  // and any topic-detail params (组队's 查看话题 re-arms the filter via
-  // openTopicsForTeam).
+  // Direct nav lands on a fresh view: the topics tab drops any topic-detail
+  // params so the list opens clean.
   const goPage = (key) => {
     if (key === 'topics') {
-      setState({ page: 'topics', topicsTeamFilter: null, topicDetail: null });
+      setState({ page: 'topics', topicDetail: null });
       return;
     }
     setState({ page: key });

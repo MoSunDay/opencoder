@@ -125,7 +125,7 @@ const installApi = () => {
 beforeEach(() => {
   localStorage.clear();
   clearCredentials();
-  setState({ page: 'nodes', preselectNode: null, nodes: [], conn: 'init', topicsTeamFilter: null, topicDetail: null });
+  setState({ page: 'nodes', preselectNode: null, nodes: [], conn: 'init', topicDetail: null });
   installApi();
 });
 

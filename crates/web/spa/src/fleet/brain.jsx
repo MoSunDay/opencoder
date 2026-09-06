@@ -4,6 +4,7 @@ import { apiGet, apiPost, apiPut } from '../api.js';
 import { BrainPanel } from '../brainPanel.jsx';
 import { ExecutionDetail } from './detail.jsx';
 import { KINDS, newId, nodeOptions } from './model.js';
+import { PageShell } from '../shell/pageShell.jsx';
 
 function Dispatch({ onNotice }) {
   const [capabilities, setCapabilities] = useState([]); const [nodes, setNodes] = useState([]);
@@ -56,5 +57,7 @@ function Dispatch({ onNotice }) {
   </Space>;
 }
 export function FleetBrainPanel({ onNotice }) {
-  return <Tabs items={[{ key: 'dispatch', label: '调度与绑定', children: <Dispatch onNotice={onNotice} /> }, { key: 'library', label: '能力库', children: <BrainPanel /> }]} />;
+  return <PageShell page="brain">
+    <Tabs items={[{ key: 'dispatch', label: '调度与绑定', children: <Dispatch onNotice={onNotice} /> }, { key: 'library', label: '能力库', children: <BrainPanel /> }]} />
+  </PageShell>;
 }

@@ -1,25 +1,21 @@
-// project.jsx — 菜单页「项目」: 项目模块总控。Owns the /api/project/overview
-// state + adaptive polling (3s while any todo is running, else 8s — interval
-// re-arms when the busy flag flips, mirroring nodes.jsx), and renders four
-// tabs: 总览 / 项目目标 / 里程碑 / TODO. `refresh` is a silent reload handed
-// to every tab so writes converge into the single overview snapshot. The
-// TODO drawer (详情/生成Plan 跳转) is owned here and keyed by todoId.
+// project.jsx — 菜单页「项目」: 项目模块总控。The /api/project/overview
+// state + adaptive polling (3s while any todo is running, else 8s) live in
+// the shared useOverview hook (iteration 4) so 进展 / Owner 视角 ride the
+// same snapshot; this panel renders four tabs: 总览 / 项目目标 / 里程碑 /
+// TODO. `refresh` is a silent reload handed to every tab so writes converge
+// into the single overview snapshot. The TODO drawer (详情/生成Plan 跳转) is
+// owned here and keyed by todoId.
 
 import { Card, Col, Row, Spin, Statistic, Tabs, Typography } from 'antd';
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { apiGet } from '../api.js';
+import { useState } from 'react';
+import { PageShell } from '../shell/pageShell.jsx';
 import { GoalsTab } from './goalsTab.jsx';
 import { MilestonesTab } from './milestonesTab.jsx';
 import { TodoDrawer } from './todoDrawer.jsx';
 import { TodosTab, flattenTodos } from './todosTab.jsx';
+import { useOverview } from './useOverview.js';
 
 const { Text, Paragraph } = Typography;
-const POLL_BUSY_MS = 3000;
-const POLL_IDLE_MS = 8000;
-
-function overviewBusy(overview) {
-  return flattenTodos(overview).some((t) => t.status === 'running');
-}
 
 /// 总览 tab: counters + the workflow hint. Pure function of `overview`.
 function OverviewTab({ overview }) {
@@ -62,64 +58,14 @@ function OverviewTab({ overview }) {
 }
 
 export function ProjectPanel({ onNotice }) {
-  const [overview, setOverview] = useState(null);
-  const [loading, setLoading] = useState(false);
+  const { overview, loading, refresh } = useOverview({ onNotice });
   const [todoId, setTodoId] = useState(null); // open TODO drawer
-  const timer = useRef(null);
-  const alive = useRef(true);
-  const busy = overviewBusy(overview);
-
-  // Keep `load` identity STABLE regardless of the onNotice prop identity: a
-  // caller passing a fresh inline arrow (tests, memo boundaries) must not
-  // re-arm the mount effect into a fetch→setState→render loop.
-  const noticeRef = useRef(onNotice);
-  useEffect(() => {
-    noticeRef.current = onNotice;
-  }, [onNotice]);
-
-  const load = useCallback(async (silent) => {
-    if (!silent) {
-      setLoading(true);
-    }
-    try {
-      const j = await apiGet('/api/project/overview');
-      if (alive.current) {
-        setOverview(j || { goals: [], backlog: [] });
-      }
-    } catch (e) {
-      if (!silent && alive.current) {
-        const notify = noticeRef.current;
-        if (notify) {
-          notify('获取项目总览失败: ' + (e && e.message));
-        }
-      }
-    } finally {
-      if (alive.current && !silent) {
-        setLoading(false);
-      }
-    }
-  }, []);
-
-  useEffect(() => {
-    alive.current = true;
-    load(false);
-    return () => {
-      alive.current = false;
-      clearInterval(timer.current);
-    };
-  }, [load]);
-
-  // Adaptive poll: fast while a todo runs, slow otherwise; re-armed on flip.
-  useEffect(() => {
-    timer.current = setInterval(() => load(true), busy ? POLL_BUSY_MS : POLL_IDLE_MS);
-    return () => clearInterval(timer.current);
-  }, [busy, load]);
 
   const tabs = [
     { key: 'overview', label: '总览', children: <OverviewTab overview={overview} /> },
-    { key: 'goals', label: '项目目标', children: <GoalsTab overview={overview} refresh={() => load(true)} onNotice={onNotice} /> },
-    { key: 'milestones', label: '里程碑', children: <MilestonesTab overview={overview} refresh={() => load(true)} onNotice={onNotice} /> },
-    { key: 'todos', label: 'TODO', children: <TodosTab overview={overview} refresh={() => load(true)} openTodo={setTodoId} onNotice={onNotice} /> },
+    { key: 'goals', label: '项目目标', children: <GoalsTab overview={overview} refresh={refresh} onNotice={onNotice} /> },
+    { key: 'milestones', label: '里程碑', children: <MilestonesTab overview={overview} refresh={refresh} onNotice={onNotice} /> },
+    { key: 'todos', label: 'TODO', children: <TodosTab overview={overview} refresh={refresh} openTodo={setTodoId} onNotice={onNotice} /> },
   ];
 
   return (
@@ -130,7 +76,7 @@ export function ProjectPanel({ onNotice }) {
       <TodoDrawer
         todoId={todoId}
         overview={overview}
-        refresh={() => load(true)}
+        refresh={refresh}
         onClose={() => setTodoId(null)}
         onNotice={onNotice}
       />

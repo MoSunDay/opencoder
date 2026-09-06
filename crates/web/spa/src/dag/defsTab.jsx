@@ -7,7 +7,7 @@
 import { Button, message, Modal, Popconfirm, Select, Space, Table, Tag, Tooltip, Typography } from 'antd';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiDel, apiGet, apiPost } from '../api.js';
-import { absTime, relTime } from '../format.js';
+import { TimeText } from '../ui/timeText.jsx';
 import { useStore } from '../store.js';
 import { newId, nodeOptions as buildNodeOptions } from '../fleet/model.js';
 import { DefEditor } from './defEditor.jsx';
@@ -165,11 +165,7 @@ export function DefsTab({ onNotice, onDispatched }) {
       dataIndex: 'updated_at',
       key: 'updated_at',
       width: 130,
-      render: (ts) => (
-        <Tooltip title={absTime(ts)}>
-          <span>{relTime(ts)}</span>
-        </Tooltip>
-      ),
+      render: (ts) => <TimeText ts={ts} />,
     },
     {
       title: '操作',

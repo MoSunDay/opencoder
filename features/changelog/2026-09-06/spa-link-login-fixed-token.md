@@ -66,6 +66,44 @@ category」`（隔离复现确定性失败，对应源文件 22:20–22:28 被�
 改写，归属该流）；`vite build` 输出契约不变（outDir 旁路验证
 static/{app.js,app.css,download-sw.js}）；`cargo test -p opencoder-web` 全 ok。
 
+## 跟进轮 3（P1 四度阻塞——44 分钟连续写入观测 + 本流前置验证全绿）
+
+| 项 | 内容 | 状态 |
+|----|------|------|
+| P1 | **第四次阻塞**：22:36–23:20 全程轮询（60–90s 粒度），三流持续落笔无 15 分钟窗口——rust e2e 流 22:35–23:06（executions_* → agents_* → 22:58 全目录 ~20 文件批量触碰 → todo_*，23:07 写其 changelog `server-e2e-full-coverage.md`）；theme 流 22:40 自行重建 dist + 22:39 写其 changelog，23:19 复燃批量触碰 `agentDetail/topicDetail/project/*Tab/todoDrawer`。两次喘息均 <15min（22:43–22:51、23:07–23:19），后者恰在窗口达成前 2 分钟被打破 | ⛔ 待窗口 |
+| 前置验证 | A 段提交前置「定向套件无交叉污染」**预验证通过**：49/49（api 4/urlCredential 6/download 3/sidebar 5/app.dom 18/chat 13，23:0x 实测）；`app.dom.test.jsx` 全绿含此前红的「scopes the project category」 | ✅ |
+| 观察 | 并发 project/nav 流红已收敛：`ownerView.dom.test` 8/8 + `progressPanel.dom.test` 6/6 隔离全绿（22:2x 曾确定性红） | ✅ 已收敛 |
+| dist | `check-spa-drift.sh` 23:07 实测 **no drift**——theme 流 22:40 的 dist 重建与当前 src 一致，D 段收敛为「verify + 提交」，无需再重建 | ✅ |
+
+TODO 不变：真实停笔窗口（`src/`、`src/project/`、`control/tests/` ≥15min 无写入）→
+`check-spa-drift.sh` 复核 → 全量 vitest（限流生效，残余红应仅剩并发流活跃项）→
+`link_login.js` 7 步（dist 变更后需重编 `target/release/opencoder-server`）→
+四段拆分提交（A: link-login 特性流含 F1/F2/F6/限流；B: nav/theme/迭代3 流含
+`@ant-design/icons` dep 与其 changelog；C: hub/search/worker + control e2e 流含其
+changelog；D: dist 验证后随段提交）。
+
+### 跟进轮 3 更正（23:28 补记——单通道门禁漏检 commit 事件）
+
+上段 TODO 落笔（23:20）即已陈旧：窗口门禁只监听文件 mtime，未轮询 commit 事件，
+23:07–23:19「喘息」内实际已发生两次提交（23:09:21/23:09:30），四段拆分计划被
+外部行动整体作废，无需也不应再按该计划执行。实际落地形态：
+
+- `d4a6633`（23:09:21）= C 段：search 工具 symlink 重入修复 + `control/tests/e2e/`
+  全套（~8.8k 行）+ hub.rs/worker，附其自身 changelog。
+- `4519f75`（23:09:30）= A+B+D 段合并落地：boot/urlCredential/store clearToken/
+  main/`link_login.js`（7 步形态）/`build-spa.sh`/vite maxForks=4 限流/dist 重建 +
+  本 changelog 初版，并裹挟 B 流 changelog（`spa-ia-three-categories-theme.md`）
+  与 rust 流 changelog（`server-e2e-full-coverage.md`）。
+- 其后 `b70be00`（23:26）归 rust e2e 流，与本流无关。
+
+方法论教训（P4 落档）：后续任何停笔窗口门禁须**双通道**——文件 mtime 轮询 +
+`git log --since=<窗口起点>` 提交事件轮询；本轮 23:20 写入的陈旧 TODO 即
+mtime 单通道漏检的直接后果，以本注记更正而非回改原文。
+
+遗留（随本注记即刻执行）：`link_login.js` 7 步从未实跑——`target/release/
+opencoder-server` 二进制（21:41）早于 4519f75 的 dist（23:09），下文「测试覆盖」
+表所记「6/6 PASS」为上一形态（6 步）旧数据，标注**待补跑**，结果以补跑回填为准。
+
 ## Impact Surface
 
 - `crates/web/spa/src/{boot,urlCredential,store,login,main}.jsx?/js`、

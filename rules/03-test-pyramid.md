@@ -6,7 +6,7 @@ Commit: (working-tree, pre-initial-commit)
 
 ```
         /\
-       /e2e\          scripts/e2e-glm.sh
+       /e2e\          scripts/e2e-glm.sh（按真服务判层）
       /------\        真 LLM (glm5.2) 端到端，手动 / CI 触发
      /        \
     /integration\     crates/*/tests/*.rs

@@ -213,6 +213,28 @@ fn default_team_max_sub_turns() -> usize {
     3
 }
 
+/// The persisted team layout uses three-digit turn directories. Both runtime
+/// budgets are counts, so zero is invalid and 999 is the largest value that
+/// can be represented without reaching an illegal directory name.
+pub const TEAM_TURN_BUDGET_MAX: usize = 999;
+
+/// Validate the two team runtime budgets before any team state is created.
+/// Pure so config loading and the runtime boundary share one contract.
+pub fn validate_team_turn_budgets(max_turns: usize, max_sub_turns: usize) -> Result<()> {
+    fn validate(name: &str, value: usize) -> Result<()> {
+        if (1..=TEAM_TURN_BUDGET_MAX).contains(&value) {
+            Ok(())
+        } else {
+            Err(CoreError::Config(format!(
+                "{name} must be between 1 and {TEAM_TURN_BUDGET_MAX}, got {value}"
+            )))
+        }
+    }
+
+    validate("team_max_turns", max_turns)?;
+    validate("team_max_sub_turns", max_sub_turns)
+}
+
 /// Default context window assumed when neither config nor a model registry
 /// supplies one. Large enough that the `context_threshold` is the binding
 /// constraint by default, but lets `reserved` take effect once set.
@@ -369,7 +391,11 @@ impl Config {
             }
         }
         env::apply_env(&mut cfg);
+        validate_team_turn_budgets(cfg.team_max_turns, cfg.team_max_sub_turns)?;
         warn_if_suspicious_model(&cfg.model);
+        if let Some(root) = crate::agent::scope::current_root() {
+            cfg.agent.agents_dir = Some(root);
+        }
         Ok(cfg)
     }
     pub fn model_id(&self) -> &str {

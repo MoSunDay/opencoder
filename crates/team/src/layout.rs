@@ -18,8 +18,8 @@ use anyhow::{anyhow, Result};
 
 /// Turns are 1-based, sub-turns 0-based, both capped at three digits so a
 /// directory listing can never be flooded by runaway counters.
-pub const MAX_TURN: usize = 999;
-pub const MAX_SUB_TURN: usize = 999;
+pub const MAX_TURN: usize = opencoder_core::TEAM_TURN_BUDGET_MAX;
+pub const MAX_SUB_TURN: usize = opencoder_core::TEAM_TURN_BUDGET_MAX;
 
 /// `^[a-z0-9][a-z0-9-]{0,63}$` — team directory name.
 pub fn validate_team_name(name: &str) -> bool {
@@ -38,6 +38,8 @@ pub fn validate_team_name(name: &str) -> bool {
 /// Topic ids are ULIDs (they also key `team_topic_runs` rows).
 pub fn validate_topic_id(id: &str) -> bool {
     ulid::Ulid::from_string(id).is_ok()
+        || ((id.starts_with("team-") || id.starts_with("system-"))
+            && opencoder_core::fleet::valid_id(id))
 }
 
 pub fn validate_turn(turn: usize) -> bool {

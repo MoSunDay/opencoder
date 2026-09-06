@@ -40,6 +40,23 @@ impl Runtime {
         spec: WorkflowSpec,
         workflow_id: String,
     ) -> Result<WorkflowState> {
+        self.run_new_with_id_observed(spec, workflow_id, || async { Ok(()) })
+            .await
+    }
+
+    /// Run a new workflow and invoke `initialized` immediately after its
+    /// workflow row transaction commits. Callers can use this boundary to
+    /// persist ownership metadata without observing a pre-commit success.
+    pub async fn run_new_with_id_observed<F, Fut>(
+        &self,
+        spec: WorkflowSpec,
+        workflow_id: String,
+        initialized: F,
+    ) -> Result<WorkflowState>
+    where
+        F: FnOnce() -> Fut,
+        Fut: std::future::Future<Output = Result<()>>,
+    {
         domain::validate_spec(&spec)?;
         if self.store.get_todo_workflow(&workflow_id).await?.is_some() {
             anyhow::bail!("todo workflow already exists: {workflow_id}");
@@ -48,6 +65,9 @@ impl Runtime {
         let mut state = domain::initial_state(&spec, workflow_id, parent_id);
         parent::create_session(&self.store, &state, &self.config).await?;
         persistence::create(&self.store, &spec, &state).await?;
+        initialized()
+            .await
+            .context("record todo workflow initialization")?;
         self.dump(&spec, &state).await?;
         state.status = WorkflowStatus::Running;
         state.generation += 1;
@@ -356,6 +376,7 @@ impl Runtime {
             client: self.client.clone(),
             config: self.config.clone(),
             workdir: self.workdir.clone(),
+            cancel: self.cancel.clone(),
         }
     }
 }

@@ -224,6 +224,58 @@ fn team_config_file_merge_and_env_overrides() {
 }
 
 #[test]
+fn team_turn_budgets_validate_file_and_environment_boundaries() {
+    let _g = ENV_LOCK.lock().unwrap();
+    let (_home_guard, dir) = isolated_home();
+    std::env::remove_var("OPENCODER_TEAM_MAX_TURNS");
+    std::env::remove_var("OPENCODER_TEAM_MAX_SUB_TURNS");
+
+    for value in [1, 999] {
+        std::env::remove_var("OPENCODER_TEAM_MAX_TURNS");
+        std::env::remove_var("OPENCODER_TEAM_MAX_SUB_TURNS");
+        fs::write(
+            dir.path().join("opencoder.json"),
+            format!(r#"{{"team_max_turns":{value},"team_max_sub_turns":{value}}}"#),
+        )
+        .unwrap();
+        let cfg = Config::load(dir.path()).unwrap();
+        assert_eq!((cfg.team_max_turns, cfg.team_max_sub_turns), (value, value));
+
+        std::env::set_var("OPENCODER_TEAM_MAX_TURNS", value.to_string());
+        std::env::set_var("OPENCODER_TEAM_MAX_SUB_TURNS", value.to_string());
+        let cfg = Config::load(dir.path()).unwrap();
+        assert_eq!((cfg.team_max_turns, cfg.team_max_sub_turns), (value, value));
+    }
+
+    for (field, env_name) in [
+        ("team_max_turns", "OPENCODER_TEAM_MAX_TURNS"),
+        ("team_max_sub_turns", "OPENCODER_TEAM_MAX_SUB_TURNS"),
+    ] {
+        for value in [0, 1000] {
+            std::env::remove_var("OPENCODER_TEAM_MAX_TURNS");
+            std::env::remove_var("OPENCODER_TEAM_MAX_SUB_TURNS");
+            fs::write(
+                dir.path().join("opencoder.json"),
+                format!(r#"{{"{field}":{value}}}"#),
+            )
+            .unwrap();
+            let error = Config::load(dir.path()).unwrap_err().to_string();
+            assert!(error.contains(field), "unexpected file error: {error}");
+            assert!(error.contains(&value.to_string()));
+
+            fs::write(dir.path().join("opencoder.json"), "{}").unwrap();
+            std::env::set_var(env_name, value.to_string());
+            let error = Config::load(dir.path()).unwrap_err().to_string();
+            assert!(error.contains(field), "unexpected env error: {error}");
+            assert!(error.contains(&value.to_string()));
+        }
+    }
+
+    std::env::remove_var("OPENCODER_TEAM_MAX_TURNS");
+    std::env::remove_var("OPENCODER_TEAM_MAX_SUB_TURNS");
+}
+
+#[test]
 fn reserved_saturates_against_context_limit() {
     let _g = ENV_LOCK.lock().unwrap();
     let (_home_guard, dir) = isolated_home();

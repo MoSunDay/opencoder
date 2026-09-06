@@ -38,6 +38,7 @@ pub(crate) fn name_or_resp(root: &std::path::Path, name: &str) -> Result<PathBuf
 }
 
 /// Read the template metadata; `Ok(None)` ⇒ unknown template (404 upstream).
+#[allow(clippy::result_large_err)] // Return the already-built Axum response at this HTTP boundary; boxing adds an allocation per error.
 pub(crate) async fn read_meta(
     root: &std::path::Path,
     name: &str,
@@ -50,6 +51,7 @@ pub(crate) async fn read_meta(
 }
 
 /// Read one version's env binding: `None` when the file is absent (unbound).
+#[allow(clippy::result_large_err)] // Return the already-built Axum response at this HTTP boundary; boxing adds an allocation per error.
 async fn read_binding(
     root: &std::path::Path,
     name: &str,

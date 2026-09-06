@@ -1,10 +1,10 @@
 //! Process-level smoke for the split fleet binaries.
 //!
 //! Boots one real `opencoder-server` (port 0) plus one real `opencoder-agent`
-//! worker against it, then walks the HMAC signature contract over raw TCP:
+//! worker against it, then walks the Bearer-token contract over raw TCP:
 //! the SPA shell and `/api/time` stay unsigned, every other route demands
-//! `x-sig-timestamp` + `x-sig` (401 when missing/stale/tampered, 409 on exact
-//! replay), and a registered node shows up in `GET /api/nodes` with a source
+//! `Authorization: Bearer <token>` (401 when missing/wrong), and a registered
+//! node shows up in `GET /api/nodes` with a source
 //! address and a fresh heartbeat while its process keeps running.
 //!
 //! Deliberately NOT covered: node task dispatch (needs an LLM) and the legacy
@@ -19,8 +19,6 @@ use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-
-use opencoder_core::auth_sig;
 
 const TOKEN: &str = "daemon-smoke-token";
 const NODE_NAME: &str = "smoke-node-1";
@@ -145,29 +143,22 @@ fn tail(path: &std::path::Path, keep: usize) -> String {
 }
 
 /// One raw HTTP exchange over a fresh TCP connection (`connection: close`).
-/// `ts` + `sig` = None sends the request unsigned; both must come together.
+/// `authorization = None` sends the request without credentials.
 fn raw_http(
     base: &str,
     method: &str,
     path: &str,
     body: &str,
-    ts: Option<i64>,
-    sig: Option<&str>,
+    authorization: Option<&str>,
 ) -> (u16, String) {
     let host = base.trim_start_matches("http://");
     let mut stream = TcpStream::connect(host).expect("connect to daemon");
     stream
         .set_read_timeout(Some(Duration::from_secs(10)))
         .unwrap();
-    let auth = match (ts, sig) {
-        (Some(t), Some(s)) => format!(
-            "{ts_header}: {t}\r\n{sig_header}: {s}\r\n",
-            ts_header = auth_sig::TS_HEADER,
-            sig_header = auth_sig::SIG_HEADER,
-        ),
-        (None, None) => String::new(),
-        _ => panic!("ts and sig must be passed together"),
-    };
+    let auth = authorization
+        .map(|value| format!("authorization: {value}\r\n"))
+        .unwrap_or_default();
     let request = format!(
         "{method} {path} HTTP/1.1\r\nhost: {host}\r\n{auth}content-length: {}\r\nconnection: close\r\n\r\n{body}",
         body.len()
@@ -189,15 +180,8 @@ fn raw_http(
     (status, body.to_string())
 }
 
-/// Signed request with a fresh timestamp, so every call carries a brand-new
-/// signature and can never trip the server's replay cache.
-fn signed(base: &str, method: &str, path: &str, body: &str) -> (u16, String) {
-    let ts = now_ms();
-    let sig = auth_sig::sign_hex(
-        TOKEN,
-        &auth_sig::canonical(method, path, ts, body.as_bytes()),
-    );
-    raw_http(base, method, path, body, Some(ts), Some(&sig))
+fn authed(base: &str, method: &str, path: &str, body: &str) -> (u16, String) {
+    raw_http(base, method, path, body, Some(&format!("Bearer {TOKEN}")))
 }
 
 #[test]
@@ -208,68 +192,35 @@ fn daemon_server_and_client_end_to_end() {
 
     let (_server, base) = spawn_server(server_dir.path());
 
-    // Unsigned surfaces: the SPA shell and the clock bootstrap.
-    let (status, html) = raw_http(&base, "GET", "/", "", None, None);
-    assert_eq!(status, 200, "SPA shell must load without a signature");
+    // Unauthenticated surfaces: the SPA shell and compatibility clock.
+    let (status, html) = raw_http(&base, "GET", "/", "", None);
+    assert_eq!(status, 200, "SPA shell must load without credentials");
     assert!(html.contains("<html"), "GET / must return the shell HTML");
-    let (status, time_body) = raw_http(&base, "GET", "/api/time", "", None, None);
-    assert_eq!(status, 200, "/api/time is the unsigned clock bootstrap");
+    let (status, time_body) = raw_http(&base, "GET", "/api/time", "", None);
+    assert_eq!(
+        status, 200,
+        "/api/time remains readable without credentials"
+    );
     assert!(
         time_body.contains("server_time_ms"),
-        "clock bootstrap must expose a millisecond field: {time_body}"
+        "time endpoint must expose a millisecond field: {time_body}"
     );
 
-    // Signed /api/health against the failure modes.
-    let (status, why) = raw_http(&base, "GET", "/api/health", "", None, None);
-    assert_eq!(status, 401, "missing signature must be refused: {why}");
-
-    let ts_ok = now_ms();
-    let sig_ok = auth_sig::sign_hex(
-        TOKEN,
-        &auth_sig::canonical("GET", "/api/health", ts_ok, b""),
-    );
-    let (status, why) = raw_http(&base, "GET", "/api/health", "", Some(ts_ok), Some(&sig_ok));
-    assert_eq!(status, 200, "valid signature must pass: {why}");
-
-    let stale = now_ms() - auth_sig::REPLAY_WINDOW_MS - 60_000;
-    let stale_sig = auth_sig::sign_hex(
-        TOKEN,
-        &auth_sig::canonical("GET", "/api/health", stale, b""),
-    );
+    // Protected /api/health accepts only the configured Bearer token.
+    let (status, why) = raw_http(&base, "GET", "/api/health", "", None);
+    assert_eq!(status, 401, "missing token must be refused: {why}");
+    let (status, why) = authed(&base, "GET", "/api/health", "");
+    assert_eq!(status, 200, "valid Bearer token must pass: {why}");
+    let (status, why) = raw_http(&base, "GET", "/api/health", "", Some("Bearer wrong-token"));
+    assert_eq!(status, 401, "wrong Bearer token must be refused: {why}");
     let (status, why) = raw_http(
         &base,
         "GET",
         "/api/health",
         "",
-        Some(stale),
-        Some(&stale_sig),
+        Some(&format!("Basic {TOKEN}")),
     );
-    assert_eq!(
-        status, 401,
-        "out-of-window timestamp must be refused: {why}"
-    );
-
-    // Sign the empty body but ship a non-empty one: the body hash is part of
-    // the canonical string, so the middleware must see a mismatch.
-    let ts_now = now_ms();
-    let empty_sig = auth_sig::sign_hex(
-        TOKEN,
-        &auth_sig::canonical("GET", "/api/health", ts_now, b""),
-    );
-    let (status, why) = raw_http(
-        &base,
-        "GET",
-        "/api/health",
-        "{}",
-        Some(ts_now),
-        Some(&empty_sig),
-    );
-    assert_eq!(status, 401, "tampered body must be refused: {why}");
-
-    // Exact duplicate of the accepted request above (same ts + sig bytes) is
-    // a replay, not a fresh acceptance.
-    let (status, why) = raw_http(&base, "GET", "/api/health", "", Some(ts_ok), Some(&sig_ok));
-    assert_eq!(status, 409, "exact signature replay must be 409: {why}");
+    assert_eq!(status, 401, "non-Bearer auth must be refused: {why}");
 
     // Fleet: the worker registers and heartbeats.
     let node_log = node_dir.path().join("node.stderr.log");
@@ -277,8 +228,8 @@ fn daemon_server_and_client_end_to_end() {
 
     let deadline = Instant::now() + Duration::from_secs(20);
     let record = loop {
-        let (status, body) = signed(&base, "GET", "/api/nodes", "");
-        assert_eq!(status, 200, "signed /api/nodes must answer: {body}");
+        let (status, body) = authed(&base, "GET", "/api/nodes", "");
+        assert_eq!(status, 200, "authenticated /api/nodes must answer: {body}");
         let json: serde_json::Value =
             serde_json::from_str(&body).unwrap_or(serde_json::Value::Null);
         if let Some(n) = json["nodes"]
@@ -297,8 +248,13 @@ fn daemon_server_and_client_end_to_end() {
     };
 
     assert!(
-        record["addr"].as_str().is_some_and(|a| !a.is_empty()),
-        "node record must carry a non-empty source address: {record}"
+        record["maintenance_agent_id"]
+            .as_str()
+            .is_some_and(|a| !a.is_empty())
+            && record["snapshot"]["cpu_capacity"]
+                .as_f64()
+                .is_some_and(|cpu| cpu > 0.0),
+        "node registration must expose a maintainer and CPU capacity: {record}"
     );
     let seen = record["last_seen_at"].as_i64().unwrap_or_default();
     assert!(

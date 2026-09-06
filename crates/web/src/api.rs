@@ -174,6 +174,9 @@ async fn messages_response(state: &AppState, id: &str) -> Response {
 #[derive(Deserialize)]
 pub struct PromptBody {
     pub prompt: String,
+    /// Optional idempotency key scoped to this session. An identical retry
+    /// returns the first admitted row; reusing it for another prompt is 409.
+    pub input_id: Option<String>,
     /// Optional image attachments as data URIs (`data:image/<fmt>;base64,...`)
     /// or `http(s)://` URLs. Forwarded to `SessionInput.images` so vision
     /// models receive them. Empty/absent for plain-text prompts.
@@ -285,13 +288,20 @@ pub async fn post_prompt(
         client,
         state.workdir.clone(),
         config,
+        body.input_id,
         body.skill,
         agent_override,
     )
     .await
     {
-        Ok(seq) => Json(json!({ "admitted_seq": seq, "ok": true })).into_response(),
+        Ok(admission) => Json(json!({
+            "admitted_seq": admission.seq,
+            "driver_ensured": admission.driver_ensured,
+            "ok": true
+        }))
+        .into_response(),
         Err(AdmissionError::BusyModeSwitch) => error_409("mode switch refused while drain running"),
+        Err(AdmissionError::InputConflict(e)) => error_409(&e.to_string()),
         Err(AdmissionError::Other(e)) => error_500(format!("admit: {e:#}")),
     }
 }

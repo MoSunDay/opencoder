@@ -83,7 +83,7 @@ describe('resolvedNames', () => {
 describe('mountHint', () => {
   it('fills host/port into the mount(8) line', () => {
     expect(mountHint({ host: '127.0.0.1', port: 2049 }))
-      .toBe('mount -t nfs -o vers=3,tcp,port=2049,mountport=2049,nolock 127.0.0.1:/ <dir>');
+      .toBe('mount -t nfs -o ro,vers=3,tcp,port=2049,mountport=2049,nolock 127.0.0.1:/ <dir>');
   });
 
   it('keeps placeholders for a missing snapshot', () => {

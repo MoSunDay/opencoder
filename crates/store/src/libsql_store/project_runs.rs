@@ -139,6 +139,40 @@ pub async fn get_todo(conn: &Connection, id: &str) -> Result<Option<ProjectTodoR
     }
 }
 
+pub async fn get_todo_summary(
+    conn: &Connection,
+    id: &str,
+) -> Result<Option<crate::ProjectTodoSummary>> {
+    let mut rows = conn
+        .query(
+            "SELECT id,milestone_id,title, \
+             CASE WHEN length(CAST(draft AS BLOB))<=65536 THEN draft END, \
+             length(CAST(draft AS BLOB)), \
+             CASE WHEN length(CAST(plan_md AS BLOB))<=65536 THEN plan_md END, \
+             length(CAST(plan_md AS BLOB)),status,agent,active_session_id,created_at,updated_at \
+             FROM project_todos WHERE id=?1 LIMIT 1",
+            params![id],
+        )
+        .await?;
+    let Some(row) = rows.next().await? else {
+        return Ok(None);
+    };
+    let todo_id: String = row.get(0)?;
+    Ok(Some(crate::ProjectTodoSummary {
+        id: todo_id.clone(),
+        milestone_id: row.get(1)?,
+        title: row.get(2)?,
+        draft: todo_text(row.get(3)?, row.get(4)?, &todo_id, "draft")
+            .context("project todo draft is null")?,
+        plan_md: todo_text(row.get(5)?, row.get(6)?, &todo_id, "plan_md"),
+        status: ProjectTodoStatus::parse(&row.get::<String>(7)?).context("project_todos.status")?,
+        agent: row.get(8)?,
+        active_session_id: row.get(9)?,
+        created_at: row.get(10)?,
+        updated_at: row.get(11)?,
+    }))
+}
+
 /// Expected-status CAS (`SET status = 'running' WHERE id = ? AND status <>
 /// 'running'`): exactly one concurrent caller can flip a todo into running.
 /// `false` = not found or already running; both mean "no claim".
@@ -152,6 +186,45 @@ pub async fn claim_todo_running(conn: &Connection, id: &str, now_ms: i64) -> Res
         .await
         .context("claim project todo running")?;
     Ok(n > 0)
+}
+
+fn validate_claim_run(rec: &ProjectTodoRunRecord) -> Result<()> {
+    anyhow::ensure!(
+        rec.kind == ProjectTodoRunKind::Execute,
+        "atomic todo claim requires an execute run"
+    );
+    anyhow::ensure!(
+        rec.status == ProjectTodoRunStatus::Running,
+        "atomic todo claim requires a running run"
+    );
+    Ok(())
+}
+
+/// One SQLite write transaction owns both the conditional claim and run
+/// insert. `BEGIN IMMEDIATE` also serializes separate store connections, so a
+/// concurrent caller cannot observe a claimed todo before its run exists.
+pub async fn claim_todo_running_with_run(
+    conn: &Connection,
+    rec: &ProjectTodoRunRecord,
+    now_ms: i64,
+) -> Result<bool> {
+    validate_claim_run(rec)?;
+    super::tx::run_tx(conn, "BEGIN IMMEDIATE", || async move {
+        let running = ProjectTodoStatus::Running.as_str();
+        let claimed = conn
+            .execute(
+                "UPDATE project_todos SET status = ?1, updated_at = ?2 WHERE id = ?3 AND status <> ?1",
+                params![running, now_ms, rec.todo_id.as_str()],
+            )
+            .await
+            .context("claim project todo running")?;
+        if claimed == 0 {
+            return Ok(false);
+        }
+        create_todo_run(conn, rec).await?;
+        Ok(true)
+    })
+    .await
 }
 
 /// Expected-status CAS variant of `patch_todo`: `WHERE id = ? AND status = ?`.
@@ -334,6 +407,27 @@ pub async fn get_todo_run(conn: &Connection, id: &str) -> Result<Option<ProjectT
     }
 }
 
+pub async fn get_todo_run_summary(
+    conn: &Connection,
+    id: &str,
+) -> Result<Option<crate::ProjectTodoRunSummary>> {
+    let mut rows = conn
+        .query(
+            "SELECT id,todo_id,kind,version, \
+             CASE WHEN length(CAST(plan_md AS BLOB))<=65536 THEN plan_md END, \
+             length(CAST(plan_md AS BLOB)), \
+             CASE WHEN length(CAST(output_md AS BLOB))<=65536 THEN output_md END, \
+             length(CAST(output_md AS BLOB)),agent,session_id,status,started_at,finished_at,created_at \
+             FROM project_todo_runs WHERE id=?1 LIMIT 1",
+            params![id],
+        )
+        .await?;
+    rows.next()
+        .await?
+        .map(|row| row_to_run_summary(&row))
+        .transpose()
+}
+
 /// Newest version first.
 pub async fn list_todo_runs(conn: &Connection, todo_id: &str) -> Result<Vec<ProjectTodoRunRecord>> {
     let stmt = conn
@@ -347,6 +441,86 @@ pub async fn list_todo_runs(conn: &Connection, todo_id: &str) -> Result<Vec<Proj
         out.push(row_to_run(&r)?);
     }
     Ok(out)
+}
+
+pub async fn list_todo_runs_page(
+    conn: &Connection,
+    todo_id: &str,
+    before_version: Option<i64>,
+    limit: u32,
+) -> Result<crate::ProjectTodoRunPage> {
+    let limit = limit.clamp(1, 100) as usize;
+    let mut rows = conn
+        .query(
+            "SELECT id,todo_id,kind,version, \
+             CASE WHEN length(CAST(plan_md AS BLOB))<=65536 THEN plan_md END, \
+             length(CAST(plan_md AS BLOB)), \
+             CASE WHEN length(CAST(output_md AS BLOB))<=65536 THEN output_md END, \
+             length(CAST(output_md AS BLOB)),agent,session_id,status,started_at,finished_at,created_at \
+             FROM project_todo_runs WHERE todo_id=?1 AND (?2 IS NULL OR version<?2) \
+             ORDER BY version DESC LIMIT ?3",
+            params![todo_id, before_version, limit as i64 + 1],
+        )
+        .await?;
+    let mut out = Vec::with_capacity(limit + 1);
+    while let Some(row) = rows.next().await? {
+        out.push(row_to_run_summary(&row)?);
+    }
+    let more = out.len() > limit;
+    out.truncate(limit);
+    Ok(crate::ProjectTodoRunPage {
+        next_version: more.then(|| out.last().unwrap().version),
+        runs: out,
+    })
+}
+
+pub async fn project_text_chunk(
+    conn: &Connection,
+    record_kind: &str,
+    owner_id: &str,
+    id: &str,
+    field: &str,
+    offset: u64,
+    max_bytes: usize,
+) -> Result<Option<crate::PayloadChunkRecord>> {
+    let (table, column) = match (record_kind, field) {
+        ("todo", "draft") => ("project_todos", "draft"),
+        ("todo", "plan_md") => ("project_todos", "plan_md"),
+        ("run", "plan_md") => ("project_todo_runs", "plan_md"),
+        ("run", "output_md") => ("project_todo_runs", "output_md"),
+        _ => anyhow::bail!("unsupported project text field"),
+    };
+    let start = i64::try_from(offset)?.saturating_add(1);
+    let take = max_bytes.clamp(1, 64 * 1024) as i64;
+    let owner_clause = if record_kind == "run" {
+        " AND todo_id=?4"
+    } else {
+        " AND id=?4"
+    };
+    let mut rows = conn
+        .query(
+            &format!(
+                "SELECT length(CAST({column} AS BLOB)), \
+                 CAST(substr(CAST({column} AS BLOB),?2,?3) AS BLOB) FROM {table} \
+                 WHERE id=?1{owner_clause}"
+            ),
+            params![id, start, take, owner_id],
+        )
+        .await?;
+    let Some(row) = rows.next().await? else {
+        return Ok(None);
+    };
+    let Some(total) = row.get::<Option<i64>>(0)? else {
+        return Ok(None);
+    };
+    let total = total.max(0) as u64;
+    if offset > total {
+        anyhow::bail!("project text offset exceeds total bytes");
+    }
+    Ok(Some(crate::PayloadChunkRecord {
+        total_bytes: total,
+        bytes: row.get::<Option<Vec<u8>>>(1)?.unwrap_or_default(),
+    }))
 }
 
 /// Every run row currently in the `running` state (any todo, any kind) —
@@ -398,5 +572,64 @@ fn row_to_run(r: &libsql::Row) -> Result<ProjectTodoRunRecord> {
         started_at: r.get(9)?,
         finished_at: r.get(10)?,
         created_at: r.get(11)?,
+    })
+}
+
+fn row_to_run_summary(r: &libsql::Row) -> Result<crate::ProjectTodoRunSummary> {
+    let id: String = r.get(0)?;
+    Ok(crate::ProjectTodoRunSummary {
+        id: id.clone(),
+        todo_id: r.get(1)?,
+        kind: ProjectTodoRunKind::parse(&r.get::<String>(2)?).context("project_todo_runs.kind")?,
+        version: r.get(3)?,
+        plan_md: summary_text(r.get(4)?, r.get(5)?, &id, "plan_md"),
+        output_md: summary_text(r.get(6)?, r.get(7)?, &id, "output_md"),
+        agent: r.get(8)?,
+        session_id: r.get(9)?,
+        status: ProjectTodoRunStatus::parse(&r.get::<String>(10)?)
+            .context("project_todo_runs.status")?,
+        started_at: r.get(11)?,
+        finished_at: r.get(12)?,
+        created_at: r.get(13)?,
+    })
+}
+
+fn summary_text(
+    value: Option<String>,
+    bytes: Option<i64>,
+    run_id: &str,
+    field: &str,
+) -> Option<crate::ProjectRunText> {
+    bytes.map(|bytes| {
+        if bytes > 64 * 1024 {
+            crate::ProjectRunText::Omitted {
+                omitted: true,
+                total_bytes: bytes.max(0) as u64,
+                read_via: "detail_field",
+                field: format!("project.run.{run_id}.{field}"),
+            }
+        } else {
+            crate::ProjectRunText::Text(value.unwrap_or_default())
+        }
+    })
+}
+
+fn todo_text(
+    value: Option<String>,
+    bytes: Option<i64>,
+    todo_id: &str,
+    field: &str,
+) -> Option<crate::ProjectRunText> {
+    bytes.map(|bytes| {
+        if bytes > 64 * 1024 {
+            crate::ProjectRunText::Omitted {
+                omitted: true,
+                total_bytes: bytes.max(0) as u64,
+                read_via: "detail_field",
+                field: format!("project.todo.{todo_id}.{field}"),
+            }
+        } else {
+            crate::ProjectRunText::Text(value.unwrap_or_default())
+        }
     })
 }

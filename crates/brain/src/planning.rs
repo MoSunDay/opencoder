@@ -96,11 +96,15 @@ impl Runtime {
         validate(&tree, &ids).map_err(|e| gen_failed(format!("planner tree rejected: {e}")))?;
         let mut topics = Vec::new();
         collect_topics(&tree.root, &mut topics);
-        let vecs = self.embed_many(&topics).map_err(|e| {
-            anyhow::Error::new(crate::error::EmbeddingFailed {
-                detail: format!("{e:#}"),
-            })
-        })?;
+        let vecs = if topics.is_empty() {
+            Vec::new()
+        } else {
+            self.embed_many(&topics).map_err(|e| {
+                anyhow::Error::new(crate::error::EmbeddingFailed {
+                    detail: format!("{e:#}"),
+                })
+            })?
+        };
         attach_topic_vectors(&mut tree.root, &vecs)
             .map_err(|e| gen_failed(format!("topic vector attach failed: {e}")))?;
         let record = BrainPlanRecord {

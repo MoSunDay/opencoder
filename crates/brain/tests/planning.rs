@@ -4,7 +4,10 @@
 //! fully deterministic: the situation text EQUALS a branch topic to take the
 //! yes edge, anything else takes no.
 
-use std::sync::Arc;
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Arc,
+};
 
 use opencoder_brain::plan::{self, PlanNode};
 use opencoder_brain::{
@@ -67,6 +70,32 @@ fn queue_tree(mock: &MockChatClient, reply: String) {
     ]);
 }
 
+struct EmptyRejectingClient {
+    inner: MockChatClient,
+    empty_calls: AtomicUsize,
+}
+
+impl ChatStream for EmptyRejectingClient {
+    fn chat_stream(
+        &self,
+        request: opencoder_llm::ChatRequest,
+    ) -> anyhow::Result<tokio::sync::mpsc::Receiver<LlmEvent>> {
+        self.inner.chat_stream(request)
+    }
+
+    fn backend(&self) -> &'static str {
+        "empty-rejecting"
+    }
+
+    fn embed(&self, texts: &[String], model: &str) -> anyhow::Result<Vec<Vec<f32>>> {
+        if texts.is_empty() {
+            self.empty_calls.fetch_add(1, Ordering::SeqCst);
+            anyhow::bail!("embedding API rejects empty input")
+        }
+        self.inner.embed(texts, model)
+    }
+}
+
 #[tokio::test]
 async fn plan_persists_tree_and_dispatch_routes_by_topic() {
     let (rt, mock, store, caps) = seeded().await;
@@ -116,6 +145,32 @@ async fn plan_persists_tree_and_dispatch_routes_by_topic() {
         .unwrap();
     assert_eq!(miss.capability_id, caps[1]);
     assert_eq!(miss.path[0].taken, Some(false));
+}
+
+#[tokio::test]
+async fn leaf_only_plan_never_calls_embedding_with_an_empty_batch() {
+    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let client = Arc::new(EmptyRejectingClient {
+        inner: MockChatClient::new(),
+        empty_calls: AtomicUsize::new(0),
+    });
+    let runtime = Runtime::new(store, client.clone(), MODEL);
+    let capability = runtime
+        .upsert_capability(&capability("single capability"), 1_000)
+        .await
+        .unwrap();
+    let reply = format!(
+        "{{\"threshold\":0.35,\"root\":{{\"id\":\"l1\",\"kind\":\"leaf\",\"capability_id\":\"{}\",\"reason\":\"only candidate\"}}}}",
+        capability.capability.id
+    );
+    queue_tree(&client.inner, reply);
+
+    let (_, tree) = runtime
+        .plan_decision_tree("planner-chat", "single capability", 5, 2_000)
+        .await
+        .unwrap();
+    assert!(matches!(tree.root, PlanNode::Leaf { .. }));
+    assert_eq!(client.empty_calls.load(Ordering::SeqCst), 0);
 }
 
 #[tokio::test]

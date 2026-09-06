@@ -66,9 +66,6 @@ const installRouter = () => {
     const url = typeof input === 'string' ? input : String((input && input.url) || '');
     const method = String(opts.method || 'GET').toUpperCase();
     hits.push({ method, url, body: opts.body || '' });
-    if (url.includes('/api/time')) {
-      return jsonResponse({ server_time_ms: Date.now() });
-    }
     // Live-stream and dispatch routes first: the broad /api/nodes catch-all
     // below used to shadow them, so node-task streams
     // (/api/nodes/tasks/:id/events) and node dispatch POSTs

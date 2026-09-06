@@ -322,7 +322,7 @@ async fn degraded_client_maps_embed_failure_to_502() {
     assert_eq!(st, StatusCode::OK, "{body}");
 }
 
-/// Brain routes live under `/api`, so they inherit the HMAC signature gate.
+/// Brain routes live under `/api`, so they inherit the Bearer-token gate.
 #[tokio::test]
 async fn unsigned_brain_request_is_401() {
     let app = app(state().await, Some(TOKEN.to_string()));

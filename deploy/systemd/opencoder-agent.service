@@ -1,0 +1,31 @@
+[Unit]
+Description=Opencoder fleet execution node
+After=network-online.target remote-fs.target
+Wants=network-online.target
+ConditionPathIsDirectory=/data00
+
+[Service]
+Type=simple
+# Root is intentional in this runc-capable example. A node that disables runc
+# may use a dedicated account after its local filesystem permissions are set.
+User=root
+Group=root
+WorkingDirectory=/etc/opencoder/agent
+ConfigurationDirectory=opencoder/agent
+ExecStartPre=/usr/bin/test -w /data00
+ExecStartPre=/usr/bin/test -r /etc/opencoder/agent.token
+ExecStart=/usr/local/bin/opencoder-agent --remote https://opencoder.internal.example --name %H --workdir /etc/opencoder/agent --data-dir /data00 --token-file /etc/opencoder/agent.token
+Restart=on-failure
+RestartSec=5s
+# Agent drain waits up to 10 minutes, then interrupts remaining work and gives
+# owned supervisors another 30 seconds to exit. Keep systemd outside that path.
+TimeoutStopSec=11min
+KillSignal=SIGTERM
+# TERM reaches only the Agent first; owned supervisors keep running during the
+# natural drain. systemd uses the cgroup only for the final timeout kill.
+KillMode=mixed
+Delegate=yes
+LimitNOFILE=1048576
+
+[Install]
+WantedBy=multi-user.target

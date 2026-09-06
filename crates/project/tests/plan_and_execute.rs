@@ -406,9 +406,8 @@ async fn execute_proceeds_after_stale_plan_run_is_converged() {
     assert_eq!(todo.status, ProjectTodoStatus::Done);
 }
 
-/// 故障注入包装：全部转发内层 store，唯独 `create_todo_run` 一律失败——
-/// 验证 claim 补偿回滚（create 失败时 todo 不得滞留 Running、不留悬空
-/// run 行）。镜像 web 测试的 FailingStore 委托模式。
+/// 故障注入包装：原子 claim + run 入口在任何写入前失败。Store 层另有
+/// 真实唯一键冲突用例验证事务内 INSERT 失败会回滚已经执行的 claim。
 struct CreateRunFailingStore {
     inner: Arc<LibsqlStore>,
 }
@@ -469,6 +468,13 @@ impl ProjectStore for CreateRunFailingStore {
     async fn claim_todo_running(&self, id: &str, now_ms: i64) -> anyhow::Result<bool> {
         self.inner.claim_todo_running(id, now_ms).await
     }
+    async fn claim_todo_running_with_run(
+        &self,
+        _rec: &ProjectTodoRunRecord,
+        _now_ms: i64,
+    ) -> anyhow::Result<bool> {
+        Err(anyhow::anyhow!("injected atomic claim failure"))
+    }
     async fn patch_todo_when(
         &self,
         id: &str,
@@ -527,7 +533,7 @@ impl ProjectStore for CreateRunFailingStore {
 }
 
 #[tokio::test]
-async fn create_run_failure_rolls_back_claim() {
+async fn atomic_claim_failure_leaves_todo_and_runs_untouched() {
     let store = Arc::new(LibsqlStore::open_memory().await.unwrap());
     let dir = tempfile::tempdir().unwrap();
     let service = ProjectService::new();
@@ -558,12 +564,12 @@ async fn create_run_failure_rolls_back_claim() {
 
     let err = service.start_execute(&todo_id).await.unwrap_err();
     assert!(
-        err.to_string().contains("create execute run"),
+        err.to_string()
+            .contains("claim todo and create execute run"),
         "got: {err:#}"
     );
 
-    // claim 已被条件回滚：todo 回到 Planned（而非滞留 Running），且没有
-    // execute run 行残留。
+    // 原子入口失败：todo 保持 Planned，且没有 execute run 行残留。
     let todo = store.get_todo(&todo_id).await.unwrap().unwrap();
     assert_eq!(todo.status, ProjectTodoStatus::Planned);
     let runs = store.list_todo_runs(&todo_id).await.unwrap();

@@ -60,29 +60,41 @@ beforeEach(() => {
   apiPostMock.mockReset().mockResolvedValue({ run_id: 'run-new12345678' });
   apiDelMock.mockReset().mockResolvedValue({ ok: true });
   openStreamMock.mockReset();
-  setNodes([{ id: 'node-1', name: 'worker-a', addr: 'http://x', status: 'idle' }]);
+  setNodes([{
+    id: 'node-1', name: 'worker-a', online: true, kinds: ['dag'],
+    snapshot: { ready: true, active_agent_loops: 0, cpu_capacity: 4 },
+  }]);
 });
 
 describe('DefsTab', () => {
   it('renders the defs table and dispatches to any node by default', async () => {
     const onDispatched = vi.fn();
-    render(<DefsTab onNotice={vi.fn()} onDispatched={onDispatched} />);
+    const onNotice = vi.fn();
+    apiPostMock.mockRejectedValueOnce(new Error('connection lost')).mockResolvedValueOnce({ run_id: 'run-new12345678' });
+    render(<DefsTab onNotice={onNotice} onDispatched={onDispatched} />);
     expect(await screen.findByText('etl')).toBeTruthy();
     expect(await screen.findByText('nightly')).toBeTruthy();
     // step count column
     expect(screen.getByText('2')).toBeTruthy();
 
     fireEvent.click(screen.getAllByText('派发')[0]); // row action opens the modal
-    expect(await screen.findByText(/选择执行节点/)).toBeTruthy();
+    expect(await screen.findByText(/整个工作流会在同一个节点完成/)).toBeTruthy();
     fireEvent.click(await screen.findByText('确认派发'));
-    await waitFor(() => expect(apiPostMock).toHaveBeenCalledWith('/api/dag/defs/dag-etl/dispatch', {}));
+    await waitFor(() => expect(apiPostMock).toHaveBeenCalledTimes(1));
+    expect(onNotice).toHaveBeenLastCalledWith(expect.stringContaining('connection lost'));
+    await waitFor(() => expect(screen.getByText('确认派发').closest('button').disabled).toBe(false));
+    fireEvent.click(screen.getByText('确认派发'));
+    await waitFor(() => expect(apiPostMock).toHaveBeenCalledTimes(2));
+    expect(apiPostMock.mock.calls[0][1].id).toBe(apiPostMock.mock.calls[1][1].id);
+    expect(apiPostMock).toHaveBeenLastCalledWith('/api/dag/defs/dag-etl/dispatch', { id: expect.stringMatching(/^dag-/) });
+    expect(onNotice).toHaveBeenLastCalledWith('');
     expect(onDispatched).toHaveBeenCalledWith('run-new12345678');
   });
 
   it('dispatch pins a node picked from the fleet snapshot', async () => {
     render(<DefsTab onNotice={vi.fn()} onDispatched={vi.fn()} />);
     fireEvent.click((await screen.findAllByText('派发'))[0]);
-    expect(await screen.findByText(/选择执行节点/)).toBeTruthy();
+    expect(await screen.findByText(/整个工作流会在同一个节点完成/)).toBeTruthy();
     // open the antd Select and pick the node option
     const selector = await waitFor(() => {
       const el = screen.getByRole('combobox');
@@ -94,7 +106,7 @@ describe('DefsTab', () => {
     fireEvent.click(opt);
     fireEvent.click(await screen.findByText('确认派发'));
     await waitFor(() =>
-      expect(apiPostMock).toHaveBeenCalledWith('/api/dag/defs/dag-etl/dispatch', { node_id: 'node-1' }),
+      expect(apiPostMock).toHaveBeenCalledWith('/api/dag/defs/dag-etl/dispatch', { id: expect.stringMatching(/^dag-/), node_id: 'node-1' }),
     );
   });
 

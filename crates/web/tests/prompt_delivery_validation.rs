@@ -51,6 +51,7 @@ async fn post(
         axum::extract::State(state.clone()),
         axum::extract::Path(sid.to_string()),
         axum::Json(opencoder_web::api::PromptBody {
+            input_id: None,
             prompt: "hi".into(),
             images: Vec::new(),
             delivery: delivery.map(String::from),
@@ -157,6 +158,7 @@ async fn post_model(
         axum::extract::State(state.clone()),
         axum::extract::Path(sid.to_string()),
         axum::Json(opencoder_web::api::PromptBody {
+            input_id: None,
             prompt: "hi".into(),
             images: Vec::new(),
             delivery: None,

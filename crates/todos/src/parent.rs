@@ -4,6 +4,7 @@ use anyhow::{Context, Result};
 use opencoder_core::{message::now_ms, resolve_agent, Config, Role};
 use opencoder_llm::ChatStream;
 use opencoder_store::{SessionMeta, Store, TASK_TYPE_TODO_WORKFLOW};
+use tokio_util::sync::CancellationToken;
 
 use crate::{domain, types::*};
 
@@ -12,6 +13,7 @@ pub struct DecisionRuntime {
     pub client: Arc<dyn ChatStream>,
     pub config: Config,
     pub workdir: PathBuf,
+    pub cancel: CancellationToken,
 }
 
 pub async fn create_session(
@@ -132,6 +134,7 @@ async fn decide<T: serde::de::DeserializeOwned>(
     )
     .await?;
     session.agent = resolve_agent("workflow").context("workflow agent not registered")?;
+    session.cancel = Some(runtime.cancel.clone());
     // Bug #16b: one unparseable reply must not suspend the whole workflow.
     // Re-ask in the same session with a correction prompt, bounded retries.
     // Only assistant messages produced by each ask count as its answer — the

@@ -27,6 +27,8 @@ pub use dag_events::{
     MAX_EVENTS as DAG_EVENT_BATCH_MAX, WINDOW as DAG_EVENT_BATCH_WINDOW,
 };
 pub use exec::{execute_agent_step, execute_python_step, ExecDeps, StepCtx, StepResult};
-pub use runtime::{execute_run, RunDeps, MAX_CONCURRENT_STEPS};
+pub use runtime::{execute_run, resume_run, RunDeps, MAX_CONCURRENT_STEPS};
 
 pub const RUNTIME_NAME: &str = "opencoder-dag-runtime";
+
+mod checkpoint;

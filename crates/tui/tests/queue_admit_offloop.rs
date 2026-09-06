@@ -146,7 +146,7 @@ impl Store for DelayStore {
 fn q_input(session_id: &str, prompt: &str) -> SessionInput {
     SessionInput {
         seq: None,
-        id: "x".into(),
+        id: format!("input-{prompt}"),
         session_id: session_id.into(),
         delivery: Delivery::Queue,
         prompt: prompt.into(),

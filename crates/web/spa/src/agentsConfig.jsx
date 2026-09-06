@@ -8,11 +8,13 @@
 import {
   Badge, Button, Card, Col, Form, Input, Modal, Popconfirm, Row, Select, Space, Table, Tag, Typography, message,
 } from 'antd';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiDel, apiGet, apiPatch, apiPost } from './api.js';
 import { REF_FIELDS, refCells, resourceOptions } from './agentsItems.js';
 import { AgentDetail } from './agentDetail.jsx';
 import { AgentNfsCard } from './agentNfsCard.jsx';
+import { ExecutionDetail } from './fleet/detail.jsx';
+import { newId, nodeOptions } from './fleet/model.js';
 
 const { Text } = Typography;
 
@@ -71,19 +73,27 @@ export function AgentsPanel({ onNotice }) {
   const [loading, setLoading] = useState(false);
   const [creating, setCreating] = useState(false);
   const [detail, setDetail] = useState(''); // 打开详情的 agent 名；'' = 列表视图
+  const [nodes, setNodes] = useState([]);
+  const [launch, setLaunch] = useState(null);
+  const [execution, setExecution] = useState(null);
+  const [launching, setLaunching] = useState(false);
+  const [launchForm] = Form.useForm();
+  const launchAttempt = useRef(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [j, prompts, skills, tools, memory] = await Promise.all([
+      const [j, prompts, skills, tools, memory, fleet] = await Promise.all([
         apiGet('/api/agents'),
         apiGet('/api/agents/resources/prompts'),
         apiGet('/api/agents/resources/skills'),
         apiGet('/api/agents/resources/tools'),
         apiGet('/api/agents/resources/memory'),
+        apiGet('/api/nodes'),
       ]);
       setAgents((j && j.agents) || []);
       setActive((j && j.active) || null);
+      setNodes((fleet && fleet.nodes) || []);
       setResources({
         prompts: (prompts && prompts.resources) || [],
         skills: (skills && skills.resources) || [],
@@ -121,6 +131,19 @@ export function AgentsPanel({ onNotice }) {
     } catch (e) {
       onNotice('删除 agent 失败: ' + (e && e.message));
     }
+  };
+
+  const run = async (values) => {
+    const request = { kind: 'agent', target: launch.name, node_id: values.node || null, input: { prompt: values.prompt } };
+    const signature = JSON.stringify(request);
+    if (launchAttempt.current?.signature !== signature) launchAttempt.current = { signature, id: newId('agent') };
+    setLaunching(true);
+    try {
+      const accepted = await apiPost('/api/executions', { ...request, id: launchAttempt.current.id });
+      launchAttempt.current = null; setLaunch(null); setExecution(accepted);
+    } catch (e) {
+      onNotice(`${e.message}；再次启动会继续确认同一执行`);
+    } finally { setLaunching(false); }
   };
 
   if (detail) {
@@ -165,6 +188,7 @@ export function AgentsPanel({ onNotice }) {
       render: (_, r) => (
         <Space size={0}>
           <Button size="small" type="link" onClick={() => setDetail(r.name)}>配置</Button>
+          <Button size="small" type="link" onClick={() => { launchForm.resetFields(); setLaunch(r); }}>启动</Button>
           <Popconfirm title={`删除 agent ${r.name}？`} okText="确认删除" onConfirm={() => remove(r.name)}>
             <Button size="small" type="link" danger>删除</Button>
           </Popconfirm>
@@ -174,8 +198,8 @@ export function AgentsPanel({ onNotice }) {
   ];
 
   return (
-    <Row gutter={16}>
-      <Col span={17}>
+    <Row gutter={[16, 16]}>
+      <Col xs={24} xl={17}>
         <Card
           size="small"
           title="生效 Agent"
@@ -195,7 +219,7 @@ export function AgentsPanel({ onNotice }) {
               ? <Badge status="success" text={`当前: ${active}`} />
               : <Badge status="default" text={<Text type="secondary">跟随默认链</Text>} />}
             <Text type="secondary" style={{ fontSize: 12 }}>
-              激活前服务端做 prompt 预检，失败返回 400；删除生效卡片会自动清掉 marker。
+              切换后，新会话将优先使用该 Agent；未选择时使用默认配置。
             </Text>
           </Space>
         </Card>
@@ -212,11 +236,12 @@ export function AgentsPanel({ onNotice }) {
             dataSource={agents}
             loading={loading}
             pagination={false}
+            scroll={{ x: 'max-content' }}
             locale={{ emptyText: '暂无 agent' }}
           />
         </Card>
       </Col>
-      <Col span={7}>
+      <Col xs={24} xl={7}>
         <AgentNfsCard onNotice={onNotice} />
       </Col>
       <CreateAgentModal
@@ -232,6 +257,14 @@ export function AgentsPanel({ onNotice }) {
           load();
         }}
       />
+      <Modal open={!!launch} title={`启动 Agent · ${launch?.name || ''}`} onCancel={() => setLaunch(null)} footer={null} destroyOnHidden>
+        <Form form={launchForm} layout="vertical" onFinish={run} initialValues={{ node: '' }}>
+          <Form.Item name="node" label="执行节点"><Select options={nodeOptions(nodes, 'agent')} /></Form.Item>
+          <Form.Item name="prompt" label="任务要求" rules={[{ required: true, message: '请输入任务要求' }]}><Input.TextArea rows={5} /></Form.Item>
+          <Button type="primary" htmlType="submit" loading={launching}>启动并查看</Button>
+        </Form>
+      </Modal>
+      {execution && <ExecutionDetail id={execution.id} summary={execution} onClose={() => setExecution(null)} onNotice={onNotice} />}
     </Row>
   );
 }

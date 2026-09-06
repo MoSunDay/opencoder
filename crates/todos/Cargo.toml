@@ -4,11 +4,15 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[features]
+default = ["runtime"]
+runtime = ["dep:opencoder-session", "dep:opencoder-llm", "dep:opencoder-store"]
+
 [dependencies]
 opencoder-core.workspace = true
-opencoder-llm.workspace = true
-opencoder-session.workspace = true
-opencoder-store.workspace = true
+opencoder-llm = { workspace = true, optional = true }
+opencoder-session = { workspace = true, optional = true }
+opencoder-store = { workspace = true, optional = true }
 tokio.workspace = true
 tokio-util.workspace = true
 serde.workspace = true

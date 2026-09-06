@@ -2,7 +2,8 @@ use anyhow::{Context, Result};
 use libsql::{params, Connection};
 use opencoder_core::{ContentBlock, Message, MessageUsage, Role};
 
-use crate::types::{ImportReport, MessageRow};
+use crate::types::{ImportReport, MessageChunkPage, MessageChunkRecord, MessageRow};
+use opencoder_core::fleet::MessageCursor;
 
 const INSERT_MESSAGE: &str = "\
 INSERT INTO messages (id, session_id, role, agent, model, blocks_json, usage_json, created_at, synthetic, display, mode, summary)
@@ -149,6 +150,117 @@ pub async fn load_rows(conn: &Connection, session_id: &str) -> Result<Vec<Messag
         });
     }
     Ok(out)
+}
+
+/// Read message JSON as SQLite BLOB slices. `substr` is applied by SQLite, so
+/// the Rust process never receives the whole legacy row merely to paginate it.
+pub async fn load_page(
+    conn: &Connection,
+    session_id: &str,
+    mut cursor: MessageCursor,
+    chunk_bytes: usize,
+    raw_budget: usize,
+) -> Result<MessageChunkPage> {
+    if chunk_bytes == 0 || raw_budget < chunk_bytes {
+        anyhow::bail!("message page budget must contain at least one non-empty chunk");
+    }
+    let mut chunks = Vec::with_capacity(raw_budget / chunk_bytes);
+    let mut used = 0usize;
+    while used < raw_budget {
+        let take = chunk_bytes.min(raw_budget - used);
+        let Some(chunk) = read_chunk(conn, session_id, cursor, take).await? else {
+            return Ok(MessageChunkPage {
+                chunks,
+                next_cursor: None,
+            });
+        };
+        let next = chunk.offset + chunk.bytes.len() as u64;
+        if chunk.bytes.is_empty() && next < chunk.total_bytes {
+            anyhow::bail!("message chunk query did not advance");
+        }
+        cursor = if next < chunk.total_bytes {
+            MessageCursor {
+                seq: chunk.seq,
+                offset: next,
+            }
+        } else {
+            MessageCursor {
+                seq: chunk.seq,
+                offset: 0,
+            }
+        };
+        used += chunk.bytes.len();
+        chunks.push(chunk);
+        if used == raw_budget {
+            break;
+        }
+    }
+    let next_cursor = has_more(conn, session_id, cursor).await?.then_some(cursor);
+    Ok(MessageChunkPage {
+        chunks,
+        next_cursor,
+    })
+}
+
+async fn read_chunk(
+    conn: &Connection,
+    session_id: &str,
+    cursor: MessageCursor,
+    chunk_bytes: usize,
+) -> Result<Option<MessageChunkRecord>> {
+    let (sql, seq, offset) = if cursor.offset == 0 {
+        (
+            "SELECT seq,role,created_at,length(CAST(blocks_json AS BLOB)),\
+             CAST(substr(CAST(blocks_json AS BLOB),1,?3) AS BLOB) FROM messages \
+             WHERE session_id=?1 AND seq>?2 ORDER BY seq ASC LIMIT 1",
+            cursor.seq,
+            0,
+        )
+    } else {
+        (
+            "SELECT seq,role,created_at,length(CAST(blocks_json AS BLOB)),\
+             CAST(substr(CAST(blocks_json AS BLOB),?3+1,?4) AS BLOB) FROM messages \
+             WHERE session_id=?1 AND seq=?2 LIMIT 1",
+            cursor.seq,
+            cursor.offset,
+        )
+    };
+    let mut rows = if offset == 0 {
+        conn.query(sql, params![session_id, seq, chunk_bytes as i64])
+            .await?
+    } else {
+        conn.query(
+            sql,
+            params![session_id, seq, offset as i64, chunk_bytes as i64],
+        )
+        .await?
+    };
+    rows.next()
+        .await?
+        .map(|row| {
+            Ok(MessageChunkRecord {
+                seq: row.get(0)?,
+                role: row.get(1)?,
+                created_at: row.get(2)?,
+                offset,
+                total_bytes: row.get::<i64>(3)?.max(0) as u64,
+                bytes: row.get(4)?,
+            })
+        })
+        .transpose()
+}
+
+async fn has_more(conn: &Connection, session_id: &str, cursor: MessageCursor) -> Result<bool> {
+    if cursor.offset > 0 {
+        return Ok(true);
+    }
+    let mut rows = conn
+        .query(
+            "SELECT 1 FROM messages WHERE session_id=?1 AND seq>?2 LIMIT 1",
+            params![session_id, cursor.seq],
+        )
+        .await?;
+    Ok(rows.next().await?.is_some())
 }
 
 pub async fn last_seq(conn: &Connection, session_id: &str) -> Result<i64> {

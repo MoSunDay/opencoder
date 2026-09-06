@@ -26,7 +26,6 @@
 // setBlockedURLs to also reject the auto-reconnect attempts.
 const { chromium } = require('playwright-core');
 const { execSync } = require('child_process');
-const crypto = require('crypto');
 const fs = require('fs');
 
 const BASE = process.env.BASE || 'http://127.0.0.1:18727';
@@ -46,7 +45,7 @@ const PORT = new URL(BASE).port;
 
 const results = [];
 const consoleErrors = [];
-const apiCalls = []; // {method, path, status} for every signed SPA request
+const apiCalls = []; // {method, path, status} for every authenticated SPA request
 let sessionId = null;
 let reconnectReq = null;
 let page;
@@ -58,7 +57,7 @@ async function trackApi(response) {
   const url = new URL(response.url());
   if (!url.pathname.startsWith('/api/')) return;
   const h = await req.allHeaders();
-  if (!h['x-sig']) return;
+  if (!h.authorization?.startsWith('Bearer ')) return;
   apiCalls.push({ method: req.method(), path: url.pathname + url.search, status: response.status() });
   if (apiCalls.length > 50) apiCalls.shift();
 }
@@ -81,16 +80,12 @@ async function step(name, fn) {
   log(`PASS ${name} (${Date.now() - t0}ms)`);
 }
 
-// node-side signed call (same canonical: METHOD\npath\nts\nsha256(body))
-async function signedJson(method, pathAndQuery, bodyObj) {
+// Node-side control call with the same Bearer credential as the SPA.
+async function authedJson(method, pathAndQuery, bodyObj) {
   const bodyText = bodyObj === undefined ? '' : JSON.stringify(bodyObj);
-  const ts = Date.now().toString();
-  const bodyHash = crypto.createHash('sha256').update(bodyText).digest('hex');
-  const canon = [method, pathAndQuery, ts, bodyHash].join('\n');
-  const sig = crypto.createHmac('sha256', TOKEN).update(canon).digest('hex');
   const res = await fetch(BASE + pathAndQuery, {
     method,
-    headers: { 'x-sig-timestamp': ts, 'x-sig': sig, ...(bodyText ? { 'content-type': 'application/json' } : {}) },
+    headers: { authorization: `Bearer ${TOKEN}`, ...(bodyText ? { 'content-type': 'application/json' } : {}) },
     body: bodyText || undefined,
   });
   let json = null; try { json = await res.json(); } catch {}
@@ -196,7 +191,7 @@ const stopBtn = () => page.locator('.ant-sender-actions-btn-loading-button').fir
       await cdp.send('Network.enable');
       await cdp.send('Network.setBlockedURLs', { urls: [`*${new URL(BASE).host}/*`] });
       execSync(`ss -K '( dport = :${PORT} or sport = :${PORT} )' || true`);
-      // chat tab has no REST polling: force a signed call to fail — the
+      // chat tab has no REST polling: force an authenticated call to fail — the
       // offline 中断 click must surface as the 连接断开 badge (and, being
       // offline, never reaches the server: the run keeps streaming there).
       await stopBtn().click();
@@ -204,7 +199,7 @@ const stopBtn = () => page.locator('.ant-sender-actions-btn-loading-button').fir
       await shot('03-offline-badge');
       await sleep(4000); // hold the drop > 2 backoff cycles (1s, 2s)
       // arm the reconnect witness BEFORE restoring: sse.js must issue a fresh
-      // signed GET /events within its backoff schedule once the link returns.
+      // authenticated GET /events within its backoff schedule once the link returns.
       reconnectReq = page.waitForRequest(
         (r) => r.url().includes('/events') && r.method() === 'GET',
         { timeout: 60000 },
@@ -229,25 +224,25 @@ const stopBtn = () => page.locator('.ant-sender-actions-btn-loading-button').fir
         await sendPrompt(PROMPT); // fresh run in the same dialog
       }
       await stopBtn().click(); // lands this time
-      await waitBadge('已连接', 20000); // the signed POST succeeded
+      await waitBadge('已连接', 20000); // the authenticated POST succeeded
       await waitDone(90000); // terminal frame -> transcript normalized from store
       await shot('05-interrupted');
     });
 
     await step('07_compact_accepted', async () => {
-      const s = await signedJson('GET', `/api/sessions/${sessionId}`);
+      const s = await authedJson('GET', `/api/sessions/${sessionId}`);
       const before = ((s.json && s.json.messages) || []).length;
-      const r = await signedJson('POST', `/api/sessions/${sessionId}/compact`, {});
+      const r = await authedJson('POST', `/api/sessions/${sessionId}/compact`, {});
       if (r.status !== 200 || !(r.json && r.json.ok)) throw new Error(`compact -> ${r.status} ${JSON.stringify(r.json)}`);
       // The summary turn is an LLM call over the whole transcript — for a
       // 20k-line tool result it takes minutes. Wait the drain out (180s cap)
       // instead of a fixed sleep, then sample the persisted messages.
       for (let i = 0; i < 60; i++) {
         await sleep(3000);
-        const st = await signedJson('GET', `/api/sessions/${sessionId}`);
+        const st = await authedJson('GET', `/api/sessions/${sessionId}`);
         if (st.json && st.json.draining === false) break;
       }
-      const s2 = await signedJson('GET', `/api/sessions/${sessionId}`);
+      const s2 = await authedJson('GET', `/api/sessions/${sessionId}`);
       const after = ((s2.json && s2.json.messages) || []).length;
       log(`messages before=${before} after=${after}`);
       await shot('06-after-compact-api');

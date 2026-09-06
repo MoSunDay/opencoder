@@ -127,6 +127,14 @@ impl ProjectStore for SqlProjectStore {
     async fn claim_todo_running(&self, id: &str, now_ms: i64) -> Result<bool> {
         project_crud_runs::claim_todo_running(&self.pool, self.starrocks, id, now_ms).await
     }
+    async fn claim_todo_running_with_run(
+        &self,
+        rec: &ProjectTodoRunRecord,
+        now_ms: i64,
+    ) -> Result<bool> {
+        project_crud_runs::claim_todo_running_with_run(&self.pool, self.starrocks, rec, now_ms)
+            .await
+    }
     async fn patch_todo_when(
         &self,
         id: &str,
@@ -142,6 +150,9 @@ impl ProjectStore for SqlProjectStore {
     }
     async fn get_todo(&self, id: &str) -> Result<Option<ProjectTodoRecord>> {
         project_crud_runs::get_todo(&self.pool, self.starrocks, id).await
+    }
+    async fn get_todo_summary(&self, id: &str) -> Result<Option<crate::ProjectTodoSummary>> {
+        project_crud_runs::get_todo_summary(&self.pool, self.starrocks, id).await
     }
     async fn list_todos(&self, milestone_id: Option<&str>) -> Result<Vec<ProjectTodoRecord>> {
         project_crud_runs::list_todos(&self.pool, self.starrocks, milestone_id).await
@@ -171,8 +182,47 @@ impl ProjectStore for SqlProjectStore {
     async fn get_todo_run(&self, id: &str) -> Result<Option<ProjectTodoRunRecord>> {
         project_crud_runs::get_todo_run(&self.pool, self.starrocks, id).await
     }
+    async fn get_todo_run_summary(&self, id: &str) -> Result<Option<crate::ProjectTodoRunSummary>> {
+        project_crud_runs::get_todo_run_summary(&self.pool, self.starrocks, id).await
+    }
     async fn list_todo_runs(&self, todo_id: &str) -> Result<Vec<ProjectTodoRunRecord>> {
         project_crud_runs::list_todo_runs(&self.pool, self.starrocks, todo_id).await
+    }
+    async fn list_todo_runs_page(
+        &self,
+        todo_id: &str,
+        before_version: Option<i64>,
+        limit: u32,
+    ) -> Result<crate::ProjectTodoRunPage> {
+        project_crud_runs::list_todo_runs_page(
+            &self.pool,
+            self.starrocks,
+            todo_id,
+            before_version,
+            limit,
+        )
+        .await
+    }
+    async fn project_text_chunk(
+        &self,
+        record_kind: &str,
+        owner_id: &str,
+        id: &str,
+        field: &str,
+        offset: u64,
+        max_bytes: usize,
+    ) -> Result<Option<crate::PayloadChunkRecord>> {
+        project_crud_runs::project_text_chunk(
+            &self.pool,
+            self.starrocks,
+            record_kind,
+            owner_id,
+            id,
+            field,
+            offset,
+            max_bytes,
+        )
+        .await
     }
     async fn list_running_todo_runs(&self) -> Result<Vec<ProjectTodoRunRecord>> {
         project_crud_runs::list_running_todo_runs(&self.pool, self.starrocks).await

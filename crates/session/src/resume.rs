@@ -47,8 +47,17 @@ pub async fn resume(
         })
     });
     let agent_name = meta.agent.as_deref().unwrap_or(&config.agent.default);
-    let agent = resolve_agent(agent_name)
-        .or_else(|| resolve_agent("act"))
+    let agent =
+        opencoder_core::agent::scope::with_root_sync(config.agent.agents_dir.clone(), || {
+            resolve_agent(agent_name)
+        })
+        .or_else(|| {
+            if config.agent.agents_dir.is_none() {
+                resolve_agent("act")
+            } else {
+                None
+            }
+        })
         .ok_or_else(|| anyhow!("agent not found: {agent_name}"))?;
 
     // Loading strategy:

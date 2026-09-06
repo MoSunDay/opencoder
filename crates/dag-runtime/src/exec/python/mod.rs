@@ -2,8 +2,8 @@
 //!
 //! Contract (see `exec/mod.rs` for the shared shape):
 //! - `sandbox: in_process` (default) — a FRESH interpreter per step on
-//!   `spawn_blocking` (the VM is CPU-bound and sync; module state never
-//!   leaks between steps), `sys.stdout`/`sys.stderr` redirected into
+//!   a killable internal agent child (the legacy wire name is retained;
+//!   interpreter state never leaks between steps), `sys.stdout`/`sys.stderr` redirected into
 //!   `_io.StringIO` buffers, globals `RUN_ID` / `STEP_DIR` / `context`.
 //! - `sandbox: runc` — fail-closed: no runc on the node means an Error
 //!   outcome, never a silent in-process fallback.
@@ -20,7 +20,6 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 use opencoder_dag::artifacts::step_dir;
 use opencoder_dag::{SandboxMode, StepKind, StepOutcome};
@@ -34,47 +33,31 @@ use super::{StepCtx, StepResult};
 const ERROR_TAIL_BYTES: usize = 2048;
 
 /// Entry point used by the runtime for `StepKind::Python`.
+mod process;
+pub use process::worker_main;
+use tokio_util::sync::CancellationToken;
+
 pub async fn execute_python_step(ctx: &StepCtx) -> StepResult {
+    execute_python_step_cancellable(ctx, CancellationToken::new()).await
+}
+
+pub async fn execute_python_step_cancellable(
+    ctx: &StepCtx,
+    cancel: CancellationToken,
+) -> StepResult {
     let (code, sandbox) = match &ctx.step.kind {
         StepKind::Python { code, sandbox } => (code.clone(), sandbox.unwrap_or_default()),
         other => return error_result(format!("python executor got a non-python step: {other:?}")),
     };
     match sandbox {
-        SandboxMode::InProcess => execute_in_process(ctx, code).await,
-        SandboxMode::Runc => execute_runc(ctx, &code).await,
+        SandboxMode::InProcess => process::execute(ctx, code, cancel).await,
+        SandboxMode::Runc => execute_runc(ctx, &code, cancel).await,
     }
 }
 
 // ---------------------------------------------------------------------------
 // In-process (embedded VM)
 // ---------------------------------------------------------------------------
-
-async fn execute_in_process(ctx: &StepCtx, code: String) -> StepResult {
-    let run_id = ctx.run_id.clone();
-    let step_name = ctx.step.name.clone();
-    let workflow_root = ctx.workflow_root.clone();
-    let context = ctx.context();
-
-    // The VM is sync and CPU-bound: run it on the blocking pool. We cannot
-    // abort a detached blocking thread — on timeout the thread keeps
-    // spinning until its code finishes (or the process exits); there is no
-    // cooperative-cancellation hook in the interpreter loop. The `runc`
-    // path does not have this limitation: the runner KILLS the container.
-    let blocking = tokio::task::spawn_blocking(move || {
-        run_vm_step(&run_id, &step_name, &workflow_root, &context, &code)
-    });
-    let joined = match ctx.step.timeout_secs {
-        Some(secs) => match tokio::time::timeout(Duration::from_secs(secs), blocking).await {
-            Ok(joined) => joined,
-            Err(_elapsed) => return error_result("python step timeout".to_string()),
-        },
-        None => blocking.await,
-    };
-    match joined {
-        Ok(result) => result,
-        Err(join) => error_result(format!("python step panicked: {join}")),
-    }
-}
 
 /// What one in-process VM run produced (plain data — all PyRefs are dropped
 /// inside the interpreter closure before this leaves it).
@@ -85,7 +68,7 @@ struct VmOutcome {
     traceback: Option<String>,
 }
 
-/// Sync, runs entirely inside `spawn_blocking`.
+/// Sync, runs only in the dedicated VM child process.
 fn run_vm_step(
     run_id: &str,
     step_name: &str,
@@ -111,11 +94,36 @@ fn run_vm_step(
     let mut settings = Settings::default();
     settings.install_signal_handlers = false;
     let outcome = Interpreter::with_init(settings, |_| {}).enter(|vm| {
-        // --- Prelude: park sys.stdout/stderr on StringIO buffers. ---
+        // --- Prelude: park sys.stdout/stderr on byte-counted buffers. ---
         let original_stdout = vm.sys_module.get_attr("stdout", vm).ok();
         let original_stderr = vm.sys_module.get_attr("stderr", vm).ok();
-        let prelude = "import sys\nfrom _io import StringIO\nsys.stdout = StringIO()\nsys.stderr = StringIO()\n";
-        if let Err(exc) = vm.run_string(vm.new_scope_with_builtins(), prelude, "<dag-prelude>".to_owned()) {
+        let prelude = format!(
+            "import sys\n\
+             from _io import StringIO\n\
+             class _OpenCoderOutput:\n\
+             \x20   def __init__(self, name):\n\
+             \x20       self._name = name\n\
+             \x20       self._bytes = 0\n\
+             \x20       self._stream = StringIO()\n\
+             \x20   def write(self, value):\n\
+             \x20       size = len(value.encode('utf-8'))\n\
+             \x20       if self._bytes + size > {limit}:\n\
+             \x20           raise RuntimeError('output_limit_exceeded: %s exceeds {limit} bytes' % self._name)\n\
+             \x20       self._bytes += size\n\
+             \x20       return self._stream.write(value)\n\
+             \x20   def flush(self):\n\
+             \x20       return None\n\
+             \x20   def getvalue(self):\n\
+             \x20       return self._stream.getvalue()\n\
+             sys.stdout = _OpenCoderOutput('python stdout')\n\
+             sys.stderr = _OpenCoderOutput('python stderr')\n",
+            limit = crate::sandbox::output_limit::STREAM_OUTPUT_LIMIT_BYTES,
+        );
+        if let Err(exc) = vm.run_string(
+            vm.new_scope_with_builtins(),
+            &prelude,
+            "<dag-prelude>".to_owned(),
+        ) {
             let tb = format_exception(vm, &exc);
             restore_streams(vm, original_stdout, original_stderr);
             return VmOutcome {
@@ -162,7 +170,7 @@ fn run_vm_step(
     match outcome.traceback {
         Some(tb) => StepResult {
             outcome: StepOutcome::Error,
-            error: Some(tail(&tb, ERROR_TAIL_BYTES)),
+            error: Some(output_limit_message(&tb).unwrap_or_else(|| tail(&tb, ERROR_TAIL_BYTES))),
             output_text,
             output_json: None,
             session_id: None,
@@ -217,6 +225,12 @@ fn read_stringio(vm: &VirtualMachine, buffer: &Option<PyObjectRef>) -> String {
         .unwrap_or_default()
 }
 
+fn output_limit_message(traceback: &str) -> Option<String> {
+    const MARKER: &str = "output_limit_exceeded:";
+    let start = traceback.rfind(MARKER)?;
+    Some(traceback[start..].lines().next()?.trim().to_string())
+}
+
 /// serde_json → python objects (null→None, bool, int, float, str, list, dict).
 fn json_to_py(value: &Value, vm: &VirtualMachine) -> PyObjectRef {
     match value {
@@ -250,7 +264,7 @@ fn json_to_py(value: &Value, vm: &VirtualMachine) -> PyObjectRef {
 // runc sandbox
 // ---------------------------------------------------------------------------
 
-async fn execute_runc(ctx: &StepCtx, code: &str) -> StepResult {
+async fn execute_runc(ctx: &StepCtx, code: &str, cancel: CancellationToken) -> StepResult {
     // Fail-closed: no runc on this node is an error, never a silent
     // in-process fallback (the step explicitly opted OUT of the VM).
     if !crate::sandbox::runc::runc_available() {
@@ -273,15 +287,28 @@ async fn execute_runc(ctx: &StepCtx, code: &str) -> StepResult {
         .join("bundles")
         .join(&ctx.run_id)
         .join(&ctx.step.name);
-    let bundle_dir = match crate::sandbox::oci::write_bundle(&bundle_dir, &spec) {
-        Ok(dir) => dir,
-        Err(err) => return error_result(format!("cannot build oci bundle: {err:#}")),
+    // Copying a provisioned interpreter can take time; keep node heartbeats
+    // and unrelated executions responsive while preparing the private tree.
+    let prepared =
+        tokio::task::spawn_blocking(move || crate::sandbox::oci::write_bundle(&bundle_dir, &spec))
+            .await;
+    let bundle_dir = match prepared {
+        Ok(Ok(dir)) => dir,
+        Ok(Err(err)) => return error_result(format!("cannot build oci bundle: {err:#}")),
+        Err(err) => return error_result(format!("oci bundle preparation failed: {err}")),
     };
 
     // run_step owns the timeout here: on expiry it KILLS the container and
     // reaps it with `runc delete --force`.
     let container_id = format!("{}-{}", ctx.run_id, ctx.step.name);
-    match crate::sandbox::runc::run_step(&bundle_dir, &container_id, ctx.step.timeout_secs).await {
+    match crate::sandbox::runc::run_step_cancellable(
+        &bundle_dir,
+        &container_id,
+        ctx.step.timeout_secs,
+        cancel.clone(),
+    )
+    .await
+    {
         Ok((0, stdout)) => {
             let step_dir = run_root.join(&ctx.step.name);
             finish_from_output_json(&step_dir, stdout)
@@ -290,6 +317,10 @@ async fn execute_runc(ctx: &StepCtx, code: &str) -> StepResult {
             "runc step exited with {code}:\n{}",
             tail(&output, ERROR_TAIL_BYTES)
         )),
+        Err(err) if cancel.is_cancelled() => StepResult {
+            outcome: StepOutcome::Cancelled,
+            ..error_result(err.to_string())
+        },
         Err(err) => error_result(err.to_string()),
     }
 }
@@ -304,11 +335,15 @@ fn finish_from_output_json(step_dir: &Path, output_text: String) -> StepResult {
     if !json_path.is_file() {
         return done_result(output_text, None);
     }
-    let text = match fs::read_to_string(&json_path) {
-        Ok(text) => text,
+    let bytes = match crate::sandbox::output_limit::read_file_bounded(
+        &json_path,
+        "output.json",
+        crate::sandbox::output_limit::STRUCTURED_JSON_LIMIT_BYTES,
+    ) {
+        Ok(bytes) => bytes,
         Err(err) => return error_result(format!("cannot read output.json: {err}")),
     };
-    match serde_json::from_str::<Value>(&text) {
+    match serde_json::from_slice::<Value>(&bytes) {
         Ok(value) => done_result(output_text, Some(value)),
         Err(err) => error_result(format!(
             "output.json is not valid JSON ({err}); written to {}",

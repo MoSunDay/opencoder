@@ -1,14 +1,9 @@
 //! OCI bundle generation for `sandbox: runc` python steps.
 //!
-//! Pure JSON/path plumbing only — process driving lives in [`super::runc`].
-//! The generated bundle is a standard OCI runtime bundle: `config.json` +
-//! `main.py` under the run's context dir. The rootfs itself is NOT copied
-//! or symlinked into the bundle: `root.path` references the shared
-//! `<workflow_root>/rootfs` by ABSOLUTE path (OCI-spec-legal, and required
-//! in practice — runc rejects a symlinked `rootfs` entry with
-//! "invalid rootfs: not an absolute path, or a symlink"). The shared tree
-//! is prepared once by [`write_rootfs_template`] / the
-//! `dag prepare-rootfs` command and used read-only by every step.
+//! JSON/path plumbing and bundle preparation; process driving lives in
+//! [`super::runc`]. Each bundle takes a private copy of the provisioned
+//! `<workflow_root>/rootfs`, preserving its interpreter version and isolating
+//! the device files that runc initializes before making the root read-only.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -41,21 +36,13 @@ pub fn shared_rootfs(run_root: &Path) -> Result<PathBuf> {
     Ok(workflow_root.join("rootfs"))
 }
 
-/// `root.path` value: the absolute shared-rootfs path (pure derivation; a
-/// parentless run root degrades to the bundle-relative `rootfs` string).
-fn root_path_value(spec: &BundleSpec) -> String {
-    shared_rootfs(&spec.run_root)
-        .map(|p| p.to_string_lossy().into_owned())
-        .unwrap_or_else(|_| "rootfs".to_string())
-}
-
 /// The OCI `config.json` for one python step.
 ///
 /// Notes on the (deliberate) shape:
 /// - `ociVersion` stays at `"1.0.0"` — the most widely accepted value across
 ///   runc releases.
-/// - rootfs is **readonly**; the only writable surface is the `/workspace/context`
-///   bind (rw) plus a fresh `/tmp` tmpfs.
+/// - rootfs is **readonly**; writable mounts are `/workspace/context`,
+///   and a fresh `/tmp`. Device initialization uses the private root tree.
 /// - namespaces: pid + ipc + uts + mount. **No network namespace** on purpose:
 ///   host networking keeps the sandbox dependency-free (no bridge/veth setup);
 ///   hostname only takes effect because of the uts namespace.
@@ -95,7 +82,7 @@ pub fn container_config(spec: &BundleSpec) -> Value {
             ],
             "cwd": "/workspace",
         },
-        "root": { "path": root_path_value(spec), "readonly": true },
+        "root": { "path": "rootfs", "readonly": true },
         "mounts": [
             {
                 "destination": "/proc",
@@ -134,8 +121,8 @@ pub fn container_config(spec: &BundleSpec) -> Value {
 
 /// Materialize the bundle at `dir`: `config.json` plus `main.py` at
 /// `<run_root>/<step>/main.py` (the very file the container args
-/// reference). The shared rootfs is validated to exist but NOT copied or
-/// linked into the bundle — `config.json` references it by absolute path.
+/// reference). The shared rootfs is validated and copied into the bundle;
+/// subsequent attempts reuse that private interpreter tree.
 /// Returns `dir` as an absolute path on success.
 pub fn write_bundle(dir: &Path, spec: &BundleSpec) -> Result<PathBuf> {
     let dir = std::path::absolute(dir)?;
@@ -164,15 +151,9 @@ pub fn write_bundle(dir: &Path, spec: &BundleSpec) -> Result<PathBuf> {
     let main_py = step_dir.join("main.py");
     fs::write(&main_py, &spec.code).with_context(|| format!("write {}", main_py.display()))?;
 
-    // 2. Ensure the bind-mount destination exists inside the (shared,
-    //    otherwise read-only) rootfs — runc does not create mountpoints.
-    let context_mountpoint = shared.join("workspace/context");
-    fs::create_dir_all(&context_mountpoint).with_context(|| {
-        format!(
-            "mkdir {} (bind-mount destination inside the shared rootfs)",
-            context_mountpoint.display()
-        )
-    })?;
+    // 2. A real, private root isolates runc device initialization and pins
+    //    interpreter files for retries. The source is never modified.
+    super::rootfs::snapshot(&shared, &dir)?;
 
     // 3. config.json.
     let config = container_config(spec);
@@ -223,7 +204,7 @@ pub fn write_rootfs_template(out: &Path) -> Result<()> {
 const README_TEMPLATE: &str = r#"
 # DAG sandbox rootfs scaffold
 
-This directory is the shared, read-only rootfs for `sandbox: runc` python
+This directory is the provisioned rootfs template for `sandbox: runc` python
 steps. It is a scaffold: you must add a python interpreter before runc can
 run anything.
 
@@ -234,14 +215,16 @@ run anything.
 2. Keep `etc/resolv.conf` in sync if your host resolver setup changes
    (copied from the host by `dag prepare-rootfs`; the sandbox shares the
    host network — there is no network namespace).
-3. `dev`, `proc`, `sys` are mount points for the OCI mounts in
-   `config.json`; `tmp` is masked by a tmpfs at runtime.
+3. `dev`, `proc`, `sys`, `tmp` and `workspace/context` are recreated as
+   empty runtime directories in each private copy. `proc` and `tmp` are
+   mounted at runtime; workspace/context receives the run artifacts bind.
 4. Point `<workflow_root>/rootfs` at this tree. It must end up a REAL
    directory — runc rejects symlinked rootfs paths ("invalid rootfs: not an
    absolute path, or a symlink"), so move/copy the tree there or bind-mount
    it (`mount --bind <tree> <workflow_root>/rootfs`). Every step bundle
-   then references it read-only by absolute path via `config.json`;
-   nothing is copied or linked per step.
+   copies the interpreter tree into its own real `rootfs` directory, used
+   read-only at runtime and reused for retries. Reserve disk space for
+   one private interpreter tree per step; no shared files are hard-linked.
 
 No network downloads happen at prepare or step time in the runtime itself —
 populating `usr/` is a provisioning concern.
@@ -267,11 +250,8 @@ mod tests {
 
         assert_eq!(cfg["ociVersion"], "1.0.0");
         assert_eq!(cfg["hostname"], "dag-step");
-        // Readonly root referenced by ABSOLUTE path (runc rejects symlinks).
-        assert_eq!(
-            cfg["root"]["path"].as_str().unwrap(),
-            tmp.path().join("rootfs").to_str().unwrap()
-        );
+        // OCI resolves this real root directory relative to the bundle.
+        assert_eq!(cfg["root"]["path"], "rootfs");
         assert_eq!(cfg["root"]["readonly"], true);
         let mounts = cfg["mounts"].as_array().unwrap();
         let bind = mounts
@@ -324,19 +304,19 @@ mod tests {
         let main_py = workflow_root.join("run-1/step-a/main.py");
         assert_eq!(fs::read_to_string(&main_py).unwrap(), "print('hi')");
 
-        // config.json is valid JSON with the args path and the ABSOLUTE
-        // shared-rootfs reference (no symlink inside the bundle).
+        // config.json references a private real tree inside this bundle.
         let cfg: Value =
             serde_json::from_str(&fs::read_to_string(bundle.join("config.json")).unwrap()).unwrap();
         assert_eq!(
             cfg["process"]["args"][1],
             "/workspace/context/step-a/main.py"
         );
-        assert_eq!(
-            cfg["root"]["path"].as_str().unwrap(),
-            workflow_root.join("rootfs").to_str().unwrap()
-        );
-        assert!(!bundle.join("rootfs").exists());
+        assert_eq!(cfg["root"]["path"], "rootfs");
+        assert!(fs::symlink_metadata(bundle.join("rootfs"))
+            .unwrap()
+            .is_dir());
+        assert!(bundle.join("rootfs/workspace/context").is_dir());
+        assert!(!workflow_root.join("rootfs/workspace").exists());
     }
 
     #[test]

@@ -3,22 +3,18 @@
 # plus one real `opencoder-agent` worker. Exercises the fleet
 # surface over plain curl (no test harness, no LLM round-trip assumed):
 #   ✅ 1  worker registers and reports idle
-#   ✅ 2  dispatch accepts a task (task_id + fresh `status:"pending"` field)
-#   ✅ 3  task reaches a terminal state (done OR error — error counts too,
+#   ✅ 2  dispatch durably accepts an execution with its five-field index
+#   ✅ 3  execution reaches an interactive/terminal state (idle/error/cancelled;
 #         the worker runs against a seeded loopback LLM stub, so the outcome
 #         is deterministic and needs zero credentials)
-#   ✅ 4  task-plane read API: single-task detail (+last_event_seq), the
-#         fleet-wide filtered list (?status=&node_id=), and the
-#         session→task reverse lookup
-# Auth is the shared HMAC scheme (`core::auth_sig`): canonical string
-#   METHOD\npath_and_query\nts_ms\nsha256_hex(body)
-# signed into the `x-sig` / `x-sig-timestamp` headers. `/` , `/static/*` and
-# `/api/time` stay unsigned — the readiness probe uses `/api/time`.
+#   ✅ 4  ID-routed Node detail/events and fleet list fields
+# Auth is the shared `Authorization: Bearer <token>` scheme. `/`,
+# `/static/*`, and `/api/time` stay unauthenticated for bootstrap/readiness.
 # Injection points: OPENCODER_SMOKE_SERVER_BIN / OPENCODER_SMOKE_AGENT_BIN
 # (prebuilt binary paths — the cargo wrapper test injects the debug binaries
 # to skip the release build) and
 # OPENCODER_SMOKE_PORT (listen port, avoids clashing with parallel tests).
-# Requires: cargo, curl, python3, openssl, GNU date (no jq). Keep assertions
+# Requires: cargo, curl, python3 (no jq). Keep assertions
 # python3-only.
 set -euo pipefail
 
@@ -63,29 +59,20 @@ cleanup() {
 trap cleanup EXIT
 
 # ---------------------------------------------------------------------------
-# HMAC signing helper — byte-for-byte parity with core::auth_sig.
+# Bearer-authenticated request helper.
 # req METHOD PATH_AND_QUERY [JSON_BODY]   → response body on stdout.
-# The timestamp is taken fresh per call: every request carries a new ts, so
-# the server-side replay dedup never trips across polls.
 # ---------------------------------------------------------------------------
 req() {
   local method="$1" pq="$2" body="${3:-}"
-  local ts body_hash canonical sig
-  ts="$(date +%s%3N)"
-  body_hash="$(printf '%s' "${body}" | openssl dgst -sha256 -hex | awk '{print $NF}')"
-  canonical="$(printf '%s\n%s\n%s\n%s' "${method}" "${pq}" "${ts}" "${body_hash}")"
-  sig="$(printf '%s' "${canonical}" | openssl dgst -sha256 -hmac "${TOKEN}" -hex | awk '{print $NF}')"
   if [ -n "${body}" ]; then
     curl --noproxy '*' -s -X "${method}" \
       -H 'Content-Type: application/json' \
-      -H "x-sig-timestamp: ${ts}" \
-      -H "x-sig: ${sig}" \
+      -H "Authorization: Bearer ${TOKEN}" \
       -d "${body}" \
       "${BASE}${pq}"
   else
     curl --noproxy '*' -s -X "${method}" \
-      -H "x-sig-timestamp: ${ts}" \
-      -H "x-sig: ${sig}" \
+      -H "Authorization: Bearer ${TOKEN}" \
       "${BASE}${pq}"
   fi
 }
@@ -98,8 +85,7 @@ echo "== starting server (opencoder-server) on :${PORT} =="
 XDG_DATA_HOME="${TMP}/xdg" "${SERVER_BIN}" --workdir "${TMP}/srv" --host 127.0.0.1 --port "${PORT}" --token "${TOKEN}" >"${TMP}/server.log" 2>&1 &
 SRV_PID=$!
 
-# Readiness probe over the UNSIGNED clock-bootstrap endpoint: never blocked
-# by auth, so a broken signature pipeline still reports itself at checkpoint 1.
+# Readiness probe over the unauthenticated compatibility clock endpoint.
 SERVER_UP=""
 # 90s budget: a cold start of the debug binary can blow past 30s when a
 # parallel `cargo test --workspace` compile storm is hammering the box.
@@ -153,98 +139,23 @@ if [ -z "${CK1}" ]; then
 fi
 echo "✅ checkpoint 1: ${NODE_NAME} registered idle (id=${CK1})"
 
-# ✅ checkpoint 2: dispatch accepted with a task_id, a bound session_id, and
-# the new `status` field reporting the fresh `pending` state.
-OUT="$(req POST "/api/nodes/${CK1}/tasks" '{"prompt":"reply with exactly: ok"}' || true)"
-CK2="$(printf '%s' "${OUT}" | python3 -c '
-import json,sys
-try:
-    v=json.load(sys.stdin)
-    tid=v.get("task_id",""); sid=v.get("session_id","")
-    print(f"{tid} {sid}" if tid and sid and v.get("status")=="pending" else "")
-except Exception: print("")' 2>/dev/null || true)"
-if [ -z "${CK2}" ]; then
-  echo "❌ checkpoint 2 FAILED: dispatch did not return task_id/session_id/status=pending: ${OUT}"
-  exit 1
-fi
-TID="${CK2%% *}"
-SID="${CK2##* }"
-echo "✅ checkpoint 2: task dispatched (task_id=${TID} session=${SID} status=pending)"
-
-# ✅ checkpoint 3: terminal status (done or error both pass).
+# Durable acceptance and ID-based routing on the v2 control plane.
+OUT="$(req POST /api/executions "{\"id\":\"agent-smoke\",\"kind\":\"agent\",\"node_id\":\"${CK1}\",\"input\":{\"prompt\":\"reply with exactly: ok\"}}")"
+python3 -c 'import json,sys; v=json.loads(sys.argv[1]); assert set(v)=={"id","created_at","kind","node_id","status"} and v["kind"]=="agent" and v["node_id"]==sys.argv[2],v' "$OUT" "$CK1"
+echo "✅ checkpoint 2: node durably accepted execution"
 FINAL=""
 for _ in $(seq 1 120); do
-  OUT="$(req GET "/api/nodes/tasks/${TID}" || true)"
-  FINAL="$(printf '%s' "${OUT}" | python3 -c '
-import json,sys
-try:
-    v=json.load(sys.stdin)
-    print(v["status"] if v.get("status") in ("done","error","cancelled") else "")
-except Exception: print("")' 2>/dev/null || true)"
-  [ -n "${FINAL}" ] && break
+  OUT="$(req GET /api/executions/agent-smoke)"
+  FINAL="$(python3 -c 'import json,sys; v=json.loads(sys.argv[1]); s=v.get("execution",{}).get("status"); print(s if s in ("idle","error","cancelled") else "")' "$OUT")"
+  [ -n "$FINAL" ] && break
   sleep 0.5
 done
-if [ -z "${FINAL}" ]; then
-  echo "❌ checkpoint 3 FAILED: task never reached a terminal state"
-  echo "--- server.log ---"; tail -20 "${TMP}/server.log"
-  echo "--- node.log ---"; tail -20 "${TMP}/node.log"
-  exit 1
-fi
-echo "✅ checkpoint 3: task terminal (status=${FINAL}; error also passes — no LLM asserted)"
-
-# ✅ checkpoint 4: task-plane read API over the three new GET endpoints.
-# 4a — single-task detail: identity fields + SSE bootstrap cursor.
-CK4A="$(req GET "/api/nodes/tasks/${TID}" || true)"
-OK4A="$(printf '%s' "${CK4A}" | python3 -c '
-import json,sys
-try:
-    v=json.load(sys.stdin)
-    ok=(v.get("id")==sys.argv[1] and v.get("node_id")==sys.argv[2]
-        and bool(v.get("session_id")) and v.get("status")==sys.argv[3]
-        and int(v.get("last_event_seq",-1))>=1)
-    print("ok" if ok else "")
-except Exception: print("")' "${TID}" "${CK1}" "${FINAL}" 2>/dev/null || true)"
-if [ -z "${OK4A}" ]; then
-  echo "❌ checkpoint 4a FAILED: task detail incomplete (want id/node/session/status=${FINAL}/last_event_seq>=1): ${CK4A}"
-  exit 1
-fi
-echo "✅ checkpoint 4a: task detail + last_event_seq verified"
-
-# 4b — fleet-wide list filtering: hits by status and by node_id, and the
-# task must be ABSENT from a list filtered on a foreign status.
-FOREIGN="cancelled"; [ "${FINAL}" = "cancelled" ] && FOREIGN="done"
-LIST_BY_STATUS="$(req GET "/api/nodes/tasks?status=${FINAL}" || true)"
-LIST_BY_NODE="$(req GET "/api/nodes/tasks?node_id=${CK1}" || true)"
-LIST_FOREIGN="$(req GET "/api/nodes/tasks?status=${FOREIGN}" || true)"
-OK4B="$(python3 -c '
-import json,sys
-def ids(raw):
-    try: return [t["id"] for t in json.loads(raw).get("tasks",[])]
-    except Exception: return []
-hit_s, hit_n, hit_f = sys.argv[1], sys.argv[2], sys.argv[3]
-print("ok" if sys.argv[4] in ids(hit_s) and sys.argv[4] in ids(hit_n)
-      and sys.argv[4] not in ids(hit_f) else "")
-' "${LIST_BY_STATUS}" "${LIST_BY_NODE}" "${LIST_FOREIGN}" "${TID}" 2>/dev/null || true)"
-if [ -z "${OK4B}" ]; then
-  echo "❌ checkpoint 4b FAILED: filtered fleet list wrong (by-status/by-node miss or foreign-status hit)"
-  echo "  by-status=${LIST_BY_STATUS}"
-  echo "  by-node=${LIST_BY_NODE}"
-  echo "  foreign=${LIST_FOREIGN}"
-  exit 1
-fi
-echo "✅ checkpoint 4b: ?status=${FINAL} and ?node_id= filters verified"
-
-# 4c — session→task reverse lookup from the synthetic session id.
-OUT="$(req GET "/api/sessions/${SID}/task" || true)"
-OK4C="$(printf '%s' "${OUT}" | python3 -c '
-import json,sys
-try: print("ok" if json.load(sys.stdin).get("id")==sys.argv[1] else "")
-except Exception: print("")' "${TID}" 2>/dev/null || true)"
-if [ -z "${OK4C}" ]; then
-  echo "❌ checkpoint 4c FAILED: session→task reverse lookup wrong: ${OUT}"
-  exit 1
-fi
-echo "✅ checkpoint 4c: /api/sessions/${SID}/task resolves to the task"
-
-echo "== cleanup =="
+[ -n "$FINAL" ] || { echo "execution did not finish: $OUT"; exit 1; }
+python3 -c 'import json,sys; v=json.loads(sys.argv[1]); assert v["request"]["input"]["prompt"]=="reply with exactly: ok" and "session" in v,v' "$OUT"
+echo "✅ checkpoint 3: node-owned detail and terminal state verified ($FINAL)"
+OUT="$(req GET "/api/executions?node_id=${CK1}")"
+python3 -c 'import json,sys; rows=json.loads(sys.argv[1])["executions"]; assert any(r["id"]=="agent-smoke" for r in rows); assert all(set(r)=={"id","created_at","kind","node_id","status"} for r in rows)' "$OUT"
+EVENTS="$(req GET /api/executions/agent-smoke/events)"
+[[ "$EVENTS" == *"id:"* ]] || { echo "node events missing"; exit 1; }
+echo "✅ checkpoint 4: five-field index and node event replay verified"
 echo "SMOKE NODES PASSED"

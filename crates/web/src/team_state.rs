@@ -51,17 +51,14 @@ fn run_config_from(workdir: &Path, cfg: &Config) -> TeamRunConfig {
 }
 
 /// Resolve the production team state for `workdir`: full config load (files
-/// and env, same entry `serve`'s brain wiring uses); a load failure degrades
-/// to defaults rather than refusing to boot.
-pub fn production(store: Arc<dyn Store>, workdir: &Path) -> Arc<TeamWebState> {
-    let cfg = Config::load(workdir).unwrap_or_else(|error| {
-        tracing::warn!(error = %error, "config load failed; team falls back to defaults");
-        Config::default()
-    });
-    Arc::new(TeamWebState::new(
+/// and env, same entry `serve`'s brain wiring uses). Invalid team budgets are
+/// startup errors, before a runtime can create state.
+pub fn production(store: Arc<dyn Store>, workdir: &Path) -> anyhow::Result<Arc<TeamWebState>> {
+    let cfg = Config::load(workdir)?;
+    Ok(Arc::new(TeamWebState::new(
         run_config_from(workdir, &cfg),
         Arc::new(NodeDispatcher::new(store)),
-    ))
+    )))
 }
 
 /// Test helper: scripted dispatcher + a throwaway per-process team root, so

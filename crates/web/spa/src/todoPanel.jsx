@@ -5,8 +5,9 @@
 // 版本行上的「运行」成功后带 workflow_id 跳到「运行」tab 并聚焦该工作流。
 
 import { Button, Card, Col, Form, Input, Popconfirm, Row, Space, Table, Tabs, Tag, Typography } from 'antd';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiDel, apiGet, apiPost, apiPut } from './api.js';
+import { newId } from './fleet/model.js';
 import { TodoEditor } from './todoEditor.jsx';
 import { TodoRunsPanel } from './todoRunsPanel.jsx';
 
@@ -53,6 +54,7 @@ function CreateTemplateForm({ onNotice, onCreated }) {
         note: values.note || '',
         spec,
       });
+      onNotice('');
       onCreated();
     } catch (e) {
       onNotice('新建模板失败: ' + (e && e.message)); // 400 = spec 校验失败等
@@ -94,6 +96,7 @@ function CreateTemplateForm({ onNotice, onCreated }) {
 function VersionsBlock({ template, onNotice, onEdit, onChanged }) {
   const [detail, setDetail] = useState(null);
   const name = template.name;
+  const attempts = useRef(new Map());
 
   useEffect(() => {
     let alive = true;
@@ -117,6 +120,7 @@ function VersionsBlock({ template, onNotice, onEdit, onChanged }) {
   const setCurrent = async (v) => {
     try {
       await apiPut(`/api/todo/templates/${encodeURIComponent(name)}/todo.json`, { current: v });
+      onNotice('');
       onChanged();
     } catch (e) {
       onNotice('设为当前失败: ' + (e && e.message));
@@ -132,6 +136,7 @@ function VersionsBlock({ template, onNotice, onEdit, onChanged }) {
     try {
       await apiPost(`/api/todo/templates/${encodeURIComponent(name)}/new-version`,
         sourceVersion ? { source_version: sourceVersion, note } : { note });
+      onNotice('');
       onChanged();
     } catch (e) {
       onNotice('新建版本失败: ' + (e && e.message));
@@ -141,6 +146,7 @@ function VersionsBlock({ template, onNotice, onEdit, onChanged }) {
   const deleteVersion = async (v) => {
     try {
       await apiDel(`/api/todo/templates/${encodeURIComponent(name)}/${encodeURIComponent(v)}`);
+      onNotice('');
       onChanged();
     } catch (e) {
       // 409 = 删除当前版本
@@ -149,8 +155,10 @@ function VersionsBlock({ template, onNotice, onEdit, onChanged }) {
   };
 
   const run = async (v) => {
+    if (!attempts.current.has(v)) attempts.current.set(v, newId('todos'));
     try {
-      const j = await apiPost(`/api/todo/templates/${encodeURIComponent(name)}/${encodeURIComponent(v)}/run`, {});
+      const j = await apiPost(`/api/todo/templates/${encodeURIComponent(name)}/${encodeURIComponent(v)}/run`, { id: attempts.current.get(v) });
+      attempts.current.delete(v);
       onNotice(`已启动工作流: ${(j && j.workflow_id) || ''}`);
       onChanged((j && j.workflow_id) || '');
     } catch (e) {
@@ -213,6 +221,7 @@ function TemplatesTab({ onNotice, onRan }) {
   const deleteTemplate = async (name) => {
     try {
       await apiDel(`/api/todo/templates/${encodeURIComponent(name)}`);
+      onNotice('');
       setBump((n) => n + 1);
     } catch (e) {
       onNotice('删除模板失败: ' + (e && e.message));

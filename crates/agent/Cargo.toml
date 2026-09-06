@@ -11,11 +11,14 @@ path = "src/main.rs"
 [dependencies]
 opencoder-core.workspace = true
 opencoder-node.workspace = true
+opencoder-worker.workspace = true
 opencoder-dag.workspace = true
 opencoder-dag-runtime.workspace = true
 opencoder-llm.workspace = true
 opencoder-store.workspace = true
+opencoder-session.workspace = true
 anyhow.workspace = true
+serde_json.workspace = true
 async-trait.workspace = true
 clap.workspace = true
 tokio.workspace = true

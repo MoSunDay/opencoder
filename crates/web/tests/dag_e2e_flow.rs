@@ -1,6 +1,6 @@
 //! Process-level e2e for the DAG execution plane: the REAL node-side
 //! runtime (`opencoder-dag-runtime::execute_run`) claims a dispatched run
-//! from the REAL `build_app` server over signed HTTP, executes an `agent`
+//! from the REAL `build_app` server over authenticated HTTP, executes an `agent`
 //! step on the real session runner with a scripted `MockChatClient`, and
 //! the browser-visible projections converge: SSE event stream (uploaded
 //! frames + the server's synthetic `run_finished`), run-row terminal
@@ -90,7 +90,7 @@ async fn claimed_run_executes_and_converges_done_on_the_server() {
     // Subscribe BEFORE claiming: the live fanout must carry the run.
     let mut sse = open_sse(&server.base, &format!("/api/dag/runs/{rid}/events")).await;
 
-    // Claim through the real signed worker uplink.
+    // Claim through the real authenticated worker uplink.
     let uplink = Arc::new(Uplink::new(&server.base, TOKEN).unwrap());
     let run = uplink
         .dag_claim(&node_id)

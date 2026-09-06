@@ -3,21 +3,21 @@
 // Content switching per menu, and the login gate. Sider and Segmented both
 // derive from NAV_ITEMS so the two navigations can never drift apart.
 
-import { Badge, Layout, Menu, Segmented, Typography } from 'antd';
+import { Badge, Layout, Menu, Segmented, Select, Typography } from 'antd';
 import { useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { AgentsPanel } from './agentsConfig.jsx';
-import { BrainPanel } from './brainPanel.jsx';
+import { FleetBrainPanel as BrainPanel } from './fleet/brain.jsx';
 import { ChatPanel } from './chat.jsx';
 import { DagPanel } from './dagPanel.jsx';
 import { EnvsPanel } from './envsPanel.jsx';
 import { LoginModal } from './login.jsx';
-import { NodesPanel } from './nodes.jsx';
+import { FleetNodesPanel as NodesPanel } from './fleet/nodes.jsx';
 import { ProjectPanel } from './project/project.jsx';
-import { TeamPanel } from './teamPanel.jsx';
+import { FleetTeamsPanel as TeamPanel } from './fleet/teams.jsx';
 import { TodoPanel } from './todoPanel.jsx';
 import { TopicDetailPanel } from './topicDetail.jsx';
-import { TopicsPanel } from './topicsPanel.jsx';
+import { ExecutionsPanel as TopicsPanel } from './fleet/executions.jsx';
 import './app.css';
 import { setState, useStore } from './store.js';
 
@@ -34,8 +34,8 @@ const NAV_ITEMS = [
   { key: 'envs', menu: 'Env 管理', nav: 'Env' },
   { key: 'agents', menu: 'Agent 配置', nav: 'Agents' },
   { key: 'team', menu: '团队组队', nav: '组队' },
-  { key: 'topics', menu: '团队话题', nav: '话题' },
-  { key: 'brain', menu: '项目目标', nav: '目标' },
+  { key: 'topics', menu: '全部执行', nav: '执行' },
+  { key: 'brain', menu: '大脑调度', nav: '大脑' },
 ];
 const MENU_ITEMS = NAV_ITEMS.map((i) => ({ key: i.key, label: i.menu }));
 const NAV_OPTIONS = NAV_ITEMS.map((i) => ({ value: i.key, label: i.nav }));
@@ -102,14 +102,14 @@ function App() {
   return (
     <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
       <Layout style={{ flex: 1, minHeight: 0 }}>
-        <Header style={{ display: 'flex', alignItems: 'center', gap: 24, background: '#001529', paddingLeft: 24 }}>
+        <Header className="fleet-header" style={{ display: 'flex', alignItems: 'center', gap: 24, background: '#001529', paddingLeft: 24 }}>
           <span style={{ color: '#fff', fontSize: 17, fontWeight: 700, letterSpacing: 1 }}>
             ⛵ Opencoder Fleet
           </span>
           <ConnectionBadge />
         </Header>
         <Layout style={{ minHeight: 0 }}>
-          <Sider width={200} theme="dark">
+          <Sider className="fleet-sidebar" width={200} theme="dark">
             <Menu
               mode="inline"
               theme="dark"
@@ -119,8 +119,10 @@ function App() {
               style={{ height: '100%', borderRight: 0 }}
             />
           </Sider>
-          <Content style={{ padding: 20, overflow: 'auto', background: '#fff' }}>
+          <Content className="fleet-content" style={{ minWidth: 0, padding: 20, overflow: 'auto', background: '#fff' }}>
+            <Select className="fleet-mobile-nav" aria-label="页面导航" value={menuKey(page)} options={MENU_ITEMS.map(({ key, label }) => ({ value: key, label }))} onChange={goPage} />
             <Segmented
+              className="fleet-desktop-nav"
               value={navValue(page)}
               options={NAV_OPTIONS}
               onChange={(v) => goPage(v)}
@@ -135,7 +137,7 @@ function App() {
           </Content>
         </Layout>
       </Layout>
-      <LoginModal open={!token} />
+      <LoginModal open={!token} onConnected={() => setNotice('')} />
     </div>
   );
 }

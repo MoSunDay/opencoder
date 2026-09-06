@@ -94,7 +94,8 @@ function CreateTodoModal({ open, overview, onCancel, onNotice, onCreated }) {
 export function TodosTab({ overview, refresh, openTodo, onNotice }) {
   const [createOpen, setCreateOpen] = useState(false);
   const rows = flattenTodos(overview);
-  const busy = (t) => t.status === 'running';
+  const busy = (t) => t.status === 'running' || ['pending', 'running', 'cancelling'].includes(t.execution?.status);
+  const executionClosed = (t) => ['cancelled', 'done'].includes(t.execution?.status);
 
   const genPlan = async (t) => {
     try {
@@ -155,11 +156,11 @@ export function TodosTab({ overview, refresh, openTodo, onNotice }) {
       width: 250,
       render: (_, r) => (
         <Space size={0}>
-          <Button type="link" size="small" disabled={busy(r)} onClick={() => genPlan(r)}>生成Plan</Button>
+          <Button type="link" size="small" disabled={busy(r) || executionClosed(r)} onClick={() => genPlan(r)}>生成Plan</Button>
           <Button
             type="link"
             size="small"
-            disabled={busy(r) || !r.plan_md}
+            disabled={busy(r) || executionClosed(r) || !r.plan_md}
             onClick={() => execute(r)}
           >
             执行

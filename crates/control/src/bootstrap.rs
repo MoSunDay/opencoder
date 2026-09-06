@@ -1,0 +1,199 @@
+use crate::{admission::AdmissionGate, transport::Hub, AppState};
+use anyhow::{Context, Result};
+use opencoder_core::Config;
+use opencoder_llm::{ChatClient, ChatRequest, ChatStream, LlmEvent};
+use opencoder_store::{fleet::FleetStore, LibsqlStore, Store};
+use std::{path::PathBuf, sync::Arc, time::Duration};
+
+const SERVER_SHUTDOWN_GRACE: Duration = Duration::from_secs(30);
+
+/// Resolves the two provider routes at the point of use. A server can manage
+/// nodes without LLM credentials; a brain call reports the actual config error.
+struct BrainClient {
+    config: Config,
+}
+impl BrainClient {
+    fn client(&self, embedding: bool) -> Result<ChatClient> {
+        let cfg = &self.config;
+        let ep = if embedding {
+            cfg.resolve_embedding_endpoint()?
+        } else {
+            cfg.resolve_endpoint()?
+        };
+        ChatClient::new_with_read_timeout(
+            &ep.base_url,
+            &ep.api_key,
+            &ep.headers,
+            cfg.stream_idle_timeout(),
+            cfg.network.proxy.as_deref(),
+        )
+    }
+}
+impl ChatStream for BrainClient {
+    fn chat_stream(&self, req: ChatRequest) -> Result<tokio::sync::mpsc::Receiver<LlmEvent>> {
+        self.client(false)?.chat_stream(req)
+    }
+    fn embed(&self, texts: &[String], model: &str) -> Result<Vec<Vec<f32>>> {
+        self.client(true)?.embed(texts, model)
+    }
+    fn backend(&self) -> &'static str {
+        "configured-brain"
+    }
+}
+
+pub async fn new_state(
+    workdir: PathBuf,
+    data: PathBuf,
+    client: Option<Arc<dyn ChatStream>>,
+) -> Result<Arc<AppState>> {
+    tokio::fs::create_dir_all(&data).await?;
+    let config = Config::load(&workdir)?;
+    let libsql = Arc::new(LibsqlStore::open(data.join("definitions.db")).await?);
+    let store: Arc<dyn Store> = libsql.clone();
+    let projects: Arc<dyn opencoder_store::ProjectStore> = libsql;
+    let client = client.unwrap_or_else(|| {
+        Arc::new(BrainClient {
+            config: config.clone(),
+        })
+    });
+    let brain = opencoder_brain::Runtime::new(store.clone(), client, config.embedding_model_id())
+        .with_chat_model(config.small_model_or_primary());
+    let fleet = Arc::new(FleetStore::open(&data.join("control.db")).await?);
+    let admission = Arc::new(AdmissionGate::load(data.join("admission.json"))?);
+    let hub = Arc::new(Hub::new(fleet.nodes().await?));
+    for index in fleet.indexes(None, None, 10000).await? {
+        if index.status == opencoder_core::fleet::ExecutionStatus::Pending {
+            hub.reserve(&index).await;
+        }
+    }
+    Ok(Arc::new(AppState {
+        workdir,
+        store,
+        projects,
+        fleet,
+        hub,
+        brain,
+        brain_gate: Default::default(),
+        admission,
+        placement: tokio::sync::Mutex::new(()),
+    }))
+}
+
+pub async fn serve(
+    host: String,
+    port: u16,
+    web: bool,
+    workdir: PathBuf,
+    data: Option<PathBuf>,
+    token: String,
+) -> Result<()> {
+    let data = resolve_data_dir(&workdir, data)?;
+    let state = new_state(workdir.clone(), data, None).await?;
+    let config = Config::load(&workdir)?;
+    if config.agent.nfs.enabled {
+        crate::api_agent_nfs::start_locked(&config)
+            .await
+            .map_err(anyhow::Error::msg)?;
+    }
+    let listener = tokio::net::TcpListener::bind((host.as_str(), port)).await?;
+    println!(
+        "opencoder-server {} listening on http://{}",
+        opencoder_core::version::VERSION_LONG,
+        listener.local_addr()?
+    );
+    let (stop, stopped) = tokio::sync::oneshot::channel();
+    let server_state = Arc::clone(&state);
+    let mut server = tokio::spawn(async move {
+        axum::serve(
+            listener,
+            crate::build_app(server_state, Some(token), web)
+                .into_make_service_with_connect_info::<std::net::SocketAddr>(),
+        )
+        .with_graceful_shutdown(async {
+            let _ = stopped.await;
+        })
+        .await
+    });
+    tokio::select! {
+        result = &mut server => {
+            result.context("server task failed")??;
+            return Ok(());
+        }
+        result = shutdown_signal(state) => result?,
+    }
+    let _ = stop.send(());
+    match tokio::time::timeout(SERVER_SHUTDOWN_GRACE, &mut server).await {
+        Ok(result) => {
+            result.context("server task failed")??;
+            Ok(())
+        }
+        Err(_) => {
+            server.abort();
+            let _ = server.await;
+            anyhow::bail!("server connections did not drain within 30 seconds")
+        }
+    }
+}
+
+fn resolve_data_dir(workdir: &std::path::Path, explicit: Option<PathBuf>) -> Result<PathBuf> {
+    let data = explicit.unwrap_or_else(|| opencoder_core::data_dir_for(workdir).join("server-v2"));
+    anyhow::ensure!(data.is_absolute(), "server data directory must be absolute");
+    Ok(data)
+}
+
+async fn shutdown_signal(state: Arc<AppState>) -> Result<()> {
+    #[cfg(unix)]
+    {
+        let mut terminate =
+            match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+                Ok(signal) => signal,
+                Err(error) => {
+                    tracing::error!(%error, "install SIGTERM handler");
+                    let _ = tokio::signal::ctrl_c().await;
+                    crate::api::admission::freeze_cluster(&state).await?;
+                    state.hub.close_connections().await;
+                    return Ok(());
+                }
+            };
+        tokio::select! {
+            result = tokio::signal::ctrl_c() => {
+                if let Err(error) = result {
+                    tracing::error!(%error, "wait for Ctrl-C");
+                }
+            }
+            _ = terminate.recv() => {}
+        }
+    }
+    #[cfg(not(unix))]
+    if let Err(error) = tokio::signal::ctrl_c().await {
+        tracing::error!(%error, "wait for Ctrl-C");
+    }
+    crate::api::admission::freeze_cluster(&state).await?;
+    state.hub.close_connections().await;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_data_dir;
+    use std::path::{Path, PathBuf};
+
+    #[test]
+    fn explicit_data_dir_is_used_and_must_be_absolute() {
+        let explicit = PathBuf::from("/srv/opencoder/server");
+        assert_eq!(
+            resolve_data_dir(Path::new("/work"), Some(explicit.clone())).unwrap(),
+            explicit
+        );
+        assert!(resolve_data_dir(Path::new("/work"), Some(PathBuf::from("relative"))).is_err());
+    }
+
+    #[test]
+    fn omitted_data_dir_keeps_the_existing_server_v2_default() {
+        let workdir = Path::new("/tmp/opencoder-work");
+        assert_eq!(
+            resolve_data_dir(workdir, None).unwrap(),
+            opencoder_core::data_dir_for(workdir).join("server-v2")
+        );
+    }
+}

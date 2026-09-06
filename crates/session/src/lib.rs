@@ -9,6 +9,7 @@ pub mod fork;
 pub mod handoff;
 pub mod mcp;
 pub mod mention_resolve;
+pub mod process;
 pub mod prompt;
 pub mod resume;
 pub mod resume_helpers;
@@ -252,8 +253,13 @@ impl SessionState {
         working_dir: PathBuf,
     ) -> Self {
         let model = config.model_id().to_string();
-        let tools_path = crate::agent_pools::tools_path_for(&config, &agent.name);
-        let skill_roots = crate::agent_pools::skill_roots_for(&agent.name);
+        let (tools_path, skill_roots) =
+            opencoder_core::agent::scope::with_root_sync(config.agent.agents_dir.clone(), || {
+                (
+                    crate::agent_pools::tools_path_for(&config, &agent.name),
+                    crate::agent_pools::skill_roots_for(&agent.name),
+                )
+            });
         SessionState {
             id: id.into(),
             messages: Vec::new(),
@@ -547,3 +553,6 @@ pub(crate) fn cache_salt_for(session: &SessionState) -> Option<String> {
 #[cfg(test)]
 #[path = "lib_tests.rs"]
 mod lib_tests;
+pub mod loop_registry;
+
+pub mod extensions;

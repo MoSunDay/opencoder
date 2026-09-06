@@ -595,3 +595,54 @@ async fn cancel_drain_persists_inflight_step_artifacts_and_frames() {
     .unwrap();
     assert_eq!(meta["outcome"], json!("cancelled"));
 }
+
+#[tokio::test]
+async fn status_delivery_failure_is_returned_to_the_execution_owner() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    let app = Router::new()
+        .route(
+            "/api/nodes/dag/runs/:rid/events",
+            post(|| async { StatusCode::OK }),
+        )
+        .route(
+            "/api/nodes/dag/runs/:rid/status",
+            post(|| async {
+                (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "fixture status persistence unavailable",
+                )
+            }),
+        );
+    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let tmp = tempfile::tempdir().unwrap();
+    let f = fixture(&base, &tmp).await;
+    let run = claimed(DagSpec {
+        name: "invalid-cycle".into(),
+        description: None,
+        steps: vec![agent_step("a", &["b"], None), agent_step("b", &["a"], None)],
+    });
+    let (_, cancel_rx) = tokio::sync::watch::channel(false);
+    let result = execute_run(
+        RunDeps {
+            uplink: f.uplink,
+            exec: ExecDeps {
+                store: f.store,
+                client: Arc::new(MockChatClient::new()),
+                workdir: f.workdir,
+                config: f.config,
+            },
+            workflow_root: f.workflow_root,
+        },
+        run,
+        cancel_rx,
+    )
+    .await;
+    server.abort();
+    let error = format!("{:#}", result.unwrap_err());
+    assert!(error.contains("terminal status delivery failed"), "{error}");
+    assert!(
+        error.contains("fixture status persistence unavailable"),
+        "{error}"
+    );
+}

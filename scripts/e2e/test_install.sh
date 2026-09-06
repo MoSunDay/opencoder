@@ -131,6 +131,19 @@ else
 fi
 
 # --- summary ---------------------------------------------------------------
+if PYTHONPATH="$REPO_ROOT/scripts/platform" \
+  python3 "$REPO_ROOT/scripts/platform/test_install_bundle.py" >"$WORK/platform.log" 2>&1; then
+  ok "C9 platform bundle verification, atomic switch and paired rollback"
+else
+  fail "C9 platform bundle contracts"; cat "$WORK/platform.log"
+fi
+if PYTHONPATH="$REPO_ROOT/scripts/platform" \
+  python3 "$REPO_ROOT/scripts/platform/test_data_archive.py" >"$WORK/archive.log" 2>&1; then
+  ok "C10 frozen data backup and isolated restore"
+else
+  fail "C10 platform data archive contracts"; cat "$WORK/archive.log"
+fi
+
 echo
 echo "result: $passed passed, $failed failed"
 if [[ "$failed" -ne 0 ]]; then exit 1; fi

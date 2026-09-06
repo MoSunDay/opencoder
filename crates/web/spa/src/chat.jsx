@@ -1,5 +1,5 @@
 // chat.jsx — Tab 2 「会话交互」: node + dialog selectors, prompt composer,
-// signed SSE streaming, interrupt. Two dialog sources:
+// Bearer-authenticated SSE streaming, interrupt. Two dialog sources:
 //   remote  GET /api/nodes/:id/dialogs   (may 404 while that feature lands —
 //                                         caught, rendered as an empty list)
 //   local   GET /api/sessions?limit=50   (server hides node-task sessions)
@@ -34,6 +34,7 @@ import { Sender } from '@ant-design/x';
 import { Button, Input, Modal, Segmented, Space, Spin, Typography } from 'antd';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiGet, apiPost } from './api.js';
+import { newId } from './fleet/model.js';
 import { openStream } from './sse.js';
 import { consumedEchoText, emptyStream, ensurePendingEcho, reduceFrame, resyncState, turnsFromMessages, usageFromMessages, withUserTurn } from './reduce.js';
 import { TranscriptView } from './transcript.jsx';
@@ -69,6 +70,7 @@ export function ChatPanel({ onNotice }) {
   const [annoText, setAnnoText] = useState('');
 
   const streamRef = useRef(null);
+  const createAttempt = useRef(null);
   const lastTaskRef = useRef(new Map()); // dialogKey -> {task_id, session_id}
   const aliveRef = useRef(true);
 
@@ -266,7 +268,7 @@ export function ChatPanel({ onNotice }) {
     });
   }, [onNotice, reloadAfterDone]);
 
-  /// seq head → signed /events stream (sendLocal + 压缩 share the open path).
+  /// seq head → authenticated /events stream (sendLocal + 压缩 share the open path).
   /// `after` is the pre-POST seq head owned by the caller; when omitted we
   /// fall back to fetching /seq here (best-effort, no ordering guarantee —
   /// callers that need only-this-turn's events must snapshot BEFORE posting).
@@ -293,7 +295,9 @@ export function ChatPanel({ onNotice }) {
   const sendLocal = async (prompt, delivery) => {
     let sid = dialogSel;
     if (!sid) {
-      const j = await apiPost('/api/sessions', {});
+      createAttempt.current ||= { key: 'auto', id: newId('agent') };
+      const j = await apiPost('/api/sessions', { id: createAttempt.current.id });
+      createAttempt.current = null;
       sid = j.id;
       setDialogSel(sid);
       setDialogs((d) => [{
@@ -332,21 +336,15 @@ export function ChatPanel({ onNotice }) {
 
   const sendRemote = async (prompt) => {
     const body = { prompt };
-    // Best-effort resume: current dispatch schema has no session_id field, a
-    // future one may. If the server rejects it, retry with a bare prompt.
     if (dialogSel) {
       body.session_id = dialogSel;
+    } else {
+      const key = JSON.stringify([nodeSel, prompt]);
+      if (createAttempt.current?.key !== key) createAttempt.current = { key, id: newId('agent') };
+      body.id = createAttempt.current.id;
     }
-    let j;
-    try {
-      j = await apiPost('/api/nodes/' + encodeURIComponent(nodeSel) + '/tasks', body);
-    } catch (e) {
-      if (body.session_id && [400, 404, 409, 422, 500].includes(e && e.status)) {
-        j = await apiPost('/api/nodes/' + encodeURIComponent(nodeSel) + '/tasks', { prompt });
-      } else {
-        throw e;
-      }
-    }
+    const j = await apiPost('/api/nodes/' + encodeURIComponent(nodeSel) + '/tasks', body);
+    createAttempt.current = null;
     const taskId = j.task_id;
     const sessionId = j.session_id;
     lastTaskRef.current.set(dialogKey(nodeSel, dialogSel || sessionId), { task_id: taskId, session_id: sessionId });

@@ -269,6 +269,55 @@ pub struct ProjectTodoRunRecord {
     pub created_at: i64,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(untagged)]
+pub enum ProjectRunText {
+    Text(String),
+    Omitted {
+        omitted: bool,
+        total_bytes: u64,
+        read_via: &'static str,
+        field: String,
+    },
+}
+
+/// Inspect projection of one project todo with bounded text columns.
+#[derive(Debug, Clone, Serialize)]
+pub struct ProjectTodoSummary {
+    pub id: String,
+    pub milestone_id: Option<String>,
+    pub title: String,
+    pub draft: ProjectRunText,
+    pub plan_md: Option<ProjectRunText>,
+    pub status: ProjectTodoStatus,
+    pub agent: String,
+    pub active_session_id: Option<String>,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ProjectTodoRunSummary {
+    pub id: String,
+    pub todo_id: String,
+    pub kind: ProjectTodoRunKind,
+    pub version: i64,
+    pub plan_md: Option<ProjectRunText>,
+    pub output_md: Option<ProjectRunText>,
+    pub agent: String,
+    pub session_id: Option<String>,
+    pub status: ProjectTodoRunStatus,
+    pub started_at: i64,
+    pub finished_at: Option<i64>,
+    pub created_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ProjectTodoRunPage {
+    pub runs: Vec<ProjectTodoRunSummary>,
+    pub next_version: Option<i64>,
+}
+
 /// Partial update for [`ProjectTodoRunRecord`]; `None` fields stay unchanged.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ProjectTodoRunPatch {

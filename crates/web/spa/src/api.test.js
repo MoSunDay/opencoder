@@ -47,4 +47,19 @@ describe('authFetch base routing', () => {
     expect(getState().token).toBe('');
     expect(localStorage.getItem('oc_token')).toBeNull();
   });
+
+  it('keeps the server base when a 401 rejects the token', async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: false,
+      status: 401,
+      json: async () => ({ error: 'invalid bearer token' }),
+    });
+    setCredentials('wrong', 'http://fleet2.example.com');
+    await expect(apiPost('/api/executions', { kind: 'agent' })).rejects.toMatchObject({ status: 401 });
+    expect(getState().token).toBe('');
+    // The token was rejected, not the address: base survives the 401 so the
+    // reopened login modal (and a #base= link) still points where it should.
+    expect(getState().base).toBe('http://fleet2.example.com');
+    expect(localStorage.getItem('oc_base')).toBe('http://fleet2.example.com');
+  });
 });

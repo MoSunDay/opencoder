@@ -1,11 +1,18 @@
 // main.jsx — app shell: antd Layout with brand Header + connection badge,
-// left Sider menu, a Segmented secondary nav pinned to the top of Content,
-// Content switching per menu, and the login gate. Sider and Segmented both
-// derive from NAV_ITEMS so the two navigations can never drift apart.
+// left Sider (category Segmented on top, then the page Menu scoped to the
+// active category), Content switching per page, and the login gate. The
+// whole navigation derives from nav.js NAV_CATEGORIES; the active category
+// is derived from `page` itself, so there is no second navigation state to
+// keep in sync (mobile renders the same two levels as Segmented + Select).
+// Visual identity lives in theme.js (antd ThemeConfig) + app.css --oc-*;
+// no component here carries an inline color.
 
-import { Badge, Layout, Menu, Segmented, Select, Typography } from 'antd';
+import { Alert, Badge, Button, ConfigProvider, Layout, Menu, Segmented, Select, Tooltip, Typography } from 'antd';
+import zhCN from 'antd/locale/zh_CN';
+import dayjs from 'dayjs';
 import { useState } from 'react';
 import { createRoot } from 'react-dom/client';
+import 'dayjs/locale/zh-cn';
 import { AgentsPanel } from './agentsConfig.jsx';
 import { FleetBrainPanel as BrainPanel } from './fleet/brain.jsx';
 import { ChatPanel } from './chat.jsx';
@@ -13,43 +20,32 @@ import { DagPanel } from './dagPanel.jsx';
 import { EnvsPanel } from './envsPanel.jsx';
 import { LoginModal } from './login.jsx';
 import { FleetNodesPanel as NodesPanel } from './fleet/nodes.jsx';
+import { OwnerViewPanel } from './project/ownerViewPanel.jsx';
+import { ProgressPanel } from './project/progressPanel.jsx';
 import { ProjectPanel } from './project/project.jsx';
 import { FleetTeamsPanel as TeamPanel } from './fleet/teams.jsx';
 import { TodoPanel } from './todoPanel.jsx';
 import { TopicDetailPanel } from './topicDetail.jsx';
 import { ExecutionsPanel as TopicsPanel } from './fleet/executions.jsx';
 import './app.css';
-import { setState, useStore } from './store.js';
+import {
+  CATEGORY_OPTIONS,
+  categoryHome,
+  categoryOf,
+  menuKey,
+  menuOf,
+  selectOptionsOf,
+} from './nav.js';
+import { clearCredentials, setState, useStore } from './store.js';
+import { theme } from './theme.js';
+import { bootUrlCredential } from './boot.js';
+
+// zh-CN everywhere: antd built-ins (Modal/Popconfirm buttons) + dayjs
+// relative dates (fromNow lands in iteration 3).
+dayjs.locale('zh-cn');
 
 const { Header, Sider, Content } = Layout;
 const { Text } = Typography;
-
-/// One row per page: `menu` is the Sider label, `nav` the Segmented label.
-const NAV_ITEMS = [
-  { key: 'nodes', menu: 'Opencoder 列表', nav: '节点' },
-  { key: 'chat', menu: '会话交互', nav: '会话' },
-  { key: 'project', menu: '项目', nav: '项目' },
-  { key: 'dag', menu: 'DAG 工作流', nav: 'DAG' },
-  { key: 'todos', menu: 'TODO 管理', nav: 'TODO' },
-  { key: 'envs', menu: 'Env 管理', nav: 'Env' },
-  { key: 'agents', menu: 'Agent 配置', nav: 'Agents' },
-  { key: 'team', menu: '团队组队', nav: '组队' },
-  { key: 'topics', menu: '全部执行', nav: '执行' },
-  { key: 'brain', menu: '大脑调度', nav: '大脑' },
-];
-const MENU_ITEMS = NAV_ITEMS.map((i) => ({ key: i.key, label: i.menu }));
-const NAV_OPTIONS = NAV_ITEMS.map((i) => ({ value: i.key, label: i.nav }));
-
-/// Sider highlight: parameterized sub-pages fold back onto their parent.
-function menuKey(page) {
-  return page === 'topic_detail' ? 'topics' : (NAV_ITEMS.some((i) => i.key === page) ? page : 'nodes');
-}
-
-/// Segmented value: undefined on sub-pages so clicking the parent option
-/// still fires onChange and navigates up (same-value clicks never fire).
-function navValue(page) {
-  return NAV_ITEMS.some((i) => i.key === page) ? page : undefined;
-}
 
 const CONN_BADGE = {
   ok: { status: 'success', text: '已连接' },
@@ -60,23 +56,38 @@ const CONN_BADGE = {
 function ConnectionBadge() {
   const { conn } = useStore();
   const b = CONN_BADGE[conn] || CONN_BADGE.init;
-  return <Badge status={b.status} text={<Text style={{ color: 'rgba(255,255,255,0.85)' }}>{b.text}</Text>} />;
+  return <Badge status={b.status} text={b.text} />;
+}
+
+/// Server base readout for the Header. Empty base = same-origin requests,
+/// which is the default embedded deployment; spell that out instead of an
+/// awkward blank chip.
+function ServerBase() {
+  const { base } = useStore();
+  const sameOrigin = !base;
+  return (
+    <Tooltip title={sameOrigin ? '使用同源请求（未配置外部地址）' : 'API 请求指向该地址'}>
+      <Text type="secondary" style={{ fontSize: 12 }}>{sameOrigin ? '同源' : base}</Text>
+    </Tooltip>
+  );
 }
 
 /// Page components keyed by store `page` — one map instead of a ternary
-/// chain so adding a tab is a single row (sub-pages fold onto their parent).
+/// chain so adding a page stays one line.
 const PANELS = {
-  brain: BrainPanel,
   chat: ChatPanel,
+  team: TeamPanel,
+  topics: TopicsPanel,
+  topic_detail: TopicDetailPanel,
   project: ProjectPanel,
+  progress: ProgressPanel,
+  ownerview: OwnerViewPanel,
   dag: DagPanel,
   todos: TodoPanel,
   envs: EnvsPanel,
   agents: AgentsPanel,
-  team: TeamPanel,
-  topics: TopicsPanel,
-  topic_detail: TopicDetailPanel,
   nodes: NodesPanel,
+  brain: BrainPanel,
 };
 
 function PageBody({ page, onNotice }) {
@@ -84,9 +95,19 @@ function PageBody({ page, onNotice }) {
   return <Panel onNotice={onNotice} />;
 }
 
+/// Pages whose panels render bare flex surfaces (no Card of their own).
+/// They get a white sheet (.fleet-sheet) so they still read as a panel now
+/// that Content sits on the gray layout canvas. Card-bearing pages float
+/// their own white surfaces directly. chat.jsx is touched lightly in a
+/// later iteration; this keeps the shell visually whole meanwhile.
+const SHEET_PAGES = new Set(['chat']);
+
 function App() {
   const { token, page } = useStore();
   const [notice, setNotice] = useState('');
+  // Active category is pure derivation from `page` — clicking a category
+  // simply navigates to its home page (nav.js), no extra store field.
+  const category = categoryOf(page);
 
   // Direct nav lands on a fresh view: the topics tab drops the team filter
   // and any topic-detail params (组队's 查看话题 re-arms the filter via
@@ -100,49 +121,79 @@ function App() {
   };
 
   return (
-    <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
-      <Layout style={{ flex: 1, minHeight: 0 }}>
-        <Header className="fleet-header" style={{ display: 'flex', alignItems: 'center', gap: 24, background: '#001529', paddingLeft: 24 }}>
-          <span style={{ color: '#fff', fontSize: 17, fontWeight: 700, letterSpacing: 1 }}>
-            ⛵ Opencoder Fleet
-          </span>
-          <ConnectionBadge />
-        </Header>
-        <Layout style={{ minHeight: 0 }}>
-          <Sider className="fleet-sidebar" width={200} theme="dark">
-            <Menu
-              mode="inline"
-              theme="dark"
-              selectedKeys={[menuKey(page)]}
-              items={MENU_ITEMS}
-              onClick={({ key }) => goPage(key)}
-              style={{ height: '100%', borderRight: 0 }}
-            />
-          </Sider>
-          <Content className="fleet-content" style={{ minWidth: 0, padding: 20, overflow: 'auto', background: '#fff' }}>
-            <Select className="fleet-mobile-nav" aria-label="页面导航" value={menuKey(page)} options={MENU_ITEMS.map(({ key, label }) => ({ value: key, label }))} onChange={goPage} />
-            <Segmented
-              className="fleet-desktop-nav"
-              value={navValue(page)}
-              options={NAV_OPTIONS}
-              onChange={(v) => goPage(v)}
-              style={{ marginBottom: 16 }}
-            />
-            {notice ? (
-              <div style={{ marginBottom: 12 }}>
-                <Typography.Text type="danger">{notice}</Typography.Text>
+    <ConfigProvider theme={theme} locale={zhCN}>
+      <div className="fleet-root">
+        <Layout className="fleet-layout">
+          <Header className="fleet-header">
+            <span className="fleet-brand">⛵ Opencoder Fleet</span>
+            <div className="fleet-header-side">
+              <ConnectionBadge />
+              <ServerBase />
+              <Button size="small" type="text" onClick={clearCredentials}>退出</Button>
+            </div>
+          </Header>
+          <Layout style={{ minHeight: 0 }}>
+            <Sider className="fleet-sidebar" width={200} theme="light">
+              <div className="fleet-nav-category">
+                <Segmented
+                  block
+                  value={category}
+                  options={CATEGORY_OPTIONS}
+                  onChange={(v) => goPage(categoryHome(v))}
+                />
               </div>
-            ) : null}
-            {token ? <PageBody page={page} onNotice={setNotice} /> : null}
-          </Content>
+              <Menu
+                mode="inline"
+                theme="light"
+                selectedKeys={[menuKey(page)]}
+                items={menuOf(category)}
+                onClick={({ key }) => goPage(key)}
+                style={{ borderRight: 0 }}
+              />
+            </Sider>
+            <Content className="fleet-content">
+              <Segmented
+                className="fleet-mobile-nav"
+                block
+                value={category}
+                options={CATEGORY_OPTIONS}
+                onChange={(v) => goPage(categoryHome(v))}
+              />
+              <Select
+                className="fleet-mobile-nav"
+                aria-label="页面导航"
+                value={menuKey(page)}
+                options={selectOptionsOf(category)}
+                onChange={goPage}
+              />
+              {notice ? (
+                <Alert
+                  className="fleet-notice"
+                  type="error"
+                  showIcon
+                  closable={{ 'aria-label': '关闭' }}
+                  title={notice}
+                  onClose={() => setNotice('')}
+                />
+              ) : null}
+              {token ? (
+                <div className={SHEET_PAGES.has(page) ? 'fleet-sheet' : undefined}>
+                  <PageBody page={page} onNotice={setNotice} />
+                </div>
+              ) : null}
+            </Content>
+          </Layout>
         </Layout>
-      </Layout>
-      <LoginModal open={!token} onConnected={() => setNotice('')} />
-    </div>
+        <LoginModal open={!token} onConnected={() => setNotice('')} />
+      </div>
+    </ConfigProvider>
   );
 }
 
 export default App;
+
+// Link login bootstraps BEFORE mount (see boot.js — stale-token 401 race).
+bootUrlCredential();
 
 // Mount the app — without this the shell serves an empty #root in every
 // browser (caught by real-browser acceptance, guarded by an html.rs test).

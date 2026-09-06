@@ -2,7 +2,9 @@ import { Alert, Button, Collapse, Descriptions, Drawer, Empty, Input, Progress, 
 import { useCallback, useEffect, useState } from 'react';
 import { apiGet, apiPost } from '../api.js';
 import { openStream } from '../sse.js';
-import { KIND_LABELS, STATUS_COLORS, STATUS_LABELS, appendMessagePage, executionActions, messagePagePath, textOf } from './model.js';
+import { StatusTag } from '../ui/statusTag.jsx';
+import { TimeText } from '../ui/timeText.jsx';
+import { KIND_LABELS, appendMessagePage, executionActions, messagePagePath, textOf } from './model.js';
 import { Artifacts } from './artifacts.jsx';
 import { DetailFields, PayloadWindows } from './detail/fields.jsx';
 import { WorkloadDetail } from './detail/workloads.jsx';
@@ -119,8 +121,8 @@ export function ExecutionDetail({ id, summary, onClose, onNotice }) {
     {execution && <Descriptions size="small" items={[
       { key: 'node', label: '所属节点', children: execution.node_id },
       { key: 'kind', label: '类型', children: KIND_LABELS[kind] || kind },
-      { key: 'status', label: '状态', children: <Tag color={STATUS_COLORS[execution.status]}>{STATUS_LABELS[execution.status] || execution.status}</Tag> },
-      { key: 'created', label: '创建时间', children: Number.isFinite(execution.created_at) ? new Date(execution.created_at).toLocaleString() : '—' },
+      { key: 'status', label: '状态', children: <StatusTag status={execution.status} /> },
+      { key: 'created', label: '创建时间', children: <TimeText ts={execution.created_at} /> },
     ]} />}
     <Space wrap style={{ margin: '12px 0' }}>
       <Button onClick={load}>刷新明细</Button>

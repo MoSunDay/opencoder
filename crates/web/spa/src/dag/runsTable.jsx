@@ -7,7 +7,7 @@
 import { Button, Popconfirm, Space, Table, Tag, Tooltip, Typography } from 'antd';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiGet, apiPost } from '../api.js';
-import { absTime, relTime } from '../format.js';
+import { TimeText } from '../ui/timeText.jsx';
 import { CANCELLABLE, NodeBadge, RunStatusTag } from './runBits.jsx';
 import { useStore } from '../store.js';
 import { RunDetail } from './runDetail.jsx';
@@ -144,25 +144,14 @@ export function RunsTable({ onNotice, refreshSignal, focusRunId, onDetailClosed 
       dataIndex: 'created_at',
       key: 'created_at',
       width: 130,
-      render: (ts) => (
-        <Tooltip title={absTime(ts)}>
-          <span>{relTime(ts)}</span>
-        </Tooltip>
-      ),
+      render: (ts) => <TimeText ts={ts} />,
     },
     {
       title: '结束时间',
       dataIndex: 'finished_at',
       key: 'finished_at',
       width: 130,
-      render: (ts) =>
-        ts ? (
-          <Tooltip title={absTime(ts)}>
-            <span>{relTime(ts)}</span>
-          </Tooltip>
-        ) : (
-          <Text type="secondary">—</Text>
-        ),
+      render: (ts) => (ts ? <TimeText ts={ts} /> : <Text type="secondary">—</Text>),
     },
     {
       title: '操作',

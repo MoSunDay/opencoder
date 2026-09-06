@@ -8,6 +8,7 @@ import { Button, Card, Col, Form, Input, Popconfirm, Row, Space, Table, Tabs, Ta
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiDel, apiGet, apiPost, apiPut } from './api.js';
 import { newId } from './fleet/model.js';
+import { PageShell } from './shell/pageShell.jsx';
 import { TodoEditor } from './todoEditor.jsx';
 import { TodoRunsPanel } from './todoRunsPanel.jsx';
 

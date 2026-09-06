@@ -7,6 +7,7 @@
 import { Button, Card, Col, Empty, Form, Input, Popconfirm, Row, Select, Space, Table, Tag, Typography, message } from 'antd';
 import { useCallback, useEffect, useState } from 'react';
 import { apiDel, apiGet, apiPost, apiPut } from './api.js';
+import { PageShell } from './shell/pageShell.jsx';
 
 const { TextArea } = Input;
 const { Text } = Typography;
@@ -277,9 +278,10 @@ export function EnvsPanel({ onNotice }) {
   };
 
   return (
-    <Row gutter={16}>
-      <Col span={8}>
-        <Card size="small" title="Env 列表" extra={<Button size="small" onClick={() => setCreating((v) => !v)}>{creating ? '收起' : '新建'}</Button>}>
+    <PageShell page="envs">
+      <Row gutter={16}>
+        <Col span={8}>
+          <Card size="small" title="Env 列表" extra={<Button size="small" onClick={() => setCreating((v) => !v)}>{creating ? '收起' : '新建'}</Button>}>
           {creating ? (
             <CreateEnvForm
               onNotice={onNotice}
@@ -322,6 +324,7 @@ export function EnvsPanel({ onNotice }) {
           : <Card size="small"><Empty description="点击左侧 env 进行编辑" /></Card>}
         <ToolsSection tools={tools} onNotice={onNotice} onToolsChanged={loadTools} />
       </Col>
-    </Row>
+      </Row>
+    </PageShell>
   );
 }

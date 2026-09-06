@@ -1,8 +1,11 @@
-import { Button, Form, Input, Select, Space, Table, Tag } from 'antd';
+import { Button, Form, Input, Select, Space, Table } from 'antd';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiGet, apiPost } from '../api.js';
+import { PageShell } from '../shell/pageShell.jsx';
+import { StatusTag } from '../ui/statusTag.jsx';
+import { TimeText } from '../ui/timeText.jsx';
 import { ExecutionDetail } from './detail.jsx';
-import { CREATABLE_KINDS, KIND_LABELS, KINDS, STATUS_COLORS, STATUS_LABELS, executionPagePath, newId, nodeOptions } from './model.js';
+import { CREATABLE_KINDS, KIND_LABELS, KINDS, executionPagePath, newId, nodeOptions } from './model.js';
 
 export function ExecutionsPanel({ onNotice }) {
   const [rows, setRows] = useState([]); const [nodes, setNodes] = useState([]);
@@ -46,7 +49,7 @@ export function ExecutionsPanel({ onNotice }) {
     catch (e) { onNotice(`${e.message}；保持内容不变再次启动，会继续确认同一次执行`); }
     finally { setBusy(false); }
   };
-  return <>
+  return <PageShell page="topics">
     <Form form={form} layout="vertical" onFinish={submit} initialValues={{ node: '' }}>
       <Space align="start" wrap>
         <Form.Item label="执行类型"><Select style={{ width: 150 }} value={kind} onChange={setKind} options={CREATABLE_KINDS} /></Form.Item>
@@ -58,13 +61,13 @@ export function ExecutionsPanel({ onNotice }) {
     </Form>
     <Space style={{ margin: '20px 0 12px' }}><Select aria-label="执行类型筛选" style={{ width: 180 }} value={filter} onChange={setFilter} options={[{ value: '', label: '全部执行' }, ...KINDS]} /><Button onClick={() => load('reset')}>刷新</Button></Space>
     <Table scroll={{ x: 'max-content' }} rowKey="id" dataSource={rows} size="small" columns={[
-      { title: 'ID', dataIndex: 'id', render: (id, row) => <Button type="link" onClick={() => setDetail(row)}>{id}</Button> },
+      { title: 'ID', dataIndex: 'id', render: (id, row) => <Button type="link" style={{ fontFamily: 'var(--oc-mono, monospace)' }} onClick={() => setDetail(row)}>{id}</Button> },
       { title: '类型', dataIndex: 'kind', render: (v) => KIND_LABELS[v] || v },
-      { title: '创建时间', dataIndex: 'created_at', render: (v) => new Date(v).toLocaleString() },
-      { title: '所属节点', dataIndex: 'node_id', render: (id) => <Space>{id}<Tag color={nodes.find((node) => node.id === id)?.online ? 'green' : 'red'}>{nodes.find((node) => node.id === id)?.online ? '在线' : '离线'}</Tag></Space> },
-      { title: '状态', dataIndex: 'status', render: (v) => <Tag color={STATUS_COLORS[v]}>{STATUS_LABELS[v] || v}</Tag> },
+      { title: '创建时间', dataIndex: 'created_at', render: (v) => <TimeText ts={v} /> },
+      { title: '所属节点', dataIndex: 'node_id', render: (id) => <Space size={4}><span style={{ fontFamily: 'var(--oc-mono, monospace)' }}>{id}</span><StatusTag status={nodes.find((node) => node.id === id)?.online ? 'online' : 'offline'} /></Space> },
+      { title: '状态', dataIndex: 'status', render: (v) => <StatusTag status={v} /> },
     ]} />
     {more && <Button block loading={loadingMore} onClick={() => load('append')}>加载更早的执行</Button>}
     {detail && <ExecutionDetail id={detail.id} summary={detail} onClose={() => setDetail(null)} onNotice={onNotice} />}
-  </>;
+  </PageShell>;
 }

@@ -1,19 +1,135 @@
 /* Base chrome for the fleet console. Component styling is antd + cssinjs
-   (antd 5); this only fixes page-level defaults and monospace transcript
-   rhythm. Emitted as dist/static/app.css by the Vite build contract. */
+   (antd 6, tokens from src/theme.js); this sheet only fixes page-level
+   defaults, the shell surfaces and the DAG node visuals. Emitted as
+   dist/static/app.css by the Vite build contract. */
+
+/* Fleet palette — the CSS twin of src/theme.js (antd ThemeConfig). The two
+   halves cannot read each other (cssinjs vs raw CSS), so they are kept in
+   lockstep by hand: change a color here AND in theme.js, or neither. */
+:root {
+  --oc-primary: #1677ff;
+  --oc-primary-rgb: 22, 119, 255;
+  --oc-primary-bg: #e6f4ff;
+  --oc-bg-layout: #f5f5f5;
+  --oc-panel-bg: #ffffff;
+  --oc-border: #f0f0f0;
+  --oc-border-strong: #d9d9d9;
+  --oc-fill-subtle: #fafafa;
+  --oc-text: rgba(0, 0, 0, 0.88);
+  --oc-text-secondary: rgba(0, 0, 0, 0.65);
+  --oc-text-tertiary: #8c8c8c;
+  --oc-success: #52c41a;
+  --oc-success-bg: #f6ffed;
+  --oc-error: #ff4d4f;
+  --oc-error-bg: #fff2f0;
+  /* Monospace stack for id / uuid / session columns (raw identifiers, not
+     prose). Referenced as var(--oc-mono, monospace) from inline styles. */
+  --oc-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas,
+    'Liberation Mono', monospace;
+}
+
 html,
 body,
 #root {
   margin: 0;
   padding: 0;
   height: 100%;
-  background: #fff;
+  background: var(--oc-bg-layout);
 }
 
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
     'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
   -webkit-font-smoothing: antialiased;
+}
+
+/* ===== App shell — light unified: white header/sider on a gray canvas.
+   Colors mirror theme.js Layout tokens; the borders live here because antd
+   has no header/sider border token. ===== */
+.fleet-root {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+.fleet-layout { flex: 1; min-height: 0; }
+.fleet-header {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  background: var(--oc-panel-bg);
+  border-bottom: 1px solid var(--oc-border);
+}
+.fleet-brand {
+  color: var(--oc-text);
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  white-space: nowrap;
+}
+.fleet-header-side {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.fleet-sidebar {
+  background: var(--oc-panel-bg);
+  border-right: 1px solid var(--oc-border);
+}
+.fleet-content {
+  padding: 20px;
+  min-width: 0;
+  overflow: auto;
+}
+.fleet-notice { margin-bottom: 12px; }
+
+/* ===== Unified page header (PageShell) — title + secondary description on
+   the left, actions slot on the right. Copy comes from nav.js PAGE_META;
+   this is pure layout, colors stay with antd tokens. ===== */
+.oc-page {
+  min-width: 0;
+}
+.oc-page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+.oc-page-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.oc-page-title.ant-typography {
+  margin: 0;
+}
+.oc-page-desc {
+  font-size: 13px;
+}
+.oc-page-extra {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+@media (max-width: 767px) {
+  .oc-page-header { flex-direction: column; align-items: stretch; }
+  .oc-page-extra { justify-content: flex-end; }
+}
+
+/* White sheet for panels that render bare surfaces without their own Card
+   (chat today) — keeps them reading as a panel on the gray canvas. */
+.fleet-sheet {
+  height: 100%;
+  min-height: 0;
+  box-sizing: border-box;
+  background: var(--oc-panel-bg);
+  border: 1px solid var(--oc-border);
+  border-radius: 8px;
+  padding: 12px;
 }
 
 /* Transcript long-line handling inside collapsible tool blocks. */
@@ -26,7 +142,7 @@ body {
 .execution-messages { margin-top: 16px; }
 .execution-message {
   padding: 12px 0;
-  border-bottom: 1px solid #f0f0f0;
+  border-bottom: 1px solid var(--oc-border);
   overflow-wrap: anywhere;
 }
 .execution-message-large,
@@ -36,9 +152,9 @@ body {
   max-height: 360px;
   overflow: auto;
   padding: 12px;
-  border: 1px solid #f0f0f0;
+  border: 1px solid var(--oc-border);
   border-radius: 6px;
-  background: #fafafa;
+  background: var(--oc-fill-subtle);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -50,8 +166,8 @@ body {
   min-height: 52px;
   padding: 8px 10px;
   border-radius: 8px;
-  border: 1.5px solid #d9d9d9;
-  background: #fafafa;
+  border: 1.5px solid var(--oc-border-strong);
+  background: var(--oc-fill-subtle);
   font-size: 12px;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
 }
@@ -68,31 +184,31 @@ body {
 }
 .dag-node-kind {
   margin-left: auto;
-  color: #8c8c8c;
+  color: var(--oc-text-tertiary);
   font-size: 11px;
 }
 .dag-node-status {
   margin-top: 4px;
-  color: #595959;
+  color: var(--oc-text-secondary);
 }
-.dag-node--pending { border-color: #d9d9d9; background: #fafafa; }
+.dag-node--pending { border-color: var(--oc-border-strong); background: var(--oc-fill-subtle); }
 .dag-node--running {
-  border-color: #1677ff;
-  background: #e6f4ff;
+  border-color: var(--oc-primary);
+  background: var(--oc-primary-bg);
   animation: dag-node-pulse 1.6s ease-in-out infinite;
 }
-.dag-node--done { border-color: #52c41a; background: #f6ffed; }
-.dag-node--error { border-color: #ff4d4f; background: #fff2f0; }
+.dag-node--done { border-color: var(--oc-success); background: var(--oc-success-bg); }
+.dag-node--error { border-color: var(--oc-error); background: var(--oc-error-bg); }
 .dag-node--skipped {
-  border-color: #d9d9d9;
-  background: #f5f5f5;
-  color: #8c8c8c;
+  border-color: var(--oc-border-strong);
+  background: var(--oc-bg-layout);
+  color: var(--oc-text-tertiary);
   border-style: dashed;
 }
-.dag-node--selected { box-shadow: 0 0 0 2px #1677ff; }
+.dag-node--selected { box-shadow: 0 0 0 2px var(--oc-primary); }
 @keyframes dag-node-pulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(22, 119, 255, 0.35); }
-  50% { box-shadow: 0 0 0 6px rgba(22, 119, 255, 0.08); }
+  0%, 100% { box-shadow: 0 0 0 0 rgba(var(--oc-primary-rgb), 0.35); }
+  50% { box-shadow: 0 0 0 6px rgba(var(--oc-primary-rgb), 0.08); }
 }
 
 /* Detail layout: graph left, event feed right. */
@@ -105,7 +221,7 @@ body {
 .dag-detail-graph {
   flex: 1 1 62%;
   min-width: 0;
-  border: 1px solid #f0f0f0;
+  border: 1px solid var(--oc-border);
   border-radius: 8px;
   overflow: hidden;
 }
@@ -131,13 +247,13 @@ body {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
-  border: 1px solid #f0f0f0;
+  border: 1px solid var(--oc-border);
   border-radius: 8px;
   padding: 4px 8px;
 }
 .dag-event {
   padding: 8px 4px;
-  border-bottom: 1px dashed #f0f0f0;
+  border-bottom: 1px dashed var(--oc-border);
 }
 .dag-event:last-child { border-bottom: none; }
 .dag-event-head {
@@ -148,12 +264,12 @@ body {
 .dag-event-extra {
   margin-top: 4px;
   font-size: 12px;
-  color: #595959;
+  color: var(--oc-text-secondary);
 }
 .dag-event-pre {
   margin: 6px 0 0;
   padding: 6px 8px;
-  background: #fafafa;
+  background: var(--oc-fill-subtle);
   border-radius: 6px;
   font-size: 12px;
   white-space: pre-wrap;
@@ -162,13 +278,14 @@ body {
   overflow-y: auto;
 }
 
-/* Keep navigation and controls reachable on narrow consoles. */
+/* Keep navigation and controls reachable on narrow consoles. Two-level IA:
+   the category switch sits above the scoped Sider menu (fleet-nav-category);
+   the same two levels re-render as Segmented + Select rows on mobile. */
+.fleet-nav-category { padding: 12px 12px 8px; }
 .fleet-mobile-nav { display: none; }
-.fleet-desktop-nav { max-width: 100%; overflow-x: auto; }
 @media (max-width: 767px) {
   .fleet-sidebar { display: none; }
-  .fleet-mobile-nav { display: inline-flex; width: 100%; margin-bottom: 16px; }
-  .fleet-desktop-nav { display: none; }
+  .fleet-mobile-nav { display: inline-flex; width: 100%; margin-bottom: 8px; }
   .fleet-header { gap: 12px !important; padding: 0 12px !important; }
   .fleet-content { padding: 12px !important; }
   .dag-detail { height: auto; flex-direction: column; }

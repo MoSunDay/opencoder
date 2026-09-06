@@ -19,7 +19,6 @@ let state = {
   preselectNode: null, // node id the fleet tab asked chat to open
   nodes: [], // last fleet snapshot shared between tabs
   conn: 'init', // 'init' | 'ok' | 'fail'
-  topicsTeamFilter: null, // team name the topics tab is filtered to (null = all)
   topicDetail: null, // {teamName, topicId} while page === 'topic_detail'
 };
 
@@ -68,7 +67,7 @@ export function clearCredentials() {
   localStorage.removeItem(BASE_KEY);
   setState({
     token: '', base: embeddedBase(), conn: 'init', nodes: [], preselectNode: null,
-    topicsTeamFilter: null, topicDetail: null,
+    topicDetail: null,
   });
 }
 
@@ -80,7 +79,7 @@ export function clearToken() {
   localStorage.removeItem(TOKEN_KEY);
   setState({
     token: '', conn: 'init', nodes: [], preselectNode: null,
-    topicsTeamFilter: null, topicDetail: null,
+    topicDetail: null,
   });
 }
 
@@ -110,24 +109,12 @@ export function clearPreselect() {
   }
 }
 
-/// 组队 tab "查看话题" → jump to the topics tab pre-filtered to that team
-/// (same param-riding pattern as openChatForNode).
-export function openTopicsForTeam(teamName) {
-  setState({ page: 'topics', topicsTeamFilter: teamName || null, topicDetail: null });
-}
-
 /// Topics row "详情" → topic detail page; {teamName, topicId} ride the store.
 export function openTopicDetail(teamName, topicId) {
   setState({ page: 'topic_detail', topicDetail: { teamName, topicId } });
 }
 
-/// Topic detail back button → topic list (keeps the team filter intact).
+/// Topic detail back button → topic list (drops the detail params).
 export function closeTopicDetail() {
   setState({ page: 'topics', topicDetail: null });
-}
-
-/// The topics tab's filter Select writes the same field
-/// openTopicsForTeam arms, keeping one source of truth.
-export function setTopicsTeamFilter(teamName) {
-  setState({ topicsTeamFilter: teamName || null });
 }

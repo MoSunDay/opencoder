@@ -104,6 +104,11 @@ mtime 单通道漏检的直接后果，以本注记更正而非回改原文。
 opencoder-server` 二进制（21:41）早于 4519f75 的 dist（23:09），下文「测试覆盖」
 表所记「6/6 PASS」为上一形态（6 步）旧数据，标注**待补跑**，结果以补跑回填为准。
 
+**补跑回填（23:30）**：release 重编（二进制 23:30:11 > dist 23:09）后
+`node scripts/acceptance/link_login.js` **7/7 PASS**（exit 0，全部步骤含第 7 步
+「错 token + base 链接：401 清 token 保留 base」），下表已同步 6/6 → 7/7，
+特性验收链最后一环闭环。
+
 ## Impact Surface
 
 - `crates/web/spa/src/{boot,urlCredential,store,login,main}.jsx?/js`、
@@ -129,7 +134,7 @@ opencoder-server` 二进制（21:41）早于 4519f75 的 dist（23:09），下�
 |------|------|------|
 | URL 凭证捕获/擦除纯函数 | `urlCredential.test.js` 6 用例 | unit（纯 node） |
 | hash/query 链接免弹窗登录 + 401 回落 + 竞争覆盖 + base-only 对称采纳 + embeddedBase 烘焙 | `app.dom.test.jsx` DOM 用例 | integration（jsdom） |
-| 真机全链路（真实 server + chromium，6 步：hash 登录/query 保留参数/覆盖陈旧 token/错 token 回落/手动登录回归/base-only） | `scripts/acceptance/link_login.js` 6/6 PASS | e2e |
+| 真机全链路（真实 server + chromium，7 步：hash 登录/query 保留参数/覆盖陈旧 token/错 token 回落/手动登录回归/base-only/错 token+base 保留 base） | `scripts/acceptance/link_login.js` **7/7 PASS**（23:30 补跑，替换旧记 6/6） | e2e |
 | dist 与 src 一致性 | `scripts/check-spa-drift.sh` no drift | 构建门禁 |
 | web crate 回归 | `cargo test -p opencoder-web` 275/275 | Rust |
 | SPA 全量 | vitest 383/383 | JS 全量 |

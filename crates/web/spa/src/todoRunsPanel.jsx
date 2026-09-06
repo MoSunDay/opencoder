@@ -11,6 +11,7 @@ import { openStream } from './sse.js';
 import { ExecutionDetail } from './fleet/detail.jsx';
 import { StatusTag } from './ui/statusTag.jsx';
 import { TimeText } from './ui/timeText.jsx';
+import { err } from './notice.js';
 
 const { Text } = Typography;
 
@@ -81,7 +82,7 @@ function EventsFeed({ workflowId, onNotice, onTerminal }) {
       },
       onStatus: (st) => {
         if (st === 'failed' && !stopped && onNotice) {
-          onNotice('TODO 事件流连接失败（已重试 5 次）');
+          onNotice(err('TODO 事件流连接失败（已重试 5 次）'));
         }
       },
     });
@@ -118,7 +119,7 @@ function WorkflowDetail({ workflowId, summary, onNotice, onMutated }) {
       setDetail(j || null);
     } catch (e) {
       if (onNotice) {
-        onNotice('获取工作流详情失败: ' + (e && e.message));
+        onNotice(err('获取工作流详情失败: ' + (e && e.message)));
       }
     }
   }, [workflowId, onNotice]);
@@ -143,7 +144,7 @@ function WorkflowDetail({ workflowId, summary, onNotice, onMutated }) {
       }
     } catch (e) {
       if (onNotice) {
-        onNotice('中断失败: ' + (e && e.message)); // 500 = 已终态
+        onNotice(err('中断失败: ' + (e && e.message))); // 500 = 已终态
       }
     }
   };
@@ -157,7 +158,7 @@ function WorkflowDetail({ workflowId, summary, onNotice, onMutated }) {
       }
     } catch (e) {
       if (onNotice) {
-        onNotice('恢复失败: ' + (e && e.message)); // 409 = 运行中
+        onNotice(err('恢复失败: ' + (e && e.message))); // 409 = 运行中
       }
     }
   };
@@ -168,7 +169,7 @@ function WorkflowDetail({ workflowId, summary, onNotice, onMutated }) {
       load();
       if (onMutated) onMutated();
     } catch (e) {
-      if (onNotice) onNotice('取消失败: ' + (e && e.message));
+      if (onNotice) onNotice(err('取消失败: ' + (e && e.message)));
     }
   };
 
@@ -236,7 +237,7 @@ export function TodoRunsPanel({ onNotice, focusWorkflowId, onFocusConsumed }) {
       rowsRef.current = list;
     } catch (e) {
       if (!silent && alive.current && onNotice) {
-        onNotice('获取工作流列表失败: ' + (e && e.message));
+        onNotice(err('获取工作流列表失败: ' + (e && e.message)));
       }
     } finally {
       if (alive.current && !silent) {

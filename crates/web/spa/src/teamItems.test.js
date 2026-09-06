@@ -1,6 +1,7 @@
 // teamItems.test.js — pure-node mapping rules for the 组队/话题 tabs (no
 // DOM, no JSX). Guards the team/topic → display-item contract that
-// teamPanel / topicsPanel / topicDetail render.
+// fleet/teams.jsx, fleet/executions.jsx (plus the legacy deep view
+// topicDetail.jsx) render.
 
 import { describe, expect, it } from 'vitest';
 import {

@@ -8,6 +8,7 @@ import { Button, Form, Input, Modal, Popconfirm, Select, Space, Table, Tooltip, 
 import { useState } from 'react';
 import { apiDel, apiPost } from '../api.js';
 import { TodoStatusTag } from './labels.jsx';
+import { err, info, ok } from '../notice.js';
 
 const { TextArea } = Input;
 const { Text } = Typography;
@@ -51,11 +52,11 @@ function CreateTodoModal({ open, overview, onCancel, onNotice, onCreated }) {
         ...(v.milestone_id ? { milestone_id: v.milestone_id } : {}),
       });
       form.resetFields();
-      onNotice('TODO 已创建，可继续生成 Plan');
+      onNotice(ok('TODO 已创建，可继续生成 Plan'));
       onCreated(rec && rec.id);
       return true;
     } catch (e) {
-      onNotice('新建 TODO 失败: ' + (e && e.message));
+      onNotice(err('新建 TODO 失败: ' + (e && e.message)));
       return false;
     } finally {
       setSaving(false);
@@ -100,32 +101,32 @@ export function TodosTab({ overview, refresh, openTodo, onNotice }) {
   const genPlan = async (t) => {
     try {
       await apiPost(todoPath(t.id) + '/plan');
-      onNotice(`已开始为「${t.title}」生成 Plan`);
+      onNotice(info(`已开始为「${t.title}」生成 Plan`));
       refresh();
       openTodo(t.id);
     } catch (e) {
-      onNotice('生成 Plan 失败: ' + (e && e.message));
+      onNotice(err('生成 Plan 失败: ' + (e && e.message)));
     }
   };
 
   const execute = async (t) => {
     try {
       await apiPost(todoPath(t.id) + '/execute');
-      onNotice(`「${t.title}」已开始执行`);
+      onNotice(info(`「${t.title}」已开始执行`));
       refresh();
       openTodo(t.id);
     } catch (e) {
-      onNotice('执行失败: ' + (e && e.message));
+      onNotice(err('执行失败: ' + (e && e.message)));
     }
   };
 
   const remove = async (t) => {
     try {
       await apiDel(todoPath(t.id));
-      onNotice('TODO 已删除');
+      onNotice(ok('TODO 已删除'));
       refresh();
     } catch (e) {
-      onNotice('删除 TODO 失败: ' + (e && e.message));
+      onNotice(err('删除 TODO 失败: ' + (e && e.message)));
     }
   };
 

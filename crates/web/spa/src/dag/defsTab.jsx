@@ -11,6 +11,7 @@ import { TimeText } from '../ui/timeText.jsx';
 import { useStore } from '../store.js';
 import { newId, nodeOptions as buildNodeOptions } from '../fleet/model.js';
 import { DefEditor } from './defEditor.jsx';
+import { err } from '../notice.js';
 
 const { Text } = Typography;
 
@@ -58,7 +59,7 @@ export function DefsTab({ onNotice, onDispatched }) {
         setRows(Array.isArray(list) ? list : []);
       } catch (e) {
         if (!silent && alive.current && onNotice) {
-          onNotice('获取工作流定义失败: ' + (e && e.message));
+          onNotice(err('获取工作流定义失败: ' + (e && e.message)));
         }
       } finally {
         if (alive.current && !silent) {
@@ -96,7 +97,7 @@ export function DefsTab({ onNotice, onDispatched }) {
       await load(true);
     } catch (e) {
       if (onNotice) {
-        onNotice('删除定义失败: ' + (e && e.message));
+        onNotice(err('删除定义失败: ' + (e && e.message)));
       }
     }
   };
@@ -116,7 +117,7 @@ export function DefsTab({ onNotice, onDispatched }) {
       );
       const runId = j && j.run_id ? j.run_id : '';
       if (onNotice) {
-        onNotice('');
+        onNotice(err(''));
       }
       message.success('已派发，运行 ID: ' + (runId ? runId.slice(0, 8) : '(unknown)'));
       attempt.current = null;
@@ -126,7 +127,7 @@ export function DefsTab({ onNotice, onDispatched }) {
       }
     } catch (e) {
       if (onNotice) {
-        onNotice('派发失败: ' + (e && e.message));
+        onNotice(err('派发失败: ' + (e && e.message)));
       }
     } finally {
       if (alive.current) {

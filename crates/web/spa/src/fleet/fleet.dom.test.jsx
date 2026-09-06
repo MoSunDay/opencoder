@@ -2,6 +2,7 @@
 import '../test/setup-dom.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { err } from '../notice.js';
 import { ExecutionsPanel } from './executions.jsx';
 import { ExecutionMessage, appendEvent, messageRefreshMode } from './detail.jsx';
 import { FleetNodesPanel } from './nodes.jsx';
@@ -27,12 +28,12 @@ describe('fleet execution boundaries', () => {
     fireEvent.change(screen.getByPlaceholderText('act / 定义名称 / 任务 ID'), { target: { value: 'act' } });
     fireEvent.click(screen.getByText('启动执行'));
     await waitFor(() => expect(apiPost).toHaveBeenCalledTimes(1));
-    expect(onNotice).toHaveBeenLastCalledWith(expect.stringContaining('connection lost'));
+    expect(onNotice).toHaveBeenLastCalledWith(err(expect.stringContaining('connection lost')));
     await waitFor(() => expect(screen.getByText('启动执行').closest('button').disabled).toBe(false));
     fireEvent.click(screen.getByText('启动执行'));
     await waitFor(() => expect(apiPost).toHaveBeenCalledTimes(2));
     expect(apiPost.mock.calls[0][1].id).toBe(apiPost.mock.calls[1][1].id);
-    expect(onNotice).toHaveBeenLastCalledWith('');
+    expect(onNotice).toHaveBeenLastCalledWith(err(''));
     expect(await screen.findByText(/execution-detail:agent-/)).toBeTruthy();
   });
   it('paginates the five-field execution index without dropping its cursor', async () => {
@@ -205,13 +206,13 @@ describe('fleet execution boundaries', () => {
     fireEvent.change(await screen.findByLabelText('任务目标'), { target: { value: '检查发布' } });
     fireEvent.click(screen.getByText('直接调度执行'));
     await waitFor(() => expect(apiPost).toHaveBeenCalledTimes(1));
-    expect(onNotice).toHaveBeenLastCalledWith('connection lost');
+    expect(onNotice).toHaveBeenLastCalledWith(err('connection lost'));
     await waitFor(() => expect(screen.getByText('直接调度执行').closest('button').disabled).toBe(false));
     fireEvent.click(screen.getByText('直接调度执行'));
     await waitFor(() => expect(apiPost).toHaveBeenCalledTimes(2));
     expect(apiPost.mock.calls[0][1].request_id).toBe(apiPost.mock.calls[1][1].request_id);
     expect(apiPost.mock.calls[0][1].request_id).toMatch(/^request-/);
-    expect(onNotice).toHaveBeenLastCalledWith('');
+    expect(onNotice).toHaveBeenLastCalledWith(err(''));
     expect(await screen.findByText('execution-detail:agent-brain-1')).toBeTruthy();
   });
   it('launches a configured team as one node-owned execution', async () => {
@@ -230,11 +231,11 @@ describe('fleet execution boundaries', () => {
     const submit = [...document.querySelectorAll('.ant-modal button')].find((button) => button.textContent.replace(/\s+/g, '') === '启动');
     expect(submit).toBeTruthy(); fireEvent.click(submit);
     await waitFor(() => expect(apiPost).toHaveBeenCalledTimes(1));
-    expect(onNotice).toHaveBeenLastCalledWith(expect.stringContaining('connection lost'));
+    expect(onNotice).toHaveBeenLastCalledWith(err(expect.stringContaining('connection lost')));
     await waitFor(() => expect(submit.disabled).toBe(false)); fireEvent.click(submit);
     await waitFor(() => expect(apiPost).toHaveBeenCalledTimes(2));
     expect(apiPost.mock.calls[0][1].id).toBe(apiPost.mock.calls[1][1].id);
     expect(apiPost).toHaveBeenLastCalledWith('/api/executions', expect.objectContaining({ kind: 'team', target: 'release', id: expect.stringMatching(/^team-/), input: { prompt: '准备发布' } }));
-    expect(onNotice).toHaveBeenLastCalledWith('');
+    expect(onNotice).toHaveBeenLastCalledWith(err(''));
   });
 });

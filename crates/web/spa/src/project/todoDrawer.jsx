@@ -13,6 +13,7 @@ import { RunStatusTag, TodoStatusTag, runKindLabel } from './labels.jsx';
 import { Markdown } from './markdown.jsx';
 import { flattenTodos } from './todosTab.jsx';
 import { ExecutionDetail } from '../fleet/detail.jsx';
+import { err, info, ok, warn } from '../notice.js';
 
 const { TextArea } = Input;
 const { Text, Paragraph } = Typography;
@@ -26,17 +27,17 @@ function RunItem({ run, executionId, onNotice, refreshRuns }) {
     setCancelling(true);
     try {
       await apiPost('/api/executions/' + encodeURIComponent(executionId) + '/commands', { action: 'cancel', input: {} });
-      onNotice('执行已取消，不能恢复');
+      onNotice(warn('执行已取消，不能恢复'));
       refreshRuns();
     } catch (e) {
-      onNotice('取消失败: ' + (e && e.message));
+      onNotice(err('取消失败: ' + (e && e.message)));
     } finally {
       setCancelling(false);
     }
   };
   const openSession = () => {
     setState({ page: 'chat' });
-    onNotice(`会话 ${run.session_id} 可在「会话交互」中打开`);
+    onNotice(info(`会话 ${run.session_id} 可在「会话交互」中打开`));
   };
   const snaps = [];
   if (run.plan_md) {
@@ -143,11 +144,11 @@ export function TodoDrawer({ todoId, overview, refresh, onClose, onNotice }) {
     setActing(true);
     try {
       await apiPatch(todoPath(todo.id), { draft });
-      onNotice('草稿已保存');
+      onNotice(ok('草稿已保存'));
       setDraft(null);
       await refresh();
     } catch (e) {
-      onNotice('保存草稿失败: ' + (e && e.message));
+      onNotice(err('保存草稿失败: ' + (e && e.message)));
     } finally {
       setActing(false);
     }
@@ -160,10 +161,10 @@ export function TodoDrawer({ todoId, overview, refresh, onClose, onNotice }) {
     setActing(true);
     try {
       await apiPost(todoPath(todo.id) + '/plan');
-      onNotice('已开始重新生成 Plan');
+      onNotice(info('已开始重新生成 Plan'));
       await Promise.all([loadRuns(true), refresh()]);
     } catch (e) {
-      onNotice('生成 Plan 失败: ' + (e && e.message));
+      onNotice(err('生成 Plan 失败: ' + (e && e.message)));
     } finally {
       setActing(false);
     }
@@ -172,11 +173,11 @@ export function TodoDrawer({ todoId, overview, refresh, onClose, onNotice }) {
   const remove = async () => {
     try {
       await apiDel(todoPath(todo.id));
-      onNotice('TODO 已删除');
+      onNotice(ok('TODO 已删除'));
       onClose();
       refresh();
     } catch (e) {
-      onNotice('删除 TODO 失败: ' + (e && e.message));
+      onNotice(err('删除 TODO 失败: ' + (e && e.message)));
     }
   };
 

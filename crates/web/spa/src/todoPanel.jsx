@@ -11,6 +11,7 @@ import { newId } from './fleet/model.js';
 import { PageShell } from './shell/pageShell.jsx';
 import { TodoEditor } from './todoEditor.jsx';
 import { TodoRunsPanel } from './todoRunsPanel.jsx';
+import { err, info } from './notice.js';
 
 const { TextArea } = Input;
 const { Text } = Typography;
@@ -44,7 +45,7 @@ function CreateTemplateForm({ onNotice, onCreated }) {
     try {
       spec = JSON.parse(values.specText || '');
     } catch (e) {
-      onNotice('spec JSON 解析失败: ' + (e && e.message));
+      onNotice(err('spec JSON 解析失败: ' + (e && e.message)));
       return;
     }
     setSaving(true);
@@ -55,10 +56,10 @@ function CreateTemplateForm({ onNotice, onCreated }) {
         note: values.note || '',
         spec,
       });
-      onNotice('');
+      onNotice(err(''));
       onCreated();
     } catch (e) {
-      onNotice('新建模板失败: ' + (e && e.message)); // 400 = spec 校验失败等
+      onNotice(err('新建模板失败: ' + (e && e.message))); // 400 = spec 校验失败等
     } finally {
       setSaving(false);
     }
@@ -107,7 +108,7 @@ function VersionsBlock({ template, onNotice, onEdit, onChanged }) {
           setDetail(j || null);
         }
       })
-      .catch((e) => onNotice('获取模板详情失败: ' + (e && e.message)));
+      .catch((e) => onNotice(err('获取模板详情失败: ' + (e && e.message))));
     return () => {
       alive = false;
     };
@@ -121,10 +122,10 @@ function VersionsBlock({ template, onNotice, onEdit, onChanged }) {
   const setCurrent = async (v) => {
     try {
       await apiPut(`/api/todo/templates/${encodeURIComponent(name)}/todo.json`, { current: v });
-      onNotice('');
+      onNotice(err(''));
       onChanged();
     } catch (e) {
-      onNotice('设为当前失败: ' + (e && e.message));
+      onNotice(err('设为当前失败: ' + (e && e.message)));
     }
   };
 
@@ -137,21 +138,21 @@ function VersionsBlock({ template, onNotice, onEdit, onChanged }) {
     try {
       await apiPost(`/api/todo/templates/${encodeURIComponent(name)}/new-version`,
         sourceVersion ? { source_version: sourceVersion, note } : { note });
-      onNotice('');
+      onNotice(err(''));
       onChanged();
     } catch (e) {
-      onNotice('新建版本失败: ' + (e && e.message));
+      onNotice(err('新建版本失败: ' + (e && e.message)));
     }
   };
 
   const deleteVersion = async (v) => {
     try {
       await apiDel(`/api/todo/templates/${encodeURIComponent(name)}/${encodeURIComponent(v)}`);
-      onNotice('');
+      onNotice(err(''));
       onChanged();
     } catch (e) {
       // 409 = 删除当前版本
-      onNotice(`删除版本 ${v} 失败: ` + (e && e.message));
+      onNotice(err(`删除版本 ${v} 失败: ` + (e && e.message)));
     }
   };
 
@@ -160,10 +161,10 @@ function VersionsBlock({ template, onNotice, onEdit, onChanged }) {
     try {
       const j = await apiPost(`/api/todo/templates/${encodeURIComponent(name)}/${encodeURIComponent(v)}/run`, { id: attempts.current.get(v) });
       attempts.current.delete(v);
-      onNotice(`已启动工作流: ${(j && j.workflow_id) || ''}`);
+      onNotice(info(`已启动工作流: ${(j && j.workflow_id) || ''}`));
       onChanged((j && j.workflow_id) || '');
     } catch (e) {
-      onNotice('运行失败: ' + (e && e.message)); // 400 = spec 无效或 env 工具缺失
+      onNotice(err('运行失败: ' + (e && e.message))); // 400 = spec 无效或 env 工具缺失
     }
   };
 
@@ -206,7 +207,7 @@ function TemplatesTab({ onNotice, onRan }) {
       setRows((j && j.templates) || []);
     } catch (e) {
       if (!silent) {
-        onNotice('获取模板列表失败: ' + (e && e.message));
+        onNotice(err('获取模板列表失败: ' + (e && e.message)));
       }
     } finally {
       if (!silent) {
@@ -222,10 +223,10 @@ function TemplatesTab({ onNotice, onRan }) {
   const deleteTemplate = async (name) => {
     try {
       await apiDel(`/api/todo/templates/${encodeURIComponent(name)}`);
-      onNotice('');
+      onNotice(err(''));
       setBump((n) => n + 1);
     } catch (e) {
-      onNotice('删除模板失败: ' + (e && e.message));
+      onNotice(err('删除模板失败: ' + (e && e.message)));
     }
   };
 

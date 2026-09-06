@@ -68,14 +68,12 @@ export const CATEGORY_OPTIONS = NAV_CATEGORIES.map((c) => ({ value: c.key, label
 
 /// Per-page header copy (title + one-line description). Exported now so the
 /// IA has one name per page; the header UI itself arrives in iteration 3.
-/// `topic_detail` rides under the 全部执行 semantics of its parent page.
 export const PAGE_META = {
   project: { title: '项目', desc: '目标、里程碑与 TODO 的用户策展跟踪' },
   progress: { title: '进展', desc: '里程碑进度、进行中 TODO 与最近项目执行' },
   ownerview: { title: 'Owner 视角', desc: '按目标分组的健康度与待人工介入事项' },
   brain: { title: '大脑调度', desc: '能力绑定与情境化调度入口' },
   topics: { title: '全部执行', desc: '舰队全部执行记录与团队过滤' },
-  topic_detail: { title: '执行详情', desc: '单条执行的消息级详情回放' },
   dag: { title: 'DAG 工作流', desc: 'DAG 运行的图视图与步骤工件' },
   todos: { title: 'TODO 管理', desc: '持久化 TODO 工作流的调度与验收' },
   team: { title: '团队组队', desc: '多 agent 团队的组建与执行' },
@@ -92,12 +90,8 @@ function findCategory(categoryKey) {
     || NAV_CATEGORIES.find((c) => c.key === DEFAULT_CATEGORY);
 }
 
-/// Active category for a store `page`: topic_detail folds onto its parent
-/// topics page (agent category); unknown pages fall back to node.
+/// Active category for a store `page`: unknown pages fall back to node.
 export function categoryOf(page) {
-  if (page === 'topic_detail') {
-    return 'agent';
-  }
   const hit = NAV_CATEGORIES.find((c) => c.items.some((i) => i.page === page));
   return hit ? hit.key : DEFAULT_CATEGORY;
 }
@@ -126,10 +120,8 @@ export function selectOptionsOf(categoryKey) {
   return findCategory(categoryKey).items.map((i) => ({ value: i.page, label: i.menu }));
 }
 
-/// Sider highlight key: parameterized sub-pages fold back onto their parent
-/// (topic_detail → topics); anything not in the active category's menu falls
+/// Sider highlight key: anything not in the active category's menu falls
 /// back to the default page so the highlight never dangles.
 export function menuKey(page) {
-  const folded = page === 'topic_detail' ? 'topics' : page;
-  return pagesOf(categoryOf(page)).includes(folded) ? folded : DEFAULT_PAGE;
+  return pagesOf(categoryOf(page)).includes(page) ? page : DEFAULT_PAGE;
 }

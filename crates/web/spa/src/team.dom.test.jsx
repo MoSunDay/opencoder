@@ -1,9 +1,8 @@
 // @vitest-environment jsdom
 // Team/topics DOM smoke against the fleet IA panels — fleet/teams.jsx and
 // fleet/executions.jsx are the maintained sources behind the 组队/全部执行
-// tabs (the pre-fleet top-level copies were deleted); topicDetail.jsx keeps
-// its legacy deep-view describe below. Landmarks render from a mocked api
-// module — same contract style as queuePanel.dom.test.jsx /
+// tabs (the pre-fleet top-level copies were deleted). Landmarks render from
+// a mocked api module — same contract style as queuePanel.dom.test.jsx /
 // fleet/fleet.dom.test.jsx. Everything above the protocol layer (api.js
 // requests + the sse.js event stream) runs for real, including the
 // ExecutionDetail drawer where 取消/恢复 live now.
@@ -29,7 +28,6 @@ vi.mock('./sse.js', () => ({ openStream: () => ({ abort() {} }) }));
 
 import './test/setup-dom.js';
 import { FleetTeamsPanel as TeamPanel } from './fleet/teams.jsx';
-import { TopicDetailPanel } from './topicDetail.jsx';
 import { ExecutionsPanel as TopicsPanel } from './fleet/executions.jsx';
 import { clearCredentials, getState, setState } from './store.js';
 
@@ -125,7 +123,7 @@ const installApi = () => {
 beforeEach(() => {
   localStorage.clear();
   clearCredentials();
-  setState({ page: 'nodes', preselectNode: null, nodes: [], conn: 'init', topicDetail: null });
+  setState({ page: 'nodes', preselectNode: null, nodes: [], conn: 'init' });
   installApi();
 });
 
@@ -277,30 +275,5 @@ describe('TopicsPanel', () => {
     fireEvent.click(findButton('在原节点恢复'));
     await act(async () => {});
     expect(apiPostMock).toHaveBeenCalledWith('/api/executions/ex-error/commands', { action: 'resume', input: {} });
-  });
-});
-
-describe('TopicDetailPanel', () => {
-  it('renders the timeline, plan, member results, summary and back button', async () => {
-    setState({ page: 'topic_detail', topicDetail: { teamName: 't1', topicId: 'tp1' } });
-    render(<TopicDetailPanel onNotice={() => {}} />);
-    // The question appears both in the timeline entry and the plan card, and
-    // the sub-turn count both in the timeline and the block header.
-    expect((await screen.findAllByText('如何拆分模块？')).length).toBeGreaterThan(0);
-    expect(screen.getByText('Turn 1')).toBeTruthy();
-    expect(await screen.findByText('先摸清边界')).toBeTruthy();
-    expect(screen.getByText('n1 · 回答')).toBeTruthy();
-    expect(screen.getByText('n2 · 对齐追答')).toBeTruthy();
-    expect(screen.getByText('一致同意三分法')).toBeTruthy();
-    expect(screen.getAllByText('子轮 1').length).toBeGreaterThan(0);
-    expect(screen.getByText('← 返回话题列表')).toBeTruthy();
-  });
-
-  it('backs out to the topics list through the store', async () => {
-    setState({ page: 'topic_detail', topicDetail: { teamName: 't1', topicId: 'tp1' } });
-    render(<TopicDetailPanel onNotice={() => {}} />);
-    fireEvent.click(await screen.findByText('← 返回话题列表'));
-    expect(getState().page).toBe('topics');
-    expect(getState().topicDetail).toBeNull();
   });
 });

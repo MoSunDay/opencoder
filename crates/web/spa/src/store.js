@@ -6,9 +6,9 @@ import { useSyncExternalStore } from 'react';
 
 export const TOKEN_KEY = 'oc_token';
 export const BASE_KEY = 'oc_base';
-/// Static fleet entry that routes to the server's own engine.
+/// Automatic placement; every conversation runs on its assigned node.
 export const LOCAL_NODE = '__local__';
-export const LOCAL_NODE_LABEL = '本机 (server 本机引擎)';
+export const LOCAL_NODE_LABEL = '自动调度 / 全部会话';
 
 let state = {
   token: localStorage.getItem(TOKEN_KEY) || '',
@@ -46,8 +46,7 @@ export function useStore() {
 }
 
 /// Persist + publish credentials. `base` is stored exactly as typed ('' =
-/// same-origin); signing covers path+query only, so origin never enters the
-/// canonical string.
+/// same-origin).
 export function setCredentials(token, base) {
   const cleanBase = String(base || '').trim().replace(/\/+$/, '');
   localStorage.setItem(TOKEN_KEY, token);
@@ -64,7 +63,7 @@ export function clearCredentials() {
   });
 }
 
-/// Origin-prefixing helper shared by api.js / time.js / sse.js.
+/// Origin-prefixing helper shared by api.js and sse.js.
 export function urlFor(pathAndQuery) {
   return (state.base || '') + pathAndQuery;
 }

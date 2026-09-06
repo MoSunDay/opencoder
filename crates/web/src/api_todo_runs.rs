@@ -50,6 +50,7 @@ fn client_for(
 }
 
 /// Read the version's spec and env binding. `(None binding)` ⇒ unbound.
+#[allow(clippy::result_large_err)] // Return the already-built Axum response at this HTTP boundary; boxing adds an allocation per error.
 async fn load_version(
     root: &std::path::Path,
     name: &str,

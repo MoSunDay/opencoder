@@ -34,5 +34,8 @@ pub(super) async fn build_full_registry(session: &SessionState) -> HashMap<Strin
     if mcp::pool::has_mcp_tools(&session.id) {
         reg.extend(mcp::pool::tools_for(&session.id));
     }
+    for tool in crate::extensions::tools(&session.id) {
+        reg.insert(tool.name().into(), tool);
+    }
     reg
 }

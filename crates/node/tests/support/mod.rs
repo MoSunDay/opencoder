@@ -271,54 +271,17 @@ async fn control_result(
     Json(serde_json::json!({ "resolved": true })).into_response()
 }
 
-/// HMAC-signature gate mirroring the server's `auth_sig_mw`: every request
-/// must carry a valid `x-sig` / `x-sig-timestamp` pair over
-/// `{METHOD}\n{path_and_query}\n{ts}\n{sha256(body)}` with the shared token.
-/// The body is buffered, verified, and re-injected for the `Json` extractors.
+/// Bearer-token gate mirroring the server middleware.
 async fn auth(req: Request<axum::body::Body>, next: Next) -> Response {
-    use axum::body::to_bytes;
-    let (parts, body) = req.into_parts();
-    let bytes = match to_bytes(body, 8 << 20).await {
-        Ok(b) => b.to_vec(),
-        Err(_) => return StatusCode::PAYLOAD_TOO_LARGE.into_response(),
-    };
-    let ts_raw = parts
-        .headers
-        .get(opencoder_core::auth_sig::TS_HEADER)
-        .and_then(|v| v.to_str().ok());
-    let sig_raw = parts
-        .headers
-        .get(opencoder_core::auth_sig::SIG_HEADER)
-        .and_then(|v| v.to_str().ok());
-    let (Some(ts_raw), Some(sig_raw)) = (ts_raw, sig_raw) else {
-        return StatusCode::UNAUTHORIZED.into_response();
-    };
-    let Ok(ts_ms) = ts_raw.trim().parse::<i64>() else {
-        return StatusCode::UNAUTHORIZED.into_response();
-    };
-    let now_ms = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0);
-    let pq = parts
-        .uri
-        .path_and_query()
-        .map(|p| p.as_str().to_string())
-        .unwrap_or_default();
-    let ok = opencoder_core::auth_sig::verify(
-        TOKEN,
-        parts.method.as_str(),
-        &pq,
-        ts_ms,
-        now_ms,
-        &bytes,
-        sig_raw,
-    )
-    .is_ok();
-    if !ok {
+    let expected = format!("Bearer {TOKEN}");
+    let authorized = req
+        .headers()
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value == expected);
+    if !authorized {
         return StatusCode::UNAUTHORIZED.into_response();
     }
-    let req = Request::from_parts(parts, axum::body::Body::from(bytes));
     next.run(req).await
 }
 

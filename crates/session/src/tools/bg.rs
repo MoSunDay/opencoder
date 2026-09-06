@@ -9,15 +9,34 @@
 //! [`register`] adds the entry, [`unregister`] removes it on completion, and
 //! [`stop`]/[`kill_all`] terminate the group on user demand.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
+use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::process::Child;
 use tokio::task::JoinHandle;
+use tokio_util::sync::CancellationToken;
+
+use super::bash::process_group::ProcessGroupGuard;
+
+pub const STREAM_OUTPUT_LIMIT_BYTES: usize = 8 * 1024 * 1024;
+
+/// A node may supervise at most this many timed-out bash commands at once.
+/// Foreground commands have their own execution slots; this cap covers only
+/// commands explicitly handed to detached supervisors.
+const MAX_ACTIVE_HANDOFFS: usize = 32;
+
+/// Completed output is temporary diagnostic state. Keep a small recent tail
+/// long enough for the model/operator to inspect it, then reclaim it during
+/// later background activity. Only paths created and tracked by this process
+/// enter this lifecycle; DB rows and user files are never considered.
+const MAX_RETAINED_OUTPUTS: usize = 8;
+const COMPLETED_OUTPUT_TTL: Duration = Duration::from_secs(60 * 60);
 
 /// Shared capture state for a backgrounded command's stdout/stderr.
 ///
@@ -28,6 +47,8 @@ pub struct BgState {
     pub stdout_buf: Vec<u8>,
     pub stderr_buf: Vec<u8>,
     file: Option<std::fs::File>,
+    output_limit_error: Option<String>,
+    output_limit: CancellationToken,
 }
 
 impl BgState {
@@ -36,30 +57,100 @@ impl BgState {
             stdout_buf: Vec::new(),
             stderr_buf: Vec::new(),
             file: None,
+            output_limit_error: None,
+            output_limit: CancellationToken::new(),
         }
     }
 
     /// Append a chunk of stdout. Writes to the file (if handed off) under the
     /// same lock — no await is held.
-    pub fn push_stdout(&mut self, data: &[u8]) {
-        self.stdout_buf.extend_from_slice(data);
-        if let Some(f) = &mut self.file {
-            let _ = f.write_all(data);
-        }
+    pub fn push_stdout(&mut self, data: &[u8]) -> bool {
+        self.push(data, true)
     }
 
     /// Append a chunk of stderr. Same file-write semantics as `push_stdout`.
-    pub fn push_stderr(&mut self, data: &[u8]) {
-        self.stderr_buf.extend_from_slice(data);
-        if let Some(f) = &mut self.file {
-            let _ = f.write_all(data);
+    pub fn push_stderr(&mut self, data: &[u8]) -> bool {
+        self.push(data, false)
+    }
+
+    fn push(&mut self, data: &[u8], stdout: bool) -> bool {
+        if self.output_limit_error.is_some() {
+            return false;
         }
+        let (buffer, label) = if stdout {
+            (&mut self.stdout_buf, "bash stdout")
+        } else {
+            (&mut self.stderr_buf, "bash stderr")
+        };
+        let accepted = data.len().min(STREAM_OUTPUT_LIMIT_BYTES - buffer.len());
+        buffer.extend_from_slice(&data[..accepted]);
+        if let Some(file) = &mut self.file {
+            let _ = file.write_all(&data[..accepted]);
+        }
+        if accepted == data.len() {
+            return true;
+        }
+        let error =
+            format!("output_limit_exceeded: {label} exceeds {STREAM_OUTPUT_LIMIT_BYTES} bytes");
+        if let Some(file) = &mut self.file {
+            let _ = write!(file, "\n[{error}]\n");
+        }
+        self.output_limit_error = Some(error);
+        self.output_limit.cancel();
+        false
+    }
+
+    pub fn output_limit_error(&self) -> Option<&str> {
+        self.output_limit_error.as_deref()
+    }
+
+    pub fn output_limit_token(&self) -> CancellationToken {
+        self.output_limit.clone()
     }
 }
 
 impl Default for BgState {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[derive(Clone, Copy)]
+pub enum OutputStream {
+    Stdout,
+    Stderr,
+}
+
+/// Drain one tool pipe into the bounded shared capture. An overflow kills the
+/// command's private process group so a blocked producer cannot linger.
+pub async fn drain_output<R>(
+    mut pipe: R,
+    state: std::sync::Arc<Mutex<BgState>>,
+    stream: OutputStream,
+    pgid: libc::pid_t,
+) where
+    R: AsyncRead + Unpin,
+{
+    let mut chunk = [0u8; 8192];
+    loop {
+        let count = match pipe.read(&mut chunk).await {
+            Ok(0) | Err(_) => return,
+            Ok(count) => count,
+        };
+        let accepted = {
+            let mut state = state.lock().unwrap();
+            match stream {
+                OutputStream::Stdout => state.push_stdout(&chunk[..count]),
+                OutputStream::Stderr => state.push_stderr(&chunk[..count]),
+            }
+        };
+        if !accepted {
+            #[cfg(unix)]
+            unsafe {
+                let _ = libc::kill(-pgid, libc::SIGKILL);
+            }
+            return;
+        }
     }
 }
 
@@ -70,6 +161,7 @@ pub fn output_path(pid: u32) -> PathBuf {
 
 struct BgEntry {
     pgid: libc::pid_t,
+    supervisor: Option<crate::process::SignalTarget>,
     #[allow(dead_code)]
     session_id: String,
     output_path: PathBuf,
@@ -80,88 +172,161 @@ fn registry() -> &'static Mutex<HashMap<u32, BgEntry>> {
     REG.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-fn task_handles() -> &'static Mutex<Vec<tokio::task::JoinHandle<()>>> {
-    static HANDLES: OnceLock<Mutex<Vec<tokio::task::JoinHandle<()>>>> = OnceLock::new();
-    HANDLES.get_or_init(|| Mutex::new(Vec::new()))
+struct SupervisorTask {
+    abort: Option<tokio::task::AbortHandle>,
+    output_path: PathBuf,
+}
+
+fn supervisor_tasks() -> &'static Mutex<HashMap<u64, SupervisorTask>> {
+    static TASKS: OnceLock<Mutex<HashMap<u64, SupervisorTask>>> = OnceLock::new();
+    TASKS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn next_supervisor_id() -> u64 {
+    static NEXT_ID: AtomicU64 = AtomicU64::new(1);
+    NEXT_ID.fetch_add(1, Ordering::Relaxed)
+}
+
+struct CompletedOutput {
+    path: PathBuf,
+    completed_at: Instant,
+}
+
+#[derive(Default)]
+struct CompletedOutputs {
+    cleaning: bool,
+    entries: VecDeque<CompletedOutput>,
+}
+
+fn completed_outputs() -> &'static Mutex<CompletedOutputs> {
+    static OUTPUTS: OnceLock<Mutex<CompletedOutputs>> = OnceLock::new();
+    OUTPUTS.get_or_init(|| Mutex::new(CompletedOutputs::default()))
+}
+
+fn completed_output_wakeup() -> &'static tokio::sync::Notify {
+    static WAKEUP: OnceLock<tokio::sync::Notify> = OnceLock::new();
+    WAKEUP.get_or_init(tokio::sync::Notify::new)
+}
+
+fn completed_output_sweeper() -> &'static Mutex<Option<tokio::task::AbortHandle>> {
+    static SWEEPER: OnceLock<Mutex<Option<tokio::task::AbortHandle>>> = OnceLock::new();
+    SWEEPER.get_or_init(|| Mutex::new(None))
 }
 
 /// Hand a timed-out command to a detached background supervisor.
 ///
-/// Opens/truncates the output file, flushes the already-captured stdout/stderr
-/// buffers to it, sets `state.file` so subsequent incremental pushes go
-/// straight to the file, registers the entry, and spawns a detached task that:
+/// After reserving one of 32 supervisor slots, opens/truncates the output file,
+/// flushes the already-captured stdout/stderr buffers to it, sets `state.file`
+/// so subsequent incremental pushes go straight to the file, and spawns a
+/// detached task that owns the foreground process-group guard and:
 ///
 /// 1. Waits for the child to exit naturally (kill_on_drop is defanged because
 ///    we own the `Child` and only drop it after `wait()`).
 /// 2. Awaits both drain tasks until EOF so the file captures the full output.
 /// 3. Appends `[exit code: N]`.
-/// 4. `kill(-pgid, SIGKILL)` to clean up any lingering process-group members.
-/// 5. Removes the registry entry.
+/// 4. terminates lingering process-group members and removes the live entry;
+/// 5. retains the file for at most one hour and among the eight newest files;
+/// 6. removes its own supervisor handle.
 #[allow(clippy::too_many_arguments)]
-pub fn handoff(
+pub(super) async fn handoff(
     pid: u32,
-    pgid: libc::pid_t,
-    session_id: String,
+    child: Child,
+    stdout_task: JoinHandle<()>,
+    stderr_task: JoinHandle<()>,
+    state: std::sync::Arc<Mutex<BgState>>,
+    process_group: ProcessGroupGuard,
+) -> Result<(), String> {
+    handoff_with_limit(
+        pid,
+        child,
+        stdout_task,
+        stderr_task,
+        state,
+        process_group,
+        MAX_ACTIVE_HANDOFFS,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn handoff_with_limit(
+    pid: u32,
     mut child: Child,
     stdout_task: JoinHandle<()>,
     stderr_task: JoinHandle<()>,
     state: std::sync::Arc<Mutex<BgState>>,
-) {
+    mut process_group: ProcessGroupGuard,
+    active_limit: usize,
+) -> Result<(), String> {
+    begin_background_lifecycle();
+    prune_completed_outputs(Instant::now());
     let path = output_path(pid);
+    let supervisor_id = next_supervisor_id();
+    let reserved = {
+        let mut tasks = supervisor_tasks().lock().unwrap();
+        if tasks.len() >= active_limit {
+            false
+        } else {
+            tasks.insert(
+                supervisor_id,
+                SupervisorTask {
+                    abort: None,
+                    output_path: path.clone(),
+                },
+            );
+            true
+        }
+    };
+    if !reserved {
+        cleanup_unaccepted(child, stdout_task, stderr_task, process_group).await;
+        return Err(format!(
+            "background_process_limit_exceeded: at most {active_limit} handed-off bash commands may run"
+        ));
+    }
 
     // Open/truncate + flush captured buffers + activate file mode.
-    {
-        let mut file = match OpenOptions::new()
+    let opened = (|| {
+        let mut file = OpenOptions::new()
             .create(true)
             .write(true)
             .truncate(true)
             .open(&path)
-        {
-            Ok(f) => f,
-            Err(e) => {
-                tracing::warn!(pid, error = %e, "bg: open output file failed");
-                // Best-effort: still kill the group so we don't leak processes.
-                #[cfg(unix)]
-                unsafe {
-                    let _ = libc::kill(-pgid, libc::SIGKILL);
-                }
-                return;
-            }
-        };
+            .map_err(|error| format!("cannot create background output: {error}"))?;
         let mut st = state.lock().unwrap();
-        let _ = file.write_all(&st.stdout_buf);
+        file.write_all(&st.stdout_buf)
+            .map_err(|error| format!("cannot write background output: {error}"))?;
         if !st.stderr_buf.is_empty() {
-            let _ = file.write_all(b"\n[stderr]\n");
-            let _ = file.write_all(&st.stderr_buf);
+            file.write_all(b"\n[stderr]\n")
+                .and_then(|()| file.write_all(&st.stderr_buf))
+                .map_err(|error| format!("cannot write background output: {error}"))?;
+        }
+        if let Some(error) = st.output_limit_error() {
+            writeln!(file, "\n[{error}]")
+                .map_err(|error| format!("cannot write background output: {error}"))?;
         }
         st.file = Some(file);
+        Ok::<(), String>(())
+    })();
+    if let Err(error) = opened {
+        supervisor_tasks().lock().unwrap().remove(&supervisor_id);
+        cleanup_unaccepted(child, stdout_task, stderr_task, process_group).await;
+        let _ = std::fs::remove_file(path);
+        return Err(error);
     }
 
-    // Register.
-    {
-        let mut reg = registry().lock().unwrap();
-        reg.insert(
-            pid,
-            BgEntry {
-                pgid,
-                session_id,
-                output_path: path.clone(),
-            },
-        );
-    }
-
-    // Detached supervisor — owns `child` so kill_on_drop won't fire early.
+    // The task cannot run before its AbortHandle is registered: this start
+    // gate prevents a short command from completing first and leaving a stale
+    // handle in the global map.
+    let (start_tx, start_rx) = tokio::sync::oneshot::channel();
     let handle = tokio::spawn(async move {
+        if start_rx.await.is_err() {
+            return;
+        }
         let exit_status = child.wait().await;
 
-        // Kill the entire process group NOW (before awaiting drain tasks) so
-        // that any grandchildren holding the pipe write-ends die and the drain
-        // tasks can reach EOF. Without this, a backgrounded descendant would
-        // keep the pipes open and the awaits below would block forever.
-        #[cfg(unix)]
-        unsafe {
-            let _ = libc::kill(-pgid, libc::SIGKILL);
-        }
+        // Terminate lingering descendants and unregister before draining, so
+        // inherited pipe writers cannot keep the drain tasks alive.
+        process_group.terminate();
 
         // Bounded wait for drain tasks: after the group kill the pipe
         // write-ends close and the tasks resolve with EOF. A 2s ceiling
@@ -181,11 +346,35 @@ pub fn handoff(
                 let _ = write!(f, "\n[exit code: {code}]");
             }
         }
-
-        let mut reg = registry().lock().unwrap();
-        reg.remove(&pid);
+        drop(state.lock().unwrap().file.take());
+        retain_completed_output(path, Instant::now());
+        supervisor_tasks().lock().unwrap().remove(&supervisor_id);
     });
-    task_handles().lock().unwrap().push(handle);
+    let mut tasks = supervisor_tasks().lock().unwrap();
+    let Some(task) = tasks.get_mut(&supervisor_id) else {
+        handle.abort();
+        return Err("background supervisor rejected during shutdown".into());
+    };
+    task.abort = Some(handle.abort_handle());
+    drop(tasks);
+    let _ = start_tx.send(());
+    Ok(())
+}
+
+async fn cleanup_unaccepted(
+    mut child: Child,
+    stdout_task: JoinHandle<()>,
+    stderr_task: JoinHandle<()>,
+    mut process_group: ProcessGroupGuard,
+) {
+    let supervised = process_group.is_supervised();
+    process_group.terminate();
+    let _ = crate::process::wait_owned_child(&mut child, supervised).await;
+    let _ = tokio::time::timeout(Duration::from_secs(2), async {
+        let _ = stdout_task.await;
+        let _ = stderr_task.await;
+    })
+    .await;
 }
 
 /// Public snapshot of one registered background process, for display-only
@@ -199,6 +388,7 @@ pub struct BgInfo {
 
 /// Snapshot every registered background process into public [`BgInfo`]s.
 pub fn list() -> Vec<BgInfo> {
+    prune_completed_outputs(Instant::now());
     let reg = registry().lock().unwrap();
     reg.iter()
         .map(|(pid, e)| BgInfo {
@@ -218,6 +408,23 @@ pub fn register(pid: u32, pgid: libc::pid_t, session_id: String) {
         pid,
         BgEntry {
             pgid,
+            supervisor: None,
+            session_id,
+            output_path: output_path(pid),
+        },
+    );
+}
+
+pub(crate) fn register_supervised(
+    pid: u32,
+    supervisor: crate::process::SignalTarget,
+    session_id: String,
+) {
+    registry().lock().unwrap().insert(
+        pid,
+        BgEntry {
+            pgid: pid as libc::pid_t,
+            supervisor: Some(supervisor),
             session_id,
             output_path: output_path(pid),
         },
@@ -231,6 +438,13 @@ pub fn unregister(pid: u32) {
     registry().lock().unwrap().remove(&pid);
 }
 
+pub(crate) fn unregister_group(pid: u32, pgid: libc::pid_t) {
+    let mut registry = registry().lock().unwrap();
+    if registry.get(&pid).is_some_and(|entry| entry.pgid == pgid) {
+        registry.remove(&pid);
+    }
+}
+
 /// Kill the process group of a single registered command by pid and remove its
 /// registry entry. Returns `true` if `pid` was registered (and thus
 /// signalled), `false` if it was already gone. The `/stop` command currently
@@ -238,17 +452,15 @@ pub fn unregister(pid: u32) {
 pub fn stop(pid: u32) -> bool {
     let entry = registry().lock().unwrap().remove(&pid);
     if let Some(entry) = entry {
-        #[cfg(unix)]
-        unsafe {
-            let _ = libc::kill(-entry.pgid, libc::SIGKILL);
-        }
+        terminate_entry(&entry);
         true
     } else {
         false
     }
 }
 
-/// Kill every registered background process group and remove temp files.
+/// Kill every registered process group. Background output remains readable
+/// until the completed-output TTL/count lifecycle reclaims it.
 /// Returns the number of process groups killed. Used by [`cleanup_all`] at
 /// program shutdown and by the display-only `/stop` command
 pub fn kill_all() -> usize {
@@ -258,22 +470,160 @@ pub fn kill_all() -> usize {
     };
     let count = entries.len();
     for entry in entries {
-        #[cfg(unix)]
-        unsafe {
-            let _ = libc::kill(-entry.pgid, libc::SIGKILL);
-        }
-        let _ = std::fs::remove_file(&entry.output_path);
+        terminate_entry(&entry);
     }
     count
 }
 
-/// Kill every registered background process group and remove temp files.
-/// Called at program shutdown.
+/// Kill tracked process groups, abort supervisors, and delete only temporary
+/// output paths created and tracked by this process. This is the production
+/// shutdown hook; it never walks directories or touches DB/user artifacts.
 pub fn cleanup_all() {
-    let _ = kill_all();
-    let handles: Vec<_> = task_handles().lock().unwrap().drain(..).collect();
-    for h in handles {
-        h.abort();
+    let active_entries: Vec<BgEntry> = {
+        let mut reg = registry().lock().unwrap();
+        reg.drain().map(|(_, entry)| entry).collect()
+    };
+    for entry in &active_entries {
+        terminate_entry(entry);
+    }
+    let tasks: Vec<SupervisorTask> = supervisor_tasks()
+        .lock()
+        .unwrap()
+        .drain()
+        .map(|(_, task)| task)
+        .collect();
+    let completed = {
+        let mut state = completed_outputs().lock().unwrap();
+        state.cleaning = true;
+        state
+            .entries
+            .drain(..)
+            .map(|entry| entry.path)
+            .collect::<Vec<_>>()
+    };
+    for task in &tasks {
+        if let Some(abort) = &task.abort {
+            abort.abort();
+        }
+    }
+    if let Some(sweeper) = completed_output_sweeper().lock().unwrap().take() {
+        sweeper.abort();
+    }
+    let paths = tasks
+        .into_iter()
+        .map(|task| task.output_path)
+        .chain(completed);
+    remove_temp_outputs(paths);
+}
+
+fn terminate_entry(entry: &BgEntry) {
+    if let Some(supervisor) = &entry.supervisor {
+        let _ = supervisor.signal(libc::SIGTERM);
+    } else {
+        #[cfg(unix)]
+        unsafe {
+            let _ = libc::kill(-entry.pgid, libc::SIGKILL);
+        }
+    }
+}
+
+/// `cleanup_all` is terminal in production. Tests may start a fresh lifecycle
+/// in the same process; a new accepted handoff is the explicit reset point.
+fn begin_background_lifecycle() {
+    completed_outputs().lock().unwrap().cleaning = false;
+}
+
+fn retain_completed_output(path: PathBuf, now: Instant) {
+    let remove = {
+        let mut state = completed_outputs().lock().unwrap();
+        if state.cleaning {
+            vec![path]
+        } else {
+            state.entries.retain(|entry| entry.path != path);
+            state.entries.push_back(CompletedOutput {
+                path,
+                completed_at: now,
+            });
+            prunable_completed_outputs(&mut state.entries, now)
+        }
+    };
+    remove_temp_outputs(remove);
+    ensure_completed_output_sweeper();
+    completed_output_wakeup().notify_one();
+}
+
+fn prune_completed_outputs(now: Instant) {
+    let remove = {
+        let mut state = completed_outputs().lock().unwrap();
+        prunable_completed_outputs(&mut state.entries, now)
+    };
+    remove_temp_outputs(remove);
+}
+
+/// Maintain exactly one lazy expiry task per runtime. Count pruning is
+/// synchronous; this task enforces the one-hour TTL even on an otherwise idle
+/// long-running node. A test without a Tokio runtime simply uses explicit
+/// pruning, while production supervisors always have a runtime available.
+fn ensure_completed_output_sweeper() {
+    let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+        return;
+    };
+    let mut slot = completed_output_sweeper().lock().unwrap();
+    if slot.as_ref().is_some_and(|task| !task.is_finished()) {
+        return;
+    }
+    let task = runtime.spawn(async {
+        loop {
+            let deadline = completed_outputs()
+                .lock()
+                .unwrap()
+                .entries
+                .front()
+                .map(|entry| entry.completed_at + COMPLETED_OUTPUT_TTL);
+            match deadline {
+                Some(deadline) => {
+                    tokio::select! {
+                        _ = tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)) => {
+                            prune_completed_outputs(Instant::now());
+                        }
+                        _ = completed_output_wakeup().notified() => {}
+                    }
+                }
+                None => completed_output_wakeup().notified().await,
+            }
+        }
+    });
+    *slot = Some(task.abort_handle());
+}
+
+/// Select expired/over-capacity entries oldest first. Filesystem deletion is
+/// deliberately outside this pure collection transform and outside the lock.
+fn prunable_completed_outputs(
+    entries: &mut VecDeque<CompletedOutput>,
+    now: Instant,
+) -> Vec<PathBuf> {
+    let mut remove = Vec::new();
+    while entries.front().is_some_and(|entry| {
+        now.saturating_duration_since(entry.completed_at) >= COMPLETED_OUTPUT_TTL
+    }) {
+        if let Some(entry) = entries.pop_front() {
+            remove.push(entry.path);
+        }
+    }
+    while entries.len() > MAX_RETAINED_OUTPUTS {
+        if let Some(entry) = entries.pop_front() {
+            remove.push(entry.path);
+        }
+    }
+    remove
+}
+
+fn remove_temp_outputs(paths: impl IntoIterator<Item = PathBuf>) {
+    let mut unique = std::collections::HashSet::new();
+    for path in paths {
+        if unique.insert(path.clone()) {
+            let _ = std::fs::remove_file(path);
+        }
     }
 }
 
@@ -290,182 +640,13 @@ pub(crate) fn test_registry_mutex() -> &'static tokio::sync::Mutex<()> {
 }
 #[cfg(test)]
 pub(crate) fn all_task_handles_len_for_test() -> usize {
-    task_handles().lock().unwrap().len()
+    supervisor_tasks().lock().unwrap().len()
+}
+#[cfg(test)]
+pub(crate) fn retained_outputs_len_for_test() -> usize {
+    completed_outputs().lock().unwrap().entries.len()
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn output_path_format() {
-        let p = output_path(12345);
-        assert_eq!(p.to_str().unwrap(), "/tmp/opencoder_bg_12345.output");
-    }
-
-    /// `register` adds a live entry that `list` exposes; `unregister` removes
-    /// it while leaving the process alive (verified by `stop`-free kill).
-    #[cfg(unix)]
-    #[tokio::test]
-    async fn register_unregister_roundtrip() {
-        use std::process::Command;
-        use std::time::Duration;
-
-        let _g = test_registry_mutex().lock().await;
-        let mut child = Command::new("setsid")
-            .args(["sleep", "60"])
-            .spawn()
-            .expect("spawn setsid sleep");
-        let pid = child.id();
-        let pgid = pid as libc::pid_t;
-        std::thread::sleep(Duration::from_millis(50));
-
-        register(pid, pgid, "test".to_string());
-        assert!(
-            list().iter().any(|info| info.pid == pid),
-            "list should expose the registered pid"
-        );
-
-        // unregister removes the entry without touching the process.
-        unregister(pid);
-        assert!(
-            !list().iter().any(|info| info.pid == pid),
-            "list should no longer contain the pid after unregister"
-        );
-        // idempotent: unregistering again is a no-op.
-        unregister(pid);
-
-        // Reap the still-alive child directly (never registered for /stop).
-        unsafe {
-            libc::kill(-pgid, libc::SIGKILL);
-        }
-        let _ = child.wait();
-    }
-
-    /// `stop(pid)` kills the registered process group, removes the entry, and
-    /// reports `false` once the entry is gone.
-    #[cfg(unix)]
-    #[test]
-    fn stop_kills_registered_process() {
-        use std::process::Command;
-        use std::time::Duration;
-
-        let _g = test_registry_mutex().blocking_lock();
-        let mut child = Command::new("setsid")
-            .args(["sleep", "60"])
-            .spawn()
-            .expect("spawn setsid sleep");
-        let pid = child.id();
-        let pgid = pid as libc::pid_t;
-        std::thread::sleep(Duration::from_millis(50));
-
-        register(pid, pgid, "test".to_string());
-        assert!(stop(pid), "stop should find the registered pid");
-        assert!(
-            !list().iter().any(|info| info.pid == pid),
-            "stop should remove the registry entry"
-        );
-        assert!(!stop(pid), "second stop finds nothing");
-
-        // The child was killed by stop(); reap the zombie.
-        let _ = child.wait();
-    }
-
-    /// `kill_all()` drains the whole registry: it SIGKILLs every registered
-    /// process group, removes every entry, and returns the number killed.
-    #[cfg(unix)]
-    #[test]
-    fn kill_all_terminates_every_registered_process() {
-        use std::process::Command;
-        use std::time::Duration;
-
-        let _g = test_registry_mutex().blocking_lock();
-        // Drain entries any earlier test may have leaked so the count below is
-        // deterministic. The mutex guarantees no other registry test is live,
-        // and SIGKILLing already-orphaned `sleep` groups is harmless.
-        let leaked = kill_all();
-        assert!(
-            list().is_empty(),
-            "registry must be empty after drain (leaked {leaked})"
-        );
-
-        let mut children: Vec<std::process::Child> = Vec::new();
-        for _ in 0..2 {
-            let child = Command::new("setsid")
-                .args(["sleep", "60"])
-                .spawn()
-                .expect("spawn setsid sleep");
-            let pid = child.id();
-            let pgid = pid as libc::pid_t;
-            std::thread::sleep(Duration::from_millis(50));
-            register(pid, pgid, "test".to_string());
-            children.push(child);
-        }
-        assert_eq!(list().len(), 2, "both processes should be registered");
-
-        let killed = kill_all();
-        assert_eq!(killed, 2, "kill_all should report the number it killed");
-        assert!(
-            list().is_empty(),
-            "kill_all should drain the entire registry"
-        );
-
-        // Reap the children that kill_all() SIGKILLed.
-        for child in children.iter_mut() {
-            let _ = child.wait();
-        }
-    }
-
-    #[test]
-    fn bg_state_push_buffers_when_no_file() {
-        let mut st = BgState::new();
-        st.push_stdout(b"hello");
-        st.push_stderr(b"world");
-        assert_eq!(&st.stdout_buf, b"hello");
-        assert_eq!(&st.stderr_buf, b"world");
-        assert!(st.file.is_none());
-    }
-
-    #[cfg(unix)]
-    #[tokio::test]
-    async fn handoff_tracks_supervisor_handle_for_cleanup() {
-        let _guard = test_registry_mutex().lock().await;
-
-        let child = tokio::process::Command::new("setsid")
-            .args(["sleep", "300"])
-            .spawn()
-            .expect("spawn setsid sleep");
-        let pid = child.id().expect("pid");
-        let pgid = pid as libc::pid_t;
-
-        let state = std::sync::Arc::new(std::sync::Mutex::new(BgState::new()));
-        let stdout_task = tokio::spawn(async {});
-        let stderr_task = tokio::spawn(async {});
-
-        handoff(
-            pid,
-            pgid,
-            "test-session".to_string(),
-            child,
-            stdout_task,
-            stderr_task,
-            state,
-        );
-
-        let initial = all_task_handles_len_for_test();
-        assert!(initial > 0, "supervisor handle tracked after handoff");
-
-        let drained: Vec<_> = task_handles().lock().unwrap().drain(..).collect();
-        assert_eq!(drained.len(), initial);
-        for h in drained {
-            h.abort();
-        }
-        assert_eq!(all_task_handles_len_for_test(), 0);
-
-        #[cfg(unix)]
-        unsafe {
-            libc::kill(-pgid, libc::SIGKILL);
-        }
-        unregister(pid);
-    }
-}
+#[path = "bash/background_tests.rs"]
+mod tests;

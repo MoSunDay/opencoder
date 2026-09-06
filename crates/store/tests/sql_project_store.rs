@@ -273,6 +273,59 @@ mod gated {
                 .unwrap_or(false)
         })
         .await;
+
+        // Execute admission needs a cross-table transaction: MySQL supports
+        // it; StarRocks must reject before touching either table.
+        let atomic_run = ProjectTodoRunRecord {
+            id: format!("atomic-{uniq}"),
+            todo_id: todo.clone(),
+            kind: ProjectTodoRunKind::Execute,
+            version: 3,
+            plan_md: Some("atomic plan".into()),
+            output_md: None,
+            agent: "act".into(),
+            session_id: None,
+            status: ProjectTodoRunStatus::Running,
+            started_at: ts + 10,
+            finished_at: None,
+            created_at: ts + 10,
+        };
+        if expect_name == "mysql" {
+            assert!(p
+                .claim_todo_running_with_run(&atomic_run, ts + 10)
+                .await
+                .unwrap());
+            assert!(p.get_todo_run(&atomic_run.id).await.unwrap().is_some());
+            assert_eq!(
+                p.get_todo(&todo).await.unwrap().unwrap().status,
+                ProjectTodoStatus::Running
+            );
+            assert!(p
+                .patch_todo_when(
+                    &todo,
+                    ProjectTodoStatus::Running,
+                    &ProjectTodoPatch {
+                        status: Some(ProjectTodoStatus::Planned),
+                        ..Default::default()
+                    },
+                    ts + 11,
+                )
+                .await
+                .unwrap());
+        } else {
+            let error = p
+                .claim_todo_running_with_run(&atomic_run, ts + 10)
+                .await
+                .unwrap_err();
+            assert!(error
+                .to_string()
+                .contains("starrocks does not support atomic"));
+            assert!(p.get_todo_run(&atomic_run.id).await.unwrap().is_none());
+            assert_eq!(
+                p.get_todo(&todo).await.unwrap().unwrap().status,
+                ProjectTodoStatus::Planned
+            );
+        }
         // Run CAS: converging the terminal run (Done above) while expecting
         // Running loses; the still-Running run2 converges to Failed.
         assert!(
@@ -370,8 +423,8 @@ mod gated {
     fn storage(backend: StorageBackend, dsn: &str) -> StorageConfig {
         StorageConfig {
             backend,
-            mysql: Some(dsn.to_string()).filter(|_| backend == StorageBackend::Mysql),
-            starrocks: Some(dsn.to_string()).filter(|_| backend == StorageBackend::Starrocks),
+            mysql: (backend == StorageBackend::Mysql).then_some(dsn.to_string()),
+            starrocks: (backend == StorageBackend::Starrocks).then_some(dsn.to_string()),
         }
     }
 

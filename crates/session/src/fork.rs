@@ -12,12 +12,20 @@ use crate::runner::new_id;
 /// Copy a session's meta and messages into a new session id, leaving the
 /// original untouched. Returns the new id.
 pub async fn fork_session(store: &dyn Store, parent_id: &str) -> Result<String> {
+    fork_session_with_id(store, parent_id, &new_id()).await
+}
+
+/// Embedders may assign a durable fleet ID before copying the session.
+pub async fn fork_session_with_id(store: &dyn Store, parent_id: &str, id: &str) -> Result<String> {
+    if !opencoder_core::fleet::valid_id(id) || store.get_session(id).await?.is_some() {
+        return Err(anyhow!("invalid or existing fork id"));
+    }
     let meta = store
         .get_session(parent_id)
         .await?
         .ok_or_else(|| anyhow!("session not found: {parent_id}"))?;
     let messages = store.load_messages(parent_id).await?;
-    let new_id = new_id();
+    let new_id = id.to_string();
     let now = now_ms();
     let forked = SessionMeta {
         id: new_id.clone(),

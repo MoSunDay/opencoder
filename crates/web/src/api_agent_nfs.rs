@@ -83,7 +83,7 @@ pub async fn post_set(State(state): State<Arc<AppState>>, Json(body): Json<SetBo
 /// Start under the slot lock: reuse the live handle when present, else
 /// spawn from config. `Ok((status, started))`; spawn failures surface as
 /// an error message for the 500 path (and as a log line at autostart).
-async fn start_locked(config: &Config) -> Result<(NfsServerStatus, bool), String> {
+pub async fn start_locked(config: &Config) -> Result<(NfsServerStatus, bool), String> {
     let opts = default_opts_from_config(config);
     let mut slot = NFS_SLOT.lock().await;
     if let Some(handle) = slot.as_ref() {
@@ -129,7 +129,7 @@ async fn stop() -> Response {
 /// live by the time the API answers. Failure is logged and swallowed —
 /// a broken export must never take the daemon down (`GET /api/agents/nfs`
 /// will simply report stopped).
-pub(crate) async fn autostart(workdir: &Path) {
+pub async fn autostart(workdir: &Path) {
     let config = match Config::load(workdir) {
         Ok(c) => c,
         Err(e) => {

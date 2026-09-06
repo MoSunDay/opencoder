@@ -85,7 +85,7 @@ fn plain_app(env: &Env, dispatcher: Arc<dyn TeamDispatcher>) -> axum::Router {
 
 fn req(method: &str, uri: &str, token: Option<&str>, body: Option<String>) -> Request<Body> {
     if let Some(t) = token {
-        return support::signed_req(method, uri, t, body);
+        return support::authed_req(method, uri, t, body);
     }
     let b = Request::builder().method(method).uri(uri);
     match body {

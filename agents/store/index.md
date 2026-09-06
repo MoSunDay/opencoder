@@ -1,6 +1,10 @@
-Commit: (working-tree, sandbox 回退为 plan：恢复 plan/act 双模式回切，写拦截能力保留)
+Commit: (working-tree, 基于 c1a1b2e78e1ccd4a3cc2ac6dc408a76d30bf46e6)
 
 # store 模块
+
+## 平台存储接缝
+
+`fleet::FleetStore` 独立打开平台 `control.db`，持久化节点注册、全局定义以及严格四字段 `execution_index(id, created_at, node_id, status)`；ID 的节点和创建时间不可改写。Server 另用新 `definitions.db` 保存全局大脑/项目定义，Node 用自己的 `runtime.db` 保存本地运行明细。旧 Store 的节点任务表仅服务兼容接口，平台不在 Server 写 session 或运行输入/结果。归属见 [control](../control/index.md) 与 [worker](../worker/index.md)。
 
 ## 职责
 
@@ -20,7 +24,7 @@ Commit: (working-tree, sandbox 回退为 plan：恢复 plan/act 双模式回切�
 - `run_tx`（`src/libsql_store/tx.rs`）：显式 BEGIN/COMMIT/ROLLBACK，避免 async 取消时 `libsql::Transaction::Drop` panic。
 - Session 类型（`src/types.rs`）：`SessionMeta`、`SessionPatch`、Input/Event/Subagent records；`task_type` 区分 parent、subagent、todo_workflow 和 todo。
 - TODO 类型（`src/todo_types.rs`）：`TodoWorkflowRecord`、`TodoItemRecord`、`TodoEventRecord` 和列表摘要。
-- 项目面类型与接缝（`src/project_types.rs` / `src/project.rs` / `src/project_factory.rs`）：goal→milestone→todo 三级 + `project_todo_runs` 运行留痕；`ProjectStore` trait（18 方法，独立于 `Store`）+ `open_project_store(config)` 工厂（libsql 默认 / `mysql` / `starrocks` feature 二选一）——opencoder-project 运行时持有 `Arc<dyn ProjectStore>`，会话/消息仍走 `Arc<dyn Store>`。
+- 项目面类型与接缝（`src/project_types.rs` / `src/project.rs` / `src/project_factory.rs`）：goal→milestone→todo 三级 + `project_todo_runs` 运行留痕；`ProjectStore` trait（独立于 `Store`）+ `open_project_store(config)` 工厂（libsql 默认 / `mysql` / `starrocks` feature 二选一）——opencoder-project 运行时持有 `Arc<dyn ProjectStore>`，会话/消息仍走 `Arc<dyn Store>`。execute 生产路径只用复合 `claim_todo_running_with_run`，不会把条件 claim 与 run INSERT 拆成两个提交。
 - 组队台账类型（`src/team_types.rs`，v17）：`TeamTopicRunRecord`——opencoder-team 话题 × node 的持久配对行（status `executing|finished`，`created_at` 首插冻结），运行时在 Store 之上，Store 只持久化（实现见 `libsql_store/team_runs.rs`）。
 
 ## Schema 与一致性
@@ -47,6 +51,7 @@ schema 随迭代推进（最新以 `src/libsql_store/schema.rs::SCHEMA_VERSION` 
 
 - StarRocks 缓存 prepared SELECT 会返回旧快照且 publish 异步——**全部语句走 text 协议**（`raw_sql` 内联参数）；sqlx 0.8.6 `RawSql::fetch_optional` 误委托 fetch_one 会 panic，用 `fetch_all` 再取 first 恢复 optional 形态。
 - 级联删除跨语句无事务保证，顺序执行（run→todo→milestone→goal）；测试一律 `eventually()` 轮询收敛。
+- execute admission 要求 todo claim 与 run INSERT 跨表原子提交：MySQL 走单个 InnoDB 事务；StarRocks 无对应跨表事务能力，因此在任何写入前返回明确错误，不回退为两个语句。Node `opencoder-agent` 固定使用节点 libsql `runtime.db`，该限制只影响显式把旧 Web/CLI/TUI Project backend 配成 StarRocks 的 execute 请求。
 
 ## 主流程
 
@@ -67,7 +72,7 @@ schema 随迭代推进（最新以 `src/libsql_store/schema.rs::SCHEMA_VERSION` 
 - `tests/schema_bootstrap.rs`：建库后 synchronous 生效值、同路径重开幂等（version 单行 + integrity_check）、并发打开。
 - `tests/store_integration/`（目录目标，按职责分模块）：会话 CRUD/patch、消息往返、事务回滚、取消安全和崩溃恢复等 P0 行为契约（WAL 并发压力另见 `store_concurrency.rs`）。
 - `tests/todos_workflow.rs`：TODO 投影+事件原子提交、generation 冲突、v8→v9 migration。
-- `tests/project_store.rs`：project 四表 CRUD/级联/状态流转 8 例；`tests/sql_project_store.rs`：sqlx 后端（`OC_TEST_MYSQL_DSN` / `OC_TEST_STARROCKS_DSN` 环境门控，无 DSN 自动跳过），真 MySQL 8.4 / StarRocks 3.3 容器实测。
+- `tests/project_store.rs`：project 四表 CRUD/级联/状态流转；`tests/contracts/project_atomic_claim.rs`：20 路并发唯一 winner、INSERT 失败回滚、已有 claim 不重复 run；`tests/sql_project_store.rs`：sqlx 后端（`OC_TEST_MYSQL_DSN` / `OC_TEST_STARROCKS_DSN` 环境门控，无 DSN 自动跳过），覆盖 MySQL 原子入口与 StarRocks 写前拒绝边界。
 - `tests/team_runs.rs`：upsert 往返且 `created_at` 冻结、`finish` 全行翻转、节点删除级联；`tests/store_migrations.rs` 覆盖 v16→v17 建表。
 - `tests/legacy_agent_normalization.rs`：interlude 存量 `agent='sandbox'` 行在全部读路径（get/list/fork 等）归一为 `plan`，原始行不被重写。
 - `tests/store_perf.rs`：持久化性能门槛。

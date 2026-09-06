@@ -1,14 +1,12 @@
 //! REST uplink from an execution node to its central server.
 //!
 //! One thin handle over a proxy-aware `reqwest::Client` (loopback always
-//! bypasses proxies). Every request is HMAC-signed with the shared token via
-//! [`opencoder_core::auth_sig`]; every non-2xx response becomes an `anyhow`
-//! error that embeds the server's body.
+//! bypasses proxies). Every request carries the shared Bearer token; every
+//! non-2xx response becomes an `anyhow` error that embeds the server's body.
 
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use opencoder_core::auth_sig;
 use opencoder_core::net::build_http_client_with_read_timeout;
 use opencoder_core::node_protocol::{
     ClaimResponse, FetchMessagesResult, NodeEventBatch, NodeHeartbeatResponse, NodeRegisterRequest,
@@ -42,6 +40,7 @@ pub const HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(5);
 /// internal Arc), so per-task background duties can own a copy.
 #[derive(Clone)]
 pub struct Uplink {
+    local_dag: Option<std::sync::Arc<dyn LocalDagPersistence>>,
     http: reqwest::Client,
     base: String,
     token: String,
@@ -51,6 +50,16 @@ pub struct Uplink {
 }
 
 impl Uplink {
+    /// Node-local DAG persistence adapter: no HTTP request or credentials.
+    pub fn for_local_dag(local: std::sync::Arc<dyn LocalDagPersistence>) -> Self {
+        Self {
+            local_dag: Some(local),
+            http: reqwest::Client::new(),
+            base: String::new(),
+            token: String::new(),
+            heartbeat_timeout: HEARTBEAT_TIMEOUT,
+        }
+    }
     /// Build an uplink against `base` (trailing slashes trimmed) with the
     /// resolved bearer token. Transport construction errors are fatal here.
     pub fn new(base: &str, token: &str) -> Result<Self> {
@@ -65,6 +74,7 @@ impl Uplink {
     pub fn with_heartbeat_timeout(base: &str, token: &str, d: Duration) -> Result<Self> {
         let http = build_http_client_with_read_timeout(None, READ_TIMEOUT)?;
         Ok(Uplink {
+            local_dag: None,
             http,
             base: base.trim_end_matches('/').to_string(),
             token: token.to_string(),
@@ -90,7 +100,7 @@ impl Uplink {
             addr: None,
         };
         let resp = self
-            .signed_request(reqwest::Method::POST, "/api/nodes/register", Some(&body))
+            .authed_request(reqwest::Method::POST, "/api/nodes/register", Some(&body))
             .await
             .context("register node")?;
         let resp = ensure_ok(resp, "register node").await?;
@@ -107,7 +117,7 @@ impl Uplink {
     pub async fn heartbeat(&self, node_id: &str) -> Result<NodeHeartbeatResponse> {
         let round_trip = async {
             let resp = self
-                .signed_request(
+                .authed_request(
                     reqwest::Method::POST,
                     &format!("/api/nodes/{node_id}/heartbeat"),
                     Some(&serde_json::json!({})),
@@ -137,7 +147,7 @@ impl Uplink {
             urlencode_component(node_id)
         );
         let resp = self
-            .signed_request(reqwest::Method::GET, &pq, None::<&serde_json::Value>)
+            .authed_request(reqwest::Method::GET, &pq, None::<&serde_json::Value>)
             .await
             .context("claim task")?;
         if resp.status() == reqwest::StatusCode::NO_CONTENT {
@@ -150,7 +160,7 @@ impl Uplink {
     /// POST /api/nodes/tasks/:tid/events — upload one ordered event batch.
     pub async fn upload_events(&self, task_id: &str, batch: NodeEventBatch) -> Result<()> {
         let resp = self
-            .signed_request(
+            .authed_request(
                 reqwest::Method::POST,
                 &format!("/api/nodes/tasks/{task_id}/events"),
                 Some(&batch),
@@ -173,7 +183,7 @@ impl Uplink {
             error,
         };
         let resp = self
-            .signed_request(
+            .authed_request(
                 reqwest::Method::POST,
                 &format!("/api/nodes/tasks/{task_id}/status"),
                 Some(&report),
@@ -193,7 +203,7 @@ impl Uplink {
             urlencode_component(node_id)
         );
         let resp = self
-            .signed_request(reqwest::Method::GET, &pq, None::<&serde_json::Value>)
+            .authed_request(reqwest::Method::GET, &pq, None::<&serde_json::Value>)
             .await
             .context("claim dag run")?;
         if resp.status() == reqwest::StatusCode::NO_CONTENT {
@@ -206,8 +216,11 @@ impl Uplink {
 
     /// POST /api/nodes/dag/runs/:rid/events — upload one ordered event batch.
     pub async fn dag_events(&self, batch: &opencoder_dag::DagEventBatch) -> Result<()> {
+        if let Some(local) = &self.local_dag {
+            return local.events(batch).await;
+        }
         let resp = self
-            .signed_request(
+            .authed_request(
                 reqwest::Method::POST,
                 &format!("/api/nodes/dag/runs/{}/events", batch.run_id),
                 Some(batch),
@@ -220,8 +233,11 @@ impl Uplink {
 
     /// POST /api/nodes/dag/runs/:rid/status — terminal run transition report.
     pub async fn dag_status(&self, report: &opencoder_dag::DagStatusReport) -> Result<()> {
+        if let Some(local) = &self.local_dag {
+            return local.status(report).await;
+        }
         let resp = self
-            .signed_request(
+            .authed_request(
                 reqwest::Method::POST,
                 &format!("/api/nodes/dag/runs/{}/status", report.run_id),
                 Some(report),
@@ -234,10 +250,8 @@ impl Uplink {
 }
 
 impl Uplink {
-    /// Single signed egress path: serialize the JSON body (if any), compute
-    /// the HMAC over `{METHOD}\n{path_and_query}\n{ts}\n{sha256(body)}`, and
-    /// attach the signature headers. Every control-plane call goes through
-    /// here, so the wire format can never drift per-call-site.
+    /// Single authenticated egress path. Every control-plane call goes through
+    /// here so the shared Bearer credential cannot drift per call site.
     /// POST /api/nodes/:id/control_result — upload one control result
     /// (P3 message relay). The server answers `{"resolved": bool}` and ALWAYS
     /// 200: an unknown/stale control id is a no-op, never a retryable error.
@@ -247,7 +261,7 @@ impl Uplink {
         result: &FetchMessagesResult,
     ) -> Result<()> {
         let resp = self
-            .signed_request(
+            .authed_request(
                 reqwest::Method::POST,
                 &format!("/api/nodes/{node_id}/control_result"),
                 Some(result),
@@ -258,7 +272,7 @@ impl Uplink {
         Ok(())
     }
 
-    async fn signed_request<T: serde::Serialize>(
+    async fn authed_request<T: serde::Serialize>(
         &self,
         method: reqwest::Method,
         path_and_query: &str,
@@ -268,18 +282,14 @@ impl Uplink {
             Some(b) => serde_json::to_vec(b).context("serialize request body")?,
             None => Vec::new(),
         };
-        let ts = opencoder_core::message::now_ms();
-        let canon = auth_sig::canonical(method.as_str(), path_and_query, ts, &body_bytes);
-        let sig = auth_sig::sign_hex(&self.token, &canon);
         self.http
             .request(method, self.url(path_and_query))
-            .header(auth_sig::TS_HEADER, ts.to_string())
-            .header(auth_sig::SIG_HEADER, sig)
+            .bearer_auth(&self.token)
             .header(reqwest::header::CONTENT_TYPE, "application/json")
             .body(body_bytes)
             .send()
             .await
-            .context("send signed request")
+            .context("send authenticated request")
     }
 }
 
@@ -307,4 +317,11 @@ async fn ensure_ok(resp: reqwest::Response, what: &'static str) -> Result<reqwes
     let body = resp.text().await.unwrap_or_default();
     warn!(%status, what, body = %body, "server rejected uplink request");
     Err(anyhow::anyhow!("{what}: HTTP {status}: {body}"))
+}
+
+/// Durable node-local DAG event/status outlet used by fleet v2.
+#[async_trait::async_trait]
+pub trait LocalDagPersistence: Send + Sync {
+    async fn events(&self, batch: &opencoder_dag::DagEventBatch) -> Result<()>;
+    async fn status(&self, report: &opencoder_dag::DagStatusReport) -> Result<()>;
 }

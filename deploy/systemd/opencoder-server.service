@@ -1,0 +1,28 @@
+[Unit]
+Description=Opencoder fleet control plane
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=opencoder-server
+Group=opencoder-server
+WorkingDirectory=/etc/opencoder/server
+StateDirectory=opencoder-server
+StateDirectoryMode=0750
+ConfigurationDirectory=opencoder/server
+ExecStartPre=/usr/bin/test -r /etc/opencoder/server.token
+ExecStart=/usr/local/bin/opencoder-server --host 127.0.0.1 --port 8080 --workdir /etc/opencoder/server --data-dir /var/lib/opencoder-server --token-file /etc/opencoder/server.token
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=45s
+KillSignal=SIGTERM
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/opencoder-server
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

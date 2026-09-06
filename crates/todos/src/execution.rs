@@ -32,7 +32,10 @@ pub async fn execute(
     cancel: CancellationToken,
 ) -> Result<TodoExecution> {
     config.autopilot.mode = opencoder_core::ApMode::Off;
-    let agent = resolve_agent(&todo.agent)
+    let agent =
+        opencoder_core::agent::scope::with_root_sync(config.agent.agents_dir.clone(), || {
+            resolve_agent(&todo.agent)
+        })
         .with_context(|| format!("TODO {} has unknown agent {}", todo.id, todo.agent))?;
     if !agent.is_primary() || agent.name == "workflow" {
         anyhow::bail!(

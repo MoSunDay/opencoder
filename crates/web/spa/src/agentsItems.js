@@ -72,5 +72,5 @@ export function mountHint(status) {
   const s = status && typeof status === 'object' ? status : {};
   const host = s.host || 'HOST';
   const port = s.port || 'PORT';
-  return `mount -t nfs -o vers=3,tcp,port=${port},mountport=${port},nolock ${host}:/ <dir>`;
+  return `mount -t nfs -o ro,vers=3,tcp,port=${port},mountport=${port},nolock ${host}:/ <dir>`;
 }

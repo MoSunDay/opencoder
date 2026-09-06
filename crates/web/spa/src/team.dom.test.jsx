@@ -203,7 +203,7 @@ describe('TopicDetailPanel', () => {
     // the sub-turn count both in the timeline and the block header.
     expect((await screen.findAllByText('如何拆分模块？')).length).toBeGreaterThan(0);
     expect(screen.getByText('Turn 1')).toBeTruthy();
-    expect(screen.getByText('先摸清边界')).toBeTruthy();
+    expect(await screen.findByText('先摸清边界')).toBeTruthy();
     expect(screen.getByText('n1 · 回答')).toBeTruthy();
     expect(screen.getByText('n2 · 对齐追答')).toBeTruthy();
     expect(screen.getByText('一致同意三分法')).toBeTruthy();

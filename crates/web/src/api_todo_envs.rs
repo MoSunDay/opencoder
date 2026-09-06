@@ -28,6 +28,7 @@ use crate::api_todo_util::{error_400, error_404, error_409, error_500, is_versio
 use crate::AppState;
 
 /// Resolved `(share root)` for the request, or a 500 response.
+#[allow(clippy::result_large_err)] // Return the already-built Axum response at this HTTP boundary; boxing adds an allocation per error.
 async fn root_or_500(state: &AppState) -> Result<std::path::PathBuf, Response> {
     share_root(&state.workdir)
         .await

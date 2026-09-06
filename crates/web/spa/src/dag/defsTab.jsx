@@ -9,6 +9,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiDel, apiGet, apiPost } from '../api.js';
 import { absTime, relTime } from '../format.js';
 import { useStore } from '../store.js';
+import { newId, nodeOptions as buildNodeOptions } from '../fleet/model.js';
 import { DefEditor } from './defEditor.jsx';
 
 const { Text } = Typography;
@@ -42,6 +43,7 @@ export function DefsTab({ onNotice, onDispatched }) {
   const [dispatchNode, setDispatchNode] = useState(undefined);
   const [dispatching, setDispatching] = useState(false);
   const alive = useRef(true);
+  const attempt = useRef(null);
 
   const load = useCallback(
     async (silent) => {
@@ -104,14 +106,20 @@ export function DefsTab({ onNotice, onDispatched }) {
     if (!def) {
       return;
     }
+    const key = JSON.stringify([def.id, dispatchNode]);
+    if (attempt.current?.key !== key) attempt.current = { key, id: newId('dag') };
     setDispatching(true);
     try {
       const j = await apiPost(
         '/api/dag/defs/' + encodeURIComponent(def.id) + '/dispatch',
-        dispatchNode ? { node_id: dispatchNode } : {},
+        { id: attempt.current.id, ...(dispatchNode ? { node_id: dispatchNode } : {}) },
       );
       const runId = j && j.run_id ? j.run_id : '';
+      if (onNotice) {
+        onNotice('');
+      }
       message.success('已派发，运行 ID: ' + (runId ? runId.slice(0, 8) : '(unknown)'));
+      attempt.current = null;
       setDispatchFor(null);
       if (onDispatched) {
         onDispatched(runId);
@@ -197,7 +205,7 @@ export function DefsTab({ onNotice, onDispatched }) {
     },
   ];
 
-  const nodeOptions = (nodes || []).map((n) => ({ value: n.id, label: (n.name || n.id) + (n.id ? ' (' + n.id.slice(0, 8) + ')' : '') }));
+  const dispatchNodeOptions = buildNodeOptions(nodes || [], 'dag');
 
   return (
     <Space direction="vertical" size={12} style={{ width: '100%' }}>
@@ -239,15 +247,15 @@ export function DefsTab({ onNotice, onDispatched }) {
         confirmLoading={dispatching}
       >
         <Space direction="vertical" size={8} style={{ width: '100%' }}>
-          <Text type="secondary">选择执行节点；留空表示任意节点可领取（进入队列等待 claim）。</Text>
+          <Text type="secondary">整个工作流会在同一个节点完成。留空时由服务端选择当前可用节点。</Text>
           <Select
             style={{ width: '100%' }}
             allowClear
             placeholder="任意节点（默认）"
             value={dispatchNode}
             onChange={setDispatchNode}
-            options={nodeOptions}
-            notFoundContent="暂无在线节点，可留空由任意节点领取"
+            options={dispatchNodeOptions}
+            notFoundContent="暂无可用 DAG 节点"
           />
         </Space>
       </Modal>

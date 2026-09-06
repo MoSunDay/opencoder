@@ -65,6 +65,7 @@ pub async fn start_topic(
     title: &str,
     requirement: &str,
 ) -> Result<TopicMeta> {
+    cfg.validate()?;
     let team = fs_store::load_team(&cfg.team_root, team_name)?;
     let members: Vec<MemberRef> = team
         .members
@@ -102,6 +103,7 @@ pub async fn run_topic(
     topic_id: &str,
     cancel: CancelToken,
 ) -> Result<TopicMeta> {
+    cfg.validate()?;
     let mut meta = fs_store::load_topic(&cfg.team_root, team_name, topic_id)?;
     if meta.status == TOPIC_FINISHED && meta.finish_reason.as_deref() != Some(FINISH_ERROR) {
         // `terminal::finish` writes the NFS metadata first and flips the

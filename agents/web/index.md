@@ -1,6 +1,12 @@
-Commit: 2677992
+Commit: (working-tree, 基于 c1a1b2e78e1ccd4a3cc2ac6dc408a76d30bf46e6)
 
 # web 模块
+
+## 平台装配边界
+
+`opencoder-server` 使用独立 [control](../control/index.md)，不启动本模块的本地 session/节点 claim 执行面。平台 [worker](../worker/index.md) 在 Node 进程内调用这里的 session router，复用 drain、消息和工具交互，无节点入站 HTTP。
+
+`spa/src/fleet/` 提供负载/维护、统一执行、普通团队职责、系统团队、能力绑定与调度、节点明细及产物下载。原会话/项目/DAG/TODO 页面由 control 适配为按 ID 路由；静态文件由 control 内嵌。全部执行详情的 Plan 使用通用控制入口，运行中禁用再次 Plan/Act，未生成计划时禁用 Act；明细包含节点保存的最新 todo。窄屏使用页面下拉导航，宽表在容器内滚动。真实双节点浏览器验收入口为 `scripts/acceptance/platform.js`，覆盖空态、最新 Plan、390px 视口、VM 随节点崩溃退出及离线错误。下面的 AppState、handle 和旧 Node API 说明属于可复用的本地/兼容 API，不代表平台 Server 持有运行明细。
 
 ## 职责
 axum HTTP/SSE 会话管理服务。提供 session CRUD、prompt 提交（admit 即返回）、事件流（SSE replay+live）、运行时 agent/model 切换、interrupt；question 作答、queue/steer 输入管理、annotation/autopilot、模型/技能发现、LLM 标题生成（对齐 TUI 会话能力，见 [changelog](../../features/changelog/2026-08-21/web-tui-parity-server-client.md)）。

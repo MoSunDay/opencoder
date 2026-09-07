@@ -9,6 +9,8 @@ Commit: cef0033
 - 大脑调度仅需目标节点和需求，提交后直接打开执行详情。空能力库由默认 act Agent 执行；有能力库时继续规划和选择能力，未绑定目标的能力默认 act。实际存储、规划和节点错误照常返回，重试沿用同一执行回执。
 - 能力库列表与搜索结果共用表格。点击行编辑或点击新建均从右侧打开占视口 75% 的抽屉；编辑读取完整内容，保留工程输入，部分保存失败后重试复用已创建 ID。
 
+Server 规划请求继承已有 `reasoning_effort` 配置，并保留请求本身的显式覆盖。真实模型在未设置该参数时可耗尽输出额度而没有完整 JSON；本机 Server 配置使用 `low`，Node 的原有设置保持独立。
+
 ## 测试覆盖
 
 | 功能 | 测试 | 文件 |
@@ -19,6 +21,7 @@ Commit: cef0033
 | 大脑选择节点后直接执行、修改需求/节点后的幂等键 | 大脑调度 DOM 回归 | `crates/web/spa/src/fleet/brain.dom.test.jsx` |
 | 单表、右侧 75% 抽屉、新建/编辑、搜索工程输入与失败重试 | `capability library table and editor` | `crates/web/spa/src/brainPanel.dom.test.jsx` |
 | 空库默认执行及回执重放、节点和计划错误、规划失败不可执行 | `empty_library_executes_on_selected_node_and_retries_the_same_receipt` 等四个 HTTP 用例 | `crates/control/tests/e2e/brain_api/default_execution.rs` |
+| 规划请求继承 Server 推理配置、保留显式覆盖和未配置语义 | `planner_inherits_configured_reasoning_and_preserves_request_overrides` | `crates/control/src/bootstrap.rs` |
 | 既有能力 CRUD、绑定、幂等、准入和规划语义 | 拆分保留的 HTTP 回归 | `crates/control/tests/e2e/brain_api/` |
 
 ## 验证记录

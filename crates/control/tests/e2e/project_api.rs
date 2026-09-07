@@ -8,13 +8,16 @@ use serde_json::json;
 use crate::support::Harness;
 
 async fn seed_todo(h: &Harness) -> String {
-    let (status, body) = h
-        .req(
-            Method::POST,
-            "/api/project/todos",
-            Some(json!({"title": "T1", "draft": "do it"})),
-        )
-        .await;
+    seed_todo_with_kind(h, None).await
+}
+
+/// Same seed but with an explicit executor_kind (e.g. brain pre-resolution).
+async fn seed_todo_with_kind(h: &Harness, executor_kind: Option<&str>) -> String {
+    let mut body = json!({"title": "T1", "draft": "do it"});
+    if let Some(kind) = executor_kind {
+        body["executor_kind"] = json!(kind);
+    }
+    let (status, body) = h.req(Method::POST, "/api/project/todos", Some(body)).await;
     assert_eq!(status, 200, "{body}");
     body["id"].as_str().unwrap().to_string()
 }
@@ -543,4 +546,51 @@ async fn cancel_unknown_project_run_is_404() {
         .await;
     assert_eq!(status, 404, "{body}");
     assert_eq!(body["error"], json!("execution id not found"));
+}
+
+#[tokio::test]
+async fn brain_todo_execute_preresolves_empty_library_to_default_agent() {
+    let h = Harness::new().await;
+    let todo_id = seed_todo_with_kind(&h, Some("brain")).await;
+
+    // Plan first (202) so the project-<todo> execution exists and execute
+    // takes the node-affinity command branch.
+    let (status, body) = h
+        .req(
+            Method::POST,
+            &format!("/api/project/todos/{todo_id}/plan"),
+            Some(json!({})),
+        )
+        .await;
+    assert_eq!(status, 202, "{body}");
+    let exec_id = format!("project-{todo_id}");
+
+    h.node.set_command(
+        &exec_id,
+        "execute",
+        200,
+        json!({"id": exec_id, "status": "running"}),
+    );
+    let (status, body) = h
+        .req(
+            Method::POST,
+            &format!("/api/project/todos/{todo_id}/execute"),
+            None,
+        )
+        .await;
+    assert_eq!(status, 200, "{body}");
+
+    // The harness store starts with an EMPTY capability library: execute
+    // pre-resolves to the default agent override (same first-use default
+    // as the brain dispatch surface) instead of a 400.
+    let seen = h.node.seen_commands();
+    let execute_cmd = seen
+        .iter()
+        .find(|(id, action, _)| id == &exec_id && action == "execute")
+        .expect("execute command forwarded");
+    assert_eq!(
+        execute_cmd.2["brain"],
+        json!({"kind": "agent", "ref": "act", "capability_id": null, "plan_id": null}),
+        "input.brain carries the default-agent resolution: {execute_cmd:?}"
+    );
 }

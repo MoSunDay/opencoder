@@ -19,8 +19,8 @@ use tower::ServiceExt;
 type Resp = (StatusCode, Value);
 
 const SPEC: &str = r#"{"name":"etl-demo","steps":[
-    {"name":"fetch","kind":{"type":"python","code":"x=1"}},
-    {"name":"load","depends_on":["fetch"],"kind":{"type":"python","code":"y=2"}}]}"#;
+    {"name":"fetch","kind":{"type":"wasm","command":"tool.wasm"}},
+    {"name":"load","depends_on":["fetch"],"kind":{"type":"wasm","command":"tool.wasm"}}]}"#;
 
 /// Wrap a raw spec literal in the `DagDefUpsertRequest` envelope.
 fn spec_body() -> String {

@@ -303,6 +303,9 @@ pub(super) async fn execute_call_with_timeout(
         ));
     }
     let ctx = ToolContext {
+        // Workflow-orchestrated sessions (DAG agent steps) expose their
+        // step-scoped contract vars (e.g. OPENCODER_HOW_APPEND) here.
+        extra_env: session.env_passthrough.clone(),
         session_id: session.id.clone(),
         message_id: tc.id.clone(),
         agent: session.agent.name.clone(),

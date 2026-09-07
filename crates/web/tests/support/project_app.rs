@@ -42,6 +42,7 @@ pub async fn harness() -> Harness {
             projects,
             dir.path().to_path_buf(),
             Some(client),
+            None,
         )
         .await
         .unwrap();

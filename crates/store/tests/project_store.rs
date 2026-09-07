@@ -16,6 +16,9 @@
 //!   status (claim-rollback, plan-writeback race, terminal-run convergence)
 //! - run_versions_and_listing_order: next_todo_version numbering (empty = 1),
 //!   newest-first listing, patch stamps status/finished_at
+//! - executor_dimension_round_trips: todo executor_kind/ref/spec and run
+//!   executor_kind/capability_id/plan_id/output_ref persist exactly (team todo
+//!   + dag run), unknown kind text fails closed on read
 //! - cascades: delete_goal removes milestone+todo+runs; delete_todo removes
 //!   runs; delete_milestone removes its todos and their runs (no re-parent)
 //! - reopen_is_idempotent_and_serves_v15: second `open` on the same file
@@ -25,10 +28,10 @@
 use std::sync::Arc;
 
 use opencoder_store::{
-    LibsqlStore, ProjectGoalPatch, ProjectGoalRecord, ProjectGoalStatus, ProjectMilestonePatch,
-    ProjectMilestoneRecord, ProjectMilestoneStatus, ProjectStore, ProjectTodoPatch,
-    ProjectTodoRecord, ProjectTodoRunKind, ProjectTodoRunPatch, ProjectTodoRunRecord,
-    ProjectTodoRunStatus, ProjectTodoStatus,
+    LibsqlStore, ProjectExecutorKind, ProjectGoalPatch, ProjectGoalRecord, ProjectGoalStatus,
+    ProjectMilestonePatch, ProjectMilestoneRecord, ProjectMilestoneStatus, ProjectStore,
+    ProjectTodoPatch, ProjectTodoRecord, ProjectTodoRunKind, ProjectTodoRunPatch,
+    ProjectTodoRunRecord, ProjectTodoRunStatus, ProjectTodoStatus,
 };
 
 async fn fresh() -> (tempfile::TempDir, Arc<LibsqlStore>, Arc<dyn ProjectStore>) {
@@ -72,6 +75,9 @@ fn todo(id: &str, milestone_id: Option<&str>, created_at: i64) -> ProjectTodoRec
         plan_md: None,
         status: ProjectTodoStatus::Draft,
         agent: "act".to_string(),
+        executor_kind: ProjectExecutorKind::Agent,
+        executor_ref: None,
+        executor_spec: None,
         active_session_id: None,
         created_at,
         updated_at: created_at,
@@ -89,6 +95,10 @@ async fn run(store: &dyn ProjectStore, id: &str, todo_id: &str, created_at: i64)
             plan_md: Some("plan".to_string()),
             output_md: None,
             agent: "plan".to_string(),
+            executor_kind: ProjectExecutorKind::Agent,
+            capability_id: None,
+            plan_id: None,
+            output_ref: None,
             session_id: Some(format!("sess-{id}")),
             status: ProjectTodoRunStatus::Running,
             started_at: created_at,
@@ -571,7 +581,7 @@ async fn reopen_is_idempotent_and_serves_v15() {
         .unwrap();
     let mut rows = stmt.query(()).await.unwrap();
     let v: i64 = rows.next().await.unwrap().unwrap().get(0).unwrap();
-    assert_eq!(v, 19, "schema_version must be latest (19) after reopen");
+    assert_eq!(v, 20, "schema_version must be latest (20) after reopen");
 
     let iface: Arc<dyn ProjectStore> = Arc::new(store);
     iface.create_goal(&goal("g1", 0, 1)).await.unwrap();
@@ -591,4 +601,125 @@ async fn reopen_is_idempotent_and_serves_v15() {
 #[allow(dead_code)]
 fn libsql_store_coerces_to_project_store(store: Arc<LibsqlStore>) -> Arc<dyn ProjectStore> {
     store
+}
+
+/// The v20 executor dimension must persist exactly through the libsql backend:
+/// a team todo keeps its executor_ref + inline executor_spec, and a dag run
+/// claimed under it keeps brain provenance (capability_id/plan_id) and the
+/// workflow artifact root (output_ref). Unknown kind text in the row is
+/// corruption and fails closed on read.
+#[tokio::test]
+async fn executor_dimension_round_trips() {
+    let (_dir, _store, iface) = fresh().await;
+
+    // Todo side: team executor with a ref and an inline spec.
+    let mut team = todo("t-team", None, 1);
+    team.executor_kind = ProjectExecutorKind::Team;
+    team.executor_ref = Some("feature-team".to_string());
+    team.executor_spec = Some(r#"{"name":"feature-team"}"#.to_string());
+    iface.create_todo(&team).await.unwrap();
+
+    let back = iface.get_todo("t-team").await.unwrap().unwrap();
+    assert_eq!(back.executor_kind, ProjectExecutorKind::Team);
+    assert_eq!(back.executor_ref.as_deref(), Some("feature-team"));
+    assert_eq!(
+        back.executor_spec.as_deref(),
+        Some(r#"{"name":"feature-team"}"#)
+    );
+
+    // Patching executor_ref through Option<Option<String>> (set + clear).
+    iface
+        .patch_todo(
+            "t-team",
+            &ProjectTodoPatch {
+                executor_ref: Some(Some("other-team".to_string())),
+                ..Default::default()
+            },
+            10,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        iface
+            .get_todo("t-team")
+            .await
+            .unwrap()
+            .unwrap()
+            .executor_ref,
+        Some("other-team".to_string())
+    );
+    iface
+        .patch_todo(
+            "t-team",
+            &ProjectTodoPatch {
+                executor_ref: Some(None),
+                ..Default::default()
+            },
+            11,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        iface
+            .get_todo("t-team")
+            .await
+            .unwrap()
+            .unwrap()
+            .executor_ref,
+        None
+    );
+
+    // Run side: dag run with brain provenance and an artifact root.
+    let mut dag_run = ProjectTodoRunRecord {
+        id: "run-dag".to_string(),
+        todo_id: "t-team".to_string(),
+        kind: ProjectTodoRunKind::Execute,
+        version: 1,
+        plan_md: None,
+        output_md: None,
+        agent: "act".to_string(),
+        executor_kind: ProjectExecutorKind::Dag,
+        capability_id: Some("cap-brain".to_string()),
+        plan_id: Some("plan-42".to_string()),
+        output_ref: Some("/workflow/run-9/step-2/".to_string()),
+        session_id: None,
+        status: ProjectTodoRunStatus::Running,
+        started_at: 2,
+        finished_at: None,
+        created_at: 2,
+    };
+    assert!(iface
+        .claim_todo_running_with_run(&dag_run, 2)
+        .await
+        .unwrap());
+    dag_run.executor_kind = ProjectExecutorKind::Brain;
+    assert!(!iface
+        .claim_todo_running_with_run(&dag_run, 3)
+        .await
+        .unwrap());
+
+    let run_back = iface.get_todo_run("run-dag").await.unwrap().unwrap();
+    assert_eq!(run_back.executor_kind, ProjectExecutorKind::Dag);
+    assert_eq!(run_back.capability_id.as_deref(), Some("cap-brain"));
+    assert_eq!(run_back.plan_id.as_deref(), Some("plan-42"));
+    assert_eq!(
+        run_back.output_ref.as_deref(),
+        Some("/workflow/run-9/step-2/")
+    );
+
+    // Unknown executor_kind text fails closed instead of guessing.
+    {
+        let store2 = LibsqlStore::open(tempfile::tempdir().unwrap().path().join("x.db"))
+            .await
+            .unwrap();
+        store2.create_todo(&todo("t-bad", None, 1)).await.unwrap();
+        let conn = store2.conn().await.unwrap();
+        conn.execute(
+            "UPDATE project_todos SET executor_kind = 'workflow' WHERE id = 't-bad'",
+            (),
+        )
+        .await
+        .unwrap();
+        assert!(store2.get_todo("t-bad").await.is_err());
+    }
 }

@@ -33,7 +33,7 @@ pub mod auth_mw;
 pub mod html;
 pub use api::project_util as api_project_util;
 
-pub use bootstrap::{new_state, serve};
+pub use bootstrap::{new_state, new_state_with_projects, serve};
 use opencoder_store::{fleet::FleetStore, ProjectStore, Store};
 pub use routes::build_app;
 use std::{path::PathBuf, sync::Arc};

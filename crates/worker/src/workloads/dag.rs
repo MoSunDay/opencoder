@@ -64,7 +64,8 @@ pub(super) async fn run(
         .as_ref()
         .ok_or_else(|| anyhow::anyhow!("DAG definition missing"))?;
     let mut spec: opencoder_dag::DagSpec =
-        serde_json::from_value(definition.get("spec").unwrap_or(definition).clone())?;
+        opencoder_dag::decode_spec(definition.get("spec").unwrap_or(definition))
+            .map_err(|e| anyhow::anyhow!(e))?;
     if let Some(input) = assignment.request.input["prompt"]
         .as_str()
         .filter(|p| !p.is_empty())

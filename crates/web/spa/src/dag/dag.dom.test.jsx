@@ -31,7 +31,7 @@ import { RunDetail } from './runDetail.jsx';
 import { setNodes } from '../store.js';
 
 const DEFS = [
-  { id: 'dag-etl', name: 'etl', spec: { name: 'etl', steps: [{ name: 'fetch', kind: { type: 'python', code: 'x' } }, { name: 'review', depends_on: ['fetch'], kind: { type: 'agent', prompt: 'r' } }] }, updated_at: 1700000000000 },
+  { id: 'dag-etl', name: 'etl', spec: { name: 'etl', steps: [{ name: 'fetch', kind: { type: 'wasm', command: 'tool.wasm' } }, { name: 'review', depends_on: ['fetch'], kind: { type: 'agent', prompt: 'r' } }] }, updated_at: 1700000000000 },
   { id: 'dag-other', name: 'nightly', spec: { name: 'nightly', steps: [{ name: 'only', kind: { type: 'agent', prompt: 'r' } }] }, updated_at: 1700000100000 },
 ];
 
@@ -117,12 +117,32 @@ describe('DefsTab', () => {
     fireEvent.click(await screen.findByText('删 除')); // popconfirm ok button splits CJK
     await waitFor(() => expect(apiDelMock).toHaveBeenCalledWith('/api/dag/defs/dag-etl'));
   });
+
+  it('marks degraded rows (no spec, error) and disables dispatch/edit but not delete', async () => {
+    // legacy python def that the server can no longer decode → DEGRADED row
+    apiGetMock.mockImplementation((path) =>
+      jsonResponse(String(path).startsWith('/api/dag/defs')
+        ? [DEFS[0], { id: 'dag-legacy', name: 'legacy', created_at: 1700000000000, updated_at: 1700000000000, error: 'parse dag spec: 该定义使用已下线的 python 步骤，无法解析' }]
+        : {}));
+    render(<DefsTab onNotice={vi.fn()} onDispatched={vi.fn()} />);
+    expect(await screen.findByText(/定义无法解析：parse dag spec/)).toBeTruthy();
+    expect(screen.getByText('legacy')).toBeTruthy();
+    // row order mirrors the payload: row 0 healthy, row 1 degraded; antd
+    // wraps button labels in <span>, so reach the native button element.
+    const rowButtons = (text) => screen.getAllByText(text).map((el) => el.closest('button'));
+    expect(rowButtons('派发')[0].disabled).toBe(false);
+    expect(rowButtons('派发')[1].disabled).toBe(true);
+    expect(rowButtons('编辑')[0].disabled).toBe(false);
+    expect(rowButtons('编辑')[1].disabled).toBe(true);
+    expect(rowButtons('删除')[1].disabled).toBe(false); // cleanup stays possible
+  });
 });
 
 describe('DefEditor', () => {
   it('surfaces local validation problems and never calls onSave', async () => {
     const onSave = vi.fn();
     render(<DefEditor open def={null} saving={false} onClose={vi.fn()} onSave={onSave} />);
+    fireEvent.click(screen.getByText('JSON')); // default is now the canvas mode
     const area = screen.getByRole('textbox');
     fireEvent.change(area, { target: { value: '{ nope' } });
     fireEvent.click(screen.getByText('保 存'));
@@ -131,7 +151,7 @@ describe('DefEditor', () => {
 
     // a spec-level problem list renders the same way
     fireEvent.change(area, {
-      target: { value: JSON.stringify({ name: 'x', steps: [{ name: 'Bad', kind: { type: 'python', code: 'x' } }] }) },
+      target: { value: JSON.stringify({ name: 'x', steps: [{ name: 'Bad', kind: { type: 'wasm', command: 'tool.wasm' } }] }) },
     });
     fireEvent.click(screen.getByText('保 存'));
     expect(await screen.findByText(/steps\[0\]\.name 必须匹配/)).toBeTruthy();
@@ -143,8 +163,9 @@ describe('DefEditor', () => {
       Object.assign(new Error('HTTP 400'), { status: 400, body: { problems: ['spec.steps 不能为空'] } }),
     );
     render(<DefEditor open def={null} saving={false} onClose={vi.fn()} onSave={onSave} />);
+    fireEvent.click(screen.getByText('JSON')); // default is now the canvas mode
     fireEvent.change(screen.getByRole('textbox'), {
-      target: { value: JSON.stringify({ name: 'ok', steps: [{ name: 'a', kind: { type: 'python', code: 'x' } }] }) },
+      target: { value: JSON.stringify({ name: 'ok', steps: [{ name: 'a', kind: { type: 'wasm', command: 'tool.wasm' } }] }) },
     });
     fireEvent.click(screen.getByText('保 存'));
     expect(await screen.findByText('spec.steps 不能为空')).toBeTruthy();

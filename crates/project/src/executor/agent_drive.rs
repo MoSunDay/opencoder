@@ -1,8 +1,9 @@
-//! 执行运行驱动：把 todo 的现行方案交给主代理在工作目录中落地。
-//! 「新或续」会话策略：todo.active_session_id 存在且会话仍可加载时
-//! resume 同一 session（持续推进，上下文跨执行延续），否则新建 session
-//! 并把 id 回写到 todo.active_session_id。结构与 plan_gen 相同（直驱
-//! SessionState + run + flusher），复用其 runtime_setup/close_run 小件。
+//! agent 执行器驱动（自 `execute.rs` 原样迁入）：把 todo 的现行方案交给
+//! 主代理在工作目录中落地。「新或续」会话策略：todo.active_session_id
+//! 存在且会话仍可加载时 resume 同一 session（持续推进，上下文跨执行
+//! 延续），否则新建 session 并把 id 回写到 todo.active_session_id。
+//! 结构与 plan_gen 相同（直驱 SessionState + run + flusher），复用其
+//! runtime_setup/close_run 小件。
 
 use std::sync::Arc;
 
@@ -93,6 +94,9 @@ async fn new_or_resume_session(
         plan_md: None,
         status: None,
         agent: None,
+        executor_kind: None,
+        executor_ref: None,
+        executor_spec: None,
         milestone_id: None,
         active_session_id: Some(Some(session.id.clone())),
     };
@@ -106,7 +110,7 @@ async fn new_or_resume_session(
 /// 执行运行主体。任何失败路径都要把 run 行与 todo 状态一并收敛（todo
 /// 由 start_execute 置为 Running，不能悬在 Running 上），并在最后摘除
 /// spawn 注册。
-pub async fn drive(
+pub(crate) async fn drive(
     deps: Arc<Deps>,
     run_id: String,
     todo: ProjectTodoRecord,
@@ -121,6 +125,7 @@ pub async fn drive(
             &run_id,
             ProjectTodoRunStatus::Failed,
             Some(format!("{e:#}")),
+            None,
             None,
         )
         .await;
@@ -182,6 +187,7 @@ async fn finish_execute_run(
                     run_id,
                     ProjectTodoRunStatus::Done,
                     Some(output),
+                    None,
                     session_id,
                 )
                 .await;
@@ -192,6 +198,7 @@ async fn finish_execute_run(
                     deps,
                     run_id,
                     ProjectTodoRunStatus::Cancelled,
+                    None,
                     None,
                     session_id,
                 )
@@ -204,6 +211,7 @@ async fn finish_execute_run(
                     run_id,
                     ProjectTodoRunStatus::Failed,
                     Some("execute agent returned no output".into()),
+                    None,
                     session_id,
                 )
                 .await;
@@ -216,6 +224,7 @@ async fn finish_execute_run(
                 run_id,
                 ProjectTodoRunStatus::Cancelled,
                 None,
+                None,
                 session_id,
             )
             .await;
@@ -227,6 +236,7 @@ async fn finish_execute_run(
                 run_id,
                 ProjectTodoRunStatus::Failed,
                 Some(format!("{e:#}")),
+                None,
                 session_id,
             )
             .await;

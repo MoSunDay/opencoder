@@ -207,6 +207,7 @@ pub async fn resume(
     };
 
     let s = SessionState {
+        env_passthrough: Vec::new(),
         id: id.to_string(),
         messages,
         agent,

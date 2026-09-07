@@ -15,7 +15,7 @@ import { err } from '../notice.js';
 
 const { Text } = Typography;
 
-const KIND_COLOR = { agent: 'geekblue', python: 'green' };
+const KIND_COLOR = { agent: 'geekblue', wasm: 'green' };
 
 /// Step-kind mini tags for the 步骤 column (first kinds, then "+n").
 function KindSummary({ spec }) {
@@ -144,6 +144,7 @@ export function DefsTab({ onNotice, onDispatched }) {
       render: (v, r) => (
         <Space direction="vertical" size={0}>
           <Text strong>{v || r.id}</Text>
+          {r.error ? <Tag color="warning" style={{ marginTop: 2 }}>定义无法解析：{r.error}</Tag> : null}
           {r.spec && r.spec.description ? <Text type="secondary" style={{ fontSize: 12 }}>{r.spec.description}</Text> : null}
         </Space>
       ),
@@ -174,12 +175,18 @@ export function DefsTab({ onNotice, onDispatched }) {
       width: 230,
       render: (_, r) => (
         <Space>
-          <Button size="small" type="link" onClick={() => { setDispatchNode(undefined); setDispatchFor(r); }}>
+          <Button
+            size="small"
+            type="link"
+            disabled={!!r.error}
+            onClick={() => { setDispatchNode(undefined); setDispatchFor(r); }}
+          >
             派发
           </Button>
           <Button
             size="small"
             type="link"
+            disabled={!!r.error}
             onClick={() => {
               setEditing(r);
               setEditorOpen(true);

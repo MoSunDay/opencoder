@@ -108,30 +108,15 @@ pub async fn serve(
     // config.storage (libsql default shares the same instance); optional
     // mysql/starrocks refuse cleanly when not compiled in — we log and fall
     // back to libsql rather than refusing to boot.
-    let project = ProjectService::new();
-    {
-        let config = opencoder_core::Config::load(&workdir).unwrap_or_else(|e| {
-            tracing::warn!(error = %e, "config load failed; project storage falls back to libsql");
-            opencoder_core::Config::default()
-        });
-        let projects = opencoder_store::open_project_store(&config.storage, libsql.clone())
-            .await
-            .unwrap_or_else(|e| {
-                tracing::warn!(error = %e, "project storage backend unavailable; falling back to libsql");
-                libsql.clone()
-            });
-        project
-            .init(store.clone(), projects, workdir.clone(), None)
-            .await?;
-    }
-
+    //
     // Brain (capability library) rides the dedicated embedding endpoint when
     // `embedding_provider` is configured (local embedding server), else the
     // primary provider's — the exact Config::load → resolve_embedding_endpoint
     // → ChatClient chain the
     // `DrainCmd::ReloadConfig` branch in `handle.rs` uses (proxy, headers and
     // read-timeout included). Any failure degrades to a bail-only client so
-    // serve() still boots and brain routes answer a clear 502.
+    // serve() still boots and brain routes answer a clear 502. Built BEFORE
+    // the project service: brain todos resolve their executor through it.
     let brain = match opencoder_core::Config::load(&workdir) {
         Ok(cfg) => match cfg.resolve_embedding_endpoint() {
             Ok(ep) => match opencoder_llm::ChatClient::new_with_read_timeout(
@@ -162,6 +147,28 @@ pub async fn serve(
             api_brain::degraded_brain(store.clone())
         }
     };
+    let project = ProjectService::new();
+    {
+        let config = opencoder_core::Config::load(&workdir).unwrap_or_else(|e| {
+            tracing::warn!(error = %e, "config load failed; project storage falls back to libsql");
+            opencoder_core::Config::default()
+        });
+        let projects = opencoder_store::open_project_store(&config.storage, libsql.clone())
+            .await
+            .unwrap_or_else(|e| {
+                tracing::warn!(error = %e, "project storage backend unavailable; falling back to libsql");
+                libsql.clone()
+            });
+        project
+            .init(
+                store.clone(),
+                projects,
+                workdir.clone(),
+                None,
+                Some(brain.clone()),
+            )
+            .await?;
+    }
 
     // Team runtime deps: resolved run config (team_root beside this
     // workdir's DB unless explicitly configured) + the node dispatcher.

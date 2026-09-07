@@ -232,6 +232,7 @@ fn queued_run(run_id: &str) -> DagClaimedRun {
                     prompt: "p".into(),
                     agent: None,
                     model: None,
+                    how_append: None,
                 },
                 timeout_secs: None,
             }],

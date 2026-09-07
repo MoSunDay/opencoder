@@ -62,6 +62,7 @@ mod tests {
 
     fn ctx(workdir: std::path::PathBuf) -> ToolContext {
         ToolContext {
+            extra_env: Vec::new(),
             session_id: "test".into(),
             message_id: "test".into(),
             agent: "act".into(),

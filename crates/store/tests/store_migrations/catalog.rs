@@ -184,7 +184,7 @@ async fn schema_migration_v16_to_v17_adds_team_topic_runs() {
         let mut rows = stmt.query(()).await.unwrap();
         let r = rows.next().await.unwrap().expect("version row exists");
         let v: i64 = r.get(0).unwrap();
-        assert_eq!(v, 19, "schema version must be latest after v16 migration");
+        assert_eq!(v, 20, "schema version must be latest after v16 migration");
     }
 
     // (2) The table exists (write proves it) and the pre-existing nodes
@@ -225,4 +225,141 @@ async fn schema_migration_v16_to_v17_adds_team_topic_runs() {
         let n: i64 = r.get(0).unwrap();
         assert_eq!(n, 1, "idx_team_topic_runs_topic must exist after migration");
     }
+}
+
+/// v20 adds the project todo executor dimension: `project_todos` gains
+/// executor_kind/ref/spec, `project_todo_runs` gains executor_kind plus the
+/// brain-provenance and artifact/topic refs. Legacy rows must backfill to the
+/// agent flow (`NOT NULL DEFAULT 'agent'`) and new rows must round-trip.
+#[tokio::test]
+async fn schema_migration_v19_to_v20_adds_project_executor_columns() {
+    use libsql::Builder;
+    use opencoder_store::{
+        ProjectExecutorKind, ProjectStore, ProjectTodoRecord, ProjectTodoRunKind,
+        ProjectTodoRunRecord, ProjectTodoRunStatus, ProjectTodoStatus,
+    };
+
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("migrate-v20.db");
+
+    // Phase 1: hand-write a v19 database — project tables in their pre-v20
+    // shape (no executor columns) plus one legacy todo/run row each.
+    {
+        let db = Builder::new_local(&db_path).build().await.unwrap();
+        let conn = db.connect().unwrap();
+        conn.execute("CREATE TABLE schema_version (version INTEGER NOT NULL)", ())
+            .await
+            .unwrap();
+        conn.execute(
+            "CREATE TABLE project_todos (               id TEXT PRIMARY KEY,               milestone_id TEXT,               title TEXT NOT NULL,               draft TEXT NOT NULL,               plan_md TEXT,               status TEXT NOT NULL,               agent TEXT NOT NULL,               active_session_id TEXT,               created_at INTEGER NOT NULL,               updated_at INTEGER NOT NULL)",
+            (),
+        )
+        .await
+        .unwrap();
+        conn.execute(
+            "CREATE TABLE project_todo_runs (               id TEXT PRIMARY KEY,               todo_id TEXT NOT NULL,               kind TEXT NOT NULL,               version INTEGER NOT NULL,               plan_md TEXT,               output_md TEXT,               agent TEXT NOT NULL,               session_id TEXT,               status TEXT NOT NULL,               started_at INTEGER NOT NULL,               finished_at INTEGER,               created_at INTEGER NOT NULL)",
+            (),
+        )
+        .await
+        .unwrap();
+        conn.execute(
+            "INSERT INTO project_todos (id, milestone_id, title, draft, plan_md, status, agent, active_session_id, created_at, updated_at) \
+             VALUES ('legacy', NULL, 'legacy todo', 'draft', NULL, 'planned', 'act', NULL, 1, 1)",
+            (),
+        )
+        .await
+        .unwrap();
+        conn.execute(
+            "INSERT INTO project_todo_runs (id, todo_id, kind, version, plan_md, output_md, agent, session_id, status, started_at, finished_at, created_at) \
+             VALUES ('legacy-run', 'legacy', 'execute', 1, NULL, NULL, 'act', NULL, 'done', 1, 2, 1)",
+            (),
+        )
+        .await
+        .unwrap();
+        conn.execute("INSERT INTO schema_version (version) VALUES (19)", ())
+            .await
+            .unwrap();
+    }
+
+    // Phase 2: reopen — migrate(conn, 19) runs the `if from < 20` block and
+    // stamps version 20.
+    let store = LibsqlStore::open(&db_path).await.unwrap();
+    {
+        let conn = store.conn().await.unwrap();
+        let stmt = conn
+            .prepare("SELECT version FROM schema_version LIMIT 1")
+            .await
+            .unwrap();
+        let mut rows = stmt.query(()).await.unwrap();
+        let v: i64 = rows
+            .next()
+            .await
+            .unwrap()
+            .expect("version row exists")
+            .get(0)
+            .unwrap();
+        assert_eq!(v, 20, "schema version must be latest after v19 migration");
+    }
+
+    // Legacy rows backfill to the agent flow.
+    let legacy = store.get_todo("legacy").await.unwrap().unwrap();
+    assert_eq!(legacy.status, ProjectTodoStatus::Planned);
+    assert_eq!(legacy.executor_kind, ProjectExecutorKind::Agent);
+    assert_eq!(legacy.executor_ref, None);
+    assert_eq!(legacy.executor_spec, None);
+    let legacy_run = store.get_todo_run("legacy-run").await.unwrap().unwrap();
+    assert_eq!(legacy_run.executor_kind, ProjectExecutorKind::Agent);
+    assert_eq!(legacy_run.capability_id, None);
+    assert_eq!(legacy_run.plan_id, None);
+    assert_eq!(legacy_run.output_ref, None);
+
+    // New writes exercise every added column (todo: team ref + inline spec;
+    // run: dag kind + brain provenance + artifact root).
+    store
+        .create_todo(&ProjectTodoRecord {
+            id: "t20".into(),
+            milestone_id: None,
+            title: "v20 todo".into(),
+            draft: "draft".into(),
+            plan_md: None,
+            status: ProjectTodoStatus::Planned,
+            agent: "act".into(),
+            executor_kind: ProjectExecutorKind::Team,
+            executor_ref: Some("feature-team".into()),
+            executor_spec: Some("{\"members\":[]}".into()),
+            active_session_id: None,
+            created_at: 5,
+            updated_at: 5,
+        })
+        .await
+        .unwrap();
+    let t20 = store.get_todo("t20").await.unwrap().unwrap();
+    assert_eq!(t20.executor_kind, ProjectExecutorKind::Team);
+    assert_eq!(t20.executor_ref.as_deref(), Some("feature-team"));
+    assert_eq!(t20.executor_spec.as_deref(), Some("{\"members\":[]}"));
+
+    let run20 = ProjectTodoRunRecord {
+        id: "run20".into(),
+        todo_id: "t20".into(),
+        kind: ProjectTodoRunKind::Execute,
+        version: 1,
+        plan_md: None,
+        output_md: None,
+        agent: "act".into(),
+        executor_kind: ProjectExecutorKind::Dag,
+        capability_id: Some("cap-1".into()),
+        plan_id: Some("plan-1".into()),
+        output_ref: Some("/workflow/w1/step-1/".into()),
+        session_id: None,
+        status: ProjectTodoRunStatus::Running,
+        started_at: 6,
+        finished_at: None,
+        created_at: 6,
+    };
+    assert!(store.claim_todo_running_with_run(&run20, 6).await.unwrap());
+    let claimed = store.get_todo_run("run20").await.unwrap().unwrap();
+    assert_eq!(claimed.executor_kind, ProjectExecutorKind::Dag);
+    assert_eq!(claimed.capability_id.as_deref(), Some("cap-1"));
+    assert_eq!(claimed.plan_id.as_deref(), Some("plan-1"));
+    assert_eq!(claimed.output_ref.as_deref(), Some("/workflow/w1/step-1/"));
 }

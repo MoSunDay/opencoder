@@ -1,4 +1,4 @@
-//! OCI bundle generation for `sandbox: runc` python steps.
+//! OCI bundle generation for `sandbox: runc` wasm steps.
 //!
 //! JSON/path plumbing and bundle preparation; process driving lives in
 //! [`super::runc`]. Each bundle takes a private copy of the provisioned
@@ -14,14 +14,17 @@ use serde_json::{json, Value};
 /// Everything needed to render one step's OCI bundle.
 pub struct BundleSpec {
     /// `<workflow_root>/<run_id>` — bind-mounted rw at `/workspace/context`
-    /// so the step reads upstream `output.json` artifacts and writes its own
-    /// under `/workspace/context/<step>/output.json`.
+    /// so the step reads upstream artifacts and writes its own under
+    /// `/workspace/context/<step>/output.json`.
     pub run_root: PathBuf,
-    /// Step slug: `main.py` lives at `<run_root>/<step_slug>/main.py`
-    /// (= `/workspace/context/<step_slug>/main.py` inside the container).
+    /// Step slug (annotations + step dir naming).
     pub step_slug: String,
-    /// The python source written to that `main.py`.
-    pub code: String,
+    /// The wasm launch command argv (module token first). The module path
+    /// is resolved inside the container against `/workspace/context`.
+    pub command: Vec<String>,
+    /// Extra env pairs injected into the container process (the
+    /// `OPENCODER_*` step contract).
+    pub env: Vec<(String, String)>,
     /// Wall-clock budget hint recorded in `annotations`; the actual kill is
     /// performed by the runc runner, not by the container itself.
     pub timeout_hint: Option<u64>,
@@ -36,7 +39,7 @@ pub fn shared_rootfs(run_root: &Path) -> Result<PathBuf> {
     Ok(workflow_root.join("rootfs"))
 }
 
-/// The OCI `config.json` for one python step.
+/// The OCI `config.json` for one wasm step.
 ///
 /// Notes on the (deliberate) shape:
 /// - `ociVersion` stays at `"1.0.0"` — the most widely accepted value across
@@ -46,7 +49,7 @@ pub fn shared_rootfs(run_root: &Path) -> Result<PathBuf> {
 /// - namespaces: pid + ipc + uts + mount. **No network namespace** on purpose:
 ///   host networking keeps the sandbox dependency-free (no bridge/veth setup);
 ///   hostname only takes effect because of the uts namespace.
-/// - `terminal: false`, uid/gid 0 — distroless-style python images we expect
+/// - `terminal: false`, uid/gid 0 — minimal static runtime trees we expect
 ///   under `usr/` have everything world-readable; the mount namespace plus
 ///   readonly root is the isolation boundary here, not uid dropping.
 pub fn container_config(spec: &BundleSpec) -> Value {
@@ -75,11 +78,8 @@ pub fn container_config(spec: &BundleSpec) -> Value {
         "process": {
             "terminal": false,
             "user": { "uid": 0, "gid": 0 },
-            "args": ["python3", format!("/workspace/context/{}/main.py", spec.step_slug)],
-            "env": [
-                "PATH=/usr/local/bin:/usr/bin:/bin",
-                "PYTHONUNBUFFERED=1",
-            ],
+            "args": wasm_args(spec),
+            "env": wasm_env(spec),
             "cwd": "/workspace",
         },
         "root": { "path": "rootfs", "readonly": true },
@@ -119,10 +119,47 @@ pub fn container_config(spec: &BundleSpec) -> Value {
     })
 }
 
-/// Materialize the bundle at `dir`: `config.json` plus `main.py` at
-/// `<run_root>/<step>/main.py` (the very file the container args
-/// reference). The shared rootfs is validated and copied into the bundle;
-/// subsequent attempts reuse that private interpreter tree.
+/// Container argv: run the module with the static `wasmtime` CLI —
+/// `wasmtime run --dir=<context> [--env K=V]... <module> [args...]`. The
+/// module token is rewritten to its guest-visible path under
+/// `/workspace/context`; later tokens pass through verbatim.
+fn wasm_args(spec: &BundleSpec) -> Vec<String> {
+    let mut args = vec![
+        "wasmtime".to_string(),
+        "run".to_string(),
+        format!("--dir={}", crate::exec::wasm::CONTEXT_MOUNT),
+    ];
+    for (k, v) in &spec.env {
+        args.push("--env".to_string());
+        args.push(format!("{k}={v}"));
+    }
+    for (i, token) in spec.command.iter().enumerate() {
+        if i == 0 {
+            args.push(format!(
+                "{}/{}",
+                crate::exec::wasm::CONTEXT_MOUNT,
+                token.trim_start_matches('/')
+            ));
+        } else {
+            args.push(token.clone());
+        }
+    }
+    args
+}
+
+/// Container process env: the standard PATH plus the `OPENCODER_*` step
+/// contract pairs.
+fn wasm_env(spec: &BundleSpec) -> Vec<String> {
+    let mut env = vec!["PATH=/usr/local/bin:/usr/bin:/bin".to_string()];
+    env.extend(spec.env.iter().map(|(k, v)| format!("{k}={v}")));
+    env
+}
+
+/// Materialize the bundle at `dir`: `config.json` referencing the wasm
+/// module under the bind-mounted `/workspace/context` (the executor
+/// already wrote the module-adjacent step artifacts). The shared rootfs is
+/// validated and copied into the bundle; subsequent attempts reuse that
+/// private runtime tree.
 /// Returns `dir` as an absolute path on success.
 pub fn write_bundle(dir: &Path, spec: &BundleSpec) -> Result<PathBuf> {
     let dir = std::path::absolute(dir)?;
@@ -140,22 +177,16 @@ pub fn write_bundle(dir: &Path, spec: &BundleSpec) -> Result<PathBuf> {
         .unwrap_or(false);
     if !is_real_dir {
         bail!(
-            "shared rootfs unusable at {}: it must be a REAL directory (missing, or a symlink — runc rejects symlinks; move/copy the tree or bind-mount it). Run `opencoder-agent dag prepare-rootfs` / place a python interpreter tree there",
+            "shared rootfs unusable at {}: it must be a REAL directory (missing, or a symlink — runc rejects symlinks; move/copy the tree or bind-mount it). Run `opencoder-agent dag prepare-rootfs` / place a static wasmtime tree there",
             shared.display()
         );
     }
 
-    // 1. main.py inside the rw context dir (same file the args point at).
-    let step_dir = spec.run_root.join(&spec.step_slug);
-    fs::create_dir_all(&step_dir).with_context(|| format!("mkdir {}", step_dir.display()))?;
-    let main_py = step_dir.join("main.py");
-    fs::write(&main_py, &spec.code).with_context(|| format!("write {}", main_py.display()))?;
-
-    // 2. A real, private root isolates runc device initialization and pins
-    //    interpreter files for retries. The source is never modified.
+    // 1. A real, private root isolates runc device initialization and pins
+    //    runtime files for retries. The source is never modified.
     super::rootfs::snapshot(&shared, &dir)?;
 
-    // 3. config.json.
+    // 2. config.json.
     let config = container_config(spec);
     let config_path = dir.join("config.json");
     fs::write(&config_path, serde_json::to_vec_pretty(&config)?)
@@ -204,14 +235,14 @@ pub fn write_rootfs_template(out: &Path) -> Result<()> {
 const README_TEMPLATE: &str = r#"
 # DAG sandbox rootfs scaffold
 
-This directory is the provisioned rootfs template for `sandbox: runc` python
-steps. It is a scaffold: you must add a python interpreter before runc can
-run anything.
+This directory is the provisioned rootfs template for `sandbox: runc` wasm
+steps. It is a scaffold: you must add a wasm runtime before runc can run
+anything.
 
-1. Place a python interpreter tree under `usr/`. The easiest path is to
-   extract a python distroless image (e.g. `cgr.dev/chainguard/python` or
-   `gcr.io/distroless/python3`) into this directory with your container
-   tooling of choice, so that `/usr/bin/python3` resolves inside the rootfs.
+1. Place a STATIC `wasmtime` CLI tree under `usr/` (build wasmtime with
+   `cargo build --release` on the target arch and copy the binary plus any
+   needed runtime libs so that `/usr/bin/wasmtime` resolves inside the
+   rootfs). A static build avoids glibc-version coupling with the host.
 2. Keep `etc/resolv.conf` in sync if your host resolver setup changes
    (copied from the host by `dag prepare-rootfs`; the sandbox shares the
    host network — there is no network namespace).
@@ -222,12 +253,14 @@ run anything.
    directory — runc rejects symlinked rootfs paths ("invalid rootfs: not an
    absolute path, or a symlink"), so move/copy the tree there or bind-mount
    it (`mount --bind <tree> <workflow_root>/rootfs`). Every step bundle
-   copies the interpreter tree into its own real `rootfs` directory, used
+   copies the runtime tree into its own real `rootfs` directory, used
    read-only at runtime and reused for retries. Reserve disk space for
-   one private interpreter tree per step; no shared files are hard-linked.
+   one private runtime tree per step; no shared files are hard-linked.
 
 No network downloads happen at prepare or step time in the runtime itself —
-populating `usr/` is a provisioning concern.
+populating `usr/` is a provisioning concern. The wasm module itself is NOT
+part of the rootfs: it lives in the run artifacts and reaches the container
+through the `/workspace/context` bind mount.
 "#;
 
 #[cfg(test)]
@@ -238,7 +271,8 @@ mod tests {
         BundleSpec {
             run_root: workflow_root.join("run-1"),
             step_slug: "step-a".into(),
-            code: "print('hi')".into(),
+            command: vec!["step-a/main.wasm".into(), "--flag".into()],
+            env: vec![("OPENCODER_RUN_ID".into(), "run-1".into())],
             timeout_hint: Some(30),
         }
     }
@@ -269,10 +303,18 @@ mod tests {
         let opts = bind["options"].as_array().unwrap();
         assert!(opts.contains(&json!("rw")), "{opts:?}");
         assert!(opts.contains(&json!("rbind")), "{opts:?}");
-        // Args point at the step main.py inside the context bind.
+        // Args run the module via the static wasmtime CLI with the context
+        // dir preopened and the step env forwarded; later tokens verbatim.
         let args = cfg["process"]["args"].as_array().unwrap();
-        assert_eq!(args[0], "python3");
-        assert_eq!(args[1], "/workspace/context/step-a/main.py");
+        assert_eq!(args[0], "wasmtime");
+        assert_eq!(args[1], "run");
+        assert_eq!(args[2], "--dir=/workspace/context");
+        assert_eq!(args[3], "--env");
+        assert_eq!(args[4], "OPENCODER_RUN_ID=run-1");
+        assert_eq!(args[5], "/workspace/context/step-a/main.wasm");
+        assert_eq!(args[6], "--flag");
+        let env = cfg["process"]["env"].as_array().unwrap();
+        assert!(env.contains(&json!("OPENCODER_RUN_ID=run-1")), "{env:?}");
         assert_eq!(cfg["process"]["cwd"], "/workspace");
         assert_eq!(cfg["process"]["terminal"], false);
         // Namespace set: pid/ipc/uts/mount, no network.
@@ -290,7 +332,7 @@ mod tests {
     }
 
     #[test]
-    fn write_bundle_writes_main_and_config() {
+    fn write_bundle_writes_config_and_private_rootfs() {
         let tmp = tempfile::tempdir().unwrap();
         let workflow_root = tmp.path().join("workflow");
         // Shared rootfs pre-exists (as the runner guarantees).
@@ -300,16 +342,14 @@ mod tests {
             write_bundle(&workflow_root.join("run-1.bundle"), &spec(&workflow_root)).unwrap();
         assert!(bundle.is_absolute());
 
-        // main.py landed at the path the container args reference.
-        let main_py = workflow_root.join("run-1/step-a/main.py");
-        assert_eq!(fs::read_to_string(&main_py).unwrap(), "print('hi')");
-
-        // config.json references a private real tree inside this bundle.
+        // config.json references the module inside the context bind via the
+        // static wasmtime CLI (the module itself was staged by the executor).
         let cfg: Value =
             serde_json::from_str(&fs::read_to_string(bundle.join("config.json")).unwrap()).unwrap();
+        assert_eq!(cfg["process"]["args"][0], "wasmtime");
         assert_eq!(
-            cfg["process"]["args"][1],
-            "/workspace/context/step-a/main.py"
+            cfg["process"]["args"][5],
+            "/workspace/context/step-a/main.wasm"
         );
         assert_eq!(cfg["root"]["path"], "rootfs");
         assert!(fs::symlink_metadata(bundle.join("rootfs"))
@@ -364,7 +404,7 @@ mod tests {
         let readme = fs::read_to_string(out.join("README.md")).unwrap();
         assert!(
             readme.contains("usr/"),
-            "readme explains interpreter placement"
+            "readme explains wasmtime placement"
         );
         assert!(readme.contains("resolv.conf"));
     }

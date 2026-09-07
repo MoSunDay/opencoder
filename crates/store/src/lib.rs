@@ -4,6 +4,7 @@ pub mod import;
 pub mod jsonl;
 pub mod libsql_store;
 pub mod project;
+pub mod project_executor_spec;
 pub mod project_factory;
 pub mod project_types;
 pub mod session_store;
@@ -27,11 +28,11 @@ pub use libsql_store::LibsqlStore;
 pub use project::ProjectStore;
 pub use project_factory::open_project_store;
 pub use project_types::{
-    ProjectGoalPatch, ProjectGoalRecord, ProjectGoalStatus, ProjectMilestonePatch,
-    ProjectMilestoneRecord, ProjectMilestoneStatus, ProjectRunText, ProjectTodoPatch,
-    ProjectTodoRecord, ProjectTodoRunKind, ProjectTodoRunPage, ProjectTodoRunPatch,
-    ProjectTodoRunRecord, ProjectTodoRunStatus, ProjectTodoRunSummary, ProjectTodoStatus,
-    ProjectTodoSummary,
+    ProjectExecutorKind, ProjectGoalPatch, ProjectGoalRecord, ProjectGoalStatus,
+    ProjectMilestonePatch, ProjectMilestoneRecord, ProjectMilestoneStatus, ProjectRunText,
+    ProjectTodoPatch, ProjectTodoRecord, ProjectTodoRunKind, ProjectTodoRunPage,
+    ProjectTodoRunPatch, ProjectTodoRunRecord, ProjectTodoRunStatus, ProjectTodoRunSummary,
+    ProjectTodoStatus, ProjectTodoSummary,
 };
 pub use session_store::SessionStore;
 pub use store::Store;

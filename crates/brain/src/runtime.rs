@@ -24,6 +24,10 @@ pub const ID_PREFIX: &str = "brain";
 /// Prefix for every persisted decision-tree plan id (`brain-plan-{ULID}`).
 pub const PLAN_ID_PREFIX: &str = "brain-plan";
 
+/// Data struct of Arcs + strings: cloning shares the store/client handles
+/// (cheap) so the web layer can hand the same runtime to the project module
+/// while keeping its own copy in `AppState`.
+#[derive(Clone)]
 pub struct Runtime {
     pub(crate) store: Arc<dyn Store>,
     pub(crate) client: Arc<dyn ChatStream>,

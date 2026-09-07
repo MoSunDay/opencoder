@@ -35,6 +35,7 @@ libc = "0.2"
 [dev-dependencies]
 opencoder-agents.workspace = true
 tempfile.workspace = true
+wat = "1.254"
 opencoder-control.workspace = true
 reqwest.workspace = true
 

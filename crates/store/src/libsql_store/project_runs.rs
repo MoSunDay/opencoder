@@ -8,18 +8,18 @@ use anyhow::{Context, Result};
 use libsql::{params, Connection, Value};
 
 use crate::project_types::{
-    ProjectTodoRecord, ProjectTodoRunKind, ProjectTodoRunPatch, ProjectTodoRunRecord,
-    ProjectTodoRunStatus, ProjectTodoStatus,
+    ProjectExecutorKind, ProjectTodoRecord, ProjectTodoRunKind, ProjectTodoRunPatch,
+    ProjectTodoRunRecord, ProjectTodoRunStatus, ProjectTodoStatus,
 };
 
-const TODO_COLS: &str = "id, milestone_id, title, draft, plan_md, status, agent, active_session_id, created_at, updated_at";
-const RUN_COLS: &str = "id, todo_id, kind, version, plan_md, output_md, agent, session_id, status, started_at, finished_at, created_at";
+const TODO_COLS: &str = "id, milestone_id, title, draft, plan_md, status, agent, active_session_id, created_at, updated_at, executor_kind, executor_ref, executor_spec";
+const RUN_COLS: &str = "id, todo_id, kind, version, plan_md, output_md, agent, session_id, status, started_at, finished_at, created_at, executor_kind, capability_id, plan_id, output_ref";
 
 // ---- todos ----
 
 pub async fn create_todo(conn: &Connection, rec: &ProjectTodoRecord) -> Result<()> {
     conn.execute(
-        "INSERT INTO project_todos (id, milestone_id, title, draft, plan_md, status, agent, active_session_id, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO project_todos (id, milestone_id, title, draft, plan_md, status, agent, active_session_id, created_at, updated_at, executor_kind, executor_ref, executor_spec) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
         params![
             rec.id.as_str(),
             rec.milestone_id.as_deref(),
@@ -30,7 +30,10 @@ pub async fn create_todo(conn: &Connection, rec: &ProjectTodoRecord) -> Result<(
             rec.agent.as_str(),
             rec.active_session_id.as_deref(),
             rec.created_at,
-            rec.updated_at
+            rec.updated_at,
+            rec.executor_kind.as_str(),
+            rec.executor_ref.as_deref(),
+            rec.executor_spec.as_deref()
         ],
     )
     .await
@@ -66,6 +69,18 @@ fn todo_set_fragment(
     if let Some(v) = patch.agent.as_deref() {
         sets.push("agent = ?");
         vals.push(v.into());
+    }
+    if let Some(v) = patch.executor_kind {
+        sets.push("executor_kind = ?");
+        vals.push(v.as_str().into());
+    }
+    if let Some(v) = patch.executor_ref.as_ref() {
+        sets.push("executor_ref = ?");
+        vals.push(v.as_deref().into()); // Some(None) -> NULL
+    }
+    if let Some(v) = patch.executor_spec.as_ref() {
+        sets.push("executor_spec = ?");
+        vals.push(v.as_deref().into()); // Some(None) -> NULL
     }
     if let Some(v) = patch.milestone_id.as_ref() {
         sets.push("milestone_id = ?");
@@ -149,7 +164,8 @@ pub async fn get_todo_summary(
              CASE WHEN length(CAST(draft AS BLOB))<=65536 THEN draft END, \
              length(CAST(draft AS BLOB)), \
              CASE WHEN length(CAST(plan_md AS BLOB))<=65536 THEN plan_md END, \
-             length(CAST(plan_md AS BLOB)),status,agent,active_session_id,created_at,updated_at \
+             length(CAST(plan_md AS BLOB)),status,agent,active_session_id,created_at,updated_at, \
+             executor_kind,executor_ref \
              FROM project_todos WHERE id=?1 LIMIT 1",
             params![id],
         )
@@ -167,6 +183,9 @@ pub async fn get_todo_summary(
         plan_md: todo_text(row.get(5)?, row.get(6)?, &todo_id, "plan_md"),
         status: ProjectTodoStatus::parse(&row.get::<String>(7)?).context("project_todos.status")?,
         agent: row.get(8)?,
+        executor_kind: ProjectExecutorKind::parse(&row.get::<String>(12)?)
+            .context("project_todos.executor_kind")?,
+        executor_ref: row.get(13)?,
         active_session_id: row.get(9)?,
         created_at: row.get(10)?,
         updated_at: row.get(11)?,
@@ -286,6 +305,10 @@ fn row_to_todo(r: &libsql::Row) -> Result<ProjectTodoRecord> {
         // Unparseable status/kind is corruption: propagate, never coerce.
         status: ProjectTodoStatus::parse(&r.get::<String>(5)?).context("project_todos.status")?,
         agent: r.get(6)?,
+        executor_kind: ProjectExecutorKind::parse(&r.get::<String>(10)?)
+            .context("project_todos.executor_kind")?,
+        executor_ref: r.get(11)?,
+        executor_spec: r.get(12)?,
         active_session_id: r.get(7)?,
         created_at: r.get(8)?,
         updated_at: r.get(9)?,
@@ -296,7 +319,7 @@ fn row_to_todo(r: &libsql::Row) -> Result<ProjectTodoRecord> {
 
 pub async fn create_todo_run(conn: &Connection, rec: &ProjectTodoRunRecord) -> Result<()> {
     conn.execute(
-        "INSERT INTO project_todo_runs (id, todo_id, kind, version, plan_md, output_md, agent, session_id, status, started_at, finished_at, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO project_todo_runs (id, todo_id, kind, version, plan_md, output_md, agent, session_id, status, started_at, finished_at, created_at, executor_kind, capability_id, plan_id, output_ref) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         params![
             rec.id.as_str(),
             rec.todo_id.as_str(),
@@ -309,7 +332,11 @@ pub async fn create_todo_run(conn: &Connection, rec: &ProjectTodoRunRecord) -> R
             rec.status.as_str(),
             rec.started_at,
             rec.finished_at,
-            rec.created_at
+            rec.created_at,
+            rec.executor_kind.as_str(),
+            rec.capability_id.as_deref(),
+            rec.plan_id.as_deref(),
+            rec.output_ref.as_deref()
         ],
     )
     .await
@@ -329,6 +356,18 @@ fn run_set_fragment(patch: &ProjectTodoRunPatch) -> (Vec<&'static str>, Vec<Valu
     }
     if let Some(v) = patch.output_md.as_deref() {
         sets.push("output_md = ?");
+        vals.push(v.into());
+    }
+    if let Some(v) = patch.output_ref.as_deref() {
+        sets.push("output_ref = ?");
+        vals.push(v.into());
+    }
+    if let Some(v) = patch.capability_id.as_deref() {
+        sets.push("capability_id = ?");
+        vals.push(v.into());
+    }
+    if let Some(v) = patch.plan_id.as_deref() {
+        sets.push("plan_id = ?");
         vals.push(v.into());
     }
     if let Some(v) = patch.session_id.as_deref() {
@@ -417,7 +456,8 @@ pub async fn get_todo_run_summary(
              CASE WHEN length(CAST(plan_md AS BLOB))<=65536 THEN plan_md END, \
              length(CAST(plan_md AS BLOB)), \
              CASE WHEN length(CAST(output_md AS BLOB))<=65536 THEN output_md END, \
-             length(CAST(output_md AS BLOB)),agent,session_id,status,started_at,finished_at,created_at \
+             length(CAST(output_md AS BLOB)),agent,session_id,status,started_at,finished_at,created_at, \
+             executor_kind,capability_id,plan_id,output_ref \
              FROM project_todo_runs WHERE id=?1 LIMIT 1",
             params![id],
         )
@@ -456,7 +496,8 @@ pub async fn list_todo_runs_page(
              CASE WHEN length(CAST(plan_md AS BLOB))<=65536 THEN plan_md END, \
              length(CAST(plan_md AS BLOB)), \
              CASE WHEN length(CAST(output_md AS BLOB))<=65536 THEN output_md END, \
-             length(CAST(output_md AS BLOB)),agent,session_id,status,started_at,finished_at,created_at \
+             length(CAST(output_md AS BLOB)),agent,session_id,status,started_at,finished_at,created_at, \
+             executor_kind,capability_id,plan_id,output_ref \
              FROM project_todo_runs WHERE todo_id=?1 AND (?2 IS NULL OR version<?2) \
              ORDER BY version DESC LIMIT ?3",
             params![todo_id, before_version, limit as i64 + 1],
@@ -566,6 +607,11 @@ fn row_to_run(r: &libsql::Row) -> Result<ProjectTodoRunRecord> {
         plan_md: r.get(4)?,
         output_md: r.get(5)?,
         agent: r.get(6)?,
+        executor_kind: ProjectExecutorKind::parse(&r.get::<String>(12)?)
+            .context("project_todo_runs.executor_kind")?,
+        capability_id: r.get(13)?,
+        plan_id: r.get(14)?,
+        output_ref: r.get(15)?,
         session_id: r.get(7)?,
         status: ProjectTodoRunStatus::parse(&r.get::<String>(8)?)
             .context("project_todo_runs.status")?,
@@ -585,6 +631,11 @@ fn row_to_run_summary(r: &libsql::Row) -> Result<crate::ProjectTodoRunSummary> {
         plan_md: summary_text(r.get(4)?, r.get(5)?, &id, "plan_md"),
         output_md: summary_text(r.get(6)?, r.get(7)?, &id, "output_md"),
         agent: r.get(8)?,
+        executor_kind: ProjectExecutorKind::parse(&r.get::<String>(14)?)
+            .context("project_todo_runs.executor_kind")?,
+        capability_id: r.get(15)?,
+        plan_id: r.get(16)?,
+        output_ref: r.get(17)?,
         session_id: r.get(9)?,
         status: ProjectTodoRunStatus::parse(&r.get::<String>(10)?)
             .context("project_todo_runs.status")?,

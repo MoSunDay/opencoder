@@ -278,6 +278,111 @@ body {
   overflow-y: auto;
 }
 
+/* ===== DAG 画布编辑器 ===== */
+/* Editable step cards — fixed box mirrors canvasLayout.js EDIT_NODE_W/H. */
+.dag-edit-node {
+  width: 240px;
+  min-height: 72px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1.5px solid var(--oc-border-strong);
+  background: var(--oc-bg-container, #fff);
+  font-size: 12px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+.dag-edit-node-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.dag-edit-node-name {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dag-edit-node-kind {
+  margin-left: auto;
+  color: var(--oc-text-tertiary);
+  font-size: 11px;
+  border: 1px solid var(--oc-border);
+  border-radius: 4px;
+  padding: 0 4px;
+}
+.dag-edit-node--agent .dag-edit-node-head .anticon { color: var(--oc-primary); }
+.dag-edit-node--wasm .dag-edit-node-head .anticon { color: #722ed1; }
+.dag-edit-node-deps {
+  margin-top: 6px;
+  color: var(--oc-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dag-edit-node--invalid { border-color: var(--oc-error); }
+.dag-edit-node--invalid .dag-edit-node-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--oc-error);
+  flex: none;
+}
+.dag-edit-node--selected { box-shadow: 0 0 0 2px var(--oc-primary); }
+
+/* Editor shell: palette | canvas stage | inspector. */
+.dag-edit-wrap {
+  display: flex;
+  gap: 8px;
+  height: calc(100vh - 220px);
+  min-height: 420px;
+}
+.dag-edit-pal {
+  width: 148px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.dag-edit-pal-card {
+  padding: 8px;
+  border: 1px dashed var(--oc-border-strong);
+  border-radius: 8px;
+  cursor: grab;
+  user-select: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.dag-edit-pal-card:hover { border-color: var(--oc-primary); }
+.dag-edit-stage {
+  flex: 1;
+  min-width: 0;
+  position: relative;
+  border: 1px solid var(--oc-border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.dag-edit-toolbar {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 4;
+  background: var(--oc-bg-container, #fff);
+  border-radius: 6px;
+  padding: 4px 6px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.dag-edit-inspector {
+  width: 260px;
+  flex: none;
+  border: 1px solid var(--oc-border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  overflow-y: auto;
+}
+
 /* Keep navigation and controls reachable on narrow consoles. Two-level IA:
    the category switch sits above the scoped Sider menu (fleet-nav-category);
    the same two levels re-render as Segmented + Select rows on mobile. */
@@ -291,5 +396,9 @@ body {
   .dag-detail { height: auto; flex-direction: column; }
   .dag-detail-graph { flex-basis: auto; height: 420px; }
   .dag-detail-side { min-width: 0; max-width: none; max-height: 480px; }
+  .dag-edit-wrap { flex-direction: column; height: auto; }
+  .dag-edit-stage { height: 380px; }
+  .dag-edit-inspector { width: auto; }
+  .dag-edit-pal { width: auto; flex-direction: row; }
   .ant-drawer-content-wrapper { max-width: 100vw; }
 }

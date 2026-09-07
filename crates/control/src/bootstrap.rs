@@ -58,10 +58,23 @@ pub async fn new_state(
     client: Option<Arc<dyn ChatStream>>,
 ) -> Result<Arc<AppState>> {
     tokio::fs::create_dir_all(&data).await?;
+    let libsql = Arc::new(LibsqlStore::open(data.join("definitions.db")).await?);
+    new_state_with_projects(workdir, data, client, libsql).await
+}
+
+/// Test/injection seam over `new_state`: swaps only the project store while
+/// the shared `store` keeps the internal libsql. Production goes through
+/// `new_state`.
+pub async fn new_state_with_projects(
+    workdir: PathBuf,
+    data: PathBuf,
+    client: Option<Arc<dyn ChatStream>>,
+    projects: Arc<dyn opencoder_store::ProjectStore>,
+) -> Result<Arc<AppState>> {
+    tokio::fs::create_dir_all(&data).await?;
     let config = Config::load(&workdir)?;
     let libsql = Arc::new(LibsqlStore::open(data.join("definitions.db")).await?);
-    let store: Arc<dyn Store> = libsql.clone();
-    let projects: Arc<dyn opencoder_store::ProjectStore> = libsql;
+    let store: Arc<dyn Store> = libsql;
     let client = client.unwrap_or_else(|| {
         Arc::new(BrainClient {
             config: config.clone(),

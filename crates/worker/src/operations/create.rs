@@ -5,6 +5,15 @@ use serde_json::{json, Value};
 
 pub(super) use super::launch::{launch, launch_locked, LaunchOutcome};
 
+/// Result-first override mirroring (same precedence as the workload's
+/// brain_override): a re-execute command's stored resolution always
+/// shadows any stale `brain` key left in request.input.
+fn mirror_result_overrides(input: &mut Value, result: &Value) {
+    if let Some(brain) = result.get("brain").filter(|v| !v.is_null()) {
+        input["brain"] = brain.clone();
+    }
+}
+
 pub(super) async fn create(worker: &Worker, assignment: Assignment) -> Result<RpcReply> {
     let _gate = worker.inner.admission.lock().await;
     if let Err(error) = assignment.request.validate() {
@@ -111,6 +120,65 @@ pub(super) async fn create(worker: &Worker, assignment: Assignment) -> Result<Rp
     )))
 }
 
+/// Executor-aware agent preflight for a project todo (pure). Agent todos
+/// contribute their agent; team/dag contribute the agents named by their
+/// INLINE spec (captain + members / agent steps) — a spec-less todo (or one
+/// referencing an external resource via executor_ref) resolves lazily at
+/// execute time, so nothing to preflight. Brain todos resolve on the
+/// control plane: without a pre-resolution (input.brain) the node cannot
+/// know the target and skips; with one, the resolved kind decides — agent
+/// takes its ref (default `act`), team/dag reuse the todo's spec attempt.
+fn project_preflight_agents(
+    todo: &opencoder_store::ProjectTodoRecord,
+    brain: Option<&Value>,
+) -> Vec<String> {
+    use opencoder_store::ProjectExecutorKind;
+    match todo.executor_kind {
+        ProjectExecutorKind::Agent => vec![todo.agent.clone()],
+        ProjectExecutorKind::Team => {
+            team_spec_agents(todo.executor_spec.as_deref()).unwrap_or_default()
+        }
+        ProjectExecutorKind::Dag => {
+            dag_spec_agents(todo.executor_spec.as_deref()).unwrap_or_default()
+        }
+        ProjectExecutorKind::Brain => match brain.and_then(|b| b["kind"].as_str()) {
+            Some("agent") => vec![brain
+                .and_then(|b| b["ref"].as_str())
+                .unwrap_or("act")
+                .to_string()],
+            Some("team") => team_spec_agents(todo.executor_spec.as_deref()).unwrap_or_default(),
+            Some("dag") => dag_spec_agents(todo.executor_spec.as_deref()).unwrap_or_default(),
+            _ => Vec::new(),
+        },
+    }
+}
+
+/// Captain + member `node_id`s off an inline team spec; None on a missing or
+/// unparseable spec (lazy resolution, never a preflight failure).
+fn team_spec_agents(spec: Option<&str>) -> Option<Vec<String>> {
+    let spec: opencoder_project::executor::spec::TeamSpec = serde_json::from_str(spec?).ok()?;
+    let mut agents = vec![spec.captain.node_id];
+    agents.extend(spec.members.into_iter().map(|m| m.node_id));
+    Some(agents)
+}
+
+/// Agent-step agents off an inline DagSpec (`agent.unwrap_or("act")`); None
+/// on a missing or unparseable spec.
+fn dag_spec_agents(spec: Option<&str>) -> Option<Vec<String>> {
+    let spec: opencoder_dag::DagSpec = serde_json::from_str(spec?).ok()?;
+    Some(
+        spec.steps
+            .into_iter()
+            .filter_map(|step| match step.kind {
+                opencoder_dag::StepKind::Agent { agent, .. } => {
+                    Some(agent.unwrap_or_else(|| "act".into()))
+                }
+                _ => None,
+            })
+            .collect(),
+    )
+}
+
 pub(super) fn prepare(worker: &Worker, assignment: &Assignment, legacy: bool) -> Result<Config> {
     if let Some(error) = worker.inner.persistence_error.lock().unwrap().as_ref() {
         bail!("node persistence unavailable: {error}");
@@ -179,7 +247,8 @@ pub(super) fn prepare(worker: &Worker, assignment: &Assignment, legacy: bool) ->
                         .as_ref()
                         .ok_or_else(|| anyhow::anyhow!("DAG definition missing"))?;
                     let spec: opencoder_dag::DagSpec =
-                        serde_json::from_value(value.get("spec").unwrap_or(value).clone())?;
+                        opencoder_dag::decode_spec(value.get("spec").unwrap_or(value))
+                            .map_err(|e| anyhow::anyhow!(e))?;
                     opencoder_dag::validate(&spec).map_err(|e| anyhow::anyhow!(e.join("; ")))?;
                     super::dag_preflight::validate(worker, &spec, legacy)?;
                     agents.extend(spec.steps.into_iter().filter_map(|s| match s.kind {
@@ -213,7 +282,14 @@ pub(super) fn prepare(worker: &Worker, assignment: &Assignment, legacy: bool) ->
                         serde_json::from_value(snapshot["goals"].clone())?;
                     let _: Vec<opencoder_store::ProjectMilestoneRecord> =
                         serde_json::from_value(snapshot["milestones"].clone())?;
-                    agents.push(todo.agent);
+                    agents.extend(project_preflight_agents(
+                        &todo,
+                        assignment
+                            .request
+                            .input
+                            .get("brain")
+                            .filter(|v| !v.is_null()),
+                    ));
                 }
                 _ => {}
             }
@@ -308,6 +384,14 @@ pub(crate) async fn start(
             }
             .into();
         }
+        if action == "execute" {
+            if let Some(brain) = command.input.get("brain").filter(|v| !v.is_null()) {
+                // Control-plane brain pre-resolution rides the command on
+                // the re-execute path; store it beside next_action so the
+                // workload (and preflight below) can pick it up.
+                record.result["brain"] = brain.clone();
+            }
+        }
         record.result["next_action"] = json!(action);
     }
     let permit = match worker.inner.slots.clone().try_acquire_owned() {
@@ -318,6 +402,12 @@ pub(crate) async fn start(
     if let Some(snapshot) = record.result.get("next_snapshot") {
         effective.definition = Some(snapshot.clone());
     }
+    // Preflight reads the brain override off request.input; mirror the
+    // command-carried resolution into this private copy (the durable
+    // acceptance stays untouched) — result-first, so a stale input key
+    // never shadows the re-execute resolution (same precedence as the
+    // workload's brain_override).
+    mirror_result_overrides(&mut effective.request.input, &record.result);
     let config = match prepare(worker, &effective, legacy) {
         Ok(config) => config,
         Err(error) => {
@@ -334,5 +424,106 @@ pub(crate) async fn start(
             409,
             format!("execution cannot start from {}", status.as_str()),
         )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use opencoder_store::{ProjectExecutorKind, ProjectTodoStatus};
+
+    fn todo(kind: ProjectExecutorKind, spec: Option<&str>) -> opencoder_store::ProjectTodoRecord {
+        opencoder_store::ProjectTodoRecord {
+            id: "pt-1".into(),
+            milestone_id: None,
+            title: "t".into(),
+            draft: "d".into(),
+            plan_md: None,
+            status: ProjectTodoStatus::Draft,
+            agent: "act".into(),
+            executor_kind: kind,
+            executor_ref: None,
+            executor_spec: spec.map(str::to_string),
+            active_session_id: None,
+            created_at: 0,
+            updated_at: 0,
+        }
+    }
+
+    #[test]
+    fn preflight_agents_follow_the_executor_kind() {
+        // Agent: the todo's own agent.
+        assert_eq!(
+            project_preflight_agents(&todo(ProjectExecutorKind::Agent, None), None),
+            vec!["act".to_string()]
+        );
+        // Team spec: captain + members node_ids; spec-less → lazy skip.
+        let team = r#"{"name":"c","captain":{"node_id":"lead","name":"Lead"},"members":[{"node_id":"a1","name":"A"},{"node_id":"a2","name":"B"}]}"#;
+        assert_eq!(
+            project_preflight_agents(&todo(ProjectExecutorKind::Team, Some(team)), None),
+            vec!["lead".to_string(), "a1".to_string(), "a2".to_string()]
+        );
+        assert!(project_preflight_agents(&todo(ProjectExecutorKind::Team, None), None).is_empty());
+        assert!(
+            project_preflight_agents(&todo(ProjectExecutorKind::Team, Some("{")), None).is_empty()
+        );
+        // Dag spec: agent steps with agent.unwrap_or("act"); wasm skipped.
+        let dag = r#"{"name":"d","steps":[
+            {"name":"w","kind":{"type":"wasm","command":"t.wasm"}},
+            {"name":"x","kind":{"type":"agent","prompt":"p","agent":"explore"}},
+            {"name":"y","kind":{"type":"agent","prompt":"p"}}]}"#;
+        assert_eq!(
+            project_preflight_agents(&todo(ProjectExecutorKind::Dag, Some(dag)), None),
+            vec!["explore".to_string(), "act".to_string()]
+        );
+        assert!(project_preflight_agents(&todo(ProjectExecutorKind::Dag, None), None).is_empty());
+    }
+
+    #[test]
+    fn brain_preflight_needs_a_resolution_and_follows_it() {
+        let base = todo(ProjectExecutorKind::Brain, None);
+        // Unresolved brain (no control-plane override) skips.
+        assert!(project_preflight_agents(&base, None).is_empty());
+        // Resolved agent takes ref (or act default).
+        assert_eq!(
+            project_preflight_agents(&base, Some(&json!({"kind":"agent","ref":"build"}))),
+            vec!["build".to_string()]
+        );
+        assert_eq!(
+            project_preflight_agents(&base, Some(&json!({"kind":"agent"}))),
+            vec!["act".to_string()]
+        );
+        // Resolved team/dag reuse the todo's inline spec; a routes-table
+        // spec (the brain default) does not parse as a team spec → skip.
+        let team = r#"{"name":"c","captain":{"node_id":"lead","name":"Lead"}}"#;
+        let routed = todo(ProjectExecutorKind::Brain, Some(team));
+        assert_eq!(
+            project_preflight_agents(&routed, Some(&json!({"kind":"team","ref":"crew"}))),
+            vec!["lead".to_string()]
+        );
+        let routes = todo(ProjectExecutorKind::Brain, Some(r#"{"routes":[]}"#));
+        assert!(project_preflight_agents(&routes, Some(&json!({"kind":"dag"}))).is_empty());
+    }
+
+    #[test]
+    fn result_brain_mirrors_over_stale_input_brain() {
+        // Result-first: a re-execute resolution shadows a pre-existing
+        // (stale) input brain key — same precedence as brain_override.
+        let mut input = json!({"brain": {"kind": "dag", "ref": "old"}});
+        mirror_result_overrides(
+            &mut input,
+            &json!({"brain": {"kind": "agent", "ref": "act"}, "next_action": "execute"}),
+        );
+        assert_eq!(input["brain"]["ref"], "act");
+
+        // Absent result brain leaves the input untouched.
+        let mut input = json!({"brain": {"kind": "dag", "ref": "old"}});
+        mirror_result_overrides(&mut input, &json!({"next_action": "execute"}));
+        assert_eq!(input["brain"]["ref"], "old");
+
+        // Null result brain likewise leaves the input untouched.
+        let mut input = json!({"brain": {"kind": "dag", "ref": "old"}});
+        mirror_result_overrides(&mut input, &json!({"brain": null}));
+        assert_eq!(input["brain"]["ref"], "old");
     }
 }

@@ -90,9 +90,9 @@ pub async fn dag_defs(State(state): State<Arc<AppState>>) -> Response {
 }
 pub async fn save_dag(State(state): State<Arc<AppState>>, Json(body): Json<Value>) -> Response {
     let spec: opencoder_dag::DagSpec =
-        match serde_json::from_value(body.get("spec").cloned().unwrap_or(body)) {
+        match opencoder_dag::decode_spec(body.get("spec").unwrap_or(&body)) {
             Ok(spec) => spec,
-            Err(error) => return error_400(error.to_string()),
+            Err(error) => return error_400(error),
         };
     if let Err(errors) = opencoder_dag::validate(&spec) {
         return error_400(errors.join("; "));

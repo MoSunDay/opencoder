@@ -157,7 +157,11 @@ impl Tool for BashTool {
             .current_dir(&workdir)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+            .stderr(Stdio::piped())
+            // Step-scoped contract vars from workflow-orchestrated
+            // sessions (e.g. OPENCODER_HOW_APPEND); login-shell profiles
+            // don't scrub unknown OPENCODER_* names, so they survive `-l`.
+            .envs(ctx.extra_env.iter().map(|(k, v)| (k.as_str(), v.as_str())));
         crate::process::configure_owned_command(&mut cmd, supervised);
 
         // Detach the child from the controlling terminal. stdout/stderr are
@@ -376,6 +380,7 @@ mod tests {
 
     fn ctx() -> ToolContext {
         ToolContext {
+            extra_env: Vec::new(),
             session_id: "test".into(),
             message_id: "test".into(),
             agent: "act".into(),

@@ -11,7 +11,7 @@ use axum::extract::{Path, Query, State};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use opencoder_dag::{
-    validate, DagDefUpsertRequest, DagDefView, DagDispatchRequest, DagDispatchResponse,
+    decode_spec, decode_spec_str, validate, DagDefView, DagDispatchRequest, DagDispatchResponse,
     DagRunStatus, DagRunView, DagSpec,
 };
 use opencoder_store::{DagDefRecord, DagRunRecord};
@@ -21,10 +21,11 @@ use serde_json::json;
 use crate::api::{error_400, error_404, error_409, error_500};
 use crate::AppState;
 
-/// Store row → wire view (parses the lazily-stored `spec_json`).
+/// Store row → wire view (parses the lazily-stored `spec_json`; removed
+/// `python` steps surface the dedicated migration error).
 fn def_view(rec: &DagDefRecord) -> Result<DagDefView, String> {
     let spec: DagSpec =
-        serde_json::from_str(&rec.spec_json).map_err(|e| format!("parse dag spec: {e}"))?;
+        decode_spec_str(&rec.spec_json).map_err(|e| format!("parse dag spec: {e}"))?;
     Ok(DagDefView {
         id: rec.id.clone(),
         name: rec.name.clone(),
@@ -53,19 +54,29 @@ fn run_view(rec: &DagRunRecord) -> DagRunView {
 /// list from `opencoder_dag::validate`.
 pub async fn post_def(
     State(state): State<Arc<AppState>>,
-    Json(body): Json<DagDefUpsertRequest>,
+    Json(body): Json<serde_json::Value>,
 ) -> Response {
-    if let Err(problems) = validate(&body.spec) {
+    // Decode from the raw value (not the typed `DagDefUpsertRequest`) so a
+    // removed step kind reports the dedicated migration message as a 400
+    // instead of axum's raw serde variant rejection.
+    let Some(spec_value) = body.get("spec") else {
+        return error_400("missing field: spec".into());
+    };
+    let spec = match decode_spec(spec_value) {
+        Ok(spec) => spec,
+        Err(e) => return error_400(format!("parse dag spec: {e}")),
+    };
+    if let Err(problems) = validate(&spec) {
         return error_400(problems.join("; "));
     }
     let now = chrono::Utc::now().timestamp_millis();
-    let spec_json = match serde_json::to_string(&body.spec) {
+    let spec_json = match serde_json::to_string(&spec) {
         Ok(s) => s,
         Err(e) => return error_500(format!("serialize dag spec: {e}")),
     };
     let def = DagDefRecord {
         id: ulid::Ulid::new().to_string(),
-        name: body.spec.name.clone(),
+        name: spec.name.clone(),
         spec_json,
         created_at: now,
         updated_at: now,
@@ -88,20 +99,40 @@ pub async fn post_def(
     }
 }
 
-/// GET /api/dag/defs — all definitions ordered by name.
+/// Degraded list row for an undecodable def: keeps the identity fields
+/// (id/name/timestamps — the browser's delete button posts to
+/// `/api/dag/defs/{id}`) and carries the decode error so one bad row
+/// cannot 500 the whole list. Built explicitly as a JSON object:
+/// `#[serde(flatten)]` on `None` emits nothing at all, which would
+/// leave the row without its id.
+fn degraded_def_row(d: &DagDefRecord, error: String) -> serde_json::Value {
+    json!({
+        "id": d.id,
+        "name": d.name,
+        "created_at": d.created_at,
+        "updated_at": d.updated_at,
+        "error": error,
+    })
+}
+
+/// GET /api/dag/defs — all definitions ordered by name. Decodable defs
+/// serialize to the exact `DagDefView` wire shape (LOCKED protocol DTO);
+/// undecodable ones (e.g. stored pre-wasm python definitions) degrade
+/// via [`degraded_def_row`] and are deleted via the normal endpoint.
 pub async fn list_defs(State(state): State<Arc<AppState>>) -> Response {
     match state.store.list_dag_defs().await {
         Ok(defs) => {
-            let mut views = Vec::with_capacity(defs.len());
-            for d in &defs {
-                match def_view(d) {
-                    Ok(v) => views.push(v),
-                    Err(e) => return error_500(format!("def {}: {e}", d.id)),
-                }
-            }
-            Json(views).into_response()
+            let rows: Vec<serde_json::Value> = defs
+                .iter()
+                .map(|d| match def_view(d) {
+                    Ok(view) => serde_json::to_value(&view)
+                        .unwrap_or_else(|e| degraded_def_row(d, format!("def {}: {e}", d.id))),
+                    Err(e) => degraded_def_row(d, format!("def {}: {e}", d.id)),
+                })
+                .collect();
+            Json(rows).into_response()
         }
-        Err(e) => error_500(format!("list_dag_defs: {e:#}")),
+        Err(e) => error_500(format!("list_dag_defs: {e}")),
     }
 }
 

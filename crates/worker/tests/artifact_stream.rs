@@ -32,8 +32,9 @@ fn rss_bytes() -> u64 {
 #[tokio::test]
 async fn streams_256_mib_artifact_with_bounded_frames_and_memory() {
     let fleet = Fleet::new(1, mock()).await;
+    support::stage_stdout_wasm(&fleet.root().join("n0/node"), "tool.wasm", "small");
     let spec = json!({"name":"large-dag","steps":[{
-        "name":"first","kind":{"type":"python","code":"print('small')"}
+        "name":"first","kind":{"type":"wasm","command":"tool.wasm"}
     }]});
     let assignment = assignment(
         &fleet.nodes[0],

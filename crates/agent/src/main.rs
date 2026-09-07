@@ -2,10 +2,10 @@
 //!
 //! Registers to `opencoder-server` over an outbound channel and executes
 //! agents, teams, workflows, projects and maintenance locally: agent steps through the real
-//! session runner, python steps through the embedded RustPython VM (or an
+//! session runner, wasm steps through the embedded wasmtime engine (or an
 //! `runc` container), artifacts under the node-local typed execution tree. The
-//! VM/runc dependency chain lives ONLY here — the main `opencoder` binary
-//! and `opencoder-server` never link it.
+//! wasmtime/runc dependency chain lives ONLY here — the main `opencoder`
+//! binary and `opencoder-server` never link it.
 //!
 //! Node (client) token semantics are inherited from the node crate: the
 //! token must be supplied by `--token`, `--token-file`, or
@@ -65,9 +65,6 @@ struct Args {
 enum AgentCommand {
     /// Run the agent loop (default when no subcommand is given).
     Run,
-    /// Internal isolated embedded Python executor; JSON over standard input/output.
-    #[command(hide = true)]
-    InternalPythonStep,
     /// Internal owner for one external workload and all of its descendants.
     #[command(hide = true)]
     InternalProcessSupervisor {
@@ -92,7 +89,7 @@ enum AgentCommand {
 
 #[derive(Subcommand, Debug)]
 enum DagCommand {
-    /// Scaffold the shared read-only rootfs used by `sandbox: runc` python
+    /// Scaffold the shared read-only rootfs used by `sandbox: runc` wasm
     /// steps (mount points, resolv.conf copy, provisioning README).
     PrepareRootfs {
         /// Directory to write the rootfs scaffold tree into.
@@ -153,7 +150,7 @@ fn prepare_rootfs(out: &std::path::Path) -> Result<()> {
     print_tree(out);
     println!();
     println!(
-        "next: add a python interpreter under usr/ — see {} for the provisioning guide",
+        "next: add a static wasmtime tree under usr/ — see {} for the provisioning guide",
         out.join("README.md").display()
     );
     Ok(())
@@ -211,9 +208,6 @@ fn main() -> Result<()> {
         };
         let code = opencoder_session::process::supervisor_main(command.clone(), cleanup)?;
         std::process::exit(code);
-    }
-    if matches!(&args.command, Some(AgentCommand::InternalPythonStep)) {
-        return opencoder_dag_runtime::exec::python::worker_main();
     }
     if args.command.is_none() || matches!(&args.command, Some(AgentCommand::Run)) {
         opencoder_session::process::configure_supervisor_binary(std::env::current_exe()?)?;

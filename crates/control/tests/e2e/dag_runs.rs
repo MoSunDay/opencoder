@@ -8,8 +8,8 @@ use serde_json::json;
 use crate::support::Harness;
 
 const SPEC: &str = r#"{"name":"etl-demo","steps":[
-    {"name":"fetch","kind":{"type":"python","code":"x=1"}},
-    {"name":"load","depends_on":["fetch"],"kind":{"type":"python","code":"y=2"}}]}"#;
+    {"name":"fetch","kind":{"type":"wasm","command":"tool.wasm"}},
+    {"name":"load","depends_on":["fetch"],"kind":{"type":"wasm","command":"tool.wasm"}}]}"#;
 
 async fn seed_definition(h: &Harness) {
     let spec: serde_json::Value = serde_json::from_str(SPEC).unwrap();
@@ -42,8 +42,8 @@ async fn dispatch_creates_run_and_ledger_views_route_to_the_node() {
         json!({"execution": {"id": "dag-run-1", "status": "done"},
                "request": {"target": "etl-demo"},
                "definition": {"spec": {"name": "etl-demo", "steps": [
-                   {"name": "fetch", "kind": {"type": "python", "code": "x=1"}},
-                   {"name": "load", "depends_on": ["fetch"], "kind": {"type": "python", "code": "y=2"}}]}},
+                   {"name": "fetch", "kind": {"type":"wasm","command":"tool.wasm"}},
+                   {"name": "load", "depends_on": ["fetch"], "kind": {"type":"wasm","command":"tool.wasm"}}]}},
                "result": {"steps": {"fetch": "ok"}}}),
     );
     let (status, body) = h.req(Method::GET, "/api/dag/runs", None).await;

@@ -65,7 +65,9 @@ async fn dag_artifacts_and_checkpoints_survive_node_restart() {
     let dir = tempfile::tempdir().unwrap();
     let client = mock();
     let node = worker(dir.path(), client.clone()).await;
-    let spec = json!({"name":"local-dag","steps":[{"name":"first","kind":{"type":"python","code":"print('artifact on node')"}},{"name":"review","depends_on":["first"],"kind":{"type":"agent","prompt":"review result"}}]});
+    // Stage the wasm module into the run context root before execution.
+    support::stage_stdout_wasm(&dir.path().join("node"), "tool.wasm", "artifact on node");
+    let spec = json!({"name":"local-dag","steps":[{"name":"first","kind":{"type":"wasm","command":"tool.wasm"}},{"name":"review","depends_on":["first"],"kind":{"type":"agent","prompt":"review result"}}]});
     assert_eq!(
         node.handle(NodeOperation::Create {
             assignment: assignment(
@@ -198,14 +200,14 @@ async fn maintenance_agent_has_real_local_query_tool() {
     node.shutdown().await.unwrap();
 }
 
-#[cfg(target_os = "linux")]
 #[tokio::test]
-async fn dag_cancel_reaps_python_before_releasing_node_capacity() {
+async fn dag_cancel_interrupts_wasm_step_and_releases_node_capacity() {
     let dir = tempfile::tempdir().unwrap();
     let node = worker(dir.path(), mock()).await;
-    let id = "dag-cancel-python";
-    let spec = json!({"name":"cancel-python","steps":[{"name":"loop","kind":{"type":"python",
-        "code":"import posix\nf = open(STEP_DIR + '/pid', 'w')\nf.write(str(posix.getpid()))\nf.close()\nwhile True:\n    pass"}}]});
+    let id = "dag-cancel-wasm";
+    // A spinning wasm step: only epoch interruption (cancel/timeout) ends it.
+    support::stage_spin_wasm(&dir.path().join("node"));
+    let spec = json!({"name":"cancel-wasm","steps":[{"name":"loop","kind":{"type":"wasm","command":"spin.wasm"}}]});
     assert_eq!(
         node.handle(NodeOperation::Create {
             assignment: assignment(&node, id, ExecutionKind::Dag, json!({}), Some(spec)),
@@ -214,18 +216,15 @@ async fn dag_cancel_reaps_python_before_releasing_node_capacity() {
         .status,
         200
     );
-    let pid_path = dir.path().join(format!("node/dag/{id}/loop/pid"));
+    // context.json lands just before the module starts — the run signal.
+    let started = dir.path().join(format!("node/dag/{id}/loop/context.json"));
     tokio::time::timeout(std::time::Duration::from_secs(10), async {
-        while std::fs::read_to_string(&pid_path)
-            .unwrap_or_default()
-            .is_empty()
-        {
+        while !started.is_file() {
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }
     })
     .await
     .unwrap();
-    let pid = std::fs::read_to_string(pid_path).unwrap();
     assert_eq!(
         node.handle(NodeOperation::Command {
             execution: ExecutionRef {
@@ -244,7 +243,6 @@ async fn dag_cancel_reaps_python_before_releasing_node_capacity() {
     let detail = settled(&node, id).await;
     assert_eq!(detail["execution"]["status"], "cancelled", "{detail}");
     assert_eq!(node.snapshot().active_runs, 0);
-    assert!(!std::path::Path::new("/proc").join(pid).exists());
     let meta: Value = serde_json::from_slice(
         &std::fs::read(dir.path().join(format!("node/dag/{id}/loop/meta.json"))).unwrap(),
     )

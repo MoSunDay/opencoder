@@ -160,6 +160,12 @@ pub struct SessionState {
     /// session uses its own agent's skills (first-wins shadowing).
     pub skill_roots: Vec<PathBuf>,
     pub last_usage: opencoder_llm::Usage,
+    /// Extra `KEY=VALUE` env pairs the runner forwards into every tool
+    /// process (`ToolContext::extra_env`). Workflow-orchestrated sessions
+    /// (DAG agent steps) set step-scoped contract vars here — e.g.
+    /// `OPENCODER_HOW_APPEND` carries the workflow-author-declared how.md
+    /// append payload. Interactive sessions keep it empty.
+    pub env_passthrough: Vec<(String, String)>,
     /// Optional durable store. When set, `record` persists each new message.
     pub store: Option<Arc<dyn Store>>,
     /// Active skill instructions. NOT part of the system prompt — the LLM
@@ -261,6 +267,7 @@ impl SessionState {
                 )
             });
         SessionState {
+            env_passthrough: Vec::new(),
             id: id.into(),
             messages: Vec::new(),
             agent,

@@ -9,13 +9,13 @@ use std::sync::Arc;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use opencoder_llm::MockChatClient;
-use opencoder_store::{LibsqlStore, Store};
+use opencoder_store::{DagDefRecord, LibsqlStore, Store};
 use tower::ServiceExt;
 
-/// Two python steps with one dependency — the minimal valid workflow.
+/// Two wasm steps with one dependency — the minimal valid workflow.
 const SPEC: &str = r#"{"name":"etl-demo","steps":[
-    {"name":"fetch","kind":{"type":"python","code":"x=1"}},
-    {"name":"load","depends_on":["fetch"],"kind":{"type":"python","code":"y=2"}}]}"#;
+    {"name":"fetch","kind":{"type":"wasm","command":"tool.wasm"}},
+    {"name":"load","depends_on":["fetch"],"kind":{"type":"wasm","command":"tool.wasm"}}]}"#;
 
 /// Wrap a raw spec literal in the `DagDefUpsertRequest` envelope.
 fn spec_body_of(spec: &str) -> String {
@@ -193,6 +193,83 @@ async fn defs_crud_upsert_keeps_id_and_delete_404s() {
     assert_eq!(s, StatusCode::NOT_FOUND);
 }
 
+/// Stored pre-wasm python definitions no longer decode: posting one is a
+/// 400 with the dedicated migration message (not a raw serde variant
+/// error), and a seeded legacy row degrades the LIST to an error-marked
+/// row instead of 500-ing the whole page; get_def fails closed on it.
+#[tokio::test]
+async fn python_defs_fail_closed_with_dedicated_errors() {
+    let ctx = app().await;
+
+    // POST a python spec: dedicated 400 message, nothing stored.
+    let python_spec =
+        r#"{"name":"p","steps":[{"name":"a","kind":{"type":"python","code":"pass"}}]}"#;
+    let (s, b) = send(
+        &ctx.app,
+        req("POST", "/api/dag/defs", Some(spec_body_of(python_spec))),
+    )
+    .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "{b}");
+    assert!(
+        b["error"]
+            .as_str()
+            .unwrap()
+            .contains("已下线的 python 步骤"),
+        "{b}"
+    );
+    let (_, list) = send(&ctx.app, req("GET", "/api/dag/defs", None)).await;
+    assert_eq!(list.as_array().unwrap().len(), 0);
+
+    // Seed a legacy python row straight through the store (the HTTP path
+    // can no longer produce one): the list degrades to an error row.
+    ctx.store
+        .upsert_dag_def(&DagDefRecord {
+            id: "legacy-python".into(),
+            name: "legacy-python".into(),
+            spec_json: python_spec.to_string(),
+            created_at: 1,
+            updated_at: 1,
+        })
+        .await
+        .unwrap();
+    let (s, list) = send(&ctx.app, req("GET", "/api/dag/defs", None)).await;
+    assert_eq!(s, StatusCode::OK, "{list}");
+    let rows = list.as_array().unwrap();
+    assert_eq!(rows.len(), 1);
+    assert!(rows[0]["spec"].is_null(), "{list}");
+    let err = rows[0]["error"].as_str().unwrap();
+    assert!(err.contains("已下线的 python 步骤"), "{err}");
+    // The degraded row keeps its identity: flatten-None used to drop
+    // id/name entirely, sending the SPA delete button to `…/defs/undefined`.
+    assert_eq!(rows[0]["id"], "legacy-python", "{list}");
+    assert_eq!(rows[0]["name"], "legacy-python", "{list}");
+    assert_eq!(rows[0]["created_at"], 1, "{list}");
+    assert_eq!(rows[0]["updated_at"], 1, "{list}");
+
+    // get_def stays fail-closed with the same dedicated message.
+    let (s, one) = send(&ctx.app, req("GET", "/api/dag/defs/legacy-python", None)).await;
+    assert_eq!(s, StatusCode::INTERNAL_SERVER_ERROR, "{one}");
+    assert!(
+        one["error"]
+            .as_str()
+            .unwrap()
+            .contains("已下线的 python 步骤"),
+        "{one}"
+    );
+
+    // A decodable def lists without the error field and keeps its spec.
+    let _ = upsert_def(&ctx.app).await;
+    let (_, list) = send(&ctx.app, req("GET", "/api/dag/defs", None)).await;
+    let good = list
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["name"] == "etl-demo")
+        .unwrap();
+    assert!(good.get("error").is_none(), "{list}");
+    assert_eq!(good["spec"]["steps"].as_array().unwrap().len(), 2);
+}
+
 #[tokio::test]
 async fn invalid_spec_is_400_with_the_problem_list() {
     let ctx = app().await;
@@ -211,8 +288,7 @@ async fn invalid_spec_is_400_with_the_problem_list() {
         "{b}"
     );
 
-    let bad_slug =
-        r#"{"name":"x","steps":[{"name":"Bad Slug","kind":{"type":"python","code":"1"}}]}"#;
+    let bad_slug = r#"{"name":"x","steps":[{"name":"Bad Slug","kind":{"type":"wasm","command":"tool.wasm"}}]}"#;
     let (s, b) = send(
         &ctx.app,
         req("POST", "/api/dag/defs", Some(spec_body_of(bad_slug))),

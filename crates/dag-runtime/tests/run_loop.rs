@@ -76,6 +76,7 @@ fn one_step_spec() -> DagSpec {
                 prompt: "给出结论".into(),
                 agent: None,
                 model: None,
+                how_append: None,
             },
             timeout_secs: None,
         }],
@@ -90,6 +91,7 @@ fn agent_step(name: &str, deps: &[&str], timeout: Option<u64>) -> StepSpec {
             prompt: format!("{name} prompt"),
             agent: None,
             model: None,
+            how_append: None,
         },
         timeout_secs: timeout,
     }

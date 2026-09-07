@@ -110,8 +110,8 @@ async fn schema_migration_v7_to_v8_adds_requirement() {
         let r = rows.next().await.unwrap().unwrap();
         let v: i64 = r.get(0).unwrap();
         assert_eq!(
-            v, 19,
-            "schema version must be latest (19) after v7->v8 migration"
+            v, 20,
+            "schema version must be latest (20) after v7->v8 migration"
         );
     }
 }
@@ -225,8 +225,8 @@ async fn schema_migration_v10_to_v11_adds_autopilot_mode() {
         let r = rows.next().await.unwrap().unwrap();
         let v: i64 = r.get(0).unwrap();
         assert_eq!(
-            v, 19,
-            "schema version must be latest (19) after v10->v11 migration"
+            v, 20,
+            "schema version must be latest (20) after v10->v11 migration"
         );
     }
 }

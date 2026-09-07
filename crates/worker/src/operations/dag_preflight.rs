@@ -13,7 +13,7 @@ pub(super) fn validate(worker: &Worker, spec: &opencoder_dag::DagSpec, legacy: b
     if !spec.steps.iter().any(|step| {
         matches!(
             &step.kind,
-            opencoder_dag::StepKind::Python {
+            opencoder_dag::StepKind::Wasm {
                 sandbox: Some(opencoder_dag::SandboxMode::Runc),
                 ..
             }

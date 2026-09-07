@@ -21,7 +21,7 @@ const DEF = {
   spec: {
     name: 'etl',
     steps: [
-      { name: 'fetch', kind: { type: 'python', code: 'print(1)' } },
+      { name: 'fetch', kind: { type: 'wasm', command: 'tool.wasm' } },
       { name: 'review', depends_on: ['fetch'], kind: { type: 'agent', prompt: 'r' } },
     ],
   },

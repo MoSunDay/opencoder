@@ -165,11 +165,63 @@ mod tests {
         roots
     }
 
+    /// Stage a wat module as `<run_root>/<step>/module.wasm` — the
+    /// executor-equivalent placement the container command references.
+    fn stage_module(run_root: &Path, step: &str, wat: &str) {
+        let dir = run_root.join(step);
+        std::fs::create_dir_all(&dir).unwrap();
+        let wasm = wat::parse_str(wat).unwrap();
+        std::fs::write(dir.join("module.wasm"), wasm).unwrap();
+    }
+
+    const HELLO_WAT: &str = r#"
+        (module
+            (import "wasi_snapshot_preview1" "fd_write"
+                (func $fd_write (param i32 i32 i32 i32) (result i32)))
+            (memory (export "memory") 1)
+            (data (i32.const 0) "from runc\n")
+            (func (export "_start")
+                (i32.store (i32.const 16) (i32.const 0))
+                (i32.store (i32.const 20) (i32.const 10))
+                (drop
+                    (call $fd_write
+                        (i32.const 1) (i32.const 16) (i32.const 1) (i32.const 24)))))
+    "#;
+
+    const SPIN_WAT: &str = r#"
+        (module
+            (func (export "_start") (loop $l (br $l))))
+    "#;
+
+    /// Fills the first 64 KiB with `x`, then streams it to stdout until the
+    /// 8 MiB runc output cap is blown (~150 x 64 KiB writes).
+    const OVERFLOW_WAT: &str = r#"
+        (module
+            (import "wasi_snapshot_preview1" "fd_write"
+                (func $fd_write (param i32 i32 i32 i32) (result i32)))
+            (memory (export "memory") 2)
+            (func (export "_start")
+                (local $i i32)
+                (loop $fill
+                    (i32.store8 (local.get $i) (i32.const 120))
+                    (local.set $i (i32.add (local.get $i) (i32.const 1)))
+                    (br_if $fill (i32.lt_u (local.get $i) (i32.const 65536))))
+                (i32.store (i32.const 65536) (i32.const 0))
+                (i32.store (i32.const 65540) (i32.const 65536))
+                (local.set $i (i32.const 0))
+                (loop $write
+                    (drop
+                        (call $fd_write
+                            (i32.const 1) (i32.const 65536) (i32.const 1) (i32.const 65544)))
+                    (local.set $i (i32.add (local.get $i) (i32.const 1)))
+                    (br_if $write (i32.lt_u (local.get $i) (i32.const 150))))))
+    "#;
+
     /// End-to-end smoke through a real runc when both runc and a prepared
     /// rootfs fixture are present. Explicit manual invocation fails if either
     /// prerequisite is absent; ordinary CI reports this test as ignored.
     #[tokio::test]
-    #[ignore = "manual: requires runc and prepared Python rootfs"]
+    #[ignore = "manual: requires runc and prepared wasm rootfs"]
     async fn runc_step_smoke() {
         assert!(runc_available(), "runc not installed");
         let rootfs = smoke_rootfs_candidates()
@@ -182,9 +234,11 @@ mod tests {
         let spec = crate::sandbox::oci::BundleSpec {
             run_root: workflow_root.join("run-1"),
             step_slug: "smoke".into(),
-            code: "print('from runc')".into(),
+            command: vec!["smoke/module.wasm".into()],
+            env: Vec::new(),
             timeout_hint: Some(30),
         };
+        stage_module(&spec.run_root, "smoke", HELLO_WAT);
         let bundle = crate::sandbox::oci::write_bundle(&workflow_root.join("b"), &spec).unwrap();
         // A container combines independently valid run and step IDs.
         let id = format!("{}-{}", "r".repeat(64), "s".repeat(64));
@@ -192,8 +246,9 @@ mod tests {
         assert_eq!(code, 0, "runc step output: {out}");
         assert!(out.contains("from runc"), "{out}");
     }
+
     #[tokio::test]
-    #[ignore = "manual: requires runc and prepared Python rootfs"]
+    #[ignore = "manual: requires runc and prepared wasm rootfs"]
     async fn cancellation_and_timeout_remove_running_containers() {
         assert!(runc_available());
         let rootfs = smoke_rootfs_candidates()
@@ -204,15 +259,17 @@ mod tests {
         for timed_out in [false, true] {
             let id = format!("dag-stop-{}", ulid::Ulid::new());
             let spec = crate::sandbox::oci::BundleSpec {
-                run_root: workflow.join(&id), step_slug: "loop".into(),
-                code: "import time\nf = open('/workspace/context/loop/started', 'w')\nf.write('started')\nf.close()\nwhile True:\n    with open('/workspace/context/loop/ticks', 'a') as f: f.write('x')\n    time.sleep(0.01)".into(),
+                run_root: workflow.join(&id),
+                step_slug: "loop".into(),
+                command: vec!["loop/module.wasm".into()],
+                env: Vec::new(),
                 timeout_hint: timed_out.then_some(5),
             };
+            stage_module(&spec.run_root, "loop", SPIN_WAT);
             let bundle =
                 crate::sandbox::oci::write_bundle(&workflow.join(format!("bundle-{id}")), &spec)
                     .unwrap();
             let cancel = CancellationToken::new();
-            let started = spec.run_root.join("loop/started");
             let child_cancel = cancel.clone();
             let child_bundle = bundle.clone();
             let child_id = id.clone();
@@ -225,8 +282,11 @@ mod tests {
                 )
                 .await
             });
+            // The spin module writes nothing observable, so wait for runc's
+            // private container state directory instead.
+            let state_dir = bundle.join("runc-state").join(&id);
             timeout(Duration::from_secs(15), async {
-                while !started.exists() {
+                while !state_dir.exists() {
                     tokio::time::sleep(Duration::from_millis(10)).await;
                 }
             })
@@ -247,19 +307,11 @@ mod tests {
                 "{error:#}"
             );
             assert!(!bundle.join("runc-state").join(&id).exists());
-            let ticks = spec.run_root.join("loop/ticks");
-            let before = std::fs::read(&ticks).unwrap();
-            tokio::time::sleep(Duration::from_millis(100)).await;
-            assert_eq!(
-                std::fs::read(ticks).unwrap(),
-                before,
-                "container kept running after terminal result"
-            );
         }
     }
 
     #[tokio::test]
-    #[ignore = "manual: requires runc and prepared Python rootfs"]
+    #[ignore = "manual: requires runc and prepared wasm rootfs"]
     async fn stdout_overflow_fails_and_removes_container() {
         assert!(runc_available());
         let rootfs = smoke_rootfs_candidates()
@@ -272,9 +324,11 @@ mod tests {
         let spec = crate::sandbox::oci::BundleSpec {
             run_root: workflow.join(&id),
             step_slug: "overflow".into(),
-            code: "print('x' * (8 * 1024 * 1024 + 1))".into(),
+            command: vec!["overflow/module.wasm".into()],
+            env: Vec::new(),
             timeout_hint: Some(30),
         };
+        stage_module(&spec.run_root, "overflow", OVERFLOW_WAT);
         let bundle = crate::sandbox::oci::write_bundle(&bundle_path, &spec).unwrap();
         let error = run_step(&bundle, &id, Some(30)).await.unwrap_err();
         assert!(

@@ -17,9 +17,10 @@ mod gated {
     use opencoder_core::{StorageBackend, StorageConfig};
     use opencoder_store::sql_store;
     use opencoder_store::{
-        ProjectGoalPatch, ProjectGoalRecord, ProjectGoalStatus, ProjectMilestoneRecord,
-        ProjectMilestoneStatus, ProjectStore, ProjectTodoPatch, ProjectTodoRecord,
-        ProjectTodoRunKind, ProjectTodoRunRecord, ProjectTodoRunStatus, ProjectTodoStatus,
+        ProjectExecutorKind, ProjectGoalPatch, ProjectGoalRecord, ProjectGoalStatus,
+        ProjectMilestoneRecord, ProjectMilestoneStatus, ProjectStore, ProjectTodoPatch,
+        ProjectTodoRecord, ProjectTodoRunKind, ProjectTodoRunRecord, ProjectTodoRunStatus,
+        ProjectTodoStatus,
     };
 
     /// Non-empty value of `var`, if set.
@@ -140,6 +141,8 @@ mod gated {
         eventually("milestone visible under goal", ms_ok).await;
 
         // todo under the milestone; run v1 allocated via next_todo_version.
+        // The todo carries the team-executor dimension (ref + inline spec) so
+        // the compact contract also proves those columns round-trip.
         p.create_todo(&ProjectTodoRecord {
             id: todo.clone(),
             milestone_id: Some(ms.clone()),
@@ -148,6 +151,9 @@ mod gated {
             plan_md: None,
             status: ProjectTodoStatus::Draft,
             agent: "act".into(),
+            executor_kind: ProjectExecutorKind::Team,
+            executor_ref: Some("feature-team".into()),
+            executor_spec: Some("{\"members\":[]}".into()),
             active_session_id: None,
             created_at: ts + 4,
             updated_at: ts + 4,
@@ -156,7 +162,11 @@ mod gated {
         .unwrap();
         let todo_ok = || async {
             let todos = p.list_todos(Some(&ms)).await.unwrap();
-            todos.len() == 1 && todos[0].id == todo
+            todos.len() == 1
+                && todos[0].id == todo
+                && todos[0].executor_kind == ProjectExecutorKind::Team
+                && todos[0].executor_ref.as_deref() == Some("feature-team")
+                && todos[0].executor_spec.as_deref() == Some("{\"members\":[]}")
         };
         eventually("todo visible under milestone", todo_ok).await;
 
@@ -171,6 +181,10 @@ mod gated {
             plan_md: Some("plan".into()),
             output_md: None,
             agent: "plan".into(),
+            executor_kind: ProjectExecutorKind::Agent,
+            capability_id: None,
+            plan_id: None,
+            output_ref: None,
             session_id: Some(format!("sess-{uniq}")),
             status: ProjectTodoRunStatus::Running,
             started_at: ts + 5,
@@ -192,6 +206,10 @@ mod gated {
             plan_md: None,
             output_md: Some("out".into()),
             agent: "act".into(),
+            executor_kind: ProjectExecutorKind::Agent,
+            capability_id: None,
+            plan_id: None,
+            output_ref: None,
             session_id: None,
             status: ProjectTodoRunStatus::Running,
             started_at: ts + 6,
@@ -275,7 +293,10 @@ mod gated {
         .await;
 
         // Execute admission needs a cross-table transaction: MySQL supports
-        // it; StarRocks must reject before touching either table.
+        // it; StarRocks must reject before touching either table. The run
+        // carries the dag-executor dimension (artifact root + brain
+        // provenance) so the atomic claim also proves those columns
+        // round-trip.
         let atomic_run = ProjectTodoRunRecord {
             id: format!("atomic-{uniq}"),
             todo_id: todo.clone(),
@@ -284,6 +305,10 @@ mod gated {
             plan_md: Some("atomic plan".into()),
             output_md: None,
             agent: "act".into(),
+            executor_kind: ProjectExecutorKind::Dag,
+            capability_id: Some(format!("cap-{uniq}")),
+            plan_id: Some(format!("plan-{uniq}")),
+            output_ref: Some(format!("/workflow/{uniq}/step-1/")),
             session_id: None,
             status: ProjectTodoRunStatus::Running,
             started_at: ts + 10,
@@ -295,7 +320,14 @@ mod gated {
                 .claim_todo_running_with_run(&atomic_run, ts + 10)
                 .await
                 .unwrap());
-            assert!(p.get_todo_run(&atomic_run.id).await.unwrap().is_some());
+            let claimed = p.get_todo_run(&atomic_run.id).await.unwrap().unwrap();
+            assert_eq!(claimed.executor_kind, ProjectExecutorKind::Dag);
+            assert_eq!(claimed.capability_id, Some(format!("cap-{uniq}")));
+            assert_eq!(claimed.plan_id, Some(format!("plan-{uniq}")));
+            assert_eq!(
+                claimed.output_ref,
+                Some(format!("/workflow/{uniq}/step-1/"))
+            );
             assert_eq!(
                 p.get_todo(&todo).await.unwrap().unwrap().status,
                 ProjectTodoStatus::Running

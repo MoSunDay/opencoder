@@ -4,7 +4,7 @@
 
 ## 结构
 
-- `spec.rs` — `DagSpec`/`StepSpec` 声明与 `validate`（唯一入口校验：slug 合法性、重复边、环检测、缺依赖）；`StepKind::{Agent, Python}`（Python 携带 `sandbox: Option<SandboxMode>`，默认 InProcess）。默认值与 `serde` 反序列化宽容。
+- `spec.rs` — `DagSpec`/`StepSpec` 声明与 `validate`（唯一入口校验：slug 合法性、重复边、环检测、缺依赖）；`StepKind::{Agent, Wasm}`：Agent 携带 `prompt`/`agent`（默认 act）/`model`/`how_append`（≤`MAX_HOW_APPEND_BYTES`），Wasm 携带 `command`（`"<module.wasm> [args...]"` 空白切分）与 `sandbox: Option<SandboxMode>`（默认 InProcess）。默认值与 `serde` 反序列化宽容。`decode_spec`/`decode_spec_str`（字符串入口）是旧定义的迁移哨兵：python 步骤专用报错（"该定义使用已下线的 python 步骤…"），不静默迁移；worker create/workloads、control catalog、project dag_drive、web defs 读写全部经此统一报错（web 列表对坏行降级为带 error 的行，不再整页 500）。
 - `domain.rs` — `StepStates`/`StepOutputs` 运行态推进：`ready_steps`（依赖全 Done 且未在运行/终态）、`run_outcome`（cancelled > error > done 折叠）、`render_context`（上游 outputs 注入 step 上下文 JSON）。
 - `transitions.rs` — 状态机纯函数（Running→Done|Error|Cancelled，终态冻结）。
 - `artifacts.rs` — 节点本地工件目录契约：`/workflow/<run_id>/<step>/{output.json,output.txt,meta.json}`；`output_snapshot`（4KB 截断快照随 step_done 事件上行）、`meta_value`。

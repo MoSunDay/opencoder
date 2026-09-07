@@ -18,6 +18,11 @@ pub struct ToolContext {
     /// (`agents/<name>/tools/v{n}/…`). `None` = no injection (builtin
     /// agents and plain sessions never set it).
     pub tools_path: Option<String>,
+    /// Extra `KEY=VALUE` env pairs injected into every spawned tool
+    /// process (bash today). Workflow-orchestrated sessions use this to
+    /// expose step-scoped contract vars (e.g. `OPENCODER_HOW_APPEND`);
+    /// plain sessions keep it empty.
+    pub extra_env: Vec<(String, String)>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

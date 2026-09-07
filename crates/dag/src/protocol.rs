@@ -138,7 +138,7 @@ mod tests {
     #[test]
     fn claimed_run_carries_spec_snapshot() {
         let wire = r#"{"run_id":"r1","dag_id":"d1","created_at":5,
-            "spec":{"name":"etl","steps":[{"name":"a","kind":{"type":"python","code":"x"}}]}}"#;
+            "spec":{"name":"etl","steps":[{"name":"a","kind":{"type":"wasm","command":"x.wasm"}}]}}"#;
         let run: DagClaimedRun = serde_json::from_str(wire).unwrap();
         assert_eq!(run.spec.steps.len(), 1);
         assert_eq!(run.spec.steps[0].name, "a");

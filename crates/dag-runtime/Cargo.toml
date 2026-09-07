@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 opencoder-core.workspace = true
+opencoder-agents.workspace = true
 opencoder-dag.workspace = true
 opencoder-llm.workspace = true
 opencoder-session.workspace = true
@@ -21,11 +22,17 @@ serde_json.workspace = true
 chrono.workspace = true
 tracing.workspace = true
 ulid.workspace = true
-rustpython-vm = "0.5"
+wasmtime = { version = "48", default-features = false, features = ["cranelift", "runtime", "std", "component-model", "async", "wat"] }
+wasmtime-wasi = { version = "48", default-features = false, features = ["p1"] }
 libc = "0.2"
 
 [dev-dependencies]
 tempfile.workspace = true
+wat = "1.254"
 opencoder-llm.workspace = true
 axum = { version = "0.7", features = ["json"] }
 tokio = { workspace = true, features = ["test-util"] }
+
+[[example]]
+name = "wasmtime-cli"
+test = true

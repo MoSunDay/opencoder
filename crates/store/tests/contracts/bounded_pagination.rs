@@ -6,9 +6,10 @@ use opencoder_core::{
     Message,
 };
 use opencoder_store::{
-    fleet::FleetStore, EventKind, LibsqlStore, ProjectStore, ProjectTodoRecord, ProjectTodoRunKind,
-    ProjectTodoRunRecord, ProjectTodoRunStatus, ProjectTodoStatus, SessionEventRecord, SessionMeta,
-    Store, TodoEventRecord, TodoItemRecord, TodoWorkflowRecord,
+    fleet::FleetStore, EventKind, LibsqlStore, ProjectExecutorKind, ProjectStore,
+    ProjectTodoRecord, ProjectTodoRunKind, ProjectTodoRunRecord, ProjectTodoRunStatus,
+    ProjectTodoStatus, SessionEventRecord, SessionMeta, Store, TodoEventRecord, TodoItemRecord,
+    TodoWorkflowRecord,
 };
 
 fn index(id: &str, created_at: i64) -> ExecutionIndex {
@@ -300,6 +301,9 @@ async fn todo_items_and_project_runs_use_bounded_keyset_pages() {
             plan_md: Some("p".repeat(65_536)),
             status: ProjectTodoStatus::Draft,
             agent: "act".into(),
+            executor_kind: ProjectExecutorKind::Agent,
+            executor_ref: None,
+            executor_spec: None,
             active_session_id: None,
             created_at: 1,
             updated_at: 1,
@@ -326,6 +330,10 @@ async fn todo_items_and_project_runs_use_bounded_keyset_pages() {
                 plan_md: None,
                 output_md: (version == 25).then(|| "x".repeat(70_000)),
                 agent: "act".into(),
+                executor_kind: ProjectExecutorKind::Agent,
+                capability_id: None,
+                plan_id: None,
+                output_ref: None,
                 session_id: Some(format!("agent-run-{version}")),
                 status: ProjectTodoRunStatus::Done,
                 started_at: version,

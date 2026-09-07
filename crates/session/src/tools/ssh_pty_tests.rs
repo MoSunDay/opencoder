@@ -93,6 +93,7 @@ async fn send_without_session_returns_error() {
     // Clean up first so there's no leftover state for this session id.
     SSH_SESSIONS.lock().unwrap().remove("test-no-session");
     let ctx = ToolContext {
+        extra_env: Vec::new(),
         session_id: "test-no-session".to_string(),
         message_id: "test-msg".to_string(),
         agent: "act".to_string(),
@@ -113,6 +114,7 @@ async fn connect_rejects_injection_in_host() {
     // Ensure clean state
     SSH_SESSIONS.lock().unwrap().clear();
     let ctx = ToolContext {
+        extra_env: Vec::new(),
         session_id: "test-injection".to_string(),
         message_id: "test-msg".to_string(),
         agent: "act".to_string(),
@@ -136,6 +138,7 @@ async fn connect_rejects_injection_in_port() {
     use opencoder_core::ToolContext;
     SSH_SESSIONS.lock().unwrap().clear();
     let ctx = ToolContext {
+        extra_env: Vec::new(),
         session_id: "test-port-injection".to_string(),
         message_id: "test-msg".to_string(),
         agent: "act".to_string(),
@@ -159,6 +162,7 @@ async fn send_rejects_interactive_command() {
     use opencoder_core::ToolContext;
     SSH_SESSIONS.lock().unwrap().clear();
     let ctx = ToolContext {
+        extra_env: Vec::new(),
         session_id: "test-interactive".to_string(),
         message_id: "test-msg".to_string(),
         agent: "act".to_string(),
@@ -180,6 +184,7 @@ async fn status_without_session_reports_none() {
     use opencoder_core::ToolContext;
     SSH_SESSIONS.lock().unwrap().clear();
     let ctx = ToolContext {
+        extra_env: Vec::new(),
         session_id: "test-status-none".to_string(),
         message_id: "test-msg".to_string(),
         agent: "act".to_string(),
@@ -198,6 +203,7 @@ async fn status_without_session_reports_none() {
 async fn unknown_action_returns_error() {
     use opencoder_core::ToolContext;
     let ctx = ToolContext {
+        extra_env: Vec::new(),
         session_id: "test-unknown".to_string(),
         message_id: "test-msg".to_string(),
         agent: "act".to_string(),

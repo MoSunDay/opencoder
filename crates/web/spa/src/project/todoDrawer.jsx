@@ -9,7 +9,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiDel, apiGet, apiPatch, apiPost } from '../api.js';
 import { setState } from '../store.js';
 import { absTime } from '../format.js';
-import { RunStatusTag, TodoStatusTag, runKindLabel } from './labels.jsx';
+import { RunStatusTag, TodoStatusTag, ExecutorTag, runKindLabel } from './labels.jsx';
 import { Markdown } from './markdown.jsx';
 import { flattenTodos } from './todosTab.jsx';
 import { ExecutionDetail } from '../fleet/detail.jsx';
@@ -55,6 +55,21 @@ function RunItem({ run, executionId, onNotice, refreshRuns }) {
       </Paragraph>
       {snaps.length ? <Collapse size="small" items={snaps} /> : <Text type="secondary">无快照输出</Text>}
       <Space size={4} wrap style={{ marginTop: 8 }}>
+        <ExecutorTag kind={run.executor_kind} />
+        {run.capability_id ? (
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            brain: {run.capability_id}{run.plan_id ? ` · ${String(run.plan_id).slice(0, 12)}…` : ''}
+          </Text>
+        ) : null}
+        {run.output_ref ? (
+          <Text
+            type="secondary"
+            title={run.output_ref}
+            style={{ fontFamily: 'monospace', fontSize: 12 }}
+          >
+            {String(run.output_ref).length > 24 ? String(run.output_ref).slice(0, 24) + '…' : run.output_ref}
+          </Text>
+        ) : null}
         <Text type="secondary">会话</Text>
         {run.session_id ? (
           <>

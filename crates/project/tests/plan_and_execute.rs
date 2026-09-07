@@ -11,10 +11,10 @@ use std::{
 use opencoder_llm::{ChatStream, CompletedToolCall, LlmEvent, MockChatClient};
 use opencoder_project::ProjectService;
 use opencoder_store::{
-    LibsqlStore, ProjectGoalPatch, ProjectGoalRecord, ProjectGoalStatus, ProjectMilestonePatch,
-    ProjectMilestoneRecord, ProjectMilestoneStatus, ProjectStore, ProjectTodoPatch,
-    ProjectTodoRecord, ProjectTodoRunKind, ProjectTodoRunPatch, ProjectTodoRunRecord,
-    ProjectTodoRunStatus, ProjectTodoStatus, Store, TASK_TYPE_PROJECT,
+    LibsqlStore, ProjectExecutorKind, ProjectGoalPatch, ProjectGoalRecord, ProjectGoalStatus,
+    ProjectMilestonePatch, ProjectMilestoneRecord, ProjectMilestoneStatus, ProjectStore,
+    ProjectTodoPatch, ProjectTodoRecord, ProjectTodoRunKind, ProjectTodoRunPatch,
+    ProjectTodoRunRecord, ProjectTodoRunStatus, ProjectTodoStatus, Store, TASK_TYPE_PROJECT,
 };
 
 fn done(text: &str) -> Vec<LlmEvent> {
@@ -61,6 +61,7 @@ async fn harness(scripts: Vec<Vec<LlmEvent>>) -> Harness {
             store.clone(),
             dir.path().to_path_buf(),
             Some(client),
+            None,
         )
         .await
         .unwrap();
@@ -121,6 +122,9 @@ async fn seed_todo(
             plan_md: None,
             status: ProjectTodoStatus::Draft,
             agent: "act".into(),
+            executor_kind: ProjectExecutorKind::Agent,
+            executor_ref: None,
+            executor_spec: None,
             active_session_id: None,
             created_at: now,
             updated_at: now,
@@ -378,6 +382,10 @@ async fn execute_proceeds_after_stale_plan_run_is_converged() {
             plan_md: None,
             output_md: None,
             agent: "plan".into(),
+            executor_kind: ProjectExecutorKind::Agent,
+            capability_id: None,
+            plan_id: None,
+            output_ref: None,
             session_id: None,
             status: ProjectTodoRunStatus::Running,
             started_at: stale_started,
@@ -544,6 +552,7 @@ async fn atomic_claim_failure_leaves_todo_and_runs_untouched() {
                 inner: store.clone(),
             }),
             dir.path().to_path_buf(),
+            None,
             None,
         )
         .await

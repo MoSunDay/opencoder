@@ -25,6 +25,7 @@ use crate::project_types::{
 pub mod ddl;
 mod project_crud;
 mod project_crud_runs;
+mod project_crud_todo;
 
 /// A pooled MySQL/StarRocks project store. The pool is cheap to clone and
 /// the struct is stateless besides the `starrocks` behavior flag.
@@ -74,6 +75,7 @@ pub async fn open(storage: &StorageConfig) -> Result<Arc<dyn ProjectStore>> {
         .await
         .with_context(|| format!("connect {backend}"))?;
     ddl::apply(&pool, starrocks).await?;
+    ddl::upgrade(&pool, starrocks).await?;
     Ok(Arc::new(SqlProjectStore { pool, starrocks }))
 }
 
@@ -119,13 +121,13 @@ impl ProjectStore for SqlProjectStore {
     }
 
     async fn create_todo(&self, rec: &ProjectTodoRecord) -> Result<()> {
-        project_crud_runs::create_todo(&self.pool, self.starrocks, rec).await
+        project_crud_todo::create_todo(&self.pool, self.starrocks, rec).await
     }
     async fn patch_todo(&self, id: &str, patch: &ProjectTodoPatch, now_ms: i64) -> Result<bool> {
-        project_crud_runs::patch_todo(&self.pool, self.starrocks, id, patch, now_ms).await
+        project_crud_todo::patch_todo(&self.pool, self.starrocks, id, patch, now_ms).await
     }
     async fn claim_todo_running(&self, id: &str, now_ms: i64) -> Result<bool> {
-        project_crud_runs::claim_todo_running(&self.pool, self.starrocks, id, now_ms).await
+        project_crud_todo::claim_todo_running(&self.pool, self.starrocks, id, now_ms).await
     }
     async fn claim_todo_running_with_run(
         &self,
@@ -142,20 +144,20 @@ impl ProjectStore for SqlProjectStore {
         patch: &ProjectTodoPatch,
         now_ms: i64,
     ) -> Result<bool> {
-        project_crud_runs::patch_todo_when(&self.pool, self.starrocks, id, when, patch, now_ms)
+        project_crud_todo::patch_todo_when(&self.pool, self.starrocks, id, when, patch, now_ms)
             .await
     }
     async fn delete_todo(&self, id: &str) -> Result<bool> {
-        project_crud_runs::delete_todo(&self.pool, self.starrocks, id).await
+        project_crud_todo::delete_todo(&self.pool, self.starrocks, id).await
     }
     async fn get_todo(&self, id: &str) -> Result<Option<ProjectTodoRecord>> {
-        project_crud_runs::get_todo(&self.pool, self.starrocks, id).await
+        project_crud_todo::get_todo(&self.pool, self.starrocks, id).await
     }
     async fn get_todo_summary(&self, id: &str) -> Result<Option<crate::ProjectTodoSummary>> {
-        project_crud_runs::get_todo_summary(&self.pool, self.starrocks, id).await
+        project_crud_todo::get_todo_summary(&self.pool, self.starrocks, id).await
     }
     async fn list_todos(&self, milestone_id: Option<&str>) -> Result<Vec<ProjectTodoRecord>> {
-        project_crud_runs::list_todos(&self.pool, self.starrocks, milestone_id).await
+        project_crud_todo::list_todos(&self.pool, self.starrocks, milestone_id).await
     }
 
     async fn create_todo_run(&self, rec: &ProjectTodoRunRecord) -> Result<()> {

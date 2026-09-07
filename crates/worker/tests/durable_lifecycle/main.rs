@@ -348,9 +348,10 @@ async fn completed_execution_wins_a_late_cancel_without_rewriting_results() {
     let dir = tempfile::tempdir().unwrap();
     let node = worker(dir.path(), support::mock()).await;
     let id = "dag-finish-wins";
+    support::stage_stdout_wasm(&dir.path().join("node"), "tool.wasm", "done");
     let spec = json!({
         "name": "finish-wins",
-        "steps": [{"name":"done","kind":{"type":"python","code":"print('done')"}}]
+        "steps": [{"name":"done","kind":{"type":"wasm","command":"tool.wasm"}}]
     });
     assert_eq!(
         node.handle(NodeOperation::Create {

@@ -58,6 +58,10 @@ async fn migration_copies_and_verifies_typed_tree_while_retaining_legacy() {
     std::fs::write(root.join("resources/dag-old/prompts/pinned"), "resource").unwrap();
     std::fs::create_dir_all(root.join("workflow/dag-old/first")).unwrap();
     std::fs::create_dir_all(root.join("workflow/rootfs/usr")).unwrap();
+    // The node's wasm module library is workflow-root scaffolding too: it
+    // must not trip the "no execution record" guard during migration.
+    std::fs::create_dir_all(root.join("workflow/_modules")).unwrap();
+    std::fs::write(root.join("workflow/_modules/tool.wasm"), b"wasm").unwrap();
     std::fs::write(root.join("workflow/dag-old/input.json"), "{}").unwrap();
     std::fs::write(root.join("workflow/dag-old/first/output.txt"), "artifact").unwrap();
     std::fs::write(root.join("workflow/rootfs/usr/python"), "runtime").unwrap();
@@ -78,6 +82,7 @@ async fn migration_copies_and_verifies_typed_tree_while_retaining_legacy() {
     assert!(root.join("executions/dag-old.json").is_file());
     assert!(root.join("workflow/dag-old/first/output.txt").is_file());
     assert!(root.join("workflow/rootfs/usr/python").is_file());
+    assert!(root.join("workflow/_modules/tool.wasm").is_file());
     assert!(!root.join("dag/rootfs").exists());
 
     let mut evolved: Value =

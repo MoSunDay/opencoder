@@ -262,6 +262,7 @@ mod tests {
 
     fn ctx(id: &str) -> ToolContext {
         ToolContext {
+            extra_env: Vec::new(),
             session_id: "s".into(),
             message_id: id.into(),
             agent: "act".into(),

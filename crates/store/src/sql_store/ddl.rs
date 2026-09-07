@@ -4,11 +4,12 @@
 //! `MEDIUMTEXT` (`STRING` on StarRocks, which has no MEDIUMTEXT), status/kind
 //! `VARCHAR(32) NOT NULL`, agent `VARCHAR(64) NOT NULL`, session ids
 //! `VARCHAR(64) NULL`, numeric columns `BIGINT NOT NULL` (`finished_at`
-//! NULL). No FK constraints, same policy as libsql — the cascades are
+//! NULL), executor names/refs `VARCHAR(255) NULL`, inline executor specs
+//! `{text}`. No FK constraints, same policy as libsql — the cascades are
 //! explicit code so every backend behaves identically.
 
 use anyhow::{Context, Result};
-use sqlx::MySqlPool;
+use sqlx::{MySqlPool, Row};
 
 const GOAL_COLUMNS: &str = "\
   id VARCHAR(64) NOT NULL,
@@ -39,7 +40,10 @@ const TODO_COLUMNS: &str = "\
   agent VARCHAR(64) NOT NULL,
   active_session_id VARCHAR(64) NULL,
   created_at BIGINT NOT NULL,
-  updated_at BIGINT NOT NULL";
+  updated_at BIGINT NOT NULL,
+  executor_kind VARCHAR(32) NOT NULL DEFAULT 'agent',
+  executor_ref VARCHAR(255) NULL,
+  executor_spec {text} NULL";
 
 const RUN_COLUMNS: &str = "\
   id VARCHAR(64) NOT NULL,
@@ -53,7 +57,11 @@ const RUN_COLUMNS: &str = "\
   status VARCHAR(32) NOT NULL,
   started_at BIGINT NOT NULL,
   finished_at BIGINT NULL,
-  created_at BIGINT NOT NULL";
+  created_at BIGINT NOT NULL,
+  executor_kind VARCHAR(32) NOT NULL DEFAULT 'agent',
+  capability_id VARCHAR(64) NULL,
+  plan_id VARCHAR(64) NULL,
+  output_ref VARCHAR(255) NULL";
 
 /// `(table, columns, secondary-index clause)`; the index clause is MySQL-only.
 const TABLES: &[(&str, &str, &str)] = &[
@@ -72,6 +80,31 @@ const TABLES: &[(&str, &str, &str)] = &[
         "project_todo_runs",
         RUN_COLUMNS,
         "KEY idx_project_todo_runs_todo (todo_id, version)",
+    ),
+];
+
+/// Columns added after the initial table shape (the executor dimension):
+/// applied only when `information_schema.columns` reports them missing,
+/// so existing deployments upgrade in place and fresh ones no-op.
+/// Definitions MUST mirror the CREATE TABLE column consts above — the
+/// drift test below enforces the names line up.
+const UPGRADE_COLUMNS: &[(&str, &[&str])] = &[
+    (
+        "project_todos",
+        &[
+            "executor_kind VARCHAR(32) NOT NULL DEFAULT 'agent'",
+            "executor_ref VARCHAR(255) NULL",
+            "executor_spec {text} NULL",
+        ],
+    ),
+    (
+        "project_todo_runs",
+        &[
+            "executor_kind VARCHAR(32) NOT NULL DEFAULT 'agent'",
+            "capability_id VARCHAR(64) NULL",
+            "plan_id VARCHAR(64) NULL",
+            "output_ref VARCHAR(255) NULL",
+        ],
     ),
 ];
 
@@ -130,6 +163,77 @@ pub async fn apply(pool: &MySqlPool, starrocks: bool) -> Result<()> {
     Ok(())
 }
 
+/// First whitespace-separated token of a column definition — the column's
+/// name, matched against `information_schema.columns` entries.
+fn column_name(def: &str) -> &str {
+    def.split_whitespace().next().unwrap_or("")
+}
+
+/// The `ALTER TABLE ... ADD COLUMN` statement for one missing column, with
+/// `{text}` resolved per backend exactly like `create_table` does.
+fn add_column_sql(table: &str, col_def: &str, starrocks: bool) -> String {
+    format!(
+        "ALTER TABLE {table} ADD COLUMN {}",
+        col_def.replace("{text}", text_type(starrocks))
+    )
+}
+
+/// Pure decision core of [`upgrade`]: the column defs whose names are NOT in
+/// the existing column set (names compared case-insensitively — MySQL and
+/// StarRocks report `information_schema.columns` names in different cases).
+/// An empty result is the idempotent no-op that fresh deployments — created
+/// by `apply` with the columns already in place — always hit.
+fn missing_columns<'a>(cols: &[&'a str], existing: &[String]) -> Vec<&'a str> {
+    cols.iter()
+        .copied()
+        .filter(|col| {
+            let name = column_name(col).to_lowercase();
+            !existing.iter().any(|c| c.to_lowercase() == name)
+        })
+        .collect()
+}
+
+/// In-place upgrade for deployments whose tables predate the executor
+/// columns: `apply` only ever runs `CREATE TABLE IF NOT EXISTS`, which is a
+/// no-op on an existing table, so writes would fail with `Unknown column`.
+/// For each [`UPGRADE_COLUMNS`] entry, ask `information_schema.columns`
+/// (exposed by both MySQL and StarRocks) what the table already has and
+/// `ADD COLUMN` only the missing definitions.
+pub async fn upgrade(pool: &MySqlPool, starrocks: bool) -> Result<()> {
+    for (table, cols) in UPGRADE_COLUMNS {
+        // The column listing rides the shared read helper: on StarRocks
+        // every statement (reads included) must take the text protocol —
+        // cached prepared SELECTs were observed returning stale snapshots,
+        // which here could re-ALTER a column added moments ago.
+        let rows = super::exec_read_all(
+            pool,
+            starrocks,
+            "SELECT column_name FROM information_schema.columns \
+             WHERE table_schema = DATABASE() AND table_name = ?",
+            &[super::Arg::Text((*table).to_string())],
+        )
+        .await
+        .with_context(|| format!("upgrade table {table}: list columns"))?;
+        let existing: Vec<String> = rows
+            .iter()
+            .map(|r| r.try_get::<String, _>(0))
+            .collect::<std::result::Result<_, _>>()
+            .with_context(|| format!("upgrade table {table}: read column_name"))?;
+        for col in missing_columns(cols, &existing) {
+            let sql = add_column_sql(table, col, starrocks);
+            // Same prepared-vs-text split as `apply`: MySQL runs DDL through
+            // the prepared path, StarRocks DDL must ride the text protocol.
+            let res = if starrocks {
+                sqlx::raw_sql(&sql).execute(pool).await
+            } else {
+                sqlx::query(&sql).execute(pool).await
+            };
+            res.with_context(|| format!("upgrade table {table}: add {col}"))?;
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -157,5 +261,99 @@ mod tests {
             assert!(!sql.contains("KEY idx_"), "no secondary indexes on {name}");
             assert!(!sql.contains("ENGINE="), "{name}");
         }
+    }
+
+    #[test]
+    fn upgrade_alters_carry_backend_text_type_and_full_definitions() {
+        for (table, cols) in UPGRADE_COLUMNS {
+            for col in *cols {
+                let mysql = add_column_sql(table, col, false);
+                let starrocks = add_column_sql(table, col, true);
+                assert!(!mysql.contains("{text}") && !starrocks.contains("{text}"));
+                // The whole definition travels verbatim with only `{text}`
+                // resolved per backend — a NOT NULL DEFAULT column keeps its
+                // full clause, a `{text}` column switches type.
+                assert!(
+                    mysql.ends_with(&format!(
+                        "ADD COLUMN {}",
+                        col.replace("{text}", "MEDIUMTEXT")
+                    )),
+                    "{mysql}"
+                );
+                assert!(
+                    starrocks.ends_with(&format!("ADD COLUMN {}", col.replace("{text}", "STRING"))),
+                    "{starrocks}"
+                );
+            }
+        }
+        // The executor-spec column is the one that actually switches type.
+        let spec = "executor_spec {text} NULL";
+        assert!(add_column_sql("project_todos", spec, false)
+            .contains("ADD COLUMN executor_spec MEDIUMTEXT NULL"));
+        assert!(add_column_sql("project_todos", spec, true)
+            .contains("ADD COLUMN executor_spec STRING NULL"));
+        // NOT NULL DEFAULT columns keep the whole clause.
+        let kind = "executor_kind VARCHAR(32) NOT NULL DEFAULT 'agent'";
+        assert!(add_column_sql("project_todo_runs", kind, false)
+            .contains("ADD COLUMN executor_kind VARCHAR(32) NOT NULL DEFAULT 'agent'"));
+    }
+
+    #[test]
+    fn upgrade_columns_do_not_drift_from_create_table_consts() {
+        for (table, cols) in UPGRADE_COLUMNS {
+            let (_, create_cols, _) = TABLES
+                .iter()
+                .find(|(name, _, _)| name == table)
+                .unwrap_or_else(|| panic!("upgrade table {table} missing from TABLES"));
+            // Exact-token match on the CREATE column list: every upgrade
+            // column must already exist there by name, so the two lists can
+            // never diverge (fresh CREATE and old-table ALTER agree).
+            let create_names: Vec<&str> = create_cols
+                .split(|c: char| c == ',' || c.is_whitespace())
+                .filter(|t| !t.is_empty())
+                .collect();
+            for col in *cols {
+                let name = column_name(col);
+                assert!(
+                    create_names.contains(&name),
+                    "{table}: upgrade column {name} absent from CREATE TABLE const"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn column_name_extracts_first_whitespace_token() {
+        assert_eq!(
+            column_name("executor_kind VARCHAR(32) NOT NULL DEFAULT 'agent'"),
+            "executor_kind"
+        );
+        assert_eq!(column_name("executor_spec {text} NULL"), "executor_spec");
+        assert_eq!(column_name(""), "");
+    }
+
+    #[test]
+    fn missing_columns_drives_idempotent_upgrade_shape() {
+        let (todos, todo_cols) = &UPGRADE_COLUMNS[0];
+        assert_eq!(*todos, "project_todos");
+        // Everything already present (fresh deployment after `apply`):
+        // nothing to ALTER — the idempotent no-op.
+        let existing: Vec<String> = todo_cols
+            .iter()
+            .map(|c| column_name(c).to_lowercase())
+            .collect();
+        assert!(missing_columns(todo_cols, &existing).is_empty());
+        // Pre-executor table: only the executor columns are missing, in order.
+        let pre_executor: Vec<String> = vec![
+            "id".into(),
+            "milestone_id".into(),
+            "title".into(),
+            "EXECUTOR_KIND".into(), // case-insensitive match, as StarRocks
+            "executor_ref".into(),  // reports mixed-case names
+        ];
+        assert_eq!(
+            missing_columns(todo_cols, &pre_executor),
+            vec!["executor_spec {text} NULL"]
+        );
     }
 }

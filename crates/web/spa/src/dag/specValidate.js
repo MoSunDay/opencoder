@@ -6,7 +6,11 @@
 
 import { dependsOn, specSteps } from '../dagProjection.js';
 
-const SLUG_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
+export const SLUG_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
+
+/// Upper bound for agent how_append payloads, in UTF-8 bytes (mirror of
+/// crates/dag/src/spec.rs MAX_HOW_APPEND_BYTES).
+export const MAX_HOW_APPEND_BYTES = 8 * 1024;
 
 /// parseSpecDraft(text) → {spec} on success or {error} with a readable
 /// Chinese message (JSON.parse's own message is English/noisy).
@@ -72,15 +76,24 @@ export function validateSpec(spec) {
       if (s.kind.model !== undefined && typeof s.kind.model !== 'string') {
         problems.push(where + '.kind.model 只能是字符串');
       }
-    } else if (s.kind.type === 'python') {
-      if (typeof s.kind.code !== 'string' || !s.kind.code.trim()) {
-        problems.push(where + ' (python) 需要 non-empty kind.code');
+      if (s.kind.how_append !== undefined) {
+        if (typeof s.kind.how_append !== 'string') {
+          problems.push(where + '.kind.how_append 只能是字符串');
+        } else if (new Blob([s.kind.how_append]).size > MAX_HOW_APPEND_BYTES) {
+          problems.push(
+            where + ' (agent) kind.how_append 超过 ' + MAX_HOW_APPEND_BYTES + ' 字节上限',
+          );
+        }
+      }
+    } else if (s.kind.type === 'wasm') {
+      if (typeof s.kind.command !== 'string' || !s.kind.command.trim()) {
+        problems.push(where + ' (wasm) 需要 non-empty kind.command');
       }
       if (s.kind.sandbox !== undefined && !['in_process', 'runc'].includes(s.kind.sandbox)) {
         problems.push(where + '.kind.sandbox 只能是 in_process | runc');
       }
     } else {
-      problems.push(where + '.kind.type 必须是 agent | python');
+      problems.push(where + '.kind.type 必须是 agent | wasm');
     }
     if (s.timeout_secs !== undefined && !(Number.isInteger(s.timeout_secs) && s.timeout_secs > 0)) {
       problems.push(where + '.timeout_secs 必须是正整数');

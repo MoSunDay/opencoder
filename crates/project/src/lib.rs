@@ -12,7 +12,7 @@
 //! 直接驱动的运行。
 
 pub mod context;
-mod execute;
+pub mod executor;
 pub mod plan_gen;
 mod recover;
 pub mod service;

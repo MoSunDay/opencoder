@@ -5,9 +5,9 @@ Commit: (working-tree, 基于 c1a1b2e78e1ccd4a3cc2ac6dc408a76d30bf46e6)
 ## 平台与编排
 
 - [Agent 调度平台](agent-platform/index.md)：独立 Server/Node、节点注册、CPU 调度、四字段索引、按 ID 读取节点明细、团队职责、系统维护团队、大脑能力绑定与直接派发。
-- [DAG 工作流](../agents/dag-runtime/index.md)：agent/Python 步骤、依赖执行、本地产物、检查点恢复及 runc 支持。
+- [DAG 工作流](../agents/dag-runtime/index.md)：agent/wasm 步骤、依赖执行、本地产物、检查点恢复、模块库 `_modules` 及 runc 支持。
 - [持久化 TODO 工作流](todos/index.md)：父会话调度验收、独立 TODO 执行、依赖/并发、恢复、回退和工具验收合同。
-- [项目管理](../agents/project/index.md)：goal/milestone/todo 结构、草稿、Plan → Act、执行记录和取消。
+- [项目管理](../agents/project/index.md)：goal/milestone/todo 结构、草稿、Plan → Act、多执行器执行（agent/team/DAG/大脑路由）、执行记录和取消。
 - [版本化 Agent 与 NFS 资源](../agents/agents/index.md)：引用卡、prompt/skills/tools/memory 共享池、版本发布/回滚和只读导出。
 - [大脑能力库](../agents/brain/index.md)：能力录入、嵌入、语义检索及决策树规划。
 

@@ -7,7 +7,7 @@ mod support;
 
 use axum::http::StatusCode;
 use serde_json::{json, Value};
-use support::project_app::{call, harness, todo_row};
+use support::project_app::{call, done, harness, todo_row};
 
 #[tokio::test]
 async fn goal_milestone_todo_crud_contract() {
@@ -153,4 +153,214 @@ async fn goal_milestone_todo_crud_contract() {
     assert_eq!(todos["todos"].as_array().unwrap().len(), 0);
     let (_, goals) = call(&h.app, "GET", "/api/project/goals", None).await;
     assert_eq!(goals["goals"].as_array().unwrap().len(), 0);
+}
+
+/// Executor-dimension write contract (P4): the create/patch bodies carry
+/// `executor_kind/executor_ref/executor_spec`, bad kind strings and bad
+/// inline specs 400 at the door, double-option null clears, and run rows
+/// expose the RESOLVED `executor_kind` (plan runs stay agent).
+#[tokio::test]
+async fn todo_executor_fields_create_patch_and_run_shape() {
+    let h = harness().await;
+
+    // team todo with ref + valid inline spec → round-trips all three.
+    let team_spec = serde_json::json!({
+        "name": "crew",
+        "captain": { "node_id": "act", "name": "队长" },
+        "members": [{ "node_id": "explore", "name": "侦察" }]
+    })
+    .to_string();
+    let (status, todo) = call(
+        &h.app,
+        "POST",
+        "/api/project/todos",
+        Some(json!({
+            "title": "团队活",
+            "draft": "多人协作",
+            "executor_kind": "team",
+            "executor_ref": "  crew-x  ",
+            "executor_spec": team_spec,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{todo}");
+    let tid = todo["id"].as_str().unwrap().to_string();
+    assert_eq!(todo["executor_kind"], "team");
+    assert_eq!(todo["executor_ref"], "crew-x", "ref is trimmed");
+    assert!(todo["executor_spec"]
+        .as_str()
+        .unwrap()
+        .contains("\"captain\""));
+    let (_, list) = call(&h.app, "GET", "/api/project/todos", None).await;
+    let row = todo_row(&list, &tid);
+    assert_eq!(row["executor_kind"], "team");
+    assert_eq!(row["executor_ref"], "crew-x");
+
+    // Unknown kind string → 400 naming it.
+    let (status, v) = call(
+        &h.app,
+        "POST",
+        "/api/project/todos",
+        Some(json!({ "title": "x", "draft": "y", "executor_kind": "nope" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{v}");
+    assert!(v["error"]
+        .as_str()
+        .unwrap()
+        .contains("unknown executor_kind: nope"));
+
+    // dag + invalid DagSpec JSON → 400 mentioning the spec problem.
+    let (status, v) = call(
+        &h.app,
+        "POST",
+        "/api/project/todos",
+        Some(json!({
+            "title": "x", "draft": "y", "executor_kind": "dag",
+            "executor_spec": "{\"name\":\"d\",\"steps\":[{\"name\":\"s\",\"kind\":{\"type\":\"agent\"}}]}"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{v}");
+    assert!(v["error"].as_str().unwrap().contains("executor_spec"));
+
+    // agent + spec → 400 (agent takes no spec).
+    let (status, v) = call(
+        &h.app,
+        "POST",
+        "/api/project/todos",
+        Some(json!({ "title": "x", "draft": "y", "executor_spec": "{}" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{v}");
+    assert!(v["error"]
+        .as_str()
+        .unwrap()
+        .contains("agent executor takes no spec"));
+
+    // PATCH: null-clear executor_ref (double option) + swap kind; the spec
+    // survives the swap only when it validates for the new kind — swapping
+    // to dag with a team spec must 400, so clear the spec in the same patch.
+    let (status, v) = call(
+        &h.app,
+        "PATCH",
+        &format!("/api/project/todos/{tid}"),
+        Some(json!({ "executor_ref": null, "executor_spec": null })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    let (status, v) = call(
+        &h.app,
+        "PATCH",
+        &format!("/api/project/todos/{tid}"),
+        Some(json!({ "executor_kind": "dag" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    let (_, list) = call(&h.app, "GET", "/api/project/todos", None).await;
+    let row = todo_row(&list, &tid);
+    assert_eq!(row["executor_kind"], "dag");
+    assert_eq!(row["executor_ref"], Value::Null, "null cleared the ref");
+    assert_eq!(row["executor_spec"], Value::Null, "null cleared the spec");
+
+    // Spec-only patch against the CURRENT kind: dag + a broken spec 400s
+    // even without executor_kind in the body.
+    let (status, v) = call(
+        &h.app,
+        "PATCH",
+        &format!("/api/project/todos/{tid}"),
+        Some(json!({ "executor_spec": "not json" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{v}");
+    assert!(v["error"].as_str().unwrap().contains("executor_spec"));
+
+    // Run rows carry the resolved executor_kind — a plan run is agent even
+    // on a dag todo (planning is executor-agnostic).
+    h.mock.queue_script(done("# 计划\n1. x"));
+    let (status, v) = call(
+        &h.app,
+        "POST",
+        &format!("/api/project/todos/{tid}/plan"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{v}");
+    let planned = support::project_app::wait_until(
+        &h.app,
+        &format!("/api/project/todos/{tid}/runs"),
+        "run lands with executor_kind",
+        |b| {
+            b["runs"].as_array().is_some_and(|runs| {
+                runs.iter()
+                    .any(|r| r["executor_kind"] == "agent" && r["kind"] == "plan")
+            })
+        },
+    )
+    .await;
+    let run = planned["runs"][0].clone();
+    assert_eq!(run["executor_kind"], "agent");
+    assert_eq!(run["kind"], "plan");
+}
+
+#[tokio::test]
+async fn patch_kind_only_revalidates_stored_spec() {
+    let h = harness().await;
+
+    // team todo with a valid team spec on disk.
+    let team_spec = serde_json::json!({
+        "name": "crew",
+        "captain": { "node_id": "act", "name": "队长" },
+        "members": [{ "node_id": "explore", "name": "侦察" }]
+    })
+    .to_string();
+    let (status, todo) = call(
+        &h.app,
+        "POST",
+        "/api/project/todos",
+        Some(json!({
+            "title": "换型",
+            "draft": "存档 spec 复检",
+            "executor_kind": "team",
+            "executor_spec": team_spec,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{todo}");
+    let tid = todo["id"].as_str().unwrap().to_string();
+
+    // kind-only PATCH (spec NOT cleared): the stored team spec must be
+    // revalidated against the new dag kind → 400 naming executor_spec.
+    let (status, v) = call(
+        &h.app,
+        "PATCH",
+        &format!("/api/project/todos/{tid}"),
+        Some(json!({ "executor_kind": "dag" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{v}");
+    assert!(v["error"].as_str().unwrap().contains("executor_spec"));
+
+    // The rejected patch applied nothing: the todo keeps team + its spec.
+    let (_, list) = call(&h.app, "GET", "/api/project/todos", None).await;
+    let row = todo_row(&list, &tid);
+    assert_eq!(row["executor_kind"], "team");
+    assert!(row["executor_spec"]
+        .as_str()
+        .unwrap()
+        .contains("\"captain\""));
+
+    // Happy variant: clear the spec in the same patch → 200.
+    let (status, v) = call(
+        &h.app,
+        "PATCH",
+        &format!("/api/project/todos/{tid}"),
+        Some(json!({ "executor_kind": "dag", "executor_spec": null })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    let (_, list) = call(&h.app, "GET", "/api/project/todos", None).await;
+    let row = todo_row(&list, &tid);
+    assert_eq!(row["executor_kind"], "dag");
+    assert_eq!(row["executor_spec"], Value::Null, "null cleared the spec");
 }

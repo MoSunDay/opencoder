@@ -24,12 +24,12 @@ Commit: (working-tree, 基于 c1a1b2e78e1ccd4a3cc2ac6dc408a76d30bf46e6)
 - `run_tx`（`src/libsql_store/tx.rs`）：显式 BEGIN/COMMIT/ROLLBACK，避免 async 取消时 `libsql::Transaction::Drop` panic。所有写事务必须 `BEGIN IMMEDIATE`（`inputs.rs` 全量已是）：deferred BEGIN 的 SELECT→INSERT 写锁升级遇第二连接提交会得到 busy_timeout 不重试的 SQLITE_BUSY_SNAPSHOT；IMMEDIATE 使跨进程竞争化为等待并保住 `admitted_seq` 读改写原子性（回归测试 `tests/inputs_cross_instance_serialized.rs` 双实例同库压测）。
 - Session 类型（`src/types.rs`）：`SessionMeta`、`SessionPatch`、Input/Event/Subagent records；`task_type` 区分 parent、subagent、todo_workflow 和 todo。
 - TODO 类型（`src/todo_types.rs`）：`TodoWorkflowRecord`、`TodoItemRecord`、`TodoEventRecord` 和列表摘要。
-- 项目面类型与接缝（`src/project_types.rs` / `src/project.rs` / `src/project_factory.rs`）：goal→milestone→todo 三级 + `project_todo_runs` 运行留痕；`ProjectStore` trait（独立于 `Store`）+ `open_project_store(config)` 工厂（libsql 默认 / `mysql` / `starrocks` feature 二选一）——opencoder-project 运行时持有 `Arc<dyn ProjectStore>`，会话/消息仍走 `Arc<dyn Store>`。execute 生产路径只用复合 `claim_todo_running_with_run`，不会把条件 claim 与 run INSERT 拆成两个提交。
+- 项目面类型与接缝（`src/project_types.rs` / `src/project.rs` / `src/project_factory.rs`）：goal→milestone→todo 三级 + `project_todo_runs` 运行留痕；`ProjectStore` trait（独立于 `Store`）+ `open_project_store(config)` 工厂（libsql 默认 / `mysql` / `starrocks` feature 二选一）——opencoder-project 运行时持有 `Arc<dyn ProjectStore>`，会话/消息仍走 `Arc<dyn Store>`。execute 生产路径只用复合 `claim_todo_running_with_run`，不会把条件 claim 与 run INSERT 拆成两个提交。另有执行器 spec 纯类型（`src/project_executor_spec.rs`：`TeamSpec`/`BrainRoutes`/`validate_spec`，供 control API 校验共享、不链接 opencoder-project）。
 - 组队台账类型（`src/team_types.rs`，v17）：`TeamTopicRunRecord`——opencoder-team 话题 × node 的持久配对行（status `executing|finished`，`created_at` 首插冻结），运行时在 Store 之上，Store 只持久化（实现见 `libsql_store/team_runs.rs`）。
 
 ## Schema 与一致性
 
-schema 随迭代推进（最新以 `src/libsql_store/schema.rs::SCHEMA_VERSION` 为准；brain 三表与 project 四表于 v15 落地，team 台账表于 v17 落地，brain 决策树计划表于 v18 落地）：
+schema 随迭代推进（最新以 `src/libsql_store/schema.rs::SCHEMA_VERSION` 为准；brain 三表与 project 四表于 v15 落地，team 台账表于 v17 落地，brain 决策树计划表于 v18 落地，项目 todo/run 执行器维度列于 v20 落地）：
 
 - Session 面：`sessions`、`messages`、`session_inputs`、`session_events`、`subagent_tasks` 及 ts registry 相关结构。
 - TODO 面：`todo_workflows` 保存 spec/state/generation；`todo_items` 保存每项 projection；`todo_events` 保存有序不可变 transition。
@@ -47,7 +47,7 @@ schema 随迭代推进（最新以 `src/libsql_store/schema.rs::SCHEMA_VERSION` 
 
 ## sqlx 后端（feature-gate：`mysql` / `starrocks`）
 
-`src/sql_store/`（默认零编译，两个 feature 互斥二选一）：`ddl.rs` 方言化 DDL（StarRocks：列后 PRIMARY KEY + STRING/无 FK，MySQL：FK CASCADE 语义与 libsql 对齐）、`project_crud.rs` / `project_crud_runs.rs` CRUD。两条硬教训：
+`src/sql_store/`（默认零编译，两个 feature 互斥二选一）：`ddl.rs` 方言化 DDL（StarRocks：列后 PRIMARY KEY + STRING/无 FK，MySQL：FK CASCADE 语义与 libsql 对齐）+ `apply`/`upgrade` 两段：CREATE IF NOT EXISTS 之后按 `information_schema.columns`（走 `exec_read_all`，StarRocks 全 text 协议）补缺失列 ADD COLUMN，既存部署免 `Unknown column`；`UPGRADE_COLUMNS` 与 CREATE 常量有 drift 测试互钉、`project_crud.rs` / `project_crud_runs.rs` CRUD。两条硬教训：
 
 - StarRocks 缓存 prepared SELECT 会返回旧快照且 publish 异步——**全部语句走 text 协议**（`raw_sql` 内联参数）；sqlx 0.8.6 `RawSql::fetch_optional` 误委托 fetch_one 会 panic，用 `fetch_all` 再取 first 恢复 optional 形态。
 - 级联删除跨语句无事务保证，顺序执行（run→todo→milestone→goal）；测试一律 `eventually()` 轮询收敛。
@@ -72,7 +72,7 @@ schema 随迭代推进（最新以 `src/libsql_store/schema.rs::SCHEMA_VERSION` 
 - `tests/schema_bootstrap.rs`：建库后 synchronous 生效值、同路径重开幂等（version 单行 + integrity_check）、并发打开。
 - `tests/store_integration/`（目录目标，按职责分模块）：会话 CRUD/patch、消息往返、事务回滚、取消安全和崩溃恢复等 P0 行为契约（WAL 并发压力另见 `store_concurrency.rs`）。
 - `tests/todos_workflow.rs`：TODO 投影+事件原子提交、generation 冲突、v8→v9 migration。
-- `tests/project_store.rs`：project 四表 CRUD/级联/状态流转；`tests/contracts/project_atomic_claim.rs`：20 路并发唯一 winner、INSERT 失败回滚、已有 claim 不重复 run；`tests/sql_project_store.rs`：sqlx 后端（`OC_TEST_MYSQL_DSN` / `OC_TEST_STARROCKS_DSN` 环境门控，无 DSN 自动跳过），覆盖 MySQL 原子入口与 StarRocks 写前拒绝边界。
+- `tests/project_store.rs`：project 四表 CRUD/级联/状态流转；`tests/contracts/project_atomic_claim.rs`：20 路并发唯一 winner、INSERT 失败回滚、已有 claim 不重复 run；`tests/sql_project_store.rs`：sqlx 后端（`OC_TEST_MYSQL_DSN` / `OC_TEST_STARROCKS_DSN` 环境门控，无 DSN 自动跳过），覆盖 MySQL 原子入口与 StarRocks 写前拒绝边界；`tests/sql_project_upgrade.rs`（旧表形 → upgrade 补列 → CRUD 升级契约，同样 DSN 门控跳过）。
 - `tests/team_runs.rs`：upsert 往返且 `created_at` 冻结、`finish` 全行翻转、节点删除级联；`tests/store_migrations.rs` 覆盖 v16→v17 建表。
 - `tests/legacy_agent_normalization.rs`：interlude 存量 `agent='sandbox'` 行在全部读路径（get/list/fork 等）归一为 `plan`，原始行不被重写。
 - `tests/store_perf.rs`：持久化性能门槛。

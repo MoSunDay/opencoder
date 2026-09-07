@@ -25,6 +25,7 @@ mod fleet_maintenance;
 mod infra_static;
 mod project_api;
 mod project_crud_extra;
+mod project_store_failure;
 mod sessions_compat_extra;
 mod sessions_relay;
 mod support_knobs;

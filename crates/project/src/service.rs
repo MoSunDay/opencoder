@@ -13,22 +13,45 @@ use std::{
 use anyhow::{bail, Context as _, Result};
 use opencoder_llm::ChatStream;
 use opencoder_store::{
-    ProjectStore, ProjectTodoRecord, ProjectTodoRunKind, ProjectTodoRunRecord, ProjectTodoStatus,
-    Store, TASK_TYPE_PROJECT,
+    ProjectExecutorKind, ProjectStore, ProjectTodoRecord, ProjectTodoRunKind, ProjectTodoRunRecord,
+    ProjectTodoStatus, Store, TASK_TYPE_PROJECT,
 };
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tokio_util::sync::CancellationToken;
 
 use crate::context::ProjectContext;
+use crate::executor::{resolve_brain, BrainHandoff, ResolvedExecutor};
 
 /// 一次初始化后只读的共享依赖集。`spawns` 是运行中的 run_id → 取消令牌
 /// 注册表（Mutex 包裹的普通 HashMap，跨 await 只做短临界区拷贝）。
+/// `brain` 是能力库运行时（控制面注入；节点上没有——brain todo 在节点
+/// 上会因缺运行时而拒启，需要控制面先预解析）。
 pub struct Deps {
     pub store: Arc<dyn Store>,
     pub projects: Arc<dyn ProjectStore>,
     pub workdir: PathBuf,
     pub client_override: Option<Arc<dyn ChatStream>>,
+    pub brain: Option<opencoder_brain::Runtime>,
     pub spawns: Mutex<HashMap<String, CancellationToken>>,
+}
+
+/// 执行启动时的执行器覆盖（控制面预解析结果）：跳过 todo 自带的三字段
+/// 解析，直接按 kind + ref 驱动；capability/plan 是 brain 预解析的留痕。
+/// 只允许 agent/team/dag——brain 不能被预解析成 brain（禁止嵌套）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExecutorOverride {
+    /// 目标执行器（agent | team | dag；brain 在此被拒绝）。
+    pub kind: ProjectExecutorKind,
+    /// 执行器引用：team/dag 的资源名、agent 的代理名（可缺省）。
+    #[serde(default, rename = "ref", skip_serializing_if = "Option::is_none")]
+    pub ref_: Option<String>,
+    /// brain 预解析命中的能力 id（留痕用）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capability_id: Option<String>,
+    /// brain 预解析使用的计划 id（留痕用）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plan_id: Option<String>,
 }
 
 /// `TASK_TYPE_PROJECT` 常量在此模块被引用（SessionMeta.task_type），re-export
@@ -59,12 +82,14 @@ impl ProjectService {
         projects: Arc<dyn ProjectStore>,
         workdir: PathBuf,
         client_override: Option<Arc<dyn ChatStream>>,
+        brain: Option<opencoder_brain::Runtime>,
     ) -> Result<()> {
         let deps = Arc::new(Deps {
             store,
             projects,
             workdir,
             client_override,
+            brain,
             spawns: Mutex::new(HashMap::new()),
         });
         self.deps
@@ -107,6 +132,12 @@ impl ProjectService {
                 plan_md: None,
                 output_md: None,
                 agent: "plan".into(),
+                // plan 运行恒为 plan 代理直驱，执行器维度固定 Agent（与
+                // todo 的执行器无关）。
+                executor_kind: ProjectExecutorKind::Agent,
+                capability_id: None,
+                plan_id: None,
+                output_ref: None,
                 session_id: None,
                 status: opencoder_store::ProjectTodoRunStatus::Running,
                 started_at: now,
@@ -131,9 +162,21 @@ impl ProjectService {
         Ok(run_id)
     }
 
-    /// 按 todo 的现行方案驱动一次执行运行：新会话或 resume 既有会话。
-    /// spawn 之前先把 todo 置为 Running（崩溃时由 store 状态自证）。
+    /// 按 todo 的现行方案驱动一次执行运行（无覆盖）。
     pub async fn start_execute(&self, todo_id: &str) -> Result<String> {
+        self.start_execute_with(todo_id, None).await
+    }
+
+    /// 同上，但允许控制面携带执行器覆盖（brain 预解析结果）。spawn 之前
+    /// 先把 todo 置为 Running（崩溃时由 store 状态自证）。执行器解析在
+    /// claim 之前完成：解析失败（brain 缺运行时、team/dag 缺目标等）
+    /// 直接向上抛，不留半启动状态；brain 解析可能触发 LLM 路由调用，
+    /// 这一窗口不含任何已 claim 的状态，代价可接受。
+    pub async fn start_execute_with(
+        &self,
+        todo_id: &str,
+        override_: Option<ExecutorOverride>,
+    ) -> Result<String> {
         let deps = self.require()?;
         let todo = deps
             .projects
@@ -147,38 +190,18 @@ impl ProjectService {
         if todo.plan_md.is_none() {
             bail!("todo has no plan — generate one first");
         }
-        // plan/execute 互斥（正向）：plan 重新生成进行中不允许启动执行——plan 收尾
-        // 回写与 execute 的 Running 状态会互踩。此检查关掉主窗口；plan 收尾的
-        // 条件回写（plan_gen::commit_plan_output）兜住「检查→claim」之间的残余
-        // 竞态。反向（执行中不可重 plan）由上面的 status 检查保证。
-        // 「进行中」以本进程注册表为准：崩溃/重启残留的 stale plan 行（不在
-        // 注册表且超 grace）不阻塞执行——机会式收敛后放行，消灭「崩溃后必须
-        // 等总览触发 sweep」的死角；grace 内的未注册行仍保守拒绝（并发
-        // start_plan 在 create→注册之间的毫秒级窗口靠 grace 兜住）。
-        let now = opencoder_core::message::now_ms();
-        let mut plan_in_flight = false;
-        for run in deps
-            .projects
-            .list_running_todo_runs()
-            .await
-            .context("list running runs for execute")?
-        {
-            if run.todo_id != todo_id || run.kind != ProjectTodoRunKind::Plan {
-                continue;
-            }
-            if deps.spawns.lock().unwrap().contains_key(&run.id)
-                || now - run.started_at <= STALE_RUN_GRACE_MS
-            {
-                plan_in_flight = true;
-            } else {
-                tracing::warn!(run_id = %run.id, "converging stale plan run before execute");
-                crate::recover::converge_stale_run(&deps, &run).await;
-            }
-        }
-        if plan_in_flight {
-            bail!("todo plan generation is in progress");
-        }
+        ensure_no_plan_in_flight(&deps, todo_id).await?;
         let cx = build_context(&deps, &todo).await?;
+        // claim 前解析执行器：brain 走运行时解析（含钉住/覆盖捷径），
+        // 其余按 todo 三字段纯解析。留痕（capability/plan）随解析产出。
+        let (resolved, trace) = if todo.executor_kind == ProjectExecutorKind::Brain {
+            resolve_brain(&deps, &todo, &cx, override_.as_ref()).await?
+        } else {
+            (
+                crate::executor::resolve(&todo, override_.as_ref())?,
+                Default::default(),
+            )
+        };
         let run_id = format!("prun-{}", ulid::Ulid::new());
         let version = deps.projects.next_todo_version(todo_id).await?;
         let now = opencoder_core::message::now_ms();
@@ -191,7 +214,11 @@ impl ProjectService {
             // 留痕（前置检查已保证 Some）。
             plan_md: todo.plan_md.clone(),
             output_md: None,
-            agent: todo.agent.clone(),
+            agent: run_agent_label(&resolved, &todo),
+            executor_kind: resolved.kind,
+            capability_id: trace.capability_id.clone(),
+            plan_id: trace.plan_id.clone(),
+            output_ref: None,
             session_id: None,
             status: opencoder_store::ProjectTodoRunStatus::Running,
             started_at: now,
@@ -211,13 +238,42 @@ impl ProjectService {
         let token = spawn_run(&deps, &run_id);
         let drive_deps = deps.clone();
         let drive_run = run_id.clone();
+        // brain todo 以 Brain 标记 + 派发交接进派发：claim 前解析出的
+        // override 随行——brain_drive 重解析直接采纳该纯函数分支（节点
+        // 无 brain 运行时也可执行），留痕沿用 claim 前解析（单一事实源）；
+        // 其余 kind 直接携带解析结果。
+        let (drive_resolved, brain_handoff) = if todo.executor_kind == ProjectExecutorKind::Brain {
+            (
+                ResolvedExecutor {
+                    kind: ProjectExecutorKind::Brain,
+                    ref_: None,
+                },
+                Some(BrainHandoff {
+                    override_: override_.clone(),
+                    trace: Some(trace),
+                }),
+            )
+        } else {
+            (resolved, None)
+        };
         // spawn 驱动 + panic 监控：驱动 panic 时 run/todo 一并收敛。
         crate::recover::spawn_run_driver(
             &deps,
             &run_id,
             todo_id,
             ProjectTodoRunKind::Execute,
-            move || crate::execute::drive(drive_deps, drive_run, todo, cx, version, token),
+            move || {
+                crate::executor::drive(
+                    drive_deps,
+                    drive_run,
+                    todo,
+                    cx,
+                    version,
+                    drive_resolved,
+                    brain_handoff,
+                    token,
+                )
+            },
         );
         Ok(run_id)
     }
@@ -293,6 +349,73 @@ fn spawn_run(deps: &Arc<Deps>, run_id: &str) -> CancellationToken {
     token
 }
 
+/// plan/execute 互斥（正向）：plan 重新生成进行中不允许启动执行——plan
+/// 收尾回写与 execute 的 Running 状态会互踩。此检查关掉主窗口；plan 收
+/// 尾的条件回写（plan_gen::commit_plan_output）兜住「检查→claim」之间
+/// 的残余竞态。反向（执行中不可重 plan）由 todo.status 检查保证。
+/// 「进行中」以本进程注册表为准：崩溃/重启残留的 stale plan 行（不在
+/// 注册表且超 grace）不阻塞执行——机会式收敛后放行，消灭「崩溃后必须
+/// 等总览触发 sweep」的死角；grace 内的未注册行仍保守拒绝（并发
+/// start_plan 在 create→注册之间的毫秒级窗口靠 grace 兜住）。
+async fn ensure_no_plan_in_flight(deps: &Arc<Deps>, todo_id: &str) -> Result<()> {
+    let now = opencoder_core::message::now_ms();
+    let mut plan_in_flight = false;
+    for run in deps
+        .projects
+        .list_running_todo_runs()
+        .await
+        .context("list running runs for execute")?
+    {
+        if run.todo_id != todo_id || run.kind != ProjectTodoRunKind::Plan {
+            continue;
+        }
+        if deps.spawns.lock().unwrap().contains_key(&run.id)
+            || now - run.started_at <= STALE_RUN_GRACE_MS
+        {
+            plan_in_flight = true;
+        } else {
+            tracing::warn!(run_id = %run.id, "converging stale plan run before execute");
+            crate::recover::converge_stale_run(deps, &run).await;
+        }
+    }
+    if plan_in_flight {
+        bail!("todo plan generation is in progress");
+    }
+    Ok(())
+}
+
+/// 执行器展示名：ref 优先，其次内联 spec 的 `name` 字段（team spec 有，
+/// dag spec 有；brain routes 没有），最后落到 todo id。仅作 run 行标签。
+fn executor_display_name(resolved: &ResolvedExecutor, todo: &ProjectTodoRecord) -> String {
+    if let Some(name) = resolved
+        .ref_
+        .as_deref()
+        .or(todo.executor_ref.as_deref())
+        .map(str::trim)
+        .filter(|n| !n.is_empty())
+    {
+        return name.to_string();
+    }
+    todo.executor_spec
+        .as_deref()
+        .and_then(|spec| serde_json::from_str::<Value>(spec).ok())
+        .and_then(|v| v.get("name").and_then(Value::as_str).map(str::to_string))
+        .unwrap_or_else(|| todo.id.clone())
+}
+
+/// run 行的 agent 标签：agent 携带解析出的代理名优先（brain 路由/override
+/// 会带名），否则沿用 todo.agent；team/dag 带上执行器名（`team:<名>` /
+/// `dag:<名>`）；brain 标记不会出现在已解析结果里（resolve/resolve_brain
+/// 都不产出 Brain），此分支只是完备性兜底。
+fn run_agent_label(resolved: &ResolvedExecutor, todo: &ProjectTodoRecord) -> String {
+    match resolved.kind {
+        ProjectExecutorKind::Agent => resolved.ref_.clone().unwrap_or_else(|| todo.agent.clone()),
+        ProjectExecutorKind::Team => format!("team:{}", executor_display_name(resolved, todo)),
+        ProjectExecutorKind::Dag => format!("dag:{}", executor_display_name(resolved, todo)),
+        ProjectExecutorKind::Brain => "brain".into(),
+    }
+}
+
 /// 组装 plan/execute 提示词所需的目标→里程碑→待办上下文。里程碑与目标
 /// 均为 best-effort：行缺失时省略对应段落，目标缺失时用占位标题。
 async fn build_context(deps: &Arc<Deps>, todo: &ProjectTodoRecord) -> Result<ProjectContext> {
@@ -330,415 +453,5 @@ async fn build_context(deps: &Arc<Deps>, todo: &ProjectTodoRecord) -> Result<Pro
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use opencoder_store::{LibsqlStore, ProjectTodoRunPatch, ProjectTodoRunStatus as RunStatus};
-
-    use crate::recover;
-
-    #[tokio::test]
-    async fn uninitialized_require_and_read_paths_error_cleanly() {
-        let service = ProjectService::new();
-        assert!(service.start_plan("t1").await.is_err());
-        assert!(service.overview().await.is_err());
-    }
-
-    #[tokio::test]
-    async fn cancel_unknown_or_uninitialized_returns_false() {
-        let service = ProjectService::new();
-        assert!(!service.cancel("nope").await.unwrap());
-    }
-
-    // ---- recover: panic 兜底 + stale 清扫（手工构造 Deps，内存库） ----
-
-    async fn test_deps() -> (tempfile::TempDir, Arc<Deps>, Arc<LibsqlStore>) {
-        let store = Arc::new(LibsqlStore::open_memory().await.unwrap());
-        let dir = tempfile::tempdir().unwrap();
-        let deps = Arc::new(Deps {
-            store: store.clone(),
-            projects: store.clone(),
-            workdir: dir.path().to_path_buf(),
-            client_override: None,
-            spawns: Mutex::new(HashMap::new()),
-        });
-        (dir, deps, store)
-    }
-
-    async fn seed_todo(p: &Arc<LibsqlStore>, id: &str, status: ProjectTodoStatus) {
-        let now = 1000;
-        p.create_todo(&ProjectTodoRecord {
-            id: id.into(),
-            milestone_id: None,
-            title: format!("待办 {id}"),
-            draft: "草稿".into(),
-            plan_md: Some("# 方案".into()),
-            status,
-            agent: "act".into(),
-            active_session_id: None,
-            created_at: now,
-            updated_at: now,
-        })
-        .await
-        .unwrap();
-    }
-
-    async fn seed_run(p: &Arc<LibsqlStore>, id: &str, todo_id: &str, kind: ProjectTodoRunKind) {
-        seed_run_at(p, id, todo_id, kind, 1000).await;
-    }
-
-    async fn seed_run_at(
-        p: &Arc<LibsqlStore>,
-        id: &str,
-        todo_id: &str,
-        kind: ProjectTodoRunKind,
-        started_at: i64,
-    ) {
-        let version = p.next_todo_version(todo_id).await.unwrap();
-        p.create_todo_run(&ProjectTodoRunRecord {
-            id: id.into(),
-            todo_id: todo_id.into(),
-            kind,
-            version,
-            plan_md: None,
-            output_md: None,
-            agent: "act".into(),
-            session_id: None,
-            status: RunStatus::Running,
-            started_at,
-            finished_at: None,
-            created_at: started_at,
-        })
-        .await
-        .unwrap();
-    }
-
-    async fn todo_status(p: &Arc<LibsqlStore>, id: &str) -> ProjectTodoStatus {
-        p.get_todo(id).await.unwrap().unwrap().status
-    }
-
-    async fn run_status(p: &Arc<LibsqlStore>, id: &str) -> RunStatus {
-        p.get_todo_run(id).await.unwrap().unwrap().status
-    }
-
-    #[tokio::test]
-    async fn panic_convergence_fails_run_execute_todo_and_forgets_spawn() {
-        let (_dir, deps, p) = test_deps().await;
-        seed_todo(&p, "t1", ProjectTodoStatus::Running).await;
-        seed_run(&p, "r1", "t1", ProjectTodoRunKind::Execute).await;
-        deps.spawns
-            .lock()
-            .unwrap()
-            .insert("r1".into(), CancellationToken::new());
-
-        recover::converge_panicked_run(&deps, "r1", "t1", ProjectTodoRunKind::Execute).await;
-
-        let run = p.get_todo_run("r1").await.unwrap().unwrap();
-        assert_eq!(run.status, RunStatus::Failed);
-        assert_eq!(run.output_md.as_deref(), Some("run driver panicked"));
-        assert!(run.finished_at.is_some(), "close_run stamps finished_at");
-        assert_eq!(todo_status(&p, "t1").await, ProjectTodoStatus::Failed);
-        assert!(
-            !deps.spawns.lock().unwrap().contains_key("r1"),
-            "panic convergence removes the spawn token"
-        );
-    }
-
-    #[tokio::test]
-    async fn panic_convergence_leaves_plan_todo_untouched() {
-        let (_dir, deps, p) = test_deps().await;
-        seed_todo(&p, "t1", ProjectTodoStatus::Planned).await;
-        seed_run(&p, "r1", "t1", ProjectTodoRunKind::Plan).await;
-
-        recover::converge_panicked_run(&deps, "r1", "t1", ProjectTodoRunKind::Plan).await;
-
-        assert_eq!(run_status(&p, "r1").await, RunStatus::Failed);
-        assert_eq!(
-            todo_status(&p, "t1").await,
-            ProjectTodoStatus::Planned,
-            "plan runs do not own the todo status"
-        );
-    }
-
-    #[tokio::test]
-    async fn sweep_converges_only_unregistered_runs_past_grace() {
-        let (_dir, deps, p) = test_deps().await;
-        // 三个 execute/plan 各一：过期未注册（要收敛）、刚启动未注册（宽限）、
-        // 过期但已注册（本进程驱动仍在跑）。另有一个过期 run 挂在非 Running
-        // 的 todo 上：run 收敛但 todo 不被动。
-        seed_todo(&p, "t-exec", ProjectTodoStatus::Running).await;
-        seed_todo(&p, "t-plan", ProjectTodoStatus::Planned).await;
-        seed_todo(&p, "t-live", ProjectTodoStatus::Running).await;
-        seed_todo(&p, "t-done", ProjectTodoStatus::Done).await;
-        seed_run(&p, "r-exec", "t-exec", ProjectTodoRunKind::Execute).await;
-        seed_run(&p, "r-plan", "t-plan", ProjectTodoRunKind::Plan).await;
-        seed_run(&p, "r-live", "t-live", ProjectTodoRunKind::Execute).await;
-        seed_run(&p, "r-done", "t-done", ProjectTodoRunKind::Execute).await;
-        // 「刚刚启动」的未注册 running run：宽限期内不动（正常启动到
-        // spawn 注册之间存在毫秒级窗口，靠 grace 兜住）。
-        let fresh_started = opencoder_core::message::now_ms();
-        seed_run_at(
-            &p,
-            "r-fresh",
-            "t-exec",
-            ProjectTodoRunKind::Execute,
-            fresh_started,
-        )
-        .await;
-        deps.spawns
-            .lock()
-            .unwrap()
-            .insert("r-live".into(), CancellationToken::new());
-
-        let converged = recover::sweep_stale_runs(&deps, 300_000).await;
-        assert_eq!(converged, 3, "r-exec + r-plan + r-done converge");
-
-        let exec = p.get_todo_run("r-exec").await.unwrap().unwrap();
-        assert_eq!(exec.status, RunStatus::Failed);
-        assert_eq!(
-            exec.output_md.as_deref(),
-            Some("stale run converged: driver lost (restart/panic)")
-        );
-        assert_eq!(todo_status(&p, "t-exec").await, ProjectTodoStatus::Failed);
-        assert_eq!(run_status(&p, "r-plan").await, RunStatus::Failed);
-        assert_eq!(
-            todo_status(&p, "t-plan").await,
-            ProjectTodoStatus::Planned,
-            "plan run convergence never touches the todo"
-        );
-        assert_eq!(
-            todo_status(&p, "t-done").await,
-            ProjectTodoStatus::Done,
-            "non-running todo stays as-is even for execute runs"
-        );
-        assert_eq!(
-            run_status(&p, "r-fresh").await,
-            RunStatus::Running,
-            "inside the grace window: kept"
-        );
-        assert_eq!(
-            run_status(&p, "r-live").await,
-            RunStatus::Running,
-            "registered token: this process still owns the driver"
-        );
-        assert_eq!(todo_status(&p, "t-live").await, ProjectTodoStatus::Running);
-    }
-
-    #[tokio::test]
-    async fn start_execute_rejects_while_plan_run_in_flight() {
-        let store = Arc::new(LibsqlStore::open_memory().await.unwrap());
-        let dir = tempfile::tempdir().unwrap();
-        let service = ProjectService::new();
-        service
-            .init(store.clone(), store.clone(), dir.path().to_path_buf(), None)
-            .await
-            .unwrap();
-        seed_todo(&store, "t1", ProjectTodoStatus::Planned).await;
-        seed_run(&store, "r-plan", "t1", ProjectTodoRunKind::Plan).await;
-        // 真活驱动：令牌在注册表里（seed 的 started_at 很老，只有注册表
-        // 命中才能证明「进行中」）。
-        service
-            .deps
-            .get()
-            .unwrap()
-            .spawns
-            .lock()
-            .unwrap()
-            .insert("r-plan".into(), CancellationToken::new());
-
-        let err = service.start_execute("t1").await.unwrap_err();
-        assert!(err.to_string().contains("plan"), "got: {err:#}");
-        assert_eq!(
-            todo_status(&store, "t1").await,
-            ProjectTodoStatus::Planned,
-            "plan run 进行中不拿走 execute claim"
-        );
-    }
-
-    #[tokio::test]
-    async fn panic_convergence_keeps_terminal_run_label() {
-        let (_dir, deps, p) = test_deps().await;
-        seed_todo(&p, "t1", ProjectTodoStatus::Done).await;
-        seed_run(&p, "r1", "t1", ProjectTodoRunKind::Execute).await;
-        // 驱动已在 panic 前把 run 收敛到 Done 并回写 todo（Done）。
-        p.patch_todo_run(
-            "r1",
-            &ProjectTodoRunPatch {
-                status: Some(RunStatus::Done),
-                output_md: Some("执行完成".into()),
-                finished_at: Some(2000),
-                ..Default::default()
-            },
-            2000,
-        )
-        .await
-        .unwrap();
-        deps.spawns
-            .lock()
-            .unwrap()
-            .insert("r1".into(), CancellationToken::new());
-
-        recover::converge_panicked_run(&deps, "r1", "t1", ProjectTodoRunKind::Execute).await;
-
-        let run = p.get_todo_run("r1").await.unwrap().unwrap();
-        assert_eq!(run.status, RunStatus::Done, "终态标签不被兜底改写");
-        assert_eq!(
-            run.output_md.as_deref(),
-            Some("执行完成"),
-            "原始输出不被 \"run driver panicked\" 打花"
-        );
-        assert_eq!(todo_status(&p, "t1").await, ProjectTodoStatus::Done);
-        assert!(
-            !deps.spawns.lock().unwrap().contains_key("r1"),
-            "panic convergence removes the spawn token"
-        );
-    }
-
-    #[tokio::test]
-    async fn panic_convergence_after_run_done_still_fails_stuck_running_todo() {
-        let (_dir, deps, p) = test_deps().await;
-        // 「close_run(Done) 与 todo 回写之间 panic」形状：run 已 Done、todo
-        // 悬在 Running——run 标签不动，todo 必须补收敛为 Failed。
-        seed_todo(&p, "t1", ProjectTodoStatus::Running).await;
-        seed_run(&p, "r1", "t1", ProjectTodoRunKind::Execute).await;
-        p.patch_todo_run(
-            "r1",
-            &ProjectTodoRunPatch {
-                status: Some(RunStatus::Done),
-                output_md: Some("执行完成".into()),
-                finished_at: Some(2000),
-                ..Default::default()
-            },
-            2000,
-        )
-        .await
-        .unwrap();
-
-        recover::converge_panicked_run(&deps, "r1", "t1", ProjectTodoRunKind::Execute).await;
-
-        assert_eq!(run_status(&p, "r1").await, RunStatus::Done);
-        assert_eq!(
-            todo_status(&p, "t1").await,
-            ProjectTodoStatus::Failed,
-            "run 已终态但 todo 仍 Running：必须补收敛，不悬死"
-        );
-    }
-
-    #[tokio::test]
-    async fn start_execute_blocks_unregistered_plan_run_within_grace() {
-        let store = Arc::new(LibsqlStore::open_memory().await.unwrap());
-        let dir = tempfile::tempdir().unwrap();
-        let service = ProjectService::new();
-        service
-            .init(store.clone(), store.clone(), dir.path().to_path_buf(), None)
-            .await
-            .unwrap();
-        seed_todo(&store, "t1", ProjectTodoStatus::Planned).await;
-        // 未注册但刚起步：可能是并发 start_plan 的 create→注册窗口，保守拒绝。
-        seed_run_at(
-            &store,
-            "r-fresh",
-            "t1",
-            ProjectTodoRunKind::Plan,
-            opencoder_core::message::now_ms(),
-        )
-        .await;
-
-        let err = service.start_execute("t1").await.unwrap_err();
-        assert!(err.to_string().contains("plan"), "got: {err:#}");
-    }
-
-    #[tokio::test]
-    async fn start_execute_converges_stale_plan_run_past_grace() {
-        let store = Arc::new(LibsqlStore::open_memory().await.unwrap());
-        let dir = tempfile::tempdir().unwrap();
-        let service = ProjectService::new();
-        service
-            .init(store.clone(), store.clone(), dir.path().to_path_buf(), None)
-            .await
-            .unwrap();
-        seed_todo(&store, "t1", ProjectTodoStatus::Planned).await;
-        // 崩溃残留：不在注册表且超 grace 的 running plan 行——不阻塞执行，
-        // 机会式收敛为 Failed（sweep 同款文案）。
-        seed_run_at(
-            &store,
-            "r-stale",
-            "t1",
-            ProjectTodoRunKind::Plan,
-            opencoder_core::message::now_ms() - STALE_RUN_GRACE_MS - 1,
-        )
-        .await;
-
-        let run_id = service.start_execute("t1").await.unwrap();
-        assert_ne!(run_id, "r-stale", "新 execute run，而非残留 plan 行");
-        let stale = store.get_todo_run("r-stale").await.unwrap().unwrap();
-        assert_eq!(stale.status, RunStatus::Failed);
-        assert_eq!(
-            stale.output_md.as_deref(),
-            Some("stale run converged: driver lost (restart/panic)")
-        );
-    }
-
-    #[tokio::test]
-    async fn cancel_converges_lost_driver_execute_run_to_cancelled() {
-        let (_dir, deps, p) = test_deps().await;
-        seed_todo(&p, "t1", ProjectTodoStatus::Running).await;
-        seed_run(&p, "r1", "t1", ProjectTodoRunKind::Execute).await;
-        // 服务持独立（空）注册表：r1 不在其中 = 驱动已丢失。
-        let service = ProjectService::new();
-        service
-            .init(
-                deps.store.clone(),
-                deps.projects.clone(),
-                deps.workdir.clone(),
-                None,
-            )
-            .await
-            .unwrap();
-
-        assert!(service.cancel("r1").await.unwrap());
-
-        let run = p.get_todo_run("r1").await.unwrap().unwrap();
-        assert_eq!(run.status, RunStatus::Cancelled);
-        assert!(run.finished_at.is_some(), "converge 落 finished_at");
-        assert_eq!(
-            todo_status(&p, "t1").await,
-            ProjectTodoStatus::Planned,
-            "lost-driver 取消回退 Planned（方案仍在，可再次执行）"
-        );
-    }
-
-    #[tokio::test]
-    async fn cancel_terminal_or_missing_run_stays_false() {
-        let (_dir, deps, p) = test_deps().await;
-        seed_todo(&p, "t1", ProjectTodoStatus::Done).await;
-        seed_run(&p, "r1", "t1", ProjectTodoRunKind::Execute).await;
-        p.patch_todo_run(
-            "r1",
-            &ProjectTodoRunPatch {
-                status: Some(RunStatus::Done),
-                finished_at: Some(2000),
-                ..Default::default()
-            },
-            2000,
-        )
-        .await
-        .unwrap();
-        let service = ProjectService::new();
-        service
-            .init(
-                deps.store.clone(),
-                deps.projects.clone(),
-                deps.workdir.clone(),
-                None,
-            )
-            .await
-            .unwrap();
-
-        assert!(!service.cancel("r1").await.unwrap(), "已终态：无可取消");
-        assert!(
-            !service.cancel("missing").await.unwrap(),
-            "行缺失：无可取消"
-        );
-        assert_eq!(run_status(&p, "r1").await, RunStatus::Done, "终态不被打花");
-    }
-}
+#[path = "service_tests.rs"]
+mod tests;

@@ -203,12 +203,14 @@ describe('fleet execution boundaries', () => {
     apiPost.mockRejectedValueOnce(new Error('connection lost')).mockResolvedValueOnce({ execution: { id: 'agent-brain-1', kind: 'agent', node_id: 'n1', status: 'pending', created_at: 1 } });
     const onNotice = vi.fn();
     render(<FleetBrainPanel onNotice={onNotice} />);
-    fireEvent.change(await screen.findByLabelText('任务目标'), { target: { value: '检查发布' } });
-    fireEvent.click(screen.getByText('直接调度执行'));
+    fireEvent.mouseDown(screen.getByLabelText('目标节点').closest('.ant-select'));
+    fireEvent.click(await screen.findByText('worker', { selector: '.ant-select-item-option-content' }));
+    fireEvent.change(await screen.findByLabelText('需求'), { target: { value: '检查发布' } });
+    fireEvent.click(screen.getByText('开始执行'));
     await waitFor(() => expect(apiPost).toHaveBeenCalledTimes(1));
     expect(onNotice).toHaveBeenLastCalledWith(err('connection lost'));
-    await waitFor(() => expect(screen.getByText('直接调度执行').closest('button').disabled).toBe(false));
-    fireEvent.click(screen.getByText('直接调度执行'));
+    await waitFor(() => expect(screen.getByText('开始执行').closest('button').disabled).toBe(false));
+    fireEvent.click(screen.getByText('开始执行'));
     await waitFor(() => expect(apiPost).toHaveBeenCalledTimes(2));
     expect(apiPost.mock.calls[0][1].request_id).toBe(apiPost.mock.calls[1][1].request_id);
     expect(apiPost.mock.calls[0][1].request_id).toMatch(/^request-/);

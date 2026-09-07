@@ -1,5 +1,6 @@
 import { Fragment, useMemo } from 'react';
 import { textRows } from './markdown.js';
+import { Markdown } from '../project/markdown.jsx';
 
 export function TextRows({ rows }) {
   return <div className="transcript-text" style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace', fontSize: 13, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
@@ -18,6 +19,6 @@ export function TextRows({ rows }) {
 }
 
 export function AssistantText({ turn }) {
-  const rows = useMemo(() => textRows(turn.text, turn.open === true), [turn.text, turn.open]);
-  return <TextRows rows={rows} />;
+  const rows = useMemo(() => textRows(turn.text, true), [turn.text]);
+  return turn.open === true ? <TextRows rows={rows} /> : <Markdown text={turn.text} />;
 }

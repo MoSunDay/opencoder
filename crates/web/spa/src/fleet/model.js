@@ -18,6 +18,16 @@ export function nodeOptions(nodes, kind) {
     disabled: !n.online || !n.snapshot?.ready || (kind && !n.kinds?.includes(kind)),
   }))];
 }
+// Conversation and Brain launch require an explicit, executable node.
+export function explicitNodeOptions(nodes = [], kind = null) {
+  return nodeOptions(nodes, kind).filter((option) => option.value).map((option) => ({
+    ...option, label: nodes.find((node) => node.id === option.value)?.name || option.value,
+  }));
+}
+export function canUseNode(nodes, id, kind = null) {
+  return !!id && explicitNodeOptions(nodes, kind).some((option) => option.value === id && !option.disabled);
+}
+
 export function textOf(message) {
   if (message.display) return message.display;
   if (typeof message.content === 'string') return message.content;

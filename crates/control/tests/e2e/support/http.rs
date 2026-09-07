@@ -25,14 +25,36 @@ pub struct Harness {
 impl Harness {
     /// Full topology: server (auth + web assets) + one scripted WS node.
     pub async fn new() -> Arc<Self> {
+        Self::new_inner(None).await
+    }
+
+    /// Same topology with an injected project store (failure-path tests).
+    pub async fn with_projects(projects: Arc<dyn opencoder_store::ProjectStore>) -> Arc<Self> {
+        Self::new_inner(Some(projects)).await
+    }
+
+    async fn new_inner(projects: Option<Arc<dyn opencoder_store::ProjectStore>>) -> Arc<Self> {
         let dir = tempfile::tempdir().unwrap();
         let mock_llm = Arc::new(MockChatClient::new());
-        let state = opencoder_control::new_state(
-            dir.path().join("work"),
-            dir.path().join("data"),
-            Some(mock_llm.clone() as Arc<dyn ChatStream>),
-        )
-        .await
+        let state = match projects {
+            Some(projects) => {
+                opencoder_control::new_state_with_projects(
+                    dir.path().join("work"),
+                    dir.path().join("data"),
+                    Some(mock_llm.clone() as Arc<dyn ChatStream>),
+                    projects,
+                )
+                .await
+            }
+            None => {
+                opencoder_control::new_state(
+                    dir.path().join("work"),
+                    dir.path().join("data"),
+                    Some(mock_llm.clone() as Arc<dyn ChatStream>),
+                )
+                .await
+            }
+        }
         .unwrap();
         let app = opencoder_control::build_app(state.clone(), Some(TOKEN.into()), true);
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

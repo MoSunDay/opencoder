@@ -58,6 +58,15 @@ pub async fn execute_agent_step(
     session.cancel = Some(cancel.clone());
     // Fresh per-step turn token so an interrupt never leaks into later steps.
     session.turn_cancel = Some(Arc::new(Mutex::new(CancellationToken::new())));
+    // Workflow-author-declared how.md append: visible to the session's
+    // tool processes as OPENCODER_HOW_APPEND, persisted after success.
+    let how_append = match &ctx.step.kind {
+        StepKind::Agent { how_append, .. } => how_append.clone(),
+        _ => None,
+    };
+    if how_append.is_some() {
+        session.env_passthrough = super::how_append::env_pairs(how_append.as_deref());
+    }
 
     // Local durability of the event stream, exactly like a node task. The
     // sink moves into the event callback and drops with it at run end.
@@ -88,6 +97,22 @@ pub async fn execute_agent_step(
     let text = transcript.lock().map(|t| t.clone()).unwrap_or_default();
     let output_json = extract_output_json_from(&text);
     let (outcome, error) = terminal_step(cancel.is_cancelled(), result.as_ref().err());
+    // Successful step: persist the declared how.md append (warn-only — a
+    // pool-write failure never flips a successful step to error).
+    if outcome == StepOutcome::Done {
+        if let Some(delta) = how_append.as_deref().filter(|d| !d.trim().is_empty()) {
+            match super::how_append::append_to_how_md(&step_agent_name(&ctx.step), delta) {
+                Ok(version) => info!(
+                    run_id = %ctx.run_id, step = %ctx.step.name, version,
+                    "how_append persisted to agent prompt pool"
+                ),
+                Err(e) => warn!(
+                    run_id = %ctx.run_id, step = %ctx.step.name, error = %e,
+                    "how_append persistence failed (step outcome unchanged)"
+                ),
+            }
+        }
+    }
     info!(
         run_id = %ctx.run_id,
         step = %ctx.step.name,
@@ -103,9 +128,18 @@ pub async fn execute_agent_step(
     }
 }
 
+/// The step's executing agent name — `agent` field or the `act` default,
+/// the same resolution `create_session_meta` pins on the session row.
+fn step_agent_name(step: &StepSpec) -> String {
+    match &step.kind {
+        StepKind::Agent { agent, .. } => agent.clone().unwrap_or_else(|| "act".into()),
+        _ => "act".into(),
+    }
+}
+
 /// Prompt = step prompt + upstream context header + structured-output
-/// instruction. The context is the same object a python step would see as
-/// its `context` global.
+/// instruction. The context is the same object a wasm step receives as its
+/// `context.json` input file (delivered under `/workspace/context`).
 fn build_prompt(ctx: &StepCtx) -> String {
     let prompt = match &ctx.step.kind {
         StepKind::Agent { prompt, .. } => prompt.clone(),

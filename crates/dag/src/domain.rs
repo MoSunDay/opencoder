@@ -45,8 +45,19 @@ pub fn validate(spec: &DagSpec) -> Result<(), Vec<String>> {
             StepKind::Agent { prompt, .. } if prompt.trim().is_empty() => {
                 errs.push(format!("agent step {:?} has an empty prompt", step.name));
             }
-            StepKind::Python { code, .. } if code.trim().is_empty() => {
-                errs.push(format!("python step {:?} has empty code", step.name));
+            StepKind::Wasm { command, .. } if command.trim().is_empty() => {
+                errs.push(format!("wasm step {:?} has an empty command", step.name));
+            }
+            StepKind::Agent {
+                how_append: Some(h),
+                ..
+            } if h.len() > crate::spec::MAX_HOW_APPEND_BYTES => {
+                errs.push(format!(
+                    "agent step {:?} how_append exceeds {} bytes (got {})",
+                    step.name,
+                    crate::spec::MAX_HOW_APPEND_BYTES,
+                    h.len()
+                ));
             }
             _ => {}
         }
@@ -192,8 +203,10 @@ fn terminal_fold(states: &StepStates) -> Option<DagRunStatus> {
     }
 }
 
-/// Build the `context` object injected into python steps (VM global
-/// `context` / container `/workspace/context` view of upstream results):
+/// Build the upstream `context` object delivered to steps as a
+/// `context.json` file whose path is passed via the `OPENCODER_STEP_CONTEXT`
+/// env variable (wasm steps; agent steps get it embedded in the prompt
+/// header instead):
 /// `{"steps": {"<name>": {"json": <output.json | null>, "ok": bool}}}`.
 /// Only DIRECT and transitive upstream steps of `step` are included, so a
 /// step never observes siblings it did not declare a path to.
@@ -260,7 +273,7 @@ mod tests {
             "name": "",
             "steps": [
                 { "name": "Bad Name", "kind": { "type": "agent", "prompt": " " } },
-                { "name": "b", "depends_on": ["b", "missing", "a", "missing"], "kind": { "type": "python", "code": "" } }
+                { "name": "b", "depends_on": ["b", "missing", "a", "missing"], "kind": { "type": "wasm", "command": "" } }
             ]
         }));
         let errs = validate(&spec).unwrap_err();
@@ -268,7 +281,7 @@ mod tests {
         assert!(joined.contains("spec.name"), "{joined}");
         assert!(joined.contains("Bad Name"), "{joined}");
         assert!(joined.contains("empty prompt"), "{joined}");
-        assert!(joined.contains("empty code"), "{joined}");
+        assert!(joined.contains("empty command"), "{joined}");
         assert!(joined.contains("depends on itself"), "{joined}");
         assert!(joined.contains("unknown step \"missing\""), "{joined}");
         assert!(joined.contains("twice"), "{joined}");
@@ -279,9 +292,9 @@ mod tests {
         let spec = spec_from(json!({
             "name": "cyc",
             "steps": [
-                { "name": "a", "depends_on": ["c"], "kind": { "type": "python", "code": "x" } },
-                { "name": "b", "depends_on": ["a"], "kind": { "type": "python", "code": "x" } },
-                { "name": "c", "depends_on": ["b"], "kind": { "type": "python", "code": "x" } }
+                { "name": "a", "depends_on": ["c"], "kind": { "type": "wasm", "command": "x.wasm" } },
+                { "name": "b", "depends_on": ["a"], "kind": { "type": "wasm", "command": "x.wasm" } },
+                { "name": "c", "depends_on": ["b"], "kind": { "type": "wasm", "command": "x.wasm" } }
             ]
         }));
         let errs = validate(&spec).unwrap_err();
@@ -293,9 +306,9 @@ mod tests {
         let spec = spec_from(json!({
             "name": "dag",
             "steps": [
-                { "name": "c", "depends_on": ["b"], "kind": { "type": "python", "code": "x" } },
-                { "name": "a", "kind": { "type": "python", "code": "x" } },
-                { "name": "b", "depends_on": ["a"], "kind": { "type": "python", "code": "x" } }
+                { "name": "c", "depends_on": ["b"], "kind": { "type": "wasm", "command": "x.wasm" } },
+                { "name": "a", "kind": { "type": "wasm", "command": "x.wasm" } },
+                { "name": "b", "depends_on": ["a"], "kind": { "type": "wasm", "command": "x.wasm" } }
             ]
         }));
         assert_eq!(topo_order(&spec).unwrap(), vec!["a", "b", "c"]);
@@ -308,10 +321,10 @@ mod tests {
         let spec = spec_from(json!({
             "name": "diamond",
             "steps": [
-                { "name": "a", "kind": { "type": "python", "code": "x" } },
-                { "name": "b", "depends_on": ["a"], "kind": { "type": "python", "code": "x" } },
-                { "name": "c", "depends_on": ["a"], "kind": { "type": "python", "code": "x" } },
-                { "name": "d", "depends_on": ["b", "c"], "kind": { "type": "python", "code": "x" } }
+                { "name": "a", "kind": { "type": "wasm", "command": "x.wasm" } },
+                { "name": "b", "depends_on": ["a"], "kind": { "type": "wasm", "command": "x.wasm" } },
+                { "name": "c", "depends_on": ["a"], "kind": { "type": "wasm", "command": "x.wasm" } },
+                { "name": "d", "depends_on": ["b", "c"], "kind": { "type": "wasm", "command": "x.wasm" } }
             ]
         }));
         assert_eq!(ready_steps(&spec, &states(&[])), vec!["a"]);
@@ -347,9 +360,9 @@ mod tests {
         let spec = spec_from(json!({
             "name": "ctx",
             "steps": [
-                { "name": "a", "kind": { "type": "python", "code": "x" } },
-                { "name": "b", "kind": { "type": "python", "code": "x" } },
-                { "name": "c", "depends_on": ["a"], "kind": { "type": "python", "code": "x" } }
+                { "name": "a", "kind": { "type": "wasm", "command": "x.wasm" } },
+                { "name": "b", "kind": { "type": "wasm", "command": "x.wasm" } },
+                { "name": "c", "depends_on": ["a"], "kind": { "type": "wasm", "command": "x.wasm" } }
             ]
         }));
         let st = states(&[("a", StepOutcome::Done)]);

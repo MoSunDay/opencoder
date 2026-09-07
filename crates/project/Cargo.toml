@@ -9,14 +9,19 @@ opencoder-core.workspace = true
 opencoder-llm.workspace = true
 opencoder-session.workspace = true
 opencoder-store.workspace = true
+opencoder-team.workspace = true
+opencoder-dag.workspace = true
+opencoder-dag-runtime.workspace = true
+opencoder-node.workspace = true
+opencoder-brain.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 anyhow.workspace = true
+async-trait.workspace = true
 tracing.workspace = true
 ulid.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
-async-trait.workspace = true

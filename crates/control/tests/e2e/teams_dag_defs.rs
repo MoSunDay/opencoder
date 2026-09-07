@@ -11,8 +11,8 @@ const TEAM: &str = r#"{"name":"demo","captain":"m1","members":[
     {"id":"m2","agent":"plan","role":"advisor"}]}"#;
 
 const SPEC: &str = r#"{"name":"etl-demo","steps":[
-    {"name":"fetch","kind":{"type":"python","code":"x=1"}},
-    {"name":"load","depends_on":["fetch"],"kind":{"type":"python","code":"y=2"}}]}"#;
+    {"name":"fetch","kind":{"type":"wasm","command":"tool.wasm"}},
+    {"name":"load","depends_on":["fetch"],"kind":{"type":"wasm","command":"tool.wasm"}}]}"#;
 
 #[tokio::test]
 async fn teams_roundtrip_and_validation() {
@@ -81,7 +81,7 @@ async fn dag_definitions_crud() {
             Method::POST,
             "/api/dag/defs",
             Some(json!({"spec": {"name": "bad", "steps": [
-            {"name": "a", "depends_on": ["ghost"], "kind": {"type": "python", "code": "x=1"}}]}})),
+            {"name": "a", "depends_on": ["ghost"], "kind": {"type":"wasm","command":"tool.wasm"}}]}})),
         )
         .await;
     assert_eq!(status, 400, "{body}");
@@ -206,8 +206,8 @@ async fn legacy_system_team_definition_is_hidden_from_the_list() {
     assert_eq!(teams[0]["name"], json!("demo"));
 }
 
-fn python_step(name: &str, depends_on: serde_json::Value) -> serde_json::Value {
-    json!({"name": name, "depends_on": depends_on, "kind": {"type": "python", "code": "x=1"}})
+fn wasm_step(name: &str, depends_on: serde_json::Value) -> serde_json::Value {
+    json!({"name": name, "depends_on": depends_on, "kind": {"type":"wasm","command":"tool.wasm"}})
 }
 
 /// save_dag rejects unparsable and invalid specs with the domain validator's
@@ -230,13 +230,13 @@ async fn dag_definition_spec_validation_table() {
         ),
         (
             "duplicate step names",
-            json!({"name": "bad", "steps": [python_step("a", json!([])), python_step("a", json!([]))]}),
+            json!({"name": "bad", "steps": [wasm_step("a", json!([])), wasm_step("a", json!([]))]}),
             "duplicate step name",
         ),
         (
             "dependency cycle",
             json!({"name": "bad", "steps": [
-                python_step("a", json!(["b"])), python_step("b", json!(["a"]))]}),
+                wasm_step("a", json!(["b"])), wasm_step("b", json!(["a"]))]}),
             "cycle detected",
         ),
     ];
@@ -256,7 +256,7 @@ async fn dag_definition_spec_validation_table() {
         .req(
             Method::POST,
             "/api/dag/defs",
-            Some(json!({"name": "bare-demo", "steps": [python_step("only", json!([]))]})),
+            Some(json!({"name": "bare-demo", "steps": [wasm_step("only", json!([]))]})),
         )
         .await;
     assert_eq!(status, 200, "{body}");

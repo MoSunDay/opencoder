@@ -19,8 +19,8 @@ const ev = (seq, kind, step, payload, at_ms = seq) => ({ seq, kind, step, payloa
 const SPEC = {
   name: 'etl',
   steps: [
-    { name: 'fetch', kind: { type: 'python', code: 'print(1)' } },
-    { name: 'transform', depends_on: ['fetch'], kind: { type: 'python', code: 'print(2)' } },
+    { name: 'fetch', kind: { type: 'wasm', command: 'tool.wasm' } },
+    { name: 'transform', depends_on: ['fetch'], kind: { type: 'wasm', command: 'tool.wasm --load' } },
     { name: 'review', depends_on: ['transform'], kind: { type: 'agent', prompt: 'review' } },
     { name: 'publish', depends_on: ['review'], kind: { type: 'agent', prompt: 'publish' } },
   ],
@@ -121,10 +121,10 @@ describe('projectStepStatuses', () => {
     const spec = {
       name: 'mixed',
       steps: [
-        { name: 'a', kind: { type: 'python', code: 'x' } },
-        { name: 'b', kind: { type: 'python', code: 'x' } },
-        { name: 'c', depends_on: ['a', 'b'], kind: { type: 'python', code: 'x' } },
-        { name: 'd', depends_on: ['c'], kind: { type: 'python', code: 'x' } },
+        { name: 'a', kind: { type: 'wasm', command: 'tool.wasm' } },
+        { name: 'b', kind: { type: 'wasm', command: 'tool.wasm' } },
+        { name: 'c', depends_on: ['a', 'b'], kind: { type: 'wasm', command: 'tool.wasm' } },
+        { name: 'd', depends_on: ['c'], kind: { type: 'wasm', command: 'tool.wasm' } },
       ],
     };
     const states = foldStepStates([
@@ -138,7 +138,7 @@ describe('projectStepStatuses', () => {
   });
 
   it('unknown depends_on names never block or crash the fixpoint', () => {
-    const spec = { name: 'x', steps: [{ name: 'a', depends_on: ['ghost'], kind: { type: 'python', code: 'x' } }] };
+    const spec = { name: 'x', steps: [{ name: 'a', depends_on: ['ghost'], kind: { type: 'wasm', command: 'tool.wasm' } }] };
     expect(projectStepStatuses(spec, new Map()).get('a')).toBe('pending');
   });
 });
@@ -153,7 +153,7 @@ describe('graphFromSpec', () => {
     expect(nodes.map((n) => n.id)).toEqual(['fetch', 'transform', 'review', 'publish']);
     expect(nodes[0]).toMatchObject({
       type: 'dagStep',
-      data: { label: 'fetch', status: 'done', kindType: 'python', output: 'rows=3' },
+      data: { label: 'fetch', status: 'done', kindType: 'wasm', output: 'rows=3' },
     });
     expect(edges.map((e) => e.source + '>' + e.target)).toEqual([
       'fetch>transform',
@@ -176,9 +176,9 @@ describe('graphFromSpec', () => {
     const cyclic = {
       name: 'c',
       steps: [
-        { name: 'a', depends_on: ['ghost', 'c', 'c'], kind: { type: 'python', code: 'x' } },
-        { name: 'b', depends_on: ['a'], kind: { type: 'python', code: 'x' } },
-        { name: 'c', depends_on: ['b'], kind: { type: 'python', code: 'x' } },
+        { name: 'a', depends_on: ['ghost', 'c', 'c'], kind: { type: 'wasm', command: 'tool.wasm' } },
+        { name: 'b', depends_on: ['a'], kind: { type: 'wasm', command: 'tool.wasm' } },
+        { name: 'c', depends_on: ['b'], kind: { type: 'wasm', command: 'tool.wasm' } },
       ],
     };
     const { nodes, edges } = graphFromSpec(cyclic, new Map());

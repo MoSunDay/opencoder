@@ -74,6 +74,7 @@ pub(crate) async fn converge_panicked_run(
         ProjectTodoRunStatus::Failed,
         Some("run driver panicked".into()),
         None,
+        None,
     )
     .await;
     if kind == ProjectTodoRunKind::Execute {
@@ -92,6 +93,7 @@ pub(crate) async fn converge_stale_run(deps: &Arc<Deps>, run: &ProjectTodoRunRec
         &run.id,
         ProjectTodoRunStatus::Failed,
         Some(STALE_RUN_NOTE.into()),
+        None,
         None,
     )
     .await;
@@ -125,6 +127,7 @@ pub(crate) async fn converge_lost_run(deps: &Arc<Deps>, run_id: &str) -> bool {
         run_id,
         ProjectTodoRunStatus::Cancelled,
         Some("cancelled: driver lost (restart/panic)".into()),
+        None,
         None,
     )
     .await;

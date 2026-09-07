@@ -74,6 +74,7 @@ async fn call_echo_tool_via_registry() {
         .expect("echo tool should be registered");
 
     let ctx = opencoder_core::ToolContext {
+        extra_env: Vec::new(),
         session_id: session_id.into(),
         message_id: "m1".into(),
         agent: "act".into(),
@@ -104,6 +105,7 @@ async fn call_add_tool_returns_sum() {
         .expect("add tool should be registered");
 
     let ctx = opencoder_core::ToolContext {
+        extra_env: Vec::new(),
         session_id: session_id.into(),
         message_id: "m1".into(),
         agent: "act".into(),

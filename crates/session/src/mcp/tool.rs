@@ -138,6 +138,7 @@ mod tests {
         assert_eq!(tools[0].name(), "mcp__calc__add");
 
         let ctx = ToolContext {
+            extra_env: Vec::new(),
             session_id: "s".into(),
             message_id: "m".into(),
             agent: "act".into(),
@@ -185,6 +186,7 @@ mod tests {
         );
 
         let ctx = ToolContext {
+            extra_env: Vec::new(),
             session_id: "s".into(),
             message_id: "m".into(),
             agent: "act".into(),

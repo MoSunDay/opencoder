@@ -175,7 +175,7 @@ async fn missing_runc_rootfs_is_rejected_before_durable_acceptance() {
                 node_id: None,
             },
             definition: Some(json!({"name":"runc","steps":[{
-                "name":"step","kind":{"type":"python","code":"print(1)","sandbox":"runc"}
+                "name":"step","kind":{"type":"wasm","command":"tool.wasm", "sandbox":"runc"}
             }]})),
         },
     )

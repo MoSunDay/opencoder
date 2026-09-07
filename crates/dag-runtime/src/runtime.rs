@@ -286,15 +286,15 @@ async fn execute_run_inner(
 /// Dispatch one step by kind, wrapped in its per-step wall-clock budget.
 /// A timeout cancels the step token and folds to `Error("step timeout")`.
 async fn execute_step(ctx: &StepCtx, exec: &ExecDeps, cancel: CancellationToken) -> StepResult {
-    // Python owns its budget and cancellation so process/container cleanup
+    // Wasm owns its budget and cancellation so process/container cleanup
     // completes before the runtime publishes the step's terminal status.
-    if matches!(&ctx.step.kind, StepKind::Python { .. }) {
-        return crate::exec::python::execute_python_step_cancellable(ctx, cancel).await;
+    if matches!(&ctx.step.kind, StepKind::Wasm { .. }) {
+        return crate::exec::wasm::execute_wasm_step_cancellable(ctx, cancel).await;
     }
     let fut = async {
         match &ctx.step.kind {
             StepKind::Agent { .. } => execute_agent_step(ctx, exec, cancel.clone()).await,
-            StepKind::Python { .. } => unreachable!("Python dispatched above"),
+            StepKind::Wasm { .. } => unreachable!("Wasm dispatched above"),
         }
     };
     match ctx.step.timeout_secs {

@@ -115,14 +115,17 @@ pub(crate) async fn dispatch_mode_switch(
             // runner applies it at the idle boundary). No sys_tokens/mode
             // flash here — the switch has not landed yet; the AgentSwitch
             // event folds it when the runner consumes the row. Same running
-            // arm shape as `fire_clear_confirm`.
-            crate::queue_admitter::handle_queue(
+            // arm shape as `fire_clear_confirm`. A failed hand-off flashes;
+            // the temp row/images were already rolled back.
+            crate::app_helpers::queue_submit_flash(
                 mode.prompt(),
                 admit_tx,
                 admit_st,
                 queue_items,
                 pending_images,
                 session_id,
+                anim_tick,
+                mode_flash,
             );
             crate::app_helpers::push_history(history, hist_idx, mode.prompt());
         }
@@ -421,13 +424,16 @@ pub(crate) async fn fire_clear_confirm(
 ) -> LoopFlow {
     let text = crate::clear_confirm::command_text(&cc);
     if *running {
-        crate::queue_admitter::handle_queue(
+        // Failed hand-off flashes; temp row/images already rolled back.
+        crate::app_helpers::queue_submit_flash(
             &text,
             admit_tx,
             admit_st,
             queue_items,
             pending_images,
             session_id,
+            anim_tick,
+            mode_flash,
         );
         // Unattended expiry is conservative (queue at the idle boundary), so
         // the queue panel row alone could read as a swallowed key — echo the

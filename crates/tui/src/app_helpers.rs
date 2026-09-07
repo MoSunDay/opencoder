@@ -499,6 +499,54 @@ pub(crate) fn queue_unsupported_flash(anim_tick: u32) -> (String, u32) {
     )
 }
 
+/// Tab-queue submit arm body (extracted from `app.rs`, file-size cap): the
+/// off-loop admitter owns the store write. On a failed hand-off (actor gone /
+/// channel saturated) the temp row + images were already rolled back — flash
+/// so the submit is not silently swallowed; the raw text stays recoverable
+/// via ↑ history (push_history runs on every submit).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn queue_submit_flash(
+    text: &str,
+    tx: &mpsc::Sender<crate::queue_admitter::AdmitReq>,
+    st: &mut crate::queue_admitter::AdmitUiState,
+    queue_items: &mut Vec<(i64, String)>,
+    pending_images: &mut Vec<(String, String)>,
+    session_id: &str,
+    anim_tick: u32,
+    mode_flash: &mut Option<(String, u32)>,
+) {
+    if !crate::queue_admitter::handle_queue(text, tx, st, queue_items, pending_images, session_id) {
+        *mode_flash = Some((
+            crate::queue_admitter::QUEUE_SUBMIT_FAILED_FLASH.to_string(),
+            anim_tick,
+        ));
+    }
+}
+
+/// Parent keyboard-steer submit arm body (extracted from `app.rs`, file-size
+/// cap): optimistic off-loop submit into `chat.steer_items` — no interrupt
+/// (`>` remains that route via `steer_fire::fire_steer_interrupt`). On a
+/// failed hand-off the temp row + images were already rolled back — flash;
+/// the raw text stays recoverable via ↑ history.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn steer_submit_flash(
+    tx: &mpsc::Sender<crate::queue_admitter::AdmitReq>,
+    st: &mut crate::queue_admitter::AdmitUiState,
+    steer_items: &mut Vec<(i64, String)>,
+    pending_images: &mut Vec<(String, String)>,
+    session_id: &str,
+    raw: &str,
+    anim_tick: u32,
+    mode_flash: &mut Option<(String, u32)>,
+) {
+    if !crate::steer_admit::submit_steer(tx, st, steer_items, pending_images, session_id, raw) {
+        *mode_flash = Some((
+            crate::steer_admit::STEER_SUBMIT_FAILED_FLASH.to_string(),
+            anim_tick,
+        ));
+    }
+}
+
 /// Stable busy hint shared by direct shortcuts and textual mode commands.
 pub(crate) fn mode_switch_busy_flash(anim_tick: u32) -> (String, u32) {
     (

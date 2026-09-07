@@ -339,7 +339,12 @@ pub(crate) async fn fold_ui_events(
                     *plan_skill_active =
                         crate::skill_persist::plan_highlight_from_consumed_text(text);
                 }
-                if let SessionEvent::SteerConsumed { text, .. } = &sev {
+                if let SessionEvent::SteerConsumed { seq, text } = &sev {
+                    // Ledger for optimistic-admit reconciliation: if the drain
+                    // consumed a steer whose admit completion is still in
+                    // flight, the completion must drop (never resurrect) the
+                    // temp row.
+                    crate::queue_admitter::note_consumed(admit, *seq);
                     // A steered input actually took effect: same re-derivation
                     // as the queue path -- a `$task-plan` token lights the
                     // chip, any other steered input reverts it.

@@ -11,6 +11,7 @@ mod mouse_helpers;
 mod mouse_scroll_tests;
 mod mouse_tests;
 mod mouse_wheel_tests;
+mod submit_flash_tests;
 
 // ----- Input-history recording (Enter / Tab recall via arrow keys) -----
 

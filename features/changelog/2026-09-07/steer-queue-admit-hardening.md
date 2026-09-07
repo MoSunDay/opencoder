@@ -23,6 +23,7 @@
 | 会话切换竞态：mismatch Done 双镜像不动、无 flash、inflight 清空且图片不注入新 composer；queue 回归守卫 | `apply_done_session_mismatch_drops_without_restore`、`apply_done_queue_done_reconciles_queue_mirror` | 同上 |
 | actor store 失败路径：删行 + flash + 图片恢复 | `actor_failure_path_flashes_and_removes_row` | `crates/tui/src/queue_admitter_fail_tests.rs` |
 | `handle_queue` 失败返回值与 flash、`apply_done` session 标签/steer 镜像分派 | `queue_admitter` 既有测试更新 | `crates/tui/src/queue_admitter.rs` |
+| 提交臂 flash 接线（评审跟进补测）：死通道失败时 `queue_submit_flash`/`steer_submit_flash` 写入对应 flash 常量与 anim_tick 且行/图片回滚、成功路径不 flash | `steer_submit_flash_failure_sets_mode_flash`、`queue_submit_flash_failure_sets_mode_flash`、`submit_flash_helpers_keep_mode_flash_clear_on_success` | `crates/tui/src/app_helpers_tests/submit_flash_tests.rs` |
 
 ## 验收结果
 
@@ -30,4 +31,5 @@
 - `cargo test -p opencoder-session`：101 个测试二进制全绿（steer_followup / input_delivery_recovery / steer_reabsorb / bare_steer_short_circuit / steer_batch_recovery / parent_steer_terminal / parent_turn_cancel_steer / subagent_steer / steer_skill_deferral 全部通过）。
 - `cargo test -p opencoder-tui`（含 `--tests`）：1788 passed / 0 failed（1698 unit + 90 integration，含 `tests/queue_admit_offloop.rs` 原样通过）；`cargo build -p opencoder-tui` 零告警，`cargo fmt --check` 干净。
 - 工作区 `cargo build --workspace` 在 `opencoder-dag-runtime` 失败（`StepKind::Python`/`rustpython_vm`）：为他人进行中的 python-step 工作树改动，与本轮无关（本轮未触碰 dag/dag-runtime/project/web）。
-- 行数预算：`app.rs` 800（恰在迭代上限内）、`queue_admitter.rs` 691、新文件 `steer_admit.rs` 265 / `queue_admitter_fail_tests.rs` 149 / `inputs_cross_instance_serialized.rs` 192。
+- 行数预算：`app.rs` 800（恰在迭代上限内）、`queue_admitter.rs` 691、新文件 `steer_admit.rs` 265 / `queue_admitter_fail_tests.rs` 149 / `inputs_cross_instance_serialized.rs` 198。
+- 评审跟进（同日）：补 `submit_flash_tests.rs` 3 例直接钉住提交臂 flash 接线；`opencoder-tui` 回归 1791/0（1701 unit + 90 integration）、clippy 零告警、fmt 干净（因主工作树 `opencoder-session` 他人 WIP 断点——`SessionState::env_passthrough`/`ToolContext::extra_env` 初始化未跟上——验证于 HEAD 隔离 worktree 执行）；修正本文 `inputs_cross_instance_serialized.rs` 行数笔误 192→198。

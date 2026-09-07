@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // StepsBlock DOM drill-down: Turn → Step → Function call. Zero clicks render
-// the collapsed `❯ 2 Steps` (or, once the turn has its own Say, the
-// `❯ Say(2 steps): {preview}` header) summary plus Say in ONE assistant
+// the collapsed `2 Steps` (or, once the turn has its own Say, the
+// `Say(2 steps): {preview}` header) summary plus Say in ONE assistant
 // bubble. Opening
 // the Turn reveals Steps; opening a Step reveals Thinking + N Function calls;
 // opening that aggregate reveals call rows, and a call reveals its result.
@@ -56,10 +56,10 @@ afterEach(() => {
 describe('StepsContent three-level drill-down', () => {
   it('renders ONLY the group row at zero clicks — the whole ladder stays out of the DOM', () => {
     mount();
-    expect(screen.getByText('❯ 2 Steps')).toBeTruthy();
+    expect(screen.getByText('2 Steps')).toBeTruthy();
     // Step, Thinking, function-call rows and results are all hidden.
-    expect(screen.queryByText(/❯ Step\(1\)/)).toBeNull();
-    expect(screen.queryByText(/❯ Step\(2\)/)).toBeNull();
+    expect(screen.queryByText(/Step\(1\)/)).toBeNull();
+    expect(screen.queryByText(/Step\(2\)/)).toBeNull();
     expect(screen.queryByText('💭 Thinking')).toBeNull();
     expect(screen.queryByText(/Function call/)).toBeNull();
     expect(screen.queryByText(/🔧 bash/)).toBeNull();
@@ -69,9 +69,9 @@ describe('StepsContent three-level drill-down', () => {
 
   it('clicking the group row reveals the step rows; thinking stays hidden (L0 → L1)', () => {
     mount();
-    fireEvent.click(screen.getByText('❯ 2 Steps'));
-    expect(screen.getByText(/❯ Step\(1\)/)).toBeTruthy();
-    expect(screen.getByText(/❯ Step\(2\)/)).toBeTruthy();
+    fireEvent.click(screen.getByText('2 Steps'));
+    expect(screen.getByText(/Step\(1\)/)).toBeTruthy();
+    expect(screen.getByText(/Step\(2\)/)).toBeTruthy();
     // Not drilled into Step(1) yet: no thinking, no aggregate row, no calls.
     expect(screen.queryByText('💭 Thinking')).toBeNull();
     expect(screen.queryByText('look at the repo first')).toBeNull();
@@ -81,11 +81,11 @@ describe('StepsContent three-level drill-down', () => {
 
   it('clicking a step row shows thinking + calls aggregate, not call rows', () => {
     mount();
-    fireEvent.click(screen.getByText('❯ 2 Steps'));
-    fireEvent.click(screen.getByText(/❯ Step\(1\)/));
+    fireEvent.click(screen.getByText('2 Steps'));
+    fireEvent.click(screen.getByText(/Step\(1\)/));
     expect(screen.getByText('💭 Thinking')).toBeTruthy();
     expect(screen.getByText('look at the repo first')).toBeTruthy();
-    expect(screen.getByText('❯ 1 Function call')).toBeTruthy();
+    expect(screen.getByText('1 Function call')).toBeTruthy();
     expect(screen.queryByText(/🔧 bash/)).toBeNull();
     expect(screen.queryByText('ls -la')).toBeNull();
     expect(screen.queryByText('total 8')).toBeNull();
@@ -93,9 +93,9 @@ describe('StepsContent three-level drill-down', () => {
 
   it('clicking a single call row expands its exact input/output', () => {
     mount();
-    fireEvent.click(screen.getByText('❯ 2 Steps'));
-    fireEvent.click(screen.getByText(/❯ Step\(1\)/));
-    fireEvent.click(screen.getByText('❯ 1 Function call'));
+    fireEvent.click(screen.getByText('2 Steps'));
+    fireEvent.click(screen.getByText(/Step\(1\)/));
+    fireEvent.click(screen.getByText('1 Function call'));
     fireEvent.click(screen.getByText(/🔧 bash/));
     expect(screen.getByText('ls -la')).toBeTruthy();
     expect(screen.getByText('total 8')).toBeTruthy();
@@ -105,9 +105,9 @@ describe('StepsContent three-level drill-down', () => {
     const initial = stepsTurn();
     initial.steps[0].calls[0].output = null;
     const mounted = mount([initial]);
-    fireEvent.click(screen.getByText('❯ 2 Steps'));
-    fireEvent.click(screen.getByText(/❯ Step\(1\)/));
-    fireEvent.click(screen.getByText('❯ 1 Function call'));
+    fireEvent.click(screen.getByText('2 Steps'));
+    fireEvent.click(screen.getByText(/Step\(1\)/));
+    fireEvent.click(screen.getByText('1 Function call'));
     fireEvent.click(screen.getByText(/🔧 bash/));
 
     const updated = stepsTurn();
@@ -116,34 +116,34 @@ describe('StepsContent three-level drill-down', () => {
       <TranscriptView turns={[updated]} usage={null} status="streaming" error={null} emptyText="无" />,
     );
 
-    expect(screen.getByText(/❯ Step\(1\)/)).toBeTruthy();
-    expect(screen.getByText('❯ 1 Function call')).toBeTruthy();
+    expect(screen.getByText(/Step\(1\)/)).toBeTruthy();
+    expect(screen.getByText('1 Function call')).toBeTruthy();
     expect(screen.getByText(/🔧 bash/)).toBeTruthy();
     expect(screen.getByText('new streamed output')).toBeTruthy();
 
-    fireEvent.click(screen.getByText('❯ 2 Steps'));
+    fireEvent.click(screen.getByText('2 Steps'));
     expect(
-      screen.getByText('❯ 2 Steps').closest('.ant-collapse-item').classList.contains('ant-collapse-item-active'),
+      screen.getByText('2 Steps').closest('.ant-collapse-item').classList.contains('ant-collapse-item-active'),
     ).toBe(false);
     updated.steps[0].calls[0].output = 'later output';
     mounted.rerender(
       <TranscriptView turns={[updated]} usage={null} status="streaming" error={null} emptyText="无" />,
     );
     expect(
-      screen.getByText('❯ 2 Steps').closest('.ant-collapse-item').classList.contains('ant-collapse-item-active'),
+      screen.getByText('2 Steps').closest('.ant-collapse-item').classList.contains('ant-collapse-item-active'),
     ).toBe(false);
   });
 
   it('Ctrl+L collapses the fully-drilled ladder back to the lone group row', () => {
     mount();
-    fireEvent.click(screen.getByText('❯ 2 Steps'));
-    fireEvent.click(screen.getByText(/❯ Step\(1\)/));
-    fireEvent.click(screen.getByText('❯ 1 Function call'));
+    fireEvent.click(screen.getByText('2 Steps'));
+    fireEvent.click(screen.getByText(/Step\(1\)/));
+    fireEvent.click(screen.getByText('1 Function call'));
     fireEvent.click(screen.getByText(/🔧 bash/));
     expect(screen.getByText('total 8')).toBeTruthy();
     fireEvent.keyDown(window, { key: 'l', ctrlKey: true });
-    expect(screen.getByText('❯ 2 Steps')).toBeTruthy();
-    expect(screen.queryByText(/❯ Step\(1\)/)).toBeNull();
+    expect(screen.getByText('2 Steps')).toBeTruthy();
+    expect(screen.queryByText(/Step\(1\)/)).toBeNull();
     expect(screen.queryByText('look at the repo first')).toBeNull();
     expect(screen.queryByText(/🔧 bash/)).toBeNull();
     expect(screen.queryByText('total 8')).toBeNull();
@@ -151,13 +151,13 @@ describe('StepsContent three-level drill-down', () => {
 
   it('the ⤒ 收起 link resets the ladder the same way', () => {
     mount();
-    fireEvent.click(screen.getByText('❯ 2 Steps'));
-    fireEvent.click(screen.getByText(/❯ Step\(2\)/));
-    fireEvent.click(screen.getByText('❯ 1 Function call'));
+    fireEvent.click(screen.getByText('2 Steps'));
+    fireEvent.click(screen.getByText(/Step\(2\)/));
+    fireEvent.click(screen.getByText('1 Function call'));
     expect(screen.getByText(/🔧 read/)).toBeTruthy();
     fireEvent.click(screen.getByText('⤒ 收起'));
-    expect(screen.getByText('❯ 2 Steps')).toBeTruthy();
-    expect(screen.queryByText(/❯ Step\(2\)/)).toBeNull();
+    expect(screen.getByText('2 Steps')).toBeTruthy();
+    expect(screen.queryByText(/Step\(2\)/)).toBeNull();
     expect(screen.queryByText(/🔧 read/)).toBeNull();
   });
 
@@ -179,8 +179,8 @@ describe('StepsContent three-level drill-down', () => {
     running.progressActive = true;
     mount([running, { kind: 'text', role: 'assistant', text: 'Say started' }]);
     expect(screen.queryByText('running')).toBeNull();
-    expect(screen.getByText('❯ Say(2 steps): Say started')).toBeTruthy();
-    expect(screen.queryByText('❯ 2 Steps')).toBeNull();
+    expect(screen.getByText('Say(2 steps): Say started')).toBeTruthy();
+    expect(screen.queryByText('2 Steps')).toBeNull();
   });
 
   it('keeps the running tag ON the Say row while sayActive (12px gap)', () => {
@@ -192,7 +192,7 @@ describe('StepsContent three-level drill-down', () => {
     const tag = screen.getByText('running');
     expect(tag).toBeTruthy();
     expect(tag.style.marginLeft).toBe('12px');
-    expect(screen.getByText('❯ Say(2 steps): partial answer line one')).toBeTruthy();
+    expect(screen.getByText('Say(2 steps): partial answer line one')).toBeTruthy();
     expect(screen.queryByText('error')).toBeNull();
   });
 
@@ -200,7 +200,7 @@ describe('StepsContent three-level drill-down', () => {
     const errored = stepsTurn();
     errored.steps[0].calls[0].isError = true;
     mount([errored, { kind: 'text', role: 'assistant', text: 'finished with a failure' }]);
-    expect(screen.getByText('❯ Say(2 steps): finished with a failure')).toBeTruthy();
+    expect(screen.getByText('Say(2 steps): finished with a failure')).toBeTruthy();
     expect(screen.getByText('error')).toBeTruthy();
     expect(screen.queryByText('running')).toBeNull();
   });
@@ -212,16 +212,16 @@ describe('StepsContent three-level drill-down', () => {
       steps: [{ thinking: 'planning the next call', calls: [] }],
     };
     mount([streaming]);
-    expect(screen.getByText('❯ 1 Step')).toBeTruthy();
-    expect(screen.queryByText(/❯ Step\(1\)/)).toBeNull();
+    expect(screen.getByText('1 Step')).toBeTruthy();
+    expect(screen.queryByText(/Step\(1\)/)).toBeNull();
     expect(screen.queryByText('💭 Thinking')).toBeNull();
     expect(screen.queryByText('planning the next call')).toBeNull();
     cleanup();
     const openCall = stepsTurn();
     openCall.steps[0].calls[0].output = null;
     mount([openCall]);
-    expect(screen.getByText('❯ 2 Steps')).toBeTruthy();
-    expect(screen.queryByText(/❯ Step\(1\)/)).toBeNull();
+    expect(screen.getByText('2 Steps')).toBeTruthy();
+    expect(screen.queryByText(/Step\(1\)/)).toBeNull();
     expect(screen.queryByText('look at the repo first')).toBeNull();
   });
 
@@ -237,8 +237,8 @@ describe('StepsContent three-level drill-down', () => {
       }],
     };
     mount([settled]);
-    expect(screen.getByText('❯ 1 Step')).toBeTruthy();
-    expect(screen.queryByText(/❯ Step\(1\)/)).toBeNull();
+    expect(screen.getByText('1 Step')).toBeTruthy();
+    expect(screen.queryByText(/Step\(1\)/)).toBeNull();
     expect(screen.queryByText('settled round')).toBeNull();
     expect(screen.queryByText('💭 Thinking')).toBeNull();
     expect(screen.queryByText(/Function call/)).toBeNull();
@@ -251,7 +251,7 @@ describe('StepsContent three-level drill-down', () => {
     // Zero clicks: only the group-row tag is in the document.
     expect(screen.getByText('error')).toBeTruthy();
     expect(screen.queryByText('running')).toBeNull();
-    fireEvent.click(screen.getByText('❯ 2 Steps'));
+    fireEvent.click(screen.getByText('2 Steps'));
     // Step(1) carries the failed call → its own red tag next to the label.
     expect(screen.getAllByText('error').length).toBe(2);
   });
@@ -269,14 +269,14 @@ describe('StepsContent three-level drill-down', () => {
       }],
     };
     mount([one]);
-    expect(screen.getByText('❯ 1 Step')).toBeTruthy();
-    expect(screen.queryByText(/❯ 1 Steps/)).toBeNull();
-    fireEvent.click(screen.getByText('❯ 1 Step'));
-    fireEvent.click(screen.getByText(/❯ Step\(1\)/));
-    expect(screen.getByText('❯ 2 Function calls')).toBeTruthy();
+    expect(screen.getByText('1 Step')).toBeTruthy();
+    expect(screen.queryByText(/1 Steps/)).toBeNull();
+    fireEvent.click(screen.getByText('1 Step'));
+    fireEvent.click(screen.getByText(/Step\(1\)/));
+    expect(screen.getByText('2 Function calls')).toBeTruthy();
     expect(screen.queryByText(/🔧 bash/)).toBeNull();
     expect(screen.queryByText(/🔧 read/)).toBeNull();
-    fireEvent.click(screen.getByText('❯ 2 Function calls'));
+    fireEvent.click(screen.getByText('2 Function calls'));
     expect(screen.getByText(/🔧 bash/)).toBeTruthy();
     expect(screen.getByText(/🔧 read/)).toBeTruthy();
   });
@@ -290,7 +290,7 @@ describe('StepsContent three-level drill-down', () => {
     // The Say merged INTO the header: label switches to the Say form with
     // the step count and the Say's first-line preview. The body below skips
     // that duplicated first line (③) — only the remaining lines render.
-    const group = screen.getByText('❯ Say(2 steps): all done here');
+    const group = screen.getByText('Say(2 steps): all done here');
     const say = screen.getByText('and the details follow');
     expect(group.compareDocumentPosition(say) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
@@ -307,11 +307,11 @@ describe('Say body spacing & first-line dedup (② ③)', () => {
       stepsTurn(),
       { kind: 'text', role: 'assistant', text: 'line one\nline two\nline three' },
     ]);
-    expect(screen.getByText('❯ Say(2 steps): line one')).toBeTruthy();
+    expect(screen.getByText('Say(2 steps): line one')).toBeTruthy();
     // 首行已由头部渲染，正文不再重复。
     expect(screen.queryByText('line one')).toBeNull();
     // 其余行照常渲染（testing-library 会把换行归一化为空格）。
-    expect(screen.getByText('line two line three')).toBeTruthy();
+    expect(screen.getByText('line two').closest('.transcript-text').textContent).toBe('line two\nline three');
     // ② 真实空行间距：正文块 marginTop 16px（TUI 头部后插一空行的对齐）。
     const wrap = spacingWrap(container);
     expect(wrap).toBeTruthy();
@@ -323,13 +323,13 @@ describe('Say body spacing & first-line dedup (② ③)', () => {
       stepsTurn(),
       { kind: 'text', role: 'assistant', text: 'all done here' },
     ]);
-    expect(screen.getByText('❯ Say(2 steps): all done here')).toBeTruthy();
+    expect(screen.getByText('Say(2 steps): all done here')).toBeTruthy();
     // 单行 Say 与 preview 一字不差 → 正文整块不渲染。
     expect(screen.queryByText('all done here')).toBeNull();
     // 无残留间距节点（没有任何 16px 的正文块包装）。
     expect(spacingWrap(container)).toBeUndefined();
     // Turn 泡内没有任何 Typography 段落 —— 不残留空文本块。
-    const bubble = screen.getByText('❯ Say(2 steps): all done here').closest('.ant-bubble');
+    const bubble = screen.getByText('Say(2 steps): all done here').closest('.ant-bubble');
     expect(bubble.querySelectorAll('.ant-typography')).toHaveLength(0);
   });
 });

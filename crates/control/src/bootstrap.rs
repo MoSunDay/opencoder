@@ -31,7 +31,8 @@ impl BrainClient {
 }
 impl ChatStream for BrainClient {
     fn chat_stream(&self, req: ChatRequest) -> Result<tokio::sync::mpsc::Receiver<LlmEvent>> {
-        self.client(false)?.chat_stream(req)
+        self.client(false)?
+            .chat_stream(configured_planner_request(&self.config, req))
     }
     fn embed(&self, texts: &[String], model: &str) -> Result<Vec<Vec<f32>>> {
         self.client(true)?.embed(texts, model)
@@ -39,6 +40,16 @@ impl ChatStream for BrainClient {
     fn backend(&self) -> &'static str {
         "configured-brain"
     }
+}
+
+// Keep an explicit request override; otherwise inherit the server's existing
+// reasoning setting, just like node conversations. Omitting it can spend the
+// whole planner output budget on reasoning and leave an incomplete JSON tree.
+fn configured_planner_request(config: &Config, mut request: ChatRequest) -> ChatRequest {
+    if request.reasoning_effort.is_none() {
+        request.reasoning_effort = config.reasoning_effort.clone();
+    }
+    request
 }
 
 pub async fn new_state(
@@ -175,8 +186,45 @@ async fn shutdown_signal(state: Arc<AppState>) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::resolve_data_dir;
+    use super::{configured_planner_request, resolve_data_dir};
+    use opencoder_core::Config;
+    use opencoder_llm::ChatRequest;
     use std::path::{Path, PathBuf};
+
+    #[test]
+    fn planner_inherits_configured_reasoning_and_preserves_request_overrides() {
+        let config = Config {
+            reasoning_effort: Some("low".into()),
+            ..Config::default()
+        };
+        let request = ChatRequest {
+            model: "planner".into(),
+            messages: vec![],
+            tools: vec![],
+            tool_choice: None,
+            temperature: Some(0.2),
+            max_tokens: Some(2048),
+            reasoning_effort: None,
+            cache_salt: None,
+        };
+        let inherited = configured_planner_request(&config, request.clone());
+        assert_eq!(inherited.reasoning_effort.as_deref(), Some("low"));
+        assert_eq!(inherited.model, "planner");
+        assert_eq!(inherited.max_tokens, Some(2048));
+        let explicit = ChatRequest {
+            reasoning_effort: Some("high".into()),
+            ..request.clone()
+        };
+        assert_eq!(
+            configured_planner_request(&config, explicit)
+                .reasoning_effort
+                .as_deref(),
+            Some("high")
+        );
+        assert!(configured_planner_request(&Config::default(), request)
+            .reasoning_effort
+            .is_none());
+    }
 
     #[test]
     fn explicit_data_dir_is_used_and_must_be_absolute() {

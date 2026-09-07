@@ -47,7 +47,7 @@ probe_release_bin() {
 SERVER_BIN="${OPENCODER_SMOKE_SERVER_BIN:-$(probe_release_bin opencoder-server opencoder-server)}"
 AGENT_BIN="${OPENCODER_SMOKE_AGENT_BIN:-$(probe_release_bin opencoder-agent opencoder-agent)}"
 
-TMP="$(mktemp -d /tmp/opencoder-smoke-nodes.XXXXXX)"
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/opencoder-smoke-nodes.XXXXXX")"
 SRV_PID=""
 NODE_PID=""
 cleanup() {

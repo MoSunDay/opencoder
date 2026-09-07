@@ -1,4 +1,4 @@
-Commit: (working-tree, 基于 c1a1b2e78e1ccd4a3cc2ac6dc408a76d30bf46e6)
+Commit: 8ed37a1aef29f864c8a7ad302e04766c38e5c627
 
 # Agent 调度平台
 
@@ -20,6 +20,8 @@ Commit: (working-tree, 基于 c1a1b2e78e1ccd4a3cc2ac6dc408a76d30bf46e6)
 ## 入口与状态
 
 Web 的节点页支持负载与显式维护，全部执行页支持统一创建、查询、取消、恢复；团队页配置职责，大脑页配置能力绑定。项目、会话、DAG、TODO 页面继续可用。
+
+Agent 执行详情与会话交互按同一 Say / Step 层级展示：回答正文保持可见，思考、工具调用及输入输出逐层展开。完成后的 Markdown 首行作为 Say 标题，正文不重复该行；流式输出结束和消息刷新保留用户的展开状态。详情支持同一会话多轮续写，并适配窄屏。渲染结构见 [Web 模块](../../agents/web/index.md)。
 
 主要状态为 pending、running、idle、interrupted、done、error、cancelled。会话一次回答后为 idle；项目可继续 Plan/Act；工作流完成后进入终态。节点持久化错误会使节点不可调度。
 

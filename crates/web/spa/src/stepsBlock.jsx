@@ -34,12 +34,16 @@
 
 import { Collapse, Tag, Typography } from 'antd';
 import { fmtDuration } from './format.js';
-import { sayPreview } from './sayText.js';
+import { sayPresentation } from './transcript/markdown.js';
 
 const { Text, Paragraph } = Typography;
 
 // TUI-flavoured monospace carried over from the old TextTurn/ToolTurn.
 const MONO = 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+
+// One disclosure glyph, changing with the actual state (TUI ▸ / ❯).
+// A literal glyph in the label plus antd's default icon produced two arrows.
+const disclosureIcon = ({ isActive }) => <span aria-hidden="true">{isActive ? '❯' : '▸'}</span>;
 
 /// Reasoning row for standalone `think` turns (pure-text rounds): ghost
 /// collapse, renders even with empty text so a reasoning-only frame still
@@ -48,6 +52,7 @@ const MONO = 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
 export function ThinkContent({ turn }) {
   return (
     <Collapse
+      expandIcon={disclosureIcon}
       size="small"
       ghost
       items={[{
@@ -76,6 +81,7 @@ export function ToolContent({ turn }) {
   const dur = fmtDuration(turn.durationMs);
   return (
     <Collapse
+      expandIcon={disclosureIcon}
       size="small"
       items={[{
         key: 'tool',
@@ -140,13 +146,14 @@ function StepCollapse({ step, index }) {
   const thinking = step && typeof step.thinking === 'string' ? step.thinking : '';
   return (
     <Collapse
+      expandIcon={disclosureIcon}
       size="small"
       ghost
       items={[{
         key: 'step:' + k,
         label: (
           <span style={{ fontFamily: MONO, fontSize: 12 }}>
-            ❯ Step({k})
+            Step({k})
             {failed ? <Tag color="red" style={{ marginLeft: 8 }}>error</Tag> : null}
           </span>
         ),
@@ -155,13 +162,14 @@ function StepCollapse({ step, index }) {
             {thinking ? <StepThinking text={thinking} /> : null}
             {list.length ? (
               <Collapse
+                expandIcon={disclosureIcon}
                 size="small"
                 ghost
                 items={[{
                   key: 'calls:' + k,
                   label: (
                     <span style={{ fontFamily: MONO, fontSize: 12 }}>
-                      ❯ {list.length} Function call{list.length === 1 ? '' : 's'}
+                      {list.length} Function call{list.length === 1 ? '' : 's'}
                     </span>
                   ),
                   children: list.map((call, ci) => (
@@ -199,7 +207,7 @@ function StepCollapse({ step, index }) {
 /// Say text: only the first non-blank line (preview) rides in the label —
 /// the full Say body renders outside, as this component's sibling (see the
 /// header comment). Disclosure state never jumps as frames arrive.
-export function StepsContent({ turn }) {
+export function StepsContent({ turn, preview }) {
   const steps = turn && Array.isArray(turn.steps) ? turn.steps : [];
   const calls = steps.flatMap((s) => ((s && Array.isArray(s.calls)) ? s.calls : []));
   const openCall = calls.some((c) => c && c.output === null);
@@ -207,7 +215,7 @@ export function StepsContent({ turn }) {
   // Same Say test bubbleItems.js uses for its progressActive freeze (image
   // markers count — they ride in the say segment like any non-step part).
   const hasSay = say.some((part) => (
-    part && part.kind === 'text' && typeof part.text === 'string' && part.text.length > 0
+    part && part.kind === 'text' && !part.image && typeof part.text === 'string' && part.text.trim().length > 0
   ));
   const running = hasSay
     ? turn.sayActive === true
@@ -215,6 +223,7 @@ export function StepsContent({ turn }) {
   const errored = calls.some((c) => c && c.isError);
   return (
     <Collapse
+      expandIcon={disclosureIcon}
       size="small"
       ghost
       items={[{
@@ -222,8 +231,8 @@ export function StepsContent({ turn }) {
         label: (
           <span style={{ fontFamily: MONO, fontSize: 12 }}>
             {hasSay
-              ? `❯ Say(${steps.length} step${steps.length === 1 ? '' : 's'}): ${sayPreview(say)}`
-              : `❯ ${steps.length} Step${steps.length === 1 ? '' : 's'}`}
+              ? `Say(${steps.length} step${steps.length === 1 ? '' : 's'}): ${preview ?? sayPresentation(say, turn.sayActive === true).preview}`
+              : `${steps.length} Step${steps.length === 1 ? '' : 's'}`}
             {running ? <Tag color="processing" style={{ marginLeft: 12 }}>running</Tag> : null}
             {!running && errored ? <Tag color="red" style={{ marginLeft: 12 }}>error</Tag> : null}
           </span>

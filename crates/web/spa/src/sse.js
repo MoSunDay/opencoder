@@ -27,7 +27,7 @@ const BACKOFF_CAP_MS = 15000;
 const REPLAY_CAP_FRAMES = 400;
 const MAX_ATTEMPTS = 5;
 
-export function openStream({ path, sessionId, after, onFrame, onStatus, onResync, signal }) {
+export function openStream({ path, sessionId, after, onFrame, onStatus, onResync, signal, executionHistory = false }) {
   // `ctrl` is the CURRENT connection's abort controller: restart() swaps it
   // after aborting so the replacement stream gets a fresh signal.
   let ctrl = new AbortController();
@@ -143,7 +143,7 @@ export function openStream({ path, sessionId, after, onFrame, onStatus, onResync
       restart();
       return;
     }
-    if (frame.event === 'done' || frame.event === 'error') {
+    if (!executionHistory && (frame.event === 'done' || frame.event === 'error')) {
       stop(); // terminal for the subscribed task: never reconnect
     }
   }
@@ -180,6 +180,13 @@ export function openStream({ path, sessionId, after, onFrame, onStatus, onResync
     }
     if (stopped || retired) {
       return; // restart()/stop() already owns the reconnection decision
+    }
+    if (executionHistory) {
+      // Fleet streams replay multiple runs of one execution. Historical
+      // done/error frames are boundaries, and only EOF ends this snapshot.
+      // The caller reopens from its last seq when execution resumes.
+      stop();
+      return;
     }
     // Server closed cleanly WITHOUT a terminal frame (proxy timeout, server
     // restart mid-run). Mirror of sse.js's error → tryReconnect path: retry

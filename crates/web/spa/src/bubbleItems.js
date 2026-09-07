@@ -55,10 +55,14 @@ function isSayPart(part) {
 export function itemsFromTurns(turns) {
   const list = Array.isArray(turns) ? turns : [];
   const items = [];
+  // Live-only status rows are absent from persisted message snapshots.
+  // They must not renumber later ladders and reset the user's disclosure.
+  let semanticIndex = 0;
+  const positions = list.map((turn, i) => turn?.kind === 'sys' ? `sys-${i}` : semanticIndex++);
   for (let index = 0; index < list.length;) {
     const turn = list[index];
     if (!isAssistantTurnPart(turn)) {
-      items.push({ key: turnKey(turn, index), role: roleOfTurn(turn), content: turn });
+      items.push({ key: turnKey(turn, positions[index]), role: roleOfTurn(turn), content: turn });
       index += 1;
       continue;
     }
@@ -93,7 +97,7 @@ export function itemsFromTurns(turns) {
       ));
       const say = parts.filter((part) => part.kind !== 'steps');
       const hasSay = say.some((part) => (
-        part.kind === 'text' && typeof part.text === 'string' && part.text.length > 0
+        part.kind === 'text' && !part.image && typeof part.text === 'string' && part.text.trim().length > 0
       ));
       const progressActive = hasSay
         ? false
@@ -107,7 +111,7 @@ export function itemsFromTurns(turns) {
       // (snapshot replay turns never carry one).
       const sayActive = stepParts.some((part) => part.sayStreaming === true);
       items.push({
-        key: 'assistant-turn:' + index,
+        key: 'assistant-turn:' + positions[index],
         role: 'assistantTurn',
         content: {
           kind: 'assistant_turn', role: 'assistant', steps, say, progressActive, sayActive,
@@ -116,7 +120,7 @@ export function itemsFromTurns(turns) {
     } else {
       parts.forEach((part, offset) => {
         const partIndex = index + offset;
-        items.push({ key: turnKey(part, partIndex), role: roleOfTurn(part), content: part });
+        items.push({ key: turnKey(part, positions[partIndex]), role: roleOfTurn(part), content: part });
       });
     }
     index = end;

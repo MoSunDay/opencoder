@@ -25,12 +25,13 @@
 // UsageFooter / StatusTag (moved from render.jsx verbatim in spirit) stay
 // below the list; the empty-state hint keeps the old wording contract.
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Bubble } from '@ant-design/x';
 import { Tag, Typography } from 'antd';
 import { isEmptyTranscript, itemsFromTurns, usageLine } from './bubbleItems.js';
 import { StepsContent, ThinkContent, ToolContent } from './stepsBlock.jsx';
-import { sayBodyParts, sayPreview } from './sayText.js';
+import { sayPresentation } from './transcript/markdown.js';
+import { AssistantText, TextRows } from './transcript/text.jsx';
 import { SubagentContent } from './subagentBlock.jsx';
 
 const { Text, Paragraph } = Typography;
@@ -64,6 +65,7 @@ function RoleAvatar({ glyph, color }) {
 /// user / ai body: same monospace pre-wrap paragraph the old TextTurn used
 /// (the ❯/◉ role markers now live on the bubble avatars).
 function TextContent({ turn }) {
+  if (turn.role === 'assistant' && !turn.image) return <div><div style={{ color: '#389e0d', fontWeight: 600 }}>❯ Say:</div><AssistantText turn={turn} /></div>;
   return (
     <Paragraph
       style={{
@@ -89,17 +91,18 @@ function TextContent({ turn }) {
 /// BODY still renders below as sibling nodes.
 function AssistantTurnContent({ turn }) {
   const say = turn && Array.isArray(turn.say) ? turn.say : [];
-  // 头部标签已经渲染了正文首个非空行（preview）：正文跳过该行，单行 Say
-  // 不再与 preview 一字不差地重复；去完为空则整个正文块不渲染 —— 不残留
-  // 任何间距或空节点。口径见 sayText.js（与头部共用同一份拼接）。
-  const body = sayBodyParts(say, sayPreview(say));
+  // 和 TUI 一样，流式取 raw 行，完成后取 Markdown 渲染行。标题与正文
+  // 共用同一表示，避免原始首行去重破坏代码围栏或重复 Markdown 标题。
+  const presentation = useMemo(() => sayPresentation(say, turn.sayActive === true), [say, turn.sayActive]);
+  const body = presentation.other;
   return (
     <div>
-      <StepsContent turn={turn} />
-      {body.length > 0 ? (
+      <StepsContent turn={turn} preview={presentation.preview} />
+      {body.length > 0 || presentation.rows.length > 0 ? (
         // TUI 对齐（头部行后插一空行）：正文块与头部保持 16px 的真实块级
         // 间距，不再与 `❯ Say(N steps)` 行挤在一起。
         <div style={{ marginTop: 16 }}>
+          {!!presentation.rows.length && <TextRows rows={presentation.rows} />}
           {body.map((part, index) => {
             if (part.kind === 'think') {
               return <ThinkContent key={'think:' + index} turn={part} />;

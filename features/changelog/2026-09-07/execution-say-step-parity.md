@@ -1,4 +1,4 @@
-Commit: c8c5ba907ad99912a83e1daf1fd89fe7100e00d4
+Commit: 8ed37a1aef29f864c8a7ad302e04766c38e5c627
 
 # Agent 执行详情统一 Say / Step 渲染
 
@@ -23,7 +23,12 @@ Commit: c8c5ba907ad99912a83e1daf1fd89fe7100e00d4
 | 历史终态后继续回放与单轮终态兼容 | `fleet execution event history` | `crates/web/spa/src/sse.history.test.js` |
 | 实际贪吃蛇执行记录、真实 bash 续写、Markdown、桌面与 390px 视口 | Chromium + 正式 Server / Node / 模型 | `/data00/opencoder-delivery/20260907-say-step-parity/` |
 
-回归入口：`npm test`、`scripts/check-spa-drift.sh`、`cargo clippy --workspace --all-targets --locked -- -D warnings`、`TMPDIR=/var/tmp cargo test --workspace --locked`、`cargo build --workspace --locked`。验收日志保存在上述本机目录。
+验收结果：
+
+- SPA：`npm test` → 47 个文件、416 个测试通过；构建和 `scripts/check-spa-drift.sh` 通过。
+- Rust：`cargo test --workspace --locked -- --test-threads=4` → 4,752 passed / 0 failed / 5 个既有手动 ignored；原始输出为上述目录中的 `rust-tests-verified.log`。本机测试使用 `TMPDIR=/var/tmp`，并在 `NO_PROXY` / `no_proxy` 中包含回环地址，避免磁盘容量门槛与环境代理干扰测试节点。
+- `cargo clippy --workspace --all-targets --locked -- -D warnings` 零警告；`cargo build --workspace --locked` 成功。
+- 提交 `8ed37a1` 已更新到本机 Server / Node，节点 ID 保持不变，接单状态为 Ready。当前 Web 的真实 bash 续写、历史 20 组 Say/Step、Markdown 去重、工具展开和 390px 视口均通过；返回的全部前端文件与发布包目录哈希一致。部署与浏览器证据分别为 `deployment.json`、`deployed-browser.json`、`final-state.json`。
 
 ## 相关文档
 

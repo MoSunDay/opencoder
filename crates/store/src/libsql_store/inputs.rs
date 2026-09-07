@@ -8,8 +8,13 @@ const INSERT_INPUT: &str = "\
 INSERT INTO session_inputs (id, session_id, delivery, prompt, images_json, admitted_seq, promoted_seq, display_text)
 VALUES (?, ?, ?, ?, ?, ?, NULL, ?)";
 
+/// Admit an input and return its row seq. The immediate transaction
+/// serializes independent store instances as well as this store's own
+/// connection, so a concurrent cross-process commit between the seq SELECT
+/// and the INSERT cannot fail the upgrade with SQLITE_BUSY_SNAPSHOT —
+/// busy_timeout turns cross-process contention into waiting instead.
 pub async fn admit(conn: &Connection, input: &SessionInput) -> Result<i64> {
-    super::tx::run_tx(conn, "BEGIN", || async move {
+    super::tx::run_tx(conn, "BEGIN IMMEDIATE", || async move {
         let admitted_seq = next_admitted_seq(conn, &input.session_id).await?;
         let images_json = serde_json::to_string(&input.images).unwrap_or_else(|_| "[]".into());
         conn.execute(
@@ -117,7 +122,7 @@ pub async fn promote(
     up_to_admitted_seq: i64,
     delivery: Delivery,
 ) -> Result<Vec<i64>> {
-    super::tx::run_tx(conn, "BEGIN", || async move {
+    super::tx::run_tx(conn, "BEGIN IMMEDIATE", || async move {
         let stmt = conn
             .prepare("SELECT seq FROM session_inputs WHERE session_id = ? AND delivery = ? AND promoted_seq IS NULL AND admitted_seq <= ? ORDER BY admitted_seq ASC")
             .await?;
@@ -155,7 +160,7 @@ pub async fn unpromote(conn: &Connection, session_id: &str, seqs: &[i64]) -> Res
     if seqs.is_empty() {
         return Ok(());
     }
-    super::tx::run_tx(conn, "BEGIN", || async move {
+    super::tx::run_tx(conn, "BEGIN IMMEDIATE", || async move {
         for s in seqs {
             conn.execute(
                 "UPDATE session_inputs SET promoted_seq = NULL WHERE session_id = ? AND seq = ? AND promoted_seq IS NOT NULL",
@@ -176,7 +181,7 @@ pub async fn mark_recorded(conn: &Connection, session_id: &str, seqs: &[i64]) ->
     if seqs.is_empty() {
         return Ok(());
     }
-    super::tx::run_tx(conn, "BEGIN", || async move {
+    super::tx::run_tx(conn, "BEGIN IMMEDIATE", || async move {
         for s in seqs {
             conn.execute(
                 "UPDATE session_inputs SET recorded = 1 WHERE session_id = ? AND seq = ?",
@@ -212,7 +217,7 @@ pub async fn recover_orphans(conn: &Connection, session_id: &str) -> Result<u64>
 /// it on the SELECT a recorded row would be picked, the guarded UPDATE would
 /// match 0 rows, and the function would still report the row as promoted.
 pub async fn promote_next_queued(conn: &Connection, session_id: &str) -> Result<Option<i64>> {
-    super::tx::run_tx(conn, "BEGIN", || async move {
+    super::tx::run_tx(conn, "BEGIN IMMEDIATE", || async move {
         let stmt = conn
             .prepare("SELECT seq FROM session_inputs WHERE session_id = ? AND delivery = 'queue' AND promoted_seq IS NULL AND recorded = 0 ORDER BY admitted_seq ASC LIMIT 1")
             .await?;
@@ -305,7 +310,7 @@ pub async fn swap_input_order(
     if seq_a == seq_b {
         return Ok(());
     }
-    super::tx::run_tx(conn, "BEGIN", || async move {
+    super::tx::run_tx(conn, "BEGIN IMMEDIATE", || async move {
         let stmt = conn
             .prepare("SELECT admitted_seq FROM session_inputs WHERE seq = ? AND session_id = ? AND promoted_seq IS NULL")
             .await?;

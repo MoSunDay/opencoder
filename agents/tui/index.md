@@ -8,7 +8,7 @@ ratatui + crossterm 交互界面。3-region 布局、事件循环、鼠标命中
 当前 disclosure 不变量：已有 Thinking/Compaction/Turn/Step/calls/call 的展开或收起状态完全由用户掌控。新 reasoning、tool result、轮次终态、Compaction 最终摘要与本地 `!cmd` 结果只更新内容/动效，不改写 disclosure；仅表头点击或 Ctrl+L 会改变它。
 
 ## 边界与非目标
-- 不在事件循环内联等待 Store 写锁：队列类 admit（Tab/Enter-while-running）经 `queue_admitter` actor 离环完成，按键分支只做乐观镜像 + completion 对账（steer 路径暂例外）；其余 Store 交互经 worker `UiCmd` 通道。不持有 SessionState（worker 持有）。
+- 不在事件循环内联等待 Store 写锁：队列 admit（Tab）与父会话键盘 steer（Enter-while-running，`steer_admit.rs`）都经 `queue_admitter` actor 离环完成，按键分支只做乐观镜像（负 temp seq）+ completion 对账；`AdmitDone` 带 `session_id`/`steer`，会话切换后的过期 completion 整体丢弃（防幽灵行），`QueueConsumed` 与 `SteerConsumed` 都喂 `note_consumed` 台账；try_send 失败与 store 失败均 flash（文字可 ↑ 恢复、图片回滚）。subagent steer 因 gate reserve/commit 语义保持内联（`subagent_input.rs`）。其余 Store 交互经 worker `UiCmd` 通道。不持有 SessionState（worker 持有）。
 - **worker 事件转发与背压 shed 行安全**（`worker.rs::spawn_ui_event_forwarder`）：worker 把 SessionEvent 转发进 UI 事件通道（容量 512）时，剩余容量 ≤ `DELTA_MIN_CAPACITY=64` 则 shed `TextDelta`（reasoning 洪泛 + UI 忙时的背压丢弃）。被 shed 的块可能携带 `'\n'`——丢掉后两侧文本在 Say 拼接中粘成一行，而**被中断的 run 永无 AssistantFinal** 修复（完成轮靠 reconcile 修复）。forwarder 因此维护 `shed_line_break`：shed 含换行的块后，给下一个送达的 TextDelta 前插一个 `'\n'`（其已以换行开头则不叠加），并在 `LlmRoundEnd | TranscriptReset | Done | Error` 回合边界重置——丢失的文本不找回，但行结构在所有路径（含中断轮）存活。另 `Prompt` 臂 `message_floor` 为 `AtomicUsize`，随 `TranscriptReset(msgs)` 更新为 `msgs.len()`，防中途压缩把 messages 换短后 AssistantFinal 切片越界静默丢失。
 - 非目标：TUI 不是 Web 替代品——app 内无 SSE replay，仅 live event 流；但 **worker 持有 `Option<Arc<dyn Store>>`**，每个 SessionEvent 经 `worker::persist_event`（fire-and-forget spawn）写入 `session_events`（含 `sse_kind`），故 web/SSE 客户端可回放 TUI 驱动的会话（TUI 自身不在 app 内回放）。
 

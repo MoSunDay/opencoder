@@ -1,4 +1,4 @@
-//! Off-loop queue admission for the TUI event loop.
+//! Off-loop admission (queue + parent keyboard-steer) for the TUI event loop.
 //!
 //! `store.admit_input` contends on the store-wide db_lock with the running
 //! turn's message flusher, subagent flushers and queue claims, so awaiting it
@@ -6,7 +6,10 @@
 //! whole queue-wait. The actor spawned here owns that wait; the UI loop stays
 //! non-blocking via an optimistic temp row (negative seq) plus completion
 //! reconciliation ([`reconcile_ok`] / [`reconcile_err`]) once the real store
-//! seq (or the failure) comes back.
+//! seq (or the failure) comes back. Both consumers route through it:
+//! Tab-queue via [`handle_queue`], parent keyboard-steer (Enter-while-running)
+//! via `steer_admit::submit_steer`; [`AdmitDone`]'s `steer` flag picks the
+//! mirror the completion reconciles against.
 
 use std::sync::Arc;
 
@@ -19,6 +22,8 @@ pub struct AdmitReq {
     pub temp_seq: i64,
     pub input: SessionInput,
     pub display: String,
+    /// Owning session, echoed on the completion for the switch-race drop.
+    pub session_id: String,
 }
 
 /// Actor completion: the store result for the admitted input, plus the
@@ -29,6 +34,10 @@ pub struct AdmitDone {
     pub temp_seq: i64,
     pub result: anyhow::Result<i64>,
     pub display: String,
+    /// Switch-race drop: reconcile only against the session the UI shows.
+    pub session_id: String,
+    /// Which mirror to reconcile: steer_items (true) or queue_items (false).
+    pub steer: bool,
 }
 
 /// One in-flight optimistic submit's image snapshot (restored on failure).
@@ -62,6 +71,8 @@ pub fn spawn_admitter(
                     temp_seq: req.temp_seq,
                     result,
                     display: req.display,
+                    session_id: req.session_id,
+                    steer: req.input.delivery == Delivery::Steer,
                 })
                 .await
                 .is_err()
@@ -90,10 +101,13 @@ pub fn submit(
     let images = std::mem::take(pending_images);
     st.inflight.push(InflightAdmit { temp_seq, images });
     queue_items.push((temp_seq, display.clone()));
+    // Clone before the literal: `input` moves into the req below.
+    let session_id = input.session_id.clone();
     match tx.try_send(AdmitReq {
         temp_seq,
         input,
         display,
+        session_id,
     }) {
         Ok(()) => true,
         Err(_) => {
@@ -142,6 +156,10 @@ pub(crate) fn admit_running(
 /// The queue panel shows the same raw text (what the user typed); the user
 /// message the LLM eventually sees is recorded token-stripped by
 /// `record_compound`, so the token never reaches the model.
+///
+/// Returns false only on a failed actor hand-off (actor gone / channel
+/// saturated) — the caller must flash [`QUEUE_SUBMIT_FAILED_FLASH`]; empty
+/// input is a no-op returning true, not a failure.
 pub(crate) fn handle_queue(
     text: &str,
     tx: &mpsc::Sender<AdmitReq>,
@@ -149,10 +167,10 @@ pub(crate) fn handle_queue(
     queue_items: &mut Vec<(i64, String)>,
     pending_images: &mut Vec<(String, String)>,
     session_id: &str,
-) {
+) -> bool {
     let raw = text.trim();
     if raw.is_empty() {
-        return;
+        return true;
     }
     // Compound control commands (`/plan <content>`,
     // `/act_clear_context <content>`) are consumed by the runner's
@@ -169,7 +187,7 @@ pub(crate) fn handle_queue(
         Some(display.clone()),
         &crate::app_helpers::snapshot_image_uris(pending_images),
     );
-    admit_running(tx, st, queue_items, pending_images, input, display);
+    admit_running(tx, st, queue_items, pending_images, input, display)
 }
 
 /// Outcome of reconciling a successful completion against the queue mirror.
@@ -263,44 +281,70 @@ pub fn note_consumed(st: &mut AdmitUiState, seq: i64) {
     st.consumed.drain(..excess);
 }
 
+/// Flash for a failed queue submit hand-off (actor gone / channel
+/// saturated): temp row + images were rolled back; the raw text stays
+/// recoverable via ↑ history because `push_history` runs on every submit.
+pub(crate) const QUEUE_SUBMIT_FAILED_FLASH: &str =
+    "⚠ queue submit failed — recover text with ↑ history";
+
 /// Apply one actor completion: reconcile the mirror and, on failure, restore
-/// the stashed images. Returns a transient flash message on failure.
+/// the stashed images; returns a transient flash on failure. `steer` picks
+/// the mirror; a completion tagged with another session is dropped wholesale.
 pub fn apply_done(
     st: &mut AdmitUiState,
     done: AdmitDone,
     queue_items: &mut Vec<(i64, String)>,
+    steer_items: &mut Vec<(i64, String)>,
     pending_images: &mut Vec<(String, String)>,
+    current_session: &str,
 ) -> Option<&'static str> {
     let AdmitDone {
         temp_seq,
         result,
         display,
+        session_id,
+        steer,
     } = done;
+    // Session-switch race: this admit fired against the OLD session. Folding
+    // it into the NEW session's mirrors would plant a ghost row — the durable
+    // row stays in the old session's pending (visible when switching back),
+    // and the stashed images are DISCARDED, not restored: they belong to the
+    // old session and must not leak into the new one's composer.
+    if session_id != current_session {
+        take_inflight(st, temp_seq);
+        return None;
+    }
+    let mirror = if steer { steer_items } else { queue_items };
     let snapshot = take_inflight(st, temp_seq);
     match result {
         Ok(real_seq) => {
-            reconcile_ok(queue_items, &st.consumed, temp_seq, real_seq, &display);
+            reconcile_ok(mirror, &st.consumed, temp_seq, real_seq, &display);
             None
         }
         Err(_) => {
-            reconcile_err(queue_items, temp_seq);
+            reconcile_err(mirror, temp_seq);
             if let Some(images) = snapshot {
                 restore_images(pending_images, images);
             }
-            Some("⚠ queue submit failed — recover text with ↑ history")
+            Some(if steer {
+                crate::steer_admit::STEER_SUBMIT_FAILED_FLASH
+            } else {
+                QUEUE_SUBMIT_FAILED_FLASH
+            })
         }
     }
 }
 
+// Store-failure actor test lives in `queue_admitter_fail_tests.rs`
+// (file-size cap; same `#[path]` pattern as `app_loop_tests/`).
+#[cfg(test)]
+#[path = "queue_admitter_fail_tests.rs"]
+mod fail_tests;
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use anyhow::Result;
-    use opencoder_core::Message;
-    use opencoder_store::{
-        LibsqlStore, SessionEventRecord, SessionFilter, SessionListItem, SessionMeta, SessionPatch,
-        SubagentTaskRecord,
-    };
+    use opencoder_store::{LibsqlStore, SessionMeta};
 
     fn mk_input(prompt: &str) -> SessionInput {
         SessionInput {
@@ -314,6 +358,20 @@ mod tests {
             admitted_seq: 0,
             promoted_seq: None,
         }
+    }
+
+    /// LibsqlStore with a pre-created session — the boilerplate every store
+    /// test here needs.
+    async fn mem_store(sid: &str) -> Arc<LibsqlStore> {
+        let store = Arc::new(LibsqlStore::open_memory().await.unwrap());
+        store
+            .create_session(&SessionMeta {
+                id: sid.into(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        store
     }
 
     #[test]
@@ -520,14 +578,7 @@ mod tests {
 
     #[tokio::test]
     async fn actor_round_trip_admits_and_reconciles() {
-        let store = Arc::new(LibsqlStore::open_memory().await.unwrap());
-        store
-            .create_session(&SessionMeta {
-                id: "s".into(),
-                ..Default::default()
-            })
-            .await
-            .unwrap();
+        let store = mem_store("s").await;
         let (tx, mut done_rx) = spawn_admitter(Arc::clone(&store) as Arc<dyn Store>);
         let mut st = AdmitUiState::default();
         let mut queue_items = vec![];
@@ -553,136 +604,9 @@ mod tests {
         assert_eq!(rows.len(), 1, "row must be durably admitted");
     }
 
-    /// Delegates everything to an inner LibsqlStore EXCEPT `admit_input`,
-    /// which always fails (steer_fire.rs `FailingAdmitStore` pattern).
-    struct FailingAdmitStore(Arc<LibsqlStore>);
-
-    #[async_trait::async_trait]
-    impl Store for FailingAdmitStore {
-        fn backend_name(&self) -> &'static str {
-            self.0.backend_name()
-        }
-        async fn create_session(&self, m: &SessionMeta) -> Result<()> {
-            self.0.create_session(m).await
-        }
-        async fn get_session(&self, id: &str) -> Result<Option<SessionMeta>> {
-            self.0.get_session(id).await
-        }
-        async fn list_sessions(&self, f: &SessionFilter) -> Result<Vec<SessionListItem>> {
-            self.0.list_sessions(f).await
-        }
-        async fn update_session(&self, id: &str, p: &SessionPatch) -> Result<()> {
-            self.0.update_session(id, p).await
-        }
-        async fn delete_session(&self, id: &str) -> Result<()> {
-            self.0.delete_session(id).await
-        }
-        async fn clear_other_sessions(&self, k: &str) -> Result<u64> {
-            self.0.clear_other_sessions(k).await
-        }
-        async fn append_message(&self, sid: &str, m: &Message) -> Result<i64> {
-            self.0.append_message(sid, m).await
-        }
-        async fn append_messages(&self, sid: &str, m: &[Message]) -> Result<Vec<i64>> {
-            self.0.append_messages(sid, m).await
-        }
-        async fn load_messages(&self, sid: &str) -> Result<Vec<Message>> {
-            self.0.load_messages(sid).await
-        }
-        async fn last_message_seq(&self, sid: &str) -> Result<i64> {
-            self.0.last_message_seq(sid).await
-        }
-        async fn admit_input(&self, _i: &SessionInput) -> Result<i64> {
-            anyhow::bail!("admit failed")
-        }
-        async fn pending_inputs(&self, sid: &str, d: Delivery) -> Result<Vec<SessionInput>> {
-            self.0.pending_inputs(sid, d).await
-        }
-        async fn promote_inputs(&self, sid: &str, up: i64, d: Delivery) -> Result<Vec<i64>> {
-            self.0.promote_inputs(sid, up, d).await
-        }
-        async fn promote_next_queued(&self, sid: &str) -> Result<Option<i64>> {
-            self.0.promote_next_queued(sid).await
-        }
-        async fn claim_next_queue(&self, sid: &str) -> Result<Option<(i64, SessionInput)>> {
-            self.0.claim_next_queue(sid).await
-        }
-        async fn delete_input(&self, id: i64) -> Result<()> {
-            self.0.delete_input(id).await
-        }
-        async fn swap_input_order(&self, sid: &str, a: i64, b: i64) -> Result<()> {
-            self.0.swap_input_order(sid, a, b).await
-        }
-        async fn append_events(&self, ev: &[SessionEventRecord]) -> Result<Vec<i64>> {
-            self.0.append_events(ev).await
-        }
-        async fn events_after(&self, sid: &str, s: i64) -> Result<Vec<SessionEventRecord>> {
-            self.0.events_after(sid, s).await
-        }
-        async fn last_event_seq(&self, sid: &str) -> Result<i64> {
-            self.0.last_event_seq(sid).await
-        }
-        async fn create_subagent_task(&self, r: &SubagentTaskRecord) -> Result<()> {
-            self.0.create_subagent_task(r).await
-        }
-        async fn complete_subagent_task(&self, id: &str, r: &str, ok: bool) -> Result<()> {
-            self.0.complete_subagent_task(id, r, ok).await
-        }
-        async fn list_subagent_tasks(&self, pid: &str) -> Result<Vec<SubagentTaskRecord>> {
-            self.0.list_subagent_tasks(pid).await
-        }
-        async fn get_subagent_task(&self, id: &str) -> Result<Option<SubagentTaskRecord>> {
-            self.0.get_subagent_task(id).await
-        }
-        async fn cancel_subagent_task(&self, id: &str) -> Result<()> {
-            self.0.cancel_subagent_task(id).await
-        }
-    }
-
-    #[tokio::test]
-    async fn actor_failure_path_flashes_and_removes_row() {
-        let inner = Arc::new(LibsqlStore::open_memory().await.unwrap());
-        let store: Arc<dyn Store> = Arc::new(FailingAdmitStore(inner));
-        let (tx, mut done_rx) = spawn_admitter(store);
-        let mut st = AdmitUiState::default();
-        let mut queue_items = vec![(-100, "other".to_string())];
-        let mut pending_images = vec![("img.png".to_string(), "alt".to_string())];
-        assert!(submit(
-            &tx,
-            &mut st,
-            &mut queue_items,
-            &mut pending_images,
-            mk_input("p"),
-            "d".into()
-        ));
-        let done = done_rx.recv().await.unwrap();
-        assert!(done.result.is_err());
-        let flash = apply_done(&mut st, done, &mut queue_items, &mut pending_images);
-        assert_eq!(
-            flash,
-            Some("⚠ queue submit failed — recover text with ↑ history")
-        );
-        assert_eq!(
-            queue_items,
-            vec![(-100, "other".to_string())],
-            "temp row removed, others kept"
-        );
-        assert_eq!(
-            pending_images,
-            vec![("img.png".to_string(), "alt".to_string())]
-        );
-        assert!(st.inflight.is_empty());
-    }
     #[tokio::test]
     async fn handle_queue_admits_raw_text_and_defers_skill() {
-        let store = Arc::new(LibsqlStore::open_memory().await.unwrap());
-        store
-            .create_session(&SessionMeta {
-                id: "s".into(),
-                ..Default::default()
-            })
-            .await
-            .unwrap();
+        let store = mem_store("s").await;
         let (tx, mut done_rx) = spawn_admitter(Arc::clone(&store) as Arc<dyn Store>);
         let mut st = AdmitUiState::default();
         let mut queue_items = vec![];
@@ -699,7 +623,14 @@ mod tests {
         // Queue-panel mirror shows what the user typed, token included.
         assert!(queue_items.iter().any(|(_, d)| d.contains("$alpha")));
         let done = done_rx.recv().await.unwrap();
-        apply_done(&mut st, done, &mut queue_items, &mut pending_images);
+        apply_done(
+            &mut st,
+            done,
+            &mut queue_items,
+            &mut vec![],
+            &mut pending_images,
+            "s",
+        );
         let rows = store.pending_inputs("s", Delivery::Queue).await.unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(
@@ -721,14 +652,7 @@ mod tests {
 
     #[tokio::test]
     async fn handle_queue_pure_skill_admits_token_not_trigger() {
-        let store = Arc::new(LibsqlStore::open_memory().await.unwrap());
-        store
-            .create_session(&SessionMeta {
-                id: "s".into(),
-                ..Default::default()
-            })
-            .await
-            .unwrap();
+        let store = mem_store("s").await;
         let (tx, mut done_rx) = spawn_admitter(Arc::clone(&store) as Arc<dyn Store>);
         let mut st = AdmitUiState::default();
         let mut queue_items = vec![];
@@ -743,7 +667,14 @@ mod tests {
         );
 
         let done = done_rx.recv().await.unwrap();
-        apply_done(&mut st, done, &mut queue_items, &mut pending_images);
+        apply_done(
+            &mut st,
+            done,
+            &mut queue_items,
+            &mut vec![],
+            &mut pending_images,
+            "s",
+        );
         let rows = store.pending_inputs("s", Delivery::Queue).await.unwrap();
         assert_eq!(
             rows[0].prompt, "$alpha",

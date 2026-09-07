@@ -5,7 +5,7 @@
 //! The ">" button on child steer rows calls [`fire_subagent_turn_cancel`] to
 //! interrupt the current turn and force immediate steer absorption.
 //!
-//! Mirrors `steer_fire::admit_keyboard_steer` for the parent: the steer is
+//! Mirrors `steer_admit::submit_steer` for the parent: the steer is
 //! admitted to the CHILD session (`Delivery::Steer` keyed by the child's
 //! `session_id`) and pushed onto the child view's `steer_items`. The parent's
 //! steer panel, queue, skill tokens and active turn are all untouched — no
@@ -75,7 +75,7 @@ pub(crate) async fn handle_subagent_steer(
 /// Admit a steer to the focused subagent's child session and push it to the
 /// child view's `steer_items` for display.
 ///
-/// Snapshot-and-consume convention matches `steer_fire::admit_keyboard_steer`:
+/// Snapshot-and-consume convention matches `steer_admit::submit_steer`:
 /// the pending images are only cleared after a successful store write, so an
 /// attached image is never silently dropped on a store error.
 #[allow(clippy::too_many_arguments)]

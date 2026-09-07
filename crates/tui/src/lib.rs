@@ -52,6 +52,7 @@ pub mod skill_display;
 pub mod skill_menu;
 pub mod skill_persist;
 pub mod skill_token;
+pub mod steer_admit;
 pub mod supervisor;
 pub mod task;
 pub mod task_row;

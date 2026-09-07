@@ -92,6 +92,8 @@ mod tests {
             temp_seq,
             result: Ok(real_seq),
             display: "d".into(),
+            session_id: "s".into(),
+            steer: false,
         }
     }
 
@@ -126,6 +128,7 @@ mod tests {
             ok_done(-1, 1),
             &mut st,
             &mut queue_items,
+            &mut vec![],
             &mut pending_images,
             false, // idle
             &store,
@@ -186,6 +189,7 @@ mod tests {
             &mut st,
             &mut vec![],
             &mut vec![],
+            &mut vec![],
             true, // running
             &store,
             "s",
@@ -202,8 +206,11 @@ mod tests {
                 temp_seq: -1,
                 result: Err(anyhow::anyhow!("store down")),
                 display: "d".into(),
+                session_id: "s".into(),
+                steer: false,
             },
             &mut st,
+            &mut vec![],
             &mut vec![],
             &mut vec![],
             false,
@@ -230,6 +237,7 @@ mod tests {
         let o = on_admit_done(
             ok_done(-1, 1),
             &mut st,
+            &mut vec![],
             &mut vec![],
             &mut vec![],
             false,
@@ -281,11 +289,16 @@ pub(crate) struct AdmitDoneOutcome {
 /// its final pending check) nothing else will ever consume it. Re-check the
 /// STORE and restart the drain loop with an empty prompt (drain mode),
 /// mirroring the Done-handler's `drain_pending` re-kick in `app_loop`.
+///
+/// Session-mismatched completions are dropped inside `apply_done` (ghost-row
+/// guard) while the stranded re-kick decision below still evaluates the
+/// CURRENT session — that is its purpose.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn on_admit_done(
     done: crate::queue_admitter::AdmitDone,
     st: &mut crate::queue_admitter::AdmitUiState,
     queue_items: &mut Vec<(i64, String)>,
+    steer_items: &mut Vec<(i64, String)>,
     pending_images: &mut Vec<(String, String)>,
     running: bool,
     store: &Arc<dyn Store>,
@@ -295,7 +308,14 @@ pub(crate) async fn on_admit_done(
 ) -> AdmitDoneOutcome {
     // Capture the outcome before `apply_done` consumes `done`.
     let admit_ok = done.result.is_ok();
-    let flash = crate::queue_admitter::apply_done(st, done, queue_items, pending_images);
+    let flash = crate::queue_admitter::apply_done(
+        st,
+        done,
+        queue_items,
+        steer_items,
+        pending_images,
+        session_id,
+    );
     if !admit_ok || running || !stranded_pending(store, session_id).await {
         return AdmitDoneOutcome {
             flash,

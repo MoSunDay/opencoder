@@ -543,15 +543,13 @@ pub(super) async fn run_app(
                                 // reads the persisted plan-phase counter).
                                 let raw = text.trim().to_string();
                                 if !raw.is_empty() {
-                                    let seq = steer_fire::admit_keyboard_steer(
-                                        &store, &session_id, &raw, &raw,
-                                        &mut pending_images, &mut chat,
-                                    )
-                                    .await;
-                                    // Store failure must not vanish silently; ↑ history still holds the text.
-                                    if let Some(flash) = steer_fire::flash_on_admit_failure(seq) {
-                                        mode_flash = Some((flash.to_string(), anim_tick));
-                                    }
+                                    // Off-loop actor owns the store write; a failed
+                                    // hand-off flashes (↑ recovers). `>` = interrupt.
+                                    steer_submit_flash(
+                                        &admit_tx, &mut admit_st, &mut chat.steer_items,
+                                        &mut pending_images, &session_id, &raw, anim_tick,
+                                        &mut mode_flash,
+                                    );
                                 }
                                 push_history(&mut history, &mut hist_idx, &text);
                                 // Enter admits without interrupting (`>` interrupts instead).
@@ -561,10 +559,10 @@ pub(super) async fn run_app(
                                 // Tab-queue: raw-text deferred admission — skill resolution
                                 // happens at consumption (idle boundary, record_compound).
                                 // The off-loop actor owns the store write; this loop never
-                                // waits on db_lock.
-                                queue_admitter::handle_queue(
+                                // waits on db_lock; a failed hand-off flashes (text via ↑).
+                                queue_submit_flash(
                                     &text, &admit_tx, &mut admit_st, &mut queue_items,
-                                    &mut pending_images, &session_id,
+                                    &mut pending_images, &session_id, anim_tick, &mut mode_flash,
                                 );
                                 push_history(&mut history, &mut hist_idx, &text);
                                 follow = true;
@@ -719,7 +717,7 @@ pub(super) async fn run_app(
             maybe_done = admit_done_rx.recv(), if admitter_alive => {
                 match maybe_done {
                     Some(done) => {
-                        let o = crate::idle_rekick::on_admit_done(done, &mut admit_st, &mut queue_items, &mut pending_images, running, &store, &session_id, &cmd_tx, &mut cancel).await;
+                        let o = crate::idle_rekick::on_admit_done(done, &mut admit_st, &mut queue_items, &mut chat.steer_items, &mut pending_images, running, &store, &session_id, &cmd_tx, &mut cancel).await;
                         if let Some(flash) = o.flash { mode_flash = Some((flash.to_string(), anim_tick)); }
                         match o.flow {
                             crate::idle_rekick::AdmitDoneFlow::Started => { running = true; follow = true; cancelled = false; chat.begin_turn(); }
@@ -794,8 +792,8 @@ pub(super) async fn run_app(
 }
 pub(crate) use crate::app_helpers::{
     apply_force_redraw, handle_mouse, initial_chat_view, mode_switch_busy_flash, on_resize_event,
-    poll_idle_resize, pre_key_intercept, push_history, queue_unsupported_flash, worker_dead,
-    MouseOutcome,
+    poll_idle_resize, pre_key_intercept, push_history, queue_submit_flash, queue_unsupported_flash,
+    steer_submit_flash, worker_dead, MouseOutcome,
 };
 #[cfg(test)]
 #[path = "app_tests/mod.rs"]

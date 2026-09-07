@@ -22,6 +22,7 @@ members = [
     "crates/brain",
     "crates/team",
 ]
+exclude = ["examples/snake"]
 
 [package]
 name = "opencoder"

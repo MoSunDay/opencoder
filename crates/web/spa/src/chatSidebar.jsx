@@ -1,19 +1,7 @@
-// chatSidebar.jsx — left column of the chat page (T5): node switcher on top,
-// @ant-design/x Conversations list below, X-styled "新建对话" creation button
-// pinned by the list. Pure presentation: every datum and callback arrives as
-// a prop from ChatPanel, which keeps owning the data flow (loadDialogs /
-// openDialog / resetTranscript are untouched — only their mount points move).
-//
-// DOM landmarks (verified in @ant-design/x 2.9 sources, es/conversations/):
-//   list root    <ul class="ant-conversations">
-//   item         <li class="ant-conversations-item"> (+ -active when selected)
-//   item label   .ant-conversations-label
-//   creation     <button class="ant-conversations-creation"> (PlusOutlined + label)
-
 import { Conversations } from '@ant-design/x';
 import { Select, Spin } from 'antd';
 import { dialogsToItems } from './conversationItems.js';
-import { LOCAL_NODE, LOCAL_NODE_LABEL } from './store.js';
+import { explicitNodeOptions } from './fleet/model.js';
 
 export function DialogSidebar({
   nodes,
@@ -24,11 +12,9 @@ export function DialogSidebar({
   onActiveChange,
   onNew,
   loading,
+  disabled,
 }) {
-  // Same option shape the header Select used before T5: local engine first,
-  // then the fleet snapshot shared by the nodes tab.
-  const nodeOptions = [{ value: LOCAL_NODE, label: LOCAL_NODE_LABEL }]
-    .concat((nodes || []).map((n) => ({ value: n.id, label: n.name || n.id })));
+  const nodeOptions = explicitNodeOptions(nodes, 'agent');
 
   return (
     <div
@@ -43,9 +29,12 @@ export function DialogSidebar({
       }}
     >
       <Select
+        aria-label="执行节点"
+        placeholder="请选择执行节点"
+        disabled={disabled}
         style={{ width: '100%', marginBottom: 12 }}
         size="small"
-        value={nodeSel}
+        value={nodeSel || undefined}
         onChange={onNodeChange}
         options={nodeOptions}
         showSearch
@@ -57,7 +46,7 @@ export function DialogSidebar({
             items={dialogsToItems(dialogs)}
             activeKey={activeKey}
             onActiveChange={onActiveChange}
-            creation={{ label: '新建对话', onClick: onNew }}
+            creation={{ label: '新建对话', onClick: onNew, disabled: disabled || !nodeSel }}
           />
         </Spin>
       </div>

@@ -292,12 +292,13 @@ describe('App shell landmarks (antd 6 under jsdom)', () => {
     expect(dayjs.locale()).toBe('zh-cn');
   });
 
-  it('shows the empty transcript and the local node on the chat page', async () => {
+  it('requires an explicit execution node on the chat page', async () => {
     setCredentials('smoke-token', '');
     setState({ page: 'chat' });
     render(<App />);
     expect(await screen.findByText(/选择或新建对话/)).toBeTruthy();
-    expect(screen.getByText('自动调度 / 全部会话')).toBeTruthy();
+    expect(screen.getByText('请先选择执行节点')).toBeTruthy();
+    expect(screen.getByPlaceholderText('输入提示词，Enter 发送，Shift+Enter 换行').disabled).toBe(true);
   });
 
   it('renders the brand and the node-category menu on the default page', () => {
@@ -341,7 +342,7 @@ describe('App shell landmarks (antd 6 under jsdom)', () => {
     const brainItem = screen.getByRole('menuitem', { name: /大脑调度/ });
     expect(brainItem.classList.contains('ant-menu-item-selected')).toBe(true);
     // …and the panel behind it renders (agent-category page).
-    expect(await screen.findByText('调度与绑定')).toBeTruthy();
+    expect(await screen.findByText('需求执行')).toBeTruthy();
   });
 
   it('scopes the project category to its three menu items', async () => {

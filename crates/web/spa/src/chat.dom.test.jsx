@@ -1,133 +1,14 @@
 // @vitest-environment jsdom
-// Chat tab smoke tests for the @ant-design/x migration (T3 Bubble.List +
-// T4 Sender). The protocol layers (sse.js / api.js / sign.js) are consumed
-// read-only: fetch is stubbed with a URL-routed mock, everything above it —
-// reduce, chat.jsx, transcript.jsx — runs for real. DOM landmarks use the
-// class prefixes shipped by @ant-design/x 2.9 (verified in node_modules):
-//   Bubble.List root  → .ant-bubble-list / .ant-bubble[-start|-end]
-//   Sender textarea   → textarea.ant-sender-input
-//   Sender stop btn   → .ant-sender-actions-btn-loading-button
-// Sender submits on a keydown of key='Enter' without shift/ctrl/alt/meta and
-// outside IME composition (sender/components/TextArea.js onInternalKeyDown).
+// Real composer, authenticated requests and streamed transcript boundaries.
+import { describe, expect, it } from 'vitest';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-
-// setup-dom.js installs the browser shims (matchMedia, observers) and the
-// RTL afterEach(cleanup) — import it before any component module.
 import './test/setup-dom.js';
 import { ChatPanel } from './chat.jsx';
 import { TranscriptView } from './transcript.jsx';
-import { clearCredentials, setCredentials, setState } from './store.js';
+import { setCredentials, setState } from './store.js';
 
-// Every request is recorded so assertions can inspect method + signed body.
-let hits = [];
-
-// Per-session bodies for GET /api/sessions/:id — the done / transcript_reset
-// reload paths. Default {} (empty snapshot → streamed turns kept); a test
-// seeds an entry to simulate what the store has (or has NOT) recorded.
-let sessionSnapshots = {};
-/// What every GET /seq answers — the persisted event head. Tests move it to
-/// simulate the run racing ahead of a lagged tab.
-let seqHead = 0;
-
-const jsonResponse = (body) => Promise.resolve({
-  ok: true,
-  status: 200,
-  json: () => Promise.resolve(body),
-});
-
-/// A 200 Response whose body stream never closes — the jsdom stand-in for a
-/// live SSE endpoint (sse.js readLoop stays pending; no reconnect timer).
-const hangingStreamResponse = () => new Response(
-  new ReadableStream({
-    start(controller) {
-      controller.enqueue(new TextEncoder().encode(''));
-    },
-  }),
-  { status: 200, headers: { 'content-type': 'text/event-stream' } },
-);
-
-/// Same, but the controller is captured so a test can push SSE blocks into
-/// the "live" stream (terminal error frames, lag re-sync, …).
-let liveEventCtl = null;
-const controlledStreamResponse = () => new Response(
-  new ReadableStream({
-    start(controller) {
-      liveEventCtl = controller;
-    },
-  }),
-  { status: 200, headers: { 'content-type': 'text/event-stream' } },
-);
-
-const installRouter = () => {
-  hits = [];
-  vi.stubGlobal('fetch', vi.fn((input, opts = {}) => {
-    const url = typeof input === 'string' ? input : String((input && input.url) || '');
-    const method = String(opts.method || 'GET').toUpperCase();
-    hits.push({ method, url, body: opts.body || '' });
-    // Live-stream and dispatch routes first: the broad /api/nodes catch-all
-    // below used to shadow them, so node-task streams
-    // (/api/nodes/tasks/:id/events) and node dispatch POSTs
-    // (/api/nodes/:id/tasks) answered { nodes: [] } and a remote stream
-    // could never be driven from a test. /events still precedes /sessions
-    // so /events?after=N never falls into the sessions rule.
-    if (url.includes('/events')) {
-      return controlledStreamResponse();
-    }
-    if (url.includes('/tasks') && method === 'POST') {
-      return jsonResponse({ task_id: 't1', session_id: 'rs1' });
-    }
-    if (url.includes('/api/nodes')) {
-      return jsonResponse({ nodes: [] });
-    }
-    if (url.includes('/seq')) {
-      return jsonResponse({ seq: seqHead });
-    }
-    if (url.includes('/prompt')) {
-      return jsonResponse({ ok: true });
-    }
-    if (url.includes('/interrupt')) {
-      return jsonResponse({ ok: true });
-    }
-    if (url === '/api/sessions' || url.startsWith('/api/sessions?')) {
-      return method === 'POST' ? jsonResponse({ id: 's1' }) : jsonResponse({ sessions: [] });
-    }
-    if (/^\/api\/sessions\/[^/]+$/.test(url)) {
-      return jsonResponse(sessionSnapshots[url.slice('/api/sessions/'.length)] || {});
-    }
-    return jsonResponse({});
-  }));
-};
-
-// Deprecation gate: the X migration is only complete when rendering is silent.
-const consoleLog = { error: [], warn: [] };
-const record = (bucket) => (...args) => {
-  consoleLog[bucket].push(args.map((a) => String(a)).join(' '));
-};
-const deprecationHits = () => consoleLog.error.concat(consoleLog.warn)
-  .filter((line) => /deprecated/i.test(line));
-
-beforeEach(() => {
-  liveEventCtl = null;
-  seqHead = 0;
-  sessionSnapshots = {};
-  consoleLog.error.length = 0; // keep spy identity; per-test deprecation gate
-  consoleLog.warn.length = 0;
-  localStorage.clear();
-  clearCredentials();
-  setState({ page: 'chat', preselectNode: null, nodes: [], conn: 'init' });
-  installRouter();
-  vi.spyOn(console, 'error').mockImplementation(record('error'));
-  vi.spyOn(console, 'warn').mockImplementation(record('warn'));
-});
-
-afterEach(() => {
-  cleanup(); // unmount → ChatPanel aborts its hanging stream
-  vi.restoreAllMocks();
-  vi.unstubAllGlobals();
-  expect(deprecationHits()).toEqual([]);
-});
+import { chatTestState } from './chat/testSupport.js';
 
 const turnsFixture = () => [
   { kind: 'text', role: 'user', text: '帮我跑一遍测试' },
@@ -147,12 +28,10 @@ describe('TranscriptView on Bubble.List', () => {
         error={null}
       />,
     );
-    // Bubble.List landmark + one bubble per turn, user right-aligned.
     expect(container.querySelector('.ant-bubble-list')).toBeTruthy();
     expect(container.querySelectorAll('.ant-bubble')).toHaveLength(5);
     expect(container.querySelector('.ant-bubble-end')).toBeTruthy();
     expect(container.querySelectorAll('.ant-bubble-start')).toHaveLength(4);
-    // Tool row keeps its error marker; usage footer text survives migration.
     expect(screen.getByText('error')).toBeTruthy();
     expect(screen.getByText(/🔧 bash/)).toBeTruthy();
     expect(screen.getByText(/▲ in 10/)).toBeTruthy();
@@ -168,6 +47,7 @@ describe('ChatPanel full chain (Sender → signed POST → SSE)', () => {
     const textarea = await waitFor(() => {
       const el = container.querySelector('textarea.ant-sender-input');
       expect(el).toBeTruthy();
+      expect(el.disabled).toBe(false);
       return el;
     });
     return { container, textarea };
@@ -178,25 +58,21 @@ describe('ChatPanel full chain (Sender → signed POST → SSE)', () => {
     await act(async () => {
       fireEvent.change(textarea, { target: { value: '你好，帮我跑个测试' } });
     });
-    // Sender: Enter (no shift/modifiers) submits, exactly like production.
     await act(async () => {
       fireEvent.keyDown(container.querySelector('textarea.ant-sender-input'), { key: 'Enter', keyCode: 13 });
     });
     await waitFor(() => {
-      const promptHit = hits.find((h) => h.url.includes('/prompt'));
+      const promptHit = chatTestState.hits.find((h) => h.url.includes('/prompt'));
       expect(promptHit).toBeTruthy();
       expect(JSON.parse(promptHit.body).prompt).toBe('你好，帮我跑个测试');
     });
-    // send() cleared the state → the controlled textarea is empty again.
     await waitFor(() => {
       expect(container.querySelector('textarea.ant-sender-input').value).toBe('');
     });
-    // The prompt opened the signed event stream for the fresh session.
-    expect(hits.some((h) => h.method === 'POST' && h.url === '/api/sessions')).toBe(true);
-    // The events fetch lands right after the prompt ack — wait for it instead
-    // of asserting synchronously (flaky under parallel CI load).
+    expect(JSON.parse(chatTestState.hits.find((hit) => hit.method === 'POST' && hit.url === '/api/sessions').body).node_id).toBe('node-1');
+    expect(chatTestState.hits.some((h) => h.method === 'POST' && h.url === '/api/sessions')).toBe(true);
     await waitFor(() => {
-      expect(hits.some((h) => h.url.includes('/api/sessions/s1/events'))).toBe(true);
+      expect(chatTestState.hits.some((h) => h.url.includes('/api/sessions/s1/events'))).toBe(true);
     });
   });
 
@@ -208,18 +84,12 @@ describe('ChatPanel full chain (Sender → signed POST → SSE)', () => {
     await act(async () => {
       fireEvent.keyDown(container.querySelector('textarea.ant-sender-input'), { key: 'Enter', keyCode: 13 });
     });
-    // Wait for the whole chain (session create → seq → prompt ack → stream),
-    // then assert ORDERING via hits: entries are pushed synchronously, so
-    // findIndex is a faithful call-order record.
     await waitFor(() => {
-      expect(hits.some((h) => h.url.includes('/api/sessions/s1/events'))).toBe(true);
+      expect(chatTestState.hits.some((h) => h.url.includes('/api/sessions/s1/events'))).toBe(true);
     });
-    const promptIdx = hits.findIndex((h) => h.method === 'POST' && h.url.includes('/prompt'));
-    const seqIdx = hits.findIndex((h) => h.method === 'GET' && /\/api\/sessions\/[^/]+\/seq/.test(h.url));
-    const eventsIdx = hits.findIndex((h) => h.url.includes('/api/sessions/s1/events'));
-    // If the /seq head is fetched AFTER the prompt POST, events the run emits
-    // between the ack and that late fetch get seq ≤ head and are never
-    // replayed on the stream — this turn's first frames are lost forever.
+    const promptIdx = chatTestState.hits.findIndex((h) => h.method === 'POST' && h.url.includes('/prompt'));
+    const seqIdx = chatTestState.hits.findIndex((h) => h.method === 'GET' && /\/api\/sessions\/[^/]+\/seq/.test(h.url));
+    const eventsIdx = chatTestState.hits.findIndex((h) => h.url.includes('/api/sessions/s1/events'));
     expect(promptIdx).toBeGreaterThan(-1);
     expect(seqIdx).toBeGreaterThan(-1);
     expect(seqIdx).toBeLessThan(promptIdx);
@@ -234,23 +104,21 @@ describe('ChatPanel full chain (Sender → signed POST → SSE)', () => {
     await act(async () => {
       fireEvent.keyDown(container.querySelector('textarea.ant-sender-input'), { key: 'Enter', keyCode: 13 });
     });
-    // loading=true while the stream hangs → Sender shows the stop button.
     const stop = await waitFor(() => {
       const el = container.querySelector('.ant-sender-actions-btn-loading-button');
       expect(el).toBeTruthy();
+      expect(el.disabled).toBe(false);
       return el;
     });
     await act(async () => {
       fireEvent.click(stop);
     });
     await waitFor(() => {
-      expect(hits.some((h) => h.method === 'POST' && h.url.includes('/interrupt'))).toBe(true);
+      expect(chatTestState.hits.some((h) => h.method === 'POST' && h.url.includes('/interrupt'))).toBe(true);
     });
   });
 
   it('releases the composer on a terminal error frame (busy must not latch)', async () => {
-    // F4: only status==='done' used to reset busy, so a run ending in error
-    // left the Sender loading forever and questionModal polling a dead stream.
     const { container, textarea } = await mountChat();
     await act(async () => {
       fireEvent.change(textarea, { target: { value: '会失败的任务' } });
@@ -262,11 +130,11 @@ describe('ChatPanel full chain (Sender → signed POST → SSE)', () => {
       expect(container.querySelector('.ant-sender-actions-btn-loading-button')).toBeTruthy();
     });
     await waitFor(() => {
-      expect(liveEventCtl).toBeTruthy();
+      expect(chatTestState.liveEventCtl).toBeTruthy();
     });
     const enc = new TextEncoder();
     await act(async () => {
-      liveEventCtl.enqueue(enc.encode(
+      chatTestState.liveEventCtl.enqueue(enc.encode(
         'event: error\ndata: ' + JSON.stringify({ error: 'boom' }) + '\n\n',
       ));
     });
@@ -276,12 +144,6 @@ describe('ChatPanel full chain (Sender → signed POST → SSE)', () => {
   });
 
   it('keeps the typed input when a remote run is already busy', async () => {
-    // Composite busy gate: while a remote task streams, Enter must neither
-    // dispatch a second task nor clear the composer. The @ant-design/x
-    // Sender itself refuses onSubmit while loading (Sender.js triggerSend
-    // `!loading`), and send()'s own busy guards back that up — the F3 fix
-    // moved setInput('') behind those guards so the remote-busy early return
-    // can never silently swallow the typed prompt.
     setState({ page: 'chat', preselectNode: 'node-1', nodes: [], conn: 'init' });
     const { container, textarea } = await mountChat();
     await act(async () => {
@@ -291,11 +153,10 @@ describe('ChatPanel full chain (Sender → signed POST → SSE)', () => {
       fireEvent.keyDown(container.querySelector('textarea.ant-sender-input'), { key: 'Enter', keyCode: 13 });
     });
     await waitFor(() => {
-      expect(hits.some((h) => h.url.includes('/nodes/node-1/tasks'))).toBe(true);
+      expect(chatTestState.hits.some((h) => h.url === '/api/sessions' && h.method === 'POST')).toBe(true);
     });
     expect(container.querySelector('.ant-sender-actions-btn-loading-button')).toBeTruthy();
 
-    // Second prompt while the remote run streams: input must survive.
     await act(async () => {
       fireEvent.change(textarea, { target: { value: '第二个输入不能丢' } });
     });
@@ -305,17 +166,10 @@ describe('ChatPanel full chain (Sender → signed POST → SSE)', () => {
     await waitFor(() => {
       expect(container.querySelector('textarea.ant-sender-input').value).toBe('第二个输入不能丢');
     });
-    expect(hits.filter((h) => h.url.includes('/tasks') && h.method === 'POST')).toHaveLength(1);
+    expect(chatTestState.hits.filter((h) => h.url === '/api/sessions' && h.method === 'POST')).toHaveLength(1);
   });
 
   it('releases the composer when a FIRST remote dispatch reaches a terminal frame (no dialog selected yet)', async () => {
-    // Fresh-remote busy latch: sendRemote only used to backfill dialogSel
-    // when one was already selected, so the terminal-frame effect
-    // early-returned on !dialogSel — the Sender stayed loading after
-    // done/error until the user clicked some dialog. Both halves are pinned:
-    // the terminal frame releases busy, and the backfilled selection makes
-    // the done → store reload fire (that GET only happens when dialogSel is
-    // set — removing the sendRemote backfill turns the last assertion red).
     setState({ page: 'chat', preselectNode: 'node-1', nodes: [], conn: 'init' });
     const { container, textarea } = await mountChat();
     await act(async () => {
@@ -325,29 +179,23 @@ describe('ChatPanel full chain (Sender → signed POST → SSE)', () => {
       fireEvent.keyDown(container.querySelector('textarea.ant-sender-input'), { key: 'Enter', keyCode: 13 });
     });
     await waitFor(() => {
-      expect(hits.some((h) => h.url.includes('/nodes/node-1/tasks'))).toBe(true);
+      expect(chatTestState.hits.some((h) => h.url === '/api/sessions' && h.method === 'POST')).toBe(true);
     });
     expect(container.querySelector('.ant-sender-actions-btn-loading-button')).toBeTruthy();
 
     const enc = new TextEncoder();
     await act(async () => {
-      liveEventCtl.enqueue(enc.encode('event: done\ndata: {}\n\n'));
+      chatTestState.liveEventCtl.enqueue(enc.encode('event: done\ndata: {}\n\n'));
     });
     await waitFor(() => {
       expect(container.querySelector('.ant-sender-actions-btn-loading-button')).toBeFalsy();
     });
-    // dialogSel was backfilled to 'rs1' → the done path reloads that session
-    // from the store (fetch mock answers {} → streamed turns are kept).
     await waitFor(() => {
-      expect(hits.some((h) => h.url === '/api/sessions/rs1')).toBe(true);
+      expect(chatTestState.hits.some((h) => h.url === '/api/sessions/s1')).toBe(true);
     });
   });
 });
 
-// TUI parity for the two composer/transcript gaps: the optimistic user echo
-// on a fresh local submit (push_user — no waiting on any server frame) and
-// the pending_turn_echo re-push after a transcript_reset rebuild whose store
-// snapshot has not recorded the echo yet (rebuild_after_reset).
 describe('ChatPanel optimistic echo & transcript_reset rebuild', () => {
   const mountChat = async () => {
     setCredentials('smoke-token', '');
@@ -355,6 +203,7 @@ describe('ChatPanel optimistic echo & transcript_reset rebuild', () => {
     const textarea = await waitFor(() => {
       const el = container.querySelector('textarea.ant-sender-input');
       expect(el).toBeTruthy();
+      expect(el.disabled).toBe(false);
       return el;
     });
     return { container, textarea };
@@ -368,16 +217,11 @@ describe('ChatPanel optimistic echo & transcript_reset rebuild', () => {
     await act(async () => {
       fireEvent.keyDown(container.querySelector('textarea.ant-sender-input'), { key: 'Enter', keyCode: 13 });
     });
-    // A fresh run carries NO steer/queue echo frame, so the optimistic echo
-    // is the run's only user anchor (TUI push_user): it must render before
-    // any stream frame — injected via startStream's initialTurns so the
-    // stream reset cannot swallow it.
     await waitFor(() => {
       const bubble = container.querySelector('.ant-bubble-end');
       expect(bubble).toBeTruthy();
       expect(bubble.textContent).toContain('马上开始');
     });
-    // No terminal frame arrived yet → still streaming, composer busy.
     expect(container.querySelector('.ant-sender-actions-btn-loading-button')).toBeTruthy();
   });
 
@@ -389,22 +233,14 @@ describe('ChatPanel optimistic echo & transcript_reset rebuild', () => {
     await act(async () => {
       fireEvent.keyDown(container.querySelector('textarea.ant-sender-input'), { key: 'Enter', keyCode: 13 });
     });
-    // consumedEchoText('/act') === '' — a bare control command echoes nothing
-    // (the runner applies it inline), so the opened stream renders no bubble.
     await waitFor(() => {
-      expect(hits.some((h) => h.url.includes('/events'))).toBe(true);
+      expect(chatTestState.hits.some((h) => h.url.includes('/events'))).toBe(true);
     });
     expect(container.querySelectorAll('.ant-bubble')).toHaveLength(0);
   });
 
   it('re-pushes the pending echo after transcript_reset when the store snapshot lacks it', async () => {
-    // The /act_clear_context <tail> scenario (TUI rebuild_after_reset): the
-    // compound submission echoes its tail locally; the runner applies
-    // ClearContext mid-run and the transcript resets, but the snapshot the
-    // rebuild re-fetches has NOT recorded the tail yet — without the re-push
-    // (ensurePendingEcho on pendingEcho) the rebuilt transcript ends at the
-    // folded context and the running turn loses its user anchor.
-    sessionSnapshots.s1 = {
+    chatTestState.sessionSnapshots.s1 = {
       messages: [{ role: 'assistant', blocks: [{ kind: 'text', text: '压缩后的上下文' }] }],
     };
     const { container, textarea } = await mountChat();
@@ -414,23 +250,20 @@ describe('ChatPanel optimistic echo & transcript_reset rebuild', () => {
     await act(async () => {
       fireEvent.keyDown(container.querySelector('textarea.ant-sender-input'), { key: 'Enter', keyCode: 13 });
     });
-    // Optimistic echo = the compound tail only; the command head never echoes.
     await waitFor(() => {
       const bubble = container.querySelector('.ant-bubble-end');
       expect(bubble).toBeTruthy();
       expect(bubble.textContent).toContain('收尾总结');
     });
     await waitFor(() => {
-      expect(liveEventCtl).toBeTruthy();
+      expect(chatTestState.liveEventCtl).toBeTruthy();
     });
     const enc = new TextEncoder();
     await act(async () => {
-      liveEventCtl.enqueue(enc.encode('event: transcript_reset\ndata: {}\n\n'));
+      chatTestState.liveEventCtl.enqueue(enc.encode('event: transcript_reset\ndata: {}\n\n'));
     });
-    // The rebuild fetched the assistant-only snapshot and re-pushed the echo:
-    // the rebuilt transcript ENDS with the user bubble.
     await waitFor(() => {
-      expect(hits.some((h) => h.url === '/api/sessions/s1')).toBe(true);
+      expect(chatTestState.hits.some((h) => h.url === '/api/sessions/s1')).toBe(true);
     });
     await waitFor(() => {
       const ends = container.querySelectorAll('.ant-bubble-end');
@@ -442,9 +275,6 @@ describe('ChatPanel optimistic echo & transcript_reset rebuild', () => {
   });
 
   it('dedups the server echo frame against the optimistic bubble (one user bubble live)', async () => {
-    // 直播回显去重（TUI pending_turn_echo 契约）：本地乐观回显与服务端
-    // steer_consumed 帧是同一条 user 边界 —— 帧文本与乐观回显完全相同时
-    // 折叠去重，直播期间不再显示两条；done 重建后本来就只剩一条。
     const { container, textarea } = await mountChat();
     await act(async () => {
       fireEvent.change(textarea, { target: { value: '马上开始' } });
@@ -453,21 +283,19 @@ describe('ChatPanel optimistic echo & transcript_reset rebuild', () => {
       fireEvent.keyDown(container.querySelector('textarea.ant-sender-input'), { key: 'Enter', keyCode: 13 });
     });
     await waitFor(() => {
-      expect(liveEventCtl).toBeTruthy();
+      expect(chatTestState.liveEventCtl).toBeTruthy();
       expect(container.querySelector('.ant-bubble-end')).toBeTruthy();
     });
     const enc = new TextEncoder();
     await act(async () => {
-      liveEventCtl.enqueue(enc.encode('event: steer_consumed\ndata: {"text":"马上开始"}\n\n'));
+      chatTestState.liveEventCtl.enqueue(enc.encode('event: steer_consumed\ndata: {"text":"马上开始"}\n\n'));
     });
-    // 相同文本的服务端回显折叠进乐观回显：仍只有一条 user 泡。
     await waitFor(() => {
       expect(container.querySelectorAll('.ant-bubble-end')).toHaveLength(1);
     });
     expect(container.querySelectorAll('.ant-bubble-end')[0].textContent).toContain('马上开始');
-    // 不同文本的回显（下一轮 steer）正常追加为第二条。
     await act(async () => {
-      liveEventCtl.enqueue(enc.encode('event: steer_consumed\ndata: {"text":"换个方向"}\n\n'));
+      chatTestState.liveEventCtl.enqueue(enc.encode('event: steer_consumed\ndata: {"text":"换个方向"}\n\n'));
     });
     await waitFor(() => {
       expect(container.querySelectorAll('.ant-bubble-end')).toHaveLength(2);
@@ -482,16 +310,15 @@ describe('ChatPanel resync (lag → snapshot rebuild at the /seq watermark)', ()
     const textarea = await waitFor(() => {
       const el = container.querySelector('textarea.ant-sender-input');
       expect(el).toBeTruthy();
+      expect(el.disabled).toBe(false);
       return el;
     });
     return { container, textarea };
   };
 
   it('rebuilds from the snapshot on lag, drops at/below-watermark frames, keeps the live tail', async () => {
-    // The run raced ahead while the tab was behind: head is 30 and the store
-    // snapshot holds the truth. draining=true keeps the run live.
-    seqHead = 30;
-    sessionSnapshots['s1'] = {
+    chatTestState.seqHead = 30;
+    chatTestState.sessionSnapshots['s1'] = {
       draining: true,
       messages: [
         { role: 'user', blocks: [{ type: 'text', text: '帮我跑测试' }] },
@@ -506,36 +333,29 @@ describe('ChatPanel resync (lag → snapshot rebuild at the /seq watermark)', ()
       fireEvent.keyDown(container.querySelector('textarea.ant-sender-input'), { key: 'Enter', keyCode: 13 });
     });
     await waitFor(() => {
-      expect(hits.some((h) => h.url.includes('/api/sessions/s1/events'))).toBe(true);
+      expect(chatTestState.hits.some((h) => h.url.includes('/api/sessions/s1/events'))).toBe(true);
     });
     const enc = new TextEncoder();
-    // Live frames carry no id (broadcast precedes persistence) — they fold
-    // into the dirty state.
     await act(async () => {
-      liveEventCtl.enqueue(enc.encode('event: text_delta\ndata: {"text":"局部"}\n\n'));
+      chatTestState.liveEventCtl.enqueue(enc.encode('event: text_delta\ndata: {"text":"局部"}\n\n'));
     });
     await waitFor(() => {
       expect(screen.getByText('局部')).toBeTruthy();
     });
-    // Server-side consumer lag: the re-sync signal.
     await act(async () => {
-      liveEventCtl.enqueue(enc.encode('event: error\ndata: {"error":"event lag: 5 events dropped","lag":5}\n\n'));
+      chatTestState.liveEventCtl.enqueue(enc.encode('event: error\ndata: {"error":"event lag: 5 events dropped","lag":5}\n\n'));
     });
-    // Backoff (1s, real timers) → onResync: /seq head 30 + snapshot rebuild.
     await new Promise((r) => setTimeout(r, 1200));
     await waitFor(() => {
-      expect(hits.some((h) => h.method === 'GET' && h.url.includes('/api/sessions/s1/events?after=30'))).toBe(true);
+      expect(chatTestState.hits.some((h) => h.method === 'GET' && h.url.includes('/api/sessions/s1/events?after=30'))).toBe(true);
     });
-    // The dirty live tail is REPLACED by the snapshot truth…
     await waitFor(() => {
       expect(screen.getByText('快照真相')).toBeTruthy();
     });
     expect(screen.queryByText('局部')).toBe(null);
-    // …and the replacement connection rejects below-watermark repeats
-    // (id: 12 ≤ applySeq 30) while folding the future live tail.
     await act(async () => {
-      liveEventCtl.enqueue(enc.encode('event: text_delta\nid: 12\ndata: {"text":"旧帧"}\n\n'));
-      liveEventCtl.enqueue(enc.encode('event: text_delta\ndata: {"text":"尾部"}\n\n'));
+      chatTestState.liveEventCtl.enqueue(enc.encode('event: text_delta\nid: 12\ndata: {"text":"旧帧"}\n\n'));
+      chatTestState.liveEventCtl.enqueue(enc.encode('event: text_delta\ndata: {"text":"尾部"}\n\n'));
     });
     await waitFor(() => {
       expect(screen.getByText('尾部')).toBeTruthy();
@@ -544,8 +364,8 @@ describe('ChatPanel resync (lag → snapshot rebuild at the /seq watermark)', ()
   }, 15000);
 
   it('a run that finished while disconnected lands done (draining flag), not latched streaming', async () => {
-    seqHead = 30;
-    sessionSnapshots['s1'] = {
+    chatTestState.seqHead = 30;
+    chatTestState.sessionSnapshots['s1'] = {
       draining: false,
       messages: [
         { role: 'user', blocks: [{ type: 'text', text: '收尾' }] },
@@ -560,15 +380,12 @@ describe('ChatPanel resync (lag → snapshot rebuild at the /seq watermark)', ()
       fireEvent.keyDown(container.querySelector('textarea.ant-sender-input'), { key: 'Enter', keyCode: 13 });
     });
     await waitFor(() => {
-      expect(hits.some((h) => h.url.includes('/api/sessions/s1/events'))).toBe(true);
+      expect(chatTestState.hits.some((h) => h.url.includes('/api/sessions/s1/events'))).toBe(true);
     });
     const enc = new TextEncoder();
     await act(async () => {
-      liveEventCtl.enqueue(enc.encode('event: error\ndata: {"error":"event lag: 2 events dropped","lag":2}\n\n'));
+      chatTestState.liveEventCtl.enqueue(enc.encode('event: error\ndata: {"error":"event lag: 2 events dropped","lag":2}\n\n'));
     });
-    // The terminal done frame fired at seq ≤ 30 — it is NEVER replayed; the
-    // resync's draining=false rebuild must close the run instead of latching
-    // 'streaming' forever (busy release → composer freed).
     await new Promise((r) => setTimeout(r, 1200));
     await waitFor(() => {
       expect(screen.getByText('终局快照')).toBeTruthy();
@@ -576,7 +393,6 @@ describe('ChatPanel resync (lag → snapshot rebuild at the /seq watermark)', ()
     await waitFor(() => {
       expect(screen.queryByText('streaming…')).toBe(null);
     });
-    // Composer is freed: the stop (loading) button is gone.
     await waitFor(() => {
       expect(container.querySelector('.ant-sender-actions-btn-loading-button')).toBe(null);
     });

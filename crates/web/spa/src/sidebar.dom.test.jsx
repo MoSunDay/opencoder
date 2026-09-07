@@ -72,6 +72,9 @@ const installRouter = () => {
     const method = String(opts.method || 'GET').toUpperCase();
     hits.push({ method, url, body: opts.body || '' });
     // Node dialog index — must match before the generic /api/nodes route.
+    if (url.includes('/nodes/node-local/dialogs')) {
+      return jsonResponse({ dialogs: fixtures.localSessions.map((row) => ({ session_id: row.id, title: row.title, first_created_at: row.created_at, last_created_at: row.updated_at })) });
+    }
     if (url.includes('/dialogs')) {
       return jsonResponse(fixtures.nodeDialogs);
     }
@@ -88,7 +91,7 @@ const installRouter = () => {
       return method === 'POST' ? jsonResponse({ id: 'new-1' }) : jsonResponse({ sessions: fixtures.localSessions });
     }
     if (url.includes('/api/nodes')) {
-      return jsonResponse({ nodes: [] });
+      return jsonResponse({ nodes: [{ id: 'node-local', name: 'Local node', online: true, kinds: ['agent'], snapshot: { ready: true } }, { id: 'n1', name: 'Fleet-1', online: true, kinds: ['agent'], snapshot: { ready: true } }] });
     }
     // GET /api/sessions/:id — the transcript snapshot openDialog loads.
     return jsonResponse(fixtures.snapshot);
@@ -106,7 +109,7 @@ beforeEach(() => {
   localStorage.clear();
   clearCredentials();
   // Store is a module-level singleton — reset it so cases never leak state.
-  setState({ page: 'nodes', preselectNode: null, nodes: [], conn: 'init' });
+  setState({ page: 'nodes', preselectNode: 'node-local', nodes: [], conn: 'init' });
   fixtures.localSessions = [];
   fixtures.nodeDialogs = { dialogs: [] };
   fixtures.snapshot = { messages: [] };
@@ -138,7 +141,7 @@ const mountChat = async () => {
   setCredentials('smoke-token', '');
   const renderResult = render(<ChatPanel />);
   await waitFor(() => {
-    expect(hits.some((h) => h.url.startsWith('/api/sessions?'))).toBe(true);
+    expect(hits.some((h) => h.url === '/api/nodes/node-local/dialogs')).toBe(true);
   });
   return renderResult;
 };
@@ -166,7 +169,7 @@ const conversationsItem = (label) => [...document.querySelectorAll('li.ant-conve
   .find((li) => (li.querySelector('.ant-conversations-label') || {}).textContent === label);
 
 describe('Conversations sidebar (T5 two-column chat)', () => {
-  it('renders the local sessions as items, then the remote list after a node switch', async () => {
+  it('lists only the selected node conversations and replaces them on node switch', async () => {
     fixtures.localSessions = localSessionsFixture();
     fixtures.nodeDialogs = {
       dialogs: [{ session_id: 'r1', title: '远端会话', first_created_at: 1, last_created_at: 2, task_count: 3 }],

@@ -39,7 +39,9 @@ pub use protocol::{
     DagClaimedRun, DagDefUpsertRequest, DagDefView, DagDispatchRequest, DagDispatchResponse,
     DagEventBatch, DagEventIn, DagEventView, DagRunView, DagStatusReport,
 };
-pub use spec::{decode_spec, decode_spec_str, DagSpec, SandboxMode, StepKind, StepSpec, MAX_HOW_APPEND_BYTES};
+pub use spec::{
+    decode_spec, decode_spec_str, DagSpec, SandboxMode, StepKind, StepSpec, MAX_HOW_APPEND_BYTES,
+};
 pub use transitions::{transition_allowed, DagRunStatus, StepOutcome};
 
 #[cfg(test)]

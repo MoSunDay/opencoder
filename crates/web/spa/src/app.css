@@ -282,10 +282,10 @@ body {
    the category switch sits above the scoped Sider menu (fleet-nav-category);
    the same two levels re-render as Segmented + Select rows on mobile. */
 .fleet-nav-category { padding: 12px 12px 8px; }
-.fleet-mobile-nav { display: none; }
+.fleet-content > .fleet-mobile-nav { display: none; }
 @media (max-width: 767px) {
   .fleet-sidebar { display: none; }
-  .fleet-mobile-nav { display: inline-flex; width: 100%; margin-bottom: 8px; }
+  .fleet-content > .fleet-mobile-nav { display: inline-flex; width: 100%; margin-bottom: 8px; }
   .fleet-header { gap: 12px !important; padding: 0 12px !important; }
   .fleet-content { padding: 12px !important; }
   .dag-detail { height: auto; flex-direction: column; }

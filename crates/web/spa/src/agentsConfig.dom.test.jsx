@@ -26,8 +26,11 @@ import { AgentsPanel } from './agentsConfig.jsx';
 import { ExecutionDetail } from './fleet/detail.jsx';
 
 /// antd 6 Button 对两字中文自动插空格（「新 建」），按 role + 去空白匹配。
-const findButton = (txt) => screen.getAllByRole('button')
-  .find((b) => (b.textContent || '').replace(/\s+/g, '') === txt);
+// Filter by accessible name before checking visibility: enumerating every
+// button walks the modal's hidden background and is very slow in jsdom.
+const findButton = (txt) => screen.getByRole('button', {
+  name: (name) => name.replace(/\s+/g, '') === txt,
+});
 
 /// 打开指定 antd 6 Select（交互面是 .ant-select 根）并在浮层里点 `label`。
 /// options portal 到 document.body，凭 .ant-select-item-option 的 title 匹配。

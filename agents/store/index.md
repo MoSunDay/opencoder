@@ -21,7 +21,7 @@ Commit: (working-tree, 基于 c1a1b2e78e1ccd4a3cc2ac6dc408a76d30bf46e6)
 
 - `Store`（`src/store.rs`）：dyn-compatible async 持久化接口。默认方法只用于后端兼容；libsql 实现完整支持 todos。
 - `LibsqlStore`（`src/libsql_store/mod.rs`）：缓存单个 Connection，并以 async Mutex 串行触碰同步 SQLite FFI，避免并发 worker 阻塞。
-- `run_tx`（`src/libsql_store/tx.rs`）：显式 BEGIN/COMMIT/ROLLBACK，避免 async 取消时 `libsql::Transaction::Drop` panic。
+- `run_tx`（`src/libsql_store/tx.rs`）：显式 BEGIN/COMMIT/ROLLBACK，避免 async 取消时 `libsql::Transaction::Drop` panic。所有写事务必须 `BEGIN IMMEDIATE`（`inputs.rs` 全量已是）：deferred BEGIN 的 SELECT→INSERT 写锁升级遇第二连接提交会得到 busy_timeout 不重试的 SQLITE_BUSY_SNAPSHOT；IMMEDIATE 使跨进程竞争化为等待并保住 `admitted_seq` 读改写原子性（回归测试 `tests/inputs_cross_instance_serialized.rs` 双实例同库压测）。
 - Session 类型（`src/types.rs`）：`SessionMeta`、`SessionPatch`、Input/Event/Subagent records；`task_type` 区分 parent、subagent、todo_workflow 和 todo。
 - TODO 类型（`src/todo_types.rs`）：`TodoWorkflowRecord`、`TodoItemRecord`、`TodoEventRecord` 和列表摘要。
 - 项目面类型与接缝（`src/project_types.rs` / `src/project.rs` / `src/project_factory.rs`）：goal→milestone→todo 三级 + `project_todo_runs` 运行留痕；`ProjectStore` trait（独立于 `Store`）+ `open_project_store(config)` 工厂（libsql 默认 / `mysql` / `starrocks` feature 二选一）——opencoder-project 运行时持有 `Arc<dyn ProjectStore>`，会话/消息仍走 `Arc<dyn Store>`。execute 生产路径只用复合 `claim_todo_running_with_run`，不会把条件 claim 与 run INSERT 拆成两个提交。

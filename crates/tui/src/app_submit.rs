@@ -78,13 +78,17 @@ pub(crate) async fn handle_submit_action(
         // the runner's record_compound resolves/activates/
         // persists the skill at the idle boundary — never now,
         // or it would fire inside the running turn.
-        queue_admitter::handle_queue(
+        // Channel gone/saturated → temp row and images already rolled back;
+        // text recoverable via ↑ history (push_history below still runs).
+        crate::app_helpers::queue_submit_flash(
             &text,
             admit_tx,
             admit_st,
             queue_items,
             pending_images,
             session_id,
+            anim_tick,
+            mode_flash,
         );
         push_history(history, hist_idx, &text);
         return LoopFlow::Proceed;

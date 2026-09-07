@@ -221,6 +221,7 @@ export function StepsContent({ turn, preview }) {
     ? turn.sayActive === true
     : (typeof turn.progressActive === 'boolean' ? turn.progressActive : openCall);
   const errored = calls.some((c) => c && c.isError);
+  const headingPreview = preview ?? sayPresentation(say, turn.sayActive === true).preview;
   return (
     <Collapse
       expandIcon={disclosureIcon}
@@ -231,7 +232,7 @@ export function StepsContent({ turn, preview }) {
         label: (
           <span style={{ fontFamily: MONO, fontSize: 12 }}>
             {hasSay
-              ? `Say(${steps.length} step${steps.length === 1 ? '' : 's'}): ${preview ?? sayPresentation(say, turn.sayActive === true).preview}`
+              ? `Say(${steps.length} step${steps.length === 1 ? '' : 's'})${headingPreview ? ': ' + headingPreview : ''}`
               : `${steps.length} Step${steps.length === 1 ? '' : 's'}`}
             {running ? <Tag color="processing" style={{ marginLeft: 12 }}>running</Tag> : null}
             {!running && errored ? <Tag color="red" style={{ marginLeft: 12 }}>error</Tag> : null}

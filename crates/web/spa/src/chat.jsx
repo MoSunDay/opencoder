@@ -1,60 +1,27 @@
-// chat.jsx — Tab 2 「会话交互」: node + dialog selectors, prompt composer,
-// Bearer-authenticated SSE streaming, interrupt. Two dialog sources:
-//   remote  GET /api/nodes/:id/dialogs   (may 404 while that feature lands —
-//                                         caught, rendered as an empty list)
-//   local   GET /api/sessions?limit=50   (server hides node-task sessions)
-// Terminal node-task streams always end in a canonical done/error frame
-// (api_nodes_ops.rs post_status closure event), which is what stops the stream.
-//
-// T4 composer note: the input area is now @ant-design/x Sender, which ships
-// with submitType='enter' — Enter sends, Shift+Enter inserts a newline and
-// Ctrl+Enter does nothing. This intentionally replaces the old
-// TextArea + Ctrl+Enter binding; the data flow is unchanged (onSubmit → the
-// same send(), loading → stop button wired to the same interrupt()).
-//
-// T5 layout note: dialog selection moved from a header antd Select into an
-// @ant-design/x Conversations sidebar (chatSidebar.jsx) — the classic X chat
-// two-column shell. Node switcher rides along on top of the sidebar. All
-// handlers (loadDialogs / openDialog / resetTranscript / send / interrupt /
-// preselect effect) are unchanged; only their mount points moved. The
-// sidebar's activeKey IS dialogSel, and its creation button calls the same
-// reset pair the old 新建对话 button did.
-//
-// T6 wiring note: composer + transcript gain the TUI's remaining surfaces —
-//   * slash/$skill command menu (commandMenu.js) with LOCAL execution paths
-//     (agent/compact/model/ap/annotation/fork); while a drain runs, /act //
-//     /plan are POSTed as TEXT (control_cmd.rs applies them at the boundary)
-//   * 排队 button → prompt delivery "queue" (steer stays the Enter default);
-//     while a drain streams, send() admits on the live session instead of
-//     restarting the stream (a restart resets the transcript view)
-//   * QueuePanel (pending inputs) + QuestionModal (question tool poll)
-//   * subagent fold blocks render through transcript.jsx → subagentBlock.jsx
-
+// Node-owned conversations: selection is required before creating or sending.
 import { Sender } from '@ant-design/x';
-import { Button, Input, Modal, Segmented, Space, Spin, Typography } from 'antd';
+import { Alert, Button, Input, Modal, Segmented, Space, Spin, Typography } from 'antd';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiGet, apiPost } from './api.js';
-import { newId } from './fleet/model.js';
-import { openStream } from './sse.js';
-import { consumedEchoText, emptyStream, ensurePendingEcho, reduceFrame, resyncState, turnsFromMessages, usageFromMessages, withUserTurn } from './reduce.js';
+import { canUseNode, newId } from './fleet/model.js';
+import { useNodes } from './fleet/useNodes.js';
+import { useTranscriptStream } from './chat/useTranscriptStream.js';
+import { consumedEchoText, emptyStream, turnsFromMessages, usageFromMessages } from './reduce.js';
 import { TranscriptView } from './transcript.jsx';
 import { DialogSidebar } from './chatSidebar.jsx';
 import { QueuePanel } from './queuePanel.jsx';
 import { QuestionModal } from './questionModal.jsx';
 import { ModelModal } from './modelModal.jsx';
 import { commandsForInput, replaceToken, stripLastToken } from './commandMenu.js';
-import { LOCAL_NODE, clearPreselect, useStore } from './store.js';
+import { clearPreselect, useStore } from './store.js';
 import { err, ok, warn } from './notice.js';
 
 const { Text } = Typography;
 
-function dialogKey(nodeId, sessionId) {
-  return nodeId + '|' + (sessionId || '');
-}
-
 export function ChatPanel({ onNotice }) {
-  const { nodes, preselectNode } = useStore();
-  const [nodeSel, setNodeSel] = useState(LOCAL_NODE);
+  const { preselectNode } = useStore();
+  const { nodes, error: nodesError } = useNodes();
+  const [nodeSel, setNodeSel] = useState(null);
   const [dialogs, setDialogs] = useState([]);
   const [dialogSel, setDialogSel] = useState(null);
   const [dialogsLoading, setDialogsLoading] = useState(false);
@@ -72,10 +39,13 @@ export function ChatPanel({ onNotice }) {
 
   const streamRef = useRef(null);
   const createAttempt = useRef(null);
-  const lastTaskRef = useRef(new Map()); // dialogKey -> {task_id, session_id}
+  const sendingRef = useRef(false);
   const aliveRef = useRef(true);
 
-  const isLocal = nodeSel === LOCAL_NODE;
+  const hasNode = !!nodeSel;
+  const nodeReady = canUseNode(nodes, nodeSel, 'agent');
+  const selectionRef = useRef({ node: nodeSel, dialog: dialogSel });
+  selectionRef.current = { node: nodeSel, dialog: dialogSel };
 
   // Tab 1's 打开对话 lands here with a preselected node.
   useEffect(() => {
@@ -95,51 +65,36 @@ export function ChatPanel({ onNotice }) {
     };
   }, []);
 
-  // $-skill completions for the command menu — one fetch per mount, best
-  // effort (an empty list only shrinks the menu, never breaks the composer).
+  // Refresh command completions whenever the selected execution node changes.
   useEffect(() => {
     let alive = true;
-    apiGet('/api/skills').then((j) => {
+    setSkills([]);
+    if (!nodeSel) return undefined;
+    apiGet('/api/skills?node_id=' + encodeURIComponent(nodeSel)).then((j) => {
       if (alive) {
         setSkills((j && j.skills) || []);
       }
-    }).catch(() => {});
+    }).catch((e) => { if (alive) onNotice?.(err('读取节点技能失败: ' + e.message)); });
     return () => {
       alive = false;
     };
-  }, []);
+  }, [nodeSel, onNotice]);
 
   const loadDialogs = useCallback(async (nodeId) => {
+    setDialogs([]);
+    if (!nodeId) { setDialogsLoading(false); return; }
     setDialogsLoading(true);
     try {
-      if (nodeId === LOCAL_NODE) {
-        const j = await apiGet('/api/sessions?limit=50');
-        const list = ((j && j.sessions) || []).map((s) => ({
-          session_id: s.id,
-          title: s.title,
-          first_created_at: s.created_at,
-          last_created_at: s.updated_at,
-          task_count: null,
-        }));
-        if (aliveRef.current) {
-          setDialogs(list);
-        }
-      } else {
-        const j = await apiGet('/api/nodes/' + encodeURIComponent(nodeId) + '/dialogs');
-        if (aliveRef.current) {
-          setDialogs((j && j.dialogs) || []);
-        }
-      }
-    } catch {
-      if (aliveRef.current) {
-        setDialogs([]); // dialogs endpoint may not exist yet — never crash
+      const j = await apiGet('/api/nodes/' + encodeURIComponent(nodeId) + '/dialogs');
+      if (aliveRef.current && selectionRef.current.node === nodeId) setDialogs(j?.dialogs || []);
+    } catch (e) {
+      if (aliveRef.current && selectionRef.current.node === nodeId) {
+        onNotice?.(err('获取会话失败: ' + e.message));
       }
     } finally {
-      if (aliveRef.current) {
-        setDialogsLoading(false);
-      }
+      if (aliveRef.current && selectionRef.current.node === nodeId) setDialogsLoading(false);
     }
-  }, []);
+  }, [onNotice]);
 
   const resetTranscript = useCallback(() => {
     if (streamRef.current) {
@@ -154,152 +109,22 @@ export function ChatPanel({ onNotice }) {
   useEffect(() => {
     resetTranscript();
     setDialogSel(null);
+    setModelOpen(false); setApOpen(false); setAnnoOpen(false); setSessionAgent('act');
+    createAttempt.current = null;
     loadDialogs(nodeSel);
   }, [nodeSel, resetTranscript, loadDialogs]);
 
-  /// Normalize the transcript from the store once a run reaches `done` —
-  /// mirrors the vanilla frontend's done → loadTranscript(). Kept best-effort:
-  /// if the fetch fails or returns nothing we keep the streamed turns.
-  const reloadAfterDone = useCallback(async (sid, currentTurns) => {
-    try {
-      const j = await apiGet('/api/sessions/' + encodeURIComponent(sid));
-      const msgs = (j && j.messages) || [];
-      if (msgs.length && aliveRef.current) {
-        setStream((s) => ({
-          ...s,
-          // TUI /act_clear_context <tail> parity (rebuild_after_reset): the
-          // reset fires inside the admitted turn, so the store snapshot has
-          // NOT recorded the echo yet — re-push the user boundary if the
-          // rebuilt turns lack it. The functional update reads the LIVE
-          // pendingEcho; on the done path it is already null and the snapshot
-          // itself carries the echo → no-op, behavior unchanged.
-          turns: ensurePendingEcho(turnsFromMessages(msgs), s.pendingEcho),
-          usage: usageFromMessages(msgs),
-        }));
-      }
-    } catch {
-      setStream((s) => ({ ...s, turns: s.turns.length ? s.turns : currentTurns }));
-    }
-  }, []);
+  const { reloadAfterDone, openSessionStream } = useTranscriptStream({ streamRef, aliveRef, setStream, setBusy, setConnecting, setQueueVersion, onNotice, selectionRef });
 
-  const startStream = useCallback(({ path, sessionId, after, initialTurns, initialUsage }) => {
-    if (streamRef.current) {
-      streamRef.current.abort();
-    }
-    // startStream RESETS the whole stream state, so a caller's optimistic
-    // user echo must ride IN via initialTurns (pushing it before this call is
-    // a guaranteed wipe). A fresh run never sees a steer/queue echo frame
-    // first, so the optimistic turn is the run's ONLY user anchor — mirror
-    // the TUI push_user + pending_turn_echo pair: seed pendingEcho from the
-    // last initial turn when it is a user text turn (bare control commands
-    // echo nothing → empty initialTurns → null), so a transcript_reset
-    // rebuild (reloadAfterDone → ensurePendingEcho) re-pushes the boundary.
-    const initialList = Array.isArray(initialTurns) ? initialTurns : [];
-    const lastInitial = initialList[initialList.length - 1];
-    const initialPendingEcho = lastInitial && lastInitial.kind === 'text' && lastInitial.role === 'user'
-      ? lastInitial.text
-      : null;
-    setStream({
-      ...emptyStream(),
-      turns: initialTurns || [],
-      usage: initialUsage || null,
-      pendingEcho: initialPendingEcho,
-      status: 'streaming',
-    });
-    streamRef.current = openStream({
-      path,
-      sessionId,
-      after: after || 0,
-      onFrame: (f) => {
-        setConnecting(false);
-        setStream((s) => reduceFrame(s, f, Date.now()));
-        // A consumed input frees a QueuePanel row — pull-only refresh.
-        if (f && (f.event === 'queue_consumed' || f.event === 'steer_consumed')) {
-          setQueueVersion((v) => v + 1);
-        }
-        // The wire payload is {} (runner/event.rs): only the store snapshot
-        // knows the collapsed transcript — refetch immediately.
-        if (f && f.event === 'transcript_reset' && sessionId) {
-          reloadAfterDone(sessionId, []);
-        }
-      },
-      onStatus: (st, info) => {
-        if (st === 'failed') {
-          setConnecting(false);
-          setBusy(false);
-          if (onNotice) {
-            onNotice(err('SSE 流连接失败（已重试 5 次）'));
-          }
-        }
-      },
-      // Round-2 #5 resync: every reconnect (lag re-sync or retry) rebuilds
-      // the fold state from the store snapshot at the /seq watermark instead
-      // of folding the replay tail into the dirty live state — live frames
-      // carry no seq, so replaying after=lastSeq would re-fold every frame
-      // consumed since the last id'd one (doubled text, duplicated tool
-      // rows, re-pushed echo turns). The snapshot's `draining` flag also
-      // closes the finished-while-disconnected gap: a run that ended during
-      // the outage has its terminal frame at seq ≤ head (never replayed), so
-      // a non-draining rebuild lands status 'done' and releases busy instead
-      // of latching 'streaming' forever. Returns null on failure → sse.js
-      // falls back to the capped legacy cursor (today's behavior).
-      onResync: async () => {
-        if (!sessionId) {
-          return null;
-        }
-        const sid = sessionId;
-        try {
-          const q = await apiGet('/api/sessions/' + encodeURIComponent(sid) + '/seq');
-          const head = q && typeof q.seq === 'number' ? q.seq : 0;
-          const j = await apiGet('/api/sessions/' + encodeURIComponent(sid));
-          if (!aliveRef.current) {
-            return null;
-          }
-          setStream((s) => resyncState({
-            messages: (j && j.messages) || [],
-            draining: !!(j && j.draining),
-            headSeq: head,
-            pendingEcho: s.pendingEcho,
-          }));
-          return head;
-        } catch {
-          return null;
-        }
-      },
-    });
-  }, [onNotice, reloadAfterDone]);
-
-  /// seq head → authenticated /events stream (sendLocal + 压缩 share the open path).
-  /// `after` is the pre-POST seq head owned by the caller; when omitted we
-  /// fall back to fetching /seq here (best-effort, no ordering guarantee —
-  /// callers that need only-this-turn's events must snapshot BEFORE posting).
-  /// `initialTurns` threads the caller's optimistic echo turns into
-  /// startStream's reset state (see startStream's comment).
-  const openLocalStream = useCallback(async (sid, after, initialTurns) => {
-    let head = after;
-    if (head === undefined) {
-      try {
-        const q = await apiGet('/api/sessions/' + encodeURIComponent(sid) + '/seq');
-        head = (q && q.seq) || 0;
-      } catch {
-        head = 0;
-      }
-    }
-    startStream({
-      path: '/api/sessions/' + encodeURIComponent(sid) + '/events',
-      sessionId: sid,
-      after: head,
-      initialTurns,
-    });
-  }, [startStream]);
-
-  const sendLocal = async (prompt, delivery) => {
+  const sendSession = async (prompt, delivery) => {
     let sid = dialogSel;
     if (!sid) {
-      createAttempt.current ||= { key: 'auto', id: newId('agent') };
-      const j = await apiPost('/api/sessions', { id: createAttempt.current.id });
+      createAttempt.current ||= { key: nodeSel, id: newId('agent') };
+      const j = await apiPost('/api/sessions', { id: createAttempt.current.id, node_id: nodeSel });
+      if (!j?.id) throw new Error('服务未返回会话 ID，请重试确认');
       createAttempt.current = null;
       sid = j.id;
+      selectionRef.current = { node: nodeSel, dialog: sid };
       setDialogSel(sid);
       setDialogs((d) => [{
         session_id: sid, title: prompt.slice(0, 40),
@@ -309,13 +134,8 @@ export function ChatPanel({ onNotice }) {
     // Snapshot the persisted head BEFORE the POST: if /seq is fetched after
     // the prompt is admitted, events emitted in between get seq ≤ head and
     // are never replayed — this turn's first frames would be lost forever.
-    let after = 0;
-    try {
-      const q = await apiGet('/api/sessions/' + encodeURIComponent(sid) + '/seq');
-      after = (q && q.seq) || 0;
-    } catch {
-      after = 0;
-    }
+    const q = await apiGet('/api/sessions/' + encodeURIComponent(sid) + '/seq');
+    const after = q?.seq || 0;
     const ack = await apiPost('/api/sessions/' + encodeURIComponent(sid) + '/prompt',
       { prompt, delivery: delivery === 'queue' ? 'queue' : 'steer' });
     if (ack && ack.ok === false) {
@@ -330,50 +150,21 @@ export function ChatPanel({ onNotice }) {
     // prediction: a later steer/queue_consumed frame echoing the SAME text
     // folds into it instead of pushing a duplicate (reduce.js dedup).
     const echo = consumedEchoText(prompt);
-    await openLocalStream(sid, after, echo
+    await openSessionStream(sid, after, [...stream.turns, ...(echo
       ? [{ kind: 'text', role: 'user', text: echo, optimistic: true }]
-      : []);
-  };
-
-  const sendRemote = async (prompt) => {
-    const body = { prompt };
-    if (dialogSel) {
-      body.session_id = dialogSel;
-    } else {
-      const key = JSON.stringify([nodeSel, prompt]);
-      if (createAttempt.current?.key !== key) createAttempt.current = { key, id: newId('agent') };
-      body.id = createAttempt.current.id;
-    }
-    const j = await apiPost('/api/nodes/' + encodeURIComponent(nodeSel) + '/tasks', body);
-    createAttempt.current = null;
-    const taskId = j.task_id;
-    const sessionId = j.session_id;
-    lastTaskRef.current.set(dialogKey(nodeSel, dialogSel || sessionId), { task_id: taskId, session_id: sessionId });
-    if (sessionId !== dialogSel) {
-      // Dispatch created a fresh synthetic session — surface it in the list.
-      // First dispatch has no dialogSel yet: backfill it too, so the
-      // terminal-frame effect sees a selection and the done → store reload
-      // actually runs for the session we just streamed.
-      setDialogs((d) => [{
-        session_id: sessionId, title: prompt.slice(0, 40),
-        first_created_at: Date.now(), last_created_at: Date.now(), task_count: 1,
-      }].concat(d));
-      setDialogSel(sessionId);
-    }
-    // Remote dispatch has no queue_consumed echo (synthetic task session), so
-    // the optimistic user turn applies the echo contract itself: bare control
-    // commands render nothing, compounds render only the tail. `optimistic`
-    // marks the local prediction (reduce.js dedups a same-text echo frame).
-    setStream((s) => withUserTurn(s, consumedEchoText(prompt), true));
-    startStream({ path: '/api/nodes/tasks/' + encodeURIComponent(taskId) + '/events', sessionId, after: 0 });
+      : [])]);
   };
 
   const send = async (rawPrompt, delivery) => {
     const prompt = (typeof rawPrompt === 'string' && rawPrompt.trim()) || input.trim();
-    if (!prompt) {
+    if (!prompt || sendingRef.current) {
       return;
     }
-    if (busy && isLocal && dialogSel) {
+    if (!nodeReady) {
+      onNotice?.(warn(nodeSel ? '所选节点当前不可执行，请选择可用节点' : '请先选择执行节点'));
+      return;
+    }
+    if (busy && dialogSel) {
       // A drain is already streaming: admit the prompt on the live session —
       // the runner takes it at the next boundary and the OPEN stream carries
       // the queue/steer echo. Never restart the stream here (startStream
@@ -391,25 +182,23 @@ export function ChatPanel({ onNotice }) {
       return;
     }
     if (busy) {
-      // Remote busy: nothing can be admitted while the node runs the task.
+      // Session creation/admission is still pending; preserve the draft.
       // Return WITHOUT clearing the composer — clearing here used to swallow
       // the typed input with no notice and no recovery path.
       return;
     }
+    sendingRef.current = true;
     setInput('');
     setBusy(true);
     setConnecting(true);
     try {
-      if (isLocal) {
-        await sendLocal(prompt, delivery);
-      } else {
-        await sendRemote(prompt);
-      }
+      await sendSession(prompt, delivery);
     } catch (e) {
       setConnecting(false);
       setBusy(false);
+      setInput(prompt);
       setStream((s) => ({ ...s, status: 'error', error: (e && e.message) || '发送失败' }));
-    }
+    } finally { sendingRef.current = false; }
   };
 
   // done/error → a terminal frame always stops the stream: release the
@@ -418,9 +207,6 @@ export function ChatPanel({ onNotice }) {
   // reliable, so the terminal path must reset too. The transcript reload
   // stays done-only: a failed run must not clobber what is already shown.
   // (Lag-marked errors never reach here — reduce.js keeps them non-terminal.)
-  // The busy release is NOT gated on dialogSel: a first remote dispatch has
-  // no selection until sendRemote backfills one, and gating the reset on it
-  // used to latch the Sender loading until the user clicked some dialog.
   useEffect(() => {
     if (stream.status !== 'done' && stream.status !== 'error') {
       return;
@@ -434,27 +220,15 @@ export function ChatPanel({ onNotice }) {
   }, [stream.status]);
 
   const interrupt = async () => {
-    try {
-      if (isLocal) {
-        if (!dialogSel) {
-          return;
-        }
-        await apiPost('/api/sessions/' + encodeURIComponent(dialogSel) + '/interrupt');
-      } else {
-        const lt = lastTaskRef.current.get(dialogKey(nodeSel, dialogSel));
-        if (!lt) {
-          return;
-        }
-        await apiPost('/api/nodes/' + encodeURIComponent(nodeSel) + '/tasks/' + encodeURIComponent(lt.task_id) + '/cancel');
-      }
-    } catch (e) {
-      if (onNotice) {
-        onNotice(err('中断失败: ' + ((e && e.message) || '')));
-      }
-    }
+    if (!dialogSel) return;
+    try { await apiPost('/api/sessions/' + encodeURIComponent(dialogSel) + '/interrupt'); }
+    catch (e) { onNotice?.(err('中断失败: ' + e.message)); }
   };
 
   const openDialog = async (sid) => {
+    if (busy) return;
+    selectionRef.current = { node: nodeSel, dialog: sid };
+    const owner = nodeSel;
     setDialogSel(sid);
     resetTranscript();
     if (!sid) {
@@ -464,19 +238,13 @@ export function ChatPanel({ onNotice }) {
       const j = await apiGet('/api/sessions/' + encodeURIComponent(sid));
       const msgs = (j && j.messages) || [];
       const agent = j && j.meta && j.meta.agent;
-      setSessionAgent(agent === 'plan' ? 'plan' : 'act');
-      if (aliveRef.current) {
+      if (aliveRef.current && selectionRef.current.node === owner && selectionRef.current.dialog === sid) {
+        setSessionAgent(agent === 'plan' ? 'plan' : 'act');
         setStream({ ...emptyStream(), turns: turnsFromMessages(msgs), usage: usageFromMessages(msgs) });
       }
-    } catch {
-      // Snapshot unavailable → fall back to replaying the last task's events
-      // from after=0 (the stream endpoint supports full replay).
-      setSessionAgent('act');
-      const lt = lastTaskRef.current.get(dialogKey(nodeSel, sid)) || lastTaskRef.current.get(dialogKey(nodeSel, null));
-      if (lt && aliveRef.current) {
-        setConnecting(true);
-        setBusy(true);
-        startStream({ path: '/api/nodes/tasks/' + encodeURIComponent(lt.task_id) + '/events', sessionId: lt.session_id, after: 0 });
+    } catch (e) {
+      if (aliveRef.current && selectionRef.current.node === owner && selectionRef.current.dialog === sid) {
+        setStream((s) => ({ ...s, status: 'error', error: '读取会话失败: ' + e.message }));
       }
     }
   };
@@ -487,8 +255,7 @@ export function ChatPanel({ onNotice }) {
     }
   };
 
-  /// Slash-command execution (LOCAL only — remote dispatch keeps today's
-  /// plain-text behavior). agent/compact open a drain-facing POST; the picker
+  /// Session commands are relayed to the selected conversation owner. agent/compact open a drain-facing POST; the picker
   /// kinds just open their modal; 'text' kinds ride the normal prompt path.
   const execCommand = async (entry) => {
     const kind = entry && entry.kind;
@@ -514,20 +281,15 @@ export function ChatPanel({ onNotice }) {
         return;
       }
       try {
-        // Same pre-POST snapshot as sendLocal: Compaction/TranscriptReset
+        // Same pre-POST snapshot as sendSession: Compaction/TranscriptReset
         // frames emitted between the POST ack and a late /seq fetch would be
         // skipped forever.
-        let after = 0;
-        try {
-          const q = await apiGet('/api/sessions/' + encodeURIComponent(sid) + '/seq');
-          after = (q && q.seq) || 0;
-        } catch {
-          after = 0;
-        }
+        const q = await apiGet('/api/sessions/' + encodeURIComponent(sid) + '/seq');
+        const after = q?.seq || 0;
         await apiPost('/api/sessions/' + encodeURIComponent(sid) + '/compact');
         setBusy(true);
         setConnecting(true);
-        await openLocalStream(sid, after); // compaction deltas arrive on the stream
+        await openSessionStream(sid, after); // compaction deltas arrive on the stream
       } catch (e) {
         setConnecting(false);
         setBusy(false);
@@ -617,9 +379,8 @@ export function ChatPanel({ onNotice }) {
     execCommand(entry);
   };
 
-  // Command menu items follow the LAST `/…`/`$…` token of the composer text
-  // (LOCAL only — remote dispatch has no local execution surface).
-  const menuEntries = isLocal ? commandsForInput(input, skills) : [];
+  // Command completion uses the selected node’s catalog.
+  const menuEntries = hasNode ? commandsForInput(input, skills) : [];
 
   return (
     <div style={{ display: 'flex', flexDirection: 'row', height: '100%', minHeight: 0 }}>
@@ -627,15 +388,16 @@ export function ChatPanel({ onNotice }) {
         nodes={nodes}
         nodeSel={nodeSel}
         onNodeChange={setNodeSel}
+        disabled={busy}
         dialogs={dialogs}
         activeKey={dialogSel}
         onActiveChange={openDialog}
-        onNew={() => { resetTranscript(); setDialogSel(null); }}
+        onNew={() => { if (busy || !nodeReady) return; resetTranscript(); setDialogSel(null); setSessionAgent('act'); createAttempt.current = null; }}
         loading={dialogsLoading}
       />
 
       <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
-        {isLocal ? (
+        {hasNode ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
             <Segmented
               size="small"
@@ -651,6 +413,7 @@ export function ChatPanel({ onNotice }) {
           </div>
         ) : null}
 
+        {!nodeReady && <Alert type="info" showIcon style={{ marginBottom: 8 }} title={nodesError || (nodeSel ? '所选节点当前不可执行，请选择可用节点' : '请先选择执行节点')} />}
         <div style={{ flex: 1, minHeight: 0, overflow: 'auto', border: '1px solid #f0f0f0', borderRadius: 8, padding: '8px 16px' }}>
           <Spin spinning={connecting} description="等待首个事件…">
             <TranscriptView
@@ -663,7 +426,7 @@ export function ChatPanel({ onNotice }) {
           </Spin>
         </div>
 
-        <QueuePanel sessionId={isLocal ? dialogSel : null} refreshSignal={queueVersion} />
+        <QueuePanel sessionId={hasNode ? dialogSel : null} refreshSignal={queueVersion} />
 
         <div style={{ marginTop: 12, position: 'relative' }}>
           {menuEntries.length > 0 ? (
@@ -696,12 +459,13 @@ export function ChatPanel({ onNotice }) {
                 onSubmit={send}
                 onCancel={interrupt}
                 loading={busy}
+                disabled={!nodeReady}
                 placeholder="输入提示词，Enter 发送，Shift+Enter 换行"
               />
             </div>
             <Button
               style={{ height: 40 }}
-              disabled={!isLocal || !dialogSel || !input.trim()}
+              disabled={!nodeReady || !dialogSel || !input.trim()}
               onClick={() => send(input.trim(), 'queue')}
             >
               排队
@@ -710,7 +474,7 @@ export function ChatPanel({ onNotice }) {
         </div>
       </div>
 
-      <ModelModal open={modelOpen} sessionId={dialogSel} onClose={() => setModelOpen(false)} onNotice={notice} />
+      <ModelModal open={modelOpen} sessionId={dialogSel} nodeId={nodeSel} onClose={() => setModelOpen(false)} onNotice={notice} />
 
       <Modal
         title="autopilot 模式"
@@ -744,7 +508,7 @@ export function ChatPanel({ onNotice }) {
         </Space>
       </Modal>
 
-      <QuestionModal sessionId={isLocal ? dialogSel : null} active={busy} />
+      <QuestionModal sessionId={hasNode ? dialogSel : null} active={busy} />
     </div>
   );
 }

@@ -187,6 +187,25 @@ async fn plan(
     state: &Arc<AppState>,
     normalized: &idem::NormalizedRequest,
 ) -> Result<(Value, CapabilityTarget), RpcReply> {
+    // An empty library is a normal first-use state: execute the request with
+    // the default agent on the requested node. Store/planner failures remain
+    // errors; an explicitly supplied plan is always resolved as requested.
+    if normalized.intent.plan_id.is_none() {
+        match state.store.list_brain_capabilities().await {
+            Ok(capabilities) if capabilities.is_empty() => {
+                return Ok((
+                    json!({
+                        "route": "default_agent", "plan_id": null, "capability_id": null,
+                        "reason": "能力库为空，由默认 Agent 执行需求", "path": [],
+                        "planned_fresh": false,
+                    }),
+                    default_target(),
+                ));
+            }
+            Ok(_) => {}
+            Err(error) => return Err(RpcReply::error(500, error.to_string())),
+        }
+    }
     let preview =
         crate::api_brain::dispatch(State(state.clone()), Json(normalized.preview())).await;
     let status = preview.status();
@@ -219,15 +238,17 @@ async fn plan(
             Ok(target) => target,
             Err(error) => return Err(RpcReply::error(500, error.to_string())),
         },
-        Ok(None) => {
-            return Err(RpcReply::error(
-                400,
-                format!("capability {capability} has no executable target"),
-            ))
-        }
+        Ok(None) => default_target(),
         Err(error) => return Err(RpcReply::error(500, error.to_string())),
     };
     Ok((result, target))
+}
+
+fn default_target() -> CapabilityTarget {
+    CapabilityTarget {
+        kind: ExecutionKind::Agent,
+        target: "act".into(),
+    }
 }
 
 async fn dispatch_unkeyed(state: &Arc<AppState>, normalized: &idem::NormalizedRequest) -> RpcReply {

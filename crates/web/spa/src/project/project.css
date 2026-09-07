@@ -4,6 +4,8 @@
 
 /* Markdown bodies rendered by src/project/markdown.jsx. */
 .md-body {
+  min-width: 0;
+  overflow-x: auto;
   font-size: 13px;
   line-height: 1.7;
   color: rgba(0, 0, 0, 0.88);

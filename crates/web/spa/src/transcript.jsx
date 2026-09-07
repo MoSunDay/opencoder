@@ -32,6 +32,7 @@ import { isEmptyTranscript, itemsFromTurns, usageLine } from './bubbleItems.js';
 import { StepsContent, ThinkContent, ToolContent } from './stepsBlock.jsx';
 import { sayPresentation } from './transcript/markdown.js';
 import { AssistantText, TextRows } from './transcript/text.jsx';
+import { Markdown } from './project/markdown.jsx';
 import { SubagentContent } from './subagentBlock.jsx';
 
 const { Text, Paragraph } = Typography;
@@ -91,17 +92,23 @@ function TextContent({ turn }) {
 /// BODY still renders below as sibling nodes.
 function AssistantTurnContent({ turn }) {
   const say = turn && Array.isArray(turn.say) ? turn.say : [];
-  // 和 TUI 一样，流式取 raw 行，完成后取 Markdown 渲染行。标题与正文
-  // 共用同一表示，避免原始首行去重破坏代码围栏或重复 Markdown 标题。
-  const presentation = useMemo(() => sayPresentation(say, turn.sayActive === true), [say, turn.sayActive]);
+  // Streaming keeps the compact raw preview. Completed answers render the
+  // complete Markdown document below the ladder; no line is stripped from
+  // a heading, list, code fence or table, and no preview duplicates the body.
+  const presentation = useMemo(() => {
+    if (turn.sayActive === true) return sayPresentation(say, true);
+    const isText = (part) => part.kind === 'text' && !part.image;
+    return { preview: '', rows: [], markdown: say.filter(isText).map((part) => part.text || '').join(''), other: say.filter((part) => !isText(part)) };
+  }, [say, turn.sayActive]);
   const body = presentation.other;
   return (
     <div>
       <StepsContent turn={turn} preview={presentation.preview} />
-      {body.length > 0 || presentation.rows.length > 0 ? (
+      {body.length > 0 || presentation.rows.length > 0 || presentation.markdown ? (
         // TUI 对齐（头部行后插一空行）：正文块与头部保持 16px 的真实块级
         // 间距，不再与 `❯ Say(N steps)` 行挤在一起。
         <div style={{ marginTop: 16 }}>
+          {presentation.markdown && <Markdown text={presentation.markdown} />}
           {!!presentation.rows.length && <TextRows rows={presentation.rows} />}
           {body.map((part, index) => {
             if (part.kind === 'think') {

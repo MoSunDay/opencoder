@@ -1,10 +1,13 @@
-import { Alert, Button, Collapse, Descriptions, Drawer, Empty, Input, Progress, Select, Space, Spin, Tag, Typography } from 'antd';
-import { useCallback, useEffect, useState } from 'react';
+import { Alert, Button, Collapse, Descriptions, Drawer, Empty, Input, Progress, Select, Space, Spin, Typography } from 'antd';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { apiGet, apiPost } from '../api.js';
 import { openStream } from '../sse.js';
 import { StatusTag } from '../ui/statusTag.jsx';
 import { TimeText } from '../ui/timeText.jsx';
-import { KIND_LABELS, appendMessagePage, executionActions, messagePagePath, textOf } from './model.js';
+import { KIND_LABELS, appendMessagePage, executionActions, messagePagePath } from './model.js';
+import { TranscriptView } from '../transcript.jsx';
+import { turnsFromMessages } from '../reduce.js';
+import { useExecutionTranscript } from './detail/liveTranscript.js';
 import { Artifacts } from './artifacts.jsx';
 import { DetailFields, PayloadWindows } from './detail/fields.jsx';
 import { WorkloadDetail } from './detail/workloads.jsx';
@@ -24,8 +27,9 @@ function eventText(data) {
   return text.length <= EVENT_TEXT_CHARS ? text : `${text.slice(0, EVENT_TEXT_CHARS)}…`;
 }
 
-export function ExecutionMessage({ message }) {
-  return <div className="execution-message"><Tag>{message.role}</Tag><Markdown text={textOf(message)} /></div>;
+export function ExecutionTranscript({ messages, live }) {
+  const turns = useMemo(() => turnsFromMessages(messages), [messages]);
+  return <TranscriptView turns={live?.turns || turns} />;
 }
 
 export function appendEvent(rows, frame) {
@@ -48,6 +52,7 @@ export function ExecutionDetail({ id, summary, onClose, onNotice }) {
   const [messagesBusy, setMessagesBusy] = useState(false);
   const [messageWindows, setMessageWindows] = useState([{ cursor: null, leading: new Uint8Array() }]);
   const [messageWindow, setMessageWindow] = useState(0);
+  const [revision, setRevision] = useState(0);
   const load = useCallback(async () => {
     try { setDetail(await apiGet(`/api/executions/${encodeURIComponent(id)}`)); setError(''); }
     catch (e) { setDetail(null); setError(e.status === 503 ? '所属节点当前离线，恢复连接后可读取明细和继续操作' : e.message); }
@@ -57,28 +62,42 @@ export function ExecutionDetail({ id, summary, onClose, onNotice }) {
     setDetail(null); setEvents([]); setMessages({ messages: [], partial: null, large: [], nextCursor: null, more: false });
     setMessageWindows([{ cursor: null, leading: new Uint8Array() }]); setMessageWindow(0); setError(''); load();
     const timer = setInterval(load, 3000);
-    const stream = openStream({ path: `/api/executions/${encodeURIComponent(id)}/events`, after: 0,
+    return () => clearInterval(timer);
+  }, [id, load]);
+  const index = detail?.execution || summary || null;
+  const kind = detail?.request?.kind || index?.kind;
+  useEffect(() => {
+    if (!id || !kind || ['agent', 'maintenance'].includes(kind)) return undefined;
+    const stream = openStream({ path: `/api/executions/${encodeURIComponent(id)}/events`, after: 0, executionHistory: true,
       onFrame: (frame) => {
         setEvents((rows) => appendEvent(rows, frame));
-        if (['done', 'run_finished', 'workflow_completed', 'workflow_failed'].includes(frame.event)) { stream.abort(); load(); }
+        if (['done', 'run_finished', 'workflow_completed', 'workflow_failed'].includes(frame.event)) load();
         if (frame.event === 'error') setError(typeof frame.data?.error === 'string' ? frame.data.error : JSON.stringify(frame.data));
       },
       onStatus: (status) => { if (status === 'failed') setError('节点事件流连接失败，可刷新重试'); },
     });
-    return () => { clearInterval(timer); stream.abort(); };
-  }, [id, load]);
-  const index = detail?.execution || summary || null;
-  const kind = detail?.request?.kind || index?.kind;
+    return () => stream.abort();
+  }, [id, kind, load]);
   const loadMessages = useCallback(async ({ reset = false, rewind = false, cursor = null, leading = new Uint8Array(), windowIndex = 0 } = {}) => {
     if (!id || !['agent', 'maintenance'].includes(kind)) return;
     setMessagesBusy(true);
     try {
       const page = await apiGet(messagePagePath(id, cursor));
-      setMessages((old) => appendMessagePage(reset ? null : { ...old, partial: rewind ? null : old.partial, large: [] }, page, leading));
+      setMessages((old) => {
+        const next = appendMessagePage(reset ? null : { ...old, partial: rewind ? null : old.partial, large: [] }, page, leading);
+        return JSON.stringify(next) === JSON.stringify(old) ? old : next;
+      });
       setMessageWindow(windowIndex);
     } catch (e) { setError(e.message); }
     finally { setMessagesBusy(false); }
   }, [id, kind]);
+  const live = useExecutionTranscript({
+    id, enabled: ['agent', 'maintenance'].includes(kind), status: index?.status, revision,
+    onFrame: (frame) => setEvents((rows) => appendEvent(rows, frame)),
+    onSettled: () => { load(); if (messageWindow === 0) loadMessages({ reset: true }); },
+    onError: setError,
+  });
+  const showLive = messageWindow === 0 && live.caughtUp && ['pending', 'running'].includes(index?.status);
   useEffect(() => {
     if (!kind || !['agent', 'maintenance'].includes(kind)) return undefined;
     const refresh = messageRefreshMode(index?.status, messageWindow);
@@ -109,7 +128,7 @@ export function ExecutionDetail({ id, summary, onClose, onNotice }) {
   };
   const command = async (action, input = {}) => {
     setBusy(true);
-    try { await apiPost(`/api/executions/${encodeURIComponent(id)}/commands`, { action, input }); setPrompt(''); await load(); }
+    try { await apiPost(`/api/executions/${encodeURIComponent(id)}/commands`, { action, input }); setPrompt(''); setRevision((v) => v + 1); await load(); }
     catch (e) { onNotice(err(e.message)); }
     finally { setBusy(false); }
   };
@@ -117,7 +136,7 @@ export function ExecutionDetail({ id, summary, onClose, onNotice }) {
   const projectRunnable = ['idle', 'interrupted', 'error'].includes(execution?.status);
   const actions = executionActions(execution);
   const unavailable = !detail && !!error;
-  return <Drawer open={!!id} title={id} onClose={onClose} size="large">
+  return <Drawer open={!!id} title={id} onClose={onClose} size="large" styles={{ wrapper: { maxWidth: '100vw' } }}>
     {error && <Alert type="error" showIcon title={error} />}
     {execution && <Descriptions size="small" items={[
       { key: 'node', label: '所属节点', children: execution.node_id },
@@ -126,7 +145,7 @@ export function ExecutionDetail({ id, summary, onClose, onNotice }) {
       { key: 'created', label: '创建时间', children: <TimeText ts={execution.created_at} /> },
     ]} />}
     <Space wrap style={{ margin: '12px 0' }}>
-      <Button onClick={load}>刷新明细</Button>
+      <Button onClick={() => { setRevision((v) => v + 1); load(); }}>刷新明细</Button>
       <Button disabled={busy || unavailable || !actions.resume} onClick={() => command('resume')}>在原节点恢复</Button>
       <Button disabled={busy || unavailable || !actions.interrupt} onClick={() => command('interrupt')}>中断（可恢复）</Button>
       <Button danger disabled={busy || unavailable || !actions.cancel} onClick={() => command('cancel')}>取消（终止）</Button>
@@ -136,7 +155,8 @@ export function ExecutionDetail({ id, summary, onClose, onNotice }) {
     {['agent', 'maintenance'].includes(kind) && <div className="execution-messages">
       <Typography.Title level={5}>会话消息</Typography.Title>
       {!messages.messages.length && !messages.partial && !messagesBusy ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无消息" /> : null}
-      {messages.messages.map((message) => <ExecutionMessage key={message.id} message={message} />)}
+      {(showLive || !!messages.messages.length) && <ExecutionTranscript messages={messages.messages} live={showLive ? live.state : null} />}
+      {showLive && live.state.trimmed && <Alert type="info" title="实时记录仅保留最近的消息，完整历史可在执行结束后分段查看" />}
       {messages.trimmed && <Alert type="info" showIcon title="为保持页面流畅，较早的已加载消息已从当前页面释放" action={<Button size="small" onClick={restartMessages}>从头查看</Button>} />}
       {!!messages.large?.length && <div className="execution-message-large">
         {messages.large.map((large) => <div key={`${large.seq}-${large.start}`}>

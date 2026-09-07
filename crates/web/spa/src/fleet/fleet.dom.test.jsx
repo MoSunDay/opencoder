@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { err } from '../notice.js';
 import { ExecutionsPanel } from './executions.jsx';
-import { ExecutionMessage, appendEvent, messageRefreshMode } from './detail.jsx';
+import { ExecutionTranscript, appendEvent, messageRefreshMode } from './detail.jsx';
 import { FleetNodesPanel } from './nodes.jsx';
 import { FleetBrainPanel } from './brain.jsx';
 import { FleetTeamsPanel } from './teams.jsx';
@@ -85,8 +85,8 @@ describe('fleet execution boundaries', () => {
     expect(state.messages[0].blocks[0].text).toBe('完成');
     expect(state.partial).toBeNull();
   });
-  it('renders an assistant message through the Markdown component', () => {
-    render(<ExecutionMessage message={{ id: 'm1', role: 'assistant', blocks: [{ kind: 'text', text: '**完成**' }] }} />);
+  it('renders completed assistant Markdown through the shared transcript', () => {
+    render(<ExecutionTranscript messages={[{ id: 'm1', role: 'assistant', blocks: [{ kind: 'text', text: '**完成**' }] }]} />);
     expect(screen.getByText('完成').tagName).toBe('STRONG');
   });
   it('bounds retained ordinary history while preserving cursor progress', () => {

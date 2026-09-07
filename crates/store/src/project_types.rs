@@ -220,8 +220,45 @@ pub struct ProjectMilestonePatch {
     pub sort: Option<i64>,
 }
 
+/// Which executor drives a todo: the single built-in agent flow, a named
+/// team definition, an inline DAG spec, or a brain-routed capability.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProjectExecutorKind {
+    #[default]
+    Agent,
+    Team,
+    Dag,
+    Brain,
+}
+
+impl ProjectExecutorKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ProjectExecutorKind::Agent => "agent",
+            ProjectExecutorKind::Team => "team",
+            ProjectExecutorKind::Dag => "dag",
+            ProjectExecutorKind::Brain => "brain",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "agent" => Some(ProjectExecutorKind::Agent),
+            "team" => Some(ProjectExecutorKind::Team),
+            "dag" => Some(ProjectExecutorKind::Dag),
+            "brain" => Some(ProjectExecutorKind::Brain),
+            _ => None,
+        }
+    }
+}
+
 /// A project todo (`project_todos` row). `milestone_id == None` is the
-/// milestone-less backlog.
+/// milestone-less backlog. The executor dimension says WHO drives the todo:
+/// `agent` keeps the single-agent flow (`agent` names it), while
+/// team/dag/brain carry the target in `executor_ref` (team/dag name or
+/// pinned brain capability id) and/or the inline JSON spec in
+/// `executor_spec`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectTodoRecord {
     pub id: String,
@@ -231,6 +268,12 @@ pub struct ProjectTodoRecord {
     pub plan_md: Option<String>,
     pub status: ProjectTodoStatus,
     pub agent: String,
+    #[serde(default)]
+    pub executor_kind: ProjectExecutorKind,
+    #[serde(default)]
+    pub executor_ref: Option<String>,
+    #[serde(default)]
+    pub executor_spec: Option<String>,
     pub active_session_id: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
@@ -247,12 +290,18 @@ pub struct ProjectTodoPatch {
     pub plan_md: Option<Option<String>>,
     pub status: Option<ProjectTodoStatus>,
     pub agent: Option<String>,
+    pub executor_kind: Option<ProjectExecutorKind>,
+    pub executor_ref: Option<Option<String>>,
+    pub executor_spec: Option<Option<String>>,
     pub milestone_id: Option<Option<String>>,
     pub active_session_id: Option<Option<String>>,
 }
 
 /// One plan/execute attempt against a todo (`project_todo_runs` row);
-/// `version` numbers the attempts per todo.
+/// `version` numbers the attempts per todo. The executor dimension mirrors
+/// the todo's own: brain-routed runs additionally record their provenance
+/// (`capability_id` / `plan_id`), dag/team runs point at their artifact
+/// root / topic id via `output_ref`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectTodoRunRecord {
     pub id: String,
@@ -262,6 +311,14 @@ pub struct ProjectTodoRunRecord {
     pub plan_md: Option<String>,
     pub output_md: Option<String>,
     pub agent: String,
+    #[serde(default)]
+    pub executor_kind: ProjectExecutorKind,
+    #[serde(default)]
+    pub capability_id: Option<String>,
+    #[serde(default)]
+    pub plan_id: Option<String>,
+    #[serde(default)]
+    pub output_ref: Option<String>,
     pub session_id: Option<String>,
     pub status: ProjectTodoRunStatus,
     pub started_at: i64,
@@ -282,6 +339,8 @@ pub enum ProjectRunText {
 }
 
 /// Inspect projection of one project todo with bounded text columns.
+/// `executor_spec` is deliberately excluded — inline specs can be huge, the
+/// bounded views only carry the kind + ref.
 #[derive(Debug, Clone, Serialize)]
 pub struct ProjectTodoSummary {
     pub id: String,
@@ -291,6 +350,8 @@ pub struct ProjectTodoSummary {
     pub plan_md: Option<ProjectRunText>,
     pub status: ProjectTodoStatus,
     pub agent: String,
+    pub executor_kind: ProjectExecutorKind,
+    pub executor_ref: Option<String>,
     pub active_session_id: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
@@ -305,6 +366,10 @@ pub struct ProjectTodoRunSummary {
     pub plan_md: Option<ProjectRunText>,
     pub output_md: Option<ProjectRunText>,
     pub agent: String,
+    pub executor_kind: ProjectExecutorKind,
+    pub capability_id: Option<String>,
+    pub plan_id: Option<String>,
+    pub output_ref: Option<String>,
     pub session_id: Option<String>,
     pub status: ProjectTodoRunStatus,
     pub started_at: i64,
@@ -323,6 +388,9 @@ pub struct ProjectTodoRunPage {
 pub struct ProjectTodoRunPatch {
     pub plan_md: Option<String>,
     pub output_md: Option<String>,
+    pub output_ref: Option<String>,
+    pub capability_id: Option<String>,
+    pub plan_id: Option<String>,
     pub session_id: Option<String>,
     pub status: Option<ProjectTodoRunStatus>,
     pub finished_at: Option<i64>,
@@ -365,6 +433,14 @@ mod tests {
         ] {
             assert_eq!(ProjectTodoRunStatus::parse(v.as_str()), Some(v));
         }
+        for v in [
+            ProjectExecutorKind::Agent,
+            ProjectExecutorKind::Team,
+            ProjectExecutorKind::Dag,
+            ProjectExecutorKind::Brain,
+        ] {
+            assert_eq!(ProjectExecutorKind::parse(v.as_str()), Some(v));
+        }
     }
 
     #[test]
@@ -377,6 +453,8 @@ mod tests {
         assert_eq!(ProjectTodoRunKind::parse("review"), None);
         assert_eq!(ProjectTodoRunStatus::parse("paused"), None);
         assert_eq!(ProjectTodoStatus::parse(""), None);
+        assert_eq!(ProjectExecutorKind::parse("workflow"), None);
+        assert_eq!(ProjectExecutorKind::parse("Agent"), None);
     }
 
     #[test]
@@ -394,8 +472,41 @@ mod tests {
             serde_json::to_string(&ProjectTodoRunStatus::Cancelled).unwrap(),
             "\"cancelled\""
         );
+        assert_eq!(
+            serde_json::to_string(&ProjectExecutorKind::Team).unwrap(),
+            "\"team\""
+        );
         let back: ProjectMilestoneStatus = serde_json::from_str("\"in_progress\"").unwrap();
         assert_eq!(back, ProjectMilestoneStatus::InProgress);
+        let back: ProjectExecutorKind = serde_json::from_str("\"dag\"").unwrap();
+        assert_eq!(back, ProjectExecutorKind::Dag);
+    }
+
+    #[test]
+    fn executor_fields_default_on_legacy_json() {
+        // Rows written before the executor dimension existed deserialize to
+        // the agent flow with all optional refs absent.
+        let todo: ProjectTodoRecord = serde_json::from_str(
+            "{\"id\":\"t\",\"milestone_id\":null,\"title\":\"t\",\"draft\":\"d\",\
+             \"plan_md\":null,\"status\":\"draft\",\"agent\":\"act\",\
+             \"active_session_id\":null,\"created_at\":1,\"updated_at\":1}",
+        )
+        .unwrap();
+        assert_eq!(todo.executor_kind, ProjectExecutorKind::Agent);
+        assert_eq!(todo.executor_ref, None);
+        assert_eq!(todo.executor_spec, None);
+        assert_eq!(ProjectExecutorKind::default(), ProjectExecutorKind::Agent);
+
+        let run: ProjectTodoRunRecord = serde_json::from_str(
+            "{\"id\":\"r\",\"todo_id\":\"t\",\"kind\":\"execute\",\"version\":1,\
+             \"plan_md\":null,\"output_md\":null,\"agent\":\"act\",\"session_id\":null,\
+             \"status\":\"running\",\"started_at\":1,\"finished_at\":null,\"created_at\":1}",
+        )
+        .unwrap();
+        assert_eq!(run.executor_kind, ProjectExecutorKind::Agent);
+        assert_eq!(run.capability_id, None);
+        assert_eq!(run.plan_id, None);
+        assert_eq!(run.output_ref, None);
     }
 
     #[test]

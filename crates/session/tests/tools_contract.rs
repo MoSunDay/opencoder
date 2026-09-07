@@ -9,6 +9,7 @@ use serde_json::json;
 
 fn ctx(dir: &Path) -> ToolContext {
     ToolContext {
+        extra_env: Vec::new(),
         session_id: "test-session".into(),
         message_id: "test-msg".into(),
         agent: "act".into(),

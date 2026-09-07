@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use opencoder_store::{
-    LibsqlStore, ProjectStore, ProjectTodoRecord, ProjectTodoRunKind, ProjectTodoRunPatch,
-    ProjectTodoRunRecord, ProjectTodoRunStatus, ProjectTodoStatus,
+    LibsqlStore, ProjectExecutorKind, ProjectStore, ProjectTodoRecord, ProjectTodoRunKind,
+    ProjectTodoRunPatch, ProjectTodoRunRecord, ProjectTodoRunStatus, ProjectTodoStatus,
 };
 use tokio::sync::Barrier;
 
@@ -15,6 +15,9 @@ fn todo(id: &str, status: ProjectTodoStatus, now: i64) -> ProjectTodoRecord {
         plan_md: Some("# plan".into()),
         status,
         agent: "act".into(),
+        executor_kind: ProjectExecutorKind::Agent,
+        executor_ref: None,
+        executor_spec: None,
         active_session_id: None,
         created_at: now,
         updated_at: now,
@@ -30,6 +33,10 @@ fn execute_run(id: &str, todo_id: &str, version: i64, now: i64) -> ProjectTodoRu
         plan_md: Some("# plan".into()),
         output_md: None,
         agent: "act".into(),
+        executor_kind: ProjectExecutorKind::Agent,
+        capability_id: None,
+        plan_id: None,
+        output_ref: None,
         session_id: None,
         status: ProjectTodoRunStatus::Running,
         started_at: now,

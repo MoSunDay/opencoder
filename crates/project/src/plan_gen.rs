@@ -49,18 +49,23 @@ pub fn runtime_setup(deps: &Deps) -> Result<(Config, Arc<dyn ChatStream>)> {
 }
 
 /// 终结一个 run 行（状态 + 输出 + finished_at），失败只告警：run 驱动
-/// 收尾路径上的写库失败不应让后台任务 panic。
+/// 收尾路径上的写库失败不应让后台任务 panic。`output_ref` 携带 team/dag
+/// 执行器的产物指针（topic id / 工件根路径）；agent 路径传 None。
 pub(crate) async fn close_run(
     deps: &Deps,
     run_id: &str,
     status: ProjectTodoRunStatus,
     output: Option<String>,
+    output_ref: Option<String>,
     session_id: Option<String>,
 ) {
     let now = opencoder_core::message::now_ms();
     let patch = ProjectTodoRunPatch {
         plan_md: None,
         output_md: output,
+        output_ref,
+        capability_id: None,
+        plan_id: None,
         session_id,
         status: Some(status),
         finished_at: Some(now),
@@ -78,12 +83,16 @@ pub(crate) async fn close_run_if_running(
     run_id: &str,
     status: ProjectTodoRunStatus,
     output: Option<String>,
+    output_ref: Option<String>,
     session_id: Option<String>,
 ) -> bool {
     let now = opencoder_core::message::now_ms();
     let patch = ProjectTodoRunPatch {
         plan_md: None,
         output_md: output,
+        output_ref,
+        capability_id: None,
+        plan_id: None,
         session_id,
         status: Some(status),
         finished_at: Some(now),
@@ -115,6 +124,9 @@ pub(crate) async fn patch_todo_status(
         plan_md,
         status: Some(status),
         agent: None,
+        executor_kind: None,
+        executor_ref: None,
+        executor_spec: None,
         milestone_id: None,
         active_session_id: None,
     };
@@ -229,6 +241,7 @@ pub async fn drive(
             ProjectTodoRunStatus::Failed,
             Some(format!("{e:#}")),
             None,
+            None,
         )
         .await;
     }
@@ -289,7 +302,15 @@ async fn finish_plan_run(
 ) {
     match result {
         Err(_) if cancel.is_cancelled() => {
-            close_run(deps, run_id, ProjectTodoRunStatus::Cancelled, None, None).await;
+            close_run(
+                deps,
+                run_id,
+                ProjectTodoRunStatus::Cancelled,
+                None,
+                None,
+                None,
+            )
+            .await;
         }
         Err(e) => {
             close_run(
@@ -297,6 +318,7 @@ async fn finish_plan_run(
                 run_id,
                 ProjectTodoRunStatus::Failed,
                 Some(format!("{e:#}")),
+                None,
                 None,
             )
             .await;
@@ -308,6 +330,7 @@ async fn finish_plan_run(
                     run_id,
                     ProjectTodoRunStatus::Done,
                     Some(output.clone()),
+                    None,
                     Some(session.id.clone()),
                 )
                 .await;
@@ -316,7 +339,15 @@ async fn finish_plan_run(
                 commit_plan_output(deps, todo_id, output.clone()).await;
             }
             None if cancel.is_cancelled() => {
-                close_run(deps, run_id, ProjectTodoRunStatus::Cancelled, None, None).await;
+                close_run(
+                    deps,
+                    run_id,
+                    ProjectTodoRunStatus::Cancelled,
+                    None,
+                    None,
+                    None,
+                )
+                .await;
             }
             None => {
                 close_run(
@@ -324,6 +355,7 @@ async fn finish_plan_run(
                     run_id,
                     ProjectTodoRunStatus::Failed,
                     Some("plan agent returned no output".into()),
+                    None,
                     None,
                 )
                 .await;
@@ -350,6 +382,7 @@ mod tests {
             projects: store.clone(),
             workdir: dir.path().to_path_buf(),
             client_override: None,
+            brain: None,
             spawns: Mutex::new(HashMap::new()),
         });
         (dir, deps, store)
@@ -365,6 +398,9 @@ mod tests {
             plan_md: Some("# 旧方案".into()),
             status,
             agent: "act".into(),
+            executor_kind: opencoder_store::ProjectExecutorKind::Agent,
+            executor_ref: None,
+            executor_spec: None,
             active_session_id: None,
             created_at: now,
             updated_at: now,

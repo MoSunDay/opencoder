@@ -6,7 +6,8 @@ use opencoder_core::fleet::*;
 use opencoder_llm::{ChatRequest, ChatStream, LlmEvent, MockChatClient};
 use opencoder_node::fleet::NodeService;
 use opencoder_store::{
-    LibsqlStore, ProjectStore, ProjectTodoRunKind, ProjectTodoRunRecord, ProjectTodoRunStatus,
+    LibsqlStore, ProjectExecutorKind, ProjectStore, ProjectTodoRunKind, ProjectTodoRunRecord,
+    ProjectTodoRunStatus,
 };
 use opencoder_worker::{DrainPolicy, StorageCapacity, Worker, WorkerOptions, WorkerRuntime};
 use serde_json::{json, Value};
@@ -189,6 +190,10 @@ pub async fn seed_project_run(
             plan_md: None,
             output_md: None,
             agent: "act".into(),
+            executor_kind: ProjectExecutorKind::Agent,
+            capability_id: None,
+            plan_id: None,
+            output_ref: None,
             session_id: None,
             status,
             started_at: 1,
@@ -387,3 +392,9 @@ impl Drop for Fleet {
         self.server.abort();
     }
 }
+
+mod wasm;
+// Shared helpers: individual test binaries use different subsets, so the
+// re-export is intentionally wider than any single binary needs.
+#[allow(unused_imports)]
+pub use wasm::{stage_spin_wasm, stage_stdout_wasm};

@@ -4,6 +4,27 @@ use opencoder_core::fleet::*;
 use serde_json::{json, Value};
 use tokio_util::sync::CancellationToken;
 
+/// The control-plane brain pre-resolution riding the execution input: fresh
+/// submits carry it in `request.input.brain`, re-execute commands in
+/// `record.result.brain`. Non-brain todos (and brain todos the control
+/// plane left unresolved) yield None — the service falls back to the todo's
+/// own executor fields.
+fn brain_override(record: &Record) -> Option<opencoder_project::service::ExecutorOverride> {
+    record
+        .result
+        .get("brain")
+        .filter(|v| !v.is_null())
+        .or_else(|| {
+            record
+                .assignment
+                .request
+                .input
+                .get("brain")
+                .filter(|v| !v.is_null())
+        })
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
+}
+
 pub(super) async fn run(
     worker: &Worker,
     record: &Record,
@@ -53,6 +74,12 @@ pub(super) async fn run(
                     draft: Some(todo.draft.clone()),
                     title: Some(todo.title.clone()),
                     agent: Some(todo.agent.clone()),
+                    // The snapshot todo is authoritative for the executor
+                    // triple too (control-plane writes may have changed it
+                    // since this node last saw the todo).
+                    executor_kind: Some(todo.executor_kind),
+                    executor_ref: Some(todo.executor_ref.clone()),
+                    executor_spec: Some(todo.executor_spec.clone()),
                     ..Default::default()
                 },
                 opencoder_core::message::now_ms(),
@@ -69,7 +96,16 @@ pub(super) async fn run(
         }
     }
     let run_id = if action == "execute" {
-        worker.inner.state.project.start_execute(&todo.id).await?
+        // Brain todos arrive pre-resolved by the control plane: fresh
+        // submits carry the override in request.input, re-execute commands
+        // in record.result (stored beside next_action/next_snapshot).
+        let override_ = brain_override(record);
+        worker
+            .inner
+            .state
+            .project
+            .start_execute_with(&todo.id, override_)
+            .await?
     } else {
         worker.inner.state.project.start_plan(&todo.id).await?
     };

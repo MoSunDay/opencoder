@@ -115,12 +115,15 @@ impl Worker {
         let libsql = Arc::new(LibsqlStore::open(runtime_db).await?);
         let store: Arc<dyn Store> = libsql.clone();
         let project = opencoder_project::ProjectService::new();
+        // 节点执行面没有 brain 运行时：brain todo 在节点上拒绝启动（由
+        // 控制面预解析后再派发）。
         project
             .init(
                 store.clone(),
                 libsql,
                 options.workdir.clone(),
                 client.clone(),
+                None,
             )
             .await?;
         let state = Arc::new(opencoder_web::AppState {

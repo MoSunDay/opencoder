@@ -23,7 +23,7 @@ OpenCoder 是完全独立、从零实现的 Rust 原生编码代理。CLI/TUI �
 - [agents/agent](agents/agent/index.md) — `opencoder-agent` 二进制：构造 worker 并接入节点通道。
 - [agents/tui](agents/tui/index.md) — ratatui 交互界面。
 - [agents/todos](agents/todos/index.md) — 持久化 TODO 工作流运行时：父 Workflow Session 调度和验收，每个 TODO 使用独立 Primary Session 执行，支持依赖、并发、恢复、回退与可选 debug 投影。
-- [agents/project](agents/project/index.md) — 用户策展的项目跟踪运行时（新 crate）：goal→milestone→todo 三级，todo 走「草稿→plan agent 生成方案→act agent 执行」生命周期，执行 resume 同一会话持续推进，`project_todo_runs` 版本留痕可取消；复用 session 直驱范式（非 todos 编排），项目数据走独立 `ProjectStore` 接缝（默认 libsql 同实例，feature-gate 可选 mysql/starrocks）。
+- [agents/project](agents/project/index.md) — 用户策展的项目跟踪运行时（新 crate）：goal→milestone→todo 三级，todo 走「草稿→plan agent 生成方案→执行」生命周期，执行器可选 agent/team/dag/brain（大脑在平台预解析后下发），执行 resume 同一会话持续推进，`project_todo_runs` 版本留痕可取消；复用 session 直驱范式（非 todos 编排），项目数据走独立 `ProjectStore` 接缝（默认 libsql 同实例，feature-gate 可选 mysql/starrocks）。
 - [agents/brain](agents/brain/index.md) — 能力库、向量检索和路由规划；平台由 control 承接能力绑定与直接派发。
 - [agents/agents](agents/agents/index.md) — 版本化自定义 Agent（opencoder-agents crate）：共享池（prompts/skills/tools/memory/<名>/v{n}，版本只增、回滚=切指针）+ 引用卡（agents/<名>/meta.json 四字段引用，多 agent 共享同一资源）+ active marker；读路径在 core `agent::{meta,resource,compose}`（resolve_agent 文件 fallback、effective_default 四级默认链、skill 多根遮蔽），写路径/NFS 只读导出（nfsserve 0.11，真实 mount 验证）在本 crate；session `/agent` 切换 + bash PATH 脚本前缀注入，web `/api/agents*` + SPA「Agent 配置」。
 

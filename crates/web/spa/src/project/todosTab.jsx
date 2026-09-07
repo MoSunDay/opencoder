@@ -7,13 +7,56 @@
 import { Button, Form, Input, Modal, Popconfirm, Select, Space, Table, Tooltip, Typography } from 'antd';
 import { useState } from 'react';
 import { apiDel, apiPost } from '../api.js';
-import { TodoStatusTag } from './labels.jsx';
+import { ExecutorTag, TodoStatusTag } from './labels.jsx';
 import { err, info, ok } from '../notice.js';
 
 const { TextArea } = Input;
 const { Text } = Typography;
 
 const todoPath = (id) => '/api/project/todos/' + encodeURIComponent(id);
+
+/// 执行器下拉选项（executor_kind）。与 labels.jsx 的 EXECUTOR_META 同源
+/// 文案；这里是纯数据以便单测断言四项齐全。
+export const EXECUTOR_OPTIONS = [
+  { value: 'agent', label: '单Agent' },
+  { value: 'team', label: '团队' },
+  { value: 'dag', label: 'DAG' },
+  { value: 'brain', label: '大脑' },
+];
+
+/// Build the executor slice of a create/patch body from form values (pure):
+/// kind defaults to agent; ref/spec join only when non-blank (trimmed); a
+/// spec must parse as JSON before anything is submitted. Returns
+/// `{ fields }` or `{ error }`.
+export function executorBody(v) {
+  const kind = String((v && v.executor_kind) || 'agent');
+  const fields = { executor_kind: kind };
+  if (kind === 'agent') {
+    return { fields };
+  }
+  const ref = String((v && v.executor_ref) || '').trim();
+  if (ref) {
+    fields.executor_ref = ref;
+  }
+  const spec = String((v && v.executor_spec) || '').trim();
+  if (spec) {
+    try {
+      JSON.parse(spec);
+    } catch {
+      return { error: 'executor_spec 不是合法 JSON，请检查后重试' };
+    }
+    fields.executor_spec = spec;
+  }
+  return { fields };
+}
+
+/// Secondary text beside the ExecutorTag in the table: agent shows its
+/// agent name (default act), other kinds show executor_ref (inline-spec
+/// todos may carry none).
+export function executorRefText(r) {
+  const kind = (r && r.executor_kind) || 'agent';
+  return kind === 'agent' ? (r.agent || 'act') : ((r && r.executor_ref) || '');
+}
 
 /// Flatten overview → rows carrying their milestone context (null ⇒ backlog).
 export function flattenTodos(overview) {
@@ -30,6 +73,7 @@ export function flattenTodos(overview) {
 function CreateTodoModal({ open, overview, onCancel, onNotice, onCreated }) {
   const [form] = Form.useForm();
   const [saving, setSaving] = useState(false);
+  const kind = Form.useWatch('executor_kind', form) || 'agent';
   const goals = (overview && overview.goals) || [];
   const msOptions = goals.flatMap((g) => (g.milestones || []).map((m) => ({
     value: m.id,
@@ -43,12 +87,18 @@ function CreateTodoModal({ open, overview, onCancel, onNotice, onCreated }) {
     } catch {
       return;
     }
+    const exec = executorBody(v);
+    if (exec.error) {
+      onNotice(err(exec.error));
+      return;
+    }
     setSaving(true);
     try {
       const rec = await apiPost('/api/project/todos', {
         title: v.title,
         draft: v.draft || '',
-        agent: v.agent || 'act',
+        ...(exec.fields.executor_kind === 'agent' ? { agent: v.agent || 'act' } : {}),
+        ...exec.fields,
         ...(v.milestone_id ? { milestone_id: v.milestone_id } : {}),
       });
       form.resetFields();
@@ -74,16 +124,38 @@ function CreateTodoModal({ open, overview, onCancel, onNotice, onCreated }) {
         <Button key="ok" type="primary" loading={saving} onClick={submit}>创建</Button>,
       ]}
     >
-      <Form form={form} layout="vertical" preserve={false} initialValues={{ agent: 'act' }}>
+      <Form form={form} layout="vertical" preserve={false} initialValues={{ agent: 'act', executor_kind: 'agent' }}>
         <Form.Item name="title" label="标题" rules={[{ required: true, message: '请输入标题' }]}>
           <Input placeholder="要完成的一件事" />
         </Form.Item>
         <Form.Item name="milestone_id" label="里程碑">
           <Select allowClear placeholder="不选则进入 backlog（未分组）" options={msOptions} aria-label="milestone_id" />
         </Form.Item>
-        <Form.Item name="agent" label="执行 agent">
-          <Input placeholder="act" style={{ width: 200 }} />
+        <Form.Item name="executor_kind" label="执行器" tooltip="agent 直驱会话；team/dag 走本地多人/DAG；brain 由能力库路由">
+          <Select aria-label="executor_kind" options={EXECUTOR_OPTIONS} style={{ width: 160 }} />
         </Form.Item>
+        {kind === 'agent' ? (
+          <Form.Item name="agent" label="执行 agent">
+            <Input placeholder="act" style={{ width: 200 }} />
+          </Form.Item>
+        ) : (
+          <>
+            <Form.Item
+              name="executor_ref"
+              label={kind === 'brain' ? '钉定能力 id' : '目标名'}
+              tooltip={kind === 'brain' ? '留空则每次执行时由大脑按标题/草稿自动路由' : '命名团队 / DAG 定义；留空则只看内联定义'}
+            >
+              <Input placeholder={kind === 'brain' ? '留空 = 自动路由' : '可留空'} style={{ width: 240 }} />
+            </Form.Item>
+            <Form.Item
+              name="executor_spec"
+              label={kind === 'brain' ? '路由表 JSON' : '内联定义 JSON'}
+              tooltip={kind === 'brain' ? '{"routes":[…],"default":{…}}，可留空' : 'team 定义 / DagSpec；留空则按目标名解析'}
+            >
+              <TextArea rows={4} placeholder={kind === 'brain' ? '{"routes":[]}' : '{"name":"…","captain":{…}} / {"name":"…","steps":[…]}'} aria-label="executor_spec" />
+            </Form.Item>
+          </>
+        )}
         <Form.Item name="draft" label="草稿">
           <TextArea rows={5} placeholder="粗略描述要做什么…" aria-label="draft" />
         </Form.Item>
@@ -150,7 +222,20 @@ export function TodosTab({ overview, refresh, openTodo, onNotice }) {
       align: 'center',
       render: (v) => (v ? <Text type="success">✓</Text> : <Text type="secondary">—</Text>),
     },
-    { title: 'Agent', dataIndex: 'agent', key: 'agent', width: 84, render: (v) => v || 'act' },
+    {
+      title: '执行器',
+      key: 'executor',
+      width: 110,
+      render: (_, r) => {
+        const ref = executorRefText(r);
+        return (
+          <Space size={4}>
+            <ExecutorTag kind={r.executor_kind} />
+            {ref ? <Text type="secondary" style={{ fontSize: 12 }}>{ref}</Text> : null}
+          </Space>
+        );
+      },
+    },
     {
       title: '操作',
       key: 'ops',

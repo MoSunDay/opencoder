@@ -36,9 +36,13 @@ pub fn validate_step_slug(name: &str) -> bool {
             .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == '-')
 }
 
-/// Run ids appear in paths: ULIDs are fine, traversal is not.
+/// Run ids appear in paths: ULIDs are fine, traversal is not. `_modules`
+/// is reserved — the node's shared wasm module library lives at
+/// `<workflow_root>/_modules/`, so a run with that id would collide with
+/// it (and fail later with a confusing directory-exists error).
 pub fn validate_run_id(run_id: &str) -> bool {
-    !run_id.is_empty()
+    run_id != "_modules"
+        && !run_id.is_empty()
         && run_id.len() <= 64
         && run_id
             .chars()
@@ -127,7 +131,8 @@ mod tests {
     fn run_id_rejects_traversal() {
         assert!(validate_run_id("01JARUN"));
         assert!(validate_run_id("run-1_x"));
-        for bad in ["", "..", "a/b", "a b", &"x".repeat(65), "."] {
+        // `_modules` is reserved for the shared module library.
+        for bad in ["", "..", "a/b", "a b", &"x".repeat(65), ".", "_modules"] {
             assert!(!validate_run_id(bad), "{bad:?}");
         }
     }

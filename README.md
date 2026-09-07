@@ -13,7 +13,7 @@
   <img alt="version" src="https://img.shields.io/badge/version-0.1.0-blue" />
   <img alt="rust" src="https://img.shields.io/badge/Rust-2021-orange?logo=rust" />
   <img alt="license" src="https://img.shields.io/badge/license-MIT-green" />
-  <img alt="platform" src="https://img.shields.io/badge/platform-linux%20%7C%20macos%20%7C%20windows-lightgrey" />
+  <img alt="platform" src="https://img.shields.io/badge/platform-linux%20%7C%20macos-lightgrey" />
   <img alt="status" src="https://img.shields.io/badge/status-active%20development-yellow" />
 </p>
 
@@ -70,6 +70,11 @@ cd opencoder
 cargo build --release
 # 二进制位于 target/release/opencoder
 ```
+
+平台前置（源码构建）：
+
+- **Linux**：直接 `cargo build --release`，全量功能可用（含 `opencoder-agent` 节点）。
+- **macOS**：可构建并使用 `opencoder`（CLI/TUI）与 `opencoder-server`；需先执行 `xcode-select --install` 并 `brew install cmake`（libsql 的 libsql-ffi 依赖 libclang 与 cmake）。macOS 上会话子进程以直接子进程方式运行（无 Linux pidfd 进程监管），`opencoder-agent` 节点（runc 沙箱、进程监管）仅支持 Linux。
 
 或使用安装脚本：
 

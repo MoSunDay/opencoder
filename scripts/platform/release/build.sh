@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build one auditable opencoder/opencoder-server/opencoder-agent release bundle.
+# Build one auditable platform release bundle from a clean commit.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
@@ -9,9 +9,27 @@ usage() {
   cat <<'USAGE'
 Usage: scripts/platform/release/build.sh [--output DIR]
 
-Builds all three release binaries from a clean commit, verifies their compiled
+Builds the release binaries for the current platform from a clean commit
+(Linux: opencoder, opencoder-server, opencoder-agent; macOS: opencoder and
+opencoder-server, the agent binary is Linux-only), verifies their compiled
 build metadata, and writes checksums plus manifest.json to an atomic bundle.
 USAGE
+}
+
+sum_files() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$@"
+  else
+    shasum -a 256 "$@"
+  fi
+}
+
+sum_check() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum -c "$1"
+  else
+    shasum -a 256 -c "$1"
+  fi
 }
 
 while [[ $# -gt 0 ]]; do
@@ -27,6 +45,11 @@ if [[ -n "$(git status --porcelain --untracked-files=normal)" ]]; then
   echo "release build requires a clean git worktree and index" >&2
   exit 3
 fi
+case "$(uname -s)" in
+  Linux) binaries=(opencoder opencoder-server opencoder-agent) ;;
+  Darwin) binaries=(opencoder opencoder-server) ;;
+  *) echo "unsupported release platform: $(uname -s)" >&2; exit 6 ;;
+esac
 commit="$(git rev-parse HEAD)"
 short="$(git rev-parse --short HEAD)"
 output="${output:-$repo_root/dist/opencoder-platform-$short}"
@@ -34,8 +57,31 @@ output="${output:-$repo_root/dist/opencoder-platform-$short}"
 mkdir -p "$(dirname "$output")"
 
 "$repo_root/scripts/check-spa-drift.sh"
-spa_digest="$({ cd crates/web/spa/dist; find . -type f -print0 | sort -z | xargs -0 sha256sum; } | sha256sum | awk '{print $1}')"
-OPENCODER_SPA_SHA256="$spa_digest" cargo build --release --locked -p opencoder -p opencoder-server -p opencoder-agent
+# SPA digest: sha256 over the contents of every file under crates/web/spa/dist,
+# hashed in sorted relative-path order (pure python3, no GNU sha256sum needed).
+# The digest input definition only has to stay self-consistent inside this
+# script: the same value is injected via OPENCODER_SPA_SHA256, checked against
+# the compiled build metadata, and recorded in the bundle manifest.
+spa_digest="$(python3 - "$repo_root/crates/web/spa/dist" <<'PY'
+import hashlib
+import pathlib
+import sys
+
+root = pathlib.Path(sys.argv[1])
+digest = hashlib.sha256()
+for path in sorted(
+    (p for p in root.rglob("*") if p.is_file() and not p.is_symlink()),
+    key=lambda p: p.relative_to(root).as_posix(),
+):
+    digest.update(path.read_bytes())
+print(digest.hexdigest())
+PY
+)"
+packages=()
+for binary in "${binaries[@]}"; do
+  packages+=(-p "$binary")
+done
+OPENCODER_SPA_SHA256="$spa_digest" cargo build --release --locked "${packages[@]}"
 target_dir="$(cargo metadata --no-deps --format-version 1 | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')"
 
 stage="$(mktemp -d "${output}.tmp.XXXXXX")"
@@ -43,7 +89,6 @@ cleanup() { rm -rf "$stage"; }
 trap cleanup EXIT
 mkdir -p "$stage/bin"
 
-binaries=(opencoder opencoder-server opencoder-agent)
 for binary in "${binaries[@]}"; do
   source_path="$target_dir/release/$binary"
   [[ -x "$source_path" ]] || { echo "missing release binary: $source_path" >&2; exit 5; }
@@ -52,14 +97,14 @@ for binary in "${binaries[@]}"; do
   "$stage/bin/$binary" --build-info >"$stage/$binary.build-info.json"
 done
 
-python3 - "$stage" "$commit" <<'PY'
+python3 - "$stage" "$commit" "${binaries[@]}" <<'PY'
 import json
 import pathlib
 import sys
 
 stage = pathlib.Path(sys.argv[1])
 expected_commit = sys.argv[2]
-names = ("opencoder", "opencoder-server", "opencoder-agent")
+names = tuple(sys.argv[3:])
 infos = {name: json.loads((stage / f"{name}.build-info.json").read_text()) for name in names}
 first = infos[names[0]]
 for name, info in infos.items():
@@ -75,15 +120,15 @@ if len(first.get("spa_sha256", "")) != 64:
     raise SystemExit("compiled SPA digest is invalid")
 PY
 
-python3 - "$stage" "$commit" "$spa_digest" <<'PY'
+python3 - "$stage" "$commit" "$spa_digest" "${binaries[@]}" <<'PY'
 import hashlib
 import json
 import pathlib
 import sys
 
 stage = pathlib.Path(sys.argv[1])
-commit, spa_digest = sys.argv[2:]
-names = ("opencoder", "opencoder-server", "opencoder-agent")
+commit, spa_digest = sys.argv[2], sys.argv[3]
+names = tuple(sys.argv[4:])
 info = json.loads((stage / "opencoder.build-info.json").read_text())
 if info["spa_sha256"] != spa_digest:
     raise SystemExit("compiled SPA digest does not match dist tree")
@@ -104,10 +149,14 @@ manifest = {
 PY
 rm "$stage"/*.build-info.json
 
+sum_paths=(manifest.json)
+for binary in "${binaries[@]}"; do
+  sum_paths+=("bin/$binary")
+done
 (
   cd "$stage"
-  sha256sum manifest.json bin/opencoder bin/opencoder-server bin/opencoder-agent >SHA256SUMS
-  sha256sum -c SHA256SUMS
+  sum_files "${sum_paths[@]}" >SHA256SUMS
+  sum_check SHA256SUMS
 )
 mv "$stage" "$output"
 trap - EXIT

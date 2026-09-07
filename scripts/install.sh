@@ -54,7 +54,8 @@ Options:
   --no-build      Skip \`cargo build --release\` (use the existing build).
   --backup        Copy the existing destination to <dest>.bak.<timestamp> before
                   overwriting. Default off. Or set \$OPENCODER_INSTALL_BACKUP=1.
-  --bundle DIR    Verify and install a three-binary platform release bundle.
+  --bundle DIR    Verify and install a platform release bundle (binary set
+                  as declared by its manifest).
   --dest-dir DIR  Platform binary directory (default: /usr/local/bin).
   -h, --help      Show this help.
 

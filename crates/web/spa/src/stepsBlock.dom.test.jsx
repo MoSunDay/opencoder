@@ -179,7 +179,7 @@ describe('StepsContent three-level drill-down', () => {
     running.progressActive = true;
     mount([running, { kind: 'text', role: 'assistant', text: 'Say started' }]);
     expect(screen.queryByText('running')).toBeNull();
-    expect(screen.getByText('Say(2 steps): Say started')).toBeTruthy();
+    expect(screen.getByText('Say(2 steps)')).toBeTruthy();
     expect(screen.queryByText('2 Steps')).toBeNull();
   });
 
@@ -200,7 +200,7 @@ describe('StepsContent three-level drill-down', () => {
     const errored = stepsTurn();
     errored.steps[0].calls[0].isError = true;
     mount([errored, { kind: 'text', role: 'assistant', text: 'finished with a failure' }]);
-    expect(screen.getByText('Say(2 steps): finished with a failure')).toBeTruthy();
+    expect(screen.getByText('Say(2 steps)')).toBeTruthy();
     expect(screen.getByText('error')).toBeTruthy();
     expect(screen.queryByText('running')).toBeNull();
   });
@@ -287,49 +287,47 @@ describe('StepsContent three-level drill-down', () => {
       { kind: 'text', role: 'assistant', text: 'all done here\nand the details follow' },
     ]);
     expect(container.querySelectorAll('.ant-bubble')).toHaveLength(1);
-    // The Say merged INTO the header: label switches to the Say form with
-    // the step count and the Say's first-line preview. The body below skips
-    // that duplicated first line (③) — only the remaining lines render.
-    const group = screen.getByText('Say(2 steps): all done here');
-    const say = screen.getByText('and the details follow');
+    // The completed Say keeps its full Markdown body below the step header.
+    const group = screen.getByText('Say(2 steps)');
+    const say = container.querySelector('.md-body');
+    expect(say.textContent).toContain('and the details follow');
     expect(group.compareDocumentPosition(say) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });
 
-// ② 头部行与正文的真实空行间距 + ③ 正文与头部 preview 的首行去重。
-// 口径见 sayText.js：头部 preview 与被跳过的首行共用同一份拼接。
-describe('Say body spacing & first-line dedup (② ③)', () => {
-  const spacingWrap = (container) => Array.from(container.querySelectorAll('div'))
-    .find((el) => el.style.marginTop === '16px');
-
-  it('multi-line Say: body skips the preview-duplicated first line and keeps a 16px gap below the header', () => {
-    const { container } = mount([
-      stepsTurn(),
-      { kind: 'text', role: 'assistant', text: 'line one\nline two\nline three' },
-    ]);
-    expect(screen.getByText('Say(2 steps): line one')).toBeTruthy();
-    // 首行已由头部渲染，正文不再重复。
-    expect(screen.queryByText('line one')).toBeNull();
-    // 其余行照常渲染（testing-library 会把换行归一化为空格）。
-    expect(screen.getByText('line two').closest('.transcript-text').textContent).toBe('line two\nline three');
-    // ② 真实空行间距：正文块 marginTop 16px（TUI 头部后插一空行的对齐）。
-    const wrap = spacingWrap(container);
-    expect(wrap).toBeTruthy();
-    expect(wrap.textContent).toContain('line two');
+describe('completed Say Markdown and streaming preview', () => {
+  it('replaces the raw streaming preview with one semantic Markdown document on completion', () => {
+    const say = { kind: 'text', role: 'assistant', text: '# Stream result\n\n**finished**' };
+    const mounted = mount([{ ...stepsTurn(), sayStreaming: true }, say]);
+    expect(screen.getByText(/Say\(2 steps\): # Stream result/)).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: 'Stream result' })).toBeNull();
+    mounted.rerender(<TranscriptView turns={[stepsTurn(), say]} status="done" />);
+    expect(screen.getByRole('heading', { name: 'Stream result' })).toBeTruthy();
+    expect(screen.getAllByText('Stream result')).toHaveLength(1);
+    expect(screen.getByText('finished').tagName).toBe('STRONG');
+    expect(screen.queryByText('running')).toBeNull();
   });
 
-  it('single-line Say: no body block at all — no leftover spacing or empty node', () => {
+  it('renders the complete Markdown document once with spacing below the ladder', () => {
     const { container } = mount([
       stepsTurn(),
-      { kind: 'text', role: 'assistant', text: 'all done here' },
+      { kind: 'text', role: 'assistant', text: '# Result\n\n**Done**\n\n- first\n- second\n\n```js\nconst ok = true;\n```\n\n| key | value |\n| --- | --- |\n| status | good |\n\n[Open](https://example.com)' },
     ]);
-    expect(screen.getByText('Say(2 steps): all done here')).toBeTruthy();
-    // 单行 Say 与 preview 一字不差 → 正文整块不渲染。
-    expect(screen.queryByText('all done here')).toBeNull();
-    // 无残留间距节点（没有任何 16px 的正文块包装）。
-    expect(spacingWrap(container)).toBeUndefined();
-    // Turn 泡内没有任何 Typography 段落 —— 不残留空文本块。
-    const bubble = screen.getByText('Say(2 steps): all done here').closest('.ant-bubble');
-    expect(bubble.querySelectorAll('.ant-typography')).toHaveLength(0);
+    expect(screen.getByText('Say(2 steps)')).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Result', level: 1 })).toBeTruthy();
+    expect(screen.getAllByText('Result')).toHaveLength(1);
+    expect(screen.getByText('Done').tagName).toBe('STRONG');
+    expect(container.querySelectorAll('.md-body li')).toHaveLength(2);
+    expect(container.querySelector('pre code').textContent).toContain('const ok = true;');
+    expect(container.querySelector('table td').textContent).toBe('status');
+    expect(screen.getByRole('link', { name: 'Open' }).getAttribute('href')).toBe('https://example.com');
+    expect(container.querySelector('.md-body').parentElement.style.marginTop).toBe('16px');
+  });
+
+  it('renders a completed one-line Say as Markdown without duplicating its text in the header', () => {
+    const { container } = mount([stepsTurn(), { kind: 'text', role: 'assistant', text: '**all done here**' }]);
+    expect(screen.getByText('Say(2 steps)')).toBeTruthy();
+    expect(screen.getByText('all done here').tagName).toBe('STRONG');
+    expect(container.textContent.split('all done here')).toHaveLength(2);
   });
 });

@@ -72,7 +72,7 @@ export const PAGE_META = {
   project: { title: '项目', desc: '目标、里程碑与 TODO 的用户策展跟踪' },
   progress: { title: '进展', desc: '里程碑进度、进行中 TODO 与最近项目执行' },
   ownerview: { title: 'Owner 视角', desc: '按目标分组的健康度与待人工介入事项' },
-  brain: { title: '大脑调度', desc: '能力绑定与情境化调度入口' },
+  brain: { title: '大脑调度', desc: '选择节点执行需求，管理可复用能力' },
   topics: { title: '全部执行', desc: '舰队全部执行记录与团队过滤' },
   dag: { title: 'DAG 工作流', desc: 'DAG 运行的图视图与步骤工件' },
   todos: { title: 'TODO 管理', desc: '持久化 TODO 工作流的调度与验收' },

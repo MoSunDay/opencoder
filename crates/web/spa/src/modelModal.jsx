@@ -5,17 +5,18 @@
 // switching is per-session here, like the TUI's /model. The endpoint
 // broadcasts `model_switched`, so the transcript reflects the change by itself.
 
-import { Button, Modal, Radio, Typography } from 'antd';
+import { Alert, Button, Modal, Radio, Typography } from 'antd';
 import { useEffect, useState } from 'react';
 import { apiGet, apiPost } from './api.js';
 import { err, ok } from './notice.js';
 
 const { Text } = Typography;
 
-export function ModelModal({ open, sessionId, onClose, onNotice }) {
+export function ModelModal({ open, sessionId, nodeId, onClose, onNotice }) {
   const [models, setModels] = useState([]);
   const [sel, setSel] = useState('');
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
 
   useEffect(() => {
     if (!open) {
@@ -24,20 +25,19 @@ export function ModelModal({ open, sessionId, onClose, onNotice }) {
     let alive = true;
     setModels([]);
     setSel('');
-    apiGet('/api/models').then((j) => {
+    setError('');
+    apiGet('/api/models' + (nodeId ? '?node_id=' + encodeURIComponent(nodeId) : '')).then((j) => {
       if (!alive) {
         return;
       }
       const list = (j && j.models) || [];
       setModels(list);
       setSel(j && j.default && list.includes(j.default) ? j.default : (list[0] || ''));
-    }).catch(() => {
-      // Catalog unavailable — the empty hint renders, retry on reopen.
-    });
+    }).catch((e) => { if (alive) setError('读取模型失败: ' + e.message); });
     return () => {
       alive = false;
     };
-  }, [open]);
+  }, [open, nodeId]);
 
   const submit = async () => {
     if (!sessionId || !sel) {
@@ -68,7 +68,8 @@ export function ModelModal({ open, sessionId, onClose, onNotice }) {
         <Button key="ok" type="primary" disabled={!sel || busy} onClick={submit}>确定</Button>,
       ]}
     >
-      {models.length === 0 ? <Text type="secondary">暂无可用模型</Text> : (
+      {error && <Alert type="error" showIcon title={error} style={{ marginBottom: 12 }} />}
+      {!error && models.length === 0 ? <Text type="secondary">暂无可用模型</Text> : (
         <Radio.Group value={sel} onChange={(e) => setSel(e.target.value)}>
           {models.map((m) => (
             <Radio key={m} value={m} style={{ display: 'block', padding: '2px 0' }}>{m}</Radio>

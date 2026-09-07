@@ -69,8 +69,8 @@ impl NormalizedRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct BrainDecision {
-    pub plan_id: String,
-    pub capability_id: String,
+    pub plan_id: Option<String>,
+    pub capability_id: Option<String>,
     pub reason: Value,
     pub path: Value,
     pub planned_fresh: bool,
@@ -219,9 +219,21 @@ pub fn prepare(
             .map(str::to_string)
             .ok_or_else(|| RpcReply::error(500, format!("brain result missing {key}")))
     };
+    let direct = result["route"].as_str() == Some("default_agent");
+    if direct && (kind != ExecutionKind::Agent || target != "act") {
+        return Err(RpcReply::error(500, "invalid default brain route"));
+    }
     let decision = BrainDecision {
-        plan_id: string("plan_id")?,
-        capability_id: string("capability_id")?,
+        plan_id: if direct {
+            None
+        } else {
+            Some(string("plan_id")?)
+        },
+        capability_id: if direct {
+            None
+        } else {
+            Some(string("capability_id")?)
+        },
         reason: result["reason"].clone(),
         path: result["path"].clone(),
         planned_fresh: result["planned_fresh"].as_bool().unwrap_or(false),
@@ -273,6 +285,9 @@ pub fn receipt_from_accepted(
         || receipt.decision.kind != index.kind
         || !ROUTABLE_KINDS.contains(&receipt.decision.kind)
         || receipt.decision.target.trim().is_empty()
+        || receipt.decision.plan_id.is_some() != receipt.decision.capability_id.is_some()
+        || (receipt.decision.capability_id.is_none()
+            && (receipt.decision.kind != ExecutionKind::Agent || receipt.decision.target != "act"))
     {
         return Err(conflict());
     }
@@ -284,6 +299,7 @@ pub fn dispatch_reply(index: &ExecutionIndex, receipt: &BrainReceipt) -> RpcRepl
         status: 202,
         body: json!({
             "ok": true,
+            "route": if receipt.decision.capability_id.is_some() { "capability" } else { "default_agent" },
             "plan_id": receipt.decision.plan_id,
             "capability_id": receipt.decision.capability_id,
             "reason": receipt.decision.reason,

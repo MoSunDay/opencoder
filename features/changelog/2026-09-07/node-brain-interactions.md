@@ -1,4 +1,4 @@
-Commit: cef0033
+Commit: 2c9743fe00afa69e0ccd4df24d35a108d6600921
 
 # Web 会话选节点、完成态 Markdown 与大脑能力库交互
 
@@ -28,7 +28,16 @@ Server 规划请求继承已有 `reasoning_effort` 配置，并保留请求本�
 
 开始基线为 `cef0033`（上一代码版本 `8ed37a1`）：Rust 4,752 passed / 0 failed / 5 个既有手动 ignored；SPA 416 passed。
 
-本轮验证原始输出及浏览器、发布证据保存在 `/data00/opencoder-delivery/20260907-node-brain-interactions/`，最终结果在部署验收后补齐。Server 使用独立系统账号，模型及向量配置保存在 Git 外，沿用现有凭据；未修改或删除已有鉴权数据。
+本轮证据保存在 `/data00/opencoder-delivery/20260907-node-brain-interactions/`：
+
+- SPA：49 个文件、429 个测试通过；构建和 dist 漂移检查通过（`spa-tests.log`、`spa-build.log`、`spa-drift.log`）。
+- Rust：`cargo test --workspace --locked -- --test-threads=4` → 4,757 passed / 0 failed / 5 个既有手动 ignored，共 328 组结果；原始输出为 `rust-tests-final.log`。测试使用 `TMPDIR=/var/tmp`，回环和内部模型地址加入 `NO_PROXY` / `no_proxy`。
+- Clippy 全 workspace/all-targets 零警告，workspace 构建成功（`clippy-final.log`、`rust-build-final.log`），汇总为 `gates.json`。
+- 正式 Web 经 Chromium 验证 Node 必选、真实 bash 执行、完成态 Markdown、历史回看、大脑直接下发和 75% 抽屉；无页面脚本错误（`deployed-browser.json`）。
+- 独立测试库使用真实向量接口完成能力创建/修改/搜索；真实模型规划、能力命中、指定测试 Node 执行和原回执重放通过（`capability-browser.json`、`library-dispatch.json`）。临时进程已停止，测试数据保留。
+- `2c9743f` 发布包已安装到本机 Server / Node，服务均 active/enabled，原节点 ID 保持不变，接单 Ready；正式 `/api/brain/search` 返回 200，全部前端文件与发布包树哈希一致（`deployment.json`、`final-state.json`）。
+
+Server 使用独立系统账号，模型、向量和推理设置保存在 Git 外的私有配置中，沿用现有凭据；未修改或删除已有鉴权数据。
 
 ## 相关文档
 

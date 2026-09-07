@@ -1,5 +1,15 @@
 use super::*;
 
+fn have(tool: &str) -> bool {
+    std::process::Command::new("which")
+        .arg(tool)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
 #[test]
 fn output_path_format() {
     let p = output_path(12345);
@@ -14,6 +24,10 @@ async fn register_unregister_roundtrip() {
     use std::process::Command;
     use std::time::Duration;
 
+    if !have("setsid") {
+        eprintln!("skipping: setsid(1) unavailable");
+        return;
+    }
     let _g = test_registry_mutex().lock().await;
     let mut child = Command::new("setsid")
         .args(["sleep", "60"])
@@ -53,6 +67,10 @@ fn stop_kills_registered_process() {
     use std::process::Command;
     use std::time::Duration;
 
+    if !have("setsid") {
+        eprintln!("skipping: setsid(1) unavailable");
+        return;
+    }
     let _g = test_registry_mutex().blocking_lock();
     let mut child = Command::new("setsid")
         .args(["sleep", "60"])
@@ -82,6 +100,10 @@ fn kill_all_terminates_every_registered_process() {
     use std::process::Command;
     use std::time::Duration;
 
+    if !have("setsid") {
+        eprintln!("skipping: setsid(1) unavailable");
+        return;
+    }
     let _g = test_registry_mutex().blocking_lock();
     // Drain entries any earlier test may have leaked so the count below is
     // deterministic. The mutex guarantees no other registry test is live,
@@ -173,6 +195,10 @@ fn background_file_stops_growing_after_overflow() {
 #[cfg(unix)]
 #[tokio::test]
 async fn completed_handoff_removes_handle_and_retains_output() {
+    if !have("setsid") {
+        eprintln!("skipping: setsid(1) unavailable");
+        return;
+    }
     let _guard = test_registry_mutex().lock().await;
     cleanup_all();
 
@@ -209,6 +235,10 @@ async fn completed_handoff_removes_handle_and_retains_output() {
 #[cfg(target_os = "linux")]
 #[tokio::test]
 async fn handoff_limit_rejects_and_cleans_unaccepted_process() {
+    if !have("setsid") {
+        eprintln!("skipping: setsid(1) unavailable");
+        return;
+    }
     let _guard = test_registry_mutex().lock().await;
     cleanup_all();
 

@@ -16,7 +16,8 @@
 //! `?2004l` paste off, `?1049l` leave alt-screen).
 //!
 //! Skips (not fails) when pty tooling is unavailable (non-Linux / minimal
-//! images): `script`, `pgrep`, `/proc/<pid>/comm`.
+//! images): `script`, `pgrep`, `/proc/<pid>/comm`. macOS also skips: BSD
+//! `script(1)` has no util-linux `-q -f -c` syntax.
 
 use std::io::{Read, Write};
 use std::process::{Child, Command, Stdio};
@@ -43,6 +44,14 @@ fn have(tool: &str) -> bool {
         .status()
         .map(|s| s.success())
         .unwrap_or(false)
+}
+
+fn pty_harness_available() -> bool {
+    if cfg!(target_os = "macos") {
+        // BSD script(1) has no util-linux `-q -f -c` syntax.
+        return false;
+    }
+    have("script") && have("pgrep")
 }
 
 /// pid of the `opencoder` process whose cmdline contains `marker`
@@ -127,7 +136,7 @@ fn assert_restored(captured: &Arc<Mutex<Vec<u8>>>, ctx: &str) {
 
 #[test]
 fn sigterm_after_capture_restores_terminal() {
-    if !(have("script") && have("pgrep") && have("kill")) {
+    if !(pty_harness_available() && have("kill")) {
         eprintln!("skipping: script/pgrep/kill not available");
         return;
     }
@@ -165,7 +174,7 @@ fn sigterm_after_capture_restores_terminal() {
 
 #[test]
 fn normal_quit_restores_terminal() {
-    if !(have("script") && have("pgrep")) {
+    if !pty_harness_available() {
         eprintln!("skipping: script/pgrep not available");
         return;
     }
@@ -200,7 +209,7 @@ fn normal_quit_restores_terminal() {
 /// through a real shell echoing the tty leftovers).
 #[test]
 fn normal_quit_absorbs_kitty_release_reports() {
-    if !(have("script") && have("pgrep")) {
+    if !pty_harness_available() {
         eprintln!("skipping: script/pgrep not available");
         return;
     }
@@ -243,7 +252,7 @@ fn normal_quit_absorbs_kitty_release_reports() {
 /// seam that historically skipped the quit drain entirely.
 #[test]
 fn onboarding_quit_absorbs_delayed_kitty_release_reports() {
-    if !(have("script") && have("pgrep")) {
+    if !pty_harness_available() {
         eprintln!("skipping: script/pgrep not available");
         return;
     }

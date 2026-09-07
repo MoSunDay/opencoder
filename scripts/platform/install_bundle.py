@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify and atomically activate one three-binary platform bundle."""
+"""Verify and atomically activate one platform release bundle."""
 
 from __future__ import annotations
 
@@ -15,7 +15,6 @@ import sys
 import time
 
 NAMES = ("opencoder", "opencoder-server", "opencoder-agent")
-EXPECTED_SUMS = {"manifest.json", *(f"bin/{name}" for name in NAMES)}
 VERSIONS = ".opencoder-platform-versions"
 CURRENT = ".opencoder-platform-current"
 MANIFEST_LINK = ".opencoder-platform-manifest.json"
@@ -56,7 +55,12 @@ def load_json(path: pathlib.Path) -> dict:
     return value
 
 
-def verify_sums(bundle: pathlib.Path) -> None:
+def bundle_names(manifest: dict) -> tuple[str, ...]:
+    """Return the sorted binary names declared by a bundle manifest."""
+    return tuple(sorted(str(key)[len("bin/"):] for key in manifest["files"]))
+
+
+def verify_sums(bundle: pathlib.Path, expected_sums: set[str]) -> None:
     path = bundle / "SHA256SUMS"
     regular_file(path)
     found: dict[str, str] = {}
@@ -65,11 +69,11 @@ def verify_sums(bundle: pathlib.Path) -> None:
         if len(parts) != 2 or len(parts[0]) != 64:
             raise InstallError("invalid SHA256SUMS line")
         relative = parts[1].lstrip("*")
-        if relative not in EXPECTED_SUMS or relative in found:
+        if relative not in expected_sums or relative in found:
             raise InstallError(f"unexpected SHA256SUMS entry: {relative}")
         found[relative] = parts[0].lower()
-    if set(found) != EXPECTED_SUMS:
-        raise InstallError("SHA256SUMS must cover manifest and all three binaries")
+    if set(found) != expected_sums:
+        raise InstallError("SHA256SUMS must cover manifest and every declared binary")
     for relative, expected in found.items():
         file = bundle / relative
         regular_file(file)
@@ -101,9 +105,6 @@ def verify_bundle(bundle: pathlib.Path) -> dict:
         raise InstallError("bundle bin is not a real directory")
     if {entry.name for entry in bundle.iterdir()} != {"manifest.json", "SHA256SUMS", "bin"}:
         raise InstallError("bundle root contains unexpected members")
-    if {entry.name for entry in (bundle / "bin").iterdir()} != set(NAMES):
-        raise InstallError("bundle bin must contain exactly the three platform binaries")
-    verify_sums(bundle)
     manifest = load_json(bundle / "manifest.json")
     required = {
         "schema_version",
@@ -128,11 +129,16 @@ def verify_bundle(bundle: pathlib.Path) -> dict:
     if not isinstance(spa, str) or len(spa) != 64 or any(c not in "0123456789abcdef" for c in spa):
         raise InstallError("invalid spa_sha256")
     files = manifest["files"]
-    expected_files = {f"bin/{name}" for name in NAMES}
-    if not isinstance(files, dict) or set(files) != expected_files:
-        raise InstallError("manifest files must contain exactly the three platform binaries")
+    if not isinstance(files, dict):
+        raise InstallError("manifest files must be an object")
+    names = bundle_names(manifest)
+    if not names or any(name not in NAMES for name in names) or "opencoder" not in names:
+        raise InstallError("manifest files must declare known platform binaries including opencoder")
+    if {entry.name for entry in (bundle / "bin").iterdir()} != set(names):
+        raise InstallError("bundle bin must contain exactly the binaries declared by manifest")
+    verify_sums(bundle, {"manifest.json", *files})
     infos = []
-    for name in NAMES:
+    for name in names:
         relative = f"bin/{name}"
         binary = bundle / relative
         regular_file(binary)
@@ -183,7 +189,8 @@ def replace_symlink(directory: pathlib.Path, name: str, target: str) -> None:
         raise
 
 
-def stage_bundle(bundle: pathlib.Path, versions: pathlib.Path, commit: str) -> pathlib.Path:
+def stage_bundle(bundle: pathlib.Path, versions: pathlib.Path, manifest: dict) -> pathlib.Path:
+    commit = manifest["commit"]
     target = versions / commit
     if target.exists():
         verify_bundle(target)
@@ -196,7 +203,7 @@ def stage_bundle(bundle: pathlib.Path, versions: pathlib.Path, commit: str) -> p
     try:
         stage.mkdir()
         (stage / "bin").mkdir()
-        for name in NAMES:
+        for name in bundle_names(manifest):
             copy_durable(bundle / "bin" / name, stage / "bin" / name, 0o755)
         copy_durable(bundle / "manifest.json", stage / "manifest.json", 0o644)
         copy_durable(bundle / "SHA256SUMS", stage / "SHA256SUMS", 0o644)
@@ -269,8 +276,13 @@ def legacy_version(dest: pathlib.Path, versions: pathlib.Path) -> str | None:
     return relative_current(name)
 
 
-def prepare_launchers(dest: pathlib.Path, versions: pathlib.Path, current: str | None) -> None:
-    for name in NAMES:
+def prepare_launchers(
+    dest: pathlib.Path,
+    versions: pathlib.Path,
+    current: str | None,
+    names: tuple[str, ...],
+) -> None:
+    for name in names:
         path = dest / name
         if path.is_symlink() and os.readlink(path) != expected_launcher(name):
             raise InstallError(f"unexpected platform launcher symlink: {path}")
@@ -285,16 +297,26 @@ def prepare_launchers(dest: pathlib.Path, versions: pathlib.Path, current: str |
         if current is not None:
             replace_symlink(dest, CURRENT, current)
     elif (dest / current / "bin").is_dir():
-        for name in NAMES:
+        for name in names:
             path = dest / name
             previous = dest / current / "bin" / name
             if path.exists() and not path.is_symlink():
                 if not previous.is_file() or sha256(path) != sha256(previous):
                     raise InstallError(f"existing launcher differs from current platform: {path}")
-    for name in NAMES:
+    for name in names:
         path = dest / name
         if not path.is_symlink():
             replace_symlink(dest, name, expected_launcher(name))
+    removed = False
+    for name in NAMES:
+        if name in names:
+            continue
+        path = dest / name
+        if path.is_symlink() and os.readlink(path) == expected_launcher(name):
+            path.unlink()
+            removed = True
+    if removed:
+        fsync_dir(dest)
     if not manifest.is_symlink():
         replace_symlink(dest, MANIFEST_LINK, f"{CURRENT}/manifest.json")
 
@@ -317,7 +339,7 @@ def export_rollback(dest: pathlib.Path, current: str | None) -> pathlib.Path | N
     try:
         stage.mkdir()
         (stage / "bin").mkdir()
-        for name in NAMES:
+        for name in bundle_names(manifest):
             copy_durable(source / "bin" / name, stage / "bin" / name, 0o755)
         copy_durable(source / "manifest.json", stage / "manifest.json", 0o644)
         copy_durable(source / "SHA256SUMS", stage / "SHA256SUMS", 0o644)
@@ -339,6 +361,7 @@ def install_bundle(
     fail_before_switch: bool = False,
 ) -> pathlib.Path | None:
     manifest = verify_bundle(bundle)
+    names = bundle_names(manifest)
     if dest.is_symlink() or not dest.is_dir():
         raise InstallError(f"destination is not a real directory: {dest}")
     lock_path = dest / ".opencoder-platform-install.lock"
@@ -352,8 +375,8 @@ def install_bundle(
         versions.mkdir(exist_ok=True)
         fsync_dir(dest)
         current = inspect_current(dest)
-        target = stage_bundle(bundle, versions, manifest["commit"])
-        prepare_launchers(dest, versions, current)
+        target = stage_bundle(bundle, versions, manifest)
+        prepare_launchers(dest, versions, current, names)
         rollback = export_rollback(dest, current) if keep_backup else None
         if fail_before_switch:
             raise InstallError("injected failure before atomic version switch")
@@ -363,7 +386,7 @@ def install_bundle(
             installed = verify_bundle(target)
             if installed != manifest:
                 raise InstallError("installed manifest changed after activation")
-            for name in NAMES:
+            for name in names:
                 if build_info(dest / name).get("git_commit") != manifest["commit"]:
                     raise InstallError(f"installed self-check failed: {name}")
         except BaseException:

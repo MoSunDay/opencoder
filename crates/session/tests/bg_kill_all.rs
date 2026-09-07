@@ -7,16 +7,30 @@
 //! one genuinely global operation and needs this isolation to stay robust under
 //! parallel test execution.
 
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::time::Duration;
 
 use opencoder_session::tools::bg::{kill_all, list, register};
+
+fn have(tool: &str) -> bool {
+    Command::new("which")
+        .arg(tool)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
 
 /// `kill_all` signals every registered process group and drains the registry:
 /// after it returns, `list()` no longer contains the pids it killed.
 #[cfg(unix)]
 #[test]
 fn kill_all_drains_and_signals_registered_group() {
+    if !have("setsid") {
+        eprintln!("skipping: setsid(1) unavailable");
+        return;
+    }
     // `setsid` makes pgid == pid so the group kill is scoped to this child only.
     let mut child = Command::new("setsid")
         .args(["sleep", "60"])

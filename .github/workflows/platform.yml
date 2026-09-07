@@ -1,0 +1,68 @@
+# CI gate for macOS platform support. The non-Linux closure — `opencoder`
+# (CLI/TUI) and `opencoder-server` — must compile and lint on macOS, and the
+# session runtime must pass its tests there (fail-closed platform stubs,
+# direct-child process fallback). `opencoder-agent` (runc sandbox, pidfd
+# process supervision) is Linux-only and is intentionally NOT built here.
+name: platform
+
+on:
+  push:
+    branches: [main]
+    # Intentionally broad: the non-Linux closure spans 14 crates (core, llm,
+    # store, shellguard, dag, node, agents, brain, control, todos, session,
+    # cli, tui, server + workspace root), and a narrower per-crate filter
+    # once missed exactly this gate's recurrence channel. Changes to the
+    # Linux-only crates merely cost a redundant green run.
+    paths:
+      - "crates/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/platform.yml"
+  pull_request:
+    # Intentionally broad: the non-Linux closure spans 14 crates (core, llm,
+    # store, shellguard, dag, node, agents, brain, control, todos, session,
+    # cli, tui, server + workspace root), and a narrower per-crate filter
+    # once missed exactly this gate's recurrence channel. Changes to the
+    # Linux-only crates merely cost a redundant green run.
+    paths:
+      - "crates/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/platform.yml"
+  workflow_dispatch:
+
+# Least privilege; newer runs on the same ref supersede stale ones.
+permissions:
+  contents: read
+
+concurrency:
+  group: platform-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  macos:
+    name: macos gate (opencoder / opencoder-server)
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      # libsql's libsql-ffi needs cmake (and libclang from the Command Line
+      # Tools) to build on macOS; the runner image does not ship cmake.
+      - name: install cmake (libsql-ffi build dependency)
+        run: brew install cmake
+
+      - name: check (non-Linux closure compiles)
+        run: cargo check -p opencoder -p opencoder-server
+
+      - name: clippy
+        run: cargo clippy -p opencoder -p opencoder-server --all-targets -- -D warnings
+
+      - name: session tests (fallback contract + portable behavior)
+        run: cargo test -p opencoder-session

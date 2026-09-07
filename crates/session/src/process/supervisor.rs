@@ -1,6 +1,6 @@
 //! Hidden agent process that owns and reaps one external workload tree.
 
-use super::{pidfd::start_time, supervisor_args, SignalTarget, LEASE_FD};
+use super::{owned::LEASE_FD, pidfd::start_time, supervisor_args, SignalTarget};
 use anyhow::{bail, Context, Result};
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},

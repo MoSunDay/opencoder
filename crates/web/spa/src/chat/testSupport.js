@@ -80,4 +80,3 @@ afterEach(() => {
   vi.unstubAllGlobals();
   expect(deprecationHits()).toEqual([]);
 });
-

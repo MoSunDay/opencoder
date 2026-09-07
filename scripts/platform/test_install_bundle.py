@@ -23,12 +23,18 @@ def binary_bytes(name: str, info: dict) -> bytes:
     ).encode()
 
 
-def make_bundle(root: pathlib.Path, commit_char: str, mismatch: str | None = None) -> pathlib.Path:
+def make_bundle(
+    root: pathlib.Path,
+    commit_char: str,
+    mismatch: str | None = None,
+    names: tuple[str, ...] | None = None,
+) -> pathlib.Path:
+    binaries = subject.NAMES if names is None else names
     commit = commit_char * 40
     bundle = root / f"bundle-{commit_char}"
     (bundle / "bin").mkdir(parents=True)
     files = {}
-    for name in subject.NAMES:
+    for name in binaries:
         binary_commit = (mismatch * 40) if mismatch == name else commit
         info = {
             "version": "1.2.3",
@@ -57,15 +63,16 @@ def make_bundle(root: pathlib.Path, commit_char: str, mismatch: str | None = Non
     }
     (bundle / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
     lines = []
-    for relative in ("manifest.json", *(f"bin/{name}" for name in subject.NAMES)):
+    for relative in ("manifest.json", *(f"bin/{name}" for name in binaries)):
         digest = hashlib.sha256((bundle / relative).read_bytes()).hexdigest()
         lines.append(f"{digest}  {relative}\n")
     (bundle / "SHA256SUMS").write_text("".join(lines), encoding="utf-8")
     return bundle
 
 
-def installed_commits(dest: pathlib.Path) -> set[str]:
-    return {subject.build_info(dest / name)["git_commit"] for name in subject.NAMES}
+def installed_commits(dest: pathlib.Path, names: tuple[str, ...] | None = None) -> set[str]:
+    binaries = subject.NAMES if names is None else names
+    return {subject.build_info(dest / name)["git_commit"] for name in binaries}
 
 
 class PlatformInstallTests(unittest.TestCase):
@@ -173,6 +180,60 @@ class PlatformInstallTests(unittest.TestCase):
                     old_manifest,
                 )
                 self.assertEqual(marker.read_text(encoding="utf-8"), "untouched")
+
+    def test_two_binary_bundle_installs_and_launches(self) -> None:
+        names = ("opencoder", "opencoder-server")
+        with tempfile.TemporaryDirectory() as raw:
+            root = pathlib.Path(raw)
+            dest = root / "dest"
+            dest.mkdir()
+            bundle = make_bundle(root, "a", names=names)
+            subject.install_bundle(bundle, dest, False)
+            for name in names:
+                self.assertTrue((dest / name).is_symlink())
+                self.assertEqual(os.readlink(dest / name), f"{subject.CURRENT}/bin/{name}")
+            self.assertFalse((dest / "opencoder-agent").exists())
+            self.assertFalse((dest / "opencoder-agent").is_symlink())
+            self.assertEqual(installed_commits(dest, names), {"a" * 40})
+
+    def test_manifest_declared_set_is_enforced(self) -> None:
+        names = ("opencoder", "opencoder-server")
+        with tempfile.TemporaryDirectory() as raw:
+            root = pathlib.Path(raw)
+            dest = root / "dest"
+            dest.mkdir()
+
+            undeclared = make_bundle(root, "a", names=names)
+            (undeclared / "bin" / "opencoder-agent").write_text("extra", encoding="utf-8")
+            with self.assertRaises(subject.InstallError):
+                subject.install_bundle(undeclared, dest, False)
+            self.assertEqual(list(dest.iterdir()), [])
+
+            missing = make_bundle(root, "b", names=names)
+            kept = "".join(
+                line
+                for line in (missing / "SHA256SUMS").read_text(encoding="utf-8").splitlines(keepends=True)
+                if "bin/opencoder-server" not in line
+            )
+            (missing / "SHA256SUMS").write_text(kept, encoding="utf-8")
+            with self.assertRaises(subject.InstallError):
+                subject.install_bundle(missing, dest, False)
+            self.assertEqual(list(dest.iterdir()), [])
+
+    def test_shrunk_binary_set_removes_dangling_launcher(self) -> None:
+        names = ("opencoder", "opencoder-server")
+        with tempfile.TemporaryDirectory() as raw:
+            root = pathlib.Path(raw)
+            dest = root / "dest"
+            dest.mkdir()
+            subject.install_bundle(make_bundle(root, "a"), dest, False)
+            self.assertTrue((dest / "opencoder-agent").is_symlink())
+            subject.install_bundle(make_bundle(root, "b", names=names), dest, False)
+            self.assertFalse((dest / "opencoder-agent").is_symlink())
+            self.assertFalse((dest / "opencoder-agent").exists())
+            for name in names:
+                self.assertEqual(os.readlink(dest / name), f"{subject.CURRENT}/bin/{name}")
+            self.assertEqual(installed_commits(dest, names), {"b" * 40})
 
 
 if __name__ == "__main__":

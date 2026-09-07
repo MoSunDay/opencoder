@@ -68,6 +68,7 @@ steer 与 queue 都是「先以 pending 落库（`admitted_seq` 列、`promoted_
 ## 依赖与接口
 - 依赖：opencoder-core、opencoder-llm（ChatStream）、opencoder-store（Store）、tokio-util（CancellationToken）。
 - 内部模块：`mcp`（`src/mcp/`）— MCP 客户端实现。经 stdio transport 拉起配置的 MCP server 子进程，按 JSON-RPC 2.0 协议通信；发现远端工具并以 `mcp__{server}__{tool}` 前缀注册为标准 `Tool`（`tools_for(session_id)`），LLM 经 function-calling 调用如同内建工具。连接由 process-global 连接池管理（`pool.rs`：`static MCP_POOL`，键为 session_id → per-session 连接 map；`sync/cleanup/status_for` 维护生命周期）。
+- 内部模块：`process`（`src/process/`）— 节点进程监管门面：Linux 后端 `owned.rs`（pidfd 信号、subreaper supervisor、lease、SpawnLease/OwnedSupervisor）+ 非 Linux fail-closed stub `fallback.rs`（`command()/runc_command()`→`Ok(None)` 走调用方 direct-Command 分支、tracker→`0/Ok(())`、配置/入口→Err），`configure_owned_command`/`wait_owned_child` 可移植留在 `mod.rs`；类型（SignalTarget 等）双平台可编译，调用方零平台分支。
 - 被依赖：web（drain_to_completion）、cli（run_headless / resume）、tui（run_headless / resume）。
 
 ## 相关模块

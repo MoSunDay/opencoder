@@ -13,7 +13,7 @@
   <img alt="version" src="https://img.shields.io/badge/version-0.1.0-blue" />
   <img alt="rust" src="https://img.shields.io/badge/Rust-2021-orange?logo=rust" />
   <img alt="license" src="https://img.shields.io/badge/license-MIT-green" />
-  <img alt="platform" src="https://img.shields.io/badge/platform-linux%20%7C%20macos%20%7C%20windows-lightgrey" />
+  <img alt="platform" src="https://img.shields.io/badge/platform-linux%20%7C%20macos-lightgrey" />
   <img alt="status" src="https://img.shields.io/badge/status-active%20development-yellow" />
 </p>
 
@@ -68,6 +68,11 @@ cd opencoder
 cargo build --release
 # Binary located at target/release/opencoder
 ```
+
+Platform prerequisites (building from source):
+
+- **Linux**: `cargo build --release` works out of the box with the full feature set (including the `opencoder-agent` node).
+- **macOS**: builds and runs `opencoder` (CLI/TUI) and `opencoder-server`; run `xcode-select --install` and `brew install cmake` first (the libsql `libsql-ffi` dependency needs libclang and cmake). On macOS, session child processes run as direct children (no Linux pidfd supervision), and the `opencoder-agent` node (runc sandbox, process supervision) is Linux-only.
 
 Or use the install script:
 

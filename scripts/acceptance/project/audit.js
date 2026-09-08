@@ -2,6 +2,7 @@ const assert = require('assert/strict');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
+const { execFileSync } = require('child_process');
 const digest = (bytes) => crypto.createHash('sha256').update(bytes).digest('hex');
 
 // Every historical payload is read through its execution index, then compared
@@ -59,6 +60,10 @@ async function audit(h, ids) {
     report.attempts++;
   }
   fs.writeFileSync(path.join(h.root, 'payload-audit.json'), JSON.stringify(report, null, 2));
+  execFileSync('python3', [path.join(__dirname, 'storage_audit.py')], {
+    input: JSON.stringify({ root: h.root, base: h.base, token: h.token, ids }),
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
   return report;
 }
 module.exports = { audit };

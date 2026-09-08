@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
-// EnvsPanel DOM smoke: env 列表渲染 fixture，选中后编辑器拉取 context；工具
-// 目录的「可导入」行点「导入」命中 POST /api/todo/tools/import；编辑器「保存」
-// 命中 PUT /api/todo/envs/:name 且 body 合并 description/tools/env_vars。
+// EnvsPanel DOM smoke: env 表格渲染 fixture（描述/工具数），行内「编辑」打开
+// 抽屉拉取 context；工具目录的「可导入」行点「导入」命中 POST
+// /api/todo/tools/import；抽屉「保存」命中 PUT /api/todo/envs/:name 且 body
+// 合并 description/tools/env_vars。
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -79,8 +80,8 @@ describe('EnvsPanel', () => {
   it('selects an env and shows its editor fields', async () => {
     render(<EnvsPanel onNotice={() => {}} />);
     await screen.findByText('demo');
-    fireEvent.click(screen.getByText('demo'));
-    expect(await screen.findByText('Env: demo')).toBeTruthy();
+    fireEvent.click(findButton('编辑'));
+    expect(await screen.findByText('编辑 Env: demo')).toBeTruthy();
     // tools 多选框显示已选 share 引用。
     await waitFor(() => {
       expect(screen.getAllByText('/agent/tools/v3/ffmpeg').length).toBeGreaterThanOrEqual(1);
@@ -103,8 +104,8 @@ describe('EnvsPanel', () => {
   it('saves the selected env via PUT with merged body', async () => {
     render(<EnvsPanel onNotice={() => {}} />);
     await screen.findByText('demo');
-    fireEvent.click(screen.getByText('demo'));
-    expect(await screen.findByText('Env: demo')).toBeTruthy();
+    fireEvent.click(findButton('编辑'));
+    expect(await screen.findByText('编辑 Env: demo')).toBeTruthy();
     await waitFor(() => {
       expect(screen.getAllByText('/agent/tools/v3/ffmpeg').length).toBeGreaterThanOrEqual(1);
     });

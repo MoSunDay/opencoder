@@ -1,12 +1,10 @@
-// agentsConfig.jsx — 菜单页「Agent 配置」：生效 agent 选择（PATCH
-// /api/agents/active；清空 = null 跟随默认链，预检失败 400 经 onNotice
-// 透出）、agent 卡片表（四类引用 tag、生效徽标、配置/删除 —— 删除生效
-// 卡片合法，服务端自动清 marker）、新建 modal（name + 四类资源 Select，
-// 数据来自各池 GET /api/agents/resources/:cat）与 NFS 导出卡片。详情视图
-// 在本页内切换到 agentDetail.jsx，不新增路由页。
+// agentsConfig.jsx — 菜单页「Agent 配置」：朴素表格列出 agent（名称列检索、
+// 头部新建/生效选择，行内 编辑/启动/删除）。新建 modal（name + 四类资源
+// Select，数据来自各池 GET /api/agents/resources/:cat）；编辑在本页内切换到
+// agentDetail.jsx，不新增路由页。NFS 导出状态块在表下方。
 
 import {
-  Badge, Button, Card, Col, Form, Input, Modal, Popconfirm, Row, Select, Space, Table, Tag, Typography, message,
+  Button, Form, Input, Modal, Popconfirm, Select, Space, Table, Tag, Typography, message,
 } from 'antd';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiDel, apiGet, apiPatch, apiPost } from './api.js';
@@ -20,7 +18,7 @@ import { PageShell } from './shell/pageShell.jsx';
 
 const { Text } = Typography;
 
-/// 新建卡片 modal：name + 四类引用（可清空 ⇒ null）。409 重名等服务端
+/// 新建 modal：name + 四类引用（可清空 ⇒ null）。409 重名等服务端
 /// error 经 onNotice 透出。
 function CreateAgentModal({ open, resources, onClose, onCreated, onNotice }) {
   const [form] = Form.useForm();
@@ -35,6 +33,7 @@ function CreateAgentModal({ open, resources, onClose, onCreated, onNotice }) {
       });
       await apiPost('/api/agents', { name: values.name, current });
       message.success('已创建');
+      form.resetFields();
       onCreated(values.name);
     } catch (e) {
       onNotice(err('新建 agent 失败: ' + (e && e.message)));
@@ -165,6 +164,9 @@ export function AgentsPanel({ onNotice }) {
       title: '名称',
       dataIndex: 'name',
       key: 'name',
+      filters: agents.map((a) => ({ text: a.name, value: a.name })),
+      filterSearch: true,
+      onFilter: (v, r) => String(r.name).includes(v),
       render: (v) => (
         <Space size={4}>
           <Text strong>{v}</Text>
@@ -183,13 +185,14 @@ export function AgentsPanel({ onNotice }) {
         </Space>
       ),
     },
-    { title: '更新时间', dataIndex: 'updated_at', key: 'updated_at', render: (v) => v || '-' },
+    { title: '更新时间', dataIndex: 'updated_at', key: 'updated_at', width: 200, render: (v) => v || '-' },
     {
       title: '操作',
       key: 'ops',
+      width: 200,
       render: (_, r) => (
         <Space size={0}>
-          <Button size="small" type="link" onClick={() => setDetail(r.name)}>配置</Button>
+          <Button size="small" type="link" onClick={() => setDetail(r.name)}>编辑</Button>
           <Button size="small" type="link" onClick={() => { launchForm.resetFields(); setLaunch(r); }}>启动</Button>
           <Popconfirm title={`删除 agent ${r.name}？`} okText="确认删除" onConfirm={() => remove(r.name)}>
             <Button size="small" type="link" danger>删除</Button>
@@ -200,75 +203,55 @@ export function AgentsPanel({ onNotice }) {
   ];
 
   return (
-    <PageShell page="agents">
-        <Row gutter={[16, 16]}>
-          <Col xs={24} xl={17}>
-            <Card
-            size="small"
-            title="生效 Agent"
-            extra={<Button size="small" onClick={load}>刷新</Button>}
-          >
-            <Space wrap>
-              <Select
-                allowClear
-                style={{ minWidth: 260 }}
-                placeholder="跟随默认链（未指定）"
-                value={active || undefined}
-                onChange={patchActive}
-                options={agents.map((a) => ({ value: a.name, label: a.name }))}
-                aria-label="active-agent"
-              />
-              {active
-                ? <Badge status="success" text={`当前: ${active}`} />
-                : <Badge status="default" text={<Text type="secondary">跟随默认链</Text>} />}
-              <Text type="secondary" style={{ fontSize: 12 }}>
-                切换后，新会话将优先使用该 Agent；未选择时使用默认配置。
-              </Text>
-            </Space>
-          </Card>
-          <Card
-            size="small"
-            title="Agent 列表"
-            style={{ marginTop: 16 }}
-            extra={<Button size="small" onClick={() => setCreating(true)}>新建</Button>}
-          >
-            <Table
-              rowKey="name"
-              size="small"
-              columns={columns}
-              dataSource={agents}
-              loading={loading}
-              pagination={false}
-              scroll={{ x: 'max-content' }}
-              locale={{ emptyText: '暂无 agent' }}
-            />
-          </Card>
-        </Col>
-        <Col xs={24} xl={7}>
-          <AgentNfsCard onNotice={onNotice} />
-        </Col>
-        <CreateAgentModal
-          open={creating}
-          resources={resources}
-          onNotice={onNotice}
-          onClose={() => {
-            setCreating(false);
-          }}
-          onCreated={(name) => {
-            setCreating(false);
-            setDetail(name);
-            load();
-          }}
-        />
-        <Modal open={!!launch} title={`启动 Agent · ${launch?.name || ''}`} onCancel={() => setLaunch(null)} footer={null} destroyOnHidden>
-          <Form form={launchForm} layout="vertical" onFinish={run} initialValues={{ node: '' }}>
-            <Form.Item name="node" label="执行节点"><Select options={nodeOptions(nodes, 'agent')} /></Form.Item>
-            <Form.Item name="prompt" label="任务要求" rules={[{ required: true, message: '请输入任务要求' }]}><Input.TextArea rows={5} /></Form.Item>
-            <Button type="primary" htmlType="submit" loading={launching}>启动并查看</Button>
-          </Form>
-        </Modal>
-        {execution && <ExecutionDetail id={execution.id} summary={execution} onClose={() => setExecution(null)} onNotice={onNotice} />}
-      </Row>
+    <PageShell
+      page="agents"
+      extra={(
+        <Space>
+          <Select
+            allowClear
+            style={{ minWidth: 220 }}
+            placeholder="生效 Agent：跟随默认链"
+            value={active || undefined}
+            onChange={patchActive}
+            options={agents.map((a) => ({ value: a.name, label: a.name }))}
+            aria-label="active-agent"
+          />
+          <Button type="primary" onClick={() => setCreating(true)}>新建</Button>
+        </Space>
+      )}
+    >
+      <Table
+        rowKey="name"
+        size="small"
+        columns={columns}
+        dataSource={agents}
+        loading={loading}
+        pagination={false}
+        scroll={{ x: 'max-content' }}
+        locale={{ emptyText: '暂无 agent' }}
+      />
+      <AgentNfsCard onNotice={onNotice} />
+      <CreateAgentModal
+        open={creating}
+        resources={resources}
+        onNotice={onNotice}
+        onClose={() => {
+          setCreating(false);
+        }}
+        onCreated={(name) => {
+          setCreating(false);
+          setDetail(name);
+          load();
+        }}
+      />
+      <Modal open={!!launch} title={`启动 Agent · ${launch?.name || ''}`} onCancel={() => setLaunch(null)} footer={null} destroyOnHidden>
+        <Form form={launchForm} layout="vertical" onFinish={run} initialValues={{ node: '' }}>
+          <Form.Item name="node" label="执行节点"><Select options={nodeOptions(nodes, 'agent')} /></Form.Item>
+          <Form.Item name="prompt" label="任务要求" rules={[{ required: true, message: '请输入任务要求' }]}><Input.TextArea rows={5} /></Form.Item>
+          <Button type="primary" htmlType="submit" loading={launching}>启动并查看</Button>
+        </Form>
+      </Modal>
+      {execution && <ExecutionDetail id={execution.id} summary={execution} onClose={() => setExecution(null)} onNotice={onNotice} />}
     </PageShell>
   );
 }

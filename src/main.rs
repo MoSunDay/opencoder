@@ -69,7 +69,8 @@ async fn main() -> Result<()> {
                 client,
                 opts,
             }) => {
-                match opencoder_local::daemon::daemon_mode(*server, *client, opts.remote.as_deref()) {
+                match opencoder_local::daemon::daemon_mode(*server, *client, opts.remote.as_deref())
+                {
                     Ok(action) => {
                         println!("{}", opencoder_local::daemon::migration_hint(action, opts));
                         Ok(())

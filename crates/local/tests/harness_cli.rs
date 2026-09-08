@@ -1,6 +1,6 @@
 use clap::Parser;
-use opencoder_local::Cli;
 use opencoder_core::harness::Harness;
+use opencoder_local::Cli;
 
 #[test]
 fn wrap_accepts_verbatim_requirement_and_repeated_environment() {

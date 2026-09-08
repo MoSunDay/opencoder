@@ -124,7 +124,9 @@ impl ProjectService {
         let Some(deps) = self.deps.get() else {
             return Ok(false);
         };
-        let token = deps.spawns.lock().unwrap().remove(run_id);
+        // The driver remains live while cancellation flushes its output and
+        // archive. Only driver completion may remove this liveness marker.
+        let token = deps.spawns.lock().unwrap().get(run_id).cloned();
         if let Some(token) = token {
             token.cancel();
             return Ok(true);

@@ -1,8 +1,8 @@
-Commit: (working-tree, 基于 4efaae89bfb89f1ce1c4287cb101ae755c4d526d)
+Commit: be76fc1086cbf0d928c1d1e03ad5470563fd86df
 
 # Agent 调度平台
 
-平台用户通过 Web 管理节点、资源、团队、工作流、项目及大脑。`opencoder-server` 管理调度，`opencoder-agent` 执行；CLI/TUI 独立保留。
+平台用户通过 Web 或 `opencoder-cli` 管理节点、资源、团队、工作流、项目及大脑。`opencoder-server` 管理调度，`opencoder-agent` 执行；本地 CLI/TUI 使用独立的 `opencoder`。
 
 ## 规则
 
@@ -19,6 +19,8 @@ Commit: (working-tree, 基于 4efaae89bfb89f1ce1c4287cb101ae755c4d526d)
 - 新平台使用独立存储，不迁移或删除旧 daemon/CLI 历史。
 
 ## 入口与状态
+
+内置和自定义 Agent 都可选择 OpenCoder 原生或 Codex 运行方式；Agent 配置提供默认值，本次启动可以覆盖。已有会话保持启动时的选择，消息复用同一折叠展示。环境传递、续聊与错误规则见 [Agent Harness](../harness/index.md)。
 
 Web 的节点页支持负载与显式维护，全部执行页支持统一创建、查询、取消、恢复；团队页配置职责，项目、会话、DAG、TODO 页面继续可用。
 

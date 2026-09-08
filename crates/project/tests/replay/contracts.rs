@@ -286,3 +286,54 @@ async fn child_inputs_outputs_and_links_are_archived_with_the_parent_attempt() {
         .contains("child output retained"));
     assert_eq!(trace["model_calls"], 3);
 }
+
+#[tokio::test]
+async fn cancellation_after_a_tool_step_retains_partial_output_without_marking_done() {
+    for kind in [ProjectTodoRunKind::Plan, ProjectTodoRunKind::Execute] {
+        let h = harness(vec![vec![LlmEvent::Completed {
+            text: "partial result retained".into(),
+            tool_calls: vec![CompletedToolCall {
+                id: "partial-call".into(),
+                name: "bash".into(),
+                input: json!({"command":"pwd"}),
+            }],
+            usage: None,
+        }]])
+        .await;
+        h.mock
+            .queue_hang(std::sync::Arc::new(tokio::sync::Notify::new()));
+        let todo = seed_todo(&h.projects, "partial cancellation", None).await;
+        h.projects
+            .patch_todo(
+                &todo,
+                &ProjectTodoPatch {
+                    plan_md: Some(Some("original plan".into())),
+                    status: Some(ProjectTodoStatus::Planned),
+                    ..Default::default()
+                },
+                1,
+            )
+            .await
+            .unwrap();
+        let id = h
+            .service
+            .start_attempt(&todo, kind, None, None, json!({}))
+            .await
+            .unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            while h.mock.call_count() < 2 {
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        h.service.cancel(&id).await.unwrap();
+        let run = wait_run_done(&h.projects, &id).await;
+        assert_eq!(run.status, ProjectTodoRunStatus::Cancelled, "{run:?}");
+        assert_eq!(run.output_md.as_deref(), Some("partial result retained"));
+        assert_eq!(parse(&run.trace_manifest)["complete"], true);
+        let todo = h.projects.get_todo(&todo).await.unwrap().unwrap();
+        assert_eq!(todo.plan_md.as_deref(), Some("original plan"));
+        assert_eq!(todo.status, ProjectTodoStatus::Planned);
+    }
+}

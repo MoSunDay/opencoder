@@ -449,6 +449,53 @@ async fn cancel_terminal_or_missing_run_stays_false() {
     assert_eq!(run_status(&p, "r1").await, RunStatus::Done, "终态不被打花");
 }
 
+#[tokio::test]
+async fn repeated_cancel_does_not_converge_a_driver_still_flushing_output() {
+    let (_dir, deps, store) = test_deps().await;
+    seed_todo(&store, "t1", ProjectTodoStatus::Running).await;
+    seed_run(&store, "r1", "t1", ProjectTodoRunKind::Execute).await;
+    let service = ProjectService::new();
+    service
+        .init(
+            deps.store.clone(),
+            deps.projects.clone(),
+            deps.workdir.clone(),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+    let live = service.require().unwrap();
+    let token = spawn_run(&live, "r1");
+
+    assert!(service.cancel("r1").await.unwrap());
+    assert!(token.is_cancelled());
+    assert!(service.cancel("r1").await.unwrap());
+    assert_eq!(crate::recover::sweep_stale_runs(&live, 0).await, 0);
+    let run = store.get_todo_run("r1").await.unwrap().unwrap();
+    assert_eq!(run.status, RunStatus::Running);
+    assert_eq!(run.output_md, None);
+    assert_eq!(todo_status(&store, "t1").await, ProjectTodoStatus::Running);
+
+    crate::plan_gen::close_run(
+        &live,
+        "r1",
+        RunStatus::Cancelled,
+        Some("partial output before cancellation".into()),
+        None,
+        None,
+    )
+    .await;
+    crate::plan_gen::forget_spawn(&live, "r1");
+    let run = store.get_todo_run("r1").await.unwrap().unwrap();
+    assert_eq!(run.status, RunStatus::Cancelled);
+    assert_eq!(
+        run.output_md.as_deref(),
+        Some("partial output before cancellation")
+    );
+    assert!(!service.cancel("r1").await.unwrap());
+}
+
 // ---- run_agent_label：解析出的 agent 名优先于 todo.agent（D3②） ----
 
 fn label_todo() -> ProjectTodoRecord {

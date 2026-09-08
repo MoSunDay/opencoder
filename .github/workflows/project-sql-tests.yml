@@ -76,7 +76,7 @@ jobs:
 
       - name: Verify mysql is up and the test database exists
         run: |
-          docker exec mysql mysql -uroot -popencoder-ci \
+          docker exec "${{ job.services.mysql.id }}" mysql -uroot -popencoder-ci \
             -e "SELECT VERSION(); SHOW DATABASES LIKE 'opencoder_store_test';"
 
       - name: cargo test sql_project_store (mysql feature)

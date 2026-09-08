@@ -83,7 +83,7 @@ async fn main() -> Result<()> {
         println!("{}", opencoder_core::version::build_info_json());
         return Ok(());
     }
-    opencoder_cli_compat::init_logging(args.verbose);
+    logging::init_logging(args.verbose);
     let workdir = args
         .workdir
         .clone()
@@ -100,9 +100,9 @@ async fn main() -> Result<()> {
     .await
 }
 
-/// Tiny local logging bootstrap (the cli crate owns the shared one; the
+/// Tiny local logging bootstrap (the local crate owns the shared one; the
 /// server keeps its dependency surface minimal on purpose).
-mod opencoder_cli_compat {
+mod logging {
     pub fn init_logging(verbose: u8) {
         let filter = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
             let level = match verbose {

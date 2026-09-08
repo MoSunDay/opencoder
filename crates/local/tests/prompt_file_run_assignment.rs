@@ -15,9 +15,9 @@ mod run {
     use std::path::Path;
     use std::sync::Arc;
 
-    use opencoder_cli::run::apply_prompt_file;
     use opencoder_core::{resolve_agent, AgentKind, Config};
     use opencoder_llm::{ChatStream, MockChatClient};
+    use opencoder_local::run::apply_prompt_file;
     use opencoder_session::SessionState;
 
     /// Real (never-run) session for `agent_name`, mirroring the fresh-session

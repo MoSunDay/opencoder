@@ -58,4 +58,4 @@ PLATFORM_BIN_DIR=/path/to/target/debug node scripts/acceptance/harness/codex.js 
 
 脚本启动临时 Server 和 Node，经真实浏览器验证非法环境零派发、Harness 选择、工具折叠（含失败后恢复）、刷新、续聊与 390px 布局。真实 Codex 模式还验证 Project Plan → Execute、清单登记与不可变交付副本；不提供二进制路径时使用确定性进程夹具。
 
-相关逻辑：[session](../../agents/session/index.md)、[CLI](../../agents/cli/index.md)、[Web](../../agents/web/index.md)、[worker](../../agents/worker/index.md)。
+相关逻辑：[session](../../agents/session/index.md)、[CLI](../../agents/local/index.md)、[Web](../../agents/web/index.md)、[worker](../../agents/worker/index.md)。

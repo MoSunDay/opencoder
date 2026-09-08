@@ -1,5 +1,5 @@
 use clap::Parser;
-use opencoder_cli::Cli;
+use opencoder_local::Cli;
 use opencoder_core::harness::Harness;
 
 #[test]

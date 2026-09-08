@@ -14,8 +14,8 @@ Project 通过惰性客户端支持无原生凭据的 Plan/Execute；资源身�
 
 | 功能 | 测试名 / 验收脚本 | 文件 |
 | --- | --- | --- |
-| CLI 参数、环境变量字面值与校验 | `harness_cli` 集成测试；`environment_preserves_payload_and_rejects_invalid_pairs` | `crates/cli/tests/harness_cli.rs`、`crates/core/src/harness/mod.rs` |
-| tmux 转交 Harness 与环境参数 | `tmux_passes_agent_harness_and_literal_environment_to_tui` | `crates/cli/src/ts/actions_tests.rs` |
+| CLI 参数、环境变量字面值与校验 | `harness_cli` 集成测试；`environment_preserves_payload_and_rejects_invalid_pairs` | `crates/local/tests/harness_cli.rs`、`crates/core/src/harness/mod.rs` |
+| tmux 转交 Harness 与环境参数 | `tmux_passes_agent_harness_and_literal_environment_to_tui` | `crates/local/src/ts/actions_tests.rs` |
 | JSONL 累计文本、工具类型和异常协议 | `harness_decode` 集成测试 | `crates/session/tests/harness_decode.rs` |
 | 真实子进程、持久化、resume、fork | `codex_binary_stream_persistence_resume_and_fork` | `crates/session/tests/harness_codex.rs` |
 | 资源文件与可执行工具、固定版本恢复 | `codex_reads_pinned_agent_files_and_executable_tools` | 同上 |

@@ -10,9 +10,9 @@
 
 use std::sync::{Arc, Mutex};
 
-use opencoder_cli::run::rewrite_legacy_sandbox_prefix;
 use opencoder_core::{resolve_agent, Config, Role};
 use opencoder_llm::{ChatStream, LlmEvent, MockChatClient};
+use opencoder_local::run::rewrite_legacy_sandbox_prefix;
 use opencoder_session::{run, SessionEvent, SessionState};
 use opencoder_store::{LibsqlStore, SessionMeta, Store};
 

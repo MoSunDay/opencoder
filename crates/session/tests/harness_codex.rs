@@ -114,7 +114,7 @@ async fn codex_reads_pinned_agent_files_and_executable_tools() {
         .await
         .unwrap();
     let snapshot = session.harness.resource_root.clone().unwrap();
-    assert!(snapshot.starts_with(root.path()));
+    assert!(snapshot.starts_with(root.path().canonicalize().unwrap()));
     assert!(snapshot.join("skills/shared/v1/inspect/SKILL.md").is_file());
     std::fs::write(
         resources.path().join("prompts/shared/v1/soul.md"),

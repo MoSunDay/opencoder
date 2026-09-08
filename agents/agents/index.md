@@ -1,6 +1,10 @@
-Commit: 09118a1（工作树态：opencoder-agents crate + core 读路径 + session/cli/web/SPA 接线，未提交）
+Commit: (working-tree, 基于 65c9d891ae905e7925277d29a87cd8e7957e8dad)
 
 # opencoder-agents — 版本化自定义 Agent（写路径 + NFS）
+
+## Agent 执行设置
+
+引用卡的 `harness` 指定新会话默认执行器，支持 `opencoder`（缺省）和 `codex`。`create_agent_with_harness` 初始化卡片；`update_agent_settings` 可独立更新引用或 Harness，并把变化写入 history。内置 Agent 可创建仅含设置的卡片，仍由 builtin 提供提示词；Web 禁止删除内置 Agent。资源卡校验、执行器固定与工作区快照由 [session](../session/index.md) 承担，写路径不启动外部进程。用户规则见 [Agent Harness](../../features/harness/index.md)。
 
 读路径在 core（[agents/core](../core/index.md) `agent::{meta,resource,compose}`），本 crate 只做**写路径**与 **NFS 导出**，全部纯函数 + 数据 struct。
 
@@ -18,7 +22,7 @@ Commit: 09118a1（工作树态：opencoder-agents crate + core 读路径 + sessi
 
 - **共享优先**：资源是顶层一等实体，多 agent 引用同一份；prompt 升 v2 = 所有引用它的 agent 同步生效。版本号只增不复用（next = max(history∪{current})+1）；**回滚 = 切 current 指针，不删历史**。
 - 引用卡四字段均可缺省但 `current.prompt` 必须可解析才算可 resolve 的 agent（web 激活 preflight 据此拒绝无 prompt 卡：400 + marker 回滚）；agent 名保留字：`active/prompts/skills/tools/memory`。
-- 资源 meta：`{name, created_at, updated_at, current: u32(0=无), history: [u32]}`；marker/卡片全部 `#[serde(default)]` 宽松解析，读路径静默降级（stale/损坏 → None，envs 哲学）。
+- 资源 meta：`{name, created_at, updated_at, current: u32(0=无), history: [u32]}`；marker/卡片全部 `#[serde(default)]` 宽松解析，基础发现读路径对 stale/损坏卡片返回 None；执行前的 Session 资源准备会严格校验卡片及 Harness，解析失败直接报错。
 
 ## 模块（每文件 <400 行）
 

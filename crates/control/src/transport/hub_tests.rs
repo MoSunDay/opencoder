@@ -61,6 +61,21 @@ async fn call_request_id(rx: &mut mpsc::Receiver<SocketCommand>) -> String {
 }
 
 #[tokio::test]
+async fn legacy_node_cannot_join_or_receive_harness_assignments() {
+    let hub = Hub::new(vec![]);
+    let (tx, mut rx) = mpsc::channel(1);
+    let mut legacy = registration();
+    legacy.protocol_version = 4;
+    let error = hub
+        .attach(legacy, snapshot("legacy", 1), tx)
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("incompatible node protocol 4"));
+    assert!(hub.views().await.is_empty());
+    assert!(rx.recv().await.is_none());
+}
+
+#[tokio::test]
 async fn initial_report_gates_calls_and_scheduling_until_complete() {
     let hub = Hub::new(vec![]);
     let (tx, _rx) = mpsc::channel(1);

@@ -25,6 +25,11 @@ pub async fn fork_session_with_id(store: &dyn Store, parent_id: &str, id: &str) 
         .await?
         .ok_or_else(|| anyhow!("session not found: {parent_id}"))?;
     let messages = store.load_messages(parent_id).await?;
+    let runtime = store.harness_runtime(parent_id).await?;
+    anyhow::ensure!(
+        runtime.as_ref().is_none_or(|r| !r.in_flight),
+        "cannot fork an unfinished harness turn"
+    );
     let new_id = id.to_string();
     let now = now_ms();
     let forked = SessionMeta {
@@ -46,6 +51,10 @@ pub async fn fork_session_with_id(store: &dyn Store, parent_id: &str, id: &str) 
         requirement: None,
     };
     store.create_session(&forked).await?;
+    if let Some(mut runtime) = runtime {
+        runtime.fork_from = runtime.thread_id.take();
+        store.set_harness_runtime(&new_id, &runtime).await?;
+    }
     if !messages.is_empty() {
         store.append_messages(&new_id, &messages).await?;
     }

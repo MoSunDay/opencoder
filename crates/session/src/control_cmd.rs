@@ -205,6 +205,12 @@ pub async fn apply(
 ) -> Result<()> {
     match cmd {
         ControlCmd::SwitchAgent(name) => {
+            if session.harness.harness == opencoder_core::harness::Harness::Codex
+                && session.harness.thread_id.is_some()
+                && name != &session.agent.name
+            {
+                return Err(anyhow::anyhow!("Codex agent instructions are fixed for this thread; start a new session to select another agent"));
+            }
             match resolve_agent(name) {
                 Some(a) => {
                     // Switching to the agent already in charge is a pure no-op:
@@ -221,6 +227,7 @@ pub async fn apply(
                     session.agent = a;
                     crate::agent_pools::refresh(session);
                     persist_agent(session, name).await?;
+                    crate::harness::prepare(session).await?;
                     on_event(SessionEvent::AgentSwitch(name.clone()));
                 }
                 // Unknown/unresolvable name: name it in an Error event instead
@@ -238,6 +245,12 @@ pub async fn apply(
             on_event(SessionEvent::Status(agent_listing(&session.agent.name)));
         }
         ControlCmd::ClearContext => {
+            if session.harness.harness == opencoder_core::harness::Harness::Codex {
+                session.harness.thread_id = None;
+                session.harness.fork_from = None;
+                session.harness.last_input_id = None;
+                session.harness.in_flight = false;
+            }
             let plan_to_act = session.agent.kind == AgentKind::Plan;
 
             // A plan clear is an execution handoff, not a neutral history
@@ -266,6 +279,7 @@ pub async fn apply(
             // Persist the boundary and converged agent atomically so resume
             // cannot resurrect plan mode behind an act handoff.
             persist_clear(session).await?;
+            crate::harness::prepare(session).await?;
             on_event(SessionEvent::TranscriptReset(session.messages.clone()));
             if let Some(name) = switched {
                 on_event(SessionEvent::AgentSwitch(name));

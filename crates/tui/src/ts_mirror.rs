@@ -139,6 +139,31 @@ impl TsMirrorStore {
 
 #[async_trait]
 impl Store for TsMirrorStore {
+    async fn set_message_usage(
+        &self,
+        session_id: &str,
+        message_id: &str,
+        usage: &opencoder_core::MessageUsage,
+    ) -> Result<()> {
+        self.inner
+            .set_message_usage(session_id, message_id, usage)
+            .await
+    }
+
+    async fn harness_runtime(
+        &self,
+        id: &str,
+    ) -> Result<Option<opencoder_core::harness::HarnessRuntime>> {
+        self.inner.harness_runtime(id).await
+    }
+    async fn set_harness_runtime(
+        &self,
+        id: &str,
+        runtime: &opencoder_core::harness::HarnessRuntime,
+    ) -> Result<()> {
+        self.inner.set_harness_runtime(id, runtime).await
+    }
+
     fn backend_name(&self) -> &'static str {
         self.inner.backend_name()
     }

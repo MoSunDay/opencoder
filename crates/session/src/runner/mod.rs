@@ -168,6 +168,26 @@ pub(crate) async fn run_loop(
             }
         }
 
+        crate::harness::prepare(session).await?;
+        if session.harness.harness == opencoder_core::harness::Harness::Codex {
+            reset_turn_cancel(session);
+            if crate::harness::codex::run_turn(session, on_event).await? {
+                drain_mode = true;
+                continue;
+            }
+            match idle_drain(session, on_event, steer_epoch).await? {
+                IdleAction::Continue => continue,
+                IdleAction::SkipLlm => {
+                    skip_llm = true;
+                    continue;
+                }
+                IdleAction::Done => {
+                    on_event(SessionEvent::Done);
+                    break;
+                }
+            }
+        }
+
         // Hard-limit gate for manual compaction: with `compaction.auto`
         // off nothing will shrink the transcript, so a request past the
         // model's context window is a guaranteed 400/degradation. Abort the

@@ -402,3 +402,10 @@ body {
   .dag-edit-pal { width: auto; flex-direction: row; }
   .ant-drawer-content-wrapper { max-width: 100vw; }
 }
+
+/* Execution identifiers and messages remain readable in the mobile drawer. */
+.oc-execution-detail .ant-drawer-title { overflow-wrap: anywhere; }
+@media (max-width: 767px) {
+  .oc-execution-detail .ant-drawer-content-wrapper { width: 100vw !important; }
+  .oc-execution-detail .ant-drawer-body { padding: 16px; }
+}

@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use anyhow::{Context as _, Result};
 use opencoder_core::{resolve_agent, Config, Message, Role};
-use opencoder_llm::{ChatClient, ChatStream};
+use opencoder_llm::ChatStream;
 #[cfg(test)]
 use opencoder_store::{ProjectTodoPatch, ProjectTodoStatus};
 use opencoder_store::{ProjectTodoRunPatch, ProjectTodoRunStatus, SessionMeta, TASK_TYPE_PROJECT};
@@ -17,8 +17,8 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{context, service::Deps};
 
-/// 客户端解析：override 优先（测试注入 MockChatClient），否则按 config
-/// endpoint 构建真客户端。镜像 web `build_client`。
+/// Resolve native credentials only when a native agent actually calls the
+/// provider. Codex sessions and pure external workflows never use this client.
 pub fn client_for(
     config: &Config,
     client_override: Option<Arc<dyn ChatStream>>,
@@ -26,16 +26,9 @@ pub fn client_for(
     if let Some(client) = client_override {
         return Ok(client);
     }
-    let ep = config.resolve_endpoint().context("resolve endpoint")?;
-    let client = ChatClient::new_with_read_timeout(
-        &ep.base_url,
-        &ep.api_key,
-        &ep.headers,
-        config.stream_idle_timeout(),
-        config.network.proxy.as_deref(),
-    )
-    .context("build chat client")?;
-    Ok(Arc::new(client) as Arc<dyn ChatStream>)
+    Ok(opencoder_session::harness::configured_client(
+        config.clone(),
+    ))
 }
 
 /// 运行前置：加载 workdir 配置、关掉 autopilot（项目运行是显式触发，
@@ -305,6 +298,7 @@ async fn run_plan(
     if let Err(error) = &flushed {
         trace.archive.fail(error);
     }
+    let result = result.and_then(|_| trace.collect_deliverables());
     trace.finish(deps).await.inspect_err(|error| {
         *deps.persistence_error.lock().unwrap() = Some(format!("project persistence: {error:#}"));
     })?;

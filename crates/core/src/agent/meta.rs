@@ -44,6 +44,8 @@ pub(crate) const MAX_NAME_LEN: usize = 48;
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AgentMeta {
     #[serde(default)]
+    pub harness: crate::harness::Harness,
+    #[serde(default)]
     pub name: String,
     #[serde(default)]
     pub created_at: String,
@@ -189,7 +191,9 @@ pub fn active_agent() -> Option<String> {
         return None;
     }
     match agent_dir(&name) {
-        Some(dir) if dir.is_dir() => Some(name),
+        Some(dir) if dir.is_dir() || super::builtin_agents().iter().any(|a| a.name == name) => {
+            Some(name)
+        }
         _ => None,
     }
 }
@@ -205,7 +209,8 @@ pub fn set_active_agent(name: Option<&str>) -> io::Result<()> {
         Some(n) => {
             validate_agent_name(n).map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
             match agent_dir(n) {
-                Some(dir) if dir.is_dir() => {}
+                Some(dir)
+                    if dir.is_dir() || super::builtin_agents().iter().any(|a| a.name == n) => {}
                 _ => {
                     return Err(io::Error::new(
                         io::ErrorKind::InvalidInput,

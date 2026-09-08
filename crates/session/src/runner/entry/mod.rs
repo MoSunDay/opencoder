@@ -98,6 +98,7 @@ async fn run_with_registry_scoped(
             return Ok(());
         }
     }
+    crate::harness::resources::prepare(session)?;
     // F2: recover promoted-but-unrecorded inputs before entry_drain_mode polls.
     input_recovery::recover_orphaned_inputs(session).await;
     // Replay cancelled subagent tasks from a prior interrupted run BEFORE the
@@ -106,7 +107,9 @@ async fn run_with_registry_scoped(
     // The TUI passes prompts directly (not via store Delivery), so when the
     // user typed new input, cancelled subagents are abandoned, not replayed.
     let has_new_input = !user_text.is_empty() || !images.is_empty();
-    crate::resume::replay_cancelled_tasks(session, has_new_input).await;
+    if session.harness.harness == opencoder_core::harness::Harness::Opencoder {
+        crate::resume::replay_cancelled_tasks(session, has_new_input).await;
+    }
     // Safety net: any `tool_use` id left dangling by a prior interrupted batch
     // is answered with a synthetic error tool_result, avoiding the provider's
     // "unanswered tool_call" HTTP 400. Idempotent; runs before recording input.
@@ -138,7 +141,11 @@ async fn run_with_registry_scoped(
         // has_text => verbatim is Some (raw non-empty); images-only => raw
         // was empty, so verbatim is None and the record stays fallback-clean.
         let user = Message::user_with_display(new_id(), user_text, verbatim.clone(), &images);
-        session.record(user).await;
+        if session.harness.harness == opencoder_core::harness::Harness::Codex {
+            session.record_checked(user).await?;
+        } else {
+            session.record(user).await;
+        }
     }
     // A pure-skill submit (tokens stripped to empty) surfaces its trigger
     // through entry_drain_mode; hand the verbatim input along so the
@@ -154,6 +161,9 @@ async fn run_with_registry_scoped(
     // P1-4: bounded re-absorb of steers/queues admitted during run_loop's
     // idle window (see drain::reabsorb_tail).
     reabsorb_tail(session, registry, &mut on_event).await?;
+    if session.harness.harness == opencoder_core::harness::Harness::Codex {
+        return Ok(());
+    }
 
     // Autopilot mode dispatch: after the initial task completes, `ap` hands
     // control to the PLAN -> ACT -> VERIFY self-driving loop, `review` runs a

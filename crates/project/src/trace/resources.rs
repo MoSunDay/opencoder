@@ -29,8 +29,15 @@ fn hash_tree(path: &Path, hash: &mut Sha256) -> Result<()> {
 }
 pub fn identity(agent: &Agent) -> Result<Value> {
     let mut hash = Sha256::new();
+    let prompt = opencoder_session::harness::resources::instruction_text(&agent.prompt);
+    let harness = opencoder_core::harness::agent_harness(&agent.name);
     hash.update(agent.name.as_bytes());
-    hash.update(agent.prompt.as_bytes());
+    hash.update(prompt.as_bytes());
+    // Preserve historical native identities while making a Harness switch a
+    // new execution identity. Materialized paths never change that identity.
+    if harness == opencoder_core::harness::Harness::Codex {
+        hash.update(b"\0harness:codex");
+    }
     hash.update(serde_json::to_vec(&agent.tools)?);
     let mut versions = serde_json::Map::new();
     if let Some(card) = agent::read_agent_meta(&agent.name) {
@@ -54,6 +61,6 @@ pub fn identity(agent: &Agent) -> Result<Value> {
         }
     }
     Ok(
-        json!({"name":agent.name,"digest":format!("{:x}",hash.finalize()),"resources":versions,"prompt":agent.prompt}),
+        json!({"name":agent.name,"digest":format!("{:x}",hash.finalize()),"resources":versions,"prompt":prompt,"harness":harness}),
     )
 }

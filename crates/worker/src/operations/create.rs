@@ -268,9 +268,6 @@ pub(super) fn prepare(worker: &Worker, assignment: &Assignment, legacy: bool) ->
                 .is_some_and(|steps| steps.iter().any(|s| s["kind"]["type"] == "agent")),
             _ => true,
         };
-        if needs_llm && worker.inner.client.is_none() {
-            config.resolve_endpoint()?;
-        }
         opencoder_core::agent::scope::with_root_sync(config.agent.agents_dir.clone(), || {
             let mut agents = vec![];
             match assignment.request.kind {
@@ -309,6 +306,7 @@ pub(super) fn prepare(worker: &Worker, assignment: &Assignment, legacy: bool) ->
                     }));
                 }
                 ExecutionKind::Todos => {
+                    agents.push("workflow".into());
                     let spec: opencoder_todos::WorkflowSpec = serde_json::from_value(
                         assignment
                             .definition
@@ -332,21 +330,65 @@ pub(super) fn prepare(worker: &Worker, assignment: &Assignment, legacy: bool) ->
                         serde_json::from_value(snapshot["goals"].clone())?;
                     let _: Vec<opencoder_store::ProjectMilestoneRecord> =
                         serde_json::from_value(snapshot["milestones"].clone())?;
-                    agents.extend(project_preflight_agents(
+                    let assigned = project_preflight_agents(
                         &todo,
                         assignment
                             .request
                             .input
                             .get("brain")
                             .filter(|v| !v.is_null()),
-                    ));
+                    );
+                    // Validate the complete definition even while planning;
+                    // credentials depend only on the agent executing this run.
+                    for agent in &assigned {
+                        if opencoder_core::resolve_agent(agent).is_none() {
+                            bail!("agent {agent} unavailable");
+                        }
+                    }
+                    if assignment.request.input["action"].as_str() == Some("execute") {
+                        agents.extend(assigned);
+                    } else {
+                        agents.push("plan".into());
+                    }
                 }
                 _ => {}
             }
+            let selection: Option<opencoder_core::harness::Harness> = assignment
+                .request
+                .input
+                .get("harness")
+                .map(|v| serde_json::from_value(v.clone()))
+                .transpose()?;
+            let envs: std::collections::BTreeMap<String, String> = assignment
+                .request
+                .input
+                .get("envs")
+                .map(|v| serde_json::from_value(v.clone()))
+                .transpose()?
+                .unwrap_or_default();
+            for (key, value) in &envs {
+                opencoder_core::harness::validate_env(key, value).map_err(anyhow::Error::msg)?;
+            }
+            let mut native = agents.is_empty();
+            let mut codex = false;
             for agent in agents {
                 if opencoder_core::resolve_agent(&agent).is_none() {
                     bail!("agent {agent} unavailable");
                 }
+                let harness = if assignment.request.kind == ExecutionKind::Agent {
+                    selection
+                } else {
+                    None
+                }
+                .unwrap_or_else(|| opencoder_core::harness::agent_harness(&agent));
+                native |= harness == opencoder_core::harness::Harness::Opencoder;
+                codex |= harness == opencoder_core::harness::Harness::Codex;
+            }
+            if needs_llm && native && worker.inner.client.is_none() {
+                config.resolve_endpoint()?;
+            }
+            if codex {
+                opencoder_session::harness::codex::binary_path(&envs, &worker.inner.state.workdir)?;
             }
             Ok::<_, anyhow::Error>(())
         })?;
@@ -470,6 +512,7 @@ pub(crate) async fn start(
     }
     if record.assignment.request.kind == ExecutionKind::Project {
         effective.request.input["run_id"] = command.input["run_id"].clone();
+        effective.request.input["action"] = record.result["next_action"].clone();
     }
     // Preflight reads the brain override off request.input; mirror the
     // command-carried resolution into this private copy (the durable

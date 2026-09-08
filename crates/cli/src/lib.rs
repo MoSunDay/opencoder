@@ -23,6 +23,15 @@ use clap::{ArgGroup, Args, Parser, Subcommand};
     about = "High-performance minimal coding agent (Rust)"
 )]
 pub struct Cli {
+    /// Select an execution harness for a new session.
+    #[arg(long, global = true, value_name = "HARNESS")]
+    pub wrap: Option<opencoder_core::harness::Harness>,
+    /// Submit this requirement and exit after streaming the response.
+    #[arg(long, global = true)]
+    pub cmd: Option<String>,
+    /// Environment passed to the harness process. Repeat for multiple variables.
+    #[arg(long, global = true, value_name = "KEY=VALUE", value_parser = opencoder_core::harness::parse_env)]
+    pub envs: Vec<(String, String)>,
     #[command(subcommand)]
     pub command: Option<Command>,
     /// Print machine-readable version, commit and fleet protocol metadata.
@@ -68,7 +77,11 @@ pub struct Cli {
     /// trailing prompt arg does not swallow it.
     #[arg(long = "image", global = true, value_name = "PATH")]
     pub image: Vec<String>,
-    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+    #[arg(
+        trailing_var_arg = true,
+        allow_hyphen_values = true,
+        conflicts_with = "cmd"
+    )]
     pub prompt: Vec<String>,
 }
 
@@ -102,7 +115,11 @@ pub fn parse_agent_name(s: &str) -> Result<String, String> {
 pub enum Command {
     /// Headless one-shot: run a prompt and stream output to stdout.
     Run {
-        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        #[arg(
+            trailing_var_arg = true,
+            allow_hyphen_values = true,
+            conflicts_with = "cmd"
+        )]
         prompt: Vec<String>,
     },
     /// Start the interactive TUI.

@@ -5,7 +5,9 @@ use super::{
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-pub const PROTOCOL_VERSION: u32 = 4;
+// v5 requires harness-aware execution. Older nodes silently ignore the harness
+// in assignment input, so mixed versions must fail at registration.
+pub const PROTOCOL_VERSION: u32 = 5;
 pub const HEARTBEAT_MS: u64 = 5_000;
 pub const STALE_MS: i64 = 20_000;
 pub const MAX_FRAME_BYTES: usize = 2 * 1024 * 1024;

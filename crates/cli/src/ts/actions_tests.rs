@@ -1,6 +1,35 @@
 use super::*;
 
 #[test]
+fn tmux_passes_agent_harness_and_literal_environment_to_tui() {
+    use clap::Parser;
+    let cli = Cli::parse_from([
+        "opencoder",
+        "--wrap",
+        "codex",
+        "--agent",
+        "act",
+        "--envs",
+        "NOTE=literal $(x) = 中文",
+        "ts",
+    ]);
+    assert_eq!(
+        launch_args(&cli),
+        Vec::from([
+            "--agent",
+            "act",
+            "--wrap",
+            "codex",
+            "--envs",
+            "NOTE=literal $(x) = 中文"
+        ])
+        .into_iter()
+        .map(OsString::from)
+        .collect::<Vec<_>>()
+    );
+}
+
+#[test]
 fn explicit_attach_target_bare_ts_returns_none() {
     // A bare `ts` (no --session) always creates a new session -- never attaches.
     assert_eq!(explicit_attach_target(None, false), None);

@@ -17,7 +17,10 @@ use axum::Json;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use opencoder_agents::{create_agent, delete_agent, update_agent_refs};
+use opencoder_agents::{
+    delete_agent,
+    write::{create_agent_with_harness, update_agent_settings},
+};
 use opencoder_core::agent::{
     active_agent, list_agents, read_agent_meta, resource_current_version_dir, set_active_agent,
     set_active_agent_checked, validate_agent_name, AgentRefs,
@@ -106,12 +109,16 @@ pub(crate) fn active_chain_references(cat: &str, resource: &str) -> bool {
 /// GET /api/agents — every card plus which one is active (sorted by name).
 pub async fn list(State(_state): State<Arc<AppState>>) -> Response {
     let active = active_agent();
-    let agents: Vec<Value> = list_agents()
+    let mut names: std::collections::BTreeSet<String> = list_agents().into_iter().collect();
+    names.extend(opencoder_core::builtin_agents().into_iter().map(|a| a.name));
+    let agents: Vec<Value> = names
         .into_iter()
         .filter_map(|name| {
-            let meta = read_agent_meta(&name)?;
+            let meta = visible_meta(&name)?;
             Some(json!({
                 "name": name,
+                "builtin": opencoder_core::builtin_agents().iter().any(|a| a.name == name),
+                "harness": meta.harness,
                 "current": meta.current,
                 "references": meta.references,
                 "updated_at": meta.updated_at,
@@ -124,6 +131,8 @@ pub async fn list(State(_state): State<Arc<AppState>>) -> Response {
 #[derive(Deserialize)]
 pub struct CreateBody {
     pub name: String,
+    #[serde(default)]
+    pub harness: opencoder_core::harness::Harness,
     /// Initial references (all optional; empty card when omitted).
     #[serde(default)]
     pub current: AgentRefs,
@@ -136,7 +145,7 @@ pub async fn create(State(_state): State<Arc<AppState>>, Json(body): Json<Create
     if let Err(e) = validate_agent_name(&name) {
         return error_400(format!("invalid agent name: {e}"));
     }
-    match create_agent(&name, body.current) {
+    match create_agent_with_harness(&name, body.current, body.harness) {
         Ok(()) => (
             StatusCode::CREATED,
             Json(json!({ "ok": true, "name": name })),
@@ -148,15 +157,16 @@ pub async fn create(State(_state): State<Arc<AppState>>, Json(body): Json<Create
 
 /// GET /api/agents/:name/meta — the full card (history included).
 pub async fn meta(State(_state): State<Arc<AppState>>, Path(name): Path<String>) -> Response {
-    match read_agent_meta(&name) {
-        Some(meta) => Json(json!({ "ok": true, "meta": meta })).into_response(),
+    match visible_meta(&name) {
+        Some(meta) => Json(json!({ "ok": true, "meta": meta, "builtin": opencoder_core::builtin_agents().iter().any(|a| a.name == name) })).into_response(),
         None => error_404(&format!("unknown agent: {name}")),
     }
 }
 
 #[derive(Deserialize)]
 pub struct UpdateBody {
-    pub current: AgentRefs,
+    pub current: Option<AgentRefs>,
+    pub harness: Option<opencoder_core::harness::Harness>,
 }
 
 /// PUT /api/agents/:name — rewrite the card's references (one history
@@ -169,7 +179,7 @@ pub async fn update(
     Json(body): Json<UpdateBody>,
 ) -> Response {
     let was_active = active_agent().as_deref() == Some(name.as_str());
-    match update_agent_refs(&name, body.current) {
+    match update_agent_settings(&name, body.current, body.harness) {
         Ok(()) => {
             if was_active {
                 fan_out_reload(&state).await;
@@ -185,6 +195,12 @@ pub async fn update(
 /// touched). Missing card ⇒ 404. ReloadConfig fans out when the ACTIVE
 /// card was deleted.
 pub async fn delete(State(state): State<Arc<AppState>>, Path(name): Path<String>) -> Response {
+    if opencoder_core::builtin_agents()
+        .iter()
+        .any(|a| a.name == name)
+    {
+        return error_400("cannot delete a builtin agent".into());
+    }
     if read_agent_meta(&name).is_none() {
         return error_404(&format!("unknown agent: {name}"));
     }
@@ -236,7 +252,7 @@ pub async fn patch_active(
         return Json(json!({ "ok": true, "active": target, "unchanged": true })).into_response();
     }
     if let Some(name) = &target {
-        if read_agent_meta(name).is_none() {
+        if visible_meta(name).is_none() {
             return error_404(&format!("unknown agent: {name}"));
         }
     }
@@ -249,6 +265,12 @@ pub async fn patch_active(
         let Some(name) = &target else {
             return Ok(());
         };
+        if opencoder_core::builtin_agents()
+            .iter()
+            .any(|a| &a.name == name)
+        {
+            return Ok(());
+        }
         let card = read_agent_meta(name).ok_or_else(|| format!("card `{name}` unreadable"))?;
         match card.current.prompt.as_deref() {
             None => Err(format!(
@@ -266,4 +288,16 @@ pub async fn patch_active(
         }
         Err(e) => io_error_response("set active agent", e),
     }
+}
+
+fn visible_meta(name: &str) -> Option<opencoder_core::agent::AgentMeta> {
+    read_agent_meta(name).or_else(|| {
+        opencoder_core::builtin_agents()
+            .into_iter()
+            .find(|a| a.name == name)
+            .map(|_| opencoder_core::agent::AgentMeta {
+                name: name.into(),
+                ..Default::default()
+            })
+    })
 }

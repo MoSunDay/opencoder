@@ -72,6 +72,46 @@ pub(super) async fn run(
         assignment.index.created_at,
     )
     .await?;
+    if fresh {
+        let selection = input
+            .get("harness")
+            .map(|v| serde_json::from_value(v.clone()))
+            .transpose()?;
+        let envs = input
+            .get("envs")
+            .map(|v| serde_json::from_value(v.clone()))
+            .transpose()?
+            .unwrap_or_default();
+        opencoder_core::agent::scope::with_root(
+            config.agent.agents_dir.clone(),
+            opencoder_session::harness::initialize(
+                worker.inner.state.store.as_ref(),
+                id,
+                agent,
+                selection,
+                envs,
+            ),
+        )
+        .await?;
+        if let Some(model) = input["model"].as_str() {
+            let mut runtime = worker
+                .inner
+                .state
+                .store
+                .harness_runtime(id)
+                .await?
+                .unwrap_or_default();
+            if runtime.harness == opencoder_core::harness::Harness::Codex {
+                runtime.model = Some(model.into());
+                worker
+                    .inner
+                    .state
+                    .store
+                    .set_harness_runtime(id, &runtime)
+                    .await?;
+            }
+        }
+    }
     let mut initial_driver_ensured = false;
     if let Some(prompt) = input["prompt"].as_str().filter(|s| !s.trim().is_empty()) {
         let prompt = if assignment.request.kind == ExecutionKind::Maintenance {

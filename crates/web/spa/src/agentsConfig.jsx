@@ -15,6 +15,7 @@ import { ExecutionDetail } from './fleet/detail.jsx';
 import { err } from './notice.js';
 import { newId, nodeOptions } from './fleet/model.js';
 import { PageShell } from './shell/pageShell.jsx';
+import { HarnessFields, parseEnvs } from './harness/fields.jsx';
 
 const { Text } = Typography;
 
@@ -31,7 +32,7 @@ function CreateAgentModal({ open, resources, onClose, onCreated, onNotice }) {
       REF_FIELDS.forEach(({ field }) => {
         current[field] = values[field] || null;
       });
-      await apiPost('/api/agents', { name: values.name, current });
+      await apiPost('/api/agents', { name: values.name, current, harness: values.harness || 'opencoder' });
       message.success('已创建');
       form.resetFields();
       onCreated(values.name);
@@ -48,6 +49,7 @@ function CreateAgentModal({ open, resources, onClose, onCreated, onNotice }) {
         <Form.Item name="name" label="名称" rules={[{ required: true, message: '请输入名称' }]}>
           <Input placeholder="reviewer" aria-label="new-agent-name" />
         </Form.Item>
+        <HarnessFields environments={false} />
         {REF_FIELDS.map(({ field, label, cat }) => (
           <Form.Item key={field} name={field} label={label} initialValue={undefined}>
             <Select
@@ -135,7 +137,7 @@ export function AgentsPanel({ onNotice }) {
   };
 
   const run = async (values) => {
-    const request = { kind: 'agent', target: launch.name, node_id: values.node || null, input: { prompt: values.prompt } };
+    const request = { kind: 'agent', target: launch.name, node_id: values.node || null, input: { prompt: values.prompt, harness: values.harness || launch.harness || 'opencoder', envs: parseEnvs(values.envs) } };
     const signature = JSON.stringify(request);
     if (launchAttempt.current?.signature !== signature) launchAttempt.current = { signature, id: newId('agent') };
     setLaunching(true);
@@ -185,6 +187,7 @@ export function AgentsPanel({ onNotice }) {
         </Space>
       ),
     },
+    { title: 'Harness', dataIndex: 'harness', render: (v) => v === 'codex' ? 'Codex' : 'OpenCoder' },
     { title: '更新时间', dataIndex: 'updated_at', key: 'updated_at', width: 200, render: (v) => v || '-' },
     {
       title: '操作',
@@ -195,7 +198,7 @@ export function AgentsPanel({ onNotice }) {
           <Button size="small" type="link" onClick={() => setDetail(r.name)}>编辑</Button>
           <Button size="small" type="link" onClick={() => { launchForm.resetFields(); setLaunch(r); }}>启动</Button>
           <Popconfirm title={`删除 agent ${r.name}？`} okText="确认删除" onConfirm={() => remove(r.name)}>
-            <Button size="small" type="link" danger>删除</Button>
+            <Button size="small" type="link" danger disabled={r.builtin}>删除</Button>
           </Popconfirm>
         </Space>
       ),
@@ -247,6 +250,7 @@ export function AgentsPanel({ onNotice }) {
       <Modal open={!!launch} title={`启动 Agent · ${launch?.name || ''}`} onCancel={() => setLaunch(null)} footer={null} destroyOnHidden>
         <Form form={launchForm} layout="vertical" onFinish={run} initialValues={{ node: '' }}>
           <Form.Item name="node" label="执行节点"><Select options={nodeOptions(nodes, 'agent')} /></Form.Item>
+          <HarnessFields initialHarness={launch?.harness || 'opencoder'} />
           <Form.Item name="prompt" label="任务要求" rules={[{ required: true, message: '请输入任务要求' }]}><Input.TextArea rows={5} /></Form.Item>
           <Button type="primary" htmlType="submit" loading={launching}>启动并查看</Button>
         </Form>

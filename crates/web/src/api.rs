@@ -26,6 +26,9 @@ use crate::AppState;
 
 #[derive(Deserialize)]
 pub struct CreateBody {
+    harness: Option<opencoder_core::harness::Harness>,
+    #[serde(default)]
+    envs: std::collections::BTreeMap<String, String>,
     agent: Option<String>,
     model: Option<String>,
 }
@@ -34,6 +37,13 @@ pub async fn create_session(
     State(state): State<Arc<AppState>>,
     body: Option<Json<CreateBody>>,
 ) -> impl IntoResponse {
+    if let Some(body) = &body {
+        for (key, value) in &body.envs {
+            if let Err(e) = opencoder_core::harness::validate_env(key, value) {
+                return error_400(e);
+            }
+        }
+    }
     let id = opencoder_session::runner::new_id();
     let now = opencoder_core::message::now_ms();
     let meta = SessionMeta {
@@ -62,6 +72,19 @@ pub async fn create_session(
     };
     if let Err(e) = state.store.create_session(&meta).await {
         return error_500(format!("create_session: {e:#}"));
+    }
+    let selection = body.as_ref().and_then(|b| b.harness);
+    let envs = body.as_ref().map(|b| b.envs.clone()).unwrap_or_default();
+    if let Err(e) = opencoder_session::harness::initialize(
+        state.store.as_ref(),
+        &id,
+        meta.agent.as_deref().unwrap_or("act"),
+        selection,
+        envs,
+    )
+    .await
+    {
+        return error_400(e.to_string());
     }
     Json(json!({ "id": id })).into_response()
 }
@@ -167,7 +190,11 @@ async fn messages_response(state: &AppState, id: &str) -> Response {
         .get(id)
         .map(|h| h.draining.load(std::sync::atomic::Ordering::SeqCst))
         .unwrap_or(false);
-    Json(json!({ "id": id, "meta": meta, "messages": messages, "draining": draining }))
+    let harness = match state.store.harness_runtime(id).await {
+        Ok(runtime) => runtime.unwrap_or_default().harness,
+        Err(e) => return error_500(format!("harness state: {e:#}")),
+    };
+    Json(json!({ "id": id, "meta": meta, "harness": harness, "messages": messages, "draining": draining }))
         .into_response()
 }
 
@@ -233,7 +260,29 @@ pub async fn post_prompt(
         Ok(c) => c,
         Err(e) => return error_500(format!("config: {e:#}")),
     };
-    if let Some(resp) = crate::api_ops::apply_prompt_model(&mut config, body.model.take()) {
+    let runtime = match state.store.harness_runtime(&id).await {
+        Ok(runtime) => runtime.unwrap_or_default(),
+        Err(e) => return error_500(format!("harness state: {e:#}")),
+    };
+    let harness = runtime.harness;
+    if harness == opencoder_core::harness::Harness::Codex {
+        if body
+            .model
+            .as_ref()
+            .is_some_and(|model| Some(model) != runtime.model.as_ref())
+        {
+            return error_409("Codex model is fixed when the session starts");
+        }
+        if let Some(agent) = &body.agent {
+            match state.store.get_session(&id).await {
+                Ok(Some(meta)) if meta.agent.as_ref() != Some(agent) => {
+                    return error_409("Codex agent is fixed when the session starts")
+                }
+                Err(e) => return error_500(format!("session: {e:#}")),
+                _ => {}
+            }
+        }
+    } else if let Some(resp) = crate::api_ops::apply_prompt_model(&mut config, body.model.take()) {
         return resp;
     }
     if let Some(a) = &body.agent {
@@ -243,6 +292,9 @@ pub async fn post_prompt(
     // `ChatClient` from config + the resolved API key (production).
     let client: Arc<dyn ChatStream> = match state.client_override.clone() {
         Some(c) => c,
+        None if harness == opencoder_core::harness::Harness::Codex => {
+            opencoder_session::harness::configured_client(config.clone())
+        }
         None => {
             let ep = match config.resolve_endpoint() {
                 Ok(v) => v,
@@ -364,6 +416,9 @@ pub async fn post_agent(
     if handle.draining.load(Ordering::SeqCst) {
         return error_409("agent switch refused while drain running");
     }
+    if let Some(response) = crate::api_ops::reject_codex_override(&state, &id).await {
+        return response;
+    }
     // The switch surface carries the primary agents only: `act` (default) and
     // `plan` (read-only). The interlude `sandbox` name no longer resolves
     // (`resolve_agent("sandbox")` is None; the store normalizes stored rows to
@@ -431,6 +486,9 @@ pub async fn post_model(
         crate::handle_lifecycle::lock_session_lifecycle(&state.handles, &id).await;
     if handle.draining.load(Ordering::SeqCst) {
         return error_409("model switch refused while drain running");
+    }
+    if let Some(response) = crate::api_ops::reject_codex_override(&state, &id).await {
+        return response;
     }
     // Keep the old value only for a global-config save failure rollback.
     let old_model = match state.store.get_session(&id).await {

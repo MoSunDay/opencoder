@@ -19,6 +19,14 @@ use crate::cmd::DrainCmd;
 use crate::handle::{send_cmd, start_drain_locked};
 use crate::AppState;
 
+pub(crate) async fn reject_codex_override(state: &AppState, id: &str) -> Option<Response> {
+    match state.store.harness_runtime(id).await {
+        Ok(Some(runtime)) if runtime.harness == opencoder_core::harness::Harness::Codex => Some(error_409("Codex owns its model, instructions and context; use a new session to change launch settings")),
+        Ok(_) => None,
+        Err(error) => Some(error_500(format!("harness state: {error:#}"))),
+    }
+}
+
 // ── fork ──────────────────────────────────────────────────────────────────
 
 /// POST /api/sessions/:id/fork — clone a session (meta + messages).
@@ -43,6 +51,9 @@ pub async fn fork_session(State(state): State<Arc<AppState>>, Path(id): Path<Str
 pub async fn post_compact(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Response {
     if let Some(resp) = crate::api::reject_node_session(&state, &id).await {
         return resp;
+    }
+    if let Some(response) = reject_codex_override(&state, &id).await {
+        return response;
     }
     match state.store.get_session(&id).await {
         Ok(Some(_)) => {}
@@ -94,6 +105,9 @@ pub async fn post_handoff(
 ) -> Response {
     if let Some(resp) = crate::api::reject_node_session(&state, &id).await {
         return resp;
+    }
+    if let Some(response) = reject_codex_override(&state, &id).await {
+        return response;
     }
     match state.store.get_session(&id).await {
         Ok(Some(_)) => {}

@@ -7,6 +7,7 @@ pub mod dangling_tools;
 pub mod event_sink;
 pub mod fork;
 pub mod handoff;
+pub mod harness;
 pub mod mcp;
 pub mod mention_resolve;
 pub mod process;
@@ -134,6 +135,7 @@ pub fn fire_turn_cancel(token: &SharedCancel) {
 }
 
 pub struct SessionState {
+    pub harness: opencoder_core::harness::HarnessRuntime,
     pub id: String,
     pub messages: Vec<Message>,
     pub agent: Agent,
@@ -267,6 +269,13 @@ impl SessionState {
                 )
             });
         SessionState {
+            harness: opencoder_core::harness::HarnessRuntime {
+                harness: opencoder_core::agent::scope::with_root_sync(
+                    config.agent.agents_dir.clone(),
+                    || opencoder_core::harness::agent_harness(&agent.name),
+                ),
+                ..Default::default()
+            },
             env_passthrough: Vec::new(),
             id: id.into(),
             messages: Vec::new(),
@@ -415,6 +424,7 @@ impl SessionState {
         self.client = new_client;
         self.model = new_cfg.model_id().to_string();
         self.config = new_cfg;
+        crate::harness::resources::invalidate_native(self);
         crate::agent_pools::refresh(self);
     }
 
@@ -427,6 +437,7 @@ impl SessionState {
     pub fn apply_config_reload_keep_client(&mut self, new_cfg: Config) {
         self.model = new_cfg.model_id().to_string();
         self.config = new_cfg;
+        crate::harness::resources::invalidate_native(self);
         crate::agent_pools::refresh(self);
     }
 
@@ -438,6 +449,11 @@ impl SessionState {
         if let Err(e) = self.persist(&msg).await {
             tracing::warn!(session_id = %self.id, error = %e, "persist message failed");
         }
+    }
+
+    pub async fn record_checked(&mut self, msg: Message) -> Result<()> {
+        self.messages.push(msg.clone());
+        self.persist(&msg).await
     }
 
     async fn persist(&mut self, msg: &Message) -> Result<()> {
@@ -474,6 +490,12 @@ impl SessionState {
                 requirement: None,
             };
             store.create_session(&meta).await?;
+            if self.harness.harness == opencoder_core::harness::Harness::Codex
+                || self.harness.resource_root.is_some()
+                || !self.harness.envs.is_empty()
+            {
+                store.set_harness_runtime(&self.id, &self.harness).await?;
+            }
             self.session_created = true;
         }
         store.append_message(&self.id, msg).await?;

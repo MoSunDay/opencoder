@@ -183,7 +183,7 @@ pub(in crate::operations) async fn detail_field(
     let value = match request.field.as_str() {
         "request.input" => record
             .as_ref()
-            .map(|row| row.assignment.request.input.clone()),
+            .map(|row| super::view::public_input(&row.assignment.request.input)),
         "definition" => record
             .as_ref()
             .and_then(|row| row.assignment.definition.clone()),

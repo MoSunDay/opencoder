@@ -1,4 +1,4 @@
-Commit: (working-tree, 基于 4efaae89bfb89f1ce1c4287cb101ae755c4d526d)
+Commit: (working-tree, 基于 65c9d891ae905e7925277d29a87cd8e7957e8dad)
 
 # control 模块
 
@@ -12,7 +12,7 @@ Commit: (working-tree, 基于 4efaae89bfb89f1ce1c4287cb101ae755c4d526d)
 
 ## 主流程
 
-1. Node 经签名 WebSocket 注册、上报快照及索引；代际和序号约束连接更新，索引归属不可改写。
+1. Node 经签名 WebSocket 注册、上报快照及索引；协议必须与 Server 相同（当前 v5）。不匹配时在保存注册、索引同步及调度之前拒绝，错误包含双方协议及同步升级要求；代际和序号约束连接更新，索引归属不可改写。
 2. 创建时在 placement 锁内解析全局定义、按 loops/CPU 选择节点、持久化归属并预留；释放锁后发 RPC。
 3. Node 接受后释放预留；同 ID 请求转发原节点比较原始输入；超时保留归属，不重新分配。
 4. 明细、控制、SSE 和分页产物均通过 ID 路由。旧 Chat/DAG/TODO/Project API 由 `api/compat` 等适配。

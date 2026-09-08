@@ -3,6 +3,7 @@ pub mod archive;
 mod artifacts;
 mod children;
 mod client;
+pub(crate) mod codex;
 pub(crate) mod recovery;
 pub mod resources;
 use crate::service::Deps;
@@ -17,6 +18,8 @@ pub struct RunTrace {
     pub archive: Archive,
     run_id: String,
     session_id: String,
+    working_dir: PathBuf,
+    deliverable_manifest: Option<PathBuf>,
     message_start: i64,
     event_start: i64,
     children: Vec<String>,
@@ -69,8 +72,19 @@ impl RunTrace {
         let archive = Archive::create(archive::run_root(&root(deps), run_id)?, cancel)?;
         input["prompt"] = json!(prompt);
         input["agent"] = resources::identity(&session.agent)?;
-        input["model"] = json!(session.config.model);
-        input["reasoning_effort"] = json!(session.config.reasoning_effort);
+        input["harness"] = json!(session.harness.harness);
+        if session.harness.harness == opencoder_core::harness::Harness::Codex {
+            input["model"] = json!(session.harness.model);
+            input["model_source"] = json!(if session.harness.model.is_some() {
+                "launch"
+            } else {
+                "codex_config"
+            });
+            input["reasoning_effort"] = Value::Null;
+        } else {
+            input["model"] = json!(session.config.model);
+            input["reasoning_effort"] = json!(session.config.reasoning_effort);
+        }
         archive::write_new(&archive.root.join("input.json"), &input)?;
         let trace = json!({"schema":1,"complete":false,"session_id":session.id,"messages_after":message_start,"events_after":event_start,"children_before":children});
         anyhow::ensure!(
@@ -96,6 +110,8 @@ impl RunTrace {
             archive,
             run_id: run_id.into(),
             session_id: session.id.clone(),
+            working_dir: session.working_dir.clone(),
+            deliverable_manifest: codex::manifest_path(session, run_id),
             message_start,
             event_start,
             children,
@@ -110,6 +126,13 @@ impl RunTrace {
         if let Err(error) = self.archive.event(event.sse_kind(), event.sse_data()) {
             self.archive.fail(error);
         }
+    }
+    pub fn collect_deliverables(&self) -> Result<()> {
+        codex::collect(
+            &self.archive,
+            &self.working_dir,
+            self.deliverable_manifest.as_deref(),
+        )
     }
     pub async fn finish(&self, deps: &Deps) -> Result<()> {
         self.archive.check()?;
@@ -130,7 +153,11 @@ impl RunTrace {
                 self.archive.root.join(name),
             )?)?);
         }
-        let trace = json!({"schema":1,"complete":true,"session_id":self.session_id,"messages_after":self.message_start,"messages_through":end,"events_after":self.event_start,"events_through":event_end,"event_count":events,"model_calls":calls,"children":children,"artifacts":artifacts,"files":files.into_iter().filter(|name|name.starts_with("request-")||name.starts_with("response-")).collect::<Vec<_>>()});
+        let mut trace = json!({"schema":1,"complete":true,"session_id":self.session_id,"messages_after":self.message_start,"messages_through":end,"events_after":self.event_start,"events_through":event_end,"event_count":events,"model_calls":calls,"children":children,"artifacts":artifacts,"files":files.into_iter().filter(|name|name.starts_with("request-")||name.starts_with("response-")).collect::<Vec<_>>()});
+        if let Some(runtime) = deps.store.harness_runtime(&self.session_id).await? {
+            trace["harness"] = json!(runtime.harness);
+            trace["thread_id"] = json!(runtime.thread_id);
+        }
         archive::write_new(&self.archive.root.join("manifest.json"), &trace)?;
         anyhow::ensure!(
             deps.projects

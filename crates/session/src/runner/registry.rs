@@ -12,6 +12,9 @@ use crate::{mcp, SessionState};
 /// this session.  Also synchronises the MCP connection pool so that enabled
 /// servers are connected (and disabled ones disconnected) before the turn.
 pub(super) async fn build_full_registry(session: &SessionState) -> HashMap<String, ToolArc> {
+    if session.harness.harness == opencoder_core::harness::Harness::Codex {
+        return HashMap::new();
+    }
     let desired: Vec<(String, opencoder_core::config::McpServerConfig)> = session
         .config
         .enabled_mcp_servers()

@@ -56,28 +56,55 @@ pub async fn run_headless(cli: &Cli, prompt: String) -> Result<()> {
     }
     let workdir = resolve_workdir(cli)?;
     let mut config = Config::load(&workdir)?;
-    // Malformed --model must fail here, before resolve_endpoint's api-key
-    // error, so E20d's "names the malformed model" check holds.
-    apply_model_override(&mut config, &cli.model).map_err(anyhow::Error::msg)?;
     apply_agent_override(&mut config, &cli.agent);
-    let ep = config.resolve_endpoint()?;
-    let client: Arc<dyn ChatStream> = Arc::new(ChatClient::new_with_read_timeout(
-        &ep.base_url,
-        &ep.api_key,
-        &ep.headers,
-        config.stream_idle_timeout(),
-        config.network.proxy.as_deref(),
-    )?);
-    let store: Option<Arc<dyn Store>> = crate::session_cmd::open_store(&workdir)
-        .await
-        .ok()
-        .map(|s| Arc::new(s) as Arc<dyn Store>);
+    let store: Option<Arc<dyn Store>> =
+        Some(Arc::new(crate::session_cmd::open_store(&workdir).await?));
+    let resume_id = pick_resume_id(cli, store.as_deref()).await?;
+    let stored_runtime = if let Some(id) = &resume_id {
+        store
+            .as_ref()
+            .unwrap()
+            .harness_runtime(id)
+            .await?
+            .unwrap_or_default()
+    } else {
+        Default::default()
+    };
+    let selected = if resume_id.is_some() {
+        anyhow::ensure!(
+            cli.wrap.is_none_or(|h| h == stored_runtime.harness),
+            "harness is fixed when the session starts"
+        );
+        stored_runtime.harness
+    } else {
+        cli.wrap.unwrap_or_else(|| {
+            opencoder_core::agent::scope::with_root_sync(config.agent.agents_dir.clone(), || {
+                opencoder_core::harness::agent_harness(&effective_default_agent(
+                    cli.agent.as_deref(),
+                    &config,
+                ))
+            })
+        })
+    };
+    let client: Arc<dyn ChatStream> = if selected == opencoder_core::harness::Harness::Codex {
+        opencoder_session::harness::configured_client(config.clone())
+    } else {
+        apply_model_override(&mut config, &cli.model).map_err(anyhow::Error::msg)?;
+        let ep = config.resolve_endpoint()?;
+        Arc::new(ChatClient::new_with_read_timeout(
+            &ep.base_url,
+            &ep.api_key,
+            &ep.headers,
+            config.stream_idle_timeout(),
+            config.network.proxy.as_deref(),
+        )?)
+    };
 
     // Create the cancellation token up front so recovery (resume_and_replay) is
     // itself interruptible: a Ctrl-C during replay cancels the token, which
     // replay_child races against, instead of freezing until the child finishes.
     let cancel = CancellationToken::new();
-    let mut session = if let Some(id) = pick_resume_id(cli, store.as_deref()).await? {
+    let mut session = if let Some(id) = resume_id.clone() {
         let st = store
             .clone()
             .ok_or_else(|| anyhow!("store unavailable for resume"))?;
@@ -118,10 +145,42 @@ pub async fn run_headless(cli: &Cli, prompt: String) -> Result<()> {
         s
     };
 
+    let envs: std::collections::BTreeMap<_, _> = cli.envs.iter().cloned().collect();
+    if resume_id.is_some() {
+        anyhow::ensure!(
+            envs.is_empty() || envs == session.harness.envs,
+            "environment is fixed when the session starts"
+        );
+        anyhow::ensure!(
+            cli.model.is_none()
+                || selected != opencoder_core::harness::Harness::Codex
+                || cli.model == session.harness.model,
+            "Codex model is fixed when the session starts"
+        );
+    } else {
+        session.harness.harness = selected;
+        session.harness.envs = envs;
+        if selected == opencoder_core::harness::Harness::Codex {
+            session.harness.model = cli.model.clone();
+        }
+    }
+    session.env_passthrough.extend(
+        session
+            .harness
+            .envs
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone())),
+    );
+
     // resume() restored the session's stored model; an explicit --model wins
     // over it and is re-persisted so subsequent resumes honor the new choice.
-    if let Some(new_model) =
-        reapply_resume_model(&mut session, &cli.model).map_err(anyhow::Error::msg)?
+    if let Some(new_model) = reapply_resume_model(
+        &mut session,
+        &cli.model
+            .clone()
+            .filter(|_| selected == opencoder_core::harness::Harness::Opencoder),
+    )
+    .map_err(anyhow::Error::msg)?
     {
         if let Some(st) = &store {
             let _ = st
@@ -234,12 +293,24 @@ pub async fn run_headless(cli: &Cli, prompt: String) -> Result<()> {
         opencoder_session::tools::bg::cleanup_all();
         std::process::exit(130);
     });
-    if images.is_empty() {
-        opencoder_session::run(&mut session, prompt, |ev| print_event(&ev)).await?;
-    } else {
-        opencoder_session::run_with_images(&mut session, prompt, images, |ev| print_event(&ev))
-            .await?;
+    let (sink, flusher) = opencoder_session::spawn_checked_event_flusher(
+        session.store.clone().context("store unavailable")?,
+        session.id.clone(),
+    );
+    let mut event_error = None;
+    let result = opencoder_session::run_with_images(&mut session, prompt, images, |ev| {
+        print_event(&ev);
+        if let Err(error) = sink.push(&ev) {
+            event_error = Some(error);
+        }
+    })
+    .await;
+    drop(sink);
+    flusher.await??;
+    if let Some(error) = event_error {
+        return Err(error.into());
     }
+    result?;
 
     // cheap background title generation (small model) after the first round.
     // This is a best-effort nicety: if the model is unreachable (e.g. the

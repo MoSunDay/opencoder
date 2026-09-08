@@ -228,5 +228,13 @@ async fn session_detail(worker: &Worker, id: &str) -> Result<RpcReply> {
     };
     let page =
         message_page_with_budget(worker, id, MessageCursor::default(), MESSAGE_CHUNK_BYTES).await?;
-    bounded_reply(json!({"meta":meta,"messages":page}))
+    let harness = worker
+        .inner
+        .state
+        .store
+        .harness_runtime(id)
+        .await?
+        .unwrap_or_default()
+        .harness;
+    bounded_reply(json!({"meta":meta,"harness":harness,"messages":page}))
 }

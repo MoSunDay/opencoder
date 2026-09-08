@@ -7,6 +7,7 @@ import { TimeText } from '../ui/timeText.jsx';
 import { ExecutionDetail } from './detail.jsx';
 import { CREATABLE_KINDS, KIND_LABELS, KINDS, executionPagePath, newId, nodeOptions } from './model.js';
 import { err } from '../notice.js';
+import { HarnessFields, parseEnvs } from '../harness/fields.jsx';
 
 export function ExecutionsPanel({ onNotice }) {
   const [rows, setRows] = useState([]); const [nodes, setNodes] = useState([]);
@@ -41,6 +42,10 @@ export function ExecutionsPanel({ onNotice }) {
   }, [filter, load]);
   const submit = async (values) => {
     const input = { prompt: values.prompt || '' };
+    if (kind === 'agent') {
+      if (values.harness && values.harness !== 'default') input.harness = values.harness;
+      input.envs = parseEnvs(values.envs);
+    }
     if (kind === 'project') input.action = 'plan';
     const request = { kind, target: values.target || null, node_id: values.node || null, input };
     const signature = JSON.stringify(request);
@@ -58,6 +63,7 @@ export function ExecutionsPanel({ onNotice }) {
         <Form.Item name="node" label="调度节点"><Select style={{ width: 330 }} options={nodeOptions(nodes, kind)} /></Form.Item>
       </Space>
       <Form.Item name="prompt" label="任务要求"><Input.TextArea rows={3} /></Form.Item>
+      {kind === 'agent' && <HarnessFields initialHarness="default" inherit />}
       <Button type="primary" htmlType="submit" loading={busy}>启动执行</Button>
     </Form>
     <Space style={{ margin: '20px 0 12px' }}><Select aria-label="执行类型筛选" style={{ width: 180 }} value={filter} onChange={setFilter} options={[{ value: '', label: '全部执行' }, ...KINDS]} /><Button onClick={() => load('reset')}>刷新</Button></Space>

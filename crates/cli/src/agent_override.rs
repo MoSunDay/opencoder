@@ -38,6 +38,11 @@ pub(crate) fn reapply_resume_agent(
     if session.agent.name == *name {
         return Ok(None);
     }
+    anyhow::ensure!(
+        session.harness.harness != opencoder_core::harness::Harness::Codex
+            || session.harness.thread_id.is_none(),
+        "Codex agent is fixed for this thread; start a new session"
+    );
     // `name` here is always an explicit --agent value (we returned early on
     // None), so an unknown name must error rather than silently resolve to
     // "act".

@@ -82,6 +82,31 @@ impl LibsqlStore {
 
 #[async_trait]
 impl Store for LibsqlStore {
+    async fn set_message_usage(
+        &self,
+        session_id: &str,
+        message_id: &str,
+        usage: &opencoder_core::MessageUsage,
+    ) -> Result<()> {
+        let _guard = self.db_lock.lock().await;
+        messages::set_usage(&self.conn, session_id, message_id, usage).await
+    }
+
+    async fn harness_runtime(
+        &self,
+        id: &str,
+    ) -> Result<Option<opencoder_core::harness::HarnessRuntime>> {
+        let _guard = self.db_lock.lock().await;
+        sessions::harness_runtime(&self.conn, id).await
+    }
+    async fn set_harness_runtime(
+        &self,
+        id: &str,
+        runtime: &opencoder_core::harness::HarnessRuntime,
+    ) -> Result<()> {
+        let _guard = self.db_lock.lock().await;
+        sessions::set_harness_runtime(&self.conn, id, runtime).await
+    }
     fn backend_name(&self) -> &'static str {
         "libsql"
     }

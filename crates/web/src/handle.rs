@@ -483,8 +483,18 @@ pub(crate) async fn start_drain_locked(
         }
         let sid = session_id.to_string();
         let handle_clone = handle.clone();
+        // Node admission owns a fixed resource snapshot; carry it across the
+        // native HTTP config reload and the non-inheriting tokio spawn.
+        let mut config = config;
+        config.agent.agents_dir =
+            opencoder_core::agent::scope::current_root().or(config.agent.agents_dir);
+        let resource_root = config.agent.agents_dir.clone();
         tokio::spawn(async move {
-            drain_to_completion(handles, store, &sid, client, workdir, config, handle_clone).await;
+            opencoder_core::agent::scope::with_root(
+                resource_root,
+                drain_to_completion(handles, store, &sid, client, workdir, config, handle_clone),
+            )
+            .await;
         });
         true
     } else {

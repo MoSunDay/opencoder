@@ -80,7 +80,21 @@ jobs:
             -e "SELECT VERSION(); SHOW DATABASES LIKE 'opencoder_store_test';"
 
       - name: cargo test sql_project_store (mysql feature)
-        run: cargo test -p opencoder-store --features mysql --test sql_project_store
+        shell: bash
+        run: |
+          set +e
+          cargo test -p opencoder-store --features mysql --test sql_project_store 2>&1 | tee "$RUNNER_TEMP/mysql-tests.log"
+          result=${PIPESTATUS[0]}
+          set -e
+          if [ "$result" -ne 0 ]; then
+            {
+              echo '### MySQL contract failure'
+              echo '```text'
+              tail -n 200 "$RUNNER_TEMP/mysql-tests.log"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+          exit "$result"
 
   starrocks:
     name: starrocks project store contract (opt-in)

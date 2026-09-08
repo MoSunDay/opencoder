@@ -1,6 +1,6 @@
 //! Dispatch-level integration tests for the `todos` CLI surface.
 //!
-//! Everything here drives `opencoder_cli::todos_cmd::dispatch` through the
+//! Everything here drives `opencoder_local::todos_cmd::dispatch` through the
 //! public API with `--workdir` pointed at a unique temp dir. dispatch opens
 //! its own store under `<data_local>/opencoder/<hash(workdir)>`, so a fresh
 //! temp workdir guarantees an empty per-workdir DB (no repo-state coupling).
@@ -8,10 +8,10 @@
 //! run→resume happy path needs a live model and lives in the python e2e suite.
 
 use clap::Parser;
-use opencoder_cli::todos_cmd::{
+use opencoder_local::todos_cmd::{
     dispatch, render_final_state, todos_terminal_outcome, TodosOutcome,
 };
-use opencoder_cli::{Cli, Command};
+use opencoder_local::{Cli, Command};
 use opencoder_todos::WorkflowState;
 
 /// Parse `opencoder --workdir <dir> todos <args...>` into a Cli (the todos
@@ -120,8 +120,8 @@ async fn list_on_empty_workdir_outputs_nothing_and_exits_zero() {
     let cli = todos_cli(dir.path(), &["list"]);
     assert!(matches!(
         cli.command,
-        Some(opencoder_cli::Command::Todos {
-            sub: opencoder_cli::TodosSub::List {
+        Some(opencoder_local::Command::Todos {
+            sub: opencoder_local::TodosSub::List {
                 json: false,
                 limit: 100
             }

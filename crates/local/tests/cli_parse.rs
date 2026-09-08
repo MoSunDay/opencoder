@@ -1,5 +1,5 @@
 use clap::Parser;
-use opencoder_cli::{Cli, Command, ConfigSub, SessionSub};
+use opencoder_local::{Cli, Command, ConfigSub, SessionSub};
 
 fn parse(args: &[&str]) -> Cli {
     Cli::parse_from(args)
@@ -210,7 +210,7 @@ fn ts_subcommand_rejects_new_flag() {
     // `--new` was removed: creating is now the default behavior, so clap must
     // reject it as an unknown argument.
     use clap::error::ErrorKind;
-    let res = opencoder_cli::Cli::try_parse_from(["opencoder", "ts", "--new"]);
+    let res = opencoder_local::Cli::try_parse_from(["opencoder", "ts", "--new"]);
     assert!(res.is_err(), "--new should be rejected");
     let kind = res.unwrap_err().kind();
     assert!(
@@ -271,7 +271,7 @@ fn run_subcommand_accepts_global_agent_flag() {
     // --agent is global, so it works on `run` and the bare prompt path.
     let cli = parse(&["opencoder", "run", "--agent", "plan", "design the api"]);
     match cli.command {
-        Some(opencoder_cli::Command::Run { prompt }) => {
+        Some(opencoder_local::Command::Run { prompt }) => {
             assert_eq!(prompt, vec!["design the api".to_string()]);
         }
         _ => panic!("expected Run"),
@@ -371,5 +371,5 @@ fn ts_subcommand_parses_delete_target_and_rejects_mixed_actions() {
         Some(Command::Ts { delete, .. }) => assert_eq!(delete.as_deref(), Some("01HZ")),
         _ => panic!("expected Ts delete"),
     }
-    assert!(opencoder_cli::Cli::try_parse_from(["opencoder", "ts", "-d", "01HZ", "-c"]).is_err());
+    assert!(opencoder_local::Cli::try_parse_from(["opencoder", "ts", "-d", "01HZ", "-c"]).is_err());
 }

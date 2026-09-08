@@ -10,6 +10,7 @@ Commit: (working-tree, 基于 65c9d891ae905e7925277d29a87cd8e7957e8dad)
 - [项目管理](../agents/project/index.md)：goal/milestone/todo 结构、草稿、Plan → Act、多执行器执行（agent/team/DAG/大脑路由）、执行记录和取消。
 - [版本化 Agent 与 NFS 资源](../agents/agents/index.md)：引用卡、prompt/skills/tools/memory 共享池、版本发布/回滚和只读导出。
 - [大脑能力库](../agents/brain/index.md)：能力录入、嵌入、语义检索及决策树规划。
+- [远程管理 CLI](../agents/ctl/index.md)：`opencoder-cli` 对接 `opencoder-server` 全量 API（system/exec/session/nodes/dag/todo/project/brain/teams/agents + raw 逃生舱），Bearer 认证、stdout 单 JSON、退出码契约。
 
 ## 会话与交互
 
@@ -17,6 +18,8 @@ Commit: (working-tree, 基于 65c9d891ae905e7925277d29a87cd8e7957e8dad)
 - [Agent Harness](harness/index.md)：CLI 和 Server Web 选择执行器、Codex 二进制消息适配、工作区资源、固定会话配置及恢复。
 - [CLI](../agents/cli/index.md)：无头运行、模型选择、会话导出/导入、TODO 命令和工具安装。
 - [TUI](../agents/tui/index.md)：Turn 阶梯、推理显示、技能选择、模式切换、notepad、快捷键、文本复制（含 Say 合并头预览载荷）和上下文展示。
+- [CLI](../agents/local/index.md)：无头运行、模型选择、会话导出/导入、TODO 命令和工具安装（本地前端，包名 `opencoder-local`）。
+- [TUI](../agents/tui/index.md)：Turn 阶梯、推理显示、技能选择、模式切换、notepad、快捷键、文本复制（含 [Say 合并头预览载荷](changelog/2026-09-05/tui-copy-mode-say-pair-payload.md)）和上下文展示。
 - [Web 会话](../agents/web/index.md)：流式会话、问题作答、排队/指导、模型/技能发现、annotation/autopilot、标题和 SSE 重连。
 
 ## 配置与基础能力

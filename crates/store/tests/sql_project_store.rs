@@ -322,6 +322,50 @@ mod gated {
             created_at: ts + 10,
         };
         if expect_name == "mysql" {
+            assert!(
+                !p.claim_todo_running_with_run(&atomic_run, ts + 9)
+                    .await
+                    .unwrap(),
+                "the existing running attempt prevents another admission"
+            );
+            assert!(p.get_todo_run(&atomic_run.id).await.unwrap().is_none());
+        }
+        // Finish the previous attempt before accepting a new execution.
+        // Run CAS: converging the terminal run (Done above) while expecting
+        // Running loses; the still-Running run2 converges to Failed.
+        assert!(
+            !p.patch_todo_run_when(
+                &run_id,
+                ProjectTodoRunStatus::Running,
+                &opencoder_store::ProjectTodoRunPatch {
+                    status: Some(ProjectTodoRunStatus::Failed),
+                    finished_at: Some(ts + 9),
+                    ..Default::default()
+                },
+                ts + 9,
+            )
+            .await
+            .unwrap(),
+            "convergence of a terminal run loses"
+        );
+        assert!(
+            p.patch_todo_run_when(
+                &run2,
+                ProjectTodoRunStatus::Running,
+                &opencoder_store::ProjectTodoRunPatch {
+                    status: Some(ProjectTodoRunStatus::Failed),
+                    output_md: Some("converged".into()),
+                    finished_at: Some(ts + 9),
+                    ..Default::default()
+                },
+                ts + 9,
+            )
+            .await
+            .unwrap(),
+            "convergence of a running run wins"
+        );
+
+        if expect_name == "mysql" {
             assert!(p
                 .claim_todo_running_with_run(&atomic_run, ts + 10)
                 .await
@@ -364,40 +408,6 @@ mod gated {
                 ProjectTodoStatus::Planned
             );
         }
-        // Run CAS: converging the terminal run (Done above) while expecting
-        // Running loses; the still-Running run2 converges to Failed.
-        assert!(
-            !p.patch_todo_run_when(
-                &run_id,
-                ProjectTodoRunStatus::Running,
-                &opencoder_store::ProjectTodoRunPatch {
-                    status: Some(ProjectTodoRunStatus::Failed),
-                    finished_at: Some(ts + 9),
-                    ..Default::default()
-                },
-                ts + 9,
-            )
-            .await
-            .unwrap(),
-            "convergence of a terminal run loses"
-        );
-        assert!(
-            p.patch_todo_run_when(
-                &run2,
-                ProjectTodoRunStatus::Running,
-                &opencoder_store::ProjectTodoRunPatch {
-                    status: Some(ProjectTodoRunStatus::Failed),
-                    output_md: Some("converged".into()),
-                    finished_at: Some(ts + 9),
-                    ..Default::default()
-                },
-                ts + 9,
-            )
-            .await
-            .unwrap(),
-            "convergence of a running run wins"
-        );
-
         // plan_md set, then cleared to NULL via Some(None).
         assert!(p
             .patch_todo(

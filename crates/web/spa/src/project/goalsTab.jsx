@@ -69,15 +69,6 @@ export function GoalsTab({ overview, refresh, onNotice }) {
     }
   };
 
-  if (!goals.length) {
-    return (
-      <Space orientation="vertical" style={{ width: '100%' }} size={16}>
-        <Button type="primary" onClick={startCreate}>新建目标</Button>
-        <Empty description="还没有项目目标 — 先建立一个目标，再往里加里程碑" />
-      </Space>
-    );
-  }
-
   return (
     <Space orientation="vertical" style={{ width: '100%' }} size={16}>
       <div>
@@ -86,6 +77,7 @@ export function GoalsTab({ overview, refresh, onNotice }) {
           目标 → 里程碑 → TODO 三级结构；删除目标会级联删除其里程碑与 TODO
         </Text>
       </div>
+      {!goals.length && <Empty description="还没有项目目标 — 先建立一个目标，再往里加里程碑" />}
       {goals.map((g) => (
         <Card
           key={g.id}

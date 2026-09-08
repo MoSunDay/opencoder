@@ -13,6 +13,9 @@ pub(in crate::operations) async fn messages(
     if let Some(reply) = crate::operations::validate_reference(worker, execution).await? {
         return Ok(reply);
     }
+    if execution.kind == ExecutionKind::Project && execution.id.starts_with("prun-") {
+        return super::project::messages(worker, &execution.id, cursor).await;
+    }
     if !matches!(
         execution.kind,
         ExecutionKind::Agent | ExecutionKind::Maintenance

@@ -30,6 +30,9 @@ pub(super) async fn read_request(worker: &Worker, request: ArtifactRequest) -> R
     if let Some(reply) = super::validate_reference(worker, &request.execution).await? {
         return Ok(reply);
     }
+    if request.execution.kind == ExecutionKind::Project {
+        return super::query::project::artifact(worker, request).await;
+    }
     if request.execution.kind != ExecutionKind::Dag {
         return Ok(RpcReply::error(400, "artifacts require a DAG execution"));
     }

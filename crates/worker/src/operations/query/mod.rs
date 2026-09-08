@@ -1,6 +1,7 @@
 mod chunks;
 mod inspect;
 mod pages;
+pub(in crate::operations) mod project;
 #[cfg(test)]
 mod tests;
 mod view;
@@ -94,6 +95,9 @@ pub(super) async fn events(
 ) -> Result<RpcReply> {
     if let Some(reply) = super::validate_reference(worker, execution).await? {
         return Ok(reply);
+    }
+    if execution.kind == ExecutionKind::Project && execution.id.starts_with("prun-") {
+        return project::events(worker, &execution.id, after).await;
     }
     let id = execution.id.as_str();
     let run = worker

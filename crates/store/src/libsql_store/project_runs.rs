@@ -13,7 +13,7 @@ use crate::project_types::{
 };
 
 const TODO_COLS: &str = "id, milestone_id, title, draft, plan_md, status, agent, active_session_id, created_at, updated_at, executor_kind, executor_ref, executor_spec";
-const RUN_COLS: &str = "id, todo_id, kind, version, plan_md, output_md, agent, session_id, status, started_at, finished_at, created_at, executor_kind, capability_id, plan_id, output_ref";
+const RUN_COLS: &str = "id, todo_id, kind, version, plan_md, output_md, agent, session_id, status, started_at, finished_at, created_at, executor_kind, capability_id, plan_id, output_ref, input_snapshot, trace_manifest";
 
 // ---- todos ----
 
@@ -209,10 +209,6 @@ pub async fn claim_todo_running(conn: &Connection, id: &str, now_ms: i64) -> Res
 
 fn validate_claim_run(rec: &ProjectTodoRunRecord) -> Result<()> {
     anyhow::ensure!(
-        rec.kind == ProjectTodoRunKind::Execute,
-        "atomic todo claim requires an execute run"
-    );
-    anyhow::ensure!(
         rec.status == ProjectTodoRunStatus::Running,
         "atomic todo claim requires a running run"
     );
@@ -229,17 +225,37 @@ pub async fn claim_todo_running_with_run(
 ) -> Result<bool> {
     validate_claim_run(rec)?;
     super::tx::run_tx(conn, "BEGIN IMMEDIATE", || async move {
-        let running = ProjectTodoStatus::Running.as_str();
-        let claimed = conn
-            .execute(
-                "UPDATE project_todos SET status = ?1, updated_at = ?2 WHERE id = ?3 AND status <> ?1",
-                params![running, now_ms, rec.todo_id.as_str()],
+        let mut rows = conn
+            .query(
+                "SELECT status FROM project_todos WHERE id=?1",
+                params![rec.todo_id.as_str()],
             )
-            .await
-            .context("claim project todo running")?;
-        if claimed == 0 {
+            .await?;
+        let Some(row) = rows.next().await? else {
+            return Ok(false);
+        };
+        if row.get::<String>(0)? == "running" {
             return Ok(false);
         }
+        let mut rows = conn
+            .query(
+                "SELECT 1 FROM project_todo_runs WHERE todo_id=?1 AND status='running' LIMIT 1",
+                params![rec.todo_id.as_str()],
+            )
+            .await?;
+        if rows.next().await?.is_some() {
+            return Ok(false);
+        }
+        let mut accepted = rec.clone();
+        accepted.version = next_todo_version(conn, &rec.todo_id).await?;
+        if rec.kind == ProjectTodoRunKind::Execute {
+            conn.execute(
+                "UPDATE project_todos SET status='running', updated_at=?1 WHERE id=?2",
+                params![now_ms, rec.todo_id.as_str()],
+            )
+            .await?;
+        }
+        let rec = &accepted;
         create_todo_run(conn, rec).await?;
         Ok(true)
     })
@@ -319,7 +335,7 @@ fn row_to_todo(r: &libsql::Row) -> Result<ProjectTodoRecord> {
 
 pub async fn create_todo_run(conn: &Connection, rec: &ProjectTodoRunRecord) -> Result<()> {
     conn.execute(
-        "INSERT INTO project_todo_runs (id, todo_id, kind, version, plan_md, output_md, agent, session_id, status, started_at, finished_at, created_at, executor_kind, capability_id, plan_id, output_ref) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO project_todo_runs (id, todo_id, kind, version, plan_md, output_md, agent, session_id, status, started_at, finished_at, created_at, executor_kind, capability_id, plan_id, output_ref, input_snapshot, trace_manifest) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         params![
             rec.id.as_str(),
             rec.todo_id.as_str(),
@@ -336,7 +352,9 @@ pub async fn create_todo_run(conn: &Connection, rec: &ProjectTodoRunRecord) -> R
             rec.executor_kind.as_str(),
             rec.capability_id.as_deref(),
             rec.plan_id.as_deref(),
-            rec.output_ref.as_deref()
+            rec.output_ref.as_deref(),
+            rec.input_snapshot.as_deref(),
+            rec.trace_manifest.as_deref()
         ],
     )
     .await
@@ -350,6 +368,14 @@ pub async fn create_todo_run(conn: &Connection, rec: &ProjectTodoRunRecord) -> R
 fn run_set_fragment(patch: &ProjectTodoRunPatch) -> (Vec<&'static str>, Vec<Value>) {
     let mut sets: Vec<&'static str> = Vec::new();
     let mut vals: Vec<Value> = Vec::new();
+    if let Some(v) = patch.input_snapshot.as_deref() {
+        sets.push("input_snapshot = ?");
+        vals.push(v.into());
+    }
+    if let Some(v) = patch.trace_manifest.as_deref() {
+        sets.push("trace_manifest = ?");
+        vals.push(v.into());
+    }
     if let Some(v) = patch.plan_md.as_deref() {
         sets.push("plan_md = ?");
         vals.push(v.into());
@@ -383,6 +409,59 @@ fn run_set_fragment(patch: &ProjectTodoRunPatch) -> (Vec<&'static str>, Vec<Valu
         vals.push(v.into());
     }
     (sets, vals)
+}
+
+pub async fn finish_todo_run(
+    conn: &Connection,
+    id: &str,
+    patch: &ProjectTodoRunPatch,
+    now_ms: i64,
+) -> Result<bool> {
+    super::tx::run_tx(conn, "BEGIN IMMEDIATE", || async move {
+        let run = get_todo_run(conn, id)
+            .await?
+            .context("run missing during finalization")?;
+        if run.status != ProjectTodoRunStatus::Running {
+            return Ok(false);
+        }
+        let status = patch.status.context("final run status missing")?;
+        anyhow::ensure!(
+            status != ProjectTodoRunStatus::Running,
+            "run finalization requires terminal status"
+        );
+        let next = if run.kind == ProjectTodoRunKind::Plan {
+            (status == ProjectTodoRunStatus::Done).then_some(ProjectTodoStatus::Planned)
+        } else {
+            Some(match status {
+                ProjectTodoRunStatus::Done => ProjectTodoStatus::Done,
+                ProjectTodoRunStatus::Cancelled => ProjectTodoStatus::Planned,
+                _ => ProjectTodoStatus::Failed,
+            })
+        };
+        if let Some(status) = next {
+            let current = get_todo(conn, &run.todo_id)
+                .await?
+                .context("todo missing during finalization")?;
+            let todo_patch = crate::ProjectTodoPatch {
+                status: Some(status),
+                plan_md: if run.kind == ProjectTodoRunKind::Plan {
+                    Some(patch.output_md.clone())
+                } else {
+                    None
+                },
+                ..Default::default()
+            };
+            if run.kind == ProjectTodoRunKind::Plan || current.status == ProjectTodoStatus::Running
+            {
+                anyhow::ensure!(
+                    patch_todo(conn, &run.todo_id, &todo_patch, now_ms).await?,
+                    "todo missing during finalization"
+                );
+            }
+        }
+        patch_todo_run(conn, id, patch, now_ms).await
+    })
+    .await
 }
 
 pub async fn patch_todo_run(
@@ -457,7 +536,9 @@ pub async fn get_todo_run_summary(
              length(CAST(plan_md AS BLOB)), \
              CASE WHEN length(CAST(output_md AS BLOB))<=65536 THEN output_md END, \
              length(CAST(output_md AS BLOB)),agent,session_id,status,started_at,finished_at,created_at, \
-             executor_kind,capability_id,plan_id,output_ref \
+             executor_kind,capability_id,plan_id,output_ref, \
+             CASE WHEN length(CAST(input_snapshot AS BLOB))<=65536 THEN input_snapshot END, length(CAST(input_snapshot AS BLOB)), \
+             CASE WHEN length(CAST(trace_manifest AS BLOB))<=65536 THEN trace_manifest END, length(CAST(trace_manifest AS BLOB)) \
              FROM project_todo_runs WHERE id=?1 LIMIT 1",
             params![id],
         )
@@ -497,7 +578,9 @@ pub async fn list_todo_runs_page(
              length(CAST(plan_md AS BLOB)), \
              CASE WHEN length(CAST(output_md AS BLOB))<=65536 THEN output_md END, \
              length(CAST(output_md AS BLOB)),agent,session_id,status,started_at,finished_at,created_at, \
-             executor_kind,capability_id,plan_id,output_ref \
+             executor_kind,capability_id,plan_id,output_ref, \
+             CASE WHEN length(CAST(input_snapshot AS BLOB))<=65536 THEN input_snapshot END, length(CAST(input_snapshot AS BLOB)), \
+             CASE WHEN length(CAST(trace_manifest AS BLOB))<=65536 THEN trace_manifest END, length(CAST(trace_manifest AS BLOB)) \
              FROM project_todo_runs WHERE todo_id=?1 AND (?2 IS NULL OR version<?2) \
              ORDER BY version DESC LIMIT ?3",
             params![todo_id, before_version, limit as i64 + 1],
@@ -507,12 +590,7 @@ pub async fn list_todo_runs_page(
     while let Some(row) = rows.next().await? {
         out.push(row_to_run_summary(&row)?);
     }
-    let more = out.len() > limit;
-    out.truncate(limit);
-    Ok(crate::ProjectTodoRunPage {
-        next_version: more.then(|| out.last().unwrap().version),
-        runs: out,
-    })
+    crate::project_types::project_run_page(out, limit)
 }
 
 pub async fn project_text_chunk(
@@ -529,6 +607,8 @@ pub async fn project_text_chunk(
         ("todo", "plan_md") => ("project_todos", "plan_md"),
         ("run", "plan_md") => ("project_todo_runs", "plan_md"),
         ("run", "output_md") => ("project_todo_runs", "output_md"),
+        ("run", "input_snapshot") => ("project_todo_runs", "input_snapshot"),
+        ("run", "trace_manifest") => ("project_todo_runs", "trace_manifest"),
         _ => anyhow::bail!("unsupported project text field"),
     };
     let start = i64::try_from(offset)?.saturating_add(1);
@@ -600,6 +680,8 @@ pub async fn next_todo_version(conn: &Connection, todo_id: &str) -> Result<i64> 
 
 fn row_to_run(r: &libsql::Row) -> Result<ProjectTodoRunRecord> {
     Ok(ProjectTodoRunRecord {
+        input_snapshot: r.get(16)?,
+        trace_manifest: r.get(17)?,
         id: r.get(0)?,
         todo_id: r.get(1)?,
         kind: ProjectTodoRunKind::parse(&r.get::<String>(2)?).context("project_todo_runs.kind")?,
@@ -624,6 +706,8 @@ fn row_to_run(r: &libsql::Row) -> Result<ProjectTodoRunRecord> {
 fn row_to_run_summary(r: &libsql::Row) -> Result<crate::ProjectTodoRunSummary> {
     let id: String = r.get(0)?;
     Ok(crate::ProjectTodoRunSummary {
+        input_snapshot: summary_text(r.get(18)?, r.get(19)?, &id, "input_snapshot"),
+        trace_manifest: summary_text(r.get(20)?, r.get(21)?, &id, "trace_manifest"),
         id: id.clone(),
         todo_id: r.get(1)?,
         kind: ProjectTodoRunKind::parse(&r.get::<String>(2)?).context("project_todo_runs.kind")?,

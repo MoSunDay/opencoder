@@ -17,6 +17,14 @@ impl NodeService for Worker {
             .unwrap()
             .clone()
             .or_else(|| {
+                self.inner
+                    .state
+                    .project
+                    .require()
+                    .ok()
+                    .and_then(|deps| deps.persistence_error.lock().unwrap().clone())
+            })
+            .or_else(|| {
                 self.configuration()
                     .and_then(|c| crate::resources::check_mount(c.agent.agents_dir.as_deref()))
                     .err()

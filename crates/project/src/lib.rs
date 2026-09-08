@@ -20,3 +20,7 @@ pub mod service;
 pub use context::ProjectContext;
 pub use plan_gen::client_for;
 pub use service::{Deps, ProjectService};
+
+pub mod trace;
+
+mod runs;

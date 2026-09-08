@@ -375,6 +375,8 @@ async fn execute_proceeds_after_stale_plan_run_is_converged() {
     let stale_started = opencoder_core::message::now_ms() - 301_000;
     h.projects
         .create_todo_run(&ProjectTodoRunRecord {
+            input_snapshot: None,
+            trace_manifest: None,
             id: "prun-stale".into(),
             todo_id: todo_id.clone(),
             kind: ProjectTodoRunKind::Plan,
@@ -587,3 +589,6 @@ async fn atomic_claim_failure_leaves_todo_and_runs_untouched() {
         "no execute run row should exist, got {runs:?} kinds"
     );
 }
+
+#[path = "replay/contracts.rs"]
+mod replay;

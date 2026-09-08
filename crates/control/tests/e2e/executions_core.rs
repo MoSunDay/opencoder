@@ -299,7 +299,7 @@ async fn project_plan_execute_commands_carry_the_plan_snapshot() {
     assert_eq!(body["status"], json!("running"));
 
     // The plan command reaches the node with the authoritative plan snapshot
-    // injected; execute rides the same affinity without re-resolving it.
+    // injected; execute refreshes the selected Agent on the same owner.
     let seen = h.node.seen_commands();
     let plan = seen
         .iter()
@@ -317,8 +317,8 @@ async fn project_plan_execute_commands_carry_the_plan_snapshot() {
         .find(|(id, action, _)| id == &exec_id && action == "execute")
         .expect("execute command forwarded to the node");
     assert!(
-        execute.2.get("snapshot").is_none(),
-        "execute carries no snapshot: {execute:?}"
+        execute.2["snapshot"]["todo"]["agent"] == "act",
+        "execute carries the current Agent selection: {execute:?}"
     );
 
     // plan for an unknown project todo id resolves to a clean 404.

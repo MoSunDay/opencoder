@@ -163,6 +163,14 @@ impl ProjectStore for SqlProjectStore {
     async fn create_todo_run(&self, rec: &ProjectTodoRunRecord) -> Result<()> {
         project_crud_runs::create_todo_run(&self.pool, self.starrocks, rec).await
     }
+    async fn finish_todo_run(
+        &self,
+        id: &str,
+        patch: &ProjectTodoRunPatch,
+        now_ms: i64,
+    ) -> Result<bool> {
+        project_crud_runs::finish_todo_run(&self.pool, self.starrocks, id, patch, now_ms).await
+    }
     async fn patch_todo_run(
         &self,
         id: &str,

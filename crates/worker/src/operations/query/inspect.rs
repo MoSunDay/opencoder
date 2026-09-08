@@ -67,7 +67,7 @@ pub(in crate::operations) async fn inspect(
             .get_todo_run_summary(id)
             .await?
         {
-            return bounded_reply(json!({"run":run}));
+            return super::project::inspect(worker, run).await;
         }
         if worker.inner.state.store.get_session(id).await?.is_none() {
             return Ok(RpcReply::error(404, "execution not found"));

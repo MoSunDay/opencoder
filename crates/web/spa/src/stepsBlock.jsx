@@ -7,7 +7,7 @@
 //         — the ONLY thing a collapsed steps bubble renders; running from
 //           reasoning/tool activity until Say begins, then red on any error.
 //         With the turn's own Say: the header becomes the Say row
-//           `❯ Say(N step{s}): {first-line preview}` and the running tag
+//           `❯ N Steps: {first-line preview}` and the running tag
 //           rides THERE (driven by sayActive, the sayStreaming ladder flag)
 //           until the sub-turn's ladder ends.
 //   L1    ❯ Step(1) [error]        ← per-step Collapse (default closed);
@@ -198,7 +198,7 @@ function StepCollapse({ step, index }) {
 ///   * no Say yet: `❯ N Step(s)`; `running` while `progressActive` stays
 ///     true from reasoning/tool activity until Say begins (older hand-built
 ///     turns without that field fall back to the open-call test);
-///   * the turn's own Say: `❯ Say(N step{s}): {first-line preview}` — the
+///   * the turn's own Say: `❯ N Steps: {first-line preview}` — the
 ///     running tag MOVES onto the Say row (driven by `sayActive`, the
 ///     sayStreaming ladder flag from the reducer) so the hint survives the
 ///     Say until the sub-turn's ladder really ends; `error` still shows once
@@ -231,9 +231,7 @@ export function StepsContent({ turn, preview }) {
         key: 'steps',
         label: (
           <span style={{ fontFamily: MONO, fontSize: 12 }}>
-            {hasSay
-              ? `Say(${steps.length} step${steps.length === 1 ? '' : 's'})${headingPreview ? ': ' + headingPreview : ''}`
-              : `${steps.length} Step${steps.length === 1 ? '' : 's'}`}
+            {`${steps.length} Step${steps.length === 1 ? '' : 's'}${hasSay && headingPreview ? ': ' + headingPreview : ''}`}
             {running ? <Tag color="processing" style={{ marginLeft: 12 }}>running</Tag> : null}
             {!running && errored ? <Tag color="red" style={{ marginLeft: 12 }}>error</Tag> : null}
           </span>

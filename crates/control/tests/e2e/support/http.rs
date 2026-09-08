@@ -35,6 +35,14 @@ impl Harness {
 
     async fn new_inner(projects: Option<Arc<dyn opencoder_store::ProjectStore>>) -> Arc<Self> {
         let dir = tempfile::tempdir().unwrap();
+        // Resource APIs honor configuration, so never inherit the developer's
+        // global (potentially read-only NFS) agents root in an HTTP test.
+        std::fs::create_dir_all(dir.path().join("work")).unwrap();
+        std::fs::write(
+            dir.path().join("work/opencoder.json"),
+            json!({"agent":{"agents_dir":dir.path().join("agents")}}).to_string(),
+        )
+        .unwrap();
         let mock_llm = Arc::new(MockChatClient::new());
         let state = match projects {
             Some(projects) => {

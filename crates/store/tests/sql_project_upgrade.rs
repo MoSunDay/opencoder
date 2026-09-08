@@ -303,6 +303,8 @@ mod gated {
             "dag://runs/1/artifacts".to_string(),
         );
         p.create_todo_run(&ProjectTodoRunRecord {
+            input_snapshot: None,
+            trace_manifest: None,
             id: run.clone(),
             todo_id: todo.clone(),
             kind: ProjectTodoRunKind::Execute,

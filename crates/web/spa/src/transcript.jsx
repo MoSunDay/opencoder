@@ -1,8 +1,8 @@
 // transcript.jsx — chat transcript on @ant-design/x Bubble.List (T3
 // migration of render.jsx). Reduced assistant segments that contain a step
 // ladder become one visual Turn bubble:
-//   user   → placement end,   variant filled   (❯ avatar, monospace body)
-//   ai     → placement start, variant outlined (◉ avatar, monospace body)
+//   user   → placement end,   variant filled   (user avatar, monospace body)
+//   ai     → placement start, variant outlined (robot avatar, monospace body)
 //   think  → placement start, variant borderless, ghost 💭 Thinking collapse
 //            (standalone turns — pure-text rounds; a tool round's thinking
 //            lives INSIDE its step, see below)
@@ -27,7 +27,8 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { Bubble } from '@ant-design/x';
-import { Tag, Typography } from 'antd';
+import { RobotOutlined, UserOutlined } from '@ant-design/icons';
+import { Avatar, Tag, Typography } from 'antd';
 import { isEmptyTranscript, itemsFromTurns, usageLine } from './bubbleItems.js';
 import { StepsContent, ThinkContent, ToolContent } from './stepsBlock.jsx';
 import { sayPresentation } from './transcript/markdown.js';
@@ -40,33 +41,24 @@ const { Text, Paragraph } = Typography;
 // TUI-flavoured monospace carried over from the old TextTurn/ToolTurn.
 const MONO = 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
 
-function RoleAvatar({ glyph, color }) {
+function RoleAvatar({ role }) {
+  const user = role === 'user';
+  const color = user ? '#13c2c2' : '#9254de';
   return (
-    <div style={{
-      width: 28,
-      height: 28,
-      borderRadius: '50%',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      background: color + '1a',
-      color,
-      fontFamily: MONO,
-      fontSize: 13,
-      fontWeight: 600,
-      flexShrink: 0,
-      userSelect: 'none',
-    }}
-    >
-      {glyph}
-    </div>
+    <Avatar
+      role="img"
+      aria-label={user ? '用户' : 'Agent'}
+      size={32}
+      icon={user ? <UserOutlined aria-hidden /> : <RobotOutlined aria-hidden />}
+      style={{ background: color + '1a', color, flexShrink: 0 }}
+    />
   );
 }
 
 /// user / ai body: same monospace pre-wrap paragraph the old TextTurn used
-/// (the ❯/◉ role markers now live on the bubble avatars).
+/// (message roles are identified by the user / robot avatars).
 function TextContent({ turn }) {
-  if (turn.role === 'assistant' && !turn.image) return <div><div style={{ color: '#389e0d', fontWeight: 600 }}>❯ Say:</div><AssistantText turn={turn} /></div>;
+  if (turn.role === 'assistant' && !turn.image) return <AssistantText turn={turn} />;
   return (
     <Paragraph
       style={{
@@ -105,8 +97,7 @@ function AssistantTurnContent({ turn }) {
     <div>
       <StepsContent turn={turn} preview={presentation.preview} />
       {body.length > 0 || presentation.rows.length > 0 || presentation.markdown ? (
-        // TUI 对齐（头部行后插一空行）：正文块与头部保持 16px 的真实块级
-        // 间距，不再与 `❯ Say(N steps)` 行挤在一起。
+        // Keep the answer body separate from the expandable step summary.
         <div style={{ marginTop: 16 }}>
           {presentation.markdown && <Markdown text={presentation.markdown} />}
           {!!presentation.rows.length && <TextRows rows={presentation.rows} />}
@@ -150,19 +141,19 @@ const BUBBLE_ROLES = {
   user: {
     placement: 'end',
     variant: 'filled',
-    avatar: <RoleAvatar glyph="❯" color="#13c2c2" />,
+    avatar: <RoleAvatar role="user" />,
     contentRender: (content) => <TextContent turn={content} />,
   },
   ai: {
     placement: 'start',
     variant: 'outlined',
-    avatar: <RoleAvatar glyph="◉" color="#9254de" />,
+    avatar: <RoleAvatar role="assistant" />,
     contentRender: (content) => <TextContent turn={content} />,
   },
   assistantTurn: {
     placement: 'start',
     variant: 'outlined',
-    avatar: <RoleAvatar glyph="◉" color="#9254de" />,
+    avatar: <RoleAvatar role="assistant" />,
     contentRender: (content) => <AssistantTurnContent turn={content} />,
   },
   // Defensive/history only: since reasoning_delta streams straight into the

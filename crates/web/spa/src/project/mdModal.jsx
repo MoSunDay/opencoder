@@ -62,6 +62,7 @@ export function MdEditModal({ open, title, initial, extraTop, onCancel, onOk }) 
       ]}
     >
       <Form form={form} layout="vertical" preserve={false}>
+        {extraTop}
         <Form.Item name="title" label="标题" rules={[{ required: true, message: '请输入标题' }]}>
           <Input placeholder="一句话标题" />
         </Form.Item>

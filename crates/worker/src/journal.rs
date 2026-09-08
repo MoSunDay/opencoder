@@ -121,21 +121,6 @@ impl Journal {
         self.save(record)
     }
 
-    pub fn set_active_project_run(&mut self, id: &str, run_id: &str) -> Result<()> {
-        let mut record = self
-            .records
-            .get(id)
-            .cloned()
-            .ok_or_else(|| anyhow::anyhow!("execution not found"))?;
-        if record.assignment.request.kind != ExecutionKind::Project
-            || record.assignment.index.status.terminal()
-        {
-            bail!("execution cannot own an active project run");
-        }
-        record.result["active_run_id"] = json!(run_id);
-        self.save(record)
-    }
-
     pub fn mark_todo_initialized(&mut self, id: &str) -> Result<()> {
         let mut record = self
             .records

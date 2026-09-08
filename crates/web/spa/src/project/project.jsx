@@ -6,7 +6,7 @@
 // into the single overview snapshot. The TODO drawer (详情/生成Plan 跳转) is
 // owned here and keyed by todoId.
 
-import { Card, Col, Row, Spin, Statistic, Tabs, Typography } from 'antd';
+import { Alert, Card, Col, Row, Spin, Statistic, Tabs, Typography } from 'antd';
 import { useState } from 'react';
 import { PageShell } from '../shell/pageShell.jsx';
 import { GoalsTab } from './goalsTab.jsx';
@@ -58,7 +58,7 @@ function OverviewTab({ overview }) {
 }
 
 export function ProjectPanel({ onNotice }) {
-  const { overview, loading, refresh } = useOverview({ onNotice });
+  const { overview, loading, refresh, error, updated } = useOverview({ onNotice });
   const [todoId, setTodoId] = useState(null); // open TODO drawer
 
   const tabs = [
@@ -70,6 +70,7 @@ export function ProjectPanel({ onNotice }) {
 
   return (
     <div>
+      {error && <Alert type="error" showIcon title={error} description={updated ? `最近成功读取：${new Date(updated).toLocaleString()}` : null} />}
       <Spin spinning={loading}>
         <Tabs items={tabs} />
       </Spin>

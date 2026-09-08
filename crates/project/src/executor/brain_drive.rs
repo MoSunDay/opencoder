@@ -19,9 +19,7 @@
 use std::sync::Arc;
 
 use anyhow::{anyhow, bail, Context as _, Result};
-use opencoder_store::{
-    ProjectExecutorKind, ProjectTodoRecord, ProjectTodoRunStatus, ProjectTodoStatus,
-};
+use opencoder_store::{ProjectExecutorKind, ProjectTodoRecord, ProjectTodoRunStatus};
 use tokio_util::sync::CancellationToken;
 
 use crate::{
@@ -224,13 +222,7 @@ pub(crate) fn drive(
                     None,
                 )
                 .await;
-                crate::plan_gen::patch_todo_status(
-                    &deps,
-                    &todo.id,
-                    ProjectTodoStatus::Failed,
-                    None,
-                )
-                .await;
+
                 forget_spawn(&deps, &run_id);
                 return;
             }

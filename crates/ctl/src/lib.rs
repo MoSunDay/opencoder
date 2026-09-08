@@ -100,11 +100,7 @@ pub enum DrainAction {
 
 pub async fn run(cli: Cli) -> anyhow::Result<i32> {
     if cli.build_info {
-        out::json(&serde_json::json!({
-            "name": "opencoder-cli",
-            "version": opencoder_core::version::VERSION_LONG,
-            "protocol_version": opencoder_core::fleet::PROTOCOL_VERSION,
-        }));
+        println!("{}", opencoder_core::version::build_info_json());
         return Ok(0);
     }
     let Some(command) = cli.command else {

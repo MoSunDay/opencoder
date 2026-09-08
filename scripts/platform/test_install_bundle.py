@@ -76,6 +76,23 @@ def installed_commits(dest: pathlib.Path, names: tuple[str, ...] | None = None) 
 
 
 class PlatformInstallTests(unittest.TestCase):
+    def test_upgrade_adds_control_cli_and_rollback_restores_legacy_set(self) -> None:
+        legacy = ("opencoder", "opencoder-server", "opencoder-agent")
+        with tempfile.TemporaryDirectory() as raw:
+            root = pathlib.Path(raw)
+            dest = root / "dest"
+            dest.mkdir()
+            old = make_bundle(root, "a", names=legacy)
+            current = make_bundle(root, "b")
+            subject.install_bundle(old, dest, False)
+            self.assertFalse((dest / "opencoder-cli").exists())
+            rollback = subject.install_bundle(current, dest, True)
+            self.assertEqual(installed_commits(dest), {"b" * 40})
+            self.assertTrue((dest / "opencoder-cli").is_symlink())
+            subject.install_bundle(rollback, dest, False)
+            self.assertEqual(installed_commits(dest, legacy), {"a" * 40})
+            self.assertFalse((dest / "opencoder-cli").is_symlink())
+
     def test_atomic_switch_failure_and_paired_rollback(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             root = pathlib.Path(raw)

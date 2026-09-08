@@ -10,8 +10,8 @@ usage() {
 Usage: scripts/platform/release/build.sh [--output DIR]
 
 Builds the release binaries for the current platform from a clean commit
-(Linux: opencoder, opencoder-server, opencoder-agent; macOS: opencoder and
-opencoder-server, the agent binary is Linux-only), verifies their compiled
+(Linux: opencoder, opencoder-cli, opencoder-server, opencoder-agent; macOS:
+opencoder, opencoder-cli and opencoder-server, the agent binary is Linux-only), verifies their compiled
 build metadata, and writes checksums plus manifest.json to an atomic bundle.
 USAGE
 }
@@ -46,8 +46,8 @@ if [[ -n "$(git status --porcelain --untracked-files=normal)" ]]; then
   exit 3
 fi
 case "$(uname -s)" in
-  Linux) binaries=(opencoder opencoder-server opencoder-agent) ;;
-  Darwin) binaries=(opencoder opencoder-server) ;;
+  Linux) binaries=(opencoder opencoder-cli opencoder-server opencoder-agent) ;;
+  Darwin) binaries=(opencoder opencoder-cli opencoder-server) ;;
   *) echo "unsupported release platform: $(uname -s)" >&2; exit 6 ;;
 esac
 commit="$(git rev-parse HEAD)"

@@ -16,8 +16,6 @@ Commit: (working-tree, 基于 65c9d891ae905e7925277d29a87cd8e7957e8dad)
 
 - [会话运行时](../agents/session/index.md)：act/plan、显式交接、恢复与分叉、steer/queue、压缩、subagent、question、侧车问询及 autopilot。
 - [Agent Harness](harness/index.md)：CLI 和 Server Web 选择执行器、Codex 二进制消息适配、工作区资源、固定会话配置及恢复。
-- [CLI](../agents/cli/index.md)：无头运行、模型选择、会话导出/导入、TODO 命令和工具安装。
-- [TUI](../agents/tui/index.md)：Turn 阶梯、推理显示、技能选择、模式切换、notepad、快捷键、文本复制（含 Say 合并头预览载荷）和上下文展示。
 - [CLI](../agents/local/index.md)：无头运行、模型选择、会话导出/导入、TODO 命令和工具安装（本地前端，包名 `opencoder-local`）。
 - [TUI](../agents/tui/index.md)：Turn 阶梯、推理显示、技能选择、模式切换、notepad、快捷键、文本复制（含 [Say 合并头预览载荷](changelog/2026-09-05/tui-copy-mode-say-pair-payload.md)）和上下文展示。
 - [Web 会话](../agents/web/index.md)：流式会话、问题作答、排队/指导、模型/技能发现、annotation/autopilot、标题和 SSE 重连。

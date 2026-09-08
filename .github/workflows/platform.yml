@@ -65,4 +65,18 @@ jobs:
         run: cargo clippy -p opencoder -p opencoder-server --all-targets -- -D warnings
 
       - name: session tests (fallback contract + portable behavior)
-        run: cargo test -p opencoder-session
+        shell: bash
+        run: |
+          set +e
+          cargo test -p opencoder-session 2>&1 | tee "$RUNNER_TEMP/session-tests.log"
+          result=${PIPESTATUS[0]}
+          set -e
+          if [ "$result" -ne 0 ]; then
+            {
+              echo '### Session test failure'
+              echo '```text'
+              tail -n 200 "$RUNNER_TEMP/session-tests.log"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+          exit "$result"

@@ -1,4 +1,4 @@
-Commit: (working-tree, 基于 002f9e07117c633cdb5764dad80cab5ade241776)
+Commit: (working-tree, 基于 4efaae89bfb89f1ce1c4287cb101ae755c4d526d)
 
 # 执行详情宽度与会话角色头像
 
@@ -26,7 +26,8 @@ Commit: (working-tree, 基于 002f9e07117c633cdb5764dad80cab5ade241776)
 - Chromium 在线实测 1600 / 1024 / 390px 三种视口，均为 75% 右侧抽屉；机器人和用户头像各自显示，无 Say 标识、无页面运行错误。
 - 真实模型验收通过 Agent、DAG 产物下载、团队、项目 Plan/Act 与回放、大脑稳定 request_id 重试、interrupt 和五字段索引检查。
 - 最初 Agent 创建确认超时后按相同 ID 确认已完成；团队提示词与协调 JSON 冲突后使用明确的阶段格式重新验收。过宽的项目验收提示触发开发规划，已中断该测试执行，改以口算任务验证完整链路。
-- 候选包完成 34 次项目运行与 30 分钟稳定性观察；最终代码的 34 次运行已通过功能断言，持续观察及生产两小时观察仍在运行，不能据此宣称两小时观察已完成。
+- 最终代码完成 34 次项目运行与 30 分钟稳定性观察；全量 Rust 回归为 4817 passed / 0 failed / 5 ignored。生产两小时观察于 20:35:28（北京时间）通过，共 241 次采样、7204.06 秒，Server/Agent 无意外重启，目标节点持续 Ready。完整证据见 [项目执行回放发布记录](project-attempt-replay.md)。
+- 提交信息重写后，线上包标识 `ff43bfa9` 在当前仓库历史中对应 `3564a03e46d139aa892a75734f401118b4dc50ed`；代码内容与线上 manifest 均已复核一致。
 - 发布与验证证据：`/var/tmp/opencoder-release-20260908-ui/`；生产观察由 `opencoder-release-observation-20260908.service` 执行。未接入运行的依赖分析草稿保留在工作区。
 
 ## 相关文档

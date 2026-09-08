@@ -14,7 +14,7 @@ import subprocess
 import sys
 import time
 
-NAMES = ("opencoder", "opencoder-server", "opencoder-agent")
+NAMES = ("opencoder", "opencoder-cli", "opencoder-server", "opencoder-agent")
 VERSIONS = ".opencoder-platform-versions"
 CURRENT = ".opencoder-platform-current"
 MANIFEST_LINK = ".opencoder-platform-manifest.json"

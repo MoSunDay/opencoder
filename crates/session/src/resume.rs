@@ -6,11 +6,11 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, Result};
 use opencoder_core::{
     message::now_ms, resolve_agent, Config, ContentBlock, Message, MessageUsage, Role,
 };
-use opencoder_llm::{lower_messages, ChatRequest, ChatStream, LlmEvent};
+use opencoder_llm::ChatStream;
 use opencoder_store::{
     Delivery, EventKind, SessionEventRecord, Store, SubagentStatus, SubagentTaskRecord,
 };
@@ -33,6 +33,17 @@ pub async fn resume(
         .await?
         .ok_or_else(|| anyhow!("session not found: {id}"))?;
 
+    let stored_harness = store.harness_runtime(id).await?;
+    let mut harness = stored_harness.clone().unwrap_or_default();
+    if stored_harness.is_none() && store.last_message_seq(id).await? == 0 {
+        harness.harness =
+            opencoder_core::agent::scope::with_root_sync(config.agent.agents_dir.clone(), || {
+                opencoder_core::harness::agent_harness(
+                    meta.agent.as_deref().unwrap_or(&config.agent.default),
+                )
+            });
+    }
+
     // Prefer the stored model/agent so resume is faithful to the original run.
     if let Some(m) = &meta.model {
         config.model = m.clone();
@@ -47,7 +58,15 @@ pub async fn resume(
         })
     });
     let agent_name = meta.agent.as_deref().unwrap_or(&config.agent.default);
-    let agent =
+    let snapshot = harness
+        .resource_root
+        .as_ref()
+        .map(|root| crate::harness::resources::restore_agent(root))
+        .transpose()?;
+    let agent = if let Some(agent) = snapshot.filter(|agent| agent.name == agent_name) {
+        agent
+    } else {
+        harness.resource_root = None;
         opencoder_core::agent::scope::with_root_sync(config.agent.agents_dir.clone(), || {
             resolve_agent(agent_name)
         })
@@ -58,7 +77,8 @@ pub async fn resume(
                 None
             }
         })
-        .ok_or_else(|| anyhow!("agent not found: {agent_name}"))?;
+        .ok_or_else(|| anyhow!("agent not found: {agent_name}"))?
+    };
 
     // Loading strategy:
     //  - Compaction path (summary_seq set, no handoff): load ONLY the tail
@@ -207,7 +227,12 @@ pub async fn resume(
     };
 
     let s = SessionState {
-        env_passthrough: Vec::new(),
+        env_passthrough: harness
+            .envs
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect(),
+        harness,
         id: id.to_string(),
         messages,
         agent,
@@ -275,6 +300,15 @@ pub async fn resume_and_replay(
     working_dir: PathBuf,
     replay_cancel: Option<CancellationToken>,
 ) -> Result<SessionState> {
+    if store
+        .harness_runtime(id)
+        .await?
+        .is_some_and(|r| r.harness == opencoder_core::harness::Harness::Codex)
+    {
+        let mut session = resume(store, id, config, client, working_dir).await?;
+        session.cancel = replay_cancel;
+        return Ok(session);
+    }
     let candidates: Vec<SubagentTaskRecord> = store
         .list_subagent_tasks(id)
         .await
@@ -427,6 +461,9 @@ async fn filter_replay_candidates(
 /// the interrupted call is transparently resumed. No-op when there is no store
 /// or no cancelled tasks (e.g. children, which hold no `task` tool).
 pub async fn replay_cancelled_tasks(session: &mut SessionState, has_new_input: bool) {
+    if session.harness.harness == opencoder_core::harness::Harness::Codex {
+        return;
+    }
     let store = match session.store.clone() {
         Some(s) => s,
         None => return,
@@ -719,64 +756,4 @@ async fn replay_child(
     Ok((text, ok))
 }
 
-/// Generate a short title from the first user/assistant exchange, using the
-/// small model when configured. Persists the title to the store. Non-fatal:
-/// errors are logged and swallowed.
-pub async fn generate_title(session: &SessionState) {
-    if session.store.is_none() {
-        return;
-    }
-    let store = session.store.clone().unwrap();
-    if let Err(e) = generate_title_inner(session, &store).await {
-        tracing::warn!(session_id = %session.id, error = %e, "title generation failed");
-    }
-}
-
-async fn generate_title_inner(session: &SessionState, store: &Arc<dyn Store>) -> Result<()> {
-    let msgs = lower_messages(&session.messages);
-    let req = ChatRequest {
-        model: session.config.small_model_or_primary().to_string(),
-        messages: msgs,
-        tools: Vec::new(),
-        tool_choice: None,
-        temperature: Some(0.3),
-        max_tokens: Some(64),
-        reasoning_effort: None,
-        cache_salt: crate::cache_salt_for(session),
-    };
-    let mut rx = session.client.chat_stream(req).context("title llm call")?;
-    let mut text = String::new();
-    while let Some(ev) = rx.recv().await {
-        match ev {
-            LlmEvent::TextDelta(t) => text.push_str(&t),
-            LlmEvent::Completed { text: t, .. } => {
-                if !t.is_empty() {
-                    text = t;
-                }
-                break;
-            }
-            LlmEvent::Retrying { .. } => {
-                // Mid-stream retry: drop deltas so the two attempts aren't
-                // concatenated; the final `Completed` overwrites `text`.
-                text.clear();
-            }
-            LlmEvent::Error(e) => return Err(anyhow!(e)),
-            _ => {}
-        }
-    }
-    let title: String = text.trim().chars().take(80).collect();
-    if title.is_empty() {
-        return Ok(());
-    }
-    store
-        .update_session(
-            &session.id,
-            &opencoder_store::SessionPatch {
-                title: Some(title),
-                updated_at: Some(opencoder_core::message::now_ms()),
-                ..Default::default()
-            },
-        )
-        .await?;
-    Ok(())
-}
+pub use crate::harness::title::generate_title;

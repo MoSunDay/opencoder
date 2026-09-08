@@ -138,6 +138,10 @@ pub async fn compact(
     _registry: &HashMap<String, ToolArc>,
     on_event: &mut (impl FnMut(SessionEvent) + Send + ?Sized),
 ) -> Result<Option<String>> {
+    anyhow::ensure!(
+        session.harness.harness != opencoder_core::harness::Harness::Codex,
+        "Codex manages its own context; OpenCoder compaction is unavailable for this harness"
+    );
     let tail = session.config.compaction.tail_turns.max(1) as usize;
     let Some(split) = compaction_split(&session.messages, tail) else {
         // Genuinely nothing to summarize (empty or single-message transcript).

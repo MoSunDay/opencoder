@@ -24,6 +24,20 @@ pub trait Store: Send + Sync {
 
     async fn create_session(&self, meta: &SessionMeta) -> Result<()>;
     async fn get_session(&self, id: &str) -> Result<Option<SessionMeta>>;
+    /// Private harness state, deliberately separate from public session metadata.
+    async fn harness_runtime(
+        &self,
+        _id: &str,
+    ) -> Result<Option<opencoder_core::harness::HarnessRuntime>> {
+        Ok(None)
+    }
+    async fn set_harness_runtime(
+        &self,
+        _id: &str,
+        _runtime: &opencoder_core::harness::HarnessRuntime,
+    ) -> Result<()> {
+        anyhow::bail!("harness persistence is unsupported by this store")
+    }
     async fn list_sessions(&self, filter: &SessionFilter) -> Result<Vec<SessionListItem>>;
     async fn update_session(&self, id: &str, patch: &SessionPatch) -> Result<()>;
     async fn delete_session(&self, id: &str) -> Result<()>;
@@ -32,6 +46,14 @@ pub trait Store: Send + Sync {
     /// `ON DELETE CASCADE` foreign keys. Returns the number of sessions removed.
     async fn clear_other_sessions(&self, keep_session_id: &str) -> Result<u64>;
 
+    async fn set_message_usage(
+        &self,
+        _session_id: &str,
+        _message_id: &str,
+        _usage: &opencoder_core::MessageUsage,
+    ) -> Result<()> {
+        anyhow::bail!("message usage update unsupported by this store")
+    }
     async fn append_message(&self, session_id: &str, msg: &Message) -> Result<i64>;
     async fn append_messages(&self, session_id: &str, msgs: &[Message]) -> Result<Vec<i64>>;
     async fn load_messages(&self, session_id: &str) -> Result<Vec<Message>>;

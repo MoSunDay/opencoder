@@ -1,6 +1,10 @@
-Commit: (working-tree, 基于 4efaae89bfb89f1ce1c4287cb101ae755c4d526d)
+Commit: (working-tree, 基于 65c9d891ae905e7925277d29a87cd8e7957e8dad)
 
 # store 模块
+
+## 私有 Harness 状态
+
+schema 22 以幂等增量迁移增加可空 `sessions.harness_runtime TEXT`。`Store::{harness_runtime,set_harness_runtime}` 独立读写 [core](../core/index.md) 的 `HarnessRuntime` JSON，保留 thread、资源和输入检查点，不扩大公开 `SessionMeta`。旧行为空，由 [session](../session/index.md) 按历史消息判定原生会话。`set_message_usage` 给已持久化 assistant 补写用量，避免增加空消息干扰编排器读取最终文本；`TsMirrorStore` 透传这三个接口。
 
 ## 平台存储接缝
 

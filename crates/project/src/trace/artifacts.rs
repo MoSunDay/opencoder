@@ -25,34 +25,39 @@ impl Tool for RegisterArtifact {
         json!({"type":"object","properties":{"path":{"type":"string"}},"required":["path"],"additionalProperties":false})
     }
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
-        self.archive.check()?;
         let path = input["path"]
             .as_str()
             .context("artifact path is required")?;
-        let source = ctx.working_dir.join(path).canonicalize()?;
-        anyhow::ensure!(
-            source.starts_with(ctx.working_dir.canonicalize()?),
-            "artifact must be inside the working directory"
-        );
-        let mut file = File::open(&source)?;
-        anyhow::ensure!(
-            file.metadata()?.is_file(),
-            "artifact must be a regular file"
-        );
-        let id = ulid::Ulid::new().to_string();
-        let target = self.archive.root.join(format!("artifact-{id}"));
-        let saved=(||->Result<Value>{
+        Ok(ToolOutput::ok(
+            register(&self.archive, &ctx.working_dir, path)?.to_string(),
+        ))
+    }
+}
+pub(super) fn register(archive: &Archive, workdir: &std::path::Path, path: &str) -> Result<Value> {
+    archive.check()?;
+    let source = workdir.join(path).canonicalize()?;
+    anyhow::ensure!(
+        source.starts_with(workdir.canonicalize()?),
+        "artifact must be inside the working directory"
+    );
+    let mut file = File::open(&source)?;
+    anyhow::ensure!(
+        file.metadata()?.is_file(),
+        "artifact must be a regular file"
+    );
+    let id = ulid::Ulid::new().to_string();
+    let target = archive.root.join(format!("artifact-{id}"));
+    let saved=(||->Result<Value>{
             let mut output=OpenOptions::new().create_new(true).write(true).open(&target)?;
             let mut digest=Sha256::new();let mut size=0u64;let mut buffer=[0u8;65536];
             loop{let n=file.read(&mut buffer)?;if n==0{break;}output.write_all(&buffer[..n])?;digest.update(&buffer[..n]);size+=n as u64;}
             output.sync_all()?;
             let entry=json!({"id":id,"name":source.file_name().context("artifact filename missing")?.to_string_lossy(),"file":format!("artifact-{id}"),"size":size,"sha256":format!("{:x}",digest.finalize())});
-            write_new(&self.archive.root.join(format!("artifact-{id}.json")),&entry)?;
-            self.archive.event("artifact_registered",entry.clone())?;
+            write_new(&archive.root.join(format!("artifact-{id}.json")),&entry)?;
+            archive.event("artifact_registered",entry.clone())?;
             Ok(entry)
-        })().inspect_err(|e|self.archive.fail(e))?;
-        Ok(ToolOutput::ok(saved.to_string()))
-    }
+        })().inspect_err(|e|archive.fail(e))?;
+    Ok(saved)
 }
 pub(super) fn install(id: &str, archive: Archive) -> opencoder_session::extensions::Registration {
     opencoder_session::extensions::register(id, vec![Arc::new(RegisterArtifact { archive })])

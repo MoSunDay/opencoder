@@ -381,3 +381,22 @@ fn parse_role(s: &str) -> Role {
         _ => Role::User,
     }
 }
+
+pub async fn set_usage(
+    conn: &Connection,
+    session_id: &str,
+    message_id: &str,
+    usage: &MessageUsage,
+) -> Result<()> {
+    let count = conn
+        .execute(
+            "UPDATE messages SET usage_json = ? WHERE session_id = ? AND id = ?",
+            params![serde_json::to_string(usage)?, session_id, message_id],
+        )
+        .await?;
+    anyhow::ensure!(
+        count == 1,
+        "message missing or duplicated while recording harness usage"
+    );
+    Ok(())
+}

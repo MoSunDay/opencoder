@@ -421,10 +421,10 @@ async fn migration_v14_to_v15_creates_brain_tables() {
 
     let store = LibsqlStore::open(&db_path).await.unwrap();
 
-    // Schema version bumped to the latest (21).
+    // Schema version bumped to the latest (22).
     assert_eq!(
         scalar_i64(&store, "SELECT version FROM schema_version LIMIT 1").await,
-        21
+        22
     );
 
     // All three brain tables now exist.
@@ -548,7 +548,7 @@ async fn migration_v17_to_v18_creates_brain_plans() {
     let store = LibsqlStore::open(&db_path).await.unwrap();
     assert_eq!(
         scalar_i64(&store, "SELECT version FROM schema_version LIMIT 1").await,
-        21
+        22
     );
     assert_eq!(
         scalar_i64(

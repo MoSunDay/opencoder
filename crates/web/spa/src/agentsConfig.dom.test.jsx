@@ -148,12 +148,12 @@ describe('AgentsPanel', () => {
     fireEvent.click(findButton('新建'));
     fireEvent.change(await screen.findByLabelText('new-agent-name'), { target: { value: 'reviewer2' } });
     // modal 的 prompt Select 是文档里第二个 .ant-select（首个是生效选择）。
-    const selects = document.querySelectorAll('.ant-select');
-    await pickSelectOption(selects[1], 'base · v2');
+    await pickSelectOption(screen.getByLabelText('new-agent-prompt').closest('.ant-select'), 'base · v2');
     fireEvent.click(findButton('创建'));
     await waitFor(() => {
       expect(apiPostMock).toHaveBeenCalledWith('/api/agents', {
         name: 'reviewer2',
+        harness: 'opencoder',
         current: { prompt: 'base', skills: null, tools: null, memory: null },
       });
     });
@@ -166,12 +166,14 @@ describe('AgentsPanel', () => {
     render(<AgentsPanel onNotice={() => {}} />);
     await screen.findByText('Prompt: base');
     fireEvent.click(screen.getAllByText(/^启\s*动$/)[0]);
+    await pickSelectOption(screen.getByLabelText('agent-harness').closest('.ant-select'), 'Codex');
+    fireEvent.change(screen.getByLabelText('agent-envs'), { target: { value: 'EXAMPLE= x=y ' } });
     fireEvent.change(await screen.findByLabelText('任务要求'), { target: { value: '检查发布状态' } });
     fireEvent.click(findButton('启动并查看'));
     await waitFor(() => {
       const call = apiPostMock.mock.calls.find(([path]) => path === '/api/executions');
       expect(call).toBeTruthy();
-      expect(call[1]).toMatchObject({ kind: 'agent', target: 'coder', node_id: null, input: { prompt: '检查发布状态' } });
+      expect(call[1]).toMatchObject({ kind: 'agent', target: 'coder', node_id: null, input: { prompt: '检查发布状态', harness: 'codex', envs: { EXAMPLE: ' x=y ' } } });
       expect(call[1].id).toMatch(/^agent-/);
     });
     expect(await screen.findByText('agent-run-1')).toBeTruthy();

@@ -188,7 +188,10 @@ async fn run_execute(
             ));
         }
     }
-    prompt.push_str("\n请用 project_artifact 工具登记需要交付的报告、补丁或其他文件，以保留本次运行的独立副本。\n");
+    if session.harness.harness == opencoder_core::harness::Harness::Opencoder {
+        prompt.push_str("\n请用 project_artifact 工具登记需要交付的报告、补丁或其他文件，以保留本次运行的独立副本。\n");
+    }
+    let prompt = crate::trace::codex::delivery_prompt(&mut session, run_id, prompt).await?;
     let trace = crate::trace::RunTrace::begin(deps, run_id, &mut session, &prompt, cancel.clone())
         .await
         .inspect_err(|error| {
@@ -210,6 +213,7 @@ async fn run_execute(
     if let Err(error) = &flushed {
         trace.archive.fail(error);
     }
+    let result = result.and_then(|_| trace.collect_deliverables());
     trace.finish(deps).await.inspect_err(|error| {
         *deps.persistence_error.lock().unwrap() = Some(format!("project persistence: {error:#}"));
     })?;

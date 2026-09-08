@@ -1,6 +1,14 @@
-Commit: (working-tree, 基于 4efaae89bfb89f1ce1c4287cb101ae755c4d526d)
+Commit: (working-tree, 基于 65c9d891ae905e7925277d29a87cd8e7957e8dad)
 
 # worker 模块
+
+## Harness 调度
+
+`operations/create` 按各 Agent 的 Harness 预检：原生执行器检查模型配置，Codex 检查节点环境中的可执行入口；TODO 预检同时覆盖 workflow 父 Agent。`workloads/agent` 在固定资源作用域内读取本次 `input.harness` / `input.envs` / 模型并初始化会话，后续运行与续聊交给共享 [session](../session/index.md)。Team、DAG、TODO、Project 创建的 Agent Session 同样使用各自引用卡默认值。
+
+Project 预检区分资源定义与实际调用：所有引用 Agent 必须存在，Plan 只检查 plan 的执行凭据，Execute 检查实际执行器；后续命令使用 `next_action`，不能沿用首次接收的 action。`tests/harness_matrix.rs` 覆盖 Project、Team、DAG、TODO、原生父会话的 Codex 子任务、双向混合及四类取消回收。
+
+节点保留恢复所需环境，`operations/query` 对公开输入和大字段读取隐藏环境值，会话详情只单列 Harness 名称。Server → Node → Codex 二进制、消息回放、幂等提交和续聊由 `tests/harness_codex.rs` 验证。用户入口见 [Agent Harness](../../features/harness/index.md)。
 
 `opencoder-worker` 持有节点执行数据和工作负载适配器，实现 [node](../node/index.md) 的 `NodeService`。由 [agent](../agent/index.md) 二进制构造。
 

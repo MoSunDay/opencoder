@@ -144,11 +144,12 @@ export function ExecutionDetail({ id, summary, onClose, onNotice }) {
   const projectRunnable = ['idle', 'interrupted', 'error'].includes(execution?.status);
   const actions = isProjectRun ? {} : executionActions(execution);
   const unavailable = !detail && !!error;
-  return <Drawer open={!!id} title={id} onClose={onClose} placement="right" size="75vw" styles={{ wrapper: { maxWidth: '100vw' } }}>
+  return <Drawer rootClassName="oc-execution-detail" open={!!id} title={id} onClose={onClose} placement="right" size="75vw" styles={{ wrapper: { maxWidth: '100vw' } }}>
     {error && <Alert type="error" showIcon title={error} />}
     {execution && <Descriptions size="small" items={[
       { key: 'node', label: '所属节点', children: execution.node_id },
       { key: 'kind', label: '类型', children: KIND_LABELS[kind] || kind },
+      { key: 'harness', label: 'Harness', children: detail?.session?.harness || detail?.harness || detail?.request?.input?.harness || 'opencoder' },
       { key: 'status', label: '状态', children: <StatusTag status={execution.status} /> },
       { key: 'created', label: '创建时间', children: <TimeText ts={execution.created_at} /> },
     ]} />}

@@ -34,48 +34,78 @@ pub(super) async fn run(opts: &TuiOpts) -> Result<()> {
     if let Some(m) = &opts.model {
         config.model = m.clone();
     }
+    let store: Arc<dyn Store> = open_store(&workdir).await?;
+    let stored = if let Some(id) = &opts.session {
+        let effective_id = match store.get_subagent_task(id).await? {
+            Some(task) if store.get_session(id).await?.is_none() => task.parent_session_id,
+            _ => id.clone(),
+        };
+        let runtime = store.harness_runtime(&effective_id).await?;
+        if runtime.is_none() && store.last_message_seq(&effective_id).await? > 0 {
+            Some(opencoder_core::harness::HarnessRuntime::default())
+        } else {
+            runtime
+        }
+    } else {
+        None
+    };
+    let harness = if let Some(runtime) = &stored {
+        anyhow::ensure!(
+            opts.harness.is_none_or(|h| h == runtime.harness),
+            "harness is fixed when the session starts"
+        );
+        runtime.harness
+    } else {
+        opts.harness.unwrap_or_else(|| {
+            opencoder_core::harness::agent_harness(&crate::fresh_agent_name(opts, &config))
+        })
+    };
     let (config, client, active_terminal): (Config, Arc<dyn ChatStream>, Option<ActiveTerminal>) =
-        match crate::onboarding::build_ready_client(&config) {
-            Ok(concrete_client) => (config, Arc::new(concrete_client), None),
-            // The wizard can fix endpoint/credential problems: run it as before.
-            Err(crate::onboarding::StartupFailure::Credentials(startup_error)) => {
-                let mut terminal = ActiveTerminal::enter()?;
-                match crate::onboarding::run(
-                    &mut terminal.terminal,
-                    &workdir,
-                    opts.model.as_deref(),
-                    config,
-                    startup_error,
-                )
-                .await?
-                {
-                    crate::onboarding::OnboardingOutcome::Ready { config, client } => {
-                        (*config, Arc::new(client), Some(terminal))
+        if harness == opencoder_core::harness::Harness::Codex {
+            let client = opencoder_session::harness::configured_client(config.clone());
+            (config, client, None)
+        } else {
+            match crate::onboarding::build_ready_client(&config) {
+                Ok(concrete_client) => (config, Arc::new(concrete_client), None),
+                // The wizard can fix endpoint/credential problems: run it as before.
+                Err(crate::onboarding::StartupFailure::Credentials(startup_error)) => {
+                    let mut terminal = ActiveTerminal::enter()?;
+                    match crate::onboarding::run(
+                        &mut terminal.terminal,
+                        &workdir,
+                        opts.model.as_deref(),
+                        config,
+                        startup_error,
+                    )
+                    .await?
+                    {
+                        crate::onboarding::OnboardingOutcome::Ready { config, client } => {
+                            (*config, Arc::new(client), Some(terminal))
+                        }
+                        crate::onboarding::OnboardingOutcome::Exit => return Ok(()),
                     }
-                    crate::onboarding::OnboardingOutcome::Exit => return Ok(()),
                 }
-            }
-            // Unbuildable (invalid proxy env/header/base_url scheme) cannot be
-            // fixed from the wizard — entering it would loop Save-fail forever.
-            // Enter the app instead with a stub client that fails every turn
-            // with this reason, so the user sees the root cause per turn.
-            Err(crate::onboarding::StartupFailure::Unbuildable(error)) => {
-                let reason = format!("{error:#}");
-                tracing::warn!(
-                    reason = %reason,
-                    "model client unbuildable; entering the UI with turn-level errors"
-                );
-                (
-                    config,
-                    Arc::new(crate::onboarding::UnbuildableClient { reason }),
-                    None,
-                )
+                // Unbuildable (invalid proxy env/header/base_url scheme) cannot be
+                // fixed from the wizard — entering it would loop Save-fail forever.
+                // Enter the app instead with a stub client that fails every turn
+                // with this reason, so the user sees the root cause per turn.
+                Err(crate::onboarding::StartupFailure::Unbuildable(error)) => {
+                    let reason = format!("{error:#}");
+                    tracing::warn!(
+                        reason = %reason,
+                        "model client unbuildable; entering the UI with turn-level errors"
+                    );
+                    (
+                        config,
+                        Arc::new(crate::onboarding::UnbuildableClient { reason }),
+                        None,
+                    )
+                }
             }
         };
     let config_client_ms = t_config_client.elapsed().as_millis() as u64;
 
     let t_store = Instant::now();
-    let store: Arc<dyn Store> = open_store(&workdir).await?;
     let store_ms = t_store.elapsed().as_millis() as u64;
 
     // Mirror ts-owned sessions into the central ts registry (`<data_root>/ts.db`)
@@ -146,11 +176,35 @@ pub(super) async fn run(opts: &TuiOpts) -> Result<()> {
         )
         .with_store(store.clone())
     };
+    if stored.is_some() {
+        anyhow::ensure!(
+            opts.envs.is_empty() || opts.envs == session.harness.envs,
+            "environment is fixed when the session starts"
+        );
+        anyhow::ensure!(
+            opts.model.is_none()
+                || harness != opencoder_core::harness::Harness::Codex
+                || opts.model == session.harness.model,
+            "Codex model is fixed when the session starts"
+        );
+    } else if session.messages.is_empty() {
+        session.harness.harness = harness;
+        session.harness.envs = opts.envs.clone();
+        if harness == opencoder_core::harness::Harness::Codex {
+            session.harness.model = opts.model.clone();
+        }
+    }
     let session_ms = t_session.elapsed().as_millis() as u64;
 
     // Explicit --model wins over a resumed session's stored model and is
     // re-persisted so later resumes honor it (headless run-path parity).
-    if let Some(m) = reapply_session_model(&mut session, &opts.model) {
+    if let Some(m) = reapply_session_model(
+        &mut session,
+        &opts
+            .model
+            .clone()
+            .filter(|_| harness == opencoder_core::harness::Harness::Opencoder),
+    ) {
         persist_session_model(store.as_ref(), &session.id, m).await;
     }
 

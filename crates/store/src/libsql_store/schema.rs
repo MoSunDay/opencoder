@@ -6,7 +6,7 @@ use super::chat_tables::{
 };
 use super::team_runs::{CREATE_INDEX_TEAM_TOPIC_RUNS_TOPIC, CREATE_TEAM_TOPIC_RUNS};
 
-const SCHEMA_VERSION: i64 = 21;
+const SCHEMA_VERSION: i64 = 22;
 
 // Order invariant: busy_timeout must precede any locking statement, and
 // synchronous=NORMAL must be applied BEFORE journal_mode=WAL. Switching a
@@ -457,6 +457,9 @@ async fn bootstrap_tx(conn: &Connection) -> Result<()> {
 /// to say which partial upgrades ran, the full pass from the bottom is the
 /// only correct entry, and it is safe for exactly the reasons above.
 async fn migrate(conn: &Connection, from: i64) -> Result<()> {
+    if from < 22 {
+        add_column_if_absent(conn, "sessions", "harness_runtime", "TEXT").await?;
+    }
     if from < 21 {
         add_column_if_absent(conn, "project_todo_runs", "input_snapshot", "TEXT").await?;
         add_column_if_absent(conn, "project_todo_runs", "trace_manifest", "TEXT").await?;

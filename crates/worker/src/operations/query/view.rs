@@ -7,7 +7,7 @@ pub(super) fn bounded_request_ref(request: &CreateExecution) -> CreateExecution 
         id: request.id.clone(),
         kind: request.kind,
         target: request.target.clone(),
-        input: bounded_value_ref(&request.input, "request.input"),
+        input: bounded_value_ref(&public_input(&request.input), "request.input"),
         node_id: request.node_id.clone(),
     }
 }
@@ -65,4 +65,14 @@ pub(super) fn bounded_reply(body: Value) -> Result<RpcReply> {
         ));
     }
     Ok(RpcReply::ok(body))
+}
+
+pub(super) fn public_input(input: &Value) -> Value {
+    let mut input = input.clone();
+    if let Some(envs) = input.get_mut("envs").and_then(Value::as_object_mut) {
+        for value in envs.values_mut() {
+            *value = json!("[redacted]");
+        }
+    }
+    input
 }

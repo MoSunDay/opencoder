@@ -1,10 +1,14 @@
-Commit: (working-tree, 基于 c1a1b2e78e1ccd4a3cc2ac6dc408a76d30bf46e6)
+Commit: (working-tree, 基于 65c9d891ae905e7925277d29a87cd8e7957e8dad)
 
 # core 模块
 
+## Harness 类型
+
+`harness` 定义 `Harness::{Opencoder,Codex}`、字面值环境变量解析与私有 `HarnessRuntime`。`AgentMeta.harness` 保存内置或自定义 Agent 的默认执行器，缺省为 `opencoder`；会话启动后由 [session](../session/index.md) 固定选择。运行态包含外部 thread、fork 来源、资源快照、环境、模型及输入提交检查点，由 [store](../store/index.md) 独立持久化，不嵌入公开 `SessionMeta`。
+
 ## 平台协议与资源作用域
 
-`fleet/{protocol,scheduling}` 提供四字段执行索引、注册/负载、请求/回复及纯 CPU 调度函数，供 [control](../control/index.md) 与 [worker](../worker/index.md) 共享。`agent::scope` 提供 Tokio 任务局部资源根；`Config::load` 和 agent 解析优先使用当前执行固定的资源目录。未设置作用域的 CLI/TUI 保持原解析规则。
+Fleet 协议版本为 **5**，要求节点理解 Harness；Server 与 Node 必须使用同一协议代际，防止旧节点忽略新请求的执行器选择。`fleet/{protocol,scheduling}` 提供四字段执行索引、注册/负载、请求/回复及纯 CPU 调度函数，供 [control](../control/index.md) 与 [worker](../worker/index.md) 共享。`agent::scope` 提供 Tokio 任务局部资源根；`Config::load` 和 agent 解析优先使用当前执行固定的资源目录。未设置作用域的 CLI/TUI 保持原解析规则。
 
 ## 职责
 跨 crate 共享的基础类型与配置。

@@ -170,31 +170,31 @@ async fn codex_cancel_reaps_descendants_and_closes_open_tools() {
     session.cancel = Some(token.clone());
     let path = child_pid.clone();
     let cancellation = tokio::spawn(async move {
-        for _ in 0..200 {
-            if path.exists() {
-                token.cancel();
-                return;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-        }
-        panic!("child did not start");
+        let pid = wait_for_child(&path).await;
+        let cancelled_at = tokio::time::Instant::now();
+        token.cancel();
+        (cancelled_at, pid)
     });
     let mut events = Vec::new();
     tokio::time::timeout(
-        std::time::Duration::from_secs(5),
+        std::time::Duration::from_secs(40),
         run(&mut session, "test".into(), |e| events.push(e)),
     )
     .await
     .unwrap()
     .unwrap();
-    cancellation.await.unwrap();
+    let (cancelled_at, pid) = cancellation.await.unwrap();
+    tokio::time::timeout_at(
+        cancelled_at + std::time::Duration::from_secs(5),
+        wait_for_exit(&pid),
+    )
+    .await
+    .expect("cancel must stop Codex and descendants within five seconds");
+    assert!(cancelled_at.elapsed() < std::time::Duration::from_secs(5));
     assert!(events
         .iter()
         .any(|e| matches!(e, SessionEvent::ToolEnd { is_error: true, .. })));
     assert!(!session.harness.in_flight);
-    let pid = std::fs::read_to_string(child_pid).unwrap();
-    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat"));
-    assert!(stat.is_err() || stat.unwrap().split_whitespace().nth(2) == Some("Z"));
 }
 
 #[tokio::test]
@@ -215,37 +215,31 @@ async fn codex_steer_interrupts_then_resumes_and_drains_queue() {
     let queue_store = store.clone();
     let sid = session.id.clone();
     let steering = tokio::spawn(async move {
-        for _ in 0..200 {
-            if marker.exists() {
-                for (id, prompt, delivery) in [
-                    ("steer-id", "new direction", Delivery::Steer),
-                    ("queue-id", "queued direction", Delivery::Queue),
-                ] {
-                    queue_store
-                        .admit_input(&SessionInput {
-                            id: id.into(),
-                            session_id: sid.clone(),
-                            prompt: prompt.into(),
-                            delivery,
-                            admitted_seq: opencoder_core::message::now_ms(),
-                            seq: None,
-                            images: vec![],
-                            display_text: None,
-                            promoted_seq: None,
-                        })
-                        .await
-                        .unwrap();
-                }
-                opencoder_session::fire_turn_cancel(&turn_cancel);
-                return;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        wait_for_child(&marker).await;
+        for (id, prompt, delivery) in [
+            ("steer-id", "new direction", Delivery::Steer),
+            ("queue-id", "queued direction", Delivery::Queue),
+        ] {
+            queue_store
+                .admit_input(&SessionInput {
+                    id: id.into(),
+                    session_id: sid.clone(),
+                    prompt: prompt.into(),
+                    delivery,
+                    admitted_seq: opencoder_core::message::now_ms(),
+                    seq: None,
+                    images: vec![],
+                    display_text: None,
+                    promoted_seq: None,
+                })
+                .await
+                .unwrap();
         }
-        panic!("Codex child did not start");
+        opencoder_session::fire_turn_cancel(&turn_cancel);
     });
     let mut events = vec![];
     tokio::time::timeout(
-        std::time::Duration::from_secs(5),
+        std::time::Duration::from_secs(40),
         run(&mut session, "first direction".into(), |e| events.push(e)),
     )
     .await
@@ -271,4 +265,39 @@ async fn codex_steer_interrupts_then_resumes_and_drains_queue() {
         .await
         .unwrap()
         .is_empty());
+}
+
+// Process/interpreter startup has its own budget. Cancellation is timed only
+// after the descendant reports readiness, including on slower macOS runners.
+async fn wait_for_child(path: &std::path::Path) -> String {
+    tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        loop {
+            match tokio::fs::read_to_string(path).await {
+                Ok(pid) if pid.parse::<u32>().is_ok() => return pid,
+                Ok(_) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => panic!("cannot read child readiness: {error}"),
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("Codex child did not become ready within thirty seconds")
+}
+
+async fn wait_for_exit(pid: &str) {
+    loop {
+        let output = tokio::process::Command::new("ps")
+            .args(["-o", "stat=", "-p", pid])
+            .output()
+            .await
+            .expect("inspect descendant state on Unix");
+        assert!(matches!(output.status.code(), Some(0 | 1)));
+        assert!(output.stderr.is_empty(), "ps failed: {output:?}");
+        let state = String::from_utf8(output.stdout).unwrap();
+        if state.trim().is_empty() || state.trim().starts_with('Z') {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
 }

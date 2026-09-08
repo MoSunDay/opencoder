@@ -218,10 +218,7 @@ async fn run_execute(
     Ok(())
 }
 
-/// 结果收敛：Done/Failed/Cancelled 三态。硬取消时 session runner 返回
-/// `Ok(())` 且不落任何新 assistant 消息，所以 Cancelled 判定同时覆盖
-/// Err 路径与「Ok 但无输出」路径；取消把 todo 回退到 Planned（方案仍在，
-/// 用户可再次执行）。
+/// Cancellation takes precedence over output from earlier tool steps.
 async fn finish_execute_run(
     deps: &Arc<Deps>,
     run_id: &str,
@@ -231,64 +228,11 @@ async fn finish_execute_run(
     watermark: std::collections::HashSet<String>,
     cancel: &CancellationToken,
 ) {
-    let session_id = Some(session.id.clone());
-    match result {
-        Ok(()) => match latest_attempt_assistant(&session.messages, &watermark) {
-            Some(output) => {
-                close_run(
-                    deps,
-                    run_id,
-                    ProjectTodoRunStatus::Done,
-                    Some(output),
-                    None,
-                    session_id,
-                )
-                .await;
-            }
-            None if cancel.is_cancelled() => {
-                close_run(
-                    deps,
-                    run_id,
-                    ProjectTodoRunStatus::Cancelled,
-                    None,
-                    None,
-                    session_id,
-                )
-                .await;
-            }
-            None => {
-                close_run(
-                    deps,
-                    run_id,
-                    ProjectTodoRunStatus::Failed,
-                    Some("execute agent returned no output".into()),
-                    None,
-                    session_id,
-                )
-                .await;
-            }
-        },
-        Err(_) if cancel.is_cancelled() => {
-            close_run(
-                deps,
-                run_id,
-                ProjectTodoRunStatus::Cancelled,
-                None,
-                None,
-                session_id,
-            )
-            .await;
-        }
-        Err(e) => {
-            close_run(
-                deps,
-                run_id,
-                ProjectTodoRunStatus::Failed,
-                Some(format!("{e:#}")),
-                None,
-                session_id,
-            )
-            .await;
-        }
-    }
+    let (status, output) = crate::plan_gen::attempt_outcome(
+        result,
+        latest_attempt_assistant(&session.messages, &watermark),
+        cancel.is_cancelled(),
+        "execute agent returned no output",
+    );
+    close_run(deps, run_id, status, output, None, Some(session.id.clone())).await;
 }

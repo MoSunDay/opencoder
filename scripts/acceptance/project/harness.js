@@ -23,17 +23,17 @@ async function harness() {
   const mock = http.createServer(async (req, res) => {
     let raw = ''; for await (const part of req) raw += part;
     const request = JSON.parse(raw); mode.requests += 1;
-    if (mode.kind === 'hang') return;
+    if (mode.kind === 'hang' || (mode.kind === 'partial-hang' && request.messages.at(-1)?.role === 'tool')) return;
     if (mode.kind === 'failure') {
       res.writeHead(400, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ error: { message: 'injected model failure' } })); return;
     }
-    const tools = mode.kind === 'artifact' && request.messages.at(-1)?.role !== 'tool'
+    const tools = ['artifact', 'partial-hang'].includes(mode.kind) && request.messages.at(-1)?.role !== 'tool'
       ? [{ index: 0, id: `artifact-${mode.requests}`, type: 'function', function: { name: 'project_artifact', arguments: JSON.stringify({ path: 'report.txt' }) } }] : null;
     res.writeHead(200, { 'content-type': 'text/event-stream' });
     const text = mode.text;
     for (const chunk of [
-      { choices: [{ index: 0, delta: tools ? { role: 'assistant', tool_calls: tools } : { role: 'assistant', content: text }, finish_reason: null }] },
+      { choices: [{ index: 0, delta: tools ? { role: 'assistant', content: mode.kind === 'partial-hang' ? 'partial output before cancellation' : undefined, tool_calls: tools } : { role: 'assistant', content: text }, finish_reason: null }] },
       { choices: [{ index: 0, delta: {}, finish_reason: tools ? 'tool_calls' : 'stop' }], usage: { prompt_tokens: 100, completion_tokens: 10, total_tokens: 110 } },
     ]) res.write(`data: ${JSON.stringify(chunk)}\n\n`);
     res.end('data: [DONE]\n\n');

@@ -313,9 +313,25 @@ async fn run_plan(
     Ok(())
 }
 
-/// run() 结果 → run 行 + todo 回写。硬取消时 session runner 返回
-/// `Ok(())` 且不带新 assistant 消息（空回合被丢弃），所以 Cancelled 的
-/// 判定必须在「无输出」分支里也看 cancel 令牌，不能只看 Err 路径。
+/// A cancelled attempt retains partial output but cannot publish a complete plan.
+pub(crate) fn attempt_outcome(
+    result: Result<()>,
+    output: Option<String>,
+    cancelled: bool,
+    missing: &str,
+) -> (ProjectTodoRunStatus, Option<String>) {
+    if cancelled {
+        return (ProjectTodoRunStatus::Cancelled, output);
+    }
+    match result {
+        Err(error) => (ProjectTodoRunStatus::Failed, Some(format!("{error:#}"))),
+        Ok(()) => match output {
+            Some(output) => (ProjectTodoRunStatus::Done, Some(output)),
+            None => (ProjectTodoRunStatus::Failed, Some(missing.into())),
+        },
+    }
+}
+
 async fn finish_plan_run(
     deps: &Arc<Deps>,
     run_id: &str,
@@ -325,68 +341,13 @@ async fn finish_plan_run(
     watermark: std::collections::HashSet<String>,
     cancel: &CancellationToken,
 ) {
-    match result {
-        Err(_) if cancel.is_cancelled() => {
-            close_run(
-                deps,
-                run_id,
-                ProjectTodoRunStatus::Cancelled,
-                None,
-                None,
-                None,
-            )
-            .await;
-        }
-        Err(e) => {
-            close_run(
-                deps,
-                run_id,
-                ProjectTodoRunStatus::Failed,
-                Some(format!("{e:#}")),
-                None,
-                None,
-            )
-            .await;
-        }
-        Ok(()) => match latest_attempt_assistant(&session.messages, &watermark) {
-            Some(output) => {
-                close_run(
-                    deps,
-                    run_id,
-                    ProjectTodoRunStatus::Done,
-                    Some(output.clone()),
-                    None,
-                    Some(session.id.clone()),
-                )
-                .await;
-                // 方案生成成功：todo 进入 Planned 并保存方案正文（条件 CAS，
-                // todo 被 execute 抢先 claim 时丢弃回写）。
-                // Todo and run were committed together by close_run.
-            }
-            None if cancel.is_cancelled() => {
-                close_run(
-                    deps,
-                    run_id,
-                    ProjectTodoRunStatus::Cancelled,
-                    None,
-                    None,
-                    None,
-                )
-                .await;
-            }
-            None => {
-                close_run(
-                    deps,
-                    run_id,
-                    ProjectTodoRunStatus::Failed,
-                    Some("plan agent returned no output".into()),
-                    None,
-                    None,
-                )
-                .await;
-            }
-        },
-    }
+    let (status, output) = attempt_outcome(
+        result,
+        latest_attempt_assistant(&session.messages, &watermark),
+        cancel.is_cancelled(),
+        "plan agent returned no output",
+    );
+    close_run(deps, run_id, status, output, None, Some(session.id.clone())).await;
 }
 
 #[cfg(test)]

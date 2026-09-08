@@ -308,7 +308,10 @@ async fn agents_card_lifecycle_and_active_pointer() {
     let builtins = opencoder_core::builtin_agents();
     assert_eq!(agents.len(), builtins.len() + 1, "{listed}");
     for builtin in builtins {
-        let row = agents.iter().find(|row| row["name"] == builtin.name).unwrap();
+        let row = agents
+            .iter()
+            .find(|row| row["name"] == builtin.name)
+            .unwrap();
         assert_eq!(row["builtin"], true);
         assert_eq!(row["harness"], "opencoder");
     }
@@ -317,7 +320,13 @@ async fn agents_card_lifecycle_and_active_pointer() {
     assert_eq!(custom["current"]["prompt"], "pack");
     assert_ok(
         &s,
-        &["agents", "update", "alpha", "--json", r#"{"harness":"codex"}"#],
+        &[
+            "agents",
+            "update",
+            "alpha",
+            "--json",
+            r#"{"harness":"codex"}"#,
+        ],
     )
     .await;
     let meta = api_get(&s, "/api/agents/alpha/meta").await;

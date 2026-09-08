@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Atomically switch all three platform launchers to a verified rollback bundle.
+# Atomically switch all declared platform launchers to a verified rollback bundle.
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -11,7 +11,7 @@ usage() {
   cat <<'USAGE'
 Usage: rollback.sh --bundle DIR [--dest-dir DIR]
 
-Verifies a previously saved platform bundle and atomically switches the CLI,
+Verifies a previously saved platform bundle and atomically switches the local CLI, control CLI,
 Server and Agent to that bundle as one protocol-compatible generation. The
 currently active generation is retained as a new rollback bundle.
 USAGE

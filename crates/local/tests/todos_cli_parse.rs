@@ -1,5 +1,5 @@
 use clap::Parser;
-use opencoder_cli::{Cli, Command, TodosSub};
+use opencoder_local::{Cli, Command, TodosSub};
 
 #[test]
 fn parses_todos_run_resume_and_debug_scope() {

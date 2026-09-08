@@ -65,7 +65,7 @@ schema 随迭代推进（最新以 `src/libsql_store/schema.rs::SCHEMA_VERSION` 
 
 - 依赖 libsql 0.9.x、opencoder-core message 类型和 async-trait。
 - 被 session、web、cli、tui 和 [todos](../todos/index.md) 依赖。
-- 用户能力见 [TODO 工作流](../../features/todos/index.md) 与 [会话 CLI](../cli/index.md)。
+- 用户能力见 [TODO 工作流](../../features/todos/index.md) 与 [会话 CLI](../local/index.md)。
 
 ## 代表性验证
 

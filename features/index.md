@@ -10,11 +10,12 @@ Commit: (working-tree, 基于 c1a1b2e78e1ccd4a3cc2ac6dc408a76d30bf46e6)
 - [项目管理](../agents/project/index.md)：goal/milestone/todo 结构、草稿、Plan → Act、多执行器执行（agent/team/DAG/大脑路由）、执行记录和取消。
 - [版本化 Agent 与 NFS 资源](../agents/agents/index.md)：引用卡、prompt/skills/tools/memory 共享池、版本发布/回滚和只读导出。
 - [大脑能力库](../agents/brain/index.md)：能力录入、嵌入、语义检索及决策树规划。
+- [远程管理 CLI](../agents/ctl/index.md)：`opencoder-cli` 对接 `opencoder-server` 全量 API（system/exec/session/nodes/dag/todo/project/brain/teams/agents + raw 逃生舱），Bearer 认证、stdout 单 JSON、退出码契约。
 
 ## 会话与交互
 
 - [会话运行时](../agents/session/index.md)：act/plan、显式交接、恢复与分叉、steer/queue、压缩、subagent、question、侧车问询及 autopilot。
-- [CLI](../agents/cli/index.md)：无头运行、模型选择、会话导出/导入、TODO 命令和工具安装。
+- [CLI](../agents/local/index.md)：无头运行、模型选择、会话导出/导入、TODO 命令和工具安装（本地前端，包名 `opencoder-local`）。
 - [TUI](../agents/tui/index.md)：Turn 阶梯、推理显示、技能选择、模式切换、notepad、快捷键、文本复制（含 [Say 合并头预览载荷](changelog/2026-09-05/tui-copy-mode-say-pair-payload.md)）和上下文展示。
 - [Web 会话](../agents/web/index.md)：流式会话、问题作答、排队/指导、模型/技能发现、annotation/autopilot、标题和 SSE 重连。
 

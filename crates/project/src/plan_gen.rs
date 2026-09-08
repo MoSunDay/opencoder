@@ -10,10 +10,9 @@ use std::sync::Arc;
 use anyhow::{Context as _, Result};
 use opencoder_core::{resolve_agent, Config, Message, Role};
 use opencoder_llm::{ChatClient, ChatStream};
-use opencoder_store::{
-    ProjectTodoPatch, ProjectTodoRunPatch, ProjectTodoRunStatus, ProjectTodoStatus, SessionMeta,
-    TASK_TYPE_PROJECT,
-};
+#[cfg(test)]
+use opencoder_store::{ProjectTodoPatch, ProjectTodoStatus};
+use opencoder_store::{ProjectTodoRunPatch, ProjectTodoRunStatus, SessionMeta, TASK_TYPE_PROJECT};
 use tokio_util::sync::CancellationToken;
 
 use crate::{context, service::Deps};
@@ -44,12 +43,15 @@ pub fn client_for(
 pub fn runtime_setup(deps: &Deps) -> Result<(Config, Arc<dyn ChatStream>)> {
     let mut config = Config::load(&deps.workdir).context("load config")?;
     config.autopilot.mode = opencoder_core::ApMode::Off;
+    if let Some(root) = opencoder_core::agent::scope::current_root() {
+        config.agent.agents_dir = Some(root);
+    }
     let client = client_for(&config, deps.client_override.clone())?;
     Ok((config, client))
 }
 
-/// 终结一个 run 行（状态 + 输出 + finished_at），失败只告警：run 驱动
-/// 收尾路径上的写库失败不应让后台任务 panic。`output_ref` 携带 team/dag
+/// 原子提交 run 终态及对应 TODO 状态；持久化失败阻止后续运行。
+/// `output_ref` 携带 team/dag
 /// 执行器的产物指针（topic id / 工件根路径）；agent 路径传 None。
 pub(crate) async fn close_run(
     deps: &Deps,
@@ -61,6 +63,8 @@ pub(crate) async fn close_run(
 ) {
     let now = opencoder_core::message::now_ms();
     let patch = ProjectTodoRunPatch {
+        input_snapshot: None,
+        trace_manifest: None,
         plan_md: None,
         output_md: output,
         output_ref,
@@ -70,8 +74,9 @@ pub(crate) async fn close_run(
         status: Some(status),
         finished_at: Some(now),
     };
-    if let Err(e) = deps.projects.patch_todo_run(run_id, &patch, now).await {
-        tracing::warn!(run_id, error = %e, "patch project run failed");
+    if let Err(e) = deps.projects.finish_todo_run(run_id, &patch, now).await {
+        *deps.persistence_error.lock().unwrap() = Some(format!("project finalization: {e:#}"));
+        tracing::error!(run_id, error = %e, "patch project run failed");
     }
 }
 
@@ -87,7 +92,26 @@ pub(crate) async fn close_run_if_running(
     session_id: Option<String>,
 ) -> bool {
     let now = opencoder_core::message::now_ms();
+    let partial = async {
+        let Some(run) = deps.projects.get_todo_run(run_id).await? else {
+            return Ok(None);
+        };
+        if run.status != ProjectTodoRunStatus::Running {
+            return Ok(None);
+        }
+        crate::trace::recovery::partial_manifest(deps, &run).await
+    }
+    .await;
+    let trace_manifest = match partial {
+        Ok(trace) => trace,
+        Err(error) => {
+            *deps.persistence_error.lock().unwrap() = Some(format!("project recovery: {error:#}"));
+            return false;
+        }
+    };
     let patch = ProjectTodoRunPatch {
+        input_snapshot: None,
+        trace_manifest,
         plan_md: None,
         output_md: output,
         output_ref,
@@ -97,41 +121,13 @@ pub(crate) async fn close_run_if_running(
         status: Some(status),
         finished_at: Some(now),
     };
-    match deps
-        .projects
-        .patch_todo_run_when(run_id, ProjectTodoRunStatus::Running, &patch, now)
-        .await
-    {
+    match deps.projects.finish_todo_run(run_id, &patch, now).await {
         Ok(won) => won,
         Err(e) => {
-            tracing::warn!(run_id, error = %e, "conditional close project run failed");
+            *deps.persistence_error.lock().unwrap() = Some(format!("project recovery: {e:#}"));
+            tracing::error!(run_id, error = %e, "conditional close project run failed");
             false
         }
-    }
-}
-
-/// 回写 todo 状态（执行/计划收尾用），同样只告警不冒泡。
-pub(crate) async fn patch_todo_status(
-    deps: &Deps,
-    todo_id: &str,
-    status: ProjectTodoStatus,
-    plan_md: Option<Option<String>>,
-) {
-    let now = opencoder_core::message::now_ms();
-    let patch = ProjectTodoPatch {
-        title: None,
-        draft: None,
-        plan_md,
-        status: Some(status),
-        agent: None,
-        executor_kind: None,
-        executor_ref: None,
-        executor_spec: None,
-        milestone_id: None,
-        active_session_id: None,
-    };
-    if let Err(e) = deps.projects.patch_todo(todo_id, &patch, now).await {
-        tracing::warn!(todo_id, error = %e, "patch project todo failed");
     }
 }
 
@@ -142,6 +138,7 @@ pub(crate) async fn patch_todo_status(
 /// 打回 Planned，使第三次 execute 能再次 claim（双执行同一会话）；条件
 /// CAS 关死该窗口——已变 Running 则丢弃 todo 回写（方案仍留痕于 run 行
 /// 的 output_md）。
+#[cfg(test)]
 pub(crate) async fn commit_plan_output(deps: &Arc<Deps>, todo_id: &str, output: String) {
     let todo = match deps.projects.get_todo(todo_id).await {
         Ok(Some(todo)) => todo,
@@ -192,6 +189,18 @@ pub(crate) fn latest_new_assistant(messages: &[Message], watermark: usize) -> Op
         .rev()
         .find(|m| m.role == Role::Assistant)
         .map(|m| m.text())
+}
+
+/// Message identities survive compaction; vector lengths do not.
+pub(crate) fn latest_attempt_assistant(
+    messages: &[Message],
+    before: &std::collections::HashSet<String>,
+) -> Option<String> {
+    messages
+        .iter()
+        .rev()
+        .find(|message| message.role == Role::Assistant && !before.contains(&message.id))
+        .map(Message::text)
 }
 
 async fn create_plan_session(
@@ -269,21 +278,37 @@ async fn run_plan(
     .with_store(deps.store.clone())
     .mark_session_created();
     session.cancel = Some(cancel.clone());
-    let watermark = session.messages.len();
+    let watermark = session
+        .messages
+        .iter()
+        .map(|message| message.id.clone())
+        .collect::<std::collections::HashSet<_>>();
     let prompt = context::plan_prompt(cx);
+    let trace = crate::trace::RunTrace::begin(deps, run_id, &mut session, &prompt, cancel.clone())
+        .await
+        .inspect_err(|error| {
+            *deps.persistence_error.lock().unwrap() =
+                Some(format!("project trace initialization: {error:#}"));
+        })?;
+    let _tools = trace.tools();
     let (sink, flusher) =
-        opencoder_session::spawn_event_flusher(Some(deps.store.clone()), session.id.clone());
-    let result = opencoder_session::run(&mut session, prompt, {
-        let sink = sink.clone();
-        move |ev| {
-            let _ = sink.push(&ev);
+        opencoder_session::spawn_checked_event_flusher(deps.store.clone(), session.id.clone());
+    let result = opencoder_session::run(&mut session, prompt, |ev| {
+        trace.record(&ev);
+        if let Err(error) = sink.push(&ev) {
+            trace.archive.fail(error);
         }
     })
     .await;
     drop(sink);
-    if let Err(e) = flusher.await {
-        tracing::warn!(session = %session.id, error = %e, "project plan event flush failed");
+    let flushed = flusher.await.context("project event flusher stopped")?;
+    if let Err(error) = &flushed {
+        trace.archive.fail(error);
     }
+    trace.finish(deps).await.inspect_err(|error| {
+        *deps.persistence_error.lock().unwrap() = Some(format!("project persistence: {error:#}"));
+    })?;
+    let result = result.and(flushed);
     finish_plan_run(deps, run_id, &todo.id, result, &session, watermark, cancel).await;
     Ok(())
 }
@@ -294,10 +319,10 @@ async fn run_plan(
 async fn finish_plan_run(
     deps: &Arc<Deps>,
     run_id: &str,
-    todo_id: &str,
+    _todo_id: &str,
     result: Result<()>,
     session: &opencoder_session::SessionState,
-    watermark: usize,
+    watermark: std::collections::HashSet<String>,
     cancel: &CancellationToken,
 ) {
     match result {
@@ -323,7 +348,7 @@ async fn finish_plan_run(
             )
             .await;
         }
-        Ok(()) => match latest_new_assistant(&session.messages, watermark) {
+        Ok(()) => match latest_attempt_assistant(&session.messages, &watermark) {
             Some(output) => {
                 close_run(
                     deps,
@@ -336,7 +361,7 @@ async fn finish_plan_run(
                 .await;
                 // 方案生成成功：todo 进入 Planned 并保存方案正文（条件 CAS，
                 // todo 被 execute 抢先 claim 时丢弃回写）。
-                commit_plan_output(deps, todo_id, output.clone()).await;
+                // Todo and run were committed together by close_run.
             }
             None if cancel.is_cancelled() => {
                 close_run(
@@ -384,6 +409,9 @@ mod tests {
             client_override: None,
             brain: None,
             spawns: Mutex::new(HashMap::new()),
+            archive_root: Mutex::new(dir.path().join("runs")),
+            admission: tokio::sync::Mutex::new(()),
+            persistence_error: Mutex::new(None),
         });
         (dir, deps, store)
     }
@@ -442,5 +470,23 @@ mod tests {
         let (_dir, deps, _p) = test_deps().await;
         // 行缺失（被并发删除）：只告警不 panic。
         commit_plan_output(&deps, "missing", "# 新方案".into()).await;
+    }
+    #[test]
+    fn output_identity_survives_compaction_of_prior_messages() {
+        let before = ["old-a".to_string(), "old-b".to_string()]
+            .into_iter()
+            .collect();
+        let mut assistant = Message::assistant("new-output");
+        assistant
+            .blocks
+            .push(opencoder_core::ContentBlock::text("retained output"));
+        assert_eq!(
+            latest_attempt_assistant(&[assistant], &before).as_deref(),
+            Some("retained output")
+        );
+        assert_eq!(
+            latest_attempt_assistant(&[Message::assistant("old-a")], &before),
+            None
+        );
     }
 }

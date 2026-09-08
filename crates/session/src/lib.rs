@@ -29,7 +29,7 @@ pub use control_cmd::{
     is_clear_context_seed, parse as parse_control_cmd, seed_message, split_control_prefix,
     ControlCmd,
 };
-pub use event_sink::{run_flusher, spawn_event_flusher, EventSink};
+pub use event_sink::{run_flusher, spawn_checked_event_flusher, spawn_event_flusher, EventSink};
 pub use resume::{generate_title, resume, resume_and_replay};
 pub use runner::{run, run_once, run_with_images, SessionEvent};
 // Sidecar (TUI `/sidecar`): temporary Q&A loop over a context snapshot.

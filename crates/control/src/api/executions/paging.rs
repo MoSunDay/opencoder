@@ -171,3 +171,19 @@ pub async fn team_turns(
         .await,
     )
 }
+
+#[derive(Deserialize)]
+pub struct EventsPageQuery {
+    #[serde(default)]
+    pub after: i64,
+}
+pub async fn events_page(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Query(query): Query<EventsPageQuery>,
+) -> Response {
+    if query.after < 0 {
+        return error_400("invalid event cursor".into());
+    }
+    response(super::events_id(&state, &id, query.after).await)
+}

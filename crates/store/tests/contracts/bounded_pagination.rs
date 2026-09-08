@@ -323,6 +323,8 @@ async fn todo_items_and_project_runs_use_bounded_keyset_pages() {
     for version in 1..=25 {
         store
             .create_todo_run(&ProjectTodoRunRecord {
+                input_snapshot: None,
+                trace_manifest: None,
                 id: format!("run-{version}"),
                 todo_id: "project-item".into(),
                 kind: ProjectTodoRunKind::Execute,

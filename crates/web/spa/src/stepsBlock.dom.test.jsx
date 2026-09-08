@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // StepsBlock DOM drill-down: Turn → Step → Function call. Zero clicks render
 // the collapsed `2 Steps` (or, once the turn has its own Say, the
-// `Say(2 steps): {preview}` header) summary plus Say in ONE assistant
+// `2 Steps: {preview}` header) summary plus Say in ONE assistant
 // bubble. Opening
 // the Turn reveals Steps; opening a Step reveals Thinking + N Function calls;
 // opening that aggregate reveals call rows, and a call reveals its result.
@@ -179,8 +179,8 @@ describe('StepsContent three-level drill-down', () => {
     running.progressActive = true;
     mount([running, { kind: 'text', role: 'assistant', text: 'Say started' }]);
     expect(screen.queryByText('running')).toBeNull();
-    expect(screen.getByText('Say(2 steps)')).toBeTruthy();
-    expect(screen.queryByText('2 Steps')).toBeNull();
+    expect(screen.getByText('2 Steps')).toBeTruthy();
+    expect(screen.queryByText(/Say\(/)).toBeNull();
   });
 
   it('keeps the running tag ON the Say row while sayActive (12px gap)', () => {
@@ -192,7 +192,7 @@ describe('StepsContent three-level drill-down', () => {
     const tag = screen.getByText('running');
     expect(tag).toBeTruthy();
     expect(tag.style.marginLeft).toBe('12px');
-    expect(screen.getByText('Say(2 steps): partial answer line one')).toBeTruthy();
+    expect(screen.getByText('2 Steps: partial answer line one')).toBeTruthy();
     expect(screen.queryByText('error')).toBeNull();
   });
 
@@ -200,7 +200,7 @@ describe('StepsContent three-level drill-down', () => {
     const errored = stepsTurn();
     errored.steps[0].calls[0].isError = true;
     mount([errored, { kind: 'text', role: 'assistant', text: 'finished with a failure' }]);
-    expect(screen.getByText('Say(2 steps)')).toBeTruthy();
+    expect(screen.getByText('2 Steps')).toBeTruthy();
     expect(screen.getByText('error')).toBeTruthy();
     expect(screen.queryByText('running')).toBeNull();
   });
@@ -288,7 +288,7 @@ describe('StepsContent three-level drill-down', () => {
     ]);
     expect(container.querySelectorAll('.ant-bubble')).toHaveLength(1);
     // The completed Say keeps its full Markdown body below the step header.
-    const group = screen.getByText('Say(2 steps)');
+    const group = screen.getByText('2 Steps');
     const say = container.querySelector('.md-body');
     expect(say.textContent).toContain('and the details follow');
     expect(group.compareDocumentPosition(say) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -299,7 +299,7 @@ describe('completed Say Markdown and streaming preview', () => {
   it('replaces the raw streaming preview with one semantic Markdown document on completion', () => {
     const say = { kind: 'text', role: 'assistant', text: '# Stream result\n\n**finished**' };
     const mounted = mount([{ ...stepsTurn(), sayStreaming: true }, say]);
-    expect(screen.getByText(/Say\(2 steps\): # Stream result/)).toBeTruthy();
+    expect(screen.getByText('2 Steps: # Stream result')).toBeTruthy();
     expect(screen.queryByRole('heading', { name: 'Stream result' })).toBeNull();
     mounted.rerender(<TranscriptView turns={[stepsTurn(), say]} status="done" />);
     expect(screen.getByRole('heading', { name: 'Stream result' })).toBeTruthy();
@@ -313,7 +313,7 @@ describe('completed Say Markdown and streaming preview', () => {
       stepsTurn(),
       { kind: 'text', role: 'assistant', text: '# Result\n\n**Done**\n\n- first\n- second\n\n```js\nconst ok = true;\n```\n\n| key | value |\n| --- | --- |\n| status | good |\n\n[Open](https://example.com)' },
     ]);
-    expect(screen.getByText('Say(2 steps)')).toBeTruthy();
+    expect(screen.getByText('2 Steps')).toBeTruthy();
     expect(screen.getByRole('heading', { name: 'Result', level: 1 })).toBeTruthy();
     expect(screen.getAllByText('Result')).toHaveLength(1);
     expect(screen.getByText('Done').tagName).toBe('STRONG');
@@ -326,7 +326,7 @@ describe('completed Say Markdown and streaming preview', () => {
 
   it('renders a completed one-line Say as Markdown without duplicating its text in the header', () => {
     const { container } = mount([stepsTurn(), { kind: 'text', role: 'assistant', text: '**all done here**' }]);
-    expect(screen.getByText('Say(2 steps)')).toBeTruthy();
+    expect(screen.getByText('2 Steps')).toBeTruthy();
     expect(screen.getByText('all done here').tagName).toBe('STRONG');
     expect(container.textContent.split('all done here')).toHaveLength(2);
   });

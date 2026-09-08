@@ -1,3 +1,4 @@
+import { submitAttempt } from './replay/attempt.js';
 // todosTab.jsx — 项目 tab 4「TODO」: flattened table over overview (milestone
 // todos + backlog), row ops 生成Plan / 执行 / 详情 / 删除, and a 新建 TODO modal
 // (title + milestone Select allowClear + agent + draft). Plan/Execute POSTs
@@ -172,7 +173,7 @@ export function TodosTab({ overview, refresh, openTodo, onNotice }) {
 
   const genPlan = async (t) => {
     try {
-      await apiPost(todoPath(t.id) + '/plan');
+      await submitAttempt(t.id, 'plan');
       onNotice(info(`已开始为「${t.title}」生成 Plan`));
       refresh();
       openTodo(t.id);
@@ -183,7 +184,7 @@ export function TodosTab({ overview, refresh, openTodo, onNotice }) {
 
   const execute = async (t) => {
     try {
-      await apiPost(todoPath(t.id) + '/execute');
+      await submitAttempt(t.id, 'execute');
       onNotice(info(`「${t.title}」已开始执行`));
       refresh();
       openTodo(t.id);

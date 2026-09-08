@@ -50,6 +50,7 @@ pub const CAPACITY: usize = 4096;
 pub struct EventSink {
     tx: mpsc::Sender<SessionEventRecord>,
     session_id: String,
+    strict: bool,
 }
 
 impl EventSink {
@@ -93,7 +94,7 @@ impl EventSink {
                 // append, and TurnDone reconstruction calls finalize_assistant
                 // which re-renders from raw text. Dropping a few token
                 // fragments only causes a momentary display gap.
-                if rec.kind == EventKind::TextDelta {
+                if rec.kind == EventKind::TextDelta && !self.strict {
                     // Silently drop — deltas are redundant
                     Ok(())
                 } else {
@@ -124,8 +125,37 @@ pub fn spawn_event_flusher(
     let sink = EventSink {
         tx,
         session_id: session_id.clone(),
+        strict: false,
     };
     let handle = tokio::spawn(run_flusher(store, rx));
+    (sink, handle)
+}
+
+/// Project runs require a positive persistence acknowledgement before success.
+/// A full channel is an error for every event, including text deltas.
+pub fn spawn_checked_event_flusher(
+    store: Arc<dyn Store>,
+    session_id: String,
+) -> (EventSink, JoinHandle<anyhow::Result<()>>) {
+    let (tx, mut rx) = mpsc::channel::<SessionEventRecord>(CAPACITY);
+    let sink = EventSink {
+        tx,
+        session_id,
+        strict: true,
+    };
+    let handle = tokio::spawn(async move {
+        while let Some(first) = rx.recv().await {
+            let mut batch = vec![first];
+            while batch.len() < DELTA_BATCH {
+                match rx.try_recv() {
+                    Ok(next) => batch.push(next),
+                    Err(_) => break,
+                }
+            }
+            store.append_events(&batch).await?;
+        }
+        Ok(())
+    });
     (sink, handle)
 }
 
@@ -456,5 +486,31 @@ mod tests {
 
         drop(sink);
         let _ = flusher.await;
+    }
+    #[tokio::test]
+    async fn checked_flusher_reports_delta_backpressure_and_database_failure() {
+        let (_dir, store) = fresh().await;
+        make_session(&store, "strict").await;
+        let (sink, flusher) = spawn_checked_event_flusher(store.clone(), "strict".into());
+        for _ in 0..CAPACITY {
+            sink.push(&SessionEvent::TextDelta("kept".into())).unwrap();
+        }
+        assert!(matches!(
+            sink.push(&SessionEvent::TextDelta("overflow".into())),
+            Err(mpsc::error::TrySendError::Full(_))
+        ));
+        drop(sink);
+        flusher.await.unwrap().unwrap();
+        assert_eq!(
+            store.events_after("strict", 0).await.unwrap().len(),
+            CAPACITY
+        );
+        store.conn().await.unwrap().execute("CREATE TRIGGER fail_trace BEFORE INSERT ON session_events BEGIN SELECT RAISE(FAIL, 'injected trace failure'); END", ()).await.unwrap();
+        let (sink, flusher) = spawn_checked_event_flusher(store.clone(), "strict".into());
+        sink.push(&SessionEvent::Done).unwrap();
+        drop(sink);
+        assert!(
+            format!("{:#}", flusher.await.unwrap().unwrap_err()).contains("injected trace failure")
+        );
     }
 }

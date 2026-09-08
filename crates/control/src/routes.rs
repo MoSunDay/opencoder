@@ -28,6 +28,7 @@ pub fn build_app(state: Arc<AppState>, token: Option<String>, web: bool) -> Rout
         .route("/api/executions/:id", get(executions::inspect))
         .route("/api/executions/:id/commands", post(executions::command))
         .route("/api/executions/:id/events", get(stream::events))
+        .route("/api/executions/:id/events-page", get(executions::events_page))
         .route(
             "/api/executions/:id/events/:seq/payload",
             get(executions::event_payload),
@@ -89,7 +90,12 @@ pub fn build_app(state: Arc<AppState>, token: Option<String>, web: bool) -> Rout
             .route("/", get(html::index))
             .route("/static/:name", get(html::static_asset));
     }
-    let mut app = app.with_state(state);
+    let mut app = app
+        .with_state(state.clone())
+        .layer(axum::middleware::from_fn_with_state(
+            state,
+            crate::resource_scope::configured_agents,
+        ));
     if let Some(token) = token {
         app = app.layer(axum::middleware::from_fn_with_state(
             Some(Arc::new(auth_mw::AuthState::new(token))),

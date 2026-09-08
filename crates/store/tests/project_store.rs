@@ -88,6 +88,8 @@ async fn run(store: &dyn ProjectStore, id: &str, todo_id: &str, created_at: i64)
     let version = store.next_todo_version(todo_id).await.unwrap();
     store
         .create_todo_run(&ProjectTodoRunRecord {
+            input_snapshot: None,
+            trace_manifest: None,
             id: id.to_string(),
             todo_id: todo_id.to_string(),
             kind: ProjectTodoRunKind::Plan,
@@ -581,7 +583,7 @@ async fn reopen_is_idempotent_and_serves_v15() {
         .unwrap();
     let mut rows = stmt.query(()).await.unwrap();
     let v: i64 = rows.next().await.unwrap().unwrap().get(0).unwrap();
-    assert_eq!(v, 20, "schema_version must be latest (20) after reopen");
+    assert_eq!(v, 21, "schema_version must be latest (21) after reopen");
 
     let iface: Arc<dyn ProjectStore> = Arc::new(store);
     iface.create_goal(&goal("g1", 0, 1)).await.unwrap();
@@ -671,6 +673,8 @@ async fn executor_dimension_round_trips() {
 
     // Run side: dag run with brain provenance and an artifact root.
     let mut dag_run = ProjectTodoRunRecord {
+        input_snapshot: None,
+        trace_manifest: None,
         id: "run-dag".to_string(),
         todo_id: "t-team".to_string(),
         kind: ProjectTodoRunKind::Execute,

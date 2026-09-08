@@ -30,6 +30,9 @@ export function overviewBusy(overview) {
 ///   into this one snapshot without flickering the spinner.
 export function useOverview({ onNotice } = {}) {
   const [overview, setOverview] = useState(null);
+  const [error, setError] = useState('');
+  const [updated, setUpdated] = useState(null);
+  const serial = useRef(0);
   const [loading, setLoading] = useState(false);
   const timer = useRef(null);
   const alive = useRef(true);
@@ -44,15 +47,20 @@ export function useOverview({ onNotice } = {}) {
   }, [onNotice]);
 
   const load = useCallback(async (silent) => {
+    const request = ++serial.current;
     if (!silent) {
       setLoading(true);
     }
     try {
       const j = await apiGet('/api/project/overview');
-      if (alive.current) {
+      if (alive.current && request === serial.current) {
         setOverview(j || { goals: [], backlog: [] });
+        const failures = flattenTodos(j).filter((todo) => todo.detail_error);
+        setError(failures.map((todo) => `${todo.title}: ${todo.detail_error?.error || JSON.stringify(todo.detail_error)}`).join("；"));
+        setUpdated(Date.now());
       }
     } catch (e) {
+      if (alive.current && request === serial.current) setError(`获取项目总览失败: ${e.message}`);
       if (!silent && alive.current) {
         const notify = noticeRef.current;
         if (notify) {
@@ -82,5 +90,5 @@ export function useOverview({ onNotice } = {}) {
   }, [busy, load]);
 
   const refresh = useCallback(() => load(true), [load]);
-  return { overview, loading, busy, refresh };
+  return { overview, loading, busy, refresh, error, updated };
 }

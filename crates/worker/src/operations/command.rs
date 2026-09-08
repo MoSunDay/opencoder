@@ -78,6 +78,19 @@ pub(super) async fn command(
             };
         }
     }
+    if command.action == "project-receipt" && execution.kind == ExecutionKind::Project {
+        let todo = execution.id.strip_prefix("project-").unwrap_or("");
+        let action = command.input["action"].as_str().unwrap_or("");
+        return Ok(
+            match super::project_admission::existing(worker, todo, action, &command.input["input"])
+                .await
+            {
+                Ok(Some(run)) => super::project_admission::receipt(worker, id, &run),
+                Ok(None) => RpcReply::error(404, "project run not accepted"),
+                Err(error) => RpcReply::error(409, error.to_string()),
+            },
+        );
+    }
     match command.action.as_str() {
         "summary" => match worker.inner.state.store.get_session(id).await? {
             Some(meta) => Ok(RpcReply::ok(json!(meta))),

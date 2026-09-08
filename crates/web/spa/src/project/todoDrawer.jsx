@@ -5,12 +5,13 @@
 // and poll every 3s while any run is still running.
 
 import { Alert, Button, Collapse, Drawer, Input, Popconfirm, Space, Spin, Timeline, Typography } from 'antd';
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { apiDel, apiGet, apiPatch, apiPost } from '../api.js';
-import { setState } from '../store.js';
+import { useEffect, useState } from 'react';
+import { apiDel, apiPatch, apiPost } from '../api.js';
+import { submitAttempt } from './replay/attempt.js';
+import { useRuns } from './replay/useRuns.js';
+import { RunText } from './replay/run.jsx';
 import { absTime } from '../format.js';
 import { RunStatusTag, TodoStatusTag, ExecutorTag, runKindLabel } from './labels.jsx';
-import { Markdown } from './markdown.jsx';
 import { flattenTodos } from './todosTab.jsx';
 import { ExecutionDetail } from '../fleet/detail.jsx';
 import { err, info, ok, warn } from '../notice.js';
@@ -18,10 +19,9 @@ import { err, info, ok, warn } from '../notice.js';
 const { TextArea } = Input;
 const { Text, Paragraph } = Typography;
 
-const RUN_POLL_MS = 3000;
 const todoPath = (id) => '/api/project/todos/' + encodeURIComponent(id);
 
-function RunItem({ run, executionId, onNotice, refreshRuns }) {
+function RunItem({ run, executionId, onNotice, refreshRuns, openExecution }) {
   const [cancelling, setCancelling] = useState(false);
   const cancel = async () => {
     setCancelling(true);
@@ -35,16 +35,12 @@ function RunItem({ run, executionId, onNotice, refreshRuns }) {
       setCancelling(false);
     }
   };
-  const openSession = () => {
-    setState({ page: 'chat' });
-    onNotice(info(`会话 ${run.session_id} 可在「会话交互」中打开`));
-  };
   const snaps = [];
   if (run.plan_md) {
-    snaps.push({ key: 'plan', label: '计划快照', children: <Markdown text={run.plan_md} /> });
+    snaps.push({ key: 'plan', label: '计划快照', children: <RunText id={run.id} value={run.plan_md} /> });
   }
   if (run.output_md) {
-    snaps.push({ key: 'out', label: '执行输出', children: <Markdown text={run.output_md} /> });
+    snaps.push({ key: 'out', label: '执行输出', children: <RunText id={run.id} value={run.output_md} /> });
   }
   return (
     <div className="proj-run-card">
@@ -55,6 +51,7 @@ function RunItem({ run, executionId, onNotice, refreshRuns }) {
       </Paragraph>
       {snaps.length ? <Collapse size="small" items={snaps} /> : <Text type="secondary">无快照输出</Text>}
       <Space size={4} wrap style={{ marginTop: 8 }}>
+        <Button size="small" onClick={() => openExecution(run.id)}>查看本次输入与过程</Button>
         <ExecutorTag kind={run.executor_kind} />
         {run.capability_id ? (
           <Text type="secondary" style={{ fontSize: 12 }}>
@@ -76,7 +73,7 @@ function RunItem({ run, executionId, onNotice, refreshRuns }) {
             <Text copyable={{ text: run.session_id }} style={{ fontFamily: 'monospace' }}>
               {String(run.session_id).slice(0, 12)}…
             </Text>
-            <Button type="link" size="small" onClick={openSession}>查看会话</Button>
+            <Button type="link" size="small" onClick={() => openExecution(run.session_id)}>查看会话</Button>
           </>
         ) : <Text type="secondary">—</Text>}
         {run.status === 'running' ? (
@@ -88,64 +85,26 @@ function RunItem({ run, executionId, onNotice, refreshRuns }) {
 }
 
 export function TodoDrawer({ todoId, overview, refresh, onClose, onNotice }) {
-  const [runs, setRuns] = useState([]);
+  const [agent, setAgent] = useState(null);
   const [draft, setDraft] = useState(null); // local edit buffer, null = unchanged
   const [acting, setActing] = useState(false);
-  const [executionOpen, setExecutionOpen] = useState(false);
-  const timer = useRef(null);
-  const alive = useRef(true);
-
+  const [executionOpen, setExecutionOpen] = useState(null);
   const todo = flattenTodos(overview).find((t) => t.id === todoId) || null;
-  const anyRunning = runs.some((r) => r.status === 'running')
-    || ['pending', 'running', 'cancelling'].includes(todo?.execution?.status);
+  const running = ['pending', 'running', 'cancelling'].includes(todo?.execution?.status);
+  const history = useRuns(todoId, running);
+  const { runs } = history;
+  const loadRuns = history.refresh;
+  const anyRunning = running || runs.some((r) => r.status === 'running');
   const executionClosed = ['cancelled', 'done'].includes(todo?.execution?.status);
-
-  // Stable loadRuns: the onNotice prop identity must not re-arm the runs
-  // effect (same inline-arrow guard as ProjectPanel.load).
-  const noticeRef = useRef(onNotice);
-  useEffect(() => {
-    noticeRef.current = onNotice;
-  }, [onNotice]);
-
-  const loadRuns = useCallback(async (silent) => {
-    if (!todoId) {
-      return;
-    }
+  useEffect(() => { setAgent(null); setExecutionOpen(null); }, [todoId]);
+  const saveAgent = async () => {
+    setActing(true);
     try {
-      const j = await apiGet(todoPath(todoId) + '/runs');
-      if (alive.current) {
-        setRuns((j && j.runs) || []);
-      }
-    } catch (e) {
-      if (!silent && alive.current) {
-        const notify = noticeRef.current;
-        if (notify) {
-          notify('获取执行记录失败: ' + (e && e.message));
-        }
-      }
-    }
-  }, [todoId]);
-
-  // Reset local state when the drawer switches to another todo.
-  useEffect(() => {
-    setRuns([]);
-    setDraft(null);
-  }, [todoId]);
-
-  // Load on open; re-poll every 3s ONLY while a run is in flight (the
-  // interval re-arms when anyRunning flips, mirroring the nodes tab).
-  useEffect(() => {
-    alive.current = true;
-    loadRuns(false);
-    if (!anyRunning) {
-      return undefined;
-    }
-    timer.current = setInterval(() => loadRuns(true), RUN_POLL_MS);
-    return () => {
-      alive.current = false;
-      clearInterval(timer.current);
-    };
-  }, [todoId, anyRunning, loadRuns]);
+      await apiPatch(todoPath(todoId), { agent: agent.trim() });
+      setAgent(null); await refresh(); onNotice(ok('执行 Agent 已更新，下次执行使用当前版本'));
+    } catch (e) { onNotice(err(e.message)); }
+    finally { setActing(false); }
+  };
 
   // Draft buffer follows the record until the user edits it.
   useEffect(() => {
@@ -175,7 +134,7 @@ export function TodoDrawer({ todoId, overview, refresh, onClose, onNotice }) {
     }
     setActing(true);
     try {
-      await apiPost(todoPath(todo.id) + '/plan');
+      await submitAttempt(todo.id, 'plan');
       onNotice(info('已开始重新生成 Plan'));
       await Promise.all([loadRuns(true), refresh()]);
     } catch (e) {
@@ -211,7 +170,7 @@ export function TodoDrawer({ todoId, overview, refresh, onClose, onNotice }) {
         <RunStatusTag status={r.status} />
       </Space>
     ),
-    content: <RunItem run={r} executionId={`project-${todoId}`} onNotice={onNotice} refreshRuns={() => loadRuns(true)} />,
+    content: <RunItem run={r} executionId={`project-${todoId}`} onNotice={onNotice} refreshRuns={loadRuns} openExecution={setExecutionOpen} />,
   }));
 
   return (
@@ -232,7 +191,11 @@ export function TodoDrawer({ todoId, overview, refresh, onClose, onNotice }) {
               <Text type="secondary">里程碑：{milestoneLabel}</Text>
               <Text type="secondary">agent：{todo.agent || 'act'}</Text>
             </Space>
-            {todo.execution ? <Button size="small" style={{ marginTop: 8 }} onClick={() => setExecutionOpen(true)}>查看节点执行详情</Button> : null}
+            {todo.executor_kind === 'agent' && <Space style={{ marginTop: 8 }}>
+              <Input aria-label="执行 Agent" value={agent ?? todo.agent ?? 'act'} disabled={anyRunning} onChange={(e) => setAgent(e.target.value)} />
+              <Button disabled={anyRunning || !agent?.trim() || agent === todo.agent} loading={acting} onClick={saveAgent}>保存 Agent</Button>
+            </Space>}
+            {todo.execution ? <Button size="small" style={{ marginTop: 8 }} onClick={() => setExecutionOpen(`project-${todoId}`)}>查看节点执行详情</Button> : null}
             {executionClosed ? <Alert type="warning" showIcon style={{ marginTop: 8 }} title="该节点执行已终止，不能再次生成或执行计划" /> : null}
           </div>
           <div>
@@ -257,7 +220,7 @@ export function TodoDrawer({ todoId, overview, refresh, onClose, onNotice }) {
           </div>
           <div>
             <Paragraph style={{ marginBottom: 4 }}><Text type="secondary">执行计划（plan_md）</Text></Paragraph>
-            <Markdown text={todo.plan_md} />
+            <RunText id={`project-${todoId}`} value={todo.plan_md} />
             <Button
               size="small"
               style={{ marginTop: 8 }}
@@ -272,9 +235,12 @@ export function TodoDrawer({ todoId, overview, refresh, onClose, onNotice }) {
             <Paragraph style={{ marginBottom: 8 }}>
               <Text type="secondary">执行记录（新版本在前）</Text>
             </Paragraph>
+            {history.error && <Alert type="error" showIcon title={history.error} />}
+            {history.updated && <Text type="secondary">最近成功读取：{absTime(history.updated)}</Text>}
             {timelineItems.length
               ? <Timeline mode="start" items={timelineItems} />
               : <Text type="secondary">还没有 Plan / 执行记录</Text>}
+            {history.more && <Button loading={history.busy} onClick={history.next}>加载更早记录</Button>}
           </div>
           <div>
             <Popconfirm
@@ -292,7 +258,7 @@ export function TodoDrawer({ todoId, overview, refresh, onClose, onNotice }) {
       ) : (
         <Text type="secondary">未找到该 TODO（可能已被删除）</Text>
       )}
-      {executionOpen && <ExecutionDetail id={`project-${todoId}`} summary={todo?.execution} onClose={() => setExecutionOpen(false)} onNotice={onNotice} />}
+      {executionOpen && <ExecutionDetail id={executionOpen} summary={executionOpen === `project-${todoId}` ? todo?.execution : null} onClose={() => setExecutionOpen(null)} onNotice={onNotice} />}
     </Drawer>
   );
 }

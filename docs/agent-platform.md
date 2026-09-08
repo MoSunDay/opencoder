@@ -105,7 +105,7 @@ Python 默认保留 `sandbox: in_process` 配置值，实际使用 `opencoder-ag
 
 ## 发布与回滚
 
-1. 在干净提交上运行 `scripts/platform/release/build.sh --output <新目录>`。脚本先验证 SPA 无漂移，再一次构建 `opencoder`、`opencoder-server`、`opencoder-agent`；三者的 `--build-info` 必须具有相同 commit、protocol 和 SPA digest，`manifest.json` 与 `SHA256SUMS` 绑定全部二进制。真实 dirty 工作树会被拒绝。
+1. 在干净提交上运行 `scripts/platform/release/build.sh --output <新目录>`。脚本先验证 SPA 无漂移，再一次构建 `opencoder`、`opencoder-cli`、`opencoder-server`、`opencoder-agent`；四者的 `--build-info` 必须具有相同 commit、protocol 和 SPA digest，`manifest.json` 与 `SHA256SUMS` 绑定全部二进制。真实 dirty 工作树会被拒绝。
 2. 调用 `POST /api/admin/drain` 先持久冻结 Server 与当前在线 Node。最多观察 10 分钟让长任务自然完成；仍未完成的任务逐条显式 interrupt，并等待 `GET /api/admin/drain` 返回 `control_drained=true`。取消后的执行不能恢复；interrupt 后只能在原 Node 显式恢复。30 秒只用于 interrupt/进程树清理，不能用作长任务的自然 drain 时限。
 3. 正常停止 Agent，再停止 Server。Agent 的本地 Frozen 状态跨重启保留；Server 也以 Frozen 重启。使用 `scripts/platform/backup.sh --server-data /var/lib/opencoder-server --node worker-a=/data00 --output <新备份目录>` 制作新备份；工具要求 Node 已停止、持有独占锁、所有执行收敛并对 SQLite 做一致性备份，不覆盖任何原目录。跨主机发布必须先按目标 inventory 在各主机停服并把这些本地目录提供给受控备份步骤，不能把本机演练当成跨机备份证据。
 4. 使用 `scripts/install.sh --bundle <bundle> --dest-dir /usr/local/bin --backup` 原子安装同一代三二进制。先启动 Server，再启动 Agent；检查 manifest/build-info、目标 Node 清单、节点 ID、版本、资源挂载和 Ready。所有发布目标都到齐后调用 `DELETE /api/admin/drain`，它只复开当前在线且健康的节点；离线节点会明确列为未处理，不会伪装完成。

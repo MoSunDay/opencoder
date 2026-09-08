@@ -88,6 +88,8 @@ jobs:
           set -e
           if [ "$result" -ne 0 ]; then
             {
+              failure=$(tail -n 45 "$RUNNER_TEMP/mysql-tests.log" | sed 's/%/%25/g; s/\r/%0D/g' | awk '{printf "%s%%0A", $0}')
+              printf '::error title=MySQL contract failure::%s\n' "$failure" >&2
               echo '### MySQL contract failure'
               echo '```text'
               tail -n 200 "$RUNNER_TEMP/mysql-tests.log"

@@ -53,3 +53,11 @@ Rust 回归使用独立 loopback 网络命名空间、系统盘 `TMPDIR=/var/tmp
 上线使用同一包同步升级 Server/Node，执行节点 PATH 指向能输出 exec JSONL 的前台 Codex 入口。本机前台入口为 `/usr/local/libexec/codext.real`，隔离前缀为 `/var/tmp/opencoder-wrap-delivery.94_bwc03/codex-bin`。升级前停写并备份数据；回滚成套二进制，旧程序不能继续新的 Codex 会话。具体产物、安装/回滚与数据验证见交付目录中的记录。
 
 使用说明见 [Agent Harness](../../harness/index.md)。
+
+## 与远端控制 CLI 合并
+
+保留远端 `c853064e` 的 `opencoder-cli` 控制面客户端和 `crates/cli → crates/local` 更名，以及 `36d2a048` 的 Server 日志模块清理。wrap 参数、headless 入口和 tmux 转交随本地前端迁入 `local`。发布包现在同时包含 `opencoder`、`opencoder-cli`、`opencoder-server`、`opencoder-agent`；四者使用相同完整 build-info，旧三件套可成套升级、回滚。
+
+新增验证：`crates/ctl/tests/build_info.rs::build_info_matches_platform_without_server_credentials`；`crates/ctl/tests/server_local.rs::agents_card_lifecycle_and_active_pointer` 同时校验内置与自定义 Agent、Codex 设置及保留资源引用；`scripts/platform/test_install_bundle.py::test_upgrade_adds_control_cli_and_rollback_restores_legacy_set` 校验控制 CLI 新增与旧版回滚。
+
+实际发布回归使用独占 Cargo target，预先构建配套二进制；临时 Node 数据放在容量充足的 `/var/tmp`。共享 target 曾混入其他提交，默认 `/tmp` 所在盘低于既有 20% 可用容量阈值，两者均不能作为本次有效测试环境；没有降低容量保护。

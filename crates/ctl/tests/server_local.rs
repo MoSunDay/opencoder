@@ -304,7 +304,25 @@ async fn agents_card_lifecycle_and_active_pointer() {
     assert_ok(&s, &["agents", "list"]).await;
     let listed = api_get(&s, "/api/agents").await;
     assert_eq!(listed["active"], "alpha", "{listed}");
-    assert_eq!(listed["agents"].as_array().unwrap().len(), 1, "{listed}");
+    let agents = listed["agents"].as_array().unwrap();
+    let builtins = opencoder_core::builtin_agents();
+    assert_eq!(agents.len(), builtins.len() + 1, "{listed}");
+    for builtin in builtins {
+        let row = agents.iter().find(|row| row["name"] == builtin.name).unwrap();
+        assert_eq!(row["builtin"], true);
+        assert_eq!(row["harness"], "opencoder");
+    }
+    let custom = agents.iter().find(|row| row["name"] == "alpha").unwrap();
+    assert_eq!(custom["builtin"], false);
+    assert_eq!(custom["current"]["prompt"], "pack");
+    assert_ok(
+        &s,
+        &["agents", "update", "alpha", "--json", r#"{"harness":"codex"}"#],
+    )
+    .await;
+    let meta = api_get(&s, "/api/agents/alpha/meta").await;
+    assert_eq!(meta["meta"]["harness"], "codex");
+    assert_eq!(meta["meta"]["current"]["prompt"], "pack");
     assert_ok(&s, &["agents", "active", "--json", r#"{"active":null}"#]).await;
     assert_ok(&s, &["agents", "delete", "alpha"]).await;
 }

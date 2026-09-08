@@ -142,6 +142,14 @@ fn ref_fields(refs: &AgentRefs) -> [(&'static str, Option<String>); 4] {
 /// and a freshly scanned `references` snapshot. `AlreadyExists` if a card
 /// is already there; the agents root / agent dir are created as needed.
 pub fn create_agent(name: &str, refs: AgentRefs) -> io::Result<()> {
+    create_agent_with_harness(name, refs, Default::default())
+}
+
+pub fn create_agent_with_harness(
+    name: &str,
+    refs: AgentRefs,
+    harness: opencoder_core::harness::Harness,
+) -> io::Result<()> {
     validate_agent_name(name).map_err(invalid_input)?;
     let dir = agent_dir(name).ok_or_else(|| not_found("cannot resolve ~/.opencoder"))?;
     let card = dir.join("meta.json");
@@ -153,6 +161,7 @@ pub fn create_agent(name: &str, refs: AgentRefs) -> io::Result<()> {
     }
     let now = now_rfc3339();
     let meta = AgentMeta {
+        harness,
         name: name.to_string(),
         created_at: now.clone(),
         updated_at: now,
@@ -171,12 +180,41 @@ pub fn create_agent(name: &str, refs: AgentRefs) -> io::Result<()> {
 /// nothing), `updated_at` bumps, and the `references` snapshot refreshes.
 /// The card must exist (`NotFound` otherwise).
 pub fn update_agent_refs(name: &str, refs: AgentRefs) -> io::Result<()> {
+    update_agent_settings(name, Some(refs), None)
+}
+
+pub fn update_agent_settings(
+    name: &str,
+    refs: Option<AgentRefs>,
+    harness: Option<opencoder_core::harness::Harness>,
+) -> io::Result<()> {
     validate_agent_name(name).map_err(invalid_input)?;
     let dir = agent_dir(name).ok_or_else(|| not_found("cannot resolve ~/.opencoder"))?;
-    let Some(mut meta) = read_agent_meta(name) else {
-        return Err(not_found(format!("unknown agent: {name}")));
+    let builtin = opencoder_core::builtin_agents()
+        .iter()
+        .any(|a| a.name == name);
+    let mut meta = match read_agent_meta(name) {
+        Some(meta) => meta,
+        None if builtin => AgentMeta {
+            name: name.into(),
+            ..Default::default()
+        },
+        None => return Err(not_found(format!("unknown agent: {name}"))),
     };
+    let refs = refs.unwrap_or_else(|| meta.current.clone());
     let now = now_rfc3339();
+    if let Some(harness) = harness {
+        if meta.harness != harness {
+            meta.history.push(AgentHistoryEntry {
+                at: now.clone(),
+                field: "harness".into(),
+                from: Some(meta.harness.as_str().into()),
+                to: Some(harness.as_str().into()),
+            });
+            meta.harness = harness;
+        }
+    }
+    std::fs::create_dir_all(&dir)?;
     let changed = ref_fields(&meta.current)
         .into_iter()
         .zip(ref_fields(&refs))

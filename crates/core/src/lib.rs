@@ -2,6 +2,7 @@ pub mod agent;
 pub mod config;
 pub mod data_dir;
 pub mod error;
+pub mod harness;
 pub mod json;
 pub mod message;
 pub mod net;

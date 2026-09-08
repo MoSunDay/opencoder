@@ -1,6 +1,18 @@
-Commit: (working-tree, 基于 4efaae89bfb89f1ce1c4287cb101ae755c4d526d)
+Commit: (working-tree, 基于 65c9d891ae905e7925277d29a87cd8e7957e8dad)
 
 # session 模块
+
+## Harness 执行接缝
+
+`SessionState.harness` 固定会话的执行器。`harness::initialize` 在首条输入前读取 Agent 默认值或显式选择；有历史消息而无运行态的旧会话保持原生执行。`configured_client` 延迟构造原生模型客户端，Codex 路径不要求原生模型凭据。共享入口先处理控制命令、资源和输入，再由 `run_loop` 选择原生模型循环或 `harness::codex::run_turn`；各编排器创建的 Agent Session 使用同一入口。
+
+`harness/resources.rs` 把引用的 prompt、skills、tools、memory 及开放工具池复制到工作区独立版本快照，保留可执行权限，拒绝符号链接并生成文件索引。快照路径落入私有运行态，resume/fork 复用；原生配置重载创建新快照，Codex 保持启动时资源。运行目录写入 Git 本地 `info/exclude`。纯函数 `instruction_text` 去除生成的文件索引，供原生快照失效处理与 [Project](../project/index.md) 稳定资源身份计算复用。
+
+`harness/codex` 分离协议归约（`decode`、`tools`）、子进程监管（`process`）和回合状态（`turn`）。需求经 stdin 提交给 `codex exec --json`，续聊和分叉分别使用 `exec resume`、`exec fork`。JSONL 转成既有 `Message` / `SessionEvent`，累计文本只发新增 delta，工具 ID 按 turn 隔离，用量补写最终 assistant。消息通过 `record_checked` 落库，提交检查点和 thread 及时保存，异常提交不会被静默重试。
+
+Codex 的 queue/steer/cancel 复用共享输入协议；中断回收进程树并闭合未完成工具。进行中会话不能 fork；已有 thread 不允许切换 Agent、模型或原生压缩，清空上下文后建立新 thread。以下模型工具循环、原生 MCP、autopilot、孤儿任务重放与 small-model 标题流程仅适用于 OpenCoder；Codex 使用自身配置、认证和权限。标题实现位于 `harness/title.rs`，保留 `resume::generate_title` 导出。
+
+能力与错误语义见 [Agent Harness](../../features/harness/index.md)；协议、资源和生命周期契约见 `tests/harness_decode.rs`、`tests/harness_codex.rs`、`tests/harness_lifecycle.rs`。
 
 ## 节点嵌入边界
 
@@ -18,7 +30,7 @@ agent 运行时核心。驱动「接收输入 → 调 LLM → 执行工具 → �
 
 ## 关键抽象
 - `SessionState`（`src/lib.rs`）：`id/messages/agent/model/config/client(Arc<dyn ChatStream>)/store(Option<Arc<dyn Store>>)/cancel(Option<CancellationToken>)/skill_prompt(Arc<Mutex<Option<String>>>)` + 私有一次性交付台账 `skill_body_delivered`（`set_skill` 每写必复位、resume 初始 false） + `working_dir/last_usage/persisted_count/session_created/ts_origin`（后者私有 bool，默认 false，经 `.ts_origin()` builder 置位——TUI bootstrap 对 tmux 启动的会话设此 flag，使首条 `persist()` 写 `model: None`/`agent: None` 作为 ts 归属标记）。`cancel` 由调用方挂载（`with_cancel`）：web 经 `POST /interrupt`、tui 经双击 Esc 触发；同一 token 在**四处出口**生效：run_loop 循环头 / mid-tool select! / **LLM 流式中**（`run_one_llm_call` 的分块轮询处）/ steer 批应用 Cancelled 路径（`runner/steer.rs`）。**中断契约**：每处出口统一补发 `Status("interrupted")` + 终帧 `Done`——`Done` 的语义是"关 SSE 流的终帧"而非"正常完成"标记，任何出口缺帧都会让订阅方永远等不到收束（回归：`tests/interrupt_emits_done.rs`；硬取消中途不落库空 assistant 的 D2 契约：`tests/hard_cancel_midstream.rs`）。`skill_prompt` 是共享可变状态：TUI 经 `Arc` 克隆直接写入（`set_skill`/`with_skill`），`run_one_llm_call` 每 turn 经 `skill_prompt_cloned()` 读取最新值，经 `skill_context.rs` 合成的尾部瞬时 user 消息注入（`build_system` 与 skill 无关，见上）。此设计修复了 session 运行中激活 skill 不生效的 bug（旧设计经 cmd channel 发送 `SetSkill`，worker 阻塞在 `run_loop` 内无法及时处理）。
-- `record(&mut self, msg)`（`src/lib.rs`）：push 到内存 + 若有 store 则持久化（best-effort，失败仅 warn）。runner 所有 message 入口都走它。内部 `persist()` 首次落库建 session 行：`ts_origin == true` 时写 `model: None`/`agent: None`（durable ts 归属标记），否则写 config 的 model/agent——故 ts 会话行由首条 `record()` 惰性创建，`ts_start` 不再预置 DB 行。
+- `record(&mut self, msg)`（`src/lib.rs`）：push 到内存 + 若有 store 则持久化（best-effort，失败仅 warn）。原生 runner 的常规消息入口使用它；Codex 消息和输入使用返回持久化错误的 `record_checked`。内部 `persist()` 首次落库建 session 行：`ts_origin == true` 时写 `model: None`/`agent: None`（durable ts 归属标记），否则写 config 的 model/agent——故 ts 会话行由首条 `record()` 惰性创建，`ts_start` 不再预置 DB 行。
 - `SessionEvent`（`runner/event.rs`，21 个细粒度 kind）：SSE/持久化的**单一真相源**三方法——`sse_kind()`（如 `llm_round_start`/`llm_round_end`/`text_delta`/`subagent_child`）、`sse_data()`（与 SSE 线格式一致的 JSON payload）、`coarse_kind()`（12 变体 `EventKind`，仅作 DB `type` 列与回退）。每次 provider/model 调用前发 `LlmRoundStart{started_at_ms}`；无工具轮在 assistant 完成后发 `LlmRoundEnd`，工具轮在该消息请求的整批工具全部完成后发 end，错误/取消路径同样闭合。两事件只描述运行生命周期，不写入 `Message` 或模型 context。web 与 TUI 都走同一事件映射，使 live 广播与 replay 的 kind/payload 一致；store 的 `sse_kind` 列保住细粒度（旧记录 `None` 时回退 coarse）。
 - **plan/sidecar 只读契约**（`prompt.rs`、`bash_guard.rs`、`runner/execute.rs`、`runner/subagent.rs`）：Environment 仅对 plan 注入 `MODE: plan (read-only); IN_PLAN_MODE=true`，act 完全省略 mode 行。plan 下所有未准入工具（含 edit/MCP）、build 子 agent 与 bash 持久写效应都在执行前返回 canonical `ToolOutput::err`；错误随 Tool 消息进入下一轮模型 context，明确要求不可换写路径重试、继续只读分析并只输出 plan。session 的 shellguard adapter 会继续拒绝 sandbox 原本放行的 `/tmp` 写入；精确 `/dev/null` 与 fd 重定向不保存状态，仍按只读处理。`bash_guard::gate` 按 kind=plan 或 agent name=`sidecar` 识别只读会话（sidecar 是 Subagent kind，bare kind 检查会漏），双层 fail-closed：未准入工具拒 + mutating bash 拒，拒文各自报 "Blocked in plan mode"/"Blocked in sidecar"。`task` spawn 同样过该门（`runner/execute.rs` 在任何 child session 创建前拦：plan 拒写向子代理、sidecar 全拒）。
 - **事件缓冲 flusher**（`src/event_sink.rs`）：`EventSink` 使用容量 4096 的有界队列。常规 `spawn_event_flusher` 对 delta 按 512 条/8 KiB 批量处理，通道满时可丢弃 delta，写库失败告警；结束时必须丢弃 sink 并等待 flusher。`spawn_checked_event_flusher` 用于 [project](../project/index.md)，对所有事件的队列背压返回错误，`JoinHandle<Result<()>>` 传播 Store 写入失败，调用方确认落库结果后才提交运行终态。测试 `checked_flusher_reports_delta_backpressure_and_database_failure` 覆盖严格模式的两类失败。

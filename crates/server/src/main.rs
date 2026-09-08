@@ -111,7 +111,7 @@ mod opencoder_cli_compat {
                 _ => "trace",
             };
             tracing_subscriber::EnvFilter::new(format!(
-                "opencoder_web={level},opencoder_server={level}"
+                "opencoder_web={level},opencoder_server={level},opencoder_control={level}"
             ))
         });
         tracing_subscriber::fmt().with_env_filter(filter).init();

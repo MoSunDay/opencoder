@@ -60,7 +60,7 @@ pub(crate) async fn ts_start(cli: &Cli) -> Result<()> {
     let workdir = current_workdir(cli)?;
     let id = cli.session.clone().unwrap_or_else(fresh_id);
     register(&registry, &id, &workdir).await?;
-    spawn_session(&workdir, &id)
+    spawn_session(&workdir, &id, cli)
 }
 
 /// Pure decision: a bare `ts` always creates a new session. The only attach
@@ -77,7 +77,7 @@ pub(crate) fn explicit_attach_target(session_arg: Option<&str>, exists: bool) ->
 
 /// Spawn `tmux new-session` running `<exe> tui --session <id> --workdir <wd>`.
 /// Caller guarantees the tmux session name does NOT already exist.
-fn spawn_session(workdir: &Path, id: &str) -> Result<()> {
+fn spawn_session(workdir: &Path, id: &str, cli: &Cli) -> Result<()> {
     let name = session_name(id);
     if session_exists(&name)? {
         bail!("tmux session '{name}' already exists; use `opencoder ts -r <id>` to resume");
@@ -86,6 +86,7 @@ fn spawn_session(workdir: &Path, id: &str) -> Result<()> {
     let mut cmd = Command::new(tmux_bin()?);
     let inside = super::env::inside_tmux();
     cmd.args(spawn_args(&exe, workdir, id, inside));
+    cmd.args(launch_args(cli));
     cmd.stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit());
@@ -117,6 +118,23 @@ fn spawn_args(exe: &Path, workdir: &Path, id: &str, inside: bool) -> Vec<OsStrin
         OsString::from("--workdir"),
         workdir.as_os_str().to_owned(),
     ]);
+    args
+}
+
+fn launch_args(cli: &Cli) -> Vec<OsString> {
+    let mut args = Vec::new();
+    for (flag, value) in [
+        ("--agent", cli.agent.as_deref()),
+        ("--model", cli.model.as_deref()),
+        ("--wrap", cli.wrap.map(|h| h.as_str())),
+    ] {
+        if let Some(value) = value {
+            args.extend([flag.into(), value.into()]);
+        }
+    }
+    for (key, value) in &cli.envs {
+        args.extend(["--envs".into(), format!("{key}={value}").into()]);
+    }
     args
 }
 
@@ -325,7 +343,7 @@ pub(crate) async fn ts_resume(cli: &Cli, target: &str) -> Result<()> {
         ),
     };
     register(&registry, &id, &workdir).await?;
-    spawn_session(&workdir, &id)
+    spawn_session(&workdir, &id, cli)
 }
 
 /// `opencoder ts -c` -- delete stopped ts sessions from every workdir.

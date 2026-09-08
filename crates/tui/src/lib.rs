@@ -78,6 +78,8 @@ use opencoder_core::Config;
 
 #[derive(Default)]
 pub struct TuiOpts {
+    pub harness: Option<opencoder_core::harness::Harness>,
+    pub envs: std::collections::BTreeMap<String, String>,
     pub workdir: Option<PathBuf>,
     pub session: Option<String>,
     pub model: Option<String>,
@@ -87,11 +89,23 @@ pub struct TuiOpts {
 impl TuiOpts {
     pub fn new(workdir: Option<PathBuf>) -> Self {
         TuiOpts {
+            harness: None,
+            envs: Default::default(),
             workdir,
             session: None,
             model: None,
             agent: None,
         }
+    }
+
+    pub fn with_harness(
+        mut self,
+        harness: Option<opencoder_core::harness::Harness>,
+        envs: std::collections::BTreeMap<String, String>,
+    ) -> Self {
+        self.harness = harness;
+        self.envs = envs;
+        self
     }
 
     pub fn with_session(mut self, session: Option<String>) -> Self {

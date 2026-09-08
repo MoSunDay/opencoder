@@ -9,6 +9,39 @@ const INSERT_SESSION: &str = "\
 INSERT OR IGNORE INTO sessions (id, title, agent, model, autopilot_mode, workdir_hash, created_at, updated_at, summary, summary_seq, summary_images_json, handoff_seq, handoff_plan, skill, task_type, requirement)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
+pub async fn harness_runtime(
+    conn: &Connection,
+    id: &str,
+) -> Result<Option<opencoder_core::harness::HarnessRuntime>> {
+    let mut rows = conn
+        .query(
+            "SELECT harness_runtime FROM sessions WHERE id = ?",
+            params![id],
+        )
+        .await?;
+    let raw = match rows.next().await? {
+        Some(row) => row.get::<Option<String>>(0)?,
+        None => None,
+    };
+    raw.map(|s| serde_json::from_str(&s).context("invalid stored harness runtime"))
+        .transpose()
+}
+
+pub async fn set_harness_runtime(
+    conn: &Connection,
+    id: &str,
+    runtime: &opencoder_core::harness::HarnessRuntime,
+) -> Result<()> {
+    let count = conn
+        .execute(
+            "UPDATE sessions SET harness_runtime = ? WHERE id = ?",
+            params![serde_json::to_string(runtime)?, id],
+        )
+        .await?;
+    anyhow::ensure!(count == 1, "session missing while saving harness runtime");
+    Ok(())
+}
+
 pub async fn create(conn: &Connection, meta: &SessionMeta) -> Result<()> {
     conn.execute(
         INSERT_SESSION,

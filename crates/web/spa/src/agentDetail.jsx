@@ -14,6 +14,7 @@ import { apiGet, apiPatch, apiPost, apiPut } from './api.js';
 import { REF_FIELDS, resolvedNames, resourceOptions, versionOptions } from './agentsItems.js';
 import { err } from './notice.js';
 import { PromptEditor } from './promptEditor.jsx';
+import { HARNESS_OPTIONS } from './harness/fields.jsx';
 
 const { Text, Title } = Typography;
 
@@ -142,7 +143,7 @@ export function AgentDetail({ name, resources, onNotice, onChanged, onBack }) {
     setLoading(true);
     try {
       const j = await apiGet(`/api/agents/${encodeURIComponent(name)}/meta`);
-      setMeta((j && j.meta) || null);
+      setMeta(j?.meta ? { ...j.meta, builtin: !!j.builtin } : null);
     } catch (e) {
       if (onNotice) {
         onNotice(err('获取 agent 详情失败: ' + (e && e.message)));
@@ -188,11 +189,18 @@ export function AgentDetail({ name, resources, onNotice, onChanged, onBack }) {
       <Space style={{ marginBottom: 16 }}>
         <Button size="small" onClick={onBack}>返回</Button>
         <Title level={5} style={{ margin: 0 }}>Agent: {name}</Title>
+        <Select aria-label="agent-default-harness" value={meta.harness || 'opencoder'} options={HARNESS_OPTIONS} style={{ minWidth: 140 }}
+          onChange={async (harness) => {
+            try {
+              await apiPut(`/api/agents/${encodeURIComponent(name)}`, { harness });
+              message.success('Harness 已更新，将用于新启动的会话'); onCardSaved();
+            } catch (e) { onNotice?.(err('更新 Harness 失败: ' + e.message)); }
+          }} />
         <Button size="small" type="primary" onClick={activate}>设为生效</Button>
         <Button size="small" onClick={load}>刷新</Button>
       </Space>
       <Tabs
-        defaultActiveKey="prompt"
+        defaultActiveKey={meta.builtin ? 'meta' : 'prompt'}
         items={[
           {
             key: 'prompt',
@@ -229,7 +237,7 @@ export function AgentDetail({ name, resources, onNotice, onChanged, onBack }) {
             children: <ResourceRefTab field="memory" cat="memory" label="Memory" {...tabProps} />,
           },
           { key: 'meta', label: 'Meta', children: <MetaTab meta={meta} /> },
-        ]}
+        ].filter((tab) => !meta.builtin || tab.key === 'meta')}
       />
     </div>
   );

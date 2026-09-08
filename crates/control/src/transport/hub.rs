@@ -94,8 +94,14 @@ impl Hub {
         mut snapshot: NodeSnapshot,
         tx: mpsc::Sender<SocketCommand>,
     ) -> anyhow::Result<()> {
-        if registration.protocol_version != PROTOCOL_VERSION
-            || !valid_id(&registration.id)
+        if registration.protocol_version != PROTOCOL_VERSION {
+            anyhow::bail!(
+                "incompatible node protocol {}; server requires {}: upgrade server and node together",
+                registration.protocol_version,
+                PROTOCOL_VERSION
+            );
+        }
+        if !valid_id(&registration.id)
             || registration.name.trim().is_empty()
             || snapshot.generation.trim().is_empty()
             || !snapshot.cpu_capacity.is_finite()

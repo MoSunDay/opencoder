@@ -302,13 +302,14 @@ async fn legacy_tables_without_version_row_converge_on_open() {
 
     assert_eq!(
         version_of(&conn).await,
-        21,
+        22,
         "version row must be stamped at the latest version"
     );
     for (table, column) in [
         ("sessions", "task_type"),
         ("sessions", "handoff_seq"),
         ("sessions", "autopilot_mode"),
+        ("sessions", "harness_runtime"),
         ("session_events", "sse_kind"),
         ("session_inputs", "images_json"),
         ("session_inputs", "recorded"),
@@ -332,6 +333,10 @@ async fn legacy_tables_without_version_row_converge_on_open() {
     // Legacy data survives; the subagent child is backfilled, the parent keeps
     // the column default.
     let parent = store.get_session("parent").await.unwrap().unwrap();
+    assert!(
+        store.harness_runtime("parent").await.unwrap().is_none(),
+        "legacy sessions have no external harness state"
+    );
     assert_eq!(parent.task_type.as_deref(), Some(TASK_TYPE_PARENT));
     let child = store.get_session("child").await.unwrap().unwrap();
     assert_eq!(child.task_type.as_deref(), Some(TASK_TYPE_SUBAGENT));
@@ -348,7 +353,7 @@ async fn legacy_tables_without_version_row_converge_on_open() {
     let conn = store.conn().await.unwrap();
     assert_eq!(
         version_of(&conn).await,
-        21,
+        22,
         "re-open must not move the version"
     );
     assert_eq!(count_schema_version_rows(&conn).await, 1);
@@ -413,7 +418,7 @@ async fn failed_bootstrap_rolls_back_and_reopens_after_repair() {
 
     let store = LibsqlStore::open(&path).await.unwrap();
     let conn = store.conn().await.unwrap();
-    assert_eq!(version_of(&conn).await, 21);
+    assert_eq!(version_of(&conn).await, 22);
     assert!(has_column(&conn, "sessions", "task_type").await);
     assert!(store.get_session("parent").await.unwrap().is_some());
     assert_eq!(scalar(&conn, "PRAGMA integrity_check").await, "ok");

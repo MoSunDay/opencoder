@@ -136,7 +136,11 @@ async fn empty_root_lists_null_active() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(v["ok"], true);
     assert_eq!(v["active"], serde_json::Value::Null);
-    assert_eq!(v["agents"].as_array().map(Vec::len), Some(0));
+    let agents = v["agents"].as_array().unwrap();
+    assert_eq!(agents.len(), opencoder_core::builtin_agents().len());
+    assert!(agents
+        .iter()
+        .all(|a| a["builtin"] == true && a["harness"] == "opencoder"));
 }
 
 #[tokio::test]
@@ -199,6 +203,7 @@ async fn cards_crud_activation_and_listing() {
         .as_array()
         .unwrap()
         .iter()
+        .filter(|a| a["builtin"] != true)
         .map(|a| a["name"].as_str().unwrap())
         .collect();
     assert_eq!(names, vec!["a", "b"]);
@@ -411,7 +416,11 @@ async fn delete_active_card_clears_marker_and_fans_reload() {
     expect_reload(&mut cmd_rx);
     let (_, v) = call(app(state.clone()), "GET", "/api/agents", None).await;
     assert_eq!(v["active"], serde_json::Value::Null);
-    assert_eq!(v["agents"].as_array().map(Vec::len), Some(0));
+    let agents = v["agents"].as_array().unwrap();
+    assert_eq!(agents.len(), opencoder_core::builtin_agents().len());
+    assert!(agents
+        .iter()
+        .all(|a| a["builtin"] == true && a["harness"] == "opencoder"));
 }
 
 /// Activating a card whose prompt reference has no live version must fail
@@ -511,4 +520,44 @@ async fn patch_preflight_promptless_card_rejected_and_rolls_back() {
     // Rollback: the marker still names the previous agent.
     let (_, v) = call(app(state.clone()), "GET", "/api/agents", None).await;
     assert_eq!(v["active"], "plain", "marker must roll back: {v}");
+}
+
+#[tokio::test]
+async fn harness_settings_apply_to_builtin_and_custom_agents() {
+    let state = state().await;
+    let _scoped = scoped();
+    let (status, body) = call(
+        app(state.clone()),
+        "PUT",
+        "/api/agents/act",
+        Some(serde_json::json!({"harness":"codex"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (_, body) = call(app(state.clone()), "GET", "/api/agents/act/meta", None).await;
+    assert_eq!(body["meta"]["harness"], "codex");
+    assert_eq!(
+        opencoder_core::resolve_agent("act").unwrap().kind,
+        opencoder_core::AgentKind::Act
+    );
+    let (status, _) = call(app(state.clone()), "DELETE", "/api/agents/act", None).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let (status, _) = call(
+        app(state.clone()),
+        "PUT",
+        "/api/agents/act",
+        Some(serde_json::json!({"harness":"unknown"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    let (status, _) = call(
+        app(state.clone()),
+        "POST",
+        "/api/agents",
+        Some(serde_json::json!({"name":"wrapped","harness":"codex"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let (_, body) = call(app(state.clone()), "GET", "/api/agents/wrapped/meta", None).await;
+    assert_eq!(body["meta"]["harness"], "codex");
 }

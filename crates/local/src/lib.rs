@@ -25,6 +25,12 @@ use clap::{ArgGroup, Args, Parser, Subcommand};
 pub struct Cli {
     #[command(subcommand)]
     pub command: Option<Command>,
+    /// Compat alias selecting this local CLI front-end (the former
+    /// `opencoder-cli` crate, now `opencoder-local` behind the `opencoder`
+    /// binary). No behavioral effect; `opencoder --cli run ...` parses the
+    /// same as `opencode run ...`.
+    #[arg(long, global = true)]
+    pub cli: bool,
     /// Print machine-readable version, commit and fleet protocol metadata.
     #[arg(long, global = true)]
     pub build_info: bool,

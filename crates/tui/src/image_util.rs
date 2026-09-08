@@ -3,7 +3,7 @@
 //! suitable for `SessionInput.images` / `ContentBlock::Image`.
 //!
 //! Logic mirrors the CLI's `load_image_data_uris` / `mime_from_ext` in
-//! `crates/cli/src/run.rs` but is kept TUI-local to avoid coupling the CLI
+//! `crates/local/src/run.rs` but is kept TUI-local to avoid coupling the CLI
 //! crate as a dependency of the TUI.
 
 use std::path::Path;

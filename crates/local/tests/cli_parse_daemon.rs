@@ -1,5 +1,5 @@
 use clap::Parser;
-use opencoder_cli::{Cli, Command};
+use opencoder_local::{Cli, Command};
 
 fn parse(args: &[&str]) -> Cli {
     Cli::parse_from(args)

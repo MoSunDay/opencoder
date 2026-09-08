@@ -61,3 +61,5 @@ Rust 回归使用独立 loopback 网络命名空间、系统盘 `TMPDIR=/var/tmp
 新增验证：`crates/ctl/tests/build_info.rs::build_info_matches_platform_without_server_credentials`；`crates/ctl/tests/server_local.rs::agents_card_lifecycle_and_active_pointer` 同时校验内置与自定义 Agent、Codex 设置及保留资源引用；`scripts/platform/test_install_bundle.py::test_upgrade_adds_control_cli_and_rollback_restores_legacy_set` 校验控制 CLI 新增与旧版回滚。
 
 实际发布回归使用独占 Cargo target，预先构建配套二进制；临时 Node 数据放在容量充足的 `/var/tmp`。共享 target 曾混入其他提交，默认 `/tmp` 所在盘低于既有 20% 可用容量阈值，两者均不能作为本次有效测试环境；没有降低容量保护。
+
+完整回归还暴露首次模型配置向导在较长配置目录下裁掉文件名的问题；提示段落现按终端宽度换行，`onboarding_wraps_long_config_path_without_losing_filename` 验证路径末尾可见并保持密钥遮罩。

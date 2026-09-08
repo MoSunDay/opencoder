@@ -15,7 +15,7 @@ use opencoder_llm::ChatClient;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Clear, Paragraph};
+use ratatui::widgets::{Clear, Paragraph, Wrap};
 
 use crate::input::spawn_input_pump;
 use crate::model_menu::{handle_model_key, ModelMenu, ModelOutcome, ProviderForm};
@@ -229,7 +229,8 @@ fn render(frame: &mut ratatui::Frame, form: &ProviderForm) {
             Line::raw(format!(" Settings will be saved to {path}")),
             Line::raw(" Fill provider/model/base URL/API key, then select [Save]."),
             Line::raw(" API key accepts a literal secret or an ENV_VAR name. Esc/Ctrl-D exits."),
-        ]),
+        ])
+        .wrap(Wrap { trim: false }),
         header,
     );
     crate::model_menu::render_model_popup(
@@ -481,6 +482,26 @@ mod tests {
             .map(|cell| cell.symbol())
             .collect::<String>();
         assert!(text.contains("configure your first model"));
+        assert!(text.contains(".opencoder/config.json"));
+        assert!(!text.contains("sk-onboarding-secret-1234"));
+    }
+
+    #[test]
+    fn onboarding_wraps_long_config_path_without_losing_filename() {
+        use ratatui::{backend::TestBackend, Terminal};
+
+        let home = std::path::PathBuf::from(format!("/{}", "long-home-".repeat(7)));
+        let _isolation = scoped_config_home(home);
+        let mut terminal = Terminal::new(TestBackend::new(100, 28)).unwrap();
+        let form = ProviderForm::new_onboarding(&ready_config());
+        terminal.draw(|frame| render(frame, &form)).unwrap();
+        let text = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
         assert!(text.contains(".opencoder/config.json"));
         assert!(!text.contains("sk-onboarding-secret-1234"));
     }

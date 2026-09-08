@@ -1,6 +1,7 @@
 const { chromium } = require('../../../crates/web/spa/node_modules/playwright-core');
 const fs = require('fs');
 const path = require('path');
+const assert = require('assert/strict');
 async function projectPage(page) {
   await page.locator('.fleet-nav-category').getByText('项目', { exact: true }).click();
   await page.getByRole('menuitem').filter({ hasText: '项目' }).click();
@@ -63,4 +64,24 @@ async function createHierarchy(page) {
   const backlog = await todo('Backlog acceptance', 'standalone TODO', false);
   return { goal, milestone, todo: main, backlog };
 }
-module.exports = { openBrowser, createHierarchy, projectPage };
+async function replayOldest(page, root) {
+  await page.getByRole('tab', { name: 'TODO', exact: true }).click();
+  await page.getByText('Acceptance TODO', { exact: true }).click();
+  await page.getByText('加载更早记录', { exact: true }).click();
+  const earliest = page.locator('.ant-timeline-item').filter({ has: page.getByText('v1', { exact: true }) });
+  await earliest.getByText('查看本次输入与过程', { exact: true }).click();
+  await page.getByText('第 1 次 · plan · plan', { exact: true }).waitFor();
+  await page.getByText('本次输入与 Agent 版本', { exact: true }).click();
+  await page.getByRole('button', { name: '分段查看', exact: true }).click();
+  await page.locator('.execution-large-field pre').waitFor();
+  assert((await page.locator('.execution-large-field pre').textContent()).includes('"agent"'));
+  const next = page.waitForResponse((response) => response.url().includes('detail-field') && response.url().includes('offset=65536'));
+  await page.getByRole('button', { name: '下一段', exact: true }).click();
+  assert.equal((await next).status(), 200);
+  await page.getByText('本次输入与 Agent 版本', { exact: true }).click();
+  await page.getByText(/本次过程事件（/).click();
+  await page.getByRole('button', { name: '刷新事件', exact: true }).waitFor();
+  await page.screenshot({ path: path.join(root, 'project-replay.png'), fullPage: true });
+  fs.writeFileSync(path.join(root, 'oldest-browser.json'), JSON.stringify({ oldest_version: 1, chunk_offset: 65536, events_opened: true }, null, 2));
+}
+module.exports = { openBrowser, createHierarchy, projectPage, replayOldest };

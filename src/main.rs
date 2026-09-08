@@ -1,6 +1,6 @@
 use anyhow::Result;
 use clap::Parser;
-use opencoder_cli::{init_logging, Cli, Command};
+use opencoder_local::{init_logging, Cli, Command};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -30,7 +30,7 @@ async fn main() -> Result<()> {
     let is_tui = matches!(cli.command, Some(Command::Tui) | Some(Command::Ts { .. }))
         || (cli.command.is_none() && cli.prompt.is_empty() && cli.cmd.is_none());
     let log_sink = if is_tui {
-        opencoder_cli::tui_log_path()
+        opencoder_local::tui_log_path()
     } else {
         None
     };
@@ -51,7 +51,7 @@ async fn main() -> Result<()> {
             "--cmd requires the default entry or run"
         );
         require(prompt)?;
-        opencoder_cli::run::run_headless(&cli, prompt.clone()).await
+        opencoder_local::run::run_headless(&cli, prompt.clone()).await
     } else {
         match &cli.command {
             Some(Command::Run { prompt }) => {
@@ -62,16 +62,16 @@ async fn main() -> Result<()> {
                 };
                 let p = join(parts);
                 require(&p)?;
-                opencoder_cli::run::run_headless(&cli, p).await
+                opencoder_local::run::run_headless(&cli, p).await
             }
             Some(Command::Daemon {
                 server,
                 client,
                 opts,
             }) => {
-                match opencoder_cli::daemon::daemon_mode(*server, *client, opts.remote.as_deref()) {
+                match opencoder_local::daemon::daemon_mode(*server, *client, opts.remote.as_deref()) {
                     Ok(action) => {
-                        println!("{}", opencoder_cli::daemon::migration_hint(action, opts));
+                        println!("{}", opencoder_local::daemon::migration_hint(action, opts));
                         Ok(())
                     }
                     // Unreachable while clap enforces exactly-one-of, but the pure
@@ -86,7 +86,7 @@ async fn main() -> Result<()> {
                 clean,
                 delete,
             }) => {
-                opencoder_cli::ts::ts_dispatch(
+                opencoder_local::ts::ts_dispatch(
                     &cli,
                     *list,
                     resume.as_deref(),
@@ -96,26 +96,26 @@ async fn main() -> Result<()> {
                 .await
             }
             Some(Command::Config { sub }) => {
-                opencoder_cli::session_cmd::config_dispatch(&cli, sub).await
+                opencoder_local::session_cmd::config_dispatch(&cli, sub).await
             }
-            Some(Command::Models) => opencoder_cli::session_cmd::models_dispatch(&cli).await,
+            Some(Command::Models) => opencoder_local::session_cmd::models_dispatch(&cli).await,
             Some(Command::Session { sub }) => {
-                opencoder_cli::session_cmd::session_dispatch(sub, &cli).await
+                opencoder_local::session_cmd::session_dispatch(sub, &cli).await
             }
-            Some(Command::Todos { sub }) => opencoder_cli::todos_cmd::dispatch(&cli, sub).await,
+            Some(Command::Todos { sub }) => opencoder_local::todos_cmd::dispatch(&cli, sub).await,
             Some(Command::InstallTools) => {
-                let code = opencoder_cli::install_tools::install_tools_run()?;
+                let code = opencoder_local::install_tools::install_tools_run()?;
                 if code != 0 {
                     std::process::exit(code);
                 }
                 Ok(())
             }
-            Some(Command::Update) => opencoder_cli::update::update_run(&cli).await,
+            Some(Command::Update) => opencoder_local::update::update_run(&cli).await,
             None => {
                 if !cli.prompt.is_empty() {
                     let p = join(cli.prompt.clone());
                     require(&p)?;
-                    opencoder_cli::run::run_headless(&cli, p).await
+                    opencoder_local::run::run_headless(&cli, p).await
                 } else if maybe_wrap_tui_in_tmux(&cli).await? {
                     return Ok(());
                 } else {
@@ -125,7 +125,7 @@ async fn main() -> Result<()> {
         }
     };
     if is_tui {
-        opencoder_cli::exit_tips::print_exit_tips();
+        opencoder_local::exit_tips::print_exit_tips();
     }
     // Kill any backgrounded bash commands (timeout handoff) and remove their
     // temp output files before the process exits.
@@ -158,7 +158,7 @@ fn require(p: &str) -> Result<()> {
 /// not already inside tmux, wrap the TUI in a tmux session. Returns `true` if
 /// the TUI was launched inside tmux, `false` to fall through to the plain TUI.
 async fn maybe_wrap_tui_in_tmux(cli: &Cli) -> Result<bool> {
-    if opencoder_cli::ts::inside_tmux() || !opencoder_cli::ts::tmux_available() {
+    if opencoder_local::ts::inside_tmux() || !opencoder_local::ts::tmux_available() {
         return Ok(false);
     }
     let workdir = match &cli.workdir {
@@ -167,7 +167,7 @@ async fn maybe_wrap_tui_in_tmux(cli: &Cli) -> Result<bool> {
     };
     let config = opencoder_core::Config::load(&workdir)?;
     if config.enable_tmux_session.unwrap_or(false) {
-        opencoder_cli::ts::ts_dispatch(cli, false, None, false, None).await?;
+        opencoder_local::ts::ts_dispatch(cli, false, None, false, None).await?;
         Ok(true)
     } else {
         Ok(false)

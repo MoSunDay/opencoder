@@ -21,4 +21,4 @@ Commit: (working-tree, 基于 c1a1b2e78e1ccd4a3cc2ac6dc408a76d30bf46e6)
 
 平台 Web 启动 TODO 时，父工作流及所有子执行固定在所属 Node，模板环境绑定在派发时校验并形成快照，运行状态与事件不上传为 Server 明细。见 [Agent 平台](../agent-platform/index.md)。
 
-相关逻辑：[todos 模块](../../agents/todos/index.md)、[CLI](../../agents/cli/index.md)、[Store](../../agents/store/index.md)。
+相关逻辑：[todos 模块](../../agents/todos/index.md)、[CLI](../../agents/local/index.md)、[Store](../../agents/store/index.md)。

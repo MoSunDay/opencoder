@@ -1,4 +1,4 @@
-Commit: (working-tree, 基于 c1a1b2e78e1ccd4a3cc2ac6dc408a76d30bf46e6)
+Commit: be76fc1086cbf0d928c1d1e03ad5470563fd86df
 
 # ctl — opencoder-cli 远程管理 CLI
 
@@ -26,10 +26,12 @@ Commit: (working-tree, 基于 c1a1b2e78e1ccd4a3cc2ac6dc408a76d30bf46e6)
 - `project overview|goals|milestones|todos` — 项目跟踪全量操作。
 - `brain caps|search|plan|plan-get|preview|dispatch` — 能力库 CRUD/绑定、近邻检索、决策树规划与派发。
 - `teams list|put` — 团队定义（列表滤掉已退役的 `system` 队）。
-- `agents list|create|update|delete|active|meta|resources|nfs` — 版本化自定义 Agent 引用卡、资源池与 NFS 只读导出生命周期。
+- `agents list|create|update|delete|active|meta|resources|nfs` — 内置与自定义 Agent 引用卡及默认 Harness、资源池与 NFS 只读导出生命周期。
 - `raw call METHOD PATH [--json …|@file] [--query k=v] [--stream]` — 逃生舱，原样直发任意路由。
 
 ## 约定
+
+`--build-info` 在读取 Server 地址和凭据前返回 `opencoder_core::version::build_info_json()`。它与 `opencoder`、`opencoder-server`、`opencoder-agent` 使用相同完整构建元数据；四者由同一发布包安装，清单校验 commit、protocol 与 SPA digest。安装和回滚契约见[平台部署](../../docs/agent-platform.md)。
 
 - 认证：纯 Bearer（与 server/agent 同一 token）；`--json` 值支持 `@file` 读文件，其余按内联 JSON 文本解析，非法即报错不静默。
 - stdout 恰一个 JSON 文档（成功 pretty、SSE 紧凑单行）；人读信息与结构化失败只进 stderr，永不混入 stdout。
@@ -37,6 +39,8 @@ Commit: (working-tree, 基于 c1a1b2e78e1ccd4a3cc2ac6dc408a76d30bf46e6)
 - `raw` 仅放行 GET/POST/PUT/PATCH/DELETE/HEAD/OPTIONS 七个方法，`--query` 必须是 `k=v` 对。
 
 ## 测试
+
+`tests/build_info.rs` 验证无 Server 凭据也能读取完整版本信息；`tests/server_local.rs::agents_card_lifecycle_and_active_pointer` 验证内置 Agent 列表、自定义卡片的 Codex 设置和资源引用保留。
 
 - 单测：`src/` 内嵌（http 的 RequestPlan/URL 编码/退出码、ctx 的 flag>env 优先级与互斥、sse 帧解析、out 单行契约、raw 的 body/@file/query/method 白名单、system/brain/project/agents 的 plan 映射，共 24 项）。
 - 契约测试：`tests/parse_exec.rs`（16）、`tests/parse_session_nodes.rs`（12）、`tests/parse_dag_teams.rs`（7）、`tests/parse_todo.rs`（7）、`tests/parse_project_brain_agents.rs`（10）——子命令到 `RequestPlan` 的纯映射。

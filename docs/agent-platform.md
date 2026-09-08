@@ -99,9 +99,9 @@ mount -t nfs -o ro,vers=3,tcp,port=<port>,mountport=<port>,nolock,soft,retrans=1
 
 自动测试覆盖真实 Server ↔ Node WebSocket、断线后继续执行、同 ID 幂等、项目节点绑定、普通团队和 DAG 单节点闭环、拒绝新 System 执行、资源快照和检查点恢复。`scripts/acceptance/platform.js` 及 `scripts/acceptance/t12_ui_verify.js` 使用真实二进制、两个临时节点、回环模型服务及 Chromium 验证打包后的页面；回环模型只证明控制与执行闭环，不代表目标模型凭据已经验收。
 
-真实内核 NFS 挂载已验证：只读写入拒绝、两版资源快照、卸载后旧会话继续及新执行拒绝。真实 runc + Python rootfs 已连续三轮并发验证正常执行、无限循环取消和超时清理；这些依赖宿主权限的测试显式标记 manual，并在本次验收中单独执行通过。
+真实 NFS 需要验证只读写入拒绝、版本资源快照，以及卸载后旧执行继续和新执行拒绝。依赖宿主权限的 NFS/runc 用例保留 manual 标记，验收记录必须对应当前执行后端和实际节点环境。
 
-Python 默认保留 `sandbox: in_process` 配置值，实际使用 `opencoder-agent internal-python-step` 内部子进程运行内嵌 RustPython。取消或超时后先停止并回收进程，再写终态；Linux 上节点进程退出也会终止 VM 子进程。无需额外 Python 二进制。库测试依赖同一构建目录中的 `opencoder-agent`，请先构建 workspace。`runc` 模式仍需在 Node 的 `<workflow_root>/rootfs` 准备真实 Python 目录，缺失时明确报错。每个步骤首次准备时将解释器复制到 bundle 内的独立 rootfs，重试复用该副本；设备目录由各容器独立初始化，共享模板不会被运行时改写。需预留每个步骤一份解释器目录的本地磁盘空间。
+DAG 的非 Agent 步骤为 WebAssembly WASI 命令模块。默认 `sandbox: in_process` 使用内嵌 wasmtime，通过 epoch deadline 处理取消和超时，无需单独安装 wasmtime CLI。`sandbox: runc` 需要节点上的 runc 和 `<workflow_root>/rootfs` 中可运行的静态 wasmtime 目录；缺失时报错，不回退到内嵌模式。每个 bundle 复制独立运行时目录并在重试中复用，rootfs 只读挂载，run 目录挂至 `/workspace/context`。模块读取 `OPENCODER_STEP_CONTEXT` 指向的 `context.json`，可写 `output.json` 返回结构化结果；不存在 `internal-python-step` 或 RustPython 执行入口。详见 [DAG 运行时](../agents/dag-runtime/index.md)。
 
 ## 发布与回滚
 

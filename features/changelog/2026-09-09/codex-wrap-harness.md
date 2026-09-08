@@ -1,4 +1,4 @@
-Commit: (working-tree, 基于 65c9d891ae905e7925277d29a87cd8e7957e8dad)
+Commit: be76fc1086cbf0d928c1d1e03ad5470563fd86df
 
 # CLI 与 Server Web 的 Codex Harness
 
@@ -31,28 +31,36 @@ Project 通过惰性客户端支持无原生凭据的 Plan/Execute；资源身�
 | 交付副本、无效路径、清单大小与符号链接 | `declared_files_are_immutable_and_invalid_paths_fail`、`oversized_or_symlinked_manifest_is_rejected` | `crates/project/src/trace/codex.rs` |
 | 旧 Node 不得接收 Harness 请求 | `legacy_node_cannot_join_or_receive_harness_assignments` | `crates/control/src/transport/hub_tests.rs` |
 | 真 Codex Project 规划、执行、清单与不可变交付 | `scripts/acceptance/harness/project.js` | 通过最终包 Server / Node 执行 |
+| 四件套构建元数据与旧版回滚 | `build_info_matches_platform_without_server_credentials`、`test_upgrade_adds_control_cli_and_rollback_restores_legacy_set` | `crates/ctl/tests/build_info.rs`、`scripts/platform/test_install_bundle.py` |
+| 首次模型配置长路径仍可见 | `onboarding_wraps_long_config_path_without_losing_filename` | `crates/tui/src/onboarding.rs` |
+| 跨平台子进程取消和终端隔离 | `codex_cancel_reaps_descendants_and_closes_open_tools`、`bash_tool_detaches_controlling_terminal` | `crates/session/tests/harness_codex.rs`、`crates/session/tests/tools_contract.rs` |
+| MySQL 并发尝试排斥与终态后领取 | `mysql_project_crud_contract` | `crates/store/tests/sql_project_store.rs` |
 
-## 验证
+## 最终验证与发布
 
-- SPA：56 个测试文件，**473 passed / 0 failed**；构建及 dist 无漂移。输出 `/var/tmp/opencoder-wrap-closure-spa-tests-final.log`、`/var/tmp/opencoder-wrap-closure-spa-build-final.log`。
-- Rust 最终完整回归：`cargo test --workspace --no-fail-fast -- --test-threads=4` → **4,840 passed / 0 failed / 5 ignored**（既有手动测试，未新增 ignore）；341 段 `test result` 汇总，输出 `/var/tmp/opencoder-wrap-closure-delivery-tests.log`。本轮闭环基线为 4,836，通过数增加 4。
-- `cargo clippy --workspace --all-targets -- -D warnings` 零警告、`cargo build --workspace` 通过，输出 `/var/tmp/opencoder-wrap-closure-delivery-clippy.log`、`/var/tmp/opencoder-wrap-closure-delivery-build.log`。
-- Codex 0.153.2：CLI 新建、读取文件/环境、resume、fork 和取消已验证。最终候选包 CLI 记录在 `/var/tmp/opencoder-wrap-delivery.94_bwc03/final-cli/`；早期 resume/fork 与脱离进程组回收记录保留在 `/var/tmp/opencoder-wrap-real-resume.stdout`、`/var/tmp/opencoder-wrap-real-fork.stdout`、`/var/tmp/oc-wrap-cleanup-9564xq65/`。
-- 最终候选包浏览器：夹具（含工具失败后恢复）与真实 Codex 均 PASS。真实记录 `/var/tmp/opencoder-wrap-closure-final-real-browser.log`，截图及 Project 验收 `/var/tmp/opencoder-wrap-browser-aKt7Ah/`。Project 交付精确为 21 字节，验证工作副本修改后归档不变；Plan 输入不含本次执行的清单路径。
-- 平台安装/归档工具 18 项测试通过。旧版本 → 候选 → 回滚 → 候选的实际三二进制元数据验证通过；新 Server/旧 Node、旧 Server/新 Node 均拒绝，注册数和执行数为 0。
-- 隔离迁移演练：旧二进制创建 schema 21，填充 10,000 会话 + 10,000 消息后升级为 22，计数与完整性保持，旧会话运行态为 NULL；重复打开和旧二进制读取历史原生会话通过。数据库约 2.56 MB，迁移进程 0.03 秒。此为合成数据，不代表生产窗口测量；未修改业务数据库或鉴权数据。
+- 干净提交 `9046a052ae0605063c3ff091c42e7d7d45d53137` 已推送 main，并发布到本机 `18081` Server 和唯一节点 `human-os-02`。`/usr/local/bin` 与 `/root/.local/bin` 均安装同一包的四个二进制；实际进程哈希、build-info 和内嵌 SPA 与 manifest 一致。
+- Rust：353 个测试目标，**4,929 passed / 0 failed / 5 既有 ignored**；clippy 全 workspace/all-targets 零警告，workspace build 与 release build 通过。SPA 56 文件、473 项通过，发布重新构建并验证 dist 无漂移。平台安装/归档工具 19 项通过，真实四件套与旧三件套升级、回滚、再升级通过。
+- CI 修正后的干净提交 `be76fc1086cbf0d928c1d1e03ad5470563fd86df` 再次通过全 workspace 检查：**4,929 passed / 0 failed / 5 既有 ignored**，353 个测试目标，fmt、clippy、配套二进制预构建与 workspace build 均通过，记录为 `post-ci-gates.json` 和 `post-ci-*.log`。
+- 后续提交仅包含规范格式、测试和 CI 修正；`source-equivalence.json` 验证运行逻辑与已部署包一致。Mac 路径断言按规范路径比较，取消/steer 测试分离启动等待与五秒取消上限，使用三秒启动延迟和跨平台进程退出检查完成 8 项回归，旧 Bash 用例改用 getsid 验证独立会话并完成 18 项工具契约回归；MySQL 测试先验证旧运行阻止新领取，再结束旧运行后验证原子领取。真实 MySQL 8.4.11 契约及 SQL 可选后端 clippy 通过。最终 [macOS CI](https://github.com/MoSunDay/opencoder/actions/runs/34272427213) 与 [MySQL / fmt / clippy CI](https://github.com/MoSunDay/opencoder/actions/runs/34270311636) 均通过。
+- 已安装 CLI 真实 Codex 读取文件与环境后返回正确结果；现网浏览器验证三层折叠、刷新、续聊、环境值隐藏、非法环境零派发与 390px 布局。原生 Agent、DAG、Team、Project、大脑稳定 request_id 与 interrupt 全部通过。
+- 自定义 Codex Agent 经只读 NFS 引用版本化 prompt，使用默认 Harness 完成 Project Execute；原生 Plan 与 Codex Execute 混合链路通过。22 字节交付文件 SHA-256 为 `b0c0a4f20e9d48e4558ffe43625317a3622be95eb7db7bb2c5d9f640caa0232b`，修改工作副本后归档不变。纯 Codex Plan/Execute、resume/fork/取消及混合编排另有进程矩阵和真实 Codex 候选验收记录。
+- 发布前冻结、interrupt 空闲会话、停写备份，并在新目录完成恢复。实际 definitions/runtime 数据库从 schema 21 迁至 22，迁移进程分别约 12 ms / 20 ms；所有旧行与索引哈希保持，再次打开收敛，旧二进制可读取恢复副本。保留 34 条旧原生会话、38 条原执行索引、36,302 个历史归档文件与 48 个原资源文件，没有删除业务数据或变更鉴权数据。
+- 稳定观察：北京时间 **2026-09-09 02:45:43 至 2026-09-09 04:46:13**，**7229.72 秒 / 227 次采样**；Server/Agent 无重启，Node 持续 Ready，固定二进制/入口配置保持，无新增服务错误、超时 Pending 或未收敛 interrupt。
 
-Rust 回归使用独立 loopback 网络命名空间、系统盘 `TMPDIR=/var/tmp/oc-wrap-tests`，仅移除测试进程代理变量。中间版本出现过定义校验失败、构建替换导致旧测试产物缺失，以及浏览器定位器不识别错误标签；最终结果以上述固定源码的完整回归和真实验收为准。
+完整发布包、日志、截图、数据库与资源备份、恢复演练、逐字节历史重放及最终记录：`/var/tmp/opencoder-wrap-rollout-20260909-4mztpbel`。主要证据为 `gates-result.json`、`post-ci-gates.json`、`ci-final.json`、`online-verification.json`、`production-observation.json`、`done.json`。
 
-## 候选交付与兼容性
+## 本机运行配置与回滚
 
-最终包：`/var/tmp/opencoder-wrap-delivery.94_bwc03/release`，独立干净源码提交 `9bb6e2cc1c74c5ebdc5ae2dc2a5f206e70a93ea5`。三个二进制的提交号、协议 v5、SPA 摘要及校验和一致；运行时代码与当前工作区逐项一致。最后的浏览器定位器增强仅影响验收脚本，不改变包内代码。
+Node 通过专属 PATH `/usr/local/libexec/opencoder-harness/bin` 使用前台 Codex 入口，该入口复用本机已有 SOCKS5 代理凭据并直接执行 `/usr/local/libexec/codext.real`；不启动 screen，不把凭据写入服务配置或仓库。全局交互式 Codex 入口保持原有行为。本机 CLI 可运行：
 
-当前安装历史 ff43bfa9 / 83ff58e8 的修改已包含于工作区基线（patch-equivalent）；候选保留既有功能。无关的 `crates/worker/src/dependency/` 未纳入候选。主工作区分支与索引未提交，现有安装和运行服务未切换。
+```sh
+opencoder --wrap codex --cmd "需求" \
+  --envs "PATH=/usr/local/libexec/opencoder-harness/bin:$PATH"
+```
 
-上线使用同一包同步升级 Server/Node，执行节点 PATH 指向能输出 exec JSONL 的前台 Codex 入口。本机前台入口为 `/usr/local/libexec/codext.real`，隔离前缀为 `/var/tmp/opencoder-wrap-delivery.94_bwc03/codex-bin`。升级前停写并备份数据；回滚成套二进制，旧程序不能继续新的 Codex 会话。具体产物、安装/回滚与数据验证见交付目录中的记录。
+Server/Node 必须按 Fleet v5 成套升级；旧/新节点混接在注册前拒绝。`config-rollback.json` 保存入口与 systemd drop-in 的不可覆盖原始锚点，并通过中断、matched 重试和显式 restore 演练。数据回滚仅恢复到新目录，按服务身份设置 owner/权限后再切换路径；原目录保留，旧程序不能继续新 Codex 会话。操作见发布目录 `ROLLBACK.md` 和[平台部署](../../../docs/agent-platform.md)。
 
-使用说明见 [Agent Harness](../../harness/index.md)。
+无关的 `crates/worker/src/dependency/` 没有纳入提交或发布。使用说明见 [Agent Harness](../../harness/index.md)。
 
 ## 与远端控制 CLI 合并
 

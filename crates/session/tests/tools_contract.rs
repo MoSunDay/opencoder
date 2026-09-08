@@ -147,11 +147,14 @@ async fn bash_tool_detaches_controlling_terminal() {
     let c = ctx(dir.path());
     let out = BashTool
         .execute(
-            json!({"command": "ps -o pid=,sid= -p \"$$\" | tr -s ' '"}),
+            // exec keeps bash's PID/session while getsid avoids ps fields
+            // that differ between Linux and macOS.
+            json!({"command": "exec python3 -c 'import os; print(os.getpid(), os.getsid(0))'"}),
             &c,
         )
         .await
         .unwrap();
+    assert!(!out.is_error, "session inspection failed: {out:?}");
     let nums: Vec<u64> = out
         .content
         .split_whitespace()

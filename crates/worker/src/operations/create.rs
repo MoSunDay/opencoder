@@ -1,5 +1,5 @@
 use crate::{journal::Record, lifecycle::Lifecycle, Worker};
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use opencoder_core::{fleet::*, Config};
 use serde_json::{json, Value};
 
@@ -14,7 +14,7 @@ fn mirror_result_overrides(input: &mut Value, result: &Value) {
     }
 }
 
-pub(super) async fn create(worker: &Worker, assignment: Assignment) -> Result<RpcReply> {
+pub(super) async fn create(worker: &Worker, mut assignment: Assignment) -> Result<RpcReply> {
     let _gate = worker.inner.admission.lock().await;
     if let Err(error) = assignment.request.validate() {
         return Ok(RpcReply::error(400, error));
@@ -43,13 +43,23 @@ pub(super) async fn create(worker: &Worker, assignment: Assignment) -> Result<Rp
         .get(&assignment.index.id)
         .cloned()
     {
+        if assignment.request.kind == ExecutionKind::Project
+            && assignment.request.input.get("run_id").is_none()
+        {
+            assignment.request.input["run_id"] =
+                existing.assignment.request.input["run_id"].clone();
+        }
         if existing.assignment.request != assignment.request {
             return Ok(RpcReply::error(
                 409,
                 "execution id already accepted with different input",
             ));
         }
-        return Ok(RpcReply::ok(json!(existing.assignment.index)));
+        let mut body = json!(existing.assignment.index);
+        if assignment.request.kind == ExecutionKind::Project {
+            body["run_id"] = existing.assignment.request.input["run_id"].clone();
+        }
+        return Ok(RpcReply::ok(body));
     }
     if let Some(error) = worker.admission_error() {
         return Ok(RpcReply::error(503, error));
@@ -88,6 +98,9 @@ pub(super) async fn create(worker: &Worker, assignment: Assignment) -> Result<Rp
         Ok(permit) => permit,
         Err(_) => return Ok(RpcReply::error(429, "node execution capacity exhausted")),
     };
+    if assignment.request.kind == ExecutionKind::Project {
+        super::project_admission::ensure_id(&mut assignment.request.input)?;
+    }
     let config = match prepare(worker, &assignment, false) {
         Ok(config) => config,
         Err(error) => {
@@ -97,7 +110,26 @@ pub(super) async fn create(worker: &Worker, assignment: Assignment) -> Result<Rp
             ))
         }
     };
-    let mut assignment = assignment;
+    let project_run = if assignment.request.kind == ExecutionKind::Project {
+        let action = assignment.request.input["action"]
+            .as_str()
+            .unwrap_or("plan");
+        match super::project_admission::reserve(
+            worker,
+            &assignment,
+            action,
+            &assignment.request.input,
+            &config,
+        )
+        .await
+        {
+            Ok(run) => Some(run),
+            Err(error) => return Ok(super::project_admission::error_reply(error)),
+        }
+    } else {
+        None
+    };
+
     assignment.index.status = ExecutionStatus::Pending;
     let lifecycle = if assignment.index.kind == ExecutionKind::Todos {
         Lifecycle::accepted_todo()
@@ -106,18 +138,25 @@ pub(super) async fn create(worker: &Worker, assignment: Assignment) -> Result<Rp
     };
     let record = Record {
         assignment,
-        result: Value::Null,
+        result: project_run
+            .as_ref()
+            .map(|r| json!({"active_run_id":r.id,"next_run_id":r.id}))
+            .unwrap_or(Value::Null),
         error: None,
         events: vec![],
         lifecycle,
     };
     worker.inner.journal.lock().await.save(record.clone())?;
     let _ = launch(worker.clone(), record.clone(), config, permit, false).await?;
-    Ok(RpcReply::ok(json!(
+    let mut body = json!(
         worker.inner.journal.lock().await.records[&record.assignment.index.id]
             .assignment
             .index
-    )))
+    );
+    if let Some(run) = project_run {
+        body["run_id"] = json!(run.id);
+    }
+    Ok(RpcReply::ok(body))
 }
 
 /// Executor-aware agent preflight for a project todo (pure). Agent todos
@@ -199,6 +238,17 @@ pub(super) fn prepare(worker: &Worker, assignment: &Assignment, legacy: bool) ->
             .inner
             .layout
             .resources_dir(assignment.index.kind, &assignment.index.id)?
+    };
+    let root = if assignment.request.kind == ExecutionKind::Project {
+        let id = assignment.request.input["run_id"]
+            .as_str()
+            .context("project run id missing")?;
+        opencoder_project::trace::archive::run_root(
+            &worker.inner.data_dir.join("project-resources"),
+            id,
+        )?
+    } else {
+        root
     };
     let new_snapshot = !root.exists();
     if new_snapshot {
@@ -321,6 +371,17 @@ pub(crate) async fn start(
     command: ExecutionCommand,
 ) -> Result<RpcReply> {
     let _gate = worker.inner.admission.lock().await;
+    let mut command = command;
+    if matches!(command.action.as_str(), "plan" | "execute") && id.starts_with("project-") {
+        match super::project_admission::existing(worker, &id[8..], &command.action, &command.input)
+            .await
+        {
+            Ok(Some(run)) => return Ok(super::project_admission::receipt(worker, id, &run)),
+            Ok(None) => {}
+            Err(error) => return Ok(RpcReply::error(409, error.to_string())),
+        }
+        super::project_admission::ensure_id(&mut command.input)?;
+    }
     if worker.inner.active.lock().await.contains_key(id) {
         return Ok(RpcReply::error(409, "execution is running"));
     }
@@ -341,7 +402,7 @@ pub(crate) async fn start(
         return Ok(RpcReply::error(409, "execution is terminal"));
     }
     {
-        let mut action = command.action;
+        let mut action = command.action.clone();
         if matches!(action.as_str(), "plan" | "execute")
             && record.assignment.request.kind != ExecutionKind::Project
         {
@@ -350,7 +411,8 @@ pub(crate) async fn start(
                 "plan/execute requires project execution",
             ));
         }
-        if action == "plan" {
+        if matches!(action.as_str(), "plan" | "execute") && command.input.get("snapshot").is_some()
+        {
             let Some(snapshot) = command.input.get("snapshot") else {
                 return Ok(RpcReply::error(
                     400,
@@ -392,6 +454,10 @@ pub(crate) async fn start(
                 record.result["brain"] = brain.clone();
             }
         }
+        if record.assignment.request.kind == ExecutionKind::Project {
+            super::project_admission::ensure_id(&mut command.input)?;
+            record.result["next_run_id"] = command.input["run_id"].clone();
+        }
         record.result["next_action"] = json!(action);
     }
     let permit = match worker.inner.slots.clone().try_acquire_owned() {
@@ -401,6 +467,9 @@ pub(crate) async fn start(
     let mut effective = record.assignment.clone();
     if let Some(snapshot) = record.result.get("next_snapshot") {
         effective.definition = Some(snapshot.clone());
+    }
+    if record.assignment.request.kind == ExecutionKind::Project {
+        effective.request.input["run_id"] = command.input["run_id"].clone();
     }
     // Preflight reads the brain override off request.input; mirror the
     // command-carried resolution into this private copy (the durable
@@ -417,8 +486,30 @@ pub(crate) async fn start(
             ))
         }
     };
+    let project_run = if record.assignment.request.kind == ExecutionKind::Project {
+        let action = record.result["next_action"].as_str().unwrap_or("plan");
+        let run = match super::project_admission::reserve(
+            worker,
+            &effective,
+            action,
+            &command.input,
+            &config,
+        )
+        .await
+        {
+            Ok(run) => run,
+            Err(error) => return Ok(super::project_admission::error_reply(error)),
+        };
+        record.result["active_run_id"] = json!(run.id);
+        Some(run)
+    } else {
+        None
+    };
     match launch(worker.clone(), record, config, permit, true).await? {
-        LaunchOutcome::Started => Ok(RpcReply::ok(json!({"id":id,"status":"running"}))),
+        LaunchOutcome::Started => Ok(match project_run {
+            Some(run) => super::project_admission::receipt(worker, id, &run),
+            None => RpcReply::ok(json!({"id":id,"status":"running"})),
+        }),
         LaunchOutcome::Running => Ok(RpcReply::error(409, "execution is running")),
         LaunchOutcome::NotRunnable(status) => Ok(RpcReply::error(
             409,

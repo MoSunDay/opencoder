@@ -61,7 +61,9 @@ const RUN_COLUMNS: &str = "\
   executor_kind VARCHAR(32) NOT NULL DEFAULT 'agent',
   capability_id VARCHAR(64) NULL,
   plan_id VARCHAR(64) NULL,
-  output_ref VARCHAR(255) NULL";
+  output_ref VARCHAR(255) NULL,
+  input_snapshot {text} NULL,
+  trace_manifest {text} NULL";
 
 /// `(table, columns, secondary-index clause)`; the index clause is MySQL-only.
 const TABLES: &[(&str, &str, &str)] = &[
@@ -104,6 +106,8 @@ const UPGRADE_COLUMNS: &[(&str, &[&str])] = &[
             "capability_id VARCHAR(64) NULL",
             "plan_id VARCHAR(64) NULL",
             "output_ref VARCHAR(255) NULL",
+            "input_snapshot {text} NULL",
+            "trace_manifest {text} NULL",
         ],
     ),
 ];

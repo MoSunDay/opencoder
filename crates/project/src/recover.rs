@@ -58,13 +58,14 @@ pub(crate) fn spawn_run_driver<F, Fut>(
 
 /// panic 兜底收敛：run → Failed，Execute 的 todo 也一并 Failed（todo 被
 /// start_execute 置成 Running，不能悬死）；Plan 不占用 todo 状态故不动
-/// todo。所有写库都走「只告警不冒泡」的条件 CAS。
+/// todo。写库失败会标记持久化不可用并阻止后续 admission。
 pub(crate) async fn converge_panicked_run(
     deps: &Arc<Deps>,
     run_id: &str,
     todo_id: &str,
     kind: ProjectTodoRunKind,
 ) {
+    let _admission = deps.admission.lock().await;
     // 驱动可能在 close_run(Done) 与 todo 回写的两个 await 之间 panic——run
     // 已终态时条件收敛不改写其标签/输出；但 todo 若仍 Running 必须补收敛，
     // 否则悬死。
@@ -88,7 +89,7 @@ pub(crate) async fn converge_panicked_run(
 /// todo（Plan 不占 todo 状态）。返回是否赢得 CAS——输家说明并发方已收敛，
 /// 同样视为已处理。
 pub(crate) async fn converge_stale_run(deps: &Arc<Deps>, run: &ProjectTodoRunRecord) -> bool {
-    let won = close_run_if_running(
+    close_run_if_running(
         deps,
         &run.id,
         ProjectTodoRunStatus::Failed,
@@ -96,11 +97,7 @@ pub(crate) async fn converge_stale_run(deps: &Arc<Deps>, run: &ProjectTodoRunRec
         None,
         None,
     )
-    .await;
-    if won && run.kind == ProjectTodoRunKind::Execute {
-        fail_todo_if_running(deps, &run.todo_id).await;
-    }
-    won
+    .await
 }
 
 /// lost-driver 取消收敛：cancel 找不到注册令牌而 run 行仍 Running 时调用。
@@ -108,14 +105,15 @@ pub(crate) async fn converge_stale_run(deps: &Arc<Deps>, run: &ProjectTodoRunRec
 /// （start_* 的返回晚于 spawn_run），故此处无需 grace 直接收敛，镜像驱动
 /// 自身的取消语义：run → Cancelled；Execute 的 todo Running → Planned
 /// （方案仍在，可再次执行）；Plan 不占 todo 状态。行缺失或已终态返回
-/// false（无可取消）。若驱动实际还活着（双击 cancel 的良性竞态），其收尾
-/// 的无条件 close_run 落在后、以真实终态覆盖，语义不受损。
+/// false（无可取消）。所有终态写入都只修改仍处于 Running 的记录。
 pub(crate) async fn converge_lost_run(deps: &Arc<Deps>, run_id: &str) -> bool {
+    let _admission = deps.admission.lock().await;
     let run = match deps.projects.get_todo_run(run_id).await {
         Ok(Some(run)) => run,
         Ok(None) => return false,
         Err(e) => {
-            tracing::warn!(run_id, error = %e, "load run for lost-driver cancel failed");
+            *deps.persistence_error.lock().unwrap() = Some(format!("project recovery: {e:#}"));
+            tracing::error!(run_id, error = %e, "load run for lost-driver cancel failed");
             return false;
         }
     };
@@ -150,7 +148,8 @@ async fn revert_todo_if_running(deps: &Arc<Deps>, todo_id: &str) {
         .patch_todo_when(todo_id, ProjectTodoStatus::Running, &patch, now)
         .await
     {
-        tracing::warn!(todo_id, error = %e, "revert running todo during lost-driver cancel failed");
+        *deps.persistence_error.lock().unwrap() = Some(format!("project recovery: {e:#}"));
+        tracing::error!(todo_id, error = %e, "revert running todo during lost-driver cancel failed");
     }
 }
 
@@ -167,7 +166,8 @@ async fn fail_todo_if_running(deps: &Arc<Deps>, todo_id: &str) {
         .patch_todo_when(todo_id, ProjectTodoStatus::Running, &patch, now)
         .await
     {
-        tracing::warn!(todo_id, error = %e, "fail running todo during convergence failed");
+        *deps.persistence_error.lock().unwrap() = Some(format!("project recovery: {e:#}"));
+        tracing::error!(todo_id, error = %e, "fail running todo during convergence failed");
     }
 }
 
@@ -196,6 +196,7 @@ pub(crate) async fn sweep_stale_runs(deps: &Arc<Deps>, grace_ms: i64) -> usize {
             continue; // 宽限期内（慢启动 / 时钟抖动 / 收敛写入在途）
         }
         tracing::warn!(run_id = %run.id, "converging stale project run (driver lost)");
+        let _admission = deps.admission.lock().await;
         if converge_stale_run(deps, &run).await {
             converged += 1;
         }

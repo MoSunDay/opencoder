@@ -141,6 +141,34 @@ describe('ProjectPanel', () => {
     });
   });
 
+  it('creates the first goal from an empty project catalog', async () => {
+    apiGetMock.mockResolvedValue({ goals: [], backlog: [] });
+    mountPanel();
+    await openTab('项目目标');
+    fireEvent.click(await screen.findByText('新建目标'));
+    await settle();
+    fireEvent.change(screen.getByPlaceholderText('一句话标题'), { target: { value: '第一个目标' } });
+    fireEvent.click(findButton('保存'));
+    await waitFor(() => expect(apiPostMock).toHaveBeenCalledWith('/api/project/goals',
+      expect.objectContaining({ title: '第一个目标' })));
+  });
+
+  it('creates a milestone under the selected goal when several goals exist', async () => {
+    const overview = overviewFixture();
+    overview.goals.push({ ...overview.goals[0], id: 'g2', title: '第二目标', milestones: [] });
+    apiGetMock.mockResolvedValue(overview);
+    mountPanel();
+    await openTab('里程碑');
+    fireEvent.click(await screen.findByText('新建里程碑', { exact: true }));
+    await settle();
+    fireEvent.mouseDown(screen.getByRole('combobox', { name: 'goal_id' }));
+    fireEvent.click(await screen.findByText('第二目标', { selector: '.ant-select-item-option-content' }));
+    fireEvent.change(screen.getByPlaceholderText('一句话标题'), { target: { value: '新里程碑' } });
+    fireEvent.click(findButton('保存'));
+    await waitFor(() => expect(apiPostMock).toHaveBeenCalledWith('/api/project/milestones',
+      expect.objectContaining({ title: '新里程碑', goal_id: 'g2' })));
+  });
+
   it('todos table flattens milestones + backlog (未分组) with plan checkmark', async () => {
     mountPanel();
     await openTab('TODO');
@@ -171,5 +199,25 @@ describe('ProjectPanel', () => {
     await waitFor(() => {
       expect(apiPostMock).toHaveBeenCalledWith('/api/executions/project-t1/commands', { action: 'cancel', input: {} });
     });
+  });
+
+  it('loads a large current plan through the owning TODO execution index', async () => {
+    const overview = overviewFixture();
+    const marker = { omitted: true, read_via: 'detail_field', field: 'project.todo.t1.plan_md' };
+    overview.goals[0].milestones[0].todos[0].plan_md = marker;
+    apiGetMock.mockImplementation((path) => {
+      if (path === '/api/project/overview') return Promise.resolve(overview);
+      if (path.includes('/detail-field?')) return Promise.resolve({
+        encoding: 'utf8-base64', bytes_b64: btoa('complete plan'), offset: 0, next_offset: 13, total_bytes: 13, eof: true,
+      });
+      return Promise.resolve({ runs: [] });
+    });
+    mountPanel();
+    await openTab('TODO');
+    fireEvent.click(findButton('详情', (await screen.findByText('写发布说明')).closest('tr')));
+    fireEvent.click(await screen.findByText('计划内容', { exact: true }));
+    expect(await screen.findByText('complete plan')).toBeTruthy();
+    expect(apiGetMock).toHaveBeenCalledWith('/api/executions/project-t1/detail-field?field=project.todo.t1.plan_md&offset=0');
+    expect(screen.queryByText('[object Object]')).toBeNull();
   });
 });

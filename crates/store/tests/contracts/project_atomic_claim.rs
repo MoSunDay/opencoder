@@ -26,6 +26,8 @@ fn todo(id: &str, status: ProjectTodoStatus, now: i64) -> ProjectTodoRecord {
 
 fn execute_run(id: &str, todo_id: &str, version: i64, now: i64) -> ProjectTodoRunRecord {
     ProjectTodoRunRecord {
+        input_snapshot: None,
+        trace_manifest: None,
         id: id.into(),
         todo_id: todo_id.into(),
         kind: ProjectTodoRunKind::Execute,
@@ -171,4 +173,124 @@ async fn existing_running_and_terminal_run_replay_do_not_duplicate() {
     let todo = store.get_todo("todo").await.unwrap().unwrap();
     assert_eq!(todo.status, ProjectTodoStatus::Done);
     assert_eq!(todo.updated_at, 20, "failed replay rolls claim back");
+}
+
+#[tokio::test]
+async fn plan_claim_blocks_execute_and_finalization_commits_todo_and_run_together() {
+    let store = LibsqlStore::open_memory().await.unwrap();
+    store
+        .create_todo(&todo("atomic", ProjectTodoStatus::Planned, 1))
+        .await
+        .unwrap();
+    let mut plan = execute_run("prun-plan", "atomic", 99, 2);
+    plan.kind = ProjectTodoRunKind::Plan;
+    plan.input_snapshot = Some("{\"input\":\"accepted\"}".into());
+    assert!(store.claim_todo_running_with_run(&plan, 2).await.unwrap());
+    assert_eq!(
+        store.get_todo_run(&plan.id).await.unwrap().unwrap().version,
+        1
+    );
+    assert!(!store
+        .claim_todo_running_with_run(&execute_run("prun-act", "atomic", 1, 3), 3)
+        .await
+        .unwrap());
+    let patch = ProjectTodoRunPatch {
+        status: Some(ProjectTodoRunStatus::Done),
+        output_md: Some("new plan".into()),
+        finished_at: Some(4),
+        ..Default::default()
+    };
+    let conn = store.conn().await.unwrap();
+    conn.execute("CREATE TRIGGER fail_finalization BEFORE UPDATE ON project_todo_runs BEGIN SELECT RAISE(FAIL, 'injected finalization failure'); END", ()).await.unwrap();
+    assert!(store.finish_todo_run(&plan.id, &patch, 4).await.is_err());
+    assert_eq!(
+        store
+            .get_todo("atomic")
+            .await
+            .unwrap()
+            .unwrap()
+            .plan_md
+            .as_deref(),
+        Some("# plan")
+    );
+    assert_eq!(
+        store.get_todo_run(&plan.id).await.unwrap().unwrap().status,
+        ProjectTodoRunStatus::Running
+    );
+    conn.execute("DROP TRIGGER fail_finalization", ())
+        .await
+        .unwrap();
+    assert!(store.finish_todo_run(&plan.id, &patch, 4).await.unwrap());
+    assert_eq!(
+        store
+            .get_todo("atomic")
+            .await
+            .unwrap()
+            .unwrap()
+            .plan_md
+            .as_deref(),
+        Some("new plan")
+    );
+    assert_eq!(
+        store.get_todo_run(&plan.id).await.unwrap().unwrap().status,
+        ProjectTodoRunStatus::Done
+    );
+    assert!(!store
+        .finish_todo_run(
+            &plan.id,
+            &ProjectTodoRunPatch {
+                status: Some(ProjectTodoRunStatus::Failed),
+                ..Default::default()
+            },
+            5
+        )
+        .await
+        .unwrap());
+    assert!(store
+        .claim_todo_running_with_run(&execute_run("prun-act", "atomic", 1, 6), 6)
+        .await
+        .unwrap());
+    assert_eq!(
+        store
+            .get_todo_run("prun-act")
+            .await
+            .unwrap()
+            .unwrap()
+            .version,
+        2
+    );
+}
+
+#[tokio::test]
+async fn medium_fields_respect_total_page_budget_without_losing_history() {
+    let store = LibsqlStore::open_memory().await.unwrap();
+    store
+        .create_todo(&todo("pages", ProjectTodoStatus::Planned, 1))
+        .await
+        .unwrap();
+    for version in 1..=25 {
+        let mut run = execute_run(&format!("prun-{version}"), "pages", version, version);
+        run.status = ProjectTodoRunStatus::Done;
+        run.plan_md = Some("p".repeat(60000));
+        run.output_md = Some("o".repeat(60000));
+        run.input_snapshot = Some("i".repeat(60000));
+        run.trace_manifest = Some("m".repeat(60000));
+        store.create_todo_run(&run).await.unwrap();
+    }
+    let mut cursor = None;
+    let mut versions = Vec::new();
+    loop {
+        let page = store
+            .list_todo_runs_page("pages", cursor, 20)
+            .await
+            .unwrap();
+        assert!(serde_json::to_vec(&page).unwrap().len() < 600000);
+        assert!(!page.runs.is_empty());
+        versions.extend(page.runs.iter().map(|run| run.version));
+        cursor = page.next_version;
+        if cursor.is_none() {
+            break;
+        }
+    }
+    assert_eq!(versions, (1..=25).rev().collect::<Vec<_>>());
 }

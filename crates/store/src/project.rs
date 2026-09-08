@@ -71,8 +71,9 @@ pub trait ProjectStore: Send + Sync {
     /// else owns the todo right now) — the TOCTOU-closed replacement for a
     /// read-then-patch pair.
     async fn claim_todo_running(&self, id: &str, now_ms: i64) -> Result<bool>;
-    /// Atomically claims the run's todo as `running` and inserts the run row.
-    /// `false` means the todo was absent or already running; in that case no
+    /// Atomically excludes concurrent Plan/Execute attempts, allocates the next
+    /// version and inserts the run. Execute also sets the todo to `running`.
+    /// `false` means the todo was absent or another attempt is running; no
     /// run row is written. Any insert/commit failure rolls the claim back.
     ///
     /// Backends that cannot provide a transaction spanning both tables must
@@ -109,6 +110,15 @@ pub trait ProjectStore: Send + Sync {
     // ---- todo runs ----
 
     async fn create_todo_run(&self, rec: &ProjectTodoRunRecord) -> Result<()>;
+    /// Commit a terminal run and its corresponding todo state in one transaction.
+    async fn finish_todo_run(
+        &self,
+        _id: &str,
+        _patch: &ProjectTodoRunPatch,
+        _now_ms: i64,
+    ) -> Result<bool> {
+        anyhow::bail!("atomic project run finalization is unsupported by this store")
+    }
     async fn patch_todo_run(
         &self,
         id: &str,

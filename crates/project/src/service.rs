@@ -13,15 +13,15 @@ use std::{
 use anyhow::{bail, Context as _, Result};
 use opencoder_llm::ChatStream;
 use opencoder_store::{
-    ProjectExecutorKind, ProjectStore, ProjectTodoRecord, ProjectTodoRunKind, ProjectTodoRunRecord,
-    ProjectTodoStatus, Store, TASK_TYPE_PROJECT,
+    ProjectExecutorKind, ProjectStore, ProjectTodoRecord, ProjectTodoRunKind, Store,
+    TASK_TYPE_PROJECT,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tokio_util::sync::CancellationToken;
 
 use crate::context::ProjectContext;
-use crate::executor::{resolve_brain, BrainHandoff, ResolvedExecutor};
+use crate::executor::ResolvedExecutor;
 
 /// 一次初始化后只读的共享依赖集。`spawns` 是运行中的 run_id → 取消令牌
 /// 注册表（Mutex 包裹的普通 HashMap，跨 await 只做短临界区拷贝）。
@@ -34,6 +34,9 @@ pub struct Deps {
     pub client_override: Option<Arc<dyn ChatStream>>,
     pub brain: Option<opencoder_brain::Runtime>,
     pub spawns: Mutex<HashMap<String, CancellationToken>>,
+    pub archive_root: Mutex<PathBuf>,
+    pub admission: tokio::sync::Mutex<()>,
+    pub persistence_error: Mutex<Option<String>>,
 }
 
 /// 执行启动时的执行器覆盖（控制面预解析结果）：跳过 todo 自带的三字段
@@ -60,7 +63,7 @@ pub const TASK_TYPE: &str = TASK_TYPE_PROJECT;
 
 /// stale run 清扫宽限期：running 行不在本进程注册表且 `now - started_at`
 /// 超过该时长才判死（重启丢驱动 / panic 兜底后仍未终态）。
-const STALE_RUN_GRACE_MS: i64 = 300_000;
+pub(crate) const STALE_RUN_GRACE_MS: i64 = 300_000;
 
 pub struct ProjectService {
     deps: OnceLock<Arc<Deps>>,
@@ -87,6 +90,9 @@ impl ProjectService {
         let deps = Arc::new(Deps {
             store,
             projects,
+            archive_root: Mutex::new(opencoder_core::data_dir_for(&workdir).join("project-runs")),
+            admission: tokio::sync::Mutex::new(()),
+            persistence_error: Mutex::new(None),
             workdir,
             client_override,
             brain,
@@ -105,177 +111,6 @@ impl ProjectService {
             .get()
             .cloned()
             .ok_or_else(|| anyhow::anyhow!("project service not initialized"))
-    }
-
-    /// 为 todo 生成（或重新生成）实施方案：spawn 一个 plan 直驱运行。
-    pub async fn start_plan(&self, todo_id: &str) -> Result<String> {
-        let deps = self.require()?;
-        let todo = deps
-            .projects
-            .get_todo(todo_id)
-            .await
-            .context("load todo for plan")?
-            .ok_or_else(|| anyhow::anyhow!("todo not found: {todo_id}"))?;
-        if todo.status == ProjectTodoStatus::Running {
-            bail!("todo is running");
-        }
-        let cx = build_context(&deps, &todo).await?;
-        let run_id = format!("prun-{}", ulid::Ulid::new());
-        let version = deps.projects.next_todo_version(todo_id).await?;
-        let now = opencoder_core::message::now_ms();
-        deps.projects
-            .create_todo_run(&ProjectTodoRunRecord {
-                id: run_id.clone(),
-                todo_id: todo_id.to_string(),
-                kind: ProjectTodoRunKind::Plan,
-                version,
-                plan_md: None,
-                output_md: None,
-                agent: "plan".into(),
-                // plan 运行恒为 plan 代理直驱，执行器维度固定 Agent（与
-                // todo 的执行器无关）。
-                executor_kind: ProjectExecutorKind::Agent,
-                capability_id: None,
-                plan_id: None,
-                output_ref: None,
-                session_id: None,
-                status: opencoder_store::ProjectTodoRunStatus::Running,
-                started_at: now,
-                finished_at: None,
-                created_at: now,
-            })
-            .await
-            .context("create plan run")?;
-        let token = spawn_run(&deps, &run_id);
-        let drive_todo = todo.clone();
-        let drive_cx = cx;
-        let drive_deps = deps.clone();
-        let drive_run = run_id.clone();
-        // spawn 驱动 + panic 监控：驱动 panic 时不留 running 悬行。
-        crate::recover::spawn_run_driver(
-            &deps,
-            &run_id,
-            todo_id,
-            ProjectTodoRunKind::Plan,
-            move || crate::plan_gen::drive(drive_deps, drive_run, drive_todo, drive_cx, token),
-        );
-        Ok(run_id)
-    }
-
-    /// 按 todo 的现行方案驱动一次执行运行（无覆盖）。
-    pub async fn start_execute(&self, todo_id: &str) -> Result<String> {
-        self.start_execute_with(todo_id, None).await
-    }
-
-    /// 同上，但允许控制面携带执行器覆盖（brain 预解析结果）。spawn 之前
-    /// 先把 todo 置为 Running（崩溃时由 store 状态自证）。执行器解析在
-    /// claim 之前完成：解析失败（brain 缺运行时、team/dag 缺目标等）
-    /// 直接向上抛，不留半启动状态；brain 解析可能触发 LLM 路由调用，
-    /// 这一窗口不含任何已 claim 的状态，代价可接受。
-    pub async fn start_execute_with(
-        &self,
-        todo_id: &str,
-        override_: Option<ExecutorOverride>,
-    ) -> Result<String> {
-        let deps = self.require()?;
-        let todo = deps
-            .projects
-            .get_todo(todo_id)
-            .await
-            .context("load todo for execute")?
-            .ok_or_else(|| anyhow::anyhow!("todo not found: {todo_id}"))?;
-        if todo.status == ProjectTodoStatus::Running {
-            bail!("todo is running");
-        }
-        if todo.plan_md.is_none() {
-            bail!("todo has no plan — generate one first");
-        }
-        ensure_no_plan_in_flight(&deps, todo_id).await?;
-        let cx = build_context(&deps, &todo).await?;
-        // claim 前解析执行器：brain 走运行时解析（含钉住/覆盖捷径），
-        // 其余按 todo 三字段纯解析。留痕（capability/plan）随解析产出。
-        let (resolved, trace) = if todo.executor_kind == ProjectExecutorKind::Brain {
-            resolve_brain(&deps, &todo, &cx, override_.as_ref()).await?
-        } else {
-            (
-                crate::executor::resolve(&todo, override_.as_ref())?,
-                Default::default(),
-            )
-        };
-        let run_id = format!("prun-{}", ulid::Ulid::new());
-        let version = deps.projects.next_todo_version(todo_id).await?;
-        let now = opencoder_core::message::now_ms();
-        let run = ProjectTodoRunRecord {
-            id: run_id.clone(),
-            todo_id: todo_id.to_string(),
-            kind: ProjectTodoRunKind::Execute,
-            version,
-            // 执行起点的方案快照：后续 plan 重新生成不会改写本次执行的
-            // 留痕（前置检查已保证 Some）。
-            plan_md: todo.plan_md.clone(),
-            output_md: None,
-            agent: run_agent_label(&resolved, &todo),
-            executor_kind: resolved.kind,
-            capability_id: trace.capability_id.clone(),
-            plan_id: trace.plan_id.clone(),
-            output_ref: None,
-            session_id: None,
-            status: opencoder_store::ProjectTodoRunStatus::Running,
-            started_at: now,
-            finished_at: None,
-            created_at: now,
-        };
-        // Store 的单事务 claim + INSERT 关死两个提交之间的崩溃窗口；并发
-        // 双击/多实例只有一个调用方能赢，插入失败会连同 claim 一起回滚。
-        if !deps
-            .projects
-            .claim_todo_running_with_run(&run, now)
-            .await
-            .context("claim todo and create execute run")?
-        {
-            bail!("todo is running");
-        }
-        let token = spawn_run(&deps, &run_id);
-        let drive_deps = deps.clone();
-        let drive_run = run_id.clone();
-        // brain todo 以 Brain 标记 + 派发交接进派发：claim 前解析出的
-        // override 随行——brain_drive 重解析直接采纳该纯函数分支（节点
-        // 无 brain 运行时也可执行），留痕沿用 claim 前解析（单一事实源）；
-        // 其余 kind 直接携带解析结果。
-        let (drive_resolved, brain_handoff) = if todo.executor_kind == ProjectExecutorKind::Brain {
-            (
-                ResolvedExecutor {
-                    kind: ProjectExecutorKind::Brain,
-                    ref_: None,
-                },
-                Some(BrainHandoff {
-                    override_: override_.clone(),
-                    trace: Some(trace),
-                }),
-            )
-        } else {
-            (resolved, None)
-        };
-        // spawn 驱动 + panic 监控：驱动 panic 时 run/todo 一并收敛。
-        crate::recover::spawn_run_driver(
-            &deps,
-            &run_id,
-            todo_id,
-            ProjectTodoRunKind::Execute,
-            move || {
-                crate::executor::drive(
-                    drive_deps,
-                    drive_run,
-                    todo,
-                    cx,
-                    version,
-                    drive_resolved,
-                    brain_handoff,
-                    token,
-                )
-            },
-        );
-        Ok(run_id)
     }
 
     /// 取消一个运行中的 run。返回是否实际取消：注册令牌存在并已触发
@@ -340,7 +175,7 @@ impl ProjectService {
 }
 
 /// 注册取消令牌并返回其克隆（drive 结束时自行摘除）。
-fn spawn_run(deps: &Arc<Deps>, run_id: &str) -> CancellationToken {
+pub(crate) fn spawn_run(deps: &Arc<Deps>, run_id: &str) -> CancellationToken {
     let token = CancellationToken::new();
     deps.spawns
         .lock()
@@ -357,7 +192,7 @@ fn spawn_run(deps: &Arc<Deps>, run_id: &str) -> CancellationToken {
 /// 注册表且超 grace）不阻塞执行——机会式收敛后放行，消灭「崩溃后必须
 /// 等总览触发 sweep」的死角；grace 内的未注册行仍保守拒绝（并发
 /// start_plan 在 create→注册之间的毫秒级窗口靠 grace 兜住）。
-async fn ensure_no_plan_in_flight(deps: &Arc<Deps>, todo_id: &str) -> Result<()> {
+pub(crate) async fn ensure_no_plan_in_flight(deps: &Arc<Deps>, todo_id: &str) -> Result<()> {
     let now = opencoder_core::message::now_ms();
     let mut plan_in_flight = false;
     for run in deps
@@ -407,7 +242,7 @@ fn executor_display_name(resolved: &ResolvedExecutor, todo: &ProjectTodoRecord) 
 /// 会带名），否则沿用 todo.agent；team/dag 带上执行器名（`team:<名>` /
 /// `dag:<名>`）；brain 标记不会出现在已解析结果里（resolve/resolve_brain
 /// 都不产出 Brain），此分支只是完备性兜底。
-fn run_agent_label(resolved: &ResolvedExecutor, todo: &ProjectTodoRecord) -> String {
+pub(crate) fn run_agent_label(resolved: &ResolvedExecutor, todo: &ProjectTodoRecord) -> String {
     match resolved.kind {
         ProjectExecutorKind::Agent => resolved.ref_.clone().unwrap_or_else(|| todo.agent.clone()),
         ProjectExecutorKind::Team => format!("team:{}", executor_display_name(resolved, todo)),
@@ -418,7 +253,10 @@ fn run_agent_label(resolved: &ResolvedExecutor, todo: &ProjectTodoRecord) -> Str
 
 /// 组装 plan/execute 提示词所需的目标→里程碑→待办上下文。里程碑与目标
 /// 均为 best-effort：行缺失时省略对应段落，目标缺失时用占位标题。
-async fn build_context(deps: &Arc<Deps>, todo: &ProjectTodoRecord) -> Result<ProjectContext> {
+pub(crate) async fn build_context(
+    deps: &Arc<Deps>,
+    todo: &ProjectTodoRecord,
+) -> Result<ProjectContext> {
     let milestone = match &todo.milestone_id {
         Some(mid) => deps
             .projects

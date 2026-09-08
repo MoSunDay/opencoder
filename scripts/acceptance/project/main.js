@@ -107,15 +107,16 @@ async function main() {
   assert(Number.isInteger(partial.replay.messages_through));
   assert((await field(interrupted, 'archive.request-1.json')).includes('messages'));
   // Cancel a separate TODO so the completed project remains reusable.
-  mode.kind = 'hang'; const cancelCalls = mode.requests;
+  mode.kind = 'partial-hang'; const cancelCalls = mode.requests;
   const cancelled = `prun-${crypto.randomUUID()}`;
   await api('POST', `/api/project/todos/${backlog.id}/execute`, { run_id: cancelled });
-  await until(async () => mode.requests > cancelCalls, 'cancel in-flight');
+  await until(async () => mode.requests >= cancelCalls + 2, 'cancel after tool output');
   await api('POST', `/api/executions/project-${backlog.id}/commands`, { action: 'cancel', input: {} });
   await until(async () => (await api('GET', `/api/executions/project-${backlog.id}`)).execution.status === 'cancelled', 'cancel convergence');
   mode.kind = 'normal';
   const cancellation = await api('GET', `/api/executions/${cancelled}`);
   assert.equal(cancellation.run.status, 'cancelled'); assert(cancellation.run.input_snapshot);
+  assert.equal(cancellation.run.output_md, 'partial output before cancellation');
   await audit(h, runs.map((run) => run.id).concat(failed, interrupted, cancelled));
   // Browser exercises the built SPA and exact run replay entry.
   await browserPage.goto(h.base, { waitUntil: 'networkidle' });

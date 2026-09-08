@@ -2,6 +2,7 @@
 pub mod admission;
 pub mod api;
 mod bootstrap;
+mod resource_scope;
 mod routes;
 pub mod transport;
 

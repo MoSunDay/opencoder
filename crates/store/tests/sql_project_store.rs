@@ -174,6 +174,8 @@ mod gated {
         assert_eq!(v1, 1, "fresh todo starts at version 1");
         let run_id = format!("run-{uniq}");
         p.create_todo_run(&ProjectTodoRunRecord {
+            input_snapshot: None,
+            trace_manifest: None,
             id: run_id.clone(),
             todo_id: todo.clone(),
             kind: ProjectTodoRunKind::Plan,
@@ -199,6 +201,8 @@ mod gated {
         .await;
         let run2 = format!("run2-{uniq}");
         p.create_todo_run(&ProjectTodoRunRecord {
+            input_snapshot: None,
+            trace_manifest: None,
             id: run2.clone(),
             todo_id: todo.clone(),
             kind: ProjectTodoRunKind::Execute,
@@ -298,6 +302,8 @@ mod gated {
         // provenance) so the atomic claim also proves those columns
         // round-trip.
         let atomic_run = ProjectTodoRunRecord {
+            input_snapshot: None,
+            trace_manifest: None,
             id: format!("atomic-{uniq}"),
             todo_id: todo.clone(),
             kind: ProjectTodoRunKind::Execute,

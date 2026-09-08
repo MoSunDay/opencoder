@@ -16,6 +16,20 @@ pub(in crate::operations) async fn event_payload(
     if request.seq <= 0 {
         return Ok(RpcReply::error(400, "event sequence must be positive"));
     }
+    if request.execution.kind == ExecutionKind::Project && request.execution.id.starts_with("prun-")
+    {
+        let mut reply = super::project::file(
+            worker,
+            &request.execution.id,
+            &format!("event-{}.json", request.seq),
+            request.offset,
+        )?;
+        if reply.status == 200 {
+            reply.body["seq"] = serde_json::json!(request.seq);
+            reply.body["encoding"] = serde_json::json!("base64");
+        }
+        return Ok(reply);
+    }
     let id = request.execution.id.as_str();
     let chunk = if request.execution.kind == ExecutionKind::Todos {
         worker
@@ -96,6 +110,12 @@ pub(in crate::operations) async fn detail_field(
         return Ok(reply);
     }
     let id = request.execution.id.as_str();
+    if let Some(name) = request.field.strip_prefix("archive.") {
+        if request.execution.kind != ExecutionKind::Project || !id.starts_with("prun-") {
+            return Ok(RpcReply::error(400, "archive requires a project run"));
+        }
+        return super::project::file(worker, id, name, request.offset);
+    }
     if let Some(field) = request.field.strip_prefix("workflow.") {
         let chunk = worker
             .inner
@@ -118,12 +138,25 @@ pub(in crate::operations) async fn detail_field(
         return detail_chunk_reply(request.field, request.offset, chunk, "utf8-base64");
     }
     if let Some(rest) = request.field.strip_prefix("project.") {
+        if request.execution.kind != ExecutionKind::Project {
+            return Ok(RpcReply::error(
+                400,
+                "project field requires a project execution",
+            ));
+        }
         let parts = rest.split('.').collect::<Vec<_>>();
         if parts.len() != 3 {
             return Ok(RpcReply::error(400, "invalid project detail field"));
         }
-        let Some(owner_id) = id.strip_prefix("project-") else {
-            return Ok(RpcReply::error(400, "invalid Project execution id"));
+        let owner_id = if let Some(owner) = id.strip_prefix("project-") {
+            owner.to_string()
+        } else if id.starts_with("prun-") && parts[0] == "run" && parts[1] == id {
+            super::project::run(worker, id).await?.todo_id
+        } else {
+            return Ok(RpcReply::error(
+                400,
+                "project field does not belong to this execution",
+            ));
         };
         let chunk = worker
             .inner
@@ -133,7 +166,7 @@ pub(in crate::operations) async fn detail_field(
             .projects
             .project_text_chunk(
                 parts[0],
-                owner_id,
+                &owner_id,
                 parts[1],
                 parts[2],
                 request.offset,

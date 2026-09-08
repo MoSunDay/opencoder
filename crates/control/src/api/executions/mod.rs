@@ -142,7 +142,15 @@ async fn submit_inner(state: &Arc<AppState>, request: CreateExecution) -> anyhow
         }
         return Ok(RpcReply {
             status: 202,
-            body: serde_json::to_value(accepted)?,
+            body: {
+                let mut body = serde_json::to_value(accepted)?;
+                if index.kind == ExecutionKind::Project {
+                    if let Some(id) = reply.body.get("run_id") {
+                        body["run_id"] = id.clone();
+                    }
+                }
+                body
+            },
         });
     }
     // The socket settles actual replies and complete reports own status. A
@@ -159,7 +167,8 @@ pub async fn create(
 
 mod paging;
 pub use paging::{
-    detail_field, event_payload, inspect, list, messages, project_runs, team_turns, todo_items,
+    detail_field, event_payload, events_page, inspect, list, messages, project_runs, team_turns,
+    todo_items, ProjectRunsQuery,
 };
 pub async fn command(
     State(state): State<Arc<AppState>>,
@@ -193,7 +202,34 @@ pub async fn dispatch_command(
         let Some(todo) = id.strip_prefix("project-").filter(|_| valid_id(id)) else {
             return RpcReply::error(400, "plan/execute requires project execution");
         };
-        if command.action == "plan" {
+        if let Some(run_id) = command.input.get("run_id") {
+            if !run_id
+                .as_str()
+                .is_some_and(|id| id.starts_with("prun-") && valid_id(id))
+            {
+                return RpcReply::error(400, "invalid project run id");
+            }
+            let receipt = command_id(
+                state,
+                id,
+                ExecutionCommand {
+                    action: "project-receipt".into(),
+                    input: json!({"action":command.action,"input":command.input}),
+                },
+            )
+            .await;
+            if receipt.status != 404 {
+                return receipt;
+            }
+        }
+        command.input =
+            match super::project::brain_preresolve(state, todo, &command.action, command.input)
+                .await
+            {
+                Ok(input) => input,
+                Err(reply) => return reply,
+            };
+        {
             let request = CreateExecution {
                 id: id.into(),
                 kind: ExecutionKind::Project,
@@ -202,7 +238,13 @@ pub async fn dispatch_command(
                 node_id: None,
             };
             match super::catalog::resolve(state, &request).await {
-                Ok(snapshot) => command.input = json!({"snapshot": snapshot}),
+                Ok(Some(snapshot)) => {
+                    if command.input.is_null() {
+                        command.input = json!({});
+                    }
+                    command.input["snapshot"] = snapshot;
+                }
+                Ok(None) => return RpcReply::error(500, "project snapshot missing"),
                 Err(reply) => return reply,
             }
         }
@@ -252,7 +294,7 @@ pub async fn event_payload_id(state: &AppState, id: &str, seq: i64, offset: u64)
     })
     .await
 }
-async fn for_id(
+pub(super) async fn for_id(
     state: &AppState,
     id: &str,
     operation: impl FnOnce(ExecutionRef) -> NodeOperation,

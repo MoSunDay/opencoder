@@ -6,7 +6,7 @@ use super::chat_tables::{
 };
 use super::team_runs::{CREATE_INDEX_TEAM_TOPIC_RUNS_TOPIC, CREATE_TEAM_TOPIC_RUNS};
 
-const SCHEMA_VERSION: i64 = 20;
+const SCHEMA_VERSION: i64 = 21;
 
 // Order invariant: busy_timeout must precede any locking statement, and
 // synchronous=NORMAL must be applied BEFORE journal_mode=WAL. Switching a
@@ -170,7 +170,9 @@ CREATE TABLE IF NOT EXISTS project_todo_runs (
   executor_kind TEXT NOT NULL DEFAULT 'agent',
   capability_id TEXT,
   plan_id TEXT,
-  output_ref TEXT
+  output_ref TEXT,
+  input_snapshot TEXT,
+  trace_manifest TEXT
 )";
 const CREATE_INDEX_PROJECT_MILESTONES_GOAL: &str =
     "CREATE INDEX IF NOT EXISTS idx_project_milestones_goal ON project_milestones(goal_id)";
@@ -455,6 +457,10 @@ async fn bootstrap_tx(conn: &Connection) -> Result<()> {
 /// to say which partial upgrades ran, the full pass from the bottom is the
 /// only correct entry, and it is safe for exactly the reasons above.
 async fn migrate(conn: &Connection, from: i64) -> Result<()> {
+    if from < 21 {
+        add_column_if_absent(conn, "project_todo_runs", "input_snapshot", "TEXT").await?;
+        add_column_if_absent(conn, "project_todo_runs", "trace_manifest", "TEXT").await?;
+    }
     if from < 20 {
         // v20: project todo executor dimension — todos carry which executor
         // (agent/team/dag/brain) drives them plus optional inline spec; runs

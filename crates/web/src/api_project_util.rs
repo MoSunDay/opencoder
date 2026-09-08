@@ -67,9 +67,14 @@ pub fn map_start_err(e: anyhow::Error) -> Response {
     let msg = format!("{e:#}");
     if msg.contains("not found") {
         error_404(msg)
-    } else if msg.contains("is running") || msg.contains("no plan") {
+    } else if msg.contains("is running")
+        || msg.contains("no plan")
+        || msg.contains("already accepted")
+    {
         error_409(msg)
-    } else if msg.contains("not initialized") {
+    } else if msg.contains("invalid project run id") {
+        error_400(msg)
+    } else if msg.contains("not initialized") || msg.contains("persistence unavailable") {
         error_503(msg)
     } else {
         error_500(format!("start: {msg}"))

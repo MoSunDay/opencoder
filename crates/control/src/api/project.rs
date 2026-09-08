@@ -1,7 +1,7 @@
-use super::{error_500, response};
+use super::{error_400, error_500, response};
 use crate::AppState;
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     response::Response,
     Json,
 };
@@ -41,18 +41,27 @@ pub async fn overview(State(state): State<Arc<AppState>>) -> Response {
         Err(error) => error_500(error.to_string()),
     }
 }
-pub async fn runs(State(state): State<Arc<AppState>>, Path(todo): Path<String>) -> Response {
+pub async fn runs(
+    State(state): State<Arc<AppState>>,
+    Path(todo): Path<String>,
+    Query(query): Query<super::executions::ProjectRunsQuery>,
+) -> Response {
+    if query.before_version.is_some_and(|version| version <= 0) {
+        return error_400("invalid project run cursor".into());
+    }
     let id = format!("project-{todo}");
     match state.fleet.index(&id).await {
-        Ok(None) => response(RpcReply::ok(json!({"runs":[]}))),
-        Ok(Some(_)) => {
-            let reply = super::executions::inspect_id(&state, &id).await;
-            if reply.status != 200 {
-                return response(reply);
-            }
-            response(RpcReply::ok(json!({"runs":reply.body["runs"]})))
-        }
-        Err(e) => error_500(e.to_string()),
+        Ok(None) => response(RpcReply::ok(
+            json!({"runs":[],"next_version":null,"more":false}),
+        )),
+        Ok(Some(_)) => response(
+            super::executions::for_id(&state, &id, |execution| NodeOperation::ProjectRuns {
+                execution,
+                before_version: query.before_version,
+            })
+            .await,
+        ),
+        Err(error) => error_500(error.to_string()),
     }
 }
 pub async fn plan(
@@ -62,54 +71,76 @@ pub async fn plan(
 ) -> Response {
     start(state, id, "plan", body.map(|b| b.0).unwrap_or(json!({}))).await
 }
-pub async fn execute(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Response {
-    start(state, id, "execute", json!({})).await
+pub async fn execute(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    body: Option<Json<Value>>,
+) -> Response {
+    start(state, id, "execute", body.map(|b| b.0).unwrap_or(json!({}))).await
 }
 async fn start(state: Arc<AppState>, todo: String, action: &str, input: Value) -> Response {
+    if !input.is_object() {
+        return error_400("project input must be an object".into());
+    }
+    if input.get("run_id").is_some_and(|id| {
+        !id.as_str()
+            .is_some_and(|id| id.starts_with("prun-") && valid_id(id))
+    }) {
+        return error_400("invalid project run id".into());
+    }
     let id = format!("project-{todo}");
-    // Brain todos are pre-resolved HERE: nodes carry no brain runtime, so
-    // the control plane routes the situation (or honors a pinned
-    // capability) and ships the resolved executor override inside the
-    // execution input. Non-brain todos pass through untouched.
-    let input = match brain_preresolve(&state, &todo, action, input).await {
-        Ok(input) => input,
-        Err(reply) => return response(reply),
-    };
     match state.fleet.index(&id).await {
-        Ok(Some(_)) => response(
-            super::executions::dispatch_command(
+        Ok(Some(index)) => {
+            let reply = super::executions::dispatch_command(
                 &state,
                 &id,
                 ExecutionCommand {
                     action: action.into(),
-                    input,
+                    input: input.clone(),
                 },
             )
-            .await,
-        ),
-        Ok(None) => {
-            // Byte-identical to the pre-brain shape for non-brain todos:
-            // `{"action": …}`; a resolved brain todo adds its override key.
-            let mut request_input = json!({"action": action});
-            if let Some(brain) = input.get("brain").filter(|v| !v.is_null()) {
-                request_input["brain"] = brain.clone();
+            .await;
+            if reply.status == 404
+                && reply.body["error"] == "execution not found"
+                && index.status == ExecutionStatus::Pending
+            {
+                submit_start(state, todo, action, input).await
+            } else {
+                response(reply)
             }
-            response(
-                super::executions::submit(
-                    &state,
-                    CreateExecution {
-                        id,
-                        kind: ExecutionKind::Project,
-                        target: Some(todo),
-                        node_id: input["node_id"].as_str().map(str::to_owned),
-                        input: request_input,
-                    },
-                )
-                .await,
-            )
         }
+        Ok(None) => submit_start(state, todo, action, input).await,
         Err(e) => error_500(e.to_string()),
     }
+}
+async fn submit_start(state: Arc<AppState>, todo: String, action: &str, input: Value) -> Response {
+    let id = format!("project-{todo}");
+
+    // Byte-identical to the pre-brain shape for non-brain todos:
+    // `{"action": …}`; a resolved brain todo adds its override key.
+    let input = match brain_preresolve(&state, &todo, action, input).await {
+        Ok(input) => input,
+        Err(reply) => return response(reply),
+    };
+    let mut request_input = input.clone();
+    request_input.as_object_mut().map(|o| o.remove("node_id"));
+    request_input["action"] = json!(action);
+    if let Some(brain) = input.get("brain").filter(|v| !v.is_null()) {
+        request_input["brain"] = brain.clone();
+    }
+    response(
+        super::executions::submit(
+            &state,
+            CreateExecution {
+                id,
+                kind: ExecutionKind::Project,
+                target: Some(todo),
+                node_id: input["node_id"].as_str().map(str::to_owned),
+                input: request_input,
+            },
+        )
+        .await,
+    )
 }
 
 /// Brain pre-resolution for `execute`: a brain todo without a resolvable
@@ -118,7 +149,7 @@ async fn start(state: Arc<AppState>, todo: String, action: &str, input: Value) -
 /// `executions::submit` reports the canonical 404; store failures 500
 /// HERE instead of being swallowed. `plan` never resolves — planning is
 /// executor-agnostic.
-async fn brain_preresolve(
+pub(super) async fn brain_preresolve(
     state: &Arc<AppState>,
     todo: &str,
     action: &str,

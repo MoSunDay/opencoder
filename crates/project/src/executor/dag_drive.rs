@@ -29,7 +29,7 @@ use tokio_util::sync::CancellationToken;
 use crate::{
     context::ProjectContext,
     executor::ResolvedExecutor,
-    plan_gen::{close_run, forget_spawn, patch_todo_status, runtime_setup},
+    plan_gen::{close_run, forget_spawn, runtime_setup},
     service::Deps,
 };
 
@@ -179,7 +179,7 @@ pub(crate) async fn drive(
 ) {
     let _ = cx;
     let result = run_dag(&deps, &run_id, &todo, &resolved, &token).await;
-    let (status, todo_status, output, output_ref, session_id) = match result {
+    let (status, _todo_status, output, output_ref, session_id) = match result {
         Ok((status, run_root, workflow_root, spec)) => {
             let output = collect_output_md(&workflow_root, &run_id, &spec);
             let closed = Some(run_id.clone());
@@ -218,7 +218,7 @@ pub(crate) async fn drive(
         ),
     };
     close_run(&deps, &run_id, status, output, output_ref, session_id).await;
-    patch_todo_status(&deps, &todo.id, todo_status, None).await;
+
     forget_spawn(&deps, &run_id);
 }
 

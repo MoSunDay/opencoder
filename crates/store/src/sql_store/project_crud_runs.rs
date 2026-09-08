@@ -12,19 +12,15 @@ use sqlx::{MySqlPool, Row};
 use super::{bind_args, corrupt_status, exec_read_all, exec_read_opt, exec_write, Arg};
 use crate::project_types::{
     ProjectExecutorKind, ProjectTodoRunKind, ProjectTodoRunPatch, ProjectTodoRunRecord,
-    ProjectTodoRunStatus, ProjectTodoStatus,
+    ProjectTodoRunStatus,
 };
 
-const RUN_COLS: &str = "id, todo_id, kind, version, plan_md, output_md, agent, session_id, status, started_at, finished_at, created_at, executor_kind, capability_id, plan_id, output_ref";
+const RUN_COLS: &str = "id, todo_id, kind, version, plan_md, output_md, agent, session_id, status, started_at, finished_at, created_at, executor_kind, capability_id, plan_id, output_ref, input_snapshot, trace_manifest";
 const INSERT_RUN: &str = "INSERT INTO project_todo_runs \
-    (id, todo_id, kind, version, plan_md, output_md, agent, session_id, status, started_at, finished_at, created_at, executor_kind, capability_id, plan_id, output_ref) \
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
+    (id, todo_id, kind, version, plan_md, output_md, agent, session_id, status, started_at, finished_at, created_at, executor_kind, capability_id, plan_id, output_ref, input_snapshot, trace_manifest) \
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
 
 fn validate_claim_run(rec: &ProjectTodoRunRecord) -> Result<()> {
-    anyhow::ensure!(
-        rec.kind == ProjectTodoRunKind::Execute,
-        "atomic todo claim requires an execute run"
-    );
     anyhow::ensure!(
         rec.status == ProjectTodoRunStatus::Running,
         "atomic todo claim requires a running run"
@@ -50,6 +46,8 @@ fn run_insert_args(rec: &ProjectTodoRunRecord) -> Vec<Arg> {
         Arg::TextOrNull(rec.capability_id.clone()),
         Arg::TextOrNull(rec.plan_id.clone()),
         Arg::TextOrNull(rec.output_ref.clone()),
+        Arg::TextOrNull(rec.input_snapshot.clone()),
+        Arg::TextOrNull(rec.trace_manifest.clone()),
     ]
 }
 
@@ -72,29 +70,43 @@ pub async fn claim_todo_running_with_run(
         .begin()
         .await
         .context("begin project execute claim tx")?;
-    let running = ProjectTodoStatus::Running.as_str().to_string();
-    let claimed = bind_args(
-        sqlx::query(
-            "UPDATE project_todos SET status = ?, updated_at = ? WHERE id = ? AND status <> ?",
-        ),
-        vec![
-            Arg::Text(running.clone()),
-            Arg::Int(now_ms),
-            Arg::Text(rec.todo_id.clone()),
-            Arg::Text(running),
-        ],
-    )
-    .execute(&mut *tx)
-    .await
-    .context("claim project todo running")?
-    .rows_affected();
-    if claimed == 0 {
-        tx.rollback()
-            .await
-            .context("rollback lost project execute claim")?;
+    let row = sqlx::query("SELECT status FROM project_todos WHERE id=? FOR UPDATE")
+        .bind(&rec.todo_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+    let Some(row) = row else {
+        tx.rollback().await?;
+        return Ok(false);
+    };
+    if row.try_get::<String, _>("status")? == "running" {
+        tx.rollback().await?;
         return Ok(false);
     }
-
+    if sqlx::query("SELECT id FROM project_todo_runs WHERE todo_id=? AND status='running' LIMIT 1")
+        .bind(&rec.todo_id)
+        .fetch_optional(&mut *tx)
+        .await?
+        .is_some()
+    {
+        tx.rollback().await?;
+        return Ok(false);
+    }
+    let next = sqlx::query(
+        "SELECT COALESCE(MAX(version),0)+1 AS next_version FROM project_todo_runs WHERE todo_id=?",
+    )
+    .bind(&rec.todo_id)
+    .fetch_one(&mut *tx)
+    .await?;
+    let mut accepted = rec.clone();
+    accepted.version = next.try_get("next_version")?;
+    if rec.kind == ProjectTodoRunKind::Execute {
+        sqlx::query("UPDATE project_todos SET status='running', updated_at=? WHERE id=?")
+            .bind(now_ms)
+            .bind(&rec.todo_id)
+            .execute(&mut *tx)
+            .await?;
+    }
+    let rec = &accepted;
     if let Err(insert_error) = bind_args(sqlx::query(INSERT_RUN), run_insert_args(rec))
         .execute(&mut *tx)
         .await
@@ -129,6 +141,14 @@ pub async fn create_todo_run(
 fn run_set_fragment(patch: &ProjectTodoRunPatch) -> (Vec<&'static str>, Vec<Arg>) {
     let mut sets: Vec<&'static str> = Vec::new();
     let mut args: Vec<Arg> = Vec::new();
+    if let Some(v) = &patch.input_snapshot {
+        sets.push("input_snapshot = ?");
+        args.push(Arg::Text(v.clone()));
+    }
+    if let Some(v) = &patch.trace_manifest {
+        sets.push("trace_manifest = ?");
+        args.push(Arg::Text(v.clone()));
+    }
     if let Some(v) = &patch.plan_md {
         sets.push("plan_md = ?");
         args.push(Arg::Text(v.clone()));
@@ -162,6 +182,69 @@ fn run_set_fragment(patch: &ProjectTodoRunPatch) -> (Vec<&'static str>, Vec<Arg>
         args.push(Arg::Int(v));
     }
     (sets, args)
+}
+
+pub async fn finish_todo_run(
+    pool: &MySqlPool,
+    starrocks: bool,
+    id: &str,
+    patch: &ProjectTodoRunPatch,
+    now_ms: i64,
+) -> Result<bool> {
+    anyhow::ensure!(
+        !starrocks,
+        "starrocks does not support atomic project run finalization"
+    );
+    let mut tx = pool.begin().await?;
+    let row =
+        sqlx::query("SELECT todo_id,kind,status FROM project_todo_runs WHERE id=? FOR UPDATE")
+            .bind(id)
+            .fetch_one(&mut *tx)
+            .await?;
+    if row.try_get::<String, _>("status")? != "running" {
+        tx.rollback().await?;
+        return Ok(false);
+    }
+    let todo: String = row.try_get("todo_id")?;
+    let kind: String = row.try_get("kind")?;
+    let status = patch.status.context("final run status missing")?;
+    anyhow::ensure!(
+        status != ProjectTodoRunStatus::Running,
+        "run finalization requires terminal status"
+    );
+    let next = if kind == "plan" {
+        (status == ProjectTodoRunStatus::Done).then_some("planned")
+    } else {
+        Some(match status {
+            ProjectTodoRunStatus::Done => "done",
+            ProjectTodoRunStatus::Cancelled => "planned",
+            _ => "failed",
+        })
+    };
+    if let Some(next) = next {
+        anyhow::ensure!(
+            sqlx::query("SELECT id FROM project_todos WHERE id=? FOR UPDATE")
+                .bind(&todo)
+                .fetch_optional(&mut *tx)
+                .await?
+                .is_some(),
+            "todo missing during finalization"
+        );
+        sqlx::query("UPDATE project_todos SET status=?,updated_at=?,plan_md=CASE WHEN ?='plan' THEN ? ELSE plan_md END WHERE id=? AND (?='plan' OR status='running')").bind(next).bind(now_ms).bind(&kind).bind(&patch.output_md).bind(todo).bind(&kind).execute(&mut *tx).await?;
+    }
+    let (sets, mut args) = run_set_fragment(patch);
+    args.push(Arg::Text(id.into()));
+    bind_args(
+        sqlx::query(&format!(
+            "UPDATE project_todo_runs SET {} WHERE id=?",
+            sets.join(", ")
+        )),
+        args,
+    )
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    Ok(true)
 }
 
 pub async fn patch_todo_run(
@@ -242,7 +325,9 @@ pub async fn get_todo_run_summary(
          OCTET_LENGTH(plan_md) AS plan_bytes, \
          CASE WHEN OCTET_LENGTH(output_md)<=65536 THEN output_md END AS output_md, \
          OCTET_LENGTH(output_md) AS output_bytes,agent,session_id,status,started_at,finished_at,created_at, \
-         executor_kind,capability_id,plan_id,output_ref \
+         executor_kind,capability_id,plan_id,output_ref, \
+         CASE WHEN OCTET_LENGTH(input_snapshot)<=65536 THEN input_snapshot END AS input_snapshot, OCTET_LENGTH(input_snapshot) AS input_bytes, \
+         CASE WHEN OCTET_LENGTH(trace_manifest)<=65536 THEN trace_manifest END AS trace_manifest, OCTET_LENGTH(trace_manifest) AS trace_bytes \
          FROM project_todo_runs WHERE id=? LIMIT 1",
         &[Arg::Text(id.to_string())],
     )
@@ -284,7 +369,9 @@ pub async fn list_todo_runs_page(
          OCTET_LENGTH(plan_md) AS plan_bytes, \
          CASE WHEN OCTET_LENGTH(output_md)<=65536 THEN output_md END AS output_md, \
          OCTET_LENGTH(output_md) AS output_bytes,agent,session_id,status,started_at,finished_at,created_at, \
-         executor_kind,capability_id,plan_id,output_ref \
+         executor_kind,capability_id,plan_id,output_ref, \
+         CASE WHEN OCTET_LENGTH(input_snapshot)<=65536 THEN input_snapshot END AS input_snapshot, OCTET_LENGTH(input_snapshot) AS input_bytes, \
+         CASE WHEN OCTET_LENGTH(trace_manifest)<=65536 THEN trace_manifest END AS trace_manifest, OCTET_LENGTH(trace_manifest) AS trace_bytes \
          FROM project_todo_runs WHERE todo_id=? AND (? IS NULL OR version<?) \
          ORDER BY version DESC LIMIT ?",
         &[
@@ -295,16 +382,11 @@ pub async fn list_todo_runs_page(
         ],
     )
     .await?;
-    let mut out = rows
+    let out = rows
         .iter()
         .map(row_to_run_summary)
         .collect::<Result<Vec<_>>>()?;
-    let more = out.len() > limit;
-    out.truncate(limit);
-    Ok(crate::ProjectTodoRunPage {
-        next_version: more.then(|| out.last().unwrap().version),
-        runs: out,
-    })
+    crate::project_types::project_run_page(out, limit)
 }
 
 // Arg list mirrors the `ProjectStore::project_text_chunk` trait method —
@@ -325,6 +407,8 @@ pub async fn project_text_chunk(
         ("todo", "plan_md") => ("project_todos", "plan_md"),
         ("run", "plan_md") => ("project_todo_runs", "plan_md"),
         ("run", "output_md") => ("project_todo_runs", "output_md"),
+        ("run", "input_snapshot") => ("project_todo_runs", "input_snapshot"),
+        ("run", "trace_manifest") => ("project_todo_runs", "trace_manifest"),
         _ => anyhow::bail!("unsupported project text field"),
     };
     let start = i64::try_from(offset)?.saturating_add(1);
@@ -411,6 +495,8 @@ fn row_to_run(r: &sqlx::mysql::MySqlRow) -> Result<ProjectTodoRunRecord> {
     let status: String = r.try_get("status")?;
     let executor_kind: String = r.try_get("executor_kind")?;
     Ok(ProjectTodoRunRecord {
+        input_snapshot: r.try_get("input_snapshot")?,
+        trace_manifest: r.try_get("trace_manifest")?,
         id: r.try_get("id")?,
         todo_id: r.try_get("todo_id")?,
         kind: ProjectTodoRunKind::parse(&kind)
@@ -440,6 +526,18 @@ fn row_to_run_summary(r: &sqlx::mysql::MySqlRow) -> Result<crate::ProjectTodoRun
     let id: String = r.try_get("id")?;
     let executor_kind: String = r.try_get("executor_kind")?;
     Ok(crate::ProjectTodoRunSummary {
+        input_snapshot: summary_text(
+            r.try_get("input_snapshot")?,
+            r.try_get("input_bytes")?,
+            &id,
+            "input_snapshot",
+        ),
+        trace_manifest: summary_text(
+            r.try_get("trace_manifest")?,
+            r.try_get("trace_bytes")?,
+            &id,
+            "trace_manifest",
+        ),
         id: id.clone(),
         todo_id: r.try_get("todo_id")?,
         kind: ProjectTodoRunKind::parse(&kind)
@@ -505,6 +603,8 @@ mod tests {
             .connect_lazy("mysql://unused:unused@127.0.0.1:9/unused")
             .unwrap();
         let rec = ProjectTodoRunRecord {
+            input_snapshot: None,
+            trace_manifest: None,
             id: "run".into(),
             todo_id: "todo".into(),
             kind: ProjectTodoRunKind::Execute,

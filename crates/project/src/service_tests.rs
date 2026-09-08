@@ -3,7 +3,10 @@
 //! 行数上限。
 
 use super::*;
-use opencoder_store::{LibsqlStore, ProjectTodoRunPatch, ProjectTodoRunStatus as RunStatus};
+use opencoder_store::{
+    LibsqlStore, ProjectTodoRecord, ProjectTodoRunKind, ProjectTodoRunPatch, ProjectTodoRunRecord,
+    ProjectTodoRunStatus as RunStatus, ProjectTodoStatus,
+};
 
 use crate::recover;
 
@@ -32,6 +35,9 @@ async fn test_deps() -> (tempfile::TempDir, Arc<Deps>, Arc<LibsqlStore>) {
         client_override: None,
         brain: None,
         spawns: Mutex::new(HashMap::new()),
+        archive_root: Mutex::new(dir.path().join("runs")),
+        admission: tokio::sync::Mutex::new(()),
+        persistence_error: Mutex::new(None),
     });
     (dir, deps, store)
 }
@@ -70,6 +76,8 @@ async fn seed_run_at(
 ) {
     let version = p.next_todo_version(todo_id).await.unwrap();
     p.create_todo_run(&ProjectTodoRunRecord {
+        input_snapshot: None,
+        trace_manifest: None,
         id: id.into(),
         todo_id: todo_id.into(),
         kind,

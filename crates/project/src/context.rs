@@ -3,6 +3,7 @@
 
 /// 一次 plan/execute 运行所需的全部业务上下文（目标→里程碑→待办链路上
 /// 各级标题与正文；goal 之外均可缺失，缺失的段落直接省略）。
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProjectContext {
     pub goal_title: String,
     pub goal_detail_md: Option<String>,

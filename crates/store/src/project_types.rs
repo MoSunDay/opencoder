@@ -304,6 +304,10 @@ pub struct ProjectTodoPatch {
 /// root / topic id via `output_ref`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectTodoRunRecord {
+    #[serde(default)]
+    pub input_snapshot: Option<String>,
+    #[serde(default)]
+    pub trace_manifest: Option<String>,
     pub id: String,
     pub todo_id: String,
     pub kind: ProjectTodoRunKind,
@@ -359,6 +363,8 @@ pub struct ProjectTodoSummary {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ProjectTodoRunSummary {
+    pub input_snapshot: Option<ProjectRunText>,
+    pub trace_manifest: Option<ProjectRunText>,
     pub id: String,
     pub todo_id: String,
     pub kind: ProjectTodoRunKind,
@@ -386,6 +392,8 @@ pub struct ProjectTodoRunPage {
 /// Partial update for [`ProjectTodoRunRecord`]; `None` fields stay unchanged.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ProjectTodoRunPatch {
+    pub input_snapshot: Option<String>,
+    pub trace_manifest: Option<String>,
     pub plan_md: Option<String>,
     pub output_md: Option<String>,
     pub output_ref: Option<String>,
@@ -394,6 +402,29 @@ pub struct ProjectTodoRunPatch {
     pub session_id: Option<String>,
     pub status: Option<ProjectTodoRunStatus>,
     pub finished_at: Option<i64>,
+}
+
+/// Bound the combined page, including fields individually below the chunk limit.
+pub(crate) fn project_run_page(
+    mut runs: Vec<ProjectTodoRunSummary>,
+    limit: usize,
+) -> anyhow::Result<ProjectTodoRunPage> {
+    let mut bytes = 0usize;
+    let mut count = 0;
+    for run in runs.iter().take(limit) {
+        let size = serde_json::to_vec(run)?.len();
+        if bytes + size > 512 * 1024 && count > 0 {
+            break;
+        }
+        bytes += size;
+        count += 1;
+    }
+    let more = runs.len() > count;
+    runs.truncate(count);
+    Ok(ProjectTodoRunPage {
+        next_version: more.then(|| runs.last().unwrap().version),
+        runs,
+    })
 }
 
 #[cfg(test)]

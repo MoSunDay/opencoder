@@ -297,10 +297,9 @@ async fn run_views_and_cancel_follow_node_ownership() {
         .await;
     assert_eq!(status, 202);
     let exec_id = format!("project-{todo_id}");
-    h.node.set_inspect(
+    h.node.set_project_runs(
         &exec_id,
-        json!({"execution": {"id": exec_id, "status": "running"},
-               "runs": [{"version": 1, "status": "done"}]}),
+        json!({"runs": [{"version": 1, "status": "done"}], "more":false}),
     );
     let (status, body) = h
         .req(
@@ -450,7 +449,7 @@ async fn todo_runs_propagate_node_inspect_failure() {
         )
         .await;
     assert_eq!(status, 404, "{body}");
-    assert_eq!(body["error"], json!("execution not found"));
+    assert_eq!(body["error"], json!("project execution not found"));
 }
 
 #[tokio::test]

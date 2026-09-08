@@ -183,6 +183,8 @@ pub async fn seed_project_run(
     let version = store.next_todo_version(todo_id).await.unwrap();
     store
         .create_todo_run(&ProjectTodoRunRecord {
+            input_snapshot: None,
+            trace_manifest: None,
             id: id.into(),
             todo_id: todo_id.into(),
             kind: ProjectTodoRunKind::Plan,

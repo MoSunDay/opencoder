@@ -27,7 +27,7 @@ use tokio_util::sync::CancellationToken;
 use crate::{
     context::ProjectContext,
     executor::{spec::TeamSpec, ResolvedExecutor},
-    plan_gen::{close_run, forget_spawn, latest_new_assistant, patch_todo_status, runtime_setup},
+    plan_gen::{close_run, forget_spawn, latest_new_assistant, runtime_setup},
     service::Deps,
 };
 
@@ -240,7 +240,7 @@ pub(crate) async fn drive(
 ) {
     match run_topic_for_todo(&deps, &todo, &cx, &resolved, &token).await {
         Ok(meta) => {
-            let (status, todo_status, output) = map_finish(&meta);
+            let (status, _todo_status, output) = map_finish(&meta);
             let output = output.or_else(|| Some(topic_digest(&meta)));
             close_run(
                 &deps,
@@ -251,7 +251,6 @@ pub(crate) async fn drive(
                 None,
             )
             .await;
-            patch_todo_status(&deps, &todo.id, todo_status, None).await;
         }
         Err(e) => {
             tracing::warn!(run_id = %run_id, error = %e, "project team run failed");
@@ -264,7 +263,6 @@ pub(crate) async fn drive(
                 None,
             )
             .await;
-            patch_todo_status(&deps, &todo.id, ProjectTodoStatus::Failed, None).await;
         }
     }
     forget_spawn(&deps, &run_id);

@@ -17,11 +17,14 @@ const messages = [
 describe('execution detail shares the TUI Say/Step ladder', () => {
   it('pairs separate persisted messages and retains nested disclosure on refresh', () => {
     const view = render(<ExecutionTranscript messages={messages} />);
-    expect(screen.getByText('Say(1 step)')).toBeTruthy();
+    expect(screen.getByRole('img', { name: '用户', exact: true }).querySelector('.anticon-user')).toBeTruthy();
+    expect(screen.getByRole('img', { name: 'Agent', exact: true }).querySelector('.anticon-robot')).toBeTruthy();
+    expect(screen.queryByText(/Say[:(]/)).toBeNull();
+    expect(screen.getByText('1 Step')).toBeTruthy();
     expect(screen.getByText('details').tagName).toBe('STRONG');
     expect(screen.queryByText('—')).toBeNull();
     expect(screen.queryByText('/repo')).toBeNull();
-    fireEvent.click(screen.getByText('Say(1 step)'));
+    fireEvent.click(screen.getByText('1 Step'));
     fireEvent.click(screen.getByText('Step(1)'));
     expect(screen.getByText('check path')).toBeTruthy();
     fireEvent.click(screen.getByText('1 Function call'));
@@ -46,7 +49,7 @@ describe('execution detail shares the TUI Say/Step ladder', () => {
     const view = render(<ExecutionTranscript messages={messages} live={{ turns: [
       turns[0], { kind: 'sys', text: 'agent → act' }, ...turns.slice(1),
     ] }} />);
-    fireEvent.click(screen.getByText('Say(1 step)'));
+    fireEvent.click(screen.getByText('1 Step'));
     fireEvent.click(screen.getByText('Step(1)'));
     expect(screen.getByText('check path')).toBeTruthy();
     view.rerender(<ExecutionTranscript messages={structuredClone(messages)} />);

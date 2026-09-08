@@ -395,6 +395,16 @@ impl ProjectStore for LibsqlStore {
         let conn = self.conn().await?;
         super::project_runs::create_todo_run(&conn, rec).await
     }
+    async fn finish_todo_run(
+        &self,
+        id: &str,
+        patch: &ProjectTodoRunPatch,
+        now_ms: i64,
+    ) -> Result<bool> {
+        let _guard = self.db_lock.lock().await;
+        let conn = self.conn().await?;
+        super::project_runs::finish_todo_run(&conn, id, patch, now_ms).await
+    }
     async fn patch_todo_run(
         &self,
         id: &str,

@@ -136,7 +136,7 @@ function TodoDetail({ id, detail }) {
   /></div>;
 }
 
-function ProjectDetail({ id, detail }) {
+function ProjectDetail({ id, detail, onOpen }) {
   const todo = detail?.todo || {};
   const runs = detail?.runs || [];
   const page = detail?.runs_page || {};
@@ -148,16 +148,16 @@ function ProjectDetail({ id, detail }) {
   <WindowedRows initialRows={runs} initialNext={page.next_version}
     path={asyncPath(`/api/executions/${encodeURIComponent(id)}/project-runs?before_version=`, 'runs', 'next_version')}
     render={(rows) => <Space orientation="vertical" style={{ width: '100%' }}>{rows.map((run) => <Space key={run.id || run.version} wrap>
-      <Typography.Text>v{run.version} · {run.kind} · {run.status}</Typography.Text><InlineFields id={id} value={run} />
+      <Button type="link" onClick={() => onOpen?.(run.id)}>v{run.version} · {run.kind} · {run.status}</Button><InlineFields id={id} value={run} />
     </Space>)}</Space>}
   /></div>;
 }
 
-export function WorkloadDetail({ id, detail, kind }) {
+export function WorkloadDetail({ id, detail, kind, onOpen }) {
   if (!detail) return null;
   if (kind === 'team') return <TeamDetail id={id} detail={detail} />;
   if (kind === 'todos') return <TodoDetail id={id} detail={detail} />;
-  if (kind === 'project') return <ProjectDetail id={id} detail={detail} />;
+  if (kind === 'project') return detail.run ? null : <ProjectDetail id={id} detail={detail} onOpen={onOpen} />;
   if (kind === 'dag') {
     const definition = detail?.definition?.spec || detail?.definition || {};
     return <Descriptions size="small" items={[

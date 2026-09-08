@@ -4,6 +4,7 @@ mod create;
 mod dag_preflight;
 mod launch;
 mod maintenance;
+mod project_admission;
 mod query;
 use crate::Worker;
 use anyhow::Result;

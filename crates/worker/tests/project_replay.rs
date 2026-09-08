@@ -106,6 +106,11 @@ async fn project_indexes_replay_all_attempts_with_pagination_and_large_fields() 
         }
         let messages = read(&fleet, &format!("/api/executions/{id}/messages")).await;
         assert!(!messages["chunks"].as_array().unwrap().is_empty());
+        assert_eq!(
+            messages["chunks"][0]["role"], "user",
+            "first input was skipped"
+        );
+        assert_eq!(messages["more"], false);
         let mut after = 0;
         loop {
             let events = read(
@@ -210,5 +215,73 @@ async fn a_rejected_first_execute_does_not_prevent_later_planning() {
     let runs = read(&fleet, &format!("/api/project/todos/{id}/runs")).await;
     assert_eq!(runs["runs"].as_array().unwrap().len(), 1);
     assert_eq!(runs["runs"][0]["id"], "prun-after-rejection");
+    fleet.shutdown().await;
+}
+
+#[tokio::test]
+async fn failed_attempt_keeps_its_only_input_message_after_later_runs() {
+    let client = mock();
+    let fleet = Fleet::new(1, client.clone()).await;
+    let todo = fleet
+        .call(
+            "POST",
+            "/api/project/todos",
+            json!({
+                "title":"retain failed input", "draft":"input stays available", "agent":"act"
+            }),
+        )
+        .await;
+    assert_eq!(todo.status, 200);
+    let todo = todo.body["id"].as_str().unwrap();
+    let root = format!("project-{todo}");
+    for (action, id, failed) in [
+        ("plan", "prun-message-plan", false),
+        ("execute", "prun-message-before", false),
+        ("execute", "prun-message-failed", true),
+        ("execute", "prun-message-after", false),
+    ] {
+        if failed {
+            client.queue_script(vec![opencoder_llm::LlmEvent::Error(
+                "injected failure".into(),
+            )]);
+        }
+        let started = fleet
+            .call(
+                "POST",
+                &format!("/api/project/todos/{todo}/{action}"),
+                json!({"run_id":id}),
+            )
+            .await;
+        assert!([200, 202].contains(&started.status), "{started:?}");
+        let result = settled(&fleet.nodes[0], &root).await;
+        assert_eq!(
+            result["execution"]["status"],
+            if failed { "error" } else { "idle" }
+        );
+    }
+    let id = "prun-message-failed";
+    wait_index(&fleet, id).await;
+    let detail = read(&fleet, &format!("/api/executions/{id}")).await;
+    assert_eq!(detail["run"]["status"], "failed");
+    let page = read(&fleet, &format!("/api/executions/{id}/messages")).await;
+    assert_eq!(page["chunks"].as_array().unwrap().len(), 1);
+    assert_eq!(page["chunks"][0]["role"], "user");
+    assert_eq!(
+        page["chunks"][0]["seq"],
+        detail["replay"]["messages_through"]
+    );
+    assert_eq!(page["more"], false);
+    let rebased = read(
+        &fleet,
+        &format!(
+            "/api/executions/{id}/messages?seq={}&offset=1",
+            detail["replay"]["messages_after"]
+        ),
+    )
+    .await;
+    assert_eq!(
+        rebased, page,
+        "an earlier offset cannot skip the first input"
+    );
     fleet.shutdown().await;
 }

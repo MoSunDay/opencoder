@@ -111,7 +111,14 @@ pub async fn messages(worker: &Worker, id: &str, mut cursor: MessageCursor) -> R
             end = end.min(sealed);
         }
     }
-    cursor.seq = cursor.seq.max(start + 1);
+    // A zero-offset message cursor is exclusive (seq > cursor.seq).
+    // Rebased cursors must also discard offsets from the preceding attempt.
+    if cursor.seq <= start {
+        cursor = MessageCursor {
+            seq: start,
+            offset: 0,
+        };
+    }
     if cursor.seq > end {
         return Ok(RpcReply::ok(json!({"chunks":[],"more":false})));
     }
@@ -119,7 +126,9 @@ pub async fn messages(worker: &Worker, id: &str, mut cursor: MessageCursor) -> R
         super::pages::message_page_with_budget(worker, &sid, cursor, MESSAGE_PAGE_RAW_BYTES)
             .await?;
     page.chunks.retain(|c| c.seq <= end);
-    page.next_cursor = page.next_cursor.filter(|c| c.seq <= end);
+    page.next_cursor = page
+        .next_cursor
+        .filter(|c| c.seq < end || (c.seq == end && c.offset > 0));
     page.more = page.next_cursor.is_some();
     super::view::bounded_reply(json!(page))
 }

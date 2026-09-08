@@ -7,6 +7,7 @@ const fs = require('fs');
 const path = require('path');
 const { harness, until, pause } = require('./harness');
 const { openBrowser, createHierarchy, projectPage } = require('./browser');
+const { audit } = require('./audit');
 let h, browser;
 const errors = [];
 async function main() {
@@ -33,6 +34,8 @@ async function main() {
     await until(async () => (await api('GET', '/api/executions?kind=project')).executions.some((index) => index.id === run_id), 'run index');
     const detail = await api('GET', `/api/executions/${run_id}`);
     assert.equal(detail.run.status, 'done'); assert.equal(detail.retention, 'complete');
+    const output = typeof detail.run.output_md === 'string' ? detail.run.output_md : await field(run_id, `project.run.${run_id}.output_md`);
+    assert.equal(output, mode.text);
     await until(async () => (await api('GET', '/api/executions?kind=project')).executions.find((index) => index.id === run_id)?.status === 'done', 'terminal index convergence');
     assert(Date.now() - detail.run.finished_at <= 10000, 'terminal status must converge within ten seconds');
     const calls = mode.requests;
@@ -113,6 +116,7 @@ async function main() {
   mode.kind = 'normal';
   const cancellation = await api('GET', `/api/executions/${cancelled}`);
   assert.equal(cancellation.run.status, 'cancelled'); assert(cancellation.run.input_snapshot);
+  await audit(h, runs.map((run) => run.id).concat(failed, interrupted, cancelled));
   // Browser exercises the built SPA and exact run replay entry.
   await browserPage.goto(h.base, { waitUntil: 'networkidle' });
   await projectPage(browserPage);

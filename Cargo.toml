@@ -8,7 +8,7 @@ members = [
     "crates/session",
     "crates/tui",
     "crates/web",
-    "crates/cli",
+    "crates/local",
     "crates/todos",
     "crates/project",
     "crates/node",
@@ -21,6 +21,7 @@ members = [
     "crates/agents",
     "crates/brain",
     "crates/team",
+    "crates/ctl",
 ]
 exclude = ["examples/snake"]
 
@@ -35,7 +36,7 @@ name = "opencoder"
 path = "src/main.rs"
 
 [dependencies]
-opencoder-cli.workspace = true
+opencoder-local.workspace = true
 opencoder-tui.workspace = true
 opencoder-core.workspace = true
 opencoder-session.workspace = true
@@ -61,7 +62,7 @@ opencoder-session = { path = "crates/session" }
 opencoder-shellguard = { path = "crates/shellguard" }
 opencoder-tui    = { path = "crates/tui" }
 opencoder-web    = { path = "crates/web" }
-opencoder-cli    = { path = "crates/cli" }
+opencoder-local   = { path = "crates/local" }
 opencoder-todos  = { path = "crates/todos" }
 opencoder-project = { path = "crates/project" }
 opencoder-node   = { path = "crates/node" }
@@ -74,6 +75,7 @@ opencoder-agent  = { path = "crates/agent" }
 opencoder-agents  = { path = "crates/agents" }
 opencoder-brain  = { path = "crates/brain" }
 opencoder-team   = { path = "crates/team" }
+opencoder-cli    = { path = "crates/ctl" }
 
 tokio = { version = "1", features = ["full"] }
 tokio-stream = "0.1"

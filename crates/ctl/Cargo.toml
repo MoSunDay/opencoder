@@ -1,0 +1,28 @@
+[package]
+name = "opencoder-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "opencoder-cli"
+path = "src/main.rs"
+
+[dependencies]
+opencoder-core.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+futures.workspace = true
+reqwest.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+async-trait.workspace = true
+axum = { version = "0.7", features = ["ws"] }
+base64.workspace = true
+opencoder-control.workspace = true
+opencoder-llm.workspace = true
+opencoder-node.workspace = true
+serde.workspace = true
+tempfile.workspace = true

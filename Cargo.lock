@@ -2327,8 +2327,8 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
- "opencoder-cli",
  "opencoder-core",
+ "opencoder-local",
  "opencoder-session",
  "opencoder-tui",
  "serde_json",
@@ -2392,21 +2392,20 @@ name = "opencoder-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
+ "axum",
  "base64",
  "clap",
- "dirs",
+ "futures",
+ "opencoder-control",
  "opencoder-core",
  "opencoder-llm",
- "opencoder-session",
- "opencoder-store",
- "opencoder-todos",
+ "opencoder-node",
+ "reqwest",
+ "serde",
  "serde_json",
  "tempfile",
  "tokio",
- "tokio-util",
- "tracing",
- "tracing-subscriber",
- "ulid",
 ]
 
 [[package]]
@@ -2511,6 +2510,28 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tracing",
+]
+
+[[package]]
+name = "opencoder-local"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "base64",
+ "clap",
+ "dirs",
+ "opencoder-core",
+ "opencoder-llm",
+ "opencoder-session",
+ "opencoder-store",
+ "opencoder-todos",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "tracing-subscriber",
+ "ulid",
 ]
 
 [[package]]

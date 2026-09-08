@@ -39,7 +39,7 @@ Commit: 860831d22fad968737c366c93b4cf70fc1f4c010
 ## 依赖与接口
 
 - 依赖 `opencoder-session` 执行父/子 Primary Session，依赖 `opencoder-store` 保存状态，依赖 `opencoder-llm` 的可替换 `ChatStream`。
-- CLI 入口见 [agents/cli](../cli/index.md)，持久化合同见 [agents/store](../store/index.md)。
+- CLI 入口见 [agents/local](../local/index.md)，持久化合同见 [agents/store](../store/index.md)。
 - 用户能力见 [features/todos](../../features/todos/index.md)。
 
 ## 代表性验证
@@ -49,4 +49,4 @@ Commit: 860831d22fad968737c366c93b4cf70fc1f4c010
 - `crates/todos/tests/interrupt.rs`：外部 interrupt 取消在飞 TODO 且可 resume、本地 Ctrl-C 单项标 Interrupted、终态拒绝 interrupt。
 - `crates/todos/tests/transitions_guards.rs` / `late_results.rs` / `boundary_guards.rs` / `interrupt_retry.rs`：状态机守卫（max_attempts 门禁的 Interrupted 豁免与普通 Failed、Suspended 回滚、dispatch 保上下文、rewind 子树外 milestone 纠错）、迟到成功/失败结果丢弃、决策/验收干跑校验与纠错循环、重复里程碑幂等、resume 持久化 Running、interrupt 有界重试跨 generation 冲突；`interrupt_retry.rs::max_attempt_one_todo_survives_external_interrupt_and_resumes` 钉住外部中断下 max_attempt=1 的 TODO 存活并恢复。
 - `crates/store/tests/todos_workflow.rs`：投影与事件原子提交、generation 冲突、v8 到 v9 迁移。
-- `crates/cli/tests/todos_cli_parse.rs`：todos 命令和 debug 作用域。
+- `crates/local/tests/todos_cli_parse.rs`：todos 命令和 debug 作用域。

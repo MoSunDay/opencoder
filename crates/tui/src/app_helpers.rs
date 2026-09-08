@@ -39,7 +39,7 @@ pub(crate) fn resume_hint(id: &str) -> String {
 /// restores the model stored in the session row into `session.config.model`,
 /// so an explicit `--model` must win here. Returns the new model string when
 /// the session changed (caller persists it), else `None`. Mirrors the headless
-/// path in `crates/cli/src/run.rs` -- the TUI previously lacked this and
+/// path in `crates/local/src/run.rs` -- the TUI previously lacked this and
 /// silently dropped `--model` on resume (chosen model not applied after restart).
 pub(crate) fn reapply_session_model(
     session: &mut SessionState,

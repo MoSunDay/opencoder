@@ -22,6 +22,7 @@ emit({'type':'item.completed','item':{'id':'r1','type':'reasoning','text':'inspe
 emit({'type':'item.started','item':{'id':'c1','type':'command_execution','command':'inspect resources','aggregated_output':'','status':'in_progress','exit_code':None}})
 if os.environ.get('FAIL_MODE') == 'hang' or (os.environ.get('FAIL_MODE') == 'steer' and 'resume' not in sys.argv):
     import subprocess
+    time.sleep(3) # Exercise readiness after the former two-second startup deadline.
     child = subprocess.Popen(['sleep','120'])
     with open(os.environ['CHILD_PID'],'w') as f: f.write(str(child.pid))
     time.sleep(120)

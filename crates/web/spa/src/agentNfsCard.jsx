@@ -4,7 +4,7 @@
 // 根只读，宿主机挂载后即可浏览四类资源池。错误经 onNotice 透出服务端
 // `error` 字段（apiJson 已并入）。
 
-import { Button, Card, Descriptions, Space, Switch, Tag, Typography, message } from 'antd';
+import { Button, Descriptions, Space, Switch, Tag, Typography, message } from 'antd';
 import { useCallback, useEffect, useState } from 'react';
 import { apiGet, apiPost } from './api.js';
 import { mountHint } from './agentsItems.js';
@@ -53,33 +53,34 @@ export function AgentNfsCard({ onNotice }) {
 
   const s = status && typeof status === 'object' ? status : {};
   return (
-    <Card
-      size="small"
-      title="NFS 资源导出"
-      loading={loading}
-      extra={(
+    <div style={{ marginTop: 16 }}>
+      <Space style={{ marginBottom: 8, justifyContent: 'space-between', width: '100%' }}>
+        <Space>
+          <Typography.Title level={5} style={{ margin: 0 }}>NFS 资源导出</Typography.Title>
+          {s.running ? <Tag color="green">运行中</Tag> : <Tag>已停止</Tag>}
+        </Space>
         <Space>
           <Switch checked={!!s.running} loading={switching} onChange={setEnabled} aria-label="nfs-enabled" />
           <Button size="small" onClick={load}>刷新</Button>
         </Space>
+      </Space>
+      {loading ? <Text type="secondary">加载中…</Text> : (
+        <>
+          <Descriptions size="small" column={4} bordered>
+            <Descriptions.Item label="地址" aria-label="nfs-addr">{s.running ? `${s.host}:${s.port}` : '-'}</Descriptions.Item>
+            <Descriptions.Item label="只读">{s.read_only ? '是' : '否'}</Descriptions.Item>
+            <Descriptions.Item label="导出根" span={2}>{s.export_root || '-'}</Descriptions.Item>
+          </Descriptions>
+          {s.running ? (
+            <div style={{ marginTop: 8 }}>
+              <Text type="secondary" style={{ fontSize: 12 }}>宿主机挂载：</Text>
+              <Paragraph copyable style={{ marginBottom: 0 }}>
+                <code aria-label="nfs-mount-hint">{mountHint(s)}</code>
+              </Paragraph>
+            </div>
+          ) : null}
+        </>
       )}
-    >
-      <Descriptions size="small" column={1} style={{ marginBottom: 0 }}>
-        <Descriptions.Item label="状态">
-          {s.running ? <Tag color="green">运行中</Tag> : <Tag>已停止</Tag>}
-        </Descriptions.Item>
-        <Descriptions.Item label="地址" aria-label="nfs-addr">{s.running ? `${s.host}:${s.port}` : '-'}</Descriptions.Item>
-        <Descriptions.Item label="只读">{s.read_only ? '是' : '否'}</Descriptions.Item>
-        <Descriptions.Item label="导出根">{s.export_root || '-'}</Descriptions.Item>
-      </Descriptions>
-      {s.running ? (
-        <div style={{ marginTop: 8 }}>
-          <Text type="secondary" style={{ fontSize: 12 }}>宿主机挂载：</Text>
-          <Paragraph copyable style={{ marginBottom: 0 }}>
-            <code aria-label="nfs-mount-hint">{mountHint(s)}</code>
-          </Paragraph>
-        </div>
-      ) : null}
-    </Card>
+    </div>
   );
 }

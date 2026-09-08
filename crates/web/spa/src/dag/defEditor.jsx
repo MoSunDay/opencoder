@@ -130,8 +130,7 @@ export function DefEditor({ open, def, saving, onClose, onSave }) {
       title={def ? '编辑工作流定义' : '新建工作流定义'}
       open={open}
       onClose={onClose}
-      size={960}
-      styles={{ wrapper: { maxWidth: '94vw' } }}
+      width="100%"
       destroyOnHidden
       footer={
         <Space style={{ float: 'right' }}>

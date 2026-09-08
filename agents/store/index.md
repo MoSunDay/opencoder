@@ -1,4 +1,4 @@
-Commit: (working-tree, 基于 c1a1b2e78e1ccd4a3cc2ac6dc408a76d30bf46e6)
+Commit: (working-tree, 基于 4efaae89bfb89f1ce1c4287cb101ae755c4d526d)
 
 # store 模块
 
@@ -24,7 +24,7 @@ Commit: (working-tree, 基于 c1a1b2e78e1ccd4a3cc2ac6dc408a76d30bf46e6)
 - `run_tx`（`src/libsql_store/tx.rs`）：显式 BEGIN/COMMIT/ROLLBACK，避免 async 取消时 `libsql::Transaction::Drop` panic。所有写事务必须 `BEGIN IMMEDIATE`（`inputs.rs` 全量已是）：deferred BEGIN 的 SELECT→INSERT 写锁升级遇第二连接提交会得到 busy_timeout 不重试的 SQLITE_BUSY_SNAPSHOT；IMMEDIATE 使跨进程竞争化为等待并保住 `admitted_seq` 读改写原子性（回归测试 `tests/inputs_cross_instance_serialized.rs` 双实例同库压测）。
 - Session 类型（`src/types.rs`）：`SessionMeta`、`SessionPatch`、Input/Event/Subagent records；`task_type` 区分 parent、subagent、todo_workflow 和 todo。
 - TODO 类型（`src/todo_types.rs`）：`TodoWorkflowRecord`、`TodoItemRecord`、`TodoEventRecord` 和列表摘要。
-- 项目面类型与接缝（`src/project_types.rs` / `src/project.rs` / `src/project_factory.rs`）：goal→milestone→todo 三级 + `project_todo_runs` 运行留痕；`ProjectStore` trait（独立于 `Store`）+ `open_project_store(config)` 工厂（libsql 默认 / `mysql` / `starrocks` feature 二选一）——opencoder-project 运行时持有 `Arc<dyn ProjectStore>`，会话/消息仍走 `Arc<dyn Store>`。execute 生产路径只用复合 `claim_todo_running_with_run`，不会把条件 claim 与 run INSERT 拆成两个提交。另有执行器 spec 纯类型（`src/project_executor_spec.rs`：`TeamSpec`/`BrainRoutes`/`validate_spec`，供 control API 校验共享、不链接 opencoder-project）。
+- 项目面类型与接缝（`src/project_types.rs` / `src/project.rs` / `src/project_factory.rs`）：goal→milestone→todo 三级 + `project_todo_runs` 运行留痕；`ProjectStore` trait（独立于 `Store`）+ `open_project_store(config)` 工厂（libsql 默认 / `mysql` / `starrocks` feature 二选一）——opencoder-project 运行时持有 `Arc<dyn ProjectStore>`，会话/消息仍走 `Arc<dyn Store>`。Plan/Execute 使用复合 `claim_todo_running_with_run`，在事务中互斥并分配运行版本；`finish_todo_run` 原子收敛 run 和 todo。另有执行器 spec 纯类型（`src/project_executor_spec.rs`：`TeamSpec`/`BrainRoutes`/`validate_spec`，供 control API 校验共享、不链接 opencoder-project）。
 - 组队台账类型（`src/team_types.rs`，v17）：`TeamTopicRunRecord`——opencoder-team 话题 × node 的持久配对行（status `executing|finished`，`created_at` 首插冻结），运行时在 Store 之上，Store 只持久化（实现见 `libsql_store/team_runs.rs`）。
 
 ## Schema 与一致性
@@ -51,7 +51,7 @@ schema 随迭代推进（最新以 `src/libsql_store/schema.rs::SCHEMA_VERSION` 
 
 - StarRocks 缓存 prepared SELECT 会返回旧快照且 publish 异步——**全部语句走 text 协议**（`raw_sql` 内联参数）；sqlx 0.8.6 `RawSql::fetch_optional` 误委托 fetch_one 会 panic，用 `fetch_all` 再取 first 恢复 optional 形态。
 - 级联删除跨语句无事务保证，顺序执行（run→todo→milestone→goal）；测试一律 `eventually()` 轮询收敛。
-- execute admission 要求 todo claim 与 run INSERT 跨表原子提交：MySQL 走单个 InnoDB 事务；StarRocks 无对应跨表事务能力，因此在任何写入前返回明确错误，不回退为两个语句。Node `opencoder-agent` 固定使用节点 libsql `runtime.db`，该限制只影响显式把旧 Web/CLI/TUI Project backend 配成 StarRocks 的 execute 请求。
+- Plan/Execute admission 与终态收敛要求跨表原子提交：MySQL 使用 InnoDB 事务；StarRocks 在写入前返回明确错误。Node `opencoder-agent` 固定使用 libsql `runtime.db`；StarRocks 限制影响显式选择该 Project backend 的本地入口，结构 CRUD 和历史读取不受影响。
 
 ## 主流程
 
@@ -77,3 +77,11 @@ schema 随迭代推进（最新以 `src/libsql_store/schema.rs::SCHEMA_VERSION` 
 - `tests/legacy_agent_normalization.rs`：interlude 存量 `agent='sandbox'` 行在全部读路径（get/list/fork 等）归一为 `plan`，原始行不被重写。
 - `tests/store_perf.rs`：持久化性能门槛。
 - `src/bundle.rs` 相关测试：Session 树导入导出与幂等性。
+
+## 项目运行留存与有界读取
+
+v21 在 `project_todo_runs` 增加两个可空文本字段：`input_snapshot` 保存本次输入，`trace_manifest` 保存归档与会话范围；不新增表。SQLite v20→v21 增量迁移保留旧行，MySQL/StarRocks 的 CREATE/UPGRADE 同步补列。旧记录的缺失字段保持空值。
+
+`ProjectTodoRunSummary` 对超过 64 KiB 的文本返回读取标记；`project_run_page` 同时约束整页约 512 KiB 的预算，保留 `next_version`，中等大小的多个字段也不能挤丢后续历史。`project_text_chunk` 按字段读取原始字节。
+
+`tests/contracts/project_atomic_claim.rs` 覆盖并发唯一赢家、事务回滚、Plan/Execute 互斥和中等字段页面预算。`tests/store_migrations/project_replay.rs` 覆盖 v20 副本备份、v21 留存字段重开，以及原备份字节保持不变；运行/归档边界见 [project](../project/index.md)。

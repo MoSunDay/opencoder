@@ -1,4 +1,4 @@
-Commit: (working-tree, 基于 c1a1b2e78e1ccd4a3cc2ac6dc408a76d30bf46e6)
+Commit: (working-tree, 基于 4efaae89bfb89f1ce1c4287cb101ae755c4d526d)
 
 # worker 模块
 
@@ -17,8 +17,16 @@ Commit: (working-tree, 基于 c1a1b2e78e1ccd4a3cc2ac6dc408a76d30bf46e6)
 - system team：协调记录本地保存，远端成员通过 PeerBridge 调用各节点维护 agent，维护明细仍属远端。
 - TODO：[todos](../todos/index.md) Runtime 的父会话与子执行都使用本地 Store。
 - DAG：[dag-runtime](../dag-runtime/index.md) 的 uplink 接到本地持久化，产物经命令分页读取；resume 跳过已成功落盘的检查点。
-- project：[project](../project/index.md) Runtime 使用节点库，Plan 文本、执行记录和子会话均本地；项目结构来自 Server 快照。
+- project：[project](../project/index.md) Runtime 使用节点库，项目结构来自 Server 快照；`operations/project_admission/` 为每次 Plan/Execute 接收独立 run ID，`workloads/project.rs` 仅驱动已接收尝试并跟踪终态。
 
-`resources` 对新执行校验显式资源目录为只读 NFS，再复制当前资源文件形成不可变快照；失败拷贝清理 staging。已有执行继续或恢复直接复用本地快照，NFS 不可用时节点拒绝新执行。已接收会话尚未建立 session 时，事件入口返回合法空流而不是 404。`core::agent::scope` 与 session runner 传播任务局部资源根，避免跨并发执行串用版本。`session::loop_registry` 提供真实活跃 loop；顶层容量与 loop 计数分开。
+`resources` 对新执行校验显式资源目录为只读 NFS，再复制当前资源文件形成不可变快照；失败拷贝清理 staging。普通会话继续/恢复使用本地快照；项目每次新的 Plan/Execute 固定当前资源，相同 run ID 重试沿用原回执。NFS 不可用时拒绝新执行。`core::agent::scope` 和 session runner 传播任务局部资源根，避免并发执行串用版本。`session::loop_registry` 提供真实活跃 loop；顶层容量与 loop 计数分开。
 
 维护工具通过 session extension 注册，只在维护会话中暴露真实状态、配置和任务控制接口；注册与心跳不会自动发起修复。业务规则见 [Agent 平台](../../features/agent-platform/index.md)。
+
+## 项目回放查询
+
+`operations/query/project/` 按 `prun-*` 查询 run、留存状态与过程清单；`project-<todo-id>` 保持根归属。输入、方案、输出、模型文件、事件载荷和已登记产物通过该 ID 路由，归属节点离线时明确失败。
+
+消息读取限制在 `messages_after < seq <= messages_through`；零 offset 游标为排他游标，从旧尝试重定位时清零 offset，避免跳过本次首条输入或混入后续运行。历史 runs 使用 `before_version`，事件使用 `after`；大字段/载荷最多每块 64 KiB。`retention` 区分 complete、partial 与 incomplete_history。字段与产物读取校验所属运行及逻辑文件名。
+
+契约见 `tests/project_replay.rs`；真实 NFS、节点重启及浏览器检查见 [项目验收脚本](../../scripts/acceptance/project/README.md)。

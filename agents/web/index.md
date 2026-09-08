@@ -1,4 +1,4 @@
-Commit: 8df60d5944999506e51b61c90b067e13e3c3b1a8
+Commit: 285e00248894c24a2414b2bc4a0a8823cbbf7252
 
 # web 模块
 
@@ -11,6 +11,12 @@ Commit: 8df60d5944999506e51b61c90b067e13e3c3b1a8
 平台会话由 `chat.jsx` 管理显式 Node 选择；`fleet/useNodes.js` 独立发现可用节点，`fleet/model.js` 提供选择项与可执行性判断。创建统一使用带 `node_id` 和稳定 ID 的 `/api/sessions`，历史仅查询所选节点的 `/dialogs`；模型/技能目录也带 `node_id`。`chat/useTranscriptStream.js` 管理事件订阅及快照刷新，按节点和会话身份忽略迟到响应。发送前读取事件水位，读取失败保留草稿并停止下发。
 
 平台大脑页由 `fleet/brain.jsx` 的节点/需求表单直接派发，并打开执行详情。`brainPanel.jsx` 用同一 Table 显示列表和搜索结果，`brain/capabilityEditor.jsx` 管理右侧 75% 抽屉，纯表单转换位于 `brain/model.js`。编辑先读取完整能力和目标，加载失败不可保存；新建后目标保存失败时保留已创建 ID，重试更新原能力。
+
+## 原生会话的资源作用域
+
+节点通过本地 session router 下发已接收执行时，[worker](../worker/index.md) 的任务作用域指向该执行的本地资源快照。[`start_drain_locked`](../../crates/web/src/handle.rs) 优先把这一根目录保留到 `config.agent.agents_dir`，并显式传入 `tokio::spawn` 内的 `core::agent::scope::with_root`。恢复会话时组合的 prompt、技能发现及 bash 工具 PATH 因此使用同一快照；HTTP 配置重载和异步任务边界不能把它改回共享 NFS。没有节点作用域的普通 Web 会话沿用自身配置根目录。
+
+明确指定的快照缺失时，恢复失败并记录错误，在调用 LLM 前终止。对应 [HTTP 回归测试](../../crates/web/tests/web_agent_snapshot.rs) 同时验证提示词、技能正文、可执行工具、普通 Web 配置和缺失快照错误；对外资源固定规则见 [Agent 调度平台](../../features/agent-platform/index.md)。
 
 ## 职责
 axum HTTP/SSE 会话管理服务。提供 session CRUD、prompt 提交（admit 即返回）、事件流（SSE replay+live）、运行时 agent/model 切换、interrupt；question 作答、queue/steer 输入管理、annotation/autopilot、模型/技能发现、LLM 标题生成（对齐 TUI 会话能力，见 [changelog](../../features/changelog/2026-08-21/web-tui-parity-server-client.md)）。

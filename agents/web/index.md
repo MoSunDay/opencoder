@@ -1,4 +1,4 @@
-Commit: (working-tree, 基于 002f9e07117c633cdb5764dad80cab5ade241776)
+Commit: (working-tree, 基于 4efaae89bfb89f1ce1c4287cb101ae755c4d526d)
 
 # web 模块
 
@@ -54,6 +54,12 @@ Agent 执行详情与会话交互共用 `turnsFromMessages` / `reduceFrame` 和 
 `AppState.team: Arc<TeamWebState>`（`src/team_state.rs`）：`run: TeamRunConfig`（team_root+轮数界，未显式配置的根重定到 workdir 数据目录）+ 可注入 `dispatcher: Arc<dyn TeamDispatcher>`（生产 `NodeDispatcher`，测试脚本化 Mock）+ `hub: TeamHub`。路由分居 `api_teams.rs`（团队半区：GET/POST `/api/teams`、PATCH `/api/teams/:name`（改队长）、POST `.../members`（增删成员，队长不可移出）、POST `.../profile`（202 后台能力画像））与 `api_teams_topics.rs`（话题半区：GET/POST `/api/teams/:name/topics`（创建 201：`start_topic` 落 executing 元信息 + `spawn_topic_runtime`）、GET `.../topics/:tid`（整棵讨论树）、POST `.../cancel`（幂等双路径：活运行时走 token，无运行时（重启遗留/error）直接落盘 `finished(cancelled)`）、POST `.../resume`（202，executing 孤儿与 finished(error) 可续，其余/在跑 409）、GET `/api/topics?team=` 跨团队列表）。`TeamHub`（`src/team_hub.rs`）是进程内 topic 运行时注册表——每话题一个 CancelToken，条目=「有活 task」而非「未完成」；运行时权威状态全在共享目录（磁盘游标，见 [agents/team](../team/index.md)）。SPA「组队」tab 渲染 `crates/web/spa/src/fleet/teams.jsx`、「全部执行」tab 渲染 `fleet/executions.jsx`（IA 重构后的维护真源）；执行详情为 `fleet/detail.jsx` 的 ExecutionDetail 抽屉（话题深视图 `topicDetail.jsx` 已于 2026-09-06 作为零调用死缝移除，见 changelog 同日条目）。
 
 ## 项目管理面（/api/project，2026-09-04）
+
+平台 SPA 在 `project/replay/` 组织逐次运行读取：`attempt.js` 保留稳定提交 ID 并合并同时提交，`useRuns` 加载更早版本且保留已加载历史，`run.jsx`/`events.jsx` 读取指定运行的输入、方案、输出、模型文件、事件、子会话及交付文件。`fleet/detail` 将消息限制在本次范围；大字段通过 `PayloadWindows` 分块读取，当前 TODO 的大方案通过根执行 ID 读取。
+
+目标列表的空态保持创建弹窗挂载；`MdEditModal.extraTop` 承载多目标情况下的里程碑归属选择。TODO 可修改 Agent 绑定。`useOverview` 与历史加载保留最近成功数据，同时明确显示读取错误，并忽略切换 TODO 前的迟到响应。
+
+代表性验证为 `project/project.dom.test.jsx`、`project/replay/replay.dom.test.jsx` 及 [构建后双节点验收](../../scripts/acceptance/project/README.md)。下列 AppState 描述属于本地 Web API，平台归属与索引接口见 [control](../control/index.md)。
 
 - `AppState.project: Arc<ProjectService>`（`service.rs::new()` 同步便宜，`serve()` 中 `open_project_store` 后 `init`；store 打开失败 fallback libsql 并 warn）。**未 init 时所有 /api/project 路由 503**。
 - 四文件分域：`api_project.rs`（goals/milestones CRUD）、`api_project_todos.rs`（todo CRUD，PATCH 不暴露 status/plan_md）、`api_project_runs.rs`（overview / plan / execute / list_todo_runs / cancel_run）、`api_project_util.rs`（共享解析/映射）。运行生命周期全在 opencoder-project crate，web 只做 HTTP 适配（404/409/503 形状见 `tests/web_project{,_runs}.rs`）。

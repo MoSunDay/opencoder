@@ -1,4 +1,4 @@
-Commit: 2c9743fe00afa69e0ccd4df24d35a108d6600921
+Commit: (working-tree, 基于 4efaae89bfb89f1ce1c4287cb101ae755c4d526d)
 
 # control 模块
 
@@ -21,6 +21,14 @@ Commit: 2c9743fe00afa69e0ccd4df24d35a108d6600921
 
 `bootstrap::BrainClient` 按调用类型解析聊天/向量端点。规划请求未显式设置推理强度时，继承 Server 的 `Config.reasoning_effort`；请求本身的设置优先。Server 独立读取其工作目录配置，不依赖 Node 进程的用户配置。
 
-普通团队与工作流只分配一个 Node。跨节点 PeerCall 仅允许运行中 system 执行的所属协调节点联系维护 agent。大脑预览不派发，dispatch 解析能力的执行目标并沿用稳定请求 ID。项目 `project-<todo-id>` 保持 Plan → Act 节点归属。项目专用路由和通用执行控制共用 `executions::dispatch_command`：每次显式 Plan 解析当前 Server 草稿，覆盖客户端自带快照，再交由原节点执行接收检查。
+普通团队与工作流只分配一个 Node。跨节点 PeerCall 仅允许运行中 system 执行的所属协调节点联系维护 agent。大脑预览不派发，dispatch 解析能力的执行目标并沿用稳定请求 ID。项目 `project-<todo-id>` 保持 Plan → Act 节点归属。项目专用路由和通用执行控制共用 `executions::dispatch_command`：每次新的 Plan/Execute 解析当前 Server 草稿、TODO 绑定与项目结构，覆盖客户端自带快照，再交由原节点执行接收检查。
 
 共享源文件仅复用 Web 的鉴权、静态资源和全局资源管理处理器；平台入口不运行旧 Web 节点任务队列。控制面 `/api` 全面子功能的 e2e 在 `crates/control/tests/e2e/`（真实 build_app + 脚本化 WS 节点 + SHARE_GATE 串行共享目录，161 用例；projects 存储可经 `new_state_with_projects` 注入以测 store 故障分支；基建旋钮见 `support/node.rs`）。执行实现见 [worker](../worker/index.md)，业务规则见 [Agent 平台](../../features/agent-platform/index.md)。
+
+## 项目运行索引
+
+项目提交可携带独立 `run_id`，回执包含该运行 ID 与原节点；重试先向原节点确认接收，再读取可变定义或执行 brain 解析。首次 Execute 因缺方案被拒后，后续 Plan 可重新建立尚未被 Node 接收的根记录；只有明确的 execution not found 才走该路径。
+
+`GET /api/project/todos/:id/runs?before_version=...` 返回有界历史页。`GET /api/executions/:run-id`、`/messages`、`/events-page?after=...`、`/detail-field`、事件载荷和 `/artifact` 都向索引所属 Node 查询。全局索引不保存这些运行内容。
+
+`resource_scope.rs` 为 `/api/agents*` 绑定当前 Server 配置的资源根，使发布 Agent/资源与 NFS 导出使用同一目录；不同 Server 的请求作用域隔离。验证入口为 `tests/resource_root.rs` 与 [Worker 的回放契约](../../crates/worker/tests/project_replay.rs)。

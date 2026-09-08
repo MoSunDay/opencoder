@@ -1,4 +1,4 @@
-Commit: 本提交（基于 9639f553）
+Commit: 285e00248894c24a2414b2bc4a0a8823cbbf7252
 
 # 原生 Agent 执行保留接收时的资源快照
 
@@ -25,3 +25,8 @@ Commit: 本提交（基于 9639f553）
 测试使用系统盘短路径 `TMPDIR=/var/tmp/oc-vdep`，在仅启用 loopback 的独立网络命名空间中执行，并移除测试进程的代理环境变量。本机 `/tmp` 位于低于节点健康门槛的数据盘，且主机临时端口范围与 83 个 Kubernetes NodePort 重叠，会使随机本地测试请求转发到其他服务；未修改生产容量策略、网络规则或测试断言。
 
 本机原始输出保存在 `/var/lib/opencoder-integration/viking-dependency-analysis-20260908/` 下的 `workspace-tests-final.log`、`clippy-final.log`、`workspace-build.log`，汇总见 `test-counts.json` 和 `gate-results.json`。
+
+## 相关文档
+
+- [Web 资源作用域](../../../agents/web/index.md)
+- [Agent 调度平台](../../agent-platform/index.md)

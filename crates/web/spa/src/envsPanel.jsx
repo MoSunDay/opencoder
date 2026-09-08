@@ -1,10 +1,12 @@
-// envsPanel.jsx — 菜单页「Env 管理」：左侧 env 列表（新建/删除），右侧选中
-// env 的编辑器（description / tools 多选（按「已导入」「可导入」分组）/
-// env_vars 动态键值行）+ 工具导入区（importable 工具逐条 POST import）。
+// envsPanel.jsx — 菜单页「Env 管理」：朴素表格列出 env（列检索、头部新建、
+// 行内编辑/删除），编辑走抽屉（description / tools 多选 / env_vars 键值行），
+// 表下方是工具目录（已导入只读 + 可导入逐条 POST import）。
 // PUT /api/todo/envs/:name 在工具引用无法解析时 400 —— 服务端 error 经
 // onNotice 透出。
 
-import { Button, Card, Col, Empty, Form, Input, Popconfirm, Row, Select, Space, Table, Tag, Typography, message } from 'antd';
+import {
+  Button, Drawer, Form, Input, Modal, Popconfirm, Select, Space, Table, Tag, Typography, message,
+} from 'antd';
 import { useCallback, useEffect, useState } from 'react';
 import { apiDel, apiGet, apiPost, apiPut } from './api.js';
 import { PageShell } from './shell/pageShell.jsx';
@@ -24,12 +26,12 @@ export function envFromContext(j) {
 }
 
 /// env_vars 对象 ⇄ 动态行数组 [[k, v], ...]。
-export function varsToRows(envVars) {
+function varsToRows(envVars) {
   return Object.entries(envVars && typeof envVars === 'object' ? envVars : {})
     .map(([k, v]) => [String(k), v === null || v === undefined ? '' : String(v)]);
 }
 
-export function rowsToVars(rows) {
+function rowsToVars(rows) {
   const out = {};
   (rows || []).forEach(([k, v]) => {
     if (k) {
@@ -40,7 +42,7 @@ export function rowsToVars(rows) {
 }
 
 /// tools 目录 → 多选分组 options（share = 已导入，importable = 可导入）。
-export function toolGroupOptions(tools) {
+function toolGroupOptions(tools) {
   const share = [];
   const importable = [];
   (tools || []).forEach((t) => {
@@ -59,7 +61,7 @@ export function toolGroupOptions(tools) {
   ];
 }
 
-function CreateEnvForm({ onNotice, onCreated }) {
+function CreateEnvModal({ open, onClose, onCreated, onNotice }) {
   const [form] = Form.useForm();
   const [saving, setSaving] = useState(false);
 
@@ -67,6 +69,8 @@ function CreateEnvForm({ onNotice, onCreated }) {
     setSaving(true);
     try {
       await apiPost('/api/todo/envs', { name: values.name, description: values.description || '' });
+      message.success('已创建');
+      form.resetFields();
       onCreated(values.name);
     } catch (e) {
       onNotice(err('新建 env 失败: ' + (e && e.message)));
@@ -76,15 +80,20 @@ function CreateEnvForm({ onNotice, onCreated }) {
   };
 
   return (
-    <Form form={form} layout="vertical" onFinish={submit} style={{ marginBottom: 8 }}>
-      <Form.Item name="name" label="名称" rules={[{ required: true, message: '请输入名称' }]}>
-        <Input placeholder="ffmpeg-env" aria-label="new-env-name" />
-      </Form.Item>
-      <Form.Item name="description" label="描述">
-        <Input placeholder="可选" />
-      </Form.Item>
-      <Button size="small" type="primary" htmlType="submit" loading={saving}>新建</Button>
-    </Form>
+    <Modal open={open} title="新建 Env" onCancel={onClose} footer={null} destroyOnHidden>
+      <Form form={form} layout="vertical" onFinish={submit}>
+        <Form.Item name="name" label="名称" rules={[{ required: true, message: '请输入名称' }]}>
+          <Input placeholder="ffmpeg-env" aria-label="new-env-name" />
+        </Form.Item>
+        <Form.Item name="description" label="描述">
+          <Input placeholder="可选" />
+        </Form.Item>
+        <Space>
+          <Button type="primary" htmlType="submit" loading={saving}>创建</Button>
+          <Button onClick={onClose}>取消</Button>
+        </Space>
+      </Form>
+    </Modal>
   );
 }
 
@@ -98,26 +107,29 @@ function VarRows({ rows, setRows }) {
     <div>
       {rows.map((r, i) => (
         <Space key={i} style={{ display: 'flex', marginBottom: 4 }} align="baseline">
-          <Input value={r[0]} placeholder="KEY" style={{ width: 160 }} aria-label="var-key"
+          <Input value={r[0]} placeholder="KEY" style={{ width: 200 }} aria-label="var-key"
             onChange={(e) => update(i, 0, e.target.value)} />
-          <Input value={r[1]} placeholder="VALUE" style={{ width: 240 }} aria-label="var-value"
+          <Input value={r[1]} placeholder="VALUE" style={{ width: 320 }} aria-label="var-value"
             onChange={(e) => update(i, 1, e.target.value)} />
           <Button type="link" danger aria-label="var-remove" onClick={() => remove(i)}>删除</Button>
         </Space>
       ))}
-      <Button type="dashed" onClick={add} style={{ width: 160 }}>+ 添加变量</Button>
+      <Button type="dashed" onClick={add} style={{ width: 200 }}>+ 添加变量</Button>
     </div>
   );
 }
 
-function EnvEditor({ name, tools, onNotice, onSaved }) {
+function EnvDrawer({ name, tools, open, onClose, onNotice, onSaved }) {
   const [description, setDescription] = useState('');
   const [selectedTools, setSelectedTools] = useState([]);
   const [rows, setRows] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
+    if (!open || !name) {
+      return;
+    }
     let alive = true;
     setLoading(true);
     apiGet(`/api/todo/envs/${encodeURIComponent(name)}`)
@@ -139,7 +151,7 @@ function EnvEditor({ name, tools, onNotice, onSaved }) {
     return () => {
       alive = false;
     };
-  }, [name, onNotice]);
+  }, [open, name, onNotice]);
 
   const save = async () => {
     setSaving(true);
@@ -161,23 +173,31 @@ function EnvEditor({ name, tools, onNotice, onSaved }) {
     }
   };
 
-  if (loading) {
-    return <Card size="small"><Text type="secondary">加载中…</Text></Card>;
-  }
-
   return (
-    <Card size="small" title={`Env: ${name}`} extra={<Button size="small" type="primary" loading={saving} onClick={save}>保存</Button>}>
-      <Space orientation="vertical" style={{ width: '100%' }} size={12}>
+    <Drawer
+      title={`编辑 Env: ${name || ''}`}
+      open={open}
+      onClose={onClose}
+      width={720}
+      destroyOnHidden
+      footer={
+        <Space style={{ float: 'right' }}>
+          <Button onClick={onClose}>关闭</Button>
+          <Button type="primary" loading={saving} onClick={save}>保存</Button>
+        </Space>
+      }
+    >
+      <Space orientation="vertical" size={12} style={{ width: '100%' }}>
         <div>
           <Text type="secondary">描述</Text>
-          <TextArea value={description} rows={2} aria-label="env-description"
+          <TextArea value={description} rows={2} aria-label="env-description" disabled={loading}
             onChange={(e) => setDescription(e.target.value)} />
         </div>
         <div>
           <Text type="secondary">工具（tools）</Text>
           <Select mode="multiple" value={selectedTools} options={toolGroupOptions(tools)}
             onChange={setSelectedTools} placeholder="选择已导入工具；可导入项需先导入"
-            style={{ width: '100%' }} aria-label="env-tools" />
+            style={{ width: '100%' }} aria-label="env-tools" disabled={loading} />
           <Text type="secondary" style={{ fontSize: 12 }}>
             选择「可导入」组的引用会在保存时被服务端 400 拒绝（工具引用无法解析），请先在下方导入。
           </Text>
@@ -187,11 +207,11 @@ function EnvEditor({ name, tools, onNotice, onSaved }) {
           <VarRows rows={rows} setRows={setRows} />
         </div>
       </Space>
-    </Card>
+    </Drawer>
   );
 }
 
-function ToolsSection({ tools, onNotice, onToolsChanged }) {
+function ToolsCatalog({ tools, onNotice, onToolsChanged }) {
   const [importing, setImporting] = useState('');
   const share = (tools || []).filter((t) => t && t.ref && t.source !== 'importable');
   const importable = (tools || []).filter((t) => t && t.ref && t.source === 'importable');
@@ -213,6 +233,9 @@ function ToolsSection({ tools, onNotice, onToolsChanged }) {
 
   const impCols = [
     { title: 'ref', dataIndex: 'ref', key: 'ref', ellipsis: true,
+      filters: importable.map((t) => ({ text: t.ref, value: t.ref })),
+      filterSearch: true,
+      onFilter: (v, t) => String(t.ref).includes(v),
       render: (v) => <Text style={{ fontFamily: 'monospace', fontSize: 12 }}>{v}</Text> },
     { title: 'agent', dataIndex: 'agent', key: 'agent', width: 120, ellipsis: true },
     { title: 'version', dataIndex: 'version', key: 'version', width: 90, ellipsis: true },
@@ -223,25 +246,25 @@ function ToolsSection({ tools, onNotice, onToolsChanged }) {
   ];
 
   return (
-    <Card size="small" title="工具目录" style={{ marginTop: 12 }}>
-      <div style={{ marginBottom: 8 }}>
+    <div style={{ marginTop: 16 }}>
+      <Space wrap style={{ marginBottom: 8 }}>
+        <Text strong>工具目录</Text>
         <Text type="secondary">已导入（share，只读）：</Text>
         {share.length
           ? share.map((t) => <Tag key={t.ref}>{t.ref}</Tag>)
           : <Text type="secondary">无</Text>}
-      </div>
-      <Text type="secondary">可导入：</Text>
+      </Space>
       <Table rowKey="ref" size="small" columns={impCols} dataSource={importable}
         pagination={false} locale={{ emptyText: '无可导入工具' }} />
-    </Card>
+    </div>
   );
 }
 
 export function EnvsPanel({ onNotice }) {
   const [envs, setEnvs] = useState([]);
   const [tools, setTools] = useState([]);
-  const [selected, setSelected] = useState('');
   const [creating, setCreating] = useState(false);
+  const [editing, setEditing] = useState('');
 
   const loadEnvs = useCallback(async () => {
     try {
@@ -269,8 +292,9 @@ export function EnvsPanel({ onNotice }) {
   const deleteEnv = async (name) => {
     try {
       await apiDel(`/api/todo/envs/${encodeURIComponent(name)}`);
-      if (selected === name) {
-        setSelected('');
+      message.success('已删除');
+      if (editing === name) {
+        setEditing('');
       }
       loadEnvs();
     } catch (e) {
@@ -278,54 +302,65 @@ export function EnvsPanel({ onNotice }) {
     }
   };
 
+  const columns = [
+    { title: '名称', dataIndex: 'name', key: 'name',
+      filters: envs.map((e) => ({ text: e.name, value: e.name })),
+      filterSearch: true,
+      onFilter: (v, e) => String(e.name).includes(v),
+      render: (v) => <Text strong>{v}</Text> },
+    { title: '描述', dataIndex: 'description', key: 'description', ellipsis: true,
+      filters: [...new Set(envs.map((e) => e.description).filter(Boolean))]
+        .map((d) => ({ text: d, value: d })),
+      filterSearch: true,
+      onFilter: (v, e) => String(e.description || '').includes(v),
+      render: (v) => v || <Text type="secondary">-</Text> },
+    { title: '工具', key: 'tools', width: 90,
+      render: (_, e) => <Tag>{(e.tools || []).length} 个</Tag> },
+    { title: '变量', key: 'vars', width: 90,
+      render: (_, e) => <Tag>{Object.keys(e.env_vars || {}).length} 个</Tag> },
+    { title: '操作', key: 'ops', width: 140, render: (_, e) => (
+      <Space size={0}>
+        <Button size="small" type="link" onClick={() => setEditing(e.name)}>编辑</Button>
+        <Popconfirm title={`删除 env ${e.name}？`} okText="确认删除" onConfirm={() => deleteEnv(e.name)}>
+          <Button size="small" type="link" danger>删除</Button>
+        </Popconfirm>
+      </Space>
+    ) },
+  ];
+
   return (
-    <PageShell page="envs">
-      <Row gutter={16}>
-        <Col span={8}>
-          <Card size="small" title="Env 列表" extra={<Button size="small" onClick={() => setCreating((v) => !v)}>{creating ? '收起' : '新建'}</Button>}>
-          {creating ? (
-            <CreateEnvForm
-              onNotice={onNotice}
-              onCreated={(name) => {
-                setCreating(false);
-                setSelected(name);
-                loadEnvs();
-              }}
-            />
-          ) : null}
-          {envs.length === 0 ? <Text type="secondary">暂无 env</Text> : envs.map((e) => (
-            <div
-              key={e.name}
-              aria-label={`env-row-${e.name}`}
-              onClick={() => setSelected(e.name)}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-                padding: '6px 8px',
-                cursor: 'pointer',
-                background: selected === e.name ? '#e6f4ff' : undefined,
-                borderBottom: '1px solid #f5f5f5',
-              }}
-            >
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div><Text strong>{e.name}</Text> <Tag style={{ marginInlineStart: 8 }}>{(e.tools || []).length} 工具</Tag></div>
-                <Text type="secondary" style={{ fontSize: 12 }}>{e.description || '-'}</Text>
-              </div>
-              <Popconfirm title={`删除 env ${e.name}？`} onConfirm={() => deleteEnv(e.name)}>
-                <Button size="small" type="link" danger onClick={(ev) => ev.stopPropagation()}>删除</Button>
-              </Popconfirm>
-            </div>
-          ))}
-        </Card>
-      </Col>
-      <Col span={16}>
-        {selected
-          ? <EnvEditor name={selected} tools={tools} onNotice={onNotice} onSaved={loadEnvs} />
-          : <Card size="small"><Empty description="点击左侧 env 进行编辑" /></Card>}
-        <ToolsSection tools={tools} onNotice={onNotice} onToolsChanged={loadTools} />
-      </Col>
-      </Row>
+    <PageShell
+      page="envs"
+      extra={<Button type="primary" onClick={() => setCreating(true)}>新建</Button>}
+    >
+      <Table
+        rowKey="name"
+        size="small"
+        columns={columns}
+        dataSource={envs}
+        pagination={false}
+        scroll={{ x: 'max-content' }}
+        locale={{ emptyText: '暂无 env' }}
+      />
+      <ToolsCatalog tools={tools} onNotice={onNotice} onToolsChanged={loadTools} />
+      <CreateEnvModal
+        open={creating}
+        onNotice={onNotice}
+        onClose={() => setCreating(false)}
+        onCreated={(name) => {
+          setCreating(false);
+          setEditing(name);
+          loadEnvs();
+        }}
+      />
+      <EnvDrawer
+        name={editing}
+        tools={tools}
+        open={!!editing}
+        onNotice={onNotice}
+        onClose={() => setEditing('')}
+        onSaved={loadEnvs}
+      />
     </PageShell>
   );
 }

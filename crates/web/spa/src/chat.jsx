@@ -463,13 +463,6 @@ export function ChatPanel({ onNotice }) {
                 placeholder="输入提示词，Enter 发送，Shift+Enter 换行"
               />
             </div>
-            <Button
-              style={{ height: 40 }}
-              disabled={!nodeReady || !dialogSel || !input.trim()}
-              onClick={() => send(input.trim(), 'queue')}
-            >
-              排队
-            </Button>
           </div>
         </div>
       </div>

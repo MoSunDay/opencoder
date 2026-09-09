@@ -7,7 +7,7 @@ Commit: b465f440381bd009dc9bd3a8192ad88eab44cede
 ## 关键路径
 
 - `crates/control/src/bootstrap.rs` — 仅开 control.db + definitions.db；BrainClient
-- `crates/control/src/transport/hub.rs` — Hub：协议 v7 校验；连接/RPC/预留仅内存
+- `crates/control/src/transport/hub.rs` — Hub：协议 v8 校验；连接/RPC/预留仅内存
 - `crates/control/src/api/executions/mod.rs` — `submit_inner` 提交选点：placement 锁内解析定义并预留；按 ID 路由明细/控制/SSE/产物
 - `crates/control/src/api/catalog.rs` — nodes/maintain/teams/dag_defs/resolve 维护与定义解析
 - `crates/control/src/api/compat/` — 旧 Chat/DAG/TODO/Project 兼容路由
@@ -16,7 +16,7 @@ Commit: b465f440381bd009dc9bd3a8192ad88eab44cede
 - `crates/control/src/resource_scope.rs` — /api/agents* 绑定 Server 资源根
 - `crates/control/src/role_gate.rs` — 角色权限矩阵纯函数；layer 顺序 auth → role_gate → resource_scope
 - `crates/control/src/api/users.rs` — /api/me、/api/users CRUD；token 一次性明文、自删/末位 admin 保护
-- `crates/core/src/fleet/protocol.rs` — PROTOCOL_VERSION=7；ExecutionIndex 五字段
+- `crates/core/src/fleet/protocol.rs` — PROTOCOL_VERSION=8；ExecutionIndex 五字段
 - `crates/control/tests/e2e/` — e2e：真实 build_app + 脚本化 WS 节点
 - `crates/control/tests/resource_root.rs` — 资源根隔离验证
 

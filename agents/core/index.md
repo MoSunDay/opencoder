@@ -22,7 +22,7 @@ Commit: b465f440381bd009dc9bd3a8192ad88eab44cede
 - `src/skill.rs` — 多根发现 first-wins 遮蔽；缓存 `src/skill/skill_cache.rs`。
 - `src/tool.rs` — `Tool` trait / `ToolArc` / `ToolContext` / `ToolOutput`。
 - `src/identity.rs` — `Identity`/`Role`(admin|root|user)/`token_hash`(sha256)；不从 lib 根 re-export（避让 message::Role）。
-- `src/fleet/protocol.rs` — `PROTOCOL_VERSION = 7`，Server/Node 必须同代际。
+- `src/fleet/protocol.rs` — `PROTOCOL_VERSION = 8`，Server/Node 必须同代际。
 - `src/fleet/{queue,scheduling}.rs` — FIFO/LIFO 排序与纯 CPU 节点选择。
 - `src/share_fs.rs` — NFS 兼容共享树布局（todo/env/agent/tools）。
 - `src/sse.rs` — `SseEvt` 服务端 SSE 事件类型。

@@ -391,6 +391,7 @@ impl NodeService for MockNode {
                 .get(&execution.id)
                 .cloned()
                 .unwrap_or_else(|| miss404("team execution not found")),
+            NodeOperation::DagSteps { .. } => miss404("dag execution not found"),
             NodeOperation::Artifact { request } => {
                 let key = (
                     request.execution.id.clone(),

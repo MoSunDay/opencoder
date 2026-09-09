@@ -9,7 +9,7 @@ Commit: b465f440381bd009dc9bd3a8192ad88eab44cede
 - `crates/node/src/fleet/mod.rs` — NodeService trait：注册/快照/索引/执行
 - `crates/node/src/fleet/client.rs` — Bearer WS 注册 + 5 秒心跳上报
 - `crates/node/src/fleet/cpu.rs` — 进程可用 CPU 与 cgroup quota 算容量
-- `crates/core/src/fleet/protocol.rs` — PROTOCOL_VERSION=7、帧与索引定义
+- `crates/core/src/fleet/protocol.rs` — PROTOCOL_VERSION=8、帧与索引定义
 - `crates/node/src/runner.rs` — 旧 run_node 队列入口（兼容）
 - `crates/node/src/uplink.rs` — 旧 REST Uplink + LocalDagPersistence 接缝
 - `crates/node/src/batcher.rs` — 旧 claim/heartbeat 批处理（兼容）

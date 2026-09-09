@@ -89,7 +89,8 @@ class Environment:
             args.extend(['--setenv', f'{key}={value}'])
         # PID 1 otherwise loses mounts made in the acceptance process's private
         # namespace. Inherit it before making the service's own guarded copy.
-        args.extend(['--', '/usr/bin/nsenter', f'--mount=/proc/{os.getpid()}/ns/mnt', '--',
+        args.extend(['--', '/usr/bin/nsenter', f'--mount=/proc/{os.getpid()}/ns/mnt',
+            f'--root=/proc/{os.getpid()}/root', f'--wd={workdir}', '--',
             '/usr/bin/python3', str(HERE / 'scope.py'), str(self.root), name, *map(str, command)])
         run(args)
         self.units.append(unit)

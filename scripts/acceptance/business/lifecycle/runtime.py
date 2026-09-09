@@ -1,6 +1,7 @@
 """Verify a run has stopped while preserving its databases and evidence."""
 from pathlib import Path
 import os
+import shutil
 from common import read, run, write
 
 
@@ -46,7 +47,8 @@ def occupants(runtime):
             paths = [os.readlink(proc / field) for field in ['cwd', 'root', 'exe']]
             for fd in (proc / 'fd').iterdir():
                 try:
-                    paths.append(os.readlink(fd).removesuffix(' (deleted)'))
+                    value = os.readlink(fd)
+                    paths.append(value[:-10] if value.endswith(' (deleted)') else value)
                 except FileNotFoundError:
                     pass
             if any(references_runtime(path, runtime) for path in paths):
@@ -67,7 +69,7 @@ def occupants(runtime):
     return {'remainingRuntimeProcesses': processes, 'remainingRuntimeMounts': mounts}
 
 
-def finalize_runtime(root):
+def finalize_runtime(root, destroy=False):
     root = Path(root).resolve()
     runtime = assert_owned(root)
     if not runtime.exists():
@@ -78,5 +80,7 @@ def finalize_runtime(root):
         raise RuntimeError('Runtime is still referenced by processes or mounts; cannot finalize')
     size = int(run(['du', '-sB1', runtime]).split()[0])
     assert_owned(root)
-    return {'runtimeRemoved': False, 'runtimeRetained': True,
+    if destroy:
+        shutil.rmtree(runtime)
+    return {'runtimeRemoved': destroy, 'runtimeRetained': not destroy,
             'runtimeBytesBeforeCleanup': size}

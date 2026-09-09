@@ -82,6 +82,10 @@ Commit: (working-tree, 基于 64f7000f)
 ## 验证
 
 - `cd crates/web/spa && npx vitest run` → **69 files / 556 tests passed**（整改前基线 541）。
+  订正（后一轮按 rules/02 证据纪律复核）：541→556 的 +15 并非全属本轮 —— 逐文件比对
+  `git show HEAD^/HEAD` 后本轮自身 `it(` 增量为 **+14**（`theme.test.js` 2、`ui/mono.test.js` 1、
+  `envsPanel.dom.test.jsx` 1、`ui/tableLoading.test.js` 5、`ui/tableLoading.dom.test.jsx` 5），
+  而 556 是**工作树**数字，含并行会话在途未提交的测试文件。数字本身真实，来源是混合的。
 - `node scripts/acceptance/spa_responsive.js` → exit 0，`visited 12 pages`、`SUMMARY measurements=27 overflowing=0`。
 - `bash scripts/check-spa-drift.sh` → `spa dist: no drift`（工作树 `dist/` 已按 `npm run build` 重建）。
 - `cargo build -p opencoder-web` → EXIT=0（`dist/` 由 `include_bytes!` 内嵌，产物变化需过构建）。
@@ -100,7 +104,8 @@ Commit: (working-tree, 基于 64f7000f)
 - `api.js` 无 timeout、调用方不传 `signal`：一次永不 settle 的**非静默**请求会让 loading 永久为真，
   配合 `pointer-events:none` 使行内操作永久不可点（评审 4.8）。本轮未动 `api.js`（影响面覆盖全部面板），
   留作独立一轮：`apiGet` 加 `AbortSignal.timeout` 或给列表拉取传 `signal`。
-- `todoRunsPanel.jsx` 的两张表仍用裸 `loading` 布尔，且其 wf-A/wf-B 双工作流状态存在「A 的 `finally`
-  清掉 B 的 loading」的既有缺陷（评审 4.12）。迁到新约定需要先把双工作流状态理清，本轮只借它加了
-  `className="oc-todo-runs"` 作用域。
+- `todoRunsPanel.jsx` 的两张表仍用裸 `loading` 布尔，本轮只借它加了 `className="oc-todo-runs"` 作用域。
+  当时记为「需先理清 wf-A/wf-B 双工作流状态」，后一轮实测该前置并不存在（外层早有 `load(silent)`，
+  轮询就是 `load(true)`），已连同内层 silent 通道一并接线：见
+  `spa-todo-runs-silent-refresh-and-bundle-provenance.md`。
 - `chatSidebar.jsx` 的 264px 固定宽（评审明确推迟项）与 `chat.jsx:438` 裸 `rgba(0,0,0,.08)` 阴影未动。

@@ -273,5 +273,6 @@ async fn existing_brain_candidate_never_replans_or_moves_nodes() {
 }
 
 mod dag_diamond_flow;
+mod dag_team_loop;
 mod team_multiround_consensus;
 mod workloads;

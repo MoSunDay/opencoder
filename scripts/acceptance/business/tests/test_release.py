@@ -42,7 +42,7 @@ class ReleaseGate(unittest.TestCase):
 
     def test_clean_result_and_real_assertions_can_pass(self):
         evaluation = {'health': 'clean', 'gaps': [], 'reportReady': False, 'findingCount': 0}
-        regression = {'verdict': 'pass', 'executions': [
+        regression = {'verdict': 'pass', 'gaps': [], 'executions': [
             {'exitCode': 0, 'error': None, 'timedOut': False}]}
         quality = quality_results(evaluation, regression)
         self.assertTrue(acceptance_passed(True, True, quality))
@@ -54,6 +54,22 @@ class ReleaseGate(unittest.TestCase):
         for executions in [[], [{'exitCode': 0, 'timedOut': True}]]:
             quality = quality_results({}, {'verdict': 'pass', 'executions': executions})
             self.assertFalse(quality['regression-test']['valid'])
+
+    def test_unexecuted_assertions_and_unresolved_gaps_cannot_pass(self):
+        for code, gaps in [(None, []), (True, []), (-9, []), (1, []), (0, ['missing evidence'])]:
+            quality = quality_results({}, {'verdict': 'pass', 'gaps': gaps,
+                'executions': [{'exitCode': code, 'timedOut': False}]})
+            self.assertFalse(quality['regression-test']['valid'])
+
+    def test_unexpected_verdict_preserves_the_actual_business_assessment(self):
+        evaluation = {'health': 'clean', 'gaps': [], 'findingCount': 0}
+        regression = {'verdict': 'block', 'gaps': [], 'executions': [{'exitCode': 1}]}
+        quality = quality_results(evaluation, regression, {'eval-diagnose': 'clean', 'regression-test': 'pass'})
+        self.assertEqual(quality['regression-test']['verdict'], 'block')
+        self.assertEqual(quality['regression-test']['expected'], 'pass')
+        self.assertEqual(quality['regression-test']['testAttemptCount'], 1)
+        self.assertFalse(acceptance_passed(True, True, quality))
+        self.assertTrue(quality_results(evaluation, regression)['regression-test']['valid'])
 
 
 if __name__ == '__main__':

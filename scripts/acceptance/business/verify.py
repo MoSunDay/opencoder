@@ -199,10 +199,6 @@ def verify(environment, jobs):
     until(delivered, 'local result delivery')
     from validation.quality import quality_results
     evaluation = read(environment.root / 'evidence/eval-diagnose/artifacts/result.json')
-    quality = quality_results(evaluation, regression)
-    expected = environment.prepared.get('expectedVerdicts', {})
-    if expected:
-        assert evaluation['health'] == expected['eval-diagnose'], 'Unexpected controlled evaluation result'
-        assert regression['verdict'] == expected['regression-test'], 'Unexpected controlled regression result'
+    quality = quality_results(evaluation, regression, environment.prepared.get('expectedVerdicts'))
     return {'businessQuality': quality, 'workflows': results, 'fifoPendingVerified': True, 'queueExecutionId': queue_execution, 'fixedNode': environment.node,
             'outboundDelivery': 'local sink only', 'realCodex': True}

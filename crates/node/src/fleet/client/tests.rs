@@ -21,6 +21,8 @@ impl NodeService for Service {
             "report load snapshot must be sampled after its indexes"
         );
         NodeSnapshot {
+            pending_runs: 0,
+            queue_order: Default::default(),
             generation: "generation-a".into(),
             sequence: 2,
             cpu_capacity: 2.0,
@@ -143,6 +145,7 @@ async fn create_reply_is_queued_after_its_load_snapshot() {
         service,
         NodeOperation::Create {
             assignment: Assignment {
+                codex: None,
                 index: record(1),
                 request: CreateExecution {
                     id: "agent-1".into(),
@@ -196,6 +199,8 @@ impl NodeService for SlowIndexes {
 
     fn snapshot(&self) -> NodeSnapshot {
         NodeSnapshot {
+            pending_runs: 0,
+            queue_order: Default::default(),
             generation: "generation-slow".into(),
             sequence: 1,
             cpu_capacity: 1.0,

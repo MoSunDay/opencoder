@@ -364,6 +364,7 @@ mod tests {
             client_override: None,
             brain: None,
             spawns: Mutex::new(HashMap::new()),
+            reserved: Mutex::new(Default::default()),
             archive_root: Mutex::new(dir.path().join("runs")),
             admission: tokio::sync::Mutex::new(()),
             persistence_error: Mutex::new(None),

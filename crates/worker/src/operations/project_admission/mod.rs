@@ -51,9 +51,20 @@ pub async fn existing(
         .accepted_attempt(todo, kind(action), id, &request(action, input))
         .await
 }
-pub fn receipt(worker: &Worker, owner: &str, run: &ProjectTodoRunRecord) -> RpcReply {
+pub async fn receipt(worker: &Worker, owner: &str, run: &ProjectTodoRunRecord) -> RpcReply {
+    let queued = worker
+        .inner
+        .journal
+        .lock()
+        .await
+        .records
+        .get(owner)
+        .is_some_and(|r| {
+            r.assignment.index.status == ExecutionStatus::Pending
+                && r.result["next_run_id"].as_str() == Some(&run.id)
+        });
     RpcReply::ok(
-        json!({"id":owner,"kind":"project","run_id":run.id,"node_id":worker.inner.registration.id,"status":match run.status {ProjectTodoRunStatus::Running=>"running",ProjectTodoRunStatus::Done=>"idle",ProjectTodoRunStatus::Failed=>"error",ProjectTodoRunStatus::Cancelled=>"cancelled"},"run_status":run.status}),
+        json!({"id":owner,"kind":"project","run_id":run.id,"node_id":worker.inner.registration.id,"status":if queued {"pending"} else {match run.status {ProjectTodoRunStatus::Running=>"running",ProjectTodoRunStatus::Done=>"idle",ProjectTodoRunStatus::Failed=>"error",ProjectTodoRunStatus::Cancelled=>"cancelled"}},"run_status":run.status}),
     )
 }
 pub async fn reserve(

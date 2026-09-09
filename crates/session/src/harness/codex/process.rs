@@ -54,11 +54,19 @@ pub fn spawn(
     prompt: String,
     images: &[std::path::PathBuf],
 ) -> Result<Running> {
-    let binary = binary_path(&session.harness.envs, &session.working_dir)?;
+    let binary = configured_binary(
+        session.harness.codex.as_ref(),
+        &session.harness.envs,
+        &session.working_dir,
+    )?;
     let (mut cmd, lease) = match crate::process::command(&binary)? {
         Some((cmd, lease)) => (cmd, Some(lease)),
         None => (Command::new(&binary), None),
     };
+    if let Some(settings) = &session.harness.codex {
+        settings.validate().map_err(anyhow::Error::msg)?;
+        cmd.args(settings.config_args());
+    }
     cmd.arg("exec");
     if let Some(id) = &session.harness.fork_from {
         cmd.args(["fork", id]);
@@ -137,6 +145,30 @@ pub fn spawn(
         owner,
         pid,
     })
+}
+
+pub fn configured_binary(
+    settings: Option<&opencoder_core::harness::CodexSettings>,
+    envs: &std::collections::BTreeMap<String, String>,
+    workdir: &std::path::Path,
+) -> Result<std::path::PathBuf> {
+    if let Some(path) = settings.and_then(|s| s.executable.as_ref()) {
+        let binary = std::env::current_dir()?.join(workdir).join(path);
+        let meta = binary
+            .metadata()
+            .context("configured Codex executable unavailable")?;
+        anyhow::ensure!(meta.is_file(), "configured Codex executable must be a file");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            anyhow::ensure!(
+                meta.permissions().mode() & 0o111 != 0,
+                "configured Codex file is not executable"
+            );
+        }
+        return Ok(binary);
+    }
+    binary_path(envs, workdir)
 }
 impl Running {
     pub async fn stop(&mut self) -> Result<()> {

@@ -1,5 +1,7 @@
 mod admission;
 mod health;
+mod scheduling;
+pub(crate) use scheduling::SchedulingState;
 
 pub(crate) use admission::AdmissionState;
 pub(crate) use health::capacity_error;

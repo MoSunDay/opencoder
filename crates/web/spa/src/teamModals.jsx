@@ -64,7 +64,7 @@ export function CreateTeamModal({ open, nodes, onClose, onDone, onNotice }) {
         <Button key="ok" type="primary" disabled={busy || !name.trim() || !captain} onClick={submit}>创建</Button>,
       ]}
     >
-      <Space direction="vertical" size={12} style={{ width: '100%' }}>
+      <Space orientation="vertical" size={12} style={{ width: '100%' }}>
         <Input placeholder="团队名称" value={name} onChange={(e) => setName(e.target.value)} />
         <div>
           <Text type="secondary">队长（单选）</Text>
@@ -188,7 +188,7 @@ export function MembersModal({ team, nodes, onClose, onDone, onNotice }) {
         <Button key="ok" type="primary" disabled={busy || (adds.length === 0 && removes.length === 0)} onClick={submit}>确定</Button>,
       ]}
     >
-      <Space direction="vertical" size={12} style={{ width: '100%' }}>
+      <Space orientation="vertical" size={12} style={{ width: '100%' }}>
         <div>
           <Text type="secondary">当前成员</Text>
           <div style={{ marginTop: 4 }}>
@@ -263,7 +263,7 @@ export function TopicModal({ team, onClose, onCreated, onNotice }) {
         <Button key="ok" type="primary" disabled={busy || !title.trim()} onClick={submit}>创建</Button>,
       ]}
     >
-      <Space direction="vertical" size={12} style={{ width: '100%' }}>
+      <Space orientation="vertical" size={12} style={{ width: '100%' }}>
         <Input placeholder="话题标题" value={title} onChange={(e) => setTitle(e.target.value)} />
         <Input.TextArea
           rows={4}

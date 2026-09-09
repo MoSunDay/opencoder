@@ -14,6 +14,7 @@ import { ExecutionDetail } from '../fleet/detail.jsx';
 import { executionPagePath } from '../fleet/model.js';
 import { PageShell } from '../shell/pageShell.jsx';
 import { StatusTag } from '../ui/statusTag.jsx';
+import { MONO_VAR } from '../ui/mono.js';
 import { TimeText } from '../ui/timeText.jsx';
 import { MilestoneStatusTag } from './labels.jsx';
 import { flattenTodos, flattenMilestones } from './model/relations.js';
@@ -148,10 +149,10 @@ export function ProgressPanel({ onNotice }) {
     {
       title: 'ID',
       dataIndex: 'id',
-      render: (v) => <span style={{ fontFamily: 'var(--oc-mono, monospace)' }}>{v}</span>,
+      render: (v) => <span style={{ fontFamily: MONO_VAR }}>{v}</span>,
     },
     { title: '状态', dataIndex: 'status', render: (v) => <StatusTag status={v} /> },
-    { title: '节点', dataIndex: 'node_id', render: (v) => <span style={{ fontFamily: 'var(--oc-mono, monospace)' }}>{v || '—'}</span> },
+    { title: '节点', dataIndex: 'node_id', render: (v) => <span style={{ fontFamily: MONO_VAR }}>{v || '—'}</span> },
     { title: '创建时间', dataIndex: 'created_at', render: (v) => <TimeText ts={v} /> },
   ];
 

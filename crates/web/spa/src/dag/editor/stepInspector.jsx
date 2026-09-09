@@ -9,6 +9,7 @@
 
 import { Alert, Button, Form, Input, InputNumber, Popconfirm, Select, Typography } from 'antd';
 import { useEffect, useState } from 'react';
+import { MONO_VAR } from '../../ui/mono.js';
 import { changeStepKind, renameStep } from './canvasModel.js';
 
 const { Text } = Typography;
@@ -60,7 +61,7 @@ export function StepInspector({ step, allNames, problemList, onChange, onRename,
         <Alert
           type="error"
           style={{ marginBottom: 10 }}
-          message="校验未通过"
+          title="校验未通过"
           description={
             <ul style={{ margin: 0, paddingLeft: 16 }}>
               {problems.map((p, i) => (
@@ -127,7 +128,7 @@ export function StepInspector({ step, allNames, problemList, onChange, onRename,
             >
               <Input
                 placeholder="tool.wasm --flag"
-                style={{ fontFamily: 'var(--oc-mono, monospace)' }}
+                style={{ fontFamily: MONO_VAR }}
                 value={kind.command || ''}
                 onChange={(e) => onChange(withKindField(step, 'command', e.target.value))}
               />

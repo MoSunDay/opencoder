@@ -1,6 +1,7 @@
 // theme.js — the single antd v6 ThemeConfig behind the fleet console's
 // "light unified" shell: white header + white sider floating on a cool light
-// gray layout canvas. Pure data, no imports — main.jsx feeds it to
+// gray layout canvas. Pure data (the only import is ./ui/mono.js, itself
+// pure data) — main.jsx feeds it to
 // <ConfigProvider theme={theme}>. Every color here has a CSS twin in the
 // app.css :root block (--oc-* variables): raw CSS surfaces (DAG nodes,
 // sheets, dividers) cannot read cssinjs tokens, so the two halves must stay
@@ -36,8 +37,10 @@ export const shadowTertiary =
 /// `0 0 0 2px` shadow itself), Input takes the whole shadow string.
 const focusRing = 'rgba(22, 119, 255, 0.10)';
 
+import { MONO } from './ui/mono.js';
+
 /// `#rrggbb` -> the `r, g, b` triplet form used inside rgba() literals, so
-/// --oc-primary-rgb can never drift away from --oc-primary.
+/// the *-rgb vars can never drift away from their hex twin.
 const rgbTriplet = (hex) => {
   const n = parseInt(hex.slice(1), 16);
   return `${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}`;
@@ -73,10 +76,19 @@ export const cssVars = {
   '--oc-error': '#ff4d4f',
   '--oc-error-bg': '#fff2f0',
   '--oc-shadow-panel': shadowTertiary,
-  // Monospace stack for id / uuid / session columns (raw identifiers, not
-  // prose). src/ui/mono.js owns the same literal on the JS side.
-  '--oc-mono': `ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas,
-    'Liberation Mono', monospace`,
+  // Transcript role accents (antd preset cyan-6 / purple-6). The *-rgb twins
+  // exist because RoleAvatar composes a 10% wash, and hex + '1a' string
+  // concatenation cannot be expressed with a var().
+  '--oc-accent-user': '#13c2c2',
+  '--oc-accent-user-rgb': rgbTriplet('#13c2c2'),
+  '--oc-accent-ai': '#9254de',
+  '--oc-accent-ai-rgb': rgbTriplet('#9254de'),
+  // Markdown heading green (antd green-7). No token twin: colorSuccessText is
+  // the lighter #52c41a, which is too pale for a heading on white.
+  '--oc-heading': '#389e0d',
+  // Monospace stack for id / uuid / session columns. ui/mono.js owns the
+  // literal; mono.test.js asserts the two stay equal.
+  '--oc-mono': MONO,
 };
 
 /// antd ThemeConfig (v6). Component notes:

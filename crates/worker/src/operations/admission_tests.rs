@@ -21,7 +21,9 @@ async fn rejected_project_commands_never_change_durable_admission() {
     .unwrap();
     let id = "project-todo";
     let original = Record {
+        queue: None,
         assignment: Assignment {
+            codex: None,
             index: ExecutionIndex {
                 id: id.into(),
                 kind: ExecutionKind::Project,
@@ -108,7 +110,9 @@ async fn rejected_project_commands_never_change_durable_admission() {
     worker.inner.active.lock().await.clear();
 
     let slot = worker.inner.slots.clone().acquire_owned().await.unwrap();
-    assert_eq!(invoke(snapshot.clone()).await.unwrap().status, 429);
+    let mut invalid_while_full = snapshot.clone();
+    invalid_while_full["todo"]["agent"] = json!("missing-resource-agent");
+    assert_eq!(invoke(invalid_while_full).await.unwrap().status, 400);
     assert_eq!(std::fs::read(&journal).unwrap(), before);
     drop(slot);
     snapshot["todo"]["agent"] = json!("missing-resource-agent");
@@ -160,6 +164,7 @@ async fn missing_runc_rootfs_is_rejected_before_durable_acceptance() {
     let reply = super::create::create(
         &worker,
         Assignment {
+            codex: None,
             index: ExecutionIndex {
                 id: id.into(),
                 created_at: 1,
@@ -214,6 +219,7 @@ async fn create_never_adopts_an_unowned_execution_directory() {
     let reply = super::create::create(
         &worker,
         Assignment {
+            codex: None,
             index: ExecutionIndex {
                 id: id.into(),
                 created_at: 1,
@@ -262,7 +268,9 @@ async fn system_history_is_queryable_and_stoppable_but_cannot_restart() {
         .kinds
         .contains(&ExecutionKind::System));
     let history = Record {
+        queue: None,
         assignment: Assignment {
+            codex: None,
             index: ExecutionIndex {
                 id: "system-history".into(),
                 created_at: 1,

@@ -6,6 +6,7 @@ pub mod executions;
 pub mod project;
 pub mod project_util;
 pub mod session;
+pub mod settings;
 pub mod stream;
 pub mod streaming;
 

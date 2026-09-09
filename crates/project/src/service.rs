@@ -34,6 +34,7 @@ pub struct Deps {
     pub client_override: Option<Arc<dyn ChatStream>>,
     pub brain: Option<opencoder_brain::Runtime>,
     pub spawns: Mutex<HashMap<String, CancellationToken>>,
+    pub reserved: Mutex<std::collections::HashSet<String>>,
     pub archive_root: Mutex<PathBuf>,
     pub admission: tokio::sync::Mutex<()>,
     pub persistence_error: Mutex<Option<String>>,
@@ -97,6 +98,7 @@ impl ProjectService {
             client_override,
             brain,
             spawns: Mutex::new(HashMap::new()),
+            reserved: Mutex::new(Default::default()),
         });
         self.deps
             .set(deps)
@@ -124,6 +126,7 @@ impl ProjectService {
         let Some(deps) = self.deps.get() else {
             return Ok(false);
         };
+        deps.reserved.lock().unwrap().remove(run_id);
         // The driver remains live while cancellation flushes its output and
         // archive. Only driver completion may remove this liveness marker.
         let token = deps.spawns.lock().unwrap().get(run_id).cloned();
@@ -207,6 +210,7 @@ pub(crate) async fn ensure_no_plan_in_flight(deps: &Arc<Deps>, todo_id: &str) ->
             continue;
         }
         if deps.spawns.lock().unwrap().contains_key(&run.id)
+            || deps.reserved.lock().unwrap().contains(&run.id)
             || now - run.started_at <= STALE_RUN_GRACE_MS
         {
             plan_in_flight = true;

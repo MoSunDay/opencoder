@@ -39,21 +39,21 @@ Server 与 Node 都要求 `--token`、`--token-file` 或既有 `OPENCODER_SERVER
 
 普通 agent、子 agent、team、DAG、TODO workflow 和项目 Plan → Act 始终在一个节点闭环。Server 通过 ID 查索引，再向所属 Node 获取明细、事件或产物；列表需要名称等额外字段时临时查询节点，不落库缓存。节点离线时查询明确失败，不用旧副本冒充当前明细。
 
-平台使用独立新库：Server 的 `data-dir` 包含 `control.db`、`definitions.db` 和持久化的 `admission.json`；省略该参数时兼容使用当前工作目录数据域下的 `server-v2/`。Node 的 `data-dir` 包含 `runtime.db`、`admission.json` 和 `<kind>/<id>/execution.json` 及其资源、team、DAG 状态。未指定 Node `data-dir` 时使用当前工作目录数据域的 `node-v2/`。旧 daemon/CLI 数据不迁移、不清空；需要迁移旧 Node 布局时显式运行 `opencoder-agent --data-dir <目录> storage migrate-layout`。平台项目定义固定使用新 Server 库，不读取旧 MySQL 项目库。
+平台使用独立新库：Server 的 `data-dir` 包含 `control.db`、`definitions.db` 和持久化的 `admission.json`；省略该参数时兼容使用当前工作目录数据域下的 `server-v2/`。Node 的 `data-dir` 包含 `runtime.db`、`admission.json`、`scheduling.json` 和 `<kind>/<id>/execution.json` 及其资源、team、DAG 状态。未指定 Node `data-dir` 时使用当前工作目录数据域的 `node-v2/`。旧 daemon/CLI 数据不迁移、不清空；需要迁移旧 Node 布局时显式运行 `opencoder-agent --data-dir <目录> storage migrate-layout`。平台项目定义固定使用新 Server 库，不读取旧 MySQL 项目库。
 
 ## 调度和恢复
 
-调度分数为 `(活跃 agent loops + 待确认分配数) / 可用 CPU`，优先最低值。CPU 包含容器 quota；统计真实运行的父/子 agent、团队成员、工作流 agent 和维护 agent，空闲会话不占 loop。节点还必须在线、心跳新鲜、资源可用、支持执行类型且未超出顶层容量。
+调度分数为 `(活跃 agent loops + 待确认分配数) / 可用 CPU`，优先最低值。CPU 包含容器 quota；统计真实运行的父/子 agent、团队成员、工作流 agent 和维护 agent，空闲会话不占 loop。节点还必须在线、心跳新鲜、资源可用且支持执行类型。优先选择有空余容量的节点；全部满载时选择等待数较少的可接受节点，把超额任务交给该 Node 持久化排队。
 
 节点每 5 秒报告心跳，并在 loop 进入/退出和任务状态变化时立即报告快照与索引。Server 在发出任务前记录归属并预留容量，收到节点确认后释放预留，避免并发请求集中投向同一空闲节点。指定 `node_id` 时只检查指定节点；节点不满足条件则报错，不改派其他节点。
 
-Node 在返回接受前同步持久化任务及资源快照。创建请求携带稳定 ID：同一 ID、相同输入重复提交不重复执行；不同输入返回 409。网络超时后归属仍保留，客户端必须用原 ID 重试，Server 不猜测任务是否接受而改派。
+Node 在返回接受前同步持久化任务、资源和 Harness 配置快照。节点页可设置最大顶层并发数（1–65535）和 FIFO/LIFO；`scheduling.json` 保存配置，优先于重启时的启动默认值。超额任务以 pending 等待，释放容量后按配置顺序启动；降低上限不打断正在运行的任务。创建请求携带稳定 ID：同一 ID、相同输入重复提交不重复执行；不同输入返回 409。网络超时后归属仍保留，客户端必须用原 ID 重试，Server 不猜测任务是否接受而改派。
 
-断线只影响传输，已接受的本地工作继续。Node 重启将未完成执行标记 `interrupted`，由用户显式在原节点恢复；不会自动重跑。DAG 恢复跳过已成功写入检查点的步骤。项目执行 ID 为 `project-<todo-id>`，Plan、Act 和新一轮 Plan 保持相同节点。节点存储出现持久化错误时上报不可调度，须处理存储故障后重启节点。项目页面与全部执行详情中的 Plan 均由 Server 解析当前草稿；Node 在容量、忙碌及资源预检通过后才保存该轮快照，拒绝请求不修改之前的运行记录。
+断线只影响传输，已接受的本地工作继续。Node 重启将原先运行中的执行标记 `interrupted`，由用户显式在原节点恢复；已接受但尚未开始的持久化 pending 队列继续等待，冻结节点在复开后才继续调度。DAG 恢复跳过已成功写入检查点的步骤。项目执行 ID 为 `project-<todo-id>`，Plan、Act 和新一轮 Plan 保持相同节点。节点存储出现持久化错误时上报不可调度，须处理存储故障后重启节点。项目页面与全部执行详情中的 Plan 均由 Server 解析当前草稿；Node 在忙碌及资源预检通过后才保存该轮快照，拒绝请求不修改之前的运行记录；容量不足会保存并排队，等待期间 Project 运行不会被失联清理误判。
 
 ## NFS 资源共享
 
-在 Web「Agent 配置」中管理资源和 NFS 服务。共享内容限于 agent 定义及 prompts/skills/tools/memory，不共享 runtime DB、对话、项目运行记录或 DAG 产物。
+Web「Agent 配置」顶部包含 Agent 列表、Agent Harness、Harness 管理、NFS 配置。主列表展示每个 Agent 的资源引用、当前版本、目录和内容；Codex 的二进制、模型、推理、权限参数和 env 在 Harness 管理中统一保存，正在运行、排队及续聊的会话保持已接受的参数。共享内容限于 agent 定义及 prompts/skills/tools/memory，不共享 runtime DB、对话、项目运行记录或 DAG 产物。
 
 使用页面提供的挂载命令，并保留 `ro`：
 
@@ -83,6 +83,8 @@ mount -t nfs -o ro,vers=3,tcp,port=<port>,mountport=<port>,nolock,soft,retrans=1
 | 创建、游标列表、明细 | `POST /api/executions`、`GET /api/executions?limit=&cursor_created_at=&cursor_id=`、`GET /api/executions/:id` |
 | 控制、事件与大字段 | `POST /api/executions/:id/commands`、`GET /api/executions/:id/events`、`GET /api/executions/:id/messages`、`GET /api/executions/:id/detail-field` |
 | drain 与就绪 | `GET /api/ready`、`GET/POST/DELETE /api/admin/drain` |
+| 节点并发与排队配置 | `PUT /api/nodes/:id/scheduling`，请求 `{ "max_runs": 4, "queue_order": "fifo" }` |
+| Harness 配置 | `GET /api/harnesses`、`PUT /api/harnesses/codex` |
 | 显式节点维护 | `POST /api/nodes/:id/maintenance` |
 | 团队定义 | `GET/POST /api/teams` |
 | 能力绑定、直接调度 | `PUT /api/brain/capabilities/:id/target`、`POST /api/brain/dispatch` |
@@ -105,8 +107,10 @@ DAG 的非 Agent 步骤为 WebAssembly WASI 命令模块。默认 `sandbox: in_p
 
 ## 发布与回滚
 
+Fleet 协议 v6 要求 Server 与 Node 成套更新，旧版本连接会被拒绝。本轮不增加数据库表或环境变量；Harness 值复用私有定义库，队列和节点调度配置保存在 Node 数据目录。
+
 1. 在干净提交上运行 `scripts/platform/release/build.sh --output <新目录>`。脚本先验证 SPA 无漂移，再一次构建 `opencoder`、`opencoder-cli`、`opencoder-server`、`opencoder-agent`；四者的 `--build-info` 必须具有相同 commit、protocol 和 SPA digest，`manifest.json` 与 `SHA256SUMS` 绑定全部二进制。真实 dirty 工作树会被拒绝。
-2. 调用 `POST /api/admin/drain` 先持久冻结 Server 与当前在线 Node。最多观察 10 分钟让长任务自然完成；仍未完成的任务逐条显式 interrupt，并等待 `GET /api/admin/drain` 返回 `control_drained=true`。取消后的执行不能恢复；interrupt 后只能在原 Node 显式恢复。30 秒只用于 interrupt/进程树清理，不能用作长任务的自然 drain 时限。
+2. 调用 `POST /api/admin/drain` 先持久冻结 Server 与当前在线 Node。最多观察 10 分钟让长任务自然完成；仍未完成的任务（包括尚未启动的 pending）逐条显式 interrupt，并等待 `GET /api/admin/drain` 返回 `control_drained=true`。取消后的执行不能恢复；interrupt 后只能在原 Node 显式恢复。30 秒只用于 interrupt/进程树清理，不能用作长任务的自然 drain 时限。
 3. 正常停止 Agent，再停止 Server。Agent 的本地 Frozen 状态跨重启保留；Server 也以 Frozen 重启。使用 `scripts/platform/backup.sh --server-data /var/lib/opencoder-server --node worker-a=/data00 --output <新备份目录>` 制作新备份；工具要求 Node 已停止、持有独占锁、所有执行收敛并对 SQLite 做一致性备份，不覆盖任何原目录。跨主机发布必须先按目标 inventory 在各主机停服并把这些本地目录提供给受控备份步骤，不能把本机演练当成跨机备份证据。
 4. 使用 `scripts/install.sh --bundle <bundle> --dest-dir /usr/local/bin --backup` 原子安装 manifest 声明的同一代二进制。先启动 Server，再启动 Agent；检查 manifest/build-info、目标 Node 清单、节点 ID、版本、资源挂载和 Ready。所有发布目标都到齐后调用 `DELETE /api/admin/drain`，它只复开当前在线且健康的节点；离线节点会明确列为未处理，不会伪装完成。
 5. 用普通 Agent、DAG、Team、TODO/Project 和大脑稳定 `request_id` 各走一条真实链路，并验证列表五字段、所属 Node 明细、控制动作、大字段分段和产物下载。在真实拓扑连续观察 2 小时：Server/Agent 无意外重启，目标 Node 全部 Ready，无新增认证、协议、存储或进程清理错误，无超过 60 秒仍未确认的 Pending，也无超过 30 秒仍未收敛的 interrupt。

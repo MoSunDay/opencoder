@@ -43,7 +43,9 @@ pub(crate) struct Inner {
     pub runtime: WorkerRuntime,
     pub data_dir: PathBuf,
     pub cpu: f64,
-    pub max_runs: usize,
+    pub scheduling: crate::runtime::SchedulingState,
+    pub pending_runs: AtomicU64,
+    pub stopping: CancellationToken,
     pub journal: Mutex<Journal>,
     pub active: Mutex<HashMap<String, CancellationToken>>,
     pub tasks: Arc<ExecutionTasks>,
@@ -152,8 +154,29 @@ impl Worker {
         }
         let cpu = opencoder_node::fleet::cpu::capacity();
         let max_runs = options.max_runs.unwrap_or(cpu.ceil() as usize).max(1);
+        let scheduling = crate::runtime::SchedulingState::load(&data_dir, max_runs)?;
         let journal = Journal::open(layout.clone())?;
-        Ok(Self {
+        for record in journal.records.values().filter(|r| {
+            r.assignment.index.kind == ExecutionKind::Project
+                && r.assignment.index.status == ExecutionStatus::Pending
+                && r.queue.is_some()
+        }) {
+            if let Some(id) = record.result["next_run_id"].as_str() {
+                state
+                    .project
+                    .require()?
+                    .reserved
+                    .lock()
+                    .unwrap()
+                    .insert(id.into());
+            }
+        }
+        let pending = journal
+            .records
+            .values()
+            .filter(|r| r.assignment.index.status == ExecutionStatus::Pending && r.queue.is_some())
+            .count();
+        let worker = Self {
             inner: Arc::new(Inner {
                 state,
                 client,
@@ -173,19 +196,24 @@ impl Worker {
                 runtime,
                 data_dir,
                 cpu,
-                max_runs,
+                scheduling,
+                pending_runs: AtomicU64::new(pending as u64),
+                stopping: CancellationToken::new(),
                 journal: Mutex::new(journal),
                 active: Mutex::new(HashMap::new()),
                 tasks: Arc::new(ExecutionTasks::new()),
                 lifecycle_gates: Mutex::new(HashMap::new()),
-                slots: Arc::new(Semaphore::new(max_runs)),
+                slots: Arc::new(Semaphore::new(MAX_NODE_RUNS)),
                 admission: Mutex::new(()),
                 maintenance: std::sync::Mutex::new(HashMap::new()),
                 _lock: lock,
             }),
-        })
+        };
+        crate::operations::queue::start_scheduler(&worker);
+        Ok(worker)
     }
     pub async fn shutdown(&self) -> Result<()> {
+        self.inner.stopping.cancel();
         let _admission = self.inner.admission.lock().await;
         for cancel in self.inner.active.lock().await.values() {
             cancel.cancel();
@@ -204,6 +232,7 @@ impl Worker {
 
     /// Drain naturally, interrupt leftovers, and prove owned cleanup completed.
     pub async fn drain_shutdown(&self) -> Result<()> {
+        self.inner.stopping.cancel();
         self.freeze_admission().await?;
         let natural_deadline = tokio::time::Instant::now() + self.inner.runtime.drain.natural_grace;
         while !self.naturally_quiescent().await {
@@ -222,6 +251,8 @@ impl Worker {
             .values()
             .filter(|record| {
                 crate::lifecycle::shutdown_interrupt_required(record.assignment.index.status)
+                    && !(record.assignment.index.status == ExecutionStatus::Pending
+                        && record.queue.is_some())
             })
             .map(|record| record.assignment.index.id.clone())
             .collect();
@@ -302,6 +333,15 @@ impl Worker {
     }
     pub(crate) fn next_sequence(&self) -> u64 {
         self.inner.sequence.fetch_add(1, Ordering::SeqCst) + 1
+    }
+    pub(crate) fn active_runs(&self) -> usize {
+        MAX_NODE_RUNS - self.inner.slots.available_permits()
+    }
+    pub(crate) fn try_slot(&self) -> Option<tokio::sync::OwnedSemaphorePermit> {
+        if self.active_runs() >= self.inner.scheduling.get().max_runs {
+            return None;
+        }
+        self.inner.slots.clone().try_acquire_owned().ok()
     }
     pub(crate) async fn lifecycle_gate(&self, id: &str) -> Arc<Mutex<()>> {
         self.inner

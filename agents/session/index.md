@@ -1,4 +1,4 @@
-Commit: (working-tree, 基于 65c9d891ae905e7925277d29a87cd8e7957e8dad)
+Commit: (working-tree, 基于 303b95027b49873a9833393d57b72de68747a9e0)
 
 # session 模块
 
@@ -8,7 +8,7 @@ Commit: (working-tree, 基于 65c9d891ae905e7925277d29a87cd8e7957e8dad)
 
 `harness/resources.rs` 把引用的 prompt、skills、tools、memory 及开放工具池复制到工作区独立版本快照，保留可执行权限，拒绝符号链接并生成文件索引。快照路径落入私有运行态，resume/fork 复用；原生配置重载创建新快照，Codex 保持启动时资源。运行目录写入 Git 本地 `info/exclude`。纯函数 `instruction_text` 去除生成的文件索引，供原生快照失效处理与 [Project](../project/index.md) 稳定资源身份计算复用。
 
-`harness/codex` 分离协议归约（`decode`、`tools`）、子进程监管（`process`）和回合状态（`turn`）。需求经 stdin 提交给 `codex exec --json`，续聊和分叉分别使用 `exec resume`、`exec fork`。JSONL 转成既有 `Message` / `SessionEvent`，累计文本只发新增 delta，工具 ID 按 turn 隔离，用量补写最终 assistant。消息通过 `record_checked` 落库，提交检查点和 thread 及时保存，异常提交不会被静默重试。
+`harness/codex` 分离协议归约（`decode`、`tools`）、子进程监管（`process`）和回合状态（`turn`）。`process::configured_binary` 优先使用私有受管路径，按配置生成模型、推理和权限 argv，并以字面 env 启动；未设置项使用节点 Codex 配置。新会话经 `pin_settings` 固定参数，resume/fork 保留运行态原值。需求经 stdin 提交给 `codex exec --json`，续聊和分叉分别使用 `exec resume`、`exec fork`。JSONL 转成既有 `Message` / `SessionEvent`，累计文本只发新增 delta，工具 ID 按 turn 隔离，用量补写最终 assistant。消息通过 `record_checked` 落库，提交检查点和 thread 及时保存，异常提交不会被静默重试。
 
 Codex 的 queue/steer/cancel 复用共享输入协议；中断回收进程树并闭合未完成工具。进行中会话不能 fork；已有 thread 不允许切换 Agent、模型或原生压缩，清空上下文后建立新 thread。以下模型工具循环、原生 MCP、autopilot、孤儿任务重放与 small-model 标题流程仅适用于 OpenCoder；Codex 使用自身配置、认证和权限。标题实现位于 `harness/title.rs`，保留 `resume::generate_title` 导出。
 

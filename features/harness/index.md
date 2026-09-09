@@ -1,4 +1,4 @@
-Commit: (working-tree, 基于 65c9d891ae905e7925277d29a87cd8e7957e8dad)
+Commit: (working-tree, 基于 303b95027b49873a9833393d57b72de68747a9e0)
 
 # Agent Harness
 
@@ -13,11 +13,13 @@ opencoder --wrap codex --cmd "检查当前项目并完成需求" \
 
 `--cmd` 是一次性需求，CLI 输出文本后退出。`--envs KEY=VALUE` 可以重复，按第一个等号拆分，重复的键以后者为准；值可以为空。需求经 stdin 传给 Codex，不作为 shell 命令解释。`--wrap opencoder` 显式使用原生执行器；省略时跟随 Agent 的默认 Harness。
 
-Server Web 的「Agent 配置」支持为内置和自定义 Agent 设置默认 Harness；启动弹窗可以覆盖本次选择并填写环境变量。「全部执行」启动 Agent 时也有同样的选择，默认跟随 Agent 配置。已有会话保持启动时的 Harness、环境变量和 Codex 模型设置，修改 Agent 默认值影响新会话。
+Server Web 的「Agent 配置」顶部按 Agent 列表、Agent Harness、Harness 管理、NFS 配置切换。列表逐个展示内置和自定义 Agent 引用的 prompt、skills、tools、memory 的名称、当前版本、NFS 相对路径和内容；Agent Harness 页管理默认执行器。启动弹窗和「全部执行」仍可覆盖本次 Harness 选择。
+
+Harness 管理统一保存 Codex 二进制路径、模型、推理强度、sandbox、approval policy 和环境变量，并显示配置修订号。留空项使用节点 Codex 自身的配置。配置在任务接受时形成私有快照，排队、续聊和分叉保持原值，修改只影响后续新任务。受管 Codex 不接受单次启动的 env 或原生模型覆盖；原生 Agent 的独立环境变量配置仍可用。管理值保存在 Server 私有定义库，随分配下发到 Node，不写入 Agent NFS 引用卡。
 
 ## 执行与恢复
 
-- 节点从其 PATH（或本次环境变量覆盖的 PATH）定位 `codex`，执行 `codex exec --json`。Codex 使用节点已有的认证、配置、工具和权限策略，无需 OpenCoder 原生模型凭据。
+- 节点优先使用受管配置的二进制路径，否则从其 PATH（或配置环境变量覆盖的 PATH）定位 `codex`，执行 `codex exec --json`。Codex 使用节点已有的认证、配置、工具和权限策略，无需 OpenCoder 原生模型凭据。
 - PATH 中的入口必须在当前进程输出 exec JSONL。启动 screen 或独立终端后退出的包装脚本需要改为实际 Codex 二进制入口；可用本次 `--envs PATH=...` 指定含该入口的目录。
 - 正常续聊使用 `codex exec resume <thread-id> --json`；分叉使用 `codex exec fork <thread-id> --json`。thread ID、输入提交位置和执行状态写入私有会话状态。
 - queue 顺序执行；steer 终止当前进程树后，向原 thread 提交新指令。取消关闭尚未完成的工具条目。Linux CLI 和 Node 复用进程监管，回收脱离原进程组的后代进程。
@@ -29,7 +31,7 @@ Server Web 的「Agent 配置」支持为内置和自定义 Agent 设置默认 H
 
 执行前，将引用卡选择的 prompt、skills、tools、memory 版本复制到工作区 `.opencoder/runtime/<session>/<agent>/<snapshot>/`。soul/how/output 及 memory 合成指令；同时提供真实文件路径，保留 skill 目录、相对链接布局和工具可执行权限。额外开放的工具池遵循 `tools_scope`。
 
-OpenCoder 和 Codex 共用资源准备入口。会话恢复优先读取固定快照。Codex 的资源更新影响后续新会话；原生 Agent 保留显式配置热重载时刷新工具池的行为，新快照不会改写已分叉会话的资源。运行目录加入 Git 的本地 `info/exclude`。环境变量只存在于节点执行状态，公开执行详情不返回其值。
+OpenCoder 和 Codex 共用资源准备入口。会话恢复优先读取固定快照。Codex 的资源更新影响后续新会话；原生 Agent 保留显式配置热重载时刷新工具池的行为，新快照不会改写已分叉会话的资源。运行目录加入 Git 的本地 `info/exclude`。环境变量保存在受认证保护的 Harness 管理配置与节点私有执行状态中，公开执行详情不返回其值。
 
 独立 Agent、原生 subagent、Team、DAG Agent step、TODO 和 Project 的 Agent 执行都经过共享 Session 入口，使用各自 Agent 的 Harness 配置。
 
@@ -41,9 +43,9 @@ Codex Execute 收到本次交付清单路径，将工作目录相对路径写为
 
 ## 升级与回滚
 
-Fleet 协议为 v5；Server 和 Node 必须成套升级。跨版本连接直接拒绝，避免旧 Node 忽略 Codex 选择；Server 默认日志显示拒绝原因。Codex 入口和认证必须在实际执行节点配置，并保持使用前台 exec JSONL 入口。
+Fleet 协议为 v6；Server 和 Node 必须成套升级。跨版本连接直接拒绝，避免旧 Node 忽略受管 Codex 参数和排队契约；Server 默认日志显示拒绝原因。Codex 入口和认证必须在实际执行节点配置，并保持使用前台 exec JSONL 入口。
 
-数据库增加可空运行态列（schema 22），历史会话默认保持原生。切换前保存停写后的数据备份；回滚时同步恢复整套二进制，并按需要使用升级前数据副本。旧程序可读取历史原生会话，但不能用于继续新的 Codex 会话。发布/回滚工具见 [平台部署](../../docs/agent-platform.md)。
+Codex wrap 的可空运行态列使用 schema 22；本次 Harness 管理和节点队列不新增表或迁移。历史会话默认保持原生。切换前保存停写后的数据备份；回滚时同步恢复整套二进制，并按需要使用升级前数据副本。旧程序可读取历史原生会话，但不能用于继续新的 Codex 会话。发布/回滚工具见 [平台部署](../../docs/agent-platform.md)。
 
 ## 消息协议
 
@@ -56,6 +58,6 @@ PLATFORM_BIN_DIR=/path/to/target/debug node scripts/acceptance/harness/codex.js
 PLATFORM_BIN_DIR=/path/to/target/debug node scripts/acceptance/harness/codex.js /absolute/path/to/codex
 ```
 
-脚本启动临时 Server 和 Node，经真实浏览器验证非法环境零派发、Harness 选择、工具折叠（含失败后恢复）、刷新、续聊与 390px 布局。真实 Codex 模式还验证 Project Plan → Execute、清单登记与不可变交付副本；不提供二进制路径时使用确定性进程夹具。
+脚本启动临时 Server 和 Node，经真实浏览器验证顶部 tabs、NFS 资源内容和版本、Agent Harness 切换、受管参数保存、非法环境零写入、节点并发与队列策略，以及工具折叠（含失败后恢复）、刷新、续聊与 390px 布局。真实 Codex 模式还验证 Project Plan → Execute、清单登记与不可变交付副本；不提供二进制路径时使用确定性进程夹具。
 
 相关逻辑：[session](../../agents/session/index.md)、[CLI](../../agents/local/index.md)、[Web](../../agents/web/index.md)、[worker](../../agents/worker/index.md)。

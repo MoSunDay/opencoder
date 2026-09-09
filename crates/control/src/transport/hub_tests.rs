@@ -15,6 +15,8 @@ fn registration() -> NodeRegistration {
 
 fn snapshot(generation: &str, sequence: u64) -> NodeSnapshot {
     NodeSnapshot {
+        pending_runs: 0,
+        queue_order: Default::default(),
         generation: generation.into(),
         sequence,
         cpu_capacity: 2.0,
@@ -39,6 +41,7 @@ fn execution() -> ExecutionIndex {
 fn create(index: &ExecutionIndex) -> NodeOperation {
     NodeOperation::Create {
         assignment: Assignment {
+            codex: None,
             index: index.clone(),
             request: CreateExecution {
                 id: index.id.clone(),

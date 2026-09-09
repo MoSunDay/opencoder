@@ -261,6 +261,14 @@ impl SessionState {
         working_dir: PathBuf,
     ) -> Self {
         let model = config.model_id().to_string();
+        let mut harness = opencoder_core::harness::HarnessRuntime {
+            harness: opencoder_core::agent::scope::with_root_sync(
+                config.agent.agents_dir.clone(),
+                || opencoder_core::harness::agent_harness(&agent.name),
+            ),
+            ..Default::default()
+        };
+        opencoder_core::harness::pin_settings(&mut harness, config.agent.codex.as_ref());
         let (tools_path, skill_roots) =
             opencoder_core::agent::scope::with_root_sync(config.agent.agents_dir.clone(), || {
                 (
@@ -269,13 +277,7 @@ impl SessionState {
                 )
             });
         SessionState {
-            harness: opencoder_core::harness::HarnessRuntime {
-                harness: opencoder_core::agent::scope::with_root_sync(
-                    config.agent.agents_dir.clone(),
-                    || opencoder_core::harness::agent_harness(&agent.name),
-                ),
-                ..Default::default()
-            },
+            harness,
             env_passthrough: Vec::new(),
             id: id.into(),
             messages: Vec::new(),

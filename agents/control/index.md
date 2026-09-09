@@ -1,4 +1,4 @@
-Commit: (working-tree, 基于 65c9d891ae905e7925277d29a87cd8e7957e8dad)
+Commit: (working-tree, 基于 303b95027b49873a9833393d57b72de68747a9e0)
 
 # control 模块
 
@@ -6,16 +6,18 @@ Commit: (working-tree, 基于 65c9d891ae905e7925277d29a87cd8e7957e8dad)
 
 ## 边界与数据
 
-- `bootstrap` 只打开新 `control.db` 与 `definitions.db`。前者持久化节点、四字段执行索引和团队/DAG/能力绑定；后者保存大脑及项目定义。平台不连接旧 MySQL 项目库。
+- `bootstrap` 只打开新 `control.db` 与 `definitions.db`。前者持久化节点、五字段执行索引和团队/DAG/能力绑定及私有 Harness 配置；后者保存大脑及项目定义。平台不连接旧 MySQL 项目库。
 - `core::fleet` 定义协议与纯调度函数。Server 不依赖 session、worker、team、project runtime 或 Python VM。
 - `transport::Hub` 的连接、负载、待确认 RPC 与容量预留仅在内存；执行明细从拥有 ID 的 Node 读取，不缓存入库。
 
 ## 主流程
 
-1. Node 经签名 WebSocket 注册、上报快照及索引；协议必须与 Server 相同（当前 v5）。不匹配时在保存注册、索引同步及调度之前拒绝，错误包含双方协议及同步升级要求；代际和序号约束连接更新，索引归属不可改写。
-2. 创建时在 placement 锁内解析全局定义、按 loops/CPU 选择节点、持久化归属并预留；释放锁后发 RPC。
+1. Node 经 Bearer 认证的 WebSocket 注册、上报快照及索引；协议必须与 Server 相同（当前 v6）。不匹配时在保存注册、索引同步及调度之前拒绝，错误包含双方协议及同步升级要求；代际和序号约束连接更新，索引归属不可改写。
+2. 创建时在 placement 锁内解析全局定义与受管 Codex 配置，优先按 loops/CPU 选择有容量的节点；全部满载时按 pending 数选择可接受节点。持久化归属并预留后释放锁、发 RPC，私有 `Assignment.codex` 携带本次配置快照。
 3. Node 接受后释放预留；同 ID 请求转发原节点比较原始输入；超时保留归属，不重新分配。
 4. 明细、控制、SSE 和分页产物均通过 ID 路由。旧 Chat/DAG/TODO/Project API 由 `api/compat` 等适配。
+
+`api/settings` 的 Harness GET/PUT 复用 FleetStore 的 `harness/codex` 定义，校验参数并递增 revision；管理 env 不进入 NFS 或公开执行明细。节点调度 PUT 转发 `configure_scheduling` maintenance RPC，实际持久化和调度由 Node 负责。
 
 `api/brain` 在未显式指定计划且能力库为空时直接构造默认 act 目标；有能力时仍经规划和路由，缺少目标绑定时使用 act。存储、规划和节点错误直接返回，显式计划不会跳过查找。`brain_dispatch` 回执以可空的 plan/capability ID 表示默认路径，保留旧字符串回执兼容；重试先从原 Node 确认接受回执，不因能力库变化重做决策。执行索引的状态可随进度变化，执行 ID、节点归属和决策保持不变。
 

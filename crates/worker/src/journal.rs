@@ -17,6 +17,9 @@ pub(crate) use io::{read_record, same_execution};
 
 #[derive(Clone, Serialize, Deserialize)]
 pub(crate) struct Record {
+    #[serde(default)]
+    // Keep the full configuration snapshot out of every execution future's stack.
+    pub queue: Option<Box<crate::operations::queue::QueuedRun>>,
     pub assignment: Assignment,
     pub result: Value,
     pub error: Option<String>,
@@ -54,6 +57,12 @@ impl Journal {
         let ids: Vec<_> = journal.records.keys().cloned().collect();
         for id in ids {
             let mut record = journal.records[&id].clone();
+            if record.assignment.index.status == ExecutionStatus::Pending
+                && record.queue.is_some()
+                && record.lifecycle.stop_intent.is_none()
+            {
+                continue;
+            }
             let transition =
                 lifecycle::recover(record.assignment.index.status, record.lifecycle.stop_intent);
             if transition.status != record.assignment.index.status

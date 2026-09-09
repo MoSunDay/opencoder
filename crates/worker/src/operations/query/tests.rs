@@ -36,7 +36,9 @@ async fn worker() -> (tempfile::TempDir, Worker) {
 fn record(worker: &Worker, id: &str, status: ExecutionStatus) -> Record {
     let node_id = worker.inner.registration.id.clone();
     Record {
+        queue: None,
         assignment: Assignment {
+            codex: None,
             index: ExecutionIndex {
                 id: id.into(),
                 created_at: 1,

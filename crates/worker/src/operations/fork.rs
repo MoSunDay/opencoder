@@ -4,14 +4,21 @@ use opencoder_core::{fleet::*, message::now_ms};
 use serde_json::{json, Value};
 pub(super) async fn fork(worker: &Worker, parent: &str) -> Result<RpcReply> {
     let id = format!("agent-{}", ulid::Ulid::new());
-    let (legacy, parent_kind) = {
+    let (legacy, parent_kind, codex) = {
         let journal = worker.inner.journal.lock().await;
         let kind = journal
             .records
             .get(parent)
             .map(|record| record.assignment.index.kind)
             .unwrap_or(ExecutionKind::Agent);
-        (journal.uses_legacy(parent), kind)
+        (
+            journal.uses_legacy(parent),
+            kind,
+            journal
+                .records
+                .get(parent)
+                .and_then(|r| r.assignment.codex.clone()),
+        )
     };
     let source = if legacy {
         worker.inner.layout.legacy_resources_dir(parent)?
@@ -45,7 +52,9 @@ pub(super) async fn fork(worker: &Worker, parent: &str) -> Result<RpcReply> {
         node_id: Some(index.node_id.clone()),
     };
     worker.inner.journal.lock().await.save(Record {
+        queue: None,
         assignment: Assignment {
+            codex,
             index,
             request,
             definition: None,

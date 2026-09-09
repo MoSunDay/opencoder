@@ -46,6 +46,8 @@ impl NodeService for Service {
 
     fn snapshot(&self) -> NodeSnapshot {
         NodeSnapshot {
+            pending_runs: 0,
+            queue_order: Default::default(),
             generation: "generation-a".into(),
             sequence: 1,
             cpu_capacity: 2.0,

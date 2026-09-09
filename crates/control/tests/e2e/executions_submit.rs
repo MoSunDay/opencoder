@@ -32,7 +32,7 @@ async fn submit_validates_node_id_and_honors_the_pin() {
     assert_eq!(status, 503, "{body}");
     assert_eq!(
         body["error"],
-        json!("no eligible online node with capacity for this execution")
+        json!("no ready online node can accept this execution")
     );
     assert!(h.node.journal_ids().is_empty(), "nothing reached the node");
 
@@ -81,7 +81,7 @@ async fn submit_of_an_unserved_kind_has_no_eligible_node() {
     assert_eq!(status, 503, "{body}");
     assert_eq!(
         body["error"],
-        json!("no eligible online node with capacity for this execution")
+        json!("no ready online node can accept this execution")
     );
     assert!(h.node.journal_ids().is_empty(), "nothing reached the node");
 }

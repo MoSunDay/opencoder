@@ -7,9 +7,11 @@ import { StatusTag } from '../ui/statusTag.jsx';
 import { ExecutionDetail } from './detail.jsx';
 import { newId } from './model.js';
 import { err } from '../notice.js';
+import { NodeSchedulingModal } from './settings/scheduling.jsx';
 
 export function FleetNodesPanel({ onNotice }) {
   const [rows, setRows] = useState([]); const [selected, setSelected] = useState(null);
+  const [scheduling, setScheduling] = useState(null);
   const [action, setAction] = useState('status'); const [input, setInput] = useState('');
   const [result, setResult] = useState(null); const [busy, setBusy] = useState(false); const [detail, setDetail] = useState(null);
   const attempt = useRef(null);
@@ -37,10 +39,13 @@ export function FleetNodesPanel({ onNotice }) {
       { title: '节点', dataIndex: 'name', render: (v, r) => <Space orientation="vertical"><b>{v}</b><small style={{ fontFamily: 'var(--oc-mono, monospace)' }}>{r.id}</small></Space> },
       { title: '状态', render: (_, r) => <StatusTag status={r.online ? 'online' : 'offline'} label={r.online ? (r.snapshot?.resource_error || '在线') : '离线'} color={r.online && r.snapshot?.ready ? 'success' : 'error'} /> },
       { title: '可用 CPU', render: (_, r) => r.snapshot?.cpu_capacity ?? '—' },
+      { title: '运行 / 最大并发', render: (_, r) => r.snapshot ? `${r.snapshot.active_runs} / ${r.snapshot.max_runs}` : '—' },
+      { title: 'Pending', render: (_, r) => r.snapshot?.pending_runs ?? '—' },
+      { title: '排队顺序', render: (_, r) => r.snapshot ? (r.snapshot.queue_order === 'lifo' ? '后入先出 LIFO' : '先入先出 FIFO') : '—' },
       { title: '活跃 agent loops', render: (_, r) => r.snapshot?.active_agent_loops ?? '—' },
       { title: 'loops / CPU', render: (_, r) => r.snapshot ? (r.snapshot.active_agent_loops / r.snapshot.cpu_capacity).toFixed(2) : '—' },
       { title: '维护 agent', dataIndex: 'maintenance_agent_id', render: (v) => <span style={{ fontFamily: 'var(--oc-mono, monospace)' }}>{v || '—'}</span> },
-      { title: '操作', render: (_, r) => <Button disabled={!r.online} onClick={() => { setSelected(r); setResult(null); }}>维护节点</Button> },
+      { title: '操作', render: (_, r) => <Space><Button disabled={!r.online} onClick={() => setScheduling(r)}>调度配置</Button><Button disabled={!r.online} onClick={() => { setSelected(r); setResult(null); }}>维护节点</Button></Space> },
     ]} />
     <Modal open={!!selected} title={`节点维护 · ${selected?.name || ''}`} onCancel={() => setSelected(null)} footer={null} width={800}>
       <Space orientation="vertical" style={{ width: '100%' }}>
@@ -53,5 +58,6 @@ export function FleetNodesPanel({ onNotice }) {
       </Space>
     </Modal>
     {detail && <ExecutionDetail id={detail.id} summary={detail} onClose={() => setDetail(null)} onNotice={onNotice} />}
+    {scheduling && <NodeSchedulingModal node={scheduling} onClose={() => setScheduling(null)} onSaved={load} onNotice={onNotice} />}
   </PageShell>;
 }

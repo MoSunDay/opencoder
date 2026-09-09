@@ -38,6 +38,10 @@ if regression:
     if spec.get('preparation') == ['go', 'mod', 'download'] or spec.get('command', [None])[0] == 'go':
         go = Path('/usr/local/bin/go').resolve(strict=True)
         spec.setdefault('readOnly', []).append(str(go.parent.parent))
+        # The jail's /tmp shares its small rootfs tmpfs. Go's compiler needs
+        # the attempt-owned disk cache for intermediate object files.
+        (Path(spec['root']) / 'cache/tmp').mkdir(parents=True, exist_ok=True)
+        spec.setdefault('environment', {})['TMPDIR'] = '/cache/tmp'
     spec.setdefault('environment', {}).update(json.loads((runtime / 'go-environment.json').read_text()))
     specification.write_text(json.dumps(spec))
 os.execv('/usr/bin/systemd-run', ['systemd-run', *args])

@@ -6,10 +6,28 @@ import { pathToFileURL } from 'node:url';
 const [release] = process.argv.slice(2);
 const { e2eFixture } = await import(pathToFileURL(`${release}/dist/test/regression/e2e/fixture.js`));
 const fixture = await e2eFixture();
+// The real review can only inspect captured data. Preserve the branch check
+// alongside the commits, because the Runner's detached snapshots omit refs.
+const requested = fixture.fixedRequest;
+const repository = fixture.config.repositories[requested.repo.split('/').at(-1)];
+const branchRef = `refs/heads/${requested.branch}`;
+const branchHead = execFileSync('git', ['rev-parse', '--verify', branchRef], {
+  cwd: repository, encoding: 'utf8',
+}).trim();
+for (const ancestors of [[requested.commit, branchHead], [requested.baseCommit, requested.commit]]) {
+  execFileSync('git', ['merge-base', '--is-ancestor', ...ancestors], { cwd: repository, stdio: 'pipe' });
+}
+const provenanceFile = `${fixture.root}/branch-provenance.json`;
+await writeFile(provenanceFile, JSON.stringify({ capturedAt: new Date().toISOString(),
+  repository: requested.repo, branchRef, branchHead, commit: requested.commit,
+  baseCommit: requested.baseCommit, commitReachableFromBranch: true, baseIsAncestor: true,
+  verification: 'git rev-parse --verify and git merge-base --is-ancestor (both exit 0)',
+}, null, 2));
+fixture.config.contextFiles.push(provenanceFile);
 // The production Runner snapshots the workspace revision as well as each repo.
 // Keep its root commit minimal; test repositories retain their own real history.
 await writeFile(`${fixture.root}/README.md`, 'Controlled business acceptance workspace.\n');
-for (const args of [['init', '-q'], ['add', 'README.md'],
+for (const args of [['init', '-q'], ['add', 'README.md', 'branch-provenance.json'],
   ['-c', 'user.name=Acceptance', '-c', 'user.email=acceptance@example.test', 'commit', '-qm', 'acceptance workspace']]) {
   execFileSync('git', args, { cwd: fixture.root, stdio: 'pipe' });
 }

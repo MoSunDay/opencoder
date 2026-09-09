@@ -8,6 +8,7 @@ import shutil
 import time
 from urllib.parse import urlencode
 from common import BASE, TARGET, emit, http, read, run, sha, until, write
+from lifecycle.evidence import copy_evidence
 
 
 def read_only_at(mounts, path):
@@ -131,9 +132,7 @@ def collect(environment, jobs):
                         shutil.copy2(attempt / file, destination / file)
                 evidence = attempt / 'evidence'
                 if evidence.exists():
-                    shutil.copytree(evidence, destination / 'evidence', dirs_exist_ok=True,
-                        ignore=shutil.ignore_patterns('codex-home', 'private-executor', 'executor-output',
-                            'rootfs', 'cache', 'layers'))
+                    copy_evidence(evidence, destination / 'evidence')
         emit('evidence_collected', capability=name, executionId=execution)
 
 

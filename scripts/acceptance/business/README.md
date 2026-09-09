@@ -16,7 +16,7 @@ python3 scripts/acceptance/business/main.py \
 
 Manager/飞书投递及新版 Viking 工单创建使用本地接收器，兼容旧群投递和新工单接口；评测及回归分析始终经 opencoder，未知投递接口直接拒绝启动。无需建单只有在同一任务分析完成且业务返回 `not_required` 时才可验收；需要投递时必须有匹配该任务的本地回执。模型、输入下载、Git 版本解析、实际回归命令、结果校验和 Web 均真实运行。评测原始输入缺失的 trace workspace、历史执行版本等仍作为证据缺口报告，不补造数据。业务执行完成不代表被测提交必然通过准出。
 
-历史场景可用 `--evaluation-request /absolute/path/request.json` 显式提供已经核实的 trace 路由和版本信息，原始失败证据保持不变。回归分支证明来自复制仓库的实际 Git 分支头和祖先关系，不作为历史评测部署版本的证明。Runner 继承已有 `JWT_TOKEN` 身份并使用私有账号目录副本，不切换或修改宿主登录状态；凭证不进入公开回执。
+历史场景可用 `--evaluation-request /absolute/path/request.json` 显式提供已经核实的 trace 路由和版本信息，原始失败证据保持不变。回归分支证明来自复制仓库的实际 Git 分支头和祖先关系，不作为历史评测部署版本的证明。Runner 使用私有账号副本，包括当前 bytedcli 的 XDG 数据目录及旧版 CLI 目录；显式提供的 `BYTEDCLI_USER_CLOUD_JWT`、`FORNAX_BYTED_JWT_TOKEN` 可沿用，通用 `JWT_TOKEN` 不作为 bytedcli 身份。不切换或修改宿主登录状态，凭证不进入公开回执。
 
 原 `/root/workspace` 只读使用，独立 Git 对象、上下文、账号副本、缓存、数据库均在本次 `runtime/`。Runner 使用挂载命名空间保护原目录；评测新建的 systemd 模型单元通过仅本次 Node 可用的包装器再次显式保护原目录。回归使用既有 OverlayFS/chroot 工作区。`ProtectSystem=strict` 本身不能保证 `/root` 只读。
 

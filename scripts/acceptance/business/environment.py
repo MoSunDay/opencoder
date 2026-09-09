@@ -24,10 +24,11 @@ def private_environment(runtime, source):
         'XDG_CACHE_HOME': str(runtime / 'home/.cache'),
         'GIT_OPTIONAL_LOCKS': '0', 'GIT_CONFIG_GLOBAL': '/dev/null',
         'PATH': str(runtime / 'bin') + ':/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/root/.local/bin'}
-    # bytedcli uses the existing SSO JWT before its on-disk login. Preserve
-    # that identity rather than relying on a potentially expired login copy.
-    if source.get('JWT_TOKEN'):
-        environment['JWT_TOKEN'] = source['JWT_TOKEN']
+    # Forward only credential variables understood by this CLI. JWT_TOKEN is
+    # unrelated to bytedcli authentication and must not be reinterpreted.
+    for key in ['BYTEDCLI_USER_CLOUD_JWT', 'FORNAX_BYTED_JWT_TOKEN']:
+        if source.get(key):
+            environment[key] = source[key]
     return environment
 
 
@@ -74,10 +75,8 @@ class Environment:
         if prepared.get('regressionFixture'):
             from dependencies.metricw import prepare
             prepare(self.runtime, prepared['workspace'])
-        for name in ['.fornax-cli', '.lark-cli', '.byte_cli']:
-            source = Path('/root') / name
-            if source.exists():
-                shutil.copytree(source, Path(self.env['HOME']) / name, symlinks=False)
+        from dependencies.identity import snapshot_identity
+        snapshot_identity(Path('/root'), self.runtime / 'home', os.environ)
         token = self.runtime / 'control-token'
         token.write_text(self.token)
         token.chmod(0o600)

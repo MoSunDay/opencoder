@@ -9,20 +9,47 @@ import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from common import git, run
 from environment import private_environment
+from dependencies.identity import snapshot_identity
 from snapshots import clone
 from verify import messages, read_only_at
 
 
 class Boundaries(unittest.TestCase):
     def test_private_runner_preserves_existing_sso_without_forwarding_unrelated_secrets(self):
-        source = {'HOME': '/original', 'JWT_TOKEN': 'existing-test-sso', 'UNRELATED_SECRET': 'excluded'}
+        source = {'HOME': '/original', 'BYTEDCLI_USER_CLOUD_JWT': 'existing-test-sso',
+                  'FORNAX_BYTED_JWT_TOKEN': 'explicit-test-identity',
+                  'JWT_TOKEN': 'unrelated', 'UNRELATED_SECRET': 'excluded'}
         environment = private_environment(Path('/private/runtime'), source)
-        self.assertEqual(environment['JWT_TOKEN'], source['JWT_TOKEN'])
+        self.assertEqual(environment['BYTEDCLI_USER_CLOUD_JWT'], source['BYTEDCLI_USER_CLOUD_JWT'])
+        self.assertEqual(environment['FORNAX_BYTED_JWT_TOKEN'], source['FORNAX_BYTED_JWT_TOKEN'])
+        self.assertNotIn('JWT_TOKEN', environment)
         self.assertEqual(environment['HOME'], '/private/runtime/home')
         self.assertEqual(environment['XDG_CONFIG_HOME'], '/private/runtime/home/.config')
         self.assertNotIn('UNRELATED_SECRET', environment)
         self.assertEqual(source['HOME'], '/original')
         self.assertNotIn('JWT_TOKEN', private_environment(Path('/private/runtime'), {}))
+
+    def test_private_login_copy_includes_current_xdg_state_without_sharing_files(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            original, private = root / 'original', root / 'private'
+            data = root / 'xdg-data'
+            login = data / 'bytedcli/data/bytecloud-auth/credentials.json'
+            login.parent.mkdir(parents=True)
+            login.write_text('existing login fixture')
+            unrelated = data / 'bytedcli/dependency/package.json'
+            unrelated.parent.mkdir(parents=True)
+            unrelated.write_text('unrelated installed dependency')
+            snapshot_identity(original, private, {'XDG_DATA_HOME': str(data)})
+            copied = private / '.local/share/bytedcli/data/bytecloud-auth/credentials.json'
+            self.assertEqual(copied.read_text(), login.read_text())
+            self.assertNotEqual(copied.stat().st_ino, login.stat().st_ino)
+            self.assertEqual(copied.stat().st_mode & 0o777, 0o600)
+            self.assertFalse((private / '.local/share/bytedcli/dependency').exists())
+            copied.write_text('private change')
+            self.assertEqual(login.read_text(), 'existing login fixture')
+            with self.assertRaises(FileExistsError):
+                snapshot_identity(original, private, {'XDG_DATA_HOME': str(data)})
 
     def test_batch_command_does_not_consume_its_callers_input(self):
         helper = str(Path(__file__).resolve().parents[1])

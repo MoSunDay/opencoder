@@ -1,4 +1,4 @@
-Commit: (working-tree, 基于 56e612b6f251e3ed384074c7cf9cfc70a8c4c9cf)
+Commit: 2491657d33c384dddcabf4d12ab4cd8822ccaf81
 
 # 独立专项里程碑、快速关联与编辑内容保留
 
@@ -43,6 +43,15 @@ libsql schema v23 保留里程碑所有字段并放宽 `goal_id`。升级时将�
 - `cargo test --workspace -j 8 --no-fail-fast -- --test-threads=1`：360 个 suite，**4951 passed / 0 failed / 5 ignored**，见 `/tmp/opencoder-relations-workspace-tests.log`。5 项既有手动用例为 2 项 NFS 挂载/离线测试及 3 项 runc/rootfs 测试；未新增 ignore。
 - `cargo build --workspace -j 8`：成功，见 `/tmp/opencoder-relations-workspace-build.log`；新增文件行数与 `git diff --check` 通过。
 - 证据日志位于 `/tmp/opencoder-relations-*.log`，浏览器报告为 `/tmp/opencoder-relations-browser.json`。
+
+## 线上发布验收
+
+- 已随 `2491657d` 成套发布，Server/Agent 协议 7、项目 schema 23；四个二进制在两套安装路径及运行进程中的摘要与发布 manifest 一致，线上 SPA 与仓库构建产物一致。
+- 真实线上 Chromium 验收 14 项通过，覆盖 Markdown 轮询、预览与保存、TODO 草稿及刷新持久化、独立创建、搜索/清空关联、项目归属派生和列表跳转；页面异常为 0。
+- Agent、DAG、Team、独立专项 Plan/Execute、大脑稳定 `request_id` 及控制动作通过。两次项目运行均完整留存且不依赖项目上下文；历史消息断点读取、DAG 产物及 3 个项目交付文件下载校验通过。
+- 发布前的 6 条 TODO、12 条项目运行、67 个会话、769 条消息、79,456 条事件及 77 条执行索引逐项保留；52,394 个历史项目运行文件摘要一致。仅历史 backlog 的归属按迁移规则更新，没有删除数据库记录。
+- 按用户要求，以 E2E 和当前服务健康作为本次发布准出，停止固定时长观察。收尾时服务开放、1/1 节点 Ready、无活跃执行或待受理请求；验收记录保留，测试执行已收尾。
+- 发布回执和明细：`/var/tmp/opencoder-project-release-final-n1eofdhr/release-receipt.json`、`live-browser.json`、`live-navigation.json`、`smoke.json`、`release-integrity.json`。
 
 ## 相关文档
 

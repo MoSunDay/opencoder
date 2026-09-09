@@ -1,121 +1,44 @@
-Commit: 6e4f2bf79f21c4f5e2a89b0605323418c1597d76
-
+Commit: b465f440381bd009dc9bd3a8192ad88eab44cede
 
 # web 模块
 
-## Harness 接口与展示
+axum HTTP/SSE 会话管理与编译期内嵌 SPA。
 
-`api_agents` 合并内置和自定义 Agent，响应含 `harness` / `harness_profile` / `builtin` 与重新解析的资源内容名称，创建及更新接口保存默认 Harness；内置 Agent 禁止删除。创建会话接受 Harness 与环境并在输入前初始化，公开会话响应只增加 Harness 名称。已有 Codex 会话的 Agent/模型变更、原生 compact/handoff 由 `api_ops` 显式拒绝；prompt 使用共享惰性客户端，不要求原生模型凭据。
+## 关键路径
 
-SPA 的 `harness/management.jsx` 管理内置/自定义 Agent 的执行器及集中 Codex 参数，加载失败时禁止提交默认空值。`harness/fields.jsx` 复用 Harness 选项和字面环境解析，仅显式原生启动显示 env 输入；Codex 提示使用集中管理。`agentsConfig`、`agentDetail` 配置默认值，Agent 启动弹窗及 `fleet/executions` 可以按次覆盖，`fleet/detail` 显示实际选择。Codex 转换后沿用原有 reducer、消息回放与 Turn → Step → Function call 展示。相关契约见 `tests/web_agents.rs`、`spa/src/harness/`，浏览器验收入口为 `scripts/acceptance/harness/codex.js`。业务规则见 [Agent Harness](../../features/harness/index.md)，节点执行见 [worker](../worker/index.md)。
+- `src/lib.rs` — `AppState`（store/handles/nodes/controls/project/team/brain）与路由装配。
+- `src/api.rs` — `/prompt` admit 即返回；draining 中 agent 切换 409。
+- `src/api_events.rs` — `/events` SSE replay+live；`/api/sessions/:id/seq` 持久化事件游标。
+- `src/handle.rs` — `SessionHandle` ring 缓冲+broadcast；`admit_and_drain_guarded`/`drain_to_completion`。
+- `src/handle_lifecycle.rs` — `lock_session_lifecycle` 复核同 handle，防锁旧对象。
+- `src/sse_dedup.rs` — `forward_live` live 去重与 pre-subscribe gap 桥接。
+- `src/auth_mw.rs` — 纯 Bearer；豁免 `/`、`/static/*`、`/api/time`、`/favicon.ico`；control 经 `#[path]` 复用。
+- `src/html.rs` — SPA 产物 `include_bytes!` 内嵌，`/`+`/static/:name` 白名单。
+- `src/api_ops.rs`、`src/cmd.rs` — fork/compact/handoff/skill/config/bg；`DrainCmd` 通道。
+- `src/api_agents.rs`、`src/api_agent_resources.rs`、`src/api_agent_nfs.rs` — 版本化 agent 面 + NFS 导出。
+- `src/api_inputs.rs`、`src/api_envs.rs` — 输入列表/删除/reorder；环境 CRUD 扇出 ReloadConfig。
+- `src/api_questions.rs`、`src/handle_questions.rs` — question answer/skip 闭环。
+- `src/api_subagents.rs` — 子代理任务列表；`DELETE /api/sessions?keep=` clear-all。
+- `src/api_brain.rs` — brain CRUD/search/dispatch，typed 错误映射。
+- `src/api_teams.rs`、`src/api_teams_topics.rs`、`src/team_state.rs`、`src/team_hub.rs` — 团队运行时与话题。
+- `src/api_project*.rs` — project HTTP 适配；未 init 全部 503。
+- `src/api_todo_*.rs`、`src/todo_hub.rs` — TODO 模板/环境/run 分发。
+- `src/api_nodes*.rs`、`src/api_control.rs`、`src/nodes_state.rs`、`src/sse_nodes.rs` — 节点注册/心跳/claim/控制。
+- `src/api_dag.rs`、`src/api_nodes_dag.rs`、`src/sse_dag.rs`、`src/dag_state.rs` — DAG CRUD/dispatch/claim/SSE。
+- `spa/src/` — React18+antd SPA（vitest），产物提交于 `spa/dist`。
+- `spa/src/harness/` — harness 管理、runners、启动字段。
+- `spa/src/fleet/` — 节点/执行/团队/调度面板。
+- `spa/src/project/` — 项目目标/里程碑/TODO 面板。
+- `tests/` — HTTP/SSE 契约与节点 e2e 测试。
 
-## 平台装配边界
+## 边界
 
-`opencoder-server` 使用独立 [control](../control/index.md)，不启动本模块的本地 session/节点 claim 执行面。平台 [worker](../worker/index.md) 在 Node 进程内调用这里的 session router，复用 drain、消息和工具交互，无节点入站 HTTP。
+- 无 LLM 单例：每 prompt 按配置构建；`client_override` 仅注入接缝。
+- `opencoder-server` 走 control，不启动本模块执行面；worker 进程内复用 session router。
 
-`spa/src/fleet/settings/scheduling.jsx` 以 Node 调度 PUT 保存并发上限和 FIFO/LIFO；节点表显示运行数/上限、pending 和顺序。`spa/src/fleet/` 提供负载/维护、统一执行、普通团队职责、系统团队、能力绑定与调度、节点明细及产物下载。原会话/项目/DAG/TODO 页面由 control 适配为按 ID 路由；静态文件由 control 内嵌。全部执行详情的 Plan 使用通用控制入口，运行中禁用再次 Plan/Act，未生成计划时禁用 Act；明细包含节点保存的最新 todo。窄屏使用页面下拉导航，宽表在容器内滚动。真实双节点浏览器验收入口为 `scripts/acceptance/platform.js`，覆盖空态、最新 Plan、390px 视口、VM 随节点崩溃退出及离线错误。下面的 AppState、handle 和旧 Node API 说明属于可复用的本地/兼容 API，不代表平台 Server 持有运行明细。
+## 相关
 
-平台会话由 `chat.jsx` 管理显式 Node 选择；`fleet/useNodes.js` 独立发现可用节点，`fleet/model.js` 提供选择项与可执行性判断。创建统一使用带 `node_id` 和稳定 ID 的 `/api/sessions`，历史仅查询所选节点的 `/dialogs`；模型/技能目录也带 `node_id`。`chat/useTranscriptStream.js` 管理事件订阅及快照刷新，按节点和会话身份忽略迟到响应。发送前读取事件水位，读取失败保留草稿并停止下发。
-
-平台大脑页由 `fleet/brain.jsx` 的节点/需求表单直接派发，并打开执行详情。`brainPanel.jsx` 用同一 Table 显示列表和搜索结果，`brain/capabilityEditor.jsx` 管理右侧 75% 抽屉，纯表单转换位于 `brain/model.js`。编辑先读取完整能力和目标，加载失败不可保存；新建后目标保存失败时保留已创建 ID，重试更新原能力。
-
-## 原生会话的资源作用域
-
-节点通过本地 session router 下发已接收执行时，[worker](../worker/index.md) 的任务作用域指向该执行的本地资源快照。[`start_drain_locked`](../../crates/web/src/handle.rs) 优先把这一根目录保留到 `config.agent.agents_dir`，并显式传入 `tokio::spawn` 内的 `core::agent::scope::with_root`。恢复会话时组合的 prompt、技能发现及 bash 工具 PATH 因此使用同一快照；HTTP 配置重载和异步任务边界不能把它改回共享 NFS。没有节点作用域的普通 Web 会话沿用自身配置根目录。
-
-明确指定的快照缺失时，恢复失败并记录错误，在调用 LLM 前终止。对应 [HTTP 回归测试](../../crates/web/tests/web_agent_snapshot.rs) 同时验证提示词、技能正文、可执行工具、普通 Web 配置和缺失快照错误；对外资源固定规则见 [Agent 调度平台](../../features/agent-platform/index.md)。
-
-## 职责
-axum HTTP/SSE 会话管理服务。提供 session CRUD、prompt 提交（admit 即返回）、事件流（SSE replay+live）、运行时 agent/model 切换、interrupt；question 作答、queue/steer 输入管理、annotation/autopilot、模型/技能发现、LLM 标题生成（对齐 TUI 会话能力，见 [changelog](../../features/changelog/2026-08-21/web-tui-parity-server-client.md)）。
-
-SPA disclosure 不变量：Bubble/Turn/call 稳定 key 保留 Collapse 实例，新 SSE 输出导致的 props 更新不会关闭或重开用户已有状态；临时状态行不参与后续语义气泡的编号，live 切换到持久化快照仍保留展开状态。仅表头点击或 Ctrl/Cmd+L / `⤴ 收起` 的 epoch 重挂改变 disclosure。
-
-Agent 执行详情与会话交互共用 `turnsFromMessages` / `reduceFrame` 和 `TranscriptView`，不单独提取 text 块。`fleet/detail.jsx` 的共用 Drawer 显式从右侧滑入，桌面尺寸为 `75vw`；小于 768px 时通过 `oc-execution-detail` 作用域使用全视口宽度、16px 内边距，长执行 ID 换行。`transcript.jsx` 的角色头像统一映射为 `UserOutlined` / `RobotOutlined`，纯文本回答和步骤回答均使用机器人头像，不另渲染 Say 文字标识。执行详情的 [事件订阅](../../crates/web/spa/src/fleet/detail/liveTranscript.js) 等待真实详情就绪，再通过通用执行 `/events-page?after=9223372036854775807` 读取 `head_seq`，以独立事件状态追平后展示 live；Agent、维护会话和 DAG 使用同一入口，水位无效明确报错。结束后显示持久化消息快照，两者不叠加，DAG 不重复订阅。执行历史订阅将 done/error 视为轮次边界，以 EOF 收束连接，续写和重连使用已处理游标；普通单轮订阅保留终帧即结束的契约。实时记录使用有界窗口并提示截断，切换执行会取消旧订阅并忽略迟到回调。
-
-## 边界与非目标
-- 不持有 LLM 客户端单例——每个 prompt 按配置构建 `ChatClient`。
-- 非目标：CORS（tower-http 引入但未启用）/ 多 workdir 路由（当前单 workdir）。鉴权**已实现**：纯 Bearer 中间件（`src/auth_mw.rs`，常量时间比较）——全部 `/api` 路由要求 `Authorization: Bearer <token>`，豁免 `/`、`/static/*`、`/api/time`、`/favicon.ico`；token 必须显式给：`--token` / `--token-file` / `OPENCODER_SERVER_TOKEN`（不自动生成）。`serve` 默认仅绑 `127.0.0.1`（回环），需显式 `--host` 才对外。
-
-## 关键抽象
-- `AppState`（`src/lib.rs`）：`store: Arc<dyn Store>`、`workdir`、`handles: HandleMap`。
-- `SessionHandle`（`src/handle.rs`）：`tx: broadcast::Sender<SseEvt>`、`recent: std::sync::Mutex<VecDeque<SseEvt>>`（pre-subscribe gap 桥接环形缓冲，容量 `RING_CAP=4096` 对齐 `event_sink::CAPACITY`；`broadcast_evt` 在同一把锁内「先入 ring 再 send」，与 `subscribe_recent` 的「subscribe + ring 快照」互斥，保证 subscribe 前广播必在快照、subscribe 后广播必走直播）、`cancel: Mutex<CancellationToken>`（每次 spawn 刷新，避免上次 interrupt 的永久取消毒化新 drain）、`overrides: Mutex<RuntimeOverrides>`、`draining: AtomicBool`，以及每 session 的 `lifecycle: tokio::sync::Mutex<()>`。所有会改变 agent/model 或把 drain 从 false 启成 true 的入口都必须持有同一 lifecycle 锁，因此“检查 idle → 写 meta/override → 启 drain”与并发请求形成单一全序；按 call_id 的 `child_turn_cancels` / `child_steer_gates` 注册表仍共享给 runner。
-- `HandleMap = Arc<Mutex<HashMap<String, Arc<SessionHandle>>>>`：活跃 drain 句柄注册表；handle 可由 `/events` 或 `/prompt` get-or-create。`handle_lifecycle::lock_session_lifecycle` 取得 lifecycle 锁后会复核 map 中仍是同一 `Arc`，handle 被替换时重试，避免锁住已淘汰对象形成双锁域。
-- `admit_and_drain_guarded`（`src/handle.rs`）：先 pin handle+lifecycle；若输入带 `agent` 字段 override 且正在 draining，立即返回 `AdmissionError::BusyModeSwitch`，不持久化 skill/input（文本模式命令不再属于 idle-only：正常 admit，由 runner 在边界应用）；否则在锁内完成可选 skill 写入、Store admission 和 `start_drain_locked`。所有 false→true drain 启动（prompt、compact/handoff、restart watcher）集中到 `start_drain_locked`，普通 steer/queue 仍可在运行中 admit 并由 watcher 兜底重启；运行中 admit 的 steer 额外立即 fire `turn_cancel`+child cancels（中断在途回合，其 tool_end 标 `turn interrupted`、未落库的部分 Say 丢弃，steer 在下个 turn 边界被吸收；queue 不打断、等 idle）——`handle.rs` "Steers interrupt the current turn"；硬取消后的 pending 不自动复活。
-- `drain_to_completion`（`src/handle.rs`）：`resume` 构建 session → 应用 overrides → `run(session, "", ...)`（drain 模式）→ on_event 同时 broadcast + 持久化供 SSE replay。`DrainGuard` 最后释放：事件 sink/flusher 已刷完、`cmd_rx` 已还原之后才把 `draining` 复位，消除尾部仍在写事件/还命令接收器但 API 已观察为 idle 的窗口。**零重提交**：drain 失败即单次 run 终止（无有界重启循环），pending steer/queue 行留在 store 等下一次成功 drain 消费；run 结束后仍应用 endpoint 转发的 drain 命令（autopilot/annotation）。**终帧契约**：SSE 消费者永远能收到一个终帧——`resume_session` 失败即广播+落库 `error`（会话行缺失时落库因 FK 跳过、仅广播）；run 返回 `Err` 且 runner 未自发过 `Error` 事件时由 `ensure_run_error_frame` 恰好补发一次（runner 自身的 LLM/compaction 失败路径已自发，不重复）。
-- `broadcast_persist_event`（`src/handle_lifecycle.rs`，与 `ensure_run_error_frame` 同居）：drain 之外的「广播+落库」单一出口（镜像 `apply_drain_cmd` 的 broadcast+sink 契约）——`POST /model`/`POST /agent` 成功后发 `model_switched`/`agent_switched`（TUI parity；切换在 lifecycle 锁内且拒绝于 draining，故与 run 事件序列无交错），resume 失败终帧亦复用；广播统一走 `handle.broadcast_evt`（ring + 直播）。
-- MCP 连接池生命周期：session 删除与最后一个 `/events` 订阅者离开时经 `opencoder_session::mcp::cleanup(&id)` 释放该 session 的 MCP 连接；订阅者归零后的 handle eviction 位于 `handle_lifecycle.rs`，同样等待 session lifecycle，不能与 admission/切换并发替换 handle；config reload 时按 `config.enabled_mcp_servers()` 经 `mcp::pool::sync` 增删连接。
-- drain 命令通道：`SessionHandle` 另携 `cmd_tx`/`cmd_rx`（`Arc<std::sync::Mutex<CmdRx>>`，锁仅在取命令时短暂持有，绝不跨 await）。`DrainCmd` 枚举（`src/cmd.rs`）：`Compact`、`Handoff{extra}`、`SetSkill(Option<String>)`、`ReloadConfig`、`SetApMode(ApMode)`、`SetAnnotation(Option<String>)`（后三者镜像 TUI worker.rs 语义；plan 阶段的 `ResetPlanPhase` 已随 plan/act 双模式删除）。需 `&mut SessionState`（仅存于 `drain_to_completion` 内）的操作经 `send_cmd()` 入队；`run()` 完成后 `process_drain_cmds()` 在 drain 闭包内排空队列。`CmdRxGuard` 在 Drop 时还原 `cmd_rx`（panic-safe）。
-- question hub：`SessionHandle.question_hub`（`Arc<QuestionHub>`）在 handle 上跨 drain 稳定存活；drain/resume 重建 session 时 rebind `session.question_hub` 并 attach——question 工具在 web 下等待作答而非 NO_LISTENER 兜底。**粘性 attach 无 detach**：最后一个 SSE 订阅者断开时 abandon 全部待答问题（工具得 SKIPPED）；多客户端同在线只有最后一个离开才触发。作答入口见 `src/api_questions.rs`（poll 即 attach），abandon/标题生成助手在 `src/handle_questions.rs`。首次 drain run 成功后 best-effort LLM 标题生成（30s 超时，已有 title 跳过）。
-- data dir 解析：统一经 `opencoder_core::data_dir_for`（唯一实现与稳定性论证见 [agents/core](../core/index.md)），web 无本地副本。
-
-## 节点面（nodes）
-`AppState.nodes: Arc<NodeHub>`（`src/nodes_state.rs`）：task_session_id → `broadcast::Sender<SseEvt>` 映射 + 纯函数 `compute_status`（staleness 20s，按 server 收包时钟记账）。节点端点分居 `api_nodes.rs`（注册表半区：list/register/heartbeat/delete/tasks 派发与列表/cancel）与 `api_nodes_ops.rs`（claim、事件批上传→append_events 带回 seq 后广播、终态上报追加 done/error 收束帧）；浏览器 SSE 桥在 `sse_nodes.rs`，强制复用 `sse_dedup::forward_live` 两级去重（先订阅后查库）。合成 session（task_type="node"）被 `reject_node_session` 在 prompt/agent/model/interrupt/fork/compact/handoff/skill 等 mutation 端点一律 409；`list_sessions` 即使 include_subagents 也排除 node 型。
-
-## brain 面（/api/brain）
-
-以下是可复用的本地 Web API；平台 Server 的配置装配、默认执行和直接派发契约见 [control](../control/index.md)。
-- 嵌入客户端装配用 `Config::resolve_embedding_endpoint()`（`embedding_provider` 独立路由，如本地 ollama bge-m3；缺省回落主 provider），失败降级 `degraded_brain` 服务照常启动。
-- 九路由 CRUD+search+动态规划（`src/api_brain.rs`）挂 `/api` 前缀（Bearer 鉴权自动覆盖）；错误映射 typed：`opencoder_brain::EmbeddingFailed` → 502（serve 降级时接 bail-only `UnavailableClient`，服务照常启动）、validate → 400、not found → 404（typed `opencoder_brain::BrainNotFound`/`PlanNotFound` downcast 判定，零字符串分界）、规划 LLM 故障 → 502（typed `PlanGenerationFailed`）、store I/O/树损坏 → 500。动态规划三路由：`POST /api/brain/plans`（建树 201）、`GET /plans/:id`、`POST /dispatch`（带 plan_id 精确路由；缺省按情况摘要缓存复用/先规划，`replan` 强制）。详见 [agents/brain](../brain/index.md)。
-
-## 组队面（/api/teams，2026-09-04）
-`AppState.team: Arc<TeamWebState>`（`src/team_state.rs`）：`run: TeamRunConfig`（team_root+轮数界，未显式配置的根重定到 workdir 数据目录）+ 可注入 `dispatcher: Arc<dyn TeamDispatcher>`（生产 `NodeDispatcher`，测试脚本化 Mock）+ `hub: TeamHub`。路由分居 `api_teams.rs`（团队半区：GET/POST `/api/teams`、PATCH `/api/teams/:name`（改队长）、POST `.../members`（增删成员，队长不可移出）、POST `.../profile`（202 后台能力画像））与 `api_teams_topics.rs`（话题半区：GET/POST `/api/teams/:name/topics`（创建 201：`start_topic` 落 executing 元信息 + `spawn_topic_runtime`）、GET `.../topics/:tid`（整棵讨论树）、POST `.../cancel`（幂等双路径：活运行时走 token，无运行时（重启遗留/error）直接落盘 `finished(cancelled)`）、POST `.../resume`（202，executing 孤儿与 finished(error) 可续，其余/在跑 409）、GET `/api/topics?team=` 跨团队列表）。`TeamHub`（`src/team_hub.rs`）是进程内 topic 运行时注册表——每话题一个 CancelToken，条目=「有活 task」而非「未完成」；运行时权威状态全在共享目录（磁盘游标，见 [agents/team](../team/index.md)）。SPA「组队」tab 渲染 `crates/web/spa/src/fleet/teams.jsx`、「全部执行」tab 渲染 `fleet/executions.jsx`（IA 重构后的维护真源）；执行详情为 `fleet/detail.jsx` 的 ExecutionDetail 抽屉（话题深视图 `topicDetail.jsx` 已于 2026-09-06 作为零调用死缝移除，见 changelog 同日条目）。
-
-## 项目管理面（/api/project，2026-09-04）
-
-平台 SPA 在 `project/replay/` 组织逐次运行读取：`attempt.js` 保留稳定提交 ID 并合并同时提交，`useRuns` 加载更早版本且保留已加载历史，`run.jsx`/`events.jsx` 读取指定运行的输入、方案、输出、模型文件、事件、子会话及交付文件。`fleet/detail` 将消息限制在本次范围；大字段通过 `PayloadWindows` 分块读取，当前 TODO 的大方案通过根执行 ID 读取。
-
-目标列表的空态保持创建弹窗挂载；`MdEditModal.extraTop` 承载多目标情况下的里程碑归属选择。TODO 可修改 Agent 绑定。`useOverview` 与历史加载保留最近成功数据，同时明确显示读取错误，并忽略切换 TODO 前的迟到响应。
-
-代表性验证为 `project/project.dom.test.jsx`、`project/replay/replay.dom.test.jsx` 及 [构建后双节点验收](../../scripts/acceptance/project/README.md)。下列 AppState 描述属于本地 Web API，平台归属与索引接口见 [control](../control/index.md)。
-
-- `AppState.project: Arc<ProjectService>`（`service.rs::new()` 同步便宜，`serve()` 中 `open_project_store` 后 `init`；store 打开失败 fallback libsql 并 warn）。**未 init 时所有 /api/project 路由 503**。
-- 四文件分域：`api_project.rs`（goals/milestones CRUD）、`api_project_todos.rs`（todo CRUD，PATCH 不暴露 status/plan_md）、`api_project_runs.rs`（overview / plan / execute / list_todo_runs / cancel_run）、`api_project_util.rs`（共享解析/映射）。运行生命周期全在 opencoder-project crate，web 只做 HTTP 适配（404/409/503 形状见 `tests/web_project{,_runs}.rs`）。
-
-## 主流程
-POST /prompt（`src/api.rs`）：仅 body.agent 属于 idle-only transition（改写会话 agent 配置，draining 时 409 且不写 skill、input、message 或 agent meta）；文本模式命令照常 admit——steer 打断当前 turn 后由 runner 于 turn 边界应用，queue 于 idle 边界应用。cheap busy check 先于 config/client 构建，guarded admission 在 lifecycle 锁内再次裁决；普通 prompt 仍按解析 body → load config → 建 ChatClient → `ensure_session_row` → guarded admit → 返回 `{admitted_seq}`（非阻塞）。
-GET /events（`src/api_events.rs`）：`events_after(after)` 重放 + 订阅 broadcast 实时转发（BroadcastStream，lag 客户端丢帧不阻塞 runner）+ **pre-subscribe gap 桥接**——`subscribe_recent` 在 map 锁外原子取得 `(rx, ring 快照)`，ring 中未被回放覆盖的条目（flusher 攒批滞后未落库）经 `sse_dedup::forward_live` 过滤后补发在重放之后（顺序安全：flusher 单通道 FIFO，未落库条目发射序必晚于全部已落库条目）。去重指纹集合为**计数多重集**（`sse_dedup.rs`：直播用重叠窗口种子 `seed_seen`，桥接用全回放窗口种子 `seed_bridge_seen`，各自消耗份数）；drain 收束且 flusher 排空后清空 ring，防空闲重连重发上一 turn 尾巴。
-GET /api/sessions/:id/seq（`get_event_seq`）：返回该 session 最高已持久化事件 seq（无则 0），供远端 client snapshot 事件游标（只取本次 prompt 产生的事件）。
-POST /agent|/model：先 pin session lifecycle，再在同一临界区检查 `draining`、更新 store meta/config 和 handle overrides；drain 已运行时在任何副作用前返回 409，API 检查与 drain 启动之间无 TOCTOU。agent 切换在一个 `SessionPatch` 内原子提交（旧 plan 模式的 `plan_input_count=0` 配套与异步 `ResetPlanPhase` 均已随双模式删除）。`POST /agent` 现只接受 primary `act|plan`（legacy `plan` 与子代理名 explore/build 返回 400 unknown-agent，见 `post_agent`）。`POST /model` 的 `persist_default=false` 仍是 session-only，true 才保存全局默认；Config save 失败保留原有回滚。
-POST /interrupt：handle.cancel.cancel() → drain 在下个 turn 边界退出。
-POST `/api/sessions/:id/subagents/:task_id/steer`：模式控制文本先返回 409 且不 admit child input；普通 steer 再校验 task 属于父 session且为 `Running`，从 live child gate 取得 reservation 后写入并触发 turn cancel。gate 缺失/关闭仍返回 409，写后关闭仍回滚该 row。
-- 会话列表（`src/api.rs`）：`GET /api/sessions` 增 `?workdir=` 过滤（经 `opencoder_core::data_dir::workdir_hash`，新会话行打戳；旧 NULL-hash 会话不被匹配）；`POST /agent` 只接受 primary `act|plan`、单 `SessionPatch` 原子持久化。事件流端点（`get_events`/`get_event_seq`）位于 `src/api_events.rs`；`GET /events` 支持 `Last-Event-ID` header 回退。
-- question 端点（`src/api_questions.rs`）：`GET /api/sessions/:id/questions`（轮询即 attach，返回 waiting `[(call_id, {question, options})]`）、`POST .../questions/:call_id/answer`（body 空 answer → 400）、`POST .../questions/:call_id/skip`（未知 call_id → 404）。
-- 输入管理端点（`src/api_inputs.rs`）：`GET /inputs?delivery=queue|steer`（默认 steer，未知会话返回空数组）、`DELETE /inputs/:seq`、`POST /inputs/reorder`。
-- annotation/autopilot/模型/技能端点（`src/api_meta.rs`）：`POST /api/sessions/:id/annotation`（`{text}` 设置/空串清空 requirement）、`POST .../autopilot`（`off|ap|review` 会话级 override，`null` 清除、非法值 400）、`GET /api/models`（**脱敏**：永不返回 api_key/headers；按 provider 分组去重下拉列表）、`GET /api/skills`（仅 name/description/enabled）。
-- 8 个 feature-parity 端点（`src/api_ops.rs`，于 `src/lib.rs::build_app()` 注册）：fork、compact、handoff、skill、config GET/PATCH、bg list/stop。compact 可在运行中排入但经 lifecycle 与 drain 启动串行化；handoff 会切模式，只允许 idle，running 时 409 且不发命令/不启动 drain。
-- TODO 管理面（2026-09-04，share 树）：`/api/todo/*` 17 条路由，模块 `api_todo_envs.rs`（env CRUD + `GET /api/todo/tools` 双源枚举 + import）、`api_todo_templates.rs`+`api_todo_template_versions.rs`（模板/版本/context.json 域校验 400/env 绑定/current 删除 409 保护）、`api_todo_runs.rs`（run 分发：env 名与已解析工具写入 `spec.metadata.env/env_tools` 后 spawn `opencoder_todos::Runtime`；workflows 列表/详情/interrupt（终态 409）/resume（running 409；终态显式 `{ok,terminal}` no-op 200，不 spawn Runtime））、`todo_hub.rs`（workflow events SSE=store 500ms 轮询，终帧关流，兼顾 CLI 跨进程驱动）。存储在 core `share_fs`（`~/.opencoder/share`，`OPENCODER_SHARE_DIR`/`agent.share_dir` 可覆盖，NFS 兼容 tmp+rename 原子写）。SPA 面：`todoPanel/todoEditor/todoRunsPanel`（菜单「TODO 管理」，`api.js` 补 `apiPut`）；「Env 管理」`envsPanel.jsx` 为朴素单 Table（名称/描述列 `filterSearch` 检索，PageShell 表头「新建」Modal，行操作 编辑 Drawer/删除，工具目录表置下方，不再 Card 叠 Card）。
-- 子代理观测 + clear-all（`src/api_subagents.rs`，2026-08-25）：`GET /api/sessions/:id/subagents` 列子代理任务（`kind` 映射存储 `agent`；空列表 200、无会话 404）；`DELETE /api/sessions?keep=:id` 照抄 TUI `gate_clear_all`——任一 live handle draining（含 keep 自身）→ 409，否则非 keep handle 走 delete_session 同款 evict 后 `clear_other_sessions` FK 级联（缺参 400、keep 不存在 404、幂等 `removed:0`）。
-- `/api/envs` 环境配置管理（`src/api_envs.rs`，5 路由）：`GET`（列表 + active）、`POST {name, capture_current=true}`（400 非法名 / 409 重名）、`PATCH {active: name|null}`（404 未知环境）、`POST /:name/recapture`、`DELETE /:name`（active 环境删除先清标记）。所有会改变有效配置的变更向全部 live session 扇出 `DrainCmd::ReloadConfig`（与 `PATCH /api/config` 同机制——快照 handles keys 后逐个 send_cmd）；recapture/delete 仅在影响 active 环境时扇出。`GET /api/config` 自动反映环境层（`Config::load` 解析）。
-- SPA 前端 `GET /`（`src/html.rs`）：React18 + antd 6 + @ant-design/x + Vite 源码在 `spa/src`（单测 vitest），构建产物**提交**在 `spa/dist`（`index.html` + `static/app.js`/`static/app.css` 固定文件名、无内容哈希），经 `include_str!`/`include_bytes!` 编译期内嵌——`cargo build` 永不需要 node；路由 `/` + `/static/:name` 白名单伺服（白名单外 404）；构建 `scripts/build-spa.sh`、漂移检查 `scripts/check-spa-drift.sh`。登录弹窗（`login.jsx`）支持链接免弹窗：`#token=`（fragment，优先，不进服务器日志）或 `?token=`（+可选 `base=`）——**采纳必须发生在首次渲染之前**（`boot.js` 在 main.jsx createRoot 前同步执行；放组件 effect 会输给 stale token 的 401 清凭证竞争，真机 acceptance 步骤 3 抓到过），采纳后立即 `replaceState` 擦除、URL token 优先于已存凭证、401 回落弹窗（纯函数 `urlCredential.js`）；服务器地址可经 `VITE_OC_BASE` 构建期内置（`build-spa.sh --base` 一次性覆盖 `.env`，store `embeddedBase()`，预填/初始/登出回填）。真机验收 `scripts/acceptance/link_login.js`（自包含 spawn release server + 固定 token，5 步；或 BASE/OC_TOKEN 指向既有部署）。舰队控制台信息架构为三分类导航（`src/nav.js` 唯一数据源：`NAV_CATEGORIES`/`PAGE_META`/`categoryOf`/`menuOf`，当前分类纯派生自 store `page`，`topic_detail` 折叠为所属页高亮）——Sider 顶部 antd Segmented 切换 项目/Agent/节点，下方 Menu 只列当前分类页面（@ant-design/icons 图标；窄屏改 Content 顶 Segmented+Select 下拉）：项目 = 项目（goal→milestone→todo 策展）+ 进展（里程碑进度卡/进行中 TODO/最近项目执行）+ Owner 视角（goal 健康 rollup 与待人工介入：failed + 阻塞 planned>24h）；Agent = 大脑调度/全部执行/DAG 工作流/TODO 管理/团队组队/会话交互/Agent 配置；节点 = 节点列表（原「Opencoder 列表」改名）/Env 管理。主题系统 `src/theme.js`（antd v6 ThemeConfig：colorPrimary #1677ff、borderRadius 6、colorBgLayout #f5f5f5、Layout 白底 Header/Sider、Table middle 密度）经 `ConfigProvider theme+locale=zhCN`（弹窗按钮中文化）生效；`app.css` 收敛为 `--oc-*` CSS 变量、与 token 手工对齐（DAG 节点等原生 CSS 面消费）；全局 notice 为可关闭 antd Alert（原红字 Text），载荷 `{type,text}` 出自 `src/notice.js` 纯构造器（`ok/err/info/warn` + `normalizeNotice` 兜底：裸字符串按 error、空文本不渲染），Alert 类型派生渲染、编辑器通过 `ui/editing/useEvent.js` 稳定通知回调，父组件更新回调不重新加载表单；Header 右侧为连接徽标+服务地址+退出。共享 UI：`src/ui/statusTag.jsx`（全控制台唯一状态→颜色/文案映射，`fleet/model.js` re-export 兼容旧导入）、`src/ui/timeText.jsx`（fromNow+Tooltip 绝对时间）、`src/shell/pageShell.jsx`（统一页头，标题/描述取自 `PAGE_META`）；项目/进展/Owner 视角三页共享数据 hook `src/project/useOverview.js`（`/api/project/overview` 自适应轮询：任一 todo running 3s、否则 8s，从 project.jsx 抽出、后端零改动）。会话面板为 X chat 三件套：`Bubble.List`（`transcript.jsx`+纯映射 `bubbleItems.js`），内嵌 step 阶梯 `stepsBlock.jsx`——`reduce.js` 把非 task 工具调用折叠为 `{kind:'steps',steps:[{thinking,calls}]}` turn——**live reasoning 从第一个字直写阶梯**：`reasoning_delta` 与 snapshot replay 共用 `spa/src/steps/reducer.js` 的 user-segment 规则，Turn 边界 = user echo **或非空 Say**（`image:true` 标记与空文本不算）：Say 关闭当前子 Turn，其后的 reasoning/tool 在 Say 之下开新 steps item（`turnFloor` 锚点，与 TUI `turn_block_start` 前移一致）；一次输入渲染多个 `[n Steps + Say]` 配对，status/task 等展示项不制造 steps item；每个气泡 Turn 由一条阶梯 + 它的 Say 配对，Step 由一段 Thinking + 之后的 `N function calls` 配对，只有新 Thinking 开启下一 Step，其前的顺序/并行调用跨完成状态和 assistant message 边界持续累加；纯文本/收尾 reasoning 形成零调用 Step，稳定态没有顶层 think turn；孤儿 tool_end 合成 finished call、`task` 保持扁平行，渲染严格按 **Turn → Step 内容 → Function call** 三级下钻：`bubbleItems.js` 以纯函数把相邻 assistant steps/text/think 片段合成一个 `assistantTurn` Bubble，默认同一 Turn 只见阶梯头行与 Say，streaming 仅更新 running/error 状态、不自动展开；阶梯无 Say 时头行为 `❯ N Step(s)`，流式回答头行为 `❯ N Steps: {原始首行预览}`，完成后头部仅保留 `N Step(s)`（闭合箭头为 `▸`、展开为 `❯`，只渲染一套箭头；image 标记不算 Say）。完成态完整正文交给 `project/markdown.jsx` 的 marked + DOMPurify 渲染为真实 Markdown DOM，不抽走标题、列表或代码围栏的首行，也不在头部重复正文；正文与阶梯头部间隔 16px，始终可见。纯文本回答由 `transcript/text.jsx` 使用同一 Markdown 组件；流式阶段保留原始预览与文本行；点击 Turn 后见 `Step(k)`，点击 Step 见 `💭 Thinking` 与 `N Function calls` 聚合行，打开聚合行后才列出 `ToolContent` function-call 行，点击单个 call 只展开其 input/result；`progressActive` 让 running 动效跨 ToolEnd 持续到首个非空 Say，与头行间隔 12px，且 Say 出现后同一 Turn 的后续帧不能重新激活；**running 不随 Say 消失而是转移到 Say 头行**——`steps/reducer.js` 的 `markSayStreaming`（text_delta 首块，settle 后 append 前，锁定 settle→mark→append 顺序）在即将关闭的阶梯上置 `sayStreaming: true`，Say 之下开新阶梯（`appendThinkDelta`/`appendStepCall` 新建分支）或终态收束（`reduce.js settleTerminal` = settle + clear，done/error/interrupted/transcript_reset/user echo 全走它）时清除，bubbleItems 以 `sayActive` 透传、stepsBlock 以 `turn.sayActive===true` 驱动 Say 行 running Tag（无 Say 时仍由 progressActive 驱动，error 语义不变），snapshot 回放旧 turn 无该 flag 恒 falsy；Ctrl+L/`⤒ 收起` 以 epoch key 重挂 Bubble.List 一键全收（详见 `features/changelog/2026-09-03/turn-step-function-call-hierarchy.md`） + `Sender`（Enter 提交——空闲即新 run、运行中按 steer admit；loading 停止键=interrupt；会话 composer 不再单设「排队」按钮，queue 投递通道保留在执行详情下拉与 `/inputs` API；本地乐观回显 turn 带 `optimistic:true` 标记——同文本 `steer_consumed`/`queue_consumed` 帧折叠进它而非 push 第二条直播回显，`pendingEcho` 记账不变，`withUserTurn(state, text, optimistic)` 与 sendSession 的 initialTurns 是打标入口）+ `Conversations` 侧栏（`chatSidebar.jsx`+纯映射 `conversationItems.js`，所选 Node 的单一对话源）；交互对齐 TUI 的组件层：`queuePanel.jsx`（pending inputs 列表/删除/重排，`queue_consumed`/`steer_consumed` 帧驱动 pull 刷新）、`questionModal.jsx`（仅 live 流 2s 轮询 `/questions`，answer/skip）、`subagentBlock.jsx`（`subagent_*` 帧折叠渲染 + `[→ view]` 对 `child_session_id` 开 `/events?after=0` 只读回放）、`commandMenu.js`（composer `/` 命令与 `$` skill 过滤菜单；`/act``/plan` idle 走 `POST /agent`、draining 改发文本由 runner 边界消费）、`modelModal.jsx`（`GET /models?node_id=…` + 会话所属节点的 `POST /model`）；协议层 `sse/reduce` 为纯函数（vitest 直测），`reduce.js` 覆盖 `subagent_*`/`compaction_delta`/`autopilot`/`interrupted`/`transcript_reset`（后者触发快照重载）。所有 `/api` 调用经 `spa/src/api.js` 的 `authFetch` 携带 `Authorization: Bearer <token>`（共享密钥存 localStorage `oc_token`（`store.js`），401 清 token 回落 `LoginModal`）；`GET /api/time`（`server_time_ms`）保留为免鉴权就绪端点。SSE 重连契约（`spa/src/sse.js`）：重连优先走 `onResync` 水位协议——`/seq` head 先读、消息快照后读重建 fold 态（`reduce.js resyncState`，`applySeq` 水位以下的带 seq 帧永不二次 fold；`draining=false` 直接落终态 `done`，收口断线窗口内 run 结束终帧永不回放的永挂），replay 只载未来尾部；无 `onResync` 或快照失败时回退 `?after=lastSeq` **有界尾部重放**，`REPLAY_CAP_FRAMES=400` 封顶且终帧恒为 head（无封顶时 4 万帧回放 O(n²) 会冻结页面）；传输层 `seq ≤ lastSeq` 帧整帧丢弃（服务端 tier-1 判定的镜像；**只有 SSE `id:` 行是事件行 seq**——`steer/queue_consumed` payload 内的 `data.seq` 是 session_inputs 行 seq（TUI 队列行身份，每会话从 1 重计），不得提升到 `frame.seq`，否则 run 中途 live 回显帧被误判重放丢弃、applySeq 水位倒退，见 `features/changelog/2026-09-04/spa-sse-payload-seq-namespace.md`）；服务端 `BroadcastStream` lag 合成帧带 `lag: n` 标记（`api.rs::map_broadcast_result`），客户端见标记即从持久化 head 重连，仅无标记的真 run `error` 为终态；`GET /api/sessions/:id` 响应含 `draining: bool`（compact 等长收尾可观测）；wire `ContentBlock` 是 serde `tag = "kind"`（`crates/core/src/message.rs`），SPA 快照渲染兼容 `kind`/`type` 双 tag。快照 transcript 对齐 TUI 回显契约（`reduce.js turnsFromMessages`）：user 消息优先 `display`（verbatim 原文，无则回退 blocks），synthetic 仅在**无 display** 时跳过。
-
-## 依赖与接口
-- 依赖：axum 0.7（ws feature）、tokio-stream（sync feature，BroadcastStream）、tokio-util（CancellationToken）、opencoder-session/store/llm/core。
-- 被依赖：cli（serve 命令）。
-
-## 相关模块
 - [agents/session](../session/index.md) — drain 与 cancel。
 - [agents/store](../store/index.md) — 持久化与事件回放。
-
-## 代表性锚点
-- HTTP 表面契约测试：`tests/web_contract.rs`（health、session CRUD、prompt admit 立即返回、SSE replay+live、agent/model 切换持久化、interrupt 取消 token）
-- SSE 去重/桥接测试：`tests/sse_presubscribe_gap.rs`（pre-subscribe gap 桥接：未落库广播补发一次、ring+持久化不双发、同内容多重集份数、subscribe 后直播不被桥接重复）、`tests/sse_overlap_dedup.rs`（BUG 8 baseline 先于 events_after）、`tests/sse_fingerprint_ttl.rs`（P2-4 首个转发 done 清空指纹集）、`tests/sse_done_collision.rs`（P0-1 历史 done 不吞直播 done）、`tests/replay_fidelity.rs`（回放 kind 与直播一致）
-- drain 生命周期契约测试：`tests/web_drain_contract.rs`（pre-existing handle 不阻塞 drain 的 F1 回归；drain 完成后 `draining` 复位使再次 prompt 重 spawn 的 G1；interrupt 不毒化后续 drain 的 G2；早订阅者经共享 broadcast 收 live 的 G3）
-- drain 生命周期测试：`tests/web_drain_contract.rs`（早订阅 handle 不阻塞 drain、drain 完成后再次 prompt 再 spawn、interrupt 后再 prompt 跑到完、先订 /events 再 prompt 收 live 帧、POST /prompt 配置失败→500、/events 慢订阅者背压）
-- feature-parity 端点测试：`tests/web_api_ops.rs`（fork/skill/compact/handoff/config/bg）；SPA 装配单测：`src/html.rs`。 环境管理端点：`tests/web_envs.rs`（列表/创建/激活/重捕获/删除 + ReloadConfig 扇出）。TODO 管理面（2026-09-04）：`tests/web_todo_envs.rs`/`web_todo_templates.rs`/`web_todo_runs.rs` + SPA `todoPanel.dom.test.jsx`/`envsPanel.dom.test.jsx`（见 changelog todo-web-management）。组队面（2026-09-04）：`tests/api_teams.rs`（9：建队/409/未注册节点 400、改队长与成员管理、话题全链路跑通+磁盘布局断言、cancel 双路径幂等、resume 202/409、/api/topics 过滤、profile 202、无凭证 401、路径穿越 400）+ SPA `teamItems.test.js`/`team.dom.test.jsx`（见 changelog agent-team）。端点边界守卫：`tests/web_endpoint_guards.rs`（questions 三端点与 `/seq` 对不存在 session 一律 404 且**不** get-or-create handle——防 HandleMap 无界增殖）。子代理列表/clear-all（2026-08-25）：`tests/subagent_list_api.rs`、`tests/clear_sessions_api.rs`；SPA 单测在 `spa/src`（vitest：sign/api/sse/reduce(+reduce.order)/bubbleItems/conversationItems/commandMenu 纯函数 + steps/reducer（阶梯折叠 + sayStreaming 生命周期）+ saypairs e2e + app/chat/sidebar/queuePanel/questionModal/subagentBlock/stepsBlock jsdom 冒烟）。
-- web/TUI 对齐端点测试（2026-08-21）：`tests/web_questions.rs`（answer 闭环/skip→SKIPPED/400/404/空列表/最后订阅者断开 abandon）、`tests/web_inputs.rs`（queue 列表/删除/重排 + 默认 steer）、`tests/web_meta_endpoints.rs`（annotation/autopilot/models 脱敏/skills 形状）、`tests/web_list_events.rs`（workdir 过滤 + Last-Event-ID replay）、`tests/web_drain_cmds.rs`（SetApMode/SetAnnotation live 应用 + 持久化）、`tests/client_remote_ops.rs`（client 侧 18 方法 e2e）。
-- running 模式门：`tests/running_mode_gate.rs`（真实 router + 挂起 LLM：agent 字段与 handoff 运行中 409 且无副作用；文本模式命令 queue/steer 运行中 200，分别在 idle/turn 边界应用生效）、`tests/agent_model_toctou.rs`（drain 与 agent/model 的双向 lifecycle 排序）、`tests/subagent_steer_api.rs`（mode steer 拒绝）、根目录 `tests/running_mode_switch_e2e.rs`（真实 `opencoder-server` 二进制和 HTTP 阻塞 provider；三二进制拆分后 fleet e2e 经根包 `tests/support/mod.rs::sibling_bin` 解析兄弟二进制）。handle identity/eviction 单测位于 `src/handle_tests.rs`。
-
-## DAG 面（P2）
-
-- `api_dag.rs`：def CRUD + dispatch + run 查询；`api_nodes_dag.rs`：claim（单活跃/节点，BEGIN IMMEDIATE CAS，FIFO `(created_at,rowid)`）+ 节点事件/状态上报（终态补写合成 `run_finished`）；`sse_dag.rs`：run 事件 SSE（id=seq，Last-Event-ID 续传）；`dag_state.rs`：进程级 `OnceLock<DagHub>` 事件广播；`api_nodes.rs` lost 收束把 running/cancelling 折叠 error("node lost")。
-- SPA「DAG」面板：defs/runs/拓扑图（@xyflow + dagre）；`dag/defEditor.jsx` 的新建/编辑抽屉为 `width="100%"` 全宽（画布与 JSON 双模式）。
-
-- **版本化 agent 管理面（2026-09-04）**：`api_agents.rs`（卡片 CRUD + `PATCH /api/agents/active` 激活——`set_active_agent_checked` preflight（prompt 引用缺失（无 prompt 卡不可 resolve，读路径会静默回落 act）或解析失败均 400 并回滚 marker）+ 仅变化时 fan_out ReloadConfig）、`api_agent_resources.rs`（共享池 `prompts|skills|tools|memory` 版本 CRUD/rollback/文件读取；写校验：路径安全、b64、1.5MiB 上限、按 category 的文件形态；被引用资源 DELETE 409 带 referenced_by；reload 策略=仅生效 agent 链路受影响时 fan_out）、`api_agent_nfs.rs`（`GET/POST /api/agents/nfs` 生命周期，进程级 NFS_SLOT；daemon 启动时 `agent.nfs.enabled` 自启动，失败仅 log）。SPA「Agent 配置」面板：`agentsConfig/agentDetail/promptEditor/agentNfsCard`（顶部 Tabs 切换 Agent 列表、Agent Harness、Harness 管理、Runner 管理与 NFS 配置；主表展示 Agent 的资源引用、当前版本、NFS 相对路径与内容名称，保留名称检索、生效选择、新建及编辑/启动/删除；版本下拉、回滚、soul/how/output 编辑保存即新版本、mount 提示）。详见 [agents/agents](../agents/index.md)。
-
-## 编辑缓冲与项目关联
-
-项目、里程碑 Markdown 的 `project/views/mdModal.jsx` 仅在打开或切换记录时初始化，预览保留已注册字段；TODO 抽屉草稿不随 `updated_at` 重置。Prompt、Env、Harness、DAG 等编辑器保留本地输入，资源切换隔离编辑会话，保存中锁定字段；Prompt 与 Env 初始读取失败时禁止用空值保存。
-
-项目和里程碑、里程碑和 TODO 通过可搜索且可清空的 Select 关联。里程碑列表允许独立创建专项，TODO 项目归属由里程碑派生；共享投影在 `project/model/relations.js`，列表、进展及 Owner 视角均包括独立里程碑。接口、迁移和删除规则见 [project](../project/index.md)。
-
-`harness/management` 支持默认与命名 Codex 配置及 Agent profile 绑定；`harness/runners` 管理版本化前台入口、安装文件清单和 env。DAG 编辑器提供 Runner step；`fleet/detail/runner` 展示已接受配置版本、阶段、报告、业务 verdict 及独立投递状态。Runner 转译消息使用既有折叠回放，资源 API 支持完整 Skill 包。接口验证见 [Runner UI 测试](../../crates/web/spa/src/harness/runner.dom.test.jsx)。
+- [agents/control](../control/index.md) — 平台控制面。
+- [agents/worker](../worker/index.md) — 节点执行面。

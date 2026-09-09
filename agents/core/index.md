@@ -1,54 +1,36 @@
-Commit: 2491657d33c384dddcabf4d12ab4cd8822ccaf81
-
+Commit: b465f440381bd009dc9bd3a8192ad88eab44cede
 
 # core 模块
 
-## Harness 类型
+跨 crate 共享类型与 Config 单一真源。
 
-`harness` 定义 `Harness::{Opencoder,Codex}`、字面值环境变量解析与私有 `HarnessRuntime`。`AgentMeta.harness` 保存内置或自定义 Agent 的默认执行器，缺省为 `opencoder`；会话启动后由 [session](../session/index.md) 固定选择。`CodexSettings` 校验二进制路径、模型、推理强度、sandbox、approval policy 与字面 env，并生成独立 argv 配置项；Debug 只显示 env 键。`pin_settings` 仅对新 Codex 运行态固定受管参数，既有 thread 不改写。运行态包含受管参数、外部 thread、fork 来源、资源快照、环境、模型及输入提交检查点，由 [store](../store/index.md) 独立持久化，不嵌入公开 `SessionMeta`。
+## 关键路径
+- `src/message.rs` — Message/Role/ContentBlock；serde tag `kind`；`estimate_chars` 全块覆盖。
+- `src/config.rs` — `Config::load`：候选深度合并（project 覆盖 global）→ 域文件 → env 变量。
+- `src/config/env.rs` — 环境层 `~/.opencoder/envs/<active>/config.json` 插入候选链。
+- `src/config/domain.rs` — mcp/cli/skills/ap 四域独立文件，项目层整体遮蔽。
+- `src/config/keymap.rs` — `KEYMAP_INFO` 17 个可重绑定 TUI 动作。
+- `src/config/cli.rs` — `InjectionTarget {parent,explore,build}` 注入目标。
+- `src/config/autopilot.rs` — `ApMode off|ap|review` 三态。
+- `src/net.rs` — `build_http_client`/`effective_proxy`，connect 30s；lib.rs re-export。
+- `src/data_dir.rs` — `data_dir_for(workdir)` per-workdir 数据目录唯一解析。
+- `src/harness/mod.rs` — `Harness::{Opencode,Codex}`、`pin_settings`。
+- `src/harness/settings.rs` — `CodexSettings` 校验与独立 argv。
+- `src/harness/runtime.rs` — `RunnerSettings` 带 revision 命名 Codex profile。
+- `src/harness/scope.rs` — task-local Codex 设置/运行态，供重载 Config 的驱动读取。
+- `src/agent/` — meta/resource/compose：引用卡 + 共享池；scope 任务局部资源根。
+- `src/skill.rs` — 多根发现 first-wins 遮蔽；缓存 `src/skill/skill_cache.rs`。
+- `src/tool.rs` — `Tool` trait / `ToolArc` / `ToolContext` / `ToolOutput`。
+- `src/fleet/protocol.rs` — `PROTOCOL_VERSION = 7`，Server/Node 必须同代际。
+- `src/fleet/{queue,scheduling}.rs` — FIFO/LIFO 排序与纯 CPU 节点选择。
+- `src/share_fs.rs` — NFS 兼容共享树布局（todo/env/agent/tools）。
+- `src/sse.rs` — `SseEvt` 服务端 SSE 事件类型。
 
-## 平台协议与资源作用域
+## 边界
+- 域文件项目层存在即整体遮蔽外层，不逐键合并、不查 XDG。
+- agent 解析优先当前执行固定的资源根（agent::scope），未设置走原解析。
 
-Fleet 协议版本为 **7**，要求节点理解受管 Harness 快照和容量队列；Server 与 Node 必须使用同一协议代际，防止旧节点忽略新请求的执行器选择。`fleet/{protocol,scheduling,queue}` 提供五字段执行索引、注册/负载、请求/回复及纯 CPU 调度函数，供 [control](../control/index.md) 与 [worker](../worker/index.md) 共享。`agent::scope` 提供 Tokio 任务局部资源根；`Config::load` 和 agent 解析优先使用当前执行固定的资源目录。`harness::scope` 向内部重新加载的 Config 传播已接受的默认 Codex 设置及完整注册配置快照；作用域直接返回 Future。`NodeScheduling` 校验 1–65535 上限，`queue_cmp` 按 FIFO/LIFO 排序；`select_queue_node` 在无空余容量时按 pending 数选择健康节点。未设置作用域的 CLI/TUI 保持原解析规则。
-
-## 职责
-跨 crate 共享的基础类型与配置。
-
-## 关键抽象
-- `Message`/`Role`/`ContentBlock`/`MessageUsage`（`src/message.rs`）：会话消息模型，serde 标签 `kind` snake_case。`Message::estimate_chars()` 遍历**所有** ContentBlock 变体（Text + Reasoning + ToolUse input JSON + ToolResult content）返回忠实文本渲染供 token 估算——区别于仅过滤 Text 的 `text()`（后者漏算 ToolResult/ToolUse/Reasoning，曾导致压缩从不触发）。每条用户消息可带 `display: Option<String>`（serde default + skip_if_none）——**回显侧单一真源**：记录时存原样输入（含 `$skill` token），展示面（TUI replay/SPA/`session show`）优先取之，旧行 NULL 回退 `text()`；永不进 LLM wire（lowering/估算只读 blocks）。
-- `Config`（`src/config.rs`）：除模型、Provider、压缩与网络配置外，维护 `mcp_servers: HashMap<String, McpServerConfig>` 与 `cli: HashMap<String, CliConfig>` 两类可注入集成。两类条目均以 `enabled` 门控，并共享 `InjectionTarget` 三布尔多选 `{parent,explore,build}`（`config/cli.rs`；JSON 字段 `inject_to` 序列化为 tag 数组如 `["explore","build"]`，兼容旧值 `"parent"/"subagents"/"all"`，缺省 parent-only 时省略该字段）；CLI 条目的 `content` 是自由文本 usage contract（多行）。`apply_tag` 对未知 tag / 空 `inject_to` 数组 `tracing::warn` 不硬错（保前向兼容，`config/cli.rs`）。`enabled_mcp_servers_for` / `enabled_cli_for` 收 `(agent_name, AgentMode)`：Primary 一律看 `parent` 位，Subagent 按名字精确匹配 `explore`/`build`（`allows_agent`），按名称稳定排序。`resolve_endpoint() -> Result<Endpoint>` 返回 env 解析后的端点（header value 支持 `{VAR}` 间接引用）；`resolve_embedding_endpoint()` 按 `embedding_provider`（serde/merge 双路径）路由 `/embeddings` 到独立 provider（未注册名点名报错，不静默回落——异模型向量不可比），`embedding_model` 定请求体模型 id；`load(workdir)` 按 global → project → env 深度合并；四域键 `mcp_servers`/`cli`/`skills`/`autopilot` 已**硬切**出 config.json——仅由域文件 `mcp.json`/`cli.json`/`skills.json`/`ap.json` 加载与保存（`config/domain.rs`；与三域 entry map 不同，ap.json 顶层即 `AutoPilotConfig` 本体，`apply_domain` 对其走 whole-object `autopilot::merge`），`save(workdir, patch)` 对域键分流写域文件，其余键仍项目优先写 config.json。激活命名环境（见 `config/envs.rs` 条目）期间 `save_target` 候选截断为 3（2 项目 + 环境层）——交互式编辑落进环境而非全局；取消激活恢复基础行为。整域 `null` patch（如 `{"cli": null}`）落盘归一为 `{}` 而非字面 `null` 文件（`domain.rs::save_domain`，merge 后非对象 root 归一化）。
-- `KeymapConfig`（`src/config/keymap.rs`）：17 个可重绑定 TUI 动作的序列化配置与元数据单一真源；`switch_mode` 默认 `ctrl+t`，缺失字段按该默认补齐，旧 `switch_mode_clear`/`switch_mode_keep` 残留键由 serde 忽略。解析和终端按键匹配由 TUI 完成。
-- `config/envs.rs`——命名环境（env）管理：每个环境是 `~/.opencoder/envs/<name>/` 完整配置快照（`config.json` + 四域文件（含 ap.json），0o600 owner-only，含 API key 可能）。纯函数集 `active_env`/`set_active_env`/`list_envs`/`create_env`/`recapture_env`/`delete_env`/`validate_env_name`；激活标记为 `~/.opencoder/envs/active` 纯文本（stale 标记读取时静默回退基础链）。捕获语义：以 `active=None` 基础链快照（无 env-var overlay、config.json 剥离四域键、按域分文件、清 stale 域文件、WYSIWYG 含项目层）；删除顺序先清标记再删目录；`validate_env_name` 拒绝保留名 `active`（与激活 marker 冲突，仅小写精确值；`list_envs` 过滤历史遗留 `envs/active/` 目录）。经 `lib.rs` re-export；保存与激活硬化：`write_config_save` 使 envs_home 之下的配置/域文件创建即 0o600 且成功写入后对既有文件 chmod 收敛（`Config::save_to` / `domain::save_domain` 接入）；`write_marker_atomic` 经同级临时文件 + fsync + rename 落激活 marker；`set_active_env_checked` 先写 marker 再 `Config::load` 干跑，失败回滚到前一 marker 并报 "leaves the config unresolvable"（去激活透传不校验；web PATCH 激活段由 `ACTIVATE_GATE` 互斥串行，空串 active 400、重复激活 200 `{"unchanged": true}` 短路）。
-- `Config.skills`（`config/skill.rs`）：`HashMap<String, SkillConfig>` 默认注入开关（`enabled`，JSON merge-patch 合并保留兄弟字段）；`enabled_skill_names()` 返回按名排序的启用列表，供 session 的 context 尾部 skill 目录提醒过滤。
-- `Agent`/`AgentKind`/`AgentMode`/`ToolFilter` + 7 内置 agent（act/plan/explore/build/command/workflow/sidecar）（`src/agent.rs`）。`sidecar`（Subagent 模式，`ToolFilter::Allow(["read","search","ls","bash"])` 只读——bash 仅只读检验命令，写效应由 session 的 bash_guard 拦截）是 `/sidecar` 旁路问答的临时循环 agent，`base_prompt_sidecar()` 声明其"只观察、不修改、答进度"角色。`AgentMode::{Primary,Subagent}` 区分主 agent 与子 agent；explore（只读，tools=search+read）/build（实现，tools=bash+edit）为 Subagent，act/plan/command/workflow 为 Primary。主 agent 仅有 act（默认，全量执行）与 plan（只读探索：tools=bash+task+question，所有状态变更由 session guard 拦截并回填模型 context、build subagent 被 runner guard 拦截）——interlude 的 sandbox 名已不再解析（`resolve_agent("sandbox")` 返回 None）。plan prompt（`base_prompt_plan`）通过 `strip_build_delegation`（`BUILD_DELEGATION_CLAUSE` 单点子句）从 BASE_PROMPT 剥离 `, 'build' (full tools) for implementation` 子句再追加 `PLAN_SUFFIX`，明确被拦截后不可换路径重试、只输出 plan（不含 question 工具指引——question 描述唯一文档面在 task-plan skill，schema `description()` 仅剩标识+指针）；act prompt 保留完整 BASE_PROMPT。
-- `Tool` trait / `ToolArc` / `ToolContext` / `ToolOutput`（`src/tool.rs`）。
-- `Skill`（`src/skill.rs`）：用户可编排的「技能」指令包（`name/description/body/source`；其中 `source` 为磁盘路径，经纯函数 `body_with_source(&Skill)` 以 `> Source: <path>` 前缀注入 body——session skill_resolve / TUI app_helpers / CLI run 在激活 skill 时调用，使 agent 能定位 skill 同目录资产（如 EXAMPLES.md））。`skills_dir()` 返回 `Option<PathBuf>`（HOME 派生的 `~/.opencoder/skills`，二进制自有配置主目录，与 config 同源；无 HOME 时 None 或绝对路径回退，绝不解析为 CWD 相对路径，seeding 对 None 直接跳过）；`discover()` 扫描该目录，识别 `<name>.md` 与 `<name>/SKILL.md` 两种布局，解析可选 `---` YAML frontmatter（`name`/`description`，缺省回退文件名/首行；容忍首部 UTF-8 BOM 与前导空行，frontmatter-only 文件 body 为空串——不再回退整个原文，防止 frontmatter 注释被当指令注入）。目录缺失返回空 `Vec`（非错误）。`extract_skill_tokens(text)` 剥离**所有** `$name` token（仅用于发现/激活）；`strip_resolved_skill_tokens(text, resolved)` 只剥离已解析 token、unresolved `$name` 原样保留（杜绝 token 吞吃用户输入内容），由 TUI/runner 解析器在 resolve 后重建 clean 文本。二进制经 `include_str!` 内嵌并随附内置 skill 包（seed 表与 seeding/install 逻辑在 `src/skill/seed.rs`，支持 `references/*` 等嵌套资源；内置包 update-on-drift（漂移文件先备份 `<file>.user.bak` 再覆盖为 ship 版，同步文件零动作）、dep-gated 包保持 per-file never-clobber；发现/解析/token 处理留在 `src/skill.rs`），首启 seed 到 `~/.opencoder/skills`：`task-plan`（上线闭环规划，2026-09-01 瘦身为五要素输出契约：树立目标、关键 context、TODO List（P0-P3）、TODO 验证手段（含证据成熟度五级与线上/生产等价验证）、核心动作关键路径；只规划不执行，计划确认后才落地，不允许跳过计划直接动手；question 用法与 assumptions 兜底内置于澄清协议，合约/保鲜等细则位于 `references/`）、`do-and-done`（实现/执行循环）、`repo-local-memory`（仓库本地记忆）、`repo-local-dreaming`（记忆整理做梦）、`review`（五问即产出：原始需求目标 / 做了哪些事情及完成度 / 卡点 / 逐项逻辑核查 / 下一步 TODO，纯逻辑层评审——不执行测试、不跑回归，逐项核查变更逻辑本身并评审变更潜在影响模块的逻辑自洽，依据=当次 diff+代码位置静态引用，completed/total+向下取整，答完裁决 `go-live ready | not ready`——2026-09-02 由 7 步证据评审版回退并改为纯逻辑评审，无固定输出模板）、`summary`（任务回顾/recap——在任一节点 done/paused/handoff 产出结构化回顾：需求/实际变更/验证证据/优化空间，只读不修改）、`submit`（提交/PR）；`task-plan → do-and-done → review → submit` 为主链，`summary` 为正交的任务回顾工具（任一节点可用，不强制插入主链），`say-and-replay` 为与之并列的正交工具（只读对齐快照，同样五问复述必答，REPLAY 块以 progress 量化完成度 completed/total + %）。另设 `DEP_GATED_SKILLS` 桶（现含 `ssh-pty`、`chrome-headless`）：经 `.skills-deps` sentinel 门控的 opt-in 技能，与内置 seeding 独立——用户运行 `install-skills-dep.sh`（首启经 `write_install_script` idempotent 落盘到 `~/.opencoder/`）创建 sentinel 后下次启动 seed；`chrome-headless` **不打包浏览器二进制**，指导 agent 用 bash 工具驱动本地 Chrome（`--headless=new --dump-dom`，API 优先）。两者 seeding 均 per-file 增量、never-clobber（用户改动永久存活、二进制升级时缺文件仍补写）；内置包相对照为 update-on-drift——漂移即以 ship 版覆盖并落 `<file>.user.bak` 备份，skill 修复随二进制升级传播。
-- `CompactionConfig`（`src/config.rs`）：`auto/context_threshold/tail_turns/reserved/buffer`（`prune` 字段已移除——曾为死配置）。
-- `OutputStreamlineConfig`（`src/config.rs`）：`enabled/trim_trailing/collapse_blank_lines/trim_outer`（默认全开）+ `collapse_inline_ws`（默认关，opt-in）。session 在 `run_loop` 持久化前对完成的 assistant 文本做保义精简（见 session 模块）。
-- `AutoPilotConfig`（`config/autopilot.rs`）：三态 `mode: ApMode`（`off | ap | review`，serde lowercase，默认 `off`）+ `max_iterations`/`verify_retries`。合并层 `mode` 键优先，旧布尔 `enabled` 迁移（`true`→`ap`、`false`→`off`，防静默关闭），未知 mode 串忽略（宽松合并）。
-- 组队配置三旋钮（`Config` 字段，`config.rs`）：`team_root: PathBuf`（opencoder-team 共享目录根，默认 `<data_root>/team`，env `OPENCODER_TEAM_ROOT`；web 启动时未显式设置的值重定到 workdir 的 `data_dir_for` 下）、`team_max_turns`（默认 8，env `OPENCODER_TEAM_MAX_TURNS`）、`team_max_sub_turns`（默认 3，env `OPENCODER_TEAM_MAX_SUB_TURNS`）；非法数字 env warn 后忽略。
-- `net` 模块（`src/net.rs`）：`build_http_client`/`build_http_client_with_read_timeout`/`effective_proxy`——proxy-aware reqwest 客户端。代理开启时合并进程 `NO_PROXY`/`no_proxy` 与固定 loopback bypass（`127.0.0.1`/`localhost`/`::1`/`0.0.0.0`），内网服务和本地 mock/自连都遵守既有直连合同。被 llm client 使用。
-- `data_dir` 模块（`src/data_dir.rs`）：`data_dir_for(workdir: &Path) -> PathBuf`——唯一的 per-workdir 数据目录解析（`<data_local>/opencoder/<hash>`，hash 为 DefaultHasher over workdir 规范化字符串形式，先 canonicalize 故 `/p` 与 `/p/` 及 symlink 折叠为同一目录）。替代此前 cli/web/tui 三处各自漂移的副本，三进程对同一 workdir 解析出同一 data dir，使 session 跨进程可见。同模块另暴露 `data_root() -> PathBuf`（=`<data_local>/opencoder`，`data_dir_for` 即 `data_root().join(hash)`），供 `ts -l` 等全局操作扫描**所有** workdir 的 store。二者均经 `lib.rs` re-export。
-- `auth_sig`（`src/auth_sig.rs`）：请求签名协议纯函数 `canonical`/`sha256_hex`/`sign_hex`/`verify` + `REPLAY_WINDOW_MS=300_000` + 8 个单测；web 的 `auth_sig_mw.rs` 与 node 的 uplink 共用。
-
-- **文件化自定义 agent 读路径（`src/agent/` 目录）**：`agent::meta`（引用卡 + `~/.opencoder/agents` 根解析：override > `OPENCODER_AGENTS_DIR` > global home；active marker 全套 envs 同款原子写/preflight 回滚/保留字 `active|prompts|skills|tools|memory`）+ `agent::resource`（共享池 `prompts|skills|tools|memory/<名>/v{n}`，`ResourceMeta.current=0` 即无；`tools_paths(scope, agent)` 工具池目录解析——Active=指定/marker agent 引用目录，All=全部池）+ `agent::compose`（`# Soul/# How/# Output` 定序拼装，空段跳过）。`resolve_agent`：builtin 优先 → 卡片 → prompt 资源 current 版本三件套 → compose（memory 引用追加 `# Memory` 段）→ `Agent{Act,Primary,ToolFilter::All}`，任何失败静默 None。`effective_default_agent(cli, cfg)`：cli > active marker > `agent.default` > act。写路径与 NFS 在 [agents/agents](../agents/index.md)。
-- **skill 多根发现（`src/skill.rs` + `src/skill/skill_cache.rs`）**：`discover()` roots = active agent 技能根（0–1 个，`agent_skill_roots`）在前 + 全局 `~/.opencoder/skills`，`discover_all(roots)` 按名 first-wins 合并（agent 层遮蔽全局同名）；缓存键 = 有序 roots 全表 + 联合指纹（任一 root 出现/消失/文件 mtime 变化即失效）；`discover_in` 保持单根无缓存。
-## 主流程
-Config::load 顺序：默认 → 全部已存在候选**深度合并**（global base → project override，project 后写后赢）→ 域文件 → env 覆盖。候选顺序（从最具体到最全局）：`<workdir>/.opencoder/config.json`、`<workdir>/opencoder.json`、**环境层 `~/.opencoder/envs/<active>/config.json`**（激活时插入，`config/env.rs::config_candidates_with`）、`~/.opencoder/config.json`、`~/.opencoder/opencoder.json`、`~/.config/opencoder/config.json`。四域键（`mcp_servers`/`cli`/`skills`/`autopilot`）不参与该候选链（`config/domain.rs`）：每域候选为项目 `<workdir>/.opencoder/<domain>.json` > 环境层 `~/.opencoder/envs/<active>/<domain>.json`（激活时插入，`domain.rs::effective_path_with`）> 全局 `~/.opencoder/<domain>.json`，项目文件存在则**整体遮蔽**更外层（不逐键合并），且不查 XDG 目录；config.json 遗留四域键加载时被忽略（硬切），损坏域文件 warn 后视为不存在。交互式 TUI 启动前先 `ensure_global_config`，有效配置无法解析凭证或构建客户端时进入首启表单；表单 patch 先经 `merged_with` 本地验证，再由 `save_global` 写入全局文件并按完整优先级重载。
-
-## 依赖与接口
-- 依赖：serde、chrono、dirs、async-trait、reqwest（`net` 模块构造 proxy-aware 客户端，含 `socks` feature）。
-- `net`（`build_http_client`/`effective_proxy`）关键项经 `lib.rs` re-export，供 llm/session 直接调用。`data_dir_for` 同样经 `lib.rs` re-export，供 cli/tui/web 解析同一 data dir 后打开 store。
-- 被依赖：所有其它 crate（类型来源）。
-
-## 代表性验证
-
-- `crates/core/tests/config_envs_contract.rs`：env 层 owner-only 权限（创建 0o600 + 成功写入后 chmod 收敛）、激活 preflight 失败回滚 marker（"leaves the config unresolvable"）、连续 marker 原子重写不产生半截文件。
-
-## 相关模块
+## 相关
 - [agents/session](../session/index.md) — Config 驱动压缩与模型选择。
 - [agents/llm](../llm/index.md) — Message lowering。
-
-## 注册执行配置
-
-`harness/runtime.rs` 定义带 revision 的命名 Codex profile 与 `RunnerSettings`，后者固定 argv、工作目录、字面环境、所属服务及安装文件 SHA-256。`AgentMeta.harness_profile` 引用命名配置，缺省使用默认 Codex 设置。`Assignment.runtime` 与默认配置一同私有下发，`Config::load`、嵌套调度和 fork 保持本次快照；缺失的命名配置明确失败。类型验证见 [harness_runtime.rs](../../crates/core/tests/harness_runtime.rs)。
+- [agents/control](../control/index.md) / [agents/worker](../worker/index.md) — fleet 协议消费方。

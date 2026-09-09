@@ -1,4 +1,4 @@
-Commit: (working-tree, 基于 56e612b6f251e3ed384074c7cf9cfc70a8c4c9cf)
+Commit: 2491657d33c384dddcabf4d12ab4cd8822ccaf81
 
 # store 模块
 
@@ -8,7 +8,7 @@ schema 22 以幂等增量迁移增加可空 `sessions.harness_runtime TEXT`。`S
 
 ## 平台存储接缝
 
-`fleet::FleetStore` 独立打开平台 `control.db`，持久化节点注册、全局定义以及严格四字段 `execution_index(id, created_at, node_id, status)`；ID 的节点和创建时间不可改写。Server 另用新 `definitions.db` 保存全局大脑/项目定义，Node 用自己的 `runtime.db` 保存本地运行明细。旧 Store 的节点任务表仅服务兼容接口，平台不在 Server 写 session 或运行输入/结果。归属见 [control](../control/index.md) 与 [worker](../worker/index.md)。
+`fleet::FleetStore` 独立打开平台 `control.db`，持久化节点注册、全局定义以及严格五字段 `execution_index(id, created_at, kind, node_id, status)`；ID 的节点和创建时间不可改写。Server 另用新 `definitions.db` 保存全局大脑/项目定义，Node 用自己的 `runtime.db` 保存本地运行明细。旧 Store 的节点任务表仅服务兼容接口，平台不在 Server 写 session 或运行输入/结果。归属见 [control](../control/index.md) 与 [worker](../worker/index.md)。
 
 ## 职责
 

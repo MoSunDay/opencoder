@@ -306,7 +306,7 @@ pub async fn seed(app: &Router, projects: &Arc<dyn ProjectStore>) -> Dataset {
         executor: ProjectExecutorKind::Brain,
         output_md: Some("# 失败方案".into()),
         capability_id: Some("cap-1".into()),
-        ..run_row("prun-mock-tf-1", &t_failed, 1, ProjectTodoRunKind::Plan, "act", base + 1)
+        ..run_row("prun-mock-tf-1", &t_failed, 1, ProjectTodoRunKind::Plan, "plan", base + 1)
     }).await;
     seed_run(projects, RunRow {
         status: ProjectTodoRunStatus::Failed,
@@ -322,7 +322,7 @@ pub async fn seed(app: &Router, projects: &Arc<dyn ProjectStore>) -> Dataset {
     seed_run(projects, RunRow {
         executor: ProjectExecutorKind::Dag,
         output_md: Some("# DAG 方案".into()),
-        ..run_row("prun-mock-tr-1", &t_running, 1, ProjectTodoRunKind::Plan, "act", base + 1)
+        ..run_row("prun-mock-tr-1", &t_running, 1, ProjectTodoRunKind::Plan, "plan", base + 1)
     }).await;
     seed_run(projects, RunRow {
         status: ProjectTodoRunStatus::Running,

@@ -702,11 +702,20 @@ mod tests {
 
         execution.abort();
         let _ = execution.await;
+        // A killed descendant may linger as an unreaped zombie in /proc (its
+        // parent died first and the container init may not reap orphans), so
+        // treat the zombie state as dead: the group kill did happen.
+        let zombie = |pid: &str| {
+            std::fs::read_to_string(std::path::Path::new("/proc").join(pid).join("stat"))
+                .ok()
+                .and_then(|stat| stat.rsplit(')').next().map(str::to_owned))
+                .is_some_and(|rest| rest.trim_start().split(' ').next() == Some("Z"))
+        };
         tokio::time::timeout(Duration::from_secs(5), async {
-            while std::path::Path::new("/proc")
-                .join(descendant.trim())
-                .exists()
-            {
+            while {
+                let path = std::path::Path::new("/proc").join(descendant.trim());
+                path.exists() && !zombie(descendant.trim())
+            } {
                 tokio::time::sleep(Duration::from_millis(10)).await;
             }
         })

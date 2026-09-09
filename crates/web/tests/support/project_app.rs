@@ -2,7 +2,9 @@
 //! `build_app` router (signature middleware ON) over an initialized
 //! `ProjectService` backed by one in-memory libsql store and a script-queue
 //! `MockChatClient`, plus the authenticated oneshot call helper and run-polling
-//! utilities. Used by `tests/web_project.rs` and `tests/web_project_runs.rs`.
+//! utilities. Used by `tests/web_project.rs`, `tests/web_project_runs.rs`
+//! and `tests/web_project_mock_dataset.rs` (dataset seeding in
+//! `support/project_mock.rs`).
 
 use std::{
     sync::Arc,
@@ -25,6 +27,9 @@ pub const TOKEN: &str = "project-test-token";
 pub struct Harness {
     pub app: Router,
     pub mock: Arc<MockChatClient>,
+    /// The same libsql Arc behind the app's `ProjectService`, exposed as the
+    /// store trait so dataset seeding can write rows HTTP cannot express.
+    pub projects: Arc<dyn ProjectStore>,
     _dir: tempfile::TempDir,
 }
 
@@ -39,7 +44,7 @@ pub async fn harness() -> Harness {
     project
         .init(
             store.clone(),
-            projects,
+            projects.clone(),
             dir.path().to_path_buf(),
             Some(client),
             None,
@@ -60,6 +65,7 @@ pub async fn harness() -> Harness {
     Harness {
         app: opencoder_web::build_app(state, Some(TOKEN.into()), false),
         mock,
+        projects,
         _dir: dir,
     }
 }

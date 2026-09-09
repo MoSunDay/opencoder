@@ -1,19 +1,26 @@
-Commit: (working-tree, 基于 303b95027b49873a9833393d57b72de68747a9e0)
+Commit: b465f440381bd009dc9bd3a8192ad88eab44cede
 
 # node 模块
 
-平台的出站通信层位于 `crates/node/src/fleet/`。它不持有具体工作负载；[worker](../worker/index.md) 实现 `NodeService` 提供注册、负载、索引及执行 RPC。
+出站通信层：注册、心跳、索引上报与执行 RPC。
 
-## 通道
+## 关键路径
 
-- `client` 使用 Bearer 认证建立 WebSocket 通道，注册携带 Node ID 与协议版本（v6）。
-- 5 秒心跳与 loop 变化通知上报快照和五字段索引；快照包含 active_runs、max_runs、pending_runs 和 queue_order；RPC 后先同步最新负载/索引，再回复确认。
-- 网络操作有超时、帧大小和并发上限。通道重连仅替换传输；已接受的操作脱离连接任务，断线不会中止节点执行。
-- `PeerBridge` 将 system 协调节点的维护请求转发给 Server；Server 验证协调执行的归属和状态，Node 间不直接连接。
-- `cpu` 从进程可用 CPU 与 cgroup quota 计算可用容量，支持小数 CPU。
+- `crates/node/src/fleet/mod.rs` — NodeService trait：注册/快照/索引/执行
+- `crates/node/src/fleet/client.rs` — Bearer WS 注册 + 5 秒心跳上报
+- `crates/node/src/fleet/cpu.rs` — 进程可用 CPU 与 cgroup quota 算容量
+- `crates/core/src/fleet/protocol.rs` — PROTOCOL_VERSION=7、帧与索引定义
+- `crates/node/src/runner.rs` — 旧 run_node 队列入口（兼容）
+- `crates/node/src/uplink.rs` — 旧 REST Uplink + LocalDagPersistence 接缝
+- `crates/node/src/batcher.rs` — 旧 claim/heartbeat 批处理（兼容）
 
-协议及调度纯函数位于 [core](../core/index.md) `fleet`；Server 连接/预留状态位于 [control](../control/index.md)。
+## 边界
 
-## 兼容接口
+- 不持有工作负载；[worker](../worker/index.md) 实现 NodeService。
+- 断线仅替换传输，已接受操作脱离连接任务不中止。
+- Node 间不直连；维护经 Server 转发 Maintenance RPC。
 
-旧 `run_node`、REST Uplink、claim/heartbeat/batcher 和 DagHook 留在库中供兼容接口与原测试使用，平台二进制不走该队列。Uplink 的 `LocalDagPersistence` 接缝供新 worker 把 DAG 事件、结果写在节点，避免向 Server 上传明细。DAG 引擎见 [dag-runtime](../dag-runtime/index.md)。
+## 相关
+
+- [core](../core/index.md) fleet 协议与调度；[control](../control/index.md) Hub
+- [dag-runtime](../dag-runtime/index.md) DAG 引擎

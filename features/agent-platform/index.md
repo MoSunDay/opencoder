@@ -1,59 +1,39 @@
-Commit: e7685686ee338523547283309670a13a4560dd00
+Commit: b465f440381bd009dc9bd3a8192ad88eab44cede
 
+# Agent 调度平台 — Server 调度、Node 执行、Web/CLI 管理
 
-# Agent 调度平台
+## 关键路径
 
-平台用户通过 Web 或 `opencoder-cli` 管理节点、资源、团队、工作流、项目及大脑。`opencoder-server` 管理调度，`opencoder-agent` 执行；本地 CLI/TUI 使用独立的 `opencoder`。
+- crates/control/src/api/executions/mod.rs — 稳定 ID 幂等受理与 select_queue_node
+- crates/control/src/api/settings/ — harness/runner 私有定义库
+- crates/control/src/admission.rs — Open/Frozen 受理开关
+- crates/web/src/api_nodes*.rs — 节点注册、负载与维护接口
+- crates/web/src/api_project*.rs — 项目 API 与运行回放
+- crates/worker/src/operations/launch.rs — 受理快照（harness + 资源版本）
+- crates/worker/src/operations/queue/mod.rs — 持久化 pending 队列与派发
+- crates/node/src/uplink.rs — WebSocket 注册/心跳/执行 RPC
+- crates/node/src/runner.rs — 注册 Runner 执行
+- crates/server/src/main.rs — opencode-server 二进制
+- crates/agent/src/main.rs — opencode-agent 二进制
+- crates/web/spa/src/fleet/nodes.jsx — 节点页与调度配置
+- crates/web/spa/src/fleet/executions.jsx — 全部执行页
+- crates/web/spa/src/fleet/detail/ — 执行详情与回放
+- docs/agent-platform.md — 部署、API 与运行时边界
+- docs/registered-runners.md — 注册 Runner 约定
+- scripts/acceptance/business/README.md — 独立副本业务验收
 
-## 规则
+## 边界
 
-- 普通 agent、team、DAG、TODO 和项目 Plan → Act 分配后固定一个节点；该执行的全部子 agent 与运行数据在节点闭环。
-- Server 的运行索引只有创建时间、ID、执行类型、调度节点、状态。查看输入、消息、计划、结果、事件或产物时，由 Server 按 ID 查询所属节点；节点离线明确报错。
-- 调度优先活跃 agent loops / CPU 最低的合格节点，优先选择有容量的节点；全满时按待排队数选择可接受节点，超额任务由 Node 持久化为 pending。空闲会话不占 loop。指定节点不能自动改派。
-- 稳定创建 ID 支持幂等重试；同 ID 不同输入返回冲突。网络超时保留原节点归属，断线后已接受执行继续。
-- 重启时原先运行中的执行显示 interrupted，由用户显式在原节点恢复；已持久化但尚未开始的 pending 队列继续等待调度。DAG 支持 Agent、WebAssembly 和注册 Runner 步骤，取消和超时等待执行停止后完成收尾。
-- 项目每次新的 Plan/Execute 使用当前全局草稿与 TODO 绑定，所有控制入口行为一致。忙碌或预检拒绝不会改写上次记录；通过预检但容量不足时保存新尝试并排队。项目 todo 执行器可选 agent/team/DAG/大脑；大脑路由由 Server 预解析为具体执行器后下发节点。
-- 项目的 Plan 与 Agent 执行每次保留独立输入、实际 Agent 版本和过程回放；相同运行 ID 重试沿用已接受的尝试。新执行采用当前 Agent 资源，版本改变时创建新会话并接续已有方案与前次结果。取消保留部分输出与过程，重复取消不会覆盖正在写入的回放。
-- NFS 只共享 agent 资源。执行固定实际版本文件，后续发布或删除不改变已接受的执行；配置的共享目录不可用、非只读 NFS、资源引用缺失均明确失败；共享目录离线时，已接收执行仍使用本地快照继续或恢复，新执行拒绝接收。
-- 完整 Skill 包中的深层参考文件与入口一起导出、固定到执行快照；NFS 句柄长度不限制资源相对路径长度。
-- 普通团队成员由 agent 与职责定义，统一在一个节点执行。新建跨节点 system 执行已关闭，维护操作必须由用户显式指定节点。
-- 大脑能力可绑定 agent/team/DAG/TODO，未绑定时默认由 act Agent 执行。能力库为空时也可直接执行需求；有能力库时规划并选择能力，规划失败会报错。预览只查看路由，直接调度按稳定 request_id 启动，重试沿用已接受的执行和决策。
-- 新平台使用独立存储，不迁移或删除旧 daemon/CLI 历史。
+- 执行分配后固定节点，子执行与数据节点闭环
+- Server 索引仅创建时间/ID/类型/节点/状态，明细按 ID 回查节点
+- 节点离线时明细查询明确报错
+- NFS 只共享 agent 资源，执行固定受理时版本快照
+- 新平台独立存储，不迁移旧 daemon/CLI 历史
 
-## 入口与状态
+## 相关
 
-内置和自定义 Agent 都可选择 OpenCoder 原生或 Codex 运行方式；Agent 配置提供默认值，本次启动可以覆盖。已有会话保持启动时的选择，消息复用同一折叠展示。环境传递、续聊与错误规则见 [Agent Harness](../harness/index.md)。
-
-Web 的节点页支持负载与显式维护，并显示运行数/并发上限、pending 数和 FIFO/LIFO 策略；「调度配置」可保存 1–65535 的顶层任务上限。超额任务按先入先出或后入先出等待，配置和队列在 Node 重启后保留。调低上限不打断现有执行，调高上限会启动符合顺序的等待任务。全部执行页支持统一创建、查询、取消、恢复；团队页配置职责，项目、会话、DAG、TODO 页面继续可用。
-
-会话交互必须选择可用 Node 才能创建和下发，历史列表、模型和技能随所选节点切换。未选或节点不可用时禁止发送；创建或读取事件水位失败保留草稿，切换节点后旧响应不会混入当前会话。
-
-大脑页的「需求执行」只需选择目标节点并输入需求，点击「开始执行」即打开执行详情。「能力库」以表格展示列表和搜索结果；点击行编辑或点击「新建能力」从右侧打开占屏幕 75% 的抽屉。新建和编辑分别显示创建/保存动作；编辑保留完整工程输入，读取失败禁止保存。
-
-执行详情从右侧向左滑入，宽度占屏幕的 75%，关闭后返回原页面。Agent 执行详情与会话交互使用机器人头像区分 Agent 回答、用户头像标识用户输入，并按同一步骤层级展示：回答正文保持可见，思考、工具调用及输入输出逐层展开。完成后的回答完整渲染 Markdown 标题、列表、代码、表格和链接；回答头部保留步骤数量，正文首行只显示一次；流式输出结束和消息刷新保留用户的展开状态。详情支持同一会话多轮续写，并适配窄屏。渲染结构见 [Web 模块](../../agents/web/index.md)。
-
-主要状态为 pending、running、idle、interrupted、done、error、cancelled。会话一次回答后为 idle；项目可继续 Plan/Act；工作流完成后进入终态。节点持久化错误会使节点不可调度。
-
-部署、API 与已知运行时边界见 [部署说明](../../docs/agent-platform.md)。逻辑结构见 [control](../../agents/control/index.md)、[worker](../../agents/worker/index.md)、[node](../../agents/node/index.md)。
-
-## 项目创建与逐次回放
-
-项目目标、里程碑及 TODO 均可独立创建。里程碑承担专项管理职责，可关联一个项目，也可保持独立；TODO 可关联一个里程碑，也可保留在未分组列表。TODO 的项目归属由里程碑派生。里程碑与 TODO 提供全量列表、名称/状态/归属筛选，以及可搜索名称和 ID、可清空的关联 Select；项目可跳转其里程碑，里程碑可跳转其 TODO。
-
-删除项目只解除里程碑归属，TODO 及历史执行仍保留；含有 TODO 的里程碑拒绝删除，需先移动或解除这些 TODO 的关联。升级时仅将历史未分组 TODO 归入独立“待归类”里程碑，此后仍允许创建未分组 TODO。
-
-项目和里程碑的 Markdown、TODO 草稿在后台刷新时保留未保存内容，编辑/预览切换和保存失败也不会清空输入。Prompt、Env、Harness、DAG 等编辑器按编辑会话保留输入；初始内容读取失败时禁止保存空值。TODO 指定执行 Agent 后，Plan 生成方案，Execute 使用该 Agent 执行。
-
-每次提交返回独立运行索引。TODO 历史可加载更早记录；打开某次运行可读取当次输入、方案、输出、消息、工具与过程事件、模型请求/响应和子任务关联。大字段按块加载。显式登记的交付文件保存独立副本，后续修改工作文件不改变旧运行的下载内容。
-
-成功、失败和取消都保留已持久化数据。节点中断的运行显示部分留存，旧记录缺少输入或过程时明确提示历史不完整；所属节点离线时读取报错，恢复后继续使用原索引。能力实现与边界见 [project](../../agents/project/index.md)。
-
-## 现有业务任务接入
-
-评测归因与代码回归可保留原业务 API/CLI，通过同名 Agent、Codex profile 和 Runner DAG 进入节点持久化队列。超额任务 pending，使用 Node 的统一并发上限和 FIFO/LIFO；不增加周期触发器。任务展示接受时的 Harness、Runner、Prompt/Skill/Tools 版本，模型消息支持折叠和刷新回放。
-
-业务任务的 jobId + attempt 固定关联执行 ID；不确定受理结果时对账同一尝试。只有平台完成且报告校验通过，业务接口才返回 done；回归 pass/block/inconclusive 与执行成功独立，报告投递也独立。已开始但没有有效完成收据的 Runner 不自动重跑，需显式业务重试；当前业务适配要求 API 与 Node 同机共享检查点。详见 [注册 Runner](../../docs/registered-runners.md)。
-
-固定节点的真实业务验收使用独立 workspace、缓存和数据库，原目录在执行命名空间内只读。结束后保留报告和审计，默认保留运行数据；授权回收时显式使用 `--destroy-runtime`，归属或退出检查失败会报错。整体通过要求平台执行、有效业务结论和 Web 检查同时通过。
-
-runc 新任务未绑定节点时可在已准备相同运行时和模块的就绪节点之间调度；指定节点的任务在该节点容量不足时 pending，容量释放后继续执行。入口、证据和回收规则见 [独立副本验收](../../scripts/acceptance/business/README.md)。
+- [agents/control](../../agents/control/index.md)
+- [agents/worker](../../agents/worker/index.md)
+- [agents/node](../../agents/node/index.md)
+- [项目管理](../../agents/project/index.md)
+- [Agent Harness](../harness/index.md)

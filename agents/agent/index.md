@@ -1,11 +1,21 @@
-Commit: (working-tree, 基于 c1a1b2e78e1ccd4a3cc2ac6dc408a76d30bf46e6)
+Commit: b465f440381bd009dc9bd3a8192ad88eab44cede
 
-# agent — opencoder-agent 二进制
+# agent 模块
 
-`crates/agent` 解析 remote、token、名称、工作目录、独立 data-dir、max-runs 和 DAG 开关，构造 [worker](../worker/index.md)，然后运行 [node](../node/index.md) 的出站 WebSocket 通道。
+opencode-agent 二进制：构造 worker 并接入节点出站通道。
 
-节点凭据来自参数或 `OPENCODER_SERVER_TOKEN`，不自动生成。正常关闭取消本地活动执行并等待有界收尾；异常退出后的未完成任务在重启时标记 interrupted，不自动重跑。
+## 关键路径
+- `src/main.rs` — clap 参数构造 worker，接入 node WebSocket 通道
+- `src/main.rs` `AgentCommand` — `Run`（默认）、隐藏 `InternalProcessSupervisor`（runc 后代）、`dag prepare-rootfs`、`storage migrate-layout`
+- `src/storage.rs` — 节点本地存储布局迁移
+- token 来自参数或 `OPENCODER_SERVER_TOKEN`，不自动生成
+- 关闭：`shutdown_signal` → `drain_shutdown` 有界收尾；超时任务重启标 interrupted，不自动重跑
 
-`internal-python-step` 是隐藏的隔离 VM 入口：在日志、Tokio 节点运行时、网络和配置初始化前短路，只通过标准输入/输出交换步骤数据。没有新增第三个平台二进制。
+## 边界
+- wasmtime/runc 依赖链只在 agent；server 与主二进制不链接。
+- `dag prepare-rootfs` 离线执行，不需要 Server 或模型。
 
-`dag prepare-rootfs --out DIR` 保留离线 rootfs 脚手架入口，不需要 Server 或模型。实际执行与恢复见 [worker](../worker/index.md)。
+## 相关
+- [agents/worker](../worker/index.md) — 实际执行与恢复
+- [agents/node](../node/index.md) — 出站 WebSocket 通道
+- [agents/dag-runtime](../dag-runtime/index.md) — DAG 调度与执行

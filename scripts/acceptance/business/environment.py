@@ -87,7 +87,10 @@ class Environment:
             '--property', f'StandardError=append:{log}']
         for key, value in self.env.items():
             args.extend(['--setenv', f'{key}={value}'])
-        args.extend(['--', '/usr/bin/python3', str(HERE / 'scope.py'), str(self.root), name, *map(str, command)])
+        # PID 1 otherwise loses mounts made in the acceptance process's private
+        # namespace. Inherit it before making the service's own guarded copy.
+        args.extend(['--', '/usr/bin/nsenter', f'--mount=/proc/{os.getpid()}/ns/mnt', '--',
+            '/usr/bin/python3', str(HERE / 'scope.py'), str(self.root), name, *map(str, command)])
         run(args)
         self.units.append(unit)
         write(self.runtime / 'units.json', self.units)

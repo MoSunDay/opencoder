@@ -1,10 +1,18 @@
 // Controlled inputs; the business API, Runner, model and test commands stay real.
 import { createServer } from 'node:http';
 import { execFileSync } from 'node:child_process';
+import { writeFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 const [release] = process.argv.slice(2);
 const { e2eFixture } = await import(pathToFileURL(`${release}/dist/test/regression/e2e/fixture.js`));
 const fixture = await e2eFixture();
+// The production Runner snapshots the workspace revision as well as each repo.
+// Keep its root commit minimal; test repositories retain their own real history.
+await writeFile(`${fixture.root}/README.md`, 'Controlled business acceptance workspace.\n');
+for (const args of [['init', '-q'], ['add', 'README.md'],
+  ['-c', 'user.name=Acceptance', '-c', 'user.email=acceptance@example.test', 'commit', '-qm', 'acceptance workspace']]) {
+  execFileSync('git', args, { cwd: fixture.root, stdio: 'pipe' });
+}
 const input = [{ case_id: 'positive', case_status: 'success', execution_status: 'completed',
   turns: [{ turn_id: 'positive-turn', sequence: 1, turn_completion: { status: 'completed' },
     user_input: { prompt: '检查已完成的空画布', attachments: [] }, tool_calls: [],

@@ -4,11 +4,13 @@ from pathlib import Path
 import argparse
 import json
 import os
+import sys
 import time
 import traceback
 from audit import capture, compare
 from common import BASE, HERE, TARGET, HTTPFailure, emit, http, read, run, write
 from environment import Environment
+from lifecycle.runtime import assert_owned, initialize_runtime, finalize_runtime
 
 
 def submit(environment):
@@ -64,6 +66,7 @@ def monitor(environment, jobs, timeout=7500):
 
 def cleanup(environment, result):
     root = environment.root
+    assert_owned(root)
     prefix = 'oc-e2e-' + root.name + '-'
     if any(not unit.startswith(prefix) for unit in environment.units):
         raise RuntimeError('Cleanup contains a service outside this acceptance run')
@@ -87,9 +90,7 @@ def cleanup(environment, result):
     if (root / 'evidence/audit-before.json').exists():
         capture(root, 'after')
         result['sourceAudit'] = compare(root)
-    result['runtimeBytesBeforeCleanup'] = int(run(['du', '-sB1', root / 'runtime']).split()[0])
-    result['runtimeRemoved'] = False
-    result['runtimeRetained'] = True
+    result.update(finalize_runtime(root))
     write(root / 'evidence/result.json', result)
 
 
@@ -97,6 +98,8 @@ def prepare_environment(root, args):
     from validation.bundle import verify_platform
     manifest, binaries = verify_platform(args.platform_bundle)
     write(root / 'evidence/platform-manifest.json', manifest)
+    if not (root / 'evidence/audit-before.json').exists():
+        capture(root, 'before')
     source = None
     if args.scenario == 'positive':
         from scenarios.positive import prepare
@@ -134,6 +137,7 @@ def main():
     parser.add_argument('--scenario', choices=['positive', 'historical'], default='positive')
     parser.add_argument('--retain-on-failure', action='store_true',
         help='Keep this private environment for diagnosis; it must be explicitly cleaned afterward')
+    parser.add_argument('--inside-private-namespace', action='store_true', help=argparse.SUPPRESS)
     args = parser.parse_args()
     root = args.root.resolve()
     if root.parent != Path('/root/.cache/opencoder-e2e') or not root.name.startswith('20'):
@@ -148,9 +152,10 @@ def main():
         parser.error('--release and --platform-bundle are required when starting a run')
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
     (root / 'evidence').mkdir(exist_ok=True, mode=0o700)
-    (root / 'runtime').mkdir(exist_ok=True, mode=0o700)
-    if (root / 'runtime/units.json').exists():
-        raise RuntimeError('An existing service run must be inspected and cleaned before reuse')
+    if not args.inside_private_namespace:
+        os.execv('/usr/bin/python3', ['python3', str(HERE / 'scope.py'), str(root), 'acceptance',
+            '/usr/bin/python3', str(HERE / 'main.py'), *sys.argv[1:], '--inside-private-namespace'])
+    initialize_runtime(root)
     environment = None
     result = {'passed': False}
     try:
@@ -183,7 +188,12 @@ def main():
         if not result['passed'] and args.retain_on_failure:
             emit('private_environment_retained_for_diagnosis', root=str(root))
             raise SystemExit(1)
-        cleanup(environment or Environment.attach(root), result)
+        try:
+            cleanup(environment or Environment.attach(root), result)
+        except Exception as error:
+            result.update({'passed': False, 'cleanupError': str(error)})
+            write(root / 'evidence/result.json', result)
+            raise
     emit('acceptance_complete', passed=result['passed'], evidence=str(root / 'evidence'))
     if not result['passed']:
         raise SystemExit(1)

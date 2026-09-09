@@ -20,8 +20,9 @@ export function useExecutionTranscript({ id, enabled, status, revision, onFrame,
     let stream;
     (async () => {
       try {
-        const { seq = 0 } = await apiGet(`/api/sessions/${encodeURIComponent(id)}/seq`);
+        const { head_seq: seq } = await apiGet(`/api/executions/${encodeURIComponent(id)}/events-page?after=9223372036854775807`);
         if (cancelled) return;
+        if (!Number.isSafeInteger(seq) || seq < 0) throw new Error('节点未返回有效的事件回放位置');
         setCaughtUp(cursor.current >= seq);
         stream = openStream({
           path: `/api/executions/${encodeURIComponent(id)}/events`,

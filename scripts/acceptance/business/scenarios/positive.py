@@ -6,6 +6,7 @@ import selectors
 import shutil
 import subprocess
 from common import CONFIG, HERE, read, write
+from lifecycle.process import record_fixture
 
 
 def prepare(root, release):
@@ -16,6 +17,7 @@ def prepare(root, release):
         stdout=subprocess.PIPE, stderr=(root / 'evidence/fixture.log').open('w'),
         text=True, stdin=subprocess.DEVNULL, env={**os.environ, 'TMPDIR': str(temporary)})
     try:
+        record_fixture(root, source)
         with selectors.DefaultSelector() as selector:
             selector.register(source.stdout, selectors.EVENT_READ)
             if not selector.select(30):

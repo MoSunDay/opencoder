@@ -26,6 +26,8 @@ python3 scripts/acceptance/business/main.py \
 
 完成诊断并保存证据后，可执行 `python3 scripts/acceptance/business/main.py --root <本次目录> --cleanup`。清理核对创建时记录的目录身份、服务归属、进程及打开的文件和各挂载命名空间，保留本次 runtime；缺少归属证明、目录被替换或仍被占用时报告失败。保留所有数据库和运行目录，完成的运行目录不能重用。
 
+用户已授权销毁本轮测试副本时，启动或清理命令显式加 `--destroy-runtime`。仅在服务、测试输入服务进程和挂载全部退出、原目录审计完成后删除归属校验通过的 `runtime/`，保留 `evidence/`；不会触及运行目录以外的数据库。默认仍保留运行数据。
+
 本轮验证固定节点和 workspace 调度。runc 沙箱可迁移到其他合格节点的调度模式单独验收。
 
 仓库进程测试使用 target 目录内的配套二进制，执行全量回归前先运行 `cargo build --workspace --bins`。通过脚本启动验证时显式关闭标准输入（例如 `cargo test --workspace </dev/null`），避免搜索工具把调用方脚本当成输入流。

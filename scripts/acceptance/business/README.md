@@ -2,6 +2,8 @@
 
 默认使用输入完整的受控评测及固定代码提交，配合真实 Codex，验证业务 API → 单并发 FIFO Node → Runner → 业务发布 → Web 三层折叠、刷新回放、文件下载。
 
+受控回归先通过真实 Git 命令核对请求分支头、目标可达性及基线祖先关系，再将证据同时纳入 workspace 提交和上下文文档。这样即使 Runner 使用不带分支引用的固定快照，复核模型仍能确认提交归属。
+
 ```sh
 python3 scripts/acceptance/business/main.py \
   --root /root/.cache/opencoder-e2e/20260909-acceptance \
@@ -28,7 +30,18 @@ python3 scripts/acceptance/business/main.py \
 
 用户已授权销毁本轮测试副本时，启动或清理命令显式加 `--destroy-runtime`。仅在服务、测试输入服务进程和挂载全部退出、原目录审计完成后删除归属校验通过的 `runtime/`，保留 `evidence/`；不会触及运行目录以外的数据库。默认仍保留运行数据。
 
-本轮验证固定节点和 workspace 调度。runc 沙箱可迁移到其他合格节点的调度模式单独验收。
+固定节点和 workspace 调度由上述真实业务流程验证。runc 模式通过 `scripts/acceptance/runc_scheduling/main.py` 单独验收：两个节点分别配置相同 rootfs 和 Wasm 模块，轮流占满一个节点，验证无节点绑定的任务在另一个节点执行，固定节点任务则先 pending，取消占用任务后在指定节点执行。它验证新任务的节点选择，不代表运行中任务可以迁移，也不代表未配置运行时的节点可接单。
+
+先用 `scripts/prepare-dag-rootfs.sh /absolute/private/path/rootfs` 准备 rootfs，再执行：
+
+```sh
+python3 scripts/acceptance/runc_scheduling/main.py \
+  --root /root/.cache/opencoder-e2e/20260909-runc-acceptance \
+  --platform-bundle /absolute/path/to/opencoder-platform-bundle \
+  --rootfs /absolute/private/path/rootfs
+```
+
+该验收同样只使用私有状态并保护原 workspace；已授权回收本轮临时数据库和副本时加 `--destroy-runtime`。保留 OCI 配置、实际容器状态、节点选择、排队和产物证据。
 
 仓库进程测试使用 target 目录内的配套二进制，执行全量回归前先运行 `cargo build --workspace --bins`。通过脚本启动验证时显式关闭标准输入（例如 `cargo test --workspace </dev/null`），避免搜索工具把调用方脚本当成输入流。
 

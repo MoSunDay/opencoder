@@ -12,6 +12,61 @@ use opencoder_llm::MockChatClient;
 use opencoder_store::{SessionMeta, TodoEventRecord, TodoWorkflowRecord};
 use std::sync::Arc;
 
+#[tokio::test]
+async fn dag_replay_watermark_includes_events_beyond_the_requested_page() {
+    let (_root, worker) = worker().await;
+    let id = "dag-query-watermark";
+    let mut accepted = record(&worker, id, ExecutionStatus::Done);
+    accepted.assignment.request.kind = ExecutionKind::Dag;
+    accepted.assignment.index.kind = ExecutionKind::Dag;
+    worker.inner.journal.lock().await.save(accepted).unwrap();
+    let reference = ExecutionRef {
+        id: id.into(),
+        kind: ExecutionKind::Dag,
+    };
+    let empty = events(&worker, &reference, i64::MAX).await.unwrap();
+    assert_eq!(empty.status, 200);
+    assert_eq!(empty.body["head_seq"], 0);
+    worker
+        .inner
+        .state
+        .store
+        .create_session(&SessionMeta {
+            id: id.into(),
+            created_at: 1,
+            updated_at: 1,
+            ..SessionMeta::default()
+        })
+        .await
+        .unwrap();
+    let entries: Vec<_> = (0..205)
+        .map(|i| opencoder_store::SessionEventRecord {
+            session_id: id.into(),
+            kind: opencoder_store::EventKind::TextDelta,
+            payload: json!({"text":i.to_string()}),
+            ts: i,
+            seq: None,
+            sse_kind: None,
+        })
+        .collect();
+    let sequences = worker
+        .inner
+        .state
+        .store
+        .append_events(&entries)
+        .await
+        .unwrap();
+    let first = events(&worker, &reference, 0).await.unwrap();
+    assert_eq!(first.status, 200);
+    assert_eq!(first.body["more"], true);
+    assert_eq!(first.body["events"].as_array().unwrap().len(), 200);
+    assert_eq!(first.body["head_seq"], *sequences.last().unwrap());
+    let head = events(&worker, &reference, i64::MAX).await.unwrap();
+    assert_eq!(head.body["head_seq"], first.body["head_seq"]);
+    assert_eq!(head.body["events"], json!([]));
+    worker.shutdown().await.unwrap();
+}
+
 async fn worker() -> (tempfile::TempDir, Worker) {
     let root = tempfile::tempdir().unwrap();
     let workdir = root.path().join("work");

@@ -121,14 +121,18 @@ pub(super) async fn events(
         )
     });
     let mut source_more = false;
+    let mut head_seq = None;
     let mut frames: Vec<Value> = if is_session {
         if worker.inner.state.store.get_session(id).await?.is_none() {
             return Ok(match record {
-                Some(_) => RpcReply::ok(json!({"events":[],"more":false,
+                Some(_) => RpcReply::ok(json!({"events":[],"more":false,"head_seq":0,
                     "finished":!worker.inner.active.lock().await.contains_key(id)})),
                 None => RpcReply::error(404, "session not found"),
             });
         }
+        // Capture the replay watermark before reading a bounded page. A DAG can
+        // have an execution ID without the session ID prefix used by legacy APIs.
+        head_seq = Some(worker.inner.state.store.last_event_seq(id).await?);
         let page = match worker
             .inner
             .state
@@ -211,7 +215,9 @@ pub(super) async fn events(
         .get(id)
         .is_some_and(|h| h.draining.load(std::sync::atomic::Ordering::SeqCst));
     let finished = !draining && !worker.inner.active.lock().await.contains_key(id);
-    Ok(RpcReply::ok(
-        json!({"events":frames,"more":more,"finished":finished}),
-    ))
+    let mut body = json!({"events":frames,"more":more,"finished":finished});
+    if let Some(seq) = head_seq {
+        body["head_seq"] = json!(seq);
+    }
+    Ok(RpcReply::ok(body))
 }

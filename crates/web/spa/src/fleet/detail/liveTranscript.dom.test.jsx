@@ -15,7 +15,22 @@ function Harness({ id = 'a', status = 'running', revision = 0, onError = vi.fn()
 const value = () => JSON.parse(screen.getByText((_, node) => node.tagName === 'PRE').textContent);
 
 describe('execution transcript subscription lifecycle', () => {
-  beforeEach(() => { vi.resetAllMocks(); apiGet.mockResolvedValue({ seq: 3 }); openStream.mockReturnValue({ abort: vi.fn() }); });
+  beforeEach(() => { vi.resetAllMocks(); apiGet.mockResolvedValue({ head_seq: 3 }); openStream.mockReturnValue({ abort: vi.fn() }); });
+  it('opens an empty DAG transcript through the generic execution API', async () => {
+    apiGet.mockResolvedValue({ head_seq: 0, events: [], more: false, finished: true });
+    render(<Harness id="dag-browser-artifact" status="done" />);
+    await waitFor(() => expect(value().caughtUp).toBe(true));
+    expect(apiGet).toHaveBeenCalledWith('/api/executions/dag-browser-artifact/events-page?after=9223372036854775807');
+    expect(openStream.mock.calls[0][0].path).toBe('/api/executions/dag-browser-artifact/events');
+  });
+  it('reports an invalid watermark instead of displaying incomplete replay as current', async () => {
+    apiGet.mockResolvedValue({ events: [] });
+    const onError = vi.fn();
+    render(<Harness onError={onError} />);
+    await waitFor(() => expect(onError).toHaveBeenCalledWith('节点未返回有效的事件回放位置'));
+    expect(openStream).not.toHaveBeenCalled();
+    expect(value().caughtUp).toBe(false);
+  });
   it('waits for replay head, then continues from its cursor when the same execution resumes', async () => {
     const view = render(<Harness />);
     await waitFor(() => expect(openStream).toHaveBeenCalledTimes(1));

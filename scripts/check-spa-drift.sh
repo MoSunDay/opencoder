@@ -44,6 +44,19 @@ drifted_paths() {
   ' | sort -u
 }
 
+# A minified bundle diff is megabytes of single lines, so cap both the line
+# count and the width. Must not be `printf | head`: head exits early, printf
+# takes SIGPIPE, and `set -o pipefail` then aborts the script before it prints
+# the verdict (observed: exit 141 with no "DRIFT detected" line). awk reads all
+# of stdin, so nothing is left holding a broken pipe.
+cap_diff() {
+  printf '%s\n' "$1" | awk -v max=40 '
+    NR <= max { print (length($0) > 200 ? substr($0, 1, 200) " ..." : $0) }
+    NR == max + 1 { cut = 1 }
+    END { if (cut) printf "... diff truncated to %d lines\n", max }
+  '
+}
+
 attempt=0
 while :; do
   attempt=$((attempt + 1))
@@ -54,12 +67,12 @@ while :; do
   }
   touched="$(drifted_paths "$out")"
   if [ "$touched" != "static/app.js" ]; then
-    printf '%s\n' "$out" | head -40   # a minified bundle diff is megabytes; the verdict is the point
+    cap_diff "$out"
     echo "spa dist: DRIFT detected — run scripts/build-spa.sh and commit dist/" >&2
     exit 1
   fi
   if [ "$attempt" -ge "$MAX_BUILDS" ]; then
-    printf '%s\n' "$out" | head -40
+    cap_diff "$out"
     echo "spa dist: DRIFT detected — static/app.js differs on all $attempt builds" >&2
     echo "spa dist: run scripts/build-spa.sh and commit dist/" >&2
     exit 1

@@ -35,6 +35,7 @@ pub(in crate::operations) async fn inspect(
                 .and_then(|definition| definition["name"].as_str())
                 .map(str::to_owned);
             (
+                record.annotations.clone(),
                 record.assignment.index.clone(),
                 record.assignment.request.kind,
                 record.assignment.request.target.clone(),
@@ -47,6 +48,7 @@ pub(in crate::operations) async fn inspect(
             )
         });
     let Some((
+        annotations,
         index,
         kind,
         target,
@@ -74,8 +76,12 @@ pub(in crate::operations) async fn inspect(
         }
         return session_detail(worker, id).await;
     };
-    let mut result = json!({"execution":index,"request":request,"definition":definition,"result":outcome,"error":error});
+    let mut result = json!({"execution":index,"request":request,"definition":definition,"result":outcome,"error":error,"annotations":annotations});
     match kind {
+        ExecutionKind::Dag => {
+            result["runners"] =
+                super::runner::views(worker, &index, result.get("definition")).await?;
+        }
         ExecutionKind::Agent | ExecutionKind::Maintenance => {
             result["session"] = session_detail(worker, id).await?.body;
         }
@@ -152,7 +158,6 @@ pub(in crate::operations) async fn inspect(
                 "more": page.next_version.is_some(),
             });
         }
-        _ => {}
     }
     bounded_reply(result)
 }

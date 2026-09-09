@@ -2,6 +2,7 @@
 
 pub mod agent;
 pub mod how_append;
+pub mod runner;
 pub mod wasm;
 
 use std::path::PathBuf;

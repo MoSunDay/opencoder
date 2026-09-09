@@ -136,6 +136,7 @@ pub fn assignment(
 ) -> Assignment {
     let node_id = worker.registration().id;
     Assignment {
+        runtime: None,
         codex: None,
         index: ExecutionIndex {
             id: id.into(),

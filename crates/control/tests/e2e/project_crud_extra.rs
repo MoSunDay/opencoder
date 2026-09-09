@@ -151,7 +151,7 @@ async fn goal_patch_validation_and_persistence() {
 }
 
 #[tokio::test]
-async fn goal_delete_cascades_milestones_and_todos() {
+async fn goal_delete_detaches_milestones_and_preserves_todos() {
     let h = Harness::new().await;
     let goal = post_goal(&h, "G", None).await;
     let goal_id = goal["id"].as_str().unwrap().to_string();
@@ -170,8 +170,9 @@ async fn goal_delete_cascades_milestones_and_todos() {
     assert_eq!(body["deleted"], json!(true));
 
     assert!(goals(&h).await.is_empty());
-    assert!(milestones(&h, None).await.is_empty());
-    assert!(todos(&h).await.is_empty(), "goal delete must cascade todos");
+    assert_eq!(milestones(&h, None).await.len(), 1);
+    assert!(milestones(&h, None).await[0]["goal_id"].is_null());
+    assert_eq!(todos(&h).await.len(), 1, "goal delete preserves TODOs");
 }
 
 #[tokio::test]
@@ -361,4 +362,50 @@ async fn todo_patch_real_fields_and_reparent() {
         )
         .await;
     assert_eq!(status, 404, "{body}");
+}
+
+#[tokio::test]
+async fn standalone_milestones_appear_in_overview_and_guard_todos() {
+    let h = Harness::new().await;
+    let (status, milestone) = h
+        .req(
+            Method::POST,
+            "/api/project/milestones",
+            Some(json!({"title":"专项"})),
+        )
+        .await;
+    assert_eq!(status, 200, "{milestone}");
+    assert!(milestone["goal_id"].is_null());
+    let id = milestone["id"].as_str().unwrap();
+    let todo = post_todo(&h, Some(id), "任务").await;
+    let (status, overview) = h.req(Method::GET, "/api/project/overview", None).await;
+    assert_eq!(status, 200, "{overview}");
+    assert_eq!(
+        overview["standalone_milestones"][0]["todos"][0]["id"],
+        todo["id"]
+    );
+    let (status, _) = h
+        .req(
+            Method::DELETE,
+            &format!("/api/project/milestones/{id}"),
+            None,
+        )
+        .await;
+    assert_eq!(status, 409);
+    let goal = post_goal(&h, "项目", None).await;
+    for body in [
+        json!({"goal_id":goal["id"]}),
+        json!({"goal_id":null}),
+        json!({"title":"改名"}),
+    ] {
+        let (status, body) = h
+            .req(
+                Method::PATCH,
+                &format!("/api/project/milestones/{id}"),
+                Some(body),
+            )
+            .await;
+        assert_eq!(status, 200, "{body}");
+    }
+    assert!(milestones(&h, None).await[0]["goal_id"].is_null());
 }

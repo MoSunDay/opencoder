@@ -19,8 +19,8 @@
 //! - executor_dimension_round_trips: todo executor_kind/ref/spec and run
 //!   executor_kind/capability_id/plan_id/output_ref persist exactly (team todo
 //!   + dag run), unknown kind text fails closed on read
-//! - cascades: delete_goal removes milestone+todo+runs; delete_todo removes
-//!   runs; delete_milestone removes its todos and their runs (no re-parent)
+//! - deletion: delete_goal detaches milestones and retains TODOs/runs;
+//!   nonempty milestones reject deletion; delete_todo removes its runs
 //! - reopen_is_idempotent_and_serves_v15: second `open` on the same file
 //!   migrates 14→15 cleanly and the project tables keep working
 //! - libsql_store_coerces_to_project_store: compile-level trait-object check
@@ -56,7 +56,7 @@ fn goal(id: &str, sort: i64, created_at: i64) -> ProjectGoalRecord {
 fn milestone(id: &str, goal_id: &str, sort: i64, created_at: i64) -> ProjectMilestoneRecord {
     ProjectMilestoneRecord {
         id: id.to_string(),
-        goal_id: goal_id.to_string(),
+        goal_id: Some(goal_id.to_string()),
         title: format!("milestone {id}"),
         detail_md: None,
         status: ProjectMilestoneStatus::Planned,
@@ -508,7 +508,7 @@ async fn conditional_patch_cas_applies_only_in_expected_state() {
 }
 
 #[tokio::test]
-async fn delete_goal_cascades_milestone_todo_and_runs() {
+async fn delete_goal_preserves_milestone_todo_and_runs() {
     let (_dir, _store, p) = fresh().await;
     p.create_goal(&goal("g1", 0, 1)).await.unwrap();
     p.create_milestone(&milestone("m1", "g1", 0, 2))
@@ -519,10 +519,20 @@ async fn delete_goal_cascades_milestone_todo_and_runs() {
 
     assert!(p.delete_goal("g1").await.unwrap());
     assert!(p.list_goals().await.unwrap().is_empty());
-    assert!(p.list_milestones(None).await.unwrap().is_empty());
-    assert!(p.list_todos(None).await.unwrap().is_empty());
-    assert!(p.list_todo_runs("t1").await.unwrap().is_empty());
-    assert!(p.get_todo("t1").await.unwrap().is_none());
+    let milestones = p.list_milestones(None).await.unwrap();
+    assert_eq!(milestones.len(), 1);
+    assert_eq!(milestones[0].goal_id, None);
+    assert_eq!(p.list_todos(None).await.unwrap().len(), 1);
+    assert_eq!(p.list_todo_runs("t1").await.unwrap().len(), 1);
+    assert_eq!(
+        p.get_todo("t1")
+            .await
+            .unwrap()
+            .unwrap()
+            .milestone_id
+            .as_deref(),
+        Some("m1")
+    );
 }
 
 #[tokio::test]
@@ -539,7 +549,7 @@ async fn delete_todo_cascades_runs() {
 }
 
 #[tokio::test]
-async fn delete_milestone_deletes_its_todos_not_reparents() {
+async fn delete_milestone_requires_explicit_unlink_and_preserves_runs() {
     let (_dir, _store, p) = fresh().await;
     p.create_goal(&goal("g1", 0, 1)).await.unwrap();
     p.create_milestone(&milestone("m1", "g1", 0, 2))
@@ -552,14 +562,35 @@ async fn delete_milestone_deletes_its_todos_not_reparents() {
     p.create_todo(&todo("t2", Some("m2"), 5)).await.unwrap();
     run(p.as_ref(), "r1", "t1", 6).await;
 
+    assert!(p
+        .delete_milestone("m1")
+        .await
+        .unwrap_err()
+        .is::<opencoder_store::project::MilestoneNotEmpty>());
+    assert_eq!(p.list_milestones(None).await.unwrap().len(), 2);
+    assert_eq!(
+        p.get_todo("t1")
+            .await
+            .unwrap()
+            .unwrap()
+            .milestone_id
+            .as_deref(),
+        Some("m1")
+    );
+    assert_eq!(p.list_todo_runs("t1").await.unwrap().len(), 1);
+    p.patch_todo(
+        "t1",
+        &ProjectTodoPatch {
+            milestone_id: Some(None),
+            ..Default::default()
+        },
+        7,
+    )
+    .await
+    .unwrap();
     assert!(p.delete_milestone("m1").await.unwrap());
-    // m1's todo AND its runs are gone — nothing is resurrected as backlog.
-    assert!(p.get_todo("t1").await.unwrap().is_none());
-    assert!(p.list_todo_runs("t1").await.unwrap().is_empty());
-    // m2 and its todo are untouched.
-    let remaining = p.list_todos(None).await.unwrap();
-    assert_eq!(remaining.len(), 1);
-    assert_eq!(remaining[0].id, "t2");
+    assert_eq!(p.list_todos(None).await.unwrap().len(), 2);
+    assert_eq!(p.list_todo_runs("t1").await.unwrap().len(), 1);
     assert_eq!(p.list_milestones(Some("g1")).await.unwrap().len(), 1);
 }
 
@@ -583,7 +614,7 @@ async fn reopen_is_idempotent_and_serves_v15() {
         .unwrap();
     let mut rows = stmt.query(()).await.unwrap();
     let v: i64 = rows.next().await.unwrap().unwrap().get(0).unwrap();
-    assert_eq!(v, 22, "schema_version must be latest (22) after reopen");
+    assert_eq!(v, 23, "schema_version must be latest (23) after reopen");
 
     let iface: Arc<dyn ProjectStore> = Arc::new(store);
     iface.create_goal(&goal("g1", 0, 1)).await.unwrap();

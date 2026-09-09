@@ -102,7 +102,8 @@ pub(super) async fn run(
                 .await?
                 .unwrap_or_default();
             if runtime.harness == opencoder_core::harness::Harness::Codex {
-                opencoder_core::harness::pin_settings(&mut runtime, config.agent.codex.as_ref());
+                opencoder_core::harness::pin_agent_settings(&mut runtime, &config, agent)
+                    .map_err(anyhow::Error::msg)?;
                 if config.agent.codex.is_none() {
                     runtime.model = input["model"].as_str().map(str::to_owned);
                 }

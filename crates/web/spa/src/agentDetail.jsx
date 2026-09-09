@@ -1,3 +1,4 @@
+import { useEvent } from './ui/editing/useEvent.js';
 // agentDetail.jsx — 单个 agent 卡片详情：头部（返回 / 名称 / 设为生效 /
 // 刷新）+ 五个 tab。四个资源 tab 共用 ResourceRefTab：引用 Select 变更 →
 // PUT /api/agents/:name 整卡 current；版本 Select +「回滚」→ POST
@@ -21,7 +22,8 @@ const { Text, Title } = Typography;
 /// 单个资源类别的引用面板：卡片的 field 引用（Select，PUT 整卡）+ 池内
 /// 版本（Select）与回滚按钮 + references 只读快照 tag。children 是该类
 /// 特有的内容查看器（Prompt 的三文件编辑器）。
-function ResourceRefTab({ field, cat, label, meta, resources, onNotice, onCardSaved, children }) {
+function ResourceRefTab({ field, cat, label, meta, resources, onNotice: noticeCallback, onCardSaved, children }) {
+  const onNotice = useEvent(noticeCallback);
   const refs = (meta && meta.current) || {};
   const referenced = refs[field] || '';
   const entry = (resources[cat] || []).find((r) => r && r.name === referenced) || null;
@@ -135,7 +137,8 @@ function MetaTab({ meta }) {
   );
 }
 
-export function AgentDetail({ name, resources, onNotice, onChanged, onBack }) {
+function AgentDetailSession({ name, resources, onNotice: noticeCallback, onChanged, onBack }) {
+  const onNotice = useEvent(noticeCallback);
   const [meta, setMeta] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -241,4 +244,8 @@ export function AgentDetail({ name, resources, onNotice, onChanged, onBack }) {
       />
     </div>
   );
+}
+
+export function AgentDetail(props) {
+  return <AgentDetailSession key={props.name} {...props} />;
 }

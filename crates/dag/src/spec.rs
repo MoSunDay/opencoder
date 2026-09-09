@@ -50,6 +50,8 @@ pub struct StepSpec {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum StepKind {
+    /// Administrator-registered binary workflow; no caller-controlled command.
+    Runner { runner: String, agent: String },
     /// Run a prompt through the local session runner on the node.
     Agent {
         prompt: String,

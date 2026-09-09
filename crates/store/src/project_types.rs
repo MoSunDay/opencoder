@@ -196,11 +196,11 @@ pub struct ProjectGoalPatch {
     pub sort: Option<i64>,
 }
 
-/// A milestone within a goal (`project_milestones` row).
+/// A standalone initiative, optionally belonging to a goal (`project_milestones` row).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectMilestoneRecord {
     pub id: String,
-    pub goal_id: String,
+    pub goal_id: Option<String>,
     pub title: String,
     pub detail_md: Option<String>,
     pub status: ProjectMilestoneStatus,
@@ -213,7 +213,7 @@ pub struct ProjectMilestoneRecord {
 /// unchanged.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ProjectMilestonePatch {
-    pub goal_id: Option<String>,
+    pub goal_id: Option<Option<String>>,
     pub title: Option<String>,
     pub detail_md: Option<String>,
     pub status: Option<ProjectMilestoneStatus>,

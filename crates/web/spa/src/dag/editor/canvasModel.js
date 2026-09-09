@@ -121,7 +121,7 @@ export function uniqueSlug(base, names) {
 /// to agent).
 export function newStep(kindType, takenNames) {
   const name = uniqueSlug('step', takenNames);
-  const kind = kindType === 'wasm' ? { type: 'wasm', command: '' } : { type: 'agent', prompt: '' };
+  const kind = emptyKind(kindType);
   return { name, kind };
 }
 
@@ -181,7 +181,7 @@ export function renameStep(name, allNames) {
 export function changeStepKind(step, nextType) {
   const next = {
     name: step && step.name,
-    kind: nextType === 'wasm' ? { type: 'wasm', command: '' } : { type: 'agent', prompt: '' },
+    kind: emptyKind(nextType),
   };
   if (step && step.timeout_secs !== undefined && step.timeout_secs !== null) {
     next.timeout_secs = step.timeout_secs;
@@ -221,4 +221,10 @@ export function specLevelProblems(problems) {
   return (Array.isArray(problems) ? problems : [])
     .filter((p) => !STEP_PREFIX_RE.test(typeof p === 'string' ? p : String(p)))
     .map((p) => (typeof p === 'string' ? p : String(p)));
+}
+
+function emptyKind(type) {
+  if (type === 'runner') return { type, runner: '', agent: '' };
+  if (type === 'wasm') return { type, command: '' };
+  return { type: 'agent', prompt: '' };
 }

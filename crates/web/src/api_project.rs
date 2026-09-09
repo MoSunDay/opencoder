@@ -21,7 +21,9 @@ use opencoder_store::{
     ProjectMilestoneRecord, ProjectMilestoneStatus,
 };
 
-use crate::api_project_util::{error_400, error_404, error_500, rec_list, require_deps, to_json};
+use crate::api_project_util::{
+    error_400, error_404, error_409, error_500, rec_list, require_deps, to_json,
+};
 use crate::AppState;
 
 // ── goals ──────────────────────────────────────────────────────────────
@@ -118,7 +120,7 @@ pub async fn patch_goal(
     }
 }
 
-/// DELETE /api/project/goals/:id — cascades milestones → todos → runs.
+/// DELETE /api/project/goals/:id — detach milestones, preserve TODOs and runs.
 pub async fn delete_goal(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Response {
     let deps = match require_deps(&state) {
         Ok(d) => d,
@@ -156,7 +158,7 @@ pub async fn list_milestones(
 
 #[derive(Deserialize)]
 pub struct CreateMilestoneBody {
-    pub goal_id: String,
+    pub goal_id: Option<String>,
     pub title: String,
     #[serde(default)]
     pub detail_md: Option<String>,
@@ -164,8 +166,8 @@ pub struct CreateMilestoneBody {
     pub sort: Option<i64>,
 }
 
-/// POST /api/project/milestones — new `planned` milestone under an existing
-/// goal; unknown goal_id → 404 (same contract as patch re-parenting).
+/// POST /api/project/milestones — new `planned` milestone with optional goal.
+/// Unknown non-null goal_id → 404.
 pub async fn create_milestone(
     State(state): State<Arc<AppState>>,
     Json(body): Json<CreateMilestoneBody>,
@@ -178,10 +180,12 @@ pub async fn create_milestone(
         Ok(t) => t,
         Err(()) => return error_400("milestone title must not be empty"),
     };
-    match deps.projects.list_goals().await {
-        Ok(goals) if goals.iter().any(|g| g.id == body.goal_id) => {}
-        Ok(_) => return error_404(format!("goal not found: {}", body.goal_id)),
-        Err(e) => return error_500(format!("verify goal: {e:#}")),
+    if let Some(goal_id) = &body.goal_id {
+        match deps.projects.list_goals().await {
+            Ok(goals) if goals.iter().any(|g| &g.id == goal_id) => {}
+            Ok(_) => return error_404(format!("goal not found: {goal_id}")),
+            Err(e) => return error_500(format!("verify goal: {e:#}")),
+        }
     }
     let now = now_ms();
     let rec = ProjectMilestoneRecord {
@@ -202,8 +206,8 @@ pub async fn create_milestone(
 
 #[derive(Deserialize)]
 pub struct PatchMilestoneBody {
-    #[serde(default)]
-    pub goal_id: Option<String>,
+    #[serde(default, deserialize_with = "crate::api_project_todos::double_option")]
+    pub goal_id: Option<Option<String>>,
     #[serde(default)]
     pub title: Option<String>,
     #[serde(default)]
@@ -230,7 +234,7 @@ pub async fn patch_milestone(
         Some(Ok(t)) => Some(t),
         Some(Err(())) => return error_400("milestone title must not be empty"),
     };
-    if let Some(goal_id) = &body.goal_id {
+    if let Some(Some(goal_id)) = &body.goal_id {
         match deps.projects.list_goals().await {
             Ok(goals) if goals.iter().any(|g| &g.id == goal_id) => {}
             Ok(_) => return error_404(format!("goal not found: {goal_id}")),
@@ -251,8 +255,7 @@ pub async fn patch_milestone(
     }
 }
 
-/// DELETE /api/project/milestones/:id — cascades the milestone's todos and
-/// their runs (todos are deleted, not re-parented to the backlog).
+/// DELETE /api/project/milestones/:id — nonempty milestones are protected (409).
 pub async fn delete_milestone(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
@@ -264,6 +267,7 @@ pub async fn delete_milestone(
     match deps.projects.delete_milestone(&id).await {
         Ok(true) => Json(json!({ "deleted": true })).into_response(),
         Ok(false) => error_404(format!("milestone not found: {id}")),
+        Err(e) if e.is::<opencoder_store::project::MilestoneNotEmpty>() => error_409(e.to_string()),
         Err(e) => error_500(format!("delete milestone: {e:#}")),
     }
 }

@@ -5,7 +5,7 @@
 // 合并 description/tools/env_vars。
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 const { apiGetMock, apiPostMock, apiPutMock, apiDelMock } = vi.hoisted(() => ({
   apiGetMock: vi.fn(),
@@ -66,6 +66,41 @@ afterEach(() => {
 });
 
 describe('EnvsPanel', () => {
+  it('preserves text and variables through rerenders and a failed save', async () => {
+    const view = render(<EnvsPanel onNotice={vi.fn()} />);
+    await screen.findByText('demo');
+    fireEvent.click(findButton('编辑'));
+    await waitFor(() => expect(screen.getByLabelText('env-description').value).toBe(demoEnv.description));
+    fireEvent.change(screen.getByLabelText('env-description'), { target: { value: 'unsaved description' } });
+    fireEvent.change(screen.getByLabelText('var-value'), { target: { value: 'unsaved variable' } });
+    const calls = apiGetMock.mock.calls.length;
+    view.rerender(<EnvsPanel onNotice={vi.fn()} />);
+    await act(async () => {});
+    expect(apiGetMock).toHaveBeenCalledTimes(calls);
+    let reject;
+    apiPutMock.mockImplementation(() => new Promise((_, fail) => { reject = fail; }));
+    fireEvent.click(findButton('保存'));
+    await waitFor(() => expect(screen.getByLabelText('var-value').disabled).toBe(true));
+    expect(screen.getByLabelText('env-description').disabled).toBe(true);
+    await act(async () => reject(new Error('save unavailable')));
+    expect(screen.getByLabelText('env-description').value).toBe('unsaved description');
+    expect(screen.getByLabelText('var-value').value).toBe('unsaved variable');
+    expect(screen.getByLabelText('var-value').disabled).toBe(false);
+  });
+
+  it('blocks saving when the initial read fails', async () => {
+    const delegate = apiGetMock.getMockImplementation();
+    apiGetMock.mockImplementation((path) => path === '/api/todo/envs/demo'
+      ? Promise.reject(new Error('read unavailable')) : delegate(path));
+    const notice = vi.fn();
+    render(<EnvsPanel onNotice={notice} />);
+    await screen.findByText('demo');
+    fireEvent.click(findButton('编辑'));
+    await waitFor(() => expect(notice).toHaveBeenCalled());
+    expect(findButton('保存').disabled).toBe(true);
+    expect(apiPutMock).not.toHaveBeenCalled();
+  });
+
   it('renders the env row and the tools catalog (share + importable)', async () => {
     render(<EnvsPanel onNotice={() => {}} />);
     expect(await screen.findByText('demo')).toBeTruthy();

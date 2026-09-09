@@ -45,8 +45,8 @@ export function FleetTeamsPanel({ onNotice }) {
       { title: '队长', dataIndex: 'captain' },
       { title: '操作', render: (_, row) => <Space><Button onClick={() => edit(row)}>编辑</Button><Button onClick={() => { runForm.resetFields(); setLaunch(row); }}>启动团队</Button></Space> },
     ]} />
-    <Modal open={editing} onCancel={() => setEditing(false)} title="团队成员与职责" footer={null} width={900}>
-      <Form form={form} onFinish={save} layout="vertical">
+    <Modal open={editing} onCancel={() => { if (!busy) setEditing(false); }} title="团队成员与职责" footer={null} width={900}>
+      <Form form={form} disabled={busy} onFinish={save} layout="vertical">
         <Space><Form.Item name="name" label="团队名称" rules={[{ required: true }, { pattern: /^[a-z0-9][a-z0-9-]{0,63}$/, message: '使用小写字母、数字和连字符' }]}><Input /></Form.Item><Form.Item name="captain" label="队长的成员 ID" rules={[{ required: true }]}><Input /></Form.Item></Space>
         <Form.List name="members">{(fields, { add, remove }) => <>
           {fields.map(({ key, name, ...rest }) => <Space key={key} align="baseline" wrap>

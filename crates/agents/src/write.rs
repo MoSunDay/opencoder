@@ -150,6 +150,21 @@ pub fn create_agent_with_harness(
     refs: AgentRefs,
     harness: opencoder_core::harness::Harness,
 ) -> io::Result<()> {
+    create_agent_with_profile(name, refs, harness, None)
+}
+
+pub fn create_agent_with_profile(
+    name: &str,
+    refs: AgentRefs,
+    harness: opencoder_core::harness::Harness,
+    profile: Option<String>,
+) -> io::Result<()> {
+    if let Some(profile) = &profile {
+        validate_agent_name(profile).map_err(invalid_input)?;
+    }
+    if profile.is_some() && harness != opencoder_core::harness::Harness::Codex {
+        return Err(invalid_input("Codex profile requires Codex harness"));
+    }
     validate_agent_name(name).map_err(invalid_input)?;
     let dir = agent_dir(name).ok_or_else(|| not_found("cannot resolve ~/.opencoder"))?;
     let card = dir.join("meta.json");
@@ -161,6 +176,7 @@ pub fn create_agent_with_harness(
     }
     let now = now_rfc3339();
     let meta = AgentMeta {
+        harness_profile: profile,
         harness,
         name: name.to_string(),
         created_at: now.clone(),
@@ -188,6 +204,15 @@ pub fn update_agent_settings(
     refs: Option<AgentRefs>,
     harness: Option<opencoder_core::harness::Harness>,
 ) -> io::Result<()> {
+    update_agent_with_profile(name, refs, harness, None)
+}
+
+pub fn update_agent_with_profile(
+    name: &str,
+    refs: Option<AgentRefs>,
+    harness: Option<opencoder_core::harness::Harness>,
+    profile: Option<Option<String>>,
+) -> io::Result<()> {
     validate_agent_name(name).map_err(invalid_input)?;
     let dir = agent_dir(name).ok_or_else(|| not_found("cannot resolve ~/.opencoder"))?;
     let builtin = opencoder_core::builtin_agents()
@@ -203,6 +228,28 @@ pub fn update_agent_settings(
     };
     let refs = refs.unwrap_or_else(|| meta.current.clone());
     let now = now_rfc3339();
+    let profile = if harness == Some(opencoder_core::harness::Harness::Opencoder) {
+        Some(None)
+    } else {
+        profile
+    };
+    if let Some(profile) = profile {
+        if let Some(name) = &profile {
+            validate_agent_name(name).map_err(invalid_input)?;
+            if harness.unwrap_or(meta.harness) != opencoder_core::harness::Harness::Codex {
+                return Err(invalid_input("Codex profile requires Codex harness"));
+            }
+        }
+        if meta.harness_profile != profile {
+            meta.history.push(AgentHistoryEntry {
+                at: now.clone(),
+                field: "harness_profile".into(),
+                from: meta.harness_profile.clone(),
+                to: profile.clone(),
+            });
+            meta.harness_profile = profile;
+        }
+    }
     if let Some(harness) = harness {
         if meta.harness != harness {
             meta.history.push(AgentHistoryEntry {

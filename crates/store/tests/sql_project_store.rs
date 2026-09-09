@@ -124,7 +124,7 @@ mod gated {
         // milestone under the goal.
         p.create_milestone(&ProjectMilestoneRecord {
             id: ms.clone(),
-            goal_id: goal.clone(),
+            goal_id: Some(goal.clone()),
             title: "ms".into(),
             detail_md: None,
             status: ProjectMilestoneStatus::Planned,
@@ -457,13 +457,16 @@ mod gated {
         .await;
         assert!(!p.delete_todo(&todo).await.unwrap(), "second delete false");
 
-        // delete_goal cascades milestones (and any todos left under them).
+        // delete_goal detaches milestones and preserves independent work.
         assert!(p.delete_goal(&goal).await.unwrap());
         eventually("goal + milestones gone", || async {
             p.list_milestones(Some(&goal)).await.unwrap().is_empty()
                 && !p.list_goals().await.unwrap().iter().any(|g| g.id == goal)
         })
         .await;
+        let retained = p.list_milestones(None).await.unwrap();
+        assert!(retained.iter().any(|m| m.id == ms && m.goal_id.is_none()));
+        assert!(p.delete_milestone(&ms).await.unwrap());
         assert!(!p.delete_goal(&goal).await.unwrap(), "second delete false");
         assert!(p.delete_goal(&goal2).await.unwrap(), "cleanup second goal");
     }

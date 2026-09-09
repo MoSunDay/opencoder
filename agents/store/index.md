@@ -1,4 +1,4 @@
-Commit: (working-tree, 基于 65c9d891ae905e7925277d29a87cd8e7957e8dad)
+Commit: (working-tree, 基于 56e612b6f251e3ed384074c7cf9cfc70a8c4c9cf)
 
 # store 模块
 
@@ -28,7 +28,7 @@ schema 22 以幂等增量迁移增加可空 `sessions.harness_runtime TEXT`。`S
 - `run_tx`（`src/libsql_store/tx.rs`）：显式 BEGIN/COMMIT/ROLLBACK，避免 async 取消时 `libsql::Transaction::Drop` panic。所有写事务必须 `BEGIN IMMEDIATE`（`inputs.rs` 全量已是）：deferred BEGIN 的 SELECT→INSERT 写锁升级遇第二连接提交会得到 busy_timeout 不重试的 SQLITE_BUSY_SNAPSHOT；IMMEDIATE 使跨进程竞争化为等待并保住 `admitted_seq` 读改写原子性（回归测试 `tests/inputs_cross_instance_serialized.rs` 双实例同库压测）。
 - Session 类型（`src/types.rs`）：`SessionMeta`、`SessionPatch`、Input/Event/Subagent records；`task_type` 区分 parent、subagent、todo_workflow 和 todo。
 - TODO 类型（`src/todo_types.rs`）：`TodoWorkflowRecord`、`TodoItemRecord`、`TodoEventRecord` 和列表摘要。
-- 项目面类型与接缝（`src/project_types.rs` / `src/project.rs` / `src/project_factory.rs`）：goal→milestone→todo 三级 + `project_todo_runs` 运行留痕；`ProjectStore` trait（独立于 `Store`）+ `open_project_store(config)` 工厂（libsql 默认 / `mysql` / `starrocks` feature 二选一）——opencoder-project 运行时持有 `Arc<dyn ProjectStore>`，会话/消息仍走 `Arc<dyn Store>`。Plan/Execute 使用复合 `claim_todo_running_with_run`，在事务中互斥并分配运行版本；`finish_todo_run` 原子收敛 run 和 todo。另有执行器 spec 纯类型（`src/project_executor_spec.rs`：`TeamSpec`/`BrainRoutes`/`validate_spec`，供 control API 校验共享、不链接 opencoder-project）。
+- 项目面类型与接缝（`src/project_types.rs` / `src/project.rs` / `src/project_factory.rs`）：项目、可独立存在的里程碑、可不关联里程碑的 TODO + `project_todo_runs` 运行留痕；`ProjectStore` trait（独立于 `Store`）+ `open_project_store(config)` 工厂（libsql 默认 / `mysql` / `starrocks` feature 二选一）——opencoder-project 运行时持有 `Arc<dyn ProjectStore>`，会话/消息仍走 `Arc<dyn Store>`。Plan/Execute 使用复合 `claim_todo_running_with_run`，在事务中互斥并分配运行版本；`finish_todo_run` 原子收敛 run 和 todo。另有执行器 spec 纯类型（`src/project_executor_spec.rs`：`TeamSpec`/`BrainRoutes`/`validate_spec`，供 control API 校验共享、不链接 opencoder-project）。
 - 组队台账类型（`src/team_types.rs`，v17）：`TeamTopicRunRecord`——opencoder-team 话题 × node 的持久配对行（status `executing|finished`，`created_at` 首插冻结），运行时在 Store 之上，Store 只持久化（实现见 `libsql_store/team_runs.rs`）。
 
 ## Schema 与一致性
@@ -41,7 +41,7 @@ schema 随迭代推进（最新以 `src/libsql_store/schema.rs::SCHEMA_VERSION` 
 - v10 migration 给 `session_inputs` 加 `recorded` 消费标记（NOT NULL DEFAULT 0）：promote（含再提升）时重置 0，消费后 `mark_inputs_recorded` 置 1；promoted-but-unrecorded 孤儿行（崩溃/硬中止残留）由 `recover_orphan_inputs` 翻回 pending；迁移落地时既有 promoted 行一次性回填 recorded=1。
 - v10 migration 给 sessions 加 plan 阶段落库两列（`plan_snapshot TEXT`、`plan_input_count INTEGER NOT NULL DEFAULT 0`）——plan/act 双模式删除后运行时已不再读写这两列，保留仅为兼容旧库 schema（读路径 `normalize_agent` 把存量 `agent='plan'` 归一为 `act`，原始行不重写）。
 - brain 三表（v15）：`brain_capabilities` / `brain_eng_inputs`（ON DELETE CASCADE，position 定序）/ `brain_vectors`（LE f32 BLOB，检索用 bundled `vector_distance_cos` + model 过滤防跨模型 dim 错配）；写入走 `create/update_brain_capability_with_vector` **单事务组合写**（capability+eng_inputs+vector 同提交/回滚，向量由 brain runtime 预嵌入后经 `BrainVectorWrite` 传入），另有逐步 `upsert_brain_vector` 供直接使用。
-- project 四表（v15）：`project_goals` / `project_milestones`（FK→goals CASCADE）/ `project_todos`（FK→milestones SET NULL，`milestone_id` 可空即 backlog；`status` draft|planned|running|done|failed、`plan_md`、`active_session_id`）/ `project_todo_runs`（run 留痕：kind plan|execute、version、status running|done|failed|cancelled、output/plan 快照、session 引用）；删除走 goal→milestone→todo→run 显式顺序（libsql 事务内）。实现 `libsql_store/{project.rs, project_runs.rs}`。
+- project 四表（v15，关系于 v23 放宽）：`project_goals` / `project_milestones`（`goal_id` 可空，承载独立专项）/ `project_todos`（`milestone_id` 可空即 backlog；`status` draft|planned|running|done|failed、`plan_md`、`active_session_id`）/ `project_todo_runs`（run 留痕：kind plan|execute、version、status running|done|failed|cancelled、output/plan 快照、session 引用）。删除项目只解除里程碑归属；非空里程碑拒删；删除 TODO 才级联其运行。libsql 删除在事务内完成。v23 保留全部业务字段并将历史 backlog 一次性归入“待归类”，未来 backlog 保持独立。实现 `libsql_store/{project.rs, project_runs.rs, schema/project_relations.rs}`。
 - `brain_plans`（v18）：动态规划决策树持久层（id/situation/situation_digest/chat_model/tree_json/created_at + `idx_brain_plans_digest(digest,created_at)`）；`Store` trait 三方法 `save/get/latest_brain_plan_for` 默认 bail、libsql 实现，latest 按 `created_at DESC, rowid DESC` 全序稳定；tree_json 为 brain crate 的 `DecisionTree` 序列化（含分支主题向量），store 保持 opaque。v17→v18 迁移补表。
 - `team_topic_runs`（v17）：opencoder-team 话题扇出的 `(topic_id, node_id)` 台账，PK(topic_id,node_id)、`node_id` FK→`nodes` ON DELETE CASCADE；`upsert` 冲突臂只刷 `status`（`created_at` 首插冻结，刷新不重启计时钟）、`finish` 全行翻 `finished`（幂等，未知 topic 0 行即成功）、`list` 按 `created_at, rowid` 定序（ULID 非单调不可排序）。`Store` trait 三方法（`upsert/finish/list_team_topic_run*`）默认 bail，libsql 完整实现；v16→v17 迁移补表（CREATE IF NOT EXISTS，索引落 post-batch）。
 - `commit_todo_transition` 在单事务内更新 workflow、替换 TODO projection 并追加 event；workflow update 带 expected generation，陈旧父进程不能覆盖 interrupt 或其他 writer。
@@ -51,10 +51,10 @@ schema 随迭代推进（最新以 `src/libsql_store/schema.rs::SCHEMA_VERSION` 
 
 ## sqlx 后端（feature-gate：`mysql` / `starrocks`）
 
-`src/sql_store/`（默认零编译，两个 feature 互斥二选一）：`ddl.rs` 方言化 DDL（StarRocks：列后 PRIMARY KEY + STRING/无 FK，MySQL：FK CASCADE 语义与 libsql 对齐）+ `apply`/`upgrade` 两段：CREATE IF NOT EXISTS 之后按 `information_schema.columns`（走 `exec_read_all`，StarRocks 全 text 协议）补缺失列 ADD COLUMN，既存部署免 `Unknown column`；`UPGRADE_COLUMNS` 与 CREATE 常量有 drift 测试互钉、`project_crud.rs` / `project_crud_runs.rs` CRUD。两条硬教训：
+`src/sql_store/`（默认零编译，两个 feature 互斥二选一）：`ddl.rs` 方言化 DDL（StarRocks：列后 PRIMARY KEY + STRING/无 FK，MySQL：InnoDB，关系变更语义与 libsql 对齐）+ `apply`/`upgrade` 两段：CREATE IF NOT EXISTS 之后按 `information_schema.columns`（走 `exec_read_all`，StarRocks 全 text 协议）补缺失列 ADD COLUMN，既存部署免 `Unknown column`；`UPGRADE_COLUMNS` 与 CREATE 常量有 drift 测试互钉、`project_crud.rs` / `project_crud_runs.rs` CRUD。两条硬教训：
 
 - StarRocks 缓存 prepared SELECT 会返回旧快照且 publish 异步——**全部语句走 text 协议**（`raw_sql` 内联参数）；sqlx 0.8.6 `RawSql::fetch_optional` 误委托 fetch_one 会 panic，用 `fetch_all` 再取 first 恢复 optional 形态。
-- 级联删除跨语句无事务保证，顺序执行（run→todo→milestone→goal）；测试一律 `eventually()` 轮询收敛。
+- StarRocks 跨语句无事务保证：项目删除先解除里程碑归属，TODO 删除先删除运行；非空里程碑拒删。测试按实际发布时序验证收敛。`ddl/relations.rs` 以列注释标记历史 backlog 迁移进度，等待异步 schema 发布后才返回可用的存储；升级完成后的启动不重新归类 backlog。
 - Plan/Execute admission 与终态收敛要求跨表原子提交：MySQL 使用 InnoDB 事务；StarRocks 在写入前返回明确错误。Node `opencoder-agent` 固定使用 libsql `runtime.db`；StarRocks 限制影响显式选择该 Project backend 的本地入口，结构 CRUD 和历史读取不受影响。
 
 ## 主流程
@@ -76,7 +76,7 @@ schema 随迭代推进（最新以 `src/libsql_store/schema.rs::SCHEMA_VERSION` 
 - `tests/schema_bootstrap.rs`：建库后 synchronous 生效值、同路径重开幂等（version 单行 + integrity_check）、并发打开。
 - `tests/store_integration/`（目录目标，按职责分模块）：会话 CRUD/patch、消息往返、事务回滚、取消安全和崩溃恢复等 P0 行为契约（WAL 并发压力另见 `store_concurrency.rs`）。
 - `tests/todos_workflow.rs`：TODO 投影+事件原子提交、generation 冲突、v8→v9 migration。
-- `tests/project_store.rs`：project 四表 CRUD/级联/状态流转；`tests/contracts/project_atomic_claim.rs`：20 路并发唯一 winner、INSERT 失败回滚、已有 claim 不重复 run；`tests/sql_project_store.rs`：sqlx 后端（`OC_TEST_MYSQL_DSN` / `OC_TEST_STARROCKS_DSN` 环境门控，无 DSN 自动跳过），覆盖 MySQL 原子入口与 StarRocks 写前拒绝边界；`tests/sql_project_upgrade.rs`（旧表形 → upgrade 补列 → CRUD 升级契约，同样 DSN 门控跳过）。
+- `tests/project_store.rs`：project 四表 CRUD/删除保护/状态流转；`tests/project_relations.rs` 与 `tests/sql_relations.rs` 验证可空关系、旧数据完整保留和只迁移一次；`tests/contracts/project_atomic_claim.rs`：20 路并发唯一 winner、INSERT 失败回滚、已有 claim 不重复 run；`tests/sql_project_store.rs`：sqlx 后端（`OC_TEST_MYSQL_DSN` / `OC_TEST_STARROCKS_DSN` 环境门控，无 DSN 自动跳过），覆盖 MySQL 原子入口与 StarRocks 写前拒绝边界；`tests/sql_project_upgrade.rs`（旧表形 → upgrade 补列 → CRUD 升级契约，同样 DSN 门控跳过）。
 - `tests/team_runs.rs`：upsert 往返且 `created_at` 冻结、`finish` 全行翻转、节点删除级联；`tests/store_migrations.rs` 覆盖 v16→v17 建表。
 - `tests/legacy_agent_normalization.rs`：interlude 存量 `agent='sandbox'` 行在全部读路径（get/list/fork 等）归一为 `plan`，原始行不被重写。
 - `tests/store_perf.rs`：持久化性能门槛。

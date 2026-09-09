@@ -15,6 +15,7 @@ import { DetailFields, PayloadWindows } from './detail/fields.jsx';
 import { WorkloadDetail } from './detail/workloads.jsx';
 import { Markdown } from '../project/markdown.jsx';
 import { err } from '../notice.js';
+import { RunnerDetail } from './detail/runner.jsx';
 
 const EVENT_TEXT_CHARS = 64 * 1024;
 const RETAINED_EVENT_CHARS = 2 * 1024 * 1024;
@@ -70,7 +71,7 @@ export function ExecutionDetail({ id, summary, onClose, onNotice }) {
   const index = detail?.execution || summary || null;
   const kind = detail?.request?.kind || index?.kind;
   const isProjectRun = kind === 'project' && id.startsWith('prun-');
-  const hasMessages = ['agent', 'maintenance'].includes(kind) || (isProjectRun && !!detail?.run?.session_id);
+  const hasMessages = ['agent', 'maintenance', 'dag'].includes(kind) || (isProjectRun && !!detail?.run?.session_id);
   useEffect(() => {
     if (!id || !kind || isProjectRun || ['agent', 'maintenance'].includes(kind)) return undefined;
     const stream = openStream({ path: `/api/executions/${encodeURIComponent(id)}/events`, after: 0, executionHistory: true,
@@ -97,7 +98,7 @@ export function ExecutionDetail({ id, summary, onClose, onNotice }) {
     finally { setMessagesBusy(false); }
   }, [id, kind, hasMessages]);
   const live = useExecutionTranscript({
-    id, enabled: ['agent', 'maintenance'].includes(kind), status: index?.status, revision,
+    id, enabled: ['agent', 'maintenance', 'dag'].includes(kind), status: index?.status, revision,
     onFrame: (frame) => setEvents((rows) => appendEvent(rows, frame)),
     onSettled: () => { load(); if (messageWindow === 0) loadMessages({ reset: true }); },
     onError: setError,
@@ -149,18 +150,19 @@ export function ExecutionDetail({ id, summary, onClose, onNotice }) {
     {execution && <Descriptions size="small" items={[
       { key: 'node', label: '所属节点', children: execution.node_id },
       { key: 'kind', label: '类型', children: KIND_LABELS[kind] || kind },
-      { key: 'harness', label: 'Harness', children: detail?.session?.harness || detail?.harness || detail?.request?.input?.harness || 'opencoder' },
+      { key: 'harness', label: 'Harness', children: detail?.runners?.length ? 'codex' : detail?.session?.harness || detail?.harness || detail?.request?.input?.harness || 'opencoder' },
       { key: 'status', label: '状态', children: <StatusTag status={execution.status} /> },
       { key: 'created', label: '创建时间', children: <TimeText ts={execution.created_at} /> },
     ]} />}
     <Space wrap style={{ margin: '12px 0' }}>
       <Button onClick={() => { setRevision((v) => v + 1); load(); }}>刷新明细</Button>
-      <Button disabled={busy || unavailable || !actions.resume} onClick={() => command('resume')}>在原节点恢复</Button>
+      <Button disabled={busy || unavailable || !actions.resume || detail?.runners?.some((r) => r.started)} onClick={() => command('resume')}>在原节点恢复</Button>
       <Button disabled={busy || unavailable || !actions.interrupt} onClick={() => command('interrupt')}>中断（可恢复）</Button>
       <Button danger disabled={busy || unavailable || !actions.cancel} onClick={() => command('cancel')}>取消（终止）</Button>
       {kind === 'project' && !isProjectRun && <><Button disabled={busy || unavailable || !projectRunnable} onClick={() => command('plan')}>生成计划</Button><Button disabled={busy || unavailable || !projectRunnable || !detail?.todo?.plan_md} onClick={() => command('execute')}>执行计划</Button></>}
     </Space>
     {detail?.error && <Alert type="error" title={detail.error} />}
+    <RunnerDetail id={id} detail={detail} onNotice={onNotice} />
     {hasMessages && <div className="execution-messages">
       <Typography.Title level={5}>会话消息</Typography.Title>
       {!messages.messages.length && !messages.partial && !messagesBusy ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无消息" /> : null}

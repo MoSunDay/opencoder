@@ -19,7 +19,7 @@ use serde_json::{json, Value};
 
 use opencoder_agents::{
     delete_agent,
-    write::{create_agent_with_harness, update_agent_settings},
+    write::{create_agent_with_profile, update_agent_with_profile},
 };
 use opencoder_core::agent::{
     active_agent, list_agents, read_agent_meta, resource_current_version_dir, set_active_agent,
@@ -119,6 +119,7 @@ pub async fn list(State(_state): State<Arc<AppState>>) -> Response {
                 "name": name,
                 "builtin": opencoder_core::builtin_agents().iter().any(|a| a.name == name),
                 "harness": meta.harness,
+                "harness_profile": meta.harness_profile,
                 "current": meta.current,
                 "references": opencoder_agents::references::references_snapshot(&meta),
                 "updated_at": meta.updated_at,
@@ -130,6 +131,7 @@ pub async fn list(State(_state): State<Arc<AppState>>) -> Response {
 
 #[derive(Deserialize)]
 pub struct CreateBody {
+    pub harness_profile: Option<String>,
     pub name: String,
     #[serde(default)]
     pub harness: opencoder_core::harness::Harness,
@@ -145,7 +147,7 @@ pub async fn create(State(_state): State<Arc<AppState>>, Json(body): Json<Create
     if let Err(e) = validate_agent_name(&name) {
         return error_400(format!("invalid agent name: {e}"));
     }
-    match create_agent_with_harness(&name, body.current, body.harness) {
+    match create_agent_with_profile(&name, body.current, body.harness, body.harness_profile) {
         Ok(()) => (
             StatusCode::CREATED,
             Json(json!({ "ok": true, "name": name })),
@@ -165,8 +167,16 @@ pub async fn meta(State(_state): State<Arc<AppState>>, Path(name): Path<String>)
 
 #[derive(Deserialize)]
 pub struct UpdateBody {
+    #[serde(default, deserialize_with = "profile_update")]
+    pub harness_profile: Option<Option<String>>,
     pub current: Option<AgentRefs>,
     pub harness: Option<opencoder_core::harness::Harness>,
+}
+
+fn profile_update<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<Option<String>>, D::Error> {
+    Option::<String>::deserialize(deserializer).map(Some)
 }
 
 /// PUT /api/agents/:name — rewrite the card's references (one history
@@ -179,7 +189,7 @@ pub async fn update(
     Json(body): Json<UpdateBody>,
 ) -> Response {
     let was_active = active_agent().as_deref() == Some(name.as_str());
-    match update_agent_settings(&name, body.current, body.harness) {
+    match update_agent_with_profile(&name, body.current, body.harness, body.harness_profile) {
         Ok(()) => {
             if was_active {
                 fan_out_reload(&state).await;

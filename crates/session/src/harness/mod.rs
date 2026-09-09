@@ -20,6 +20,12 @@ pub async fn save(session: &SessionState) -> Result<()> {
 }
 
 pub async fn prepare(session: &mut SessionState) -> Result<()> {
+    opencoder_core::harness::pin_agent_settings(
+        &mut session.harness,
+        &session.config,
+        &session.agent.name,
+    )
+    .map_err(anyhow::Error::msg)?;
     resources::prepare(session)?;
     if session.session_created
         && (session.harness.harness == Harness::Codex

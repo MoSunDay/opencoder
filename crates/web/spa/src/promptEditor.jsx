@@ -1,12 +1,13 @@
+import { useEvent } from './ui/editing/useEvent.js';
 // promptEditor.jsx — 引用的 prompts 资源之 soul/how/output 编辑器：从
 // CURRENT 版本读取 soul.md|how.md|output.md（缺失 ⇒ 空文本，404 吞掉），
 // 「保存」把三份文件一起 PUT /api/agents/resources/prompts/:name（b64）
 // 产生新版本并提示版本号；onSaved 回调让外层刷新 meta / 版本列表。
 
-import { Button, Card, Input, Typography, message } from 'antd';
+import { Alert, Button, Card, Input, Typography, message } from 'antd';
 import { useEffect, useState } from 'react';
 import { apiGet, apiPut } from './api.js';
-import { b64DecodeText, b64EncodeText } from './agentsItems.js';
+import { b64EncodeText } from './agentsItems.js';
 import { err } from './notice.js';
 
 const { TextArea } = Input;
@@ -18,20 +19,26 @@ const PROMPT_PARTS = [
   { key: 'output', file: 'output.md', label: 'Output（产出契约）', rows: 5 },
 ];
 
-/// 读 CURRENT 版本下的一个 prompt 文件；不存在（404）或解码失败 ⇒ ''。
+/// 读 CURRENT 版本下的一个 prompt 文件；不存在（404）⇒ ''。
 async function readPromptFile(resourceName, version, file) {
   try {
     const j = await apiGet(
       `/api/agents/resources/prompts/${encodeURIComponent(resourceName)}/versions/${version}/files/${file}`,
     );
-    return b64DecodeText(j && j.content_b64);
-  } catch {
-    return '';
+    if (typeof j?.content_b64 !== 'string') throw new Error('prompt 文件响应缺少正文');
+    const bytes = Uint8Array.from(atob(j.content_b64), (char) => char.charCodeAt(0));
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch (e) {
+    if (e.status === 404) return '';
+    throw e;
   }
 }
 
-export function PromptEditor({ resourceName, onNotice, onSaved }) {
+function PromptEditorSession({ resourceName, onNotice: noticeCallback, onSaved }) {
+  const onNotice = useEvent(noticeCallback);
   const [texts, setTexts] = useState({ soul: '', how: '', output: '' });
+  const [loadError, setLoadError] = useState('');
+  const [loaded, setLoaded] = useState(false);
   const [version, setVersion] = useState(0);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -43,7 +50,7 @@ export function PromptEditor({ resourceName, onNotice, onSaved }) {
       setVersion(0);
       return undefined;
     }
-    setLoading(true);
+    setLoading(true); setLoaded(false); setLoadError('');
     (async () => {
       try {
         const j = await apiGet(`/api/agents/resources/prompts/${encodeURIComponent(resourceName)}/meta`);
@@ -52,11 +59,13 @@ export function PromptEditor({ resourceName, onNotice, onSaved }) {
         if (!alive) {
           return;
         }
+        setLoaded(true);
         setVersion(v);
         setTexts({ soul: parts[0], how: parts[1], output: parts[2] });
       } catch (e) {
         if (alive && onNotice) {
-          onNotice(err('读取 prompt 失败: ' + (e && e.message)));
+          setLoadError('读取 prompt 失败: ' + e.message);
+          onNotice(err('读取 prompt 失败: ' + e.message));
         }
       } finally {
         if (alive) {
@@ -74,6 +83,7 @@ export function PromptEditor({ resourceName, onNotice, onSaved }) {
   }
 
   const save = async () => {
+    if (saving || !loaded) return;
     setSaving(true);
     try {
       const files = PROMPT_PARTS.map((p) => ({ path: p.file, content_b64: b64EncodeText(texts[p.key]) }));
@@ -98,13 +108,15 @@ export function PromptEditor({ resourceName, onNotice, onSaved }) {
       size="small"
       title={`Prompt 内容（当前 v${version}）`}
       loading={loading}
-      extra={<Button size="small" type="primary" loading={saving} onClick={save}>保存</Button>}
+      extra={<Button size="small" type="primary" loading={saving} disabled={!loaded} onClick={save}>保存</Button>}
       style={{ marginTop: 12 }}
     >
+      {loadError && <Alert type="error" showIcon title={loadError} />}
       {PROMPT_PARTS.map((p) => (
         <div key={p.key} style={{ marginBottom: 12 }}>
           <Text type="secondary" style={{ fontSize: 12 }}>{p.label} · {p.file}</Text>
           <TextArea
+            disabled={saving || !loaded}
             rows={p.rows}
             value={texts[p.key]}
             aria-label={`prompt-${p.key}`}
@@ -114,4 +126,8 @@ export function PromptEditor({ resourceName, onNotice, onSaved }) {
       ))}
     </Card>
   );
+}
+
+export function PromptEditor(props) {
+  return <PromptEditorSession key={props.resourceName || "empty"} {...props} />;
 }

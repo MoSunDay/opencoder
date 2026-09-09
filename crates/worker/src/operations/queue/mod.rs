@@ -124,8 +124,9 @@ pub(crate) async fn dispatch_locked(worker: &Worker) -> Result<()> {
             {
                 continue;
             }
-            let reply = opencoder_core::harness::scope::with_settings(
+            let reply = opencoder_core::harness::scope::with_execution(
                 queued.config.agent.codex.clone(),
+                queued.config.agent.runtime.clone(),
                 opencoder_core::agent::scope::with_root(
                     queued.config.agent.agents_dir.clone(),
                     super::native(

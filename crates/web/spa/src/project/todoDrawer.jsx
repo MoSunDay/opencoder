@@ -12,7 +12,8 @@ import { useRuns } from './replay/useRuns.js';
 import { RunText } from './replay/run.jsx';
 import { absTime } from '../format.js';
 import { RunStatusTag, TodoStatusTag, ExecutorTag, runKindLabel } from './labels.jsx';
-import { flattenTodos } from './todosTab.jsx';
+import { RelationSelect } from './views/relationSelect.jsx';
+import { flattenTodos, milestoneOptions } from './model/relations.js';
 import { ExecutionDetail } from '../fleet/detail.jsx';
 import { err, info, ok, warn } from '../notice.js';
 
@@ -84,9 +85,10 @@ function RunItem({ run, executionId, onNotice, refreshRuns, openExecution }) {
   );
 }
 
-export function TodoDrawer({ todoId, overview, refresh, onClose, onNotice }) {
+function TodoDrawerSession({ todoId, overview, refresh, onClose, onNotice }) {
   const [agent, setAgent] = useState(null);
   const [draft, setDraft] = useState(null); // local edit buffer, null = unchanged
+  const [savedDraft, setSavedDraft] = useState(null);
   const [acting, setActing] = useState(false);
   const [executionOpen, setExecutionOpen] = useState(null);
   const todo = flattenTodos(overview).find((t) => t.id === todoId) || null;
@@ -101,7 +103,7 @@ export function TodoDrawer({ todoId, overview, refresh, onClose, onNotice }) {
     setActing(true);
     try {
       await apiPatch(todoPath(todoId), { agent: agent.trim() });
-      setAgent(null); await refresh(); onNotice(ok('执行 Agent 已更新，下次执行使用当前版本'));
+      await refresh(); onNotice(ok('执行 Agent 已更新，下次执行使用当前版本'));
     } catch (e) { onNotice(err(e.message)); }
     finally { setActing(false); }
   };
@@ -109,7 +111,7 @@ export function TodoDrawer({ todoId, overview, refresh, onClose, onNotice }) {
   // Draft buffer follows the record until the user edits it.
   useEffect(() => {
     setDraft(null);
-  }, [todoId, todo && todo.updated_at]);
+  }, [todoId]);
 
   const saveDraft = async () => {
     if (!todo || draft === null) {
@@ -119,7 +121,7 @@ export function TodoDrawer({ todoId, overview, refresh, onClose, onNotice }) {
     try {
       await apiPatch(todoPath(todo.id), { draft });
       onNotice(ok('草稿已保存'));
-      setDraft(null);
+      setSavedDraft(draft);
       await refresh();
     } catch (e) {
       onNotice(err('保存草稿失败: ' + (e && e.message)));
@@ -155,9 +157,8 @@ export function TodoDrawer({ todoId, overview, refresh, onClose, onNotice }) {
     }
   };
 
-  const milestoneLabel = todo && todo.milestone_title ? todo.milestone_title : '未分组';
   const draftValue = draft === null ? (todo ? todo.draft : '') : draft;
-  const dirty = draft !== null && todo && draft !== (todo.draft || '');
+  const dirty = draft !== null && todo && draft !== (savedDraft ?? todo.draft ?? '');
 
   const timelineItems = runs.map((r) => ({
     key: r.id,
@@ -178,7 +179,7 @@ export function TodoDrawer({ todoId, overview, refresh, onClose, onNotice }) {
       open={Boolean(todoId)}
       size={680}
       title={todo ? `TODO · ${todo.title}` : 'TODO 详情'}
-      onClose={onClose}
+      onClose={() => { if (!acting) onClose(); }}
       destroyOnHidden
     >
       {todo ? (
@@ -188,11 +189,13 @@ export function TodoDrawer({ todoId, overview, refresh, onClose, onNotice }) {
             <Space size={8} wrap>
               <Text strong>{todo.title}</Text>
               <TodoStatusTag status={todo.status} />
-              <Text type="secondary">里程碑：{milestoneLabel}</Text>
+              <RelationSelect path={todoPath(todo.id)} field="milestone_id" value={todo.milestone_id}
+                options={milestoneOptions(overview)} refresh={refresh} onNotice={onNotice} label="TODO 所属里程碑" disabled={acting} />
+              <Text type="secondary">项目：{todo.goal_title || '未关联'}</Text>
               <Text type="secondary">agent：{todo.agent || 'act'}</Text>
             </Space>
             {todo.executor_kind === 'agent' && <Space style={{ marginTop: 8 }}>
-              <Input aria-label="执行 Agent" value={agent ?? todo.agent ?? 'act'} disabled={anyRunning} onChange={(e) => setAgent(e.target.value)} />
+              <Input aria-label="执行 Agent" value={agent ?? todo.agent ?? 'act'} disabled={anyRunning || acting} onChange={(e) => setAgent(e.target.value)} />
               <Button disabled={anyRunning || !agent?.trim() || agent === todo.agent} loading={acting} onClick={saveAgent}>保存 Agent</Button>
             </Space>}
             {todo.execution ? <Button size="small" style={{ marginTop: 8 }} onClick={() => setExecutionOpen(`project-${todoId}`)}>查看节点执行详情</Button> : null}
@@ -202,6 +205,7 @@ export function TodoDrawer({ todoId, overview, refresh, onClose, onNotice }) {
             <Paragraph style={{ marginBottom: 4 }}><Text type="secondary">草稿</Text></Paragraph>
             <TextArea
               value={draftValue}
+              disabled={acting}
               autoSize={{ minRows: 3, maxRows: 12 }}
               onChange={(e) => setDraft(e.target.value)}
               placeholder="粗略描述要做什么…"
@@ -261,4 +265,9 @@ export function TodoDrawer({ todoId, overview, refresh, onClose, onNotice }) {
       {executionOpen && <ExecutionDetail id={executionOpen} summary={executionOpen === `project-${todoId}` ? todo?.execution : null} onClose={() => setExecutionOpen(null)} onNotice={onNotice} />}
     </Drawer>
   );
+}
+
+// A new record is a new editing session; late responses only touch the old instance.
+export function TodoDrawer(props) {
+  return <TodoDrawerSession key={props.todoId || "closed"} {...props} />;
 }

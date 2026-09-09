@@ -166,7 +166,7 @@ describe('canvasModel changeStepKind', () => {
 
 describe('canvasModel specProblemIndex', () => {
   const PROBLEMS = [
-    'steps[0].kind.type 必须是 agent | wasm',
+    'steps[0].kind.type 必须是 agent | wasm | runner',
     'spec.name 必须是非空字符串',
     'steps[1].depends_on 存在重复项',
   ];
@@ -174,7 +174,7 @@ describe('canvasModel specProblemIndex', () => {
 
   it('steps[N] 前缀的问题按节点序号挂到对应节点 id 上', () => {
     const idx = specProblemIndex(PROBLEMS, NODES);
-    expect(idx.get('a')).toEqual(['steps[0].kind.type 必须是 agent | wasm']);
+    expect(idx.get('a')).toEqual(['steps[0].kind.type 必须是 agent | wasm | runner']);
     expect(idx.get('b')).toEqual(['steps[1].depends_on 存在重复项']);
     expect(idx.size).toBe(2);
   });

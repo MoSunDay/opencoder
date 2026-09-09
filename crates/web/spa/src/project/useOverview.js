@@ -8,7 +8,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiGet } from '../api.js';
-import { flattenTodos } from './todosTab.jsx';
+import { flattenTodos } from './model/relations.js';
 
 const POLL_BUSY_MS = 3000;
 const POLL_IDLE_MS = 8000;

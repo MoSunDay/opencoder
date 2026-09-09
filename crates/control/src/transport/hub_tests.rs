@@ -41,6 +41,7 @@ fn execution() -> ExecutionIndex {
 fn create(index: &ExecutionIndex) -> NodeOperation {
     NodeOperation::Create {
         assignment: Assignment {
+            runtime: None,
             codex: None,
             index: index.clone(),
             request: CreateExecution {

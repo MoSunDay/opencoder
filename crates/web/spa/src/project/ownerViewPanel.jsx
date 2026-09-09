@@ -14,7 +14,7 @@ import { PageShell } from '../shell/pageShell.jsx';
 import { TimeText } from '../ui/timeText.jsx';
 import { milestoneProgress, ownerLabel } from './progressPanel.jsx';
 import { TodoDrawer } from './todoDrawer.jsx';
-import { flattenTodos } from './todosTab.jsx';
+import { flattenTodos } from './model/relations.js';
 import { useOverview } from './useOverview.js';
 
 const { Text } = Typography;
@@ -113,6 +113,7 @@ export function OwnerViewPanel({ onNotice }) {
   const [todoId, setTodoId] = useState(null); // open TODO drawer
 
   const goals = (overview && overview.goals) || [];
+  const standalone = overview?.standalone_milestones || [];
   const backlog = (overview && overview.backlog) || [];
   const attention = attentionRows(overview);
 
@@ -142,7 +143,7 @@ export function OwnerViewPanel({ onNotice }) {
 
   return (
     <PageShell page="ownerview">
-      {goals.length === 0 ? (
+      {goals.length === 0 && standalone.length === 0 && backlog.length === 0 ? (
         <Empty description="暂无项目目标" style={{ margin: '48px 0' }} />
       ) : (
         <Spin spinning={loading}>
@@ -159,6 +160,7 @@ export function OwnerViewPanel({ onNotice }) {
           ) : null}
           <Row gutter={[12, 12]}>
             {goals.map((g) => <GoalCard key={g.id} goal={g} />)}
+            {standalone.length > 0 && <GoalCard goal={{ title: '独立专项', milestones: standalone }} />}
           </Row>
           <Card size="small" style={{ marginTop: 12 }}>
             <Text type="secondary">未分组 TODO（backlog）：</Text>

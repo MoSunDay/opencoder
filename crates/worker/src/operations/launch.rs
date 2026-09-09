@@ -74,8 +74,9 @@ pub(super) async fn launch_locked(
     let tasks = worker.inner.tasks.clone();
     tasks.spawn(async move {
         let outcome = std::panic::AssertUnwindSafe(async {
-            opencoder_core::harness::scope::with_settings(
+            opencoder_core::harness::scope::with_execution(
                 config.agent.codex.clone(),
+                config.agent.runtime.clone(),
                 opencoder_core::agent::scope::with_root(
                     config.agent.agents_dir.clone(),
                     Box::pin(crate::workloads::run(

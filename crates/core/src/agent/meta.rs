@@ -43,6 +43,8 @@ pub(crate) const MAX_NAME_LEN: usize = 48;
 /// ([`AgentRefs`]); it never holds version directories itself.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AgentMeta {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub harness_profile: Option<String>,
     #[serde(default)]
     pub harness: crate::harness::Harness,
     #[serde(default)]

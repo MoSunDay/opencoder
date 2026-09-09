@@ -141,7 +141,7 @@ pub struct PatchTodoBody {
 
 /// Force deserialization of the INNER `Option<T>` so JSON `null` produces
 /// `Some(None)` (clear) instead of collapsing to the outer `None` (absent).
-fn double_option<'de, T, D>(de: D) -> Result<Option<Option<T>>, D::Error>
+pub(crate) fn double_option<'de, T, D>(de: D) -> Result<Option<Option<T>>, D::Error>
 where
     T: serde::Deserialize<'de>,
     D: serde::Deserializer<'de>,

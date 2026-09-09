@@ -86,7 +86,7 @@ async fn goals_milestones_todos_crud_roundtrip() {
     assert_eq!(status, 200, "{body}");
     assert_eq!(body["todos"].as_array().unwrap().len(), 1);
 
-    // Patch + delete cascade paths.
+    // Patch + protected milestone deletion paths.
     let (status, body) = h
         .req(
             Method::PATCH,
@@ -142,7 +142,7 @@ async fn goals_milestones_todos_crud_roundtrip() {
         .await;
     assert_eq!(status, 404, "{body}");
 
-    // Milestone delete cascades its todos (deleted, not re-parented).
+    // Nonempty milestones must first have their TODOs explicitly unlinked.
     let (status, _) = h
         .req(
             Method::POST,
@@ -151,6 +151,32 @@ async fn goals_milestones_todos_crud_roundtrip() {
         )
         .await;
     assert_eq!(status, 200);
+    let (status, body) = h
+        .req(
+            Method::DELETE,
+            &format!("/api/project/milestones/{milestone_id}"),
+            None,
+        )
+        .await;
+    assert_eq!(status, 409, "{body}");
+    let (_, linked) = h
+        .req(
+            Method::GET,
+            &format!("/api/project/todos?milestone_id={milestone_id}"),
+            None,
+        )
+        .await;
+    for todo in linked["todos"].as_array().unwrap() {
+        let id = todo["id"].as_str().unwrap();
+        let (status, _) = h
+            .req(
+                Method::PATCH,
+                &format!("/api/project/todos/{id}"),
+                Some(json!({"milestone_id":null})),
+            )
+            .await;
+        assert_eq!(status, 200);
+    }
     let (status, body) = h
         .req(
             Method::DELETE,

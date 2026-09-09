@@ -1,3 +1,4 @@
+import { useEvent } from './ui/editing/useEvent.js';
 // envsPanel.jsx — 菜单页「Env 管理」：朴素表格列出 env（列检索、头部新建、
 // 行内编辑/删除），编辑走抽屉（description / tools 多选 / env_vars 键值行），
 // 表下方是工具目录（已导入只读 + 可导入逐条 POST import）。
@@ -61,7 +62,8 @@ function toolGroupOptions(tools) {
   ];
 }
 
-function CreateEnvModal({ open, onClose, onCreated, onNotice }) {
+function CreateEnvModal({ open, onClose, onCreated, onNotice: noticeCallback }) {
+  const onNotice = useEvent(noticeCallback);
   const [form] = Form.useForm();
   const [saving, setSaving] = useState(false);
 
@@ -80,8 +82,8 @@ function CreateEnvModal({ open, onClose, onCreated, onNotice }) {
   };
 
   return (
-    <Modal open={open} title="新建 Env" onCancel={onClose} footer={null} destroyOnHidden>
-      <Form form={form} layout="vertical" onFinish={submit}>
+    <Modal open={open} title="新建 Env" onCancel={() => { if (!saving) onClose(); }} footer={null} destroyOnHidden>
+      <Form form={form} layout="vertical" onFinish={submit} disabled={saving}>
         <Form.Item name="name" label="名称" rules={[{ required: true, message: '请输入名称' }]}>
           <Input placeholder="ffmpeg-env" aria-label="new-env-name" />
         </Form.Item>
@@ -97,7 +99,7 @@ function CreateEnvModal({ open, onClose, onCreated, onNotice }) {
   );
 }
 
-function VarRows({ rows, setRows }) {
+function VarRows({ rows, setRows, disabled }) {
   const update = (i, idx, value) => {
     setRows(rows.map((r, n) => (n === i ? (idx === 0 ? [value, r[1]] : [r[0], value]) : r)));
   };
@@ -107,37 +109,41 @@ function VarRows({ rows, setRows }) {
     <div>
       {rows.map((r, i) => (
         <Space key={i} style={{ display: 'flex', marginBottom: 4 }} align="baseline">
-          <Input value={r[0]} placeholder="KEY" style={{ width: 200 }} aria-label="var-key"
+          <Input value={r[0]} placeholder="KEY" style={{ width: 200 }} aria-label="var-key" disabled={disabled}
             onChange={(e) => update(i, 0, e.target.value)} />
-          <Input value={r[1]} placeholder="VALUE" style={{ width: 320 }} aria-label="var-value"
+          <Input value={r[1]} placeholder="VALUE" style={{ width: 320 }} aria-label="var-value" disabled={disabled}
             onChange={(e) => update(i, 1, e.target.value)} />
-          <Button type="link" danger aria-label="var-remove" onClick={() => remove(i)}>删除</Button>
+          <Button type="link" danger aria-label="var-remove" disabled={disabled} onClick={() => remove(i)}>删除</Button>
         </Space>
       ))}
-      <Button type="dashed" onClick={add} style={{ width: 200 }}>+ 添加变量</Button>
+      <Button type="dashed" onClick={add} disabled={disabled} style={{ width: 200 }}>+ 添加变量</Button>
     </div>
   );
 }
 
-function EnvDrawer({ name, tools, open, onClose, onNotice, onSaved }) {
+function EnvDrawerSession({ name, tools, open, onClose, onNotice: noticeCallback, onSaved }) {
+  const onNotice = useEvent(noticeCallback);
   const [description, setDescription] = useState('');
   const [selectedTools, setSelectedTools] = useState([]);
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
     if (!open || !name) {
       return;
     }
     let alive = true;
-    setLoading(true);
+    setLoading(true); setLoaded(false);
     apiGet(`/api/todo/envs/${encodeURIComponent(name)}`)
       .then((j) => {
         if (!alive) {
           return;
         }
-        const e = envFromContext(j) || {};
+        const e = envFromContext(j);
+        if (!e) throw new Error('env 详情格式异常');
+        setLoaded(true);
         setDescription(e.description || '');
         setSelectedTools(Array.isArray(e.tools) ? e.tools : []);
         setRows(varsToRows(e.env_vars));
@@ -154,6 +160,7 @@ function EnvDrawer({ name, tools, open, onClose, onNotice, onSaved }) {
   }, [open, name, onNotice]);
 
   const save = async () => {
+    if (saving || !loaded) return;
     setSaving(true);
     try {
       await apiPut(`/api/todo/envs/${encodeURIComponent(name)}`, {
@@ -177,41 +184,42 @@ function EnvDrawer({ name, tools, open, onClose, onNotice, onSaved }) {
     <Drawer
       title={`编辑 Env: ${name || ''}`}
       open={open}
-      onClose={onClose}
+      onClose={() => { if (!saving) onClose(); }}
       width={720}
       destroyOnHidden
       footer={
         <Space style={{ float: 'right' }}>
-          <Button onClick={onClose}>关闭</Button>
-          <Button type="primary" loading={saving} onClick={save}>保存</Button>
+          <Button onClick={onClose} disabled={saving}>关闭</Button>
+          <Button type="primary" loading={saving} disabled={!loaded} onClick={save}>保存</Button>
         </Space>
       }
     >
       <Space orientation="vertical" size={12} style={{ width: '100%' }}>
         <div>
           <Text type="secondary">描述</Text>
-          <TextArea value={description} rows={2} aria-label="env-description" disabled={loading}
+          <TextArea value={description} rows={2} aria-label="env-description" disabled={loading || saving}
             onChange={(e) => setDescription(e.target.value)} />
         </div>
         <div>
           <Text type="secondary">工具（tools）</Text>
           <Select mode="multiple" value={selectedTools} options={toolGroupOptions(tools)}
             onChange={setSelectedTools} placeholder="选择已导入工具；可导入项需先导入"
-            style={{ width: '100%' }} aria-label="env-tools" disabled={loading} />
+            style={{ width: '100%' }} aria-label="env-tools" disabled={loading || saving} />
           <Text type="secondary" style={{ fontSize: 12 }}>
             选择「可导入」组的引用会在保存时被服务端 400 拒绝（工具引用无法解析），请先在下方导入。
           </Text>
         </div>
         <div>
           <Text type="secondary">环境变量（env_vars）</Text>
-          <VarRows rows={rows} setRows={setRows} />
+          <VarRows rows={rows} setRows={setRows} disabled={loading || saving || !loaded} />
         </div>
       </Space>
     </Drawer>
   );
 }
 
-function ToolsCatalog({ tools, onNotice, onToolsChanged }) {
+function ToolsCatalog({ tools, onNotice: noticeCallback, onToolsChanged }) {
+  const onNotice = useEvent(noticeCallback);
   const [importing, setImporting] = useState('');
   const share = (tools || []).filter((t) => t && t.ref && t.source !== 'importable');
   const importable = (tools || []).filter((t) => t && t.ref && t.source === 'importable');
@@ -260,7 +268,8 @@ function ToolsCatalog({ tools, onNotice, onToolsChanged }) {
   );
 }
 
-export function EnvsPanel({ onNotice }) {
+export function EnvsPanel({ onNotice: noticeCallback }) {
+  const onNotice = useEvent(noticeCallback);
   const [envs, setEnvs] = useState([]);
   const [tools, setTools] = useState([]);
   const [creating, setCreating] = useState(false);
@@ -363,4 +372,8 @@ export function EnvsPanel({ onNotice }) {
       />
     </PageShell>
   );
+}
+
+function EnvDrawer(props) {
+  return <EnvDrawerSession key={`${props.open}/${props.name}`} {...props} />;
 }

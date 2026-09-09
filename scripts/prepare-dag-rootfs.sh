@@ -25,11 +25,13 @@ out="$(cd "$out" && pwd)"
 }
 
 echo "==> building the wasmtime-cli example (debug profile reuses workspace artifacts)"
-cargo build -p opencoder-dag-runtime --example wasmtime-cli
-bin="$repo_root/target/debug/examples/wasmtime-cli"
+cargo build --manifest-path "$repo_root/Cargo.toml" -p opencoder-dag-runtime --example wasmtime-cli
+target_dir="$(cargo metadata --manifest-path "$repo_root/Cargo.toml" --no-deps --format-version 1 |
+  python3 -c 'import json, sys; print(json.load(sys.stdin)["target_directory"])')"
+bin="$target_dir/debug/examples/wasmtime-cli"
 
 echo "==> writing the scaffold via 'opencoder-agent dag prepare-rootfs'"
-cargo run -q -p opencoder-agent -- dag prepare-rootfs --out "$out" >/dev/null
+cargo run -q --manifest-path "$repo_root/Cargo.toml" -p opencoder-agent -- dag prepare-rootfs --out "$out" >/dev/null
 
 echo "==> installing the wasm runtime at usr/bin/wasmtime"
 cp "$bin" "$out/usr/bin/wasmtime"

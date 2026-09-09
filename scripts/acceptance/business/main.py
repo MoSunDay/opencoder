@@ -11,6 +11,7 @@ from audit import capture, compare
 from common import BASE, HERE, TARGET, HTTPFailure, emit, http, read, run, write
 from environment import Environment
 from lifecycle.runtime import assert_owned, initialize_runtime, finalize_runtime
+from lifecycle.process import stop_fixture
 
 
 def submit(environment):
@@ -64,7 +65,7 @@ def monitor(environment, jobs, timeout=7500):
     raise RuntimeError('Real business E2E exceeded its bounded deadline')
 
 
-def cleanup(environment, result):
+def cleanup(environment, result, destroy=False):
     root = environment.root
     assert_owned(root)
     prefix = 'oc-e2e-' + root.name + '-'
@@ -75,6 +76,7 @@ def cleanup(environment, result):
     if source:
         source.terminate()
         source.wait(timeout=10)
+    stop_fixture(root)
     remaining = []
     for proc in Path('/proc').iterdir():
         if not proc.name.isdigit() or int(proc.name) == os.getpid():
@@ -90,7 +92,7 @@ def cleanup(environment, result):
     if (root / 'evidence/audit-before.json').exists():
         capture(root, 'after')
         result['sourceAudit'] = compare(root)
-    result.update(finalize_runtime(root))
+    result.update(finalize_runtime(root, destroy=destroy))
     write(root / 'evidence/result.json', result)
 
 
@@ -133,6 +135,8 @@ def main():
     parser.add_argument('--root', type=Path, required=True)
     parser.add_argument('--release', type=Path)
     parser.add_argument('--cleanup', action='store_true', help='Clean a retained private run after preserving evidence')
+    parser.add_argument('--destroy-runtime', action='store_true',
+        help='Explicitly authorize removal of this run\'s owned temporary databases and copies after shutdown')
     parser.add_argument('--platform-bundle', type=Path)
     parser.add_argument('--scenario', choices=['positive', 'historical'], default='positive')
     parser.add_argument('--retain-on-failure', action='store_true',
@@ -146,7 +150,7 @@ def main():
         if not (root / 'runtime').exists() and read(root / 'evidence/result.json').get('runtimeRemoved'):
             emit('private_runtime_already_removed', root=str(root))
             return
-        cleanup(Environment.attach(root), read(root / 'evidence/result.json'))
+        cleanup(Environment.attach(root), read(root / 'evidence/result.json'), args.destroy_runtime)
         return
     if not args.release or not args.platform_bundle:
         parser.error('--release and --platform-bundle are required when starting a run')
@@ -189,7 +193,7 @@ def main():
             emit('private_environment_retained_for_diagnosis', root=str(root))
             raise SystemExit(1)
         try:
-            cleanup(environment or Environment.attach(root), result)
+            cleanup(environment or Environment.attach(root), result, args.destroy_runtime)
         except Exception as error:
             result.update({'passed': False, 'cleanupError': str(error)})
             write(root / 'evidence/result.json', result)

@@ -1,7 +1,9 @@
 [Unit]
 Description=OpenCoder read-only Agent resource distribution
-Wants=network-online.target
+Wants=network-online.target opencoder-server.service
 After=network-online.target opencoder-server.service
+Before=opencoder-agent.service
+PartOf=opencoder-server.service
 
 [Mount]
 What=127.0.0.1:/

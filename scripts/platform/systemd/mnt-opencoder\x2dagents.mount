@@ -1,0 +1,14 @@
+[Unit]
+Description=OpenCoder read-only Agent resource distribution
+Wants=network-online.target
+After=network-online.target opencoder-server.service
+
+[Mount]
+What=127.0.0.1:/
+Where=/mnt/opencoder-agents
+Type=nfs
+Options=ro,vers=3,tcp,port=2049,mountport=2049,nolock,soft,retrans=1,timeo=50,actimeo=0,lookupcache=none
+TimeoutSec=30
+
+[Install]
+WantedBy=multi-user.target

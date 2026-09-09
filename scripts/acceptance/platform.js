@@ -9,6 +9,7 @@ const http = require('http');
 const os = require('os');
 const path = require('path');
 const assert = require('assert/strict');
+const { stageWasm } = require('./harness/wasm');
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'opencoder-platform-browser-'));
 const bin = process.env.PLATFORM_BIN_DIR || path.join(__dirname, '../../target/debug');
@@ -21,6 +22,7 @@ let mock;
 let base;
 let llmDelay = 0;
 const errors = [];
+const llmRequests = [];
 
 async function until(check, label) {
   const deadline = Date.now() + 30000;
@@ -59,7 +61,8 @@ async function stop(child) {
 }
 async function main() {
   mock = http.createServer(async (req, res) => {
-    for await (const _ of req) { /* consume input */ }
+    let raw = ''; for await (const chunk of req) raw += chunk;
+    llmRequests.push(JSON.parse(raw));
     if (llmDelay) await pause(llmDelay);
     res.writeHead(200, { 'content-type': 'text/event-stream' });
     for (const chunk of [
@@ -78,6 +81,7 @@ async function main() {
     }));
     return dir;
   });
+  for (const directory of dirs.slice(1)) stageWasm(path.join(directory, 'state'));
   const server = start('opencoder-server', ['--workdir', dirs[0], '--port', '0', '--token', token], dirs[0]);
   await until(async () => {
     if (server.exitCode !== null) throw new Error(`server exited: ${fs.readFileSync(server.logPath, 'utf8')}`);
@@ -106,6 +110,7 @@ async function main() {
   await page.getByRole('button', { name: '执行指令', exact: true }).click();
   await page.locator('.ant-modal pre').filter({ hasText: 'maintenance_agent_id' }).waitFor();
   await page.locator('.ant-modal-close').click();
+  await page.locator('.fleet-nav-category').getByText('Agent', { exact: true }).click();
   await page.getByRole('menuitem', { name: '全部执行' }).click();
   await page.locator('.ant-empty').waitFor();
   await page.getByPlaceholder('act / 定义名称 / 任务 ID').fill('act');
@@ -116,11 +121,12 @@ async function main() {
   const indexes = (await api('GET', '/api/executions')).executions;
   const run = indexes.find((i) => i.id.startsWith('agent-'));
   assert(run);
-  assert.deepEqual(Object.keys(run).sort(), ['created_at', 'id', 'node_id', 'status']);
+  assert.deepEqual(Object.keys(run).sort(), ['created_at', 'id', 'kind', 'node_id', 'status']);
   const detail = await api('GET', `/api/executions/${run.id}`);
-  assert(JSON.stringify(detail.session.messages).includes('browser node-owned answer'));
+  const messages = await api('GET', `/api/executions/${run.id}/messages`);
+  assert(messages.chunks.map(chunk => Buffer.from(chunk.bytes_b64, 'base64').toString()).join('').includes('browser node-owned answer'));
   await page.locator('.ant-drawer-close').click();
-  await api('POST', '/api/executions', { id: 'dag-browser', kind: 'dag', input: { definition: { name: 'browser-artifact', steps: [{ name: 'python', kind: { type: 'python', code: "print('node artifact')" } }] } } });
+  await api('POST', '/api/executions', { id: 'dag-browser', kind: 'dag', input: { definition: { name: 'browser-artifact', steps: [{ name: 'python', kind: { type: 'wasm', command: 'stdout.wasm' } }] } } });
   await until(async () => (await api('GET', '/api/executions/dag-browser')).execution.status === 'done', 'DAG completion');
   const artifact = await api('POST', '/api/executions/dag-browser/commands', { action: 'artifact', input: { step: 'python', file: 'output.txt' } });
   assert.equal(Buffer.from(artifact.bytes_b64, 'base64').toString(), 'node artifact\n');
@@ -132,6 +138,7 @@ async function main() {
   await api('PATCH', `/api/project/todos/${todo.id}`, { draft: 'latest browser draft' });
   await page.getByRole('button', { name: /^刷\s*新$/ }).click();
   await page.getByRole('button', { name: projectId, exact: true }).click();
+  const planRequestsBefore = llmRequests.length;
   llmDelay = 1500;
   await page.getByRole('button', { name: '生成计划', exact: true }).click();
   await until(async () => (await api('GET', `/api/executions/${projectId}`)).execution.status === 'running', 'Plan started');
@@ -141,20 +148,22 @@ async function main() {
   const planned = await api('GET', `/api/executions/${projectId}`);
   assert.equal(planned.todo.draft, 'latest browser draft');
   assert.equal(planned.execution.node_id, project.node_id);
-  await page.getByText('工作流、团队与计划明细', { exact: true }).click();
   await page.getByRole('button', { name: '刷新明细', exact: true }).click();
-  await page.locator('.ant-drawer .ant-tag').filter({ hasText: /^idle$/ }).waitFor();
-  await page.locator('.ant-drawer pre').filter({ hasText: 'latest browser draft' }).waitFor();
+  await page.locator('.ant-drawer .ant-tag').filter({ hasText: /^等待继续$/ }).waitFor();
+  assert(llmRequests.slice(planRequestsBefore).some(request => JSON.stringify(request).includes('latest browser draft')));
+  await page.locator('.ant-drawer').getByText('browser node-owned answer', { exact: true }).waitFor();
   await page.screenshot({ path: path.join(root, 'project-latest-plan.png'), animations: 'disabled' });
   await page.locator('.ant-drawer-close').click();
   await page.setViewportSize({ width: 390, height: 844 });
+  await page.locator('.fleet-nav-category').getByText('节点', { exact: true }).click();
   await page.getByRole('combobox', { name: '页面导航' }).click();
-  await page.locator('.ant-select-item-option-content').getByText('Opencoder 列表', { exact: true }).click();
+  await page.locator('.ant-select-item-option-content').getByText('节点列表', { exact: true }).click();
   await page.getByText('node-a', { exact: true }).waitFor();
   assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'mobile page must not overflow');
   await page.getByRole('combobox', { name: '页面导航' }).press('Escape');
   await page.screenshot({ path: path.join(root, 'mobile-nodes.png'), animations: 'disabled' });
   await page.setViewportSize({ width: 1600, height: 1000 });
+  await page.locator('.fleet-nav-category').getByText('Agent', { exact: true }).click();
   await page.getByRole('menuitem', { name: '团队组队' }).click();
   await page.getByText('system', { exact: true }).waitFor();
   await page.screenshot({ path: path.join(root, 'teams.png') });
@@ -167,19 +176,18 @@ async function main() {
   const ownerChild = children.find((child) => child.spawnargs.includes(owner.name));
   const ownerDir = path.join(root, owner.name);
   await api('POST', '/api/executions', { id: 'dag-crash', kind: 'dag', node_id: owner.id,
-    input: { definition: { name: 'crash-lifecycle', steps: [{ name: 'loop', kind: { type: 'python',
-      code: "import posix\nf = open(STEP_DIR + '/pid', 'w')\nf.write(str(posix.getpid()))\nf.close()\nwhile True:\n    pass" } }] } } });
-  const vmPidPath = path.join(ownerDir, 'state/workflow/dag-crash/loop/pid');
-  await until(async () => fs.existsSync(vmPidPath) && fs.readFileSync(vmPidPath, 'utf8').length, 'crash VM started');
-  const vmPid = fs.readFileSync(vmPidPath, 'utf8');
+    input: { definition: { name: 'crash-lifecycle', steps: [{ name: 'loop', kind: {
+      type: 'wasm', command: 'spin.wasm' } }] } } });
+  await until(async () => (await api('GET', '/api/executions/dag-crash')).execution.status === 'running', 'Wasm running');
   ownerChild.kill('SIGKILL');
-  await until(async () => !fs.existsSync(`/proc/${vmPid}`), 'VM exits with crashed node');
+  await until(async () => ownerChild.signalCode === 'SIGKILL', 'Wasm owner process exits');
   const restarted = start('opencoder-agent', ownerChild.spawnargs.slice(1), ownerDir);
   await until(async () => (await api('GET', '/api/nodes')).nodes.find((node) => node.id === owner.id)?.online, 'owner restarted');
   assert.equal((await api('GET', '/api/executions/dag-crash')).execution.status, 'interrupted');
   const count = (await api('GET', '/api/executions')).executions.length;
   await stop(restarted);
   await until(async () => !(await api('GET', '/api/nodes')).nodes.find((node) => node.id === owner.id).online, 'owner disconnected');
+  await page.locator('.fleet-nav-category').getByText('Agent', { exact: true }).click();
   await page.getByRole('menuitem', { name: '全部执行' }).click();
   await page.getByRole('button', { name: projectId, exact: true }).click();
   await page.locator('.ant-drawer .ant-alert-error').waitFor();

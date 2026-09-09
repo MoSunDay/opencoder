@@ -69,6 +69,14 @@ async fn readonly_nfs_node_snapshots_and_offline_followup() {
         "alpha/SKILL.md",
         "pinned skill",
     );
+    let deep = "alpha/references/a-complete-service-contract-with-a-long-name.md";
+    resource(
+        &source,
+        "skills",
+        "review-skills",
+        deep,
+        "complete deep reference",
+    );
     resource(&source, "tools", "review-tools", "check", "pinned tool");
     resource(
         &source,
@@ -187,6 +195,10 @@ async fn readonly_nfs_node_snapshots_and_offline_followup() {
         assert_eq!(std::fs::read_to_string(pinned).unwrap(), text);
     }
     let pinned = node_root.join("node/agent/agent-v1/resources");
+    assert_eq!(
+        std::fs::read_to_string(pinned.join("skills/review-skills/v1").join(deep)).unwrap(),
+        "complete deep reference"
+    );
     for (relative, text) in [
         ("skills/review-skills/v1/alpha/SKILL.md", "pinned skill"),
         ("tools/review-tools/v1/check", "pinned tool"),
@@ -198,6 +210,21 @@ async fn readonly_nfs_node_snapshots_and_offline_followup() {
         );
     }
     assert!(pinned.join("reviewer/meta.json").is_file());
+    // The real kernel client retains its mount and directory/file handles.
+    export.handle.take().unwrap().shutdown();
+    export.handle = Some(
+        spawn_nfs_server(&NfsServerOpts {
+            export_root: source.clone(),
+            host: "127.0.0.1".into(),
+            port,
+            read_only: true,
+        })
+        .unwrap(),
+    );
+    assert_eq!(
+        std::fs::read_to_string(mount.join("skills/review-skills/v1").join(deep)).unwrap(),
+        "complete deep reference"
+    );
     export.unmount();
     assert!(!node.snapshot().ready);
     assert!(!second.snapshot().ready);

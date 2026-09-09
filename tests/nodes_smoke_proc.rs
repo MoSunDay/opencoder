@@ -76,7 +76,9 @@ fn smoke_script_two_process_nodes_flow_passes() {
         script.display()
     );
 
+    let fixture_home = tempfile::tempdir().unwrap();
     let mut child = Command::new("bash")
+        .env("HOME", fixture_home.path())
         .arg(&script)
         .current_dir(&repo_root)
         .env(

@@ -6,7 +6,7 @@
 //!
 //! - **fileid ↔ path**: `fileid3` is a stable FNV-1a hash of the canonical
 //!   *relative* path; the opaque NFS file handle carries the relative path
-//!   bytes themselves (`id_to_fh`/`fh_to_id` overrides). A tiny id→path
+//!   bytes for short paths, or a digest for long paths. A tiny id→path
 //!   registry is the only state — integration glue required because the
 //!   `NFSFileSystem` trait exchanges opaque `u64` ids in both directions.
 //! - **traversal rejection at the FS layer**: handle/lookup names must be a
@@ -28,6 +28,8 @@ use async_trait::async_trait;
 use nfsserve::fs_util::metadata_to_fattr3;
 use nfsserve::nfs::{fattr3, fileid3, filename3, nfs_fh3, nfspath3, nfsstat3, nfsstring, sattr3};
 use nfsserve::vfs::{DirEntry, NFSFileSystem, ReadDirResult, VFSCapabilities};
+
+mod handles;
 
 /// Payload budget for the relative path inside a file handle. NFSv3 caps
 /// handles at 64 bytes (`FHSIZE3`); we stay under it so real clients never
@@ -141,7 +143,32 @@ fn path_of(ids: &RwLock<HashMap<fileid3, PathBuf>>, id: fileid3) -> Result<PathB
 /// `symlink_metadata` of `root/rel` — missing ⇒ `NFS3ERR_NOENT`. Symlink
 /// metadata (not followed) so dangling links still getattr/readlink.
 fn stat(root: &Path, rel: &Path) -> Result<std::fs::Metadata, nfsstat3> {
-    std::fs::symlink_metadata(root.join(rel)).map_err(|_| nfsstat3::NFS3ERR_NOENT)
+    let mut parent = root.to_path_buf();
+    for part in rel.parent().unwrap_or(Path::new("")).components() {
+        parent.push(part);
+        if std::fs::symlink_metadata(&parent)
+            .map_err(fs_error)?
+            .file_type()
+            .is_symlink()
+        {
+            return Err(nfsstat3::NFS3ERR_ACCES);
+        }
+    }
+    std::fs::symlink_metadata(root.join(rel)).map_err(fs_error)
+}
+
+fn fs_error(error: std::io::Error) -> nfsstat3 {
+    match error.kind() {
+        std::io::ErrorKind::NotFound => nfsstat3::NFS3ERR_NOENT,
+        std::io::ErrorKind::PermissionDenied => nfsstat3::NFS3ERR_ACCES,
+        _ => nfsstat3::NFS3ERR_IO,
+    }
+}
+
+fn collect_names<T>(entries: impl Iterator<Item = std::io::Result<T>>) -> Result<Vec<T>, nfsstat3> {
+    entries
+        .collect::<std::io::Result<Vec<_>>>()
+        .map_err(fs_error)
 }
 
 #[async_trait]
@@ -157,7 +184,7 @@ impl NFSFileSystem for ReadOnlyAgentsFs {
     fn id_to_fh(&self, id: fileid3) -> nfs_fh3 {
         match path_of(&self.ids, id) {
             Ok(rel) => nfs_fh3 {
-                data: rel_bytes(&rel),
+                data: handles::encode(&rel),
             },
             // Unknown id: emit a handle that always fails rel_from_handle
             // (NUL is rejected) instead of aliasing the root.
@@ -166,16 +193,16 @@ impl NFSFileSystem for ReadOnlyAgentsFs {
     }
 
     fn fh_to_id(&self, fh: &nfs_fh3) -> Result<fileid3, nfsstat3> {
-        Ok(register(&self.ids, &rel_from_handle(&fh.data)?))
+        let rel = handles::resolve(&self.root, &self.ids, &fh.data)?;
+        Ok(register(&self.ids, &rel))
     }
 
     async fn lookup(&self, dirid: fileid3, filename: &filename3) -> Result<fileid3, nfsstat3> {
         let dir = path_of(&self.ids, dirid)?;
-        stat(&self.root, &dir)?;
-        let rel = dir.join(lookup_component(filename)?);
-        if rel.as_os_str().len() > MAX_FH_PATH {
-            return Err(nfsstat3::NFS3ERR_NOENT);
+        if !stat(&self.root, &dir)?.is_dir() {
+            return Err(nfsstat3::NFS3ERR_NOTDIR);
         }
+        let rel = dir.join(lookup_component(filename)?);
         stat(&self.root, &rel)?;
         Ok(register(&self.ids, &rel))
     }
@@ -286,16 +313,15 @@ impl NFSFileSystem for ReadOnlyAgentsFs {
             return Err(nfsstat3::NFS3ERR_NOTDIR);
         }
         // Deterministic order: sort by name so readdir cookies stay stable.
-        let mut names: Vec<(PathBuf, fileid3)> = std::fs::read_dir(self.root.join(&rel))
-            .map_err(|_| nfsstat3::NFS3ERR_IO)?
-            .filter_map(|e| e.ok())
-            .map(|e| PathBuf::from(e.file_name().to_string_lossy().into_owned()))
-            .filter(|n| rel.join(n).as_os_str().len() <= MAX_FH_PATH)
-            .map(|n| {
-                let id = path_id(&rel.join(&n));
-                (n, id)
-            })
-            .collect();
+        let mut names: Vec<(PathBuf, fileid3)> =
+            collect_names(std::fs::read_dir(self.root.join(&rel)).map_err(fs_error)?)?
+                .into_iter()
+                .map(|e| PathBuf::from(e.file_name().to_string_lossy().into_owned()))
+                .map(|n| {
+                    let id = path_id(&rel.join(&n));
+                    (n, id)
+                })
+                .collect();
         names.sort_by(|a, b| a.0.cmp(&b.0));
 
         // Unknown cookie (or 0): restart from the top rather than
@@ -310,10 +336,7 @@ impl NFSFileSystem for ReadOnlyAgentsFs {
                 break;
             }
             let child = rel.join(name);
-            let attr = match stat(&self.root, &child) {
-                Ok(meta) => metadata_to_fattr3(*id, &meta),
-                Err(_) => continue,
-            };
+            let attr = metadata_to_fattr3(*id, &stat(&self.root, &child)?);
             register(&self.ids, &child);
             entries.push(DirEntry {
                 fileid: *id,

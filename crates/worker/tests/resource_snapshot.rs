@@ -2,6 +2,44 @@
 mod resources;
 use serde_json::json;
 
+#[test]
+fn absent_configured_source_is_not_an_empty_successful_snapshot() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("lost-export");
+    let target = dir.path().join("node/run/resources");
+    let error = resources::pin(Some(&source), &target).unwrap_err();
+    assert!(error.to_string().contains("source unavailable"));
+    assert!(!target.exists());
+    // The built-in-only configuration remains supported explicitly.
+    assert_eq!(resources::pin(None, &target).unwrap(), Some(target.clone()));
+    // Accepted tasks keep their local snapshot even when the source is gone.
+    assert_eq!(
+        resources::pin(Some(&source), &target).unwrap(),
+        Some(target)
+    );
+}
+
+#[test]
+fn failed_copy_publishes_nothing_and_retry_uses_complete_resources() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("export");
+    let target = dir.path().join("node/run/resources");
+    resource(&source, "skills", "review", "alpha/SKILL.md", "complete");
+    std::fs::write(source.join("skills/review/meta.json"), "broken metadata").unwrap();
+    assert!(resources::pin(Some(&source), &target).is_err());
+    assert!(!target.exists());
+    assert_eq!(
+        std::fs::read_dir(target.parent().unwrap()).unwrap().count(),
+        0
+    );
+    resource(&source, "skills", "review", "alpha/SKILL.md", "complete");
+    resources::pin(Some(&source), &target).unwrap();
+    assert_eq!(
+        std::fs::read_to_string(target.join("skills/review/v1/alpha/SKILL.md")).unwrap(),
+        "complete"
+    );
+}
+
 fn resource(source: &std::path::Path, category: &str, name: &str, relative: &str, content: &str) {
     let root = source.join(category).join(name);
     std::fs::create_dir_all(

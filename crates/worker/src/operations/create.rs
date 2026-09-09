@@ -233,7 +233,9 @@ pub(super) fn prepare(worker: &Worker, assignment: &Assignment, legacy: bool) ->
         .agent
         .agents_dir
         .clone()
-        .or_else(opencoder_core::agent::agents_dir);
+        // An absent implicit pool permits built-in agents. An explicitly
+        // configured source remains Some so pin rejects its disappearance.
+        .or_else(|| opencoder_core::agent::agents_dir().filter(|path| path.exists()));
     let root = if legacy {
         worker
             .inner

@@ -12,6 +12,7 @@ pub mod session_store;
 pub mod sql_store;
 pub mod store;
 pub mod team_types;
+mod users;
 pub mod todo_types;
 pub mod ts_registry;
 pub mod types;
@@ -37,6 +38,7 @@ pub use project_types::{
 pub use session_store::SessionStore;
 pub use store::Store;
 pub use team_types::{TeamTopicRunRecord, TEAM_RUN_EXECUTING, TEAM_RUN_FINISHED};
+pub use users::{GuardedDelete, PlatformUser};
 pub use todo_types::{
     TodoEventPage, TodoEventRecord, TodoItemPage, TodoItemRecord, TodoItemSummary,
     TodoWorkflowDetail, TodoWorkflowRecord, TodoWorkflowSummary,

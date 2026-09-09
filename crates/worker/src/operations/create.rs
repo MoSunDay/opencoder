@@ -78,7 +78,7 @@ pub(super) async fn create(worker: &Worker, mut assignment: Assignment) -> Resul
     if assignment.definition.is_none()
         && !matches!(
             assignment.request.kind,
-            ExecutionKind::Agent | ExecutionKind::Maintenance
+            ExecutionKind::Agent | ExecutionKind::Maintenance | ExecutionKind::Operator
         )
     {
         return Ok(RpcReply::error(
@@ -279,13 +279,15 @@ pub(super) fn prepare(worker: &Worker, assignment: &Assignment, legacy: bool) ->
         opencoder_core::agent::scope::with_root_sync(config.agent.agents_dir.clone(), || {
             let mut agents = vec![];
             match assignment.request.kind {
-                ExecutionKind::Agent | ExecutionKind::Maintenance => agents.push(
-                    assignment
-                        .request
-                        .target
-                        .clone()
-                        .unwrap_or_else(|| "act".into()),
-                ),
+                ExecutionKind::Agent | ExecutionKind::Maintenance | ExecutionKind::Operator => {
+                    agents.push(
+                        assignment
+                            .request
+                            .target
+                            .clone()
+                            .unwrap_or_else(|| "act".into()),
+                    )
+                }
                 ExecutionKind::Team => {
                     let team: TeamDefinition = serde_json::from_value(
                         assignment

@@ -148,6 +148,7 @@ impl Worker {
             ExecutionKind::Todos,
             ExecutionKind::Project,
             ExecutionKind::Maintenance,
+            ExecutionKind::Operator,
         ];
         if options.dag {
             kinds.push(ExecutionKind::Dag);

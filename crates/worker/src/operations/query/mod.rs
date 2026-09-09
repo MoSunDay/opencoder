@@ -117,7 +117,10 @@ pub(super) async fn events(
     let is_session = record.as_ref().is_none_or(|r| {
         matches!(
             r.assignment.request.kind,
-            ExecutionKind::Agent | ExecutionKind::Maintenance | ExecutionKind::Dag
+            ExecutionKind::Agent
+                | ExecutionKind::Maintenance
+                | ExecutionKind::Operator
+                | ExecutionKind::Dag
         )
     });
     let mut source_more = false;

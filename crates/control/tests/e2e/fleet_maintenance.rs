@@ -224,7 +224,7 @@ async fn nodes_catalog_lists_the_connected_node() {
     assert_eq!(node["snapshot"]["ready"], json!(true));
     assert_eq!(
         node["kinds"],
-        json!(["agent", "dag", "team", "todos", "project"])
+        json!(["agent", "dag", "team", "todos", "project", "operator"])
     );
 }
 

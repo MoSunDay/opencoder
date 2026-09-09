@@ -17,6 +17,20 @@ def port():
         return sock.getsockname()[1]
 
 
+def private_environment(runtime, source):
+    environment = {'HOME': str(runtime / 'home'), 'TMPDIR': str(runtime / 'tmp'),
+        'XDG_CONFIG_HOME': str(runtime / 'home/.config'),
+        'XDG_DATA_HOME': str(runtime / 'home/.local/share'),
+        'XDG_CACHE_HOME': str(runtime / 'home/.cache'),
+        'GIT_OPTIONAL_LOCKS': '0', 'GIT_CONFIG_GLOBAL': '/dev/null',
+        'PATH': str(runtime / 'bin') + ':/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/root/.local/bin'}
+    # bytedcli uses the existing SSO JWT before its on-disk login. Preserve
+    # that identity rather than relying on a potentially expired login copy.
+    if source.get('JWT_TOKEN'):
+        environment['JWT_TOKEN'] = source['JWT_TOKEN']
+    return environment
+
+
 class Environment:
     @classmethod
     def attach(cls, root):
@@ -29,9 +43,7 @@ class Environment:
         value.api_token = (value.runtime / 'api-token').read_text().strip() if (value.runtime / 'api-token').exists() else None
         endpoints = read(value.runtime / 'endpoints.json') if (value.runtime / 'endpoints.json').exists() else {}
         value.base, value.business, value.node = (endpoints.get(key) for key in ['server', 'api', 'node'])
-        value.env = {key: str(value.runtime / sub) for key, sub in {
-            'HOME': 'home', 'TMPDIR': 'tmp', 'XDG_CONFIG_HOME': 'home/.config',
-            'XDG_DATA_HOME': 'home/.local/share', 'XDG_CACHE_HOME': 'home/.cache'}.items()}
+        value.env = private_environment(value.runtime, os.environ)
         return value
 
     def __init__(self, root, prepared):
@@ -43,12 +55,7 @@ class Environment:
         self.token = secrets.token_hex(32)
         self.base = None
         self.node = None
-        self.env = {'HOME': str(self.runtime / 'home'), 'TMPDIR': str(self.runtime / 'tmp'),
-            'XDG_CONFIG_HOME': str(self.runtime / 'home/.config'),
-            'XDG_DATA_HOME': str(self.runtime / 'home/.local/share'),
-            'XDG_CACHE_HOME': str(self.runtime / 'home/.cache'),
-            'GIT_OPTIONAL_LOCKS': '0', 'GIT_CONFIG_GLOBAL': '/dev/null',
-            'PATH': str(self.runtime / 'bin') + ':/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/root/.local/bin'}
+        self.env = private_environment(self.runtime, os.environ)
         (self.runtime / 'bin').mkdir(exist_ok=True)
         shutil.copy2(HERE / 'systemd.py', self.runtime / 'bin/systemd-run')
         (self.runtime / 'bin/systemd-run').chmod(0o700)
@@ -64,7 +71,10 @@ class Environment:
             prepare_modules(self.runtime, prepared['workspace'], go_environment)
         else:
             write(self.runtime / 'go-module-manifest.json', {})
-        for name in ['.fornax-cli', '.lark-cli']:
+        if prepared.get('regressionFixture'):
+            from dependencies.metricw import prepare
+            prepare(self.runtime, prepared['workspace'])
+        for name in ['.fornax-cli', '.lark-cli', '.byte_cli']:
             source = Path('/root') / name
             if source.exists():
                 shutil.copytree(source, Path(self.env['HOME']) / name, symlinks=False)
@@ -166,6 +176,10 @@ class Environment:
                   Path('/usr/bin/node'), Path('/usr/local/libexec/codext.real')]
         if self.prepared.get('requiresGo', True): paths.append(Path('/usr/local/bin/go').resolve())
         inventory = {str(p): sha(p) for p in paths}
+        fixture = self.runtime / 'regression-fixture.json'
+        if fixture.exists():
+            inventory.update(read(fixture)['sha256'])
+            inventory[str(fixture)] = sha(fixture)
         resources = self.complete_resources()
         self.validate_nfs_resources()
         for name in ['eval-diagnose', 'regression-test']:

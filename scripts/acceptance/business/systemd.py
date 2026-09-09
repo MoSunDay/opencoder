@@ -43,5 +43,9 @@ if regression:
         (Path(spec['root']) / 'cache/tmp').mkdir(parents=True, exist_ok=True)
         spec.setdefault('environment', {})['TMPDIR'] = '/cache/tmp'
     spec.setdefault('environment', {}).update(json.loads((runtime / 'go-environment.json').read_text()))
+    fixture = runtime / 'regression-fixture.json'
+    if fixture.exists():
+        from metricw import configure
+        spec = configure(spec, json.loads(fixture.read_text()))
     specification.write_text(json.dumps(spec))
 os.execv('/usr/bin/systemd-run', ['systemd-run', *args])

@@ -24,6 +24,16 @@ def clone(source, target, revision, checkout=False):
     return str(target)
 
 
+def branch_provenance(repository, baseline, target, ref='refs/remotes/origin/master'):
+    git(repository, 'merge-base', '--is-ancestor', baseline, target)
+    git(repository, 'merge-base', '--is-ancestor', target, ref)
+    return {'repository': 'repos/jianying-openagent-api', 'branchRef': ref,
+        'branchHead': git(repository, 'rev-parse', '--verify', ref),
+        'commit': target, 'baseCommit': baseline, 'commitReachableFromBranch': True,
+        'baseIsAncestor': True, 'verification': 'actual git rev-parse and merge-base --is-ancestor',
+        'scope': 'Copied regression branch; does not establish historical evaluation deployment versions'}
+
+
 def prepare(root, release):
     runtime = root / 'runtime'
     state = root / 'prepared.json'
@@ -48,9 +58,9 @@ def prepare(root, release):
         repositories[name] = clone(source, workspace / 'repos' / name, revisions[name])
     # Explicitly retain the real branch and base/target ancestry in the copied repository.
     target_repo = repositories['jianying-openagent-api']
-    git(target_repo, 'merge-base', '--is-ancestor', BASE, TARGET)
-    git(target_repo, 'merge-base', '--is-ancestor', TARGET, 'refs/remotes/origin/master')
-    contexts = []
+    branch_proof = runtime / 'context/regression-branch-provenance.json'
+    write(branch_proof, branch_provenance(target_repo, BASE, TARGET))
+    contexts = [str(branch_proof)]
     for i, source in enumerate(config['contextFiles']):
         target = runtime / 'context' / f'{i}-{Path(source).name}'
         target.parent.mkdir(parents=True, exist_ok=True)

@@ -14,7 +14,9 @@ python3 scripts/acceptance/business/main.py \
 
 要求本机安装 systemd、NFS 客户端、opencoder-agent、真实 Codex 及 Playwright Chromium；平台四个二进制必须来自同一已验证 bundle。业务配置采用 `common.py` 指定的本机路径；`--scenario historical` 另外使用真实 case 5 和固定的 `jianying-openagent-api` 提交。Server 必须支持超过 60 字节的 NFS 资源路径。启动前会逐文件验证完整 skill 包经过 NFS 后的哈希，不能用补写 Node 快照代替真实导出。
 
-仅 Manager/飞书结果投递使用本地接收器。模型、输入下载、Git 版本解析、实际回归命令、结果校验和 Web 均真实运行。评测原始输入缺失的 trace workspace、历史执行版本等仍作为证据缺口报告，不补造数据。业务执行完成不代表被测提交必然通过准出。
+Manager/飞书投递及新版 Viking 工单创建使用本地接收器，兼容旧群投递和新工单接口；评测及回归分析始终经 opencoder，未知投递接口直接拒绝启动。无需建单只有在同一任务分析完成且业务返回 `not_required` 时才可验收；需要投递时必须有匹配该任务的本地回执。模型、输入下载、Git 版本解析、实际回归命令、结果校验和 Web 均真实运行。评测原始输入缺失的 trace workspace、历史执行版本等仍作为证据缺口报告，不补造数据。业务执行完成不代表被测提交必然通过准出。
+
+历史场景可用 `--evaluation-request /absolute/path/request.json` 显式提供已经核实的 trace 路由和版本信息，原始失败证据保持不变。回归分支证明来自复制仓库的实际 Git 分支头和祖先关系，不作为历史评测部署版本的证明。Runner 继承已有 `JWT_TOKEN` 身份并使用私有账号目录副本，不切换或修改宿主登录状态；凭证不进入公开回执。
 
 原 `/root/workspace` 只读使用，独立 Git 对象、上下文、账号副本、缓存、数据库均在本次 `runtime/`。Runner 使用挂载命名空间保护原目录；评测新建的 systemd 模型单元通过仅本次 Node 可用的包装器再次显式保护原目录。回归使用既有 OverlayFS/chroot 工作区。`ProtectSystem=strict` 本身不能保证 `/root` 只读。
 
@@ -23,6 +25,8 @@ python3 scripts/acceptance/business/main.py \
 启动时独立复制宿主 Go 已下载的模块归档，在私有目录使用固定提交的 `go.mod/go.sum` 补齐依赖后保存哈希清单。缺失的内部模块通过已有 SSH 身份读取，URL 转换只写入临时 HOME 的 Git 配置，严格校验已有 host key。每项测试在启动前获得自己的缓存副本，仍实际准备依赖、编译和执行；不复制编译结果，不修改宿主认证配置。无法获取的依赖直接阻止历史场景验收启动。受控正例仅使用 Node.js 实际断言，不依赖业务 Go 环境。
 
 依赖准备继承已有 HTTP/HTTPS 代理设置，值只写入本次私有配置；实际测试阶段仍切断外部网络。
+
+`--scenario historical --regression-fixture metricw-offline` 显式启用固定目标的离线 metrics 夹具。它校验目标依赖为 `metricw v0.0.4`，使用目标声明的精确 Go 工具链，并在副本中加入缺失的本地日志配置。测试阶段只允许 loopback，HTTP 夹具仅响应 metrics sampler/clip 的缺省配置请求，其他请求会使验收失败。Go 的兼容链接参数 `-ldflags=-checklinkname=0`、工具链/包装器哈希、配置和实际请求均写入 `regression-fixture.json` 及测试回执。业务代码、测试断言和依赖准备命令保持原样；使用该夹具的结果只证明所声明测试环境下的行为，不替换无夹具的历史结论。
 
 `evidence/` 保留原目录前后清单、各仓 HEAD/status、排队状态、模型实际挂载、消息、带哈希的报告和下载截图。原目录有并发写入时如实列出差异，不回滚其他任务的内容。正常结束停止本次服务、卸载 NFS，保留本次 `runtime/` 内的数据库、缓存和副本。`--retain-on-failure` 仅供诊断，使用后必须显式完成清理。
 
@@ -46,3 +50,5 @@ python3 scripts/acceptance/runc_scheduling/main.py \
 仓库进程测试使用 target 目录内的配套二进制，执行全量回归前先运行 `cargo build --workspace --bins`。通过脚本启动验证时显式关闭标准输入（例如 `cargo test --workspace </dev/null`），避免搜索工具把调用方脚本当成输入流。
 
 `result.json` 分别记录 `platformPassed`、`businessQuality` 和整体 `passed`。只有真实执行、Web 及有效业务结论全部满足才整体通过。依赖失败、未执行断言和缺失证据不会变成成功；历史失败证据保持原样。验收完成后不附加固定观察等待。
+
+验收工具自身的回归入口：`python3 -m unittest discover -s scripts/acceptance/business/tests` 和 `node --test scripts/acceptance/business/tests/delivery.test.mjs`，覆盖真实 Git 祖先校验、输入拒绝、私有身份、投递隔离、质量门禁及数据保留。

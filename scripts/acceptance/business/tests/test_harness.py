@@ -8,11 +8,22 @@ import tempfile
 import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from common import git, run
+from environment import private_environment
 from snapshots import clone
 from verify import messages, read_only_at
 
 
 class Boundaries(unittest.TestCase):
+    def test_private_runner_preserves_existing_sso_without_forwarding_unrelated_secrets(self):
+        source = {'HOME': '/original', 'JWT_TOKEN': 'existing-test-sso', 'UNRELATED_SECRET': 'excluded'}
+        environment = private_environment(Path('/private/runtime'), source)
+        self.assertEqual(environment['JWT_TOKEN'], source['JWT_TOKEN'])
+        self.assertEqual(environment['HOME'], '/private/runtime/home')
+        self.assertEqual(environment['XDG_CONFIG_HOME'], '/private/runtime/home/.config')
+        self.assertNotIn('UNRELATED_SECRET', environment)
+        self.assertEqual(source['HOME'], '/original')
+        self.assertNotIn('JWT_TOKEN', private_environment(Path('/private/runtime'), {}))
+
     def test_batch_command_does_not_consume_its_callers_input(self):
         helper = str(Path(__file__).resolve().parents[1])
         script = ('import sys; sys.path.insert(0, sys.argv[1]); from common import run; '

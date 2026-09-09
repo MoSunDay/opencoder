@@ -193,9 +193,12 @@ def verify(environment, jobs):
     assert str(brief['request']['caseId']) == str(expected_case['caseId'])
     assert brief['request'].get('runId') == expected_case.get('runId')
     def delivered():
+        from validation.delivery import delivered as confirmed_delivery
+        current_business = http(environment.business, environment.api_token,
+            '/api/v1/eval-diagnose/jobs/' + jobs['eval-diagnose'])
         file = environment.root / 'evidence/delivery.jsonl'
-        return file.exists() and any(row['type'] == 'local-delivery' and row['jobId'] == jobs['eval-diagnose']
-            for row in map(json.loads, file.read_text().splitlines()))
+        records = list(map(json.loads, file.read_text().splitlines())) if file.exists() else []
+        return confirmed_delivery(current_business, jobs['eval-diagnose'], records)
     until(delivered, 'local result delivery')
     from validation.quality import quality_results
     evaluation = read(environment.root / 'evidence/eval-diagnose/artifacts/result.json')

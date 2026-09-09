@@ -97,6 +97,12 @@ def cleanup(environment, result, destroy=False):
 
 
 def prepare_environment(root, args):
+    # Reject bad overrides before starting fixture processes or copying runtime data.
+    request = read(args.evaluation_request) if args.evaluation_request else None
+    if args.evaluation_request and not isinstance(request, dict):
+        raise ValueError('Evaluation request must be a JSON object')
+    if args.regression_fixture and args.scenario != 'historical':
+        raise ValueError('The metrics fixture applies only to the historical Go scenario')
     from validation.bundle import verify_platform
     manifest, binaries = verify_platform(args.platform_bundle)
     write(root / 'evidence/platform-manifest.json', manifest)
@@ -116,6 +122,12 @@ def prepare_environment(root, args):
                  'from snapshots import prepare; prepare(Path(sys.argv[2]), Path(sys.argv[3]))',
                  HERE, root, args.release.resolve()], capture=False, timeout=7200)
         prepared = read(root / 'prepared.json')
+    if args.evaluation_request:
+        write(root / 'evidence/baseline/request.json', request)
+        if prepared.get('requests'):
+            prepared['requests']['eval-diagnose'] = request
+    if args.regression_fixture:
+        prepared['regressionFixture'] = args.regression_fixture
     prepared['platformBinaries'] = binaries
     if not Path(prepared['workspace']).is_dir():
         raise RuntimeError('Acceptance workspace is missing; choose a new root')
@@ -139,6 +151,10 @@ def main():
         help='Explicitly authorize removal of this run\'s owned temporary databases and copies after shutdown')
     parser.add_argument('--platform-bundle', type=Path)
     parser.add_argument('--scenario', choices=['positive', 'historical'], default='positive')
+    parser.add_argument('--evaluation-request', type=Path,
+        help='Explicit evaluation request with independently verified trace routing/version metadata')
+    parser.add_argument('--regression-fixture', choices=['metricw-offline'],
+        help='Use a declared loopback metrics configuration fixture for the historical Go target')
     parser.add_argument('--retain-on-failure', action='store_true',
         help='Keep this private environment for diagnosis; it must be explicitly cleaned afterward')
     parser.add_argument('--inside-private-namespace', action='store_true', help=argparse.SUPPRESS)

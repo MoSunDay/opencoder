@@ -161,7 +161,7 @@ def main():
             '/usr/bin/python3', str(HERE / 'main.py'), *sys.argv[1:], '--inside-private-namespace'])
     initialize_runtime(root)
     environment = None
-    result = {'passed': False}
+    result = {'passed': False, 'platformPassed': False, 'businessQuality': {}}
     try:
         environment = prepare_environment(root, args)
         environment.launch()

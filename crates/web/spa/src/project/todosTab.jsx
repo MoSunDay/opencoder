@@ -199,7 +199,7 @@ export function TodosTab({ overview, refresh, openTodo, onNotice, milestoneFilte
   };
 
   const columns = [
-    { title: '标题', dataIndex: 'title', key: 'title', ellipsis: true, render: (v, r) => <a onClick={() => openTodo(r.id)}>{v}</a> },
+    { title: '标题', dataIndex: 'title', key: 'title', ellipsis: true, render: (v, r) => <Button type="link" onClick={() => openTodo(r.id)} style={{ padding: 0, height: 'auto' }}>{v}</Button> },
     {
       title: '里程碑',
       key: 'milestone',

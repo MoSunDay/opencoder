@@ -35,11 +35,9 @@
 import { Collapse, Tag, Typography } from 'antd';
 import { fmtDuration } from './format.js';
 import { sayPresentation } from './transcript/markdown.js';
+import { MONO_VAR } from './ui/mono.js';
 
 const { Text, Paragraph } = Typography;
-
-// TUI-flavoured monospace carried over from the old TextTurn/ToolTurn.
-const MONO = 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
 
 // One disclosure glyph, changing with the actual state (TUI ▸ / ❯).
 // A literal glyph in the label plus antd's default icon produced two arrows.
@@ -61,8 +59,8 @@ export function ThinkContent({ turn }) {
         children: (
           <Paragraph
             style={{
-              fontFamily: MONO, fontSize: 12,
-              whiteSpace: 'pre-wrap', color: '#8c8c8c', marginBottom: 0,
+              fontFamily: MONO_VAR, fontSize: 12,
+              whiteSpace: 'pre-wrap', color: 'var(--oc-text-tertiary)', marginBottom: 0,
             }}
           >
             {turn.text || ''}
@@ -86,7 +84,7 @@ export function ToolContent({ turn }) {
       items={[{
         key: 'tool',
         label: (
-          <span style={{ fontFamily: MONO, fontSize: 12 }}>
+          <span style={{ fontFamily: MONO_VAR, fontSize: 12 }}>
             🔧 {turn.name || 'tool'}
             {dur ? <Text type="secondary"> · {dur}</Text> : null}
             {turn.isError ? <Tag color="red" style={{ marginLeft: 8 }}>error</Tag> : null}
@@ -95,14 +93,14 @@ export function ToolContent({ turn }) {
         children: (
           <>
             {turn.input ? (
-              <Paragraph style={{ fontFamily: MONO, fontSize: 12, whiteSpace: 'pre-wrap', marginBottom: 4 }}>
+              <Paragraph style={{ fontFamily: MONO_VAR, fontSize: 12, whiteSpace: 'pre-wrap', marginBottom: 4 }}>
                 <Text type="secondary">input:</Text>
                 {'\n'}
                 {turn.input}
               </Paragraph>
             ) : null}
             {turn.output ? (
-              <Paragraph style={{ fontFamily: MONO, fontSize: 12, whiteSpace: 'pre-wrap', marginBottom: 0 }}>
+              <Paragraph style={{ fontFamily: MONO_VAR, fontSize: 12, whiteSpace: 'pre-wrap', marginBottom: 0 }}>
                 <Text type="secondary">output:</Text>
                 {'\n'}
                 {turn.output}
@@ -122,11 +120,11 @@ export function ToolContent({ turn }) {
 function StepThinking({ text }) {
   return (
     <div style={{ marginBottom: 4 }}>
-      <div style={{ fontFamily: MONO, fontSize: 12, color: '#8c8c8c' }}>💭 Thinking</div>
+      <div style={{ fontFamily: MONO_VAR, fontSize: 12, color: 'var(--oc-text-tertiary)' }}>💭 Thinking</div>
       <Paragraph
         style={{
-          fontFamily: MONO, fontSize: 12,
-          whiteSpace: 'pre-wrap', color: '#8c8c8c', marginBottom: 0,
+          fontFamily: MONO_VAR, fontSize: 12,
+          whiteSpace: 'pre-wrap', color: 'var(--oc-text-tertiary)', marginBottom: 0,
         }}
       >
         {text}
@@ -152,7 +150,7 @@ function StepCollapse({ step, index }) {
       items={[{
         key: 'step:' + k,
         label: (
-          <span style={{ fontFamily: MONO, fontSize: 12 }}>
+          <span style={{ fontFamily: MONO_VAR, fontSize: 12 }}>
             Step({k})
             {failed ? <Tag color="red" style={{ marginLeft: 8 }}>error</Tag> : null}
           </span>
@@ -168,7 +166,7 @@ function StepCollapse({ step, index }) {
                 items={[{
                   key: 'calls:' + k,
                   label: (
-                    <span style={{ fontFamily: MONO, fontSize: 12 }}>
+                    <span style={{ fontFamily: MONO_VAR, fontSize: 12 }}>
                       {list.length} Function call{list.length === 1 ? '' : 's'}
                     </span>
                   ),
@@ -230,7 +228,7 @@ export function StepsContent({ turn, preview }) {
       items={[{
         key: 'steps',
         label: (
-          <span style={{ fontFamily: MONO, fontSize: 12 }}>
+          <span style={{ fontFamily: MONO_VAR, fontSize: 12 }}>
             {`${steps.length} Step${steps.length === 1 ? '' : 's'}${hasSay && headingPreview ? ': ' + headingPreview : ''}`}
             {running ? <Tag color="processing" style={{ marginLeft: 12 }}>running</Tag> : null}
             {!running && errored ? <Tag color="red" style={{ marginLeft: 12 }}>error</Tag> : null}

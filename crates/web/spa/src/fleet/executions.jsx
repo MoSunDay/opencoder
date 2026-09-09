@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiGet, apiPost } from '../api.js';
 import { PageShell } from '../shell/pageShell.jsx';
 import { StatusTag } from '../ui/statusTag.jsx';
+import { MONO_VAR } from '../ui/mono.js';
 import { TimeText } from '../ui/timeText.jsx';
 import { ExecutionDetail } from './detail.jsx';
 import { CREATABLE_KINDS, KIND_LABELS, KINDS, executionPagePath, newId, nodeOptions } from './model.js';
@@ -14,10 +15,13 @@ export function ExecutionsPanel({ onNotice }) {
   const [kind, setKind] = useState('agent'); const [detail, setDetail] = useState(null);
   const [busy, setBusy] = useState(false); const [filter, setFilter] = useState('');
   const [more, setMore] = useState(false); const [loadingMore, setLoadingMore] = useState(false);
+  /// 索引表拉取态：reset（首屏/换筛选/刷新）与 append（翻页）都是 in-flight；
+  /// 只有 3s poll 静默，免得表格每 3 秒闪一次 spinner。
+  const [loading, setLoading] = useState(true);
   const attempt = useRef(null); const cursor = useRef(null); const extended = useRef(false); const [form] = Form.useForm();
   const load = useCallback(async (mode = 'reset') => {
     const append = mode === 'append';
-    if (append) setLoadingMore(true);
+    if (append) setLoadingMore(true); else if (mode !== 'poll') setLoading(true);
     try {
       const [a, b] = await Promise.all([apiGet(executionPagePath(filter, append ? cursor.current : null)), apiGet('/api/nodes')]);
       const page = a.executions || [];
@@ -32,7 +36,7 @@ export function ExecutionsPanel({ onNotice }) {
       setNodes(b.nodes || []);
     }
     catch (e) { onNotice(err(e.message)); }
-    finally { if (append) setLoadingMore(false); }
+    finally { if (append) setLoadingMore(false); else if (mode !== 'poll') setLoading(false); }
   }, [filter, onNotice]);
   useEffect(() => {
     let live = true;
@@ -67,11 +71,11 @@ export function ExecutionsPanel({ onNotice }) {
       <Button type="primary" htmlType="submit" loading={busy}>启动执行</Button>
     </Form>
     <Space style={{ margin: '20px 0 12px' }}><Select aria-label="执行类型筛选" style={{ width: 180 }} value={filter} onChange={setFilter} options={[{ value: '', label: '全部执行' }, ...KINDS]} /><Button onClick={() => load('reset')}>刷新</Button></Space>
-    <Table scroll={{ x: 'max-content' }} rowKey="id" dataSource={rows} size="small" columns={[
-      { title: 'ID', dataIndex: 'id', render: (id, row) => <Button type="link" style={{ fontFamily: 'var(--oc-mono, monospace)' }} onClick={() => setDetail(row)}>{id}</Button> },
+    <Table scroll={{ x: 'max-content' }} rowKey="id" dataSource={rows} size="small" loading={loading || loadingMore} columns={[
+      { title: 'ID', dataIndex: 'id', render: (id, row) => <Button type="link" style={{ fontFamily: MONO_VAR }} onClick={() => setDetail(row)}>{id}</Button> },
       { title: '类型', dataIndex: 'kind', render: (v) => KIND_LABELS[v] || v },
       { title: '创建时间', dataIndex: 'created_at', render: (v) => <TimeText ts={v} /> },
-      { title: '所属节点', dataIndex: 'node_id', render: (id) => <Space size={4}><span style={{ fontFamily: 'var(--oc-mono, monospace)' }}>{id}</span><StatusTag status={nodes.find((node) => node.id === id)?.online ? 'online' : 'offline'} /></Space> },
+      { title: '所属节点', dataIndex: 'node_id', render: (id) => <Space size={4}><span style={{ fontFamily: MONO_VAR }}>{id}</span><StatusTag status={nodes.find((node) => node.id === id)?.online ? 'online' : 'offline'} /></Space> },
       { title: '状态', dataIndex: 'status', render: (v) => <StatusTag status={v} /> },
     ]} />
     {more && <Button block loading={loadingMore} onClick={() => load('append')}>加载更早的执行</Button>}

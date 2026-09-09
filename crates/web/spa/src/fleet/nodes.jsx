@@ -4,6 +4,7 @@ import { apiGet, apiPost } from '../api.js';
 import { setState } from '../store.js';
 import { PageShell } from '../shell/pageShell.jsx';
 import { StatusTag } from '../ui/statusTag.jsx';
+import { MONO_VAR } from '../ui/mono.js';
 import { ExecutionDetail } from './detail.jsx';
 import { newId } from './model.js';
 import { err } from '../notice.js';
@@ -14,12 +15,16 @@ export function FleetNodesPanel({ onNotice }) {
   const [scheduling, setScheduling] = useState(null);
   const [action, setAction] = useState('status'); const [input, setInput] = useState('');
   const [result, setResult] = useState(null); const [busy, setBusy] = useState(false); const [detail, setDetail] = useState(null);
+  /// 列表拉取态：silent = 3s 轮询（静默，不闪 spinner），非 silent = 首屏 / 手动刷新。
+  const [loading, setLoading] = useState(true);
   const attempt = useRef(null);
-  const load = useCallback(async () => {
+  const load = useCallback(async (silent) => {
+    if (!silent) setLoading(true);
     try { const j = await apiGet('/api/nodes'); setRows(j.nodes); setState({ nodes: j.nodes }); }
     catch (e) { onNotice(err(e.message)); }
+    finally { if (!silent) setLoading(false); }
   }, [onNotice]);
-  useEffect(() => { load(); const timer = setInterval(load, 3000); return () => clearInterval(timer); }, [load]);
+  useEffect(() => { load(false); const timer = setInterval(() => load(true), 3000); return () => clearInterval(timer); }, [load]);
   const perform = async () => {
     setBusy(true);
     try {
@@ -34,9 +39,9 @@ export function FleetNodesPanel({ onNotice }) {
     } catch (e) { onNotice(err(e.message)); }
     finally { setBusy(false); }
   };
-  return <PageShell page="nodes" extra={<Button onClick={load}>刷新节点</Button>}>
-    <Table scroll={{ x: 'max-content' }} locale={{ emptyText: '暂无 Opencoder 节点' }} rowKey="id" dataSource={rows} columns={[
-      { title: '节点', dataIndex: 'name', render: (v, r) => <Space orientation="vertical"><b>{v}</b><small style={{ fontFamily: 'var(--oc-mono, monospace)' }}>{r.id}</small></Space> },
+  return <PageShell page="nodes" extra={<Button onClick={() => load(false)}>刷新节点</Button>}>
+    <Table scroll={{ x: 'max-content' }} locale={{ emptyText: '暂无 Opencoder 节点' }} rowKey="id" dataSource={rows} loading={loading} columns={[
+      { title: '节点', dataIndex: 'name', render: (v, r) => <Space orientation="vertical"><b>{v}</b><small style={{ fontFamily: MONO_VAR }}>{r.id}</small></Space> },
       { title: '状态', render: (_, r) => <StatusTag status={r.online ? 'online' : 'offline'} label={r.online ? (r.snapshot?.resource_error || '在线') : '离线'} color={r.online && r.snapshot?.ready ? 'success' : 'error'} /> },
       { title: '可用 CPU', render: (_, r) => r.snapshot?.cpu_capacity ?? '—' },
       { title: '运行 / 最大并发', render: (_, r) => r.snapshot ? `${r.snapshot.active_runs} / ${r.snapshot.max_runs}` : '—' },
@@ -44,7 +49,7 @@ export function FleetNodesPanel({ onNotice }) {
       { title: '排队顺序', render: (_, r) => r.snapshot ? (r.snapshot.queue_order === 'lifo' ? '后入先出 LIFO' : '先入先出 FIFO') : '—' },
       { title: '活跃 agent loops', render: (_, r) => r.snapshot?.active_agent_loops ?? '—' },
       { title: 'loops / CPU', render: (_, r) => r.snapshot ? (r.snapshot.active_agent_loops / r.snapshot.cpu_capacity).toFixed(2) : '—' },
-      { title: '维护 agent', dataIndex: 'maintenance_agent_id', render: (v) => <span style={{ fontFamily: 'var(--oc-mono, monospace)' }}>{v || '—'}</span> },
+      { title: '维护 agent', dataIndex: 'maintenance_agent_id', render: (v) => <span style={{ fontFamily: MONO_VAR }}>{v || '—'}</span> },
       { title: '操作', render: (_, r) => <Space><Button disabled={!r.online} onClick={() => setScheduling(r)}>调度配置</Button><Button disabled={!r.online} onClick={() => { setSelected(r); setResult(null); }}>维护节点</Button></Space> },
     ]} />
     <Modal open={!!selected} title={`节点维护 · ${selected?.name || ''}`} onCancel={() => setSelected(null)} footer={null} width={800}>

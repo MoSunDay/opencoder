@@ -9,6 +9,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiDel, apiGet, apiPost, apiPut } from './api.js';
 import { newId } from './fleet/model.js';
 import { PageShell } from './shell/pageShell.jsx';
+import { MONO_VAR } from './ui/mono.js';
 import { TodoEditor } from './todoEditor.jsx';
 import { TodoRunsPanel } from './todoRunsPanel.jsx';
 import { err, info } from './notice.js';
@@ -83,7 +84,7 @@ function CreateTemplateForm({ onNotice, onCreated }) {
           </Col>
         </Row>
         <Form.Item name="specText" label="spec（WorkflowSpec JSON）" rules={[{ required: true, message: '请填写 spec' }]}>
-          <TextArea rows={10} style={{ fontFamily: 'monospace' }} aria-label="new-template-spec" />
+          <TextArea rows={10} style={{ fontFamily: MONO_VAR }} aria-label="new-template-spec" />
         </Form.Item>
         <Space>
           <Button type="primary" htmlType="submit" loading={saving}>创建</Button>

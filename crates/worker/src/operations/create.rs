@@ -3,7 +3,7 @@ use anyhow::{bail, Context, Result};
 use opencoder_core::{fleet::*, Config};
 use serde_json::{json, Value};
 
-pub(super) use super::launch::{launch, launch_locked, LaunchOutcome};
+pub(super) use super::launch::{launch_locked, LaunchOutcome};
 
 /// Result-first override mirroring (same precedence as the workload's
 /// brain_override): a re-execute command's stored resolution always
@@ -94,10 +94,6 @@ pub(super) async fn create(worker: &Worker, mut assignment: Assignment) -> Resul
     {
         return Ok(RpcReply::error(400, "unsupported execution kind"));
     }
-    let permit = match worker.inner.slots.clone().try_acquire_owned() {
-        Ok(permit) => permit,
-        Err(_) => return Ok(RpcReply::error(429, "node execution capacity exhausted")),
-    };
     if assignment.request.kind == ExecutionKind::Project {
         super::project_admission::ensure_id(&mut assignment.request.input)?;
     }
@@ -137,6 +133,7 @@ pub(super) async fn create(worker: &Worker, mut assignment: Assignment) -> Resul
         Lifecycle::default()
     };
     let record = Record {
+        queue: None,
         assignment,
         result: project_run
             .as_ref()
@@ -146,8 +143,8 @@ pub(super) async fn create(worker: &Worker, mut assignment: Assignment) -> Resul
         events: vec![],
         lifecycle,
     };
-    worker.inner.journal.lock().await.save(record.clone())?;
-    let _ = launch(worker.clone(), record.clone(), config, permit, false).await?;
+    let record = super::queue::enqueue(worker, record, config, false).await?;
+    super::queue::dispatch_locked(worker).await?;
     let mut body = json!(
         worker.inner.journal.lock().await.records[&record.assignment.index.id]
             .assignment
@@ -223,6 +220,10 @@ pub(super) fn prepare(worker: &Worker, assignment: &Assignment, legacy: bool) ->
         bail!("node persistence unavailable: {error}");
     }
     let mut config = worker.configuration()?;
+    if let Some(settings) = &assignment.codex {
+        settings.validate().map_err(anyhow::Error::msg)?;
+        config.agent.codex = Some(settings.as_ref().clone());
+    }
     let source = config
         .agent
         .agents_dir
@@ -388,7 +389,29 @@ pub(super) fn prepare(worker: &Worker, assignment: &Assignment, legacy: bool) ->
                 config.resolve_endpoint()?;
             }
             if codex {
-                opencoder_session::harness::codex::binary_path(&envs, &worker.inner.state.workdir)?;
+                if assignment.request.kind == ExecutionKind::Agent
+                    && assignment.codex.is_some()
+                    && (!envs.is_empty()
+                        || assignment
+                            .request
+                            .input
+                            .get("model")
+                            .is_some_and(|v| !v.is_null()))
+                {
+                    bail!("Codex parameters are managed by Harness configuration; per-task model/env overrides are not allowed");
+                }
+                let mut effective_envs = config
+                    .agent
+                    .codex
+                    .as_ref()
+                    .map(|s| s.envs.clone())
+                    .unwrap_or_default();
+                effective_envs.extend(envs);
+                opencoder_session::harness::codex::configured_binary(
+                    config.agent.codex.as_ref(),
+                    &effective_envs,
+                    &worker.inner.state.workdir,
+                )?;
             }
             Ok::<_, anyhow::Error>(())
         })?;
@@ -418,7 +441,7 @@ pub(crate) async fn start(
         match super::project_admission::existing(worker, &id[8..], &command.action, &command.input)
             .await
         {
-            Ok(Some(run)) => return Ok(super::project_admission::receipt(worker, id, &run)),
+            Ok(Some(run)) => return Ok(super::project_admission::receipt(worker, id, &run).await),
             Ok(None) => {}
             Err(error) => return Ok(RpcReply::error(409, error.to_string())),
         }
@@ -437,6 +460,9 @@ pub(crate) async fn start(
         };
         (record, journal.uses_legacy(id))
     };
+    if record.assignment.index.status == ExecutionStatus::Pending {
+        return Ok(RpcReply::error(409, "execution is already pending"));
+    }
     if matches!(
         record.assignment.index.status,
         ExecutionStatus::Done | ExecutionStatus::Cancelled
@@ -502,10 +528,6 @@ pub(crate) async fn start(
         }
         record.result["next_action"] = json!(action);
     }
-    let permit = match worker.inner.slots.clone().try_acquire_owned() {
-        Ok(p) => p,
-        Err(_) => return Ok(RpcReply::error(429, "node execution capacity exhausted")),
-    };
     let mut effective = record.assignment.clone();
     if let Some(snapshot) = record.result.get("next_snapshot") {
         effective.definition = Some(snapshot.clone());
@@ -548,17 +570,18 @@ pub(crate) async fn start(
     } else {
         None
     };
-    match launch(worker.clone(), record, config, permit, true).await? {
-        LaunchOutcome::Started => Ok(match project_run {
-            Some(run) => super::project_admission::receipt(worker, id, &run),
-            None => RpcReply::ok(json!({"id":id,"status":"running"})),
-        }),
-        LaunchOutcome::Running => Ok(RpcReply::error(409, "execution is running")),
-        LaunchOutcome::NotRunnable(status) => Ok(RpcReply::error(
-            409,
-            format!("execution cannot start from {}", status.as_str()),
-        )),
-    }
+    super::queue::enqueue(worker, record, config, true).await?;
+    super::queue::dispatch_locked(worker).await?;
+    let status = worker.inner.journal.lock().await.records[id]
+        .assignment
+        .index
+        .status;
+    let mut reply = match project_run {
+        Some(run) => super::project_admission::receipt(worker, id, &run).await,
+        None => RpcReply::ok(json!({"id":id})),
+    };
+    reply.body["status"] = json!(status);
+    Ok(reply)
 }
 
 #[cfg(test)]

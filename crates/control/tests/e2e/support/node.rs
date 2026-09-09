@@ -267,6 +267,8 @@ impl NodeService for MockNode {
     fn snapshot(&self) -> NodeSnapshot {
         let t = self.tables.lock().unwrap();
         NodeSnapshot {
+            pending_runs: 0,
+            queue_order: Default::default(),
             generation: format!("{}-g1", self.id),
             sequence: self.snapshot_seq.fetch_add(1, Ordering::SeqCst),
             cpu_capacity: 4.0,

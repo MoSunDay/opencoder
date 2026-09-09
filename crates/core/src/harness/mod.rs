@@ -1,6 +1,9 @@
 //! Execution selection and private, durable harness state.
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, path::PathBuf, str::FromStr};
+pub mod scope;
+mod settings;
+pub use settings::CodexSettings;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -35,6 +38,7 @@ impl FromStr for Harness {
 #[derive(Clone, Default, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct HarnessRuntime {
+    pub codex: Option<CodexSettings>,
     pub harness: Harness,
     pub thread_id: Option<String>,
     pub fork_from: Option<String>,
@@ -49,6 +53,24 @@ pub fn agent_harness(name: &str) -> Harness {
     crate::agent::read_agent_meta(name)
         .map(|m| m.harness)
         .unwrap_or_default()
+}
+
+/// Only fresh Codex sessions take managed defaults. Existing threads keep their snapshot.
+pub fn pin_settings(runtime: &mut HarnessRuntime, settings: Option<&CodexSettings>) {
+    if runtime.harness != Harness::Codex
+        || runtime.codex.is_some()
+        || runtime.thread_id.is_some()
+        || runtime.last_input_id.is_some()
+    {
+        return;
+    }
+    if let Some(settings) = settings {
+        let mut envs = settings.envs.clone();
+        envs.extend(runtime.envs.clone());
+        runtime.envs = envs;
+        runtime.model = settings.model.clone();
+        runtime.codex = Some(settings.clone());
+    }
 }
 
 pub fn parse_env(s: &str) -> Result<(String, String), String> {

@@ -1,4 +1,4 @@
-Commit: (working-tree, 基于 65c9d891ae905e7925277d29a87cd8e7957e8dad)
+Commit: (working-tree, 基于 303b95027b49873a9833393d57b72de68747a9e0)
 
 # project 模块
 
@@ -12,13 +12,15 @@ Plan 固定使用 plan Agent。Execute 可选择 agent/team/dag/brain；Plan 与
 
 ## 接收与运行身份
 
-`ProjectService` 持有 `OnceLock<Arc<Deps>>`。`Deps` 包含 Store、ProjectStore、工作目录、客户端替身、可选 brain、admission 锁、活跃驱动注册表、归档根和持久化错误标记。
+`ProjectService` 持有 `OnceLock<Arc<Deps>>`。`Deps` 包含 Store、ProjectStore、工作目录、客户端替身、可选 brain、admission 锁、活跃驱动及待调度预约注册表、归档根和持久化错误标记。
 
 `runs.rs` 把接收与启动分开：
 
 1. `accepted_attempt` 先按 `prun-*` ID、todo、kind 和原始请求确认回执；相同 ID 重试沿用原记录，不重新读取可变定义。
 2. `reserve_attempt` 校验方案与执行器，保存请求、todo、目标/里程碑上下文、解析后的执行器和资源根。Store 在事务内互斥 Plan/Execute，并分配 `MAX(version)+1`；仅 Execute 将 todo 置为 running。
-3. Worker 写入接受 journal 后调用 `drive_reserved`。已终态或已有活跃驱动时不重复启动。
+3. `Deps.reserved` 保护尚未启动的预约，不被失联扫描收敛，也不能重复 Plan；Worker 重启从 pending journal 重建预约。Worker 取得节点容量后调用 `drive_reserved`，活跃驱动接管注册；取消移除预约并收敛运行记录。已终态或已有活跃驱动时不重复启动。
+
+`recover::spawn_run_driver` 继承资源根与受管 Harness 任务作用域，内部重新读取 Config 仍使用已接受参数。
 
 `start_plan`、`start_execute` 和 `start_execute_with` 是本地入口；后者支持控制面预解析的 `ExecutorOverride`。存储失败会阻止后续接收。
 

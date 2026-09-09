@@ -15,7 +15,7 @@ pub(super) async fn update(worker: &Worker, command: NodeAdmissionCommand) -> Re
     }
     Ok(RpcReply::ok(json!({
         "mode": if worker.admission_open() { "open" } else { "frozen" },
-        "active_runs": worker.inner.max_runs - worker.inner.slots.available_permits(),
+        "active_runs": worker.active_runs(),
         "owned_processes": opencoder_session::process::active_owned_processes(),
     })))
 }

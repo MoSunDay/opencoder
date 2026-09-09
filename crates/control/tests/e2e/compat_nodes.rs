@@ -173,7 +173,7 @@ async fn task_create_validates_caller_ids_and_node_pins() {
     assert_eq!(status, 503, "{body}");
     assert_eq!(
         body["error"],
-        json!("no eligible online node with capacity for this execution")
+        json!("no ready online node can accept this execution")
     );
 
     // Continuing an unknown conversation on this node is a 409, not a create.

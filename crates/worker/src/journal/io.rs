@@ -19,6 +19,7 @@ pub(crate) fn read_record(path: &Path, allow_legacy_kind: bool) -> Result<Record
 
 pub(crate) fn same_execution(left: &Record, right: &Record) -> bool {
     left.assignment.request == right.assignment.request
+        && left.assignment.codex == right.assignment.codex
         && left.assignment.definition == right.assignment.definition
         && left.assignment.index.id == right.assignment.index.id
         && left.assignment.index.kind == right.assignment.index.kind

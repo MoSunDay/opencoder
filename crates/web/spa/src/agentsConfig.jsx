@@ -4,11 +4,11 @@
 // agentDetail.jsx，不新增路由页。NFS 导出状态块在表下方。
 
 import {
-  Button, Form, Input, Modal, Popconfirm, Select, Space, Table, Tag, Typography, message,
+  Button, Form, Input, Modal, Popconfirm, Select, Space, Table, Tabs, Tag, Typography, message,
 } from 'antd';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiDel, apiGet, apiPatch, apiPost } from './api.js';
-import { REF_FIELDS, refCells, resourceOptions } from './agentsItems.js';
+import { REF_FIELDS, resolvedNames, resourceOptions } from './agentsItems.js';
 import { AgentDetail } from './agentDetail.jsx';
 import { AgentNfsCard } from './agentNfsCard.jsx';
 import { ExecutionDetail } from './fleet/detail.jsx';
@@ -16,6 +16,7 @@ import { err } from './notice.js';
 import { newId, nodeOptions } from './fleet/model.js';
 import { PageShell } from './shell/pageShell.jsx';
 import { HarnessFields, parseEnvs } from './harness/fields.jsx';
+import { AgentHarnessSettings, HarnessManagement } from './harness/management.jsx';
 
 const { Text } = Typography;
 
@@ -70,6 +71,15 @@ function CreateAgentModal({ open, resources, onClose, onCreated, onNotice }) {
 }
 
 export function AgentsPanel({ onNotice }) {
+  return <PageShell page="agents"><Tabs destroyOnHidden items={[
+    { key: 'agents', label: 'Agent 列表', children: <AgentListPanel onNotice={onNotice} /> },
+    { key: 'agent-harness', label: 'Agent Harness', children: <AgentHarnessSettings onNotice={onNotice} /> },
+    { key: 'harnesses', label: 'Harness 管理', children: <HarnessManagement onNotice={onNotice} /> },
+    { key: 'nfs', label: 'NFS 配置', children: <AgentNfsCard onNotice={onNotice} /> },
+  ]} /></PageShell>;
+}
+
+function AgentListPanel({ onNotice }) {
   const [agents, setAgents] = useState([]);
   const [active, setActive] = useState(null);
   const [resources, setResources] = useState({ prompts: [], skills: [], tools: [], memory: [] });
@@ -176,17 +186,19 @@ export function AgentsPanel({ onNotice }) {
         </Space>
       ),
     },
-    {
-      title: '当前引用',
-      key: 'refs',
-      render: (_, r) => (
-        <Space size={[4, 4]} wrap>
-          {refCells(r.current).map(({ field, label, value }) => (
-            <Tag key={field} color={value ? 'geekblue' : 'default'}>{label}: {value || '—'}</Tag>
-          ))}
-        </Space>
-      ),
-    },
+    ...REF_FIELDS.map(({ field, label, cat }) => ({
+      title: label, key: field,
+      render: (_, row) => {
+        const name = row.current?.[field];
+        const resource = resources[cat].find((r) => r.name === name);
+        if (!name) return <Text type="secondary">{row.builtin ? '内置' : '—'}</Text>;
+        return <Space orientation="vertical" size={2}>
+          <Tag color={resource ? 'geekblue' : 'error'}>{name} · {resource ? `v${resource.current}` : '资源缺失'}</Tag>
+          {resource && <Text code>{`${cat}/${name}/v${resource.current}/`}</Text>}
+          <Text type="secondary">{resolvedNames(row.references, field).join('、') || '暂无内容'}</Text>
+        </Space>;
+      },
+    })),
     { title: 'Harness', dataIndex: 'harness', render: (v) => v === 'codex' ? 'Codex' : 'OpenCoder' },
     { title: '更新时间', dataIndex: 'updated_at', key: 'updated_at', width: 200, render: (v) => v || '-' },
     {
@@ -206,10 +218,8 @@ export function AgentsPanel({ onNotice }) {
   ];
 
   return (
-    <PageShell
-      page="agents"
-      extra={(
-        <Space>
+    <div>
+        <Space style={{ marginBottom: 16 }} wrap>
           <Select
             allowClear
             style={{ minWidth: 220 }}
@@ -221,8 +231,6 @@ export function AgentsPanel({ onNotice }) {
           />
           <Button type="primary" onClick={() => setCreating(true)}>新建</Button>
         </Space>
-      )}
-    >
       <Table
         rowKey="name"
         size="small"
@@ -233,7 +241,6 @@ export function AgentsPanel({ onNotice }) {
         scroll={{ x: 'max-content' }}
         locale={{ emptyText: '暂无 agent' }}
       />
-      <AgentNfsCard onNotice={onNotice} />
       <CreateAgentModal
         open={creating}
         resources={resources}
@@ -256,6 +263,6 @@ export function AgentsPanel({ onNotice }) {
         </Form>
       </Modal>
       {execution && <ExecutionDetail id={execution.id} summary={execution} onClose={() => setExecution(null)} onNotice={onNotice} />}
-    </PageShell>
+    </div>
   );
 }

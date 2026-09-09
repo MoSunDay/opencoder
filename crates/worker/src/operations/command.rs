@@ -85,7 +85,7 @@ pub(super) async fn command(
             match super::project_admission::existing(worker, todo, action, &command.input["input"])
                 .await
             {
-                Ok(Some(run)) => super::project_admission::receipt(worker, id, &run),
+                Ok(Some(run)) => super::project_admission::receipt(worker, id, &run).await,
                 Ok(None) => RpcReply::error(404, "project run not accepted"),
                 Err(error) => RpcReply::error(409, error.to_string()),
             },
@@ -163,6 +163,22 @@ pub(crate) async fn durable_stop(
         .request_stop(id, intent, cancel.is_some())?;
     if update.signal {
         cancel.expect("active cancellation token").cancel();
+    } else {
+        let record = worker.inner.journal.lock().await.records.get(id).cloned();
+        if let Some(record) = record.filter(|r| r.assignment.index.kind == ExecutionKind::Project) {
+            if let Some(run) = record.result["next_run_id"].as_str() {
+                worker.inner.state.project.cancel(run).await?;
+                worker
+                    .inner
+                    .state
+                    .project
+                    .require()?
+                    .reserved
+                    .lock()
+                    .unwrap()
+                    .remove(run);
+            }
+        }
     }
     opencoder_session::loop_registry::notify_change();
     Ok(RpcReply::ok(json!({"id":id,"status":update.status})))
@@ -182,6 +198,7 @@ async fn http(
     {
         return Ok(RpcReply::error(400, "invalid session operation"));
     }
+    let _gate = worker.inner.admission.lock().await;
     let (record, legacy) = {
         let journal = worker.inner.journal.lock().await;
         (journal.records.get(id).cloned(), journal.uses_legacy(id))
@@ -209,7 +226,6 @@ async fn http(
             "managed child sessions are controlled through their owning execution",
         ));
     }
-    let _gate = worker.inner.admission.lock().await;
     if requires_admission(method, tail) {
         if let Some(error) = worker.admission_error() {
             return Ok(RpcReply::error(503, error));
@@ -239,9 +255,55 @@ async fn http(
         && matches!(tail_path(tail), "prompt" | "compact" | "handoff")
         && !worker.inner.active.lock().await.contains_key(id);
     let permit = if needs_monitor {
-        match worker.inner.slots.clone().try_acquire_owned() {
-            Ok(p) => Some(p),
-            Err(_) => return Ok(RpcReply::error(429, "node execution capacity exhausted")),
+        let queued = super::queue::QueuedCommand {
+            tail: tail.into(),
+            body: body.clone(),
+        };
+        if let Some(record) = record
+            .as_ref()
+            .filter(|r| r.assignment.index.status == ExecutionStatus::Pending)
+        {
+            return Ok(
+                if record.queue.as_ref().and_then(|q| q.command.as_ref()) == Some(&queued) {
+                    RpcReply::ok(json!({"id":id,"status":"pending"}))
+                } else {
+                    RpcReply::error(409, "execution already has pending work")
+                },
+            );
+        }
+        // FIFO gives earlier pending work newly freed slots. Under LIFO this
+        // newest follow-up has priority, just like a freshly enqueued task.
+        if worker.inner.scheduling.get().queue_order == QueueOrder::Fifo {
+            super::queue::dispatch_locked(worker).await?;
+        }
+        match worker.try_slot() {
+            Some(p) => Some(p),
+            None => {
+                let Some(mut record) = record.clone() else {
+                    return Ok(RpcReply::error(409, "execution owner required"));
+                };
+                if !crate::lifecycle::can_start(record.assignment.index.status) {
+                    return Ok(RpcReply::error(409, "execution is not continuable"));
+                }
+                let config = super::create::prepare(worker, &record.assignment, legacy)?;
+                record.result["monitor_after"] = json!(worker
+                    .inner
+                    .state
+                    .store
+                    .events_after(id, 0)
+                    .await?
+                    .last()
+                    .and_then(|e| e.seq)
+                    .unwrap_or(0));
+                let gate = worker.lifecycle_gate(id).await;
+                let _guard = gate.lock().await;
+                super::queue::enqueue_with_command(worker, record, config, true, Some(queued))
+                    .await?;
+                return Ok(RpcReply {
+                    status: 202,
+                    body: json!({"id":id,"status":"pending"}),
+                });
+            }
         }
     } else {
         None

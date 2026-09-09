@@ -61,6 +61,7 @@ async fn submit_inner(state: &Arc<AppState>, request: CreateExecution) -> anyhow
             // acceptance. A newer definition must not replace its snapshot.
             state.hub.reserve(&index).await;
             let assignment = Assignment {
+                codex: super::settings::codex(state).await?,
                 index,
                 request,
                 definition: None,
@@ -78,11 +79,11 @@ async fn submit_inner(state: &Arc<AppState>, request: CreateExecution) -> anyhow
                 }
             }
             let Some(node) =
-                select_node(&nodes, request.kind, request.node_id.as_deref(), now_ms())
+                select_queue_node(&nodes, request.kind, request.node_id.as_deref(), now_ms())
             else {
                 return Ok(RpcReply::error(
                     503,
-                    "no eligible online node with capacity for this execution",
+                    "no ready online node can accept this execution",
                 ));
             };
             let index = ExecutionIndex {
@@ -95,6 +96,7 @@ async fn submit_inner(state: &Arc<AppState>, request: CreateExecution) -> anyhow
             state.fleet.put_index(&index).await?;
             state.hub.reserve(&index).await;
             let assignment = Assignment {
+                codex: super::settings::codex(state).await?,
                 index,
                 request,
                 definition,

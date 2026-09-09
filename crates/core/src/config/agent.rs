@@ -19,6 +19,9 @@ fn default_agent_name() -> String {
 /// field defaults, so partial blocks from older configs keep parsing.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AgentDefaults {
+    /// Private execution settings, never written to NFS Agent cards.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub codex: Option<crate::harness::CodexSettings>,
     #[serde(default = "default_agent_name")]
     pub default: String,
     /// File-based agents root override. `None` (the default) keeps the
@@ -44,6 +47,7 @@ pub struct AgentDefaults {
 impl Default for AgentDefaults {
     fn default() -> Self {
         AgentDefaults {
+            codex: None,
             default: "act".to_string(),
             agents_dir: None,
             share_dir: None,

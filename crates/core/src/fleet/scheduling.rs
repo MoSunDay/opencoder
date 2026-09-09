@@ -10,13 +10,43 @@ pub fn load(node: &NodeView) -> Option<f64> {
 }
 
 pub fn eligible(node: &NodeView, kind: ExecutionKind, now: i64) -> bool {
+    accepting(node, kind, now)
+        && node
+            .snapshot
+            .as_ref()
+            .is_some_and(|s| s.active_runs.saturating_add(node.reserved_loops) < s.max_runs)
+}
+
+/// A ready node may durably accept work even when all execution slots are occupied.
+pub fn accepting(node: &NodeView, kind: ExecutionKind, now: i64) -> bool {
     node.online
         && now.saturating_sub(node.last_seen_at) < STALE_MS
         && node.registration.kinds.contains(&kind)
-        && node.snapshot.as_ref().is_some_and(|s| {
-            s.ready && s.active_runs.saturating_add(node.reserved_loops) < s.max_runs
-        })
+        && node.snapshot.as_ref().is_some_and(|s| s.ready)
         && load(node).is_some()
+}
+
+pub fn select_queue_node<'a>(
+    nodes: &'a [NodeView],
+    kind: ExecutionKind,
+    pinned: Option<&str>,
+    now: i64,
+) -> Option<&'a NodeView> {
+    select_node(nodes, kind, pinned, now).or_else(|| {
+        nodes
+            .iter()
+            .filter(|n| pinned.is_none_or(|id| n.registration.id == id) && accepting(n, kind, now))
+            .min_by_key(|n| {
+                (
+                    n.snapshot
+                        .as_ref()
+                        .map(|s| s.pending_runs)
+                        .unwrap_or(0)
+                        .saturating_add(n.reserved_loops),
+                    &n.registration.id,
+                )
+            })
+    })
 }
 
 pub fn select_node<'a>(
@@ -61,6 +91,8 @@ mod tests {
             last_seen_at: 100,
             reserved_loops: 0,
             snapshot: Some(NodeSnapshot {
+                pending_runs: 0,
+                queue_order: Default::default(),
                 generation: "g".into(),
                 sequence: 1,
                 cpu_capacity: cpu,
@@ -101,6 +133,41 @@ mod tests {
         assert!(select_node(&nodes, ExecutionKind::Agent, Some("a"), 100).is_none());
         assert!(select_node(&nodes, ExecutionKind::Agent, None, 30_000).is_none());
     }
+    #[test]
+    fn full_nodes_queue_by_pending_count_without_bypassing_readiness_or_pinning() {
+        let mut nodes = vec![node("a", 2.0, 10), node("b", 8.0, 10)];
+        for n in &mut nodes {
+            n.snapshot.as_mut().unwrap().active_runs = 10;
+        }
+        nodes[0].snapshot.as_mut().unwrap().pending_runs = 2;
+        assert_eq!(
+            select_queue_node(&nodes, ExecutionKind::Agent, None, 100)
+                .unwrap()
+                .registration
+                .id,
+            "b"
+        );
+        assert_eq!(
+            select_queue_node(&nodes, ExecutionKind::Agent, Some("a"), 100)
+                .unwrap()
+                .registration
+                .id,
+            "a"
+        );
+        nodes[0].snapshot.as_mut().unwrap().active_runs = 9;
+        assert_eq!(
+            select_queue_node(&nodes, ExecutionKind::Agent, None, 100)
+                .unwrap()
+                .registration
+                .id,
+            "a",
+            "available slots take priority over pending count"
+        );
+        nodes[0].snapshot.as_mut().unwrap().ready = false;
+        assert!(select_queue_node(&nodes, ExecutionKind::Agent, Some("a"), 100).is_none());
+        assert!(select_queue_node(&nodes, ExecutionKind::Agent, None, 30_000).is_none());
+    }
+
     #[test]
     fn invalid_cpu_and_duplicate_team_members_are_rejected() {
         assert!(load(&node("n", 0.0, 0)).is_none());

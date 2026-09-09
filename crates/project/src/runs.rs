@@ -139,6 +139,7 @@ impl ProjectService {
                 .context("claim todo and create execute run")?,
             "todo is running"
         );
+        deps.reserved.lock().unwrap().insert(id.to_owned());
         deps.projects
             .get_todo_run(id)
             .await?
@@ -162,6 +163,7 @@ impl ProjectService {
         let todo = serde_json::from_value(saved["todo"].clone())?;
         let cx = serde_json::from_value(saved["context"].clone())?;
         let token = spawn_run(&deps, id);
+        deps.reserved.lock().unwrap().remove(id);
         let run_id = id.to_owned();
         let todo_id = run.todo_id.clone();
         let drive_deps = deps.clone();

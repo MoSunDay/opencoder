@@ -179,7 +179,7 @@ async fn dispatch_honors_node_pinning() {
     assert_eq!(status, 503, "{body}");
     assert_eq!(
         body["error"],
-        json!("no eligible online node with capacity for this execution")
+        json!("no ready online node can accept this execution")
     );
     assert_eq!(h.node.journal_ids(), vec!["dag-pin-1"]);
 }

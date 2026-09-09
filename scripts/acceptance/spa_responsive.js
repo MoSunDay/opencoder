@@ -2,12 +2,21 @@
 //
 // Fleet-console SPA phone-viewport horizontal-overflow gate.
 //
-// Serves the *committed* SPA bundle (crates/web/spa/dist) over localhost with a
-// fixture API (see spa_responsive_fixtures.js), drives every mobile-nav page at
+// Serves whatever SPA bundle currently sits in the WORKING TREE at
+// crates/web/spa/dist over localhost with a fixture API (see
+// spa_responsive_fixtures.js), drives every mobile-nav page at
 // 390x844, and fails on any element that escapes the viewport while the
 // document itself cannot scroll sideways. The SPA only hides the mobile nav
 // below 768px, so 390x844 is the width the console must survive (also what
 // scripts/browser-acceptance.js uses).
+//
+// Provenance: that dist/ directory is committed, but the copy on disk may be
+// stale (src/ edited, build not rerun) or dirty (rebuilt, not committed), so a
+// verdict here describes the working tree, NOT HEAD. The `bundle:` line
+// printed at startup states which of the two it was; --require-committed
+// refuses to measure anything that is not exactly HEAD, and --drift rebuilds
+// src/ into a temp dir and diffs it against dist/ first
+// (scripts/check-spa-drift.sh -- expensive, hence opt-in).
 //
 // Chromium mobile emulation reports an *inflated* window.innerWidth once
 // something overflows (390 -> 413), which would make "scrollWidth <= innerWidth"
@@ -21,15 +30,22 @@
 //
 // Usage: node scripts/acceptance/spa_responsive.js [--headed] [--port 18099]
 //          [--shots /tmp/uitest/responsive] [--only 节点] [--keep]
-// Exit: 0 = every visited page fits, 1 = overflow / unreachable page, 2 = harness error.
+//          [--require-committed] [--drift]
+//          --require-committed  refuse (exit 2) unless dist/ == HEAD and src/ is clean
+//          --drift              run scripts/check-spa-drift.sh first, exit 2 on drift
+// Exit: 0 = every visited page fits, 1 = overflow / unreachable page,
+//       2 = harness error (provenance refusals included).
 
 const { createServer } = require('node:http');
 const { readFile } = require('node:fs/promises');
-const { existsSync, mkdirSync } = require('node:fs');
+const { accessSync, constants, existsSync, mkdirSync } = require('node:fs');
+const { execFileSync, spawnSync } = require('node:child_process');
 const path = require('node:path');
 const { FIXTURES, ABSENT, GUARDED } = require('./spa_responsive_fixtures');
 
-const SPA = path.resolve(__dirname, '../../crates/web/spa/dist');
+const REPO = path.resolve(__dirname, '../..');
+const SPA = path.resolve(REPO, 'crates/web/spa/dist');
+const DRIFT_SCRIPT = path.resolve(__dirname, '../check-spa-drift.sh');
 const WIDTH = 390;
 const HEIGHT = 844;
 const TOKEN = 'fixture-token';
@@ -46,11 +62,95 @@ function arg(flag, fallback) {
 }
 const HEADED = process.argv.includes('--headed');
 const KEEP = process.argv.includes('--keep');
+const REQUIRE_COMMITTED = process.argv.includes('--require-committed');
+const DRIFT = process.argv.includes('--drift');
 const PORT = Number(arg('port', process.env.PORT || 18099));
 const SHOTS = arg('shots', process.env.SHOTS || '/tmp/uitest/responsive');
 const ONLY = arg('only', '');
 
 const pause = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// ---------------------------------------------------------------------------
+// Bundle provenance. The gate measures the WORKING-TREE dist/, which is
+// committed but can be stale (src/ edited, build not rerun) or dirty (rebuilt,
+// not committed). Without this pre-flight a failure gets attributed to HEAD
+// when an uncommitted rebuild actually produced it. Everything here degrades to
+// a printed note: the gate must stay runnable outside a checkout (tarball).
+// ---------------------------------------------------------------------------
+const porcelain = (...pathspecs) => {
+  try {
+    return execFileSync('git', ['-C', REPO, 'status', '--porcelain', '--', ...pathspecs],
+      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+  } catch (_) {
+    return null; // no git binary, not a repository, or git refused
+  }
+};
+
+const changedPaths = (status) => status.split('\n').filter((l) => l.trim()).length;
+
+// -> { line, warn, pinned, refusal }. `line` is always printed; `pinned` is
+// true only when the bundle on disk is exactly HEAD and src/ is clean.
+function bundleProvenance() {
+  const dist = porcelain('crates/web/spa/dist');
+  const src = porcelain('crates/web/spa/src');
+  if (dist === null || src === null) {
+    return {
+      line: `bundle: ${SPA} (git unavailable: provenance unknown)`,
+      warn: null,
+      pinned: false,
+      refusal: 'git is unavailable here, so the bundle cannot be tied to a commit',
+    };
+  }
+  const distCount = changedPaths(dist);
+  const srcCount = changedPaths(src);
+  if (!distCount && !srcCount) {
+    return {
+      line: `bundle: ${SPA} (clean: dist == HEAD, no uncommitted src)`,
+      warn: null,
+      pinned: true,
+      refusal: '',
+    };
+  }
+  return {
+    line: `bundle: ${SPA} (working tree; dist differs from HEAD: ${distCount} path(s), `
+      + `src differs from HEAD: ${srcCount} path(s))`,
+    // src moved but dist did not: the bundle about to be measured was built
+    // from an older src/, so a green run says nothing about the edits on disk.
+    warn: srcCount && !distCount
+      ? `WARNING: crates/web/spa/src has ${srcCount} uncommitted change(s) while dist/ matches HEAD`
+        + ' -- the bundle being measured does NOT contain them (run scripts/build-spa.sh)'
+      : null,
+    pinned: false,
+    refusal: `the working tree differs from HEAD (dist: ${distCount} path(s), src: ${srcCount} path(s))`,
+  };
+}
+
+// --drift: rebuild src/ into a temp dir and diff it against dist/ before
+// measuring, so "dist/ is what src/ says" is verified instead of assumed.
+function runDriftCheck() {
+  if (!existsSync(DRIFT_SCRIPT)) {
+    console.log(`drift: skipped, ${DRIFT_SCRIPT} does not exist`);
+    return;
+  }
+  try {
+    accessSync(DRIFT_SCRIPT, constants.X_OK);
+  } catch (_) {
+    console.log(`drift: skipped, ${DRIFT_SCRIPT} is not executable`);
+    return;
+  }
+  console.log(`drift: ${DRIFT_SCRIPT} (rebuilds the SPA into a temp dir -- slow)`);
+  const run = spawnSync(DRIFT_SCRIPT, [], { cwd: REPO, stdio: 'inherit' });
+  if (run.error) {
+    console.error(`drift: could not run ${DRIFT_SCRIPT}: ${run.error.message}`);
+    process.exit(2);
+  }
+  if (run.status !== 0) {
+    console.error(`drift: FAIL (exit ${run.status}) -- dist/ is not a build of the current src/;`
+      + ' run scripts/build-spa.sh and commit dist/');
+    process.exit(2);
+  }
+  console.log('drift: OK, dist/ matches a fresh build of src/');
+}
 
 // ---------------------------------------------------------------------------
 // Static + fixture server. Only GETs are served (every page is read-only); a
@@ -305,7 +405,18 @@ async function main() {
   if (!existsSync(path.join(SPA, 'index.html'))) {
     throw new Error(`SPA bundle not found at ${SPA} (run: cd crates/web/spa && npm install && npm run build)`);
   }
-  const { chromium } = require(path.resolve(__dirname, '../../crates/web/spa/node_modules/playwright-core'));
+  // Pre-flight: say out loud which bundle is about to be measured, and refuse
+  // to measure an unpinned one when the caller asked for the commit itself.
+  const provenance = bundleProvenance();
+  console.log(provenance.line);
+  if (provenance.warn) console.warn(provenance.warn);
+  if (REQUIRE_COMMITTED && !provenance.pinned) {
+    console.error(`REFUSING (--require-committed): ${provenance.refusal}.`
+      + ' Run scripts/build-spa.sh, commit dist/, and re-run to measure HEAD.');
+    process.exit(2);
+  }
+  if (DRIFT) runDriftCheck();
+  const { chromium } = require(path.resolve(REPO, 'crates/web/spa/node_modules/playwright-core'));
   const srv = await serve(PORT);
   const base = `http://127.0.0.1:${PORT}`;
   const browser = await chromium.launch({

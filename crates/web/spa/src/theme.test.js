@@ -61,8 +61,11 @@ describe('palette lockstep: theme.js cssVars <-> app.css :root', () => {
     // require each reference to be declared in :root AND present in cssVars.
     const declared = new Set(Object.keys(declaredVars()));
     const inCssVars = new Set(Object.keys(cssVars));
+    // Separators are normalized before the filters below, which assume '/':
+    // recursive readdir hands back platform-native relative paths.
     const srcFiles = readdirSync(new URL('.', import.meta.url), { recursive: true })
       .filter((p) => typeof p === 'string')
+      .map((p) => p.split(/[\\/]/).join('/'))
       .filter((p) => !p.split('/').includes('node_modules'))
       .filter((p) => /\.(js|jsx)$/.test(p));
     const sources = [
@@ -77,6 +80,20 @@ describe('palette lockstep: theme.js cssVars <-> app.css :root', () => {
         usedBy.get(m[1]).add(name);
       }
     }
+    // Self-proof: a scan that reached nothing is indistinguishable from a scan
+    // that found nothing wrong. Every filter above can degrade silently (Dirent
+    // objects instead of strings, a path layout change), collapsing the walk to
+    // the two stylesheets while the dangling assertion below still passes, so
+    // assert here that the recursive walk really happened.
+    expect(srcFiles.length, 'the recursive walk must reach .js/.jsx sources').toBeGreaterThan(0);
+    expect(srcFiles.some((p) => p.endsWith('.jsx')), 'the walk must cover .jsx sources').toBe(true);
+    // ui/mono.js exports MONO_VAR from a plain JS module -- a surface no
+    // stylesheet can stand in for -- so attributing --oc-mono to it proves the
+    // scan read JS sources and not just app.css / project.css.
+    expect(
+      [...(usedBy.get('--oc-mono') || [])].some((n) => n.endsWith('ui/mono.js')),
+      'the scan must reach JS sources, not just the two stylesheets',
+    ).toBe(true);
     const dangling = [...usedBy.keys()]
       .filter((v) => !declared.has(v) || !inCssVars.has(v))
       .sort()

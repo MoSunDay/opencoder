@@ -120,7 +120,7 @@ pub async fn list(State(_state): State<Arc<AppState>>) -> Response {
                 "builtin": opencoder_core::builtin_agents().iter().any(|a| a.name == name),
                 "harness": meta.harness,
                 "current": meta.current,
-                "references": meta.references,
+                "references": opencoder_agents::references::references_snapshot(&meta),
                 "updated_at": meta.updated_at,
             }))
         })

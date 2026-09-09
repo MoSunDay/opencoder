@@ -114,18 +114,21 @@ describe('AgentsPanel', () => {
     // 生效徽标只在 coder 行。
     expect(screen.getByText('生效中')).toBeTruthy();
     // 引用 tag：已引用带值，未引用显示 `—`。
-    expect(screen.getByText('Prompt: base')).toBeTruthy();
-    expect(screen.getByText('Tools: std')).toBeTruthy();
-    expect(screen.getAllByText('Skills: —').length).toBe(2);
-    expect(screen.getAllByText('Memory: —').length).toBe(2);
+    expect(screen.getByText('base · v2')).toBeTruthy();
+    expect(screen.getByText('std · 资源缺失')).toBeTruthy();
+    expect(screen.getByText('prompts/base/v2/')).toBeTruthy();
+    expect(screen.getByText('soul')).toBeTruthy();
+    expect(screen.getAllByText('—').length).toBe(6);
     expect(screen.getByText('2026-09-01T00:00:00Z')).toBeTruthy();
-    // NFS 卡片随页渲染（已停止态）。
+    expect(screen.getByRole('tab', { name: 'Agent 列表' })).toBeTruthy();
+    expect(screen.getByRole('tab', { name: 'Harness 管理' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('tab', { name: 'NFS 配置' }));
     expect(await screen.findByText('已停止')).toBeTruthy();
   });
 
   it('fires PATCH /api/agents/active when the active select changes', async () => {
     const { container } = render(<AgentsPanel onNotice={() => {}} />);
-    await screen.findByText('Prompt: base');
+    await screen.findByText('base · v2');
     await pickSelectOption(container.querySelector('.ant-select'), 'reviewer');
     await waitFor(() => {
       expect(apiPatchMock).toHaveBeenCalledWith('/api/agents/active', { active: 'reviewer' });
@@ -134,7 +137,7 @@ describe('AgentsPanel', () => {
 
   it('deletes an agent only after the Popconfirm confirm', async () => {
     render(<AgentsPanel onNotice={() => {}} />);
-    await screen.findByText('Prompt: base');
+    await screen.findByText('base · v2');
     fireEvent.click(screen.getAllByText(/^删\s*除$/)[0]);
     fireEvent.click(await screen.findByText('确认删除'));
     await waitFor(() => {
@@ -144,7 +147,7 @@ describe('AgentsPanel', () => {
 
   it('creates an agent through POST with null refs for untouched selects', async () => {
     render(<AgentsPanel onNotice={() => {}} />);
-    await screen.findByText('Prompt: base');
+    await screen.findByText('base · v2');
     fireEvent.click(findButton('新建'));
     fireEvent.change(await screen.findByLabelText('new-agent-name'), { target: { value: 'reviewer2' } });
     // modal 的 prompt Select 是文档里第二个 .ant-select（首个是生效选择）。
@@ -164,16 +167,17 @@ describe('AgentsPanel', () => {
   it('starts a configured agent and opens its node-owned execution', async () => {
     apiPostMock.mockResolvedValueOnce({ id: 'agent-run-1', kind: 'agent', node_id: 'node-a', created_at: 1, status: 'pending' });
     render(<AgentsPanel onNotice={() => {}} />);
-    await screen.findByText('Prompt: base');
+    await screen.findByText('base · v2');
     fireEvent.click(screen.getAllByText(/^启\s*动$/)[0]);
     await pickSelectOption(screen.getByLabelText('agent-harness').closest('.ant-select'), 'Codex');
-    fireEvent.change(screen.getByLabelText('agent-envs'), { target: { value: 'EXAMPLE= x=y ' } });
+    expect(screen.queryByLabelText('agent-envs')).toBeNull();
+    expect(screen.getByText('Codex 参数已统一管理')).toBeTruthy();
     fireEvent.change(await screen.findByLabelText('任务要求'), { target: { value: '检查发布状态' } });
     fireEvent.click(findButton('启动并查看'));
     await waitFor(() => {
       const call = apiPostMock.mock.calls.find(([path]) => path === '/api/executions');
       expect(call).toBeTruthy();
-      expect(call[1]).toMatchObject({ kind: 'agent', target: 'coder', node_id: null, input: { prompt: '检查发布状态', harness: 'codex', envs: { EXAMPLE: ' x=y ' } } });
+      expect(call[1]).toMatchObject({ kind: 'agent', target: 'coder', node_id: null, input: { prompt: '检查发布状态', harness: 'codex', envs: {} } });
       expect(call[1].id).toMatch(/^agent-/);
     });
     expect(await screen.findByText('agent-run-1')).toBeTruthy();

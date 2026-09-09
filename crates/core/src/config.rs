@@ -396,6 +396,9 @@ impl Config {
         if let Some(root) = crate::agent::scope::current_root() {
             cfg.agent.agents_dir = Some(root);
         }
+        if let Some(settings) = crate::harness::scope::current() {
+            cfg.agent.codex = Some(settings);
+        }
         Ok(cfg)
     }
     pub fn model_id(&self) -> &str {

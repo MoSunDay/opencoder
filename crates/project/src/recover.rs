@@ -39,9 +39,12 @@ pub(crate) fn spawn_run_driver<F, Fut>(
     F: FnOnce() -> Fut,
     Fut: Future<Output = ()> + Send + 'static,
 {
-    let handle: JoinHandle<()> = tokio::spawn(opencoder_core::agent::scope::with_root(
-        opencoder_core::agent::scope::current_root(),
-        drive(),
+    let handle: JoinHandle<()> = tokio::spawn(opencoder_core::harness::scope::with_settings(
+        opencoder_core::harness::scope::current(),
+        opencoder_core::agent::scope::with_root(
+            opencoder_core::agent::scope::current_root(),
+            drive(),
+        ),
     ));
     let deps = deps.clone();
     let run_id = run_id.to_string();
@@ -189,7 +192,9 @@ pub(crate) async fn sweep_stale_runs(deps: &Arc<Deps>, grace_ms: i64) -> usize {
     let now = opencoder_core::message::now_ms();
     let mut converged = 0usize;
     for run in runs {
-        if deps.spawns.lock().unwrap().contains_key(&run.id) {
+        if deps.spawns.lock().unwrap().contains_key(&run.id)
+            || deps.reserved.lock().unwrap().contains(&run.id)
+        {
             continue; // 本进程驱动仍在跑
         }
         if now - run.started_at <= grace_ms {

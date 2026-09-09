@@ -1,18 +1,18 @@
-Commit: (working-tree, 基于 65c9d891ae905e7925277d29a87cd8e7957e8dad)
+Commit: (working-tree, 基于 303b95027b49873a9833393d57b72de68747a9e0)
 
 # web 模块
 
 ## Harness 接口与展示
 
-`api_agents` 合并内置和自定义 Agent，响应含 `harness` / `builtin`，创建及更新接口保存默认 Harness；内置 Agent 禁止删除。创建会话接受 Harness 与环境并在输入前初始化，公开会话响应只增加 Harness 名称。已有 Codex 会话的 Agent/模型变更、原生 compact/handoff 由 `api_ops` 显式拒绝；prompt 使用共享惰性客户端，不要求原生模型凭据。
+`api_agents` 合并内置和自定义 Agent，响应含 `harness` / `builtin` 与重新解析的资源内容名称，创建及更新接口保存默认 Harness；内置 Agent 禁止删除。创建会话接受 Harness 与环境并在输入前初始化，公开会话响应只增加 Harness 名称。已有 Codex 会话的 Agent/模型变更、原生 compact/handoff 由 `api_ops` 显式拒绝；prompt 使用共享惰性客户端，不要求原生模型凭据。
 
-SPA 的 `harness/fields.jsx` 复用 Harness 选项和字面环境解析；`agentsConfig`、`agentDetail` 配置默认值，Agent 启动弹窗及 `fleet/executions` 可以按次覆盖，`fleet/detail` 显示实际选择。Codex 转换后沿用原有 reducer、消息回放与 Turn → Step → Function call 展示。相关契约见 `tests/web_agents.rs`、`spa/src/harness/`，浏览器验收入口为 `scripts/acceptance/harness/codex.js`。业务规则见 [Agent Harness](../../features/harness/index.md)，节点执行见 [worker](../worker/index.md)。
+SPA 的 `harness/management.jsx` 管理内置/自定义 Agent 的执行器及集中 Codex 参数，加载失败时禁止提交默认空值。`harness/fields.jsx` 复用 Harness 选项和字面环境解析，仅显式原生启动显示 env 输入；Codex 提示使用集中管理。`agentsConfig`、`agentDetail` 配置默认值，Agent 启动弹窗及 `fleet/executions` 可以按次覆盖，`fleet/detail` 显示实际选择。Codex 转换后沿用原有 reducer、消息回放与 Turn → Step → Function call 展示。相关契约见 `tests/web_agents.rs`、`spa/src/harness/`，浏览器验收入口为 `scripts/acceptance/harness/codex.js`。业务规则见 [Agent Harness](../../features/harness/index.md)，节点执行见 [worker](../worker/index.md)。
 
 ## 平台装配边界
 
 `opencoder-server` 使用独立 [control](../control/index.md)，不启动本模块的本地 session/节点 claim 执行面。平台 [worker](../worker/index.md) 在 Node 进程内调用这里的 session router，复用 drain、消息和工具交互，无节点入站 HTTP。
 
-`spa/src/fleet/` 提供负载/维护、统一执行、普通团队职责、系统团队、能力绑定与调度、节点明细及产物下载。原会话/项目/DAG/TODO 页面由 control 适配为按 ID 路由；静态文件由 control 内嵌。全部执行详情的 Plan 使用通用控制入口，运行中禁用再次 Plan/Act，未生成计划时禁用 Act；明细包含节点保存的最新 todo。窄屏使用页面下拉导航，宽表在容器内滚动。真实双节点浏览器验收入口为 `scripts/acceptance/platform.js`，覆盖空态、最新 Plan、390px 视口、VM 随节点崩溃退出及离线错误。下面的 AppState、handle 和旧 Node API 说明属于可复用的本地/兼容 API，不代表平台 Server 持有运行明细。
+`spa/src/fleet/settings/scheduling.jsx` 以 Node 调度 PUT 保存并发上限和 FIFO/LIFO；节点表显示运行数/上限、pending 和顺序。`spa/src/fleet/` 提供负载/维护、统一执行、普通团队职责、系统团队、能力绑定与调度、节点明细及产物下载。原会话/项目/DAG/TODO 页面由 control 适配为按 ID 路由；静态文件由 control 内嵌。全部执行详情的 Plan 使用通用控制入口，运行中禁用再次 Plan/Act，未生成计划时禁用 Act；明细包含节点保存的最新 todo。窄屏使用页面下拉导航，宽表在容器内滚动。真实双节点浏览器验收入口为 `scripts/acceptance/platform.js`，覆盖空态、最新 Plan、390px 视口、VM 随节点崩溃退出及离线错误。下面的 AppState、handle 和旧 Node API 说明属于可复用的本地/兼容 API，不代表平台 Server 持有运行明细。
 
 平台会话由 `chat.jsx` 管理显式 Node 选择；`fleet/useNodes.js` 独立发现可用节点，`fleet/model.js` 提供选择项与可执行性判断。创建统一使用带 `node_id` 和稳定 ID 的 `/api/sessions`，历史仅查询所选节点的 `/dialogs`；模型/技能目录也带 `node_id`。`chat/useTranscriptStream.js` 管理事件订阅及快照刷新，按节点和会话身份忽略迟到响应。发送前读取事件水位，读取失败保留草稿并停止下发。
 
@@ -109,4 +109,4 @@ POST `/api/sessions/:id/subagents/:task_id/steer`：模式控制文本先返回 
 - `api_dag.rs`：def CRUD + dispatch + run 查询；`api_nodes_dag.rs`：claim（单活跃/节点，BEGIN IMMEDIATE CAS，FIFO `(created_at,rowid)`）+ 节点事件/状态上报（终态补写合成 `run_finished`）；`sse_dag.rs`：run 事件 SSE（id=seq，Last-Event-ID 续传）；`dag_state.rs`：进程级 `OnceLock<DagHub>` 事件广播；`api_nodes.rs` lost 收束把 running/cancelling 折叠 error("node lost")。
 - SPA「DAG」面板：defs/runs/拓扑图（@xyflow + dagre）；`dag/defEditor.jsx` 的新建/编辑抽屉为 `width="100%"` 全宽（画布与 JSON 双模式）。
 
-- **版本化 agent 管理面（2026-09-04）**：`api_agents.rs`（卡片 CRUD + `PATCH /api/agents/active` 激活——`set_active_agent_checked` preflight（prompt 引用缺失（无 prompt 卡不可 resolve，读路径会静默回落 act）或解析失败均 400 并回滚 marker）+ 仅变化时 fan_out ReloadConfig）、`api_agent_resources.rs`（共享池 `prompts|skills|tools|memory` 版本 CRUD/rollback/文件读取；写校验：路径安全、b64、1.5MiB 上限、按 category 的文件形态；被引用资源 DELETE 409 带 referenced_by；reload 策略=仅生效 agent 链路受影响时 fan_out）、`api_agent_nfs.rs`（`GET/POST /api/agents/nfs` 生命周期，进程级 NFS_SLOT；daemon 启动时 `agent.nfs.enabled` 自启动，失败仅 log）。SPA「Agent 配置」面板：`agentsConfig/agentDetail/promptEditor/agentNfsCard`（列表为朴素单 Table——名称列 `filterSearch` 检索、PageShell 表头生效 Select+「新建」、行操作 编辑(进 agentDetail)/启动/删除；NFS 卡去 Card 改 Descriptions 条带；版本下拉、回滚、soul/how/output 编辑保存即新版本、mount 提示）。详见 [agents/agents](../agents/index.md)。
+- **版本化 agent 管理面（2026-09-04）**：`api_agents.rs`（卡片 CRUD + `PATCH /api/agents/active` 激活——`set_active_agent_checked` preflight（prompt 引用缺失（无 prompt 卡不可 resolve，读路径会静默回落 act）或解析失败均 400 并回滚 marker）+ 仅变化时 fan_out ReloadConfig）、`api_agent_resources.rs`（共享池 `prompts|skills|tools|memory` 版本 CRUD/rollback/文件读取；写校验：路径安全、b64、1.5MiB 上限、按 category 的文件形态；被引用资源 DELETE 409 带 referenced_by；reload 策略=仅生效 agent 链路受影响时 fan_out）、`api_agent_nfs.rs`（`GET/POST /api/agents/nfs` 生命周期，进程级 NFS_SLOT；daemon 启动时 `agent.nfs.enabled` 自启动，失败仅 log）。SPA「Agent 配置」面板：`agentsConfig/agentDetail/promptEditor/agentNfsCard`（顶部 Tabs 切换 Agent 列表、Agent Harness、Harness 管理与 NFS 配置；主表展示 Agent 的资源引用、当前版本、NFS 相对路径与内容名称，保留名称检索、生效选择、新建及编辑/启动/删除；版本下拉、回滚、soul/how/output 编辑保存即新版本、mount 提示）。详见 [agents/agents](../agents/index.md)。

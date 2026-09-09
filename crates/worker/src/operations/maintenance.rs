@@ -9,6 +9,21 @@ pub(super) async fn run(worker: &Worker, command: ExecutionCommand) -> Result<Rp
 }
 async fn run_unscoped(worker: &Worker, command: ExecutionCommand) -> Result<RpcReply> {
     match command.action.as_str() {
+        "scheduling" => Ok(RpcReply::ok(json!(worker.inner.scheduling.get()))),
+        "configure_scheduling" => {
+            let settings: NodeScheduling = match serde_json::from_value(command.input) {
+                Ok(settings) => settings,
+                Err(error) => return Ok(RpcReply::error(400, error.to_string())),
+            };
+            if let Err(error) = settings.validate() {
+                return Ok(RpcReply::error(400, error));
+            }
+            let _gate = worker.inner.admission.lock().await;
+            worker.inner.scheduling.save(settings)?;
+            super::queue::dispatch_locked(worker).await?;
+            opencoder_session::loop_registry::notify_change();
+            Ok(RpcReply::ok(json!(settings)))
+        }
         "status" => Ok(RpcReply::ok(
             json!({"node":worker.registration(),"snapshot":worker.snapshot()}),
         )),
@@ -84,6 +99,7 @@ async fn run_unscoped(worker: &Worker, command: ExecutionCommand) -> Result<RpcR
             super::create::create(
                 worker,
                 Assignment {
+                    codex: None,
                     index,
                     request,
                     definition: None,

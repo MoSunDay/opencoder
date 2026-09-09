@@ -1,4 +1,4 @@
-Commit: (working-tree, 基于 c1a1b2e78e1ccd4a3cc2ac6dc408a76d30bf46e6)
+Commit: (working-tree, 基于 303b95027b49873a9833393d57b72de68747a9e0)
 
 # node 模块
 
@@ -6,8 +6,8 @@ Commit: (working-tree, 基于 c1a1b2e78e1ccd4a3cc2ac6dc408a76d30bf46e6)
 
 ## 通道
 
-- `client` 同步 Server 时间后签名 WebSocket 握手，注册路径带 node_id 避免多节点同毫秒签名冲突。
-- 5 秒心跳与 loop 变化通知上报快照和四字段索引；RPC 后先同步最新负载/索引，再回复确认。
+- `client` 使用 Bearer 认证建立 WebSocket 通道，注册携带 Node ID 与协议版本（v6）。
+- 5 秒心跳与 loop 变化通知上报快照和五字段索引；快照包含 active_runs、max_runs、pending_runs 和 queue_order；RPC 后先同步最新负载/索引，再回复确认。
 - 网络操作有超时、帧大小和并发上限。通道重连仅替换传输；已接受的操作脱离连接任务，断线不会中止节点执行。
 - `PeerBridge` 将 system 协调节点的维护请求转发给 Server；Server 验证协调执行的归属和状态，Node 间不直接连接。
 - `cpu` 从进程可用 CPU 与 cgroup quota 计算可用容量，支持小数 CPU。

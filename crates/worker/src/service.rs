@@ -32,12 +32,17 @@ impl NodeService for Worker {
             })
             .or_else(|| self.admission_error());
         NodeSnapshot {
+            pending_runs: self
+                .inner
+                .pending_runs
+                .load(std::sync::atomic::Ordering::SeqCst),
+            queue_order: self.inner.scheduling.get().queue_order,
             generation: self.inner.generation.clone(),
             sequence: self.next_sequence(),
             cpu_capacity: self.inner.cpu,
             active_agent_loops: opencoder_session::loop_registry::active_ids().len() as u64,
-            active_runs: (self.inner.max_runs - self.inner.slots.available_permits()) as u64,
-            max_runs: self.inner.max_runs as u64,
+            active_runs: self.active_runs() as u64,
+            max_runs: self.inner.scheduling.get().max_runs as u64,
             ready: error.is_none(),
             resource_error: error,
         }
@@ -71,7 +76,9 @@ impl NodeService for Worker {
                         node_id: self.inner.registration.id.clone(),
                         status: match run.status {
                             opencoder_store::ProjectTodoRunStatus::Running => {
-                                if self
+                                if record.assignment.index.status == ExecutionStatus::Pending {
+                                    ExecutionStatus::Pending
+                                } else if self
                                     .inner
                                     .active
                                     .lock()

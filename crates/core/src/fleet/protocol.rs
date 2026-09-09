@@ -5,9 +5,8 @@ use super::{
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-// v5 requires harness-aware execution. Older nodes silently ignore the harness
-// in assignment input, so mixed versions must fail at registration.
-pub const PROTOCOL_VERSION: u32 = 5;
+// v6 pins managed Harness settings and accepts durable node queues.
+pub const PROTOCOL_VERSION: u32 = 6;
 pub const HEARTBEAT_MS: u64 = 5_000;
 pub const STALE_MS: i64 = 20_000;
 pub const MAX_FRAME_BYTES: usize = 2 * 1024 * 1024;
@@ -133,6 +132,8 @@ pub fn valid_id(id: &str) -> bool {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Assignment {
+    #[serde(default)]
+    pub codex: Option<Box<crate::harness::CodexSettings>>,
     pub index: ExecutionIndex,
     pub request: CreateExecution,
     #[serde(default)]
@@ -166,6 +167,10 @@ pub struct NodeRegistration {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NodeSnapshot {
+    #[serde(default)]
+    pub pending_runs: u64,
+    #[serde(default)]
+    pub queue_order: super::QueueOrder,
     pub generation: String,
     pub sequence: u64,
     pub cpu_capacity: f64,

@@ -46,7 +46,9 @@ pub(super) async fn launch_locked(
         .assignment
         .index
         .status;
-    if !crate::lifecycle::can_launch(status, resume) {
+    if !crate::lifecycle::can_launch(status, resume)
+        && !(status == ExecutionStatus::Pending && record.queue.is_some())
+    {
         return Ok(LaunchOutcome::NotRunnable(status));
     }
     let cancel = CancellationToken::new();
@@ -72,9 +74,18 @@ pub(super) async fn launch_locked(
     let tasks = worker.inner.tasks.clone();
     tasks.spawn(async move {
         let outcome = std::panic::AssertUnwindSafe(async {
-            opencoder_core::agent::scope::with_root(
-                config.agent.agents_dir.clone(),
-                crate::workloads::run(&worker, &record, config, cancel.clone(), resume),
+            opencoder_core::harness::scope::with_settings(
+                config.agent.codex.clone(),
+                opencoder_core::agent::scope::with_root(
+                    config.agent.agents_dir.clone(),
+                    Box::pin(crate::workloads::run(
+                        &worker,
+                        &record,
+                        config,
+                        cancel.clone(),
+                        resume,
+                    )),
+                ),
             )
             .await
         })

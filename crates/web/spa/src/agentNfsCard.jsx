@@ -10,6 +10,7 @@ import { apiGet, apiPost } from './api.js';
 import { mountHint } from './agentsItems.js';
 import { err } from './notice.js';
 import { useMessage } from './ui/appMessage.js';
+import { MONO_VAR } from './ui/mono.js';
 
 const { Paragraph, Text } = Typography;
 
@@ -79,7 +80,7 @@ export function AgentNfsCard({ onNotice }) {
             <div style={{ marginTop: 8 }}>
               <Text type="secondary" style={{ fontSize: 12 }}>宿主机挂载：</Text>
               <Paragraph copyable style={{ marginBottom: 0 }}>
-                <code aria-label="nfs-mount-hint">{mountHint(s)}</code>
+                <code aria-label="nfs-mount-hint" style={{ fontFamily: MONO_VAR }}>{mountHint(s)}</code>
               </Paragraph>
             </div>
           ) : null}

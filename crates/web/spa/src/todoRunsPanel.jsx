@@ -292,6 +292,7 @@ export function TodoRunsPanel({ onNotice, focusWorkflowId, onFocusConsumed }) {
       <Col xs={24} lg={10}>
         <Card size="small" title="工作流" extra={<Button size="small" onClick={() => load(false)}>刷新</Button>}>
           <Table
+            className="oc-todo-runs"
             rowKey="id"
             size="small"
             loading={loading}

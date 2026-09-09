@@ -14,6 +14,7 @@ import { PageShell } from './shell/pageShell.jsx';
 import { err } from './notice.js';
 import { useMessage } from './ui/appMessage.js';
 import { MONO_VAR } from './ui/mono.js';
+import { tableLoading, tableRows } from './ui/tableLoading.js';
 
 const { TextArea } = Input;
 const { Text } = Typography;
@@ -278,20 +279,27 @@ export function EnvsPanel({ onNotice: noticeCallback }) {
   const msg = useMessage();
   const [envs, setEnvs] = useState([]);
   const [tools, setTools] = useState([]);
-  // env 列表首屏/刷新期间给主表格上 loading —— 否则拉取中是一片空白。
+  // env 列表拉取态：只有首屏/显式刷新会遮罩表格 —— 否则拉取中是一片空白。
+  // 变更（新建/保存/删除）后的刷新走 silent：遮罩会给表格加 pointer-events:
+  // none，把行内「编辑」「删除」一起锁死，用户刚点完却点不动下一行。
   const [loadingEnvs, setLoadingEnvs] = useState(true);
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState('');
 
-  const loadEnvs = useCallback(async () => {
-    setLoadingEnvs(true);
+  const loadEnvs = useCallback(async (opts) => {
+    const silent = !!(opts && opts.silent);
+    if (!silent) {
+      setLoadingEnvs(true);
+    }
     try {
       const j = await apiGet('/api/todo/envs');
       setEnvs((j && j.envs) || []);
     } catch (e) {
       onNotice(err('获取 env 列表失败: ' + (e && e.message)));
     } finally {
-      setLoadingEnvs(false);
+      if (!silent) {
+        setLoadingEnvs(false);
+      }
     }
   }, [onNotice]);
 
@@ -316,7 +324,7 @@ export function EnvsPanel({ onNotice: noticeCallback }) {
       if (editing === name) {
         setEditing('');
       }
-      loadEnvs();
+      loadEnvs({ silent: true });
     } catch (e) {
       onNotice(err('删除 env 失败: ' + (e && e.message)));
     }
@@ -357,8 +365,8 @@ export function EnvsPanel({ onNotice: noticeCallback }) {
         rowKey="name"
         size="small"
         columns={columns}
-        dataSource={envs}
-        loading={loadingEnvs}
+        dataSource={tableRows(loadingEnvs, envs)}
+        loading={tableLoading(loadingEnvs)}
         pagination={false}
         scroll={{ x: 'max-content' }}
         locale={{ emptyText: '暂无 env' }}
@@ -371,7 +379,7 @@ export function EnvsPanel({ onNotice: noticeCallback }) {
         onCreated={(name) => {
           setCreating(false);
           setEditing(name);
-          loadEnvs();
+          loadEnvs({ silent: true });
         }}
       />
       <EnvDrawer
@@ -380,7 +388,7 @@ export function EnvsPanel({ onNotice: noticeCallback }) {
         open={!!editing}
         onNotice={onNotice}
         onClose={() => setEditing('')}
-        onSaved={loadEnvs}
+        onSaved={() => loadEnvs({ silent: true })}
       />
     </PageShell>
   );

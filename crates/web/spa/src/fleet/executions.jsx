@@ -4,6 +4,7 @@ import { apiGet, apiPost } from '../api.js';
 import { PageShell } from '../shell/pageShell.jsx';
 import { StatusTag } from '../ui/statusTag.jsx';
 import { MONO_VAR } from '../ui/mono.js';
+import { tableLoading, tableRows } from '../ui/tableLoading.js';
 import { TimeText } from '../ui/timeText.jsx';
 import { ExecutionDetail } from './detail.jsx';
 import { CREATABLE_KINDS, KIND_LABELS, KINDS, executionPagePath, newId, nodeOptions } from './model.js';
@@ -15,8 +16,10 @@ export function ExecutionsPanel({ onNotice }) {
   const [kind, setKind] = useState('agent'); const [detail, setDetail] = useState(null);
   const [busy, setBusy] = useState(false); const [filter, setFilter] = useState('');
   const [more, setMore] = useState(false); const [loadingMore, setLoadingMore] = useState(false);
-  /// 索引表拉取态：reset（首屏/换筛选/刷新）与 append（翻页）都是 in-flight；
-  /// 只有 3s poll 静默，免得表格每 3 秒闪一次 spinner。
+  /// 索引表拉取态：只有 reset（首屏/换筛选/刷新）会遮罩表格。append（翻页）
+  /// 刻意不遮罩——遮罩给表格加 pointer-events: none，ID 链接当场点不动，还会
+  /// 和「加载更早的执行」按钮自带的 spinner 撞成两个；3s poll 静默，免得表格
+  /// 每 3 秒闪一次 spinner。
   const [loading, setLoading] = useState(true);
   const attempt = useRef(null); const cursor = useRef(null); const extended = useRef(false); const [form] = Form.useForm();
   const load = useCallback(async (mode = 'reset') => {
@@ -71,7 +74,7 @@ export function ExecutionsPanel({ onNotice }) {
       <Button type="primary" htmlType="submit" loading={busy}>启动执行</Button>
     </Form>
     <Space style={{ margin: '20px 0 12px' }}><Select aria-label="执行类型筛选" style={{ width: 180 }} value={filter} onChange={setFilter} options={[{ value: '', label: '全部执行' }, ...KINDS]} /><Button onClick={() => load('reset')}>刷新</Button></Space>
-    <Table scroll={{ x: 'max-content' }} rowKey="id" dataSource={rows} size="small" loading={loading || loadingMore} columns={[
+    <Table scroll={{ x: 'max-content' }} rowKey="id" dataSource={tableRows(loading, rows)} size="small" loading={tableLoading(loading)} columns={[
       { title: 'ID', dataIndex: 'id', render: (id, row) => <Button type="link" style={{ fontFamily: MONO_VAR }} onClick={() => setDetail(row)}>{id}</Button> },
       { title: '类型', dataIndex: 'kind', render: (v) => KIND_LABELS[v] || v },
       { title: '创建时间', dataIndex: 'created_at', render: (v) => <TimeText ts={v} /> },

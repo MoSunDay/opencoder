@@ -44,3 +44,13 @@ Commit: (working-tree, 基于 e488f767)
 
 - `main.jsx` 中包裹 shell 的 antd `<App component={false}>` 与其 `UsersDrawer` 挂载在 JSX 上相互嵌套，无法干净拆分；提交它会连带引入对未跟踪 `src/admin/usersDrawer.jsx` 的 import，使该提交单独不可构建。`useMessage()` 的静态回落分支保证在 `<App>` 落地前行为与迁移前完全一致（无回归），`<App>` 一落地即自动升级为上下文 API。
 - `dist/` 未重建提交：当前重建会把上述未提交的源码烘进已提交产物，违反 dist↔src 契约；且并行会话自身的提交（`708220d7`、`406d1ffd`）同样未带 dist。`scripts/check-spa-drift.sh` 目前为红，归因于该在途改动，待其落地后由重建统一收敛（届时会一并包含本轮 src 改动）。
+
+## 后续修正（见 `spa-table-loading-honesty-and-guard-hardening.md`）
+
+本文两处表述经评审核实**不成立**，特此更正，不改写原始记录：
+
+- 「`mono.test.js` 断言两者恒等」当时是恒真断言：`theme.js` 里就是 `'--oc-mono': MONO`，
+  该测试实为 `MONO === MONO`，不构成 JS↔CSS 守卫（真正生效的是 `theme.test.js` 的动态枚举比较）。
+  现已改为直读 `app.css` 的 `:root` 声明。
+- `src/ui/monoText.jsx` 作为「交付原语」列出，但全树零 importer、自身无测试，属死代码，现已删除；
+  实际被约 32 处调用点使用的原语是 `ui/mono.js` 的 `MONO_VAR`。

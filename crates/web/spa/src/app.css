@@ -30,12 +30,14 @@
   --oc-success-bg: #f6ffed;
   --oc-error: #ff4d4f;
   --oc-error-bg: #fff2f0;
-  /* Transcript role accents + markdown heading green. The -rgb twins feed
-     rgba() washes (RoleAvatar); see theme.js cssVars for why. */
+  /* Transcript role accents, the DAG wasm-node icon accent + markdown heading
+     green. The -rgb twins feed rgba() washes (RoleAvatar); see theme.js
+     cssVars for why. */
   --oc-accent-user: #13c2c2;
   --oc-accent-user-rgb: 19, 194, 194;
   --oc-accent-ai: #9254de;
   --oc-accent-ai-rgb: 146, 84, 222;
+  --oc-accent-wasm: #722ed1;
   --oc-heading: #389e0d;
   /* Monospace stack for id / uuid / session columns (raw identifiers, not
      prose). Referenced as var(--oc-mono, monospace) from inline styles. */
@@ -201,9 +203,19 @@ body {
 
 /* Selected-row marker for the click-to-select tables (todoRunsPanel). Own
    class on purpose: borrowing antd's internal .ant-table-row-selected ties
-   the row to checkbox-selection styling that this table does not have. */
-.oc-row-selected > td {
-  background: rgba(var(--oc-primary-rgb), 0.06) !important;
+   the row to checkbox-selection styling that this table does not have.
+   Scoped under the panel's own .oc-todo-runs wrapper like every other rule in
+   this sheet. !important is required because antd's generated row-background
+   and hover rules outrank a bare class selector — and the :hover twin exists
+   because in a click-to-select table the pointer is always resting on the
+   selected row, so a lone !important wash would freeze out hover feedback and
+   the row would never react. Selected 0.10 sits clearly above the rowHoverBg
+   #f5f9ff so a chosen row is distinguishable from a merely hovered one. */
+.oc-todo-runs .oc-row-selected > td {
+  background: rgba(var(--oc-primary-rgb), 0.10) !important;
+}
+.oc-todo-runs .oc-row-selected:hover > td {
+  background: rgba(var(--oc-primary-rgb), 0.16) !important;
 }
 
 .execution-messages { margin-top: 16px; }
@@ -377,7 +389,7 @@ body {
   padding: 0 4px;
 }
 .dag-edit-node--agent .dag-edit-node-head .anticon { color: var(--oc-primary); }
-.dag-edit-node--wasm .dag-edit-node-head .anticon { color: #722ed1; }
+.dag-edit-node--wasm .dag-edit-node-head .anticon { color: var(--oc-accent-wasm); }
 .dag-edit-node-deps {
   margin-top: 6px;
   color: var(--oc-text-secondary);
@@ -458,8 +470,31 @@ body {
 @media (max-width: 767px) {
   .fleet-sidebar { display: none; }
   .fleet-content > .fleet-mobile-nav { display: inline-flex; width: 100%; margin-bottom: 8px; }
-  .fleet-header { gap: 12px !important; padding: 0 12px !important; }
+  /* Brand (163px, nowrap) + the five status/identity/action chips need ~425px
+     at their min-content width, so a single row overflows 390px -- and Chromium
+     mobile emulation then grows the layout viewport to the overflow (413px),
+     dragging the document with it. Wrap onto two rows and stop the flex shrink
+     that squeezed the text chips into 12px slivers. antd sets the fixed height
+     and the 56px line-height inline in its cssinjs sheet, hence !important. */
+  .fleet-header {
+    height: auto !important;
+    min-height: 56px;
+    line-height: 1.5 !important;
+    flex-wrap: wrap;
+    align-content: center;
+    gap: 4px 12px !important;
+    padding: 6px 12px !important;
+  }
+  .fleet-header-side { flex-wrap: wrap; justify-content: flex-end; gap: 4px 8px; }
+  .fleet-header-side > * { flex: 0 0 auto; }
   .fleet-content { padding: 12px !important; }
+  /* Safety net for any list table that forgets scroll={{ x }}: without its own
+     horizontal scroller a table cannot shrink below its cells' min-content, so
+     it widens .fleet-content and drags the mobile nav sideways with the rows.
+     The panels all pass scroll={{ x: 'max-content' }} already (which renders
+     .ant-table-content/.ant-table-body); this only guarantees the clipping. */
+  .ant-table-content,
+  .ant-table-body { overflow-x: auto; }
   .dag-detail { height: auto; flex-direction: column; }
   .dag-detail-graph { flex-basis: auto; height: 420px; }
   .dag-detail-side { min-width: 0; max-width: none; max-height: 480px; }

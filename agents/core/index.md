@@ -1,4 +1,5 @@
-Commit: (working-tree, 基于 303b95027b49873a9833393d57b72de68747a9e0)
+Commit: 2491657d33c384dddcabf4d12ab4cd8822ccaf81
+
 
 # core 模块
 
@@ -8,7 +9,7 @@ Commit: (working-tree, 基于 303b95027b49873a9833393d57b72de68747a9e0)
 
 ## 平台协议与资源作用域
 
-Fleet 协议版本为 **6**，要求节点理解受管 Harness 快照和容量队列；Server 与 Node 必须使用同一协议代际，防止旧节点忽略新请求的执行器选择。`fleet/{protocol,scheduling,queue}` 提供五字段执行索引、注册/负载、请求/回复及纯 CPU 调度函数，供 [control](../control/index.md) 与 [worker](../worker/index.md) 共享。`agent::scope` 提供 Tokio 任务局部资源根；`Config::load` 和 agent 解析优先使用当前执行固定的资源目录。`harness::scope` 向内部重新加载的 Config 传播已接受的 Codex 设置；作用域直接返回 Future。`NodeScheduling` 校验 1–65535 上限，`queue_cmp` 按 FIFO/LIFO 排序；`select_queue_node` 在无空余容量时按 pending 数选择健康节点。未设置作用域的 CLI/TUI 保持原解析规则。
+Fleet 协议版本为 **7**，要求节点理解受管 Harness 快照和容量队列；Server 与 Node 必须使用同一协议代际，防止旧节点忽略新请求的执行器选择。`fleet/{protocol,scheduling,queue}` 提供五字段执行索引、注册/负载、请求/回复及纯 CPU 调度函数，供 [control](../control/index.md) 与 [worker](../worker/index.md) 共享。`agent::scope` 提供 Tokio 任务局部资源根；`Config::load` 和 agent 解析优先使用当前执行固定的资源目录。`harness::scope` 向内部重新加载的 Config 传播已接受的默认 Codex 设置及完整注册配置快照；作用域直接返回 Future。`NodeScheduling` 校验 1–65535 上限，`queue_cmp` 按 FIFO/LIFO 排序；`select_queue_node` 在无空余容量时按 pending 数选择健康节点。未设置作用域的 CLI/TUI 保持原解析规则。
 
 ## 职责
 跨 crate 共享的基础类型与配置。
@@ -47,3 +48,7 @@ Config::load 顺序：默认 → 全部已存在候选**深度合并**（global 
 ## 相关模块
 - [agents/session](../session/index.md) — Config 驱动压缩与模型选择。
 - [agents/llm](../llm/index.md) — Message lowering。
+
+## 注册执行配置
+
+`harness/runtime.rs` 定义带 revision 的命名 Codex profile 与 `RunnerSettings`，后者固定 argv、工作目录、字面环境、所属服务及安装文件 SHA-256。`AgentMeta.harness_profile` 引用命名配置，缺省使用默认 Codex 设置。`Assignment.runtime` 与默认配置一同私有下发，`Config::load`、嵌套调度和 fork 保持本次快照；缺失的命名配置明确失败。类型验证见 [harness_runtime.rs](../../crates/core/tests/harness_runtime.rs)。

@@ -23,6 +23,12 @@ export const palette = {
   border: '#eef1f5', // --oc-border — hairline dividers and table borders
   borderStrong: '#d3dae2', // --oc-border-strong — control borders, DAG nodes
   fillSubtle: '#fafbfc', // --oc-fill-subtle — table head / label backgrounds
+  // Transcript role accents + the DAG editor's wasm-node icon. Each hex is
+  // written once here; cssVars reads it for both the hex var and its `-rgb`
+  // triplet twin (RoleAvatar composes a 10% wash that a var() cannot express).
+  accentUser: '#13c2c2', // --oc-accent-user — user bubble / avatar (cyan-6)
+  accentAi: '#9254de', // --oc-accent-ai — ai bubble / avatar (purple-5)
+  accentWasm: '#722ed1', // --oc-accent-wasm — DAG wasm-node icon (purple-6)
 };
 
 /// Soft elevation for surfaces floating on the canvas. Note antd applies
@@ -79,10 +85,13 @@ export const cssVars = {
   // Transcript role accents (antd preset cyan-6 / purple-6). The *-rgb twins
   // exist because RoleAvatar composes a 10% wash, and hex + '1a' string
   // concatenation cannot be expressed with a var().
-  '--oc-accent-user': '#13c2c2',
-  '--oc-accent-user-rgb': rgbTriplet('#13c2c2'),
-  '--oc-accent-ai': '#9254de',
-  '--oc-accent-ai-rgb': rgbTriplet('#9254de'),
+  '--oc-accent-user': palette.accentUser,
+  '--oc-accent-user-rgb': rgbTriplet(palette.accentUser),
+  '--oc-accent-ai': palette.accentAi,
+  '--oc-accent-ai-rgb': rgbTriplet(palette.accentAi),
+  // DAG editor wasm-node icon, consumed by the raw-CSS rule
+  // .dag-edit-node--wasm .dag-edit-node-head .anticon in app.css.
+  '--oc-accent-wasm': palette.accentWasm,
   // Markdown heading green (antd green-7). No token twin: colorSuccessText is
   // the lighter #52c41a, which is too pale for a heading on white.
   '--oc-heading': '#389e0d',
@@ -102,6 +111,10 @@ export const cssVars = {
 ///   are normalized to middle density via the cell padding tokens. The head
 ///   keeps no vertical split lines (headerSplitColor) — hairlines only.
 /// - Card unifies body/header padding at 16 (default is paddingLG = 24).
+/// - fontFamilyCode pins <Typography.Text code> (runsTable / agentsConfig /
+///   usersDrawer) to the same MONO stack as --oc-mono. antd's own default code
+///   face carries `Courier` and lacks `ui-monospace`, so without this inline
+///   code would render in a different face than every MONO_VAR identifier.
 export const theme = {
   token: {
     colorPrimary: palette.primary,
@@ -110,6 +123,7 @@ export const theme = {
     fontSize: 14,
     borderRadius: 8,
     boxShadowTertiary: shadowTertiary,
+    fontFamilyCode: MONO,
   },
   components: {
     Layout: {

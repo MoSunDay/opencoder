@@ -222,15 +222,13 @@ export function StatusTag({ status, error }) {
 }
 
 /// Empty-state hint: the console-wide antd Empty idiom (same as
-/// project/goalsTab.jsx), keeping the 48px vertical breathing room the
-/// hand-rolled padded Text used to provide. `text` still lands in the DOM as
-/// the Empty description.
+/// project/goalsTab.jsx). antd's Empty already carries marginBlock: 32, so the
+/// old outer 48px padding was double breathing room (~230px total). We drop
+/// the wrapper div and pin the Empty's own margin to 24 — the vertical space
+/// is now ONE spacing decision, not two stacked ones. `text` still lands in
+/// the DOM as the Empty description.
 export function EmptyHint({ text }) {
-  return (
-    <div style={{ padding: '48px 0' }}>
-      <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={text} />
-    </div>
-  );
+  return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={text} style={{ marginBlock: 24 }} />;
 }
 
 export function TranscriptView({ turns, usage, status, error, emptyText }) {

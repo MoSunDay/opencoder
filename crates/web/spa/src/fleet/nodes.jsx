@@ -5,6 +5,7 @@ import { setState } from '../store.js';
 import { PageShell } from '../shell/pageShell.jsx';
 import { StatusTag } from '../ui/statusTag.jsx';
 import { MONO_VAR } from '../ui/mono.js';
+import { tableLoading, tableRows } from '../ui/tableLoading.js';
 import { ExecutionDetail } from './detail.jsx';
 import { newId } from './model.js';
 import { err } from '../notice.js';
@@ -40,7 +41,7 @@ export function FleetNodesPanel({ onNotice }) {
     finally { setBusy(false); }
   };
   return <PageShell page="nodes" extra={<Button onClick={() => load(false)}>刷新节点</Button>}>
-    <Table scroll={{ x: 'max-content' }} locale={{ emptyText: '暂无 Opencoder 节点' }} rowKey="id" dataSource={rows} loading={loading} columns={[
+    <Table scroll={{ x: 'max-content' }} locale={{ emptyText: '暂无 Opencoder 节点' }} rowKey="id" dataSource={tableRows(loading, rows)} loading={tableLoading(loading)} columns={[
       { title: '节点', dataIndex: 'name', render: (v, r) => <Space orientation="vertical"><b>{v}</b><small style={{ fontFamily: MONO_VAR }}>{r.id}</small></Space> },
       { title: '状态', render: (_, r) => <StatusTag status={r.online ? 'online' : 'offline'} label={r.online ? (r.snapshot?.resource_error || '在线') : '离线'} color={r.online && r.snapshot?.ready ? 'success' : 'error'} /> },
       { title: '可用 CPU', render: (_, r) => r.snapshot?.cpu_capacity ?? '—' },
@@ -63,6 +64,6 @@ export function FleetNodesPanel({ onNotice }) {
       </Space>
     </Modal>
     {detail && <ExecutionDetail id={detail.id} summary={detail} onClose={() => setDetail(null)} onNotice={onNotice} />}
-    {scheduling && <NodeSchedulingModal node={scheduling} onClose={() => setScheduling(null)} onSaved={load} onNotice={onNotice} />}
+    {scheduling && <NodeSchedulingModal node={scheduling} onClose={() => setScheduling(null)} onSaved={() => load(false)} onNotice={onNotice} />}
   </PageShell>;
 }

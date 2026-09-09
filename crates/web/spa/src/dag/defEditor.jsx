@@ -6,7 +6,7 @@
 // blocked while the text does not parse.
 
 import { Alert, Button, Drawer, Form, Input, Segmented, Space, Typography, message } from 'antd';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { CanvasEditor } from './editor/canvasEditor.jsx';
 import { parseSpecDraft, problemsFromApiError, validateSpec } from './specValidate.js';
 
@@ -40,6 +40,9 @@ function specToText(def) {
 /// back into the same draft. onSave(spec) contract unchanged: reject keeps
 /// the drawer open with problems rendered.
 export function DefEditor({ open, def, saving, onClose, onSave }) {
+  const source = useRef(def);
+  source.current = def;
+  const recordId = def?.id || 'new';
   const [mode, setMode] = useState('canvas');
   const [draft, setDraft] = useState(EXAMPLE_SPEC);
   const [text, setText] = useState(EXAMPLE);
@@ -53,14 +56,14 @@ export function DefEditor({ open, def, saving, onClose, onSave }) {
     if (!open) {
       return;
     }
-    const base = def && def.spec ? def.spec : EXAMPLE_SPEC;
+    const base = source.current?.spec || EXAMPLE_SPEC;
     setDraft(base);
     setText(JSON.stringify(base, null, 2));
     setMode('canvas');
     setProblems([]);
     setPositions({});
     setCanvasKey((k) => k + 1);
-  }, [open, def]);
+  }, [open, recordId]);
 
   // Red dots + toolbar badge stay live while the canvas edits the draft.
   const liveProblems = useMemo(
@@ -129,12 +132,12 @@ export function DefEditor({ open, def, saving, onClose, onSave }) {
     <Drawer
       title={def ? '编辑工作流定义' : '新建工作流定义'}
       open={open}
-      onClose={onClose}
+      onClose={() => { if (!saving) onClose(); }}
       width="100%"
       destroyOnHidden
       footer={
         <Space style={{ float: 'right' }}>
-          <Button onClick={onClose}>取消</Button>
+          <Button disabled={saving} onClick={onClose}>取消</Button>
           <Button type="primary" loading={saving} onClick={submit}>
             保存
           </Button>
@@ -144,9 +147,10 @@ export function DefEditor({ open, def, saving, onClose, onSave }) {
       <Space direction="vertical" size={12} style={{ width: '100%' }}>
         <Text type="secondary">
           spec 为 JSON：name / description? / steps[]，每个 step 为 name、depends_on[]、kind{' '}
-          {'{type: "agent"|"wasm", ...}'}。步骤名须为小写 slug。
+          {'{type: "agent"|"wasm"|"runner", ...}'}。步骤名须为小写 slug。
         </Text>
         <Segmented
+          disabled={saving}
           value={mode}
           onChange={(m) => switchMode(m)}
           options={[
@@ -155,6 +159,7 @@ export function DefEditor({ open, def, saving, onClose, onSave }) {
           ]}
         />
         {mode === 'canvas' ? (
+          <div inert={saving ? '' : undefined}>
           <CanvasEditor
             key={canvasKey}
             spec={draft || EXAMPLE_SPEC}
@@ -163,10 +168,12 @@ export function DefEditor({ open, def, saving, onClose, onSave }) {
             onPositionsChange={setPositions}
             onSpecChange={setDraft}
           />
+          </div>
         ) : (
           <Form layout="vertical">
             <Form.Item label="spec (JSON)" validateStatus={problems.length ? 'error' : undefined}>
               <TextArea
+                disabled={saving}
                 rows={18}
                 value={text}
                 spellCheck={false}

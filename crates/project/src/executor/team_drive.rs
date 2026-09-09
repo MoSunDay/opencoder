@@ -132,7 +132,9 @@ fn materialized_team_name(todo_id: &str) -> String {
 fn team_requirement(cx: &ProjectContext, todo: &ProjectTodoRecord) -> String {
     let mut out = String::new();
     out.push_str("请就下面的项目待办展开团队讨论并收敛出结论。\n\n背景：\n");
-    out.push_str(&format!("- 目标：{}\n", cx.goal_title));
+    if let Some(title) = &cx.goal_title {
+        out.push_str(&format!("- 目标：{title}\n"));
+    }
     if let Some(title) = &cx.milestone_title {
         out.push_str(&format!("- 里程碑：{}\n", title));
     }

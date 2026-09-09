@@ -67,7 +67,7 @@ async fn v20_backup_preserves_history_and_v21_replay_survives_reopen() {
         .unwrap();
     assert_eq!(
         rows.next().await.unwrap().unwrap().get::<i64>(0).unwrap(),
-        22
+        23
     );
     assert_eq!(std::fs::read(&backup).unwrap(), original_backup);
     // Restoring the unchanged backup into a separate path is independently viable.

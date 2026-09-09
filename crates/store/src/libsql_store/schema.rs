@@ -6,7 +6,9 @@ use super::chat_tables::{
 };
 use super::team_runs::{CREATE_INDEX_TEAM_TOPIC_RUNS_TOPIC, CREATE_TEAM_TOPIC_RUNS};
 
-const SCHEMA_VERSION: i64 = 22;
+mod project_relations;
+
+const SCHEMA_VERSION: i64 = 23;
 
 // Order invariant: busy_timeout must precede any locking statement, and
 // synchronous=NORMAL must be applied BEFORE journal_mode=WAL. Switching a
@@ -129,7 +131,7 @@ CREATE TABLE IF NOT EXISTS project_goals (
 const CREATE_PROJECT_MILESTONES: &str = "\
 CREATE TABLE IF NOT EXISTS project_milestones (
   id TEXT PRIMARY KEY,
-  goal_id TEXT NOT NULL,
+  goal_id TEXT,
   title TEXT NOT NULL,
   detail_md TEXT,
   status TEXT NOT NULL,
@@ -664,6 +666,10 @@ async fn migrate(conn: &Connection, from: i64) -> Result<()> {
         conn.execute(CREATE_NODES, ()).await?;
         conn.execute(CREATE_NODE_TASKS, ()).await?;
     }
+    if from < 23 {
+        project_relations::migrate(conn).await?;
+    }
+
     Ok(())
 }
 /// Return `true` if `table` has a column named `column`.

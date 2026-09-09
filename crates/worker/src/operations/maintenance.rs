@@ -99,6 +99,7 @@ async fn run_unscoped(worker: &Worker, command: ExecutionCommand) -> Result<RpcR
             super::create::create(
                 worker,
                 Assignment {
+                    runtime: None,
                     codex: None,
                     index,
                     request,

@@ -8,6 +8,19 @@
 use anyhow::Result;
 use async_trait::async_trait;
 
+pub mod overview;
+
+#[derive(Debug)]
+pub struct MilestoneNotEmpty;
+
+impl std::fmt::Display for MilestoneNotEmpty {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("milestone contains TODOs; move or unlink them before deleting")
+    }
+}
+
+impl std::error::Error for MilestoneNotEmpty {}
+
 use crate::project_types::{
     ProjectGoalPatch, ProjectGoalRecord, ProjectMilestonePatch, ProjectMilestoneRecord,
     ProjectTodoPatch, ProjectTodoRecord, ProjectTodoRunPatch, ProjectTodoRunRecord,
@@ -22,8 +35,9 @@ use crate::project_types::{
 ///   only; a patch with every field `None` is a caller bug (it would produce
 ///   an invalid empty `SET`).
 /// - `delete_*` returns `false` when the id does not exist.
-/// - Deletes cascade inside one transaction, explicitly (not via backend FK
-///   tricks), so every backend behaves identically.
+/// - Goal deletion detaches milestones; nonempty milestones reject deletion.
+///   TODO deletion also removes its runs. libsql/MySQL use transactions;
+///   StarRocks performs the statements sequentially.
 /// - Status/kind strings round-trip exactly; an unrecognized status on read is
 ///   corruption and propagates as an error.
 #[async_trait]
@@ -36,7 +50,7 @@ pub trait ProjectStore: Send + Sync {
     async fn create_goal(&self, rec: &ProjectGoalRecord) -> Result<()>;
     /// `false` = id not found. Always stamps `updated_at = now_ms`.
     async fn patch_goal(&self, id: &str, patch: &ProjectGoalPatch, now_ms: i64) -> Result<bool>;
-    /// Transactional cascade: runs → todos → milestones → goal.
+    /// Detach milestones and delete only the goal, preserving all work.
     async fn delete_goal(&self, id: &str) -> Result<bool>;
     /// Ordered by `sort` then `created_at`.
     async fn list_goals(&self) -> Result<Vec<ProjectGoalRecord>>;
@@ -50,11 +64,7 @@ pub trait ProjectStore: Send + Sync {
         patch: &ProjectMilestonePatch,
         now_ms: i64,
     ) -> Result<bool>;
-    /// Transactional cascade: the runs and todos of THIS milestone, then the
-    /// milestone itself. Decision: its todos are deleted, NOT re-parented to
-    /// the backlog — deleting a milestone is a destructive, user-confirmed
-    /// action, and silently resurrecting its todos as backlog items would
-    /// resurrect stale work the user meant to remove.
+    /// Delete an empty milestone. Returns `MilestoneNotEmpty` for linked TODOs.
     async fn delete_milestone(&self, id: &str) -> Result<bool>;
     /// `goal_id == None` lists across all goals; ordered by `sort` then
     /// `created_at`.

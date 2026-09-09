@@ -268,7 +268,8 @@ impl SessionState {
             ),
             ..Default::default()
         };
-        opencoder_core::harness::pin_settings(&mut harness, config.agent.codex.as_ref());
+        // Fallible validation is performed by harness::prepare before execution.
+        let _ = opencoder_core::harness::pin_agent_settings(&mut harness, &config, &agent.name);
         let (tools_path, skill_roots) =
             opencoder_core::agent::scope::with_root_sync(config.agent.agents_dir.clone(), || {
                 (

@@ -61,6 +61,7 @@ async fn submit_inner(state: &Arc<AppState>, request: CreateExecution) -> anyhow
             // acceptance. A newer definition must not replace its snapshot.
             state.hub.reserve(&index).await;
             let assignment = Assignment {
+                runtime: super::settings::registered::snapshot(state).await?,
                 codex: super::settings::codex(state).await?,
                 index,
                 request,
@@ -96,6 +97,7 @@ async fn submit_inner(state: &Arc<AppState>, request: CreateExecution) -> anyhow
             state.fleet.put_index(&index).await?;
             state.hub.reserve(&index).await;
             let assignment = Assignment {
+                runtime: super::settings::registered::snapshot(state).await?,
                 codex: super::settings::codex(state).await?,
                 index,
                 request,

@@ -85,6 +85,12 @@ export function validateSpec(spec) {
           );
         }
       }
+    } else if (s.kind.type === 'runner') {
+      for (const key of ['runner', 'agent']) {
+        if (typeof s.kind[key] !== 'string' || !SLUG_RE.test(s.kind[key])) {
+          problems.push(where + '.kind.' + key + ' 必须是有效的小写 slug');
+        }
+      }
     } else if (s.kind.type === 'wasm') {
       if (typeof s.kind.command !== 'string' || !s.kind.command.trim()) {
         problems.push(where + ' (wasm) 需要 non-empty kind.command');
@@ -93,7 +99,7 @@ export function validateSpec(spec) {
         problems.push(where + '.kind.sandbox 只能是 in_process | runc');
       }
     } else {
-      problems.push(where + '.kind.type 必须是 agent | wasm');
+      problems.push(where + '.kind.type 必须是 agent | wasm | runner');
     }
     if (s.timeout_secs !== undefined && !(Number.isInteger(s.timeout_secs) && s.timeout_secs > 0)) {
       problems.push(where + '.timeout_secs 必须是正整数');

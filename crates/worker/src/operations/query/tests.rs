@@ -36,8 +36,10 @@ async fn worker() -> (tempfile::TempDir, Worker) {
 fn record(worker: &Worker, id: &str, status: ExecutionStatus) -> Record {
     let node_id = worker.inner.registration.id.clone();
     Record {
+        annotations: serde_json::Value::Null,
         queue: None,
         assignment: Assignment {
+            runtime: None,
             codex: None,
             index: ExecutionIndex {
                 id: id.into(),

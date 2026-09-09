@@ -42,6 +42,14 @@ pub fn validate(spec: &DagSpec) -> Result<(), Vec<String>> {
             errs.push(format!("step name {:?} is not a valid slug", step.name));
         }
         match &step.kind {
+            StepKind::Runner { runner, agent }
+                if !validate_step_slug(runner) || !validate_step_slug(agent) =>
+            {
+                errs.push(format!(
+                    "runner step {:?} requires valid runner and agent names",
+                    step.name
+                ));
+            }
             StepKind::Agent { prompt, .. } if prompt.trim().is_empty() => {
                 errs.push(format!("agent step {:?} has an empty prompt", step.name));
             }

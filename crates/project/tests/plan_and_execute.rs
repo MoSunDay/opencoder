@@ -95,7 +95,7 @@ async fn seed_milestone(projects: &Arc<dyn ProjectStore>, id: &str, goal_id: &st
     projects
         .create_milestone(&ProjectMilestoneRecord {
             id: id.into(),
-            goal_id: goal_id.into(),
+            goal_id: Some(goal_id.into()),
             title: format!("里程碑 {id}"),
             detail_md: None,
             status: ProjectMilestoneStatus::Planned,
@@ -188,6 +188,46 @@ async fn plan_generates_and_updates_todo() {
     let todo = h.projects.get_todo(&todo_id).await.unwrap().unwrap();
     assert_eq!(todo.plan_md.as_deref(), Some("# 实施计划\n1. 步骤一"));
     assert_eq!(todo.status, ProjectTodoStatus::Planned);
+}
+
+#[tokio::test]
+async fn standalone_milestone_can_plan_and_execute_without_a_project() {
+    let h = harness(vec![done("专项实施计划"), done("专项完成")]).await;
+    let now = 1000;
+    h.projects
+        .create_milestone(&ProjectMilestoneRecord {
+            id: "initiative".into(),
+            goal_id: None,
+            title: "专项治理".into(),
+            detail_md: Some("专项背景".into()),
+            status: ProjectMilestoneStatus::Planned,
+            sort: 0,
+            created_at: now,
+            updated_at: now,
+        })
+        .await
+        .unwrap();
+    let todo = seed_todo(&h.projects, "initiative-todo", Some("initiative")).await;
+    let plan = h.service.start_plan(&todo).await.unwrap();
+    let plan = wait_run_done(&h.projects, &plan).await;
+    assert_eq!(plan.status, ProjectTodoRunStatus::Done);
+    let input: serde_json::Value =
+        serde_json::from_str(plan.input_snapshot.as_ref().unwrap()).unwrap();
+    let prompt = input["prompt"].as_str().unwrap();
+    assert!(prompt.contains("专项治理"));
+    assert!(prompt.contains("专项背景"));
+    assert!(!prompt.contains("- 目标："));
+    let execution = h.service.start_execute(&todo).await.unwrap();
+    assert_eq!(
+        wait_run_done(&h.projects, &execution).await.status,
+        ProjectTodoRunStatus::Done
+    );
+    let overview = h.service.overview().await.unwrap();
+    assert!(overview["goals"].as_array().unwrap().is_empty());
+    assert_eq!(
+        overview["standalone_milestones"][0]["todos"][0]["status"],
+        "done"
+    );
 }
 
 #[tokio::test]

@@ -18,6 +18,8 @@ pub(crate) use io::{read_record, same_execution};
 #[derive(Clone, Serialize, Deserialize)]
 pub(crate) struct Record {
     #[serde(default)]
+    pub annotations: Value,
+    #[serde(default)]
     // Keep the full configuration snapshot out of every execution future's stack.
     pub queue: Option<Box<crate::operations::queue::QueuedRun>>,
     pub assignment: Assignment,

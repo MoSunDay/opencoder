@@ -44,7 +44,12 @@ pub async fn resume(
             });
     }
 
-    opencoder_core::harness::pin_settings(&mut harness, config.agent.codex.as_ref());
+    opencoder_core::harness::pin_agent_settings(
+        &mut harness,
+        &config,
+        meta.agent.as_deref().unwrap_or(&config.agent.default),
+    )
+    .map_err(anyhow::Error::msg)?;
     // Prefer the stored model/agent so resume is faithful to the original run.
     if let Some(m) = &meta.model {
         config.model = m.clone();

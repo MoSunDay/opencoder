@@ -19,6 +19,19 @@ pub(crate) fn restore(
         if meta["outcome"] != "done" {
             continue;
         }
+        if matches!(step.kind, opencoder_dag::StepKind::Runner { .. }) {
+            let receipt: serde_json::Value =
+                serde_json::from_slice(&std::fs::read(dir.join("runner-completion.json"))?)?;
+            super::exec::runner::artifacts::verify(
+                &dir.join("artifacts"),
+                &serde_json::from_value::<Vec<super::exec::runner::artifacts::Artifact>>(
+                    receipt["artifacts"].clone(),
+                )?,
+                receipt["result_file"]
+                    .as_str()
+                    .ok_or_else(|| anyhow::anyhow!("Runner result missing"))?,
+            )?;
+        }
         let output = serde_json::from_slice(&std::fs::read(dir.join("output.json"))?)?;
         states.insert(step.name.clone(), StepOutcome::Done);
         outputs.insert(step.name.clone(), output);

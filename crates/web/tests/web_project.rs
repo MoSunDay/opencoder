@@ -364,3 +364,78 @@ async fn patch_kind_only_revalidates_stored_spec() {
     assert_eq!(row["executor_kind"], "dag");
     assert_eq!(row["executor_spec"], Value::Null, "null cleared the spec");
 }
+
+#[tokio::test]
+async fn standalone_relations_and_protected_deletion() {
+    let h = harness().await;
+    let (status, milestone) = call(
+        &h.app,
+        "POST",
+        "/api/project/milestones",
+        Some(json!({"title":"专项"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{milestone}");
+    assert!(milestone["goal_id"].is_null());
+    let mid = milestone["id"].as_str().unwrap();
+    let (_, todo) = call(
+        &h.app,
+        "POST",
+        "/api/project/todos",
+        Some(json!({"title":"任务","draft":"正文","milestone_id":mid})),
+    )
+    .await;
+    let tid = todo["id"].as_str().unwrap();
+    let (_, overview) = call(&h.app, "GET", "/api/project/overview", None).await;
+    assert_eq!(overview["standalone_milestones"][0]["todos"][0]["id"], tid);
+    let (status, _) = call(
+        &h.app,
+        "DELETE",
+        &format!("/api/project/milestones/{mid}"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    let (_, goal) = call(
+        &h.app,
+        "POST",
+        "/api/project/goals",
+        Some(json!({"title":"项目"})),
+    )
+    .await;
+    let gid = goal["id"].as_str().unwrap();
+    for body in [
+        json!({"goal_id":gid}),
+        json!({"goal_id":null}),
+        json!({"title":"改名"}),
+    ] {
+        let (status, body) = call(
+            &h.app,
+            "PATCH",
+            &format!("/api/project/milestones/{mid}"),
+            Some(body),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+    }
+    let (_, items) = call(&h.app, "GET", "/api/project/milestones", None).await;
+    assert!(items["milestones"][0]["goal_id"].is_null());
+    let (status, _) = call(
+        &h.app,
+        "PATCH",
+        &format!("/api/project/todos/{tid}"),
+        Some(json!({"milestone_id":null})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = call(
+        &h.app,
+        "DELETE",
+        &format!("/api/project/milestones/{mid}"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, todos) = call(&h.app, "GET", "/api/project/todos", None).await;
+    assert_eq!(todos["todos"][0]["draft"], "正文");
+}

@@ -16,7 +16,7 @@ import { PageShell } from '../shell/pageShell.jsx';
 import { StatusTag } from '../ui/statusTag.jsx';
 import { TimeText } from '../ui/timeText.jsx';
 import { MilestoneStatusTag } from './labels.jsx';
-import { flattenTodos } from './todosTab.jsx';
+import { flattenTodos, flattenMilestones } from './model/relations.js';
 import { useOverview } from './useOverview.js';
 
 const { Text } = Typography;
@@ -35,13 +35,9 @@ export function milestoneProgress(milestone) {
 /// milestoneCards(overview) → one row per milestone carrying its goal title
 /// (cards show the parent goal) plus the pure progress numbers.
 export function milestoneCards(overview) {
-  const goals = (overview && overview.goals) || [];
-  return goals.flatMap((g) => (g.milestones || []).map((m) => ({
-    key: m.id,
-    goal_title: g.title,
-    milestone: m,
-    ...milestoneProgress(m),
-  })));
+  return flattenMilestones(overview).map((m) => ({
+    key: m.id, goal_title: m.goal_title || '独立专项', milestone: m, ...milestoneProgress(m),
+  }));
 }
 
 /// isTodoLive(t) — todosTab 的 busy 口径 verbatim: a running todo, or any
@@ -62,7 +58,7 @@ export function liveTodos(overview) {
 export function ownerLabel(row) {
   return row.goal_title && row.milestone_title
     ? `${row.goal_title} / ${row.milestone_title}`
-    : '未分组';
+    : row.milestone_title || '未分组';
 }
 
 /// Elapsed anchor: the execution's started_at, falling back to the todo's

@@ -19,7 +19,7 @@ it('edits managed Codex parameters and literal env as one persisted configuratio
   fireEvent.change(screen.getByLabelText('codex-managed-envs'), { target: { value: 'KEY= literal = 中文\nEMPTY=' } });
   fireEvent.click(screen.getByRole('button', { name: '保存 Codex 配置' }));
   await waitFor(() => expect(apiPut).toHaveBeenCalledWith('/api/harnesses/codex', {
-    executable: '/usr/bin/codex', model: 'model-b', reasoning_effort: 'high', sandbox_mode: 'read-only', approval_policy: 'never', envs: { KEY: ' literal = 中文', EMPTY: '' },
+    executable: '/usr/bin/codex', model: 'model-b', reasoning_effort: 'high', sandbox_mode: 'read-only', approval_policy: 'never', auth_slot: null, envs: { KEY: ' literal = 中文', EMPTY: '' },
   }));
   expect(await screen.findByText('配置 v4')).toBeTruthy();
 });

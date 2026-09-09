@@ -1,10 +1,10 @@
-Commit: (working-tree, 基于 303b95027b49873a9833393d57b72de68747a9e0)
+Commit: (working-tree, 基于 56e612b6f251e3ed384074c7cf9cfc70a8c4c9cf)
 
 # project 模块
 
 ## 职责与边界
 
-`opencoder-project` 驱动用户策展的 goal → milestone → todo；todo 可不挂里程碑，进入 backlog。生命周期为草稿 → Plan → Execute，支持重复执行与取消。项目结构由 [control](../control/index.md) 保存，运行由 [worker](../worker/index.md) 使用节点 `runtime.db` 执行；`project-<todo-id>` 固定归属节点。
+`opencoder-project` 驱动用户策展的项目、专项里程碑与 TODO；里程碑可不挂项目，TODO 可不挂里程碑，进入 backlog。TODO 关联时最多归属一个里程碑，项目归属从该里程碑派生。生命周期为草稿 → Plan → Execute，支持重复执行与取消。项目结构由 [control](../control/index.md) 保存，运行由 [worker](../worker/index.md) 使用节点 `runtime.db` 执行；`project-<todo-id>` 固定归属节点。
 
 项目运行与 [todos](../todos/index.md) 的自治 workflow 是不同入口。会话、消息和子任务通过 `Arc<dyn Store>` 持久化，项目记录通过 `Arc<dyn ProjectStore>` 持久化。平台 Node 固定使用 libsql；本地 Web/CLI/TUI 可选择独立 Project backend。
 
@@ -64,3 +64,12 @@ libsql 和 MySQL 提供原子接收/收敛实现。StarRocks 缺少所需跨表�
 - `tests/executor_team_dag_brain.rs`：Team/DAG/Brain 路由和节点预解析覆盖。
 - `crates/worker/tests/project_replay.rs`：27 次运行、历史分页、大字段、失败尝试唯一输入、节点归属与离线错误。
 - [双节点浏览器验收](../../scripts/acceptance/project/README.md)：创建层级、当前 Agent 版本、失败/取消/重启、完整索引回读与 30 分钟观察。
+
+## 独立专项与编辑状态
+
+- Web 的里程碑、TODO Tab 展示全量列表，使用可搜索、可清空的 Select 修改所属关系；里程碑承担专项职责，不另外建立管理 Topic。
+- `ProjectMilestoneRecord.goal_id` 可空；里程碑 PATCH 中省略不修改、`null` 解除、ID 重新关联。删除项目只解除里程碑归属，非空里程碑删除返回 409；TODO 与运行记录保留。
+- `project::overview::overview` 是 Control 与本地 Web 共用的纯投影：`goals` 保持项目树，`standalone_milestones` 收录独立里程碑及其 TODO，`backlog` 收录无里程碑 TODO。无项目的执行上下文省略目标段落。
+- libsql schema v23 无损放宽里程碑字段，并仅在升级时将历史 backlog 归入“待归类”。MySQL/StarRocks 通过列 metadata checkpoint 完成对应升级；升级完成后的新 backlog 保持独立。
+- Markdown 编辑按打开会话和记录 ID 初始化，预览从同一表单读取；轮询不覆盖本地草稿。TODO 草稿保存后保留本地基线，服务端状态更新时间不清空输入。
+- 回归入口：`spa/src/project/views/` 与 `spa/src/ui/editing/editors.dom.test.jsx` 覆盖编辑缓冲、预览、轮询和搜索关联；`store/tests/project_relations.rs`、`sql_relations.rs` 覆盖迁移与删除保护。`plan_and_execute.rs` 验证独立里程碑的完整 Plan/Execute。

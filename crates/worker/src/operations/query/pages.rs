@@ -18,7 +18,7 @@ pub(in crate::operations) async fn messages(
     }
     if !matches!(
         execution.kind,
-        ExecutionKind::Agent | ExecutionKind::Maintenance
+        ExecutionKind::Agent | ExecutionKind::Maintenance | ExecutionKind::Dag
     ) {
         return Ok(RpcReply::error(400, "messages require a session execution"));
     }

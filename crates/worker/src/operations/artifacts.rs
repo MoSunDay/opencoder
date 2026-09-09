@@ -68,12 +68,34 @@ async fn read_fields(
     } else {
         worker.inner.layout.kind_root(ExecutionKind::Dag)
     };
-    if !matches!(name, "output.txt" | "output.json" | "meta.json") {
+    let dir =
+        opencoder_dag::artifacts::step_dir(&workflow_root, id, step).map_err(anyhow::Error::msg)?;
+    let path = if matches!(name, "output.txt" | "output.json" | "meta.json") {
+        dir.join(name)
+    } else if let Some(relative) = name.strip_prefix("artifacts/") {
+        let receipt = dir.join("runner-completion.json");
+        if !receipt.exists() {
+            return Ok(RpcReply::error(404, "Runner result not available"));
+        }
+        let value: Value = serde_json::from_slice(&std::fs::read(receipt)?)?;
+        let manifest: Vec<opencoder_dag_runtime::exec::runner::artifacts::Artifact> =
+            serde_json::from_value(value["artifacts"].clone())?;
+        let Some(artifact) = manifest.iter().find(|a| a.file == relative) else {
+            return Ok(RpcReply::error(404, "unregistered Runner artifact"));
+        };
+        let path = opencoder_dag_runtime::exec::runner::artifacts::checked_path(
+            &dir.join("artifacts"),
+            relative,
+        )?;
+        if offset == 0
+            && opencoder_dag_runtime::exec::runner::artifacts::checksum(&path)? != artifact.sha256
+        {
+            bail!("Runner artifact checksum mismatch");
+        }
+        path
+    } else {
         return Ok(RpcReply::error(400, "unknown artifact file"));
-    }
-    let path = opencoder_dag::artifacts::step_dir(&workflow_root, id, step)
-        .map_err(anyhow::Error::msg)?
-        .join(name);
+    };
     if !path.exists() {
         return Ok(RpcReply::error(404, "artifact not available"));
     }

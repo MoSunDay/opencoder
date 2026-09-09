@@ -5,8 +5,8 @@ use super::{
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-// v6 pins managed Harness settings and accepts durable node queues.
-pub const PROTOCOL_VERSION: u32 = 6;
+// v7 pins named Harness profiles and registered binary Runner definitions.
+pub const PROTOCOL_VERSION: u32 = 7;
 pub const HEARTBEAT_MS: u64 = 5_000;
 pub const STALE_MS: i64 = 20_000;
 pub const MAX_FRAME_BYTES: usize = 2 * 1024 * 1024;
@@ -132,6 +132,8 @@ pub fn valid_id(id: &str) -> bool {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Assignment {
+    #[serde(default)]
+    pub runtime: Option<Box<crate::harness::RuntimeSettings>>,
     #[serde(default)]
     pub codex: Option<Box<crate::harness::CodexSettings>>,
     pub index: ExecutionIndex,

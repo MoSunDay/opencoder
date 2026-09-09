@@ -8,7 +8,7 @@
 use anyhow::{Context, Result};
 use sqlx::{MySqlPool, Row};
 
-use super::{corrupt_status, exec_read_all, exec_write, id_column, row_exists, run_cascade, Arg};
+use super::{corrupt_status, exec_read_all, exec_write, row_exists, run_cascade, Arg};
 use crate::project_types::{
     ProjectGoalPatch, ProjectGoalRecord, ProjectGoalStatus, ProjectMilestonePatch,
     ProjectMilestoneRecord, ProjectMilestoneStatus,
@@ -81,10 +81,7 @@ pub async fn patch_goal(
     Ok(n > 0)
 }
 
-/// Cascade: the runs of the goal's todos → the todos → the milestones →
-/// the goal. `false` when the goal id does not exist. The todo ids are
-/// SELECTed up front so every DELETE binds a flat single id (portable to
-/// StarRocks, whose DELETE grammar is stricter about subqueries).
+/// Preserve independent work when removing a project.
 pub async fn delete_goal(pool: &MySqlPool, starrocks: bool, id: &str) -> Result<bool> {
     if !row_exists(
         pool,
@@ -96,31 +93,18 @@ pub async fn delete_goal(pool: &MySqlPool, starrocks: bool, id: &str) -> Result<
     {
         return Ok(false);
     }
-    let todo_rows = exec_read_all(
+    run_cascade(
         pool,
         starrocks,
-        "SELECT t.id FROM project_todos t \
-         JOIN project_milestones m ON m.id = t.milestone_id WHERE m.goal_id = ?",
-        &[Arg::Text(id.to_string())],
+        &[
+            (
+                "UPDATE project_milestones SET goal_id = NULL WHERE goal_id = ?",
+                id.to_owned(),
+            ),
+            ("DELETE FROM project_goals WHERE id = ?", id.to_owned()),
+        ],
     )
     .await?;
-    let todo_ids = id_column(&todo_rows, "id")?;
-    let mut stmts: Vec<(&'static str, String)> = Vec::new();
-    for tid in &todo_ids {
-        stmts.push((
-            "DELETE FROM project_todo_runs WHERE todo_id = ?",
-            tid.clone(),
-        ));
-    }
-    for tid in &todo_ids {
-        stmts.push(("DELETE FROM project_todos WHERE id = ?", tid.clone()));
-    }
-    stmts.push((
-        "DELETE FROM project_milestones WHERE goal_id = ?",
-        id.to_string(),
-    ));
-    stmts.push(("DELETE FROM project_goals WHERE id = ?", id.to_string()));
-    run_cascade(pool, starrocks, &stmts).await?;
     Ok(true)
 }
 
@@ -165,7 +149,7 @@ pub async fn create_milestone(
          VALUES (?,?,?,?,?,?,?,?)",
         vec![
             Arg::Text(rec.id.clone()),
-            Arg::Text(rec.goal_id.clone()),
+            Arg::TextOrNull(rec.goal_id.clone()),
             Arg::Text(rec.title.clone()),
             Arg::TextOrNull(rec.detail_md.clone()),
             Arg::Text(rec.status.as_str().to_string()),
@@ -190,7 +174,7 @@ pub async fn patch_milestone(
     let mut args: Vec<Arg> = Vec::new();
     if let Some(v) = &patch.goal_id {
         sets.push("goal_id = ?");
-        args.push(Arg::Text(v.clone()));
+        args.push(Arg::TextOrNull(v.clone()));
     }
     if let Some(v) = &patch.title {
         sets.push("title = ?");
@@ -221,44 +205,58 @@ pub async fn patch_milestone(
     Ok(n > 0)
 }
 
-/// Cascade: the runs of this milestone's todos → the todos themselves →
-/// the milestone. Todos are deleted, NOT re-parented to the backlog (see the
-/// trait docs). `false` when the milestone id does not exist.
+/// Nonempty milestones are protected from deletion.
 pub async fn delete_milestone(pool: &MySqlPool, starrocks: bool, id: &str) -> Result<bool> {
-    if !row_exists(
-        pool,
-        starrocks,
-        "SELECT 1 FROM project_milestones WHERE id = ?",
-        id,
-    )
-    .await?
-    {
+    if starrocks {
+        if !row_exists(
+            pool,
+            true,
+            "SELECT 1 FROM project_milestones WHERE id = ?",
+            id,
+        )
+        .await?
+        {
+            return Ok(false);
+        }
+        if row_exists(
+            pool,
+            true,
+            "SELECT 1 FROM project_todos WHERE milestone_id = ?",
+            id,
+        )
+        .await?
+        {
+            return Err(crate::project::MilestoneNotEmpty.into());
+        }
+        exec_write(
+            pool,
+            true,
+            "DELETE FROM project_milestones WHERE id = ?",
+            vec![Arg::Text(id.to_owned())],
+        )
+        .await?;
+        return Ok(true);
+    }
+    let mut tx = pool.begin().await?;
+    let existing = sqlx::query("SELECT id FROM project_milestones WHERE id = ? FOR UPDATE")
+        .bind(id)
+        .fetch_optional(&mut *tx)
+        .await?;
+    if existing.is_none() {
         return Ok(false);
     }
-    let todo_rows = exec_read_all(
-        pool,
-        starrocks,
-        "SELECT id FROM project_todos WHERE milestone_id = ?",
-        &[Arg::Text(id.to_string())],
-    )
-    .await?;
-    let todo_ids = id_column(&todo_rows, "id")?;
-    let mut stmts: Vec<(&'static str, String)> = Vec::new();
-    for tid in &todo_ids {
-        stmts.push((
-            "DELETE FROM project_todo_runs WHERE todo_id = ?",
-            tid.clone(),
-        ));
+    let children = sqlx::query("SELECT id FROM project_todos WHERE milestone_id = ? FOR UPDATE")
+        .bind(id)
+        .fetch_all(&mut *tx)
+        .await?;
+    if !children.is_empty() {
+        return Err(crate::project::MilestoneNotEmpty.into());
     }
-    stmts.push((
-        "DELETE FROM project_todos WHERE milestone_id = ?",
-        id.to_string(),
-    ));
-    stmts.push((
-        "DELETE FROM project_milestones WHERE id = ?",
-        id.to_string(),
-    ));
-    run_cascade(pool, starrocks, &stmts).await?;
+    sqlx::query("DELETE FROM project_milestones WHERE id = ?")
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
     Ok(true)
 }
 

@@ -198,7 +198,7 @@ function EditorCanvas({ spec, problems, positions, onSpecChange, onPositionsChan
   const onDrop = (e) => {
     e.preventDefault();
     const kind = e.dataTransfer.getData('application/opencoder-step');
-    if (kind !== 'agent' && kind !== 'wasm') {
+    if (!['agent', 'wasm', 'runner'].includes(kind)) {
       return;
     }
     addStep(kind, screenToFlowPosition({ x: e.clientX, y: e.clientY }));

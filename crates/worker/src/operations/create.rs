@@ -133,6 +133,7 @@ pub(super) async fn create(worker: &Worker, mut assignment: Assignment) -> Resul
         Lifecycle::default()
     };
     let record = Record {
+        annotations: serde_json::Value::Null,
         queue: None,
         assignment,
         result: project_run
@@ -209,6 +210,7 @@ fn dag_spec_agents(spec: Option<&str>) -> Option<Vec<String>> {
                 opencoder_dag::StepKind::Agent { agent, .. } => {
                     Some(agent.unwrap_or_else(|| "act".into()))
                 }
+                opencoder_dag::StepKind::Runner { agent, .. } => Some(agent),
                 _ => None,
             })
             .collect(),
@@ -220,6 +222,9 @@ pub(super) fn prepare(worker: &Worker, assignment: &Assignment, legacy: bool) ->
         bail!("node persistence unavailable: {error}");
     }
     let mut config = worker.configuration()?;
+    if let Some(settings) = &assignment.runtime {
+        config.agent.runtime = settings.as_ref().clone();
+    }
     if let Some(settings) = &assignment.codex {
         settings.validate().map_err(anyhow::Error::msg)?;
         config.agent.codex = Some(settings.as_ref().clone());
@@ -299,10 +304,16 @@ pub(super) fn prepare(worker: &Worker, assignment: &Assignment, legacy: bool) ->
                             .map_err(|e| anyhow::anyhow!(e))?;
                     opencoder_dag::validate(&spec).map_err(|e| anyhow::anyhow!(e.join("; ")))?;
                     super::dag_preflight::validate(worker, &spec, legacy)?;
+                    for step in &spec.steps {
+                        if let opencoder_dag::StepKind::Runner { runner, agent } = &step.kind {
+                            opencoder_dag_runtime::exec::runner::validate(&config, runner, agent)?;
+                        }
+                    }
                     agents.extend(spec.steps.into_iter().filter_map(|s| match s.kind {
                         opencoder_dag::StepKind::Agent { agent, .. } => {
                             Some(agent.unwrap_or_else(|| "act".into()))
                         }
+                        opencoder_dag::StepKind::Runner { agent, .. } => Some(agent),
                         _ => None,
                     }));
                 }
@@ -371,7 +382,6 @@ pub(super) fn prepare(worker: &Worker, assignment: &Assignment, legacy: bool) ->
                 opencoder_core::harness::validate_env(key, value).map_err(anyhow::Error::msg)?;
             }
             let mut native = agents.is_empty();
-            let mut codex = false;
             for agent in agents {
                 if opencoder_core::resolve_agent(&agent).is_none() {
                     bail!("agent {agent} unavailable");
@@ -383,14 +393,13 @@ pub(super) fn prepare(worker: &Worker, assignment: &Assignment, legacy: bool) ->
                 }
                 .unwrap_or_else(|| opencoder_core::harness::agent_harness(&agent));
                 native |= harness == opencoder_core::harness::Harness::Opencoder;
-                codex |= harness == opencoder_core::harness::Harness::Codex;
-            }
-            if needs_llm && native && worker.inner.client.is_none() {
-                config.resolve_endpoint()?;
-            }
-            if codex {
+                if harness != opencoder_core::harness::Harness::Codex {
+                    continue;
+                }
+                let settings = opencoder_core::harness::agent_settings(&config, &agent)
+                    .map_err(anyhow::Error::msg)?;
                 if assignment.request.kind == ExecutionKind::Agent
-                    && assignment.codex.is_some()
+                    && settings.is_some()
                     && (!envs.is_empty()
                         || assignment
                             .request
@@ -400,18 +409,16 @@ pub(super) fn prepare(worker: &Worker, assignment: &Assignment, legacy: bool) ->
                 {
                     bail!("Codex parameters are managed by Harness configuration; per-task model/env overrides are not allowed");
                 }
-                let mut effective_envs = config
-                    .agent
-                    .codex
-                    .as_ref()
-                    .map(|s| s.envs.clone())
-                    .unwrap_or_default();
-                effective_envs.extend(envs);
+                let mut effective_envs = settings.map(|s| s.envs.clone()).unwrap_or_default();
+                effective_envs.extend(envs.clone());
                 opencoder_session::harness::codex::configured_binary(
-                    config.agent.codex.as_ref(),
+                    settings,
                     &effective_envs,
                     &worker.inner.state.workdir,
                 )?;
+            }
+            if needs_llm && native && worker.inner.client.is_none() {
+                config.resolve_endpoint()?;
             }
             Ok::<_, anyhow::Error>(())
         })?;

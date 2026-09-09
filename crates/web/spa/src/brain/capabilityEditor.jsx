@@ -6,7 +6,7 @@ import { capabilityBody, capabilityForm, needsTargetSave } from './model.js';
 
 const required = [{ required: true, whitespace: true, message: '请填写此项' }];
 
-export function CapabilityEditor({ entry, onClose, onSaved }) {
+function CapabilityEditorSession({ entry, onClose, onSaved }) {
   const [form] = Form.useForm();
   const [id, setId] = useState(entry?.capability?.id || null);
   const [loading, setLoading] = useState(!!id);
@@ -91,4 +91,8 @@ export function CapabilityEditor({ entry, onClose, onSaved }) {
       </Form>
     </Spin>
   </Drawer>;
+}
+
+export function CapabilityEditor(props) {
+  return <CapabilityEditorSession key={props.entry?.capability?.id || "new"} {...props} />;
 }

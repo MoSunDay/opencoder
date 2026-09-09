@@ -19,6 +19,8 @@ fn default_agent_name() -> String {
 /// field defaults, so partial blocks from older configs keep parsing.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AgentDefaults {
+    #[serde(default, skip_serializing_if = "runtime_empty")]
+    pub runtime: crate::harness::RuntimeSettings,
     /// Private execution settings, never written to NFS Agent cards.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub codex: Option<crate::harness::CodexSettings>,
@@ -47,6 +49,7 @@ pub struct AgentDefaults {
 impl Default for AgentDefaults {
     fn default() -> Self {
         AgentDefaults {
+            runtime: Default::default(),
             codex: None,
             default: "act".to_string(),
             agents_dir: None,
@@ -55,6 +58,10 @@ impl Default for AgentDefaults {
             nfs: AgentNfsConfig::default(),
         }
     }
+}
+
+fn runtime_empty(value: &crate::harness::RuntimeSettings) -> bool {
+    value.profiles.is_empty() && value.runners.is_empty()
 }
 
 /// Tool-surface breadth for custom agents. Serialized lowercase

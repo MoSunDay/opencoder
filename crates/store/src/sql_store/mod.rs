@@ -13,7 +13,7 @@ use anyhow::{Context, Result};
 use async_trait::async_trait;
 use opencoder_core::{StorageBackend, StorageConfig};
 use sqlx::mysql::{MySqlArguments, MySqlConnectOptions};
-use sqlx::{MySqlPool, Row};
+use sqlx::MySqlPool;
 
 use crate::project::ProjectStore;
 use crate::project_types::{
@@ -405,14 +405,6 @@ pub(super) async fn row_exists(
             .await?
             .is_some(),
     )
-}
-
-/// Collect one string column (`name`) from already-fetched rows.
-pub(super) fn id_column(rows: &[sqlx::mysql::MySqlRow], name: &str) -> Result<Vec<String>> {
-    rows.iter()
-        .map(|r| r.try_get::<String, _>(name))
-        .collect::<std::result::Result<Vec<_>, _>>()
-        .context("read project id column")
 }
 
 /// Run a cascade of single-bind DELETEs. MySQL: one transaction, so a

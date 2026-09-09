@@ -78,38 +78,19 @@ pub async fn patch_goal(
     Ok(n > 0)
 }
 
-/// Tx cascade: runs (via todos of the goal's milestones) → todos →
-/// milestones → goal. `false` when the goal id does not exist.
+/// Delete the goal, preserving its milestones, TODOs and runs.
 pub async fn delete_goal(conn: &Connection, id: &str) -> Result<bool> {
     super::tx::run_tx(conn, "BEGIN IMMEDIATE", || async move {
         if !exists(conn, "SELECT 1 FROM project_goals WHERE id = ?1", id).await? {
             return Ok(false);
         }
         conn.execute(
-            "DELETE FROM project_todo_runs WHERE todo_id IN (
-               SELECT t.id FROM project_todos t
-               JOIN project_milestones m ON m.id = t.milestone_id
-               WHERE m.goal_id = ?1)",
+            "UPDATE project_milestones SET goal_id = NULL WHERE goal_id = ?1",
             params![id],
         )
-        .await
-        .context("cascade delete goal runs")?;
-        conn.execute(
-            "DELETE FROM project_todos WHERE milestone_id IN \
-             (SELECT id FROM project_milestones WHERE goal_id = ?1)",
-            params![id],
-        )
-        .await
-        .context("cascade delete goal todos")?;
-        conn.execute(
-            "DELETE FROM project_milestones WHERE goal_id = ?1",
-            params![id],
-        )
-        .await
-        .context("cascade delete goal milestones")?;
+        .await?;
         conn.execute("DELETE FROM project_goals WHERE id = ?1", params![id])
-            .await
-            .context("delete project goal")?;
+            .await?;
         Ok(true)
     })
     .await
@@ -150,7 +131,7 @@ pub async fn create_milestone(conn: &Connection, rec: &ProjectMilestoneRecord) -
         "INSERT INTO project_milestones (id, goal_id, title, detail_md, status, sort_key, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)",
         params![
             rec.id.as_str(),
-            rec.goal_id.as_str(),
+            rec.goal_id.as_deref(),
             rec.title.as_str(),
             rec.detail_md.as_deref(),
             rec.status.as_str(),
@@ -172,9 +153,9 @@ pub async fn patch_milestone(
 ) -> Result<bool> {
     let mut sets: Vec<&'static str> = Vec::new();
     let mut vals: Vec<Value> = Vec::new();
-    if let Some(v) = patch.goal_id.as_deref() {
+    if let Some(v) = &patch.goal_id {
         sets.push("goal_id = ?");
-        vals.push(v.into());
+        vals.push(v.as_deref().map(Value::from).unwrap_or(Value::Null));
     }
     if let Some(v) = patch.title.as_deref() {
         sets.push("title = ?");
@@ -206,30 +187,23 @@ pub async fn patch_milestone(
     Ok(n > 0)
 }
 
-/// Tx cascade: the runs of this milestone's todos → the todos themselves →
-/// the milestone. Todos are deleted, NOT re-parented to the backlog (see the
-/// trait docs). `false` when the milestone id does not exist.
+/// Only empty milestones can be deleted; associations must be changed explicitly.
 pub async fn delete_milestone(conn: &Connection, id: &str) -> Result<bool> {
     super::tx::run_tx(conn, "BEGIN IMMEDIATE", || async move {
         if !exists(conn, "SELECT 1 FROM project_milestones WHERE id = ?1", id).await? {
             return Ok(false);
         }
-        conn.execute(
-            "DELETE FROM project_todo_runs WHERE todo_id IN \
-             (SELECT id FROM project_todos WHERE milestone_id = ?1)",
-            params![id],
+        if exists(
+            conn,
+            "SELECT 1 FROM project_todos WHERE milestone_id = ?1",
+            id,
         )
-        .await
-        .context("cascade delete milestone runs")?;
-        conn.execute(
-            "DELETE FROM project_todos WHERE milestone_id = ?1",
-            params![id],
-        )
-        .await
-        .context("cascade delete milestone todos")?;
+        .await?
+        {
+            return Err(crate::project::MilestoneNotEmpty.into());
+        }
         conn.execute("DELETE FROM project_milestones WHERE id = ?1", params![id])
-            .await
-            .context("delete project milestone")?;
+            .await?;
         Ok(true)
     })
     .await

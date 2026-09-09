@@ -17,6 +17,7 @@ const { TextArea } = Input;
 const KIND_OPTIONS = [
   { value: 'agent', label: 'Agent 步骤' },
   { value: 'wasm', label: 'Wasm 步骤' },
+  { value: 'runner', label: 'Runner 工作流' },
 ];
 const SANDBOX_OPTIONS = [
   { value: 'in_process', label: '内嵌 VM (in_process)' },
@@ -114,6 +115,10 @@ export function StepInspector({ step, allNames, problemList, onChange, onRename,
             </Form.Item>
           </>
         ) : null}
+        {kindType === 'runner' && <>
+          <Form.Item label="已注册 Runner"><Input value={kind.runner || ''} placeholder="eval-diagnose" onChange={(e) => onChange(withKindField(step, 'runner', e.target.value))} /></Form.Item>
+          <Form.Item label="Agent" extra="使用 Agent 绑定的 Codex 配置和资源版本"><Input value={kind.agent || ''} placeholder="eval-diagnose" onChange={(e) => onChange(withKindField(step, 'agent', e.target.value))} /></Form.Item>
+        </>}
         {kindType === 'wasm' ? (
           <>
             <Form.Item

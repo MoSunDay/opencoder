@@ -11,6 +11,7 @@ use opencoder_core::{
 };
 use serde_json::json;
 use std::sync::Arc;
+pub mod registered;
 
 pub async fn codex(state: &AppState) -> anyhow::Result<Option<Box<CodexSettings>>> {
     state
@@ -22,8 +23,12 @@ pub async fn codex(state: &AppState) -> anyhow::Result<Option<Box<CodexSettings>
 }
 
 pub async fn get_harnesses(State(state): State<Arc<AppState>>) -> Response {
+    let profiles = match state.fleet.definitions("codex_profile").await {
+        Ok(values) => values,
+        Err(error) => return super::error_500(error.to_string()),
+    };
     match state.fleet.definition("harness", "codex").await {
-        Ok(value) => super::response(RpcReply::ok(json!({"harnesses": [
+        Ok(value) => super::response(RpcReply::ok(json!({"profiles":profiles,"harnesses": [
             {"name":"opencoder", "managed":false},
             {"name":"codex", "managed":value.is_some(), "revision":value.as_ref().map(|v| &v["revision"]),
              "settings":value.map(|v| v["settings"].clone()).unwrap_or(json!(CodexSettings::default()))}

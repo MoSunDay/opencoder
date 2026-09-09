@@ -40,7 +40,9 @@ pub struct BrainTrace {
 /// situation 文本：能力路由的判别输入（嵌入 + 决策树行走都吃它）。
 fn situation_for(cx: &ProjectContext, todo: &ProjectTodoRecord) -> String {
     let mut s = String::new();
-    s.push_str(&format!("目标：{}\n", cx.goal_title));
+    if let Some(title) = &cx.goal_title {
+        s.push_str(&format!("目标：{title}\n"));
+    }
     if let Some(m) = &cx.milestone_title {
         s.push_str(&format!("里程碑：{m}\n"));
     }

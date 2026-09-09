@@ -3,7 +3,8 @@
 //! `web_agents.rs`: the agents root is a process-global override, so every
 //! test holds one static lock for its whole body. Thin router + oneshot.
 
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::Arc;
+use tokio::sync::{Mutex, MutexGuard};
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
@@ -16,11 +17,11 @@ use tower::ServiceExt;
 use opencoder_llm::{ChatStream, MockChatClient};
 use opencoder_store::{LibsqlStore, Store};
 
-static OVERRIDE_LOCK: Mutex<()> = Mutex::new(());
+static OVERRIDE_LOCK: Mutex<()> = Mutex::const_new(());
 
-fn scoped() -> (tempfile::TempDir, MutexGuard<'static, ()>) {
+async fn scoped() -> (tempfile::TempDir, MutexGuard<'static, ()>) {
     let dir = tempfile::tempdir().unwrap();
-    let guard = OVERRIDE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let guard = OVERRIDE_LOCK.lock().await;
     opencoder_core::agent::set_agents_dir_override(Some(dir.path().to_path_buf()));
     (dir, guard)
 }
@@ -137,7 +138,7 @@ fn expect_silent(rx: &mut tokio::sync::mpsc::UnboundedReceiver<opencoder_web::cm
 #[tokio::test]
 async fn version_lifecycle_and_file_roundtrip() {
     let state = state().await;
-    let _scoped = scoped();
+    let _scoped = scoped().await;
     let (_, v) = call(
         app(state.clone()),
         "GET",
@@ -249,7 +250,7 @@ async fn version_lifecycle_and_file_roundtrip() {
 #[tokio::test]
 async fn rejects_bad_category_paths_shape_and_oversize() {
     let state = state().await;
-    let _scoped = scoped();
+    let _scoped = scoped().await;
     // Unknown category ⇒ 400 everywhere it is a path param.
     for (method, uri) in [
         ("GET", "/api/agents/resources/nope"),
@@ -349,7 +350,7 @@ async fn rejects_bad_category_paths_shape_and_oversize() {
 #[tokio::test]
 async fn reload_only_for_active_chain_writes() {
     let state = state().await;
-    let _scoped = scoped();
+    let _scoped = scoped().await;
     call(
         app(state.clone()),
         "POST",
@@ -418,7 +419,7 @@ async fn reload_only_for_active_chain_writes() {
 #[tokio::test]
 async fn delete_referenced_conflicts_then_removes() {
     let state = state().await;
-    let _scoped = scoped();
+    let _scoped = scoped().await;
     call(
         app(state.clone()),
         "POST",
@@ -501,7 +502,7 @@ async fn delete_referenced_conflicts_then_removes() {
 #[tokio::test]
 async fn missing_resource_and_versions_are_404() {
     let state = state().await;
-    let _scoped = scoped();
+    let _scoped = scoped().await;
     call(
         app(state.clone()),
         "POST",
@@ -551,4 +552,66 @@ async fn missing_resource_and_versions_are_404() {
     )
     .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn skill_package_versions_keep_referenced_contracts_and_assets() {
+    let (_dir, _guard) = scoped().await;
+    let state = state().await;
+    let files = [
+        ("review/SKILL.md", "Read references/contract.md"),
+        ("review/references/contract.md", "Pinned contract"),
+        ("review/agents/openai.yaml", "interface: {}"),
+        ("review/assets/render.py", "print('report')"),
+    ];
+    let body = serde_json::json!({"name":"workflow", "files": files.iter().map(|(path, text)|
+        serde_json::json!({"path":path,"content_b64":B64.encode(text)})).collect::<Vec<_>>()});
+    let (status, value) = call(
+        app(state.clone()),
+        "POST",
+        "/api/agents/resources/skills",
+        body.clone(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{value}");
+    for (path, text) in files {
+        let (status, value) = call(
+            app(state.clone()),
+            "GET",
+            &format!("/api/agents/resources/skills/workflow/versions/1/files/{path}"),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        assert_eq!(value["content_b64"], B64.encode(text));
+    }
+    let mut invalid = body.clone();
+    invalid["files"].as_array_mut().unwrap().remove(0);
+    let (status, _) = call(
+        app(state.clone()),
+        "PUT",
+        "/api/agents/resources/skills/workflow",
+        invalid,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let mut duplicate = body.clone();
+    duplicate["files"]
+        .as_array_mut()
+        .unwrap()
+        .push(body["files"][0].clone());
+    let (status, _) = call(
+        app(state.clone()),
+        "PUT",
+        "/api/agents/resources/skills/workflow",
+        duplicate,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        opencoder_core::agent::read_resource_meta("skills", "workflow")
+            .unwrap()
+            .current,
+        1
+    );
 }

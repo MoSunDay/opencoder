@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 #[derive(Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct CodexSettings {
+    pub auth_slot: Option<u32>,
     pub executable: Option<String>,
     pub model: Option<String>,
     pub reasoning_effort: Option<String>,
@@ -24,6 +25,9 @@ impl std::fmt::Debug for CodexSettings {
 
 impl CodexSettings {
     pub fn validate(&self) -> Result<(), String> {
+        if self.auth_slot == Some(0) {
+            return Err("Codex auth_slot must be positive".into());
+        }
         for (name, value) in [("executable", &self.executable), ("model", &self.model)] {
             if value
                 .as_ref()
@@ -65,6 +69,9 @@ impl CodexSettings {
     /// Values are separate argv entries, never interpreted by a shell.
     pub fn config_args(&self) -> Vec<String> {
         let mut args = Vec::new();
+        if let Some(slot) = self.auth_slot {
+            args.extend(["--auth-slot".into(), slot.to_string()]);
+        }
         for (key, value) in [
             ("model_reasoning_effort", &self.reasoning_effort),
             ("sandbox_mode", &self.sandbox_mode),

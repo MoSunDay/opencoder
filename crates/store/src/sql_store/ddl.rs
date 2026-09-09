@@ -11,6 +11,8 @@
 use anyhow::{Context, Result};
 use sqlx::{MySqlPool, Row};
 
+mod relations;
+
 const GOAL_COLUMNS: &str = "\
   id VARCHAR(64) NOT NULL,
   title VARCHAR(512) NOT NULL,
@@ -22,7 +24,7 @@ const GOAL_COLUMNS: &str = "\
 
 const MILESTONE_COLUMNS: &str = "\
   id VARCHAR(64) NOT NULL,
-  goal_id VARCHAR(64) NOT NULL,
+  goal_id VARCHAR(64) NULL,
   title VARCHAR(512) NOT NULL,
   detail_md {text} NULL,
   status VARCHAR(32) NOT NULL,
@@ -235,7 +237,7 @@ pub async fn upgrade(pool: &MySqlPool, starrocks: bool) -> Result<()> {
             res.with_context(|| format!("upgrade table {table}: add {col}"))?;
         }
     }
-    Ok(())
+    relations::upgrade(pool, starrocks).await
 }
 
 #[cfg(test)]

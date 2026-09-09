@@ -131,7 +131,7 @@ describe('ProjectPanel', () => {
     });
   });
 
-  it('milestones tab groups by goal and PATCHes status via Segmented', async () => {
+  it('milestones tab lists independently and PATCHes status via Segmented', async () => {
     mountPanel();
     await openTab('里程碑');
     expect(await screen.findByText('M1 冲刺')).toBeTruthy();
@@ -162,7 +162,7 @@ describe('ProjectPanel', () => {
     fireEvent.click(await screen.findByText('新建里程碑', { exact: true }));
     await settle();
     fireEvent.mouseDown(screen.getByRole('combobox', { name: 'goal_id' }));
-    fireEvent.click(await screen.findByText('第二目标', { selector: '.ant-select-item-option-content' }));
+    fireEvent.click(await screen.findByText('第二目标 · g2', { selector: '.ant-select-item-option-content' }));
     fireEvent.change(screen.getByPlaceholderText('一句话标题'), { target: { value: '新里程碑' } });
     fireEvent.click(findButton('保存'));
     await waitFor(() => expect(apiPostMock).toHaveBeenCalledWith('/api/project/milestones',
@@ -176,7 +176,7 @@ describe('ProjectPanel', () => {
     expect(screen.getByText('回归测试')).toBeTruthy();
     expect(screen.getByText('杂项')).toBeTruthy();
     const row = screen.getByText('杂项').closest('tr');
-    expect(row && within(row).getByText('未分组')).toBeTruthy();
+    expect(row && within(row).getByText('未关联')).toBeTruthy();
     const planned = screen.getByText('写发布说明').closest('tr');
     expect(planned && within(planned).getByText('✓')).toBeTruthy();
   });

@@ -25,6 +25,7 @@ ulid.workspace = true
 wasmtime = { version = "48", default-features = false, features = ["cranelift", "runtime", "std", "component-model", "async", "wat"] }
 wasmtime-wasi = { version = "48", default-features = false, features = ["p1"] }
 libc = "0.2"
+sha2 = "0.10"
 
 [dev-dependencies]
 tempfile.workspace = true

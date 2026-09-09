@@ -54,7 +54,10 @@ mod tests {
     #[tokio::test]
     async fn optional_backends_refuse_cleanly_without_their_feature() {
         let libsql = Arc::new(LibsqlStore::open_memory().await.unwrap());
-        for name in ["mysql", "starrocks"] {
+        for (name, feature_on) in [
+            ("mysql", cfg!(feature = "mysql")),
+            ("starrocks", cfg!(feature = "starrocks")),
+        ] {
             let storage = StorageConfig {
                 backend: StorageBackend::parse(name).unwrap(),
                 ..Default::default()
@@ -64,10 +67,6 @@ mod tests {
                 Ok(_) => panic!("{name} must refuse without a DSN"),
             };
             assert!(err.contains(name), "message names the backend: {err}");
-            let feature_on = match name {
-                "starrocks" => cfg!(feature = "starrocks"),
-                _ => cfg!(feature = "mysql"),
-            };
             if feature_on {
                 // Feature compiled in but no DSN configured: refuse with the
                 // DSN-missing error, still without touching libsql.

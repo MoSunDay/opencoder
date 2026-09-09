@@ -170,7 +170,8 @@ async function main() {
   await page.getByText('acceptance-team', { exact: true }).waitFor();
   await page.screenshot({ path: path.join(root, 'teams.png') });
   await page.getByRole('menuitem', { name: '大脑调度' }).click();
-  await page.getByText('调度与绑定', { exact: true }).waitFor();
+  await page.getByText('需求执行', { exact: true }).waitFor();
+  await page.getByText('能力库', { exact: true }).waitFor();
   await page.screenshot({ path: path.join(root, 'brain.png') });
   // An offline owner must expose an error without creating a replacement run.
 

@@ -1,4 +1,5 @@
-Commit: (working-tree, 基于 303b95027b49873a9833393d57b72de68747a9e0)
+Commit: 2491657d33c384dddcabf4d12ab4cd8822ccaf81
+
 
 # Agent Harness
 
@@ -13,9 +14,9 @@ opencoder --wrap codex --cmd "检查当前项目并完成需求" \
 
 `--cmd` 是一次性需求，CLI 输出文本后退出。`--envs KEY=VALUE` 可以重复，按第一个等号拆分，重复的键以后者为准；值可以为空。需求经 stdin 传给 Codex，不作为 shell 命令解释。`--wrap opencoder` 显式使用原生执行器；省略时跟随 Agent 的默认 Harness。
 
-Server Web 的「Agent 配置」顶部按 Agent 列表、Agent Harness、Harness 管理、NFS 配置切换。列表逐个展示内置和自定义 Agent 引用的 prompt、skills、tools、memory 的名称、当前版本、NFS 相对路径和内容；Agent Harness 页管理默认执行器。启动弹窗和「全部执行」仍可覆盖本次 Harness 选择。
+Server Web 的「Agent 配置」顶部按 Agent 列表、Agent Harness、Harness 管理、Runner 管理、NFS 配置切换。列表逐个展示内置和自定义 Agent 引用的 prompt、skills、tools、memory 的名称、当前版本、NFS 相对路径和内容；Agent Harness 页管理默认执行器及命名配置绑定。启动弹窗和「全部执行」仍可覆盖本次 Harness 选择。
 
-Harness 管理统一保存 Codex 二进制路径、模型、推理强度、sandbox、approval policy 和环境变量，并显示配置修订号。留空项使用节点 Codex 自身的配置。配置在任务接受时形成私有快照，排队、续聊和分叉保持原值，修改只影响后续新任务。受管 Codex 不接受单次启动的 env 或原生模型覆盖；原生 Agent 的独立环境变量配置仍可用。管理值保存在 Server 私有定义库，随分配下发到 Node，不写入 Agent NFS 引用卡。
+Harness 管理分别保存默认及命名 Codex 配置，包括二进制路径、模型、推理强度、授权槽位、sandbox、approval policy 和环境变量，并显示配置修订号。留空项使用节点 Codex 自身的配置。配置在任务接受时形成私有快照，排队、续聊和分叉保持原值，修改只影响后续新任务。受管 Codex 不接受单次启动的 env 或原生模型覆盖；原生 Agent 的独立环境变量配置仍可用。管理值保存在 Server 私有定义库，随分配下发到 Node，不写入 Agent NFS 引用卡。
 
 ## 执行与恢复
 
@@ -43,9 +44,9 @@ Codex Execute 收到本次交付清单路径，将工作目录相对路径写为
 
 ## 升级与回滚
 
-Fleet 协议为 v6；Server 和 Node 必须成套升级。跨版本连接直接拒绝，避免旧 Node 忽略受管 Codex 参数和排队契约；Server 默认日志显示拒绝原因。Codex 入口和认证必须在实际执行节点配置，并保持使用前台 exec JSONL 入口。
+Fleet 协议为 v7；Server 和 Node 必须成套升级。跨版本连接直接拒绝，避免旧 Node 忽略受管 Codex 参数和排队契约；Server 默认日志显示拒绝原因。Codex 入口和认证必须在实际执行节点配置，并保持使用前台 exec JSONL 入口。
 
-Codex wrap 的可空运行态列使用 schema 22；本次 Harness 管理和节点队列不新增表或迁移。历史会话默认保持原生。切换前保存停写后的数据备份；回滚时同步恢复整套二进制，并按需要使用升级前数据副本。旧程序可读取历史原生会话，但不能用于继续新的 Codex 会话。发布/回滚工具见 [平台部署](../../docs/agent-platform.md)。
+Codex wrap 的可空运行态列使用 schema 22；命名 Harness、注册 Runner 和节点队列复用现有存储，不另增业务表。历史会话默认保持原生。切换前保存停写后的数据备份；回滚时同步恢复整套二进制，并按需要使用升级前数据副本。旧程序可读取历史原生会话，但不能用于继续新的 Codex 会话。发布/回滚工具见 [平台部署](../../docs/agent-platform.md)。
 
 ## 消息协议
 
@@ -61,3 +62,7 @@ PLATFORM_BIN_DIR=/path/to/target/debug node scripts/acceptance/harness/codex.js 
 脚本启动临时 Server 和 Node，经真实浏览器验证顶部 tabs、NFS 资源内容和版本、Agent Harness 切换、受管参数保存、非法环境零写入、节点并发与队列策略，以及工具折叠（含失败后恢复）、刷新、续聊与 390px 布局。真实 Codex 模式还验证 Project Plan → Execute、清单登记与不可变交付副本；不提供二进制路径时使用确定性进程夹具。
 
 相关逻辑：[session](../../agents/session/index.md)、[CLI](../../agents/local/index.md)、[Web](../../agents/web/index.md)、[worker](../../agents/worker/index.md)。
+
+## 业务 Runner
+
+已有业务工具可登记前台入口，通过 DAG Runner 执行。模型配置、资源版本和安装文件在受理时固定；阶段和 Codex 消息进入同一折叠回放，报告支持下载。执行成功与业务准出结论分开显示。已开始且无有效完成收据的任务需要显式业务重试，避免再次提交模型。完整约定见 [注册 Runner](../../docs/registered-runners.md)。

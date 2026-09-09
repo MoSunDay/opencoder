@@ -1,10 +1,11 @@
-Commit: (working-tree, 基于 56e612b6f251e3ed384074c7cf9cfc70a8c4c9cf)
+Commit: 2491657d33c384dddcabf4d12ab4cd8822ccaf81
+
 
 # web 模块
 
 ## Harness 接口与展示
 
-`api_agents` 合并内置和自定义 Agent，响应含 `harness` / `builtin` 与重新解析的资源内容名称，创建及更新接口保存默认 Harness；内置 Agent 禁止删除。创建会话接受 Harness 与环境并在输入前初始化，公开会话响应只增加 Harness 名称。已有 Codex 会话的 Agent/模型变更、原生 compact/handoff 由 `api_ops` 显式拒绝；prompt 使用共享惰性客户端，不要求原生模型凭据。
+`api_agents` 合并内置和自定义 Agent，响应含 `harness` / `harness_profile` / `builtin` 与重新解析的资源内容名称，创建及更新接口保存默认 Harness；内置 Agent 禁止删除。创建会话接受 Harness 与环境并在输入前初始化，公开会话响应只增加 Harness 名称。已有 Codex 会话的 Agent/模型变更、原生 compact/handoff 由 `api_ops` 显式拒绝；prompt 使用共享惰性客户端，不要求原生模型凭据。
 
 SPA 的 `harness/management.jsx` 管理内置/自定义 Agent 的执行器及集中 Codex 参数，加载失败时禁止提交默认空值。`harness/fields.jsx` 复用 Harness 选项和字面环境解析，仅显式原生启动显示 env 输入；Codex 提示使用集中管理。`agentsConfig`、`agentDetail` 配置默认值，Agent 启动弹窗及 `fleet/executions` 可以按次覆盖，`fleet/detail` 显示实际选择。Codex 转换后沿用原有 reducer、消息回放与 Turn → Step → Function call 展示。相关契约见 `tests/web_agents.rs`、`spa/src/harness/`，浏览器验收入口为 `scripts/acceptance/harness/codex.js`。业务规则见 [Agent Harness](../../features/harness/index.md)，节点执行见 [worker](../worker/index.md)。
 
@@ -109,10 +110,12 @@ POST `/api/sessions/:id/subagents/:task_id/steer`：模式控制文本先返回 
 - `api_dag.rs`：def CRUD + dispatch + run 查询；`api_nodes_dag.rs`：claim（单活跃/节点，BEGIN IMMEDIATE CAS，FIFO `(created_at,rowid)`）+ 节点事件/状态上报（终态补写合成 `run_finished`）；`sse_dag.rs`：run 事件 SSE（id=seq，Last-Event-ID 续传）；`dag_state.rs`：进程级 `OnceLock<DagHub>` 事件广播；`api_nodes.rs` lost 收束把 running/cancelling 折叠 error("node lost")。
 - SPA「DAG」面板：defs/runs/拓扑图（@xyflow + dagre）；`dag/defEditor.jsx` 的新建/编辑抽屉为 `width="100%"` 全宽（画布与 JSON 双模式）。
 
-- **版本化 agent 管理面（2026-09-04）**：`api_agents.rs`（卡片 CRUD + `PATCH /api/agents/active` 激活——`set_active_agent_checked` preflight（prompt 引用缺失（无 prompt 卡不可 resolve，读路径会静默回落 act）或解析失败均 400 并回滚 marker）+ 仅变化时 fan_out ReloadConfig）、`api_agent_resources.rs`（共享池 `prompts|skills|tools|memory` 版本 CRUD/rollback/文件读取；写校验：路径安全、b64、1.5MiB 上限、按 category 的文件形态；被引用资源 DELETE 409 带 referenced_by；reload 策略=仅生效 agent 链路受影响时 fan_out）、`api_agent_nfs.rs`（`GET/POST /api/agents/nfs` 生命周期，进程级 NFS_SLOT；daemon 启动时 `agent.nfs.enabled` 自启动，失败仅 log）。SPA「Agent 配置」面板：`agentsConfig/agentDetail/promptEditor/agentNfsCard`（顶部 Tabs 切换 Agent 列表、Agent Harness、Harness 管理与 NFS 配置；主表展示 Agent 的资源引用、当前版本、NFS 相对路径与内容名称，保留名称检索、生效选择、新建及编辑/启动/删除；版本下拉、回滚、soul/how/output 编辑保存即新版本、mount 提示）。详见 [agents/agents](../agents/index.md)。
+- **版本化 agent 管理面（2026-09-04）**：`api_agents.rs`（卡片 CRUD + `PATCH /api/agents/active` 激活——`set_active_agent_checked` preflight（prompt 引用缺失（无 prompt 卡不可 resolve，读路径会静默回落 act）或解析失败均 400 并回滚 marker）+ 仅变化时 fan_out ReloadConfig）、`api_agent_resources.rs`（共享池 `prompts|skills|tools|memory` 版本 CRUD/rollback/文件读取；写校验：路径安全、b64、1.5MiB 上限、按 category 的文件形态；被引用资源 DELETE 409 带 referenced_by；reload 策略=仅生效 agent 链路受影响时 fan_out）、`api_agent_nfs.rs`（`GET/POST /api/agents/nfs` 生命周期，进程级 NFS_SLOT；daemon 启动时 `agent.nfs.enabled` 自启动，失败仅 log）。SPA「Agent 配置」面板：`agentsConfig/agentDetail/promptEditor/agentNfsCard`（顶部 Tabs 切换 Agent 列表、Agent Harness、Harness 管理、Runner 管理与 NFS 配置；主表展示 Agent 的资源引用、当前版本、NFS 相对路径与内容名称，保留名称检索、生效选择、新建及编辑/启动/删除；版本下拉、回滚、soul/how/output 编辑保存即新版本、mount 提示）。详见 [agents/agents](../agents/index.md)。
 
 ## 编辑缓冲与项目关联
 
 项目、里程碑 Markdown 的 `project/views/mdModal.jsx` 仅在打开或切换记录时初始化，预览保留已注册字段；TODO 抽屉草稿不随 `updated_at` 重置。Prompt、Env、Harness、DAG 等编辑器保留本地输入，资源切换隔离编辑会话，保存中锁定字段；Prompt 与 Env 初始读取失败时禁止用空值保存。
 
 项目和里程碑、里程碑和 TODO 通过可搜索且可清空的 Select 关联。里程碑列表允许独立创建专项，TODO 项目归属由里程碑派生；共享投影在 `project/model/relations.js`，列表、进展及 Owner 视角均包括独立里程碑。接口、迁移和删除规则见 [project](../project/index.md)。
+
+`harness/management` 支持默认与命名 Codex 配置及 Agent profile 绑定；`harness/runners` 管理版本化前台入口、安装文件清单和 env。DAG 编辑器提供 Runner step；`fleet/detail/runner` 展示已接受配置版本、阶段、报告、业务 verdict 及独立投递状态。Runner 转译消息使用既有折叠回放，资源 API 支持完整 Skill 包。接口验证见 [Runner UI 测试](../../crates/web/spa/src/harness/runner.dom.test.jsx)。

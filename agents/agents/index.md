@@ -1,10 +1,11 @@
-Commit: (working-tree, 基于 65c9d891ae905e7925277d29a87cd8e7957e8dad)
+Commit: 2491657d33c384dddcabf4d12ab4cd8822ccaf81
+
 
 # opencoder-agents — 版本化自定义 Agent（写路径 + NFS）
 
 ## Agent 执行设置
 
-引用卡的 `harness` 指定新会话默认执行器，支持 `opencoder`（缺省）和 `codex`。`create_agent_with_harness` 初始化卡片；`update_agent_settings` 可独立更新引用或 Harness，并把变化写入 history。内置 Agent 可创建仅含设置的卡片，仍由 builtin 提供提示词；Web 禁止删除内置 Agent。资源卡校验、执行器固定与工作区快照由 [session](../session/index.md) 承担，写路径不启动外部进程。用户规则见 [Agent Harness](../../features/harness/index.md)。
+引用卡的 `harness` 指定新会话默认执行器，支持 `opencoder`（缺省）和 `codex`。`create_agent_with_profile` 初始化卡片；`update_agent_with_profile` 可独立更新引用、Harness 或 `harness_profile`，并把变化写入 history。内置 Agent 可创建仅含设置的卡片，仍由 builtin 提供提示词；Web 禁止删除内置 Agent。资源卡校验、执行器固定与工作区快照由 [session](../session/index.md) 承担，写路径不启动外部进程。用户规则见 [Agent Harness](../../features/harness/index.md)。
 
 读路径在 core（[agents/core](../core/index.md) `agent::{meta,resource,compose}`），本 crate 只做**写路径**与 **NFS 导出**，全部纯函数 + 数据 struct。
 
@@ -40,3 +41,5 @@ core `resolve_agent`：builtin 优先 → 引用卡 → prompt 资源 current �
 - skill 遮蔽：`core::skill::discover()` roots = active agent 技能根在前 + 全局 skills 目录，first-wins（详见 [agents/core](../core/index.md)）。
 - session：`/agent <名>` 切换（[agents/session](../session/index.md)）、bash 前缀 PATH 注入；web：`/api/agents*` CRUD + 激活 fan_out + NFS 生命周期（[agents/web](../web/index.md)）。
 - `crates/agent`（opencoder-agent 舰队 worker 二进制）是**另一个 crate**，勿混淆。
+
+`harness_profile` 只保存命名引用，具体模型、权限、授权槽位和 env 由 Server 私有配置管理。Skill 上传接受完整目录包，入口 `SKILL.md` 与 references/assets/agents 等辅助文件共同版本化；缺入口、重复路径和路径逃逸明确拒绝。资源读取和执行快照仍走同一共享池，验证见 [web_agent_resources.rs](../../crates/web/tests/web_agent_resources.rs)。

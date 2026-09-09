@@ -1,4 +1,5 @@
-Commit: (working-tree, 基于 303b95027b49873a9833393d57b72de68747a9e0)
+Commit: 2491657d33c384dddcabf4d12ab4cd8822ccaf81
+
 
 # worker 模块
 
@@ -8,7 +9,7 @@ Commit: (working-tree, 基于 303b95027b49873a9833393d57b72de68747a9e0)
 
 Project 预检区分资源定义与实际调用：所有引用 Agent 必须存在，Plan 只检查 plan 的执行凭据，Execute 检查实际执行器；后续命令使用 `next_action`，不能沿用首次接收的 action。`tests/harness_matrix.rs` 覆盖 Project、Team、DAG、TODO、原生父会话的 Codex 子任务、双向混合及四类取消回收。
 
-`Assignment.codex` 在接收时进入私有 `Config.agent.codex`，受管 Codex 拒绝按次 model/env 覆盖。`harness::scope` 使重新读取配置的内部驱动保持已接受的参数，fork 继承父 Assignment；工作负载 Future 和完整队列快照使用堆分配，避免深层编排作用域放大线程栈。
+`Assignment.codex` 与 `Assignment.runtime` 在接收时进入私有 `Config.agent.codex/runtime`，受管 Codex 拒绝按次 model/env 覆盖。`harness::scope` 使重新读取配置的内部驱动保持已接受的参数，fork 继承父 Assignment；工作负载 Future 和完整队列快照使用堆分配，避免深层编排作用域放大线程栈。
 
 节点保留恢复所需环境，`operations/query` 对公开输入和大字段读取隐藏环境值，会话详情只单列 Harness 名称。Server → Node → Codex 二进制、消息回放、幂等提交和续聊由 `tests/harness_codex.rs` 验证。用户入口见 [Agent Harness](../../features/harness/index.md)。
 
@@ -42,3 +43,9 @@ Project 预检区分资源定义与实际调用：所有引用 Agent 必须存�
 消息读取限制在 `messages_after < seq <= messages_through`；零 offset 游标为排他游标，从旧尝试重定位时清零 offset，避免跳过本次首条输入或混入后续运行。历史 runs 使用 `before_version`，事件使用 `after`；大字段/载荷最多每块 64 KiB。`retention` 区分 complete、partial 与 incomplete_history。字段与产物读取校验所属运行及逻辑文件名。
 
 契约见 `tests/project_replay.rs`；真实 NFS、节点重启及浏览器检查见 [项目验收脚本](../../scripts/acceptance/project/README.md)。
+
+## Runner 受理与回放
+
+Runner DAG 预检包含注册入口、安装文件校验和与命名 Codex profile。pending 配置投影读取已接受队列快照；开始后继续沿用该版本。`operations/query/runner` 返回阶段、配置版本、业务摘要、独立 verdict、报告及投递状态，隐去私有环境。DAG 的 `/messages` 读取父会话持久化转译消息，报告经受控 artifact 接口下载。
+
+`annotate` 独立保存业务对账/投递状态，不改变执行终态。已启动的 Runner 不提供普通 resume 入口，避免外部业务重复执行；有效收据在恢复时仍须重新校验。端到端合同见 [runner_dispatch.rs](../../crates/worker/tests/runner_dispatch.rs)。

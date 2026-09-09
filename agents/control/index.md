@@ -1,4 +1,5 @@
-Commit: (working-tree, 基于 303b95027b49873a9833393d57b72de68747a9e0)
+Commit: 2491657d33c384dddcabf4d12ab4cd8822ccaf81
+
 
 # control 模块
 
@@ -12,8 +13,8 @@ Commit: (working-tree, 基于 303b95027b49873a9833393d57b72de68747a9e0)
 
 ## 主流程
 
-1. Node 经 Bearer 认证的 WebSocket 注册、上报快照及索引；协议必须与 Server 相同（当前 v6）。不匹配时在保存注册、索引同步及调度之前拒绝，错误包含双方协议及同步升级要求；代际和序号约束连接更新，索引归属不可改写。
-2. 创建时在 placement 锁内解析全局定义与受管 Codex 配置，优先按 loops/CPU 选择有容量的节点；全部满载时按 pending 数选择可接受节点。持久化归属并预留后释放锁、发 RPC，私有 `Assignment.codex` 携带本次配置快照。
+1. Node 经 Bearer 认证的 WebSocket 注册、上报快照及索引；协议必须与 Server 相同（当前 v7）。不匹配时在保存注册、索引同步及调度之前拒绝，错误包含双方协议及同步升级要求；代际和序号约束连接更新，索引归属不可改写。
+2. 创建时在 placement 锁内解析全局定义与受管 Codex 配置，优先按 loops/CPU 选择有容量的节点；全部满载时按 pending 数选择可接受节点。持久化归属并预留后释放锁、发 RPC，私有 `Assignment.codex` 和 `Assignment.runtime` 携带默认及命名 Harness、Runner 的配置快照。
 3. Node 接受后释放预留；同 ID 请求转发原节点比较原始输入；超时保留归属，不重新分配。
 4. 明细、控制、SSE 和分页产物均通过 ID 路由。旧 Chat/DAG/TODO/Project API 由 `api/compat` 等适配。
 
@@ -34,3 +35,5 @@ Commit: (working-tree, 基于 303b95027b49873a9833393d57b72de68747a9e0)
 `GET /api/project/todos/:id/runs?before_version=...` 返回有界历史页。`GET /api/executions/:run-id`、`/messages`、`/events-page?after=...`、`/detail-field`、事件载荷和 `/artifact` 都向索引所属 Node 查询。全局索引不保存这些运行内容。
 
 `resource_scope.rs` 为 `/api/agents*` 绑定当前 Server 配置的资源根，使发布 Agent/资源与 NFS 导出使用同一目录；不同 Server 的请求作用域隔离。验证入口为 `tests/resource_root.rs` 与 [Worker 的回放契约](../../crates/worker/tests/project_replay.rs)。
+
+`api/settings/registered` 通过现有定义存储的 `codex_profile` / `runner` 命名空间保存注册配置并递增 revision；受理时固定完整快照，拒绝超出通道预算的配置。管理 API 为 `/api/harnesses/codex/profiles` 与 `/api/runners`，默认 `harness/codex` 独立保留。注册 Runner 通过 DAG step 使用，执行与产物仍归原 Node。协议见 [注册 Runner](../../docs/registered-runners.md)。

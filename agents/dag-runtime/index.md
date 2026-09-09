@@ -1,8 +1,9 @@
-Commit: (working-tree, 基于 c1a1b2e78e1ccd4a3cc2ac6dc408a76d30bf46e6)
+Commit: 2491657d33c384dddcabf4d12ab4cd8822ccaf81
+
 
 # dag-runtime — 节点侧 DAG 执行运行时
 
-[worker](../worker/index.md) 通过 `Uplink::for_local_dag` 将事件和状态写入 Node Store。Server 只接收执行索引；平台的 wasm/runc 执行由 `opencoder-agent` 承担，`opencoder-server` 不链接该运行时。步骤只有两种：agent（真 session）与 wasm（wasmtime WASI 命令模块）。
+[worker](../worker/index.md) 通过 `Uplink::for_local_dag` 将事件和状态写入 Node Store。Server 只接收执行索引；平台的 wasm/runc 执行由 `opencoder-agent` 承担，`opencoder-server` 不链接该运行时。步骤支持 agent（真 session）、wasm（wasmtime WASI 命令模块）与 runner（注册前台进程）。
 
 ## 执行与恢复
 
@@ -29,3 +30,9 @@ spec 中 agent 步骤可声明 `how_append`：步骤 Done 后把该值追加到 
 - how_append 环境对、池名解析与追加：`exec/how_append.rs`（OVERRIDE_LOCK 保护）。
 - 状态上报故障、依赖阻断和取消 drain：`tests/run_loop.rs`。
 - 真实 runc：显式执行 `sandbox::runc::tests` 的 manual 测试，并设置已有测试变量 `DAG_TEST_ROOTFS`；缺失前提会失败，不静默跳过。
+
+## 注册 Runner
+
+`exec/runner` 从已接受配置解析 Runner 与 Agent profile，校验安装文件，向前台进程传入本次请求及资源快照。`process` 监管取消、超时和退出；`events` 严格消费 NDJSON stage/codex/result/error，Codex 事件复用 Session 解码并写入 DAG 父会话；`artifacts` 验证登记路径、大小与 SHA-256，保存可重放的完成收据。
+
+进程退出成功、阶段及模型终态完整、产物全部通过后才完成。恢复会重新校验收据与文件；已开始但缺少有效完成收据的 Runner 不隐式重跑。业务 retry 必须建立新尝试。协议与限制见 [注册 Runner](../../docs/registered-runners.md)，真实进程测试见 [runner.rs](../../crates/dag-runtime/tests/runner.rs)。

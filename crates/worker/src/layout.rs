@@ -13,7 +13,11 @@ pub struct DirectoryLayout {
     legacy_workflow_root: PathBuf,
 }
 
-pub(crate) const ALL_KINDS: [ExecutionKind; 7] = [
+/// Every kind with a node-owned journal root. `load_current` rebuilds the
+/// in-memory journal from these directories on restart, so the list must
+/// stay in lockstep with `kind_root` writers — a missing kind silently
+/// drops its records (and their queued work) across a node restart.
+pub(crate) const ALL_KINDS: [ExecutionKind; 8] = [
     ExecutionKind::Agent,
     ExecutionKind::Dag,
     ExecutionKind::Team,
@@ -21,6 +25,7 @@ pub(crate) const ALL_KINDS: [ExecutionKind; 7] = [
     ExecutionKind::Project,
     ExecutionKind::Maintenance,
     ExecutionKind::System,
+    ExecutionKind::Operator,
 ];
 
 pub(crate) fn reserved_execution_entry(name: &str) -> bool {

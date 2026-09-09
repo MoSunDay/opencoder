@@ -184,7 +184,7 @@ async fn schema_migration_v16_to_v17_adds_team_topic_runs() {
         let mut rows = stmt.query(()).await.unwrap();
         let r = rows.next().await.unwrap().expect("version row exists");
         let v: i64 = r.get(0).unwrap();
-        assert_eq!(v, 23, "schema version must be latest after v16 migration");
+        assert_eq!(v, 24, "schema version must be latest after v16 migration");
     }
 
     // (2) The table exists (write proves it) and the pre-existing nodes
@@ -298,7 +298,7 @@ async fn schema_migration_v19_to_v20_adds_project_executor_columns() {
             .expect("version row exists")
             .get(0)
             .unwrap();
-        assert_eq!(v, 23, "schema version must be latest after v19 migration");
+        assert_eq!(v, 24, "schema version must be latest after v19 migration");
     }
 
     // Legacy rows backfill to the agent flow.

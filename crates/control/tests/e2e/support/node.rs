@@ -260,6 +260,7 @@ impl NodeService for MockNode {
                 ExecutionKind::Team,
                 ExecutionKind::Todos,
                 ExecutionKind::Project,
+                ExecutionKind::Operator,
             ],
         }
     }

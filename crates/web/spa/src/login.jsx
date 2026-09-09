@@ -1,11 +1,12 @@
-// login.jsx — shared-secret login Modal.
+// login.jsx — token-only login Modal. The server base is NOT asked here: it
+// comes from the URL link (?base=), the stored oc_base, or the build-time
+// VITE_OC_BASE embed (store.js embeddedBase) — the probe below reuses the
+// CURRENT stored base untouched.
 
-import { Alert, Button, Form, Input, Modal, Typography } from 'antd';
+import { Alert, Button, Form, Input, Modal } from 'antd';
 import { useEffect, useState } from 'react';
 import { apiGet } from './api.js';
-import { BASE_KEY, embeddedBase, setCredentials, clearToken } from './store.js';
-
-const { Text } = Typography;
+import { clearToken, getState, setCredentials, setIdentity } from './store.js';
 
 /// Shown whenever no token is stored (`oc_token`). Closable: false — without
 /// a shared key every protected call 401s, so there is nothing to render behind.
@@ -15,31 +16,29 @@ export function LoginModal({ open, onConnected }) {
   const [err, setErr] = useState('');
 
   // Link login (?token= / #token=) is adopted in boot.js BEFORE mount;
-  // this modal only handles interactive logins.
-  // Prefill: stored base, else the build-time embedded base (VITE_OC_BASE).
+  // this modal only handles interactive logins. Only the token is editable.
   useEffect(() => {
     if (!open) {
       return;
     }
-    form.setFieldsValue({
-      base: localStorage.getItem(BASE_KEY) ?? embeddedBase(),
-      token: '',
-    });
+    form.setFieldsValue({ token: '' });
   }, [open, form]);
 
   const submit = async (values) => {
     setBusy(true);
     setErr('');
     const token = (values.token || '').trim();
-    const base = (values.base || '').trim();
     if (!token) {
-      setErr('共享密钥不能为空');
+      setErr('访问令牌不能为空');
       setBusy(false);
       return;
     }
-    setCredentials(token, base);
+    // Keep the CURRENT base (stored / URL-delivered / embedded) — login is
+    // token-only, the address never changes hands here.
+    setCredentials(token, getState().base);
     try {
-      await apiGet('/api/nodes'); // protected probe proves reachability + token
+      const j = await apiGet('/api/me'); // protected probe: reachability + identity
+      setIdentity(j);
       onConnected?.();
       setBusy(false);
     } catch (e) {
@@ -61,20 +60,9 @@ export function LoginModal({ open, onConnected }) {
       footer={null}
       destroyOnHidden={false}
     >
-      <Form form={form} layout="vertical" onFinish={submit} initialValues={{ base: '' }}>
-        <Form.Item
-          name="base"
-          label="服务器地址"
-          extra={(
-            <Text type="secondary">
-              留空 = 同源 (same-origin)。示例: https://fleet.example.com
-            </Text>
-          )}
-        >
-          <Input placeholder="留空 = 同源 (same-origin)" allowClear autoComplete="off" />
-        </Form.Item>
-        <Form.Item name="token" label="共享密钥 (Token)">
-          <Input.Password placeholder="共享密钥" autoFocus />
+      <Form form={form} layout="vertical" onFinish={submit}>
+        <Form.Item name="token" label="访问令牌 (Token)">
+          <Input.Password placeholder="访问令牌" autoFocus />
         </Form.Item>
         {err ? <Alert type="error" showIcon title={err} style={{ marginBottom: 16 }} /> : null}
         <Button type="primary" htmlType="submit" loading={busy} block>

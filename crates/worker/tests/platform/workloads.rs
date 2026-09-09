@@ -1,4 +1,5 @@
 use super::*;
+use base64::Engine;
 
 #[tokio::test]
 async fn project_plan_act_and_new_draft_stay_on_the_assigned_node() {
@@ -277,5 +278,36 @@ async fn ordinary_team_stays_on_one_node_and_system_creation_is_retired() {
             .status,
         404
     );
+    fleet.shutdown().await;
+}
+
+#[tokio::test]
+async fn operator_executions_run_the_host_process_agent_loop() {
+    let client = mock();
+    let fleet = Fleet::new(1, client.clone()).await;
+    client.queue_script(vec![LlmEvent::Completed {
+        text: "host checked".into(),
+        tool_calls: vec![],
+        usage: None,
+    }]);
+    let reply = fleet
+        .call(
+            "POST",
+            "/api/executions",
+            json!({"id":"operator-host-1","kind":"operator","input":{"prompt":"check host"}}),
+        )
+        .await;
+    assert_eq!(reply.status, 202, "{reply:?}");
+    let detail = settled(&fleet.nodes[0], "operator-host-1").await;
+    assert_eq!(detail["execution"]["status"], "idle", "{detail}");
+    assert_eq!(detail["execution"]["kind"], "operator");
+    // The default title and the host-process preamble land in the session.
+    assert_eq!(detail["session"]["meta"]["title"], "Operator");
+    let first_user = String::from_utf8(base64::engine::general_purpose::STANDARD
+        .decode(detail["session"]["messages"]["chunks"][0]["bytes_b64"].as_str().unwrap())
+        .unwrap())
+    .unwrap();
+    assert!(first_user.contains("Operator agent"), "{first_user}");
+    assert!(first_user.contains("check host"), "{first_user}");
     fleet.shutdown().await;
 }

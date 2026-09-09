@@ -19,6 +19,7 @@ let state = {
   preselectNode: null, // node id the fleet tab asked chat to open
   nodes: [], // last fleet snapshot shared between tabs
   conn: 'init', // 'init' | 'ok' | 'fail'
+  identity: null, // {name, role} from GET /api/me; null until probed
 };
 
 const listeners = new Set();
@@ -58,14 +59,21 @@ export function setCredentials(token, base) {
   const cleanBase = String(base || '').trim().replace(/\/+$/, '');
   localStorage.setItem(TOKEN_KEY, token);
   localStorage.setItem(BASE_KEY, cleanBase);
-  setState({ token, base: cleanBase, conn: 'init' });
+  // identity is re-probed after login (GET /api/me in login.jsx).
+  setState({ token, base: cleanBase, conn: 'init', identity: null });
+}
+
+/// Publish the authenticated identity ({name, role}) resolved by the login
+/// probe (GET /api/me). Merges into state; panels/nav read it via useStore.
+export function setIdentity(identity) {
+  setState({ identity: identity && identity.name ? { name: identity.name, role: identity.role || 'user' } : null });
 }
 
 export function clearCredentials() {
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(BASE_KEY);
   setState({
-    token: '', base: embeddedBase(), conn: 'init', nodes: [], preselectNode: null,
+    token: '', base: embeddedBase(), conn: 'init', nodes: [], preselectNode: null, identity: null,
   });
 }
 
@@ -76,7 +84,7 @@ export function clearCredentials() {
 export function clearToken() {
   localStorage.removeItem(TOKEN_KEY);
   setState({
-    token: '', conn: 'init', nodes: [], preselectNode: null,
+    token: '', conn: 'init', nodes: [], preselectNode: null, identity: null,
   });
 }
 

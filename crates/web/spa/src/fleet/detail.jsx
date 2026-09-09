@@ -72,9 +72,9 @@ export function ExecutionDetail({ id, summary, onClose, onNotice }) {
   const kind = detail?.request?.kind || index?.kind;
   const detailReady = detail?.execution?.id === id;
   const isProjectRun = kind === 'project' && id.startsWith('prun-');
-  const hasMessages = detailReady && (['agent', 'maintenance', 'dag'].includes(kind) || (isProjectRun && !!detail?.run?.session_id));
+  const hasMessages = detailReady && (['agent', 'maintenance', 'dag', 'operator'].includes(kind) || (isProjectRun && !!detail?.run?.session_id));
   useEffect(() => {
-    if (!detailReady || !id || !kind || isProjectRun || ['agent', 'maintenance', 'dag'].includes(kind)) return undefined;
+    if (!detailReady || !id || !kind || isProjectRun || ['agent', 'maintenance', 'dag', 'operator'].includes(kind)) return undefined;
     const stream = openStream({ path: `/api/executions/${encodeURIComponent(id)}/events`, after: 0, executionHistory: true,
       onFrame: (frame) => {
         setEvents((rows) => appendEvent(rows, frame));
@@ -99,7 +99,7 @@ export function ExecutionDetail({ id, summary, onClose, onNotice }) {
     finally { setMessagesBusy(false); }
   }, [id, kind, hasMessages]);
   const live = useExecutionTranscript({
-    id, enabled: detailReady && ['agent', 'maintenance', 'dag'].includes(kind), status: index?.status, revision,
+    id, enabled: detailReady && ['agent', 'maintenance', 'dag', 'operator'].includes(kind), status: index?.status, revision,
     onFrame: (frame) => setEvents((rows) => appendEvent(rows, frame)),
     onSettled: () => { load(); if (messageWindow === 0) loadMessages({ reset: true }); },
     onError: setError,
@@ -181,7 +181,7 @@ export function ExecutionDetail({ id, summary, onClose, onNotice }) {
       {!messages.large?.length && (messages.more || messages.partial) && <Button block loading={messagesBusy} onClick={nextMessages}>继续加载消息</Button>}
       {messagesBusy && !messages.messages.length && !messages.partial ? <Spin size="small" /> : null}
     </div>}
-    {['agent', 'maintenance'].includes(kind) && <Space orientation="vertical" style={{ width: '100%', marginTop: 16 }}>
+    {['agent', 'maintenance', 'operator'].includes(kind) && <Space orientation="vertical" style={{ width: '100%', marginTop: 16 }}>
       <Input.TextArea disabled={unavailable} value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="继续会话" rows={3} />
       <Space><Select value={delivery} onChange={setDelivery} options={[{ value: 'prompt', label: '发送' }, { value: 'steer', label: '指导当前执行' }, { value: 'queue', label: '加入队列' }]} /><Button type="primary" disabled={!prompt.trim()} loading={busy} onClick={() => command(delivery, { prompt })}>提交</Button></Space>
     </Space>}

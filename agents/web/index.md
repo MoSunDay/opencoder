@@ -1,4 +1,4 @@
-Commit: 2491657d33c384dddcabf4d12ab4cd8822ccaf81
+Commit: 6e4f2bf79f21c4f5e2a89b0605323418c1597d76
 
 
 # web 模块
@@ -30,7 +30,7 @@ axum HTTP/SSE 会话管理服务。提供 session CRUD、prompt 提交（admit �
 
 SPA disclosure 不变量：Bubble/Turn/call 稳定 key 保留 Collapse 实例，新 SSE 输出导致的 props 更新不会关闭或重开用户已有状态；临时状态行不参与后续语义气泡的编号，live 切换到持久化快照仍保留展开状态。仅表头点击或 Ctrl/Cmd+L / `⤴ 收起` 的 epoch 重挂改变 disclosure。
 
-Agent 执行详情与会话交互共用 `turnsFromMessages` / `reduceFrame` 和 `TranscriptView`，不单独提取 text 块。`fleet/detail.jsx` 的共用 Drawer 显式从右侧滑入，桌面尺寸为 `75vw`；小于 768px 时通过 `oc-execution-detail` 作用域使用全视口宽度、16px 内边距，长执行 ID 换行。`transcript.jsx` 的角色头像统一映射为 `UserOutlined` / `RobotOutlined`，纯文本回答和步骤回答均使用机器人头像，不另渲染 Say 文字标识。执行详情的 [事件订阅](../../crates/web/spa/src/fleet/detail/liveTranscript.js) 先读会话事件水位，以独立事件状态追平后展示 live；结束后显示持久化消息快照，两者不叠加。执行历史订阅将 done/error 视为轮次边界，以 EOF 收束连接，续写和重连使用已处理游标；普通单轮订阅保留终帧即结束的契约。实时记录使用有界窗口并提示截断，切换执行会取消旧订阅并忽略迟到回调。
+Agent 执行详情与会话交互共用 `turnsFromMessages` / `reduceFrame` 和 `TranscriptView`，不单独提取 text 块。`fleet/detail.jsx` 的共用 Drawer 显式从右侧滑入，桌面尺寸为 `75vw`；小于 768px 时通过 `oc-execution-detail` 作用域使用全视口宽度、16px 内边距，长执行 ID 换行。`transcript.jsx` 的角色头像统一映射为 `UserOutlined` / `RobotOutlined`，纯文本回答和步骤回答均使用机器人头像，不另渲染 Say 文字标识。执行详情的 [事件订阅](../../crates/web/spa/src/fleet/detail/liveTranscript.js) 等待真实详情就绪，再通过通用执行 `/events-page?after=9223372036854775807` 读取 `head_seq`，以独立事件状态追平后展示 live；Agent、维护会话和 DAG 使用同一入口，水位无效明确报错。结束后显示持久化消息快照，两者不叠加，DAG 不重复订阅。执行历史订阅将 done/error 视为轮次边界，以 EOF 收束连接，续写和重连使用已处理游标；普通单轮订阅保留终帧即结束的契约。实时记录使用有界窗口并提示截断，切换执行会取消旧订阅并忽略迟到回调。
 
 ## 边界与非目标
 - 不持有 LLM 客户端单例——每个 prompt 按配置构建 `ChatClient`。

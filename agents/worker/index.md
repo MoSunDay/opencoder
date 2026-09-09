@@ -1,4 +1,4 @@
-Commit: e7685686ee338523547283309670a13a4560dd00
+Commit: 2a658f433024832a438e85ffd982c1b986f3b0fa
 
 
 # worker 模块
@@ -45,6 +45,8 @@ Project 预检区分资源定义与实际调用：所有引用 Agent 必须存�
 契约见 `tests/project_replay.rs`；真实 NFS、节点重启及浏览器检查见 [项目验收脚本](../../scripts/acceptance/project/README.md)。
 
 ## Runner 受理与回放
+
+通用 `operations/query` 的 Agent、维护会话和 DAG 事件分页在读取当前页之前采样 `head_seq`，表示最高已持久化序号；空 DAG 为 0。水位独立于 200 条分页边界，客户端可用空页查询再沿同一执行事件流追平。契约由 `dag_replay_watermark_includes_events_beyond_the_requested_page` 的 205 条事件验证。
 
 Runner DAG 预检包含注册入口、安装文件校验和与命名 Codex profile。pending 配置投影读取已接受队列快照；开始后继续沿用该版本。`operations/query/runner` 返回阶段、配置版本、业务摘要、独立 verdict、报告及投递状态，隐去私有环境。DAG 的 `/messages` 读取父会话持久化转译消息，报告经受控 artifact 接口下载。
 

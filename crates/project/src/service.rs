@@ -17,7 +17,7 @@ use opencoder_store::{
     TASK_TYPE_PROJECT,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 
 use crate::context::ProjectContext;
@@ -137,7 +137,7 @@ impl ProjectService {
         Ok(crate::recover::converge_lost_run(deps, run_id).await)
     }
 
-    /// 全量树形总览：目标(含里程碑(含待办)) + 无里程碑的 backlog。
+    /// 全量总览：项目下的里程碑、独立里程碑，以及未关联里程碑的 TODO。
     pub async fn overview(&self) -> Result<Value> {
         let deps = self.require()?;
         // 机会式 stale run 清扫（无后台定时器）：读路径触发，失败只告警，
@@ -150,32 +150,15 @@ impl ProjectService {
             .await
             .context("list milestones")?;
         let todos = deps.projects.list_todos(None).await.context("list todos")?;
-        let mut backlog = Vec::new();
-        for todo in &todos {
-            if todo.milestone_id.is_none() {
-                backlog.push(serde_json::to_value(todo)?);
-            }
-        }
-        let mut goals_json = Vec::with_capacity(goals.len());
-        for goal in &goals {
-            let mut node = serde_json::to_value(goal)?;
-            let mut ms_json = Vec::new();
-            for ms in milestones.iter().filter(|m| m.goal_id == goal.id) {
-                let mut ms_node = serde_json::to_value(ms)?;
-                let mut todo_json = Vec::new();
-                for todo in todos
-                    .iter()
-                    .filter(|t| t.milestone_id.as_deref() == Some(ms.id.as_str()))
-                {
-                    todo_json.push(serde_json::to_value(todo)?);
-                }
-                ms_node["todos"] = Value::Array(todo_json);
-                ms_json.push(ms_node);
-            }
-            node["milestones"] = Value::Array(ms_json);
-            goals_json.push(node);
-        }
-        Ok(json!({ "goals": goals_json, "backlog": backlog }))
+        let todos = todos
+            .iter()
+            .map(serde_json::to_value)
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(opencoder_store::project::overview::overview(
+            &goals,
+            &milestones,
+            &todos,
+        ))
     }
 }
 
@@ -258,7 +241,7 @@ pub(crate) fn run_agent_label(resolved: &ResolvedExecutor, todo: &ProjectTodoRec
 }
 
 /// 组装 plan/execute 提示词所需的目标→里程碑→待办上下文。里程碑与目标
-/// 均为 best-effort：行缺失时省略对应段落，目标缺失时用占位标题。
+/// 均可省略：独立专项保留里程碑上下文，无项目时不构造虚假目标。
 pub(crate) async fn build_context(
     deps: &Arc<Deps>,
     todo: &ProjectTodoRecord,
@@ -280,14 +263,11 @@ pub(crate) async fn build_context(
             .await
             .context("list goals")?
             .into_iter()
-            .find(|g| g.id == ms.goal_id),
+            .find(|g| ms.goal_id.as_deref() == Some(g.id.as_str())),
         None => None,
     };
     Ok(ProjectContext {
-        goal_title: goal
-            .as_ref()
-            .map(|g| g.title.clone())
-            .unwrap_or_else(|| "未命名目标".into()),
+        goal_title: goal.as_ref().map(|g| g.title.clone()),
         goal_detail_md: goal.as_ref().and_then(|g| g.detail_md.clone()),
         milestone_title: milestone.as_ref().map(|m| m.title.clone()),
         milestone_detail_md: milestone.as_ref().and_then(|m| m.detail_md.clone()),

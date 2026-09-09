@@ -110,16 +110,15 @@ fn safe_rel_path(path: &str) -> Result<(), String> {
 }
 
 /// Category-specific file shapes: prompts are exactly the three section
-/// files, memory a single `memory.md`, skills `SKILL.md`-bearing
-/// (`<skill>/SKILL.md` or `<skill>.md`); tools accept any safe path.
+/// files, memory a single `memory.md`, skills a standalone markdown file
+/// or a package with a `SKILL.md` entry; tools accept any safe path.
 fn check_shape(cat: &str, path: &str) -> Result<(), String> {
     let ok = match cat {
         "prompts" => matches!(path, "soul.md" | "how.md" | "output.md"),
         "memory" => path == "memory.md",
         "skills" => {
             let segments: Vec<&str> = path.split('/').collect();
-            (segments.len() == 2 && segments[1] == "SKILL.md")
-                || (segments.len() == 1 && path.ends_with(".md"))
+            (segments.len() >= 2) || (segments.len() == 1 && path.ends_with(".md"))
         }
         _ => true, // tools: any safe path
     };
@@ -151,6 +150,22 @@ fn decode_files(cat: &str, body: &SaveBody) -> Result<(String, Vec<VersionFile>)
     }
     let name = body.name.trim().to_string();
     validate_resource_name(cat, &name).map_err(|e| format!("invalid resource name: {e}"))?;
+    let paths: std::collections::BTreeSet<_> =
+        body.files.iter().map(|file| file.path.as_str()).collect();
+    if paths.len() != body.files.len() {
+        return Err("duplicate resource file path".to_string());
+    }
+    if cat == "skills" {
+        for file in &body.files {
+            if let Some((skill, _)) = file.path.split_once('/') {
+                if !paths.contains(format!("{skill}/SKILL.md").as_str()) {
+                    return Err(format!(
+                        "skill package `{skill}` requires its SKILL.md entry"
+                    ));
+                }
+            }
+        }
+    }
     let mut total: usize = 0;
     let mut files = Vec::with_capacity(body.files.len());
     for file in &body.files {

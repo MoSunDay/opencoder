@@ -17,6 +17,9 @@ pub fn error_400(msg: impl Into<String>) -> Response {
 pub fn error_404(msg: impl Into<String>) -> Response {
     super::error_404(&msg.into())
 }
+pub fn error_409(msg: impl Into<String>) -> Response {
+    super::error_409(&msg.into())
+}
 pub fn error_500(msg: impl Into<String>) -> Response {
     super::error_500(msg.into())
 }

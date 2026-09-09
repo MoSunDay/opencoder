@@ -92,6 +92,21 @@ pub(super) async fn command(
         );
     }
     match command.action.as_str() {
+        "annotate" => {
+            if !command.input.is_object() || serde_json::to_vec(&command.input)?.len() > 64 * 1024 {
+                return Ok(RpcReply::error(
+                    400,
+                    "annotations must be an object of at most 64 KiB",
+                ));
+            }
+            let mut journal = worker.inner.journal.lock().await;
+            let Some(mut record) = journal.records.get(id).cloned() else {
+                return Ok(RpcReply::error(404, "execution not found"));
+            };
+            record.annotations = command.input;
+            journal.save(record)?;
+            Ok(RpcReply::ok(json!({"ok":true})))
+        }
         "summary" => match worker.inner.state.store.get_session(id).await? {
             Some(meta) => Ok(RpcReply::ok(json!(meta))),
             None => Ok(RpcReply::error(404, "session not found")),

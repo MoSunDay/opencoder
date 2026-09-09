@@ -6,7 +6,9 @@ import { submitAttempt } from './replay/attempt.js';
 // the plan-generation workflow continues without a detour.
 
 import { Button, Form, Input, Modal, Popconfirm, Select, Space, Table, Tooltip, Typography } from 'antd';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { flattenTodos, milestoneOptions, goalOptions, matchesText, searchSelect } from './model/relations.js';
+import { RelationSelect } from './views/relationSelect.jsx';
 import { apiDel, apiPost } from '../api.js';
 import { ExecutorTag, TodoStatusTag } from './labels.jsx';
 import { err, info, ok } from '../notice.js';
@@ -59,27 +61,14 @@ export function executorRefText(r) {
   return kind === 'agent' ? (r.agent || 'act') : ((r && r.executor_ref) || '');
 }
 
-/// Flatten overview → rows carrying their milestone context (null ⇒ backlog).
-export function flattenTodos(overview) {
-  const goals = (overview && overview.goals) || [];
-  const backlog = (overview && overview.backlog) || [];
-  const rows = [];
-  goals.forEach((g) => (g.milestones || []).forEach((m) => (m.todos || []).forEach((t) => {
-    rows.push({ ...t, milestone_id: m.id, milestone_title: m.title, goal_title: g.title });
-  })));
-  backlog.forEach((t) => rows.push({ ...t, milestone_id: null, milestone_title: null, goal_title: null }));
-  return rows;
-}
+export { flattenTodos } from './model/relations.js';
 
 function CreateTodoModal({ open, overview, onCancel, onNotice, onCreated }) {
   const [form] = Form.useForm();
   const [saving, setSaving] = useState(false);
+  useEffect(() => { if (open) form.resetFields(); }, [open, form]);
   const kind = Form.useWatch('executor_kind', form) || 'agent';
-  const goals = (overview && overview.goals) || [];
-  const msOptions = goals.flatMap((g) => (g.milestones || []).map((m) => ({
-    value: m.id,
-    label: `${g.title} / ${m.title}`,
-  })));
+  const msOptions = milestoneOptions(overview);
 
   const submit = async () => {
     let v;
@@ -118,19 +107,19 @@ function CreateTodoModal({ open, overview, onCancel, onNotice, onCreated }) {
     <Modal
       open={open}
       title="新建 TODO"
-      onCancel={onCancel}
+      onCancel={() => { if (!saving) onCancel(); }}
       destroyOnHidden
       footer={[
-        <Button key="cancel" onClick={onCancel}>取消</Button>,
+        <Button key="cancel" disabled={saving} onClick={onCancel}>取消</Button>,
         <Button key="ok" type="primary" loading={saving} onClick={submit}>创建</Button>,
       ]}
     >
-      <Form form={form} layout="vertical" preserve={false} initialValues={{ agent: 'act', executor_kind: 'agent' }}>
+      <Form form={form} layout="vertical" disabled={saving} initialValues={{ agent: 'act', executor_kind: 'agent' }}>
         <Form.Item name="title" label="标题" rules={[{ required: true, message: '请输入标题' }]}>
           <Input placeholder="要完成的一件事" />
         </Form.Item>
         <Form.Item name="milestone_id" label="里程碑">
-          <Select allowClear placeholder="不选则进入 backlog（未分组）" options={msOptions} aria-label="milestone_id" />
+          <Select {...searchSelect} placeholder="可不关联里程碑" options={msOptions} aria-label="milestone_id" />
         </Form.Item>
         <Form.Item name="executor_kind" label="执行器" tooltip="agent 直驱会话；team/dag 走本地多人/DAG；brain 由能力库路由">
           <Select aria-label="executor_kind" options={EXECUTOR_OPTIONS} style={{ width: 160 }} />
@@ -165,9 +154,15 @@ function CreateTodoModal({ open, overview, onCancel, onNotice, onCreated }) {
   );
 }
 
-export function TodosTab({ overview, refresh, openTodo, onNotice }) {
+export function TodosTab({ overview, refresh, openTodo, onNotice, milestoneFilter, setMilestoneFilter }) {
   const [createOpen, setCreateOpen] = useState(false);
-  const rows = flattenTodos(overview);
+  const [query, setQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState(null);
+  const [projectFilter, setProjectFilter] = useState(null);
+  const rows = flattenTodos(overview).filter((todo) => matchesText(query, todo.title, todo.id)
+    && (!statusFilter || todo.status === statusFilter)
+    && (!projectFilter || (projectFilter === 'unlinked' ? !todo.goal_id : todo.goal_id === projectFilter))
+    && (!milestoneFilter || (milestoneFilter === 'unlinked' ? !todo.milestone_id : todo.milestone_id === milestoneFilter)));
   const busy = (t) => t.status === 'running' || ['pending', 'running', 'cancelling'].includes(t.execution?.status);
   const executionClosed = (t) => ['cancelled', 'done'].includes(t.execution?.status);
 
@@ -210,10 +205,10 @@ export function TodosTab({ overview, refresh, openTodo, onNotice }) {
       key: 'milestone',
       width: 180,
       ellipsis: true,
-      render: (_, r) => (r.milestone_title
-        ? <Tooltip title={r.goal_title}><span>{r.milestone_title}</span></Tooltip>
-        : <Text type="secondary">未分组</Text>),
+      render: (_, r) => <RelationSelect path={todoPath(r.id)} field="milestone_id" value={r.milestone_id}
+        options={milestoneOptions(overview)} refresh={refresh} onNotice={onNotice} label={`TODO ${r.title} 所属里程碑`} />,
     },
+    { title: '项目', dataIndex: 'goal_title', render: (v) => v || '未关联项目' },
     { title: '状态', dataIndex: 'status', key: 'status', width: 90, render: (v) => <TodoStatusTag status={v} /> },
     {
       title: '计划',
@@ -276,7 +271,17 @@ export function TodosTab({ overview, refresh, openTodo, onNotice }) {
           工作流：草稿 → 生成Plan → 执行 → 版本留存（执行记录里可回看每次 Plan/执行）
         </Text>
       </div>
+      <Space wrap>
+        <Input.Search aria-label="搜索 TODO" placeholder="搜索名称或 ID" value={query} allowClear onChange={(e) => setQuery(e.target.value)} style={{ width: 210 }} />
+        <Select {...searchSelect} aria-label="筛选 TODO 里程碑" placeholder="全部里程碑" style={{ width: 230 }} value={milestoneFilter}
+          onChange={setMilestoneFilter} options={[{ value: 'unlinked', label: '未关联里程碑' }, ...milestoneOptions(overview)]} />
+        <Select {...searchSelect} aria-label="筛选 TODO 项目" placeholder="全部项目" style={{ width: 200 }} value={projectFilter}
+          onChange={setProjectFilter} options={[{ value: 'unlinked', label: '未关联项目' }, ...goalOptions(overview)]} />
+        <Select allowClear aria-label="筛选 TODO 状态" placeholder="全部状态" style={{ width: 140 }} value={statusFilter} onChange={setStatusFilter}
+          options={['draft', 'planned', 'running', 'done', 'failed'].map((value) => ({ value, label: <TodoStatusTag status={value} /> }))} />
+      </Space>
       <Table
+        scroll={{ x: 'max-content' }}
         rowKey="id"
         size="middle"
         columns={columns}

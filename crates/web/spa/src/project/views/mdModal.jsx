@@ -6,8 +6,8 @@
 // above 标题 and stays caller-owned.
 
 import { Button, Form, Input, InputNumber, Modal, Segmented } from 'antd';
-import { useEffect, useState } from 'react';
-import { Markdown } from './markdown.jsx';
+import { useEffect, useRef, useState } from 'react';
+import { Markdown } from '../markdown.jsx';
 
 const { TextArea } = Input;
 
@@ -15,37 +15,46 @@ export function MdEditModal({ open, title, initial, extraTop, onCancel, onOk }) 
   const [form] = Form.useForm();
   const [mode, setMode] = useState('edit');
   const [saving, setSaving] = useState(false);
-  const detail = Form.useWatch('detail_md', form) || '';
+  const seed = useRef(initial);
+  seed.current = initial;
+  const recordId = initial?.id || 'new';
+  const submitting = useRef(false);
 
   // Re-seed on every open (create ⇒ blank, edit ⇒ record fields).
   useEffect(() => {
     if (open) {
       form.resetFields();
       form.setFieldsValue({
-        title: (initial && initial.title) || '',
-        sort: (initial && initial.sort) || 0,
-        detail_md: (initial && initial.detail_md) || '',
+        title: seed.current?.title || '',
+        sort: seed.current?.sort || 0,
+        detail_md: seed.current?.detail_md || '',
+        goal_id: seed.current?.goal_id ?? null,
       });
       setMode('edit');
       setSaving(false);
     }
-  }, [open, initial, form]);
+  }, [open, recordId, form]);
 
   const submit = async () => {
+    if (submitting.current) return;
+    submitting.current = true;
     let values;
     try {
       values = await form.validateFields();
     } catch {
+      submitting.current = false;
       return; // antd already pinned the required-field messages
     }
     setSaving(true);
     try {
       await onOk({
+        ...values,
         title: values.title,
         sort: Number.isFinite(values.sort) ? values.sort : 0,
         detail_md: values.detail_md || '',
       });
     } finally {
+      submitting.current = false;
       setSaving(false);
     }
   };
@@ -54,14 +63,14 @@ export function MdEditModal({ open, title, initial, extraTop, onCancel, onOk }) 
     <Modal
       open={open}
       title={title}
-      onCancel={onCancel}
+      onCancel={() => { if (!saving) onCancel(); }}
       destroyOnHidden
       footer={[
-        <Button key="cancel" onClick={onCancel}>取消</Button>,
+        <Button key="cancel" disabled={saving} onClick={onCancel}>取消</Button>,
         <Button key="ok" type="primary" loading={saving} onClick={submit}>保存</Button>,
       ]}
     >
-      <Form form={form} layout="vertical" preserve={false}>
+      <Form form={form} layout="vertical" disabled={saving}>
         {extraTop}
         <Form.Item name="title" label="标题" rules={[{ required: true, message: '请输入标题' }]}>
           <Input placeholder="一句话标题" />
@@ -77,17 +86,20 @@ export function MdEditModal({ open, title, initial, extraTop, onCancel, onOk }) 
             style={{ marginBottom: 8 }}
           />
         </Form.Item>
-        {mode === 'edit' ? (
+        <div hidden={mode !== 'edit'}>
           <Form.Item name="detail_md" noStyle>
             <TextArea rows={6} placeholder="支持 Markdown：# 标题、列表、代码块…" aria-label="detail_md" />
           </Form.Item>
-        ) : (
+        </div>
+        {mode === 'preview' && (
           <div
             className="md-modal-preview"
             style={{ minHeight: 140, padding: 12, border: '1px solid #f0f0f0', borderRadius: 6 }}
             aria-label="detail_preview"
           >
-            <Markdown text={detail} />
+            <Form.Item noStyle shouldUpdate>
+              {() => <Markdown text={form.getFieldValue('detail_md')} />}
+            </Form.Item>
           </div>
         )}
       </Form>

@@ -2,10 +2,10 @@
 //! `ProjectContext` 生成——无 IO、无状态，便于单测锁定措辞契约。
 
 /// 一次 plan/execute 运行所需的全部业务上下文（目标→里程碑→待办链路上
-/// 各级标题与正文；goal 之外均可缺失，缺失的段落直接省略）。
+/// 各级标题与正文；项目与里程碑均可缺失，缺失的段落直接省略）。
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProjectContext {
-    pub goal_title: String,
+    pub goal_title: Option<String>,
     pub goal_detail_md: Option<String>,
     pub milestone_title: Option<String>,
     pub milestone_detail_md: Option<String>,
@@ -21,7 +21,9 @@ pub fn plan_prompt(cx: &ProjectContext) -> String {
         "你是一名资深工程规划助手。请把下面这份粗略待办草稿整理成一份完整、可执行的实施方案。\n\n",
     );
     out.push_str("背景：\n");
-    out.push_str(&format!("- 目标：{}\n", cx.goal_title));
+    if let Some(title) = &cx.goal_title {
+        out.push_str(&format!("- 目标：{}\n", title));
+    }
     if let Some(detail) = &cx.goal_detail_md {
         out.push_str(&format!("  目标说明：{}\n", detail.trim()));
     }
@@ -50,7 +52,9 @@ pub fn execute_prompt(cx: &ProjectContext, plan_md: &str, version: i64, resume: 
     let mut out = String::new();
     out.push_str("你是编码代理。请依据下面的实施方案，在当前工作目录中立即动手执行。\n\n");
     out.push_str("背景：\n");
-    out.push_str(&format!("- 目标：{}\n", cx.goal_title));
+    if let Some(title) = &cx.goal_title {
+        out.push_str(&format!("- 目标：{}\n", title));
+    }
     if let Some(title) = &cx.milestone_title {
         out.push_str(&format!("- 里程碑：{}\n", title));
     }
@@ -80,7 +84,7 @@ mod tests {
 
     fn cx() -> ProjectContext {
         ProjectContext {
-            goal_title: "构建个人知识库".into(),
+            goal_title: Some("构建个人知识库".into()),
             goal_detail_md: Some("长期目标说明".into()),
             milestone_title: Some("M1 检索".into()),
             milestone_detail_md: Some("里程碑说明".into()),
@@ -107,6 +111,18 @@ mod tests {
         let p = plan_prompt(&c);
         assert!(!p.contains("里程碑"));
         assert!(p.contains("目标：构建个人知识库"));
+    }
+
+    #[test]
+    fn standalone_milestone_keeps_context_without_a_goal() {
+        let mut c = cx();
+        c.goal_title = None;
+        c.goal_detail_md = None;
+        for p in [plan_prompt(&c), execute_prompt(&c, "实施步骤", 1, false)] {
+            assert!(p.contains("里程碑：M1 检索"));
+            assert!(p.contains("做一个计数器"));
+            assert!(!p.contains("目标："));
+        }
     }
 
     #[test]

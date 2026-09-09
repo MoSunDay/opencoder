@@ -12,7 +12,8 @@ import { PageShell } from '../shell/pageShell.jsx';
 import { GoalsTab } from './goalsTab.jsx';
 import { MilestonesTab } from './milestonesTab.jsx';
 import { TodoDrawer } from './todoDrawer.jsx';
-import { TodosTab, flattenTodos } from './todosTab.jsx';
+import { TodosTab } from './todosTab.jsx';
+import { flattenMilestones, flattenTodos } from './model/relations.js';
 import { useOverview } from './useOverview.js';
 
 const { Text, Paragraph } = Typography;
@@ -21,8 +22,8 @@ const { Text, Paragraph } = Typography;
 function OverviewTab({ overview }) {
   const goals = (overview && overview.goals) || [];
   const backlog = (overview && overview.backlog) || [];
-  const milestones = goals.flatMap((g) => g.milestones || []);
-  const todos = [...milestones.flatMap((m) => m.todos || []), ...backlog];
+  const milestones = flattenMilestones(overview);
+  const todos = flattenTodos(overview);
   const by = (s) => todos.filter((t) => t.status === s).length;
   const cards = [
     { title: '目标', value: goals.length, suffix: '个' },
@@ -47,8 +48,7 @@ function OverviewTab({ overview }) {
             <Text strong>工作流：</Text>
             <Text>
               草稿（粗略想法）→ 生成Plan（LLM 出结构化计划，版本留存）→ 执行（独立会话跑
-              plan，输出与 session 归档）→ 每次运行都有版本可回看。目标 → 里程碑 → TODO
-              三级组织，未分组 TODO 放在 backlog。
+              plan，输出与 session 归档）→ 每次运行都有版本可回看。里程碑聚拢专项 TODO，可独立存在或关联项目；TODO 也可独立记录。
             </Text>
           </Paragraph>
         </Card>
@@ -59,20 +59,23 @@ function OverviewTab({ overview }) {
 
 export function ProjectPanel({ onNotice }) {
   const { overview, loading, refresh, error, updated } = useOverview({ onNotice });
+  const [activeTab, setActiveTab] = useState('overview');
+  const [goalFilter, setGoalFilter] = useState(null);
+  const [milestoneFilter, setMilestoneFilter] = useState(null);
   const [todoId, setTodoId] = useState(null); // open TODO drawer
 
   const tabs = [
     { key: 'overview', label: '总览', children: <OverviewTab overview={overview} /> },
-    { key: 'goals', label: '项目目标', children: <GoalsTab overview={overview} refresh={refresh} onNotice={onNotice} /> },
-    { key: 'milestones', label: '里程碑', children: <MilestonesTab overview={overview} refresh={refresh} onNotice={onNotice} /> },
-    { key: 'todos', label: 'TODO', children: <TodosTab overview={overview} refresh={refresh} openTodo={setTodoId} onNotice={onNotice} /> },
+    { key: 'goals', label: '项目目标', children: <GoalsTab openMilestones={(id) => { setGoalFilter(id); setActiveTab('milestones'); }} overview={overview} refresh={refresh} onNotice={onNotice} /> },
+    { key: 'milestones', label: '里程碑', children: <MilestonesTab goalFilter={goalFilter} setGoalFilter={setGoalFilter} openTodos={(id) => { setMilestoneFilter(id); setActiveTab('todos'); }} overview={overview} refresh={refresh} onNotice={onNotice} /> },
+    { key: 'todos', label: 'TODO', children: <TodosTab milestoneFilter={milestoneFilter} setMilestoneFilter={setMilestoneFilter} overview={overview} refresh={refresh} openTodo={setTodoId} onNotice={onNotice} /> },
   ];
 
   return (
     <div>
       {error && <Alert type="error" showIcon title={error} description={updated ? `最近成功读取：${new Date(updated).toLocaleString()}` : null} />}
       <Spin spinning={loading}>
-        <Tabs items={tabs} />
+        <Tabs activeKey={activeTab} onChange={setActiveTab} items={tabs} />
       </Spin>
       <TodoDrawer
         todoId={todoId}

@@ -17,6 +17,7 @@ import { newId, nodeOptions } from './fleet/model.js';
 import { PageShell } from './shell/pageShell.jsx';
 import { HarnessFields, parseEnvs } from './harness/fields.jsx';
 import { AgentHarnessSettings, HarnessManagement } from './harness/management.jsx';
+import { RunnerManagement } from './harness/runners.jsx';
 
 const { Text } = Typography;
 
@@ -75,6 +76,7 @@ export function AgentsPanel({ onNotice }) {
     { key: 'agents', label: 'Agent 列表', children: <AgentListPanel onNotice={onNotice} /> },
     { key: 'agent-harness', label: 'Agent Harness', children: <AgentHarnessSettings onNotice={onNotice} /> },
     { key: 'harnesses', label: 'Harness 管理', children: <HarnessManagement onNotice={onNotice} /> },
+    { key: 'runners', label: 'Runner 管理', children: <RunnerManagement onNotice={onNotice} /> },
     { key: 'nfs', label: 'NFS 配置', children: <AgentNfsCard onNotice={onNotice} /> },
   ]} /></PageShell>;
 }

@@ -88,7 +88,7 @@ function envOptions(envs) {
   );
 }
 
-export function TodoEditor({ templateName, version, onNotice, onClose }) {
+function TodoEditorSession({ templateName, version, onNotice, onClose }) {
   const [form] = Form.useForm();
   const [mode, setMode] = useState('form');
   const [spec, setSpec] = useState(null);
@@ -169,6 +169,7 @@ export function TodoEditor({ templateName, version, onNotice, onClose }) {
   };
 
   const save = async () => {
+    if (saving || !spec) return;
     let nextSpec = null;
     if (mode === 'form') {
       let values = null;
@@ -216,17 +217,18 @@ export function TodoEditor({ templateName, version, onNotice, onClose }) {
       extra={(
         <Space>
           <Segmented
+            disabled={saving}
             value={mode}
             onChange={switchMode}
             options={[{ value: 'form', label: '表单' }, { value: 'json', label: 'JSON 源码' }]}
           />
-          <Button onClick={onClose}>返回</Button>
-          <Button type="primary" loading={saving} onClick={save}>保存</Button>
+          <Button onClick={onClose} disabled={saving}>返回</Button>
+          <Button type="primary" loading={saving} disabled={!spec} onClick={save}>保存</Button>
         </Space>
       )}
     >
       {mode === 'form' ? (
-        <Form form={form} layout="vertical">
+        <Form form={form} layout="vertical" disabled={saving}>
           <Row gutter={12}>
             <Col span={12}>
               <Form.Item name="name" label="名称" rules={[{ required: true, message: '请输入名称' }]}>
@@ -326,6 +328,7 @@ export function TodoEditor({ templateName, version, onNotice, onClose }) {
         <div>
           <Text type="secondary">直接编辑 WorkflowSpec JSON；保存前会做本地 JSON 解析检查。</Text>
           <TextArea
+            disabled={saving}
             value={jsonText}
             onChange={(e) => setJsonText(e.target.value)}
             rows={24}
@@ -348,4 +351,8 @@ export function TodoEditor({ templateName, version, onNotice, onClose }) {
       </Space>
     </Card>
   );
+}
+
+export function TodoEditor(props) {
+  return <TodoEditorSession key={`${props.templateName}/${props.version}`} {...props} />;
 }

@@ -1,4 +1,4 @@
-Commit: 2491657d33c384dddcabf4d12ab4cd8822ccaf81
+Commit: e7685686ee338523547283309670a13a4560dd00
 
 
 # worker 模块
@@ -49,3 +49,7 @@ Project 预检区分资源定义与实际调用：所有引用 Agent 必须存�
 Runner DAG 预检包含注册入口、安装文件校验和与命名 Codex profile。pending 配置投影读取已接受队列快照；开始后继续沿用该版本。`operations/query/runner` 返回阶段、配置版本、业务摘要、独立 verdict、报告及投递状态，隐去私有环境。DAG 的 `/messages` 读取父会话持久化转译消息，报告经受控 artifact 接口下载。
 
 `annotate` 独立保存业务对账/投递状态，不改变执行终态。已启动的 Runner 不提供普通 resume 入口，避免外部业务重复执行；有效收据在恢复时仍须重新校验。端到端合同见 [runner_dispatch.rs](../../crates/worker/tests/runner_dispatch.rs)。
+
+真实业务验收从同一已验证 bundle 获取四个二进制。临时 systemd 服务先进入验收进程的挂载命名空间及根目录，再建立自己的原 workspace 只读边界，保证 Node 能看到本轮 NFS。受控回归将真实分支头和祖先验证随 workspace 与上下文固定，供脱离分支引用的快照复核使用。
+
+验收目录通过设备号和 inode 记录归属，测试输入服务通过 PID 与启动时间记录归属。结束前检查服务、打开文件及所有可见挂载命名空间；默认保留运行数据，显式 `--destroy-runtime` 仅删除本轮归属目录。证据可重复合并，排除私有沙箱并拒绝符号链接。脚本和边界见 [验收说明](../../scripts/acceptance/business/README.md)；runc 双节点调度入口为 [runc_scheduling/main.py](../../scripts/acceptance/runc_scheduling/main.py)。

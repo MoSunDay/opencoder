@@ -10,6 +10,7 @@ Commit: b465f440381bd009dc9bd3a8192ad88eab44cede
 - `crates/worker/src/operations/queue/` — 单调序号 + FIFO/LIFO 选等待任务
 - `crates/worker/src/operations/launch.rs` — 取容量后启动
 - `crates/worker/src/operations/query/` — 明细/事件/消息分页；head_seq 水位
+- `crates/worker/src/operations/query/dag_steps.rs` — DAG run 步级 meta.json 进度/单步视图
 - `crates/worker/src/operations/query/project/` — prun-* 回放；载荷 64 KiB 分块
 - `crates/worker/src/operations/query/runner.rs` — Runner 阶段/verdict/投递状态
 - `crates/worker/src/operations/project_admission/` — Plan/Execute 独立 run ID

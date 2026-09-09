@@ -124,30 +124,21 @@ async function main() {
   await browserPage.goto(h.base, { waitUntil: 'networkidle' });
   await projectPage(browserPage);
   await replayOldest(browserPage, h.root);
-  console.log(JSON.stringify({ stage: 'observation', attempts: runs.length + 3, started_at: new Date().toISOString() }));
-  const samples = [];
   const started = Date.now();
-  const duration = 1800000;
-  do {
-    const indexes = (await api('GET', '/api/executions?kind=project')).executions;
-    assert.equal(new Set(indexes.map((index) => index.id)).size, indexes.length);
-    for (const record of runs) {
-      const index = indexes.find((index) => index.id === record.id); assert(index, record.id);
-      assert.equal(index.node_id, node.id); assert.equal(index.status, 'done');
-      assert.deepEqual(Object.keys(index).sort(), ['created_at', 'id', 'kind', 'node_id', 'status']);
-      const detail = await api('GET', `/api/executions/${record.id}`);
-      assert.deepEqual(detail.replay, record.trace);
-      assert.deepEqual(detail.run, record.summary);
-    }
-    assert.deepEqual(errors, []);
-    samples.push({ at: new Date().toISOString(), indexes: indexes.length, replayed: runs.length });
-    fs.writeFileSync(path.join(h.root, 'observation.json'), JSON.stringify(samples, null, 2));
-    if (Date.now() - started >= duration) break;
-    await pause(Math.max(0, 10000 - (Date.now() - started) % 10000));
-  } while (true);
+  const indexes = (await api('GET', '/api/executions?kind=project')).executions;
+  assert.equal(new Set(indexes.map((index) => index.id)).size, indexes.length);
+  for (const record of runs) {
+    const index = indexes.find((index) => index.id === record.id); assert(index, record.id);
+    assert.equal(index.node_id, node.id); assert.equal(index.status, 'done');
+    assert.deepEqual(Object.keys(index).sort(), ['created_at', 'id', 'kind', 'node_id', 'status']);
+    const detail = await api('GET', `/api/executions/${record.id}`);
+    assert.deepEqual(detail.replay, record.trace);
+    assert.deepEqual(detail.run, record.summary);
+  }
+  assert.deepEqual(errors, []);
   assert.deepEqual(await audit(h, allRuns), audited);
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(h.root, 'storage-audit.json'), 'utf8')), originalStorage);
-  const report = { attempts: runs.length + 3, successful: runs.length, duration_ms: Date.now() - started, samples: samples.length, browser_errors: errors, first_run: first.id };
+  const report = { attempts: runs.length + 3, successful: runs.length, duration_ms: Date.now() - started, acceptance: 'E2E and current health', browser_errors: errors, first_run: first.id };
   fs.writeFileSync(path.join(h.root, 'report.json'), JSON.stringify(report, null, 2));
   console.log(JSON.stringify({ stage: 'complete', ...report }));
 }

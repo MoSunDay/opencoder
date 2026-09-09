@@ -6,6 +6,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { stageWasm } = require('./harness/wasm');
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'opencoder-artifact-browser-'));
 const bin = process.env.PLATFORM_BIN_DIR || path.join(__dirname, '../../target/debug');
@@ -79,6 +80,7 @@ async function main() {
     if (match) base = match[1];
     return !!base;
   }, 'server');
+  stageWasm(path.join(nodeDir, 'state'), 'seed');
   const node = start('opencoder-agent', [
     '--remote', base, '--token', token, '--name', 'artifact-node',
     '--workdir', nodeDir, '--data-dir', path.join(nodeDir, 'state'),
@@ -88,7 +90,7 @@ async function main() {
   await api('POST', '/api/executions', {
     id: 'dag-browser-artifact', kind: 'dag', input: { definition: {
       name: 'browser-artifact',
-      steps: [{ name: 'first', kind: { type: 'python', code: "print('seed')" } }],
+      steps: [{ name: 'first', kind: { type: 'wasm', command: 'stdout.wasm' } }],
     } },
   });
   await until(async () => (await api('GET', '/api/executions/dag-browser-artifact')).execution.status === 'done', 'dag', 90_000);
@@ -112,6 +114,7 @@ async function main() {
   });
   await page.addInitScript((credential) => localStorage.setItem('oc_token', credential), token);
   await page.goto(base, { waitUntil: 'networkidle' });
+  await page.locator('.fleet-nav-category').getByText('Agent', { exact: true }).click();
   await page.getByRole('menuitem', { name: '全部执行' }).click();
   await page.getByRole('button', { name: 'dag-browser-artifact' }).click();
   await page.locator('.ant-drawer').waitFor();

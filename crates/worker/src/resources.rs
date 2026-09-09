@@ -58,14 +58,22 @@ pub(crate) fn pin(source: Option<&Path>, destination: &Path) -> Result<Option<Pa
         }
         return Ok(Some(destination.into()));
     }
-    let Some(source) = source.filter(|p| p.exists()) else {
+    let Some(source) = source else {
         opencoder_core::share_fs::durable_create_dir_all(destination)?;
         std::fs::File::open(destination)?.sync_all()?;
         std::fs::File::open(destination.parent().unwrap())?.sync_all()?;
         return Ok(Some(destination.into()));
     };
-    if std::fs::symlink_metadata(source)?.file_type().is_symlink() {
+    let metadata = std::fs::symlink_metadata(source)
+        .with_context(|| format!("resource snapshot source unavailable: {}", source.display()))?;
+    if metadata.file_type().is_symlink() {
         bail!("agent resource mount root cannot be a symlink");
+    }
+    if !metadata.is_dir() {
+        bail!(
+            "resource snapshot source must be a directory: {}",
+            source.display()
+        );
     }
     let source = source.canonicalize()?;
     let staging = destination.with_extension(format!("staging-{}", ulid::Ulid::new()));

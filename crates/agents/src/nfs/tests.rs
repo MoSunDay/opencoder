@@ -5,6 +5,70 @@
 use super::*;
 use nfsserve::nfs::{ftype3, set_atime, set_gid3, set_mode3, set_mtime, set_size3, set_uid3};
 
+#[test]
+fn directory_errors_cannot_become_a_successful_partial_listing() {
+    for (kind, expected) in [
+        (
+            std::io::ErrorKind::PermissionDenied,
+            nfsstat3::NFS3ERR_ACCES,
+        ),
+        (std::io::ErrorKind::Other, nfsstat3::NFS3ERR_IO),
+    ] {
+        let entries = vec![Ok("first"), Err(std::io::Error::from(kind)), Ok("last")];
+        assert_eq!(
+            collect_names(entries.into_iter()).unwrap_err() as u32,
+            expected as u32
+        );
+    }
+}
+
+#[tokio::test]
+async fn long_directory_pagination_and_old_handles_survive_restart() {
+    let (dir, fs) = fixture();
+    let relative = "skills/a-complete-resource-package-with-a-long-name/v1/references";
+    std::fs::create_dir_all(dir.path().join(relative)).unwrap();
+    for i in 0..37 {
+        std::fs::write(
+            dir.path()
+                .join(relative)
+                .join(format!("contract-{i:02}.md")),
+            "body",
+        )
+        .unwrap();
+    }
+    let mut id = fs.root_dir();
+    for part in relative.split('/') {
+        id = fs.lookup(id, &name(part)).await.unwrap();
+    }
+    let restarted = agents_fs(dir.path().to_path_buf());
+    let id = restarted.fh_to_id(&fs.id_to_fh(id)).unwrap();
+    let mut cookie = 0;
+    let mut names = Vec::new();
+    loop {
+        let page = restarted.readdir(id, cookie, 4).await.unwrap();
+        assert!(!page.entries.is_empty());
+        for entry in page.entries {
+            cookie = entry.fileid;
+            assert_eq!(restarted.read(cookie, 0, 1024).await.unwrap().0, b"body");
+            names.push(entry.name.0);
+        }
+        if page.end {
+            break;
+        }
+        assert!(names.len() < 37);
+    }
+    assert_eq!(names.len(), 37);
+    names.sort();
+    names.dedup();
+    assert_eq!(names.len(), 37);
+    let old = nfs_fh3 {
+        data: b"prompts/p/v1/soul.md".to_vec(),
+    };
+    let id = restarted.fh_to_id(&old).unwrap();
+    assert_eq!(restarted.id_to_fh(id).data, old.data);
+    assert_eq!(restarted.read(id, 0, 1024).await.unwrap().0, b"be terse");
+}
+
 /// `sattr3` with every field "don't change" — mutations must still be
 /// rejected, proving ROFS does not depend on the requested attributes.
 fn sattr_void() -> sattr3 {
@@ -283,5 +347,76 @@ async fn wrong_type_ops_rejected() {
     assert!(matches!(
         fs.read(root, 0, 16).await.unwrap_err(),
         nfsstat3::NFS3ERR_ISDIR
+    ));
+}
+
+#[tokio::test]
+async fn complete_skill_package_survives_long_paths_and_export_restart() {
+    let (dir, fs) = fixture();
+    let relative =
+        "skills/regression-test/v2/code-regression-review/references/service-contract.md";
+    std::fs::create_dir_all(dir.path().join(relative).parent().unwrap()).unwrap();
+    std::fs::write(dir.path().join(relative), "real workflow contract").unwrap();
+    assert!(relative.len() > MAX_FH_PATH);
+    let mut parent = fs.root_dir();
+    for component in relative.split('/') {
+        let listed = fs.readdir(parent, 0, 100).await.unwrap();
+        assert!(listed
+            .entries
+            .iter()
+            .any(|e| e.name.0 == component.as_bytes()));
+        parent = fs.lookup(parent, &name(component)).await.unwrap();
+        let handle = fs.id_to_fh(parent);
+        assert!(handle.data.len() <= 64);
+        assert_eq!(fs.fh_to_id(&handle).unwrap(), parent);
+    }
+    let handle = fs.id_to_fh(parent);
+    let restarted = agents_fs(dir.path().to_path_buf());
+    let recovered = restarted.fh_to_id(&handle).unwrap();
+    assert_eq!(recovered, parent);
+    assert_eq!(
+        restarted.read(recovered, 0, 1024).await.unwrap().0,
+        b"real workflow contract"
+    );
+    std::fs::remove_file(dir.path().join(relative)).unwrap();
+    let restarted = agents_fs(dir.path().to_path_buf());
+    assert!(matches!(
+        restarted.fh_to_id(&handle),
+        Err(nfsstat3::NFS3ERR_STALE)
+    ));
+    let mut truncated = handle.clone();
+    truncated.data.pop();
+    assert!(matches!(
+        restarted.fh_to_id(&truncated),
+        Err(nfsstat3::NFS3ERR_BADHANDLE)
+    ));
+}
+
+#[tokio::test]
+#[cfg(unix)]
+async fn opaque_handle_recovery_cannot_follow_a_link_outside_the_export() {
+    let (dir, fs) = fixture();
+    let outside = tempfile::tempdir().unwrap();
+    std::fs::write(outside.path().join("secret.md"), "outside").unwrap();
+    let link = "a-long-skill-name-that-makes-the-relative-resource-path-exceed-sixty-bytes";
+    std::os::unix::fs::symlink(outside.path(), dir.path().join(link)).unwrap();
+    let handle = nfs_fh3 {
+        data: handles::encode(&PathBuf::from(link).join("secret.md")),
+    };
+    assert!(matches!(fs.fh_to_id(&handle), Err(nfsstat3::NFS3ERR_STALE)));
+    let link_id = fs.lookup(fs.root_dir(), &name(link)).await.unwrap();
+    assert!(matches!(
+        fs.lookup(link_id, &name("secret.md")).await,
+        Err(nfsstat3::NFS3ERR_NOTDIR)
+    ));
+    std::os::unix::fs::symlink(outside.path(), dir.path().join("short")).unwrap();
+    let forged = fs
+        .fh_to_id(&nfs_fh3 {
+            data: b"short/secret.md".to_vec(),
+        })
+        .unwrap();
+    assert!(matches!(
+        fs.read(forged, 0, 1024).await,
+        Err(nfsstat3::NFS3ERR_ACCES)
     ));
 }

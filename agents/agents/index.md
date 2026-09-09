@@ -1,4 +1,4 @@
-Commit: 2491657d33c384dddcabf4d12ab4cd8822ccaf81
+Commit: (working-tree, 基于 9f39c6cb36fb511c1e3a921338f4f1c7dc36efa1)
 
 
 # opencoder-agents — 版本化自定义 Agent（写路径 + NFS）
@@ -31,7 +31,7 @@ Commit: 2491657d33c384dddcabf4d12ab4cd8822ccaf81
 - `write.rs`：`save_resource_version(cat, name, [VersionFile]) -> u32`（`.tmp-v{n}.<pid>` 目录写全量后 rename 原子落位，dest 存在即败）；`create_agent`/`update_agent_refs`（逐字段 diff，仅变更字段追加 history 条目）/`delete_agent`（幂等；marker 由调用方先清）。
 - `rollback.rs`：`rollback_resource`（版本必须 ∈ history 且目录存在；指针切换 + updated_at）。
 - `references.rs`：`scan_resource`（prompts→soul|how|output 桑；skills→*.md 桑与含 SKILL.md 子目录；tools→直接子项；memory→memory.md）+ `references_snapshot`/`refresh_agent_references`（引用卡快照重算回写）。
-- `nfs.rs`：nfsserve 0.11 `FileSystem` 只读实现——filehandle=规范相对路径字节（根编码为 `"/"`，拒绝 `..`/绝对/非 UTF8），getattr/read/readdir 真实透传，一切变更操作 `NFS3ERR_ROFS`。真实内核 mount 已验证。
+- `nfs.rs`、`nfs/handles.rs`：nfsserve 0.11 `FileSystem` 只读实现。短路径句柄沿用规范相对路径字节（根编码为 `"/"`），长路径使用有界摘要，导出重启后从资源树恢复；拒绝 `..`、绝对路径、非 UTF8 和目录链接穿越。getattr/read/readdir 真实透传，一切变更操作 `NFS3ERR_ROFS`。真实内核 mount 已验证完整 skill 包的深层文件。
 - `serve.rs`：`NfsServerOpts/NfsServerStatus/NfsServerHandle` + `spawn_nfs_server`（独立 OS 线程跑 accept loop，watch-channel 优雅 shutdown，port 0=临时端口）+ `default_opts_from_config`（`agent.nfs{enabled,host,port=2049,read_only}`）。挂载：`mount -t nfs -o vers=3,tcp,port=P,mountport=P,nolock <host>:/ <dir>`（含 mount 协议，无需外部 mountd）。
 
 ## 接缝（谁消费什么）

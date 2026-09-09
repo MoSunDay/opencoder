@@ -58,12 +58,16 @@ Web「Agent 配置」顶部包含 Agent 列表、Agent Harness、Harness 管理�
 使用页面提供的挂载命令，并保留 `ro`：
 
 ```bash
-mount -t nfs -o ro,vers=3,tcp,port=<port>,mountport=<port>,nolock,soft,retrans=1,timeo=50 server:/ /mnt/opencoder-agents
+mount -t nfs -o ro,vers=3,tcp,port=<port>,mountport=<port>,nolock,soft,retrans=1,timeo=50,actimeo=0,lookupcache=none server:/ /mnt/opencoder-agents
 ```
 
 在 Node 的 `opencoder.json` 中设置 `agent.agents_dir` 为 `/mnt/opencoder-agents`。显式配置该路径时 Node 校验 Linux 挂载表，要求可读的只读 NFS；未挂载、可写挂载或本地目录都返回资源错误，不静默使用本地资源替代。
 
-每次新执行复制当前版本到节点资源快照，包含实际文件。资源后续发布、回滚或移除不会改变已接受的执行。缺失引用、不可读资源和版本内符号链接在接受前报错。已有执行的继续或恢复使用已固定快照，NFS 断开不阻止这些操作；新执行需要共享目录可用。仅使用内置 agent 时可以不配置共享目录。
+Server 的 NFS 导出支持完整深层资源路径，短路径句柄保持兼容，长路径句柄在导出重启后可恢复。目录读取失败明确返回错误，不以漏文件的列表代替成功。
+
+本机部署可使用 `scripts/platform/systemd/` 的只读挂载单元及 Agent 依赖配置；跨主机部署调整 `What` 为实际 Server。每个挂载点只保留一个挂载，关闭目录与属性缓存使资源发布及时对新任务生效。回滚不支持长句柄的旧 Server 时，先停止依赖该挂载的 Node，再受控重新挂载。
+
+每次新执行复制当前版本到节点资源快照，包含实际文件。显式资源源路径消失或复制失败时拒绝接受，不生成空快照；只有未配置资源的内置 Agent 可以使用空资源池。资源后续发布、回滚或移除不会改变已接受的执行。缺失引用、不可读资源和版本内符号链接在接受前报错。已有执行的继续或恢复使用已固定快照，NFS 断开不阻止这些操作；新执行需要共享目录可用。仅使用内置 agent 时可以不配置共享目录。
 
 ## 团队与大脑
 

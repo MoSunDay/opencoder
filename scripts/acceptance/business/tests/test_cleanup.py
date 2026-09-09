@@ -2,15 +2,52 @@
 from pathlib import Path
 from contextlib import closing
 import sqlite3
+import json
+import subprocess
 import sys
 import tempfile
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from lifecycle.runtime import initialize_runtime, finalize_runtime
+from lifecycle.process import record_fixture, stop_fixture
 
 
 class RuntimeCleanup(unittest.TestCase):
+    def test_explicit_disposal_removes_only_owned_runtime(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            root = base / 'run'
+            (root / 'evidence').mkdir(parents=True)
+            initialize_runtime(root)
+            existing = base / 'existing.db'
+            existing.write_text('untouched')
+            (root / 'runtime/task.db').write_text('temporary')
+            (root / 'evidence/report.json').write_text('retained')
+            self.assertTrue(finalize_runtime(root, destroy=True)['runtimeRemoved'])
+            self.assertFalse((root / 'runtime').exists())
+            self.assertEqual(existing.read_text(), 'untouched')
+            self.assertEqual((root / 'evidence/report.json').read_text(), 'retained')
+
+    def test_fixture_reattachment_checks_start_time_before_stopping(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])
+            try:
+                record_fixture(root, child)
+                marker = root / 'evidence/fixture-process.json'
+                owner = json.loads(marker.read_text())
+                marker.write_text(json.dumps({**owner, 'startTime': 'different'}))
+                stop_fixture(root)
+                self.assertIsNone(child.poll())
+                marker.write_text(json.dumps(owner))
+                stop_fixture(root)
+                self.assertIsNotNone(child.poll())
+            finally:
+                if child.poll() is None:
+                    child.kill()
+                child.wait()
+
     def test_all_databases_and_reports_survive_finalization(self):
         with tempfile.TemporaryDirectory() as temporary:
             base = Path(temporary)

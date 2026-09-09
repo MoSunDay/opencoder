@@ -42,6 +42,9 @@ pub(crate) async fn handle(worker: &Worker, operation: NodeOperation) -> Result<
             execution,
             after_turn,
         } => query::team_turns(worker, &execution, after_turn).await,
+        NodeOperation::DagSteps { execution, step } => {
+            query::dag_steps(worker, &execution, step).await
+        }
         NodeOperation::Artifact { request } => artifacts::read_request(worker, request).await,
         NodeOperation::Command { execution, command } => {
             command::command(worker, &execution, command).await

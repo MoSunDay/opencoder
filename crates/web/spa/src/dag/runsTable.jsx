@@ -182,7 +182,7 @@ export function RunsTable({ onNotice, refreshSignal, focusRunId, onDetailClosed 
   ];
 
   return (
-    <Space direction="vertical" size={12} style={{ width: '100%' }}>
+    <Space orientation="vertical" size={12} style={{ width: '100%' }}>
       <Space>
         <Button onClick={() => load(false)}>刷新</Button>
         <Text type="secondary">每 3s 自动刷新，最多展示最近 50 条。</Text>

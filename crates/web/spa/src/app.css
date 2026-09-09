@@ -30,6 +30,13 @@
   --oc-success-bg: #f6ffed;
   --oc-error: #ff4d4f;
   --oc-error-bg: #fff2f0;
+  /* Transcript role accents + markdown heading green. The -rgb twins feed
+     rgba() washes (RoleAvatar); see theme.js cssVars for why. */
+  --oc-accent-user: #13c2c2;
+  --oc-accent-user-rgb: 19, 194, 194;
+  --oc-accent-ai: #9254de;
+  --oc-accent-ai-rgb: 146, 84, 222;
+  --oc-heading: #389e0d;
   /* Monospace stack for id / uuid / session columns (raw identifiers, not
      prose). Referenced as var(--oc-mono, monospace) from inline styles. */
   --oc-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas,
@@ -190,6 +197,13 @@ body {
   white-space: pre-wrap;
   word-break: break-word;
   margin: 0;
+}
+
+/* Selected-row marker for the click-to-select tables (todoRunsPanel). Own
+   class on purpose: borrowing antd's internal .ant-table-row-selected ties
+   the row to checkbox-selection styling that this table does not have. */
+.oc-row-selected > td {
+  background: rgba(var(--oc-primary-rgb), 0.06) !important;
 }
 
 .execution-messages { margin-top: 16px; }

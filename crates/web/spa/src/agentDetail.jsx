@@ -8,12 +8,13 @@ import { useEvent } from './ui/editing/useEvent.js';
 // references 解析快照。
 
 import {
-  Button, Card, Select, Space, Tabs, Tag, Timeline, Typography, message,
+  Button, Card, Select, Space, Tabs, Tag, Timeline, Typography,
 } from 'antd';
 import { useCallback, useEffect, useState } from 'react';
 import { apiGet, apiPatch, apiPost, apiPut } from './api.js';
 import { REF_FIELDS, resolvedNames, resourceOptions, versionOptions } from './agentsItems.js';
 import { err } from './notice.js';
+import { useMessage } from './ui/appMessage.js';
 import { PromptEditor } from './promptEditor.jsx';
 import { HARNESS_OPTIONS } from './harness/fields.jsx';
 
@@ -24,6 +25,7 @@ const { Text, Title } = Typography;
 /// 特有的内容查看器（Prompt 的三文件编辑器）。
 function ResourceRefTab({ field, cat, label, meta, resources, onNotice: noticeCallback, onCardSaved, children }) {
   const onNotice = useEvent(noticeCallback);
+  const msg = useMessage();
   const refs = (meta && meta.current) || {};
   const referenced = refs[field] || '';
   const entry = (resources[cat] || []).find((r) => r && r.name === referenced) || null;
@@ -34,7 +36,7 @@ function ResourceRefTab({ field, cat, label, meta, resources, onNotice: noticeCa
       await apiPut(`/api/agents/${encodeURIComponent(meta.name)}`, {
         current: { ...refs, [field]: v || null },
       });
-      message.success('引用已更新');
+      msg.success('引用已更新');
       onCardSaved();
     } catch (e) {
       if (onNotice) {
@@ -52,7 +54,7 @@ function ResourceRefTab({ field, cat, label, meta, resources, onNotice: noticeCa
         `/api/agents/resources/${cat}/${encodeURIComponent(referenced)}/rollback`,
         { version: rollbackV },
       );
-      message.success(`已回滚到 v${(j && j.current) || rollbackV}`);
+      msg.success(`已回滚到 v${(j && j.current) || rollbackV}`);
       onCardSaved();
     } catch (e) {
       if (onNotice) {
@@ -113,7 +115,7 @@ function MetaTab({ meta }) {
           <Timeline
             items={hist.map((h, i) => ({
               key: String(i),
-              children: (
+              content: (
                 <Space wrap size={4}>
                   <Tag>{h.field || '-'}</Tag>
                   <Text style={{ fontSize: 12 }}>{h.from || '—'} → {h.to || '—'}</Text>
@@ -139,6 +141,7 @@ function MetaTab({ meta }) {
 
 function AgentDetailSession({ name, resources, onNotice: noticeCallback, onChanged, onBack }) {
   const onNotice = useEvent(noticeCallback);
+  const msg = useMessage();
   const [meta, setMeta] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -170,7 +173,7 @@ function AgentDetailSession({ name, resources, onNotice: noticeCallback, onChang
   const activate = async () => {
     try {
       await apiPatch('/api/agents/active', { active: name });
-      message.success(`已激活 ${name}`);
+      msg.success(`已激活 ${name}`);
     } catch (e) {
       // 400/404 = prompt 预检失败等，服务端 error 字段已并入 e.message
       if (onNotice) {
@@ -196,7 +199,7 @@ function AgentDetailSession({ name, resources, onNotice: noticeCallback, onChang
           onChange={async (harness) => {
             try {
               await apiPut(`/api/agents/${encodeURIComponent(name)}`, { harness });
-              message.success('Harness 已更新，将用于新启动的会话'); onCardSaved();
+              msg.success('Harness 已更新，将用于新启动的会话'); onCardSaved();
             } catch (e) { onNotice?.(err('更新 Harness 失败: ' + e.message)); }
           }} />
         <Button size="small" type="primary" onClick={activate}>设为生效</Button>

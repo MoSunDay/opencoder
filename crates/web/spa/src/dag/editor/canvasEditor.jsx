@@ -19,8 +19,8 @@ import {
   useReactFlow,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { message } from 'antd';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useMessage } from '../../ui/appMessage.js';
 import { layoutEditorNodes } from './canvasLayout.js';
 import { canConnect, canvasToSpec, newStep, specProblemIndex, specToCanvas } from './canvasModel.js';
 import { CanvasToolbar, StepPalette } from './canvasToolbar.jsx';
@@ -65,6 +65,7 @@ export function CanvasEditor(props) {
 /// EditorCanvas — hook body of CanvasEditor (kept inside the provider so
 /// useReactFlow / fitView / screenToFlowPosition resolve).
 function EditorCanvas({ spec, problems, positions, onSpecChange, onPositionsChange }) {
+  const msg = useMessage();
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [selectedId, setSelectedId] = useState(null);
@@ -162,7 +163,7 @@ function EditorCanvas({ spec, problems, positions, onSpecChange, onPositionsChan
     (params) => {
       const reason = canConnect(edges, params.source, params.target);
       if (reason) {
-        message.warning(reason);
+        msg.warning(reason);
         return;
       }
       setEdges(addEdge({ ...params, type: 'smoothstep', markerEnd: { type: MarkerType.ArrowClosed } }, edges));

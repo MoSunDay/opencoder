@@ -28,29 +28,32 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Bubble } from '@ant-design/x';
 import { RobotOutlined, UserOutlined } from '@ant-design/icons';
-import { Avatar, Tag, Typography } from 'antd';
+import { Avatar, Empty, Tag, Typography } from 'antd';
 import { isEmptyTranscript, itemsFromTurns, usageLine } from './bubbleItems.js';
 import { StepsContent, ThinkContent, ToolContent } from './stepsBlock.jsx';
 import { sayPresentation } from './transcript/markdown.js';
 import { AssistantText, TextRows } from './transcript/text.jsx';
 import { Markdown } from './project/markdown.jsx';
 import { SubagentContent } from './subagentBlock.jsx';
+import { MONO_VAR } from './ui/mono.js';
 
 const { Text, Paragraph } = Typography;
 
-// TUI-flavoured monospace carried over from the old TextTurn/ToolTurn.
-const MONO = 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
-
 function RoleAvatar({ role }) {
   const user = role === 'user';
-  const color = user ? '#13c2c2' : '#9254de';
   return (
     <Avatar
       role="img"
       aria-label={user ? '用户' : 'Agent'}
       size={32}
       icon={user ? <UserOutlined aria-hidden /> : <RobotOutlined aria-hidden />}
-      style={{ background: color + '1a', color, flexShrink: 0 }}
+      style={{
+        // The 10% wash used to be `hex + '1a'`; a var() cannot be string-
+        // concatenated, so the rgba() wash reads the -rgb twins from :root.
+        background: user ? 'rgba(var(--oc-accent-user-rgb), 0.1)' : 'rgba(var(--oc-accent-ai-rgb), 0.1)',
+        color: user ? 'var(--oc-accent-user)' : 'var(--oc-accent-ai)',
+        flexShrink: 0,
+      }}
     />
   );
 }
@@ -62,7 +65,7 @@ function TextContent({ turn }) {
   return (
     <Paragraph
       style={{
-        fontFamily: MONO,
+        fontFamily: MONO_VAR,
         fontSize: 13,
         whiteSpace: 'pre-wrap',
         wordBreak: 'break-word',
@@ -199,7 +202,7 @@ export function UsageFooter({ usage }) {
     return null;
   }
   return (
-    <div style={{ marginTop: 12, fontFamily: MONO, fontSize: 12 }}>
+    <div style={{ marginTop: 12, fontFamily: MONO_VAR, fontSize: 12 }}>
       <Text type="secondary">{usageLine(usage)}</Text>
     </div>
   );
@@ -218,10 +221,14 @@ export function StatusTag({ status, error }) {
   return null;
 }
 
+/// Empty-state hint: the console-wide antd Empty idiom (same as
+/// project/goalsTab.jsx), keeping the 48px vertical breathing room the
+/// hand-rolled padded Text used to provide. `text` still lands in the DOM as
+/// the Empty description.
 export function EmptyHint({ text }) {
   return (
-    <div style={{ padding: '48px 0', textAlign: 'center' }}>
-      <Text type="secondary">{text}</Text>
+    <div style={{ padding: '48px 0' }}>
+      <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={text} />
     </div>
   );
 }
@@ -253,7 +260,7 @@ export function TranscriptView({ turns, usage, status, error, emptyText }) {
             <Typography.Link
               onClick={() => setEpoch(epoch + 1)}
               type="secondary"
-              style={{ fontFamily: MONO, fontSize: 12 }}
+              style={{ fontFamily: MONO_VAR, fontSize: 12 }}
             >
               ⤒ 收起
             </Typography.Link>

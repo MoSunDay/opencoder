@@ -10,6 +10,7 @@ import { apiGet, apiPost } from './api.js';
 import { openStream } from './sse.js';
 import { ExecutionDetail } from './fleet/detail.jsx';
 import { StatusTag } from './ui/statusTag.jsx';
+import { MONO_VAR } from './ui/mono.js';
 import { TimeText } from './ui/timeText.jsx';
 import { err } from './notice.js';
 
@@ -112,8 +113,12 @@ function EventsFeed({ workflowId, onNotice, onTerminal }) {
 function WorkflowDetail({ workflowId, summary, onNotice, onMutated }) {
   const [detail, setDetail] = useState(null);
   const [executionOpen, setExecutionOpen] = useState(false);
+  /// 详情（workflow + items）自己的拉取态 —— 与 TodoRunsPanel 工作流列表的
+  /// loading 是两份数据，不能共用一个旗标。
+  const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
+    setLoading(true);
     try {
       const j = await apiGet(`/api/todo/workflows/${encodeURIComponent(workflowId)}`);
       setDetail(j || null);
@@ -121,6 +126,8 @@ function WorkflowDetail({ workflowId, summary, onNotice, onMutated }) {
       if (onNotice) {
         onNotice(err('获取工作流详情失败: ' + (e && e.message)));
       }
+    } finally {
+      setLoading(false);
     }
   }, [workflowId, onNotice]);
 
@@ -206,7 +213,7 @@ function WorkflowDetail({ workflowId, summary, onNotice, onMutated }) {
       </Card>
       <Card size="small" title="TODO 项" style={{ marginBottom: 12 }}>
         <Table rowKey={(r) => (r && r.todo_id) || ''} size="small" columns={itemCols}
-          dataSource={items} pagination={false} />
+          dataSource={items} pagination={false} loading={loading} />
       </Card>
       <Card size="small" title="事件流">
         <EventsFeed workflowId={workflowId} onNotice={onNotice} onTerminal={load} />
@@ -273,7 +280,7 @@ export function TodoRunsPanel({ onNotice, focusWorkflowId, onFocusConsumed }) {
 
   const wfCols = [
     { title: 'ID', dataIndex: 'id', key: 'id', ellipsis: true,
-      render: (v) => <Tooltip title={v}><span style={{ fontFamily: 'var(--oc-mono, monospace)' }}>{String(v || '').slice(0, 16)}…</span></Tooltip> },
+      render: (v) => <Tooltip title={v}><span style={{ fontFamily: MONO_VAR }}>{String(v || '').slice(0, 16)}…</span></Tooltip> },
     { title: '状态', key: 'status', width: 170,
       render: (_, row) => <Space size={4}><Tooltip title="节点执行状态"><span><ExecutionStatusTag status={row.execution_status} /></span></Tooltip>{row.detail_error ? null : <Tooltip title="工作流状态"><span><StatusTag status={row.status} /></span></Tooltip>}</Space> },
     { title: '更新时间', dataIndex: 'updated_at', key: 'updated_at', width: 110,
@@ -292,7 +299,7 @@ export function TodoRunsPanel({ onNotice, focusWorkflowId, onFocusConsumed }) {
             dataSource={rows}
             pagination={false}
             onRow={(r) => ({ onClick: () => setSelectedId(r.id), style: { cursor: 'pointer' } })}
-            rowClassName={(r) => (r && r.id === selectedId ? 'ant-table-row-selected' : '')}
+            rowClassName={(r) => (r && r.id === selectedId ? 'oc-row-selected' : '')}
           />
         </Card>
       </Col>

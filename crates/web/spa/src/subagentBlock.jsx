@@ -11,21 +11,21 @@ import { Collapse, Modal, Tag, Typography } from 'antd';
 import { useEffect, useRef, useState } from 'react';
 import { emptyStream, reduceFrame } from './reduce.js';
 import { openStream } from './sse.js';
+import { MONO_VAR } from './ui/mono.js';
+import { statusColor } from './ui/statusTag.jsx';
 
 const { Text, Paragraph } = Typography;
 
-const MONO = 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+/// The subagent turn statuses the shared console table (ui/statusTag.jsx)
+/// covers. Everything outside these four keeps the historical `processing`
+/// blue: a subagent mid-flight (or carrying a status this block does not
+/// know) must read as live, not as neutral/grey.
+const SUBAGENT_STATUSES = ['running', 'done', 'error', 'cancelled'];
 
-/// antd Tag color per subagent turn status.
-const STATUS_COLOR = {
-  running: 'processing',
-  done: 'success',
-  error: 'error',
-  cancelled: 'default',
-};
-
+/// antd Tag color per subagent turn status — a thin delegation to the
+/// console-wide statusColor table, with the `processing` fallback above.
 export function statusColorOf(status) {
-  return STATUS_COLOR[status] || 'processing';
+  return SUBAGENT_STATUSES.includes(status) ? statusColor(status) : 'processing';
 }
 
 /// Child usage → 'Σ n tokens', or null when the run emitted no llm_usage.
@@ -79,20 +79,20 @@ export function childLines(turn) {
 function LineRow({ line }) {
   if (line.kind === 'tool') {
     return (
-      <div style={{ fontFamily: MONO, fontSize: 12, padding: '1px 0' }}>
+      <div style={{ fontFamily: MONO_VAR, fontSize: 12, padding: '1px 0' }}>
         🔧 {line.text}
         {line.isError ? <Tag color="red" style={{ marginLeft: 8 }}>error</Tag> : null}
       </div>
     );
   }
   if (line.kind === 'think') {
-    return <Paragraph style={{ fontStyle: 'italic', color: '#8c8c8c', fontSize: 12, whiteSpace: 'pre-wrap', marginBottom: 0 }}>{line.text}</Paragraph>;
+    return <Paragraph style={{ fontStyle: 'italic', color: 'var(--oc-text-tertiary)', fontSize: 12, whiteSpace: 'pre-wrap', marginBottom: 0 }}>{line.text}</Paragraph>;
   }
   if (line.kind === 'sys' || line.kind === 'usage') {
     return <Text type="secondary" style={{ fontSize: 12 }}>{line.text}</Text>;
   }
   return (
-    <Paragraph style={{ fontFamily: MONO, fontSize: 12, whiteSpace: 'pre-wrap', wordBreak: 'break-word', margin: 0 }}>
+    <Paragraph style={{ fontFamily: MONO_VAR, fontSize: 12, whiteSpace: 'pre-wrap', wordBreak: 'break-word', margin: 0 }}>
       {line.text}
     </Paragraph>
   );
@@ -110,7 +110,7 @@ function SubagentLabel({ turn, open, onView }) {
   const status = (turn && turn.status) || 'running';
   const showSummary = !open && turn && typeof turn.summary === 'string' && turn.summary;
   return (
-    <span style={{ fontFamily: MONO, fontSize: 12 }}>
+    <span style={{ fontFamily: MONO_VAR, fontSize: 12 }}>
       🤖 {(turn && turn.name) || 'subagent'} · {status}
       <Tag color={statusColorOf(status)} style={{ marginLeft: 8 }}>{status}</Tag>
       {showSummary ? <Text type="secondary">{turn.summary}</Text> : null}

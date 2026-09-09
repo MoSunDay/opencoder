@@ -1,4 +1,4 @@
-Commit: 1a1255c029fed0162469ac1c2ed34f6c2160c654
+Commit: c9bfebbb553777c4aaf16db69c30648e1fd71819
 
 
 # worker 模块
@@ -54,6 +54,8 @@ Runner DAG 预检包含注册入口、安装文件校验和与命名 Codex profi
 
 真实业务验收从同一已验证 bundle 获取四个二进制。临时 systemd 服务先进入验收进程的挂载命名空间及根目录，再建立自己的原 workspace 只读边界，保证 Node 能看到本轮 NFS。受控回归将真实分支头和祖先验证随 workspace 与上下文固定，供脱离分支引用的快照复核使用。
 
-验收侧 `private_environment` 统一新建与重新接入时的私有目录和既有 SSO 身份。`validation/delivery` 隔离旧群投递与新版 Viking 工单接口；实际分析必须经 Runner，投递回执必须属于已完成任务，`not_required` 也校验任务身份和完成状态。历史场景可显式提供核实过的评测请求，并独立记录真实回归分支证明。可选 `metricw-offline` 仅向指定 metrics 配置键提供 loopback 缺省响应，固定工具链、记录兼容参数与实际请求，保留原测试断言和历史无夹具结论。
+验收侧 `private_environment` 统一新建与重新接入时的私有目录，仅沿用 bytedcli 支持的显式身份变量。`dependencies/identity` 将当前 XDG 登录数据及兼容的旧 CLI 目录独立复制到私有 HOME，不共享文件 inode、不修改宿主登录记录；通用 `JWT_TOKEN` 不替代 bytedcli 身份。
+
+`validation/delivery` 隔离旧群投递与新版 Viking 工单接口；实际分析必须经 Runner，投递回执必须属于已完成任务，`not_required` 也校验任务身份和完成状态。历史场景可显式提供核实过的评测请求，并独立记录真实回归分支证明。可选 `metricw-offline` 仅向指定 metrics 配置键提供 loopback 缺省响应，固定工具链、记录兼容参数与实际请求，保留原测试断言和历史无夹具结论。
 
 验收目录通过设备号和 inode 记录归属，测试输入服务通过 PID 与启动时间记录归属。结束前检查服务、打开文件及所有可见挂载命名空间；默认保留运行数据，显式 `--destroy-runtime` 仅删除本轮归属目录。证据可重复合并，排除私有沙箱并拒绝符号链接。脚本和边界见 [验收说明](../../scripts/acceptance/business/README.md)；runc 双节点调度入口为 [runc_scheduling/main.py](../../scripts/acceptance/runc_scheduling/main.py)。

@@ -198,6 +198,7 @@ struct FleetGuard {
 fn spawn_server(workdir: &std::path::Path) -> (FleetGuard, String) {
     let mut server = ServerGuard(
         Command::new(support::sibling_bin(support::SERVER_BIN))
+            .env("HOME", workdir)
             .arg("--workdir")
             .arg(workdir)
             .args(["--host", "127.0.0.1", "--port", "0", "--token", TOKEN])
@@ -235,6 +236,7 @@ fn spawn_server(workdir: &std::path::Path) -> (FleetGuard, String) {
                 .to_string();
             let agent = ServerGuard(
                 Command::new(support::sibling_bin(support::AGENT_BIN))
+                    .env("HOME", workdir)
                     .arg("--workdir")
                     .arg(workdir)
                     .arg("--data-dir")
@@ -356,7 +358,7 @@ fn real_server_rejects_running_mode_switches_until_idle() {
     let (_server, base) = spawn_server(tmp.path());
 
     let (status, created) = http(&base, "POST", "/api/sessions", r#"{"agent":"act"}"#);
-    assert_eq!(status, 200);
+    assert_eq!(status, 200, "session creation: {created}");
     let sid = created["id"].as_str().unwrap();
     assert_eq!(
         http(

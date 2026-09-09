@@ -42,7 +42,7 @@ async function createHierarchy(page) {
   await page.getByRole('tab', { name: '里程碑', exact: true }).click();
   await page.getByRole('button', { name: '新建里程碑', exact: true }).click();
   await page.getByRole('combobox', { name: 'goal_id' }).click();
-  await page.locator('.ant-select-item-option-content').getByText('Project replay acceptance', { exact: true }).click();
+  await page.locator('.ant-select-item-option-content').filter({ hasText: goal.id }).click();
   await page.getByPlaceholder('一句话标题').fill('Complete replay');
   const milestone = await save('/api/project/milestones', /保\s*存/);
   await page.getByRole('tab', { name: 'TODO', exact: true }).click();
@@ -52,7 +52,7 @@ async function createHierarchy(page) {
     await page.getByRole('textbox', { name: 'draft' }).fill(draft);
     if (grouped) {
       await page.getByRole('combobox', { name: 'milestone_id' }).click();
-      await page.locator('.ant-select-item-option-content').getByText('Project replay acceptance / Complete replay', { exact: true }).click();
+      await page.locator('.ant-select-item-option-content').filter({ hasText: milestone.id }).click();
     }
     const created = await save('/api/project/todos', /创\s*建/);
     await page.getByText(`TODO · ${title}`, { exact: true }).waitFor();

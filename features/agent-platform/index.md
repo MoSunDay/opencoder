@@ -1,4 +1,4 @@
-Commit: 2491657d33c384dddcabf4d12ab4cd8822ccaf81
+Commit: (working-tree, 基于 9f39c6cb36fb511c1e3a921338f4f1c7dc36efa1)
 
 
 # Agent 调度平台
@@ -15,6 +15,7 @@ Commit: 2491657d33c384dddcabf4d12ab4cd8822ccaf81
 - 项目每次新的 Plan/Execute 使用当前全局草稿与 TODO 绑定，所有控制入口行为一致。忙碌或预检拒绝不会改写上次记录；通过预检但容量不足时保存新尝试并排队。项目 todo 执行器可选 agent/team/DAG/大脑；大脑路由由 Server 预解析为具体执行器后下发节点。
 - 项目的 Plan 与 Agent 执行每次保留独立输入、实际 Agent 版本和过程回放；相同运行 ID 重试沿用已接受的尝试。新执行采用当前 Agent 资源，版本改变时创建新会话并接续已有方案与前次结果。取消保留部分输出与过程，重复取消不会覆盖正在写入的回放。
 - NFS 只共享 agent 资源。执行固定实际版本文件，后续发布或删除不改变已接受的执行；配置的共享目录不可用、非只读 NFS、资源引用缺失均明确失败；共享目录离线时，已接收执行仍使用本地快照继续或恢复，新执行拒绝接收。
+- 完整 Skill 包中的深层参考文件与入口一起导出、固定到执行快照；NFS 句柄长度不限制资源相对路径长度。
 - 普通团队成员由 agent 与职责定义，统一在一个节点执行。新建跨节点 system 执行已关闭，维护操作必须由用户显式指定节点。
 - 大脑能力可绑定 agent/team/DAG/TODO，未绑定时默认由 act Agent 执行。能力库为空时也可直接执行需求；有能力库时规划并选择能力，规划失败会报错。预览只查看路由，直接调度按稳定 request_id 启动，重试沿用已接受的执行和决策。
 - 新平台使用独立存储，不迁移或删除旧 daemon/CLI 历史。
@@ -52,3 +53,5 @@ Web 的节点页支持负载与显式维护，并显示运行数/并发上限、
 评测归因与代码回归可保留原业务 API/CLI，通过同名 Agent、Codex profile 和 Runner DAG 进入节点持久化队列。超额任务 pending，使用 Node 的统一并发上限和 FIFO/LIFO；不增加周期触发器。任务展示接受时的 Harness、Runner、Prompt/Skill/Tools 版本，模型消息支持折叠和刷新回放。
 
 业务任务的 jobId + attempt 固定关联执行 ID；不确定受理结果时对账同一尝试。只有平台完成且报告校验通过，业务接口才返回 done；回归 pass/block/inconclusive 与执行成功独立，报告投递也独立。已开始但没有有效完成收据的 Runner 不自动重跑，需显式业务重试；当前业务适配要求 API 与 Node 同机共享检查点。详见 [注册 Runner](../../docs/registered-runners.md)。
+
+固定节点的真实业务验收使用独立 workspace、缓存和数据库，原目录在执行命名空间内只读；结束后保留报告和审计，销毁运行副本。入口与依赖准备见 [独立副本验收](../../scripts/acceptance/business/README.md)。

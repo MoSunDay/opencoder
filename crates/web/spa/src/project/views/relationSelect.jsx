@@ -6,6 +6,10 @@ import { searchSelect } from '../model/relations.js';
 
 // Keep the chosen association visible until the refreshed snapshot acknowledges it.
 export function RelationSelect({ path, field, value, options, refresh, onNotice, label, disabled }) {
+  return <RelationEditor key={JSON.stringify([path, field])} {...{ path, field, value, options, refresh, onNotice, label, disabled }} />;
+}
+
+function RelationEditor({ path, field, value, options, refresh, onNotice, label, disabled }) {
   const [pending, setPending] = useState(null);
   const [busy, setBusy] = useState(false);
   useEffect(() => {

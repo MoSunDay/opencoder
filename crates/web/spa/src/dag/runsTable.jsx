@@ -8,6 +8,7 @@ import { Button, Popconfirm, Space, Table, Tag, Tooltip, Typography } from 'antd
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiGet, apiPost } from '../api.js';
 import { TimeText } from '../ui/timeText.jsx';
+import { tableLoading, tableRows } from '../ui/tableLoading.js';
 import { CANCELLABLE, NodeBadge, RunStatusTag } from './runBits.jsx';
 import { useStore } from '../store.js';
 import { RunDetail } from './runDetail.jsx';
@@ -190,9 +191,12 @@ export function RunsTable({ onNotice, refreshSignal, focusRunId, onDetailClosed 
       <Table
         rowKey="id"
         size="middle"
+        // Own horizontal scroller like every other list table: the columns
+        // cannot shrink below their min-content on a phone viewport.
+        scroll={{ x: 'max-content' }}
         columns={columns}
-        dataSource={rows}
-        loading={loading}
+        dataSource={tableRows(loading, rows)}
+        loading={tableLoading(loading)}
         pagination={false}
         locale={{ emptyText: '暂无运行记录，先在「定义」页派发一个工作流' }}
       />

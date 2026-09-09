@@ -6,10 +6,11 @@
 // duplication is structural, which is exactly why it needs a test — these
 // assertions turn "remember to change both" into a build failure.
 
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { theme as antdTheme } from 'antd';
 import { cssVars, palette, shadowTertiary, theme } from './theme.js';
+import { MONO } from './ui/mono.js';
 
 const css = readFileSync(new URL('./app.css', import.meta.url), 'utf8');
 
@@ -52,18 +53,59 @@ describe('palette lockstep: theme.js cssVars <-> app.css :root', () => {
     expect(drifted, drifted.join('\n')).toEqual([]);
   });
 
-  it('leaves no var(--oc-*) reference dangling on a fallback', () => {
+  it('leaves no var(--oc-*) reference dangling across app.css, project.css and every src file', () => {
+    // transcript.jsx (and friends) reference --oc-* from inline styles with no
+    // fallback, so a deleted var would silently compute to an invalid value
+    // (transparent background) with a green build. Scan every surface that can
+    // name a var — the two stylesheets plus every .js/.jsx under src/ — and
+    // require each reference to be declared in :root AND present in cssVars.
     const declared = new Set(Object.keys(declaredVars()));
-    const used = new Set([...css.matchAll(/var\((--oc-[\w-]+)/g)].map((m) => m[1]));
-    expect([...used].filter((v) => !declared.has(v)).sort()).toEqual([]);
+    const inCssVars = new Set(Object.keys(cssVars));
+    const srcFiles = readdirSync(new URL('.', import.meta.url), { recursive: true })
+      .filter((p) => typeof p === 'string')
+      .filter((p) => !p.split('/').includes('node_modules'))
+      .filter((p) => /\.(js|jsx)$/.test(p));
+    const sources = [
+      ['app.css', css],
+      ['project/project.css', readFileSync(new URL('./project/project.css', import.meta.url), 'utf8')],
+      ...srcFiles.map((p) => [p, readFileSync(new URL(`./${p}`, import.meta.url), 'utf8')]),
+    ];
+    const usedBy = new Map();
+    for (const [name, src] of sources) {
+      for (const m of src.matchAll(/var\((--oc-[\w-]+)/g)) {
+        if (!usedBy.has(m[1])) usedBy.set(m[1], new Set());
+        usedBy.get(m[1]).add(name);
+      }
+    }
+    const dangling = [...usedBy.keys()]
+      .filter((v) => !declared.has(v) || !inCssVars.has(v))
+      .sort()
+      .map((v) => `${v} (used by ${[...usedBy.get(v)].join(', ')})`);
+    expect(dangling, dangling.join('\n')).toEqual([]);
   });
 
-  it('derives --oc-primary-rgb from --oc-primary (rgba() literals stay honest)', () => {
+  it('derives every --oc-*-rgb from its hex twin (rgba() literals stay honest)', () => {
+    // Enumerate ALL -rgb vars rather than hardcoding --oc-primary: a drifted
+    // twin paints e.g. a cyan-tinted avatar with a blue-green glyph while every
+    // other test still passes.
     const declared = declaredVars();
-    const hex = declared['--oc-primary'];
-    const n = parseInt(hex.slice(1), 16);
-    expect(declared['--oc-primary-rgb'].replace(/\s+/g, ' '))
-      .toBe(`${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}`);
+    const rgbVars = Object.keys(declared).filter((k) => k.endsWith('-rgb')).sort();
+    expect(rgbVars.length, 'expected at least one --oc-*-rgb var').toBeGreaterThan(0);
+    const offenders = [];
+    for (const rgb of rgbVars) {
+      const hexName = rgb.slice(0, -'-rgb'.length);
+      const hex = declared[hexName];
+      if (!/^#[0-9a-fA-F]{6}$/.test(hex || '')) {
+        offenders.push(`${rgb}: missing #rrggbb twin ${hexName} (got ${hex})`);
+        continue;
+      }
+      const n = parseInt(hex.slice(1), 16);
+      const want = `${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}`;
+      if (declared[rgb] !== want) {
+        offenders.push(`${rgb}: css=${declared[rgb]} want=${want} (from ${hexName}=${hex})`);
+      }
+    }
+    expect(offenders, offenders.join('\n')).toEqual([]);
   });
 });
 
@@ -159,5 +201,14 @@ describe('theme config shape', () => {
 
   it('drops the Table header split line', () => {
     expect(theme.components.Table.headerSplitColor).toBe('transparent');
+  });
+
+  it('pins the antd code face to the same stack as --oc-mono', () => {
+    // <Typography.Text code> reads token.fontFamilyCode; if it forks from
+    // MONO / --oc-mono, inline code renders in a different face than every
+    // MONO_VAR identifier (antd's own default carries Courier, no
+    // ui-monospace).
+    expect(theme.token.fontFamilyCode).toBe(MONO);
+    expect(theme.token.fontFamilyCode).toBe(cssVars['--oc-mono']);
   });
 });

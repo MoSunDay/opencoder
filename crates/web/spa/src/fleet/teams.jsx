@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiGet, apiPost } from '../api.js';
 import { PageShell } from '../shell/pageShell.jsx';
 import { ExecutionDetail } from './detail.jsx';
+import { tableLoading, tableRows } from '../ui/tableLoading.js';
 import { newId, nodeOptions } from './model.js';
 import { err } from '../notice.js';
 
@@ -42,8 +43,8 @@ export function FleetTeamsPanel({ onNotice }) {
     finally { setBusy(false); }
   };
   return <PageShell page="team">
-    <Space style={{ marginBottom: 12 }}><Button type="primary" onClick={() => edit(null)}>创建团队</Button><Button onClick={load}>刷新</Button></Space>
-    <Table scroll={{ x: 'max-content' }} rowKey="name" dataSource={rows} loading={loading} columns={[
+    <Space style={{ marginBottom: 12 }}><Button type="primary" onClick={() => edit(null)}>创建团队</Button><Button onClick={() => load()}>刷新</Button></Space>
+    <Table scroll={{ x: 'max-content' }} rowKey="name" dataSource={tableRows(loading, rows)} loading={tableLoading(loading)} columns={[
       { title: '团队', dataIndex: 'name' },
       { title: '成员与职责', render: (_, row) => row.members.map((m) => <div key={m.id}><Tag>{m.agent || m.name}</Tag>{m.role}{m.node_id && ` · ${m.online ? '在线' : '离线'}`}</div>) },
       { title: '队长', dataIndex: 'captain' },

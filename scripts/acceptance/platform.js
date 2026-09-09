@@ -155,7 +155,7 @@ async function main() {
   await page.screenshot({ path: path.join(root, 'project-latest-plan.png'), animations: 'disabled' });
   await page.locator('.ant-drawer-close').click();
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.locator('.fleet-nav-category').getByText('节点', { exact: true }).click();
+  await page.locator('.fleet-mobile-nav').getByText('节点', { exact: true }).click();
   await page.getByRole('combobox', { name: '页面导航' }).click();
   await page.locator('.ant-select-item-option-content').getByText('节点列表', { exact: true }).click();
   await page.getByText('node-a', { exact: true }).waitFor();
@@ -164,8 +164,10 @@ async function main() {
   await page.screenshot({ path: path.join(root, 'mobile-nodes.png'), animations: 'disabled' });
   await page.setViewportSize({ width: 1600, height: 1000 });
   await page.locator('.fleet-nav-category').getByText('Agent', { exact: true }).click();
+  await api('POST', '/api/teams', { name: 'acceptance-team', captain: 'captain',
+    members: [{ id: 'captain', agent: 'default', role: 'acceptance captain' }] });
   await page.getByRole('menuitem', { name: '团队组队' }).click();
-  await page.getByText('system', { exact: true }).waitFor();
+  await page.getByText('acceptance-team', { exact: true }).waitFor();
   await page.screenshot({ path: path.join(root, 'teams.png') });
   await page.getByRole('menuitem', { name: '大脑调度' }).click();
   await page.getByText('调度与绑定', { exact: true }).waitFor();
@@ -182,7 +184,7 @@ async function main() {
   ownerChild.kill('SIGKILL');
   await until(async () => ownerChild.signalCode === 'SIGKILL', 'Wasm owner process exits');
   const restarted = start('opencoder-agent', ownerChild.spawnargs.slice(1), ownerDir);
-  await until(async () => (await api('GET', '/api/nodes')).nodes.find((node) => node.id === owner.id)?.online, 'owner restarted');
+  await until(async () => (await api('GET', '/api/nodes')).nodes.some((node) => node.id === owner.id && node.online && node.snapshot.ready), 'owner restarted');
   assert.equal((await api('GET', '/api/executions/dag-crash')).execution.status, 'interrupted');
   const count = (await api('GET', '/api/executions')).executions.length;
   await stop(restarted);

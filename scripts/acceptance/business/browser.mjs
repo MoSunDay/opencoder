@@ -19,6 +19,9 @@ await context.addInitScript(value => {
 const page = await context.newPage();
 const errors = [];
 page.on('pageerror', error => errors.push(error.message));
+page.on('response', response => {
+  if (response.status() >= 400) errors.push(`${response.status()} ${new URL(response.url()).pathname}`);
+});
 const report = {};
 async function open(id) {
   await page.goto(server, { waitUntil: 'networkidle' });

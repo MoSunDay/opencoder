@@ -22,9 +22,9 @@ python3 scripts/acceptance/business/main.py \
 
 依赖准备继承已有 HTTP/HTTPS 代理设置，值只写入本次私有配置；实际测试阶段仍切断外部网络。
 
-`evidence/` 保留原目录前后清单、各仓 HEAD/status、排队状态、模型实际挂载、消息、带哈希的报告和下载截图。原目录有并发写入时如实列出差异，不回滚其他任务的内容。正常结束停止本次服务、卸载 NFS，保留 `runtime/` 中的数据库和证据；`--retain-on-failure` 仅供诊断，使用后必须显式停止服务。
+`evidence/` 保留原目录前后清单、各仓 HEAD/status、排队状态、模型实际挂载、消息、带哈希的报告和下载截图。原目录有并发写入时如实列出差异，不回滚其他任务的内容。正常结束停止本次服务、卸载 NFS，保留本次 `runtime/` 内的数据库、缓存和副本。`--retain-on-failure` 仅供诊断，使用后必须显式完成清理。
 
-完成诊断并保存证据后，可执行 `python3 scripts/acceptance/business/main.py --root <本次目录> --cleanup`。清理会核对服务归属并确认没有进程或挂载残留；不删除数据库或运行目录。
+完成诊断并保存证据后，可执行 `python3 scripts/acceptance/business/main.py --root <本次目录> --cleanup`。清理核对创建时记录的目录身份、服务归属、进程及打开的文件和各挂载命名空间，保留本次 runtime；缺少归属证明、目录被替换或仍被占用时报告失败。保留所有数据库和运行目录，完成的运行目录不能重用。
 
 本轮验证固定节点和 workspace 调度。runc 沙箱可迁移到其他合格节点的调度模式单独验收。
 

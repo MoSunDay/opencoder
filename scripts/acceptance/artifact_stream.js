@@ -17,6 +17,7 @@ let browser;
 let base;
 let page;
 let sampler;
+const failures = [];
 
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 async function until(check, label, timeout = 60_000) {
@@ -104,7 +105,12 @@ async function main() {
   const context = await browser.newContext({ acceptDownloads: true });
   page = await context.newPage();
   page.on('console', (message) => console.error(`browser ${message.type()}: ${message.text()}`));
+  page.on('pageerror', error => failures.push(error.message));
   page.on('response', async (response) => {
+    if (response.status() >= 400) {
+      const failure = `${response.status()} ${response.url()}`; failures.push(failure);
+      console.error(failure, await response.text());
+    }
     if (response.url().includes('__opencoder_download')) {
       console.error(`download response ${response.status()} ${response.url()}`, await response.allHeaders());
     }
@@ -158,6 +164,7 @@ async function main() {
   assert(peak - baseline < 32 * 1024 * 1024, `JS heap grew by ${peak - baseline} bytes`);
   assert.equal(await download.failure(), null);
   assert.equal(node.exitCode, null);
+  assert.deepEqual(failures, []);
   console.log(JSON.stringify({ result: 'PASS', bytes: fixtureBytes,
     max_js_heap_growth: peak - baseline, root }));
 }

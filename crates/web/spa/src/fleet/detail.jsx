@@ -70,10 +70,11 @@ export function ExecutionDetail({ id, summary, onClose, onNotice }) {
   }, [id, load]);
   const index = detail?.execution || summary || null;
   const kind = detail?.request?.kind || index?.kind;
+  const detailReady = detail?.execution?.id === id;
   const isProjectRun = kind === 'project' && id.startsWith('prun-');
-  const hasMessages = ['agent', 'maintenance', 'dag'].includes(kind) || (isProjectRun && !!detail?.run?.session_id);
+  const hasMessages = detailReady && (['agent', 'maintenance', 'dag'].includes(kind) || (isProjectRun && !!detail?.run?.session_id));
   useEffect(() => {
-    if (!id || !kind || isProjectRun || ['agent', 'maintenance'].includes(kind)) return undefined;
+    if (!detailReady || !id || !kind || isProjectRun || ['agent', 'maintenance', 'dag'].includes(kind)) return undefined;
     const stream = openStream({ path: `/api/executions/${encodeURIComponent(id)}/events`, after: 0, executionHistory: true,
       onFrame: (frame) => {
         setEvents((rows) => appendEvent(rows, frame));
@@ -83,7 +84,7 @@ export function ExecutionDetail({ id, summary, onClose, onNotice }) {
       onStatus: (status) => { if (status === 'failed') setError('节点事件流连接失败，可刷新重试'); },
     });
     return () => stream.abort();
-  }, [id, kind, isProjectRun, load]);
+  }, [id, kind, isProjectRun, detailReady, load]);
   const loadMessages = useCallback(async ({ reset = false, rewind = false, cursor = null, leading = new Uint8Array(), windowIndex = 0 } = {}) => {
     if (!id || !hasMessages) return;
     setMessagesBusy(true);
@@ -98,7 +99,7 @@ export function ExecutionDetail({ id, summary, onClose, onNotice }) {
     finally { setMessagesBusy(false); }
   }, [id, kind, hasMessages]);
   const live = useExecutionTranscript({
-    id, enabled: ['agent', 'maintenance', 'dag'].includes(kind), status: index?.status, revision,
+    id, enabled: detailReady && ['agent', 'maintenance', 'dag'].includes(kind), status: index?.status, revision,
     onFrame: (frame) => setEvents((rows) => appendEvent(rows, frame)),
     onSettled: () => { load(); if (messageWindow === 0) loadMessages({ reset: true }); },
     onError: setError,

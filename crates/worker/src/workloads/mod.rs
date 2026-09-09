@@ -17,7 +17,7 @@ pub(crate) async fn run(
     resume: bool,
 ) -> Result<(ExecutionStatus, Value)> {
     match record.assignment.request.kind {
-        ExecutionKind::Agent | ExecutionKind::Maintenance => {
+        ExecutionKind::Agent | ExecutionKind::Maintenance | ExecutionKind::Operator => {
             agent::run(worker, record, config, cancel, resume).await
         }
         ExecutionKind::Dag => dag::run(worker, record, config, cancel, resume).await,

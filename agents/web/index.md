@@ -12,7 +12,7 @@ axum HTTP/SSE 会话管理与编译期内嵌 SPA。
 - `src/handle.rs` — `SessionHandle` ring 缓冲+broadcast；`admit_and_drain_guarded`/`drain_to_completion`。
 - `src/handle_lifecycle.rs` — `lock_session_lifecycle` 复核同 handle，防锁旧对象。
 - `src/sse_dedup.rs` — `forward_live` live 去重与 pre-subscribe gap 桥接。
-- `src/auth_mw.rs` — 纯 Bearer；豁免 `/`、`/static/*`、`/api/time`、`/favicon.ico`；control 经 `#[path]` 复用。
+- `src/auth_mw.rs` — Bearer → Identity：seed token 常量时间比较或用户表 sha256 反查；`exempt` 豁免 `/`、`/static/*`、`/api/time` 等；control 经 `#[path]` 复用。
 - `src/html.rs` — SPA 产物 `include_bytes!` 内嵌，`/`+`/static/:name` 白名单。
 - `src/api_ops.rs`、`src/cmd.rs` — fork/compact/handoff/skill/config/bg；`DrainCmd` 通道。
 - `src/api_agents.rs`、`src/api_agent_resources.rs`、`src/api_agent_nfs.rs` — 版本化 agent 面 + NFS 导出。

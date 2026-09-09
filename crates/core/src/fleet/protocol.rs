@@ -20,6 +20,7 @@ pub enum ExecutionKind {
     Todos,
     Project,
     Maintenance,
+    Operator,
     System,
 }
 
@@ -32,6 +33,7 @@ impl ExecutionKind {
             Self::Todos => "todos",
             Self::Project => "project",
             Self::Maintenance => "maintenance",
+            Self::Operator => "operator",
             Self::System => "system",
         }
     }

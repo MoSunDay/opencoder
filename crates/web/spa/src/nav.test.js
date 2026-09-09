@@ -11,12 +11,16 @@ import {
   DEFAULT_PAGE,
   NAV_CATEGORIES,
   PAGE_META,
+  allowedPages,
   categoryHome,
   categoryOf,
+  menuItemsOf,
   menuKey,
   menuOf,
   pagesOf,
+  selectItemsOf,
   selectOptionsOf,
+  visibleCategories,
 } from './nav.js';
 
 // Flat {category, page, menu, icon} rows for table-driven assertions.
@@ -144,5 +148,34 @@ describe('CATEGORY_OPTIONS / PAGE_META coverage', () => {
       expect(String(meta.title).length).toBeGreaterThan(0);
       expect(String(meta.desc).length).toBeGreaterThan(0);
     }
+  });
+});
+
+describe('visibleCategories / allowedPages (permission view)', () => {
+  it('admin and the pre-probe null identity see the full IA', () => {
+    expect(visibleCategories(null)).toBe(NAV_CATEGORIES);
+    expect(visibleCategories({ name: 'boss', role: 'admin' })).toBe(NAV_CATEGORIES);
+    expect(allowedPages(null)).toEqual(ALL_PAGES);
+  });
+
+  it('non-admin keeps a single Agent category with only 全部执行', () => {
+    const visible = visibleCategories({ name: 'guest', role: 'user' });
+    expect(visible).toHaveLength(1);
+    expect(visible[0].key).toBe('agent');
+    expect(visible[0].label).toBe('Agent');
+    // 全部执行 item 与全量 IA 同一行（icon/menu 不漂移）。
+    const topics = NAV_CATEGORIES.find((c) => c.key === 'agent').items.find((i) => i.page === 'topics');
+    expect(visible[0].items).toEqual([topics]);
+    expect(allowedPages({ name: 'guest', role: 'user' })).toEqual(['topics']);
+  });
+
+  it('feeds the shell Menu/Select builders without dangling keys', () => {
+    const visible = visibleCategories({ name: 'guest', role: 'root' });
+    const menu = menuItemsOf(visible[0].items);
+    const select = selectItemsOf(visible[0].items);
+    expect(menu.map((i) => i.key)).toEqual(['topics']);
+    expect(menu[0].label).toBe('全部执行');
+    expect(isValidElement(menu[0].icon)).toBe(true);
+    expect(select).toEqual([{ value: 'topics', label: '全部执行' }]);
   });
 });

@@ -8,7 +8,7 @@ use super::team_runs::{CREATE_INDEX_TEAM_TOPIC_RUNS_TOPIC, CREATE_TEAM_TOPIC_RUN
 
 mod project_relations;
 
-const SCHEMA_VERSION: i64 = 23;
+const SCHEMA_VERSION: i64 = 24;
 
 // Order invariant: busy_timeout must precede any locking statement, and
 // synchronous=NORMAL must be applied BEFORE journal_mode=WAL. Switching a
@@ -212,6 +212,17 @@ CREATE TABLE IF NOT EXISTS brain_vectors (
   emb BLOB NOT NULL,
   updated_at INTEGER NOT NULL
 )";
+/// Platform users (v24): bearer identities beyond the seed admin token.
+/// Only sha256 hex digests are stored; the plaintext token is shown exactly
+/// once in the creation response and never persisted or logged.
+const CREATE_PLATFORM_USERS: &str = "\
+CREATE TABLE IF NOT EXISTS platform_users (
+  name        TEXT PRIMARY KEY,
+  token_hash  TEXT NOT NULL UNIQUE,
+  role        TEXT NOT NULL,
+  created_at  INTEGER NOT NULL
+)";
+
 /// Exemplar-input lookups are per-capability ordered scans; the index keeps
 /// the brain catalog's `get`/`list` reads off full table scans.
 const CREATE_INDEX_BRAIN_ENG_INPUTS: &str =
@@ -373,6 +384,7 @@ async fn bootstrap_tx(conn: &Connection) -> Result<()> {
     conn.execute(CREATE_DAG_RUNS, ()).await?;
     conn.execute(CREATE_DAG_EVENTS, ()).await?;
     conn.execute(CREATE_TEAM_TOPIC_RUNS, ()).await?;
+    conn.execute(CREATE_PLATFORM_USERS, ()).await?;
     conn.execute(CREATE_INDEX_MSG, ()).await?;
     conn.execute(CREATE_INDEX_IN, ()).await?;
     conn.execute(CREATE_INDEX_EV, ()).await?;
@@ -665,6 +677,11 @@ async fn migrate(conn: &Connection, from: i64) -> Result<()> {
         // the DDL.
         conn.execute(CREATE_NODES, ()).await?;
         conn.execute(CREATE_NODE_TASKS, ()).await?;
+    }
+    if from < 24 {
+        // v24: platform users. CREATE IF NOT EXISTS keeps this idempotent;
+        // no extra index needed (UNIQUE constraints carry the lookups).
+        conn.execute(CREATE_PLATFORM_USERS, ()).await?;
     }
     if from < 23 {
         project_relations::migrate(conn).await?;

@@ -4,7 +4,7 @@
 // agentDetail.jsx，不新增路由页。NFS 导出状态块在表下方。
 
 import {
-  Button, Form, Input, Modal, Popconfirm, Select, Space, Table, Tabs, Tag, Typography, message,
+  Button, Form, Input, Modal, Popconfirm, Select, Space, Table, Tabs, Tag, Typography,
 } from 'antd';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiDel, apiGet, apiPatch, apiPost } from './api.js';
@@ -13,17 +13,21 @@ import { AgentDetail } from './agentDetail.jsx';
 import { AgentNfsCard } from './agentNfsCard.jsx';
 import { ExecutionDetail } from './fleet/detail.jsx';
 import { err } from './notice.js';
+import { useMessage } from './ui/appMessage.js';
 import { newId, nodeOptions } from './fleet/model.js';
+import { OperatorPanel } from './operators/panel.jsx';
 import { PageShell } from './shell/pageShell.jsx';
 import { HarnessFields, parseEnvs } from './harness/fields.jsx';
 import { AgentHarnessSettings, HarnessManagement } from './harness/management.jsx';
 import { RunnerManagement } from './harness/runners.jsx';
+import { useStore } from './store.js';
 
 const { Text } = Typography;
 
 /// 新建 modal：name + 四类引用（可清空 ⇒ null）。409 重名等服务端
 /// error 经 onNotice 透出。
 function CreateAgentModal({ open, resources, onClose, onCreated, onNotice }) {
+  const msg = useMessage();
   const [form] = Form.useForm();
   const [saving, setSaving] = useState(false);
 
@@ -35,7 +39,7 @@ function CreateAgentModal({ open, resources, onClose, onCreated, onNotice }) {
         current[field] = values[field] || null;
       });
       await apiPost('/api/agents', { name: values.name, current, harness: values.harness || 'opencoder' });
-      message.success('已创建');
+      msg.success('已创建');
       form.resetFields();
       onCreated(values.name);
     } catch (e) {
@@ -72,8 +76,14 @@ function CreateAgentModal({ open, resources, onClose, onCreated, onNotice }) {
 }
 
 export function AgentsPanel({ onNotice }) {
+  // Operator 页签仅对 admin 显示入口（产品选择）；后端允许 user/root 提交
+  // operator 执行（见 users_api e2e），SPA 不在此重复拦截。
+  const { identity } = useStore();
   return <PageShell page="agents"><Tabs destroyOnHidden items={[
     { key: 'agents', label: 'Agent 列表', children: <AgentListPanel onNotice={onNotice} /> },
+    ...(identity?.role === 'admin' ? [
+      { key: 'operator', label: 'Operator', children: <OperatorPanel onNotice={onNotice} /> },
+    ] : []),
     { key: 'agent-harness', label: 'Agent Harness', children: <AgentHarnessSettings onNotice={onNotice} /> },
     { key: 'harnesses', label: 'Harness 管理', children: <HarnessManagement onNotice={onNotice} /> },
     { key: 'runners', label: 'Runner 管理', children: <RunnerManagement onNotice={onNotice} /> },
@@ -82,6 +92,7 @@ export function AgentsPanel({ onNotice }) {
 }
 
 function AgentListPanel({ onNotice }) {
+  const msg = useMessage();
   const [agents, setAgents] = useState([]);
   const [active, setActive] = useState(null);
   const [resources, setResources] = useState({ prompts: [], skills: [], tools: [], memory: [] });
@@ -130,7 +141,7 @@ function AgentListPanel({ onNotice }) {
     try {
       const j = await apiPatch('/api/agents/active', { active: value || null });
       setActive((j && j.active) || null);
-      message.success(value ? `已激活 ${value}` : '已恢复默认链');
+      msg.success(value ? `已激活 ${value}` : '已恢复默认链');
       load();
     } catch (e) {
       onNotice(err('切换生效 agent 失败: ' + (e && e.message)));
@@ -141,7 +152,7 @@ function AgentListPanel({ onNotice }) {
   const remove = async (name) => {
     try {
       await apiDel(`/api/agents/${encodeURIComponent(name)}`);
-      message.success('已删除');
+      msg.success('已删除');
       load();
     } catch (e) {
       onNotice(err('删除 agent 失败: ' + (e && e.message)));

@@ -14,7 +14,7 @@ Commit: b465f440381bd009dc9bd3a8192ad88eab44cede
 - `crates/worker/src/operations/query/runner.rs` — Runner 阶段/verdict/投递状态
 - `crates/worker/src/operations/project_admission/` — Plan/Execute 独立 run ID
 - `crates/worker/src/operations/maintenance.rs` — 维护工具；configure_scheduling
-- `crates/worker/src/workloads/` — agent/team/dag/todos/project 适配器
+- `crates/worker/src/workloads/` — agent/team/dag/todos/project 适配器；operator 复用 agent 循环（宿主机进程直跑，无 runc/无 node_maintenance）
 - `crates/worker/src/runtime/scheduling.rs` — scheduling.json 持久化并发/队列序
 - `crates/worker/src/state.rs` — runtime.db；节点 ID 持久化、目录锁
 - `crates/worker/src/layout.rs` — `<kind>/<id>/execution.json` 布局
@@ -26,6 +26,7 @@ Commit: b465f440381bd009dc9bd3a8192ad88eab44cede
 ## 边界
 
 - 运行不依赖 WebSocket 存活；重启后 interrupted 需显式 resume。
+- `layout::ALL_KINDS` 必须覆盖全部有 kind 根目录的执行类型（含 operator）——漏一个即重启丢记录。
 - Node 不开放入站 HTTP：agent 复用 web session API 进程内调用。
 - system 团队执行已退役，create 直接拒绝。
 

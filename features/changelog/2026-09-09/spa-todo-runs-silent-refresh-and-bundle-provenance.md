@@ -64,7 +64,20 @@ Node 行为变化下失效（`recursive` 回 Dirent 而非 string、路径分隔
 
 修法：只在差异**局限于** `static/app.js` 时重建重试（最多 3 次构建），其余情况（`app.css`、
 `index.html`、`Only in` 多/少文件）立即判 DRIFT。真实的 `src` 改动会改变语义、每次构建都差异，
-所以重试只可能去掉假阳性，不可能掩盖漂移；失败时的 diff 输出限 40 行（压缩产物 diff 是 MB 级）。
+所以重试只可能去掉假阳性，不可能掩盖漂移；失败时的 diff 输出限 40 行、每行限 200 字符
+（压缩产物 diff 是 MB 级的单行，只限行数仍会倾倒上百 MB）。
+
+## 5. 上一节自己踩的坑：`head` 截断把判决吞掉（提交后验证时发现）
+
+`bc82d428` 里那段截断写作 `printf '%s\n' "$out" | head -40`。`head` 读满 40 行即退出，`printf`
+随即收到 SIGPIPE，`set -o pipefail` 把管道判为失败，`set -e` 于是在打印判决**之前**中止脚本：
+实测 `bc82d428` 干净 worktree 上（HEAD 的 `dist/` 相对 HEAD 的 `src/` 是陈旧产物，`app.css` 与
+`app.js` 同时差异，即评审说的"新克隆上误报 overflow"场景）退出码是 **141** 而不是 1，
+`spa dist: DRIFT detected — run scripts/build-spa.sh` 一行也没打出来。
+
+第 4 节的自测之所以没抓到：当时是往 `dist/static/app.css` **手工注入一行**，diff 只有几十行、
+塞得进管道缓冲区，`printf` 写完就退出，构不成 SIGPIPE。只有 MB 级的真实陈旧产物才会触发。
+改成 `cap_diff()`：`awk` 读完整条 stdin（不留人握着断管），在 awk 内部同时做行数与行宽截断。
 
 ## 测试覆盖
 
@@ -97,15 +110,22 @@ Node 行为变化下失效（`recursive` 回 Dirent 而非 string、路径分隔
 - `node scripts/acceptance/spa_responsive.js --drift ...` → `spa dist: no drift (build 1/3)` →
   `drift: OK` → exit 0；`--require-committed` → 打印溯源行后 exit 2
   （当前工作树：`dist differs from HEAD: 2 path(s), src differs from HEAD: 16 path(s)`）。
-- `bash scripts/check-spa-drift.sh` 三条路径：忠实 dist → `no drift (build 2/3)` exit 0
-  （旧脚本在此处即假报 DRIFT）；给 `dist/static/app.js` 注入一行 → 3 次构建全差异，exit 1；
-  给 `dist/static/app.css` 注入一行 → 首次构建即 exit 1（6.7s，不重试）。dist 已按 md5 复原。
+- `bash scripts/check-spa-drift.sh` 三条路径，均在 `bc82d428` 的独立 worktree 里跑（不碰并行会话
+  的在途源码）：
+  1. HEAD 陈旧 dist（`app.css`+`app.js` 同时差异，MB 级）→ 首次构建即 exit **1**，输出 4553 字节
+     / 47 行，末尾 `... diff truncated to 40 lines` 与 `DRIFT detected — run scripts/build-spa.sh`
+     判决齐全（`bc82d428` 的 `head` 版在此处是 exit 141 且无判决）；
+  2. worktree 内 `npm run build` 出忠实 dist → `no drift (build 1/3)` exit **0**；
+  3. 往 `src/main.jsx` 追加 `window.__ocDriftProbe = 1;`（真实语义改动、只动 `app.js`）→
+     `only static/app.js differs — rebuilding (1/3)`、`(2/3)` → `DRIFT detected — static/app.js
+     differs on all 3 builds` exit **1**，输出 1794 字节。重试路径确实拦不住真漂移。
+  worktree 已 `git worktree remove`，主树 dist/ 未被这些实验触碰。
 - `cargo build -p opencoder-web` → Finished（`dist/` 走 `include_bytes!` 内嵌，产物变化必须过构建）。
 - `cargo test -p opencoder-web` → **291 passed / 0 failed**（59 个测试二进制，EXIT=0）。该 crate 的
   `src/auth_mw.rs`、`src/lib.rs` 属并行会话在途改动，故数字是混合溯源；本轮零 Rust 变更，跑它只为
   确认重建后的 `dist/` 经 `include_bytes!` 内嵌后 HTTP/SSE 契约测试仍全绿。
 - 行数 gate：新增 `todoRunsPanel.dom.test.jsx` 247 行（≤400）；迭代中文件最大
-  `spa_responsive.js` 510 行、`todoRunsPanel.jsx` 326、`theme.test.js` 231、`check-spa-drift.sh` 68（均 ≤800）。
+  `spa_responsive.js` 510 行、`todoRunsPanel.jsx` 326、`theme.test.js` 231、`check-spa-drift.sh` 81（均 ≤800）。
   无 class、无新增依赖、无硬编码凭据。
 - 订正（评审 P2-2，rules/02 证据纪律）：7d873ea6 的 changelog 写「整改前基线 541 → 556」，
   暗示 +15 全属该轮；逐文件比对 `git show HEAD^/HEAD` 后该轮自身 `it(` 增量为 **+14**

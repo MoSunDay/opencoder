@@ -1,4 +1,4 @@
-Commit: (working-tree, 基于 9f39c6cb36fb511c1e3a921338f4f1c7dc36efa1)
+Commit: e7685686ee338523547283309670a13a4560dd00
 
 
 # Agent 调度平台
@@ -54,4 +54,6 @@ Web 的节点页支持负载与显式维护，并显示运行数/并发上限、
 
 业务任务的 jobId + attempt 固定关联执行 ID；不确定受理结果时对账同一尝试。只有平台完成且报告校验通过，业务接口才返回 done；回归 pass/block/inconclusive 与执行成功独立，报告投递也独立。已开始但没有有效完成收据的 Runner 不自动重跑，需显式业务重试；当前业务适配要求 API 与 Node 同机共享检查点。详见 [注册 Runner](../../docs/registered-runners.md)。
 
-固定节点的真实业务验收使用独立 workspace、缓存和数据库，原目录在执行命名空间内只读；结束后保留报告和审计，销毁运行副本。入口与依赖准备见 [独立副本验收](../../scripts/acceptance/business/README.md)。
+固定节点的真实业务验收使用独立 workspace、缓存和数据库，原目录在执行命名空间内只读。结束后保留报告和审计，默认保留运行数据；授权回收时显式使用 `--destroy-runtime`，归属或退出检查失败会报错。整体通过要求平台执行、有效业务结论和 Web 检查同时通过。
+
+runc 新任务未绑定节点时可在已准备相同运行时和模块的就绪节点之间调度；指定节点的任务在该节点容量不足时 pending，容量释放后继续执行。入口、证据和回收规则见 [独立副本验收](../../scripts/acceptance/business/README.md)。

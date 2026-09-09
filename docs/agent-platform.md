@@ -107,13 +107,13 @@ DAG 的非 Agent 步骤为 WebAssembly WASI 命令模块。默认 `sandbox: in_p
 
 ## 发布与回滚
 
-Fleet 协议 v6 要求 Server 与 Node 成套更新，旧版本连接会被拒绝。本轮不增加数据库表或环境变量；Harness 值复用私有定义库，队列和节点调度配置保存在 Node 数据目录。
+Fleet 协议 v7 要求 Server 与 Node 成套更新，旧版本连接会被拒绝。Harness 值复用私有定义库，队列和节点调度配置保存在 Node 数据目录。
 
 1. 在干净提交上运行 `scripts/platform/release/build.sh --output <新目录>`。脚本先验证 SPA 无漂移，再一次构建 `opencoder`、`opencoder-cli`、`opencoder-server`、`opencoder-agent`；四者的 `--build-info` 必须具有相同 commit、protocol 和 SPA digest，`manifest.json` 与 `SHA256SUMS` 绑定全部二进制。真实 dirty 工作树会被拒绝。
 2. 调用 `POST /api/admin/drain` 先持久冻结 Server 与当前在线 Node。最多观察 10 分钟让长任务自然完成；仍未完成的任务（包括尚未启动的 pending）逐条显式 interrupt，并等待 `GET /api/admin/drain` 返回 `control_drained=true`。取消后的执行不能恢复；interrupt 后只能在原 Node 显式恢复。30 秒只用于 interrupt/进程树清理，不能用作长任务的自然 drain 时限。
 3. 正常停止 Agent，再停止 Server。Agent 的本地 Frozen 状态跨重启保留；Server 也以 Frozen 重启。使用 `scripts/platform/backup.sh --server-data /var/lib/opencoder-server --node worker-a=/data00 --output <新备份目录>` 制作新备份；工具要求 Node 已停止、持有独占锁、所有执行收敛并对 SQLite 做一致性备份，不覆盖任何原目录。跨主机发布必须先按目标 inventory 在各主机停服并把这些本地目录提供给受控备份步骤，不能把本机演练当成跨机备份证据。
 4. 使用 `scripts/install.sh --bundle <bundle> --dest-dir /usr/local/bin --backup` 原子安装 manifest 声明的同一代二进制。先启动 Server，再启动 Agent；检查 manifest/build-info、目标 Node 清单、节点 ID、版本、资源挂载和 Ready。所有发布目标都到齐后调用 `DELETE /api/admin/drain`，它只复开当前在线且健康的节点；离线节点会明确列为未处理，不会伪装完成。
-5. 用普通 Agent、DAG、Team、TODO/Project 和大脑稳定 `request_id` 各走一条真实链路，并验证列表五字段、所属 Node 明细、控制动作、大字段分段和产物下载。在真实拓扑连续观察 2 小时：Server/Agent 无意外重启，目标 Node 全部 Ready，无新增认证、协议、存储或进程清理错误，无超过 60 秒仍未确认的 Pending，也无超过 30 秒仍未收敛的 interrupt。
+5. 用普通 Agent、DAG、Team、TODO/Project 和大脑稳定 `request_id` 各走一条真实链路，并验证列表五字段、所属 Node 明细、控制动作、大字段分段和产物下载。E2E 通过后核对当前服务健康：Server/Agent 无意外重启，目标 Node 全部 Ready，无新增认证、协议、存储或进程清理错误，无超过 60 秒仍未确认的 Pending，也无超过 30 秒仍未收敛的 interrupt。没有业务流量时，以 E2E 和服务健康完成发布验收，不额外等待固定观察时长；需要验证真实流量表现时再单独安排观察。
 6. 失败时立即重新冻结，不删除索引或执行数据。二进制回滚用 `scripts/platform/rollback.sh --bundle <上一代bundle> --dest-dir /usr/local/bin` 成套切换全部二进制；需要回滚数据时先用 `scripts/platform/restore.sh --backup <备份> --output <新的隔离目录>` 验证并恢复到新目录，按实际服务身份设置新恢复目录的 owner 和读写权限，再让 Server/各 Node 的 `--data-dir` 明确指向对应恢复目录。不得把旧二进制直接指向未经配套验证的新协议数据，也不得覆盖原数据目录。
 
 首次平台部署保留旧 CLI/daemon 目录；回退旧模式时仍使用其原目录，不能让旧版本读取新平台库。仓库内验收没有执行生产部署，也没有修改生产数据或凭据。实际主机地址、目标 inventory、内网证书路径、NFS 挂载和模型凭据引用是上线时必须填写的外部参数。

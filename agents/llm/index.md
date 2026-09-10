@@ -1,8 +1,8 @@
-Commit: b465f440381bd009dc9bd3a8192ad88eab44cede
+Commit: c36ac68df313ec108549ed5b95756eb37edf5f69
 
 # llm 模块
 
-OpenAI 兼容流式客户端 + ChatStream 抽象 + token 估算。
+OpenAI 兼容流式客户端（Chat Completions 与 Responses）+ ChatStream 抽象 + token 估算。
 
 ## 关键路径
 - `src/stream.rs` — `ChatStream` trait：`chat_stream -> Receiver<LlmEvent>`。
@@ -20,6 +20,8 @@ OpenAI 兼容流式客户端 + ChatStream 抽象 + token 估算。
 - `src/embed.rs` — POST /embeddings；`EMBED_MAX_ATTEMPTS=3`、每请求 60s 超时。
 - `src/embed.rs::embeddings_via` — 同步桥（block_in_place / 独立 runtime）。
 - `src/mock.rs` — `MockChatClient` FIFO 脚本回放 + 请求录制，零 token 接缝。
+
+`src/responses/` 负责 Responses 请求编码、output 状态回放及 SSE/JSON 解码；`src/client/` 按 provider 协议选择端点。Responses 的 reasoning、拒答、交错工具调用和终态校验均归一为 `LlmEvent`，未完成响应不会提交部分工具状态。
 
 ## 边界
 - 中途重试丢弃全部累积状态从头生成；持久化文本只来自单个 Completed 帧。

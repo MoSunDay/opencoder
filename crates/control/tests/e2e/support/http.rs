@@ -147,6 +147,29 @@ impl Harness {
         (status, parsed)
     }
 
+    /// `req` variant for positive-path dispatch tests: retries ONLY the
+    /// transient no-ready placement failure ([`TRANSIENT_NO_READY`]) until
+    /// the deadline, then returns the first other reply untouched. Opt-in
+    /// on purpose: genuine negative tests keep asserting the exact 503 via
+    /// [`Harness::req`].
+    pub async fn dispatch(
+        &self,
+        method: reqwest::Method,
+        path: &str,
+        body: Option<Value>,
+    ) -> (reqwest::StatusCode, Value) {
+        // 60s comfortably covers the 20s staleness window plus a few
+        // missed 5s heartbeat ticks under heavy parallel load.
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
+        loop {
+            let (status, parsed) = self.req(method.clone(), path, body.clone()).await;
+            if !transient_no_ready(status, &parsed) || tokio::time::Instant::now() >= deadline {
+                return (status, parsed);
+            }
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+    }
+
     pub async fn req_raw(
         &self,
         method: reqwest::Method,
@@ -217,4 +240,39 @@ impl Drop for Harness {
             task.abort();
         }
     }
+}
+
+/// Placement error the fleet gateway returns when no node is currently
+/// `online && ready` for the kind. Under heavy parallel load the 5s
+/// heartbeat can briefly miss the 20s staleness window, so even a
+/// scripted-ready node can answer this — transient by construction.
+pub const TRANSIENT_NO_READY: &str = "no ready online node can accept this execution";
+
+/// True when `(status, body)` is the transient no-ready placement failure.
+/// Pure predicate so the retry policy stays unit-testable.
+fn transient_no_ready(status: reqwest::StatusCode, body: &Value) -> bool {
+    status.as_u16() == 503 && body["error"].as_str() == Some(TRANSIENT_NO_READY)
+}
+
+#[test]
+fn transient_no_ready_matches_only_the_placement_503() {
+    let error = |msg: &str| json!({ "error": msg });
+    assert!(transient_no_ready(
+        reqwest::StatusCode::SERVICE_UNAVAILABLE,
+        &error(TRANSIENT_NO_READY)
+    ));
+    // Same status, different failure (e.g. settings snapshot): not transient.
+    assert!(!transient_no_ready(
+        reqwest::StatusCode::SERVICE_UNAVAILABLE,
+        &error("settings snapshot failed")
+    ));
+    // Success and error-shape-less bodies pass through untouched.
+    assert!(!transient_no_ready(
+        reqwest::StatusCode::ACCEPTED,
+        &json!({"workflow_id": "x"})
+    ));
+    assert!(!transient_no_ready(
+        reqwest::StatusCode::SERVICE_UNAVAILABLE,
+        &json!({})
+    ));
 }

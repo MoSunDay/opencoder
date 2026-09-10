@@ -13,6 +13,7 @@ Commit: b465f440381bd009dc9bd3a8192ad88eab44cede
 - crates/local/src/todos_cmd.rs — validate/run/resume/interrupt
 - crates/web/src/api_todo_runs.rs — 平台 TODO 运行接口
 - crates/web/src/api_todo_templates.rs — TODO 模板接口
+- crates/web/spa/src/todoEditor.jsx 与 src/todo/editor/ — SPA 模板编辑器（表单/画布/JSON 三态，画布可视化依赖）
 - crates/todos/tests/ — 门禁、中断恢复与降级测试
 
 ## 边界
@@ -22,6 +23,7 @@ Commit: b465f440381bd009dc9bd3a8192ad88eab44cede
 - Store 是权威数据，debug 投影可重建
 - 非 completed 终态退出非零；stdout 仅最终状态 JSON
 - validate 拒绝含 /、..、\0 的 todo id 与依赖环
+- SPA 画布编辑器的客户端校验是建议性镜像（crates/web/spa/src/todo/editor/specValidate.js），服务端 validate_spec 权威
 
 ## 相关
 

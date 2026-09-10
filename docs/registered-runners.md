@@ -13,7 +13,7 @@ Runner 是 DAG 的一种步骤。Server 管理命名 Codex 配置和运行入口
 {
   "name": "eval-diagnose",
   "steps": [{
-    "name": "workflow",
+    "name": "diagnose",
     "kind": {"type": "runner", "runner": "eval-diagnose", "agent": "eval-diagnose"},
     "timeout_secs": 3600
   }]
@@ -47,6 +47,6 @@ Codex 后续 JSONL 原样放入 `event`。每个 phase 必须收到完整 thread
 
 已校验完成的 Runner 可以重放完成收据；DAG 恢复时重新校验产物。只有 started 标记、没有完成收据的尝试不会隐式重跑，应通过业务任务重试接口创建新 attempt。Node 的最大并发数与 FIFO/LIFO 对 Runner 和其他执行统一生效。
 
-执行详情提供 runners（阶段、资源和配置版本、摘要、准出结论、文件清单）；`/api/executions/:id/messages` 可重放 DAG 消息，artifact 接口支持 `step=workflow&file=artifacts/<relative>`。业务适配器可通过 `annotate` 命令回写独立的报告投递状态。
+执行详情提供 runners（阶段、资源和配置版本、摘要、准出结论、文件清单）；`/api/executions/:id/messages` 可重放 DAG 消息，artifact 接口支持 `step=diagnose&file=artifacts/<relative>`。业务适配器可通过 `annotate` 命令回写独立的报告投递状态。
 
 协议版本为 7；Server 与 Node 一起升级。

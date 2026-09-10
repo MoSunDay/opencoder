@@ -13,8 +13,8 @@ Commit: b465f440381bd009dc9bd3a8192ad88eab44cede
 - `crates/control/src/api/compat/` — 旧 Chat/DAG/TODO/Project 兼容路由
 - `crates/control/src/api/settings/` — harness/codex 定义；registered 管 profile/runner
 - `crates/control/src/routes.rs` — /api/harnesses/codex/profiles、/api/runners
-- `crates/control/src/resource_scope.rs` — /api/agents* 绑定 Server 资源根
-- `crates/control/src/role_gate.rs` — 角色权限矩阵纯函数；layer 顺序 auth → role_gate → resource_scope
+- `crates/control/src/resource_scope.rs` — /api/agents* 绑定 Server 资源根；/api/dag/wasm* 复用共享中间件 `api_dag_wasm_nfs::configured_dag_wasm`
+- `crates/control/src/role_gate.rs` — 角色权限矩阵纯函数；layer 顺序 auth → role_gate → resource_scope；/api/dag/wasm* 非 admin 只读
 - `crates/control/src/api/users.rs` — /api/me、/api/users CRUD；token 一次性明文、自删/末位 admin 保护
 - `crates/core/src/fleet/protocol.rs` — PROTOCOL_VERSION=8；ExecutionIndex 五字段
 - `crates/control/tests/e2e/` — e2e：真实 build_app + 脚本化 WS 节点

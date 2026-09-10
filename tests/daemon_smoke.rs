@@ -11,6 +11,10 @@
 //! process verbs — `server`/`client`/`node` are deleted, and spawning one
 //! would not even error (clap would read it as a free-form prompt and launch
 //! a live agent), so nothing here ever spawns them.
+//!
+//! Prerequisite: the sibling fleet binaries must exist in this test
+//! binary's directory — see `support::FLEET_BINS_HINT` (`cargo build
+//! --workspace --bins`, or run the workspace regression as a whole).
 
 mod support;
 

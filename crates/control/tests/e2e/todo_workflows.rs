@@ -231,7 +231,7 @@ async fn template_dispatch_creates_todos_execution() {
     assert_eq!(status, 200);
 
     let (status, body) = h
-        .req(
+        .dispatch(
             Method::POST,
             "/api/todo/templates/demo/v1/run",
             Some(json!({"id": "todos-run-1"})),
@@ -483,7 +483,7 @@ async fn dispatch_pins_env_and_reaches_node() {
     assert_eq!(s, 200);
 
     let (s, b) = h
-        .req(
+        .dispatch(
             Method::POST,
             "/api/todo/templates/envrun/v1/run",
             Some(json!({"id": "todos-envrun-1"})),
@@ -569,4 +569,62 @@ async fn dispatch_rejects_missing_env_tool_and_tampered_spec() {
     assert_eq!(s, 400, "{b}");
     assert!(err_of(&b).contains("template:"), "{b}");
     assert!(!h.node.journal_ids().contains(&"todos-tamper-1".to_string()));
+}
+
+/// Regression for the load-observed flake: a scripted-ready node can
+/// transiently answer the placement 503 when the heartbeat misses the
+/// staleness window under heavy parallel load. `Harness::dispatch` must
+/// absorb the transient failure and still land the 202 once the node
+/// reports ready again.
+#[tokio::test]
+async fn dispatch_retries_transient_no_ready_node() {
+    let _guard = scoped().await;
+    let h = Harness::new().await;
+    let (status, _) = h
+        .req(
+            Method::POST,
+            "/api/todo/templates",
+            Some(json!({"name": "demo", "spec": spec("demo")})),
+        )
+        .await;
+    assert_eq!(status, 200);
+
+    // Force the node to report not-ready and wait for the fleet view to
+    // reflect it (bounded by the heartbeat tick), so the first dispatch
+    // really hits the no-ready gate instead of racing past it.
+    h.node.set_snapshot_opts(None, Some(false));
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(20);
+    while h
+        .state
+        .hub
+        .views()
+        .await
+        .iter()
+        .all(|n| n.snapshot.as_ref().is_some_and(|s| s.ready))
+    {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "not-ready snapshot never propagated"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+
+    // Flip back to ready shortly after the first 503; the retry loop must
+    // absorb the window and return the eventual 202.
+    let node = h.node.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        node.set_snapshot_opts(None, None);
+    });
+
+    let (status, body) = h
+        .dispatch(
+            Method::POST,
+            "/api/todo/templates/demo/v1/run",
+            Some(json!({"id": "todos-flake-1"})),
+        )
+        .await;
+    assert_eq!(status, 202, "{body}");
+    assert_eq!(body["workflow_id"], json!("todos-flake-1"), "{body}");
+    assert!(h.node.journal_ids().contains(&"todos-flake-1".to_string()));
 }

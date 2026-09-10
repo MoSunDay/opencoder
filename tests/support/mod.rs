@@ -2,7 +2,24 @@
 //! workspace-sibling fleet binaries (`opencoder-server`, `opencoder-agent`)
 //! from the same target dir as this package's own `opencoder` binary.
 
+//! # Prerequisite
+//!
+//! The fleet smokes in this package spawn the split server/agent binaries,
+//! which only exist in the shared target dir after a workspace build. Run
+//! what [`FLEET_BINS_HINT`] says before `cargo test -p opencoder`, or
+//! simply use `cargo test --workspace` (it builds every member binary
+//! first). A missing sibling fails fast via [`sibling_bin`] with the same
+//! hint.
+
 use std::path::PathBuf;
+
+/// Remediation when no fleet sibling binary is found. A fixture-level
+/// constant (not inline panic text) so the prerequisite stays single-source
+/// and reusable by any future preflight.
+pub const FLEET_BINS_HINT: &str = "build the workspace binaries first: \
+     `cargo build --workspace --bins` (fleet e2e smokes need the split \
+     opencode-server/opencode-agent binaries; `cargo test -p opencode` \
+     alone does not build them)";
 
 /// Candidate names for the fleet server binary, in priority order (see
 /// [`sibling_bin`] for why there is more than one).
@@ -43,10 +60,7 @@ pub fn sibling_bin(candidates: &[&str]) -> PathBuf {
         }
     }
     panic!(
-        "none of {candidates:?} found in {} — build the workspace binaries first: \
-         `cargo build --workspace --bins` (fleet e2e smokes need the split \
-         opencoder-server/opencoder-agent binaries; `cargo test -p opencoder` \
-         alone does not build them)",
+        "none of {candidates:?} found in {} — {FLEET_BINS_HINT}",
         dir.display()
     );
 }

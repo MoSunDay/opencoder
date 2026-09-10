@@ -1,4 +1,4 @@
-Commit: b465f440381bd009dc9bd3a8192ad88eab44cede
+Commit: c36ac68df313ec108549ed5b95756eb37edf5f69
 
 # core 模块
 
@@ -26,6 +26,8 @@ Commit: b465f440381bd009dc9bd3a8192ad88eab44cede
 - `src/fleet/{queue,scheduling}.rs` — FIFO/LIFO 排序与纯 CPU 节点选择。
 - `src/share_fs.rs` — NFS 兼容共享树布局（todo/env/agent/tools）。
 - `src/sse.rs` — `SseEvt` 服务端 SSE 事件类型。
+
+Provider 配置在 `src/config/provider.rs` 声明 `chat_completions`（默认）与 `responses` 协议；`Message.provider_state` 保存 Responses 续聊所需的 provider、模型和有序 output，凭据不落库。
 
 ## 边界
 - 域文件项目层存在即整体遮蔽外层，不逐键合并、不查 XDG。

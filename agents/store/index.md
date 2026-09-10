@@ -1,4 +1,4 @@
-Commit: b465f440381bd009dc9bd3a8192ad88eab44cede
+Commit: c36ac68df313ec108549ed5b95756eb37edf5f69
 
 # store 模块
 
@@ -23,6 +23,8 @@ Commit: b465f440381bd009dc9bd3a8192ad88eab44cede
 - `src/bundle.rs` — Session 树二进制导出/导入。
 - `src/{types,todo_types,team_types,brain_types}.rs` — 各面记录类型。
 - `src/ts_registry.rs` — tmux 会话索引 `ts.db`，不含会话内容。
+
+消息表的 `provider_state_json` 为 nullable，保存 Responses 原始 output、phase、call id 与密文推理状态；旧消息仍按 NULL 兼容读取，bundle 导出/导入保留该字段。
 
 ## 边界
 - 平台库分立：control.db / definitions.db（Server）、runtime.db（Node）。

@@ -217,6 +217,9 @@ pub async fn serve(
 /// auth on every route (production); `token = None` skips the middleware (used
 /// by tests that build their own router with an injected `MockChatClient`).
 pub fn build_app(state: Arc<AppState>, token: Option<String>, web: bool) -> axum::Router {
+    // Captured before the builder chain consumes `state`: the bearer
+    // middleware resolves platform users through the same store.
+    let auth_store = state.store.clone();
     let mut app = Router::<Arc<AppState>>::new();
     if web {
         app = app
@@ -515,8 +518,11 @@ pub fn build_app(state: Arc<AppState>, token: Option<String>, web: bool) -> axum
         // Unauthenticated compatibility/readiness time endpoint.
         .route("/api/time", get(auth_mw::server_time))
         .with_state(state);
+    // Captured before `with_state` consumes the Arc: the bearer middleware
+    // resolves platform users through the same store.
+
     if let Some(t) = token {
-        let auth = std::sync::Arc::new(auth_mw::AuthState::new(t));
+        let auth = std::sync::Arc::new(auth_mw::AuthState::new(t, auth_store));
         app = app.layer(axum::middleware::from_fn_with_state(
             Some(auth),
             auth_mw::require_bearer,

@@ -46,8 +46,8 @@ pub(super) async fn launch_locked(
         .assignment
         .index
         .status;
-    if !crate::lifecycle::can_launch(status, resume)
-        && !(status == ExecutionStatus::Pending && record.queue.is_some())
+    if !(crate::lifecycle::can_launch(status, resume)
+        || status == ExecutionStatus::Pending && record.queue.is_some())
     {
         return Ok(LaunchOutcome::NotRunnable(status));
     }

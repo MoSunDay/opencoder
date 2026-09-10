@@ -60,11 +60,12 @@ const jsonResponse = (body, status = 200) => Promise.resolve({
 const installFetchRouter = ({ rejectToken, failNodes, withGoal } = {}) => {
   vi.stubGlobal('fetch', vi.fn((input, init) => {
     const url = typeof input === 'string' ? input : String((input && input.url) || '');
+    const bearer = String((init && init.headers && init.headers.Authorization) || '');
+    if (rejectToken && bearer === 'Bearer ' + rejectToken) {
+      // Any protected surface (nodes fetch, /api/me identity probe) rejects.
+      return jsonResponse({ error: 'unauthorized' }, 401);
+    }
     if (url.includes('/api/nodes')) {
-      const bearer = String((init && init.headers && init.headers.Authorization) || '');
-      if (rejectToken && bearer === 'Bearer ' + rejectToken) {
-        return jsonResponse({ error: 'unauthorized' }, 401);
-      }
       if (failNodes) {
         return jsonResponse({ error: '节点服务不可用' }, 500);
       }
@@ -72,6 +73,9 @@ const installFetchRouter = ({ rejectToken, failNodes, withGoal } = {}) => {
     }
     if (url.includes('/api/sessions')) {
       return jsonResponse({ sessions: [] });
+    }
+    if (url.includes('/api/me')) {
+      return jsonResponse({ name: 'smoke', role: 'admin' });
     }
     if (withGoal && url.includes('/api/project/overview')) {
       // Seed one active goal: GoalsTab's EMPTY branch carries no MdEditModal,
@@ -130,7 +134,7 @@ describe('App shell landmarks (antd 6 under jsdom)', () => {
   it('notifies the app to clear stale request errors after a successful login', async () => {
     const onConnected = vi.fn();
     render(<LoginModal open onConnected={onConnected} />);
-    fireEvent.change(screen.getByLabelText('共享密钥 (Token)'), {
+    fireEvent.change(screen.getByLabelText('访问令牌 (Token)'), {
       target: { value: 'correct-token' },
     });
     fireEvent.click(screen.getByRole('button', { name: /连\s*接/ }));
@@ -187,8 +191,9 @@ describe('App shell landmarks (antd 6 under jsdom)', () => {
     render(<App />);
     expect(await screen.findByText('Opencoder Fleet · 登录')).toBeTruthy();
     // The 401 cleared the token but must not wipe the link-delivered base:
-    // the reopened modal still points at the fleet the link named.
-    await waitFor(() => expect(screen.getByLabelText('服务器地址').value).toBe('http://fleet2.example.com'));
+    // login is token-only now (no 服务器地址 field), so the surviving base is
+    // the store/localStorage one the next probe reuses.
+    expect(screen.queryByLabelText('服务器地址')).toBeNull();
     expect(getState().base).toBe('http://fleet2.example.com');
     expect(localStorage.getItem('oc_base')).toBe('http://fleet2.example.com');
   });
@@ -208,6 +213,28 @@ describe('App shell landmarks (antd 6 under jsdom)', () => {
     expect(embeddedBase()).toBe('https://fleet.example.com');
     vi.stubEnv('VITE_OC_BASE', '');
     expect(embeddedBase()).toBe('');
+  });
+
+  it('re-probes /api/me on refresh and restores the admin identity', async () => {
+    // A page reload (or a ?token= link login) restores the token but not the
+    // identity — the store never persists /api/me. The shell must probe on
+    // mount so the badge, admin entry, and admin nav come back by themselves.
+    setCredentials('smoke-token', '');
+    render(<App />);
+    expect(await screen.findByText('smoke · 管理员')).toBeTruthy();
+    expect(await screen.findByRole('button', { name: '后台管理' })).toBeTruthy();
+    expect(getState().identity).toEqual({ name: 'smoke', role: 'admin' });
+    // No login modal: the stored credential was accepted.
+    expect(screen.queryByText('Opencoder Fleet · 登录')).toBeNull();
+  });
+
+  it('drops a stored token the refresh probe rejects (401) back to the login modal', async () => {
+    installFetchRouter({ rejectToken: 'stale-token' });
+    setCredentials('stale-token', '');
+    render(<App />);
+    expect(await screen.findByText('Opencoder Fleet · 登录')).toBeTruthy();
+    expect(localStorage.getItem('oc_token')).toBeNull();
+    expect(getState().identity).toBeNull();
   });
 
   it('shows the empty fleet table on the nodes page', async () => {

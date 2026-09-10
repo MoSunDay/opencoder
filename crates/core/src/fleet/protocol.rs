@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 // v7 pins named Harness profiles and registered binary Runner definitions.
-pub const PROTOCOL_VERSION: u32 = 7;
+pub const PROTOCOL_VERSION: u32 = 8;
 pub const HEARTBEAT_MS: u64 = 5_000;
 pub const STALE_MS: i64 = 20_000;
 pub const MAX_FRAME_BYTES: usize = 2 * 1024 * 1024;
@@ -20,6 +20,7 @@ pub enum ExecutionKind {
     Todos,
     Project,
     Maintenance,
+    Operator,
     System,
 }
 
@@ -32,6 +33,7 @@ impl ExecutionKind {
             Self::Todos => "todos",
             Self::Project => "project",
             Self::Maintenance => "maintenance",
+            Self::Operator => "operator",
             Self::System => "system",
         }
     }
@@ -243,6 +245,11 @@ pub enum NodeOperation {
         execution: ExecutionRef,
         #[serde(default)]
         after_turn: u32,
+    },
+    DagSteps {
+        execution: ExecutionRef,
+        #[serde(default)]
+        step: Option<String>,
     },
     Artifact {
         request: ArtifactRequest,

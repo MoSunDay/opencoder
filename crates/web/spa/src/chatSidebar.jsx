@@ -24,7 +24,7 @@ export function DialogSidebar({
         display: 'flex',
         flexDirection: 'column',
         minHeight: 0,
-        borderRight: '1px solid #f0f0f0',
+        borderRight: '1px solid var(--oc-border)',
         paddingRight: 12,
       }}
     >

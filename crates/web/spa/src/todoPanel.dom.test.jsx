@@ -128,7 +128,8 @@ describe('TodoRunsPanel 执行控制', () => {
   it('保留中断、取消与节点执行详情的独立语义', async () => {
     render(<TodoRunsPanel onNotice={vi.fn()} />);
     await screen.findByText(/todos-1/);
-    fireEvent.click(document.querySelector('tbody tr'));
+    // scroll.x 打开后 tbody 首行是 aria-hidden 的 measure-row，取数据行要带类名。
+    fireEvent.click(document.querySelector('tbody tr.ant-table-row'));
     fireEvent.click(await screen.findByText('中断（可恢复）'));
     await waitFor(() => expect(apiPostMock).toHaveBeenCalledWith('/api/todo/workflows/todos-1/interrupt', {}));
     fireEvent.click(screen.getByText('取消（终止）'));

@@ -4,15 +4,18 @@
 // 根只读，宿主机挂载后即可浏览四类资源池。错误经 onNotice 透出服务端
 // `error` 字段（apiJson 已并入）。
 
-import { Button, Descriptions, Space, Switch, Tag, Typography, message } from 'antd';
+import { Button, Descriptions, Space, Switch, Tag, Typography } from 'antd';
 import { useCallback, useEffect, useState } from 'react';
 import { apiGet, apiPost } from './api.js';
 import { mountHint } from './agentsItems.js';
 import { err } from './notice.js';
+import { useMessage } from './ui/appMessage.js';
+import { MONO_VAR } from './ui/mono.js';
 
 const { Paragraph, Text } = Typography;
 
 export function AgentNfsCard({ onNotice }) {
+  const msg = useMessage();
   const [status, setStatus] = useState(null);
   const [loading, setLoading] = useState(true);
   const [switching, setSwitching] = useState(false);
@@ -40,7 +43,7 @@ export function AgentNfsCard({ onNotice }) {
     try {
       const j = await apiPost('/api/agents/nfs', { enabled });
       setStatus((j && j.status) || null);
-      message.success(enabled ? 'NFS 导出已启动' : 'NFS 导出已停止');
+      msg.success(enabled ? 'NFS 导出已启动' : 'NFS 导出已停止');
     } catch (e) {
       if (onNotice) {
         onNotice(err('切换 NFS 失败: ' + (e && e.message)));
@@ -66,16 +69,18 @@ export function AgentNfsCard({ onNotice }) {
       </Space>
       {loading ? <Text type="secondary">加载中…</Text> : (
         <>
-          <Descriptions size="small" column={4} bordered>
-            <Descriptions.Item label="地址" aria-label="nfs-addr">{s.running ? `${s.host}:${s.port}` : '-'}</Descriptions.Item>
-            <Descriptions.Item label="只读">{s.read_only ? '是' : '否'}</Descriptions.Item>
-            <Descriptions.Item label="导出根" span={2}>{s.export_root || '-'}</Descriptions.Item>
-          </Descriptions>
+          {/* antd 6 只把 items 里的已知键（label/children/span/…）投给单元格，
+              多余 props 会被丢掉 —— aria-label 只能挂在内容上（span 包一层）。 */}
+          <Descriptions size="small" column={4} bordered items={[
+            { key: 'addr', label: '地址', children: <span aria-label="nfs-addr">{s.running ? `${s.host}:${s.port}` : '-'}</span> },
+            { key: 'read_only', label: '只读', children: s.read_only ? '是' : '否' },
+            { key: 'export_root', label: '导出根', span: 2, children: s.export_root || '-' },
+          ]} />
           {s.running ? (
             <div style={{ marginTop: 8 }}>
               <Text type="secondary" style={{ fontSize: 12 }}>宿主机挂载：</Text>
               <Paragraph copyable style={{ marginBottom: 0 }}>
-                <code aria-label="nfs-mount-hint">{mountHint(s)}</code>
+                <code aria-label="nfs-mount-hint" style={{ fontFamily: MONO_VAR }}>{mountHint(s)}</code>
               </Paragraph>
             </div>
           ) : null}

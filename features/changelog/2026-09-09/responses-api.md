@@ -1,4 +1,4 @@
-Commit: (working-tree, 基于 0a502305e42a390ba5949ca66211d2d2816512ba)
+Commit: 1679f6ebe271f1182e26762e004d02331ec2b304
 
 # Responses API 编码工作流
 

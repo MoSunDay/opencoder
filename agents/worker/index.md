@@ -15,6 +15,7 @@ Commit: b465f440381bd009dc9bd3a8192ad88eab44cede
 - `crates/worker/src/operations/query/runner.rs` — Runner 阶段/verdict/投递状态
 - `crates/worker/src/operations/project_admission/` — Plan/Execute 独立 run ID
 - `crates/worker/src/operations/maintenance.rs` — 维护工具；configure_scheduling
+- `crates/worker/src/dag_wasm_pin.rs` — DAG wasm 模块受理冻结：池 → sha256 校验 → `_modules/` staging+rename
 - `crates/worker/src/workloads/` — agent/team/dag/todos/project 适配器；operator 复用 agent 循环（宿主机进程直跑，无 runc/无 node_maintenance）
 - `crates/worker/src/runtime/scheduling.rs` — scheduling.json 持久化并发/队列序
 - `crates/worker/src/state.rs` — runtime.db；节点 ID 持久化、目录锁

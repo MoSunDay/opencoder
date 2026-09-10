@@ -17,3 +17,4 @@ Commit: b465f440381bd009dc9bd3a8192ad88eab44cede
 
 ## 相关
 - [agents/dag-runtime](../dag-runtime/index.md) — 节点执行方。
+- [agents/dag-wasm](../dag-wasm/index.md) — wasm 模块版本池：发布/NFS 导出/节点冻结分发。

@@ -16,6 +16,7 @@ axum HTTP/SSE 会话管理与编译期内嵌 SPA。
 - `src/html.rs` — SPA 产物 `include_bytes!` 内嵌，`/`+`/static/:name` 白名单。
 - `src/api_ops.rs`、`src/cmd.rs` — fork/compact/handoff/skill/config/bg；`DrainCmd` 通道。
 - `src/api_agents.rs`、`src/api_agent_resources.rs`、`src/api_agent_nfs.rs` — 版本化 agent 面 + NFS 导出。
+- `src/api_dag_wasm.rs`、`src/api_dag_wasm_nfs.rs`、`src/nfs_exports.rs` — DAG wasm 模块池 API + 命名多 NFS 导出（agents/dag-wasm 两路）。
 - `src/api_inputs.rs`、`src/api_envs.rs` — 输入列表/删除/reorder；环境 CRUD 扇出 ReloadConfig。
 - `src/api_questions.rs`、`src/handle_questions.rs` — question answer/skip 闭环。
 - `src/api_subagents.rs` — 子代理任务列表；`DELETE /api/sessions?keep=` clear-all。

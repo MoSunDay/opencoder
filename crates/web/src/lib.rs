@@ -5,6 +5,8 @@ pub mod api_agents;
 pub mod api_brain;
 pub mod api_control;
 pub mod api_dag;
+pub mod api_dag_wasm;
+pub mod api_dag_wasm_nfs;
 pub mod api_envs;
 pub mod api_events;
 pub mod api_inputs;
@@ -34,6 +36,7 @@ pub mod handle;
 mod handle_lifecycle;
 mod handle_questions;
 pub mod html;
+pub mod nfs_exports;
 pub mod nodes_state;
 pub mod sse_dag;
 pub mod sse_dedup;
@@ -186,6 +189,8 @@ pub async fn serve(
     // `agent.nfs.enabled`) before the HTTP listener binds, so the API is
     // live from the first request. Failures only log — never fatal.
     api_agent_nfs::autostart(&workdir).await;
+    // Second named export: the DAG wasm pool (`dag.nfs.enabled`).
+    api_dag_wasm_nfs::autostart(&workdir).await;
 
     let app = build_app(state, Some(token), web);
 
@@ -214,6 +219,9 @@ pub fn build_app(state: Arc<AppState>, token: Option<String>, web: bool) -> axum
     // Captured before the builder chain consumes `state`: the bearer
     // middleware resolves platform users through the same store.
     let auth_store = state.store.clone();
+    // Captured before `with_state` consumes the Arc: the DAG wasm pool
+    // scope middleware resolves the pool root from the same workdir.
+    let scope_state = state.clone();
     let mut app = Router::<Arc<AppState>>::new();
     if web {
         app = app
@@ -497,6 +505,26 @@ pub fn build_app(state: Arc<AppState>, token: Option<String>, web: bool) -> axum
         .route("/api/dag/runs/:id", get(api_dag::get_run))
         .route("/api/dag/runs/:id/cancel", post(api_dag::cancel_run))
         .route("/api/dag/runs/:id/events", get(sse_dag::get_dag_run_events))
+        // ── DAG wasm-module pool (versioned, NFS-exported) ────────────
+        .route(
+            "/api/dag/wasm",
+            get(api_dag_wasm::list).post(api_dag_wasm::create),
+        )
+        .route(
+            "/api/dag/wasm/nfs",
+            get(api_dag_wasm_nfs::nfs_get).post(api_dag_wasm_nfs::nfs_post),
+        )
+        .route(
+            "/api/dag/wasm/:name",
+            get(api_dag_wasm::get)
+                .put(api_dag_wasm::put_version)
+                .delete(api_dag_wasm::delete),
+        )
+        .route("/api/dag/wasm/:name/rollback", post(api_dag_wasm::rollback))
+        .route(
+            "/api/dag/wasm/:name/versions/:v/wasm.bin",
+            get(api_dag_wasm::download),
+        )
         .route("/api/nodes/dag/claim", get(api_nodes_dag::claim))
         .route(
             "/api/nodes/dag/runs/:rid/events",
@@ -514,6 +542,16 @@ pub fn build_app(state: Arc<AppState>, token: Option<String>, web: bool) -> axum
         .with_state(state);
     // Captured before `with_state` consumes the Arc: the bearer middleware
     // resolves platform users through the same store.
+
+    // DAG wasm pool scope: inject the resolved pool root (config
+    // `dag.wasm_dir` or the per-workdir data-dir default; an existing
+    // scope/override wins) into every /api/dag/wasm* request. Added
+    // BEFORE the bearer layer below, so it runs INSIDE it (layers added
+    // later wrap the earlier ones).
+    app = app.layer(axum::middleware::from_fn_with_state(
+        scope_state,
+        api_dag_wasm_nfs::configured_dag_wasm,
+    ));
 
     if let Some(t) = token {
         let auth = std::sync::Arc::new(auth_mw::AuthState::new(t, auth_store));

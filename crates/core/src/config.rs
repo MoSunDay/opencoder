@@ -8,6 +8,7 @@ mod agent;
 mod autopilot;
 mod cli;
 mod compaction;
+mod dag;
 mod domain;
 pub(crate) mod env;
 pub mod envs;
@@ -27,6 +28,7 @@ pub use agent::{AgentDefaults, AgentNfsConfig, ToolsScope};
 pub use autopilot::{ApMode, AutoPilotConfig};
 pub use cli::{CliConfig, InjectionTarget};
 pub use compaction::{CompactionConfig, OutputStreamlineConfig};
+pub use dag::DagConfig;
 pub use env::{looks_like_env_var, scoped_config_home, ScopedConfigHome};
 pub use envs::{
     active_env, create_env, delete_env, env_dir, envs_home, list_envs, recapture_env,
@@ -76,6 +78,9 @@ pub struct Config {
     pub embedding_provider: Option<String>,
     #[serde(default)]
     pub agent: AgentDefaults,
+    /// DAG wasm-module pool + NFS export knobs.
+    #[serde(default)]
+    pub dag: DagConfig,
     #[serde(default)]
     pub compaction: CompactionConfig,
     /// Per-message assistant-output streamlining (deterministic, meaning-
@@ -265,6 +270,7 @@ impl Default for Config {
             embedding_model: None,
             embedding_provider: None,
             agent: AgentDefaults::default(),
+            dag: DagConfig::default(),
             compaction: CompactionConfig::default(),
             output_streamline: OutputStreamlineConfig::default(),
             context_limit: None,

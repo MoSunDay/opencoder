@@ -300,6 +300,19 @@ pub(super) fn merge_into(cfg: &mut Config, value: serde_json::Value) {
                 }
             }
         }
+        // DAG block mirrors the agent one: `wasm_dir` + a partial `nfs`
+        // object whose serde defaults fill the rest
+        // (`{"dag":{"nfs":{"port":0}}}` only overrides the port).
+        if let Some(d) = obj.get("dag").and_then(|v| v.as_object()) {
+            if let Some(dir) = d.get("wasm_dir").and_then(|v| v.as_str()) {
+                cfg.dag.wasm_dir = Some(std::path::PathBuf::from(dir));
+            }
+            if let Some(n) = d.get("nfs") {
+                if let Ok(parsed) = serde_json::from_value(n.clone()) {
+                    cfg.dag.nfs = parsed;
+                }
+            }
+        }
         if let Some(n) = obj.get("network").and_then(|v| v.as_object()) {
             if let Some(p) = n.get("proxy").and_then(|v| v.as_str()) {
                 let t = p.trim();
@@ -538,5 +551,39 @@ mod tests {
         assert_eq!(cfg.agent.nfs.host, "0.0.0.0");
         // Unspecified nfs fields keep their serde defaults.
         assert!(cfg.agent.nfs.read_only);
+    }
+
+    /// The `dag` block (wasm pool root + nfs exposure) must merge from
+    /// disk: without it `dag.wasm_dir` was silently dropped and the
+    /// serving daemons always fell back to the data-dir default pool.
+    #[test]
+    fn merge_dag_block_wasm_dir_and_nfs() {
+        let mut cfg = Config::default();
+        merge_into(
+            &mut cfg,
+            serde_json::json!({
+                "dag": { "wasm_dir": "/custom/wasm", "nfs": { "enabled": true, "port": 0 } }
+            }),
+        );
+        assert_eq!(
+            cfg.dag.wasm_dir.as_deref(),
+            Some(std::path::Path::new("/custom/wasm"))
+        );
+        assert!(cfg.dag.nfs.enabled);
+        assert_eq!(cfg.dag.nfs.port, 0);
+        // Unspecified nfs fields keep their serde defaults.
+        assert_eq!(cfg.dag.nfs.host, "127.0.0.1");
+        assert!(cfg.dag.nfs.read_only);
+
+        // A partial dag block leaves the rest at defaults (no leakage
+        // between config files).
+        let mut cfg = Config::default();
+        merge_into(
+            &mut cfg,
+            serde_json::json!({ "dag": { "nfs": { "port": 1 } } }),
+        );
+        assert_eq!(cfg.dag.wasm_dir, None);
+        assert!(!cfg.dag.nfs.enabled);
+        assert_eq!(cfg.dag.nfs.port, 1);
     }
 }

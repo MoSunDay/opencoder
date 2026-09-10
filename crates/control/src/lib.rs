@@ -2,8 +2,8 @@
 pub mod admission;
 pub mod api;
 mod bootstrap;
-pub mod role_gate;
 mod resource_scope;
+pub mod role_gate;
 mod routes;
 pub mod transport;
 
@@ -17,6 +17,10 @@ pub mod api_agent_resources;
 pub mod api_agents;
 #[path = "../../web/src/api_brain.rs"]
 pub mod api_brain;
+#[path = "../../web/src/api_dag_wasm.rs"]
+pub mod api_dag_wasm;
+#[path = "../../web/src/api_dag_wasm_nfs.rs"]
+pub mod api_dag_wasm_nfs;
 #[path = "../../web/src/api_project.rs"]
 pub mod api_project;
 #[path = "../../web/src/api_project_todos.rs"]
@@ -33,6 +37,8 @@ pub mod api_todo_util;
 pub mod auth_mw;
 #[path = "../../web/src/html.rs"]
 pub mod html;
+#[path = "../../web/src/nfs_exports.rs"]
+pub mod nfs_exports;
 pub use api::project_util as api_project_util;
 
 pub use bootstrap::{new_state, new_state_with_projects, serve};

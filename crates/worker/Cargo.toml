@@ -15,6 +15,7 @@ opencoder-team.workspace = true
 opencoder-todos.workspace = true
 opencoder-project.workspace = true
 opencoder-dag.workspace = true
+opencoder-dag-wasm.workspace = true
 opencoder-dag-runtime.workspace = true
 base64.workspace = true
 anyhow.workspace = true

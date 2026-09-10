@@ -89,16 +89,19 @@ impl ToolAccumulator {
     pub fn finish_all(&mut self) -> anyhow::Result<Vec<CompletedToolCall>> {
         let mut out = Vec::new();
         for (_, partial) in std::mem::take(&mut self.tools).into_iter() {
+            if partial.id.is_empty() || partial.name.is_empty() {
+                anyhow::bail!("incomplete tool call: missing id or name");
+            }
             let input: Value = if partial.arguments.trim().is_empty() {
                 serde_json::json!({})
             } else {
-                serde_json::from_str(&partial.arguments).unwrap_or_else(|_| {
-                    Value::Object(serde_json::Map::from_iter([(
-                        "_raw_arguments".to_string(),
-                        Value::String(partial.arguments.clone()),
-                    )]))
-                })
+                serde_json::from_str(&partial.arguments).map_err(|e| {
+                    anyhow::anyhow!("invalid arguments for tool `{}`: {e}", partial.name)
+                })?
             };
+            if !input.is_object() {
+                anyhow::bail!("tool arguments must be an object");
+            }
             out.push(CompletedToolCall {
                 id: partial.id,
                 name: partial.name,
@@ -145,14 +148,19 @@ mod tests {
     }
 
     #[test]
-    fn finish_all_parses_json_and_fallback_on_invalid() {
+    fn finish_all_parses_json_and_rejects_invalid_batch() {
         let mut acc = ToolAccumulator::default();
         acc.apply(0, Some("c1"), Some("edit"), Some("{\"path\":\"a.txt\"}"));
-        acc.apply(1, Some("c2"), Some("bash"), Some("not valid json"));
         let calls = acc.finish_all().unwrap();
-        assert_eq!(calls.len(), 2);
+        assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].input["path"], "a.txt");
-        assert_eq!(calls[1].input["_raw_arguments"], "not valid json");
+        acc.apply(0, Some("c1"), Some("edit"), Some("{}"));
+        acc.apply(1, Some("c2"), Some("bash"), Some("not valid json"));
+        assert!(acc
+            .finish_all()
+            .unwrap_err()
+            .to_string()
+            .contains("invalid arguments"));
     }
 
     #[test]

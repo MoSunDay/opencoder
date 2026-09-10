@@ -209,8 +209,8 @@ async fn reasoning_sent_back_in_second_request_body() {
     // The second request's messages must include an assistant message with
     // reasoning_content.
     let second = &reqs[1];
-    let assistant_msgs: Vec<&serde_json::Value> = second
-        .messages
+    let wire_messages_212 = opencoder_llm::lower_messages(&second.messages);
+    let assistant_msgs: Vec<&serde_json::Value> = wire_messages_212
         .iter()
         .filter(|m| m.get("role").and_then(|v| v.as_str()) == Some("assistant"))
         .collect();

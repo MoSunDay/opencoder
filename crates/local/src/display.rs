@@ -5,6 +5,7 @@ use opencoder_session::SessionEvent;
 /// Print a session event to stdout/stderr with ANSI colours.
 pub(crate) fn print_event(ev: &SessionEvent) {
     match ev {
+        SessionEvent::LlmAttemptReset => eprintln!("\n[retry: incomplete response discarded]"),
         SessionEvent::LlmRoundStart { .. }
         | SessionEvent::LlmRoundEnd
         | SessionEvent::LlmUsage { .. } => {}

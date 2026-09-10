@@ -21,6 +21,8 @@ use crate::tool_call::CompletedToolCall;
 /// (`#[serde(default)]`) -- past cache usage is unrecoverable.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Usage {
+    #[serde(default)]
+    pub reasoning_tokens: u64,
     pub input_tokens: u64,
     pub output_tokens: u64,
     pub total_tokens: u64,
@@ -32,6 +34,8 @@ pub struct Usage {
 
 #[derive(Debug, Clone)]
 pub enum LlmEvent {
+    /// Opaque state from a successful response; committed with Completed only.
+    ProviderState(opencoder_core::ProviderState),
     TextDelta(String),
     ReasoningDelta(String),
     ToolCallStart {

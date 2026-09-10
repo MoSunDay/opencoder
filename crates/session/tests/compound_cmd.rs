@@ -22,7 +22,7 @@ use opencoder_store::{Delivery, LibsqlStore, SessionInput, Store};
 /// semantics (see `skill_one_shot.rs`) this is THE activation proof: the
 /// skill lives exactly for the run that consumed the token.
 fn request_carries_skill(req: &opencoder_llm::ChatRequest) -> bool {
-    req.messages
+    opencoder_llm::lower_messages(&req.messages)
         .iter()
         .filter(|m| m.get("role").and_then(|r| r.as_str()) == Some("user"))
         .filter_map(|m| m.get("content").and_then(|c| c.as_str()))

@@ -172,8 +172,8 @@ async fn successful_drain_persists_generated_title() {
     // The title round must target the small model, not the primary.
     let reqs = ctx.mock.requests();
     assert!(reqs.len() >= 2, "expected a run round + a title round");
-    assert_eq!(reqs.last().unwrap().model, "mini");
-    assert_eq!(reqs[0].model, "big");
+    assert_eq!(reqs.last().unwrap().model, "a/mini");
+    assert_eq!(reqs[0].model, "a/big");
     // The drain pinned the project config: primary id must be the default.
     let cfg = opencoder_core::Config::load(&ctx.workdir).unwrap();
     // small_model_or_primary strips the provider prefix ("a/mini" -> "mini").

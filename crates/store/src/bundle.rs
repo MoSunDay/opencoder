@@ -228,6 +228,7 @@ mod tests {
 
     fn sample_bundle() -> SessionBundle {
         let msg = Message {
+            provider_state: None,
             display: None,
             id: "msg1".into(),
             role: Role::User,

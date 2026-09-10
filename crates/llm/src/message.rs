@@ -105,7 +105,9 @@ fn push_assistant(out: &mut Vec<OpenAIMessage>, msg: &Message) {
         .blocks
         .iter()
         .filter_map(|b| match b {
-            ContentBlock::Reasoning { text } => Some(text.clone()),
+            // Responses summaries are display data, not Chat Completions
+            // reasoning_content. Only replay the latter for legacy messages.
+            ContentBlock::Reasoning { text } if msg.provider_state.is_none() => Some(text.clone()),
             _ => None,
         })
         .collect::<Vec<_>>()

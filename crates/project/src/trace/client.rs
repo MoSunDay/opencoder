@@ -12,6 +12,7 @@ pub(super) struct RecordedClient {
 }
 fn event_value(event: &LlmEvent) -> Value {
     match event {
+        LlmEvent::ProviderState(state) => json!({"type":"provider_state", "state":state}),
         LlmEvent::TextDelta(text) => json!({"type":"text_delta","text":text}),
         LlmEvent::ReasoningDelta(text) => json!({"type":"reasoning_delta","text":text}),
         LlmEvent::ToolCallStart { index, id, name } => {
@@ -37,7 +38,7 @@ impl ChatStream for RecordedClient {
     fn chat_stream(&self, req: ChatRequest) -> Result<mpsc::Receiver<LlmEvent>> {
         let call = self
             .archive
-            .request(&req.to_body())
+            .request(&self.inner.request_body(&req)?)
             .inspect_err(|e| self.archive.fail(e))?;
         let mut source = match self.inner.chat_stream(req) {
             Ok(source) => source,
@@ -65,6 +66,9 @@ impl ChatStream for RecordedClient {
             }
         });
         Ok(rx)
+    }
+    fn request_body(&self, req: &ChatRequest) -> Result<Value> {
+        self.inner.request_body(req)
     }
     fn backend(&self) -> &'static str {
         self.inner.backend()

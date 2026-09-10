@@ -22,6 +22,7 @@ fn done() -> Vec<LlmEvent> {
 
 fn req() -> ChatRequest {
     ChatRequest {
+        purpose: opencoder_llm::RequestPurpose::Conversation,
         model: "m".into(),
         messages: vec![],
         tools: vec![],
@@ -157,6 +158,7 @@ async fn switch_provider_in_map_updates_model_and_client() {
     providers_a.insert(
         "deepseek".to_string(),
         ProviderConfig {
+            protocol: "chat_completions".into(),
             base_url: "https://api.deepseek.com/v1".to_string(),
             api_key: Some("dk-key".to_string()),
             model: Some("deepseek-chat".to_string()),
@@ -187,6 +189,7 @@ async fn switch_provider_in_map_updates_model_and_client() {
     providers_b.insert(
         "deepseek".to_string(),
         ProviderConfig {
+            protocol: "chat_completions".into(),
             base_url: "https://api.deepseek.com/v1".to_string(),
             api_key: Some("dk-key".to_string()),
             model: Some("deepseek-chat".to_string()),
@@ -196,6 +199,7 @@ async fn switch_provider_in_map_updates_model_and_client() {
     providers_b.insert(
         "openai".to_string(),
         ProviderConfig {
+            protocol: "chat_completions".into(),
             base_url: "https://api.openai.com/v1".to_string(),
             api_key: Some("oai-key".to_string()),
             model: Some("gpt-4o".to_string()),

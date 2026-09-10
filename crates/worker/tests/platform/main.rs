@@ -198,11 +198,13 @@ async fn concurrent_brain_request_plans_once_and_creates_one_execution() {
         client.requests()[before..]
             .iter()
             .filter(|request| {
-                request.messages.iter().any(|message| {
-                    message["content"]
-                        .as_str()
-                        .is_some_and(|content| content.contains("能力动态规划器"))
-                })
+                opencoder_llm::lower_messages(&request.messages)
+                    .iter()
+                    .any(|message| {
+                        message["content"]
+                            .as_str()
+                            .is_some_and(|content| content.contains("能力动态规划器"))
+                    })
             })
             .count(),
         1,

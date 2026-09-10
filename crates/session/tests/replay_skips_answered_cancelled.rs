@@ -84,6 +84,7 @@ async fn replay_skips_cancelled_task_with_existing_tool_result() {
 
     // Assistant turn with a task tool_use.
     let assistant_msg = Message {
+        provider_state: None,
         display: None,
         id: "a1".into(),
         role: Role::Assistant,
@@ -110,6 +111,7 @@ async fn replay_skips_cancelled_task_with_existing_tool_result() {
 
     // The timeout already recorded a tool_result for this task_use.
     let tool_msg = Message {
+        provider_state: None,
         display: None,
         id: "t1".into(),
         role: Role::Tool,

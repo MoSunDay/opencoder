@@ -21,6 +21,7 @@ fn done(text: &str, total: u64) -> LlmEvent {
         text: text.into(),
         tool_calls: Vec::<CompletedToolCall>::new(),
         usage: Some(Usage {
+            reasoning_tokens: 0,
             input_tokens: total - 1,
             output_tokens: 1,
             total_tokens: total,

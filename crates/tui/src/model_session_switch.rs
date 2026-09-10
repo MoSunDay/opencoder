@@ -33,13 +33,7 @@ pub(crate) async fn switch_session(
     }
     let new_config = config.clone();
     match new_config.resolve_endpoint() {
-        Ok(ep) => match opencoder_llm::ChatClient::new_with_read_timeout(
-            &ep.base_url,
-            &ep.api_key,
-            &ep.headers,
-            new_config.stream_idle_timeout(),
-            new_config.network.proxy.as_deref(),
-        ) {
+        Ok(ep) => match opencoder_llm::ChatClient::from_config(&new_config, &ep) {
             Ok(new_client) => {
                 *client = Arc::new(new_client);
             }

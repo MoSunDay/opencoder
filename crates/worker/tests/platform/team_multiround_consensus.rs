@@ -25,7 +25,7 @@ fn prompt_text(request: &ChatRequest) -> String {
     request
         .messages
         .iter()
-        .filter_map(|m| m["content"].as_str())
+        .map(|m| m.text())
         .collect::<Vec<_>>()
         .join("\n")
 }

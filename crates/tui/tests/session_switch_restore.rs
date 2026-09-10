@@ -227,7 +227,7 @@ async fn switched_model_used_by_next_turn() {
     let requests = mock.requests();
     assert_eq!(requests.len(), 1);
     assert_eq!(
-        requests[0].model, MODEL_B_BARE,
+        requests[0].model, MODEL_B,
         "the next turn after the switch must use the restored model"
     );
 }

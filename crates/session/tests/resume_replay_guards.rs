@@ -20,6 +20,7 @@ use common::*;
 /// "timed out" result the subagent timeout path persists).
 fn tool_result_msg(id: &str, content: &str, is_error: bool) -> Message {
     Message {
+        provider_state: None,
         display: None,
         id: format!("{id}-result"),
         role: Role::Tool,

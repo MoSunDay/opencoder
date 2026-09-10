@@ -88,8 +88,7 @@ impl ChatStream for ParkingFailClient {
         &self,
         req: opencoder_llm::ChatRequest,
     ) -> anyhow::Result<tokio::sync::mpsc::Receiver<LlmEvent>> {
-        let transcript = req
-            .messages
+        let transcript = opencoder_llm::lower_messages(&req.messages)
             .iter()
             .filter_map(|message| message["content"].as_str())
             .collect::<Vec<_>>()

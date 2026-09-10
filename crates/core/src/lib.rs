@@ -6,6 +6,8 @@ pub mod harness;
 pub mod identity;
 pub mod json;
 pub mod message;
+pub mod provider;
+pub use provider::{ProviderProtocol, ProviderState};
 pub mod net;
 pub mod node_protocol;
 pub mod share_fs;

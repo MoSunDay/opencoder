@@ -9,6 +9,7 @@ pub(crate) fn cfg() -> Config {
     Config {
         model: "openai/gpt-4o-mini".to_string(),
         provider: opencoder_core::ProviderConfig {
+            protocol: "chat_completions".into(),
             base_url: "https://api.openai.com/v1".to_string(),
             api_key: Some("sk-abcd1234567".to_string()),
             model: None,
@@ -30,6 +31,7 @@ pub(crate) fn provider_cfg() -> Config {
     c.providers.insert(
         "deepseek".to_string(),
         opencoder_core::ProviderConfig {
+            protocol: "chat_completions".into(),
             base_url: "https://api.deepseek.com/v1".to_string(),
             api_key: Some("dk-secret-key".to_string()),
             model: Some("deepseek-chat".to_string()),
@@ -100,6 +102,8 @@ fn mask_hides_short_keys_entirely() {
 fn reasoning_cycle_is_circular() {
     let mut r = Reasoning::Off;
     let seq = [
+        Reasoning::None,
+        Reasoning::Minimal,
         Reasoning::Low,
         Reasoning::Medium,
         Reasoning::High,
@@ -120,8 +124,11 @@ fn reasoning_new_levels_round_trip() {
     assert_eq!(Reasoning::from_config(Some("max")), Reasoning::Max);
     // case-insensitive + trimmed, like the other levels.
     assert_eq!(Reasoning::from_config(Some("  XHigh ")), Reasoning::XHigh);
-    // unknown strings still fall back to Off (field omitted).
-    assert_eq!(Reasoning::from_config(Some("ultra")), Reasoning::Off);
+    // Unknown effort values are retained so opening the form cannot erase them.
+    assert_eq!(
+        Reasoning::from_config(Some("ultra")),
+        Reasoning::Custom("ultra".into())
+    );
 
     // to_option emits the literal provider tokens.
     assert_eq!(Reasoning::XHigh.to_option().as_deref(), Some("xhigh"));
@@ -131,6 +138,8 @@ fn reasoning_new_levels_round_trip() {
     // Full parse -> serialize round-trip for the whole scale.
     for variant in [
         Reasoning::Off,
+        Reasoning::None,
+        Reasoning::Minimal,
         Reasoning::Low,
         Reasoning::Medium,
         Reasoning::High,

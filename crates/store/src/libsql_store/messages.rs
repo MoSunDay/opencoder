@@ -6,8 +6,8 @@ use crate::types::{ImportReport, MessageChunkPage, MessageChunkRecord, MessageRo
 use opencoder_core::fleet::MessageCursor;
 
 const INSERT_MESSAGE: &str = "\
-INSERT INTO messages (id, session_id, role, agent, model, blocks_json, usage_json, created_at, synthetic, display, mode, summary)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 0)";
+INSERT INTO messages (id, session_id, role, agent, model, blocks_json, usage_json, created_at, synthetic, display, provider_state_json, mode, summary)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 0)";
 
 /// Maximum number of messages inserted per transaction in batch operations.
 /// Keeping transactions bounded prevents WAL bloat and reduces lock
@@ -65,6 +65,10 @@ async fn append_chunk_in_tx(
                     m.created_at,
                     m.synthetic as i64,
                     m.display.as_deref(),
+                    m.provider_state
+                        .as_ref()
+                        .map(serde_json::to_string)
+                        .transpose()?,
                 ],
             )
             .await
@@ -92,7 +96,7 @@ async fn append_chunk_in_tx(
 
 pub async fn load(conn: &Connection, session_id: &str) -> Result<Vec<Message>> {
     let stmt = conn
-        .prepare("SELECT id, role, agent, model, blocks_json, usage_json, created_at, synthetic, display FROM messages WHERE session_id = ? ORDER BY seq ASC")
+        .prepare("SELECT id, role, agent, model, blocks_json, usage_json, created_at, synthetic, display, provider_state_json FROM messages WHERE session_id = ? ORDER BY seq ASC")
         .await?;
     let mut rows = stmt.query(params![session_id]).await?;
     let mut out = Vec::new();
@@ -117,7 +121,7 @@ pub async fn load_after(
     // all rows, matching the trait-default semantics.
     let skip_count = skip_count.max(0);
     let stmt = conn
-        .prepare("SELECT id, role, agent, model, blocks_json, usage_json, created_at, synthetic, display FROM messages WHERE session_id = ? ORDER BY seq ASC LIMIT -1 OFFSET ?")
+        .prepare("SELECT id, role, agent, model, blocks_json, usage_json, created_at, synthetic, display, provider_state_json FROM messages WHERE session_id = ? ORDER BY seq ASC LIMIT -1 OFFSET ?")
         .await?;
     let mut rows = stmt.query(params![session_id, skip_count]).await?;
     let mut out = Vec::new();
@@ -323,6 +327,10 @@ async fn import_chunk_in_tx(conn: &Connection, session_id: &str, msgs: &[Message
                     m.created_at,
                     m.synthetic as i64,
                     m.display.as_deref(),
+                    m.provider_state
+                        .as_ref()
+                        .map(serde_json::to_string)
+                        .transpose()?,
                 ],
             )
             .await?;
@@ -351,6 +359,11 @@ fn row_to_message(r: &libsql::Row) -> Result<Message> {
         MessageUsage::default()
     });
     Ok(Message {
+        provider_state: r
+            .get::<Option<String>>(9)?
+            .map(|s| serde_json::from_str(&s))
+            .transpose()
+            .context("decode provider state")?,
         id,
         role: parse_role(&role_s),
         blocks,

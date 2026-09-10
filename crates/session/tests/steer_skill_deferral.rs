@@ -104,16 +104,18 @@ fn gate2_turn() -> LlmEvent {
 }
 
 fn has_active_skill_reminder(req: &opencoder_llm::ChatRequest) -> bool {
-    req.messages.iter().any(|m| {
-        m.get("role").and_then(|r| r.as_str()) == Some("user")
-            && m.get("content")
-                .and_then(|c| c.as_str())
-                .is_some_and(|c| c.contains("[active skill]"))
-    })
+    opencoder_llm::lower_messages(&req.messages)
+        .iter()
+        .any(|m| {
+            m.get("role").and_then(|r| r.as_str()) == Some("user")
+                && m.get("content")
+                    .and_then(|c| c.as_str())
+                    .is_some_and(|c| c.contains("[active skill]"))
+        })
 }
 
 fn last_user_content(req: &opencoder_llm::ChatRequest) -> String {
-    req.messages
+    opencoder_llm::lower_messages(&req.messages)
         .iter()
         .rev()
         .find(|m| m.get("role").and_then(|r| r.as_str()) == Some("user"))
@@ -236,7 +238,7 @@ async fn steer_admitted_mid_turn_defers_skill_until_absorption() {
     assert!(
         !has_active_skill_reminder(req1),
         "turn 1 payload must carry no [active skill] reminder: {:?}",
-        req1.messages
+        opencoder_llm::lower_messages(&req1.messages)
     );
     let mid = store.get_session(sid).await.unwrap().unwrap();
     assert!(mid.skill.is_none(), "skill not persisted before absorption");
@@ -276,8 +278,7 @@ async fn steer_admitted_mid_turn_defers_skill_until_absorption() {
 
     // Turn 1 (already sent before the steer existed) stays untouched.
     assert!(!has_active_skill_reminder(&requests[0]));
-    let req1_text = requests[0]
-        .messages
+    let req1_text = opencoder_llm::lower_messages(&requests[0].messages)
         .iter()
         .filter_map(|m| m.get("content").and_then(|c| c.as_str()))
         .collect::<Vec<_>>()
@@ -295,16 +296,17 @@ async fn steer_admitted_mid_turn_defers_skill_until_absorption() {
         "pointer silent while the body ships adjacent: {tail}"
     );
     assert!(
-        requests[1].messages.iter().any(|m| {
-            m.get("role").and_then(|r| r.as_str()) == Some("user")
-                && m.get("content").and_then(|c| c.as_str()).is_some_and(|c| {
-                    c.starts_with("[skill loaded] ") && c.contains("skills/review/SKILL.md")
-                })
-        }),
+        opencoder_llm::lower_messages(&requests[1].messages)
+            .iter()
+            .any(|m| {
+                m.get("role").and_then(|r| r.as_str()) == Some("user")
+                    && m.get("content").and_then(|c| c.as_str()).is_some_and(|c| {
+                        c.starts_with("[skill loaded] ") && c.contains("skills/review/SKILL.md")
+                    })
+            }),
         "turn 2 receives the skill via the [skill loaded] message naming its source"
     );
-    let user_texts: Vec<String> = requests[1]
-        .messages
+    let user_texts: Vec<String> = opencoder_llm::lower_messages(&requests[1].messages)
         .iter()
         .filter(|m| m.get("role").and_then(|r| r.as_str()) == Some("user"))
         .filter_map(|m| m.get("content").and_then(|c| c.as_str()))

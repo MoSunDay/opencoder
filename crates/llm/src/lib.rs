@@ -5,6 +5,7 @@ mod http_date;
 pub mod message;
 pub mod mock;
 pub mod request;
+pub mod responses;
 pub mod retry;
 pub mod schema;
 pub mod sse;
@@ -17,7 +18,9 @@ pub use embed::{build_embed_body, parse_embeddings_response};
 pub use event::{LlmEvent, Usage};
 pub use message::{lower_messages, OpenAIMessage};
 pub use mock::{MockChatClient, MOCK_EMBED_DIM};
-pub use request::ChatRequest;
+pub use request::{ChatRequest, RequestPurpose};
 pub use stream::ChatStream;
 pub use tokens::{estimate, estimate_messages, estimate_messages_for_display, estimate_transcript};
 pub use tool_call::CompletedToolCall;
+
+pub use opencoder_core::Message;

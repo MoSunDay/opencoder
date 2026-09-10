@@ -216,8 +216,7 @@ async fn subagent_reasoning_sent_back_in_child_second_request() {
     // The child's second request (index 2) must include reasoning_content
     // in an assistant message.
     let child_second = &reqs[2];
-    let has_reasoning = child_second
-        .messages
+    let has_reasoning = opencoder_llm::lower_messages(&child_second.messages)
         .iter()
         .filter(|m| m.get("role").and_then(|v| v.as_str()) == Some("assistant"))
         .any(|m| m.get("reasoning_content").is_some());

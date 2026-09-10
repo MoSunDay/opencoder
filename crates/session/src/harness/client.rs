@@ -10,15 +10,12 @@ pub fn configured_client(config: Config) -> Arc<dyn ChatStream> {
 }
 struct ConfiguredClient(Config);
 impl ChatStream for ConfiguredClient {
+    fn request_body(&self, request: &ChatRequest) -> Result<serde_json::Value> {
+        let ep = self.0.resolve_endpoint()?;
+        ChatClient::from_config(&self.0, &ep)?.request_body(request)
+    }
     fn chat_stream(&self, request: ChatRequest) -> Result<tokio::sync::mpsc::Receiver<LlmEvent>> {
         let ep = self.0.resolve_endpoint()?;
-        ChatClient::new_with_read_timeout(
-            &ep.base_url,
-            &ep.api_key,
-            &ep.headers,
-            self.0.stream_idle_timeout(),
-            self.0.network.proxy.as_deref(),
-        )?
-        .chat_stream(request)
+        ChatClient::from_config(&self.0, &ep)?.chat_stream(request)
     }
 }

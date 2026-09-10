@@ -7,10 +7,10 @@ import { apiDel, apiGet, apiPost, apiPut } from './api.js';
 vi.mock('./api.js', () => ({ apiGet: vi.fn(), apiPost: vi.fn(), apiPut: vi.fn(), apiDel: vi.fn() }));
 
 const entry = { capability: { id: 'c1', capability_type: 'goal', summary: '解析依赖图', input_desc: 'crate 列表', output_desc: '依赖 DAG', updated_at: 2 }, eng_inputs: [{ content: 'opencoder' }] };
-const second = { capability: { ...entry.capability, id: 'c2', summary: '生成构建计划' }, eng_inputs: [] };
+const second = { capability: { ...entry.capability, id: 'c2', capability_type: 'agent', summary: '生成构建计划' }, eng_inputs: [] };
 const button = (name) => screen.getAllByRole('button').find((item) => item.textContent.replace(/\s/g, '') === name);
 const fill = () => {
-  for (const [label, value] of [['能力类型', 'goal'], ['一句话描述', '新能力'], ['输入描述', '需求'], ['输出描述', '结果']]) {
+  for (const [label, value] of [['一句话描述', '新能力'], ['输入描述', '需求'], ['输出描述', '结果']]) {
     fireEvent.change(screen.getByLabelText(label), { target: { value } });
   }
 };
@@ -19,6 +19,9 @@ beforeEach(() => {
   vi.resetAllMocks();
   apiGet.mockImplementation(async (path) => {
     if (path === '/api/brain/capabilities') return { capabilities: [entry, second] };
+    // Editor cascade listings: names per execution kind (dag is a bare array).
+    if (path === '/api/agents') return { agents: [{ name: 'act' }, { name: 'custom-agent' }] };
+    if (path === '/api/dag/defs') return [{ id: 'dag-build' }];
     if (path.endsWith('/target')) return { target: null };
     return entry;
   });
@@ -37,6 +40,11 @@ describe('capability library table and editor', () => {
     expect(container.querySelector('.ant-card')).toBeNull();
     expect(screen.queryByLabelText('能力类型')).toBeNull();
     expect(screen.queryByRole('dialog')).toBeNull();
+    // 列头为「执行类型」（非「能力类型」），值经 KIND_LABELS 渲染，存量自由文本原样回退。
+    expect(screen.getByText('执行类型', { selector: 'th' })).toBeTruthy();
+    expect(screen.queryByText('能力类型', { selector: 'th' })).toBeNull();
+    expect(screen.getByText('Agent')).toBeTruthy();
+    expect(screen.getByText('goal')).toBeTruthy();
   });
 
   it('creates through a 75 percent right drawer and resets fields for the next creation', async () => {
@@ -49,7 +57,7 @@ describe('capability library table and editor', () => {
     fireEvent.change(screen.getByPlaceholderText('一条示例输入'), { target: { value: '示例' } });
     fireEvent.click(button('创建能力'));
     await waitFor(() => expect(apiPost).toHaveBeenCalledWith('/api/brain/capabilities', {
-      capability_type: 'goal', summary: '新能力', input_desc: '需求', output_desc: '结果', eng_inputs: ['示例'],
+      capability_type: 'agent', summary: '新能力', input_desc: '需求', output_desc: '结果', eng_inputs: ['示例'],
     }));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     expect(apiPut).not.toHaveBeenCalled();
@@ -65,7 +73,7 @@ describe('capability library table and editor', () => {
     await waitFor(() => expect(screen.getByDisplayValue('opencoder').disabled).toBe(false));
     fireEvent.change(screen.getByLabelText('一句话描述'), { target: { value: '更新后的能力' } });
     fireEvent.click(button('保存修改'));
-    await waitFor(() => expect(apiPut).toHaveBeenCalledWith('/api/brain/capabilities/c1', expect.objectContaining({ summary: '更新后的能力', eng_inputs: ['opencoder'] })));
+    await waitFor(() => expect(apiPut).toHaveBeenCalledWith('/api/brain/capabilities/c1', expect.objectContaining({ summary: '更新后的能力', eng_inputs: ['opencoder'], capability_type: 'agent' })));
     expect(apiPost).not.toHaveBeenCalled();
   });
 
@@ -109,7 +117,8 @@ describe('capability library table and editor', () => {
 
   it('retains content and reuses the created ID when saving its target fails', async () => {
     render(<BrainPanel />); fireEvent.click(button('新建能力')); fill();
-    fireEvent.change(screen.getByLabelText('执行目标'), { target: { value: 'custom-agent' } });
+    fireEvent.mouseDown(screen.getByLabelText('名称').closest('.ant-select'));
+    fireEvent.click(await screen.findByText('custom-agent', { selector: '.ant-select-item-option-content' }));
     apiPut.mockRejectedValueOnce(new Error('connection lost'));
     fireEvent.click(button('创建能力'));
     expect(await screen.findByText(/能力内容已保存，执行目标未保存/)).toBeTruthy();
@@ -119,6 +128,33 @@ describe('capability library table and editor', () => {
     expect(apiPost).toHaveBeenCalledTimes(1);
     expect(apiPut).toHaveBeenCalledWith('/api/brain/capabilities/created', expect.objectContaining({ summary: '新能力' }));
     expect(apiPut).toHaveBeenLastCalledWith('/api/brain/capabilities/created/target', { kind: 'agent', target: 'custom-agent' });
+  });
+
+  it('cascades the name options from the chosen execution kind', async () => {
+    render(<BrainPanel />);
+    fireEvent.click(button('新建能力'));
+    // The 名称 select lives inside the drawer and preselects the default 'act'.
+    const dialog = screen.getByRole('dialog');
+    const nameContent = () => within(dialog).getByLabelText('名称').closest('.ant-select-content');
+    expect(within(dialog).getByLabelText('名称').closest('.ant-drawer')).toBeTruthy();
+    await waitFor(() => expect(apiGet).toHaveBeenCalledWith('/api/agents'));
+    await waitFor(() => expect(nameContent().textContent).toBe('act'));
+    fireEvent.mouseDown(within(dialog).getByLabelText('名称').closest('.ant-select'));
+    // 'act' is offered as a real option of the agent listing.
+    fireEvent.click(await screen.findByText('act', { selector: '.ant-select-item-option-content' }));
+    // Switching 执行类型 refetches names for that kind and clears the pick.
+    fireEvent.mouseDown(screen.getByLabelText('执行类型').closest('.ant-select'));
+    const dagOption = await screen.findByText('DAG', { selector: '.ant-select-item-option-content' });
+    for (const label of ['Agent', 'Team', 'DAG', 'TODO 工作流']) {
+      expect(screen.getByText(label, { selector: '.ant-select-item-option-content' })).toBeTruthy();
+    }
+    expect(screen.queryByText('项目任务', { selector: '.ant-select-item-option-content' })).toBeNull();
+    fireEvent.click(dagOption);
+    await waitFor(() => expect(apiGet).toHaveBeenCalledWith('/api/dag/defs'));
+    fireEvent.mouseDown(within(dialog).getByLabelText('名称').closest('.ant-select'));
+    expect(await screen.findByText('dag-build', { selector: '.ant-select-item-option-content' })).toBeTruthy();
+    expect(nameContent().querySelector('.ant-select-placeholder')).toBeTruthy();
+    expect(nameContent().className).not.toContain('has-value');
   });
 
   it('blocks saving if the latest capability cannot be loaded', async () => {

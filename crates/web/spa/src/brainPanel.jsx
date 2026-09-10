@@ -2,6 +2,7 @@
 import { Alert, Button, Input, Popconfirm, Select, Space, Table, Tag } from 'antd';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiDel, apiGet, apiPost } from './api.js';
+import { KIND_LABELS } from './fleet/model.js';
 import { TimeText } from './ui/timeText.jsx';
 import { CapabilityEditor } from './brain/capabilityEditor.jsx';
 import { ok } from './notice.js';
@@ -43,7 +44,7 @@ export function BrainPanel({ onNotice }) {
   };
   const edit = (entry) => setEditor({ entry });
   const columns = [
-    { title: '能力类型', dataIndex: ['capability', 'capability_type'], width: 140, render: (value) => <Tag>{value}</Tag> },
+    { title: '执行类型', dataIndex: ['capability', 'capability_type'], width: 140, render: (value) => <Tag>{KIND_LABELS[value] || value}</Tag> },
     { title: '一句话描述', dataIndex: ['capability', 'summary'], ellipsis: true },
     { title: '输入描述', dataIndex: ['capability', 'input_desc'], ellipsis: true },
     { title: '输出描述', dataIndex: ['capability', 'output_desc'], ellipsis: true },

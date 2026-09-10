@@ -1,10 +1,12 @@
-import { Alert, Button, Divider, Drawer, Form, Input, Select, Space, Spin } from 'antd';
+import { Alert, Button, Drawer, Form, Input, Select, Space, Spin } from 'antd';
 import { useEffect, useRef, useState } from 'react';
 import { apiGet, apiPost, apiPut } from '../api.js';
 import { KINDS } from '../fleet/model.js';
 import { capabilityBody, capabilityForm, needsTargetSave } from './model.js';
+import { fetchTargetOptions } from './targetOptions.js';
 
 const required = [{ required: true, whitespace: true, message: '请填写此项' }];
+const TARGET_KIND_OPTIONS = KINDS.filter((kind) => ['agent', 'team', 'dag', 'todos'].includes(kind.value));
 
 function CapabilityEditorSession({ entry, onClose, onSaved }) {
   const [form] = Form.useForm();
@@ -14,8 +16,12 @@ function CapabilityEditorSession({ entry, onClose, onSaved }) {
   const [error, setError] = useState('');
   const [loaded, setLoaded] = useState(!id);
   const [revision, setRevision] = useState(0);
+  const [options, setOptions] = useState([]);
+  const [optionsLoading, setOptionsLoading] = useState(false);
   const originalTarget = useRef(null);
   const initialId = entry?.capability?.id;
+  const kind = Form.useWatch('target_kind', form);
+  const watchedTarget = Form.useWatch('target', form);
 
   useEffect(() => {
     if (!initialId) return undefined;
@@ -33,6 +39,25 @@ function CapabilityEditorSession({ entry, onClose, onSaved }) {
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [initialId, revision, form]);
+
+  // TYPE → NAME cascade: whenever the 执行类型 changes, refetch the actual
+  // resource names of that kind. Failures are swallowed (empty options) so a
+  // broken listing endpoint never blocks editing the capability itself.
+  useEffect(() => {
+    let cancelled = false;
+    setOptionsLoading(true);
+    fetchTargetOptions(apiGet, kind)
+      .then((result) => { if (!cancelled) setOptions(result); })
+      .catch(() => { if (!cancelled) setOptions([]); })
+      .finally(() => { if (!cancelled) setOptionsLoading(false); });
+    return () => { cancelled = true; };
+  }, [kind]);
+
+  // Edit mode fallback: a binding whose resource no longer exists still
+  // displays (and can be re-saved) by appending the watched value as an option.
+  const staleTarget = watchedTarget && !options.some((option) => option.value === watchedTarget)
+    ? [{ value: watchedTarget, label: watchedTarget }] : [];
+  const mergedOptions = [...options, ...staleTarget];
 
   const save = async (values) => {
     if (saving || !loaded) return;
@@ -68,7 +93,12 @@ function CapabilityEditorSession({ entry, onClose, onSaved }) {
       action={!loaded ? <Button onClick={() => setRevision((value) => value + 1)}>重试</Button> : null} />}
     <Spin spinning={loading}>
       <Form form={form} layout="vertical" initialValues={capabilityForm(entry)} onFinish={save} disabled={saving || !loaded}>
-        <Form.Item name="capability_type" label="能力类型" rules={required}><Input placeholder="如：代码开发、测试、需求分析" /></Form.Item>
+        <Form.Item name="target_kind" label="执行类型" rules={[{ required: true }]}>
+          <Select options={TARGET_KIND_OPTIONS} onChange={() => form.setFieldValue('target', undefined)} />
+        </Form.Item>
+        <Form.Item name="target" label="名称" rules={required}>
+          <Select showSearch optionFilterProp="label" placeholder="先选择执行类型" loading={optionsLoading} options={mergedOptions} />
+        </Form.Item>
         <Form.Item name="summary" label="一句话描述" rules={required}><Input placeholder="这个能力做什么" /></Form.Item>
         <Form.Item name="input_desc" label="输入描述" rules={required}><Input.TextArea rows={3} placeholder="期望的输入是什么" /></Form.Item>
         <Form.Item name="output_desc" label="输出描述" rules={required}><Input.TextArea rows={3} placeholder="产出的结果是什么" /></Form.Item>
@@ -80,13 +110,6 @@ function CapabilityEditorSession({ entry, onClose, onSaved }) {
             </div>)}
             <Button type="dashed" onClick={() => add('')}>添加工程输入</Button>
           </>}</Form.List>
-        </Form.Item>
-        <Divider titlePlacement="left">执行目标</Divider>
-        <Form.Item name="target_kind" label="执行类型" rules={[{ required: true }]}>
-          <Select options={KINDS.filter((kind) => ['agent', 'team', 'dag', 'todos'].includes(kind.value))} />
-        </Form.Item>
-        <Form.Item name="target" label="执行目标" rules={required} extra="默认由 act Agent 执行，也可指定团队或工作流。">
-          <Input placeholder="Agent / 团队 / DAG 名称 / 模板名/v1" />
         </Form.Item>
       </Form>
     </Spin>

@@ -3,7 +3,6 @@ export const DEFAULT_TARGET = { kind: 'agent', target: 'act' };
 export function capabilityForm(entry, target) {
   const capability = entry?.capability || {};
   return {
-    capability_type: capability.capability_type || '',
     summary: capability.summary || '',
     input_desc: capability.input_desc || '',
     output_desc: capability.output_desc || '',
@@ -15,7 +14,9 @@ export function capabilityForm(entry, target) {
 
 export function capabilityBody(values) {
   return {
-    capability_type: String(values.capability_type || '').trim(),
+    // capability_type is derived from the chosen 执行类型 (target_kind);
+    // the free-text category field is gone from the editor.
+    capability_type: String(values.target_kind || '').trim(),
     summary: String(values.summary || '').trim(),
     input_desc: String(values.input_desc || '').trim(),
     output_desc: String(values.output_desc || '').trim(),

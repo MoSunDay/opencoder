@@ -32,6 +32,11 @@ fn non_admin_allowed(method: &Method, path: &str) -> bool {
     if (path == "/api/me" || path == "/api/nodes") && method == Method::GET {
         return true;
     }
+    // Wasm pool surface is read-only for non-admins: list/get/download (and
+    // the `/nfs` status snapshot); every write stays admin-only.
+    if (path == "/api/dag/wasm" || path.starts_with("/api/dag/wasm/")) && method == Method::GET {
+        return true;
+    }
     if path == "/api/executions" {
         return method == Method::GET || method == Method::POST;
     }
@@ -105,9 +110,21 @@ mod tests {
             assert!(allow(role, "GET", "/api/executions"));
             assert!(allow(role, "GET", "/api/executions/agent-x"));
             assert!(allow(role, "GET", "/api/executions/agent-x/events"));
-            assert!(allow(role, "GET", "/api/executions/agent-x/events/3/payload"));
+            assert!(allow(
+                role,
+                "GET",
+                "/api/executions/agent-x/events/3/payload"
+            ));
             assert!(allow(role, "GET", "/api/executions/agent-x/messages"));
             assert!(allow(role, "GET", "/static/app.js"));
+            // Wasm pool: read-only (list/get/download, nfs status).
+            assert!(allow(role, "GET", "/api/dag/wasm"));
+            assert!(allow(role, "GET", "/api/dag/wasm/tool"));
+            assert!(allow(role, "GET", "/api/dag/wasm/tool/versions/1/wasm.bin"));
+            assert!(!allow(role, "POST", "/api/dag/wasm"));
+            assert!(!allow(role, "PUT", "/api/dag/wasm/tool"));
+            assert!(!allow(role, "DELETE", "/api/dag/wasm/tool"));
+            assert!(!allow(role, "POST", "/api/dag/wasm/tool/rollback"));
             // Writes outside the execution surface stay admin-only.
             assert!(!allow(role, "GET", "/api/agents"));
             assert!(!allow(role, "GET", "/api/sessions/agent-x/events"));

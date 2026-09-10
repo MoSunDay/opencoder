@@ -2424,6 +2424,7 @@ dependencies = [
  "opencoder-brain",
  "opencoder-core",
  "opencoder-dag",
+ "opencoder-dag-wasm",
  "opencoder-llm",
  "opencoder-node",
  "opencoder-store",
@@ -2496,6 +2497,18 @@ dependencies = [
  "wasmtime",
  "wasmtime-wasi",
  "wat",
+]
+
+[[package]]
+name = "opencoder-dag-wasm"
+version = "0.1.0"
+dependencies = [
+ "opencoder-agents",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "tokio",
 ]
 
 [[package]]
@@ -2740,6 +2753,7 @@ dependencies = [
  "opencoder-core",
  "opencoder-dag",
  "opencoder-dag-runtime",
+ "opencoder-dag-wasm",
  "opencoder-llm",
  "opencoder-node",
  "opencoder-project",
@@ -2750,6 +2764,7 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+ "sha2",
  "tempfile",
  "tokio",
  "tokio-stream",
@@ -2776,6 +2791,7 @@ dependencies = [
  "opencoder-core",
  "opencoder-dag",
  "opencoder-dag-runtime",
+ "opencoder-dag-wasm",
  "opencoder-llm",
  "opencoder-node",
  "opencoder-project",

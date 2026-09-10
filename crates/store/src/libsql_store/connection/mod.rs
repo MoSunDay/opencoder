@@ -63,7 +63,12 @@ pub(super) async fn open_memory() -> Result<Connection> {
 }
 
 fn log_open(path: &Path, total_ms: u64, stages: [(&'static str, u64); 4]) {
-    let [(_, build_ms), (_, pragma_ms), (_, bootstrap_ms), (_, checkpoint_ms)] = stages;
+    let [
+        (_, build_ms),
+        (_, pragma_ms),
+        (_, bootstrap_ms),
+        (_, checkpoint_ms),
+    ] = stages;
     tracing::info!(
         backend = "libsql", path = %path.display(), build_ms, pragma_ms,
         bootstrap_ms, checkpoint_ms, total_ms, "store opened"

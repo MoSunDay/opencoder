@@ -591,6 +591,10 @@ impl ChatView {
             *smry = sanitize_multiline(summary).into_owned();
             view.llm_round_started_at_ms = None;
             view.frozen_round_ms = None;
+            // A cancelled/failed child never emits its own LlmRoundEnd/Done:
+            // finalize its open Say here or the focused child view keeps
+            // showing raw markdown forever.
+            view.finalize_assistant();
             // Leftover child steer rows (steers queued while the child was
             // running but never claimed) would otherwise sit on the pending
             // panel forever — clear them with the block.

@@ -450,6 +450,16 @@ pub fn build_app(state: Arc<AppState>, token: Option<String>, web: bool) -> axum
                 .delete(api_brain::delete_capability),
         )
         .route("/api/brain/search", post(api_brain::search))
+        .route(
+            "/api/brain/playbooks",
+            get(api_brain::list_playbooks).post(api_brain::create_playbook),
+        )
+        .route(
+            "/api/brain/playbooks/:id",
+            get(api_brain::get_playbook)
+                .put(api_brain::update_playbook)
+                .delete(api_brain::delete_playbook),
+        )
         .route("/api/brain/plans", post(api_brain::create_plan))
         .route("/api/brain/plans/:id", get(api_brain::get_plan))
         .route("/api/brain/dispatch", post(api_brain::dispatch))

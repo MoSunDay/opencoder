@@ -71,7 +71,9 @@ pub(in crate::operations) async fn dag_steps(
             for name in &names {
                 let meta = step_meta(&root, &execution.id, name).await;
                 statuses.push(outcome_status(&meta));
-                rows.push(json!({"name": name, "status": outcome_status(&meta), "error": meta["error"]}));
+                rows.push(
+                    json!({"name": name, "status": outcome_status(&meta), "error": meta["error"]}),
+                );
             }
             let (done, error, cancelled, pending) = count_statuses(&statuses);
             bounded_reply(json!({
@@ -193,7 +195,8 @@ mod tests {
             vec!["first".to_string(), "second".to_string()]
         );
         // Legacy shape: the definition itself carries the steps array.
-        let legacy = json!({"name":"d","steps":[{"name":"only","kind":{"type":"agent","prompt":"a"}}]});
+        let legacy =
+            json!({"name":"d","steps":[{"name":"only","kind":{"type":"agent","prompt":"a"}}]});
         assert_eq!(spec_step_names(Some(&legacy)), vec!["only".to_string()]);
         assert!(spec_step_names(None).is_empty());
     }

@@ -279,8 +279,10 @@ fn normalize(v: &mut [f32]) {
 }
 
 /// Cosine similarity over two vectors of equal length (length mismatch and
-/// zero norms are errors, not silently-clamped values).
-fn cosine(a: &[f32], b: &[f32]) -> Result<f64> {
+/// zero norms are errors, not silently-clamped values). `pub(crate)` so the
+/// playbook trigger scan reuses the exact same arithmetic (see
+/// `playbook::trigger::cosine_similarity`).
+pub(crate) fn cosine(a: &[f32], b: &[f32]) -> Result<f64> {
     if a.len() != b.len() {
         bail!("vector dimension mismatch: {} vs {}", a.len(), b.len());
     }

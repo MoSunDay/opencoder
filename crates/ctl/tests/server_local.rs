@@ -106,7 +106,7 @@ async fn teams_put_list_and_raw_escape_hatch() {
     assert_ok(&s, &["teams", "list"]).await;
     let listed = api_get(&s, "/api/teams").await;
     assert_eq!(listed["teams"].as_array().unwrap().len(), 1, "{listed}");
-    assert_eq!(listed["teams"][0]["captain"], "m1", "{listed}");
+    assert_eq!(listed["teams"][0]["captain"], "act", "{listed}");
     // `raw` drives routes verbatim: probe GET, then the same save route the
     // dedicated `teams put` wrapper uses.
     assert_ok(&s, &["raw", "call", "GET", "/api/health"]).await;

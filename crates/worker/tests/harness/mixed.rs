@@ -7,7 +7,7 @@ pub async fn all(root: &Path) {
     // DAG forwards structured output; the native step returns its declared JSON.
     let native = Arc::new(MockChatClient::new()
         .push_script(done("```json\n{\"value\":\"MATRIX_NATIVE\"}\n```"))
-        .with_default(done(r#"{"question":"inspect","participants":["member"],"summary":"aligned","aligned":true,"complete":true,"final_summary":"MATRIX_MIXED_TEAM"}"#)));
+        .with_default(done(r#"{"question":"inspect","participants":["build"],"summary":"aligned","aligned":true,"complete":true,"final_summary":"MATRIX_MIXED_TEAM"}"#)));
     let node = fixture::node(&root.join("mixed"), Some(native.clone())).await;
     let before = fixture::captures(root).len();
     let spec = json!({"name":"mixed","steps":[{"name":"native","kind":{"type":"agent","agent":"command","prompt":"MATRIX_NATIVE"}},{"name":"codex","depends_on":["native"],"kind":{"type":"agent","agent":"act","prompt":"MATRIX_DAG_MIXED"}}]});
@@ -21,7 +21,7 @@ pub async fn all(root: &Path) {
         .unwrap()
         .contains("MATRIX_NATIVE"));
 
-    let spec = json!({"name":"mixed-team","captain":"captain","members":[{"id":"captain","agent":"command","role":"coordinate"},{"id":"member","agent":"build","role":"inspect"}]});
+    let spec = json!({"name":"mixed-team","captain":"command","members":[{"agent":"command"},{"agent":"build"}]});
     let result = create(
         &node,
         "team-mixed",

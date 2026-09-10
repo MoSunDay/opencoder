@@ -1,15 +1,16 @@
 pub mod admission;
 pub mod brain;
 pub(crate) mod brain_dispatch;
+pub mod brain_playbook_dispatch;
 pub mod catalog;
 pub mod executions;
 pub mod project;
 pub mod project_util;
 pub mod session;
 pub mod settings;
-pub mod users;
 pub mod stream;
 pub mod streaming;
+pub mod users;
 
 use axum::{
     http::StatusCode,

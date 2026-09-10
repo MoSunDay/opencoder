@@ -4,7 +4,7 @@
 //! multi-statement ops run via [`super::tx::run_tx`] (`BEGIN IMMEDIATE`).
 
 use anyhow::{Context, Result};
-use libsql::{params, Connection};
+use libsql::{Connection, params};
 
 use super::node_state::transition_allowed;
 use crate::types::{NodeTaskRecord, NodeTaskStatus, SessionMeta, TASK_TYPE_NODE};

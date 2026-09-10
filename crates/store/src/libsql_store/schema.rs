@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use libsql::Connection;
 
+use super::brain_playbooks::{CREATE_BRAIN_PLAYBOOKS, CREATE_INDEX_BRAIN_PLAYBOOKS_DIGEST};
 use super::chat_tables::{
     CREATE_EVENTS, CREATE_INPUTS, CREATE_MESSAGES, CREATE_SESSIONS, CREATE_SUBAGENT_TASKS,
 };
@@ -8,7 +9,7 @@ use super::team_runs::{CREATE_INDEX_TEAM_TOPIC_RUNS_TOPIC, CREATE_TEAM_TOPIC_RUN
 
 mod project_relations;
 
-const SCHEMA_VERSION: i64 = 24;
+const SCHEMA_VERSION: i64 = 25;
 
 // Order invariant: busy_timeout must precede any locking statement, and
 // synchronous=NORMAL must be applied BEFORE journal_mode=WAL. Switching a
@@ -240,8 +241,7 @@ CREATE TABLE IF NOT EXISTS brain_plans (
   tree_json TEXT NOT NULL,
   created_at INTEGER NOT NULL
 )";
-const CREATE_INDEX_BRAIN_PLANS_DIGEST: &str =
-    "CREATE INDEX IF NOT EXISTS idx_brain_plans_digest ON brain_plans(situation_digest, created_at)";
+const CREATE_INDEX_BRAIN_PLANS_DIGEST: &str = "CREATE INDEX IF NOT EXISTS idx_brain_plans_digest ON brain_plans(situation_digest, created_at)";
 
 /// DAG workflow tables (v16): definitions, dispatched runs, node-uploaded
 /// events. No FK constraints on purpose (same policy as the project tables):
@@ -376,6 +376,7 @@ async fn bootstrap_tx(conn: &Connection) -> Result<()> {
     conn.execute(CREATE_BRAIN_ENG_INPUTS, ()).await?;
     conn.execute(CREATE_BRAIN_VECTORS, ()).await?;
     conn.execute(CREATE_BRAIN_PLANS, ()).await?;
+    conn.execute(CREATE_BRAIN_PLAYBOOKS, ()).await?;
     conn.execute(CREATE_PROJECT_GOALS, ()).await?;
     conn.execute(CREATE_PROJECT_MILESTONES, ()).await?;
     conn.execute(CREATE_PROJECT_TODOS, ()).await?;
@@ -449,6 +450,8 @@ async fn bootstrap_tx(conn: &Connection) -> Result<()> {
     // Same post-migrate placement: brain plans physically exist either via
     // the CREATE batch (fresh DBs) or the v18 migration (old DBs).
     conn.execute(CREATE_INDEX_BRAIN_PLANS_DIGEST, ()).await?;
+    conn.execute(CREATE_INDEX_BRAIN_PLAYBOOKS_DIGEST, ())
+        .await?;
     conn.execute(CREATE_INDEX_IN_ID, ()).await?;
     Ok(())
 }
@@ -680,6 +683,12 @@ async fn migrate(conn: &Connection, from: i64) -> Result<()> {
         // the DDL.
         conn.execute(CREATE_NODES, ()).await?;
         conn.execute(CREATE_NODE_TASKS, ()).await?;
+    }
+    if from < 25 {
+        // v25: brain playbooks. CREATE IF NOT EXISTS keeps this idempotent
+        // (fresh databases already carry the table from bootstrap's CREATE
+        // batch); the table is new, so no rows need backfilling.
+        conn.execute(CREATE_BRAIN_PLAYBOOKS, ()).await?;
     }
     if from < 24 {
         // v24: platform users. CREATE IF NOT EXISTS keeps this idempotent;

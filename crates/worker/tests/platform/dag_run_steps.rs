@@ -78,7 +78,11 @@ async fn dag_run_progress_and_step_views_after_completion() {
 
     // Single-step view: bounded structured output + real timings.
     let first = fleet
-        .call("GET", "/api/dag/runs/dag-steps-prog-run/steps/first", Value::Null)
+        .call(
+            "GET",
+            "/api/dag/runs/dag-steps-prog-run/steps/first",
+            Value::Null,
+        )
         .await;
     assert_eq!(first.status, 200, "{first:?}");
     assert_eq!(first.body["name"], json!("first"));

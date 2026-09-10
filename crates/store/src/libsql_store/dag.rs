@@ -7,8 +7,8 @@
 //! The append-only event stream lives in [`super::dag_events`].
 
 use anyhow::{Context, Result};
-use libsql::{params, params::IntoParams, Connection};
-use opencoder_dag::{transition_allowed, DagRunStatus};
+use libsql::{Connection, params, params::IntoParams};
+use opencoder_dag::{DagRunStatus, transition_allowed};
 
 use crate::types::{ConvergedDagRun, DagDefRecord, DagRunRecord};
 

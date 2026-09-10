@@ -79,3 +79,20 @@ pub struct BrainVectorWrite {
     /// Millisecond timestamp for the vector row's updated_at.
     pub embedded_at: i64,
 }
+
+/// One persisted playbook — the brain's orchestration graph (fixed or
+/// LLM-generated). `spec_json` is the serialized `opencoder_brain`
+/// `PlaybookSpec` kept opaque here: the store only persists and fetches it,
+/// the brain crate owns the domain. `origin` is "fixed" | "dynamic";
+/// `situation_digest` is set only for dynamic playbooks — the plan-cache
+/// reuse key.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BrainPlaybookRecord {
+    pub id: String,
+    pub name: String,
+    pub origin: String,
+    pub situation_digest: Option<String>,
+    pub spec_json: String,
+    pub created_at: i64,
+    pub updated_at: i64,
+}

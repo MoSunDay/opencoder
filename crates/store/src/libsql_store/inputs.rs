@@ -1,5 +1,5 @@
-use anyhow::{bail, Context, Result};
-use libsql::{params, Connection};
+use anyhow::{Context, Result, bail};
+use libsql::{Connection, params};
 use tracing::warn;
 
 use crate::types::{Delivery, InputAdmission, InputConflict, SessionInput};

@@ -19,11 +19,19 @@ pub mod domain;
 pub mod error;
 pub mod plan;
 pub mod planning;
+pub mod playbook;
 pub mod runtime;
 pub mod types;
 
 pub use error::{BrainNotFound, EmbeddingFailed, PlanGenerationFailed, PlanNotFound};
 pub use plan::{DecisionTree, DispatchOutcome, PlanNode};
-pub use planning::{situation_digest, Dispatched, PLANNER_FRAMEWORK_PROMPT};
+pub use planning::{
+    situation_digest, Dispatched, PlannedPlaybook, PLANNER_FRAMEWORK_PROMPT,
+    PLAYBOOK_FRAMEWORK_PROMPT,
+};
+pub use playbook::{
+    cosine_similarity, fires, match_text, scan, threshold, PlaybookInput, PlaybookOrigin,
+    PlaybookSpec, PlaybookStep, PlaybookTarget, PlaybookTrigger,
+};
 pub use runtime::Runtime;
 pub use types::CapabilityInput;

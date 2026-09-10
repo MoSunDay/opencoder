@@ -176,10 +176,9 @@ async fn diamond_workflow_wasm_steps_feed_the_agent_step() {
 
     // 2. The wasm steps really READ the upstream context: b's context.json
     //    carries a's structured output plus its success flag.
-    let b_ctx: Value = serde_json::from_str(
-        &std::fs::read_to_string(run.join("b").join("context.json")).unwrap(),
-    )
-    .unwrap();
+    let b_ctx: Value =
+        serde_json::from_str(&std::fs::read_to_string(run.join("b").join("context.json")).unwrap())
+            .unwrap();
     assert_eq!(b_ctx["steps"]["a"]["json"], json!({"value":1}));
     assert_eq!(b_ctx["steps"]["a"]["ok"], json!(true));
 

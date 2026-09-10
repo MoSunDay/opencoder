@@ -42,32 +42,32 @@ async fn team_multiround_consensus_runs_alignment_subturn_and_next_round_hint() 
         .call(
             "POST",
             "/api/teams",
-            json!({"name":"consensus-team","captain":"captain","members":[
-                {"id":"captain","agent":"act","role":"coordinate"},
-                {"id":"arch","agent":"act","role":"architect"},
-                {"id":"qa","agent":"act","role":"qa"}
+            json!({"name":"consensus-team","captain":"act","members":[
+                {"agent":"act"},
+                {"agent":"plan","capabilities":["system design and architecture trade-offs"]},
+                {"agent":"explore","capabilities":["risk probing and acceptance criteria"]}
             ]}),
         )
         .await;
     assert_eq!(saved.status, 200, "{saved:?}");
 
     // 12 scripted replies in exact consumption order:
-    //  1 plan(t1)            2 arch answer        3 qa answer (vague)
-    //  4 summary(t1,0)=unaligned                  5 qa alignment follow-up
+    //  1 plan(t1)            2 plan answer       3 explore answer (vague)
+    //  4 summary(t1,0)=unaligned                  5 explore alignment follow-up
     //  6 summary(t1,1)=aligned 7 closing(t1)=continue(+next_question)
-    //  8 plan(t2, hinted)    9 arch answer       10 qa answer
+    //  8 plan(t2, hinted)    9 plan answer       10 explore answer
     // 11 summary(t2,0)=aligned                    12 closing(t2)=complete
     for text in [
-        json!({"question":"define the caching strategy","participants":["arch","qa"],"rationale":"need design and quality views"}).to_string(),
-        "arch: Redis LRU with a 24h TTL in front of the primary store, keys namespaced by entity.".into(),
-        "qa: direction works, but invalidation on deploy is unclear to me.".into(),
-        json!({"summary":"caching direction agreed","aligned":false,"ambiguities":[{"node_id":"qa","question":"invalidation on deploy?"}]}).to_string(),
-        "qa: embed the release version in the cache key so a deploy invalidates atomically by key rotation.".into(),
+        json!({"question":"define the caching strategy","participants":["plan","explore"],"rationale":"need design and quality views"}).to_string(),
+        "plan: Redis LRU with a 24h TTL in front of the primary store, keys namespaced by entity.".into(),
+        "explore: direction works, but invalidation on deploy is unclear to me.".into(),
+        json!({"summary":"caching direction agreed","aligned":false,"ambiguities":[{"node_id":"explore","question":"invalidation on deploy?"}]}).to_string(),
+        "explore: embed the release version in the cache key so a deploy invalidates atomically by key rotation.".into(),
         json!({"summary":"invalidation settled via versioned keys","aligned":true,"ambiguities":[]}).to_string(),
         json!({"complete":false,"next_question":"verify cache failure modes under node loss","final_summary":null}).to_string(),
-        json!({"question":"verify cache failure modes under node loss","participants":["arch","qa"],"rationale":"verify the agreed design"}).to_string(),
-        "arch: on node loss the LRU entries expire via TTL; no stale reads because writes bypass the cache.".into(),
-        "qa: acceptance: no stale reads beyond one TTL window and zero cache-layer errors during a node-loss drill.".into(),
+        json!({"question":"verify cache failure modes under node loss","participants":["plan","explore"],"rationale":"verify the agreed design"}).to_string(),
+        "plan: on node loss the LRU entries expire via TTL; no stale reads because writes bypass the cache.".into(),
+        "explore: acceptance: no stale reads beyond one TTL window and zero cache-layer errors during a node-loss drill.".into(),
         json!({"summary":"failure modes verified with acceptance criteria","aligned":true,"ambiguities":[]}).to_string(),
         json!({"complete":true,"next_question":null,"final_summary":"consensus reached: versioned-key LRU cache with atomic deploy invalidation and verified node-loss failure modes"}).to_string(),
     ] {
@@ -99,7 +99,7 @@ async fn team_multiround_consensus_runs_alignment_subturn_and_next_round_hint() 
     let request_prompt = |i: usize| prompt_text(&requests[i]);
     assert!(
         request_prompt(1).contains("define the caching strategy"),
-        "arch answer prompt must carry the t1 question: {}",
+        "plan member answer prompt must carry the t1 question: {}",
         request_prompt(1)
     );
     let alignment = request_prompt(4);
@@ -112,7 +112,8 @@ async fn team_multiround_consensus_runs_alignment_subturn_and_next_round_hint() 
         "alignment prompt must carry the ambiguity question: {alignment}"
     );
     assert!(
-        request_prompt(7).contains("上一轮建议的下一问题：verify cache failure modes under node loss"),
+        request_prompt(7)
+            .contains("上一轮建议的下一问题：verify cache failure modes under node loss"),
         "t2 plan prompt must carry the closing next_question hint: {}",
         request_prompt(7)
     );
@@ -132,24 +133,36 @@ async fn team_multiround_consensus_runs_alignment_subturn_and_next_round_hint() 
     assert_eq!(turns.len(), 2, "{turns:?}");
     assert_eq!(
         turns[0],
-        json!({"turn":1,"question":"define the caching strategy","participants":["arch","qa"],"aligned":true,"sub_turns":2})
+        json!({"turn":1,"question":"define the caching strategy","participants":["plan","explore"],"aligned":true,"sub_turns":2})
     );
     assert_eq!(
         turns[1],
-        json!({"turn":2,"question":"verify cache failure modes under node loss","participants":["arch","qa"],"aligned":true,"sub_turns":1})
+        json!({"turn":2,"question":"verify cache failure modes under node loss","participants":["plan","explore"],"aligned":true,"sub_turns":1})
     );
 
     // ── artifact layer: turn 1 sub 0 = plain answers for both members.
-    assert_eq!(read_json(&topic_dir.join("1/0/arch/result.json"))["kind"], json!("answer"));
-    assert_eq!(read_json(&topic_dir.join("1/0/qa/result.json"))["kind"], json!("answer"));
-    // Turn 1 sub 0 summary flagged qa as the only ambiguity...
+    assert_eq!(
+        read_json(&topic_dir.join("1/0/plan/result.json"))["kind"],
+        json!("answer")
+    );
+    assert_eq!(
+        read_json(&topic_dir.join("1/0/explore/result.json"))["kind"],
+        json!("answer")
+    );
+    // Turn 1 sub 0 summary flagged explore as the only ambiguity...
     let summary_1_0 = read_json(&topic_dir.join("1/0/summary.json"));
     assert_eq!(summary_1_0["aligned"], json!(false));
-    assert_eq!(summary_1_0["ambiguities"][0]["node_id"], json!("qa"));
-    // ...so the alignment sub-turn re-asked ONLY qa.
-    assert_eq!(read_json(&topic_dir.join("1/1/qa/result.json"))["kind"], json!("alignment"));
-    assert!(!topic_dir.join("1/1/arch").exists());
-    assert_eq!(read_json(&topic_dir.join("1/1/summary.json"))["aligned"], json!(true));
+    assert_eq!(summary_1_0["ambiguities"][0]["node_id"], json!("explore"));
+    // ...so the alignment sub-turn re-asked ONLY explore.
+    assert_eq!(
+        read_json(&topic_dir.join("1/1/explore/result.json"))["kind"],
+        json!("alignment")
+    );
+    assert!(!topic_dir.join("1/1/plan").exists());
+    assert_eq!(
+        read_json(&topic_dir.join("1/1/summary.json"))["aligned"],
+        json!(true)
+    );
     // Turn 2 aligned on the first sub-turn: no follow-up sub-turn directory.
     assert!(!topic_dir.join("2/1").exists());
     // Turn 2 plan mirrors the closing decision's next_question verbatim.
@@ -158,6 +171,6 @@ async fn team_multiround_consensus_runs_alignment_subturn_and_next_round_hint() 
         plan_2["question"],
         json!("verify cache failure modes under node loss")
     );
-    assert_eq!(plan_2["participants"], json!(["arch", "qa"]));
+    assert_eq!(plan_2["participants"], json!(["plan", "explore"]));
     fleet.shutdown().await;
 }

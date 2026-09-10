@@ -1,4 +1,4 @@
-Commit: b465f440381bd009dc9bd3a8192ad88eab44cede
+Commit: (working-tree, 基于 b465f440)
 
 # control 模块
 
@@ -20,11 +20,13 @@ Commit: b465f440381bd009dc9bd3a8192ad88eab44cede
 - `crates/control/tests/e2e/` — e2e：真实 build_app + 脚本化 WS 节点
 - `crates/control/tests/resource_root.rs` — 资源根隔离验证
 
+- `src/api/brain_playbook_dispatch.rs` — 剧本平台派发：批次按依赖层背靠背建 execution（id `{prefix}-pbk-{request_id}-{step}`）、`fleet.definition("capability_target", id)` 解析 Brain 目标、`trigger_scan` 消息相似度触发；路由 `GET/POST /api/brain/playbooks*`。
 ## 边界
 
 - server 二进制不依赖 session/worker/team/project runtime。
 - 执行明细向归属 Node 实时查询，全局索引不存运行内容。
 - system 团队执行已退役；跨节点维护走 POST /api/nodes/:id/maintenance。
+- team 定义成员=agent 名（唯一、captain ∈ members）；resolve 时经 `GET /api/brain/agents` 同源聚合把成员能力 summary 固化进 pinned definition，库存定义不落 capabilities。
 - 认证开启时 seed token 恒等 admin；换启动 token 重启会把表内 `admin` 行 digest 重指新 token（轮换即吊销旧 seed 凭证）。非 admin 仅读 + operator 提交/命令（operator 为宿主机直跑通道）；无 Identity 视为 admin（本地模式）。
 
 ## 相关

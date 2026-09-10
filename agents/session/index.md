@@ -1,4 +1,4 @@
-Commit: b465f440381bd009dc9bd3a8192ad88eab44cede
+Commit: c36ac68df313ec108549ed5b95756eb37edf5f69
 
 # session 模块
 
@@ -32,6 +32,8 @@ Commit: b465f440381bd009dc9bd3a8192ad88eab44cede
 - `src/streamline.rs`、`src/mention_resolve.rs` — assistant 文本保义精简；`@path` 提及展开。
 - `src/tool_guard.rs`、`src/dangling_tools.rs` — 失败阈值守卫；补未应答 tool_use 防 400。
 - `src/autopilot/` — autopilot 决策/阶段/复核。
+
+主模型、small model、子代理及标题/VERIFY 请求沿 provider 的协议路由；Responses 的 provider state 随消息持久化，resume、fork 和 compaction 保持完整工具组及续聊 output。
 
 ## 边界
 

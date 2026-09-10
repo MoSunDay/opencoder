@@ -134,6 +134,7 @@ mod tests {
             assert!(!allow(role, "POST", "/api/users"));
             assert!(!allow(role, "DELETE", "/api/users/alice"));
             assert!(!allow(role, "GET", "/api/brain/capabilities"));
+            assert!(!allow(Role::User, "GET", "/api/brain/agents"));
             // The shell/assets stay reachable (auth exempts them).
             assert!(allow(role, "GET", "/"));
         }
@@ -144,10 +145,18 @@ mod tests {
         // These pass the gate; the executions handlers reject non-operator
         // kinds for non-admins.
         assert!(allow(Role::User, "POST", "/api/executions"));
-        assert!(allow(Role::User, "POST", "/api/executions/operator-x/commands"));
+        assert!(allow(
+            Role::User,
+            "POST",
+            "/api/executions/operator-x/commands"
+        ));
         // Other mutations on executions stay closed.
         assert!(!allow(Role::User, "PUT", "/api/executions/operator-x"));
-        assert!(!allow(Role::User, "POST", "/api/executions/operator-x/events"));
+        assert!(!allow(
+            Role::User,
+            "POST",
+            "/api/executions/operator-x/events"
+        ));
         assert!(!allow(Role::User, "POST", "/api/executions/"));
     }
 }

@@ -5,7 +5,7 @@
 //! via [`super::tx::run_tx`] (`BEGIN IMMEDIATE`) with explicit cascades.
 
 use anyhow::{Context, Result};
-use libsql::{params, Connection, Value};
+use libsql::{Connection, Value, params};
 
 use crate::project_types::{
     ProjectExecutorKind, ProjectTodoRecord, ProjectTodoRunKind, ProjectTodoRunPatch,
@@ -429,8 +429,12 @@ pub async fn finish_todo_run(
             status != ProjectTodoRunStatus::Running,
             "run finalization requires terminal status"
         );
+        // Step runs (playbook 子尝试) 永不回写 todo 状态：todo 生命周期由
+        // 父 playbook run 独占（它才是 Execute 行）；Plan/Execute 语义不变。
         let next = if run.kind == ProjectTodoRunKind::Plan {
             (status == ProjectTodoRunStatus::Done).then_some(ProjectTodoStatus::Planned)
+        } else if run.kind == ProjectTodoRunKind::Step {
+            None
         } else {
             Some(match status {
                 ProjectTodoRunStatus::Done => ProjectTodoStatus::Done,

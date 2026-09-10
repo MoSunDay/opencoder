@@ -1,7 +1,7 @@
 //! v23: independent milestones and one-time classification of legacy backlog.
 //! Runs inside the bootstrap transaction; no business record is discarded.
-use anyhow::{ensure, Result};
-use libsql::{params, Connection};
+use anyhow::{Result, ensure};
+use libsql::{Connection, params};
 
 pub(super) async fn migrate(conn: &Connection) -> Result<()> {
     let mut columns = conn

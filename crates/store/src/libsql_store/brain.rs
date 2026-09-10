@@ -3,7 +3,7 @@
 //! more than one row run inside a single `run_tx` transaction.
 
 use anyhow::{Context, Result};
-use libsql::{params, Connection, Row};
+use libsql::{Connection, Row, params};
 
 use crate::{
     BrainCapabilityDetail, BrainCapabilityRecord, BrainEngInputRecord, BrainPlanRecord,

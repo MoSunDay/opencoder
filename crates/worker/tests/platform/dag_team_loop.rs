@@ -41,8 +41,7 @@ async fn dag_saved_definition_dispatch_runs_to_done() {
     // The agent step answers with prose around a ```json fence so the run
     // loop recovers structured output via `extract_output_json_from`.
     client.queue_script(completed(
-        "here is the result\n```json\n{\"answer\":\"saved-def-ok\"}\n```\ndone"
-            .to_string(),
+        "here is the result\n```json\n{\"answer\":\"saved-def-ok\"}\n```\ndone".to_string(),
     ));
     let saved = fleet
         .call(
@@ -55,7 +54,11 @@ async fn dag_saved_definition_dispatch_runs_to_done() {
         .await;
     assert_eq!(saved.status, 200, "{saved:?}");
     let dispatched = fleet
-        .call("POST", "/api/dag/defs/saved-loop/dispatch", json!({"id":"dag-saved-loop"}))
+        .call(
+            "POST",
+            "/api/dag/defs/saved-loop/dispatch",
+            json!({"id":"dag-saved-loop"}),
+        )
         .await;
     assert_eq!(dispatched.status, 202, "{dispatched:?}");
     assert_eq!(dispatched.body["run_id"], json!("dag-saved-loop"));
@@ -104,16 +107,16 @@ async fn team_dispatch_completes_with_final_summary() {
         .call(
             "POST",
             "/api/teams",
-            json!({"name":"loop-team","captain":"captain","members":[
-                {"id":"captain","agent":"act","role":"coordinate"},
-                {"id":"reviewer","agent":"act","role":"review"}
+            json!({"name":"loop-team","captain":"act","members":[
+                {"agent":"act"},
+                {"agent":"plan"}
             ]}),
         )
         .await;
     assert_eq!(saved.status, 200, "{saved:?}");
     // plan decision → member answer → summary decision → closing decision.
     for text in [
-        json!({"question":"review the delivery","participants":["reviewer"],"rationale":"need a review"})
+        json!({"question":"review the delivery","participants":["plan"],"rationale":"need a review"})
             .to_string(),
         "member reviewed the delivery".into(),
         "{\"summary\":\"review finished\",\"aligned\":true}".into(),
@@ -143,10 +146,9 @@ async fn team_dispatch_completes_with_final_summary() {
     // Worker-side team state: team.json under the team dir and the topic
     // record carrying the final summary from the closing decision.
     let team_state = fleet.root().join("n0/node/team/team-loop-1/team/loop-team");
-    let team: Value = serde_json::from_str(
-        &std::fs::read_to_string(team_state.join("team.json")).unwrap(),
-    )
-    .unwrap();
+    let team: Value =
+        serde_json::from_str(&std::fs::read_to_string(team_state.join("team.json")).unwrap())
+            .unwrap();
     assert_eq!(team["name"], json!("loop-team"));
     let topic: Value = serde_json::from_str(
         &std::fs::read_to_string(team_state.join("team-loop-1/team.json")).unwrap(),

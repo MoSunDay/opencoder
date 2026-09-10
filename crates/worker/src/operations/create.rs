@@ -187,6 +187,10 @@ fn project_preflight_agents(
             Some("dag") => dag_spec_agents(todo.executor_spec.as_deref()).unwrap_or_default(),
             _ => Vec::new(),
         },
+        // Playbook steps are resolved from the brain playbook spec at
+        // execute time (the executor_ref names a playbook, not an agent), so
+        // preflight has nothing to list — lazy resolution, never a failure.
+        ProjectExecutorKind::Playbook => Vec::new(),
     }
 }
 

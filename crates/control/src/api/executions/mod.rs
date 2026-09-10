@@ -218,10 +218,7 @@ pub async fn dispatch_command_as(
         Ok(Some(index))
             if identity.is_some_and(|i| !i.is_admin() && index.kind != ExecutionKind::Operator) =>
         {
-            return RpcReply::error(
-                403,
-                "non-admin roles may only command operator executions",
-            );
+            return RpcReply::error(403, "non-admin roles may only command operator executions");
         }
         Ok(Some(index))
             if index.kind == ExecutionKind::System

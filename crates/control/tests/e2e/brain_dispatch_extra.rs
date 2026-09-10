@@ -259,8 +259,8 @@ async fn team_target_dispatches_team_execution() {
     let h = Harness::new().await;
     let team = json!({
         "name": "relay-team",
-        "captain": "m1",
-        "members": [{"id": "m1", "agent": "act", "role": "captain"}],
+        "captain": "act",
+        "members": [{"agent": "act"}],
     });
     let (status, body) = h.req(Method::POST, "/api/teams", Some(team)).await;
     assert_eq!(status, 200, "{body}");

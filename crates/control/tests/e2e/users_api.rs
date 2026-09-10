@@ -8,11 +8,21 @@ use serde_json::{json, Value};
 use crate::support::{http::Harness, TOKEN};
 
 /// JSON request with an explicit bearer; returns (status, parsed body).
-async fn auth(h: &Harness, method: Method, path: &str, token: &str, body: Option<Value>) -> (reqwest::StatusCode, Value) {
+async fn auth(
+    h: &Harness,
+    method: Method,
+    path: &str,
+    token: &str,
+    body: Option<Value>,
+) -> (reqwest::StatusCode, Value) {
     let resp = h.req_raw(method, path, body, Some(token)).await;
     let status = resp.status();
     let bytes = resp.bytes().await.unwrap();
-    let parsed = if bytes.is_empty() { json!({}) } else { serde_json::from_slice(&bytes).unwrap_or(json!({})) };
+    let parsed = if bytes.is_empty() {
+        json!({})
+    } else {
+        serde_json::from_slice(&bytes).unwrap_or(json!({}))
+    };
     (status, parsed)
 }
 
@@ -38,15 +48,27 @@ async fn me_reports_the_seed_admin_and_rejects_missing_tokens() {
 #[tokio::test]
 async fn admin_creates_lists_and_revokes_users() {
     let h = Harness::new().await;
-    let (status, body) =
-        auth(&h, Method::POST, "/api/users", TOKEN, Some(json!({"name": "alice", "role": "user"}))).await;
+    let (status, body) = auth(
+        &h,
+        Method::POST,
+        "/api/users",
+        TOKEN,
+        Some(json!({"name": "alice", "role": "user"})),
+    )
+    .await;
     assert_eq!(status, 200, "{body}");
     assert_eq!(body["user"]["name"], json!("alice"));
     assert_eq!(body["user"]["role"], json!("user"));
     let token = body["token"].as_str().unwrap().to_string();
     // The plaintext is returned exactly once and in the `oc_` wire format.
-    assert!(token.starts_with("oc_"), "plaintext oc_ token returned exactly once: {token}");
-    assert!(token.len() > "oc_".len(), "plaintext token carries randomness");
+    assert!(
+        token.starts_with("oc_"),
+        "plaintext oc_ token returned exactly once: {token}"
+    );
+    assert!(
+        token.len() > "oc_".len(),
+        "plaintext token carries randomness"
+    );
 
     // The issued token authenticates as its user.
     let (status, me) = auth(&h, Method::GET, "/api/me", &token, None).await;
@@ -54,14 +76,32 @@ async fn admin_creates_lists_and_revokes_users() {
     assert_eq!(me, json!({"name": "alice", "role": "user"}));
 
     // Duplicate names collide with 409; unknown roles and bad names 400.
-    let (status, _) =
-        auth(&h, Method::POST, "/api/users", TOKEN, Some(json!({"name": "alice", "role": "root"}))).await;
+    let (status, _) = auth(
+        &h,
+        Method::POST,
+        "/api/users",
+        TOKEN,
+        Some(json!({"name": "alice", "role": "root"})),
+    )
+    .await;
     assert_eq!(status, 409);
-    let (status, _) =
-        auth(&h, Method::POST, "/api/users", TOKEN, Some(json!({"name": "x y", "role": "user"}))).await;
+    let (status, _) = auth(
+        &h,
+        Method::POST,
+        "/api/users",
+        TOKEN,
+        Some(json!({"name": "x y", "role": "user"})),
+    )
+    .await;
     assert_eq!(status, 400);
-    let (status, _) =
-        auth(&h, Method::POST, "/api/users", TOKEN, Some(json!({"name": "ok", "role": "boss"}))).await;
+    let (status, _) = auth(
+        &h,
+        Method::POST,
+        "/api/users",
+        TOKEN,
+        Some(json!({"name": "ok", "role": "boss"})),
+    )
+    .await;
     assert_eq!(status, 400);
 
     // Listing shows the user without any token material.
@@ -88,23 +128,46 @@ async fn delete_protections_cover_self_and_the_last_admin() {
     // The seed identity is "admin": self-delete is refused before lookup.
     let (status, body) = auth(&h, Method::DELETE, "/api/users/admin", TOKEN, None).await;
     assert_eq!(status, 400, "{body}");
-    assert_eq!(body["error"], json!("cannot delete the caller's own account"));
+    assert_eq!(
+        body["error"],
+        json!("cannot delete the caller's own account")
+    );
 
     // A lone table admin cannot be removed…
-    auth(&h, Method::POST, "/api/users", TOKEN, Some(json!({"name": "boss", "role": "admin"}))).await;
+    auth(
+        &h,
+        Method::POST,
+        "/api/users",
+        TOKEN,
+        Some(json!({"name": "boss", "role": "admin"})),
+    )
+    .await;
     let (status, body) = auth(&h, Method::DELETE, "/api/users/boss", TOKEN, None).await;
     assert_eq!(status, 400, "{body}");
     assert_eq!(body["error"], json!("cannot delete the last admin"));
 
     // …but a second admin unlocks the removal.
-    auth(&h, Method::POST, "/api/users", TOKEN, Some(json!({"name": "boss2", "role": "admin"}))).await;
+    auth(
+        &h,
+        Method::POST,
+        "/api/users",
+        TOKEN,
+        Some(json!({"name": "boss2", "role": "admin"})),
+    )
+    .await;
     let (status, _) = auth(&h, Method::DELETE, "/api/users/boss", TOKEN, None).await;
     assert_eq!(status, 200);
 }
 
 async fn user_token_h(h: &Harness, name: &str, role: &str) -> String {
-    let (status, body) =
-        auth(h, Method::POST, "/api/users", TOKEN, Some(json!({"name": name, "role": role}))).await;
+    let (status, body) = auth(
+        h,
+        Method::POST,
+        "/api/users",
+        TOKEN,
+        Some(json!({"name": name, "role": role})),
+    )
+    .await;
     assert_eq!(status, 200, "{body}");
     body["token"].as_str().unwrap().to_string()
 }
@@ -122,14 +185,27 @@ async fn non_admins_get_the_read_and_operator_launch_profile() {
         // …management and other surfaces stay admin-only.
         let (status, _) = auth(&h, Method::GET, "/api/users", &token, None).await;
         assert_eq!(status, 403, "{role} users");
-        let (status, _) =
-            auth(&h, Method::POST, "/api/users", &token, Some(json!({"name": "x", "role": "user"}))).await;
+        let (status, _) = auth(
+            &h,
+            Method::POST,
+            "/api/users",
+            &token,
+            Some(json!({"name": "x", "role": "user"})),
+        )
+        .await;
         assert_eq!(status, 403, "{role} create user");
         let (status, _) = auth(&h, Method::GET, "/api/agents", &token, None).await;
         assert_eq!(status, 403, "{role} agents");
         let (status, _) = auth(&h, Method::GET, "/api/brain/capabilities", &token, None).await;
         assert_eq!(status, 403, "{role} brain");
-        let (status, _) = auth(&h, Method::POST, "/api/nodes/node-e2e/maintenance", &token, Some(json!({}))).await;
+        let (status, _) = auth(
+            &h,
+            Method::POST,
+            "/api/nodes/node-e2e/maintenance",
+            &token,
+            Some(json!({})),
+        )
+        .await;
         assert_eq!(status, 403, "{role} maintenance");
     }
 }
@@ -155,7 +231,10 @@ async fn non_admins_submit_and_command_operator_executions_only() {
     .await;
     assert_eq!(status, 202, "{receipt}");
     assert_eq!(receipt["node_id"], json!("node-e2e"));
-    assert!(h.node.journal_ids().contains(&"operator-nina-1".to_string()));
+    assert!(h
+        .node
+        .journal_ids()
+        .contains(&"operator-nina-1".to_string()));
 
     // agent (or any other kind) submissions are refused before placement.
     let (status, body) = auth(
@@ -174,8 +253,16 @@ async fn non_admins_submit_and_command_operator_executions_only() {
 
     // Reading the operator execution works; the id must keep the operator-
     // prefix (the scripted node supplies the inspect body).
-    h.node.set_inspect("operator-nina-1", json!({"status": "running"}));
-    let (status, body) = auth(&h, Method::GET, "/api/executions/operator-nina-1", &token, None).await;
+    h.node
+        .set_inspect("operator-nina-1", json!({"status": "running"}));
+    let (status, body) = auth(
+        &h,
+        Method::GET,
+        "/api/executions/operator-nina-1",
+        &token,
+        None,
+    )
+    .await;
     assert_eq!(status, 200, "{body}");
     assert_eq!(body["status"], json!("running"));
 
@@ -241,5 +328,8 @@ async fn operator_kind_without_an_eligible_node_fails_closed() {
         body["error"],
         json!("no ready online node can accept this execution")
     );
-    assert!(!h.node.journal_ids().contains(&"operator-ghost-1".to_string()));
+    assert!(!h
+        .node
+        .journal_ids()
+        .contains(&"operator-ghost-1".to_string()));
 }

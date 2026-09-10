@@ -78,7 +78,10 @@ mod tests {
         assert_eq!(serde_json::to_string(&Role::Admin).unwrap(), "\"admin\"");
         assert_eq!(serde_json::to_string(&Role::Root).unwrap(), "\"root\"");
         assert_eq!(serde_json::to_string(&Role::User).unwrap(), "\"user\"");
-        assert_eq!(serde_json::from_str::<Role>("\"root\"").unwrap(), Role::Root);
+        assert_eq!(
+            serde_json::from_str::<Role>("\"root\"").unwrap(),
+            Role::Root
+        );
         assert!(serde_json::from_str::<Role>("\"superuser\"").is_err());
         for role in [Role::Admin, Role::Root, Role::User] {
             assert_eq!(parse_role(role.as_str()), Some(role));

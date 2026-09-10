@@ -5,8 +5,8 @@ use opencoder_core::Role;
 use opencoder_llm::{LlmEvent, MockChatClient};
 use opencoder_node::fleet::NodeService;
 use opencoder_store::{LibsqlStore, Store};
-use serde_json::{json, Value};
 use opencoder_worker::Worker;
+use serde_json::{json, Value};
 use std::sync::Arc;
 use support::*;
 
@@ -381,7 +381,10 @@ async fn shutdown_waits_for_task_capture_before_immediate_reopen() {
 /// Worker options with an explicit max-runs budget (the shared `worker()`
 /// helper fixes 4): max_runs = 1 pins the single slot so later creations
 /// stay durably queued instead of dispatching immediately.
-async fn one_slot_worker(root: &std::path::Path, client: Arc<dyn opencoder_llm::ChatStream>) -> Worker {
+async fn one_slot_worker(
+    root: &std::path::Path,
+    client: Arc<dyn opencoder_llm::ChatStream>,
+) -> Worker {
     let workdir = root.join("work");
     std::fs::create_dir_all(workdir.join(".opencoder")).unwrap();
     std::fs::write(workdir.join(".opencoder/ap.json"), r#"{"mode":"off"}"#).unwrap();

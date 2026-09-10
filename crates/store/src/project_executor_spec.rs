@@ -33,6 +33,9 @@ pub fn validate_spec(kind: ProjectExecutorKind, spec_json: &str) -> Result<()> {
                 serde_json::from_str(spec_json).context("parse brain routes")?;
             validate_brain_routes(&routes)
         }
+        // playbook 的编排图存在 brain playbook 表（executor_ref 引用），
+        // 不接受内联 spec（镜像 Agent 分支的拒绝语义）。
+        ProjectExecutorKind::Playbook => bail!("playbook executor takes no spec"),
     }
 }
 

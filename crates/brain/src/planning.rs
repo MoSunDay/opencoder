@@ -8,13 +8,17 @@ use std::collections::HashSet;
 use anyhow::{Context, Result};
 
 use opencoder_llm::{ChatRequest, ChatStream, LlmEvent};
-use opencoder_store::{BrainPlanRecord, BrainVectorHit};
+use opencoder_store::{BrainPlanRecord, BrainPlaybookRecord, BrainVectorHit};
 
 use crate::error::{PlanGenerationFailed, PlanNotFound};
 use crate::plan::{
     attach_topic_vectors, collect_topics, dispatch, validate, DecisionTree, DispatchOutcome,
 };
-use crate::runtime::{Runtime, PLAN_ID_PREFIX};
+use crate::playbook::{
+    self, PlaybookInput, PlaybookOrigin, PlaybookSpec, PlaybookStep, PlaybookTarget,
+    PlaybookTrigger,
+};
+use crate::runtime::{Runtime, PLAN_ID_PREFIX, PLAYBOOK_ID_PREFIX};
 
 /// The framework prompt every planning call runs under — the single source
 /// of truth for what the planner model is asked to produce. Kept `pub` so
@@ -40,6 +44,31 @@ pub const PLANNER_FRAMEWORK_PROMPT: &str = "\
 {\"threshold\":0.35,\"root\":{\"id\":\"b1\",\"kind\":\"branch\",\"topic\":\"…\",\"reason\":\"…\",\"yes\":{…},\"no\":{…}}}\n\
 叶节点形如：{\"id\":\"l1\",\"kind\":\"leaf\",\"capability_id\":\"…\",\"reason\":\"…\"}";
 
+/// The framework prompt every dynamic-playbook planning call runs under —
+/// the sibling of [`PLANNER_FRAMEWORK_PROMPT`] for the second scheduling
+/// track (dual-track: decision trees route, playbooks orchestrate). Kept
+/// `pub` so callers (tests, audits, the web surface) can pin the exact
+/// contract.
+pub const PLAYBOOK_FRAMEWORK_PROMPT: &str = "\
+你是「剧本动态规划器」：把候选能力库组织成一份可执行剧本（playbook），让一个新情况由一组步骤协作处理，而不是路由到单个能力。\n\
+\n\
+输入：\n\
+1. 当前情况（situation）\n\
+2. 候选能力清单：每项含 capability_id、类型、摘要、输入/输出描述，以及与当前情况的向量距离 distance（越小越相关；相似度 = 1 - distance）\n\
+\n\
+任务：输出一份严格 JSON 的剧本草稿：每个步骤指派一个执行目标（agent/team/dag/todos/brain）与一段提示词模板，用 depends_on 声明步骤间的先后依赖。\n\
+\n\
+构造规则：\n\
+1. 只能引用候选清单中出现过的 capability_id 于 brain 目标，禁止编造。\n\
+2. steps 不超过 8 个；step 的 name 为 slug：仅小写字母、数字与 `-`/`_`。\n\
+3. depends_on 只能引用其他 step 的 name，禁止环与自依赖。\n\
+4. prompt 为模板，必须包含 `{situation}` 占位符（派发时替换为当前情况）。\n\
+5. target 的 kind 只能是 agent/team/dag/todos/brain 之一，且对应字段（agent/team/dag/workflow/capability_id）非空。\n\
+6. 只输出 name、trigger（可省略，缺省为 manual）与 steps；id 与 origin 由系统生成，不要输出。\n\
+\n\
+输出（只输出 JSON，不要任何其它文字）：\n\
+{\"name\":\"...\",\"trigger\":{\"kind\":\"message\",\"match_text\":\"...\",\"threshold\":0.82},\"steps\":[{\"name\":\"fetch\",\"depends_on\":[],\"target\":{\"kind\":\"agent\",\"agent\":\"act\"},\"prompt\":\"请处理：{situation}\"}]}";
+
 /// What one `dispatch_or_plan` call resolved to: the routed outcome plus the
 /// plan that produced it (and whether that plan was minted by this call or
 /// reused from the digest cache).
@@ -49,6 +78,18 @@ pub struct Dispatched {
     pub outcome: DispatchOutcome,
     /// `true` when this call planned a fresh tree; `false` when it reused
     /// the cached newest plan for the situation digest.
+    pub planned_fresh: bool,
+}
+
+/// What one `plan_playbook` call resolved to: the persisted record plus its
+/// decoded spec (and whether this call minted the playbook or reused the
+/// newest dynamic one cached for the situation digest).
+#[derive(Debug, Clone)]
+pub struct PlannedPlaybook {
+    pub record: BrainPlaybookRecord,
+    pub spec: PlaybookSpec,
+    /// `true` when this call planned a fresh playbook; `false` when it
+    /// reused the cached newest dynamic playbook for the situation digest.
     pub planned_fresh: bool,
 }
 
@@ -191,6 +232,101 @@ impl Runtime {
             .with_context(|| format!("dispatch through plan {} failed", record.id))?;
         Ok((record.clone(), outcome))
     }
+
+    /// Plan one dynamic playbook for a situation — the second scheduling
+    /// track. Reuse the newest cached dynamic playbook for the situation
+    /// digest unless missing; otherwise vector-search the library and
+    /// either fall back to the default act playbook (empty library — no
+    /// LLM call at all) or prompt the planner model under
+    /// [`PLAYBOOK_FRAMEWORK_PROMPT`] → parse → validate against the
+    /// retrieved candidate set → persist. LLM-side failures (stream error,
+    /// unparseable reply, contract violation) surface as the typed
+    /// [`PlanGenerationFailed`] marker; a corrupt cached spec is a
+    /// 500-class plain anyhow error (mirroring [`Self::dispatch_record`]).
+    pub async fn plan_playbook(
+        &self,
+        chat_model: &str,
+        situation: &str,
+        top_k: u32,
+        now_ms: i64,
+    ) -> Result<PlannedPlaybook> {
+        let digest = situation_digest(situation);
+        if let Some(record) = self.store.latest_brain_playbook_for(&digest).await? {
+            if record.origin == "dynamic" {
+                let spec: PlaybookSpec = serde_json::from_str(&record.spec_json)
+                    .with_context(|| format!("stored playbook {} spec is corrupt", record.id))?;
+                return Ok(PlannedPlaybook {
+                    record,
+                    spec,
+                    planned_fresh: false,
+                });
+            }
+        }
+        let hits = self.search(situation, top_k).await?;
+        let spec = if hits.is_empty() {
+            default_act_spec(&digest)
+        } else {
+            let req = ChatRequest {
+                purpose: opencoder_llm::RequestPurpose::Planning,
+                model: chat_model.to_string(),
+                messages: vec![
+                    opencoder_llm::Message::system("playbook-system", PLAYBOOK_FRAMEWORK_PROMPT),
+                    opencoder_llm::Message::user(
+                        "playbook-user",
+                        build_user_prompt(situation, &hits),
+                    ),
+                ],
+                tools: Vec::new(),
+                tool_choice: None,
+                temperature: Some(0.2),
+                max_tokens: Some(4096),
+                reasoning_effort: None,
+                cache_salt: None,
+            };
+            let raw = drain_chat(self.client.as_ref(), req)
+                .await
+                .map_err(|e| gen_failed(format!("planner chat failed: {e:#}")))?;
+            let draft = parse_playbook_reply(&raw)
+                .map_err(|e| gen_failed(format!("planner reply unparseable: {e:#}")))?;
+            PlaybookSpec {
+                schema_version: playbook::SCHEMA_VERSION,
+                id: format!("{PLAYBOOK_ID_PREFIX}-{}", ulid::Ulid::new()),
+                name: draft.name,
+                origin: PlaybookOrigin::Dynamic {
+                    situation_digest: digest.clone(),
+                    plan_id: None,
+                },
+                trigger: draft.trigger,
+                steps: draft.steps,
+            }
+        };
+        let mut errs = match playbook::validate(&spec) {
+            Ok(()) => Vec::new(),
+            Err(errs) => errs,
+        };
+        errs.extend(validate_candidates(&spec, &hits));
+        if !errs.is_empty() {
+            return Err(gen_failed(format!(
+                "planner playbook invalid: {}",
+                errs.join("; ")
+            )));
+        }
+        let record = BrainPlaybookRecord {
+            id: spec.id.clone(),
+            name: spec.name.clone(),
+            origin: "dynamic".into(),
+            situation_digest: Some(digest),
+            spec_json: serde_json::to_string(&spec).context("serialize playbook spec")?,
+            created_at: now_ms,
+            updated_at: now_ms,
+        };
+        self.save_playbook_record(&record).await?;
+        Ok(PlannedPlaybook {
+            record,
+            spec,
+            planned_fresh: true,
+        })
+    }
 }
 
 /// Render the planner's user message: the situation plus the candidate
@@ -229,6 +365,72 @@ fn parse_tree(raw: &str) -> Result<DecisionTree> {
     };
     serde_json::from_str(&cleaned[start..=end])
         .context("planner reply is not a valid decision tree")
+}
+
+/// Parse the planner reply into a [`PlaybookInput`] draft — the exact
+/// fence-stripping leniency [`parse_tree`] applies to tree replies, so a
+/// ```` ```json ````-wrapped playbook parses the same as a bare one.
+fn parse_playbook_reply(raw: &str) -> Result<PlaybookInput> {
+    let cleaned = raw
+        .trim()
+        .trim_start_matches("```json")
+        .trim_start_matches("```");
+    let cleaned = cleaned.trim_end_matches("```").trim();
+    let Some(start) = cleaned.find('{') else {
+        anyhow::bail!("planner reply contains no JSON object");
+    };
+    let Some(end) = cleaned.rfind('}') else {
+        anyhow::bail!("planner reply JSON object is unterminated");
+    };
+    serde_json::from_str(&cleaned[start..=end]).context("planner reply is not a valid playbook")
+}
+
+/// The empty-library fallback: a single-step playbook handing the raw
+/// situation to the `act` agent. No LLM call is spent — with zero
+/// candidates there is nothing to orchestrate, so the playbook degrades to
+/// "let an agent handle it". The prompt template keeps the `{situation}`
+/// placeholder verbatim (substituted at dispatch time by
+/// [`crate::playbook::render_prompt`]).
+fn default_act_spec(digest: &str) -> PlaybookSpec {
+    PlaybookSpec {
+        schema_version: playbook::SCHEMA_VERSION,
+        id: format!("{PLAYBOOK_ID_PREFIX}-{}", ulid::Ulid::new()),
+        name: "default-act".to_string(),
+        origin: PlaybookOrigin::Dynamic {
+            situation_digest: digest.to_string(),
+            plan_id: None,
+        },
+        trigger: PlaybookTrigger::Manual {},
+        steps: vec![PlaybookStep {
+            name: "act".to_string(),
+            depends_on: Vec::new(),
+            target: PlaybookTarget::Agent {
+                agent: "act".to_string(),
+            },
+            prompt: "{situation}".to_string(),
+        }],
+    }
+}
+
+/// The planner-side half of the playbook contract the pure
+/// [`playbook::validate`] cannot check (it has no retrieval context):
+/// every brain step must target one of the retrieved candidates. Returns
+/// one message per violation so the caller folds them into the same
+/// aggregated generation error.
+fn validate_candidates(spec: &PlaybookSpec, hits: &[BrainVectorHit]) -> Vec<String> {
+    let ids: HashSet<&str> = hits.iter().map(|h| h.capability.id.as_str()).collect();
+    spec.steps
+        .iter()
+        .filter_map(|step| match &step.target {
+            PlaybookTarget::Brain { capability_id } if !ids.contains(capability_id.as_str()) => {
+                Some(format!(
+                    "brain target {capability_id:?} (step {:?}) is not a candidate",
+                    step.name
+                ))
+            }
+            _ => None,
+        })
+        .collect()
 }
 
 /// Drain one scripted chat stream to its final text — the same discipline

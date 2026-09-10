@@ -29,6 +29,7 @@ axum HTTP/SSE 会话管理与编译期内嵌 SPA。
 - `spa/src/harness/` — harness 管理、runners、启动字段。
 - `spa/src/fleet/` — 节点/执行/团队/调度面板。
 - `spa/src/project/` — 项目目标/里程碑/TODO 面板。
+- `spa/src/todo/editor/`、`spa/src/todoEditor.jsx` — TODO 模板编辑器：表单/画布/JSON 三态，spec 唯一事实来源，画布坐标仅会话态。
 - `spa/src/ui/tableLoading.js` — 列表表格 `loading` 的唯一约定：`tableLoading`（带 delay，裸 boolean 会变成 `delay:0` 闪遮罩）+ `tableRows`（拉取中交回 `undefined`，否则 antd 对着用户断言「暂无数据」）。新增表一律走它。
 - `scripts/acceptance/spa_responsive.js` — 390×844 手机视口横向溢出门禁，服务**工作树** `spa/dist`；启动打印 bundle 溯源，`--require-committed` 拒测非 HEAD 产物、`--drift` 先跑漂移检查。
 - `scripts/check-spa-drift.sh` — `spa/dist` ↔ `src` 漂移检查；压缩器对同一 src 偶发不同标识符命名（实测 4 次构建 1 次变体），故仅在差异局限于 `static/app.js` 时重建重试。

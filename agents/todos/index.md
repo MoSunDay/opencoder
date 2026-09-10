@@ -6,7 +6,7 @@ Commit: b465f440381bd009dc9bd3a8192ad88eab44cede
 
 ## 关键路径
 - `src/types.rs` — `WorkflowSpec`/`TodoSpec`/`WorkflowState`/`ParentDecision`/`ContextMode`。
-- `src/domain.rs` — `validate_spec`；TODO agent 必须为 primary。
+- `src/domain.rs` — `validate_spec`；TODO agent 必须为 primary。SPA 镜像 `crates/web/spa/src/todo/editor/specValidate.js` 逐条对齐（改校验规则需同步）。
 - `src/parent.rs` — 父 workflow Primary Session 决策循环。
 - `src/execution.rs` — 每 TODO 独立 act Primary Session 完成闭环。
 - `src/transitions.rs` — 状态机守卫；Interrupted 豁免 max_attempts。

@@ -1,8 +1,10 @@
-// todoEditor.jsx — TODO 模板单版本编辑器：表单 / JSON 源码双模式编辑
+// todoEditor.jsx — TODO 模板单版本编辑器：表单 / 画布 / JSON 源码三模式编辑
 // GET/PUT /api/todo/templates/:name/:version/context.json 上的 WorkflowSpec。
 // 表单模式只覆盖高频字段（name/objective/constraints/todos 常规列）；
-// acceptance.required_tool_calls 属低频字段，不建表单入口 —— 序列化时按
-// todo id 从原 spec 透传，需要增删时切到「JSON 源码」模式编辑。
+// 画布模式（todo/editor/canvasEditor.jsx）可视化编辑节点/依赖，Inspector 内
+// 亦可编辑 acceptance.required_tool_calls；JSON 源码模式兜底全量字段。
+// spec state 是唯一草稿事实来源，三模式进出时互相搬运（时序镜像
+// dag/defEditor.jsx）；画布坐标是会话状态（positions），不入 spec。
 // Env 绑定（env.json）与 context 一起保存（绑定值变化才发 PUT）。
 
 import { Button, Card, Col, Divider, Form, Input, InputNumber, Row, Segmented, Select, Space, Spin, Typography } from 'antd';
@@ -11,6 +13,8 @@ import { apiGet, apiPut } from './api.js';
 import { err } from './notice.js';
 import { useMessage } from './ui/appMessage.js';
 import { MONO_VAR } from './ui/mono.js';
+import { TodoCanvasEditor } from './todo/editor/canvasEditor.jsx';
+import { validateSpec } from './todo/editor/specValidate.js';
 
 const { TextArea } = Input;
 const { Text } = Typography;
@@ -52,7 +56,7 @@ export function specToForm(s) {
 }
 
 /// 表单值 → WorkflowSpec：schema_version/id/metadata 原样保留自 original；
-/// required_tool_calls 按 todo id 透传（低频字段，仅 JSON 模式可改）。
+/// required_tool_calls 按 todo id 透传（低频字段，画布/JSON 模式可改）。
 export function formToSpec(values, original) {
   const src = original || {};
   const todos = (values.todos || []).map((t) => {
@@ -97,6 +101,8 @@ function TodoEditorSession({ templateName, version, onNotice, onClose }) {
   const [mode, setMode] = useState('form');
   const [spec, setSpec] = useState(null);
   const [jsonText, setJsonText] = useState('');
+  const [positions, setPositions] = useState({}); // 画布会话坐标 map，不入 spec
+  const [canvasKey, setCanvasKey] = useState(0); // 进入画布时 bump → 以新 spec 重挂
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [envs, setEnvs] = useState([]);
@@ -150,26 +156,56 @@ function TodoEditorSession({ templateName, version, onNotice, onClose }) {
     [todosWatch],
   );
 
+  /// 画布红点 / 工具栏徽标的实时校验（结构化 [{path,message}]，来自 specValidate）。
+  const problems = useMemo(
+    () => (spec && typeof spec === 'object' ? validateSpec(spec) : []),
+    [spec],
+  );
+
+  /// 三模式切换（时序镜像 dag/defEditor.jsx）：spec 是唯一草稿事实来源，
+  /// 离开一个模式先把它的编辑并入 spec，再从（局部变量里的）新 spec 派生
+  /// 目标视图 —— setState 异步，绝不读刚 set 过的 state。
   const switchMode = (next) => {
     if (next === mode) {
       return;
     }
-    if (next === 'json') {
-      // 表单 → JSON：以当前表单值生成源码（含未保存的编辑）。
-      setJsonText(JSON.stringify(formToSpec(form.getFieldsValue(), spec), null, 2));
-      setMode('json');
+    if (mode === 'form') {
+      // 离开表单：容忍半填（不 validateFields），当前表单值先并入 spec。
+      const merged = formToSpec(form.getFieldsValue(), spec);
+      setSpec(merged);
+      if (next === 'json') {
+        setJsonText(JSON.stringify(merged, null, 2));
+      } else {
+        setCanvasKey((k) => k + 1); // 重挂画布，让新 spec 成为初始值
+      }
+      setMode(next);
       return;
     }
-    let parsed = null;
-    try {
-      parsed = JSON.parse(jsonText);
-    } catch (e) {
-      msg.error('JSON 解析失败: ' + (e && e.message));
-      return; // 停留在 JSON 模式，修好再切
+    if (mode === 'json') {
+      // 离开 JSON：解析失败停留原模式，修好再切。
+      let parsed = null;
+      try {
+        parsed = JSON.parse(jsonText);
+      } catch (e) {
+        msg.error('JSON 解析失败: ' + (e && e.message));
+        return;
+      }
+      setSpec(parsed);
+      if (next === 'form') {
+        form.setFieldsValue(specToForm(parsed));
+      } else {
+        setCanvasKey((k) => k + 1);
+      }
+      setMode(next);
+      return;
     }
-    setSpec(parsed);
-    form.setFieldsValue(specToForm(parsed));
-    setMode('form');
+    // 离开画布：spec 已是画布持续上抛的草稿，直接派生目标视图。
+    if (next === 'form') {
+      form.setFieldsValue(specToForm(spec));
+    } else {
+      setJsonText(JSON.stringify(spec, null, 2));
+    }
+    setMode(next);
   };
 
   const save = async () => {
@@ -183,6 +219,9 @@ function TodoEditorSession({ templateName, version, onNotice, onClose }) {
         return; // 校验错误已标在字段上
       }
       nextSpec = formToSpec(values, spec);
+    } else if (mode === 'canvas') {
+      // 画布已把每次结构变更上抛进 spec，直接落盘。
+      nextSpec = spec;
     } else {
       try {
         nextSpec = JSON.parse(jsonText);
@@ -224,7 +263,11 @@ function TodoEditorSession({ templateName, version, onNotice, onClose }) {
             disabled={saving}
             value={mode}
             onChange={switchMode}
-            options={[{ value: 'form', label: '表单' }, { value: 'json', label: 'JSON 源码' }]}
+            options={[
+              { value: 'form', label: '表单' },
+              { value: 'canvas', label: '画布' },
+              { value: 'json', label: 'JSON 源码' },
+            ]}
           />
           <Button onClick={onClose} disabled={saving}>返回</Button>
           <Button type="primary" loading={saving} disabled={!spec} onClick={save}>保存</Button>
@@ -325,9 +368,21 @@ function TodoEditorSession({ templateName, version, onNotice, onClose }) {
           </Form.List>
           <Divider />
           <Text type="secondary">
-            提示：acceptance.required_tool_calls 等低频字段请切换到「JSON 源码」模式编辑。
+            提示：acceptance.required_tool_calls 等低频字段请切换到「画布」（选中节点后在右侧
+            Inspector 编辑）或「JSON 源码」模式编辑。
           </Text>
         </Form>
+      ) : mode === 'canvas' ? (
+        <div className="todo-edit-canvas" inert={saving ? '' : undefined}>
+          <TodoCanvasEditor
+            key={canvasKey}
+            spec={spec}
+            problems={problems}
+            positions={positions}
+            onSpecChange={setSpec}
+            onPositionsChange={setPositions}
+          />
+        </div>
       ) : (
         <div>
           <Text type="secondary">直接编辑 WorkflowSpec JSON；保存前会做本地 JSON 解析检查。</Text>

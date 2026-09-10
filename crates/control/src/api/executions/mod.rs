@@ -164,8 +164,19 @@ async fn submit_inner(state: &Arc<AppState>, request: CreateExecution) -> anyhow
 
 pub async fn create(
     State(state): State<Arc<AppState>>,
+    identity: Option<axum::Extension<opencoder_core::identity::Identity>>,
     Json(request): Json<CreateExecution>,
 ) -> Response {
+    if identity
+        .as_ref()
+        .map(|axum::Extension(i)| i)
+        .is_some_and(|i| !i.is_admin() && request.kind != ExecutionKind::Operator)
+    {
+        return response(RpcReply::error(
+            403,
+            "non-admin roles may only submit operator executions",
+        ));
+    }
     response(submit(&state, request).await)
 }
 
@@ -177,9 +188,11 @@ pub use paging::{
 pub async fn command(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
+    identity: Option<axum::Extension<opencoder_core::identity::Identity>>,
     Json(command): Json<ExecutionCommand>,
 ) -> Response {
-    response(dispatch_command(&state, &id, command).await)
+    let identity = identity.map(|axum::Extension(i)| i);
+    response(dispatch_command_as(&state, &id, command, identity.as_ref()).await)
 }
 
 /// Every public control route uses the same authoritative Plan snapshot.
@@ -187,9 +200,29 @@ pub async fn command(
 pub async fn dispatch_command(
     state: &Arc<AppState>,
     id: &str,
+    command: ExecutionCommand,
+) -> RpcReply {
+    dispatch_command_as(state, id, command, None).await
+}
+
+/// [`dispatch_command`] with the caller's identity: non-admins may command
+/// only operator executions (the role gate already limited them to this
+/// endpoint family).
+pub async fn dispatch_command_as(
+    state: &Arc<AppState>,
+    id: &str,
     mut command: ExecutionCommand,
+    identity: Option<&opencoder_core::identity::Identity>,
 ) -> RpcReply {
     match state.fleet.index(id).await {
+        Ok(Some(index))
+            if identity.is_some_and(|i| !i.is_admin() && index.kind != ExecutionKind::Operator) =>
+        {
+            return RpcReply::error(
+                403,
+                "non-admin roles may only command operator executions",
+            );
+        }
         Ok(Some(index))
             if index.kind == ExecutionKind::System
                 && !matches!(command.action.as_str(), "cancel" | "interrupt") =>

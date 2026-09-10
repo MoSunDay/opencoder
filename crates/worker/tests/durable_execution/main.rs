@@ -6,6 +6,7 @@ use opencoder_llm::{LlmEvent, MockChatClient};
 use opencoder_node::fleet::NodeService;
 use opencoder_store::{LibsqlStore, Store};
 use serde_json::{json, Value};
+use opencoder_worker::Worker;
 use std::sync::Arc;
 use support::*;
 
@@ -375,4 +376,156 @@ async fn shutdown_waits_for_task_capture_before_immediate_reopen() {
         node.shutdown().await.unwrap();
         drop(node);
     }
+}
+
+/// Worker options with an explicit max-runs budget (the shared `worker()`
+/// helper fixes 4): max_runs = 1 pins the single slot so later creations
+/// stay durably queued instead of dispatching immediately.
+async fn one_slot_worker(root: &std::path::Path, client: Arc<dyn opencoder_llm::ChatStream>) -> Worker {
+    let workdir = root.join("work");
+    std::fs::create_dir_all(workdir.join(".opencoder")).unwrap();
+    std::fs::write(workdir.join(".opencoder/ap.json"), r#"{"mode":"off"}"#).unwrap();
+    opencoder_worker::Worker::open(
+        opencoder_worker::WorkerOptions {
+            name: "test-node".into(),
+            workdir,
+            data_dir: root.join("node"),
+            workflow_root: None,
+            max_runs: Some(1),
+            dag: true,
+        },
+        Some(client),
+    )
+    .await
+    .unwrap()
+}
+
+async fn status_of(worker: &Worker, id: &str) -> Value {
+    worker
+        .handle(NodeOperation::Inspect {
+            execution: ExecutionRef {
+                id: id.into(),
+                kind: ExecutionKind::Operator,
+            },
+        })
+        .await
+        .body["execution"]["status"]
+        .clone()
+}
+
+/// Operator records live under `node/operator/` — they must reload with the
+/// journal on restart: a finished one keeps its history, an interrupted one
+/// stays inspectable, and queued work is picked back up by the scheduler
+/// (regression: `ALL_KINDS` once omitted `Operator`, so every operator
+/// record silently vanished across a restart).
+#[tokio::test]
+async fn operator_executions_survive_node_restart() {
+    let dir = tempfile::tempdir().unwrap();
+    // Chat call #0 blocks until released, keeping its execution Running and
+    // the single slot occupied; later calls complete immediately.
+    let blocker = Arc::new(InterruptClient {
+        calls: std::sync::atomic::AtomicUsize::new(0),
+        first_release: Arc::new(tokio::sync::Notify::new()),
+        resumed_release: Arc::new(tokio::sync::Notify::new()),
+    });
+    let first = one_slot_worker(dir.path(), blocker.clone()).await;
+
+    // Occupies the only run slot and stays running (blocked LLM call).
+    assert_eq!(
+        first
+            .handle(NodeOperation::Create {
+                assignment: assignment(
+                    &first,
+                    "operator-restart-running",
+                    ExecutionKind::Operator,
+                    json!({"prompt":"hang on the host"}),
+                    None,
+                ),
+            })
+            .await
+            .status,
+        200
+    );
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        loop {
+            if status_of(&first, "operator-restart-running").await == json!("running") {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+
+    // These two stay queued (pending, never dispatched) behind the slot.
+    for (id, prompt) in [
+        ("operator-restart-done", "host once"),
+        ("operator-restart-queued", "host twice"),
+    ] {
+        assert_eq!(
+            first
+                .handle(NodeOperation::Create {
+                    assignment: assignment(
+                        &first,
+                        id,
+                        ExecutionKind::Operator,
+                        json!({"prompt": prompt}),
+                        None,
+                    ),
+                })
+                .await
+                .status,
+            200
+        );
+    }
+    assert_eq!(
+        status_of(&first, "operator-restart-done").await,
+        json!("pending")
+    );
+    assert_eq!(
+        status_of(&first, "operator-restart-queued").await,
+        json!("pending")
+    );
+    // Operator records are journaled in the operator kind root.
+    for id in [
+        "operator-restart-running",
+        "operator-restart-done",
+        "operator-restart-queued",
+    ] {
+        assert!(
+            dir.path()
+                .join(format!("node/operator/{id}/execution.json"))
+                .exists(),
+            "operator journal record missing for {id}"
+        );
+    }
+
+    first.shutdown().await.unwrap();
+    drop(first);
+
+    // Restart with an always-completing client: queued operator work must be
+    // re-dispatched and finished records must still resolve.
+    let second = worker(dir.path(), mock()).await;
+    assert_eq!(
+        settled(&second, "operator-restart-done").await["execution"]["status"],
+        json!("idle")
+    );
+    assert_eq!(
+        settled(&second, "operator-restart-queued").await["execution"]["status"],
+        json!("idle")
+    );
+    // The cancelled execution stays on record (shutdown cancelled it in
+    // flight) — the whole point is that it is still addressable, not
+    // vanished, after the restart.
+    let interrupted = second
+        .handle(NodeOperation::Inspect {
+            execution: ExecutionRef {
+                id: "operator-restart-running".into(),
+                kind: ExecutionKind::Operator,
+            },
+        })
+        .await;
+    assert_eq!(interrupted.status, 200, "{:?}", interrupted);
+    assert_eq!(interrupted.body["execution"]["status"], json!("cancelled"));
+    second.shutdown().await.unwrap();
 }

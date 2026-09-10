@@ -1,61 +1,38 @@
-Commit: c9bfebbb553777c4aaf16db69c30648e1fd71819
-
+Commit: b465f440381bd009dc9bd3a8192ad88eab44cede
 
 # worker 模块
 
-## Harness 调度
+节点执行面：受理、排队、恢复与工作负载适配。
 
-`operations/create` 按各 Agent 的 Harness 预检：原生执行器检查模型配置，Codex 检查受管配置或节点 PATH 中的可执行入口；TODO 预检同时覆盖 workflow 父 Agent。`workloads/agent` 在固定资源作用域内读取本次 `input.harness` / `input.envs` / 模型并初始化会话，后续运行与续聊交给共享 [session](../session/index.md)。Team、DAG、TODO、Project 创建的 Agent Session 同样使用各自引用卡默认值。
+## 关键路径
 
-Project 预检区分资源定义与实际调用：所有引用 Agent 必须存在，Plan 只检查 plan 的执行凭据，Execute 检查实际执行器；后续命令使用 `next_action`，不能沿用首次接收的 action。`tests/harness_matrix.rs` 覆盖 Project、Team、DAG、TODO、原生父会话的 Codex 子任务、双向混合及四类取消回收。
+- `crates/worker/src/operations/create.rs` — admission 锁内去重、预检并落盘
+- `crates/worker/src/operations/queue/` — 单调序号 + FIFO/LIFO 选等待任务
+- `crates/worker/src/operations/launch.rs` — 取容量后启动
+- `crates/worker/src/operations/query/` — 明细/事件/消息分页；head_seq 水位
+- `crates/worker/src/operations/query/dag_steps.rs` — DAG run 步级 meta.json 进度/单步视图
+- `crates/worker/src/operations/query/project/` — prun-* 回放；载荷 64 KiB 分块
+- `crates/worker/src/operations/query/runner.rs` — Runner 阶段/verdict/投递状态
+- `crates/worker/src/operations/project_admission/` — Plan/Execute 独立 run ID
+- `crates/worker/src/operations/maintenance.rs` — 维护工具；configure_scheduling
+- `crates/worker/src/workloads/` — agent/team/dag/todos/project 适配器；operator 复用 agent 循环（宿主机进程直跑，无 runc/无 node_maintenance）
+- `crates/worker/src/runtime/scheduling.rs` — scheduling.json 持久化并发/队列序
+- `crates/worker/src/state.rs` — runtime.db；节点 ID 持久化、目录锁
+- `crates/worker/src/layout.rs` — `<kind>/<id>/execution.json` 布局
+- `crates/worker/src/journal/` — 原子落盘（sync_all + rename）
+- `crates/worker/tests/harness_matrix.rs` — 五类 Harness 预检与取消矩阵
+- `crates/worker/tests/project_replay.rs`、`runner_dispatch.rs` — 端到端契约
+- `scripts/acceptance/business/`、`project/` — 真实 NFS 与业务验收
 
-`Assignment.codex` 与 `Assignment.runtime` 在接收时进入私有 `Config.agent.codex/runtime`，受管 Codex 拒绝按次 model/env 覆盖。`harness::scope` 使重新读取配置的内部驱动保持已接受的参数，fork 继承父 Assignment；工作负载 Future 和完整队列快照使用堆分配，避免深层编排作用域放大线程栈。
+## 边界
 
-节点保留恢复所需环境，`operations/query` 对公开输入和大字段读取隐藏环境值，会话详情只单列 Harness 名称。Server → Node → Codex 二进制、消息回放、幂等提交和续聊由 `tests/harness_codex.rs` 验证。用户入口见 [Agent Harness](../../features/harness/index.md)。
+- 运行不依赖 WebSocket 存活；重启后 interrupted 需显式 resume。
+- `layout::ALL_KINDS` 必须覆盖全部有 kind 根目录的执行类型（含 operator）——漏一个即重启丢记录。
+- Node 不开放入站 HTTP：agent 复用 web session API 进程内调用。
+- system 团队执行已退役，create 直接拒绝。
 
-`opencoder-worker` 持有节点执行数据和工作负载适配器，实现 [node](../node/index.md) 的 `NodeService`。由 [agent](../agent/index.md) 二进制构造。
+## 相关
 
-## 所有权
-
-`WorkerOptions` 指定独立数据目录、工作目录、顶层容量和 DAG 能力。节点 ID 持久化、目录加锁。`runtime.db` 保存 session/workflow/project 明细，`<kind>/<id>/execution.json` 保存原始请求、定义快照与状态日志（兼容旧 `executions/` 布局），资源、团队和产物目录均在 Node。
-
-`operations/create` 在 admission 锁内去重、预检、固定资源，并 fsync pending 接受记录；`operations/queue` 按单调序号与 FIFO/LIFO 选择等待任务，取得容量后交给 `launch`。Plan 快照在忙碌、类型、目标和资源检查通过后写入接收记录，容量不足进入队列；拒绝请求不改变 journal。新快照预检失败会清理未接收副本，允许同 ID 重试读取最新资源。运行和控制不依赖 WebSocket 存活。重启时运行中记录变 interrupted，显式 resume 才运行；带有效队列快照且无停止意图的 pending 保留。落盘故障让节点不可调度。
-
-`runtime/scheduling` 在 Node 数据目录持久化 `scheduling.json`，记录最大顶层并发与队列顺序，保存值优先于启动默认值。`try_slot` 在 admission 锁内执行动态上限检查；降低上限不取消现有 permit。调度器随 Node 停止退出，冻结期间不派发。空闲会话 prompt/compact/handoff 超额时原子保存待执行命令；相同待调度输入幂等，不同输入冲突。Project 队列恢复预约注册，运行索引和重试回执保持 pending。
-
-## 执行适配
-
-- agent：复用 [web](../web/index.md) 本地 session API、drain 和消息事件持久化；HTTP router 在进程内调用，Node 不开放入站 HTTP。
-- 普通 team：自定义 `TeamDispatcher` 为每个成员创建本地会话；职责与定义固定。
-- system team：协调记录本地保存，远端成员通过 PeerBridge 调用各节点维护 agent，维护明细仍属远端。
-- TODO：[todos](../todos/index.md) Runtime 的父会话与子执行都使用本地 Store。
-- DAG：[dag-runtime](../dag-runtime/index.md) 的 uplink 接到本地持久化，产物经命令分页读取；resume 跳过已成功落盘的检查点。
-- project：[project](../project/index.md) Runtime 使用节点库，项目结构来自 Server 快照；`operations/project_admission/` 为每次 Plan/Execute 接收独立 run ID，`workloads/project.rs` 仅驱动已接收尝试并跟踪终态。
-
-`resources` 对新执行校验显式资源目录为只读 NFS，再复制当前资源文件形成不可变快照；失败拷贝清理 staging。普通会话继续/恢复使用本地快照；项目每次新的 Plan/Execute 固定当前资源，相同 run ID 重试沿用原回执。NFS 不可用时拒绝新执行。`core::agent::scope` 和 session runner 传播任务局部资源根，避免并发执行串用版本。`session::loop_registry` 提供真实活跃 loop；顶层容量与 loop 计数分开。
-
-维护工具通过 session extension 注册，只在维护会话中暴露真实状态、配置和任务控制接口；注册与心跳不会自动发起修复。业务规则见 [Agent 平台](../../features/agent-platform/index.md)。
-
-## 项目回放查询
-
-`operations/query/project/` 按 `prun-*` 查询 run、留存状态与过程清单；`project-<todo-id>` 保持根归属。输入、方案、输出、模型文件、事件载荷和已登记产物通过该 ID 路由，归属节点离线时明确失败。
-
-消息读取限制在 `messages_after < seq <= messages_through`；零 offset 游标为排他游标，从旧尝试重定位时清零 offset，避免跳过本次首条输入或混入后续运行。历史 runs 使用 `before_version`，事件使用 `after`；大字段/载荷最多每块 64 KiB。`retention` 区分 complete、partial 与 incomplete_history。字段与产物读取校验所属运行及逻辑文件名。
-
-契约见 `tests/project_replay.rs`；真实 NFS、节点重启及浏览器检查见 [项目验收脚本](../../scripts/acceptance/project/README.md)。
-
-## Runner 受理与回放
-
-通用 `operations/query` 的 Agent、维护会话和 DAG 事件分页在读取当前页之前采样 `head_seq`，表示最高已持久化序号；空 DAG 为 0。水位独立于 200 条分页边界，客户端可用空页查询再沿同一执行事件流追平。契约由 `dag_replay_watermark_includes_events_beyond_the_requested_page` 的 205 条事件验证。
-
-Runner DAG 预检包含注册入口、安装文件校验和与命名 Codex profile。pending 配置投影读取已接受队列快照；开始后继续沿用该版本。`operations/query/runner` 返回阶段、配置版本、业务摘要、独立 verdict、报告及投递状态，隐去私有环境。DAG 的 `/messages` 读取父会话持久化转译消息，报告经受控 artifact 接口下载。
-
-`annotate` 独立保存业务对账/投递状态，不改变执行终态。已启动的 Runner 不提供普通 resume 入口，避免外部业务重复执行；有效收据在恢复时仍须重新校验。端到端合同见 [runner_dispatch.rs](../../crates/worker/tests/runner_dispatch.rs)。
-
-真实业务验收从同一已验证 bundle 获取四个二进制。临时 systemd 服务先进入验收进程的挂载命名空间及根目录，再建立自己的原 workspace 只读边界，保证 Node 能看到本轮 NFS。受控回归将真实分支头和祖先验证随 workspace 与上下文固定，供脱离分支引用的快照复核使用。
-
-验收侧 `private_environment` 统一新建与重新接入时的私有目录，仅沿用 bytedcli 支持的显式身份变量。`dependencies/identity` 将当前 XDG 登录数据及兼容的旧 CLI 目录独立复制到私有 HOME，不共享文件 inode、不修改宿主登录记录；通用 `JWT_TOKEN` 不替代 bytedcli 身份。
-
-`validation/delivery` 隔离旧群投递与新版 Viking 工单接口；实际分析必须经 Runner，投递回执必须属于已完成任务，`not_required` 也校验任务身份和完成状态。历史场景可显式提供核实过的评测请求，并独立记录真实回归分支证明。可选 `metricw-offline` 仅向指定 metrics 配置键提供 loopback 缺省响应，固定工具链、记录兼容参数与实际请求，保留原测试断言和历史无夹具结论。
-
-验收目录通过设备号和 inode 记录归属，测试输入服务通过 PID 与启动时间记录归属。结束前检查服务、打开文件及所有可见挂载命名空间；默认保留运行数据，显式 `--destroy-runtime` 仅删除本轮归属目录。证据可重复合并，排除私有沙箱并拒绝符号链接。脚本和边界见 [验收说明](../../scripts/acceptance/business/README.md)；runc 双节点调度入口为 [runc_scheduling/main.py](../../scripts/acceptance/runc_scheduling/main.py)。
+- [node](../node/index.md) NodeService 通道；[session](../session/index.md) 会话引擎
+- [todos](../todos/index.md)、[dag-runtime](../dag-runtime/index.md)、[project](../project/index.md)
+- [Agent 平台](../../features/agent-platform/index.md)、[Agent Harness](../../features/harness/index.md)

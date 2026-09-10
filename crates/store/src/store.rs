@@ -481,6 +481,54 @@ pub trait Store: Send + Sync {
     async fn delete_node(&self, _id: &str) -> Result<()> {
         anyhow::bail!("node store API is not supported by {}", self.backend_name())
     }
+    /// Platform-user directory (`platform_users`, v24). Tokens are stored as
+    /// sha256 hex digests only; the control API returns plaintext exactly
+    /// once at creation. Backends without the table keep these defaults.
+    async fn find_user_by_token_hash(
+        &self,
+        _token_hash: &str,
+    ) -> Result<Option<crate::users::PlatformUser>> {
+        Ok(None)
+    }
+    async fn find_user_by_name(
+        &self,
+        _name: &str,
+    ) -> Result<Option<crate::users::PlatformUser>> {
+        Ok(None)
+    }
+    async fn list_users(&self) -> Result<Vec<crate::users::PlatformUser>> {
+        Ok(Vec::new())
+    }
+    async fn create_user(
+        &self,
+        _name: &str,
+        _token_hash: &str,
+        _role: opencoder_core::identity::Role,
+        _created_at: i64,
+    ) -> Result<crate::users::PlatformUser> {
+        anyhow::bail!("user store API is not supported by {}", self.backend_name())
+    }
+    /// Delete by name; `Ok(false)` when the user does not exist.
+    async fn delete_user(&self, _name: &str) -> Result<bool> {
+        anyhow::bail!("user store API is not supported by {}", self.backend_name())
+    }
+    /// Atomic delete that never removes the last admin: the admin-count
+    /// guard runs inside the same statement as the delete, closing the
+    /// count-then-delete TOCTOU two concurrent deletions could race through.
+    async fn delete_user_guarding_last_admin(
+        &self,
+        _name: &str,
+    ) -> Result<crate::users::GuardedDelete> {
+        anyhow::bail!("user store API is not supported by {}", self.backend_name())
+    }
+    /// Re-point an existing user's credential at a new token digest
+    /// (seed-token rotation); `Ok(false)` when no row carries that name.
+    async fn update_user_token_hash(&self, _name: &str, _token_hash: &str) -> Result<bool> {
+        anyhow::bail!("user store API is not supported by {}", self.backend_name())
+    }
+    async fn count_admin_users(&self) -> Result<i64> {
+        Ok(0)
+    }
     /// Liveness touch + cancel-command poll in one transaction: refreshes
     /// `last_seen_at`, collapses non-busy status to `idle`, and returns the
     /// ids of this node's cancelling tasks as the cancel instructions.

@@ -99,6 +99,27 @@ pub async fn dag(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> 
     }
     response(RpcReply::ok(dag_view(reply.body)))
 }
+pub async fn dag_progress(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Response {
+    response(
+        executions::for_id(&state, &id, |execution| NodeOperation::DagSteps {
+            execution,
+            step: None,
+        })
+        .await,
+    )
+}
+pub async fn dag_step(
+    State(state): State<Arc<AppState>>,
+    Path((id, step)): Path<(String, String)>,
+) -> Response {
+    response(
+        executions::for_id(&state, &id, |execution| NodeOperation::DagSteps {
+            execution,
+            step: Some(step),
+        })
+        .await,
+    )
+}
 pub async fn todo(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Response {
     let reply = inspect(&state, &id).await;
     if reply.status != 200 {

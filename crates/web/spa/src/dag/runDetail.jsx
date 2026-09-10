@@ -208,7 +208,7 @@ export function RunDetail({ run, onNotice, onClose, onFinished }) {
   const feed = useMemo(() => [...events].slice(-200).reverse(), [events]);
 
   return (
-    <Space direction="vertical" size={12} style={{ width: '100%' }}>
+    <Space orientation="vertical" size={12} style={{ width: '100%' }}>
       <Space wrap>
         <Button size="small" onClick={onClose}>← 返回运行列表</Button>
         <Button size="small" onClick={() => setExecutionOpen(true)}>执行详情与产物</Button>
@@ -220,8 +220,8 @@ export function RunDetail({ run, onNotice, onClose, onFinished }) {
           事件流: {STREAM_LABEL[streamStatus] || streamStatus}
         </Tag>
       </Space>
-      {current.error ? <Alert type="error" showIcon message={current.error} /> : null}
-      {specError ? <Alert type="warning" showIcon message={specError} /> : null}
+      {current.error ? <Alert type="error" showIcon title={current.error} /> : null}
+      {specError ? <Alert type="warning" showIcon title={specError} /> : null}
       <div className="dag-detail">
         <div className="dag-detail-graph">
           {spec ? (
@@ -253,12 +253,12 @@ export function RunDetail({ run, onNotice, onClose, onFinished }) {
               title={'步骤 · ' + selected.label}
               extra={<Button size="small" type="text" onClick={() => setSelected(null)}>关闭</Button>}
             >
-              <Descriptions size="small" column={1}>
-                <Descriptions.Item label="状态">{stepStatusLabel(selected.status)}</Descriptions.Item>
-                <Descriptions.Item label="类型">{selected.kindType || '-'}</Descriptions.Item>
-                <Descriptions.Item label="结束时间">{selected.at_ms ? absTime(selected.at_ms) : '—'}</Descriptions.Item>
-              </Descriptions>
-              {selected.error ? <Alert type="error" style={{ marginTop: 8 }} message={selected.error} /> : null}
+              <Descriptions size="small" column={1} items={[
+                { key: 'status', label: '状态', children: stepStatusLabel(selected.status) },
+                { key: 'kind', label: '类型', children: selected.kindType || '-' },
+                { key: 'finished', label: '结束时间', children: selected.at_ms ? absTime(selected.at_ms) : '—' },
+              ]} />
+              {selected.error ? <Alert type="error" style={{ marginTop: 8 }} title={selected.error} /> : null}
               {selected.output ? (
                 <pre className="dag-event-pre">{outputPreview(selected.output)}</pre>
               ) : (

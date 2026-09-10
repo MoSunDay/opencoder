@@ -1,4 +1,5 @@
 mod chunks;
+mod dag_steps;
 mod inspect;
 mod pages;
 pub(in crate::operations) mod project;
@@ -15,6 +16,7 @@ use serde_json::{json, Value};
 use tower::ServiceExt;
 
 pub(super) use chunks::{detail_field, event_payload};
+pub(super) use dag_steps::dag_steps;
 pub(super) use inspect::inspect;
 pub(super) use pages::{messages, project_runs, team_turns, todo_items};
 
@@ -117,7 +119,10 @@ pub(super) async fn events(
     let is_session = record.as_ref().is_none_or(|r| {
         matches!(
             r.assignment.request.kind,
-            ExecutionKind::Agent | ExecutionKind::Maintenance | ExecutionKind::Dag
+            ExecutionKind::Agent
+                | ExecutionKind::Maintenance
+                | ExecutionKind::Operator
+                | ExecutionKind::Dag
         )
     });
     let mut source_more = false;

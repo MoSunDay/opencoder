@@ -6,12 +6,15 @@ import { useEvent } from './ui/editing/useEvent.js';
 // onNotice 透出。
 
 import {
-  Button, Drawer, Form, Input, Modal, Popconfirm, Select, Space, Table, Tag, Typography, message,
+  Button, Drawer, Form, Input, Modal, Popconfirm, Select, Space, Table, Tag, Typography,
 } from 'antd';
 import { useCallback, useEffect, useState } from 'react';
 import { apiDel, apiGet, apiPost, apiPut } from './api.js';
 import { PageShell } from './shell/pageShell.jsx';
 import { err } from './notice.js';
+import { useMessage } from './ui/appMessage.js';
+import { MONO_VAR } from './ui/mono.js';
+import { tableLoading, tableRows } from './ui/tableLoading.js';
 
 const { TextArea } = Input;
 const { Text } = Typography;
@@ -64,6 +67,7 @@ function toolGroupOptions(tools) {
 
 function CreateEnvModal({ open, onClose, onCreated, onNotice: noticeCallback }) {
   const onNotice = useEvent(noticeCallback);
+  const msg = useMessage();
   const [form] = Form.useForm();
   const [saving, setSaving] = useState(false);
 
@@ -71,7 +75,7 @@ function CreateEnvModal({ open, onClose, onCreated, onNotice: noticeCallback }) 
     setSaving(true);
     try {
       await apiPost('/api/todo/envs', { name: values.name, description: values.description || '' });
-      message.success('已创建');
+      msg.success('已创建');
       form.resetFields();
       onCreated(values.name);
     } catch (e) {
@@ -123,6 +127,7 @@ function VarRows({ rows, setRows, disabled }) {
 
 function EnvDrawerSession({ name, tools, open, onClose, onNotice: noticeCallback, onSaved }) {
   const onNotice = useEvent(noticeCallback);
+  const msg = useMessage();
   const [description, setDescription] = useState('');
   const [selectedTools, setSelectedTools] = useState([]);
   const [rows, setRows] = useState([]);
@@ -168,7 +173,7 @@ function EnvDrawerSession({ name, tools, open, onClose, onNotice: noticeCallback
         tools: selectedTools,
         env_vars: rowsToVars(rows),
       });
-      message.success('已保存');
+      msg.success('已保存');
       if (onSaved) {
         onSaved();
       }
@@ -220,6 +225,7 @@ function EnvDrawerSession({ name, tools, open, onClose, onNotice: noticeCallback
 
 function ToolsCatalog({ tools, onNotice: noticeCallback, onToolsChanged }) {
   const onNotice = useEvent(noticeCallback);
+  const msg = useMessage();
   const [importing, setImporting] = useState('');
   const share = (tools || []).filter((t) => t && t.ref && t.source !== 'importable');
   const importable = (tools || []).filter((t) => t && t.ref && t.source === 'importable');
@@ -228,7 +234,7 @@ function ToolsCatalog({ tools, onNotice: noticeCallback, onToolsChanged }) {
     setImporting(t.ref);
     try {
       const j = await apiPost('/api/todo/tools/import', { agent: t.agent, version: t.version, tool: t.tool });
-      message.success('已导入: ' + ((j && j.ref) || t.ref));
+      msg.success('已导入: ' + ((j && j.ref) || t.ref));
       if (onToolsChanged) {
         onToolsChanged();
       }
@@ -244,7 +250,7 @@ function ToolsCatalog({ tools, onNotice: noticeCallback, onToolsChanged }) {
       filters: importable.map((t) => ({ text: t.ref, value: t.ref })),
       filterSearch: true,
       onFilter: (v, t) => String(t.ref).includes(v),
-      render: (v) => <Text style={{ fontFamily: 'monospace', fontSize: 12 }}>{v}</Text> },
+      render: (v) => <Text style={{ fontFamily: MONO_VAR, fontSize: 12 }}>{v}</Text> },
     { title: 'agent', dataIndex: 'agent', key: 'agent', width: 120, ellipsis: true },
     { title: 'version', dataIndex: 'version', key: 'version', width: 90, ellipsis: true },
     { title: 'tool', dataIndex: 'tool', key: 'tool', ellipsis: true },
@@ -270,17 +276,30 @@ function ToolsCatalog({ tools, onNotice: noticeCallback, onToolsChanged }) {
 
 export function EnvsPanel({ onNotice: noticeCallback }) {
   const onNotice = useEvent(noticeCallback);
+  const msg = useMessage();
   const [envs, setEnvs] = useState([]);
   const [tools, setTools] = useState([]);
+  // env 列表拉取态：只有首屏/显式刷新会遮罩表格 —— 否则拉取中是一片空白。
+  // 变更（新建/保存/删除）后的刷新走 silent：遮罩会给表格加 pointer-events:
+  // none，把行内「编辑」「删除」一起锁死，用户刚点完却点不动下一行。
+  const [loadingEnvs, setLoadingEnvs] = useState(true);
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState('');
 
-  const loadEnvs = useCallback(async () => {
+  const loadEnvs = useCallback(async (opts) => {
+    const silent = !!(opts && opts.silent);
+    if (!silent) {
+      setLoadingEnvs(true);
+    }
     try {
       const j = await apiGet('/api/todo/envs');
       setEnvs((j && j.envs) || []);
     } catch (e) {
       onNotice(err('获取 env 列表失败: ' + (e && e.message)));
+    } finally {
+      if (!silent) {
+        setLoadingEnvs(false);
+      }
     }
   }, [onNotice]);
 
@@ -301,11 +320,11 @@ export function EnvsPanel({ onNotice: noticeCallback }) {
   const deleteEnv = async (name) => {
     try {
       await apiDel(`/api/todo/envs/${encodeURIComponent(name)}`);
-      message.success('已删除');
+      msg.success('已删除');
       if (editing === name) {
         setEditing('');
       }
-      loadEnvs();
+      loadEnvs({ silent: true });
     } catch (e) {
       onNotice(err('删除 env 失败: ' + (e && e.message)));
     }
@@ -346,7 +365,8 @@ export function EnvsPanel({ onNotice: noticeCallback }) {
         rowKey="name"
         size="small"
         columns={columns}
-        dataSource={envs}
+        dataSource={tableRows(loadingEnvs, envs)}
+        loading={tableLoading(loadingEnvs)}
         pagination={false}
         scroll={{ x: 'max-content' }}
         locale={{ emptyText: '暂无 env' }}
@@ -359,7 +379,7 @@ export function EnvsPanel({ onNotice: noticeCallback }) {
         onCreated={(name) => {
           setCreating(false);
           setEditing(name);
-          loadEnvs();
+          loadEnvs({ silent: true });
         }}
       />
       <EnvDrawer
@@ -368,7 +388,7 @@ export function EnvsPanel({ onNotice: noticeCallback }) {
         open={!!editing}
         onNotice={onNotice}
         onClose={() => setEditing('')}
-        onSaved={loadEnvs}
+        onSaved={() => loadEnvs({ silent: true })}
       />
     </PageShell>
   );

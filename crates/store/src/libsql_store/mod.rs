@@ -29,6 +29,7 @@ mod messages;
 mod node_state;
 mod node_tasks;
 mod nodes;
+mod users;
 mod project;
 mod project_runs;
 pub(crate) mod schema;
@@ -517,6 +518,50 @@ impl Store for LibsqlStore {
         brain::latest_plan_by_digest(&self.conn, digest).await
     }
 
+    async fn find_user_by_token_hash(
+        &self,
+        token_hash: &str,
+    ) -> Result<Option<crate::users::PlatformUser>> {
+        let _guard = self.db_lock.lock().await;
+        users::find_by_token_hash(&self.conn, token_hash).await
+    }
+    async fn find_user_by_name(&self, name: &str) -> Result<Option<crate::users::PlatformUser>> {
+        let _guard = self.db_lock.lock().await;
+        users::find_by_name(&self.conn, name).await
+    }
+    async fn list_users(&self) -> Result<Vec<crate::users::PlatformUser>> {
+        let _guard = self.db_lock.lock().await;
+        users::list(&self.conn).await
+    }
+    async fn create_user(
+        &self,
+        name: &str,
+        token_hash: &str,
+        role: opencoder_core::identity::Role,
+        created_at: i64,
+    ) -> Result<crate::users::PlatformUser> {
+        let _guard = self.db_lock.lock().await;
+        users::create(&self.conn, name, token_hash, role, created_at).await
+    }
+    async fn delete_user(&self, name: &str) -> Result<bool> {
+        let _guard = self.db_lock.lock().await;
+        users::delete(&self.conn, name).await
+    }
+    async fn delete_user_guarding_last_admin(
+        &self,
+        name: &str,
+    ) -> Result<crate::users::GuardedDelete> {
+        let _guard = self.db_lock.lock().await;
+        users::delete_guarding_last_admin(&self.conn, name).await
+    }
+    async fn update_user_token_hash(&self, name: &str, token_hash: &str) -> Result<bool> {
+        let _guard = self.db_lock.lock().await;
+        users::update_token_hash(&self.conn, name, token_hash).await
+    }
+    async fn count_admin_users(&self) -> Result<i64> {
+        let _guard = self.db_lock.lock().await;
+        users::count_admins(&self.conn).await
+    }
     async fn register_node(
         &self,
         name: &str,

@@ -4,10 +4,11 @@
 // Endpoints: GET /api/dag/defs, POST /api/dag/defs, DELETE /api/dag/defs/:id,
 // POST /api/dag/defs/:id/dispatch {node_id?} → {run_id}.
 
-import { Button, message, Modal, Popconfirm, Select, Space, Table, Tag, Tooltip, Typography } from 'antd';
+import { Button, Modal, Popconfirm, Select, Space, Table, Tag, Tooltip, Typography } from 'antd';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiDel, apiGet, apiPost } from '../api.js';
 import { TimeText } from '../ui/timeText.jsx';
+import { useMessage } from '../ui/appMessage.js';
 import { useStore } from '../store.js';
 import { newId, nodeOptions as buildNodeOptions } from '../fleet/model.js';
 import { DefEditor } from './defEditor.jsx';
@@ -34,6 +35,7 @@ function KindSummary({ spec }) {
 }
 
 export function DefsTab({ onNotice, onDispatched }) {
+  const msg = useMessage();
   const { nodes } = useStore();
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -119,7 +121,7 @@ export function DefsTab({ onNotice, onDispatched }) {
       if (onNotice) {
         onNotice(err(''));
       }
-      message.success('已派发，运行 ID: ' + (runId ? runId.slice(0, 8) : '(unknown)'));
+      msg.success('已派发，运行 ID: ' + (runId ? runId.slice(0, 8) : '(unknown)'));
       attempt.current = null;
       setDispatchFor(null);
       if (onDispatched) {
@@ -142,7 +144,7 @@ export function DefsTab({ onNotice, onDispatched }) {
       dataIndex: 'name',
       key: 'name',
       render: (v, r) => (
-        <Space direction="vertical" size={0}>
+        <Space orientation="vertical" size={0}>
           <Text strong>{v || r.id}</Text>
           {r.error ? <Tag color="warning" style={{ marginTop: 2 }}>定义无法解析：{r.error}</Tag> : null}
           {r.spec && r.spec.description ? <Text type="secondary" style={{ fontSize: 12 }}>{r.spec.description}</Text> : null}
@@ -212,7 +214,7 @@ export function DefsTab({ onNotice, onDispatched }) {
   const dispatchNodeOptions = buildNodeOptions(nodes || [], 'dag');
 
   return (
-    <Space direction="vertical" size={12} style={{ width: '100%' }}>
+    <Space orientation="vertical" size={12} style={{ width: '100%' }}>
       <Space>
         <Button
           type="primary"
@@ -250,7 +252,7 @@ export function DefsTab({ onNotice, onDispatched }) {
         cancelText="取消"
         confirmLoading={dispatching}
       >
-        <Space direction="vertical" size={8} style={{ width: '100%' }}>
+        <Space orientation="vertical" size={8} style={{ width: '100%' }}>
           <Text type="secondary">整个工作流会在同一个节点完成。留空时由服务端选择当前可用节点。</Text>
           <Select
             style={{ width: '100%' }}

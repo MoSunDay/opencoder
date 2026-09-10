@@ -57,6 +57,8 @@ pub struct NotepadView {
     pub tree: TreeState,
     pub editor: EditorState,
     pub search: Option<SearchState>,
+    /// Injected terminal size for deterministic tests; `None` = use the real one.
+    pub size_override: Option<(u16, u16)>,
 }
 
 impl NotepadView {
@@ -68,6 +70,7 @@ impl NotepadView {
             tree: TreeState::new(&workdir),
             editor: EditorState::empty(),
             search: None,
+            size_override: None,
         }
     }
 }

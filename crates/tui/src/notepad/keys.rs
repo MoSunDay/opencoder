@@ -264,7 +264,12 @@ fn try_page_scroll(view: &mut NotepadView, k: &KeyEvent, viewport: EditorViewpor
 }
 
 fn editor_viewport(view: &NotepadView) -> EditorViewport {
-    let (width, height) = crossterm::terminal::size().unwrap_or((80, 24));
+    // crossterm falls back to /dev/tty when stdout is not a tty, so the size
+    // varies with the host machine; prefer the injected override when present.
+    let (width, height) = view
+        .size_override
+        .or_else(|| crossterm::terminal::size().ok())
+        .unwrap_or((80, 24));
     let area = crate::notepad::editor_area(
         ratatui::layout::Rect::new(0, 0, width, height),
         view.tree_hidden,

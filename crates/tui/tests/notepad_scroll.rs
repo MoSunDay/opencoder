@@ -30,11 +30,19 @@ async fn open_first_file(view: &mut NotepadView) {
     handle_key(view, key(KeyCode::Enter)).await;
 }
 
+/// View with a pinned terminal size so viewport-dependent assertions do not
+/// depend on the host's `/dev/tty` dimensions.
+fn pinned_view(dir: &std::path::Path) -> NotepadView {
+    let mut v = NotepadView::new(dir.to_path_buf());
+    v.size_override = Some((80, 24));
+    v
+}
+
 #[tokio::test]
 async fn big_g_advances_scroll() {
     let d = tempfile::tempdir().unwrap();
     fs::write(d.path().join("tall.txt"), tall_content(60)).unwrap();
-    let mut v = NotepadView::new(d.path().to_path_buf());
+    let mut v = pinned_view(d.path());
     open_first_file(&mut v).await;
     assert_eq!(v.focus, Focus::Editor);
     assert_eq!(v.editor.scroll, 0, "scroll should start at 0");
@@ -51,7 +59,7 @@ async fn big_g_advances_scroll() {
 async fn gg_resets_scroll_to_zero() {
     let d = tempfile::tempdir().unwrap();
     fs::write(d.path().join("tall.txt"), tall_content(60)).unwrap();
-    let mut v = NotepadView::new(d.path().to_path_buf());
+    let mut v = pinned_view(d.path());
     open_first_file(&mut v).await;
     // Go to bottom
     handle_key(&mut v, key(KeyCode::Char('G'))).await;
@@ -66,7 +74,7 @@ async fn gg_resets_scroll_to_zero() {
 async fn j_advances_scroll_incrementally() {
     let d = tempfile::tempdir().unwrap();
     fs::write(d.path().join("tall.txt"), tall_content(40)).unwrap();
-    let mut v = NotepadView::new(d.path().to_path_buf());
+    let mut v = pinned_view(d.path());
     open_first_file(&mut v).await;
     assert_eq!(v.editor.scroll, 0);
     // Press j many times — scroll should eventually advance
@@ -83,7 +91,7 @@ async fn j_advances_scroll_incrementally() {
 async fn ctrl_d_moves_cursor_down() {
     let d = tempfile::tempdir().unwrap();
     fs::write(d.path().join("tall.txt"), tall_content(60)).unwrap();
-    let mut v = NotepadView::new(d.path().to_path_buf());
+    let mut v = pinned_view(d.path());
     open_first_file(&mut v).await;
     let line_before = v.editor.cursor_line();
     handle_key(&mut v, ctrl('d')).await;
@@ -100,7 +108,7 @@ async fn ctrl_d_moves_cursor_down() {
 async fn ctrl_u_moves_cursor_up() {
     let d = tempfile::tempdir().unwrap();
     fs::write(d.path().join("tall.txt"), tall_content(60)).unwrap();
-    let mut v = NotepadView::new(d.path().to_path_buf());
+    let mut v = pinned_view(d.path());
     open_first_file(&mut v).await;
     // Move down first
     handle_key(&mut v, key(KeyCode::Char('G'))).await;
@@ -121,7 +129,7 @@ async fn ctrl_u_moves_cursor_up() {
 async fn ctrl_f_full_page_down() {
     let d = tempfile::tempdir().unwrap();
     fs::write(d.path().join("tall.txt"), tall_content(60)).unwrap();
-    let mut v = NotepadView::new(d.path().to_path_buf());
+    let mut v = pinned_view(d.path());
     open_first_file(&mut v).await;
     let line_before = v.editor.cursor_line();
     handle_key(&mut v, ctrl('f')).await;
@@ -186,7 +194,7 @@ async fn edit_command_opens_with_edit_keyword() {
 async fn page_scroll_does_not_fire_in_insert_mode() {
     let d = tempfile::tempdir().unwrap();
     fs::write(d.path().join("tall.txt"), tall_content(60)).unwrap();
-    let mut v = NotepadView::new(d.path().to_path_buf());
+    let mut v = pinned_view(d.path());
     open_first_file(&mut v).await;
     // Enter Insert mode
     handle_key(&mut v, key(KeyCode::Char('i'))).await;

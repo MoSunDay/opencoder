@@ -4,11 +4,12 @@ import { useEvent } from './ui/editing/useEvent.js';
 // 「保存」把三份文件一起 PUT /api/agents/resources/prompts/:name（b64）
 // 产生新版本并提示版本号；onSaved 回调让外层刷新 meta / 版本列表。
 
-import { Alert, Button, Card, Input, Typography, message } from 'antd';
+import { Alert, Button, Card, Input, Typography } from 'antd';
 import { useEffect, useState } from 'react';
 import { apiGet, apiPut } from './api.js';
 import { b64EncodeText } from './agentsItems.js';
 import { err } from './notice.js';
+import { useMessage } from './ui/appMessage.js';
 
 const { TextArea } = Input;
 const { Text } = Typography;
@@ -36,6 +37,7 @@ async function readPromptFile(resourceName, version, file) {
 
 function PromptEditorSession({ resourceName, onNotice: noticeCallback, onSaved }) {
   const onNotice = useEvent(noticeCallback);
+  const msg = useMessage();
   const [texts, setTexts] = useState({ soul: '', how: '', output: '' });
   const [loadError, setLoadError] = useState('');
   const [loaded, setLoaded] = useState(false);
@@ -90,7 +92,7 @@ function PromptEditorSession({ resourceName, onNotice: noticeCallback, onSaved }
       const j = await apiPut(`/api/agents/resources/prompts/${encodeURIComponent(resourceName)}`, { files });
       const v = (j && j.version) || version + 1;
       setVersion(v);
-      message.success(`已保存，新版本 v${v}`);
+      msg.success(`已保存，新版本 v${v}`);
       if (onSaved) {
         onSaved(v);
       }

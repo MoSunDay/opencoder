@@ -2,7 +2,8 @@
 // EnvsPanel DOM smoke: env 表格渲染 fixture（描述/工具数），行内「编辑」打开
 // 抽屉拉取 context；工具目录的「可导入」行点「导入」命中 POST
 // /api/todo/tools/import；抽屉「保存」命中 PUT /api/todo/envs/:name 且 body
-// 合并 description/tools/env_vars。
+// 合并 description/tools/env_vars。删除后的 silent 刷新在途时表格不得遮罩
+// （遮罩 = .ant-spin-spinning → CSS 给容器 pointer-events: none，行内按钮全锁）。
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -21,7 +22,14 @@ vi.mock('./api.js', () => ({
 }));
 
 import './test/setup-dom.js';
+import { SPIN_DELAY_MS } from './ui/tableLoading.js';
 import { EnvsPanel } from './envsPanel.jsx';
+
+/// jsdom 下只用微任务 flush：RTL 的 waitFor/findBy 依赖真实定时器轮询，
+/// 与 fake timers 混用会互相卡住，所以计时相关的用例自己推进时钟。
+const flush = async () => { for (let i = 0; i < 6; i += 1) { await act(async () => {}); } };
+const advance = async (ms) => { await act(async () => { await vi.advanceTimersByTimeAsync(ms); }); };
+const isMasked = () => !!document.querySelector('.ant-table-wrapper .ant-spin-spinning');
 
 /// antd 6 Button 对两字中文自动插空格（「导 入」「保 存」），按 role + 去空白匹配。
 const findButton = (txt) => screen.getAllByRole('button')
@@ -152,5 +160,44 @@ describe('EnvsPanel', () => {
         env_vars: { FFMPEG_PATH: '/usr/bin/ffmpeg' },
       });
     });
+  });
+
+  it('keeps the env table unmasked while the post-delete silent refresh is in flight', async () => {
+    vi.useFakeTimers();
+    try {
+      render(<EnvsPanel onNotice={vi.fn()} />);
+      await flush();
+      expect(screen.getByText('demo')).toBeTruthy();
+      expect(isMasked()).toBe(false);
+
+      // 删除成功后的刷新挂住：这一段在途时间就是「行内按钮被锁死」的窗口。
+      let releaseRefresh = () => {};
+      apiGetMock.mockImplementation((path) => {
+        if (path === '/api/todo/envs') {
+          return new Promise((resolve) => { releaseRefresh = () => resolve({ envs: [] }); });
+        }
+        return Promise.resolve(path === '/api/todo/envs/demo' ? { env: demoEnv } : {});
+      });
+      await act(async () => { fireEvent.click(findButton('删除')); });
+      await advance(0);
+      await act(async () => { fireEvent.click(findButton('确认删除')); });
+      await flush();
+      expect(apiDelMock).toHaveBeenCalledWith('/api/todo/envs/demo');
+
+      // 越过 SPIN_DELAY_MS：silent 刷新不该点着 spinner，行数据也不该被抽空。
+      await advance(SPIN_DELAY_MS * 2);
+      expect(isMasked()).toBe(false);
+      expect(document.querySelector('.ant-spin-spinning')).toBeNull();
+      expect(screen.getByText('demo')).toBeTruthy();
+      expect(findButton('编辑').disabled).toBe(false);
+
+      // 刷新落定后才换数据：此时 loadingEnvs 仍为 false，空态允许显示。
+      releaseRefresh();
+      await flush();
+      expect(screen.getByText('暂无 env')).toBeTruthy();
+      expect(isMasked()).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

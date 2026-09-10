@@ -115,7 +115,7 @@ export function QueuePanel({ sessionId, refreshSignal }) {
   const steerRows = rows.filter((r) => r.delivery === 'steer');
   const queueRows = rows.filter((r) => r.delivery === 'queue');
   return (
-    <div style={{ marginTop: 12, border: '1px solid #f0f0f0', borderRadius: 8, padding: '6px 12px' }}>
+    <div style={{ marginTop: 12, border: '1px solid var(--oc-border)', borderRadius: 8, padding: '6px 12px' }}>
       <div
         style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', userSelect: 'none' }}
         onClick={() => setOpen((o) => !o)}

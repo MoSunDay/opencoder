@@ -10,6 +10,9 @@ use serde_json::json;
 use std::sync::Arc;
 
 pub fn build_app(state: Arc<AppState>, token: Option<String>, web: bool) -> Router {
+    // Captured before the builder chains consume `state`: the bearer
+    // middleware resolves platform users through the same store.
+    let auth_store = state.store.clone();
     let mut app = Router::<Arc<AppState>>::new()
         .merge(api::compat::routes())
         .route("/api/health", get(|| async { axum::Json(json!({"ok":true,"protocol_version":opencoder_core::fleet::PROTOCOL_VERSION,"role":"control","commit":opencoder_core::version::VERSION_LONG})) }))
@@ -21,6 +24,9 @@ pub fn build_app(state: Arc<AppState>, token: Option<String>, web: bool) -> Rout
                 .delete(admission::reopen),
         )
         .route("/api/time", get(auth_mw::server_time))
+        .route("/api/me", get(api::users::me))
+        .route("/api/users", get(api::users::list).post(api::users::create))
+        .route("/api/users/:name", axum::routing::delete(api::users::delete))
         .route("/api/nodes", get(catalog::nodes))
         .route("/api/nodes/:id/scheduling", put(api::settings::save_scheduling))
         .route("/api/harnesses", get(api::settings::get_harnesses))
@@ -102,10 +108,13 @@ pub fn build_app(state: Arc<AppState>, token: Option<String>, web: bool) -> Rout
         .layer(axum::middleware::from_fn_with_state(
             state,
             crate::resource_scope::configured_agents,
-        ));
+        ))
+        // Runs after the bearer middleware: role-gates the non-admin
+        // surface (see role_gate::allowed).
+        .layer(axum::middleware::from_fn(crate::role_gate::require_role));
     if let Some(token) = token {
         app = app.layer(axum::middleware::from_fn_with_state(
-            Some(Arc::new(auth_mw::AuthState::new(token))),
+            Some(Arc::new(auth_mw::AuthState::new(token, auth_store))),
             auth_mw::require_bearer,
         ));
     }

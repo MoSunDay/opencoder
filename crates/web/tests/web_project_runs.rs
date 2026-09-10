@@ -8,9 +8,11 @@ mod support;
 use std::sync::Arc;
 
 use axum::http::StatusCode;
+use opencoder_llm::LlmEvent;
 use opencoder_store::{LibsqlStore, Store};
 use serde_json::json;
 use support::project_app::{call, done, harness, todo_row, tool_turn, wait_until, TOKEN};
+use tokio::sync::Notify;
 
 #[tokio::test]
 async fn plan_and_execute_run_lifecycle() {
@@ -164,4 +166,164 @@ async fn cancel_unknown_run_returns_false_and_503_shape() {
         assert_eq!(v["ok"], false);
         assert!(v["error"].as_str().unwrap().contains("not initialized"));
     }
+}
+
+#[tokio::test]
+async fn plan_failure_keeps_todo_draft() {
+    let h = harness().await;
+    let (_, todo) = call(
+        &h.app,
+        "POST",
+        "/api/project/todos",
+        Some(json!({ "title": "会失败的计划", "draft": "这条草稿不该被改写" })),
+    )
+    .await;
+    let tid = todo["id"].as_str().unwrap().to_string();
+
+    // 模型直接报错：plan run 落 failed，收尾是事务性的，todo 行原封不动。
+    h.mock
+        .queue_script(vec![LlmEvent::Error("模型炸了".into())]);
+    let (status, v) = call(
+        &h.app,
+        "POST",
+        &format!("/api/project/todos/{tid}/plan"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{v}");
+    assert!(v["run_id"].as_str().unwrap().starts_with("prun-"), "{v}");
+
+    let runs = wait_until(
+        &h.app,
+        &format!("/api/project/todos/{tid}/runs"),
+        "plan run failed",
+        |b| {
+            b["runs"]
+                .as_array()
+                .is_some_and(|a| a.first().is_some_and(|r| r["status"] == "failed"))
+        },
+    )
+    .await;
+    let run = &runs["runs"].as_array().unwrap()[0];
+    assert_eq!(run["kind"], "plan");
+    assert!(
+        run["output_md"].as_str().unwrap().contains("模型炸了"),
+        "{runs}"
+    );
+
+    // 失败的 plan run 不改写 todo：仍是 draft、无 plan_md、草稿原文保留。
+    let list = call(&h.app, "GET", "/api/project/todos", None).await.1;
+    let row = todo_row(&list, &tid);
+    assert_eq!(row["status"], "draft");
+    assert!(row["plan_md"].is_null());
+    assert_eq!(row["draft"], "这条草稿不该被改写");
+
+    // 补救：失败没有卡死 todo，换个正常脚本再次 plan 仍能成功落盘。
+    h.mock.queue_script(done("# 补救计划"));
+    let (status, v) = call(
+        &h.app,
+        "POST",
+        &format!("/api/project/todos/{tid}/plan"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{v}");
+    let planned = wait_until(&h.app, "/api/project/todos", "todo planned", |b| {
+        b["todos"]
+            .as_array()
+            .is_some_and(|a| a.iter().any(|t| t["id"] == tid && t["status"] == "planned"))
+    })
+    .await;
+    let row = todo_row(&planned, &tid);
+    assert_eq!(row["plan_md"], "# 补救计划");
+}
+
+#[tokio::test]
+async fn cancel_live_execute_over_http_reverts_todo() {
+    let h = harness().await;
+    let (_, todo) = call(
+        &h.app,
+        "POST",
+        "/api/project/todos",
+        Some(json!({ "title": "可取消的执行", "draft": "跑起来再取消" })),
+    )
+    .await;
+    let tid = todo["id"].as_str().unwrap().to_string();
+
+    // 先 plan 出方案，todo 才能进入执行。
+    h.mock.queue_script(done("# 执行方案"));
+    let (status, v) = call(
+        &h.app,
+        "POST",
+        &format!("/api/project/todos/{tid}/plan"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{v}");
+    wait_until(&h.app, "/api/project/todos", "todo planned", |b| {
+        b["todos"]
+            .as_array()
+            .is_some_and(|a| a.iter().any(|t| t["id"] == tid && t["status"] == "planned"))
+    })
+    .await;
+
+    // 执行的 LLM 调用挂在外部 Notify 上：取消时 run 是真正的 live 状态。
+    let notify = Arc::new(Notify::new());
+    h.mock.queue_hang(notify.clone());
+    let (status, v) = call(
+        &h.app,
+        "POST",
+        &format!("/api/project/todos/{tid}/execute"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{v}");
+    let rid = v["run_id"].as_str().unwrap().to_string();
+    wait_until(&h.app, "/api/project/todos", "todo running", |b| {
+        b["todos"]
+            .as_array()
+            .is_some_and(|a| a.iter().any(|t| t["id"] == tid && t["status"] == "running"))
+    })
+    .await;
+
+    // HTTP 取消 live run：driver 收敛 run 为 cancelled，todo 回退 planned。
+    let (status, v) = call(
+        &h.app,
+        "POST",
+        &format!("/api/project/runs/{rid}/cancel"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert_eq!(v, json!({ "cancelled": true }));
+
+    let runs = wait_until(
+        &h.app,
+        &format!("/api/project/todos/{tid}/runs"),
+        "execute run cancelled",
+        |b| {
+            b["runs"]
+                .as_array()
+                .is_some_and(|a| a.first().is_some_and(|r| r["status"] == "cancelled"))
+        },
+    )
+    .await;
+    assert_eq!(runs["runs"].as_array().unwrap()[0]["kind"], "execute");
+
+    // 回退后的 todo 仍是 planned，方案原样保留。
+    let list = call(&h.app, "GET", "/api/project/todos", None).await.1;
+    let row = todo_row(&list, &tid);
+    assert_eq!(row["status"], "planned");
+    assert_eq!(row["plan_md"], "# 执行方案");
+
+    // 终态 run 的二次取消幂等：不再报 cancelled。
+    let (status, v) = call(
+        &h.app,
+        "POST",
+        &format!("/api/project/runs/{rid}/cancel"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert_eq!(v, json!({ "cancelled": false }));
 }

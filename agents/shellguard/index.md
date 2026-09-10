@@ -1,22 +1,24 @@
-Commit: 8709349 (working-tree, plan 严格只读写效应标记)
+Commit: b465f440381bd009dc9bd3a8192ad88eab44cede
 
 # shellguard 模块
 
-## 职责
-sandbox 模式的 shell 命令安全分类器（`opencoder-shellguard`）。分类核提取自 [rippy](https://github.com/mpecan/rippy)（MIT，版权归 rippy 作者），按 sandbox 策略改造：判定基于 rable 解析出的 AST，而非字符串形状穷举。
+sandbox shell 命令安全分类器（rable AST 判定）。
 
-## 关键抽象
-- `classify(command) -> Verdict`（`src/lib.rs`）：唯一入口。策略——一切携带风险的写拦截；释放集仅 `/dev/null` + `/tmp`；cwd/项目目录**不释放**；不可解析 fail-closed（`Ask`）；`Allow` 放行、`Ask`/`Deny` 一律拦截。`cd` 特例：静态可解析目标的纯导航不写状态 → `Allow`，analyzer 按目标重瞄后续操作数的判定 cwd（写后置仍拦）；不可解析目标（变量、`~`、无参、未知 flag）与 `pushd`/`popd` 维持 `Ask` fail-closed。
-- 管线（`lib.rs` 模块序即数据流向）：`nesting` 界定输入形状 → `parser`（rable）产 AST → `ast` 节点分类 → `resolve` 静态求值 shell 展开 → `analyzer` 逐命令下钻 `handlers/` 注册表；`perl_safety`/`python_safety`/`ruby_safety`/`node_safety`/`sql` 覆盖解释器内嵌代码与 SQL 写面。
-- `Verdict`/`Decision`/`AllowReason`（`src/verdict.rs`）：三值判定 + 理由；`Verdict::writes_state` 是组合时不丢失的类型化写效应标记。shellguard 仍可按 sandbox 策略 `Allow` 落在 `/tmp` 的变更，但严格只读消费方可据此继续拦截；精确 `/dev/null` 与 fd redirect 不产生持久状态，标记为 false。
+## 关键路径
+- `src/lib.rs::classify / classify_in` — 唯一入口；`classify_in` 显式 cwd，须对齐执行 cwd。
+- `src/lib.rs` — 不可解析 fail-closed：一律 `Ask` 拦截。
+- `src/verdict.rs` — `Decision::{Allow,Ask,Deny}` 三值 + `writes_state` 写效应标记。
+- `src/handlers/scope.rs` — 释放集仅 `/dev/null` + `/tmp`；cwd/项目目录不释放。
+- `src/lib.rs` 管线 — nesting → parser（rable）→ ast → resolve → analyzer。
+- `src/handlers/` — 每命令 handler 注册表（git/docker/curl/sed/cloud/…）。
+- `src/{perl,python,ruby,node}_safety.rs`、`src/sql.rs` — 解释器内嵌代码与 SQL 写面。
+- `src/allowlists.rs` — simple-safe 白名单（rippy 数据裁剪）。
+- `Cargo.toml [lints.clippy]` — `unwrap_used`/`expect_used`/`panic` 全 deny。
+- `crates/session/src/bash_guard_compat_tests{,2}.rs` — 表驱动判定 corpus。
 
-## 质量约束
-- crate 级 lint：`unwrap_used`/`expect_used`/`panic` 全 `deny`——分类器自身不允许 panic 路径（`Cargo.toml [lints.clippy]`）。
-- 判定兼容性由 session 侧 229 行 / 230 断言表驱动 corpus 守护（`crates/session/src/bash_guard_compat_tests{,2}.rs`，分歧按 RELEASE/RETARGETED/OVER-BLOCK/RELAXED 显式标注）。
+## 边界
+- `Allow` 落 /tmp 的变更仍带 `writes_state`，严格只读消费方据此继续拦。
+- `cd` 静态可解析纯导航 Allow 并重瞄判定 cwd；不可解析目标及 pushd/popd 均 Ask。
 
-## 依赖与接口
-- 依赖：`rable`（shell 解析）、thiserror。
-- 被依赖：`opencoder-session`（`bash_guard.rs` 严格只读适配：无写效应的 `Allow → ReadOnly`；带 `writes_state` 的 `Allow` 及全部 `Ask`/`Deny → WriteBlocked`）。
-
-## 相关模块
-- [agents/session](../session/index.md) — plan 模式严格只读 bash 拦截消费方。
+## 相关
+- [agents/session](../session/index.md) — bash_guard 严格只读适配消费方。

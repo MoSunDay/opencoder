@@ -5,10 +5,12 @@
 // todo id 从原 spec 透传，需要增删时切到「JSON 源码」模式编辑。
 // Env 绑定（env.json）与 context 一起保存（绑定值变化才发 PUT）。
 
-import { Button, Card, Col, Divider, Form, Input, InputNumber, Row, Segmented, Select, Space, Spin, Typography, message } from 'antd';
+import { Button, Card, Col, Divider, Form, Input, InputNumber, Row, Segmented, Select, Space, Spin, Typography } from 'antd';
 import { useEffect, useMemo, useState } from 'react';
 import { apiGet, apiPut } from './api.js';
 import { err } from './notice.js';
+import { useMessage } from './ui/appMessage.js';
+import { MONO_VAR } from './ui/mono.js';
 
 const { TextArea } = Input;
 const { Text } = Typography;
@@ -89,6 +91,8 @@ function envOptions(envs) {
 }
 
 function TodoEditorSession({ templateName, version, onNotice, onClose }) {
+  /// App 上下文里的 message API（脱离 <App> 时 useMessage 自动回落静态 API）。
+  const msg = useMessage();
   const [form] = Form.useForm();
   const [mode, setMode] = useState('form');
   const [spec, setSpec] = useState(null);
@@ -160,7 +164,7 @@ function TodoEditorSession({ templateName, version, onNotice, onClose }) {
     try {
       parsed = JSON.parse(jsonText);
     } catch (e) {
-      message.error('JSON 解析失败: ' + (e && e.message));
+      msg.error('JSON 解析失败: ' + (e && e.message));
       return; // 停留在 JSON 模式，修好再切
     }
     setSpec(parsed);
@@ -183,7 +187,7 @@ function TodoEditorSession({ templateName, version, onNotice, onClose }) {
       try {
         nextSpec = JSON.parse(jsonText);
       } catch (e) {
-        message.error('JSON 解析失败: ' + (e && e.message));
+        msg.error('JSON 解析失败: ' + (e && e.message));
         return;
       }
     }
@@ -196,11 +200,11 @@ function TodoEditorSession({ templateName, version, onNotice, onClose }) {
         setEnvLoaded(envBinding);
       }
       setSpec(nextSpec);
-      message.success('已保存');
+      msg.success('已保存');
     } catch (e) {
-      const msg = '保存失败: ' + (e && e.message);
+      const text = '保存失败: ' + (e && e.message);
       if (onNotice) {
-        onNotice(err(msg));
+        onNotice(err(text));
       }
     } finally {
       setSaving(false);
@@ -332,7 +336,7 @@ function TodoEditorSession({ templateName, version, onNotice, onClose }) {
             value={jsonText}
             onChange={(e) => setJsonText(e.target.value)}
             rows={24}
-            style={{ fontFamily: 'monospace', marginTop: 8 }}
+            style={{ fontFamily: MONO_VAR, marginTop: 8 }}
             aria-label="spec-json"
           />
         </div>

@@ -1,12 +1,14 @@
 import { useEvent } from '../ui/editing/useEvent.js';
-import { Button, Form, Input, Space, Table, Tag, Typography, message } from 'antd';
+import { Button, Form, Input, Space, Table, Tag, Typography } from 'antd';
 import { useCallback, useEffect, useState } from 'react';
 import { apiGet, apiPut } from '../api.js';
 import { parseEnvs } from './fields.jsx';
 import { err } from '../notice.js';
+import { useMessage } from '../ui/appMessage.js';
 
 export function RunnerManagement({ onNotice: noticeCallback }) {
   const onNotice = useEvent(noticeCallback);
+  const msg = useMessage();
   const [items, setItems] = useState([]); const [busy, setBusy] = useState(false); const [editing, setEditing] = useState(false);
   const [form] = Form.useForm();
   const load = useCallback(async () => {
@@ -29,7 +31,7 @@ export function RunnerManagement({ onNotice: noticeCallback }) {
     try {
       await apiPut(`/api/runners/${encodeURIComponent(values.name)}`, { command: JSON.parse(values.command),
         workdir: values.workdir, parent_unit: values.parent_unit || null, files: JSON.parse(values.files), envs: parseEnvs(values.envs) });
-      message.success('Runner 已保存，新任务使用新版本'); setEditing(false); await load();
+      msg.success('Runner 已保存，新任务使用新版本'); setEditing(false); await load();
     } catch (error) { onNotice(err(`保存 Runner 失败：${error.message}`)); }
     finally { setBusy(false); }
   };

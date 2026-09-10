@@ -181,7 +181,7 @@ pub async fn resolve(
                 json!({"todo":todo,"goals":state.projects.list_goals().await.map_err(fail)?,"milestones":state.projects.list_milestones(None).await.map_err(fail)?}),
             )
         }
-        ExecutionKind::Agent | ExecutionKind::Maintenance => None,
+        ExecutionKind::Agent | ExecutionKind::Maintenance | ExecutionKind::Operator => None,
     };
     if let Some(value) = &definition {
         match request.kind {

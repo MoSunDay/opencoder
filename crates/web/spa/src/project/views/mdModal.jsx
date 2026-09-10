@@ -94,7 +94,7 @@ export function MdEditModal({ open, title, initial, extraTop, onCancel, onOk }) 
         {mode === 'preview' && (
           <div
             className="md-modal-preview"
-            style={{ minHeight: 140, padding: 12, border: '1px solid #f0f0f0', borderRadius: 6 }}
+            style={{ minHeight: 140, padding: 12, border: '1px solid var(--oc-border)', borderRadius: 6 }}
             aria-label="detail_preview"
           >
             <Form.Item noStyle shouldUpdate>

@@ -1,33 +1,33 @@
-Commit: (working-tree, 基于 65c9d891ae905e7925277d29a87cd8e7957e8dad)
+Commit: b465f440381bd009dc9bd3a8192ad88eab44cede
 
-# OpenCoder 能力地图
+# OpenCoder 能力地图 — 业务能力总索引
 
 ## 平台与编排
 
-- [Agent 调度平台](agent-platform/index.md)：独立 Server/Node、节点注册、CPU 调度、四字段索引、按 ID 读取节点明细、团队职责、系统维护团队、大脑能力绑定与直接派发。
-- [DAG 工作流](../agents/dag-runtime/index.md)：agent/wasm 步骤、依赖执行、本地产物、检查点恢复、模块库 `_modules` 及 runc 支持。
-- [持久化 TODO 工作流](todos/index.md)：父会话调度验收、独立 TODO 执行、依赖/并发、恢复、回退和工具验收合同。
-- [项目管理](../agents/project/index.md)：goal/milestone/todo 结构、草稿、Plan → Act、多执行器执行（agent/team/DAG/大脑路由）、执行记录和取消。
-- [版本化 Agent 与 NFS 资源](../agents/agents/index.md)：引用卡、prompt/skills/tools/memory 共享池、版本发布/回滚和只读导出。
-- [大脑能力库](../agents/brain/index.md)：能力录入、嵌入、语义检索及决策树规划。
-- [远程管理 CLI](../agents/ctl/index.md)：`opencoder-cli` 对接 `opencoder-server` 全量 API（system/exec/session/nodes/dag/todo/project/brain/teams/agents + raw 逃生舱），Bearer 认证、stdout 单 JSON、退出码契约。
+- [Agent 调度平台](agent-platform/index.md) — Server/Node 调度与按 ID 查执行明细。
+- [DAG 工作流](../agents/dag-runtime/index.md) — agent/wasm 步骤、依赖执行与产物。
+- [持久化 TODO 工作流](todos/index.md) — 父会话调度验收、独立 TODO 执行。
+- [项目管理](../agents/project/index.md) — goal/milestone/todo 与多执行器。
+- [版本化 Agent 与 NFS](../agents/agents/index.md) — 引用卡、共享池、只读导出。
+- [大脑能力库](../agents/brain/index.md) — 能力录入、语义检索与路由。
+- [远程管理 CLI](../agents/ctl/index.md) — 对接 Server API 与退出码契约。
 
 ## 会话与交互
 
-- [会话运行时](../agents/session/index.md)：act/plan、显式交接、恢复与分叉、steer/queue、压缩、subagent、question、侧车问询及 autopilot。
-- [Agent Harness](harness/index.md)：CLI 和 Server Web 选择执行器、Codex 二进制消息适配、工作区资源、固定会话配置及恢复。
-- [CLI](../agents/local/index.md)：无头运行、模型选择、会话导出/导入、TODO 命令和工具安装（本地前端，包名 `opencoder-local`）。
-- [TUI](../agents/tui/index.md)：Turn 阶梯、推理显示、技能选择、模式切换、notepad、快捷键、文本复制（含 [Say 合并头预览载荷](changelog/2026-09-05/tui-copy-mode-say-pair-payload.md)）和上下文展示。
-- [Web 会话](../agents/web/index.md)：流式会话、问题作答、排队/指导、模型/技能发现、annotation/autopilot、标题和 SSE 重连。
+- [会话运行时](../agents/session/index.md) — act/plan、压缩、subagent、恢复。
+- [Agent Harness](harness/index.md) — opencode/codex 执行器与资源快照。
+- [CLI](../agents/local/index.md) — 无头运行、TODO 命令与工具安装。
+- [TUI](../agents/tui/index.md) — Turn 阶梯、模式切换与复制。
+- [Web 会话](../agents/web/index.md) — 流式会话、SSE 与模型发现。
 
 ## 配置与基础能力
 
-- [配置和资源作用域](../agents/core/index.md)：模型/压缩配置、按域文件、命名环境、CLI/MCP 注入范围和 Skill 上下文注入。
-- [模型客户端](../agents/llm/index.md)：OpenAI 兼容流式协议、重试、超时、嵌入和确定性测试。
-- [持久化](../agents/store/index.md)：本地高性能存储、会话与执行状态、恢复及独立平台索引。
-- [sandbox 命令分类](../agents/shellguard/index.md)：只读模式下的 shell 写效应分类与拦截。
-- [测试规则](../rules/)：功能测试、全量回归 gate、测试分层与执行证据。
+- [配置和资源作用域](../agents/core/index.md) — 模型/压缩/命名环境与 Skill 注入。
+- [模型客户端](../agents/llm/index.md) — OpenAI 兼容流式与测试夹具。
+- [持久化](../agents/store/index.md) — 本地存储与会话/执行状态。
+- [sandbox 命令分类](../agents/shellguard/index.md) — 只读模式写效应拦截。
+- [测试规则](../rules/) — 功能测试、回归 gate、测试分层。
 
 ## 变更记录
 
-[Changelog](changelog/) 按日期记录可检索的变化和验证结果。
+- [Changelog](changelog/) — 按日期记录变化与验证。

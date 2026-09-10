@@ -448,6 +448,57 @@ mod gated {
         })
         .await;
 
+        // finish_todo_run on a Step run (playbook child attempt): the run
+        // row converges, but the todo keeps its status — the todo lifecycle
+        // belongs to the parent playbook's Execute row exclusively.
+        let step_run = ProjectTodoRunRecord {
+            input_snapshot: None,
+            trace_manifest: None,
+            id: format!("step-{uniq}"),
+            todo_id: todo.clone(),
+            kind: ProjectTodoRunKind::Step,
+            version: 9,
+            plan_md: None,
+            output_md: None,
+            agent: "act".into(),
+            executor_kind: ProjectExecutorKind::Agent,
+            capability_id: None,
+            plan_id: None,
+            output_ref: None,
+            session_id: None,
+            status: ProjectTodoRunStatus::Running,
+            started_at: ts + 12,
+            finished_at: None,
+            created_at: ts + 12,
+        };
+        p.create_todo_run(&step_run).await.unwrap();
+        assert!(p
+            .finish_todo_run(
+                &step_run.id,
+                &opencoder_store::ProjectTodoRunPatch {
+                    status: Some(ProjectTodoRunStatus::Done),
+                    output_md: Some("step out".into()),
+                    finished_at: Some(ts + 13),
+                    ..Default::default()
+                },
+                ts + 13,
+            )
+            .await
+            .unwrap());
+        eventually("step run converged, todo untouched", || async {
+            p.get_todo_run(&step_run.id)
+                .await
+                .unwrap()
+                .map(|r| r.status == ProjectTodoRunStatus::Done)
+                .unwrap_or(false)
+                && p.get_todo(&todo)
+                    .await
+                    .unwrap()
+                    .map(|t| t.status == ProjectTodoStatus::Planned)
+                    .unwrap_or(false)
+        })
+        .await;
+
         // delete_todo cascades its runs.
         assert!(p.delete_todo(&todo).await.unwrap());
         eventually("todo + runs gone", || async {

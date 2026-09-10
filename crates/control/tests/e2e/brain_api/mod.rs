@@ -48,7 +48,9 @@ fn queue_plan(h: &Harness, cap: &str) {
     ]);
 }
 
+mod agents;
 mod capabilities;
 mod default_execution;
 mod dispatch;
 mod planning;
+mod playbooks;

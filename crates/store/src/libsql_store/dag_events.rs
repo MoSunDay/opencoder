@@ -3,7 +3,7 @@
 //! scheduling state: it only stores and replays these rows.
 
 use anyhow::{Context, Result};
-use libsql::{params, Connection};
+use libsql::{Connection, params};
 
 use crate::types::DagEventRecord;
 

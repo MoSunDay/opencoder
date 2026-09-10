@@ -20,6 +20,8 @@ struct Tables {
     journal: HashMap<String, Value>,
     /// execution id -> accepted ExecutionIndex json.
     accepted: HashMap<String, Value>,
+    /// execution id -> pinned definition carried by the assignment.
+    pinned: HashMap<String, Option<Value>>,
     inspects: HashMap<String, RpcReply>,
     /// (execution id, action) -> reply.
     commands: HashMap<(String, String), RpcReply>,
@@ -222,6 +224,18 @@ impl MockNode {
         ids
     }
 
+    /// The pinned definition the node received for `id` (None when the id
+    /// was never assigned; Some(None) for a definition-less assignment).
+    pub fn pinned_definition(&self, id: &str) -> Option<Value> {
+        self.tables
+            .lock()
+            .unwrap()
+            .pinned
+            .get(id)
+            .cloned()
+            .flatten()
+    }
+
     /// Overrides Freeze/Reopen/Status admission replies by command name
     /// ("freeze"/"reopen"/"status"); when present the default side effects
     /// (open flip, freeze counting) are skipped.
@@ -316,6 +330,7 @@ impl NodeService for MockNode {
                 }
                 let index = serde_json::to_value(&assignment.index).unwrap();
                 t.journal.insert(id.clone(), request);
+                t.pinned.insert(id.clone(), assignment.definition.clone());
                 t.accepted.insert(id, index.clone());
                 RpcReply::ok(index)
             }

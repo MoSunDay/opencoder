@@ -18,7 +18,9 @@ use std::sync::Arc;
 /// `GET /api/me` — the authenticated caller. Without bearer middleware
 /// (auth-disabled deployments) defaults to the bootstrap admin view.
 pub async fn me(identity: Option<Extension<Identity>>) -> Response {
-    let identity = identity.map(|Extension(i)| i).unwrap_or_else(|| Identity::admin("admin"));
+    let identity = identity
+        .map(|Extension(i)| i)
+        .unwrap_or_else(|| Identity::admin("admin"));
     Json(json!({"name": identity.name, "role": identity.role.as_str()})).into_response()
 }
 

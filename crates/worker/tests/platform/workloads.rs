@@ -135,15 +135,15 @@ async fn ordinary_team_stays_on_one_node_and_system_creation_is_retired() {
         .call(
             "POST",
             "/api/teams",
-            json!({"name":"local-team","captain":"captain","members":[
-                {"id":"captain","agent":"act","role":"coordinate"},
-                {"id":"reviewer","agent":"act","role":"review"}
+            json!({"name":"local-team","captain":"act","members":[
+                {"agent":"act"},
+                {"agent":"plan"}
             ]}),
         )
         .await;
     assert_eq!(saved.status, 200, "{saved:?}");
     for text in [
-        json!({"question":"review locally","participants":["reviewer"],"rationale":"review"})
+        json!({"question":"review locally","participants":["plan"],"rationale":"review"})
             .to_string(),
         "local review answer".into(),
         "{\"summary\":\"all checked\",\"aligned\":true}".into(),
@@ -303,9 +303,15 @@ async fn operator_executions_run_the_host_process_agent_loop() {
     assert_eq!(detail["execution"]["kind"], "operator");
     // The default title and the host-process preamble land in the session.
     assert_eq!(detail["session"]["meta"]["title"], "Operator");
-    let first_user = String::from_utf8(base64::engine::general_purpose::STANDARD
-        .decode(detail["session"]["messages"]["chunks"][0]["bytes_b64"].as_str().unwrap())
-        .unwrap())
+    let first_user = String::from_utf8(
+        base64::engine::general_purpose::STANDARD
+            .decode(
+                detail["session"]["messages"]["chunks"][0]["bytes_b64"]
+                    .as_str()
+                    .unwrap(),
+            )
+            .unwrap(),
+    )
     .unwrap();
     assert!(first_user.contains("Operator agent"), "{first_user}");
     assert!(first_user.contains("check host"), "{first_user}");

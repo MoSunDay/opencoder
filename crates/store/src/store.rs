@@ -9,8 +9,8 @@ use crate::types::{
 };
 use crate::{
     BrainCapabilityDetail, BrainCapabilityRecord, BrainEngInputRecord, BrainPlanRecord,
-    BrainVectorHit, BrainVectorWrite, TeamTopicRunRecord, TodoEventPage, TodoEventRecord,
-    TodoItemRecord, TodoWorkflowDetail, TodoWorkflowRecord, TodoWorkflowSummary,
+    BrainPlaybookRecord, BrainVectorHit, BrainVectorWrite, TeamTopicRunRecord, TodoEventPage,
+    TodoEventRecord, TodoItemRecord, TodoWorkflowDetail, TodoWorkflowRecord, TodoWorkflowSummary,
 };
 
 /// Storage abstraction — the single seam that lets us swap libsql for another
@@ -455,6 +455,29 @@ pub trait Store: Send + Sync {
     async fn latest_brain_plan_for(&self, _digest: &str) -> Result<Option<BrainPlanRecord>> {
         anyhow::bail!("brain plans are not supported by {}", self.backend_name())
     }
+    /// Upsert one playbook keyed by id (`created_at` survives conflicts).
+    async fn save_brain_playbook(&self, _record: &BrainPlaybookRecord) -> Result<()> {
+        anyhow::bail!("playbooks are not supported by {}", self.backend_name())
+    }
+    /// Fetch one playbook by id (`None` if absent).
+    async fn get_brain_playbook(&self, _id: &str) -> Result<Option<BrainPlaybookRecord>> {
+        anyhow::bail!("playbooks are not supported by {}", self.backend_name())
+    }
+    /// Every playbook, newest first (created_at DESC).
+    async fn list_brain_playbooks(&self) -> Result<Vec<BrainPlaybookRecord>> {
+        anyhow::bail!("playbooks are not supported by {}", self.backend_name())
+    }
+    /// Delete one playbook; `Ok(true)` when a row was removed.
+    async fn delete_brain_playbook(&self, _id: &str) -> Result<bool> {
+        anyhow::bail!("playbooks are not supported by {}", self.backend_name())
+    }
+    /// Newest dynamic playbook for a digest — the plan-cache probe.
+    async fn latest_brain_playbook_for(
+        &self,
+        _digest: &str,
+    ) -> Result<Option<BrainPlaybookRecord>> {
+        anyhow::bail!("playbooks are not supported by {}", self.backend_name())
+    }
 
     /// Register (or re-register) a worker node by its unique `name`. A new
     /// name gets a fresh ULID; a known name keeps its `id` so dispatched tasks
@@ -490,10 +513,7 @@ pub trait Store: Send + Sync {
     ) -> Result<Option<crate::users::PlatformUser>> {
         Ok(None)
     }
-    async fn find_user_by_name(
-        &self,
-        _name: &str,
-    ) -> Result<Option<crate::users::PlatformUser>> {
+    async fn find_user_by_name(&self, _name: &str) -> Result<Option<crate::users::PlatformUser>> {
         Ok(None)
     }
     async fn list_users(&self) -> Result<Vec<crate::users::PlatformUser>> {

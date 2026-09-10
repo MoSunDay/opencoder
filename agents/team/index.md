@@ -1,4 +1,4 @@
-Commit: b465f440381bd009dc9bd3a8192ad88eab44cede
+Commit: (working-tree, 基于 b465f440)
 
 # team 模块
 
@@ -21,7 +21,8 @@ Commit: b465f440381bd009dc9bd3a8192ad88eab44cede
 
 - system 团队执行已退役：control 与 worker 均拒绝。
 - 权威进度在 worker 本地团队目录；`team_topic_runs` 仅运行台账。
-- 成员 ID 表示团队角色非机器 ID；不经 NFS 共享话题内容。
+- 成员以 agent 名标识（`MemberRef.node_id = name = agent`，团队内唯一）；不经 NFS 共享话题内容。
+- 成员 `capabilities` 是控制面 resolve 固化的大脑能力 summary 快照（非运行时画像）。
 
 ## 相关
 

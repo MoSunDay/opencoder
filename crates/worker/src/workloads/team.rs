@@ -43,7 +43,7 @@ impl Dispatcher {
             &id,
             &member.agent,
             None,
-            Some(format!("{} / {}", self.coordinator, member.role)),
+            Some(format!("{} / {}", self.coordinator, member.agent)),
             now_ms(),
         )
         .await?;
@@ -60,15 +60,16 @@ impl Dispatcher {
             Some(self.worker.inner.state.store.clone()),
             id.clone(),
         );
-        let outcome = opencoder_session::run(
-            &mut session,
-            format!("你的职责：{}\n\n{prompt}", member.role),
-            move |event| {
-                if let Err(error) = sink.push(&event) {
-                    tracing::error!(%error,"team event persistence channel failed");
-                }
-            },
-        )
+        let prompt = if member.capabilities.is_empty() {
+            prompt.to_string()
+        } else {
+            format!("你的能力：{}\n\n{prompt}", member.capabilities.join("；"))
+        };
+        let outcome = opencoder_session::run(&mut session, prompt, move |event| {
+            if let Err(error) = sink.push(&event) {
+                tracing::error!(%error,"team event persistence channel failed");
+            }
+        })
         .await;
         flush.await?;
         outcome?;
@@ -113,8 +114,8 @@ pub(super) async fn run(
         .members
         .iter()
         .map(|m| MemberRef {
-            node_id: m.id.clone(),
-            name: m.role.clone(),
+            node_id: m.agent.clone(),
+            name: m.agent.clone(),
         })
         .collect();
     let captain = members
@@ -128,12 +129,13 @@ pub(super) async fn run(
             &TeamMeta {
                 name: definition.name.clone(),
                 captain: captain.clone(),
-                members: members
+                members: definition
+                    .members
                     .iter()
                     .map(|m| opencoder_team::types::TeamMember {
-                        node_id: m.node_id.clone(),
-                        name: m.name.clone(),
-                        capabilities: vec![m.name.clone()],
+                        node_id: m.agent.clone(),
+                        name: m.agent.clone(),
+                        capabilities: m.capabilities.clone(),
                         profiled_at: None,
                     })
                     .collect(),
@@ -173,7 +175,7 @@ pub(super) async fn run(
         members: definition
             .members
             .into_iter()
-            .map(|m| (m.id.clone(), m))
+            .map(|m| (m.agent.clone(), m))
             .collect(),
         cancel: cancel.clone(),
         coordinator: id.clone(),

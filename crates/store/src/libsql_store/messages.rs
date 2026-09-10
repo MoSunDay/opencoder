@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use libsql::{params, Connection};
+use libsql::{Connection, params};
 use opencoder_core::{ContentBlock, Message, MessageUsage, Role};
 
 use crate::types::{ImportReport, MessageChunkPage, MessageChunkRecord, MessageRow};

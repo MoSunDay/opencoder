@@ -10,6 +10,8 @@
 mod agent_drive;
 mod brain_drive;
 mod dag_drive;
+mod playbook_drive;
+mod playbook_step;
 mod team_drive;
 
 use std::sync::Arc;
@@ -72,6 +74,7 @@ pub fn resolve(
         }),
         ProjectExecutorKind::Team => with_target(todo, ProjectExecutorKind::Team),
         ProjectExecutorKind::Dag => with_target(todo, ProjectExecutorKind::Dag),
+        ProjectExecutorKind::Playbook => with_target(todo, ProjectExecutorKind::Playbook),
         ProjectExecutorKind::Brain => Err(anyhow::anyhow!(
             "brain executor requires runtime resolution"
         )),
@@ -105,7 +108,9 @@ pub(crate) fn retarget(todo: &ProjectTodoRecord, resolved: &ResolvedExecutor) ->
                 next.executor_ref = Some(name.to_string());
             }
         }
-        ProjectExecutorKind::Brain => {}
+        // playbook 的目标就是 todo 自身的 executor_ref（驱动内再展开成
+        // 步骤图），无额外回写；brain 同理。
+        ProjectExecutorKind::Brain | ProjectExecutorKind::Playbook => {}
     }
     next
 }
@@ -138,6 +143,9 @@ pub async fn drive(
         }
         ProjectExecutorKind::Brain => {
             brain_drive::drive(deps, run_id, todo, cx, version, brain, token).await
+        }
+        ProjectExecutorKind::Playbook => {
+            playbook_drive::drive(deps, run_id, todo, cx, version, resolved, token).await
         }
     }
 }

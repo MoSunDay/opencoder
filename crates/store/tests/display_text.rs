@@ -237,8 +237,8 @@ async fn v5_to_v6_migration_adds_display_text() {
         let r = rows.next().await.unwrap().unwrap();
         let v: i64 = r.get(0).unwrap();
         assert_eq!(
-            v, 24,
-            "schema version must be 24 (latest) after v5 migration"
+            v, 25,
+            "schema version must be 25 (latest) after v5 migration"
         );
     }
     let again = store2.pending_inputs("s1", Delivery::Queue).await.unwrap();

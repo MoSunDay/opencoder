@@ -3,7 +3,7 @@
 //! are returned exactly once at creation time by the control API.
 
 use anyhow::{Context, Result};
-use libsql::{params, Connection};
+use libsql::{Connection, params};
 
 use crate::users::{GuardedDelete, PlatformUser};
 use opencoder_core::identity::Role;
@@ -24,7 +24,10 @@ fn row_to_user(row: &libsql::Row) -> Result<PlatformUser> {
 }
 
 /// Resolve a token digest to its user (bearer authentication lookup).
-pub async fn find_by_token_hash(conn: &Connection, token_hash: &str) -> Result<Option<PlatformUser>> {
+pub async fn find_by_token_hash(
+    conn: &Connection,
+    token_hash: &str,
+) -> Result<Option<PlatformUser>> {
     let stmt = conn
         .prepare(&format!(
             "SELECT {USER_COLS} FROM platform_users WHERE token_hash = ?1"
@@ -39,7 +42,9 @@ pub async fn find_by_token_hash(conn: &Connection, token_hash: &str) -> Result<O
 
 pub async fn find_by_name(conn: &Connection, name: &str) -> Result<Option<PlatformUser>> {
     let stmt = conn
-        .prepare(&format!("SELECT {USER_COLS} FROM platform_users WHERE name = ?1"))
+        .prepare(&format!(
+            "SELECT {USER_COLS} FROM platform_users WHERE name = ?1"
+        ))
         .await?;
     let mut rows = stmt.query(params![name]).await?;
     match rows.next().await? {
@@ -67,7 +72,12 @@ pub async fn count_admins(conn: &Connection) -> Result<i64> {
         .prepare("SELECT COUNT(*) FROM platform_users WHERE role = 'admin'")
         .await?;
     let mut rows = stmt.query(()).await?;
-    Ok(rows.next().await?.map(|r| r.get(0)).transpose()?.unwrap_or(0))
+    Ok(rows
+        .next()
+        .await?
+        .map(|r| r.get(0))
+        .transpose()?
+        .unwrap_or(0))
 }
 
 /// Insert a user; UNIQUE(name) / UNIQUE(token_hash) violations surface as
@@ -103,10 +113,7 @@ pub async fn delete(conn: &Connection, name: &str) -> Result<bool> {
 /// same statement as the delete, so concurrent deletions serialize on the
 /// row write and can never remove the final admin. `Missing`/`LastAdmin`
 /// are resolved after the fact purely to shape the API response.
-pub async fn delete_guarding_last_admin(
-    conn: &Connection,
-    name: &str,
-) -> Result<GuardedDelete> {
+pub async fn delete_guarding_last_admin(conn: &Connection, name: &str) -> Result<GuardedDelete> {
     let changed = conn
         .execute(
             "DELETE FROM platform_users WHERE name = ?1 \
@@ -157,25 +164,40 @@ mod tests {
         assert_eq!(created.role, Role::User);
 
         // Same name conflicts.
-        assert!(create(&conn, "alice", &"h2".repeat(8), Role::Root, 11)
-            .await
-            .is_err());
+        assert!(
+            create(&conn, "alice", &"h2".repeat(8), Role::Root, 11)
+                .await
+                .is_err()
+        );
         // Same token hash conflicts (different name).
-        assert!(create(&conn, "bob", &"h1".repeat(8), Role::User, 12)
-            .await
-            .is_err());
+        assert!(
+            create(&conn, "bob", &"h1".repeat(8), Role::User, 12)
+                .await
+                .is_err()
+        );
         // Distinct user is fine.
         create(&conn, "bob", &"h3".repeat(8), Role::Admin, 13)
             .await
             .unwrap();
 
         assert_eq!(
-            find_by_token_hash(&conn, &"h1".repeat(8)).await.unwrap().map(|u| u.name),
+            find_by_token_hash(&conn, &"h1".repeat(8))
+                .await
+                .unwrap()
+                .map(|u| u.name),
             Some("alice".into())
         );
-        assert_eq!(find_by_token_hash(&conn, &"nope".repeat(8)).await.unwrap(), None);
         assert_eq!(
-            list(&conn).await.unwrap().iter().map(|u| u.name.clone()).collect::<Vec<_>>(),
+            find_by_token_hash(&conn, &"nope".repeat(8)).await.unwrap(),
+            None
+        );
+        assert_eq!(
+            list(&conn)
+                .await
+                .unwrap()
+                .iter()
+                .map(|u| u.name.clone())
+                .collect::<Vec<_>>(),
             vec!["alice".to_string(), "bob".to_string()]
         );
         assert_eq!(count_admins(&conn).await.unwrap(), 1);
@@ -188,7 +210,9 @@ mod tests {
     #[tokio::test]
     async fn guarded_delete_never_removes_the_last_admin() {
         let conn = db().await;
-        create(&conn, "solo", &"h1".repeat(8), Role::Admin, 10).await.unwrap();
+        create(&conn, "solo", &"h1".repeat(8), Role::Admin, 10)
+            .await
+            .unwrap();
         // The only admin is refused…
         assert_eq!(
             delete_guarding_last_admin(&conn, "solo").await.unwrap(),
@@ -201,7 +225,9 @@ mod tests {
             GuardedDelete::Missing
         );
         // …non-admins always delete…
-        create(&conn, "plain", &"h2".repeat(8), Role::User, 11).await.unwrap();
+        create(&conn, "plain", &"h2".repeat(8), Role::User, 11)
+            .await
+            .unwrap();
         assert_eq!(
             delete_guarding_last_admin(&conn, "plain").await.unwrap(),
             GuardedDelete::Deleted
@@ -209,7 +235,9 @@ mod tests {
         // …and a second admin unlocks removal — the guard reads the count
         // inside the same statement, so sequential deletes of both admins
         // stop at the survivor exactly like concurrent ones would.
-        create(&conn, "peer", &"h3".repeat(8), Role::Admin, 12).await.unwrap();
+        create(&conn, "peer", &"h3".repeat(8), Role::Admin, 12)
+            .await
+            .unwrap();
         assert_eq!(
             delete_guarding_last_admin(&conn, "solo").await.unwrap(),
             GuardedDelete::Deleted
@@ -223,18 +251,38 @@ mod tests {
     #[tokio::test]
     async fn token_hash_rotation_repoints_and_keeps_uniqueness() {
         let conn = db().await;
-        create(&conn, "admin", &"h1".repeat(8), Role::Admin, 10).await.unwrap();
-        assert!(update_token_hash(&conn, "admin", &"h2".repeat(8)).await.unwrap());
-        assert_eq!(find_by_token_hash(&conn, &"h1".repeat(8)).await.unwrap(), None);
+        create(&conn, "admin", &"h1".repeat(8), Role::Admin, 10)
+            .await
+            .unwrap();
+        assert!(
+            update_token_hash(&conn, "admin", &"h2".repeat(8))
+                .await
+                .unwrap()
+        );
         assert_eq!(
-            find_by_token_hash(&conn, &"h2".repeat(8)).await.unwrap().map(|u| u.name),
+            find_by_token_hash(&conn, &"h1".repeat(8)).await.unwrap(),
+            None
+        );
+        assert_eq!(
+            find_by_token_hash(&conn, &"h2".repeat(8))
+                .await
+                .unwrap()
+                .map(|u| u.name),
             Some("admin".into())
         );
         // Unknown names are a no-op; another user's digest is rejected.
-        assert!(!update_token_hash(&conn, "ghost", &"h3".repeat(8)).await.unwrap());
-        create(&conn, "other", &"h4".repeat(8), Role::User, 11).await.unwrap();
         assert!(
-            update_token_hash(&conn, "other", &"h2".repeat(8)).await.is_err(),
+            !update_token_hash(&conn, "ghost", &"h3".repeat(8))
+                .await
+                .unwrap()
+        );
+        create(&conn, "other", &"h4".repeat(8), Role::User, 11)
+            .await
+            .unwrap();
+        assert!(
+            update_token_hash(&conn, "other", &"h2".repeat(8))
+                .await
+                .is_err(),
             "rotating onto an existing digest must not be silently allowed"
         );
     }

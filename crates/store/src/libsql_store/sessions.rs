@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use libsql::{params, params_from_iter, Connection, Value};
+use libsql::{Connection, Value, params, params_from_iter};
 
 use crate::types::{
     SessionFilter, SessionListItem, SessionMeta, SessionPatch, TASK_TYPE_PARENT, TASK_TYPE_SUBAGENT,

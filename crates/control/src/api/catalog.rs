@@ -115,7 +115,7 @@ pub async fn resolve(
     request: &CreateExecution,
 ) -> Result<Option<Value>, RpcReply> {
     let fail = |e: anyhow::Error| RpcReply::error(500, format!("definition: {e:#}"));
-    let definition = match request.kind {
+    let mut definition = match request.kind {
         ExecutionKind::Team | ExecutionKind::Dag => {
             if request.kind == ExecutionKind::Team && request.target.as_deref() == Some("system") {
                 return Err(RpcReply::error(400, "system team execution is retired"));
@@ -183,12 +183,33 @@ pub async fn resolve(
         }
         ExecutionKind::Agent | ExecutionKind::Maintenance | ExecutionKind::Operator => None,
     };
-    if let Some(value) = &definition {
+    if let Some(value) = definition.as_mut() {
         match request.kind {
-            ExecutionKind::Team => serde_json::from_value::<TeamDefinition>(value.clone())
-                .map_err(|e| RpcReply::error(400, e.to_string()))?
-                .validate()
-                .map_err(|e| RpcReply::error(400, e))?,
+            ExecutionKind::Team => {
+                let mut team = serde_json::from_value::<TeamDefinition>(value.clone())
+                    .map_err(|e| RpcReply::error(400, e.to_string()))?;
+                team.validate().map_err(|e| RpcReply::error(400, e))?;
+                // Capabilities are control-plane state, not user input: the
+                // pinned definition freezes each member agent's bound
+                // capability summaries (empty when the agent has none).
+                let groups = super::brain::agent_capability_groups(state)
+                    .await
+                    .map_err(fail)?;
+                for member in &mut team.members {
+                    member.capabilities = groups
+                        .iter()
+                        .find(|(agent, _)| *agent == member.agent)
+                        .map(|(_, capabilities)| {
+                            capabilities
+                                .iter()
+                                .filter_map(|c| c["summary"].as_str().map(str::to_string))
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                }
+                *value = serde_json::to_value(&team)
+                    .map_err(|e| RpcReply::error(500, format!("definition: {e}")))?;
+            }
             ExecutionKind::Dag => {
                 let spec =
                     serde_json::from_value(value.get("spec").cloned().unwrap_or(value.clone()))

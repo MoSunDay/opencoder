@@ -6,8 +6,9 @@ Commit: c36ac68df313ec108549ed5b95756eb37edf5f69
 
 ## 关键路径
 - `src/store.rs` — `Store` trait（dyn-compatible），上层只依赖 `Arc<dyn Store>`。
-- `src/libsql_store/mod.rs` — `LibsqlStore` 单 Connection + async Mutex 串行访问。
-- `src/libsql_store/schema.rs` — `SCHEMA_VERSION = 24`（v24 platform_users）；embedded libsql + WAL。
+- `src/libsql_store/mod.rs` — `LibsqlStore` 单 Connection + async Mutex 串行访问；`impl_store.rs` 承载唯一 `impl Store for LibsqlStore` 块（trait impl 不可拆多块，E0119）。
+- `src/libsql_store/brain_playbooks.rs` — v25 剧本表（spec_json 对 store 不透明）+ digest 索引。
+- `src/libsql_store/schema.rs` — `SCHEMA_VERSION = 25`（v25 brain_playbooks；v24 platform_users）；embedded libsql + WAL。
 - `src/users.rs` + `src/libsql_store/users.rs` — 平台用户（digest 落库）；`delete_user_guarding_last_admin` 守卫与 DELETE 同语句（防并发清空 admin），`update_user_token_hash` 支撑 seed 轮换。
 - `src/libsql_store/schema.rs` — PRAGMA 顺序：synchronous=NORMAL 必须先于 journal_mode=WAL；busy_timeout 30s。
 - `src/libsql_store/tx.rs` — `run_tx` 显式事务；写事务一律 BEGIN IMMEDIATE。

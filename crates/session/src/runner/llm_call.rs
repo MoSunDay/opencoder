@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use anyhow::{anyhow, Result};
 use opencoder_core::{AgentMode, Config, MessageUsage, ToolArc};
 use opencoder_llm::tool_call::CompletedToolCall;
-use opencoder_llm::{lower_messages, ChatRequest, ChatStream, LlmEvent, Usage};
+use opencoder_llm::{ChatRequest, ChatStream, LlmEvent, Usage};
 
 use crate::prompt::build_system;
 use crate::tools::schema_for;
@@ -12,11 +12,20 @@ use crate::SessionState;
 use super::event::SessionEvent;
 use super::steer::{await_cancel, await_turn_cancel};
 
+#[derive(Debug, Default)]
+pub(super) struct LlmTurn {
+    pub text: String,
+    pub reasoning: String,
+    pub tool_calls: Vec<CompletedToolCall>,
+    pub usage: Option<Usage>,
+    pub provider_state: Option<opencoder_core::ProviderState>,
+}
+
 pub(super) async fn run_one_llm_call(
     session: &SessionState,
     registry: &HashMap<String, ToolArc>,
     on_event: &mut (impl FnMut(SessionEvent) + Send + ?Sized),
-) -> Result<(String, String, Vec<CompletedToolCall>, Option<Usage>)> {
+) -> Result<LlmTurn> {
     let mcp_status = mcp_status_for_agent(session, registry);
     let mcp = crate::prompt::mcp_section(&mcp_status);
     let cli = (session.agent.name != "workflow")
@@ -52,7 +61,6 @@ pub(super) async fn run_one_llm_call(
     if let Some(tail) = crate::skill_context::tail_reminder(session) {
         to_send.push(tail);
     }
-    let openai_msgs = lower_messages(&to_send);
 
     let unlocked = crate::tools::latent::unlocked_from_body(skill_body.as_deref());
     let extensions = crate::extensions::tools(&session.id);
@@ -82,8 +90,9 @@ pub(super) async fn run_one_llm_call(
     let tool_schemas = schema_for(&allowed, hide_build);
 
     let req = ChatRequest {
-        model: session.model.clone(),
-        messages: openai_msgs,
+        purpose: opencoder_llm::RequestPurpose::Conversation,
+        model: session.config.model.clone(),
+        messages: to_send,
         tools: tool_schemas,
         tool_choice: if allowed.is_empty() {
             None
@@ -98,6 +107,7 @@ pub(super) async fn run_one_llm_call(
     let mut rx = session.client.chat_stream(req)?;
     let mut completed: Option<(String, Vec<CompletedToolCall>, Option<Usage>)> = None;
     let mut reasoning_buf = String::new();
+    let mut provider_state = None;
     // True once a `Retrying` status has been shown; cleared (with an empty
     // Status event) the moment real content streams so the "↻ retry" badge
     // doesn't linger after recovery.
@@ -114,18 +124,19 @@ pub(super) async fn run_one_llm_call(
             biased;
             _ = &mut cancel_fut => {
                 on_event(SessionEvent::Status("interrupted".into()));
-                return Ok((String::new(), String::new(), Vec::new(), None));
+                return Ok(LlmTurn::default());
             }
             _ = &mut turn_cancel_fut => {
                 // Turn interrupted by subagent steer "submit-now": return an
                 // empty turn. The caller (run_loop) detects this via
                 // is_turn_cancelled and continues the loop to absorb pending
                 // steers — it does NOT break like a real cancel.
-                return Ok((String::new(), String::new(), Vec::new(), None));
+                return Ok(LlmTurn::default());
             }
             ev = rx.recv() => {
                 let ev = match ev { Some(ev) => ev, None => break };
                 match ev {
+                    LlmEvent::ProviderState(state) => provider_state = Some(state),
                     LlmEvent::TextDelta(t) => {
                         if retried {
                             retried = false;
@@ -155,6 +166,8 @@ pub(super) async fn run_one_llm_call(
                         // reasoning deltas accumulated this attempt so they
                         // aren't stitched onto the fresh frame.
                         reasoning_buf.clear();
+                        provider_state = None;
+                        on_event(SessionEvent::LlmAttemptReset);
                         retried = true;
                         on_event(SessionEvent::Status(format!(
                             "\u{21bb} retry {attempt}/{max}"
@@ -167,7 +180,13 @@ pub(super) async fn run_one_llm_call(
     }
     let (text, tool_calls, usage) =
         completed.ok_or_else(|| anyhow!("stream ended without completion"))?;
-    Ok((text, reasoning_buf, tool_calls, usage))
+    Ok(LlmTurn {
+        text,
+        reasoning: reasoning_buf,
+        tool_calls,
+        usage,
+        provider_state,
+    })
 }
 
 fn mcp_tool_allowed(config: &Config, agent: &str, mode: AgentMode, tool_name: &str) -> bool {
@@ -208,6 +227,7 @@ fn mcp_status_for_agent(
 
 pub(super) fn core_usage(u: &Usage) -> MessageUsage {
     MessageUsage {
+        reasoning_tokens: u.reasoning_tokens,
         input_tokens: u.input_tokens,
         output_tokens: u.output_tokens,
         total_tokens: u.total_tokens,
@@ -256,7 +276,7 @@ mod tests {
         let registry: HashMap<String, ToolArc> = HashMap::new();
         let result = run_one_llm_call(&session, &registry, &mut |_| {}).await;
         assert!(result.is_ok(), "expected success, got: {:?}", result);
-        let (text, _, _, _) = result.unwrap();
+        let text = result.unwrap().text;
         assert_eq!(text, "hello");
     }
 
@@ -326,7 +346,9 @@ mod tests {
         })
         .await;
         assert!(result.is_ok(), "expected success, got: {:?}", result);
-        let (text, reasoning, _, _) = result.unwrap();
+        let super::LlmTurn {
+            text, reasoning, ..
+        } = result.unwrap();
         // Text always comes from the final Completed frame — never stitched
         // across the two attempts.
         assert_eq!(text, "final");

@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use opencoder_core::{ContentBlock, Message};
-use opencoder_llm::{lower_messages, ChatRequest, ChatStream, LlmEvent};
+use opencoder_llm::{ChatRequest, ChatStream, LlmEvent};
 
 use crate::autopilot::decision::parse_verdict;
 use crate::autopilot::prompts::{verify_system_prompt, verify_user_prompt};
@@ -43,14 +43,20 @@ pub async fn verify(
     state: &ApState,
     retries: u32,
 ) -> Result<VerifyVerdict, VerifyFailure> {
-    let msgs = lower_messages(&build_snapshot(session, state));
+    let msgs = build_snapshot(session, state);
 
     // Cause of the most recent failed attempt — the freshest diagnosis when
     // the budget runs out (a mixed run reports the last kind).
     let mut last_failure: Option<VerifyFailure> = None;
     for _ in 0..retries {
         let req = ChatRequest {
-            model: session.config.small_model_or_primary().to_string(),
+            purpose: opencoder_llm::RequestPurpose::Verify,
+            model: session
+                .config
+                .small_model
+                .as_deref()
+                .unwrap_or(&session.config.model)
+                .to_string(),
             messages: msgs.clone(),
             tools: Vec::new(),
             tool_choice: None,
@@ -254,13 +260,13 @@ fn has_content(blocks: &[ContentBlock]) -> bool {
 async fn drain_one_shot(client: &Arc<dyn ChatStream>, req: ChatRequest) -> Result<String> {
     let mut rx = client.chat_stream(req)?;
     let mut text = String::new();
+    let mut completed = false;
     while let Some(ev) = rx.recv().await {
         match ev {
             LlmEvent::TextDelta(t) => text.push_str(&t),
             LlmEvent::Completed { text: t, .. } => {
-                if !t.is_empty() {
-                    text = t;
-                }
+                completed = true;
+                text = t;
                 break;
             }
             LlmEvent::Retrying { .. } => {
@@ -271,6 +277,9 @@ async fn drain_one_shot(client: &Arc<dyn ChatStream>, req: ChatRequest) -> Resul
             LlmEvent::Error(e) => return Err(anyhow::anyhow!(e)),
             _ => {}
         }
+    }
+    if !completed {
+        return Err(anyhow::anyhow!("stream ended without completion"));
     }
     Ok(text)
 }
@@ -294,6 +303,7 @@ mod tests {
 
     fn tool_use_msg(id: &str, use_id: &str) -> Message {
         Message {
+            provider_state: None,
             display: None,
             id: id.into(),
             role: Role::Assistant,
@@ -312,6 +322,7 @@ mod tests {
 
     fn tool_result_msg(id: &str, use_id: &str) -> Message {
         Message {
+            provider_state: None,
             display: None,
             id: id.into(),
             role: Role::Tool,

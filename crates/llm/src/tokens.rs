@@ -22,7 +22,11 @@ pub fn estimate(text: &str) -> usize {
 pub fn estimate_messages(messages: &[Message]) -> usize {
     messages
         .iter()
-        .map(|m| estimate(&m.estimate_chars()) + PER_MESSAGE_OVERHEAD)
+        .map(|m| {
+            estimate(&m.estimate_chars())
+                .saturating_add(retained_reasoning(m))
+                .saturating_add(PER_MESSAGE_OVERHEAD)
+        })
         .sum()
 }
 
@@ -32,13 +36,24 @@ pub fn estimate_messages(messages: &[Message]) -> usize {
 /// framing), so that the replay/resume `context_used` value matches what
 /// streaming would have accumulated over the same transcript.
 pub fn estimate_messages_for_display(messages: &[Message]) -> usize {
-    messages.iter().map(|m| estimate(&m.estimate_chars())).sum()
+    messages
+        .iter()
+        .map(|m| estimate(&m.estimate_chars()).saturating_add(retained_reasoning(m)))
+        .sum()
 }
 
 /// Estimate tokens for the full session transcript that will be sent to the
 /// model (system prompt text + all messages).
 pub fn estimate_transcript(system: &str, messages: &[Message]) -> usize {
     estimate(system) + estimate_messages(messages)
+}
+
+fn retained_reasoning(message: &Message) -> usize {
+    if message.provider_state.is_some() {
+        usize::try_from(message.usage.reasoning_tokens).unwrap_or(usize::MAX)
+    } else {
+        0
+    }
 }
 
 #[cfg(test)]

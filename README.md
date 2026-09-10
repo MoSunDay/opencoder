@@ -109,6 +109,8 @@ curl -fsSL https://raw.githubusercontent.com/MoSunDay/opencoder/main/scripts/ins
 
 `model` 格式为 `"{provider}/{model_id}"`，provider 名匹配 `providers` map 的 key（未匹配则回退到默认 `provider`）。`api_key` / header `value` 支持 `{ENV_VAR}` 环境变量间接引用。
 
+接入 GPT-5/6 时，在对应 provider 中设置 `"protocol": "responses"`，并填写服务端提供的模型 ID。未设置协议的旧配置默认使用 `chat_completions`。两种协议可以混用，支持流式推理、工具/MCP、图片、子代理和会话恢复。配置示例与验收范围见 [Responses API](features/responses/index.md)。
+
 ### 三种使用方式
 
 ```bash

@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS messages (
   agent       TEXT,
   model       TEXT,
   blocks_json TEXT NOT NULL,
+  provider_state_json TEXT,
   usage_json  TEXT NOT NULL,
   created_at  INTEGER NOT NULL,
   synthetic   INTEGER NOT NULL DEFAULT 0,

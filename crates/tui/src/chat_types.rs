@@ -140,6 +140,7 @@ pub struct SidecarPanel {
 
 #[derive(Default, Clone, Debug, PartialEq)]
 pub struct ChatView {
+    pub attempt_snapshot: Option<AttemptSnapshot>,
     pub blocks: Vec<ChatBlock>,
     pub agent: String,
     pub status: String,
@@ -346,4 +347,12 @@ pub(super) fn indented(rendered: &[Line<'static>], width: usize) -> Vec<Line<'st
             Line::from(spans)
         })
         .collect()
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct AttemptSnapshot {
+    pub start: usize,
+    pub blocks: Vec<ChatBlock>,
+    pub context_used: u64,
+    pub assistant: Option<usize>,
 }

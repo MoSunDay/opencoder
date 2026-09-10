@@ -15,6 +15,7 @@ use std::collections::HashMap;
 #[test]
 fn replayed_tool_block_omits_duration_span() {
     let msg = Message {
+        provider_state: None,
         display: None,
         id: "a1".into(),
         role: Role::Assistant,
@@ -82,6 +83,7 @@ fn replayed_tool_block_omits_duration_span() {
 #[test]
 fn replayed_orphan_tool_result_omits_duration_span() {
     let msg = Message {
+        provider_state: None,
         display: None,
         id: "tr1".into(),
         role: Role::Tool,
@@ -122,6 +124,7 @@ fn replayed_orphan_tool_result_omits_duration_span() {
 #[test]
 fn replayed_reasoning_folds_into_the_ladder_step() {
     let msg = Message {
+        provider_state: None,
         display: None,
         id: "r1".into(),
         role: Role::Assistant,

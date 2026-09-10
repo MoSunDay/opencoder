@@ -135,18 +135,18 @@ fn enter_chains_through_config_fields_to_save() {
 fn left_right_change_reasoning() {
     let mut slot: Option<ModelMenu> = Some(ModelMenu::Config(ConfigForm::new(&cfg())));
     let before = match slot.as_ref().unwrap() {
-        ModelMenu::Config(f) => f.reasoning,
+        ModelMenu::Config(f) => f.reasoning.clone(),
         _ => unreachable!(),
     };
     handle_model_key(&mut slot, right());
     let after = match slot.as_ref().unwrap() {
-        ModelMenu::Config(f) => f.reasoning,
+        ModelMenu::Config(f) => f.reasoning.clone(),
         _ => unreachable!(),
     };
     assert_eq!(after, before.next(), "Right advances reasoning");
     handle_model_key(&mut slot, left());
     let back = match slot.as_ref().unwrap() {
-        ModelMenu::Config(f) => f.reasoning,
+        ModelMenu::Config(f) => f.reasoning.clone(),
         _ => unreachable!(),
     };
     assert_eq!(back, before, "Left returns reasoning to original");

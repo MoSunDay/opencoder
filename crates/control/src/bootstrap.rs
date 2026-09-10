@@ -20,16 +20,14 @@ impl BrainClient {
         } else {
             cfg.resolve_endpoint()?
         };
-        ChatClient::new_with_read_timeout(
-            &ep.base_url,
-            &ep.api_key,
-            &ep.headers,
-            cfg.stream_idle_timeout(),
-            cfg.network.proxy.as_deref(),
-        )
+        ChatClient::from_config(cfg, &ep)
     }
 }
 impl ChatStream for BrainClient {
+    fn request_body(&self, req: &ChatRequest) -> Result<serde_json::Value> {
+        self.client(false)?
+            .request_body(&configured_planner_request(&self.config, req.clone()))
+    }
     fn chat_stream(&self, req: ChatRequest) -> Result<tokio::sync::mpsc::Receiver<LlmEvent>> {
         self.client(false)?
             .chat_stream(configured_planner_request(&self.config, req))
@@ -81,7 +79,7 @@ pub async fn new_state_with_projects(
         })
     });
     let brain = opencoder_brain::Runtime::new(store.clone(), client, config.embedding_model_id())
-        .with_chat_model(config.small_model_or_primary());
+        .with_chat_model(config.small_model.as_deref().unwrap_or(&config.model));
     let fleet = Arc::new(FleetStore::open(&data.join("control.db")).await?);
     let admission = Arc::new(AdmissionGate::load(data.join("admission.json"))?);
     let hub = Arc::new(Hub::new(fleet.nodes().await?));
@@ -259,6 +257,7 @@ mod tests {
             ..Config::default()
         };
         let request = ChatRequest {
+            purpose: opencoder_llm::RequestPurpose::Conversation,
             model: "planner".into(),
             messages: vec![],
             tools: vec![],

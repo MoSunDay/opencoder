@@ -325,7 +325,7 @@ async fn second_run_has_no_skill_reminder() {
 
 /// String contents of every `user` message in a captured request.
 fn user_texts(req: &opencoder_llm::ChatRequest) -> Vec<String> {
-    req.messages
+    opencoder_llm::lower_messages(&req.messages)
         .iter()
         .filter(|m| m.get("role").and_then(|r| r.as_str()) == Some("user"))
         .filter_map(|m| m.get("content").and_then(|c| c.as_str()))

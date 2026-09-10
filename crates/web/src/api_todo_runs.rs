@@ -38,15 +38,9 @@ fn client_for(
     let endpoint = config
         .resolve_endpoint()
         .map_err(|e| error_500(format!("endpoint: {e}")))?;
-    ChatClient::new_with_read_timeout(
-        &endpoint.base_url,
-        &endpoint.api_key,
-        &endpoint.headers,
-        config.stream_idle_timeout(),
-        config.network.proxy.as_deref(),
-    )
-    .map(|c| Arc::new(c) as Arc<dyn ChatStream>)
-    .map_err(|e| error_500(format!("client: {e}")))
+    ChatClient::from_config(config, &endpoint)
+        .map(|c| Arc::new(c) as Arc<dyn ChatStream>)
+        .map_err(|e| error_500(format!("client: {e}")))
 }
 
 /// Read the version's spec and env binding. `(None binding)` ⇒ unbound.

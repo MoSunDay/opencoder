@@ -401,13 +401,7 @@ pub async fn process_cmd(
             let applied_model;
             let prev_model = sess.config.model.clone();
             match new_cfg.resolve_endpoint() {
-                Ok(ep) => match ChatClient::new_with_read_timeout(
-                    &ep.base_url,
-                    &ep.api_key,
-                    &ep.headers,
-                    new_cfg.stream_idle_timeout(),
-                    new_cfg.network.proxy.as_deref(),
-                ) {
+                Ok(ep) => match ChatClient::from_config(&new_cfg, &ep) {
                     Ok(new_client) => {
                         sess.apply_config_reload(*new_cfg, Arc::new(new_client));
                         applied_model = true;

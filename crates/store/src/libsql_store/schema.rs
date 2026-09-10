@@ -471,6 +471,9 @@ async fn bootstrap_tx(conn: &Connection) -> Result<()> {
 /// to say which partial upgrades ran, the full pass from the bottom is the
 /// only correct entry, and it is safe for exactly the reasons above.
 async fn migrate(conn: &Connection, from: i64) -> Result<()> {
+    if from < 24 {
+        add_column_if_absent(conn, "messages", "provider_state_json", "TEXT").await?;
+    }
     if from < 22 {
         add_column_if_absent(conn, "sessions", "harness_runtime", "TEXT").await?;
     }

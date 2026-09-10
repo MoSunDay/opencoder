@@ -35,6 +35,9 @@ export function deltaTextOf(data) {
 /// `{error}` object shape the SSE payloads use, so reduceFrame can fold them
 /// unchanged. Returns null for anything unrecognizable.
 export function nestedEventOf(raw) {
+  if (typeof raw === 'string' && ['LlmAttemptReset', 'LlmRoundEnd', 'Done'].includes(raw)) {
+    return { event: raw.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase(), data: {} };
+  }
   if (!raw || typeof raw !== 'object') {
     return null;
   }
@@ -371,6 +374,9 @@ function foldFrame(state, frame, nowMs) {
   const event = frame && frame.event;
   const data = (frame && frame.data) || {};
   switch (event) {
+    case 'llm_round_start': return { ...state, attemptTurns: state.turns };
+    case 'llm_round_end': return { ...state, attemptTurns: null };
+    case 'llm_attempt_reset': return state.attemptTurns ? { ...state, turns: state.attemptTurns, error: null } : state;
     case 'text_delta': {
       const text = deltaTextOf(data);
       if (!text) {
@@ -545,13 +551,14 @@ function foldFrame(state, frame, nowMs) {
       const turns = state.turns.slice();
       const t = turns[idx];
       const child = reduceFrame(
-        { turns: t.events, usage: t.usage, status: t.status, error: null },
+        { turns: t.events, usage: t.usage, status: t.status, error: null, attemptTurns: t.attemptTurns },
         nested,
         nowMs,
       );
       turns[idx] = {
         ...t,
         events: child.turns,
+        attemptTurns: child.attemptTurns,
         usage: child.usage || t.usage,
         status: child.status === 'done' || child.status === 'error' ? child.status : t.status,
       };

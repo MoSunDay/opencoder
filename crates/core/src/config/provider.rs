@@ -6,8 +6,10 @@
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProviderConfig {
+    #[serde(default = "default_protocol")]
+    pub protocol: String,
     #[serde(default = "default_base_url")]
     pub base_url: String,
     #[serde(default)]
@@ -35,9 +37,15 @@ pub struct HttpHeader {
 /// overrides the built-in.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Endpoint {
+    pub protocol: crate::ProviderProtocol,
+    pub provider: String,
     pub base_url: String,
     pub api_key: String,
     pub headers: Vec<(String, String)>,
+}
+
+pub(super) fn default_protocol() -> String {
+    "chat_completions".into()
 }
 
 /// Default `base_url` for the active provider. `pub(super)` because
@@ -45,4 +53,16 @@ pub struct Endpoint {
 /// (keeping it in sync with this serde default).
 pub(super) fn default_base_url() -> String {
     "https://api.openai.com/v1".to_string()
+}
+
+impl Default for ProviderConfig {
+    fn default() -> Self {
+        Self {
+            protocol: default_protocol(),
+            base_url: String::new(),
+            api_key: None,
+            model: None,
+            headers: Vec::new(),
+        }
+    }
 }

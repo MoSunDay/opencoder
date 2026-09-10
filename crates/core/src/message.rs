@@ -72,6 +72,8 @@ impl ContentBlock {
 /// be recovered, only tracked from the point this change shipped.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct MessageUsage {
+    #[serde(default)]
+    pub reasoning_tokens: u64,
     pub input_tokens: u64,
     pub output_tokens: u64,
     pub total_tokens: u64,
@@ -83,6 +85,8 @@ pub struct MessageUsage {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Message {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_state: Option<crate::ProviderState>,
     pub id: String,
     pub role: Role,
     pub blocks: Vec<ContentBlock>,
@@ -110,6 +114,7 @@ pub struct Message {
 impl Message {
     pub fn user(id: impl Into<String>, text: impl Into<String>) -> Self {
         Message {
+            provider_state: None,
             id: id.into(),
             role: Role::User,
             blocks: vec![ContentBlock::text(text)],
@@ -145,6 +150,7 @@ impl Message {
             });
         }
         Message {
+            provider_state: None,
             id: id.into(),
             role: Role::User,
             blocks,
@@ -173,6 +179,7 @@ impl Message {
 
     pub fn assistant(id: impl Into<String>) -> Self {
         Message {
+            provider_state: None,
             id: id.into(),
             role: Role::Assistant,
             display: None,
@@ -186,6 +193,7 @@ impl Message {
     }
     pub fn system(id: impl Into<String>, text: impl Into<String>) -> Self {
         Message {
+            provider_state: None,
             id: id.into(),
             role: Role::System,
             display: None,

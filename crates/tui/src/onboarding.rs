@@ -74,14 +74,7 @@ pub(crate) fn build_ready_client(config: &Config) -> Result<ChatClient, StartupF
             .with_context(|| format!("invalid value for header `{name}`"))
             .map_err(StartupFailure::Unbuildable)?;
     }
-    ChatClient::new_with_read_timeout(
-        &ep.base_url,
-        &ep.api_key,
-        &ep.headers,
-        config.stream_idle_timeout(),
-        config.network.proxy.as_deref(),
-    )
-    .map_err(StartupFailure::Unbuildable)
+    ChatClient::from_config(config, &ep).map_err(StartupFailure::Unbuildable)
 }
 
 /// Fallback `ChatStream` used when the model client is unbuildable but the
@@ -252,6 +245,7 @@ mod tests {
         providers.insert(
             "demo".into(),
             ProviderConfig {
+                protocol: "chat_completions".into(),
                 base_url: "https://example.com/v1".into(),
                 api_key: Some("sk-onboarding-secret-1234".into()),
                 model: Some("model-x".into()),
@@ -351,6 +345,7 @@ mod tests {
             reason: "invalid proxy '::not a proxy::'".into(),
         };
         let request = ChatRequest {
+            purpose: opencoder_llm::RequestPurpose::Conversation,
             model: "demo/model-x".into(),
             messages: Vec::new(),
             tools: Vec::new(),

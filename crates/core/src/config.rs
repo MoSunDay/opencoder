@@ -358,6 +358,7 @@ impl Config {
             if p.exists() {
                 let raw = std::fs::read_to_string(&p)?;
                 let parsed: serde_json::Value = serde_json::from_str(&raw)?;
+                crate::provider::validate_protocol_patch(&parsed)?;
                 if !parsed.is_object() {
                     // A valid-JSON-but-not-object file (e.g. `[1,2]` or
                     // `"foo"`) falls through `merge_into` silently. Warn so the
@@ -565,6 +566,7 @@ impl Config {
     /// legacy top-level `provider` field supplies base_url/api_key/headers.
     pub fn resolve_endpoint(&self) -> Result<Endpoint> {
         let name = self.provider_id();
+        let provider = self.provider_for(name).unwrap_or(&self.provider);
         let headers_src = match self.provider_for(name) {
             Some(p) => &p.headers,
             None => &self.provider.headers,
@@ -574,6 +576,8 @@ impl Config {
             .map(|h| (h.name.clone(), env::resolve_env(&h.value)))
             .collect();
         Ok(Endpoint {
+            protocol: crate::ProviderProtocol::parse(&provider.protocol)?,
+            provider: name.to_owned(),
             base_url: self.base_url_for(name),
             api_key: self.api_key_for(name)?,
             headers,
@@ -601,6 +605,8 @@ impl Config {
                     .map(|h| (h.name.clone(), env::resolve_env(&h.value)))
                     .collect();
                 Ok(Endpoint {
+                    protocol: crate::ProviderProtocol::parse(&p.protocol)?,
+                    provider: name.to_owned(),
                     base_url: p.base_url.clone(),
                     api_key: self.api_key_for(name)?,
                     headers,
@@ -727,6 +733,7 @@ impl Config {
             serde_json::json!({})
         };
         merge::merge_json(&mut root, patch);
+        crate::provider::validate_protocol_patch(&root)?;
         // MCP name-collision guard (bug #14): two `mcp_servers` names that
         // normalize to the same tool prefix would shadow each other's tools
         // at registration. Defensive for paths that still carry the key

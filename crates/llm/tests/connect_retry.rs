@@ -98,8 +98,9 @@ fn make_client(base_url: &str) -> ChatClient {
 
 fn make_request() -> ChatRequest {
     ChatRequest {
+        purpose: opencoder_llm::RequestPurpose::Conversation,
         model: "test-model".to_string(),
-        messages: vec![serde_json::json!({"role": "user", "content": "hi"})],
+        messages: vec![opencoder_core::Message::user("u", "hi")],
         tools: vec![],
         tool_choice: None,
         temperature: None,

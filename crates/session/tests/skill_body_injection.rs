@@ -70,7 +70,7 @@ fn session_on(
 
 /// System-message content of a request ("" when absent).
 fn system_content(req: &opencoder_llm::ChatRequest) -> String {
-    req.messages
+    opencoder_llm::lower_messages(&req.messages)
         .iter()
         .find(|m| m.get("role").and_then(|r| r.as_str()) == Some("system"))
         .and_then(|m| m.get("content").and_then(|c| c.as_str()))
@@ -81,7 +81,7 @@ fn system_content(req: &opencoder_llm::ChatRequest) -> String {
 /// Content of the LAST payload message: the slot the transient skill
 /// context occupies (nothing may ride after it).
 fn last_message_content(req: &opencoder_llm::ChatRequest) -> String {
-    req.messages
+    opencoder_llm::lower_messages(&req.messages)
         .last()
         .and_then(|m| m.get("content").and_then(|c| c.as_str()))
         .unwrap_or("")
@@ -90,18 +90,20 @@ fn last_message_content(req: &opencoder_llm::ChatRequest) -> String {
 
 /// Whether any user-role payload message contains `needle`.
 fn any_user_contains(req: &opencoder_llm::ChatRequest, needle: &str) -> bool {
-    req.messages.iter().any(|m| {
-        m.get("role").and_then(|r| r.as_str()) == Some("user")
-            && m.get("content")
-                .and_then(|c| c.as_str())
-                .is_some_and(|c| c.contains(needle))
-    })
+    opencoder_llm::lower_messages(&req.messages)
+        .iter()
+        .any(|m| {
+            m.get("role").and_then(|r| r.as_str()) == Some("user")
+                && m.get("content")
+                    .and_then(|c| c.as_str())
+                    .is_some_and(|c| c.contains(needle))
+        })
 }
 
 /// Non-overlapping occurrence count of `needle` across all user-role
 /// payload messages.
 fn count_user_occurrences(req: &opencoder_llm::ChatRequest, needle: &str) -> usize {
-    req.messages
+    opencoder_llm::lower_messages(&req.messages)
         .iter()
         .filter(|m| m.get("role").and_then(|r| r.as_str()) == Some("user"))
         .filter_map(|m| m.get("content").and_then(|c| c.as_str()))

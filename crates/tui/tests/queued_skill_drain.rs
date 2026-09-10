@@ -74,15 +74,16 @@ fn text_done(text: &str) -> LlmEvent {
     }
 }
 
-fn message_contents(req: &opencoder_llm::ChatRequest) -> Vec<&str> {
-    req.messages
+fn message_contents(req: &opencoder_llm::ChatRequest) -> Vec<String> {
+    opencoder_llm::lower_messages(&req.messages)
         .iter()
         .filter_map(|m| m.get("content").and_then(|c| c.as_str()))
+        .map(str::to_owned)
         .collect()
 }
 
 fn system_content(req: &opencoder_llm::ChatRequest) -> String {
-    req.messages
+    opencoder_llm::lower_messages(&req.messages)
         .iter()
         .find(|m| m.get("role").and_then(|r| r.as_str()) == Some("system"))
         .and_then(|m| m.get("content").and_then(|c| c.as_str()))
@@ -193,8 +194,8 @@ async fn queued_skill_fires_at_consumption_not_during_kickoff() {
         !system_content(drained).contains("haiku"),
         "drained system prompt stays skill-free"
     );
-    let last_user = drained
-        .messages
+    let wire_messages_196 = opencoder_llm::lower_messages(&drained.messages);
+    let last_user = wire_messages_196
         .iter()
         .rev()
         .find(|m| m.get("role").and_then(|r| r.as_str()) == Some("user"))
@@ -211,8 +212,8 @@ async fn queued_skill_fires_at_consumption_not_during_kickoff() {
 
     // The recorded user message is the clean text; the token never reaches
     // the model even though the queue row kept it.
-    let user_msgs: Vec<&str> = drained
-        .messages
+    let wire_messages_213 = opencoder_llm::lower_messages(&drained.messages);
+    let user_msgs: Vec<&str> = wire_messages_213
         .iter()
         .filter(|m| m.get("role").and_then(|r| r.as_str()) == Some("user"))
         .filter_map(|m| m.get("content").and_then(|c| c.as_str()))

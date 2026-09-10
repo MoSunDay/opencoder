@@ -11,6 +11,7 @@ use opencoder_llm::lower_messages;
 
 fn tool_msg(id: &str, content: &str, is_error: bool) -> Message {
     Message {
+        provider_state: None,
         display: None,
         id: "m1".into(),
         role: Role::Tool,
@@ -137,6 +138,7 @@ fn tool_result_image_rehomes_to_user_message() {
     //   2. a following `role:"user"` message whose `content` array carries the
     //      image as an `image_url` part (the only legal place for images).
     let msg = Message {
+        provider_state: None,
         display: None,
         id: "m1".into(),
         role: Role::Tool,
@@ -181,6 +183,7 @@ fn tool_result_image_rehomes_to_user_message() {
 #[test]
 fn tool_result_with_multiple_images_rehomes_all() {
     let msg = Message {
+        provider_state: None,
         display: None,
         id: "m1".into(),
         role: Role::Tool,
@@ -222,6 +225,7 @@ fn error_tool_result_image_rehomes_with_prefixed_string() {
     // is_error must still produce the [error] prefix on the STRING tool content
     // while the image is rehomed unchanged onto the trailing user turn.
     let msg = Message {
+        provider_state: None,
         display: None,
         id: "m1".into(),
         role: Role::Tool,
@@ -263,6 +267,7 @@ fn text_only_tool_result_still_lowers_to_plain_string_content() {
     // Byte-for-byte backwards compat: a ToolResult with no images must keep a
     // plain-string `content`, identical to the pre-image output.
     let msg = Message {
+        provider_state: None,
         display: None,
         id: "m1".into(),
         role: Role::Tool,
@@ -294,6 +299,7 @@ fn tool_message_content_is_always_string_even_with_image() {
     // Regression guard: the `tool` role content is a string regardless of
     // whether the tool returned images (strict providers HTTP-400 on an array).
     let msg = Message {
+        provider_state: None,
         display: None,
         id: "m1".into(),
         role: Role::Tool,
@@ -326,6 +332,7 @@ fn user_embedded_tool_result_image_rehomes_to_user_message() {
     // image just like the dedicated Role::Tool path: tool message keeps string
     // content, image lands on a trailing user turn.
     let mut msg = Message {
+        provider_state: None,
         display: None,
         id: "m1".into(),
         role: Role::User,
@@ -365,6 +372,7 @@ fn user_embedded_tool_result_image_rehomes_to_user_message() {
 
 fn assistant_with_tool_calls(tool_id: &str) -> Message {
     Message {
+        provider_state: None,
         display: None,
         id: "m1".into(),
         role: Role::Assistant,
@@ -402,6 +410,7 @@ fn assistant_tool_only_content_is_null() {
 #[test]
 fn assistant_text_content_is_preserved() {
     let msg = Message {
+        provider_state: None,
         display: None,
         id: "m1".into(),
         role: Role::Assistant,
@@ -449,6 +458,7 @@ fn assistant_with_both_text_and_tool_calls_keeps_string_content() {
     // When an assistant turn has BOTH text and tool calls, `content` stays a
     // string (the null path only applies to tool-call-only turns).
     let msg = Message {
+        provider_state: None,
         display: None,
         id: "m1".into(),
         role: Role::Assistant,

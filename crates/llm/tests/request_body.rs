@@ -4,6 +4,7 @@ use opencoder_llm::ChatRequest;
 
 fn req(reasoning: Option<&str>) -> ChatRequest {
     ChatRequest {
+        purpose: opencoder_llm::RequestPurpose::Conversation,
         model: "m".to_string(),
         messages: vec![],
         tools: vec![],
@@ -68,6 +69,7 @@ fn body_omits_reasoning_effort_when_empty() {
 #[test]
 fn body_includes_cache_salt_when_set() {
     let req = ChatRequest {
+        purpose: opencoder_llm::RequestPurpose::Conversation,
         model: "m".to_string(),
         messages: Vec::new(),
         tools: vec![],
@@ -84,6 +86,7 @@ fn body_includes_cache_salt_when_set() {
 #[test]
 fn body_omits_cache_salt_when_none() {
     let req = ChatRequest {
+        purpose: opencoder_llm::RequestPurpose::Conversation,
         model: "m".to_string(),
         messages: Vec::new(),
         tools: vec![],
@@ -103,6 +106,7 @@ fn body_omits_cache_salt_when_none() {
 #[test]
 fn body_omits_cache_salt_when_empty() {
     let req = ChatRequest {
+        purpose: opencoder_llm::RequestPurpose::Conversation,
         model: "m".to_string(),
         messages: Vec::new(),
         tools: vec![],

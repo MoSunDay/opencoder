@@ -500,6 +500,7 @@ mod tests {
         use opencoder_core::{ContentBlock, Message, MessageUsage, Role};
         let uri = tiny_png_data_uri();
         let tool_msg = Message {
+            provider_state: None,
             display: None,
             id: "m-tool".into(),
             role: Role::Tool,
@@ -532,6 +533,7 @@ mod tests {
     fn replay_tool_message_without_images_no_image_block() {
         use opencoder_core::{ContentBlock, Message, MessageUsage, Role};
         let tool_msg = Message {
+            provider_state: None,
             display: None,
             id: "m-tool2".into(),
             role: Role::Tool,

@@ -140,14 +140,22 @@ pub enum StreamInterruption {
     /// per-read timeout from the underlying HTTP client).
     ChunkError,
     /// The stream ended cleanly but carried no valid `finish_reason` — the
-    /// response was truncated. Previously treated as a silent success (bug);
-    /// now retried, degrading to a best-effort `Completed` only when the budget
-    /// is exhausted.
+    /// response was truncated. Retry, then report an error if the budget is exhausted.
     Truncated,
     /// No decoded SSE event arrived within the idle window. Catches an upstream
     /// that keeps the connection alive with keep-alive heartbeats but delivers
     /// no content.
     IdleTimeout,
+}
+
+impl std::fmt::Display for StreamInterruption {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::ChunkError => "chunk read error",
+            Self::Truncated => "truncated stream",
+            Self::IdleTimeout => "idle timeout",
+        })
+    }
 }
 
 /// Whether a mid-stream interruption is worth retrying. Every current class is

@@ -30,6 +30,7 @@ pub struct Projection {
 
 fn message(id: String, role: Role, blocks: Vec<ContentBlock>) -> Message {
     Message {
+        provider_state: None,
         id,
         role,
         blocks,
@@ -84,6 +85,7 @@ pub fn decode(mut state: Decoder, line: &str) -> Result<(Decoder, Projection)> {
                 .as_u64()
                 .context("Codex output usage missing")?;
             state.usage = MessageUsage {
+                reasoning_tokens: 0,
                 input_tokens: input,
                 output_tokens: output,
                 total_tokens: input.saturating_add(output),

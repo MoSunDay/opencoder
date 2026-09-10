@@ -83,8 +83,7 @@ async fn task_plan_act_request_hides_build_on_every_surface() {
     let (session, mock) = session_for("plan-strip-act", "act", Some(plan_body()));
     let req = single_request(session, mock).await;
 
-    let system = req
-        .messages
+    let system = opencoder_llm::lower_messages(&req.messages)
         .iter()
         .find(|m| m["role"] == "system")
         .expect("system message present")["content"]
@@ -113,7 +112,10 @@ async fn plain_act_request_still_advertises_build() {
     // the build clause in the task schema.
     let (session, mock) = session_for("plan-strip-plain", "act", None);
     let req = single_request(session, mock).await;
-    let system = req.messages[0]["content"].as_str().unwrap().to_string();
+    let system = opencoder_llm::lower_messages(&req.messages)[0]["content"]
+        .as_str()
+        .unwrap()
+        .to_string();
     assert!(
         system.contains(BUILD_CLAUSE),
         "plain act system prompt must keep the build clause, got: {system}"
@@ -243,7 +245,8 @@ async fn aborted_run_keeps_task_plan_completed_run_clears_it() {
         .await
         .unwrap();
     let req = &mock.requests()[reqs_before];
-    let system = req.messages[0]["content"].as_str().unwrap();
+    let wire_messages_245 = opencoder_llm::lower_messages(&req.messages);
+    let system = wire_messages_245[0]["content"].as_str().unwrap();
     assert!(
         !system.contains(BUILD_CLAUSE),
         "continued task-plan run must not advertise build, got: {system}"
@@ -272,7 +275,7 @@ async fn aborted_run_keeps_task_plan_completed_run_clears_it() {
         .unwrap();
     let req = &mock.requests()[reqs_before];
     assert!(
-        req.messages[0]["content"]
+        opencoder_llm::lower_messages(&req.messages)[0]["content"]
             .as_str()
             .unwrap()
             .contains(BUILD_CLAUSE),

@@ -140,7 +140,7 @@ fn session_on(
 
 /// System-message content of a request ("" when absent).
 fn system_content(req: &opencoder_llm::ChatRequest) -> String {
-    req.messages
+    opencoder_llm::lower_messages(&req.messages)
         .iter()
         .find(|m| m.get("role").and_then(|r| r.as_str()) == Some("system"))
         .and_then(|m| m.get("content").and_then(|c| c.as_str()))
@@ -151,7 +151,7 @@ fn system_content(req: &opencoder_llm::ChatRequest) -> String {
 /// Content of the LAST user-role message — where the transient skill-context
 /// reminder is appended.
 fn last_user_content(req: &opencoder_llm::ChatRequest) -> String {
-    req.messages
+    opencoder_llm::lower_messages(&req.messages)
         .iter()
         .rev()
         .find(|m| m.get("role").and_then(|r| r.as_str()) == Some("user"))
@@ -161,16 +161,20 @@ fn last_user_content(req: &opencoder_llm::ChatRequest) -> String {
 }
 
 fn any_user_contains(req: &opencoder_llm::ChatRequest, needle: &str) -> bool {
-    req.messages.iter().any(|m| {
-        m.get("role").and_then(|r| r.as_str()) == Some("user")
-            && m.get("content")
-                .and_then(|c| c.as_str())
-                .is_some_and(|c| c.contains(needle))
-    })
+    opencoder_llm::lower_messages(&req.messages)
+        .iter()
+        .any(|m| {
+            m.get("role").and_then(|r| r.as_str()) == Some("user")
+                && m.get("content")
+                    .and_then(|c| c.as_str())
+                    .is_some_and(|c| c.contains(needle))
+        })
 }
 
 fn any_message_contains(req: &opencoder_llm::ChatRequest, needle: &str) -> bool {
-    req.messages.iter().any(|m| m.to_string().contains(needle))
+    opencoder_llm::lower_messages(&req.messages)
+        .iter()
+        .any(|m| m.to_string().contains(needle))
 }
 
 /// 1. Prefix-cache stability: flipping the skills-catalog config AND the
@@ -229,7 +233,7 @@ async fn system_prompt_bytes_stable_across_catalog_and_activation_changes() {
         any_message_contains(second, "[skill loaded]")
             && any_message_contains(second, "alpha-BODY-CONTENT"),
         "the active skill body ships via the loaded message: {:?}",
-        second.messages
+        opencoder_llm::lower_messages(&second.messages)
     );
 
     // Toggle everything back OFF: three-way byte stability.
@@ -272,7 +276,8 @@ async fn skills_catalog_reminder_is_last_payload_message_and_never_persisted() {
     let req = &requests[0];
 
     // The reminder is the final message of the payload: nothing after it.
-    let last = req.messages.last().expect("non-empty payload");
+    let wire_messages_275 = opencoder_llm::lower_messages(&req.messages);
+    let last = wire_messages_275.last().expect("non-empty payload");
     assert_eq!(
         last.get("role").and_then(|r| r.as_str()),
         Some("user"),
@@ -396,12 +401,12 @@ async fn subagent_and_workflow_payloads_carry_no_skill_context() {
         assert!(
             !any_message_contains(req, "[skills]"),
             "{agent} must not receive the skills catalog: {:?}",
-            req.messages
+            opencoder_llm::lower_messages(&req.messages)
         );
         assert!(
             !any_message_contains(req, "[active skill]"),
             "{agent} must not receive the active-skill reminder: {:?}",
-            req.messages
+            opencoder_llm::lower_messages(&req.messages)
         );
     }
 }

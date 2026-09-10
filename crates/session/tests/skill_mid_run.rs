@@ -63,7 +63,7 @@ fn done_turn(text: &str) -> LlmEvent {
 
 /// Extract the system message content from a ChatRequest's messages.
 fn system_content(req: &opencoder_llm::ChatRequest) -> String {
-    req.messages
+    opencoder_llm::lower_messages(&req.messages)
         .iter()
         .find(|m| m.get("role").and_then(|r| r.as_str()) == Some("system"))
         .and_then(|m| m.get("content").and_then(|c| c.as_str()))
@@ -74,7 +74,7 @@ fn system_content(req: &opencoder_llm::ChatRequest) -> String {
 /// Extract the content of the LAST user-role message of a ChatRequest —
 /// where the transient `[active skill]` tail reminder is appended.
 fn last_user_content(req: &opencoder_llm::ChatRequest) -> String {
-    req.messages
+    opencoder_llm::lower_messages(&req.messages)
         .iter()
         .rev()
         .find(|m| m.get("role").and_then(|r| r.as_str()) == Some("user"))
@@ -86,24 +86,28 @@ fn last_user_content(req: &opencoder_llm::ChatRequest) -> String {
 /// Whether any user message of the request carries the `[active skill]`
 /// tail reminder.
 fn has_active_skill_reminder(req: &opencoder_llm::ChatRequest) -> bool {
-    req.messages.iter().any(|m| {
-        m.get("role").and_then(|r| r.as_str()) == Some("user")
-            && m.get("content")
-                .and_then(|c| c.as_str())
-                .is_some_and(|c| c.contains("[active skill]"))
-    })
+    opencoder_llm::lower_messages(&req.messages)
+        .iter()
+        .any(|m| {
+            m.get("role").and_then(|r| r.as_str()) == Some("user")
+                && m.get("content")
+                    .and_then(|c| c.as_str())
+                    .is_some_and(|c| c.contains("[active skill]"))
+        })
 }
 
 /// The skill body ships as the one-shot `[skill loaded]` payload
 /// message naming `path` (the `[active skill]` tail pointer is
 /// fallback-only).
 fn has_loaded_skill_message(req: &opencoder_llm::ChatRequest, path: &str) -> bool {
-    req.messages.iter().any(|m| {
-        m.get("role").and_then(|r| r.as_str()) == Some("user")
-            && m.get("content")
-                .and_then(|c| c.as_str())
-                .is_some_and(|c| c.starts_with("[skill loaded] ") && c.contains(path))
-    })
+    opencoder_llm::lower_messages(&req.messages)
+        .iter()
+        .any(|m| {
+            m.get("role").and_then(|r| r.as_str()) == Some("user")
+                && m.get("content")
+                    .and_then(|c| c.as_str())
+                    .is_some_and(|c| c.starts_with("[skill loaded] ") && c.contains(path))
+        })
 }
 
 /// Skill body as the TUI `$` picker / `skill_resolve` actually store it:
@@ -237,7 +241,7 @@ async fn skill_set_mid_run_appears_in_next_turn_tail_reminder() {
     assert!(
         !has_active_skill_reminder(&requests[0]),
         "turn 1 payload must carry no [active skill] reminder: {:?}",
-        requests[0].messages
+        opencoder_llm::lower_messages(&requests[0].messages)
     );
 
     // Turn 2's system prompt still excludes the body; the skill arrives as

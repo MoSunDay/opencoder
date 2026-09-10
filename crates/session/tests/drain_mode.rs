@@ -295,12 +295,13 @@ async fn drain_mode_queue_skill_consumed() {
         "exactly 1 LLM call (skill prompt)"
     );
     assert!(
-        mock.requests().iter().any(|req| req
-            .messages
+        mock.requests()
             .iter()
-            .filter(|m| m.get("role").and_then(|r| r.as_str()) == Some("user"))
-            .filter_map(|m| m.get("content").and_then(|c| c.as_str()))
-            .any(|t| t.contains("[skill loaded]") || t.contains("[active skill]"))),
+            .any(|req| opencoder_llm::lower_messages(&req.messages)
+                .iter()
+                .filter(|m| m.get("role").and_then(|r| r.as_str()) == Some("user"))
+                .filter_map(|m| m.get("content").and_then(|c| c.as_str()))
+                .any(|t| t.contains("[skill loaded]") || t.contains("[active skill]"))),
         "skill activated by $review token (request carries skill artifact)"
     );
     assert!(

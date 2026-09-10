@@ -268,6 +268,6 @@ fn provider_cursor_renders_at_edit_position() {
         })
         .unwrap();
 
-    // popup: x=4, y=11; model_id is row 1; cursor at col 3 → cx = 4+1+15+3 = 23
-    terminal.backend_mut().assert_cursor_position((23, 13));
+    // popup: x=4, y=10; model_id is row 1; cursor at col 3 → cx = 4+1+15+3 = 23
+    terminal.backend_mut().assert_cursor_position((23, 12));
 }

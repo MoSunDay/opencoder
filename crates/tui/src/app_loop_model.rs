@@ -53,26 +53,22 @@ pub(crate) async fn handle_model_outcome(
                             // `/task` new sessions pick up the new endpoint
                             // (the worker only swaps its own sess.client).
                             match reloaded.resolve_endpoint() {
-                                Ok(ep) => match opencoder_llm::ChatClient::new_with_read_timeout(
-                                    &ep.base_url,
-                                    &ep.api_key,
-                                    &ep.headers,
-                                    reloaded.stream_idle_timeout(),
-                                    reloaded.network.proxy.as_deref(),
-                                ) {
-                                    Ok(new_client) => {
-                                        *client = Arc::new(new_client);
-                                    }
-                                    Err(e) => {
-                                        chat.push_marker(Line::from(Span::styled(
-                                            format!(
-                                                "[/config] client build failed: {e:#} — \
+                                Ok(ep) => {
+                                    match opencoder_llm::ChatClient::from_config(&reloaded, &ep) {
+                                        Ok(new_client) => {
+                                            *client = Arc::new(new_client);
+                                        }
+                                        Err(e) => {
+                                            chat.push_marker(Line::from(Span::styled(
+                                                format!(
+                                                    "[/config] client build failed: {e:#} — \
                                                  live session keeps previous client"
-                                            ),
-                                            Style::default().fg(theme::err_color()),
-                                        )));
+                                                ),
+                                                Style::default().fg(theme::err_color()),
+                                            )));
+                                        }
                                     }
-                                },
+                                }
                                 Err(e) => {
                                     chat.push_marker(Line::from(Span::styled(
                                         format!(

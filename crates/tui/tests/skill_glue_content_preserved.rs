@@ -29,7 +29,7 @@ fn text_done(text: &str) -> LlmEvent {
 
 /// Collect every user-role message content from a ChatRequest.
 fn user_contents(req: &opencoder_llm::ChatRequest) -> Vec<String> {
-    req.messages
+    opencoder_llm::lower_messages(&req.messages)
         .iter()
         .filter(|m| m.get("role").and_then(|r| r.as_str()) == Some("user"))
         .filter_map(|m| m.get("content").and_then(|c| c.as_str()).map(String::from))

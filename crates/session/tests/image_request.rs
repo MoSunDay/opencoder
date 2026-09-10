@@ -57,8 +57,8 @@ async fn image_attachment_reaches_request_body() {
     let reqs = mock.requests();
     assert!(!reqs.is_empty(), "at least one request must be captured");
     // The first lowered message is the user's multimodal turn.
-    let user = reqs[0]
-        .messages
+    let wire_messages_60 = opencoder_llm::lower_messages(&reqs[0].messages);
+    let user = wire_messages_60
         .iter()
         .find(|m| m["role"] == "user")
         .expect("a user message in the request");
@@ -103,8 +103,8 @@ async fn empty_text_with_image_still_recorded() {
         !reqs.is_empty(),
         "at least one request must be captured for an image-only prompt"
     );
-    let user = reqs[0]
-        .messages
+    let wire_messages_105 = opencoder_llm::lower_messages(&reqs[0].messages);
+    let user = wire_messages_105
         .iter()
         .find(|m| m["role"] == "user")
         .expect("a user message for an image-only prompt");

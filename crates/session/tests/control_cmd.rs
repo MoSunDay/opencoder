@@ -597,8 +597,7 @@ async fn clear_context_sentinel_never_reaches_model_context() {
     );
     // The fresh-start marker is present in the model context (the first
     // message is the system prompt, so scan the user messages).
-    let has_marker = requests[0]
-        .messages
+    let has_marker = opencoder_llm::lower_messages(&requests[0].messages)
         .iter()
         .any(|m| m.to_string().contains("Context cleared"));
     assert!(

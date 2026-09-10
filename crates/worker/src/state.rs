@@ -403,14 +403,7 @@ impl ChatStream for ConfiguredClient {
         request: opencoder_llm::ChatRequest,
     ) -> Result<tokio::sync::mpsc::Receiver<opencoder_llm::LlmEvent>> {
         let ep = self.0.resolve_endpoint()?;
-        opencoder_llm::ChatClient::new_with_read_timeout(
-            &ep.base_url,
-            &ep.api_key,
-            &ep.headers,
-            self.0.stream_idle_timeout(),
-            self.0.network.proxy.as_deref(),
-        )?
-        .chat_stream(request)
+        opencoder_llm::ChatClient::from_config(&self.0, &ep)?.chat_stream(request)
     }
 }
 

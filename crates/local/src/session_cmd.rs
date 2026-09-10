@@ -270,6 +270,7 @@ mod tests {
         assert_eq!(super::show_message_line(&legacy), "[User] legacy prompt");
 
         let mut tool = Message {
+            provider_state: None,
             id: "m3".into(),
             role: Role::Assistant,
             blocks: vec![ContentBlock::text("done")],
@@ -309,6 +310,7 @@ mod tests {
         providers.insert(
             "zhipuai".to_string(),
             opencoder_core::ProviderConfig {
+                protocol: "chat_completions".into(),
                 base_url: "https://api.example/v1".into(),
                 api_key: Some("sk-test-1234567890abcdef".into()),
                 model: None,
@@ -318,6 +320,7 @@ mod tests {
         providers.insert(
             "short".to_string(),
             opencoder_core::ProviderConfig {
+                protocol: "chat_completions".into(),
                 base_url: "https://api.example/v1".into(),
                 api_key: Some("abcd".into()),
                 model: None,
@@ -398,6 +401,7 @@ mod tests {
         providers.insert(
             "deepseek".to_string(),
             ProviderConfig {
+                protocol: "chat_completions".into(),
                 base_url: "https://api.deepseek.com/v1".to_string(),
                 api_key: Some("sk-dk".to_string()),
                 model: Some("deepseek-chat".to_string()),
@@ -407,6 +411,7 @@ mod tests {
         providers.insert(
             "openai".to_string(),
             ProviderConfig {
+                protocol: "chat_completions".into(),
                 base_url: "https://api.openai.com/v1".to_string(),
                 api_key: None,
                 model: Some("gpt-4o".to_string()),
@@ -470,6 +475,7 @@ mod tests {
             .await
             .unwrap();
         let msg = Message {
+            provider_state: None,
             display: None,
             id: "m1".into(),
             role: Role::Assistant,

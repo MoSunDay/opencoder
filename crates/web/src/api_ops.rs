@@ -276,13 +276,7 @@ fn build_client(state: &AppState, config: &Config) -> Result<Arc<dyn ChatStream>
         Ok(v) => v,
         Err(e) => return Err(Box::new(error_500(format!("api_key: {e:#}")))),
     };
-    match ChatClient::new_with_read_timeout(
-        &ep.base_url,
-        &ep.api_key,
-        &ep.headers,
-        config.stream_idle_timeout(),
-        config.network.proxy.as_deref(),
-    ) {
+    match ChatClient::from_config(config, &ep) {
         Ok(c) => Ok(Arc::new(c) as Arc<dyn ChatStream>),
         Err(e) => Err(Box::new(error_500(format!("client: {e:#}")))),
     }

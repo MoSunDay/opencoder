@@ -40,6 +40,7 @@ impl ConfigPatch {
 
 #[derive(Debug, Clone)]
 pub struct ProviderPatch {
+    pub protocol: String,
     pub name: String,
     pub model_id: String,
     pub base_url: String,
@@ -49,7 +50,8 @@ pub struct ProviderPatch {
 
 impl ProviderPatch {
     pub fn to_json(&self) -> serde_json::Value {
-        let mut provider = serde_json::json!({ "base_url": self.base_url });
+        let mut provider =
+            serde_json::json!({ "base_url": self.base_url, "protocol": self.protocol });
         provider["model"] = serde_json::Value::String(self.model_id.clone());
         if let Some(v) = &self.api_key {
             let v = v.trim();

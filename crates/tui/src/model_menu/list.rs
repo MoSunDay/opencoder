@@ -10,6 +10,7 @@ use super::state::{ModelMenu, ModelOutcome};
 /// One row in the provider list.
 #[derive(Debug, Clone)]
 pub struct ProviderEntry {
+    pub protocol: String,
     pub name: String,
     pub base_url: String,
     pub model_id: String,
@@ -37,6 +38,7 @@ impl ProviderList {
             .providers
             .iter()
             .map(|(name, p)| ProviderEntry {
+                protocol: p.protocol.clone(),
                 name: name.clone(),
                 base_url: p.base_url.clone(),
                 model_id: p.model.clone().unwrap_or_else(|| {
@@ -133,13 +135,14 @@ pub fn handle_key(mut list: ProviderList, k: KeyEvent) -> (ModelOutcome, Option<
                     // Provider has no model set — guide the user to fill it in
                     // rather than emitting a suspicious "name/" switch that
                     // would be rejected downstream.
-                    let form = ProviderForm::from_existing(
+                    let mut form = ProviderForm::from_existing(
                         &entry.name,
                         &entry.base_url,
                         &entry.model_id,
                         &entry.api_key,
                         entry.headers,
                     );
+                    form.protocol = entry.protocol.clone();
                     (ModelOutcome::Idle, Some(ModelMenu::Form(form)))
                 } else {
                     // Arm the "save as default?" prompt instead of switching
@@ -154,13 +157,14 @@ pub fn handle_key(mut list: ProviderList, k: KeyEvent) -> (ModelOutcome, Option<
         }
         KeyCode::Char('e') => {
             if let Some(entry) = list.entries.get(list.selected).cloned() {
-                let form = ProviderForm::from_existing(
+                let mut form = ProviderForm::from_existing(
                     &entry.name,
                     &entry.base_url,
                     &entry.model_id,
                     &entry.api_key,
                     entry.headers,
                 );
+                form.protocol = entry.protocol.clone();
                 (ModelOutcome::Idle, Some(ModelMenu::Form(form)))
             } else {
                 (ModelOutcome::Idle, Some(ModelMenu::List(list)))
@@ -173,6 +177,7 @@ pub fn handle_key(mut list: ProviderList, k: KeyEvent) -> (ModelOutcome, Option<
             // as a hint, or a generic default.
             let default_base = list.default_base_url.clone();
             let form = ProviderForm {
+                protocol: "chat_completions".into(),
                 name: String::new(),
                 name_readonly: false,
                 name_cursor: 0,

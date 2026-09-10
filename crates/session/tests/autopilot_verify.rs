@@ -215,7 +215,7 @@ async fn verify_snapshot_truncates_transcript_to_window() {
 
     let reqs = mock.requests();
     assert_eq!(reqs.len(), 1);
-    let msgs = &reqs[0].messages;
+    let msgs = &opencoder_llm::lower_messages(&reqs[0].messages);
     assert!(
         msgs.len() < 20 + 2,
         "transcript must be truncated, got {} messages",

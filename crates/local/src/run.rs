@@ -91,13 +91,7 @@ pub async fn run_headless(cli: &Cli, prompt: String) -> Result<()> {
     } else {
         apply_model_override(&mut config, &cli.model).map_err(anyhow::Error::msg)?;
         let ep = config.resolve_endpoint()?;
-        Arc::new(ChatClient::new_with_read_timeout(
-            &ep.base_url,
-            &ep.api_key,
-            &ep.headers,
-            config.stream_idle_timeout(),
-            config.network.proxy.as_deref(),
-        )?)
+        Arc::new(ChatClient::from_config(&config, &ep)?)
     };
 
     // Create the cancellation token up front so recovery (resume_and_replay) is

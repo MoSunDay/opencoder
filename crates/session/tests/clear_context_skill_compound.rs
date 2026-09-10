@@ -77,7 +77,7 @@ fn mk_input(session_id: &str, prompt: &str) -> SessionInput {
 
 /// User-role text of every message in a captured request payload.
 fn user_texts(req: &ChatRequest) -> Vec<String> {
-    req.messages
+    opencoder_llm::lower_messages(&req.messages)
         .iter()
         .filter(|m| m.get("role").and_then(|r| r.as_str()) == Some("user"))
         .filter_map(|m| m.get("content").and_then(|c| c.as_str()))

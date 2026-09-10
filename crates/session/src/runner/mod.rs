@@ -307,7 +307,13 @@ pub(crate) async fn run_loop(
             on_event(SessionEvent::Done);
             break;
         }
-        let (text, reasoning, tool_calls, usage) = turn;
+        let llm_call::LlmTurn {
+            text,
+            reasoning,
+            tool_calls,
+            usage,
+            provider_state,
+        } = turn;
         // Streamline the completed assistant text before it is persisted and
         // re-sent as context. The live TextDelta stream already delivered the
         // verbatim original to the UI, so this only trims the stored +
@@ -318,12 +324,15 @@ pub(crate) async fn run_loop(
         }
 
         let mut blocks: Vec<ContentBlock> = Vec::new();
+        // Responses summaries remain visible on replay independently of the
+        // Chat Completions interleaved-thinking option.
         // Interleaved thinking: persist reasoning_content into the assistant
         // message so it's sent back on subsequent requests. Only needed on
         // tool-call turns (DeepSeek-V4 requires this and returns 400 if
         // omitted; non-tool reasoning is ignored by the API anyway).
         let it_on = session.config.interleaved_thinking.unwrap_or(true);
-        if it_on && !tool_calls.is_empty() && !reasoning.is_empty() {
+        if !reasoning.is_empty() && (provider_state.is_some() || (it_on && !tool_calls.is_empty()))
+        {
             blocks.push(ContentBlock::Reasoning { text: reasoning });
         }
         if !text.is_empty() {
@@ -340,9 +349,16 @@ pub(crate) async fn run_loop(
         assistant.model = Some(session.model.clone());
         assistant.agent = Some(session.agent.name.clone());
         assistant.blocks = blocks;
+        assistant.provider_state = provider_state;
         assistant.usage = usage.as_ref().map(core_usage).unwrap_or_default();
         assistant.created_at = now_ms();
-        session.record(assistant).await;
+        if let Err(error) = session.record_checked(assistant).await {
+            on_event(SessionEvent::LlmRoundEnd);
+            on_event(SessionEvent::Error(format!(
+                "persist assistant response: {error:#}"
+            )));
+            return Err(error);
+        }
         if let Some(u) = &usage {
             on_event(SessionEvent::LlmUsage {
                 total_tokens: u.total_tokens,
@@ -423,6 +439,7 @@ pub(crate) async fn run_loop(
                         })
                         .collect();
                     let doom_msg = Message {
+                        provider_state: None,
                         display: None,
                         id: new_id(),
                         role: Role::Tool,
@@ -586,6 +603,7 @@ pub(crate) async fn run_loop(
                 .collect();
             if !non_replayable.is_empty() {
                 let tool_msg = Message {
+                    provider_state: None,
                     display: None,
                     id: new_id(),
                     role: Role::Tool,
@@ -605,6 +623,7 @@ pub(crate) async fn run_loop(
             break;
         }
         let tool_msg = Message {
+            provider_state: None,
             display: None,
             id: new_id(),
             role: Role::Tool,

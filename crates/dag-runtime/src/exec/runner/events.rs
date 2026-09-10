@@ -70,6 +70,7 @@ impl Events {
                     .await?;
                 session
                     .record_checked(Message {
+                        provider_state: None,
                         id: format!("{}-stage-{}", self.prefix, ulid::Ulid::new()),
                         role: Role::User,
                         blocks: vec![ContentBlock::text(format!("执行阶段：{stage}"))],

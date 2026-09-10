@@ -130,7 +130,7 @@ pub(super) async fn run_subagent(
                 id: child_session_id.clone(),
                 title: Some(prompt.chars().take(60).collect()),
                 agent: Some(kind.clone()),
-                model: Some(parent.config.model_id().to_string()),
+                model: Some(parent.config.model.clone()),
 
                 autopilot_mode: None,
                 workdir_hash: None,

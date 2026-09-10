@@ -111,7 +111,7 @@ fn assert_requests_well_formed(client: &MockChatClient) {
 
 fn assert_no_dangling_in_request(i: usize, req: &ChatRequest) {
     let mut pending: Vec<String> = Vec::new();
-    for m in &req.messages {
+    for m in &opencoder_llm::lower_messages(&req.messages) {
         match m.get("role").and_then(|v| v.as_str()) {
             Some("assistant") => {
                 if let Some(calls) = m.get("tool_calls").and_then(|v| v.as_array()) {
@@ -314,6 +314,7 @@ async fn in_process_continue_reconciles_preexisting_dangling_non_task() {
         .await;
     session
         .record(opencoder_core::Message {
+            provider_state: None,
             display: None,
             id: opencoder_session::runner::new_id(),
             role: opencoder_core::Role::Assistant,

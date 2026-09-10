@@ -235,7 +235,10 @@ async fn title_generation_writes_via_small_model() {
     generate_title(&s).await;
 
     let reqs = title_mock.requests();
-    assert_eq!(reqs[0].model, "mini", "title gen must use small_model id");
+    assert_eq!(
+        reqs[0].model, "cheap/mini",
+        "title gen must retain small_model provider"
+    );
     let meta = store.get_session("t").await.unwrap().unwrap();
     assert_eq!(
         meta.title.as_deref(),

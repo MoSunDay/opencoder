@@ -456,7 +456,11 @@ impl SessionState {
 
     pub async fn record_checked(&mut self, msg: Message) -> Result<()> {
         self.messages.push(msg.clone());
-        self.persist(&msg).await
+        if let Err(error) = self.persist(&msg).await {
+            self.messages.pop();
+            return Err(error);
+        }
+        Ok(())
     }
 
     async fn persist(&mut self, msg: &Message) -> Result<()> {

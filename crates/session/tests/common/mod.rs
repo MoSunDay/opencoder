@@ -76,6 +76,7 @@ pub fn parent_task_turn(task_ids: &[&str]) -> Message {
         });
     }
     Message {
+        provider_state: None,
         display: None,
         id: "a1".into(),
         role: Role::Assistant,

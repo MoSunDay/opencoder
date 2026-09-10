@@ -52,7 +52,7 @@ export function CanvasToolbar({ onAutoLayout, onFitView, problems }) {
 }
 
 const PALETTE = [
-  { kindType: 'runner', icon: <CodeOutlined />, title: 'Runner 工作流', hint: '已注册的业务程序 + Agent' },
+  { kindType: 'runner', icon: <CodeOutlined />, title: 'Runner 步骤', hint: '已注册的业务程序 + Agent' },
   { kindType: 'agent', icon: <RobotOutlined />, title: 'Agent 步骤', hint: 'LLM 提示词执行' },
   { kindType: 'wasm', icon: <CodeOutlined />, title: 'Wasm 步骤', hint: '内嵌 wasm runtime / runc 沙箱' },
 ];

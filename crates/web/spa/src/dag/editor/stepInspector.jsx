@@ -18,7 +18,7 @@ const { TextArea } = Input;
 const KIND_OPTIONS = [
   { value: 'agent', label: 'Agent 步骤' },
   { value: 'wasm', label: 'Wasm 步骤' },
-  { value: 'runner', label: 'Runner 工作流' },
+  { value: 'runner', label: 'Runner 步骤' },
 ];
 const SANDBOX_OPTIONS = [
   { value: 'in_process', label: '内嵌 VM (in_process)' },

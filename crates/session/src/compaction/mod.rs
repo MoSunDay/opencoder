@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use anyhow::{anyhow, Context, Result};
 use opencoder_core::{message::now_ms, ContentBlock, Message, Role, ToolArc};
-use opencoder_llm::{estimate_messages, lower_messages, ChatRequest, LlmEvent};
+use opencoder_llm::{estimate_messages, ChatRequest, LlmEvent};
 use opencoder_store::SessionPatch;
 
 use crate::prompt::{build_system, compaction_system_prompt, compaction_user_prompt};
@@ -288,6 +288,13 @@ fn split_index(messages: &[Message], tail_turns: usize) -> usize {
 /// Returns `None` only when there is genuinely nothing to summarize — an
 /// empty transcript or a single message.
 fn compaction_split(messages: &[Message], tail_turns: usize) -> Option<usize> {
+    let desired = preferred_split(messages, tail_turns)?;
+    boundary::tool_safe_split(messages, desired)
+}
+
+mod boundary;
+
+fn preferred_split(messages: &[Message], tail_turns: usize) -> Option<usize> {
     let turn_starts = turn_start_indices(messages);
     if turn_starts.is_empty() {
         return None;
@@ -313,18 +320,28 @@ async fn summarize(
     previous_summary: Option<&str>,
     on_event: &mut (impl FnMut(SessionEvent) + Send + ?Sized),
 ) -> Result<String> {
-    let mut msgs: Vec<serde_json::Value> = Vec::new();
+    let mut msgs: Vec<Message> = Vec::new();
     // System prompt: anchored context summarization assistant.
-    msgs.push(serde_json::json!({ "role": "system", "content": compaction_system_prompt() }));
+    msgs.push(Message::system(
+        "compaction-system",
+        compaction_system_prompt(),
+    ));
     // The conversation head to summarize.
-    msgs.extend(lower_messages(head));
+    msgs.extend_from_slice(head);
     // User prompt: structured output template (+ optional previous-summary).
-    msgs.push(
-        serde_json::json!({ "role": "user", "content": compaction_user_prompt(previous_summary) }),
-    );
+    msgs.push(Message::user(
+        "compaction-user",
+        compaction_user_prompt(previous_summary),
+    ));
     // Summarization is a cheap background call → use small_model when configured.
-    let model = session.config.small_model_or_primary().to_string();
+    let model = session
+        .config
+        .small_model
+        .as_deref()
+        .unwrap_or(&session.config.model)
+        .to_string();
     let req = ChatRequest {
+        purpose: opencoder_llm::RequestPurpose::Compaction,
         model,
         messages: msgs,
         tools: Vec::new(),
@@ -336,6 +353,7 @@ async fn summarize(
     };
     let mut rx = session.client.chat_stream(req)?;
     let mut text = String::new();
+    let mut completed = false;
     // Cancel guard only: the event-level idle watchdog now lives inside the
     // streaming client, which retries stalls transparently. A double-Esc / web
     // interrupt during the compaction-summary stream must still break out
@@ -358,9 +376,8 @@ async fn summarize(
                         on_event(SessionEvent::CompactionDelta(t));
                     }
                     LlmEvent::Completed { text: t, .. } => {
-                        if !t.is_empty() {
-                            text = t;
-                        }
+                completed = true;
+                        text = t;
                     }
                     LlmEvent::Retrying { .. } => {
                         // Mid-stream retry: the client discarded its partial
@@ -374,6 +391,9 @@ async fn summarize(
                 }
             }
         }
+    }
+    if !completed {
+        return Err(anyhow::anyhow!("stream ended without completion"));
     }
     if text.trim().is_empty() {
         return Err(anyhow!("empty compaction summary"));

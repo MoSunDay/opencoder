@@ -163,7 +163,7 @@ async fn direct_prompt_records_verbatim_display_and_clean_text() {
         );
     }
     for req in mock.requests() {
-        let body = format!("{req:?}");
+        let body = req.to_body().to_string();
         assert!(
             !body.contains("$review"),
             "the token must never reach the LLM request: {body}"

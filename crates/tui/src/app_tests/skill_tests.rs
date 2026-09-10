@@ -391,6 +391,7 @@ fn startup_endpoint_resolves_by_model_prefix_not_legacy_field() {
     providers.insert(
         "deepseek".to_string(),
         ProviderConfig {
+            protocol: "chat_completions".into(),
             base_url: "https://api.deepseek.com/v1".to_string(),
             api_key: Some("dk-key".to_string()),
             model: None,
@@ -403,6 +404,7 @@ fn startup_endpoint_resolves_by_model_prefix_not_legacy_field() {
         // Distinct from providers["deepseek"] so a revert to the raw field is
         // caught (it would return the openai url + oai-key instead).
         provider: ProviderConfig {
+            protocol: "chat_completions".into(),
             base_url: "https://api.openai.com/v1".to_string(),
             api_key: Some("oai-key".to_string()),
             model: None,
@@ -425,6 +427,7 @@ fn startup_endpoint_falls_back_to_legacy_when_prefix_absent() {
     let cfg = Config {
         model: "unknown-svc/model-x".to_string(),
         provider: ProviderConfig {
+            protocol: "chat_completions".into(),
             base_url: "https://legacy.example.com/v1".to_string(),
             api_key: Some("legacy-key".to_string()),
             model: None,

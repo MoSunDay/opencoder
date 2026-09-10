@@ -190,7 +190,7 @@ async fn diamond_workflow_wasm_steps_feed_the_agent_step() {
     let agent_prompt = requests
         .iter()
         .flat_map(|request| request.messages.iter())
-        .filter_map(|message| message["content"].as_str())
+        .map(|message| message.text())
         .find(|content| content.contains("汇总 b 与 c 的结果"))
         .expect("agent step prompt request missing");
     for fragment in ["\"value\": 1", "\"value\": 2", "\"value\": 4"] {

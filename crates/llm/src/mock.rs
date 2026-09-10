@@ -185,6 +185,7 @@ mod tests {
 
     fn req() -> ChatRequest {
         ChatRequest {
+            purpose: crate::RequestPurpose::Conversation,
             model: "mock-model".into(),
             messages: Vec::new(),
             tools: Vec::new(),

@@ -223,12 +223,13 @@ async fn skill_activation_never_creates_session_row() {
     // loaded]` message (the queued `$review` resolves at the idle-boundary
     // drain, so the follow-up turn is the one that carries it).
     assert!(
-        mock.requests().iter().any(|req| req
-            .messages
+        mock.requests()
             .iter()
-            .filter(|m| m.get("role").and_then(|r| r.as_str()) == Some("user"))
-            .filter_map(|m| m.get("content").and_then(|c| c.as_str()))
-            .any(|t| t.starts_with("[skill loaded] "))),
+            .any(|req| opencoder_llm::lower_messages(&req.messages)
+                .iter()
+                .filter(|m| m.get("role").and_then(|r| r.as_str()) == Some("user"))
+                .filter_map(|m| m.get("content").and_then(|c| c.as_str()))
+                .any(|t| t.starts_with("[skill loaded] "))),
         "skill was active during the run (body in the payload)"
     );
     assert_no_new_row(&spy, &store, &before_ids, before_creates, "$skill").await;

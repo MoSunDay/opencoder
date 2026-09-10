@@ -77,7 +77,9 @@ fn phase_label(phase: &ApPhase) -> &'static str {
 /// True when any message of the captured request contains `needle`
 /// (messages are JSON values; stringified for the substring scan).
 fn any_message_contains(req: &opencoder_llm::ChatRequest, needle: &str) -> bool {
-    req.messages.iter().any(|m| m.to_string().contains(needle))
+    opencoder_llm::lower_messages(&req.messages)
+        .iter()
+        .any(|m| m.to_string().contains(needle))
 }
 
 // ── HOME isolation: skill discovery reads the process $HOME ───────────────

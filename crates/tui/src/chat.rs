@@ -73,10 +73,27 @@ impl ChatView {
         self.track_context(ev);
         match ev {
             SessionEvent::LlmRoundStart { started_at_ms } => {
+                let start = self.turn_block_start.min(self.blocks.len());
+                self.attempt_snapshot = Some(AttemptSnapshot {
+                    start,
+                    blocks: self.blocks[start..].to_vec(),
+                    context_used: self.context_used,
+                    assistant: self.round_assistant_idx,
+                });
                 self.llm_round_started_at_ms = Some(*started_at_ms);
                 self.frozen_round_ms = None;
             }
+            SessionEvent::LlmAttemptReset => {
+                if let Some(saved) = &self.attempt_snapshot {
+                    self.blocks.truncate(saved.start);
+                    self.blocks.extend(saved.blocks.iter().cloned());
+                    self.turn_block_start = saved.start;
+                    self.context_used = saved.context_used;
+                    self.round_assistant_idx = saved.assistant;
+                }
+            }
             SessionEvent::LlmRoundEnd => {
+                self.attempt_snapshot = None;
                 if let Some(anchor) = self.llm_round_started_at_ms.take() {
                     self.frozen_round_ms =
                         Some(((opencoder_core::message::now_ms() - anchor).max(0)) as u64);

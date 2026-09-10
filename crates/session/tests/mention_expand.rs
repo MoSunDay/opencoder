@@ -133,15 +133,13 @@ async fn direct_prompt_expands_mentions() {
     assert_eq!(reqs.len(), 1);
     let want = format!("{}/notes.md", abs.display());
     assert!(
-        reqs[0]
-            .messages
+        opencoder_llm::lower_messages(&reqs[0].messages)
             .iter()
             .any(|m| m.to_string().contains(&want)),
         "request must carry the absolute path"
     );
     assert!(
-        !reqs[0]
-            .messages
+        !opencoder_llm::lower_messages(&reqs[0].messages)
             .iter()
             .any(|m| m.to_string().contains("@notes.md")),
         "raw token must be gone"

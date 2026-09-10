@@ -98,14 +98,14 @@ async fn tool_returned_image_reaches_request_body() {
     // The second request must carry the tool result as a STRING-content `tool`
     // message (OpenAI spec) ...
     let second = &reqs[1];
-    let tool_msg = second
-        .messages
+    let wire_messages_101 = opencoder_llm::lower_messages(&second.messages);
+    let tool_msg = wire_messages_101
         .iter()
         .find(|m| m["role"] == "tool")
         .unwrap_or_else(|| {
             panic!(
                 "expected a 'tool' message in second request: {:?}",
-                second.messages
+                opencoder_llm::lower_messages(&second.messages)
             )
         });
     assert!(
@@ -115,8 +115,8 @@ async fn tool_returned_image_reaches_request_body() {
 
     // ... and the tool-returned image is rehomed onto a `role:"user"` message as
     // a legal `image_url` part (images cannot live on the `tool` role).
-    let user_with_image = second
-        .messages
+    let wire_messages_117 = opencoder_llm::lower_messages(&second.messages);
+    let user_with_image = wire_messages_117
         .iter()
         .filter(|m| m["role"] == "user")
         .find(|m| {
@@ -128,7 +128,7 @@ async fn tool_returned_image_reaches_request_body() {
         .unwrap_or_else(|| {
             panic!(
                 "expected a 'user' message with an image_url part: {:?}",
-                second.messages
+                opencoder_llm::lower_messages(&second.messages)
             )
         });
 

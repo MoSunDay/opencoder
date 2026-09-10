@@ -206,6 +206,7 @@ pub async fn reconcile_dangling_tool_uses(session: &mut SessionState) {
     }
     let n_dangling = dangling.len();
     let synthetic = Message {
+        provider_state: None,
         display: None,
         id: crate::runner::new_id(),
         role: Role::Tool,

@@ -14,6 +14,7 @@ use ratatui::Terminal;
 #[test]
 fn provider_patch_wraps_env_var_name_in_braces() {
     let p = crate::model_menu::patch::ProviderPatch {
+        protocol: "chat_completions".into(),
         name: "deepseek".into(),
         model_id: "chat".into(),
         base_url: "u".into(),
@@ -37,6 +38,7 @@ fn provider_patch_wraps_env_var_name_in_braces() {
 #[test]
 fn provider_patch_omits_api_key_when_untouched() {
     let p = crate::model_menu::patch::ProviderPatch {
+        protocol: "chat_completions".into(),
         name: "deepseek".into(),
         model_id: "chat".into(),
         base_url: "u".into(),
@@ -54,6 +56,7 @@ fn provider_patch_omits_api_key_when_untouched() {
 #[test]
 fn provider_patch_clears_api_key_when_empty() {
     let p = crate::model_menu::patch::ProviderPatch {
+        protocol: "chat_completions".into(),
         name: "deepseek".into(),
         model_id: "chat".into(),
         base_url: "u".into(),
@@ -70,6 +73,7 @@ fn provider_patch_clears_api_key_when_empty() {
 #[test]
 fn provider_patch_serializes_headers() {
     let p = crate::model_menu::patch::ProviderPatch {
+        protocol: "chat_completions".into(),
         name: "svc".into(),
         model_id: "m".into(),
         base_url: "u".into(),
@@ -113,6 +117,7 @@ fn provider_patch_model_survives_save_load_cycle() {
     let _home = super::common::lock_home(dir.path());
     // Simulate adding a provider while a *different* model is active.
     let patch = crate::model_menu::patch::ProviderPatch {
+        protocol: "chat_completions".into(),
         name: "qwen3".into(),
         model_id: "qwen-max".into(),
         base_url: "https://api.qwen.com/v1".into(),
@@ -413,6 +418,7 @@ fn multi_provider_cfg() -> opencoder_core::Config {
     c.providers.insert(
         "active".to_string(),
         opencoder_core::ProviderConfig {
+            protocol: "chat_completions".into(),
             base_url: "https://active.example.com/v1".to_string(),
             api_key: Some("ak-active".to_string()),
             model: None,
@@ -422,6 +428,7 @@ fn multi_provider_cfg() -> opencoder_core::Config {
     c.providers.insert(
         "other".to_string(),
         opencoder_core::ProviderConfig {
+            protocol: "chat_completions".into(),
             base_url: "https://other.example.com/v1".to_string(),
             api_key: None,
             model: None,
@@ -679,9 +686,9 @@ fn provider_form_cursor_on_model_id() {
         })
         .unwrap();
 
-    // popup: x=4, y=11 (want_h = 11 + max(1 header row) = 12); model_id is
-    // row 1; "glm-5.2" has 7 chars → cx = 4+1+15+7 = 27, cy = 11+1+1 = 13
-    terminal.backend_mut().assert_cursor_position((27, 13));
+    // popup: x=4, y=10 (want_h = 12 + max(1 header row) = 13); model_id is
+    // row 1; "glm-5.2" has 7 chars → cx = 4+1+15+7 = 27, cy = 10+1+1 = 12
+    terminal.backend_mut().assert_cursor_position((27, 12));
 }
 
 #[test]
@@ -702,8 +709,8 @@ fn provider_form_cursor_on_api_key_uses_raw_buffer() {
         .unwrap();
 
     // api_key is row 3; raw buffer "n" (1 char) → cx = 4+1+15+1 = 21,
-    // cy = 11+1+3 = 15
-    terminal.backend_mut().assert_cursor_position((21, 15));
+    // cy = 10+1+3 = 14
+    terminal.backend_mut().assert_cursor_position((21, 14));
 }
 
 #[test]

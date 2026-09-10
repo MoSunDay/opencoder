@@ -49,7 +49,7 @@ async fn seed(store: &Arc<dyn Store>, id: &str, agent: &str) {
 /// String contents of every `user` message in a captured request payload
 /// (where the transient `[skill loaded]` body message rides).
 fn request_user_texts(req: &opencoder_llm::ChatRequest) -> Vec<String> {
-    req.messages
+    opencoder_llm::lower_messages(&req.messages)
         .iter()
         .filter(|m| m.get("role").and_then(|r| r.as_str()) == Some("user"))
         .filter_map(|m| m.get("content").and_then(|c| c.as_str()))

@@ -4,3 +4,4 @@ mod common;
 mod config_tests;
 mod cursor_editing_tests;
 mod provider_tests;
+mod responses;

@@ -6,7 +6,6 @@
 use std::collections::HashSet;
 
 use anyhow::{Context, Result};
-use serde_json::json;
 
 use opencoder_llm::{ChatRequest, ChatStream, LlmEvent};
 use opencoder_store::{BrainPlanRecord, BrainVectorHit};
@@ -75,10 +74,11 @@ impl Runtime {
             ));
         }
         let req = ChatRequest {
+            purpose: opencoder_llm::RequestPurpose::Planning,
             model: chat_model.to_string(),
             messages: vec![
-                json!({ "role": "system", "content": PLANNER_FRAMEWORK_PROMPT }),
-                json!({ "role": "user", "content": build_user_prompt(situation, &hits) }),
+                opencoder_llm::Message::system("planner-system", PLANNER_FRAMEWORK_PROMPT),
+                opencoder_llm::Message::user("planner-user", build_user_prompt(situation, &hits)),
             ],
             tools: Vec::new(),
             tool_choice: None,
@@ -237,21 +237,25 @@ fn parse_tree(raw: &str) -> Result<DecisionTree> {
 async fn drain_chat(client: &dyn ChatStream, req: ChatRequest) -> Result<String> {
     let mut rx = client.chat_stream(req)?;
     let mut text = String::new();
+    let mut completed = false;
     while let Some(ev) = rx.recv().await {
         match ev {
             LlmEvent::TextDelta(d) => text.push_str(&d),
             LlmEvent::Retrying { .. } => text.clear(),
             LlmEvent::Completed { text: t, .. } => {
-                if !t.is_empty() {
-                    text = t;
-                }
+                completed = true;
+                text = t;
                 break;
             }
             LlmEvent::Error(e) => anyhow::bail!("{e}"),
-            LlmEvent::ReasoningDelta(_)
+            LlmEvent::ProviderState(_)
+            | LlmEvent::ReasoningDelta(_)
             | LlmEvent::ToolCallStart { .. }
             | LlmEvent::ToolCallDelta { .. } => {}
         }
+    }
+    if !completed {
+        return Err(anyhow::anyhow!("stream ended without completion"));
     }
     if text.trim().is_empty() {
         anyhow::bail!("planner produced an empty reply");

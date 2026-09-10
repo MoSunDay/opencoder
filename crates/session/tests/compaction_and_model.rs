@@ -67,6 +67,7 @@ fn assistant_with_tool(id: &str, tool_id: &str) -> Message {
 /// A tool-result message (simulates the tool execution result).
 fn tool_result(id: &str, tool_id: &str, content: &str) -> Message {
     Message {
+        provider_state: None,
         display: None,
         id: id.into(),
         role: Role::Tool,
@@ -165,8 +166,8 @@ async fn small_model_is_used_for_compaction_summary_call() {
     let reqs = mock.requests();
     assert!(!reqs.is_empty(), "at least the compaction call must happen");
     assert_eq!(
-        reqs[0].model, "mini",
-        "compaction summarize must use small_model id, got {}",
+        reqs[0].model, "cheap/mini",
+        "compaction summarize must retain small_model provider, got {}",
         reqs[0].model
     );
 }
@@ -183,7 +184,9 @@ async fn model_switch_takes_effect_on_next_request_body() {
     run(&mut s, "first".into(), |_| {}).await.unwrap();
 
     // switch the session model mid-session
-    s.model = "switched/claude".into();
+    let mut config = s.config.clone();
+    config.model = "switched/claude".into();
+    s.apply_config_reload(config, mock.clone());
 
     // next turn must carry the new model in the request body
     run(&mut s, "second".into(), |_| {}).await.unwrap();

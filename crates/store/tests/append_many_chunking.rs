@@ -14,6 +14,7 @@ use tempfile::TempDir;
 
 fn msg(id: &str) -> Message {
     Message {
+        provider_state: None,
         display: None,
         id: id.into(),
         role: Role::User,

@@ -14,17 +14,19 @@ pub enum ProviderField {
     ModelId,
     BaseUrl,
     ApiKey,
+    Protocol,
     Headers,
     Save,
     Cancel,
 }
 
 impl ProviderField {
-    const ORDER: [ProviderField; 7] = [
+    const ORDER: [ProviderField; 8] = [
         ProviderField::Name,
         ProviderField::ModelId,
         ProviderField::BaseUrl,
         ProviderField::ApiKey,
+        ProviderField::Protocol,
         ProviderField::Headers,
         ProviderField::Save,
         ProviderField::Cancel,
@@ -41,6 +43,7 @@ impl ProviderField {
 
 #[derive(Clone)]
 pub struct ProviderForm {
+    pub protocol: String,
     pub name: String,
     /// `true` when editing an existing provider (Name field is read-only).
     pub name_readonly: bool,
@@ -74,6 +77,7 @@ impl ProviderForm {
         headers: Vec<(String, String)>,
     ) -> Self {
         ProviderForm {
+            protocol: "chat_completions".into(),
             name: name.to_string(),
             name_readonly: true,
             name_cursor: name.chars().count(),
@@ -96,6 +100,7 @@ impl ProviderForm {
     pub fn new_blank(config: &Config) -> Self {
         let base_url = config.base_url_for(config.provider_id());
         ProviderForm {
+            protocol: "chat_completions".into(),
             name: String::new(),
             name_readonly: false,
             name_cursor: 0,
@@ -124,6 +129,7 @@ impl ProviderForm {
         let base_url = provider.base_url.clone();
         let api_key = provider.api_key.clone().unwrap_or_default();
         ProviderForm {
+            protocol: provider.protocol.clone(),
             name_cursor: name.chars().count(),
             name,
             name_readonly: false,
@@ -222,6 +228,7 @@ impl ProviderForm {
 
     pub fn build_patch(&self) -> ProviderPatch {
         ProviderPatch {
+            protocol: self.protocol.clone(),
             name: self.name.clone(),
             model_id: self.model_id.clone(),
             base_url: self.base_url.clone(),
@@ -231,6 +238,7 @@ impl ProviderForm {
     }
 
     fn validate(&self) -> Result<(), String> {
+        opencoder_core::ProviderProtocol::parse(&self.protocol).map_err(|e| e.to_string())?;
         if self.name.trim().is_empty() {
             return Err("provider name must not be empty".into());
         }
@@ -286,6 +294,17 @@ pub fn handle_key(mut form: ProviderForm, k: KeyEvent) -> (ModelOutcome, Option<
             },
             _ => {}
         }
+        return (ModelOutcome::Idle, Some(ModelMenu::Form(form)));
+    }
+    if form.focus == ProviderField::Protocol
+        && matches!(k.code, KeyCode::Left | KeyCode::Right | KeyCode::Char(' '))
+    {
+        form.protocol = if form.protocol == "responses" {
+            "chat_completions"
+        } else {
+            "responses"
+        }
+        .into();
         return (ModelOutcome::Idle, Some(ModelMenu::Form(form)));
     }
     match k.code {

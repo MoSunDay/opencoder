@@ -119,19 +119,13 @@ pub async fn serve(
     // the project service: brain todos resolve their executor through it.
     let brain = match opencoder_core::Config::load(&workdir) {
         Ok(cfg) => match cfg.resolve_embedding_endpoint() {
-            Ok(ep) => match opencoder_llm::ChatClient::new_with_read_timeout(
-                &ep.base_url,
-                &ep.api_key,
-                &ep.headers,
-                cfg.stream_idle_timeout(),
-                cfg.network.proxy.as_deref(),
-            ) {
+            Ok(ep) => match opencoder_llm::ChatClient::from_config(&cfg, &ep) {
                 Ok(c) => opencoder_brain::Runtime::new(
                     store.clone(),
                     Arc::new(c) as Arc<dyn opencoder_llm::ChatStream>,
                     cfg.embedding_model_id(),
                 )
-                .with_chat_model(cfg.small_model_or_primary()),
+                .with_chat_model(cfg.small_model.as_deref().unwrap_or(&cfg.model)),
                 Err(e) => {
                     tracing::warn!("brain degraded, llm client unavailable: {e:#}");
                     api_brain::degraded_brain(store.clone())

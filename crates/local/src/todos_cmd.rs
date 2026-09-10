@@ -97,13 +97,7 @@ fn runtime(
     let mut config = Config::load(workdir)?;
     crate::run::apply_model_override(&mut config, &cli.model).map_err(anyhow::Error::msg)?;
     let endpoint = config.resolve_endpoint()?;
-    let client: Arc<dyn ChatStream> = Arc::new(ChatClient::new_with_read_timeout(
-        &endpoint.base_url,
-        &endpoint.api_key,
-        &endpoint.headers,
-        config.stream_idle_timeout(),
-        config.network.proxy.as_deref(),
-    )?);
+    let client: Arc<dyn ChatStream> = Arc::new(ChatClient::from_config(&config, &endpoint)?);
     let cancel = CancellationToken::new();
     let signal = cancel.clone();
     tokio::spawn(async move {

@@ -133,7 +133,10 @@ async fn next_turn_system_prompt_carries_agent_soul() {
     events(&mut session, "hello").await;
 
     let req = &mock.requests()[0];
-    let system = req.messages[0].get("content").unwrap().to_string();
+    let system = opencoder_llm::lower_messages(&req.messages)[0]
+        .get("content")
+        .unwrap()
+        .to_string();
     assert!(
         system.contains("SOUL-worker"),
         "system prompt carries the file agent soul: {system}"
@@ -243,7 +246,7 @@ async fn compound_agent_switch_runs_rest_under_new_agent() {
     assert_eq!(mock.requests().len(), 1, "remainder ran as one LLM turn");
 
     let req = &mock.requests()[0];
-    let msgs = &req.messages;
+    let msgs = &opencoder_llm::lower_messages(&req.messages);
     assert!(
         msgs.iter().any(|m| {
             m.get("role").and_then(|r| r.as_str()) == Some("user")

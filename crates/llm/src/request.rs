@@ -1,11 +1,23 @@
 use serde_json::{json, Value};
 
-use crate::message::OpenAIMessage;
+use crate::message::lower_messages;
+use opencoder_core::Message;
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum RequestPurpose {
+    #[default]
+    Conversation,
+    Title,
+    Verify,
+    Compaction,
+    Planning,
+}
 
 #[derive(Debug, Clone)]
 pub struct ChatRequest {
+    pub purpose: RequestPurpose,
     pub model: String,
-    pub messages: Vec<OpenAIMessage>,
+    pub messages: Vec<Message>,
     pub tools: Vec<Value>,
     pub tool_choice: Option<String>,
     /// Sampling temperature. Stored as `f64` (not `f32`) so that `json!(t)`
@@ -30,7 +42,7 @@ impl ChatRequest {
     pub fn to_body(&self) -> Value {
         let mut body = json!({
             "model": self.model,
-            "messages": self.messages,
+            "messages": lower_messages(&self.messages),
             "stream": true,
             "stream_options": { "include_usage": true },
         });
@@ -68,6 +80,7 @@ mod tests {
 
     fn minimal_req() -> ChatRequest {
         ChatRequest {
+            purpose: crate::RequestPurpose::Conversation,
             model: "m".into(),
             messages: Vec::new(),
             tools: Vec::new(),

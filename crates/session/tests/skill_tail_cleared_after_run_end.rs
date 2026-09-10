@@ -68,27 +68,31 @@ fn bash_turn(text: &str) -> LlmEvent {
 /// `[active skill]` tail reminder (the assertion style of
 /// `tests/steer_skill_deferral.rs` / `tests/skill_one_shot.rs`).
 fn has_active_skill_tail(req: &ChatRequest) -> bool {
-    req.messages.iter().any(|m| {
-        m.get("role").and_then(|r| r.as_str()) == Some("user")
-            && m.get("content")
-                .and_then(|c| c.as_str())
-                .is_some_and(|c| c.contains("[active skill]"))
-    })
+    opencoder_llm::lower_messages(&req.messages)
+        .iter()
+        .any(|m| {
+            m.get("role").and_then(|r| r.as_str()) == Some("user")
+                && m.get("content")
+                    .and_then(|c| c.as_str())
+                    .is_some_and(|c| c.contains("[active skill]"))
+        })
 }
 
 /// The armed skill ships as the one-shot `[skill loaded]` body message
 /// (the `[active skill]` tail pointer is fallback-only under F3).
 fn has_loaded_skill_message(req: &ChatRequest) -> bool {
-    req.messages.iter().any(|m| {
-        m.get("role").and_then(|r| r.as_str()) == Some("user")
-            && m.get("content")
-                .and_then(|c| c.as_str())
-                .is_some_and(|c| c.starts_with("[skill loaded] "))
-    })
+    opencoder_llm::lower_messages(&req.messages)
+        .iter()
+        .any(|m| {
+            m.get("role").and_then(|r| r.as_str()) == Some("user")
+                && m.get("content")
+                    .and_then(|c| c.as_str())
+                    .is_some_and(|c| c.starts_with("[skill loaded] "))
+        })
 }
 
 fn user_texts(req: &ChatRequest) -> Vec<String> {
-    req.messages
+    opencoder_llm::lower_messages(&req.messages)
         .iter()
         .filter(|m| m.get("role").and_then(|r| r.as_str()) == Some("user"))
         .filter_map(|m| m.get("content").and_then(|c| c.as_str()))

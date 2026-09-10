@@ -28,7 +28,9 @@ pub(super) fn has_editable_key(root: &serde_json::Value) -> bool {
     if obj
         .get("provider")
         .and_then(|v| v.as_object())
-        .is_some_and(|p| p.contains_key("base_url") || p.contains_key("api_key"))
+        .is_some_and(|p| {
+            p.contains_key("base_url") || p.contains_key("api_key") || p.contains_key("protocol")
+        })
     {
         return true;
     }
@@ -196,6 +198,13 @@ pub(super) fn merge_into(cfg: &mut Config, value: serde_json::Value) {
             cfg.team_max_sub_turns = v.min(usize::MAX as u64) as usize;
         }
         if let Some(p) = obj.get("provider").and_then(|v| v.as_object()) {
+            if let Some(v) = p.get("protocol") {
+                cfg.provider.protocol = if v.is_null() {
+                    "chat_completions".into()
+                } else {
+                    v.as_str().unwrap_or("invalid protocol type").to_owned()
+                };
+            }
             if let Some(b) = p.get("base_url").and_then(|v| v.as_str()) {
                 cfg.provider.base_url = b.to_string();
             }
@@ -217,6 +226,13 @@ pub(super) fn merge_into(cfg: &mut Config, value: serde_json::Value) {
             for (name, pv) in providers {
                 if let Some(pcfg) = pv.as_object() {
                     let entry = cfg.providers.entry(name.clone()).or_default();
+                    if let Some(v) = pcfg.get("protocol") {
+                        entry.protocol = if v.is_null() {
+                            "chat_completions".into()
+                        } else {
+                            v.as_str().unwrap_or("invalid protocol type").to_owned()
+                        };
+                    }
                     if let Some(b) = pcfg.get("base_url").and_then(|v| v.as_str()) {
                         entry.base_url = b.to_string();
                     }

@@ -492,13 +492,7 @@ async fn register_with_retry(uplink: &Uplink, opts: &NodeOpts) -> Result<String>
 fn build_default_client(opts: &NodeOpts) -> Result<Arc<dyn ChatStream>> {
     let config = opencoder_core::Config::load(&opts.workdir)?;
     let ep = config.resolve_endpoint()?;
-    let client = ChatClient::new_with_read_timeout(
-        &ep.base_url,
-        &ep.api_key,
-        &ep.headers,
-        config.stream_idle_timeout(),
-        config.network.proxy.as_deref(),
-    )?;
+    let client = ChatClient::from_config(&config, &ep)?;
     Ok(Arc::new(client))
 }
 

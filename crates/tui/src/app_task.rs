@@ -37,13 +37,11 @@ use crate::worker::{
 /// Returns `Result` (not `()`) because the body uses `?` to propagate errors
 /// from `resolve_agent` / `resume`; the caller propagates with `?`.
 /// The outer match's post-arm `continue` stays inline in `run_app`.
-/// Wire `model` stored on a freshly created `/task` session: the bare model
-/// id (no provider prefix) -- the same derivation as `SessionState::new` and
-/// resume, so the request `model` string is identical no matter how the
-/// session was created. `config` is the live in-memory config, so a
-/// session-only `/model` switch carries into the new task.
-fn new_task_wire_model(config: &Config) -> String {
-    config.model_id().to_string()
+/// Carry a session-only model choice into a new task while loading other
+/// settings from disk. Config retains the provider needed for request routing.
+fn new_task_config(mut loaded: Config, active: &Config) -> Config {
+    loaded.model = active.model.clone();
+    loaded
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -93,8 +91,11 @@ pub(crate) async fn switch_session(
         crate::task::TaskPick::New => {
             let new_session_id = opencoder_session::runner::new_id();
             let new_agent = resolve_agent("act").context("agent")?;
-            let new_config = Config::load(workdir).unwrap_or_else(|_| config.clone());
-            let mut sess = SessionState::new(
+            let new_config = new_task_config(
+                Config::load(workdir).unwrap_or_else(|_| config.clone()),
+                config,
+            );
+            let sess = SessionState::new(
                 new_session_id,
                 new_agent,
                 new_config,
@@ -102,7 +103,6 @@ pub(crate) async fn switch_session(
                 workdir.to_path_buf(),
             )
             .with_store(store.clone());
-            sess.model = new_task_wire_model(config);
             (sess, 0)
         }
         crate::task::TaskPick::Resume(id) => {
@@ -414,17 +414,20 @@ mod tests {
     // ── pending_replay_hint (pure) ──────────────────────────────────────
 
     #[test]
-    fn new_task_wire_model_strips_provider_prefix() {
-        let prefixed = Config {
+    fn new_task_keeps_active_provider_model_and_loads_other_settings() {
+        let active = Config {
             model: "prov-x/model-x".into(),
             ..Config::default()
         };
-        assert_eq!(new_task_wire_model(&prefixed), "model-x");
-        let bare = Config {
-            model: "model-x".into(),
+        let disk = Config {
+            model: "disk/default".into(),
+            max_tokens: Some(8192),
             ..Config::default()
         };
-        assert_eq!(new_task_wire_model(&bare), "model-x", "already bare");
+        let config = new_task_config(disk, &active);
+        assert_eq!(config.model, "prov-x/model-x");
+        assert_eq!(config.model_id(), "model-x");
+        assert_eq!(config.max_tokens, Some(8192));
     }
 
     #[test]
@@ -446,6 +449,7 @@ mod tests {
 
     fn user_msg(id: &str, text: &str) -> Message {
         Message {
+            provider_state: None,
             display: None,
             id: id.into(),
             role: opencoder_core::Role::User,
@@ -460,6 +464,7 @@ mod tests {
 
     fn assistant_task_use(id: &str, tool_use_id: &str) -> Message {
         Message {
+            provider_state: None,
             display: None,
             id: id.into(),
             role: opencoder_core::Role::Assistant,

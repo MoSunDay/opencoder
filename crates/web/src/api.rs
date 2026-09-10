@@ -300,13 +300,7 @@ pub async fn post_prompt(
                 Ok(v) => v,
                 Err(e) => return error_500(format!("api_key: {e:#}")),
             };
-            match ChatClient::new_with_read_timeout(
-                &ep.base_url,
-                &ep.api_key,
-                &ep.headers,
-                config.stream_idle_timeout(),
-                config.network.proxy.as_deref(),
-            ) {
+            match ChatClient::from_config(&config, &ep) {
                 Ok(c) => Arc::new(c),
                 Err(e) => return error_500(format!("client: {e:#}")),
             }

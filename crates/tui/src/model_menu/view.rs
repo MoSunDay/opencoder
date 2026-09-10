@@ -379,7 +379,7 @@ fn render_save_default_confirm(f: &mut Frame, area: Rect, list: &ProviderList) {
 
 fn render_provider_form(f: &mut Frame, area: Rect, composer_top: u16, form: &ProviderForm) {
     let header_count = form.headers.pairs.len() as u16;
-    let want_h = 11u16 + header_count.max(1);
+    let want_h = 12u16 + header_count.max(1);
     let h = want_h.min(composer_top.max(1));
     let w = 72u16.min(area.width.saturating_sub(4));
     let x = area.x + (area.width.saturating_sub(w)) / 2;
@@ -440,6 +440,12 @@ fn render_provider_form(f: &mut Frame, area: Rect, composer_top: u16, form: &Pro
             &form.api_key_display(),
             form.focus == ProviderField::ApiKey,
             "type, \u{2190}/\u{2192} cursor, Enter=next",
+        ),
+        field_line(
+            "protocol:",
+            &form.protocol,
+            form.focus == ProviderField::Protocol,
+            "Left/Right/Space cycle, Enter=next",
         ),
     ];
 
@@ -565,7 +571,7 @@ fn render_provider_form(f: &mut Frame, area: Rect, composer_top: u16, form: &Pro
                 (hn.as_str(), 5)
             };
             let cx = popup.x + 1 + col + raw.chars().count() as u16;
-            let cy = popup.y + 1 + 5 + idx as u16;
+            let cy = popup.y + 1 + 6 + idx as u16;
             f.set_cursor_position((cx, cy));
         }
     }

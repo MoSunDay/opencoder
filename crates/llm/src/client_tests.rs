@@ -1,4 +1,6 @@
+use super::usage::first_u64;
 use super::*;
+use serde_json::Value;
 
 /// Regression guard: the default read timeout must stay at 600 s (10 min).
 #[test]
@@ -437,6 +439,7 @@ async fn stream_task_exits_promptly_after_rx_drop() {
         ChatClient::new(&format!("http://127.0.0.1:{port}"), "test-key", &[], None).unwrap();
 
     let req = ChatRequest {
+        purpose: crate::RequestPurpose::Conversation,
         model: "test-model".to_string(),
         messages: vec![],
         tools: vec![],

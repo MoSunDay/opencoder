@@ -198,13 +198,7 @@ async fn refresh_after_env_change(
             // Rebuild the outer client too so subsequent prompts use the
             // env's endpoint immediately (mirrors /model).
             match reloaded.resolve_endpoint() {
-                Ok(ep) => match opencoder_llm::ChatClient::new_with_read_timeout(
-                    &ep.base_url,
-                    &ep.api_key,
-                    &ep.headers,
-                    reloaded.stream_idle_timeout(),
-                    reloaded.network.proxy.as_deref(),
-                ) {
+                Ok(ep) => match opencoder_llm::ChatClient::from_config(&reloaded, &ep) {
                     Ok(new_client) => *client = Arc::new(new_client),
                     Err(e) => err_marker(
                         chat,

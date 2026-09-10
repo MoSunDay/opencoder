@@ -580,13 +580,7 @@ async fn apply_drain_cmd(
         DrainCmd::ReloadConfig => match Config::load(workdir) {
             Ok(new_cfg) => {
                 match new_cfg.resolve_endpoint() {
-                    Ok(ep) => match ChatClient::new_with_read_timeout(
-                        &ep.base_url,
-                        &ep.api_key,
-                        &ep.headers,
-                        new_cfg.stream_idle_timeout(),
-                        new_cfg.network.proxy.as_deref(),
-                    ) {
+                    Ok(ep) => match ChatClient::from_config(&new_cfg, &ep) {
                         Ok(c) => {
                             session.apply_config_reload(new_cfg, Arc::new(c) as Arc<dyn ChatStream>)
                         }

@@ -55,6 +55,7 @@ async fn append_and_load_preserves_all_roles_and_blocks() {
             m.agent = Some("act".into());
             m.model = Some("glm-5.2".into());
             m.usage = opencoder_core::MessageUsage {
+                reasoning_tokens: 0,
                 input_tokens: 10,
                 output_tokens: 5,
                 total_tokens: 15,
@@ -67,6 +68,7 @@ async fn append_and_load_preserves_all_roles_and_blocks() {
         {
             let id = "t1";
             Message {
+                provider_state: None,
                 display: None,
                 id: id.into(),
                 role: Role::Tool,

@@ -4,6 +4,7 @@ use opencoder_llm::{ChatRequest, ChatStream, CompletedToolCall, LlmEvent, MockCh
 
 fn req_with(model: &str) -> ChatRequest {
     ChatRequest {
+        purpose: opencoder_llm::RequestPurpose::Conversation,
         model: model.to_string(),
         messages: vec![],
         tools: vec![],

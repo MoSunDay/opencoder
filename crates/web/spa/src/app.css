@@ -462,6 +462,25 @@ body {
   overflow-y: auto;
 }
 
+/* todo canvas editor */
+/* TODO 画布（todoEditor.jsx 画布模式）复用 .dag-edit-* 的节点/工具栏/面板
+   骨架，这里只补 TODO 特有元素的最小规则。 */
+/* 外壳是整页 Card（dag 画布长在 Drawer 里）：页头 + Card 头 + 底部 Env 绑定
+   行叠起来的 chrome 更高，画布高度相应收一档，避免整页滚动。 */
+.todo-edit-canvas .dag-edit-wrap {
+  height: calc(100vh - 300px);
+  min-height: 420px;
+}
+/* TODO 节点图标着色：镜像 --agent/--wasm 的做法，任务清单用任务绿。 */
+.dag-edit-node--todo .dag-edit-node-head .anticon { color: var(--oc-heading); }
+/* TODO Inspector 字段比 dag 的多（含 required_tool_calls 行编辑），压一压
+   垂直间距让长表单一屏可见；只作用于画布外壳内，不影响 dag。 */
+.todo-edit-canvas .dag-edit-inspector .ant-form-item { margin-bottom: 10px; }
+/* 窄屏回到既有 dag 画布的纵向堆叠布局（specificity 需压过上面的高度规则）。 */
+@media (max-width: 767px) {
+  .todo-edit-canvas .dag-edit-wrap { height: auto; }
+}
+
 /* Keep navigation and controls reachable on narrow consoles. Two-level IA:
    the category switch sits above the scoped Sider menu (fleet-nav-category);
    the same two levels re-render as Segmented + Select rows on mobile. */

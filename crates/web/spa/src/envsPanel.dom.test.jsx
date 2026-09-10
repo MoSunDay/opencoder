@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
 // EnvsPanel DOM smoke: env 表格渲染 fixture（描述/工具数），行内「编辑」打开
-// 抽屉拉取 context；工具目录的「可导入」行点「导入」命中 POST
-// /api/todo/tools/import；抽屉「保存」命中 PUT /api/todo/envs/:name 且 body
-// 合并 description/tools/env_vars。删除后的 silent 刷新在途时表格不得遮罩
-// （遮罩 = .ant-spin-spinning → CSS 给容器 pointer-events: none，行内按钮全锁）。
+// 抽屉拉取 context（仅描述 + 环境变量；工具走行点击的工具抽屉）；
+// 「保存」命中 PUT /api/todo/envs/:name 且 body 只含 description/env_vars
+// （tools 由服务端部分合并保留）。工具目录不再全局展示 —— 随 env 进
+// envs/toolsDrawer.jsx（其交互见 toolsDrawer.dom.test.jsx）。删除后的
+// silent 刷新在途时表格不得遮罩（遮罩 = .ant-spin-spinning → CSS 给容器
+// pointer-events: none，行内按钮全锁）。
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -45,7 +47,7 @@ const envsFixture = { envs: [demoEnv] };
 const toolsFixture = {
   tools: [
     { ref: '/agent/tools/v3/ffmpeg', source: 'share' },
-    { ref: '/agent/tools/v2/git', source: 'importable', agent: 'agent-1', version: 'v2', tool: 'git' },
+    { ref: '/agent/tools/v2/git', source: 'importable', agent: 'ag', version: 'v2', tool: 'git' },
   ],
 };
 
@@ -109,15 +111,15 @@ describe('EnvsPanel', () => {
     expect(apiPutMock).not.toHaveBeenCalled();
   });
 
-  it('renders the env row and the tools catalog (share + importable)', async () => {
+  it('renders the env row; the global tools catalog is gone from the panel', async () => {
     render(<EnvsPanel onNotice={() => {}} />);
     expect(await screen.findByText('demo')).toBeTruthy();
     expect(screen.getByText('视频工具链')).toBeTruthy();
-    // 可导入表行 + 导入按钮立即可见（未选中 env 也有工具目录）。
-    expect(await screen.findByText('/agent/tools/v2/git')).toBeTruthy();
-    expect(findButton('导入')).toBeTruthy();
-    // 已导入（share）只读清单。
-    expect(screen.getByText('已导入（share，只读）：')).toBeTruthy();
+    // 工具数/变量数 Tag（各渲染「N 个」）。
+    expect(screen.getAllByText('1 个').length).toBeGreaterThanOrEqual(1);
+    // 全局「工具目录」区块已移除：目录随 env 走，进工具抽屉才可见。
+    expect(screen.queryByText('工具目录')).toBeNull();
+    expect(screen.queryByText('/agent/tools/v2/git')).toBeNull();
   });
 
   it('selects an env and shows its editor fields', async () => {
@@ -125,38 +127,35 @@ describe('EnvsPanel', () => {
     await screen.findByText('demo');
     fireEvent.click(findButton('编辑'));
     expect(await screen.findByText('编辑 Env: demo')).toBeTruthy();
-    // tools 多选框显示已选 share 引用。
-    await waitFor(() => {
-      expect(screen.getAllByText('/agent/tools/v3/ffmpeg').length).toBeGreaterThanOrEqual(1);
-    });
+    await waitFor(() => expect(screen.getByLabelText('env-description').value).toBe(demoEnv.description));
+    // tools 多选已移出编辑抽屉（绑定改在工具抽屉里管理）。
+    expect(screen.queryByLabelText('env-tools')).toBeNull();
+    expect(screen.getByLabelText('var-value').value).toBe('/usr/bin/ffmpeg');
   });
 
-  it('imports an importable tool via POST /api/todo/tools/import', async () => {
+  it('opens the tools drawer on row click; 编辑 opens the edit drawer only', async () => {
     render(<EnvsPanel onNotice={() => {}} />);
-    await screen.findByText('/agent/tools/v2/git');
-    fireEvent.click(findButton('导入'));
-    await waitFor(() => {
-      expect(apiPostMock).toHaveBeenCalledWith('/api/todo/tools/import', {
-        agent: 'agent-1',
-        version: 'v2',
-        tool: 'git',
-      });
-    });
+    await screen.findByText('demo');
+    // 操作列 stopPropagation：点「编辑」不触发行点击，工具抽屉不开。
+    fireEvent.click(findButton('编辑'));
+    expect(await screen.findByText('编辑 Env: demo')).toBeTruthy();
+    expect(screen.queryByText('工具: demo')).toBeNull();
+    // 点行打开工具抽屉：标题 + 已绑定引用可见。
+    fireEvent.click(screen.getByText('demo'));
+    expect(await screen.findByText('工具: demo')).toBeTruthy();
+    expect(screen.getByText('/agent/tools/v3/ffmpeg')).toBeTruthy();
   });
 
-  it('saves the selected env via PUT with merged body', async () => {
+  it('saves the selected env via PUT (tools preserved server-side)', async () => {
     render(<EnvsPanel onNotice={() => {}} />);
     await screen.findByText('demo');
     fireEvent.click(findButton('编辑'));
     expect(await screen.findByText('编辑 Env: demo')).toBeTruthy();
-    await waitFor(() => {
-      expect(screen.getAllByText('/agent/tools/v3/ffmpeg').length).toBeGreaterThanOrEqual(1);
-    });
+    await waitFor(() => expect(screen.getByLabelText('env-description').value).toBe(demoEnv.description));
     fireEvent.click(findButton('保存'));
     await waitFor(() => {
       expect(apiPutMock).toHaveBeenCalledWith('/api/todo/envs/demo', {
         description: '视频工具链',
-        tools: ['/agent/tools/v3/ffmpeg'],
         env_vars: { FFMPEG_PATH: '/usr/bin/ffmpeg' },
       });
     });

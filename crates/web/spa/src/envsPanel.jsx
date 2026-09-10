@@ -1,33 +1,25 @@
-import { useEvent } from './ui/editing/useEvent.js';
 // envsPanel.jsx — 菜单页「Env 管理」：朴素表格列出 env（列检索、头部新建、
-// 行内编辑/删除），编辑走抽屉（description / tools 多选 / env_vars 键值行），
-// 表下方是工具目录（已导入只读 + 可导入逐条 POST import）。
+// 行内编辑/删除），编辑走抽屉（description / env_vars 键值行；tools 由服务端
+// 部分合并语义保留）。工具跟随 env：点行（或工具数 Tag）打开右侧工具抽屉，
+// 查看/添加/移除/导入都在该抽屉内完成（见 envs/toolsDrawer.jsx）。
 // PUT /api/todo/envs/:name 在工具引用无法解析时 400 —— 服务端 error 经
 // onNotice 透出。
 
 import {
-  Button, Drawer, Form, Input, Modal, Popconfirm, Select, Space, Table, Tag, Typography,
+  Button, Drawer, Form, Input, Modal, Popconfirm, Space, Table, Tag, Typography,
 } from 'antd';
 import { useCallback, useEffect, useState } from 'react';
 import { apiDel, apiGet, apiPost, apiPut } from './api.js';
 import { PageShell } from './shell/pageShell.jsx';
 import { err } from './notice.js';
+import { useEvent } from './ui/editing/useEvent.js';
 import { useMessage } from './ui/appMessage.js';
-import { MONO_VAR } from './ui/mono.js';
 import { tableLoading, tableRows } from './ui/tableLoading.js';
+import { envFromContext } from './envs/envModel.js';
+import { EnvToolsDrawer } from './envs/toolsDrawer.jsx';
 
 const { TextArea } = Input;
 const { Text } = Typography;
-
-/// GET /api/todo/envs/:name 的「context object」归一化：{env:{...}} 包装或
-/// 裸对象都接受。
-export function envFromContext(j) {
-  if (!j || typeof j !== 'object') {
-    return null;
-  }
-  const e = j.env && typeof j.env === 'object' ? j.env : j;
-  return e && typeof e.name === 'string' ? e : null;
-}
 
 /// env_vars 对象 ⇄ 动态行数组 [[k, v], ...]。
 function varsToRows(envVars) {
@@ -43,26 +35,6 @@ function rowsToVars(rows) {
     }
   });
   return out;
-}
-
-/// tools 目录 → 多选分组 options（share = 已导入，importable = 可导入）。
-function toolGroupOptions(tools) {
-  const share = [];
-  const importable = [];
-  (tools || []).forEach((t) => {
-    if (!t || !t.ref) {
-      return;
-    }
-    if (t.source === 'importable') {
-      importable.push({ value: t.ref, label: t.ref });
-    } else {
-      share.push({ value: t.ref, label: t.ref });
-    }
-  });
-  return [
-    { label: '已导入', options: share },
-    { label: '可导入', options: importable },
-  ];
 }
 
 function CreateEnvModal({ open, onClose, onCreated, onNotice: noticeCallback }) {
@@ -125,11 +97,10 @@ function VarRows({ rows, setRows, disabled }) {
   );
 }
 
-function EnvDrawerSession({ name, tools, open, onClose, onNotice: noticeCallback, onSaved }) {
+function EnvDrawerSession({ name, open, onClose, onNotice: noticeCallback, onSaved }) {
   const onNotice = useEvent(noticeCallback);
   const msg = useMessage();
   const [description, setDescription] = useState('');
-  const [selectedTools, setSelectedTools] = useState([]);
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -150,7 +121,6 @@ function EnvDrawerSession({ name, tools, open, onClose, onNotice: noticeCallback
         if (!e) throw new Error('env 详情格式异常');
         setLoaded(true);
         setDescription(e.description || '');
-        setSelectedTools(Array.isArray(e.tools) ? e.tools : []);
         setRows(varsToRows(e.env_vars));
       })
       .catch((e) => onNotice(err('获取 env 详情失败: ' + (e && e.message))))
@@ -168,9 +138,10 @@ function EnvDrawerSession({ name, tools, open, onClose, onNotice: noticeCallback
     if (saving || !loaded) return;
     setSaving(true);
     try {
+      // 只发 description/env_vars：PUT 是部分合并，tools 由服务端保留，
+      // 绑定变更一律走工具抽屉（envs/toolsDrawer.jsx）。
       await apiPut(`/api/todo/envs/${encodeURIComponent(name)}`, {
         description,
-        tools: selectedTools,
         env_vars: rowsToVars(rows),
       });
       msg.success('已保存');
@@ -178,7 +149,6 @@ function EnvDrawerSession({ name, tools, open, onClose, onNotice: noticeCallback
         onSaved();
       }
     } catch (e) {
-      // 400 = 工具引用无法解析等，服务端 error 字段已并入 e.message
       onNotice(err('保存 env 失败: ' + (e && e.message)));
     } finally {
       setSaving(false);
@@ -206,15 +176,6 @@ function EnvDrawerSession({ name, tools, open, onClose, onNotice: noticeCallback
             onChange={(e) => setDescription(e.target.value)} />
         </div>
         <div>
-          <Text type="secondary">工具（tools）</Text>
-          <Select mode="multiple" value={selectedTools} options={toolGroupOptions(tools)}
-            onChange={setSelectedTools} placeholder="选择已导入工具；可导入项需先导入"
-            style={{ width: '100%' }} aria-label="env-tools" disabled={loading || saving} />
-          <Text type="secondary" style={{ fontSize: 12 }}>
-            选择「可导入」组的引用会在保存时被服务端 400 拒绝（工具引用无法解析），请先在下方导入。
-          </Text>
-        </div>
-        <div>
           <Text type="secondary">环境变量（env_vars）</Text>
           <VarRows rows={rows} setRows={setRows} disabled={loading || saving || !loaded} />
         </div>
@@ -223,68 +184,18 @@ function EnvDrawerSession({ name, tools, open, onClose, onNotice: noticeCallback
   );
 }
 
-function ToolsCatalog({ tools, onNotice: noticeCallback, onToolsChanged }) {
-  const onNotice = useEvent(noticeCallback);
-  const msg = useMessage();
-  const [importing, setImporting] = useState('');
-  const share = (tools || []).filter((t) => t && t.ref && t.source !== 'importable');
-  const importable = (tools || []).filter((t) => t && t.ref && t.source === 'importable');
-
-  const importTool = async (t) => {
-    setImporting(t.ref);
-    try {
-      const j = await apiPost('/api/todo/tools/import', { agent: t.agent, version: t.version, tool: t.tool });
-      msg.success('已导入: ' + ((j && j.ref) || t.ref));
-      if (onToolsChanged) {
-        onToolsChanged();
-      }
-    } catch (e) {
-      onNotice(err('导入工具失败: ' + (e && e.message)));
-    } finally {
-      setImporting('');
-    }
-  };
-
-  const impCols = [
-    { title: 'ref', dataIndex: 'ref', key: 'ref', ellipsis: true,
-      filters: importable.map((t) => ({ text: t.ref, value: t.ref })),
-      filterSearch: true,
-      onFilter: (v, t) => String(t.ref).includes(v),
-      render: (v) => <Text style={{ fontFamily: MONO_VAR, fontSize: 12 }}>{v}</Text> },
-    { title: 'agent', dataIndex: 'agent', key: 'agent', width: 120, ellipsis: true },
-    { title: 'version', dataIndex: 'version', key: 'version', width: 90, ellipsis: true },
-    { title: 'tool', dataIndex: 'tool', key: 'tool', ellipsis: true },
-    { title: '操作', key: 'op', width: 80, render: (_, t) => (
-      <Button size="small" loading={importing === t.ref} onClick={() => importTool(t)}>导入</Button>
-    ) },
-  ];
-
-  return (
-    <div style={{ marginTop: 16 }}>
-      <Space wrap style={{ marginBottom: 8 }}>
-        <Text strong>工具目录</Text>
-        <Text type="secondary">已导入（share，只读）：</Text>
-        {share.length
-          ? share.map((t) => <Tag key={t.ref}>{t.ref}</Tag>)
-          : <Text type="secondary">无</Text>}
-      </Space>
-      <Table rowKey="ref" size="small" columns={impCols} dataSource={importable}
-        pagination={false} locale={{ emptyText: '无可导入工具' }} />
-    </div>
-  );
-}
-
 export function EnvsPanel({ onNotice: noticeCallback }) {
   const onNotice = useEvent(noticeCallback);
   const msg = useMessage();
   const [envs, setEnvs] = useState([]);
-  const [tools, setTools] = useState([]);
   // env 列表拉取态：只有首屏/显式刷新会遮罩表格 —— 否则拉取中是一片空白。
-  // 变更（新建/保存/删除）后的刷新走 silent：遮罩会给表格加 pointer-events:
-  // none，把行内「编辑」「删除」一起锁死，用户刚点完却点不动下一行。
+  // 变更（新建/保存/删除/工具抽屉改动）后的刷新走 silent：遮罩会给表格加
+  // pointer-events: none，把行内「编辑」「删除」一起锁死，用户刚点完却点不动
+  // 下一行。
   const [loadingEnvs, setLoadingEnvs] = useState(true);
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState('');
+  const [toolsEnv, setToolsEnv] = useState('');
 
   const loadEnvs = useCallback(async (opts) => {
     const silent = !!(opts && opts.silent);
@@ -303,19 +214,9 @@ export function EnvsPanel({ onNotice: noticeCallback }) {
     }
   }, [onNotice]);
 
-  const loadTools = useCallback(async () => {
-    try {
-      const j = await apiGet('/api/todo/tools');
-      setTools((j && j.tools) || []);
-    } catch (e) {
-      onNotice(err('获取工具目录失败: ' + (e && e.message)));
-    }
-  }, [onNotice]);
-
   useEffect(() => {
     loadEnvs();
-    loadTools();
-  }, [loadEnvs, loadTools]);
+  }, [loadEnvs]);
 
   const deleteEnv = async (name) => {
     try {
@@ -323,6 +224,9 @@ export function EnvsPanel({ onNotice: noticeCallback }) {
       msg.success('已删除');
       if (editing === name) {
         setEditing('');
+      }
+      if (toolsEnv === name) {
+        setToolsEnv('');
       }
       loadEnvs({ silent: true });
     } catch (e) {
@@ -343,11 +247,16 @@ export function EnvsPanel({ onNotice: noticeCallback }) {
       onFilter: (v, e) => String(e.description || '').includes(v),
       render: (v) => v || <Text type="secondary">-</Text> },
     { title: '工具', key: 'tools', width: 90,
-      render: (_, e) => <Tag>{(e.tools || []).length} 个</Tag> },
+      render: (_, e) => (
+        <Tag style={{ cursor: 'pointer' }} onClick={(event) => {
+          event.stopPropagation();
+          setToolsEnv(e.name);
+        }}>{(e.tools || []).length} 个</Tag>
+      ) },
     { title: '变量', key: 'vars', width: 90,
       render: (_, e) => <Tag>{Object.keys(e.env_vars || {}).length} 个</Tag> },
     { title: '操作', key: 'ops', width: 140, render: (_, e) => (
-      <Space size={0}>
+      <Space size={0} onClick={(event) => event.stopPropagation()}>
         <Button size="small" type="link" onClick={() => setEditing(e.name)}>编辑</Button>
         <Popconfirm title={`删除 env ${e.name}？`} okText="确认删除" onConfirm={() => deleteEnv(e.name)}>
           <Button size="small" type="link" danger>删除</Button>
@@ -370,8 +279,8 @@ export function EnvsPanel({ onNotice: noticeCallback }) {
         pagination={false}
         scroll={{ x: 'max-content' }}
         locale={{ emptyText: '暂无 env' }}
+        onRow={(e) => ({ onClick: () => setToolsEnv(e.name), style: { cursor: 'pointer' } })}
       />
-      <ToolsCatalog tools={tools} onNotice={onNotice} onToolsChanged={loadTools} />
       <CreateEnvModal
         open={creating}
         onNotice={onNotice}
@@ -384,11 +293,17 @@ export function EnvsPanel({ onNotice: noticeCallback }) {
       />
       <EnvDrawer
         name={editing}
-        tools={tools}
         open={!!editing}
         onNotice={onNotice}
         onClose={() => setEditing('')}
         onSaved={() => loadEnvs({ silent: true })}
+      />
+      <EnvToolsDrawer
+        name={toolsEnv}
+        open={!!toolsEnv}
+        onNotice={onNotice}
+        onClose={() => setToolsEnv('')}
+        onChanged={() => loadEnvs({ silent: true })}
       />
     </PageShell>
   );

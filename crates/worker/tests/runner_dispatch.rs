@@ -72,7 +72,7 @@ async fn registered_runner_http_dispatch_pins_profile_and_resources_while_queued
             .status,
         400
     );
-    let spec = json!({"name":"business","steps":[{"name":"workflow","timeout_secs":20,"kind":{"type":"runner","runner":"business","agent":"act"}}]});
+    let spec = json!({"name":"business","steps":[{"name":"diagnose","timeout_secs":20,"kind":{"type":"runner","runner":"business","agent":"act"}}]});
     assert_eq!(
         fleet
             .call("POST", "/api/dag/defs", json!({"spec":spec}))
@@ -155,7 +155,7 @@ async fn registered_runner_http_dispatch_pins_profile_and_resources_while_queued
             .response(
                 "GET",
                 &format!(
-                    "/api/executions/{id}/artifact?step=workflow&file=artifacts%2Fresult.json"
+                    "/api/executions/{id}/artifact?step=diagnose&file=artifacts%2Fresult.json"
                 ),
             )
             .await;

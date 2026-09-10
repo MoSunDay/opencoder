@@ -15,6 +15,7 @@ import { ModelModal } from './modelModal.jsx';
 import { commandsForInput, replaceToken, stripLastToken } from './commandMenu.js';
 import { clearPreselect, useStore } from './store.js';
 import { err, ok, warn } from './notice.js';
+import { MONO_VAR } from './ui/mono.js';
 
 const { Text } = Typography;
 
@@ -414,7 +415,7 @@ export function ChatPanel({ onNotice }) {
         ) : null}
 
         {!nodeReady && <Alert type="info" showIcon style={{ marginBottom: 8 }} title={nodesError || (nodeSel ? '所选节点当前不可执行，请选择可用节点' : '请先选择执行节点')} />}
-        <div style={{ flex: 1, minHeight: 0, overflow: 'auto', border: '1px solid #f0f0f0', borderRadius: 8, padding: '8px 16px' }}>
+        <div style={{ flex: 1, minHeight: 0, overflow: 'auto', border: '1px solid var(--oc-border)', borderRadius: 8, padding: '8px 16px' }}>
           <Spin spinning={connecting} description="等待首个事件…">
             <TranscriptView
               turns={stream.turns}
@@ -433,7 +434,7 @@ export function ChatPanel({ onNotice }) {
             <div
               style={{
                 position: 'absolute', bottom: '100%', left: 0, right: 0, marginBottom: 4,
-                background: '#fff', border: '1px solid #f0f0f0', borderRadius: 8,
+                background: 'var(--oc-panel-bg)', border: '1px solid var(--oc-border)', borderRadius: 8,
                 boxShadow: '0 4px 16px rgba(0,0,0,0.08)', zIndex: 20,
                 maxHeight: 264, overflow: 'auto',
               }}
@@ -445,7 +446,7 @@ export function ChatPanel({ onNotice }) {
                   style={{ padding: '6px 12px', cursor: 'pointer', display: 'flex', gap: 8, alignItems: 'baseline' }}
                   onClick={() => pickCommand(entry)}
                 >
-                  <Text strong style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace' }}>{entry.cmd}</Text>
+                  <Text strong style={{ fontFamily: MONO_VAR }}>{entry.cmd}</Text>
                   <Text type="secondary" style={{ fontSize: 12 }}>{entry.desc}</Text>
                 </div>
               ))}

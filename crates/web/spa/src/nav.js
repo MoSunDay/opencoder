@@ -108,16 +108,49 @@ export function pagesOf(categoryKey) {
 
 /// antd Menu items for one category (createElement keeps this file .js).
 export function menuOf(categoryKey) {
-  return findCategory(categoryKey).items.map((i) => ({
+  return menuItemsOf(findCategory(categoryKey).items);
+}
+
+/// antd Select options for the mobile page picker of one category.
+export function selectOptionsOf(categoryKey) {
+  return selectItemsOf(findCategory(categoryKey).items);
+}
+
+/// antd Menu items for a raw item LIST (e.g. one category object handed out
+/// by visibleCategories — permission filtering happens before this point).
+export function menuItemsOf(items) {
+  return items.map((i) => ({
     key: i.page,
     label: i.menu,
     icon: createElement(i.icon),
   }));
 }
 
-/// antd Select options for the mobile page picker of one category.
-export function selectOptionsOf(categoryKey) {
-  return findCategory(categoryKey).items.map((i) => ({ value: i.page, label: i.menu }));
+/// antd Select options for the mobile picker from a raw item LIST.
+export function selectItemsOf(items) {
+  return items.map((i) => ({ value: i.page, label: i.menu }));
+}
+
+/// Permission view over the IA: admin (and the pre-probe null identity)
+/// sees everything; any other role keeps exactly one category — Agent —
+/// with a single 全部执行 item. Pure: derives from NAV_CATEGORIES rows, so
+/// icon/menu copy can never drift from the admin view.
+export function visibleCategories(identity) {
+  if (!identity || identity.role === 'admin') {
+    return NAV_CATEGORIES;
+  }
+  const agent = NAV_CATEGORIES.find((c) => c.key === 'agent');
+  return [{
+    key: agent.key,
+    label: agent.label,
+    items: [agent.items.find((i) => i.page === 'topics')],
+  }];
+}
+
+/// Flat page keys a given identity may open (menu scoping + shell routing
+/// both ask this; non-admin ⇒ exactly ['topics']).
+export function allowedPages(identity) {
+  return visibleCategories(identity).flatMap((c) => c.items.map((i) => i.page));
 }
 
 /// Sider highlight key: anything not in the active category's menu falls

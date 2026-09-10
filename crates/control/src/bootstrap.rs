@@ -103,6 +103,53 @@ pub async fn new_state_with_projects(
     }))
 }
 
+/// Record the startup token as the bootstrap admin user (idempotent). The
+/// bearer middleware authenticates the seed token regardless of this table,
+/// but the table row is what `GET /api/me` reports and what admins manage.
+/// A name collision means the server restarted with a rotated startup
+/// token: the `admin` row is re-pointed at the new digest so the previous
+/// credential dies with the rotation instead of surviving it.
+async fn seed_admin(store: &Arc<dyn Store>, token: &str) -> Result<()> {
+    let digest = opencoder_core::identity::token_hash(token);
+    if store.find_user_by_token_hash(&digest).await?.is_some() {
+        return Ok(());
+    }
+    match store
+        .create_user(
+            "admin",
+            &digest,
+            opencoder_core::identity::Role::Admin,
+            chrono::Utc::now().timestamp_millis(),
+        )
+        .await
+    {
+        Ok(_) => Ok(()),
+        Err(create_error) => {
+            // Only an admin-role `admin` row is a rotation target; a
+            // deliberately created non-admin user named "admin" is left
+            // untouched (warn and skip).
+            let rotatable = match store.find_user_by_name("admin").await {
+                Ok(Some(existing)) => Some(existing.role),
+                _ => None,
+            };
+            if rotatable == Some(opencoder_core::identity::Role::Admin) {
+                match store.update_user_token_hash("admin", &digest).await {
+                    Ok(true) => {
+                        tracing::info!("seed admin credential rotated to the new startup token");
+                        return Ok(());
+                    }
+                    other => {
+                        tracing::warn!(?other, "seed admin token rotation failed");
+                    }
+                }
+            } else {
+                tracing::warn!(%create_error, "seed admin user skipped (name already exists)");
+            }
+            Ok(())
+        }
+    }
+}
+
 pub async fn serve(
     host: String,
     port: u16,
@@ -113,6 +160,7 @@ pub async fn serve(
 ) -> Result<()> {
     let data = resolve_data_dir(&workdir, data)?;
     let state = new_state(workdir.clone(), data, None).await?;
+    seed_admin(&state.store, &token).await?;
     let config = Config::load(&workdir)?;
     if config.agent.nfs.enabled {
         crate::api_agent_nfs::start_locked(&config)
@@ -255,6 +303,68 @@ mod tests {
         assert_eq!(
             resolve_data_dir(workdir, None).unwrap(),
             opencoder_core::data_dir_for(workdir).join("server-v2")
+        );
+    }
+}
+
+#[cfg(test)]
+mod seed_admin_tests {
+    use super::*;
+    use opencoder_core::identity::{token_hash, Role};
+    use opencoder_store::Store;
+
+    async fn memory_store() -> Arc<dyn Store> {
+        Arc::new(LibsqlStore::open_memory().await.unwrap())
+    }
+
+    async fn name_of_digest(store: &Arc<dyn Store>, token: &str) -> Option<String> {
+        store
+            .find_user_by_token_hash(&token_hash(token))
+            .await
+            .unwrap()
+            .map(|user| user.name)
+    }
+
+    #[tokio::test]
+    async fn first_boot_seeds_and_re_boots_are_idempotent() {
+        let store = memory_store().await;
+        seed_admin(&store, "boot-token").await.unwrap();
+        assert_eq!(name_of_digest(&store, "boot-token").await, Some("admin".into()));
+        seed_admin(&store, "boot-token").await.unwrap();
+        assert_eq!(
+            store.list_users().await.unwrap().len(),
+            1,
+            "same-token restart must not duplicate the admin row"
+        );
+    }
+
+    #[tokio::test]
+    async fn rotating_the_startup_token_repoints_the_admin_credential() {
+        let store = memory_store().await;
+        seed_admin(&store, "first-boot-token").await.unwrap();
+        seed_admin(&store, "rotated-token").await.unwrap();
+        // The old seed credential must die with the rotation; the new one
+        // owns the row.
+        assert_eq!(name_of_digest(&store, "first-boot-token").await, None);
+        assert_eq!(name_of_digest(&store, "rotated-token").await, Some("admin".into()));
+    }
+
+    #[tokio::test]
+    async fn rotation_never_touches_a_non_admin_row_named_admin() {
+        let store = memory_store().await;
+        store
+            .create_user("admin", &token_hash("user-owned-token"), Role::User, 1)
+            .await
+            .unwrap();
+        seed_admin(&store, "seed-token").await.unwrap();
+        // The user-created row keeps its credential and role; the seed token
+        // has no row of its own (the bearer middleware still authenticates it).
+        let row = store.find_user_by_name("admin").await.unwrap().unwrap();
+        assert_eq!(row.role, Role::User);
+        assert_eq!(name_of_digest(&store, "seed-token").await, None);
+        assert_eq!(
+            name_of_digest(&store, "user-owned-token").await,
+            Some("admin".into())
         );
     }
 }

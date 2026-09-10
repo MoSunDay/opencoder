@@ -5,8 +5,10 @@
 // list when POST /api/dag/defs rejects the draft; switching JSON → 画布 is
 // blocked while the text does not parse.
 
-import { Alert, Button, Drawer, Form, Input, Segmented, Space, Typography, message } from 'antd';
+import { Alert, Button, Drawer, Form, Input, Segmented, Space, Typography } from 'antd';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMessage } from '../ui/appMessage.js';
+import { MONO_VAR } from '../ui/mono.js';
 import { CanvasEditor } from './editor/canvasEditor.jsx';
 import { parseSpecDraft, problemsFromApiError, validateSpec } from './specValidate.js';
 
@@ -40,6 +42,7 @@ function specToText(def) {
 /// back into the same draft. onSave(spec) contract unchanged: reject keeps
 /// the drawer open with problems rendered.
 export function DefEditor({ open, def, saving, onClose, onSave }) {
+  const msg = useMessage();
   const source = useRef(def);
   source.current = def;
   const recordId = def?.id || 'new';
@@ -85,7 +88,7 @@ export function DefEditor({ open, def, saving, onClose, onSave }) {
     const parsed = parseSpecDraft(text);
     if (parsed.error) {
       setProblems([parsed.error]);
-      message.warning('JSON 有误，请先修正后再切换');
+      msg.warning('JSON 有误，请先修正后再切换');
       return;
     }
     setDraft(parsed.spec);
@@ -133,7 +136,7 @@ export function DefEditor({ open, def, saving, onClose, onSave }) {
       title={def ? '编辑工作流定义' : '新建工作流定义'}
       open={open}
       onClose={() => { if (!saving) onClose(); }}
-      width="100%"
+      size="100%"
       destroyOnHidden
       footer={
         <Space style={{ float: 'right' }}>
@@ -144,7 +147,7 @@ export function DefEditor({ open, def, saving, onClose, onSave }) {
         </Space>
       }
     >
-      <Space direction="vertical" size={12} style={{ width: '100%' }}>
+      <Space orientation="vertical" size={12} style={{ width: '100%' }}>
         <Text type="secondary">
           spec 为 JSON：name / description? / steps[]，每个 step 为 name、depends_on[]、kind{' '}
           {'{type: "agent"|"wasm"|"runner", ...}'}。步骤名须为小写 slug。
@@ -179,7 +182,7 @@ export function DefEditor({ open, def, saving, onClose, onSave }) {
                 spellCheck={false}
                 onChange={onTextAreaChange}
                 placeholder="粘贴或编辑工作流 JSON"
-                style={{ fontFamily: 'SFMono-Regular, Consolas, monospace', fontSize: 12 }}
+                style={{ fontFamily: MONO_VAR, fontSize: 12 }}
               />
             </Form.Item>
           </Form>
@@ -187,7 +190,7 @@ export function DefEditor({ open, def, saving, onClose, onSave }) {
         {problems.length ? (
           <Alert
             type="error"
-            message="spec 校验未通过"
+            title="spec 校验未通过"
             description={
               <ul style={{ margin: 0, paddingLeft: 18 }}>
                 {problems.map((p, i) => (

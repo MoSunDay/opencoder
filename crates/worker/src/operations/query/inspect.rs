@@ -82,7 +82,7 @@ pub(in crate::operations) async fn inspect(
             result["runners"] =
                 super::runner::views(worker, &index, result.get("definition")).await?;
         }
-        ExecutionKind::Agent | ExecutionKind::Maintenance => {
+        ExecutionKind::Agent | ExecutionKind::Maintenance | ExecutionKind::Operator => {
             result["session"] = session_detail(worker, id).await?.body;
         }
         ExecutionKind::Todos => {

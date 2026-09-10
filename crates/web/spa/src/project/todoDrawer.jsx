@@ -15,6 +15,7 @@ import { RunStatusTag, TodoStatusTag, ExecutorTag, runKindLabel } from './labels
 import { RelationSelect } from './views/relationSelect.jsx';
 import { flattenTodos, milestoneOptions } from './model/relations.js';
 import { ExecutionDetail } from '../fleet/detail.jsx';
+import { MONO_VAR } from '../ui/mono.js';
 import { err, info, ok, warn } from '../notice.js';
 
 const { TextArea } = Input;
@@ -63,7 +64,7 @@ function RunItem({ run, executionId, onNotice, refreshRuns, openExecution }) {
           <Text
             type="secondary"
             title={run.output_ref}
-            style={{ fontFamily: 'monospace', fontSize: 12 }}
+            style={{ fontFamily: MONO_VAR, fontSize: 12 }}
           >
             {String(run.output_ref).length > 24 ? String(run.output_ref).slice(0, 24) + '…' : run.output_ref}
           </Text>
@@ -71,7 +72,7 @@ function RunItem({ run, executionId, onNotice, refreshRuns, openExecution }) {
         <Text type="secondary">会话</Text>
         {run.session_id ? (
           <>
-            <Text copyable={{ text: run.session_id }} style={{ fontFamily: 'monospace' }}>
+            <Text copyable={{ text: run.session_id }} style={{ fontFamily: MONO_VAR }}>
               {String(run.session_id).slice(0, 12)}…
             </Text>
             <Button type="link" size="small" onClick={() => openExecution(run.session_id)}>查看会话</Button>

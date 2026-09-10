@@ -1,8 +1,9 @@
 import { useEvent } from '../ui/editing/useEvent.js';
-import { Alert, Button, Form, Input, InputNumber, Select, Space, Spin, Table, Tag, Typography, message } from 'antd';
+import { Alert, Button, Form, Input, InputNumber, Select, Space, Spin, Table, Tag, Typography } from 'antd';
 import { useCallback, useEffect, useState } from 'react';
 import { apiGet, apiPut } from '../api.js';
 import { err } from '../notice.js';
+import { useMessage } from '../ui/appMessage.js';
 import { HARNESS_OPTIONS, parseEnvs } from './fields.jsx';
 
 const choices = (values) => values.map((value) => ({ value, label: value }));
@@ -10,6 +11,7 @@ const optional = (value) => value?.trim() || null;
 
 export function HarnessManagement({ onNotice: noticeCallback }) {
   const onNotice = useEvent(noticeCallback);
+  const msg = useMessage();
   const [form] = Form.useForm();
   const [dirty, setDirty] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -49,7 +51,7 @@ export function HarnessManagement({ onNotice: noticeCallback }) {
       const entry = { name: selected, settings, revision: result.revision };
       if (selected) setProfiles((rows) => rows.filter((row) => row.name !== selected).concat(entry));
       else setDefaults(entry);
-      setDirty(false); setRevision(result.revision); message.success('Codex 配置已保存，新任务将使用此版本');
+      setDirty(false); setRevision(result.revision); msg.success('Codex 配置已保存，新任务将使用此版本');
     } catch (e) { onNotice(err(`保存 Harness 配置失败：${e.message}`)); }
     finally { setSaving(false); }
   };
@@ -81,6 +83,7 @@ export function HarnessManagement({ onNotice: noticeCallback }) {
 
 export function AgentHarnessSettings({ onNotice: noticeCallback }) {
   const onNotice = useEvent(noticeCallback);
+  const msg = useMessage();
   const [profiles, setProfiles] = useState([]);
   const [agents, setAgents] = useState([]); const [loading, setLoading] = useState(false); const [saving, setSaving] = useState(null);
   const load = useCallback(async () => {
@@ -92,7 +95,7 @@ export function AgentHarnessSettings({ onNotice: noticeCallback }) {
   useEffect(() => { load(); }, [load]);
   const save = async (name, harness, profile) => {
     setSaving(name);
-    try { await apiPut(`/api/agents/${encodeURIComponent(name)}`, { harness, ...(profile !== undefined ? { harness_profile: profile } : {}) }); await load(); message.success('Agent Harness 已更新，仅影响新任务'); }
+    try { await apiPut(`/api/agents/${encodeURIComponent(name)}`, { harness, ...(profile !== undefined ? { harness_profile: profile } : {}) }); await load(); msg.success('Agent Harness 已更新，仅影响新任务'); }
     catch (e) { onNotice(err(e.message)); }
     finally { setSaving(null); }
   };

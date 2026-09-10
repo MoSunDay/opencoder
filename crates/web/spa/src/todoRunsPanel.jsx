@@ -10,7 +10,9 @@ import { apiGet, apiPost } from './api.js';
 import { openStream } from './sse.js';
 import { ExecutionDetail } from './fleet/detail.jsx';
 import { StatusTag } from './ui/statusTag.jsx';
+import { MONO_VAR } from './ui/mono.js';
 import { TimeText } from './ui/timeText.jsx';
+import { tableLoading, tableRows } from './ui/tableLoading.js';
 import { err } from './notice.js';
 
 const { Text } = Typography;
@@ -112,21 +114,36 @@ function EventsFeed({ workflowId, onNotice, onTerminal }) {
 function WorkflowDetail({ workflowId, summary, onNotice, onMutated }) {
   const [detail, setDetail] = useState(null);
   const [executionOpen, setExecutionOpen] = useState(false);
+  /// 详情（workflow + items）自己的拉取态 —— 与 TodoRunsPanel 工作流列表的
+  /// loading 是两份数据，不能共用一个旗标。
+  const [loading, setLoading] = useState(true);
 
-  const load = useCallback(async () => {
+  /// silent=true 走静默通道：遮罩 = `.ant-spin-container` 上 pointer-events:
+  /// none，行内按钮当场锁死，而变更后的刷新正是用户要点下一颗按钮的时刻。
+  const load = useCallback(async (silent) => {
+    if (!silent) {
+      setLoading(true);
+    }
     try {
       const j = await apiGet(`/api/todo/workflows/${encodeURIComponent(workflowId)}`);
       setDetail(j || null);
     } catch (e) {
-      if (onNotice) {
+      if (!silent && onNotice) {
         onNotice(err('获取工作流详情失败: ' + (e && e.message)));
+      }
+    } finally {
+      if (!silent) {
+        setLoading(false);
       }
     }
   }, [workflowId, onNotice]);
 
+  /// 终帧刷新同样静默；useCallback 稳住 EventsFeed 的 effect 依赖（否则每次轮询都重订阅）。
+  const onTerminal = useCallback(() => load(true), [load]);
+
   useEffect(() => {
     setDetail(null);
-    load();
+    load(false);
   }, [load]);
 
   const wf = (detail && detail.workflow) || null;
@@ -138,7 +155,7 @@ function WorkflowDetail({ workflowId, summary, onNotice, onMutated }) {
   const interrupt = async () => {
     try {
       await apiPost(`/api/todo/workflows/${encodeURIComponent(workflowId)}/interrupt`, {});
-      load();
+      load(true);
       if (onMutated) {
         onMutated();
       }
@@ -152,7 +169,7 @@ function WorkflowDetail({ workflowId, summary, onNotice, onMutated }) {
   const resume = async () => {
     try {
       await apiPost(`/api/todo/workflows/${encodeURIComponent(workflowId)}/resume`, {});
-      load();
+      load(true);
       if (onMutated) {
         onMutated();
       }
@@ -166,7 +183,7 @@ function WorkflowDetail({ workflowId, summary, onNotice, onMutated }) {
   const cancel = async () => {
     try {
       await apiPost(`/api/executions/${encodeURIComponent(workflowId)}/commands`, { action: 'cancel', input: {} });
-      load();
+      load(true);
       if (onMutated) onMutated();
     } catch (e) {
       if (onNotice) onNotice(err('取消失败: ' + (e && e.message)));
@@ -205,11 +222,12 @@ function WorkflowDetail({ workflowId, summary, onNotice, onMutated }) {
         ) : <Text type="secondary">加载中…</Text>}
       </Card>
       <Card size="small" title="TODO 项" style={{ marginBottom: 12 }}>
-        <Table rowKey={(r) => (r && r.todo_id) || ''} size="small" columns={itemCols}
-          dataSource={items} pagination={false} />
+        <Table className="oc-todo-items" rowKey={(r) => (r && r.todo_id) || ''} size="small" columns={itemCols}
+          dataSource={tableRows(loading, items)} pagination={false} loading={tableLoading(loading)}
+          scroll={{ x: 'max-content' }} />
       </Card>
       <Card size="small" title="事件流">
-        <EventsFeed workflowId={workflowId} onNotice={onNotice} onTerminal={load} />
+        <EventsFeed workflowId={workflowId} onNotice={onNotice} onTerminal={onTerminal} />
       </Card>
       {executionOpen && <ExecutionDetail id={workflowId} summary={{ id: workflowId, kind: 'todos', node_id: summary?.node_id, status: summary?.execution_status || summary?.status, created_at: summary?.execution_created_at || summary?.created_at }} onClose={() => setExecutionOpen(false)} onNotice={onNotice} />}
     </div>
@@ -273,7 +291,7 @@ export function TodoRunsPanel({ onNotice, focusWorkflowId, onFocusConsumed }) {
 
   const wfCols = [
     { title: 'ID', dataIndex: 'id', key: 'id', ellipsis: true,
-      render: (v) => <Tooltip title={v}><span style={{ fontFamily: 'var(--oc-mono, monospace)' }}>{String(v || '').slice(0, 16)}…</span></Tooltip> },
+      render: (v) => <Tooltip title={v}><span style={{ fontFamily: MONO_VAR }}>{String(v || '').slice(0, 16)}…</span></Tooltip> },
     { title: '状态', key: 'status', width: 170,
       render: (_, row) => <Space size={4}><Tooltip title="节点执行状态"><span><ExecutionStatusTag status={row.execution_status} /></span></Tooltip>{row.detail_error ? null : <Tooltip title="工作流状态"><span><StatusTag status={row.status} /></span></Tooltip>}</Space> },
     { title: '更新时间', dataIndex: 'updated_at', key: 'updated_at', width: 110,
@@ -285,14 +303,16 @@ export function TodoRunsPanel({ onNotice, focusWorkflowId, onFocusConsumed }) {
       <Col xs={24} lg={10}>
         <Card size="small" title="工作流" extra={<Button size="small" onClick={() => load(false)}>刷新</Button>}>
           <Table
+            className="oc-todo-runs"
             rowKey="id"
             size="small"
-            loading={loading}
+            loading={tableLoading(loading)}
             columns={wfCols}
-            dataSource={rows}
+            dataSource={tableRows(loading, rows)}
             pagination={false}
+            scroll={{ x: 'max-content' }}
             onRow={(r) => ({ onClick: () => setSelectedId(r.id), style: { cursor: 'pointer' } })}
-            rowClassName={(r) => (r && r.id === selectedId ? 'ant-table-row-selected' : '')}
+            rowClassName={(r) => (r && r.id === selectedId ? 'oc-row-selected' : '')}
           />
         </Card>
       </Col>

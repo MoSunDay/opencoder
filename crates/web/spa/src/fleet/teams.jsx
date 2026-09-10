@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiGet, apiPost } from '../api.js';
 import { PageShell } from '../shell/pageShell.jsx';
 import { ExecutionDetail } from './detail.jsx';
+import { tableLoading, tableRows } from '../ui/tableLoading.js';
 import { newId, nodeOptions } from './model.js';
 import { err } from '../notice.js';
 
@@ -10,13 +11,17 @@ export function FleetTeamsPanel({ onNotice }) {
   const [rows, setRows] = useState([]); const [nodes, setNodes] = useState([]); const [agents, setAgents] = useState([]);
   const [editing, setEditing] = useState(false); const [launch, setLaunch] = useState(null); const [detail, setDetail] = useState(null);
   const [busy, setBusy] = useState(false); const [form] = Form.useForm(); const [runForm] = Form.useForm(); const attempt = useRef(null);
+  /// 团队列表拉取态（首屏 + 保存/启动后的刷新），驱动表格 loading。
+  const [loading, setLoading] = useState(true);
   const load = useCallback(async () => {
+    setLoading(true);
     try {
       const [a, b, c] = await Promise.all([apiGet('/api/teams'), apiGet('/api/nodes'), apiGet('/api/agents')]);
       setRows(a.teams); setNodes(b.nodes);
       const entries = Array.isArray(c) ? c : (c.agents || []);
       setAgents(entries.map((a) => ({ value: a.name || a.id, label: a.name || a.id })));
     } catch (e) { onNotice(err(e.message)); }
+    finally { setLoading(false); }
   }, [onNotice]);
   useEffect(() => { load(); }, [load]);
   const edit = (row) => {
@@ -38,8 +43,8 @@ export function FleetTeamsPanel({ onNotice }) {
     finally { setBusy(false); }
   };
   return <PageShell page="team">
-    <Space style={{ marginBottom: 12 }}><Button type="primary" onClick={() => edit(null)}>创建团队</Button><Button onClick={load}>刷新</Button></Space>
-    <Table scroll={{ x: 'max-content' }} rowKey="name" dataSource={rows} columns={[
+    <Space style={{ marginBottom: 12 }}><Button type="primary" onClick={() => edit(null)}>创建团队</Button><Button onClick={() => load()}>刷新</Button></Space>
+    <Table scroll={{ x: 'max-content' }} rowKey="name" dataSource={tableRows(loading, rows)} loading={tableLoading(loading)} columns={[
       { title: '团队', dataIndex: 'name' },
       { title: '成员与职责', render: (_, row) => row.members.map((m) => <div key={m.id}><Tag>{m.agent || m.name}</Tag>{m.role}{m.node_id && ` · ${m.online ? '在线' : '离线'}`}</div>) },
       { title: '队长', dataIndex: 'captain' },

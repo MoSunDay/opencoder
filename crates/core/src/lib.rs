@@ -3,6 +3,7 @@ pub mod config;
 pub mod data_dir;
 pub mod error;
 pub mod harness;
+pub mod identity;
 pub mod json;
 pub mod message;
 pub mod net;
@@ -38,6 +39,7 @@ pub use tool_deps::{all_installed, check_tool_deps, ToolDepStatus};
 pub use tool_guard_config::ToolGuardConfig;
 
 pub use error::{CoreError, Result};
+pub use identity::{parse_role, token_hash, Identity};
 pub use message::{ContentBlock, Message, MessageUsage, Role};
 pub use net::{build_http_client, effective_proxy};
 pub use share_fs::{

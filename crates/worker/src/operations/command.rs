@@ -221,7 +221,7 @@ async fn http(
     if record.as_ref().is_some_and(|r| {
         !matches!(
             r.assignment.request.kind,
-            ExecutionKind::Agent | ExecutionKind::Maintenance
+            ExecutionKind::Agent | ExecutionKind::Maintenance | ExecutionKind::Operator
         )
     }) {
         return Ok(RpcReply::error(

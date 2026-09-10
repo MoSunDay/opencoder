@@ -1,6 +1,6 @@
 export const CREATABLE_KINDS = [
   ['agent', 'Agent'], ['team', 'Team'], ['dag', 'DAG'], ['todos', 'TODO 工作流'],
-  ['project', '项目任务'],
+  ['project', '项目任务'], ['operator', 'Operator'],
 ].map(([value, label]) => ({ value, label }));
 export const KINDS = [...CREATABLE_KINDS, { value: 'system', label: '历史系统执行' }];
 export const KIND_LABELS = Object.fromEntries(KINDS.map(({ value, label }) => [value, label]));

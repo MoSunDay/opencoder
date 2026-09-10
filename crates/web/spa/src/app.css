@@ -4,24 +4,41 @@
    dist/static/app.css by the Vite build contract. */
 
 /* Fleet palette — the CSS twin of src/theme.js (antd ThemeConfig). The two
-   halves cannot read each other (cssinjs vs raw CSS), so they are kept in
-   lockstep by hand: change a color here AND in theme.js, or neither. */
+   halves cannot read each other (cssinjs vs raw CSS, and antd pins its own
+   css vars to a .css-var-* class instead of :root), so they are kept in
+   lockstep by hand: change a color here AND in theme.js, or neither.
+   theme.test.js fails the build when the two drift apart. */
 :root {
   --oc-primary: #1677ff;
   --oc-primary-rgb: 22, 119, 255;
   --oc-primary-bg: #e6f4ff;
-  --oc-bg-layout: #f5f5f5;
+  --oc-bg-layout: #f4f6f8;
   --oc-panel-bg: #ffffff;
-  --oc-border: #f0f0f0;
-  --oc-border-strong: #d9d9d9;
-  --oc-fill-subtle: #fafafa;
+  --oc-bg-container: #ffffff;
+  --oc-border: #eef1f5;
+  --oc-border-strong: #d3dae2;
+  --oc-fill-subtle: #fafbfc;
   --oc-text: rgba(0, 0, 0, 0.88);
   --oc-text-secondary: rgba(0, 0, 0, 0.65);
   --oc-text-tertiary: #8c8c8c;
+  /* Mirrors theme.js `shadowTertiary`: antd only applies that token to
+     borderless Cards, and every Card here is outlined, so the raw-CSS
+     surfaces that do float (.fleet-sheet, .dag-node) carry it themselves. */
+  --oc-shadow-panel: 0 1px 2px rgba(16, 24, 40, 0.04),
+    0 1px 3px rgba(16, 24, 40, 0.06);
   --oc-success: #52c41a;
   --oc-success-bg: #f6ffed;
   --oc-error: #ff4d4f;
   --oc-error-bg: #fff2f0;
+  /* Transcript role accents, the DAG wasm-node icon accent + markdown heading
+     green. The -rgb twins feed rgba() washes (RoleAvatar); see theme.js
+     cssVars for why. */
+  --oc-accent-user: #13c2c2;
+  --oc-accent-user-rgb: 19, 194, 194;
+  --oc-accent-ai: #9254de;
+  --oc-accent-ai-rgb: 146, 84, 222;
+  --oc-accent-wasm: #722ed1;
+  --oc-heading: #389e0d;
   /* Monospace stack for id / uuid / session columns (raw identifiers, not
      prose). Referenced as var(--oc-mono, monospace) from inline styles. */
   --oc-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas,
@@ -43,6 +60,39 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* ===== Scrollbars: slim rounded thumb, no track. Default Chrome bars are
+   15px of chrome that fight the hairline aesthetic; 10px also hands the
+   scroll containers (fleet-content, tables, drawers) back some width. ===== */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 0, 0, 0.16) transparent;
+}
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  /* transparent border + content-box clip = 6px thumb centred in 10px */
+  background: rgba(0, 0, 0, 0.16);
+  background-clip: content-box;
+  border: 2px solid transparent;
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.3);
+  background-clip: content-box;
+}
+::-webkit-scrollbar-corner { background: transparent; }
+
+/* Keyboard focus: one consistent primary ring. Bare :focus-visible keeps
+   specificity at (0,1,0), so antd components retain their own native ring
+   and only the raw-CSS surfaces (DAG nodes, links, custom rows) gain one. */
+:focus-visible {
+  outline: 2px solid rgba(var(--oc-primary-rgb), 0.45);
+  outline-offset: 2px;
+}
+::selection {
+  background: rgba(var(--oc-primary-rgb), 0.16);
+}
+
 /* ===== App shell — light unified: white header/sider on a gray canvas.
    Colors mirror theme.js Layout tokens; the borders live here because antd
    has no header/sider border token. ===== */
@@ -58,12 +108,18 @@ body {
   gap: 24px;
   background: var(--oc-panel-bg);
   border-bottom: 1px solid var(--oc-border);
+  /* Hairline lift so the header separates from the canvas without a seam.
+     Stacked above the Sider (antd gives it z-index 1) or the shadow is
+     painted over by the sider/content that follow in DOM order. */
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.03);
+  position: relative;
+  z-index: 2;
 }
 .fleet-brand {
   color: var(--oc-text);
   font-size: 17px;
   font-weight: 700;
-  letter-spacing: 1px;
+  letter-spacing: 0.2px; /* 1px tracked the wordmark out too loosely */
   white-space: nowrap;
 }
 .fleet-header-side {
@@ -94,7 +150,7 @@ body {
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
-  margin-bottom: 16px;
+  margin-bottom: 20px;
 }
 .oc-page-heading {
   display: flex;
@@ -105,6 +161,11 @@ body {
 }
 .oc-page-title.ant-typography {
   margin: 0;
+  /* One notch under Title level={4}'s 20px: the shell title is chrome, not
+     content, and negative tracking tightens CJK-free wordmarks. */
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
 }
 .oc-page-desc {
   font-size: 13px;
@@ -128,8 +189,9 @@ body {
   box-sizing: border-box;
   background: var(--oc-panel-bg);
   border: 1px solid var(--oc-border);
-  border-radius: 8px;
-  padding: 12px;
+  border-radius: 10px; /* matches the Card borderRadiusLG = 10 token */
+  padding: 14px;
+  box-shadow: var(--oc-shadow-panel);
 }
 
 /* Transcript long-line handling inside collapsible tool blocks. */
@@ -137,6 +199,23 @@ body {
   white-space: pre-wrap;
   word-break: break-word;
   margin: 0;
+}
+
+/* Selected-row marker for the click-to-select tables (todoRunsPanel). Own
+   class on purpose: borrowing antd's internal .ant-table-row-selected ties
+   the row to checkbox-selection styling that this table does not have.
+   Scoped under the panel's own .oc-todo-runs wrapper like every other rule in
+   this sheet. !important is required because antd's generated row-background
+   and hover rules outrank a bare class selector — and the :hover twin exists
+   because in a click-to-select table the pointer is always resting on the
+   selected row, so a lone !important wash would freeze out hover feedback and
+   the row would never react. Selected 0.10 sits clearly above the rowHoverBg
+   #f5f9ff so a chosen row is distinguishable from a merely hovered one. */
+.oc-todo-runs .oc-row-selected > td {
+  background: rgba(var(--oc-primary-rgb), 0.10) !important;
+}
+.oc-todo-runs .oc-row-selected:hover > td {
+  background: rgba(var(--oc-primary-rgb), 0.16) !important;
 }
 
 .execution-messages { margin-top: 16px; }
@@ -169,7 +248,7 @@ body {
   border: 1.5px solid var(--oc-border-strong);
   background: var(--oc-fill-subtle);
   font-size: 12px;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+  box-shadow: var(--oc-shadow-panel);
 }
 .dag-node-title {
   display: flex;
@@ -310,7 +389,7 @@ body {
   padding: 0 4px;
 }
 .dag-edit-node--agent .dag-edit-node-head .anticon { color: var(--oc-primary); }
-.dag-edit-node--wasm .dag-edit-node-head .anticon { color: #722ed1; }
+.dag-edit-node--wasm .dag-edit-node-head .anticon { color: var(--oc-accent-wasm); }
 .dag-edit-node-deps {
   margin-top: 6px;
   color: var(--oc-text-secondary);
@@ -391,8 +470,31 @@ body {
 @media (max-width: 767px) {
   .fleet-sidebar { display: none; }
   .fleet-content > .fleet-mobile-nav { display: inline-flex; width: 100%; margin-bottom: 8px; }
-  .fleet-header { gap: 12px !important; padding: 0 12px !important; }
+  /* Brand (163px, nowrap) + the five status/identity/action chips need ~425px
+     at their min-content width, so a single row overflows 390px -- and Chromium
+     mobile emulation then grows the layout viewport to the overflow (413px),
+     dragging the document with it. Wrap onto two rows and stop the flex shrink
+     that squeezed the text chips into 12px slivers. antd sets the fixed height
+     and the 56px line-height inline in its cssinjs sheet, hence !important. */
+  .fleet-header {
+    height: auto !important;
+    min-height: 56px;
+    line-height: 1.5 !important;
+    flex-wrap: wrap;
+    align-content: center;
+    gap: 4px 12px !important;
+    padding: 6px 12px !important;
+  }
+  .fleet-header-side { flex-wrap: wrap; justify-content: flex-end; gap: 4px 8px; }
+  .fleet-header-side > * { flex: 0 0 auto; }
   .fleet-content { padding: 12px !important; }
+  /* Safety net for any list table that forgets scroll={{ x }}: without its own
+     horizontal scroller a table cannot shrink below its cells' min-content, so
+     it widens .fleet-content and drags the mobile nav sideways with the rows.
+     The panels all pass scroll={{ x: 'max-content' }} already (which renders
+     .ant-table-content/.ant-table-body); this only guarantees the clipping. */
+  .ant-table-content,
+  .ant-table-body { overflow-x: auto; }
   .dag-detail { height: auto; flex-direction: column; }
   .dag-detail-graph { flex-basis: auto; height: 420px; }
   .dag-detail-side { min-width: 0; max-width: none; max-height: 480px; }

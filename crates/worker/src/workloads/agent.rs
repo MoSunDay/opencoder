@@ -66,8 +66,10 @@ pub(super) async fn run(
         id,
         agent,
         input["model"].as_str().map(str::to_owned),
-        input["title"].as_str().map(str::to_owned).or_else(|| {
-            (assignment.request.kind == ExecutionKind::Maintenance).then(|| "节点维护".into())
+        input["title"].as_str().map(str::to_owned).or_else(|| match assignment.request.kind {
+            ExecutionKind::Maintenance => Some("节点维护".into()),
+            ExecutionKind::Operator => Some("Operator".into()),
+            _ => None,
         }),
         assignment.index.created_at,
     )
@@ -118,10 +120,13 @@ pub(super) async fn run(
     }
     let mut initial_driver_ensured = false;
     if let Some(prompt) = input["prompt"].as_str().filter(|s| !s.trim().is_empty()) {
-        let prompt = if assignment.request.kind == ExecutionKind::Maintenance {
-            format!("你是本节点的维护 agent。使用 node_maintenance 工具查询真实的状态、日志、资源和任务；只有用户明确要求时才修改配置或控制任务，不主动修复，不删除鉴权数据。\n\n用户指令：{prompt}")
-        } else {
-            prompt.into()
+        let prompt = match assignment.request.kind {
+            ExecutionKind::Maintenance => format!("你是本节点的维护 agent。使用 node_maintenance 工具查询真实的状态、日志、资源和任务；只有用户明确要求时才修改配置或控制任务，不主动修复，不删除鉴权数据。\n\n用户指令：{prompt}"),
+            // Operator runs the agent loop directly in the host process (no
+            // runc sandbox, no node_maintenance tool), so the preamble asks
+            // for host-level care instead of the maintenance tool contract.
+            ExecutionKind::Operator => format!("你是 Operator agent：直接运行在宿主机进程内（非 runc 容器，也非节点维护模式）。你的操作会直接影响宿主机环境，请谨慎执行，避免破坏性与不可逆命令，仅完成用户明确交代的任务。\n\n用户指令：{prompt}"),
+            _ => prompt.into(),
         };
         let reply = native(
             worker,

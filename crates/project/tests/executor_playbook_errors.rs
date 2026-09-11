@@ -1,7 +1,8 @@
 //! 端到端集成：playbook 执行器的失败路径（与 `executor_playbook.rs` 共享
 //! 场景基建）。覆盖：步骤失败坍缩（a 失败 ⇒ 下游不启动、无子 run 行、父
-//! run Failed 但独立步骤照常完成）、todos 目标本地拒绝（平台语义）、未知
-//! 剧本引用（load_spec 早期失败、无子行）。
+//! run Failed 但独立步骤照常完成、坍缩步骤在父 run 汇总中显式标记）、
+//! todos 目标本地拒绝（平台语义）、未知剧本引用（load_spec 早期失败、
+//! 无子行）。
 
 use std::{
     sync::Arc,
@@ -188,8 +189,8 @@ async fn step_rows(
 
 #[tokio::test]
 async fn playbook_step_failure_collapses_downstream() {
-    // a 指向未登记 dag 定义（子 run 行 Failed）；b 依赖 a → 坍缩（无子行）；
-    // c 独立 → Done；父 run Failed。
+    // a 指向未登记 dag 定义（子 run 行 Failed）；b 依赖 a → 坍缩（无子行，
+    // 但父 run 汇总以 blocked 标记可见）；c 独立 → Done；父 run Failed。
     let h = harness_with(vec![done("C")]).await;
     seed_playbook(
         &h,
@@ -215,6 +216,13 @@ async fn playbook_step_failure_collapses_downstream() {
         out.contains("dag definition not found"),
         "a error surfaced: {out}"
     );
+    // 汇总覆盖 spec 的每一步（a/b/c 全在场）：坍缩的 b 显式标记——它从未
+    // 启动、不在 outputs 里，排障要能看见哪些步骤因上游失败被跳过。
+    assert!(
+        out.contains("- b: blocked: 上游失败未启动"),
+        "collapsed step visible in summary: {out}"
+    );
+    assert!(out.contains("- c: done"), "c recorded: {out}");
     // 坍缩步骤没有子 run 行（从未启动）。
     let steps = step_rows(&h.projects, "t-fail").await;
     let names: Vec<&str> = steps.iter().map(|(n, _)| n.as_str()).collect();

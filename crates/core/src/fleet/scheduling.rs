@@ -173,7 +173,7 @@ mod tests {
         assert!(load(&node("n", 0.0, 0)).is_none());
         assert!(load(&node("n", f64::NAN, 0)).is_none());
         assert!(!crate::fleet::valid_id("../x"));
-        let team = crate::fleet::TeamDefinition {
+        let mut team = crate::fleet::TeamDefinition {
             name: "t".into(),
             captain: "a".into(),
             members: vec![],

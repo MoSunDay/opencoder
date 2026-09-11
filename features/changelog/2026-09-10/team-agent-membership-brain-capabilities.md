@@ -90,6 +90,41 @@ definition，worker 与 SPA 均不再消费用户录入的 role。
 4 例、`control` role_gate 3 例 + e2e `brain_api` 20 例 + `teams_dag_defs` 7 例、
 `worker` team 1 例全绿。
 
+## 评审复核 fast-follow（P3 残留收口）
+
+- **成员名 trim 归一**：`TeamDefinition::validate` 改为「先就地 canonicalize 再校验」
+  （`&mut self`：captain 与各 `member.agent` 先 trim），与 bind 侧 trim-on-store 对称。
+  此前手工 API 提交 `" act "` 可过校验，但 resolve 按精确 `==` 匹配 trim 后的分组键，
+  该成员固化空快照、worker 以 padded 名键控 session（SPA Select 路径不可达，fail-soft）。
+  归一后三个消费点（存储定义、resolve 固化、worker 成员键控）同键；仅 trim 后撞名的
+  「双胞胎」成员改按重复拒绝（此前会各键一个 session）。
+- **幻影 agent 绑定闸门（宽容策略）**：`bind`（control `api/brain.rs`）对 `kind==Agent`
+  目标查 agent 卡（自定义 `read_agent_meta` ∪ `builtin_agents`），未知名不拒——agent
+  允许后建——但 `tracing::warn!(capability, agent)` 落迹，typo 不再无痕归组；team/
+  dag/todos 目标仍自由命名不查。
+- **SPA 陈旧 fixture**：`ui/tableLoading.dom.test.jsx` 的 TEAMS/TEAM_PAGE 换当前线形状
+  （成员 `{agent, capabilities}`、`/api/brain/agents` 分组键 `agent` 而非 `name`、
+  captain ∈ members），消除惰性误导。
+- 测试：core `fleet::protocol` 单测 +1（trim 归一 + 撞名拒，2 断言组）；e2e
+  `teams_dag_defs::padded_team_member_names_normalize_before_the_freeze`（padded 成员 →
+  存储已 trim → pinned 固化非空快照）；e2e
+  `brain_api::binding_an_unknown_agent_is_kept_leniently`（未知 agent 绑定 200 保留 + 
+  聚合可见）。
+
+### fast-follow 回归记录（实跑）
+
+- 基线复跑（评审对象 `bf757d2e`+`8b260caf`，`/tmp/verify-pin` worktree，共享
+  target dir）：`cargo test --workspace --locked --no-fail-fast` **5137 通过 / 0 失败**。
+- 本 fast-follow 树全量：**5137 通过 / 3 失败**——失败全部是 `web::web_project_runs`
+  3 例（`project_app.rs` 10s 墙钟轮询 deadline），与并行构建流的 cargo 任务重叠
+  （16 核 load 40~100）时饿死；无并发 cargo 时单跑 4/4 过（2.82s、0.50s 各一次），
+  与前次记录的 load≈200 同签名，与本改动面（core fleet protocol / control
+  brain+catalog / worker create / SPA 测试 fixture）零交集。
+- 定向回归：core `fleet` 9/9；control e2e 180/180（含新增 2 例）；worker lib
+  38/38 + create 4/4 + team 1/1；SPA 全量 647/647（77 文件）。
+- `cargo clippy --workspace --all-targets -- -D warnings` 0 warning（31s 热缓存）；
+  改动块 `cargo fmt --check` 无 diff。
+
 ## 兼容与范围
 
 - Fleet 线协议版本不变（TeamDefinition 为业务负载，非 PROTOCOL_VERSION 门控字段）。

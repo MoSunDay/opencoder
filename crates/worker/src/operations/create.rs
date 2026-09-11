@@ -293,7 +293,7 @@ pub(super) fn prepare(worker: &Worker, assignment: &Assignment, legacy: bool) ->
                     )
                 }
                 ExecutionKind::Team => {
-                    let team: TeamDefinition = serde_json::from_value(
+                    let mut team: TeamDefinition = serde_json::from_value(
                         assignment
                             .definition
                             .clone()

@@ -49,6 +49,9 @@ const MAX_NAME_LEN: usize = 48;
 /// effective config (which itself depends on the active Env). The historical
 /// local path remains the fallback for installations without a share.
 pub fn envs_home() -> Option<PathBuf> {
+    if let Some(root) = crate::agent::scope::current_root() {
+        return Some(root.join("envs"));
+    }
     configured_share_dir()
         .map(|dir| dir.join("envs"))
         .or_else(|| global_opencoder_home().map(|home| home.join("envs")))

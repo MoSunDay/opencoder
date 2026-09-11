@@ -6,7 +6,9 @@
 //!
 //! Dispatch mirrors `brain.rs::dispatch` conventions (RpcReply helpers,
 //! request_id validation, idempotent replay keyed on the computed execution
-//! ids) and submits through `executions::submit` so admission, placement and
+//! ids, and a request_id fingerprint gate — the same key with different
+//! content answers 409 instead of replaying the earlier run) and submits
+//! through `executions::submit` so admission, placement and
 //! node acceptance stay identical to every other execution path. Batch
 //! submission is one-shot: 一期串行批次提交，无跨请求等待图 — the topological
 //! batches are submitted back-to-back and only reported in the response;
@@ -20,7 +22,9 @@ use axum::{
     response::Response,
     Json,
 };
-use opencoder_brain::playbook::{self, PlaybookSpec, PlaybookStep, PlaybookTarget};
+use opencoder_brain::playbook::{
+    self, PlaybookRouteKind, PlaybookSpec, PlaybookStep, PlaybookTarget,
+};
 use opencoder_core::fleet::*;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -28,9 +32,67 @@ use serde_json::{json, Value};
 use super::{error_400, error_404, error_500, response};
 use crate::AppState;
 
-/// Longest request key reused inside step execution ids (`valid_id` allows
-/// 64 bytes total; capping the key keeps room for the step-name tail).
+/// Longest request key reused inside step execution ids. The key is used
+/// VERBATIM — no truncation — so two distinct request ids can never share
+/// an execution-id head; the cap keeps the id inside `valid_id`'s 64-byte
+/// ceiling with room for the step-name tail (`valid_id` allows 64 bytes
+/// total; the auto-generated ULID fallback is exactly 26 chars).
 const MAX_KEY_CHARS: usize = 26;
+
+/// Boundedness of the in-process idempotency gate: one slot per distinct
+/// request_id, whole-map cap — a leaky client cannot grow it unbounded.
+const MAX_DISPATCH_KEYS: usize = 512;
+
+/// Request-scoped dispatch fingerprints: a request_id reused with a
+/// different dispatch (playbook, situation or node) is a client bug and
+/// answers 409 instead of silently replaying the earlier executions.
+pub struct PlaybookGate {
+    states: tokio::sync::Mutex<std::collections::HashMap<String, String>>,
+}
+
+impl Default for PlaybookGate {
+    fn default() -> Self {
+        Self {
+            states: tokio::sync::Mutex::new(std::collections::HashMap::new()),
+        }
+    }
+}
+
+impl PlaybookGate {
+    /// Claim one request_id for a dispatch fingerprint. Same fingerprint
+    /// (idempotent retry) claims again; a different fingerprint is a 409;
+    /// a fresh key on a full map is a 503 (retry later, never an eviction).
+    pub async fn claim(&self, request_id: &str, fingerprint: &str) -> Result<(), RpcReply> {
+        let mut states = self.states.lock().await;
+        if states
+            .get(request_id)
+            .is_some_and(|seen| seen != fingerprint)
+        {
+            return Err(RpcReply::error(
+                409,
+                "request_id already dispatched different content; use a new request_id",
+            ));
+        }
+        if !states.contains_key(request_id) && states.len() >= MAX_DISPATCH_KEYS {
+            return Err(RpcReply::error(
+                503,
+                "playbook idempotency gate is at capacity; retry later",
+            ));
+        }
+        states.insert(request_id.to_string(), fingerprint.to_string());
+        Ok(())
+    }
+}
+
+/// Dispatch fingerprint: one digest over the canonical
+/// `{playbook}\u{1}{situation}\u{1}{node}` tuple — a request_id reused with
+/// any of those changed is a client bug, not an idempotent retry.
+fn dispatch_fingerprint(id: &str, situation: &str, node_id: Option<&str>) -> String {
+    opencoder_brain::situation_digest(&format!(
+        "{id}\u{1}{situation}\u{1}{}",
+        node_id.unwrap_or("")
+    ))
+}
 
 #[derive(Debug, Default, Deserialize)]
 pub struct DispatchBody {
@@ -60,8 +122,17 @@ pub async fn dispatch(
     Json(body): Json<DispatchBody>,
 ) -> Response {
     if let Some(request_id) = body.request_id.as_deref() {
-        if !valid_id(request_id) || request_id.len() > 48 {
+        if !valid_id(request_id) {
             return error_400("invalid request_id".into());
+        }
+        // The key lands in every step execution id verbatim, so a longer
+        // key would have to be truncated — which mints identical ids for
+        // distinct prefixes. The cap makes that class of collision
+        // unrepresentable instead.
+        if request_id.len() > MAX_KEY_CHARS {
+            return error_400(format!(
+                "request_id must be at most {MAX_KEY_CHARS} chars to keep step execution ids collision-free"
+            ));
         }
     }
     if body.node_id.as_deref().is_some_and(|node| !valid_id(node)) {
@@ -76,6 +147,30 @@ pub async fn dispatch(
     };
     if let Err(errs) = playbook::validate(&spec) {
         return error_500(format!("stored playbook invalid: {}", errs.join("; ")));
+    }
+    // An empty situation would silently substitute "" into every
+    // `{situation}` placeholder and dispatch executions with an empty
+    // prompt; playbooks whose prompts never reference the placeholder
+    // dispatch fine without one.
+    if situation.trim().is_empty()
+        && spec
+            .steps
+            .iter()
+            .any(|step| step.prompt.contains("{situation}"))
+    {
+        return error_400(
+            "situation must not be empty when a step prompt references {situation}".into(),
+        );
+    }
+    // Same request_id, different dispatch content (playbook, situation or
+    // node) is a client bug: claim it before computing/replaying requests
+    // so the earlier dispatch's executions are never presented as this
+    // request's result. Invalid keys/specs above still win.
+    if let Some(request_id) = body.request_id.as_deref() {
+        let fingerprint = dispatch_fingerprint(&id, &situation, body.node_id.as_deref());
+        if let Err(reply) = state.playbook_gate.claim(request_id, &fingerprint).await {
+            return response(reply);
+        }
     }
 
     let batches = topo_batches(&spec);
@@ -133,10 +228,13 @@ pub async fn dispatch(
 }
 
 /// 一期 manual fallback for message triggers: embed the inbound text plus
-/// every message trigger's `match_text` through the brain runtime and report
-/// the playbooks whose trigger fires (`trigger::scan` does the pure filter).
-/// An embed outage is a 502 — the scan never silently pretends nothing
-/// matched. Auto-scanning inbound messages lands 二期.
+/// every message trigger's `match_text` through the brain runtime — ONE
+/// batched `embed_many` round-trip, not N+1 `embed_one` calls — and report
+/// the playbooks whose trigger fires. Specs are parsed once here because
+/// `trigger::scan` would re-decode every `spec_json` a second time; the
+/// pure filter stays in the brain crate for its unit tests. An embed
+/// outage is a 502 — the scan never silently pretends nothing matched.
+/// Auto-scanning inbound messages lands 二期.
 pub async fn trigger_scan(
     State(state): State<Arc<AppState>>,
     Json(body): Json<TriggerScanBody>,
@@ -149,40 +247,53 @@ pub async fn trigger_scan(
         Ok(records) => records,
         Err(error) => return error_500(error.to_string()),
     };
-    let incoming = match state.brain.embed_one(text) {
-        Ok(emb) => emb,
+    // Parse each spec ONCE (corrupt rows → None, skipped — fail-open, a
+    // corrupt row must not take the scan down).
+    let parsed: Vec<_> = records
+        .iter()
+        .map(|record| {
+            (
+                record,
+                serde_json::from_str::<PlaybookSpec>(&record.spec_json).ok(),
+            )
+        })
+        .collect();
+    // Incoming text first, then every parseable Message trigger's
+    // match_text in record order; `embed_many` preserves input order.
+    let texts: Vec<String> = std::iter::once(text.to_string())
+        .chain(parsed.iter().filter_map(|(_, spec)| {
+            spec.as_ref()
+                .and_then(|spec| playbook::trigger::match_text(&spec.trigger).map(str::to_string))
+        }))
+        .collect();
+    let embeddings = match state.brain.embed_many(&texts) {
+        Ok(vecs) => vecs,
         Err(error) => return response(embed_error(error)),
     };
-    let mut similarities: BTreeMap<String, Option<f64>> = BTreeMap::new();
-    for record in &records {
-        let Ok(spec) = serde_json::from_str::<PlaybookSpec>(&record.spec_json) else {
+    let (incoming, match_embs) = embeddings.split_first().expect("input text always embeds");
+    let mut match_embs = match_embs.iter();
+    let mut matches = Vec::new();
+    for (record, spec) in &parsed {
+        let Some(spec) = spec else {
             continue; // corrupt rows are skipped, not fatal
         };
-        let Some(match_text) = playbook::trigger::match_text(&spec.trigger) else {
-            continue; // manual triggers never auto-fire
-        };
-        let emb = match state.brain.embed_one(match_text) {
-            Ok(emb) => emb,
-            Err(error) => return response(embed_error(error)),
-        };
-        similarities.insert(
-            record.id.clone(),
-            playbook::trigger::cosine_similarity(&incoming, &emb),
-        );
-    }
-    let matched = playbook::trigger::scan(&records, |record| {
-        similarities.get(&record.id).copied().flatten()
-    });
-    response(RpcReply::ok(json!({
-        "ok": true,
-        "matches": matched
-            .iter()
-            .map(|record| json!({
+        // The iterator walks in lockstep with the chained match_texts
+        // above, so every Message trigger pairs with its own embedding.
+        let similarity = playbook::trigger::match_text(&spec.trigger).and_then(|_| {
+            let emb = match_embs.next().expect("embed_many preserves input order");
+            playbook::trigger::cosine_similarity(incoming, emb)
+        });
+        if playbook::trigger::fires(&spec.trigger, similarity) {
+            matches.push(json!({
                 "playbook_id": record.id,
                 "name": record.name,
-                "similarity": similarities.get(&record.id).cloned().flatten(),
-            }))
-            .collect::<Vec<_>>(),
+                "similarity": similarity,
+            }));
+        }
+    }
+    response(RpcReply::ok(json!({
+        "ok": true,
+        "matches": matches,
     })))
 }
 
@@ -217,9 +328,10 @@ fn topo_batches(spec: &PlaybookSpec) -> Vec<Vec<&PlaybookStep>> {
 }
 
 /// Map one step's target onto an executable (kind, target) pair. Direct
-/// targets pass through; brain targets resolve the control-plane
-/// `capability_target` binding (missing binding → default agent "act",
-/// mirroring `brain.rs::plan`), and non-executable kinds are a 400.
+/// targets pass through; brain targets honor an inline route first and
+/// otherwise resolve the control-plane `capability_target` binding (missing
+/// binding → default agent "act", mirroring `brain.rs::plan`), and
+/// non-executable kinds are a 400.
 async fn resolve_target(
     state: &AppState,
     step: &PlaybookStep,
@@ -229,7 +341,21 @@ async fn resolve_target(
         PlaybookTarget::Team { team } => Ok((ExecutionKind::Team, team.clone())),
         PlaybookTarget::Dag { dag } => Ok((ExecutionKind::Dag, dag.clone())),
         PlaybookTarget::Todos { workflow } => Ok((ExecutionKind::Todos, workflow.clone())),
-        PlaybookTarget::Brain { capability_id } => {
+        PlaybookTarget::Brain {
+            capability_id,
+            route,
+        } => {
+            // The inline route is the cross-end determinism channel: it
+            // pins one executor for every end and overrides the
+            // environment's `capability_target` binding. All three route
+            // kinds are directly executable.
+            if let Some(route) = route {
+                return Ok(match route.kind {
+                    PlaybookRouteKind::Agent => (ExecutionKind::Agent, route.ref_.clone()),
+                    PlaybookRouteKind::Team => (ExecutionKind::Team, route.ref_.clone()),
+                    PlaybookRouteKind::Dag => (ExecutionKind::Dag, route.ref_.clone()),
+                });
+            }
             let target: CapabilityTarget = match state
                 .fleet
                 .definition("capability_target", capability_id)
@@ -258,11 +384,14 @@ async fn resolve_target(
 }
 
 /// Deterministic per-request execution id: `{kind}-pbk-{key}-{step}` (the
-/// kind prefix is `CreateExecution::validate`'s contract). The key is capped
-/// so the id stays inside `valid_id`'s 64-byte ceiling; when the step name
-/// must shrink, a short hash of the full name keeps sibling steps distinct.
+/// kind prefix is `CreateExecution::validate`'s contract). The key is used
+/// VERBATIM — the caller guarantees `key.len() <= MAX_KEY_CHARS` (the
+/// handler's request_id validation), so distinct keys can never share an id
+/// head and the id stays inside `valid_id`'s 64-byte ceiling; when the step
+/// name must shrink, a short hash of the full name keeps sibling steps
+/// distinct.
 fn step_execution_id(kind: ExecutionKind, key: &str, step: &str) -> String {
-    let key = &key[..key.len().min(MAX_KEY_CHARS)];
+    debug_assert!(key.len() <= MAX_KEY_CHARS, "key must be pre-validated");
     let head = format!("{}-pbk-{}-", kind.prefix(), key);
     let budget = 64usize.saturating_sub(head.len());
     let tail = if step.len() <= budget {
@@ -377,13 +506,51 @@ mod tests {
             step_execution_id(ExecutionKind::Agent, "req-1", "fetch")
         );
         assert!(valid_id(&base));
+        // The key is embedded verbatim, so a full-budget (26-char) key is
+        // recognizable in the id and distinct keys never collide.
+        let key = "k".repeat(MAX_KEY_CHARS);
+        let id = step_execution_id(ExecutionKind::Todos, &key, "fetch");
+        assert!(id.starts_with(&format!("todos-pbk-{key}-")), "{id}");
+        assert!(valid_id(&id), "{id}");
         let long = "s".repeat(80);
-        let id = step_execution_id(ExecutionKind::Todos, &"k".repeat(48), &long);
+        let id = step_execution_id(ExecutionKind::Todos, &key, &long);
         assert!(valid_id(&id), "{id}");
         assert_ne!(
             id,
-            step_execution_id(ExecutionKind::Todos, &"k".repeat(48), &format!("{}x", long)),
+            step_execution_id(ExecutionKind::Todos, &key, &format!("{}x", long)),
             "hash tail keeps sibling steps distinct"
         );
+    }
+
+    #[tokio::test]
+    async fn playbook_gate_replays_same_content_and_rejects_changes() {
+        let gate = PlaybookGate::default();
+        gate.claim("r1", "f1").await.unwrap();
+        gate.claim("r1", "f1").await.unwrap(); // idempotent retry re-claims
+        let conflict = gate.claim("r1", "f2").await.unwrap_err();
+        assert_eq!(conflict.status, 409, "{:?}", conflict.body);
+    }
+
+    #[tokio::test]
+    async fn playbook_gate_answers_503_at_capacity() {
+        let gate = PlaybookGate::default();
+        gate.claim("kept", "f").await.unwrap();
+        // "kept" occupies slot 512 already, so exactly 511 more keys fit.
+        for i in 0..MAX_DISPATCH_KEYS - 1 {
+            gate.claim(&format!("k{i}"), "f").await.unwrap();
+        }
+        let full = gate.claim("overflow", "f").await.unwrap_err();
+        assert_eq!(full.status, 503, "{:?}", full.body);
+        // Known keys are never evicted: the same fingerprint still claims.
+        gate.claim("kept", "f").await.unwrap();
+    }
+
+    #[test]
+    fn dispatch_fingerprint_covers_playbook_situation_and_node() {
+        let base = dispatch_fingerprint("pbk", "s1", Some("node-1"));
+        assert_eq!(base, dispatch_fingerprint("pbk", "s1", Some("node-1")));
+        assert_ne!(base, dispatch_fingerprint("pbk-2", "s1", Some("node-1")));
+        assert_ne!(base, dispatch_fingerprint("pbk", "s2", Some("node-1")));
+        assert_ne!(base, dispatch_fingerprint("pbk", "s1", None));
     }
 }

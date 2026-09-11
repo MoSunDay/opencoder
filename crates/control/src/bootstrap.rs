@@ -96,6 +96,7 @@ pub async fn new_state_with_projects(
         hub,
         brain,
         brain_gate: Default::default(),
+        playbook_gate: Default::default(),
         admission,
         placement: tokio::sync::Mutex::new(()),
     }))

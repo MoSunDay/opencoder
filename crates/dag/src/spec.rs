@@ -70,7 +70,11 @@ pub enum StepKind {
     },
     /// Run a WebAssembly module on the node. `command` is the launch
     /// command: `"<module.wasm> [args...]"` (whitespace-split; the module
-    /// path is relative to the run's context root). Default sandbox is the
+    /// path is relative to the run's context root). The module token may
+    /// pin an explicit pool version — `tool@v3.wasm` freezes version 3 of
+    /// the `tool` pool module at accept time, while plain `tool.wasm`
+    /// takes the pool `current` (see the `opencode-dag-wasm` token
+    /// grammar). Default sandbox is the
     /// embedded wasm runtime; [`SandboxMode::Runc`] wraps the step in an OCI
     /// container (`runc run`) with the run directory bind-mounted at
     /// `/workspace/context`.

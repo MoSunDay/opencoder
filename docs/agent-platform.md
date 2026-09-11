@@ -65,6 +65,14 @@ mount -t nfs -o ro,vers=3,tcp,port=<port>,mountport=<port>,nolock,soft,retrans=1
 
 Server 的 NFS 导出支持完整深层资源路径，短路径句柄保持兼容，长路径句柄在导出重启后可恢复。目录读取失败明确返回错误，不以漏文件的列表代替成功。
 
+DAG wasm 模块池是第二路只读导出：Server 侧 `dag.nfs.enabled` 开启（默认 `127.0.0.1:2050`、只读，导出根为 `dag.wasm_dir` 或数据目录默认 `<data>/dag/wasm`）。节点用同样的只读参数挂载后，在 `opencoder.json` 设置 `dag.wasm_dir` 指向挂载点：
+
+```bash
+mount -t nfs -o ro,vers=3,tcp,port=2050,mountport=2050,nolock,soft,retrans=1,timeo=50,actimeo=0,lookupcache=none server:/ /mnt/opencoder-dag-wasm
+```
+
+该路径不做挂载表强制校验：未配置时 wasm 模块维持 out-of-band 投放；配置后节点受理 DAG 时把 spec 引用的池模块冻结进 `<workflow_root>/_modules/`（`tool.wasm` 取 current，`tool@v3.wasm` 取显式版本），池缺名或缺该版本视为 out-of-band 跳过，导出内容损坏（sha256 不符）则拒绝受理。发布/回滚只影响之后的新受理，不影响已接受 run；本机部署可参照 agents 挂载单元模板复制第二路挂载。
+
 本机部署可使用 `scripts/platform/systemd/` 的只读挂载单元及 Agent 依赖配置；跨主机部署调整 `What` 为实际 Server。每个挂载点只保留一个挂载，关闭目录与属性缓存使资源发布及时对新任务生效。回滚不支持长句柄的旧 Server 时，先停止依赖该挂载的 Node，再受控重新挂载。
 
 每次新执行复制当前版本到节点资源快照，包含实际文件。显式资源源路径消失或复制失败时拒绝接受，不生成空快照；只有未配置资源的内置 Agent 可以使用空资源池。资源后续发布、回滚或移除不会改变已接受的执行。缺失引用、不可读资源和版本内符号链接在接受前报错。已有执行的继续或恢复使用已固定快照，NFS 断开不阻止这些操作；新执行需要共享目录可用。仅使用内置 agent 时可以不配置共享目录。
@@ -107,7 +115,7 @@ Server 的 NFS 导出支持完整深层资源路径，短路径句柄保持兼�
 
 真实 NFS 需要验证只读写入拒绝、版本资源快照，以及卸载后旧执行继续和新执行拒绝。依赖宿主权限的 NFS/runc 用例保留 manual 标记，验收记录必须对应当前执行后端和实际节点环境。
 
-DAG 的非 Agent 步骤为 WebAssembly WASI 命令模块。默认 `sandbox: in_process` 使用内嵌 wasmtime，通过 epoch deadline 处理取消和超时，无需单独安装 wasmtime CLI。`sandbox: runc` 需要节点上的 runc 和 `<workflow_root>/rootfs` 中可运行的静态 wasmtime 目录；缺失时报错，不回退到内嵌模式。每个 bundle 复制独立运行时目录并在重试中复用，rootfs 只读挂载，run 目录挂至 `/workspace/context`。模块读取 `OPENCODER_STEP_CONTEXT` 指向的 `context.json`，可写 `output.json` 返回结构化结果；不存在 `internal-python-step` 或 RustPython 执行入口。详见 [DAG 运行时](../agents/dag-runtime/index.md)。
+DAG 的非 Agent 步骤为 WebAssembly WASI 命令模块。默认 `sandbox: in_process` 使用内嵌 wasmtime，通过 epoch deadline 处理取消和超时，无需单独安装 wasmtime CLI。`sandbox: runc` 需要节点上的 runc 和 `<workflow_root>/rootfs` 中可运行的静态 wasmtime 目录；缺失时报错，不回退到内嵌模式。每个 bundle 复制独立运行时目录并在重试中复用，rootfs 只读挂载，run 目录挂至 `/workspace/context`。模块读取 `OPENCODER_STEP_CONTEXT` 指向的 `context.json`，可写 `output.json` 返回结构化结果；不存在 `internal-python-step` 或 RustPython 执行入口。wasm 模块经 Server 模块池发布（`/api/dag/wasm` + 第二路 NFS 只读导出），节点配置 `dag.wasm_dir` 后受理时冻结到 `_modules/`，spec 中 `tool@v3.wasm` 形态可显式固定版本。详见 [DAG 运行时](../agents/dag-runtime/index.md) 与 [dag-wasm 模块](../agents/dag-wasm/index.md)。
 
 ## 发布与回滚
 

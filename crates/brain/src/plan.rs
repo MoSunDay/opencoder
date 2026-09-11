@@ -282,6 +282,9 @@ fn normalize(v: &mut [f32]) {
 /// zero norms are errors, not silently-clamped values). `pub(crate)` so the
 /// playbook trigger scan reuses the exact same arithmetic (see
 /// `playbook::trigger::cosine_similarity`).
+// The negated `> 0.0` comparison is deliberate: NaN never passes it, so the
+// guard also rejects NaN-poisoned vectors (fail-closed one layer earlier).
+#[allow(clippy::neg_cmp_op_on_partial_ord)]
 pub(crate) fn cosine(a: &[f32], b: &[f32]) -> Result<f64> {
     if a.len() != b.len() {
         bail!("vector dimension mismatch: {} vs {}", a.len(), b.len());
@@ -295,8 +298,27 @@ pub(crate) fn cosine(a: &[f32], b: &[f32]) -> Result<f64> {
         nb += (*y as f64) * (*y as f64);
     }
     let denom = na.sqrt() * nb.sqrt();
-    if denom <= 0.0 {
-        bail!("cosine over a zero vector");
+    // NaN components fold the norms into NaN, and NaN never passes `> 0.0`,
+    // so poisoned vectors are rejected here — fail-closed one layer earlier
+    // (instead of leaking Some(NaN) into `fires`).
+    if !(denom > 0.0) {
+        bail!("cosine over a zero-or-non-finite vector");
     }
     Ok(dot / denom)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cosine_rejects_nan_and_zero_vectors() {
+        // A NaN component poisons the norms: NaN never passes `> 0.0`, so
+        // the guard rejects it instead of leaking Some(NaN) similarity.
+        assert!(cosine(&[f32::NAN, 1.0], &[1.0, 0.0]).is_err());
+        assert!(cosine(&[1.0, 0.0], &[f32::NAN, 1.0]).is_err());
+        assert!(cosine(&[0.0, 0.0], &[1.0, 0.0]).is_err());
+        assert_eq!(cosine(&[1.0, 0.0], &[1.0, 0.0]).unwrap(), 1.0);
+        assert_eq!(cosine(&[1.0, 0.0], &[0.0, 1.0]).unwrap(), 0.0);
+    }
 }

@@ -15,9 +15,10 @@ pub mod topology;
 pub mod trigger;
 
 pub use spec::{
-    render_prompt, validate, validate_draft, PlaybookInput, PlaybookOrigin, PlaybookSpec,
-    PlaybookStep, PlaybookTarget, PlaybookTrigger, MAX_CHAIN_DEPTH, MAX_NAME_CHARS,
-    MAX_PLAYBOOK_NAME_CHARS, MAX_PROMPT_CHARS, MAX_STEPS, MAX_WIDTH, SCHEMA_VERSION,
+    render_prompt, validate, validate_draft, PlaybookInput, PlaybookOrigin, PlaybookRoute,
+    PlaybookRouteKind, PlaybookSpec, PlaybookStep, PlaybookTarget, PlaybookTrigger,
+    MAX_CHAIN_DEPTH, MAX_ID_CHARS, MAX_MATCH_TEXT_CHARS, MAX_NAME_CHARS, MAX_PLAYBOOK_NAME_CHARS,
+    MAX_PROMPT_CHARS, MAX_STEPS, MAX_TARGET_REF_CHARS, MAX_WIDTH, SCHEMA_VERSION,
 };
 pub use topology::{chain_depth, collapse_blocked, max_width, ready_steps, topo_order};
 pub use trigger::{cosine_similarity, fires, match_text, scan, threshold};

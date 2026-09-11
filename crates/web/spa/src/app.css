@@ -132,6 +132,14 @@ body {
   background: var(--oc-panel-bg);
   border-right: 1px solid var(--oc-border);
 }
+.fleet-sidebar.ant-layout-sider-collapsed .fleet-nav-category {
+  visibility: hidden;
+  pointer-events: none;
+}
+.fleet-nav-toggle {
+  margin: 8px 8px 0;
+  width: calc(100% - 16px);
+}
 .fleet-content {
   padding: 20px;
   min-width: 0;

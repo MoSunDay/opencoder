@@ -37,14 +37,14 @@ async fn drain_aggregate_counts_active_executions_until_settled() {
 }
 
 #[tokio::test]
-async fn reopen_while_open_short_circuits_without_node_round_trip() {
+async fn reopen_while_open_reconciles_online_nodes() {
     let h = Harness::new().await;
-    // DELETE on an already-open server answers 200 with an empty fan-out: no
-    // node is asked anything, so `nodes` stays [].
+    // DELETE on an already-open server still reconciles online nodes. This
+    // repairs a node that persisted Frozen during its previous shutdown.
     let (status, body) = h.req(Method::DELETE, "/api/admin/drain", None).await;
     assert_eq!(status, 200, "{body}");
     assert_eq!(body["server"]["mode"], json!("open"));
-    assert_eq!(body["nodes"], json!([]));
+    assert_eq!(body["nodes"][0]["body"]["mode"], json!("open"));
     assert_eq!(body["offline_nodes"], json!([]));
 }
 

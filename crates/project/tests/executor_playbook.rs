@@ -1,7 +1,8 @@
 //! 端到端集成：playbook 执行器的成功路径（本地剧本编排轨，brain 双轨
 //! 调度落地端，真 store + MockChatClient）。覆盖：串行链按拓扑序执行并逐段
 //! 落子 run 行、菱形依赖并发调度（b/c 同批、d 收口）、brain 钉住能力步骤
-//! 经派发交接落到默认路由（无 brain 运行时亦可跑）。失败路径见
+//! 经派发交接落到默认路由（无 brain 运行时亦可跑）、brain 内联路由步骤
+//! 跨端确定性解析（路由即执行器，不经环境绑定）。失败路径见
 //! `executor_playbook_errors.rs`。
 
 use std::{
@@ -10,14 +11,16 @@ use std::{
 };
 
 use opencoder_brain::playbook::{
-    PlaybookOrigin, PlaybookSpec, PlaybookStep, PlaybookTarget, PlaybookTrigger,
+    PlaybookOrigin, PlaybookRoute, PlaybookRouteKind, PlaybookSpec, PlaybookStep, PlaybookTarget,
+    PlaybookTrigger,
 };
 use opencoder_llm::{ChatStream, LlmEvent, MockChatClient};
 use opencoder_project::ProjectService;
 use opencoder_store::{
-    BrainPlaybookRecord, LibsqlStore, ProjectExecutorKind, ProjectStore, ProjectTodoRecord,
-    ProjectTodoRunKind, ProjectTodoRunStatus, ProjectTodoStatus, Store,
+    BrainPlaybookRecord, DagDefRecord, LibsqlStore, ProjectExecutorKind, ProjectStore,
+    ProjectTodoRecord, ProjectTodoRunKind, ProjectTodoRunStatus, ProjectTodoStatus, Store,
 };
+use serde_json::json;
 
 fn done(text: &str) -> Vec<LlmEvent> {
     vec![LlmEvent::Completed {
@@ -296,6 +299,7 @@ async fn playbook_brain_step_routes_via_handoff_without_runtime() {
                 depends_on: vec![],
                 target: PlaybookTarget::Brain {
                     capability_id: "cap-7".into(),
+                    route: None,
                 },
                 prompt: "用能力处理 {situation}".into(),
             }],
@@ -319,4 +323,64 @@ async fn playbook_brain_step_routes_via_handoff_without_runtime() {
     let snap: serde_json::Value =
         serde_json::from_str(child.input_snapshot.as_deref().unwrap()).unwrap();
     assert!(snap["prompt"].as_str().unwrap().contains("整理项目结构"));
+}
+
+/// 单步 agent 工作流 spec（内联路由 Dag 目标的已登记定义体）。
+fn one_step_dag_spec() -> String {
+    json!({"name":"项目单步","steps":[{"name":"run","kind":{"type":"agent","prompt":"输出 done"}}]})
+        .to_string()
+}
+
+#[tokio::test]
+async fn playbook_brain_step_inline_route_is_deterministic() {
+    // brain 步骤携带内联路由：本地解析不经路由表/brain 运行时（无路由表
+    // 时缺省会落到 Agent），路由即执行器——同一 spec 与控制面解析出相同
+    // 目标；能力 id 仅作溯源随行。路由目标选 Dag（种子最便宜：一条已登
+    // 记 dag 定义 + 一个 agent 脚本），子行 executor_kind==Dag 即证路由
+    // 压过缺省。
+    let h = harness_with(vec![done("done")]).await;
+    h.store
+        .upsert_dag_def(&DagDefRecord {
+            id: "dag-def-inline".into(),
+            name: "项目单步".into(),
+            spec_json: one_step_dag_spec(),
+            created_at: 1000,
+            updated_at: 1000,
+        })
+        .await
+        .unwrap();
+    seed_playbook(
+        &h,
+        &spec_of(
+            "pb-brain-route",
+            vec![PlaybookStep {
+                name: "cap".into(),
+                depends_on: vec![],
+                target: PlaybookTarget::Brain {
+                    capability_id: "cap-9".into(),
+                    route: Some(PlaybookRoute {
+                        kind: PlaybookRouteKind::Dag,
+                        ref_: "dag-def-inline".into(),
+                    }),
+                },
+                prompt: "用能力处理 {situation}".into(),
+            }],
+        ),
+    )
+    .await;
+    seed_todo(&h, "t-brain-route", "pb-brain-route").await;
+
+    let run_id = h.service.start_execute("t-brain-route").await.unwrap();
+    let run = wait_run_done(&h.projects, &run_id).await;
+
+    assert_eq!(run.status, ProjectTodoRunStatus::Done);
+    let steps = step_rows(&h.projects, "t-brain-route").await;
+    assert_eq!(steps.len(), 1);
+    let child = &steps[0].1;
+    // 子行按「内联路由解析出的执行器」留痕：Dag（路由钉死，非缺省
+    // Agent），capability_id 仍作溯源、无计划 id。
+    assert_eq!(child.executor_kind, ProjectExecutorKind::Dag);
+    assert_eq!(child.capability_id.as_deref(), Some("cap-9"));
+    assert_eq!(child.plan_id, None);
+    assert_eq!(child.status, ProjectTodoRunStatus::Done);
 }

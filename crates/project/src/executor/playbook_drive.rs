@@ -230,13 +230,24 @@ impl Schedule {
     }
 }
 
-/// 汇总输出：按拓扑序每步一行 `- {name}: {status}[: {excerpt ≤200 字符}]`。
+/// 汇总输出：按拓扑序覆盖 spec 的每一步（不只 `outputs` 里出现过的），
+/// 每步一行 `- {name}: {status}[: {excerpt ≤200 字符}]`。被上游失败坍缩
+/// 的步骤以显式标记出现（`blocked: 上游失败未启动`）——它们从未启动、
+/// 不在 `outputs` 里，排障时才可见哪些步骤因上游失败被跳过。
 fn summarize(
     spec: &PlaybookSpec,
     outputs: &BTreeMap<String, (ProjectTodoRunStatus, Option<String>)>,
 ) -> String {
     let order =
         topo_order(spec).unwrap_or_else(|_| spec.steps.iter().map(|s| s.name.clone()).collect());
+    // 失败集：outputs 里状态为 Failed 的步骤（含启动即失败的），坍缩集由
+    // 它传递闭包得出（与调度循环同一纯函数）。
+    let failed: BTreeSet<String> = outputs
+        .iter()
+        .filter(|(_, (status, _))| *status == ProjectTodoRunStatus::Failed)
+        .map(|(name, _)| name.clone())
+        .collect();
+    let blocked = collapse_blocked(spec, &failed);
     let mut lines = vec!["剧本步骤结果：".to_string()];
     for name in order {
         if let Some((status, output)) = outputs.get(&name) {
@@ -246,6 +257,11 @@ fn summarize(
                 line.push_str(&format!(": {excerpt}"));
             }
             lines.push(line);
+        } else if blocked.contains(&name) {
+            lines.push(format!("- {name}: blocked: 上游失败未启动"));
+        } else {
+            // 其余未在 outputs 的步骤：取消路径下从未启动（无失败可归因）。
+            lines.push(format!("- {name}: skipped: 未启动"));
         }
     }
     lines.join("\n")

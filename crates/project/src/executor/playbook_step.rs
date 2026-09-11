@@ -5,13 +5,13 @@
 use std::sync::Arc;
 
 use opencoder_brain::playbook::{
-    render_prompt, validate, PlaybookSpec, PlaybookStep, PlaybookTarget,
+    render_prompt, validate, PlaybookRouteKind, PlaybookSpec, PlaybookStep, PlaybookTarget,
 };
 use opencoder_store::{ProjectExecutorKind, ProjectTodoRecord};
 
 use crate::{
     context::ProjectContext,
-    executor::{BrainHandoff, ResolvedExecutor},
+    executor::{BrainHandoff, BrainTrace, ResolvedExecutor},
     service::{Deps, ExecutorOverride},
 };
 
@@ -111,24 +111,56 @@ pub(crate) async fn resolve_step(
         PlaybookTarget::Todos { .. } => {
             Err("todos target requires platform dispatch (control)".to_string())
         }
-        PlaybookTarget::Brain { capability_id } => {
-            let (_, step_todo) = with_target(&step_todo, ProjectExecutorKind::Brain, capability_id);
-            // 钉住能力 + 缺省路由表 → 纯解析，节点无需 brain 运行时。
-            let (resolved, trace) = crate::executor::resolve_brain(deps, &step_todo, cx, None)
-                .await
-                .map_err(|e| format!("brain step {:?} resolve failed: {e:#}", step.name))?;
-            // 派发交接镜像 reserve_attempt/drive_reserved 对 brain todo 的
-            // 构造：解析结果包成 override 随行，驱动内重解析直接采纳。
-            let handoff = BrainHandoff {
-                override_: Some(ExecutorOverride {
-                    kind: resolved.kind,
-                    ref_: resolved.ref_.clone(),
-                    capability_id: trace.capability_id.clone(),
-                    plan_id: trace.plan_id.clone(),
-                }),
-                trace: Some(trace),
-            };
-            Ok((resolved, step_todo, Some(handoff)))
-        }
+        PlaybookTarget::Brain {
+            capability_id,
+            route,
+        } => match route {
+            // 内联路由是跨端确定性通道——本地与控制面对同一 spec 解析出
+            // 相同执行器，不再依赖环境绑定：不经 resolve_brain（无路由表
+            // /运行时查询），路由即执行器，能力 id 仅作溯源随行。
+            Some(route) => {
+                let kind = match route.kind {
+                    PlaybookRouteKind::Agent => ProjectExecutorKind::Agent,
+                    PlaybookRouteKind::Team => ProjectExecutorKind::Team,
+                    PlaybookRouteKind::Dag => ProjectExecutorKind::Dag,
+                };
+                let (resolved, step_todo) = with_target(&step_todo, kind, &route.ref_);
+                // 交接镜像钉住能力路径的构造：路由结果包成 override 随行，
+                // 驱动内重解析直接采纳（节点无 brain 运行时亦可执行）。
+                let handoff = BrainHandoff {
+                    override_: Some(ExecutorOverride {
+                        kind: resolved.kind,
+                        ref_: resolved.ref_.clone(),
+                        capability_id: Some(capability_id.clone()),
+                        plan_id: None,
+                    }),
+                    trace: Some(BrainTrace {
+                        capability_id: Some(capability_id.clone()),
+                        plan_id: None,
+                    }),
+                };
+                Ok((resolved, step_todo, Some(handoff)))
+            }
+            None => {
+                let (_, step_todo) =
+                    with_target(&step_todo, ProjectExecutorKind::Brain, capability_id);
+                // 钉住能力 + 缺省路由表 → 纯解析，节点无需 brain 运行时。
+                let (resolved, trace) = crate::executor::resolve_brain(deps, &step_todo, cx, None)
+                    .await
+                    .map_err(|e| format!("brain step {:?} resolve failed: {e:#}", step.name))?;
+                // 派发交接镜像 reserve_attempt/drive_reserved 对 brain todo 的
+                // 构造：解析结果包成 override 随行，驱动内重解析直接采纳。
+                let handoff = BrainHandoff {
+                    override_: Some(ExecutorOverride {
+                        kind: resolved.kind,
+                        ref_: resolved.ref_.clone(),
+                        capability_id: trace.capability_id.clone(),
+                        plan_id: trace.plan_id.clone(),
+                    }),
+                    trace: Some(trace),
+                };
+                Ok((resolved, step_todo, Some(handoff)))
+            }
+        },
     }
 }

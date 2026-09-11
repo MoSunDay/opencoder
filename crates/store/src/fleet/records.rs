@@ -9,11 +9,19 @@ use serde_json::Value;
 
 impl FleetStore {
     pub async fn register(&self, node: &NodeRegistration) -> Result<()> {
+        let _guard = self.gate.lock().await;
         self.conn.execute("INSERT INTO fleet_nodes VALUES (?1,?2) ON CONFLICT(id) DO UPDATE SET registration=excluded.registration",
             params![node.id.clone(), serde_json::to_string(node)?]).await?;
         Ok(())
     }
+    /// Remove only the node registration; execution ownership and history
+    /// remain in execution_index and in the node's own durable store.
+    pub async fn unregister(&self, id: &str) -> Result<bool> {
+        let _guard = self.gate.lock().await;
+        Ok(self.conn.execute("DELETE FROM fleet_nodes WHERE id=?1", params![id]).await? > 0)
+    }
     pub async fn nodes(&self) -> Result<Vec<NodeRegistration>> {
+        let _guard = self.gate.lock().await;
         let mut rows = self
             .conn
             .query("SELECT registration FROM fleet_nodes ORDER BY id", ())

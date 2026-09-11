@@ -34,6 +34,18 @@ pub async fn nodes(State(state): State<Arc<AppState>>) -> Response {
         .collect();
     response(RpcReply::ok(json!({"nodes":nodes})))
 }
+pub async fn unregister(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Response {
+    use crate::transport::UnregisterResult;
+    match state.hub.unregister(&id, &state.fleet).await {
+        Ok(UnregisterResult::Removed) => response(RpcReply::ok(json!({"ok": true}))),
+        Ok(UnregisterResult::NotFound) => response(RpcReply::error(404, "node not found")),
+        Ok(UnregisterResult::Connected) => response(RpcReply::error(
+            409,
+            "节点仍有活动连接，请先停止节点服务，离线后再删除注册",
+        )),
+        Err(error) => error_500(format!("unregister node: {error:#}")),
+    }
+}
 pub async fn maintain(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,

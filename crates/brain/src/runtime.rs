@@ -268,10 +268,13 @@ impl Runtime {
         Ok(emb)
     }
 
-    /// Embed a batch: every upstream failure (HTTP error, cardinality
-    /// mismatch, empty vector) is carried as the typed [`EmbeddingFailed`]
-    /// marker; on success every returned vector is non-empty.
-    pub(crate) fn embed_many(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
+    /// Batch embedding entry point — callers embedding several texts (e.g.
+    /// the control-plane trigger scan) must use one round-trip instead of
+    /// N+1 `embed_one` calls. Every upstream failure (HTTP error,
+    /// cardinality mismatch, empty vector) is carried as the typed
+    /// [`EmbeddingFailed`] marker; on success every returned vector is
+    /// non-empty.
+    pub fn embed_many(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
         let vecs = match self.client.embed(texts, &self.model) {
             Ok(vecs) => vecs,
             Err(e) => {

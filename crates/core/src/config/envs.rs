@@ -69,10 +69,12 @@ fn configured_share_dir() -> Option<PathBuf> {
         let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) else {
             continue;
         };
-        if let Some(dir) = value.pointer("/agent/share_dir").and_then(|v| v.as_str()) {
-            let dir = dir.trim();
-            if !dir.is_empty() {
-                return Some(PathBuf::from(dir));
+        for key in ["/agent/share_dir", "/agent/agents_dir"] {
+            if let Some(dir) = value.pointer(key).and_then(|v| v.as_str()) {
+                let dir = dir.trim();
+                if !dir.is_empty() {
+                    return Some(PathBuf::from(dir));
+                }
             }
         }
     }

@@ -190,3 +190,24 @@ situation digest 铸出并缓存；两份落地端同时接入：控制面把剧
   `cargo test -p`（单进程 workspace 全跑在本环境会被 OOM 杀）——
   5159 passed / 0 failed（基线 5140 + 净增 19 项新测试）。clippy 在
   brain/project/control 三 crate 零警告。
+
+## 评审 fast-follow 二期前清扫（2026-09-11，R1/R2）
+
+上轮放行时挂账的两个 C 级残余，随本轮一并清掉（R3 内存闸门为既有
+brain_gate 同款模式、R4 `plan_playbook` HTTP 接线属二期，均维持不动）：
+
+- **R1 指纹过严**：`dispatch_fingerprint` 改吃 trim 后的 situation——
+  `render_prompt` 本就按 trim 后文本代入占位符，"x" 与 " x " 渲染产物相同，
+  同 request_id 复用属于幂等重试而非 409。指纹语义与实际派发内容对齐。
+- **R2 ±Inf 分量穿透**：`plan::cosine` 守卫由 `!(denom > 0.0)` 收紧为
+  `!(denom.is_finite() && denom > 0.0)`——±Inf 分量使 denom=Inf、
+  `Inf/Inf=NaN` 仍可泄漏 `Ok(NaN)`；有限性入守卫后由 Cauchy-Schwarz
+  （|dot| ≤ denom）保证结果必有限，顺带删除
+  `#[allow(clippy::neg_cmp_op_on_partial_ord)]` 定点豁免。trigger 扫描
+  （`cosine_similarity` 委托同一函数）同步受益。
+- 测试：`cosine_rejects_nan_and_zero_vectors` 扩 ±Inf 断言
+  （`crates/brain/src/plan.rs`）、
+  `dispatch_fingerprint_covers_playbook_situation_and_node` 扩 trim 等价
+  断言（`crates/control/src/api/brain_playbook_dispatch.rs`）。
+- 全量回归：23 个 crate 逐 crate 5159 passed / 0 failed（与上轮基线
+  持平——本轮仅扩断言不新增用例）；clippy brain/control 零警告。

@@ -134,7 +134,7 @@ mod tests {
             assert!(!allow(role, "POST", "/api/users"));
             assert!(!allow(role, "DELETE", "/api/users/alice"));
             assert!(!allow(role, "GET", "/api/brain/capabilities"));
-            assert!(!allow(Role::User, "GET", "/api/brain/agents"));
+            assert!(!allow(role, "GET", "/api/brain/agents"));
             // The shell/assets stay reachable (auth exempts them).
             assert!(allow(role, "GET", "/"));
         }

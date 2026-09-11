@@ -58,7 +58,7 @@ function TeamDetail({ id, detail }) {
   return <div><Typography.Title level={5}>团队执行</Typography.Title><Descriptions size="small" items={[
     { key: 'name', label: '团队', children: team.name || '—' },
     { key: 'captain', label: '队长', children: team.captain || '—' },
-    { key: 'members', label: '成员', children: (team.members || []).map((member) => <Tag key={member.id}>{member.id} · {member.role}</Tag>) },
+    { key: 'members', label: '成员', children: (team.members || []).map((member) => <Tag key={member.agent} color={member.agent === team.captain ? 'gold' : undefined}>{[member.agent, ...(member.capabilities || [])].join(' · ')}</Tag>) },
   ]} />
   {turns.length || topic.turns_page?.more ? <WindowedRows
     initialRows={turns}

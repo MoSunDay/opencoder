@@ -172,10 +172,12 @@ describe('fleet execution boundaries', () => {
   it('offers bounded team plan, participant result and summary windows', async () => {
     const bytes = new TextEncoder().encode('成员结论');
     apiGet.mockResolvedValue({ encoding: 'utf8-base64', offset: 0, next_offset: bytes.length, total_bytes: bytes.length, eof: true, bytes_b64: btoa(String.fromCharCode(...bytes)) });
-    render(<WorkloadDetail id="team-owner" kind="team" detail={{ definition: { name: 'release', captain: 'lead', members: [] }, topic: {
+    render(<WorkloadDetail id="team-owner" kind="team" detail={{ definition: { name: 'release', captain: 'lead', members: [{ agent: 'lead', capabilities: ['发布编排'] }] }, topic: {
       turns: [{ turn: 3, meta: { question: '发布检查', participants: ['lead'], aligned: true, sub_turns: 1 }, detail_fields: { plan: 'team.turn.3.plan' } }],
     } }} />);
     expect(screen.getByText('发布检查')).toBeTruthy(); expect(screen.getByText('已对齐')).toBeTruthy();
+    /// 成员身份即 agent：固化下来的能力快照随 Tag 一并展示。
+    expect(screen.getByText('lead · 发布编排')).toBeTruthy();
     expect(screen.getByText('查看本轮计划')).toBeTruthy(); expect(screen.getByText('第 1 次小结')).toBeTruthy();
     fireEvent.click(screen.getByText('lead · 第 1 次结果'));
     expect(await screen.findByText('成员结论', { exact: true })).toBeTruthy();
@@ -247,6 +249,7 @@ describe('fleet execution boundaries', () => {
       return { agents: [
         { agent: 'act', capabilities: [{ id: 'c1', summary: '执行任务' }] },
         { agent: 'plan', capabilities: [{ id: 'c2', summary: '规划拆解' }] },
+        { agent: 'explore', capabilities: [] },
       ] };
     });
     apiPost.mockResolvedValue({ ok: true });
@@ -261,16 +264,23 @@ describe('fleet execution boundaries', () => {
     /// 队员为 multiple Select：再选 act（Form.useWatch 的更新在下一个交互 tick 生效，断言前等待）。
     fireEvent.mouseDown(screen.getByLabelText('队员').closest('.ant-select'));
     fireEvent.click(await screen.findByText('act', { selector: '.ant-select-item-option-content' }));
+    /// 多选下拉在选中后收起：重新展开再选 explore（无绑定能力的兜底分支）。
+    fireEvent.mouseDown(screen.getByLabelText('队员').closest('.ant-select'));
+    /// 重开下拉会留下旧浮层：取最后一个（最新）explore 选项。
+    const exploreOptions = await screen.findAllByText('explore', { selector: '.ant-select-item-option-content' });
+    fireEvent.click(exploreOptions[exploreOptions.length - 1]);
     const rosterRow = (agent) => document.querySelector(`[data-agent="${agent}"]`);
     await waitFor(() => expect(rosterRow('act')).toBeTruthy());
     expect(rosterRow('plan').textContent).toContain('规划拆解');
     expect(rosterRow('act').textContent).toContain('执行任务');
+    /// 无绑定能力的 agent 走「暂无能力画像」兜底文案。
+    expect(rosterRow('explore').textContent).toContain('暂无能力画像');
     /// 队长置顶：plan 行带队长标识且排在 act 之前。
     expect(rosterRow('plan').textContent).toContain('队长');
     expect(rosterRow('act').textContent).not.toContain('队长');
     expect(rosterRow('plan').compareDocumentPosition(rosterRow('act')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     fireEvent.click(screen.getByText('保存团队'));
-    await waitFor(() => expect(apiPost).toHaveBeenCalledWith('/api/teams', { name: 'release', captain: 'plan', members: [{ agent: 'plan' }, { agent: 'act' }] }));
+    await waitFor(() => expect(apiPost).toHaveBeenCalledWith('/api/teams', { name: 'release', captain: 'plan', members: [{ agent: 'plan' }, { agent: 'act' }, { agent: 'explore' }] }));
     expect(onNotice).toHaveBeenLastCalledWith(err(''));
   });
 });

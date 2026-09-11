@@ -26,7 +26,7 @@ Commit: bf757d2e8688496f8c1be8fc8926dbd9fb2e3c21
 - server 二进制不依赖 session/worker/team/project runtime。
 - 执行明细向归属 Node 实时查询，全局索引不存运行内容。
 - system 团队执行已退役；跨节点维护走 POST /api/nodes/:id/maintenance。
-- team 定义成员=agent 名（唯一、captain ∈ members）；resolve 时经 `GET /api/brain/agents` 同源聚合把成员能力 summary 固化进 pinned definition，库存定义不落 capabilities。
+- team 定义成员=agent 名（唯一、captain ∈ members）；resolve 时经 `GET /api/brain/agents` 同源聚合把成员能力 summary 固化进 pinned definition，库存定义不落 capabilities；成员名/captain 在 validate 时就地 trim 归一（与 bind 侧对称，padded 提交不再固化空快照）。
 - 认证开启时 seed token 恒等 admin；换启动 token 重启会把表内 `admin` 行 digest 重指新 token（轮换即吊销旧 seed 凭证）。非 admin 仅读 + operator 提交/命令（operator 为宿主机直跑通道）；无 Identity 视为 admin（本地模式）。
 
 ## 相关

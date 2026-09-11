@@ -325,7 +325,18 @@ pub struct TeamDefinition {
 }
 
 impl TeamDefinition {
-    pub fn validate(&self) -> Result<(), String> {
+    /// Validate and canonicalize in place. Member agent names and the
+    /// captain are trimmed first — mirroring brain bind's trim-on-store —
+    /// so every consumer (capability resolve, worker member keying, the
+    /// SPA echo) agrees on one agent key. Without this a padded name
+    /// validated but matched nothing at resolve time, freezing an empty
+    /// capability snapshot; names that collide only after trimming are
+    /// caught by the duplicate check.
+    pub fn validate(&mut self) -> Result<(), String> {
+        self.captain = self.captain.trim().to_string();
+        for member in &mut self.members {
+            member.agent = member.agent.trim().to_string();
+        }
         let agents: std::collections::HashSet<_> = self.members.iter().map(|m| &m.agent).collect();
         if !valid_id(&self.name)
             || !self.name.as_bytes()[0].is_ascii_alphanumeric()
@@ -337,7 +348,7 @@ impl TeamDefinition {
             || self.members.is_empty()
             || agents.len() != self.members.len()
             || !agents.contains(&self.captain)
-            || self.members.iter().any(|m| m.agent.trim().is_empty())
+            || self.members.iter().any(|m| m.agent.is_empty())
         {
             return Err("team requires a unique non-empty agent per member and a captain belonging to the team; the team name 'system' is reserved".into());
         }
@@ -376,7 +387,7 @@ mod tests {
 
     #[test]
     fn team_definition_accepts_the_minimal_agent_shape() {
-        let team: TeamDefinition = serde_json::from_value(serde_json::json!({
+        let mut team: TeamDefinition = serde_json::from_value(serde_json::json!({
             "name": "release", "captain": "act",
             "members": [{"agent": "act"}, {"agent": "plan", "capabilities": ["db 迁移"]}]
         }))
@@ -385,7 +396,7 @@ mod tests {
         assert!(team.members[0].capabilities.is_empty());
         assert_eq!(team.members[1].capabilities, vec!["db 迁移"]);
         // Legacy member fields (id/role) are ignored on deserialize.
-        let legacy: TeamDefinition = serde_json::from_value(serde_json::json!({
+        let mut legacy: TeamDefinition = serde_json::from_value(serde_json::json!({
             "name": "release", "captain": "act",
             "members": [{"id": "m1", "agent": "act", "role": "captain"}]
         }))
@@ -402,9 +413,29 @@ mod tests {
             serde_json::json!({"name":"t","captain":"act","members":[]}),
             serde_json::json!({"name":"system","captain":"act","members":[{"agent":"act"}]}),
         ] {
-            let team: TeamDefinition = serde_json::from_value(body).unwrap();
+            let mut team: TeamDefinition = serde_json::from_value(body).unwrap();
             assert!(team.validate().is_err(), "{team:?}");
         }
+    }
+
+    #[test]
+    fn team_definition_trims_padded_member_and_captain_names() {
+        let mut team: TeamDefinition = serde_json::from_value(serde_json::json!({
+            "name": "release", "captain": " plan ",
+            "members": [{"agent": " act "}, {"agent": "plan"}]
+        }))
+        .unwrap();
+        assert!(team.validate().is_ok());
+        assert_eq!(team.captain, "plan");
+        assert_eq!(team.members[0].agent, "act");
+
+        // Names that collide only after trimming are duplicates, not twins
+        // that would key two worker sessions apart.
+        let mut twins: TeamDefinition = serde_json::from_value(serde_json::json!({
+            "name": "release", "captain": "act", "members": [{"agent": "act"}, {"agent": " act "}]
+        }))
+        .unwrap();
+        assert!(twins.validate().is_err(), "{twins:?}");
     }
 
     #[test]

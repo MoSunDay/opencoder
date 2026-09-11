@@ -19,7 +19,7 @@ Commit: (working-tree, 基于 b465f440)
 - `src/runtime.rs` — playbook CRUD（`PLAYBOOK_ID_PREFIX="playbook"`）；store 表 v25 `brain_playbooks`。
 ## 边界
 - 能力绑定与派发在 control（request_id 幂等）；执行明细落 worker 节点。
-- Agent 绑定聚合视图 `GET /api/brain/agents`（control `api/brain.rs`）：按 `capability_target` kind=Agent 分组出 `{agent, capabilities:[{id,summary}]}`，team resolve 用它固化成员能力快照。
+- Agent 绑定聚合视图 `GET /api/brain/agents`（control `api/brain.rs`）：按 `capability_target` kind=Agent 分组出 `{agent, capabilities:[{id,summary}]}`，team resolve 用它固化成员能力快照；bind 对未知 agent 名宽容放行但 `warn`（幻影闸门，允许 agent 后建）。
 
 - 剧本固定/动态两来源同走 `PlaybookSpec`；本地执行在 project（`executor/playbook_drive.rs`），平台展开派发在 control（`api/brain_playbook_dispatch.rs`）。
 ## 相关

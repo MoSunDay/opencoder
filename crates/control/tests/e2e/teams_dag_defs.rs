@@ -287,6 +287,82 @@ async fn team_resolve_freezes_member_capability_snapshots() {
     assert_eq!(stored["members"][0]["capabilities"], json!([]));
 }
 
+/// Padded member names normalize before the capability freeze: the stored
+/// team, the aggregation match and the pinned definition all speak the
+/// trimmed agent key (previously a padded member validated but resolved no
+/// group, freezing an empty snapshot while the worker keyed a padded
+/// session name).
+#[tokio::test]
+async fn padded_team_member_names_normalize_before_the_freeze() {
+    let h = Harness::new().await;
+    let (status, body) = h
+        .req(
+            Method::POST,
+            "/api/teams",
+            Some(json!({"name": "padded-team", "captain": " act ",
+                "members": [member(" act "), member("plan")]})),
+        )
+        .await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["captain"], json!("act"));
+    assert_eq!(
+        body["members"],
+        json!([
+            {"agent":"act","capabilities":[]},
+            {"agent":"plan","capabilities":[]},
+        ]),
+        "stored members are trimmed: {body}"
+    );
+
+    let (status, body) = h
+        .req(
+            Method::POST,
+            "/api/brain/capabilities",
+            Some(json!({
+                "capability_type": "tool-usage",
+                "summary": "padded freeze summary",
+                "input_desc": "a work request",
+                "output_desc": "completed work",
+                "eng_inputs": ["exemplar input"],
+            })),
+        )
+        .await;
+    assert_eq!(status, 201, "{body}");
+    let cap = body["capability"]["id"].as_str().unwrap().to_string();
+    let (status, body) = h
+        .req(
+            Method::PUT,
+            &format!("/api/brain/capabilities/{cap}/target"),
+            Some(json!({"kind": "agent", "target": "act"})),
+        )
+        .await;
+    assert_eq!(status, 200, "{body}");
+
+    let (status, body) = h
+        .req(
+            Method::POST,
+            "/api/executions",
+            Some(
+                json!({"id": "team-padded-1", "kind": "team", "target": "padded-team",
+                    "node_id": "node-e2e"}),
+            ),
+        )
+        .await;
+    assert_eq!(status, 202, "{body}");
+
+    let pinned = h
+        .node
+        .pinned_definition("team-padded-1")
+        .expect("assignment reached the node");
+    let act = pinned["members"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|m| m["agent"] == json!("act"))
+        .unwrap_or_else(|| panic!("trimmed member act missing: {pinned}"));
+    assert_eq!(act["capabilities"], json!(["padded freeze summary"]));
+}
+
 fn wasm_step(name: &str, depends_on: serde_json::Value) -> serde_json::Value {
     json!({"name": name, "depends_on": depends_on, "kind": {"type":"wasm","command":"tool.wasm"}})
 }

@@ -70,3 +70,32 @@ async fn agents_lists_only_agent_bound_capabilities() {
     assert!(ids.contains(&json!(bound)), "{body}");
     assert!(ids.contains(&json!(padded)), "{body}");
 }
+
+/// The phantom gate is lenient: binding an agent capability to a name with
+/// no agent card (custom or builtin) still succeeds — agents can be
+/// created after the bind — and the group surfaces in the aggregation,
+/// matching the fail-soft "unbound → empty" semantics elsewhere.
+#[tokio::test]
+async fn binding_an_unknown_agent_is_kept_leniently() {
+    let h = Harness::new().await;
+    let cap = seed_cap(&h, "phantom agent capability").await;
+    let (status, body) = h
+        .req(
+            Method::PUT,
+            &format!("/api/brain/capabilities/{cap}/target"),
+            Some(json!({"kind": "agent", "target": "ghost-agent"})),
+        )
+        .await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["target"], json!("ghost-agent"));
+
+    let (status, body) = h.req(Method::GET, "/api/brain/agents", None).await;
+    assert_eq!(status, 200, "{body}");
+    let group = body["agents"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|a| a["agent"] == json!("ghost-agent"))
+        .unwrap_or_else(|| panic!("phantom group kept in the aggregation: {body}"));
+    assert_eq!(group["capabilities"][0]["id"], json!(cap));
+}

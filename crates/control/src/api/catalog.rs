@@ -68,7 +68,7 @@ pub async fn teams(State(state): State<Arc<AppState>>) -> Response {
 }
 pub async fn save_team(
     State(state): State<Arc<AppState>>,
-    Json(team): Json<TeamDefinition>,
+    Json(mut team): Json<TeamDefinition>,
 ) -> Response {
     if let Err(error) = team.validate() {
         return error_400(error);

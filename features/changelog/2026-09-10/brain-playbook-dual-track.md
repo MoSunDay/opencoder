@@ -47,7 +47,9 @@ situation digest 铸出并缓存；两份落地端同时接入：控制面把剧
   created_at)`；fresh DB 走 bootstrap CREATE，旧库走 `from < 25` 幂等迁移。
 - `Store` trait 新增 `save/get/list/delete_brain_playbook` 与
   `latest_brain_playbook_for`（默认实现 bail，非 libsql 后端明确不支持）；
-  libsql 实现 upsert on conflict 只替换内容、`created_at` 存活。
+  libsql 实现委托 `libsql_store/brain_playbooks.rs` 自由函数；mod.rs 的
+  `impl Store for LibsqlStore` 整块迁至 `impl_store.rs`（Rust 不允许同 trait
+  多 impl 块，E0119），mod.rs 收敛为 70 行结构定义。
 - `ProjectExecutorKind::Playbook`（`executor_ref` 引用剧本，内联 spec 一律
   `playbook executor takes no spec`）与 `ProjectTodoRunKind::Step`（playbook
   子尝试）；`finish_todo_run` 对 Step 不回写 todo 状态，生命周期归父 Execute 行。
@@ -112,8 +114,12 @@ situation digest 铸出并缓存；两份落地端同时接入：控制面把剧
 | 本地执行器成功路径（串行/菱形/brain 交接） | `playbook_runs_serial_chain_in_topo_order`、`playbook_runs_diamond_with_parallel_waves`、`playbook_brain_step_routes_via_handoff_without_runtime` | `crates/project/tests/executor_playbook.rs` |
 | 本地执行器失败路径（坍缩/todos 拒绝/缺失引用） | `playbook_step_failure_collapses_downstream`、`playbook_todos_target_is_rejected_locally`、`playbook_missing_reference_fails_the_run` | `crates/project/tests/executor_playbook_errors.rs` |
 
-- 全量回归：本轮按操作者指示免测提交（未执行全量 `cargo test --workspace`），
-  测试文件已随本提交入库。
+- 全量回归：workspace 全部 23 个 crate 串行 `cargo test -p <crate>`（等价于
+  `cargo test --workspace --no-fail-fast`；单体进程在高负载环境下两次被杀，改逐
+  crate 断点续跑）——381 个测试套件、5140 个用例全部通过、0 失败。此前的
+  `running_mode_switch_e2e` 负载抖动本轮未复现。store 层在 `impl Store` 拆分手术
+  （mod.rs → impl_store.rs）后另行复跑 `cargo test -p opencoder-store`：48 套件
+  245 用例通过。
 
 ## 兼容与范围
 
@@ -131,3 +137,56 @@ situation digest 铸出并缓存；两份落地端同时接入：控制面把剧
 相关语义：[brain](../../../agents/brain/index.md)、[control](../../../agents/control/index.md)、
 [project](../../../agents/project/index.md)、[store](../../../agents/store/index.md)、
 [web](../../../agents/web/index.md)、[worker](../../../agents/worker/index.md)
+
+## 评审 fast-follow（2026-09-11）
+
+双轨落地后的评审整改：D1–D6 六项 + C 级批量，语义全部有测试钉死。
+
+- **D1 静默跨请求错配**：执行 id 的 key 不再截 request_id 前 26 字节（前缀
+  碰撞曾跨请求铸出相同执行 id，重放探针会 202 到错误的 execution）——key 原样
+  使用，超长 request_id（> `MAX_KEY_CHARS=26`，ULID 回退恰为 26）直接 400；新增
+  `PlaybookGate`（AppState，容量 512）：同 request_id 携不同派发内容
+  （playbook/situation/节点指纹）重放答 **409** 而非静默换语义，容量满 503。
+- **D2 跨端解析分叉**：新线类型 `PlaybookRoute { kind: agent|team|dag, ref }` 由
+  `PlaybookTarget::Brain` 的 `route` 字段可选携带（serde 默认，旧行不变）——
+  内联 route 是跨端确定性通道：本地执行器（`playbook_step.rs`）与 control
+  dispatch（`resolve_target`）同规则解析，压过环境绑定（control
+  `capability_target` / 本地路由表）。
+- **D3 可观测盲区**：`summarize` 补列坍缩步骤（`- {name}: blocked: 上游失败未启动`）
+  与取消路径未启动步骤（`- {name}: skipped: 未启动`）。
+- **D4 空指令**：任一步骤 prompt 引用 `{situation}` 而 situation 为空 →
+  dispatch 400；规划侧 `validate_situation_placeholders`
+  （`crates/brain/src/planning.rs`）对动态剧本强制占位符，固定剧本豁免。
+- **D5 注入面**：长度上限入 validate——`spec.id ≤ 256B`（MAX_ID_CHARS）、target
+  引用（agent/team/dag/workflow/capability_id/route ref）≤ 256B
+  （MAX_TARGET_REF_CHARS）、`match_text ≤ 2000B`（MAX_MATCH_TEXT_CHARS）。
+- **D6 缓存僵化**：`plan_playbook` 增 `replan: bool`（对齐 `dispatch_or_plan` 的
+  逃生舱），置位时跳过 situation digest 缓存读。
+- **C 级批量**：spec.rs 模块注释更正（原始 JSON 反序列化为 `PlaybookInput`）、
+  重复步骤名只报 duplicates 不再误报「cycle」、删除死守卫
+  `depends_on.len() > MAX_STEPS`、`plan::cosine` 在守卫 `!(denom > 0.0)` 处拒
+  NaN 分量向量（不再漏 `Some(NaN)`）、`Runtime::embed_many` 转 pub 且
+  trigger_scan 把 [入站 + 全部 match_text] 并成一次 embed 批次往返、spec_json
+  每行只解析一次。
+
+### 测试映射表
+
+| 功能 | 测试函数 | 文件 |
+| --- | --- | --- |
+| D1 PlaybookGate 幂等门（同内容重放/异内容 409/容量 503） | `playbook_gate_replays_same_content_and_rejects_changes`、`playbook_gate_answers_503_at_capacity` | `crates/control/src/api/brain_playbook_dispatch.rs` |
+| D1 派发指纹 + 执行 id 键原样不截断 | `dispatch_fingerprint_covers_playbook_situation_and_node`、`step_ids_are_prefixed_deterministic_and_length_safe` | 同上 |
+| D1 e2e（超长 request_id 400 / 同键异内容 409） | `dispatch_rejects_oversized_request_id_400`、`dispatch_request_id_reuse_with_different_content_409` | `crates/control/tests/e2e/brain_api/playbooks/dispatch.rs` |
+| D2 route 线格式（合法/空 ref 拒绝/roundtrip/旧行 route=None） | `valid_route_passes_validation`、`empty_route_ref_is_rejected`、`routed_brain_target_round_trips`、`old_brain_target_shape_deserializes_with_route_none` | `crates/brain/src/playbook/spec.rs` |
+| D2 本地执行器内联 route 确定性 | `playbook_brain_step_inline_route_is_deterministic` | `crates/project/tests/executor_playbook.rs` |
+| D2 控制面内联 route 压过绑定 | `dispatch_inline_brain_route_wins_over_binding` | `crates/control/tests/e2e/brain_api/playbooks/dispatch.rs` |
+| D3 汇总补 blocked/skipped 步骤行 | `playbook_step_failure_collapses_downstream`（扩展） | `crates/project/tests/executor_playbook_errors.rs` |
+| D4 空 situation（dispatch 400 / 规划侧拒绝） | `dispatch_requires_situation_for_placeholder_steps`、`plan_rejects_missing_situation_placeholder` | `crates/control/tests/e2e/brain_api/playbooks/dispatch.rs`、`crates/brain/tests/planning_playbook.rs` |
+| D5 字段长度上限 | `oversize_fields_are_rejected` | `crates/brain/src/playbook/spec.rs` |
+| D6 replan 跳过 digest 缓存 | `plan_replan_bypasses_the_digest_cache` | `crates/brain/tests/planning_playbook.rs` |
+| C 级（重名去噪 + cosine 拒 NaN） | `duplicate_names_report_duplicates_without_cycle_noise`、`cosine_rejects_nan_and_zero_vectors`、`cosine_similarity_is_none_for_nan_and_zero_vectors` | `crates/brain/src/playbook/spec.rs`、`crates/brain/src/plan.rs`、`crates/brain/src/playbook/trigger.rs` |
+| C 级 trigger_scan 单批次 embed | `trigger_scan_batches_embeds_into_one_round_trip` | `crates/control/tests/e2e/brain_api/playbooks/trigger.rs` |
+
+- 全量回归：workspace 全部 23 个 crate + `opencode-cli` 逐 crate
+  `cargo test -p`（单进程 workspace 全跑在本环境会被 OOM 杀）——
+  5159 passed / 0 failed（基线 5140 + 净增 19 项新测试）。clippy 在
+  brain/project/control 三 crate 零警告。

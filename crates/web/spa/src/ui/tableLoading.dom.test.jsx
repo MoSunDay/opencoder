@@ -43,9 +43,11 @@ const NODE = {
   id: 'n1', name: 'worker', online: true, kinds: ['agent'], maintenance_agent_id: 'maintainer-n1',
   snapshot: { ready: true, cpu_capacity: 2, active_agent_loops: 3, max_runs: 4, active_runs: 1, pending_runs: 0, queue_order: 'fifo' },
 };
-const TEAMS = { teams: [{ name: 'release', captain: 'lead', members: [{ id: 'lead', agent: 'act', role: '交付' }] }] };
+/// 成员即 agent：`{agent, capabilities}` 是当前线形状（id/role 已删），
+/// `/api/brain/agents` 的分组键是 `agent`（不是 name）。
+const TEAMS = { teams: [{ name: 'release', captain: 'act', members: [{ agent: 'act', capabilities: ['发布编排'] }] }] };
 /// 团队页一次 load 并发拉三个接口，兑现时给一个三种读法都成立的载荷。
-const TEAM_PAGE = { ...TEAMS, nodes: [NODE], agents: [{ name: 'act' }] };
+const TEAM_PAGE = { ...TEAMS, nodes: [NODE], agents: [{ agent: 'act', capabilities: [{ id: 'c1', summary: '发布编排' }] }] };
 const execution = (id, created_at = 10) => ({ id, kind: 'agent', node_id: 'n1', status: 'done', created_at });
 
 /// 表格是否被遮罩：wrapper 内出现 spinning 的 Spin 根节点即为遮罩。
@@ -167,7 +169,7 @@ describe('table loading convention in the DOM', () => {
 
   it('hides a refresh shorter than the spin delay and only masks a still-pending one', async () => {
     apiGetMock.mockImplementation((path) => Promise.resolve(path === '/api/teams' ? TEAMS
-      : (path === '/api/nodes' ? { nodes: [NODE] } : { agents: [{ name: 'act' }] })));
+      : (path === '/api/nodes' ? { nodes: [NODE] } : { agents: [{ agent: 'act', capabilities: [] }] })));
     render(<FleetTeamsPanel onNotice={vi.fn()} />);
     await flush();
     expect(screen.getByText('release')).toBeTruthy();

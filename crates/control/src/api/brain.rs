@@ -32,6 +32,23 @@ pub async fn bind(
         Ok(None) => return error_404("capability not found"),
         Err(error) => return error_500(error.to_string()),
     }
+    // Lenient phantom gate: an agent binding naming an agent with no card
+    // (custom or builtin) still succeeds — agents may be created after the
+    // bind — but the mismatch is logged so a typo cannot silently group a
+    // capability under a name nothing will ever resolve. Team/dag/todos
+    // targets are free-form and stay unchecked.
+    if target.kind == ExecutionKind::Agent
+        && opencoder_core::agent::read_agent_meta(&target.target).is_none()
+        && !opencoder_core::builtin_agents()
+            .iter()
+            .any(|a| a.name == target.target)
+    {
+        tracing::warn!(
+            capability = %id,
+            agent = %target.target,
+            "capability bound to an unknown agent; keeping the bind (lenient gate)"
+        );
+    }
     match state
         .fleet
         .put_definition("capability_target", &id, &json!(target))

@@ -235,23 +235,32 @@ impl Runtime {
 
     /// Plan one dynamic playbook for a situation — the second scheduling
     /// track. Reuse the newest cached dynamic playbook for the situation
-    /// digest unless missing; otherwise vector-search the library and
-    /// either fall back to the default act playbook (empty library — no
-    /// LLM call at all) or prompt the planner model under
-    /// [`PLAYBOOK_FRAMEWORK_PROMPT`] → parse → validate against the
-    /// retrieved candidate set → persist. LLM-side failures (stream error,
-    /// unparseable reply, contract violation) surface as the typed
-    /// [`PlanGenerationFailed`] marker; a corrupt cached spec is a
-    /// 500-class plain anyhow error (mirroring [`Self::dispatch_record`]).
+    /// digest unless missing or `replan` (the escape hatch forcing a fresh
+    /// plan even when the digest cache has one — the way out when the
+    /// capability library or the planner model changed under an unchanged
+    /// situation); otherwise vector-search the library and either fall back
+    /// to the default act playbook (empty library — no LLM call at all) or
+    /// prompt the planner model under [`PLAYBOOK_FRAMEWORK_PROMPT`] →
+    /// parse → validate against the retrieved candidate set → persist.
+    /// LLM-side failures (stream error, unparseable reply, contract
+    /// violation) surface as the typed [`PlanGenerationFailed`] marker; a
+    /// corrupt cached spec is a 500-class plain anyhow error (mirroring
+    /// [`Self::dispatch_record`]).
     pub async fn plan_playbook(
         &self,
         chat_model: &str,
         situation: &str,
         top_k: u32,
+        replan: bool,
         now_ms: i64,
     ) -> Result<PlannedPlaybook> {
         let digest = situation_digest(situation);
-        if let Some(record) = self.store.latest_brain_playbook_for(&digest).await? {
+        let cached = if replan {
+            None
+        } else {
+            self.store.latest_brain_playbook_for(&digest).await?
+        };
+        if let Some(record) = cached {
             if record.origin == "dynamic" {
                 let spec: PlaybookSpec = serde_json::from_str(&record.spec_json)
                     .with_context(|| format!("stored playbook {} spec is corrupt", record.id))?;
@@ -305,6 +314,7 @@ impl Runtime {
             Err(errs) => errs,
         };
         errs.extend(validate_candidates(&spec, &hits));
+        errs.extend(validate_situation_placeholders(&spec));
         if !errs.is_empty() {
             return Err(gen_failed(format!(
                 "planner playbook invalid: {}",
@@ -422,13 +432,32 @@ fn validate_candidates(spec: &PlaybookSpec, hits: &[BrainVectorHit]) -> Vec<Stri
     spec.steps
         .iter()
         .filter_map(|step| match &step.target {
-            PlaybookTarget::Brain { capability_id } if !ids.contains(capability_id.as_str()) => {
+            PlaybookTarget::Brain { capability_id, .. }
+                if !ids.contains(capability_id.as_str()) =>
+            {
                 Some(format!(
                     "brain target {capability_id:?} (step {:?}) is not a candidate",
                     step.name
                 ))
             }
             _ => None,
+        })
+        .collect()
+}
+
+/// The planner-side placeholder contract: the framework prompt mandates a
+/// `{situation}` placeholder in every step prompt; a dynamic spec without
+/// it would dispatch literal templates. Fixed playbooks are exempt (they
+/// may carry their own context), so this lives here, not in `validate`.
+fn validate_situation_placeholders(spec: &PlaybookSpec) -> Vec<String> {
+    spec.steps
+        .iter()
+        .filter(|step| !step.prompt.contains("{situation}"))
+        .map(|step| {
+            format!(
+                "planner step {:?} prompt misses the {{situation}} placeholder",
+                step.name
+            )
         })
         .collect()
 }

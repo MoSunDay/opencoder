@@ -164,4 +164,14 @@ mod tests {
         // Fail-closed: a None similarity (embed failure) skips everything.
         assert!(scan(&records, |_| None).is_empty());
     }
+
+    #[test]
+    fn cosine_similarity_is_none_for_nan_and_zero_vectors() {
+        // NaN components fold into the norms and the shared cosine guard
+        // rejects them, so poisoned embeddings can never fire a trigger.
+        assert!(cosine_similarity(&[f32::NAN, 1.0], &[1.0, 0.0]).is_none());
+        assert!(cosine_similarity(&[1.0, 0.0], &[f32::NAN, 1.0]).is_none());
+        assert!(cosine_similarity(&[0.0, 0.0], &[1.0, 0.0]).is_none());
+        assert_eq!(cosine_similarity(&[1.0, 0.0], &[1.0, 0.0]), Some(1.0));
+    }
 }

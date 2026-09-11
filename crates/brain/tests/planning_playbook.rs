@@ -73,6 +73,7 @@ fn step(name: &str, deps: &[&str], target: PlaybookTarget, prompt: &str) -> serd
 fn brain(capability_id: &str) -> PlaybookTarget {
     PlaybookTarget::Brain {
         capability_id: capability_id.into(),
+        route: None,
     }
 }
 
@@ -99,7 +100,7 @@ async fn plan_persists_and_roundtrips() {
     );
 
     let planned = rt
-        .plan_playbook("planner-chat", SITUATION_A, 5, 2_000)
+        .plan_playbook("planner-chat", SITUATION_A, 5, false, 2_000)
         .await
         .unwrap();
     assert!(planned.planned_fresh);
@@ -141,7 +142,7 @@ async fn plan_persists_and_roundtrips() {
     let calls = mock.call_count();
     assert_eq!(calls, 1, "exactly one planner call so far");
     let cached = rt
-        .plan_playbook("planner-chat", SITUATION_A, 5, 3_000)
+        .plan_playbook("planner-chat", SITUATION_A, 5, false, 3_000)
         .await
         .unwrap();
     assert!(!cached.planned_fresh);
@@ -154,7 +155,7 @@ async fn plan_persists_and_roundtrips() {
 async fn empty_library_returns_default_act_playbook() {
     let (rt, mock) = setup().await; // no capabilities, no scripts queued
     let planned = rt
-        .plan_playbook("planner-chat", SITUATION_A, 5, 2_000)
+        .plan_playbook("planner-chat", SITUATION_A, 5, false, 2_000)
         .await
         .unwrap();
     assert!(planned.planned_fresh);
@@ -195,7 +196,7 @@ async fn contract_violation_is_typed_generation_failure() {
         }),
     );
     let err = rt
-        .plan_playbook("planner-chat", SITUATION_A, 5, 2_000)
+        .plan_playbook("planner-chat", SITUATION_A, 5, false, 2_000)
         .await
         .unwrap_err();
     let typed = err
@@ -220,7 +221,7 @@ async fn contract_violation_is_typed_generation_failure() {
         }),
     );
     let err = rt
-        .plan_playbook("planner-chat", SITUATION_A, 5, 2_000)
+        .plan_playbook("planner-chat", SITUATION_A, 5, false, 2_000)
         .await
         .unwrap_err();
     let typed = err
@@ -245,7 +246,7 @@ async fn unparseable_reply_fails() {
         },
     ]);
     let err = rt
-        .plan_playbook("planner-chat", SITUATION_A, 5, 2_000)
+        .plan_playbook("planner-chat", SITUATION_A, 5, false, 2_000)
         .await
         .unwrap_err();
     assert!(
@@ -272,15 +273,80 @@ async fn distinct_situations_do_not_share_the_cache() {
     );
 
     let a = rt
-        .plan_playbook("planner-chat", SITUATION_A, 5, 2_000)
+        .plan_playbook("planner-chat", SITUATION_A, 5, false, 2_000)
         .await
         .unwrap();
     let b = rt
-        .plan_playbook("planner-chat", SITUATION_B, 5, 2_100)
+        .plan_playbook("planner-chat", SITUATION_B, 5, false, 2_100)
         .await
         .unwrap();
     assert!(a.planned_fresh && b.planned_fresh, "both must plan fresh");
     assert_ne!(a.record.id, b.record.id);
     assert_ne!(a.record.situation_digest, b.record.situation_digest);
     assert_eq!(mock.call_count(), 2, "one planner call per situation");
+}
+
+#[tokio::test]
+async fn plan_replan_bypasses_the_digest_cache() {
+    let (rt, mock, caps) = seeded().await;
+    queue_reply(
+        &mock,
+        json!({"name": "first", "steps": [step("act", &[], brain(&caps[0]), "{situation}")]}),
+    );
+    let first = rt
+        .plan_playbook("planner-chat", SITUATION_A, 5, false, 2_000)
+        .await
+        .unwrap();
+    assert!(first.planned_fresh);
+
+    // replan forces a fresh plan even though the digest cache has one.
+    queue_reply(
+        &mock,
+        json!({"name": "second", "steps": [step("act", &[], brain(&caps[1]), "{situation}")]}),
+    );
+    let second = rt
+        .plan_playbook("planner-chat", SITUATION_A, 5, true, 3_000)
+        .await
+        .unwrap();
+    assert!(second.planned_fresh);
+    assert_ne!(
+        second.record.id, first.record.id,
+        "replan must mint a new id"
+    );
+    let all = rt.list_playbooks().await.unwrap();
+    assert_eq!(all.len(), 2, "both records are persisted");
+
+    // Back on the cache path: the newest (replanned) record is reused.
+    let cached = rt
+        .plan_playbook("planner-chat", SITUATION_A, 5, false, 4_000)
+        .await
+        .unwrap();
+    assert!(!cached.planned_fresh);
+    assert_eq!(cached.record.id, second.record.id);
+    assert_eq!(cached.spec, second.spec);
+}
+
+#[tokio::test]
+async fn plan_rejects_missing_situation_placeholder() {
+    let (rt, mock, caps) = seeded().await;
+    queue_reply(
+        &mock,
+        json!({
+            "name": "literal",
+            "steps": [step("act", &[], brain(&caps[0]), "handle the raw thing verbatim")],
+        }),
+    );
+    let err = rt
+        .plan_playbook("planner-chat", SITUATION_A, 5, false, 2_000)
+        .await
+        .unwrap_err();
+    let typed = err
+        .downcast_ref::<PlanGenerationFailed>()
+        .expect("typed PlanGenerationFailed marker");
+    assert!(
+        typed.detail.contains("{situation} placeholder"),
+        "detail must name the missing placeholder: {typed:?}"
+    );
+    // Nothing invalid is persisted.
+    assert!(rt.list_playbooks().await.unwrap().is_empty());
 }

@@ -9,15 +9,20 @@ pub async fn configured_agents(
     next: Next,
 ) -> Response {
     let path = request.uri().path();
-    if path != "/api/agents" && !path.starts_with("/api/agents/") {
+    if path != "/api/agents"
+        && !path.starts_with("/api/agents/")
+        && path != "/api/envs"
+        && !path.starts_with("/api/envs/")
+    {
         return next.run(request).await;
     }
     let config = match opencoder_core::Config::load(&state.workdir) {
         Ok(config) => config,
         Err(error) => return crate::api::error_500(format!("agent resource config: {error:#}")),
     };
-    match config.agent.agents_dir {
-        Some(root) => opencoder_core::agent::scope::with_root(Some(root), next.run(request)).await,
-        None => next.run(request).await,
-    }
+    let root = config
+        .agent
+        .agents_dir
+        .or_else(opencoder_core::agent::agents_dir);
+    opencoder_core::agent::scope::with_root(root, next.run(request)).await
 }

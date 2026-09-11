@@ -2,7 +2,7 @@ export const CREATABLE_KINDS = [
   ['agent', 'Agent'], ['team', 'Team'], ['dag', 'DAG'], ['todos', 'TODO 工作流'],
   ['project', '项目任务'], ['operator', 'Operator'],
 ].map(([value, label]) => ({ value, label }));
-export const KINDS = [...CREATABLE_KINDS, { value: 'system', label: '历史系统执行' }];
+export const KINDS = [...CREATABLE_KINDS, { value: 'brain', label: '大脑调度' }, { value: 'system', label: '历史系统执行' }];
 export const KIND_LABELS = Object.fromEntries(KINDS.map(({ value, label }) => [value, label]));
 // 执行状态表已搬进 src/ui/statusTag.jsx（全控制台唯一状态→视觉映射）；这里
 // re-export 保持旧导入路径（executions/detail/todoRunsPanel）零改动，文案

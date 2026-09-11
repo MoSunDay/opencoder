@@ -79,13 +79,46 @@ async fn submit_inner(state: &Arc<AppState>, request: CreateExecution) -> anyhow
                     nodes.push(node);
                 }
             }
-            let Some(node) =
-                select_queue_node(&nodes, request.kind, request.node_id.as_deref(), now_ms())
-            else {
-                return Ok(RpcReply::error(
-                    503,
-                    "no ready online node can accept this execution",
-                ));
+            let mut incompatibilities = Vec::new();
+            let node = loop {
+                let Some(node) =
+                    select_queue_node(&nodes, request.kind, request.node_id.as_deref(), now_ms())
+                        .cloned()
+                else {
+                    return Ok(RpcReply::error(
+                        503,
+                        if incompatibilities.is_empty() {
+                            "no ready online node can accept this execution".to_string()
+                        } else {
+                            format!(
+                                "no ready compatible node can accept this execution: {}",
+                                incompatibilities.join("; ")
+                            )
+                        },
+                    ));
+                };
+                if let Some(action) = request.input.get("_brain").and_then(|b| b.get("action")) {
+                    let reply = state
+                        .hub
+                        .call(
+                            &node.registration.id,
+                            NodeOperation::Brain {
+                                execution: ExecutionRef {
+                                    id: request.id.clone(),
+                                    kind: request.kind,
+                                },
+                                action: "capability_probe".into(),
+                                input: action.clone(),
+                            },
+                        )
+                        .await;
+                    if reply.status >= 300 {
+                        incompatibilities.push(format!("{}: {}", node.registration.id, reply.body));
+                        nodes.retain(|n| n.registration.id != node.registration.id);
+                        continue;
+                    }
+                }
+                break node;
             };
             let index = ExecutionIndex {
                 id: request.id.clone(),
@@ -218,10 +251,7 @@ pub async fn dispatch_command_as(
         Ok(Some(index))
             if identity.is_some_and(|i| !i.is_admin() && index.kind != ExecutionKind::Operator) =>
         {
-            return RpcReply::error(
-                403,
-                "non-admin roles may only command operator executions",
-            );
+            return RpcReply::error(403, "non-admin roles may only command operator executions");
         }
         Ok(Some(index))
             if index.kind == ExecutionKind::System
@@ -298,6 +328,18 @@ pub async fn command_id(state: &AppState, id: &str, command: ExecutionCommand) -
             Ok(permit) => Some(permit),
             Err(error) => return RpcReply::error(503, error),
         }
+    } else {
+        None
+    };
+    let _brain_control = if state
+        .fleet
+        .index(id)
+        .await
+        .ok()
+        .flatten()
+        .is_some_and(|i| i.kind == ExecutionKind::Brain)
+    {
+        Some(state.brain_gate.lock(id).await)
     } else {
         None
     };

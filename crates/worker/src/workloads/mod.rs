@@ -1,4 +1,4 @@
-mod agent;
+pub(crate) mod agent;
 mod dag;
 mod project;
 mod team;
@@ -16,7 +16,8 @@ pub(crate) async fn run(
     cancel: CancellationToken,
     resume: bool,
 ) -> Result<(ExecutionStatus, Value)> {
-    match record.assignment.request.kind {
+    let (status, result) = match record.assignment.request.kind {
+        ExecutionKind::Brain => crate::brain::activate::run(worker, record, config, cancel).await,
         ExecutionKind::Agent | ExecutionKind::Maintenance | ExecutionKind::Operator => {
             agent::run(worker, record, config, cancel, resume).await
         }
@@ -25,5 +26,6 @@ pub(crate) async fn run(
         ExecutionKind::Team => team::run(worker, record, config, cancel, resume).await,
         ExecutionKind::System => anyhow::bail!("system team execution is retired"),
         ExecutionKind::Project => project::run(worker, record, cancel).await,
-    }
+    }?;
+    crate::brain::output::normalize(worker, record, status, result).await
 }

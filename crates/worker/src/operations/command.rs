@@ -13,6 +13,9 @@ pub(super) async fn command(
         return Ok(reply);
     }
     let id = execution.id.as_str();
+    if execution.kind == ExecutionKind::Brain {
+        return crate::brain::api::handle(worker, execution, &command.action, command.input).await;
+    }
     let record = worker.inner.journal.lock().await.records.get(id).cloned();
     if record.as_ref().is_some_and(|record| {
         record.assignment.request.kind == ExecutionKind::System

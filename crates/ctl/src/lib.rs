@@ -107,6 +107,14 @@ pub async fn run(cli: Cli) -> anyhow::Result<i32> {
         out::note("no command given; see `opencoder-cli --help`");
         return Ok(64);
     };
+    if let Command::Brain(cmd::brain::BrainCmd::ActivateLocal {
+        context,
+        config,
+        output,
+    }) = &command
+    {
+        return cmd::brain::ontology::activate(context, config, output).await;
+    }
     let ctx: Ctx = ctx::resolve(
         cli.server.as_deref(),
         cli.token.as_deref(),

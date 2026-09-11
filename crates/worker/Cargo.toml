@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 opencoder-core.workspace = true
+opencoder-brain.workspace = true
 opencoder-node.workspace = true
 opencoder-web.workspace = true
 opencoder-session.workspace = true

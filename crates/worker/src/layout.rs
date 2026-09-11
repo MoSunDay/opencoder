@@ -17,7 +17,8 @@ pub struct DirectoryLayout {
 /// in-memory journal from these directories on restart, so the list must
 /// stay in lockstep with `kind_root` writers — a missing kind silently
 /// drops its records (and their queued work) across a node restart.
-pub(crate) const ALL_KINDS: [ExecutionKind; 8] = [
+pub(crate) const ALL_KINDS: [ExecutionKind; 9] = [
+    ExecutionKind::Brain,
     ExecutionKind::Agent,
     ExecutionKind::Dag,
     ExecutionKind::Team,

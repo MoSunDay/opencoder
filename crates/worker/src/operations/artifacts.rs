@@ -30,6 +30,32 @@ pub(super) async fn read_request(worker: &Worker, request: ArtifactRequest) -> R
     if let Some(reply) = super::validate_reference(worker, &request.execution).await? {
         return Ok(reply);
     }
+    if request.step == "brain-result" && request.file == "output.json" {
+        let managed = worker
+            .inner
+            .journal
+            .lock()
+            .await
+            .records
+            .get(&request.execution.id)
+            .is_some_and(|r| r.assignment.request.input.get("_brain").is_some());
+        if !managed {
+            return Ok(RpcReply::error(404, "managed result not found"));
+        }
+        let path = worker
+            .inner
+            .layout
+            .execution_dir(request.execution.kind, &request.execution.id)?
+            .join("brain-result/output.json");
+        return read_chunk(
+            &path,
+            &request.step,
+            &request.file,
+            request.offset,
+            request.version.as_deref(),
+        )
+        .await;
+    }
     if request.execution.kind == ExecutionKind::Project {
         return super::query::project::artifact(worker, request).await;
     }
@@ -103,6 +129,19 @@ async fn read_fields(
     let path = path.canonicalize()?;
     if !path.starts_with(root) {
         bail!("artifact path escaped execution directory");
+    }
+    read_chunk(&path, step, name, offset, expected_version).await
+}
+
+async fn read_chunk(
+    path: &std::path::Path,
+    step: &str,
+    name: &str,
+    offset: u64,
+    expected_version: Option<&str>,
+) -> Result<RpcReply> {
+    if !path.is_file() {
+        return Ok(RpcReply::error(404, "artifact not available"));
     }
     let mut file = tokio::fs::File::open(path).await?;
     let metadata = file.metadata().await?;

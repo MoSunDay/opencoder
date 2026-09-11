@@ -48,11 +48,11 @@ pub(in crate::operations) async fn dag_steps(
     let execution_status = status.as_str();
     match step {
         Some(step) => {
-            let meta = step_meta(&root, &execution.id, &step).await;
+            let meta = step_meta(&root, &execution.id, &step).await?;
             let output = if outcome_status(&meta) == "pending" {
                 Value::Null
             } else {
-                step_output(&root, &execution.id, &step).await
+                step_output(&root, &execution.id, &step).await?
             };
             bounded_reply(json!({
                 "run_id": execution.id,
@@ -69,9 +69,11 @@ pub(in crate::operations) async fn dag_steps(
             let mut rows = Vec::with_capacity(names.len());
             let mut statuses = Vec::with_capacity(names.len());
             for name in &names {
-                let meta = step_meta(&root, &execution.id, name).await;
+                let meta = step_meta(&root, &execution.id, name).await?;
                 statuses.push(outcome_status(&meta));
-                rows.push(json!({"name": name, "status": outcome_status(&meta), "error": meta["error"]}));
+                rows.push(
+                    json!({"name": name, "status": outcome_status(&meta), "error": meta["error"]}),
+                );
             }
             let (done, error, cancelled, pending) = count_statuses(&statuses);
             bounded_reply(json!({
@@ -103,8 +105,7 @@ fn spec_step_names(definition: Option<&Value>) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// Map one step's `meta.json` to its progress status; missing/unreadable/
-/// unparseable meta or an unknown outcome folds to `pending`. Pure.
+/// Project validated metadata; Null means no committed step receipt.
 fn outcome_status(meta: &Value) -> &'static str {
     match meta["outcome"].as_str() {
         Some("done") => "done",
@@ -127,30 +128,31 @@ fn count_statuses(statuses: &[&'static str]) -> (usize, usize, usize, usize) {
     })
 }
 
-/// Read one step's `meta.json`; IO/parse failures (including a not-yet-run
-/// step) yield `Null` so callers see `pending` instead of an error.
-async fn step_meta(root: &Path, run_id: &str, name: &str) -> Value {
-    let dir = match opencoder_dag::artifacts::step_dir(root, run_id, name) {
-        Ok(dir) => dir,
-        Err(_) => return Value::Null,
-    };
+/// Only a missing metadata file means the step has not run. Corruption and
+/// I/O failures remain visible rather than projecting a false pending state.
+async fn step_meta(root: &Path, run_id: &str, name: &str) -> Result<Value> {
+    let dir = opencoder_dag::artifacts::step_dir(root, run_id, name).map_err(anyhow::Error::msg)?;
     match tokio::fs::read(dir.join("meta.json")).await {
-        Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or(Value::Null),
-        Err(_) => Value::Null,
+        Ok(bytes) => {
+            let value: Value = serde_json::from_slice(&bytes)?;
+            anyhow::ensure!(
+                matches!(
+                    value["outcome"].as_str(),
+                    Some("done" | "error" | "cancelled")
+                ),
+                "unknown DAG step outcome"
+            );
+            Ok(value)
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Value::Null),
+        Err(error) => Err(error.into()),
     }
 }
-
-/// Read one step's `output.json` (always written for finished steps;
-/// `Value::Null` when absent or unparseable).
-async fn step_output(root: &Path, run_id: &str, name: &str) -> Value {
-    let dir = match opencoder_dag::artifacts::step_dir(root, run_id, name) {
-        Ok(dir) => dir,
-        Err(_) => return Value::Null,
-    };
-    match tokio::fs::read(dir.join("output.json")).await {
-        Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or(Value::Null),
-        Err(_) => Value::Null,
-    }
+async fn step_output(root: &Path, run_id: &str, name: &str) -> Result<Value> {
+    let dir = opencoder_dag::artifacts::step_dir(root, run_id, name).map_err(anyhow::Error::msg)?;
+    Ok(serde_json::from_slice(
+        &tokio::fs::read(dir.join("output.json")).await?,
+    )?)
 }
 
 #[cfg(test)]
@@ -193,7 +195,8 @@ mod tests {
             vec!["first".to_string(), "second".to_string()]
         );
         // Legacy shape: the definition itself carries the steps array.
-        let legacy = json!({"name":"d","steps":[{"name":"only","kind":{"type":"agent","prompt":"a"}}]});
+        let legacy =
+            json!({"name":"d","steps":[{"name":"only","kind":{"type":"agent","prompt":"a"}}]});
         assert_eq!(spec_step_names(Some(&legacy)), vec!["only".to_string()]);
         assert!(spec_step_names(None).is_empty());
     }

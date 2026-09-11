@@ -191,6 +191,7 @@ fn request_report(trigger: &mpsc::Sender<()>) {
 struct PreparedReport {
     snapshot: NodeSnapshot,
     records: Vec<ExecutionIndex>,
+    brain: Vec<NodeFrame>,
 }
 
 async fn prepare_report(service: &dyn NodeService) -> Result<PreparedReport> {
@@ -198,6 +199,7 @@ async fn prepare_report(service: &dyn NodeService) -> Result<PreparedReport> {
     Ok(PreparedReport {
         snapshot: service.snapshot(),
         records,
+        brain: service.brain_frames().await?,
     })
 }
 
@@ -235,6 +237,9 @@ where
             },
         )
         .await?;
+    }
+    for frame in &report.brain {
+        send(writer, frame).await?;
     }
     send(
         writer,

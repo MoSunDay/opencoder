@@ -15,7 +15,7 @@ let state = {
   // null (never stored) falls back to the build-time embedded base; an
   // explicitly stored '' still means same-origin and wins over the embed.
   base: localStorage.getItem(BASE_KEY) ?? embeddedBase(),
-  page: 'nodes', // 'nodes' | 'chat' | 'dag' | 'team' | 'topics'
+  page: new URLSearchParams(window.location.search).has('brain_run') ? 'brain' : 'nodes', // 'nodes' | 'chat' | 'dag' | 'team' | 'topics'
   preselectNode: null, // node id the fleet tab asked chat to open
   nodes: [], // last fleet snapshot shared between tabs
   conn: 'init', // 'init' | 'ok' | 'fail'

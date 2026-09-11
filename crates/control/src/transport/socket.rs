@@ -55,6 +55,7 @@ async fn serve(
     let id = registration.id.clone();
     let generation = snapshot.generation.clone();
     let mut reports = ReportCollector::default();
+    let brain_capacity = Arc::new(tokio::sync::Semaphore::new(32));
     let mut initial_admission_request;
     let (tx, mut rx) = tokio::sync::mpsc::channel::<SocketCommand>(128);
     {
@@ -103,6 +104,18 @@ async fn serve(
                         _ => anyhow::bail!("invalid node frame"),
                     };
                     match frame {
+                        NodeFrame::Brain { execution, action, input } => {
+                            if !state.hub.touch(&id, &generation).await { continue; }
+                            if let Ok(permit) = brain_capacity.clone().try_acquire_owned() {
+                                let state = state.clone(); let node = id.clone();
+                                tokio::spawn(async move {
+                                    let _permit = permit;
+                                    if let Err(error) = crate::api::brain_runs::effects::deliver(state,node,execution,action,input).await {
+                                        tracing::warn!(%error,"brain delivery remains pending for replay");
+                                    }
+                                });
+                            }
+                        }
                         NodeFrame::Hello { .. } => anyhow::bail!("duplicate hello"),
                         NodeFrame::Snapshot { snapshot } => state.hub.snapshot(&id, &generation, snapshot).await,
                         NodeFrame::IndexReport { report } => {

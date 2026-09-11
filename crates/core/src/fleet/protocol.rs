@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 // v7 pins named Harness profiles and registered binary Runner definitions.
-pub const PROTOCOL_VERSION: u32 = 8;
+pub const PROTOCOL_VERSION: u32 = 9;
 pub const HEARTBEAT_MS: u64 = 5_000;
 pub const STALE_MS: i64 = 20_000;
 pub const MAX_FRAME_BYTES: usize = 2 * 1024 * 1024;
@@ -14,6 +14,7 @@ pub const MAX_FRAME_BYTES: usize = 2 * 1024 * 1024;
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ExecutionKind {
+    Brain,
     Agent,
     Dag,
     Team,
@@ -27,6 +28,7 @@ pub enum ExecutionKind {
 impl ExecutionKind {
     pub fn prefix(self) -> &'static str {
         match self {
+            Self::Brain => "brain",
             Self::Agent => "agent",
             Self::Dag => "dag",
             Self::Team => "team",
@@ -199,6 +201,12 @@ pub struct NodeView {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "operation", rename_all = "snake_case")]
 pub enum NodeOperation {
+    Brain {
+        execution: ExecutionRef,
+        action: String,
+        #[serde(default)]
+        input: Value,
+    },
     Admission {
         command: NodeAdmissionCommand,
     },
@@ -290,6 +298,11 @@ pub enum ServerFrame {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum NodeFrame {
+    Brain {
+        execution: ExecutionRef,
+        action: String,
+        input: Value,
+    },
     Hello {
         registration: NodeRegistration,
         snapshot: NodeSnapshot,

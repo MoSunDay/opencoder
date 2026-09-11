@@ -15,8 +15,11 @@
 //! Both seams (`Store`, `ChatStream`) are the same abstractions the rest of
 //! the workspace builds on, so storage and embedding backends stay swappable.
 
+pub mod activation;
 pub mod domain;
 pub mod error;
+pub mod execution;
+pub mod ontology;
 pub mod plan;
 pub mod planning;
 pub mod runtime;

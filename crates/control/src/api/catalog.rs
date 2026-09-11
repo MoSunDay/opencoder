@@ -128,6 +128,14 @@ pub async fn resolve(
 ) -> Result<Option<Value>, RpcReply> {
     let fail = |e: anyhow::Error| RpcReply::error(500, format!("definition: {e:#}"));
     let definition = match request.kind {
+        ExecutionKind::Brain => {
+            let body: opencoder_core::brain::BrainRequest =
+                serde_json::from_value(request.input.clone())
+                    .map_err(|e| RpcReply::error(400, e.to_string()))?;
+            opencoder_brain::execution::initialize(&request.id, body, 0)
+                .map_err(|e| RpcReply::error(400, e.to_string()))?;
+            Some(request.input.clone())
+        }
         ExecutionKind::Team | ExecutionKind::Dag => {
             if request.kind == ExecutionKind::Team && request.target.as_deref() == Some("system") {
                 return Err(RpcReply::error(400, "system team execution is retired"));

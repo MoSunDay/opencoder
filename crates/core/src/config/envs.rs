@@ -1,4 +1,4 @@
-//! Named environment config sets (`~/.opencoder/envs/<name>/`).
+//! Named environment config sets (`<share>/envs/<name>/`, or the local fallback `~/.opencoder/envs/<name>/`).
 //!
 //! An env is a directory holding one complete opencoder config snapshot:
 //! `config.json` plus the four domain files (`mcp.json` / `cli.json` /
@@ -42,9 +42,41 @@ fn json_kind_name(v: &serde_json::Value) -> &'static str {
 /// Env name length cap (keeps paths and TUI rows sane).
 const MAX_NAME_LEN: usize = 48;
 
-/// `~/.opencoder/envs/` — the env root (never created by read-only calls).
+/// Shared Env root. When a share directory is configured, Env snapshots live
+/// under `<share>/envs` so the control plane and every NFS-connected node use
+/// the same files. The explicit `OPENCODER_SHARE_DIR` override wins; otherwise
+/// the global config's `agent.share_dir` is discovered without loading the
+/// effective config (which itself depends on the active Env). The historical
+/// local path remains the fallback for installations without a share.
 pub fn envs_home() -> Option<PathBuf> {
-    global_opencoder_home().map(|home| home.join("envs"))
+    configured_share_dir()
+        .map(|dir| dir.join("envs"))
+        .or_else(|| global_opencoder_home().map(|home| home.join("envs")))
+}
+
+fn configured_share_dir() -> Option<PathBuf> {
+    if let Some(value) = super::env::env_get("OPENCODER_SHARE_DIR") {
+        let value = value.trim();
+        if !value.is_empty() {
+            return Some(PathBuf::from(value));
+        }
+    }
+    let home = global_opencoder_home()?;
+    for path in [home.join("config.json"), home.join("opencoder.json")] {
+        let Ok(raw) = std::fs::read_to_string(path) else {
+            continue;
+        };
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) else {
+            continue;
+        };
+        if let Some(dir) = value.pointer("/agent/share_dir").and_then(|v| v.as_str()) {
+            let dir = dir.trim();
+            if !dir.is_empty() {
+                return Some(PathBuf::from(dir));
+            }
+        }
+    }
+    None
 }
 
 /// `~/.opencoder/envs/<name>/` for a validated `name`.

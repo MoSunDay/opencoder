@@ -86,10 +86,14 @@ impl PlaybookGate {
 
 /// Dispatch fingerprint: one digest over the canonical
 /// `{playbook}\u{1}{situation}\u{1}{node}` tuple — a request_id reused with
-/// any of those changed is a client bug, not an idempotent retry.
+/// any of those changed is a client bug, not an idempotent retry. The
+/// situation is digested trimmed because `render_prompt` substitutes it
+/// trimmed: "x" and " x " render identical prompts, so they are the same
+/// dispatch (idempotent retry), not a 409.
 fn dispatch_fingerprint(id: &str, situation: &str, node_id: Option<&str>) -> String {
     opencoder_brain::situation_digest(&format!(
-        "{id}\u{1}{situation}\u{1}{}",
+        "{id}\u{1}{}\u{1}{}",
+        situation.trim(),
         node_id.unwrap_or("")
     ))
 }
@@ -552,5 +556,12 @@ mod tests {
         assert_ne!(base, dispatch_fingerprint("pbk-2", "s1", Some("node-1")));
         assert_ne!(base, dispatch_fingerprint("pbk", "s2", Some("node-1")));
         assert_ne!(base, dispatch_fingerprint("pbk", "s1", None));
+        // Whitespace-only differences render identical prompts
+        // (render_prompt substitutes trimmed), so they digest identically —
+        // an idempotent retry, never a 409.
+        assert_eq!(base, dispatch_fingerprint("pbk", " s1 ", Some("node-1")));
+        assert_eq!(base, dispatch_fingerprint("pbk", "\n s1\t", Some("node-1")));
+        // Content differences beyond trimming remain distinct fingerprints.
+        assert_ne!(base, dispatch_fingerprint("pbk", " s1x", Some("node-1")));
     }
 }

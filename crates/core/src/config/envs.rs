@@ -223,6 +223,10 @@ pub(crate) fn is_under_envs_home(path: &Path) -> bool {
 /// pre-existing env file that predates the contract (e.g. written by an
 /// older binary with a plain `fs::write`) is chmod-converged on the next
 /// save, since `OpenOptions::mode` only applies at creation time.
+pub fn write_config_save_public(target: &Path, body: &str) -> io::Result<()> {
+    write_config_save(target, body)
+}
+
 pub(crate) fn write_config_save(target: &Path, body: &str) -> io::Result<()> {
     let private = is_under_envs_home(target);
     let result = write_file_maybe_private(target, body, private);

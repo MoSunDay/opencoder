@@ -1,4 +1,4 @@
-Commit: (working-tree, 基于 8b260caf)
+Commit: 56cc4b28e46dcc38ad2d3ab798413940c3155f93
 
 # DAG wasm 显式版本 pin：`tool@v3.wasm` token 语法 + 受理冻结采纳
 

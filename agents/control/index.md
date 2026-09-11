@@ -1,4 +1,4 @@
-Commit: b465f440381bd009dc9bd3a8192ad88eab44cede
+Commit: 86567de28148c84077cdc77229bff38b5b5ab11e
 
 # control 模块
 
@@ -9,7 +9,7 @@ Commit: b465f440381bd009dc9bd3a8192ad88eab44cede
 - `crates/control/src/bootstrap.rs` — 仅开 control.db + definitions.db；BrainClient
 - `crates/control/src/transport/hub.rs` — Hub：协议 v8 校验；连接/RPC/预留仅内存
 - `crates/control/src/api/executions/mod.rs` — `submit_inner` 提交选点：placement 锁内解析定义并预留；按 ID 路由明细/控制/SSE/产物
-- `crates/control/src/api/catalog.rs` — nodes/maintain/teams/dag_defs/resolve 维护与定义解析
+- `crates/control/src/api/catalog.rs` — 节点列表、注册删除、维护，以及 teams/dag_defs/resolve 定义解析
 - `crates/control/src/api/compat/` — 旧 Chat/DAG/TODO/Project 兼容路由
 - `crates/control/src/api/settings/` — harness/codex 定义；registered 管 profile/runner
 - `crates/control/src/routes.rs` — /api/harnesses/codex/profiles、/api/runners
@@ -26,6 +26,7 @@ Commit: b465f440381bd009dc9bd3a8192ad88eab44cede
 - 执行明细向归属 Node 实时查询，全局索引不存运行内容。
 - system 团队执行已退役；跨节点维护走 POST /api/nodes/:id/maintenance。
 - 认证开启时 seed token 恒等 admin；换启动 token 重启会把表内 `admin` 行 digest 重指新 token（轮换即吊销旧 seed 凭证）。非 admin 仅读 + operator 提交/命令（operator 为宿主机直跑通道）；无 Identity 视为 admin（本地模式）。
+- 节点删除只移除 FleetStore 的 `fleet_nodes` 注册行；在线连接返回 409，离线注册删除后执行索引和节点本地任务数据仍由各自生命周期管理。
 
 ## 相关
 

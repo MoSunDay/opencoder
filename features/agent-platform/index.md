@@ -1,4 +1,4 @@
-Commit: b465f440381bd009dc9bd3a8192ad88eab44cede
+Commit: 86567de28148c84077cdc77229bff38b5b5ab11e
 
 # Agent 调度平台 — Server 调度、Node 执行、Web/CLI 管理
 
@@ -15,7 +15,7 @@ Commit: b465f440381bd009dc9bd3a8192ad88eab44cede
 - crates/node/src/runner.rs — 注册 Runner 执行
 - crates/server/src/main.rs — opencode-server 二进制
 - crates/agent/src/main.rs — opencode-agent 二进制
-- crates/web/spa/src/fleet/nodes.jsx — 节点页与调度配置
+- crates/web/spa/src/fleet/nodes.jsx — 节点页、注册删除与调度配置
 - crates/web/spa/src/fleet/executions.jsx — 全部执行页
 - crates/web/spa/src/fleet/detail/ — 执行详情与回放
 - docs/agent-platform.md — 部署、API 与运行时边界
@@ -27,6 +27,7 @@ Commit: b465f440381bd009dc9bd3a8192ad88eab44cede
 - 执行分配后固定节点，子执行与数据节点闭环
 - Server 索引仅创建时间/ID/类型/节点/状态，明细按 ID 回查节点
 - 节点离线时明细查询明确报错
+- 节点页删除仅移除节点注册；在线节点需先停止服务，执行索引和任务数据保留
 - NFS 只共享 agent 资源，执行固定受理时版本快照
 - 新平台独立存储，不迁移旧 daemon/CLI 历史
 

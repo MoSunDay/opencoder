@@ -339,7 +339,7 @@ impl TeamDefinition {
             || !agents.contains(&self.captain)
             || self.members.iter().any(|m| m.agent.trim().is_empty())
         {
-            return Err("team requires a unique non-empty agent per member and a captain belonging to the team; system is reserved".into());
+            return Err("team requires a unique non-empty agent per member and a captain belonging to the team; the team name 'system' is reserved".into());
         }
         Ok(())
     }

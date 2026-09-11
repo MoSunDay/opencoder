@@ -21,6 +21,12 @@ pub async fn bind(
     {
         return error_400("capability target must name an agent, team or workflow".into());
     }
+    // Targets are stored trimmed so bind and the agent grouping agree on one
+    // agent key (a padded " act" would otherwise group apart from "act").
+    let target = CapabilityTarget {
+        target: target.target.trim().to_string(),
+        ..target
+    };
     match state.store.get_brain_capability(&id).await {
         Ok(Some(_)) => {}
         Ok(None) => return error_404("capability not found"),
@@ -43,8 +49,8 @@ pub async fn target(State(state): State<Arc<AppState>>, Path(id): Path<String>) 
 }
 
 /// Agent name → capability snapshots bound to that agent. Capabilities
-/// without an agent binding (missing, unparsable or non-agent target) are
-/// skipped; BTreeMap keeps the agent order stable.
+/// without an agent binding (missing, unreadable, unparsable or non-agent
+/// target) are skipped; BTreeMap keeps the agent order stable.
 pub(crate) async fn agent_capability_groups(
     state: &AppState,
 ) -> anyhow::Result<Vec<(String, Vec<serde_json::Value>)>> {
@@ -58,7 +64,12 @@ pub(crate) async fn agent_capability_groups(
         {
             Ok(Some(value)) => value,
             Ok(None) => continue,
-            Err(_) => continue,
+            Err(error) => {
+                // Fail-visible: a store read error would otherwise freeze an
+                // empty capability snapshot at team resolve with no trace.
+                tracing::warn!(%error, capability = %capability.capability.id, "capability target read failed; treating capability as unbound");
+                continue;
+            }
         };
         let target: CapabilityTarget = match serde_json::from_value(binding) {
             Ok(target) => target,
@@ -68,7 +79,7 @@ pub(crate) async fn agent_capability_groups(
             continue;
         }
         groups
-            .entry(target.target.clone())
+            .entry(target.target.trim().to_string())
             .or_default()
             .push(json!({
                 "id": capability.capability.id,

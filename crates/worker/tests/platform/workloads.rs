@@ -3,6 +3,7 @@ use base64::Engine;
 
 #[tokio::test]
 async fn project_plan_act_and_new_draft_stay_on_the_assigned_node() {
+    let _config = support::isolated_config();
     let fleet = Fleet::new(2, mock()).await;
     let created = fleet
         .call(
@@ -121,6 +122,7 @@ async fn project_plan_act_and_new_draft_stay_on_the_assigned_node() {
 
 #[tokio::test]
 async fn ordinary_team_stays_on_one_node_and_system_creation_is_retired() {
+    let _config = support::isolated_config();
     let client = mock();
     let fleet = Fleet::new(2, client.clone()).await;
     let coordinator = fleet.nodes[0].registration().id;
@@ -283,6 +285,7 @@ async fn ordinary_team_stays_on_one_node_and_system_creation_is_retired() {
 
 #[tokio::test]
 async fn operator_executions_run_the_host_process_agent_loop() {
+    let _config = support::isolated_config();
     let client = mock();
     let fleet = Fleet::new(1, client.clone()).await;
     client.queue_script(vec![LlmEvent::Completed {

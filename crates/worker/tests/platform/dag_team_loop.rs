@@ -36,6 +36,7 @@ async fn sse_text(fleet: &Fleet, path: &str) -> String {
 
 #[tokio::test]
 async fn dag_saved_definition_dispatch_runs_to_done() {
+    let _config = support::isolated_config();
     let client = mock();
     let fleet = Fleet::new(1, client.clone()).await;
     // The agent step answers with prose around a ```json fence so the run
@@ -98,6 +99,7 @@ async fn dag_saved_definition_dispatch_runs_to_done() {
 
 #[tokio::test]
 async fn team_dispatch_completes_with_final_summary() {
+    let _config = support::isolated_config();
     let client = mock();
     let fleet = Fleet::new(1, client.clone()).await;
     let saved = fleet

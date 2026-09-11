@@ -12,6 +12,7 @@ import { PageShell } from './shell/pageShell.jsx';
 import { MONO_VAR } from './ui/mono.js';
 import { TodoEditor } from './todoEditor.jsx';
 import { TodoRunsPanel } from './todoRunsPanel.jsx';
+import { TodoEnvsPanel } from './envs/todoPanel.jsx';
 import { err, info } from './notice.js';
 
 const { TextArea } = Input;
@@ -316,6 +317,7 @@ export function TodoPanel({ onNotice }) {
       activeKey={tab}
       onChange={setTab}
       items={[
+        { key: 'envs', label: '模板环境与工具', children: <TodoEnvsPanel onNotice={onNotice} /> },
         { key: 'templates', label: '模板', children: <TemplatesTab onNotice={onNotice} onRan={onRan} /> },
         {
           key: 'runs',

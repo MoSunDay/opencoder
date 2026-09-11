@@ -1,5 +1,5 @@
 import { Alert, Button, Descriptions, Space, Spin, Tag, Typography } from 'antd';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { apiGet } from '../../api.js';
 import { Markdown } from '../../project/markdown.jsx';
 import { InlineFields, PayloadWindows } from './fields.jsx';
@@ -20,6 +20,7 @@ function WindowedRows({ initialRows, initialNext, path, render }) {
   const [page, setPage] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  useEffect(() => { if (page === 0) { setRows(initialRows || []); setNextCursor(initialNext ?? null); } }, [initialRows, initialNext, page]);
   const load = async (cursor, targetPage) => {
     if (targetPage === 0 && cursor === null) {
       setRows(initialRows || []); setNextCursor(initialNext ?? null); setPage(0); setError('');
@@ -127,7 +128,7 @@ function TodoDetail({ id, detail }) {
   const page = detail?.workflow?.items_page || {};
   return <div><Typography.Title level={5}>TODO 工作流</Typography.Title><Descriptions size="small" items={[
     { key: 'status', label: '工作流状态', children: workflow.status || '—' },
-    { key: 'progress', label: '当前页', children: `${items.filter((item) => ['completed', 'done'].includes(item.status)).length} / ${items.length} 完成` },
+    { key: 'progress', label: '当前页', children: `${items.filter((item) => ['completed', 'done', 'passed'].includes(item.status)).length} / ${items.length} 完成` },
   ]} /><WindowedRows initialRows={items} initialNext={page.next_ordinal}
     path={asyncPath(`/api/executions/${encodeURIComponent(id)}/todo-items?after_ordinal=`, 'items', 'next_ordinal')}
     render={(rows) => <Space orientation="vertical" style={{ width: '100%' }}>{rows.map((item) => <Space key={item.todo_id || item.id} wrap>

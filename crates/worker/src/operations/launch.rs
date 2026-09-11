@@ -96,7 +96,11 @@ pub(super) async fn launch_locked(
         let (status, result, error) = match outcome {
             Ok((status, result)) => (status, result, None),
             Err(error) => (
-                if cancel.is_cancelled() {
+                if cancel.is_cancelled()
+                    && record.assignment.index.kind == opencoder_core::fleet::ExecutionKind::Brain
+                {
+                    ExecutionStatus::Interrupted
+                } else if cancel.is_cancelled() {
                     ExecutionStatus::Cancelled
                 } else {
                     ExecutionStatus::Error

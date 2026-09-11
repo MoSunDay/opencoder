@@ -384,7 +384,7 @@ export function ChatPanel({ onNotice }) {
   const menuEntries = hasNode ? commandsForInput(input, skills) : [];
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'row', height: '100%', minHeight: 0 }}>
+    <div style={{ display: 'flex', flexDirection: 'row', height: '100%', minHeight: 0, gap: 16 }}>
       <DialogSidebar
         nodes={nodes}
         nodeSel={nodeSel}
@@ -399,7 +399,7 @@ export function ChatPanel({ onNotice }) {
 
       <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
         {hasNode ? (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
             <Segmented
               size="small"
               value={sessionAgent}
@@ -414,8 +414,8 @@ export function ChatPanel({ onNotice }) {
           </div>
         ) : null}
 
-        {!nodeReady && <Alert type="info" showIcon style={{ marginBottom: 8 }} title={nodesError || (nodeSel ? '所选节点当前不可执行，请选择可用节点' : '请先选择执行节点')} />}
-        <div style={{ flex: 1, minHeight: 0, overflow: 'auto', border: '1px solid var(--oc-border)', borderRadius: 8, padding: '8px 16px' }}>
+        {!nodeReady && <Alert type="info" showIcon style={{ marginBottom: 12 }} title={nodesError || (nodeSel ? '所选节点当前不可执行，请选择可用节点' : '请先选择执行节点')} />}
+        <div style={{ flex: 1, minHeight: 0, overflow: 'auto', border: '1px solid var(--oc-border)', borderRadius: 10, padding: '12px 16px' }}>
           <Spin spinning={connecting} description="等待首个事件…">
             <TranscriptView
               turns={stream.turns}

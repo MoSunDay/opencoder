@@ -136,8 +136,29 @@ body {
   visibility: hidden;
   pointer-events: none;
 }
+/* Pin the collapse toggle to the bottom of the sider: the sider children
+   are a flex column, the menu grows, and margin-top:auto sinks the button. */
+.fleet-sidebar .ant-layout-sider-children {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+}
+.fleet-sidebar .ant-layout-sider-children > .ant-menu {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
 .fleet-nav-toggle {
-  margin: 8px 8px 0;
+  margin: auto 8px 8px;
+  width: calc(100% - 16px);
+  border-top: 1px solid var(--oc-border);
+  border-radius: 0 0 6px 6px;
+  padding-top: 10px;
+  height: auto;
+}
+.fleet-sidebar.ant-layout-sider-collapsed .fleet-nav-toggle {
+  margin: auto 8px 8px;
   width: calc(100% - 16px);
 }
 .fleet-content {

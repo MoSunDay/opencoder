@@ -5,6 +5,7 @@ use libsql::{Builder, Connection, Database};
 use std::path::Path;
 use tokio::sync::Mutex;
 
+mod brain;
 mod records;
 mod report;
 mod schema;
@@ -27,6 +28,7 @@ impl FleetStore {
         conn.execute_batch("PRAGMA busy_timeout=30000; PRAGMA journal_mode=WAL;")
             .await?;
         schema::initialize(&conn).await?;
+        brain::initialize(&conn).await?;
         Ok(Self {
             _db: db,
             conn,

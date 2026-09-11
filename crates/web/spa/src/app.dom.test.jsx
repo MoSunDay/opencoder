@@ -369,7 +369,7 @@ describe('App shell landmarks (antd 6 under jsdom)', () => {
     const brainItem = screen.getByRole('menuitem', { name: /大脑调度/ });
     expect(brainItem.classList.contains('ant-menu-item-selected')).toBe(true);
     // …and the panel behind it renders (agent-category page).
-    expect(await screen.findByText('需求执行')).toBeTruthy();
+    expect(await screen.findByText('工作台')).toBeTruthy();
   });
 
   it('scopes the project category to its three menu items', async () => {

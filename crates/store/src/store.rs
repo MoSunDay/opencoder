@@ -318,6 +318,9 @@ pub trait Store: Send + Sync {
     ) -> Result<TodoEventPage> {
         anyhow::bail!("bounded todo event pagination is unsupported by this store")
     }
+    async fn last_todo_event_seq(&self, _workflow_id: &str) -> Result<i64> {
+        anyhow::bail!("todo event watermark is unsupported by this store")
+    }
     async fn todo_event_payload_chunk(
         &self,
         _workflow_id: &str,
@@ -490,10 +493,7 @@ pub trait Store: Send + Sync {
     ) -> Result<Option<crate::users::PlatformUser>> {
         Ok(None)
     }
-    async fn find_user_by_name(
-        &self,
-        _name: &str,
-    ) -> Result<Option<crate::users::PlatformUser>> {
+    async fn find_user_by_name(&self, _name: &str) -> Result<Option<crate::users::PlatformUser>> {
         Ok(None)
     }
     async fn list_users(&self) -> Result<Vec<crate::users::PlatformUser>> {

@@ -11,5 +11,8 @@ pub trait NodeService: Send + Sync {
     fn snapshot(&self) -> NodeSnapshot;
     fn changes(&self) -> tokio::sync::watch::Receiver<u64>;
     async fn indexes(&self) -> anyhow::Result<Vec<ExecutionIndex>>;
+    async fn brain_frames(&self) -> anyhow::Result<Vec<NodeFrame>> {
+        Ok(Vec::new())
+    }
     async fn handle(&self, operation: NodeOperation) -> RpcReply;
 }

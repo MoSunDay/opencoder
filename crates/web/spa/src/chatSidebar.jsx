@@ -25,7 +25,7 @@ export function DialogSidebar({
         flexDirection: 'column',
         minHeight: 0,
         borderRight: '1px solid var(--oc-border)',
-        paddingRight: 12,
+        paddingRight: 16,
       }}
     >
       <Select

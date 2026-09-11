@@ -48,9 +48,13 @@ pub(crate) async fn native(
         .header("content-type", "application/json")
         .body(Body::from(text))?;
     read_reply(
-        opencoder_web::build_app(worker.inner.state.clone(), None, false)
-            .oneshot(request)
-            .await?,
+        opencoder_web::build_app(
+            crate::brain::workdir::native_state(worker, path).await?,
+            None,
+            false,
+        )
+        .oneshot(request)
+        .await?,
     )
     .await
 }
@@ -157,10 +161,12 @@ pub(super) async fn events(
         };
         source_more = page.more;
         page.events.into_iter().map(|e| json!({"seq":e.seq,"kind":e.sse_kind.unwrap_or_else(|| "status".into()),"data":e.payload,"ts":e.ts})).collect()
-    } else if record
-        .as_ref()
-        .is_some_and(|r| r.assignment.request.kind == ExecutionKind::Todos)
-    {
+    } else if record.as_ref().is_some_and(|r| {
+        matches!(
+            r.assignment.request.kind,
+            ExecutionKind::Todos | ExecutionKind::Brain
+        )
+    }) {
         let page = match worker
             .inner
             .state

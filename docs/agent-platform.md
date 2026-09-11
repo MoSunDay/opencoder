@@ -111,7 +111,7 @@ DAG 的非 Agent 步骤为 WebAssembly WASI 命令模块。默认 `sandbox: in_p
 
 ## 发布与回滚
 
-Fleet 协议 v7 要求 Server 与 Node 成套更新，旧版本连接会被拒绝。Harness 值复用私有定义库，队列和节点调度配置保存在 Node 数据目录。
+Fleet 协议 v9 要求 Server 与 Node 成套更新，旧版本连接会被拒绝。Harness 值复用私有定义库，队列和节点调度配置保存在 Node 数据目录。
 
 1. 在干净提交上运行 `scripts/platform/release/build.sh --output <新目录>`。脚本先验证 SPA 无漂移，再一次构建 `opencoder`、`opencoder-cli`、`opencoder-server`、`opencoder-agent`；四者的 `--build-info` 必须具有相同 commit、protocol 和 SPA digest，`manifest.json` 与 `SHA256SUMS` 绑定全部二进制。真实 dirty 工作树会被拒绝。
 2. 调用 `POST /api/admin/drain` 先持久冻结 Server 与当前在线 Node。最多观察 10 分钟让长任务自然完成；仍未完成的任务（包括尚未启动的 pending）逐条显式 interrupt，并等待 `GET /api/admin/drain` 返回 `control_drained=true`。取消后的执行不能恢复；interrupt 后只能在原 Node 显式恢复。30 秒只用于 interrupt/进程树清理，不能用作长任务的自然 drain 时限。

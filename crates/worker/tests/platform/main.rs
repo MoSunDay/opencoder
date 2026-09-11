@@ -7,6 +7,7 @@ use support::*;
 
 #[tokio::test]
 async fn brain_preview_binding_and_dispatch_are_idempotent() {
+    let _config = support::isolated_config();
     let client = mock();
     let fleet = Fleet::new(1, client.clone()).await;
     let created=fleet.call("POST","/api/brain/capabilities",json!({"capability_type":"agent","summary":"review code","input_desc":"code task","output_desc":"review","eng_inputs":["review code"]})).await;
@@ -151,6 +152,7 @@ async fn brain_preview_binding_and_dispatch_are_idempotent() {
 
 #[tokio::test]
 async fn concurrent_brain_request_plans_once_and_creates_one_execution() {
+    let _config = support::isolated_config();
     let client = mock();
     let fleet = Fleet::new(1, client.clone()).await;
     let created = fleet
@@ -227,6 +229,7 @@ async fn concurrent_brain_request_plans_once_and_creates_one_execution() {
 
 #[tokio::test]
 async fn existing_brain_candidate_never_replans_or_moves_nodes() {
+    let _config = support::isolated_config();
     let client = mock();
     let fleet = Fleet::new(2, client.clone()).await;
     let owner = fleet.nodes[0].registration().id;

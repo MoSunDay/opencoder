@@ -1,4 +1,4 @@
-Commit: c36ac68df313ec108549ed5b95756eb37edf5f69
+Commit: e50ffc433bca866fd17bd571a74f1bdf17705dea
 
 # store 模块
 
@@ -17,6 +17,8 @@ Commit: c36ac68df313ec108549ed5b95756eb37edf5f69
 - `src/libsql_store/project_runs.rs` — run 文本单字段 64 KiB 上限、整页 512 KiB 预算（`src/project_types.rs`）。
 - `src/libsql_store/{project.rs,project_runs.rs,schema/project_relations.rs}` — project 三表 + 运行留痕。
 - `src/fleet/` — `FleetStore` 独立 control.db：节点 + 五字段 execution_index。
+- `src/fleet/brain.rs` — brain_plan_versions 追加式版本与 brain_resource_claims 持久读写占用；计划头/稳定指针复用 fleet_definitions。
+- `Store::last_todo_event_seq` — 根状态与事件流快照的水位接缝。
 - `src/sql_store/` — feature-gate `mysql`/`starrocks` 后端，仅覆盖 project 面。
 - `src/project_factory.rs` — `open_project_store` 返回 `Arc<dyn ProjectStore>`。
 - `src/project_executor_spec.rs` — `TeamSpec`/`BrainRoutes`/`validate_spec` 纯类型。
@@ -31,8 +33,11 @@ Commit: c36ac68df313ec108549ed5b95756eb37edf5f69
 - `team_topic_runs` created_at 首插冻结；`brain_plans.tree_json` 对 store opaque。
 - StarRocks 全语句走 text 协议、无跨语句事务：跨表原子提交写前拒绝。
 - 删除数据必须由显式上层操作触发。
+- FleetStore 共用连接的公开读写都通过 gate；显式事务内部只调用已持锁 helper，避免无关写入混入事务或重入锁。
+- Brain 资源占用仅由确定结束回执释放，保留记录且无时间到期；成功的状态/事件提交先于来源通知确认。
 
 ## 相关
+- [brain](../brain/index.md) — 计划与根状态消费方。
 - [agents/session](../session/index.md) — 主要消费方。
 - [agents/core](../core/index.md) — HarnessRuntime 类型来源。
 - [agents/project](../project/index.md) — project 运行留痕边界。

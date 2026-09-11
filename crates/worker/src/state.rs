@@ -38,6 +38,7 @@ pub(crate) struct Inner {
     pub registration: NodeRegistration,
     pub generation: String,
     pub sequence: AtomicU64,
+    pub brain_frame_cursor: AtomicU64,
     pub persistence_error: std::sync::Mutex<Option<String>>,
     pub admission_state: AdmissionState,
     pub runtime: WorkerRuntime,
@@ -86,6 +87,9 @@ impl Worker {
             .map_err(|e| anyhow::anyhow!("node data directory already in use: {e}"))?;
         let admission_state = AdmissionState::load(&data_dir)?;
         opencoder_dag_runtime::sandbox::runc::cleanup_owned_containers(&[
+            layout
+                .checked_kind_root(ExecutionKind::Brain)?
+                .join("bundles"),
             layout
                 .checked_kind_root(ExecutionKind::Dag)?
                 .join("bundles"),
@@ -143,6 +147,7 @@ impl Worker {
             client_override: client.clone(),
         });
         let mut kinds = vec![
+            ExecutionKind::Brain,
             ExecutionKind::Agent,
             ExecutionKind::Team,
             ExecutionKind::Todos,
@@ -192,6 +197,7 @@ impl Worker {
                 },
                 generation: ulid::Ulid::new().to_string(),
                 sequence: AtomicU64::new(0),
+                brain_frame_cursor: AtomicU64::new(0),
                 persistence_error: std::sync::Mutex::new(None),
                 admission_state,
                 runtime,

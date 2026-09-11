@@ -15,6 +15,7 @@ pub fn build_app(state: Arc<AppState>, token: Option<String>, web: bool) -> Rout
     let auth_store = state.store.clone();
     let mut app = Router::<Arc<AppState>>::new()
         .merge(api::compat::routes())
+        .merge(api::brain_runs::routes())
         .route("/api/health", get(|| async { axum::Json(json!({"ok":true,"protocol_version":opencoder_core::fleet::PROTOCOL_VERSION,"role":"control","commit":opencoder_core::version::VERSION_LONG})) }))
         .route("/api/ready", get(admission::ready))
         .route(

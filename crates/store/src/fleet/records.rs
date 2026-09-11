@@ -18,7 +18,11 @@ impl FleetStore {
     /// remain in execution_index and in the node's own durable store.
     pub async fn unregister(&self, id: &str) -> Result<bool> {
         let _guard = self.gate.lock().await;
-        Ok(self.conn.execute("DELETE FROM fleet_nodes WHERE id=?1", params![id]).await? > 0)
+        Ok(self
+            .conn
+            .execute("DELETE FROM fleet_nodes WHERE id=?1", params![id])
+            .await?
+            > 0)
     }
     pub async fn nodes(&self) -> Result<Vec<NodeRegistration>> {
         let _guard = self.gate.lock().await;
@@ -110,6 +114,10 @@ impl FleetStore {
         })
     }
     pub async fn definition(&self, kind: &str, id: &str) -> Result<Option<Value>> {
+        let _guard = self.gate.lock().await;
+        self.definition_locked(kind, id).await
+    }
+    pub(super) async fn definition_locked(&self, kind: &str, id: &str) -> Result<Option<Value>> {
         let mut rows = self
             .conn
             .query(
@@ -123,6 +131,7 @@ impl FleetStore {
             .transpose()
     }
     pub async fn definitions(&self, kind: &str) -> Result<Vec<Value>> {
+        let _guard = self.gate.lock().await;
         let mut rows = self
             .conn
             .query(
@@ -137,6 +146,7 @@ impl FleetStore {
         Ok(result)
     }
     pub async fn delete_definition(&self, kind: &str, id: &str) -> Result<()> {
+        let _guard = self.gate.lock().await;
         self.conn
             .execute(
                 "DELETE FROM fleet_definitions WHERE kind=?1 AND id=?2",
@@ -146,6 +156,15 @@ impl FleetStore {
         Ok(())
     }
     pub async fn put_definition(&self, kind: &str, id: &str, body: &Value) -> Result<()> {
+        let _guard = self.gate.lock().await;
+        self.put_definition_locked(kind, id, body).await
+    }
+    pub(super) async fn put_definition_locked(
+        &self,
+        kind: &str,
+        id: &str,
+        body: &Value,
+    ) -> Result<()> {
         self.conn.execute("INSERT INTO fleet_definitions VALUES (?1,?2,?3) ON CONFLICT(kind,id) DO UPDATE SET body=excluded.body", params![kind,id,serde_json::to_string(body)?]).await?;
         Ok(())
     }

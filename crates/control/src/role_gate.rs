@@ -112,6 +112,7 @@ mod tests {
             assert!(!allow(role, "GET", "/api/agents"));
             assert!(!allow(role, "GET", "/api/sessions/agent-x/events"));
             assert!(!allow(role, "PUT", "/api/nodes/n1/scheduling"));
+            assert!(!allow(role, "DELETE", "/api/nodes/n1"));
             assert!(!allow(role, "POST", "/api/nodes/n1/maintenance"));
             assert!(!allow(role, "GET", "/api/users"));
             assert!(!allow(role, "POST", "/api/users"));

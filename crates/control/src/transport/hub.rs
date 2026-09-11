@@ -38,6 +38,12 @@ pub struct Hub {
     state: Mutex<State>,
 }
 
+pub enum UnregisterResult {
+    Removed,
+    NotFound,
+    Connected,
+}
+
 impl Hub {
     pub fn new(nodes: Vec<NodeRegistration>) -> Self {
         let nodes = nodes
@@ -72,6 +78,26 @@ impl Hub {
         }
         nodes.sort_by(|a, b| a.registration.id.cmp(&b.registration.id));
         nodes
+    }
+    /// Serialize removal with attach and keep the live view intact if the
+    /// durable delete fails. Active connections must be stopped first: the
+    /// worker otherwise re-registers automatically and continues local work.
+    pub async fn unregister(
+        &self,
+        id: &str,
+        fleet: &opencoder_store::fleet::FleetStore,
+    ) -> anyhow::Result<UnregisterResult> {
+        let mut state = self.state.lock().await;
+        if state.connections.contains_key(id) {
+            return Ok(UnregisterResult::Connected);
+        }
+        let removed = fleet.unregister(id).await?;
+        let cached = state.nodes.remove(id).is_some();
+        Ok(if removed || cached {
+            UnregisterResult::Removed
+        } else {
+            UnregisterResult::NotFound
+        })
     }
     pub async fn close_connections(&self) {
         let senders: Vec<_> = self

@@ -11,8 +11,8 @@ import { FleetTeamsPanel } from './teams.jsx';
 import { PayloadWindows, detailMarkers } from './detail/fields.jsx';
 import { WorkloadDetail } from './detail/workloads.jsx';
 import { CREATABLE_KINDS, KINDS, LARGE_MESSAGE_BYTES, appendMessagePage, executionActions, executionPagePath, newId, nodeOptions, textOf } from './model.js';
-import { apiGet, apiPost } from '../api.js';
-vi.mock('../api.js', () => ({ apiGet: vi.fn(), apiPost: vi.fn(), apiPut: vi.fn() }));
+import { apiDel, apiGet, apiPost } from '../api.js';
+vi.mock('../api.js', () => ({ apiDel: vi.fn(), apiGet: vi.fn(), apiPost: vi.fn(), apiPut: vi.fn() }));
 vi.mock('./detail.jsx', async (importOriginal) => ({
   ...(await importOriginal()),
   ExecutionDetail: ({ id }) => <div>execution-detail:{id}</div>,
@@ -54,6 +54,15 @@ describe('fleet execution boundaries', () => {
     expect(await screen.findByText('1.50')).toBeTruthy(); expect(screen.getByText('maintainer-n1')).toBeTruthy(); expect(apiPost).not.toHaveBeenCalled();
     fireEvent.click(screen.getByText('维护节点')); fireEvent.click(screen.getByText('执行指令'));
     await waitFor(() => expect(apiPost).toHaveBeenCalledWith('/api/nodes/n1/maintenance', { action: 'status', input: {} }));
+  });
+  it('deletes only the selected node registration after confirmation', async () => {
+    apiGet.mockResolvedValue({ nodes: [{ ...node, online: false }] }); apiDel.mockResolvedValue({ ok: true });
+    render(<FleetNodesPanel onNotice={vi.fn()} />);
+    expect(await screen.findByText('worker')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '删除节点' }));
+    expect(await screen.findByText('只删除节点注册信息，任务记录和执行文件保留。节点服务重新连接后会再次注册。')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '确认删除' }));
+    await waitFor(() => expect(apiDel).toHaveBeenCalledWith('/api/nodes/n1'));
   });
   it('creates distinct request IDs in browsers without randomUUID', () => {
     const getRandomValues = crypto.getRandomValues.bind(crypto);

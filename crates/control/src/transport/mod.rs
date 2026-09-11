@@ -1,7 +1,7 @@
 mod hub;
 mod report;
 mod socket;
-pub use hub::Hub;
+pub use hub::{Hub, UnregisterResult};
 pub use socket::upgrade;
 
 pub(super) enum SocketCommand {

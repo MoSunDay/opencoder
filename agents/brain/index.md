@@ -14,8 +14,8 @@ Commit: (working-tree, 基于 b465f440)
 - web 路由 `crates/web/src/api_brain.rs`；SPA 面板 `crates/web/spa/src/brainPanel.jsx`。
 - 测试：`crates/brain/tests/{runtime,planning}.rs`、web 层 `crates/web/tests/web_brain*.rs`。
 
-- `src/playbook/` — 剧本双轨纯域：`spec.rs`（`PlaybookSpec` 聚合校验/`validate_draft`/`render_prompt`）、`topology.rs`（Kahn 拓扑/`collapse_blocked`）、`trigger.rs`（message 相似度触发/`scan`）。
-- `src/planning.rs` — `plan_playbook`：LLM 铸动态剧本、候选背靠背校验、digest 缓存复用（空库退单步 {Agent,"act"}）。
+- `src/playbook/` — 剧本双轨纯域：`spec.rs`（`PlaybookSpec` 聚合校验/`validate_draft`/`render_prompt`；`PlaybookTarget::Brain.route: Option<PlaybookRoute>` 跨端确定性通道，serde 默认、旧行不变；长度上限 `spec.id`/target 引用 ≤256B、`match_text` ≤2000B）、`topology.rs`（Kahn 拓扑/`collapse_blocked`）、`trigger.rs`（message 相似度触发/`scan`）。
+- `src/planning.rs` — `plan_playbook`：LLM 铸动态剧本、候选背靠背校验、digest 缓存复用（空库退单步 {Agent,"act"}）；`replan: bool` 跳过缓存读，`validate_situation_placeholders` 强制动态剧本带 `{situation}` 占位。
 - `src/runtime.rs` — playbook CRUD（`PLAYBOOK_ID_PREFIX="playbook"`）；store 表 v25 `brain_playbooks`。
 ## 边界
 - 能力绑定与派发在 control（request_id 幂等）；执行明细落 worker 节点。

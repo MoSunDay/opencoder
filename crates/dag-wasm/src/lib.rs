@@ -18,11 +18,14 @@
 //! crashed writer can never publish a torn version.
 //!
 //! The root is exported read-only over NFS (mirroring the agents
-//! export). A node *pins* a module by materializing the pool's current
-//! `wasm.bin` at `<workflow_root>/_modules/<name>.wasm`, where wasm
-//! steps resolve modules by filename (`_modules` is reserved in the
-//! DAG artifacts layout for exactly this library) — bumping the pool's
-//! `current` is what the next workflow run observes.
+//! export). A node *pins* a module by materializing the referenced
+//! version's `wasm.bin` at `<workflow_root>/_modules/<token>`, where
+//! wasm steps resolve modules by filename (`_modules` is reserved in
+//! the DAG artifacts layout for exactly this library): a plain
+//! `tool.wasm` token pins the pool `current` (bumping it is what the
+//! next accept observes), a `tool@v3.wasm` token pins that explicit,
+//! immutable version — see [`token`]. Non-pool-shaped tokens stay
+//! out-of-band.
 //!
 //! [`meta::wasm_root`] falls back to `None` by default: web/control
 //! middleware injects the configured data-dir root through the
@@ -37,6 +40,7 @@ pub const MAX_WASM_BYTES: usize = 32 * 1024 * 1024;
 
 pub mod meta;
 pub mod scope;
+pub mod token;
 pub mod validate;
 pub mod write;
 
@@ -44,5 +48,6 @@ pub use meta::{
     list_pools, pool_dir, read_pool_meta, read_version_meta, set_wasm_dir_override, version_dir,
     wasm_bin, wasm_root, WasmPoolMeta, WasmVersionMeta,
 };
+pub use token::parse_module_token;
 pub use validate::{validate_name, validate_wasm_bytes, validate_wasm_bytes_with_cap};
 pub use write::{delete_wasm, rollback_wasm, save_wasm_version};

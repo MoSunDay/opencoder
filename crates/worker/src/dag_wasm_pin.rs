@@ -3,10 +3,13 @@
 //! The pool (usually a read-only NFS mount at `dag.wasm_dir`) is the
 //! mutable, server-side source of truth: publishes and rollbacks flip its
 //! `current` pointer at any time. A node *pins* at accept time by copying
-//! the current `wasm.bin` of every pool-known module the spec references
-//! into `<workflow_root>/_modules/<token>` — the shared module library the
-//! wasm executor resolves modules from. Later pool churn can therefore
-//! never change what an already-accepted run executes.
+//! the referenced version's `wasm.bin` of every pool-known module the spec
+//! references into `<workflow_root>/_modules/<token>` — the shared module
+//! library the wasm executor resolves modules from: a plain `tool.wasm`
+//! token freezes the pool `current`, a `tool@v3.wasm` token freezes that
+//! explicit, immutable version (grammar: `wasm_pool::parse_module_token`).
+//! Later pool churn can therefore never change what an already-accepted
+//! run executes.
 //!
 //! Semantics mirror `resources::pin` for agent resources: unconfigured →
 //! silent no-op (out-of-band staging stays valid); unknown pool entry →
@@ -38,26 +41,14 @@ pub(crate) fn module_tokens(spec: &DagSpec) -> Vec<String> {
     tokens
 }
 
-/// Map a module token (e.g. "tool.wasm") to its pool name ("tool"):
-/// `None` when it lacks a `.wasm` suffix, the suffix is the whole token,
-/// or the stem fails [`wasm_pool::validate_name`] (nested or traversing
-/// paths can never come from the flat pool — those stay out-of-band).
-pub(crate) fn pool_name(token: &str) -> Option<String> {
-    let stem = token.strip_suffix(".wasm")?;
-    if stem.is_empty() {
-        return None;
-    }
-    wasm_pool::validate_name(stem).ok()?;
-    Some(stem.to_string())
-}
-
 /// Pin every pool-known module the spec references into
 /// `<workflow_root>/_modules/<token>`.
 ///
 /// - `config.dag.wasm_dir` unset → `Ok(())` no-op (out-of-band staging
 ///   stays valid; nothing is created).
 /// - pool entry missing for a referenced name → skip silently
-///   (out-of-band module).
+///   (out-of-band module); same for an explicit `tool@v9.wasm` pin the
+///   pool has no version 9 for.
 /// - pool entry present but `wasm.bin` unreadable or its sha256 ≠ the
 ///   version meta → hard `Err`: a configured-but-corrupt export rejects
 ///   the accept (fail-closed).
@@ -71,24 +62,31 @@ pub(crate) fn pin(
     };
     let modules = workflow_root.join("_modules");
     for token in module_tokens(spec) {
-        let Some(name) = pool_name(&token) else {
+        let Some((name, pinned)) = wasm_pool::parse_module_token(&token) else {
             continue;
         };
         let Some(meta) = wasm_pool::read_pool_meta(source, &name) else {
             continue;
         };
-        let bytes = read_verified(source, &name, meta.current)?;
+        // Explicit pins reference immutable version dirs; an unknown
+        // version skips exactly like an unknown name (out-of-band).
+        let version = match pinned {
+            Some(v) if meta.history.contains(&v) => v,
+            Some(_) => continue,
+            None => meta.current,
+        };
+        let bytes = read_verified(source, &name, version)?;
         stage(
             &modules,
             &token,
-            &wasm_pool::wasm_bin(source, &name, meta.current),
+            &wasm_pool::wasm_bin(source, &name, version),
             &bytes,
         )?;
     }
     Ok(())
 }
 
-/// Read the pool's current `wasm.bin` and verify it against its version
+/// Read the pool's `v{version}` `wasm.bin` and verify it against the
 /// meta digest — the fail-closed gate in front of every copy.
 fn read_verified(source: &Path, name: &str, version: u32) -> Result<Vec<u8>> {
     let bin = wasm_pool::wasm_bin(source, name, version);
@@ -277,16 +275,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn pool_name_maps_only_flat_wasm_tokens() {
-        assert_eq!(pool_name("tool.wasm"), Some("tool".to_string()));
-        assert_eq!(pool_name("my_tool-2.wasm"), Some("my_tool-2".to_string()));
-        assert_eq!(pool_name("tool"), None);
-        assert_eq!(pool_name("tool.bin"), None);
-        assert_eq!(pool_name(".wasm"), None);
-        assert_eq!(pool_name("../x.wasm"), None);
-        assert_eq!(pool_name("build/out.wasm"), None);
-    }
 
     #[test]
     fn pin_is_a_no_op_without_a_configured_pool() {
@@ -367,6 +355,97 @@ mod tests {
             v2
         );
         assert!(no_tmp_files(&workflow.path().join("_modules")));
+    }
+
+    #[test]
+    fn pin_freezes_the_explicitly_pinned_version_not_current() {
+        let pool = tempfile::tempdir().unwrap();
+        let workflow = tempfile::tempdir().unwrap();
+        let v1 = module(b"one");
+        let v2 = module(b"two");
+        assert_eq!(
+            wasm_pool::save_wasm_version(pool.path(), "tool", "one", &v1).unwrap(),
+            1
+        );
+        assert_eq!(
+            wasm_pool::save_wasm_version(pool.path(), "tool", "two", &v2).unwrap(),
+            2
+        );
+        pin(
+            &config_with_pool(pool.path()),
+            &spec(&["tool@v1.wasm --flag"]),
+            workflow.path(),
+        )
+        .unwrap();
+        // The pinned token freezes v1 bytes under the full token name —
+        // the unpinned `tool.wasm` slot is NOT created alongside it.
+        assert_eq!(
+            std::fs::read(workflow.path().join("_modules/tool@v1.wasm")).unwrap(),
+            v1
+        );
+        assert!(!workflow.path().join("_modules/tool.wasm").exists());
+
+        // `current` keeps moving (rollback to v1, publish v3) — an
+        // explicit pin re-accepted still freezes v1 bytes.
+        wasm_pool::rollback_wasm(pool.path(), "tool", 1).unwrap();
+        let v3 = module(b"three");
+        assert_eq!(
+            wasm_pool::save_wasm_version(pool.path(), "tool", "three", &v3).unwrap(),
+            3
+        );
+        pin(
+            &config_with_pool(pool.path()),
+            &spec(&["tool@v1.wasm"]),
+            workflow.path(),
+        )
+        .unwrap();
+        assert_eq!(
+            std::fs::read(workflow.path().join("_modules/tool@v1.wasm")).unwrap(),
+            v1
+        );
+    }
+
+    #[test]
+    fn pin_stages_current_and_explicit_versions_side_by_side() {
+        let pool = tempfile::tempdir().unwrap();
+        let workflow = tempfile::tempdir().unwrap();
+        let v1 = module(b"one");
+        let v2 = module(b"two");
+        wasm_pool::save_wasm_version(pool.path(), "tool", "one", &v1).unwrap();
+        wasm_pool::save_wasm_version(pool.path(), "tool", "two", &v2).unwrap();
+        pin(
+            &config_with_pool(pool.path()),
+            &spec(&["tool.wasm", "tool@v1.wasm"]),
+            workflow.path(),
+        )
+        .unwrap();
+        assert_eq!(
+            std::fs::read(workflow.path().join("_modules/tool.wasm")).unwrap(),
+            v2
+        );
+        assert_eq!(
+            std::fs::read(workflow.path().join("_modules/tool@v1.wasm")).unwrap(),
+            v1
+        );
+    }
+
+    #[test]
+    fn pin_skips_explicit_versions_unknown_to_the_pool() {
+        let pool = tempfile::tempdir().unwrap();
+        let workflow = tempfile::tempdir().unwrap();
+        assert_eq!(
+            wasm_pool::save_wasm_version(pool.path(), "tool", "only", &module(b"one")).unwrap(),
+            1
+        );
+        pin(
+            &config_with_pool(pool.path()),
+            &spec(&["tool@v9.wasm"]),
+            workflow.path(),
+        )
+        .unwrap();
+        // Unknown pinned version = out-of-band, like an unknown name —
+        // not even the directory is created.
+        assert!(!workflow.path().join("_modules").exists());
     }
 
     #[test]

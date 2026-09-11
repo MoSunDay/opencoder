@@ -1,6 +1,7 @@
 //! End-to-end pin coverage: pool publish → accept-time pin → real wasm
 //! execution from the frozen `_modules` copy → freeze across later pool
-//! publishes.
+//! publishes (both the `current` form and the explicit `tool@v1.wasm`
+//! version pin).
 
 #[path = "../src/dag_wasm_pin.rs"]
 mod dag_wasm_pin;
@@ -32,7 +33,7 @@ fn compile(message: &str) -> Vec<u8> {
     wat::parse_str(stdout_module_wat(message)).unwrap()
 }
 
-fn spec() -> DagSpec {
+fn spec(command: &str) -> DagSpec {
     DagSpec {
         name: "e2e-workflow".into(),
         description: None,
@@ -40,7 +41,7 @@ fn spec() -> DagSpec {
             name: "run".into(),
             depends_on: vec![],
             kind: StepKind::Wasm {
-                command: "tool.wasm".into(),
+                command: command.into(),
                 sandbox: None,
             },
             timeout_secs: None,
@@ -74,7 +75,7 @@ async fn pinned_module_executes_and_stays_frozen_across_pool_publishes() {
         "dag": {"wasm_dir": pool.path().to_string_lossy()}
     }))
     .unwrap();
-    let spec = spec();
+    let spec = spec("tool.wasm");
     pin(&config, &spec, workflow.path()).unwrap();
     let frozen = workflow.path().join("_modules/tool.wasm");
     assert!(frozen.is_file());
@@ -92,6 +93,51 @@ async fn pinned_module_executes_and_stays_frozen_across_pool_publishes() {
     // copy is not live and a second execution still runs v1.
     let v2 = compile("pinned-v2-message");
     opencoder_dag_wasm::save_wasm_version(pool.path(), "tool", "e2e-2", &v2).unwrap();
+    assert_eq!(std::fs::read(&frozen).unwrap(), v1);
+    let second = execute_wasm_step(&step_ctx(workflow.path(), spec)).await;
+    assert_eq!(second.outcome, StepOutcome::Done, "{second:?}");
+    assert!(
+        second.output_text.contains("pinned-v1-message"),
+        "{second:?}"
+    );
+}
+
+#[tokio::test]
+async fn explicitly_pinned_version_executes_and_ignores_current_flips() {
+    let pool = tempfile::tempdir().unwrap();
+    let workflow = tempfile::tempdir().unwrap();
+
+    // Server side: v1 then v2 — `current` lands on v2.
+    let v1 = compile("pinned-v1-message");
+    opencoder_dag_wasm::save_wasm_version(pool.path(), "tool", "e2e", &v1).unwrap();
+    let v2 = compile("pinned-v2-message");
+    opencoder_dag_wasm::save_wasm_version(pool.path(), "tool", "e2e-2", &v2).unwrap();
+
+    // Node accept with an explicit version pin: freezes v1 (NOT current).
+    let config: opencoder_core::Config = serde_json::from_value(serde_json::json!({
+        "dag": {"wasm_dir": pool.path().to_string_lossy()}
+    }))
+    .unwrap();
+    let spec = spec("tool@v1.wasm");
+    pin(&config, &spec, workflow.path()).unwrap();
+    let frozen = workflow.path().join("_modules/tool@v1.wasm");
+    assert!(frozen.is_file());
+    assert_eq!(std::fs::read(&frozen).unwrap(), v1);
+
+    // Execute for real from the pinned copy — current is v2, the run
+    // observes v1.
+    let result = execute_wasm_step(&step_ctx(workflow.path(), spec.clone())).await;
+    assert_eq!(result.outcome, StepOutcome::Done, "{result:?}");
+    assert!(
+        result.output_text.contains("pinned-v1-message"),
+        "{result:?}"
+    );
+
+    // `current` keeps moving (v3 published, then rollback to v2): the
+    // explicit pin neither follows nor breaks — still v1 bytes/output.
+    let v3 = compile("pinned-v3-message");
+    opencoder_dag_wasm::save_wasm_version(pool.path(), "tool", "e2e-3", &v3).unwrap();
+    opencoder_dag_wasm::rollback_wasm(pool.path(), "tool", 2).unwrap();
     assert_eq!(std::fs::read(&frozen).unwrap(), v1);
     let second = execute_wasm_step(&step_ctx(workflow.path(), spec)).await;
     assert_eq!(second.outcome, StepOutcome::Done, "{second:?}");

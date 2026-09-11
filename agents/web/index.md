@@ -1,4 +1,4 @@
-Commit: b465f440381bd009dc9bd3a8192ad88eab44cede
+Commit: e50ffc433bca866fd17bd571a74f1bdf17705dea
 
 # web 模块
 
@@ -28,6 +28,10 @@ axum HTTP/SSE 会话管理与编译期内嵌 SPA。
 - `spa/src/` — React18+antd SPA（vitest），产物提交于 `spa/dist`。
 - `spa/src/harness/` — harness 管理、runners、启动字段。
 - `spa/src/fleet/` — 节点/执行/团队/调度面板。
+- `spa/src/brain/workbench/` — 能力/计划/运行工作台；图投影、原子快照水位与事件重连、步骤实例分页和检查面板。
+- `spa/src/fleet/detail.jsx` 的 ExecutionView — 四类过程的共享查询/渲染入口；受 Brain 管理的执行隐藏独立修改操作。
+- `spa/src/dag/process.jsx` — 原生与嵌入页共用 DAG 状态画布。
+- `spa/src/envs/todoPanel.jsx` — TODO 模板环境与工具入口，与配置 Env 管理各自保留。
 - `spa/src/project/` — 项目目标/里程碑/TODO 面板。
 - `spa/src/todo/editor/`、`spa/src/todoEditor.jsx` — TODO 模板编辑器：表单/画布/JSON 三态，spec 唯一事实来源，画布坐标仅会话态。
 - `spa/src/ui/tableLoading.js` — 列表表格 `loading` 的唯一约定：`tableLoading`（带 delay，裸 boolean 会变成 `delay:0` 闪遮罩）+ `tableRows`（拉取中交回 `undefined`，否则 antd 对着用户断言「暂无数据」）。新增表一律走它。
@@ -42,6 +46,7 @@ axum HTTP/SSE 会话管理与编译期内嵌 SPA。
 
 ## 相关
 
+- [brain](../brain/index.md) — 工作台数据契约；[业务交互](../../features/brain/index.md)。
 - [agents/session](../session/index.md) — drain 与 cancel。
 - [agents/store](../store/index.md) — 持久化与事件回放。
 - [agents/control](../control/index.md) — 平台控制面。

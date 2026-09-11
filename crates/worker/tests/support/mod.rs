@@ -19,6 +19,14 @@ use std::{
     time::Duration,
 };
 
+/// Keep current-thread integration runtimes independent of host credentials,
+/// harness settings and NFS agent pools. Hold both values until the test ends.
+pub fn isolated_config() -> (opencoder_core::config::ScopedConfigHome, tempfile::TempDir) {
+    let home = tempfile::tempdir().unwrap();
+    let guard = opencoder_core::config::scoped_config_home(home.path().to_path_buf());
+    (guard, home)
+}
+
 pub fn mock() -> Arc<MockChatClient> {
     Arc::new(
         MockChatClient::new().with_default(vec![LlmEvent::Completed {

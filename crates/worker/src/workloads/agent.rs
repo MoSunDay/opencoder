@@ -5,7 +5,7 @@ use opencoder_store::SessionMeta;
 use serde_json::{json, Value};
 use tokio_util::sync::CancellationToken;
 
-pub(super) async fn create_session(
+pub(crate) async fn create_session(
     worker: &Worker,
     id: &str,
     agent: &str,
@@ -66,11 +66,14 @@ pub(super) async fn run(
         id,
         agent,
         input["model"].as_str().map(str::to_owned),
-        input["title"].as_str().map(str::to_owned).or_else(|| match assignment.request.kind {
-            ExecutionKind::Maintenance => Some("节点维护".into()),
-            ExecutionKind::Operator => Some("Operator".into()),
-            _ => None,
-        }),
+        input["title"]
+            .as_str()
+            .map(str::to_owned)
+            .or_else(|| match assignment.request.kind {
+                ExecutionKind::Maintenance => Some("节点维护".into()),
+                ExecutionKind::Operator => Some("Operator".into()),
+                _ => None,
+            }),
         assignment.index.created_at,
     )
     .await?;

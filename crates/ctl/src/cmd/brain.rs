@@ -3,6 +3,7 @@
 //! only; execution goes through the shared `exec_plan` transport.
 
 use anyhow::Result;
+pub mod ontology;
 use clap::Subcommand;
 
 use crate::cmd::exec_plan;
@@ -17,6 +18,23 @@ fn required_body(raw: &str) -> Result<serde_json::Value> {
 
 #[derive(Subcommand, Debug)]
 pub enum BrainCmd {
+    /// Immutable ontology plan definitions and version history.
+    #[command(subcommand)]
+    PlanDefs(ontology::PlansCmd),
+    /// Event-driven ontology executions.
+    #[command(subcommand)]
+    Runs(ontology::RunsCmd),
+    /// Aggregate reusable Agent / DAG / TODO / Team capabilities.
+    Library,
+    #[command(hide = true)]
+    ActivateLocal {
+        #[arg(long)]
+        context: std::path::PathBuf,
+        #[arg(long)]
+        config: std::path::PathBuf,
+        #[arg(long)]
+        output: std::path::PathBuf,
+    },
     /// Capability library: CRUD + target binding.
     #[command(subcommand)]
     Caps(CapsCmd),
@@ -84,6 +102,10 @@ pub enum CapsCmd {
 
 pub fn plan(sub: &BrainCmd) -> Result<RequestPlan> {
     Ok(match sub {
+        BrainCmd::PlanDefs(sub) => ontology::plans(sub)?,
+        BrainCmd::Runs(sub) => ontology::runs(sub)?,
+        BrainCmd::Library => RequestPlan::get("/api/brain/library"),
+        BrainCmd::ActivateLocal { .. } => anyhow::bail!("local activation has no HTTP request"),
         BrainCmd::Caps(sub) => plan_caps(sub)?,
         BrainCmd::Search { json } => {
             RequestPlan::post("/api/brain/search").with_body(required_body(json)?)

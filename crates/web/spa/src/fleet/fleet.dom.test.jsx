@@ -6,7 +6,7 @@ import { err } from '../notice.js';
 import { ExecutionsPanel } from './executions.jsx';
 import { ExecutionTranscript, appendEvent, messageRefreshMode } from './detail.jsx';
 import { FleetNodesPanel } from './nodes.jsx';
-import { FleetBrainPanel } from './brain.jsx';
+import { BrainDispatch as FleetBrainPanel } from './brain.jsx';
 import { FleetTeamsPanel } from './teams.jsx';
 import { PayloadWindows, detailMarkers } from './detail/fields.jsx';
 import { WorkloadDetail } from './detail/workloads.jsx';

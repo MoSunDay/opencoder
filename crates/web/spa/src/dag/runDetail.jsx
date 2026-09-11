@@ -5,6 +5,7 @@
 // the final status/error is applied to the header row, the runs table is
 // refreshed (onFinished) and the stream is closed.
 
+import { DagProcess } from './process.jsx';
 import { Background, Controls, Handle, MarkerType, Position, ReactFlow } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { Alert, Button, Card, Descriptions, Space, Spin, Tag, Typography } from 'antd';
@@ -98,7 +99,7 @@ export function RunDetail({ run, onNotice, onClose, onFinished }) {
   const [specError, setSpecError] = useState('');
   const [events, setEvents] = useState([]); // ascending by seq (arrival for unpersisted)
   const [streamStatus, setStreamStatus] = useState('connecting');
-  const [selected, setSelected] = useState(null); // clicked step node data
+  const [selectedId, setSelected] = useState(null); // clicked step node data
   const [executionOpen, setExecutionOpen] = useState(false);
   const streamRef = useRef(null);
   const finishedRef = useRef(false);
@@ -205,6 +206,7 @@ export function RunDetail({ run, onNotice, onClose, onFinished }) {
       }),
     [graph],
   );
+  const selected = graph.nodes.find((node) => node.id === selectedId)?.data;
   const feed = useMemo(() => [...events].slice(-200).reverse(), [events]);
 
   return (
@@ -225,20 +227,7 @@ export function RunDetail({ run, onNotice, onClose, onFinished }) {
       <div className="dag-detail">
         <div className="dag-detail-graph">
           {spec ? (
-            <ReactFlow
-              nodes={graph.nodes}
-              edges={rfEdges}
-              nodeTypes={nodeTypes}
-              onNodeClick={(_, node) => setSelected(node.data)}
-              fitView
-              minZoom={0.2}
-              nodesDraggable={false}
-              nodesConnectable={false}
-              proOptions={{ hideAttribution: false }}
-            >
-              <Background gap={18} size={1} />
-              <Controls showInteractive={false} />
-            </ReactFlow>
+            <DagProcess spec={spec} events={events} selectedId={selectedId} onSelect={setSelected} showInspector={false} />
           ) : (
             <div className="dag-detail-empty">
               <Spin />

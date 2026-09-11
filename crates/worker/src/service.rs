@@ -6,6 +6,9 @@ use std::collections::HashSet;
 
 #[async_trait::async_trait]
 impl NodeService for Worker {
+    async fn brain_frames(&self) -> anyhow::Result<Vec<NodeFrame>> {
+        crate::brain::outbox::frames(self).await
+    }
     fn registration(&self) -> NodeRegistration {
         self.inner.registration.clone()
     }

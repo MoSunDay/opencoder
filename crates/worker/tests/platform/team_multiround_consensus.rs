@@ -36,6 +36,7 @@ fn read_json(path: &std::path::Path) -> Value {
 
 #[tokio::test]
 async fn team_multiround_consensus_runs_alignment_subturn_and_next_round_hint() {
+    let _config = support::isolated_config();
     let client = mock();
     let fleet = Fleet::new(1, client.clone()).await;
     let saved = fleet

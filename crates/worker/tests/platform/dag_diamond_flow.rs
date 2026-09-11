@@ -123,6 +123,7 @@ fn delta_wat(step: &str, delta: u32) -> String {
 
 #[tokio::test]
 async fn diamond_workflow_wasm_steps_feed_the_agent_step() {
+    let _config = support::isolated_config();
     let client = mock();
     let fleet = Fleet::new(1, client.clone()).await;
     let data_dir = fleet.root().join("n0/node");

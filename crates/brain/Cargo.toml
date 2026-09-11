@@ -5,6 +5,8 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+opencoder-core.workspace = true
+sha2 = "0.10"
 opencoder-llm.workspace = true
 opencoder-store.workspace = true
 anyhow.workspace = true

@@ -8,6 +8,7 @@ use tokio_util::sync::CancellationToken;
 
 struct Dispatcher {
     worker: Worker,
+    workdir: std::path::PathBuf,
     config: Config,
     members: HashMap<String, opencoder_core::fleet::TeamMember>,
     cancel: CancellationToken,
@@ -52,7 +53,7 @@ impl Dispatcher {
             &id,
             self.config.clone(),
             self.worker.client(&self.config)?,
-            self.worker.inner.state.workdir.clone(),
+            self.workdir.clone(),
         )
         .await?;
         session.cancel = Some(self.cancel.child_token());
@@ -169,6 +170,7 @@ pub(super) async fn run(
     let failures = Arc::new(std::sync::Mutex::new(vec![]));
     let dispatcher = Arc::new(Dispatcher {
         worker: worker.clone(),
+        workdir: crate::brain::workdir::for_record(worker, record)?,
         config,
         members: definition
             .members

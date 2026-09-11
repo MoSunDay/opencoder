@@ -100,7 +100,7 @@ pub(super) async fn run(
         exec: opencoder_dag_runtime::ExecDeps {
             store: worker.inner.state.store.clone(),
             client: worker.client(&config)?,
-            workdir: worker.inner.state.workdir.clone(),
+            workdir: crate::brain::workdir::for_record(worker, record)?,
             config,
         },
         workflow_root: workflow_root.clone(),

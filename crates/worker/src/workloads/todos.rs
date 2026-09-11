@@ -17,7 +17,7 @@ pub(super) async fn run(
         store: worker.inner.state.store.clone(),
         client: worker.client(&config)?,
         config,
-        workdir: worker.inner.state.workdir.clone(),
+        workdir: crate::brain::workdir::for_record(worker, record)?,
         debug_root: None,
         cancel,
     };

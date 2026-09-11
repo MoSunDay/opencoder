@@ -1,6 +1,6 @@
 import { Button, Input, Modal, Select, Space, Table } from 'antd';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { apiGet, apiPost } from '../api.js';
+import { apiDel, apiGet, apiPost } from '../api.js';
 import { setState } from '../store.js';
 import { PageShell } from '../shell/pageShell.jsx';
 import { StatusTag } from '../ui/statusTag.jsx';
@@ -8,7 +8,7 @@ import { MONO_VAR } from '../ui/mono.js';
 import { tableLoading, tableRows } from '../ui/tableLoading.js';
 import { ExecutionDetail } from './detail.jsx';
 import { newId } from './model.js';
-import { err } from '../notice.js';
+import { err, ok } from '../notice.js';
 import { NodeSchedulingModal } from './settings/scheduling.jsx';
 
 export function FleetNodesPanel({ onNotice }) {
@@ -16,6 +16,8 @@ export function FleetNodesPanel({ onNotice }) {
   const [scheduling, setScheduling] = useState(null);
   const [action, setAction] = useState('status'); const [input, setInput] = useState('');
   const [result, setResult] = useState(null); const [busy, setBusy] = useState(false); const [detail, setDetail] = useState(null);
+  const [deleting, setDeleting] = useState(false);
+  const [removeTarget, setRemoveTarget] = useState(null);
   /// 列表拉取态：silent = 3s 轮询（静默，不闪 spinner），非 silent = 首屏 / 手动刷新。
   const [loading, setLoading] = useState(true);
   const attempt = useRef(null);
@@ -40,6 +42,16 @@ export function FleetNodesPanel({ onNotice }) {
     } catch (e) { onNotice(err(e.message)); }
     finally { setBusy(false); }
   };
+  const removeNode = async () => {
+    setDeleting(true);
+    try {
+      await apiDel(`/api/nodes/${encodeURIComponent(removeTarget.id)}`);
+      setRemoveTarget(null);
+      onNotice(ok('节点注册已删除，任务记录保留'));
+      await load(false);
+    } catch (e) { onNotice(err(e.message)); }
+    finally { setDeleting(false); }
+  };
   return <PageShell page="nodes" extra={<Button onClick={() => load(false)}>刷新节点</Button>}>
     <Table scroll={{ x: 'max-content' }} locale={{ emptyText: '暂无 Opencoder 节点' }} rowKey="id" dataSource={tableRows(loading, rows)} loading={tableLoading(loading)} columns={[
       { title: '节点', dataIndex: 'name', render: (v, r) => <Space orientation="vertical"><b>{v}</b><small style={{ fontFamily: MONO_VAR }}>{r.id}</small></Space> },
@@ -51,7 +63,7 @@ export function FleetNodesPanel({ onNotice }) {
       { title: '活跃 agent loops', render: (_, r) => r.snapshot?.active_agent_loops ?? '—' },
       { title: 'loops / CPU', render: (_, r) => r.snapshot ? (r.snapshot.active_agent_loops / r.snapshot.cpu_capacity).toFixed(2) : '—' },
       { title: '维护 agent', dataIndex: 'maintenance_agent_id', render: (v) => <span style={{ fontFamily: MONO_VAR }}>{v || '—'}</span> },
-      { title: '操作', render: (_, r) => <Space><Button disabled={!r.online} onClick={() => setScheduling(r)}>调度配置</Button><Button disabled={!r.online} onClick={() => { setSelected(r); setResult(null); }}>维护节点</Button></Space> },
+      { title: '操作', render: (_, r) => <Space><Button disabled={!r.online} onClick={() => setScheduling(r)}>调度配置</Button><Button disabled={!r.online} onClick={() => { setSelected(r); setResult(null); }}>维护节点</Button><Button danger disabled={r.online} title={r.online ? '请先停止节点服务，离线后可删除注册' : undefined} onClick={() => setRemoveTarget(r)}>删除节点</Button></Space> },
     ]} />
     <Modal open={!!selected} title={`节点维护 · ${selected?.name || ''}`} onCancel={() => setSelected(null)} footer={null} width={800}>
       <Space orientation="vertical" style={{ width: '100%' }}>
@@ -62,6 +74,11 @@ export function FleetNodesPanel({ onNotice }) {
         <Button type="primary" loading={busy} onClick={perform}>{action === 'configure' ? '应用配置更新' : '执行指令'}</Button>
         {result && <pre style={{ whiteSpace: 'pre-wrap', maxHeight: 400, overflow: 'auto' }}>{JSON.stringify(result, null, 2)}</pre>}
       </Space>
+    </Modal>
+    <Modal open={!!removeTarget} title={`删除节点 · ${removeTarget?.name || ''}`} okText="确认删除" cancelText="取消"
+      okButtonProps={{ danger: true }} confirmLoading={deleting} onOk={removeNode}
+      onCancel={() => { if (!deleting) setRemoveTarget(null); }}>
+      只删除节点注册信息，任务记录和执行文件保留。节点服务重新连接后会再次注册。
     </Modal>
     {detail && <ExecutionDetail id={detail.id} summary={detail} onClose={() => setDetail(null)} onNotice={onNotice} />}
     {scheduling && <NodeSchedulingModal node={scheduling} onClose={() => setScheduling(null)} onSaved={() => load(false)} onNotice={onNotice} />}

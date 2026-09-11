@@ -51,7 +51,7 @@ async fn teams_roundtrip_and_validation() {
         assert_eq!(status, 400, "{body}");
         assert_eq!(
             body["error"],
-            json!("team requires a unique non-empty agent per member and a captain belonging to the team; system is reserved")
+            json!("team requires a unique non-empty agent per member and a captain belonging to the team; the team name 'system' is reserved")
         );
     }
 }

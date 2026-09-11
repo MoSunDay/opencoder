@@ -55,27 +55,31 @@ async fn serve(
     let id = registration.id.clone();
     let generation = snapshot.generation.clone();
     let mut reports = ReportCollector::default();
-    let mut initial_freeze_request = None;
+    let mut initial_admission_request;
     let (tx, mut rx) = tokio::sync::mpsc::channel::<SocketCommand>(128);
     {
         // Admission transitions and attaches share this lock. A node joining a
         // frozen server is queued a Freeze before a concurrent Reopen can be
-        // queued, while a node joining after Reopen observes Open.
+        // queued, while a node joining after Reopen is sent Reopen.
         let _transition = state.admission.transition().await;
+        // Local shutdown persists Frozen. Reconcile both modes on reconnect
+        // so a restarted node can rejoin an open cluster, even when another
+        // resource error masks its local admission state in the snapshot.
+        let command = if state.admission.is_open().await {
+            NodeAdmissionCommand::Reopen
+        } else {
+            NodeAdmissionCommand::Freeze
+        };
         state
             .hub
             .attach(registration.clone(), snapshot, tx.clone())
             .await?;
-        if !state.admission.is_open().await {
-            let request_id = ulid::Ulid::new().to_string();
-            tx.try_send(SocketCommand::Frame(Box::new(ServerFrame::Call {
-                request_id: request_id.clone(),
-                operation: NodeOperation::Admission {
-                    command: NodeAdmissionCommand::Freeze,
-                },
-            })))?;
-            initial_freeze_request = Some(request_id);
-        }
+        let request_id = ulid::Ulid::new().to_string();
+        tx.try_send(SocketCommand::Frame(Box::new(ServerFrame::Call {
+            request_id: request_id.clone(),
+            operation: NodeOperation::Admission { command },
+        })))?;
+        initial_admission_request = Some((request_id, command));
     }
     let outcome = async {
         state.fleet.register(&registration).await?;
@@ -137,10 +141,11 @@ async fn serve(
                             }
                         }
                         NodeFrame::Reply { request_id, reply } => {
-                            if initial_freeze_request.as_deref() == Some(request_id.as_str()) {
-                                initial_freeze_request = None;
-                                if !(200..300).contains(&reply.status) {
-                                    tracing::warn!(node_id = %id, status = reply.status, body = %reply.body, "freeze joining node while server admission is frozen");
+                            if initial_admission_request.as_ref().is_some_and(|(id, _)| id == &request_id) {
+                                let (_, command) = initial_admission_request.take().unwrap();
+                                let expected = if command == NodeAdmissionCommand::Freeze { "frozen" } else { "open" };
+                                if !(200..300).contains(&reply.status) || reply.body["mode"] != expected {
+                                    tracing::warn!(node_id = %id, ?command, status = reply.status, body = %reply.body, "joining node rejected admission synchronization");
                                 }
                                 continue;
                             }

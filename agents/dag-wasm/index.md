@@ -15,16 +15,20 @@ out-of-band 手工投放 `<data>/dag/_modules/`。
   `OPENCODER_DAG_WASM_DIR` → None（由 web/control 中间件注入）
 - `crates/dag-wasm/src/validate.rs` — 名称规则镜像 validate_resource_name；
   wasm 魔数 `\0asm` + LE version==1 + 32MiB 独立上限
+- `crates/dag-wasm/src/token.rs` — spec 模块 token 语法：`tool.wasm`（pin
+  current）/ `tool@v3.wasm`（pin 显式版本，`v<n>` 无前导零、u32）；
+  非池形态 token 一律 out-of-band
 - 布局：`<root>/<name>/meta.json` + `<root>/<name>/v{n}/wasm.bin` + `v{n}/meta.json`
   （sha256/size_bytes/updated_at）
 - `crates/web/src/api_dag_wasm.rs` — /api/dag/wasm CRUD + rollback + wasm.bin 下载
 - `crates/web/src/api_dag_wasm_nfs.rs` — 第二 NFS 导出生命周期 + scope 中间件
   （config `dag.wasm_dir` → 默认 `<data>/dag/wasm`）
 - `crates/web/src/nfs_exports.rs` — 命名多导出注册表（agents 2049 / dag-wasm 2050）
-- `crates/worker/src/dag_wasm_pin.rs` — 受理冻结：spec wasm 首 token → 池
-  `v{current}/wasm.bin` → sha256 校验 → staging+rename 到 `_modules/<token>`；
-  未配置 wasm_dir 静默跳过，池缺名跳过（保留 out-of-band），配置了但损坏
-  fail-closed 拒绝受理
+- `crates/worker/src/dag_wasm_pin.rs` — 受理冻结：spec wasm 首 token →
+  池 `v{n}/wasm.bin`（`tool.wasm` 取 current，`tool@v3.wasm` 取显式版本）→
+  sha256 校验 → staging+rename 到 `_modules/<token>`；未配置 wasm_dir 静默
+  跳过，池缺名或缺版本跳过（保留 out-of-band），配置了但损坏 fail-closed
+  拒绝受理
 - core config `dag` 块：`wasm_dir` + `nfs{enabled,host,port=2050,read_only}`
 
 ## 边界
@@ -32,7 +36,8 @@ out-of-band 手工投放 `<data>/dag/_modules/`。
 - 池读写域逻辑在本 crate；HTTP/导出在 web；节点冻结在 worker——三段共享
   `opencoder-dag-wasm` 类型
 - 发布/回滚只切 current 指针；版本目录永不删除（同 agents 池契约）
-- 节点 spec 不写版本号：受理时取 current 冻结（`tool@v3` 显式 pin 为后续项）
+- 节点 spec 的模块 token 两种池形态：`tool.wasm` 受理时取 current 冻结；
+  `tool@v3.wasm` 显式 pin 到不可变版本目录（回滚/再发布不影响已冻结 run）
 
 ## 相关
 

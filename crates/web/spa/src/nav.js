@@ -80,7 +80,7 @@ export const PAGE_META = {
   chat: { title: '会话交互', desc: '与舰队节点对话的会话工作台' },
   agents: { title: 'Agent 配置', desc: '版本化自定义 agent 的池与引用' },
   nodes: { title: '节点列表', desc: '在线 Opencoder 节点与负载' },
-  envs: { title: 'Env 管理', desc: '节点环境变量配置' },
+  envs: { title: 'Env 管理', desc: 'OpenCoder 完整配置集' },
 };
 
 /// Category lookup with the default as the safety net (unknown keys never

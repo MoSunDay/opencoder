@@ -17,6 +17,7 @@ pub mod api_agent_resources;
 pub mod api_agents;
 #[path = "../../web/src/api_brain.rs"]
 pub mod api_brain;
+pub mod api_envs;
 #[path = "../../web/src/api_project.rs"]
 pub mod api_project;
 #[path = "../../web/src/api_project_todos.rs"]

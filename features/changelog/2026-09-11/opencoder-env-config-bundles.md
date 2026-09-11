@@ -1,4 +1,4 @@
-Commit: 75f916e8564fd53031e59a01b5572d8df3cb9a61
+Commit: d5f35cf42f7fd1ce0bf5065de39d79ddc7a280aa
 
 # Web Env 管理对齐 OpenCoder 配置集
 

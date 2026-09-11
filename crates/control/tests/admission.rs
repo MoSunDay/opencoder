@@ -377,3 +377,57 @@ async fn reconnect_freeze_cannot_arrive_after_concurrent_reopen() {
     );
     reconnected.abort();
 }
+
+#[tokio::test]
+async fn frozen_node_reconnecting_to_open_server_becomes_ready() {
+    let harness = Harness::new().await;
+    harness.node.abort();
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        while harness.state.hub.views().await[0].online {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+
+    // A normal node restart retains its local shutdown freeze while the
+    // control plane continues accepting work.
+    harness.service.open.store(false, Ordering::SeqCst);
+    let remote = harness.base.clone();
+    let service: Arc<dyn NodeService> = harness.service.clone();
+    let reconnected =
+        tokio::spawn(
+            async move { opencoder_node::fleet::run(&remote, "test-token", service).await },
+        );
+    let result = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            let views = harness.state.hub.views().await;
+            if views[0].online && views[0].snapshot.as_ref().is_some_and(|s| s.ready) {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await;
+    reconnected.abort();
+    result.expect("reconnected node must recover from its persisted freeze");
+    assert!(harness.service.open.load(Ordering::SeqCst));
+    assert_eq!(
+        harness.state.admission.snapshot().await.mode,
+        AdmissionMode::Open
+    );
+}
+
+#[tokio::test]
+async fn reopen_also_recovers_online_nodes_when_server_is_already_open() {
+    let harness = Harness::new().await;
+    harness.service.open.store(false, Ordering::SeqCst);
+    let reopened = harness
+        .request(reqwest::Method::DELETE, "/api/admin/drain", json!({}))
+        .await;
+    assert_eq!(reopened.status(), 200);
+    let body: Value = reopened.json().await.unwrap();
+    assert_eq!(body["server"]["mode"], "open");
+    assert_eq!(body["nodes"][0]["body"]["mode"], "open");
+    assert!(harness.service.open.load(Ordering::SeqCst));
+}

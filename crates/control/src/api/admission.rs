@@ -163,18 +163,11 @@ pub async fn freeze(State(state): State<Arc<AppState>>) -> Response {
 
 pub async fn reopen(State(state): State<Arc<AppState>>) -> Response {
     let _transition = state.admission.transition().await;
-    if state.admission.is_open().await {
-        let status = local_status(&state)
-            .await
-            .unwrap_or_else(|error| json!({"mode":"open","status_error":error.to_string()}));
-        return response(RpcReply::ok(json!({
-            "server": status,
-            "nodes": [],
-            "offline_nodes": [],
-        })));
-    }
+    // Reconcile online nodes even when the server is already open: a node
+    // may still carry its durable shutdown freeze.
+    let server_open = state.admission.is_open().await;
     let (nodes, offline_nodes) = call_online_nodes(&state, NodeAdmissionCommand::Reopen).await;
-    if nodes.is_empty() {
+    if nodes.is_empty() && !server_open {
         return response(RpcReply::error(
             503,
             "no online node available for admission verification",
@@ -187,7 +180,11 @@ pub async fn reopen(State(state): State<Arc<AppState>>) -> Response {
         return response(RpcReply {
             status: 503,
             body: json!({
-                "error": "one or more online nodes rejected admission reopen; server remains frozen",
+                "error": if server_open {
+                    "one or more online nodes rejected admission reopen"
+                } else {
+                    "one or more online nodes rejected admission reopen; server remains frozen"
+                },
                 "nodes": nodes,
                 "offline_nodes": offline_nodes,
             }),

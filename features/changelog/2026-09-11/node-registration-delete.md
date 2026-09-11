@@ -29,4 +29,6 @@ Commit: 86567de28148c84077cdc77229bff38b5b5ab11e
 - `cargo test -p opencoder-control --lib` → 47 passed / 0 failed
 - `npm test -- --run src/fleet/fleet.dom.test.jsx` → 24 passed / 0 failed
 - `npm run build` → 成功
+- `cargo clippy --workspace --all-targets -- -D warnings` → 通过
+- `cargo test --workspace` → 未通过：既有 `opencoder::nodes_smoke_proc::smoke_script_two_process_nodes_flow_passes` 在 checkpoint 4 严格断言五字段时，当前 `/api/executions` 返回额外 `ownership` 字段；失败路径与本次节点注册删除无关。
 - 发布 bundle：`dist/opencoder-platform-86567de2`；server/agent 已重启，build-info commit `86567de2`，两服务 active。

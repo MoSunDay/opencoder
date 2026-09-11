@@ -15,6 +15,7 @@
 // chain and every existing landmark query stay byte-identical.
 
 import { Alert, App as AntdApp, Badge, Button, ConfigProvider, Layout, Menu, Segmented, Select, Tooltip, Typography } from 'antd';
+import { MenuFoldOutlined, MenuUnfoldOutlined } from '@ant-design/icons';
 import zhCN from 'antd/locale/zh_CN';
 import dayjs from 'dayjs';
 import { useCallback, useEffect, useState } from 'react';
@@ -124,6 +125,7 @@ const SHEET_PAGES = new Set(['chat']);
 
 function App() {
   const { token, page, identity } = useStore();
+  const [navCollapsed, setNavCollapsed] = useState(false);
   // Panel→shell notices carry {type, text} (notice.js); normalizeNotice
   // keeps legacy bare-string call sites safe. Empty text (the onNotice('')
   // clear convention) renders nothing.
@@ -186,8 +188,29 @@ function App() {
             </div>
           </Header>
           <Layout style={{ minHeight: 0 }}>
-            <Sider className="fleet-sidebar" width={200} theme="light">
-              <div className="fleet-nav-category">
+            <Sider
+              className="fleet-sidebar"
+              width={200}
+              collapsedWidth={64}
+              collapsible
+              collapsed={navCollapsed}
+              onCollapse={setNavCollapsed}
+              trigger={null}
+              theme="light"
+            >
+              <Button
+                className="fleet-nav-toggle"
+                type="text"
+                icon={navCollapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
+                aria-label={navCollapsed ? '展开菜单' : '收起菜单'}
+                aria-expanded={!navCollapsed}
+                aria-controls="fleet-page-menu"
+                title={navCollapsed ? '展开菜单' : '收起菜单'}
+                onClick={() => setNavCollapsed((value) => !value)}
+              >
+                {navCollapsed ? null : '收起菜单'}
+              </Button>
+              <div className="fleet-nav-category" aria-hidden={navCollapsed}>
                 <Segmented
                   block
                   value={category.key}
@@ -196,6 +219,7 @@ function App() {
                 />
               </div>
               <Menu
+                id="fleet-page-menu"
                 mode="inline"
                 theme="light"
                 selectedKeys={[shownPage]}

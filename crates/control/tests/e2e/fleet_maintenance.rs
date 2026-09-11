@@ -229,6 +229,15 @@ async fn nodes_catalog_lists_the_connected_node() {
 }
 
 #[tokio::test]
+async fn connected_node_registration_cannot_be_deleted_while_agent_is_running() {
+    let h = Harness::new().await;
+    let (status, body) = h.req(Method::DELETE, "/api/nodes/node-e2e", None).await;
+    assert_eq!(status, 409, "{body}");
+    assert!(body["error"].as_str().unwrap_or("").contains("停止节点服务"));
+    assert_eq!(h.state.fleet.nodes().await.unwrap().len(), 1);
+}
+
+#[tokio::test]
 async fn maintenance_proxies_configured_node_replies() {
     let h = Harness::new().await;
     h.node.set_maintenance(

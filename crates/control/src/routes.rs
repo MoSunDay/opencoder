@@ -28,6 +28,7 @@ pub fn build_app(state: Arc<AppState>, token: Option<String>, web: bool) -> Rout
         .route("/api/users", get(api::users::list).post(api::users::create))
         .route("/api/users/:name", axum::routing::delete(api::users::delete))
         .route("/api/nodes", get(catalog::nodes))
+        .route("/api/nodes/:id", axum::routing::delete(catalog::unregister))
         .route("/api/nodes/:id/scheduling", put(api::settings::save_scheduling))
         .route("/api/harnesses", get(api::settings::get_harnesses))
         .route("/api/harnesses/:name", put(api::settings::save_harness))

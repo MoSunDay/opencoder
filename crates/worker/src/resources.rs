@@ -152,7 +152,8 @@ pub(crate) fn pin(source: Option<&Path>, destination: &Path) -> Result<Option<Pa
     }
     for entry in std::fs::read_dir(&staging)? {
         let path = entry?.path();
-        if AGENT_CATEGORIES.contains(&path.file_name().unwrap().to_string_lossy().as_ref()) {
+        let name = path.file_name().unwrap().to_string_lossy();
+        if name == "envs" || AGENT_CATEGORIES.contains(&name.as_ref()) {
             continue;
         }
         let meta: AgentMeta = serde_json::from_slice(&std::fs::read(path.join("meta.json"))?)?;

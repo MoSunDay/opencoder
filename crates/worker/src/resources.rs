@@ -1,3 +1,4 @@
+//! NFS resource snapshotting for agent execution, including OpenCoder Env bundles.
 use anyhow::{bail, Context, Result};
 use opencoder_core::agent::{AgentMeta, ResourceMeta, AGENT_CATEGORIES};
 use std::path::{Path, PathBuf};
@@ -93,7 +94,13 @@ pub(crate) fn pin(source: Option<&Path>, destination: &Path) -> Result<Option<Pa
             continue;
         }
         let name = name.to_string_lossy();
-        if AGENT_CATEGORIES.contains(&name.as_ref()) {
+        if name == "envs" {
+            // OpenCoder Env snapshots are shared runtime inputs. Keep them in
+            // the execution snapshot so the runc payload reads the same NFS
+            // data selected by the control plane; never resolve Env files from
+            // the node's private ~/.opencoder directory.
+            copy_version(&path, &staging.join("envs"))?;
+        } else if AGENT_CATEGORIES.contains(&name.as_ref()) {
             for resource in std::fs::read_dir(&path)? {
                 let resource = resource?;
                 if resource.file_type()?.is_symlink() {

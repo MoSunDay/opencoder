@@ -54,6 +54,7 @@ pub struct AppState {
     pub hub: Arc<transport::Hub>,
     pub brain: opencoder_brain::Runtime,
     pub(crate) brain_gate: api::brain_dispatch::BrainGate,
+    pub(crate) playbook_gate: api::brain_playbook_dispatch::PlaybookGate,
     pub admission: Arc<admission::AdmissionGate>,
     /// Serializes placement plus reservation; never held waiting for a node.
     pub placement: tokio::sync::Mutex<()>,

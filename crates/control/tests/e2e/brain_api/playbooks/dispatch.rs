@@ -10,6 +10,7 @@ use super::{agent, index_kind, seed_dag, seed_playbook, spec, step};
 use crate::support::Harness;
 use opencoder_brain::PlaybookTarget;
 use opencoder_brain::PlaybookTrigger;
+use opencoder_brain::playbook::{PlaybookRoute, PlaybookRouteKind};
 
 /// A three-layer graph (a → b1/b2 → c) dispatches one execution per step,
 /// batched topologically, and a replay with the same request_id resubmits
@@ -155,6 +156,7 @@ async fn dispatch_resolves_brain_target_binding() {
                     &["warm"],
                     PlaybookTarget::Brain {
                         capability_id: bound.clone(),
+                        route: None,
                     },
                 ),
             ],
@@ -171,6 +173,7 @@ async fn dispatch_resolves_brain_target_binding() {
                 &[],
                 PlaybookTarget::Brain {
                     capability_id: unbound.clone(),
+                    route: None,
                 },
             )],
         ),
@@ -181,7 +184,7 @@ async fn dispatch_resolves_brain_target_binding() {
         .req(
             Method::POST,
             "/api/brain/playbooks/playbook-bound/dispatch",
-            Some(json!({"request_id": "bindreq"})),
+            Some(json!({"request_id": "bindreq", "situation": "resize now"})),
         )
         .await;
     assert_eq!(status, 202, "{body}");
@@ -201,7 +204,7 @@ async fn dispatch_resolves_brain_target_binding() {
         .req(
             Method::POST,
             "/api/brain/playbooks/playbook-unbound/dispatch",
-            Some(json!({"request_id": "unbreq"})),
+            Some(json!({"request_id": "unbreq", "situation": "resize now"})),
         )
         .await;
     assert_eq!(status, 202, "{body}");
@@ -242,7 +245,10 @@ async fn dispatch_invalid_request_id_400() {
         &spec("playbook-bad", PlaybookTrigger::Manual {}, vec![agent("a")]),
     )
     .await;
-    for bad in ["bad id!", &"x".repeat(49)] {
+    // "bad id!" fails the charset; 27 and 48 chars fail the verbatim-id
+    // budget (26 = a full ULID). The 26-char boundary is covered by
+    // `dispatch_rejects_oversized_request_id_400`.
+    for bad in ["bad id!", &"x".repeat(27), &"x".repeat(48)] {
         let (status, body) = h
             .req(
                 Method::POST,
@@ -252,4 +258,233 @@ async fn dispatch_invalid_request_id_400() {
             .await;
         assert_eq!(status, 400, "{body}");
     }
+}
+
+/// A 26-char request_id (the full execution-id key budget, same length as
+/// the ULID fallback) is accepted — the oversized-cap 400 must not swallow
+/// it; 27 chars is rejected with the collision-free message.
+#[tokio::test]
+async fn dispatch_rejects_oversized_request_id_400() {
+    let h = Harness::new().await;
+    // Every helper-built prompt references {situation}, so the D4 gate
+    // answers for the accepted key — proving the key itself passed.
+    seed_playbook(
+        &h,
+        &spec("playbook-keycap", PlaybookTrigger::Manual {}, vec![agent("a")]),
+    )
+    .await;
+    let (status, body) = h
+        .req(
+            Method::POST,
+            "/api/brain/playbooks/playbook-keycap/dispatch",
+            Some(json!({"request_id": "x".repeat(26)})),
+        )
+        .await;
+    assert_eq!(status, 400, "{body}");
+    assert_eq!(
+        body["error"],
+        json!("situation must not be empty when a step prompt references {situation}")
+    );
+
+    let (status, body) = h
+        .req(
+            Method::POST,
+            "/api/brain/playbooks/playbook-keycap/dispatch",
+            Some(json!({"request_id": "x".repeat(26), "situation": "fits"})),
+        )
+        .await;
+    assert_eq!(status, 202, "{body}");
+    assert!(body["executions"][0]["id"]
+        .as_str()
+        .unwrap()
+        .starts_with(&format!("agent-pbk-{}-a", "x".repeat(26))));
+
+    let (status, body) = h
+        .req(
+            Method::POST,
+            "/api/brain/playbooks/playbook-keycap/dispatch",
+            Some(json!({"request_id": "x".repeat(27), "situation": "fits"})),
+        )
+        .await;
+    assert_eq!(status, 400, "{body}");
+    assert_eq!(
+        body["error"],
+        json!("request_id must be at most 26 chars to keep step execution ids collision-free")
+    );
+}
+
+/// An empty situation only 400s when some step prompt actually substitutes
+/// `{situation}`; placeholder-free playbooks dispatch fine without one.
+#[tokio::test]
+async fn dispatch_requires_situation_for_placeholder_steps() {
+    let h = Harness::new().await;
+    let mut echo = agent("echo");
+    echo.prompt = "{situation}".into();
+    seed_playbook(
+        &h,
+        &spec("playbook-situ", PlaybookTrigger::Manual {}, vec![echo]),
+    )
+    .await;
+    let mut fixed = agent("fixed");
+    fixed.prompt = "static prompt, no placeholder".into();
+    seed_playbook(
+        &h,
+        &spec(
+            "playbook-situ-free",
+            PlaybookTrigger::Manual {},
+            vec![fixed],
+        ),
+    )
+    .await;
+
+    let (status, body) = h
+        .req(
+            Method::POST,
+            "/api/brain/playbooks/playbook-situ/dispatch",
+            Some(json!({"request_id": "situ1"})),
+        )
+        .await;
+    assert_eq!(status, 400, "{body}");
+    assert_eq!(
+        body["error"],
+        json!("situation must not be empty when a step prompt references {situation}")
+    );
+
+    let (status, body) = h
+        .req(
+            Method::POST,
+            "/api/brain/playbooks/playbook-situ/dispatch",
+            Some(json!({"request_id": "situ2", "situation": "nightly run"})),
+        )
+        .await;
+    assert_eq!(status, 202, "{body}");
+
+    let (status, body) = h
+        .req(
+            Method::POST,
+            "/api/brain/playbooks/playbook-situ-free/dispatch",
+            Some(json!({"request_id": "situfree"})),
+        )
+        .await;
+    assert_eq!(status, 202, "{body}");
+}
+
+/// A request_id reused with different dispatch content is a 409, not a
+/// silent replay of the earlier executions; the same content replays 202.
+#[tokio::test]
+async fn dispatch_request_id_reuse_with_different_content_409() {
+    let h = Harness::new().await;
+    seed_playbook(
+        &h,
+        &spec("playbook-reuse", PlaybookTrigger::Manual {}, vec![agent("a")]),
+    )
+    .await;
+
+    let (status, first) = h
+        .req(
+            Method::POST,
+            "/api/brain/playbooks/playbook-reuse/dispatch",
+            Some(json!({"request_id": "reused1", "situation": "s1"})),
+        )
+        .await;
+    assert_eq!(status, 202, "{first}");
+
+    // Idempotent retry: same request_id, same content → same executions.
+    let (status, replay) = h
+        .req(
+            Method::POST,
+            "/api/brain/playbooks/playbook-reuse/dispatch",
+            Some(json!({"request_id": "reused1", "situation": "s1"})),
+        )
+        .await;
+    assert_eq!(status, 202, "{replay}");
+    assert_eq!(replay["executions"], first["executions"]);
+
+    // Same request_id, different situation → 409 (the old executions must
+    // not be presented as this dispatch's result).
+    let (status, body) = h
+        .req(
+            Method::POST,
+            "/api/brain/playbooks/playbook-reuse/dispatch",
+            Some(json!({"request_id": "reused1", "situation": "s2"})),
+        )
+        .await;
+    assert_eq!(status, 409, "{body}");
+    assert_eq!(
+        body["error"],
+        json!("request_id already dispatched different content; use a new request_id")
+    );
+}
+
+/// A brain step carrying an inline route resolves to that executor even
+/// when the environment binds the capability elsewhere — the inline route
+/// is the cross-end determinism channel.
+#[tokio::test]
+async fn dispatch_inline_brain_route_wins_over_binding() {
+    let h = Harness::new().await;
+    seed_dag(&h).await;
+    let (status, body) = h
+        .req(
+            Method::POST,
+            "/api/brain/capabilities",
+            Some(json!({
+                "capability_type": "tool-usage",
+                "summary": "route with a pinned executor",
+                "input_desc": "a work request",
+                "output_desc": "completed work",
+                "eng_inputs": ["exemplar input"],
+            })),
+        )
+        .await;
+    assert_eq!(status, 201, "{body}");
+    let capability = body["capability"]["id"].as_str().unwrap().to_string();
+
+    // Conflicting environment binding: the default agent, not the dag.
+    let (status, body) = h
+        .req(
+            Method::PUT,
+            &format!("/api/brain/capabilities/{capability}/target"),
+            Some(json!({"kind": "agent", "target": "act"})),
+        )
+        .await;
+    assert_eq!(status, 200, "{body}");
+
+    seed_playbook(
+        &h,
+        &spec(
+            "playbook-route",
+            PlaybookTrigger::Manual {},
+            vec![step(
+                "run",
+                &[],
+                PlaybookTarget::Brain {
+                    capability_id: capability.clone(),
+                    route: Some(PlaybookRoute {
+                        kind: PlaybookRouteKind::Dag,
+                        ref_: "pbk-dag".into(),
+                    }),
+                },
+            )],
+        ),
+    )
+    .await;
+
+    let (status, body) = h
+        .req(
+            Method::POST,
+            "/api/brain/playbooks/playbook-route/dispatch",
+            Some(json!({"request_id": "routereq", "situation": "route me"})),
+        )
+        .await;
+    assert_eq!(status, 202, "{body}");
+    let run = &body["executions"][0];
+    assert_eq!(run["kind"], json!("dag"), "{body}");
+    assert!(run["id"]
+        .as_str()
+        .unwrap()
+        .starts_with("dag-pbk-routereq-run"));
+    assert_eq!(
+        index_kind(&h, run["id"].as_str().unwrap()).await,
+        Some(ExecutionKind::Dag)
+    );
 }

@@ -10,6 +10,8 @@ path = "src/main.rs"
 
 [dependencies]
 opencoder-core.workspace = true
+opencoder-brain.workspace = true
+opencoder-llm.workspace = true
 anyhow.workspace = true
 clap.workspace = true
 futures.workspace = true

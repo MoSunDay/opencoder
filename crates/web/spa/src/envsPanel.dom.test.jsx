@@ -25,7 +25,7 @@ vi.mock('./api.js', () => ({
 
 import './test/setup-dom.js';
 import { SPIN_DELAY_MS } from './ui/tableLoading.js';
-import { EnvsPanel } from './envsPanel.jsx';
+import { TodoEnvsPanel as EnvsPanel } from './envs/todoPanel.jsx';
 
 /// jsdom 下只用微任务 flush：RTL 的 waitFor/findBy 依赖真实定时器轮询，
 /// 与 fake timers 混用会互相卡住，所以计时相关的用例自己推进时钟。

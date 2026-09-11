@@ -29,7 +29,6 @@ mod messages;
 mod node_state;
 mod node_tasks;
 mod nodes;
-mod users;
 mod project;
 mod project_runs;
 pub(crate) mod schema;
@@ -38,6 +37,7 @@ mod subagent_tasks;
 mod team_runs;
 mod todos;
 mod tx;
+mod users;
 
 /// Primary `Store` implementation backed by libsql (embedded local SQLite, WAL).
 ///
@@ -416,6 +416,21 @@ impl Store for LibsqlStore {
     ) -> Result<TodoEventPage> {
         let _guard = self.db_lock.lock().await;
         todos::events_page(&self.conn, workflow_id, after_seq, limit, payload_budget).await
+    }
+    async fn last_todo_event_seq(&self, workflow_id: &str) -> Result<i64> {
+        let _guard = self.db_lock.lock().await;
+        let mut rows = self
+            .conn
+            .query(
+                "SELECT COALESCE(MAX(seq),0) FROM todo_events WHERE workflow_id=?1",
+                [workflow_id],
+            )
+            .await?;
+        Ok(rows
+            .next()
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("missing event watermark"))?
+            .get(0)?)
     }
     async fn todo_event_payload_chunk(
         &self,

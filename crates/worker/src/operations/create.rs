@@ -229,6 +229,19 @@ pub(super) fn prepare(worker: &Worker, assignment: &Assignment, legacy: bool) ->
         settings.validate().map_err(anyhow::Error::msg)?;
         config.agent.codex = Some(settings.as_ref().clone());
     }
+    if let Some(action) = assignment
+        .request
+        .input
+        .get("_brain")
+        .and_then(|b| b.get("action"))
+    {
+        if let Some(runtime) = action.get("runtime").filter(|v| !v.is_null()) {
+            config.agent.runtime = serde_json::from_value(runtime.clone())?;
+        }
+        if let Some(codex) = action.get("codex").filter(|v| !v.is_null()) {
+            config.agent.codex = Some(serde_json::from_value(codex.clone())?);
+        }
+    }
     let source = config
         .agent
         .agents_dir
@@ -267,6 +280,7 @@ pub(super) fn prepare(worker: &Worker, assignment: &Assignment, legacy: bool) ->
     let validated = (|| -> Result<()> {
         let prompt = assignment.request.input["prompt"].as_str().unwrap_or("");
         let needs_llm = match assignment.request.kind {
+            ExecutionKind::Brain => assignment.request.input["mode"] == "dynamic",
             ExecutionKind::Agent => !prompt.is_empty(),
             ExecutionKind::Dag => assignment
                 .definition
@@ -277,8 +291,27 @@ pub(super) fn prepare(worker: &Worker, assignment: &Assignment, legacy: bool) ->
             _ => true,
         };
         opencoder_core::agent::scope::with_root_sync(config.agent.agents_dir.clone(), || {
+            if let Some(pins) =
+                assignment.request.input["_brain"]["action"]["agent_manifests"].as_object()
+            {
+                for (name, expected) in pins {
+                    let actual = opencoder_core::brain::resources::agent_manifest(name)
+                        .map_err(anyhow::Error::msg)?;
+                    anyhow::ensure!(expected.as_str()==Some(actual.as_str()), "pinned agent resource mismatch for {name}; select a node with the required version");
+                }
+            }
             let mut agents = vec![];
             match assignment.request.kind {
+                ExecutionKind::Brain => {
+                    opencoder_brain::execution::initialize(
+                        &assignment.index.id,
+                        serde_json::from_value(assignment.request.input.clone())?,
+                        0,
+                    )?;
+                    if worker.inner.client.is_none() {
+                        crate::brain::activate::preflight()?;
+                    }
+                }
                 ExecutionKind::Agent | ExecutionKind::Maintenance | ExecutionKind::Operator => {
                     agents.push(
                         assignment

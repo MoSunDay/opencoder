@@ -49,9 +49,4 @@ export function BrainDispatch({ onNotice }) {
   </>;
 }
 
-export function FleetBrainPanel({ onNotice }) {
-  return <PageShell page="brain"><Tabs items={[
-    { key: 'dispatch', label: '需求执行', children: <BrainDispatch onNotice={onNotice} /> },
-    { key: 'library', label: '能力库', children: <BrainPanel onNotice={onNotice} /> },
-  ]} /></PageShell>;
-}
+export { BrainWorkbench as FleetBrainPanel } from '../brain/workbench/index.jsx';

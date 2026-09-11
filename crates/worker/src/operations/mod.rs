@@ -16,6 +16,11 @@ pub(crate) use query::native;
 
 pub(crate) async fn handle(worker: &Worker, operation: NodeOperation) -> Result<RpcReply> {
     match operation {
+        NodeOperation::Brain {
+            execution,
+            action,
+            input,
+        } => crate::brain::api::handle(worker, &execution, &action, input).await,
         NodeOperation::Admission { command } => admission::update(worker, command).await,
         NodeOperation::Create { assignment } => create::create(worker, assignment).await,
         NodeOperation::Inspect { execution } => query::inspect(worker, &execution).await,

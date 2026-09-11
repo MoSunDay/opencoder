@@ -198,18 +198,6 @@ function App() {
               trigger={null}
               theme="light"
             >
-              <Button
-                className="fleet-nav-toggle"
-                type="text"
-                icon={navCollapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
-                aria-label={navCollapsed ? '展开菜单' : '收起菜单'}
-                aria-expanded={!navCollapsed}
-                aria-controls="fleet-page-menu"
-                title={navCollapsed ? '展开菜单' : '收起菜单'}
-                onClick={() => setNavCollapsed((value) => !value)}
-              >
-                {navCollapsed ? null : '收起菜单'}
-              </Button>
               <div className="fleet-nav-category" aria-hidden={navCollapsed}>
                 <Segmented
                   block
@@ -227,6 +215,18 @@ function App() {
                 onClick={({ key }) => goPage(key)}
                 style={{ borderRight: 0 }}
               />
+              <Button
+                className="fleet-nav-toggle"
+                type="text"
+                icon={navCollapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
+                aria-label={navCollapsed ? '展开菜单' : '收起菜单'}
+                aria-expanded={!navCollapsed}
+                aria-controls="fleet-page-menu"
+                title={navCollapsed ? '展开菜单' : '收起菜单'}
+                onClick={() => setNavCollapsed((value) => !value)}
+              >
+                {navCollapsed ? null : '收起菜单'}
+              </Button>
             </Sider>
             <Content className="fleet-content">
               <Segmented

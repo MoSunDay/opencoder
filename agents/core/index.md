@@ -1,4 +1,4 @@
-Commit: c36ac68df313ec108549ed5b95756eb37edf5f69
+Commit: e50ffc433bca866fd17bd571a74f1bdf17705dea
 
 # core 模块
 
@@ -22,7 +22,9 @@ Commit: c36ac68df313ec108549ed5b95756eb37edf5f69
 - `src/skill.rs` — 多根发现 first-wins 遮蔽；缓存 `src/skill/skill_cache.rs`。
 - `src/tool.rs` — `Tool` trait / `ToolArc` / `ToolContext` / `ToolOutput`。
 - `src/identity.rs` — `Identity`/`Role`(admin|root|user)/`token_hash`(sha256)；不从 lib 根 re-export（避让 message::Role）。
-- `src/fleet/protocol.rs` — `PROTOCOL_VERSION = 8`，Server/Node 必须同代际。
+- `src/fleet/protocol.rs` — `PROTOCOL_VERSION = 9`，Server/Node 必须同代际。
+- `src/brain/` — PlanVersion/OntologyPlan、BrainRun/动作账本/通知 DTO；资源摘要固定 agent 卡和引用版本。
+- `build.rs` — 通过 Git 实际元数据路径监视 HEAD/refs，兼容 linked worktree。
 - `src/fleet/{queue,scheduling}.rs` — FIFO/LIFO 排序与纯 CPU 节点选择。
 - `src/share_fs.rs` — NFS 兼容共享树布局（todo/env/agent/tools）。
 - `src/sse.rs` — `SseEvt` 服务端 SSE 事件类型。

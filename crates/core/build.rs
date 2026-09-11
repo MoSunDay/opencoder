@@ -42,10 +42,16 @@ fn main() {
 /// normal branch HEAD only contains `ref: refs/heads/<name>` and does not
 /// itself change when a new commit advances that ref.
 fn rerun_for_git(manifest_dir: &str) {
-    let git_dir = format!("{manifest_dir}/../../.git");
-    println!("cargo:rerun-if-changed={git_dir}/HEAD");
-    println!("cargo:rerun-if-changed={git_dir}/refs");
-    println!("cargo:rerun-if-changed={git_dir}/packed-refs");
+    // In a linked worktree .git is a file; resolve each real metadata path.
+    // Watching a nonexistent .git/HEAD makes Cargo rerun this script forever.
+    for reference in ["HEAD", "refs", "packed-refs"] {
+        if let Some(path) = run_git(&["rev-parse", "--git-path", reference], manifest_dir) {
+            let path = std::path::Path::new(manifest_dir).join(path);
+            if path.exists() {
+                println!("cargo:rerun-if-changed={}", path.display());
+            }
+        }
+    }
 }
 
 /// Run a git subcommand in `dir`, returning trimmed stdout on success.

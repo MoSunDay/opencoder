@@ -26,6 +26,7 @@ fn fenced(body: &str) -> String {
 
 #[tokio::test]
 async fn dag_run_progress_and_step_views_after_completion() {
+    let _config = support::isolated_config();
     let client = mock();
     let fleet = Fleet::new(1, client.clone()).await;
     client.queue_script(completed(fenced("{\"v\":1}")));
@@ -111,6 +112,7 @@ async fn dag_run_progress_and_step_views_after_completion() {
 
 #[tokio::test]
 async fn dag_run_progress_reports_pending_step_while_in_flight() {
+    let _config = support::isolated_config();
     let client = mock();
     let fleet = Fleet::new(1, client.clone()).await;
     client.queue_script(completed(fenced("{\"v\":1}")));

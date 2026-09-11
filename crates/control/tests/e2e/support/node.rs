@@ -298,6 +298,9 @@ impl NodeService for MockNode {
     async fn handle(&self, operation: NodeOperation) -> RpcReply {
         let mut t = self.tables.lock().unwrap();
         match operation {
+            NodeOperation::Brain { .. } => {
+                RpcReply::error(501, "mock node does not implement brain activations")
+            }
             NodeOperation::Create { assignment } => {
                 if let Some(reply) = t.create_reply.clone() {
                     return reply;

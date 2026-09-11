@@ -1,4 +1,4 @@
-Commit: b465f440381bd009dc9bd3a8192ad88eab44cede
+Commit: e50ffc433bca866fd17bd571a74f1bdf17705dea
 
 # OpenCoder 逻辑地图
 
@@ -20,7 +20,7 @@ Rust 原生编码代理 workspace：`opencoder`（本地 CLI/TUI）、`opencode-
 - [agents/dag-runtime](agents/dag-runtime/index.md) — 节点侧 DAG 调度执行；server 不链接。
 - [agents/todos](agents/todos/index.md) — 持久化 TODO 工作流：每 TODO 独立 Primary Session。
 - [agents/project](agents/project/index.md) — 项目跟踪：goal→milestone→todo，`ProjectStore` 接缝。
-- [agents/brain](agents/brain/index.md) — 能力库、向量检索、路由规划。
+- [agents/brain](agents/brain/index.md) — 能力库、版本化本体计划、有限调度状态机与兼容路由。
 - [agents/agents](agents/agents/index.md) — 版本化自定义 Agent：共享池 `v{n}` + meta.json 引用卡 + NFS 只读导出。
 - [agents/team](agents/team/index.md) — 团队目录与消息扇出运行时。
 - [agents/control](agents/control/index.md) — 平台控制面：节点调度、五字段执行索引。

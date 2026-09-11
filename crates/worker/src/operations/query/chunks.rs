@@ -31,7 +31,10 @@ pub(in crate::operations) async fn event_payload(
         return Ok(reply);
     }
     let id = request.execution.id.as_str();
-    let chunk = if request.execution.kind == ExecutionKind::Todos {
+    let chunk = if matches!(
+        request.execution.kind,
+        ExecutionKind::Todos | ExecutionKind::Brain
+    ) {
         worker
             .inner
             .state

@@ -2380,10 +2380,12 @@ name = "opencoder-brain"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "opencoder-core",
  "opencoder-llm",
  "opencoder-store",
  "serde",
  "serde_json",
+ "sha2",
  "tokio",
  "ulid",
 ]
@@ -2398,6 +2400,7 @@ dependencies = [
  "base64",
  "clap",
  "futures",
+ "opencoder-brain",
  "opencoder-control",
  "opencoder-core",
  "opencoder-llm",
@@ -2772,6 +2775,7 @@ dependencies = [
  "futures",
  "libc",
  "opencoder-agents",
+ "opencoder-brain",
  "opencoder-control",
  "opencoder-core",
  "opencoder-dag",

@@ -23,7 +23,7 @@ vi.mock('../api.js', () => ({
 }));
 
 import '../test/setup-dom.js';
-import { EnvsPanel } from '../envsPanel.jsx';
+import { TodoEnvsPanel as EnvsPanel } from '../envs/todoPanel.jsx';
 
 /// jsdom 下只用微任务 flush（同 envsPanel.dom.test.jsx 的约定）。
 const flush = async () => { for (let i = 0; i < 6; i += 1) { await act(async () => {}); } };

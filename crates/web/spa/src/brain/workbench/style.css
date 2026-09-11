@@ -1,0 +1,30 @@
+.brain-launch { max-width: 700px; margin: auto; }
+.brain-run { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.brain-run-header { display: flex; justify-content: space-between; gap: 20px; align-items: flex-start; padding: 20px; background: var(--oc-surface, #fafcff); border: 1px solid #dce5ef; border-radius: 12px; }
+.brain-run-header h4 { margin-top: 0; }
+.brain-workspace-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.brain-workspace { display: grid; grid-template-columns: 190px minmax(280px, 1fr) minmax(300px, 380px); border: 1px solid #dce5ef; border-radius: 12px; overflow: hidden; min-height: 560px; }
+.brain-canvas { height: 560px; min-width: 0; background: #f8fafc; }
+.brain-step-list { overflow: auto; max-height: 700px; border-right: 1px solid #dce5ef; padding: 8px; }
+.brain-step-list button { display: flex; flex-direction: column; gap: 6px; text-align: left; border: 1px solid transparent; border-radius: 8px; width: 100%; padding: 12px; margin-bottom: 5px; color: inherit; background: transparent; cursor: pointer; }
+.brain-step-list button:hover, .brain-step-list button.selected { background: #edf4ff; border-color: #b7d1fb; }
+.brain-step-list small { color: #577087; text-transform: uppercase; }
+.brain-step-list span { font-size: 12px; color: #62768a; }
+.brain-node { width: 224px; min-height: 100px; border: 1px solid #cbd7e4; border-left: 4px solid #9aacbc; border-radius: 10px; padding: 12px; background: #fff; box-shadow: 0 2px 8px #20374d0a; color: #1b2d40; }
+.brain-node > strong { display: block; margin: 6px 0 10px; white-space: normal; overflow-wrap: anywhere; }
+.brain-node-kind { text-transform: uppercase; font-size: 11px; color: #5d7185; letter-spacing: .05em; }
+.brain-node-selected { outline: 2px solid #1677ff; outline-offset: 3px; }
+.brain-node-running { border-left-color: #1677ff; }
+.brain-node-failed { border-left-color: #e44f4f; }
+.brain-node-succeeded { border-left-color: #389e0d; }
+.brain-node-contract { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: #577087; }
+.brain-inspector { min-width: 0; max-height: 760px; overflow: auto; border-left: 1px solid #dce5ef; padding: 16px; }
+.brain-json { margin: 8px 0; padding: 12px; max-height: 340px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; border-radius: 8px; background: #f3f6fa; color: #30485f; font-size: 12px; }
+.brain-events { max-height: 240px; overflow: auto; margin-top: 12px; }
+.brain-events details { padding: 7px 0; border-bottom: 1px solid #eef1f5; }
+.brain-events summary { display: flex; align-items: center; gap: 12px; cursor: pointer; font-size: 12px; }
+.brain-input-request { border: 1px solid #ffd591; background: #fffaf0; padding: 16px; border-radius: 8px; }
+.brain-editor-workspace { display: grid; grid-template-columns: minmax(300px, 1fr) 360px; border: 1px solid #dce5ef; margin-top: 12px; border-radius: 10px; overflow: hidden; }
+.execution-view-inline { min-width: 0; }
+@media (max-width: 1150px) { .brain-workspace { grid-template-columns: 150px minmax(0, 1fr); } .brain-workspace > .brain-inspector { grid-column: 1 / -1; border-left: none; border-top: 1px solid #dce5ef; } }
+@media (max-width: 700px) { .brain-run-header { flex-direction: column; } .brain-workspace { display: block; } .brain-step-list { display: flex; max-height: 120px; overflow: auto; } .brain-step-list button { min-width: 140px; } .brain-canvas { height: 420px; } .brain-editor-workspace { display: block; } .brain-workspace-toolbar { flex-wrap: wrap; } }

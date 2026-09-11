@@ -16,7 +16,7 @@ Commit: b465f440381bd009dc9bd3a8192ad88eab44cede
 - store 表 v15 `project_*`、v23 里程碑放宽；`project_todo_runs` 版本留痕可取消。
 - ProjectStore feature-gate `mysql`/`starrocks`；StarRocks 拒绝 Plan/Execute 写。
 
-- `src/executor/playbook_drive.rs` + `playbook_step.rs` — 本地剧本编排：拓扑波次 JoinSet 并发、失败 `collapse_blocked` 折叠下游、每步 `kind=Step` 子 run 行（不写 todo 状态）；todos 目标本地拒绝（平台语义）。
+- `src/executor/playbook_drive.rs` + `playbook_step.rs` — 本地剧本编排：拓扑波次 JoinSet 并发、失败 `collapse_blocked` 折叠下游、每步 `kind=Step` 子 run 行（不写 todo 状态）；todos 目标本地拒绝（平台语义）；brain 步骤内联 `PlaybookRoute` 与 control 同规则解析（压过本地路由表），汇总补 `blocked: 上游失败未启动`/`skipped: 未启动` 行。
 ## 边界
 - 项目运行与 todos 自治 workflow 是不同入口。
 - 共享外置 ProjectStore 的多运行时无分布式驱动租约。

@@ -1,8 +1,8 @@
-Commit: e50ffc433bca866fd17bd571a74f1bdf17705dea
+Commit: 2686d40a267436adb555041fc8154fc9bb454574 (working-tree)
 
 # brain 模块
 
-纯本体校验、有限调度状态机和一次动态规划；保留描述型能力、向量检索与决策树路由接口。
+纯本体校验、有限调度状态机和一次动态规划；保留描述型能力、向量检索与决策树路由接口。`ActionFlow` 在同一计划内按条件边创建持久访问轮次，`flow_current` 指向当前轮次；`execution::flow` 在回执后推进条件、回退、交付物校验和取消边界。
 
 ## 类型与边界
 
@@ -13,7 +13,7 @@ Commit: e50ffc433bca866fd17bd571a74f1bdf17705dea
 ## 关键路径
 
 - [ontology/](../../crates/brain/src/ontology/) — JSON schema 子集、绑定来源、类型/语义、控制循环及批量汇合校验。
-- [execution/](../../crates/brain/src/execution/) — initialize/advance、输入解析、稳定实例 ID、条件展开、通知去重、动作账本、暂停/取消和交付验证。
+- [execution/](../../crates/brain/src/execution/) — initialize/advance、输入解析、稳定实例 ID、条件展开、通知去重、动作账本、暂停/取消（取消会在无活动子动作时收敛为终态）和交付验证。
 - [activation.rs](../../crates/brain/src/activation.rs) — 固定模式返回全部就绪动作；动态模式调用 ChatStream 一次，解析完整计划后校验，不带运行期工具循环。
 - `src/{domain,runtime,plan,planning}.rs` — 描述型能力、向量检索和兼容决策树；旧 `brain_plans.tree_json` 与新本体计划版本分开存储。
 

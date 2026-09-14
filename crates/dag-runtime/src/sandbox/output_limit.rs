@@ -10,14 +10,20 @@ pub(crate) const STRUCTURED_JSON_LIMIT_BYTES: usize = 2 * 1024 * 1024;
 
 /// Read a complete stream without ever retaining more than `limit` bytes.
 /// EOF at exactly the limit is accepted; the next byte is a stable error.
-pub(crate) async fn read_bounded<R>(
-    mut reader: R,
-    label: &'static str,
-    limit: usize,
-) -> Result<Vec<u8>>
+#[cfg(test)]
+pub(crate) async fn read_bounded<R>(reader: R, label: &'static str, limit: usize) -> Result<Vec<u8>>
 where
     R: AsyncRead + Unpin,
 {
+    read_logged(reader, label, limit, None).await
+}
+
+pub(crate) async fn read_logged<R: AsyncRead + Unpin>(
+    mut reader: R,
+    label: &'static str,
+    limit: usize,
+    log: Option<crate::exec::logs::StepLog>,
+) -> Result<Vec<u8>> {
     let mut output = Vec::with_capacity(limit.min(64 * 1024));
     let mut chunk = [0u8; 8192];
     loop {
@@ -30,6 +36,9 @@ where
             anyhow::bail!("output_limit_exceeded: {label} exceeds {limit} bytes");
         }
         output.extend_from_slice(&chunk[..count]);
+        if let Some(log) = &log {
+            log.output(label, &chunk[..count]);
+        }
     }
 }
 

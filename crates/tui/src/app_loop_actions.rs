@@ -160,7 +160,6 @@ pub(crate) async fn dispatch_slash_action(
     task_picker: &mut Option<crate::task::TaskPicker>,
     model_menu: &mut Option<ModelMenu>,
     mcp_menu: &mut Option<crate::mcp_menu::McpMenu>,
-    envs_menu: &mut Option<crate::envs_menu::EnvsMenu>,
     cli_menu: &mut Option<crate::cli_menu::CliMenu>,
     skill_toggle_menu: &mut Option<crate::skill_menu::SkillMenu>,
     ap_menu: &mut Option<crate::ap_menu::ApMenu>,
@@ -211,11 +210,6 @@ pub(crate) async fn dispatch_slash_action(
         SlashAction::Mcp => {
             *mcp_menu = Some(crate::mcp_menu::McpMenu::List(
                 crate::mcp_menu::McpList::new(config),
-            ));
-        }
-        SlashAction::Envs => {
-            *envs_menu = Some(crate::envs_menu::EnvsMenu::List(
-                crate::envs_menu::EnvsList::discover(),
             ));
         }
         SlashAction::Cli => {

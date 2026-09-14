@@ -17,6 +17,8 @@ import { WorkloadDetail } from './detail/workloads.jsx';
 import { Markdown } from '../project/markdown.jsx';
 import { err } from '../notice.js';
 import { RunnerDetail } from './detail/runner.jsx';
+import { ExecutionLogs } from '../ui/executionEvents/executionLogs.jsx';
+import { useExecutionEvents } from '../ui/executionEvents/useExecutionEvents.js';
 
 const EVENT_TEXT_CHARS = 64 * 1024;
 const RETAINED_EVENT_CHARS = 2 * 1024 * 1024;
@@ -80,7 +82,7 @@ export function ExecutionView({ executionRef, summary, onNotice, mode = 'full', 
   const kind = detail?.request?.kind || index?.kind;
   const detailReady = detail?.execution?.id === id;
   const isProjectRun = kind === 'project' && id.startsWith('prun-');
-  const hasMessages = detailReady && (['agent', 'maintenance', 'dag', 'operator'].includes(kind) || (isProjectRun && !!detail?.run?.session_id));
+  const hasMessages = detailReady && (['agent', 'maintenance', 'operator'].includes(kind) || (isProjectRun && !!detail?.run?.session_id));
   useEffect(() => {
     if (!detailReady || !id || !kind || isProjectRun || ['agent', 'maintenance', 'dag', 'operator'].includes(kind)) return undefined;
     const stream = openStream({ path: `/api/executions/${encodeURIComponent(id)}/events`, after: 0, executionHistory: true,
@@ -93,6 +95,12 @@ export function ExecutionView({ executionRef, summary, onNotice, mode = 'full', 
     });
     return () => stream.abort();
   }, [id, kind, isProjectRun, detailReady, load]);
+  const dagLogs = useExecutionEvents({ id, enabled: detailReady && kind === 'dag', status: index?.status,
+    onFrame: (frame) => { if (['run_started', 'step_started', 'step_done', 'run_finished'].includes(frame.event)) {
+      setEvents((rows) => appendEvent(rows, frame));
+      if (frame.event === 'run_finished') load();
+    } },
+  });
   const loadMessages = useCallback(async ({ reset = false, rewind = false, cursor = null, leading = new Uint8Array(), windowIndex = 0 } = {}) => {
     if (!id || !hasMessages) return;
     setMessagesBusy(true);
@@ -107,7 +115,7 @@ export function ExecutionView({ executionRef, summary, onNotice, mode = 'full', 
     finally { setMessagesBusy(false); }
   }, [id, kind, hasMessages]);
   const live = useExecutionTranscript({
-    id, enabled: detailReady && ['agent', 'maintenance', 'dag', 'operator'].includes(kind), status: index?.status, revision,
+    id, enabled: detailReady && ['agent', 'maintenance', 'operator'].includes(kind), status: index?.status, revision,
     onFrame: (frame) => setEvents((rows) => appendEvent(rows, frame)),
     onSettled: () => { load(); if (messageWindow === 0) loadMessages({ reset: true }); },
     onError: setError,
@@ -194,6 +202,7 @@ export function ExecutionView({ executionRef, summary, onNotice, mode = 'full', 
       <Space><Select value={delivery} onChange={setDelivery} options={[{ value: 'prompt', label: '发送' }, { value: 'steer', label: '指导当前执行' }, { value: 'queue', label: '加入队列' }]} /><Button type="primary" disabled={!prompt.trim()} loading={busy} onClick={() => command(delivery, { prompt })}>提交</Button></Space>
     </Space>}
     {kind === 'dag' && (detail?.definition?.spec || detail?.definition)?.steps && <DagProcess spec={detail.definition.spec || detail.definition} frames={events} snapshot={detail.dag_steps} />}
+    {kind === 'dag' && <ExecutionLogs id={id} {...dagLogs} steps={((detail?.definition?.spec || detail?.definition)?.steps || []).map((step) => step.name)} />}
     {kind === 'dag' && <Artifacts id={id} spec={detail?.definition?.spec || detail?.definition} onNotice={onNotice} />}
     {detail?.topic?.final_summary && <Markdown text={detail.topic.final_summary} />}
     <WorkloadDetail id={id} detail={detail} kind={kind} onOpen={setChildId} />

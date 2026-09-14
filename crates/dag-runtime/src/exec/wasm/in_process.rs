@@ -28,6 +28,7 @@ use wasmtime_wasi::{FsPerms, I32Exit, WasiCtxBuilder};
 use super::super::StepCtx;
 use super::super::StepResult;
 use super::{error_result, finish_from_output_json, resolve_module, step_env, CONTEXT_MOUNT};
+use crate::step_log::{StepOutputLog, Stream};
 
 /// Epoch tick period; the store deadline is expressed in these ticks.
 const TICK_MS: u64 = 100;
@@ -48,6 +49,7 @@ pub(crate) async fn execute(
     tokens: &[String],
     timeout_secs: Option<u64>,
     cancel: CancellationToken,
+    output: Option<StepOutputLog>,
 ) -> StepResult {
     let module_path = match resolve_module(run_root, module_library, &tokens[0]) {
         Ok(p) => p,
@@ -75,6 +77,7 @@ pub(crate) async fn execute(
             step_name,
             timeout_secs,
             cancel_flag,
+            output,
         )
     });
     let result = match job.await {
@@ -87,6 +90,9 @@ pub(crate) async fn execute(
 
 /// Sync engine run — owns the whole lifecycle: engine, ticker, store,
 /// instantiation, classification of the terminal error.
+// The extra parameter is the optional node-store output mirror; grouping the
+// engine inputs into a struct would only hide the same eight values.
+#[allow(clippy::too_many_arguments)]
 fn run_sync(
     module_path: PathBuf,
     tokens: Vec<String>,
@@ -95,6 +101,7 @@ fn run_sync(
     step_name: String,
     timeout_secs: Option<u64>,
     cancel_flag: Arc<AtomicBool>,
+    output: Option<StepOutputLog>,
 ) -> StepResult {
     let budget_secs = timeout_secs.unwrap_or(DEFAULT_TIMEOUT_SECS);
     let ticks = (budget_secs.saturating_mul(1000) / TICK_MS).max(1);
@@ -108,8 +115,10 @@ fn run_sync(
     let _ticker = EpochTicker::spawn(engine.clone(), ticks, Arc::clone(&cancel_flag));
 
     let limit = crate::sandbox::output_limit::STREAM_OUTPUT_LIMIT_BYTES;
-    let stdout = SharedSink::new(limit);
-    let stderr = SharedSink::new(limit);
+    // The step log (when the runtime supplied one) mirrors every guest write
+    // as it lands, so a remote console sees output while the step runs.
+    let stdout = SharedSink::with_output(limit, output.clone().map(|log| (log, Stream::Stdout)));
+    let stderr = SharedSink::with_output(limit, output.map(|log| (log, Stream::Stderr)));
 
     let mut builder = WasiCtxBuilder::new();
     builder
@@ -258,6 +267,8 @@ struct SinkState {
     buf: Mutex<Vec<u8>>,
     limit: usize,
     overflow: AtomicBool,
+    /// Optional live mirror: (node-store step log, which stream this is).
+    output: Option<(StepOutputLog, Stream)>,
 }
 
 /// A [`StdoutStream`] capturing into a bounded buffer. Guest writes past
@@ -267,11 +278,12 @@ struct SinkState {
 struct SharedSink(Arc<SinkState>);
 
 impl SharedSink {
-    fn new(limit: usize) -> Self {
+    fn with_output(limit: usize, output: Option<(StepOutputLog, Stream)>) -> Self {
         SharedSink(Arc::new(SinkState {
             buf: Mutex::new(Vec::new()),
             limit,
             overflow: AtomicBool::new(false),
+            output,
         }))
     }
 
@@ -313,6 +325,12 @@ impl AsyncWrite for SinkWriter {
         _cx: &mut TaskContext<'_>,
         buf: &[u8],
     ) -> Poll<std::io::Result<usize>> {
+        // Mirror BEFORE the bounded buffer can reject the chunk: the live
+        // view must show what the guest actually wrote, including the write
+        // that tripped `output_limit_exceeded`.
+        if let Some((log, stream)) = &self.0.output {
+            log.push_bytes(*stream, buf);
+        }
         if self.0.overflow.load(Ordering::SeqCst) {
             return Poll::Ready(Err(limit_error(self.0.limit)));
         }

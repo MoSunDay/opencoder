@@ -10,7 +10,7 @@ use opencoder_core::{
     harness::{agent_settings, RunnerSettings},
     Config,
 };
-use opencoder_dag::{StepKind, StepOutcome};
+use opencoder_dag::StepOutcome;
 use opencoder_session::SessionState;
 use serde_json::{json, Value};
 use std::{collections::BTreeMap, time::Duration};
@@ -40,8 +40,14 @@ pub fn validate(config: &Config, runner: &str, agent: &str) -> Result<()> {
     Ok(())
 }
 
-pub async fn execute(ctx: &StepCtx, deps: &ExecDeps, cancel: CancellationToken) -> StepResult {
-    let result = run(ctx, deps, cancel.clone()).await;
+pub async fn execute(
+    ctx: &StepCtx,
+    deps: &ExecDeps,
+    runner: &str,
+    agent: &str,
+    cancel: CancellationToken,
+) -> StepResult {
+    let result = run(ctx, deps, runner, agent, cancel.clone()).await;
     match result {
         Ok(value) => value,
         Err(error) => StepResult {
@@ -58,10 +64,13 @@ pub async fn execute(ctx: &StepCtx, deps: &ExecDeps, cancel: CancellationToken) 
     }
 }
 
-async fn run(ctx: &StepCtx, deps: &ExecDeps, cancel: CancellationToken) -> Result<StepResult> {
-    let StepKind::Runner { runner, agent } = &ctx.step.kind else {
-        anyhow::bail!("expected Runner step");
-    };
+async fn run(
+    ctx: &StepCtx,
+    deps: &ExecDeps,
+    runner: &str,
+    agent: &str,
+    cancel: CancellationToken,
+) -> Result<StepResult> {
     let dir = opencoder_dag::artifacts::step_dir(&ctx.workflow_root, &ctx.run_id, &ctx.step.name)
         .map_err(anyhow::Error::msg)?;
     let output = dir.join("artifacts");

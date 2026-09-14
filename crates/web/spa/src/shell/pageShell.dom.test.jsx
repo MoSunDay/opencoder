@@ -2,6 +2,8 @@
 // PageShell DOM contract: the unified page header is driven by nav.js
 // PAGE_META (title + description), carries the right-side actions slot, and
 // can skip the header entirely (bare) for sub-pages / special layouts.
+// Pages missing from PAGE_META are headerless too — `brain` (the workbench
+// carries its own Tabs titles) renders only the `.oc-page` body.
 
 import { afterEach, describe, expect, it } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
@@ -37,6 +39,12 @@ describe('PageShell', () => {
     render(<PageShell page="no_such_page">unknown-content</PageShell>);
     expect(screen.queryByRole('heading')).toBeNull();
     expect(screen.getByText('unknown-content')).toBeTruthy();
+  });
+
+  it('renders the headerless brain page body without any page header', () => {
+    render(<PageShell page="brain">brain-body</PageShell>);
+    expect(screen.queryByRole('heading')).toBeNull();
+    expect(screen.getByText('brain-body')).toBeTruthy();
   });
 
   it('every PAGE_META page can mount with a heading', () => {

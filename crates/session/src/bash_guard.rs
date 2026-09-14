@@ -326,11 +326,21 @@ pub(crate) fn strip_wrappers(cmd: &str) -> &str {
 /// cwd.
 #[cfg(test)]
 pub(crate) fn plain_dir() -> tempfile::TempDir {
-    let home = std::env::var("HOME").expect("$HOME set");
+    // Do not derive this parent from HOME: other tests deliberately swap and
+    // remove isolated HOME trees while this helper is running in parallel.
+    // `/data00` is the repository's stable non-release filesystem; retain a
+    // portable fallback for developer checkouts.
+    let parent = [
+        std::path::Path::new("/data00"),
+        std::path::Path::new("/root"),
+    ]
+    .into_iter()
+    .find(|path| path.is_dir())
+    .expect("stable non-release test parent");
     tempfile::Builder::new()
         .prefix("sg-plain-")
-        .tempdir_in(home)
-        .expect("writable $HOME for a non-released workdir")
+        .tempdir_in(parent)
+        .expect("writable stable parent for a non-released workdir")
 }
 
 #[cfg(test)]

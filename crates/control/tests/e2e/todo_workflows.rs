@@ -461,7 +461,8 @@ async fn dispatch_pins_env_and_reaches_node() {
             Method::POST,
             "/api/todo/envs",
             Some(json!({
-        "name": "envrun", "tools": ["/agent/tools/v3/ffmpeg"]})),
+        "name": "envrun", "tools": ["/agent/tools/v3/ffmpeg"],
+        "env_vars": {"OPENCODER_E2E_PROBE": "e2e-value"}})),
         )
         .await;
     assert_eq!(s, 200);

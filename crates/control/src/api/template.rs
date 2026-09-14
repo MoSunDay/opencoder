@@ -28,11 +28,14 @@ pub(super) fn snapshot(root: &Path, name: &str, version: &str) -> Result<Value> 
                 bail!("environment tool missing: {reference}");
             }
         }
+        let env_vars = opencoder_todos::domain::env_vars_from_context(&context)?;
         if !spec.metadata.is_object() {
             spec.metadata = json!({});
         }
         spec.metadata["env"] = json!(env);
         spec.metadata["env_tools"] = tools;
+        spec.metadata["env_vars"] =
+            opencoder_todos::domain::env_vars_metadata(env_vars);
     }
     opencoder_todos::domain::validate_spec(&spec)?;
     Ok(serde_json::to_value(spec)?)
@@ -58,10 +61,34 @@ mod tests {
             todo_env_binding_path(root, "demo", "v1").unwrap(),
             json!({"env":"test"}),
         );
-        write(env_context_path(root, "test").unwrap(), json!({"tools":[]}));
+        write(
+            env_context_path(root, "test").unwrap(),
+            json!({"tools":[], "env_vars":{"Z_LAST":"1","A_FIRST":"2"}}),
+        );
         let pinned = snapshot(root, "demo", "v1").unwrap();
         assert_eq!(pinned["metadata"]["env"], "test");
         assert_eq!(pinned["metadata"]["env_tools"], json!([]));
+        assert_eq!(
+            pinned["metadata"]["env_vars"],
+            json!({"A_FIRST":"2","Z_LAST":"1"})
+        );
+        // Invalid env_vars (bad key / non-string value) rejects dispatch.
+        write(
+            env_context_path(root, "test").unwrap(),
+            json!({"tools":[], "env_vars":{"bad-key":"1"}}),
+        );
+        assert!(snapshot(root, "demo", "v1")
+            .unwrap_err()
+            .to_string()
+            .contains("env_vars"));
+        write(
+            env_context_path(root, "test").unwrap(),
+            json!({"tools":[], "env_vars":{"GOOD":42}}),
+        );
+        assert!(snapshot(root, "demo", "v1")
+            .unwrap_err()
+            .to_string()
+            .contains("env_vars"));
         write(
             env_context_path(root, "test").unwrap(),
             json!({"tools":["missing/tool"]}),

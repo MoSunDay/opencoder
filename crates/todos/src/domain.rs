@@ -5,6 +5,57 @@ use opencoder_core::resolve_agent;
 
 use crate::types::*;
 
+/// Extract the `env_vars` map from a TODO env context as key-sorted
+/// `(key, value)` pairs. Keys must look like environment variable names and
+/// values must be strings — dispatch fails fast otherwise, so a pinned
+/// snapshot never carries an env the runner would silently drop.
+pub fn env_vars_from_context(context: &serde_json::Value) -> Result<Vec<(String, String)>> {
+    let Some(map) = context.get("env_vars").filter(|v| !v.is_null()) else {
+        return Ok(Vec::new());
+    };
+    let entries = map
+        .as_object()
+        .with_context(|| "env_vars 必须是对象")?;
+    let mut pairs = Vec::with_capacity(entries.len());
+    for (key, value) in entries {
+        let value = value
+            .as_str()
+            .with_context(|| format!("env_vars[{key}] 的值必须是字符串"))?;
+        if !opencoder_core::looks_like_env_var(key) {
+            bail!("env_vars 键必须是环境变量名（大写开头，[A-Z0-9_]）: {key}");
+        }
+        pairs.push((key.clone(), value.to_string()));
+    }
+    pairs.sort_by(|a, b| a.0.cmp(&b.0));
+    Ok(pairs)
+}
+
+/// Serialize `(key, value)` pairs into the `metadata.env_vars` object shape
+/// used by pinned specs (key-sorted for deterministic output).
+pub fn env_vars_metadata(pairs: Vec<(String, String)>) -> serde_json::Value {
+    serde_json::Value::Object(
+        pairs
+            .into_iter()
+            .map(|(k, v)| (k, serde_json::Value::String(v)))
+            .collect(),
+    )
+}
+
+/// TODO session env from the pinned spec (`metadata.env_vars`). Stamping
+/// already validated the shape at dispatch; malformed entries are skipped so
+/// a hand-edited spec cannot crash a run.
+pub fn env_passthrough_from_metadata(metadata: &serde_json::Value) -> Vec<(String, String)> {
+    let Some(entries) = metadata.get("env_vars").and_then(|v| v.as_object()) else {
+        return Vec::new();
+    };
+    let mut pairs: Vec<(String, String)> = entries
+        .iter()
+        .filter_map(|(k, v)| v.as_str().map(|v| (k.clone(), v.to_string())))
+        .collect();
+    pairs.sort_by(|a, b| a.0.cmp(&b.0));
+    pairs
+}
+
 pub fn validate_spec(spec: &WorkflowSpec) -> Result<()> {
     if spec.schema_version != 1 {
         bail!("unsupported todos schema_version {}", spec.schema_version);
@@ -377,6 +428,35 @@ mod tests {
                 "id {bad:?} rejected for the wrong reason: {error}"
             );
         }
+    }
+
+    #[test]
+    fn env_vars_from_context_sorts_and_validates() {
+        let pairs = env_vars_from_context(&serde_json::json!({
+            "env_vars": {"Z_LAST": "2", "A_FIRST": "1"}
+        }))
+        .unwrap();
+        assert_eq!(pairs, vec![("A_FIRST".into(), "1".into()), ("Z_LAST".into(), "2".into())]);
+        assert_eq!(
+            env_vars_metadata(pairs),
+            serde_json::json!({"A_FIRST": "1", "Z_LAST": "2"})
+        );
+    }
+
+    #[test]
+    fn env_vars_from_context_rejects_bad_keys_and_values() {
+        assert!(env_vars_from_context(&serde_json::json!({"env_vars": {"lower": "x"}})).is_err());
+        assert!(env_vars_from_context(&serde_json::json!({"env_vars": {"KEY": 3}})).is_err());
+        assert!(env_vars_from_context(&serde_json::json!({"env_vars": null})).is_ok());
+    }
+
+    #[test]
+    fn env_passthrough_from_metadata_skips_malformed_and_sorts() {
+        let pairs = env_passthrough_from_metadata(&serde_json::json!({
+            "env_vars": {"B": "2", "A": "1", "BAD": 9}
+        }));
+        assert_eq!(pairs, vec![("A".into(), "1".into()), ("B".into(), "2".into())]);
+        assert!(env_passthrough_from_metadata(&serde_json::Value::Null).is_empty());
     }
 
     #[test]

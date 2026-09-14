@@ -1,10 +1,10 @@
 // todoPanel.jsx — 菜单页「TODO 管理」: 两个 tab。
 //   模板 — templates 表 + 展开行版本列表（编辑/设为当前/新版本/删除版本/
-//           运行）+ 新建模板内联表单（预填最小合法 spec 示例）。
+//           运行）；新建/编辑都从右侧滑出 100% 宽抽屉（不叠卡片）。
 //   运行 — todoRunsPanel.jsx 的工作流列表 + 事件流。
 // 版本行上的「运行」成功后带 workflow_id 跳到「运行」tab 并聚焦该工作流。
 
-import { Button, Card, Col, Form, Input, Popconfirm, Row, Space, Table, Tabs, Tag, Typography } from 'antd';
+import { Button, Card, Col, Drawer, Form, Input, Popconfirm, Row, Space, Table, Tabs, Tag, Typography } from 'antd';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiDel, apiGet, apiPost, apiPut } from './api.js';
 import { newId } from './fleet/model.js';
@@ -68,8 +68,7 @@ function CreateTemplateForm({ onNotice, onCreated }) {
   };
 
   return (
-    <Card size="small" title="新建模板" style={{ marginBottom: 16 }}>
-      <Form form={form} layout="vertical" onFinish={submit}
+    <Form form={form} layout="vertical" onFinish={submit}
         initialValues={{ specText: JSON.stringify(EXAMPLE_SPEC, null, 2) }}>
         <Row gutter={12}>
           <Col span={6}>
@@ -92,7 +91,6 @@ function CreateTemplateForm({ onNotice, onCreated }) {
           <Text type="secondary">400 时服务端会返回「spec 校验失败: …」</Text>
         </Space>
       </Form>
-    </Card>
   );
 }
 
@@ -232,19 +230,10 @@ function TemplatesTab({ onNotice, onRan }) {
     }
   };
 
-  if (editing) {
-    return (
-      <TodoEditor
-        templateName={editing.name}
-        version={editing.version}
-        onNotice={onNotice}
-        onClose={() => {
-          setEditing(null);
-          setBump((n) => n + 1);
-        }}
-      />
-    );
-  }
+  const closeEditor = () => {
+    setEditing(null);
+    setBump((n) => n + 1); // 关闭即刷新：抽屉里的保存要以列表视角可见
+  };
 
   const columns = [
     { title: '名称', dataIndex: 'name', key: 'name' },
@@ -263,19 +252,8 @@ function TemplatesTab({ onNotice, onRan }) {
   return (
     <div>
       <Space style={{ marginBottom: 12 }}>
-        <Button type="primary" onClick={() => setCreating((v) => !v)}>
-          {creating ? '收起新建' : '新建模板'}
-        </Button>
+        <Button type="primary" onClick={() => setCreating(true)}>新建模板</Button>
       </Space>
-      {creating ? (
-        <CreateTemplateForm
-          onNotice={onNotice}
-          onCreated={() => {
-            setCreating(false);
-            setBump((n) => n + 1);
-          }}
-        />
-      ) : null}
       <Table
         rowKey="name"
         size="small"
@@ -299,6 +277,41 @@ function TemplatesTab({ onNotice, onRan }) {
           ),
         }}
       />
+      <Drawer
+        title="新建 TODO 模板"
+        placement="right"
+        open={creating}
+        onClose={() => setCreating(false)}
+        size="100%"
+        styles={{ wrapper: { maxWidth: '100vw' } }}
+        destroyOnHidden
+      >
+        <CreateTemplateForm
+          onNotice={onNotice}
+          onCreated={() => {
+            setCreating(false);
+            setBump((n) => n + 1);
+          }}
+        />
+      </Drawer>
+      <Drawer
+        title={editing ? `编辑模板 ${editing.name} · ${editing.version}` : ''}
+        placement="right"
+        open={!!editing}
+        onClose={closeEditor}
+        size="100%"
+        styles={{ wrapper: { maxWidth: '100vw' } }}
+        destroyOnHidden
+      >
+        {editing ? (
+          <TodoEditor
+            templateName={editing.name}
+            version={editing.version}
+            onNotice={onNotice}
+            onClose={closeEditor}
+          />
+        ) : null}
+      </Drawer>
     </div>
   );
 }

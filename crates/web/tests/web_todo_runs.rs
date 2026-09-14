@@ -144,8 +144,12 @@ fn seed_share(root: &std::path::Path) {
     std::fs::create_dir_all(&env_dir).unwrap();
     std::fs::write(
         env_dir.join("context.json"),
-        serde_json::json!({"name": "dev", "tools": ["/agent/tools/v3/ffmpeg"], "env_vars": {}})
-            .to_string(),
+        serde_json::json!({
+            "name": "dev",
+            "tools": ["/agent/tools/v3/ffmpeg"],
+            "env_vars": {"OPENCODER_WEB_PROBE": "web-env-value"}
+        })
+        .to_string(),
     )
     .unwrap();
 }
@@ -232,6 +236,11 @@ async fn run_reaches_terminal_and_is_observable() {
     assert_eq!(
         v["workflow"]["spec_json"]["metadata"]["env_tools"],
         serde_json::json!(["/agent/tools/v3/ffmpeg"])
+    );
+    assert_eq!(
+        v["workflow"]["spec_json"]["metadata"]["env_vars"],
+        serde_json::json!({"OPENCODER_WEB_PROBE": "web-env-value"}),
+        "dispatch must stamp the bound TODO env's env_vars into the spec snapshot"
     );
 
     // Interrupt refuses terminal workflows with 409 (a settled outcome

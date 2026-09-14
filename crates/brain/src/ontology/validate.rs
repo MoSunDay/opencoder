@@ -112,18 +112,22 @@ pub fn validate(plan: &OntologyPlan) -> Result<()> {
             }
         }
     }
-    let mut resolved = BTreeSet::new();
-    loop {
-        let before = resolved.len();
-        for step in &plan.steps {
-            if dependencies(step).iter().all(|d| resolved.contains(d)) {
-                resolved.insert(step.id.clone());
+    if let Some(flow) = &plan.flow {
+        super::flow::validate(plan, flow)?;
+    } else {
+        let mut resolved = BTreeSet::new();
+        loop {
+            let before = resolved.len();
+            for step in &plan.steps {
+                if dependencies(step).iter().all(|d| resolved.contains(d)) {
+                    resolved.insert(step.id.clone());
+                }
             }
+            if resolved.len() == steps.len() {
+                break;
+            }
+            ensure!(resolved.len() > before, "dependency cycle in ontology plan");
         }
-        if resolved.len() == steps.len() {
-            break;
-        }
-        ensure!(resolved.len() > before, "dependency cycle in ontology plan");
     }
     for (name, deliverable) in &plan.deliverables {
         ensure!(valid_id(name), "invalid deliverable id");
@@ -136,7 +140,19 @@ pub fn validate(plan: &OntologyPlan) -> Result<()> {
     Ok(())
 }
 
-fn check_binding(
+pub(super) fn check_condition(
+    plan: &OntologyPlan,
+    owner: &StepTemplate,
+    condition: &Condition,
+) -> Result<()> {
+    check_binding(plan, Some(owner), &condition.value, None)?;
+    if let Some(schema) = binding_schema(plan, Some(owner), &condition.value)? {
+        accepts(&schema, &condition.equals)?;
+    }
+    Ok(())
+}
+
+pub(super) fn check_binding(
     plan: &OntologyPlan,
     owner: Option<&StepTemplate>,
     binding: &Binding,

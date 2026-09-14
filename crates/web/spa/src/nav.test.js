@@ -9,6 +9,7 @@ import {
   CATEGORY_OPTIONS,
   DEFAULT_CATEGORY,
   DEFAULT_PAGE,
+  HEADERLESS_PAGES,
   NAV_CATEGORIES,
   PAGE_META,
   allowedPages,
@@ -83,15 +84,15 @@ describe('categoryHome / pagesOf', () => {
     // Iteration 4 widens the project category to 项目 / 进展 / Owner 视角.
     expect(pagesOf('project')).toEqual(['project', 'progress', 'ownerview']);
     expect(pagesOf('agent')).toEqual(['brain', 'topics', 'dag', 'todos', 'team', 'chat', 'agents']);
-    expect(pagesOf('node')).toEqual(['nodes', 'envs']);
+    expect(pagesOf('node')).toEqual(['nodes']);
   });
 });
 
 describe('menuOf / selectOptionsOf scoping', () => {
   it('builds antd Menu items keyed by page with matching labels', () => {
     const items = menuOf('node');
-    expect(items.map((i) => i.key)).toEqual(['nodes', 'envs']);
-    expect(items.map((i) => i.label)).toEqual(['节点列表', 'Env 管理']);
+    expect(items.map((i) => i.key)).toEqual(['nodes']);
+    expect(items.map((i) => i.label)).toEqual(['节点列表']);
     expect(items.every((i) => isValidElement(i.icon))).toBe(true);
   });
 
@@ -140,7 +141,14 @@ describe('CATEGORY_OPTIONS / PAGE_META coverage', () => {
 
   it('covers every page key exactly', () => {
     const expected = [...ALL_PAGES].sort();
-    expect(Object.keys(PAGE_META).sort()).toEqual(expected);
+    expect([...Object.keys(PAGE_META), ...HEADERLESS_PAGES].sort()).toEqual(expected);
+  });
+
+  it('keeps headerless pages out of PAGE_META while they stay in the IA', () => {
+    for (const page of HEADERLESS_PAGES) {
+      expect(PAGE_META[page]).toBeUndefined();
+      expect(ALL_PAGES).toContain(page);
+    }
   });
 
   it('gives every page a non-empty title and description', () => {

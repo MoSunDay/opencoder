@@ -2,6 +2,7 @@
 
 pub mod agent;
 pub mod how_append;
+pub mod logs;
 pub mod runner;
 pub mod wasm;
 
@@ -30,6 +31,8 @@ pub struct StepCtx {
     pub states: StepStates,
     pub outputs: StepOutputs,
     pub workflow_root: PathBuf,
+    /// Run-scoped event sink for incremental agent transcript frames.
+    pub log: Option<crate::exec::logs::StepLog>,
 }
 
 impl StepCtx {

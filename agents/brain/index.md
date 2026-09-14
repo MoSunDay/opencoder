@@ -9,6 +9,9 @@ Commit: 6fd9e78ef777000e03e1ac2c7c64980b9fd2b714
 - 共享 DTO 在 [core/brain](../../crates/core/src/brain/)。PlanVersion 是不可变计划快照，StepTemplate 定义类型端口、输入绑定、控制依赖、条件、有限 foreach、动作和资源约束。
 - BrainRun 固定意图和计划，保存展开实例、输入请求、交付物、Prepared 动作、来源游标及 activation/control_epoch。版本成熟度与置信依据独立。
 - 调度域函数显式接收状态、事件和时间，不执行网络或文件副作用。运行中不替换计划；资源占用与派发由控制面处理。
+- 能力绑定与派发在 control（request_id 幂等）；执行明细落 worker 节点。
+- Agent 绑定聚合视图 `GET /api/brain/agents`（control `api/brain.rs`）：按 `capability_target` kind=Agent 分组出 `{agent, capabilities:[{id,summary}]}`，team resolve 用它固化成员能力快照；bind 对未知 agent 名宽容放行但 `warn`（幻影闸门，允许 agent 后建）。
+- 剧本固定/动态两来源同走 `PlaybookSpec`；本地执行在 project（`executor/playbook_drive.rs`），平台展开派发在 control（`api/brain_playbook_dispatch.rs`）。
 
 ## 关键路径
 
@@ -16,6 +19,9 @@ Commit: 6fd9e78ef777000e03e1ac2c7c64980b9fd2b714
 - [execution/](../../crates/brain/src/execution/) — initialize/advance、输入解析、稳定实例 ID、条件展开、通知去重、动作账本、暂停/取消（取消会在无活动子动作时收敛为终态）和交付验证。
 - [activation.rs](../../crates/brain/src/activation.rs) — 固定模式返回全部就绪动作；动态模式调用 ChatStream 一次，解析完整计划后校验，不带运行期工具循环。
 - `src/{domain,runtime,plan,planning}.rs` — 描述型能力、向量检索和兼容决策树；旧 `brain_plans.tree_json` 与新本体计划版本分开存储。
+- `src/playbook/` — 剧本双轨纯域：`spec.rs`（`PlaybookSpec` 聚合校验/`validate_draft`/`render_prompt`；`PlaybookTarget::Brain.route: Option<PlaybookRoute>` 跨端确定性通道，serde 默认、旧行不变；长度上限 `spec.id`/target 引用 ≤256B、`match_text` ≤2000B）、`topology.rs`（Kahn 拓扑/`collapse_blocked`）、`trigger.rs`（message 相似度触发/`scan`）。
+- `src/planning.rs` — `plan_playbook`：LLM 铸动态剧本、候选背靠背校验、digest 缓存复用（空库退单步 {Agent,"act"}）；`replan: bool` 跳过缓存读，`validate_situation_placeholders` 强制动态剧本带 `{situation}` 占位。
+- `src/runtime.rs` — playbook CRUD（`PLAYBOOK_ID_PREFIX="playbook"`）；store 表 v25 `brain_playbooks`。
 
 ## 主流程
 
@@ -30,9 +36,10 @@ Commit: 6fd9e78ef777000e03e1ac2c7c64980b9fd2b714
 
 - [control](../control/index.md) — `api/brain_runs/`：计划/能力/运行 API、版本发布、派发、资源占用与回执。
 - [worker](../worker/index.md) — `brain/`：根持久化、短激活、outbox、恢复和四类结果适配。
-- [store](../store/index.md) — 追加版本、稳定指针、全局资源占用、原子 TODO 事件水位。
+- [store](../store/index.md) — 追加版本、稳定指针、全局资源占用、原子 TODO 事件水位、向量三表与 plans。
 - [node](../node/index.md) — Brain RPC 与可重放上行消息；[ctl](../ctl/index.md) — 有限本地激活入口。
 - [web](../web/index.md) — 工作台投影与原生过程组件；[产品契约](../../features/brain/index.md)、[协议示例](../../docs/brain-orchestration.md)。
+- [llm](../llm/index.md) — embed 接口。
 
 ## 验证入口
 
@@ -51,18 +58,3 @@ Commit: 6fd9e78ef777000e03e1ac2c7c64980b9fd2b714
 - store 表 v15 `brain_*` 三张、v18 `brain_plans`；embed 走 `ChatStream::embed`。
 - web 路由 `crates/web/src/api_brain.rs`；SPA 面板 `crates/web/spa/src/brainPanel.jsx`。
 - 测试：`crates/brain/tests/{runtime,planning}.rs`、web 层 `crates/web/tests/web_brain*.rs`。
-
-- `src/playbook/` — 剧本双轨纯域：`spec.rs`（`PlaybookSpec` 聚合校验/`validate_draft`/`render_prompt`；`PlaybookTarget::Brain.route: Option<PlaybookRoute>` 跨端确定性通道，serde 默认、旧行不变；长度上限 `spec.id`/target 引用 ≤256B、`match_text` ≤2000B）、`topology.rs`（Kahn 拓扑/`collapse_blocked`）、`trigger.rs`（message 相似度触发/`scan`）。
-- `src/planning.rs` — `plan_playbook`：LLM 铸动态剧本、候选背靠背校验、digest 缓存复用（空库退单步 {Agent,"act"}）；`replan: bool` 跳过缓存读，`validate_situation_placeholders` 强制动态剧本带 `{situation}` 占位。
-- `src/runtime.rs` — playbook CRUD（`PLAYBOOK_ID_PREFIX="playbook"`）；store 表 v25 `brain_playbooks`。
-## 边界
-- 能力绑定与派发在 control（request_id 幂等）；执行明细落 worker 节点。
-- Agent 绑定聚合视图 `GET /api/brain/agents`（control `api/brain.rs`）：按 `capability_target` kind=Agent 分组出 `{agent, capabilities:[{id,summary}]}`，team resolve 用它固化成员能力快照；bind 对未知 agent 名宽容放行但 `warn`（幻影闸门，允许 agent 后建）。
-
-- 剧本固定/动态两来源同走 `PlaybookSpec`；本地执行在 project（`executor/playbook_drive.rs`），平台展开派发在 control（`api/brain_playbook_dispatch.rs`）。
-## 相关
-- [agents/control](../control/index.md) — 绑定与派发。
-- [agents/worker](../worker/index.md) — 执行明细归属。
-- [agents/store](../store/index.md) — 向量三表与 plans。
-- [agents/llm](../llm/index.md) — embed 接口。
-- [agents/web](../web/index.md) — HTTP 路由。

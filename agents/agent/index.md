@@ -8,6 +8,7 @@ opencode-agent 二进制：构造 worker 并接入节点出站通道。
 - `src/main.rs` — clap 参数构造 worker，接入 node WebSocket 通道
 - `src/main.rs` `AgentCommand` — `Run`（默认）、隐藏 `InternalProcessSupervisor`（runc 后代）、`dag prepare-rootfs`、`storage migrate-layout`
 - `src/storage.rs` — 节点本地存储布局迁移
+- `run` 启动即 seed 内置技能包到节点 `~/.opencoder/skills`（update-on-drift，与主二进制同策略；dep-gated 走 sentinel）
 - token 来自参数或 `OPENCODER_SERVER_TOKEN`，不自动生成
 - 关闭：`shutdown_signal` → `drain_shutdown` 有界收尾；超时任务重启标 interrupted，不自动重跑
 

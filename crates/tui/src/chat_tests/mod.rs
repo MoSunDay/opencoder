@@ -10,6 +10,7 @@ mod interrupt_resubmit;
 mod line_accounting;
 mod plan_card;
 mod reconcile_repair;
+mod say_interleaved_finalize;
 mod say_markdown_e2e;
 mod say_pair;
 mod say_pair_dedup;

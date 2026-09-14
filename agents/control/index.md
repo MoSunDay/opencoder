@@ -20,8 +20,7 @@ Commit: 6fd9e78ef777000e03e1ac2c7c64980b9fd2b714
 - `crates/core/src/fleet/protocol.rs` — PROTOCOL_VERSION=9；ExecutionIndex 五字段
 - `crates/control/tests/e2e/` — e2e：真实 build_app + 脚本化 WS 节点
 - `crates/control/tests/resource_root.rs` — 资源根隔离验证
-
-- `src/api/brain_playbook_dispatch.rs` — 剧本平台派发：批次按依赖层背靠背建 execution（id `{prefix}-pbk-{request_id}-{step}`，key 原样不截断、request_id ≤26 字符否则 400；`PlaybookGate` 同 request_id 异派发内容 409、容量满 503）、`fleet.definition("capability_target", id)` 解析 Brain 目标（内联 `PlaybookRoute` 压过绑定；占位步骤空 situation 400）、`trigger_scan` 消息相似度触发（入站 + 全部 match_text 单批 embed）；路由 `GET/POST /api/brain/playbooks*`。
+- `crates/control/src/api/brain_playbook_dispatch.rs` — 剧本平台派发：批次按依赖层背靠背建 execution（id `{prefix}-pbk-{request_id}-{step}`，key 原样不截断、request_id ≤26 字符否则 400；`PlaybookGate` 同 request_id 异派发内容 409、容量满 503）、`fleet.definition("capability_target", id)` 解析 Brain 目标（内联 `PlaybookRoute` 压过绑定；占位步骤空 situation 400）、`trigger_scan` 消息相似度触发（入站 + 全部 match_text 单批 embed）；路由 `GET/POST /api/brain/playbooks*`。
 ## 边界
 
 - server 二进制不依赖 session/worker/team/project runtime。

@@ -1,4 +1,4 @@
-Commit: working-tree
+Commit: 104c6b2663858f0a15d7066eb89227d681a4cf44
 
 # 能力库页签直连能力 CRUD 表，大脑页去掉 PageShell 页头
 

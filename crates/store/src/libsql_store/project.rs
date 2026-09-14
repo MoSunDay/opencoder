@@ -7,7 +7,7 @@
 //! impl at the bottom delegates to both.
 
 use anyhow::{Context, Result};
-use libsql::{Connection, Value, params};
+use libsql::{params, Connection, Value};
 
 use super::LibsqlStore;
 use crate::project::ProjectStore;

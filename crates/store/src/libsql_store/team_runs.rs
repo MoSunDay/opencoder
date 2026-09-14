@@ -7,7 +7,7 @@
 //! registers them in the bootstrap batch + v17 migration.
 
 use anyhow::{Context, Result};
-use libsql::{Connection, Row, params};
+use libsql::{params, Connection, Row};
 
 use crate::team_types::TeamTopicRunRecord;
 

@@ -4,7 +4,7 @@
 //! single-statement read or write — no transactions needed.
 
 use anyhow::{Context, Result};
-use libsql::{Connection, Row, params};
+use libsql::{params, Connection, Row};
 
 use crate::BrainPlaybookRecord;
 

@@ -19,13 +19,6 @@ pub async fn config_dispatch(cli: &Cli, sub: &Option<ConfigSub>) -> Result<()> {
     match sub {
         Some(ConfigSub::Show) | None => {
             let workdir = current_workdir(cli)?;
-            // Banner BEFORE load: when the active env's config is corrupt the
-            // load below fails, and the banner is the hint that names the
-            // layer to deactivate/repair.
-            if let Some(banner) = active_env_banner() {
-                // stderr: stdout stays pure machine-readable JSON.
-                eprintln!("{banner}");
-            }
             let cfg = Config::load(&workdir)?;
             println!("{}", config_show_json(&cfg)?);
             Ok(())
@@ -238,11 +231,6 @@ fn show_message_line(m: &opencoder_core::Message) -> String {
     format!("[{:?}] {}", m.role, text)
 }
 
-/// One-line active-env note for `config show` (None when no env is active).
-pub fn active_env_banner() -> Option<String> {
-    opencoder_core::config::envs::active_env().map(|name| format!("active env: {name}"))
-}
-
 /// `config show` body: the serialized config with every `api_key` masked
 /// (first 4 chars + `***`). Pure (value → [`redact_json`] → pretty string) so
 /// the "stdout never carries a full key" contract is unit-testable without
@@ -283,23 +271,6 @@ mod tests {
         };
         tool.display = Some("kept".into());
         assert_eq!(super::show_message_line(&tool), "[Assistant] kept");
-    }
-
-    #[test]
-    fn active_env_banner_tracks_active_env() {
-        let workdir = std::env::temp_dir().join(format!("oc-cli-envs-{}", ulid::Ulid::new()));
-        std::fs::create_dir_all(&workdir).unwrap();
-        let _iso = opencoder_core::scoped_config_home(workdir.clone());
-
-        assert_eq!(super::active_env_banner(), None);
-        opencoder_core::config::envs::create_env("clienv", &workdir, false).unwrap();
-        opencoder_core::config::envs::set_active_env(Some("clienv")).unwrap();
-        assert_eq!(
-            super::active_env_banner().as_deref(),
-            Some("active env: clienv")
-        );
-        opencoder_core::config::envs::set_active_env(None).unwrap();
-        assert_eq!(super::active_env_banner(), None);
     }
 
     #[test]

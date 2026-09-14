@@ -25,7 +25,7 @@ export function HarnessFields({ initialHarness = 'opencoder', environments = tru
     <Form.Item name="harness" label="Harness" initialValue={initialHarness}>
       <Select options={inherit ? [{ value: 'default', label: '跟随 Agent 配置' }, ...HARNESS_OPTIONS] : HARNESS_OPTIONS} aria-label="agent-harness" />
     </Form.Item>
-    {environments && harness === 'codex' && <Alert type="info" showIcon title="Codex 参数已统一管理" description="模型、权限策略和环境变量请在 Agent 配置 → Harness 管理中修改；新任务将固定使用该配置。" style={{ marginBottom: 16 }} />}
+    {environments && harness === 'codex' && <Alert type="info" showIcon title="Codex 参数已统一管理" description="模型和环境变量请在 Agent 配置 → Harness 管理中修改；新任务将固定使用该配置。" style={{ marginBottom: 16 }} />}
     {environments && harness === 'opencoder' && <Form.Item name="envs" preserve={false} label="环境变量" extra="每行一个 KEY=VALUE，仅传给执行进程；启动后固定。"
       rules={[{ validator: (_, value) => {
         try { parseEnvs(value); return Promise.resolve(); } catch (e) { return Promise.reject(e); }

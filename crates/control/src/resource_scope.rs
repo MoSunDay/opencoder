@@ -9,11 +9,7 @@ pub async fn configured_agents(
     next: Next,
 ) -> Response {
     let path = request.uri().path();
-    if path != "/api/agents"
-        && !path.starts_with("/api/agents/")
-        && path != "/api/envs"
-        && !path.starts_with("/api/envs/")
-    {
+    if path != "/api/agents" && !path.starts_with("/api/agents/") {
         return next.run(request).await;
     }
     let config = match opencoder_core::Config::load(&state.workdir) {

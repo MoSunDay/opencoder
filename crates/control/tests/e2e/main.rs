@@ -15,6 +15,7 @@ mod brain_dispatch_extra;
 mod compat_nodes;
 mod dag_dispatch_extra;
 mod dag_runs;
+mod dag_step_events;
 mod executions_artifacts;
 mod executions_core;
 mod executions_paging;

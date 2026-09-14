@@ -150,7 +150,7 @@ export function DefEditor({ open, def, saving, onClose, onSave }) {
       <Space orientation="vertical" size={12} style={{ width: '100%' }}>
         <Text type="secondary">
           spec 为 JSON：name / description? / steps[]，每个 step 为 name、depends_on[]、kind{' '}
-          {'{type: "agent"|"wasm"|"runner", ...}'}。步骤名须为小写 slug。
+          {'{type: "agent"|"wasm", ...}'}。步骤名须为小写 slug。
         </Text>
         <Segmented
           disabled={saving}

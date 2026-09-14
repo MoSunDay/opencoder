@@ -9,7 +9,7 @@ ratatui + crossterm 交互界面。
 - `src/app.rs`、`src/app_loop.rs` — App 状态与主事件循环、命令分发
 - `src/key_handler.rs`、`src/keymap.rs` — 键盘分发与键位映射
 - `src/worker.rs` — worker actor 持 SessionState；`spawn_ui_event_forwarder` 容量 512、`DELTA_MIN_CAPACITY=64` 时 shed TextDelta
-- `src/command.rs` — `SlashAction` 斜杠命令枚举（Notepad/Sidecar/Ap/Mcp/Envs/Cli/Skill/Ps/Stop 等）
+- `src/command.rs` — `SlashAction` 斜杠命令枚举（Notepad/Sidecar/Ap/Mcp/Cli/Skill/Ps/Stop 等）
 - `src/composer.rs` — 输入框；`wrap_rows` 可视行布局
 - `src/chat.rs`、`src/chat_steps.rs`、`src/chat_headers.rs`、`src/chat_step_render.rs` — 消息渲染，测试在 `src/chat_tests/`
 - `src/render.rs` — 渲染入口；`notepad: Option<&NotepadView>` 全屏分支

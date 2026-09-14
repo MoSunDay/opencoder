@@ -8,8 +8,7 @@
 //! - **Rollback** ([`rollback::rollback_resource`]): pointer-only switch of a pool's `current` back to a historical version — version dirs are never deleted.
 //!
 //! Everything on disk is replaced atomically (temp sibling + fsync +
-//! rename; 0o600 on unix) via [`io::atomic_write`] — mirroring the envs/
-//! active-marker writer in `opencoder_core::config::envs`.
+//! rename; 0o600 on unix) via [`io::atomic_write`].
 //!
 //! Pure-functional style: free functions over plain structs, no classes,
 //! no interior state — the process-global agents-root override (used by

@@ -356,6 +356,16 @@ pub async fn events_id(state: &AppState, id: &str, after: i64) -> RpcReply {
     })
     .await
 }
+/// One DAG step's event page; the node picks the step's event source.
+pub async fn dag_step_events_id(state: &AppState, id: &str, step: &str, after: i64) -> RpcReply {
+    let step = step.to_owned();
+    for_id(state, id, move |execution| NodeOperation::DagStepEvents {
+        execution,
+        step,
+        after,
+    })
+    .await
+}
 pub async fn messages_id(state: &AppState, id: &str, cursor: MessageCursor) -> RpcReply {
     for_id(state, id, |execution| NodeOperation::Messages {
         execution,

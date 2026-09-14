@@ -16,7 +16,7 @@ import { err } from '../notice.js';
 
 const { Text } = Typography;
 
-const KIND_COLOR = { agent: 'geekblue', wasm: 'green', runner: 'purple' };
+const KIND_COLOR = { agent: 'geekblue', wasm: 'green' };
 
 /// Step-kind mini tags for the 步骤 column (first kinds, then "+n").
 function KindSummary({ spec }) {

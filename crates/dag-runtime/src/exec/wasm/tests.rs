@@ -42,6 +42,19 @@ const OUTPUT_JSON_WAT: &str = r#"
     (drop (call $fd_close (i32.load (i32.const 0))))))
 "#;
 
+/// Writes "boom\n" to fd 2 (stderr) and exits 0.
+const STDERR_WAT: &str = r#"
+(module
+  (import "wasi_snapshot_preview1" "fd_write"
+    (func $fd_write (param i32 i32 i32 i32) (result i32)))
+  (memory (export "memory") 1)
+  (data (i32.const 8) "boom\n")
+  (func (export "_start")
+    (i32.store (i32.const 0) (i32.const 8))
+    (i32.store (i32.const 4) (i32.const 5))
+    (drop (call $fd_write (i32.const 2) (i32.const 0) (i32.const 1) (i32.const 20)))))
+"#;
+
 /// proc_exit(7).
 const EXIT_7_WAT: &str = r#"
 (module
@@ -80,6 +93,7 @@ fn step_ctx(workflow_root: &std::path::Path, command: &str, timeout_secs: Option
         states: StepStates::new(),
         outputs: StepOutputs::new(),
         workflow_root: workflow_root.to_path_buf(),
+        log: None,
     }
 }
 
@@ -200,6 +214,72 @@ async fn cancel_token_maps_to_cancelled_outcome() {
     });
     let res = execute_wasm_step_cancellable(&ctx, token).await;
     assert_eq!(res.outcome, StepOutcome::Cancelled, "{res:?}");
+    drop(tmp);
+}
+
+/// In-memory node store for the `step_output` mirroring assertions.
+async fn memory_store() -> std::sync::Arc<dyn opencoder_store::Store> {
+    std::sync::Arc::new(opencoder_store::LibsqlStore::open_memory().await.unwrap())
+}
+
+/// Run one wasm step with its output mirrored, then close the log so the
+/// tail batch is guaranteed to be appended before the rows are read.
+async fn run_mirrored(
+    ctx: &StepCtx,
+    store: &std::sync::Arc<dyn opencoder_store::Store>,
+) -> StepResult {
+    // `session_events.session_id` is a foreign key: the run's session has to
+    // exist before the mirror can append to it (the runtime guarantees this
+    // for whole runs; this harness drives the executor directly).
+    store
+        .create_session(&opencoder_store::SessionMeta {
+            id: ctx.run_id.clone(),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    let log = crate::step_log::StepOutputLog::new(store.clone(), &ctx.run_id, &ctx.step.name);
+    let result = execute_wasm_step_logged(ctx, CancellationToken::new(), Some(log.clone())).await;
+    log.close().await;
+    result
+}
+
+#[tokio::test]
+async fn guest_stdout_is_mirrored_as_step_output_events() {
+    let store = memory_store().await;
+    let (tmp, root) = temp_workflow_with_module(HELLO_WAT);
+    let ctx = step_ctx(&root, "tool.wat", None);
+    let res = run_mirrored(&ctx, &store).await;
+    assert_eq!(res.outcome, StepOutcome::Done, "{res:?}");
+
+    // The rows live on the RUN's session and name the step (LOCKED contract).
+    let rows = store.as_ref().events_after(&ctx.run_id, 0).await.unwrap();
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    let row = &rows[0];
+    assert_eq!(row.session_id, "run-1");
+    assert_eq!(row.kind, opencoder_store::EventKind::Step);
+    assert_eq!(row.sse_kind.as_deref(), Some("step_output"));
+    assert!(row.seq.is_some(), "the store assigns a sequence");
+    assert_eq!(row.payload["step"], serde_json::json!("a"));
+    assert_eq!(row.payload["stream"], serde_json::json!("stdout"));
+    assert_eq!(row.payload["text"], serde_json::json!("hello wasm\n"));
+    assert_eq!(row.payload["at_ms"].as_i64().unwrap(), row.ts);
+    drop(tmp);
+}
+
+#[tokio::test]
+async fn guest_stderr_is_mirrored_with_its_stream_label() {
+    let store = memory_store().await;
+    let (tmp, root) = temp_workflow_with_module(STDERR_WAT);
+    let ctx = step_ctx(&root, "tool.wat", None);
+    let res = run_mirrored(&ctx, &store).await;
+    assert_eq!(res.outcome, StepOutcome::Done, "{res:?}");
+    let rows = store.as_ref().events_after(&ctx.run_id, 0).await.unwrap();
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert_eq!(rows[0].payload["stream"], serde_json::json!("stderr"));
+    assert_eq!(rows[0].payload["text"], serde_json::json!("boom\n"));
+    // The step's own artifacts still carry the combined, bounded output.
+    assert!(res.output_text.contains("boom"), "{res:?}");
     drop(tmp);
 }
 

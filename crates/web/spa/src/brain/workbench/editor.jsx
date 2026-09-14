@@ -1,60 +1,72 @@
-import { Alert, Button, Collapse, Form, Input, Select, Space, Tabs, Typography } from 'antd';
-import { createContext, useContext, useEffect, useId, useRef, useState } from 'react';
+import { Alert, Button, Collapse, Empty, Form, InputNumber, Select, Space, Tabs, Typography } from 'antd';
+import { forwardRef, useImperativeHandle, useState } from 'react';
 import { apiPost } from '../../api.js';
 import { PlanCanvas } from './canvas.jsx';
-import { KINDS, newStep } from './model.js';
-const JsonValidation = createContext(() => {});
-function JsonField({ label, value, onChange }) {
-  const report = useContext(JsonValidation); const id = useId();
-  const serialized = JSON.stringify(value, null, 2); const previous = useRef(serialized);
-  const [text, setText] = useState(serialized); const [error, setError] = useState('');
-  useEffect(() => { if (previous.current !== serialized) { previous.current = serialized; setText(serialized); } }, [serialized]);
-  useEffect(() => { report((errors) => ({ ...errors, [id]: error })); return () => report((errors) => { const next = { ...errors }; delete next[id]; return next; }); }, [error, id, report]);
-  return <Form.Item label={label} validateStatus={error ? 'error' : ''} help={error}><Input.TextArea aria-label={label} value={text} autoSize={{ minRows: 2, maxRows: 12 }} spellCheck={false} onChange={(e) => {
-    setText(e.target.value);
+import { useDraft } from './editor/draft.js';
+import { appendAction, checkDraftPlan, removeAction, repairPlan, submission } from './editor/model.js';
+import { ActionEditor } from './editor/action.jsx';
+import { JsonField } from './editor/fields.jsx';
+import { PublishDialog } from './editor/publish.jsx';
+import { PlanContracts } from './editor/contracts.jsx';
+
+export const PlanEditor = forwardRef(function PlanEditor({ version, cacheKey = `oc:brain:editor:${version?.id || 'new'}`, capabilities, onSaved, onClose }, ref) {
+  const { draft, setDraft, error: cacheError, persist, retry, clear } = useDraft(cacheKey, version);
+  const [error, setError] = useState(''); const [publishing, setPublishing] = useState(false); const [busy, setBusy] = useState(false); const [tab, setTab] = useState('canvas');
+  const close = () => { if (!busy && (!draft || persist())) onClose(); };
+  useImperativeHandle(ref, () => ({ close }));
+  if (!draft) return <Alert type="error" showIcon title="无法读取浏览器草稿" description={cacheError} action={<Space><Button onClick={retry}>重试读取</Button><Button onClick={onClose}>关闭</Button></Space>} />;
+  const plan = draft.version.plan;
+  const step = plan.steps.find((s) => s.id === draft.selected);
+  const invalid = Object.values(draft.raw).some((field) => field.error);
+  const setPlan = (next) => setDraft((d) => ({ ...d, version: { ...d.version, plan: next } }));
+  const onRaw = (field, value) => setDraft((d) => ({ ...d, raw: { ...d.raw, [field]: value } }));
+  const editStep = (next) => setDraft((d) => {
+    const old = d.version.plan.steps.find((s) => s.id === next.id);
+    const raw = { ...d.raw };
+    for (const key of ['inputs', 'output', 'resources', 'when', 'foreach']) if (JSON.stringify(old[key]) !== JSON.stringify(next[key])) delete raw[`${next.id}:${key}`];
+    return { ...d, raw, version: { ...d.version, plan: { ...d.version.plan, steps: d.version.plan.steps.map((s) => s.id === next.id ? next : s) } } };
+  });
+  const json = (key, label, value, change) => <JsonField label={label} field={key} value={value} raw={draft.raw[key]} onRaw={onRaw} onChange={change} />;
+  const save = async (metadata) => {
+    setBusy(true); setError('');
     try {
-      const next = JSON.parse(e.target.value);
-      if (label === '本体定义' && (!next || !Array.isArray(next.steps) || !next.inputs || !next.deliverables || next.steps.some((step) => !step || typeof step.id !== 'string' || !step.action || typeof step.action.kind !== 'string'))) throw new Error('完整计划需要 steps 数组、inputs 和 deliverables 对象');
-      previous.current = JSON.stringify(next, null, 2); onChange(next); setError('');
-    } catch (error) { setError(error.message); }
-  }} /></Form.Item>;
-}
-function StepEditor({ step, plan, capabilities, onChange }) {
-  const set = (key, value) => onChange({ ...step, [key]: value });
-  const action = (key, value) => set('action', { ...step.action, [key]: value });
-  const choices = capabilities.filter((c) => c.kind === step.action.kind && c.target);
-  return <Form layout="vertical" size="small"><Form.Item label="步骤名称"><Input value={step.label} onChange={(e) => set('label', e.target.value)} /></Form.Item>
-    <Form.Item label="步骤作用"><Input.TextArea value={step.purpose} onChange={(e) => set('purpose', e.target.value)} /></Form.Item>
-    <Space.Compact style={{ width: '100%', marginBottom: 12 }}><Select value={step.action.kind} options={KINDS} onChange={(kind) => onChange({ ...step, capability_id: undefined, action: { ...step.action, kind, target: kind === 'agent' ? 'act' : '', definition: undefined, agent_manifests: {} } })} /><Select style={{ flex: 1 }} showSearch value={step.action.target} options={choices.map((c) => ({ value: c.target, label: c.summary || c.target }))} onChange={(target) => { const capability = choices.find((c) => c.target === target); onChange({ ...step, capability_id: capability?.id, action: { ...step.action, target, definition: capability?.definition, agent_manifests: {} } }); }} /></Space.Compact>
-    <Form.Item label="动作说明"><Input.TextArea rows={3} value={step.action.prompt} onChange={(e) => action('prompt', e.target.value)} /></Form.Item>
-    <Form.Item label="验收标准"><Input.TextArea value={step.acceptance} onChange={(e) => set('acceptance', e.target.value)} /></Form.Item>
-    <Form.Item label="前置依赖"><Select mode="multiple" value={step.depends_on} options={plan.steps.filter((s) => s.id !== step.id).map((s) => ({ value: s.id, label: s.label }))} onChange={(value) => set('depends_on', value)} /></Form.Item>
-    <Form.Item label="输出方式"><Select value={step.action.output_mode} options={[{ value: 'text', label: '文本' }, { value: 'json', label: '结构化 JSON' }]} onChange={(value) => action('output_mode', value)} /></Form.Item>
-    <Form.Item label="输出字段（JSON pointer）"><Input value={step.action.output_pointer || ''} placeholder="空值表示全部输出" onChange={(e) => action('output_pointer', e.target.value)} /></Form.Item>
-    <JsonField label="输入端口与来源绑定" value={step.inputs} onChange={(value) => set('inputs', value)} />
-    <Typography.Paragraph type="secondary">来源 source：input（用户输入）、output（上游 step）、item（批量项）、literal（常量）。使用 schema 描述类型，path 指定字段。</Typography.Paragraph>
-    <JsonField label="输出类型约定" value={step.output} onChange={(value) => set('output', value)} />
-    <Collapse items={[{ key: 'advanced', label: '条件、批量与共享资源', children: <>
-      <JsonField label="条件 when（null 为无条件）" value={step.when || null} onChange={(value) => set('when', value)} />
-      <JsonField label="批量 foreach（null 为单次）" value={step.foreach || null} onChange={(value) => set('foreach', value)} />
-      <JsonField label="共享资源（key、mode: read / write）" value={step.resources} onChange={(value) => set('resources', value)} />
-    </> }]} />
-  </Form>;
-}
-export function PlanEditor({ version, capabilities, onSaved, onClose }) {
-  const [plan, setPlan] = useState(version.plan); const [selected, setSelected] = useState(plan.steps[0]?.id); const [changelog, setChangelog] = useState(''); const [tags, setTags] = useState(version.tags || []); const [confidence, setConfidence] = useState(version.confidence || { level: 'unverified', reason: '', evidence: [] }); const [error, setError] = useState(''); const [busy, setBusy] = useState(false);
-  const [jsonErrors, setJsonErrors] = useState({}); const invalid = Object.values(jsonErrors).some(Boolean); const [tab, setTab] = useState('steps');
-  const step = plan.steps.find((s) => s.id === selected);
-  const validate = async () => { if (invalid) { setError('请先修正 JSON 格式错误'); return false; } setError(''); try { await apiPost('/api/brain/plan-defs/validate', plan); return true; } catch (e) { setError(e.message); return false; } };
-  const save = async () => { if (!changelog.trim()) { setError('请填写本次变更说明'); return; } setBusy(true); try { if (!await validate()) return; const result = await apiPost('/api/brain/plan-defs', { ...version, plan, changelog, tags, confidence, author: 'user', created_at: Date.now() }); onSaved(result); } catch (e) { setError(e.message); } finally { setBusy(false); } };
-  return <JsonValidation.Provider value={setJsonErrors}><div><Space><Button onClick={onClose}>返回计划库</Button><Typography.Title level={4} style={{ margin: 0 }}>编辑 {version.id} · v{version.version}</Typography.Title><Button disabled={invalid} onClick={validate}>校验计划</Button><Button type="primary" loading={busy} disabled={invalid} onClick={save}>保存新版本</Button></Space>
-    <Typography.Paragraph type="secondary">已发布版本不可覆盖。保存生成新版本，运行中的计划保持固定。</Typography.Paragraph>{error && <Alert type="error" showIcon title={error} />}
-    <Form layout="vertical"><Form.Item label="计划名称"><Input value={plan.title} onChange={(e) => setPlan({ ...plan, title: e.target.value })} /></Form.Item><Form.Item label="目标"><Input.TextArea value={plan.objective} onChange={(e) => setPlan({ ...plan, objective: e.target.value })} /></Form.Item>
-      <Space align="start" wrap><Form.Item label="变更说明（必填）"><Input style={{ width: 320 }} value={changelog} onChange={(e) => setChangelog(e.target.value)} /></Form.Item><Form.Item label="标签"><Select mode="tags" style={{ width: 220 }} value={tags} onChange={setTags} /></Form.Item><Form.Item label="置信程度"><Select style={{ width: 140 }} value={confidence.level} onChange={(level) => setConfidence({ ...confidence, level })} options={['unverified', 'low', 'medium', 'high'].map((value, i) => ({ value, label: ['未验证', '低', '中', '高'][i] }))} /></Form.Item><Form.Item label="置信依据"><Input value={confidence.reason} onChange={(e) => setConfidence({ ...confidence, reason: e.target.value })} /></Form.Item></Space>
-    </Form>
-    <Tabs activeKey={tab} onChange={(key) => { if (!invalid) setTab(key); else setError('请先修正 JSON 格式错误'); }} items={[{ key: 'steps', label: '步骤与关系', children: <><Space><Button disabled={invalid} onClick={() => { const step = newStep(`step-${crypto.randomUUID().slice(0, 8)}`); setPlan({ ...plan, steps: [...plan.steps, step] }); setSelected(step.id); }}>添加步骤</Button><Button danger disabled={!step || invalid} onClick={() => { setPlan({ ...plan, steps: plan.steps.filter((s) => s.id !== selected) }); setSelected(null); }}>移除所选步骤</Button></Space><div className="brain-editor-workspace"><PlanCanvas plan={plan} mode="ontology" selected={selected} onSelect={(id) => { if (!invalid) setSelected(id); else setError('请先修正 JSON 格式错误'); }} /><div className="brain-inspector">{step ? <StepEditor key={step.id} step={step} plan={plan} capabilities={capabilities} onChange={(next) => setPlan({ ...plan, steps: plan.steps.map((s) => s.id === selected ? next : s) })} /> : '请选择步骤'}</div></div></> },
-      { key: 'contracts', label: '目标输入与交付物', children: <Form layout="vertical"><JsonField label="用户输入定义" value={plan.inputs} onChange={(inputs) => setPlan({ ...plan, inputs })} /><JsonField label="交付物与验证条件" value={plan.deliverables} onChange={(deliverables) => setPlan({ ...plan, deliverables })} /></Form> },
-      { key: 'source', label: '完整计划 JSON', children: <JsonField label="本体定义" value={plan} onChange={setPlan} /> },
+      if (!persist()) return;
+      const value = submission({ ...draft, metadata }, capabilities);
+      await apiPost('/api/brain/plan-defs/validate', value.plan);
+      const result = await apiPost('/api/brain/plan-defs', value);
+      clear(); onSaved(result);
+    } catch (e) { setError(e.message); }
+    finally { setBusy(false); }
+  };
+  return <div className="brain-plan-editor">
+    <div className="brain-editor-toolbar"><Space><Button onClick={close} disabled={busy}>关闭画布</Button><Typography.Text type={cacheError ? 'danger' : 'secondary'}>{cacheError ? '草稿缓存失败' : '草稿已缓存在此浏览器'}</Typography.Text></Space><Space>
+      <Button disabled={busy || plan.steps.length > 0} onClick={() => setDraft((d) => ({ ...d, version: { ...d.version, plan: repairPlan(capabilities) }, selected: 'fix', positions: {}, viewport: null, raw: {} }))}>修复—复测—发布示例</Button>
+      <Button type="primary" disabled={invalid || busy || !!cacheError} onClick={() => { setError(''); setPublishing(true); }}>提交计划</Button>
+    </Space></div>
+    {cacheError && <Alert type="error" showIcon title={cacheError} action={<Button onClick={persist}>重试缓存</Button>} />}
+    {error && !publishing && <Alert type="error" showIcon title={error} />}
+    <Tabs activeKey={tab} onChange={setTab} items={[
+      { key: 'canvas', label: '实体 · Action · 条件流转', children: <div className="brain-plan-workspace">
+        <aside className="brain-entity-library"><Typography.Text strong>实体（能力库对象）</Typography.Text><p>选择实体添加 Action，再定义输入、动作和后续现象。</p>
+          {!capabilities.some((c) => c.target) && <Empty description="请先在能力库添加实体" />}
+          {capabilities.filter((c) => c.target).map((entity) => <div className="brain-entity-card" key={entity.id}><strong>{entity.summary || entity.target}</strong><small>{entity.kind} · {entity.target}</small><Button size="small" disabled={invalid} onClick={() => { const id = `action-${crypto.randomUUID().slice(0, 8)}`; setDraft((d) => ({ ...d, selected: id, version: { ...d.version, plan: appendAction(d.version.plan, entity, id) } })); }}>添加 Action</Button></div>)}
+        </aside>
+        <PlanCanvas plan={plan} capabilities={capabilities} mode="ontology" selected={draft.selected} positions={draft.positions} viewport={draft.viewport}
+          onPositions={(positions) => setDraft((d) => ({ ...d, positions: { ...d.positions, ...positions } }))}
+          onViewport={(viewport) => setDraft((d) => ({ ...d, viewport }))}
+          onSelect={(selected) => setDraft((d) => ({ ...d, selected }))}
+          onConnect={plan.flow && !invalid ? ({ source, target }) => setPlan({ ...plan, flow: { ...plan.flow, transitions: [...plan.flow.transitions, { from: source, to: target, label: '继续执行' }] } }) : undefined} />
+        <aside className="brain-inspector">
+          {step ? <><Space style={{ marginBottom: 12 }}><Typography.Text strong>Action 定义</Typography.Text><Button size="small" danger onClick={() => setDraft((d) => ({ ...d, selected: null, raw: Object.fromEntries(Object.entries(d.raw).filter(([key]) => !key.startsWith(`${step.id}:`))), version: { ...d.version, plan: removeAction(d.version.plan, step.id) } }))}>删除 Action</Button></Space>
+            <ActionEditor step={step} plan={plan} capabilities={capabilities} raw={draft.raw} onRaw={onRaw} onChange={editStep} onFlow={(flow) => setPlan({ ...plan, flow })} /></> : <><Typography.Paragraph>选中 Action 编辑执行实体、前置输入、要做什么与条件流转。</Typography.Paragraph><Button onClick={() => setTab('contracts')}>定义计划输入与交付物</Button></>}
+        </aside>
+      </div> },
+      { key: 'contracts', label: '计划输入与交付物', children: <Form layout="vertical" className="brain-plan-contracts">
+        {plan.flow && <><Form.Item label="起始 Action"><Select aria-label="起始 Action" value={plan.flow.entry} options={plan.steps.map((s) => ({ value: s.id, label: s.label }))} onChange={(entry) => setPlan({ ...plan, flow: { ...plan.flow, entry } })} /></Form.Item><Form.Item label="单个 Action 最多执行轮次"><InputNumber min={1} max={100} value={plan.flow.max_visits_per_action} onChange={(max_visits_per_action) => setPlan({ ...plan, flow: { ...plan.flow, max_visits_per_action } })} /></Form.Item></>}
+        <PlanContracts plan={plan} raw={draft.raw} onRaw={onRaw} onChange={setPlan} />
+      </Form> },
+      { key: 'source', label: '本体定义', children: <Collapse defaultActiveKey={['source']} items={[{ key: 'source', label: '完整契约', children: json('plan:source', '本体定义', plan, (value) => setPlan(checkDraftPlan(value))) }]} /> },
     ]} />
-  </div></JsonValidation.Provider>;
-}
+    {publishing && <PublishDialog metadata={draft.metadata} busy={busy} error={error || cacheError} onChange={(metadata) => setDraft((d) => ({ ...d, metadata }))} onSubmit={save} onClose={() => { if (!busy) setPublishing(false); }} />}
+  </div>;
+});

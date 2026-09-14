@@ -50,6 +50,11 @@ pub(crate) async fn handle(worker: &Worker, operation: NodeOperation) -> Result<
         NodeOperation::DagSteps { execution, step } => {
             query::dag_steps(worker, &execution, step).await
         }
+        NodeOperation::DagStepEvents {
+            execution,
+            step,
+            after,
+        } => query::dag_step_events(worker, &execution, &step, after).await,
         NodeOperation::Artifact { request } => artifacts::read_request(worker, request).await,
         NodeOperation::Command { execution, command } => {
             command::command(worker, &execution, command).await

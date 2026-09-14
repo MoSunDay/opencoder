@@ -26,6 +26,10 @@ struct Tables {
     maintenance: HashMap<String, RpcReply>,
     /// id -> (rows, finished, more).
     events: HashMap<String, (Vec<Value>, bool, bool)>,
+    /// (id, step) -> (rows, finished, more) for `DagStepEvents`.
+    step_events: HashMap<(String, String), (Vec<Value>, bool, bool)>,
+    /// (id, step) -> raw reply overriding the step events table.
+    step_events_status: HashMap<(String, String), RpcReply>,
     /// id -> raw reply that overrides the events table (SSE error-frame tests).
     events_status: HashMap<String, RpcReply>,
     /// (id, seq) -> reply (EventPayloadChunk json).
@@ -129,6 +133,37 @@ impl MockNode {
         let mut t = self.tables.lock().unwrap();
         t.events.remove(id);
         t.events_status.insert(id.into(), RpcReply { status, body });
+    }
+
+    /// Seeds one DAG step's event page (`DagStepEvents`), filtered by `after`.
+    pub fn set_step_events(&self, id: &str, step: &str, rows: Vec<Value>, finished: bool) {
+        let mut t = self.tables.lock().unwrap();
+        t.step_events_status.remove(&(id.into(), step.into()));
+        t.step_events
+            .insert((id.into(), step.into()), (rows, finished, false));
+    }
+
+    /// Like `set_step_events` but also scripts the `more` paging flag.
+    pub fn set_step_events_more(
+        &self,
+        id: &str,
+        step: &str,
+        rows: Vec<Value>,
+        finished: bool,
+        more: bool,
+    ) {
+        let mut t = self.tables.lock().unwrap();
+        t.step_events_status.remove(&(id.into(), step.into()));
+        t.step_events
+            .insert((id.into(), step.into()), (rows, finished, more));
+    }
+
+    /// Makes `DagStepEvents` reply with this raw RpcReply (error-frame tests).
+    pub fn set_step_events_status(&self, id: &str, step: &str, status: u16, body: Value) {
+        let mut t = self.tables.lock().unwrap();
+        t.step_events.remove(&(id.into(), step.into()));
+        t.step_events_status
+            .insert((id.into(), step.into()), RpcReply { status, body });
     }
 
     pub fn set_payload(&self, id: &str, seq: i64, body: Value) {
@@ -395,6 +430,29 @@ impl NodeService for MockNode {
                 .cloned()
                 .unwrap_or_else(|| miss404("team execution not found")),
             NodeOperation::DagSteps { .. } => miss404("dag execution not found"),
+            NodeOperation::DagStepEvents {
+                execution,
+                step,
+                after,
+            } => {
+                let key = (execution.id.clone(), step.clone());
+                if let Some(reply) = t.step_events_status.get(&key) {
+                    return reply.clone();
+                }
+                let (rows, finished, more) =
+                    t.step_events
+                        .get(&key)
+                        .cloned()
+                        .unwrap_or((Vec::new(), false, false));
+                let filtered: Vec<Value> = rows
+                    .into_iter()
+                    .filter(|r| r["seq"].as_i64().unwrap_or(0) > after)
+                    .collect();
+                RpcReply::ok(json!({
+                    "events": filtered, "more": more, "finished": finished, "head_seq": 0,
+                    "step": {"name": step, "status": if finished { "done" } else { "pending" }},
+                }))
+            }
             NodeOperation::Artifact { request } => {
                 let key = (
                     request.execution.id.clone(),

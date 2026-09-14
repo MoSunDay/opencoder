@@ -1,20 +1,17 @@
 // @vitest-environment jsdom
-// AgentsPanel DOM smoke：agent 表渲染 fixture（引用 tag / 生效徽标 / `—`），
-// 生效 Select 换选命中 PATCH /api/agents/active 且 body 带 active，删除走
-// Popconfirm 确认后命中 DELETE /api/agents/:name，新建 modal 提交命中
-// POST /api/agents（未选引用 ⇒ null）。api.js 模块级 mock（同 envsPanel 模式）。
-
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
-const { apiGetMock, apiPostMock, apiPatchMock, apiDelMock } = vi.hoisted(() => ({
+const { apiGetMock, apiPostMock, apiPatchMock, apiDelMock, apiPutMock } = vi.hoisted(() => ({
   apiGetMock: vi.fn(),
+  apiPutMock: vi.fn(),
   apiPostMock: vi.fn(),
   apiPatchMock: vi.fn(),
   apiDelMock: vi.fn(),
 }));
 vi.mock('./api.js', () => ({
   apiGet: apiGetMock,
+  apiPut: apiPutMock,
   apiPost: apiPostMock,
   apiPatch: apiPatchMock,
   apiDel: apiDelMock,
@@ -81,6 +78,11 @@ const installApi = () => {
     if (path === '/api/agents') {
       return Promise.resolve(agentsFixture);
     }
+    if (/^\/api\/agents\/[^/]+\/meta$/.test(path)) {
+      const name = decodeURIComponent(path.split('/')[3]);
+      return Promise.resolve({ meta: { name, current: {}, harness: 'opencoder', references: {}, history: [] } });
+    }
+    if (path === '/api/harnesses/codex/profiles') return Promise.resolve({ items: [] });
     if (path === '/api/agents/resources/prompts') {
       return Promise.resolve(promptsFixture);
     }
@@ -106,29 +108,25 @@ afterEach(() => {
 });
 
 describe('AgentsPanel', () => {
-  it('renders agent rows with ref tags, active badge and updated_at', async () => {
+  it('renders only agent identity in the list and keeps detail-only data out of rows', async () => {
     render(<AgentsPanel onNotice={() => {}} />);
     // 生效 Select 的选中项与表格行同名 —— 用 findAllByText 断言两处都在。
     expect((await screen.findAllByText('coder')).length).toBeGreaterThanOrEqual(2);
     expect(screen.getByText('reviewer')).toBeTruthy();
-    // 生效徽标只在 coder 行。
     expect(screen.getByText('生效中')).toBeTruthy();
-    // 引用 tag：已引用带值，未引用显示 `—`。
-    expect(screen.getByText('base · v2')).toBeTruthy();
-    expect(screen.getByText('std · 资源缺失')).toBeTruthy();
-    expect(screen.getByText('prompts/base/v2/')).toBeTruthy();
-    expect(screen.getByText('soul')).toBeTruthy();
-    expect(screen.getAllByText('—').length).toBe(6);
-    expect(screen.getByText('2026-09-01T00:00:00Z')).toBeTruthy();
+    expect(screen.queryByText('base · v2')).toBeNull();
+    expect(screen.queryByText('2026-09-01T00:00:00Z')).toBeNull();
     expect(screen.getByRole('tab', { name: 'Agent 列表' })).toBeTruthy();
     expect(screen.getByRole('tab', { name: 'Harness 管理' })).toBeTruthy();
+    expect(screen.queryByRole('tab', { name: 'Runner 管理' })).toBeNull();
+    expect(screen.queryByRole('tab', { name: 'Agent Harness' })).toBeNull();
     fireEvent.click(screen.getByRole('tab', { name: 'NFS 配置' }));
     expect(await screen.findByText('已停止')).toBeTruthy();
   });
 
   it('fires PATCH /api/agents/active when the active select changes', async () => {
     const { container } = render(<AgentsPanel onNotice={() => {}} />);
-    await screen.findByText('base · v2');
+    await screen.findAllByText('coder');
     await pickSelectOption(container.querySelector('.ant-select'), 'reviewer');
     await waitFor(() => {
       expect(apiPatchMock).toHaveBeenCalledWith('/api/agents/active', { active: 'reviewer' });
@@ -137,7 +135,7 @@ describe('AgentsPanel', () => {
 
   it('deletes an agent only after the Popconfirm confirm', async () => {
     render(<AgentsPanel onNotice={() => {}} />);
-    await screen.findByText('base · v2');
+    await screen.findAllByText('coder');
     fireEvent.click(screen.getAllByText(/^删\s*除$/)[0]);
     fireEvent.click(await screen.findByText('确认删除'));
     await waitFor(() => {
@@ -147,7 +145,7 @@ describe('AgentsPanel', () => {
 
   it('creates an agent through POST with null refs for untouched selects', async () => {
     render(<AgentsPanel onNotice={() => {}} />);
-    await screen.findByText('base · v2');
+    await screen.findAllByText('coder');
     fireEvent.click(findButton('新建'));
     fireEvent.change(await screen.findByLabelText('new-agent-name'), { target: { value: 'reviewer2' } });
     // modal 的 prompt Select 是文档里第二个 .ant-select（首个是生效选择）。
@@ -164,10 +162,28 @@ describe('AgentsPanel', () => {
     // chat.dom.test 的长测超时惯例，宽放到 20s）。
   }, 20000);
 
+  it('opens agent editing in a right-side 75 percent drawer', async () => {
+    render(<AgentsPanel onNotice={() => {}} />);
+    await screen.findAllByText('coder');
+    fireEvent.click(screen.getAllByText(/^编\s*辑$/)[0]);
+    const drawer = await screen.findByRole('dialog');
+    expect(within(drawer).getByText('编辑 Agent · coder')).toBeTruthy();
+    await within(drawer).findByLabelText('agent-default-harness');
+    expect(document.querySelector('.ant-drawer-right')).toBeTruthy();
+    expect(screen.getByRole('table', { hidden: true })).toBeTruthy();
+    expect(drawer.closest('.ant-drawer')).toBeTruthy();
+    expect(drawer.closest('.ant-drawer').querySelector('.ant-drawer-content-wrapper').style.width).toBe('75%');
+    fireEvent.click(within(drawer).getByRole('button', { name: 'Close' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    fireEvent.click(screen.getAllByText(/^编\s*辑$/)[1]);
+    await within(await screen.findByRole('dialog')).findByText('编辑 Agent · reviewer');
+    expect(apiGetMock).toHaveBeenCalledWith('/api/agents/reviewer/meta');
+  });
+
   it('starts a configured agent and opens its node-owned execution', async () => {
     apiPostMock.mockResolvedValueOnce({ id: 'agent-run-1', kind: 'agent', node_id: 'node-a', created_at: 1, status: 'pending' });
     render(<AgentsPanel onNotice={() => {}} />);
-    await screen.findByText('base · v2');
+    await screen.findAllByText('coder');
     fireEvent.click(screen.getAllByText(/^启\s*动$/)[0]);
     await pickSelectOption(screen.getByLabelText('agent-harness').closest('.ant-select'), 'Codex');
     expect(screen.queryByLabelText('agent-envs')).toBeNull();

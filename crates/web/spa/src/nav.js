@@ -17,7 +17,6 @@ import {
   ProfileOutlined,
   ProjectOutlined,
   RobotOutlined,
-  SettingOutlined,
   TeamOutlined,
   ThunderboltOutlined,
 } from '@ant-design/icons';
@@ -53,7 +52,6 @@ export const NAV_CATEGORIES = [
     label: '节点',
     items: [
       { page: 'nodes', menu: '节点列表', icon: ClusterOutlined },
-      { page: 'envs', menu: 'Env 管理', icon: SettingOutlined },
     ],
   },
 ];
@@ -66,13 +64,17 @@ export const DEFAULT_PAGE = 'nodes';
 /// antd Segmented options for the three categories (Sider + mobile row 1).
 export const CATEGORY_OPTIONS = NAV_CATEGORIES.map((c) => ({ value: c.key, label: c.label }));
 
+/// Pages that carry their own title inside the body (the brain workbench uses
+/// Tabs), so they deliberately have no PAGE_META header copy. PageShell renders
+/// a headerless `.oc-page` body for any page missing from PAGE_META.
+export const HEADERLESS_PAGES = ['brain'];
+
 /// Per-page header copy (title + one-line description). Exported now so the
 /// IA has one name per page; the header UI itself arrives in iteration 3.
 export const PAGE_META = {
   project: { title: '项目', desc: '目标、里程碑与 TODO 的用户策展跟踪' },
   progress: { title: '进展', desc: '里程碑进度、进行中 TODO 与最近项目执行' },
   ownerview: { title: 'Owner 视角', desc: '按目标分组的健康度与待人工介入事项' },
-  brain: { title: '大脑调度', desc: '维护能力与版本化计划，观察并发执行和交付证据' },
   topics: { title: '全部执行', desc: '舰队全部执行记录与团队过滤' },
   dag: { title: 'DAG 工作流', desc: 'DAG 运行的图视图与步骤工件' },
   todos: { title: 'TODO 管理', desc: '持久化 TODO 工作流的调度与验收' },
@@ -80,7 +82,6 @@ export const PAGE_META = {
   chat: { title: '会话交互', desc: '与舰队节点对话的会话工作台' },
   agents: { title: 'Agent 配置', desc: '版本化自定义 agent 的池与引用' },
   nodes: { title: '节点列表', desc: '在线 Opencoder 节点与负载' },
-  envs: { title: 'Env 管理', desc: 'OpenCoder 完整配置集' },
 };
 
 /// Category lookup with the default as the safety net (unknown keys never

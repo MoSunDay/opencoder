@@ -26,7 +26,6 @@ pub(crate) fn render_popups(
     file_menu: Option<&FileMenu>,
     model_menu: Option<&ModelMenu>,
     mcp_menu: Option<&crate::mcp_menu::McpMenu>,
-    envs_menu: Option<&crate::envs_menu::EnvsMenu>,
     cli_menu: Option<&crate::cli_menu::CliMenu>,
     skill_toggle_menu: Option<&crate::skill_menu::SkillMenu>,
     ap_menu: Option<&crate::ap_menu::ApMenu>,
@@ -48,9 +47,6 @@ pub(crate) fn render_popups(
     }
     if let Some(mcp) = mcp_menu {
         crate::mcp_menu::render_mcp_popup(f, area, composer_top, mcp);
-    }
-    if let Some(envs) = envs_menu {
-        crate::envs_menu::render_envs_popup(f, area, composer_top, envs);
     }
     if let Some(cli) = cli_menu {
         crate::cli_menu::render_cli_popup(f, area, composer_top, cli);

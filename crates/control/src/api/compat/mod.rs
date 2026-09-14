@@ -24,6 +24,10 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/api/dag/runs/:id", get(workflows::dag))
         .route("/api/dag/runs/:id/progress", get(workflows::dag_progress))
         .route("/api/dag/runs/:id/steps/:step", get(workflows::dag_step))
+        .route(
+            "/api/dag/runs/:id/steps/:step/events",
+            get(super::stream::dag_step_events),
+        )
         .route("/api/dag/runs/:id/events", get(super::stream::events))
         .route("/api/dag/runs/:id/cancel", post(workflows::cancel))
         .route(

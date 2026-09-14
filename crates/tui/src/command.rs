@@ -25,7 +25,6 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("/fork", "从已有会话复制上下文创建新任务 (fork picker)"),
     ("/model", "切换供应商 / 模型 (provider picker)"),
     ("/mcp", "管理 MCP server 列表 (enable/disable/增删改)"),
-    ("/envs", "管理环境配置集 (激活/新建/快照/删除)"),
     ("/cli", "管理 CLI 注册内容及注入范围 (parent/subagents/all)"),
     (
         "/skill",
@@ -75,8 +74,6 @@ pub enum SlashAction {
     ClearContext,
     /// `/mcp` — manage MCP servers (enable/disable/add/edit/delete).
     Mcp,
-    /// `/envs` — manage env config sets (activate/create/recapture/delete).
-    Envs,
     /// `/cli` — manage CLI prompt registrations.
     Cli,
     /// `/skill` — manage default-injection skill toggles.
@@ -211,7 +208,6 @@ pub fn parse(input: &str) -> Option<SlashAction> {
         "notepad" | "note" => Some(SlashAction::Notepad),
         "act_clear_context" | "clear_context" => Some(SlashAction::ClearContext),
         "mcp" | "mc" => Some(SlashAction::Mcp),
-        "envs" | "env" => Some(SlashAction::Envs),
         "cli" => Some(SlashAction::Cli),
         "skill" | "sk" => Some(SlashAction::Skill),
         "ps" => Some(SlashAction::Ps),
@@ -235,7 +231,6 @@ fn dispatch(name: &str) -> Option<SlashAction> {
         "/notepad" => Some(SlashAction::Notepad),
         "/act_clear_context" | "/clear_context" => Some(SlashAction::ClearContext),
         "/mcp" => Some(SlashAction::Mcp),
-        "/envs" => Some(SlashAction::Envs),
         "/cli" => Some(SlashAction::Cli),
         "/skill" => Some(SlashAction::Skill),
         "/ps" => Some(SlashAction::Ps),
@@ -428,7 +423,6 @@ mod tests {
         assert_eq!(parse("/c"), Some(SlashAction::Compact));
         assert_eq!(parse("/cli"), Some(SlashAction::Cli));
         assert_eq!(parse("/mcp"), Some(SlashAction::Mcp));
-        assert_eq!(parse("/envs"), Some(SlashAction::Envs));
         assert_eq!(parse("/skill"), Some(SlashAction::Skill));
         assert_eq!(parse("/sk"), Some(SlashAction::Skill));
         assert_eq!(parse("/"), Some(SlashAction::Task));
@@ -796,16 +790,6 @@ mod tests {
         assert_eq!(dispatch("/mcp"), Some(SlashAction::Mcp));
     }
 
-    #[test]
-    fn parse_envs_full_and_alias() {
-        assert_eq!(parse("/envs"), Some(SlashAction::Envs));
-        assert_eq!(parse("/env"), Some(SlashAction::Envs));
-    }
-
-    #[test]
-    fn dispatch_envs() {
-        assert_eq!(dispatch("/envs"), Some(SlashAction::Envs));
-    }
 
     fn key(code: KeyCode, mods: KeyModifiers) -> KeyEvent {
         KeyEvent::new(code, mods)

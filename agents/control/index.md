@@ -13,8 +13,7 @@ Commit: e50ffc433bca866fd17bd571a74f1bdf17705dea
 - `crates/control/src/api/catalog.rs` — 节点列表、注册删除、维护，以及 teams/dag_defs/resolve 定义解析
 - `crates/control/src/api/compat/` — 旧 Chat/DAG/TODO/Project 兼容路由
 - `crates/control/src/api/settings/` — harness/codex 定义；registered 管 profile/runner
-- `crates/control/src/routes.rs` — /api/harnesses/codex/profiles、/api/runners、/api/envs
-- `crates/control/src/api_envs.rs` — OpenCoder Env 快照（config、MCP、CLI、Skills、Autopilot）的列表、激活、编辑与生命周期
+- `crates/control/src/routes.rs` — /api/harnesses/codex/profiles、/api/runners
 - `crates/control/src/resource_scope.rs` — /api/agents* 绑定 Server 资源根
 - `crates/control/src/role_gate.rs` — 角色权限矩阵纯函数；layer 顺序 auth → role_gate → resource_scope
 - `crates/control/src/api/users.rs` — /api/me、/api/users CRUD；token 一次性明文、自删/末位 admin 保护

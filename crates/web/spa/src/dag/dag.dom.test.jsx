@@ -60,7 +60,7 @@ beforeEach(() => {
   });
   apiPostMock.mockReset().mockResolvedValue({ run_id: 'run-new12345678' });
   apiDelMock.mockReset().mockResolvedValue({ ok: true });
-  openStreamMock.mockReset();
+  openStreamMock.mockReset().mockReturnValue({ abort: vi.fn() });
   setNodes([{
     id: 'node-1', name: 'worker-a', online: true, kinds: ['dag'],
     snapshot: { ready: true, active_agent_loops: 0, cpu_capacity: 4 },
@@ -226,7 +226,7 @@ describe('RunDetail', () => {
 
     await waitFor(() =>
       expect(openStreamMock).toHaveBeenCalledWith(
-        expect.objectContaining({ path: '/api/dag/runs/run-live9999/events', after: 0 }),
+        expect.objectContaining({ path: '/api/executions/run-live9999/events', after: 0 }),
       ),
     );
 
@@ -253,11 +253,11 @@ describe('RunDetail', () => {
     // final status applied to the header row (feed rows carry 失败 too — at
     // least one tag + the error alert prove the header finalized)
     expect((await screen.findAllByText('失败')).length).toBeGreaterThan(0);
-    expect(screen.getByText('step review failed')).toBeTruthy();
+    expect(screen.getAllByText('step review failed').length).toBeGreaterThan(0);
     expect(onFinished).toHaveBeenCalledTimes(1);
   });
 
-  it('closes the stream after applying run_finished (no further frames fold)', async () => {
+  it('reopens from the terminal cursor when the execution status changes', async () => {
     const abort = vi.fn();
     let onFrame = null;
     openStreamMock.mockImplementation((arg) => {
@@ -270,5 +270,6 @@ describe('RunDetail', () => {
       onFrame(frame('run_finished', { seq: 1, kind: 'run_finished', payload: { status: 'done' }, at_ms: 1 }));
     });
     await waitFor(() => expect(abort).toHaveBeenCalledTimes(1));
+    expect(openStreamMock.mock.calls.at(-1)[0].after).toBe(1);
   });
 });

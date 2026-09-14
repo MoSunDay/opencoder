@@ -27,7 +27,7 @@ const BACKOFF_CAP_MS = 15000;
 const REPLAY_CAP_FRAMES = 400;
 const MAX_ATTEMPTS = 5;
 
-export function openStream({ path, sessionId, after, onFrame, onStatus, onResync, signal, executionHistory = false }) {
+export function openStream({ path, sessionId, after, onFrame, onStatus, onResync, signal, executionHistory = false, requireEnd = false }) {
   // `ctrl` is the CURRENT connection's abort controller: restart() swaps it
   // after aborting so the replacement stream gets a fresh signal.
   let ctrl = new AbortController();
@@ -38,7 +38,7 @@ export function openStream({ path, sessionId, after, onFrame, onStatus, onResync
   let retired = false;
   let attempts = 0;
   let backoff = BACKOFF_START_MS;
-  let lastSeq = 0;
+  let lastSeq = Number.isFinite(after) ? after : 0;
   let timer = null;
 
   const report = (status, info) => {
@@ -116,6 +116,8 @@ export function openStream({ path, sessionId, after, onFrame, onStatus, onResync
     if (!frame) {
       return;
     }
+    if (frame.event === 'stream_end' && frame.data?.finished === true) { stop(); return; }
+    if (executionHistory && frame.event === 'error' && frame.seq === null) { restart(); return; }
     attempts = 0; // any frame proves the stream is alive
     backoff = BACKOFF_START_MS;
     report('live');
@@ -181,7 +183,7 @@ export function openStream({ path, sessionId, after, onFrame, onStatus, onResync
     if (stopped || retired) {
       return; // restart()/stop() already owns the reconnection decision
     }
-    if (executionHistory) {
+    if (executionHistory && !requireEnd) {
       // Fleet streams replay multiple runs of one execution. Historical
       // done/error frames are boundaries, and only EOF ends this snapshot.
       // The caller reopens from its last seq when execution resumes.

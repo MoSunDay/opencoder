@@ -74,7 +74,6 @@ pub(crate) fn render<B: Backend + 'static>(
     file_menu: Option<&crate::file_menu::FileMenu>,
     model_menu: Option<&ModelMenu>,
     mcp_menu: Option<&crate::mcp_menu::McpMenu>,
-    envs_menu: Option<&crate::envs_menu::EnvsMenu>,
     cli_menu: Option<&crate::cli_menu::CliMenu>,
     skill_toggle_menu: Option<&crate::skill_menu::SkillMenu>,
     ap_menu: Option<&crate::ap_menu::ApMenu>,
@@ -306,7 +305,6 @@ pub(crate) fn render<B: Backend + 'static>(
             file_menu,
             model_menu,
             mcp_menu,
-            envs_menu,
             cli_menu,
             skill_toggle_menu,
             ap_menu,
@@ -350,7 +348,7 @@ pub(crate) fn render<B: Backend + 'static>(
             && question_menu.is_none()
             && cli_menu.is_none()
             && mcp_menu.is_none()
-            && envs_menu.is_none()
+
             && skill_toggle_menu.is_none()
         {
             let position = composer::cursor_screen_position(

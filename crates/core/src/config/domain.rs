@@ -59,34 +59,16 @@ pub(crate) fn global_domain_path(key: &str) -> Option<PathBuf> {
     super::env::global_opencoder_home().map(|home| home.join(file))
 }
 
-/// Env-scope domain file: `~/.opencoder/envs/<name>/<domain>.json` while an
-/// env is active; `None` when no env layer applies.
-fn env_domain_path(active: Option<&str>, key: &str) -> Option<PathBuf> {
-    let file = domain_file_name(key)?;
-    super::envs::env_dir(active?).map(|dir| dir.join(file))
-}
-
 /// The single effective domain file: the project one if it exists, else the
-/// active env's, else the global one if it exists, else `None` (nothing to
-/// load). Non-domain keys (guarded by [`is_domain_key`]) resolve to no file.
-/// With an explicit env layer (`None` = base chain, used by env capture to
-/// avoid self-reference).
-pub(crate) fn effective_path_with(
-    working_dir: &Path,
-    key: &str,
-    active: Option<&str>,
-) -> Option<PathBuf> {
+/// global one if it exists, else `None` (nothing to load). Non-domain keys
+/// (guarded by [`is_domain_key`]) resolve to no file.
+pub(crate) fn effective_path(working_dir: &Path, key: &str) -> Option<PathBuf> {
     if !is_domain_key(key) {
         return None;
     }
     let project = project_domain_path(working_dir, key);
     if project.exists() {
         return Some(project);
-    }
-    if let Some(env) = env_domain_path(active, key) {
-        if env.exists() {
-            return Some(env);
-        }
     }
     let global = global_domain_path(key)?;
     if global.exists() {
@@ -97,30 +79,15 @@ pub(crate) fn effective_path_with(
 }
 
 /// Write target for a domain patch: the project file if it already exists,
-/// else (while an env is active) the env file — created on save so the base
-/// global file stays pristine for deactivation, else the global one — created
-/// on save. Falls back to the project path when no home resolves.
+/// else the global one — created on save. Falls back to the project path when
+/// no home resolves.
 pub(crate) fn write_target(working_dir: &Path, key: &str) -> Option<PathBuf> {
-    write_target_with(working_dir, key, super::envs::active_env().as_deref())
-}
-
-/// [`write_target`] with an explicit env layer.
-pub(crate) fn write_target_with(
-    working_dir: &Path,
-    key: &str,
-    active: Option<&str>,
-) -> Option<PathBuf> {
     if !is_domain_key(key) {
         return None;
     }
     let project = project_domain_path(working_dir, key);
     if project.exists() {
         return Some(project);
-    }
-    if let Some(env) = env_domain_path(active, key) {
-        // Whether or not the env file exists, it is the target from here on
-        // (created on save); the base global file stays untouched.
-        return Some(env);
     }
     // Whether or not a global file exists, it is the target from here on
     // (created on save); only an unresolvable home falls back to the project.
@@ -132,16 +99,7 @@ pub(crate) fn write_target_with(
 /// candidates) and is treated as absent — a bad domain file must not break
 /// startup.
 pub(crate) fn read_effective(working_dir: &Path, key: &str) -> Option<serde_json::Value> {
-    read_effective_with(working_dir, key, super::envs::active_env().as_deref())
-}
-
-/// [`read_effective`] with an explicit env layer (`None` = base chain).
-pub(crate) fn read_effective_with(
-    working_dir: &Path,
-    key: &str,
-    active: Option<&str>,
-) -> Option<serde_json::Value> {
-    let path = effective_path_with(working_dir, key, active)?;
+    let path = effective_path(working_dir, key)?;
     let raw = std::fs::read_to_string(&path).ok()?;
     if raw.trim().is_empty() {
         return None;
@@ -240,9 +198,7 @@ pub(crate) fn save_domain(
         }
     }
     let pretty = serde_json::to_string_pretty(&root)?;
-    // E-1: same owner-only contract as config.json — domain files saved into
-    // the active env dir may embed provider api keys.
-    super::envs::write_config_save(&target, &pretty)?;
+    super::write_config_save(&target, &pretty)?;
     Ok(target)
 }
 

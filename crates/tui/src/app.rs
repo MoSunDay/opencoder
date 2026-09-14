@@ -122,7 +122,6 @@ pub(super) async fn run_app(
     let mut file_menu: Option<crate::file_menu::FileMenu> = None;
     let mut model_menu: Option<ModelMenu> = None;
     let mut mcp_menu: Option<crate::mcp_menu::McpMenu> = None;
-    let mut envs_menu: Option<crate::envs_menu::EnvsMenu> = None;
     let mut cli_menu: Option<crate::cli_menu::CliMenu> = None;
     let mut skill_toggle_menu: Option<crate::skill_menu::SkillMenu> = None;
     let mut ap_menu: Option<crate::ap_menu::ApMenu> = None;
@@ -250,7 +249,6 @@ pub(super) async fn run_app(
                     file_menu.as_ref(),
                     model_menu.as_ref(),
                     mcp_menu.as_ref(),
-                    envs_menu.as_ref(),
                     cli_menu.as_ref(),
                     skill_toggle_menu.as_ref(),
                     ap_menu.as_ref(),
@@ -387,12 +385,6 @@ pub(super) async fn run_app(
                             ).await;
                             continue;
                         }
-                        if envs_menu.is_some() {
-                            match app_loop::handle_envs_outcome(&mut envs_menu, k, &mut client, &mut config, &mut model_label, &mut compaction_threshold, &mut context_limit, &mut frame_ms, &mut frame_ticker, &cmd_tx, &mut chat, &workdir).await {
-                                app_loop::LoopFlow::Quit => break, app_loop::LoopFlow::Redraw => continue, _ => {}
-                            }
-                            continue;
-                        }
                         if cli_menu.is_some() {
                             let _ = app_loop::handle_cli_outcome(
                                 &mut cli_menu, k, &mut config, &cmd_tx, &mut chat, &workdir,
@@ -433,7 +425,7 @@ pub(super) async fn run_app(
                             match app_loop::dispatch_command(
                                 &mut command_menu, k, &cmd_tx, &mut cancel, &mut chat,
                                 &sidecar_ask, &mut running, &mut follow, &store,
-                                &session_id, &mut task_picker, &mut model_menu, &mut mcp_menu, &mut envs_menu, &mut cli_menu, &mut skill_toggle_menu, &mut ap_menu,
+                                &session_id, &mut task_picker, &mut model_menu, &mut mcp_menu, &mut cli_menu, &mut skill_toggle_menu, &mut ap_menu,
                                 &mut cache_salt_menu, &mut keymap_menu, &agent_name,
                                 &mut input, &mut cursor_idx,
                                 &mut config, &workdir,
@@ -511,7 +503,7 @@ pub(super) async fn run_app(
                                     &workdir, &skill_handle, &mut chat, &sidecar_ask, &store,
                                     &mut plan_skill_active, &mut clear_confirm, &mut mode_flash,
                                     anim_tick, &mut plan_edit, &mut notepad, &mut task_picker,
-                                    &mut model_menu, &mut mcp_menu, &mut envs_menu,
+                                    &mut model_menu, &mut mcp_menu,
                                     &mut cli_menu, &mut skill_toggle_menu, &mut ap_menu,
                                     &mut cache_salt_menu, &mut config, &cmd_tx, &mut cancel,
                                     &mut task_elapsed_ms, &mut cancelled, &mut follow,
@@ -709,7 +701,7 @@ pub(super) async fn run_app(
                     Event::Paste(pasted) => {
                         // Modal-priority paste routing (mirrors Event::Key); empty pastes try a silent clipboard-image read. (clippy's collapsible_match suggestion would put an `.await` in a match guard, which Rust forbids.)
                         #[allow(clippy::collapsible_match)]
-                        if app_loop::handle_paste_event(&pasted, &mut plan_edit, &mut notepad, task_picker.is_some(), cache_salt_menu.is_some(), keymap_menu.is_some(), skill_toggle_menu.is_some(), &mut model_menu, &mut mcp_menu, &mut envs_menu, &mut cli_menu, &mut command_menu, &mut question_menu, &mut input, &mut cursor_idx, &mut pending_images, &mut img_asm, &mut chat, &workdir).await { continue; }
+                        if app_loop::handle_paste_event(&pasted, &mut plan_edit, &mut notepad, task_picker.is_some(), cache_salt_menu.is_some(), keymap_menu.is_some(), skill_toggle_menu.is_some(), &mut model_menu, &mut mcp_menu, &mut cli_menu, &mut command_menu, &mut question_menu, &mut input, &mut cursor_idx, &mut pending_images, &mut img_asm, &mut chat, &workdir).await { continue; }
                     }
                     _ => {}
                 }

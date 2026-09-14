@@ -31,6 +31,21 @@ pub async fn run_step_cancellable(
     timeout_secs: Option<u64>,
     cancel: CancellationToken,
 ) -> Result<(i32, String)> {
+    run_step_streamed(bundle_dir, id, timeout_secs, cancel, None).await
+}
+
+/// [`run_step_cancellable`] with the container's piped stdout/stderr mirrored
+/// into `output` (the node-store step log) AS THEY ARE READ, so a remote
+/// console follows a long-running sandboxed step live. The bounded collectors
+/// below still own the returned text and the `output_limit_exceeded` cap; the
+/// tee only observes the same bytes.
+pub async fn run_step_streamed(
+    bundle_dir: &Path,
+    id: &str,
+    timeout_secs: Option<u64>,
+    cancel: CancellationToken,
+    output: Option<crate::step_log::StepOutputLog>,
+) -> Result<(i32, String)> {
     anyhow::ensure!(
         !id.is_empty()
             && id.len() <= 255
@@ -76,16 +91,27 @@ pub async fn run_step_cancellable(
         _ = deadline => Err(anyhow::anyhow!("runc step timeout")),
         result = async {
             let wait = async { Ok::<_, anyhow::Error>(child.wait().await?) };
+            // Mirror each pipe through the step log when one was supplied.
+            let stdout: Box<dyn tokio::io::AsyncRead + Unpin + Send> = match &output {
+                Some(log) => Box::new(log.tee_reader(crate::step_log::Stream::Stdout, stdout)),
+                None => Box::new(stdout),
+            };
+            let stderr: Box<dyn tokio::io::AsyncRead + Unpin + Send> = match &output {
+                Some(log) => Box::new(log.tee_reader(crate::step_log::Stream::Stderr, stderr)),
+                None => Box::new(stderr),
+            };
             let (out, err, status) = tokio::try_join!(
-                crate::sandbox::output_limit::read_bounded(
+                crate::sandbox::output_limit::read_logged(
                     stdout,
                     "runc stdout",
                     crate::sandbox::output_limit::STREAM_OUTPUT_LIMIT_BYTES,
+                    None,
                 ),
-                crate::sandbox::output_limit::read_bounded(
+                crate::sandbox::output_limit::read_logged(
                     stderr,
                     "runc stderr",
                     crate::sandbox::output_limit::STREAM_OUTPUT_LIMIT_BYTES,
+                    None,
                 ),
                 wait,
             )?;

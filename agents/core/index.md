@@ -6,8 +6,8 @@ Commit: e50ffc433bca866fd17bd571a74f1bdf17705dea
 
 ## 关键路径
 - `src/message.rs` — Message/Role/ContentBlock；serde tag `kind`；`estimate_chars` 全块覆盖。
-- `src/config.rs` — `Config::load`：候选深度合并（project 覆盖 global）→ 域文件 → env 变量。
-- `src/config/env.rs` — 环境层 `~/.opencoder/envs/<active>/config.json` 插入候选链。
+- `src/config.rs` — `Config::load`：候选深度合并（project 覆盖 global）→ 域文件 → 进程环境变量。
+- `src/config/env.rs` — `config_candidates`（project-first 候选链）与 `looks_like_env_var` 等环境变量名判定。
 - `src/config/domain.rs` — mcp/cli/skills/ap 四域独立文件，项目层整体遮蔽。
 - `src/config/keymap.rs` — `KEYMAP_INFO` 17 个可重绑定 TUI 动作。
 - `src/config/cli.rs` — `InjectionTarget {parent,explore,build}` 注入目标。

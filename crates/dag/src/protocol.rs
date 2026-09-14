@@ -53,7 +53,7 @@ pub struct DagClaimedRun {
 }
 
 /// One node-emitted event, uploaded in batches. `kind` is a small closed
-/// vocabulary: `run_started | step_started | step_done | run_finished`.
+/// vocabulary: `run_started | step_started | step_done | step_log | run_finished`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DagEventIn {
     pub kind: String,
@@ -112,7 +112,13 @@ pub struct DagEventView {
 }
 
 /// Event kind vocabulary (server validates uploads against this set).
-pub const DAG_EVENT_KINDS: [&str; 4] = ["run_started", "step_started", "step_done", "run_finished"];
+pub const DAG_EVENT_KINDS: [&str; 5] = [
+    "run_started",
+    "step_started",
+    "step_done",
+    "step_log",
+    "run_finished",
+];
 
 #[cfg(test)]
 mod tests {

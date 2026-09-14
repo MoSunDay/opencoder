@@ -31,12 +31,31 @@ import { TodoRunsPanel, workflowActions } from './todoRunsPanel.jsx';
 const findButton = (txt) => screen.getAllByRole('button')
   .find((b) => (b.textContent || '').replace(/\s+/g, '') === txt);
 
+const noopNotice = () => {}; // 稳定引用：TemplatesTab.load 依赖 onNotice，内联箭头会触发无限重取
+
+/// 抽屉契约：右侧滑入、占视口 100%（不叠卡片）。返回 content-wrapper。
+const openDrawer = async () => {
+  const drawer = await screen.findByRole('dialog');
+  expect(drawer.closest('.ant-drawer')).toBeTruthy();
+  expect(document.querySelector('.ant-drawer-right')).toBeTruthy();
+  const wrapper = drawer.closest('.ant-drawer').querySelector('.ant-drawer-content-wrapper');
+  expect(wrapper.style.width).toBe('100%');
+  return drawer;
+};
+
 const templatesFixture = {
   templates: [
     { name: 'demo', description: 'd', current: 'v1', versions: [{ version: 'v1', note: '', created_at: 1 }] },
   ],
 };
 const detailFixture = { template: templatesFixture.templates[0], env_by_version: { v1: null } };
+/// TodoEditor 拉的三份：context.json（裸 spec）/ envs / env.json。
+const SPEC_FIXTURE = {
+  schema_version: 1, id: 'wf-demo', name: 'demo', objective: 'ship the demo', constraints: [],
+  todos: [{ id: 't1', title: '调研', requirement_background: '', instructions: '做', depends_on: [],
+    agent: 'act', max_attempts: 3, acceptance: { criteria: '完成' }, metadata: {} }],
+  metadata: {},
+};
 
 const installApi = () => {
   apiGetMock.mockReset().mockImplementation((path) => {
@@ -45,6 +64,15 @@ const installApi = () => {
     }
     if (path === '/api/todo/templates/demo') {
       return Promise.resolve(detailFixture);
+    }
+    if (path === '/api/todo/templates/demo/v1/context.json') {
+      return Promise.resolve(SPEC_FIXTURE);
+    }
+    if (path === '/api/todo/templates/demo/v1/env.json') {
+      return Promise.resolve({ env: null });
+    }
+    if (path === '/api/todo/envs') {
+      return Promise.resolve({ envs: [] });
     }
     if (path === '/api/todo/workflows?limit=50') {
       return Promise.resolve({ workflows: [{ id: 'todos-1', status: 'running', execution_status: 'running', execution_created_at: 1, node_id: 'node-a', updated_at: 2 }] });
@@ -67,7 +95,7 @@ afterEach(() => {
 
 describe('TodoPanel 模板 tab', () => {
   it('renders the template table with name and current version', async () => {
-    render(<TodoPanel onNotice={() => {}} />);
+    render(<TodoPanel onNotice={noopNotice} />);
     expect(await screen.findByText('demo')).toBeTruthy();
     expect(screen.getByText('v1')).toBeTruthy(); // 当前版本列的 Tag
   });
@@ -100,9 +128,10 @@ describe('TodoPanel 模板 tab', () => {
   });
 
   it('creates a template through POST /api/todo/templates', async () => {
-    render(<TodoPanel onNotice={() => {}} />);
+    render(<TodoPanel onNotice={noopNotice} />);
     await screen.findByText('demo');
     fireEvent.click(screen.getByText('新建模板'));
+    await openDrawer();
     fireEvent.change(screen.getByLabelText('模板名'), { target: { value: 'spec-check' } });
     fireEvent.click(findButton('创建'));
     await waitFor(() => {
@@ -115,6 +144,32 @@ describe('TodoPanel 模板 tab', () => {
     // 预填的最小示例 spec 原样随请求上行（含 wf-example / t1）。
     expect(body.spec.id).toBe('wf-example');
     expect(body.spec.todos[0].id).toBe('t1');
+  });
+
+  it('opens version editing in a full-width right drawer with the chrome-less editor', async () => {
+    render(<TodoPanel onNotice={noopNotice} />);
+    await screen.findByText('demo');
+    fireEvent.click(document.querySelector('.ant-table-row-expand-icon'));
+    fireEvent.click(screen.getByText('编辑'));
+
+    const drawer = await openDrawer();
+    expect(screen.getByText('编辑模板 demo · v1')).toBeTruthy(); // 抽屉标题接管 Card 标题
+    // 编辑器本体已在抽屉里加载（context 回填 + 三模式切换可用）。
+    expect(await screen.findByDisplayValue('ship the demo')).toBeTruthy();
+    expect(screen.getByText('TODO 列表')).toBeTruthy();
+    expect(screen.getByText('JSON 源码')).toBeTruthy();
+    // 列表仍在抽屉背后（不再整页替换）。
+    expect(document.querySelector('.ant-table-row')).toBeTruthy();
+
+    // 返回 = 关抽屉 + 刷新列表（jsdom 不赌 antd 关闭动画，用请求计数验证）。
+    // 注意：编辑抽屉展开后 DOM/antd 样式规则剧增，全局 getAllByRole 会因 jsdom
+    // getComputedStyle 逐元素解析而慢到分钟级，这里改用原生按钮扫描。
+    const listCalls = apiGetMock.mock.calls.filter((c) => c[0] === '/api/todo/templates').length;
+    fireEvent.click([...drawer.querySelectorAll('button')]
+      .find((b) => (b.textContent || '').replace(/\s+/g, '') === '返回'));
+    await waitFor(() => {
+      expect(apiGetMock.mock.calls.filter((c) => c[0] === '/api/todo/templates').length).toBe(listCalls + 1);
+    });
   });
 });
 

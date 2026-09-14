@@ -6,19 +6,18 @@
 // refreshed (onFinished) and the stream is closed.
 
 import { DagProcess } from './process.jsx';
-import { Background, Controls, Handle, MarkerType, Position, ReactFlow } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { Alert, Button, Card, Descriptions, Space, Spin, Tag, Typography } from 'antd';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { apiGet } from '../api.js';
 import { absTime } from '../format.js';
-import { openStream } from '../sse.js';
+import { useExecutionEvents } from '../ui/executionEvents/useExecutionEvents.js';
+import { ExecutionLogs } from '../ui/executionEvents/executionLogs.jsx';
 import {
   foldStepStates,
   frameToEvent,
   graphFromSpec,
   outputPreview,
-  STEP_RUNNING,
 } from '../dagProjection.js';
 import { statusLabel } from '../ui/statusTag.jsx';
 import { RunStatusTag, NodeBadge } from './runBits.jsx';
@@ -41,24 +40,6 @@ const STREAM_LABEL = {
   closed: '已结束',
   failed: '连接失败',
 };
-
-/// Custom React Flow node — module-level for a stable nodeTypes identity.
-function DagStepNode({ data, selected }) {
-  const status = (data && data.status) || 'pending';
-  return (
-    <div className={'dag-node dag-node--' + status + (selected ? ' dag-node--selected' : '')}>
-      <Handle type="target" position={Position.Left} isConnectable={false} />
-      <div className="dag-node-title">
-        <span className="dag-node-name">{data && data.label}</span>
-        <span className="dag-node-kind">{data && data.kindType}</span>
-      </div>
-      <div className="dag-node-status">{stepStatusLabel(status)}</div>
-      <Handle type="source" position={Position.Right} isConnectable={false} />
-    </div>
-  );
-}
-
-const nodeTypes = { dagStep: DagStepNode };
 
 const STEP_LABEL = { pending: '待执行', running: '执行中', done: '已完成', error: '失败', skipped: '未执行' };
 function stepStatusLabel(status) {
@@ -98,10 +79,8 @@ export function RunDetail({ run, onNotice, onClose, onFinished }) {
   const [spec, setSpec] = useState(null);
   const [specError, setSpecError] = useState('');
   const [events, setEvents] = useState([]); // ascending by seq (arrival for unpersisted)
-  const [streamStatus, setStreamStatus] = useState('connecting');
   const [selectedId, setSelected] = useState(null); // clicked step node data
   const [executionOpen, setExecutionOpen] = useState(false);
-  const streamRef = useRef(null);
   const finishedRef = useRef(false);
   const alive = useRef(true);
 
@@ -110,7 +89,7 @@ export function RunDetail({ run, onNotice, onClose, onFinished }) {
     alive.current = true;
     const id = current && current.id;
     const dagId = current && current.dag_id;
-    if (!id || !dagId) {
+    if (!id || (!dagId && !current.spec)) {
       return undefined;
     }
     (current.spec ? Promise.resolve({ spec: current.spec }) : apiGet('/api/dag/defs/' + encodeURIComponent(dagId)))
@@ -129,82 +108,24 @@ export function RunDetail({ run, onNotice, onClose, onFinished }) {
     };
   }, [current && current.id, current && current.dag_id]);
 
-  // Live event stream: replay first, then live frames. Fold is a pure
-  // reducer (dagProjection.foldStepStates) over the appended event list.
-  useEffect(() => {
-    const id = current && current.id;
-    if (!id) {
-      return undefined;
-    }
-    const applyFinal = (payload, atMs) => {
-      if (finishedRef.current) {
-        return;
+  const logs = useExecutionEvents({ id: current.id, status: current.status,
+    onFrame: (frame) => {
+      const ev = frameToEvent(frame);
+      if (!ev) return;
+      setEvents((prior) => [...prior, ev]);
+      if (ev.kind === 'run_finished') {
+        setCurrent((prior) => ({ ...prior, status: ev.payload.status || prior.status,
+          error: ev.payload.error || '', finished_at: ev.at_ms }));
+        if (!finishedRef.current) { finishedRef.current = true; onFinished?.(); }
       }
-      finishedRef.current = true;
-      setCurrent((prev) => ({
-        ...prev,
-        status: (payload && payload.status) || prev.status,
-        error: payload && payload.error ? payload.error : prev && prev.error,
-        finished_at: Number.isFinite(atMs) ? atMs : prev && prev.finished_at,
-      }));
-      if (onFinished) {
-        onFinished();
-      }
-      // Close after applying: the run is terminal, the stream has no more news.
-      if (streamRef.current) {
-        streamRef.current.abort();
-      }
-    };
-    streamRef.current = openStream({
-      path: '/api/dag/runs/' + encodeURIComponent(id) + '/events',
-      after: 0,
-      onStatus: (st) => {
-        if (alive.current) {
-          setStreamStatus(st);
-        }
-      },
-      onFrame: (frame) => {
-        const ev = frameToEvent(frame);
-        if (!ev) {
-          return;
-        }
-        if (alive.current) {
-          setEvents((prev) => {
-            if (Number.isFinite(ev.seq)) {
-              const lastSeq = prev.length ? prev[prev.length - 1].seq : null;
-              if (Number.isFinite(lastSeq) && ev.seq <= lastSeq) {
-                return prev; // replay repeat (transport already dedups; belt+braces)
-              }
-            }
-            return [...prev, ev];
-          });
-        }
-        if (ev.kind === 'run_finished') {
-          applyFinal(ev.payload, ev.at_ms);
-        }
-      },
-    });
-    return () => {
-      if (streamRef.current) {
-        streamRef.current.abort();
-      }
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [current && current.id]);
+    },
+  });
+  const streamStatus = logs.connection;
 
   const stepStates = useMemo(() => foldStepStates(events), [events]);
   const graph = useMemo(
     () => (spec ? graphFromSpec(spec, stepStates) : { nodes: [], edges: [] }),
     [spec, stepStates],
-  );
-  const rfEdges = useMemo(
-    () =>
-      graph.edges.map((e) => {
-        const targetNode = graph.nodes.find((n) => n.id === e.target);
-        const running = targetNode && targetNode.data && targetNode.data.status === STEP_RUNNING;
-        return { ...e, animated: !!running, markerEnd: { type: MarkerType.ArrowClosed } };
-      }),
-    [graph],
   );
   const selected = graph.nodes.find((node) => node.id === selectedId)?.data;
   const feed = useMemo(() => [...events].slice(-200).reverse(), [events]);
@@ -264,6 +185,7 @@ export function RunDetail({ run, onNotice, onClose, onFinished }) {
           </div>
         </div>
       </div>
+      <ExecutionLogs id={current.id} {...logs} steps={(spec?.steps || []).map((step) => step.name)} step={selectedId || ''} onStepChange={(name) => setSelected(name || null)} />
       {executionOpen && <ExecutionDetail id={current.id} summary={{ id: current.id, kind: 'dag', node_id: current.node_id, status: current.status, created_at: current.created_at }} onClose={() => setExecutionOpen(false)} onNotice={onNotice} />}
     </Space>
   );

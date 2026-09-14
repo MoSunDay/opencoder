@@ -51,7 +51,7 @@ async fn fixture(root: &Path, mode: &str) -> (StepCtx, ExecDeps) {
         .unwrap();
     let spec: DagSpec = serde_json::from_value(
         json!({"name":"business", "steps":[{"name":"workflow","timeout_secs":2,
-        "kind":{"type":"runner","runner":"business","agent":"act"}}]}),
+        "kind":{"type":"agent","prompt":"business","agent":"act"}}]}),
     )
     .unwrap();
     let run = root.join("dag-business");
@@ -68,6 +68,7 @@ async fn fixture(root: &Path, mode: &str) -> (StepCtx, ExecDeps) {
         states: Default::default(),
         outputs: Default::default(),
         workflow_root: root.to_owned(),
+        log: None,
     };
     let deps = ExecDeps {
         store,
@@ -82,7 +83,7 @@ async fn fixture(root: &Path, mode: &str) -> (StepCtx, ExecDeps) {
 async fn runner_persists_codex_transcript_artifacts_and_recovers_without_reexecution() {
     let dir = tempfile::tempdir().unwrap();
     let (ctx, deps) = fixture(dir.path(), "normal").await;
-    let result = runner::execute(&ctx, &deps, CancellationToken::new()).await;
+    let result = runner::execute(&ctx, &deps, "business", "act", CancellationToken::new()).await;
     assert_eq!(result.outcome, StepOutcome::Done, "{:?}", result.error);
     assert_eq!(
         result.output_json.as_ref().unwrap()["result"]["verdict"],
@@ -95,6 +96,19 @@ async fn runner_persists_codex_transcript_artifacts_and_recovers_without_reexecu
     }
     assert!(!text.contains("private-profile-value"));
     assert!(messages.iter().any(|m| m.usage.output_tokens == 5));
+    // Every row the runner appends to the RUN session names its DAG step, so
+    // a consumer pooling several steps' events can attribute each one. The
+    // `messages` table has no such column — `session_events` rows carry it.
+    let events = deps.store.events_after(&ctx.run_id, 0).await.unwrap();
+    assert!(
+        events
+            .iter()
+            .any(|row| row.sse_kind.as_deref() == Some("runner_stage")),
+        "{events:?}"
+    );
+    for row in &events {
+        assert_eq!(row.payload["step"], json!("workflow"), "{row:?}");
+    }
     let config: Value =
         serde_json::from_slice(&std::fs::read(dir.path().join("invocation.json")).unwrap())
             .unwrap();
@@ -103,7 +117,7 @@ async fn runner_persists_codex_transcript_artifacts_and_recovers_without_reexecu
     assert_eq!(config["runner_revision"], 3);
     assert_eq!(config["codex"]["auth_slot"], 1);
     assert!(Path::new(config["agent"]["resources"].as_str().unwrap()).is_dir());
-    let restored = runner::execute(&ctx, &deps, CancellationToken::new()).await;
+    let restored = runner::execute(&ctx, &deps, "business", "act", CancellationToken::new()).await;
     assert_eq!(restored.outcome, StepOutcome::Done);
     assert_eq!(
         std::fs::read_to_string(dir.path().join("starts")).unwrap(),
@@ -115,7 +129,7 @@ async fn runner_persists_codex_transcript_artifacts_and_recovers_without_reexecu
         "{}",
     )
     .unwrap();
-    let corrupted = runner::execute(&ctx, &deps, CancellationToken::new()).await;
+    let corrupted = runner::execute(&ctx, &deps, "business", "act", CancellationToken::new()).await;
     assert_eq!(corrupted.outcome, StepOutcome::Error);
     assert!(corrupted.error.unwrap().contains("checksum"));
 }
@@ -131,14 +145,16 @@ async fn runner_rejects_bad_events_incomplete_codex_and_bad_artifacts_without_re
     ] {
         let dir = tempfile::tempdir().unwrap();
         let (ctx, deps) = fixture(dir.path(), mode).await;
-        let result = runner::execute(&ctx, &deps, CancellationToken::new()).await;
+        let result =
+            runner::execute(&ctx, &deps, "business", "act", CancellationToken::new()).await;
         assert_eq!(result.outcome, StepOutcome::Error, "mode={mode}");
         assert!(
             result.error.as_ref().unwrap().contains(reason),
             "mode={mode} error={:?}",
             result.error
         );
-        let restored = runner::execute(&ctx, &deps, CancellationToken::new()).await;
+        let restored =
+            runner::execute(&ctx, &deps, "business", "act", CancellationToken::new()).await;
         assert!(restored.error.unwrap().contains("new business attempt"));
         assert_eq!(
             std::fs::read_to_string(dir.path().join("starts")).unwrap(),
@@ -168,7 +184,7 @@ async fn cancellation_and_timeout_reap_runner_descendants() {
                 trigger.cancel();
             }
         });
-        let result = runner::execute(&ctx, &deps, cancel).await;
+        let result = runner::execute(&ctx, &deps, "business", "act", cancel).await;
         task.await.unwrap();
         assert_eq!(
             result.outcome,

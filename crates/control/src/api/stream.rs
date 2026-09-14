@@ -7,42 +7,58 @@ use axum::{
         IntoResponse, Response,
     },
 };
+use opencoder_core::fleet::RpcReply;
 use serde::Deserialize;
 use serde_json::Value;
-use std::{collections::VecDeque, convert::Infallible, sync::Arc, time::Duration};
+use std::{
+    collections::VecDeque, convert::Infallible, future::Future, pin::Pin, sync::Arc, time::Duration,
+};
+
+/// Poll interval between node round-trips once the local queue drains.
+const POLL_INTERVAL: Duration = Duration::from_millis(300);
 
 #[derive(Deserialize)]
 pub struct Cursor {
     pub after: Option<i64>,
 }
-pub async fn events(
-    State(state): State<Arc<AppState>>,
-    Path(id): Path<String>,
-    Query(query): Query<Cursor>,
-    headers: HeaderMap,
-) -> Response {
-    let after = query
+
+/// One page fetch: cursor in, node reply out. Owned captures keep the unfold
+/// state `'static` so every SSE endpoint shares the same paging loop.
+type PageFetch = Arc<dyn Fn(i64) -> Pin<Box<dyn Future<Output = RpcReply> + Send>> + Send + Sync>;
+
+/// SSE cursor: the `after` query parameter wins, `Last-Event-ID` (set by the
+/// browser on reconnect) is the fallback, and 0 replays from the beginning.
+fn cursor_after(query: &Cursor, headers: &HeaderMap) -> i64 {
+    query
         .after
         .or_else(|| {
             headers
                 .get("last-event-id")
                 .and_then(|v| v.to_str().ok()?.parse().ok())
         })
-        .unwrap_or(0);
-    let first = super::executions::events_id(&state, &id, after).await;
+        .unwrap_or(0)
+}
+
+/// Turn a paged node query into an SSE stream: emit queued frames, refetch
+/// after `POLL_INTERVAL` when the queue drains, and end once the node reports
+/// `finished` with no further page. A non-200 poll becomes one `error` frame.
+fn sse(first: RpcReply, fetch: PageFetch, after: i64) -> Response {
     if first.status != 200 {
         return super::response(first);
     }
     let stream = futures::stream::unfold(
         (
-            state,
-            id,
+            fetch,
             after,
             VecDeque::<Value>::new(),
             Some(first.body),
             false,
+            false,
         ),
-        |(state, id, mut cursor, mut queue, mut page, mut ended)| async move {
+        |(fetch, mut cursor, mut queue, mut page, mut ended, end_sent)| async move {
+            if end_sent {
+                return None;
+            }
             loop {
                 if let Some(frame) = queue.pop_front() {
                     let seq = frame["seq"].as_i64().unwrap_or(cursor);
@@ -54,23 +70,27 @@ pub async fn events(
                         .expect("JSON event");
                     return Some((
                         Ok::<_, Infallible>(event),
-                        (state, id, cursor, queue, page, ended),
+                        (fetch, cursor, queue, page, ended, false),
                     ));
                 }
                 if ended {
-                    return None;
+                    let event = Event::default()
+                        .event("stream_end")
+                        .json_data(serde_json::json!({"finished":true}))
+                        .expect("JSON stream end");
+                    return Some((Ok(event), (fetch, cursor, queue, None, true, true)));
                 }
                 let body = match page.take() {
                     Some(body) => body,
                     None => {
-                        tokio::time::sleep(Duration::from_millis(300)).await;
-                        let reply = super::executions::events_id(&state, &id, cursor).await;
+                        tokio::time::sleep(POLL_INTERVAL).await;
+                        let reply = fetch(cursor).await;
                         if reply.status != 200 {
                             let event = Event::default()
                                 .event("error")
                                 .json_data(reply.body)
                                 .expect("JSON error");
-                            return Some((Ok(event), (state, id, cursor, queue, None, true)));
+                            return Some((Ok(event), (fetch, cursor, queue, None, true, true)));
                         }
                         reply.body
                     }
@@ -88,4 +108,42 @@ pub async fn events(
     Sse::new(stream)
         .keep_alive(KeepAlive::new().interval(Duration::from_secs(5)))
         .into_response()
+}
+
+pub async fn events(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Query(query): Query<Cursor>,
+    headers: HeaderMap,
+) -> Response {
+    let after = cursor_after(&query, &headers);
+    let first = super::executions::events_id(&state, &id, after).await;
+    let fetch: PageFetch = Arc::new(move |cursor| {
+        let state = state.clone();
+        let id = id.clone();
+        Box::pin(async move { super::executions::events_id(&state, &id, cursor).await })
+    });
+    sse(first, fetch, after)
+}
+
+/// One DAG step's event stream (`/api/dag/runs/:id/steps/:step/events`).
+/// The node resolves the step's event source (child session for agent steps,
+/// filtered run session otherwise), so the paging loop is the run-level one.
+pub async fn dag_step_events(
+    State(state): State<Arc<AppState>>,
+    Path((id, step)): Path<(String, String)>,
+    Query(query): Query<Cursor>,
+    headers: HeaderMap,
+) -> Response {
+    let after = cursor_after(&query, &headers);
+    let first = super::executions::dag_step_events_id(&state, &id, &step, after).await;
+    let fetch: PageFetch = Arc::new(move |cursor| {
+        let state = state.clone();
+        let id = id.clone();
+        let step = step.clone();
+        Box::pin(
+            async move { super::executions::dag_step_events_id(&state, &id, &step, cursor).await },
+        )
+    });
+    sse(first, fetch, after)
 }

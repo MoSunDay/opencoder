@@ -5,7 +5,7 @@
 // 避免 sse.js 把「干净关闭」当作断线去空重连。
 
 import { Button, Card, Col, Empty, Row, Space, Table, Tooltip, Typography } from 'antd';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiGet, apiPost } from './api.js';
 import { openStream } from './sse.js';
 import { ExecutionDetail } from './fleet/detail.jsx';
@@ -14,6 +14,8 @@ import { MONO_VAR } from './ui/mono.js';
 import { TimeText } from './ui/timeText.jsx';
 import { tableLoading, tableRows } from './ui/tableLoading.js';
 import { err } from './notice.js';
+import { foldTodoEvents, itemsToStates, runProgress } from './todo/runProjection.js';
+import { TodoRunCanvas, TodoRunInspector } from './todo/runCanvas.jsx';
 
 const { Text } = Typography;
 
@@ -56,7 +58,7 @@ export function summarizePayload(data) {
   return parts.join(' · ');
 }
 
-function EventsFeed({ workflowId, onNotice, onTerminal }) {
+function EventsFeed({ workflowId, onNotice, onTerminal, onFrame }) {
   const [events, setEvents] = useState([]);
 
   useEffect(() => {
@@ -68,6 +70,9 @@ function EventsFeed({ workflowId, onNotice, onTerminal }) {
       onFrame: (f) => {
         if (stopped) {
           return;
+        }
+        if (onFrame) {
+          onFrame(f); // 帧直通：父级折叠进运行画布 / 触发静默重拉
         }
         const kind = (f && f.event) || 'message';
         setEvents((list) => list.concat({
@@ -92,7 +97,7 @@ function EventsFeed({ workflowId, onNotice, onTerminal }) {
       stopped = true;
       handle.abort();
     };
-  }, [workflowId, onNotice, onTerminal]);
+  }, [workflowId, onNotice, onTerminal, onFrame]);
 
   if (!events.length) {
     return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无事件" />;
@@ -114,6 +119,10 @@ function EventsFeed({ workflowId, onNotice, onTerminal }) {
 function WorkflowDetail({ workflowId, summary, onNotice, onMutated }) {
   const [detail, setDetail] = useState(null);
   const [executionOpen, setExecutionOpen] = useState(false);
+  /// 运行画布：选中节点 + SSE 直通的 todo_* 帧（静默重拉成功后清空，
+  /// 新快照的 items 已含这些事件投影）。
+  const [selectedTodoId, setSelectedTodoId] = useState('');
+  const [liveFrames, setLiveFrames] = useState([]);
   /// 详情（workflow + items）自己的拉取态 —— 与 TodoRunsPanel 工作流列表的
   /// loading 是两份数据，不能共用一个旗标。
   const [loading, setLoading] = useState(true);
@@ -127,6 +136,7 @@ function WorkflowDetail({ workflowId, summary, onNotice, onMutated }) {
     try {
       const j = await apiGet(`/api/todo/workflows/${encodeURIComponent(workflowId)}`);
       setDetail(j || null);
+      setLiveFrames([]);
     } catch (e) {
       if (!silent && onNotice) {
         onNotice(err('获取工作流详情失败: ' + (e && e.message)));
@@ -141,13 +151,32 @@ function WorkflowDetail({ workflowId, summary, onNotice, onMutated }) {
   /// 终帧刷新同样静默；useCallback 稳住 EventsFeed 的 effect 依赖（否则每次轮询都重订阅）。
   const onTerminal = useCallback(() => load(true), [load]);
 
+  /// todo_* 帧折叠进画布实时状态；rewound/suspended/resumed 会改写 items 投影
+  /// （回滚失效 / 挂起），静默重拉纠正。终帧由 onTerminal 负责，不在此重复。
+  const onFrame = useCallback((f) => {
+    const kind = (f && f.event) || '';
+    if (kind.startsWith('todo_')) {
+      setLiveFrames((fs) => fs.concat(f));
+    } else if (kind === 'workflow_rewound' || kind === 'workflow_suspended' || kind === 'workflow_resumed') {
+      load(true);
+    }
+  }, [load]);
+
   useEffect(() => {
     setDetail(null);
+    setSelectedTodoId('');
+    setLiveFrames([]);
     load(false);
   }, [load]);
 
   const wf = (detail && detail.workflow) || null;
   const items = (detail && detail.items) || [];
+  const spec = wf && wf.spec_json && typeof wf.spec_json === 'object' ? wf.spec_json : null;
+  const states = useMemo(() => foldTodoEvents(itemsToStates(items), liveFrames), [items, liveFrames]);
+  const progress = spec ? runProgress(spec, states) : null;
+  const selectedTodo = spec && Array.isArray(spec.todos)
+    ? spec.todos.find((t) => t && t.id === selectedTodoId)
+    : null;
   const status = wf ? String(wf.status || '') : '';
   const executionStatus = summary?.execution_status;
   const actions = workflowActions(status, executionStatus);
@@ -212,6 +241,12 @@ function WorkflowDetail({ workflowId, summary, onNotice, onMutated }) {
         )}
         style={{ marginBottom: 12 }}
       >
+        {spec ? (
+          <div style={{ marginBottom: 6 }}>
+            <Text strong>{spec.name || workflowId}</Text>
+            {spec.objective ? <Text type="secondary"> — {spec.objective}</Text> : null}
+          </div>
+        ) : null}
         {wf ? (
           <Space wrap size={16}>
             <span>执行 <ExecutionStatusTag status={executionStatus} /></span>
@@ -221,14 +256,33 @@ function WorkflowDetail({ workflowId, summary, onNotice, onMutated }) {
           </Space>
         ) : <Text type="secondary">加载中…</Text>}
       </Card>
-      <Card size="small" title="TODO 项" style={{ marginBottom: 12 }}>
-        <Table className="oc-todo-items" rowKey={(r) => (r && r.todo_id) || ''} size="small" columns={itemCols}
-          dataSource={tableRows(loading, items)} pagination={false} loading={tableLoading(loading)}
-          scroll={{ x: 'max-content' }} />
+      <Card size="small" title="调度画布" style={{ marginBottom: 12 }}
+        extra={progress ? (
+          <Text type="secondary">
+            {progress.passed}/{progress.total} 已通过
+            {progress.active ? ` · ${progress.active} 执行中` : ''}
+            {progress.failed ? ` · ${progress.failed} 失败` : ''}
+            {progress.pending ? ` · ${progress.pending} 待执行` : ''}
+          </Text>
+        ) : null}
+      >
+        <TodoRunCanvas spec={spec} states={states} selectedId={selectedTodoId} onSelect={setSelectedTodoId} />
+        {selectedTodo ? <TodoRunInspector todo={selectedTodo} state={states.get(selectedTodoId)} /> : null}
       </Card>
-      <Card size="small" title="事件流">
-        <EventsFeed workflowId={workflowId} onNotice={onNotice} onTerminal={onTerminal} />
-      </Card>
+      <Row gutter={12}>
+        <Col span={15}>
+          <Card size="small" title="TODO 项" style={{ marginBottom: 12 }}>
+            <Table className="oc-todo-items" rowKey={(r) => (r && r.todo_id) || ''} size="small" columns={itemCols}
+              dataSource={tableRows(loading, items)} pagination={false} loading={tableLoading(loading)}
+              scroll={{ x: 'max-content' }} />
+          </Card>
+        </Col>
+        <Col span={9}>
+          <Card size="small" title="事件流">
+            <EventsFeed workflowId={workflowId} onNotice={onNotice} onTerminal={onTerminal} onFrame={onFrame} />
+          </Card>
+        </Col>
+      </Row>
       {executionOpen && <ExecutionDetail id={workflowId} summary={{ id: workflowId, kind: 'todos', node_id: summary?.node_id, status: summary?.execution_status || summary?.status, created_at: summary?.execution_created_at || summary?.created_at }} onClose={() => setExecutionOpen(false)} onNotice={onNotice} />}
     </div>
   );

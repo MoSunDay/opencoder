@@ -210,7 +210,6 @@ fn dag_spec_agents(spec: Option<&str>) -> Option<Vec<String>> {
                 opencoder_dag::StepKind::Agent { agent, .. } => {
                     Some(agent.unwrap_or_else(|| "act".into()))
                 }
-                opencoder_dag::StepKind::Runner { agent, .. } => Some(agent),
                 _ => None,
             })
             .collect(),
@@ -341,16 +340,10 @@ pub(super) fn prepare(worker: &Worker, assignment: &Assignment, legacy: bool) ->
                             .map_err(|e| anyhow::anyhow!(e))?;
                     opencoder_dag::validate(&spec).map_err(|e| anyhow::anyhow!(e.join("; ")))?;
                     super::dag_preflight::validate(worker, &spec, legacy)?;
-                    for step in &spec.steps {
-                        if let opencoder_dag::StepKind::Runner { runner, agent } = &step.kind {
-                            opencoder_dag_runtime::exec::runner::validate(&config, runner, agent)?;
-                        }
-                    }
                     agents.extend(spec.steps.into_iter().filter_map(|s| match s.kind {
                         opencoder_dag::StepKind::Agent { agent, .. } => {
                             Some(agent.unwrap_or_else(|| "act".into()))
                         }
-                        opencoder_dag::StepKind::Runner { agent, .. } => Some(agent),
                         _ => None,
                     }));
                 }

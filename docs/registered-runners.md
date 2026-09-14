@@ -1,13 +1,13 @@
-# 注册业务 Runner
+# 注册业务 Runner（历史协议）
 
-Runner 是 DAG 的一种步骤。Server 管理命名 Codex 配置和运行入口，Node 负责持久化受理、排队、进程、取消和超时。业务程序保留原有取证、校验及报告流程。
+DAG 只接受 Agent 和 Wasm 步骤；Runner 已从 DAG 类型、编辑器和调度器移除。旧 Runner 定义重新保存或派发时明确报错，不会自动改写或执行。以下协议用于解释已有注册配置、历史执行回执及底层进程接口。
 
 ## 配置
 
 - `GET /api/harnesses/codex/profiles`、`PUT /api/harnesses/codex/profiles/:name`：私有 Codex 配置版本，包含 executable、model、reasoning_effort、sandbox_mode、approval_policy、auth_slot、envs。
 - Agent 卡片设置 `harness: "codex"` 和 `harness_profile: "business"`；未绑定命名配置的 Agent 继续使用默认 Codex 配置。
 - `GET /api/runners`、`PUT /api/runners/:name`：登记 command 数组、workdir、envs、files（绝对路径到 SHA-256）和可选 parent_unit。
-- Web 的「Agent 配置」提供 Agent Harness、Harness 管理、Runner 管理页签；DAG 编辑器可选择 Runner 步骤。
+- Web 不提供 Runner 步骤入口；下方 JSON 是历史定义示例，当前 DAG API 拒绝此类型。
 
 ```json
 {

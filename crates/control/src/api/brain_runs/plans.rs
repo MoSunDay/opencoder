@@ -79,7 +79,6 @@ fn agent_names(action: &ActionSpec) -> anyhow::Result<Vec<String>> {
                     opencoder_dag::StepKind::Agent { agent, .. } => {
                         Some(agent.unwrap_or_else(|| "act".into()))
                     }
-                    opencoder_dag::StepKind::Runner { agent, .. } => Some(agent),
                     _ => None,
                 })
                 .collect()

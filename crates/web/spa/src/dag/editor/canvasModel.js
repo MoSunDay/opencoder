@@ -224,7 +224,6 @@ export function specLevelProblems(problems) {
 }
 
 function emptyKind(type) {
-  if (type === 'runner') return { type, runner: '', agent: '' };
   if (type === 'wasm') return { type, command: '' };
   return { type: 'agent', prompt: '' };
 }

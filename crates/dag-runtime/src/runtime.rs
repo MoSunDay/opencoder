@@ -17,6 +17,7 @@ use opencoder_dag::{
     StepOutcome, StepOutputs, StepStates,
 };
 use opencoder_node::uplink::Uplink;
+use opencoder_store::SessionMeta;
 use tokio::sync::watch;
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
@@ -93,6 +94,7 @@ async fn execute_run_inner(
         let error = "invalid step slug in spec snapshot".to_string();
         return fail_run(&deps.uplink, run, sink, error).await;
     }
+    ensure_run_session(&exec.store, &run).await;
     if let Err(e) = tokio::fs::create_dir_all(
         run_root(&deps.workflow_root, &run.run_id).expect("run id validated above"),
     )
@@ -201,6 +203,7 @@ async fn execute_run_inner(
                 states: states.clone(),
                 outputs: outputs.clone(),
                 workflow_root: deps.workflow_root.clone(),
+                log: Some(sink.step_log(&name)),
             };
             sink.emit(step_started_event(&name));
             let exec = Arc::clone(&exec);
@@ -277,28 +280,62 @@ async fn execute_run_inner(
 
     let error_text = run_error_text(&run.spec, &states, &step_errors);
     sink.emit(run_finished_event(terminal.as_str(), error_text.as_deref()));
-    sink.close().await;
+    if let Err(error) = sink.close().await {
+        warn!(run_id = %run.run_id, error = %error, "dag event uploader did not flush cleanly");
+    }
     report_status(&deps.uplink, &run.run_id, terminal, error_text.clone()).await?;
     info!(run_id = %run.run_id, status = %terminal, "dag run finished");
     Ok(terminal)
 }
 
+/// Guarantee the run's own session row exists before any step mirrors output
+/// onto it: `session_events.session_id` is a foreign key, so a missing row
+/// would silently drop every `step_output` record this run produces. The
+/// node's DAG workload normally creates the session first (with its own
+/// title/agent) and the store's insert is `OR IGNORE`, so this is a no-op
+/// there and a safety net everywhere else (resume of an older run, direct
+/// runtime callers, tests). Failing to create it only warns — the run's own
+/// event/status delivery does not depend on the node store.
+async fn ensure_run_session(store: &Arc<dyn opencoder_store::Store>, run: &DagClaimedRun) {
+    let now = now_ms();
+    let meta = SessionMeta {
+        id: run.run_id.clone(),
+        title: Some(run.spec.name.clone()),
+        created_at: now,
+        updated_at: now,
+        ..Default::default()
+    };
+    if let Err(error) = store.create_session(&meta).await {
+        warn!(
+            run_id = %run.run_id,
+            error = %error,
+            "run session unavailable; step_output rows for this run may not persist"
+        );
+    }
+}
+
 /// Dispatch one step by kind, wrapped in its per-step wall-clock budget.
 /// A timeout cancels the step token and folds to `Error("step timeout")`.
 async fn execute_step(ctx: &StepCtx, exec: &ExecDeps, cancel: CancellationToken) -> StepResult {
-    if matches!(&ctx.step.kind, StepKind::Runner { .. }) {
-        return crate::exec::runner::execute(ctx, exec, cancel).await;
-    }
     // Wasm owns its budget and cancellation so process/container cleanup
     // completes before the runtime publishes the step's terminal status.
     if matches!(&ctx.step.kind, StepKind::Wasm { .. }) {
-        return crate::exec::wasm::execute_wasm_step_cancellable(ctx, cancel).await;
+        // Mirror the step's output into the node store as it is produced
+        // (`step_output` events on the run's session). The tail batch is
+        // flushed BEFORE the result is returned, so the console never sees a
+        // terminal step whose last output is still buffered — on success,
+        // timeout, cancellation, and error alike.
+        let output =
+            crate::step_log::StepOutputLog::new(exec.store.clone(), &ctx.run_id, &ctx.step.name);
+        let result =
+            crate::exec::wasm::execute_wasm_step_logged(ctx, cancel, Some(output.clone())).await;
+        output.close().await;
+        return result;
     }
     let fut = async {
         match &ctx.step.kind {
             StepKind::Agent { .. } => execute_agent_step(ctx, exec, cancel.clone()).await,
             StepKind::Wasm { .. } => unreachable!("Wasm dispatched above"),
-            StepKind::Runner { .. } => unreachable!("Runner dispatched above"),
         }
     };
     match ctx.step.timeout_secs {
@@ -380,7 +417,9 @@ async fn fail_run(
 ) -> Result<DagRunStatus> {
     warn!(run_id = %run.run_id, error = %error, "dag run failed before scheduling");
     sink.emit(run_finished_event("error", Some(&error)));
-    sink.close().await;
+    if let Err(close_error) = sink.close().await {
+        warn!(run_id = %run.run_id, error = %close_error, "dag event uploader did not flush cleanly");
+    }
     report_status(uplink, &run.run_id, DagRunStatus::Error, Some(error)).await?;
     Ok(DagRunStatus::Error)
 }

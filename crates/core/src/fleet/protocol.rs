@@ -259,6 +259,14 @@ pub enum NodeOperation {
         #[serde(default)]
         step: Option<String>,
     },
+    /// One DAG step's event stream: the step's child session for `agent`
+    /// steps, otherwise the run session filtered down to this step.
+    DagStepEvents {
+        execution: ExecutionRef,
+        step: String,
+        #[serde(default)]
+        after: i64,
+    },
     Artifact {
         request: ArtifactRequest,
     },
@@ -367,6 +375,19 @@ pub struct CapabilityTarget {
 mod tests {
     use super::*;
 
+    /// Project the new variant into plain data so the round-trip assertions
+    /// do not need `PartialEq` on the whole operation enum.
+    fn describe_step_events(operation: NodeOperation) -> Option<(String, String, i64)> {
+        match operation {
+            NodeOperation::DagStepEvents {
+                execution,
+                step,
+                after,
+            } => Some((execution.id, step, after)),
+            _ => None,
+        }
+    }
+
     #[test]
     fn execution_reference_preserves_explicit_kind() {
         let index = ExecutionIndex {
@@ -409,5 +430,68 @@ mod tests {
                 "execution": {"id": "agent-example", "kind": "agent"}
             })
         );
+    }
+
+    #[test]
+    fn dag_step_events_wire_shape_is_additive() {
+        let operation = NodeOperation::DagStepEvents {
+            execution: ExecutionRef {
+                id: "dag-run-1".into(),
+                kind: ExecutionKind::Dag,
+            },
+            step: "fetch".into(),
+            after: 12,
+        };
+        let wire = serde_json::to_value(&operation).unwrap();
+        assert_eq!(
+            wire,
+            serde_json::json!({
+                "operation": "dag_step_events",
+                "execution": {"id": "dag-run-1", "kind": "dag"},
+                "step": "fetch",
+                "after": 12
+            })
+        );
+        assert_eq!(
+            serde_json::from_value::<NodeOperation>(wire)
+                .map(describe_step_events)
+                .unwrap(),
+            Some(("dag-run-1".to_string(), "fetch".to_string(), 12))
+        );
+
+        // Backward compatible: a caller that omits `after` starts from 0, and
+        // the pre-existing `dag_steps` wire shape is untouched.
+        let defaulted = serde_json::from_value::<NodeOperation>(serde_json::json!({
+            "operation": "dag_step_events",
+            "execution": {"id": "dag-run-1", "kind": "dag"},
+            "step": "fetch"
+        }))
+        .map(describe_step_events)
+        .unwrap();
+        assert_eq!(
+            defaulted,
+            Some(("dag-run-1".to_string(), "fetch".to_string(), 0))
+        );
+        assert_eq!(
+            serde_json::to_value(NodeOperation::DagSteps {
+                execution: ExecutionRef {
+                    id: "dag-run-1".into(),
+                    kind: ExecutionKind::Dag,
+                },
+                step: None,
+            })
+            .unwrap(),
+            serde_json::json!({
+                "operation": "dag_steps",
+                "execution": {"id": "dag-run-1", "kind": "dag"},
+                "step": null
+            })
+        );
+        // A step is mandatory: without it the operation is not decodable.
+        assert!(serde_json::from_value::<NodeOperation>(serde_json::json!({
+            "operation": "dag_step_events",
+            "execution": {"id": "dag-run-1", "kind": "dag"}
+        }))
+        .is_err());
     }
 }

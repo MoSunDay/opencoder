@@ -1,12 +1,4 @@
 import { useEvent } from './ui/editing/useEvent.js';
-// agentDetail.jsx — 单个 agent 卡片详情：头部（返回 / 名称 / 设为生效 /
-// 刷新）+ 五个 tab。四个资源 tab 共用 ResourceRefTab：引用 Select 变更 →
-// PUT /api/agents/:name 整卡 current；版本 Select +「回滚」→ POST
-// .../rollback。Prompt tab 内嵌 promptEditor（soul/how/output 三文件版本
-// 化保存）；Tools 只读展示 references.tools 名称 —— 后端没有逐文件列表
-// 端点，上传 UI 留空（缺口已记录，不做）。Meta tab 渲染 history 时间线 +
-// references 解析快照。
-
 import {
   Button, Card, Select, Space, Tabs, Tag, Timeline, Typography,
 } from 'antd';
@@ -16,9 +8,9 @@ import { REF_FIELDS, resolvedNames, resourceOptions, versionOptions } from './ag
 import { err } from './notice.js';
 import { useMessage } from './ui/appMessage.js';
 import { PromptEditor } from './promptEditor.jsx';
-import { HARNESS_OPTIONS } from './harness/fields.jsx';
+import { AgentHarnessFields } from './harness/agentFields.jsx';
 
-const { Text, Title } = Typography;
+const { Text } = Typography;
 
 /// 单个资源类别的引用面板：卡片的 field 引用（Select，PUT 整卡）+ 池内
 /// 版本（Select）与回滚按钮 + references 只读快照 tag。children 是该类
@@ -139,7 +131,7 @@ function MetaTab({ meta }) {
   );
 }
 
-function AgentDetailSession({ name, resources, onNotice: noticeCallback, onChanged, onBack }) {
+function AgentDetailSession({ name, resources, onNotice: noticeCallback, onChanged }) {
   const onNotice = useEvent(noticeCallback);
   const msg = useMessage();
   const [meta, setMeta] = useState(null);
@@ -163,17 +155,13 @@ function AgentDetailSession({ name, resources, onNotice: noticeCallback, onChang
     load();
   }, [load]);
 
-  const onCardSaved = useCallback(() => {
-    load();
-    if (onChanged) {
-      onChanged();
-    }
-  }, [load, onChanged]);
+  const onCardSaved = useCallback(() => Promise.all([load(), onChanged?.()]), [load, onChanged]);
 
   const activate = async () => {
     try {
       await apiPatch('/api/agents/active', { active: name });
       msg.success(`已激活 ${name}`);
+      onChanged?.();
     } catch (e) {
       // 400/404 = prompt 预检失败等，服务端 error 字段已并入 e.message
       if (onNotice) {
@@ -193,18 +181,10 @@ function AgentDetailSession({ name, resources, onNotice: noticeCallback, onChang
   return (
     <div>
       <Space style={{ marginBottom: 16 }}>
-        <Button size="small" onClick={onBack}>返回</Button>
-        <Title level={5} style={{ margin: 0 }}>Agent: {name}</Title>
-        <Select aria-label="agent-default-harness" value={meta.harness || 'opencoder'} options={HARNESS_OPTIONS} style={{ minWidth: 140 }}
-          onChange={async (harness) => {
-            try {
-              await apiPut(`/api/agents/${encodeURIComponent(name)}`, { harness });
-              msg.success('Harness 已更新，将用于新启动的会话'); onCardSaved();
-            } catch (e) { onNotice?.(err('更新 Harness 失败: ' + e.message)); }
-          }} />
         <Button size="small" type="primary" onClick={activate}>设为生效</Button>
         <Button size="small" onClick={load}>刷新</Button>
       </Space>
+      <AgentHarnessFields meta={meta} onNotice={onNotice} onSaved={onCardSaved} />
       <Tabs
         defaultActiveKey={meta.builtin ? 'meta' : 'prompt'}
         items={[

@@ -1,4 +1,4 @@
-// Agent resource versions, managed Harness settings and node scheduling through the UI.
+// Agent identity, managed Codex settings and node scheduling through the UI.
 const assert = require('assert/strict');
 const path = require('path');
 
@@ -24,18 +24,34 @@ module.exports = async ({ page, api, until, root, envs }) => {
   await page.getByRole('menuitem', { name: 'Agent 配置' }).click();
   await page.getByRole('tab', { name: 'Agent 列表', exact: true }).waitFor();
   const row = page.getByRole('row').filter({ hasText: 'browser-agent' });
-  await row.getByText('prompts/browser-prompt/v2/', { exact: true }).waitFor();
-  await row.getByText('skills/browser-skills/v1/', { exact: true }).waitFor();
-  await row.getByText('tools/browser-tools/v1/', { exact: true }).waitFor();
-  assert((await row.innerText()).includes('soul、how'));
-  await page.screenshot({ path: path.join(root, 'agent-resources.png'), animations: 'disabled' });
-  await page.getByRole('tab', { name: 'Agent Harness', exact: true }).click();
-  await page.getByLabel('harness-act').waitFor();
-  assert.equal(await page.locator('[aria-label^="harness-"]').count(), 8);
-  await page.getByLabel('harness-browser-agent').click();
+  await row.waitFor();
+  assert.deepEqual(await page.getByRole('columnheader').allTextContents(), ['名称', '操作']);
+  assert.equal(await page.getByRole('tab', { name: 'Runner 管理', exact: true }).count(), 0);
+  assert.equal(await page.getByRole('tab', { name: 'Agent Harness', exact: true }).count(), 0);
+  await row.getByRole('button', { name: '编辑', exact: true }).click();
+  const drawer = page.getByRole('dialog', { name: '编辑 Agent · browser-agent' });
+  await drawer.getByText('browser-prompt · v2', { exact: true }).waitFor();
+  for (const name of ['soul', 'how']) await drawer.getByLabel('resolved-prompt').filter({ hasText: name }).waitFor();
+  await page.waitForFunction(() => {
+    const box = document.querySelector('.ant-drawer-content-wrapper')?.getBoundingClientRect();
+    return box && Math.abs(box.width / innerWidth - 0.75) < 0.01 && Math.abs(box.right - innerWidth) < 1;
+  });
+  await drawer.getByLabel('agent-default-harness').click();
   await page.locator('.ant-select-item-option-content').getByText('Codex', { exact: true }).click();
   await until(async () => (await api('GET', '/api/agents/browser-agent/meta')).meta.harness === 'codex', 'saved agent Harness');
+  await drawer.getByLabel('agent-harness-profile').waitFor();
+  await drawer.getByRole('tab', { name: 'Skills', exact: true }).click();
+  await drawer.getByText('browser-skills · v1', { exact: true }).waitFor();
+  await drawer.getByRole('tab', { name: 'Tools', exact: true }).click();
+  await drawer.getByText('browser-tools · v1', { exact: true }).waitFor();
+  await page.screenshot({ path: path.join(root, 'agent-detail.png'), animations: 'disabled' });
+  await drawer.getByRole('button', { name: '关闭', exact: true }).click();
+  await drawer.waitFor({ state: 'hidden' });
+  await row.waitFor();
+  await page.screenshot({ path: path.join(root, 'agent-list.png'), animations: 'disabled' });
   await page.getByRole('tab', { name: 'Harness 管理', exact: true }).click();
+  await page.getByLabel('模型（--model）').waitFor();
+  for (const name of ['Codex 二进制路径', '授权槽位', '推理强度', '沙箱权限', '审批策略']) assert.equal(await page.getByLabel(name, { exact: true }).count(), 0);
   await page.getByLabel('codex-managed-envs').fill('INVALID');
   await page.getByRole('button', { name: '保存 Codex 配置', exact: true }).click();
   await page.getByText('环境变量必须为 KEY=VALUE，每行一个', { exact: true }).waitFor();
@@ -44,6 +60,9 @@ module.exports = async ({ page, api, until, root, envs }) => {
   await page.getByLabel('codex-managed-envs').fill(envs.join('\n'));
   await page.getByRole('button', { name: '保存 Codex 配置', exact: true }).click();
   await page.getByText('配置 v1', { exact: true }).waitFor();
+  const saved = (await api('GET', '/api/harnesses')).harnesses.find((h) => h.name === 'codex').settings;
+  assert.deepEqual(saved.envs, Object.fromEntries(envs.map((line) => [line.slice(0, line.indexOf('=')), line.slice(line.indexOf('=') + 1)])));
+  for (const field of ['executable', 'auth_slot', 'reasoning_effort', 'sandbox_mode', 'approval_policy']) assert.equal(saved[field], null);
   await page.getByRole('tab', { name: 'Harness 管理', exact: true }).scrollIntoViewIfNeeded();
   await page.screenshot({ path: path.join(root, 'harness-management.png'), animations: 'disabled' });
 };

@@ -50,8 +50,6 @@ pub struct StepSpec {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum StepKind {
-    /// Administrator-registered binary workflow; no caller-controlled command.
-    Runner { runner: String, agent: String },
     /// Run a prompt through the local session runner on the node.
     Agent {
         prompt: String,
@@ -98,6 +96,9 @@ pub enum SandboxMode {
 /// No silent migration happens: the caller surfaces the error to the user.
 pub fn decode_spec(value: &serde_json::Value) -> Result<DagSpec, String> {
     if let Some(steps) = value.get("steps").and_then(|s| s.as_array()) {
+        if steps.iter().any(|step| step["kind"]["type"] == "runner") {
+            return Err("DAG 不支持 Runner 步骤，请改写为 agent/wasm 后重新保存".into());
+        }
         for step in steps {
             if step
                 .get("kind")
@@ -209,6 +210,21 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn runner_is_not_a_dag_step_type() {
+        let value = json!({"name":"old","steps":[{"name":"a","kind":{"type":"runner","runner":"business","agent":"act"}}]});
+        assert!(decode_spec(&value)
+            .unwrap_err()
+            .contains("DAG 不支持 Runner"));
+        assert!(decode_spec_str(&value.to_string())
+            .unwrap_err()
+            .contains("DAG 不支持 Runner"));
+        assert!(serde_json::from_value::<DagSpec>(value)
+            .unwrap_err()
+            .to_string()
+            .contains("unknown variant `runner`"));
     }
 
     #[test]

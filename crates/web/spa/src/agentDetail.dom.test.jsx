@@ -108,10 +108,9 @@ const mountDetail = async () => {
       resources={resourcesFixture}
       onNotice={() => {}}
       onChanged={() => {}}
-      onBack={() => {}}
     />,
   );
-  expect(await screen.findByText('Agent: coder')).toBeTruthy();
+  expect(await screen.findByLabelText('agent-default-harness')).toBeTruthy();
 };
 
 describe('AgentDetail', () => {

@@ -1,6 +1,6 @@
-import { Alert, Button, Collapse, Drawer, Empty, Space, Table, Tabs, Tag } from 'antd';
+import { Alert, Button, Drawer, Empty, Space, Table, Tabs, Tag } from 'antd';
 import { useCallback, useEffect, useState } from 'react';
-import { apiGet, apiPost } from '../../api.js';
+import { apiGet } from '../../api.js';
 import { BrainPanel } from '../../brainPanel.jsx';
 import { PageShell } from '../../shell/pageShell.jsx';
 import { StatusTag } from '../../ui/statusTag.jsx';
@@ -22,11 +22,7 @@ export function BrainWorkbench({ onNotice }) {
         { title: '运行', dataIndex: 'id', render: (id) => <Button type="link" onClick={() => setRunId(id)}>{id}</Button> }, { title: '节点', dataIndex: 'node_id' }, { title: '执行状态', dataIndex: 'status', render: (status) => status === 'idle' ? <Tag color="blue">等待事件</Tag> : <StatusTag status={status} /> },
       ]} locale={{ emptyText: <Empty description="从目标开始，让能力组成可观察的执行计划" /> }} /></> },
       { key: 'plans', label: '计划库', children: <Plans plans={plans} capabilities={capabilities} reload={reload} onRun={executePlan} /> },
-      { key: 'capabilities', label: '能力库', children: <><Table rowKey="id" expandable={{ expandedRowRender: (c) => <pre className="brain-json">{JSON.stringify({ inputs: c.inputs, output: c.output, evidence: c.evidence || [], source_plan: c.source_plan }, null, 2)}</pre> }} dataSource={capabilities} pagination={{ pageSize: 10 }} columns={[
-        { title: '能力', dataIndex: 'summary' }, { title: '类型', dataIndex: 'kind', filters: ['agent', 'dag', 'todos', 'team'].map((value) => ({ text: value, value })), onFilter: (value, record) => record.kind === value, render: (kind) => <Tag>{kind}</Tag> }, { title: '执行目标', dataIndex: 'target' },
-        { title: '成熟度', dataIndex: 'maturity', render: (value) => <Tag color={value === 'stable' ? 'green' : 'default'}>{value === 'stable' ? '稳定' : '草稿'}</Tag> },
-        { title: '操作', render: (_, c) => <Button size="small" onClick={async () => { try { await apiPost(`/api/brain/library/${encodeURIComponent(c.id)}/stable`, { maturity: c.maturity === 'stable' ? 'draft' : 'stable', evidence: c.evidence || [] }); await reload(); } catch (e) { setError(e.message); } }}>{c.maturity === 'stable' ? '改为草稿' : '标记稳定'}</Button> },
-      ]} /><Collapse items={[{ key: 'manage', label: '维护能力描述与目标绑定', children: <BrainPanel onNotice={onNotice} /> }]} /></> },
+      { key: 'capabilities', label: '能力库', children: <BrainPanel onNotice={onNotice} /> },
     ]} />
   </>}
   <Drawer destroyOnHidden open={launch} onClose={() => setLaunch(false)} title="新建大脑运行" size={600}><Launch key={String(initialPlan)} plans={plans} initialPlan={initialPlan} onCreated={(id) => { setLaunch(false); setRunId(id); }} /></Drawer>

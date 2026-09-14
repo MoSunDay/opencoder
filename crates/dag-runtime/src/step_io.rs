@@ -8,10 +8,13 @@ use std::collections::BTreeMap;
 
 use anyhow::Context;
 use opencoder_core::message::now_ms;
-use opencoder_dag::artifacts::{meta_value, output_snapshot, step_dir};
+use opencoder_dag::artifacts::{
+    meta_value_with_session, output_snapshot, session_file, session_value, step_dir,
+};
 use opencoder_dag::protocol::DagClaimedRun;
 use opencoder_dag::{DagSpec, StepOutcome, StepOutputs, StepStates};
 use serde_json::Value;
+use tracing::warn;
 
 use crate::dag_events::{step_done_event, RunEventSink};
 use crate::exec::StepResult;
@@ -74,15 +77,48 @@ pub(crate) async fn write_step_artifacts(
         &dir.join("output.json"),
         &serde_json::to_vec(result.output_json.as_ref().unwrap_or(&Value::Null))?,
     )?;
-    let meta = meta_value(
+    // `session_id` is additive: steps that never had a sub-session serialize
+    // null and older readers keep working.
+    let meta = meta_value_with_session(
         name,
         outcome_str(&result.outcome),
         started_at_ms,
         now_ms(),
         result.error.as_deref(),
+        result.session_id.as_deref(),
     );
     crate::checkpoint::write(&dir.join("meta.json"), &serde_json::to_vec(&meta)?)?;
     Ok(())
+}
+
+/// Publish a step's sub-session id to `<step>/session.json` THE MOMENT the
+/// session exists (LOCKED node-side data contract): it lets a remote console
+/// attach to a still-running step, while `meta.json`'s `session_id` only
+/// lands when the step finishes. Failure merely warns — `meta.json` stays the
+/// fallback, and artifact IO must never fail a step.
+pub(crate) fn write_session_artifact(
+    workflow_root: &std::path::Path,
+    run_id: &str,
+    step: &str,
+    session_id: &str,
+) {
+    let Ok(dir) = step_dir(workflow_root, run_id, step) else {
+        warn!(%run_id, %step, "session.json skipped: step name is not a valid slug");
+        return;
+    };
+    let result = (|| -> anyhow::Result<()> {
+        std::fs::create_dir_all(&dir)?;
+        crate::checkpoint::write(
+            &session_file(&dir),
+            &serde_json::to_vec(&session_value(session_id))?,
+        )
+    })();
+    if let Err(error) = result {
+        warn!(
+            %run_id, %step, %session_id, error = %error,
+            "session.json checkpoint failed (meta.json session_id remains the fallback)"
+        );
+    }
 }
 
 /// Give every step that never ran (cancelled run, or transitively blocked by

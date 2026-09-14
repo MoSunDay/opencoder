@@ -67,6 +67,35 @@ pub(super) fn bounded_reply(body: Value) -> Result<RpcReply> {
     Ok(RpcReply::ok(body))
 }
 
+/// Spec step names in declaration order from the definition snapshot (the
+/// same `spec`-aware traversal `runner::views` uses). Pure.
+pub(super) fn spec_step_names(definition: Option<&Value>) -> Vec<String> {
+    definition
+        .and_then(|d| d.get("spec").unwrap_or(d).get("steps"))
+        .and_then(Value::as_array)
+        .map(|steps| {
+            steps
+                .iter()
+                .filter_map(|step| step["name"].as_str().map(str::to_owned))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Declared `steps[].kind.type` for one spec step (`agent`/`wasm`/`runner`).
+/// `None` when the step is absent or its kind is not a tagged object. Pure.
+pub(super) fn spec_step_kind(definition: Option<&Value>, name: &str) -> Option<String> {
+    definition
+        .and_then(|d| d.get("spec").unwrap_or(d).get("steps"))
+        .and_then(Value::as_array)?
+        .iter()
+        .find(|step| step["name"].as_str() == Some(name))?
+        .get("kind")?
+        .get("type")
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+}
+
 pub(super) fn public_input(input: &Value) -> Value {
     let mut input = input.clone();
     if let Some(envs) = input.get_mut("envs").and_then(Value::as_object_mut) {

@@ -15,7 +15,6 @@ pub(crate) static HOME_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new((
 
 mod cancel_keep_pending;
 mod cli_outcome_tests;
-mod envs_outcome_tests;
 mod mcp_outcome_tests;
 mod model_outcome_tests;
 mod skill_outcome_tests;

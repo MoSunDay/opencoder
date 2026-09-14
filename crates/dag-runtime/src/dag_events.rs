@@ -4,10 +4,11 @@
 //! crate's event batcher) and pushes batches upstream with bounded retry.
 //!
 //! Ordering is preserved end-to-end: one channel, one uploader, batches
-//! never reordered. A persistently failing uplink degrades to warn-and-drop
-//! after three linear-backoff attempts — the server's lost-node sweep
-//! converges the run regardless.
+//! never reordered. A persistently failing uplink returns an error after
+//! three linear-backoff attempts; the execution owner cannot report success
+//! with an incomplete log.
 
+use anyhow::{Context, Result};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -22,7 +23,7 @@ use tracing::warn;
 pub const MAX_EVENTS: usize = 8;
 /// ... or once this long passed between flush opportunities.
 pub const WINDOW: Duration = Duration::from_millis(300);
-/// Upload attempts per batch (linear backoff), then warn-and-drop.
+/// Upload attempts per batch (linear backoff), then return an error.
 const ATTEMPTS: usize = 3;
 
 /// Producer handle for one run's event stream. Cheap to keep on the stack
@@ -31,9 +32,8 @@ const ATTEMPTS: usize = 3;
 /// caller must WAIT for that flush (e.g. before reporting a terminal
 /// status).
 pub struct RunEventSink {
-    run_id: String,
     tx: Option<mpsc::UnboundedSender<DagEventIn>>,
-    join: Option<tokio::task::JoinHandle<()>>,
+    join: Option<tokio::task::JoinHandle<Result<()>>>,
 }
 
 impl RunEventSink {
@@ -42,7 +42,6 @@ impl RunEventSink {
         let (tx, rx) = mpsc::unbounded_channel();
         let join = tokio::spawn(uploader(uplink, run_id.clone(), rx));
         Self {
-            run_id,
             tx: Some(tx),
             join: Some(join),
         }
@@ -55,15 +54,18 @@ impl RunEventSink {
         }
     }
 
+    pub(crate) fn step_log(&self, step: &str) -> crate::exec::logs::StepLog {
+        crate::exec::logs::StepLog::new(step.to_owned(), self.tx.as_ref().unwrap().clone())
+    }
+
     /// Close the queue and WAIT until the uploader flushed the tail — the
     /// durable ordering point before a terminal status report.
-    pub async fn close(mut self) {
+    pub async fn close(mut self) -> Result<()> {
         self.tx.take();
         if let Some(join) = self.join.take() {
-            if let Err(e) = join.await {
-                warn!(run_id = %self.run_id, error = %e, "dag event uploader panicked");
-            }
+            join.await.context("DAG event uploader panicked")??;
         }
+        Ok(())
     }
 }
 
@@ -80,7 +82,7 @@ async fn uploader(
     uplink: Arc<Uplink>,
     run_id: String,
     mut rx: mpsc::UnboundedReceiver<DagEventIn>,
-) {
+) -> Result<()> {
     let mut buf: Vec<DagEventIn> = Vec::new();
     let mut tick = tokio::time::interval(WINDOW);
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -90,26 +92,26 @@ async fn uploader(
                 Some(ev) => {
                     buf.push(ev);
                     if buf.len() >= MAX_EVENTS {
-                        flush(&uplink, &run_id, &mut buf).await;
+                        flush(&uplink, &run_id, &mut buf).await?;
                     }
                 }
                 None => break,
             },
             _ = tick.tick() => {
                 if !buf.is_empty() {
-                    flush(&uplink, &run_id, &mut buf).await;
+                    flush(&uplink, &run_id, &mut buf).await?;
                 }
             }
         }
     }
-    flush(&uplink, &run_id, &mut buf).await;
+    flush(&uplink, &run_id, &mut buf).await
 }
 
 /// One batch upload with bounded retry; the buffer is only cleared on the
 /// attempt (retries replay the identical batch, preserving order).
-async fn flush(uplink: &Uplink, run_id: &str, buf: &mut Vec<DagEventIn>) {
+async fn flush(uplink: &Uplink, run_id: &str, buf: &mut Vec<DagEventIn>) -> Result<()> {
     if buf.is_empty() {
-        return;
+        return Ok(());
     }
     let batch = DagEventBatch {
         run_id: run_id.to_string(),
@@ -117,15 +119,10 @@ async fn flush(uplink: &Uplink, run_id: &str, buf: &mut Vec<DagEventIn>) {
     };
     for attempt in 0..ATTEMPTS {
         match uplink.dag_events(&batch).await {
-            Ok(()) => return,
+            Ok(()) => return Ok(()),
             Err(e) => {
                 if attempt + 1 == ATTEMPTS {
-                    warn!(
-                        run_id,
-                        events = batch.events.len(),
-                        error = %e,
-                        "dag event upload failed after retries; dropping batch"
-                    );
+                    return Err(e.context("DAG event upload failed after retries"));
                 } else {
                     warn!(run_id, attempt, error = %e, "dag event upload retrying");
                     tokio::time::sleep(Duration::from_millis(200 * (attempt as u64 + 1))).await;
@@ -133,6 +130,7 @@ async fn flush(uplink: &Uplink, run_id: &str, buf: &mut Vec<DagEventIn>) {
             }
         }
     }
+    unreachable!("final upload attempt returns")
 }
 
 /// `run_started` frame. No `node_id`: the runtime does not know the id the
@@ -221,6 +219,26 @@ mod tests {
         assert_eq!(fe.payload["error"], "bad");
     }
 
+    #[tokio::test]
+    async fn close_reports_persistence_failure_instead_of_succeeding_with_missing_logs() {
+        struct Failed;
+        #[async_trait::async_trait]
+        impl opencoder_node::uplink::LocalDagPersistence for Failed {
+            async fn events(&self, _: &DagEventBatch) -> Result<()> {
+                anyhow::bail!("disk full")
+            }
+            async fn status(&self, _: &opencoder_dag::DagStatusReport) -> Result<()> {
+                Ok(())
+            }
+        }
+        let sink = RunEventSink::new(
+            Arc::new(Uplink::for_local_dag(Arc::new(Failed))),
+            "r".into(),
+        );
+        sink.emit(run_started_event("test"));
+        assert!(format!("{:#}", sink.close().await.unwrap_err()).contains("disk full"));
+    }
+
     /// Sink close() must flush a tail that never hit the count cap: emit one
     /// event, close, and observe the uploader's batch arrive at a stub
     /// uplink endpoint. Drives the real batching loop with `tokio::pause`
@@ -254,7 +272,7 @@ mod tests {
         let sink = RunEventSink::new(Arc::clone(&uplink), "r1".into());
         sink.emit(run_started_event("etl"));
         sink.emit(step_started_event("a"));
-        sink.close().await;
+        sink.close().await.unwrap();
 
         let got = seen.lock().unwrap().clone();
         assert_eq!(got, vec!["run_started", "step_started"]);

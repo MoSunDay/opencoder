@@ -1,8 +1,7 @@
 // @vitest-environment jsdom
 // AgentNfsCard DOM smoke: GET /api/agents/nfs 的状态字段渲染（运行中 tag /
 // host:port / 只读 / 导出根 / mount 提示行），Switch 翻转命中 POST
-// /api/agents/nfs 且 body 带布尔 enabled。api.js 模块级 mock（同 envsPanel
-// 模式）。
+// /api/agents/nfs 且 body 带布尔 enabled。api.js 模块级 mock。
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';

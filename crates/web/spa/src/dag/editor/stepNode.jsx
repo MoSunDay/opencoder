@@ -8,7 +8,7 @@
 import { CodeOutlined, RobotOutlined } from '@ant-design/icons';
 import { Handle, Position } from '@xyflow/react';
 
-const KIND_LABEL = { agent: 'Agent', wasm: 'Wasm', runner: 'Runner' };
+const KIND_LABEL = { agent: 'Agent', wasm: 'Wasm' };
 
 /// StepEditNode — one editable step card. Kept module-level and stable via
 /// editNodeTypes so React Flow does not remount nodes on parent re-renders.

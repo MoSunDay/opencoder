@@ -335,7 +335,6 @@ describe('App shell landmarks (antd 6 under jsdom)', () => {
     // Default page (nodes) scopes the Sider menu to the node category. Icon
     // glyphs carry their own aria-label, so match menuitem names by regex.
     expect(screen.getByRole('menuitem', { name: /节点列表/ })).toBeTruthy();
-    expect(screen.getByRole('menuitem', { name: /Env 管理/ })).toBeTruthy();
     // Pages of other categories stay out of the scoped menu.
     expect(screen.queryByRole('menuitem', { name: /会话交互/ })).toBeNull();
     expect(screen.queryByRole('menuitem', { name: /DAG 工作流/ })).toBeNull();

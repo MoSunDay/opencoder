@@ -153,7 +153,7 @@ pub fn agent_dir(name: &str) -> Option<PathBuf> {
     agents_dir().map(|root| root.join(name))
 }
 
-/// Same contract as [`crate::config::envs::validate_env_name`]: non-empty,
+/// Name contract: non-empty,
 /// ≤48 chars, not `.`/`..`, charset `[A-Za-z0-9._-]`, and none of the
 /// reserved non-agent names — the `active` marker plus the four shared
 /// pool dirs (`prompts`/`skills`/`tools`/`memory`) — so an agent
@@ -185,7 +185,7 @@ pub fn validate_agent_name(name: &str) -> Result<(), String> {
 
 /// The active agent name, or `None` when no marker exists, the marker is
 /// blank/invalid, or the agent directory is gone (stale marker deactivates
-/// silently, mirrors `active_env`).
+/// silently).
 pub fn active_agent() -> Option<String> {
     let raw = std::fs::read_to_string(agents_dir()?.join(ACTIVE_MARKER)).ok()?;
     let name = raw.trim().to_string();
@@ -281,7 +281,7 @@ fn write_marker_atomic(root: &std::path::Path, body: &str) -> io::Result<()> {
 /// to `Some(name)`, run `agents_root_check` (a dry-run meta parse +
 /// compose, supplied by the caller); on failure restore the previous marker
 /// and surface `InvalidData`. Deactivation (`None`) passes through
-/// unchanged. Mirrors `set_active_env_checked`.
+/// unchanged.
 pub fn set_active_agent_checked(
     name: Option<&str>,
     agents_root_check: impl FnOnce() -> Result<(), String>,

@@ -99,7 +99,7 @@ Server 的 NFS 导出支持完整深层资源路径，短路径句柄保持兼�
 {"id":"agent-client-request-1","kind":"agent","target":"act","input":{"prompt":"检查当前仓库"},"node_id":null}
 ```
 
-事件支持 seq 回放；超大事件、消息和详情字段由 64 KiB chunk 及游标分段读取。DAG 产物通过 Bearer 保护的流式下载端点传输，256 MiB 验收不会在浏览器或 Server 聚合完整文件。原会话、DAG、TODO、Team 和项目页面 API 均由 Server 依据五字段索引转发到归属节点。
+DAG 页和执行详情共用实时日志组件，展示 Agent 输出、思考与工具事件以及 Wasm stdout/stderr，支持步骤筛选、搜索、自动滚动和历史分页。日志沿 Node WebSocket 与浏览器 SSE 增量传输，断线从已接收的 seq 续传；服务端明确发送流结束标记，网络断开不会显示为正常结束。事件支持 seq 回放；超大事件、消息和详情字段由 64 KiB chunk 及游标分段读取。DAG 产物通过 Bearer 保护的流式下载端点传输，256 MiB 验收不会在浏览器或 Server 聚合完整文件。原会话、DAG、TODO、Team 和项目页面 API 均由 Server 依据五字段索引转发到归属节点。
 
 ## 验证边界
 

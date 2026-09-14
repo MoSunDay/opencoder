@@ -97,11 +97,14 @@ fn apply_env(spec: &mut WorkflowSpec, root: &std::path::Path, env: &str) -> Resu
             }
         }
     }
+    let env_vars = opencoder_todos::domain::env_vars_from_context(&env_context)
+        .map_err(|e| error_400(format!("{e:#}")))?;
     if !spec.metadata.is_object() {
         spec.metadata = json!({});
     }
     spec.metadata["env"] = json!(env);
     spec.metadata["env_tools"] = tools;
+    spec.metadata["env_vars"] = opencoder_todos::domain::env_vars_metadata(env_vars);
     opencoder_todos::domain::validate_spec(spec)
         .map_err(|e| error_400(format!("spec 校验失败: {e:#}")))
 }

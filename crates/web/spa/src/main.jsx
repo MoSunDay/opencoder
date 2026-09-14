@@ -26,7 +26,6 @@ import { AgentsPanel } from './agentsConfig.jsx';
 import { FleetBrainPanel as BrainPanel } from './fleet/brain.jsx';
 import { ChatPanel } from './chat.jsx';
 import { DagPanel } from './dagPanel.jsx';
-import { EnvsPanel } from './envsPanel.jsx';
 import { LoginModal } from './login.jsx';
 import { FleetNodesPanel as NodesPanel } from './fleet/nodes.jsx';
 import { OwnerViewPanel } from './project/ownerViewPanel.jsx';
@@ -105,7 +104,6 @@ const PANELS = {
   ownerview: OwnerViewPanel,
   dag: DagPanel,
   todos: TodoPanel,
-  envs: EnvsPanel,
   agents: AgentsPanel,
   nodes: NodesPanel,
   brain: BrainPanel,

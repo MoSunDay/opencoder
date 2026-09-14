@@ -93,10 +93,7 @@ const FIXTURES = {
   '/api/agents/resources/skills': { resources: [{ name: 's1', kind: 'skill', path: '/a/s1' }] },
   '/api/agents/resources/tools': { resources: [{ name: 't1', kind: 'tool', path: '/a/t1' }] },
   '/api/agents/resources/memory': { resources: [{ name: 'm1', kind: 'memory', path: '/a/m1' }] },
-  // harness/runners.jsx renders entry.settings.workdir and harness/management.jsx
-  // reads data.harnesses.find(name === 'codex').settings — both would throw.
-  '/api/runners': { items: [{ name: 'runner-0', settings: { command: ['codex', 'exec'],
-    workdir: '/srv/work', parent_unit: null, files: {}, envs: { RUST_LOG: 'info' } } }] },
+  // harness/management.jsx reads data.harnesses.find(name === 'codex').settings.
   '/api/harnesses': { harnesses: [{ name: 'codex', revision: 3, settings: { executable: '/usr/bin/codex',
     model: 'gpt-4o-mini', reasoning_effort: 'medium', sandbox_mode: 'read-only',
     approval_policy: 'never', envs: {}, auth_slot: null } }],

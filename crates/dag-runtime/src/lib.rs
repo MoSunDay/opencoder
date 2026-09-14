@@ -11,6 +11,10 @@
 //! - `step_io` (private module) — per-step artifact bookkeeping helpers
 //!   used by the run loop: finished-step artifact writes + state folds, and
 //!   terminal outcomes for steps that never ran.
+//! - [`step_log`] — per-step output mirrored into the NODE store as
+//!   `step_output` events on the run's session (`session_id = run_id`) so a
+//!   remote console can follow a step live; batched by interval/bytes with a
+//!   forced tail flush before the step reports its outcome.
 //! - [`sandbox`] — OCI bundle generation + `runc` driving (pure helpers +
 //!   process wrappers; only used when a wasm step opts into
 //!   `sandbox: runc`).
@@ -19,8 +23,12 @@ pub mod dag_events;
 pub mod exec;
 pub mod runtime;
 pub mod sandbox;
+pub mod step_log;
 
 mod step_io;
+
+#[cfg(test)]
+mod step_log_tests;
 
 pub use dag_events::{
     run_finished_event, run_started_event, step_done_event, step_started_event, RunEventSink,

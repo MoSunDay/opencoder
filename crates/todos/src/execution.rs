@@ -72,6 +72,19 @@ pub async fn execute(
         .mark_session_created()
     };
     session.cancel = Some(cancel);
+    // TODO env takes effect at runtime: `metadata.env_vars` (stamped at
+    // dispatch) rides env_passthrough into every tool subprocess (bash) and
+    // the Codex harness process. Resume keeps harness-restored vars; the
+    // bound TODO env wins on key conflicts (BTreeMap insert overwrites).
+    let todo_env = crate::domain::env_passthrough_from_metadata(&workflow.metadata);
+    if !todo_env.is_empty() {
+        let mut merged: std::collections::BTreeMap<String, String> =
+            session.env_passthrough.drain(..).collect();
+        for (key, value) in todo_env {
+            merged.insert(key, value);
+        }
+        session.env_passthrough = merged.into_iter().collect();
+    }
     // Snapshot the transcript size before this run: on Resume the session
     // carries the previous attempt's messages, and only assistant messages
     // produced by THIS run are valid candidates.

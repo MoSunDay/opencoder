@@ -107,7 +107,11 @@ fn claimed(spec: DagSpec) -> DagClaimedRun {
 }
 
 fn kinds(c: &Captured) -> Vec<String> {
-    c.events.iter().map(|e| e.kind.clone()).collect()
+    c.events
+        .iter()
+        .filter(|e| e.kind != "step_log")
+        .map(|e| e.kind.clone())
+        .collect()
 }
 
 /// Wait until the stub saw at least one status report (the loop posts it
@@ -215,16 +219,24 @@ async fn single_agent_step_completes_and_reports_done() {
     assert_eq!(report.status, "done");
     assert!(report.error.is_none());
 
-    let c = shared.lock().unwrap();
-    assert_eq!(
-        kinds(&c),
-        vec!["run_started", "step_started", "step_done", "run_finished"]
-    );
-    let step_done = &c.events[2];
-    assert_eq!(step_done.step.as_deref(), Some("analyze"));
-    assert_eq!(step_done.payload["ok"], json!(true));
-    assert_eq!(c.events[3].payload["status"], json!("done"));
-    drop(c);
+    // Scope the capture guard: the artifact assertions below await the store.
+    {
+        let c = shared.lock().unwrap();
+        assert_eq!(
+            kinds(&c),
+            vec!["run_started", "step_started", "step_done", "run_finished"]
+        );
+        assert!(c.events.iter().any(|e| e.kind == "step_log"
+            && e.step.as_deref() == Some("analyze")
+            && e.payload["event"] == "text_delta"
+            && e.payload["data"]["text"]
+                .as_str()
+                .is_some_and(|text| text.contains("answer"))));
+        let step_done = c.events.iter().find(|e| e.kind == "step_done").unwrap();
+        assert_eq!(step_done.step.as_deref(), Some("analyze"));
+        assert_eq!(step_done.payload["ok"], json!(true));
+        assert_eq!(c.events.last().unwrap().payload["status"], json!("done"));
+    }
 
     // Artifacts under <workflow_root>/<run_id>/<step>/.
     let dir = f.workflow_root.join(&run_id).join("analyze");
@@ -236,8 +248,115 @@ async fn single_agent_step_completes_and_reports_done() {
     let meta: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(dir.join("meta.json")).unwrap()).unwrap();
     assert_eq!(meta["outcome"], json!("done"));
+
+    // `session.json` is the LIVE pointer, written when the session was
+    // created: it must resolve to a real store session and agree with the
+    // `session_id` meta.json carries for finished steps (LOCKED contract).
+    let session_file = opencoder_dag::artifacts::session_file(&dir);
+    let session: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&session_file).unwrap()).unwrap();
+    let live = live_session_id(&session);
+    // The body is EXACTLY the contract shape: `{"session_id":"<ulid>"}`.
+    assert_eq!(session, opencoder_dag::artifacts::session_value(&live));
+    assert_eq!(meta["session_id"], json!(live));
+    let store: &dyn opencoder_store::Store = f.store.as_ref();
+    assert!(store.get_session(&live).await.unwrap().is_some());
+
     // The step ran on a real (mocked-LLM) session: exactly one chat call.
     assert_eq!(mock.call_count(), 1);
+}
+
+/// The session id carried by a parsed `session.json`.
+fn live_session_id(value: &serde_json::Value) -> String {
+    opencoder_dag::artifacts::parse_session_id(value).expect("session.json carries a session_id")
+}
+
+/// Minimal WASI module printing one line to stdout (the `wat` feature
+/// compiles it at load time — no binary fixture needed).
+const HELLO_WAT: &str = r#"
+(module
+  (import "wasi_snapshot_preview1" "fd_write"
+    (func $fd_write (param i32 i32 i32 i32) (result i32)))
+  (memory (export "memory") 1)
+  (data (i32.const 8) "hello wasm\n")
+  (func (export "_start")
+    (i32.store (i32.const 0) (i32.const 8))
+    (i32.store (i32.const 4) (i32.const 11))
+    (drop (call $fd_write (i32.const 1) (i32.const 0) (i32.const 1) (i32.const 20)))))
+"#;
+
+/// A wasm step has no sub-session, so its output is mirrored onto the RUN's
+/// session as `step_output` events: the tail flush must land before the run
+/// reports its terminal status.
+#[tokio::test]
+async fn wasm_step_output_is_mirrored_to_the_run_session() {
+    let (base, shared) = spawn_stub().await;
+    let tmp = tempfile::tempdir().unwrap();
+    let client: Arc<dyn opencoder_llm::ChatStream> = Arc::new(MockChatClient::new());
+    let f = fixture(&base, &tmp).await;
+    let spec = DagSpec {
+        name: "e2e-wasm".into(),
+        description: None,
+        steps: vec![StepSpec {
+            name: "build".into(),
+            depends_on: vec![],
+            kind: StepKind::Wasm {
+                command: "tool.wat".into(),
+                sandbox: None,
+            },
+            timeout_secs: None,
+        }],
+    };
+    let run = claimed(spec);
+    let run_id = run.run_id.clone();
+    // Stage the module in the run's context root, as a spec upload would.
+    let run_root = f.workflow_root.join(&run_id);
+    std::fs::create_dir_all(&run_root).unwrap();
+    std::fs::write(run_root.join("tool.wat"), HELLO_WAT).unwrap();
+    let (_, cancel_rx) = tokio::sync::watch::channel(false);
+
+    let status = execute_run(
+        RunDeps {
+            uplink: Arc::clone(&f.uplink),
+            exec: ExecDeps {
+                store: Arc::clone(&f.store),
+                client,
+                workdir: f.workdir.clone(),
+                config: f.config.clone(),
+            },
+            workflow_root: f.workflow_root.clone(),
+        },
+        run,
+        cancel_rx,
+    )
+    .await
+    .unwrap();
+    assert_eq!(status, DagRunStatus::Done);
+    assert_eq!(await_status(&shared).await.status, "done");
+
+    let store: &dyn opencoder_store::Store = f.store.as_ref();
+    let rows = store.events_after(&run_id, 0).await.unwrap();
+    let mirrored: Vec<_> = rows
+        .iter()
+        .filter(|row| row.sse_kind.as_deref() == Some("step_output"))
+        .collect();
+    assert_eq!(mirrored.len(), 1, "{rows:?}");
+    assert_eq!(mirrored[0].session_id, run_id);
+    assert_eq!(mirrored[0].payload["step"], json!("build"));
+    assert_eq!(mirrored[0].payload["stream"], json!("stdout"));
+    assert_eq!(mirrored[0].payload["text"], json!("hello wasm\n"));
+    assert_eq!(
+        mirrored[0].payload["at_ms"].as_i64().unwrap(),
+        mirrored[0].ts
+    );
+
+    // Artifacts are unchanged, and a wasm step reports no sub-session.
+    let meta: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(run_root.join("build").join("meta.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(meta["outcome"], json!("done"));
+    assert!(meta["session_id"].is_null());
 }
 
 #[tokio::test]
@@ -563,6 +682,7 @@ async fn cancel_drain_persists_inflight_step_artifacts_and_frames() {
     let order: Vec<(&str, Option<&str>)> = c
         .events
         .iter()
+        .filter(|e| e.kind != "step_log")
         .map(|e| (e.kind.as_str(), e.step.as_deref()))
         .collect();
     assert_eq!(

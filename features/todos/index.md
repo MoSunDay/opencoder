@@ -13,7 +13,10 @@ Commit: b465f440381bd009dc9bd3a8192ad88eab44cede
 - crates/local/src/todos_cmd.rs — validate/run/resume/interrupt
 - crates/web/src/api_todo_runs.rs — 平台 TODO 运行接口
 - crates/web/src/api_todo_templates.rs — TODO 模板接口
-- crates/web/spa/src/todoEditor.jsx 与 src/todo/editor/ — SPA 模板编辑器（表单/画布/JSON 三态，画布可视化依赖）
+- crates/web/spa/src/todoEditor.jsx 与 src/todo/editor/ — SPA 模板编辑器（表单/画布/JSON 三态，画布可视化依赖）；宿主是 todoPanel 的 100% 宽右侧抽屉，非整页替换
+- crates/web/spa/src/todoRunsPanel.jsx 与 src/todo/runCanvas.jsx — 运行视图：调度画布（依赖图 + 每 TODO 实时状态）+ Inspector + 事件流
+- crates/todos/src/execution.rs — TODO env 生效链：dispatch 盖章的 `metadata.env_vars` 并入子会话 `env_passthrough`，经 `ToolContext::extra_env` 抵达 bash/harness 进程
+- crates/todos/tests/env_passthrough.rs — env_vars 抵达 bash 进程的生效证明
 - crates/todos/tests/ — 门禁、中断恢复与降级测试
 
 ## 边界
@@ -23,6 +26,8 @@ Commit: b465f440381bd009dc9bd3a8192ad88eab44cede
 - Store 是权威数据，debug 投影可重建
 - 非 completed 终态退出非零；stdout 仅最终状态 JSON
 - validate 拒绝含 /、..、\0 的 todo id 与依赖环
+- TODO env `env_vars` 键必须匹配环境变量名、值必须字符串；dispatch 盖章与 env 保存双重 fail-fast
+- 节点侧 OpenCoder Env 配置集（/api/envs）已删除，TODO env 是唯一环境体系
 - SPA 画布编辑器的客户端校验是建议性镜像（crates/web/spa/src/todo/editor/specValidate.js），服务端 validate_spec 权威
 
 ## 相关

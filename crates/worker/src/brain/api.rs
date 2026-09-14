@@ -250,7 +250,8 @@ async fn snapshot_locked(worker: &Worker, run: &BrainRun, offset: usize) -> Resu
     let groups: Vec<_> = run.request.plan.iter().flat_map(|p| &p.plan.steps).map(|step| {
         let mut counts = std::collections::BTreeMap::<String,usize>::new();
         for instance in run.instances.values().filter(|i|i.step_id == step.id) { *counts.entry(serde_json::to_value(instance.status).unwrap().as_str().unwrap().into()).or_default() += 1; }
-        json!({"id":step.id,"counts":counts,"sealed":run.expansions.contains_key(&step.id),"total":run.expansions.get(&step.id).map_or(0,Vec::len)})
+        let total: usize = counts.values().sum();
+        json!({"id":step.id,"counts":counts,"sealed":run.expansions.contains_key(&step.id),"total":total,"current_instance":run.flow_current.as_ref().filter(|id|run.instances[*id].step_id == step.id)})
     }).collect();
     let instances: Vec<_> = run.instances.values().skip(offset).take(100).map(|i|json!({"id":i.id,"step_id":i.step_id,"status":i.status,"attempt":i.attempt,"execution":i.execution,"node_id":i.node_id,"reason":i.reason,"item_key":i.item_key})).collect();
     Ok(

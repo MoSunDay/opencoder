@@ -1,14 +1,14 @@
 // agentsConfig.jsx — 菜单页「Agent 配置」：朴素表格列出 agent（名称列检索、
 // 头部新建/生效选择，行内 编辑/启动/删除）。新建 modal（name + 四类资源
-// Select，数据来自各池 GET /api/agents/resources/:cat）；编辑在本页内切换到
-// agentDetail.jsx，不新增路由页。NFS 导出状态块在表下方。
+// Select，数据来自各池 GET /api/agents/resources/:cat）；编辑在右侧抽屉打开
+// agentDetail.jsx。Operator、Harness 与 NFS 分别管理。
 
 import {
-  Button, Form, Input, Modal, Popconfirm, Select, Space, Table, Tabs, Tag, Typography,
+  Button, Drawer, Form, Input, Modal, Popconfirm, Select, Space, Table, Tabs, Tag, Typography,
 } from 'antd';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiDel, apiGet, apiPatch, apiPost } from './api.js';
-import { REF_FIELDS, resolvedNames, resourceOptions } from './agentsItems.js';
+import { REF_FIELDS, resourceOptions } from './agentsItems.js';
 import { AgentDetail } from './agentDetail.jsx';
 import { AgentNfsCard } from './agentNfsCard.jsx';
 import { ExecutionDetail } from './fleet/detail.jsx';
@@ -18,8 +18,7 @@ import { newId, nodeOptions } from './fleet/model.js';
 import { OperatorPanel } from './operators/panel.jsx';
 import { PageShell } from './shell/pageShell.jsx';
 import { HarnessFields, parseEnvs } from './harness/fields.jsx';
-import { AgentHarnessSettings, HarnessManagement } from './harness/management.jsx';
-import { RunnerManagement } from './harness/runners.jsx';
+import { HarnessManagement } from './harness/management.jsx';
 import { useStore } from './store.js';
 
 const { Text } = Typography;
@@ -38,7 +37,7 @@ function CreateAgentModal({ open, resources, onClose, onCreated, onNotice }) {
       REF_FIELDS.forEach(({ field }) => {
         current[field] = values[field] || null;
       });
-      await apiPost('/api/agents', { name: values.name, current, harness: values.harness || 'opencoder' });
+      await apiPost('/api/agents', { name: values.name, current, harness: values.harness });
       msg.success('已创建');
       form.resetFields();
       onCreated(values.name);
@@ -84,9 +83,7 @@ export function AgentsPanel({ onNotice }) {
     ...(identity?.role === 'admin' ? [
       { key: 'operator', label: 'Operator', children: <OperatorPanel onNotice={onNotice} /> },
     ] : []),
-    { key: 'agent-harness', label: 'Agent Harness', children: <AgentHarnessSettings onNotice={onNotice} /> },
     { key: 'harnesses', label: 'Harness 管理', children: <HarnessManagement onNotice={onNotice} /> },
-    { key: 'runners', label: 'Runner 管理', children: <RunnerManagement onNotice={onNotice} /> },
     { key: 'nfs', label: 'NFS 配置', children: <AgentNfsCard onNotice={onNotice} /> },
   ]} /></PageShell>;
 }
@@ -172,18 +169,6 @@ function AgentListPanel({ onNotice }) {
     } finally { setLaunching(false); }
   };
 
-  if (detail) {
-    return (
-      <AgentDetail
-        name={detail}
-        resources={resources}
-        onNotice={onNotice}
-        onChanged={load}
-        onBack={() => setDetail('')}
-      />
-    );
-  }
-
   const columns = [
     {
       title: '名称',
@@ -199,21 +184,6 @@ function AgentListPanel({ onNotice }) {
         </Space>
       ),
     },
-    ...REF_FIELDS.map(({ field, label, cat }) => ({
-      title: label, key: field,
-      render: (_, row) => {
-        const name = row.current?.[field];
-        const resource = resources[cat].find((r) => r.name === name);
-        if (!name) return <Text type="secondary">{row.builtin ? '内置' : '—'}</Text>;
-        return <Space orientation="vertical" size={2}>
-          <Tag color={resource ? 'geekblue' : 'error'}>{name} · {resource ? `v${resource.current}` : '资源缺失'}</Tag>
-          {resource && <Text code>{`${cat}/${name}/v${resource.current}/`}</Text>}
-          <Text type="secondary">{resolvedNames(row.references, field).join('、') || '暂无内容'}</Text>
-        </Space>;
-      },
-    })),
-    { title: 'Harness', dataIndex: 'harness', render: (v) => v === 'codex' ? 'Codex' : 'OpenCoder' },
-    { title: '更新时间', dataIndex: 'updated_at', key: 'updated_at', width: 200, render: (v) => v || '-' },
     {
       title: '操作',
       key: 'ops',
@@ -254,6 +224,22 @@ function AgentListPanel({ onNotice }) {
         scroll={{ x: 'max-content' }}
         locale={{ emptyText: '暂无 agent' }}
       />
+      <Drawer
+        title={detail ? `编辑 Agent · ${detail}` : '编辑 Agent'}
+        placement="right"
+        open={!!detail}
+        onClose={() => setDetail('')}
+        size="75%"
+        styles={{ wrapper: { maxWidth: '100vw' } }}
+        destroyOnHidden
+      >
+        {detail ? <AgentDetail
+          name={detail}
+          resources={resources}
+          onNotice={onNotice}
+          onChanged={load}
+        /> : null}
+      </Drawer>
       <CreateAgentModal
         open={creating}
         resources={resources}

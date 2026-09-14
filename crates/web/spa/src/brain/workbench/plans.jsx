@@ -1,16 +1,17 @@
 import { Alert, Button, Drawer, Empty, Input, Select, Space, Table, Tag, Typography } from 'antd';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { apiGet, apiPost } from '../../api.js';
-import { newId } from '../../fleet/model.js';
-import { newPlan } from './model.js';
+import { useStore } from '../../store.js';
+import { draftKey } from './editor/draft.js';
 import { PlanEditor } from './editor.jsx';
 import { PlanCanvas } from './canvas.jsx';
 export function Plans({ plans, capabilities, reload, onRun }) {
+  const { identity, base } = useStore(); const editorRef = useRef(null);
+  const owner = `${base || location.origin}:${identity?.name || 'anonymous'}`;
   const [editor, setEditor] = useState(null); const [view, setView] = useState(null); const [versions, setVersions] = useState([]); const [diff, setDiff] = useState(null); const [error, setError] = useState(''); const [search, setSearch] = useState('');
   const open = async (p, edit = false) => { try { const version = await apiGet(`/api/brain/plan-defs/${encodeURIComponent(p.id)}/versions/${p.latest_version}`); if (edit) setEditor({ ...version, version: p.latest_version + 1 }); else { setView(version); setDiff(null); const history = await apiGet(`/api/brain/plan-defs/${encodeURIComponent(p.id)}/versions`); setVersions(history.versions); } } catch (e) { setError(e.message); } };
   const stable = async () => { try { await apiPost(`/api/brain/plan-defs/${encodeURIComponent(view.id)}/stable`, { version: view.version }); await reload(); } catch (e) { setError(e.message); } };
-  if (editor) return <PlanEditor key={`${editor.id}:${editor.version}`} version={editor} capabilities={capabilities} onClose={() => setEditor(null)} onSaved={async () => { setEditor(null); await reload(); }} />;
-  return <><Space style={{ marginBottom: 16 }}><Input.Search placeholder="搜索计划名称" value={search} onChange={(e) => setSearch(e.target.value)} /><Button type="primary" onClick={() => setEditor({ id: newId('plan'), version: 1, plan: newPlan() })}>新建计划</Button></Space>
+  return <><Space style={{ marginBottom: 16 }}><Input.Search placeholder="搜索计划名称" value={search} onChange={(e) => setSearch(e.target.value)} /><Button type="primary" onClick={() => setEditor({ creating: true })}>新建计划</Button></Space>
     {error && <Alert type="error" showIcon title={error} />}<Table rowKey="id" pagination={{ pageSize: 10 }} dataSource={plans.filter((p) => `${p.title} ${p.id}`.toLowerCase().includes(search.toLowerCase()))} columns={[
       { title: '计划', dataIndex: 'title', render: (title, p) => <Button type="link" onClick={() => open(p)}>{title}</Button> }, { title: '最新版本', dataIndex: 'latest_version', render: (v) => `v${v}` },
       { title: '稳定版本', dataIndex: 'stable_version', render: (v) => v ? <Tag color="green">v{v} 稳定</Tag> : <Tag>草稿</Tag> },
@@ -20,5 +21,6 @@ export function Plans({ plans, capabilities, reload, onRun }) {
       <Typography.Paragraph>{view.changelog}</Typography.Paragraph><Typography.Paragraph type="secondary">{view.confidence.reason}</Typography.Paragraph><PlanCanvas plan={view.plan} mode="ontology" />
       {diff && <pre className="brain-json">{JSON.stringify(diff, null, 2)}</pre>}
     </>}</Drawer>
+    <Drawer className="brain-plan-drawer" title={editor?.creating ? '新建计划' : '编辑计划新版本'} placement="right" size="100%" open={!!editor} onClose={() => editorRef.current?.close()} destroyOnHidden styles={{ body: { padding: 0 } }}>{editor && <PlanEditor ref={editorRef} key={draftKey(owner, editor.creating ? null : editor)} cacheKey={draftKey(owner, editor.creating ? null : editor)} version={editor.creating ? undefined : editor} capabilities={capabilities} onClose={() => setEditor(null)} onSaved={async () => { setEditor(null); await reload(); }} />}</Drawer>
   </>;
 }

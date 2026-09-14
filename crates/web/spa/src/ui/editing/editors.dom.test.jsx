@@ -39,11 +39,11 @@ it('Prompt read errors cannot become an empty overwrite', async () => {
 it('Harness notification rerenders preserve fields and selected profile', async () => {
   api.apiGet.mockResolvedValue({ harnesses: [{ name: 'codex', revision: 1, settings: { model: 'initial', envs: {} } }], profiles: [] });
   const view = render(<HarnessManagement onNotice={vi.fn()} />);
-  await waitFor(() => expect(screen.getByLabelText('Codex 模型').value).toBe('initial'));
-  fireEvent.change(screen.getByLabelText('Codex 模型'), { target: { value: 'edited' } });
+  await waitFor(() => expect(screen.getByLabelText('模型（--model）').value).toBe('initial'));
+  fireEvent.change(screen.getByLabelText('模型（--model）'), { target: { value: 'edited' } });
   view.rerender(<HarnessManagement onNotice={vi.fn()} />);
   await act(async () => {});
-  expect(screen.getByLabelText('Codex 模型').value).toBe('edited');
+  expect(screen.getByLabelText('模型（--model）').value).toBe('edited');
   expect(api.apiGet).toHaveBeenCalledTimes(1);
 });
 

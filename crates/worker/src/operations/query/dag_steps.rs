@@ -54,16 +54,22 @@ pub(in crate::operations) async fn dag_steps(
             } else {
                 step_output(&root, &execution.id, &step).await?
             };
-            bounded_reply(json!({
+            let session_id = step_session_id(&root, &execution.id, &step, &meta).await?;
+            let mut body = json!({
                 "run_id": execution.id,
                 "execution_status": execution_status,
                 "name": step,
+                "kind": spec_step_kind(definition.as_ref(), &step),
                 "status": outcome_status(&meta),
                 "error": meta["error"],
                 "started_at_ms": meta["started_at_ms"],
                 "finished_at_ms": meta["finished_at_ms"],
                 "output": bounded_value_ref(&output, "output"),
-            }))
+            });
+            if let Some(session_id) = session_id {
+                body["session_id"] = json!(session_id);
+            }
+            bounded_reply(body)
         }
         None => {
             let mut rows = Vec::with_capacity(names.len());
@@ -90,23 +96,9 @@ pub(in crate::operations) async fn dag_steps(
     }
 }
 
-/// Spec step names in declaration order from the definition snapshot (the
-/// same `spec`-aware traversal `runner::views` uses). Pure.
-fn spec_step_names(definition: Option<&Value>) -> Vec<String> {
-    definition
-        .and_then(|d| d.get("spec").unwrap_or(d).get("steps"))
-        .and_then(Value::as_array)
-        .map(|steps| {
-            steps
-                .iter()
-                .filter_map(|step| step["name"].as_str().map(str::to_owned))
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
 /// Project validated metadata; Null means no committed step receipt.
-fn outcome_status(meta: &Value) -> &'static str {
+/// Shared with `dag_step_events`, which reports the same projection.
+pub(in crate::operations) fn outcome_status(meta: &Value) -> &'static str {
     match meta["outcome"].as_str() {
         Some("done") => "done",
         Some("error") => "error",
@@ -130,7 +122,12 @@ fn count_statuses(statuses: &[&'static str]) -> (usize, usize, usize, usize) {
 
 /// Only a missing metadata file means the step has not run. Corruption and
 /// I/O failures remain visible rather than projecting a false pending state.
-async fn step_meta(root: &Path, run_id: &str, name: &str) -> Result<Value> {
+/// Shared with `dag_step_events`, which needs the same receipt.
+pub(in crate::operations) async fn step_meta(
+    root: &Path,
+    run_id: &str,
+    name: &str,
+) -> Result<Value> {
     let dir = opencoder_dag::artifacts::step_dir(root, run_id, name).map_err(anyhow::Error::msg)?;
     match tokio::fs::read(dir.join("meta.json")).await {
         Ok(bytes) => {
@@ -148,6 +145,40 @@ async fn step_meta(root: &Path, run_id: &str, name: &str) -> Result<Value> {
         Err(error) => Err(error.into()),
     }
 }
+/// The step's child session: `session.json` is committed by the runtime as
+/// soon as the session exists, `meta.json.session_id` is the durable
+/// fallback. `None` while an agent step has not created its session yet.
+/// Shared with `dag_step_events`, which picks its event source with it.
+pub(in crate::operations) async fn step_session_id(
+    root: &Path,
+    run_id: &str,
+    name: &str,
+    meta: &Value,
+) -> Result<Option<String>> {
+    let dir = opencoder_dag::artifacts::step_dir(root, run_id, name).map_err(anyhow::Error::msg)?;
+    match tokio::fs::read(dir.join("session.json")).await {
+        // A torn write is transient: fall back to the committed receipt.
+        Ok(bytes) => {
+            if let Ok(value) = serde_json::from_slice::<Value>(&bytes) {
+                if let Some(id) = session_id_field(&value) {
+                    return Ok(Some(id));
+                }
+            }
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error.into()),
+    }
+    Ok(session_id_field(meta))
+}
+
+/// Accept only a well-formed id; anything else means "not known yet".
+fn session_id_field(value: &Value) -> Option<String> {
+    value["session_id"]
+        .as_str()
+        .filter(|id| valid_id(id))
+        .map(str::to_owned)
+}
+
 async fn step_output(root: &Path, run_id: &str, name: &str) -> Result<Value> {
     let dir = opencoder_dag::artifacts::step_dir(root, run_id, name).map_err(anyhow::Error::msg)?;
     Ok(serde_json::from_slice(

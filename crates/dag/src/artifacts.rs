@@ -8,6 +8,7 @@
 //!   <step-slug>/output.json           <- machine-readable step output (optional)
 //!   <step-slug>/output.txt            <- captured stdout / transcript tail
 //!   <step-slug>/meta.json             <- runtime-written step metadata
+//!   <step-slug>/session.json          <- live sub-session pointer (agent steps)
 //! ```
 //!
 //! The SERVER never touches these files: browsers only ever see truncated
@@ -94,13 +95,52 @@ pub fn meta_value(
     finished_at_ms: i64,
     error: Option<&str>,
 ) -> Value {
+    meta_value_with_session(step, outcome, started_at_ms, finished_at_ms, error, None)
+}
+
+/// [`meta_value`] plus the optional `session_id` of the sub-session that
+/// executed the step. The field is additive and OPTIONAL: readers must treat
+/// a missing `session_id` as "this step ran without a session" (older runs and
+/// step kinds that never had one), never as a parse failure.
+pub fn meta_value_with_session(
+    step: &str,
+    outcome: &str,
+    started_at_ms: i64,
+    finished_at_ms: i64,
+    error: Option<&str>,
+    session_id: Option<&str>,
+) -> Value {
     json!({
         "step": step,
         "outcome": outcome,
         "started_at_ms": started_at_ms,
         "finished_at_ms": finished_at_ms,
         "error": error,
+        "session_id": session_id,
     })
+}
+
+/// `<step>/session.json` — the live pointer to a step's sub-session, written
+/// THE MOMENT the session is created so a remote console can attach while the
+/// step is still running (`meta.json` only carries `session_id` once the step
+/// finishes). Path is derived from the validated [`step_dir`].
+pub fn session_file(step_dir: &Path) -> PathBuf {
+    step_dir.join("session.json")
+}
+
+/// `session.json` body: `{"session_id":"<ulid>"}`.
+pub fn session_value(session_id: &str) -> Value {
+    json!({ "session_id": session_id })
+}
+
+/// Inverse of [`session_value`]: the session id in a parsed `session.json`,
+/// or `None` for a malformed/empty body (callers fall back to `meta.json`).
+pub fn parse_session_id(value: &Value) -> Option<String> {
+    value
+        .get("session_id")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
 }
 
 #[cfg(test)]
@@ -170,5 +210,57 @@ mod tests {
         assert_eq!(v["step"], "fetch");
         assert_eq!(v["outcome"], "done");
         assert_eq!(v["error"], serde_json::Value::Null);
+    }
+
+    #[test]
+    fn meta_carries_an_optional_session_id() {
+        let plain = meta_value("fetch", "done", 1, 2, None);
+        assert!(plain["session_id"].is_null());
+        let with = meta_value_with_session("fetch", "done", 1, 2, None, Some("01JSESSION"));
+        assert_eq!(with["session_id"], "01JSESSION");
+        // Every other field is byte-identical: the addition is purely additive.
+        for key in [
+            "step",
+            "outcome",
+            "started_at_ms",
+            "finished_at_ms",
+            "error",
+        ] {
+            assert_eq!(plain[key], with[key], "{key} drifted");
+        }
+    }
+
+    #[test]
+    fn session_file_sits_in_the_validated_step_dir() {
+        let root = Path::new("/workflow");
+        let dir = step_dir(root, "01R", "fetch").unwrap();
+        assert_eq!(
+            session_file(&dir),
+            Path::new("/workflow/01R/fetch/session.json")
+        );
+    }
+
+    #[test]
+    fn session_value_roundtrips_through_parse_session_id() {
+        let value = session_value("01JSESSION");
+        assert_eq!(parse_session_id(&value).as_deref(), Some("01JSESSION"));
+        assert_eq!(parse_session_id(&json!({})), None);
+        assert_eq!(parse_session_id(&json!({"session_id": ""})), None);
+        assert_eq!(parse_session_id(&json!({"session_id": 7})), None);
+        assert_eq!(parse_session_id(&Value::Null), None);
+        // A parsed file body behaves the same as the in-memory value.
+        let parsed: Value = serde_json::from_str(&value.to_string()).unwrap();
+        assert_eq!(parse_session_id(&parsed).as_deref(), Some("01JSESSION"));
+    }
+
+    #[test]
+    fn legacy_meta_json_still_parses_and_reports_no_session() {
+        // A meta.json written before `session_id` existed must stay readable.
+        let legacy: Value = serde_json::from_str(
+            r#"{"step":"fetch","outcome":"done","started_at_ms":1,"finished_at_ms":2,"error":null}"#,
+        )
+        .unwrap();
+        assert_eq!(legacy["step"], "fetch");
+        assert!(legacy.get("session_id").is_none());
     }
 }

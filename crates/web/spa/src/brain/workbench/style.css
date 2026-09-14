@@ -26,5 +26,23 @@
 .brain-input-request { border: 1px solid #ffd591; background: #fffaf0; padding: 16px; border-radius: 8px; }
 .brain-editor-workspace { display: grid; grid-template-columns: minmax(300px, 1fr) 360px; border: 1px solid #dce5ef; margin-top: 12px; border-radius: 10px; overflow: hidden; }
 .execution-view-inline { min-width: 0; }
+.brain-plan-editor { height: 100%; display: flex; flex-direction: column; min-height: 0; }
+.brain-editor-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 20px; border-bottom: 1px solid #e5ebf2; }
+.brain-plan-editor > .ant-tabs { flex: 1; min-height: 0; }
+.brain-plan-editor > .ant-tabs > .ant-tabs-nav { margin: 0; padding: 0 20px; }
+.brain-plan-editor > .ant-tabs > .ant-tabs-content-holder { min-height: 0; overflow: auto; }
+.brain-plan-editor > .ant-tabs > .ant-tabs-content-holder > .ant-tabs-content,
+.brain-plan-editor .ant-tabs-tabpane { height: 100%; }
+.brain-plan-workspace { display: grid; grid-template-columns: 220px minmax(0, 1fr) 360px; height: 100%; min-height: 520px; }
+.brain-plan-workspace > .brain-canvas { height: 100%; }
+.brain-plan-workspace > .brain-inspector { max-height: none; height: 100%; overflow-y: auto; }
+.brain-entity-library { border-right: 1px solid #e1e7ef; padding: 16px; overflow-y: auto; }
+.brain-entity-library > p { color: #64748b; font-size: 12px; }
+.brain-entity-card { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; border: 1px solid #d6e2f0; background: #f7faff; border-radius: 8px; padding: 12px; margin: 12px 0; }
+.brain-entity-card small { color: #64748b; }
+.brain-port { padding: 12px; border: 1px solid #e1e7ef; border-radius: 8px; margin: 8px 0; display: flex; flex-direction: column; gap: 8px; }
+.brain-port .ant-form-item { margin-bottom: 0; }
+.brain-input-ports, .brain-transitions { margin: 18px 0; }
+.brain-plan-contracts { max-width: 760px; padding: 20px; }
 @media (max-width: 1150px) { .brain-workspace { grid-template-columns: 150px minmax(0, 1fr); } .brain-workspace > .brain-inspector { grid-column: 1 / -1; border-left: none; border-top: 1px solid #dce5ef; } }
 @media (max-width: 700px) { .brain-run-header { flex-direction: column; } .brain-workspace { display: block; } .brain-step-list { display: flex; max-height: 120px; overflow: auto; } .brain-step-list button { min-width: 140px; } .brain-canvas { height: 420px; } .brain-editor-workspace { display: block; } .brain-workspace-toolbar { flex-wrap: wrap; } }

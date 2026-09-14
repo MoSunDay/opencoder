@@ -4,13 +4,20 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+/// Persist a config save to `target` (body already pretty-printed).
+pub(crate) fn write_config_save(target: &Path, body: &str) -> std::io::Result<()> {
+    if let Some(parent) = target.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(target, body)
+}
+
 mod agent;
 mod autopilot;
 mod cli;
 mod compaction;
 mod domain;
 pub(crate) mod env;
-pub mod envs;
 mod keymap;
 mod mcp;
 pub(crate) mod mcp_guard;
@@ -28,10 +35,6 @@ pub use autopilot::{ApMode, AutoPilotConfig};
 pub use cli::{CliConfig, InjectionTarget};
 pub use compaction::{CompactionConfig, OutputStreamlineConfig};
 pub use env::{looks_like_env_var, scoped_config_home, ScopedConfigHome};
-pub use envs::{
-    active_env, create_env, delete_env, env_dir, envs_home, list_envs, recapture_env,
-    set_active_env, validate_env_name,
-};
 pub use keymap::KeymapConfig;
 pub use keymap::KEYMAP_INFO;
 pub use mcp::McpServerConfig;
@@ -629,20 +632,8 @@ impl Config {
     /// Pick the file to persist config edits to. Rule (project-first, global
     /// fallback): the first existing candidate that already holds any of the
     /// editable keys; if none, create the project-local `./opencoder.json`.
-    /// While an env is active the candidate chain is cut at the env layer:
-    /// global/XDG candidates are skipped so `/model`-style edits land in the
-    /// env and the global base files stay pristine for deactivation. The
-    /// project-first rule still wins when a project-layer file already
-    /// carries editable keys — such edits keep going to the project file.
     pub fn save_target(working_dir: &Path) -> PathBuf {
-        let active = envs::active_env();
-        let mut candidates = env::config_candidates_with(working_dir, active.as_deref());
-        if active.is_some() {
-            // candidate layout: 2 project entries + 1 env entry; drop the
-            // global/XDG tail (active_env() validated the env dir, so the
-            // env candidate is always present here).
-            candidates.truncate(3);
-        }
+        let candidates = env::config_candidates(working_dir);
         // candidates are ordered project-first (index 0) → global-last, which
         // is exactly the priority we want for picking a save target.
         for p in &candidates {
@@ -658,12 +649,7 @@ impl Config {
         }
         // Nothing editable on disk yet → create the project-local opencoder.json
         // at the working-dir root (more idiomatic than .opencoder/config.json).
-        // With an env active, create the env's config.json instead so the edit
-        // stays env-scoped (deactivation restores the base config verbatim).
-        match active.as_deref().and_then(envs::env_dir) {
-            Some(dir) => dir.join("config.json"),
-            None => working_dir.join("opencoder.json"),
-        }
+        working_dir.join("opencoder.json")
     }
 
     /// Split-routing save (分流): top-level domain keys (`mcp_servers` /
@@ -764,7 +750,7 @@ impl Config {
         let pretty = serde_json::to_string_pretty(&root)?;
         // E-1: a save landing in the active env dir must honor the 0o600
         // owner-only contract (api keys live in these files).
-        envs::write_config_save(target, &pretty)?;
+        write_config_save(target, &pretty)?;
         Ok(target.to_path_buf())
     }
 }

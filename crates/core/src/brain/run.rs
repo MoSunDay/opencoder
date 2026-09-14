@@ -56,8 +56,12 @@ pub struct BrainRun {
     #[serde(default)]
     pub candidate_plan: Option<PlanVersion>,
     pub instances: BTreeMap<String, StepInstance>,
-    /// A sealed entry is the complete finite instance set for a template.
+    /// DAG: complete finite expansion. Action flow: latest ready visit;
+    /// historical visits remain in instances and retain their receipts.
     pub expansions: BTreeMap<String, Vec<String>>,
+    /// Current action visit for a routed plan; earlier visits stay in instances.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub flow_current: Option<String>,
     pub source_cursors: BTreeMap<String, u64>,
     pub actions: BTreeMap<String, ActionReceipt>,
     pub input_requests: BTreeMap<String, InputRequest>,

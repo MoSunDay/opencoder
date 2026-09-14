@@ -102,7 +102,7 @@ impl Events {
                 let rows: Vec<_> = effects
                     .events
                     .iter()
-                    .map(|event| record(session, event))
+                    .map(|event| record(session, event, &self.step))
                     .collect();
                 session.store.as_ref().unwrap().append_events(&rows).await?;
                 if let Some(error) = &next.failed {
@@ -154,7 +154,7 @@ impl Events {
             let rows: Vec<_> = effects
                 .events
                 .iter()
-                .map(|event| record(session, event))
+                .map(|event| record(session, event, &self.step))
                 .collect();
             session.store.as_ref().unwrap().append_events(&rows).await?;
         }
@@ -162,13 +162,32 @@ impl Events {
     }
 }
 
-fn record(session: &SessionState, event: &SessionEvent) -> SessionEventRecord {
+/// One `session_events` row for a decoded runner event. The payload is
+/// always attributed with the DAG step name (additive) so a consumer pooling
+/// rows from several sessions can filter a single step's stream — the same
+/// `payload.step` key the `runner_stage` row above already carries. The
+/// `messages` table has no such column, so step attribution lives on
+/// `session_events` rows only.
+fn record(session: &SessionState, event: &SessionEvent, step: &str) -> SessionEventRecord {
     SessionEventRecord {
         session_id: session.id.clone(),
         kind: event.coarse_kind(),
-        payload: event.sse_data(),
+        payload: with_step(event.sse_data(), step),
         ts: now_ms(),
         seq: None,
         sse_kind: Some(event.sse_kind().into()),
+    }
+}
+
+/// Merge `"step"` into an event payload. `sse_data()` is always an object;
+/// anything else is passed through untouched rather than reshaped (a payload
+/// shape change would break SSE replay for consumers).
+fn with_step(payload: Value, step: &str) -> Value {
+    match payload {
+        Value::Object(mut map) => {
+            map.insert("step".into(), Value::String(step.to_string()));
+            Value::Object(map)
+        }
+        other => other,
     }
 }

@@ -49,7 +49,6 @@ fn draw(
         None, // file_menu
         None, // model_menu
         mcp_menu,
-        None, // envs_menu
         cli_menu,
         None, // skill_toggle_menu
         None, // ap_menu

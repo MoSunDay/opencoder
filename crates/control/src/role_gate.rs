@@ -92,6 +92,7 @@ mod tests {
             ("POST", "/api/executions"),
             ("PUT", "/api/harnesses/opencode"),
             ("DELETE", "/api/users/alice"),
+            ("GET", "/api/dag/runs/dag-1/steps/fetch/events"),
         ] {
             assert!(allow(Role::Admin, method, path), "{method} {path}");
         }
@@ -111,6 +112,13 @@ mod tests {
             // Writes outside the execution surface stay admin-only.
             assert!(!allow(role, "GET", "/api/agents"));
             assert!(!allow(role, "GET", "/api/sessions/agent-x/events"));
+            // The compat DAG surface (including the step event stream) stays
+            // admin-only: it is not part of the execution read profile.
+            assert!(!allow(
+                role,
+                "GET",
+                "/api/dag/runs/dag-1/steps/fetch/events"
+            ));
             assert!(!allow(role, "PUT", "/api/nodes/n1/scheduling"));
             assert!(!allow(role, "DELETE", "/api/nodes/n1"));
             assert!(!allow(role, "POST", "/api/nodes/n1/maintenance"));

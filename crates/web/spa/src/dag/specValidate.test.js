@@ -58,7 +58,7 @@ describe('validateSpec', () => {
   it('validates step kind payloads per type', () => {
     const mk = (kind) => ({ name: 'a', kind });
     expect(validateSpec({ name: 'x', steps: [mk({ type: 'shell', cmd: 'ls' })] })[0]).toContain(
-      'kind.type 必须是 agent | wasm | runner',
+      'kind.type 必须是 agent | wasm',
     );
     expect(validateSpec({ name: 'x', steps: [mk({ type: 'agent' })] })[0]).toContain('kind.prompt');
     expect(validateSpec({ name: 'x', steps: [mk({ type: 'wasm' })] })[0]).toContain('kind.command');
@@ -67,7 +67,7 @@ describe('validateSpec', () => {
     ).toContain('sandbox');
     // the removed python kind falls into the unknown-type branch
     expect(validateSpec({ name: 'x', steps: [mk({ type: 'python', code: 'x' })] })[0]).toContain(
-      'kind.type 必须是 agent | wasm | runner',
+      'kind.type 必须是 agent | wasm',
     );
     expect(validateSpec({ name: 'x', steps: [{ name: 'a', kind: null }] })[0]).toContain('kind 必须是对象');
   });
@@ -156,11 +156,7 @@ describe('problemsFromApiError', () => {
   });
 });
 
-it('validates registered runner bindings', () => {
+it('rejects Runner even with valid registered bindings', () => {
   const spec = { name: 'business', steps: [{ name: 'workflow', kind: { type: 'runner', runner: 'eval-diagnose', agent: 'eval-diagnose' } }] };
-  expect(validateSpec(spec)).toEqual([]);
-  spec.steps[0].kind.runner = '../bin';
-  expect(validateSpec(spec).join(' ')).toContain('kind.runner');
-  spec.steps[0].kind.agent = '';
-  expect(validateSpec(spec).join(' ')).toContain('kind.agent');
+  expect(validateSpec(spec)).toEqual(['steps[0].kind.type 必须是 agent | wasm']);
 });

@@ -38,6 +38,14 @@ pub async fn execute_agent_step(
             return errored(format!("create session: {e:#}"));
         }
     };
+    // Publish the live-session pointer immediately so a remote console can
+    // attach while the step runs (meta.json's session_id lands on finish).
+    crate::step_io::write_session_artifact(
+        &ctx.workflow_root,
+        &ctx.run_id,
+        &ctx.step.name,
+        &session_id,
+    );
     info!(run_id = %ctx.run_id, step = %ctx.step.name, %session_id, "dag agent step executing");
 
     // One token doubles as replay guard AND run-loop hard cancel (web parity:
@@ -77,11 +85,15 @@ pub async fn execute_agent_step(
     let on_event = {
         let sink = sink;
         let transcript = Arc::clone(&transcript);
+        let log = ctx.log.clone();
         move |ev: SessionEvent| {
             let _ = sink.push(&ev);
             if let SessionEvent::TextDelta(text) = &ev {
                 if let Ok(mut tail) = transcript.lock() {
                     push_tail(&mut tail, text, MAX_TRANSCRIPT_TAIL);
+                }
+                if let Some(log) = &log {
+                    log.text_delta(text);
                 }
             }
         }
@@ -94,7 +106,20 @@ pub async fn execute_agent_step(
         warn!(run_id = %ctx.run_id, step = %ctx.step.name, error = %e, "local event flush failed");
     }
 
-    let text = transcript.lock().map(|t| t.clone()).unwrap_or_default();
+    // Providers normally stream `TextDelta` frames, but a valid provider (and
+    // the deterministic test client) may deliver only a completed message.
+    // Recover that persisted assistant text so structured output and the
+    // run-scoped step log do not depend on streaming granularity.
+    let mut text = transcript.lock().map(|t| t.clone()).unwrap_or_default();
+    if text.trim().is_empty() {
+        if let Some(completed) = opencoder_session::handoff::last_assistant_text(&session.messages)
+        {
+            text = completed;
+            if let Some(log) = &ctx.log {
+                log.text_delta(&text);
+            }
+        }
+    }
     let output_json = extract_output_json_from(&text);
     let (outcome, error) = terminal_step(cancel.is_cancelled(), result.as_ref().err());
     // Successful step: persist the declared how.md append (warn-only — a

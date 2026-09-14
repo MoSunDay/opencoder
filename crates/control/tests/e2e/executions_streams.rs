@@ -94,6 +94,10 @@ async fn incremental_tail_emits_late_rows_and_closes_on_finished() {
         .unwrap();
     assert_eq!(status, 200);
     assert_eq!(sse_ids(&text), vec![1, 2, 3, 4], "{text}");
+    assert!(
+        text.ends_with("event: stream_end\ndata: {\"finished\":true}\n\n"),
+        "{text}"
+    );
 }
 
 #[tokio::test]
@@ -156,6 +160,7 @@ async fn mid_stream_node_error_emits_an_error_frame_and_closes() {
     assert!(text.contains(r#"data: {"error":"boom"}"#), "{text}");
     // The replayed row stays framed; the error frame carries no id.
     assert_eq!(sse_ids(&text), vec![1], "{text}");
+    assert!(!text.contains("stream_end"), "{text}");
 }
 
 #[tokio::test]

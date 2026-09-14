@@ -88,6 +88,9 @@ pub async fn create_env(State(state): State<Arc<AppState>>, Json(body): Json<Val
         "tools": body.get("tools").cloned().unwrap_or(json!([])),
         "env_vars": body.get("env_vars").cloned().unwrap_or(json!({})),
     });
+    if let Err(e) = opencoder_todos::domain::env_vars_from_context(&context) {
+        return error_400(format!("{e:#}"));
+    }
     let path = match env_context_path(&root, name) {
         Ok(p) => p,
         Err(e) => return error_400(format!("{e:#}")),
@@ -150,6 +153,9 @@ pub async fn update_env(
         if let Some(v) = body.get(key) {
             ctx[key] = v.clone();
         }
+    }
+    if let Err(e) = opencoder_todos::domain::env_vars_from_context(&ctx) {
+        return error_400(format!("{e:#}"));
     }
     if let Some(list) = ctx.get("tools").and_then(Value::as_array) {
         for item in list {

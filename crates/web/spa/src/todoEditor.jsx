@@ -6,6 +6,8 @@
 // spec state 是唯一草稿事实来源，三模式进出时互相搬运（时序镜像
 // dag/defEditor.jsx）；画布坐标是会话状态（positions），不入 spec。
 // Env 绑定（env.json）与 context 一起保存（绑定值变化才发 PUT）。
+// 本组件渲染在 todoPanel 的全宽 Drawer 内，不再自带 Card 外壳：标题由抽屉
+// 提供，这里只保留 模式切换 + 返回/保存 工具条。
 
 import { Button, Card, Col, Divider, Form, Input, InputNumber, Row, Segmented, Select, Space, Spin, Typography } from 'antd';
 import { useEffect, useMemo, useState } from 'react';
@@ -251,29 +253,27 @@ function TodoEditorSession({ templateName, version, onNotice, onClose }) {
   };
 
   if (loading) {
-    return <Card><Spin /></Card>;
+    return <div style={{ padding: 24, textAlign: 'center' }}><Spin /></div>;
   }
 
   return (
-    <Card
-      title={`编辑模板 ${templateName} · ${version}`}
-      extra={(
+    <div className="todo-editor">
+      <div className="todo-editor-toolbar">
+        <Segmented
+          disabled={saving}
+          value={mode}
+          onChange={switchMode}
+          options={[
+            { value: 'form', label: '表单' },
+            { value: 'canvas', label: '画布' },
+            { value: 'json', label: 'JSON 源码' },
+          ]}
+        />
         <Space>
-          <Segmented
-            disabled={saving}
-            value={mode}
-            onChange={switchMode}
-            options={[
-              { value: 'form', label: '表单' },
-              { value: 'canvas', label: '画布' },
-              { value: 'json', label: 'JSON 源码' },
-            ]}
-          />
           <Button onClick={onClose} disabled={saving}>返回</Button>
           <Button type="primary" loading={saving} disabled={!spec} onClick={save}>保存</Button>
         </Space>
-      )}
-    >
+      </div>
       {mode === 'form' ? (
         <Form form={form} layout="vertical" disabled={saving}>
           <Row gutter={12}>
@@ -408,7 +408,7 @@ function TodoEditorSession({ templateName, version, onNotice, onClose }) {
         />
         <Text type="secondary">随「保存」一并提交</Text>
       </Space>
-    </Card>
+    </div>
   );
 }
 

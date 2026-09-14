@@ -1,15 +1,15 @@
-Commit: b465f440381bd009dc9bd3a8192ad88eab44cede
+Commit: 2686d40a267436adb555041fc8154fc9bb454574
 
 # dag 模块
 
 零 IO 的 DAG 纯域 + 线协议，server 与节点两端唯一契约。
 
 ## 关键路径
-- `src/spec.rs` — `DagSpec`/`validate`/`StepKind::{Agent,Wasm,Runner}`；python 步骤已下线，`decode_spec` 专用报错不静默迁移。
+- `src/spec.rs` — `DagSpec`/`validate`/`StepKind::{Agent,Wasm}`；python 与 Runner 步骤已下线，`decode_spec` 对旧 Runner 定义显式报错，不静默迁移。
 - `src/domain.rs` — `ready_steps`/`run_outcome`/`render_context` 运行态推进。
 - `src/transitions.rs` — 状态机纯函数，终态冻结。
-- `src/artifacts.rs` — `/workflow/<run_id>/<step>/` 工件契约；run id 拒绝 `_modules`。
-- `src/protocol.rs` — 线协议 DTO LOCKED，server 只存转不执行。
+- `src/artifacts.rs` — `/workflow/<run_id>/<step>/` 工件契约；run id 拒绝 `_modules`；`session_file`/`session_value`/`parse_session_id` 定义 `session.json`（`{"session_id":"<ulid>"}`，步骤运行中的实时指针），`meta_value_with_session` 让 `meta.json` 携带可选 `session_id`（旧文件仍可解析）。
+- `src/protocol.rs` — 线协议 DTO LOCKED，server 只存转不执行；`step_log` 事件承载步骤的增量日志。
 - 持久化在 store 层：`dag_defs`/`dag_runs`/`dag_events`（schema v16），本 crate 不触 SQL。
 
 ## 边界

@@ -26,10 +26,6 @@ pub use agent::{
     build_delegation_hidden, builtin_agents, effective_default_agent, resolve_agent,
     strip_build_delegation, tool_preamble, Agent, AgentKind, AgentMode, ToolFilter,
 };
-pub use config::envs::{
-    active_env, create_env, delete_env, env_dir, envs_home, list_envs, recapture_env,
-    set_active_env, set_active_env_checked, validate_env_name,
-};
 pub use config::validate_team_turn_budgets;
 pub use config::{
     looks_like_env_var, scoped_config_home, AgentDefaults, ApMode, AutoPilotConfig, CliConfig,

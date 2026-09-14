@@ -17,7 +17,7 @@ pub async fn all(node: &opencoder_worker::Worker, root: &Path) {
         let spec = match kind {
             ExecutionKind::Project => snapshot,
             ExecutionKind::Team => {
-                json!({"name":"cancel-team","captain":"captain","members":[{"id":"captain","agent":"act","role":"coordinate"}]})
+                json!({"name":"cancel-team","captain":"act","members":[{"agent":"act"}]})
             }
             ExecutionKind::Dag => {
                 json!({"name":"cancel-dag","steps":[{"name":"wait","kind":{"type":"agent","prompt":"MATRIX_HANG"}}]})

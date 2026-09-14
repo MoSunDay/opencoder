@@ -1,4 +1,4 @@
-Commit: e50ffc433bca866fd17bd571a74f1bdf17705dea
+Commit: 104c6b26 + 2280fb3c (merge working-tree)
 
 # control 模块
 
@@ -14,19 +14,21 @@ Commit: e50ffc433bca866fd17bd571a74f1bdf17705dea
 - `crates/control/src/api/compat/` — 旧 Chat/DAG/TODO/Project 兼容路由
 - `crates/control/src/api/settings/` — harness/codex 定义；registered 管 profile/runner
 - `crates/control/src/routes.rs` — /api/harnesses/codex/profiles、/api/runners
-- `crates/control/src/resource_scope.rs` — /api/agents* 绑定 Server 资源根
-- `crates/control/src/role_gate.rs` — 角色权限矩阵纯函数；layer 顺序 auth → role_gate → resource_scope
+- `crates/control/src/resource_scope.rs` — /api/agents* 绑定 Server 资源根；/api/dag/wasm* 复用共享中间件 `api_dag_wasm_nfs::configured_dag_wasm`
+- `crates/control/src/role_gate.rs` — 角色权限矩阵纯函数；layer 顺序 auth → role_gate → resource_scope；/api/dag/wasm* 非 admin 只读
 - `crates/control/src/api/users.rs` — /api/me、/api/users CRUD；token 一次性明文、自删/末位 admin 保护
 - `crates/core/src/fleet/protocol.rs` — PROTOCOL_VERSION=9；ExecutionIndex 五字段
 - `crates/control/tests/e2e/` — e2e：真实 build_app + 脚本化 WS 节点
 - `crates/control/tests/resource_root.rs` — 资源根隔离验证
 
+- `src/api/brain_playbook_dispatch.rs` — 剧本平台派发：批次按依赖层背靠背建 execution（id `{prefix}-pbk-{request_id}-{step}`，key 原样不截断、request_id ≤26 字符否则 400；`PlaybookGate` 同 request_id 异派发内容 409、容量满 503）、`fleet.definition("capability_target", id)` 解析 Brain 目标（内联 `PlaybookRoute` 压过绑定；占位步骤空 situation 400）、`trigger_scan` 消息相似度触发（入站 + 全部 match_text 单批 embed）；路由 `GET/POST /api/brain/playbooks*`。
 ## 边界
 
 - server 二进制不依赖 session/worker/team/project runtime。
 - 执行明细向归属 Node 实时查询，全局索引不存运行内容。Brain 根明细同样属于 Node，计划版本与跨运行资源占用属于 control。
 - Brain 管理动作派发前探测目标节点资源摘要，原生受理复核快照；不确定受理重发同 ID。
 - system 团队执行已退役；跨节点维护走 POST /api/nodes/:id/maintenance。
+- team 定义成员=agent 名（唯一、captain ∈ members）；resolve 时经 `GET /api/brain/agents` 同源聚合把成员能力 summary 固化进 pinned definition，库存定义不落 capabilities；成员名/captain 在 validate 时就地 trim 归一（与 bind 侧对称，padded 提交不再固化空快照）。
 - 认证开启时 seed token 恒等 admin；换启动 token 重启会把表内 `admin` 行 digest 重指新 token（轮换即吊销旧 seed 凭证）。非 admin 仅读 + operator 提交/命令（operator 为宿主机直跑通道）；无 Identity 视为 admin（本地模式）。
 - 节点删除只移除 FleetStore 的 `fleet_nodes` 注册行；在线连接返回 409，离线注册删除后执行索引和节点本地任务数据仍由各自生命周期管理。
 

@@ -13,9 +13,7 @@ pub fn env_vars_from_context(context: &serde_json::Value) -> Result<Vec<(String,
     let Some(map) = context.get("env_vars").filter(|v| !v.is_null()) else {
         return Ok(Vec::new());
     };
-    let entries = map
-        .as_object()
-        .with_context(|| "env_vars 必须是对象")?;
+    let entries = map.as_object().with_context(|| "env_vars 必须是对象")?;
     let mut pairs = Vec::with_capacity(entries.len());
     for (key, value) in entries {
         let value = value
@@ -436,7 +434,13 @@ mod tests {
             "env_vars": {"Z_LAST": "2", "A_FIRST": "1"}
         }))
         .unwrap();
-        assert_eq!(pairs, vec![("A_FIRST".into(), "1".into()), ("Z_LAST".into(), "2".into())]);
+        assert_eq!(
+            pairs,
+            vec![
+                ("A_FIRST".into(), "1".into()),
+                ("Z_LAST".into(), "2".into())
+            ]
+        );
         assert_eq!(
             env_vars_metadata(pairs),
             serde_json::json!({"A_FIRST": "1", "Z_LAST": "2"})
@@ -455,7 +459,10 @@ mod tests {
         let pairs = env_passthrough_from_metadata(&serde_json::json!({
             "env_vars": {"B": "2", "A": "1", "BAD": 9}
         }));
-        assert_eq!(pairs, vec![("A".into(), "1".into()), ("B".into(), "2".into())]);
+        assert_eq!(
+            pairs,
+            vec![("A".into(), "1".into()), ("B".into(), "2".into())]
+        );
         assert!(env_passthrough_from_metadata(&serde_json::Value::Null).is_empty());
     }
 

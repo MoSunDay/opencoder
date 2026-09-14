@@ -1,3 +1,5 @@
+mod message_projection;
+
 use anyhow::Result;
 use async_trait::async_trait;
 
@@ -9,8 +11,8 @@ use crate::types::{
 };
 use crate::{
     BrainCapabilityDetail, BrainCapabilityRecord, BrainEngInputRecord, BrainPlanRecord,
-    BrainVectorHit, BrainVectorWrite, TeamTopicRunRecord, TodoEventPage, TodoEventRecord,
-    TodoItemRecord, TodoWorkflowDetail, TodoWorkflowRecord, TodoWorkflowSummary,
+    BrainPlaybookRecord, BrainVectorHit, BrainVectorWrite, TeamTopicRunRecord, TodoEventPage,
+    TodoEventRecord, TodoItemRecord, TodoWorkflowDetail, TodoWorkflowRecord, TodoWorkflowSummary,
 };
 
 /// Storage abstraction — the single seam that lets us swap libsql for another
@@ -84,19 +86,7 @@ pub trait Store: Send + Sync {
     /// not override it; the primary backend reads the real columns.
     async fn load_message_rows(&self, session_id: &str) -> Result<Vec<MessageRow>> {
         let msgs = self.load_messages(session_id).await?;
-        Ok(msgs
-            .into_iter()
-            .enumerate()
-            .map(|(i, m)| MessageRow {
-                seq: i as i64 + 1,
-                role: serde_json::to_value(m.role)
-                    .ok()
-                    .and_then(|v| v.as_str().map(str::to_string))
-                    .unwrap_or_else(|| "user".into()),
-                blocks: serde_json::to_value(&m.blocks).unwrap_or(serde_json::Value::Null),
-                created_at: m.created_at,
-            })
-            .collect())
+        Ok(message_projection::message_rows(msgs))
     }
     /// Read raw message JSON in bounded SQL slices. Implementations must not
     /// materialize a whole oversized row before applying `raw_budget`.
@@ -457,6 +447,29 @@ pub trait Store: Send + Sync {
     /// cache probe (`None` when nothing was planned for this digest yet).
     async fn latest_brain_plan_for(&self, _digest: &str) -> Result<Option<BrainPlanRecord>> {
         anyhow::bail!("brain plans are not supported by {}", self.backend_name())
+    }
+    /// Upsert one playbook keyed by id (`created_at` survives conflicts).
+    async fn save_brain_playbook(&self, _record: &BrainPlaybookRecord) -> Result<()> {
+        anyhow::bail!("playbooks are not supported by {}", self.backend_name())
+    }
+    /// Fetch one playbook by id (`None` if absent).
+    async fn get_brain_playbook(&self, _id: &str) -> Result<Option<BrainPlaybookRecord>> {
+        anyhow::bail!("playbooks are not supported by {}", self.backend_name())
+    }
+    /// Every playbook, newest first (created_at DESC).
+    async fn list_brain_playbooks(&self) -> Result<Vec<BrainPlaybookRecord>> {
+        anyhow::bail!("playbooks are not supported by {}", self.backend_name())
+    }
+    /// Delete one playbook; `Ok(true)` when a row was removed.
+    async fn delete_brain_playbook(&self, _id: &str) -> Result<bool> {
+        anyhow::bail!("playbooks are not supported by {}", self.backend_name())
+    }
+    /// Newest dynamic playbook for a digest — the plan-cache probe.
+    async fn latest_brain_playbook_for(
+        &self,
+        _digest: &str,
+    ) -> Result<Option<BrainPlaybookRecord>> {
+        anyhow::bail!("playbooks are not supported by {}", self.backend_name())
     }
 
     /// Register (or re-register) a worker node by its unique `name`. A new

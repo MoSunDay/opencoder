@@ -7,8 +7,8 @@ use anyhow::Result;
 use async_trait::async_trait;
 
 use super::{
-    LibsqlStore, brain, brain_playbooks, dag, dag_events, events, inputs, messages, node_tasks,
-    nodes, sessions, subagent_tasks, team_runs, todos, users,
+    brain, brain_playbooks, dag, dag_events, events, inputs, messages, node_tasks, nodes, sessions,
+    subagent_tasks, team_runs, todos, users, LibsqlStore,
 };
 use crate::store::Store;
 use crate::types::{

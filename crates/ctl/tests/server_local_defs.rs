@@ -14,14 +14,13 @@ use serde_json::Value;
 pub const TOKEN: &str = "ctl-server-local-token";
 
 /// Legal TeamDefinition (shape copied from control e2e `teams_dag_defs.rs`).
-pub const TEAM: &str = r#"{"name":"t1","captain":"m1","members":[
-    {"id":"m1","agent":"act","role":"captain"},
-    {"id":"m2","agent":"plan","role":"advisor"}]}"#;
+pub const TEAM: &str = r#"{"name":"t1","captain":"act","members":[
+    {"agent":"act"},
+    {"agent":"plan"}]}"#;
 
 /// Second team, used to prove the `raw` escape hatch is equivalent to
 /// `teams put` (upsert keyed by name, distinct name → second row).
-pub const TEAM_RAW: &str =
-    r#"{"name":"t2","captain":"m1","members":[{"id":"m1","agent":"act","role":"solo"}]}"#;
+pub const TEAM_RAW: &str = r#"{"name":"t2","captain":"act","members":[{"agent":"act"}]}"#;
 
 /// Legal DagSpec (bare spec, no `{"spec":…}` wrapper) from the same file.
 pub const DAG_SPEC: &str = r#"{"name":"etl-ctl","steps":[

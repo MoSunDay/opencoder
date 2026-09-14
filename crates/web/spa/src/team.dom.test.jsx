@@ -40,18 +40,14 @@ const nodesFixture = {
   ],
 };
 
-const agentsFixture = { agents: [{ name: 'act' }, { name: 'explore' }] };
+const agentsFixture = { agents: [
+  { agent: 'act', capabilities: [{ id: 'c1', summary: '执行任务' }] },
+  { agent: 'explore', capabilities: [] },
+] };
 
 const teamsFixture = {
   teams: [
-    {
-      name: 't1',
-      captain: 'm1',
-      members: [
-        { id: 'm1', agent: 'act', role: '协调任务并汇总结果', node_id: 'n1', online: true },
-        { id: 'm2', agent: 'review', role: '代码评审' },
-      ],
-    },
+    { name: 't1', captain: 'act', members: [{ agent: 'act' }, { agent: 'review' }] },
   ],
 };
 
@@ -94,7 +90,7 @@ const installApi = () => {
     if (p.startsWith('/api/nodes')) {
       return Promise.resolve(nodesFixture);
     }
-    if (p.startsWith('/api/agents')) {
+    if (p.startsWith('/api/brain/agents')) {
       return Promise.resolve(agentsFixture);
     }
     if (p.startsWith('/api/executions?')) {
@@ -158,39 +154,38 @@ const pickSelectOption = async (selectEl, label) => {
 };
 
 describe('TeamPanel', () => {
-  it('renders the team row with captain, member digest and both row actions', async () => {
+  it('renders the team row with captain, member agent tags and both row actions', async () => {
     render(<TeamPanel onNotice={() => {}} />);
     expect(await screen.findByText('t1')).toBeTruthy();
     expect(screen.getByText('团队组队')).toBeTruthy(); // page header via PAGE_META
-    expect(screen.getByText('m1')).toBeTruthy(); // 队长 column
-    expect(screen.getByText('act')).toBeTruthy(); // member agent Tag
-    expect(screen.getByText(/协调任务并汇总结果 · 在线/)).toBeTruthy(); // digest + member node state
-    expect(screen.getByText('review')).toBeTruthy();
-    expect(screen.getByText('代码评审')).toBeTruthy();
+    expect(screen.getAllByText('act')).toHaveLength(2); // 队长 cell（agent 名）+ member Tag
+    expect(screen.getByText('review')).toBeTruthy(); // member agent Tag
+    expect(screen.queryByText(/协调任务并汇总结果/)).toBeNull(); // 职责由服务端固化，不再随成员下发
     expect(findButton('编辑')).toBeTruthy();
     expect(findButton('启动团队')).toBeTruthy();
     expect(findButton('创建团队')).toBeTruthy();
     expect(findButton('刷新')).toBeTruthy();
   });
 
-  it('opens the create-team modal with the member-agent picker fed by /api/agents', async () => {
+  it('opens the create-team modal with the agent pickers fed by /api/brain/agents', async () => {
     render(<TeamPanel onNotice={() => {}} />);
     fireEvent.click(await screen.findByText('创建团队'));
-    expect(await screen.findByText('团队成员与职责')).toBeTruthy();
+    expect(await screen.findByText('团队成员')).toBeTruthy();
     expect(screen.getByLabelText('团队名称')).toBeTruthy();
-    expect(screen.getByLabelText('队长的成员 ID')).toBeTruthy();
-    expect(screen.getByPlaceholderText('成员 ID')).toBeTruthy(); // default member row
-    fireEvent.mouseDown(screen.getByRole('combobox')); // the member's Agent picker
+    expect(screen.getByLabelText('队长')).toBeTruthy();
+    expect(screen.getByLabelText('队员')).toBeTruthy(); // multiple Select
+    expect(screen.queryByPlaceholderText('成员 ID')).toBeNull(); // 成员身份即 agent，不再手填 ID
+    await act(async () => {
+      fireEvent.mouseDown(screen.getByLabelText('队长').closest('.ant-select'));
+    });
     // scope to the dropdown options (antd portals them outside the modal and
     // jsdom may render holders twice, so getByText is ambiguous here)
     await waitFor(() => {
       const labels = [...document.querySelectorAll('.ant-select-item-option')]
         .map((o) => o.getAttribute('title') || o.textContent);
-      expect(labels).toEqual(expect.arrayContaining(['act', 'explore'])); // from /api/agents
+      expect(labels).toEqual(expect.arrayContaining(['act', 'explore'])); // from /api/brain/agents
     });
-    expect(apiGetMock).toHaveBeenCalledWith('/api/agents');
-    fireEvent.click(screen.getByText('添加成员'));
-    expect(screen.getAllByPlaceholderText('成员 ID')).toHaveLength(2); // the add action grows the form
+    expect(apiGetMock).toHaveBeenCalledWith('/api/brain/agents');
     expect(findButton('保存团队')).toBeTruthy();
   });
 

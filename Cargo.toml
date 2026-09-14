@@ -13,6 +13,7 @@ members = [
     "crates/project",
     "crates/node",
     "crates/dag",
+    "crates/dag-wasm",
     "crates/dag-runtime",
     "crates/server",
     "crates/control",
@@ -67,6 +68,7 @@ opencoder-todos  = { path = "crates/todos" }
 opencoder-project = { path = "crates/project" }
 opencoder-node   = { path = "crates/node" }
 opencoder-dag    = { path = "crates/dag" }
+opencoder-dag-wasm = { path = "crates/dag-wasm" }
 opencoder-dag-runtime = { path = "crates/dag-runtime" }
 opencoder-server = { path = "crates/server" }
 opencoder-control = { path = "crates/control" }

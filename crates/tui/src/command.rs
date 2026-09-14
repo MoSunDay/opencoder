@@ -790,7 +790,6 @@ mod tests {
         assert_eq!(dispatch("/mcp"), Some(SlashAction::Mcp));
     }
 
-
     fn key(code: KeyCode, mods: KeyModifiers) -> KeyEvent {
         KeyEvent::new(code, mods)
     }

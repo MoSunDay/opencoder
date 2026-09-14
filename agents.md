@@ -17,6 +17,7 @@ Rust 原生编码代理 workspace：`opencoder`（本地 CLI/TUI）、`opencode-
 - [agents/local](agents/local/index.md) — 本地 CLI 前端：参数解析、headless、tmux 会话入口。
 - [agents/web](agents/web/index.md) — axum HTTP + SSE 会话管理 + 内嵌 SPA。
 - [agents/dag](agents/dag/index.md) — DAG 纯域 + 线协议（DTO LOCKED）。
+- [agents/dag-wasm](agents/dag-wasm/index.md) — DAG wasm 模块版本池：发布、NFS 导出、节点冻结分发。
 - [agents/dag-runtime](agents/dag-runtime/index.md) — 节点侧 DAG 调度执行；server 不链接。
 - [agents/todos](agents/todos/index.md) — 持久化 TODO 工作流：每 TODO 独立 Primary Session。
 - [agents/project](agents/project/index.md) — 项目跟踪：goal→milestone→todo，`ProjectStore` 接缝。

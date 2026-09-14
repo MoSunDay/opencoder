@@ -669,7 +669,6 @@ mod app_loop_mcp;
 
 pub(crate) use app_loop_mcp::handle_mcp_outcome;
 
-
 #[path = "app_loop_cli.rs"]
 mod app_loop_cli;
 

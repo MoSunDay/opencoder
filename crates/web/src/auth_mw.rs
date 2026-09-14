@@ -68,15 +68,17 @@ fn token_eq(expected: &str, actual: &str) -> bool {
 
 /// Resolve a bearer credential to an identity, without logging secrets.
 /// Owns its inputs so the returned future is `Send` under any caller.
-async fn identify(
-    seed: Option<String>,
-    lookup: Arc<dyn Store>,
-    token: String,
-) -> Option<Identity> {
-    if seed.as_deref().is_some_and(|expected| token_eq(expected, &token)) {
+async fn identify(seed: Option<String>, lookup: Arc<dyn Store>, token: String) -> Option<Identity> {
+    if seed
+        .as_deref()
+        .is_some_and(|expected| token_eq(expected, &token))
+    {
         return Some(Identity::admin("admin"));
     }
-    let user = lookup.find_user_by_token_hash(&token_hash(&token)).await.ok()??;
+    let user = lookup
+        .find_user_by_token_hash(&token_hash(&token))
+        .await
+        .ok()??;
     Some(Identity {
         name: user.name,
         role: user.role,
@@ -142,7 +144,10 @@ mod tests {
             bearer_token(&request(Some("Bearer secret"))),
             Some("secret")
         );
-        assert_eq!(bearer_token(&request(Some("bearer  secret"))), Some("secret"));
+        assert_eq!(
+            bearer_token(&request(Some("bearer  secret"))),
+            Some("secret")
+        );
         assert_eq!(bearer_token(&request(Some("Basic secret"))), None);
         assert_eq!(bearer_token(&request(Some("Bearer "))), None);
         assert_eq!(bearer_token(&request(Some("Bearer secret extra"))), None);
@@ -180,9 +185,8 @@ mod tests {
     #[tokio::test]
     async fn user_tokens_map_to_their_role() {
         let state = state_with(Some(("alice", "alice-token", Role::User))).await;
-        let identify = |token: &str| {
-            identify(state.seed_token.clone(), state.lookup.clone(), token.into())
-        };
+        let identify =
+            |token: &str| identify(state.seed_token.clone(), state.lookup.clone(), token.into());
         let identity = identify("alice-token").await;
         assert_eq!(
             identity.map(|i| (i.name, i.role.as_str())),

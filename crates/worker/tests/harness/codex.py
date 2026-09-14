@@ -22,8 +22,10 @@ elif 'Accept or reject one TODO candidate.' in prompt:
 elif 'MATRIX_CANDIDATE' in prompt:
     answer = {'status': 'candidate', 'summary': 'done', 'result': 'MATRIX_ANSWER', 'verification': 'checked',
               'evidence_refs': [], 'recovery_context': {'summary': 'done', 'refs': []}}
-elif '你的职责：' in prompt:
-    answer = {'question': 'inspect', 'participants': ['member'], 'summary': 'aligned', 'aligned': True,
+elif '你是团队队长' in prompt:
+    # Captain decision prompts (plan/summary/closing) arrive un-prefixed; the
+    # one JSON reply satisfies every decision shape and free-text answers.
+    answer = {'question': 'inspect', 'participants': ['plan'], 'summary': 'aligned', 'aligned': True,
               'complete': True, 'final_summary': 'MATRIX_TEAM_DONE'}
 else:
     answer = 'MATRIX_ANSWER'

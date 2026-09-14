@@ -19,7 +19,7 @@ async fn managed_team_dag_todo_return_typed_downloadable_outputs() {
     let cases = [
         (
             ExecutionKind::Team,
-            json!({"name":"review","captain":"captain","members":[{"id":"captain","agent":"act","role":"coordinate"},{"id":"member","agent":"act","role":"review"}]}),
+            json!({"name":"review","captain":"act","members":[{"agent":"act"},{"agent":"plan"}]}),
             json!("team completed"),
         ),
         (
@@ -36,7 +36,7 @@ async fn managed_team_dag_todo_return_typed_downloadable_outputs() {
     for (kind, definition, expected) in cases {
         let dir = tempfile::tempdir().unwrap();
         let client = match kind {
-            ExecutionKind::Team => Arc::new(MockChatClient::new().with_default(done(r#"{"question":"inspect","participants":["member"],"summary":"aligned","aligned":true,"complete":true,"final_summary":"team completed"}"#))),
+            ExecutionKind::Team => Arc::new(MockChatClient::new().with_default(done(r#"{"question":"inspect","participants":["plan"],"summary":"aligned","aligned":true,"complete":true,"final_summary":"team completed"}"#))),
             ExecutionKind::Todos => Arc::new(MockChatClient::new()
                 .push_script(done(r#"{"operation":"dispatch","todos":[{"todo_id":"t1","context_mode":"new"}],"reason":"ready"}"#))
                 .push_script(done(r#"{"status":"candidate","summary":"done","result":"ok","verification":"checked","evidence_refs":[],"recovery_context":{"summary":"done","refs":[]}}"#))

@@ -117,7 +117,8 @@ async fn project(node: &opencoder_worker::Worker) {
     }
 }
 async fn team(node: &opencoder_worker::Worker) {
-    let spec = json!({"name":"matrix-team","captain":"captain","members":[{"id":"captain","agent":"act","role":"coordinate"},{"id":"member","agent":"plan","role":"inspect"}]});
+    let spec =
+        json!({"name":"matrix-team","captain":"act","members":[{"agent":"act"},{"agent":"plan"}]});
     let result = create(
         node,
         "team-matrix",

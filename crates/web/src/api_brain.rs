@@ -30,7 +30,8 @@ use tokio::sync::mpsc;
 
 use anyhow::{bail, Result};
 
-use opencoder_brain::CapabilityInput;
+use opencoder_brain::playbook;
+use opencoder_brain::{CapabilityInput, PlaybookInput, PlaybookSpec};
 use opencoder_llm::{ChatRequest, ChatStream, LlmEvent};
 use opencoder_store::{BrainCapabilityDetail, Store};
 
@@ -216,6 +217,105 @@ pub async fn search(State(state): State<Arc<AppState>>, Json(body): Json<SearchB
     match state.brain.search(query, k).await {
         Ok(hits) => Json(json!({ "ok": true, "hits": hits })).into_response(),
         Err(e) => map_brain_error("search brain", e),
+    }
+}
+
+// ─── playbooks (fixed orchestration graphs over the capability library) ──
+
+/// GET /api/brain/playbooks — every persisted playbook, newest first.
+/// Playbooks carry no embeddings (pure store reads), so the only failure
+/// class is store I/O → 500.
+pub async fn list_playbooks(State(state): State<Arc<AppState>>) -> Response {
+    match state.brain.list_playbooks().await {
+        Ok(books) => Json(json!({ "ok": true, "playbooks": books })).into_response(),
+        Err(e) => error_500(format!("list brain playbooks: {e:#}")),
+    }
+}
+
+/// POST /api/brain/playbooks — validate then persist a fresh fixed
+/// playbook. Domain rejections are aggregated by [`playbook::validate_draft`]
+/// and joined into one 400 message verbatim (the same report the runtime
+/// would raise, minus its interleaved error classes). The minted id lives
+/// inside the echoed `spec`.
+pub async fn create_playbook(
+    State(state): State<Arc<AppState>>,
+    Json(input): Json<PlaybookInput>,
+) -> Response {
+    if let Err(errs) = playbook::validate_draft(&input) {
+        return error_400(errs.join("; "));
+    }
+    match state
+        .brain
+        .create_playbook(&input, opencoder_core::message::now_ms())
+        .await
+    {
+        Ok(spec) => {
+            let id = spec.id.clone();
+            let spec_json = serde_json::to_value(&spec).unwrap_or_default();
+            (
+                StatusCode::CREATED,
+                Json(json!({
+                    "ok": true,
+                    "playbook": { "id": id },
+                    "spec": spec_json,
+                })),
+            )
+                .into_response()
+        }
+        Err(e) => error_500(format!("create brain playbook: {e:#}")),
+    }
+}
+
+/// GET /api/brain/playbooks/:id — one playbook with its decoded spec.
+/// Existence is probed through the store record (404 when absent); a stored
+/// spec that no longer parses is a server-side corruption → 500.
+pub async fn get_playbook(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Response {
+    match state.brain.get_playbook(&id).await {
+        Ok(Some(record)) => match serde_json::from_str::<PlaybookSpec>(&record.spec_json) {
+            Ok(spec) => {
+                Json(json!({ "ok": true, "playbook": record, "spec": spec })).into_response()
+            }
+            Err(e) => error_500(format!("get brain playbook: stored spec is corrupt: {e}")),
+        },
+        Ok(None) => error_404(&format!("brain playbook not found: {id}")),
+        Err(e) => error_500(format!("get brain playbook: {e:#}")),
+    }
+}
+
+/// PUT /api/brain/playbooks/:id — replace name/trigger/steps (id, origin
+/// and created_at are preserved by the runtime). Unknown id → 404
+/// (`Ok(None)`), payload → 400.
+pub async fn update_playbook(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Json(input): Json<PlaybookInput>,
+) -> Response {
+    if let Err(errs) = playbook::validate_draft(&input) {
+        return error_400(errs.join("; "));
+    }
+    match state
+        .brain
+        .update_playbook(&id, &input, opencoder_core::message::now_ms())
+        .await
+    {
+        Ok(Some(spec)) => {
+            Json(json!({ "ok": true, "playbook": { "id": spec.id }, "spec": spec })).into_response()
+        }
+        Ok(None) => error_404(&format!("brain playbook not found: {id}")),
+        Err(e) => error_500(format!("update brain playbook: {e:#}")),
+    }
+}
+
+/// DELETE /api/brain/playbooks/:id — 200 ok / 404 (the store delete returns
+/// whether a row was removed, so no separate probe is needed).
+pub async fn delete_playbook(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Response {
+    match state.brain.delete_playbook(&id).await {
+        Ok(true) => Json(json!({ "ok": true, "deleted": id })).into_response(),
+        Ok(false) => error_404(&format!("brain playbook not found: {id}")),
+        Err(e) => error_500(format!("delete brain playbook: {e:#}")),
     }
 }
 

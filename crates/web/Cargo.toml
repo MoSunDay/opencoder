@@ -9,6 +9,7 @@ opencoder-agents.workspace = true
 opencoder-brain.workspace = true
 opencoder-core.workspace = true
 opencoder-dag.workspace = true
+opencoder-dag-wasm.workspace = true
 opencoder-llm.workspace = true
 opencoder-project.workspace = true
 opencoder-session.workspace = true
@@ -33,6 +34,9 @@ ulid = { workspace = true }
 [dev-dependencies]
 async-trait.workspace = true
 tempfile.workspace = true
+# web_dag_wasm: verify the version meta's sha256 against a locally
+# computed digest of the uploaded module.
+sha2 = "0.10"
 # nodes_lost_sweep: open a SECOND connection to the file-backed test db and
 # backfill an old `nodes.last_seen_at` (in-memory dbs cannot do cross-conn).
 libsql.workspace = true

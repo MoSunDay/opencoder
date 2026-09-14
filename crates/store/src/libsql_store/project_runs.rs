@@ -5,7 +5,7 @@
 //! via [`super::tx::run_tx`] (`BEGIN IMMEDIATE`) with explicit cascades.
 
 use anyhow::{Context, Result};
-use libsql::{Connection, Value, params};
+use libsql::{params, Connection, Value};
 
 use crate::project_types::{
     ProjectExecutorKind, ProjectTodoRecord, ProjectTodoRunKind, ProjectTodoRunPatch,

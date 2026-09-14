@@ -4,7 +4,7 @@
 //! multi-statement ops run via [`super::tx::run_tx`] (`BEGIN IMMEDIATE`).
 
 use anyhow::{Context, Result};
-use libsql::{Connection, params};
+use libsql::{params, Connection};
 
 use crate::types::NodeRecord;
 

@@ -3,7 +3,7 @@
 //! are returned exactly once at creation time by the control API.
 
 use anyhow::{Context, Result};
-use libsql::{Connection, params};
+use libsql::{params, Connection};
 
 use crate::users::{GuardedDelete, PlatformUser};
 use opencoder_core::identity::Role;
@@ -164,17 +164,13 @@ mod tests {
         assert_eq!(created.role, Role::User);
 
         // Same name conflicts.
-        assert!(
-            create(&conn, "alice", &"h2".repeat(8), Role::Root, 11)
-                .await
-                .is_err()
-        );
+        assert!(create(&conn, "alice", &"h2".repeat(8), Role::Root, 11)
+            .await
+            .is_err());
         // Same token hash conflicts (different name).
-        assert!(
-            create(&conn, "bob", &"h1".repeat(8), Role::User, 12)
-                .await
-                .is_err()
-        );
+        assert!(create(&conn, "bob", &"h1".repeat(8), Role::User, 12)
+            .await
+            .is_err());
         // Distinct user is fine.
         create(&conn, "bob", &"h3".repeat(8), Role::Admin, 13)
             .await
@@ -254,11 +250,9 @@ mod tests {
         create(&conn, "admin", &"h1".repeat(8), Role::Admin, 10)
             .await
             .unwrap();
-        assert!(
-            update_token_hash(&conn, "admin", &"h2".repeat(8))
-                .await
-                .unwrap()
-        );
+        assert!(update_token_hash(&conn, "admin", &"h2".repeat(8))
+            .await
+            .unwrap());
         assert_eq!(
             find_by_token_hash(&conn, &"h1".repeat(8)).await.unwrap(),
             None
@@ -271,11 +265,9 @@ mod tests {
             Some("admin".into())
         );
         // Unknown names are a no-op; another user's digest is rejected.
-        assert!(
-            !update_token_hash(&conn, "ghost", &"h3".repeat(8))
-                .await
-                .unwrap()
-        );
+        assert!(!update_token_hash(&conn, "ghost", &"h3".repeat(8))
+            .await
+            .unwrap());
         create(&conn, "other", &"h4".repeat(8), Role::User, 11)
             .await
             .unwrap();

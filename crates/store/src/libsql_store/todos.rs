@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use libsql::{Connection, params};
+use libsql::{params, Connection};
 
 use crate::{TodoEventRecord, TodoItemRecord, TodoWorkflowRecord, TodoWorkflowSummary};
 

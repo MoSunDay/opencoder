@@ -477,7 +477,6 @@ pub(crate) async fn dispatch_command(
     task_picker: &mut Option<TaskPicker>,
     model_menu: &mut Option<ModelMenu>,
     mcp_menu: &mut Option<crate::mcp_menu::McpMenu>,
-    envs_menu: &mut Option<crate::envs_menu::EnvsMenu>,
     cli_menu: &mut Option<crate::cli_menu::CliMenu>,
     skill_toggle_menu: &mut Option<crate::skill_menu::SkillMenu>,
     ap_menu: &mut Option<crate::ap_menu::ApMenu>,
@@ -521,7 +520,6 @@ pub(crate) async fn dispatch_command(
                 task_picker,
                 model_menu,
                 mcp_menu,
-                envs_menu,
                 cli_menu,
                 skill_toggle_menu,
                 ap_menu,
@@ -671,10 +669,6 @@ mod app_loop_mcp;
 
 pub(crate) use app_loop_mcp::handle_mcp_outcome;
 
-#[path = "app_loop_envs.rs"]
-mod app_loop_envs;
-
-pub(crate) use app_loop_envs::handle_envs_outcome;
 
 #[path = "app_loop_cli.rs"]
 mod app_loop_cli;

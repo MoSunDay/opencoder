@@ -39,6 +39,9 @@ pub fn advance(run: &mut BrainRun, now: i64) -> Result<()> {
                 });
         }
     }
+    if let Some(flow) = &plan.flow {
+        return super::flow::advance(run, &plan, flow, now);
+    }
     loop {
         let before = serde_json::to_value((&run.instances, &run.expansions))?;
         for step in &plan.steps {
@@ -179,7 +182,12 @@ fn seal_error(run: &mut BrainRun, step: &StepTemplate, reason: &str, now: i64) -
     Ok(())
 }
 
-fn instance(id: String, step: &StepTemplate, key: Option<String>, item: Value) -> StepInstance {
+pub(super) fn instance(
+    id: String,
+    step: &StepTemplate,
+    key: Option<String>,
+    item: Value,
+) -> StepInstance {
     StepInstance {
         id,
         step_id: step.id.clone(),

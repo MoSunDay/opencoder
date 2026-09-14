@@ -85,7 +85,7 @@
 
 ## 管理接口
 
-- `/api/brain/library` 与 `/:id/stable`：能力集合和成熟度。
+- `/api/brain/library` 与 `/:id/stable`：能力集合和成熟度；Web 工作台不展示成熟度/稳定标记，该接口仅供 API 与 CLI 使用。能力库页签对应 `/api/brain/capabilities`（含 `/search`）。
 - `/api/brain/plan-defs`、`/validate`、`/:id/versions`、`/:id/versions/:version`、`/:id/stable`、`/:id/diff?from=&to=`。
 - `/api/brain/runs/:id`、`/context`、`/actions`、`/instances?step=&offset=`、`/instances/:instance`、`/events-page?after=`、`/events`。
 - `POST /api/brain/runs/:id/inputs`：`{name,value}`；已提供输入不可换值。

@@ -42,6 +42,7 @@ pub fn initialize(id: &str, request: BrainRequest, now: i64) -> Result<BrainRun>
         candidate_plan: None,
         instances: BTreeMap::new(),
         expansions: BTreeMap::new(),
+        flow_current: None,
         source_cursors: BTreeMap::new(),
         actions: BTreeMap::new(),
         input_requests: BTreeMap::new(),

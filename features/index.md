@@ -1,11 +1,11 @@
-Commit: e50ffc433bca866fd17bd571a74f1bdf17705dea
+Commit: 2686d40a267436adb555041fc8154fc9bb454574
 
 # OpenCoder 能力地图 — 业务能力总索引
 
 ## 平台与编排
 
 - [Agent 调度平台](agent-platform/index.md) — Server/Node 调度与按 ID 查执行明细。
-- [DAG 工作流](../agents/dag-runtime/index.md) — agent/wasm 步骤、依赖执行与产物。
+- [DAG 工作流](../agents/dag-runtime/index.md) — agent/wasm 步骤、依赖执行与产物、单步执行记录（`session.json` / `step_output`）。
 - [持久化 TODO 工作流](todos/index.md) — 父会话调度验收、独立 TODO 执行。
 - [项目管理](../agents/project/index.md) — goal/milestone/todo 与多执行器。
 - [版本化 Agent 与 NFS](../agents/agents/index.md) — 引用卡、共享池、只读导出。

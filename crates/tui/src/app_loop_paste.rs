@@ -110,7 +110,6 @@ pub(crate) fn route_paste(
     skill_toggle_menu_open: bool,
     model_menu: &mut Option<ModelMenu>,
     mcp_menu: &mut Option<crate::mcp_menu::McpMenu>,
-    envs_menu: &mut Option<crate::envs_menu::EnvsMenu>,
     cli_menu: &mut Option<crate::cli_menu::CliMenu>,
     command_menu: &mut Option<CommandMenu>,
     question_menu: &mut Option<crate::question_menu::QuestionMenu>,
@@ -146,10 +145,6 @@ pub(crate) fn route_paste(
         return LoopFlow::Redraw;
     }
     if let Some(menu) = mcp_menu.as_mut() {
-        menu.paste(trimmed);
-        return LoopFlow::Redraw;
-    }
-    if let Some(menu) = envs_menu.as_mut() {
         menu.paste(trimmed);
         return LoopFlow::Redraw;
     }
@@ -258,7 +253,6 @@ pub(crate) async fn handle_paste_event(
     skill_toggle_menu_open: bool,
     model_menu: &mut Option<ModelMenu>,
     mcp_menu: &mut Option<crate::mcp_menu::McpMenu>,
-    envs_menu: &mut Option<crate::envs_menu::EnvsMenu>,
     cli_menu: &mut Option<crate::cli_menu::CliMenu>,
     command_menu: &mut Option<CommandMenu>,
     question_menu: &mut Option<crate::question_menu::QuestionMenu>,
@@ -285,7 +279,6 @@ pub(crate) async fn handle_paste_event(
             skill_toggle_menu_open,
             model_menu,
             mcp_menu,
-            envs_menu,
             cli_menu,
             command_menu,
             question_menu,

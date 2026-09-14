@@ -33,6 +33,7 @@ use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 
 use super::{StepCtx, StepResult};
+use crate::step_log::StepOutputLog;
 
 /// Bounded tail for tracebacks / runc output in `error`.
 const ERROR_TAIL_BYTES: usize = 2048;
@@ -134,10 +135,23 @@ pub(crate) fn write_context_json(ctx: &StepCtx) -> Result<(), String> {
 
 /// Entry point used by the runtime for `StepKind::Wasm`.
 pub async fn execute_wasm_step(ctx: &StepCtx) -> StepResult {
-    execute_wasm_step_cancellable(ctx, CancellationToken::new()).await
+    execute_wasm_step_logged(ctx, CancellationToken::new(), None).await
 }
 
 pub async fn execute_wasm_step_cancellable(ctx: &StepCtx, cancel: CancellationToken) -> StepResult {
+    execute_wasm_step_logged(ctx, cancel, None).await
+}
+
+/// [`execute_wasm_step_cancellable`] plus incremental output mirroring: every
+/// byte the guest (or the `runc` container) writes is handed to `output` as
+/// it arrives, so a remote console can follow the step live instead of only
+/// reading `output.txt` after the fact. The bounded collectors still own the
+/// step's returned text and the output cap — the mirror only observes.
+pub async fn execute_wasm_step_logged(
+    ctx: &StepCtx,
+    cancel: CancellationToken,
+    output: Option<StepOutputLog>,
+) -> StepResult {
     let (command, sandbox) = match &ctx.step.kind {
         StepKind::Wasm { command, sandbox } => (command.clone(), sandbox.unwrap_or_default()),
         _ => return error_result("non-wasm step dispatched to the wasm executor".into()),
@@ -165,10 +179,21 @@ pub async fn execute_wasm_step_cancellable(ctx: &StepCtx, cancel: CancellationTo
                 &tokens,
                 ctx.step.timeout_secs,
                 cancel,
+                output,
             )
             .await
         }
-        SandboxMode::Runc => run_runc(ctx, &run_root, Some(&module_library), &tokens, cancel).await,
+        SandboxMode::Runc => {
+            run_runc(
+                ctx,
+                &run_root,
+                Some(&module_library),
+                &tokens,
+                cancel,
+                output,
+            )
+            .await
+        }
     }
 }
 
@@ -180,6 +205,7 @@ async fn run_runc(
     module_library: Option<&std::path::Path>,
     tokens: &[String],
     cancel: CancellationToken,
+    output: Option<StepOutputLog>,
 ) -> StepResult {
     if !crate::sandbox::runc::runc_available() {
         return error_result(
@@ -222,11 +248,12 @@ async fn run_runc(
     // run_step owns the timeout here: on expiry it KILLS the container and
     // reaps it with `runc delete --force`.
     let container_id = format!("{}-{}", ctx.run_id, ctx.step.name);
-    match crate::sandbox::runc::run_step_cancellable(
+    match crate::sandbox::runc::run_step_streamed(
         &bundle_dir,
         &container_id,
         ctx.step.timeout_secs,
         cancel.clone(),
+        output,
     )
     .await
     {

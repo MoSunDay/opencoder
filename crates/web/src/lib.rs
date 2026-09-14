@@ -5,7 +5,6 @@ pub mod api_agents;
 pub mod api_brain;
 pub mod api_control;
 pub mod api_dag;
-pub mod api_envs;
 pub mod api_events;
 pub mod api_inputs;
 pub mod api_meta;
@@ -283,14 +282,6 @@ pub fn build_app(state: Arc<AppState>, token: Option<String>, web: bool) -> axum
         .route("/api/skills", get(api_meta::get_skills))
         .route("/api/config", get(api_ops::get_config))
         .route("/api/config", patch(api_ops::patch_config))
-        .route(
-            "/api/envs",
-            get(api_envs::list)
-                .post(api_envs::create)
-                .patch(api_envs::patch),
-        )
-        .route("/api/envs/:name/recapture", post(api_envs::recapture))
-        .route("/api/envs/:name", delete(api_envs::delete))
         // ── custom agents：reference cards + active marker + shared pools ──
         .route(
             "/api/agents",

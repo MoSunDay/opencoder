@@ -29,6 +29,30 @@ pub struct OntologyPlan {
     pub deliverables: BTreeMap<String, Deliverable>,
     #[serde(default)]
     pub references: Vec<PlanRef>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub flow: Option<ActionFlow>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct ActionFlow {
+    pub entry: String,
+    #[serde(default = "twenty")]
+    pub max_visits_per_action: u32,
+    pub transitions: Vec<ActionTransition>,
+}
+fn twenty() -> u32 {
+    20
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct ActionTransition {
+    pub from: String,
+    pub to: Option<String>,
+    pub label: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub when: Option<Condition>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]

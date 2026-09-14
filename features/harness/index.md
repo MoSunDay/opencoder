@@ -1,28 +1,27 @@
-Commit: b465f440381bd009dc9bd3a8192ad88eab44cede
+Commit: 0bc5b867a766100422dd4d0cd214a57f794db26d (working-tree)
 
-# Agent Harness — opencode/codex 双执行器与资源快照
+# Agent Harness — OpenCoder／Codex 执行方式与 Wrap 参数
 
-## 关键路径
+## Agent 配置
 
-- crates/core/src/harness/mod.rs — Harness 枚举 {opencode, codex}
-- crates/core/src/harness/settings.rs — CodexSettings，Debug 不泄值
-- crates/core/src/harness/runtime.rs — pin_agent_settings/agent_settings
-- crates/local/src/lib.rs — CLI --wrap/--cmd/--envs
-- crates/session/src/harness/mod.rs — 会话启动即固定 harness
-- crates/session/src/harness/resources.rs — 工作区快照 .opencoder/runtime
-- crates/session/src/harness/codex/process.rs — codex exec/resume/fork
-- crates/session/src/harness/codex/decode.rs — exec JSONL 转消息
-- crates/control/src/api/settings/ — 默认/命名 Codex 配置与修订号
-- crates/web/spa/src/harness/ — Harness/Runner 管理页
-- crates/worker/src/workloads/agent.rs — Agent 执行负载
-- scripts/acceptance/harness/codex.js — 浏览器验收脚本
+- Agent 列表显示名称、生效状态与编辑／启动／删除操作。编辑从右侧打开占视口 75% 的详情抽屉，关闭后继续使用原列表。
+- 执行方式、资源引用、Prompt 编辑和版本历史在 Agent 详情内维护。内置和自定义 Agent 都可以选择 OpenCoder 或 Codex。
+- Codex Agent 可以绑定命名参数配置；清除绑定后使用默认 Codex 配置。参数配置读取失败时显示错误并提供重试，期间禁止修改绑定。
+- 宿主机执行使用 Operator 入口，不提供单独的 Runner 配置页。
 
-## 边界
+## Codex 参数管理
 
-- Codex 复用节点自身认证与权限，不用 OpenCoder 凭据
-- 配置受理时快照；修改只影响后续新任务
-- 环境变量存私有定义库，公开详情不返回
-- 意外退出不自动重发已提交需求
+- Harness 管理只配置 `opencoder --wrap codex` 的 `--model` 与 `--envs`，支持默认配置和命名配置档案。
+- 模型留空时使用 Codex 默认模型。环境变量每行一个 `KEY=VALUE`，允许空值，保留值中的空格与等号；格式错误时禁止提交。
+- Web 不提供 Codex 安装路径、授权槽位、推理强度、沙箱或审批策略控件。保存时仅提交模型与环境变量，其余 Codex 选项回到默认值，由执行节点上的 Codex 自身配置决定。
+- 读取失败时禁止用空配置覆盖现有值；保存失败时保留输入并显示错误，允许重试。
+
+## 执行边界
+
+- Codex 使用节点自身认证与权限，不使用 OpenCoder 凭据。
+- 配置在任务受理时固定；修改只影响后续新受理任务，已排队或运行中的任务保留原配置快照。
+- 环境变量保存在私有定义库，不进入 NFS 资源，公开执行详情不返回其值。
+- 意外退出不自动重发已提交需求。
 
 ## 相关
 
@@ -30,4 +29,3 @@ Commit: b465f440381bd009dc9bd3a8192ad88eab44cede
 - [agents/local](../../agents/local/index.md)
 - [agents/web](../../agents/web/index.md)
 - [agents/worker](../../agents/worker/index.md)
-- [注册 Runner](../../docs/registered-runners.md)

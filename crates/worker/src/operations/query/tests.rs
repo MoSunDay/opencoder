@@ -347,3 +347,6 @@ fn workflow_lookup_errors_propagate_and_untracked_missing_rows_are_inconsistent(
         TodoWorkflowView::Inconsistent
     ));
 }
+
+#[cfg(test)]
+mod dag_step_events;

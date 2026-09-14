@@ -9,10 +9,12 @@
 //! - combined single-transaction create/update with vector: capability,
 //!   eng_inputs and embedding commit together; update replaces the vector
 //! - v14 → v15 migration creates the three brain tables
+//! - playbooks (v25): save/get/list/delete round-trip, origin-scoped
+//!   latest-by-digest, upsert keeps created_at, v24 → v25 migration
 
 use opencoder_store::{
-    BrainCapabilityRecord, BrainEngInputRecord, BrainPlanRecord, BrainVectorWrite, LibsqlStore,
-    Store,
+    BrainCapabilityRecord, BrainEngInputRecord, BrainPlanRecord, BrainPlaybookRecord,
+    BrainVectorWrite, LibsqlStore, Store,
 };
 use tempfile::TempDir;
 
@@ -421,10 +423,10 @@ async fn migration_v14_to_v15_creates_brain_tables() {
 
     let store = LibsqlStore::open(&db_path).await.unwrap();
 
-    // Schema version bumped to the latest (24).
+    // Schema version bumped to the latest (25).
     assert_eq!(
         scalar_i64(&store, "SELECT version FROM schema_version LIMIT 1").await,
-        24
+        25
     );
 
     // All three brain tables now exist.
@@ -548,7 +550,7 @@ async fn migration_v17_to_v18_creates_brain_plans() {
     let store = LibsqlStore::open(&db_path).await.unwrap();
     assert_eq!(
         scalar_i64(&store, "SELECT version FROM schema_version LIMIT 1").await,
-        24
+        25
     );
     assert_eq!(
         scalar_i64(
@@ -578,5 +580,165 @@ async fn migration_v17_to_v18_creates_brain_plans() {
             .unwrap()
             .id,
         "brain-plan-m"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Brain playbooks (v25)
+// ---------------------------------------------------------------------------
+
+fn playbook(id: &str, name: &str, origin: &str, digest: Option<&str>) -> BrainPlaybookRecord {
+    BrainPlaybookRecord {
+        id: id.into(),
+        name: name.into(),
+        origin: origin.into(),
+        situation_digest: digest.map(str::to_string),
+        spec_json: format!("{{\"schema_version\":1,\"id\":\"{id}\",\"name\":\"{name}\"}}"),
+        created_at: 0,
+        updated_at: 0,
+    }
+}
+
+/// Stamp one clock value into both timestamps (creation and last write).
+fn stamped(mut record: BrainPlaybookRecord, ts: i64) -> BrainPlaybookRecord {
+    record.created_at = ts;
+    record.updated_at = ts;
+    record
+}
+
+/// save → get by id → list (newest first) → delete (+ miss on re-delete) →
+/// latest-by-digest restricted to dynamic-origin rows.
+#[tokio::test]
+async fn playbook_save_get_list_delete_roundtrip() {
+    let store = LibsqlStore::open_memory().await.unwrap();
+    assert!(store
+        .get_brain_playbook("playbook-none")
+        .await
+        .unwrap()
+        .is_none());
+    assert!(store
+        .latest_brain_playbook_for("no-digest")
+        .await
+        .unwrap()
+        .is_none());
+
+    let a = stamped(playbook("playbook-a", "alpha", "fixed", None), 1_000);
+    let b = stamped(
+        playbook("playbook-b", "beta", "dynamic", Some("dig1")),
+        2_000,
+    );
+    let c = stamped(playbook("playbook-c", "gamma", "fixed", None), 3_000);
+    store.save_brain_playbook(&a).await.unwrap();
+    store.save_brain_playbook(&b).await.unwrap();
+    store.save_brain_playbook(&c).await.unwrap();
+
+    let got = store
+        .get_brain_playbook("playbook-b")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(got.name, "beta");
+    assert_eq!(got.origin, "dynamic");
+    assert_eq!(got.situation_digest.as_deref(), Some("dig1"));
+    assert!(got.spec_json.contains("playbook-b"));
+
+    let listed = store.list_brain_playbooks().await.unwrap();
+    let ids: Vec<&str> = listed.iter().map(|r| r.id.as_str()).collect();
+    assert_eq!(ids, vec!["playbook-c", "playbook-b", "playbook-a"]);
+
+    let d = stamped(
+        playbook("playbook-d", "delta", "dynamic", Some("dig1")),
+        4_000,
+    );
+    store.save_brain_playbook(&d).await.unwrap();
+    let latest = store
+        .latest_brain_playbook_for("dig1")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        latest.id, "playbook-d",
+        "newest dynamic row for the digest wins"
+    );
+
+    assert!(store.delete_brain_playbook("playbook-b").await.unwrap());
+    assert!(!store.delete_brain_playbook("playbook-b").await.unwrap());
+    assert!(store
+        .get_brain_playbook("playbook-b")
+        .await
+        .unwrap()
+        .is_none());
+    assert_eq!(store.list_brain_playbooks().await.unwrap().len(), 3);
+}
+
+/// Upsert on conflict replaces every field EXCEPT created_at — the original
+/// creation timestamp survives rewrites (ordering anchors on it).
+#[tokio::test]
+async fn playbook_upsert_preserves_created_at() {
+    let store = LibsqlStore::open_memory().await.unwrap();
+    let first = stamped(playbook("playbook-u", "first", "fixed", None), 100);
+    store.save_brain_playbook(&first).await.unwrap();
+    let second = stamped(
+        playbook("playbook-u", "second", "dynamic", Some("dig")),
+        999,
+    );
+    store.save_brain_playbook(&second).await.unwrap();
+
+    let got = store
+        .get_brain_playbook("playbook-u")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        got.created_at, 100,
+        "creation timestamp survives the rewrite"
+    );
+    assert_eq!(got.updated_at, 999);
+    assert_eq!(got.name, "second");
+    assert_eq!(got.origin, "dynamic");
+    assert_eq!(got.situation_digest.as_deref(), Some("dig"));
+}
+
+/// v24 → v25: a hand-built v24 database gains `brain_playbooks` (and its
+/// digest index) on reopen, and the playbook API round-trips through the
+/// migrated schema. Mirrors the v17 → v18 pattern above.
+#[tokio::test]
+async fn migration_v24_to_v25_creates_brain_playbooks() {
+    let dir: TempDir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("brain-playbooks-migrate.db");
+    {
+        let db = libsql::Builder::new_local(&db_path).build().await.unwrap();
+        let conn = db.connect().unwrap();
+        conn.execute("CREATE TABLE schema_version (version INTEGER NOT NULL)", ())
+            .await
+            .unwrap();
+        conn.execute("INSERT INTO schema_version (version) VALUES (24)", ())
+            .await
+            .unwrap();
+    }
+
+    let store = LibsqlStore::open(&db_path).await.unwrap();
+    assert_eq!(
+        scalar_i64(&store, "SELECT version FROM schema_version LIMIT 1").await,
+        25
+    );
+    let table = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='brain_playbooks'";
+    assert_eq!(scalar_i64(&store, table).await, 1);
+    let index = "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_brain_playbooks_digest'";
+    assert_eq!(scalar_i64(&store, index).await, 1);
+
+    let m = stamped(
+        playbook("playbook-m", "migrated", "fixed", Some("dig-m")),
+        1,
+    );
+    store.save_brain_playbook(&m).await.unwrap();
+    assert_eq!(
+        store
+            .get_brain_playbook("playbook-m")
+            .await
+            .unwrap()
+            .unwrap()
+            .id,
+        "playbook-m"
     );
 }

@@ -16,6 +16,8 @@ Commit: e50ffc433bca866fd17bd571a74f1bdf17705dea
 - `crates/worker/src/operations/project_admission/` — Plan/Execute 独立 run ID
 - `crates/worker/src/operations/maintenance.rs` — 维护工具；configure_scheduling
 - `crates/worker/src/brain/` — TODO 存储根状态/事件，短 runc 激活、持久 outbox、同盘恢复；输出归一化与可下载产物。
+- `crates/worker/src/dag_wasm_pin.rs` — DAG wasm 模块受理冻结：池 → sha256 校验 →
+  `_modules/` staging+rename（`tool.wasm` 取 current，`tool@v3.wasm` 显式版本；缺名/缺版本跳过）
 - `crates/worker/src/workloads/` — agent/team/dag/todos/project 适配器；operator 复用 agent 循环（宿主机进程直跑，无 runc/无 node_maintenance）
 - `crates/worker/src/runtime/scheduling.rs` — scheduling.json 持久化并发/队列序
 - `crates/worker/src/state.rs` — runtime.db；节点 ID 持久化、目录锁

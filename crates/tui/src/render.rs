@@ -348,7 +348,6 @@ pub(crate) fn render<B: Backend + 'static>(
             && question_menu.is_none()
             && cli_menu.is_none()
             && mcp_menu.is_none()
-
             && skill_toggle_menu.is_none()
         {
             let position = composer::cursor_screen_position(

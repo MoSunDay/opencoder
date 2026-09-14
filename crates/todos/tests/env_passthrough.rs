@@ -6,9 +6,9 @@
 use std::sync::Arc;
 
 use opencoder_core::Config;
+use opencoder_core::ContentBlock;
 use opencoder_llm::{ChatStream, LlmEvent, MockChatClient};
 use opencoder_store::{LibsqlStore, Store};
-use opencoder_core::ContentBlock;
 use opencoder_todos::{types::*, Runtime};
 use tokio_util::sync::CancellationToken;
 
@@ -108,7 +108,9 @@ async fn stamped_env_vars_reach_bash_processes() {
             .push_script(dispatch("step-1", "new"))
             .push_script(bash_tool_turn(PROBE))
             .push_script(done(CANDIDATE))
-            .push_script(done(r#"{"operation":"accept","reason":"meets criteria","mark_milestone":false}"#))
+            .push_script(done(
+                r#"{"operation":"accept","reason":"meets criteria","mark_milestone":false}"#,
+            ))
             .push_script(done(r#"{"operation":"complete","reason":"all passed"}"#)),
     );
     let temp = tempfile::tempdir().unwrap();
@@ -124,7 +126,10 @@ async fn stamped_env_vars_reach_bash_processes() {
             }
         }),
     );
-    let state = runtime.run_new_with_id(spec, "run-env".into()).await.unwrap();
+    let state = runtime
+        .run_new_with_id(spec, "run-env".into())
+        .await
+        .unwrap();
     assert_eq!(state.status, WorkflowStatus::Completed);
 
     let state = opencoder_todos::persistence::load(&store_dyn, "run-env")
@@ -155,7 +160,9 @@ async fn workflows_without_env_vars_run_clean() {
         MockChatClient::new()
             .push_script(dispatch("step-1", "new"))
             .push_script(done(CANDIDATE))
-            .push_script(done(r#"{"operation":"accept","reason":"meets criteria","mark_milestone":false}"#))
+            .push_script(done(
+                r#"{"operation":"accept","reason":"meets criteria","mark_milestone":false}"#,
+            ))
             .push_script(done(r#"{"operation":"complete","reason":"all passed"}"#)),
     );
     let temp = tempfile::tempdir().unwrap();
@@ -164,7 +171,10 @@ async fn workflows_without_env_vars_run_clean() {
 
     let mut spec = spec_with_env("wf-clean", serde_json::Value::Null);
     spec.todos[0].acceptance.required_tool_calls = Vec::new();
-    let state = runtime.run_new_with_id(spec, "run-clean".into()).await.unwrap();
+    let state = runtime
+        .run_new_with_id(spec, "run-clean".into())
+        .await
+        .unwrap();
     assert_eq!(state.status, WorkflowStatus::Completed);
     assert_eq!(mock.call_count(), 4);
 }

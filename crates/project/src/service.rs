@@ -228,15 +228,19 @@ fn executor_display_name(resolved: &ResolvedExecutor, todo: &ProjectTodoRecord) 
 }
 
 /// run 行的 agent 标签：agent 携带解析出的代理名优先（brain 路由/override
-/// 会带名），否则沿用 todo.agent；team/dag 带上执行器名（`team:<名>` /
-/// `dag:<名>`）；brain 标记不会出现在已解析结果里（resolve/resolve_brain
-/// 都不产出 Brain），此分支只是完备性兜底。
+/// 会带名），否则沿用 todo.agent；team/dag/playbook 带上执行器名
+/// （`team:<名>` / `dag:<名>` / `playbook:<名>`）；brain 标记不会出现在已
+/// 解析结果里（resolve/resolve_brain 都不产出 Brain），此分支只是完备性
+/// 兜底。
 pub(crate) fn run_agent_label(resolved: &ResolvedExecutor, todo: &ProjectTodoRecord) -> String {
     match resolved.kind {
         ProjectExecutorKind::Agent => resolved.ref_.clone().unwrap_or_else(|| todo.agent.clone()),
         ProjectExecutorKind::Team => format!("team:{}", executor_display_name(resolved, todo)),
         ProjectExecutorKind::Dag => format!("dag:{}", executor_display_name(resolved, todo)),
         ProjectExecutorKind::Brain => "brain".into(),
+        ProjectExecutorKind::Playbook => {
+            format!("playbook:{}", executor_display_name(resolved, todo))
+        }
     }
 }
 

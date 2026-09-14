@@ -212,8 +212,13 @@ pub async fn finish_todo_run(
         status != ProjectTodoRunStatus::Running,
         "run finalization requires terminal status"
     );
+    // Step runs (playbook child attempts) never write the todo status —
+    // the parent playbook Execute run owns the todo lifecycle. Plan/Execute
+    // semantics are unchanged.
     let next = if kind == "plan" {
         (status == ProjectTodoRunStatus::Done).then_some("planned")
+    } else if kind == "step" {
+        None
     } else {
         Some(match status {
             ProjectTodoRunStatus::Done => "done",

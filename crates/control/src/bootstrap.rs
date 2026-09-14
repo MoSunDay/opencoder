@@ -96,6 +96,7 @@ pub async fn new_state_with_projects(
         hub,
         brain,
         brain_gate: Default::default(),
+        playbook_gate: Default::default(),
         admission,
         placement: tokio::sync::Mutex::new(()),
     }))
@@ -328,7 +329,10 @@ mod seed_admin_tests {
     async fn first_boot_seeds_and_re_boots_are_idempotent() {
         let store = memory_store().await;
         seed_admin(&store, "boot-token").await.unwrap();
-        assert_eq!(name_of_digest(&store, "boot-token").await, Some("admin".into()));
+        assert_eq!(
+            name_of_digest(&store, "boot-token").await,
+            Some("admin".into())
+        );
         seed_admin(&store, "boot-token").await.unwrap();
         assert_eq!(
             store.list_users().await.unwrap().len(),
@@ -345,7 +349,10 @@ mod seed_admin_tests {
         // The old seed credential must die with the rotation; the new one
         // owns the row.
         assert_eq!(name_of_digest(&store, "first-boot-token").await, None);
-        assert_eq!(name_of_digest(&store, "rotated-token").await, Some("admin".into()));
+        assert_eq!(
+            name_of_digest(&store, "rotated-token").await,
+            Some("admin".into())
+        );
     }
 
     #[tokio::test]

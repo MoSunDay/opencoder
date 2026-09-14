@@ -14,11 +14,11 @@ fn done(text: &str) -> Vec<LlmEvent> {
 }
 
 #[tokio::test]
-async fn team_members_execute_locally_with_role_assignments() {
+async fn team_members_execute_locally_with_capability_prefixes() {
     let dir = tempfile::tempdir().unwrap();
-    let client=Arc::new(MockChatClient::new().with_default(done(r#"{"question":"inspect","participants":["member"],"summary":"aligned","aligned":true,"complete":true,"final_summary":"team completed"}"#)));
+    let client=Arc::new(MockChatClient::new().with_default(done(r#"{"question":"inspect","participants":["plan"],"summary":"aligned","aligned":true,"complete":true,"final_summary":"team completed"}"#)));
     let node = worker(dir.path(), client.clone()).await;
-    let definition = json!({"name":"review","captain":"captain","members":[{"id":"captain","agent":"act","role":"coordinate"},{"id":"member","agent":"act","role":"review implementation"}]});
+    let definition = json!({"name":"review","captain":"act","members":[{"agent":"act"},{"agent":"plan","capabilities":["review implementation"]}]});
     let reply = node
         .handle(NodeOperation::Create {
             assignment: assignment(

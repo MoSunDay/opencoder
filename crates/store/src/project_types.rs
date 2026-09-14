@@ -109,12 +109,15 @@ impl ProjectTodoStatus {
     }
 }
 
-/// What a todo run executed: planning pass or execution pass.
+/// What a todo run executed: planning pass, execution pass, or one step of
+/// a playbook execution (child attempt of a playbook parent run — never
+/// owns the todo lifecycle, see `finish_todo_run`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ProjectTodoRunKind {
     Plan,
     Execute,
+    Step,
 }
 
 impl ProjectTodoRunKind {
@@ -122,6 +125,7 @@ impl ProjectTodoRunKind {
         match self {
             ProjectTodoRunKind::Plan => "plan",
             ProjectTodoRunKind::Execute => "execute",
+            ProjectTodoRunKind::Step => "step",
         }
     }
 
@@ -129,6 +133,7 @@ impl ProjectTodoRunKind {
         match s {
             "plan" => Some(ProjectTodoRunKind::Plan),
             "execute" => Some(ProjectTodoRunKind::Execute),
+            "step" => Some(ProjectTodoRunKind::Step),
             _ => None,
         }
     }
@@ -221,7 +226,8 @@ pub struct ProjectMilestonePatch {
 }
 
 /// Which executor drives a todo: the single built-in agent flow, a named
-/// team definition, an inline DAG spec, or a brain-routed capability.
+/// team definition, an inline DAG spec, a brain-routed capability, or a
+/// brain playbook (orchestration graph referenced by `executor_ref`).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ProjectExecutorKind {
@@ -230,6 +236,7 @@ pub enum ProjectExecutorKind {
     Team,
     Dag,
     Brain,
+    Playbook,
 }
 
 impl ProjectExecutorKind {
@@ -239,6 +246,7 @@ impl ProjectExecutorKind {
             ProjectExecutorKind::Team => "team",
             ProjectExecutorKind::Dag => "dag",
             ProjectExecutorKind::Brain => "brain",
+            ProjectExecutorKind::Playbook => "playbook",
         }
     }
 
@@ -248,6 +256,7 @@ impl ProjectExecutorKind {
             "team" => Some(ProjectExecutorKind::Team),
             "dag" => Some(ProjectExecutorKind::Dag),
             "brain" => Some(ProjectExecutorKind::Brain),
+            "playbook" => Some(ProjectExecutorKind::Playbook),
             _ => None,
         }
     }
@@ -453,7 +462,11 @@ mod tests {
         ] {
             assert_eq!(ProjectTodoStatus::parse(v.as_str()), Some(v));
         }
-        for v in [ProjectTodoRunKind::Plan, ProjectTodoRunKind::Execute] {
+        for v in [
+            ProjectTodoRunKind::Plan,
+            ProjectTodoRunKind::Execute,
+            ProjectTodoRunKind::Step,
+        ] {
             assert_eq!(ProjectTodoRunKind::parse(v.as_str()), Some(v));
         }
         for v in [
@@ -469,6 +482,7 @@ mod tests {
             ProjectExecutorKind::Team,
             ProjectExecutorKind::Dag,
             ProjectExecutorKind::Brain,
+            ProjectExecutorKind::Playbook,
         ] {
             assert_eq!(ProjectExecutorKind::parse(v.as_str()), Some(v));
         }

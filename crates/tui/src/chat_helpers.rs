@@ -123,6 +123,10 @@ impl ChatView {
                     }
                     view.llm_round_started_at_ms = None;
                     view.frozen_round_ms = None;
+                    // Same repair as mark_subagent_done: an orphaned child
+                    // (parent cancelled/error while it streamed) leaves its
+                    // Say open — finalize so the child view never shows raw.
+                    view.finalize_assistant();
                     view.steer_items.clear();
                     *elapsed_ms = Some(((now_ms() - *started_at_ms).max(0)) as u64);
                 }

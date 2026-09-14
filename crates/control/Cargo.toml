@@ -10,6 +10,7 @@ opencoder-store.workspace = true
 opencoder-brain.workspace = true
 opencoder-agents.workspace = true
 opencoder-dag.workspace = true
+opencoder-dag-wasm.workspace = true
 opencoder-todos = { path = "../todos", default-features = false }
 opencoder-llm.workspace = true
 anyhow.workspace = true

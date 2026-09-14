@@ -383,3 +383,85 @@ fn error_reconciles_orphaned_subagent_blocks() {
         _ => unreachable!(),
     }
 }
+
+/// Helper: fetch the child view of a Subagent block by id.
+fn child_view<'a>(v: &'a ChatView, id: &str) -> &'a ChatView {
+    match v
+        .blocks
+        .iter()
+        .rev()
+        .find(|b| matches!(b, ChatBlock::Subagent { id: bid, .. } if bid == id))
+    {
+        Some(ChatBlock::Subagent { view, .. }) => view,
+        _ => panic!("expected a Subagent block for {id}"),
+    }
+}
+
+/// Helper: the child view's LAST open Assistant must be done + rendered
+/// (never raw markdown left on screen in the focused child view).
+fn assert_child_say_finalized(v: &ChatView, id: &str, raw_fragment: &str) {
+    let view = child_view(v, id);
+    let open = view
+        .blocks
+        .iter()
+        .rposition(|b| matches!(b, ChatBlock::Assistant { done: false, .. }));
+    assert!(
+        open.is_none(),
+        "child view of {id} still has an open (raw) Assistant block"
+    );
+    assert!(
+        !block_text(view).contains(raw_fragment),
+        "child view of {id} still shows raw markdown fragment {raw_fragment:?}"
+    );
+}
+
+/// A subagent cancelled mid-Say never emits its own `LlmRoundEnd`/`Done`:
+/// `SubagentEnd { cancelled }` must finalize the child view's open Say so
+/// the focused child view shows the rendered (not raw) partial answer.
+#[test]
+fn cancelled_subagent_finalizes_child_say() {
+    let mut v = ChatView::default();
+    v.apply(&SessionEvent::TextDelta("delegate this".into()));
+    v.apply(&SessionEvent::LlmRoundEnd);
+    v.apply(&SessionEvent::SubagentStart {
+        id: "s1".into(),
+        kind: "explore".into(),
+        prompt: "search".into(),
+        child_session_id: "sub-1".into(),
+    });
+    // Child streams a markdown answer, then the shared cancel token fires:
+    // no child LlmRoundEnd, no child Done — only SubagentEnd(cancelled).
+    v.apply(&SessionEvent::SubagentChild {
+        id: "s1".into(),
+        ev: Box::new(SessionEvent::TextDelta("**partial** answer".into())),
+    });
+    v.apply(&SessionEvent::SubagentEnd {
+        id: "s1".into(),
+        ok: false,
+        cancelled: true,
+        summary: String::new(),
+    });
+    assert_child_say_finalized(&v, "s1", "**partial**");
+}
+
+/// Parent-turn termination with a still-running subagent (cancel drain /
+/// error): `reconcile_orphaned_subagents` must finalize the orphaned child
+/// view's open Say for the same reason.
+#[test]
+fn orphaned_subagent_child_say_finalized_on_done() {
+    let mut v = ChatView::default();
+    v.apply(&SessionEvent::TextDelta("delegate this".into()));
+    v.apply(&SessionEvent::SubagentStart {
+        id: "s2".into(),
+        kind: "build".into(),
+        prompt: "fix".into(),
+        child_session_id: "sub-2".into(),
+    });
+    v.apply(&SessionEvent::SubagentChild {
+        id: "s2".into(),
+        ev: Box::new(SessionEvent::TextDelta("# Halfway heading".into())),
+    });
+    // Parent turn ends while the child never delivered its Done.
+    v.apply(&SessionEvent::Done);
+    assert_child_say_finalized(&v, "s2", "# Halfway");
+}

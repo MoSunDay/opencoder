@@ -17,9 +17,11 @@ axum HTTP/SSE 会话管理与编译期内嵌 SPA。
 - `src/api_ops.rs`、`src/cmd.rs` — fork/compact/handoff/skill/config/bg；`DrainCmd` 通道。
 - `src/api_agents.rs`、`src/api_agent_resources.rs`、`src/api_agent_nfs.rs` — 版本化 agent 面 + NFS 导出。
 - `src/api_inputs.rs` — 输入列表/删除/reorder。
+- `src/api_dag_wasm.rs`、`src/api_dag_wasm_nfs.rs`、`src/nfs_exports.rs` — DAG wasm 模块池 API + 命名多 NFS 导出（agents/dag-wasm 两路）。
 - `src/api_questions.rs`、`src/handle_questions.rs` — question answer/skip 闭环。
 - `src/api_subagents.rs` — 子代理任务列表；`DELETE /api/sessions?keep=` clear-all。
 - `src/api_brain.rs` — brain CRUD/search/dispatch，typed 错误映射。
+- `src/api_brain.rs` — 剧本 CRUD（list/get/create/validate/delete），`validate_draft` 写库前 400。
 - `src/api_teams.rs`、`src/api_teams_topics.rs`、`src/team_state.rs`、`src/team_hub.rs` — 团队运行时与话题。
 - `src/api_project*.rs` — project HTTP 适配；未 init 全部 503。
 - `src/api_todo_*.rs`、`src/todo_hub.rs` — TODO 模板/环境/run 分发。

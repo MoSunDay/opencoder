@@ -71,6 +71,11 @@ pub fn build_app(state: Arc<AppState>, token: Option<String>, web: bool) -> Rout
         .route("/api/agents/resources/:cat/:name/rollback", post(api_agent_resources::rollback))
         .route("/api/agents/resources/:cat/:name/versions/:v/files/*path", get(api_agent_resources::read_file))
         .route("/api/agents/nfs", get(api_agent_nfs::get_status).post(api_agent_nfs::post_set))
+        .route("/api/dag/wasm", get(api_dag_wasm::list).post(api_dag_wasm::create))
+        .route("/api/dag/wasm/nfs", get(api_dag_wasm_nfs::nfs_get).post(api_dag_wasm_nfs::nfs_post))
+        .route("/api/dag/wasm/:name", get(api_dag_wasm::get).put(api_dag_wasm::put_version).delete(api_dag_wasm::delete))
+        .route("/api/dag/wasm/:name/rollback", post(api_dag_wasm::rollback))
+        .route("/api/dag/wasm/:name/versions/:v/wasm.bin", get(api_dag_wasm::download))
         .route("/api/todo/envs", get(api_todo_envs::list_envs).post(api_todo_envs::create_env))
         .route("/api/todo/envs/:name", get(api_todo_envs::get_env).put(api_todo_envs::update_env).delete(api_todo_envs::delete_env))
         .route("/api/todo/tools", get(api_todo_envs::list_tools))
@@ -94,11 +99,16 @@ pub fn build_app(state: Arc<AppState>, token: Option<String>, web: bool) -> Rout
         .route("/api/brain/capabilities", get(api_brain::list_capabilities).post(api_brain::create_capability))
         .route("/api/brain/capabilities/:id", get(api_brain::get_capability).put(api_brain::update_capability).delete(api_brain::delete_capability))
         .route("/api/brain/capabilities/:id/target", get(brain::target).put(brain::bind))
+        .route("/api/brain/agents", get(brain::agents))
         .route("/api/brain/search", post(api_brain::search))
         .route("/api/brain/plans", post(brain::create_plan))
         .route("/api/brain/plans/:id", get(api_brain::get_plan))
         .route("/api/brain/preview", post(brain::preview))
         .route("/api/brain/dispatch", post(brain::dispatch))
+        .route("/api/brain/playbooks", get(brain::list_playbooks))
+        .route("/api/brain/playbooks/trigger-scan", post(api::brain_playbook_dispatch::trigger_scan))
+        .route("/api/brain/playbooks/:id", get(brain::get_playbook))
+        .route("/api/brain/playbooks/:id/dispatch", post(api::brain_playbook_dispatch::dispatch))
         .fallback(api::session::relay);
     if web {
         app = app
@@ -107,6 +117,12 @@ pub fn build_app(state: Arc<AppState>, token: Option<String>, web: bool) -> Rout
     }
     let mut app = app
         .with_state(state.clone())
+        // dag-wasm pool scope: same position as the agents scope below, so
+        // both resource-root resolvers run inside the role gate.
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            api_dag_wasm_nfs::configured_dag_wasm,
+        ))
         .layer(axum::middleware::from_fn_with_state(
             state,
             crate::resource_scope::configured_agents,

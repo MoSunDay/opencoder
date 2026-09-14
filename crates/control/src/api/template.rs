@@ -34,8 +34,7 @@ pub(super) fn snapshot(root: &Path, name: &str, version: &str) -> Result<Value> 
         }
         spec.metadata["env"] = json!(env);
         spec.metadata["env_tools"] = tools;
-        spec.metadata["env_vars"] =
-            opencoder_todos::domain::env_vars_metadata(env_vars);
+        spec.metadata["env_vars"] = opencoder_todos::domain::env_vars_metadata(env_vars);
     }
     opencoder_todos::domain::validate_spec(&spec)?;
     Ok(serde_json::to_value(spec)?)

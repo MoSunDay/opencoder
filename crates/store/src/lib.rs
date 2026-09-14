@@ -12,14 +12,14 @@ pub mod session_store;
 pub mod sql_store;
 pub mod store;
 pub mod team_types;
-mod users;
 pub mod todo_types;
 pub mod ts_registry;
 pub mod types;
+mod users;
 
 pub use brain_types::{
     BrainCapabilityDetail, BrainCapabilityRecord, BrainEngInputRecord, BrainPlanRecord,
-    BrainVectorHit, BrainVectorWrite,
+    BrainPlaybookRecord, BrainVectorHit, BrainVectorWrite,
 };
 pub use bundle::{
     export_bundle, import_bundle, read_bundle, write_bundle, SessionBundle, SubagentBundle,
@@ -38,7 +38,6 @@ pub use project_types::{
 pub use session_store::SessionStore;
 pub use store::Store;
 pub use team_types::{TeamTopicRunRecord, TEAM_RUN_EXECUTING, TEAM_RUN_FINISHED};
-pub use users::{GuardedDelete, PlatformUser};
 pub use todo_types::{
     TodoEventPage, TodoEventRecord, TodoItemPage, TodoItemRecord, TodoItemSummary,
     TodoWorkflowDetail, TodoWorkflowRecord, TodoWorkflowSummary,
@@ -52,4 +51,5 @@ pub use types::{
     SubagentTaskRecord, TASK_TYPE_NODE, TASK_TYPE_PARENT, TASK_TYPE_PROJECT, TASK_TYPE_SUBAGENT,
     TASK_TYPE_TODO, TASK_TYPE_TODO_WORKFLOW,
 };
+pub use users::{GuardedDelete, PlatformUser};
 pub mod fleet;

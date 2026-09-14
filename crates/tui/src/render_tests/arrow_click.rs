@@ -144,7 +144,7 @@ async fn render_then_click_arrow_targets_jump_view() {
             &mut queue_scroll,
             0,
             0,
-                        None,
+            None,
             None,
             None,
             None,

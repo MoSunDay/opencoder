@@ -54,6 +54,7 @@ const teamsFixture = {
 const executionsFixture = {
   executions: [
     { id: 'ex-running', kind: 'agent', status: 'running', created_at: T0, node_id: 'n1' },
+    { id: 'ex-maint', kind: 'maintenance', status: 'done', created_at: T0, node_id: 'n1' },
     { id: 'ex-error', kind: 'team', status: 'error', created_at: T0, node_id: 'n2' },
   ],
 };
@@ -235,11 +236,12 @@ describe('TopicsPanel', () => {
     expect(await screen.findByText('ex-running')).toBeTruthy();
     expect(screen.getByText('ex-error')).toBeTruthy();
     expect(screen.getByText('舰队全部执行记录与团队过滤')).toBeTruthy(); // page header via PAGE_META
-    expect(screen.getAllByText('Agent')).toHaveLength(2); // launch-form kind value + 类型 cell
+    expect(screen.getAllByText('Agent')).toHaveLength(1); // 类型 cell（启动表单已收进 Modal，默认不渲染）
+    expect(screen.getByText('维护执行')).toBeTruthy(); // maintenance 类型列显示中文标签
     expect(screen.getByText('Team')).toBeTruthy();
     expect(screen.getByText('运行中')).toBeTruthy(); // STATUS_META via ui/statusTag
     expect(screen.getByText('失败')).toBeTruthy();
-    expect(screen.getByText('在线')).toBeTruthy(); // n1 node state tag
+    expect(screen.getAllByText('在线')).toHaveLength(2); // n1 node state tag（agent + maintenance 两行同节点）
     expect(screen.getByText('离线')).toBeTruthy(); // n2 node state tag
     expect(screen.getByText('启动执行')).toBeTruthy();
   });
@@ -252,6 +254,7 @@ describe('TopicsPanel', () => {
     await waitFor(() => expect(apiGetMock).toHaveBeenCalledWith('/api/executions?limit=50&kind=team'));
     expect(await screen.findByText('ex-error')).toBeTruthy();
     expect(screen.queryByText('ex-running')).toBeNull(); // filtered page replaced the rows
+    expect(screen.queryByText('ex-maint')).toBeNull(); // maintenance 行同样被 Team 筛选滤掉
   });
 
   it('hits cancel then resume on the detail drawer action buttons', async () => {

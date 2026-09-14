@@ -14,6 +14,8 @@ import { useExecutionTranscript } from './detail/liveTranscript.js';
 import { Artifacts } from './artifacts.jsx';
 import { DetailFields, PayloadWindows } from './detail/fields.jsx';
 import { WorkloadDetail } from './detail/workloads.jsx';
+import { BrainRunEmbed } from './detail/brainRun.jsx';
+import { TodoRunEmbed } from './detail/todoCanvas.jsx';
 import { Markdown } from '../project/markdown.jsx';
 import { err } from '../notice.js';
 import { RunnerDetail } from './detail/runner.jsx';
@@ -205,6 +207,11 @@ export function ExecutionView({ executionRef, summary, onNotice, mode = 'full', 
     {kind === 'dag' && <ExecutionLogs id={id} {...dagLogs} steps={((detail?.definition?.spec || detail?.definition)?.steps || []).map((step) => step.name)} />}
     {kind === 'dag' && <Artifacts id={id} spec={detail?.definition?.spec || detail?.definition} onNotice={onNotice} />}
     {detail?.topic?.final_summary && <Markdown text={detail.topic.final_summary} />}
+    {/* 过程视图只在完整明细挂载：inline 模式（brain 工作台 Inspector 的「执行过程」页，
+        ~380px 窄列）不嵌 PlanCanvas/TODO 画布与第二条 SSE，内联仍由下方 Transcript/
+        WorkloadDetail 等轻量块承载过程信息。 */}
+    {mode === 'full' && kind === 'brain' && <BrainRunEmbed id={id} onNotice={onNotice} />}
+    {mode === 'full' && kind === 'todos' && <TodoRunEmbed id={id} />}
     <WorkloadDetail id={id} detail={detail} kind={kind} onOpen={setChildId} />
     {isProjectRun && detail?.run && <RunReplay id={id} detail={detail} onOpen={setChildId} />}
     <DetailFields id={id} detail={detail} />

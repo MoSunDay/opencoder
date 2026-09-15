@@ -157,3 +157,42 @@ fn version_root_symlink_cannot_escape_resource_mount() {
     );
     assert!(!dir.path().join("snapshot").exists());
 }
+
+#[test]
+fn wasm_only_dags_do_not_depend_on_unrelated_agent_pools() {
+    use opencoder_core::fleet::*;
+    let mut assignment = Assignment {
+        runtime: None,
+        codex: None,
+        index: ExecutionIndex {
+            id: "dag-wasm".into(),
+            kind: ExecutionKind::Dag,
+            node_id: "node-one".into(),
+            created_at: 1,
+            status: ExecutionStatus::Pending,
+        },
+        request: CreateExecution {
+            id: "dag-wasm".into(),
+            kind: ExecutionKind::Dag,
+            target: None,
+            node_id: None,
+            input: json!({}),
+        },
+        definition: Some(
+            json!({"name":"wasm","steps":[{"name":"tool","kind":{"type":"wasm","command":"tool.wasm"}}]}),
+        ),
+    };
+    assert!(!resources::requires_agent_pool(&assignment));
+    assignment.definition = Some(json!({"spec":assignment.definition.take().unwrap()}));
+    assert!(!resources::requires_agent_pool(&assignment));
+    assignment.request.input = json!({"_brain":{"action":{"agent_manifests":{"review":"pinned"}}}});
+    assert!(resources::requires_agent_pool(&assignment));
+    assignment.request.input = json!({});
+    assignment.definition.as_mut().unwrap()["spec"]["steps"][0]["kind"] =
+        json!({"type":"agent","prompt":"check"});
+    assert!(resources::requires_agent_pool(&assignment));
+    assignment.definition = None;
+    assert!(resources::requires_agent_pool(&assignment));
+    assignment.request.kind = ExecutionKind::Todos;
+    assert!(resources::requires_agent_pool(&assignment));
+}

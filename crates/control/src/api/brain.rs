@@ -147,6 +147,31 @@ pub async fn dispatch(State(state): State<Arc<AppState>>, Json(body): Json<Value
     let Some(request_id) = normalized.request_id.clone() else {
         return response(dispatch_unkeyed(&state, &normalized).await);
     };
+    let _process_lock = match state.fleet.request_lock("brain", &request_id).await {
+        Ok(lock) => lock,
+        Err(error) => return error_500(error.to_string()),
+    };
+    let fingerprint = idem::fingerprint(&normalized.intent);
+    match state
+        .fleet
+        .claim_request("brain", &request_id, &fingerprint)
+        .await
+    {
+        Ok(true) => {}
+        Ok(false) => return response(idem::conflict()),
+        Err(error) => return error_500(error.to_string()),
+    }
+    let persisted_prepared = match state.fleet.receipt("brain", &request_id).await {
+        Ok(Some(receipt)) if receipt.phase == "prepared" => {
+            let prepared: idem::PreparedDispatch = match serde_json::from_value(receipt.payload) {
+                Ok(prepared) => prepared,
+                Err(error) => return error_500(error.to_string()),
+            };
+            Some(prepared)
+        }
+        Ok(_) => None,
+        Err(error) => return error_500(error.to_string()),
+    };
     let mut gate = state.brain_gate.lock(&request_id).await;
 
     let mut existing = Vec::new();
@@ -163,6 +188,9 @@ pub async fn dispatch(State(state): State<Arc<AppState>>, Json(body): Json<Value
             409,
             "request_id has multiple execution candidates",
         ));
+    }
+    if let Some(prepared) = persisted_prepared {
+        return response(submit_prepared(&state, prepared).await);
     }
     if let Some(index) = existing.first() {
         let accepted = state
@@ -237,6 +265,21 @@ pub async fn dispatch(State(state): State<Arc<AppState>>, Json(body): Json<Value
             prepared
         }
     };
+    if let Err(error) = state
+        .fleet
+        .save_receipt(
+            "brain",
+            &request_id,
+            &opencoder_store::fleet::handoff::Receipt {
+                fingerprint,
+                phase: "prepared".into(),
+                payload: json!(prepared),
+            },
+        )
+        .await
+    {
+        return error_500(error.to_string());
+    }
     drop(planning_permit);
     let execution = super::executions::submit(&state, prepared.request).await;
     if execution.status != 202 {
@@ -248,6 +291,17 @@ pub async fn dispatch(State(state): State<Arc<AppState>>, Json(body): Json<Value
     };
     gate.remove(&request_id);
     response(idem::dispatch_reply(&index, &prepared.receipt))
+}
+
+async fn submit_prepared(state: &Arc<AppState>, prepared: idem::PreparedDispatch) -> RpcReply {
+    let execution = super::executions::submit(state, prepared.request).await;
+    if execution.status != 202 {
+        return execution;
+    }
+    match serde_json::from_value::<ExecutionIndex>(execution.body) {
+        Ok(index) => idem::dispatch_reply(&index, &prepared.receipt),
+        Err(error) => RpcReply::error(500, error.to_string()),
+    }
 }
 
 pub async fn create_plan(

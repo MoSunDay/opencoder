@@ -54,6 +54,7 @@ async fn serve(
     }
     let id = registration.id.clone();
     let generation = snapshot.generation.clone();
+    let mut report_sequence = snapshot.sequence;
     let mut reports = ReportCollector::default();
     let brain_capacity = Arc::new(tokio::sync::Semaphore::new(32));
     let mut initial_admission_request;
@@ -66,7 +67,9 @@ async fn serve(
         // Local shutdown persists Frozen. Reconcile both modes on reconnect
         // so a restarted node can rejoin an open cluster, even when another
         // resource error masks its local admission state in the snapshot.
-        let command = if state.admission.is_open().await {
+        let command = if generation.starts_with("host-") {
+            NodeAdmissionCommand::Status
+        } else if state.admission.is_open().await {
             NodeAdmissionCommand::Reopen
         } else {
             NodeAdmissionCommand::Freeze
@@ -117,7 +120,10 @@ async fn serve(
                             }
                         }
                         NodeFrame::Hello { .. } => anyhow::bail!("duplicate hello"),
-                        NodeFrame::Snapshot { snapshot } => state.hub.snapshot(&id, &generation, snapshot).await,
+                        NodeFrame::Snapshot { snapshot } => {
+                            report_sequence = snapshot.sequence;
+                            state.hub.snapshot(&id, &generation, snapshot).await;
+                        },
                         NodeFrame::IndexReport { report } => {
                             if !state.hub.touch(&id, &generation).await { continue; }
                             let report_id = report.report_id;
@@ -132,10 +138,11 @@ async fn serve(
                                 IndexReportPart::Batch { records } => reports.batch(report_id, records)?,
                                 IndexReportPart::End => {
                                     if let Some(complete) = reports.end(report_id)? {
-                                        let recovered = state.fleet.apply_index_report(
+                                        let recovered = state.fleet.apply_index_report_fenced(
                                             &id,
                                             &complete.records,
                                             complete.pending_at_begin.as_deref(),
+                                            generation.starts_with("host-").then_some((generation.as_str(), report_sequence)),
                                         ).await?;
                                         state.hub.acknowledge_report(&id, &complete.records).await;
                                         // Initial sync settles claims whose old connection can no
@@ -148,6 +155,15 @@ async fn serve(
                                         if !state.hub.mark_index_synced(&id, &generation).await {
                                             anyhow::bail!("index report belongs to a stale connection");
                                         }
+                                        if complete.initial && generation.starts_with("host-") {
+                                            let server = state.lifecycle.platform.get().map(|p| p.release_id.clone()).unwrap_or_else(|| "legacy".into());
+                                            tx.send(SocketCommand::Frame(Box::new(ServerFrame::Call {
+                                                request_id:ulid::Ulid::new().to_string(),
+                                                operation:NodeOperation::Maintenance { command:ExecutionCommand {
+                                                    action:"host_handoff_ready".into(),input:serde_json::json!({"server":server})
+                                                }}
+                                            }))).await?;
+                                        }
                                         tracing::debug!(node_id = %id, report_id = complete.report_id, records = complete.records.len(), "index report applied");
                                     }
                                 }
@@ -157,7 +173,7 @@ async fn serve(
                             if initial_admission_request.as_ref().is_some_and(|(id, _)| id == &request_id) {
                                 let (_, command) = initial_admission_request.take().unwrap();
                                 let expected = if command == NodeAdmissionCommand::Freeze { "frozen" } else { "open" };
-                                if !(200..300).contains(&reply.status) || reply.body["mode"] != expected {
+                                if !(200..300).contains(&reply.status) || (command != NodeAdmissionCommand::Status && reply.body["mode"] != expected) {
                                     tracing::warn!(node_id = %id, ?command, status = reply.status, body = %reply.body, "joining node rejected admission synchronization");
                                 }
                                 continue;

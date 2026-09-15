@@ -137,6 +137,8 @@ for name in names:
     data = (stage / "bin" / name).read_bytes()
     files[f"bin/{name}"] = {"sha256": hashlib.sha256(data).hexdigest(), "bytes": len(data)}
 manifest = {
+    "release_id": "rel-" + commit,
+    "compatibility": info["release_compatibility"],
     "schema_version": 1,
     "commit": commit,
     "version": info["version"],

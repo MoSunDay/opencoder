@@ -78,12 +78,15 @@ async fn system_probes_and_bearer_auth_contract() {
 async fn drain_cycle_against_the_real_admission_gate() {
     let s = Server::new(None).await;
     assert_ok(&s, &["drain", "status"]).await;
-    assert_eq!(s.state.admission.snapshot().await.mode, AdmissionMode::Open);
+    assert_eq!(
+        s.state.admission.snapshot().await.unwrap().mode,
+        AdmissionMode::Open
+    );
     // Reopen in the open state short-circuits 200 (api/admission.rs).
     assert_ok(&s, &["drain", "reopen"]).await;
     assert_ok(&s, &["drain", "freeze"]).await;
     assert_eq!(
-        s.state.admission.snapshot().await.mode,
+        s.state.admission.snapshot().await.unwrap().mode,
         AdmissionMode::Frozen
     );
     // Frozen mode turns /api/ready into a 503 → exit 4.
@@ -93,7 +96,10 @@ async fn drain_cycle_against_the_real_admission_gate() {
     assert_eq!(cli(&s, TOKEN, &["drain", "reopen"]).await, 4);
     // Restore through the gate itself; the HTTP path needs a linked node.
     s.state.admission.reopen(&s.state.placement).await.unwrap();
-    assert_eq!(s.state.admission.snapshot().await.mode, AdmissionMode::Open);
+    assert_eq!(
+        s.state.admission.snapshot().await.unwrap().mode,
+        AdmissionMode::Open
+    );
     assert_ok(&s, &["drain", "status"]).await;
 }
 

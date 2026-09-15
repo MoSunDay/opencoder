@@ -19,6 +19,42 @@ fn sse_ids(text: &str) -> Vec<i64> {
         .collect()
 }
 
+/// Observe the initial page before changing the scripted node response.
+/// A fixed delay can expire before the request starts under full-suite load.
+async fn first_page(h: &Harness, path: &str, ids: &[i64]) -> (reqwest::Response, String) {
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let mut response = h.req_raw(Method::GET, path, None, Some(TOKEN)).await;
+        assert_eq!(response.status(), 200);
+        let mut bytes = Vec::new();
+        loop {
+            bytes.extend_from_slice(
+                &response
+                    .chunk()
+                    .await
+                    .unwrap()
+                    .expect("stream closed before its first page"),
+            );
+            if bytes.ends_with(b"\n\n") {
+                let text = String::from_utf8(bytes.clone()).unwrap();
+                if sse_ids(&text) == ids {
+                    return (response, text);
+                }
+            }
+        }
+    })
+    .await
+    .expect("initial event page arrives")
+}
+
+async fn finish_stream(response: reqwest::Response, mut prefix: String) -> String {
+    let suffix = tokio::time::timeout(Duration::from_secs(10), response.text())
+        .await
+        .expect("stream closes after the terminal node response")
+        .unwrap();
+    prefix.push_str(&suffix);
+    prefix
+}
+
 fn row(seq: i64, kind: &str) -> Value {
     json!({"seq": seq, "kind": kind, "data": {"n": seq}, "ts": seq})
 }
@@ -78,21 +114,12 @@ async fn incremental_tail_emits_late_rows_and_closes_on_finished() {
     .await;
     let first = vec![row(1, "llm_round_start"), row(2, "text_delta")];
     h.node.set_events("agent-tail-1", first.clone(), false);
-    let stream = {
-        let h = h.clone();
-        tokio::spawn(async move { h.sse_text("/api/executions/agent-tail-1/events").await })
-    };
-    // The unfinished stream stays open while polling; new rows appear later.
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    let (stream, prefix) = first_page(&h, "/api/executions/agent-tail-1/events", &[1, 2]).await;
     let mut all = first;
     all.push(row(3, "tool_result"));
     all.push(row(4, "done"));
     h.node.set_events("agent-tail-1", all, true);
-    let (status, text) = tokio::time::timeout(Duration::from_secs(10), stream)
-        .await
-        .expect("stream closes once the node reports finished")
-        .unwrap();
-    assert_eq!(status, 200);
+    let text = finish_stream(stream, prefix).await;
     assert_eq!(sse_ids(&text), vec![1, 2, 3, 4], "{text}");
     assert!(
         text.ends_with("event: stream_end\ndata: {\"finished\":true}\n\n"),
@@ -113,21 +140,13 @@ async fn more_flag_keeps_polling_and_pages_without_duplicates() {
     // finished=false + more=true: the first page replays but polling goes on.
     h.node
         .set_events_more("agent-more-1", first.clone(), false, true);
-    let stream = {
-        let h = h.clone();
-        tokio::spawn(async move { h.sse_text("/api/executions/agent-more-1/events").await })
-    };
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    let (stream, prefix) = first_page(&h, "/api/executions/agent-more-1/events", &[1, 2]).await;
     let mut all = first;
     all.push(row(3, "text_delta"));
     all.push(row(4, "done"));
     // Flip more off with a finished page holding the second batch.
     h.node.set_events_more("agent-more-1", all, true, false);
-    let (status, text) = tokio::time::timeout(Duration::from_secs(10), stream)
-        .await
-        .expect("stream closes once more flips off with finished")
-        .unwrap();
-    assert_eq!(status, 200);
+    let text = finish_stream(stream, prefix).await;
     // Re-served rows are dropped by the cursor: every seq appears once.
     assert_eq!(sse_ids(&text), vec![1, 2, 3, 4], "{text}");
 }
@@ -143,19 +162,10 @@ async fn mid_stream_node_error_emits_an_error_frame_and_closes() {
     .await;
     h.node
         .set_events("agent-err-1", vec![row(1, "llm_round_start")], false);
-    let stream = {
-        let h = h.clone();
-        tokio::spawn(async move { h.sse_text("/api/executions/agent-err-1/events").await })
-    };
-    // Let the first page flush, then make the node fail the next poll.
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    let (stream, prefix) = first_page(&h, "/api/executions/agent-err-1/events", &[1]).await;
     h.node
         .set_events_status("agent-err-1", 500, json!({"error": "boom"}));
-    let (status, text) = tokio::time::timeout(Duration::from_secs(10), stream)
-        .await
-        .expect("error frame terminates the stream")
-        .unwrap();
-    assert_eq!(status, 200);
+    let text = finish_stream(stream, prefix).await;
     assert!(text.contains("event: error"), "{text}");
     assert!(text.contains(r#"data: {"error":"boom"}"#), "{text}");
     // The replayed row stays framed; the error frame carries no id.

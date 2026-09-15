@@ -26,28 +26,31 @@ pub struct Cursor {
 /// state `'static` so every SSE endpoint shares the same paging loop.
 type PageFetch = Arc<dyn Fn(i64) -> Pin<Box<dyn Future<Output = RpcReply> + Send>> + Send + Sync>;
 
-/// SSE cursor: the `after` query parameter wins, `Last-Event-ID` (set by the
-/// browser on reconnect) is the fallback, and 0 replays from the beginning.
+/// Resume from the newest cursor supplied by the caller or EventSource.
 fn cursor_after(query: &Cursor, headers: &HeaderMap) -> i64 {
-    query
-        .after
-        .or_else(|| {
-            headers
-                .get("last-event-id")
-                .and_then(|v| v.to_str().ok()?.parse().ok())
-        })
-        .unwrap_or(0)
+    query.after.unwrap_or(0).max(
+        headers
+            .get("last-event-id")
+            .and_then(|v| v.to_str().ok()?.parse::<i64>().ok())
+            .unwrap_or(0),
+    )
 }
 
 /// Turn a paged node query into an SSE stream: emit queued frames, refetch
 /// after `POLL_INTERVAL` when the queue drains, and end once the node reports
 /// `finished` with no further page. A non-200 poll becomes one `error` frame.
-fn sse(first: RpcReply, fetch: PageFetch, after: i64) -> Response {
+fn sse(
+    first: RpcReply,
+    fetch: PageFetch,
+    after: i64,
+    lifecycle: Arc<crate::release::Lifecycle>,
+) -> Response {
     if first.status != 200 {
         return super::response(first);
     }
     let stream = futures::stream::unfold(
         (
+            lifecycle,
             fetch,
             after,
             VecDeque::<Value>::new(),
@@ -55,11 +58,22 @@ fn sse(first: RpcReply, fetch: PageFetch, after: i64) -> Response {
             false,
             false,
         ),
-        |(fetch, mut cursor, mut queue, mut page, mut ended, end_sent)| async move {
+        |(lifecycle, fetch, mut cursor, mut queue, mut page, mut ended, end_sent)| async move {
             if end_sent {
                 return None;
             }
             loop {
+                if lifecycle.retiring.load(std::sync::atomic::Ordering::SeqCst) {
+                    let event = Event::default()
+                        .event("reconnect")
+                        .id(cursor.to_string())
+                        .retry(Duration::from_millis(100))
+                        .data("release switch");
+                    return Some((
+                        Ok(event),
+                        (lifecycle, fetch, cursor, queue, None, false, true),
+                    ));
+                }
                 if let Some(frame) = queue.pop_front() {
                     let seq = frame["seq"].as_i64().unwrap_or(cursor);
                     cursor = cursor.max(seq);
@@ -70,7 +84,7 @@ fn sse(first: RpcReply, fetch: PageFetch, after: i64) -> Response {
                         .expect("JSON event");
                     return Some((
                         Ok::<_, Infallible>(event),
-                        (fetch, cursor, queue, page, ended, false),
+                        (lifecycle, fetch, cursor, queue, page, ended, false),
                     ));
                 }
                 if ended {
@@ -78,19 +92,27 @@ fn sse(first: RpcReply, fetch: PageFetch, after: i64) -> Response {
                         .event("stream_end")
                         .json_data(serde_json::json!({"finished":true}))
                         .expect("JSON stream end");
-                    return Some((Ok(event), (fetch, cursor, queue, None, true, true)));
+                    return Some((
+                        Ok(event),
+                        (lifecycle, fetch, cursor, queue, None, true, true),
+                    ));
                 }
                 let body = match page.take() {
                     Some(body) => body,
                     None => {
-                        tokio::time::sleep(POLL_INTERVAL).await;
-                        let reply = fetch(cursor).await;
+                        let reply = tokio::select! {
+                            reply = async { tokio::time::sleep(POLL_INTERVAL).await; fetch(cursor).await } => reply,
+                            _ = lifecycle.retired() => continue,
+                        };
                         if reply.status != 200 {
                             let event = Event::default()
                                 .event("error")
                                 .json_data(reply.body)
                                 .expect("JSON error");
-                            return Some((Ok(event), (fetch, cursor, queue, None, true, true)));
+                            return Some((
+                                Ok(event),
+                                (lifecycle, fetch, cursor, queue, None, true, true),
+                            ));
                         }
                         reply.body
                     }
@@ -118,12 +140,13 @@ pub async fn events(
 ) -> Response {
     let after = cursor_after(&query, &headers);
     let first = super::executions::events_id(&state, &id, after).await;
+    let lifecycle = state.lifecycle.clone();
     let fetch: PageFetch = Arc::new(move |cursor| {
         let state = state.clone();
         let id = id.clone();
         Box::pin(async move { super::executions::events_id(&state, &id, cursor).await })
     });
-    sse(first, fetch, after)
+    sse(first, fetch, after, lifecycle)
 }
 
 /// One DAG step's event stream (`/api/dag/runs/:id/steps/:step/events`).
@@ -137,6 +160,7 @@ pub async fn dag_step_events(
 ) -> Response {
     let after = cursor_after(&query, &headers);
     let first = super::executions::dag_step_events_id(&state, &id, &step, after).await;
+    let lifecycle = state.lifecycle.clone();
     let fetch: PageFetch = Arc::new(move |cursor| {
         let state = state.clone();
         let id = id.clone();
@@ -145,5 +169,5 @@ pub async fn dag_step_events(
             async move { super::executions::dag_step_events_id(&state, &id, &step, cursor).await },
         )
     });
-    sse(first, fetch, after)
+    sse(first, fetch, after, lifecycle)
 }

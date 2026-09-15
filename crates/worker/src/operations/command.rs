@@ -317,7 +317,13 @@ async fn http(
         if worker.inner.scheduling.get().queue_order == QueueOrder::Fifo {
             super::queue::dispatch_locked(worker).await?;
         }
-        match worker.try_slot() {
+        match worker
+            .inner
+            .host_capacity
+            .is_none()
+            .then(|| worker.try_slot())
+            .flatten()
+        {
             Some(p) => Some(p),
             None => {
                 let Some(mut record) = record.clone() else {

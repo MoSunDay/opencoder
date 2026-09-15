@@ -1,9 +1,8 @@
 [Unit]
 Description=OpenCoder read-only DAG WASM distribution
-Wants=network-online.target opencoder-server.service
-After=network-online.target opencoder-server.service
+Wants=network-online.target opencoder-resources.service
+After=network-online.target opencoder-resources.service
 Before=opencoder-agent.service
-PartOf=opencoder-server.service
 
 [Mount]
 What=127.0.0.1:/

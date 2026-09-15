@@ -19,3 +19,11 @@ Commit: 8a50a393cbe615f5d6453ff4290da0bf03546881
 - SPA 构建产物与源码一致；Git diff 格式检查通过。
 
 相关：[TODO 工作台](../../../docs/todo-workbench.md)、[功能说明](../../todos/index.md)。
+
+## 联合发布验证
+
+- 代码候选 `d1779dd844bc5f61496cb3be5978bc6217b71cb4` 合并 TODO 目录、平滑发布和线上 `5bf6f621` 的全部 DAG 修复。发布分支为 `release/todo-directory-20260915`。
+- 全量 Rust 回归结合失败项及新增用例复验，共覆盖 5,228 项通过；6 项既有特权手工用例保留忽略。原全量日志 `/tmp/opencoder-todo-delivery-workspace-regression.log`，修复后的 205 项复验日志 `/tmp/opencoder-todo-delivery-regression-fixes.log`。
+- `cargo clippy --workspace --all-targets -- -D warnings` 零警告；前端全量 96 文件、683 项通过；发布工具及备份安装测试 33 项、真实模型验收脚本测试 3 项通过。
+- 成套优化发布包的四个二进制提交号、协议与静态产物摘要一致。浏览器 TODO 与 DAG 验收通过；真实磁盘的三版本切换、带任务回滚、Shell/OCI 进程保持、SSE 连续及独立 NFS 验收通过，证据 `/var/tmp/opencoder-smooth-h7quack9/result.json`。
+- 生产切换尚未进行：已准备候选包与迁移收据，等待已有生产发布锁持有者完成其流程；在线验证结果应在切换后补录。

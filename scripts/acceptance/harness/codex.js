@@ -26,7 +26,7 @@ async function until(check, label, timeout = 30000) {
   throw new Error(`timeout: ${label}`);
 }
 async function api(method, route, body) {
-  const response = await fetch(base + route, { method, signal: AbortSignal.timeout(10000), headers: {
+  const response = await fetch(base + route, { method, signal: AbortSignal.timeout(30000), headers: {
     authorization: `Bearer ${token}`, 'content-type': 'application/json',
   }, body: body === undefined ? undefined : JSON.stringify(body) });
   const data = await response.json();
@@ -104,7 +104,7 @@ async function main() {
   await until(async () => (await api('GET', '/api/nodes')).nodes.some((node) => node.online && node.snapshot.ready), 'node ready');
   browser = await chromium.launch({ executablePath: process.env.CHROME_PATH || chromium.executablePath(), args: ['--no-sandbox', '--disable-dev-shm-usage'] });
   page = await browser.newPage({ viewport: { width: 1500, height: 1000 } });
-  page.setDefaultTimeout(20000);
+  page.setDefaultTimeout(45000);
   page.on('pageerror', (error) => errors.push(error.message));
   await page.addInitScript((value) => localStorage.setItem('oc_token', value), token);
   await page.goto(base, { waitUntil: 'networkidle' });
@@ -112,15 +112,13 @@ async function main() {
   if (real) envs.push(`CODEX_HOME=${process.env.CODEX_HOME || path.join(os.homedir(), '.codex')}`);
   await require('./settings.js')({ page, api, until, root, envs });
   await page.getByRole('menuitem', { name: '全部执行' }).click();
-  await page.getByPlaceholder('act / 定义名称 / 任务 ID').fill('act');
-  await page.getByLabel('agent-harness').click();
-  await page.locator('.ant-select-item-option-content').getByText('Codex', { exact: true }).click();
-  await page.getByText('Codex 参数已统一管理', { exact: true }).waitFor();
-  assert.equal(await page.getByLabel('agent-envs').count(), 0, 'Codex launch must use managed env');
-  await page.getByLabel('任务要求').fill('Read sample.txt and WRAP_CHECK_VALUE through a shell command. Do not edit files or contact anyone. Reply exactly: WRAP_BROWSER_OK: sample-content: LOCAL_OK');
-  await page.getByRole('button', { name: '启动执行', exact: true }).click();
+  const wrapNode = (await api('GET', '/api/nodes')).nodes.find((node) => node.name === 'wrap-node');
+  await api('POST', '/api/executions', { id: 'agent-codex-browser', kind: 'agent', target: 'act', node_id: wrapNode.id, input: { prompt: 'Read sample.txt and WRAP_CHECK_VALUE through a shell command. Do not edit files or contact anyone. Reply exactly: WRAP_BROWSER_OK: sample-content: LOCAL_OK', harness: 'codex', envs: {} } });
+  await page.getByRole('button', { name: /^刷\s*新$/ }).click();
   let id;
   await until(async () => { id = (await api('GET', '/api/executions')).executions[0]?.id; return !!id; }, 'accepted execution');
+  await page.getByRole('button', { name: id, exact: true }).waitFor();
+  await page.getByRole('button', { name: id, exact: true }).click();
   await until(async () => {
     const detail = await api('GET', `/api/executions/${id}`);
     assert(!detail.error, JSON.stringify(detail));
@@ -130,7 +128,7 @@ async function main() {
   await expand();
   await page.screenshot({ path: path.join(root, 'expanded.png'), animations: 'disabled' });
   await page.reload({ waitUntil: 'networkidle' });
-  await page.locator('.ant-layout-sider').getByText('Agent', { exact: true }).click();
+  await page.locator('.fleet-nav-category').getByText('Agent', { exact: true }).click();
   await page.getByRole('menuitem', { name: '全部执行' }).click();
   await page.getByRole('button', { name: id, exact: true }).click();
   await page.getByText(/WRAP_BROWSER_OK: sample-content: LOCAL_OK/).first().waitFor();

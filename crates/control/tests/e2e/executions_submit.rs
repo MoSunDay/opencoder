@@ -36,14 +36,21 @@ async fn submit_validates_node_id_and_honors_the_pin() {
     );
     assert!(h.node.journal_ids().is_empty(), "nothing reached the node");
 
-    // A pin to the live node lands the execution on exactly that node.
+    // The durable request fingerprint also covers placement intent.
+    let (status, _) = submit(
+        &h,
+        json!({"id":"agent-pin-1","kind":"agent","input":{"prompt":"hi"},"node_id":"node-e2e"}),
+    )
+    .await;
+    assert_eq!(status, 409);
+    // A new request pinned to the live node lands on exactly that node.
     let (status, receipt) = submit(
         &h,
-        json!({"id": "agent-pin-1", "kind": "agent", "input": {"prompt": "hi"}, "node_id": "node-e2e"}),
+        json!({"id": "agent-pin-2", "kind": "agent", "input": {"prompt": "hi"}, "node_id": "node-e2e"}),
     )
     .await;
     assert_eq!(status, 202, "{receipt}");
-    assert_eq!(receipt["id"], json!("agent-pin-1"));
+    assert_eq!(receipt["id"], json!("agent-pin-2"));
     assert_eq!(receipt["node_id"], json!("node-e2e"));
 }
 
@@ -57,8 +64,7 @@ async fn submit_conflict_for_same_id_with_different_input_passes_through() {
     .await;
     assert_eq!(status, 202, "{receipt}");
 
-    // The control plane replays the create; the node's durable journal
-    // rejects a different input for a known id and the 409 passes through.
+    // Shared durable receipts reject changed input before node dispatch.
     let (status, body) = submit(
         &h,
         json!({"id": "agent-conflict-input-1", "kind": "agent", "input": {"prompt": "second"}}),
@@ -67,7 +73,7 @@ async fn submit_conflict_for_same_id_with_different_input_passes_through() {
     assert_eq!(status, 409, "{body}");
     assert_eq!(
         body["error"],
-        json!("execution id already accepted with different input")
+        json!("execution id already used with different input")
     );
     assert_eq!(h.node.journal_ids(), vec!["agent-conflict-input-1"]);
 }

@@ -279,6 +279,7 @@ pub(super) fn prepare(worker: &Worker, assignment: &Assignment, legacy: bool) ->
         crate::resources::check_mount(config.agent.agents_dir.as_deref())?;
     }
     std::fs::create_dir_all(root.parent().unwrap())?;
+    let source = source.filter(|_| crate::resources::requires_agent_pool(assignment));
     config.agent.agents_dir = crate::resources::pin(source.as_deref(), &root)?;
     let validated = (|| -> Result<()> {
         let prompt = assignment.request.input["prompt"].as_str().unwrap_or("");
@@ -503,6 +504,17 @@ pub(crate) async fn start(
     };
     if record.assignment.index.status == ExecutionStatus::Pending {
         return Ok(RpcReply::error(409, "execution is already pending"));
+    }
+    if record
+        .lifecycle
+        .todo_reruns
+        .values()
+        .any(|c| c.phase == "stopping")
+    {
+        return Ok(RpcReply::error(
+            409,
+            "TODO rerun is still stopping the previous execution",
+        ));
     }
     if matches!(
         record.assignment.index.status,

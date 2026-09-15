@@ -58,7 +58,7 @@ async fn dag_agent_and_wasm_logs_stream_before_completion_and_resume_by_sequence
     let mut stream = response.into_body().into_data_stream();
     let mut text = String::new();
     tokio::time::timeout(Duration::from_secs(15), async {
-        while !text.contains("\"event\":\"stderr\"") {
+        while !text.contains("\"stream\":\"stderr\"") {
             let bytes = stream
                 .next()
                 .await
@@ -71,7 +71,7 @@ async fn dag_agent_and_wasm_logs_stream_before_completion_and_resume_by_sequence
     .expect("stdout and stderr must arrive while Wasm is still running");
     assert!(text.contains("agent-live-answer"), "{text}");
     assert!(text.contains("wasm-live-output"), "{text}");
-    assert!(text.contains("\"event\":\"stdout\""), "{text}");
+    assert!(text.contains("\"stream\":\"stdout\""), "{text}");
     assert!(!text.contains("event: run_finished"), "{text}");
     let detail = fleet
         .call("GET", "/api/executions/dag-live-logs", Value::Null)

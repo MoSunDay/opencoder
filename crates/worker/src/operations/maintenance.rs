@@ -9,7 +9,14 @@ pub(super) async fn run(worker: &Worker, command: ExecutionCommand) -> Result<Rp
 }
 async fn run_unscoped(worker: &Worker, command: ExecutionCommand) -> Result<RpcReply> {
     match command.action.as_str() {
-        "scheduling" => Ok(RpcReply::ok(json!(worker.inner.scheduling.get()))),
+        "scheduling" => {
+            if let Some(host) = &worker.inner.host_capacity {
+                return Ok(RpcReply::ok(
+                    json!({"max_runs":host.store.capacity().await?.max_runs,"queue_order":"fifo"}),
+                ));
+            }
+            Ok(RpcReply::ok(json!(worker.inner.scheduling.get())))
+        }
         "configure_scheduling" => {
             let settings: NodeScheduling = match serde_json::from_value(command.input) {
                 Ok(settings) => settings,
@@ -17,6 +24,16 @@ async fn run_unscoped(worker: &Worker, command: ExecutionCommand) -> Result<RpcR
             };
             if let Err(error) = settings.validate() {
                 return Ok(RpcReply::error(400, error));
+            }
+            if let Some(host) = &worker.inner.host_capacity {
+                if settings.queue_order != QueueOrder::Fifo {
+                    return Ok(RpcReply::error(
+                        400,
+                        "multi-runtime hosts require FIFO ordering",
+                    ));
+                }
+                host.store.configure_capacity(settings.max_runs).await?;
+                return Ok(RpcReply::ok(json!(settings)));
             }
             let _gate = worker.inner.admission.lock().await;
             worker.inner.scheduling.save(settings)?;

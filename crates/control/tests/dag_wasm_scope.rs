@@ -83,6 +83,7 @@ async fn publish(app: &Router, payload: &str) {
 #[tokio::test]
 async fn wasm_pool_publication_uses_configured_root_without_cross_server_leaks() {
     let dir = tempfile::tempdir().unwrap();
+    let _scope = opencoder_core::config::scoped_config_home(dir.path().into());
     let mut apps = Vec::new();
     for name in ["first", "second"] {
         let workdir = dir.path().join(name);
@@ -133,6 +134,7 @@ async fn wasm_pool_publication_uses_configured_root_without_cross_server_leaks()
 #[tokio::test]
 async fn pool_scope_defaults_to_workdir_data_dir_when_unconfigured() {
     let dir = tempfile::tempdir().unwrap();
+    let _scope = opencoder_core::config::scoped_config_home(dir.path().into());
     let workdir = dir.path().join("work");
     std::fs::create_dir_all(&workdir).unwrap();
     let state = opencoder_control::new_state(workdir.clone(), workdir.join("state"), None)

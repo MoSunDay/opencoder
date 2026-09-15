@@ -73,6 +73,37 @@ async fn prepared_action_replays_after_restart_and_duplicate_notice_keeps_waterm
     );
     assert_eq!(before["plan"], snapshot(&node, &reference).await["plan"]);
     let receipt: ActionReceipt = serde_json::from_value(action).unwrap();
+    let call = |action: &str, input: Value| {
+        node.handle(NodeOperation::Brain {
+            execution: reference.clone(),
+            action: action.into(),
+            input,
+        })
+    };
+    // A lost dispatch reply may update the retry error while old frames remain in flight.
+    assert_eq!(
+        call(
+            "receipt",
+            json!({"id":receipt.id,"reply":RpcReply::error(503,"uncertain transport")})
+        )
+        .await
+        .status,
+        200
+    );
+    assert_eq!(call("authorize", json!(receipt)).await.status, 200);
+    let mut changed = receipt.clone();
+    changed.request["input"]["prompt"] = json!("changed request");
+    assert_eq!(call("authorize", json!(changed)).await.status, 409);
+    assert_eq!(
+        call(
+            "receipt",
+            json!({"id":receipt.id,"reply":RpcReply::ok(json!({"node_id":"child-node"}))})
+        )
+        .await
+        .status,
+        200
+    );
+    assert_eq!(call("authorize", json!(receipt)).await.status, 409);
     let notice = json!({"parent":receipt.request["input"]["_brain"]["parent"],"execution":{"id":receipt.id,"kind":"agent"},"node_id":"child-node","sequence":3,"status":"succeeded","output":{"value":"verified","artifacts":[],"evidence":["receipt"]},"error":null,"at_ms":5});
     let first = node
         .handle(NodeOperation::Brain {
@@ -85,6 +116,10 @@ async fn prepared_action_replays_after_restart_and_duplicate_notice_keeps_waterm
     let completed = snapshot(&node, &reference).await;
     assert_eq!(completed["phase"], "completed");
     assert_eq!(completed["deliverables"]["result"], "verified");
+    assert_eq!(
+        call("published", completed["plan"].clone()).await.body["duplicate"],
+        true
+    );
     assert_eq!(
         node.handle(NodeOperation::Brain {
             execution: reference.clone(),

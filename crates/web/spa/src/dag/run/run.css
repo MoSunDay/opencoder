@@ -1,0 +1,10 @@
+.dag-run-result { width: 100%; min-width: 0; }
+.dag-run-result > .ant-alert { margin-bottom: 12px; }
+.dag-run-result .react-flow__node.selected .dag-node { box-shadow: 0 0 0 2px var(--oc-primary); }
+.dag-run-result .dag-detail-graph { width: 100%; height: min(65vh, 650px); min-height: 400px; }
+.dag-logs-drawer .ant-drawer-body { display: flex; flex-direction: column; }
+.execution-logs { display: flex; flex-direction: column; flex: 1; min-height: 0; gap: 8px; }
+.execution-log-lines { flex: 1; min-height: 200px; overflow: auto; background: #111827; color: #d1d5db; padding: 12px; font-family: monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+.execution-log-lines .ant-typography-secondary { color: #9ca3af; }
+.dag-node--cancelled, .dag-node--interrupted { border-color: #d89614; background: #fffbe6; }
+.dag-node-error { color: #c42b1c; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

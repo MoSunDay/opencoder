@@ -7,6 +7,7 @@ mod maintenance;
 mod project_admission;
 mod query;
 pub(crate) mod queue;
+pub(crate) mod todo;
 use crate::Worker;
 use anyhow::Result;
 pub(crate) use command::durable_stop;

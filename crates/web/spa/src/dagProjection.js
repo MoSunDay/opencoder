@@ -115,7 +115,7 @@ export function projectStepStatuses(spec, stepStates) {
       }
       const blocked = dependsOn(s)
         .filter((d) => known.has(d))
-        .some((d) => out.get(d) === STEP_ERROR || out.get(d) === STEP_SKIPPED);
+        .some((d) => out.get(d) === STEP_ERROR || out.get(d) === 'cancelled' || out.get(d) === STEP_SKIPPED);
       if (blocked) {
         out.set(s.name, STEP_SKIPPED);
         changed = true;

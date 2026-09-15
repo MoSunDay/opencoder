@@ -2,6 +2,7 @@
 pub mod admission;
 pub mod api;
 mod bootstrap;
+pub mod release;
 mod resource_scope;
 pub mod role_gate;
 mod routes;
@@ -25,6 +26,8 @@ pub mod api_dag_wasm_nfs;
 pub mod api_project;
 #[path = "../../web/src/api_project_todos.rs"]
 pub mod api_project_todos;
+#[path = "../../web/src/api_todo_directory/mod.rs"]
+pub mod api_todo_directory;
 #[path = "../../web/src/api_todo_envs.rs"]
 pub mod api_todo_envs;
 #[path = "../../web/src/api_todo_template_versions.rs"]
@@ -41,12 +44,13 @@ pub mod html;
 pub mod nfs_exports;
 pub use api::project_util as api_project_util;
 
-pub use bootstrap::{new_state, new_state_with_projects, serve};
+pub use bootstrap::{new_state, new_state_with_projects, serve, serve_release};
 use opencoder_store::{fleet::FleetStore, ProjectStore, Store};
 pub use routes::build_app;
 use std::{path::PathBuf, sync::Arc};
 
 pub struct AppState {
+    pub lifecycle: Arc<release::Lifecycle>,
     pub workdir: PathBuf,
     pub store: Arc<dyn Store>,
     pub projects: Arc<dyn ProjectStore>,
@@ -54,7 +58,6 @@ pub struct AppState {
     pub hub: Arc<transport::Hub>,
     pub brain: opencoder_brain::Runtime,
     pub(crate) brain_gate: api::brain_dispatch::BrainGate,
-    pub(crate) playbook_gate: api::brain_playbook_dispatch::PlaybookGate,
     pub admission: Arc<admission::AdmissionGate>,
     /// Serializes placement plus reservation; never held waiting for a node.
     pub placement: tokio::sync::Mutex<()>,

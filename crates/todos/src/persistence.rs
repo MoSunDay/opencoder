@@ -44,7 +44,7 @@ pub async fn commit(
                 seq: None,
                 workflow_id: state.workflow_id.clone(),
                 kind: kind.into(),
-                payload,
+                payload: review_payload(state, payload),
                 ts: now,
             },
         )
@@ -195,4 +195,34 @@ async fn atomic_write(path: &Path, content: &[u8]) -> Result<()> {
     tokio::fs::write(&temp, content).await?;
     tokio::fs::rename(&temp, path).await?;
     Ok(())
+}
+
+/// Add authoritative post-transition state to events, including dispatch batches.
+fn review_payload(state: &WorkflowState, mut payload: serde_json::Value) -> serde_json::Value {
+    use serde_json::json;
+    if !payload.is_object() {
+        payload = json!({"value":payload});
+    }
+    payload["generation"] = json!(state.generation);
+    payload["world_epoch"] = json!(state.world_epoch);
+    payload["workflow_status"] = json!(state.status);
+    let ids: Vec<&str> = if let Some(id) = payload["todo_id"].as_str() {
+        vec![id]
+    } else if let Some(todos) = payload["todos"].as_array() {
+        todos.iter().filter_map(|t| t["todo_id"].as_str()).collect()
+    } else {
+        state.todos.keys().map(String::as_str).collect()
+    };
+    let items: Vec<_> = ids
+        .into_iter()
+        .filter_map(|id| {
+            state.todos.get(id).map(|t| {
+                json!({"todo_id":id,"status":t.status,"attempt":t.attempt,
+            "active_session_id":t.active_session_id,"last_error":t.last_error,
+            "accepted_generation":t.accepted_generation})
+            })
+        })
+        .collect();
+    payload["items"] = json!(items);
+    payload
 }

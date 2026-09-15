@@ -11,20 +11,28 @@ spa="$repo_root/crates/web/spa"
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
-mkdir "$tmp/spa"
-cp "$spa/package.json" "$spa/package-lock.json" "$spa/index.html" "$spa/vite.config.js" "$tmp/spa/"
-cp -R "$spa/src" "$tmp/spa/src"
+# Mirror the repo layout, not a bare "spa/" dir: src/ may import repo-root
+# fixtures with repo-relative depth (e.g. src/brain/workbench/editor/model.js
+# pulls ../../../../../../../examples/brain/repair-loop.json), which only
+# resolves when crates/web/spa sits at its real depth next to examples/.
+mirror="$tmp/crates/web/spa"
+mkdir -p "$mirror"
+cp "$spa/package.json" "$spa/package-lock.json" "$spa/index.html" "$spa/vite.config.js" "$mirror/"
+cp -R "$spa/src" "$mirror/src"
 if [ -d "$spa/public" ]; then
-  cp -R "$spa/public" "$tmp/spa/public"
+  cp -R "$spa/public" "$mirror/public"
+fi
+if [ -d "$repo_root/examples" ]; then
+  cp -R "$repo_root/examples" "$tmp/examples"
 fi
 
 if [ -d "$spa/node_modules" ]; then
-  ln -s "$spa/node_modules" "$tmp/spa/node_modules"
+  ln -s "$spa/node_modules" "$mirror/node_modules"
 else
-  (cd "$tmp/spa" && npm ci --no-audit --no-fund)
+  (cd "$mirror" && npm ci --no-audit --no-fund)
 fi
 
-cd "$tmp/spa"
+cd "$mirror"
 
 # The minifier is not bit-stable. Repeated `npm run build` of the SAME src/
 # occasionally emits static/app.js with a different set of mangled identifiers
@@ -61,7 +69,7 @@ attempt=0
 while :; do
   attempt=$((attempt + 1))
   npm run build >/dev/null
-  out="$(diff -r "$spa/dist" "$tmp/spa/dist" 2>&1)" && {
+  out="$(diff -r "$spa/dist" "$mirror/dist" 2>&1)" && {
     echo "spa dist: no drift (build $attempt/$MAX_BUILDS)"
     exit 0
   }

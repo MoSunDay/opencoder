@@ -15,6 +15,7 @@ fn done(text: &str) -> Vec<LlmEvent> {
 
 #[tokio::test]
 async fn team_members_execute_locally_with_capability_prefixes() {
+    let _host_config = support::isolated_config();
     let dir = tempfile::tempdir().unwrap();
     let client=Arc::new(MockChatClient::new().with_default(done(r#"{"question":"inspect","participants":["plan"],"summary":"aligned","aligned":true,"complete":true,"final_summary":"team completed"}"#)));
     let node = worker(dir.path(), client.clone()).await;
@@ -62,6 +63,7 @@ async fn team_members_execute_locally_with_capability_prefixes() {
 
 #[tokio::test]
 async fn dag_artifacts_and_checkpoints_survive_node_restart() {
+    let _host_config = support::isolated_config();
     let dir = tempfile::tempdir().unwrap();
     let client = mock();
     let node = worker(dir.path(), client.clone()).await;
@@ -121,6 +123,7 @@ async fn dag_artifacts_and_checkpoints_survive_node_restart() {
 
 #[tokio::test]
 async fn todo_parent_and_children_complete_in_one_node() {
+    let _host_config = support::isolated_config();
     let dir = tempfile::tempdir().unwrap();
     let client=Arc::new(MockChatClient::new()
         .push_script(done(r#"{"operation":"dispatch","todos":[{"todo_id":"t1","context_mode":"new"}],"reason":"ready"}"#))
@@ -159,6 +162,7 @@ async fn todo_parent_and_children_complete_in_one_node() {
 
 #[tokio::test]
 async fn maintenance_agent_has_real_local_query_tool() {
+    let _host_config = support::isolated_config();
     let dir = tempfile::tempdir().unwrap();
     let client = Arc::new(
         MockChatClient::new()
@@ -202,6 +206,7 @@ async fn maintenance_agent_has_real_local_query_tool() {
 
 #[tokio::test]
 async fn dag_cancel_interrupts_wasm_step_and_releases_node_capacity() {
+    let _host_config = support::isolated_config();
     let dir = tempfile::tempdir().unwrap();
     let node = worker(dir.path(), mock()).await;
     let id = "dag-cancel-wasm";

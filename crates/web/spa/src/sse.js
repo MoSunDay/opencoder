@@ -40,6 +40,7 @@ export function openStream({ path, sessionId, after, onFrame, onStatus, onResync
   let backoff = BACKOFF_START_MS;
   let lastSeq = Number.isFinite(after) ? after : 0;
   let timer = null;
+  let releaseReconnect = false;
 
   const report = (status, info) => {
     if (typeof onStatus === 'function') {
@@ -117,6 +118,13 @@ export function openStream({ path, sessionId, after, onFrame, onStatus, onResync
       return;
     }
     if (frame.event === 'stream_end' && frame.data?.finished === true) { stop(); return; }
+    if (frame.event === 'reconnect') {
+      releaseReconnect = true;
+      attempts = 0;
+      backoff = 100;
+      restart();
+      return;
+    }
     if (executionHistory && frame.event === 'error' && frame.seq === null) { restart(); return; }
     attempts = 0; // any frame proves the stream is alive
     backoff = BACKOFF_START_MS;
@@ -248,6 +256,10 @@ export function openStream({ path, sessionId, after, onFrame, onStatus, onResync
   /// and folding them all back in freezes the tab; a finished run's terminal
   /// frame IS the head, so the capped tail still converges).
   async function reconnectCursor() {
+    if (releaseReconnect) {
+      releaseReconnect = false;
+      return lastSeq;
+    }
     // Resync protocol (round-2 #5): when the app supplies `onResync` it owns
     // the re-sync — it rebuilds the fold state from the store snapshot at a
     // /seq watermark and returns that floor; we stream strictly above it.

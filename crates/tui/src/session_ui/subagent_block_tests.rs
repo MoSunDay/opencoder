@@ -10,11 +10,55 @@ use std::sync::Arc;
 
 // ── build_subagent_block status mapping ───────────────────────────────
 
-/// Store stub for `build_subagent_block`: an empty child transcript (no
-/// events, no messages) so the reconstructed child `ChatView` is empty.
-/// Everything else panics — the block builder only reads the child's
-/// transcript.
-struct EmptyChildStore;
+/// Store stub for `build_subagent_block`: carries a fixed child event log
+/// (empty by default → reconstructed child `ChatView` is empty) and no
+/// message rows. Everything else panics — the block builder only reads the
+/// child's transcript.
+struct EmptyChildStore {
+    events: Vec<opencoder_store::SessionEventRecord>,
+}
+
+impl EmptyChildStore {
+    fn new() -> Self {
+        Self { events: Vec::new() }
+    }
+
+    /// Stub carrying serialized `SessionEvent`s under the child session id,
+    /// the shape `reconstruct_child_view` replays via `events_after`.
+    /// `kind` is display-only for replay (payload is the source of truth);
+    /// a coarse mapping keeps the stub honest without a full event taxonomy.
+    fn with_events(evs: Vec<opencoder_session::SessionEvent>) -> Self {
+        fn coarse_kind(ev: &opencoder_session::SessionEvent) -> opencoder_store::EventKind {
+            use opencoder_session::SessionEvent;
+            match ev {
+                SessionEvent::TextDelta(_) => opencoder_store::EventKind::TextDelta,
+                SessionEvent::ToolStart { .. } => opencoder_store::EventKind::ToolStart,
+                SessionEvent::ToolEnd { .. } => opencoder_store::EventKind::ToolEnd,
+                SessionEvent::Done => opencoder_store::EventKind::Done,
+                _ => opencoder_store::EventKind::Step,
+            }
+        }
+        Self {
+            events: evs
+                .iter()
+                .map(|ev| opencoder_store::SessionEventRecord {
+                    session_id: "child-1".into(),
+                    kind: coarse_kind(ev),
+                    payload: serde_json::to_value(ev).expect("event serializes"),
+                    ts: 0,
+                    seq: None,
+                    sse_kind: None,
+                })
+                .collect(),
+        }
+    }
+}
+
+impl Default for EmptyChildStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 #[async_trait::async_trait]
 impl opencoder_store::Store for EmptyChildStore {
@@ -29,7 +73,7 @@ impl opencoder_store::Store for EmptyChildStore {
         _: &str,
         _: i64,
     ) -> anyhow::Result<Vec<opencoder_store::SessionEventRecord>> {
-        Ok(Vec::new())
+        Ok(self.events.clone())
     }
     async fn create_session(&self, _: &opencoder_store::SessionMeta) -> anyhow::Result<()> {
         unimplemented!()
@@ -155,7 +199,7 @@ fn task_record(
 
 #[tokio::test]
 async fn subagent_block_completed_maps_to_done() {
-    let store: Arc<dyn opencoder_store::Store> = Arc::new(EmptyChildStore);
+    let store: Arc<dyn opencoder_store::Store> = Arc::new(EmptyChildStore::new());
     let task = task_record(SubagentStatus::Completed, Some("all done"), Some(true));
     let block = build_subagent_block(&task, &store).await;
     match block {
@@ -177,7 +221,7 @@ async fn subagent_block_completed_maps_to_done() {
 
 #[tokio::test]
 async fn subagent_block_cancelled_maps_to_cancelled_marker() {
-    let store: Arc<dyn opencoder_store::Store> = Arc::new(EmptyChildStore);
+    let store: Arc<dyn opencoder_store::Store> = Arc::new(EmptyChildStore::new());
     let task = task_record(SubagentStatus::Cancelled, None, None);
     let block = build_subagent_block(&task, &store).await;
     match block {
@@ -199,7 +243,7 @@ async fn subagent_block_cancelled_maps_to_cancelled_marker() {
 
 #[tokio::test]
 async fn subagent_block_failed_maps_to_failed() {
-    let store: Arc<dyn opencoder_store::Store> = Arc::new(EmptyChildStore);
+    let store: Arc<dyn opencoder_store::Store> = Arc::new(EmptyChildStore::new());
     let task = task_record(SubagentStatus::Failed, Some("boom"), Some(false));
     let block = build_subagent_block(&task, &store).await;
     match block {
@@ -224,7 +268,7 @@ async fn subagent_block_running_maps_to_interrupted() {
     // A Running row can only survive into the store when replay was cut
     // short (e.g. resume cancel token fired mid-replay); the rebuild must
     // still produce a terminal block rather than a dangling spinner.
-    let store: Arc<dyn opencoder_store::Store> = Arc::new(EmptyChildStore);
+    let store: Arc<dyn opencoder_store::Store> = Arc::new(EmptyChildStore::new());
     let task = task_record(SubagentStatus::Running, None, None);
     let block = build_subagent_block(&task, &store).await;
     match block {
@@ -246,7 +290,7 @@ async fn subagent_block_running_maps_to_interrupted() {
 
 #[tokio::test]
 async fn replay_subagent_block_carries_duration_from_task() {
-    let store: Arc<dyn opencoder_store::Store> = Arc::new(EmptyChildStore);
+    let store: Arc<dyn opencoder_store::Store> = Arc::new(EmptyChildStore::new());
     let mut task = task_record(SubagentStatus::Completed, Some("done"), Some(true));
     task.started_at = 1_000_000;
     task.completed_at = Some(1_018_000);
@@ -261,5 +305,49 @@ async fn replay_subagent_block_carries_duration_from_task() {
             assert_eq!(elapsed_ms, Some(18_000));
         }
         _ => panic!("expected Subagent block"),
+    }
+}
+
+/// A child event log truncated MID-STREAM (crash / kill before the child's
+/// round-terminal frames): the rebuilt child view must not resurrect an
+/// open Say whose body would render raw markdown — the rebuild path lacks
+/// the live `mark_subagent_done` repair, so `build_subagent_block` must
+/// finalize the reconstructed view itself.
+#[tokio::test]
+async fn replay_truncated_child_log_seals_open_says() {
+    use opencoder_session::SessionEvent;
+    let store: Arc<dyn opencoder_store::Store> = Arc::new(EmptyChildStore::with_events(vec![
+        SessionEvent::LlmRoundStart { started_at_ms: 1 },
+        SessionEvent::ReasoningDelta("think0 ".into()),
+        SessionEvent::TextDelta("ans0 **bold0** tail\n".into()),
+        // Resumed reasoning below the landed Say, then ANOTHER text — the
+        // interleaved shape — and the log simply stops: no LlmRoundEnd,
+        // no Done ever reached the store.
+        SessionEvent::ReasoningDelta("think1 ".into()),
+        SessionEvent::TextDelta("ans1 **bold1** tail\n".into()),
+    ]));
+    let task = task_record(SubagentStatus::Running, None, None);
+    let block = build_subagent_block(&task, &store).await;
+    match block {
+        ChatBlock::Subagent { view, .. } => {
+            assert!(
+                !view
+                    .blocks
+                    .iter()
+                    .any(|b| matches!(b, ChatBlock::Assistant { done: false, .. })),
+                "truncated replay must seal every child Say: {:#?}",
+                view.blocks
+            );
+            let flat: Vec<String> = view
+                .flatten()
+                .iter()
+                .map(|l| l.spans.iter().map(|s| s.content.clone()).collect())
+                .collect();
+            assert!(
+                !flat.iter().any(|l| l.contains("**")),
+                "rebuilt child body must render markdown, got {flat:?}"
+            );
+        }
+        other => panic!("expected Subagent block, got {other:?}"),
     }
 }

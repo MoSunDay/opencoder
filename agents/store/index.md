@@ -1,4 +1,4 @@
-Commit: e50ffc433bca866fd17bd571a74f1bdf17705dea
+Commit: 1ac64fe8b81a2c7c144c72b717a8031ab18f2589
 
 # store 模块
 
@@ -15,10 +15,12 @@ Commit: e50ffc433bca866fd17bd571a74f1bdf17705dea
 - `src/libsql_store/messages.rs` — 批量写按 `BATCH_CHUNK=200` 分块。
 - `src/libsql_store/sessions.rs` — `harness_runtime`/`set_message_usage` 私有补写接口。
 - `src/libsql_store/todos.rs` — `commit_todo_transition` 单事务 + expected generation。
+- `Store::todo_events_before` — 工作流内按 seq 倒序的行数与字节预算分页；跨工作流序号空洞不会形成扫描窗口。过大的单条 payload 返回省略标记，由完整事件读取接口补取。
 - `src/libsql_store/project_runs.rs` — run 文本单字段 64 KiB 上限、整页 512 KiB 预算（`src/project_types.rs`）。
 - `src/libsql_store/{project.rs,project_runs.rs,schema/project_relations.rs}` — project 三表 + 运行留痕。
 - `src/fleet/` — `FleetStore` 独立 control.db：节点 + 五字段 execution_index。
 - `src/fleet/brain.rs` — brain_plan_versions 追加式版本与 brain_resource_claims 持久读写占用；计划头/稳定指针复用 fleet_definitions。
+- `Store::dag_step_snapshot` — 在 run-session 水位内读取各步骤最新生命周期事件及最近开始时间；libsql 查询只投影状态字段，不读取 stdout 等日志载荷，返回量按步骤数增长。`src/store/dag_snapshot.rs` 定义读取模型。
 - `Store::last_todo_event_seq` — 根状态与事件流快照的水位接缝。
 - `src/sql_store/` — feature-gate `mysql`/`starrocks` 后端，仅覆盖 project 面。
 - `src/project_factory.rs` — `open_project_store` 返回 `Arc<dyn ProjectStore>`。
@@ -30,12 +32,19 @@ Commit: e50ffc433bca866fd17bd571a74f1bdf17705dea
 消息表的 `provider_state_json` 为 nullable，保存 Responses 原始 output、phase、call id 与密文推理状态；旧消息仍按 NULL 兼容读取，bundle 导出/导入保留该字段。
 
 ## 边界
-- 平台库分立：control.db / definitions.db（Server）、runtime.db（Node）。
+- 平台库分立：control.db / definitions.db（Server）、host.db（稳定 Host）、按版本隔离的 runtime.db。共享控制数据仅使用本机本地 SQLite/WAL。
 - `team_topic_runs` created_at 首插冻结；`brain_plans.tree_json` 对 store opaque。
 - StarRocks 全语句走 text 协议、无跨语句事务：跨表原子提交写前拒绝。
 - 删除数据必须由显式上层操作触发。
 - FleetStore 共用连接的公开读写都通过 gate；显式事务内部只调用已持锁 helper，避免无关写入混入事务或重入锁。
 - Brain 资源占用仅由确定结束回执释放，保留记录且无时间到期；成功的状态/事件提交先于来源通知确认。
+
+## 发布持久状态
+
+- `src/fleet/handoff/receipts.rs` — 请求指纹、阶段/回执与冻结 assignment；Project 初始派发以 run_id 区分，只有明确拒绝后才能替换尝试。
+- `src/fleet/handoff/runtimes.rs` — Runtime 注册、执行归属和报告水位；已有归属只读复核，旧 Host 报告不能覆盖新版状态。
+- `src/fleet/handoff/capacity.rs` — 全机容量及 FIFO 预留；启动前占槽，确定结束后释放，不使用心跳到期释放。
+- `request_lock` 使用本机文件锁跨进程串行化长操作，数据库事务只覆盖短持久化步骤；轻量执行索引不承载运行详情。
 
 ## 相关
 - [brain](../brain/index.md) — 计划与根状态消费方。

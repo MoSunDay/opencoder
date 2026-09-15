@@ -6,6 +6,8 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Serialize, Deserialize)]
 pub(crate) struct QueuedRun {
+    #[serde(default)]
+    pub ticket: Option<String>,
     pub sequence: u64,
     pub resume: bool,
     pub config: Config,
@@ -54,12 +56,27 @@ pub(crate) async fn enqueue_with_command(
     record.assignment.index.status = ExecutionStatus::Pending;
     record.lifecycle.stop_intent = None;
     record.queue = Some(Box::new(QueuedRun {
+        ticket: worker
+            .inner
+            .host_capacity
+            .as_ref()
+            .map(|_| ulid::Ulid::new().to_string()),
         sequence,
         resume,
         config,
         command,
     }));
     journal.save(record.clone())?;
+    if let Some(host) = &worker.inner.host_capacity {
+        let ticket = record
+            .queue
+            .as_ref()
+            .and_then(|q| q.ticket.as_deref())
+            .ok_or_else(|| anyhow::anyhow!("hosted queue missing ticket"))?;
+        host.store
+            .enqueue_capacity(ticket, &record.assignment.index.id, &host.runtime_id)
+            .await?;
+    }
     worker
         .inner
         .pending_runs
@@ -70,7 +87,9 @@ pub(crate) async fn enqueue_with_command(
 
 /// Caller holds node admission; a slot is reserved before any workload starts.
 pub(crate) async fn dispatch_locked(worker: &Worker) -> Result<()> {
+    worker.reconcile_capacity().await?;
     crate::brain::wake::recover_locked(worker).await?;
+    super::todo::recover_locked(worker).await?;
     if worker.admission_error().is_some()
         || worker.inner.stopping.is_cancelled()
         || worker.inner.persistence_error.lock().unwrap().is_some()
@@ -100,7 +119,11 @@ pub(crate) async fn dispatch_locked(worker: &Worker) -> Result<()> {
         .inner
         .pending_runs
         .store(records.len() as u64, std::sync::atomic::Ordering::SeqCst);
-    let order = worker.inner.scheduling.get().queue_order;
+    let order = if worker.inner.host_capacity.is_some() {
+        QueueOrder::Fifo
+    } else {
+        worker.inner.scheduling.get().queue_order
+    };
     records.sort_by(|a, b| {
         queue_cmp(
             order,
@@ -113,6 +136,19 @@ pub(crate) async fn dispatch_locked(worker: &Worker) -> Result<()> {
             break;
         };
         let queued = record.queue.as_ref().unwrap().clone();
+        if let Some(host) = &worker.inner.host_capacity {
+            let ticket = queued
+                .ticket
+                .as_deref()
+                .ok_or_else(|| anyhow::anyhow!("hosted queue missing capacity ticket"))?;
+            host.store
+                .enqueue_capacity(ticket, &record.assignment.index.id, &host.runtime_id)
+                .await?;
+            if !host.store.claim_capacity(ticket, &host.runtime_id).await? {
+                break;
+            }
+        }
+        let ticket = queued.ticket.clone();
         let outcome = if let Some(command) = &queued.command {
             let id = record.assignment.index.id.clone();
             let gate = worker.lifecycle_gate(&id).await;
@@ -123,6 +159,7 @@ pub(crate) async fn dispatch_locked(worker: &Worker) -> Result<()> {
                 .status
                 != ExecutionStatus::Pending
             {
+                worker.finish_slot(ticket.as_deref()).await?;
                 continue;
             }
             let reply = opencoder_core::harness::scope::with_execution(
@@ -151,6 +188,7 @@ pub(crate) async fn dispatch_locked(worker: &Worker) -> Result<()> {
                     .pending_runs
                     .fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
                 opencoder_session::loop_registry::notify_change();
+                worker.finish_slot(ticket.as_deref()).await?;
                 continue;
             }
             super::launch::launch_locked(
@@ -171,7 +209,10 @@ pub(crate) async fn dispatch_locked(worker: &Worker) -> Result<()> {
                 .pending_runs
                 .fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
         } else if let super::launch::LaunchOutcome::NotRunnable(status) = outcome {
+            worker.finish_slot(ticket.as_deref()).await?;
             tracing::debug!(?status, "pending execution changed before dispatch");
+        } else {
+            worker.finish_slot(ticket.as_deref()).await?;
         }
     }
     Ok(())

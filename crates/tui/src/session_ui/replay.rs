@@ -437,7 +437,14 @@ pub(super) async fn build_subagent_block(
         }
     };
 
-    let view = reconstruct_child_view(&task.child_session_id, &task.agent, store).await;
+    let mut view = reconstruct_child_view(&task.child_session_id, &task.agent, store).await;
+    // The persisted event log may end mid-stream (crash / kill between
+    // flushes): the child never emitted its round-terminal frames, and
+    // unlike the live path — whose `mark_subagent_done` finalizes the child
+    // view — a rebuilt view has no turn end to repair it. Finalize once
+    // here so a truncated log never resurrects an open Say whose body
+    // renders raw markdown.
+    view.finalize_assistant();
 
     ChatBlock::Subagent {
         id: task.task_id.clone(),

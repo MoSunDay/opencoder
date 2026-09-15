@@ -53,6 +53,7 @@ fn read_record(root: &std::path::Path, kind: &str, id: &str) -> Value {
 
 #[tokio::test]
 async fn idle_cancel_is_durable_terminal_and_repeated_stop_is_idempotent() {
+    let _config = support::isolated_config();
     let dir = tempfile::tempdir().unwrap();
     let client = support::mock();
     let first = worker(dir.path(), client.clone()).await;
@@ -135,6 +136,7 @@ async fn idle_cancel_is_durable_terminal_and_repeated_stop_is_idempotent() {
 
 #[tokio::test]
 async fn cancel_intent_survives_process_loss_and_cannot_recover_as_interrupted() {
+    let _config = support::isolated_config();
     let dir = tempfile::tempdir().unwrap();
     let client = support::mock();
     let first = worker(dir.path(), client.clone()).await;
@@ -178,6 +180,7 @@ async fn cancel_intent_survives_process_loss_and_cannot_recover_as_interrupted()
 
 #[tokio::test]
 async fn interrupt_is_resumable_once_and_late_interrupt_cannot_downgrade_cancel() {
+    let _config = support::isolated_config();
     let dir = tempfile::tempdir().unwrap();
     let first_hang = Arc::new(tokio::sync::Notify::new());
     let resumed_hang = Arc::new(tokio::sync::Notify::new());
@@ -257,6 +260,7 @@ async fn interrupt_is_resumable_once_and_late_interrupt_cannot_downgrade_cancel(
 
 #[tokio::test]
 async fn cancelled_project_execution_cannot_resume() {
+    let _config = support::isolated_config();
     let hang = Arc::new(tokio::sync::Notify::new());
     let client = Arc::new(MockChatClient::new().push_hang(hang.clone()));
     let fleet = Fleet::new(1, client.clone()).await;
@@ -345,6 +349,7 @@ async fn cancelled_project_execution_cannot_resume() {
 
 #[tokio::test]
 async fn completed_execution_wins_a_late_cancel_without_rewriting_results() {
+    let _config = support::isolated_config();
     let dir = tempfile::tempdir().unwrap();
     let node = worker(dir.path(), support::mock()).await;
     let id = "dag-finish-wins";

@@ -26,6 +26,7 @@ fn execution(id: &str) -> ExecutionRef {
 
 #[tokio::test]
 async fn storage_and_durable_freeze_reject_every_new_work_entry() {
+    let _host_config = support::isolated_config();
     let dir = tempfile::tempdir().unwrap();
     let low = Arc::new(AtomicBool::new(true));
     let client = Arc::new(
@@ -167,6 +168,7 @@ async fn storage_and_durable_freeze_reject_every_new_work_entry() {
 
 #[tokio::test]
 async fn drain_persists_interrupt_and_restart_never_replays() {
+    let _host_config = support::isolated_config();
     let dir = tempfile::tempdir().unwrap();
     let low = Arc::new(AtomicBool::new(false));
     let release = Arc::new(tokio::sync::Notify::new());
@@ -260,6 +262,7 @@ async fn drain_persists_interrupt_and_restart_never_replays() {
 
 #[tokio::test]
 async fn low_storage_blocks_new_work_while_existing_work_finishes_naturally() {
+    let _host_config = support::isolated_config();
     let dir = tempfile::tempdir().unwrap();
     let low = Arc::new(AtomicBool::new(false));
     let finish = Arc::new(tokio::sync::Notify::new());
@@ -349,6 +352,7 @@ async fn low_storage_blocks_new_work_while_existing_work_finishes_naturally() {
 
 #[tokio::test]
 async fn drain_cancels_a_hanging_title_request_without_a_seeded_title() {
+    let _host_config = support::isolated_config();
     let dir = tempfile::tempdir().unwrap();
     let low = Arc::new(AtomicBool::new(false));
     let never_release = Arc::new(tokio::sync::Notify::new());

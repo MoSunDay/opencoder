@@ -74,7 +74,7 @@ async fn active_execution_count(state: &AppState) -> anyhow::Result<u64> {
 }
 
 async fn local_status(state: &Arc<AppState>) -> anyhow::Result<serde_json::Value> {
-    let admission = state.admission.snapshot().await;
+    let admission = state.admission.snapshot().await?;
     let views = state.hub.views().await;
     let online_nodes = views.iter().filter(|node| node.online).count();
     let ready_nodes = views
@@ -144,6 +144,10 @@ pub async fn status(State(state): State<Arc<AppState>>) -> Response {
 }
 
 pub async fn freeze(State(state): State<Arc<AppState>>) -> Response {
+    let _process_lock = match state.fleet.request_lock("admission", "cluster").await {
+        Ok(lock) => lock,
+        Err(error) => return response(RpcReply::error(500, error.to_string())),
+    };
     let _transition = state.admission.transition().await;
     if let Err(error) = state.admission.freeze(&state.placement).await {
         return response(RpcReply::error(500, error.to_string()));
@@ -162,6 +166,10 @@ pub async fn freeze(State(state): State<Arc<AppState>>) -> Response {
 }
 
 pub async fn reopen(State(state): State<Arc<AppState>>) -> Response {
+    let _process_lock = match state.fleet.request_lock("admission", "cluster").await {
+        Ok(lock) => lock,
+        Err(error) => return response(RpcReply::error(500, error.to_string())),
+    };
     let _transition = state.admission.transition().await;
     // Reconcile online nodes even when the server is already open: a node
     // may still carry its durable shutdown freeze.
@@ -203,7 +211,7 @@ pub async fn reopen(State(state): State<Arc<AppState>>) -> Response {
     })))
 }
 
-pub(crate) async fn freeze_cluster(state: &Arc<AppState>) -> anyhow::Result<()> {
+pub async fn freeze_cluster(state: &Arc<AppState>) -> anyhow::Result<()> {
     let _transition = state.admission.transition().await;
     state.admission.freeze(&state.placement).await?;
     let (nodes, _) = call_online_nodes(state, NodeAdmissionCommand::Freeze).await;

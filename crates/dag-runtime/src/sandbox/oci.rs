@@ -128,6 +128,7 @@ fn wasm_args(spec: &BundleSpec) -> Vec<String> {
         "wasmtime".to_string(),
         "run".to_string(),
         format!("--dir={}", crate::exec::wasm::CONTEXT_MOUNT),
+        "-Ccache-config=/opencoder-wasmtime-cache.toml".to_string(),
     ];
     for (k, v) in &spec.env {
         args.push("--env".to_string());
@@ -184,7 +185,14 @@ pub fn write_bundle(dir: &Path, spec: &BundleSpec) -> Result<PathBuf> {
 
     // 1. A real, private root isolates runc device initialization and pins
     //    runtime files for retries. The source is never modified.
-    super::rootfs::snapshot(&shared, &dir)?;
+    let rootfs = super::rootfs::snapshot(&shared, &dir)?;
+    // The root image is read-only at execution time. Wasmtime's default
+    // cache under /.cache cannot be created there; use the container's
+    // existing private /tmp mount without changing the guest environment.
+    opencoder_core::atomic_write(
+        &rootfs.join("opencoder-wasmtime-cache.toml"),
+        b"[cache]\ndirectory = \"/tmp/wasmtime-cache\"\n",
+    )?;
 
     // 2. config.json.
     let config = container_config(spec);
@@ -309,10 +317,11 @@ mod tests {
         assert_eq!(args[0], "wasmtime");
         assert_eq!(args[1], "run");
         assert_eq!(args[2], "--dir=/workspace/context");
-        assert_eq!(args[3], "--env");
-        assert_eq!(args[4], "OPENCODER_RUN_ID=run-1");
-        assert_eq!(args[5], "/workspace/context/step-a/main.wasm");
-        assert_eq!(args[6], "--flag");
+        assert_eq!(args[3], "-Ccache-config=/opencoder-wasmtime-cache.toml");
+        assert_eq!(args[4], "--env");
+        assert_eq!(args[5], "OPENCODER_RUN_ID=run-1");
+        assert_eq!(args[6], "/workspace/context/step-a/main.wasm");
+        assert_eq!(args[7], "--flag");
         let env = cfg["process"]["env"].as_array().unwrap();
         assert!(env.contains(&json!("OPENCODER_RUN_ID=run-1")), "{env:?}");
         assert_eq!(cfg["process"]["cwd"], "/workspace");
@@ -348,7 +357,7 @@ mod tests {
             serde_json::from_str(&fs::read_to_string(bundle.join("config.json")).unwrap()).unwrap();
         assert_eq!(cfg["process"]["args"][0], "wasmtime");
         assert_eq!(
-            cfg["process"]["args"][5],
+            cfg["process"]["args"][6],
             "/workspace/context/step-a/main.wasm"
         );
         assert_eq!(cfg["root"]["path"], "rootfs");
@@ -357,6 +366,13 @@ mod tests {
             .is_dir());
         assert!(bundle.join("rootfs/workspace/context").is_dir());
         assert!(!workflow_root.join("rootfs/workspace").exists());
+        assert_eq!(
+            fs::read_to_string(bundle.join("rootfs/opencoder-wasmtime-cache.toml")).unwrap(),
+            "[cache]\ndirectory = \"/tmp/wasmtime-cache\"\n"
+        );
+        assert!(!workflow_root
+            .join("rootfs/opencoder-wasmtime-cache.toml")
+            .exists());
     }
 
     #[test]

@@ -20,21 +20,22 @@ tar -xzf "$build_dir/source.tar.gz" -C "$build_dir"
 cd "$build_dir/nginx-$version"
 ./configure --prefix=/usr/local/lib/opencoder-nginx --sbin-path=/usr/local/sbin/nginx \
   --conf-path=/etc/nginx/nginx.conf --pid-path=/run/opencoder-nginx.pid \
-  --error-log-path=/var/log/nginx/error.log --http-log-path=/var/log/nginx/access.log \
+  --error-log-path=/var/log/opencoder-nginx/error.log --http-log-path=/var/log/opencoder-nginx/access.log \
   --with-pcre-jit --with-http_ssl_module
 make -j4
-install -d /etc/nginx/conf.d /var/log/nginx /usr/local/lib/opencoder-nginx /usr/local/sbin
+install -d /etc/nginx/conf.d /var/log/opencoder-nginx /usr/local/lib/opencoder-nginx /usr/local/sbin
 install -m 755 objs/nginx /usr/local/sbin/nginx
 install -m 644 conf/mime.types /etc/nginx/mime.types
 cat > /etc/nginx/nginx.conf <<'CONF'
 worker_processes auto;
+worker_rlimit_nofile 65536;
 pid /run/opencoder-nginx.pid;
-error_log /var/log/nginx/error.log warn;
+error_log /var/log/opencoder-nginx/error.log warn;
 events { worker_connections 4096; }
 http {
     include /etc/nginx/mime.types;
     default_type application/octet-stream;
-    access_log /var/log/nginx/access.log;
+    access_log /var/log/opencoder-nginx/access.log;
     sendfile on;
     keepalive_timeout 65;
     include /etc/nginx/conf.d/*.conf;
@@ -46,6 +47,7 @@ Description=OpenCoder stable Nginx ingress
 After=network.target
 [Service]
 Type=simple
+LimitNOFILE=1048576
 ExecStartPre=/usr/local/sbin/nginx -t
 ExecStart=/usr/local/sbin/nginx -g "daemon off;"
 ExecReload=/usr/local/sbin/nginx -s reload

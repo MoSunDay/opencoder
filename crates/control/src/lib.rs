@@ -26,7 +26,7 @@ pub mod api_dag_wasm_nfs;
 pub mod api_project;
 #[path = "../../web/src/api_project_todos.rs"]
 pub mod api_project_todos;
-#[path = "../../web/src/api_todo_directory.rs"]
+#[path = "../../web/src/api_todo_directory/mod.rs"]
 pub mod api_todo_directory;
 #[path = "../../web/src/api_todo_envs.rs"]
 pub mod api_todo_envs;

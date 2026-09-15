@@ -27,9 +27,9 @@ uuid.workspace = true
 base64.workspace = true
 dirs.workspace = true
 axum = { version = "0.7", features = ["ws"] }
+reqwest.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
 tower = { version = "0.5", features = ["util"] }
-reqwest.workspace = true
 opencoder-node.workspace = true

@@ -6,7 +6,19 @@ use serde_json::{json, Value};
 /// step_started event when it later arrives above the snapshot watermark.
 pub(super) fn project(name: &str, meta: &Value, event: Option<&DagStepEvent>, run: &str) -> Value {
     let receipt_at = meta["finished_at_ms"].as_i64().unwrap_or(0);
-    let receipt_current = !meta.is_null() && event.is_none_or(|e| receipt_at >= e.at_ms);
+    let receipt_current = !meta.is_null()
+        && event.is_none_or(|e| {
+            if e.started {
+                return receipt_at >= e.at_ms;
+            }
+            // Completed events are emitted AFTER writing the receipt. The
+            // receipt distinguishes cancellation from failure, but a receipt
+            // from an older attempt or a later persistence error cannot win.
+            receipt_at > e.at_ms
+                || (receipt_at >= e.started_at_ms
+                    && e.ok == (super::outcome_status(meta) == "done")
+                    && e.error.as_deref() == meta["error"].as_str())
+        });
     let (status, error, at_ms) = if receipt_current {
         (
             super::outcome_status(meta),
@@ -43,6 +55,7 @@ mod tests {
             seq: 5,
             started: true,
             at_ms,
+            started_at_ms: at_ms,
             ok: true,
             error: None,
         }
@@ -72,5 +85,44 @@ mod tests {
             project("build", &Value::Null, None, "running")["status"],
             "pending"
         );
+    }
+
+    #[test]
+    fn cancelled_receipt_survives_its_later_completion_event() {
+        let meta = json!({"outcome":"cancelled","finished_at_ms":20,"error":"cancelled"});
+        let event = DagStepEvent {
+            started: false,
+            at_ms: 30,
+            ok: false,
+            error: Some("cancelled".into()),
+            ..started(10)
+        };
+        assert_eq!(
+            project("build", &meta, Some(&event), "cancelled")["status"],
+            "cancelled"
+        );
+        let later_attempt = DagStepEvent {
+            started_at_ms: 25,
+            ..event
+        };
+        assert_eq!(
+            project("build", &meta, Some(&later_attempt), "error")["status"],
+            "error"
+        );
+    }
+
+    #[test]
+    fn artifact_failure_after_a_receipt_is_not_hidden() {
+        let meta = json!({"outcome":"done","finished_at_ms":20});
+        let event = DagStepEvent {
+            started: false,
+            at_ms: 20,
+            ok: false,
+            error: Some("step artifact persistence failed".into()),
+            ..started(10)
+        };
+        let result = project("build", &meta, Some(&event), "error");
+        assert_eq!(result["status"], "error");
+        assert_eq!(result["error"], "step artifact persistence failed");
     }
 }

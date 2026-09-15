@@ -11,6 +11,8 @@ use opencoder_core::message::now_ms;
 use opencoder_store::ProjectExecutorKind;
 use serde_json::{json, Value};
 use std::sync::Arc;
+mod routing;
+pub(super) use routing::brain_preresolve;
 
 pub async fn overview(State(state): State<Arc<AppState>>) -> Response {
     let result = async {
@@ -170,7 +172,7 @@ async fn submit_start(state: Arc<AppState>, todo: String, action: &str, input: V
 /// `executions::submit` reports the canonical 404; store failures 500
 /// HERE instead of being swallowed. `plan` never resolves — planning is
 /// executor-agnostic.
-pub(super) async fn brain_preresolve(
+async fn resolve_brain_executor(
     state: &Arc<AppState>,
     todo: &str,
     action: &str,

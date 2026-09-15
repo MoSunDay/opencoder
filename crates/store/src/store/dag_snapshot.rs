@@ -12,6 +12,7 @@ pub struct DagStepEvent {
     pub seq: i64,
     pub started: bool,
     pub at_ms: i64,
+    pub started_at_ms: i64,
     pub ok: bool,
     pub error: Option<String>,
 }

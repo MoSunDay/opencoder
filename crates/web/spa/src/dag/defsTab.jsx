@@ -4,7 +4,7 @@
 // Endpoints: GET /api/dag/defs, POST /api/dag/defs, DELETE /api/dag/defs/:id,
 // POST /api/dag/defs/:id/dispatch {node_id?} → {run_id}.
 
-import { Button, Modal, Popconfirm, Select, Space, Table, Tag, Tooltip, Typography } from 'antd';
+import { Button, Modal, Popconfirm, Select, Space, Table, Tag, Typography } from 'antd';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiDel, apiGet, apiPost } from '../api.js';
 import { TimeText } from '../ui/timeText.jsx';
@@ -15,24 +15,6 @@ import { DefEditor } from './defEditor.jsx';
 import { err } from '../notice.js';
 
 const { Text } = Typography;
-
-const KIND_COLOR = { agent: 'geekblue', wasm: 'green' };
-
-/// Step-kind mini tags for the 步骤 column (first kinds, then "+n").
-function KindSummary({ spec }) {
-  const kinds = ((spec && spec.steps) || []).map((s) => (s.kind && s.kind.type) || '?');
-  const head = kinds.slice(0, 3);
-  return (
-    <Space size={4} wrap>
-      {head.map((k, i) => (
-        <Tag key={i} color={KIND_COLOR[k] || 'default'} style={{ marginInlineEnd: 0 }}>
-          {k}
-        </Tag>
-      ))}
-      {kinds.length > head.length ? <Text type="secondary">+{kinds.length - head.length}</Text> : null}
-    </Space>
-  );
-}
 
 export function DefsTab({ onNotice, onDispatched }) {
   const msg = useMessage();
@@ -150,19 +132,6 @@ export function DefsTab({ onNotice, onDispatched }) {
           {r.spec && r.spec.description ? <Text type="secondary" style={{ fontSize: 12 }}>{r.spec.description}</Text> : null}
         </Space>
       ),
-    },
-    {
-      title: '步骤数',
-      key: 'steps',
-      width: 90,
-      align: 'center',
-      render: (_, r) => ((r.spec && r.spec.steps) || []).length,
-    },
-    {
-      title: '类型',
-      key: 'kinds',
-      width: 170,
-      render: (_, r) => <KindSummary spec={r.spec} />,
     },
     {
       title: '更新时间',

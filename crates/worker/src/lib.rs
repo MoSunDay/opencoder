@@ -15,7 +15,7 @@ mod state;
 mod workloads;
 pub use layout::DirectoryLayout;
 pub use migration::{migrate_layout, MigrationReport};
-pub use runtime::{DrainPolicy, HealthReader, StorageCapacity, WorkerRuntime};
+pub use runtime::{DrainPolicy, HealthReader, HostBinding, StorageCapacity, WorkerRuntime};
 pub use state::{Worker, WorkerOptions};
 
 mod maintenance_tools;

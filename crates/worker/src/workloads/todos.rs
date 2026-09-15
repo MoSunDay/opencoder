@@ -47,6 +47,21 @@ pub(super) async fn run(
         {
             spec.objective = format!("{}\n执行要求：{prompt}", spec.objective);
         }
+        let directory = worker
+            .inner
+            .layout
+            .execution_dir(ExecutionKind::Todos, id)?
+            .join("definition");
+        if !directory.exists() {
+            let files = opencoder_todos::directory::encode(&spec, spec.metadata["env"].as_str())?;
+            opencoder_todos::directory::write_new(&directory, &files)?;
+        }
+        let frozen = opencoder_todos::directory::load(&directory)?;
+        anyhow::ensure!(
+            frozen == spec,
+            "TODO definition directory differs from the pinned assignment"
+        );
+        let spec = frozen;
         let worker = worker.clone();
         let initialized_id = id.clone();
         runtime

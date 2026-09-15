@@ -19,6 +19,12 @@ use clap::Parser;
     about = "opencoder fleet control plane: web console, brain and node scheduling"
 )]
 struct Args {
+    /// Run the independent resource service instead of a business server.
+    #[arg(long)]
+    resources: bool,
+    /// Per-instance release metadata; keeps the existing resource workdir.
+    #[arg(long, conflicts_with = "resources")]
+    release_config: Option<PathBuf>,
     /// Print machine-readable version, commit and fleet protocol metadata.
     #[arg(long)]
     build_info: bool,
@@ -89,13 +95,28 @@ async fn main() -> Result<()> {
         .clone()
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
     let token = resolve_token(args.token, args.token_file)?;
-    opencoder_control::serve(
+    if args.resources {
+        return opencoder_control::release::resources::serve(
+            workdir,
+            args.data_dir
+                .context("resource service requires --data-dir")?,
+            args.port,
+            token,
+        )
+        .await;
+    }
+    let platform = args
+        .release_config
+        .map(|path| -> Result<_> { Ok(serde_json::from_slice(&std::fs::read(path)?)?) })
+        .transpose()?;
+    opencoder_control::serve_release(
         args.host,
         args.port,
         args.web,
         workdir,
         args.data_dir,
         token,
+        platform,
     )
     .await
 }

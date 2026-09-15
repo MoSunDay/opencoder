@@ -30,19 +30,44 @@ impl FleetStore {
         records: &[ExecutionIndex],
         pending_at_begin: Option<&[String]>,
     ) -> Result<Vec<ExecutionIndex>> {
+        self.apply_index_report_fenced(node_id, records, pending_at_begin, None)
+            .await
+    }
+
+    pub async fn apply_index_report_fenced(
+        &self,
+        node_id: &str,
+        records: &[ExecutionIndex],
+        pending_at_begin: Option<&[String]>,
+        watermark: Option<(&str, u64)>,
+    ) -> Result<Vec<ExecutionIndex>> {
         validate_report(node_id, records)?;
         let _guard = self.gate.lock().await;
         self.conn
             .execute("BEGIN IMMEDIATE", ())
             .await
             .context("begin index report transaction")?;
-        match apply_report_tx(
+        match async {
+            if let Some((generation, sequence)) = watermark {
+                let mut rows = self.conn.query("SELECT generation,sequence FROM node_report_watermarks WHERE node_id=?1", [node_id]).await?;
+                if let Some(row) = rows.next().await? {
+                    let old: String = row.get(0)?;
+                    let old_sequence: i64 = row.get(1)?;
+                    if generation < old.as_str() || (generation == old && sequence <= old_sequence as u64) {
+                        return Ok(Vec::new());
+                    }
+                }
+                drop(rows);
+                self.conn.execute("INSERT INTO node_report_watermarks VALUES (?1,?2,?3) ON CONFLICT(node_id) DO UPDATE SET generation=excluded.generation,sequence=excluded.sequence", params![node_id,generation,sequence as i64]).await?;
+            }
+            apply_report_tx(
             &self.conn,
             node_id,
             records,
             pending_at_begin.unwrap_or_default(),
         )
         .await
+        }.await
         {
             Ok(recovered) => {
                 if let Err(error) = self
@@ -117,6 +142,18 @@ async fn apply_report_tx(
         {
             continue;
         }
+        // A prepared outbox entry may still be in flight on another server.
+        // Absence from an inventory is not evidence that it was rejected.
+        let mut dispatched = conn
+            .query(
+                "SELECT 1 FROM execution_assignments WHERE id=?1",
+                [id.as_str()],
+            )
+            .await?;
+        if dispatched.next().await?.is_some() {
+            continue;
+        }
+        drop(dispatched);
         conn.execute(
             "UPDATE execution_index SET status='error' WHERE id=?1 AND node_id=?2 AND status='pending'",
             params![id.clone(), node_id.to_owned()],

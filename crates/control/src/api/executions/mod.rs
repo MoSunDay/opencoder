@@ -5,195 +5,12 @@ use axum::{
     response::Response,
     Json,
 };
-use opencoder_core::{fleet::*, message::now_ms};
+use opencoder_core::fleet::*;
 use serde_json::json;
 use std::sync::Arc;
 
-pub async fn submit(state: &Arc<AppState>, request: CreateExecution) -> RpcReply {
-    if request.kind == ExecutionKind::System {
-        return RpcReply::error(
-            400,
-            "system team execution is retired; use explicit node maintenance",
-        );
-    }
-    if request.kind == ExecutionKind::Project
-        && request.id != format!("project-{}", request.target.as_deref().unwrap_or(""))
-    {
-        return RpcReply::error(
-            400,
-            "project execution id must be project-<todo id> to preserve plan/act affinity",
-        );
-    }
-    if let Err(error) = request.validate() {
-        return RpcReply::error(400, error);
-    }
-    match submit_inner(state, request).await {
-        Ok(reply) => reply,
-        Err(error) => RpcReply::error(500, format!("submit execution: {error:#}")),
-    }
-}
-
-async fn submit_inner(state: &Arc<AppState>, request: CreateExecution) -> anyhow::Result<RpcReply> {
-    let (_permit, assignment) = {
-        let _gate = state.placement.lock().await;
-        let permit = match state.admission.enter().await {
-            Ok(permit) => permit,
-            Err(error) => return Ok(RpcReply::error(503, error)),
-        };
-        if let Some(index) = state.fleet.index(&request.id).await? {
-            if index.kind != request.kind {
-                return Ok(RpcReply::error(
-                    409,
-                    "execution id is already assigned to another kind",
-                ));
-            }
-            if request
-                .node_id
-                .as_deref()
-                .is_some_and(|node| node != index.node_id)
-            {
-                return Ok(RpcReply::error(
-                    409,
-                    "execution is already assigned to another node",
-                ));
-            }
-            // The node compares the original request and returns its durable
-            // acceptance. A newer definition must not replace its snapshot.
-            state.hub.reserve(&index).await;
-            let assignment = Assignment {
-                runtime: super::settings::registered::snapshot(state).await?,
-                codex: super::settings::codex(state).await?,
-                index,
-                request,
-                definition: None,
-            };
-            (permit, assignment)
-        } else {
-            let definition = match super::catalog::resolve(state, &request).await {
-                Ok(definition) => definition,
-                Err(reply) => return Ok(reply),
-            };
-            let mut nodes = Vec::new();
-            for node in state.hub.views().await {
-                if state.admission.node_allowed(&node).await {
-                    nodes.push(node);
-                }
-            }
-            let mut incompatibilities = Vec::new();
-            let node = loop {
-                let Some(node) =
-                    select_queue_node(&nodes, request.kind, request.node_id.as_deref(), now_ms())
-                        .cloned()
-                else {
-                    return Ok(RpcReply::error(
-                        503,
-                        if incompatibilities.is_empty() {
-                            "no ready online node can accept this execution".to_string()
-                        } else {
-                            format!(
-                                "no ready compatible node can accept this execution: {}",
-                                incompatibilities.join("; ")
-                            )
-                        },
-                    ));
-                };
-                if let Some(action) = request.input.get("_brain").and_then(|b| b.get("action")) {
-                    let reply = state
-                        .hub
-                        .call(
-                            &node.registration.id,
-                            NodeOperation::Brain {
-                                execution: ExecutionRef {
-                                    id: request.id.clone(),
-                                    kind: request.kind,
-                                },
-                                action: "capability_probe".into(),
-                                input: action.clone(),
-                            },
-                        )
-                        .await;
-                    if reply.status >= 300 {
-                        incompatibilities.push(format!("{}: {}", node.registration.id, reply.body));
-                        nodes.retain(|n| n.registration.id != node.registration.id);
-                        continue;
-                    }
-                }
-                break node;
-            };
-            let index = ExecutionIndex {
-                id: request.id.clone(),
-                created_at: now_ms(),
-                kind: request.kind,
-                node_id: node.registration.id.clone(),
-                status: ExecutionStatus::Pending,
-            };
-            state.fleet.put_index(&index).await?;
-            state.hub.reserve(&index).await;
-            let assignment = Assignment {
-                runtime: super::settings::registered::snapshot(state).await?,
-                codex: super::settings::codex(state).await?,
-                index,
-                request,
-                definition,
-            };
-            (permit, assignment)
-        }
-    };
-    let index = assignment.index.clone();
-    let mut reply = state
-        .hub
-        .call(
-            &index.node_id,
-            NodeOperation::Create {
-                assignment: assignment.clone(),
-            },
-        )
-        .await;
-    if reply.status == 428 {
-        let definition = match super::catalog::resolve(state, &assignment.request).await {
-            Ok(definition) => definition,
-            Err(reply) => return Ok(reply),
-        };
-        state.hub.reserve(&index).await;
-        reply = state
-            .hub
-            .call(
-                &index.node_id,
-                NodeOperation::Create {
-                    assignment: Assignment {
-                        definition,
-                        ..assignment
-                    },
-                },
-            )
-            .await;
-    }
-    if (200..300).contains(&reply.status) {
-        let accepted: ExecutionIndex = serde_json::from_value(reply.body.clone())?;
-        if accepted.id != index.id
-            || accepted.node_id != index.node_id
-            || accepted.created_at != index.created_at
-            || accepted.kind != index.kind
-        {
-            anyhow::bail!("invalid node acceptance");
-        }
-        return Ok(RpcReply {
-            status: 202,
-            body: {
-                let mut body = serde_json::to_value(accepted)?;
-                if index.kind == ExecutionKind::Project {
-                    if let Some(id) = reply.body.get("run_id") {
-                        body["run_id"] = id.clone();
-                    }
-                }
-                body
-            },
-        });
-    }
-    // The socket settles actual replies and complete reports own status. A
-    // timeout/disconnect retains Pending because the node may have accepted it.
-    Ok(reply)
-}
+mod submit;
+pub use submit::submit;
 
 pub async fn create(
     State(state): State<Arc<AppState>>,
@@ -321,7 +138,20 @@ pub async fn dispatch_command_as(
 pub async fn inspect_id(state: &AppState, id: &str) -> RpcReply {
     for_id(state, id, |execution| NodeOperation::Inspect { execution }).await
 }
+
+pub async fn receipt(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Response {
+    match state.fleet.receipt("execution", &id).await {
+        Ok(Some(receipt)) => response(RpcReply::ok(json!({"id":id,"phase":receipt.phase,
+            "receipt": if matches!(receipt.phase.as_str(), "accepted" | "rejected") { receipt.payload } else { serde_json::Value::Null }}))),
+        Ok(None) => response(RpcReply::error(404, "request receipt not found")),
+        Err(error) => response(RpcReply::error(500, error.to_string())),
+    }
+}
 pub async fn command_id(state: &AppState, id: &str, command: ExecutionCommand) -> RpcReply {
+    let _process_lock = match state.fleet.request_lock("brain-control", id).await {
+        Ok(lock) => lock,
+        Err(error) => return RpcReply::error(500, error.to_string()),
+    };
     let _permit = if crate::admission::command_requires_admission(&command) {
         let _placement = state.placement.lock().await;
         match state.admission.enter().await {

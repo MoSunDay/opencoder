@@ -5,9 +5,7 @@ use serde_json::{json, Value};
 use std::path::Path;
 
 pub(super) fn snapshot(root: &Path, name: &str, version: &str) -> Result<Value> {
-    let context = read_json_opt(&todo_context_path(root, name, version)?)?
-        .context("template version not found")?;
-    let mut spec: opencoder_todos::WorkflowSpec = serde_json::from_value(context)?;
+    let mut spec = opencoder_todos::directory::load(&todo_version_dir(root, name, version)?)?;
     let binding = read_json_opt(&todo_env_binding_path(root, name, version)?)?;
     if let Some(env) = binding
         .as_ref()

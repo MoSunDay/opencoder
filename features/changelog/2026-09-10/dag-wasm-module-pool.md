@@ -1,4 +1,4 @@
-Commit: (working-tree, 基于 b465f440)
+Commit: 1ccb120ee9b7fb751500805cef3da91ec3fcdac1
 
 # DAG wasm 模块池：发布 API + NFS 只读导出 + 节点受理冻结分发
 

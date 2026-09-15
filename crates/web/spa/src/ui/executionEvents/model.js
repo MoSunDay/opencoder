@@ -49,3 +49,7 @@ export function logRows(frames, step = '', query = '') {
   }
   return needle ? rows.filter((entry) => `${entry.step} ${entry.label} ${entry.text}`.toLocaleLowerCase().includes(needle)) : rows;
 }
+
+export function pageFrames(page) {
+  return (page.events || []).map((event) => ({ seq: event.seq, event: event.kind || event.event, data: event.data || event.payload || {} }));
+}

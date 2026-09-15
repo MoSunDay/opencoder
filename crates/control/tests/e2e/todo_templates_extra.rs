@@ -123,7 +123,7 @@ async fn template_meta_and_context_contract() {
         &h,
         Method::POST,
         "/api/todo/templates/meta/new-version",
-        Some(json!({"spec": spec("meta")})),
+        Some(json!({"spec": spec("meta"),"expected_current":"v1"})),
     )
     .await;
     assert_eq!(s, 200, "{b}");
@@ -149,163 +149,127 @@ async fn template_meta_and_context_contract() {
     .await;
     assert_eq!(s, 404);
 
-    // Replace the spec and read it back; an invalid replacement keeps the old one.
-    let (s, b) = http(
+    // Existing versions are immutable; edits publish a complete new directory.
+    let (s, _) = http(
         &h,
         Method::PUT,
         "/api/todo/templates/meta/v1/context.json",
         Some(spec("meta2")),
     )
     .await;
-    assert_eq!(s, 200, "{b}");
+    assert_eq!(s, 409);
     let (s, b) = http(
+        &h,
+        Method::POST,
+        "/api/todo/templates/meta/new-version",
+        Some(json!({"source_version":"v1","expected_current":"v1","spec":spec("meta2")})),
+    )
+    .await;
+    assert_eq!(s, 200, "{b}");
+    assert_eq!(b["version"], "v3");
+    let (_, old) = http(
         &h,
         Method::GET,
         "/api/todo/templates/meta/v1/context.json",
         None,
     )
     .await;
-    assert_eq!(s, 200, "{b}");
-    assert_eq!(b["id"], json!("wf-meta2"), "{b}");
-    let mut bad = spec("meta3");
+    assert_eq!(old["id"], "wf-meta");
+    let mut bad = spec("bad");
     bad["todos"] = json!([]);
     let (s, b) = http(
         &h,
-        Method::PUT,
-        "/api/todo/templates/meta/v1/context.json",
-        Some(bad),
+        Method::POST,
+        "/api/todo/templates/meta/new-version",
+        Some(json!({"source_version":"v3","expected_current":"v3","spec":bad})),
     )
     .await;
     assert_eq!(s, 400, "{b}");
-    let (s, b) = http(
+    assert!(b["diagnostics"].is_array());
+    let (_, current) = http(
         &h,
         Method::GET,
-        "/api/todo/templates/meta/v1/context.json",
+        "/api/todo/templates/meta/v3/context.json",
         None,
     )
     .await;
-    assert_eq!(s, 200, "{b}");
-    assert_eq!(b["id"], json!("wf-meta2"), "{b}");
-
-    let (s, _) = http(
-        &h,
-        Method::PUT,
-        "/api/todo/templates/none/v1/context.json",
-        Some(spec("x")),
-    )
-    .await;
-    assert_eq!(s, 404);
+    assert_eq!(current["id"], "wf-meta2");
 }
 
 #[tokio::test]
 async fn env_binding_roundtrip_tombstone_and_map() {
     let _guard = scoped().await.0;
     let h = Harness::new().await;
-    let (s, _) = http(
+    assert_eq!(
+        create(&h, json!({"name":"bind","spec":spec("bind")}))
+            .await
+            .0,
+        200
+    );
+    assert_eq!(
+        http(
+            &h,
+            Method::POST,
+            "/api/todo/envs",
+            Some(json!({"name":"dev"}))
+        )
+        .await
+        .0,
+        200
+    );
+    let (s, b) = http(
         &h,
         Method::POST,
-        "/api/todo/templates",
-        Some(json!({"name": "bind", "spec": spec("bind")})),
+        "/api/todo/templates/bind/new-version",
+        Some(json!({"source_version":"v1","expected_current":"v1","binding":{"env":"dev"}})),
     )
     .await;
-    assert_eq!(s, 200);
-
-    // Unbound version answers the explicit `{"env":null}` shape.
-    let (s, b) = http(
+    assert_eq!(s, 200, "{b}");
+    assert_eq!(b["version"], "v2");
+    let (_, b) = http(
         &h,
         Method::GET,
         "/api/todo/templates/bind/v1/env.json",
         None,
     )
     .await;
-    assert_eq!(s, 200, "{b}");
-    assert_eq!(b, json!({"env": null}), "{b}");
-
-    let (s, _) = http(
-        &h,
-        Method::POST,
-        "/api/todo/envs",
-        Some(json!({"name": "dev"})),
-    )
-    .await;
-    assert_eq!(s, 200);
-    let (s, b) = http(
-        &h,
-        Method::PUT,
-        "/api/todo/templates/bind/v1/env.json",
-        Some(json!({"env": "dev"})),
-    )
-    .await;
-    assert_eq!(s, 200, "{b}");
-    let (s, b) = http(
+    assert!(b["env"].is_null());
+    let (_, b) = http(
         &h,
         Method::GET,
-        "/api/todo/templates/bind/v1/env.json",
+        "/api/todo/templates/bind/v2/env.json",
         None,
     )
     .await;
-    assert_eq!(s, 200, "{b}");
-    assert_eq!(b["env"], json!("dev"), "{b}");
-
-    // A non-existent target env is refused.
+    assert_eq!(b["env"], "dev");
     let (s, b) = http(
         &h,
-        Method::PUT,
-        "/api/todo/templates/bind/v1/env.json",
-        Some(json!({"env": "ghost"})),
+        Method::POST,
+        "/api/todo/templates/bind/new-version",
+        Some(json!({"source_version":"v2","expected_current":"v2","binding":{"env":"ghost"}})),
     )
     .await;
     assert_eq!(s, 400, "{b}");
-    assert!(err_of(&b).contains("env 不存在"), "{b}");
-
+    assert_eq!(b["diagnostics"][0]["path"], "env.json");
     let (s, _) = http(
         &h,
         Method::PUT,
-        "/api/todo/templates/none/v1/env.json",
-        Some(json!({"env": "dev"})),
+        "/api/todo/templates/bind/v2/env.json",
+        Some(json!({"env":null})),
     )
     .await;
-    assert_eq!(s, 404);
-
-    // Explicit null (and `""`) clears to the `{"env":null}` tombstone.
+    assert_eq!(s, 409);
     let (s, b) = http(
         &h,
-        Method::PUT,
-        "/api/todo/templates/bind/v1/env.json",
-        Some(json!({"env": null})),
+        Method::POST,
+        "/api/todo/templates/bind/new-version",
+        Some(json!({"source_version":"v2","expected_current":"v2","binding":{"env":null}})),
     )
     .await;
     assert_eq!(s, 200, "{b}");
-    let (s, b) = http(
-        &h,
-        Method::GET,
-        "/api/todo/templates/bind/v1/env.json",
-        None,
-    )
-    .await;
-    assert_eq!(s, 200, "{b}");
-    assert_eq!(b["env"], Value::Null, "{b}");
-    let (s, _) = http(
-        &h,
-        Method::PUT,
-        "/api/todo/templates/bind/v1/env.json",
-        Some(json!({"env": ""})),
-    )
-    .await;
-    assert_eq!(s, 200);
-
-    // The template view exposes the per-version binding map.
-    let (s, _) = http(
-        &h,
-        Method::PUT,
-        "/api/todo/templates/bind/v1/env.json",
-        Some(json!({"env": "dev"})),
-    )
-    .await;
-    assert_eq!(s, 200);
-    let (s, b) = http(&h, Method::GET, "/api/todo/templates/bind", None).await;
-    assert_eq!(s, 200, "{b}");
-    assert_eq!(b["env_by_version"]["v1"], json!("dev"), "{b}");
+    let (_, b) = http(&h, Method::GET, "/api/todo/templates/bind", None).await;
+    assert_eq!(b["env_by_version"]["v2"], "dev");
+    assert!(b["env_by_version"]["v3"].is_null());
 }
 
 #[tokio::test]

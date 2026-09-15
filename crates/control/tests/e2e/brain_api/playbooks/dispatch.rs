@@ -294,14 +294,14 @@ async fn dispatch_rejects_oversized_request_id_400() {
         .req(
             Method::POST,
             "/api/brain/playbooks/playbook-keycap/dispatch",
-            Some(json!({"request_id": "x".repeat(26), "situation": "fits"})),
+            Some(json!({"request_id": "y".repeat(26), "situation": "fits"})),
         )
         .await;
     assert_eq!(status, 202, "{body}");
     assert!(body["executions"][0]["id"]
         .as_str()
         .unwrap()
-        .starts_with(&format!("agent-pbk-{}-a", "x".repeat(26))));
+        .starts_with(&format!("agent-pbk-{}-a", "y".repeat(26))));
 
     let (status, body) = h
         .req(

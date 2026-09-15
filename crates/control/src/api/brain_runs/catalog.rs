@@ -44,7 +44,11 @@ pub async fn capabilities(state: &Arc<AppState>) -> anyhow::Result<Vec<Value>> {
     for name in opencoder_core::list_child_dirs(&share.join("todo")) {
         let root = opencoder_core::todo_dir(&share, &name)?;
         for version in opencoder_core::list_child_dirs(&root) {
-            if !opencoder_core::todo_context_path(&share, &name, &version)?.is_file() {
+            if !opencoder_core::todo_context_path(&share, &name, &version)?.is_file()
+                && !opencoder_core::todo_version_dir(&share, &name, &version)?
+                    .join("workflow.json")
+                    .is_file()
+            {
                 continue;
             }
             let definition = crate::api::template::snapshot(&share, &name, &version)?;
@@ -92,6 +96,10 @@ pub async fn stable(
     if body["maturity"] != "stable" && body["maturity"] != "draft" {
         return error_400("maturity must be draft or stable".into());
     }
+    let _process_lock = match state.fleet.request_lock("capability", &id).await {
+        Ok(lock) => lock,
+        Err(error) => return error_500(error.to_string()),
+    };
     let _gate = state.brain_gate.lock(&format!("capability:{id}")).await;
     let mut metadata = match state.fleet.definition("brain_capability_meta", &id).await {
         Ok(Some(value)) => value,
@@ -140,6 +148,7 @@ pub async fn record_evidence(
     id: &str,
     notice: &opencoder_core::brain::BrainNotice,
 ) -> anyhow::Result<()> {
+    let _process_lock = state.fleet.request_lock("capability", id).await?;
     let _gate = state.brain_gate.lock(&format!("capability:{id}")).await;
     let mut metadata = state
         .fleet

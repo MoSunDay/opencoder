@@ -48,6 +48,7 @@ pub struct AcceptanceSpec {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct RequiredToolCall {
     pub name: String,
     #[serde(default)]

@@ -87,8 +87,6 @@ pub(in crate::operations) async fn inspect(
                 return Ok(steps);
             }
             result["dag_steps"] = steps.body;
-            result["runners"] =
-                super::runner::views(worker, &index, result.get("definition")).await?;
         }
         ExecutionKind::Agent | ExecutionKind::Maintenance | ExecutionKind::Operator => {
             result["session"] = session_detail(worker, id).await?.body;

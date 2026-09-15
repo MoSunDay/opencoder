@@ -1,0 +1,8 @@
+.todo-workbench{container-type:inline-size;min-width:0;display:flex;flex-direction:column;gap:12px}
+.todo-workbench-toolbar{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:center}
+.todo-parent-heading{padding:16px 20px;border:1px solid var(--ant-color-border,#d9d9d9);border-radius:10px;background:var(--ant-color-fill-quaternary,#fafafa);display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px}
+.todo-parent-heading h4,.todo-parent-heading p{margin:0!important}
+.todo-parent-heading>span{color:var(--ant-color-text-secondary,#666)}
+.todo-parent-decision{width:100%;display:flex;gap:16px;flex-wrap:wrap;font-size:13px}
+.todo-review-json{white-space:pre-wrap;overflow-wrap:anywhere;max-height:430px;overflow:auto;font-size:12px;line-height:1.6;background:var(--ant-color-fill-quaternary,#fafafa);padding:10px;border-radius:6px}
+.todo-history{display:flex;flex-direction:column;gap:10px}.todo-save-state{font-size:12px;color:var(--ant-color-text-secondary,#666)}

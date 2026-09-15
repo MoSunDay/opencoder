@@ -125,7 +125,9 @@ impl NodeService for Worker {
             if rows.is_empty() {
                 break;
             }
-            cursor = rows.last().map(|r| r.id.clone());
+            cursor = rows
+                .last()
+                .map(|row| format!("{}|{}", row.updated_at.max(row.created_at), row.id));
             for row in &rows {
                 if roots.contains(&row.id) {
                     continue;
@@ -162,5 +164,67 @@ fn internal_session_status(active: bool) -> ExecutionStatus {
         // Sessions without a top-level journal are owned by another
         // execution and cannot accept work directly once their loop exits.
         ExecutionStatus::Done
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::WorkerOptions;
+    use opencoder_llm::MockChatClient;
+    use opencoder_store::SessionMeta;
+    use std::sync::Arc;
+
+    #[tokio::test]
+    async fn node_inventory_reads_more_than_500_sessions_with_activity_cursors() {
+        let root = tempfile::tempdir().unwrap();
+        let _scope = opencoder_core::config::scoped_config_home(root.path().join("home"));
+        let workdir = root.path().join("work");
+        std::fs::create_dir_all(workdir.join(".opencoder")).unwrap();
+        std::fs::write(workdir.join(".opencoder/ap.json"), r#"{"mode":"off"}"#).unwrap();
+        let worker = Worker::open(
+            WorkerOptions {
+                name: "inventory".into(),
+                workdir,
+                data_dir: root.path().join("node"),
+                workflow_root: None,
+                max_runs: Some(1),
+                dag: false,
+            },
+            Some(Arc::new(MockChatClient::new())),
+        )
+        .await
+        .unwrap();
+        for index in 0..503 {
+            worker
+                .inner
+                .state
+                .store
+                .create_session(&SessionMeta {
+                    id: format!("agent-inventory-{index:04}"),
+                    created_at: 1000 + index,
+                    // Activity sorting differs from creation sorting, including ties.
+                    updated_at: if index % 2 == 0 { 2000 } else { 0 },
+                    ..Default::default()
+                })
+                .await
+                .unwrap();
+        }
+        let rows = worker.indexes().await.unwrap();
+        let ids: HashSet<_> = rows
+            .iter()
+            .filter(|r| r.id.starts_with("agent-inventory-"))
+            .map(|r| r.id.as_str())
+            .collect();
+        assert_eq!(ids.len(), 503);
+        assert_eq!(
+            rows.iter()
+                .filter(|r| r.id.starts_with("agent-inventory-"))
+                .count(),
+            503
+        );
+        assert!(ids.contains("agent-inventory-0000"));
+        assert!(ids.contains("agent-inventory-0502"));
+        worker.shutdown().await.unwrap();
     }
 }

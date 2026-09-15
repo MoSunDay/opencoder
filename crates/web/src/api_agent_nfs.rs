@@ -43,7 +43,7 @@ fn status_value(status: &NfsServerStatus) -> Value {
 /// GET /api/agents/nfs — current snapshot; stopped defaults when no
 /// server is running.
 pub async fn get_status(State(_state): State<Arc<AppState>>) -> Response {
-    Json(json!({ "ok": true, "status": status_value(&nfs_exports::status(AGENTS_EXPORT)) }))
+    Json(json!({ "ok": true, "status": status_value(&nfs_exports::status(AGENTS_EXPORT).await) }))
         .into_response()
 }
 
@@ -88,7 +88,7 @@ async fn stop() -> Response {
     nfs_exports::stop(AGENTS_EXPORT).await;
     Json(json!({
         "ok": true,
-        "status": status_value(&nfs_exports::status(AGENTS_EXPORT)),
+        "status": status_value(&nfs_exports::status(AGENTS_EXPORT).await),
         "started": false,
     }))
     .into_response()

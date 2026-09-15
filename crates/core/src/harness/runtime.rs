@@ -1,7 +1,7 @@
 //! Private, versioned execution configuration; Agent cards contain references only.
 use super::CodexSettings;
 use serde::{Deserialize, Serialize};
-use std::{collections::BTreeMap, path::PathBuf};
+use std::collections::BTreeMap;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Versioned<T> {
@@ -9,65 +9,22 @@ pub struct Versioned<T> {
     pub settings: T,
 }
 
-#[derive(Clone, Default, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[derive(Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct RuntimeSettings {
     pub profiles: BTreeMap<String, Versioned<CodexSettings>>,
-    pub runners: BTreeMap<String, Versioned<RunnerSettings>>,
+    /// Opaque historical fields round-trip through persisted execution snapshots.
+    /// Only profiles are interpreted by current execution code.
+    #[serde(flatten)]
+    pub archived: BTreeMap<String, serde_json::Value>,
 }
 
-#[derive(Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-pub struct RunnerSettings {
-    pub parent_unit: Option<String>,
-    pub command: Vec<String>,
-    pub workdir: PathBuf,
-    pub envs: BTreeMap<String, String>,
-    /// Immutable installation files checked before admission and every execution.
-    pub files: BTreeMap<PathBuf, String>,
-}
-
-impl std::fmt::Debug for RunnerSettings {
+impl std::fmt::Debug for RuntimeSettings {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("RunnerSettings")
-            .field("files", &self.files.len())
-            .field("environment_keys", &self.envs.keys().collect::<Vec<_>>())
-            .finish_non_exhaustive()
-    }
-}
-
-impl RunnerSettings {
-    pub fn validate(&self) -> Result<(), String> {
-        if self.parent_unit.as_deref().is_some_and(|unit| {
-            !unit.ends_with(".service")
-                || unit.len() > 128
-                || !unit
-                    .bytes()
-                    .all(|b| b.is_ascii_alphanumeric() || b"-_.@".contains(&b))
-        }) {
-            return Err("invalid Runner parent service".into());
-        }
-        if self.command.is_empty()
-            || !std::path::Path::new(&self.command[0]).is_absolute()
-            || self.command.iter().any(|a| a.contains('\0'))
-            || !self.workdir.is_absolute()
-        {
-            return Err("Runner requires an absolute executable and working directory".into());
-        }
-        if self.files.is_empty()
-            || self.files.iter().any(|(p, hash)| {
-                !p.is_absolute() || hash.len() != 64 || !hash.bytes().all(|b| b.is_ascii_hexdigit())
-            })
-        {
-            return Err("Runner requires installation files with SHA-256 checksums".into());
-        }
-        for (key, value) in &self.envs {
-            super::validate_env(key, value)?;
-        }
-        if serde_json::to_vec(self).map_err(|e| e.to_string())?.len() > 256 * 1024 {
-            return Err("Runner configuration exceeds 256 KiB".into());
-        }
-        Ok(())
+        f.debug_struct("RuntimeSettings")
+            .field("profiles", &self.profiles)
+            .field("archived_field_count", &self.archived.len())
+            .finish()
     }
 }
 

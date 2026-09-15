@@ -1,0 +1,211 @@
+"""Validated -> warming -> ready -> switching -> verifying -> complete.
+
+The journal records intent before every switch; replay uses the same release
+and probe IDs. Retired runtimes remain independently owned systemd services.
+"""
+from pathlib import Path
+import copy
+import time
+from . import manifest, probes, units
+from .state import Journal
+
+
+def record_for(settings, bundle_manifest, ordinal):
+    identifier = bundle_manifest["release_id"]
+    port = settings.port_base + ordinal * 3
+    if port + 2 >= 65536:
+        raise ValueError("versioned port range exhausted")
+    return {"id": identifier, "manifest": bundle_manifest, "server_port": port,
+        "runtime_port": port + 1, "host_port": port + 2,
+        "runtime_data": str(settings.state_dir / "runtimes" / identifier),
+        "server_unit": f"opencoder-server-{identifier}.service",
+        "runtime_unit": f"opencoder-runtime-{identifier}.service",
+        "host_unit": f"opencoder-host-{identifier}.service",
+        "created_at": int(time.time() * 1000)}
+
+
+def fresh_frontends(record, releases, reason):
+    """Keep old HTTP bodies/RPCs alive while starting another activation."""
+    used = [int(r[k]) for r in releases for k in ("host_port", "server_port", "runtime_port")]
+    used.extend(h["port"] for r in releases for key in ("previous_hosts", "previous_servers") for h in r.get(key, []))
+    port = max(used) + 1
+    if port + 1 >= 65536:
+        raise ValueError("no ports available for reactivation instances")
+    result = copy.deepcopy(record)
+    result.setdefault("previous_hosts", []).append({"unit":record["host_unit"],"port":record["host_port"]})
+    result.setdefault("previous_servers", []).append({"unit":record["server_unit"],"port":record["server_port"]})
+    result.update(host_port=port, server_port=port + 1,
+        host_unit=f"opencoder-host-{record['id']}-{reason}-{len(result['previous_hosts'])}.service",
+        server_unit=f"opencoder-server-{record['id']}-{reason}-{len(result['previous_servers'])}.service")
+    return result
+
+
+def register_runtime(settings, record, operations, host_url=None):
+    return operations.http(host_url or settings.host_url, "/runtimes", "POST", {
+        "id": record["id"], "release_id": record["id"], "mode": "staged", "config": {
+            "endpoint": f"http://127.0.0.1:{record['runtime_port']}",
+            "data_dir": record["runtime_data"], "unit": record["runtime_unit"]}})
+
+
+def register_server(settings, record, operations, enabled=True, host_url=None):
+    return operations.http(host_url or settings.host_url, f"/servers/{record['id']}", "POST", {
+        "id": record["id"], "url": f"http://127.0.0.1:{record['server_port']}", "enabled": enabled})
+
+
+def deploy(settings, bundle, operations, seconds=90):
+    journal = Journal(settings.state_dir)
+    candidate = manifest.verify(bundle)
+    manifest.compatible(candidate, [r["manifest"] for r in journal.data["releases"].values()])
+    manifest.resources(settings, candidate)
+    if journal.data["phase"] == "rolling_back":
+        return rollback(settings, operations, seconds)
+    if not journal.data["current"]:
+        raise ValueError("first migration is required; use --migrate after reviewing the migration receipt")
+    identifier = candidate["release_id"]
+    if journal.data["candidate"] not in (None, identifier):
+        raise ValueError("another release is unfinished; resume it or roll it back first")
+    if journal.data["current"] == identifier and journal.data["phase"] in ("complete", "rolled_back"):
+        probes.public(settings, journal.record(identifier), operations, seconds)
+        retire_server(settings, journal, operations)
+        return journal.data
+    retained = identifier in journal.data["releases"]
+    if not retained:
+        used = [int(r[k]) for r in journal.data["releases"].values() for k in ("server_port", "runtime_port", "host_port")]
+        used.extend(h["port"] for r in journal.data["releases"].values() for key in ("previous_hosts", "previous_servers") for h in r.get(key, []))
+        ordinal = (max(used, default=settings.port_base - 1) + 3 - settings.port_base) // 3
+        record = record_for(settings, candidate, ordinal)
+        record["resource_source"] = journal.record(journal.data["current"])["runtime_data"]
+        journal.data["releases"][identifier] = record
+    record = journal.record(identifier)
+    if record["manifest"] != candidate:
+        raise ValueError("release ID already belongs to another bundle")
+    if journal.data["candidate"] is None:
+        if retained:
+            record = fresh_frontends(record, list(journal.data["releases"].values()), "activate")
+            journal.data["releases"][identifier] = record
+        journal.data.get("retirement", {}).pop(identifier, None)
+        record["probe_epoch"] = record.get("probe_epoch", 0) + 1
+        journal.data.update(candidate=identifier, previous=journal.data["current"], failure=None)
+        journal.phase("validated")
+    try:
+        if journal.data["phase"] in ("validated", "warming", "failed"):
+            journal.phase("warming")
+            units.prepare(settings, bundle, record)
+            units.validate(settings, record, operations)
+            operations.run("systemctl", "daemon-reload")
+            operations.run("systemctl", "enable", record["runtime_unit"], record["server_unit"], record["host_unit"])
+            register_runtime(settings, record, operations)
+            operations.run("systemctl", "start", record["runtime_unit"])
+            node_id = probes.candidate(settings, record, operations, seconds)
+            # Each Host upgrade is warmed while runtimes remain independent.
+            operations.run("systemctl", "start", record["host_unit"])
+            host_url = f"http://127.0.0.1:{record['host_port']}"
+            operations.wait(lambda: operations.http(host_url, "/status"), seconds)
+            register_server(settings, record, operations)
+            operations.run("systemctl", "start", record["server_unit"])
+            probes.ready(settings, record, node_id, operations, seconds)
+            journal.phase("ready")
+        if journal.data["phase"] in ("ready", "switching"):
+            # The transition intent is durable before changing Host or Nginx.
+            journal.data["current"] = identifier
+            journal.phase("switching")
+            operations.http(f"http://127.0.0.1:{record['host_port']}", f"/runtimes/{identifier}/activate", "POST", {})
+            operations.http(f"http://127.0.0.1:{record['host_port']}", "/activate-host", "POST", {})
+            units.switch_ingress(settings, record, operations)
+            operations.http(f"http://127.0.0.1:{record['host_port']}", "/commit-host", "POST", {})
+            journal.phase("verifying")
+        if journal.data["phase"] == "verifying":
+            probes.public(settings, record, operations, seconds)
+            units.activate_launchers(settings, record, operations)
+            journal.data["candidate"] = None
+            journal.phase("complete")
+        retire_server(settings, journal, operations)
+        return journal.data
+    except Exception as error:
+        journal.fail(error)
+        if journal.data["phase"] in ("switching", "verifying"):
+            rollback(settings, operations, seconds)
+        elif journal.data["phase"] in ("validated", "warming", "ready"):
+            # Keep current tasks and admission intact. Candidate evidence and
+            # probe ownership remain available for a same-ID resume.
+            journal.phase("failed")
+        raise
+
+
+def retire_server(settings, journal, operations):
+    def retire_port(port, unit):
+        try:
+            operations.http(f"http://127.0.0.1:{port}", "/api/admin/release/retire", "POST", {})
+        except OSError:
+            if not operations.inactive(unit):
+                raise
+        operations.run("systemctl", "disable", unit)
+    for identifier, record in journal.data["releases"].items():
+        for previous in record.get("previous_servers", []):
+            try:
+                retire_port(previous["port"], previous["unit"])
+                previous.update(phase="retiring", failure=None)
+            except Exception as error:
+                previous.update(phase="failed", failure=str(error))
+            journal.save()
+        for host in record.get("previous_hosts", []):
+            operations.run("systemctl", "disable", host["unit"])
+        if identifier == journal.data["current"]:
+            continue
+        retirement = journal.data.setdefault("retirement", {}).setdefault(identifier, {})
+        try:
+            # POST returns immediately; old response bodies and RPCs drain
+            # without a stop deadline. A lost response is safe to retry.
+            if retirement.get("phase") != "retiring":
+                retire_port(record['server_port'],record['server_unit'])
+            register_server(settings, record, operations, enabled=False)
+            operations.run("systemctl", "disable", record["server_unit"], record["host_unit"])
+            retirement.update(phase="retiring", failure=None)
+        except Exception as error:
+            retirement.update(phase="failed", failure=str(error))
+        journal.save()
+
+
+def rollback(settings, operations, seconds=90):
+    journal = Journal(settings.state_dir)
+    if journal.data["phase"] == "rolled_back":
+        probes.public(settings, journal.record(journal.data["current"]), operations, seconds)
+        retire_server(settings, journal, operations)
+        return journal.data
+    previous = journal.data["previous"]
+    if not previous:
+        raise ValueError("no compatible previous release is recorded")
+    old = journal.record(previous)
+    manifest.compatible(old["manifest"], [r["manifest"] for r in journal.data["releases"].values()])
+    if journal.data["phase"] != "rolling_back":
+        # Fresh standby instances let rollback proceed while older instances
+        # finish response bodies and RPCs. Runtime units are never restarted.
+        old = fresh_frontends(old, list(journal.data["releases"].values()), "rollback")
+        journal.data["releases"][previous] = old
+        journal.data.get("retirement", {}).pop(previous, None)
+        old["probe_epoch"] = old.get("probe_epoch", 0) + 1
+        journal.data["rollback_from"] = journal.data["current"]
+        journal.phase("rolling_back")
+    units.prepare_host(settings, old)
+    units.prepare_server(settings, old)
+    units.validate(settings, old, operations)
+    operations.run("systemctl", "daemon-reload")
+    operations.run("systemctl", "enable", old["host_unit"], old["server_unit"], old["runtime_unit"])
+    operations.run("systemctl", "start", old["host_unit"])
+    operations.run("systemctl", "start", old["server_unit"], old["runtime_unit"])
+    host_url = f"http://127.0.0.1:{old['host_port']}"
+    operations.wait(lambda: operations.http(host_url, "/status"), seconds)
+    node_id = probes.candidate(settings, old, operations, seconds)
+    register_server(settings, old, operations, host_url=host_url)
+    probes.ready(settings, old, node_id, operations, seconds)
+    operations.http(host_url, f"/runtimes/{previous}/activate", "POST", {})
+    operations.http(host_url, "/activate-host", "POST", {})
+    journal.data.update(current=previous, candidate=None)
+    journal.save()
+    units.switch_ingress(settings, old, operations)
+    operations.http(host_url, "/commit-host", "POST", {})
+    probes.public(settings, old, operations, seconds)
+    units.activate_launchers(settings, old, operations)
+    journal.phase("rolled_back")
+    retire_server(settings, journal, operations)
+    return journal.data

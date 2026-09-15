@@ -379,3 +379,89 @@ fn echo_without_sidecar_block_is_a_noop() {
     );
     assert!(v.sidecar.is_none());
 }
+
+/// An interleaved child round (think-after-text, several open Says) plus
+/// the `SidecarTurn` frame: the runner forwards the child's round frames
+/// but SWALLOWS its `Done`, so the panel arm must finalize the nested view
+/// itself — after the Turn frame no open Assistant may remain and the
+/// panel body may not keep raw markdown markers.
+#[test]
+fn sidecar_turn_finalizes_interleaved_child_says() {
+    let (mut v, _tx) = open_panel();
+    v.apply(&sc_start("sc-1", "检查这个函数"));
+    v.apply(&sc_child(
+        "sc-1",
+        SessionEvent::LlmRoundStart { started_at_ms: 1 },
+    ));
+    for k in 0..3 {
+        v.apply(&sc_child(
+            "sc-1",
+            SessionEvent::ReasoningDelta(format!("think{k} ")),
+        ));
+        v.apply(&sc_child(
+            "sc-1",
+            SessionEvent::TextDelta(format!("ans{k} **bold{k}** tail\n")),
+        ));
+    }
+    // The runner DOES forward the child's LlmRoundEnd (only `Done` is
+    // swallowed) — with several stranded Says that repair alone sealed just
+    // the last one pre-fix; the Turn frame must close out the rest.
+    v.apply(&sc_child("sc-1", SessionEvent::LlmRoundEnd));
+    v.apply(&sc_turn("sc-1", true, "", 10, 1));
+
+    let panel = v.sidecar.as_ref().expect("panel kept");
+    assert!(panel.done, "Turn frame marks the panel done");
+    let open: Vec<usize> = panel
+        .view
+        .blocks
+        .iter()
+        .enumerate()
+        .filter_map(|(i, b)| match b {
+            ChatBlock::Assistant { done: false, .. } => Some(i),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        open.is_empty(),
+        "SidecarTurn must seal every child Say, open at {open:?}: {:#?}",
+        panel.view.blocks
+    );
+    let flat: Vec<String> = panel.view.flatten().iter().map(|l| line_text(l)).collect();
+    assert!(
+        !flat.iter().any(|l| l.contains("**")),
+        "panel body must render markdown, got {flat:?}"
+    );
+    assert!(
+        flat.iter().any(|l| l.contains("bold0")),
+        "rendered bold text must be present: {flat:?}"
+    );
+}
+
+/// A child round cut mid-stream (crash / timeout before its own
+/// `LlmRoundEnd`): even a single stranded open Say must be sealed by the
+/// `SidecarTurn` frame, mirroring `mark_subagent_done`'s repair.
+#[test]
+fn sidecar_turn_seals_a_single_stranded_child_say() {
+    let (mut v, _tx) = open_panel();
+    v.apply(&sc_start("sc-1", "q"));
+    v.apply(&sc_child(
+        "sc-1",
+        SessionEvent::LlmRoundStart { started_at_ms: 1 },
+    ));
+    v.apply(&sc_child(
+        "sc-1",
+        SessionEvent::TextDelta("partial **b**\n".into()),
+    ));
+    v.apply(&sc_turn("sc-1", false, "", 0, 1));
+    let panel = v.sidecar.as_ref().expect("panel kept");
+    assert!(panel.done && !panel.ok);
+    assert!(
+        !panel
+            .view
+            .blocks
+            .iter()
+            .any(|b| matches!(b, ChatBlock::Assistant { done: false, .. })),
+        "failed turn must still seal the child Say: {:#?}",
+        panel.view.blocks
+    );
+}

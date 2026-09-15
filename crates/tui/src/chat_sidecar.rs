@@ -99,6 +99,15 @@ pub(crate) fn fold_sidecar(chat: &mut ChatView, sev: &SessionEvent) -> bool {
             rounds,
         } => {
             if let Some(panel) = chat.sidecar.as_mut().filter(|p| p.id == *id) {
+                // The runner folds the child's round-terminal frames but
+                // swallows the child's `Done`, and the child's own
+                // LlmRoundEnd only repairs the LAST open Say — an
+                // interleaved child round (think-after-text) leaves earlier
+                // Says open. Finalize the nested view here (idempotent), the
+                // same repair `mark_subagent_done` applies to subagent
+                // children, so the panel body never keeps rendering raw
+                // markdown after the turn ended.
+                panel.view.finalize_assistant();
                 panel.done = true;
                 panel.ok = *ok;
                 if !answer.trim().is_empty() {

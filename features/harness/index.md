@@ -1,4 +1,4 @@
-Commit: 0bc5b867a766100422dd4d0cd214a57f794db26d (working-tree)
+Commit: 104c6b2663858f0a15d7066eb89227d681a4cf44
 
 # Agent Harness — OpenCoder／Codex 执行方式与 Wrap 参数
 

@@ -144,6 +144,36 @@ pub async fn dispatch(
     }
     let _ = body.top_k;
     let situation = body.situation.unwrap_or_default();
+    let key = body
+        .request_id
+        .clone()
+        .unwrap_or_else(|| ulid::Ulid::new().to_string());
+    let _lock = match state.fleet.request_lock("playbook", &key).await {
+        Ok(lock) => lock,
+        Err(error) => return error_500(error.to_string()),
+    };
+    let fingerprint = dispatch_fingerprint(&id, &situation, body.node_id.as_deref());
+    match state
+        .fleet
+        .claim_request("playbook", &key, &fingerprint)
+        .await
+    {
+        Ok(true) => {}
+        Ok(false) => {
+            return response(RpcReply::error(
+                409,
+                "request_id already dispatched different content; use a new request_id",
+            ))
+        }
+        Err(error) => return error_500(error.to_string()),
+    }
+    match state.fleet.receipt("playbook", &key).await {
+        Ok(Some(receipt)) if receipt.phase == "prepared" => {
+            return response(replay_prepared(&state, receipt.payload).await);
+        }
+        Ok(_) => {}
+        Err(error) => return error_500(error.to_string()),
+    }
     let spec = match state.brain.get_playbook_spec(&id).await {
         Ok(Some(spec)) => spec,
         Ok(None) => return error_404(&format!("brain playbook not found: {id}")),
@@ -166,17 +196,6 @@ pub async fn dispatch(
             "situation must not be empty when a step prompt references {situation}".into(),
         );
     }
-    // Same request_id, different dispatch content (playbook, situation or
-    // node) is a client bug: claim it before computing/replaying requests
-    // so the earlier dispatch's executions are never presented as this
-    // request's result. Invalid keys/specs above still win.
-    if let Some(request_id) = body.request_id.as_deref() {
-        let fingerprint = dispatch_fingerprint(&id, &situation, body.node_id.as_deref());
-        if let Err(reply) = state.playbook_gate.claim(request_id, &fingerprint).await {
-            return response(reply);
-        }
-    }
-
     let batches = topo_batches(&spec);
     let mut plans = Vec::new();
     for step in batches.iter().flatten() {
@@ -188,10 +207,6 @@ pub async fn dispatch(
 
     // The request key makes every step id deterministic per request: a
     // retry with the same request_id recomputes the same ids.
-    let key = body
-        .request_id
-        .clone()
-        .unwrap_or_else(|| ulid::Ulid::new().to_string());
     let requests: Vec<CreateExecution> = plans
         .iter()
         .map(|plan| CreateExecution {
@@ -207,28 +222,43 @@ pub async fn dispatch(
         })
         .collect();
 
-    // Idempotent replay (一期: request-scoped): every computed id already in
-    // the execution index ⇒ the earlier dispatch landed; return the same
-    // response shape without resubmitting anything.
-    if body.request_id.is_some() && all_indexed(&state, &requests).await {
-        let executions: Vec<Value> = plans
-            .iter()
-            .zip(&requests)
-            .map(|(plan, request)| execution_json(&plan.step.name, plan.kind, &request.id))
-            .collect();
-        return response(dispatch_reply(&id, &batches, executions));
+    let executions = plans
+        .iter()
+        .zip(&requests)
+        .map(|(plan, request)| execution_json(&plan.step.name, plan.kind, &request.id))
+        .collect();
+    let payload = json!({"requests":requests,"reply":dispatch_reply(&id, &batches, executions)});
+    if let Err(error) = state
+        .fleet
+        .save_receipt(
+            "playbook",
+            &key,
+            &opencoder_store::fleet::handoff::Receipt {
+                fingerprint,
+                phase: "prepared".into(),
+                payload: payload.clone(),
+            },
+        )
+        .await
+    {
+        return error_500(error.to_string());
     }
+    response(replay_prepared(&state, payload).await)
+}
 
-    let mut executions = Vec::new();
-    for (plan, request) in plans.iter().zip(requests) {
-        let id = request.id.clone();
-        let reply = super::executions::submit(&state, request).await;
+async fn replay_prepared(state: &Arc<AppState>, payload: Value) -> RpcReply {
+    let requests: Vec<CreateExecution> = match serde_json::from_value(payload["requests"].clone()) {
+        Ok(requests) => requests,
+        Err(error) => return RpcReply::error(500, error.to_string()),
+    };
+    for request in requests {
+        let reply = super::executions::submit(state, request).await;
         if reply.status != 202 {
-            return response(reply);
+            return reply;
         }
-        executions.push(execution_json(&plan.step.name, plan.kind, &id));
     }
-    response(dispatch_reply(&id, &batches, executions))
+    serde_json::from_value(payload["reply"].clone())
+        .unwrap_or_else(|error| RpcReply::error(500, error.to_string()))
 }
 
 /// 一期 manual fallback for message triggers: embed the inbound text plus
@@ -417,16 +447,6 @@ fn fnv1a(bytes: &[u8]) -> u32 {
         hash.wrapping_mul(0x0100_0193)
             .wrapping_add(u32::from(*byte))
     })
-}
-
-async fn all_indexed(state: &AppState, requests: &[CreateExecution]) -> bool {
-    for request in requests {
-        match state.fleet.index(&request.id).await {
-            Ok(Some(index)) if index.kind == request.kind => {}
-            _ => return false,
-        }
-    }
-    !requests.is_empty()
 }
 
 fn execution_json(step: &str, kind: ExecutionKind, id: &str) -> Value {

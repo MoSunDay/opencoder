@@ -6,7 +6,6 @@ import { err } from '../notice.js';
 import { ExecutionsPanel } from './executions.jsx';
 import { ExecutionTranscript, appendEvent, messageRefreshMode } from './detail.jsx';
 import { FleetNodesPanel } from './nodes.jsx';
-import { BrainDispatch as FleetBrainPanel } from './brain.jsx';
 import { FleetTeamsPanel } from './teams.jsx';
 import { PayloadWindows, detailMarkers } from './detail/fields.jsx';
 import { WorkloadDetail } from './detail/workloads.jsx';
@@ -20,33 +19,25 @@ vi.mock('./detail.jsx', async (importOriginal) => ({
 const node = { id: 'n1', name: 'worker', online: true, kinds: ['agent'], maintenance_agent_id: 'maintainer-n1', snapshot: { ready: true, cpu_capacity: 2, active_agent_loops: 3 } };
 afterEach(() => { cleanup(); vi.resetAllMocks(); vi.unstubAllGlobals(); });
 describe('fleet execution boundaries', () => {
-  it('keeps the same execution ID when durable acceptance reply is lost', async () => {
+  it('keeps execution browsing focused on filtering and refresh', async () => {
     apiGet.mockImplementation(async (path) => path === '/api/nodes' ? { nodes: [node] } : { executions: [] });
-    apiPost.mockRejectedValueOnce(new Error('connection lost')).mockImplementationOnce(async (_, body) => ({ id: body.id }));
     const onNotice = vi.fn();
     render(<ExecutionsPanel onNotice={onNotice} />);
-    fireEvent.change(screen.getByPlaceholderText('act / 定义名称 / 任务 ID'), { target: { value: 'act' } });
-    fireEvent.click(screen.getByText('启动执行'));
-    await waitFor(() => expect(apiPost).toHaveBeenCalledTimes(1));
-    expect(onNotice).toHaveBeenLastCalledWith(err(expect.stringContaining('connection lost')));
-    await waitFor(() => expect(screen.getByText('启动执行').closest('button').disabled).toBe(false));
-    fireEvent.click(screen.getByText('启动执行'));
-    await waitFor(() => expect(apiPost).toHaveBeenCalledTimes(2));
-    expect(apiPost.mock.calls[0][1].id).toBe(apiPost.mock.calls[1][1].id);
-    expect(onNotice).toHaveBeenLastCalledWith(err(''));
-    expect(await screen.findByText(/execution-detail:agent-/)).toBeTruthy();
+    expect(await screen.findByRole('button', { name: /刷\s*新/ })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '启动执行' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '加载更早的执行' })).toBeNull();
+    expect(screen.queryByText('舰队全部执行记录与团队过滤')).toBeNull();
   });
-  it('paginates the five-field execution index without dropping its cursor', async () => {
+  it('loads one bounded execution page without exposing pagination', async () => {
     apiGet.mockImplementation(async (path) => {
       if (path === '/api/nodes') return { nodes: [node] };
-      if (String(path).includes('cursor_created_at=9')) return { executions: [{ id: 'agent-old', kind: 'agent', node_id: 'n1', status: 'done', created_at: 8 }] };
       return { executions: [{ id: 'agent-new', kind: 'agent', node_id: 'n1', status: 'running', created_at: 10 }], next_cursor: { created_at: 9, id: 'agent-next' } };
     });
     render(<ExecutionsPanel onNotice={vi.fn()} />);
     expect(await screen.findByText('agent-new')).toBeTruthy();
-    fireEvent.click(screen.getByText('加载更早的执行'));
-    expect(await screen.findByText('agent-old')).toBeTruthy();
-    expect(apiGet).toHaveBeenCalledWith('/api/executions?limit=50&cursor_created_at=9&cursor_id=agent-next');
+    expect(screen.queryByText('agent-old')).toBeNull();
+    expect(screen.queryByRole('button', { name: '加载更早的执行' })).toBeNull();
+    expect(apiGet).toHaveBeenCalledWith('/api/executions?limit=50');
   });
   it('renders CPU normalized load and only performs maintenance after a user action', async () => {
     apiGet.mockResolvedValue({ nodes: [node] }); apiPost.mockResolvedValue({ snapshot: node.snapshot });
@@ -74,6 +65,8 @@ describe('fleet execution boundaries', () => {
   it('keeps retired system runs filterable but removes their launch option', () => {
     expect(CREATABLE_KINDS.some((kind) => kind.value === 'system')).toBe(false);
     expect(KINDS.some((kind) => kind.value === 'system')).toBe(true);
+    expect(KINDS.some((kind) => kind.value === 'maintenance')).toBe(true); // 节点维护产生的真实 kind，可筛选
+    expect(CREATABLE_KINDS.some((kind) => kind.value === 'maintenance')).toBe(false); // 但不可手动启动
   });
   it('rejects offline node options and reads persisted message blocks', () => {
     expect(nodeOptions([{ ...node, online: false }], 'agent')[1].disabled).toBe(true);
@@ -208,25 +201,6 @@ describe('fleet execution boundaries', () => {
     expect(b.large[0].text).toBe('中"'); expect(b.large[0].text).not.toContain('�');
     const revisited = appendMessagePage(null, { chunks: [chunk(Uint8Array.from([chinese[1], chinese[2], 34]), 100)], more: true });
     expect(revisited.large[0].text).toBe('"'); expect(revisited.large[0].start).toBe(102);
-  });
-  it('retries an unconfirmed Brain dispatch with the same request identifier', async () => {
-    apiGet.mockImplementation(async (path) => path === '/api/nodes' ? { nodes: [node] } : { capabilities: [] });
-    apiPost.mockRejectedValueOnce(new Error('connection lost')).mockResolvedValueOnce({ execution: { id: 'agent-brain-1', kind: 'agent', node_id: 'n1', status: 'pending', created_at: 1 } });
-    const onNotice = vi.fn();
-    render(<FleetBrainPanel onNotice={onNotice} />);
-    fireEvent.mouseDown(screen.getByLabelText('目标节点').closest('.ant-select'));
-    fireEvent.click(await screen.findByText('worker', { selector: '.ant-select-item-option-content' }));
-    fireEvent.change(await screen.findByLabelText('需求'), { target: { value: '检查发布' } });
-    fireEvent.click(screen.getByText('开始执行'));
-    await waitFor(() => expect(apiPost).toHaveBeenCalledTimes(1));
-    expect(onNotice).toHaveBeenLastCalledWith(err('connection lost'));
-    await waitFor(() => expect(screen.getByText('开始执行').closest('button').disabled).toBe(false));
-    fireEvent.click(screen.getByText('开始执行'));
-    await waitFor(() => expect(apiPost).toHaveBeenCalledTimes(2));
-    expect(apiPost.mock.calls[0][1].request_id).toBe(apiPost.mock.calls[1][1].request_id);
-    expect(apiPost.mock.calls[0][1].request_id).toMatch(/^request-/);
-    expect(onNotice).toHaveBeenLastCalledWith(err(''));
-    expect(await screen.findByText('execution-detail:agent-brain-1')).toBeTruthy();
   });
   it('launches a configured team as one node-owned execution', async () => {
     const teamNode = { ...node, kinds: ['team'] };

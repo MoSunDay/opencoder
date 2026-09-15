@@ -1,4 +1,4 @@
-Commit: e50ffc433bca866fd17bd571a74f1bdf17705dea
+Commit: 1ac64fe8b81a2c7c144c72b717a8031ab18f2589
 
 # core 模块
 
@@ -16,7 +16,7 @@ Commit: e50ffc433bca866fd17bd571a74f1bdf17705dea
 - `src/data_dir.rs` — `data_dir_for(workdir)` per-workdir 数据目录唯一解析。
 - `src/harness/mod.rs` — `Harness::{Opencode,Codex}`、`pin_settings`。
 - `src/harness/settings.rs` — `CodexSettings` 校验与独立 argv。
-- `src/harness/runtime.rs` — `RunnerSettings` 带 revision 命名 Codex profile。
+- `src/harness/runtime.rs` — `RuntimeSettings` 保存带 revision 的命名 Codex profile；未知历史字段仅以不透明 archived 数据往返，不参与执行。
 - `src/harness/scope.rs` — task-local Codex 设置/运行态，供重载 Config 的驱动读取。
 - `src/agent/` — meta/resource/compose：引用卡 + 共享池；scope 任务局部资源根。
 - `src/skill.rs` — 多根发现 first-wins 遮蔽；缓存 `src/skill/skill_cache.rs`。
@@ -34,6 +34,11 @@ Provider 配置在 `src/config/provider.rs` 声明 `chat_completions`（默认�
 ## 边界
 - 域文件项目层存在即整体遮蔽外层，不逐键合并、不查 XDG。
 - agent 解析优先当前执行固定的资源根（agent::scope），未设置走原解析。
+
+## 发布共享契约
+
+- `src/fleet/release.rs` — PlatformConfig、交接协议与数据格式兼容范围；兼容性随构建信息进入发布清单。
+- `src/skill/runtime.rs` — Runtime 私有全局技能快照、原子完成标记和固定发现根；新版本播种技能不会修改旧 Runtime 已固定内容。
 
 ## 相关
 - [agents/session](../session/index.md) — Config 驱动压缩与模型选择。

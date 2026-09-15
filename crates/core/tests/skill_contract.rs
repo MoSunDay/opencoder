@@ -420,6 +420,38 @@ fn seeded_review_skill_requires_five_question_recap() {
 }
 
 #[test]
+fn seeded_review_skill_enforces_lean_output_contract() {
+    // The review output is strictly five questions + verdict, nothing else:
+    // progress (completed/total), a numbered TODO list, per-item verify
+    // method + evidence, and an explicit anti-redundancy discipline replace
+    // the retired "no fixed output template" free-form guidance.
+    let root = tempfile::tempdir().unwrap();
+    seed_builtin_skills_in(root.path()).expect("seed");
+    let body = std::fs::read_to_string(root.path().join("review/SKILL.md")).unwrap();
+    for token in [
+        "## 输出契约",
+        "板块之外零输出",
+        "严格五问",
+        "TODO List",
+        "编号",
+        "验证方式",
+        "证据 = `file:line`",
+        "不整段粘贴",
+        "不写开篇引言",
+        "不跨板块复读",
+    ] {
+        assert!(
+            body.contains(token),
+            "review lean output contract missing `{token}`"
+        );
+    }
+    assert!(
+        !body.contains("没有固定输出模板"),
+        "review must drop the retired free-form (no fixed template) guidance"
+    );
+}
+
+#[test]
 fn seeded_say_and_replay_skill_requires_five_question_recap() {
     // Same guard for the say-and-replay REPLAY block: goal / progress /
     // done+verify / encountered + blocked / remaining must all survive

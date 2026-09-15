@@ -148,6 +148,7 @@ async fn resume(root: &std::path::Path, id: &str, prompt: &str, seed: Seed) {
 
 #[tokio::test]
 async fn recovery_admits_once_from_every_pre_execution_fault_point() {
+    let _host_config = support::isolated_config();
     let cases = [
         ("no-session", Seed::NoSession),
         ("empty-session", Seed::EmptySession),
@@ -168,6 +169,7 @@ async fn recovery_admits_once_from_every_pre_execution_fault_point() {
 
 #[tokio::test]
 async fn resume_after_completed_first_turn_does_not_call_the_model_again() {
+    let _host_config = support::isolated_config();
     let dir = tempfile::tempdir().unwrap();
     let client = mock();
     let first = worker(dir.path(), client.clone()).await;

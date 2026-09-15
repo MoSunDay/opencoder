@@ -10,14 +10,20 @@ use serde_json::json;
 use std::sync::Arc;
 
 pub fn build_app(state: Arc<AppState>, token: Option<String>, web: bool) -> Router {
+    crate::release::outbox::start(&state);
     // Captured before the builder chains consume `state`: the bearer
     // middleware resolves platform users through the same store.
     let auth_store = state.store.clone();
+    if let Some(token) = &token {
+        let _ = state.lifecycle.credential.set(token.clone());
+    }
     let mut app = Router::<Arc<AppState>>::new()
         .merge(api::compat::routes())
         .merge(api::brain_runs::routes())
         .route("/api/health", get(|| async { axum::Json(json!({"ok":true,"protocol_version":opencoder_core::fleet::PROTOCOL_VERSION,"role":"control","commit":opencoder_core::version::VERSION_LONG})) }))
         .route("/api/ready", get(admission::ready))
+        .route("/api/admin/release", get(crate::release::status))
+        .route("/api/admin/release/retire", post(crate::release::retire))
         .route(
             "/api/admin/drain",
             get(admission::status)
@@ -35,12 +41,11 @@ pub fn build_app(state: Arc<AppState>, token: Option<String>, web: bool) -> Rout
         .route("/api/harnesses/:name", put(api::settings::save_harness))
         .route("/api/harnesses/codex/profiles", get(api::settings::registered::profiles))
         .route("/api/harnesses/codex/profiles/:name", put(api::settings::registered::save_profile))
-        .route("/api/runners", get(api::settings::registered::runners))
-        .route("/api/runners/:name", put(api::settings::registered::save_runner))
         .route("/api/nodes/channel", get(transport::upgrade))
         .route("/api/nodes/:id/maintenance", post(catalog::maintain))
         .route("/api/executions", get(executions::list).post(executions::create))
         .route("/api/executions/:id", get(executions::inspect))
+        .route("/api/executions/:id/receipt", get(executions::receipt))
         .route("/api/executions/:id/commands", post(executions::command))
         .route("/api/executions/:id/events", get(stream::events))
         .route("/api/executions/:id/events-page", get(executions::events_page))
@@ -80,6 +85,8 @@ pub fn build_app(state: Arc<AppState>, token: Option<String>, web: bool) -> Rout
         .route("/api/todo/envs/:name", get(api_todo_envs::get_env).put(api_todo_envs::update_env).delete(api_todo_envs::delete_env))
         .route("/api/todo/tools", get(api_todo_envs::list_tools))
         .route("/api/todo/tools/import", post(api_todo_envs::import_tool))
+        .route("/api/todo/validate-files", post(api_todo_directory::validate_files))
+        .route("/api/todo/templates/:name/:version/files", get(api_todo_directory::files))
         .route("/api/todo/templates", get(api_todo_templates::list_templates).post(api_todo_templates::create_template))
         .route("/api/todo/templates/:name", get(api_todo_templates::get_template).delete(api_todo_template_versions::delete_template))
         .route("/api/todo/templates/:name/todo.json", get(api_todo_templates::get_meta).put(api_todo_templates::update_meta))
@@ -117,6 +124,14 @@ pub fn build_app(state: Arc<AppState>, token: Option<String>, web: bool) -> Rout
     }
     let mut app = app
         .with_state(state.clone())
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            crate::release::forward_resources,
+        ))
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            crate::release::track,
+        ))
         // dag-wasm pool scope: same position as the agents scope below, so
         // both resource-root resolvers run inside the role gate.
         .layer(axum::middleware::from_fn_with_state(

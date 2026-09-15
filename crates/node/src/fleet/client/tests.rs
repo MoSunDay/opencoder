@@ -291,7 +291,10 @@ async fn connection_reads_calls_while_indexes_wait_and_cancels_collection_on_clo
     });
 
     server.await.unwrap();
-    assert!(client.await.unwrap().is_err());
+    client
+        .await
+        .unwrap()
+        .expect("a normal peer close completes the old channel cleanly");
     tokio::time::timeout(
         std::time::Duration::from_secs(1),
         service.cancelled.acquire(),
@@ -300,4 +303,17 @@ async fn connection_reads_calls_while_indexes_wait_and_cancels_collection_on_clo
     .expect("closing the connection must cancel its index collection")
     .unwrap()
     .forget();
+}
+
+#[test]
+fn normal_retirement_and_error_close_codes_remain_distinct() {
+    for code in [None, Some(CloseCode::Normal), Some(CloseCode::Away)] {
+        close_outcome(code).expect("normal retirement");
+    }
+    for code in [CloseCode::Error, CloseCode::Policy, CloseCode::Protocol] {
+        assert_eq!(
+            close_outcome(Some(code)).unwrap_err().to_string(),
+            format!("server closed node channel with code {}", u16::from(code))
+        );
+    }
 }

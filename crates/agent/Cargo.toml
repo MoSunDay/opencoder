@@ -20,6 +20,11 @@ opencoder-session.workspace = true
 anyhow.workspace = true
 serde_json.workspace = true
 async-trait.workspace = true
+serde.workspace = true
+reqwest.workspace = true
+futures.workspace = true
+ulid.workspace = true
+axum = { version = "0.7", features = ["json"] }
 clap.workspace = true
 tokio.workspace = true
 tracing.workspace = true

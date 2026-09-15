@@ -2,7 +2,7 @@
 //! the node's artifact contract (`<dag_root>/<run>/<step>/meta.json` +
 //! `output.json`) through the two new control routes — the aggregate
 //! progress view and the single-step view — for a finished run and for a
-//! run parked mid-flight (first step done, second still pending).
+//! run parked mid-flight (first step done, second still running).
 
 use super::*;
 use std::sync::Arc;
@@ -115,7 +115,7 @@ async fn dag_run_progress_and_step_views_after_completion() {
 }
 
 #[tokio::test]
-async fn dag_run_progress_reports_pending_step_while_in_flight() {
+async fn dag_run_progress_reports_running_step_while_in_flight() {
     let _config = support::isolated_config();
     let client = mock();
     let fleet = Fleet::new(1, client.clone()).await;
@@ -153,28 +153,30 @@ async fn dag_run_progress_reports_pending_step_while_in_flight() {
                 )
                 .await;
             assert_eq!(progress.status, 200, "{progress:?}");
-            if progress.body["done"] == json!(1) && progress.body["pending"] == json!(1) {
+            if progress.body["done"] == json!(1) && progress.body["running"] == json!(1) {
                 return progress;
             }
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         }
     })
     .await
-    .expect("run never reached done=1 pending=1");
+    .expect("run never reached done=1 running=1");
     assert_eq!(progress.body["total"], json!(2), "{progress:?}");
     assert_eq!(progress.body["execution_status"], json!("running"));
     assert_eq!(progress.body["done"], json!(1));
     assert_eq!(progress.body["error"], json!(0));
     assert_eq!(progress.body["cancelled"], json!(0));
-    assert_eq!(progress.body["pending"], json!(1));
+    assert_eq!(progress.body["pending"], json!(0));
+    assert_eq!(progress.body["running"], json!(1));
+    assert!(progress.body["head_seq"].as_i64().unwrap() > 0);
     let steps = progress.body["steps"].as_array().unwrap();
     assert_eq!(steps.len(), 2, "{steps:?}");
     assert_eq!(steps[0]["name"], json!("first"));
     assert_eq!(steps[0]["status"], json!("done"));
     assert_eq!(steps[1]["name"], json!("second"));
-    assert_eq!(steps[1]["status"], json!("pending"));
+    assert_eq!(steps[1]["status"], json!("running"));
 
-    // In-spec step that never ran: 200 with pending status and null
+    // Running step without a terminal receipt: 200 with running status and null
     // timings/output (no meta.json, no output.json on disk yet).
     let second = fleet
         .call(
@@ -184,7 +186,7 @@ async fn dag_run_progress_reports_pending_step_while_in_flight() {
         )
         .await;
     assert_eq!(second.status, 200, "{second:?}");
-    assert_eq!(second.body["status"], json!("pending"));
+    assert_eq!(second.body["status"], json!("running"));
     assert_eq!(second.body["output"], json!(null));
     assert_eq!(second.body["started_at_ms"], json!(null));
     assert_eq!(second.body["finished_at_ms"], json!(null));
@@ -200,5 +202,7 @@ async fn dag_run_progress_reports_pending_step_while_in_flight() {
     assert_eq!(cancelled.status, 200, "{cancelled:?}");
     let detail = settled(&fleet.nodes[0], "dag-steps-mid-run").await;
     assert_eq!(detail["execution"]["status"], "cancelled", "{detail}");
+    assert_eq!(detail["dag_steps"]["cancelled"], 1, "{detail}");
+    assert_eq!(detail["dag_steps"]["error"], 0, "{detail}");
     fleet.shutdown().await;
 }

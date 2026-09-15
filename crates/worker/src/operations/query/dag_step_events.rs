@@ -1,7 +1,7 @@
 //! DAG single-step event stream: the query behind
 //! `GET /api/dag/runs/:id/steps/:step/events`. An `agent` step owns a child
 //! session (`session.json`, falling back to `meta.json.session_id`) and its
-//! events are read straight from it; `wasm`/`runner` steps multiplex into the
+//! events are read straight from it; `wasm` steps multiplex into the
 //! run session, so their frames are selected by `payload.step` (wasm output
 //! additionally by the `step_output` kind). Frame shape, page caps and the
 //! 413 guards match `query::events` so the control SSE loop is reusable.
@@ -65,7 +65,7 @@ pub(in crate::operations) async fn dag_step_events(
     let status = outcome_status(&meta);
     let session_id = step_session_id(&root, &execution.id, step, &meta).await?;
     // An agent step streams its own child session once it exists; until then
-    // (and for wasm/runner) the run session is the only source.
+    // (and for wasm) the run session is the only source.
     let child = kind.as_deref() == Some("agent") && session_id.is_some();
     let source = if child {
         session_id.clone().unwrap_or_default()

@@ -7,6 +7,7 @@
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
+use unicode_width::UnicodeWidthStr;
 
 use crate::theme;
 
@@ -54,6 +55,12 @@ struct MdRenderer {
     code_buf: Vec<String>,
     list_stack: Vec<(ListKind, usize)>,
     in_para: bool,
+    // ── GFM 表格缓冲 ──
+    // 表格激活期间 `flush()` 不再落行，而是把取走的 span 收进当前行的
+    // 单元格；行末单元格定格为一行，表末统一渲染成对齐网格。
+    table_active: bool,
+    table_row: Vec<Vec<Span<'static>>>,
+    table_rows: Vec<Vec<Vec<Span<'static>>>>,
 }
 
 #[derive(Clone, Copy)]
@@ -73,6 +80,9 @@ impl MdRenderer {
             code_buf: Vec::new(),
             list_stack: Vec::new(),
             in_para: false,
+            table_active: false,
+            table_row: Vec::new(),
+            table_rows: Vec::new(),
         }
     }
 
@@ -87,7 +97,11 @@ impl MdRenderer {
     }
 
     fn flush(&mut self) {
-        if !self.spans.is_empty() || self.in_para {
+        if self.table_active {
+            // 表格内：取走的 span 成为当前行的一个单元格。空单元格也必须
+            // 占位，否则残行会让后续列整体左移错位。
+            self.table_row.push(std::mem::take(&mut self.spans));
+        } else if !self.spans.is_empty() || self.in_para {
             self.lines.push(Line::from(std::mem::take(&mut self.spans)));
         }
     }
@@ -188,6 +202,17 @@ impl MdRenderer {
                 );
                 self.push_str("[".to_string());
             }
+            Tag::Table(_) => {
+                // 先收束挂起的段落，再切换进表格缓冲模式；单元格文本由
+                // flush() 落进 table_row，表末统一成型。
+                self.flush();
+                self.in_para = false;
+                self.table_active = true;
+                self.table_row.clear();
+                self.table_rows.clear();
+            }
+            // 行是隐式的：单元格直接累积进 table_row，行末定格，无需处理。
+            Tag::TableHead | Tag::TableRow => {}
             _ => {
                 self.in_para = true;
             }
@@ -227,6 +252,22 @@ impl MdRenderer {
             TagEnd::Link => {
                 self.push_str("]".to_string());
                 self.style_stack.pop();
+            }
+            TagEnd::TableCell => {
+                // 单元格闭合：把已累积的 span 落成当前行的一个格子。
+                self.flush();
+            }
+            TagEnd::TableRow | TagEnd::TableHead => {
+                self.table_rows.push(std::mem::take(&mut self.table_row));
+            }
+            TagEnd::Table => {
+                let grid = emit_table(&self.table_rows);
+                self.lines.extend(grid);
+                // 与段落收尾保持一致：表格后留一个空行。
+                self.lines.push(Line::from(""));
+                self.table_active = false;
+                self.table_rows.clear();
+                self.in_para = false;
             }
             _ => {}
         }
@@ -291,6 +332,84 @@ impl MdRenderer {
         }
         self.lines
     }
+}
+
+// ── GFM 表格渲染（纯函数：只读缓冲行，产出对齐网格） ──────────────────────
+
+/// 单元格的终端显示宽度：各 span 内容宽度之和（按列计，不按字符数）。
+fn table_cell_width(cell: &[Span<'static>]) -> usize {
+    cell.iter()
+        .map(|s| UnicodeWidthStr::width(s.content.as_ref()))
+        .sum()
+}
+
+/// 组装一行：单元格之间插入 muted 的 ` │ ` 分隔 span，短单元格右侧补
+/// 空格对齐到列宽。`header` 时给每个 span 叠加加粗（patch，保留单元格
+/// 自身的内联样式）。残行的缺失单元格渲染为纯空白占位。
+fn table_row_line(cells: &[Vec<Span<'static>>], widths: &[usize], header: bool) -> Line<'static> {
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    for (c, width) in widths.iter().enumerate() {
+        if c > 0 {
+            spans.push(Span::styled(
+                " \u{2502} ".to_string(),
+                Style::default().fg(theme::muted()),
+            ));
+        }
+        let cell = cells.get(c);
+        let used = cell.map(|c| table_cell_width(c)).unwrap_or(0);
+        if let Some(cell) = cell {
+            for s in cell {
+                let mut s = s.clone();
+                if header {
+                    s.style = s.style.patch(Style::default().add_modifier(Modifier::BOLD));
+                }
+                spans.push(s);
+            }
+        }
+        let pad = width.saturating_sub(used);
+        if pad > 0 {
+            spans.push(Span::raw(" ".repeat(pad)));
+        }
+    }
+    Line::from(spans)
+}
+
+/// 把缓冲的表格行渲染成对齐网格：首行为表头（加粗），其后一条
+/// `─┼─` 分隔线（每列 `─`×(列宽+2)，用 `┼` 相连，muted 样式），
+/// 其余为普通行。列数取最长行；每列宽度取该列单元格的最大显示宽。
+/// 残行 / 空单元格不 panic；`rows` 为空或没有列时返回空。超宽表格
+/// 不截断、不换行（宽度交给视口处理）。
+fn emit_table(rows: &[Vec<Vec<Span<'static>>>]) -> Vec<Line<'static>> {
+    let cols = rows.iter().map(|r| r.len()).max().unwrap_or(0);
+    if rows.is_empty() || cols == 0 {
+        return Vec::new();
+    }
+    let widths: Vec<usize> = (0..cols)
+        .map(|c| {
+            rows.iter()
+                .map(|r| r.get(c).map(|c| table_cell_width(c)).unwrap_or(0))
+                .max()
+                .unwrap_or(0)
+        })
+        .collect();
+    let mut lines = Vec::new();
+    let mut first = true;
+    // 零单元格的畸形行直接跳过，不产生空行。
+    for row in rows.iter().filter(|r| !r.is_empty()) {
+        lines.push(table_row_line(row, &widths, first));
+        if first {
+            first = false;
+            lines.push(Line::from(Span::styled(
+                widths
+                    .iter()
+                    .map(|w| "\u{2500}".repeat(w + 2))
+                    .collect::<Vec<_>>()
+                    .join("\u{253c}"),
+                Style::default().fg(theme::muted()),
+            )));
+        }
+    }
+    lines
 }
 
 #[cfg(test)]

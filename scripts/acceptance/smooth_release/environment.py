@@ -17,6 +17,7 @@ from rolling import probes, units
 from rolling.state import atomic_bytes, write
 from fixture import Model, HOLD_WASM
 from resources import Resources
+from containers import Containers
 
 
 _ports = set()
@@ -55,15 +56,19 @@ def until(check, label, seconds=90):
 
 
 class Environment:
-    def __init__(self, binaries, nginx):
-        self.root = Path(tempfile.mkdtemp(prefix='opencoder-smooth-'))
+    def __init__(self, binaries, nginx, data_parent=None, wasmtime=None):
+        self.root = Path(tempfile.mkdtemp(prefix='opencoder-smooth-',dir=data_parent))
         self.root.chmod(0o755)
         print(json.dumps({'evidence':str(self.root)}), flush=True)
         self.prefix = self.root.name
         self.children = {}
         self.records = []
         self.nginx = nginx
-        self.model = Model()
+        self.model = Model(self.root)
+        self.containers = Containers(wasmtime)
+        self.shared_skill = self.root / '.opencoder/skills/release-reference/SKILL.md'
+        self.shared_skill.parent.mkdir(parents=True)
+        self.shared_skill.write_text('---\nname: release-reference\ndescription: fixture\n---\nfirst release bytes\n')
         self.resources = Resources(self.root,port)
         self.token = secrets.token_hex(24)
         self.opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
@@ -74,7 +79,7 @@ class Environment:
         write(self.root / 'build-info.json',self.info)
         self.settings = Settings(self.root / 'state',self.root / 'server-work',self.root / 'server-data',
             self.root / 'agent-work',self.root / 'token',public_url=f'http://127.0.0.1:{port()}',
-            host_port=port(),resource_port=port(),nginx_include=self.root / 'ingress.conf',max_runs=4)
+            host_port=port(),resource_port=port(),nginx_include=self.root / 'ingress.conf',max_runs=6)
         s = self.settings
         self.settings = Settings(**{**s.__dict__,'listen':s.public_url.removeprefix('http://')})
         atomic_bytes(s.token_file,self.token.encode())
@@ -126,6 +131,7 @@ class Environment:
         write(data / 'host-binding.json',{'database':str(s.state_dir / 'host/host.db'),'runtime_id':label})
         atomic_bytes(data / 'dag/_modules/release-probe.wasm',probes.WASM)
         atomic_bytes(data / 'dag/_modules/hold.wasm',HOLD_WASM.encode())
+        self.containers.prepare(data)
         config = {'endpoint':f"http://127.0.0.1:{record['runtime_port']}",'data_dir':str(data),'unit':record['runtime_unit']}
         self.http(host,'/runtimes','POST',{'id':label,'release_id':label,'mode':'staged','config':config})
         command = [self.bin / 'opencoder-agent','--workdir',s.agent_workdir,'--data-dir',data,
@@ -209,13 +215,27 @@ class Environment:
 
     def release_work(self):
         self.model.release.set()
+        (self.root / 'shell.release').touch()
         for record in self.records:
             for context in Path(record['runtime_data']).rglob('context.json'):
-                if any(name in str(context) for name in ['dag-hold','dag-r3-hold']):
+                if any(name in str(context) for name in ['dag-hold','dag-r3-hold','dag-container-hold']):
                     (context.parent.parent / 'release').touch()
 
     def close(self):
         self.release_work()
+        # Stop producers before Runtime units, so an outbox retry cannot wake a
+        # Runtime between its quiescence check and the end of fixture cleanup.
+        producers = {label:child for label,child in self.children.items() if label != 'resources'}
+        for child in producers.values():
+            if child.poll() is None:
+                child.terminate()
+        for label,child in producers.items():
+            try:
+                child.wait(timeout=60)
+            except subprocess.TimeoutExpired:
+                print('fixture producer still draining:',label,child.pid,flush=True)
+                return
+        safe = True
         for record in self.records:
             try:
                 if not self.runtime_pid(record):
@@ -224,7 +244,11 @@ class Environment:
                 until(lambda:self.http(endpoint,'/inventory')['can_hibernate'],'fixture quiescence',60)
                 subprocess.run(['systemctl','stop',record['runtime_unit']],check=True,timeout=30)
             except Exception as error:
+                safe = False
                 print('fixture runtime cleanup:',record['runtime_unit'],str(error),flush=True)
+        if not safe:
+            print('fixture resources retained for unfinished runtime cleanup',flush=True)
+            return
         self.resources.close()
         for child in self.children.values():
             if child.poll() is None:

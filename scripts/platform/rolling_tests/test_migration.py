@@ -31,7 +31,7 @@ class MigrationTests(unittest.TestCase):
                 result = migration.migrate(settings,root/'bundle',operations)
             self.assertEqual(result['phase'],'complete')
             self.assertEqual(result['migration_stage'],'complete')
-            self.assertIn('proxy_pass http://127.0.0.1:19000',settings.nginx_include.read_text())
+            self.assertIn('proxy_pass http://127.0.0.1:3000',settings.nginx_include.read_text())
             self.assertFalse(any(c[:2] == ('systemctl','stop') for c in operations.calls))
             self.assertFalse(any('/api/admin/drain' in c for c in operations.calls))
 

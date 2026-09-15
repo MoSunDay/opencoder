@@ -126,6 +126,15 @@ impl FleetStore {
         execution_id: &str,
         inherited: Option<&str>,
     ) -> Result<String> {
+        // Ownership is immutable. Inventory and history reads must not take
+        // the shared database's writer lock for every already-known task.
+        if let Some(owner) = self.owner(execution_id).await? {
+            ensure!(
+                inherited.is_none_or(|id| id == owner.runtime_id),
+                "execution runtime ownership conflict"
+            );
+            return Ok(owner.runtime_id);
+        }
         let _gate = self.gate.lock().await;
         let tx = self
             .conn

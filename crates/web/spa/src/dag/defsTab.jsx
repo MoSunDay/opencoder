@@ -1,4 +1,4 @@
-// defsTab.jsx — DAG「定义」tab: definitions table (name / step count /
+// defsTab.jsx — DAG「定义」tab: definitions table (name /
 // updated_at / actions) + dispatch modal (optional target node from the
 // shared fleet snapshot) + create/edit drawer (defEditor.jsx).
 // Endpoints: GET /api/dag/defs, POST /api/dag/defs, DELETE /api/dag/defs/:id,

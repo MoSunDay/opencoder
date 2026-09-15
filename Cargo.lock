@@ -2428,6 +2428,7 @@ dependencies = [
  "chrono",
  "dirs",
  "futures",
+ "http-body",
  "opencoder-agents",
  "opencoder-brain",
  "opencoder-core",
@@ -2465,6 +2466,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+ "ulid",
 ]
 
 [[package]]

@@ -3,7 +3,7 @@ mod capacity;
 mod receipts;
 mod runtimes;
 pub use capacity::CapacitySnapshot;
-pub use receipts::Receipt;
+pub use receipts::{dispatch_key, Receipt};
 pub use runtimes::{RuntimeOwner, RuntimeRecord};
 
 use super::FleetStore;

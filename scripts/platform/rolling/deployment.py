@@ -47,7 +47,7 @@ def deploy(settings, bundle, operations, seconds=90):
     identifier = candidate["release_id"]
     if journal.data["candidate"] not in (None, identifier):
         raise ValueError("another release is unfinished; resume it or roll it back first")
-    if journal.data["current"] == identifier and journal.data["phase"] == "complete":
+    if journal.data["current"] == identifier and journal.data["phase"] in ("complete", "rolled_back"):
         probes.public(settings, journal.record(identifier), operations, seconds)
         retire_server(settings, journal, operations)
         return journal.data
@@ -55,11 +55,14 @@ def deploy(settings, bundle, operations, seconds=90):
         used = [int(r[k]) for r in journal.data["releases"].values() for k in ("server_port", "runtime_port", "host_port")]
         used.extend(h["port"] for r in journal.data["releases"].values() for key in ("previous_hosts", "previous_servers") for h in r.get(key, []))
         ordinal = (max(used, default=settings.port_base - 1) + 3 - settings.port_base) // 3
-        journal.data["releases"][identifier] = record_for(settings, candidate, ordinal)
+        record = record_for(settings, candidate, ordinal)
+        record["resource_source"] = journal.record(journal.data["current"])["runtime_data"]
+        journal.data["releases"][identifier] = record
     record = journal.record(identifier)
     if record["manifest"] != candidate:
         raise ValueError("release ID already belongs to another bundle")
     if journal.data["candidate"] is None:
+        record["probe_epoch"] = record.get("probe_epoch", 0) + 1
         journal.data.update(candidate=identifier, previous=journal.data["current"], failure=None)
         journal.phase("validated")
     try:
@@ -165,6 +168,7 @@ def rollback(settings, operations, seconds=90):
             raise ValueError("no ports available for rollback instances")
         old["host_unit"] = f"opencoder-host-{previous}-rollback-{len(old['previous_hosts'])}.service"
         old["server_unit"] = f"opencoder-server-{previous}-rollback-{len(old['previous_servers'])}.service"
+        old["probe_epoch"] = old.get("probe_epoch", 0) + 1
         journal.data["rollback_from"] = journal.data["current"]
         journal.phase("rolling_back")
     units.prepare_host(settings, old)

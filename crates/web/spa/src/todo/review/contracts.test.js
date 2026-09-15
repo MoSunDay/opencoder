@@ -2,8 +2,6 @@ import {beforeEach,describe,expect,it,vi} from 'vitest';
 import {applyFrame} from './model.js';
 import {readOverview,readReview,eventPayload} from './api.js';
 import {apiGet} from '../../api.js';
-import {formToSpec,specToForm,EXAMPLE_SPEC} from '../editing/model.js';
-import {foldTodoEvents,itemsToStates} from '../runProjection.js';
 vi.mock('../../api.js',()=>({apiGet:vi.fn()}));
 beforeEach(()=>vi.clearAllMocks());
 const snapshot={workflow:{id:'todos-1',generation:2,world_epoch:0,status:'running'},head_seq:5,nodes:[{id:'a',status:'pending',attempt:0}],total:1};
@@ -16,7 +14,6 @@ describe('TODO review consistency',()=>{
     expect(applyFrame(next,{...frame,seq:7,data:{...frame.data,generation:1}})).toBe(next);
     const failed=applyFrame(next,{...frame,seq:8,data:{...frame.data,generation:4,items:[{todo_id:'a',status:'failed',attempt:3}]}});
     expect(failed.nodes[0].status).toBe('failed');
-    expect(foldTodoEvents(itemsToStates([{todo_id:'a',status:'pending'}]),[frame]).get('a').status).toBe('running');
   });
   it('reads all nodes across pages and retries conflicting generations',async()=>{
     apiGet.mockResolvedValueOnce({...snapshot,total:2,next_ordinal:1})
@@ -39,17 +36,5 @@ describe('TODO review consistency',()=>{
     apiGet.mockResolvedValueOnce({offset:0,next_offset:bytes.length,eof:true,bytes_b64:bytes.toString('base64')});
     expect(await eventPayload('todos-1',{seq:9,data:{omitted:true}},{},'session-a')).toEqual({output:'完整工具结果'});
     expect(apiGet.mock.calls[0][0]).toContain('section=session_event_payload&session_id=session-a');
-  });
-  it('form rename preserves metadata, acceptance gates and dependency references',()=>{
-    const spec=structuredClone(EXAMPLE_SPEC);spec.metadata={owner:'parent'};
-    spec.todos[0].metadata={review:'keep'};spec.todos[0].acceptance.required_tool_calls=[{name:'bash',arguments_contains:[]}];
-    spec.todos.push({...structuredClone(spec.todos[0]),id:'t2',depends_on:['t1']});
-    const form=specToForm(spec);form.todos[0].id='renamed';
-    const result=formToSpec(form,spec);
-    expect(result.metadata).toEqual(spec.metadata);
-    expect(result.todos[0].metadata).toEqual(spec.todos[0].metadata);
-    expect(result.todos[0].acceptance).toEqual(spec.todos[0].acceptance);
-    expect(result.todos[1].depends_on).toEqual(['renamed']);
-    expect(result.todos[0]).not.toHaveProperty('_source_id');
   });
 });

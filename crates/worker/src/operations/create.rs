@@ -279,6 +279,7 @@ pub(super) fn prepare(worker: &Worker, assignment: &Assignment, legacy: bool) ->
         crate::resources::check_mount(config.agent.agents_dir.as_deref())?;
     }
     std::fs::create_dir_all(root.parent().unwrap())?;
+    let source = source.filter(|_| crate::resources::requires_agent_pool(assignment));
     config.agent.agents_dir = crate::resources::pin(source.as_deref(), &root)?;
     let validated = (|| -> Result<()> {
         let prompt = assignment.request.input["prompt"].as_str().unwrap_or("");

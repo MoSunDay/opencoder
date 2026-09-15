@@ -11,6 +11,8 @@ from rolling.state import Journal, write
 from rolling.manifest import compatible
 from rolling.units import nginx
 from rolling.units import service
+from rolling.units import freeze_rootfs
+from rolling.probes import probe_id
 
 
 def manifest(identifier):
@@ -87,6 +89,7 @@ class DeploymentTests(unittest.TestCase):
         self.assertEqual(len(result["releases"]), 2)
         self.assertEqual(self.probes_candidate.call_count, 1)
         self.assertEqual(self.units_prepare.call_count, 1)
+        self.assertEqual(interrupted.record("r2")["probe_epoch"], result["releases"]["r2"]["probe_epoch"])
 
     def test_failed_prewarm_preserves_current_admission_and_ownership(self):
         self.probes_candidate.side_effect = RuntimeError("probe failed")
@@ -107,6 +110,21 @@ class DeploymentTests(unittest.TestCase):
         self.assertEqual(result["phase"], "rolled_back")
         self.assertEqual(set(result["releases"]), {"r1", "r2"})
         self.assertEqual(self.operations.active, "r1")
+        self.assertNotEqual(probe_id(self.old, public=True), probe_id(result["releases"]["r1"], public=True))
+
+    def test_retry_after_rollback_executes_new_probes_and_keeps_resume_identity(self):
+        self.probes_public.side_effect = [RuntimeError("probe failed"), True]
+        with self.assertRaisesRegex(RuntimeError, "probe failed"):
+            deploy(self.settings, Path("bundle"), self.operations)
+        failed = Journal(self.settings.state_dir).record("r2")
+        self.probes_public.side_effect = None
+        result = deploy(self.settings, Path("bundle"), self.operations)
+        retried = result["releases"]["r2"]
+        self.assertNotEqual(probe_id(failed), probe_id(retried))
+        self.assertNotEqual(probe_id(failed, public=True), probe_id(retried, public=True))
+        resumed = deploy(self.settings, Path("bundle"), self.operations)
+        self.assertEqual(probe_id(retried), probe_id(resumed["releases"]["r2"]))
+        self.assertEqual(len(result["releases"]), 2)
 
     def test_retained_data_format_is_checked_before_any_switch(self):
         incompatible = manifest("r3")
@@ -126,6 +144,30 @@ class DeploymentTests(unittest.TestCase):
         unit.write_text(service(['/bin/true'], 'unit verification', workdir=directory))
         subprocess.run(['systemd-analyze','verify',str(unit)],check=True,capture_output=True)
         self.assertIn('WorkingDirectory=' + str(directory) + '\n',unit.read_text())
+
+    def test_oci_images_are_pinned_per_runtime_and_ignore_live_mounts(self):
+        root = Path(self.directory.name)
+        source = root / 'old/dag/rootfs'
+        (source / 'usr/bin').mkdir(parents=True)
+        (source / 'dev').mkdir()
+        (source / 'usr/bin/wasmtime').write_bytes(b'first-version')
+        (source / 'dev/ptmx').write_bytes(b'live-device')
+        (source / 'bin').symlink_to('usr/bin')
+        record = {'runtime_data':str(root / 'new'),'resource_source':str(root / 'old')}
+        freeze_rootfs(record)
+        (source / 'usr/bin/wasmtime').write_bytes(b'second-version')
+        freeze_rootfs(record)
+        target = root / 'new/dag/rootfs'
+        self.assertEqual((target / 'usr/bin/wasmtime').read_bytes(),b'first-version')
+        self.assertFalse((target / 'dev/ptmx').exists())
+        self.assertEqual((target / 'bin').readlink(),Path('usr/bin'))
+        self.assertEqual((source / 'dev/ptmx').read_bytes(),b'live-device')
+        outside = root / 'outside'
+        outside.mkdir()
+        (source / 'workspace').symlink_to(outside)
+        with self.assertRaisesRegex(ValueError,'workspace'):
+            freeze_rootfs({'runtime_data':str(root / 'third'),'resource_source':str(root / 'old')})
+        self.assertFalse((outside / 'context').exists())
 
 
 if __name__ == "__main__":

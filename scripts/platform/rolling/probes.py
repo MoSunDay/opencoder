@@ -3,10 +3,44 @@ import hashlib
 import time
 import json
 import socket
+import urllib.error
 from pathlib import Path
-from .state import atomic_bytes
+from .state import atomic_bytes, runtime_use
+from .io import HttpFailure
 
 WASM = bytes.fromhex("0061736d0100000001040160000003020100070a01065f737461727400000a040102000b")
+
+
+def ambiguous(status):
+    return status in (408, 425, 428, 429) or status >= 500
+
+
+def submit_probe(operations, base, identifier, request, seconds):
+    def accepted():
+        try:
+            receipt = operations.http(base, f"/api/executions/{identifier}/receipt")
+        except (HttpFailure, urllib.error.HTTPError) as error:
+            if error.code == 404:
+                receipt = None
+            elif ambiguous(error.code):
+                return False
+            else:
+                raise ValueError(str(error)) from error
+        if receipt:
+            if receipt["phase"] == "accepted":
+                return True
+            if receipt["phase"] == "rejected":
+                raise ValueError(f"public probe rejected: {receipt}")
+        try:
+            operations.http(base, "/api/executions", "POST", request)
+            return True
+        except (HttpFailure, urllib.error.HTTPError) as error:
+            if ambiguous(error.code):
+                return False
+            raise ValueError(str(error)) from error
+    # A lost reply never changes the ID or frozen input. The same check also
+    # resumes a deployer that crashed after acceptance but before checkpointing.
+    operations.wait(accepted, seconds)
 
 
 def resource_paths(settings):
@@ -51,11 +85,24 @@ def spec():
 
 
 def probe_id(record, public=False):
-    suffix = hashlib.sha256(record["id"].encode()).hexdigest()[:32]
+    # Every activation must execute fresh work, including rollback to a
+    # previously healthy release. A resumed activation retains this epoch.
+    identity = record["id"]
+    if record.get("probe_epoch", 0):
+        identity += '\0' + str(record["probe_epoch"])
+    suffix = hashlib.sha256(identity.encode()).hexdigest()[:32]
     return f"dag-probe-{'public-' if public else ''}{suffix}"
 
 
 def candidate(settings, record, operations, seconds):
+    with runtime_use(settings.state_dir, record["id"]):
+        node_id = candidate_locked(settings, record, operations, seconds)
+        if (Path(record["runtime_data"]) / 'dag/rootfs').is_dir():
+            candidate_locked(settings, record, operations, seconds, container=True)
+        return node_id
+
+
+def candidate_locked(settings, record, operations, seconds, container=False):
     root = Path(record["runtime_data"])
     atomic_bytes(root / "dag/_modules/release-probe.wasm", WASM, 0o444)
     endpoint = f"http://127.0.0.1:{record['runtime_port']}"
@@ -63,15 +110,23 @@ def candidate(settings, record, operations, seconds):
     if inventory.get("runtime_id") != record["id"] or inventory["build"]["git_commit"] != record["manifest"]["commit"]:
         raise ValueError("candidate runtime identity or compiled commit differs from release")
     node_id = inventory["registration"]["id"]
-    identifier = probe_id(record)
+    identifier = probe_id(record) + ('-oci' if container else '')
+    definition = spec()
+    if container:
+        definition['steps'][0]['kind']['sandbox'] = 'runc'
     # Creation time comes from the durable release record, never from a retry.
     assignment = {"index": {"id": identifier, "kind": "dag", "node_id": node_id,
         "created_at": record["created_at"], "status": "pending"},
         "request": {"id": identifier, "kind": "dag", "input": {}, "node_id": node_id},
-        "definition": spec()}
-    receipt = operations.http(endpoint, "/rpc", "POST", {"operation": "create", "assignment": assignment})
-    if receipt["status"] >= 300:
-        raise RuntimeError(f"candidate probe rejected: {receipt}")
+        "definition": definition}
+    def accepted():
+        receipt = operations.http(endpoint, "/rpc", "POST", {"operation": "create", "assignment": assignment})
+        if ambiguous(receipt["status"]):
+            return False
+        if receipt["status"] >= 300:
+            raise ValueError(f"candidate probe rejected: {receipt}")
+        return True
+    operations.wait(accepted, seconds)
 
     def finished():
         view = operations.http(endpoint, "/inventory")
@@ -100,8 +155,8 @@ def public(settings, record, operations, seconds):
     # starting. Verify the public version within the readiness budget.
     operations.wait(lambda: operations.http(settings.public_url, "/api/admin/release")["instance_release"] == record["id"],seconds)
     identifier = probe_id(record, public=True)
-    operations.http(settings.public_url, "/api/executions", "POST", {
-        "id": identifier, "kind": "dag", "input": {"definition": spec()}})
+    submit_probe(operations, settings.public_url, identifier, {
+        "id": identifier, "kind": "dag", "input": {"definition": spec()}}, seconds)
     def finished():
         reply = operations.http(settings.public_url, f"/api/executions/{identifier}")
         # Inspection uses the shared five-field index plus runtime-owned detail.

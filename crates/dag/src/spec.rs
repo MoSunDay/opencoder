@@ -216,9 +216,7 @@ mod tests {
     #[test]
     fn runner_is_not_a_dag_step_type() {
         let value = json!({"name":"old","steps":[{"name":"a","kind":{"type":"runner","runner":"business","agent":"act"}}]});
-        assert!(decode_spec(&value)
-            .unwrap_err()
-            .contains("unknown variant"));
+        assert!(decode_spec(&value).unwrap_err().contains("unknown variant"));
         assert!(decode_spec_str(&value.to_string())
             .unwrap_err()
             .contains("unknown variant"));

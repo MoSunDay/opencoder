@@ -1,3 +1,12 @@
+import {jsonLanguage} from '@codemirror/lang-json';
+
+export function jsonLocation(text) {
+  let offset=text.length;
+  jsonLanguage.parser.parse(text).iterate({enter(node){if(node.type.isError)offset=Math.min(offset,node.from);}});
+  const prefix=text.slice(0,offset);
+  return {line:prefix.split('\n').length,column:prefix.length-prefix.lastIndexOf('\n')};
+}
+
 // Preserve numeric lexemes (including integers beyond Number.MAX_SAFE_INTEGER).
 export function formatJson(text) {
   JSON.parse(text);

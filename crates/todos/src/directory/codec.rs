@@ -43,7 +43,14 @@ struct TaskFile {
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Binding {
+    #[serde(deserialize_with = "binding_env")]
     env: Option<String>,
+}
+
+fn binding_env<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<String>, D::Error> {
+    Option::<String>::deserialize(deserializer)
 }
 
 fn issue(path: &str, message: impl ToString) -> Diagnostic {

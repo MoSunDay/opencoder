@@ -1,4 +1,4 @@
-Commit: 2686d40a267436adb555041fc8154fc9bb454574
+Commit: 8a50a393cbe615f5d6453ff4290da0bf03546881
 
 # dag-runtime 模块
 
@@ -12,9 +12,8 @@ Commit: 2686d40a267436adb555041fc8154fc9bb454574
 - `src/dag_events.rs` — 批量上报 8 条/300ms，终态前等待冲刷；agent transcript 的 `text_delta` 与步骤输出通过 `step_log` 增量上报（Uplink 实时链路，与 `step_log.rs` 的落库链路互补）。
 - `src/exec/wasm/` — wasmtime WASI 模块；runc fail-closed，绝不回落 in_process。
 - `src/exec/how_append.rs` — `OPENCODER_HOW_APPEND` 追加 agent 共享池 `how.md`。
-- `src/exec/runner/` — 注册前台进程的历史直连执行器；不属于 DAG 的 `StepKind`。
 - `src/sandbox/` — OCI bundle/rootfs 生成与有界清理。
-- 事件经 `Uplink::for_local_dag` 写 Node Store（crates/node）；测试 `tests/{run_loop,runner}.rs`。
+- 事件经 `Uplink::for_local_dag` 写 Node Store（crates/node）；测试 `tests/run_loop.rs`。
 
 ## 边界
 - `opencoder-server` 不链接；执行只发生在 claiming 节点。
@@ -23,4 +22,3 @@ Commit: 2686d40a267436adb555041fc8154fc9bb454574
 ## 相关
 - [agents/worker](../worker/index.md) — 本地 DAG 接入方。
 - [agents/dag](../dag/index.md) — 契约来源。
-- [注册 Runner](../../docs/registered-runners.md) — 协议与限制。

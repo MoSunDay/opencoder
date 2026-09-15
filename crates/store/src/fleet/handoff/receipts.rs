@@ -1,9 +1,18 @@
 use super::super::FleetStore;
 use anyhow::{ensure, Result};
 use libsql::{params, TransactionBehavior};
-use opencoder_core::fleet::{Assignment, RpcReply};
+use opencoder_core::fleet::{Assignment, CreateExecution, ExecutionKind, RpcReply};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+
+/// Project sessions retain one owner while each initial admission has its own run ID.
+pub fn dispatch_key(request: &CreateExecution) -> &str {
+    if request.kind == ExecutionKind::Project {
+        request.input["run_id"].as_str().unwrap_or(&request.id)
+    } else {
+        &request.id
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Receipt {
@@ -15,7 +24,7 @@ pub struct Receipt {
 impl FleetStore {
     pub async fn pending_assignments(&self, after: &str, limit: u32) -> Result<Vec<Assignment>> {
         let _gate = self.gate.lock().await;
-        let mut rows = self.conn.query("SELECT a.assignment FROM execution_assignments a JOIN dispatch_receipts r ON r.scope='execution' AND r.id=a.id WHERE r.phase='prepared' AND a.id>?1 ORDER BY a.id LIMIT ?2", params![after,i64::from(limit.min(128))]).await?;
+        let mut rows = self.conn.query("SELECT a.assignment FROM execution_assignments a JOIN dispatch_receipts r ON r.scope='execution' AND r.id=CASE WHEN json_extract(a.assignment,'$.request.kind')='project' THEN COALESCE(json_extract(a.assignment,'$.request.input.run_id'),a.id) ELSE a.id END WHERE r.phase='prepared' AND a.id>?1 ORDER BY a.id LIMIT ?2", params![after,i64::from(limit.min(128))]).await?;
         let mut assignments = Vec::new();
         while let Some(row) = rows.next().await? {
             assignments.push(serde_json::from_str(&row.get::<String>(0)?)?);
@@ -106,10 +115,32 @@ impl FleetStore {
         if let Some(row) = rows.next().await? {
             let old: Assignment = serde_json::from_str(&row.get::<String>(0)?)?;
             ensure!(
-                old.request == assignment.request && old.index.node_id == i.node_id,
+                old.index.node_id == i.node_id
+                    && old.index.kind == i.kind
+                    && old.index.created_at == i.created_at,
+                "assignment ownership conflict"
+            );
+            if old.request == assignment.request {
+                return Ok(());
+            }
+            ensure!(
+                old.request.kind == ExecutionKind::Project
+                    && dispatch_key(&old.request) != dispatch_key(&assignment.request),
                 "assignment conflict"
             );
-            return Ok(());
+            let mut rejected = tx
+                .query(
+                    "SELECT phase FROM dispatch_receipts WHERE scope='execution' AND id=?1",
+                    [dispatch_key(&old.request)],
+                )
+                .await?;
+            ensure!(
+                rejected
+                    .next()
+                    .await?
+                    .is_some_and(|row| row.get::<String>(0).ok().as_deref() == Some("rejected")),
+                "previous project dispatch is unresolved or accepted"
+            );
         }
         drop(rows);
         tx.execute("INSERT INTO execution_index(id,created_at,kind,node_id,status) VALUES (?1,?2,?3,?4,?5) ON CONFLICT(id) DO NOTHING",
@@ -129,11 +160,11 @@ impl FleetStore {
         );
         drop(rows);
         tx.execute(
-            "INSERT INTO execution_assignments VALUES (?1,?2)",
+            "INSERT INTO execution_assignments VALUES (?1,?2) ON CONFLICT(id) DO UPDATE SET assignment=excluded.assignment",
             params![i.id.clone(), serde_json::to_string(assignment)?],
         )
         .await?;
-        let changed = tx.execute("UPDATE dispatch_receipts SET phase='prepared' WHERE scope='execution' AND id=?1 AND fingerprint=?2", params![i.id.clone(),fingerprint]).await?;
+        let changed = tx.execute("UPDATE dispatch_receipts SET phase='prepared' WHERE scope='execution' AND id=?1 AND fingerprint=?2", params![dispatch_key(&assignment.request),fingerprint]).await?;
         ensure!(changed == 1, "missing dispatch receipt");
         tx.commit().await?;
         Ok(())

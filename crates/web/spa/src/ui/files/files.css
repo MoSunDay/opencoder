@@ -9,3 +9,9 @@
 .todo-directory-toolbar{display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px;margin:12px 0}
 .todo-file-errors{padding-left:18px}.todo-file-errors li{margin:8px 0;overflow-wrap:anywhere}
 @media(max-width:700px){.file-workspace{grid-template-columns:minmax(0,1fr)}.file-workspace-tree{max-height:230px;border-right:0;border-bottom:1px solid var(--oc-border,#ddd);padding-bottom:8px}.file-editor-split{flex-direction:column}.file-editor-split .file-editor-code,.file-editor-split .file-editor-preview{flex:1;min-height:200px}.file-editor-body{height:65vh}.file-editor-toolbar{align-items:flex-start}}
+
+.file-workspace-tree .ant-tree-treenode{width:100%;min-width:0}
+.file-workspace-tree .ant-tree-indent{flex-shrink:0}.file-workspace-tree .ant-tree-indent-unit{width:12px}
+.file-workspace-tree .ant-tree-node-content-wrapper{display:flex;flex:1;min-width:0;overflow:hidden;white-space:nowrap}
+.file-workspace-tree .ant-tree-iconEle{flex-shrink:0}
+.file-workspace-tree .ant-tree-title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

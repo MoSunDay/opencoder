@@ -1,5 +1,6 @@
 """Loopback model and releasable WASI workload for process handoff tests."""
 import json
+import shlex
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -10,10 +11,15 @@ def field(prompt, name):
 
 
 class Model:
-    def __init__(self):
+    def __init__(self, root):
         self.release = threading.Event()
         self.entered = threading.Event()
         self.calls = []
+        script = '\n'.join(['import os, pathlib, time',
+            f'pathlib.Path({str(root / "shell.pid")!r}).write_text(str(os.getpid()))',
+            f'while not pathlib.Path({str(root / "shell.release")!r}).exists(): time.sleep(.1)',
+            'print("shell kept running")'])
+        self.shell_command = 'python3 -c ' + shlex.quote(script)
         owner = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -26,12 +32,18 @@ class Model:
                 prompt = next((m['content'] for m in reversed(messages) if m['role'] == 'user'), '')
                 if isinstance(prompt, list):
                     prompt = '\n'.join(p.get('text', '') for p in prompt)
-                answer = owner.answer(prompt)
-                text = answer if isinstance(answer, str) else json.dumps(answer)
+                if 'smooth-release-shell' in prompt and not any(m.get('role') == 'tool' for m in messages):
+                    frames = [({'role':'assistant','tool_calls':[{'index':0,'id':'release-shell-call',
+                        'type':'function','function':{'name':'bash','arguments':json.dumps({'command':owner.shell_command})}}]},None),
+                        ({},'tool_calls')]
+                else:
+                    answer = owner.answer(prompt)
+                    text = answer if isinstance(answer, str) else json.dumps(answer)
+                    frames = [({'role':'assistant','content':text},None),({},'stop')]
                 self.send_response(200)
                 self.send_header('Content-Type', 'text/event-stream')
                 self.end_headers()
-                for delta, reason in [({'role':'assistant','content':text},None),({},'stop')]:
+                for delta, reason in frames:
                     self.wfile.write(('data: ' + json.dumps({'choices':[{'index':0,'delta':delta,'finish_reason':reason}]}) + '\n\n').encode())
                 self.wfile.write(b'data: [DONE]\n\n')
 

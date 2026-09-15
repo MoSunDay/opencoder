@@ -55,7 +55,8 @@ fn profile_validation_rejects_invalid_execution_settings() {
 
 #[test]
 fn historical_runtime_fields_round_trip_without_executable_registrations() {
-    let value = json!({"profiles":{},"runners":{"old":{"revision":1,"settings":{"command":["/old/bin"]}}}});
+    let value =
+        json!({"profiles":{},"runners":{"old":{"revision":1,"settings":{"command":["/old/bin"]}}}});
     let runtime: RuntimeSettings = serde_json::from_value(value.clone()).unwrap();
     assert!(runtime.profiles.is_empty());
     assert_eq!(serde_json::to_value(runtime).unwrap(), value);

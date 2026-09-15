@@ -1,4 +1,4 @@
-Commit: a8ccb79b028fc53a3bb50df54ba1fec157693ed4
+Commit: 8a50a393cbe615f5d6453ff4290da0bf03546881
 
 # control 模块
 
@@ -13,8 +13,8 @@ Commit: a8ccb79b028fc53a3bb50df54ba1fec157693ed4
 - `crates/control/src/api/catalog.rs` — 节点列表、注册删除、维护，以及 teams/dag_defs/resolve 定义解析
 - `crates/control/src/api/compat/` — 旧 Chat/DAG/TODO/Project 兼容路由
 - `crates/control/src/api/compat/todo_review.rs` — Review 与任意节点重跑转发到原归属 Node；context-preview 复用 TODO 上下文纯函数。
-- `crates/control/src/api/settings/` — harness/codex 定义；registered 管 profile/runner
-- `crates/control/src/routes.rs` — /api/harnesses/codex/profiles、/api/runners
+- `crates/control/src/api/settings/` — harness/codex 定义；registered 管命名 Codex profile
+- `crates/control/src/routes.rs` — /api/harnesses/codex/profiles 与 TODO files/validate/version 路由；目录 API 复用 Web 实现
 - `crates/control/src/resource_scope.rs` — /api/agents* 绑定 Server 资源根；/api/dag/wasm* 复用共享中间件 `api_dag_wasm_nfs::configured_dag_wasm`
 - `crates/control/src/role_gate.rs` — 角色权限矩阵纯函数；layer 顺序 auth → role_gate → resource_scope；/api/dag/wasm* 非 admin 只读
 - `crates/control/src/api/users.rs` — /api/me、/api/users CRUD；token 一次性明文、自删/末位 admin 保护
@@ -38,5 +38,5 @@ Commit: a8ccb79b028fc53a3bb50df54ba1fec157693ed4
 
 - [brain](../brain/index.md) 本体调度与回执契约
 - [server](../server/index.md) 启动方；[worker](../worker/index.md) 执行面
-- [Agent 平台](../../features/agent-platform/index.md)、[注册 Runner](../../docs/registered-runners.md)
+- [Agent 平台](../../features/agent-platform/index.md)、[TODO 工作流](../../features/todos/index.md)
 - 回放契约 [project_replay.rs](../../crates/worker/tests/project_replay.rs)

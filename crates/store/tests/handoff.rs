@@ -237,3 +237,48 @@ async fn stale_server_reports_cannot_overwrite_new_host_state() {
         ExecutionStatus::Done
     );
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn historical_owner_reads_do_not_wait_for_another_process_writer() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("host.db");
+    let store = FleetStore::open(&path).await.unwrap();
+    store
+        .register_runtime(&RuntimeRecord {
+            id: "r1".into(),
+            release_id: "release-one".into(),
+            config: json!({}),
+            mode: "staged".into(),
+        })
+        .await
+        .unwrap();
+    store.activate_runtime("r1").await.unwrap();
+    store.assign_runtime("agent-history", None).await.unwrap();
+    let database = libsql::Builder::new_local(&path).build().await.unwrap();
+    let connection = database.connect().unwrap();
+    let writer = connection
+        .transaction_with_behavior(libsql::TransactionBehavior::Immediate)
+        .await
+        .unwrap();
+    let mut read = tokio::spawn(async move {
+        let owner = store
+            .assign_runtime("agent-history", Some("r1"))
+            .await
+            .unwrap();
+        let conflict = store
+            .assign_runtime("agent-history", Some("r2"))
+            .await
+            .is_err();
+        (owner, conflict)
+    });
+    let result = tokio::time::timeout(std::time::Duration::from_secs(1), &mut read).await;
+    writer.rollback().await.unwrap();
+    let (owner, conflict) = result
+        .expect("historical routing waited for the writer lock")
+        .unwrap();
+    assert_eq!(owner, "r1");
+    assert!(
+        conflict,
+        "immutable ownership conflict must still be rejected"
+    );
+}

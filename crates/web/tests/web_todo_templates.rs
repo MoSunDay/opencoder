@@ -32,6 +32,14 @@ async fn share() -> (tokio::sync::MutexGuard<'static, ()>, std::path::PathBuf) {
 fn app(state: Arc<opencoder_web::AppState>) -> Router {
     Router::new()
         .route(
+            "/api/todo/validate-files",
+            post(opencoder_web::api_todo_directory::validate_files),
+        )
+        .route(
+            "/api/todo/templates/:name/:version/files",
+            get(opencoder_web::api_todo_directory::files),
+        )
+        .route(
             "/api/todo/templates",
             get(tpl::list_templates).post(tpl::create_template),
         )
@@ -261,61 +269,69 @@ async fn context_update_and_version_lifecycle() {
     let state = state().await;
     let a = || app(state.clone());
     create_demo(&state).await;
-
-    let mut cycle = cycle_spec();
-    cycle["id"] = serde_json::json!("wf-2");
-    let (status, v) = call(
+    let (status, _) = call(
         a(),
         "PUT",
         "/api/todo/templates/demo/v1/context.json",
-        Some(cycle),
+        Some(spec("act")),
     )
     .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST, "{v}");
-    assert!(v["error"].as_str().unwrap().contains("spec 校验失败"));
-
-    let mut updated = spec("act");
-    updated["objective"] = serde_json::json!("v2 objective");
-    let (status, v) = call(
-        a(),
-        "PUT",
-        "/api/todo/templates/demo/v1/context.json",
-        Some(updated),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "{v}");
-
+    assert_eq!(status, StatusCode::CONFLICT);
     let (status, v) = call(
         a(),
         "POST",
         "/api/todo/templates/demo/new-version",
-        Some(serde_json::json!({"note": "fork"})),
+        Some(
+            serde_json::json!({"source_version":"v1","expected_current":"v1","spec":cycle_spec()}),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{v}");
+    assert!(v["diagnostics"].is_array());
+    let mut updated = spec("act");
+    updated["objective"] = serde_json::json!("v2 objective");
+    let body = serde_json::json!({"source_version":"v1","expected_current":"v1","spec":updated});
+    let (status, v) = call(
+        a(),
+        "POST",
+        "/api/todo/templates/demo/new-version",
+        Some(body.clone()),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{v}");
     assert_eq!(v["version"], "v2");
-
-    let (_, v) = call(a(), "GET", "/api/todo/templates/demo/todo.json", None).await;
-    assert_eq!(v["template"]["current"], "v2");
-    assert_eq!(v["template"]["versions"].as_array().unwrap().len(), 2);
-    let (_, v) = call(a(), "GET", "/api/todo/templates/demo/v2/context.json", None).await;
-    assert_eq!(v["objective"], "v2 objective", "context copied verbatim");
-
-    let (status, v) = call(a(), "DELETE", "/api/todo/templates/demo/v2", None).await;
-    assert_eq!(status, StatusCode::CONFLICT, "{v}");
-    assert!(v["error"]
-        .as_str()
-        .unwrap()
-        .contains("不能删除 current 版本 v2"));
-
-    let (status, v) = call(a(), "DELETE", "/api/todo/templates/demo/v1", None).await;
-    assert_eq!(status, StatusCode::OK, "{v}");
-    let (status, _) = call(a(), "GET", "/api/todo/templates/demo/v1/context.json", None).await;
-    assert_eq!(status, StatusCode::NOT_FOUND);
-    let (status, v) = call(a(), "DELETE", "/api/todo/templates/demo", None).await;
-    assert_eq!(status, StatusCode::OK, "{v}");
-    let (status, _) = call(a(), "GET", "/api/todo/templates/demo", None).await;
-    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, _) = call(
+        a(),
+        "POST",
+        "/api/todo/templates/demo/new-version",
+        Some(body),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    let (_, old) = call(a(), "GET", "/api/todo/templates/demo/v1/context.json", None).await;
+    assert_ne!(old["objective"], "v2 objective");
+    let (_, next) = call(a(), "GET", "/api/todo/templates/demo/v2/context.json", None).await;
+    assert_eq!(next["objective"], "v2 objective");
+    let (status, _) = call(a(), "DELETE", "/api/todo/templates/demo/v2", None).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(
+        call(a(), "DELETE", "/api/todo/templates/demo/v1", None)
+            .await
+            .0,
+        StatusCode::OK
+    );
+    assert_eq!(
+        call(a(), "GET", "/api/todo/templates/demo/v1/context.json", None)
+            .await
+            .0,
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        call(a(), "DELETE", "/api/todo/templates/demo", None)
+            .await
+            .0,
+        StatusCode::OK
+    );
 }
 
 /// T-5: env binding requires an existing env, clears to null, rides along on
@@ -326,58 +342,38 @@ async fn env_binding_lifecycle() {
     let state = state().await;
     let a = || app(state.clone());
     create_demo(&state).await;
-
-    let (status, v) = call(
-        a(),
-        "PUT",
-        "/api/todo/templates/demo/v1/env.json",
-        Some(serde_json::json!({"env": "nope"})),
-    )
-    .await;
+    let (status, v) = call(a(), "POST", "/api/todo/templates/demo/new-version", Some(serde_json::json!({"source_version":"v1","expected_current":"v1","binding":{"env":"nope"}}))).await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{v}");
-    assert!(v["error"].as_str().unwrap().contains("env 不存在: nope"));
-
-    let env_dir = root.join("env").join("dev");
+    assert_eq!(v["diagnostics"][0]["path"], "env.json");
+    let env_dir = root.join("env/dev");
     std::fs::create_dir_all(&env_dir).unwrap();
     std::fs::write(
         env_dir.join("context.json"),
-        serde_json::json!({"name": "dev", "tools": [], "env_vars": {}}).to_string(),
+        serde_json::json!({"name":"dev","tools":[],"env_vars":{}}).to_string(),
     )
     .unwrap();
-    let (status, v) = call(
-        a(),
-        "PUT",
-        "/api/todo/templates/demo/v1/env.json",
-        Some(serde_json::json!({"env": "dev"})),
-    )
-    .await;
+    let (status, v) = call(a(), "POST", "/api/todo/templates/demo/new-version", Some(serde_json::json!({"source_version":"v1","expected_current":"v1","binding":{"env":"dev"}}))).await;
     assert_eq!(status, StatusCode::OK, "{v}");
-    let (status, v) = call(a(), "GET", "/api/todo/templates/demo/v1/env.json", None).await;
-    assert_eq!(status, StatusCode::OK, "{v}");
+    assert_eq!(v["version"], "v2");
+    let (_, v) = call(a(), "GET", "/api/todo/templates/demo/v1/env.json", None).await;
+    assert!(v["env"].is_null());
+    let (_, v) = call(a(), "GET", "/api/todo/templates/demo/v2/env.json", None).await;
     assert_eq!(v["env"], "dev");
-    let (_, v) = call(a(), "GET", "/api/todo/templates/demo", None).await;
-    assert_eq!(v["env_by_version"]["v1"], "dev");
-    // Fork carries the binding; clearing writes an explicit null tombstone.
-    let (status, v) = call(
+    let (_, v) = call(
         a(),
         "POST",
         "/api/todo/templates/demo/new-version",
         Some(serde_json::json!({})),
     )
     .await;
-    assert_eq!(status, StatusCode::OK, "{v}");
-    let (_, v) = call(a(), "GET", "/api/todo/templates/demo/v2/env.json", None).await;
-    assert_eq!(v["env"], "dev", "binding copied to the fork");
-    let (status, v) = call(
-        a(),
-        "PUT",
-        "/api/todo/templates/demo/v2/env.json",
-        Some(serde_json::json!({"env": null})),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "{v}");
-    let (_, v) = call(a(), "GET", "/api/todo/templates/demo/v2/env.json", None).await;
-    assert_eq!(v["env"], serde_json::Value::Null);
+    assert_eq!(v["version"], "v3");
+    let (_, v) = call(a(), "GET", "/api/todo/templates/demo/v3/env.json", None).await;
+    assert_eq!(v["env"], "dev");
+    let (status, _) = call(a(), "POST", "/api/todo/templates/demo/new-version", Some(serde_json::json!({"source_version":"v3","expected_current":"v3","binding":{"env":null}}))).await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, v) = call(a(), "GET", "/api/todo/templates/demo", None).await;
+    assert_eq!(v["env_by_version"]["v2"], "dev");
+    assert!(v["env_by_version"]["v4"].is_null());
 }
 
 /// T-6: traversal-shaped template names are rejected at body validation.
@@ -396,4 +392,79 @@ async fn template_name_traversal_rejected() {
         .await;
         assert_eq!(status, StatusCode::BAD_REQUEST, "name {name:?}: {v}");
     }
+}
+
+#[tokio::test]
+async fn directory_errors_preserve_raw_files_and_never_publish_invalid_or_stale_edits() {
+    let (_guard, root) = share().await;
+    let state = state().await;
+    create_demo(&state).await;
+    let a = || app(state.clone());
+    let (_, bundle) = call(a(), "GET", "/api/todo/templates/demo/v1/files", None).await;
+    let mut files = bundle["files"].clone();
+    files["todos/t1/instructions.md"] = serde_json::json!("# Edited\n\n完整上下文\n");
+    let mut invalid = files.clone();
+    invalid["todos/t1/task.json"] = serde_json::json!("{\ninvalid");
+    let body = |files| serde_json::json!({"source_version":"v1","expected_revision":bundle["revision"],"files":files});
+    let (status, result) = call(
+        a(),
+        "POST",
+        "/api/todo/templates/demo/new-version",
+        Some(body(invalid)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(result["diagnostics"][0]["path"], "todos/t1/task.json");
+    assert!(!root.join("todo/demo/v2").exists());
+    let (status, _) = call(
+        a(),
+        "POST",
+        "/api/todo/templates/demo/new-version",
+        Some(body(files.clone())),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        call(
+            a(),
+            "POST",
+            "/api/todo/templates/demo/new-version",
+            Some(body(files))
+        )
+        .await
+        .0,
+        StatusCode::CONFLICT
+    );
+    assert!(!root.join("todo/demo/v3").exists());
+    let (_, original) = call(a(), "GET", "/api/todo/templates/demo/v1/files", None).await;
+    assert_eq!(original["files"], bundle["files"]);
+    std::fs::write(
+        root.join("todo/demo/v2/env.json"),
+        r#"{"env":"missing-env"}"#,
+    )
+    .unwrap();
+    let (status, broken) = call(a(), "GET", "/api/todo/templates/demo/v2/files", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(broken["files"]["env.json"], r#"{"env":"missing-env"}"#);
+    assert_eq!(broken["diagnostics"][0]["path"], "env.json");
+    assert_eq!(
+        call(
+            a(),
+            "POST",
+            "/api/todo/validate-files",
+            Some(serde_json::json!({"files":broken["files"]}))
+        )
+        .await
+        .0,
+        StatusCode::BAD_REQUEST
+    );
+    let (_, tree) = call(
+        a(),
+        "GET",
+        "/api/todo/templates/demo/v1/files?tree=true",
+        None,
+    )
+    .await;
+    assert!(tree.get("files").is_none());
+    assert_eq!(tree["entries"].as_array().unwrap().len(), 7);
 }

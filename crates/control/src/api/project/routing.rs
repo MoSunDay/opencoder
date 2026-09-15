@@ -69,3 +69,50 @@ pub(crate) async fn brain_preresolve(
 fn failure(error: impl std::fmt::Display) -> RpcReply {
     RpcReply::error(500, format!("project routing receipt: {error}"))
 }
+
+/// A rejected initial run remains rejected even after a different run creates
+/// the Project session. Retry checks happen before any node control operation.
+pub(crate) async fn initial_receipt(
+    state: &Arc<AppState>,
+    todo: &str,
+    action: &str,
+    input: &Value,
+) -> Result<Option<RpcReply>, RpcReply> {
+    use opencoder_core::fleet::{CreateExecution, ExecutionKind};
+    let Some(run_id) = input["run_id"].as_str() else {
+        return Ok(None);
+    };
+    let Some(receipt) = state
+        .fleet
+        .receipt("execution", run_id)
+        .await
+        .map_err(failure)?
+    else {
+        return Ok(None);
+    };
+    let input = brain_preresolve(state, todo, action, input.clone()).await?;
+    let mut request_input = input.clone();
+    request_input.as_object_mut().map(|o| o.remove("node_id"));
+    request_input["action"] = json!(action);
+    let request = CreateExecution {
+        id: format!("project-{todo}"),
+        kind: ExecutionKind::Project,
+        target: Some(todo.into()),
+        node_id: input["node_id"].as_str().map(str::to_owned),
+        input: request_input,
+    };
+    let fingerprint =
+        opencoder_core::token_hash(&serde_json::to_string(&request).map_err(failure)?);
+    if receipt.fingerprint != fingerprint {
+        return Err(RpcReply::error(
+            409,
+            "project run id already used with different input",
+        ));
+    }
+    if matches!(receipt.phase.as_str(), "accepted" | "rejected") {
+        return serde_json::from_value(receipt.payload)
+            .map(Some)
+            .map_err(failure);
+    }
+    Ok(None)
+}

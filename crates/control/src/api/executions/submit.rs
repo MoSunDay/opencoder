@@ -1,5 +1,6 @@
 use crate::AppState;
 use opencoder_core::{fleet::*, message::now_ms};
+use opencoder_store::fleet::handoff::dispatch_key;
 use std::sync::Arc;
 
 pub async fn submit(state: &Arc<AppState>, request: CreateExecution) -> RpcReply {
@@ -28,10 +29,11 @@ pub async fn submit(state: &Arc<AppState>, request: CreateExecution) -> RpcReply
 
 async fn submit_inner(state: &Arc<AppState>, request: CreateExecution) -> anyhow::Result<RpcReply> {
     let _request_lock = state.fleet.request_lock("execution", &request.id).await?;
+    let key = dispatch_key(&request).to_owned();
     let fingerprint = opencoder_core::token_hash(&serde_json::to_string(&request)?);
     if !state
         .fleet
-        .claim_request("execution", &request.id, &fingerprint)
+        .claim_request("execution", &key, &fingerprint)
         .await?
     {
         return Ok(RpcReply::error(
@@ -39,12 +41,28 @@ async fn submit_inner(state: &Arc<AppState>, request: CreateExecution) -> anyhow
             "execution id already used with different input",
         ));
     }
-    if let Some(receipt) = state.fleet.receipt("execution", &request.id).await? {
+    if let Some(receipt) = state.fleet.receipt("execution", &key).await? {
         if matches!(receipt.phase.as_str(), "accepted" | "rejected") {
             return Ok(serde_json::from_value(receipt.payload)?);
         }
     }
-    let frozen = state.fleet.assignment(&request.id).await?;
+    let mut frozen = state.fleet.assignment(&request.id).await?;
+    if let Some(old) = &frozen {
+        if old.request != request {
+            let rejected = state
+                .fleet
+                .receipt("execution", dispatch_key(&old.request))
+                .await?
+                .is_some_and(|receipt| receipt.phase == "rejected");
+            if request.kind != ExecutionKind::Project || !rejected {
+                return Ok(RpcReply::error(
+                    409,
+                    "previous execution dispatch is unresolved or accepted",
+                ));
+            }
+            frozen = None;
+        }
+    }
     let (_permit, assignment) = if let Some(assignment) = frozen {
         (None, assignment)
     } else {
@@ -73,12 +91,20 @@ async fn submit_inner(state: &Arc<AppState>, request: CreateExecution) -> anyhow
             // The node compares the original request and returns its durable
             // acceptance. A newer definition must not replace its snapshot.
             state.hub.reserve(&index).await;
+            let definition = if request.kind == ExecutionKind::Project {
+                match crate::api::catalog::resolve(state, &request).await {
+                    Ok(definition) => definition,
+                    Err(reply) => return Ok(reply),
+                }
+            } else {
+                None
+            };
             let assignment = Assignment {
                 runtime: crate::api::settings::registered::snapshot(state).await?,
                 codex: crate::api::settings::codex(state).await?,
                 index,
                 request,
-                definition: None,
+                definition,
             };
             (Some(permit), assignment)
         } else {
@@ -207,7 +233,7 @@ async fn submit_inner(state: &Arc<AppState>, request: CreateExecution) -> anyhow
         };
         state
             .fleet
-            .finish_dispatch(&index.id, &fingerprint, &reply)
+            .finish_dispatch(&key, &fingerprint, &reply)
             .await?;
         return Ok(reply);
     }
@@ -218,7 +244,7 @@ async fn submit_inner(state: &Arc<AppState>, request: CreateExecution) -> anyhow
             .fleet
             .save_receipt(
                 "execution",
-                &index.id,
+                &key,
                 &opencoder_store::fleet::handoff::Receipt {
                     fingerprint,
                     phase: "rejected".into(),

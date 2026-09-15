@@ -35,9 +35,14 @@ pub(crate) fn lock(root: &FsPath, name: &str) -> Result<File, Response> {
 }
 
 pub fn invalid(errors: Vec<Diagnostic>) -> Response {
+    let message = errors
+        .iter()
+        .map(|e| format!("{}: {}", e.path, e.message))
+        .collect::<Vec<_>>()
+        .join("；");
     (
         axum::http::StatusCode::BAD_REQUEST,
-        Json(json!({"error":"文件不符合 TODO 框架要求","diagnostics":errors})),
+        Json(json!({"error":format!("文件不符合 TODO 框架要求：{message}"),"diagnostics":errors})),
     )
         .into_response()
 }
@@ -51,29 +56,11 @@ fn diagnostic(path: &str, error: impl ToString) -> Diagnostic {
     }
 }
 
-#[allow(clippy::result_large_err)]
-fn check_files(root: &FsPath, files: &Files) -> Result<(), Response> {
-    let (_, env) = directory::decode(files).map_err(invalid)?;
+fn check_files(root: &FsPath, files: &Files) -> Result<(), Vec<Diagnostic>> {
+    let (mut spec, env) = directory::decode(files)?;
     if let Some(env) = env {
-        let path = share_fs::env_context_path(root, &env)
-            .map_err(|e| invalid(vec![diagnostic("env.json", e)]))?;
-        let context = read_json_opt(&path)
-            .map_err(|e| invalid(vec![diagnostic("env.json", e)]))?
-            .ok_or_else(|| invalid(vec![diagnostic("env.json", format!("环境不存在: {env}"))]))?;
-        opencoder_todos::domain::env_vars_from_context(&context)
-            .map_err(|e| invalid(vec![diagnostic("env.json", e)]))?;
-        if let Some(tools) = context.get("tools") {
-            let tools = tools
-                .as_array()
-                .ok_or_else(|| invalid(vec![diagnostic("env.json", "环境 tools 必须是数组")]))?;
-            for tool in tools {
-                let reference = tool
-                    .as_str()
-                    .ok_or_else(|| invalid(vec![diagnostic("env.json", "工具引用必须是字符串")]))?;
-                share_fs::resolve_tool_ref(root, reference)
-                    .map_err(|e| invalid(vec![diagnostic("env.json", e)]))?;
-            }
-        }
+        directory::apply_environment(&mut spec, root, &env)
+            .map_err(|e| vec![diagnostic("env.json", format!("{e:#}"))])?;
     }
     Ok(())
 }
@@ -83,6 +70,12 @@ fn input_files(body: &Value) -> Result<Files, Response> {
     if let Some(files) = body.get("files") {
         return serde_json::from_value(files.clone())
             .map_err(|e| invalid(vec![diagnostic("workflow.json", e)]));
+    }
+    if body.get("spec").is_none() {
+        return Err(invalid(vec![diagnostic(
+            "workflow.json",
+            "缺少 spec 或 files",
+        )]));
     }
     let spec = serde_json::from_value(body.get("spec").cloned().unwrap_or(Value::Null))
         .map_err(|e| invalid(vec![diagnostic("workflow.json", e)]))?;
@@ -94,7 +87,9 @@ pub async fn create(State(state): State<Arc<AppState>>, Json(body): Json<Value>)
         Ok(pair) => pair,
         Err(e) => return error_500(e.to_string()),
     };
-    let name = body["name"].as_str().unwrap_or("");
+    let Some(name) = body["name"].as_str() else {
+        return error_400("缺少 name 字段".into());
+    };
     let _guard = match lock(&root, name) {
         Ok(file) => file,
         Err(response) => return response,
@@ -111,7 +106,7 @@ pub async fn create(State(state): State<Arc<AppState>>, Json(body): Json<Value>)
         Err(response) => return response,
     };
     if let Err(response) = check_files(&root, &files) {
-        return response;
+        return invalid(response);
     }
     let meta = json!({"name":name,"description":body["description"].as_str().unwrap_or(""),"current":"v1",
         "versions":[{"version":"v1","note":body["note"].as_str().unwrap_or(""),"created_at":now_ms()}]});
@@ -148,10 +143,10 @@ pub async fn save(
         Ok(path) => path,
         Err(e) => return error_400(e.to_string()),
     };
-    let mut meta = match read_json_opt(&path) {
+    let mut meta = match crate::api_todo_templates::read_meta(&root, &name).await {
         Ok(Some(meta)) => meta,
         Ok(None) => return error_404("模板不存在"),
-        Err(e) => return error_500(e.to_string()),
+        Err(response) => return response,
     };
     let edits =
         body.get("files").is_some() || body.get("spec").is_some() || body.get("binding").is_some();
@@ -209,7 +204,7 @@ pub async fn save(
         files.insert("env.json".into(), binding.to_string());
     }
     if let Err(response) = check_files(&root, &files) {
-        return response;
+        return invalid(response);
     }
     let dir = path.parent().expect("template parent");
     // Include unpublished directories left by a failed metadata write.
@@ -244,10 +239,10 @@ pub async fn files(
         Ok(dir) => dir,
         Err(e) => return error_400(e.to_string()),
     };
-    let meta = match read_json_opt(&dir.parent().expect("template").join("todo.json")) {
+    let meta = match crate::api_todo_templates::read_meta(&root, &name).await {
         Ok(Some(meta)) => meta,
         Ok(None) => return error_404("模板不存在"),
-        Err(e) => return error_500(e.to_string()),
+        Err(response) => return response,
     };
     if !meta["versions"]
         .as_array()
@@ -259,17 +254,12 @@ pub async fn files(
         Ok(files) => files,
         Err(e) => return invalid(vec![diagnostic(&version, format!("{e:#}"))]),
     };
-    let mut errors = directory::validate(&files);
-    if errors.is_empty() {
-        if let Err(response) = check_files(&root, &files) {
-            return response;
-        }
-    }
+    let errors = check_files(&root, &files).err().unwrap_or_default();
     let entries: Vec<_> = files
         .iter()
         .map(|(path, text)| json!({"path":path,"bytes":text.len()}))
         .collect();
-    let mut result = json!({"version":version,"revision":revision(&meta),"entries":entries,"diagnostics":std::mem::take(&mut errors)});
+    let mut result = json!({"version":version,"revision":revision(&meta),"entries":entries,"diagnostics":errors});
     if let Some(path) = query.path {
         let Some(text) = files.get(&path) else {
             return error_404("文件不存在");
@@ -296,6 +286,6 @@ pub async fn validate_files(
     };
     match check_files(&root, &files) {
         Ok(()) => Json(json!({"valid":true})).into_response(),
-        Err(response) => response,
+        Err(errors) => invalid(errors),
     }
 }

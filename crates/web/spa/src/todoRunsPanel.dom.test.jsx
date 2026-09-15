@@ -34,6 +34,9 @@ vi.mock('./api.js', () => ({
 vi.mock('./sse.js', () => ({ openStream: vi.fn(() => ({ abort: () => {} })) }));
 vi.mock('./fleet/detail.jsx', () => ({ ExecutionDetail: ({ id }) => <div>execution-detail:{id}</div> }));
 
+vi.mock('./ui/files/workspace.jsx', () => ({ FileWorkspace: ({files}) => <div className="file-workspace">{Object.keys(files).join('|')}</div> }));
+const reviewData = path => path.includes('section=files') ? {files:{'objective.md':'Objective'}} : path.includes('section=history') ? {events:[],next_before_seq:null} : DETAIL;
+
 import { SPIN_DELAY_MS } from './ui/tableLoading.js';
 import { TodoRunsPanel } from './todoRunsPanel.jsx';
 
@@ -63,7 +66,7 @@ const innerMasked = () => !!document.querySelector('.todo-workbench .ant-spin-sp
 const emptyLies = (scope) => !!document.querySelector(`${scope} .ant-empty`);
 
 /// 行文本按表作用域化取：详情卡标题也会渲染 `todos-1…`，全局 getByText 会撞车。
-const rowText = (scope) => scope === '.oc-todo-items' ? document.querySelector('.todo-task-nav')?.textContent || '' : Array.from(document.querySelectorAll(`${scope} tbody tr.ant-table-row`))
+const rowText = (scope) => scope === '.oc-todo-items' ? document.querySelector('.file-workspace')?.textContent || '' : Array.from(document.querySelectorAll(`${scope} tbody tr.ant-table-row`))
   .map((r) => r.textContent || '').join('|');
 
 /// antd 6 Button 给两字中文插空格（「刷 新」），按 role + 去空白匹配。
@@ -96,7 +99,7 @@ const deferred = () => {
 };
 
 const installApi = () => {
-  apiGetMock.mockReset().mockImplementation((path) => Promise.resolve(path === DETAIL_PATH ? DETAIL : WORKFLOWS));
+  apiGetMock.mockReset().mockImplementation((path) => Promise.resolve(path === LIST_PATH ? WORKFLOWS : reviewData(path)));
   apiPostMock.mockReset().mockResolvedValue({ ok: true });
   apiPutMock.mockReset().mockResolvedValue({ ok: true });
   apiDelMock.mockReset().mockResolvedValue({ ok: true });
@@ -118,7 +121,7 @@ afterEach(() => {
 describe('TodoRunsPanel 表格 loading 语义', () => {
   it('首屏在途时不宣称暂无数据，兑现后行照常渲染', async () => {
     const first = deferred();
-    apiGetMock.mockImplementation((path) => (path === LIST_PATH ? first.promise : Promise.resolve(DETAIL)));
+    apiGetMock.mockImplementation((path) => (path === LIST_PATH ? first.promise : Promise.resolve(reviewData(path))));
     render(<TodoRunsPanel onNotice={vi.fn()} />);
     await flush();
     // dataSource 交回 undefined → antd 抑制空态；[] 会一边拉取一边撒谎。
@@ -131,7 +134,7 @@ describe('TodoRunsPanel 表格 loading 语义', () => {
     expect(outerMasked()).toBe(false);
 
     // 反向证明：数据真为空时占位确实会出现，上面的 false 才不是死选择器。
-    apiGetMock.mockImplementation((path) => (path === LIST_PATH ? Promise.resolve({ workflows: [] }) : Promise.resolve(DETAIL)));
+    apiGetMock.mockImplementation((path) => (path === LIST_PATH ? Promise.resolve({ workflows: [] }) : Promise.resolve(reviewData(path))));
     await act(async () => { fireEvent.click(findButton('刷新')); });
     await flush();
     expect(emptyLies('.oc-todo-runs')).toBe(true);
@@ -139,7 +142,7 @@ describe('TodoRunsPanel 表格 loading 语义', () => {
 
   it('首屏拉取越过 SPIN_DELAY_MS 才亮遮罩，兑现后遮罩消失（证明选择器是活的）', async () => {
     const first = deferred();
-    apiGetMock.mockImplementation((path) => (path === LIST_PATH ? first.promise : Promise.resolve(DETAIL)));
+    apiGetMock.mockImplementation((path) => (path === LIST_PATH ? first.promise : Promise.resolve(reviewData(path))));
     render(<TodoRunsPanel onNotice={vi.fn()} />);
     await flush();
     await advance(SPIN_DELAY_MS - 50);
@@ -157,7 +160,7 @@ describe('TodoRunsPanel 表格 loading 语义', () => {
 
   it('点击行选中工作流；详情首拉在途时 TODO 项表同样不撒谎', async () => {
     const detailReq = deferred();
-    apiGetMock.mockImplementation((path) => (path === LIST_PATH ? Promise.resolve(WORKFLOWS) : detailReq.promise));
+    apiGetMock.mockImplementation((path) => (path === LIST_PATH ? Promise.resolve(WORKFLOWS) : path === DETAIL_PATH ? detailReq.promise : Promise.resolve(reviewData(path))));
     render(<TodoRunsPanel onNotice={vi.fn()} />);
     await flush();
     const row = clickFirstRow('.oc-todo-runs');
@@ -178,7 +181,7 @@ describe('TodoRunsPanel 表格 loading 语义', () => {
     await act(async () => { detailReq.resolve(DETAIL); });
     await flush();
     expect(rowText('.oc-todo-items')).toContain('t1');
-    expect(document.querySelectorAll('.todo-nav-node')).toHaveLength(1);
+    expect(document.querySelector('.file-workspace').textContent).toContain('process/todos/t1/status.json');
     expect(innerMasked()).toBe(false);
   });
 
@@ -230,7 +233,7 @@ describe('TodoRunsPanel 表格 loading 语义', () => {
 
     // 轮询请求挂住：仍有 running 工作流时每 3s 一次，遮罩会把行点击锁死。
     const poll = deferred();
-    apiGetMock.mockImplementation((path) => (path === LIST_PATH ? poll.promise : Promise.resolve(DETAIL)));
+    apiGetMock.mockImplementation((path) => (path === LIST_PATH ? poll.promise : Promise.resolve(reviewData(path))));
     await advance(POLL_MS);
     await flush();
     expect(apiGetMock.mock.calls.filter((c) => c[0] === LIST_PATH)).toHaveLength(2);

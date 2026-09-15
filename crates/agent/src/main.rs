@@ -239,14 +239,6 @@ fn main() -> Result<()> {
 async fn run(args: Args) -> Result<()> {
     init_logging();
 
-    // Seed the built-in skill packs into ~/.opencoder/skills before any
-    // execution lands on this node: agent steps run the real session runner,
-    // which resolves skills from the node-local home. Incremental,
-    // best-effort, update-on-drift — same policy as the `opencoder` binary,
-    // so a binary upgrade propagates skill fixes here too.
-    opencoder_core::seed_builtin_skills();
-    opencoder_core::seed_dep_gated_skills();
-
     // Offline tooling short-circuits BEFORE the server/token/store/LLM
     // wiring below: `dag prepare-rootfs` only touches the local filesystem.
     if let Some(AgentCommand::Dag {
@@ -271,6 +263,20 @@ async fn run(args: Args) -> Result<()> {
         })
     ) {
         return storage::migrate_layout(&data_dir, args.workflow_root.as_deref());
+    }
+
+    match args.command {
+        Some(AgentCommand::Runtime { .. }) => {
+            opencoder_core::skill::pin_runtime_skills(
+                &data_dir,
+                opencoder_core::skills_dir().as_deref(),
+            )?;
+        }
+        Some(AgentCommand::Host { .. }) => {}
+        _ => {
+            opencoder_core::seed_builtin_skills();
+            opencoder_core::seed_dep_gated_skills();
+        }
     }
 
     let token = resolve_token(args.token.clone(), args.token_file.clone())?;

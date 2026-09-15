@@ -1,4 +1,4 @@
-Commit: 86567de28148c84077cdc77229bff38b5b5ab11e
+Commit: 6ff63f9b
 
 # Agent 调度平台 — Server 调度、Node 执行、Web/CLI 管理
 
@@ -28,7 +28,7 @@ Commit: 86567de28148c84077cdc77229bff38b5b5ab11e
 - Server 索引仅创建时间/ID/类型/节点/状态，明细按 ID 回查节点
 - 节点离线时明细查询明确报错
 - 节点页删除仅移除节点注册；在线节点需先停止服务，执行索引和任务数据保留
-- NFS 只共享 agent 资源，执行固定受理时版本快照
+- Server 通过只读 NFS 共享 Agent 资源和 DAG WASM 制品；节点在受理时复制版本快照到本地执行目录，任务不写 NFS
 - 新平台独立存储，不迁移旧 daemon/CLI 历史
 
 ## 相关

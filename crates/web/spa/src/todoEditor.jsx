@@ -2,16 +2,16 @@
 // GET/PUT /api/todo/templates/:name/:version/context.json 上的 WorkflowSpec。
 // 表单模式只覆盖高频字段（name/objective/constraints/todos 常规列）；
 // 画布模式（todo/editor/canvasEditor.jsx）可视化编辑节点/依赖，Inspector 内
-// 亦可编辑 acceptance.required_tool_calls；JSON 源码模式兜底全量字段。
+// 亦可编辑 acceptance.required_tool_calls；JSON 源码模式可编辑完整字段。
 // spec state 是唯一草稿事实来源，三模式进出时互相搬运（时序镜像
 // dag/defEditor.jsx）；画布坐标是会话状态（positions），不入 spec。
-// Env 绑定（env.json）与 context 一起保存（绑定值变化才发 PUT）。
+// Env 绑定（env.json）独立保存，成功后回读确认。
 // 本组件渲染在 todoPanel 的全宽 Drawer 内，不再自带 Card 外壳：标题由抽屉
 // 提供，这里只保留 模式切换 + 返回/保存 工具条。
 
-import { Button, Card, Col, Divider, Form, Input, InputNumber, Row, Segmented, Select, Space, Spin, Typography } from 'antd';
+import { Alert, Button, Divider, Form, Input, Segmented, Select, Space, Spin, Typography } from 'antd';
 import { useEffect, useMemo, useState } from 'react';
-import { apiGet, apiPut } from './api.js';
+import { apiGet, apiPut, apiPost } from './api.js';
 import { err } from './notice.js';
 import { useMessage } from './ui/appMessage.js';
 import { MONO_VAR } from './ui/mono.js';
@@ -21,74 +21,10 @@ import { validateSpec } from './todo/editor/specValidate.js';
 const { TextArea } = Input;
 const { Text } = Typography;
 
-const AGENT_OPTIONS = ['act', 'plan', 'explore', 'build'].map((a) => ({ value: a, label: a }));
-const MAX_ATTEMPTS_MIN = 1;
 
-/// context 响应归一化：裸 spec 或 {spec} 包装都接受，形状不对返回 null。
-export function specFromContext(j) {
-  if (!j || typeof j !== 'object') {
-    return null;
-  }
-  if (Array.isArray(j.todos)) {
-    return j;
-  }
-  if (j.spec && Array.isArray(j.spec.todos)) {
-    return j.spec;
-  }
-  return null;
-}
-
-/// WorkflowSpec → 表单值（todos 展平 acceptance.criteria 到顶层 criteria）。
-export function specToForm(s) {
-  return {
-    name: s.name || '',
-    objective: s.objective || '',
-    constraints: Array.isArray(s.constraints) ? s.constraints.map(String) : [],
-    todos: (Array.isArray(s.todos) ? s.todos : []).map((t) => ({
-      id: t.id || '',
-      title: t.title || '',
-      agent: t.agent || 'act',
-      depends_on: Array.isArray(t.depends_on) ? t.depends_on : [],
-      max_attempts: Number.isFinite(t.max_attempts) ? t.max_attempts : 3,
-      requirement_background: t.requirement_background || '',
-      instructions: t.instructions || '',
-      criteria: (t.acceptance && t.acceptance.criteria) || '',
-    })),
-  };
-}
-
-/// 表单值 → WorkflowSpec：schema_version/id/metadata 原样保留自 original；
-/// required_tool_calls 按 todo id 透传（低频字段，画布/JSON 模式可改）。
-export function formToSpec(values, original) {
-  const src = original || {};
-  const todos = (values.todos || []).map((t) => {
-    const prev = (Array.isArray(src.todos) ? src.todos : []).find((p) => p && p.id === t.id);
-    const acceptance = { criteria: t.criteria || '' };
-    const prevCalls = prev && prev.acceptance && prev.acceptance.required_tool_calls;
-    if (Array.isArray(prevCalls)) {
-      acceptance.required_tool_calls = prevCalls;
-    }
-    return {
-      id: t.id || '',
-      title: t.title || '',
-      requirement_background: t.requirement_background || '',
-      instructions: t.instructions || '',
-      depends_on: Array.isArray(t.depends_on) ? t.depends_on : [],
-      agent: t.agent || 'act',
-      max_attempts: Number.isFinite(t.max_attempts) ? t.max_attempts : 3,
-      acceptance,
-    };
-  });
-  return {
-    schema_version: Number.isFinite(src.schema_version) ? src.schema_version : 1,
-    id: src.id || '',
-    name: values.name || '',
-    objective: values.objective || '',
-    constraints: Array.isArray(values.constraints) ? values.constraints : [],
-    todos,
-    metadata: src.metadata && typeof src.metadata === 'object' ? src.metadata : {},
-  };
-}
+import { EXAMPLE_SPEC, specFromContext, specToForm, formToSpec } from './todo/editing/model.js';
+export { specFromContext, specToForm, formToSpec } from './todo/editing/model.js';
+import { TodoForm } from './todo/editing/form.jsx';
 
 function envOptions(envs) {
   return [{ value: '', label: '不绑定' }].concat(
@@ -96,12 +32,18 @@ function envOptions(envs) {
   );
 }
 
-function TodoEditorSession({ templateName, version, onNotice, onClose }) {
+function TodoEditorSession({ templateName, version, creating = false, onCreated, onNotice, onClose, onDirtyChange }) {
   /// App 上下文里的 message API（脱离 <App> 时 useMessage 自动回落静态 API）。
   const msg = useMessage();
   const [form] = Form.useForm();
-  const [mode, setMode] = useState('form');
+  const [mode, setMode] = useState('canvas');
   const [spec, setSpec] = useState(null);
+  const [dirty, setDirty] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [agentOptions, setAgentOptions] = useState([]);
+  const [loadError, setLoadError] = useState('');
+  const [envSaving, setEnvSaving] = useState(false);
+  const changeSpec = (next) => { setSpec(next); setDirty(true); };
   const [jsonText, setJsonText] = useState('');
   const [positions, setPositions] = useState({}); // 画布会话坐标 map，不入 spec
   const [canvasKey, setCanvasKey] = useState(0); // 进入画布时 bump → 以新 spec 重挂
@@ -110,6 +52,7 @@ function TodoEditorSession({ templateName, version, onNotice, onClose }) {
   const [envs, setEnvs] = useState([]);
   const [envBinding, setEnvBinding] = useState('');
   const [envLoaded, setEnvLoaded] = useState('');
+  useEffect(() => { onDirtyChange?.(dirty || envBinding !== envLoaded); }, [dirty, envBinding, envLoaded, onDirtyChange]);
   const todosWatch = Form.useWatch('todos', form);
 
   const ctxPath = `/api/todo/templates/${encodeURIComponent(templateName)}/${encodeURIComponent(version)}/context.json`;
@@ -119,10 +62,11 @@ function TodoEditorSession({ templateName, version, onNotice, onClose }) {
     let alive = true;
     (async () => {
       try {
-        const [ctx, envsJ, envJ] = await Promise.all([
-          apiGet(ctxPath),
+        const [ctx, envsJ, envJ, agentsJ] = await Promise.all([
+          creating ? Promise.resolve(EXAMPLE_SPEC) : apiGet(ctxPath),
           apiGet('/api/todo/envs'),
-          apiGet(envPath),
+          creating ? Promise.resolve({env:null}) : apiGet(envPath),
+          apiGet('/api/agents'),
         ]);
         if (!alive) {
           return;
@@ -132,12 +76,14 @@ function TodoEditorSession({ templateName, version, onNotice, onClose }) {
           throw new Error('context 格式异常（缺少 todos）');
         }
         setSpec(s);
+        setAgentOptions((agentsJ.agents || []).filter(a => a.primary && a.name !== 'workflow').map(a => ({value:a.name,label:a.name})));
         form.setFieldsValue(specToForm(s));
         setEnvs((envsJ && envsJ.envs) || []);
         const bound = (envJ && envJ.env) || '';
         setEnvBinding(bound);
         setEnvLoaded(bound);
       } catch (e) {
+        setLoadError(e.message);
         if (onNotice) {
           onNotice(err('加载模板版本失败: ' + (e && e.message)));
         }
@@ -232,15 +178,19 @@ function TodoEditorSession({ templateName, version, onNotice, onClose }) {
         return;
       }
     }
+    const validation = validateSpec(nextSpec);
+    if (validation.length) { msg.error(validation.map(p => p.message).join('；')); return; }
+    if (creating && !newName.trim()) { msg.error('请输入模板名'); return; }
     setSaving(true);
     try {
-      await apiPut(ctxPath, nextSpec);
-      if (envBinding !== envLoaded) {
-        // Env 绑定与 context 一起保存；400（env 不存在）走同一错误出口。
-        await apiPut(envPath, { env: envBinding || null });
-        setEnvLoaded(envBinding);
+      if (creating) {
+        await apiPost('/api/todo/templates', {name:newName.trim(),spec:nextSpec,description:'',note:''});
+        setDirty(false); onCreated?.(); return;
       }
+      await apiPut(ctxPath, nextSpec);
       setSpec(nextSpec);
+      if (mode === 'form') form.setFieldsValue(specToForm(nextSpec));
+      setDirty(false);
       msg.success('已保存');
     } catch (e) {
       const text = '保存失败: ' + (e && e.message);
@@ -258,6 +208,9 @@ function TodoEditorSession({ templateName, version, onNotice, onClose }) {
 
   return (
     <div className="todo-editor">
+      {loadError && <Alert type="error" title="加载模板失败" description={loadError} />}
+      {creating && <Form layout="vertical"><Form.Item label="模板名" htmlFor="todo-template-name" required><Input id="todo-template-name" value={newName} onChange={e => {setNewName(e.target.value);setDirty(true);}} placeholder="my-template" /></Form.Item></Form>}
+      <div className="todo-parent-heading"><strong>父 Agent · workflow</strong><span>根据目标调度任务，独立验收结果</span></div>
       <div className="todo-editor-toolbar">
         <Segmented
           disabled={saving}
@@ -271,107 +224,11 @@ function TodoEditorSession({ templateName, version, onNotice, onClose }) {
         />
         <Space>
           <Button onClick={onClose} disabled={saving}>返回</Button>
-          <Button type="primary" loading={saving} disabled={!spec} onClick={save}>保存</Button>
+          <span className="todo-save-state">{dirty ? '有未保存修改' : '定义已同步'}</span><Button type="primary" loading={saving} disabled={!spec || !!loadError} onClick={save}>{creating ? '创建' : '保存'}</Button>
         </Space>
       </div>
       {mode === 'form' ? (
-        <Form form={form} layout="vertical" disabled={saving}>
-          <Row gutter={12}>
-            <Col span={12}>
-              <Form.Item name="name" label="名称" rules={[{ required: true, message: '请输入名称' }]}>
-                <Input placeholder="工作流名称" />
-              </Form.Item>
-            </Col>
-          </Row>
-          <Form.Item name="objective" label="目标（objective）">
-            <TextArea rows={2} placeholder="这个工作流要达成什么" />
-          </Form.Item>
-          <Form.Item label="约束（constraints）" style={{ marginBottom: 8 }}>
-            <Form.List name="constraints">
-              {(fields, { add, remove }) => (
-                <>
-                  {fields.map((f) => (
-                    <Space key={f.key} style={{ display: 'flex', marginBottom: 4 }} align="baseline">
-                      <Form.Item name={f.name} noStyle>
-                        <Input placeholder="约束，如：不得修改 crates/core" style={{ width: 480 }} />
-                      </Form.Item>
-                      <Button type="link" danger onClick={() => remove(f.name)}>删除</Button>
-                    </Space>
-                  ))}
-                  <Button type="dashed" onClick={() => add('')} style={{ width: 200 }}>+ 添加约束</Button>
-                </>
-              )}
-            </Form.List>
-          </Form.Item>
-          <Divider orientation="left" plain>TODO 列表</Divider>
-          <Form.List name="todos">
-            {(fields, { add, remove }) => (
-              <>
-                {fields.map((f) => {
-                  const row = (todosWatch || [])[f.name] || {};
-                  const depOptions = allIds.filter((id) => id !== row.id).map((id) => ({ value: id, label: id }));
-                  return (
-                    <Card key={f.key} size="small" style={{ marginBottom: 12 }}
-                      title={`TODO #${f.name + 1}`}
-                      extra={<Button type="link" danger onClick={() => remove(f.name)}>删除</Button>}
-                    >
-                      <Row gutter={12}>
-                        <Col span={6}>
-                          <Form.Item name={[f.name, 'id']} label="ID" rules={[{ required: true, message: '请输入 ID' }]}>
-                            <Input placeholder="t1" />
-                          </Form.Item>
-                        </Col>
-                        <Col span={9}>
-                          <Form.Item name={[f.name, 'title']} label="标题" rules={[{ required: true, message: '请输入标题' }]}>
-                            <Input />
-                          </Form.Item>
-                        </Col>
-                        <Col span={5}>
-                          <Form.Item name={[f.name, 'agent']} label="agent">
-                            <Select options={AGENT_OPTIONS} />
-                          </Form.Item>
-                        </Col>
-                        <Col span={4}>
-                          <Form.Item name={[f.name, 'max_attempts']} label="最大尝试">
-                            <InputNumber min={MAX_ATTEMPTS_MIN} style={{ width: '100%' }} />
-                          </Form.Item>
-                        </Col>
-                        <Col span={24}>
-                          <Form.Item name={[f.name, 'depends_on']} label="依赖（depends_on）">
-                            <Select mode="multiple" options={depOptions} placeholder="可多选其它 TODO 的 id" />
-                          </Form.Item>
-                        </Col>
-                        <Col span={12}>
-                          <Form.Item name={[f.name, 'requirement_background']} label="需求背景">
-                            <TextArea rows={3} />
-                          </Form.Item>
-                        </Col>
-                        <Col span={12}>
-                          <Form.Item name={[f.name, 'instructions']} label="执行说明">
-                            <TextArea rows={3} />
-                          </Form.Item>
-                        </Col>
-                        <Col span={24}>
-                          <Form.Item name={[f.name, 'criteria']} label="验收标准（acceptance.criteria）">
-                            <TextArea rows={2} />
-                          </Form.Item>
-                        </Col>
-                      </Row>
-                    </Card>
-                  );
-                })}
-                <Button type="dashed" onClick={() => add({ id: '', title: '', agent: 'act', depends_on: [], max_attempts: 3, requirement_background: '', instructions: '', criteria: '' })} style={{ width: 200 }}>
-                  + 添加 TODO
-                </Button>
-              </>
-            )}
-          </Form.List>
-          <Divider />
-          <Text type="secondary">
-            提示：acceptance.required_tool_calls 等低频字段请切换到「画布」（选中节点后在右侧
-            Inspector 编辑）或「JSON 源码」模式编辑。
-          </Text>
-        </Form>
+        <TodoForm form={form} saving={saving} allIds={allIds} todosWatch={todosWatch} agentOptions={agentOptions} onChange={() => setDirty(true)} />
       ) : mode === 'canvas' ? (
         <div className="todo-edit-canvas" inert={saving ? '' : undefined}>
           <TodoCanvasEditor
@@ -379,7 +236,8 @@ function TodoEditorSession({ templateName, version, onNotice, onClose }) {
             spec={spec}
             problems={problems}
             positions={positions}
-            onSpecChange={setSpec}
+            onSpecChange={changeSpec}
+            agentOptions={agentOptions}
             onPositionsChange={setPositions}
           />
         </div>
@@ -389,7 +247,7 @@ function TodoEditorSession({ templateName, version, onNotice, onClose }) {
           <TextArea
             disabled={saving}
             value={jsonText}
-            onChange={(e) => setJsonText(e.target.value)}
+            onChange={(e) => {setJsonText(e.target.value);setDirty(true);}}
             rows={24}
             style={{ fontFamily: MONO_VAR, marginTop: 8 }}
             aria-label="spec-json"
@@ -397,8 +255,8 @@ function TodoEditorSession({ templateName, version, onNotice, onClose }) {
         </div>
       )}
       <Divider />
-      <Space>
-        <Text>Env 绑定：</Text>
+      {!creating && <Space>
+        <Text>环境绑定：</Text>
         <Select
           value={envBinding}
           onChange={setEnvBinding}
@@ -406,8 +264,14 @@ function TodoEditorSession({ templateName, version, onNotice, onClose }) {
           style={{ width: 220 }}
           aria-label="env-binding"
         />
-        <Text type="secondary">随「保存」一并提交</Text>
-      </Space>
+        <Button loading={envSaving} disabled={envBinding === envLoaded} onClick={async () => {
+          setEnvSaving(true);
+          try { await apiPut(envPath,{env:envBinding || null}); const saved = await apiGet(envPath); setEnvLoaded(saved.env || ''); setEnvBinding(saved.env || ''); msg.success('环境绑定已保存'); }
+          catch(e) { msg.error('环境绑定失败：'+e.message); }
+          finally { setEnvSaving(false); }
+        }}>保存环境绑定</Button>
+        <Text type="secondary">{envBinding === envLoaded ? '环境绑定已同步' : '环境绑定未保存'}</Text>
+      </Space>}
     </div>
   );
 }

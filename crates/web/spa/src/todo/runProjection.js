@@ -56,6 +56,20 @@ export function foldTodoEvents(states, frames) {
   for (const f of Array.isArray(frames) ? frames : []) {
     const kind = (f && f.event) || 'message';
     const d = (f && f.data) || {};
+    if (Array.isArray(d.items)) {
+      for (const [id, item] of itemsToStates(d.items)) map.set(id, item);
+      continue;
+    }
+    if (kind === 'todos_dispatched') {
+      for (const assignment of d.assignments || d.todos || []) {
+        const current = map.get(assignment.todo_id);
+        if (!current) continue;
+        map.set(assignment.todo_id, {...current, status:'running',
+          attempt:assignment.attempt ?? current.attempt,
+          activeSessionId:assignment.session_id ?? current.activeSessionId});
+      }
+      continue;
+    }
     const todoId = typeof d.todo_id === 'string' ? d.todo_id : null;
     if (!todoId) {
       continue;

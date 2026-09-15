@@ -1,4 +1,4 @@
-Commit: 6fd9e78ef777000e03e1ac2c7c64980b9fd2b714
+Commit: 6ff63f9b
 
 # control 模块
 
@@ -6,7 +6,7 @@ Commit: 6fd9e78ef777000e03e1ac2c7c64980b9fd2b714
 
 ## 关键路径
 
-- `crates/control/src/bootstrap.rs` — 仅开 control.db + definitions.db；BrainClient
+- `crates/control/src/bootstrap.rs` — 仅开 control.db + definitions.db；BrainClient；启动 Agent 与 DAG WASM 两路只读 NFS 导出
 - `crates/control/src/transport/hub.rs` — Hub：协议 v9 校验；连接/RPC/预留仅内存
 - `crates/control/src/api/executions/mod.rs` — `submit_inner` 提交选点：placement 锁内解析定义并预留；按 ID 路由明细/控制/SSE/产物
 - `crates/control/src/api/brain_runs/` — 能力/不可变计划/运行 API；按根串行授权派发与控制，资源占用和来源回执确认。

@@ -52,7 +52,8 @@ export function FleetNodesPanel({ onNotice }) {
     } catch (e) { onNotice(err(e.message)); }
     finally { setDeleting(false); }
   };
-  return <PageShell page="nodes" extra={<Button onClick={() => load(false)}>刷新节点</Button>}>
+  return <PageShell page="nodes">
+    <Space style={{ marginBottom: 12 }}><Button onClick={() => load(false)}>刷新节点</Button></Space>
     <Table scroll={{ x: 'max-content' }} locale={{ emptyText: '暂无 Opencoder 节点' }} rowKey="id" dataSource={tableRows(loading, rows)} loading={tableLoading(loading)} columns={[
       { title: '节点', dataIndex: 'name', render: (v, r) => <Space orientation="vertical"><b>{v}</b><small style={{ fontFamily: MONO_VAR }}>{r.id}</small></Space> },
       { title: '状态', render: (_, r) => <StatusTag status={r.online ? 'online' : 'offline'} label={r.online ? (r.snapshot?.resource_error || '在线') : '离线'} color={r.online && r.snapshot?.ready ? 'success' : 'error'} /> },

@@ -308,6 +308,15 @@ pub trait Store: Send + Sync {
     ) -> Result<TodoEventPage> {
         anyhow::bail!("bounded todo event pagination is unsupported by this store")
     }
+    async fn todo_events_before(
+        &self,
+        _workflow_id: &str,
+        _before_seq: i64,
+        _limit: u32,
+        _payload_budget: usize,
+    ) -> Result<TodoEventPage> {
+        anyhow::bail!("reverse todo event pagination is unsupported by this store")
+    }
     async fn last_todo_event_seq(&self, _workflow_id: &str) -> Result<i64> {
         anyhow::bail!("todo event watermark is unsupported by this store")
     }
@@ -320,7 +329,6 @@ pub trait Store: Send + Sync {
     ) -> Result<Option<crate::PayloadChunkRecord>> {
         anyhow::bail!("bounded todo event payload reads are unsupported by this store")
     }
-
     /// Persist a new brain capability together with its exemplar inputs in
     /// one transaction (project goals / capability library). Step-wise write:
     /// no embedding row is touched, so runtime paths must prefer
@@ -471,7 +479,6 @@ pub trait Store: Send + Sync {
     ) -> Result<Option<BrainPlaybookRecord>> {
         anyhow::bail!("playbooks are not supported by {}", self.backend_name())
     }
-
     /// Register (or re-register) a worker node by its unique `name`. A new
     /// name gets a fresh ULID; a known name keeps its `id` so dispatched tasks
     /// keep their foreign key, while version/workdir/last_seen_at are

@@ -296,27 +296,8 @@ async function verifyBrainRetry(nodeName) {
   await page.unroute('**/api/brain/runs');
   let view = page.locator('.brain-run');
   await view.getByText('BRAIN-STABLE').waitFor(); // 成功后关抽屉、切到运行视图
-  // 已知产品缺陷（与本页无关，另行记录）：并发 outbox 帧下 authorize/published 回放
-  // 不幂等，busy 节点上实例可能永久停在 就绪（worker 日志 action receipt changed /
-  // no pending plan publication）。UI 断言不放松：卡住则经 API 重开一次运行再看。
-  let passed = false;
-  try {
-    await view.locator('.brain-step-list').getByText('已通过').waitFor({ timeout: 60_000 }); // 唯一步骤实例跑通（负载高时跑完需 >30s）
-    passed = true;
-  } catch { /* fall through to fresh-run retry */ }
-  if (!passed) {
-    const nodeId = (await api('GET', '/api/nodes')).nodes.find((n) => n.name === nodeName).id;
-    const retryId = 'brain-' + require('crypto').randomBytes(16).toString('hex');
-    await api('POST', '/api/brain/runs', { id: retryId, mode: 'dynamic', node_id: nodeId, objective: 'BRAIN-STABLE-2', inputs: {}, plan: null, references: [] });
-    await openAgentPage('大脑调度');
-    const back = page.locator('.brain-run').getByRole('button', { name: '返回工作台' });
-    if (await back.count()) await back.click(); // 运行视图仍打开时先回工作台
-    await page.getByRole('button', { name: '刷新运行' }).click();
-    await page.getByRole('button', { name: retryId, exact: true }).click();
-    view = page.locator('.brain-run');
-    await view.getByText('BRAIN-STABLE-2').waitFor();
-    await view.locator('.brain-step-list').getByText('已通过').waitFor({ timeout: 60_000 });
-  }
+  // The same run must converge across activation stream boundaries.
+  await view.locator('.brain-step-list').getByText('已通过').waitFor({ timeout: 60_000 });
   await view.locator('.brain-step-list button').first().click(); // 选中步骤 → Inspector 带出实例
   await page.getByRole('tab', { name: '执行过程' }).click(); // 内联 ExecutionView（不挂画布）
   await page.getByText('browser fresh answer', { exact: true }).waitFor({ timeout: 30_000 });

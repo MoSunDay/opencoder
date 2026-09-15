@@ -383,6 +383,16 @@ impl Store for LibsqlStore {
         let _guard = self.db_lock.lock().await;
         todos::events_page(&self.conn, workflow_id, after_seq, limit, payload_budget).await
     }
+    async fn todo_events_before(
+        &self,
+        workflow_id: &str,
+        before_seq: i64,
+        limit: u32,
+        payload_budget: usize,
+    ) -> Result<TodoEventPage> {
+        let _guard = self.db_lock.lock().await;
+        todos::events_before(&self.conn, workflow_id, before_seq, limit, payload_budget).await
+    }
     async fn last_todo_event_seq(&self, workflow_id: &str) -> Result<i64> {
         let _guard = self.db_lock.lock().await;
         let mut rows = self

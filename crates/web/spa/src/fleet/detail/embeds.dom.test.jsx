@@ -45,11 +45,10 @@ describe('执行明细内嵌运行视图', () => {
 
   it('todos 明细内嵌调度画布，点击节点联动 Inspector', async () => {
     apiGet.mockImplementation(async (path) => {
-      if (path === '/api/todo/workflows/todos-1') {
-        return { workflow: { status: 'running', spec_json: { todos: [
-          { id: 't1', title: '调研', agent: 'explore', depends_on: [], acceptance: { criteria: '对比' } },
-          { id: 't2', title: '实现', agent: 'act', depends_on: ['t1'], acceptance: { criteria: '通过' } }] } },
-          items: [{ todo_id: 't1', status: 'passed', attempt: 1, active_session_id: null, last_error: '' }] };
+      if (path.startsWith('/api/todo/workflows/todos-1/review?section=node')) return {todo:{title:'实现',agent:'act',acceptance:{criteria:'通过'}},state:{status:'pending',attempt:0}};
+      if (path.includes('section=history')) return {events:[],more:false};
+      if (path.startsWith('/api/todo/workflows/todos-1/review')) {
+        return {workflow:{id:'todos-1',status:'running',generation:1,world_epoch:0},execution_status:'running',head_seq:1,total:2,nodes:[{id:'t1',title:'调研',agent:'plan',depends_on:[],status:'passed',attempt:1},{id:'t2',title:'实现',agent:'act',depends_on:['t1'],status:'pending',attempt:0}]};
       }
       return {};
     });
@@ -60,27 +59,27 @@ describe('执行明细内嵌运行视图', () => {
     fireEvent.click(document.querySelector('.oc-todo-run-node[data-todo-id="t2"]'));
     // 画布节点也渲染同名标题，Inspector 断言按容器作用域取。
     await waitFor(() => {
-      const inspector = document.querySelector('.oc-todo-run-inspector');
+      const inspector = document.querySelector('.todo-review-inspector');
       expect(inspector).toBeTruthy();
       expect(inspector.textContent).toContain('实现');
     });
   });
 
-  it('todos 画布拉取失败时静默回退，TodoDetail 列表仍在', async () => {
+  it('todos Review 拉取失败明确报告错误并保留执行信息', async () => {
     apiGet.mockImplementation(async (path) => {
       if (path === '/api/executions/todos-x') {
         return { execution: { id: 'todos-x', kind: 'todos', status: 'done', created_at: 1 },
           request: { kind: 'todos', target: 'tpl/v1', input: {} },
           workflow: { workflow: { status: 'completed' }, items: [{ todo_id: 't1', status: 'done', attempt: 1 }] } };
       }
-      if (path === '/api/todo/workflows/todos-x') throw new Error('node store unreachable'); // 分体部署 node 侧 store 不可见
+      if (path.startsWith('/api/todo/workflows/todos-x/review')) throw new Error('node store unreachable'); // 分体部署 node 侧 store 不可见
       return {};
     });
     render(<ExecutionView executionRef={{ id: 'todos-x', kind: 'todos' }} onNotice={vi.fn()} />);
     // 「TODO 工作流」同时是 todos 的类型标签（头部 Descriptions），断言限定
     // 到 TodoDetail 回退块的标题节点。
     expect(await screen.findByText('TODO 工作流', { selector: 'h5' })).toBeTruthy(); // TodoDetail 回退仍在
-    expect(screen.queryByText('TODO 调度画布')).toBeNull(); // 画布失败静默，不渲染
+    expect(await screen.findByText('node store unreachable')).toBeTruthy();
   });
 
   it('inline 模式（工作台 Inspector「执行过程」页）不挂过程视图，full 模式才挂', async () => {
@@ -93,20 +92,19 @@ describe('执行明细内嵌运行视图', () => {
           request: { kind: 'todos', target: 'tpl/v1', input: {} },
           workflow: { workflow: { status: 'running' }, items: [] } };
       }
-      if (path === '/api/todo/workflows/todos-insp') {
-        return { workflow: { status: 'running', spec_json: { todos: [
-          { id: 't1', title: '内联步骤', agent: 'act', depends_on: [], acceptance: { criteria: '通过' } }] } }, items: [] };
+      if (path.startsWith('/api/todo/workflows/todos-insp/review')) {
+        return {workflow:{id:'todos-insp',status:'running',generation:1,world_epoch:0},execution_status:'running',head_seq:1,total:1,nodes:[{id:'t1',title:'内联步骤',agent:'act',depends_on:[],status:'pending',attempt:0}]};
       }
       return {};
     });
     const inline = render(<ExecutionView executionRef={{ id: 'todos-insp', kind: 'todos' }} mode="inline" managed onNotice={vi.fn()} />);
     expect(await inline.findByText('TODO 工作流', { selector: 'h5' })).toBeTruthy(); // TodoDetail 轻量块仍在
     expect(inline.queryByText('TODO 调度画布')).toBeNull(); // 窄列不挂画布
-    expect(apiGet.mock.calls.filter(([path]) => path === '/api/todo/workflows/todos-insp')).toHaveLength(0); // 门控：inline 连画布数据都不拉
+    expect(apiGet.mock.calls.filter(([path]) => path.startsWith('/api/todo/workflows/todos-insp/review'))).toHaveLength(0); // 门控：inline 连画布数据都不拉
     inline.unmount();
 
     const full = render(<ExecutionView executionRef={{ id: 'todos-insp', kind: 'todos' }} onNotice={vi.fn()} />);
-    expect(await full.findByText('TODO 调度画布')).toBeTruthy(); // full（明细抽屉）模式挂画布
+    await waitFor(()=>expect(full.container.querySelector('.oc-todo-run-node[data-todo-id="t1"]')).toBeTruthy()); // full（明细抽屉）模式挂画布
     expect(full.container.querySelector('.oc-todo-run-node[data-todo-id="t1"]')).toBeTruthy();
   });
 });

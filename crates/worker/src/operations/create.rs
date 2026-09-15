@@ -504,6 +504,17 @@ pub(crate) async fn start(
     if record.assignment.index.status == ExecutionStatus::Pending {
         return Ok(RpcReply::error(409, "execution is already pending"));
     }
+    if record
+        .lifecycle
+        .todo_reruns
+        .values()
+        .any(|c| c.phase == "stopping")
+    {
+        return Ok(RpcReply::error(
+            409,
+            "TODO rerun is still stopping the previous execution",
+        ));
+    }
     if matches!(
         record.assignment.index.status,
         ExecutionStatus::Done | ExecutionStatus::Cancelled

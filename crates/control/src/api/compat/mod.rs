@@ -5,6 +5,7 @@ use axum::{
 };
 use std::sync::Arc;
 pub mod sessions;
+mod todo_review;
 pub mod workflows;
 pub fn routes() -> Router<Arc<AppState>> {
     Router::new()
@@ -34,8 +35,14 @@ pub fn routes() -> Router<Arc<AppState>> {
             "/api/todo/templates/:name/:version/run",
             post(workflows::dispatch_todos),
         )
+        .route(
+            "/api/todo/context-preview",
+            post(todo_review::context_preview),
+        )
         .route("/api/todo/workflows", get(workflows::todos))
         .route("/api/todo/workflows/:id", get(workflows::todo))
+        .route("/api/todo/workflows/:id/review", get(todo_review::review))
+        .route("/api/todo/workflows/:id/rerun", post(todo_review::rerun))
         .route("/api/todo/workflows/:id/events", get(super::stream::events))
         .route(
             "/api/todo/workflows/:id/interrupt",

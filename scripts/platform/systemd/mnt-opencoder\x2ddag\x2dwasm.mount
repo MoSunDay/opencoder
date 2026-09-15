@@ -1,0 +1,16 @@
+[Unit]
+Description=OpenCoder read-only DAG WASM distribution
+Wants=network-online.target opencoder-server.service
+After=network-online.target opencoder-server.service
+Before=opencoder-agent.service
+PartOf=opencoder-server.service
+
+[Mount]
+What=127.0.0.1:/
+Where=/mnt/opencoder-dag-wasm
+Type=nfs
+Options=ro,vers=3,tcp,port=2050,mountport=2050,nolock,soft,retrans=1,timeo=50,actimeo=0,lookupcache=none
+TimeoutSec=30
+
+[Install]
+WantedBy=multi-user.target

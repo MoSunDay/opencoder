@@ -73,10 +73,18 @@ pub async fn handle(
         "authorize" => {
             let receipt: ActionReceipt = serde_json::from_value(input)?;
             let current = run.actions.get(&receipt.id).context("unknown action")?;
-            ensure!(
-                current == &receipt && current.state == ReceiptState::Prepared,
-                "action receipt changed"
-            );
+            // Transport errors and acceptance results are mutable receipt fields.
+            // An old outbox frame must retain the immutable action identity.
+            let mut expected = current.clone();
+            expected.state = receipt.state;
+            expected.result = receipt.result.clone();
+            expected.error = receipt.error.clone();
+            if expected != receipt || receipt.state != ReceiptState::Prepared {
+                return Ok(RpcReply::error(409, "action receipt identity changed"));
+            }
+            if current.state != ReceiptState::Prepared {
+                return Ok(RpcReply::error(409, "action already accepted or settled"));
+            }
             let instance = run
                 .instances
                 .get(&receipt.instance_id)
@@ -163,11 +171,14 @@ pub async fn handle(
             }
         }
         "published" => {
+            let version: PlanVersion = serde_json::from_value(input.clone())?;
+            if run.candidate_plan.is_none() && run.request.plan.as_ref() == Some(&version) {
+                return Ok(RpcReply::ok(json!({"duplicate":true})));
+            }
             let mut candidate = run
                 .candidate_plan
                 .take()
                 .context("no pending plan publication")?;
-            let version: PlanVersion = serde_json::from_value(input.clone())?;
             for (old, new) in candidate.plan.steps.iter_mut().zip(&version.plan.steps) {
                 if old.action.definition.is_none() {
                     old.action.definition = new.action.definition.clone();

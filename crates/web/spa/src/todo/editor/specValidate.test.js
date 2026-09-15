@@ -166,7 +166,7 @@ describe('validateSpec', () => {
       { path: 'todos[a]', message: 'TODO a 不能使用 workflow agent' },
     ]);
     expect(validateSpec({ ...GOOD, todos: [GOOD_TODO('a', [], 'ghost-agent')] })).toEqual([]);
-    expect(BUILTIN_AGENTS).toEqual(['act', 'plan', 'explore', 'build']);
+    expect(BUILTIN_AGENTS).toEqual(['act', 'plan', 'command']);
   });
 
   it('无法定位 id（空白/缺失）的 todo 问题挂 workflow', () => {

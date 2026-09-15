@@ -90,7 +90,7 @@ pub async fn nfs_get(State(state): State<Arc<AppState>>) -> Response {
     Json(json!({
         "ok": true,
         "root": resolve_root(&state.workdir).display().to_string(),
-        "status": status_value(&nfs_exports::status(DAG_WASM_EXPORT)),
+        "status": status_value(&nfs_exports::status(DAG_WASM_EXPORT).await),
     }))
     .into_response()
 }
@@ -128,7 +128,7 @@ pub async fn nfs_post(State(state): State<Arc<AppState>>, Json(body): Json<SetBo
         nfs_exports::stop(DAG_WASM_EXPORT).await;
         Json(json!({
             "ok": true,
-            "status": status_value(&nfs_exports::status(DAG_WASM_EXPORT)),
+            "status": status_value(&nfs_exports::status(DAG_WASM_EXPORT).await),
             "started": false,
         }))
         .into_response()

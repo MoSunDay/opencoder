@@ -71,7 +71,7 @@ DAG wasm 模块池是第二路只读导出：Server 侧 `dag.nfs.enabled` 开启
 mount -t nfs -o ro,vers=3,tcp,port=2050,mountport=2050,nolock,soft,retrans=1,timeo=50,actimeo=0,lookupcache=none server:/ /mnt/opencoder-dag-wasm
 ```
 
-该路径不做挂载表强制校验：未配置时 wasm 模块维持 out-of-band 投放；配置后节点受理 DAG 时把 spec 引用的池模块冻结进 `<workflow_root>/_modules/`（`tool.wasm` 取 current，`tool@v3.wasm` 取显式版本），池缺名或缺该版本视为 out-of-band 跳过，导出内容损坏（sha256 不符）则拒绝受理。发布/回滚只影响之后的新受理，不影响已接受 run；本机部署可参照 agents 挂载单元模板复制第二路挂载。
+该路径不做挂载表强制校验，但节点必须以 `ro` 挂载并只读加载：未配置时 wasm 模块维持 out-of-band 投放；配置后节点受理 DAG 时把 spec 引用的池模块冻结进 `<workflow_root>/_modules/`（`tool.wasm` 取 current，`tool@v3.wasm` 取显式版本），池缺名或缺该版本视为 out-of-band 跳过，导出内容损坏（sha256 不符）则拒绝受理。WASM 和 Agent 任务都只执行节点本地快照，不向 NFS 写入或直接依赖 NFS 运行。发布/回滚只影响之后的新受理，不影响已接受 run；本机部署可参照 agents 挂载单元模板复制第二路挂载。
 
 本机部署可使用 `scripts/platform/systemd/` 的只读挂载单元及 Agent 依赖配置；跨主机部署调整 `What` 为实际 Server。每个挂载点只保留一个挂载，关闭目录与属性缓存使资源发布及时对新任务生效。回滚不支持长句柄的旧 Server 时，先停止依赖该挂载的 Node，再受控重新挂载。
 

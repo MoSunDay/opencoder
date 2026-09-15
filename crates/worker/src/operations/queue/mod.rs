@@ -71,6 +71,7 @@ pub(crate) async fn enqueue_with_command(
 /// Caller holds node admission; a slot is reserved before any workload starts.
 pub(crate) async fn dispatch_locked(worker: &Worker) -> Result<()> {
     crate::brain::wake::recover_locked(worker).await?;
+    super::todo::recover_locked(worker).await?;
     if worker.admission_error().is_some()
         || worker.inner.stopping.is_cancelled()
         || worker.inner.persistence_error.lock().unwrap().is_some()

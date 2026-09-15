@@ -13,8 +13,8 @@ Commit: b465f440381bd009dc9bd3a8192ad88eab44cede
 - crates/local/src/todos_cmd.rs — validate/run/resume/interrupt
 - crates/web/src/api_todo_runs.rs — 平台 TODO 运行接口
 - crates/web/src/api_todo_templates.rs — TODO 模板接口
-- crates/web/spa/src/todoEditor.jsx 与 src/todo/editor/ — SPA 模板编辑器（表单/画布/JSON 三态，画布可视化依赖）；宿主是 todoPanel 的 100% 宽右侧抽屉，非整页替换
-- crates/web/spa/src/todoRunsPanel.jsx 与 src/todo/runCanvas.jsx — 运行视图：调度画布（依赖图 + 每 TODO 实时状态）+ Inspector + 事件流
+- crates/web/spa/src/todoEditor.jsx 与 src/todo/editor/ — SPA 模板编辑器（默认画布，表单/JSON 共享草稿，metadata 与依赖引用保留）；宿主是 todoPanel 的 100% 宽右侧抽屉，非整页替换
+- crates/web/spa/src/todoRunsPanel.jsx 与 src/todo/runCanvas.jsx — 运行工作台：调度画布、节点 Review、历史尝试与任意节点重跑
 - crates/todos/src/execution.rs — TODO env 生效链：dispatch 盖章的 `metadata.env_vars` 并入子会话 `env_passthrough`，经 `ToolContext::extra_env` 抵达 bash/harness 进程
 - crates/todos/tests/env_passthrough.rs — env_vars 抵达 bash 进程的生效证明
 - crates/todos/tests/ — 门禁、中断恢复与降级测试
@@ -30,8 +30,13 @@ Commit: b465f440381bd009dc9bd3a8192ad88eab44cede
 - 节点侧 OpenCoder Env 配置集（/api/envs）已删除，TODO env 是唯一环境体系
 - SPA 画布编辑器的客户端校验是建议性镜像（crates/web/spa/src/todo/editor/specValidate.js），服务端 validate_spec 权威
 
+- `crates/todos/src/review/` 统一派发上下文、精简父 Agent 调度输入与重跑影响范围。
+- `crates/worker/src/operations/todo/` 提供一致性快照、分段 Review 和持久化重跑受理恢复；旧执行退出后才重新排队。
+- 重跑保留当前文件、外部操作结果、上游及独立分支的通过结果，并归档目标与下游旧轮次。
+
 ## 相关
 
+- [TODO 工作台操作](../../docs/todo-workbench.md)
 - [Agent 平台](../agent-platform/index.md)
 - [todos 模块](../../agents/todos/index.md)
 - [CLI](../../agents/local/index.md)

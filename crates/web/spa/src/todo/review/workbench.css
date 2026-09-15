@@ -1,0 +1,16 @@
+.todo-workbench{container-type:inline-size;min-width:0;display:flex;flex-direction:column;gap:12px}
+.todo-workbench-toolbar{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:center}
+.todo-parent-heading{padding:16px 20px;border:1px solid var(--ant-color-border,#d9d9d9);border-radius:10px;background:var(--ant-color-fill-quaternary,#fafafa);display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px}
+.todo-parent-heading h4,.todo-parent-heading p{margin:0!important}
+.todo-parent-heading>span{color:var(--ant-color-text-secondary,#666)}
+.todo-parent-decision{width:100%;display:flex;gap:16px;flex-wrap:wrap;font-size:13px}
+.todo-workbench-body{display:grid;grid-template-columns:190px minmax(320px,1fr) 360px;gap:12px;min-height:580px}
+.todo-task-nav,.todo-task-inspector{border:1px solid var(--ant-color-border,#d9d9d9);border-radius:8px;padding:12px;overflow:auto;max-height:700px;min-width:0}
+.todo-task-nav{display:flex;flex-direction:column;gap:8px}.todo-task-nav>.ant-select{width:100%}
+.todo-nav-node{display:flex;align-items:flex-start;gap:5px;flex-direction:column;width:100%;padding:10px;text-align:left;border:1px solid var(--ant-color-border,#d9d9d9);border-radius:6px;cursor:pointer;background:var(--ant-color-bg-container,#fff);color:inherit}
+.todo-nav-node.selected{border-color:#1677ff;background:var(--ant-color-primary-bg,#e6f4ff)}
+.todo-nav-node small{opacity:.65}.todo-workbench-canvas{min-width:0;border:1px solid var(--ant-color-border,#d9d9d9);border-radius:8px;overflow:hidden}
+.todo-review-json{white-space:pre-wrap;overflow-wrap:anywhere;max-height:430px;overflow:auto;font-size:12px;line-height:1.6;background:var(--ant-color-fill-quaternary,#fafafa);padding:10px;border-radius:6px}
+.todo-history{display:flex;flex-direction:column;gap:10px}.todo-save-state{font-size:12px;color:var(--ant-color-text-secondary,#666)}
+@container(max-width:1050px){.todo-workbench-body{grid-template-columns:160px minmax(0,1fr)}.todo-task-inspector{grid-column:1/-1;max-height:none}.todo-task-nav{max-height:580px}}
+@container(max-width:600px){.todo-workbench-body{display:flex;flex-direction:column}.todo-task-nav{max-height:230px}.todo-parent-heading{padding:12px}.todo-parent-decision{gap:6px}.todo-workbench-canvas .dag-detail-graph{height:400px!important}}

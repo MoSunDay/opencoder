@@ -12,6 +12,7 @@
 import { Alert, Button, Form, Input, InputNumber, Popconfirm, Select, Space, Typography } from 'antd';
 import { useEffect, useState } from 'react';
 import { RequiredCallsEditor } from './requiredCallsEditor.jsx';
+import { ContextPreview } from '../editing/contextPreview.jsx';
 import { BUILTIN_AGENTS } from './specValidate.js';
 
 const { Text } = Typography;
@@ -38,7 +39,7 @@ function withAcceptance(todo, key, value) {
 /// surface as a warning toast there. allIds is kept for signature parity
 /// with the dag StepInspector. onChange(todo) commits every other field
 /// edit; onRemove() deletes the node.
-export function TodoInspector({ todo, allIds, problemList, onChange, onRename, onRemove }) {
+export function TodoInspector({ todo, spec, agentOptions = AGENT_OPTIONS, allIds, problemList, onChange, onRename, onRemove }) {
   if (!todo || typeof todo !== 'object') {
     return null;
   }
@@ -67,7 +68,7 @@ export function TodoInspector({ todo, allIds, problemList, onChange, onRename, o
           <Input value={todo.title || ''} onChange={(e) => onChange({ ...todo, title: e.target.value })} />
         </Form.Item>
         <Form.Item label="agent">
-          <Select options={AGENT_OPTIONS} value={todo.agent || undefined} onChange={(v) => onChange({ ...todo, agent: v })} />
+          <Select options={agentOptions} value={todo.agent || undefined} onChange={(v) => onChange({ ...todo, agent: v })} />
         </Form.Item>
         <Form.Item label="最大尝试 (max_attempts)">
           <InputNumber
@@ -106,6 +107,7 @@ export function TodoInspector({ todo, allIds, problemList, onChange, onRename, o
           />
         </Form.Item>
       </Form>
+      <ContextPreview spec={spec} todoId={todo.id} />
       <Popconfirm title="删除该 TODO 及其依赖连线？" okText="删除" cancelText="取消" onConfirm={onRemove}>
         <Button danger block>
           删除 TODO

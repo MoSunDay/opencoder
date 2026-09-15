@@ -47,17 +47,17 @@ const CONTEXT_FIXTURE = {
     {
       id: 't1',
       title: '调研方案',
-      agent: 'explore',
+      agent: 'plan',
       depends_on: [],
       max_attempts: 3,
       requirement_background: '背景',
       instructions: '调研',
-      acceptance: { criteria: '输出对比文档', required_tool_calls: [{ name: 'web_search', arguments_contains: [] }] },
+      acceptance: { criteria: '输出对比文档', required_tool_calls: [{ name: 'web_search', arguments_contains: {} }] },
     },
     {
       id: 't2',
       title: '落地实现',
-      agent: 'build',
+      agent: 'act',
       depends_on: ['t1'],
       max_attempts: 2,
       requirement_background: '背景2',
@@ -71,6 +71,7 @@ const ENV_FIXTURE = { env: '' }; // 未绑定 → 保存时不发 env PUT
 
 const installApi = () => {
   apiGetMock.mockReset().mockImplementation((path) => {
+    if (path === '/api/agents') return Promise.resolve({agents:[{name:'act',primary:true},{name:'plan',primary:true}]});
     if (path === CTX_PATH) {
       return Promise.resolve(CONTEXT_FIXTURE);
     }
@@ -96,11 +97,14 @@ afterEach(() => {
 /// 渲染外壳并等首个表单字段回填（= context 加载完成的信号）。
 const mountEditor = async () => {
   render(<TodoEditor templateName="demo" version="v1" onNotice={() => {}} onClose={vi.fn()} />);
+  await screen.findByDisplayValue('ship the demo');
+  await waitFor(()=>expect(document.querySelectorAll('.dag-edit-node')).toHaveLength(2));
+  fireEvent.click(screen.getByText('表单'));
   return screen.findByDisplayValue('ship the demo');
 };
 
 describe('TodoEditor 三态外壳', () => {
-  it('加载后落在表单模式并回填 spec 高频字段', async () => {
+  it('默认画布显示全部节点，切表单回填 spec 高频字段', async () => {
     await mountEditor();
     expect(apiGetMock).toHaveBeenCalledWith(CTX_PATH);
     expect(apiGetMock).toHaveBeenCalledWith('/api/todo/envs');

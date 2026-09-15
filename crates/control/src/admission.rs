@@ -198,7 +198,7 @@ fn reject_symlink(path: &Path) -> Result<()> {
 
 pub fn command_requires_admission(command: &ExecutionCommand) -> bool {
     match command.action.as_str() {
-        "resume" | "plan" | "execute" | "prompt" | "steer" | "queue" => true,
+        "resume" | "plan" | "execute" | "prompt" | "steer" | "queue" | "todo-rerun" => true,
         "http" => {
             let method = command.input["method"].as_str().unwrap_or("GET");
             let tail = command.input["tail"].as_str().unwrap_or("");

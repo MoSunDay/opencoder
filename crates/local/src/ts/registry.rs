@@ -141,7 +141,7 @@ async fn list_all_sessions(store: &LibsqlStore) -> Result<Vec<SessionListItem>> 
         let page_len = page.len();
         cursor = page
             .last()
-            .map(|item| format!("{}|{}", item.created_at, item.id));
+            .map(|item| format!("{}|{}", item.updated_at.max(item.created_at), item.id));
         out.extend(page);
         if page_len < STORE_PAGE_SIZE as usize {
             return Ok(out);
@@ -290,10 +290,9 @@ mod tests {
     async fn list_all_sessions_paginates_past_store_limit() {
         let store = LibsqlStore::open_memory().await.unwrap();
         for n in 0..=STORE_PAGE_SIZE {
-            store
-                .create_session(&meta(&format!("PAGE{n:04}"), None, i64::from(n)))
-                .await
-                .unwrap();
+            let mut session = meta(&format!("PAGE{n:04}"), None, i64::from(n));
+            session.updated_at = 10_000;
+            store.create_session(&session).await.unwrap();
         }
         assert_eq!(
             list_all_sessions(&store).await.unwrap().len(),

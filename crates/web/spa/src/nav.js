@@ -67,7 +67,7 @@ export const CATEGORY_OPTIONS = NAV_CATEGORIES.map((c) => ({ value: c.key, label
 /// Pages that carry their own title inside the body (the brain workbench uses
 /// Tabs), so they deliberately have no PAGE_META header copy. PageShell renders
 /// a headerless `.oc-page` body for any page missing from PAGE_META.
-export const HEADERLESS_PAGES = ['brain', 'topics'];
+export const HEADERLESS_PAGES = ['brain', 'topics', 'team', 'agents', 'nodes'];
 
 /// Per-page header copy (title + one-line description). Exported now so the
 /// IA has one name per page; the header UI itself arrives in iteration 3.
@@ -77,10 +77,7 @@ export const PAGE_META = {
   ownerview: { title: 'Owner 视角', desc: '按目标分组的健康度与待人工介入事项' },
   dag: { title: 'DAG 工作流', desc: 'DAG 运行的图视图与步骤工件' },
   todos: { title: 'TODO 管理', desc: '持久化 TODO 工作流的调度与验收' },
-  team: { title: '团队组队', desc: '多 agent 团队的组建与执行' },
   chat: { title: '会话交互', desc: '与舰队节点对话的会话工作台' },
-  agents: { title: 'Agent 配置', desc: '版本化自定义 agent 的池与引用' },
-  nodes: { title: '节点列表', desc: '在线 Opencoder 节点与负载' },
 };
 
 /// Category lookup with the default as the safety net (unknown keys never

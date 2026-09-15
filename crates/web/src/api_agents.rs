@@ -117,6 +117,7 @@ pub async fn list(State(_state): State<Arc<AppState>>) -> Response {
             let meta = visible_meta(&name)?;
             Some(json!({
                 "name": name,
+                "primary": opencoder_core::resolve_agent(&name).is_some_and(|a| a.is_primary() && a.name != "workflow"),
                 "builtin": opencoder_core::builtin_agents().iter().any(|a| a.name == name),
                 "harness": meta.harness,
                 "harness_profile": meta.harness_profile,

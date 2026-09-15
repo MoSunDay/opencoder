@@ -77,8 +77,8 @@ const installApi = () => {
     if (path === '/api/todo/workflows?limit=50') {
       return Promise.resolve({ workflows: [{ id: 'todos-1', status: 'running', execution_status: 'running', execution_created_at: 1, node_id: 'node-a', updated_at: 2 }] });
     }
-    if (path === '/api/todo/workflows/todos-1') {
-      return Promise.resolve({ workflow: { id: 'todos-1', status: 'running' }, items: [] });
+    if (path.startsWith('/api/todo/workflows/todos-1/review')) {
+      return Promise.resolve({workflow:{id:'todos-1',status:'running',generation:1,world_epoch:0},execution_status:'running',nodes:[],total:0,head_seq:1,controls:[]});
     }
     return Promise.resolve({});
   });
@@ -133,6 +133,7 @@ describe('TodoPanel 模板 tab', () => {
     fireEvent.click(screen.getByText('新建模板'));
     await openDrawer();
     fireEvent.change(screen.getByLabelText('模板名'), { target: { value: 'spec-check' } });
+    await screen.findByDisplayValue('完成任务并提供可核验结果');
     fireEvent.click(findButton('创建'));
     await waitFor(() => {
       expect(apiPostMock).toHaveBeenCalledWith(
@@ -156,7 +157,7 @@ describe('TodoPanel 模板 tab', () => {
     expect(screen.getByText('编辑模板 demo · v1')).toBeTruthy(); // 抽屉标题接管 Card 标题
     // 编辑器本体已在抽屉里加载（context 回填 + 三模式切换可用）。
     expect(await screen.findByDisplayValue('ship the demo')).toBeTruthy();
-    expect(screen.getByText('TODO 列表')).toBeTruthy();
+    expect(document.querySelector('.todo-edit-canvas')).toBeTruthy();
     expect(screen.getByText('JSON 源码')).toBeTruthy();
     // 列表仍在抽屉背后（不再整页替换）。
     expect(document.querySelector('.ant-table-row')).toBeTruthy();

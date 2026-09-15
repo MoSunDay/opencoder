@@ -74,7 +74,7 @@ export function TodoCanvasEditor(props) {
 
 /// EditorCanvas — hook body of TodoCanvasEditor (kept inside the provider
 /// so useReactFlow / fitView / screenToFlowPosition resolve).
-function EditorCanvas({ spec, problems, positions, onSpecChange, onPositionsChange }) {
+function EditorCanvas({ spec, problems, positions, onSpecChange, onPositionsChange, agentOptions }) {
   const msg = useMessage();
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
@@ -313,6 +313,8 @@ function EditorCanvas({ spec, problems, positions, onSpecChange, onPositionsChan
       </div>
       {selectedNode ? (
         <TodoInspector
+          agentOptions={agentOptions}
+          spec={canvasToSpec({ nodes, edges }, meta)}
           todo={selectedNode.data.todo}
           allIds={nodes.filter((n) => n.id !== selectedId).map((n) => n.id)}
           problemList={problemMapFor(selectedId)}

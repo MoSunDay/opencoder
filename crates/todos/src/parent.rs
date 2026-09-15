@@ -60,9 +60,11 @@ pub async fn schedule(
          {{\"operation\":\"rewind\",\"milestone_todo_id\":\"...\",\"reason\":\"...\"}}\n\
          {{\"operation\":\"complete|fail|suspend\",\"reason\":\"...\"}}\n\
          Dispatch only IDs in runnable. Use new for first attempt, resume to continue the same interrupted/revision session, fork for a clean attempt. Complete only when every TODO passed.\n\
-         RUNNABLE={}\nSTATE={}\nTODO_SUMMARY={}",
+         WORKFLOW_OBJECTIVE={}\nCONSTRAINTS={}\nRUNNABLE={}\nSTATE={}\nTODO_SUMMARY={}",
+        serde_json::to_string(&spec.objective)?,
+        serde_json::to_string(&spec.constraints)?,
         serde_json::to_string(&runnable)?,
-        serde_json::to_string(state)?,
+        serde_json::to_string(&crate::review::context::scheduling_state(state))?,
         serde_json::to_string(&spec.todos.iter().map(|t| serde_json::json!({"id":t.id,"title":t.title,"depends_on":t.depends_on})).collect::<Vec<_>>())?
     );
     // `None` keeps the prompt byte-identical to the pre-correction form.

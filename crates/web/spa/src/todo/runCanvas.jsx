@@ -5,9 +5,9 @@
 // TodoRunInspector 展示该 TODO 的需求/验收/会话细节。坐标每次 dagre 自动
 // 布局（runProjection.runGraph），运行视图没有会话态可保。
 
-import { Background, Controls, Handle, Position, ReactFlow, ReactFlowProvider } from '@xyflow/react';
+import { Background, Controls, Handle, Position, ReactFlow, ReactFlowProvider, useReactFlow } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
 import { Alert, Descriptions, Empty, Typography } from 'antd';
 import { StatusTag } from '../ui/statusTag.jsx';
 import { MONO_VAR } from '../ui/mono.js';
@@ -47,11 +47,15 @@ export function TodoRunNode({ data, selected }) {
 const runNodeTypes = { todoRun: TodoRunNode };
 
 function RunFlow({ spec, states, selectedId, onSelect, height }) {
-  const graph = useMemo(() => runGraph(spec, states), [spec, states]);
+  const topology = JSON.stringify((spec?.todos||[]).map(t=>[t.id,t.depends_on]));
+  const graph = useMemo(() => runGraph(spec, new Map()), [topology]);
+  const {fitView}=useReactFlow();
+  useEffect(()=>{if(selectedId)fitView({nodes:[{id:selectedId}],duration:180,padding:0.5,maxZoom:1});},[selectedId,fitView]);
   if (!graph.nodes.length) {
     return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="spec 未加载或无 TODO" />;
   }
-  const nodes = graph.nodes.map((n) => ({ ...n, selected: n.id === selectedId }));
+  const nodes = graph.nodes.map((n) => ({ ...n, selected: n.id === selectedId,
+    data:{...n.data,status:states.get(n.id)?.status||'pending',attempt:states.get(n.id)?.attempt||0} }));
   return (
     <div className="dag-detail-graph" style={{ height }}>
       <ReactFlow

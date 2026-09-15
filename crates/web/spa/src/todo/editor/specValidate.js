@@ -6,7 +6,7 @@
 // (that is what drives the editor's red dot). [] means the draft may be
 // submitted — the server remains authoritative.
 
-export const BUILTIN_AGENTS = ['act', 'plan', 'explore', 'build'];
+export const BUILTIN_AGENTS = ['act', 'plan', 'command'];
 
 /// parseSpecDraft(text) → {spec} on success or {error} with a readable
 /// Chinese message (JSON.parse's own message is English/noisy).
@@ -153,6 +153,8 @@ export function validateSpec(spec) {
     }
     if (typeof t.agent !== 'string' || !t.agent.trim()) {
       problems.push({ path: where, message: 'TODO ' + label + ' agent 不能为空' });
+    } else if (['explore', 'build', 'sidecar'].includes(t.agent)) {
+      problems.push({path:where,message:'TODO '+label+' 必须使用 Primary Agent'});
     } else if (t.agent === 'workflow') {
       problems.push({ path: where, message: 'TODO ' + label + ' 不能使用 workflow agent' });
     }

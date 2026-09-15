@@ -158,7 +158,7 @@ describe('TeamPanel', () => {
   it('renders the team row with captain, member agent tags and both row actions', async () => {
     render(<TeamPanel onNotice={() => {}} />);
     expect(await screen.findByText('t1')).toBeTruthy();
-    expect(screen.getByText('团队组队')).toBeTruthy(); // page header via PAGE_META
+    expect(screen.queryByText('团队组队')).toBeNull(); // 团队页不再显示冗余页头
     expect(screen.getAllByText('act')).toHaveLength(2); // 队长 cell（agent 名）+ member Tag
     expect(screen.getByText('review')).toBeTruthy(); // member agent Tag
     expect(screen.queryByText(/协调任务并汇总结果/)).toBeNull(); // 职责由服务端固化，不再随成员下发

@@ -4,23 +4,20 @@
 // 流在 workflow_completed/workflow_failed 后服务器即关流，这里主动 abort，
 // 避免 sse.js 把「干净关闭」当作断线去空重连。
 
-import { Button, Card, Col, Empty, Row, Space, Table, Tooltip, Typography } from 'antd';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { apiGet, apiPost } from './api.js';
-import { openStream } from './sse.js';
+import { Button, Card, Col, Drawer, Empty, Row, Space, Table, Tooltip, Typography } from 'antd';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { apiGet } from './api.js';
 import { ExecutionDetail } from './fleet/detail.jsx';
 import { StatusTag } from './ui/statusTag.jsx';
 import { MONO_VAR } from './ui/mono.js';
 import { TimeText } from './ui/timeText.jsx';
 import { tableLoading, tableRows } from './ui/tableLoading.js';
 import { err } from './notice.js';
-import { foldTodoEvents, itemsToStates, runProgress } from './todo/runProjection.js';
-import { TodoRunCanvas, TodoRunInspector } from './todo/runCanvas.jsx';
+import { TodoWorkbench } from './todo/review/workbench.jsx';
 
 const { Text } = Typography;
 
 const POLL_MS = 3000;
-const MAX_EVENTS = 200;
 /// SSE 终帧事件名（服务器随后关流）。
 export const TERMINAL_KINDS = ['workflow_completed', 'workflow_failed'];
 
@@ -58,234 +55,11 @@ export function summarizePayload(data) {
   return parts.join(' · ');
 }
 
-function EventsFeed({ workflowId, onNotice, onTerminal, onFrame }) {
-  const [events, setEvents] = useState([]);
-
-  useEffect(() => {
-    setEvents([]);
-    let stopped = false;
-    const handle = openStream({
-      path: `/api/todo/workflows/${encodeURIComponent(workflowId)}/events`,
-      after: 0,
-      onFrame: (f) => {
-        if (stopped) {
-          return;
-        }
-        if (onFrame) {
-          onFrame(f); // 帧直通：父级折叠进运行画布 / 触发静默重拉
-        }
-        const kind = (f && f.event) || 'message';
-        setEvents((list) => list.concat({
-          seq: f && f.seq,
-          kind,
-          summary: summarizePayload(f && f.data),
-        }).slice(-MAX_EVENTS));
-        if (TERMINAL_KINDS.includes(kind)) {
-          handle.abort(); // 服务器关流在即：主动停，防 sse.js 空重连
-          if (onTerminal) {
-            onTerminal();
-          }
-        }
-      },
-      onStatus: (st) => {
-        if (st === 'failed' && !stopped && onNotice) {
-          onNotice(err('TODO 事件流连接失败（已重试 5 次）'));
-        }
-      },
-    });
-    return () => {
-      stopped = true;
-      handle.abort();
-    };
-  }, [workflowId, onNotice, onTerminal, onFrame]);
-
-  if (!events.length) {
-    return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无事件" />;
-  }
-  return (
-    <div style={{ maxHeight: 260, overflow: 'auto', fontSize: 12 }}>
-      {events.map((e, i) => (
-        <div key={(e.seq === undefined || e.seq === null ? 'x' + i : e.seq) + ':' + e.kind} style={{ padding: '1px 0' }}>
-          <Text type="secondary">#{e.seq === undefined || e.seq === null ? '-' : e.seq}</Text>
-          {' '}
-          <Text strong>{e.kind}</Text>
-          {e.summary ? <span> — {e.summary}</span> : null}
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function WorkflowDetail({ workflowId, summary, onNotice, onMutated }) {
-  const [detail, setDetail] = useState(null);
-  const [executionOpen, setExecutionOpen] = useState(false);
-  /// 运行画布：选中节点 + SSE 直通的 todo_* 帧（静默重拉成功后清空，
-  /// 新快照的 items 已含这些事件投影）。
-  const [selectedTodoId, setSelectedTodoId] = useState('');
-  const [liveFrames, setLiveFrames] = useState([]);
-  /// 详情（workflow + items）自己的拉取态 —— 与 TodoRunsPanel 工作流列表的
-  /// loading 是两份数据，不能共用一个旗标。
-  const [loading, setLoading] = useState(true);
-
-  /// silent=true 走静默通道：遮罩 = `.ant-spin-container` 上 pointer-events:
-  /// none，行内按钮当场锁死，而变更后的刷新正是用户要点下一颗按钮的时刻。
-  const load = useCallback(async (silent) => {
-    if (!silent) {
-      setLoading(true);
-    }
-    try {
-      const j = await apiGet(`/api/todo/workflows/${encodeURIComponent(workflowId)}`);
-      setDetail(j || null);
-      setLiveFrames([]);
-    } catch (e) {
-      if (!silent && onNotice) {
-        onNotice(err('获取工作流详情失败: ' + (e && e.message)));
-      }
-    } finally {
-      if (!silent) {
-        setLoading(false);
-      }
-    }
-  }, [workflowId, onNotice]);
-
-  /// 终帧刷新同样静默；useCallback 稳住 EventsFeed 的 effect 依赖（否则每次轮询都重订阅）。
-  const onTerminal = useCallback(() => load(true), [load]);
-
-  /// todo_* 帧折叠进画布实时状态；rewound/suspended/resumed 会改写 items 投影
-  /// （回滚失效 / 挂起），静默重拉纠正。终帧由 onTerminal 负责，不在此重复。
-  const onFrame = useCallback((f) => {
-    const kind = (f && f.event) || '';
-    if (kind.startsWith('todo_')) {
-      setLiveFrames((fs) => fs.concat(f));
-    } else if (kind === 'workflow_rewound' || kind === 'workflow_suspended' || kind === 'workflow_resumed') {
-      load(true);
-    }
-  }, [load]);
-
-  useEffect(() => {
-    setDetail(null);
-    setSelectedTodoId('');
-    setLiveFrames([]);
-    load(false);
-  }, [load]);
-
-  const wf = (detail && detail.workflow) || null;
-  const items = (detail && detail.items) || [];
-  const spec = wf && wf.spec_json && typeof wf.spec_json === 'object' ? wf.spec_json : null;
-  const states = useMemo(() => foldTodoEvents(itemsToStates(items), liveFrames), [items, liveFrames]);
-  const progress = spec ? runProgress(spec, states) : null;
-  const selectedTodo = spec && Array.isArray(spec.todos)
-    ? spec.todos.find((t) => t && t.id === selectedTodoId)
-    : null;
-  const status = wf ? String(wf.status || '') : '';
-  const executionStatus = summary?.execution_status;
-  const actions = workflowActions(status, executionStatus);
-
-  const interrupt = async () => {
-    try {
-      await apiPost(`/api/todo/workflows/${encodeURIComponent(workflowId)}/interrupt`, {});
-      load(true);
-      if (onMutated) {
-        onMutated();
-      }
-    } catch (e) {
-      if (onNotice) {
-        onNotice(err('中断失败: ' + (e && e.message))); // 500 = 已终态
-      }
-    }
-  };
-
-  const resume = async () => {
-    try {
-      await apiPost(`/api/todo/workflows/${encodeURIComponent(workflowId)}/resume`, {});
-      load(true);
-      if (onMutated) {
-        onMutated();
-      }
-    } catch (e) {
-      if (onNotice) {
-        onNotice(err('恢复失败: ' + (e && e.message))); // 409 = 运行中
-      }
-    }
-  };
-
-  const cancel = async () => {
-    try {
-      await apiPost(`/api/executions/${encodeURIComponent(workflowId)}/commands`, { action: 'cancel', input: {} });
-      load(true);
-      if (onMutated) onMutated();
-    } catch (e) {
-      if (onNotice) onNotice(err('取消失败: ' + (e && e.message)));
-    }
-  };
-
-  const itemCols = [
-    { title: 'TODO', dataIndex: 'todo_id', key: 'todo_id', width: 120, ellipsis: true },
-    { title: '状态', dataIndex: 'status', key: 'status', width: 110,
-      render: (s) => <StatusTag status={s} /> },
-    { title: '尝试', dataIndex: 'attempt', key: 'attempt', width: 60 },
-    { title: '会话', dataIndex: 'active_session_id', key: 'sid', ellipsis: true,
-      render: (v) => (v ? <Text copyable={{ text: v }} style={{ fontSize: 12 }}>{String(v).slice(0, 14) + '…'}</Text> : '-') },
-  ];
-
-  return (
-    <div>
-      <Card size="small" title={<Tooltip title={workflowId}><span>{String(workflowId).slice(0, 18)}…</span></Tooltip>}
-        extra={(
-          <Space>
-            <Button size="small" onClick={() => setExecutionOpen(true)}>执行详情</Button>
-            <Button size="small" disabled={!wf || !actions.interrupt} onClick={interrupt}>中断（可恢复）</Button>
-            <Button size="small" disabled={!wf || !actions.resume} onClick={resume}>在原节点恢复</Button>
-            <Button size="small" danger disabled={!wf || !actions.cancel} onClick={cancel}>取消（终止）</Button>
-          </Space>
-        )}
-        style={{ marginBottom: 12 }}
-      >
-        {spec ? (
-          <div style={{ marginBottom: 6 }}>
-            <Text strong>{spec.name || workflowId}</Text>
-            {spec.objective ? <Text type="secondary"> — {spec.objective}</Text> : null}
-          </div>
-        ) : null}
-        {wf ? (
-          <Space wrap size={16}>
-            <span>执行 <ExecutionStatusTag status={executionStatus} /></span>
-            <span><StatusTag status={wf.status} /></span>
-            <Text type="secondary">父会话: {wf.parent_session_id || '-'}</Text>
-            <Text type="secondary">generation: {wf.generation === undefined ? '-' : wf.generation}</Text>
-          </Space>
-        ) : <Text type="secondary">加载中…</Text>}
-      </Card>
-      <Card size="small" title="调度画布" style={{ marginBottom: 12 }}
-        extra={progress ? (
-          <Text type="secondary">
-            {progress.passed}/{progress.total} 已通过
-            {progress.active ? ` · ${progress.active} 执行中` : ''}
-            {progress.failed ? ` · ${progress.failed} 失败` : ''}
-            {progress.pending ? ` · ${progress.pending} 待执行` : ''}
-          </Text>
-        ) : null}
-      >
-        <TodoRunCanvas spec={spec} states={states} selectedId={selectedTodoId} onSelect={setSelectedTodoId} />
-        {selectedTodo ? <TodoRunInspector todo={selectedTodo} state={states.get(selectedTodoId)} /> : null}
-      </Card>
-      <Row gutter={12}>
-        <Col span={15}>
-          <Card size="small" title="TODO 项" style={{ marginBottom: 12 }}>
-            <Table className="oc-todo-items" rowKey={(r) => (r && r.todo_id) || ''} size="small" columns={itemCols}
-              dataSource={tableRows(loading, items)} pagination={false} loading={tableLoading(loading)}
-              scroll={{ x: 'max-content' }} />
-          </Card>
-        </Col>
-        <Col span={9}>
-          <Card size="small" title="事件流">
-            <EventsFeed workflowId={workflowId} onNotice={onNotice} onTerminal={onTerminal} onFrame={onFrame} />
-          </Card>
-        </Col>
-      </Row>
-      {executionOpen && <ExecutionDetail id={workflowId} summary={{ id: workflowId, kind: 'todos', node_id: summary?.node_id, status: summary?.execution_status || summary?.status, created_at: summary?.execution_created_at || summary?.created_at }} onClose={() => setExecutionOpen(false)} onNotice={onNotice} />}
-    </div>
-  );
+function WorkflowDetail({workflowId,summary,onNotice,onMutated}) {
+  const [executionOpen,setExecutionOpen]=useState(false);
+  return <><Button style={{marginBottom:12}} onClick={()=>setExecutionOpen(true)}>执行详情</Button>
+    <TodoWorkbench key={workflowId} id={workflowId} onMutated={onMutated}/>
+    {executionOpen&&<ExecutionDetail id={workflowId} summary={{...summary,id:workflowId,kind:'todos'}} onClose={()=>setExecutionOpen(false)} onNotice={onNotice}/>}</>;
 }
 
 export function TodoRunsPanel({ onNotice, focusWorkflowId, onFocusConsumed }) {
@@ -308,7 +82,7 @@ export function TodoRunsPanel({ onNotice, focusWorkflowId, onFocusConsumed }) {
       setRows(list);
       rowsRef.current = list;
     } catch (e) {
-      if (!silent && alive.current && onNotice) {
+      if (alive.current && onNotice) {
         onNotice(err('获取工作流列表失败: ' + (e && e.message)));
       }
     } finally {
@@ -323,7 +97,7 @@ export function TodoRunsPanel({ onNotice, focusWorkflowId, onFocusConsumed }) {
     load(false);
     // 3s 轮询，但只在仍有 running 工作流时真正拉取。
     const timer = setInterval(() => {
-      if (rowsRef.current.some((r) => r && r.status === 'running')) {
+      if (rowsRef.current.length) {
         load(true);
       }
     }, POLL_MS);
@@ -354,7 +128,7 @@ export function TodoRunsPanel({ onNotice, focusWorkflowId, onFocusConsumed }) {
 
   return (
     <Row gutter={[16, 16]}>
-      <Col xs={24} lg={10}>
+      <Col span={24}>
         <Card size="small" title="工作流" extra={<Button size="small" onClick={() => load(false)}>刷新</Button>}>
           <Table
             className="oc-todo-runs"
@@ -370,11 +144,9 @@ export function TodoRunsPanel({ onNotice, focusWorkflowId, onFocusConsumed }) {
           />
         </Card>
       </Col>
-      <Col xs={24} lg={14}>
-        {selectedId
-          ? <WorkflowDetail workflowId={selectedId} summary={rows.find((row) => row.id === selectedId)} onNotice={onNotice} onMutated={() => load(true)} />
-          : <Card size="small"><Empty description="点击左侧工作流查看详情" /></Card>}
-      </Col>
+      <Drawer open={!!selectedId} title="TODO 运行 Review" placement="right" size="100%" onClose={()=>setSelectedId('')} destroyOnHidden>
+        {selectedId&&<WorkflowDetail workflowId={selectedId} summary={rows.find(row=>row.id===selectedId)} onNotice={onNotice} onMutated={()=>load(true)}/>}
+      </Drawer>
     </Row>
   );
 }

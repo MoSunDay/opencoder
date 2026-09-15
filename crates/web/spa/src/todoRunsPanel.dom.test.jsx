@@ -40,7 +40,7 @@ import { TodoRunsPanel } from './todoRunsPanel.jsx';
 /// 面板内部的轮询间隔（未导出，这里与源码保持一致）。
 const POLL_MS = 3000;
 const LIST_PATH = '/api/todo/workflows?limit=50';
-const DETAIL_PATH = '/api/todo/workflows/todos-1';
+const DETAIL_PATH = '/api/todo/workflows/todos-1/review?section=overview';
 const WORKFLOWS = {
   workflows: [{
     id: 'todos-1', status: 'running', execution_status: 'running',
@@ -48,21 +48,22 @@ const WORKFLOWS = {
   }],
 };
 const DETAIL = {
-  workflow: { id: 'todos-1', status: 'running' },
-  items: [{ todo_id: 't1', status: 'running', attempt: 1, active_session_id: 'ses-1' }],
+  workflow: {id:'todos-1',status:'running',generation:1,world_epoch:0},
+  execution_status:'running',total:1,head_seq:1,controls:[],
+  nodes:[{id:'t1',title:'Task one',depends_on:[],status:'running',attempt:1,active_session_id:'ses-1'}],
 };
 
 /// 工作流表是否被遮罩（作用域化：只认这张表的 wrapper 子树）。
 const outerMasked = () => !!document.querySelector('.oc-todo-runs .ant-spin-spinning');
 /// TODO 项表是否被遮罩。
-const innerMasked = () => !!document.querySelector('.oc-todo-items .ant-spin-spinning');
+const innerMasked = () => !!document.querySelector('.todo-workbench .ant-spin-spinning');
 
 /// 「暂无数据」占位：emptyText 为 null 时 rc-table 仍留一条空的
 /// `.ant-table-placeholder` tr，真正对用户撒谎的是里面的 `.ant-empty` 组件。
 const emptyLies = (scope) => !!document.querySelector(`${scope} .ant-empty`);
 
 /// 行文本按表作用域化取：详情卡标题也会渲染 `todos-1…`，全局 getByText 会撞车。
-const rowText = (scope) => Array.from(document.querySelectorAll(`${scope} tbody tr.ant-table-row`))
+const rowText = (scope) => scope === '.oc-todo-items' ? document.querySelector('.todo-task-nav')?.textContent || '' : Array.from(document.querySelectorAll(`${scope} tbody tr.ant-table-row`))
   .map((r) => r.textContent || '').join('|');
 
 /// antd 6 Button 给两字中文插空格（「刷 新」），按 role + 去空白匹配。
@@ -162,12 +163,12 @@ describe('TodoRunsPanel 表格 loading 语义', () => {
     const row = clickFirstRow('.oc-todo-runs');
     await flush();
 
-    expect(apiGetMock).toHaveBeenCalledWith(DETAIL_PATH);
+    expect(apiGetMock).toHaveBeenCalledWith(DETAIL_PATH,expect.objectContaining({signal:expect.anything()}));
     expect(row.className).toContain('oc-row-selected');
-    expect(document.querySelector('.oc-todo-items')).toBeTruthy();
+    expect(document.querySelector('.todo-workbench')).toBeTruthy();
     // 详情不知道就是不知道：空态占位不得抢在数据前面出现。
     expect(emptyLies('.oc-todo-items')).toBe(false);
-    expect(innerMasked()).toBe(false);
+    expect(innerMasked()).toBe(true);
     // 越过 SPIN_DELAY_MS：首拉该遮就遮（详情里此刻还没有任何可点的东西）。
     // 这条 true 同时证明 `.oc-todo-items` 作用域选择器是活的。
     await advance(SPIN_DELAY_MS + 50);
@@ -177,7 +178,7 @@ describe('TodoRunsPanel 表格 loading 语义', () => {
     await act(async () => { detailReq.resolve(DETAIL); });
     await flush();
     expect(rowText('.oc-todo-items')).toContain('t1');
-    expect(document.querySelectorAll('.oc-todo-items tbody tr.ant-table-row')).toHaveLength(1);
+    expect(document.querySelectorAll('.todo-nav-node')).toHaveLength(1);
     expect(innerMasked()).toBe(false);
   });
 
@@ -198,7 +199,7 @@ describe('TodoRunsPanel 表格 loading 语义', () => {
     await flush();
     expect(apiPostMock).toHaveBeenCalledWith('/api/todo/workflows/todos-1/interrupt', {});
     expect(apiGetMock).toHaveBeenCalledWith(LIST_PATH);
-    expect(apiGetMock).toHaveBeenCalledWith(DETAIL_PATH);
+    expect(apiGetMock).toHaveBeenCalledWith(DETAIL_PATH,expect.objectContaining({signal:expect.anything()}));
 
     await advance(SPIN_DELAY_MS * 4);
     await flush();

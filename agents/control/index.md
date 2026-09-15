@@ -1,4 +1,4 @@
-Commit: 8a50a393cbe615f5d6453ff4290da0bf03546881
+Commit: 1ac64fe8b81a2c7c144c72b717a8031ab18f2589
 
 # control 模块
 
@@ -6,9 +6,9 @@ Commit: 8a50a393cbe615f5d6453ff4290da0bf03546881
 
 ## 关键路径
 
-- `crates/control/src/bootstrap.rs` — 仅开 control.db + definitions.db；BrainClient；启动 Agent 与 DAG WASM 两路只读 NFS 导出
-- `crates/control/src/transport/hub.rs` — Hub：协议 v9 校验；连接/RPC/预留仅内存
-- `crates/control/src/api/executions/mod.rs` — `submit_inner` 提交选点：placement 锁内解析定义并预留；按 ID 路由明细/控制/SSE/产物
+- `crates/control/src/bootstrap.rs` — 仅开 control.db + definitions.db；BrainClient；兼容模式管理 NFS，版本模式转发到独立资源服务
+- `crates/control/src/transport/hub.rs` — Hub：协议 v9 校验、连接与在途 RPC；按 Host 交接编号隔离旧报告，完整索引同步后标记就绪
+- `crates/control/src/api/executions/mod.rs` — 持久请求去重与归属路由；`submit.rs` 以跨进程锁保护选点/冻结 assignment，事务保存回执和派发记录，`release/outbox.rs` 恢复未确认派发
 - `crates/control/src/api/brain_runs/` — 能力/不可变计划/运行 API；按根串行授权派发与控制，资源占用和来源回执确认。
 - `crates/control/src/api/catalog.rs` — 节点列表、注册删除、维护，以及 teams/dag_defs/resolve 定义解析
 - `crates/control/src/api/compat/` — 旧 Chat/DAG/TODO/Project 兼容路由
@@ -33,6 +33,13 @@ Commit: 8a50a393cbe615f5d6453ff4290da0bf03546881
 - team 定义成员=agent 名（唯一、captain ∈ members）；resolve 时经 `GET /api/brain/agents` 同源聚合把成员能力 summary 固化进 pinned definition，库存定义不落 capabilities；成员名/captain 在 validate 时就地 trim 归一（与 bind 侧对称，padded 提交不再固化空快照）。
 - 认证开启时 seed token 恒等 admin；换启动 token 重启会把表内 `admin` 行 digest 重指新 token（轮换即吊销旧 seed 凭证）。非 admin 仅读 + operator 提交/命令（operator 为宿主机直跑通道）；无 Identity 视为 admin（本地模式）。
 - 节点删除只移除 FleetStore 的 `fleet_nodes` 注册行；在线连接返回 409，离线注册删除后执行索引和节点本地任务数据仍由各自生命周期管理。
+
+## 多版本协议
+
+- `release/` 分离本实例退役与管理员冻结；响应跟踪覆盖完整 body，保留长度和 trailers。SSE 发送最后游标与重连通知，普通请求无发布强杀期限。
+- Brain、Playbook、Project 长操作使用本机文件锁，数据库事务不跨网络或模型调用。相同 ID/内容返回原回执，异内容返回冲突。
+- Project 首次派发回执按 run_id 区分；新尝试仅可替换明确拒绝的派发，执行归属保持原节点，未知结果禁止重派。
+- 发布状态、资源管理由 `release/proxy.rs` 连接 Host/独立 NFS；整机容量属于 Host 持久账本。
 
 ## 相关
 

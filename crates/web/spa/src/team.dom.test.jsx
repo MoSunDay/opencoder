@@ -235,7 +235,7 @@ describe('TopicsPanel', () => {
     render(<TopicsPanel onNotice={() => {}} />);
     expect(await screen.findByText('ex-running')).toBeTruthy();
     expect(screen.getByText('ex-error')).toBeTruthy();
-    expect(screen.getByText('舰队全部执行记录与团队过滤')).toBeTruthy(); // page header via PAGE_META
+    expect(screen.queryByText('舰队全部执行记录与团队过滤')).toBeNull(); // 全部执行页不再显示冗余页头
     expect(screen.getAllByText('Agent')).toHaveLength(1); // 类型 cell（启动表单已收进 Modal，默认不渲染）
     expect(screen.getByText('维护执行')).toBeTruthy(); // maintenance 类型列显示中文标签
     expect(screen.getByText('Team')).toBeTruthy();
@@ -243,7 +243,8 @@ describe('TopicsPanel', () => {
     expect(screen.getByText('失败')).toBeTruthy();
     expect(screen.getAllByText('在线')).toHaveLength(2); // n1 node state tag（agent + maintenance 两行同节点）
     expect(screen.getByText('离线')).toBeTruthy(); // n2 node state tag
-    expect(screen.getByText('启动执行')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '启动执行' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '加载更早的执行' })).toBeNull();
   });
 
   it('filters the list by kind through the 执行类型筛选 select', async () => {

@@ -113,10 +113,11 @@ async function main() {
   await page.locator('.fleet-nav-category').getByText('Agent', { exact: true }).click();
   await page.getByRole('menuitem', { name: '全部执行' }).click();
   await page.locator('.ant-empty').waitFor();
-  await page.getByRole('button', { name: '启动执行' }).click(); // 工具栏按钮：打开启动执行 Modal
-  await page.getByPlaceholder('act / 定义名称 / 任务 ID').fill('act');
-  await page.getByLabel('任务要求').fill('run browser acceptance');
-  await page.getByRole('dialog').getByRole('button', { name: '启动执行' }).click();
+  const browserNode = (await api('GET', '/api/nodes')).nodes.find((node) => node.name === 'node-a');
+  await api('POST', '/api/executions', { id: 'agent-browser', kind: 'agent', target: 'act', node_id: browserNode.id, input: { prompt: 'run browser acceptance' } });
+  await page.getByRole('button', { name: /^刷\s*新$/ }).click();
+  await page.getByRole('button', { name: 'agent-browser', exact: true }).waitFor();
+  await page.getByRole('button', { name: 'agent-browser', exact: true }).click();
   await page.getByText('browser node-owned answer', { exact: true }).waitFor({ timeout: 30000 });
   await page.screenshot({ path: path.join(root, 'agent-detail.png') });
   const indexes = (await api('GET', '/api/executions')).executions;

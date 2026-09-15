@@ -1,4 +1,4 @@
-Commit: 8a50a393cbe615f5d6453ff4290da0bf03546881
+Commit: 1ac64fe8b81a2c7c144c72b717a8031ab18f2589
 
 # core 模块
 
@@ -34,6 +34,11 @@ Provider 配置在 `src/config/provider.rs` 声明 `chat_completions`（默认�
 ## 边界
 - 域文件项目层存在即整体遮蔽外层，不逐键合并、不查 XDG。
 - agent 解析优先当前执行固定的资源根（agent::scope），未设置走原解析。
+
+## 发布共享契约
+
+- `src/fleet/release.rs` — PlatformConfig、交接协议与数据格式兼容范围；兼容性随构建信息进入发布清单。
+- `src/skill/runtime.rs` — Runtime 私有全局技能快照、原子完成标记和固定发现根；新版本播种技能不会修改旧 Runtime 已固定内容。
 
 ## 相关
 - [agents/session](../session/index.md) — Config 驱动压缩与模型选择。

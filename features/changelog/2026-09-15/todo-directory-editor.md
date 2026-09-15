@@ -1,4 +1,4 @@
-Commit: 8a50a393cbe615f5d6453ff4290da0bf03546881
+Commit: 1ac64fe8b81a2c7c144c72b717a8031ab18f2589
 
 # TODO 目录编辑与文件校验
 
@@ -22,8 +22,28 @@ Commit: 8a50a393cbe615f5d6453ff4290da0bf03546881
 
 ## 联合发布验证
 
-- 代码候选 `d1779dd844bc5f61496cb3be5978bc6217b71cb4` 合并 TODO 目录、平滑发布和线上 `5bf6f621` 的全部 DAG 修复。发布分支为 `release/todo-directory-20260915`。
-- 全量 Rust 回归结合失败项及新增用例复验，共覆盖 5,228 项通过；6 项既有特权手工用例保留忽略。原全量日志 `/tmp/opencoder-todo-delivery-workspace-regression.log`，修复后的 205 项复验日志 `/tmp/opencoder-todo-delivery-regression-fixes.log`。
-- `cargo clippy --workspace --all-targets -- -D warnings` 零警告；前端全量 96 文件、683 项通过；发布工具及备份安装测试 33 项、真实模型验收脚本测试 3 项通过。
-- 成套优化发布包的四个二进制提交号、协议与静态产物摘要一致。浏览器 TODO 与 DAG 验收通过；真实磁盘的三版本切换、带任务回滚、Shell/OCI 进程保持、SSE 连续及独立 NFS 验收通过，证据 `/var/tmp/opencoder-smooth-h7quack9/result.json`。
-- 生产切换尚未进行：已准备候选包与迁移收据，等待已有生产发布锁持有者完成其流程；在线验证结果应在切换后补录。
+- 生产版本 `320dbbf3a5b8e843c5f2650e09059a7d8cf41b70` 已生效，合并 TODO 目录、平滑发布和线上 `5bf6f621` 的 DAG 修复。后续源码提交补充发布工具的本机挂载检查与首次迁移处理，业务二进制源码一致。
+- Rust 全量回归 5,228 项通过、0 失败，6 项既有特权手工用例保留忽略；最终完整日志 `/tmp/opencoder-todo-delivery-workspace-final.log`。全目标 Clippy 零警告，workspace 构建通过。
+- 前端全量 96 文件、683 项通过；发布工具 16 项、安装备份 19 项、真实模型验收夹具 3 项通过。四个优化二进制的提交号、协议和静态产物摘要一致。
+- 隔离的真实磁盘演练覆盖三版本切换、带任务回滚、Shell/OCI 进程保持、SSE 连续及独立 NFS，证据 `/var/tmp/opencoder-smooth-h7quack9/result.json`。
+
+## 生产验收
+
+- 线上 DAG 列表不显示类型和步骤数量；编辑器只提供 Agent、Wasm；已删除 Runner API，Runner 定义请求返回 400。
+- 实际浏览器完成目录创建、JSON/Markdown 编辑与预览、保存新版本、旧版本保持不变。JSON 语法错误和空 Markdown 均弹窗显示路径、行列和原因，禁止创建或发布无效版本。
+- 真实模型执行两个依赖 TODO，核验 Runtime 加载冻结目录，第二个任务获得首个任务的已验收结果。只读 Review 和指定任务重跑通过，上游文件与会话不变，目标任务新增会话且保留历史。
+- 发布期间 33 次连续提交零失败；旧 Runtime 与工具进程保持，新任务进入新版。独立进程完成完整 900 秒观察，173 个样本全部通过。首次观察进程收到 SIGTERM 后保留了部分记录，最终通过基于重新完成的完整窗口。
+- 发布状态为 complete；Server、Host、Runtime、Nginx 与资源服务均正常，检查时无异常重启和错误日志。原 Node ID、凭证及并发上限 20 保留；一致性备份已完成。
+- 结果与截图：`/var/lib/opencoder-platform/acceptance/todo-directory-20260915/release.json`。跨版本与观察证据：`/var/tmp/release-live-68cd9f401086e095/result.json`。详见 [平滑发布记录](smooth-release.md#生产迁移与验收)。
+
+## 测试覆盖
+
+| 功能 | 测试名 | 文件 |
+| --- | --- | --- |
+| 完整目录往返与 Markdown 保真 | `directory_round_trip_preserves_all_spec_fields_and_markdown_bytes` | `crates/todos/tests/directory.rs` |
+| 逐文件校验与错误位置 | `validates_every_required_file_and_returns_file_locations` | 同上 |
+| 不可变版本与旧模板读取 | `atomic_versions_and_legacy_import_keep_the_source_unchanged` | 同上 |
+| 无效 JSON 保留草稿、弹窗定位、阻止保存 | `preserves invalid JSON while switching files and blocks save with a locating modal` | `crates/web/spa/src/todoEditor.dom.test.jsx` |
+| Markdown 源码与安全预览 | `Markdown supports source and sanitized preview without changing saved text` | 同上 |
+| 只读历史选择与实时刷新 | `loads older attempts and retains the selected context when live history refreshes` | `crates/web/spa/src/todo/review/files/workspace.dom.test.jsx` |
+| 重跑回执丢失后幂等恢复 | `keeps one request identity across a lost response and closes only after durable queuing` | `crates/web/spa/src/todo/review/rerun.dom.test.jsx` |

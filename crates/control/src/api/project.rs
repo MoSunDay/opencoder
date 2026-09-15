@@ -132,7 +132,10 @@ async fn start(state: Arc<AppState>, todo: String, action: &str, mut input: Valu
             .await;
             if reply.status == 404
                 && reply.body["error"] == "execution not found"
-                && index.status == ExecutionStatus::Pending
+                && matches!(
+                    index.status,
+                    ExecutionStatus::Pending | ExecutionStatus::Error
+                )
             {
                 submit_start(state, todo, action, input).await
             } else {

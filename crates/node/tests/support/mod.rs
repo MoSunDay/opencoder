@@ -59,6 +59,9 @@ pub struct Inner {
     /// early; once the instant passes (or it was never set) the beat is
     /// served normally.
     pub hang_heartbeats_until: Option<Instant>,
+    /// Explicit release for recovery tests; client construction cannot consume
+    /// the simulated outage before the first heartbeat reaches the server.
+    pub heartbeat_gate: Option<Arc<tokio::sync::Semaphore>>,
 }
 
 pub struct Stub {
@@ -135,6 +138,12 @@ impl Stub {
     pub fn hang_heartbeats_for(&self, d: Duration) {
         self.lock().hang_heartbeats_until = Some(Instant::now() + d);
     }
+
+    pub fn hold_heartbeats(&self) -> Arc<tokio::sync::Semaphore> {
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        self.lock().heartbeat_gate = Some(gate.clone());
+        gate
+    }
 }
 
 /// Tiny unique-suffix helper (avoids an extra dev-only dependency).
@@ -165,6 +174,11 @@ async fn heartbeat(State(st): State<Arc<Stub>>, Path(_id): Path<String>) -> Resp
     // neither counts nor consumes cancels/controls ahead of its time. The
     // client usually times out meanwhile; the late response is discarded by
     // the transport, which is exactly the slow-server behavior under test.
+    let gate = st.lock().heartbeat_gate.clone();
+    let _permit = match gate {
+        Some(gate) => Some(gate.acquire_owned().await.unwrap()),
+        None => None,
+    };
     let hang_until = st.lock().hang_heartbeats_until;
     if let Some(until) = hang_until {
         let now = Instant::now();

@@ -14,6 +14,10 @@ pub async fn deliver(
     action: String,
     input: Value,
 ) -> Result<()> {
+    let _process_lock = state
+        .fleet
+        .request_lock("brain-control", &execution.id)
+        .await?;
     let index = state
         .fleet
         .index(&execution.id)
@@ -74,7 +78,9 @@ pub async fn deliver(
             }
             let reply = match receipt.kind {
                 ActionKind::Execute => {
-                    let request: CreateExecution = serde_json::from_value(receipt.request.clone())?;
+                    let mut request: CreateExecution =
+                        serde_json::from_value(receipt.request.clone())?;
+                    request.node_id = Some(node.clone());
                     let resources: Vec<ResourceUse> =
                         serde_json::from_value(request.input["_brain"]["resources"].clone())?;
                     if !state

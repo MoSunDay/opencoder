@@ -1,5 +1,6 @@
 #[cfg(feature = "runtime")]
 mod batch;
+pub mod directory;
 pub mod domain;
 #[cfg(feature = "runtime")]
 pub mod execution;

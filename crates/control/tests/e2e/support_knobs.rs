@@ -39,17 +39,27 @@ async fn create_reply_override_bypasses_the_journal() {
     assert_eq!(body["error"], json!("node refuses"));
     assert!(h.node.journal_ids().is_empty(), "override must not journal");
 
-    // Clearing restores real journaling + idempotent acceptance.
+    // A definitive rejection remains queryable and replays unchanged.
     h.node.clear_create_reply();
+    let (status, receipt) = h
+        .req(
+            Method::POST,
+            "/api/executions",
+            Some(json!({"id":"agent-knob-1","kind":"agent"})),
+        )
+        .await;
+    assert_eq!(status, 409);
+    assert_eq!(receipt, body);
+    // Clearing restores real journaling for a new request.
     let (status, body) = h
         .req(
             Method::POST,
             "/api/executions",
-            Some(json!({"id": "agent-knob-1", "kind": "agent"})),
+            Some(json!({"id": "agent-knob-new", "kind": "agent"})),
         )
         .await;
     assert_eq!(status, 202, "{body}");
-    assert_eq!(h.node.journal_ids(), vec!["agent-knob-1".to_string()]);
+    assert_eq!(h.node.journal_ids(), vec!["agent-knob-new".to_string()]);
 }
 
 #[tokio::test]

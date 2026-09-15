@@ -17,6 +17,7 @@ tokio.workspace = true
 async-trait.workspace = true
 libsql.workspace = true
 ulid.workspace = true
+fs2 = "0.4"
 
 # Optional project-data backends. StarRocks speaks the MySQL wire protocol,
 # so both map to the same sqlx mysql driver; the feature choice only records

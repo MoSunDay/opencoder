@@ -1,4 +1,4 @@
-Commit: e50ffc433bca866fd17bd571a74f1bdf17705dea
+Commit: 8a50a393cbe615f5d6453ff4290da0bf03546881
 
 # core 模块
 
@@ -16,7 +16,7 @@ Commit: e50ffc433bca866fd17bd571a74f1bdf17705dea
 - `src/data_dir.rs` — `data_dir_for(workdir)` per-workdir 数据目录唯一解析。
 - `src/harness/mod.rs` — `Harness::{Opencode,Codex}`、`pin_settings`。
 - `src/harness/settings.rs` — `CodexSettings` 校验与独立 argv。
-- `src/harness/runtime.rs` — `RunnerSettings` 带 revision 命名 Codex profile。
+- `src/harness/runtime.rs` — `RuntimeSettings` 保存带 revision 的命名 Codex profile；未知历史字段仅以不透明 archived 数据往返，不参与执行。
 - `src/harness/scope.rs` — task-local Codex 设置/运行态，供重载 Config 的驱动读取。
 - `src/agent/` — meta/resource/compose：引用卡 + 共享池；scope 任务局部资源根。
 - `src/skill.rs` — 多根发现 first-wins 遮蔽；缓存 `src/skill/skill_cache.rs`。

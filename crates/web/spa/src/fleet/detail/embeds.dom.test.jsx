@@ -1,16 +1,10 @@
 // @vitest-environment jsdom
-// embeds.dom.test.jsx — 执行明细内嵌运行视图的 DOM 守卫：
-// - brain：BrainRunEmbed 复用工作台 BrainRunBody（步骤列表 + PlanCanvas +
-//   Inspector），但绝不写 brain_run URL 参数（那是 BrainRunView 的职责，
-//   明细抽屉的位置语义由抽屉自身承载）。
-// - todos：TodoRunEmbed 拉分体 store 的 /api/todo/workflows/:id 渲染调度画布；
-//   拉取失败（分体部署下 node 侧 store 不可见）时静默返回 null，明细里
-//   workloads.jsx 的 TodoDetail 列表仍在下方回退。
+// Embedded execution views retain directory review and report unavailable data.
 import '../../test/setup-dom.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { BrainRunEmbed } from './brainRun.jsx';
-import { TodoRunEmbed } from './todoCanvas.jsx';
+import { TodoRunEmbed } from './todoFiles.jsx';
 import { ExecutionView } from '../detail.jsx';
 import { apiGet } from '../../api.js';
 
@@ -21,6 +15,8 @@ vi.mock('../../sse.js', () => ({ openStream: vi.fn(() => ({ abort() {} })) }));
 // undefined，事件流 effect 的 cleanup 就在 handle.abort() 上炸（同
 // todoRunsPanel.dom.test.jsx 的做法）；这里用 clearAllMocks 只清调用记录，
 // apiGet 的实现由每个测试自行 mockImplementation 重挂。
+Range.prototype.getClientRects=()=>[];
+Range.prototype.getBoundingClientRect=()=>({left:0,right:0,top:0,bottom:0});
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
 describe('执行明细内嵌运行视图', () => {
@@ -43,8 +39,9 @@ describe('执行明细内嵌运行视图', () => {
     expect(window.location.search).toBe('');
   });
 
-  it('todos 明细内嵌调度画布，点击节点联动 Inspector', async () => {
+  it('todos 明细展示只读定义和任务过程目录', async () => {
     apiGet.mockImplementation(async (path) => {
+      if (path.includes('section=files')) return {files:{'objective.md':'审核任务'}};
       if (path.startsWith('/api/todo/workflows/todos-1/review?section=node')) return {todo:{title:'实现',agent:'act',acceptance:{criteria:'通过'}},state:{status:'pending',attempt:0}};
       if (path.includes('section=history')) return {events:[],more:false};
       if (path.startsWith('/api/todo/workflows/todos-1/review')) {
@@ -53,16 +50,12 @@ describe('执行明细内嵌运行视图', () => {
       return {};
     });
     render(<TodoRunEmbed id="todos-1" />);
-    await waitFor(() => expect(document.querySelector('.oc-todo-run-node[data-todo-id="t1"]')).toBeTruthy());
-    expect(document.querySelector('.oc-todo-run-node[data-todo-id="t2"]')).toBeTruthy();
-    expect(screen.getByText(/1\/2 已通过/)).toBeTruthy(); // 进度统计来自 items 投影
-    fireEvent.click(document.querySelector('.oc-todo-run-node[data-todo-id="t2"]'));
-    // 画布节点也渲染同名标题，Inspector 断言按容器作用域取。
-    await waitFor(() => {
-      const inspector = document.querySelector('.todo-review-inspector');
-      expect(inspector).toBeTruthy();
-      expect(inspector.textContent).toContain('实现');
-    });
+    await waitFor(() => expect(document.querySelector('[data-file-path="process/todos/t1/status.json"]')).toBeTruthy());
+    expect(screen.getByText(/1\/2 已通过/)).toBeTruthy();
+    fireEvent.click(document.querySelector('[data-file-path="process/todos/t2/status.json"]'));
+    await waitFor(() => expect(screen.getByLabelText('文件内容 process/todos/t2/status.json').textContent).toContain('pending'));
+    expect(screen.getByLabelText('文件内容 process/todos/t2/status.json').getAttribute('contenteditable')).toBe('false');
+
   });
 
   it('todos Review 拉取失败明确报告错误并保留执行信息', async () => {
@@ -92,6 +85,8 @@ describe('执行明细内嵌运行视图', () => {
           request: { kind: 'todos', target: 'tpl/v1', input: {} },
           workflow: { workflow: { status: 'running' }, items: [] } };
       }
+      if (path.includes('section=files')) return {files:{'objective.md':'审核任务'}};
+      if (path.includes('section=history')) return {events:[],next_before_seq:null};
       if (path.startsWith('/api/todo/workflows/todos-insp/review')) {
         return {workflow:{id:'todos-insp',status:'running',generation:1,world_epoch:0},execution_status:'running',head_seq:1,total:1,nodes:[{id:'t1',title:'内联步骤',agent:'act',depends_on:[],status:'pending',attempt:0}]};
       }
@@ -104,7 +99,7 @@ describe('执行明细内嵌运行视图', () => {
     inline.unmount();
 
     const full = render(<ExecutionView executionRef={{ id: 'todos-insp', kind: 'todos' }} onNotice={vi.fn()} />);
-    await waitFor(()=>expect(full.container.querySelector('.oc-todo-run-node[data-todo-id="t1"]')).toBeTruthy()); // full（明细抽屉）模式挂画布
-    expect(full.container.querySelector('.oc-todo-run-node[data-todo-id="t1"]')).toBeTruthy();
+    await waitFor(()=>expect(full.container.querySelector('[data-file-path="process/todos/t1/status.json"]')).toBeTruthy()); // full（明细抽屉）模式挂画布
+    expect(full.container.querySelector('[data-file-path="process/todos/t1/status.json"]')).toBeTruthy();
   });
 });

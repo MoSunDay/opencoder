@@ -1,4 +1,4 @@
-Commit: a8ccb79b028fc53a3bb50df54ba1fec157693ed4
+Commit: 8a50a393cbe615f5d6453ff4290da0bf03546881
 
 # local 模块
 
@@ -11,7 +11,7 @@ Commit: a8ccb79b028fc53a3bb50df54ba1fec157693ed4
 - `src/agent_override.rs` — `apply_agent_override`/`reapply_resume_agent` 折入 --agent
 - `src/model_override.rs`、`src/run_image.rs` — --model / --image 覆盖
 - `src/daemon.rs` — `daemon` 子命令只打印 `migration_hint` 指向 opencoder-server/agent 并退出 0
-- `src/todos_cmd.rs` — todos 子命令（validate/run/resume/show/events/list/interrupt）
+- `src/todos_cmd.rs` — todos 子命令（validate/run/resume/show/events/list/interrupt）；validate/run 经 `todos::directory::load_bound` 读取目录并校验文件及环境绑定，兼容旧 spec 文件。
 - `src/ts/` — tmux 会话：`actions.rs` 逐参数转发新 TUI 进程；`registry.rs` 中央注册表 `<data_root>/ts.db`
 - `src/ts/registry.rs` — 迁移扫描会话时使用 Store 的活动时间与 ID 游标，覆盖超过单页上限及 updated_at 早于 created_at 的导入记录。
 - `src/main.rs`（仓库根）— 二进制 `opencoder` 入口：supervisor 分支先于 clap 解析，Linux `configure_supervisor_binary`

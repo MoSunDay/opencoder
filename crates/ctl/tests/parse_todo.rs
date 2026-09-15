@@ -211,10 +211,10 @@ fn todo_template_versions() {
             r#"{"todos":[]}"#,
         ]))
         .unwrap(),
-        Method::PUT,
-        "/api/todo/templates/nightly/v2/context.json",
+        Method::POST,
+        "/api/todo/templates/nightly/new-version",
         &[],
-        Some(json!({"todos": []})),
+        Some(json!({"source_version":"v2","expected_current":"v2","spec":{"todos": []}})),
     );
     assert_plan(
         &todo_plan(&todo(&["templates", "get-binding", "nightly", "v2"])).unwrap(),
@@ -233,10 +233,10 @@ fn todo_template_versions() {
             r#"{"env":"gpu"}"#,
         ]))
         .unwrap(),
-        Method::PUT,
-        "/api/todo/templates/nightly/v2/env.json",
+        Method::POST,
+        "/api/todo/templates/nightly/new-version",
         &[],
-        Some(json!({"env": "gpu"})),
+        Some(json!({"source_version":"v2","expected_current":"v2","binding":{"env": "gpu"}})),
     );
     assert_plan(
         &todo_plan(&todo(&["templates", "delete-version", "nightly", "v2"])).unwrap(),

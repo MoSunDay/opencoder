@@ -6,10 +6,7 @@ use opencoder_store::{fleet::FleetStore, LibsqlStore, Store};
 use std::{
     path::{Path, PathBuf},
     sync::Arc,
-    time::Duration,
 };
-
-const SERVER_SHUTDOWN_GRACE: Duration = Duration::from_secs(30);
 
 /// Resolves the two provider routes at the point of use. A server can manage
 /// nodes without LLM credentials; a brain call reports the actual config error.
@@ -92,7 +89,9 @@ pub async fn new_state_with_projects(
             hub.reserve(&index).await;
         }
     }
+    let lifecycle = Arc::new(crate::release::Lifecycle::default());
     Ok(Arc::new(AppState {
+        lifecycle,
         workdir,
         store,
         projects,
@@ -100,7 +99,6 @@ pub async fn new_state_with_projects(
         hub,
         brain,
         brain_gate: Default::default(),
-        playbook_gate: Default::default(),
         admission,
         placement: tokio::sync::Mutex::new(()),
     }))
@@ -161,11 +159,49 @@ pub async fn serve(
     data: Option<PathBuf>,
     token: String,
 ) -> Result<()> {
+    serve_release(host, port, web, workdir, data, token, None).await
+}
+
+pub async fn serve_release(
+    host: String,
+    port: u16,
+    web: bool,
+    workdir: PathBuf,
+    data: Option<PathBuf>,
+    token: String,
+    platform: Option<opencoder_core::fleet::release::PlatformConfig>,
+) -> Result<()> {
     let data = resolve_data_dir(&workdir, data)?;
     let state = new_state(workdir.clone(), data, None).await?;
+    if let Some(platform) = platform {
+        state
+            .lifecycle
+            .platform
+            .set(platform)
+            .map_err(|_| anyhow::anyhow!("release configuration supplied twice"))?;
+    }
     seed_admin(&state.store, &token).await?;
     let config = Config::load(&workdir)?;
-    autostart_nfs_exports(&workdir, &config).await?;
+    if let Some(platform) = state.lifecycle.platform.get() {
+        let url = reqwest::Url::parse(&platform.resource_service)?;
+        anyhow::ensure!(
+            url.scheme() == "http" && url.host_str() == Some("127.0.0.1"),
+            "resource service must use loopback HTTP"
+        );
+        reqwest::Client::builder()
+            .no_proxy()
+            .build()?
+            .get(format!(
+                "{}/api/health",
+                platform.resource_service.trim_end_matches('/')
+            ))
+            .bearer_auth(&token)
+            .send()
+            .await?
+            .error_for_status()?;
+    } else {
+        autostart_nfs_exports(&workdir, &config).await?;
+    }
     let listener = tokio::net::TcpListener::bind((host.as_str(), port)).await?;
     println!(
         "opencoder-server {} listening on http://{}",
@@ -190,20 +226,15 @@ pub async fn serve(
             result.context("server task failed")??;
             return Ok(());
         }
-        result = shutdown_signal(state) => result?,
+        result = shutdown_signal() => result?,
+        _ = state.lifecycle.retired() => {},
     }
+    state.lifecycle.retire();
     let _ = stop.send(());
-    match tokio::time::timeout(SERVER_SHUTDOWN_GRACE, &mut server).await {
-        Ok(result) => {
-            result.context("server task failed")??;
-            Ok(())
-        }
-        Err(_) => {
-            server.abort();
-            let _ = server.await;
-            anyhow::bail!("server connections did not drain within 30 seconds")
-        }
-    }
+    state.lifecycle.drained().await;
+    state.hub.close_connections().await;
+    server.await.context("server task failed")??;
+    Ok(())
 }
 
 /// Start the two server-owned read-only NFS exports before accepting HTTP
@@ -229,7 +260,7 @@ fn resolve_data_dir(workdir: &std::path::Path, explicit: Option<PathBuf>) -> Res
     Ok(data)
 }
 
-async fn shutdown_signal(state: Arc<AppState>) -> Result<()> {
+async fn shutdown_signal() -> Result<()> {
     #[cfg(unix)]
     {
         let mut terminate =
@@ -238,8 +269,6 @@ async fn shutdown_signal(state: Arc<AppState>) -> Result<()> {
                 Err(error) => {
                     tracing::error!(%error, "install SIGTERM handler");
                     let _ = tokio::signal::ctrl_c().await;
-                    crate::api::admission::freeze_cluster(&state).await?;
-                    state.hub.close_connections().await;
                     return Ok(());
                 }
             };
@@ -256,8 +285,6 @@ async fn shutdown_signal(state: Arc<AppState>) -> Result<()> {
     if let Err(error) = tokio::signal::ctrl_c().await {
         tracing::error!(%error, "wait for Ctrl-C");
     }
-    crate::api::admission::freeze_cluster(&state).await?;
-    state.hub.close_connections().await;
     Ok(())
 }
 

@@ -6,7 +6,7 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio_tungstenite::{
     connect_async,
-    tungstenite::{client::IntoClientRequest, Message},
+    tungstenite::{client::IntoClientRequest, protocol::frame::coding::CloseCode, Message},
 };
 
 pub async fn run(remote: &str, token: &str, service: Arc<dyn NodeService>) -> Result<()> {
@@ -27,6 +27,9 @@ pub async fn run(remote: &str, token: &str, service: Arc<dyn NodeService>) -> Re
         .append_pair("node_id", &service.registration().id);
     let capacity = Arc::new(tokio::sync::Semaphore::new(128));
     loop {
+        if !service.reconnect_allowed(remote).await? {
+            return Ok(());
+        }
         let outcome = connection(url.as_str(), token, service.clone(), capacity.clone()).await;
         if let Err(error) = outcome {
             tracing::error!(%error, "node channel disconnected; local execution continues");
@@ -70,6 +73,10 @@ async fn connection(
     loop {
         tokio::select! {
             _ = tick.tick() => {
+                if service.retiring() && capacity.available_permits() == 128 && rx.is_empty() {
+                    writer.send(Message::Close(None)).await?;
+                    return Ok(());
+                }
                 request_report(&report_trigger);
             }
             changed = changes.changed() => {
@@ -128,11 +135,18 @@ async fn connection(
                         }
                     },
                     Message::Ping(data) => writer.send(Message::Pong(data)).await?,
-                    Message::Close(_) => bail!("server closed channel"),
+                    Message::Close(frame) => return close_outcome(frame.map(|frame| frame.code)),
                     _ => bail!("invalid server frame"),
                 }
             }
         }
+    }
+}
+
+fn close_outcome(code: Option<CloseCode>) -> Result<()> {
+    match code {
+        None | Some(CloseCode::Normal | CloseCode::Away) => Ok(()),
+        Some(code) => bail!("server closed node channel with code {}", u16::from(code)),
     }
 }
 
@@ -188,19 +202,10 @@ fn request_report(trigger: &mpsc::Sender<()>) {
     let _ = trigger.try_send(());
 }
 
-struct PreparedReport {
-    snapshot: NodeSnapshot,
-    records: Vec<ExecutionIndex>,
-    brain: Vec<NodeFrame>,
-}
+type PreparedReport = super::NodeReport;
 
 async fn prepare_report(service: &dyn NodeService) -> Result<PreparedReport> {
-    let records = service.indexes().await?;
-    Ok(PreparedReport {
-        snapshot: service.snapshot(),
-        records,
-        brain: service.brain_frames().await?,
-    })
+    service.report().await
 }
 
 async fn prepare_owned_report(service: Arc<dyn NodeService>) -> Result<PreparedReport> {

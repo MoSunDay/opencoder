@@ -202,5 +202,7 @@ async fn dag_run_progress_reports_running_step_while_in_flight() {
     assert_eq!(cancelled.status, 200, "{cancelled:?}");
     let detail = settled(&fleet.nodes[0], "dag-steps-mid-run").await;
     assert_eq!(detail["execution"]["status"], "cancelled", "{detail}");
+    assert_eq!(detail["dag_steps"]["cancelled"], 1, "{detail}");
+    assert_eq!(detail["dag_steps"]["error"], 0, "{detail}");
     fleet.shutdown().await;
 }

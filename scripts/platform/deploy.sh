@@ -131,7 +131,7 @@ PY
   then
     break
   fi
-  (( SECONDS < deadline )) || { echo "timed out waiting for existing nodes to reconnect Ready" >&2; exit 4; }
+  (( SECONDS < deadline )) || { echo "timed out waiting for existing nodes to reconnect" >&2; exit 4; }
   sleep 1
 done
 
@@ -155,12 +155,17 @@ while :; do
   (( SECONDS < deadline )) || { echo "timed out waiting for admission Ready" >&2; exit 4; }
   sleep 1
 done
-python3 - "$after_nodes" "$tmp_dir/ready.json" <<'PY'
+curl_json GET /api/nodes "$after_nodes"
+python3 - "$before_nodes" "$after_nodes" "$tmp_dir/ready.json" <<'PY'
 import json
 import sys
 
-nodes = json.load(open(sys.argv[1], encoding="utf-8")).get("nodes", [])
-ready = json.load(open(sys.argv[2], encoding="utf-8"))
+before = {n["id"] for n in json.load(open(sys.argv[1], encoding="utf-8")).get("nodes", [])}
+nodes = json.load(open(sys.argv[2], encoding="utf-8")).get("nodes", [])
+after = {n["id"] for n in nodes}
+ready = json.load(open(sys.argv[3], encoding="utf-8"))
+if not before.issubset(after):
+    raise SystemExit(f"existing node ID disappeared after reopen: {before - after}")
 if ready.get("ready_nodes", 0) < 1 or ready.get("mode") != "open":
     raise SystemExit(f"cluster is not ready: {ready}")
 print(f"ready node IDs: {', '.join(n['id'] for n in nodes if n.get('online') and n.get('snapshot', {}).get('ready'))}")

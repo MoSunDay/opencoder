@@ -12,6 +12,8 @@ TODO 模板新建与编辑默认进入依赖画布。父 Agent 固定负责调�
 
 历史回看按工作流事件倒序分页，序号跨工作流存在大跨度时也可直接读取更早记录；大事件继续通过分段读取还原。NFS 状态读取等待生命周期操作完成，避免并发时把运行中的导出误报为停止；启动与目录隔离测试使用独立配置，防止读取宿主机只读挂载。Review 遇到缺失任务状态返回明确错误。
 
+Fleet 集成测试在整个测试生命周期内隔离配置，避免复制宿主机 NFS Agent 资源池导致节点 RPC 超时；队列重启用例同样使用独立配置，原有调度断言保持不变。
+
 平台浏览器回归还复现了 Brain 的调度周期结束后页面停留旧状态，以及重复 outbox 回执误报。页面现在按同一运行的最终状态继续重连；已采纳的计划发布返回幂等回执，派发授权区分不可变请求身份和可变传输错误，已受理请求返回冲突状态而不再次派发。验收脚本移除了失败后另开运行的路径。
 
 ## 测试覆盖
@@ -36,6 +38,7 @@ TODO 模板新建与编辑默认进入依赖画布。父 Agent 固定负责调�
 | NFS 并发生命周期状态 | `named_export_start_reuse_stop`、`server_startup_starts_the_dag_wasm_export` | `crates/web/src/nfs_exports.rs`、`crates/control/src/bootstrap.rs` |
 | Brain 激活间事件重连 | `reloads the same brain run after an activation stream closes and stops at its terminal state` | `crates/web/spa/src/brain/workbench/tests/reconnect.dom.test.jsx` |
 | Brain 重启、重复回执与请求身份校验 | `prepared_action_replays_after_restart_and_duplicate_notice_keeps_watermark` | `crates/worker/tests/brain_recovery.rs` |
+| Fleet 路由、Codex 与调度配置隔离 | `list_filters_by_stored_kind_and_routes_with_typed_reference`、`server_dispatches_codex_to_node_and_replays_native_messages`、`managed_codex_is_pinned_and_node_obeys_fifo_lifo` | `crates/worker/tests/fleet_index_contract.rs`、`harness_codex.rs`、`harness_settings_queue.rs` |
 | 浏览器全流程、断线与重启历史 | `scripts/acceptance/todo_workbench/main.js` | 截图与 result.json 保存在脚本输出的独立临时目录 |
 
 ## 验证记录

@@ -14,7 +14,7 @@ Commit: 5bf6f621e3722e60258592267109ba5807e74d94
 - SPA 全量：97 个测试文件、714 项通过（`/tmp/opencoder-dag-spa-final-full.log`）。
 - `cargo clippy --workspace --all-targets -- -D warnings`：零警告（`/tmp/opencoder-dag-clippy-final2.log`）。
 - `cargo test --workspace`：394 个测试套件，5,204 passed / 0 failed / 6 ignored（`/tmp/opencoder-dag-tests-final2.log`）。6 项为原有 NFS 挂载、runc/wasm rootfs 和挂载 CLI 的特权手工用例，没有新增跳过项。
-- `cargo build --workspace`：独立工作树通过（`/tmp/opencoder-dag-build-isolated.log`）。共享工作区在测试运行期间加入另一批 host/runtime handoff 改造，其构建因锁跨越 await 失败；本次候选使用已提交基线和明确的 DAG 修复隔离构建，未纳入这些在途改动。
+- `cargo build --workspace`：独立工作树通过（`/tmp/opencoder-dag-build-isolated.log`）。共享工作区在测试运行期间加入另一批 host/runtime handoff 改造，其构建因锁跨越 await 失败；本次发布使用已提交基线和明确的 DAG 修复隔离构建，未纳入这些在途改动。
 - 浏览器验收入口：`PLATFORM_BIN_DIR=<bundle>/bin node scripts/acceptance/dag_results.js`。独立 Server/Agent 使用确定性模型响应，并校验浏览器实际加载的 SPA 与仓库产物一致。
 
 全量回归发现并修正事件流测试的时序假设：原先固定等待 500ms 后切换节点应答，满负载下可能在首个请求前切成 500；三项相关测试改为实际收到首批事件后推进，断言保持不变。
@@ -33,20 +33,23 @@ Commit: 5bf6f621e3722e60258592267109ba5807e74d94
 | 两个入口、75vw 抽屉、步骤切换及取消结果 | `shows final states immediately and loads logs only in the 75vw right drawer` 等 | `crates/web/spa/src/dag/graph.dom.test.jsx` |
 | 历史整批展示、断流清理与滚动 | `loads historical pages atomically before subscribing after their last cursor` 等 | `crates/web/spa/src/ui/executionEvents/logs.dom.test.jsx` |
 
-## 已生效版本验收
+## 首次发布验收（8a50a393）
 
 - 发布 `8a50a393`，四个二进制的 commit、protocol 9 与 SPA 摘要一致，manifest/SHA256SUMS 通过。
 - 使用发布包完成独立 Server/Agent 浏览器验收：结果快照、实时状态、75% 右侧抽屉、步骤切换、实时日志和执行详情全部通过。
 - 线上 Server/Agent 正常，原 Node ID 在线、Ready、admission=open；历史 DAG 的 5 个步骤直接显示最终结果，没有画布回放 SSE，日志抽屉读取通过。线上 JS/CSS 与提交产物一致，发布后无新增服务警告或错误。
 - 回滚包：`/usr/local/bin/.opencoder-platform-rollbacks/1789454112673175689-a8ccb79b028f`。
 
-## 补充修复候选
+## 补充修复发布（5bf6f621）
 
 - `5bf6f621` 保留取消回执与完成事件的正确关系，并消除事件流测试固定延时造成的竞争。
 - 分支：`fix/dag-results-final-20260915`；独立工作树：`/data00/github/opencoder-dag-release`。
 - 发布包：`/data00/github/opencoder/dist/opencoder-platform-5bf6f621`。四个二进制、manifest、协议与 SPA 摘要验证通过。
-- 使用候选发布包的真实 Server/Agent 浏览器验收通过：`/tmp/opencoder-todo-workbench-CUwbzT/dag-results.json`，覆盖结果快照、实时状态、75% 抽屉、步骤日志切换及执行详情入口。
-- **尚未上线此补充修复**：本轮 AGENTS.md 要求其他改动验证后一起发布；共享工作区新增运行时改造尚未纳入本次验收，发布范围已向用户请求确认。当前线上仍是 `8a50a393`，健康检查正常、Ready、admission=open，原节点在线。
+- 使用发布包的真实 Server/Agent 浏览器验收通过：`/tmp/opencoder-todo-workbench-CUwbzT/dag-results.json`，覆盖结果快照、实时状态、75% 抽屉、步骤日志切换及执行详情入口。
+- 用户继续要求完成服务发布后，于 2026-09-15 15:33:09 CST 从 `8a50a393` 更新至 `5bf6f621`。发布前确认没有活动任务、节点与 Server 均已排空；成套原子安装后依次重启 Server/Agent，并恢复 admission=open。
+- 原节点 `node-01M1WVDEYE7Q4TFV6J83EZGKYJ` 重新在线，Ready 检查通过，protocol 9，资源错误为空，服务重启计数为 0，发布后日志没有新增警告或错误。
+- 线上浏览器验收通过：`/tmp/opencoder-dag-production-5bf6f621/result.json`。四个二进制与 manifest 的提交及 SPA 摘要一致；实际 JS/CSS 与已发布提交一致；历史 DAG 的 5 个步骤直接显示结果，画布回放事件流数量为 0，右侧 75% 日志抽屉读取正常。
+- 本次发布日志：`/tmp/opencoder-dag-deploy-5bf6f621.log`；回滚包：`/usr/local/bin/.opencoder-platform-rollbacks/1789457586850557800-8a50a393cbe6`。
 
 ## 相关文档
 

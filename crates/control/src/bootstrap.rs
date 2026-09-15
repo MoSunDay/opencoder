@@ -3,7 +3,11 @@ use anyhow::{Context, Result};
 use opencoder_core::Config;
 use opencoder_llm::{ChatClient, ChatRequest, ChatStream, LlmEvent};
 use opencoder_store::{fleet::FleetStore, LibsqlStore, Store};
-use std::{path::PathBuf, sync::Arc, time::Duration};
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+    time::Duration,
+};
 
 const SERVER_SHUTDOWN_GRACE: Duration = Duration::from_secs(30);
 
@@ -161,11 +165,7 @@ pub async fn serve(
     let state = new_state(workdir.clone(), data, None).await?;
     seed_admin(&state.store, &token).await?;
     let config = Config::load(&workdir)?;
-    if config.agent.nfs.enabled {
-        crate::api_agent_nfs::start_locked(&config)
-            .await
-            .map_err(anyhow::Error::msg)?;
-    }
+    autostart_nfs_exports(&workdir, &config).await?;
     let listener = tokio::net::TcpListener::bind((host.as_str(), port)).await?;
     println!(
         "opencoder-server {} listening on http://{}",
@@ -204,6 +204,23 @@ pub async fn serve(
             anyhow::bail!("server connections did not drain within 30 seconds")
         }
     }
+}
+
+/// Start the two server-owned read-only NFS exports before accepting HTTP
+/// traffic. Agent NFS failures remain startup errors for compatibility;
+/// DAG-WASM autostart keeps its existing fail-open behavior and logs the
+/// failure internally.
+async fn autostart_nfs_exports(workdir: &Path, config: &Config) -> Result<()> {
+    if config.agent.nfs.enabled {
+        crate::api_agent_nfs::start_locked(config)
+            .await
+            .map_err(anyhow::Error::msg)?;
+    }
+    // The control-plane server owns the DAG wasm pool. Expose it through
+    // the second read-only NFS export before the HTTP listener accepts
+    // requests, matching the standalone web server startup path.
+    crate::api_dag_wasm_nfs::autostart(workdir).await;
+    Ok(())
 }
 
 fn resolve_data_dir(workdir: &std::path::Path, explicit: Option<PathBuf>) -> Result<PathBuf> {
@@ -246,7 +263,7 @@ async fn shutdown_signal(state: Arc<AppState>) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{configured_planner_request, resolve_data_dir};
+    use super::{autostart_nfs_exports, configured_planner_request, resolve_data_dir};
     use opencoder_core::Config;
     use opencoder_llm::ChatRequest;
     use std::path::{Path, PathBuf};
@@ -304,6 +321,35 @@ mod tests {
             resolve_data_dir(workdir, None).unwrap(),
             opencoder_core::data_dir_for(workdir).join("server-v2")
         );
+    }
+
+    #[tokio::test]
+    async fn server_startup_starts_the_dag_wasm_export() {
+        let _ = crate::nfs_exports::stop(crate::nfs_exports::DAG_WASM_EXPORT).await;
+        let dir = tempfile::tempdir().unwrap();
+        let workdir = dir.path().join("work");
+        let pool = dir.path().join("wasm");
+        std::fs::create_dir_all(&workdir).unwrap();
+        std::fs::create_dir_all(&pool).unwrap();
+        std::fs::write(
+            workdir.join("opencoder.json"),
+            serde_json::json!({
+                "dag": {
+                    "wasm_dir": pool,
+                    "nfs": {"enabled": true, "port": 0, "read_only": true}
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let config = Config::load(&workdir).unwrap();
+
+        autostart_nfs_exports(&workdir, &config).await.unwrap();
+        let status = crate::nfs_exports::status(crate::nfs_exports::DAG_WASM_EXPORT);
+        assert!(status.running);
+        assert!(status.read_only);
+        assert!(status.port > 0);
+        assert!(crate::nfs_exports::stop(crate::nfs_exports::DAG_WASM_EXPORT).await);
     }
 }
 

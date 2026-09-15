@@ -1,4 +1,4 @@
-Commit: a8ccb79b028fc53a3bb50df54ba1fec157693ed4
+Commit: 5bf6f621e3722e60258592267109ba5807e74d94
 
 # worker 模块
 
@@ -11,7 +11,7 @@ Commit: a8ccb79b028fc53a3bb50df54ba1fec157693ed4
 - `crates/worker/src/operations/launch.rs` — 取容量后启动
 - `crates/worker/src/operations/query/` — 明细/事件/消息分页；head_seq 水位
 - `crates/worker/src/operations/todo/` — `todo-review` 一致性快照、分段上下文与所属会话查询；`todo-rerun` 持久化受理、停止旧驱动及恢复排队。
-- `crates/worker/src/operations/query/dag_steps.rs` — DAG run 步级 meta.json 进度/单步视图
+- `crates/worker/src/operations/query/dag_steps.rs` — DAG 进度/单步视图：固定定义顺序，合并生命周期快照与 meta.json 回执，返回 head_seq 和运行/中断计数。`dag_steps/projection.rs` 按最近开始时间与完成结果判断当前尝试，同次尝试的取消回执不被稍晚完成事件误判为失败，后续产物写入错误仍优先显示；未提交回执的运行步骤也可识别；单步输出只读取已存在的回执结果。
 - `crates/worker/src/operations/query/project/` — prun-* 回放；载荷 64 KiB 分块
 - `crates/worker/src/operations/query/runner.rs` — Runner 阶段/verdict/投递状态
 - `crates/worker/src/operations/project_admission/` — Plan/Execute 独立 run ID

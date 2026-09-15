@@ -1,4 +1,4 @@
-Commit: a8ccb79b028fc53a3bb50df54ba1fec157693ed4
+Commit: 5bf6f621e3722e60258592267109ba5807e74d94
 
 # store 模块
 
@@ -20,6 +20,7 @@ Commit: a8ccb79b028fc53a3bb50df54ba1fec157693ed4
 - `src/libsql_store/{project.rs,project_runs.rs,schema/project_relations.rs}` — project 三表 + 运行留痕。
 - `src/fleet/` — `FleetStore` 独立 control.db：节点 + 五字段 execution_index。
 - `src/fleet/brain.rs` — brain_plan_versions 追加式版本与 brain_resource_claims 持久读写占用；计划头/稳定指针复用 fleet_definitions。
+- `Store::dag_step_snapshot` — 在 run-session 水位内读取各步骤最新生命周期事件及最近开始时间；libsql 查询只投影状态字段，不读取 stdout 等日志载荷，返回量按步骤数增长。`src/store/dag_snapshot.rs` 定义读取模型。
 - `Store::last_todo_event_seq` — 根状态与事件流快照的水位接缝。
 - `src/sql_store/` — feature-gate `mysql`/`starrocks` 后端，仅覆盖 project 面。
 - `src/project_factory.rs` — `open_project_store` 返回 `Arc<dyn ProjectStore>`。

@@ -1,4 +1,4 @@
-Commit: a8ccb79b028fc53a3bb50df54ba1fec157693ed4
+Commit: 5bf6f621e3722e60258592267109ba5807e74d94
 
 # web 模块
 
@@ -36,7 +36,8 @@ axum HTTP/SSE 会话管理与编译期内嵌 SPA。
 - `spa/src/brain/workbench/` — 能力/计划/运行工作台；图投影、原子快照水位与事件重连、步骤实例分页和检查面板。能力库页签直接是 `brainPanel.jsx` 能力 CRUD 表（行点击进 `brain/capabilityEditor.jsx` 抽屉），无成熟度列与 `+` 展开行；页自带 Tabs 标题，属 `nav.js` 的 `HEADERLESS_PAGES`，PageShell 只渲染无页头的 `.oc-page` body。
 - `spa/src/fleet/detail.jsx` 的 ExecutionView — 四类过程的共享查询/渲染入口；受 Brain 管理的执行隐藏独立修改操作。
 - `spa/src/brain/workbench/useRun.js` — 激活事件流结束后按同一运行 ID 重连，直到根运行进入终态；重连与快照刷新使用独立计时器。
-- `spa/src/dag/process.jsx` — 原生与嵌入页共用 DAG 状态画布。
+- `spa/src/dag/run/` — 原生与嵌入页共用结果快照、状态增量与日志抽屉；`process.jsx` 只投影当前节点状态。快照水位过滤历史帧，完成事件先于账本落盘时同水位不回退运行态，更新水位可进入新尝试。
+- `spa/src/ui/executionEvents/` — 日志按需批量加载历史后衔接实时流，保留有界窗口、分页、搜索和滚动；卸载终止请求，日志帧不驱动画布状态。
 - `spa/src/envs/todoPanel.jsx` — TODO 模板环境（TODO env）与工具入口。
 - `spa/src/project/` — 项目目标/里程碑/TODO 面板。
 - `spa/src/todo/editor/`、`spa/src/todoEditor.jsx` — TODO 模板编辑器默认画布，表单/画布/JSON 共享 spec 草稿；保留 metadata、门禁与节点改名后的依赖引用，支持派发上下文预览。画布坐标仅会话态；宿主为 100% 宽右侧 Drawer，关闭脏草稿有确认提示。

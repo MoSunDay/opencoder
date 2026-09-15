@@ -1,26 +1,13 @@
-Commit: 6ff63f9b
+Commit: 5bf6f621e3722e60258592267109ba5807e74d94
 
 # Agent 调度平台 — Server 调度、Node 执行、Web/CLI 管理
 
-## 关键路径
+## 执行查看
 
-- crates/control/src/api/executions/mod.rs — 稳定 ID 幂等受理与 select_queue_node
-- crates/control/src/api/settings/ — harness/runner 私有定义库
-- crates/control/src/admission.rs — Open/Frozen 受理开关
-- crates/web/src/api_nodes*.rs — 节点注册、负载与维护接口
-- crates/web/src/api_project*.rs — 项目 API 与运行回放
-- crates/worker/src/operations/launch.rs — 受理快照（harness + 资源版本）
-- crates/worker/src/operations/queue/mod.rs — 持久化 pending 队列与派发
-- crates/node/src/uplink.rs — WebSocket 注册/心跳/执行 RPC
-- crates/node/src/runner.rs — 注册 Runner 执行
-- crates/server/src/main.rs — opencode-server 二进制
-- crates/agent/src/main.rs — opencode-agent 二进制
-- crates/web/spa/src/fleet/nodes.jsx — 节点页、注册删除与调度配置
-- crates/web/spa/src/fleet/executions.jsx — 全部执行页
-- crates/web/spa/src/fleet/detail/ — 执行详情与回放
-- docs/agent-platform.md — 部署、API 与运行时边界
-- docs/registered-runners.md — 注册 Runner 约定
-- scripts/acceptance/business/README.md — 独立副本业务验收
+- 用户从全部执行、DAG 运行等业务入口查看运行；执行列表展示创建时间、ID、类型、节点与状态，详细结果由所属节点提供。
+- DAG 直接展示当前结果，运行中继续更新。完成或取消后的未执行步骤明确标示，加载与连接错误显示重试入口。
+- 点击 DAG 步骤从右侧打开占视口 75% 的「实时日志」抽屉；支持切换步骤或查看全部步骤、搜索、自动滚动和历史分页。打开历史执行不会逐条回放画布，关闭日志抽屉结束日志请求。
+- 执行详情继续提供产物下载；节点离线时显示错误，恢复连接后可重新查询。
 
 ## 边界
 

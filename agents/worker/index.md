@@ -1,4 +1,4 @@
-Commit: e50ffc433bca866fd17bd571a74f1bdf17705dea
+Commit: c0b88d6131b493822219179b1135a0a01807822b
 
 # worker 模块
 
@@ -21,9 +21,12 @@ Commit: e50ffc433bca866fd17bd571a74f1bdf17705dea
 - `crates/worker/src/workloads/` — agent/team/dag/todos/project 适配器；operator 复用 agent 循环（宿主机进程直跑，无 runc/无 node_maintenance）
 - `crates/worker/src/runtime/scheduling.rs` — scheduling.json 持久化并发/队列序
 - `crates/worker/src/state.rs` — runtime.db；节点 ID 持久化、目录锁
+- `crates/worker/src/service.rs` — 节点会话索引每页读取 500 条，续页使用
+  `max(updated_at, created_at)|id` 游标，与 Store 的 activity 排序一致；不能只传 session ID。
 - `crates/worker/src/layout.rs` — `<kind>/<id>/execution.json` 布局
 - `crates/worker/src/journal/` — 原子落盘（sync_all + rename）
 - `crates/worker/tests/harness_matrix.rs` — 五类 Harness 预检与取消矩阵
+- `crates/worker/tests/internal_session_index/main.rs` — 1001 会话分页索引、activity 并列与内部会话状态
 - `crates/worker/tests/project_replay.rs`、`runner_dispatch.rs` — 端到端契约
 - `scripts/acceptance/business/`、`project/` — 真实 NFS 与业务验收
 
@@ -33,6 +36,7 @@ Commit: e50ffc433bca866fd17bd571a74f1bdf17705dea
 - Brain 激活等待时释放容量；状态与因果事件原子提交，通知游标去重。取消等待在途子执行回执，不能只结束根循环就宣称取消完成。
 - `layout::ALL_KINDS` 必须覆盖全部有 kind 根目录的执行类型（含 operator）——漏一个即重启丢记录。
 - Node 不开放入站 HTTP：agent 复用 web session API 进程内调用。
+- 节点重连需要完整回放全部会话索引；时间戳并列、导入会话 updated_at 为零及多页边界均不可漏项。
 - system 团队执行已退役，create 直接拒绝。
 
 ## 相关

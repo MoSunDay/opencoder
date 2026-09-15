@@ -7,7 +7,7 @@
 修复（crates/tui，markdown.rs 414→537 行）：
 
 - `MdRenderer` 增加 `table_active/table_row/table_rows` 缓冲：`Tag::Table` 开表（先 flush 悬空段落），`flush()` 在表内改为把 spans 作为**一个单元格**入行（空单元格也占位，保证列对齐），`TagEnd::TableCell` 落格、`TagEnd::TableRow/TableHead` 收行、`TagEnd::Table` 经 `emit_table` 出行。
-- 纯函数 `emit_table`/`table_row_line`/`table_cell_width`：列宽取各列单元格显示宽最大值（`unicode-width`），单元格右补空格对齐，` │ `（muted）分隔；首行（表头）逐 span `patch(BOLD)` 保留 inline 样式；表头后一行 `─×(w+2)` 以 `┼` 相连的分隔线；残缺行/空表不 panic，缺格补空白格，零格行跳过。
+- 纯函数 `emit_table`/`table_row_line`/`table_cell_width`：列宽取各列单元格显示宽最大值（`unicode-width`），单元格右补空格对齐，` │ `（muted）分隔；首行（表头）逐 span `patch(BOLD)` 保留 inline 样式；表头后一行 `─×w` 以 `─┼─` 相连的分隔线（总宽与表头严格相等，见下方修正）；残缺行/空表不 panic，缺格补空白格，零格行跳过。
 - 不截断不折行（viewport 自行处理超宽）。
 
 实测：将 /root/rdb 真实会话（01M2G6F3…，427 轮、3 万+ text_delta、102 行表格文本）全量事件经 `SessionEvent::from_sse` 重放 ChatView 后 flatten，`Check│Outcome` 表从挤行变为对齐表格。
@@ -19,8 +19,17 @@
 | 基础表：表头 `Check │ Outcome` + BOLD span、`─┼─` 分隔线、正文行按列宽补齐、无 `CheckOutcome` 挤接、无原始 `|---` 行 | `chat::tests::markdown_table::basic_table_header_bold_and_separator`（修复前失败） |
 | 单列表/空单元格对齐不 panic | `chat::tests::markdown_table::single_column_and_empty_cells_align_without_panic` |
 | 单元格内 inline code span 存活（accent 样式） | `chat::tests::markdown_table::inline_code_span_survives_inside_cells` |
+| 分隔线 `┼` 与表头 `│` 按显示宽列位对齐、行宽相等（ASCII + CJK 表） | `chat::tests::markdown_table::separator_cross_aligns_under_column_pipes` |
 | Chat e2e：TextDelta 流式表格 + LlmRoundEnd → flatten 含 `│` 表头与 `┼` 分隔线、无 `|---` | `chat::tests::markdown_table::chat_level_say_table_renders_after_llm_round_end` |
 | 真实会话重放：/root/rdb 300,940 事件全量重放渲染对齐（本条目实测证据，未入库） | scratch 重放（一次性，已清理） |
+
+## 修正（同日复审 aa8ffd66）：分隔线 `┼` 与列分隔 `│` 列位对齐
+
+复审发现首版分隔线（每列 `─`×(w+2)、单宽 `┼` 相连）总宽恒比表头多 2 列，且每个 `┼` 比对应 `│` 恒偏右 1 列（所有表格可见）。修正 `emit_table`（crates/tui/src/markdown.rs）：每列 `─`×w、以 3 宽 `─┼─` 相连——总宽与表头严格相等，`┼` 落在 `│` 正下方。新增 `separator_cross_aligns_under_column_pipes` 断言列位与行宽（原 4 项测试均未覆盖列位对齐，属盲区）。
+
+已知非阻塞限制（复审记录，暂不修）：
+- 表格嵌于 blockquote/列表时容器前缀缩进丢失（`Tag::Table` 先 `flush()` 悬空段落所致；旧代码该场景同样损坏，非回归）。
+- `TagEnd::Table` 无条件追加空行，理论空表（`emit_table` 返回空 vec）会遗留孤立空行；GFM 表格必有表头行，实际不可达。
 
 回归：`cargo test -p opencoder-tui` 全绿（lib 1702 项 + 集成测试；say_markdown_e2e / say_pair_dedup / say_raw_repro / say_interleaved_finalize 全过）；`cargo clippy -p opencoder-tui --all-targets` 无新告警。
 

@@ -1,3 +1,5 @@
+Commit: 1ac64fe8b81a2c7c144c72b717a8031ab18f2589
+
 # 平滑发布：新任务切新版，已有任务保持 Runtime 归属
 
 ## 变更
@@ -46,7 +48,7 @@
 
 ## 当前验证状态
 
-实现及隔离验收已通过；首次生产迁移和真实模型切换后的 15 分钟观察尚未完成。
+实现、隔离验收、首次迁移、真实模型跨版本检查和完整 15 分钟稳定性观察均已通过。
 
 - Rust 完整回归：5,228 项通过、0 失败，6 项既有手工用例忽略。日志 `/tmp/opencoder-smooth-final-tests2.log`；Project 资源拒绝后的继续规划、原拒绝回执重放及心跳恢复均通过。
 - 全目标 Clippy 零警告，workspace 构建通过；日志 `/tmp/opencoder-smooth-final-clippy5.log`、`/tmp/opencoder-smooth-final-build2.log`。
@@ -54,9 +56,18 @@
 - 发布工具 16 项通过，包含 24 个故障子场景；旧安装/备份工具 19 项、真实模型验收夹具 3 项通过。日志 `/tmp/opencoder-smooth-final-rolling-tests4.log`、`/tmp/opencoder-smooth-platform-current.log`、`/tmp/opencoder-smooth-final-acceptance-tests.log`。
 - 最新隔离演练使用生产所在 ext4 磁盘，完成三版共存、两次 Host 交接、带任务回滚、Server SIGKILL 恢复、休眠/历史唤醒、全局容量/FIFO、技能隔离、只读 NFS；Shell、WASI 与真实 OCI 容器原进程保持。56 次持续提交零失败，最长接收 215 毫秒，最大接收间隔 315 毫秒、调度间隔 409 毫秒，SSE 149 毫秒且持久事件逐条一致。证据 `/var/tmp/opencoder-smooth-g42kp5bx/result.json`、`scheduling.json`；模型为本地夹具。
 - 使用生产只读资源池的独立 Runtime 复测：纯 WASM 受理由修复前 8.75–22.23 秒降至 9–10 毫秒，执行完成约 228 毫秒；证据 `/var/tmp/opencoder-resource-preflight-8t2uvsur`、日志 `/tmp/opencoder-resource-preflight-fixed.log`。
-- 联合代码与 `320dbbf3` 发布候选一致，保留 TODO 目录交付及已上线 DAG 修复；差异仅为本文和接口说明补充。该候选的优化发布包另有磁盘演练证据 `/var/tmp/opencoder-smooth-h7quack9/result.json`，详见 [TODO 目录交付](todo-directory-editor.md#联合发布验证)。
-- Nginx 1.30.4 已安装，配置检查通过且未启动；原生产 Server/Agent 继续服务。首次迁移、真实模型样本及最终观察结果将在实际执行后补录。
+- 业务二进制源码与 `320dbbf3` 发布候选一致，保留 TODO 目录交付及已上线 DAG 修复；发布工具另包含本机挂载预检和首次迁移修复。该候选的优化发布包另有磁盘演练证据 `/var/tmp/opencoder-smooth-h7quack9/result.json`，详见 [TODO 目录交付](todo-directory-editor.md#联合发布验证)。
+- Nginx 1.30.4 已接管固定入口；独立 NFS、Host 与 Runtime 正常运行，原 Server/Agent 已退出。
 
 首次迁移预检发现本机挂载表对同一路径重复报告 `ext4`。检查器现逐项验证所有文件系统，重复本地记录允许通过；空结果、未知类型和包含 NFS 的混合结果仍拒绝。首次尝试尚未停止生产服务。
 
 一致性备份已完成。原只读挂载存在其他引用，迁移现使用 `systemctl start` 保留已挂载资源，并由就绪探针核验独立导出与实际读取；NFS 的稳定文件句柄保持跨服务重启有效。
+
+## 生产迁移与验收
+
+- 首次迁移到 `d1779dd8`，随后真实模型验收通过正式发布命令切到 `320dbbf3`；Node ID `node-01M1WVDEYE7Q4TFV6J83EZGKYJ`、原凭证和并发上限 20 保留。
+- 维护窗口一致性备份保存 127,219 个文件：`/var/lib/opencoder-platform/backups/first-migration`。不停调度的在线备份保存 16 个数据库并检查完整性，明确标记非跨库同一时刻快照：`/var/lib/opencoder-platform/backups/online-20260915-post-migration`。
+- 真实模型 TODO 两个依赖脚本依次完成，长 WASI DAG 跨发布运行；旧 Runtime、模型 Shell 和 NFS 的进程身份断言通过。33 次持续提交零失败，最长受理 189 毫秒、最大接收间隔 289 毫秒、调度间隔 282 毫秒，SSE 游标逐条校验通过。
+- 旧 Server/Host 已自行退出，旧 Runtime 安全休眠；生产浏览器验证发布状态、历史唤醒、依赖上下文及只读 Review，页面无脚本错误。证据 `/var/tmp/release-live-68cd9f401086e095/browser.json`。
+- 原观察进程在 34 个成功样本后收到 SIGTERM，退出码 143，原因未知；保留部分样本。跨版本检查已在进入观察前全部通过；独立 systemd 监控重新执行完整 900 秒窗口，证据 `/var/tmp/release-live-68cd9f401086e095/observation-restart-01`。重新执行的完整窗口已通过：900 秒内 173 个探针全部完成，最终结果为 PASS，见 `/var/tmp/release-live-68cd9f401086e095/result.json`。
+- 全量验证日志集中保存于 `/var/lib/opencoder-platform/acceptance/20260915`。

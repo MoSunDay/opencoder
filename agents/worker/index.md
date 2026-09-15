@@ -1,4 +1,4 @@
-Commit: 8a50a393cbe615f5d6453ff4290da0bf03546881
+Commit: 1ac64fe8b81a2c7c144c72b717a8031ab18f2589
 
 # worker 模块
 
@@ -38,8 +38,14 @@ Commit: 8a50a393cbe615f5d6453ff4290da0bf03546881
 - TODO 重跑按 request_id 去重并校验 generation 与已通过的前置任务。请求与配置先写执行账本，等待旧驱动退出后应用一次重置并重新排队；同盘重启继续该流程，取消优先于未排队的重跑。公开回执不包含配置。
 - TODO Review 使用事件水位前后复核、generation 与分段 etag；历史按工作流事件倒序分页，会话查询必须属于父会话或该运行的子会话历史。
 - `layout::ALL_KINDS` 必须覆盖全部有 kind 根目录的执行类型（含 operator）——漏一个即重启丢记录。
-- Node 不开放入站 HTTP：agent 复用 web session API 进程内调用。
+- 兼容节点通过出站通道服务；独立 Runtime 由 agent 暴露认证的本地 RPC，业务适配仍复用进程内 API。
 - system 团队执行已退役，create 直接拒绝。
+
+## Runtime 归属与资源
+
+- `runtime/capacity.rs` 从 host-binding 读取所属 Runtime 和共享 Host 账本；任务启动前取得跨版本槽位，确定完成后释放。旧版本继续处理已受理队列、控制与内部子会话。
+- `resources.rs` 固定 Agent 资源；纯 WASM DAG 只固定所需模块，Agent 步骤或 Agent 资源指纹仍要求完整快照，挂载检查不会跳过。
+- `can_hibernate` 同时检查执行 future、队列、工具、写入错误和未确认 Brain outbox；休眠不丢弃运行目录与数据库。
 
 ## 相关
 

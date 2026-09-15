@@ -125,7 +125,11 @@ impl NodeService for Worker {
             if rows.is_empty() {
                 break;
             }
-            cursor = rows.last().map(|r| r.id.clone());
+            // Session listings use the activity timestamp and ID as a keyset,
+            // including imported sessions whose updated_at predates creation.
+            cursor = rows
+                .last()
+                .map(|r| format!("{}|{}", r.updated_at.max(r.created_at), r.id));
             for row in &rows {
                 if roots.contains(&row.id) {
                     continue;

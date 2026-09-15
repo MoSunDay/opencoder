@@ -76,7 +76,8 @@ describe('DefsTab', () => {
     expect(await screen.findByText('etl')).toBeTruthy();
     expect(await screen.findByText('nightly')).toBeTruthy();
     // step count column
-    expect(screen.getByText('2')).toBeTruthy();
+    expect(screen.queryByText('步骤数')).toBeNull();
+    expect(screen.queryByText('类型')).toBeNull();
 
     fireEvent.click(screen.getAllByText('派发')[0]); // row action opens the modal
     expect(await screen.findByText(/整个工作流会在同一个节点完成/)).toBeTruthy();

@@ -5,7 +5,7 @@ use super::{
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-// v7 pins named Harness profiles and registered binary Runner definitions.
+// Versioned fleet transport with immutable execution configuration.
 pub const PROTOCOL_VERSION: u32 = 9;
 pub const HEARTBEAT_MS: u64 = 5_000;
 pub const STALE_MS: i64 = 20_000;

@@ -10,9 +10,11 @@ import { ExecutionDetail } from './detail.jsx';
 import { newId } from './model.js';
 import { err, ok } from '../notice.js';
 import { NodeSchedulingModal } from './settings/scheduling.jsx';
+import { ReleasesModal } from './settings/releases.jsx';
 
 export function FleetNodesPanel({ onNotice }) {
   const [rows, setRows] = useState([]); const [selected, setSelected] = useState(null);
+  const [releases, setReleases] = useState(false);
   const [scheduling, setScheduling] = useState(null);
   const [action, setAction] = useState('status'); const [input, setInput] = useState('');
   const [result, setResult] = useState(null); const [busy, setBusy] = useState(false); const [detail, setDetail] = useState(null);
@@ -53,7 +55,7 @@ export function FleetNodesPanel({ onNotice }) {
     finally { setDeleting(false); }
   };
   return <PageShell page="nodes">
-    <Space style={{ marginBottom: 12 }}><Button onClick={() => load(false)}>刷新节点</Button></Space>
+    <Space style={{ marginBottom: 12 }}><Button onClick={() => load(false)}>刷新节点</Button><Button onClick={() => setReleases(true)}>发布状态</Button></Space>
     <Table scroll={{ x: 'max-content' }} locale={{ emptyText: '暂无 Opencoder 节点' }} rowKey="id" dataSource={tableRows(loading, rows)} loading={tableLoading(loading)} columns={[
       { title: '节点', dataIndex: 'name', render: (v, r) => <Space orientation="vertical"><b>{v}</b><small style={{ fontFamily: MONO_VAR }}>{r.id}</small></Space> },
       { title: '状态', render: (_, r) => <StatusTag status={r.online ? 'online' : 'offline'} label={r.online ? (r.snapshot?.resource_error || '在线') : '离线'} color={r.online && r.snapshot?.ready ? 'success' : 'error'} /> },
@@ -83,5 +85,6 @@ export function FleetNodesPanel({ onNotice }) {
     </Modal>
     {detail && <ExecutionDetail id={detail.id} summary={detail} onClose={() => setDetail(null)} onNotice={onNotice} />}
     {scheduling && <NodeSchedulingModal node={scheduling} onClose={() => setScheduling(null)} onSaved={() => load(false)} onNotice={onNotice} />}
+    {releases && <ReleasesModal onClose={() => setReleases(false)} onInspect={(id) => setDetail({ id })} />}
   </PageShell>;
 }

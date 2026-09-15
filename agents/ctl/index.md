@@ -1,4 +1,4 @@
-Commit: e50ffc433bca866fd17bd571a74f1bdf17705dea
+Commit: 8a50a393cbe615f5d6453ff4290da0bf03546881
 
 # ctl 模块
 
@@ -13,6 +13,7 @@ opencoder-cli：opencode-server 控制面的远程管理客户端。
 - `src/cmd/mod.rs` — 共享执行器 `exec_plan`（缓冲）/`exec_stream`（SSE，非 2xx 先预检）
 - `src/cmd/*.rs` — 按域模块：clap Subcommand + 纯 `plan()` + 薄 `run()`
 - `src/cmd/brain/ontology.rs` — library、plan-defs、runs 的 API 映射；`activate-local` 在远程凭据解析前读取本地 context 并输出有限决策。
+- `src/cmd/todo.rs` — TODO 模板与运行管理；put-context/put-binding 通过 new-version 发布，携带 source_version 与 expected_current，保持已发布版本不可变。
 - `src/cmd/raw.rs` — `raw` 逃生舱：任意 method+path 直发，限 7 个方法，`--json` 支持 `@file`
 - `src/main.rs` — tokio 包裹 `run()`；无子命令退出码 64
 - `tests/parse_*.rs` — 子命令→RequestPlan 纯映射契约

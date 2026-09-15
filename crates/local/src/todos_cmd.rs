@@ -9,12 +9,17 @@ use tokio_util::sync::CancellationToken;
 use crate::{Cli, TodosSub};
 
 pub async fn dispatch(cli: &Cli, sub: &TodosSub) -> Result<()> {
+    let config_workdir = cli
+        .workdir
+        .clone()
+        .map(Ok)
+        .unwrap_or_else(std::env::current_dir)?;
+    let config = Config::load(&config_workdir)?;
+    let share = opencoder_core::effective_share_dir(Some(&config))
+        .context("TODO share directory unavailable")?;
     if let TodosSub::Validate { file } = sub {
-        let raw = tokio::fs::read_to_string(file)
-            .await
-            .with_context(|| format!("read todos file {}", file.display()))?;
-        let spec = opencoder_todos::parse_spec(&raw)
-            .with_context(|| format!("parse todos spec {}", file.display()))?;
+        let spec = opencoder_todos::directory::load_bound(file, &share)
+            .with_context(|| format!("load TODO {}", file.display()))?;
         println!(
             "{}",
             serde_json::to_string(&serde_json::json!({
@@ -56,11 +61,8 @@ pub async fn dispatch(cli: &Cli, sub: &TodosSub) -> Result<()> {
             Ok(())
         }
         TodosSub::Run { file, debug, json } => {
-            let raw = tokio::fs::read_to_string(file)
-                .await
-                .with_context(|| format!("read todos file {}", file.display()))?;
-            let spec = opencoder_todos::parse_spec(&raw)
-                .with_context(|| format!("parse todos spec {}", file.display()))?;
+            let spec = opencoder_todos::directory::load_bound(file, &share)
+                .with_context(|| format!("load TODO {}", file.display()))?;
             let workflow_id = format!("todos-{}", ulid::Ulid::new());
             eprintln!("workflow_id={workflow_id}");
             let runtime = runtime(cli, &workdir, store.clone(), *debug)?;

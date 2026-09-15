@@ -1,6 +1,8 @@
 mod admission;
+pub(crate) mod capacity;
 mod health;
 mod scheduling;
+pub use capacity::HostBinding;
 pub(crate) use scheduling::SchedulingState;
 
 pub(crate) use admission::AdmissionState;

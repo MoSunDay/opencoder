@@ -85,7 +85,7 @@ pub enum TodoTemplatesCmd {
     },
     /// Read a version's `context.json` (the WorkflowSpec).
     GetContext { name: String, version: String },
-    /// Overwrite a version's `context.json`.
+    /// Save a spec as a new version (the source must still be current).
     PutContext {
         name: String,
         version: String,
@@ -95,7 +95,7 @@ pub enum TodoTemplatesCmd {
     },
     /// Read a version's `env.json` binding.
     GetBinding { name: String, version: String },
-    /// Overwrite a version's `env.json` binding.
+    /// Save an environment binding as a new version.
     PutBinding {
         name: String,
         version: String,
@@ -203,8 +203,8 @@ pub fn plan(sub: &TodoCmd) -> Result<RequestPlan> {
             name,
             version,
             json,
-        }) => RequestPlan::put(format!("/api/todo/templates/{name}/{version}/context.json"))
-            .with_opt_body(parse_body(Some(json.as_str()))?),
+        }) => RequestPlan::post(format!("/api/todo/templates/{name}/new-version"))
+            .with_opt_body(Some(serde_json::json!({"source_version":version,"expected_current":version,"spec":parse_body(Some(json.as_str()))?}))),
         TodoCmd::Templates(TodoTemplatesCmd::GetBinding { name, version }) => {
             RequestPlan::get(format!("/api/todo/templates/{name}/{version}/env.json"))
         }
@@ -212,8 +212,8 @@ pub fn plan(sub: &TodoCmd) -> Result<RequestPlan> {
             name,
             version,
             json,
-        }) => RequestPlan::put(format!("/api/todo/templates/{name}/{version}/env.json"))
-            .with_opt_body(parse_body(Some(json.as_str()))?),
+        }) => RequestPlan::post(format!("/api/todo/templates/{name}/new-version"))
+            .with_opt_body(Some(serde_json::json!({"source_version":version,"expected_current":version,"binding":parse_body(Some(json.as_str()))?}))),
         TodoCmd::Templates(TodoTemplatesCmd::DeleteVersion { name, version }) => {
             RequestPlan::delete(format!("/api/todo/templates/{name}/{version}"))
         }

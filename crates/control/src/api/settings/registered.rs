@@ -1,4 +1,4 @@
-//! Versioned private profiles and executable registrations, pinned at dispatch.
+//! Versioned private profiles, pinned at dispatch.
 use crate::AppState;
 use axum::{
     extract::{Path, State},
@@ -6,7 +6,7 @@ use axum::{
     Json,
 };
 use opencoder_core::fleet::RpcReply;
-use opencoder_core::harness::{CodexSettings, RunnerSettings, RuntimeSettings};
+use opencoder_core::harness::{CodexSettings, RuntimeSettings};
 use serde_json::{json, Value};
 use std::sync::Arc;
 
@@ -18,14 +18,6 @@ pub async fn snapshot(state: &AppState) -> anyhow::Result<Option<Box<RuntimeSett
             .ok_or_else(|| anyhow::anyhow!("profile name missing"))?;
         settings
             .profiles
-            .insert(name.into(), serde_json::from_value(value)?);
-    }
-    for value in state.fleet.definitions("runner").await? {
-        let name = value["name"]
-            .as_str()
-            .ok_or_else(|| anyhow::anyhow!("runner name missing"))?;
-        settings
-            .runners
             .insert(name.into(), serde_json::from_value(value)?);
     }
     anyhow::ensure!(
@@ -77,17 +69,4 @@ pub async fn save_profile(
         return super::super::error_400(error);
     }
     save(&state, "codex_profile", &name, json!(settings)).await
-}
-pub async fn runners(State(state): State<Arc<AppState>>) -> Response {
-    list(&state, "runner").await
-}
-pub async fn save_runner(
-    State(state): State<Arc<AppState>>,
-    Path(name): Path<String>,
-    Json(settings): Json<RunnerSettings>,
-) -> Response {
-    if let Err(error) = settings.validate() {
-        return super::super::error_400(error);
-    }
-    save(&state, "runner", &name, json!(settings)).await
 }

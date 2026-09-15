@@ -148,6 +148,8 @@ async fn workflow_review_rerun_and_large_context_cross_the_fleet_boundary() {
     let overview = review(&fleet, id, "section=overview").await;
     assert_eq!(overview["nodes"].as_array().unwrap().len(), 4);
     assert_eq!(overview["workflow"]["status"], "completed");
+    let files = review(&fleet, id, "section=files").await;
+    assert_eq!(files["files"]["todos/b/instructions.md"], "execute B");
     let original = review(&fleet, id, "section=node&todo_id=b").await;
     assert_eq!(original["preview"]["affected"], json!(["b", "c"]));
     assert_eq!(
@@ -204,6 +206,7 @@ async fn workflow_review_rerun_and_large_context_cross_the_fleet_boundary() {
         next["workflow"]["world_epoch"].as_u64().unwrap(),
         overview["workflow"]["world_epoch"].as_u64().unwrap() + 1
     );
+    assert_eq!(review(&fleet, id, "section=files").await, files);
     let b = review(&fleet, id, "section=node&todo_id=b").await;
     assert_eq!(b["state"]["session_history"].as_array().unwrap().len(), 2);
     assert_ne!(

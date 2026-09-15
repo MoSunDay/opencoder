@@ -104,13 +104,13 @@ function writeConfig(directory) {
 }
 
 
-async function open(answer) {
+async function open(answer, { dag = false } = {}) {
   responseFor=answer;await startMock();
   const serverWork=path.join(root,'server-work'),nodeWork=path.join(root,'node-work');
   writeConfig(serverWork);writeConfig(nodeWork);
   const server=start('opencoder-server',['--workdir',serverWork,'--data-dir',path.join(root,'server-data'),'--port','0','--token',token],serverWork,'server');
   await until(()=>{const m=fs.readFileSync(server.logPath,'utf8').match(/listening on (http:\/\/127\.0\.0\.1:\d+)/);if(m)base=m[1];return base;},'server ready');
-  const args=['--remote',base,'--token',token,'--name','todo-review-node','--workdir',nodeWork,'--data-dir',path.join(root,'node-data'),'--no-dag'];
+  const args=['--remote',base,'--token',token,'--name','todo-review-node','--workdir',nodeWork,'--data-dir',path.join(root,'node-data'),...(dag ? [] : ['--no-dag'])];
   let agent=start('opencoder-agent',args,nodeWork,'agent');
   const nodeId=await until(async()=>(await api('GET','/api/nodes')).nodes.find(n=>n.online&&n.snapshot?.ready)?.id,'node ready');
   browser=await chromium.launch({executablePath:process.env.CHROME_PATH||chromium.executablePath(),args:['--no-sandbox','--disable-dev-shm-usage']});

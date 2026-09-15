@@ -266,6 +266,14 @@ impl Store for LibsqlStore {
         events::last_seq(&conn, session_id).await
     }
 
+    async fn dag_step_snapshot(
+        &self,
+        id: &str,
+    ) -> Result<crate::store::dag_snapshot::DagStepSnapshot> {
+        let _guard = self.db_lock.lock().await;
+        events::dag_snapshot(&self.conn, id).await
+    }
+
     async fn create_subagent_task(&self, record: &SubagentTaskRecord) -> Result<()> {
         let _guard = self.db_lock.lock().await;
         let conn = self.conn().await?;

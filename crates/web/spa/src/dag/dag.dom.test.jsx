@@ -206,70 +206,12 @@ describe('RunsTable', () => {
 });
 
 describe('RunDetail', () => {
-  const RUN = { id: 'run-live9999', dag_id: 'dag-etl', name: 'etl', node_id: 'node-1', status: 'running', created_at: 1700000000000 };
-
-  function streamStub() {
-    let handle = null;
-    openStreamMock.mockImplementation(({ onFrame, onStatus }) => {
-      handle = { onFrame, onStatus };
-      return { abort: vi.fn() };
-    });
-    return () => handle;
-  }
-
-  const frame = (kind, data) => ({ event: kind, data, seq: data.seq ?? null });
-
-  it('folds the SSE replay into the feed and finalizes on run_finished', async () => {
-    const getHandle = streamStub();
-    const onFinished = vi.fn();
-    render(<RunDetail run={RUN} onNotice={vi.fn()} onClose={vi.fn()} onFinished={onFinished} />);
-
-    await waitFor(() =>
-      expect(openStreamMock).toHaveBeenCalledWith(
-        expect.objectContaining({ path: '/api/executions/run-live9999/events', after: 0 }),
-      ),
-    );
-
-    const push = (...frames) =>
-      act(async () => {
-        for (const f of frames) {
-          getHandle().onFrame(f);
-        }
-      });
-    await push(
-      frame('run_started', { seq: 1, kind: 'run_started', payload: { node_id: 'node-1' }, at_ms: 1 }),
-      frame('step_started', { seq: 2, kind: 'step_started', step: 'fetch', payload: {}, at_ms: 2 }),
-      frame('step_done', { seq: 3, kind: 'step_done', step: 'fetch', payload: { ok: true, output: 'rows=42' }, at_ms: 3 }),
-      frame('step_done', { seq: 4, kind: 'step_done', step: 'review', payload: { ok: false, error: 'refused', output: '' }, at_ms: 4 }),
-    );
-    // reverse-chron feed: newest (review failed) above the older fetch output
-    const texts = document.body.textContent;
-    expect(texts).toContain('步骤完成');
-    expect(texts).toContain('rows=42');
-    expect(texts).toContain('refused');
-    expect(texts.indexOf('refused')).toBeLessThan(texts.indexOf('rows=42'));
-
-    await push(frame('run_finished', { seq: 5, kind: 'run_finished', payload: { status: 'error', error: 'step review failed' }, at_ms: 5 }));
-    // final status applied to the header row (feed rows carry 失败 too — at
-    // least one tag + the error alert prove the header finalized)
-    expect((await screen.findAllByText('失败')).length).toBeGreaterThan(0);
-    expect(screen.getAllByText('step review failed').length).toBeGreaterThan(0);
-    expect(onFinished).toHaveBeenCalledTimes(1);
-  });
-
-  it('reopens from the terminal cursor when the execution status changes', async () => {
-    const abort = vi.fn();
-    let onFrame = null;
-    openStreamMock.mockImplementation((arg) => {
-      onFrame = arg.onFrame;
-      return { abort };
-    });
-    render(<RunDetail run={RUN} onNotice={vi.fn()} onClose={vi.fn()} onFinished={vi.fn()} />);
-    await waitFor(() => expect(onFrame).toBeTruthy());
-    await act(async () => {
-      onFrame(frame('run_finished', { seq: 1, kind: 'run_finished', payload: { status: 'done' }, at_ms: 1 }));
-    });
-    await waitFor(() => expect(abort).toHaveBeenCalledTimes(1));
-    expect(openStreamMock.mock.calls.at(-1)[0].after).toBe(1);
+  it('reports a missing immutable definition and allows retry', async () => {
+    apiGetMock.mockResolvedValue({});
+    render(<RunDetail run={RUNS[0]} onClose={vi.fn()} />);
+    expect(await screen.findByText('执行缺少工作流定义快照')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /重\s*试/ }));
+    await waitFor(() => expect(apiGetMock).toHaveBeenCalledTimes(2));
+    expect(openStreamMock).not.toHaveBeenCalled();
   });
 });

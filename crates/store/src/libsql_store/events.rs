@@ -3,6 +3,9 @@ use libsql::{params, Connection};
 
 use crate::types::{EventKind, SessionEventPage, SessionEventRecord};
 
+mod dag_snapshot;
+pub(super) use dag_snapshot::read as dag_snapshot;
+
 const EVENT_OVERHEAD_BYTES: usize = 512;
 
 const INSERT_EVENT: &str = "\

@@ -1,4 +1,4 @@
-Commit: 5bf6f621e3722e60258592267109ba5807e74d94
+Commit: 1ac64fe8b81a2c7c144c72b717a8031ab18f2589
 
 # store 模块
 
@@ -32,12 +32,19 @@ Commit: 5bf6f621e3722e60258592267109ba5807e74d94
 消息表的 `provider_state_json` 为 nullable，保存 Responses 原始 output、phase、call id 与密文推理状态；旧消息仍按 NULL 兼容读取，bundle 导出/导入保留该字段。
 
 ## 边界
-- 平台库分立：control.db / definitions.db（Server）、runtime.db（Node）。
+- 平台库分立：control.db / definitions.db（Server）、host.db（稳定 Host）、按版本隔离的 runtime.db。共享控制数据仅使用本机本地 SQLite/WAL。
 - `team_topic_runs` created_at 首插冻结；`brain_plans.tree_json` 对 store opaque。
 - StarRocks 全语句走 text 协议、无跨语句事务：跨表原子提交写前拒绝。
 - 删除数据必须由显式上层操作触发。
 - FleetStore 共用连接的公开读写都通过 gate；显式事务内部只调用已持锁 helper，避免无关写入混入事务或重入锁。
 - Brain 资源占用仅由确定结束回执释放，保留记录且无时间到期；成功的状态/事件提交先于来源通知确认。
+
+## 发布持久状态
+
+- `src/fleet/handoff/receipts.rs` — 请求指纹、阶段/回执与冻结 assignment；Project 初始派发以 run_id 区分，只有明确拒绝后才能替换尝试。
+- `src/fleet/handoff/runtimes.rs` — Runtime 注册、执行归属和报告水位；已有归属只读复核，旧 Host 报告不能覆盖新版状态。
+- `src/fleet/handoff/capacity.rs` — 全机容量及 FIFO 预留；启动前占槽，确定结束后释放，不使用心跳到期释放。
+- `request_lock` 使用本机文件锁跨进程串行化长操作，数据库事务只覆盖短持久化步骤；轻量执行索引不承载运行详情。
 
 ## 相关
 - [brain](../brain/index.md) — 计划与根状态消费方。

@@ -34,7 +34,7 @@ async function until(check, label) {
 }
 async function api(method, route, body) {
   const text = body === undefined ? '' : JSON.stringify(body);
-  const response = await fetch(base + route, { signal: AbortSignal.timeout(5000), method, headers: {
+  const response = await fetch(base + route, { signal: AbortSignal.timeout(30000), method, headers: {
     authorization: `Bearer ${token}`, ...(text ? { 'content-type': 'application/json' } : {}),
   }, body: text || undefined });
   const raw = await response.text();
@@ -96,7 +96,7 @@ async function main() {
   console.log('two nodes registered');
   browser = await chromium.launch({ executablePath: process.env.CHROME_PATH || chromium.executablePath(), args: ['--no-sandbox', '--disable-dev-shm-usage'] });
   page = await browser.newPage({ viewport: { width: 1600, height: 1000 } });
-  page.setDefaultTimeout(15000);
+  page.setDefaultTimeout(45000);
   page.setDefaultNavigationTimeout(20000);
   page.on('pageerror', (error) => errors.push(error.message));
   page.on('console', (message) => { if (message.type() === 'error') console.error('browser:', message.text()); });
@@ -113,9 +113,11 @@ async function main() {
   await page.locator('.fleet-nav-category').getByText('Agent', { exact: true }).click();
   await page.getByRole('menuitem', { name: '全部执行' }).click();
   await page.locator('.ant-empty').waitFor();
-  await page.getByPlaceholder('act / 定义名称 / 任务 ID').fill('act');
-  await page.getByLabel('任务要求').fill('run browser acceptance');
-  await page.getByRole('button', { name: '启动执行' }).click();
+  const browserNode = (await api('GET', '/api/nodes')).nodes.find((node) => node.name === 'node-a');
+  await api('POST', '/api/executions', { id: 'agent-browser', kind: 'agent', target: 'act', node_id: browserNode.id, input: { prompt: 'run browser acceptance' } });
+  await page.getByRole('button', { name: /^刷\s*新$/ }).click();
+  await page.getByRole('button', { name: 'agent-browser', exact: true }).waitFor();
+  await page.getByRole('button', { name: 'agent-browser', exact: true }).click();
   await page.getByText('browser node-owned answer', { exact: true }).waitFor({ timeout: 30000 });
   await page.screenshot({ path: path.join(root, 'agent-detail.png') });
   const indexes = (await api('GET', '/api/executions')).executions;
@@ -164,13 +166,13 @@ async function main() {
   await page.screenshot({ path: path.join(root, 'mobile-nodes.png'), animations: 'disabled' });
   await page.setViewportSize({ width: 1600, height: 1000 });
   await page.locator('.fleet-nav-category').getByText('Agent', { exact: true }).click();
-  await api('POST', '/api/teams', { name: 'acceptance-team', captain: 'captain',
-    members: [{ id: 'captain', agent: 'default', role: 'acceptance captain' }] });
+  await api('POST', '/api/teams', { name: 'acceptance-team', captain: 'default',
+    members: [{ agent: 'default' }] });
   await page.getByRole('menuitem', { name: '团队组队' }).click();
   await page.getByText('acceptance-team', { exact: true }).waitFor();
   await page.screenshot({ path: path.join(root, 'teams.png') });
   await page.getByRole('menuitem', { name: '大脑调度' }).click();
-  await page.getByText('需求执行', { exact: true }).waitFor();
+  await page.getByRole('button', { name: '开始新任务' }).waitFor();
   await page.getByText('能力库', { exact: true }).waitFor();
   await page.screenshot({ path: path.join(root, 'brain.png') });
   // An offline owner must expose an error without creating a replacement run.

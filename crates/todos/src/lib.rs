@@ -1,5 +1,6 @@
 #[cfg(feature = "runtime")]
 mod batch;
+pub mod directory;
 pub mod domain;
 #[cfg(feature = "runtime")]
 pub mod execution;
@@ -9,6 +10,7 @@ mod json_output;
 pub mod parent;
 #[cfg(feature = "runtime")]
 pub mod persistence;
+pub mod review;
 #[cfg(feature = "runtime")]
 pub mod runner;
 #[cfg(feature = "runtime")]

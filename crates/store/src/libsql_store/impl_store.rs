@@ -266,6 +266,14 @@ impl Store for LibsqlStore {
         events::last_seq(&conn, session_id).await
     }
 
+    async fn dag_step_snapshot(
+        &self,
+        id: &str,
+    ) -> Result<crate::store::dag_snapshot::DagStepSnapshot> {
+        let _guard = self.db_lock.lock().await;
+        events::dag_snapshot(&self.conn, id).await
+    }
+
     async fn create_subagent_task(&self, record: &SubagentTaskRecord) -> Result<()> {
         let _guard = self.db_lock.lock().await;
         let conn = self.conn().await?;
@@ -382,6 +390,16 @@ impl Store for LibsqlStore {
     ) -> Result<TodoEventPage> {
         let _guard = self.db_lock.lock().await;
         todos::events_page(&self.conn, workflow_id, after_seq, limit, payload_budget).await
+    }
+    async fn todo_events_before(
+        &self,
+        workflow_id: &str,
+        before_seq: i64,
+        limit: u32,
+        payload_budget: usize,
+    ) -> Result<TodoEventPage> {
+        let _guard = self.db_lock.lock().await;
+        todos::events_before(&self.conn, workflow_id, before_seq, limit, payload_budget).await
     }
     async fn last_todo_event_seq(&self, workflow_id: &str) -> Result<i64> {
         let _guard = self.db_lock.lock().await;

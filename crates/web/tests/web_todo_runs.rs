@@ -63,6 +63,10 @@ fn app(state: Arc<opencoder_web::AppState>) -> Router {
         )
         .route("/api/todo/templates", post(tpl::create_template))
         .route(
+            "/api/todo/templates/:name/new-version",
+            post(opencoder_web::api_todo_template_versions::new_version),
+        )
+        .route(
             "/api/todo/templates/:name/:version/env.json",
             get(tpl::get_env_binding).put(tpl::put_env_binding),
         )
@@ -201,14 +205,14 @@ async fn run_reaches_terminal_and_is_observable() {
     assert_eq!(status, StatusCode::OK, "{v}");
     let (status, v) = call(
         a(),
-        "PUT",
-        "/api/todo/templates/demo/v1/env.json",
-        Some(serde_json::json!({"env": "dev"})),
+        "POST",
+        "/api/todo/templates/demo/new-version",
+        Some(serde_json::json!({"source_version":"v1","expected_current":"v1","binding":{"env": "dev"}})),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{v}");
 
-    let (status, v) = call(a(), "POST", "/api/todo/templates/demo/v1/run", None).await;
+    let (status, v) = call(a(), "POST", "/api/todo/templates/demo/v2/run", None).await;
     assert_eq!(status, StatusCode::OK, "{v}");
     let id = v["workflow_id"].as_str().unwrap().to_string();
     assert!(id.starts_with("todos-"), "{id}");

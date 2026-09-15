@@ -5,7 +5,7 @@ pub mod scope;
 mod settings;
 pub use settings::CodexSettings;
 mod runtime;
-pub use runtime::{agent_settings, pin_agent_settings, RunnerSettings, RuntimeSettings, Versioned};
+pub use runtime::{agent_settings, pin_agent_settings, RuntimeSettings, Versioned};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]

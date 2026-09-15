@@ -8,6 +8,7 @@ use support::*;
 
 #[tokio::test]
 async fn server_routes_by_id_and_disconnect_does_not_stop_accepted_work() {
+    let _host_config = support::isolated_config();
     let dir = tempfile::tempdir().unwrap();
     let client = mock();
     let node = worker(dir.path(), client.clone()).await;

@@ -1,6 +1,6 @@
 # Agent 调度平台
 
-`opencoder` 保留 CLI/TUI；平台由两个独立进程组成：`opencoder-server` 负责 Web、全局定义、大脑和调度，`opencoder-agent` 负责节点上的 agent loop。Server 不创建本地会话、不执行团队或工作流，也不链接 Python VM/runc。
+`opencoder` 保留 CLI/TUI；初始部署可以使用两个进程：`opencoder-server` 负责 Web、全局定义、大脑和调度，`opencoder-agent` 负责节点上的 agent loop。Server 不创建本地会话、不执行团队或工作流，也不链接 Python VM/runc。
 
 ## 部署
 
@@ -47,7 +47,7 @@ Server 与 Node 都要求 `--token`、`--token-file` 或既有 `OPENCODER_SERVER
 
 节点每 5 秒报告心跳，并在 loop 进入/退出和任务状态变化时立即报告快照与索引。Server 在发出任务前记录归属并预留容量，收到节点确认后释放预留，避免并发请求集中投向同一空闲节点。指定 `node_id` 时只检查指定节点；节点不满足条件则报错，不改派其他节点。
 
-Node 在返回接受前同步持久化任务、资源和 Harness 配置快照。节点页可设置最大顶层并发数（1–65535）和 FIFO/LIFO；`scheduling.json` 保存配置，优先于重启时的启动默认值。超额任务以 pending 等待，释放容量后按配置顺序启动；降低上限不打断正在运行的任务。创建请求携带稳定 ID：同一 ID、相同输入重复提交不重复执行；不同输入返回 409。网络超时后归属仍保留，客户端必须用原 ID 重试，Server 不猜测任务是否接受而改派。
+Node 在返回接受前同步持久化任务、资源和 Harness 配置快照。旧单进程节点可设置最大顶层并发数（1–65535）和 FIFO/LIFO；`scheduling.json` 保存配置，优先于重启时的启动默认值。超额任务以 pending 等待，释放容量后按配置顺序启动；降低上限不打断正在运行的任务。创建请求携带稳定 ID：同一 ID、相同输入重复提交不重复执行；不同输入返回 409。网络超时后归属仍保留，客户端必须用原 ID 重试，Server 不猜测任务是否接受而改派。
 
 断线只影响传输，已接受的本地工作继续。Node 重启将原先运行中的执行标记 `interrupted`，由用户显式在原节点恢复；已接受但尚未开始的持久化 pending 队列继续等待，冻结节点在复开后才继续调度。DAG 恢复跳过已成功写入检查点的步骤。项目执行 ID 为 `project-<todo-id>`，Plan、Act 和新一轮 Plan 保持相同节点。节点存储出现持久化错误时上报不可调度，须处理存储故障后重启节点。项目页面与全部执行详情中的 Plan 均由 Server 解析当前草稿；Node 在忙碌及资源预检通过后才保存该轮快照，拒绝请求不修改之前的运行记录；容量不足会保存并排队，等待期间 Project 运行不会被失联清理误判。
 
@@ -63,7 +63,7 @@ mount -t nfs -o ro,vers=3,tcp,port=<port>,mountport=<port>,nolock,soft,retrans=1
 
 在 Node 的 `opencoder.json` 中设置 `agent.agents_dir` 为 `/mnt/opencoder-agents`。显式配置该路径时 Node 校验 Linux 挂载表，要求可读的只读 NFS；未挂载、可写挂载或本地目录都返回资源错误，不静默使用本地资源替代。
 
-Server 的 NFS 导出支持完整深层资源路径，短路径句柄保持兼容，长路径句柄在导出重启后可恢复。目录读取失败明确返回错误，不以漏文件的列表代替成功。
+NFS 资源服务的导出支持完整深层资源路径，短路径句柄保持兼容，长路径句柄在导出重启后可恢复。目录读取失败明确返回错误，不以漏文件的列表代替成功。
 
 DAG wasm 模块池是第二路只读导出：Server 侧 `dag.nfs.enabled` 开启（默认 `127.0.0.1:2050`、只读，导出根为 `dag.wasm_dir` 或数据目录默认 `<data>/dag/wasm`）。节点用同样的只读参数挂载后，在 `opencoder.json` 设置 `dag.wasm_dir` 指向挂载点：
 
@@ -71,7 +71,7 @@ DAG wasm 模块池是第二路只读导出：Server 侧 `dag.nfs.enabled` 开启
 mount -t nfs -o ro,vers=3,tcp,port=2050,mountport=2050,nolock,soft,retrans=1,timeo=50,actimeo=0,lookupcache=none server:/ /mnt/opencoder-dag-wasm
 ```
 
-该路径不做挂载表强制校验：未配置时 wasm 模块维持 out-of-band 投放；配置后节点受理 DAG 时把 spec 引用的池模块冻结进 `<workflow_root>/_modules/`（`tool.wasm` 取 current，`tool@v3.wasm` 取显式版本），池缺名或缺该版本视为 out-of-band 跳过，导出内容损坏（sha256 不符）则拒绝受理。发布/回滚只影响之后的新受理，不影响已接受 run；本机部署可参照 agents 挂载单元模板复制第二路挂载。
+该路径不做挂载表强制校验，但节点必须以 `ro` 挂载并只读加载：未配置时 wasm 模块维持 out-of-band 投放；配置后节点受理 DAG 时把 spec 引用的池模块冻结进 `<workflow_root>/_modules/`（`tool.wasm` 取 current，`tool@v3.wasm` 取显式版本），池缺名或缺该版本视为 out-of-band 跳过，导出内容损坏（sha256 不符）则拒绝受理。WASM 和 Agent 任务都只执行节点本地快照，不向 NFS 写入或直接依赖 NFS 运行。发布/回滚只影响之后的新受理，不影响已接受 run；本机部署可参照 agents 挂载单元模板复制第二路挂载。
 
 本机部署可使用 `scripts/platform/systemd/` 的只读挂载单元及 Agent 依赖配置；跨主机部署调整 `What` 为实际 Server。每个挂载点只保留一个挂载，关闭目录与属性缓存使资源发布及时对新任务生效。回滚不支持长句柄的旧 Server 时，先停止依赖该挂载的 Node，再受控重新挂载。
 
@@ -107,7 +107,7 @@ mount -t nfs -o ro,vers=3,tcp,port=2050,mountport=2050,nolock,soft,retrans=1,tim
 {"id":"agent-client-request-1","kind":"agent","target":"act","input":{"prompt":"检查当前仓库"},"node_id":null}
 ```
 
-DAG 页和执行详情共用实时日志组件，展示 Agent 输出、思考与工具事件以及 Wasm stdout/stderr，支持步骤筛选、搜索、自动滚动和历史分页。日志沿 Node WebSocket 与浏览器 SSE 增量传输，断线从已接收的 seq 续传；服务端明确发送流结束标记，网络断开不会显示为正常结束。事件支持 seq 回放；超大事件、消息和详情字段由 64 KiB chunk 及游标分段读取。DAG 产物通过 Bearer 保护的流式下载端点传输，256 MiB 验收不会在浏览器或 Server 聚合完整文件。原会话、DAG、TODO、Team 和项目页面 API 均由 Server 依据五字段索引转发到归属节点。
+DAG 页和执行详情先展示节点结果快照，运行中只折叠快照之后的状态事件，不逐条回放历史来绘制画布。`GET /api/dag/runs/:id/progress` 和执行详情的 `dag_steps` 返回 `head_seq`、步骤状态及 `running` 计数；新一轮步骤开始可覆盖旧回执，断线后重新同步快照。点击步骤打开右侧占视口 75% 的「实时日志」抽屉，共用步骤切换、全部步骤、搜索、自动滚动和历史分页；历史记录整批展示，关闭抽屉即结束日志请求。日志展示 Agent 输出、思考与工具事件以及 Wasm stdout/stderr。日志沿 Node WebSocket 与浏览器 SSE 增量传输，断线从已接收的 seq 续传；服务端明确发送流结束标记，网络断开不会显示为正常结束。事件支持 seq 回放；超大事件、消息和详情字段由 64 KiB chunk 及游标分段读取。DAG 产物通过 Bearer 保护的流式下载端点传输，256 MiB 验收不会在浏览器或 Server 聚合完整文件。原会话、DAG、TODO、Team 和项目页面 API 均由 Server 依据五字段索引转发到归属节点。
 
 ## 验证边界
 
@@ -119,16 +119,11 @@ DAG 的非 Agent 步骤为 WebAssembly WASI 命令模块。默认 `sandbox: in_p
 
 ## 发布与回滚
 
-Fleet 协议 v9 要求 Server 与 Node 成套更新，旧版本连接会被拒绝。Harness 值复用私有定义库，队列和节点调度配置保存在 Node 数据目录。
+平滑发布使用固定 Nginx 入口、双版本 Server、稳定 Agent Host 和独立 Runtime。完整配置、首次迁移、发布、回滚、备份及验收见 [平滑发布](smooth-release.md)。
 
-1. 在干净提交上运行 `scripts/platform/release/build.sh --output <新目录>`。脚本先验证 SPA 无漂移，再一次构建 `opencoder`、`opencoder-cli`、`opencoder-server`、`opencoder-agent`；四者的 `--build-info` 必须具有相同 commit、protocol 和 SPA digest，`manifest.json` 与 `SHA256SUMS` 绑定全部二进制。真实 dirty 工作树会被拒绝。
-2. 调用 `POST /api/admin/drain` 先持久冻结 Server 与当前在线 Node。最多观察 10 分钟让长任务自然完成；仍未完成的任务（包括尚未启动的 pending）逐条显式 interrupt，并等待 `GET /api/admin/drain` 返回 `control_drained=true`。取消后的执行不能恢复；interrupt 后只能在原 Node 显式恢复。30 秒只用于 interrupt/进程树清理，不能用作长任务的自然 drain 时限。
-3. 正常停止 Agent，再停止 Server。Agent 的本地 Frozen 状态跨重启保留；Server 也以 Frozen 重启。使用 `scripts/platform/backup.sh --server-data /var/lib/opencoder-server --node worker-a=/data00 --output <新备份目录>` 制作新备份；工具要求 Node 已停止、持有独占锁、所有执行收敛并对 SQLite 做一致性备份，不覆盖任何原目录。跨主机发布必须先按目标 inventory 在各主机停服并把这些本地目录提供给受控备份步骤，不能把本机演练当成跨机备份证据。
-4. 使用 `scripts/install.sh --bundle <bundle> --dest-dir /usr/local/bin --backup` 原子安装 manifest 声明的同一代二进制。先启动 Server，再启动 Agent；检查 manifest/build-info、目标 Node 清单、节点 ID、版本、资源挂载和 Ready。所有发布目标都到齐后调用 `DELETE /api/admin/drain`，它只复开当前在线且健康的节点；离线节点会明确列为未处理，不会伪装完成。
-5. 用普通 Agent、DAG、Team、TODO/Project 和大脑稳定 `request_id` 各走一条真实链路，并验证列表五字段、所属 Node 明细、控制动作、大字段分段和产物下载。E2E 通过后核对当前服务健康：Server/Agent 无意外重启，目标 Node 全部 Ready，无新增认证、协议、存储或进程清理错误，无超过 60 秒仍未确认的 Pending，也无超过 30 秒仍未收敛的 interrupt。没有业务流量时，以 E2E 和服务健康完成发布验收，不额外等待固定观察时长；需要验证真实流量表现时再单独安排观察。
-6. 失败时立即重新冻结，不删除索引或执行数据。二进制回滚用 `scripts/platform/rollback.sh --bundle <上一代bundle> --dest-dir /usr/local/bin` 成套切换全部二进制；需要回滚数据时先用 `scripts/platform/restore.sh --backup <备份> --output <新的隔离目录>` 验证并恢复到新目录，按实际服务身份设置新恢复目录的 owner 和读写权限，再让 Server/各 Node 的 `--data-dir` 明确指向对应恢复目录。不得把旧二进制直接指向未经配套验证的新协议数据，也不得覆盖原数据目录。
+兼容发布只激活候选版本并 reload 入口；旧任务原地完成，不调用全局 drain。原有两进程部署需要先执行一次安全迁移窗口，保留 Node ID、凭证和历史数据。跨版本 Host 共用并发上限和 FIFO；旧 Runtime 在任务、工具、写入及 Brain 回执全部结束后休眠，历史访问可唤醒。
 
-首次平台部署保留旧 CLI/daemon 目录；回退旧模式时仍使用其原目录，不能让旧版本读取新平台库。仓库内验收没有执行生产部署，也没有修改生产数据或凭据。实际主机地址、目标 inventory、内网证书路径、NFS 挂载和模型凭据引用是上线时必须填写的外部参数。
+版本回滚切换新流量与新任务归属，不恢复旧数据库。NFS 资源服务及其升级使用独立维护流程。首次迁移后不要再用原 Agent/Server unit 重启命令代替发布工具。
 
 手动依赖验收入口：
 

@@ -1,4 +1,4 @@
-Commit: (working-tree, 基于 b465f440)
+Commit: bf757d2e8688496f8c1be8fc8926dbd9fb2e3c21
 
 # brain playbook：双轨调度第二轨——编排图域 + v25 存储 + CRUD/派发 API + 项目执行器
 

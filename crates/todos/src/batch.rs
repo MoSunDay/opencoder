@@ -21,12 +21,18 @@ pub async fn execute(
     *state = transitions::dispatch(spec, state.clone(), &assignments)?;
     let dispatched_ids: Vec<String> = requests.iter().map(|r| r.todo_id.clone()).collect();
     let dispatch_reason = reason.clone();
+    let contexts = assignments.iter().map(|(request, session_id)| {
+        let todo = spec.todos.iter().find(|t| t.id == request.todo_id).context("TODO missing")?;
+        Ok(serde_json::json!({"todo_id":request.todo_id,"session_id":session_id,
+            "attempt":state.todos[&request.todo_id].attempt,"context_mode":request.context_mode,
+            "context":crate::review::context::dispatch_context(spec, state, todo, request.context_mode)?}))
+    }).collect::<Result<Vec<_>>>()?;
     runtime
         .commit(
             spec,
             state,
             "todos_dispatched",
-            serde_json::json!({"todos":requests,"reason":reason}),
+            serde_json::json!({"todos":requests,"reason":reason,"assignments":contexts}),
         )
         .await?;
     tracing::info!(
@@ -150,7 +156,7 @@ async fn apply_result(
             spec,
             state,
             "todo_candidate_ready",
-            serde_json::json!({"todo_id":todo_id,"gate":execution.gate}),
+            serde_json::json!({"todo_id":todo_id,"gate":execution.gate,"candidate":state.todos[todo_id].candidate}),
         )
         .await?;
     if state.todos.get(todo_id).map(|todo| todo.status) != Some(TodoStatus::CandidateReady) {

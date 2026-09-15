@@ -139,6 +139,7 @@ async fn managed_codex_is_pinned_and_node_obeys_fifo_lifo() {
 
 #[tokio::test]
 async fn pending_queue_and_scheduling_survive_node_restart() {
+    let _config = isolated_config();
     let root = tempfile::tempdir().unwrap();
     let binary = controlled_binary(root.path());
     let log = root.path().join("restart.jsonl");

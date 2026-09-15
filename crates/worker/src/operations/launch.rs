@@ -73,6 +73,7 @@ pub(super) async fn launch_locked(
     .then(|| opencoder_session::loop_registry::LoopGuard::enter(&id));
     let tasks = worker.inner.tasks.clone();
     tasks.spawn(async move {
+        let ticket = record.queue.as_ref().and_then(|q| q.ticket.clone());
         let outcome = std::panic::AssertUnwindSafe(async {
             opencoder_core::harness::scope::with_execution(
                 config.agent.codex.clone(),
@@ -121,6 +122,9 @@ pub(super) async fn launch_locked(
             tracing::error!(%id,%error,"could not persist terminal execution status");
             *worker.inner.persistence_error.lock().unwrap() =
                 Some(format!("execution {id}: {error:#}"));
+        } else if let Err(error) = worker.finish_slot(ticket.as_deref()).await {
+            *worker.inner.persistence_error.lock().unwrap() =
+                Some(format!("capacity completion {id}: {error:#}"));
         }
         worker.inner.active.lock().await.remove(&id);
         drop(loop_guard);

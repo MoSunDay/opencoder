@@ -1,4 +1,4 @@
-Commit: e50ffc433bca866fd17bd571a74f1bdf17705dea
+Commit: 1ac64fe8b81a2c7c144c72b717a8031ab18f2589
 
 # worker 模块
 
@@ -10,17 +10,20 @@ Commit: e50ffc433bca866fd17bd571a74f1bdf17705dea
 - `crates/worker/src/operations/queue/` — 单调序号 + FIFO/LIFO 选等待任务
 - `crates/worker/src/operations/launch.rs` — 取容量后启动
 - `crates/worker/src/operations/query/` — 明细/事件/消息分页；head_seq 水位
-- `crates/worker/src/operations/query/dag_steps.rs` — DAG run 步级 meta.json 进度/单步视图
+- `crates/worker/src/operations/todo/` — `todo-review` 一致性快照、分段上下文与所属会话查询；`todo-rerun` 持久化受理、停止旧驱动及恢复排队。
+- `crates/worker/src/operations/query/dag_steps.rs` — DAG 进度/单步视图：固定定义顺序，合并生命周期快照与 meta.json 回执，返回 head_seq 和运行/中断计数。`dag_steps/projection.rs` 按最近开始时间与完成结果判断当前尝试，同次尝试的取消回执不被稍晚完成事件误判为失败，后续产物写入错误仍优先显示；未提交回执的运行步骤也可识别；单步输出只读取已存在的回执结果。
 - `crates/worker/src/operations/query/project/` — prun-* 回放；载荷 64 KiB 分块
-- `crates/worker/src/operations/query/runner.rs` — Runner 阶段/verdict/投递状态
 - `crates/worker/src/operations/project_admission/` — Plan/Execute 独立 run ID
 - `crates/worker/src/operations/maintenance.rs` — 维护工具；configure_scheduling
 - `crates/worker/src/brain/` — TODO 存储根状态/事件，短 runc 激活、持久 outbox、同盘恢复；输出归一化与可下载产物。
 - `crates/worker/src/dag_wasm_pin.rs` — DAG wasm 模块受理冻结：池 → sha256 校验 →
   `_modules/` staging+rename（`tool.wasm` 取 current，`tool@v3.wasm` 显式版本；缺名/缺版本跳过）
 - `crates/worker/src/workloads/` — agent/team/dag/todos/project 适配器；operator 复用 agent 循环（宿主机进程直跑，无 runc/无 node_maintenance）
+- `crates/worker/src/workloads/todos.rs` — 新运行写入并加载执行目录中的 `definition/`；恢复从 Store 读取冻结定义，复核已有目录，模板后续修改不影响运行。
+- `crates/worker/src/operations/todo/read.rs` — Review 的 `files` 分区从冻结定义生成 JSON/Markdown 文件集，沿用分段 etag 协议。
 - `crates/worker/src/runtime/scheduling.rs` — scheduling.json 持久化并发/队列序
 - `crates/worker/src/state.rs` — runtime.db；节点 ID 持久化、目录锁
+- `crates/worker/src/service.rs` — 根执行与内部会话清单；会话按 `(max(updated_at, created_at), id)` 游标翻页。
 - `crates/worker/src/layout.rs` — `<kind>/<id>/execution.json` 布局
 - `crates/worker/src/journal/` — 原子落盘（sync_all + rename）
 - `crates/worker/tests/harness_matrix.rs` — 五类 Harness 预检与取消矩阵
@@ -31,9 +34,18 @@ Commit: e50ffc433bca866fd17bd571a74f1bdf17705dea
 
 - 运行不依赖 WebSocket 存活；普通执行重启后的 interrupted 需显式 resume。Brain 根按持久唤醒/动作恢复，保持暂停与取消意图；不迁移丢盘节点所有权。
 - Brain 激活等待时释放容量；状态与因果事件原子提交，通知游标去重。取消等待在途子执行回执，不能只结束根循环就宣称取消完成。
+- Brain 派发授权核验不可变动作身份，传输错误与受理结果不作为身份字段；已受理或结束的动作返回 409，已采纳计划的重复发布返回幂等回执。
+- TODO 重跑按 request_id 去重并校验 generation 与已通过的前置任务。请求与配置先写执行账本，等待旧驱动退出后应用一次重置并重新排队；同盘重启继续该流程，取消优先于未排队的重跑。公开回执不包含配置。
+- TODO Review 使用事件水位前后复核、generation 与分段 etag；历史按工作流事件倒序分页，会话查询必须属于父会话或该运行的子会话历史。
 - `layout::ALL_KINDS` 必须覆盖全部有 kind 根目录的执行类型（含 operator）——漏一个即重启丢记录。
-- Node 不开放入站 HTTP：agent 复用 web session API 进程内调用。
+- 兼容节点通过出站通道服务；独立 Runtime 由 agent 暴露认证的本地 RPC，业务适配仍复用进程内 API。
 - system 团队执行已退役，create 直接拒绝。
+
+## Runtime 归属与资源
+
+- `runtime/capacity.rs` 从 host-binding 读取所属 Runtime 和共享 Host 账本；任务启动前取得跨版本槽位，确定完成后释放。旧版本继续处理已受理队列、控制与内部子会话。
+- `resources.rs` 固定 Agent 资源；纯 WASM DAG 只固定所需模块，Agent 步骤或 Agent 资源指纹仍要求完整快照，挂载检查不会跳过。
+- `can_hibernate` 同时检查执行 future、队列、工具、写入错误和未确认 Brain outbox；休眠不丢弃运行目录与数据库。
 
 ## 相关
 

@@ -61,16 +61,19 @@ impl AdmissionGate {
         })
     }
 
-    pub async fn snapshot(&self) -> AdmissionSnapshot {
-        let state = self.state.lock().await;
-        AdmissionSnapshot {
+    pub async fn snapshot(&self) -> Result<AdmissionSnapshot> {
+        let state = load_state(&self.path)?;
+        Ok(AdmissionSnapshot {
             mode: state.mode,
             inflight_admissions: self.inflight.load(Ordering::SeqCst),
-        }
+        })
     }
 
     pub async fn enter(&self) -> Result<AdmissionPermit, &'static str> {
-        let state = self.state.lock().await;
+        let state = load_state(&self.path).map_err(|error| {
+            tracing::error!(%error, "read shared admission");
+            "server admission state unavailable"
+        })?;
         if state.mode != AdmissionMode::Open {
             return Err("server admission is frozen");
         }
@@ -81,8 +84,7 @@ impl AdmissionGate {
     }
 
     pub async fn node_allowed(&self, node: &NodeView) -> bool {
-        let state = self.state.lock().await;
-        state.mode == AdmissionMode::Open
+        self.is_open().await
             && node.online
             && node
                 .snapshot
@@ -91,7 +93,13 @@ impl AdmissionGate {
     }
 
     pub async fn is_open(&self) -> bool {
-        self.state.lock().await.mode == AdmissionMode::Open
+        match load_state(&self.path) {
+            Ok(state) => state.mode == AdmissionMode::Open,
+            Err(error) => {
+                tracing::error!(%error, "read shared admission");
+                false
+            }
+        }
     }
 
     pub async fn transition(&self) -> tokio::sync::MutexGuard<'_, ()> {
@@ -113,7 +121,7 @@ impl AdmissionGate {
     pub async fn reopen(&self, placement: &Mutex<()>) -> Result<()> {
         let _placement = placement.lock().await;
         let mut state = self.state.lock().await;
-        if state.mode == AdmissionMode::Open {
+        if load_state(&self.path)?.mode == AdmissionMode::Open {
             return Ok(());
         }
         let open = PersistedState {
@@ -198,7 +206,7 @@ fn reject_symlink(path: &Path) -> Result<()> {
 
 pub fn command_requires_admission(command: &ExecutionCommand) -> bool {
     match command.action.as_str() {
-        "resume" | "plan" | "execute" | "prompt" | "steer" | "queue" => true,
+        "resume" | "plan" | "execute" | "prompt" | "steer" | "queue" | "todo-rerun" => true,
         "http" => {
             let method = command.input["method"].as_str().unwrap_or("GET");
             let tail = command.input["tail"].as_str().unwrap_or("");
@@ -235,14 +243,17 @@ mod tests {
         let gate = AdmissionGate::load(path.clone()).unwrap();
         let permit = gate.enter().await.unwrap();
         gate.freeze(&placement).await.unwrap();
-        assert_eq!(gate.snapshot().await.inflight_admissions, 1);
+        assert_eq!(gate.snapshot().await.unwrap().inflight_admissions, 1);
         drop(permit);
         assert!(gate.enter().await.is_err());
 
         let restarted = AdmissionGate::load(path.clone()).unwrap();
-        assert_eq!(restarted.snapshot().await.mode, AdmissionMode::Frozen);
+        assert_eq!(
+            restarted.snapshot().await.unwrap().mode,
+            AdmissionMode::Frozen
+        );
         restarted.reopen(&placement).await.unwrap();
-        let reopened = AdmissionGate::load(path).unwrap().snapshot().await;
+        let reopened = AdmissionGate::load(path).unwrap().snapshot().await.unwrap();
         assert_eq!(reopened.mode, AdmissionMode::Open);
     }
 

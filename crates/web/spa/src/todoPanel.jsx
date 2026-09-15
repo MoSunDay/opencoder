@@ -4,101 +4,27 @@
 //   运行 — todoRunsPanel.jsx 的工作流列表 + 事件流。
 // 版本行上的「运行」成功后带 workflow_id 跳到「运行」tab 并聚焦该工作流。
 
-import { Button, Card, Col, Drawer, Form, Input, Popconfirm, Row, Space, Table, Tabs, Tag, Typography } from 'antd';
+import { Button, Drawer, Modal, Popconfirm, Space, Table, Tabs, Tag, Typography } from 'antd';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiDel, apiGet, apiPost, apiPut } from './api.js';
 import { newId } from './fleet/model.js';
-import { PageShell } from './shell/pageShell.jsx';
-import { MONO_VAR } from './ui/mono.js';
 import { TodoEditor } from './todoEditor.jsx';
 import { TodoRunsPanel } from './todoRunsPanel.jsx';
 import { TodoEnvsPanel } from './envs/todoPanel.jsx';
 import { err, info } from './notice.js';
+import {FileProblems,errorProblems} from './todo/directory/problems.jsx';
 
-const { TextArea } = Input;
 const { Text } = Typography;
 
-/// 新建模板预填的最小合法 WorkflowSpec（id 固定 wf-example，todo t1）。
-export const EXAMPLE_SPEC = {
-  schema_version: 1,
-  id: 'wf-example',
-  name: '示例工作流',
-  objective: '示例目标：完成一件事',
-  constraints: [],
-  todos: [{
-    id: 't1',
-    title: '示例任务',
-    requirement_background: '',
-    instructions: '描述这个任务要做什么',
-    depends_on: [],
-    agent: 'act',
-    max_attempts: 3,
-    acceptance: { criteria: '完成即通过' },
-  }],
-  metadata: {},
-};
-
-function CreateTemplateForm({ onNotice, onCreated }) {
-  const [form] = Form.useForm();
-  const [saving, setSaving] = useState(false);
-
-  const submit = async (values) => {
-    let spec = null;
-    try {
-      spec = JSON.parse(values.specText || '');
-    } catch (e) {
-      onNotice(err('spec JSON 解析失败: ' + (e && e.message)));
-      return;
-    }
-    setSaving(true);
-    try {
-      await apiPost('/api/todo/templates', {
-        name: values.name,
-        description: values.description || '',
-        note: values.note || '',
-        spec,
-      });
-      onNotice(err(''));
-      onCreated();
-    } catch (e) {
-      onNotice(err('新建模板失败: ' + (e && e.message))); // 400 = spec 校验失败等
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <Form form={form} layout="vertical" onFinish={submit}
-        initialValues={{ specText: JSON.stringify(EXAMPLE_SPEC, null, 2) }}>
-        <Row gutter={12}>
-          <Col span={6}>
-            <Form.Item name="name" label="模板名" rules={[{ required: true, message: '请输入模板名' }]}>
-              <Input placeholder="my-template" />
-            </Form.Item>
-          </Col>
-          <Col span={8}>
-            <Form.Item name="description" label="描述"><Input /></Form.Item>
-          </Col>
-          <Col span={8}>
-            <Form.Item name="note" label="首版备注"><Input placeholder="v1" /></Form.Item>
-          </Col>
-        </Row>
-        <Form.Item name="specText" label="spec（WorkflowSpec JSON）" rules={[{ required: true, message: '请填写 spec' }]}>
-          <TextArea rows={10} style={{ fontFamily: MONO_VAR }} aria-label="new-template-spec" />
-        </Form.Item>
-        <Space>
-          <Button type="primary" htmlType="submit" loading={saving}>创建</Button>
-          <Text type="secondary">400 时服务端会返回「spec 校验失败: …」</Text>
-        </Space>
-      </Form>
-  );
-}
+export { EXAMPLE_SPEC } from './todo/directory/model.js';
 
 /// 展开行：某模板的版本列表（env 绑定来自 GET /api/todo/templates/:name）。
 function VersionsBlock({ template, onNotice, onEdit, onChanged }) {
   const [detail, setDetail] = useState(null);
   const name = template.name;
   const attempts = useRef(new Map());
+  const [fileProblems,setFileProblems]=useState([]);
+  const [problemVersion,setProblemVersion]=useState(template.current);
 
   useEffect(() => {
     let alive = true;
@@ -108,7 +34,7 @@ function VersionsBlock({ template, onNotice, onEdit, onChanged }) {
           setDetail(j || null);
         }
       })
-      .catch((e) => onNotice(err('获取模板详情失败: ' + (e && e.message))));
+      .catch((e) => {setFileProblems(errorProblems(e,'todo.json'));onNotice(err('获取模板详情失败: ' + (e && e.message)));});
     return () => {
       alive = false;
     };
@@ -141,6 +67,7 @@ function VersionsBlock({ template, onNotice, onEdit, onChanged }) {
       onNotice(err(''));
       onChanged();
     } catch (e) {
+      setProblemVersion(sourceVersion||template.current);setFileProblems(errorProblems(e));
       onNotice(err('新建版本失败: ' + (e && e.message)));
     }
   };
@@ -157,14 +84,19 @@ function VersionsBlock({ template, onNotice, onEdit, onChanged }) {
   };
 
   const run = async (v) => {
+    setProblemVersion(v);
     if (!attempts.current.has(v)) attempts.current.set(v, newId('todos'));
     try {
+      const bundle=await apiGet(`/api/todo/templates/${encodeURIComponent(name)}/${encodeURIComponent(v)}/files`);
+      if(bundle.diagnostics?.length){setFileProblems(bundle.diagnostics);return;}
+      await apiPost('/api/todo/validate-files',{files:bundle.files});
       const j = await apiPost(`/api/todo/templates/${encodeURIComponent(name)}/${encodeURIComponent(v)}/run`, { id: attempts.current.get(v) });
       attempts.current.delete(v);
       onNotice(info(`已启动工作流: ${(j && j.workflow_id) || ''}`));
       onChanged((j && j.workflow_id) || '');
     } catch (e) {
-      onNotice(err('运行失败: ' + (e && e.message))); // 400 = spec 无效或 env 工具缺失
+      setFileProblems(errorProblems(e));
+      onNotice(err('运行失败: ' + (e && e.message)));
     }
   };
 
@@ -187,15 +119,23 @@ function VersionsBlock({ template, onNotice, onEdit, onChanged }) {
         </div>
       ))}
       <Button size="small" type="dashed" style={{ marginTop: 6 }} onClick={() => newVersion('')}>+ 从当前新建版本</Button>
+      <FileProblems problems={fileProblems} onClose={()=>setFileProblems([])} onLocate={()=>onEdit(name,problemVersion)}/>
     </div>
   );
 }
 
 function TemplatesTab({ onNotice, onRan }) {
   const [rows, setRows] = useState([]);
+  const [listProblems,setListProblems]=useState([]);
   const [loading, setLoading] = useState(false);
   const [editing, setEditing] = useState(null); // {name, version} → TodoEditor
   const [creating, setCreating] = useState(false);
+  const dirty=useRef(false);
+  const onDirtyChange=useCallback(value=>{dirty.current=value;},[]);
+  const closeDraft=callback=>{
+    if(dirty.current)Modal.confirm({title:'放弃未保存的修改？',okText:'放弃修改',cancelText:'继续编辑',onOk:()=>{dirty.current=false;callback();}});
+    else callback();
+  };
   const [bump, setBump] = useState(0);
 
   const load = useCallback(async (silent) => {
@@ -207,6 +147,7 @@ function TemplatesTab({ onNotice, onRan }) {
       setRows((j && j.templates) || []);
     } catch (e) {
       if (!silent) {
+        setListProblems(errorProblems(e,'todo.json'));
         onNotice(err('获取模板列表失败: ' + (e && e.message)));
       }
     } finally {
@@ -230,10 +171,8 @@ function TemplatesTab({ onNotice, onRan }) {
     }
   };
 
-  const closeEditor = () => {
-    setEditing(null);
-    setBump((n) => n + 1); // 关闭即刷新：抽屉里的保存要以列表视角可见
-  };
+  const closeEditor = () => closeDraft(()=>{setEditing(null);setBump(n=>n+1);});
+  const closeCreate = () => closeDraft(()=>setCreating(false));
 
   const columns = [
     { title: '名称', dataIndex: 'name', key: 'name' },
@@ -254,6 +193,7 @@ function TemplatesTab({ onNotice, onRan }) {
       <Space style={{ marginBottom: 12 }}>
         <Button type="primary" onClick={() => setCreating(true)}>新建模板</Button>
       </Space>
+      <FileProblems problems={listProblems} onClose={()=>setListProblems([])}/>
       <Table
         rowKey="name"
         size="small"
@@ -281,21 +221,25 @@ function TemplatesTab({ onNotice, onRan }) {
         title="新建 TODO 模板"
         placement="right"
         open={creating}
-        onClose={() => setCreating(false)}
+        onClose={closeCreate}
         size="100%"
         styles={{ wrapper: { maxWidth: '100vw' } }}
         destroyOnHidden
       >
-        <CreateTemplateForm
+        <TodoEditor
+          creating
+          onDirtyChange={onDirtyChange}
           onNotice={onNotice}
+          onClose={closeCreate}
           onCreated={() => {
+            dirty.current=false;
             setCreating(false);
             setBump((n) => n + 1);
           }}
         />
       </Drawer>
       <Drawer
-        title={editing ? `编辑模板 ${editing.name} · ${editing.version}` : ''}
+        title={editing ? `编辑模板 ${editing.name}` : ''}
         placement="right"
         open={!!editing}
         onClose={closeEditor}
@@ -305,6 +249,7 @@ function TemplatesTab({ onNotice, onRan }) {
       >
         {editing ? (
           <TodoEditor
+            onDirtyChange={onDirtyChange}
             templateName={editing.name}
             version={editing.version}
             onNotice={onNotice}

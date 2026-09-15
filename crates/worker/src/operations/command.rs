@@ -13,6 +13,9 @@ pub(super) async fn command(
         return Ok(reply);
     }
     let id = execution.id.as_str();
+    if matches!(command.action.as_str(), "todo-review" | "todo-rerun") {
+        return super::todo::handle(worker, execution, &command.action, command.input).await;
+    }
     if execution.kind == ExecutionKind::Brain {
         return crate::brain::api::handle(worker, execution, &command.action, command.input).await;
     }
@@ -179,6 +182,26 @@ pub(crate) async fn durable_stop(
         .lock()
         .await
         .request_stop(id, intent, cancel.is_some())?;
+    if intent == StopIntent::Cancel {
+        let mut journal = worker.inner.journal.lock().await;
+        if let Some(mut record) = journal.records.get(id).cloned() {
+            let mut changed = false;
+            for control in record
+                .lifecycle
+                .todo_reruns
+                .values_mut()
+                .filter(|c| c.phase == "stopping")
+            {
+                control.phase = "failed".into();
+                control.error = Some("rerun was cancelled".into());
+                control.config = None;
+                changed = true;
+            }
+            if changed {
+                journal.save(record)?;
+            }
+        }
+    }
     if update.signal {
         cancel.expect("active cancellation token").cancel();
     } else {
@@ -294,7 +317,13 @@ async fn http(
         if worker.inner.scheduling.get().queue_order == QueueOrder::Fifo {
             super::queue::dispatch_locked(worker).await?;
         }
-        match worker.try_slot() {
+        match worker
+            .inner
+            .host_capacity
+            .is_none()
+            .then(|| worker.try_slot())
+            .flatten()
+        {
             Some(p) => Some(p),
             None => {
                 let Some(mut record) = record.clone() else {

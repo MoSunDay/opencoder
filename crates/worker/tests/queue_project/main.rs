@@ -20,6 +20,7 @@ async fn create_project(node: &opencoder_worker::Worker, todo: &str) -> RpcReply
 
 #[tokio::test]
 async fn project_queue_preserves_pending_receipts_and_cancel_before_start() {
+    let _host_config = support::isolated_config();
     let root = tempfile::tempdir().unwrap();
     let client = Arc::new(InterruptClient {
         calls: Default::default(),

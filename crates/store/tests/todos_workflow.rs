@@ -118,3 +118,87 @@ async fn schema_v8_reopens_at_v9_with_todo_tables() {
         .await
         .unwrap();
 }
+
+#[tokio::test]
+async fn reverse_todo_history_skips_global_sequence_gaps_and_respects_byte_budget() {
+    let store = LibsqlStore::open_memory().await.unwrap();
+    store.create_session(&parent("parent-1")).await.unwrap();
+    store
+        .create_todo_workflow(&workflow(0, "running"), &[], &event("created"))
+        .await
+        .unwrap();
+    let mut other = workflow(0, "running");
+    other.id = "other".into();
+    let mut unrelated = event("noise");
+    unrelated.workflow_id = other.id.clone();
+    store
+        .create_todo_workflow(&other, &[], &unrelated)
+        .await
+        .unwrap();
+    for generation in 1..=300 {
+        other.generation = generation;
+        store
+            .commit_todo_transition(&other, &[], &unrelated)
+            .await
+            .unwrap();
+    }
+    let mut large = event("dispatch");
+    large.payload = serde_json::json!({"text":"中".repeat(30_000)});
+    let dispatch = store
+        .commit_todo_transition(&workflow(1, "running"), &[], &large)
+        .await
+        .unwrap();
+    let head = store
+        .commit_todo_transition(&workflow(2, "done"), &[], &event("completed"))
+        .await
+        .unwrap();
+    let page = store
+        .todo_events_before("wf-1", head + 1, 200, 2048)
+        .await
+        .unwrap();
+    assert!(page.more);
+    assert_eq!(
+        page.events
+            .iter()
+            .map(|e| e.seq.unwrap())
+            .collect::<Vec<_>>(),
+        vec![head]
+    );
+    let page = store
+        .todo_events_before("wf-1", head, 200, 2048)
+        .await
+        .unwrap();
+    assert!(page.more);
+    assert_eq!(page.events[0].seq, Some(dispatch));
+    assert_eq!(page.events[0].payload["omitted"], true);
+    let chunk = store
+        .todo_event_payload_chunk("wf-1", dispatch, 0, 64 * 1024)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(chunk.total_bytes > 64 * 1024);
+    let page = store
+        .todo_events_before("wf-1", dispatch, 200, 2048)
+        .await
+        .unwrap();
+    assert!(!page.more);
+    assert_eq!(
+        page.events
+            .iter()
+            .map(|e| e.seq.unwrap())
+            .collect::<Vec<_>>(),
+        vec![1]
+    );
+    let page = store
+        .todo_events_before("wf-1", head + 1, 2, 200_000)
+        .await
+        .unwrap();
+    assert!(page.more);
+    assert_eq!(
+        page.events
+            .iter()
+            .map(|e| e.seq.unwrap())
+            .collect::<Vec<_>>(),
+        vec![head, dispatch]
+    );
+}

@@ -1,4 +1,4 @@
-import { DagProcess } from '../dag/process.jsx';
+import { DagRunResult } from '../dag/run/result.jsx';
 import { RunReplay } from '../project/replay/run.jsx';
 import { submitAttempt } from '../project/replay/attempt.js';
 import { Alert, Button, Collapse, Descriptions, Drawer, Empty, Input, Progress, Select, Space, Spin, Typography } from 'antd';
@@ -14,11 +14,10 @@ import { useExecutionTranscript } from './detail/liveTranscript.js';
 import { Artifacts } from './artifacts.jsx';
 import { DetailFields, PayloadWindows } from './detail/fields.jsx';
 import { WorkloadDetail } from './detail/workloads.jsx';
+import { BrainRunEmbed } from './detail/brainRun.jsx';
+import { TodoRunEmbed } from './detail/todoFiles.jsx';
 import { Markdown } from '../project/markdown.jsx';
 import { err } from '../notice.js';
-import { RunnerDetail } from './detail/runner.jsx';
-import { ExecutionLogs } from '../ui/executionEvents/executionLogs.jsx';
-import { useExecutionEvents } from '../ui/executionEvents/useExecutionEvents.js';
 
 const EVENT_TEXT_CHARS = 64 * 1024;
 const RETAINED_EVENT_CHARS = 2 * 1024 * 1024;
@@ -95,12 +94,6 @@ export function ExecutionView({ executionRef, summary, onNotice, mode = 'full', 
     });
     return () => stream.abort();
   }, [id, kind, isProjectRun, detailReady, load]);
-  const dagLogs = useExecutionEvents({ id, enabled: detailReady && kind === 'dag', status: index?.status,
-    onFrame: (frame) => { if (['run_started', 'step_started', 'step_done', 'run_finished'].includes(frame.event)) {
-      setEvents((rows) => appendEvent(rows, frame));
-      if (frame.event === 'run_finished') load();
-    } },
-  });
   const loadMessages = useCallback(async ({ reset = false, rewind = false, cursor = null, leading = new Uint8Array(), windowIndex = 0 } = {}) => {
     if (!id || !hasMessages) return;
     setMessagesBusy(true);
@@ -167,19 +160,18 @@ export function ExecutionView({ executionRef, summary, onNotice, mode = 'full', 
     {execution && <Descriptions size="small" items={[
       { key: 'node', label: '所属节点', children: execution.node_id },
       { key: 'kind', label: '类型', children: KIND_LABELS[kind] || kind },
-      { key: 'harness', label: 'Harness', children: detail?.runners?.length ? 'codex' : detail?.session?.harness || detail?.harness || detail?.request?.input?.harness || 'opencoder' },
+      { key: 'harness', label: 'Harness', children: detail?.session?.harness || detail?.harness || detail?.request?.input?.harness || 'opencoder' },
       { key: 'status', label: '状态', children: <StatusTag status={execution.status} /> },
       { key: 'created', label: '创建时间', children: <TimeText ts={execution.created_at} /> },
     ]} />}
     {!managed && <Space wrap style={{ margin: '12px 0' }}>
       <Button onClick={() => { setRevision((v) => v + 1); load(); }}>刷新明细</Button>
-      <Button disabled={busy || unavailable || !actions.resume || detail?.runners?.some((r) => r.started)} onClick={() => command('resume')}>在原节点恢复</Button>
+      <Button disabled={busy || unavailable || !actions.resume} onClick={() => command('resume')}>在原节点恢复</Button>
       <Button disabled={busy || unavailable || !actions.interrupt} onClick={() => command('interrupt')}>中断（可恢复）</Button>
       <Button danger disabled={busy || unavailable || !actions.cancel} onClick={() => command('cancel')}>取消（终止）</Button>
       {kind === 'project' && !isProjectRun && <><Button disabled={busy || unavailable || !projectRunnable} onClick={() => command('plan')}>生成计划</Button><Button disabled={busy || unavailable || !projectRunnable || !detail?.todo?.plan_md} onClick={() => command('execute')}>执行计划</Button></>}
     </Space>}
     {detail?.error && <Alert type="error" title={detail.error} />}
-    <RunnerDetail id={id} detail={detail} onNotice={onNotice} />
     {hasMessages && <div className="execution-messages">
       <Typography.Title level={5}>会话消息</Typography.Title>
       {!messages.messages.length && !messages.partial && !messagesBusy ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无消息" /> : null}
@@ -201,14 +193,20 @@ export function ExecutionView({ executionRef, summary, onNotice, mode = 'full', 
       <Input.TextArea disabled={unavailable} value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="继续会话" rows={3} />
       <Space><Select value={delivery} onChange={setDelivery} options={[{ value: 'prompt', label: '发送' }, { value: 'steer', label: '指导当前执行' }, { value: 'queue', label: '加入队列' }]} /><Button type="primary" disabled={!prompt.trim()} loading={busy} onClick={() => command(delivery, { prompt })}>提交</Button></Space>
     </Space>}
-    {kind === 'dag' && (detail?.definition?.spec || detail?.definition)?.steps && <DagProcess spec={detail.definition.spec || detail.definition} frames={events} snapshot={detail.dag_steps} />}
-    {kind === 'dag' && <ExecutionLogs id={id} {...dagLogs} steps={((detail?.definition?.spec || detail?.definition)?.steps || []).map((step) => step.name)} />}
+    {kind === 'dag' && (detail?.definition?.spec || detail?.definition)?.steps && <DagRunResult key={id} id={id}
+      spec={detail.definition.spec || detail.definition} status={execution?.status}
+      onStatus={(status) => { if (status !== execution?.status) load(); }} />}
     {kind === 'dag' && <Artifacts id={id} spec={detail?.definition?.spec || detail?.definition} onNotice={onNotice} />}
     {detail?.topic?.final_summary && <Markdown text={detail.topic.final_summary} />}
+    {/* 过程视图只在完整明细挂载：inline 模式（brain 工作台 Inspector 的「执行过程」页，
+        ~380px 窄列）不嵌 PlanCanvas/TODO 画布与第二条 SSE，内联仍由下方 Transcript/
+        WorkloadDetail 等轻量块承载过程信息。 */}
+    {mode === 'full' && kind === 'brain' && <BrainRunEmbed id={id} onNotice={onNotice} />}
+    {mode === 'full' && kind === 'todos' && <TodoRunEmbed id={id} />}
     <WorkloadDetail id={id} detail={detail} kind={kind} onOpen={setChildId} />
     {isProjectRun && detail?.run && <RunReplay id={id} detail={detail} onOpen={setChildId} />}
     <DetailFields id={id} detail={detail} />
-    {!isProjectRun && <Collapse style={{ marginTop: 16 }} items={[
+    {!isProjectRun && kind !== 'dag' && <Collapse style={{ marginTop: 16 }} items={[
       { key: 'events', label: `执行事件（最近 ${events.length} 条）`, children: events.map((e, i) => <div key={`${e.seq}-${i}`}><pre style={{ whiteSpace: 'pre-wrap' }}>#{e.seq} {e.event} {e.data?.omitted ? '内容较大，可分段查看' : e.text}</pre>{e.data?.omitted && e.data?.read_via === 'event_payload' ? <PayloadWindows id={id} marker={e.data} seq={e.seq} label="分段查看事件内容" /> : null}</div>) },
     ]} />}
     {childId && <ExecutionDetail key={childId} id={childId} onClose={() => setChildId(null)} onNotice={onNotice} />}

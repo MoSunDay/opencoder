@@ -266,11 +266,16 @@ pub struct Fleet {
     app: axum::Router,
     server: tokio::task::JoinHandle<()>,
     channels: Vec<tokio::task::JoinHandle<anyhow::Result<()>>>,
+    _config: opencoder_core::config::ScopedConfigHome,
     _dir: tempfile::TempDir,
 }
 impl Fleet {
     pub async fn new(count: usize, client: Arc<MockChatClient>) -> Self {
         let dir = tempfile::tempdir().unwrap();
+        // All Fleet fixtures run on current-thread runtimes. Keep host agent
+        // pools and credentials outside the fixture for its entire lifetime,
+        // including requests served by spawned node-channel tasks.
+        let config = opencoder_core::config::scoped_config_home(dir.path().join("config-home"));
         let state = opencoder_control::new_state(
             dir.path().join("server-work"),
             dir.path().join("server"),
@@ -319,6 +324,7 @@ impl Fleet {
             app,
             server,
             channels,
+            _config: config,
             _dir: dir,
         }
     }

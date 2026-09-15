@@ -1,4 +1,4 @@
-Commit: (working-tree, 基于 b465f440)
+Commit: bf757d2e8688496f8c1be8fc8926dbd9fb2e3c21
 
 # 团队成员即 Agent：组队免填成员 ID/职责，能力快照由大脑固化
 

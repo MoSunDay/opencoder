@@ -319,13 +319,7 @@ body {
   50% { box-shadow: 0 0 0 6px rgba(var(--oc-primary-rgb), 0.08); }
 }
 
-/* Detail layout: graph left, event feed right. */
-.dag-detail {
-  display: flex;
-  gap: 12px;
-  align-items: stretch;
-  height: 560px;
-}
+/* DAG result canvas. */
 .dag-detail-graph {
   flex: 1 1 62%;
   min-width: 0;
@@ -333,59 +327,6 @@ body {
   border-radius: 8px;
   overflow: hidden;
 }
-.dag-detail-empty {
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-}
-.dag-detail-side {
-  flex: 1 1 38%;
-  min-width: 280px;
-  max-width: 460px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  min-height: 0;
-}
-
-/* Reverse-chronological event feed. */
-.dag-feed {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-  border: 1px solid var(--oc-border);
-  border-radius: 8px;
-  padding: 4px 8px;
-}
-.dag-event {
-  padding: 8px 4px;
-  border-bottom: 1px dashed var(--oc-border);
-}
-.dag-event:last-child { border-bottom: none; }
-.dag-event-head {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-.dag-event-extra {
-  margin-top: 4px;
-  font-size: 12px;
-  color: var(--oc-text-secondary);
-}
-.dag-event-pre {
-  margin: 6px 0 0;
-  padding: 6px 8px;
-  background: var(--oc-fill-subtle);
-  border-radius: 6px;
-  font-size: 12px;
-  white-space: pre-wrap;
-  word-break: break-word;
-  max-height: 180px;
-  overflow-y: auto;
-}
-
 /* ===== DAG 画布编辑器 ===== */
 /* Editable step cards — fixed box mirrors canvasLayout.js EDIT_NODE_W/H. */
 .dag-edit-node {
@@ -491,25 +432,6 @@ body {
   overflow-y: auto;
 }
 
-/* todo canvas editor */
-/* TODO 画布（todoEditor.jsx 画布模式）复用 .dag-edit-* 的节点/工具栏/面板
-   骨架，这里只补 TODO 特有元素的最小规则。 */
-/* 外壳是整页 Card（dag 画布长在 Drawer 里）：页头 + Card 头 + 底部 Env 绑定
-   行叠起来的 chrome 更高，画布高度相应收一档，避免整页滚动。 */
-.todo-edit-canvas .dag-edit-wrap {
-  height: calc(100vh - 300px);
-  min-height: 420px;
-}
-/* TODO 节点图标着色：镜像 --agent/--wasm 的做法，任务清单用任务绿。 */
-.dag-edit-node--todo .dag-edit-node-head .anticon { color: var(--oc-heading); }
-/* TODO Inspector 字段比 dag 的多（含 required_tool_calls 行编辑），压一压
-   垂直间距让长表单一屏可见；只作用于画布外壳内，不影响 dag。 */
-.todo-edit-canvas .dag-edit-inspector .ant-form-item { margin-bottom: 10px; }
-/* 窄屏回到既有 dag 画布的纵向堆叠布局（specificity 需压过上面的高度规则）。 */
-@media (max-width: 767px) {
-  .todo-edit-canvas .dag-edit-wrap { height: auto; }
-}
-
 /* Keep navigation and controls reachable on narrow consoles. Two-level IA:
    the category switch sits above the scoped Sider menu (fleet-nav-category);
    the same two levels re-render as Segmented + Select rows on mobile. */
@@ -543,9 +465,7 @@ body {
      .ant-table-content/.ant-table-body); this only guarantees the clipping. */
   .ant-table-content,
   .ant-table-body { overflow-x: auto; }
-  .dag-detail { height: auto; flex-direction: column; }
   .dag-detail-graph { flex-basis: auto; height: 420px; }
-  .dag-detail-side { min-width: 0; max-width: none; max-height: 480px; }
   .dag-edit-wrap { flex-direction: column; height: auto; }
   .dag-edit-stage { height: 380px; }
   .dag-edit-inspector { width: auto; }
@@ -558,47 +478,4 @@ body {
 @media (max-width: 767px) {
   .oc-execution-detail .ant-drawer-content-wrapper { width: 100vw !important; }
   .oc-execution-detail .ant-drawer-body { padding: 16px; }
-}
-
-/* ===== TODO 运行画布 ===== */
-/* 节点复用 .dag-node 基类与状态修饰；盒子尺寸对齐 canvasLayout.js 的
- * TODO_NODE_W/H（240×96）。candidate/revise 沿用 antd gold/orange 色板。 */
-.oc-todo-run-node { width: 240px; min-height: 72px; }
-.oc-todo-run-node .dag-node-status { display: flex; align-items: center; gap: 6px; }
-.oc-todo-run-attempt { color: var(--oc-text-tertiary); font-size: 11px; }
-.oc-todo-run-deps {
-  margin-top: 4px;
-  color: var(--oc-text-tertiary);
-  font-size: 11px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.oc-todo-run--candidate { border-color: #faad14; background: #fffbe6; }
-.oc-todo-run--revise { border-color: #fa8c16; background: #fff7e6; }
-.oc-todo-run-inspector { margin-top: 8px; }
-.oc-todo-run-pre {
-  margin: 8px 0 0;
-  padding: 6px 8px;
-  border: 1px solid var(--oc-border);
-  border-radius: 6px;
-  background: var(--oc-fill-subtle);
-  font-family: var(--oc-mono);
-  font-size: 12px;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  max-height: 160px;
-  overflow: auto;
-}
-
-/* ===== TODO 模板编辑抽屉 ===== */
-/* TodoEditor 不再自带 Card 外壳（外壳由 todoPanel 的全宽 Drawer 提供），
- * 工具条左右分布：模式切换居左，返回/保存居右。 */
-.todo-editor-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
-  margin-bottom: 12px;
 }

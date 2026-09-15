@@ -41,18 +41,25 @@ fn round(v: &mut ChatView, rng: &mut Rng, r: usize, last: bool) {
     v.apply(&SessionEvent::LlmRoundStart {
         started_at_ms: 1000,
     });
-    if rng.below(2) == 0 {
-        v.apply(&SessionEvent::ReasoningDelta(format!("think r{r} ")));
-    }
     let mut streamed = String::new();
-    let chunks = 1 + rng.below(4) as usize;
-    for c in 0..chunks {
-        let t = format!("r{r}c{c} **bold** `code`\n");
-        streamed.push_str(&t);
-        if rng.below(4) == 0 {
-            continue;
-        } // shed delta
-        v.apply(&SessionEvent::TextDelta(t));
+    // A round streams in BATCHES: each batch is an optional leading
+    // reasoning run followed by answer text. Consecutive batches therefore
+    // exercise think-AFTER-text — the provider shape that strands several
+    // open Says when reasoning resumes below a landed Say.
+    let batches = 2 + rng.below(5) as usize;
+    for b in 0..batches {
+        if rng.below(2) == 0 {
+            v.apply(&SessionEvent::ReasoningDelta(format!("think r{r}b{b} ")));
+        }
+        let chunks = 1 + rng.below(4) as usize;
+        for c in 0..chunks {
+            let t = format!("r{r}b{b}c{c} **bold** `code`\n");
+            streamed.push_str(&t);
+            if rng.below(4) == 0 {
+                continue;
+            } // shed delta
+            v.apply(&SessionEvent::TextDelta(t));
+        }
     }
     let tools = if last { 0 } else { 1 + rng.below(2) as usize };
     for t in 0..tools {

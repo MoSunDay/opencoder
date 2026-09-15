@@ -37,6 +37,7 @@
 | 回滚后重新执行探针、续跑保持编号 | `test_retry_after_rollback_executes_new_probes_and_keeps_resume_identity` | 同上 |
 | 首次迁移中断续跑 | `test_resume_after_current_pointer_was_written_finishes_ingress` | `scripts/platform/rolling_tests/test_migration.py` |
 | 响应丢失后的探针回执恢复 | `ProbeTests` | `scripts/platform/rolling_tests/test_probes.py` |
+| 重复挂载与混合远程存储预检 | `test_every_reported_mount_must_be_verified_local_storage` | `scripts/platform/rolling_tests/test_manifest.py` |
 | 24 个中断点、备份完整性 | `RecoveryTests` | `scripts/platform/rolling_tests/test_recovery.py` |
 | 发布状态和 SSE 客户端 | DOM/游标测试 | `crates/web/spa/src/fleet/releases.dom.test.jsx`、`crates/web/spa/src/sse.release.test.js` |
 | 真实进程、TODO 链、WASI、Shell、NFS、回滚 | `exercise` | `scripts/acceptance/smooth_release/main.py` |
@@ -49,8 +50,10 @@
 - Rust 完整回归：5,228 项通过、0 失败，6 项既有手工用例忽略。日志 `/tmp/opencoder-smooth-final-tests2.log`；Project 资源拒绝后的继续规划、原拒绝回执重放及心跳恢复均通过。
 - 全目标 Clippy 零警告，workspace 构建通过；日志 `/tmp/opencoder-smooth-final-clippy5.log`、`/tmp/opencoder-smooth-final-build2.log`。
 - 前端全量 96 文件、683 项通过，SPA 构建与漂移检查通过；日志 `/tmp/opencoder-smooth-combined-spa4.log`。
-- 发布工具 14 项通过，包含 24 个故障子场景；旧安装/备份工具 19 项、真实模型验收夹具 3 项通过。日志 `/tmp/opencoder-smooth-final-rolling-tests.log`、`/tmp/opencoder-smooth-platform-current.log`、`/tmp/opencoder-smooth-final-acceptance-tests.log`。
+- 发布工具 15 项通过，包含 24 个故障子场景；旧安装/备份工具 19 项、真实模型验收夹具 3 项通过。日志 `/tmp/opencoder-smooth-final-rolling-tests2.log`、`/tmp/opencoder-smooth-platform-current.log`、`/tmp/opencoder-smooth-final-acceptance-tests.log`。
 - 最新隔离演练使用生产所在 ext4 磁盘，完成三版共存、两次 Host 交接、带任务回滚、Server SIGKILL 恢复、休眠/历史唤醒、全局容量/FIFO、技能隔离、只读 NFS；Shell、WASI 与真实 OCI 容器原进程保持。56 次持续提交零失败，最长接收 215 毫秒，最大接收间隔 315 毫秒、调度间隔 409 毫秒，SSE 149 毫秒且持久事件逐条一致。证据 `/var/tmp/opencoder-smooth-g42kp5bx/result.json`、`scheduling.json`；模型为本地夹具。
 - 使用生产只读资源池的独立 Runtime 复测：纯 WASM 受理由修复前 8.75–22.23 秒降至 9–10 毫秒，执行完成约 228 毫秒；证据 `/var/tmp/opencoder-resource-preflight-8t2uvsur`、日志 `/tmp/opencoder-resource-preflight-fixed.log`。
 - 联合代码与 `320dbbf3` 发布候选一致，保留 TODO 目录交付及已上线 DAG 修复；差异仅为本文和接口说明补充。该候选的优化发布包另有磁盘演练证据 `/var/tmp/opencoder-smooth-h7quack9/result.json`，详见 [TODO 目录交付](todo-directory-editor.md#联合发布验证)。
 - Nginx 1.30.4 已安装，配置检查通过且未启动；原生产 Server/Agent 继续服务。首次迁移、真实模型样本及最终观察结果将在实际执行后补录。
+
+首次迁移预检发现本机挂载表对同一路径重复报告 `ext4`。检查器现逐项验证所有文件系统，重复本地记录允许通过；空结果、未知类型和包含 NFS 的混合结果仍拒绝。首次尝试尚未停止生产服务。

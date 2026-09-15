@@ -48,6 +48,9 @@ def resources(settings, manifest):
     import subprocess
     for path in filter(None, (settings.state_dir, settings.server_data, settings.legacy_agent_data)):
         result = subprocess.run(["findmnt", "-n", "-o", "FSTYPE", "-T", str(path)], check=True, capture_output=True, text=True)
-        filesystem = result.stdout.strip()
-        if filesystem not in ("ext2", "ext3", "ext4", "xfs", "btrfs", "zfs", "bcachefs", "tmpfs", "ramfs", "overlay"):
-            raise ValueError(f"handoff database requires verified local storage: {path} ({filesystem})")
+        filesystems = set(result.stdout.split())
+        local = {"ext2", "ext3", "ext4", "xfs", "btrfs", "zfs", "bcachefs", "tmpfs", "ramfs", "overlay"}
+        # A mount may appear more than once in this namespace. Every reported
+        # layer must be local; duplicate records do not change that decision.
+        if not filesystems or not filesystems <= local:
+            raise ValueError(f"handoff database requires verified local storage: {path} ({result.stdout.strip()})")

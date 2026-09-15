@@ -1,4 +1,4 @@
-Commit: 6977bde19a831a804e1a785ae24596f4c304e87d
+Commit: c0b88d6131b493822219179b1135a0a01807822b
 
 # opencoder-server 接入 DAG WASM NFS 自动启动
 
@@ -20,3 +20,11 @@ Commit: 6977bde19a831a804e1a785ae24596f4c304e87d
 - `cargo test -p opencoder-worker`
 - `cargo test -p opencoder-web`
 - `rustfmt --edition 2021 --check crates/control/src/bootstrap.rs`
+
+
+## 线上生效
+
+- 发布版本：`c0b88d61`（包含 `ea2052b2` 的 Server 自动启动逻辑）。
+- Server `dag.nfs` 已启用，导出 `127.0.0.1:2050`，只读；节点通过 `/mnt/opencoder-dag-wasm` 持久化只读 NFS v3 挂载。
+- 验证制品 `nfs-dag-e2e-20260915@v1.wasm`：Server 源池、NFS 挂载和节点本地 `_modules` SHA256 均为 `d716c85762bf57fb3f8e02f7be8856ca67a5bef41da2afaaebf54d0aadc17b39`；实际 DAG 执行完成，输出 `nfs-dag-e2e\n`。
+- NFS 写入返回 `EROFS`；任务输出位于节点本地 DAG 工作目录。

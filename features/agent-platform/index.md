@@ -1,4 +1,4 @@
-Commit: 6977bde19a831a804e1a785ae24596f4c304e87d
+Commit: 6ff63f9b
 
 # Agent 调度平台 — Server 调度、Node 执行、Web/CLI 管理
 

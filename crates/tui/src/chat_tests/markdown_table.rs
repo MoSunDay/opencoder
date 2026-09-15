@@ -118,3 +118,41 @@ fn chat_level_say_table_renders_after_llm_round_end() {
         "cells must not jam into one run:\n{joined}"
     );
 }
+
+#[test]
+fn separator_cross_aligns_under_column_pipes() {
+    use unicode_width::UnicodeWidthStr as Uws;
+
+    fn assert_aligned(src: &str) {
+        let ls = crate::markdown::render(src);
+        let text: Vec<String> = ls.iter().map(line_text).collect();
+        let header = text[0].as_str();
+        let sep = text[1].as_str();
+        let display_col = |s: &str, byte_idx: usize| Uws::width(&s[..byte_idx]);
+        let pipes: Vec<usize> = header
+            .match_indices('\u{2502}')
+            .map(|(i, _)| display_col(header, i))
+            .collect();
+        let crosses: Vec<usize> = sep
+            .match_indices('\u{253c}')
+            .map(|(i, _)| display_col(sep, i))
+            .collect();
+        assert!(
+            !pipes.is_empty() && pipes.len() == crosses.len(),
+            "pipe/cross count mismatch:\n{text:?}"
+        );
+        assert_eq!(
+            pipes, crosses,
+            "`\u{253c}` must sit directly under `\u{2502}`:\n{text:?}"
+        );
+        assert_eq!(
+            Uws::width(header),
+            Uws::width(sep),
+            "separator row width must equal header row width:\n{text:?}"
+        );
+    }
+
+    // ASCII 表与含 CJK 宽字符的表：`┼` 按显示宽落在 `│` 正下方。
+    assert_aligned("| Check | Outcome | Notes |\n|---|---|---|\n| Build | Pass | ok |\n");
+    assert_aligned("| 检查 | 结果 |\n|---|---|\n| 构建 | 通过 |\n");
+}

@@ -375,7 +375,8 @@ fn table_row_line(cells: &[Vec<Span<'static>>], widths: &[usize], header: bool) 
 }
 
 /// 把缓冲的表格行渲染成对齐网格：首行为表头（加粗），其后一条
-/// `─┼─` 分隔线（每列 `─`×(列宽+2)，用 `┼` 相连，muted 样式），
+/// 分隔线（每列 `─`×列宽，用 `─┼─` 相连——总宽与表头严格相等，
+/// `┼` 落在 `│` 正下方，muted 样式），
 /// 其余为普通行。列数取最长行；每列宽度取该列单元格的最大显示宽。
 /// 残行 / 空单元格不 panic；`rows` 为空或没有列时返回空。超宽表格
 /// 不截断、不换行（宽度交给视口处理）。
@@ -402,9 +403,9 @@ fn emit_table(rows: &[Vec<Vec<Span<'static>>>]) -> Vec<Line<'static>> {
             lines.push(Line::from(Span::styled(
                 widths
                     .iter()
-                    .map(|w| "\u{2500}".repeat(w + 2))
+                    .map(|w| "\u{2500}".repeat(*w))
                     .collect::<Vec<_>>()
-                    .join("\u{253c}"),
+                    .join("\u{2500}\u{253c}\u{2500}"),
                 Style::default().fg(theme::muted()),
             )));
         }

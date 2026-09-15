@@ -61,7 +61,7 @@ impl Default for AgentDefaults {
 }
 
 fn runtime_empty(value: &crate::harness::RuntimeSettings) -> bool {
-    value.profiles.is_empty() && value.runners.is_empty()
+    value.profiles.is_empty() && value.archived.is_empty()
 }
 
 /// Tool-surface breadth for custom agents. Serialized lowercase

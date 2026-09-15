@@ -31,52 +31,18 @@ async fn registered_runner_is_rejected_by_dag_definition_and_inline_dispatch() {
         r#"{"agent":{"agents_dir":null}}"#,
     )
     .unwrap();
-    let exe = fleet.root().join("runner.py");
-    let source = include_str!("../../dag-runtime/tests/runner/fixture.py").replace("root = pathlib.Path.cwd()", "root = pathlib.Path.cwd() / v['execution_id']\nroot.mkdir(exist_ok=True)")
-        .replace("mode = os.environ['MODE'].split(':', 1)[1]", "mode = os.environ['MODE'].split(':', 1)[1]\nif v['input'].get('hold'):\n    import time\n    while not (pathlib.Path.cwd()/'release').exists(): time.sleep(0.02)");
-    std::fs::write(&exe, source).unwrap();
+    let exe = fleet.root().join("profile-tool");
+    std::fs::write(&exe, "#!/bin/sh\nexit 0\n").unwrap();
     std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o700)).unwrap();
-    let profile = json!({"executable":exe,"model":"model-v1","auth_slot":1,"envs":{"EXAMPLE":"private-profile-value"}});
-    let profile_url = "/api/harnesses/codex/profiles/business";
-    assert_eq!(
-        fleet.call("PUT", profile_url, profile.clone()).await.body["revision"],
-        1
-    );
-    assert_eq!(
-        fleet
-            .call("GET", "/api/harnesses/codex/profiles", Value::Null)
-            .await
-            .body["items"][0]["name"],
-        "business"
-    );
-    let runner = json!({"command":[exe],"workdir":fleet.root(),"envs":{"MODE":"fixture:normal"},"files":{
-        exe.display().to_string():opencoder_dag_runtime::exec::runner::artifacts::checksum(&exe).unwrap()}});
-    assert_eq!(
-        fleet
-            .call("PUT", "/api/runners/business", runner.clone())
-            .await
-            .body["revision"],
-        1
-    );
-    assert_eq!(
-        fleet.call("GET", "/api/runners", Value::Null).await.body["items"][0]["name"],
-        "business"
-    );
-    let mut invalid = runner.clone();
-    invalid["files"] = json!({});
-    assert_eq!(
-        fleet
-            .call("PUT", "/api/runners/invalid", invalid)
-            .await
-            .status,
-        400
-    );
+    assert_eq!(fleet.call("PUT", "/api/harnesses/codex/profiles/business", json!({"executable":exe,"model":"model-v1","auth_slot":1})).await.body["revision"], 1);
+    assert!(fleet.call("GET", "/api/runners", Value::Null).await.status >= 400);
+    assert!(fleet.call("PUT", "/api/runners/business", json!({})).await.status >= 400);
     let spec = json!({"name":"business","steps":[{"name":"diagnose","timeout_secs":20,"kind":{"type":"runner","runner":"business","agent":"act"}}]});
     let reply = fleet
         .call("POST", "/api/dag/defs", json!({"spec":spec}))
         .await;
     assert_eq!(reply.status, 400, "{reply:?}");
-    assert!(reply.body.to_string().contains("Runner"), "{reply:?}");
+    assert!(reply.body.to_string().contains("unknown variant"), "{reply:?}");
     let reply = fleet
         .call(
             "POST",
@@ -89,7 +55,10 @@ async fn registered_runner_is_rejected_by_dag_definition_and_inline_dispatch() {
     assert_eq!(reply.status, 400, "{reply:?}");
     // Inline dispatch hits the serde boundary first: `runner` is no longer a
     // known step kind variant after the convergence to agent/wasm.
-    assert!(reply.body.to_string().contains("unknown variant"), "{reply:?}");
+    assert!(
+        reply.body.to_string().contains("unknown variant"),
+        "{reply:?}"
+    );
     assert_eq!(client.call_count(), 0);
     fleet.shutdown().await;
 }

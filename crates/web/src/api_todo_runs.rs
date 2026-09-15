@@ -16,8 +16,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use opencoder_core::share_fs::{
-    env_context_path, read_json_opt, resolve_tool_ref, todo_context_path, todo_env_binding_path,
-    validate_share_name,
+    env_context_path, read_json_opt, resolve_tool_ref, todo_env_binding_path, validate_share_name,
 };
 use opencoder_llm::{ChatClient, ChatStream};
 use opencoder_todos::WorkflowSpec;
@@ -50,13 +49,13 @@ async fn load_version(
     name: &str,
     version: &str,
 ) -> Result<(Value, Option<String>), Response> {
-    let context_path =
-        todo_context_path(root, name, version).map_err(|e| error_400(format!("{e:#}")))?;
-    let context = match read_json_opt(&context_path) {
-        Ok(Some(context)) => context,
-        Ok(None) => return Err(error_404(&format!("版本不存在: {name}/{version}"))),
-        Err(e) => return Err(error_500(format!("读取 context.json 失败: {e:#}"))),
-    };
+    let path = opencoder_core::share_fs::todo_version_dir(root, name, version)
+        .map_err(|e| error_400(e.to_string()))?;
+    if !path.is_dir() {
+        return Err(error_404("版本不存在"));
+    }
+    let spec = opencoder_todos::directory::load(&path).map_err(|e| error_400(format!("{e:#}")))?;
+    let context = serde_json::to_value(spec).map_err(|e| error_500(e.to_string()))?;
     let binding_path =
         todo_env_binding_path(root, name, version).map_err(|e| error_400(format!("{e:#}")))?;
     let env = match read_json_opt(&binding_path) {

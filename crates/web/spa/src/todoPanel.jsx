@@ -12,16 +12,18 @@ import { TodoEditor } from './todoEditor.jsx';
 import { TodoRunsPanel } from './todoRunsPanel.jsx';
 import { TodoEnvsPanel } from './envs/todoPanel.jsx';
 import { err, info } from './notice.js';
+import {FileProblems,errorProblems} from './todo/directory/problems.jsx';
 
 const { Text } = Typography;
 
-export { EXAMPLE_SPEC } from './todo/editing/model.js';
+export { EXAMPLE_SPEC } from './todo/directory/model.js';
 
 /// 展开行：某模板的版本列表（env 绑定来自 GET /api/todo/templates/:name）。
 function VersionsBlock({ template, onNotice, onEdit, onChanged }) {
   const [detail, setDetail] = useState(null);
   const name = template.name;
   const attempts = useRef(new Map());
+  const [fileProblems,setFileProblems]=useState([]);
 
   useEffect(() => {
     let alive = true;
@@ -82,12 +84,16 @@ function VersionsBlock({ template, onNotice, onEdit, onChanged }) {
   const run = async (v) => {
     if (!attempts.current.has(v)) attempts.current.set(v, newId('todos'));
     try {
+      const bundle=await apiGet(`/api/todo/templates/${encodeURIComponent(name)}/${encodeURIComponent(v)}/files`);
+      if(bundle.diagnostics?.length){setFileProblems(bundle.diagnostics);return;}
+      await apiPost('/api/todo/validate-files',{files:bundle.files});
       const j = await apiPost(`/api/todo/templates/${encodeURIComponent(name)}/${encodeURIComponent(v)}/run`, { id: attempts.current.get(v) });
       attempts.current.delete(v);
       onNotice(info(`已启动工作流: ${(j && j.workflow_id) || ''}`));
       onChanged((j && j.workflow_id) || '');
     } catch (e) {
-      onNotice(err('运行失败: ' + (e && e.message))); // 400 = spec 无效或 env 工具缺失
+      setFileProblems(errorProblems(e));
+      onNotice(err('运行失败: ' + (e && e.message)));
     }
   };
 
@@ -110,6 +116,7 @@ function VersionsBlock({ template, onNotice, onEdit, onChanged }) {
         </div>
       ))}
       <Button size="small" type="dashed" style={{ marginTop: 6 }} onClick={() => newVersion('')}>+ 从当前新建版本</Button>
+      <FileProblems problems={fileProblems} onClose={()=>setFileProblems([])} onLocate={()=>onEdit(name,template.current)}/>
     </div>
   );
 }

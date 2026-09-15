@@ -100,9 +100,6 @@ pub enum SandboxMode {
 /// No silent migration happens: the caller surfaces the error to the user.
 pub fn decode_spec(value: &serde_json::Value) -> Result<DagSpec, String> {
     if let Some(steps) = value.get("steps").and_then(|s| s.as_array()) {
-        if steps.iter().any(|step| step["kind"]["type"] == "runner") {
-            return Err("DAG 不支持 Runner 步骤，请改写为 agent/wasm 后重新保存".into());
-        }
         for step in steps {
             if step
                 .get("kind")
@@ -221,10 +218,10 @@ mod tests {
         let value = json!({"name":"old","steps":[{"name":"a","kind":{"type":"runner","runner":"business","agent":"act"}}]});
         assert!(decode_spec(&value)
             .unwrap_err()
-            .contains("DAG 不支持 Runner"));
+            .contains("unknown variant"));
         assert!(decode_spec_str(&value.to_string())
             .unwrap_err()
-            .contains("DAG 不支持 Runner"));
+            .contains("unknown variant"));
         assert!(serde_json::from_value::<DagSpec>(value)
             .unwrap_err()
             .to_string()

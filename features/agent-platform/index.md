@@ -1,26 +1,19 @@
-Commit: 6ff63f9b
+Commit: 5bf6f621e3722e60258592267109ba5807e74d94
 
 # Agent 调度平台 — Server 调度、Node 执行、Web/CLI 管理
 
-## 关键路径
+## 执行查看
 
-- crates/control/src/api/executions/mod.rs — 稳定 ID 幂等受理与 select_queue_node
-- crates/control/src/api/settings/ — harness/runner 私有定义库
-- crates/control/src/admission.rs — Open/Frozen 受理开关
-- crates/web/src/api_nodes*.rs — 节点注册、负载与维护接口
-- crates/web/src/api_project*.rs — 项目 API 与运行回放
-- crates/worker/src/operations/launch.rs — 受理快照（harness + 资源版本）
-- crates/worker/src/operations/queue/mod.rs — 持久化 pending 队列与派发
-- crates/node/src/uplink.rs — WebSocket 注册/心跳/执行 RPC
-- crates/node/src/runner.rs — 注册 Runner 执行
-- crates/server/src/main.rs — opencode-server 二进制
-- crates/agent/src/main.rs — opencode-agent 二进制
-- crates/web/spa/src/fleet/nodes.jsx — 节点页、注册删除与调度配置
-- crates/web/spa/src/fleet/executions.jsx — 全部执行页
-- crates/web/spa/src/fleet/detail/ — 执行详情与回放
-- docs/agent-platform.md — 部署、API 与运行时边界
-- docs/registered-runners.md — 注册 Runner 约定
-- scripts/acceptance/business/README.md — 独立副本业务验收
+- 用户从全部执行、DAG 运行等业务入口查看运行；执行列表展示创建时间、ID、类型、节点与状态，详细结果由所属节点提供。
+- DAG 直接展示当前结果，运行中继续更新。完成或取消后的未执行步骤明确标示，加载与连接错误显示重试入口。
+- 点击 DAG 步骤从右侧打开占视口 75% 的「实时日志」抽屉；支持切换步骤或查看全部步骤、搜索、自动滚动和历史分页。打开历史执行不会逐条回放画布，关闭日志抽屉结束日志请求。
+- 执行详情继续提供产物下载；节点离线时显示错误，恢复连接后可重新查询。
+
+## 平滑发布
+
+- 新版本就绪后接新任务；已有任务、回复、重跑与子任务留在原 Runtime，多个版本共用节点容量与 FIFO。
+- 节点页的发布状态展示当前/候选版本、阶段、旧版本任务和回收失败；SSE 按游标自动续接。
+- 首次迁移需要一次安全窗口；后续兼容发布不冻结节点，独立 NFS 保持运行。操作见 [平滑发布](../../docs/smooth-release.md)。
 
 ## 边界
 
@@ -28,7 +21,7 @@ Commit: 6ff63f9b
 - Server 索引仅创建时间/ID/类型/节点/状态，明细按 ID 回查节点
 - 节点离线时明细查询明确报错
 - 节点页删除仅移除节点注册；在线节点需先停止服务，执行索引和任务数据保留
-- Server 通过只读 NFS 共享 Agent 资源和 DAG WASM 制品；节点在受理时复制版本快照到本地执行目录，任务不写 NFS
+- 平滑发布通过独立资源服务的只读 NFS 共享 Agent 资源和 DAG WASM 制品；节点在受理时复制版本快照到本地执行目录，任务不写 NFS
 - 新平台独立存储，不迁移旧 daemon/CLI 历史
 
 ## 相关

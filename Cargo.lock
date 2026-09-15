@@ -2342,7 +2342,9 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "axum",
  "clap",
+ "futures",
  "opencoder-core",
  "opencoder-dag",
  "opencoder-dag-runtime",
@@ -2351,11 +2353,14 @@ dependencies = [
  "opencoder-session",
  "opencoder-store",
  "opencoder-worker",
+ "reqwest",
+ "serde",
  "serde_json",
  "tempfile",
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "ulid",
 ]
 
 [[package]]
@@ -2612,6 +2617,7 @@ dependencies = [
  "opencoder-control",
  "opencoder-core",
  "opencoder-store",
+ "serde_json",
  "tempfile",
  "tokio",
  "tracing",
@@ -2662,6 +2668,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "chrono",
+ "fs2",
  "libsql",
  "opencoder-core",
  "opencoder-dag",

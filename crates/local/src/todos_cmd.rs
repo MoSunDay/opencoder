@@ -10,11 +10,8 @@ use crate::{Cli, TodosSub};
 
 pub async fn dispatch(cli: &Cli, sub: &TodosSub) -> Result<()> {
     if let TodosSub::Validate { file } = sub {
-        let raw = tokio::fs::read_to_string(file)
-            .await
-            .with_context(|| format!("read todos file {}", file.display()))?;
-        let spec = opencoder_todos::parse_spec(&raw)
-            .with_context(|| format!("parse todos spec {}", file.display()))?;
+        let spec = opencoder_todos::directory::load(file)
+            .with_context(|| format!("load TODO {}", file.display()))?;
         println!(
             "{}",
             serde_json::to_string(&serde_json::json!({
@@ -56,11 +53,8 @@ pub async fn dispatch(cli: &Cli, sub: &TodosSub) -> Result<()> {
             Ok(())
         }
         TodosSub::Run { file, debug, json } => {
-            let raw = tokio::fs::read_to_string(file)
-                .await
-                .with_context(|| format!("read todos file {}", file.display()))?;
-            let spec = opencoder_todos::parse_spec(&raw)
-                .with_context(|| format!("parse todos spec {}", file.display()))?;
+            let spec = opencoder_todos::directory::load(file)
+                .with_context(|| format!("load TODO {}", file.display()))?;
             let workflow_id = format!("todos-{}", ulid::Ulid::new());
             eprintln!("workflow_id={workflow_id}");
             let runtime = runtime(cli, &workdir, store.clone(), *debug)?;

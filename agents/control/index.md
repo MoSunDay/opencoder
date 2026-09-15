@@ -1,4 +1,4 @@
-Commit: 6ff63f9b
+Commit: a8ccb79b028fc53a3bb50df54ba1fec157693ed4
 
 # control 模块
 
@@ -12,6 +12,7 @@ Commit: 6ff63f9b
 - `crates/control/src/api/brain_runs/` — 能力/不可变计划/运行 API；按根串行授权派发与控制，资源占用和来源回执确认。
 - `crates/control/src/api/catalog.rs` — 节点列表、注册删除、维护，以及 teams/dag_defs/resolve 定义解析
 - `crates/control/src/api/compat/` — 旧 Chat/DAG/TODO/Project 兼容路由
+- `crates/control/src/api/compat/todo_review.rs` — Review 与任意节点重跑转发到原归属 Node；context-preview 复用 TODO 上下文纯函数。
 - `crates/control/src/api/settings/` — harness/codex 定义；registered 管 profile/runner
 - `crates/control/src/routes.rs` — /api/harnesses/codex/profiles、/api/runners
 - `crates/control/src/resource_scope.rs` — /api/agents* 绑定 Server 资源根；/api/dag/wasm* 复用共享中间件 `api_dag_wasm_nfs::configured_dag_wasm`
@@ -25,6 +26,8 @@ Commit: 6ff63f9b
 
 - server 二进制不依赖 session/worker/team/project runtime。
 - 执行明细向归属 Node 实时查询，全局索引不存运行内容。Brain 根明细同样属于 Node，计划版本与跨运行资源占用属于 control。
+- TODO Review/重跑复用协议 v9 的执行 Command；新增接口仍受既有角色权限矩阵约束。Agent 列表的 primary 标记来自实际注册表解析。
+- NFS 状态读取等待导出生命周期锁；启动后的状态检查与导出操作串行，锁竞争不会被解释为导出停止。
 - Brain 管理动作派发前探测目标节点资源摘要，原生受理复核快照；不确定受理重发同 ID。
 - system 团队执行已退役；跨节点维护走 POST /api/nodes/:id/maintenance。
 - team 定义成员=agent 名（唯一、captain ∈ members）；resolve 时经 `GET /api/brain/agents` 同源聚合把成员能力 summary 固化进 pinned definition，库存定义不落 capabilities；成员名/captain 在 validate 时就地 trim 归一（与 bind 侧对称，padded 提交不再固化空快照）。

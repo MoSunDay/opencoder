@@ -215,6 +215,34 @@ async fn a_rejected_first_execute_does_not_prevent_later_planning() {
     let runs = read(&fleet, &format!("/api/project/todos/{id}/runs")).await;
     assert_eq!(runs["runs"].as_array().unwrap().len(), 1);
     assert_eq!(runs["runs"][0]["id"], "prun-after-rejection");
+    for route in [
+        format!("/api/project/todos/{id}/execute"),
+        format!("/api/executions/project-{id}/commands"),
+    ] {
+        let body = if route.ends_with("/commands") {
+            json!({"action":"execute","input":{"run_id":"prun-rejected"}})
+        } else {
+            json!({"run_id":"prun-rejected"})
+        };
+        let repeated = fleet.call("POST", &route, body).await;
+        assert_eq!(repeated.status, execute.status, "{repeated:?}");
+        assert_eq!(repeated.body, execute.body);
+    }
+    let changed = fleet
+        .call(
+            "POST",
+            &format!("/api/project/todos/{id}/plan"),
+            json!({"run_id":"prun-rejected"}),
+        )
+        .await;
+    assert_eq!(changed.status, 409);
+    assert_eq!(
+        read(&fleet, &format!("/api/project/todos/{id}/runs")).await["runs"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
     fleet.shutdown().await;
 }
 

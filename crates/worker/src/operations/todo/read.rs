@@ -65,6 +65,9 @@ pub(super) async fn query(worker: &Worker, id: &str, input: Value) -> Result<Rpc
     let state: WorkflowState = serde_json::from_value(record.state_json.clone())?;
     let section = input["section"].as_str().unwrap_or("overview");
     let value = match section {
+        "files" => {
+            json!({"files":opencoder_todos::directory::encode(&spec, spec.metadata["env"].as_str())?})
+        }
         "overview" => overview(worker, &record, &spec, &state, head, &input).await?,
         "node" => {
             let Some(todo) = spec

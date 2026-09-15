@@ -26,6 +26,42 @@ pub struct CreateRun {
 }
 pub async fn create(State(state): State<Arc<AppState>>, Json(body): Json<CreateRun>) -> Response {
     let intent = serde_json::to_value(&body).expect("serializable request intent");
+    let id = body
+        .id
+        .clone()
+        .unwrap_or_else(|| format!("brain-{}", ulid::Ulid::new()));
+    if !valid_id(&id) {
+        return error_400("invalid brain run id".into());
+    }
+    let _lock = match state.fleet.request_lock("brain-run", &id).await {
+        Ok(lock) => lock,
+        Err(error) => return error_500(error.to_string()),
+    };
+    let fingerprint = opencoder_core::token_hash(&intent.to_string());
+    match state
+        .fleet
+        .claim_request("brain-run", &id, &fingerprint)
+        .await
+    {
+        Ok(true) => {}
+        Ok(false) => {
+            return response(RpcReply::error(
+                409,
+                "run id was already accepted with a different intent",
+            ))
+        }
+        Err(error) => return error_500(error.to_string()),
+    }
+    match state.fleet.receipt("brain-run", &id).await {
+        Ok(Some(receipt)) if receipt.phase == "prepared" => {
+            return match serde_json::from_value(receipt.payload) {
+                Ok(request) => response(crate::api::executions::submit(&state, request).await),
+                Err(error) => error_500(error.to_string()),
+            };
+        }
+        Ok(_) => {}
+        Err(error) => return error_500(error.to_string()),
+    }
     if let Some(id) = body.id.as_deref() {
         if let Ok(Some(index)) = state.fleet.index(id).await {
             if index.kind != ExecutionKind::Brain {
@@ -92,9 +128,6 @@ pub async fn create(State(state): State<Arc<AppState>>, Json(body): Json<CreateR
             references,
             capabilities: super::catalog::capabilities(&state).await?,
         };
-        let id = body
-            .id
-            .unwrap_or_else(|| format!("brain-{}", ulid::Ulid::new()));
         opencoder_brain::execution::initialize(&id, request.clone(), 0)?;
         Ok::<_, anyhow::Error>(CreateExecution {
             id,
@@ -110,7 +143,21 @@ pub async fn create(State(state): State<Arc<AppState>>, Json(body): Json<CreateR
     }
     .await;
     match request {
-        Ok(request) => response(crate::api::executions::submit(&state, request).await),
+        Ok(request) => {
+            let receipt = opencoder_store::fleet::handoff::Receipt {
+                fingerprint,
+                phase: "prepared".into(),
+                payload: json!(request),
+            };
+            if let Err(error) = state
+                .fleet
+                .save_receipt("brain-run", &request.id, &receipt)
+                .await
+            {
+                return error_500(error.to_string());
+            }
+            response(crate::api::executions::submit(&state, request).await)
+        }
         Err(e) => error_400(e.to_string()),
     }
 }
@@ -228,6 +275,10 @@ pub async fn command(
     if !matches!(command.action.as_str(), "pause" | "resume" | "cancel") {
         return error_400("supported commands: pause, resume, cancel".into());
     }
+    let _process_lock = match state.fleet.request_lock("brain-control", &id).await {
+        Ok(lock) => lock,
+        Err(error) => return super::super::error_500(error.to_string()),
+    };
     let _gate = state.brain_gate.lock(&id).await;
     response(call(&state, &id, &command.action, command.input).await)
 }

@@ -10,13 +10,16 @@ pub(in crate::libsql_store) async fn read(conn: &Connection, id: &str) -> Result
     let head_seq = super::last_seq(conn, id).await?;
     let mut rows = conn
         .query(
-            "SELECT seq, sse_kind, json_extract(payload_json, '$.step'), \
+        "WITH latest AS (SELECT max(seq) AS seq, \
+           max(CASE WHEN sse_kind='step_started' \
+             THEN coalesce(json_extract(payload_json, '$.at_ms'), ts) END) AS started_at_ms \
+           FROM session_events WHERE session_id=?1 AND seq<=?2 \
+           AND sse_kind IN ('step_started','step_done') GROUP BY json_extract(payload_json, '$.step')) \
+         SELECT e.seq, sse_kind, json_extract(payload_json, '$.step'), \
          coalesce(json_extract(payload_json, '$.at_ms'), ts), \
          coalesce(json_extract(payload_json, '$.payload.ok'), 1), \
-         json_extract(payload_json, '$.payload.error') FROM session_events \
-         WHERE seq IN (SELECT max(seq) FROM session_events \
-           WHERE session_id=?1 AND seq<=?2 AND sse_kind IN ('step_started','step_done') \
-           GROUP BY json_extract(payload_json, '$.step')) ORDER BY seq",
+         json_extract(payload_json, '$.payload.error'), coalesce(latest.started_at_ms, 0) \
+         FROM session_events e JOIN latest ON latest.seq=e.seq ORDER BY e.seq",
             params![id, head_seq],
         )
         .await?;
@@ -29,6 +32,7 @@ pub(in crate::libsql_store) async fn read(conn: &Connection, id: &str) -> Result
             at_ms: row.get(3)?,
             ok: row.get::<i64>(4)? != 0,
             error: row.get(5)?,
+            started_at_ms: row.get(6)?,
         });
     }
     Ok(DagStepSnapshot { head_seq, steps })

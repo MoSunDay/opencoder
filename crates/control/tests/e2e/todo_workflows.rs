@@ -100,7 +100,7 @@ async fn template_env_and_tool_management() {
         .req(
             Method::POST,
             "/api/todo/templates/demo/new-version",
-            Some(json!({"spec": spec("demo"), "note": "v2"})),
+            Some(json!({"spec": spec("demo"), "note": "v2", "expected_current":"v1"})),
         )
         .await;
     assert_eq!(status, 200, "{body}");
@@ -476,9 +476,9 @@ async fn dispatch_pins_env_and_reaches_node() {
     assert_eq!(s, 200);
     let (s, _) = h
         .req(
-            Method::PUT,
-            "/api/todo/templates/envrun/v1/env.json",
-            Some(json!({"env": "envrun"})),
+            Method::POST,
+            "/api/todo/templates/envrun/new-version",
+            Some(json!({"expected_current":"v1","binding":{"env": "envrun"}})),
         )
         .await;
     assert_eq!(s, 200);
@@ -486,7 +486,7 @@ async fn dispatch_pins_env_and_reaches_node() {
     let (s, b) = h
         .dispatch(
             Method::POST,
-            "/api/todo/templates/envrun/v1/run",
+            "/api/todo/templates/envrun/v2/run",
             Some(json!({"id": "todos-envrun-1"})),
         )
         .await;
@@ -525,12 +525,14 @@ async fn dispatch_rejects_missing_env_tool_and_tampered_spec() {
     assert_eq!(s, 200);
     let (s, _) = h
         .req(
-            Method::PUT,
-            "/api/todo/templates/broken/v1/env.json",
-            Some(json!({"env": "broken"})),
+            Method::POST,
+            "/api/todo/templates/broken/new-version",
+            Some(json!({"expected_current":"v1","binding":{"env": "broken"}})),
         )
         .await;
-    assert_eq!(s, 200);
+    assert_eq!(s, 400);
+    // A manually tampered binding is also refused before dispatch.
+    std::fs::write(share.join("todo/broken/v1/env.json"), r#"{"env":"broken"}"#).unwrap();
     let (s, b) = h
         .req(
             Method::POST,
@@ -556,7 +558,7 @@ async fn dispatch_rejects_missing_env_tool_and_tampered_spec() {
         .await;
     assert_eq!(s, 200);
     std::fs::write(
-        share.join("todo/tamper/v1/context.json"),
+        share.join("todo/tamper/v1/workflow.json"),
         "{\"todos\":\"x\"}",
     )
     .unwrap();

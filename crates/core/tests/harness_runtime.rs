@@ -1,5 +1,5 @@
 use opencoder_core::{
-    harness::{self, CodexSettings, RunnerSettings, RuntimeSettings, Versioned},
+    harness::{self, CodexSettings, RuntimeSettings, Versioned},
     Config,
 };
 use serde_json::json;
@@ -31,16 +31,7 @@ async fn named_profiles_survive_config_reload_and_spawned_driver_scope() {
 }
 
 #[test]
-fn runner_and_profile_validation_rejects_unpinned_or_invalid_execution_settings() {
-    let mut value = json!({"command":["/usr/bin/node","/opt/workflow/cli.js"],"workdir":"/opt/workflow",
-        "files":{"/opt/workflow/cli.js":"a".repeat(64)},"parent_unit":"opencoder-agent.service"});
-    let parse = |v| serde_json::from_value::<RunnerSettings>(v).unwrap();
-    assert!(parse(value.clone()).validate().is_ok());
-    value["parent_unit"] = json!("invalid service");
-    assert!(parse(value.clone()).validate().is_err());
-    value["parent_unit"] = json!(null);
-    value["files"] = json!({});
-    assert!(parse(value.clone()).validate().is_err());
+fn profile_validation_rejects_invalid_execution_settings() {
     assert!(
         serde_json::from_value::<CodexSettings>(json!({"auth_slot":0}))
             .unwrap()
@@ -60,4 +51,13 @@ fn runner_and_profile_validation_rejects_unpinned_or_invalid_execution_settings(
             .unwrap_err()
             .contains("missing"));
     });
+}
+
+#[test]
+fn historical_runtime_fields_round_trip_without_executable_registrations() {
+    let value =
+        json!({"profiles":{},"runners":{"old":{"revision":1,"settings":{"command":["/old/bin"]}}}});
+    let runtime: RuntimeSettings = serde_json::from_value(value.clone()).unwrap();
+    assert!(runtime.profiles.is_empty());
+    assert_eq!(serde_json::to_value(runtime).unwrap(), value);
 }

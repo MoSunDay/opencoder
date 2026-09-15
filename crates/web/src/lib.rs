@@ -22,6 +22,7 @@ pub mod api_questions;
 pub mod api_subagents;
 pub mod api_teams;
 pub mod api_teams_topics;
+pub mod api_todo_directory;
 pub mod api_todo_envs;
 pub mod api_todo_runs;
 pub mod api_todo_template_versions;
@@ -338,6 +339,14 @@ pub fn build_app(state: Arc<AppState>, token: Option<String>, web: bool) -> axum
         )
         .route("/api/todo/tools", get(api_todo_envs::list_tools))
         .route("/api/todo/tools/import", post(api_todo_envs::import_tool))
+        .route(
+            "/api/todo/validate-files",
+            post(api_todo_directory::validate_files),
+        )
+        .route(
+            "/api/todo/templates/:name/:version/files",
+            get(api_todo_directory::files),
+        )
         .route(
             "/api/todo/templates",
             get(api_todo_templates::list_templates).post(api_todo_templates::create_template),

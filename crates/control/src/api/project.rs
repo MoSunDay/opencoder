@@ -11,6 +11,8 @@ use opencoder_core::message::now_ms;
 use opencoder_store::ProjectExecutorKind;
 use serde_json::{json, Value};
 use std::sync::Arc;
+mod routing;
+pub(super) use routing::{brain_preresolve, initial_receipt};
 
 pub async fn overview(State(state): State<Arc<AppState>>) -> Response {
     let result = async {
@@ -99,7 +101,7 @@ pub async fn execute(
 ) -> Response {
     start(state, id, "execute", body.map(|b| b.0).unwrap_or(json!({}))).await
 }
-async fn start(state: Arc<AppState>, todo: String, action: &str, input: Value) -> Response {
+async fn start(state: Arc<AppState>, todo: String, action: &str, mut input: Value) -> Response {
     if !input.is_object() {
         return error_400("project input must be an object".into());
     }
@@ -108,6 +110,13 @@ async fn start(state: Arc<AppState>, todo: String, action: &str, input: Value) -
             .is_some_and(|id| id.starts_with("prun-") && valid_id(id))
     }) {
         return error_400("invalid project run id".into());
+    }
+    if input.get("run_id").is_none() {
+        input["run_id"] = json!(format!("prun-{}", ulid::Ulid::new()));
+    }
+    match initial_receipt(&state, &todo, action, &input).await {
+        Ok(Some(reply)) | Err(reply) => return response(reply),
+        Ok(None) => {}
     }
     let id = format!("project-{todo}");
     match state.fleet.index(&id).await {
@@ -170,7 +179,7 @@ async fn submit_start(state: Arc<AppState>, todo: String, action: &str, input: V
 /// `executions::submit` reports the canonical 404; store failures 500
 /// HERE instead of being swallowed. `plan` never resolves — planning is
 /// executor-agnostic.
-pub(super) async fn brain_preresolve(
+async fn resolve_brain_executor(
     state: &Arc<AppState>,
     todo: &str,
     action: &str,

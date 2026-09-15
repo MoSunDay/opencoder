@@ -1,11 +1,11 @@
-Commit: 2686d40a267436adb555041fc8154fc9bb454574
+Commit: 8a50a393cbe615f5d6453ff4290da0bf03546881
 
 # dag 模块
 
 零 IO 的 DAG 纯域 + 线协议，server 与节点两端唯一契约。
 
 ## 关键路径
-- `src/spec.rs` — `DagSpec`/`validate`/`StepKind::{Agent,Wasm}`；python 与 Runner 步骤已下线，`decode_spec` 对旧 Runner 定义显式报错，不静默迁移。
+- `src/spec.rs` — `DagSpec`/`validate`/`StepKind::{Agent,Wasm}`；`decode_spec` 通过类型反序列化拒绝未支持的步骤类型；无注册 Runner 专用解析或执行分支。
 - `src/domain.rs` — `ready_steps`/`run_outcome`/`render_context` 运行态推进。
 - `src/transitions.rs` — 状态机纯函数，终态冻结。
 - `src/artifacts.rs` — `/workflow/<run_id>/<step>/` 工件契约；run id 拒绝 `_modules`；`session_file`/`session_value`/`parse_session_id` 定义 `session.json`（`{"session_id":"<ulid>"}`，步骤运行中的实时指针），`meta_value_with_session` 让 `meta.json` 携带可选 `session_id`（旧文件仍可解析）。

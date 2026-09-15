@@ -12,6 +12,7 @@ use support::*;
 
 #[tokio::test]
 async fn oversized_legacy_message_is_chunked_and_detail_stays_bounded() {
+    let _host_config = support::isolated_config();
     let dir = tempfile::tempdir().unwrap();
     let node = worker(dir.path(), mock()).await;
     let id = "agent-big-message";

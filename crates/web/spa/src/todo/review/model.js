@@ -10,10 +10,6 @@ export function applyFrame(snapshot,frame) {
     latest_event:{seq:frame.seq,kind:frame.event,payload:data}};
 }
 
-export function graphSpec(snapshot) {return {todos:(snapshot?.nodes||[]).map(node=>({...node}))};}
-export function graphStates(snapshot) {return new Map((snapshot?.nodes||[]).map(n=>[n.id,{
-  status:n.status,attempt:n.attempt,activeSessionId:n.active_session_id,lastError:n.last_error||''} ]));}
-
 export function relatedEvent(event,todoId) {
   if(!todoId)return true;
   const payload=event.payload||{};

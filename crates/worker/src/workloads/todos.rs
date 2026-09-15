@@ -22,6 +22,34 @@ pub(super) async fn run(
         cancel,
     };
     let workflow = worker.inner.state.store.get_todo_workflow(id).await?;
+    let mut spec: opencoder_todos::WorkflowSpec = if let Some(workflow) = &workflow {
+        serde_json::from_value(workflow.spec_json.clone())?
+    } else {
+        let mut spec: opencoder_todos::WorkflowSpec =
+            serde_json::from_value(record.assignment.definition.clone().unwrap())?;
+        if let Some(prompt) = record.assignment.request.input["prompt"]
+            .as_str()
+            .filter(|p| !p.is_empty())
+        {
+            spec.objective = format!("{}\n执行要求：{prompt}", spec.objective);
+        }
+        spec
+    };
+    let directory = worker
+        .inner
+        .layout
+        .execution_dir(ExecutionKind::Todos, id)?
+        .join("definition");
+    if !directory.exists() {
+        let files = opencoder_todos::directory::encode(&spec, spec.metadata["env"].as_str())?;
+        opencoder_todos::directory::write_new(&directory, &files)?;
+    }
+    let frozen = opencoder_todos::directory::load(&directory)?;
+    anyhow::ensure!(
+        frozen == spec,
+        "TODO definition directory differs from the frozen workflow"
+    );
+    spec = frozen;
     let state = if resume && workflow.is_some() {
         worker
             .inner
@@ -39,14 +67,6 @@ pub(super) async fn run(
         }
         runtime.resume(id).await?
     } else {
-        let mut spec: opencoder_todos::WorkflowSpec =
-            serde_json::from_value(record.assignment.definition.clone().unwrap())?;
-        if let Some(prompt) = record.assignment.request.input["prompt"]
-            .as_str()
-            .filter(|p| !p.is_empty())
-        {
-            spec.objective = format!("{}\n执行要求：{prompt}", spec.objective);
-        }
         let worker = worker.clone();
         let initialized_id = id.clone();
         runtime

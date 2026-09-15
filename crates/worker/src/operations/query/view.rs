@@ -68,7 +68,7 @@ pub(super) fn bounded_reply(body: Value) -> Result<RpcReply> {
 }
 
 /// Spec step names in declaration order from the definition snapshot (the
-/// same `spec`-aware traversal `runner::views` uses). Pure.
+/// stored `spec`-aware traversal). Pure.
 pub(super) fn spec_step_names(definition: Option<&Value>) -> Vec<String> {
     definition
         .and_then(|d| d.get("spec").unwrap_or(d).get("steps"))
@@ -82,7 +82,7 @@ pub(super) fn spec_step_names(definition: Option<&Value>) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// Declared `steps[].kind.type` for one spec step (`agent`/`wasm`/`runner`).
+/// Declared `steps[].kind.type` for one spec step (`agent`/`wasm`).
 /// `None` when the step is absent or its kind is not a tagged object. Pure.
 pub(super) fn spec_step_kind(definition: Option<&Value>, name: &str) -> Option<String> {
     definition

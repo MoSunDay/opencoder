@@ -45,6 +45,7 @@ pub(crate) struct Inner {
     pub data_dir: PathBuf,
     pub cpu: f64,
     pub scheduling: crate::runtime::SchedulingState,
+    pub host_capacity: Option<crate::runtime::capacity::HostCapacity>,
     pub pending_runs: AtomicU64,
     pub stopping: CancellationToken,
     pub journal: Mutex<Journal>,
@@ -161,6 +162,7 @@ impl Worker {
         let cpu = opencoder_node::fleet::cpu::capacity();
         let max_runs = options.max_runs.unwrap_or(cpu.ceil() as usize).max(1);
         let scheduling = crate::runtime::SchedulingState::load(&data_dir, max_runs)?;
+        let host_capacity = crate::runtime::capacity::HostCapacity::load(&data_dir).await?;
         let journal = Journal::open(layout.clone())?;
         for record in journal.records.values().filter(|r| {
             r.assignment.index.kind == ExecutionKind::Project
@@ -204,6 +206,7 @@ impl Worker {
                 data_dir,
                 cpu,
                 scheduling,
+                host_capacity,
                 pending_runs: AtomicU64::new(pending as u64),
                 stopping: CancellationToken::new(),
                 journal: Mutex::new(journal),
@@ -345,7 +348,9 @@ impl Worker {
         MAX_NODE_RUNS - self.inner.slots.available_permits()
     }
     pub(crate) fn try_slot(&self) -> Option<tokio::sync::OwnedSemaphorePermit> {
-        if self.active_runs() >= self.inner.scheduling.get().max_runs {
+        if self.inner.host_capacity.is_none()
+            && self.active_runs() >= self.inner.scheduling.get().max_runs
+        {
             return None;
         }
         self.inner.slots.clone().try_acquire_owned().ok()
@@ -397,7 +402,7 @@ impl ExecutionTasks {
             .map_err(|_| anyhow::anyhow!("node shutdown timed out waiting for task cleanup"))
     }
 
-    fn active_count(&self) -> usize {
+    pub(crate) fn active_count(&self) -> usize {
         self.tracker.len()
     }
 }

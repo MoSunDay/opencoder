@@ -22,6 +22,8 @@ export function RunsTable({ onNotice, refreshSignal, focusRunId, onDetailClosed 
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
   const [detail, setDetail] = useState(null); // run row shown in RunDetail
+  const detailOpen = useRef(false);
+  detailOpen.current = !!detail;
   const timer = useRef(null);
   const alive = useRef(true);
 
@@ -52,7 +54,7 @@ export function RunsTable({ onNotice, refreshSignal, focusRunId, onDetailClosed 
   useEffect(() => {
     alive.current = true;
     load(false);
-    timer.current = setInterval(() => load(true), POLL_MS);
+    timer.current = setInterval(() => { if (!detailOpen.current) load(true); }, POLL_MS);
     return () => {
       alive.current = false;
       clearInterval(timer.current);

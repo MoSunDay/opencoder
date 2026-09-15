@@ -1,23 +1,30 @@
 import { Background, Controls, Handle, Position, ReactFlow } from '@xyflow/react';
-import { Alert, Descriptions, Typography } from 'antd';
-import { useMemo, useState } from 'react';
-import { foldStepStates, frameToEvent, graphFromSpec, outputPreview } from '../dagProjection.js';
+import '@xyflow/react/dist/style.css';
+import { useMemo } from 'react';
+import { graphFromSpec } from '../dagProjection.js';
+import { statusLabel } from '../ui/statusTag.jsx';
+
 function Step({ data }) {
-  return <div className={`dag-node dag-node--${data.status || 'pending'}`}><Handle type="target" position={Position.Left} /><strong className="dag-node-name">{data.label}</strong><div>{data.kindType} · {data.status}</div><Handle type="source" position={Position.Right} /></div>;
+  const label = data.status === 'pending' ? '待执行' : data.status === 'skipped' ? '未执行' : statusLabel(data.status);
+  return <div className={`dag-node dag-node--${data.status}`}>
+    <Handle type="target" position={Position.Left} /><strong className="dag-node-name">{data.label}</strong>
+    <div>{data.kindType} · {label}</div>
+    {data.error && <div className="dag-node-error" title={data.error}>{data.error}</div>}
+    <Handle type="source" position={Position.Right} />
+  </div>;
 }
 const types = { dagStep: Step };
-export function DagProcess({ spec, frames = [], events: suppliedEvents, selectedId, onSelect, showInspector = true, snapshot }) {
-  const [localId, setLocalId] = useState(null);
-  const events = useMemo(() => suppliedEvents || frames.map(frameToEvent).filter(Boolean), [frames, suppliedEvents]);
+
+export function DagProcess({ spec, snapshot, selectedId, onSelect }) {
   const graph = useMemo(() => {
-    const states = foldStepStates(events);
-    for (const step of snapshot?.steps || []) {
-      if (['done', 'error', 'cancelled'].includes(step.status) || !states.has(step.name)) states.set(step.name, { ...states.get(step.name), status: step.status, error: step.error });
-    }
+    const ended = ['done', 'error', 'cancelled'].includes(snapshot?.execution_status);
+    const states = new Map((snapshot?.steps || []).map((step) => [step.name,
+      ended && step.status === 'pending' ? { ...step, status: 'skipped' } : step]));
     return graphFromSpec(spec, states);
-  }, [spec, events, snapshot]);
-  const selected = graph.nodes.find((n) => n.id === (selectedId ?? localId))?.data;
-  return <><div className="dag-detail-graph" style={{ height: 400 }}><ReactFlow nodes={graph.nodes} edges={graph.edges} nodeTypes={types} onNodeClick={(_, node) => { setLocalId(node.id); onSelect?.(node.id); }} fitView nodesDraggable={false} nodesConnectable={false}><Background /><Controls showInteractive={false} /></ReactFlow></div>
-    {showInspector && selected && <div><Typography.Text strong>{selected.label}</Typography.Text><Descriptions column={1} size="small" items={[{ key: 'status', label: '状态', children: selected.status }, { key: 'kind', label: '类型', children: selected.kindType }]} />{selected.error && <Alert type="error" title={selected.error} />}<pre className="brain-json">{outputPreview(selected.output)}</pre></div>}
-  </>;
+  }, [spec, snapshot]);
+  const nodes = useMemo(() => graph.nodes.map((node) => ({ ...node, selected: node.id === selectedId })), [graph, selectedId]);
+  return <div className="dag-detail-graph"><ReactFlow nodes={nodes} edges={graph.edges} nodeTypes={types}
+    onNodeClick={(_, node) => onSelect?.(node.id)} fitView nodesDraggable={false} nodesConnectable={false}>
+    <Background /><Controls showInteractive={false} />
+  </ReactFlow></div>;
 }

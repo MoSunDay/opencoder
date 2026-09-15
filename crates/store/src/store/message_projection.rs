@@ -2,6 +2,20 @@ use opencoder_core::Message;
 
 use crate::types::MessageRow;
 
+pub(super) fn after(mut msgs: Vec<Message>, skip_count: i64) -> Vec<Message> {
+    let skip = (skip_count.max(0) as usize).min(msgs.len());
+    msgs.drain(..skip);
+    msgs
+}
+
+pub(super) fn import_report(count: usize) -> crate::ImportReport {
+    crate::ImportReport {
+        sessions: if count == 0 { 0 } else { 1 },
+        messages: count as u32,
+        skipped: 0,
+    }
+}
+
 /// Reconstruct positional rows for stores without a raw-message implementation.
 pub(super) fn message_rows(msgs: Vec<Message>) -> Vec<MessageRow> {
     msgs.into_iter()

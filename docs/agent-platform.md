@@ -107,7 +107,7 @@ mount -t nfs -o ro,vers=3,tcp,port=2050,mountport=2050,nolock,soft,retrans=1,tim
 {"id":"agent-client-request-1","kind":"agent","target":"act","input":{"prompt":"检查当前仓库"},"node_id":null}
 ```
 
-DAG 页和执行详情共用实时日志组件，展示 Agent 输出、思考与工具事件以及 Wasm stdout/stderr，支持步骤筛选、搜索、自动滚动和历史分页。日志沿 Node WebSocket 与浏览器 SSE 增量传输，断线从已接收的 seq 续传；服务端明确发送流结束标记，网络断开不会显示为正常结束。事件支持 seq 回放；超大事件、消息和详情字段由 64 KiB chunk 及游标分段读取。DAG 产物通过 Bearer 保护的流式下载端点传输，256 MiB 验收不会在浏览器或 Server 聚合完整文件。原会话、DAG、TODO、Team 和项目页面 API 均由 Server 依据五字段索引转发到归属节点。
+DAG 页和执行详情先展示节点结果快照，运行中只折叠快照之后的状态事件，不逐条回放历史来绘制画布。`GET /api/dag/runs/:id/progress` 和执行详情的 `dag_steps` 返回 `head_seq`、步骤状态及 `running` 计数；新一轮步骤开始可覆盖旧回执，断线后重新同步快照。点击步骤打开右侧占视口 75% 的「实时日志」抽屉，共用步骤切换、全部步骤、搜索、自动滚动和历史分页；历史记录整批展示，关闭抽屉即结束日志请求。日志展示 Agent 输出、思考与工具事件以及 Wasm stdout/stderr。日志沿 Node WebSocket 与浏览器 SSE 增量传输，断线从已接收的 seq 续传；服务端明确发送流结束标记，网络断开不会显示为正常结束。事件支持 seq 回放；超大事件、消息和详情字段由 64 KiB chunk 及游标分段读取。DAG 产物通过 Bearer 保护的流式下载端点传输，256 MiB 验收不会在浏览器或 Server 聚合完整文件。原会话、DAG、TODO、Team 和项目页面 API 均由 Server 依据五字段索引转发到归属节点。
 
 ## 验证边界
 

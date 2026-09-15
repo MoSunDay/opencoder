@@ -36,7 +36,7 @@ export function TodoWorkbench({id,onMutated,showControls=true}) {
     {(error||actionError)&&<Alert type="error" showIcon title={actionError?'执行操作失败':'状态同步失败'} description={actionError||error}/>}
     {loading&&!snapshot?<Spin/>:snapshot?.initializing?<Alert type="info" title="工作流正在初始化" description="受理记录已保存，等待父 Agent 和 TODO 状态就绪。"/>:!wf?<Empty description="无法读取工作流"/>:<>
       <div className="todo-parent-heading"><div><Typography.Title level={4}>{wf.name}</Typography.Title><Typography.Paragraph>{wf.objective}</Typography.Paragraph></div>
-        <Space wrap><StatusTag status={wf.status}/><Tag>轮次 {wf.world_epoch}</Tag><Tag>{progress.passed}/{progress.total} 已通过</Tag><Button onClick={()=>{setSelected('');setSessionId(wf.parent_session_id);}}>父 Agent 会话</Button></Space>
+        <Space wrap><StatusTag status={wf.status}/><Tag>轮次 {wf.world_epoch}</Tag><Tag>{progress.passed}/{progress.total} 已通过</Tag><Button onClick={()=>setSessionId(wf.parent_session_id)}>父 Agent 会话</Button></Space>
         <div className="todo-parent-decision"><strong>父 Agent · workflow</strong><span>{EVENT_LABELS[snapshot.latest_event?.kind]||snapshot.latest_event?.kind||'等待调度'}</span><span>{snapshot.latest_event?.payload?.reason||wf.terminal_reason||''}</span></div>
       </div>
       {!!snapshot.controls?.length&&<Space wrap>{snapshot.controls.slice(-3).map(c=><Tag key={c.request_id} color={c.phase==='failed'?'error':c.phase==='stopping'?'processing':'success'} title={c.error||c.request_id}>{c.todo_id} 重跑 · {c.phase==='stopping'?'等待停止':c.phase==='queued'?'已重新排队':`失败：${c.error}`}</Tag>)}</Space>}

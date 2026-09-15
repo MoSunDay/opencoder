@@ -1,4 +1,5 @@
-import {validateSpec} from '../editor/specValidate.js';
+import {validateSpec} from './specValidate.js';
+import {jsonLocation} from '../../ui/files/format.js';
 
 export const EXAMPLE_SPEC = {schema_version:1,id:'wf-example',name:'示例工作流',objective:'完成任务并提供可核验结果',constraints:[],
   todos:[{id:'t1',title:'示例任务',requirement_background:'需要完成并验收当前任务',instructions:'完成任务并记录验证结果',depends_on:[],agent:'act',max_attempts:3,acceptance:{criteria:'结果满足目标并有验证依据'},metadata:{}}],metadata:{}};
@@ -26,8 +27,7 @@ export function decodeFiles(files, agents) {
     if (!path.endsWith('.json')) continue;
     try { parsed[path] = JSON.parse(text); }
     catch (error) {
-      const position = /position (\d+)/.exec(error.message); const prefix = text.slice(0,position ? Number(position[1]) : 0);
-      fail(path,error.message,prefix.split('\n').length,prefix.length-prefix.lastIndexOf('\n'));
+      const at=jsonLocation(text);fail(path,error.message,at.line,at.column);
     }
   }
   const required = (path, markdown=false) => {
@@ -57,6 +57,7 @@ export function decodeFiles(files, agents) {
     }
     keys(path,['title','agent','depends_on','max_attempts','required_tool_calls','metadata']);
     const task = parsed[path]; if (!object(task)) continue;
+    if(Array.isArray(task.required_tool_calls)) for(const call of task.required_tool_calls) if(object(call)) for(const key of Object.keys(call)) if(!['name','arguments_contains','result_ok'].includes(key)) fail(path,`required_tool_calls 不支持的字段：${key}`);
     if (task.required_tool_calls?.some?.(call => call?.result_ok !== undefined && typeof call.result_ok !== 'boolean')) fail(path,'required_tool_calls.result_ok 必须是布尔值');
     if (agents && !agents.includes(task.agent)) fail(path,`不可用的 Primary Agent：${task.agent}`);
     todos.push({...task,id,depends_on:task.depends_on || [],requirement_background:files[`${base}/context.md`],instructions:files[`${base}/instructions.md`],

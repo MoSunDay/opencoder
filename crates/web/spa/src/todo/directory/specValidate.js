@@ -1,7 +1,7 @@
 // specValidate.js — PURE client-side validation of a WorkflowSpec JSON
 // draft (mirror of crates/todos/src/domain.rs validate_spec rules) before
 // it is submitted to the server. Unlike dag/specValidate.js, problems are
-// STRUCTURED [{path, message}] so the canvas can pin each one on a node:
+// STRUCTURED [{path, message}] so the directory editor can locate the task file:
 // path is 'workflow' for spec-level issues or `todos[<id>]` for a todo
 // (that is what drives the editor's red dot). [] means the draft may be
 // submitted — the server remains authoritative.
@@ -78,7 +78,7 @@ export function validateSpec(spec) {
       problems.push({ path: 'workflow', message: 'todos 条目必须是对象' });
       continue;
     }
-    // Only a non-empty string id can be pinned on the canvas; every
+    // Only a non-empty string id can be pinned to a task; every
     // problem of an unpinnable todo falls back to the workflow path.
     const hasId = typeof t.id === 'string' && !!t.id.trim();
     const where = hasId ? 'todos[' + t.id + ']' : 'workflow';

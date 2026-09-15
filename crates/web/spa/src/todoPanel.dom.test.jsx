@@ -25,10 +25,11 @@ vi.mock('./fleet/detail.jsx', () => ({ ExecutionDetail: ({ id, summary }) => <di
 import './test/setup-dom.js';
 import { err, info } from './notice.js';
 import { TodoPanel } from './todoPanel.jsx';
+import {specFiles} from './todo/directory/model.js';
 import { TodoRunsPanel, workflowActions } from './todoRunsPanel.jsx';
 
 /// antd 6 Button 对两字中文自动插空格（「创 建」），按 role + 去空白匹配。
-const findButton = (txt) => screen.getAllByRole('button')
+const findButton = (txt) => [...document.querySelectorAll('button')]
   .find((b) => (b.textContent || '').replace(/\s+/g, '') === txt);
 
 const noopNotice = () => {}; // 稳定引用：TemplatesTab.load 依赖 onNotice，内联箭头会触发无限重取
@@ -52,7 +53,7 @@ const detailFixture = { template: templatesFixture.templates[0], env_by_version:
 /// TodoEditor 拉的三份：context.json（裸 spec）/ envs / env.json。
 const SPEC_FIXTURE = {
   schema_version: 1, id: 'wf-demo', name: 'demo', objective: 'ship the demo', constraints: [],
-  todos: [{ id: 't1', title: '调研', requirement_background: '', instructions: '做', depends_on: [],
+  todos: [{ id: 't1', title: '调研', requirement_background: '背景', instructions: '做', depends_on: [],
     agent: 'act', max_attempts: 3, acceptance: { criteria: '完成' }, metadata: {} }],
   metadata: {},
 };
@@ -65,9 +66,8 @@ const installApi = () => {
     if (path === '/api/todo/templates/demo') {
       return Promise.resolve(detailFixture);
     }
-    if (path === '/api/todo/templates/demo/v1/context.json') {
-      return Promise.resolve(SPEC_FIXTURE);
-    }
+    if (path === '/api/todo/templates/demo/v1/files') return Promise.resolve({files:specFiles(SPEC_FIXTURE),revision:'r1'});
+    if (path === '/api/agents') return Promise.resolve({agents:[{name:'act',primary:true}]});
     if (path === '/api/todo/templates/demo/v1/env.json') {
       return Promise.resolve({ env: null });
     }
@@ -77,6 +77,8 @@ const installApi = () => {
     if (path === '/api/todo/workflows?limit=50') {
       return Promise.resolve({ workflows: [{ id: 'todos-1', status: 'running', execution_status: 'running', execution_created_at: 1, node_id: 'node-a', updated_at: 2 }] });
     }
+    if(path.includes('section=files'))return Promise.resolve({files:specFiles(SPEC_FIXTURE)});
+    if(path.includes('section=history'))return Promise.resolve({events:[],next_before_seq:null});
     if (path.startsWith('/api/todo/workflows/todos-1/review')) {
       return Promise.resolve({workflow:{id:'todos-1',status:'running',generation:1,world_epoch:0},execution_status:'running',nodes:[],total:0,head_seq:1,controls:[]});
     }
@@ -87,7 +89,7 @@ const installApi = () => {
   apiDelMock.mockReset().mockResolvedValue({ ok: true });
 };
 
-beforeEach(installApi);
+beforeEach(()=>{Range.prototype.getClientRects=()=>[];Range.prototype.getBoundingClientRect=()=>({left:0,right:0,top:0,bottom:0});installApi();});
 
 afterEach(() => {
   cleanup();
@@ -102,7 +104,8 @@ describe('TodoPanel 模板 tab', () => {
 
   it('expands a row and dispatches a run for the version', async () => {
     const onNotice = vi.fn();
-    apiPostMock.mockRejectedValueOnce(new Error('connection lost')).mockResolvedValueOnce({ ok: true, workflow_id: 'todos-1' });
+    let attempts=0;
+    apiPostMock.mockImplementation(async path=>{if(path.endsWith('/run')&&attempts++===0)throw new Error('connection lost');return {ok:true,workflow_id:'todos-1'};});
     render(<TodoPanel onNotice={onNotice} />);
     await screen.findByText('demo');
     fireEvent.click(document.querySelector('.ant-table-row-expand-icon'));
@@ -114,11 +117,13 @@ describe('TodoPanel 模板 tab', () => {
       .pop();
     expect(runBtn).toBeTruthy();
     fireEvent.click(runBtn);
-    await waitFor(() => expect(apiPostMock).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(apiPostMock.mock.calls.filter(c=>c[0].endsWith('/run'))).toHaveLength(1));
     expect(onNotice).toHaveBeenLastCalledWith(err(expect.stringContaining('connection lost')));
+    fireEvent.click(findButton('继续修改'));
     fireEvent.click(runBtn);
-    await waitFor(() => expect(apiPostMock).toHaveBeenCalledTimes(2));
-    expect(apiPostMock.mock.calls[0][1].id).toBe(apiPostMock.mock.calls[1][1].id);
+    await waitFor(() => expect(apiPostMock.mock.calls.filter(c=>c[0].endsWith('/run'))).toHaveLength(2));
+    const runs=apiPostMock.mock.calls.filter(c=>c[0].endsWith('/run'));
+    expect(runs[0][1].id).toBe(runs[1][1].id);
     expect(apiPostMock).toHaveBeenLastCalledWith('/api/todo/templates/demo/v1/run', { id: expect.stringMatching(/^todos-/) });
     expect(onNotice).toHaveBeenLastCalledWith(info('已启动工作流: todos-1'));
     // 成功后自动切到「运行」tab（聚焦 todos-1，替身 openStream 不炸即可）。
@@ -133,8 +138,8 @@ describe('TodoPanel 模板 tab', () => {
     fireEvent.click(screen.getByText('新建模板'));
     await openDrawer();
     fireEvent.change(screen.getByLabelText('模板名'), { target: { value: 'spec-check' } });
-    await screen.findByDisplayValue('完成任务并提供可核验结果');
-    fireEvent.click(findButton('创建'));
+    await screen.findByLabelText('文件内容 objective.md');
+    fireEvent.click(findButton('创建模板'));
     await waitFor(() => {
       expect(apiPostMock).toHaveBeenCalledWith(
         '/api/todo/templates',
@@ -143,8 +148,8 @@ describe('TodoPanel 模板 tab', () => {
     });
     const body = apiPostMock.mock.calls.find((c) => c[0] === '/api/todo/templates')[1];
     // 预填的最小示例 spec 原样随请求上行（含 wf-example / t1）。
-    expect(body.spec.id).toBe('wf-example');
-    expect(body.spec.todos[0].id).toBe('t1');
+    expect(JSON.parse(body.files['workflow.json']).id).toBe('wf-example');
+    expect(body.files['todos/t1/task.json']).toBeTruthy();
   });
 
   it('opens version editing in a full-width right drawer with the chrome-less editor', async () => {
@@ -154,11 +159,11 @@ describe('TodoPanel 模板 tab', () => {
     fireEvent.click(screen.getByText('编辑'));
 
     const drawer = await openDrawer();
-    expect(screen.getByText('编辑模板 demo · v1')).toBeTruthy(); // 抽屉标题接管 Card 标题
+    expect(screen.getByText('编辑模板 demo')).toBeTruthy(); // 抽屉标题接管 Card 标题
     // 编辑器本体已在抽屉里加载（context 回填 + 三模式切换可用）。
-    expect(await screen.findByDisplayValue('ship the demo')).toBeTruthy();
-    expect(document.querySelector('.todo-edit-canvas')).toBeTruthy();
-    expect(screen.getByText('JSON 源码')).toBeTruthy();
+    expect(await screen.findByLabelText('文件内容 objective.md')).toBeTruthy();
+    expect(document.querySelector('.file-workspace')).toBeTruthy();
+    expect(screen.getByText('workflow.json')).toBeTruthy();
     // 列表仍在抽屉背后（不再整页替换）。
     expect(document.querySelector('.ant-table-row')).toBeTruthy();
 

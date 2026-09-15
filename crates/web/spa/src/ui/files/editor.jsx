@@ -1,16 +1,17 @@
 import {useEffect, useRef, useState} from 'react';
 import {Button, Segmented, Space} from 'antd';
 import {basicSetup} from 'codemirror';
-import {EditorState, Compartment} from '@codemirror/state';
+import {EditorState, Compartment, StateEffect, Annotation} from '@codemirror/state';
 import {EditorView, keymap} from '@codemirror/view';
 import {indentWithTab} from '@codemirror/commands';
 import {json} from '@codemirror/lang-json';
 import {markdown} from '@codemirror/lang-markdown';
 import {setDiagnostics} from '@codemirror/lint';
 import {Markdown} from '../../project/markdown.jsx';
-import {formatJson} from './format.js';
+import {formatJson,jsonLocation} from './format.js';
 import './files.css';
 
+const externalChange = Annotation.define();
 const theme = EditorView.theme({
   '&': {height:'100%',backgroundColor:'var(--oc-bg-container, transparent)',color:'var(--oc-text, inherit)'},
   '.cm-scroller': {overflow:'auto',fontFamily:'var(--oc-mono, monospace)',fontSize:'13px'},
@@ -29,15 +30,19 @@ export function FileEditor({path, value = '', readOnly = false, diagnostics = []
     if (!path) return;
     let saved = cache.get(path);
     const language = isMarkdown ? markdown() : /\.json$/i.test(path) ? json() : [];
+    const extensions=[basicSetup, language, theme, EditorView.lineWrapping,
+      permission.current.of([EditorState.readOnly.of(readOnly), EditorView.editable.of(!readOnly)]),
+      EditorView.contentAttributes.of({'aria-label':`文件内容 ${path}`}),
+      keymap.of([{key:'Mod-s',run:() => {if (!refs.current.readOnly) refs.current.onSave?.(); return true;}},indentWithTab]),
+      EditorView.updateListener.of(update => {
+        if (update.docChanged && !update.transactions.some(transaction=>transaction.annotation(externalChange)))
+          refs.current.onChange?.(refs.current.path, update.state.doc.toString());
+      }),
+    ];
     if (!saved || saved.state.doc.toString() !== value) {
-      saved = {state:EditorState.create({doc:value, extensions:[basicSetup, language, theme, EditorView.lineWrapping,
-        permission.current.of([EditorState.readOnly.of(readOnly), EditorView.editable.of(!readOnly)]),
-        EditorView.contentAttributes.of({'aria-label':`文件内容 ${path}`}),
-        keymap.of([{key:'Mod-s',run:() => {if (!refs.current.readOnly) refs.current.onSave?.(); return true;}},indentWithTab]),
-        EditorView.updateListener.of(update => {
-          if (update.docChanged) refs.current.onChange?.(refs.current.path, update.state.doc.toString());
-        }),
-      ]}),scrollTop:0,scrollLeft:0};
+      saved = {state:EditorState.create({doc:value,extensions}),scrollTop:0,scrollLeft:0};
+    } else {
+      saved = {...saved,state:saved.state.update({effects:StateEffect.reconfigure.of(extensions)}).state};
     }
     const editor = new EditorView({state:saved.state, parent:host.current}); view.current = editor;
     editor.scrollDOM.scrollTop = saved.scrollTop; editor.scrollDOM.scrollLeft = saved.scrollLeft;
@@ -48,7 +53,7 @@ export function FileEditor({path, value = '', readOnly = false, diagnostics = []
   },[path,cache]); // Each file retains its own history and selection.
   useEffect(() => {
     const editor = view.current;
-    if (editor && editor.state.doc.toString() !== value) editor.dispatch({changes:{from:0,to:editor.state.doc.length,insert:value}});
+    if (editor && editor.state.doc.toString() !== value) editor.dispatch({changes:{from:0,to:editor.state.doc.length,insert:value},annotations:externalChange.of(true)});
   },[value,path]);
   useEffect(() => {
     view.current?.dispatch({effects:permission.current.reconfigure([EditorState.readOnly.of(readOnly),EditorView.editable.of(!readOnly)])});
@@ -72,7 +77,7 @@ export function FileEditor({path, value = '', readOnly = false, diagnostics = []
     try {
       const editor = view.current;
       if (editor) editor.dispatch({changes:{from:0,to:editor.state.doc.length,insert:formatJson(editor.state.doc.toString())}});
-    } catch (error) { onError?.([{path,message:error.message,line:1,column:1}]); }
+    } catch (error) { onError?.([{path,message:error.message,...jsonLocation(value)}]); }
   };
   const displayMode = isMarkdown ? mode : 'source';
   return <section className="file-editor" aria-label={`编辑器 ${path}`}>

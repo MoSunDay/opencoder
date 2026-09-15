@@ -15,7 +15,7 @@ import { Artifacts } from './artifacts.jsx';
 import { DetailFields, PayloadWindows } from './detail/fields.jsx';
 import { WorkloadDetail } from './detail/workloads.jsx';
 import { BrainRunEmbed } from './detail/brainRun.jsx';
-import { TodoRunEmbed } from './detail/todoCanvas.jsx';
+import { TodoRunEmbed } from './detail/todoFiles.jsx';
 import { Markdown } from '../project/markdown.jsx';
 import { err } from '../notice.js';
 

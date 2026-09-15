@@ -93,6 +93,12 @@ pub async fn dispatch_command_as(
             {
                 return RpcReply::error(400, "invalid project run id");
             }
+            match super::project::initial_receipt(state, todo, &command.action, &command.input)
+                .await
+            {
+                Ok(Some(reply)) | Err(reply) => return reply,
+                Ok(None) => {}
+            }
             let receipt = command_id(
                 state,
                 id,

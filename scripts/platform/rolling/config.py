@@ -20,7 +20,7 @@ class Settings:
     listen: str = "127.0.0.1:18081"
     host_port: int = 18082
     resource_port: int = 18084
-    port_base: int = 19000
+    port_base: int = 3000
     max_runs: int = 20
     min_memory_mb: int = 1024
     nginx_include: Path = Path("/etc/nginx/conf.d/opencoder-platform.conf")

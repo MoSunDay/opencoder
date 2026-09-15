@@ -60,6 +60,7 @@ async fn index_replays_all_session_pages_with_activity_order_and_ties() {
 
 #[tokio::test]
 async fn internal_session_is_running_only_while_its_loop_is_live() {
+    let _host_config = support::isolated_config();
     let dir = tempfile::tempdir().unwrap();
     let worker = support::worker(dir.path(), support::mock()).await;
     let top_id = "agent-top-idle";

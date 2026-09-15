@@ -1,4 +1,4 @@
-Commit: 5bf6f621e3722e60258592267109ba5807e74d94
+Commit: 8a50a393cbe615f5d6453ff4290da0bf03546881
 
 # worker 模块
 
@@ -13,13 +13,14 @@ Commit: 5bf6f621e3722e60258592267109ba5807e74d94
 - `crates/worker/src/operations/todo/` — `todo-review` 一致性快照、分段上下文与所属会话查询；`todo-rerun` 持久化受理、停止旧驱动及恢复排队。
 - `crates/worker/src/operations/query/dag_steps.rs` — DAG 进度/单步视图：固定定义顺序，合并生命周期快照与 meta.json 回执，返回 head_seq 和运行/中断计数。`dag_steps/projection.rs` 按最近开始时间与完成结果判断当前尝试，同次尝试的取消回执不被稍晚完成事件误判为失败，后续产物写入错误仍优先显示；未提交回执的运行步骤也可识别；单步输出只读取已存在的回执结果。
 - `crates/worker/src/operations/query/project/` — prun-* 回放；载荷 64 KiB 分块
-- `crates/worker/src/operations/query/runner.rs` — Runner 阶段/verdict/投递状态
 - `crates/worker/src/operations/project_admission/` — Plan/Execute 独立 run ID
 - `crates/worker/src/operations/maintenance.rs` — 维护工具；configure_scheduling
 - `crates/worker/src/brain/` — TODO 存储根状态/事件，短 runc 激活、持久 outbox、同盘恢复；输出归一化与可下载产物。
 - `crates/worker/src/dag_wasm_pin.rs` — DAG wasm 模块受理冻结：池 → sha256 校验 →
   `_modules/` staging+rename（`tool.wasm` 取 current，`tool@v3.wasm` 显式版本；缺名/缺版本跳过）
 - `crates/worker/src/workloads/` — agent/team/dag/todos/project 适配器；operator 复用 agent 循环（宿主机进程直跑，无 runc/无 node_maintenance）
+- `crates/worker/src/workloads/todos.rs` — 新运行写入并加载执行目录中的 `definition/`；恢复从 Store 读取冻结定义，复核已有目录，模板后续修改不影响运行。
+- `crates/worker/src/operations/todo/read.rs` — Review 的 `files` 分区从冻结定义生成 JSON/Markdown 文件集，沿用分段 etag 协议。
 - `crates/worker/src/runtime/scheduling.rs` — scheduling.json 持久化并发/队列序
 - `crates/worker/src/state.rs` — runtime.db；节点 ID 持久化、目录锁
 - `crates/worker/src/service.rs` — 根执行与内部会话清单；会话按 `(max(updated_at, created_at), id)` 游标翻页。

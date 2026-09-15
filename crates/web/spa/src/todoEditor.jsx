@@ -68,6 +68,12 @@ function TodoEditorSession({templateName,version,creating=false,onNotice,onClose
     }catch(error){report(error);}
     finally{savingRef.current=false;if(mounted.current)setSaving(false);}
   };
+  const locate=problem=>{
+    if(/^(workflow\.json|env\.json|objective\.md|todos\/[^/]+\/(task\.json|context\.md|instructions\.md|acceptance\.md))$/.test(problem.path)) {
+      setFiles(previous=>Object.hasOwn(previous,problem.path)?previous:{...previous,[problem.path]:''});
+    }
+    setSelected(problem.path);setLocation({...problem,key:Date.now()});
+  };
   const selectedTodo=/^todos\/([^/]+)(?:\/|$)/.exec(selected)?.[1];
   const act=()=>{
     try{
@@ -85,6 +91,9 @@ function TodoEditorSession({templateName,version,creating=false,onNotice,onClose
       <Button disabled={saving||!!loadError} onClick={()=>{setTaskId('');setOperation('add');}}>新增 TODO</Button>
       <Button disabled={!selectedTodo||saving} onClick={()=>{setTaskId(`${selectedTodo}-copy`);setOperation('copy');}}>复制 TODO</Button>
       <Button disabled={!selectedTodo||saving} onClick={()=>{setTaskId(selectedTodo);setOperation('rename');}}>重命名 TODO</Button>
+      <Button disabled={!Object.hasOwn(files,selected)||saving} onClick={()=>{
+        setFiles(previous=>Object.fromEntries(Object.entries(previous).filter(([path])=>path!==selected)));setServerProblems([]);
+      }}>移除文件</Button>
       <Button danger disabled={!selectedTodo||saving} onClick={()=>setOperation('delete')}>删除 TODO</Button>
     </Space><Space wrap>
       <Typography.Text type={diagnostics.length?'danger':'secondary'}>{diagnostics.length?`${diagnostics.length} 个错误`:dirty?'有未保存修改':'文件已同步'}</Typography.Text>
@@ -99,7 +108,7 @@ function TodoEditorSession({templateName,version,creating=false,onNotice,onClose
     </Space>
     <FileWorkspace files={files} selected={selected} onSelect={setSelected} diagnostics={diagnostics} changed={changed}
       readOnly={saving||!!loadError} onChange={change} onSave={save} onError={setProblems} location={location}/>
-    <FileProblems problems={problems} onClose={()=>setProblems([])} onLocate={problem=>{setSelected(problem.path);setLocation({...problem,key:Date.now()});}}/>
+    <FileProblems problems={problems} onClose={()=>setProblems([])} onLocate={locate}/>
     <Modal title={({add:'新增 TODO',copy:'复制 TODO',rename:'重命名 TODO',delete:'删除 TODO'})[operation]} open={!!operation}
       onCancel={()=>setOperation(null)} onOk={act} okText="确定" cancelText="取消">
       {operation==='delete'?<p>删除 {selectedTodo} 的任务目录；存在依赖引用时需要先修改引用。</p>:<Input aria-label="TODO ID" value={taskId} onChange={e=>setTaskId(e.target.value)} onPressEnter={act}/>}

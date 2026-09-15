@@ -1,40 +1,14 @@
 //! Resolve a template and its environment before sending the immutable snapshot.
-use anyhow::{bail, Context, Result};
+use anyhow::Result;
 use opencoder_core::share_fs::*;
-use serde_json::{json, Value};
+#[cfg(test)]
+use serde_json::json;
+use serde_json::Value;
 use std::path::Path;
 
 pub(super) fn snapshot(root: &Path, name: &str, version: &str) -> Result<Value> {
-    let mut spec = opencoder_todos::directory::load(&todo_version_dir(root, name, version)?)?;
-    let binding = read_json_opt(&todo_env_binding_path(root, name, version)?)?;
-    if let Some(env) = binding
-        .as_ref()
-        .and_then(|v| v["env"].as_str())
-        .filter(|s| !s.is_empty())
-    {
-        let context =
-            read_json_opt(&env_context_path(root, env)?)?.context("bound environment missing")?;
-        let tools = context.get("tools").cloned().unwrap_or(json!([]));
-        for tool in tools
-            .as_array()
-            .context("environment tools must be an array")?
-        {
-            let reference = tool
-                .as_str()
-                .context("environment tool reference must be a string")?;
-            if resolve_tool_ref(root, reference).is_err() {
-                bail!("environment tool missing: {reference}");
-            }
-        }
-        let env_vars = opencoder_todos::domain::env_vars_from_context(&context)?;
-        if !spec.metadata.is_object() {
-            spec.metadata = json!({});
-        }
-        spec.metadata["env"] = json!(env);
-        spec.metadata["env_tools"] = tools;
-        spec.metadata["env_vars"] = opencoder_todos::domain::env_vars_metadata(env_vars);
-    }
-    opencoder_todos::domain::validate_spec(&spec)?;
+    let spec =
+        opencoder_todos::directory::load_bound(&todo_version_dir(root, name, version)?, root)?;
     Ok(serde_json::to_value(spec)?)
 }
 

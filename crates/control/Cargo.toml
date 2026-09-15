@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+http-body = "1"
 opencoder-core.workspace = true
 opencoder-store.workspace = true
 opencoder-brain.workspace = true

@@ -6,6 +6,12 @@ import urllib.error
 import urllib.request
 
 
+class HttpFailure(RuntimeError):
+    def __init__(self, method, path, status, detail):
+        self.code = status
+        super().__init__(f"{method} {path}: HTTP {status}: {detail}")
+
+
 class Operations:
     def __init__(self, token_file):
         self.token = token_file.read_text().strip()
@@ -22,7 +28,7 @@ class Operations:
                 return json.load(response)
         except urllib.error.HTTPError as error:
             detail = error.read(4096).decode(errors="replace")
-            raise RuntimeError(f"{method} {path}: HTTP {error.code}: {detail}") from None
+            raise HttpFailure(method, path, error.code, detail) from None
 
     def run(self, *args):
         subprocess.run(args, check=True, stdin=subprocess.DEVNULL)

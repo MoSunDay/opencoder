@@ -3,6 +3,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import uuid
 from .state import atomic_bytes, write
 
 
@@ -99,6 +100,7 @@ def prepare(settings, bundle, record):
         raise ValueError("runtime node identity differs from the stable host")
     atomic_bytes(runtime_data / "node-id", node_id.encode())
     write(runtime_data / "host-binding.json", {"database": str(settings.state_dir / "host/host.db"), "runtime_id": record["id"]})
+    freeze_rootfs(record)
     agent = installed / "bin/opencoder-agent"
     commands = {
         record["runtime_unit"]: [agent, "--workdir", settings.agent_workdir, "--data-dir", runtime_data,
@@ -118,6 +120,49 @@ def prepare(settings, bundle, record):
         atomic_bytes(settings.systemd_dir / unit, content.encode(), 0o644)
     prepare_host(settings, record)
     prepare_server(settings, record)
+
+
+def freeze_rootfs(record):
+    source = Path(record.get("resource_source",record["runtime_data"])) / "dag/rootfs"
+    target = Path(record["runtime_data"]) / "dag/rootfs"
+    if source == target or not source.exists():
+        return
+    if source.is_symlink() or not source.is_dir():
+        raise ValueError("OCI image source must be a real directory")
+    if (source / 'workspace').is_symlink():
+        raise ValueError("OCI workspace must be a real directory")
+    if target.exists():
+        if target.is_symlink() or not target.is_dir():
+            raise ValueError("Runtime OCI image must be a real directory")
+        return
+    target.parent.mkdir(parents=True,exist_ok=True)
+    stage = target.parent / (".rootfs-stage-" + uuid.uuid4().hex)
+    def ignored(directory, names):
+        relative = Path(directory).relative_to(source)
+        omitted = {'dev','proc','sys','tmp'} if relative == Path('.') else {'context'} if relative == Path('workspace') else set()
+        return set(names) & omitted
+    shutil.copytree(source,stage,symlinks=True,ignore=ignored)
+    for name in ['dev','proc','sys','tmp','workspace/context']:
+        directory = stage / name
+        if directory.is_symlink():
+            raise ValueError("OCI runtime mount must be a real directory")
+        directory.mkdir(parents=True,exist_ok=True)
+    for path in stage.rglob('*'):
+        if path.is_file() and not path.is_symlink():
+            with path.open('rb') as stream:
+                os.fsync(stream.fileno())
+    for directory in sorted((p for p in stage.rglob('*') if p.is_dir() and not p.is_symlink()),key=lambda p:len(p.parts),reverse=True) + [stage]:
+        fd = os.open(directory,os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+    stage.rename(target)
+    fd = os.open(target.parent,os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
 
 
 def prepare_server(settings, record):

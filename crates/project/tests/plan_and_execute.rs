@@ -65,6 +65,9 @@ async fn harness(scripts: Vec<Vec<LlmEvent>>) -> Harness {
         )
         .await
         .unwrap();
+    // Keep archived inputs and artifacts in this fixture, independent of the
+    // developer's global data directory and unrelated disk writers.
+    *service.require().unwrap().archive_root.lock().unwrap() = dir.path().join("runs");
     Harness {
         service,
         mock,

@@ -35,6 +35,9 @@ pub fn read_files(root: &Path) -> Result<Files> {
                 .unwrap_or_default();
             let env = binding.get("env").and_then(serde_json::Value::as_str);
             let mut converted = encode(&spec, env)?;
+            if let Some(raw_binding) = files.get("env.json") {
+                converted.insert("env.json".into(), raw_binding.clone());
+            }
             // Preserve unrecognized files so validation exposes them to the editor.
             for (path, text) in files {
                 if path != "context.json" && path != "env.json" {

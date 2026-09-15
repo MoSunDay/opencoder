@@ -9,8 +9,16 @@ use tokio_util::sync::CancellationToken;
 use crate::{Cli, TodosSub};
 
 pub async fn dispatch(cli: &Cli, sub: &TodosSub) -> Result<()> {
+    let config_workdir = cli
+        .workdir
+        .clone()
+        .map(Ok)
+        .unwrap_or_else(std::env::current_dir)?;
+    let config = Config::load(&config_workdir)?;
+    let share = opencoder_core::effective_share_dir(Some(&config))
+        .context("TODO share directory unavailable")?;
     if let TodosSub::Validate { file } = sub {
-        let spec = opencoder_todos::directory::load(file)
+        let spec = opencoder_todos::directory::load_bound(file, &share)
             .with_context(|| format!("load TODO {}", file.display()))?;
         println!(
             "{}",
@@ -53,7 +61,7 @@ pub async fn dispatch(cli: &Cli, sub: &TodosSub) -> Result<()> {
             Ok(())
         }
         TodosSub::Run { file, debug, json } => {
-            let spec = opencoder_todos::directory::load(file)
+            let spec = opencoder_todos::directory::load_bound(file, &share)
                 .with_context(|| format!("load TODO {}", file.display()))?;
             let workflow_id = format!("todos-{}", ulid::Ulid::new());
             eprintln!("workflow_id={workflow_id}");

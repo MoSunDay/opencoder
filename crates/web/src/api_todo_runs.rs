@@ -15,9 +15,7 @@ use axum::Json;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use opencoder_core::share_fs::{
-    env_context_path, read_json_opt, resolve_tool_ref, todo_env_binding_path, validate_share_name,
-};
+use opencoder_core::share_fs::{read_json_opt, todo_env_binding_path, validate_share_name};
 use opencoder_llm::{ChatClient, ChatStream};
 use opencoder_todos::WorkflowSpec;
 
@@ -76,36 +74,8 @@ async fn load_version(
 /// runner) and re-validate so the stored spec semantics stay intact.
 #[allow(clippy::result_large_err)] // Response is the natural error currency here
 fn apply_env(spec: &mut WorkflowSpec, root: &std::path::Path, env: &str) -> Result<(), Response> {
-    if let Err(e) = validate_share_name(env) {
-        return Err(error_400(e));
-    }
-    let context_path = env_context_path(root, env).map_err(|e| error_400(format!("{e:#}")))?;
-    let env_context = match read_json_opt(&context_path) {
-        Ok(Some(context)) => context,
-        Ok(None) => return Err(error_400(format!("env 不存在: {env}"))),
-        Err(e) => return Err(error_500(format!("读取 env 失败: {e:#}"))),
-    };
-    let tools = env_context.get("tools").cloned().unwrap_or(json!([]));
-    if let Some(list) = tools.as_array() {
-        for item in list {
-            let Some(reference) = item.as_str() else {
-                return Err(error_400(format!("env 工具引用必须是字符串: {item}")));
-            };
-            if resolve_tool_ref(root, reference).is_err() {
-                return Err(error_400(format!("env 工具缺失: {reference}")));
-            }
-        }
-    }
-    let env_vars = opencoder_todos::domain::env_vars_from_context(&env_context)
-        .map_err(|e| error_400(format!("{e:#}")))?;
-    if !spec.metadata.is_object() {
-        spec.metadata = json!({});
-    }
-    spec.metadata["env"] = json!(env);
-    spec.metadata["env_tools"] = tools;
-    spec.metadata["env_vars"] = opencoder_todos::domain::env_vars_metadata(env_vars);
-    opencoder_todos::domain::validate_spec(spec)
-        .map_err(|e| error_400(format!("spec 校验失败: {e:#}")))
+    opencoder_todos::directory::apply_environment(spec, root, env)
+        .map_err(|e| error_400(format!("env.json: {e:#}")))
 }
 
 /// POST /api/todo/templates/:name/:version/run — spawn the workflow and

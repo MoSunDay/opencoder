@@ -6,7 +6,7 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio_tungstenite::{
     connect_async,
-    tungstenite::{client::IntoClientRequest, Message},
+    tungstenite::{client::IntoClientRequest, protocol::frame::coding::CloseCode, Message},
 };
 
 pub async fn run(remote: &str, token: &str, service: Arc<dyn NodeService>) -> Result<()> {
@@ -135,11 +135,18 @@ async fn connection(
                         }
                     },
                     Message::Ping(data) => writer.send(Message::Pong(data)).await?,
-                    Message::Close(_) => return Ok(()),
+                    Message::Close(frame) => return close_outcome(frame.map(|frame| frame.code)),
                     _ => bail!("invalid server frame"),
                 }
             }
         }
+    }
+}
+
+fn close_outcome(code: Option<CloseCode>) -> Result<()> {
+    match code {
+        None | Some(CloseCode::Normal | CloseCode::Away) => Ok(()),
+        Some(code) => bail!("server closed node channel with code {}", u16::from(code)),
     }
 }
 

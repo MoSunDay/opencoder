@@ -1,6 +1,7 @@
 """Fsync-backed release journal; all switch operations are replayable."""
 import contextlib
 import fcntl
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -39,6 +40,18 @@ def locked(root):
     root.mkdir(parents=True, exist_ok=True)
     with (root / "deploy.lock").open("a+") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        yield
+
+
+@contextlib.contextmanager
+def runtime_use(root, runtime_id):
+    # Same local flock namespace as FleetStore::shared_request_lock. Keep a
+    # direct candidate probe alive against Host garbage collection on rollback.
+    directory = root / "host/host.locks"
+    directory.mkdir(parents=True, exist_ok=True)
+    name = hashlib.sha256(("runtime-use\0" + runtime_id).encode()).hexdigest()
+    with (directory / name).open("a+") as lock:
+        fcntl.flock(lock, fcntl.LOCK_SH)
         yield
 
 

@@ -41,8 +41,34 @@ pub(crate) async fn read_meta(
 ) -> Result<Option<Value>, Response> {
     let path = todo_meta_path(root, name).map_err(|e| error_400(format!("{e:#}")))?;
     match read_json_opt(&path) {
-        Ok(meta) => Ok(meta),
-        Err(e) => Err(error_500(format!("读取模板元数据失败: {e:#}"))),
+        Ok(Some(meta)) => {
+            let versions = meta["versions"].as_array();
+            let valid = meta.is_object()
+                && meta["current"].as_str().is_some_and(|current| {
+                    versions.is_some_and(|entries| {
+                        let names: Vec<_> = entries
+                            .iter()
+                            .filter_map(|entry| entry["version"].as_str())
+                            .collect();
+                        names.len() == entries.len()
+                            && names.contains(&current)
+                            && names.iter().all(|name| validate_share_name(name).is_ok())
+                            && names
+                                .iter()
+                                .collect::<std::collections::BTreeSet<_>>()
+                                .len()
+                                == names.len()
+                    })
+                });
+            if !valid {
+                return Err(error_400(format!(
+                    "{name}/todo.json: current 或 versions 格式错误"
+                )));
+            }
+            Ok(Some(meta))
+        }
+        Ok(None) => Ok(None),
+        Err(e) => Err(error_400(format!("{name}/todo.json: {e:#}"))),
     }
 }
 
@@ -62,7 +88,7 @@ async fn read_binding(
 }
 
 /// GET /api/todo/templates — metadata of every template dir with a parseable
-/// `todo.json` (mid-write/unreadable dirs are skipped, never fatal).
+/// `todo.json`; unreadable published metadata is reported explicitly.
 pub async fn list_templates(State(state): State<Arc<AppState>>) -> Response {
     let root = match share_root(&state.workdir).await {
         Ok((_, root)) => root,
@@ -73,9 +99,13 @@ pub async fn list_templates(State(state): State<Arc<AppState>>) -> Response {
         .into_iter()
         .filter(|name| !name.starts_with('.'))
     {
-        if let Ok(Some(mut meta)) = read_meta(&root, &name).await {
-            meta["name"] = json!(name);
-            templates.push(meta);
+        match read_meta(&root, &name).await {
+            Ok(Some(mut meta)) => {
+                meta["name"] = json!(name);
+                templates.push(meta);
+            }
+            Ok(None) => return error_400(format!("{name}/todo.json: 缺少模板元数据")),
+            Err(response) => return response,
         }
     }
     Json(json!({ "templates": templates })).into_response()
@@ -116,7 +146,8 @@ pub async fn get_template(
             };
             let binding = match read_binding(&root, &name, version).await {
                 Ok(Some(binding)) => binding.get("env").cloned().unwrap_or(Value::Null),
-                _ => Value::Null,
+                Ok(None) => Value::Null,
+                Err(response) => return response,
             };
             env_by_version.insert(version.to_string(), binding);
         }
@@ -218,9 +249,7 @@ pub async fn get_context(
     }
 }
 
-/// PUT /api/todo/templates/:name/:version/context.json — replace the spec.
-/// The body IS the WorkflowSpec JSON; parse + domain validation gate the
-/// write so a broken spec can never replace a runnable one.
+/// Historical writes are rejected; publish edits through new-version.
 pub async fn put_context() -> Response {
     error_409("模板版本只读，请通过 new-version 保存新版本")
 }
@@ -248,10 +277,7 @@ pub async fn get_env_binding(
     }
 }
 
-/// PUT /api/todo/templates/:name/:version/env.json — bind (or clear) an env.
-/// A non-empty target must exist as an env context; empty/null clears by
-/// writing `{"env":null}` (an explicit tombstone beats a missing file for
-/// NFS readers that cache directory listings).
+/// Environment bindings are frozen with their version.
 pub async fn put_env_binding() -> Response {
     error_409("环境绑定随模板版本冻结，请通过 new-version 保存新版本")
 }

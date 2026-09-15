@@ -12,6 +12,7 @@ use support::*;
 
 #[tokio::test]
 async fn durable_acceptance_deduplicates_and_details_stay_on_node() {
+    let _config = support::isolated_config();
     let dir = tempfile::tempdir().unwrap();
     let client = mock();
     let worker = worker(dir.path(), client.clone()).await;
@@ -114,6 +115,7 @@ async fn durable_acceptance_deduplicates_and_details_stay_on_node() {
 
 #[tokio::test]
 async fn restart_marks_unfinished_work_interrupted_and_requires_explicit_resume() {
+    let _config = support::isolated_config();
     let dir = tempfile::tempdir().unwrap();
     let client = mock();
     let first = worker(dir.path(), client.clone()).await;
@@ -174,6 +176,7 @@ async fn restart_marks_unfinished_work_interrupted_and_requires_explicit_resume(
 
 #[tokio::test]
 async fn failed_agent_can_be_explicitly_resumed_without_duplicating_initial_input() {
+    let _config = support::isolated_config();
     let dir = tempfile::tempdir().unwrap();
     let client = Arc::new(
         MockChatClient::new()
@@ -257,6 +260,7 @@ async fn failed_agent_can_be_explicitly_resumed_without_duplicating_initial_inpu
 
 #[tokio::test]
 async fn todo_interrupt_compat_route_remains_resumable_once() {
+    let _config = support::isolated_config();
     let first_hang = Arc::new(tokio::sync::Notify::new());
     let resumed_hang = Arc::new(tokio::sync::Notify::new());
     let client = Arc::new(
@@ -354,6 +358,7 @@ async fn todo_interrupt_compat_route_remains_resumable_once() {
 
 #[tokio::test]
 async fn shutdown_waits_for_task_capture_before_immediate_reopen() {
+    let _config = support::isolated_config();
     let dir = tempfile::tempdir().unwrap();
     for attempt in 0..12 {
         let node = worker(dir.path(), mock()).await;
@@ -423,6 +428,7 @@ async fn status_of(worker: &Worker, id: &str) -> Value {
 /// record silently vanished across a restart).
 #[tokio::test]
 async fn operator_executions_survive_node_restart() {
+    let _config = support::isolated_config();
     let dir = tempfile::tempdir().unwrap();
     // Chat call #0 blocks until released, keeping its execution Running and
     // the single slot occupied; later calls complete immediately.

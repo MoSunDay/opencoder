@@ -215,6 +215,34 @@ async fn a_rejected_first_execute_does_not_prevent_later_planning() {
     let runs = read(&fleet, &format!("/api/project/todos/{id}/runs")).await;
     assert_eq!(runs["runs"].as_array().unwrap().len(), 1);
     assert_eq!(runs["runs"][0]["id"], "prun-after-rejection");
+    for route in [
+        format!("/api/project/todos/{id}/execute"),
+        format!("/api/executions/project-{id}/commands"),
+    ] {
+        let body = if route.ends_with("/commands") {
+            json!({"action":"execute","input":{"run_id":"prun-rejected"}})
+        } else {
+            json!({"run_id":"prun-rejected"})
+        };
+        let repeated = fleet.call("POST", &route, body).await;
+        assert_eq!(repeated.status, execute.status, "{repeated:?}");
+        assert_eq!(repeated.body, execute.body);
+    }
+    let changed = fleet
+        .call(
+            "POST",
+            &format!("/api/project/todos/{id}/plan"),
+            json!({"run_id":"prun-rejected"}),
+        )
+        .await;
+    assert_eq!(changed.status, 409);
+    assert_eq!(
+        read(&fleet, &format!("/api/project/todos/{id}/runs")).await["runs"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
     fleet.shutdown().await;
 }
 
@@ -282,6 +310,70 @@ async fn failed_attempt_keeps_its_only_input_message_after_later_runs() {
     assert_eq!(
         rebased, page,
         "an earlier offset cannot skip the first input"
+    );
+    fleet.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_rejected_resource_preflight_keeps_affinity_and_allows_a_new_plan() {
+    let fleet = Fleet::new(1, mock()).await;
+    let todo = fleet.call("POST", "/api/project/todos", json!({
+        "title":"repair resource selection", "draft":"plan once", "agent":"missing-resource-agent"
+    })).await;
+    assert_eq!(todo.status, 200);
+    let id = todo.body["id"].as_str().unwrap();
+    let owner = format!("project-{id}");
+    let route = format!("/api/project/todos/{id}/plan");
+    let rejected = fleet
+        .call("POST", &route, json!({"run_id":"prun-missing-resource"}))
+        .await;
+    assert_eq!(rejected.status, 400, "{rejected:?}");
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        while fleet
+            .state
+            .fleet
+            .index(&owner)
+            .await
+            .unwrap()
+            .unwrap()
+            .status
+            != opencoder_core::fleet::ExecutionStatus::Error
+        {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    let previous = fleet.state.fleet.index(&owner).await.unwrap().unwrap();
+    let patched = fleet
+        .call(
+            "PATCH",
+            &format!("/api/project/todos/{id}"),
+            json!({"agent":"act"}),
+        )
+        .await;
+    assert_eq!(patched.status, 200, "{patched:?}");
+    let accepted = fleet
+        .call("POST", &route, json!({"run_id":"prun-valid-resource"}))
+        .await;
+    assert_eq!(accepted.status, 202, "{accepted:?}");
+    assert_eq!(accepted.body["node_id"], previous.node_id);
+    assert_eq!(accepted.body["created_at"], previous.created_at);
+    assert_eq!(
+        settled(&fleet.nodes[0], &owner).await["execution"]["status"],
+        "idle"
+    );
+    let repeated = fleet
+        .call("POST", &route, json!({"run_id":"prun-missing-resource"}))
+        .await;
+    assert_eq!(repeated.status, rejected.status);
+    assert_eq!(repeated.body, rejected.body);
+    assert_eq!(
+        read(&fleet, &format!("/api/project/todos/{id}/runs")).await["runs"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
     );
     fleet.shutdown().await;
 }

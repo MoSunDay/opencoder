@@ -9,7 +9,7 @@ pub struct Versioned<T> {
     pub settings: T,
 }
 
-#[derive(Clone, Default, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct RuntimeSettings {
     pub profiles: BTreeMap<String, Versioned<CodexSettings>>,
@@ -17,6 +17,15 @@ pub struct RuntimeSettings {
     /// Only profiles are interpreted by current execution code.
     #[serde(flatten)]
     pub archived: BTreeMap<String, serde_json::Value>,
+}
+
+impl std::fmt::Debug for RuntimeSettings {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RuntimeSettings")
+            .field("profiles", &self.profiles)
+            .field("archived_field_count", &self.archived.len())
+            .finish()
+    }
 }
 
 /// Resolve only the explicitly selected profile. Missing references are errors.

@@ -8,6 +8,7 @@ mod image_render;
 mod interrupt_fuzz;
 mod interrupt_resubmit;
 mod line_accounting;
+mod markdown_table;
 mod plan_card;
 mod reconcile_repair;
 mod say_interleaved_finalize;

@@ -85,40 +85,18 @@ afterEach(() => {
 });
 
 describe('table loading convention in the DOM', () => {
-  it('keeps the execution index unmasked and clickable while 加载更早的执行 appends', async () => {
-    const append = deferred();
-    apiGetMock.mockImplementation((path) => {
-      if (path === '/api/nodes') {
-        return Promise.resolve({ nodes: [NODE] });
-      }
-      if (String(path).includes('cursor_created_at')) {
-        return append.promise;
-      }
-      return Promise.resolve({ executions: [execution('agent-new')], next_cursor: { created_at: 9, id: 'agent-next' } });
-    });
+  it('keeps the execution index unmasked and clickable without pagination controls', async () => {
+    apiGetMock.mockImplementation((path) => path === '/api/nodes'
+      ? Promise.resolve({ nodes: [NODE] })
+      : Promise.resolve({ executions: [execution('agent-new')], next_cursor: { created_at: 9, id: 'agent-next' } }));
     render(<ExecutionsPanel onNotice={vi.fn()} />);
     await flush();
     expect(screen.getByText('agent-new')).toBeTruthy();
     expect(isMasked()).toBe(false);
-
-    fireEvent.click(screen.getByText('加载更早的执行'));
-    await flush();
-    expect(apiGetMock)
-      .toHaveBeenCalledWith('/api/executions?limit=50&cursor_created_at=9&cursor_id=agent-next');
-    // append 期间：翻页按钮自己转，表格不遮罩 —— 遮罩会让 ID 链接点不动，
-    // 而且和按钮的 spinner 撞成两个。
-    expect(findButton('加载更早的执行').className).toContain('ant-btn-loading');
-    expect(isMasked()).toBe(false);
-    await advance(SPIN_DELAY_MS * 2);
-    expect(isMasked()).toBe(false);
+    expect(screen.queryByRole('button', { name: '启动执行' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '加载更早的执行' })).toBeNull();
     fireEvent.click(screen.getByText('agent-new'));
     expect(screen.getByText('execution-detail:agent-new')).toBeTruthy();
-
-    await act(async () => { append.resolve({ executions: [execution('agent-old', 8)] }); });
-    await flush();
-    expect(screen.getByText('agent-old')).toBeTruthy();
-    expect(screen.getByText('agent-new')).toBeTruthy();
-    expect(isMasked()).toBe(false);
   });
 
   it('never masks the node table on the silent 3s poll, so row actions stay clickable', async () => {

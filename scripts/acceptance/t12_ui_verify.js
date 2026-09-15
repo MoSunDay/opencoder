@@ -189,12 +189,9 @@ async function verifyLogin() {
 
 async function verifyPaging(nodeIds) {
   await openAgentPage('全部执行');
-  await page.getByRole('button', { name: '加载更早的执行' }).click();
-  const sixthPage = page.locator('.ant-pagination-item-6');
-  await sixthPage.waitFor();
-  await sixthPage.click();
+  await page.getByRole('button', { name: /^刷\s*新$/ }).click();
   await page.locator('tbody').getByText(/agent-seed-/).first().waitFor();
-  await page.locator('.ant-pagination-item-1').click();
+  assert.equal(await page.getByRole('button', { name: '加载更早的执行' }).count(), 0);
   const listed = await api('GET', '/api/executions?limit=1');
   assert.deepEqual(Object.keys(listed.executions[0]).sort(), ['created_at', 'id', 'kind', 'node_id', 'status']);
   await api('POST', '/api/executions', { id: 'agent-poll-new', kind: 'agent', target: 'act', node_id: nodeIds[0], input: { prompt: '', title: 'poll' } });
@@ -203,11 +200,11 @@ async function verifyPaging(nodeIds) {
 
 async function verifyAgent(nodeName) {
   delay = 2_000;
-  await page.getByRole('button', { name: '启动执行' }).click(); // 工具栏按钮：打开启动执行 Modal
-  await page.getByPlaceholder('act / 定义名称 / 任务 ID').fill('act');
-  await page.getByLabel('任务要求').fill('AGENT-FRESH');
-  await chooseInForm('调度节点', nodeName);
-  await page.getByRole('dialog').getByRole('button', { name: '启动执行' }).click();
+  const node = (await api('GET', '/api/nodes')).nodes.find((candidate) => candidate.name === nodeName);
+  await api('POST', '/api/executions', { id: 'agent-browser', kind: 'agent', target: 'act', node_id: node.id, input: { prompt: 'AGENT-FRESH' } });
+  await page.getByRole('button', { name: /^刷\s*新$/ }).click();
+  await page.getByRole('button', { name: 'agent-browser', exact: true }).waitFor();
+  await page.getByRole('button', { name: 'agent-browser', exact: true }).click();
   let drawer = page.locator('.ant-drawer:visible');
   await drawer.getByText('运行中', { exact: true }).waitFor();
   await drawer.getByText('browser fresh answer', { exact: true }).waitFor({ timeout: 15_000 });
@@ -229,12 +226,11 @@ async function verifyAgent(nodeName) {
 
 async function verifyDag(nodeId, nodeName) {
   await api('POST', '/api/dag/defs', { spec: { name: 'verify-dag', steps: [{ name: 'first', kind: { type: 'wasm', command: 'stdout.wasm' } }] } });
-  await page.getByRole('button', { name: '启动执行' }).click(); // verifyAgent 成功后 Modal 已关，重新打开
-  await chooseInForm('执行类型', 'DAG');
-  await page.getByPlaceholder('act / 定义名称 / 任务 ID').fill('verify-dag');
-  await page.getByLabel('任务要求').fill('DAG-SAME-NODE');
-  await chooseInForm('调度节点', nodeName);
-  await page.getByRole('dialog').getByRole('button', { name: '启动执行' }).click();
+  const node = (await api('GET', '/api/nodes')).nodes.find((candidate) => candidate.name === nodeName);
+  await api('POST', '/api/executions', { id: 'dag-browser', kind: 'dag', target: 'verify-dag', node_id: node.id, input: { prompt: 'DAG-SAME-NODE' } });
+  await page.getByRole('button', { name: /^刷\s*新$/ }).click();
+  await page.getByRole('button', { name: 'dag-browser', exact: true }).waitFor();
+  await page.getByRole('button', { name: 'dag-browser', exact: true }).click();
   const drawer = page.locator('.ant-drawer:visible');
   await drawer.getByText('已完成', { exact: true }).waitFor({ timeout: 20_000 });
   const id = await drawer.locator('.ant-drawer-title').innerText();

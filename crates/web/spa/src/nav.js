@@ -67,7 +67,7 @@ export const CATEGORY_OPTIONS = NAV_CATEGORIES.map((c) => ({ value: c.key, label
 /// Pages that carry their own title inside the body (the brain workbench uses
 /// Tabs), so they deliberately have no PAGE_META header copy. PageShell renders
 /// a headerless `.oc-page` body for any page missing from PAGE_META.
-export const HEADERLESS_PAGES = ['brain'];
+export const HEADERLESS_PAGES = ['brain', 'topics'];
 
 /// Per-page header copy (title + one-line description). Exported now so the
 /// IA has one name per page; the header UI itself arrives in iteration 3.
@@ -75,7 +75,6 @@ export const PAGE_META = {
   project: { title: '项目', desc: '目标、里程碑与 TODO 的用户策展跟踪' },
   progress: { title: '进展', desc: '里程碑进度、进行中 TODO 与最近项目执行' },
   ownerview: { title: 'Owner 视角', desc: '按目标分组的健康度与待人工介入事项' },
-  topics: { title: '全部执行', desc: '舰队全部执行记录与团队过滤' },
   dag: { title: 'DAG 工作流', desc: 'DAG 运行的图视图与步骤工件' },
   todos: { title: 'TODO 管理', desc: '持久化 TODO 工作流的调度与验收' },
   team: { title: '团队组队', desc: '多 agent 团队的组建与执行' },

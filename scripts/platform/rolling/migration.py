@@ -109,7 +109,10 @@ def migrate(settings, bundle, operations, seconds=90):
         operations.wait(lambda: operations.http(settings.resource_url, "/api/health"), seconds)
         if not journal.data.get("migration_mounts_ready"):
             for mount in settings.systemd_dir.glob("mnt-opencoder*.mount"):
-                operations.run("systemctl", "restart", mount.name)
+                # Stable NFS handles survive the resource-owner handoff. Keep
+                # an existing mount (which may have other readers) in place;
+                # readiness below verifies the new exporter and actual reads.
+                operations.run("systemctl", "start", mount.name)
             journal.data["migration_mounts_ready"] = True
             journal.save()
         host_url = f"http://127.0.0.1:{record['host_port']}"

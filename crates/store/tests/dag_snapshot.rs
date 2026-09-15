@@ -58,6 +58,14 @@ async fn snapshot_has_latest_attempts_and_exact_cursor_without_log_payloads() {
         .unwrap();
     let next = store.dag_step_snapshot("run").await.unwrap();
     assert_eq!(next.head_seq, terminal);
+    assert_eq!(
+        next.steps
+            .iter()
+            .find(|step| step.name == "first")
+            .unwrap()
+            .started_at_ms,
+        5
+    );
     assert!(
         !next
             .steps

@@ -16,9 +16,9 @@ afterEach(() => cleanup());
 
 describe('PageShell', () => {
   it('renders the PAGE_META title, description and children', () => {
-    render(<PageShell page="nodes">body-content</PageShell>);
-    expect(screen.getByRole('heading', { name: '节点列表' })).toBeTruthy();
-    expect(screen.getByText('在线 Opencoder 节点与负载')).toBeTruthy();
+    render(<PageShell page="project">body-content</PageShell>);
+    expect(screen.getByRole('heading', { name: '项目' })).toBeTruthy();
+    expect(screen.getByText('目标、里程碑与 TODO 的用户策展跟踪')).toBeTruthy();
     expect(screen.getByText('body-content')).toBeTruthy();
   });
 
@@ -45,6 +45,15 @@ describe('PageShell', () => {
     render(<PageShell page="brain">brain-body</PageShell>);
     expect(screen.queryByRole('heading')).toBeNull();
     expect(screen.getByText('brain-body')).toBeTruthy();
+  });
+
+  it('renders operational list pages without a redundant page header', () => {
+    for (const page of ['topics', 'team', 'agents', 'nodes']) {
+      cleanup();
+      render(<PageShell page={page}>body</PageShell>);
+      expect(screen.queryByRole('heading')).toBeNull();
+      expect(screen.getByText('body')).toBeTruthy();
+    }
   });
 
   it('every PAGE_META page can mount with a heading', () => {

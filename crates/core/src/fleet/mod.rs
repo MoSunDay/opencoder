@@ -2,6 +2,7 @@
 mod paging;
 mod protocol;
 mod queue;
+pub mod release;
 mod report;
 mod scheduling;
 pub use paging::*;

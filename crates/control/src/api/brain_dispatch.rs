@@ -88,7 +88,7 @@ pub struct BrainReceipt {
     pub decision: BrainDecision,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PreparedDispatch {
     pub request: CreateExecution,
     pub receipt: BrainReceipt,

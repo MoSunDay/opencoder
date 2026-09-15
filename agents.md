@@ -1,4 +1,4 @@
-Commit: e50ffc433bca866fd17bd571a74f1bdf17705dea
+Commit: 1ac64fe8b81a2c7c144c72b717a8031ab18f2589
 
 # OpenCoder 逻辑地图
 
@@ -27,8 +27,8 @@ Rust 原生编码代理 workspace：`opencoder`（本地 CLI/TUI）、`opencode-
 - [agents/control](agents/control/index.md) — 平台控制面：节点调度、五字段执行索引。
 - [agents/worker](agents/worker/index.md) — 节点执行面：接受/恢复、资源快照、操作适配。
 - [agents/node](agents/node/index.md) — 出站 WebSocket：注册、心跳、RPC。
-- [agents/server](agents/server/index.md) — `opencoder-server` 二进制：启动 control。
-- [agents/agent](agents/agent/index.md) — `opencoder-agent` 二进制：构造 worker 接入节点。
+- [agents/server](agents/server/index.md) — 版本 Server 与独立只读资源服务入口。
+- [agents/agent](agents/agent/index.md) — 稳定 Host、独立版本 Runtime 与兼容节点入口。
 - [agents/ctl](agents/ctl/index.md) — `opencoder-cli`：Server API + Bearer + 退出码约定。
 
 业务能力见 [features/index.md](features/index.md)。

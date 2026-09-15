@@ -398,12 +398,38 @@ pub async fn events_page(
     limit: u32,
     payload_budget: usize,
 ) -> Result<crate::TodoEventPage> {
+    bounded_events(conn, workflow_id, after, limit, payload_budget, false).await
+}
+
+pub async fn events_before(
+    conn: &Connection,
+    workflow_id: &str,
+    before: i64,
+    limit: u32,
+    payload_budget: usize,
+) -> Result<crate::TodoEventPage> {
+    bounded_events(conn, workflow_id, before, limit, payload_budget, true).await
+}
+
+async fn bounded_events(
+    conn: &Connection,
+    workflow_id: &str,
+    cursor: i64,
+    limit: u32,
+    payload_budget: usize,
+    reverse: bool,
+) -> Result<crate::TodoEventPage> {
     let limit = limit.clamp(1, 200) as usize;
     let mut rows = conn
         .query(
-            "SELECT seq,kind,ts,length(CAST(payload_json AS BLOB)) FROM todo_events \
-             WHERE workflow_id=?1 AND seq>?2 ORDER BY seq LIMIT ?3",
-            params![workflow_id, after, limit as i64 + 1],
+            if reverse {
+                "SELECT seq,kind,ts,length(CAST(payload_json AS BLOB)) FROM todo_events \
+                 WHERE workflow_id=?1 AND seq<?2 ORDER BY seq DESC LIMIT ?3"
+            } else {
+                "SELECT seq,kind,ts,length(CAST(payload_json AS BLOB)) FROM todo_events \
+                 WHERE workflow_id=?1 AND seq>?2 ORDER BY seq LIMIT ?3"
+            },
+            params![workflow_id, cursor, limit as i64 + 1],
         )
         .await?;
     let mut metas = Vec::with_capacity(limit + 1);

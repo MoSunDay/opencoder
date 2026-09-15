@@ -3,7 +3,7 @@ const assert = require('assert/strict');
 const path = require('path');
 
 module.exports = async ({ page, api, until, root, envs }) => {
-  await page.locator('.ant-layout-sider').getByText('节点', { exact: true }).click();
+  await page.locator('.fleet-nav-category').getByText('节点', { exact: true }).click();
   await page.getByRole('menuitem', { name: '节点列表' }).click();
   await page.getByRole('button', { name: '调度配置', exact: true }).click();
   await page.getByLabel('node-max-runs').fill('2');
@@ -20,7 +20,7 @@ module.exports = async ({ page, api, until, root, envs }) => {
   await api('POST', '/api/agents/resources/skills', { name: 'browser-skills', files: [file('review/SKILL.md', '# Review\nInspect files.')] });
   await api('POST', '/api/agents/resources/tools', { name: 'browser-tools', files: [file('probe.sh', '#!/bin/sh\nprintf probe')] });
   await api('POST', '/api/agents', { name: 'browser-agent', current: { prompt: 'browser-prompt', skills: 'browser-skills', tools: 'browser-tools' } });
-  await page.locator('.ant-layout-sider').getByText('Agent', { exact: true }).click();
+  await page.locator('.fleet-nav-category').getByText('Agent', { exact: true }).click();
   await page.getByRole('menuitem', { name: 'Agent 配置' }).click();
   await page.getByRole('tab', { name: 'Agent 列表', exact: true }).waitFor();
   const row = page.getByRole('row').filter({ hasText: 'browser-agent' });

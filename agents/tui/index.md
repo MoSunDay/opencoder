@@ -28,7 +28,7 @@ ratatui + crossterm 交互界面。
 - 不持有 SessionState（worker 持有）；Store 交互经 worker `UiCmd` 通道或离环 actor，不在事件循环内联等写锁。
 - notepad、sidecar、ps/stop、本地 `!cmd` 不进模型 context。
 - 已有块（Thinking/Turn/Step/call 等）的展开/收起状态仅用户改变；新事件只更新内容。
-- Say 终态契约：Assistant 块 `done` 前 raw 逐行、之后 `rendered`，每条终态路径必须幂等 `finalize_assistant`；子代理子视图（`SubagentChild` 路由）同契约，`SubagentEnd`（含取消）与孤儿修复（`reconcile_orphaned_subagents`）也 finalize 子视图，否则聚焦视图残留原始 Markdown。
+- Say 终态契约：Assistant 块 `done` 前 raw 逐行、之后 `rendered`；`finalize_assistant` 幂等且循环封板**所有** open Say（交错轮次可能滞留多个，单次 rposition 修复会漏），`append_text_delta` 开新 Say 前即封板旧 Say（K=1 不变量）；子代理子视图（`SubagentChild` 路由）同契约，`SubagentEnd`（含取消）与孤儿修复（`reconcile_orphaned_subagents`）、sidecar `SidecarTurn`、resume 重建 `build_subagent_block` 均 finalize 子视图，否则聚焦视图残留原始 Markdown。
 - 无单独 Codex 渲染器，消费共享消息/事件；Harness 运行契约在 session 模块。
 
 ## 相关

@@ -10,6 +10,11 @@ struct Connection {
     reported_ready: bool,
     index_synced: bool,
 }
+struct Standby {
+    registration: NodeRegistration,
+    snapshot: NodeSnapshot,
+    connection: Connection,
+}
 
 struct Pending {
     node_id: String,
@@ -30,6 +35,7 @@ pub(super) struct CreateReply {
 struct State {
     nodes: HashMap<String, NodeView>,
     connections: HashMap<String, Connection>,
+    standby: HashMap<String, Standby>,
     pending: HashMap<String, Pending>,
     reservations: HashMap<String, Reservation>,
     accepted: HashMap<String, String>,
@@ -65,6 +71,7 @@ impl Hub {
             state: Mutex::new(State {
                 nodes,
                 connections: HashMap::new(),
+                standby: HashMap::new(),
                 pending: HashMap::new(),
                 reservations: HashMap::new(),
                 accepted: HashMap::new(),
@@ -137,8 +144,36 @@ impl Hub {
             anyhow::bail!("invalid node registration");
         }
         let mut state = self.state.lock().await;
-        if state.connections.contains_key(&registration.id) {
-            anyhow::bail!("node already has an active connection");
+        if let Some(current) = state.connections.get(&registration.id) {
+            let epoch = |s: &str| {
+                s.strip_prefix("host-")
+                    .and_then(|s| s.split('-').next())
+                    .and_then(|s| s.parse::<u64>().ok())
+            };
+            anyhow::ensure!(
+                matches!((epoch(&snapshot.generation),epoch(&current.generation)), (Some(new),Some(old)) if new > old),
+                "node already has an active connection"
+            );
+            if let Some(pending) = state.standby.get(&registration.id) {
+                anyhow::ensure!(
+                    epoch(&snapshot.generation) > epoch(&pending.snapshot.generation),
+                    "stale standby host"
+                );
+            }
+            state.standby.insert(
+                registration.id.clone(),
+                Standby {
+                    connection: Connection {
+                        generation: snapshot.generation.clone(),
+                        tx,
+                        reported_ready: snapshot.ready,
+                        index_synced: false,
+                    },
+                    registration,
+                    snapshot,
+                },
+            );
+            return Ok(());
         }
         let reported_ready = snapshot.ready;
         snapshot.ready = false;
@@ -171,6 +206,17 @@ impl Hub {
     }
     pub async fn snapshot(&self, id: &str, generation: &str, mut snapshot: NodeSnapshot) {
         let mut state = self.state.lock().await;
+        if let Some(standby) = state
+            .standby
+            .get_mut(id)
+            .filter(|s| s.connection.generation == generation)
+        {
+            if snapshot.generation == generation && snapshot.sequence > standby.snapshot.sequence {
+                standby.connection.reported_ready = snapshot.ready;
+                standby.snapshot = snapshot;
+            }
+            return;
+        }
         let (index_synced, reported_ready) = match state.connections.get_mut(id) {
             Some(connection)
                 if connection.generation == generation && snapshot.generation == generation =>
@@ -196,6 +242,13 @@ impl Hub {
     pub async fn touch(&self, id: &str, generation: &str) -> bool {
         let mut state = self.state.lock().await;
         if state
+            .standby
+            .get(id)
+            .is_some_and(|s| s.connection.generation == generation)
+        {
+            return true;
+        }
+        if state
             .connections
             .get(id)
             .is_none_or(|connection| connection.generation != generation)
@@ -209,6 +262,23 @@ impl Hub {
     }
     pub async fn mark_index_synced(&self, id: &str, generation: &str) -> bool {
         let mut state = self.state.lock().await;
+        if state
+            .standby
+            .get(id)
+            .is_some_and(|s| s.connection.generation == generation)
+        {
+            let mut standby = state.standby.remove(id).unwrap();
+            standby.connection.index_synced = true;
+            standby.snapshot.ready = standby.connection.reported_ready;
+            state.connections.insert(id.to_string(), standby.connection);
+            if let Some(node) = state.nodes.get_mut(id) {
+                node.registration = standby.registration;
+                node.snapshot = Some(standby.snapshot);
+                node.online = true;
+                node.last_seen_at = now_ms();
+            }
+            return true;
+        }
         let ready = match state.connections.get_mut(id) {
             Some(connection) if connection.generation == generation => {
                 connection.index_synced = true;
@@ -264,6 +334,14 @@ impl Hub {
     }
     pub async fn detach(&self, id: &str, generation: &str) {
         let mut state = self.state.lock().await;
+        if state
+            .standby
+            .get(id)
+            .is_some_and(|s| s.connection.generation == generation)
+        {
+            state.standby.remove(id);
+            return;
+        }
         if state
             .connections
             .get(id)

@@ -13,14 +13,10 @@ use axum::response::{IntoResponse, Response};
 use axum::Json;
 use serde_json::{json, Value};
 
-use opencoder_core::share_fs::{
-    todo_context_path, todo_env_binding_path, todo_meta_path, todo_version_dir, validate_share_name,
-};
+use opencoder_core::share_fs::{todo_meta_path, todo_version_dir, validate_share_name};
 
 use crate::api_todo_templates::{name_or_resp, read_meta};
-use crate::api_todo_util::{
-    error_400, error_404, error_409, error_500, next_version, now_ms, share_root,
-};
+use crate::api_todo_util::{error_400, error_404, error_409, error_500, share_root};
 use crate::AppState;
 
 /// POST /api/todo/templates/:name/new-version — fork the current (or
@@ -28,83 +24,11 @@ use crate::AppState;
 /// copied verbatim, an env binding (if any) rides along, and `current`
 /// flips to the new version.
 pub async fn new_version(
-    State(state): State<Arc<AppState>>,
-    Path(name): Path<String>,
-    Json(body): Json<Value>,
+    state: State<Arc<AppState>>,
+    name: Path<String>,
+    body: Json<Value>,
 ) -> Response {
-    let root = match share_root(&state.workdir).await {
-        Ok((_, root)) => root,
-        Err(e) => return error_500(format!("share root: {e:#}")),
-    };
-    if let Err(resp) = name_or_resp(&root, &name) {
-        return resp;
-    }
-    let mut meta = match read_meta(&root, &name).await {
-        Ok(Some(meta)) => meta,
-        Ok(None) => return error_404(&format!("模板不存在: {name}")),
-        Err(resp) => return resp,
-    };
-    let source = body
-        .get("source_version")
-        .and_then(Value::as_str)
-        .map(str::to_string)
-        .or_else(|| {
-            meta.get("current")
-                .and_then(Value::as_str)
-                .map(str::to_string)
-        })
-        .unwrap_or_else(|| "v1".into());
-    let source_context = match todo_context_path(&root, &name, &source) {
-        Ok(p) => p,
-        Err(e) => return error_400(format!("{e:#}")),
-    };
-    let context_bytes = match tokio::fs::read(&source_context).await {
-        Ok(bytes) => bytes,
-        Err(_) => return error_404(&format!("版本不存在: {name}/{source}")),
-    };
-    let existing: Vec<String> = meta
-        .get("versions")
-        .and_then(Value::as_array)
-        .map(|versions| {
-            versions
-                .iter()
-                .filter_map(|v| v.get("version").and_then(Value::as_str).map(str::to_string))
-                .collect()
-        })
-        .unwrap_or_default();
-    let next = next_version(&existing);
-    let target_context = match todo_context_path(&root, &name, &next) {
-        Ok(p) => p,
-        Err(e) => return error_400(format!("{e:#}")),
-    };
-    if let Err(e) = opencoder_core::share_fs::atomic_write(&target_context, &context_bytes) {
-        return error_500(format!("写入 context.json 失败: {e:#}"));
-    }
-    if let Ok(source_binding) = todo_env_binding_path(&root, &name, &source) {
-        if let Ok(bytes) = tokio::fs::read(&source_binding).await {
-            let target_binding = match todo_env_binding_path(&root, &name, &next) {
-                Ok(p) => p,
-                Err(e) => return error_400(format!("{e:#}")),
-            };
-            if let Err(e) = opencoder_core::share_fs::atomic_write(&target_binding, &bytes) {
-                return error_500(format!("写入 env.json 失败: {e:#}"));
-            }
-        }
-    }
-    let note = body.get("note").and_then(Value::as_str).unwrap_or("");
-    meta["versions"]
-        .as_array_mut()
-        .unwrap_or(&mut Vec::new())
-        .push(json!({ "version": next, "note": note, "created_at": now_ms() }));
-    meta["current"] = json!(next);
-    let meta_path = match todo_meta_path(&root, &name) {
-        Ok(p) => p,
-        Err(e) => return error_400(format!("{e:#}")),
-    };
-    if let Err(e) = opencoder_core::share_fs::atomic_write_json(&meta_path, &meta) {
-        return error_500(format!("写入 todo.json 失败: {e:#}"));
-    }
-    Json(json!({ "version": next })).into_response()
+    crate::api_todo_directory::save(state, name, body).await
 }
 
 /// DELETE /api/todo/templates/:name/:version — drop one version (409 when it
@@ -117,6 +41,10 @@ pub async fn delete_version(
     let root = match share_root(&state.workdir).await {
         Ok((_, root)) => root,
         Err(e) => return error_500(format!("share root: {e:#}")),
+    };
+    let _guard = match crate::api_todo_directory::lock(&root, &name) {
+        Ok(file) => file,
+        Err(response) => return response,
     };
     if let Err(resp) = name_or_resp(&root, &name) {
         return resp;
@@ -164,6 +92,10 @@ pub async fn delete_template(
     let root = match share_root(&state.workdir).await {
         Ok((_, root)) => root,
         Err(e) => return error_500(format!("share root: {e:#}")),
+    };
+    let _guard = match crate::api_todo_directory::lock(&root, &name) {
+        Ok(file) => file,
+        Err(response) => return response,
     };
     let dir = match name_or_resp(&root, &name) {
         Ok(dir) => dir,

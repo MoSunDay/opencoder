@@ -90,18 +90,15 @@ pub async fn stop(key: &'static str) -> bool {
     }
 }
 
-/// Snapshot for `key`: `nfs_status` of the live handle, or the stopped
-/// defaults. Sync on purpose (callers embed it in JSON handlers): a
-/// `try_lock` miss means a start/stop is mid-flight on this key — the
-/// stopped defaults are reported rather than blocking the caller.
-pub fn status(key: &'static str) -> NfsServerStatus {
-    match EXPORTS.try_lock() {
-        Ok(exports) => exports
-            .get(key)
-            .map(|handle| nfs_status(Some(handle)))
-            .unwrap_or_else(|| stopped(key)),
-        Err(_) => stopped(key),
-    }
+/// Snapshot for `key`, serialized with lifecycle changes. Contention on a
+/// different export must not turn a running export into a stopped snapshot.
+pub async fn status(key: &'static str) -> NfsServerStatus {
+    EXPORTS
+        .lock()
+        .await
+        .get(key)
+        .map(|handle| nfs_status(Some(handle)))
+        .unwrap_or_else(|| stopped(key))
 }
 
 #[cfg(test)]
@@ -138,10 +135,20 @@ mod tests {
                 let (again, started) = start("test-export", opts(dir.path())).await.unwrap();
                 assert!(!started, "live handle must be reused, not respawned");
                 assert_eq!(again.port, first.port, "reuse keeps the bound port");
-                assert!(status("test-export").running);
+                // A concurrent lifecycle operation holds the shared registry lock.
+                // Status must wait, not falsely report the live export as stopped.
+                let guard = EXPORTS.lock().await;
+                assert!(tokio::time::timeout(
+                    std::time::Duration::from_millis(10),
+                    status("test-export")
+                )
+                .await
+                .is_err());
+                drop(guard);
+                assert!(status("test-export").await.running);
 
                 assert!(stop("test-export").await);
-                let stopped = status("test-export");
+                let stopped = status("test-export").await;
                 assert!(!stopped.running);
                 assert_eq!(stopped.export_root, "");
                 // Idempotent stop.

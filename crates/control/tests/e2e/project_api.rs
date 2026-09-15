@@ -619,3 +619,48 @@ async fn brain_todo_execute_preresolves_empty_library_to_default_agent() {
         "input.brain carries the default-agent resolution: {execute_cmd:?}"
     );
 }
+
+#[tokio::test]
+async fn keyed_project_routing_rejects_changed_intent_after_unconfirmed_command() {
+    let h = Harness::new().await;
+    let todo = seed_todo_with_kind(&h, Some("brain")).await;
+    let path = format!("/api/project/todos/{todo}");
+    let (status, body) = h
+        .req(Method::POST, &format!("{path}/plan"), Some(json!({})))
+        .await;
+    assert_eq!(status, 202, "{body}");
+    let id = format!("project-{todo}");
+    h.node
+        .set_command(&id, "project-receipt", 404, json!({"error":"not accepted"}));
+    h.node
+        .set_command(&id, "execute", 503, json!({"error":"unconfirmed"}));
+    let request = json!({"run_id":"prun-routing-release","reason":"original"});
+    let (status, body) = h
+        .req(
+            Method::POST,
+            &format!("{path}/execute"),
+            Some(request.clone()),
+        )
+        .await;
+    assert_eq!(status, 503, "{body}");
+    let (status, body) = h
+        .req(
+            Method::POST,
+            &format!("{path}/execute"),
+            Some(json!({"run_id":"prun-routing-release","reason":"changed"})),
+        )
+        .await;
+    assert_eq!(status, 409, "{body}");
+    let (status, body) = h
+        .req(Method::POST, &format!("{path}/execute"), Some(request))
+        .await;
+    assert_eq!(status, 503, "{body}");
+    let commands: Vec<_> = h
+        .node
+        .seen_commands()
+        .into_iter()
+        .filter(|(_, action, _)| action == "execute")
+        .collect();
+    assert_eq!(commands.len(), 2);
+    assert_eq!(commands[0].2, commands[1].2);
+}

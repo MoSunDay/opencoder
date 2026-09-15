@@ -46,7 +46,9 @@ mod skill_cache;
 
 pub use skill_cache::discover_cached;
 
+mod runtime;
 mod seed;
+pub use runtime::pin_runtime_skills;
 
 pub use seed::{
     seed_builtin_skills, seed_builtin_skills_in, seed_dep_gated_skills, seed_dep_gated_skills_in,
@@ -69,7 +71,7 @@ pub struct Skill {
 /// made seeding write into whatever the current working directory happened
 /// to be, so it is deliberately gone.
 pub fn skills_dir() -> Option<PathBuf> {
-    dirs::home_dir().map(|h| h.join(".opencoder").join("skills"))
+    runtime::pinned_root().or_else(|| dirs::home_dir().map(|h| h.join(".opencoder").join("skills")))
 }
 
 /// Production discovery: scan the active file-based agent's private skill

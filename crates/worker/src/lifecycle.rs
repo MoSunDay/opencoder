@@ -10,6 +10,8 @@ pub(crate) enum StopIntent {
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
 pub(crate) struct Lifecycle {
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub todo_reruns: std::collections::BTreeMap<String, crate::operations::todo::Control>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stop_intent: Option<StopIntent>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

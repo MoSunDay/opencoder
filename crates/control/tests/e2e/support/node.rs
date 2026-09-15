@@ -392,7 +392,13 @@ impl NodeService for MockNode {
                     .commands
                     .get(&(execution.id.clone(), action.clone()))
                     .cloned()
-                    .unwrap_or_else(|| RpcReply::error(400, "unknown execution command"));
+                    .unwrap_or_else(|| {
+                        if execution.kind == ExecutionKind::Project && action == "project-receipt" {
+                            miss404("project run not accepted")
+                        } else {
+                            RpcReply::error(400, "unknown execution command")
+                        }
+                    });
                 self.seen
                     .lock()
                     .unwrap()

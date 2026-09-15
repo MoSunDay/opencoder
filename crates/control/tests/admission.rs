@@ -347,7 +347,7 @@ async fn reconnect_freeze_cannot_arrive_after_concurrent_reopen() {
         .await;
     assert_eq!(offline_reopen.status(), 503);
     assert_eq!(
-        harness.state.admission.snapshot().await.mode,
+        harness.state.admission.snapshot().await.unwrap().mode,
         AdmissionMode::Frozen
     );
 
@@ -372,7 +372,7 @@ async fn reconnect_freeze_cannot_arrive_after_concurrent_reopen() {
     assert_eq!(reopened.status(), 200);
     assert!(harness.service.open.load(Ordering::SeqCst));
     assert_eq!(
-        harness.state.admission.snapshot().await.mode,
+        harness.state.admission.snapshot().await.unwrap().mode,
         AdmissionMode::Open
     );
     reconnected.abort();
@@ -413,7 +413,7 @@ async fn frozen_node_reconnecting_to_open_server_becomes_ready() {
     result.expect("reconnected node must recover from its persisted freeze");
     assert!(harness.service.open.load(Ordering::SeqCst));
     assert_eq!(
-        harness.state.admission.snapshot().await.mode,
+        harness.state.admission.snapshot().await.unwrap().mode,
         AdmissionMode::Open
     );
 }

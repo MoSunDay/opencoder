@@ -135,9 +135,24 @@ async fn claimed_run_executes_and_converges_done_on_the_server() {
     // Live SSE carries the full uploaded projection in order.
     let frames = await_sse_terminal(&mut sse, "done").await;
     let kinds: Vec<&str> = frames.iter().map(|f| f.kind.as_str()).collect();
-    let expected = ["run_started", "step_started", "step_done", "run_finished"];
+    // Live execution logs ride the same projection: the streamed text delta
+    // lands as a `step_log` frame between `step_started` and `step_done`.
+    let expected = [
+        "run_started",
+        "step_started",
+        "step_log",
+        "step_done",
+        "run_finished",
+    ];
     assert_eq!(&kinds[..expected.len()], &expected, "kinds={kinds:?}");
-    let step_done = &frames[2];
+    let step_log = &frames[2];
+    assert_eq!(step_log.data["step"], json!("analyze"));
+    assert_eq!(step_log.data["payload"]["event"], json!("text_delta"));
+    assert!(step_log.data["payload"]["data"]["text"]
+        .as_str()
+        .unwrap()
+        .contains("结论如下"));
+    let step_done = &frames[3];
     assert_eq!(step_done.data["step"], json!("analyze"));
     assert_eq!(step_done.data["payload"]["ok"], json!(true));
     // Uploaded frames carry the step's snapshot (transcript tail).

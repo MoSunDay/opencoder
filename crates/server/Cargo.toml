@@ -13,6 +13,7 @@ opencoder-core.workspace = true
 opencoder-control.workspace = true
 opencoder-store.workspace = true
 anyhow.workspace = true
+serde_json.workspace = true
 clap.workspace = true
 tokio.workspace = true
 tracing.workspace = true

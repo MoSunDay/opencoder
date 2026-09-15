@@ -82,7 +82,7 @@ async fn hung_heartbeat_times_out_within_injected_budget() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn heartbeat_recovers_after_timeout() {
     let (base, st) = support::spawn_stub().await;
-    st.hang_heartbeats_for(Duration::from_millis(250));
+    let gate = st.hold_heartbeats();
     let uplink =
         Uplink::with_heartbeat_timeout(&base, support::TOKEN, Duration::from_millis(80)).unwrap();
 
@@ -97,10 +97,9 @@ async fn heartbeat_recovers_after_timeout() {
         t0.elapsed()
     );
 
-    // Once the wedge window lapses the same uplink serves beats normally.
-    while Instant::now() < t0 + Duration::from_millis(300) {
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
+    // Restore the server only after the same client has observed a timeout.
+    // An absolute window could elapse while constructing the client on a busy host.
+    gate.add_permits(1);
     let hb = uplink
         .heartbeat(support::STUB_NODE_ID)
         .await

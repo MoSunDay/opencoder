@@ -3,6 +3,29 @@ use anyhow::{bail, Context, Result};
 use opencoder_core::agent::{AgentMeta, ResourceMeta, AGENT_CATEGORIES};
 use std::path::{Path, PathBuf};
 
+/// WASM-only DAGs have no Agent resource dependency. Their modules are pinned
+/// separately; copying every prompt, skill and tool would block admission on
+/// unrelated files. Unknown definitions and declared agent pins fail closed.
+pub(crate) fn requires_agent_pool(assignment: &opencoder_core::fleet::Assignment) -> bool {
+    use opencoder_core::fleet::ExecutionKind;
+    if assignment.request.kind != ExecutionKind::Dag
+        || assignment.request.input["_brain"]["action"]["agent_manifests"]
+            .as_object()
+            .is_some_and(|pins| !pins.is_empty())
+    {
+        return true;
+    }
+    !assignment
+        .definition
+        .as_ref()
+        .and_then(|value| opencoder_dag::decode_spec(value.get("spec").unwrap_or(value)).ok())
+        .is_some_and(|spec| {
+            spec.steps
+                .iter()
+                .all(|step| matches!(step.kind, opencoder_dag::StepKind::Wasm { .. }))
+        })
+}
+
 pub(crate) fn check_mount(path: Option<&Path>) -> Result<()> {
     let Some(path) = path else {
         return Ok(());

@@ -16,6 +16,7 @@ use std::{ffi::OsString, path::PathBuf};
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 
+mod host;
 mod storage;
 
 #[derive(Parser, Debug)]
@@ -63,6 +64,18 @@ struct Args {
 
 #[derive(Subcommand, Debug)]
 enum AgentCommand {
+    /// Stable node identity and routing for independent versioned runtimes.
+    Host {
+        #[arg(long)]
+        port: u16,
+        #[arg(long)]
+        standby: bool,
+    },
+    /// Serve a version-isolated execution runtime on loopback.
+    Runtime {
+        #[arg(long)]
+        port: u16,
+    },
     /// Run the agent loop (default when no subcommand is given).
     Run,
     /// Internal owner for one external workload and all of its descendants.
@@ -209,7 +222,12 @@ fn main() -> Result<()> {
         let code = opencoder_session::process::supervisor_main(command.clone(), cleanup)?;
         std::process::exit(code);
     }
-    if args.command.is_none() || matches!(&args.command, Some(AgentCommand::Run)) {
+    if args.command.is_none()
+        || matches!(
+            &args.command,
+            Some(AgentCommand::Run | AgentCommand::Runtime { .. })
+        )
+    {
         opencoder_session::process::configure_supervisor_binary(std::env::current_exe()?)?;
     }
     tokio::runtime::Builder::new_multi_thread()
@@ -247,10 +265,20 @@ async fn run(args: Args) -> Result<()> {
         return storage::migrate_layout(&data_dir, args.workflow_root.as_deref());
     }
 
-    let remote = args
-        .remote
-        .clone()
-        .context("agent requires --remote <server-base-url>")?;
+    match args.command {
+        Some(AgentCommand::Runtime { .. }) => {
+            opencoder_core::skill::pin_runtime_skills(
+                &data_dir,
+                opencoder_core::skills_dir().as_deref(),
+            )?;
+        }
+        Some(AgentCommand::Host { .. }) => {}
+        _ => {
+            opencoder_core::seed_builtin_skills();
+            opencoder_core::seed_dep_gated_skills();
+        }
+    }
+
     let token = resolve_token(args.token.clone(), args.token_file.clone())?;
     let name = args.name.clone().unwrap_or_else(|| {
         // Same derivation as the old `opencode daemon --client` default.
@@ -258,6 +286,25 @@ async fn run(args: Args) -> Result<()> {
             .or_else(|_| std::env::var("COMPUTERNAME"))
             .unwrap_or_else(|_| "opencoder-agent".into())
     });
+
+    if let Some(AgentCommand::Host { port, standby }) = args.command {
+        let host = host::Host::open(
+            &data_dir,
+            name,
+            token,
+            args.max_runs
+                .unwrap_or_else(|| opencoder_node::fleet::cpu::capacity().ceil() as usize)
+                .max(1),
+        )
+        .await?;
+        return host::run(
+            host,
+            port,
+            args.remote.context("host requires --remote")?,
+            standby,
+        )
+        .await;
+    }
 
     let worker = opencoder_worker::Worker::open(
         opencoder_worker::WorkerOptions {
@@ -271,6 +318,12 @@ async fn run(args: Args) -> Result<()> {
         None,
     )
     .await?;
+    if let Some(AgentCommand::Runtime { port }) = args.command {
+        return host::runtime::serve(worker, port, token).await;
+    }
+    let remote = args
+        .remote
+        .context("agent requires --remote <server-base-url>")?;
     let service: std::sync::Arc<dyn opencoder_node::fleet::NodeService> =
         std::sync::Arc::new(worker.clone());
     let mut fleet =
@@ -304,6 +357,44 @@ async fn shutdown_signal() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn independent_host_and_runtime_modes_parse_without_legacy_run() {
+        let host = Args::try_parse_from([
+            "opencoder-agent",
+            "--remote",
+            "http://127.0.0.1:18081",
+            "--data-dir",
+            "/tmp/host",
+            "host",
+            "--port",
+            "19002",
+            "--standby",
+        ])
+        .unwrap();
+        assert!(matches!(
+            host.command,
+            Some(AgentCommand::Host {
+                port: 19002,
+                standby: true
+            })
+        ));
+        let runtime = Args::try_parse_from([
+            "opencoder-agent",
+            "--data-dir",
+            "/tmp/runtime",
+            "runtime",
+            "--port",
+            "19001",
+        ])
+        .unwrap();
+        assert!(runtime.remote.is_none());
+        assert!(matches!(
+            runtime.command,
+            Some(AgentCommand::Runtime { port: 19001 })
+        ));
+        assert!(Args::try_parse_from(["opencoder-agent", "host", "--port", "65536"]).is_err());
+    }
 
     #[test]
     fn token_flag_wins_over_flag_path() {

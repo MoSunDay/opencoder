@@ -20,13 +20,16 @@ function Timeline({ id, liveEvents }) {
   return <><Space><Typography.Text strong>{historical ? '历史事件' : '实时事件'}</Typography.Text><Button size="small" disabled={historical && !more} onClick={load}>{historical ? '下一页' : '从头查看'}</Button>{historical && <Button size="small" onClick={() => { setHistorical(false); setCursor(0); setMore(true); }}>回到实时</Button>}</Space>
     {error && <Alert type="error" title={error} />}<div className="brain-events">{events.map((event) => <details key={event.seq}><summary><span>#{event.seq}</span><Tag>{event.event}</Tag><span>{event.data?.detail?.reason || event.data?.detail?.parent?.instance_id || ''}</span></summary><pre className="brain-json">{JSON.stringify(event.data, null, 2)}</pre></details>)}</div></>;
 }
-export function BrainRunView({ id, onBack, onNotice }) {
+// BrainRunBody：运行视图主体（可内嵌到执行明细抽屉），不带返回栏、不写 brain_run URL 参数。
+// header：可选的顶部条（工作台视图传入返回栏/面包屑），渲染进唯一的 .brain-run
+// 容器首位——避免 View 再自裹一层 .brain-run（旧双层嵌套是拆分残留）。
+export function BrainRunBody({ id, onNotice, header = null }) {
   const { run, events, error, connection, refresh } = useBrainRun(id); const [mode, setMode] = useState('execution'); const [stepId, setStepId] = useState(null); const [instanceId, setInstanceId] = useState(null); const [commandError, setCommandError] = useState(''); const [busy, setBusy] = useState(false);
   const select = (step) => { setStepId(step); setInstanceId(run?.instances.find((i) => i.step_id === step)?.id || null); };
-  useEffect(() => { const params = new URLSearchParams(location.search); params.set('brain_run', id); history.replaceState(null, '', `${location.pathname}?${params}${location.hash}`); return () => {}; }, [id]);
   const command = async (action) => { setBusy(true); setCommandError(''); try { await apiPost(`/api/brain/runs/${encodeURIComponent(id)}/commands`, { action }); await refresh(); } catch (e) { setCommandError(e.message); } finally { setBusy(false); } };
   const input = async (name, value, type) => { try { await apiPost(`/api/brain/runs/${encodeURIComponent(id)}/inputs`, { name, value: type === 'string' ? value : JSON.parse(value) }); await refresh(); } catch (e) { setCommandError(e.message); } };
-  return <div className="brain-run"><Space wrap><Button onClick={onBack}>返回工作台</Button><Breadcrumb items={[{ title: '大脑调度' }, { title: id }, ...(stepId ? [{ title: stepId }] : [])]} /></Space>
+  return <div className="brain-run">
+    {header}
     {(error || commandError) && <Alert type="error" showIcon title={commandError || error} action={<Button onClick={() => refresh()?.catch(() => {})}>重试</Button>} />}
     {!run ? <Spin /> : <><div className="brain-run-header"><div><Typography.Title level={4}>{run.objective}</Typography.Title><Space wrap><Tag color={COLORS[run.phase]}>{PHASES[run.phase]}</Tag><Tag>{run.plan ? `${run.plan.id} · v${run.plan.version}` : '尚未生成计划'}</Tag><Typography.Text type="secondary">大脑：{['running', 'planning'].includes(run.phase) && run.handled_revision < run.revision ? '有事件待处理' : terminal(run.phase) ? '已结束' : '等待事件'}</Typography.Text><Typography.Text type="secondary">第 {run.activation} 次激活 · {connection === 'live' ? '实时连接' : connection}</Typography.Text><TimeText ts={run.updated_at} /></Space></div>
       <Space><Button disabled={busy || terminal(run.phase) || run.phase === 'cancelling'} onClick={() => command(run.phase === 'paused' ? 'resume' : 'pause')}>{run.phase === 'paused' ? '继续执行' : '暂停派发'}</Button><Button danger disabled={busy || terminal(run.phase) || run.phase === 'cancelling'} onClick={() => command('cancel')}>取消全部</Button></Space></div>
@@ -40,4 +43,11 @@ export function BrainRunView({ id, onBack, onNotice }) {
       <Collapse defaultActiveKey={['timeline']} items={[{ key: 'timeline', label: '调度事件与因果记录', children: <Timeline id={id} liveEvents={events} /> }, { key: 'deliverables', label: '交付物与验收结果', children: <pre className="brain-json">{JSON.stringify(run.deliverables, null, 2)}</pre> }]} />
     </>}
   </div>;
+}
+// BrainRunView：工作台完整视图 = URL 参数同步 + 返回栏/面包屑 + BrainRunBody。
+// stepId 在 Body 内部，这里拿不到，面包屑省略步骤段（可接受的展示简化）。
+// 返回栏经 header 渲染进 Body 的单层 .brain-run 容器，不自裹第二层。
+export function BrainRunView({ id, onBack, onNotice }) {
+  useEffect(() => { const params = new URLSearchParams(location.search); params.set('brain_run', id); history.replaceState(null, '', `${location.pathname}?${params}${location.hash}`); return () => {}; }, [id]);
+  return <BrainRunBody id={id} onNotice={onNotice} header={<Space wrap><Button onClick={onBack}>返回工作台</Button><Breadcrumb items={[{ title: '大脑调度' }, { title: id }]} /></Space>} />;
 }

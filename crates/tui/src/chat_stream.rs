@@ -45,6 +45,14 @@ impl ChatView {
         // closing turn's trailing step NOW so its thinking lands in
         // `context_used` exactly once, even before the round ends.
         self.seal_trailing_step();
+        // The old open Say can never receive another delta once any block
+        // intervened (ladder / tool / marker): seal it NOW — markdown render
+        // plus `context_used` accounting — instead of waiting for the
+        // round-end repair points. This pins the "at most ONE open Say"
+        // invariant: think-after-text interleaving can no longer strand a
+        // stack of open Says whose bodies render raw under their merged
+        // headers.
+        self.finalize_assistant();
         self.blocks.push(ChatBlock::Assistant {
             raw: text.to_string(),
             rendered: Vec::new(),
@@ -93,11 +101,20 @@ impl ChatView {
         // The round's Say is the last OPEN Assistant, not necessarily the
         // last block: closing the Say may already have opened the NEXT
         // turn's ladder beneath it.
-        let open_idx = self
+        // One round may strand SEVERAL open Says: a Say lands, a later
+        // ReasoningDelta opens the NEXT turn's ladder beneath it, and the
+        // next TextDelta — finding a non-Assistant tail — opens ANOTHER Say
+        // (`think -> text -> think -> text` iterates to K open Says). A
+        // single `rposition` repair would only seal the last one, leaving
+        // the earlier Says `done:false` forever (their bodies render raw
+        // markdown under the `Say(n steps)` header). Loop until no open
+        // Assistant remains: every stranded Say gets its render and its
+        // `context_used` accounting.
+        while let Some(idx) = self
             .blocks
             .iter()
-            .rposition(|block| matches!(block, ChatBlock::Assistant { done: false, .. }));
-        if let Some(idx) = open_idx {
+            .rposition(|block| matches!(block, ChatBlock::Assistant { done: false, .. }))
+        {
             if let Some(ChatBlock::Assistant {
                 raw,
                 rendered,

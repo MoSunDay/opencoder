@@ -1,4 +1,4 @@
-Commit: e50ffc433bca866fd17bd571a74f1bdf17705dea
+Commit: a8ccb79b028fc53a3bb50df54ba1fec157693ed4
 
 # store 模块
 
@@ -15,6 +15,7 @@ Commit: e50ffc433bca866fd17bd571a74f1bdf17705dea
 - `src/libsql_store/messages.rs` — 批量写按 `BATCH_CHUNK=200` 分块。
 - `src/libsql_store/sessions.rs` — `harness_runtime`/`set_message_usage` 私有补写接口。
 - `src/libsql_store/todos.rs` — `commit_todo_transition` 单事务 + expected generation。
+- `Store::todo_events_before` — 工作流内按 seq 倒序的行数与字节预算分页；跨工作流序号空洞不会形成扫描窗口。过大的单条 payload 返回省略标记，由完整事件读取接口补取。
 - `src/libsql_store/project_runs.rs` — run 文本单字段 64 KiB 上限、整页 512 KiB 预算（`src/project_types.rs`）。
 - `src/libsql_store/{project.rs,project_runs.rs,schema/project_relations.rs}` — project 三表 + 运行留痕。
 - `src/fleet/` — `FleetStore` 独立 control.db：节点 + 五字段 execution_index。

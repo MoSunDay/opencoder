@@ -1,4 +1,4 @@
-Commit: b465f440381bd009dc9bd3a8192ad88eab44cede
+Commit: a8ccb79b028fc53a3bb50df54ba1fec157693ed4
 
 # local 模块
 
@@ -13,6 +13,7 @@ Commit: b465f440381bd009dc9bd3a8192ad88eab44cede
 - `src/daemon.rs` — `daemon` 子命令只打印 `migration_hint` 指向 opencoder-server/agent 并退出 0
 - `src/todos_cmd.rs` — todos 子命令（validate/run/resume/show/events/list/interrupt）
 - `src/ts/` — tmux 会话：`actions.rs` 逐参数转发新 TUI 进程；`registry.rs` 中央注册表 `<data_root>/ts.db`
+- `src/ts/registry.rs` — 迁移扫描会话时使用 Store 的活动时间与 ID 游标，覆盖超过单页上限及 updated_at 早于 created_at 的导入记录。
 - `src/main.rs`（仓库根）— 二进制 `opencoder` 入口：supervisor 分支先于 clap 解析，Linux `configure_supervisor_binary`
 - `src/update.rs`、`src/install_tools.rs`、`src/exit_tips.rs`、`src/display.rs` — 自更新/工具安装/退出提示/事件渲染
 

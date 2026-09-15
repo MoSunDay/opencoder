@@ -1,4 +1,4 @@
-Commit: 08e5f0062bba429f7ce8af74197f6f0462cb806b
+Commit: a8ccb79b028fc53a3bb50df54ba1fec157693ed4
 
 # web 模块
 
@@ -18,6 +18,7 @@ axum HTTP/SSE 会话管理与编译期内嵌 SPA。
 - `src/api_agents.rs`、`src/api_agent_resources.rs`、`src/api_agent_nfs.rs` — 版本化 agent 面 + NFS 导出。
 - `src/api_inputs.rs` — 输入列表/删除/reorder。
 - `src/api_dag_wasm.rs`、`src/api_dag_wasm_nfs.rs`、`src/nfs_exports.rs` — DAG wasm 模块池 API + 命名多 NFS 导出（agents/dag-wasm 两路）。
+- `src/nfs_exports.rs::status` — 异步获取生命周期锁后读取真实导出状态，调用方等待正在进行的启动/停止。
 - `src/api_questions.rs`、`src/handle_questions.rs` — question answer/skip 闭环。
 - `src/api_subagents.rs` — 子代理任务列表；`DELETE /api/sessions?keep=` clear-all。
 - `src/api_brain.rs` — brain CRUD/search/dispatch（typed 错误映射）与剧本 CRUD（list/get/create/validate/delete，`validate_draft` 写库前 400）。
@@ -34,12 +35,15 @@ axum HTTP/SSE 会话管理与编译期内嵌 SPA。
 - `spa/src/fleet/` — 节点/执行/团队/调度面板。
 - `spa/src/brain/workbench/` — 能力/计划/运行工作台；图投影、原子快照水位与事件重连、步骤实例分页和检查面板。能力库页签直接是 `brainPanel.jsx` 能力 CRUD 表（行点击进 `brain/capabilityEditor.jsx` 抽屉），无成熟度列与 `+` 展开行；页自带 Tabs 标题，属 `nav.js` 的 `HEADERLESS_PAGES`，PageShell 只渲染无页头的 `.oc-page` body。
 - `spa/src/fleet/detail.jsx` 的 ExecutionView — 四类过程的共享查询/渲染入口；受 Brain 管理的执行隐藏独立修改操作。
+- `spa/src/brain/workbench/useRun.js` — 激活事件流结束后按同一运行 ID 重连，直到根运行进入终态；重连与快照刷新使用独立计时器。
 - `spa/src/dag/process.jsx` — 原生与嵌入页共用 DAG 状态画布。
 - `spa/src/envs/todoPanel.jsx` — TODO 模板环境（TODO env）与工具入口。
 - `spa/src/project/` — 项目目标/里程碑/TODO 面板。
-- `spa/src/todo/editor/`、`spa/src/todoEditor.jsx` — TODO 模板编辑器：表单/画布/JSON 三态，spec 唯一事实来源，画布坐标仅会话态；无 Card 外壳，渲染在 `todoPanel` 的 100% 宽右侧 Drawer 里（`.todo-editor-toolbar`：模式切换左、返回/保存右）。
+- `spa/src/todo/editor/`、`spa/src/todoEditor.jsx` — TODO 模板编辑器默认画布，表单/画布/JSON 共享 spec 草稿；保留 metadata、门禁与节点改名后的依赖引用，支持派发上下文预览。画布坐标仅会话态；宿主为 100% 宽右侧 Drawer，关闭脏草稿有确认提示。
 - `spa/src/todoPanel.jsx` — 菜单页「TODO 管理」：模板 tab 的新建/编辑都走 100% 宽右侧 Drawer（列表保持挂载，关闭即 bump 刷新），运行 tab 是 `todoRunsPanel`。注意：抽屉展开后的 DOM 测试里全局 `getAllByRole` 会因 RTL `isInaccessible`→jsdom `getComputedStyle`（antd CSSINJS 大规则表）慢到分钟级，交互断言改用局部 `querySelectorAll`+文本归一化。
-- `spa/src/todo/runCanvas.jsx`、`spa/src/todo/runProjection.js` — TODO 运行态画布：items+SSE 折叠成每 TODO 状态投影到 spec 依赖图（只读），`todoRunsPanel` 详情页联动 Inspector。
+- `spa/src/todo/review/` — 工作流快照、任务筛选、候选/门禁/上下文与历史会话 Review；`useReview.js` 结合 generation、事件水位、SSE 和轮询，陈旧或失败时禁用控制；`api.js` 按 etag 拼装大字段。
+- `spa/src/todo/runCanvas.jsx`、`spa/src/todo/runProjection.js` — 将 Review 状态投影到只读依赖图；选中任务联动 Inspector。完整执行详情复用工作台，inline 过程视图保留轻量内容。
+- `spa/src/todo/review/rerun.jsx` — 展示目标和下游影响、要求原因；不确定回执重试保留 request_id，收到持久化 queued 回执才关闭。历史尝试选择固定其上下文，会话按消息游标增量读取。
 - `spa/src/ui/tableLoading.js` — 列表表格 `loading` 的唯一约定：`tableLoading`（带 delay，裸 boolean 会变成 `delay:0` 闪遮罩）+ `tableRows`（拉取中交回 `undefined`，否则 antd 对着用户断言「暂无数据」）。新增表一律走它。
 - `scripts/acceptance/spa_responsive.js` — 390×844 手机视口横向溢出门禁，服务**工作树** `spa/dist`；启动打印 bundle 溯源，`--require-committed` 拒测非 HEAD 产物、`--drift` 先跑漂移检查。
 - `scripts/check-spa-drift.sh` — `spa/dist` ↔ `src` 漂移检查；压缩器对同一 src 偶发不同标识符命名（实测 4 次构建 1 次变体），故仅在差异局限于 `static/app.js` 时重建重试。
@@ -57,4 +61,5 @@ axum HTTP/SSE 会话管理与编译期内嵌 SPA。
 - [agents/store](../store/index.md) — 持久化与事件回放。
 - [agents/control](../control/index.md) — 平台控制面。
 - [agents/worker](../worker/index.md) — 节点执行面。
+- [TODO 工作流](../../features/todos/index.md) — 画布、Review 与节点重跑规则。
 - [Agent Harness](../../features/harness/index.md) — 执行方式、Wrap 参数与配置快照规则。

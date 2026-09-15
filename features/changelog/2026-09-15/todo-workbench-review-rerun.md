@@ -1,3 +1,5 @@
+Commit: a8ccb79b028fc53a3bb50df54ba1fec157693ed4
+
 # TODO 画布、执行 Review 与指定节点重跑
 
 TODO 模板新建与编辑默认进入依赖画布。父 Agent 固定负责调度验收，每个 TODO 独立执行；运行工作台提供任务筛选、真实状态、候选结果与验收、实际派发上下文、历史尝试和父子会话 Review。
@@ -44,7 +46,24 @@ Fleet 集成测试在整个测试生命周期内隔离配置，避免复制宿�
 ## 验证记录
 
 - 前端全量：705 passed，0 failed（`/tmp/todo-spa-final-complete.log`）。
-- 浏览器：PASS（`/tmp/opencoder-todo-workbench-eBU1vC/result.json`）。
-- 平台浏览器：PASS（`/tmp/todo-platform-isolated.log`；证据目录 `/tmp/opencoder-t12-verify-wf9nHp`），同一 Brain 运行完成，不另开运行替代。
+- 发布包 TODO 浏览器：PASS（`/tmp/opencoder-todo-workbench-ePZ35p/result.json`），含画布、上下文、Review、重跑、断线、重启历史和手机布局。
+- 发布包平台浏览器：PASS（`/tmp/todo-bundle-platform.log`；证据目录 `/tmp/opencoder-t12-verify-Ka5kSv`），同一 Brain 运行完成。
 - SPA 构建与 drift：通过。
-- Rust 全量和最终发布记录将在门禁完成后补充。
+- Rust 全量：`cargo test --workspace --no-fail-fast -j16` → 5,199 passed / 0 failed / 6 既有 ignored（393 个测试目标汇总，`/tmp/todo-isolated-verified-tests.log`）。
+- Clippy：`cargo clippy --workspace --all-targets -j16 -- -D warnings` → 零警告（`/tmp/todo-isolated-verified-clippy.log`）；`cargo build --workspace -j16` 通过（`/tmp/todo-isolated-verified-build.log`）。
+- Rust 门禁使用独立 `CARGO_TARGET_DIR=/data00/rust-build/cargo/opencoder-todo-workbench-20260915`、`CARGO_PROFILE_DEV_DEBUG=0`，避免其他工作树覆盖共享构建产物；该配置仅关闭调试符号，不跳过测试。
+
+## 发布与真实验收
+
+- 发布提交：`a8ccb79b028fc53a3bb50df54ba1fec157693ed4`；发布包 `/tmp/opencoder-todo-release-20260915-final`，独立 release target 构建，4 个二进制的提交、协议与 SPA 摘要一致。
+- 发布证据目录：`/tmp/opencoder-todo-rollout-20260915-a8ccb79b`，保存备份、进程校验与观察记录。
+- 无活动任务时冻结接入并完成一致性备份，未中断现有任务。备份位于 `/tmp/opencoder-todo-rollout-20260915-a8ccb79b/data-backup`；随后安装 Server、Agent、CLI 和本地程序并重新开放接入。
+- 安装文件及 Server、Agent 实际进程 inode 的 SHA-256 均匹配发布清单，原 Node ID 恢复 Ready，DAG WASM NFS 保持只读。证据：发布证据目录中的 `installed-verification.json`。
+- 真实模型样本：`todos-live-20260915-131625-chain`（依赖链）、`todos-live-20260915-131625-parallel`（同批双分支）、`todos-live-20260915-131625-review`（产物哈希核验）全部完成且节点全部 passed。
+- 非里程碑节点 `verify` 重跑通过：上游会话历史仍为 1 次，目标变为 2 次；实际上下文包含已验收依赖结果与重跑原因，既有上游文件哈希不变。证据：`/tmp/todo-live-delivery-20260915-131625/result.json`、`rerun.json`、`parallel-history.json`。
+- 最后一次真实任务完成后，2026-09-15 13:18:00—13:33:01（PRC）连续观察 901 秒、61 次采样：PASS；节点持续 Ready，进程与配置未变化，无任务积压或服务错误。证据：发布证据目录中的 `observation-result.json`、`observation.jsonl`、`service-journal.log`。
+
+## 相关文档
+
+- [TODO 使用规则](../../todos/index.md)、[工作台操作](../../../docs/todo-workbench.md)
+- [TODO 运行时](../../../agents/todos/index.md)、[节点执行面](../../../agents/worker/index.md)

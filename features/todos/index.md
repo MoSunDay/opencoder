@@ -1,43 +1,34 @@
-Commit: b465f440381bd009dc9bd3a8192ad88eab44cede
+Commit: a8ccb79b028fc53a3bb50df54ba1fec157693ed4
 
-# 持久化 TODO 工作流 — 父会话调度验收、独立 TODO 执行
+# 持久化 TODO 工作流
 
-## 关键路径
+父 Agent workflow 负责调度和验收，每个 TODO 使用独立 Primary 会话执行。父调度读取结果摘要；子任务获得目标、约束、任务说明及已验收依赖的结果和证据，过程数据单独保留供 Review。
 
-- crates/todos/src/types.rs — WorkflowSpec 与 required_tool_calls
-- crates/todos/src/parent.rs — 父 Workflow Session 调度与验收
-- crates/todos/src/runner.rs — 运行时与 --debug 投影
-- crates/todos/src/persistence.rs — Store 持久化与 debug_dump
-- crates/todos/src/transitions.rs — 状态机与里程碑幂等
-- crates/todos/src/json_output.rs — 最终状态 JSON 输出
-- crates/local/src/todos_cmd.rs — validate/run/resume/interrupt
-- crates/web/src/api_todo_runs.rs — 平台 TODO 运行接口
-- crates/web/src/api_todo_templates.rs — TODO 模板接口
-- crates/web/spa/src/todoEditor.jsx 与 src/todo/editor/ — SPA 模板编辑器（默认画布，表单/JSON 共享草稿，metadata 与依赖引用保留）；宿主是 todoPanel 的 100% 宽右侧抽屉，非整页替换
-- crates/web/spa/src/todoRunsPanel.jsx 与 src/todo/runCanvas.jsx — 运行工作台：调度画布、节点 Review、历史尝试与任意节点重跑
-- crates/todos/src/execution.rs — TODO env 生效链：dispatch 盖章的 `metadata.env_vars` 并入子会话 `env_passthrough`，经 `ToolContext::extra_env` 抵达 bash/harness 进程
-- crates/todos/tests/env_passthrough.rs — env_vars 抵达 bash 进程的生效证明
-- crates/todos/tests/ — 门禁、中断恢复与降级测试
+## 编辑与运行
 
-## 边界
+- **Agent → TODO 管理**：新建和编辑默认打开依赖画布，可添加任务、连接依赖、设置执行 Agent 与验收条件，并切换表单或 JSON；三种模式共享草稿。
+- 任务背景、说明、metadata、工具门禁和改名后的依赖引用完整保留。关闭未保存草稿时提示确认。
+- 派发上下文预览展示目标、约束和任务；实际依赖结果及恢复信息在执行时填入并留痕。
+- 模板和环境绑定分别保存；环境变量名必须合法、值必须为字符串。运行使用启动时冻结的定义和环境，模板后续编辑不改写已有运行。
+- 只允许 Primary Agent 执行 TODO；任务 ID 不得含路径分隔符、.. 或 NUL，依赖不得成环。工具硬门禁核验工具名称、参数子集和成功结果。
 
-- 每个 TODO 独立 Primary Session；父会话不接执行工具
-- required tool call 硬门禁：名称 + 参数子集 + 成功结果
-- Store 是权威数据，debug 投影可重建
-- 非 completed 终态退出非零；stdout 仅最终状态 JSON
-- validate 拒绝含 /、..、\0 的 todo id 与依赖环
-- TODO env `env_vars` 键必须匹配环境变量名、值必须字符串；dispatch 盖章与 env 保存双重 fail-fast
-- 节点侧 OpenCoder Env 配置集（/api/envs）已删除，TODO env 是唯一环境体系
-- SPA 画布编辑器的客户端校验是建议性镜像（crates/web/spa/src/todo/editor/specValidate.js），服务端 validate_spec 权威
+## 执行 Review
 
-- `crates/todos/src/review/` 统一派发上下文、精简父 Agent 调度输入与重跑影响范围。
-- `crates/worker/src/operations/todo/` 提供一致性快照、分段 Review 和持久化重跑受理恢复；旧执行退出后才重新排队。
-- 重跑保留当前文件、外部操作结果、上游及独立分支的通过结果，并归档目标与下游旧轮次。
+- 工作台提供状态画布、搜索与状态筛选、候选结果、验证说明、工具门禁及父 Agent 验收理由。
+- 实际派发上下文、历次子会话和父会话可独立回看；大字段分段读取，历史向前分页，固定历史尝试不会被新运行状态替换。
+- 节点离线、读取失败或状态陈旧时明确提示并暂停运行控制，恢复同步后继续。
+- 中断允许在原节点恢复；取消终止执行。CLI 非 completed 终态返回非零，stdout 只输出最终状态 JSON；Store 数据为权威，调试投影可重建。
+
+## 指定节点重跑
+
+- 任意节点都可重跑，直接前置任务必须已验收通过。操作前显示影响范围并要求填写原因。
+- 先持久化请求、停止旧执行并等待子任务退出，再重置目标及全部下游、递增运行轮次并重新排队。
+- 保留上游和独立分支的已通过结果、现有文件、外部操作结果及原会话历史；有过尝试的节点创建新的独立会话。
+- 同一请求重复提交不会重复重跑；节点重启继续已受理流程，取消优先于尚未排队的重跑。停止或恢复失败会显示明确原因。
 
 ## 相关
 
 - [TODO 工作台操作](../../docs/todo-workbench.md)
-- [Agent 平台](../agent-platform/index.md)
-- [todos 模块](../../agents/todos/index.md)
-- [CLI](../../agents/local/index.md)
-- [Store](../../agents/store/index.md)
+- [TODO 运行时](../../agents/todos/index.md)、[节点执行面](../../agents/worker/index.md)
+- [Store](../../agents/store/index.md)、[Web](../../agents/web/index.md)
+- [Agent 平台](../agent-platform/index.md)、[CLI](../../agents/local/index.md)

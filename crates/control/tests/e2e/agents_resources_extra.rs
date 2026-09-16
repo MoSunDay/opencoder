@@ -353,8 +353,46 @@ async fn resource_skills_memory_tools_pools_roundtrip() {
     .await;
     assert_eq!(body["content_b64"], json!(b64("skill v1")), "{body}");
 
-    let (_, body) = post_save(&h, "memory", "team-mem", "memory.md", "remember this").await;
-    assert_eq!(body["version"], json!(1), "{body}");
+    // Memory is directory-shaped: a multi-file save (nested dir plus a
+    // binary sidecar) succeeds and every file reads back byte-exact from
+    // its version path.
+    let dump_b64 = base64::engine::general_purpose::STANDARD.encode([0u8, 255, 1]);
+    let (status, body) = h
+        .req(
+            Method::POST,
+            "/api/agents/resources/memory",
+            Some(json!({"name": "team-mem", "files": [
+                {"path": "memory.md", "content_b64": b64("remember this")},
+                {"path": "topics/rust.md", "content_b64": b64("rust notes")},
+                {"path": "topics/dump.bin", "content_b64": dump_b64},
+            ]})),
+        )
+        .await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["version"], json!(1));
+    for (path, expect) in [
+        ("memory.md", "remember this"),
+        ("topics/rust.md", "rust notes"),
+    ] {
+        let body = want(
+            &h,
+            Method::GET,
+            &format!("/api/agents/resources/memory/team-mem/versions/1/files/{path}"),
+            None,
+            200,
+        )
+        .await;
+        assert_eq!(body["content_b64"], json!(b64(expect)), "{path}: {body}");
+    }
+    let body = want(
+        &h,
+        Method::GET,
+        "/api/agents/resources/memory/team-mem/versions/1/files/topics/dump.bin",
+        None,
+        200,
+    )
+    .await;
+    assert_eq!(body["content_b64"], json!(dump_b64), "{body}");
     let (_, body) = h
         .req(
             Method::GET,
@@ -363,6 +401,21 @@ async fn resource_skills_memory_tools_pools_roundtrip() {
         )
         .await;
     assert_eq!(body["meta"]["current"], json!(1), "{body}");
+    // The reference snapshot hits: the version tree holds `*.md` files.
+    let (_, body) = post_save(&h, "prompts", "mem-pack", "soul.md", "soul").await;
+    assert_eq!(body["version"], json!(1), "{body}");
+    let (status, body) = h
+        .req(
+            Method::POST,
+            "/api/agents",
+            Some(json!({"name": "mem-reader", "current": {
+                "prompt": "mem-pack", "memory": "team-mem",
+            }})),
+        )
+        .await;
+    assert_eq!(status, 201, "{body}");
+    let (_, body) = h.req(Method::GET, "/api/agents/mem-reader/meta", None).await;
+    assert_eq!(body["meta"]["references"]["memory"], json!(true), "{body}");
 
     let (_, body) = post_save(&h, "tools", "nest-kit", "bin/run.sh", "#!/bin/sh").await;
     assert_eq!(body["version"], json!(1), "{body}");

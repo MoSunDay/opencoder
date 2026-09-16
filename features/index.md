@@ -8,7 +8,7 @@ Commit: cd2b20f9
 - [DAG 工作流](../agents/dag-runtime/index.md) — agent/wasm 步骤、依赖执行与产物、单步执行记录（`session.json` / `step_output`）；控制台点画布任一 step 打开单步执行记录抽屉（wasm=实时日志、agent=类 TUI 会话转写），走 SSE `/api/dag/runs/:id/steps/:step/events`。定义编辑器画布支持工具栏「连线」模式两段式点击建依赖边（armed 源高亮、合法目标提示，`canConnect` 拒自连/重复/成环，Esc/点空白取消），点 Handle 未拖动同样进入待目标模式，Handle 拖拽与 JSON 模式仍可用；运行画布保持只读、点节点开抽屉。
 - [持久化 TODO 工作流](todos/index.md) — 父会话调度验收、独立 TODO 执行。
 - [项目管理](../agents/project/index.md) — goal/milestone/todo 与多执行器。
-- [版本化 Agent 与 NFS](../agents/agents/index.md) — 按 Agent 编辑四类资源、专属版本与共享池、只读导出。
+- [版本化 Agent 与 NFS](../agents/agents/index.md) — 按 Agent 编辑四类资源、专属版本与共享池、只读导出；无全局激活（默认 agent 走 `--agent` > `config.agent.default` > "act"），memory 支持目录化多文件（`.md` 字典序聚合注入），资源树行内新建/改名。
 - [大脑调度工作台](brain/index.md) — 版本化本体计划、并发执行画布与回执恢复。
 - [大脑能力库](../agents/brain/index.md) — 能力录入、语义检索与路由。
 - [远程管理 CLI](../agents/ctl/index.md) — 对接 Server API 与退出码契约。
@@ -18,8 +18,8 @@ Commit: cd2b20f9
 - [会话运行时](../agents/session/index.md) — act/plan、压缩、subagent、恢复。
 - [Agent Harness](harness/index.md) — opencode/codex 执行器与资源快照。
 - [CLI](../agents/local/index.md) — 无头运行、TODO 命令与工具安装。
-- [TUI](../agents/tui/index.md) — Turn 阶梯、模式切换与复制。
-- [Web 会话](../agents/web/index.md) — 流式会话、SSE 与模型发现。
+- [TUI](../agents/tui/index.md) — Turn 阶梯、模式切换与复制；`/agent` 命令模糊选择 primary agent。
+- [Web 会话](../agents/web/index.md) — 流式会话、SSE 与模型发现；输入框 `@`/`/agent` 模糊提及 agent（有会话即切、无会话入创建参数）。
 
 ## 配置与基础能力
 

@@ -61,7 +61,7 @@ pub fn validate_path(path: &str) -> io::Result<()> {
         || path.split('/').count() > 64
         || path
             .split('/')
-            .any(|part| part.is_empty() || part == "." || part == "..")
+            .any(|part| part.is_empty() || part.starts_with('.'))
     {
         return Err(invalid_input(format!("unsafe file path: {path}")));
     }
@@ -206,7 +206,10 @@ mod tests {
             0o751
         );
         assert!(merge_files("tools", &files, &changes, &["run".into()]).is_err());
-        for path in ["../x", "/x", "x//y", "x/./y", "x\\y", "x\0"] {
+        // Hidden (dot-prefixed) segments are rejected in lockstep with the
+        // web write side: the memory reader skips dot files, so a hidden
+        // path would be written but never injected.
+        for path in ["../x", "/x", "x//y", "x/./y", "x\\y", "x\0", ".x", "x/.y"] {
             assert!(validate_path(path).is_err());
         }
         assert!(validate_files("prompts", &[]).is_err());

@@ -18,15 +18,22 @@ const MEMORY_MAX_BYTES: usize = 200 * 1024;
 /// Aggregate every markdown file under a memory version `dir` into the
 /// `# Memory` section body. Returns `None` when no readable `*.md` exists
 /// (callers then append no memory section at all). Unreadable or
-/// non-UTF-8 files are skipped silently — the pool degrades, it never
-/// fails the whole agent.
+/// non-UTF-8 files are skipped with a `debug` log — the pool degrades,
+/// it never fails the whole agent.
 pub(crate) fn section_body(dir: &Path) -> Option<String> {
     let mut paths: Vec<String> = Vec::new();
     collect_markdown(dir, dir, &mut paths);
     paths.sort();
     let bodies: Vec<String> = paths
         .iter()
-        .filter_map(|rel| std::fs::read_to_string(dir.join(rel)).ok())
+        .filter_map(|rel| match std::fs::read_to_string(dir.join(rel)) {
+            Ok(body) => Some(body.trim().to_string()),
+            Err(e) => {
+                tracing::debug!(path = %rel, error = %e,
+                    "memory pool: skipping unreadable markdown file");
+                None
+            }
+        })
         .map(|body| body.trim().to_string())
         .collect();
     if bodies.is_empty() {
@@ -99,6 +106,21 @@ mod tests {
             "[memory truncated: original size {} bytes exceeds 200KB limit]",
             long.len()
         )));
+    }
+
+    #[test]
+    fn section_body_skips_unreadable_files_and_degrades() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.md"), "alpha\n").unwrap();
+        // Invalid UTF-8 fails `read_to_string` exactly like an unreadable
+        // file: the entry is logged at debug level and dropped, the rest
+        // of the pool still aggregates.
+        std::fs::write(dir.path().join("bad.md"), [0xFF, 0xFE]).unwrap();
+        assert_eq!(section_body(dir.path()).unwrap(), "alpha");
+        // A pool holding no readable markdown appends no section at all.
+        let only_bad = tempfile::tempdir().unwrap();
+        std::fs::write(only_bad.path().join("bad.md"), [0xFF]).unwrap();
+        assert_eq!(section_body(only_bad.path()), None);
     }
 
     #[test]

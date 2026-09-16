@@ -83,8 +83,10 @@ fn unknown_category(cat: &str) -> Option<Response> {
 }
 
 /// A file path is safe when non-empty, relative (no leading `/`), free of
-/// `..`/`.` segments and empty segments, and ≤64 segments deep — checked
-/// before any filesystem work happens.
+/// `..`/`.` and hidden (dot-prefixed) segments and empty segments, and
+/// ≤64 segments deep — checked before any filesystem work happens. Hidden
+/// segments are rejected because the memory reader skips dot files: a path
+/// that would be written but never injected is a contract violation.
 fn safe_rel_path(path: &str) -> Result<(), String> {
     if path.is_empty() {
         return Err("file path cannot be empty".to_string());
@@ -102,6 +104,11 @@ fn safe_rel_path(path: &str) -> Result<(), String> {
     if segments.iter().any(|s| *s == ".." || *s == ".") {
         return Err(format!(
             "file path must stay inside the version dir (no `..`): {path}"
+        ));
+    }
+    if let Some(seg) = segments.iter().find(|s| s.starts_with('.')) {
+        return Err(format!(
+            "file path cannot contain hidden (dot-prefixed) segments: {seg} in {path}"
         ));
     }
     Ok(())

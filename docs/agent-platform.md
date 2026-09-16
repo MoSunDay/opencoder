@@ -51,6 +51,14 @@ Node 在返回接受前同步持久化任务、资源和 Harness 配置快照。
 
 断线只影响传输，已接受的本地工作继续。Node 重启将原先运行中的执行标记 `interrupted`，由用户显式在原节点恢复；已接受但尚未开始的持久化 pending 队列继续等待，冻结节点在复开后才继续调度。DAG 恢复跳过已成功写入检查点的步骤。项目执行 ID 为 `project-<todo-id>`，Plan、Act 和新一轮 Plan 保持相同节点。节点存储出现持久化错误时上报不可调度，须处理存储故障后重启节点。项目页面与全部执行详情中的 Plan 均由 Server 解析当前草稿；Node 在忙碌及资源预检通过后才保存该轮快照，拒绝请求不修改之前的运行记录；容量不足会保存并排队，等待期间 Project 运行不会被失联清理误判。
 
+## 定时调度
+
+`schedules.json`（server workdir 的 `.opencoder/` 域文件，或全局 `~/.opencoder/`）声明 cronjob；定义以文件为唯一事实来源，Server 控制面内置 cron 调度器（无文件即不运行，配置读取失败或条目非法仅告警跳过，不影响其余任务）。字段：`id`（1–40 字符，字母/数字/`-`/`_`，用于确定性执行 ID）、`cron`（5 字段为分 时 日 月 周；6/7 字段保留秒位）、`timezone`（仅固定偏移如 `+08:00`）、`enabled`（默认 true，关闭的条目不做校验）、`kind`（`brain`/`team`/`todos`/`agent`/`dag`）、`target`、`params`、`overlap`（`skip` 默认 / `allow`）、`node_id`（可选钉住节点）、`scan_interval_secs`（扫描间隔，默认 15s，最小 1s）。
+
+触发复用既有入口：agent/team/todos/dag 走 `POST /api/executions` 同一条提交链路，brain 走 brain run 创建链路；`params` 支持时间模板 `{{now[±N<单位>][:格式]}}`（单位 s/m/h/d/w，缺省 RFC3339，另有 `unix`/`unix_ms`），在触发时刻渲染为执行 input。每次触发获得确定性执行 ID `<kind>-<schedule_id>-<scheduled_for_ms>`：同一 tick 重复提交幂等收敛，不重复执行。Server 停机重启后仅补跑最近一个错过的 tick，更早的记为 `missed`（24 小时补跑窗口）；提交失败的 tick 在 1 小时内重试，超窗后等待下一个 tick。新建条目首次扫描时没有历史台账，基线退化为 24 小时窗口起点：窗口内最近一个到期 tick 会在首次扫描立即补跑，更早的记为 `missed`。`overlap: skip` 时上一轮触发对应的执行未到终态则本轮不触发，`allow` 无条件触发。
+
+触发历史持久化在 `schedule_runs` 表（schema v26），按 `(schedule_id, scheduled_for_ms)` 主键覆盖写；`GET /api/schedules` 列出全部定义并附最近一次触发与下一次触发时刻，`GET /api/schedules/:id/runs?limit=` 返回倒序历史。两个端点均为 admin-only；CLI 对应 `opencoder-cli schedule list` 与 `opencoder-cli schedule runs <id>`。
+
 ## NFS 资源共享
 
 Web「Agent 配置」按 Agent 名称打开配置抽屉，直接查看和编辑 Prompt（Soul、How、Output）、Skills 目录及附件、Tools 文件和 `memory.md`。新建只填写名称与执行方式，资源首次保存自动创建并绑定；Prompt 至少一部分非空。历史版本位于各页签的「历史版本」，恢复会生成新版本。文本支持编辑和预览，二进制支持下载与上传替换，工具保留执行权限；切换页签保留草稿，关闭或刷新未保存内容会提示。读取错误禁止覆盖保存，保存失败保留输入。内置 Agent 显示实际 Prompt、工具限制及已有 Agent 级资源，资源只读，缺少的类别标注未配置。
@@ -106,6 +114,7 @@ mount -t nfs -o ro,vers=3,tcp,port=2050,mountport=2050,nolock,soft,retrans=1,tim
 | 显式节点维护 | `POST /api/nodes/:id/maintenance` |
 | 团队定义 | `GET/POST /api/teams` |
 | 能力绑定、直接调度 | `PUT /api/brain/capabilities/:id/target`、`POST /api/brain/dispatch` |
+| 定时调度与触发历史 | `GET /api/schedules`、`GET /api/schedules/:id/runs?limit=` |
 
 资源读取返回 `baseline: {resource, version, revision}`、`versions`、递归 `files: [{path, content_b64, mode}]` 和 `read_only`。保存提交读取时的 `baseline`、新增或修改的 `files` 和删除路径 `removed`；未提交文件保留。恢复提交 `baseline` 与历史 `version`，响应与读取相同。文件模式仅接受 `0o000–0o777`，合并后的资源上限为 1.5 MiB / 4096 文件。旧共享资源池 API 保留；PUT 以 URL 名称为准，可省略 body 名称，名称不匹配报错，专属资源必须经所属 Agent 接口修改。
 

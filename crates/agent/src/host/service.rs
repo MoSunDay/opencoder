@@ -125,6 +125,90 @@ impl Host {
                         json!({"max_runs":self.store.capacity().await?.max_runs,"queue_order":"fifo","workdir":null,"workdir_supported":false}),
                     ))
                 }
+                "dialogs_clear" => {
+                    // Fan out across every runtime the host owns: live ones
+                    // delete for real (sessions + journal records), while a
+                    // hibernated runtime is only represented by its saved
+                    // final inventory — dropping the rows there is what
+                    // stops the next sync from resurrecting the dialogs.
+                    let requested: Vec<String> = command.input["sessions"]
+                        .as_array()
+                        .map(|rows| {
+                            rows.iter()
+                                .filter_map(|v| v.as_str().map(str::to_owned))
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    let mut removed = 0u64;
+                    let mut forgotten = 0usize;
+                    let mut skipped: Vec<String> = Vec::new();
+                    for runtime in self.store.runtimes().await? {
+                        if runtime.mode == "staged" {
+                            continue;
+                        }
+                        let sleeping = self
+                            .store
+                            .definition("runtime_sleep", &runtime.id)
+                            .await?
+                            .is_some_and(|v| !v.is_null());
+                        if !sleeping {
+                            let reply = self.call_runtime(&runtime.id, &operation).await?;
+                            if reply.status >= 300 {
+                                return Ok(reply);
+                            }
+                            removed += reply.body["removed"].as_u64().unwrap_or(0);
+                            forgotten += reply.body["forgotten"].as_u64().unwrap_or(0) as usize;
+                            if let Some(rows) = reply.body["skipped"].as_array() {
+                                for value in rows {
+                                    if let Some(id) = value.as_str() {
+                                        if !skipped.iter().any(|known| known == id) {
+                                            skipped.push(id.to_owned());
+                                        }
+                                    }
+                                }
+                            }
+                            continue;
+                        }
+                        let saved = self
+                            .store
+                            .definition("runtime_sleep", &runtime.id)
+                            .await?
+                            .unwrap_or(serde_json::Value::Null);
+                        let mut saved: serde_json::Value = serde_json::from_value(saved)?;
+                        let Some(rows) =
+                            saved.get_mut("indexes").and_then(serde_json::Value::as_array_mut)
+                        else {
+                            continue;
+                        };
+                        rows.retain(|index| {
+                            let Some(id) = index.get("id").and_then(serde_json::Value::as_str)
+                            else {
+                                return true;
+                            };
+                            if !requested.iter().any(|asked| asked == id) {
+                                return true;
+                            }
+                            let live = matches!(
+                                index.get("status").and_then(serde_json::Value::as_str),
+                                Some("pending" | "running" | "cancelling" | "interrupted")
+                            );
+                            if live {
+                                if !skipped.iter().any(|known| known == id) {
+                                    skipped.push(id.to_owned());
+                                }
+                                return true;
+                            }
+                            removed += 1;
+                            false
+                        });
+                        self.store
+                            .put_definition("runtime_sleep", &runtime.id, &saved)
+                            .await?;
+                    }
+                    return Ok(opencoder_core::fleet::RpcReply::ok(
+                        json!({"ok":true,"removed":removed,"skipped":skipped,"forgotten":forgotten}),
+                    ));
+                }
                 "configure_scheduling" => {
                     let settings: NodeScheduling =
                         serde_json::from_value::<NodeScheduling>(command.input.clone())?

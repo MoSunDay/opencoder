@@ -18,18 +18,22 @@ it('keeps a durable run identity across an uncertain submission and exposes erro
   expect(apiPost.mock.calls[0][0]).toBe('/api/brain/runs'); expect(apiPost.mock.calls[0][1].id).toBe(apiPost.mock.calls[1][1].id);
   expect(apiPost.mock.calls[0][1]).toMatchObject({ mode: 'dynamic', plan: null, references: [] });
 });
-it('folds the optional prefill inputs behind advanced options and launches a one-liner without them', async () => {
+it('collects engineering inputs as a one-level KV list and launches a one-liner without them', async () => {
   apiPost.mockResolvedValueOnce({ id: 'brain-one-liner' }); const created = vi.fn();
   render(<Launch plans={[]} onCreated={created} />);
-  // 可选初始输入默认收进“高级选项”，主表单只见必填项。
-  expect(screen.queryByLabelText(/初始输入/)).toBeNull();
-  fireEvent.click(screen.getByText('高级选项'));
-  expect(await screen.findByLabelText(/初始输入/)).toBeTruthy();
-  expect(screen.getByPlaceholderText('留空即可，运行中会按需询问')).toBeTruthy();
-  fireEvent.change(screen.getByLabelText('目标和交付物'), { target: { value: '一句话发起，零预填输入' } });
+  // 文档名称、input 名称与高级选项退场；工程描述默认零行，一句话即可发起。
+  expect(screen.queryByLabelText('文档名称')).toBeNull();
+  expect(screen.queryByLabelText('input 名称')).toBeNull();
+  expect(screen.queryByText('高级选项')).toBeNull();
+  fireEvent.click(screen.getByText('添加工程参数'));
+  fireEvent.change(screen.getByLabelText('工程参数名'), { target: { value: ' repo ' } });
+  fireEvent.change(screen.getByLabelText('工程参数值'), { target: { value: '3' } });
+  fireEvent.click(screen.getByText('添加工程参数'));
+  fireEvent.change(screen.getByLabelText('目标和交付物'), { target: { value: '一句话发起，工程参数一层 KV' } });
   fireEvent.mouseDown(screen.getByLabelText('大脑所在节点').closest('.ant-select'));
   fireEvent.click(await screen.findByText('节点 A', { selector: '.ant-select-item-option-content' }));
   fireEvent.click(screen.getByText('规划并执行'));
   await waitFor(() => expect(created).toHaveBeenCalledWith('brain-one-liner'));
-  expect(apiPost.mock.calls[0][1].inputs).toEqual({});
+  // 空键行被忽略，值按 JSON 解析为数字。
+  expect(apiPost.mock.calls[0][1].inputs).toEqual({ repo: 3 });
 });

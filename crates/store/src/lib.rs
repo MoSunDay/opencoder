@@ -7,6 +7,7 @@ pub mod project;
 pub mod project_executor_spec;
 pub mod project_factory;
 pub mod project_types;
+pub mod schedule_types;
 pub mod session_store;
 #[cfg(any(feature = "mysql", feature = "starrocks"))]
 pub mod sql_store;
@@ -35,6 +36,9 @@ pub use project_types::{
     ProjectTodoRunPatch, ProjectTodoRunRecord, ProjectTodoRunStatus, ProjectTodoRunSummary,
     ProjectTodoStatus, ProjectTodoSummary,
 };
+pub use schedule_types::{
+    ScheduleRunRecord, SCHEDULE_RUN_ERROR, SCHEDULE_RUN_FIRED, SCHEDULE_RUN_MISSED,
+};
 pub use session_store::SessionStore;
 pub use store::Store;
 pub use team_types::{TeamTopicRunRecord, TEAM_RUN_EXECUTING, TEAM_RUN_FINISHED};
@@ -44,12 +48,12 @@ pub use todo_types::{
 };
 pub use ts_registry::{TsRecord, TsRegistry};
 pub use types::{
-    ConvergedDagRun, DagDefRecord, DagEventRecord, DagRunRecord, Delivery, EventKind, ImportReport,
-    InputAdmission, InputConflict, MessageChunkPage, MessageChunkRecord, MessageRow, NodeRecord,
-    NodeTaskRecord, NodeTaskStatus, PayloadChunkRecord, SessionEventPage, SessionEventRecord,
-    SessionFilter, SessionInput, SessionListItem, SessionMeta, SessionPatch, SubagentStatus,
-    SubagentTaskRecord, TASK_TYPE_NODE, TASK_TYPE_PARENT, TASK_TYPE_PROJECT, TASK_TYPE_SUBAGENT,
-    TASK_TYPE_TODO, TASK_TYPE_TODO_WORKFLOW,
+    ClearNodeDialogs, ConvergedDagRun, DagDefRecord, DagEventRecord, DagRunRecord, Delivery,
+    EventKind, ImportReport, InputAdmission, InputConflict, MessageChunkPage, MessageChunkRecord,
+    MessageRow, NodeRecord, NodeTaskRecord, NodeTaskStatus, PayloadChunkRecord, SessionEventPage,
+    SessionEventRecord, SessionFilter, SessionInput, SessionListItem, SessionMeta, SessionPatch,
+    SubagentStatus, SubagentTaskRecord, TASK_TYPE_NODE, TASK_TYPE_PARENT, TASK_TYPE_PROJECT,
+    TASK_TYPE_SUBAGENT, TASK_TYPE_TODO, TASK_TYPE_TODO_WORKFLOW,
 };
 pub use users::{GuardedDelete, PlatformUser};
 pub mod fleet;

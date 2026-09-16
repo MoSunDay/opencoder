@@ -223,6 +223,17 @@ body {
   box-shadow: var(--oc-shadow-panel);
 }
 
+/* Sheet pages dock to the viewport bottom: the pane drops its bottom padding
+   and the sheet squares off its bottom corners, so nothing gray shows under
+   the panel (chat today — SHEET_PAGES in main.jsx owns the pairing). */
+.fleet-content--flush {
+  padding-bottom: 0;
+}
+.fleet-content--flush .fleet-sheet {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
 /* Transcript long-line handling inside collapsible tool blocks. */
 .ant-collapse-content-box pre {
   white-space: pre-wrap;

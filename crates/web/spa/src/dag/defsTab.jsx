@@ -4,7 +4,7 @@
 // Endpoints: GET /api/dag/defs, POST /api/dag/defs, DELETE /api/dag/defs/:id,
 // POST /api/dag/defs/:id/dispatch {node_id?} → {run_id}.
 
-import { Button, Modal, Popconfirm, Select, Space, Table, Tag, Typography } from 'antd';
+import { Button, Input, Modal, Popconfirm, Select, Space, Table, Tag, Typography } from 'antd';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiDel, apiGet, apiPost } from '../api.js';
 import { TimeText } from '../ui/timeText.jsx';
@@ -27,6 +27,7 @@ export function DefsTab({ onNotice, onDispatched }) {
   const [dispatchFor, setDispatchFor] = useState(null); // def row in dispatch modal
   const [dispatchNode, setDispatchNode] = useState(undefined);
   const [dispatching, setDispatching] = useState(false);
+  const [search, setSearch] = useState('');
   const alive = useRef(true);
   const attempt = useRef(null);
 
@@ -180,11 +181,25 @@ export function DefsTab({ onNotice, onDispatched }) {
     },
   ];
 
+  // 搜索框为受控组件：按定义名称/ID（忽略大小写）过滤本地列表，不入服务端。
+  const query = search.trim().toLowerCase();
+  const visible = query
+    ? rows.filter((r) => [r.name, r.id].some((v) => String(v || '').toLowerCase().includes(query)))
+    : rows;
+
   const dispatchNodeOptions = buildNodeOptions(nodes || [], 'dag');
 
   return (
     <Space orientation="vertical" size={12} style={{ width: '100%' }}>
       <Space>
+        <Input.Search
+          allowClear
+          style={{ minWidth: 220 }}
+          placeholder="搜索定义名称 / ID"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          aria-label="dag-def-search"
+        />
         <Button
           type="primary"
           onClick={() => {
@@ -200,7 +215,7 @@ export function DefsTab({ onNotice, onDispatched }) {
         rowKey="id"
         size="middle"
         columns={columns}
-        dataSource={rows}
+        dataSource={visible}
         loading={loading}
         pagination={false}
         locale={{ emptyText: '暂无工作流定义' }}

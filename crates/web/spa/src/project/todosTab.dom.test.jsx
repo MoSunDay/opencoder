@@ -108,7 +108,7 @@ describe('TodosTab executor column', () => {
     expect(agentRow && within(agentRow).getByText('单Agent')).toBeTruthy();
     expect(agentRow && within(agentRow).getByText('explore')).toBeTruthy();
     const teamRow = screen.getByText('团队跑').closest('tr');
-    expect(teamRow && within(teamRow).getByText('团队')).toBeTruthy();
+    expect(teamRow && within(teamRow).getByText('Team')).toBeTruthy();
     expect(teamRow && within(teamRow).getByText('crew-x')).toBeTruthy();
   });
 });
@@ -122,7 +122,7 @@ describe('TodosTab create modal', () => {
     // agent default: the agent input, no ref/spec fields.
     expect(screen.getByPlaceholderText('act')).toBeTruthy();
     expect(screen.queryByLabelText('executor_spec')).toBeNull();
-    await pickExecutor('团队');
+    await pickExecutor('Team');
     expect(screen.queryByPlaceholderText('act')).toBeNull();
     expect(screen.getByPlaceholderText('可留空')).toBeTruthy();
     expect(screen.getByLabelText('executor_spec')).toBeTruthy();
@@ -132,7 +132,7 @@ describe('TodosTab create modal', () => {
     mountTab();
     await openCreate();
     fireEvent.change(screen.getByPlaceholderText('要完成的一件事'), { target: { value: '团队活' } });
-    await pickExecutor('团队');
+    await pickExecutor('Team');
     fireEvent.change(screen.getByPlaceholderText('可留空'), { target: { value: '  crew-x  ' } });
     fireEvent.change(screen.getByLabelText('executor_spec'), {
       target: { value: '{"name":"c","captain":{"node_id":"act","name":"L"}}' },

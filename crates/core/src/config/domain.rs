@@ -1,7 +1,9 @@
-//! Domain config files (`mcp.json` / `cli.json` / `skills.json` / `ap.json`).
+//! Domain config files (`mcp.json` / `cli.json` / `skills.json` / `ap.json` /
+//! `schedules.json`).
 //!
 //! The three map-shaped domains (`mcp_servers`, `cli`, `skills`) plus the
-//! scalar `autopilot` domain are hard-cut from `config.json`: they load
+//! object-shaped `autopilot` and `schedules` domains are hard-cut from
+//! `config.json`: they load
 //! from — and save to — a dedicated domain file.
 //! Lookup walks project first and a single effective file wins (it shadows
 //! the others entirely — no per-key merge across files, unlike
@@ -18,11 +20,12 @@ use std::path::{Path, PathBuf};
 use super::Config;
 
 /// Domain key -> domain file name. Order defines the split/save routing order.
-pub(crate) const DOMAIN_FILES: [(&str, &str); 4] = [
+pub(crate) const DOMAIN_FILES: [(&str, &str); 5] = [
     ("mcp_servers", "mcp.json"),
     ("cli", "cli.json"),
     ("skills", "skills.json"),
     ("autopilot", "ap.json"),
+    ("schedules", "schedules.json"),
 ];
 
 /// Placeholder path piece for a non-domain key: never matches a real file, so
@@ -280,8 +283,10 @@ pub(crate) fn apply_domain(cfg: &mut Config, key: &str, value: &serde_json::Valu
                 }
             }
         }
-        // Not entry-shaped: ap.json's top level is the AutoPilotConfig body.
+        // Not entry-shaped: ap.json's / schedules.json's top level IS the
+        // config body (AutoPilotConfig / SchedulesConfig).
         "autopilot" => super::autopilot::merge(&mut cfg.autopilot, entries),
+        "schedules" => super::schedule::merge(&mut cfg.schedules, entries),
         _ => {}
     }
 }
@@ -292,7 +297,7 @@ mod tests {
 
     #[test]
     fn domain_key_table_maps_keys_to_files() {
-        for key in ["mcp_servers", "cli", "skills", "autopilot"] {
+        for key in ["mcp_servers", "cli", "skills", "autopilot", "schedules"] {
             assert!(is_domain_key(key), "{key} must be a domain key");
         }
         for key in ["model", "fps", "providers", "keymap", ""] {
@@ -302,6 +307,7 @@ mod tests {
         assert_eq!(domain_file_name("cli"), Some("cli.json"));
         assert_eq!(domain_file_name("skills"), Some("skills.json"));
         assert_eq!(domain_file_name("autopilot"), Some("ap.json"));
+        assert_eq!(domain_file_name("schedules"), Some("schedules.json"));
         assert_eq!(domain_file_name("model"), None);
     }
 

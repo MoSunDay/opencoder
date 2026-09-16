@@ -83,6 +83,9 @@ pub enum Command {
     /// Versioned custom agents: cards, resources, NFS export.
     #[command(subcommand)]
     Agents(cmd::agents::AgentCmd),
+    /// Cron schedules (schedules.json) and their fire history.
+    #[command(subcommand)]
+    Schedule(cmd::schedule::ScheduleCmd),
     /// Escape hatch: any method + path against the server, verbatim.
     #[command(subcommand)]
     Raw(cmd::raw::RawCmd),
@@ -135,6 +138,7 @@ pub async fn run(cli: Cli) -> anyhow::Result<i32> {
         Command::Brain(sub) => cmd::brain::run(&ctx, sub).await,
         Command::Teams(sub) => cmd::teams::run(&ctx, sub).await,
         Command::Agents(sub) => cmd::agents::run(&ctx, sub).await,
+        Command::Schedule(sub) => cmd::schedule::run(&ctx, sub).await,
         Command::Raw(sub) => cmd::raw::run(&ctx, sub).await,
     }
 }

@@ -44,7 +44,17 @@ export function graph(plan, groups = []) {
   return { nodes: nodes.map((n) => ({ ...n, position: { x: layout.node(n.id).x - 112, y: layout.node(n.id).y - 64 } })), edges };
 }
 export function newPlan() { return { schema_version: 2, title: '新计划', objective: '', inputs: {}, instances: [], outputs: {}, routes: [], entry: [] }; }
+export function engineeringInputs(rows) {
+  const inputs = {};
+  for (const row of rows || []) {
+    const key = String(row?.key || '').trim(); if (!key) continue;
+    const raw = String(row?.value ?? '').trim();
+    let value; try { value = raw === '' ? '' : JSON.parse(raw); } catch { value = raw; }
+    inputs[key] = value;
+  }
+  return inputs;
+}
 export function launchBody(values, id) {
   const reference = (raw) => { const [name, version] = raw.split('@'); return { id: name, version: Number(version) }; };
-  return { id, mode: values.mode, node_id: values.node, objective: values.objective.trim(), inputs: { ...JSON.parse(values.inputs || '{}'), ...(values.documentName ? { [values.documentInput || 'document']: { name: values.documentName, markdown: values.documentMarkdown || '' } } : {}) }, plan: values.mode === 'fixed' ? reference(values.plan) : null, references: values.mode === 'dynamic' ? (values.references || []).map(reference) : [] };
+  return { id, mode: values.mode, node_id: values.node, objective: values.objective.trim(), inputs: engineeringInputs(values.engineering), plan: values.mode === 'fixed' ? reference(values.plan) : null, references: values.mode === 'dynamic' ? (values.references || []).map(reference) : [] };
 }

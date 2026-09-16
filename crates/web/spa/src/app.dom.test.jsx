@@ -327,9 +327,29 @@ describe('App shell landmarks (antd 6 under jsdom)', () => {
     setCredentials('smoke-token', '');
     setState({ page: 'chat' });
     render(<App />);
-    expect(await screen.findByText(/选择或新建对话/)).toBeTruthy();
+    expect(await screen.findByText(/选中节点后输入提示词，即新建对话/)).toBeTruthy();
     expect(screen.getByText('请先选择执行节点')).toBeTruthy();
     expect(screen.getByPlaceholderText('输入提示词，Enter 发送，Shift+Enter 换行').disabled).toBe(true);
+  });
+
+  it('docks the chat sheet to the viewport bottom: flush pane class + sheet wrapper', async () => {
+    setCredentials('smoke-token', '');
+    setState({ page: 'chat' });
+    render(<App />);
+    expect(await screen.findByText(/选中节点后输入提示词，即新建对话/)).toBeTruthy();
+    // SHEET_PAGES pairing: the pane drops its bottom padding and the panel is
+    // wrapped in the white sheet that squares off against the screen edge.
+    expect(document.querySelector('.fleet-content').className).toContain('fleet-content--flush');
+    expect(document.querySelector('.fleet-content > .fleet-sheet')).toBeTruthy();
+  });
+
+  it('keeps the padded pane on card-bearing pages (no flush, no sheet)', async () => {
+    setCredentials('smoke-token', '');
+    setState({ page: 'nodes' });
+    render(<App />);
+    expect(await screen.findByText('暂无 Opencoder 节点')).toBeTruthy();
+    expect(document.querySelector('.fleet-content').className).not.toContain('fleet-content--flush');
+    expect(document.querySelector('.fleet-content > .fleet-sheet')).toBeNull();
   });
 
   it('renders the brand and the node-category menu on the default page', () => {
@@ -339,8 +359,11 @@ describe('App shell landmarks (antd 6 under jsdom)', () => {
     // Default page (nodes) scopes the Sider menu to the node category. Icon
     // glyphs carry their own aria-label, so match menuitem names by regex.
     expect(screen.getByRole('menuitem', { name: /节点列表/ })).toBeTruthy();
-    // Pages of other categories stay out of the scoped menu.
-    expect(screen.queryByRole('menuitem', { name: /会话交互/ })).toBeNull();
+    // Pages of other categories stay out of the scoped menu. The chat page's
+    // nav label is now「Agent」(renamed from Operator), so both names must be
+    // absent here.
+    expect(screen.queryByRole('menuitem', { name: /Operator/ })).toBeNull();
+    expect(screen.queryByRole('menuitem', { name: /Agent/ })).toBeNull();
     expect(screen.queryByRole('menuitem', { name: /DAG 工作流/ })).toBeNull();
   });
 
@@ -397,10 +420,12 @@ describe('App shell landmarks (antd 6 under jsdom)', () => {
       ).toBe(labelOf(page));
       // The sidebar half of the promise: the Sider Menu is scoped to the
       // page's category and icon glyphs add their own aria-label, so match
-      // by regex within the sider.
+      // by regex within the sider. Anchored at the end: the chat page label
+      // 「Agent」is a prefix of「Agent 配置」, and both live in the same scoped
+      // menu — an unanchored match would be ambiguous.
       const sider = within(document.querySelector('.fleet-sidebar'));
       expect(
-        sider.queryByRole('menuitem', { name: new RegExp(escapeRegExp(labelOf(page))) }),
+        sider.queryByRole('menuitem', { name: new RegExp(escapeRegExp(labelOf(page)) + '$') }),
         `sidebar Menu has no item for ${page} (expected ${labelOf(page)})`,
       ).toBeTruthy();
     }

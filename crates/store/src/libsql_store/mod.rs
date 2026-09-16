@@ -19,6 +19,7 @@ mod node_tasks;
 mod nodes;
 mod project;
 mod project_runs;
+mod schedule;
 pub(crate) mod schema;
 mod sessions;
 mod subagent_tasks;

@@ -18,7 +18,10 @@ use std::net::{TcpListener, TcpStream};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
+use serde_json::Value;
+
 /// One scripted LLM response.
+#[derive(Clone)]
 #[allow(dead_code)]
 pub enum Script {
     /// A normal streaming completion carrying this assistant text.
@@ -28,6 +31,21 @@ pub enum Script {
     Hold,
     /// Reply with a non-200 status (models an LLM outage).
     Fail(u16, String),
+    /// Request-aware reply: the closure receives the parsed request body
+    /// (OpenAI chat-completions JSON) and returns the completion text.
+    /// The lever for echo-style contracts such as brain route receipts.
+    Dynamic(Arc<dyn Fn(&Value) -> String + Send + Sync>),
+}
+
+impl Script {
+    /// Convenience constructor for a single [`Script::Dynamic`] entry.
+    #[allow(dead_code)]
+    pub fn dynamic<F>(respond: F) -> Self
+    where
+        F: Fn(&Value) -> String + Send + Sync + 'static,
+    {
+        Script::Dynamic(Arc::new(respond))
+    }
 }
 
 /// Reply text for requests beyond the script: unmistakable in transcripts,
@@ -63,8 +81,15 @@ impl LlmStub {
                 let release = release_thread.clone();
                 std::thread::spawn(move || {
                     let mut stream = stream;
-                    let body = read_http_body(&mut stream);
-                    requests.0.lock().unwrap().push(body);
+                    let (path, body) = read_http_request(&mut stream);
+                    if path.contains("/embeddings") {
+                        // The brain runtime embeds capability cards through
+                        // the same base URL; serve a canned vector so the
+                        // chat script accounting stays untouched.
+                        write_embeddings(&mut stream, &body);
+                        return;
+                    }
+                    requests.0.lock().unwrap().push(body.clone());
                     requests.1.notify_all();
                     let entry = {
                         let mut queue = shared.lock().unwrap();
@@ -93,6 +118,10 @@ impl LlmStub {
                         }
                         Some(Script::Fail(status, message)) => {
                             write_failure(&mut stream, status, &message)
+                        }
+                        Some(Script::Dynamic(respond)) => {
+                            let parsed = serde_json::from_str(&body).unwrap_or(Value::Null);
+                            write_completion(&mut stream, &respond(&parsed));
                         }
                         None => write_completion(&mut stream, EXTRA_REPLY),
                     }
@@ -182,8 +211,9 @@ impl LlmStub {
     }
 }
 
-/// Read one HTTP request (headers + content-length body) off the wire.
-fn read_http_body(stream: &mut TcpStream) -> String {
+/// Read one HTTP request (headers + content-length body) off the wire and
+/// return its request path plus the decoded body.
+fn read_http_request(stream: &mut TcpStream) -> (String, String) {
     stream
         .set_read_timeout(Some(Duration::from_secs(5)))
         .unwrap();
@@ -211,7 +241,44 @@ fn read_http_body(stream: &mut TcpStream) -> String {
         assert!(count > 0, "LLM request closed before body completed");
         request.extend_from_slice(&chunk[..count]);
     }
-    String::from_utf8(request[header_end..header_end + content_len].to_vec()).unwrap()
+    let head = String::from_utf8_lossy(&request[..header_end]).into_owned();
+    let path = head
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().nth(1))
+        .unwrap_or_default()
+        .to_string();
+    let body = String::from_utf8(request[header_end..header_end + content_len].to_vec()).unwrap();
+    (path, body)
+}
+
+/// Read one HTTP request body off the wire (chat-completions callers).
+fn read_http_body(stream: &mut TcpStream) -> String {
+    read_http_request(stream).1
+}
+
+/// Answer an `/embeddings` probe with deterministic vectors — no script entry
+/// consumed and nothing recorded, so scenario accounting stays chat-only.
+fn write_embeddings(stream: &mut TcpStream, body: &str) {
+    let inputs = serde_json::from_str::<Value>(body)
+        .ok()
+        .and_then(|value| match value.get("input") {
+            Some(Value::String(_)) => Some(1),
+            Some(Value::Array(items)) => Some(items.len()),
+            _ => None,
+        })
+        .unwrap_or(1);
+    let data: Vec<Value> = (0..inputs)
+        .map(|index| serde_json::json!({"index": index, "embedding": [0.1, 0.2, 0.3, 0.4]}))
+        .collect();
+    let payload = serde_json::json!({"model": "stub", "data": data}).to_string();
+    let head = format!(
+        "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+        payload.len()
+    );
+    let _ = stream.write_all(head.as_bytes());
+    let _ = stream.write_all(payload.as_bytes());
+    let _ = stream.flush();
 }
 
 /// Write a minimal OpenAI chat-completions SSE replay for `text`.

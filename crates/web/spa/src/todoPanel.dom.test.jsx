@@ -102,6 +102,20 @@ describe('TodoPanel 模板 tab', () => {
     expect(screen.getByText('v1')).toBeTruthy(); // 当前版本列的 Tag
   });
 
+  it('filters templates through the controlled todo-template-search box (case-insensitive)', async () => {
+    render(<TodoPanel onNotice={noopNotice} />);
+    expect(await screen.findByText('demo')).toBeTruthy();
+    // 命中唯一模板的名称。
+    fireEvent.change(screen.getByLabelText('todo-template-search'), { target: { value: 'demo' } });
+    expect(screen.getByText('demo')).toBeTruthy();
+    // 无关关键词：模板行从表格中消失。
+    fireEvent.change(screen.getByLabelText('todo-template-search'), { target: { value: 'zzz-nope' } });
+    await waitFor(() => expect(screen.queryByText('demo')).toBeNull());
+    // 清空后恢复。
+    fireEvent.change(screen.getByLabelText('todo-template-search'), { target: { value: '' } });
+    expect(await screen.findByText('demo')).toBeTruthy();
+  });
+
   it('expands a row and dispatches a run for the version', async () => {
     const onNotice = vi.fn();
     let attempts=0;

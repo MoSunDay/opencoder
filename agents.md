@@ -35,9 +35,12 @@ Rust 原生编码代理 workspace：`opencoder`（本地 CLI/TUI）、`opencode-
 
 ## 根包进程级 e2e 套件（layer-2，随 cargo test 运行）
 
-- [tests/operator_e2e/](tests/operator_e2e/main.rs) — O1–O4：operator 创建→drain→idle、relay SSE 守卫、角色门禁 403、interrupt→cancelled + 重启恢复（真二进制 + 共享 LLM 桩）。
-- [tests/dag_e2e/](tests/dag_e2e/main.rs) — D1–D3/D5：spec 保存/dispatch 流、wasm 版本池（wat 现场编译）、cancel/失败折叠、runc preflight（无 runc 时 SKIP 运行段）。
-- [tests/support/](tests/support/mod.rs) — `llm_stub`（FIFO/Hold/Fail 流式桩）、`http_util`（Bearer JSON + SSE 解析）、`fleet_proc`（fleet 拉起/RAII）；`tests/running_mode_switch_e2e.rs` 已复用 `llm_stub`。
+- [tests/operator_e2e/](tests/operator_e2e/main.rs) — O1–O5：operator 创建→drain→idle、relay SSE 守卫、角色门禁（operator/agent 提交与指令放行、dag/team 403）、interrupt→cancelled + 重启恢复、`kind=agent` 会话（how_append 注入、output_text/output_json、合并列表）（真二进制 + 共享 LLM 桩）。
+- [tests/dag_e2e/](tests/dag_e2e/main.rs) — D1–D3/D5：spec 保存/dispatch 流、wasm 版本池（wat 现场编译）、cancel/失败折叠、runc preflight（无 runc 时 SKIP 运行段）、structured_output（agent 步围栏/裸 JSON 两种形态 output.json 非 null）。
+- [tests/todos_e2e/](tests/todos_e2e/main.rs) — T1–T3：模板→运行→完成、interrupt→节点重启→resume→done、子 LLM 失败→todo failed + workflow suspended（父决策重试链共 5 请求）。
+- [tests/team_e2e/](tests/team_e2e/main.rs) — M1：能力注册/绑定→pinned 定义冻结 capabilities→member prompt 能力前缀→四段 chat 决策→finished topic + 1-based turn 台账。
+- [tests/brain_e2e/](tests/brain_e2e/main.rs) — B1/B2：plan-defs 固化 v1→fixed run 经子会话+收据路由 completed→重放 202 零调用；旁路 409、异样 receipt→blocked→cancel→终态命令拒绝。子会话标题 pass 与 route 竞态，stub 按内容判别。
+- [tests/support/](tests/support/mod.rs) — `llm_stub`（FIFO/Hold/Fail/**Dynamic 请求感知**流式桩 + `/embeddings` canned、`Script: Clone`）、`http_util`（Bearer JSON + SSE 解析）、`fleet_proc`（fleet 拉起/RAII/kill+respawn）；`tests/running_mode_switch_e2e.rs` 与 todos/team/brain e2e 共用。
 
 ## 仓库规则
 

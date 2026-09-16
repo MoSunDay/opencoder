@@ -12,6 +12,7 @@ anyhow.workspace = true
 thiserror.workspace = true
 async-trait.workspace = true
 chrono.workspace = true
+cron.workspace = true
 tracing.workspace = true
 dirs.workspace = true
 ulid.workspace = true

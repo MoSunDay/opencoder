@@ -26,11 +26,13 @@ pub async fn create(
     if identity
         .as_ref()
         .map(|axum::Extension(i)| i)
-        .is_some_and(|i| !i.is_admin() && request.kind != ExecutionKind::Operator)
+        .is_some_and(|i| {
+            !i.is_admin() && !matches!(request.kind, ExecutionKind::Operator | ExecutionKind::Agent)
+        })
     {
         return response(RpcReply::error(
             403,
-            "non-admin roles may only submit operator executions",
+            "non-admin roles may only submit operator or agent executions",
         ));
     }
     response(submit(&state, request).await)
@@ -62,8 +64,8 @@ pub async fn dispatch_command(
 }
 
 /// [`dispatch_command`] with the caller's identity: non-admins may command
-/// only operator executions (the role gate already limited them to this
-/// endpoint family).
+/// only operator and agent executions (the role gate already limited them
+/// to this endpoint family).
 pub async fn dispatch_command_as(
     state: &Arc<AppState>,
     id: &str,
@@ -72,9 +74,15 @@ pub async fn dispatch_command_as(
 ) -> RpcReply {
     match state.fleet.index(id).await {
         Ok(Some(index))
-            if identity.is_some_and(|i| !i.is_admin() && index.kind != ExecutionKind::Operator) =>
+            if identity.is_some_and(|i| {
+                !i.is_admin()
+                    && !matches!(index.kind, ExecutionKind::Operator | ExecutionKind::Agent)
+            }) =>
         {
-            return RpcReply::error(403, "non-admin roles may only command operator executions");
+            return RpcReply::error(
+                403,
+                "non-admin roles may only command operator or agent executions",
+            );
         }
         Ok(Some(index))
             if index.kind == ExecutionKind::System

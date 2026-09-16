@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 // Chat top bar + sidebar actions:
-//   act/plan Segmented is clickable once a node is selected — with no session
-//   the choice is staged locally and rides session creation (`agent` field);
-//   with an idle session it POSTs /agent. The top bar keeps only act/plan +
-//   模型. Sidebar rows expose a hover 删除 menu confirmed via Modal.confirm.
+//   page-level 模式 Segmented (Operator/Agent) + 知识追加 entry ride along the
+//   act/plan Segmented, which is clickable once a node is selected — with no
+//   session the choice is staged locally and rides session creation (`agent`
+//   field); with an idle session it POSTs /agent. Sidebar rows expose a hover
+//   删除 menu confirmed via Modal.confirm.
 import '../test/setup-dom.js';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -22,7 +23,9 @@ const pick = async (name) => {
   fireEvent.click(await screen.findByText(name, { selector: '.ant-select-item-option-content' }));
 };
 
-const selectedSegment = (container) => container.querySelector('.ant-segmented-item-selected')?.textContent;
+const selectedSegment = (container, label) => container
+  .querySelector(`.ant-segmented[aria-label="${label}"]`)
+  ?.querySelector('.ant-segmented-item-selected')?.textContent;
 
 const send = async (container, prompt) => {
   const input = container.querySelector('textarea.ant-sender-input');
@@ -46,12 +49,16 @@ beforeEach(() => {
 });
 
 describe('chat top bar', () => {
-  it('keeps only act/plan + 模型 in the top bar', async () => {
+  it('keeps act/plan + 模型 in the session controls with the 模式 Segmented ahead', async () => {
     const { container } = render(<ChatPanel />);
     await pick('n1');
     await waitFor(() => expect(container.querySelector('.ant-segmented')).toBeTruthy());
     // antd 6 inserts a space between two CJK button chars ("模 型").
     expect(screen.getByRole('button', { name: '模 型' })).toBeTruthy();
+    // 页头模式 Segmented 常驻且缺省 Operator 模式（Agent 链路详见 chatMode 测试）。
+    expect(container.querySelector('.ant-segmented[aria-label="会话模式"]')).toBeTruthy();
+    expect(selectedSegment(container, '会话模式')).toBe('Operator 模式');
+    expect(screen.queryByRole('button', { name: '知识追加' })).toBeNull();
     expect(screen.queryByRole('button', { name: '批注' })).toBeNull();
     expect(screen.queryByRole('button', { name: '压缩' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'autopilot' })).toBeNull();
@@ -61,19 +68,19 @@ describe('chat top bar', () => {
     const { container } = render(<ChatPanel />);
     await pick('n1');
     const seg = await waitFor(() => {
-      const el = container.querySelector('.ant-segmented-item-input');
+      const el = container.querySelector('.ant-segmented[aria-label="agent 切换"] .ant-segmented-item-input');
       expect(el).toBeTruthy();
       expect(el.disabled).toBe(false);
       return el;
     });
     expect(seg.disabled).toBe(false);
-    expect(selectedSegment(container)).toBe('act');
+    expect(selectedSegment(container, 'agent 切换')).toBe('act');
 
     await act(async () => {
       fireEvent.click(screen.getByText('plan'));
     });
     // Staged locally: no session, so no /agent POST yet.
-    expect(selectedSegment(container)).toBe('plan');
+    expect(selectedSegment(container, 'agent 切换')).toBe('plan');
     expect(apiPost).not.toHaveBeenCalled();
 
     await send(container, '只读规划');
@@ -87,13 +94,13 @@ describe('chat top bar', () => {
     await pick('n1');
     fireEvent.click(await screen.findByText('已有会话'));
     await waitFor(() => expect(apiGet).toHaveBeenCalledWith('/api/sessions/s1'));
-    expect(selectedSegment(container)).toBe('act');
+    expect(selectedSegment(container, 'agent 切换')).toBe('act');
 
     await act(async () => {
       fireEvent.click(screen.getByText('plan'));
     });
     await waitFor(() => expect(apiPost).toHaveBeenCalledWith('/api/sessions/s1/agent', { value: 'plan' }));
-    expect(selectedSegment(container)).toBe('plan');
+    expect(selectedSegment(container, 'agent 切换')).toBe('plan');
   });
 });
 

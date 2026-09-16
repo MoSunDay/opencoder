@@ -9,8 +9,10 @@ it('projects inputs, instances, multiple outputs and semantic loop routes with s
  expect(a.edges).toContainEqual(expect.objectContaining({ source: 'route:after-verify', target: 'input:feedback' }));
  expect(statusOf({ counts: { failed: 1, succeeded: 9 } })).toBe('failed');
 });
-it('submits named Markdown documents and keeps fixed and generated plans explicit', () => {
- const values = { mode: 'dynamic', objective: ' Goal ', node: 'n', references: ['ref@2'], documentName: '需求', documentMarkdown: '# 正文' };
- expect(launchBody(values, 'b')).toMatchObject({ plan: null, references: [{ id: 'ref', version: 2 }], inputs: { document: { name: '需求', markdown: '# 正文' } } });
+it('submits the engineering description as one-level KV inputs and keeps fixed and generated plans explicit', () => {
+ const values = { mode: 'dynamic', objective: ' Goal ', node: 'n', references: ['ref@2'], engineering: [{ key: ' repo ', value: 'x/y' }, { key: 'parallel', value: '3' }, { key: 'verified', value: 'true' }, { key: 'document', value: '{"name":"需求","markdown":"# 正文"}' }, { key: 'raw', value: 'not json' }, { key: '   ', value: 'ignored' }, { key: 'empty', value: '' }] };
+ expect(launchBody(values, 'b')).toMatchObject({ plan: null, references: [{ id: 'ref', version: 2 }] });
+ expect(launchBody(values, 'b').inputs).toEqual({ repo: 'x/y', parallel: 3, verified: true, document: { name: '需求', markdown: '# 正文' }, raw: 'not json', empty: '' });
  expect(launchBody({ ...values, mode: 'fixed', plan: 'p@3' }, 'b')).toMatchObject({ plan: { id: 'p', version: 3 }, references: [] });
+ expect(launchBody({ ...values, engineering: [] }, 'b').inputs).toEqual({});
 });

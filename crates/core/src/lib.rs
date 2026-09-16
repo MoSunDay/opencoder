@@ -11,6 +11,7 @@ pub mod provider;
 pub use provider::{ProviderProtocol, ProviderState};
 pub mod net;
 pub mod node_protocol;
+pub mod schedule;
 pub mod share_fs;
 #[cfg(test)]
 mod share_fs_tests;

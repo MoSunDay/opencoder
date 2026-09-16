@@ -19,7 +19,7 @@ export const RunStatusTag = ({ status }) => <StatusTag status={status} />;
 /// table stays the single mapping.
 export const EXECUTOR_META = {
   agent: { color: 'blue', label: '单Agent' },
-  team: { color: 'purple', label: '团队' },
+  team: { color: 'purple', label: 'Team' },
   dag: { color: 'cyan', label: 'DAG' },
   brain: { color: 'gold', label: '大脑' },
 };

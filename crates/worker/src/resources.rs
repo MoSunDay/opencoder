@@ -202,8 +202,12 @@ pub(crate) fn pin(source: Option<&Path>, destination: &Path) -> Result<Option<Pa
 
 fn copy_version(source: &Path, destination: &Path) -> Result<()> {
     opencoder_core::share_fs::durable_create_dir_all(destination)?;
-    for entry in std::fs::read_dir(source)? {
-        let entry = entry?;
+    for entry in std::fs::read_dir(source)
+        .with_context(|| format!("read resource version dir {}", source.display()))?
+    {
+        let entry = entry.with_context(|| {
+            format!("read resource version entry in {}", source.display())
+        })?;
         let path = entry.path();
         if entry.file_type()?.is_symlink() {
             bail!(
@@ -215,8 +219,12 @@ fn copy_version(source: &Path, destination: &Path) -> Result<()> {
             copy_version(&path, &destination.join(entry.file_name()))?;
         } else {
             let target = destination.join(entry.file_name());
-            std::fs::copy(&path, &target)?;
-            std::fs::File::open(target)?.sync_all()?;
+            std::fs::copy(&path, &target).with_context(|| {
+                format!("copy resource file {} -> {}", path.display(), target.display())
+            })?;
+            std::fs::File::open(&target)
+                .with_context(|| format!("reopen copied resource file {}", target.display()))?
+                .sync_all()?;
         }
     }
     std::fs::File::open(destination)?.sync_all()?;
@@ -232,5 +240,25 @@ impl Drop for Staging {
                 tracing::error!(path = %self.0.display(), %error, "remove resource staging directory");
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A failed version copy must name the exact source path (P2 review: the
+    /// bare `?` used to surface "No such file or directory" with no
+    /// location, which once cost a live EIO diagnosis).
+    #[test]
+    fn copy_version_error_names_source_path() {
+        let dest = tempfile::tempdir().unwrap();
+        let err = copy_version(Path::new("/nonexistent-resource-version"), &dest.path().join("v1"))
+            .unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("/nonexistent-resource-version"),
+            "error must carry the source path: {msg}"
+        );
     }
 }

@@ -227,18 +227,93 @@ fn push_tail(tail: &mut String, delta: &str, max: usize) {
     }
 }
 
-/// Recover structured output from the final assistant text: the LAST
-/// ```json fenced block wins; else the whole trimmed text when it parses as
-/// JSON; else `None` (the step simply had no structured output).
-fn extract_output_json_from(text: &str) -> Option<Value> {
+/// Recover structured output from the final assistant text. Precedence: the
+/// LAST ```json fenced block wins (the output contract's primary form); else
+/// the last balanced top-level `{...}` object in the reply tail (bare JSON
+/// after narration); else the whole trimmed text when it parses as JSON
+/// (arrays, scalars); else `None` (the step simply had no structured output).
+///
+/// Public so the node's agent-kind session executor shares the DAG step's
+/// output contract byte for byte.
+pub fn extract_output_json_from(text: &str) -> Option<Value> {
+    // When a fence exists but its body fails to parse, the bare-JSON scan
+    // runs on the text AFTER the fence body: an unclosed `{` inside the dead
+    // fence must not swallow the real object that follows it.
+    let mut bare_scan = text;
     if let Some(start) = text.rfind("```json") {
-        let body = &text[start + "```json".len()..];
-        let body = body.split("```").next().unwrap_or(body);
+        let after = &text[start + "```json".len()..];
+        let (body, rest) = match after.find("```") {
+            Some(end) => (&after[..end], &after[end + "```".len()..]),
+            None => (after, ""),
+        };
+        bare_scan = rest;
         if let Ok(v) = serde_json::from_str::<Value>(body.trim()) {
             return Some(v);
         }
     }
+    if let Some(v) = extract_tail_bare_json(bare_scan) {
+        return Some(v);
+    }
     serde_json::from_str::<Value>(text.trim()).ok()
+}
+
+/// How much of the reply tail the bare-JSON fallback scans. Step replies are
+/// narration-first, so the final structured object always sits near the end.
+const BARE_JSON_TAIL_LIMIT: usize = 8 * 1024;
+
+/// Find every balanced top-level `{...}` span in the tail of `text` and parse
+/// the last one that yields valid JSON. Braces inside JSON strings never
+/// count (string-aware scan). Byte-level scanning is safe: `{`, `}`, `"`,
+/// `\` are ASCII and never occur inside a multi-byte UTF-8 sequence, so span
+/// slicing always lands on char boundaries.
+fn extract_tail_bare_json(text: &str) -> Option<Value> {
+    let start = if text.len() <= BARE_JSON_TAIL_LIMIT {
+        0
+    } else {
+        let mut cut = text.len() - BARE_JSON_TAIL_LIMIT;
+        while !text.is_char_boundary(cut) {
+            cut += 1;
+        }
+        cut
+    };
+    let bytes = &text.as_bytes()[start..];
+    let mut spans: Vec<(usize, usize)> = Vec::new();
+    let mut depth = 0usize;
+    let mut open_at: Option<usize> = None;
+    let mut in_string = false;
+    let mut escaped = false;
+    for (i, &byte) in bytes.iter().enumerate() {
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if byte == b'\\' {
+                escaped = true;
+            } else if byte == b'"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match byte {
+            b'"' => in_string = true,
+            b'{' => {
+                if depth == 0 {
+                    open_at = Some(i);
+                }
+                depth += 1;
+            }
+            b'}' if depth > 0 => {
+                depth -= 1;
+                if depth == 0 {
+                    spans.push((open_at.take().unwrap_or(i), i));
+                }
+            }
+            _ => {}
+        }
+    }
+    spans
+        .iter()
+        .rev()
+        .find_map(|(from, to)| serde_json::from_slice(&bytes[*from..=*to]).ok())
 }
 
 /// Terminal decision by precedence: cancelled > error > done (the node
@@ -300,6 +375,59 @@ mod tests {
             extract_output_json_from("```json\n{\"open\": 4}").unwrap()["open"],
             serde_json::json!(4)
         );
+    }
+
+    /// Bare JSON after narration (the no-fence contract form): the whole
+    /// text is NOT valid JSON, so the pre-fix whole-text parse returned
+    /// `None` here — the fallback scan is what recovers the object.
+    #[test]
+    fn extracts_bare_json_from_narration_tail() {
+        let reply = "## 分析过程\n调用链定位到 handler，签名匹配，关键证据如下……（长叙述）\n最终结论：\n{\"depend_type\": \"strong\", \"analysis_report\": {\"调用链\": \"router->handler\"}}\n";
+        let value = extract_output_json_from(reply).unwrap();
+        assert_eq!(value["depend_type"], serde_json::json!("strong"));
+        assert_eq!(
+            value["analysis_report"]["调用链"],
+            serde_json::json!("router->handler")
+        );
+        // The LAST top-level object wins when narration carries examples.
+        let mixed = "示例 {\"not\": \"this\"} 与 {a: 占位} 说明。\n{\"final\": 7}";
+        assert_eq!(
+            extract_output_json_from(mixed).unwrap()["final"],
+            serde_json::json!(7)
+        );
+    }
+
+    /// A broken fence falls through to the tail scan instead of dropping the
+    /// whole structured output; prose braces never shadow a real object.
+    #[test]
+    fn broken_fence_falls_back_to_tail_bare_json() {
+        // The fence closes, but its body is not valid JSON: the fence branch
+        // fails and the tail scan recovers the bare object after it.
+        let reply = "```json\n{\"broken\":\n```\n结论：\n{\"depend_type\": \"weak\"}";
+        assert_eq!(
+            extract_output_json_from(reply).unwrap()["depend_type"],
+            serde_json::json!("weak")
+        );
+        // Braces inside JSON strings are inert; the scan still balances.
+        let strings = "{\"code\": \"} { \\n { \"} ... 混入叙述 {\"answer\": 9}";
+        assert_eq!(
+            extract_output_json_from(strings).unwrap()["answer"],
+            serde_json::json!(9)
+        );
+        // Unterminated object at the very end yields nothing.
+        assert!(extract_tail_bare_json("结论 {\"open\": 1").is_none());
+    }
+
+    /// The fallback only scans the 8KB tail: objects buried earlier in a
+    /// huge reply are out of scope, objects at the end are always reached.
+    #[test]
+    fn bare_json_scan_is_bounded_to_the_tail() {
+        let late = format!("{}\n{{\"tail_only\": true}}", "x".repeat(9000));
+        assert!(extract_output_json_from(&late).unwrap()["tail_only"]
+            .as_bool()
+            .unwrap());
+        let early = format!("{{\"head_only\": true}}\n{}", "y".repeat(9000));
+        assert!(extract_output_json_from(&early).is_none());
     }
 
     /// The transcript tail keeps the LAST bytes on a char boundary.

@@ -137,6 +137,20 @@ describe('DefsTab', () => {
     expect(rowButtons('编辑')[1].disabled).toBe(true);
     expect(rowButtons('删除')[1].disabled).toBe(false); // cleanup stays possible
   });
+
+  it('filters defs by name/id through the controlled dag-def-search box (case-insensitive)', async () => {
+    render(<DefsTab onNotice={vi.fn()} onDispatched={vi.fn()} />);
+    expect(await screen.findByText('etl')).toBeTruthy();
+    expect(screen.getByText('nightly')).toBeTruthy();
+    // 大写输入命中小写定义名：nightly 行在、etl 行消失。
+    fireEvent.change(screen.getByLabelText('dag-def-search'), { target: { value: 'NIGHT' } });
+    await waitFor(() => expect(screen.queryByText('etl')).toBeNull());
+    expect(screen.getByText('nightly')).toBeTruthy();
+    // 按 ID 同样能命中。
+    fireEvent.change(screen.getByLabelText('dag-def-search'), { target: { value: 'dag-other' } });
+    expect(screen.getByText('nightly')).toBeTruthy(); // id = dag-other
+    expect(screen.queryByText('etl')).toBeNull();
+  });
 });
 
 describe('DefEditor', () => {
@@ -222,6 +236,22 @@ describe('RunsTable', () => {
     expect(await screen.findByText('etl')).toBeTruthy(); // top-level name
     expect(screen.getByText('nightly')).toBeTruthy(); // spec.name fallback
     expect(screen.getByText('-')).toBeTruthy(); // no name anywhere
+  });
+
+  it('filters runs by name/status through the controlled dag-run-search box (case-insensitive)', async () => {
+    render(<RunsTable onNotice={vi.fn()} />);
+    expect(await screen.findByText('运行中')).toBeTruthy();
+    // 按名称过滤：其它两行消失，只剩 nightly。
+    fireEvent.change(screen.getByLabelText('dag-run-search'), { target: { value: 'nightly' } });
+    await waitFor(() => expect(screen.queryByText('etl')).toBeNull());
+    expect(screen.getByText('nightly')).toBeTruthy();
+    // 大写状态命中：只剩 done 状态的行（名字同为 etl）。
+    fireEvent.change(screen.getByLabelText('dag-run-search'), { target: { value: 'DONE' } });
+    await waitFor(() => expect(screen.queryByText('nightly')).toBeNull());
+    expect(screen.getByText('etl')).toBeTruthy();
+    expect(screen.getByText('已完成')).toBeTruthy();
+    expect(screen.queryByText('运行中')).toBeNull();
+    expect(screen.queryByText('等待节点确认')).toBeNull();
   });
 });
 

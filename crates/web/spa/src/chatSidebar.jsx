@@ -1,22 +1,25 @@
-import { DeleteOutlined } from '@ant-design/icons';
+import { ClearOutlined, DeleteOutlined } from '@ant-design/icons';
 import { Conversations } from '@ant-design/x';
-import { Select, Spin } from 'antd';
+import { Button, Select, Spin } from 'antd';
 import { dialogsToItems } from './conversationItems.js';
 import { explicitNodeOptions } from './fleet/model.js';
 
 export function DialogSidebar({
   nodes,
   nodeSel,
+  nodeKind,
   onNodeChange,
   dialogs,
   activeKey,
   onActiveChange,
   onDelete,
-  onNew,
+  onDeleteAll,
   loading,
   disabled,
 }) {
-  const nodeOptions = explicitNodeOptions(nodes, 'operator');
+  // 节点下拉按创建模式过滤可执行节点（Operator 模式 'operator'，Agent 模式
+  // 'agent'）；未传 kind 时保持旧缺省，兼容既有调用。
+  const nodeOptions = explicitNodeOptions(nodes, nodeKind || 'operator');
 
   return (
     <div
@@ -52,10 +55,20 @@ export function DialogSidebar({
               items: [{ key: 'delete', danger: true, icon: <DeleteOutlined />, label: '删除' }],
               onClick: ({ key }) => { if (key === 'delete') onDelete?.(item.key); },
             })}
-            creation={{ label: '新建对话', onClick: onNew, disabled: disabled || !nodeSel }}
           />
         </Spin>
       </div>
+      <Button
+        danger
+        block
+        size="small"
+        icon={<ClearOutlined />}
+        disabled={disabled || !dialogs.length}
+        onClick={onDeleteAll}
+        style={{ marginTop: 12 }}
+      >
+        删除全部会话
+      </Button>
     </div>
   );
 }

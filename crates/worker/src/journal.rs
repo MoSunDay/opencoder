@@ -126,6 +126,32 @@ impl Journal {
         Ok(())
     }
 
+    /// Drop an execution's journal record (and its record file) so full index
+    /// reports stop resurrecting it after control-side deletion. Unknown ids
+    /// return false; a missing record file is tolerated.
+    pub fn forget(&mut self, id: &str) -> Result<bool> {
+        let Some(record) = self.records.get(id).cloned() else {
+            return Ok(false);
+        };
+        let location = self
+            .locations
+            .get(id)
+            .copied()
+            .unwrap_or(RecordLocation::Current);
+        let path = match location {
+            RecordLocation::Current => self.layout.record_path(record.assignment.index.kind, id)?,
+            RecordLocation::Legacy => self.layout.legacy_record_path(id)?,
+        };
+        if let Err(error) = std::fs::remove_file(&path) {
+            if error.kind() != std::io::ErrorKind::NotFound {
+                return Err(error.into());
+            }
+        }
+        self.locations.remove(id);
+        self.records.remove(id);
+        Ok(true)
+    }
+
     pub fn uses_legacy(&self, id: &str) -> bool {
         self.locations.get(id) == Some(&RecordLocation::Legacy)
     }

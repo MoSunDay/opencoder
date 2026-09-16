@@ -206,3 +206,37 @@ async fn task_create_validates_caller_ids_and_node_pins() {
         .await;
     assert_eq!(status, 503, "{body}");
 }
+
+#[tokio::test]
+async fn dialogs_delete_clears_node_and_terminal_indexes() {
+    let h = Harness::new().await;
+    h.put_index(
+        "operator-dlg-1",
+        ExecutionKind::Operator,
+        ExecutionStatus::Idle,
+    )
+    .await;
+    h.put_index(
+        "operator-dlg-2",
+        ExecutionKind::Operator,
+        ExecutionStatus::Running,
+    )
+    .await;
+    h.node.set_maintenance(
+        "dialogs_clear",
+        200,
+        json!({"ok": true, "removed": 1, "skipped": [], "forgotten": 1}),
+    );
+    let (status, body) = h
+        .req(Method::DELETE, "/api/nodes/node-e2e/dialogs", None)
+        .await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["ok"], json!(true));
+    assert_eq!(body["removed"], json!(1));
+    assert_eq!(body["skipped"], json!(["operator-dlg-2"]));
+
+    // The idle index row is gone, the running one survives.
+    let rows = h.state.fleet.indexes(Some("node-e2e"), Some(ExecutionKind::Operator), 500).await.unwrap();
+    let ids: Vec<&str> = rows.iter().map(|r| r.id.as_str()).collect();
+    assert_eq!(ids, vec!["operator-dlg-2"]);
+}

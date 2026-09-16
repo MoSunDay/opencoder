@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
-// Operator 页签可见性 + 面板内容：AgentsPanel 仅在 identity.role === 'admin'
-// 时渲染 Operator tab；面板为只读节点总览（会话交互页以 operator kind 建会话，
-// 本页不再有「操作」列/启动入口）。store identity 经 setState 直写。
+// 「节点总览」页签可见性 + 面板内容：AgentsPanel 仅在 identity.role === 'admin'
+// 时渲染 节点总览 tab（label 由 Operator 改名，key 仍为 operator）；面板为只读
+// 节点总览（Agent 页以 operator kind 建会话，本页不再有「操作」列/启动入口）。
+// store identity 经 setState 直写。
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
@@ -48,12 +49,14 @@ afterEach(() => {
   clearCredentials();
 });
 
-describe('Operator tab visibility', () => {
-  it('shows the Operator tab for an admin identity and renders its panel', async () => {
+describe('节点总览 tab visibility', () => {
+  it('shows the 节点总览 tab for an admin identity and renders its panel', async () => {
     setState({ identity: { name: 'boss', role: 'admin' } });
     render(<AgentsPanel onNotice={() => {}} />);
     expect(screen.getByText('Agent 列表')).toBeTruthy();
-    fireEvent.click(screen.getByText('Operator'));
+    // label 已由 Operator 改名「节点总览」（tab key 仍为 operator）。
+    expect(screen.queryByText('Operator')).toBeNull();
+    fireEvent.click(screen.getByText('节点总览'));
     // 面板说明（会话即 Operator 运行：非 runc 容器、非节点维护模式）+ 节点表。
     expect(await screen.findByText(/非 runc 容器、非节点维护模式/)).toBeTruthy();
     expect(await screen.findByText('edge-1')).toBeTruthy();
@@ -63,17 +66,17 @@ describe('Operator tab visibility', () => {
   it('keeps the panel read-only: no actions column or launch entry', async () => {
     setState({ identity: { name: 'boss', role: 'admin' } });
     render(<AgentsPanel onNotice={() => {}} />);
-    fireEvent.click(screen.getByText('Operator'));
+    fireEvent.click(screen.getByText('节点总览'));
     expect(await screen.findByText('edge-1')).toBeTruthy();
     expect(screen.queryByText('操作')).toBeNull();
     expect(screen.queryByText('启动 Operator')).toBeNull();
     expect(screen.queryByRole('button', { name: /启动/ })).toBeNull();
   });
 
-  it('hides the Operator tab for a non-admin identity', async () => {
+  it('hides the 节点总览 tab for a non-admin identity', async () => {
     setState({ identity: { name: 'guest', role: 'user' } });
     render(<AgentsPanel onNotice={() => {}} />);
     await screen.findByText('Agent 列表');
-    expect(screen.queryByText('Operator')).toBeNull();
+    expect(screen.queryByText('节点总览')).toBeNull();
   });
 });

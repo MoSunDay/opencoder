@@ -308,6 +308,26 @@ pub async fn clear_others(conn: &Connection, keep_id: &str) -> Result<u64> {
     Ok(affected as u64)
 }
 
+/// Delete sessions by id, chunked to keep the IN list bounded. Child rows
+/// (messages, inputs, events, subagent_tasks) are removed by their
+/// `ON DELETE CASCADE` foreign keys. Unknown ids are ignored. Returns the
+/// number of deleted session rows.
+pub async fn delete_many(conn: &Connection, ids: &[String]) -> Result<u64> {
+    let mut removed = 0u64;
+    for chunk in ids.chunks(100) {
+        let placeholders = vec!["?"; chunk.len()].join(",");
+        let affected = conn
+            .execute(
+                &format!("DELETE FROM sessions WHERE id IN ({placeholders})"),
+                params_from_iter(chunk.iter().map(String::as_str)),
+            )
+            .await
+            .context("delete sessions by id")?;
+        removed += affected as u64;
+    }
+    Ok(removed)
+}
+
 /// Legacy agent-name normalization, applied on READ paths only: databases
 /// written during the sandbox-mode interlude store `agent = 'sandbox'` for
 /// the read-only agent, which is named `plan` again. Resume must land those

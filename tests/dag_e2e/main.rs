@@ -11,4 +11,5 @@ mod support;
 mod cancel_fail;
 mod fixtures;
 mod flow;
+mod structured_output;
 mod wasm_pool;

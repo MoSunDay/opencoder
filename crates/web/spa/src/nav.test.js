@@ -45,6 +45,14 @@ describe('NAV_CATEGORIES shape', () => {
     expect(ALL_ITEMS.some((i) => i.menu === 'Opencoder 列表')).toBe(false);
   });
 
+  it('renames the chat page to Agent (old label Operator is gone)', () => {
+    // page key `chat`、ALL_PAGES 与 HEADERLESS_REASONS 约定不动：仅 menu 文案
+    // 由 Operator 改名 Agent（页内模式 Segmented 才区分 Operator/Agent 链路）。
+    const item = ALL_ITEMS.find((i) => i.page === 'chat');
+    expect(item.menu).toBe('Agent');
+    expect(ALL_ITEMS.some((i) => i.menu === 'Operator')).toBe(false);
+  });
+
   it('stores icon component references, not JSX elements', () => {
     for (const item of ALL_ITEMS) {
       expect(item.icon).toBeTruthy();
@@ -111,8 +119,8 @@ describe('menuOf / selectOptionsOf scoping', () => {
       { value: 'topics', label: '全部执行' },
       { value: 'dag', label: 'DAG 工作流' },
       { value: 'todos', label: 'TODO 管理' },
-      { value: 'team', label: '团队组队' },
-      { value: 'chat', label: '会话交互' },
+      { value: 'team', label: 'Team 组队' },
+      { value: 'chat', label: 'Agent' },
       { value: 'agents', label: 'Agent 配置' },
     ]);
   });

@@ -10,6 +10,7 @@ pub mod executions;
 pub mod nodes;
 pub mod project;
 pub mod raw;
+pub mod schedule;
 pub mod sessions;
 pub mod system;
 pub mod teams;

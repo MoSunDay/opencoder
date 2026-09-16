@@ -254,8 +254,19 @@ async fn rejects_bad_category_paths_shape_and_oversize() {
         assert_eq!(status, StatusCode::BAD_REQUEST, "{method} {uri}: {v}");
     }
 
-    // Traversal / absolute / empty paths ⇒ 400 (checked before any fs work).
-    for path in ["../escape", "a/../../b", "/abs.md", "a//b.md", ""] {
+    // Traversal / absolute / empty / hidden paths ⇒ 400 (checked before
+    // any fs work). Hidden segments are rejected because the memory
+    // reader skips dot files — writable-but-never-injected is a contract
+    // violation, refused at the door instead.
+    for path in [
+        "../escape",
+        "a/../../b",
+        "/abs.md",
+        "a//b.md",
+        "",
+        ".hidden.md",
+        "dir/.x.md",
+    ] {
         let (status, v) = call(
             app(state.clone()),
             "POST",

@@ -8,7 +8,7 @@
 //! order. A pool holding a single `memory.md` therefore renders
 //! byte-for-byte like the pre-T3 single-file read.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 /// Aggregated memory cap. Mirrors `AGENTS_MD_MAX_BYTES` in
 /// `crates/session/src/prompt.rs` (200 KiB) — that constant is

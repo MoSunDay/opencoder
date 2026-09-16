@@ -25,7 +25,7 @@ async function main() {
     await page.getByRole('button', { name: '关闭画布' }).click();
     await page.getByRole('button', { name: '新建计划' }).click();
     assert.equal(await page.getByLabel('下一步如何判断').inputValue(), '复测成功且证据明确时结束，否则回流修复');
-    await page.screenshot({ path: path.join(artifacts, 'editor.png') });
+    await page.screenshot({ path: path.join(artifacts, 'editor.png'), animations: 'disabled' });
     await page.getByRole('button', { name: '提交计划' }).click();
     await page.getByLabel('计划名称').fill('浏览器 v2 修复验证');
     await page.getByLabel('一句话概述').fill('固定图版本、命名输出及局部路由');
@@ -35,7 +35,7 @@ async function main() {
     assert.equal(savedResponse.status(), 200, await savedResponse.text());
     const version = (await savedResponse.json()).version;
     assert.equal(version.plan.schema_version, 2);
-    await page.getByRole('button', { name: '执行', exact: true }).click();
+    await page.getByRole('button', { name: /^执\s*行$/ }).click();
     await page.getByLabel('目标和交付物').fill('浏览器运行：提交经过验证的修复结果');
     await page.getByLabel('大脑所在节点').click();
     await page.locator('.ant-select-item-option').filter({ hasText: 'test-node' }).first().click();
@@ -62,7 +62,7 @@ async function main() {
     assert.equal(visit.inputs.document.markdown, '# 问题\n修复后提交测试依据。');
     await page.locator('.react-flow__node').filter({ hasText: 'after-verify' }).click();
     await page.locator('.brain-inspector').getByText('Fixture verifies connected output').waitFor();
-    await page.screenshot({ path: path.join(artifacts, 'run.png') });
+    await page.screenshot({ path: path.join(artifacts, 'run.png'), animations: 'disabled' });
     fs.writeFileSync(path.join(artifacts, 'snapshot.json'), JSON.stringify(snapshot, null, 2));
     assert.deepEqual(errors, []);
     console.log(JSON.stringify({ result: 'PASS', id, artifacts }));

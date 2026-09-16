@@ -1,8 +1,8 @@
-// fuzzy.js — fuzzy subsequence scorer for the composer command menu.
+// fuzzy.js -- fuzzy subsequence scorer for the composer command menu.
 // Ported 1:1 from the TUI skill picker (crates/tui/src/menu.rs::fuzzy_score)
 // so the SPA `@agent` entries rank exactly like the TUI `/agent` picker:
 // `query` must be a subsequence of `target`; the score (lower = better)
-// rewards compact, consecutive and early matches. Case-insensitive — the
+// rewards compact, consecutive and early matches. Case-insensitive -- the
 // TUI callers lowercase both sides, this port folds internally instead.
 
 /// Subsequence match score, or `null` when `query` is not a subsequence of

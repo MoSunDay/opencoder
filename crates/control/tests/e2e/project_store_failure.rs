@@ -1,5 +1,5 @@
 //! Project store failure paths: an injected `get_todo` fault must surface
-//! as a 500 from `execute`'s brain pre-resolution, before any fleet call.
+//! as a 500 from `execute`'s executor admission, before any fleet call.
 
 use std::sync::Arc;
 
@@ -172,7 +172,7 @@ async fn execute_reports_500_when_todo_store_fails() {
     );
     let h = Harness::with_projects(Arc::new(GetTodoFailingStore { inner })).await;
 
-    // `execute` pre-resolves brain todos via `projects.get_todo` before any
+    // `execute` checks the stored executor via `projects.get_todo` before any
     // fleet/index call; the injected store fault must become a 500 carrying
     // both the branch tag and the underlying error text.
     let (status, body) = h

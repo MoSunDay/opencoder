@@ -120,6 +120,7 @@ pub(super) async fn run_app(
     let mut task_picker: Option<TaskPicker> = None;
     let mut command_menu: Option<CommandMenu> = None;
     let mut file_menu: Option<crate::file_menu::FileMenu> = None;
+    let mut agent_menu: Option<crate::agent_menu::AgentMenu> = None;
     let mut model_menu: Option<ModelMenu> = None;
     let mut mcp_menu: Option<crate::mcp_menu::McpMenu> = None;
     let mut cli_menu: Option<crate::cli_menu::CliMenu> = None;
@@ -247,6 +248,7 @@ pub(super) async fn run_app(
                     task_picker.as_ref(),
                     command_menu.as_ref(),
                     file_menu.as_ref(),
+                    agent_menu.as_ref(),
                     model_menu.as_ref(),
                     mcp_menu.as_ref(),
                     cli_menu.as_ref(),
@@ -436,6 +438,7 @@ pub(super) async fn run_app(
                                 &admit_tx, &mut admit_st,
                                 &mut queue_items, &mut pending_images,
                                 &mut history, &mut hist_idx,
+                                &mut agent_menu,
                             )
                             .await
                             {
@@ -493,6 +496,7 @@ pub(super) async fn run_app(
                             &mut queue_scroll,
                             &mut file_menu,
                             &workdir,
+                            &mut agent_menu,
                         ) {
                             KeyAction::Submit(text) => {
                                 if app_submit::handle_submit_action(
@@ -507,7 +511,7 @@ pub(super) async fn run_app(
                                     &mut cli_menu, &mut skill_toggle_menu, &mut ap_menu,
                                     &mut cache_salt_menu, &mut config, &cmd_tx, &mut cancel,
                                     &mut task_elapsed_ms, &mut cancelled, &mut follow,
-                                    &mut body_refresh_pending,
+                                    &mut body_refresh_pending, &mut agent_menu,
                                 )
                                 .await
                                     == app_loop::LoopFlow::Quit

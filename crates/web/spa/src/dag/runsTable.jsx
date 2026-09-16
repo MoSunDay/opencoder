@@ -124,7 +124,7 @@ export function RunsTable({ onNotice, refreshSignal, focusRunId, onDetailClosed 
         </Tooltip>
       ),
     },
-    { title: '名称', dataIndex: 'name', key: 'name', render: (v) => v || '-' },
+    { title: '名称', dataIndex: 'name', key: 'name', render: (v, r) => v || r?.spec?.name || '-' },
     {
       title: '状态',
       dataIndex: 'status',

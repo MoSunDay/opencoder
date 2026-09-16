@@ -119,17 +119,31 @@ impl Host {
                 }
                 "status" => return Ok(RpcReply::ok(self.status().await?)),
                 "scheduling" => {
+                    // multi-runtime hosts run sessions in per-runtime workdirs,
+                    // so node-level scheduling workdir never applies here.
                     return Ok(RpcReply::ok(
-                        json!({"max_runs":self.store.capacity().await?.max_runs,"queue_order":"fifo"}),
+                        json!({"max_runs":self.store.capacity().await?.max_runs,"queue_order":"fifo","workdir":null,"workdir_supported":false}),
                     ))
                 }
                 "configure_scheduling" => {
-                    let settings: NodeScheduling = serde_json::from_value(command.input.clone())?;
+                    let settings: NodeScheduling =
+                        serde_json::from_value::<NodeScheduling>(command.input.clone())?
+                            .normalized();
                     settings.validate().map_err(anyhow::Error::msg)?;
-                    anyhow::ensure!(
-                        settings.queue_order == QueueOrder::Fifo,
-                        "multi-runtime hosts require FIFO ordering"
-                    );
+                    // Capability violations are client errors (400), not host
+                    // routing failures; keep parity with the runtime side.
+                    if settings.queue_order != QueueOrder::Fifo {
+                        return Ok(RpcReply::error(
+                            400,
+                            "multi-runtime hosts require FIFO ordering",
+                        ));
+                    }
+                    if settings.workdir.is_some() {
+                        return Ok(RpcReply::error(
+                            400,
+                            "multi-runtime hosts do not support a scheduling workdir",
+                        ));
+                    }
                     self.store.configure_capacity(settings.max_runs).await?;
                     return Ok(RpcReply::ok(json!(settings)));
                 }

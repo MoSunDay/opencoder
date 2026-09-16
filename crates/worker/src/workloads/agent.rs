@@ -23,7 +23,9 @@ pub(crate) async fn create_session(
         model,
         created_at,
         updated_at: created_at,
-        workdir_hash: Some(opencoder_core::workdir_hash(&worker.inner.state.workdir)),
+        workdir_hash: Some(opencoder_core::workdir_hash(
+            &crate::brain::workdir::node_workdir(worker),
+        )),
         autopilot_mode: None,
         summary: None,
         summary_seq: None,
@@ -159,7 +161,7 @@ pub(super) async fn run(
             worker.inner.state.store.clone(),
             id,
             worker.client(&config)?,
-            worker.inner.state.workdir.clone(),
+            crate::brain::workdir::node_workdir(worker),
             config,
         )
         .await;

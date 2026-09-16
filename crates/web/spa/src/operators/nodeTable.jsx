@@ -1,17 +1,12 @@
 // nodeTable.jsx — Operator 节点表：复用 fleet/useNodes.js 的 5s 轮询快照。
-// 「启动 Operator」仅对 在线 + snapshot.ready + kinds 含 operator 的节点
-// 可用（与 model.js nodeOptions 的禁用口径一致）。
+// 只读节点总览：会话交互工作台的会话即以 operator 执行在节点宿主机进程
+// 内运行，本表不再提供启动入口，仅展示支持 operator 的在线节点与负载。
 
-import { Alert, Button, Space, Table } from 'antd';
+import { Alert, Space, Table } from 'antd';
 import { useNodes } from '../fleet/useNodes.js';
 import { StatusTag } from '../ui/statusTag.jsx';
 
-/// 节点当前能否承载 operator 执行（kinds 数组由节点注册时上报）。
-export function operable(node) {
-  return !!(node.online && node.snapshot?.ready && node.kinds?.includes('operator'));
-}
-
-export function NodeTable({ onLaunch }) {
+export function NodeTable() {
   const { nodes, error } = useNodes();
   const columns = [
     {
@@ -37,14 +32,6 @@ export function NodeTable({ onLaunch }) {
     { title: 'CPU', render: (_, r) => r.snapshot?.cpu_capacity ?? '—' },
     { title: '运行中', render: (_, r) => r.snapshot?.active_agent_loops ?? '—' },
     { title: '待处理', render: (_, r) => r.snapshot?.pending_runs ?? '—' },
-    {
-      title: '操作',
-      render: (_, r) => (
-        <Button size="small" type="primary" disabled={!operable(r)} onClick={() => onLaunch(r)}>
-          启动 Operator
-        </Button>
-      ),
-    },
   ];
 
   return (

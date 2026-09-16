@@ -38,6 +38,7 @@ fn press_running_command(
         &mut queue_scroll,
         &mut file_menu,
         Path::new("."),
+        &mut None,
     );
     (action, input, cursor)
 }
@@ -80,6 +81,7 @@ fn press_ctrl_t(agent: &str, running: bool, input_disabled: bool) -> (KeyAction,
         &mut queue_scroll,
         &mut file_menu,
         Path::new("."),
+        &mut None,
     );
     (action, input)
 }
@@ -163,6 +165,7 @@ fn idle_tab_with_live_subagents_becomes_queue() {
         &mut queue_scroll,
         &mut file_menu,
         Path::new("."),
+        &mut None,
     );
     assert!(
         matches!(action, KeyAction::Queue(ref t) if t == "after the subagents finish"),
@@ -244,6 +247,7 @@ fn backtab_in_plan_mode_arms_clear_context_confirm() {
             &mut queue_scroll,
             &mut file_menu,
             Path::new("."),
+            &mut None,
         );
         (action, input)
     }
@@ -319,6 +323,7 @@ fn backtab_arm_then_esc_restores_the_raw_draft() {
             &mut queue_scroll,
             &mut file_menu,
             Path::new("."),
+            &mut None,
         );
         let (rest, draft) = match action {
             KeyAction::ArmClearConfirm { rest, draft } => (rest, draft),
@@ -385,6 +390,7 @@ fn backtab_in_act_mode_switches_to_plan() {
             &mut queue_scroll,
             &mut file_menu,
             Path::new("."),
+            &mut None,
         );
         (action, input)
     }
@@ -444,6 +450,7 @@ fn tab_shift_spelling_arms_or_switches_like_backtab() {
             &mut queue_scroll,
             &mut file_menu,
             Path::new("."),
+            &mut None,
         );
         (action, input)
     }
@@ -515,6 +522,7 @@ fn ctrl_alt_shift_tab_chords_never_arm_or_switch() {
             &mut queue_scroll,
             &mut file_menu,
             Path::new("."),
+            &mut None,
         );
         (action, input)
     }
@@ -594,6 +602,7 @@ fn shift_tab_with_focused_subagent_never_arms() {
             &mut queue_scroll,
             &mut file_menu,
             Path::new("."),
+            &mut None,
         );
         assert!(
             matches!(action, KeyAction::None),

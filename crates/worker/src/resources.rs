@@ -120,6 +120,13 @@ pub(crate) fn pin(source: Option<&Path>, destination: &Path) -> Result<Option<Pa
         if AGENT_CATEGORIES.contains(&name.as_ref()) {
             for resource in std::fs::read_dir(&path)? {
                 let resource = resource?;
+                if resource
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with(".staging~")
+                {
+                    continue;
+                }
                 if resource.file_type()?.is_symlink() {
                     bail!(
                         "agent resource entries cannot be symlinks: {}",

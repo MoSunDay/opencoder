@@ -22,7 +22,7 @@ mod server_local_defs;
 
 use opencoder_control::admission::AdmissionMode;
 use server_local_defs::{api_get, assert_ok, cli, Server, TOKEN};
-use server_local_defs::{CAP, CAP_UPDATED, CARD, DAG_SPEC, PROMPT_PACK, TEAM, TEAM_RAW, WF_SPEC};
+use server_local_defs::{CAP, CAP_UPDATED, CARD, DAG_SPEC, TEAM, TEAM_RAW, WF_SPEC};
 
 // ── checklist 1 + 10: probes and the bearer contract ──────────────────
 
@@ -289,38 +289,18 @@ async fn brain_caps_lifecycle_and_search() {
 // ── checklist 8: custom agents card lifecycle ─────────────────────────
 
 #[tokio::test]
-async fn agents_card_lifecycle_and_active_pointer() {
+async fn agents_card_lifecycle_without_active_pointer() {
     let s = Server::new(None).await;
-    // Activation requires the referenced prompts pool to exist first.
-    assert_ok(
-        &s,
-        &[
-            "agents",
-            "resources",
-            "create",
-            "prompts",
-            "--json",
-            PROMPT_PACK,
-        ],
-    )
-    .await;
     assert_ok(&s, &["agents", "create", "--json", CARD]).await; // 201
-    assert_ok(&s, &["agents", "active", "--json", r#"{"active":"alpha"}"#]).await;
     assert_ok(&s, &["agents", "meta", "alpha"]).await;
     assert_ok(&s, &["agents", "list"]).await;
     let listed = api_get(&s, "/api/agents").await;
-    assert_eq!(listed["active"], "alpha", "{listed}");
+    // Activation moved to per-session switching; the registry never tracks it.
+    assert!(listed.get("active").is_none(), "{listed}");
     let agents = listed["agents"].as_array().unwrap();
-    let builtins = opencoder_core::builtin_agents();
-    assert_eq!(agents.len(), builtins.len() + 1, "{listed}");
-    for builtin in builtins {
-        let row = agents
-            .iter()
-            .find(|row| row["name"] == builtin.name)
-            .unwrap();
-        assert_eq!(row["builtin"], true);
-        assert_eq!(row["harness"], "opencoder");
-    }
+    // Registry-only listing: the freshly created card is the whole list —
+    // builtin scheduling roles stay in the runtime, never in /api/agents.
+    assert_eq!(agents.len(), 1, "{listed}");
     let custom = agents.iter().find(|row| row["name"] == "alpha").unwrap();
     assert_eq!(custom["builtin"], false);
     assert_eq!(custom["current"]["prompt"], "pack");
@@ -338,7 +318,6 @@ async fn agents_card_lifecycle_and_active_pointer() {
     let meta = api_get(&s, "/api/agents/alpha/meta").await;
     assert_eq!(meta["meta"]["harness"], "codex");
     assert_eq!(meta["meta"]["current"]["prompt"], "pack");
-    assert_ok(&s, &["agents", "active", "--json", r#"{"active":null}"#]).await;
     assert_ok(&s, &["agents", "delete", "alpha"]).await;
 }
 

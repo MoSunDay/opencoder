@@ -15,8 +15,26 @@ use std::sync::Arc;
 pub async fn pin(state: &Arc<AppState>, plan: &mut OntologyPlan) -> anyhow::Result<()> {
     opencoder_brain::ontology::validate(plan)?;
     let config = opencoder_core::Config::load(&state.workdir)?;
-    for step in &mut plan.steps {
-        if step.action.definition.is_none() {
+    let library = super::catalog::capabilities(state).await?;
+    for step in &mut plan.instances {
+        let capability = library
+            .iter()
+            .find(|c| c["id"].as_str() == Some(&step.capability_id))
+            .ok_or_else(|| anyhow::anyhow!("unregistered capability {}", step.capability_id))?;
+        anyhow::ensure!(
+            capability["summary"]
+                .as_str()
+                .is_some_and(|s| !s.trim().is_empty()),
+            "capability {} has no description",
+            step.capability_id
+        );
+        anyhow::ensure!(
+            capability["kind"] == json!(step.action.kind)
+                && capability["target"].as_str() == Some(&step.action.target),
+            "capability identity mismatch for {}",
+            step.id
+        );
+        {
             let request = CreateExecution {
                 id: format!("{}-preflight", step.action.kind.prefix()),
                 kind: step.action.kind,
@@ -24,9 +42,30 @@ pub async fn pin(state: &Arc<AppState>, plan: &mut OntologyPlan) -> anyhow::Resu
                 input: json!({}),
                 node_id: step.action.node_id.clone(),
             };
-            step.action.definition = crate::api::catalog::resolve(state, &request)
+            let mut snapshot = crate::api::catalog::resolve(state, &request)
                 .await
                 .map_err(|r| anyhow::anyhow!("{}: {}", step.id, r.body))?;
+            if snapshot.is_none() {
+                let agent = opencoder_core::agent::scope::with_root_sync(
+                    config.agent.agents_dir.clone(),
+                    || opencoder_core::resolve_agent(&step.action.target),
+                )
+                .ok_or_else(|| {
+                    anyhow::anyhow!("capability target {} unavailable", step.action.target)
+                })?;
+                snapshot = Some(
+                    json!({"name":agent.name,"kind":agent.kind,"mode":agent.mode,"prompt":agent.prompt,"tools":agent.tools}),
+                );
+            }
+            anyhow::ensure!(
+                step.action
+                    .definition
+                    .as_ref()
+                    .is_none_or(|provided| Some(provided) == snapshot.as_ref()),
+                "capability definition snapshot mismatch for {}",
+                step.id
+            );
+            step.action.definition = snapshot;
         }
         if step.action.runtime.is_none() {
             step.action.runtime = Some(serde_json::to_value(&config.agent.runtime)?);
@@ -58,7 +97,7 @@ pub async fn pin(state: &Arc<AppState>, plan: &mut OntologyPlan) -> anyhow::Resu
 fn agent_names(action: &ActionSpec) -> anyhow::Result<Vec<String>> {
     let definition = action.definition.as_ref().unwrap_or(&Value::Null);
     Ok(match action.kind {
-        ExecutionKind::Agent => vec![action.target.clone()],
+        ExecutionKind::Agent | ExecutionKind::Operator => vec![action.target.clone()],
         ExecutionKind::Team => serde_json::from_value::<TeamDefinition>(definition.clone())?
             .members
             .into_iter()
@@ -152,6 +191,13 @@ pub async fn stable(
     let Some(version) = body["version"].as_u64() else {
         return error_400("version is required".into());
     };
+    match state.fleet.brain_plan_version(&id, version).await {
+        Ok(Some(p)) if p.plan.schema_version != 2 => {
+            return response(RpcReply::error(409, opencoder_brain::graph::MIGRATION))
+        }
+        Ok(_) => {}
+        Err(e) => return error_500(e.to_string()),
+    }
     match state.fleet.mark_brain_stable(&id, version).await {
         Ok(p) => response(RpcReply::ok(json!(p))),
         Err(e) => error_400(e.to_string()),

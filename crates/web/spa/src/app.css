@@ -479,3 +479,36 @@ body {
   .oc-execution-detail .ant-drawer-content-wrapper { width: 100vw !important; }
   .oc-execution-detail .ant-drawer-body { padding: 16px; }
 }
+
+/* Click-to-connect affordance: grow the tiny handles so they are actually
+   clickable, pulse the armed source, invite clicks on legal targets. */
+.dag-edit-stage .react-flow__handle {
+  width: 10px;
+  height: 10px;
+}
+.dag-edit-node--linksrc {
+  border-color: var(--oc-primary);
+  box-shadow: 0 0 0 2px var(--oc-primary), 0 0 14px rgba(22, 119, 255, 0.35);
+}
+.dag-edit-node--linktgt { cursor: crosshair; }
+.dag-edit-node--linktgt:hover {
+  border-color: var(--oc-primary);
+  box-shadow: 0 0 0 2px var(--oc-primary);
+}
+.dag-edit-linkbar {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: calc(100% - 16px);
+  padding: 4px 10px;
+  border: 1px solid var(--oc-primary);
+  border-radius: 6px;
+  background: var(--oc-bg-container, #fff);
+  color: var(--oc-primary);
+  font-size: 12px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}

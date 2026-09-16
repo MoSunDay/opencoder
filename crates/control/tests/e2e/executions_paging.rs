@@ -256,3 +256,70 @@ async fn list_walks_all_pages_through_next_cursor() {
         assert!(unique.iter().any(|id| id.as_str() == want), "{pages:?}");
     }
 }
+
+/// The list lifts the dispatch-time name at the JSON layer: agent rows show
+/// the target, team/dag rows prefer the frozen definition snapshot (deleting
+/// the definition cannot rename history), rows without an assignment stay
+/// unnamed (the SPA renders `-`).
+#[tokio::test]
+async fn execution_list_lifts_dispatch_time_names() {
+    let h = Harness::new().await;
+    let (status, body) = h
+        .req(
+            Method::POST,
+            "/api/dag/defs",
+            Some(json!({"spec": {"name": "etl-demo", "steps": [
+                {"name": "fetch", "kind": {"type": "wasm", "command": "tool.wasm"}},
+            ]}})),
+        )
+        .await;
+    assert_eq!(status, 200, "{body}");
+    let (status, body) = h
+        .req(
+            Method::POST,
+            "/api/teams",
+            Some(json!({"name":"demo","captain":"act","members":[{"agent":"act"}]})),
+        )
+        .await;
+    assert_eq!(status, 200, "{body}");
+
+    for (id, kind, target, input) in [
+        ("agent-name-1", "agent", "coder-x", json!({"prompt": "hi"})),
+        ("team-name-1", "team", "demo", json!({})),
+        ("dag-name-1", "dag", "etl-demo", json!({})),
+    ] {
+        let (status, body) = h
+            .req(
+                Method::POST,
+                "/api/executions",
+                Some(json!({"id": id, "kind": kind, "target": target, "input": input})),
+            )
+            .await;
+        assert_eq!(status, 202, "{body}");
+    }
+    // A historical row without a stored assignment (index-only) gains no name.
+    h.put_index("agent-legacy-1", ExecutionKind::Agent, ExecutionStatus::Done)
+        .await;
+
+    let (status, body) = h.req(Method::GET, "/api/executions?limit=50", None).await;
+    assert_eq!(status, 200, "{body}");
+    let rows = body["executions"].as_array().unwrap().clone();
+    let name_of = |id: &str| {
+        rows.iter()
+            .find(|row| row["id"] == json!(id))
+            .map(|row| row["name"].clone())
+    };
+    assert_eq!(name_of("agent-name-1"), Some(json!("coder-x")));
+    assert_eq!(name_of("team-name-1"), Some(json!("demo")));
+    assert_eq!(name_of("dag-name-1"), Some(json!("etl-demo")));
+    let legacy = rows.iter().find(|row| row["id"] == json!("agent-legacy-1")).unwrap();
+    assert!(legacy.get("name").is_none());
+
+    // The name survives deleting the definition: it comes from the
+    // dispatch-time assignment snapshot, not the live definition table.
+    let (status, body) = h.req(Method::DELETE, "/api/dag/defs/etl-demo", None).await;
+    assert_eq!(status, 200, "{body}");
+    let (status, body) = h.req(Method::GET, "/api/executions?limit=50&kind=dag", None).await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["executions"][0]["name"], json!("etl-demo"));
+}

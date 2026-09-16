@@ -40,6 +40,7 @@ fn press(code: KeyCode, text: &str, running: bool, sidecar_focused: bool) -> (Ke
         &mut queue_scroll,
         &mut file_menu,
         Path::new("."),
+        &mut None,
     );
     (action, input)
 }

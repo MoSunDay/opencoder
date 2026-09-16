@@ -30,7 +30,7 @@ pub async fn run(
                 persistence::load(worker, &record.assignment.index.id).await?
             {
                 if !run.phase.terminal() {
-                    run.phase = RunPhase::Failed;
+                    run.phase = RunPhase::Blocked;
                     run.error = Some(format!("brain activation: {error:#}"));
                     run.revision += 1;
                     persistence::save(
@@ -69,7 +69,10 @@ async fn run_inner(
                 )?,
             ),
         };
-        if run.candidate_plan.is_some() || run.phase.terminal() || run.phase == RunPhase::Paused {
+        if run.candidate_plan.is_some()
+            || run.phase.terminal()
+            || matches!(run.phase, RunPhase::Paused | RunPhase::Blocked)
+        {
             return Ok(outcome(&run));
         }
         if run.phase == RunPhase::Cancelling {
@@ -100,18 +103,20 @@ async fn run_inner(
     };
     // A fresh, finite context is the only activation input. No session history
     // is resumed and no model waits for a child execution to finish.
-    let decision = if context.plan.is_some() && context.ready.is_empty() {
-        Ok(ActivationDecision {
-            run_id: context.run_id.clone(),
-            activation: context.activation,
-            control_epoch: context.control_epoch,
-            reason: "Observation recorded; waiting for a legal wake source".into(),
-            plan: None,
-            dispatch: vec![],
-        })
-    } else {
-        container::activate(worker, &config, &context, cancel.clone()).await
-    };
+    let decision =
+        if context.plan.is_some() && context.ready.is_empty() && context.routes.is_empty() {
+            Ok(ActivationDecision {
+                run_id: context.run_id.clone(),
+                activation: context.activation,
+                control_epoch: context.control_epoch,
+                reason: "Observation recorded; waiting for a legal wake source".into(),
+                plan: None,
+                dispatch: vec![],
+                routes: vec![],
+            })
+        } else {
+            container::activate(worker, &config, &context, cancel.clone()).await
+        };
     if cancel.is_cancelled() {
         anyhow::bail!("brain activation interrupted");
     }
@@ -133,6 +138,13 @@ async fn run_inner(
     match decision {
         Ok(decision) => {
             execution::decide(&run, &decision)?;
+            anyhow::ensure!(
+                context
+                    .routes
+                    .iter()
+                    .all(|c| decision.routes.iter().any(|d| d.receipt == c.receipt)),
+                "activation omitted a pending route decision"
+            );
             if let Some(plan) = decision.plan {
                 opencoder_brain::ontology::validate(&plan)?;
                 run.candidate_plan = Some(PlanVersion {
@@ -148,11 +160,24 @@ async fn run_inner(
             } else {
                 // The finite plan determines readiness. The activation must
                 // dispatch all ready work; it cannot silently omit a branch.
-                for instance_id in &context.ready {
-                    if run
-                        .instances
-                        .get(instance_id)
-                        .is_some_and(|i| i.status == StepStatus::Ready)
+                for route in &decision.routes {
+                    opencoder_brain::graph::apply(&mut run, route, persistence::now())?;
+                    if run.phase == RunPhase::Blocked {
+                        break;
+                    }
+                }
+                let ready: Vec<_> = run
+                    .instances
+                    .values()
+                    .filter(|i| i.status == StepStatus::Ready)
+                    .map(|i| i.id.clone())
+                    .collect();
+                for instance_id in &ready {
+                    if run.phase == RunPhase::Running
+                        && run
+                            .instances
+                            .get(instance_id)
+                            .is_some_and(|i| i.status == StepStatus::Ready)
                     {
                         execution::prepare(
                             &mut run,
@@ -168,12 +193,12 @@ async fn run_inner(
                 Some(previous),
                 &run,
                 "activation_completed",
-                json!({"reason":decision.reason,"dispatch":decision.dispatch}),
+                json!({"reason":decision.reason,"dispatch":decision.dispatch,"routes":decision.routes}),
             )
             .await?;
         }
         Err(error) => {
-            run.phase = RunPhase::Failed;
+            run.phase = RunPhase::Blocked;
             run.error = Some(format!("brain activation: {error:#}"));
             run.revision += 1;
             persistence::save(

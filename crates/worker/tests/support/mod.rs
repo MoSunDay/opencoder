@@ -36,7 +36,7 @@ pub fn mock() -> Arc<MockChatClient> {
         }]),
     )
 }
-pub async fn worker(root: &std::path::Path, client: Arc<MockChatClient>) -> Worker {
+pub async fn worker(root: &std::path::Path, client: Arc<dyn ChatStream>) -> Worker {
     let workdir = root.join("work");
     std::fs::create_dir_all(workdir.join(".opencoder")).unwrap();
     std::fs::write(workdir.join(".opencoder/ap.json"), r#"{"mode":"off"}"#).unwrap();
@@ -261,6 +261,7 @@ async fn execution_ref(worker: &Worker, id: &str) -> ExecutionRef {
 }
 
 pub struct Fleet {
+    pub url: String,
     pub state: Arc<opencoder_control::AppState>,
     pub nodes: Vec<Worker>,
     app: axum::Router,
@@ -270,7 +271,10 @@ pub struct Fleet {
     _dir: tempfile::TempDir,
 }
 impl Fleet {
-    pub async fn new(count: usize, client: Arc<MockChatClient>) -> Self {
+    pub async fn new(count: usize, client: Arc<dyn ChatStream>) -> Self {
+        Self::new_with_ui(count, client, false).await
+    }
+    pub async fn new_with_ui(count: usize, client: Arc<dyn ChatStream>, ui: bool) -> Self {
         let dir = tempfile::tempdir().unwrap();
         // All Fleet fixtures run on current-thread runtimes. Keep host agent
         // pools and credentials outside the fixture for its entire lifetime,
@@ -283,7 +287,7 @@ impl Fleet {
         )
         .await
         .unwrap();
-        let app = opencoder_control::build_app(state.clone(), None, false);
+        let app = opencoder_control::build_app(state.clone(), None, ui);
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let url = format!("http://{}", listener.local_addr().unwrap());
         let serve_app = app.clone();
@@ -319,6 +323,7 @@ impl Fleet {
         .await
         .unwrap();
         Self {
+            url,
             state,
             nodes,
             app,

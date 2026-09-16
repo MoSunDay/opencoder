@@ -4,7 +4,7 @@ import {FileWorkspace} from '../../../ui/files/workspace.jsx';
 import {eventPayload,readReview} from '../api.js';
 import {pathTodo,reviewFiles} from './model.js';
 
-export function ReviewFiles({id,snapshot,onTodo,onSession,onError}) {
+export function ReviewFiles({id,snapshot,onTodo,onSession,onError,active=true}) {
   const [definition,setDefinition]=useState({});const [events,setEvents]=useState([]);
   const [selected,setSelected]=useState('definition/objective.md');
   const [before,setBefore]=useState(null);const [busy,setBusy]=useState(false);
@@ -34,7 +34,7 @@ export function ReviewFiles({id,snapshot,onTodo,onSession,onError}) {
     alive.current=true;loadDefinition();
     return()=>{alive.current=false;};
   },[id]);
-  useEffect(()=>{load();},[id,snapshot?.head_seq]);
+  useEffect(()=>{if(active)load();},[id,snapshot?.head_seq,active]);
   useEffect(()=>{callbacks.current.onError?.(definitionError||error);},[definitionError,error]);
   const projection=useMemo(()=>reviewFiles(definition,snapshot,events),[definition,snapshot,events]);
   const files=useMemo(()=>Object.fromEntries(Object.entries(projection.files).filter(([path])=>{

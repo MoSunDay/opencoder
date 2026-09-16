@@ -67,6 +67,7 @@ async fn render_then_click_arrow_targets_jump_view() {
             None,
             None,
             None, // file_menu
+            None, // agent_menu
             &mut hits,
             &mut None,
             false,
@@ -157,6 +158,7 @@ async fn render_then_click_arrow_targets_jump_view() {
             None,
             None,
             None, // file_menu
+            None, // agent_menu
             &mut hits,
             &mut None,
             false,

@@ -55,6 +55,7 @@ def register_server(settings, record, operations, enabled=True, host_url=None):
 def deploy(settings, bundle, operations, seconds=90):
     journal = Journal(settings.state_dir)
     candidate = manifest.verify(bundle)
+    manifest.brain_preflight(settings, candidate, journal.data["releases"].values())
     manifest.compatible(candidate, [r["manifest"] for r in journal.data["releases"].values()])
     manifest.resources(settings, candidate)
     if journal.data["phase"] == "rolling_back":
@@ -106,6 +107,7 @@ def deploy(settings, bundle, operations, seconds=90):
             probes.ready(settings, record, node_id, operations, seconds)
             journal.phase("ready")
         if journal.data["phase"] in ("ready", "switching"):
+            manifest.brain_preflight(settings, candidate, journal.data["releases"].values())
             # The transition intent is durable before changing Host or Nginx.
             journal.data["current"] = identifier
             journal.phase("switching")

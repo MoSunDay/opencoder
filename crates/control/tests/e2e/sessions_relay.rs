@@ -17,8 +17,8 @@ async fn sessions_create_and_list_through_node_summaries() {
         .await;
     assert_eq!(status, 200, "{body}");
     let id = body["id"].as_str().unwrap().to_string();
-    assert!(id.starts_with("agent-"), "{id}");
-    assert_eq!(body["execution"]["kind"], json!("agent"));
+    assert!(id.starts_with("operator-"), "{id}");
+    assert_eq!(body["execution"]["kind"], json!("operator"));
     assert_eq!(body["execution"]["node_id"], json!("node-e2e"));
 
     // List merges the durable index with the node's `summary` command.
@@ -39,14 +39,22 @@ async fn sessions_create_and_list_through_node_summaries() {
 #[tokio::test]
 async fn relay_forwards_verbs_as_http_commands_and_validates_paths() {
     let h = Harness::new().await;
-    h.put_index("agent-relay-1", ExecutionKind::Agent, ExecutionStatus::Idle)
-        .await;
-    h.node
-        .set_command("agent-relay-1", "http", 200, json!({"answer": "from-node"}));
+    h.put_index(
+        "operator-relay-1",
+        ExecutionKind::Operator,
+        ExecutionStatus::Idle,
+    )
+    .await;
+    h.node.set_command(
+        "operator-relay-1",
+        "http",
+        200,
+        json!({"answer": "from-node"}),
+    );
     let (status, body) = h
         .req(
             Method::POST,
-            "/api/sessions/agent-relay-1/prompt?delivery=queue",
+            "/api/sessions/operator-relay-1/prompt?delivery=queue",
             Some(json!({"text": "hello"})),
         )
         .await;
@@ -56,7 +64,7 @@ async fn relay_forwards_verbs_as_http_commands_and_validates_paths() {
     let seen = h.node.seen_commands();
     let http = seen
         .iter()
-        .find(|(id, action, _)| id == "agent-relay-1" && action == "http")
+        .find(|(id, action, _)| id == "operator-relay-1" && action == "http")
         .expect("http command relayed");
     assert_eq!(http.2["method"], json!("POST"));
     assert_eq!(http.2["tail"], json!("prompt?delivery=queue"));
@@ -64,7 +72,7 @@ async fn relay_forwards_verbs_as_http_commands_and_validates_paths() {
 
     // GET relay with empty tail and no body.
     let (status, body) = h
-        .req(Method::GET, "/api/sessions/agent-relay-1", None)
+        .req(Method::GET, "/api/sessions/operator-relay-1", None)
         .await;
     assert_eq!(status, 200, "{body}");
     // Path traversal and malformed ids never reach a node.
@@ -77,7 +85,7 @@ async fn relay_forwards_verbs_as_http_commands_and_validates_paths() {
         .await;
     assert_eq!(resp.status(), 401, "auth applies before routing");
     let (status, body) = h
-        .req(Method::GET, "/api/sessions/agent-unknown-9/prompt", None)
+        .req(Method::GET, "/api/sessions/operator-unknown-9/prompt", None)
         .await;
     assert_eq!(status, 404, "{body}");
 }
@@ -85,10 +93,14 @@ async fn relay_forwards_verbs_as_http_commands_and_validates_paths() {
 #[tokio::test]
 async fn session_events_stream_replays_and_resumes_by_cursor() {
     let h = Harness::new().await;
-    h.put_index("agent-sse-1", ExecutionKind::Agent, ExecutionStatus::Idle)
-        .await;
+    h.put_index(
+        "operator-sse-1",
+        ExecutionKind::Operator,
+        ExecutionStatus::Idle,
+    )
+    .await;
     h.node.set_events(
-        "agent-sse-1",
+        "operator-sse-1",
         vec![
             json!({"seq": 1, "kind": "llm_round_start", "data": {"n": 1}, "ts": 1}),
             json!({"seq": 2, "kind": "text_delta", "data": {"t": "hi"}, "ts": 2}),
@@ -96,7 +108,7 @@ async fn session_events_stream_replays_and_resumes_by_cursor() {
         ],
         true,
     );
-    let (status, text) = h.sse_text("/api/sessions/agent-sse-1/events").await;
+    let (status, text) = h.sse_text("/api/sessions/operator-sse-1/events").await;
     assert_eq!(status, 200);
     assert!(text.contains("id: 1"), "{text}");
     assert!(text.contains("event: llm_round_start"), "{text}");
@@ -104,14 +116,16 @@ async fn session_events_stream_replays_and_resumes_by_cursor() {
     assert!(text.contains("event: done"), "{text}");
 
     // Cursor resume: after=2 only replays seq 3.
-    let (status, text) = h.sse_text("/api/sessions/agent-sse-1/events?after=2").await;
+    let (status, text) = h
+        .sse_text("/api/sessions/operator-sse-1/events?after=2")
+        .await;
     assert_eq!(status, 200);
     assert!(!text.contains("id: 1") && !text.contains("id: 2"), "{text}");
     assert!(text.contains("id: 3"), "{text}");
 
     // Unknown execution: plain JSON 404, not an SSE stream.
     let (status, body) = h
-        .req(Method::GET, "/api/sessions/agent-none/events", None)
+        .req(Method::GET, "/api/sessions/operator-none/events", None)
         .await;
     assert_eq!(status, 404, "{body}");
 }
@@ -120,21 +134,21 @@ async fn session_events_stream_replays_and_resumes_by_cursor() {
 async fn task_owner_lookup_is_control_plane_owned() {
     let h = Harness::new().await;
     h.put_index(
-        "agent-owner-1",
-        ExecutionKind::Agent,
+        "operator-owner-1",
+        ExecutionKind::Operator,
         ExecutionStatus::Running,
     )
     .await;
     let (status, body) = h
-        .req(Method::GET, "/api/sessions/agent-owner-1/task", None)
+        .req(Method::GET, "/api/sessions/operator-owner-1/task", None)
         .await;
     assert_eq!(status, 200, "{body}");
-    assert_eq!(body["task"]["task_id"], json!("agent-owner-1"));
-    assert_eq!(body["task"]["session_id"], json!("agent-owner-1"));
+    assert_eq!(body["task"]["task_id"], json!("operator-owner-1"));
+    assert_eq!(body["task"]["session_id"], json!("operator-owner-1"));
     assert_eq!(body["node_id"], json!("node-e2e"));
     assert_eq!(body["task"]["status"], json!("running"));
     let (status, body) = h
-        .req(Method::GET, "/api/sessions/agent-none/task", None)
+        .req(Method::GET, "/api/sessions/operator-none/task", None)
         .await;
     assert_eq!(status, 404, "{body}");
 }
@@ -142,17 +156,21 @@ async fn task_owner_lookup_is_control_plane_owned() {
 #[tokio::test]
 async fn execution_events_stream_on_the_executions_surface() {
     let h = Harness::new().await;
-    h.put_index("agent-exev-1", ExecutionKind::Agent, ExecutionStatus::Idle)
-        .await;
+    h.put_index(
+        "operator-exev-1",
+        ExecutionKind::Operator,
+        ExecutionStatus::Idle,
+    )
+    .await;
     h.node.set_events(
-        "agent-exev-1",
+        "operator-exev-1",
         vec![
             json!({"seq": 1, "kind": "llm_round_start", "data": {"n": 1}, "ts": 1}),
             json!({"seq": 2, "kind": "done", "data": {}, "ts": 2}),
         ],
         true,
     );
-    let (status, text) = h.sse_text("/api/executions/agent-exev-1/events").await;
+    let (status, text) = h.sse_text("/api/executions/operator-exev-1/events").await;
     assert_eq!(status, 200);
     assert!(
         text.contains("id: 1") && text.contains("event: llm_round_start"),
@@ -165,14 +183,14 @@ async fn execution_events_stream_on_the_executions_surface() {
 
     // Cursor resume through the executions alias: after=1 only replays seq 2.
     let (status, text) = h
-        .sse_text("/api/executions/agent-exev-1/events?after=1")
+        .sse_text("/api/executions/operator-exev-1/events?after=1")
         .await;
     assert_eq!(status, 200);
     assert!(!text.contains("id: 1") && text.contains("id: 2"), "{text}");
 
     // Unknown execution: plain JSON 404, not an SSE stream.
     let (status, body) = h
-        .req(Method::GET, "/api/executions/agent-none/events", None)
+        .req(Method::GET, "/api/executions/operator-none/events", None)
         .await;
     assert_eq!(status, 404, "{body}");
 }
@@ -185,20 +203,20 @@ async fn sessions_create_honors_caller_ids_pins_and_validates() {
         .req(
             Method::POST,
             "/api/sessions",
-            Some(json!({"id": "agent-named-1", "agent": "act"})),
+            Some(json!({"id": "operator-named-1", "agent": "act"})),
         )
         .await;
     assert_eq!(status, 200, "{body}");
-    assert_eq!(body["id"], json!("agent-named-1"));
-    assert_eq!(body["execution"]["id"], json!("agent-named-1"));
+    assert_eq!(body["id"], json!("operator-named-1"));
+    assert_eq!(body["execution"]["id"], json!("operator-named-1"));
     assert_eq!(body["execution"]["node_id"], json!("node-e2e"));
 
     // Pinning table: connected node works, ghost node finds no eligible
     // fleet member, malformed node ids are refused by validation.
     for (name, id, node, expected) in [
-        ("pin connected", "agent-pin-1", Some("node-e2e"), 200),
-        ("pin ghost", "agent-pin-2", Some("ghost"), 503),
-        ("malformed node id", "agent-pin-3", Some("bad/id"), 400),
+        ("pin connected", "operator-pin-1", Some("node-e2e"), 200),
+        ("pin ghost", "operator-pin-2", Some("ghost"), 503),
+        ("malformed node id", "operator-pin-3", Some("bad/id"), 400),
     ] {
         let mut body = json!({"id": id, "agent": "act"});
         if let Some(node) = node {
@@ -216,7 +234,7 @@ async fn sessions_create_honors_caller_ids_pins_and_validates() {
         body["error"]
             .as_str()
             .unwrap_or_default()
-            .contains("id must start with agent-"),
+            .contains("id must start with operator-"),
         "{body}"
     );
 }
@@ -238,15 +256,19 @@ async fn frozen_gate_refuses_session_create_but_not_reads() {
 #[tokio::test]
 async fn session_list_falls_back_to_degraded_rows_without_summaries() {
     let h = Harness::new().await;
-    h.put_index("agent-deg-1", ExecutionKind::Agent, ExecutionStatus::Idle)
-        .await;
+    h.put_index(
+        "operator-deg-1",
+        ExecutionKind::Operator,
+        ExecutionStatus::Idle,
+    )
+    .await;
     let (status, body) = h.req(Method::GET, "/api/sessions", None).await;
     assert_eq!(status, 200, "{body}");
     let row = body["sessions"]
         .as_array()
         .unwrap()
         .iter()
-        .find(|s| s["id"] == json!("agent-deg-1"))
+        .find(|s| s["id"] == json!("operator-deg-1"))
         .expect("degraded row present");
     assert_eq!(row["node_id"], json!("node-e2e"));
     assert_eq!(row["status"], json!("idle"));
@@ -261,8 +283,12 @@ async fn session_list_falls_back_to_degraded_rows_without_summaries() {
 #[tokio::test]
 async fn relay_rejects_bad_ids_tails_and_bodies_before_any_node_call() {
     let h = Harness::new().await;
-    h.put_index("agent-relay-2", ExecutionKind::Agent, ExecutionStatus::Idle)
-        .await;
+    h.put_index(
+        "operator-relay-2",
+        ExecutionKind::Operator,
+        ExecutionStatus::Idle,
+    )
+    .await;
     // Malformed ids are refused by the path guard; '_' is a legal id char,
     // so `bad_id` passes the guard and lands on the 404 index miss instead.
     let (status, body) = h.req(Method::GET, "/api/sessions/bad.id", None).await;
@@ -272,7 +298,7 @@ async fn relay_rejects_bad_ids_tails_and_bodies_before_any_node_call() {
     assert_eq!(body["error"], json!("execution id not found"));
     // Traversal-style tails never reach a node.
     let (status, body) = h
-        .req(Method::GET, "/api/sessions/agent-relay-2/a..b", None)
+        .req(Method::GET, "/api/sessions/operator-relay-2/a..b", None)
         .await;
     assert_eq!(status, 400, "{body}");
     assert_eq!(h.node.seen_commands().len(), 0, "no node roundtrip yet");
@@ -282,7 +308,7 @@ async fn relay_rejects_bad_ids_tails_and_bodies_before_any_node_call() {
     let (status, bytes) = h
         .req_bytes(
             Method::POST,
-            "/api/sessions/agent-relay-2/prompt",
+            "/api/sessions/operator-relay-2/prompt",
             Some("hi".into()),
             Some("text/plain"),
             Some(TOKEN),
@@ -295,7 +321,7 @@ async fn relay_rejects_bad_ids_tails_and_bodies_before_any_node_call() {
     let (status, _) = h
         .req_bytes(
             Method::POST,
-            "/api/sessions/agent-relay-2/prompt",
+            "/api/sessions/operator-relay-2/prompt",
             Some(oversized),
             Some("application/json"),
             Some(TOKEN),
@@ -309,20 +335,28 @@ async fn relay_rejects_bad_ids_tails_and_bodies_before_any_node_call() {
 #[tokio::test]
 async fn relay_forwards_put_delete_and_node_error_bodies_verbatim() {
     let h = Harness::new().await;
-    h.put_index("agent-relay-3", ExecutionKind::Agent, ExecutionStatus::Idle)
-        .await;
+    h.put_index(
+        "operator-relay-3",
+        ExecutionKind::Operator,
+        ExecutionStatus::Idle,
+    )
+    .await;
     h.node
-        .set_command("agent-relay-3", "http", 200, json!({"ok": true}));
+        .set_command("operator-relay-3", "http", 200, json!({"ok": true}));
     let (status, body) = h
         .req(
             Method::PUT,
-            "/api/sessions/agent-relay-3/answer",
+            "/api/sessions/operator-relay-3/answer",
             Some(json!({"x": 1})),
         )
         .await;
     assert_eq!(status, 200, "{body}");
     let (status, body) = h
-        .req(Method::DELETE, "/api/sessions/agent-relay-3/answer", None)
+        .req(
+            Method::DELETE,
+            "/api/sessions/operator-relay-3/answer",
+            None,
+        )
         .await;
     assert_eq!(status, 200, "{body}");
     let seen = h.node.seen_commands();
@@ -333,7 +367,7 @@ async fn relay_forwards_put_delete_and_node_error_bodies_verbatim() {
         let call = seen
             .iter()
             .find(|(id, action, input)| {
-                id == "agent-relay-3" && action == "http" && input["method"] == json!(method)
+                id == "operator-relay-3" && action == "http" && input["method"] == json!(method)
             })
             .unwrap_or_else(|| panic!("{method} not relayed: {seen:?}"));
         assert_eq!(call.2["tail"], json!("answer"), "{method}: {call:?}");
@@ -342,13 +376,13 @@ async fn relay_forwards_put_delete_and_node_error_bodies_verbatim() {
 
     // Node-side failures pass through with status and body intact.
     h.node.set_command(
-        "agent-relay-3",
+        "operator-relay-3",
         "http",
         404,
         json!({"error": "no subresource"}),
     );
     let (status, body) = h
-        .req(Method::GET, "/api/sessions/agent-relay-3/missing", None)
+        .req(Method::GET, "/api/sessions/operator-relay-3/missing", None)
         .await;
     assert_eq!(status, 404, "{body}");
     assert_eq!(body, json!({"error": "no subresource"}));
@@ -357,10 +391,14 @@ async fn relay_forwards_put_delete_and_node_error_bodies_verbatim() {
 #[tokio::test]
 async fn admission_gate_blocks_only_mutating_session_relay_tails() {
     let h = Harness::new().await;
-    h.put_index("agent-gate-1", ExecutionKind::Agent, ExecutionStatus::Idle)
-        .await;
+    h.put_index(
+        "operator-gate-1",
+        ExecutionKind::Operator,
+        ExecutionStatus::Idle,
+    )
+    .await;
     h.node
-        .set_command("agent-gate-1", "http", 200, json!({"ok": true}));
+        .set_command("operator-gate-1", "http", 200, json!({"ok": true}));
     let (status, _) = h.req(Method::POST, "/api/admin/drain", None).await;
     assert_eq!(status, 200);
 
@@ -374,7 +412,7 @@ async fn admission_gate_blocks_only_mutating_session_relay_tails() {
         let (status, body) = h
             .req(
                 Method::POST,
-                &format!("/api/sessions/agent-gate-1/{tail}"),
+                &format!("/api/sessions/operator-gate-1/{tail}"),
                 Some(json!({"text": "hi"})),
             )
             .await;
@@ -382,11 +420,15 @@ async fn admission_gate_blocks_only_mutating_session_relay_tails() {
     }
     // Read-only and control tails stay reachable while frozen.
     let (status, body) = h
-        .req(Method::GET, "/api/sessions/agent-gate-1/messages", None)
+        .req(Method::GET, "/api/sessions/operator-gate-1/messages", None)
         .await;
     assert_eq!(status, 200, "{body}");
     let (status, body) = h
-        .req(Method::POST, "/api/sessions/agent-gate-1/interrupt", None)
+        .req(
+            Method::POST,
+            "/api/sessions/operator-gate-1/interrupt",
+            None,
+        )
         .await;
     assert_eq!(status, 200, "{body}");
 
@@ -396,7 +438,7 @@ async fn admission_gate_blocks_only_mutating_session_relay_tails() {
     let (status, body) = h
         .req(
             Method::POST,
-            "/api/sessions/agent-gate-1/prompt",
+            "/api/sessions/operator-gate-1/prompt",
             Some(json!({"text": "hi"})),
         )
         .await;
@@ -406,10 +448,14 @@ async fn admission_gate_blocks_only_mutating_session_relay_tails() {
 #[tokio::test]
 async fn session_events_resume_from_last_event_id_header() {
     let h = Harness::new().await;
-    h.put_index("agent-sse-2", ExecutionKind::Agent, ExecutionStatus::Idle)
-        .await;
+    h.put_index(
+        "operator-sse-2",
+        ExecutionKind::Operator,
+        ExecutionStatus::Idle,
+    )
+    .await;
     h.node.set_events(
-        "agent-sse-2",
+        "operator-sse-2",
         vec![
             json!({"seq": 1, "kind": "llm_round_start", "data": {}, "ts": 1}),
             json!({"seq": 2, "kind": "text_delta", "data": {"t": "hi"}, "ts": 2}),
@@ -420,7 +466,7 @@ async fn session_events_resume_from_last_event_id_header() {
     let (status, bytes) = h
         .req_bytes(
             Method::GET,
-            "/api/sessions/agent-sse-2/events",
+            "/api/sessions/operator-sse-2/events",
             None,
             None,
             Some(TOKEN),

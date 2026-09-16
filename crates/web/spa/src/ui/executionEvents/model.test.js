@@ -22,4 +22,10 @@ describe('execution log projection', () => {
     expect(logEntry({ seq: 5, event: 'step_log', data: marker }).marker).toBe(marker);
     expect(logRows([{ seq: 1, event: 'tool_end', data: { name: 'shell', output: 'exit=0' } }])[0].text).toBe('shell\nexit=0');
   });
+  it('projects node-side step_output frames onto merged stdout/stderr rows', () => {
+    const out = (seq, stream, text) => ({ seq, event: 'step_output', data: { step: 'a', stream, text, at_ms: seq } });
+    expect(logEntry(out(1, 'stderr', 'boom'))).toMatchObject({ event: 'stderr', label: 'stderr', step: 'a', text: 'boom' });
+    const rows = logRows([out(1, 'stdout', 'he'), out(2, 'stdout', 'llo'), out(3, 'stderr', 'boom'), out(4, 'stdout', 'ok')]);
+    expect(rows.map((r) => [r.event, r.text])).toEqual([['stdout', 'hello'], ['stderr', 'boom'], ['stdout', 'ok']]);
+  });
 });

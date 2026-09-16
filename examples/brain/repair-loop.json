@@ -1,217 +1,145 @@
 {
-  "schema_version": 1,
-  "title": "修复—复测—发布",
-  "objective": "修复问题，复测失败回退继续修复，全部通过后发布",
+  "schema_version": 2,
+  "title": "修复与复测",
+  "objective": "根据问题修复，复测不通过则再次修复，凭证据交付",
   "inputs": {
-    "problem": {
-      "description": "待修复问题",
+    "document": {
+      "description": "需求文档",
+      "source": {
+        "kind": "external"
+      },
+      "schema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "markdown": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "markdown"
+        ]
+      },
+      "required": true
+    },
+    "feedback": {
+      "description": "本轮复测问题",
+      "source": {
+        "kind": "routed"
+      },
+      "schema": {
+        "type": "string"
+      },
+      "required": false
+    },
+    "change": {
+      "description": "本轮修复内容",
+      "source": {
+        "kind": "routed"
+      },
       "schema": {
         "type": "string"
       },
       "required": true
     }
   },
-  "steps": [
+  "instances": [
     {
       "id": "fix",
-      "label": "提交修复",
-      "purpose": "修复问题并提交证据",
-      "capability_id": null,
+      "description": "根据需求和反馈修复问题",
+      "capability_id": "builtin-agent-act",
       "action": {
         "kind": "agent",
         "target": "act",
-        "prompt": "修复问题并提交 commit，返回 commit 标识",
-        "output_mode": "json",
-        "max_attempts": 1
+        "prompt": "根据需求和反馈修复问题",
+        "output_mode": "json"
       },
-      "inputs": {
-        "problem": {
-          "schema": {
-            "type": "string"
-          },
-          "binding": {
-            "source": "input",
-            "name": "problem"
-          },
-          "required": true
-        },
-        "feedback": {
-          "schema": {
-            "type": "string"
-          },
-          "binding": {
-            "source": "output",
-            "step": "verify",
-            "path": "/issues"
-          },
-          "required": false
-        }
-      },
-      "output": {
-        "type": "object",
-        "properties": {
-          "commit": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "commit"
-        ]
-      },
-      "acceptance": "有可复现的修复提交",
-      "depends_on": [],
+      "inputs": [
+        "document",
+        "feedback"
+      ],
+      "outputs": [
+        "fix-result"
+      ],
+      "max_visits": 20,
       "resources": []
     },
     {
       "id": "verify",
-      "label": "复测验证",
-      "purpose": "复测修复并记录现象",
-      "capability_id": null,
+      "description": "复测本轮修复，给出问题或通过结论及证据",
+      "capability_id": "builtin-agent-act",
       "action": {
         "kind": "agent",
         "target": "act",
-        "prompt": "复测提交，返回 passed 布尔值和 issues",
-        "output_mode": "json",
-        "max_attempts": 1
+        "prompt": "复测本轮修复，给出问题或通过结论及证据",
+        "output_mode": "json"
       },
-      "inputs": {
-        "commit": {
-          "schema": {
-            "type": "string"
-          },
-          "binding": {
-            "source": "output",
-            "step": "fix",
-            "path": "/commit"
-          },
-          "required": true
-        }
-      },
-      "output": {
-        "type": "object",
-        "properties": {
-          "passed": {
-            "type": "boolean"
-          },
-          "issues": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "passed",
-          "issues"
-        ]
-      },
-      "acceptance": "明确复测是否通过",
-      "depends_on": [],
-      "resources": []
-    },
-    {
-      "id": "release",
-      "label": "发布上线",
-      "purpose": "仅发布已通过复测的最新提交",
-      "capability_id": null,
-      "action": {
-        "kind": "agent",
-        "target": "act",
-        "prompt": "发布最新修复并返回结果",
-        "output_mode": "json",
-        "max_attempts": 1
-      },
-      "inputs": {
-        "commit": {
-          "schema": {
-            "type": "string"
-          },
-          "binding": {
-            "source": "output",
-            "step": "fix",
-            "path": "/commit"
-          },
-          "required": true
-        },
-        "verified": {
-          "schema": {
-            "type": "boolean"
-          },
-          "binding": {
-            "source": "output",
-            "step": "verify",
-            "path": "/passed"
-          },
-          "required": true
-        }
-      },
-      "output": {
-        "type": "object",
-        "properties": {
-          "result": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "result"
-        ]
-      },
-      "acceptance": "发布结果可追溯",
-      "depends_on": [],
+      "inputs": [
+        "change"
+      ],
+      "outputs": [
+        "verification"
+      ],
+      "max_visits": 20,
       "resources": []
     }
   ],
-  "deliverables": {
-    "release_result": {
-      "description": "上线结果",
-      "source": {
-        "source": "output",
-        "step": "release",
-        "path": "/result"
-      },
-      "schema": {
-        "type": "string"
-      }
+  "outputs": {
+    "fix-result": {
+      "description": "本轮修复内容与证据"
+    },
+    "verification": {
+      "description": "本轮复测结论、剩余问题与验证依据"
     }
   },
-  "references": [],
-  "flow": {
-    "entry": "fix",
-    "max_visits_per_action": 20,
-    "transitions": [
-      {
-        "from": "fix",
-        "to": "verify",
-        "label": "提交修复后进入复测"
-      },
-      {
-        "from": "verify",
-        "to": "fix",
-        "label": "复测发现问题，回到修复",
-        "when": {
-          "value": {
-            "source": "output",
-            "step": "verify",
-            "path": "/passed"
-          },
-          "equals": false
+  "entry": [
+    "fix"
+  ],
+  "routes": [
+    {
+      "id": "after-fix",
+      "description": "将本轮修复交给复测",
+      "outputs": [
+        "fix-result"
+      ],
+      "targets": [
+        {
+          "instance": "verify",
+          "bindings": {
+            "change": "fix-result"
+          }
         }
-      },
-      {
-        "from": "verify",
-        "to": "release",
-        "label": "复测通过，发布上线",
-        "when": {
-          "value": {
-            "source": "output",
-            "step": "verify",
-            "path": "/passed"
-          },
-          "equals": true
+      ],
+      "exits": []
+    },
+    {
+      "id": "after-verify",
+      "description": "复测仍有问题时携带本轮问题回到修复；验证通过并有证据时交付；结论不明确则阻塞",
+      "outputs": [
+        "verification"
+      ],
+      "targets": [
+        {
+          "instance": "fix",
+          "bindings": {
+            "feedback": "verification"
+          }
         }
-      },
-      {
-        "from": "release",
-        "to": null,
-        "label": "发布完成"
-      }
-    ]
-  }
+      ],
+      "exits": [
+        {
+          "id": "done",
+          "description": "交付已完成且复测通过的修复",
+          "deliverables": [
+            "verification"
+          ],
+          "require_completed": true,
+          "require_verified": true
+        }
+      ]
+    }
+  ]
 }

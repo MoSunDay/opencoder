@@ -90,21 +90,25 @@ async fn nodeless_control_plane_answers_config_queries_with_503() {
 #[tokio::test]
 async fn dialogs_rows_are_happy_degraded_and_node_scoped() {
     let h = Harness::new().await;
-    h.put_index("agent-dlg-2", ExecutionKind::Agent, ExecutionStatus::Idle)
-        .await;
+    h.put_index(
+        "operator-dlg-2",
+        ExecutionKind::Operator,
+        ExecutionStatus::Idle,
+    )
+    .await;
     h.node.set_command(
-        "agent-dlg-2",
+        "operator-dlg-2",
         "summary",
         200,
         json!({
-            "id": "agent-dlg-2", "title": "chat", "status": "idle",
+            "id": "operator-dlg-2", "title": "chat", "status": "idle",
             "created_at": 7, "updated_at": 9
         }),
     );
     // Degraded row: index only, no seeded summary command.
     h.put_index(
-        "agent-dlg-3",
-        ExecutionKind::Agent,
+        "operator-dlg-3",
+        ExecutionKind::Operator,
         ExecutionStatus::Running,
     )
     .await;
@@ -116,7 +120,7 @@ async fn dialogs_rows_are_happy_degraded_and_node_scoped() {
     let rows = body["dialogs"].as_array().unwrap();
     let happy = rows
         .iter()
-        .find(|r| r["session_id"] == json!("agent-dlg-2"))
+        .find(|r| r["session_id"] == json!("operator-dlg-2"))
         .expect("happy row");
     assert_eq!(happy["title"], json!("chat"));
     assert_eq!(happy["status"], json!("idle"));
@@ -124,7 +128,7 @@ async fn dialogs_rows_are_happy_degraded_and_node_scoped() {
     assert_eq!(happy["last_created_at"], json!(9));
     let degraded = rows
         .iter()
-        .find(|r| r["session_id"] == json!("agent-dlg-3"))
+        .find(|r| r["session_id"] == json!("operator-dlg-3"))
         .expect("degraded row");
     assert_eq!(degraded["title"], json!(null));
     assert_eq!(degraded["status"], json!("running"));
@@ -150,7 +154,7 @@ async fn task_cancel_errors_are_control_or_node_owned() {
     let (status, body) = h
         .req(
             Method::POST,
-            "/api/nodes/node-e2e/tasks/agent-none/cancel",
+            "/api/nodes/node-e2e/tasks/operator-none/cancel",
             None,
         )
         .await;
@@ -162,13 +166,13 @@ async fn task_cancel_errors_are_control_or_node_owned() {
 
     // Known execution: the node's conflict reply passes through verbatim.
     h.put_index(
-        "agent-cancel-1",
-        ExecutionKind::Agent,
+        "operator-cancel-1",
+        ExecutionKind::Operator,
         ExecutionStatus::Done,
     )
     .await;
     h.node.set_command(
-        "agent-cancel-1",
+        "operator-cancel-1",
         "cancel",
         409,
         json!({"error": "already done"}),
@@ -176,7 +180,7 @@ async fn task_cancel_errors_are_control_or_node_owned() {
     let (status, body) = h
         .req(
             Method::POST,
-            "/api/nodes/node-e2e/tasks/agent-cancel-1/cancel",
+            "/api/nodes/node-e2e/tasks/operator-cancel-1/cancel",
             None,
         )
         .await;

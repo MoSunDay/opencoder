@@ -91,7 +91,7 @@ const installRouter = () => {
       return method === 'POST' ? jsonResponse({ id: 'new-1' }) : jsonResponse({ sessions: fixtures.localSessions });
     }
     if (url.includes('/api/nodes')) {
-      return jsonResponse({ nodes: [{ id: 'node-local', name: 'Local node', online: true, kinds: ['agent'], snapshot: { ready: true } }, { id: 'n1', name: 'Fleet-1', online: true, kinds: ['agent'], snapshot: { ready: true } }] });
+      return jsonResponse({ nodes: [{ id: 'node-local', name: 'Local node', online: true, kinds: ['agent', 'operator'], snapshot: { ready: true } }, { id: 'n1', name: 'Fleet-1', online: true, kinds: ['agent', 'operator'], snapshot: { ready: true } }] });
     }
     // GET /api/sessions/:id — the transcript snapshot openDialog loads.
     return jsonResponse(fixtures.snapshot);

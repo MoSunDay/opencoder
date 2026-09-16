@@ -29,11 +29,8 @@
 //! description to the first non-empty, non-heading body line.
 //!
 //! Discovery is multi-root with first-wins shadowing ([`discover_all`]):
-//! the active file-based agent's private skill pools
-//! (`<agents_root>/skills/<ref>/v{n}/`, see [`crate::agent::meta`]) are
-//! scanned BEFORE the global `~/.opencoder/skills`, and a skill from an
-//! earlier root shadows same-name skills in later roots — so a file-based
-//! agent can ship a private skill-set that overrides the global one.
+//! skills are discovered from the global `~/.opencoder/skills` (历史上还会
+//! 先扫激活 agent 的私有技能池，全局激活 agent 移除后只保留全局根).
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -74,30 +71,22 @@ pub fn skills_dir() -> Option<PathBuf> {
     runtime::pinned_root().or_else(|| dirs::home_dir().map(|h| h.join(".opencoder").join("skills")))
 }
 
-/// Production discovery: scan the active file-based agent's private skill
-/// pools FIRST, then the global `~/.opencoder/skills`, through the cache
-/// (see [`production_skill_roots`] and [`discover_all`]). A skill shipped
-/// by the active agent therefore shadows a same-name global skill.
+/// Production discovery: scan the global `~/.opencoder/skills` through the
+/// cache (see [`production_skill_roots`] and [`discover_all`]).
 ///
 /// A missing or unreadable directory is not an error — it yields an empty
 /// `Vec`, so the TUI picker simply reports "no skills" instead of crashing.
-/// No home directory AND no active agent likewise yields an empty `Vec`.
+/// No home directory likewise yields an empty `Vec`.
 pub fn discover() -> Vec<Skill> {
     discover_cached(&production_skill_roots())
 }
 
-/// Ordered production root list behind [`discover`]: the active agent's
-/// skills pools ([`crate::agent::meta::active_skill_roots`], 0–1 dirs
-/// under `<agents_root>/skills/<ref>/v{n}/`) first, then the global skills
-/// dir. Earlier roots shadow later ones ([`discover_all`]), so the
-/// agent-private layer always wins over the global one; either layer may
-/// be absent without affecting the other.
+/// Ordered production root list behind [`discover`]: the global skills
+/// dir. Historical versions also layered the active file agent's private
+/// pools in front of it (全局激活 agent 已移除，技能发现只看全局根);
+/// either layer may be absent without affecting the other.
 pub(crate) fn production_skill_roots() -> Vec<PathBuf> {
-    let mut roots = crate::agent::meta::active_skill_roots();
-    if let Some(dir) = skills_dir() {
-        roots.push(dir);
-    }
-    roots
+    skills_dir().into_iter().collect()
 }
 
 /// Directory-scanning core, factored out so tests can point at a tempdir.
@@ -665,7 +654,7 @@ mod tests {
         assert_eq!(names, vec!["a", "b"]);
     }
 
-    // ----- production root assembly (active agent layer + global layer) -----
+    // ----- production root assembly (global layer only) -----
 
     /// Point the process-global agents-root override at `root` under the
     /// lock shared with the meta tests (`crate::agent::meta::tests`); hold
@@ -681,7 +670,7 @@ mod tests {
         guard
     }
 
-    /// Build an agents-root fixture whose active agent `work` references
+    /// Build an agents-root fixture with a `work` agent card referencing
     /// skills pool `pack` (current version `v1`), and plant `skills` in the
     /// pool's version dir. Returns the pool's version dir. Fixture shape
     /// mirrors `crate::agent::meta::tests`.
@@ -708,26 +697,9 @@ mod tests {
     }
 
     #[test]
-    fn production_skill_roots_put_agent_pool_before_global() {
+    fn production_skill_roots_is_global_only() {
         let dir = tempfile::tempdir().unwrap();
-        let root = dir.path();
-        let pool = agent_pool_with_skills(root, &[]);
-        let _g = agents_override(root);
-        crate::agent::meta::set_active_agent(Some("work")).unwrap();
-        let roots = production_skill_roots();
-        crate::agent::meta::set_agents_dir_override(None);
-        assert_eq!(roots.first(), Some(&pool), "agent layer must come FIRST");
-        match skills_dir() {
-            Some(global) => assert_eq!(roots.last(), Some(&global)),
-            // No home dir resolvable: the agent pool is the only root.
-            None => assert_eq!(roots.len(), 1),
-        }
-    }
-
-    #[test]
-    fn production_skill_roots_without_active_agent_just_global() {
-        let dir = tempfile::tempdir().unwrap();
-        let _g = agents_override(dir.path()); // no `active` marker at all
+        let _g = agents_override(dir.path()); // agents root irrelevant now
         let roots = production_skill_roots();
         crate::agent::meta::set_agents_dir_override(None);
         match skills_dir() {
@@ -737,10 +709,10 @@ mod tests {
     }
 
     #[test]
-    fn discover_surfaces_active_agent_skills_and_shadows_global() {
+    fn discover_ignores_agent_skill_pools() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
-        let pool = agent_pool_with_skills(
+        agent_pool_with_skills(
             root,
             &[(
                 "shared.md",
@@ -748,21 +720,18 @@ mod tests {
             )],
         );
         let _g = agents_override(root);
-        crate::agent::meta::set_active_agent(Some("work")).unwrap();
         let found = discover();
         // Stable across a second (cached) call.
         assert_eq!(found, discover());
         crate::agent::meta::set_agents_dir_override(None);
-        // The real global `~/.opencoder/skills` cannot be faked (no
-        // override), so prove shadowing by source: whatever a same-name
-        // global `shared` skill would contain, the surfaced entry must be
-        // the agent pool's copy.
-        let shared = found
-            .iter()
-            .find(|s| s.name == "shared")
-            .expect("agent pool skill must be discoverable");
-        assert_eq!(shared.description, "from agent pool");
-        assert_eq!(shared.body, "agent body");
-        assert_eq!(shared.source, pool.join("shared.md"));
+        // 全局激活已移除：agent 私有技能池不再进入生产发现根，任何
+        // surfaced 技能的 source 都不能落在 agents root 之下。
+        for skill in &found {
+            assert!(
+                !skill.source.starts_with(root),
+                "agent pool skill leaked into discovery: {}",
+                skill.source.display()
+            );
+        }
     }
 }

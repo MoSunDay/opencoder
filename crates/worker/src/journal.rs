@@ -56,6 +56,24 @@ impl Journal {
         };
         journal.load_legacy()?;
         journal.load_current()?;
+        // Check before recovery writes. An older binary must finish legacy
+        // nonterminal brain work; upgrading must not reinterpret its state.
+        for record in journal.records.values() {
+            let input = &record.assignment.request.input;
+            let legacy = (record.assignment.index.kind == ExecutionKind::Brain
+                && input["schema_version"] != 2)
+                || (input.get("_brain").is_some() && input["_brain"]["schema_version"] != 2)
+                || input.get("brain_receipt").is_some()
+                || input.get("playbook_receipt").is_some();
+            if legacy
+                && !matches!(
+                    record.assignment.index.status,
+                    ExecutionStatus::Done | ExecutionStatus::Error | ExecutionStatus::Cancelled
+                )
+            {
+                bail!("brain migration blocked by nonterminal legacy execution {}; let its owning old runtime converge before upgrading", record.assignment.index.id);
+            }
+        }
         let ids: Vec<_> = journal.records.keys().cloned().collect();
         for id in ids {
             let mut record = journal.records[&id].clone();

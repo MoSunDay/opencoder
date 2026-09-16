@@ -51,9 +51,9 @@ pub(crate) struct SayHeader {
     /// Header inline preview, computed once via [`say_preview_for`]: the
     /// first non-empty line RENDERED (markdown applied) once the Say is
     /// done, the raw first line while it streams. The body dedup compares
-    /// against the SAME string, so the header never shows raw markdown and
-    /// never repeats itself below.
-    pub preview: String,
+    /// against the same text. Keep the styled spans: this header is the
+    /// ONLY rendering of the first line once body dedup removes it.
+    pub preview: Line<'static>,
     pub streaming: bool,
 }
 
@@ -66,32 +66,38 @@ pub(crate) fn say_preview(raw: &str) -> &str {
         .unwrap_or("")
 }
 
-/// done Say 的渲染结果里首个非空行文本（trim）：markdown 渲染后的口径
-/// 与 [`merged_say_body`] 逐行取的 `line_text` 完全一致。
-fn rendered_preview(rendered: &[Line<'static>]) -> String {
-    rendered
-        .iter()
-        .map(line_text)
-        .map(|t| t.trim().to_string())
-        .find(|l| !l.is_empty())
-        .unwrap_or_default()
-}
-
-/// 合并对头部 preview 的唯一口径：done 取 markdown 渲染后的首个非空行
-/// （头部不露 `#`/`**`/`-` 这类原始标记，正文也不再把该行换个形态重复
-/// 一遍）；流式取 raw 首行（与流式正文行同源，同口径去重）。done 但
-/// 渲染结果为空时回退 raw，保证头部始终有 preview。
-pub(crate) fn say_preview_for(raw: &str, rendered: &[Line<'static>], done: bool) -> String {
-    if done {
-        let rendered = rendered_preview(rendered);
-        if rendered.is_empty() {
-            say_preview(raw).to_string()
-        } else {
-            rendered
-        }
-    } else {
-        say_preview(raw).to_string()
+/// The preview and body dedup share the first visible line. Trim only its
+/// outside whitespace, preserving every inline style and internal space.
+/// Empty rendered output (e.g. a reference definition) stays empty instead
+/// of exposing Markdown source that intentionally has no visible content.
+pub(crate) fn say_preview_for(raw: &str, rendered: &[Line<'static>], done: bool) -> Line<'static> {
+    if !done {
+        return Line::from(say_preview(raw).to_string());
     }
+    let Some(line) = rendered.iter().find(|line| {
+        line.spans
+            .iter()
+            .any(|span| !span.content.trim().is_empty())
+    }) else {
+        return Line::default();
+    };
+    let first = line
+        .spans
+        .iter()
+        .position(|s| !s.content.trim().is_empty())
+        .unwrap();
+    let last = line
+        .spans
+        .iter()
+        .rposition(|s| !s.content.trim().is_empty())
+        .unwrap();
+    let mut preview = line.clone();
+    preview.spans = line.spans[first..=last].to_vec();
+    let first = preview.spans.first_mut().unwrap();
+    first.content = first.content.trim_start().to_string().into();
+    let last = preview.spans.last_mut().unwrap();
+    last.content = last.content.trim_end().to_string().into();
+    preview
 }
 
 /// 合并对里 Say 正文的去重判定（三态）。头部行已经用 preview 展示了正文
@@ -160,7 +166,7 @@ pub(crate) fn merged_say_body_decision(
     rendered: &[Line<'static>],
     done: bool,
 ) -> SayBody {
-    let preview = say_preview_for(raw, rendered, done);
+    let preview = line_text(&say_preview_for(raw, rendered, done));
     if done {
         let texts: Vec<String> = rendered.iter().map(line_text).collect();
         merged_say_body(&preview, &texts)
@@ -188,9 +194,10 @@ fn say_header_line(open: bool, n: usize, say: &SayHeader, anim_tick: u32) -> Lin
             .fg(theme::ok_color())
             .add_modifier(Modifier::BOLD),
     )];
-    if !say.preview.is_empty() {
-        spans.push(Span::raw(say.preview.clone()));
-    }
+    spans.extend(say.preview.spans.iter().cloned().map(|mut span| {
+        span.style = say.preview.style.patch(span.style);
+        span
+    }));
     if say.streaming {
         spans.push(Span::styled(
             format!(

@@ -179,6 +179,10 @@ pub(crate) async fn dispatch_slash_action(
     pending_images: &mut Vec<(String, String)>,
     history: &mut Vec<String>,
     hist_idx: &mut Option<usize>,
+    // `/agent` picker slot — the Agent arm fills it; every other action
+    // leaves it untouched. (Trailing param so existing call sites can
+    // append one argument instead of reshuffling.)
+    agent_menu: &mut Option<crate::agent_menu::AgentMenu>,
 ) -> LoopFlow {
     match action {
         SlashAction::Task => {
@@ -220,6 +224,15 @@ pub(crate) async fn dispatch_slash_action(
         SlashAction::Skill => {
             *skill_toggle_menu = Some(crate::skill_menu::SkillMenu::List(
                 crate::skill_menu::SkillList::new(config),
+            ));
+        }
+        SlashAction::Agent => {
+            // Open the primary-agent picker. The pick fills the composer with
+            // the `/agent <name> ` control head (key_handler), so the switch
+            // itself rides the normal submit path — same contract as the SPA
+            // `/agent` entry.
+            *agent_menu = Some(crate::agent_menu::AgentMenu::new(
+                crate::agent_menu::available_primary_agents(),
             ));
         }
         SlashAction::Compact => match gate_compact(*running) {

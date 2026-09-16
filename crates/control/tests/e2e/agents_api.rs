@@ -1,8 +1,8 @@
 //! Versioned-agent surface on the control plane: agent cards (PUT
-//! history/references, delete-conflict with referenced pools), active
-//! pointer (deactivate/blank/idempotent/preflight semantics) and the NFS
-//! export lifecycle. The resource-pool validation matrix and version
-//! lifecycle live in `agents_resources_extra.rs`.
+//! history/references, delete-conflict with referenced pools) and the NFS
+//! export lifecycle. 全局激活端点已移除（会话级 agent 切换走
+//! /api/sessions/:id/agent）。The resource-pool validation matrix and
+//! version lifecycle live in `agents_resources_extra.rs`.
 
 use base64::Engine as _;
 use reqwest::Method;
@@ -35,14 +35,15 @@ async fn scoped_root() -> (std::path::PathBuf, tokio::sync::MutexGuard<'static, 
 }
 
 #[tokio::test]
-async fn agent_card_lifecycle_and_active_pointer() {
+async fn agent_card_lifecycle_without_active_pointer() {
     let _guard = scoped().await;
     let h = Harness::new().await;
 
     let (status, body) = h.req(Method::GET, "/api/agents", None).await;
     assert_eq!(status, 200, "{body}");
     assert_eq!(body["ok"], json!(true));
-    assert_eq!(body["active"], json!(null));
+    // 全局激活已移除：list 响应不再携带 `active` 字段。
+    assert!(body.get("active").is_none(), "{body}");
 
     let (status, body) = h
         .req(
@@ -57,7 +58,7 @@ async fn agent_card_lifecycle_and_active_pointer() {
         .req(Method::POST, "/api/agents", Some(json!({"name": "alpha"})))
         .await;
     assert_eq!(status, 409, "{body}");
-    for bad in ["active", "prompts", "../x", " "] {
+    for bad in ["prompts", "../x", " "] {
         let (status, _) = h
             .req(Method::POST, "/api/agents", Some(json!({"name": bad})))
             .await;
@@ -79,8 +80,7 @@ async fn agent_card_lifecycle_and_active_pointer() {
         )
         .await;
     assert_eq!(status, 200, "{body}");
-    // Activation requires the referenced prompts/<name> pool to exist
-    // with a live version, so publish pack2 first.
+    // 引用池资源仍要求 prompts/<name> 存在有 live version，先发布 pack2。
     let (status, body) = h
         .req(
             Method::POST,
@@ -89,6 +89,8 @@ async fn agent_card_lifecycle_and_active_pointer() {
         )
         .await;
     assert_eq!(status, 200, "{body}");
+    // 全局激活端点已移除：PATCH /api/agents/active 落到 /api/agents/:name
+    // 的 put/delete 路由 ⇒ PATCH 方法不被允许。
     let (status, body) = h
         .req(
             Method::PATCH,
@@ -96,18 +98,10 @@ async fn agent_card_lifecycle_and_active_pointer() {
             Some(json!({"active": "alpha"})),
         )
         .await;
-    assert_eq!(status, 200, "{body}");
-    let (status, body) = h.req(Method::GET, "/api/agents", None).await;
-    assert_eq!(status, 200);
-    assert_eq!(body["active"], json!("alpha"));
-    let (status, body) = h
-        .req(
-            Method::PATCH,
-            "/api/agents/active",
-            Some(json!({"active": "ghost"})),
-        )
-        .await;
-    assert_eq!(status, 404, "{body}");
+    assert!(
+        status == 404 || status == 405,
+        "activation endpoint must be gone: {status} {body}"
+    );
 
     let (status, body) = h.req(Method::DELETE, "/api/agents/alpha", None).await;
     assert_eq!(status, 200, "{body}");
@@ -214,7 +208,7 @@ async fn nfs_status_reports_idle_export_state() {
 }
 
 /// Publish a minimal prompts pool (one live version) so a card referencing
-/// it passes the activation preflight.
+/// it resolves.
 async fn publish_prompt_pool(h: &Harness, name: &str, body: &str) {
     let (status, body) = h
         .req(
@@ -224,157 +218,6 @@ async fn publish_prompt_pool(h: &Harness, name: &str, body: &str) {
         )
         .await;
     assert_eq!(status, 200, "{body}");
-}
-
-/// PATCH /api/agents/active semantics beyond the happy path: repeat
-/// activation answers `{"unchanged": true}` (exact shape), `null`
-/// deactivates, and a blank name is a 400 — not a deactivation.
-#[tokio::test]
-async fn active_pointer_deactivate_blank_and_idempotent_repatch() {
-    let _guard = scoped().await;
-    let h = Harness::new().await;
-    publish_prompt_pool(&h, "drain-pack", "be steady").await;
-    let (status, body) = h
-        .req(
-            Method::POST,
-            "/api/agents",
-            Some(json!({"name": "steady", "current": {"prompt": "drain-pack"}})),
-        )
-        .await;
-    assert_eq!(status, 201, "{body}");
-
-    let (status, body) = h
-        .req(
-            Method::PATCH,
-            "/api/agents/active",
-            Some(json!({"active": "steady"})),
-        )
-        .await;
-    assert_eq!(status, 200, "{body}");
-    assert_eq!(body, json!({"ok": true, "active": "steady"}));
-
-    // Same value again ⇒ `unchanged`, no marker churn (exact response).
-    let (status, body) = h
-        .req(
-            Method::PATCH,
-            "/api/agents/active",
-            Some(json!({"active": "steady"})),
-        )
-        .await;
-    assert_eq!(status, 200, "{body}");
-    assert_eq!(
-        body,
-        json!({"ok": true, "active": "steady", "unchanged": true})
-    );
-    let (_, body) = h.req(Method::GET, "/api/agents", None).await;
-    assert_eq!(body["active"], json!("steady"));
-
-    // `null` deactivates.
-    let (status, body) = h
-        .req(
-            Method::PATCH,
-            "/api/agents/active",
-            Some(json!({"active": null})),
-        )
-        .await;
-    assert_eq!(status, 200, "{body}");
-    assert_eq!(body, json!({"ok": true, "active": null}));
-    let (_, body) = h.req(Method::GET, "/api/agents", None).await;
-    assert_eq!(body["active"], json!(null));
-
-    // Blank (whitespace-only) is a 400, never a silent deactivation.
-    let (status, body) = h
-        .req(
-            Method::PATCH,
-            "/api/agents/active",
-            Some(json!({"active": "  "})),
-        )
-        .await;
-    assert_eq!(status, 400, "{body}");
-    assert_eq!(body["ok"], json!(false));
-    assert!(
-        body["error"].as_str().unwrap_or_default().contains("blank"),
-        "{body}"
-    );
-    let (_, body) = h.req(Method::GET, "/api/agents", None).await;
-    assert_eq!(body["active"], json!(null));
-}
-
-/// Activation preflight: a promptless card and a card whose prompt pool
-/// was never published are both rejected with 400 BEFORE the marker
-/// settles — the previously active agent survives the failed switch.
-#[tokio::test]
-async fn active_pointer_preflight_rejects_promptless_and_unpublished_cards() {
-    let _guard = scoped().await;
-    let h = Harness::new().await;
-    publish_prompt_pool(&h, "live-pack", "live body").await;
-    for (name, current) in [
-        ("barebone", json!({})),
-        ("dangling", json!({"prompt": "never-published-pack"})),
-    ] {
-        let (status, body) = h
-            .req(
-                Method::POST,
-                "/api/agents",
-                Some(json!({"name": name, "current": current})),
-            )
-            .await;
-        assert_eq!(status, 201, "{name}: {body}");
-    }
-
-    // Anchor a good active agent first so rollback is observable.
-    let (status, body) = h
-        .req(
-            Method::POST,
-            "/api/agents",
-            Some(json!({"name": "anchored", "current": {"prompt": "live-pack"}})),
-        )
-        .await;
-    assert_eq!(status, 201, "{body}");
-    let (status, body) = h
-        .req(
-            Method::PATCH,
-            "/api/agents/active",
-            Some(json!({"active": "anchored"})),
-        )
-        .await;
-    assert_eq!(status, 200, "{body}");
-
-    let (status, body) = h
-        .req(
-            Method::PATCH,
-            "/api/agents/active",
-            Some(json!({"active": "barebone"})),
-        )
-        .await;
-    assert_eq!(status, 400, "{body}");
-    assert!(
-        body["error"]
-            .as_str()
-            .unwrap_or_default()
-            .contains("no prompt reference"),
-        "{body}"
-    );
-
-    let (status, body) = h
-        .req(
-            Method::PATCH,
-            "/api/agents/active",
-            Some(json!({"active": "dangling"})),
-        )
-        .await;
-    assert_eq!(status, 400, "{body}");
-    assert!(
-        body["error"]
-            .as_str()
-            .unwrap_or_default()
-            .contains("no live version"),
-        "{body}"
-    );
-
-    // Marker rolled back: the previous agent stays active.
-    let (_, body) = h.req(Method::GET, "/api/agents", None).await;
-    assert_eq!(body["active"], json!("anchored"), "{body}");
 }
 
 /// PUT /api/agents/:name rewrites the card: unknown agent ⇒ 404; each

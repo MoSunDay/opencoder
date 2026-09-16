@@ -19,6 +19,7 @@ import {
   useReactFlow,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
+import { LinkOutlined } from '@ant-design/icons';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useMessage } from '../../ui/appMessage.js';
 import { layoutEditorNodes } from './canvasLayout.js';
@@ -69,6 +70,8 @@ function EditorCanvas({ spec, problems, positions, onSpecChange, onPositionsChan
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [selectedId, setSelectedId] = useState(null);
+  const [linkMode, setLinkMode] = useState(false); // toolbar 连线 toggle
+  const [linkFrom, setLinkFrom] = useState(null); // armed source node id
   const [meta, setMeta] = useState(spec); // SpecMetaForm base (name/description)
   const specRef = useRef(spec); // name/description carry-through for emit
   const dirtyRef = useRef(false); // structural change → emit on next commit
@@ -112,6 +115,22 @@ function EditorCanvas({ spec, problems, positions, onSpecChange, onPositionsChan
       }));
     });
   }, [edges, problems]);
+
+  // Click-to-connect affordance: highlight the armed source and every
+  // still-legal target so the second click is guided. Runs off the same
+  // state as the meta effect; both merge via data spread, order matters.
+  useEffect(() => {
+    setNodes((cur) =>
+      cur.map((n) => {
+        const linkSource = !!linkFrom && n.id === linkFrom;
+        const linkTarget = !!linkFrom && !linkSource && canConnect(edges, linkFrom, n.id) === null;
+        if (n.data && n.data.linkSource === linkSource && n.data.linkTarget === linkTarget) {
+          return n;
+        }
+        return { ...n, data: { ...n.data, linkSource, linkTarget } };
+      }),
+    );
+  }, [linkFrom, edges]);
 
   // Fit once the first layout has committed (next macrotask keeps it calm).
   useEffect(() => {
@@ -164,13 +183,78 @@ function EditorCanvas({ spec, problems, positions, onSpecChange, onPositionsChan
       const reason = canConnect(edges, params.source, params.target);
       if (reason) {
         msg.warning(reason);
-        return;
+        return false;
       }
       setEdges(addEdge({ ...params, type: 'smoothstep', markerEnd: { type: MarkerType.ArrowClosed } }, edges));
       markDirty();
+      return true;
     },
     [edges, setEdges],
   );
+
+  // Click-to-connect: with a source armed (toolbar 连线 toggle, or a handle
+  // click that dropped without a valid target), the first click picks the
+  // source and the next click on another node adds the dependency through
+  // onConnect's canConnect guard. Plain clicks keep select-inspector.
+  const onNodeClick = useCallback(
+    (_e, node) => {
+      if (!linkFrom) {
+        if (linkMode) {
+          setLinkFrom(node.id);
+        }
+        return;
+      }
+      if (linkFrom === node.id) {
+        setLinkFrom(null);
+        return;
+      }
+      if (onConnect({ source: linkFrom, target: node.id })) {
+        setLinkFrom(null);
+      }
+    },
+    [linkMode, linkFrom, onConnect],
+  );
+
+  // A handle press that ends without a valid drop arms click-to-target (the
+  // tiny handles are hard to drag). A drop ON a handle that the
+  // isValidConnection guard rejected explains why nothing got drawn.
+  const onConnectEnd = useCallback(
+    (_e, state) => {
+      const from = state && state.fromHandle && state.fromHandle.nodeId;
+      if (!from) {
+        return;
+      }
+      const to = state.toHandle && state.toHandle.nodeId;
+      if (to) {
+        const reason = canConnect(edges, from, to);
+        if (reason) {
+          msg.warning(reason);
+        }
+        return;
+      }
+      setLinkFrom(from);
+    },
+    [edges],
+  );
+
+  // Esc releases the armed source (link mode itself stays until toggled).
+  useEffect(() => {
+    if (!linkFrom) {
+      return undefined;
+    }
+    const onKey = (e) => {
+      if (e.key === 'Escape') {
+        setLinkFrom(null);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [linkFrom]);
+
+  const toggleLinkMode = useCallback(() => {
+    setLinkFrom(null);
+    setLinkMode((m) => !m);
+  }, []);
 
   // Drag stops persist the pin into the session-state positions map only.
   const onNodeDragStop = useCallback(
@@ -284,7 +368,19 @@ function EditorCanvas({ spec, problems, positions, onSpecChange, onPositionsChan
           problems={problems || []}
           onAutoLayout={autoLayout}
           onFitView={() => fitView({ padding: 0.18, duration: 200 })}
+          linkMode={linkMode}
+          onToggleLink={toggleLinkMode}
         />
+        {(linkMode || linkFrom) && (
+          <div className={linkFrom ? 'dag-edit-linkbar dag-edit-linkbar--armed' : 'dag-edit-linkbar'}>
+            <LinkOutlined />
+            <span>
+              {linkFrom
+                ? `连线：${linkFrom} → 点击目标步骤（Esc 取消）`
+                : '连线模式：点击源步骤，再点击目标步骤完成依赖'}
+            </span>
+          </div>
+        )}
         <ReactFlow
           nodes={nodes}
           edges={edges}
@@ -292,6 +388,9 @@ function EditorCanvas({ spec, problems, positions, onSpecChange, onPositionsChan
           onNodesChange={onNodesChangeWrapped}
           onEdgesChange={onEdgesChangeWrapped}
           onConnect={onConnect}
+          onNodeClick={onNodeClick}
+          onConnectEnd={onConnectEnd}
+          onPaneClick={() => setLinkFrom(null)}
           onSelectionChange={({ nodes: sel }) => setSelectedId(sel.length ? sel[0].id : null)}
           onNodeDragStop={onNodeDragStop}
           isValidConnection={(c) => canConnect(edges, c.source, c.target) === null}

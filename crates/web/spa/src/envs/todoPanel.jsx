@@ -265,9 +265,12 @@ export function TodoEnvsPanel({ onNotice: noticeCallback }) {
     ) },
   ];
 
+  // extra-only PageShell wrapper: no `page` key on purpose. This sub-panel is a
+  // tab inside the `todos` page, so it must never grow a page title of its own
+  // — the old `page="todo"` (typo for `todos`) read like a real page key and
+  // would have started rendering a title the moment PAGE_META gained `todos`.
   return (
     <PageShell
-      page="todo"
       extra={<Button type="primary" onClick={() => setCreating(true)}>新建</Button>}
     >
       <Table

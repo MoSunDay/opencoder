@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // Operator 页签可见性 + 面板内容：AgentsPanel 仅在 identity.role === 'admin'
-// 时渲染 Operator tab；面板说明、节点表（kinds 含 operator 才可启动）都在。
-// store identity 经 setState 直写（同 app.dom.test.jsx 的 store 驱动方式）。
+// 时渲染 Operator tab；面板为只读节点总览（会话交互页以 operator kind 建会话，
+// 本页不再有「操作」列/启动入口）。store identity 经 setState 直写。
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
@@ -36,7 +36,6 @@ beforeEach(() => {
   clearCredentials();
   apiGetMock.mockReset().mockImplementation((path) => {
     if (path === '/api/nodes') return Promise.resolve(nodesFixture);
-    if (path === '/api/agents') return Promise.resolve({ agents: [{ name: 'act' }] });
     return Promise.resolve({ ok: true, resources: [] });
   });
   apiPostMock.mockReset().mockResolvedValue({ ok: true });
@@ -55,16 +54,20 @@ describe('Operator tab visibility', () => {
     render(<AgentsPanel onNotice={() => {}} />);
     expect(screen.getByText('Agent 列表')).toBeTruthy();
     fireEvent.click(screen.getByText('Operator'));
-    // 面板说明（非 runc 容器、非节点维护模式）+ 节点表。
+    // 面板说明（会话即 Operator 运行：非 runc 容器、非节点维护模式）+ 节点表。
     expect(await screen.findByText(/非 runc 容器、非节点维护模式/)).toBeTruthy();
     expect(await screen.findByText('edge-1')).toBeTruthy();
-    // 启动按钮：node-1 可用；node-2 缺 operator kind、node-3 离线 ⇒ 禁用。
-    const texts = await screen.findAllByText('启动 Operator');
-    const launchButtons = texts.map((el) => el.closest('button'));
-    expect(launchButtons).toHaveLength(3);
-    expect(launchButtons[0].disabled).toBe(false);
-    expect(launchButtons[1].disabled).toBe(true);
-    expect(launchButtons[2].disabled).toBe(true);
+    expect(await screen.findByText('edge-3')).toBeTruthy();
+  });
+
+  it('keeps the panel read-only: no actions column or launch entry', async () => {
+    setState({ identity: { name: 'boss', role: 'admin' } });
+    render(<AgentsPanel onNotice={() => {}} />);
+    fireEvent.click(screen.getByText('Operator'));
+    expect(await screen.findByText('edge-1')).toBeTruthy();
+    expect(screen.queryByText('操作')).toBeNull();
+    expect(screen.queryByText('启动 Operator')).toBeNull();
+    expect(screen.queryByRole('button', { name: /启动/ })).toBeNull();
   });
 
   it('hides the Operator tab for a non-admin identity', async () => {
@@ -72,16 +75,5 @@ describe('Operator tab visibility', () => {
     render(<AgentsPanel onNotice={() => {}} />);
     await screen.findByText('Agent 列表');
     expect(screen.queryByText('Operator')).toBeNull();
-  });
-});
-
-describe('OperatorPanel launch flow', () => {
-  it('opens the launch modal from an operable node', async () => {
-    setState({ identity: { name: 'boss', role: 'admin' } });
-    render(<AgentsPanel onNotice={() => {}} />);
-    fireEvent.click(screen.getByText('Operator'));
-    const launchButtons = (await screen.findAllByText('启动 Operator')).map((el) => el.closest('button'));
-    fireEvent.click(launchButtons[0]);
-    expect(await screen.findByText('启动 Operator · edge-1')).toBeTruthy();
   });
 });

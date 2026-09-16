@@ -15,6 +15,8 @@ use crate::write::resource_dir;
 /// Version dirs are never deleted by this operation; a later save still
 /// takes `max(history ∪ {current}) + 1`, so numbers are never reused.
 pub fn rollback_resource(cat: &str, name: &str, version: u32) -> io::Result<()> {
+    let _lock = crate::resources::lock::write_lock()?;
+    crate::resources::require_shared(cat, name)?;
     validate_resource_name(cat, name).map_err(invalid_input)?;
     let dir = resource_dir(cat, name)?;
     let Some(mut meta) = read_resource_meta(cat, name) else {
@@ -35,6 +37,7 @@ pub fn rollback_resource(cat: &str, name: &str, version: u32) -> io::Result<()> 
             "版本目录缺失: {cat}/{name}/v{version}"
         )));
     }
+    crate::resources::filesystem::read_files(&vdir)?;
     meta.current = version;
     meta.updated_at = now_rfc3339();
     atomic_write_json(&dir.join("meta.json"), &meta)

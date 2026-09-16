@@ -262,7 +262,8 @@ fn say_pair_payload(spans: &[Span<'_>]) -> Option<String> {
             rest = &rest[..rest.len() - 1];
         }
     }
-    let preview = rest.first().map(|s| s.content.trim()).unwrap_or_default();
+    let preview: String = rest.iter().map(|s| s.content.as_ref()).collect();
+    let preview = preview.trim();
     (!preview.is_empty()).then(|| preview.to_string())
 }
 

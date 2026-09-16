@@ -1,3 +1,5 @@
+#[path = "support/brain.rs"]
+mod graph_support;
 mod support;
 use opencoder_core::{brain::ActionReceipt, fleet::*};
 use opencoder_node::fleet::NodeService;
@@ -37,7 +39,8 @@ async fn next_action(node: &opencoder_worker::Worker, seen: &[String]) -> Action
 async fn repair_flow_persists_visits_feedback_and_release_gate_on_node() {
     let _config = isolated_config();
     let dir = tempfile::tempdir().unwrap();
-    let node = worker(dir.path(), mock()).await;
+    let client = mock();
+    let node = worker(dir.path(), client.clone()).await;
     let reference = ExecutionRef {
         id: "brain-flow".into(),
         kind: ExecutionKind::Brain,
@@ -46,31 +49,20 @@ async fn repair_flow_persists_visits_feedback_and_release_gate_on_node() {
         serde_json::from_str(include_str!("../../../examples/brain/repair-loop.json")).unwrap();
     let version = json!({"id":"repair-loop","version":1,"plan":plan,"changelog":"fixture","created_at":1,"author":"test"});
     let reply = node.handle(NodeOperation::Create { assignment: assignment(&node, &reference.id, reference.kind,
-        json!({"mode":"fixed","objective":"repair and verify","plan":version,"inputs":{"problem":"repro"}}), Some(json!({}))) }).await;
+        json!({"schema_version":2,"mode":"fixed","objective":"repair and verify","plan":version,"inputs":{"document":{"name":"Problem","markdown":"repro"}}}), Some(json!({}))) }).await;
     assert_eq!(reply.status, 200, "{reply:?}");
     let mut seen = vec![];
-    for (expected, output) in [
-        ("fix", json!({"commit":"fix-1"})),
-        ("verify", json!({"passed":false,"issues":"still broken"})),
-        ("fix", json!({"commit":"fix-2"})),
-        ("verify", json!({"passed":true,"issues":""})),
-        ("release", json!({"result":"released fix-2"})),
+    for (expected, name, content, passed, next) in [
+        ("fix", "fix-result", "fix-1", false, Some("verify")),
+        ("verify", "verification", "still broken", false, Some("fix")),
+        ("fix", "fix-result", "fix-2", false, Some("verify")),
+        ("verify", "verification", "verified fix-2", true, None),
     ] {
+        let output = json!({name: {"content":content,"completion":{"passed":true,"evidence":["delivered"]},"verification":{"passed":passed,"evidence":["tests"]}}});
         let receipt = next_action(&node, &seen).await;
         assert!(receipt
             .instance_id
             .starts_with(&format!("{expected}~visit-")));
-        if expected == "release" {
-            let instance = node
-                .handle(NodeOperation::Brain {
-                    execution: reference.clone(),
-                    action: "instance".into(),
-                    input: json!({"id":receipt.instance_id}),
-                })
-                .await;
-            assert_eq!(instance.body["inputs"]["commit"], "fix-2");
-            assert_eq!(instance.body["inputs"]["verified"], true);
-        }
         if seen.len() == 2 {
             let instance = node
                 .handle(NodeOperation::Brain {
@@ -86,6 +78,17 @@ async fn repair_flow_persists_visits_feedback_and_release_gate_on_node() {
                 .iter()
                 .any(|i| i["step_id"] == "release"));
         }
+        let route = if expected == "fix" {
+            "after-fix"
+        } else {
+            "after-verify"
+        };
+        let key = format!(
+            "route-{}",
+            &opencoder_brain::execution::fingerprint(&(route, vec![receipt.instance_id.clone()]))
+                [..32]
+        );
+        client.queue_script(vec![opencoder_llm::LlmEvent::Completed {text:json!({"receipt":key,"reason":"fixture output evidence","selected":next.into_iter().collect::<Vec<_>>(),"exit":if next.is_none(){Some("done")}else{None}}).to_string(),tool_calls:vec![],usage:None}]);
         let notice = json!({"parent":receipt.request["input"]["_brain"]["parent"],"execution":{"id":receipt.id,"kind":"agent"},"node_id":"child-node","sequence":1,"status":"succeeded","output":{"value":output,"artifacts":[],"evidence":["fixture"]},"error":null,"at_ms":5});
         seen.push(receipt.id);
         let reply = node
@@ -105,9 +108,17 @@ async fn repair_flow_persists_visits_feedback_and_release_gate_on_node() {
             .await;
         assert_eq!(duplicate.body["duplicate"], true);
     }
-    let state = snapshot(&node, &reference).await;
+    let state = graph_support::wait_phase(&node, &reference, "completed").await;
     assert_eq!(state["phase"], "completed");
-    assert_eq!(state["total_instances"], 5);
-    assert_eq!(state["deliverables"]["release_result"], "released fix-2");
+    assert_eq!(state["total_instances"], 4);
+    assert_eq!(
+        state["deliverables"]
+            .as_object()
+            .unwrap()
+            .values()
+            .next()
+            .unwrap(),
+        "verified fix-2"
+    );
     node.shutdown().await.unwrap();
 }

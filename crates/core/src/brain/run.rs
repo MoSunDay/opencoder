@@ -6,6 +6,8 @@ use std::collections::BTreeMap;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct BrainRequest {
+    #[serde(default = "legacy_schema")]
+    pub schema_version: u32,
     pub mode: PlanningMode,
     pub objective: String,
     #[serde(default)]
@@ -32,6 +34,7 @@ pub enum RunPhase {
     Running,
     Paused,
     WaitingInput,
+    Blocked,
     Cancelling,
     Completed,
     Failed,
@@ -46,6 +49,8 @@ impl RunPhase {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct BrainRun {
+    #[serde(default)]
+    pub graph: super::GraphState,
     pub id: String,
     pub phase: RunPhase,
     pub revision: u64,
@@ -190,6 +195,8 @@ pub struct BrainNotice {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ActivationContext {
+    #[serde(default)]
+    pub routes: Vec<super::RouteContext>,
     pub schema_version: u32,
     pub run_id: String,
     pub activation: u64,
@@ -208,6 +215,8 @@ pub struct ActivationContext {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ActivationDecision {
+    #[serde(default)]
+    pub routes: Vec<super::RouteDecision>,
     pub run_id: String,
     pub activation: u64,
     pub control_epoch: u64,
@@ -227,9 +236,14 @@ pub struct ResourceClaim {
     pub released: bool,
 }
 
-pub const BUSINESS_KINDS: [ExecutionKind; 4] = [
+pub const BUSINESS_KINDS: [ExecutionKind; 5] = [
     ExecutionKind::Agent,
     ExecutionKind::Dag,
     ExecutionKind::Todos,
     ExecutionKind::Team,
+    ExecutionKind::Operator,
 ];
+
+fn legacy_schema() -> u32 {
+    1
+}

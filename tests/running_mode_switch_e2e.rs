@@ -445,7 +445,7 @@ fn real_server_rejects_running_mode_switches_until_idle() {
 /// discarded planning prompt cannot leak into act or post-restart context.
 #[test]
 fn real_server_clear_context_executes_preserved_plan_in_act() {
-    const SID: &str = "agent-plan-clear-handoff-e2e";
+    const SID: &str = "operator-plan-clear-handoff-e2e";
     const PLAN: &str = "EXECUTE_DEPLOYMENT_PLAN_42";
     const RESULT: &str = "ACT_EXECUTION_COMPLETE_42";
     const RESUMED: &str = "RESUMED_ACT_COMPLETE_42";

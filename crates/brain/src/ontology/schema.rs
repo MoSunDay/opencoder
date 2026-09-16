@@ -111,7 +111,7 @@ pub fn projected<'a>(schema: &'a DataSchema, pointer: &str) -> Result<&'a DataSc
     Ok(current)
 }
 
-pub(super) fn validate_schema(schema: &DataSchema, depth: usize) -> Result<()> {
+pub(crate) fn validate_schema(schema: &DataSchema, depth: usize) -> Result<()> {
     ensure!(depth < 32, "schema nesting exceeds 32");
     ensure!(
         schema.kind == DataType::Array || schema.items.is_none(),

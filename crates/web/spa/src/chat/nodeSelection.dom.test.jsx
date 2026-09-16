@@ -7,7 +7,7 @@ import { setState } from '../store.js';
 import { apiGet, apiPost } from '../api.js';
 vi.mock('../api.js', () => ({ apiGet: vi.fn(), apiPost: vi.fn(), apiDel: vi.fn(), authFetch: vi.fn() }));
 vi.mock('../sse.js', () => ({ openStream: vi.fn(() => ({ abort: vi.fn() })) }));
-const nodes = ['n1', 'n2'].map((id) => ({ id, name: id, online: true, kinds: ['agent'], snapshot: { ready: true } }));
+const nodes = ['n1', 'n2'].map((id) => ({ id, name: id, online: true, kinds: ['agent', 'operator'], snapshot: { ready: true } }));
 const pick = async (name) => {
   fireEvent.mouseDown(screen.getByLabelText('执行节点').closest('.ant-select'));
   fireEvent.click(await screen.findByText(name, { selector: '.ant-select-item-option-content' }));
@@ -22,7 +22,7 @@ beforeEach(() => {
   vi.resetAllMocks();
   setState({ preselectNode: null, nodes: [] });
   apiGet.mockImplementation(async (path) => path === '/api/nodes' ? { nodes } : path.endsWith('/seq') ? { seq: 0 } : { dialogs: [] });
-  apiPost.mockImplementation(async (path) => path === '/api/sessions' ? { id: 'agent-created' } : { ok: true });
+  apiPost.mockImplementation(async (path) => path === '/api/sessions' ? { id: 'operator-created' } : { ok: true });
 });
 
 describe('explicit conversation node selection', () => {
@@ -36,9 +36,9 @@ describe('explicit conversation node selection', () => {
     expect(apiGet).not.toHaveBeenCalledWith('/api/sessions?limit=50');
     await pick('n2');
     await send(container, 'do work');
-    await waitFor(() => expect(apiPost).toHaveBeenCalledWith('/api/sessions', { id: expect.stringMatching(/^agent-/), node_id: 'n2' }));
+    await waitFor(() => expect(apiPost).toHaveBeenCalledWith('/api/sessions', { id: expect.stringMatching(/^operator-/), node_id: 'n2', agent: 'act' }));
     expect(apiGet).toHaveBeenCalledWith('/api/nodes/n2/dialogs');
-    expect(apiPost).toHaveBeenCalledWith('/api/sessions/agent-created/prompt', { prompt: 'do work', delivery: 'steer' });
+    expect(apiPost).toHaveBeenCalledWith('/api/sessions/operator-created/prompt', { prompt: 'do work', delivery: 'steer' });
   });
 
   it('preserves the chosen node, draft and request ID after uncertain creation', async () => {

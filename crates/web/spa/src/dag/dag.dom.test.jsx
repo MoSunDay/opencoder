@@ -204,6 +204,25 @@ describe('RunsTable', () => {
     fireEvent.click((await screen.findAllByText('查看'))[0]);
     expect(await screen.findByText('← 返回运行列表')).toBeTruthy();
   });
+
+  it('renders the name column with a spec.name fallback', async () => {
+    // Compat servers lift spec.name to the row top level; rows that only
+    // carry the spec snapshot still resolve, missing-everything shows '-'.
+    apiGetMock.mockImplementation((path) => {
+      if (String(path).startsWith('/api/dag/runs')) {
+        return jsonResponse([
+          { id: 'run-dddddddd4444', dag_id: 'dag-etl', name: 'etl', status: 'running', created_at: 1700000000000 },
+          { id: 'run-eeeeeeee5555', dag_id: 'dag-other', spec: { name: 'nightly' }, status: 'pending', created_at: 1700000050000 },
+          { id: 'run-ffffffff6666', dag_id: 'dag-etl', status: 'done', created_at: 1700000010000 },
+        ]);
+      }
+      return jsonResponse({});
+    });
+    render(<RunsTable onNotice={vi.fn()} />);
+    expect(await screen.findByText('etl')).toBeTruthy(); // top-level name
+    expect(screen.getByText('nightly')).toBeTruthy(); // spec.name fallback
+    expect(screen.getByText('-')).toBeTruthy(); // no name anywhere
+  });
 });
 
 describe('RunDetail', () => {

@@ -52,24 +52,16 @@ pub fn apply_notice(run: &mut BrainRun, notice: &BrainNotice) -> Result<bool> {
     instance.status = notice.status;
     instance.reason = notice.error.clone().unwrap_or_default();
     if notice.status == StepStatus::Succeeded {
-        let step = run
-            .request
-            .plan
-            .as_ref()
-            .unwrap()
-            .plan
-            .steps
-            .iter()
-            .find(|s| s.id == instance.step_id)
-            .unwrap();
         match notice.output.as_ref() {
-            Some(output) => match crate::ontology::accepts(&step.output, &output.value) {
-                Ok(()) => instance.output = Some(output.clone()),
-                Err(e) => {
-                    instance.status = StepStatus::Failed;
-                    instance.reason = format!("output contract: {e}");
+            Some(output) => {
+                match crate::ontology::accepts(&crate::graph::output_schema(), &output.value) {
+                    Ok(()) => instance.output = Some(output.clone()),
+                    Err(e) => {
+                        instance.status = StepStatus::Failed;
+                        instance.reason = format!("output contract: {e}");
+                    }
                 }
-            },
+            }
             None => {
                 instance.status = StepStatus::Failed;
                 instance.reason = "execution completed without an output envelope".into();
@@ -92,7 +84,7 @@ pub fn apply_notice(run: &mut BrainRun, notice: &BrainNotice) -> Result<bool> {
             .as_ref()
             .unwrap()
             .plan
-            .steps
+            .instances
             .iter()
             .find(|s| s.id == instance.step_id)
             .unwrap();
@@ -104,6 +96,14 @@ pub fn apply_notice(run: &mut BrainRun, notice: &BrainNotice) -> Result<bool> {
             instance.execution = None;
             instance.node_id = None;
             instance.finished_at = None;
+        }
+    }
+    if run.instances[&notice.parent.instance_id].status == StepStatus::Succeeded {
+        if let Err(error) = crate::graph::capture(run, &notice.parent.instance_id) {
+            run.error = Some(format!("output contract: {error:#}"));
+            if !matches!(run.phase, RunPhase::Paused | RunPhase::Cancelling) {
+                run.phase = RunPhase::Blocked;
+            }
         }
     }
     run.source_cursors.insert(cursor_key, notice.sequence);

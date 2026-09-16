@@ -1,52 +1,50 @@
 import dagre from '@dagrejs/dagre';
-export const KINDS = [{ value: 'agent', label: 'Agent' }, { value: 'dag', label: 'DAG' }, { value: 'todos', label: 'TODO' }, { value: 'team', label: 'Team' }];
-export const PHASES = { planning: '规划中', running: '执行中', paused: '已暂停', waiting_input: '等待输入', cancelling: '取消中', completed: '已完成', failed: '失败', cancelled: '已取消' };
-export const STATES = { waiting: '等待依赖', ready: '就绪', queued: '已排队', running: '执行中', verifying: '验证中', succeeded: '已通过', failed: '失败', skipped: '条件跳过', cancelled: '已取消' };
-export const COLORS = { planning: 'purple', running: 'blue', ready: 'cyan', queued: 'gold', succeeded: 'green', completed: 'green', failed: 'red', waiting_input: 'orange', paused: 'gold', cancelled: 'default' };
+export const KINDS = [{ value: 'agent', label: 'Agent' }, { value: 'dag', label: 'DAG' }, { value: 'todos', label: 'TODO' }, { value: 'team', label: 'Team' }, { value: 'operator', label: 'Operator' }];
+export const PHASES = { blocked: '已阻塞', planning: '规划中', running: '执行中', paused: '已暂停', waiting_input: '等待输入', cancelling: '取消中', completed: '已完成', failed: '失败', cancelled: '已取消' };
+export const STATES = { inactive: '未激活', waiting: '等待输入 / 汇合', ready: '就绪', queued: '已排队', running: '执行中', verifying: '验证中', succeeded: '执行结束', failed: '失败', skipped: '条件跳过', cancelled: '已取消' };
+export const COLORS = { blocked: 'red', planning: 'purple', running: 'blue', ready: 'cyan', queued: 'gold', succeeded: 'green', completed: 'green', failed: 'red', waiting_input: 'orange', paused: 'gold', cancelled: 'default' };
 export const terminal = (phase) => ['completed', 'failed', 'cancelled'].includes(phase);
 export function dependencies(step) {
   return [...new Set([...(step.depends_on || []), ...Object.values(step.inputs || {}).map((i) => i.binding), step.when?.value, step.foreach?.items].filter(Boolean).map((b) => typeof b === 'string' ? b : b.source === 'output' ? b.step : null).filter(Boolean))];
 }
 export function statusOf(group) {
+  if (group?.total === 0) return 'inactive';
   const counts = group?.counts || {};
   return ['failed', 'running', 'verifying', 'queued', 'ready', 'waiting', 'cancelled', 'succeeded', 'skipped'].find((s) => counts[s]) || (group?.sealed ? 'skipped' : 'waiting');
 }
-export function graph(plan, groups = [], ontology = false, capabilities = []) {
-  const nodes = (plan?.steps || []).map((step) => ({ id: step.id, type: 'brainStep', data: { step, label: step.label, kind: ontology ? 'Action' : step.action.kind, group: groups.find((g) => g.id === step.id), ontology } }));
-  const edges = plan?.flow ? plan.flow.transitions.filter((e) => e.to || ontology).map((edge, index) => ({ id: `flow:${index}`, source: edge.from, target: edge.to || 'flow:finish', type: 'smoothstep', label: edge.label, markerEnd: { type: 'arrowclosed' }, style: { stroke: edge.when?.equals === false ? '#d46b08' : '#1677ff', strokeWidth: 2, ...(edge.when ? { strokeDasharray: '6 3' } : {}) } })) : (plan?.steps || []).flatMap((s) => dependencies(s).map((dep) => ({ id: `${dep}->${s.id}`, source: dep, target: s.id, type: 'smoothstep', style: s.when ? { strokeDasharray: '5 4' } : {}, label: s.when ? '条件' : s.foreach ? '展开' : '' })));
-  if (ontology) {
-    if (plan?.flow) nodes.push({ id: 'flow:finish', type: 'brainStep', data: { kind: '结束', label: '验证交付物', ontology } });
-    for (const step of plan?.steps || []) {
-      if (!step.capability_id) continue;
-      const id = `entity:${step.capability_id}`;
-      const entity = capabilities.find((c) => c.id === step.capability_id);
-      if (!nodes.some((n) => n.id === id)) nodes.push({ id, type: 'brainStep', data: { kind: '实体', label: entity?.summary || step.action.target, entity: true, description: `${step.action.kind} · ${step.action.target}`, ontology } });
-      edges.push({ id: `${id}->${step.id}`, source: id, target: step.id, type: 'smoothstep', label: '执行', style: { stroke: '#8c8c8c', strokeDasharray: '3 4' } });
+export function graph(plan, groups = []) {
+  const nodes = []; const edges = [];
+  const add = (id, label, kind, extra = {}) => nodes.push({ id, type: 'brainStep', data: { label, kind, ...extra } });
+  const edge = (source, target, label = '') => edges.push({ id: `${source}->${target}:${edges.length}`, source, target, label, type: 'smoothstep', markerEnd: { type: 'arrowclosed' } });
+  if (plan?.schema_version !== 2) {
+    for (const i of plan?.steps || []) add(i.id, i.label, '历史实例', { step: i });
+    for (const e of plan?.flow?.transitions || []) if (e.to) edge(e.from, e.to, e.label);
+    if (!plan?.flow) for (const i of plan?.steps || []) for (const source of dependencies(i)) edge(source, i.id);
+  } else {
+    for (const [id, port] of Object.entries(plan.inputs)) add(`input:${id}`, id, 'input', { description: port.description });
+    for (const i of plan.instances) {
+      add(i.id, i.description || i.id, `实例 · ${i.action.kind}`, { step: i, group: groups.find((g) => g.id === i.id) });
+      i.inputs.forEach((id) => edge(`input:${id}`, i.id));
+      i.outputs.forEach((id) => edge(i.id, `output:${id}`));
     }
-    for (const [id, port] of Object.entries(plan?.inputs || {})) {
-      nodes.push({ id: `input:${id}`, type: 'brainStep', data: { label: id, kind: '输入', port, ontology } });
-      for (const step of plan.steps || []) {
-        const bindings = [...Object.values(step.inputs || {}).map((i) => i.binding), step.when?.value, step.foreach?.items];
-        if (bindings.some((b) => b?.source === 'input' && b.name === id)) edges.push({ id: `input:${id}->${step.id}`, source: `input:${id}`, target: step.id, type: 'smoothstep' });
+    for (const [id, output] of Object.entries(plan.outputs)) add(`output:${id}`, id, 'output', { description: output.description });
+    for (const r of plan.routes) {
+      add(`route:${r.id}`, r.id, '路由', { description: r.description });
+      r.outputs.forEach((o) => edge(`output:${o}`, `route:${r.id}`));
+      for (const t of r.targets) {
+        const bindings = Object.keys(t.bindings);
+        if (bindings.length) bindings.forEach((input) => edge(`route:${r.id}`, `input:${input}`, `${t.bindings[input]} → ${input}`));
+        else edge(`route:${r.id}`, t.instance, '选中后激活');
       }
-    }
-    for (const [id, port] of Object.entries(plan?.deliverables || {})) {
-      nodes.push({ id: `result:${id}`, type: 'brainStep', data: { label: id, kind: '交付物', port, ontology } });
-      const source = port.source?.source === 'output' ? port.source.step : port.source?.source === 'input' ? `input:${port.source.name}` : null;
-      if (source) edges.push({ id: `${source}->result:${id}`, source, target: `result:${id}`, type: 'smoothstep' });
+      for (const e of r.exits) { add(`exit:${r.id}:${e.id}`, e.description, '结束出口'); edge(`route:${r.id}`, `exit:${r.id}:${e.id}`); }
     }
   }
   const layout = new dagre.graphlib.Graph(); layout.setGraph({ rankdir: 'LR', nodesep: 32, ranksep: 70 }); layout.setDefaultEdgeLabel(() => ({}));
-  nodes.forEach((n) => layout.setNode(n.id, { width: 224, height: ontology ? 128 : 104 })); edges.filter((e) => nodes.some((n) => n.id === e.source) && nodes.some((n) => n.id === e.target)).forEach((e) => layout.setEdge(e.source, e.target)); dagre.layout(layout);
-  return { nodes: nodes.map((n) => ({ ...n, position: { x: layout.node(n.id).x - 112, y: layout.node(n.id).y - 52 } })), edges: edges.filter((e) => nodes.some((n) => n.id === e.source) && nodes.some((n) => n.id === e.target)) };
+  nodes.forEach((n) => layout.setNode(n.id, { width: 224, height: 128 })); edges.forEach((e) => layout.setEdge(e.source, e.target)); dagre.layout(layout);
+  return { nodes: nodes.map((n) => ({ ...n, position: { x: layout.node(n.id).x - 112, y: layout.node(n.id).y - 64 } })), edges };
 }
-export function newStep(id = 'step-1') {
-  return { id, label: '新步骤', purpose: '说明此步骤的作用', action: { kind: 'agent', target: 'act', prompt: '执行任务并返回结果', output_mode: 'text', max_attempts: 1 }, inputs: {}, output: { type: 'string' }, acceptance: '结果满足任务要求', depends_on: [], resources: [] };
-}
-export function newPlan() {
-  return { schema_version: 1, title: '新计划', objective: '', inputs: {}, steps: [newStep()], deliverables: { result: { description: '最终结果', source: { source: 'output', step: 'step-1' }, schema: { type: 'string' } } }, references: [] };
-}
+export function newPlan() { return { schema_version: 2, title: '新计划', objective: '', inputs: {}, instances: [], outputs: {}, routes: [], entry: [] }; }
 export function launchBody(values, id) {
   const reference = (raw) => { const [name, version] = raw.split('@'); return { id: name, version: Number(version) }; };
-  return { id, mode: values.mode, node_id: values.node, objective: values.objective.trim(), inputs: JSON.parse(values.inputs || '{}'), plan: values.mode === 'fixed' ? reference(values.plan) : null, references: values.mode === 'dynamic' ? (values.references || []).map(reference) : [] };
+  return { id, mode: values.mode, node_id: values.node, objective: values.objective.trim(), inputs: { ...JSON.parse(values.inputs || '{}'), ...(values.documentName ? { [values.documentInput || 'document']: { name: values.documentName, markdown: values.documentMarkdown || '' } } : {}) }, plan: values.mode === 'fixed' ? reference(values.plan) : null, references: values.mode === 'dynamic' ? (values.references || []).map(reference) : [] };
 }

@@ -1,12 +1,14 @@
 // canvasToolbar.jsx — floating controls for the DAG spec editor canvas:
-// CanvasToolbar is the absolute-positioned button row (auto-layout / fit /
-// validation problems popover), StepPalette is the left-hand draggable
-// "add step" panel. Both are presentational; state lives in the parent.
+// CanvasToolbar is the absolute-positioned button row (link-mode toggle /
+// auto-layout / fit / validation problems popover), StepPalette is the
+// left-hand draggable "add step" panel. Both are presentational; state
+// lives in the parent.
 
 import {
   AimOutlined,
   CheckCircleOutlined,
   CodeOutlined,
+  LinkOutlined,
   NodeIndexOutlined,
   RobotOutlined,
 } from '@ant-design/icons';
@@ -18,7 +20,7 @@ const { Text } = Typography;
 /// canvas). problems is the validateSpec() string list for the current
 /// draft: any entry turns the 校验 button danger with a Badge count and a
 /// clickable problem list; an empty list shows the passing hint instead.
-export function CanvasToolbar({ onAutoLayout, onFitView, problems }) {
+export function CanvasToolbar({ onAutoLayout, onFitView, problems, linkMode, onToggleLink }) {
   const list = Array.isArray(problems) ? problems : [];
   const hasProblems = list.length > 0;
   const content = hasProblems ? (
@@ -33,6 +35,15 @@ export function CanvasToolbar({ onAutoLayout, onFitView, problems }) {
   return (
     <div className="dag-edit-toolbar">
       <Space.Compact size="small">
+        <Button
+          size="small"
+          type={linkMode ? 'primary' : 'default'}
+          icon={<LinkOutlined />}
+          onClick={onToggleLink}
+          title="连线模式：点击源步骤，再点击目标步骤建立依赖"
+        >
+          连线
+        </Button>
         <Button size="small" icon={<NodeIndexOutlined />} onClick={onAutoLayout}>
           自动布局
         </Button>

@@ -52,6 +52,7 @@ pub(super) fn run_handle(
         &mut queue_scroll,
         &mut file_menu,
         workdir,
+        &mut None,
     )
 }
 
@@ -97,6 +98,7 @@ pub(super) fn run_handle_disabled(
         &mut queue_scroll,
         &mut file_menu,
         workdir,
+        &mut None,
     )
 }
 
@@ -143,6 +145,7 @@ pub(super) fn run_handle_subagents_busy(
         &mut queue_scroll,
         &mut file_menu,
         workdir,
+        &mut None,
     )
 }
 
@@ -187,6 +190,7 @@ pub(super) fn run_handle_subagent(
         &mut queue_scroll,
         &mut file_menu,
         workdir,
+        &mut None,
     )
 }
 
@@ -230,6 +234,7 @@ pub(super) fn run_handle_menu(
         &mut queue_scroll,
         &mut file_menu,
         workdir,
+        &mut None,
     )
 }
 
@@ -277,6 +282,7 @@ fn up_arrow_recalls_recorded_steer_or_queue_text() {
         &mut queue_scroll,
         &mut file_menu,
         workdir,
+        &mut None,
     );
     assert!(matches!(action, KeyAction::None));
     assert_eq!(input, "steer while running");
@@ -306,6 +312,7 @@ fn up_arrow_recalls_recorded_steer_or_queue_text() {
         &mut queue_scroll,
         &mut file_menu,
         workdir,
+        &mut None,
     );
     assert!(matches!(action, KeyAction::None));
     assert_eq!(input, "");

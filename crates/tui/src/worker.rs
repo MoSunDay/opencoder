@@ -51,8 +51,8 @@ pub enum UiCmd {
 #[derive(Debug)]
 pub enum UiEvent {
     Session(SessionEvent),
-    /// Reliable completed parent answer for repairing TextDelta chunks shed
-    /// by the bounded UI channel. Ordered bridge delivery precedes TurnDone.
+    /// Authoritative completed parent answer. Ordered bridge delivery precedes
+    /// TurnDone; every interim streaming answer is also delivered losslessly.
     AssistantFinal(String),
     TurnDone(String),
 }
@@ -173,80 +173,13 @@ pub fn gate_switch(busy: bool) -> SwitchGate {
     }
 }
 
-/// Minimum free capacity reserved by the ordered UI forwarder. Parent
-/// TextDelta may be shed below this threshold because `AssistantFinal` repairs
-/// it. Every other event is delivered with async backpressure in original
-/// order, including child deltas, reasoning, transcript resets and lifecycle.
-const DELTA_MIN_CAPACITY: usize = 64;
+#[path = "worker/delivery.rs"]
+mod delivery;
+use delivery::{forward_event, spawn_ui_event_forwarder};
 
-/// Returns true for parent streaming text whose completed value is repaired by
-/// the reliable `AssistantFinal` event. Child deltas are not recoverable here.
-/// ReasoningDelta is deliberately excluded — see `DELTA_MIN_CAPACITY` docs.
-fn is_droppable_delta(sev: &SessionEvent) -> bool {
-    matches!(sev, SessionEvent::TextDelta(_))
-}
-
-/// Enqueue a session event into the per-command ordered bridge. The sync LLM
-/// callback never writes directly to the bounded UI channel; the bridge task
-/// owns that operation so reliable events can await capacity without blocking
-/// or reordering the callback.
-fn forward_event(tx: &mpsc::UnboundedSender<UiEvent>, sev: SessionEvent) {
-    let _ = tx.send(UiEvent::Session(sev));
-}
-
-fn spawn_ui_event_forwarder(
-    tx: mpsc::Sender<UiEvent>,
-) -> (mpsc::UnboundedSender<UiEvent>, tokio::task::JoinHandle<()>) {
-    let (pending_tx, mut pending_rx) = mpsc::unbounded_channel::<UiEvent>();
-    let handle = tokio::spawn(async move {
-        // A shed TextDelta may be the chunk that carried the `'\n'` separating
-        // it from the next delivered chunk. Dropping it silently fuses two
-        // lines in the Say the UI assembled from the surviving deltas — and a
-        // CANCELLED turn never receives the `AssistantFinal` repair, so the
-        // fusion would freeze on screen forever. Track whether any shed delta
-        // carried a line break and re-insert exactly one separator ahead of
-        // the next delivered TextDelta: the lost text stays lost (by design —
-        // completion repairs it), but the line structure survives every path,
-        // interrupted or not.
-        let mut shed_line_break = false;
-        while let Some(event) = pending_rx.recv().await {
-            let droppable = matches!(&event, UiEvent::Session(sev) if is_droppable_delta(sev));
-            if droppable && tx.capacity() <= DELTA_MIN_CAPACITY {
-                if let UiEvent::Session(SessionEvent::TextDelta(text)) = &event {
-                    shed_line_break |= text.contains('\n');
-                }
-                continue;
-            }
-            let event = match event {
-                UiEvent::Session(SessionEvent::TextDelta(mut text)) => {
-                    if shed_line_break && !text.starts_with('\n') {
-                        text.insert(0, '\n');
-                    }
-                    shed_line_break = false;
-                    UiEvent::Session(SessionEvent::TextDelta(text))
-                }
-                // Turn and round boundaries seal the Say the pending
-                // separator belonged to; a fresh Say must not inherit it as
-                // a stray leading blank line. `TranscriptReset` rebuilds the
-                // whole view, dropping any open Say with it.
-                UiEvent::Session(
-                    sev @ (SessionEvent::LlmRoundEnd
-                    | SessionEvent::TranscriptReset(_)
-                    | SessionEvent::Done
-                    | SessionEvent::Error(_)),
-                ) => {
-                    shed_line_break = false;
-                    UiEvent::Session(sev)
-                }
-                other => other,
-            };
-            if tx.send(event).await.is_err() {
-                break;
-            }
-        }
-    });
-    (pending_tx, handle)
-}
+#[cfg(test)]
+#[path = "worker/delivery_tests.rs"]
+mod delivery_tests;
 
 fn completed_assistant_text(sess: &SessionState, message_floor: usize) -> Option<String> {
     sess.messages

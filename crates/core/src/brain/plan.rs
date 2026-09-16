@@ -25,7 +25,17 @@ pub struct OntologyPlan {
     pub objective: String,
     #[serde(default)]
     pub inputs: BTreeMap<String, InputPort>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub steps: Vec<StepTemplate>,
+    #[serde(default)]
+    pub instances: Vec<super::GraphInstance>,
+    #[serde(default)]
+    pub outputs: BTreeMap<String, super::GraphOutput>,
+    #[serde(default)]
+    pub routes: Vec<super::GraphRoute>,
+    #[serde(default)]
+    pub entry: Vec<String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub deliverables: BTreeMap<String, Deliverable>,
     #[serde(default)]
     pub references: Vec<PlanRef>,
@@ -58,6 +68,8 @@ pub struct ActionTransition {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct InputPort {
+    #[serde(default)]
+    pub source: super::InputSource,
     pub description: String,
     pub schema: DataSchema,
     #[serde(default = "yes")]

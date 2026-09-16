@@ -66,7 +66,7 @@ const innerMasked = () => !!document.querySelector('.todo-workbench .ant-spin-sp
 const emptyLies = (scope) => !!document.querySelector(`${scope} .ant-empty`);
 
 /// 行文本按表作用域化取：详情卡标题也会渲染 `todos-1…`，全局 getByText 会撞车。
-const rowText = (scope) => scope === '.oc-todo-items' ? document.querySelector('.file-workspace')?.textContent || '' : Array.from(document.querySelectorAll(`${scope} tbody tr.ant-table-row`))
+const rowText = (scope) => scope === '.oc-todo-items' ? document.querySelector('.todo-task-list')?.textContent || '' : Array.from(document.querySelectorAll(`${scope} tbody tr.ant-table-row`))
   .map((r) => r.textContent || '').join('|');
 
 /// antd 6 Button 给两字中文插空格（「刷 新」），按 role + 去空白匹配。
@@ -181,7 +181,7 @@ describe('TodoRunsPanel 表格 loading 语义', () => {
     await act(async () => { detailReq.resolve(DETAIL); });
     await flush();
     expect(rowText('.oc-todo-items')).toContain('t1');
-    expect(document.querySelector('.file-workspace').textContent).toContain('process/todos/t1/status.json');
+    expect(document.querySelector('.todo-task-list [data-todo-id="t1"]').textContent).toContain('Task one');
     expect(innerMasked()).toBe(false);
   });
 

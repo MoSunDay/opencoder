@@ -20,6 +20,7 @@ impl SchedulingState {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => NodeScheduling {
                 max_runs,
                 queue_order: Default::default(),
+                workdir: None,
             },
             Err(e) => return Err(e).context("read node scheduling"),
         };
@@ -30,7 +31,7 @@ impl SchedulingState {
         })
     }
     pub(crate) fn get(&self) -> NodeScheduling {
-        *self.value.lock().unwrap()
+        self.value.lock().unwrap().clone()
     }
     pub(crate) fn save(&self, value: NodeScheduling) -> Result<()> {
         value.validate().map_err(anyhow::Error::msg)?;

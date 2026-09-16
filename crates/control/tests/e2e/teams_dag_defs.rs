@@ -107,6 +107,78 @@ async fn dag_definitions_crud() {
     assert_eq!(status, 404);
 }
 
+#[tokio::test]
+async fn dag_save_tracks_update_time_and_preserves_creation_time() {
+    let h = Harness::new().await;
+    let mut spec: serde_json::Value = serde_json::from_str(SPEC).unwrap();
+    let before = opencoder_core::message::now_ms();
+    let (status, created) = h
+        .req(Method::POST, "/api/dag/defs", Some(json!({"spec": spec})))
+        .await;
+    assert_eq!(status, 200, "{created}");
+    assert!(created["created_at"].as_i64().unwrap() >= before);
+    assert_eq!(created["updated_at"], created["created_at"]);
+
+    spec["description"] = json!("edited workflow");
+    let (status, updated) = h
+        .req(
+            Method::POST,
+            "/api/dag/defs",
+            Some(json!({"spec": spec, "created_at": 1, "updated_at": 1})),
+        )
+        .await;
+    assert_eq!(status, 200, "{updated}");
+    assert_eq!(updated["id"], created["id"]);
+    assert_eq!(updated["created_at"], created["created_at"]);
+    assert!(updated["updated_at"].as_i64().unwrap() > created["updated_at"].as_i64().unwrap());
+    assert_eq!(updated["spec"]["description"], "edited workflow");
+
+    let (status, listed) = h.req(Method::GET, "/api/dag/defs", None).await;
+    assert_eq!(status, 200, "{listed}");
+    assert_eq!(listed, json!([updated]));
+    let (status, fetched) = h.req(Method::GET, "/api/dag/defs/etl-demo", None).await;
+    assert_eq!(status, 200, "{fetched}");
+    assert_eq!(fetched, updated);
+
+    spec["steps"] = json!([]);
+    let (status, rejected) = h.req(Method::POST, "/api/dag/defs", Some(spec)).await;
+    assert_eq!(status, 400, "{rejected}");
+    let (status, unchanged) = h.req(Method::GET, "/api/dag/defs/etl-demo", None).await;
+    assert_eq!(status, 200, "{unchanged}");
+    assert_eq!(unchanged, updated);
+}
+
+#[tokio::test]
+async fn legacy_dag_gets_timestamps_on_save_and_concurrent_edits_keep_creation() {
+    let h = Harness::new().await;
+    let spec: serde_json::Value = serde_json::from_str(SPEC).unwrap();
+    h.state
+        .fleet
+        .put_definition(
+            "dag",
+            "etl-demo",
+            &json!({"id":"etl-demo","name":"etl-demo","spec":spec}),
+        )
+        .await
+        .unwrap();
+    let before = opencoder_core::message::now_ms();
+    let (first, second) = tokio::join!(
+        h.req(Method::POST, "/api/dag/defs", Some(spec.clone())),
+        h.req(Method::POST, "/api/dag/defs", Some(spec)),
+    );
+    assert_eq!(first.0, 200, "{}", first.1);
+    assert_eq!(second.0, 200, "{}", second.1);
+    assert!(first.1["created_at"].as_i64().unwrap() >= before);
+    assert_eq!(first.1["created_at"], second.1["created_at"]);
+    let first_time = first.1["updated_at"].as_i64().unwrap();
+    let second_time = second.1["updated_at"].as_i64().unwrap();
+    assert_ne!(first_time, second_time);
+    let (status, stored) = h.req(Method::GET, "/api/dag/defs/etl-demo", None).await;
+    assert_eq!(status, 200, "{stored}");
+    assert_eq!(stored["created_at"], first.1["created_at"]);
+    assert_eq!(stored["updated_at"], first_time.max(second_time));
+}
+
 fn member(agent: &str) -> serde_json::Value {
     json!({"agent": agent})
 }

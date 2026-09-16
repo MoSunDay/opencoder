@@ -89,7 +89,7 @@ function PromptEditorSession({ resourceName, onNotice: noticeCallback, onSaved }
     setSaving(true);
     try {
       const files = PROMPT_PARTS.map((p) => ({ path: p.file, content_b64: b64EncodeText(texts[p.key]) }));
-      const j = await apiPut(`/api/agents/resources/prompts/${encodeURIComponent(resourceName)}`, { files });
+      const j = await apiPut(`/api/agents/resources/prompts/${encodeURIComponent(resourceName)}`, { name: resourceName, files });
       const v = (j && j.version) || version + 1;
       setVersion(v);
       msg.success(`已保存，新版本 v${v}`);

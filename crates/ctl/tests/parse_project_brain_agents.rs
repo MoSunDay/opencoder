@@ -230,29 +230,9 @@ fn brain_search_plan_preview_dispatch() {
             .with_body(serde_json::json!({"query": "auth", "k": 5}))
     );
 
-    let plan = planned_brain(&["plan", "--json", r#"{"situation":"deploy"}"#]);
-    assert_eq!(
-        plan,
-        RequestPlan::post("/api/brain/plans").with_body(serde_json::json!({"situation": "deploy"}))
-    );
-
     let plan = planned_brain(&["plan-get", "p1"]);
     assert_eq!(plan, RequestPlan::get("/api/brain/plans/p1"));
 
-    let plan = planned_brain(&["preview", "--json", r#"{"situation":"deploy"}"#]);
-    assert_eq!(
-        plan,
-        RequestPlan::post("/api/brain/preview")
-            .with_body(serde_json::json!({"situation": "deploy"}))
-    );
-
-    let plan = planned_brain(&[
-        "dispatch",
-        "--json",
-        r#"{"situation":"deploy","plan_id":"p1"}"#,
-    ]);
-    assert_eq!(plan.method, reqwest::Method::POST);
-    assert_eq!(plan.path, "/api/brain/dispatch");
 }
 
 // ── agents ─────────────────────────────────────────────────────────────
@@ -279,12 +259,6 @@ fn agents_cards_and_active_marker() {
 
     let plan = planned_agents(&["delete", "rev"]);
     assert_eq!(plan, RequestPlan::delete("/api/agents/rev"));
-
-    let plan = planned_agents(&["active", "--json", r#"{"active":"rev"}"#]);
-    assert_eq!(
-        plan,
-        RequestPlan::patch("/api/agents/active").with_body(serde_json::json!({"active": "rev"}))
-    );
 
     let plan = planned_agents(&["meta", "rev"]);
     assert_eq!(plan, RequestPlan::get("/api/agents/rev/meta"));

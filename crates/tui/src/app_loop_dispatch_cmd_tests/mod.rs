@@ -126,6 +126,7 @@ async fn dispatch_popup(
         &mut pending_images,
         &mut history,
         &mut hist_idx,
+        &mut None,
     )
     .await;
     let chat_markers = marker_texts(chat);

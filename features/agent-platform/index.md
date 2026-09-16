@@ -1,37 +1,10 @@
-Commit: 3c1222a5e61536ec96914a7edb40d246bc6665e6
+Commit: f2d723ed2a32a5a394eac05f58bc5558e7cfe08f
 
-# Agent 调度平台 — Server 调度、Node 执行、Web/CLI 管理
+# Agent 调度平台
 
-## 执行查看
-
-- 用户从全部执行、DAG 运行等业务入口查看运行；执行列表展示创建时间、ID、类型、节点与状态，详细结果由所属节点提供。
-- DAG 直接展示当前结果，运行中继续更新。完成或取消后的未执行步骤明确标示，加载与连接错误显示重试入口。
-- 点击 DAG 步骤从右侧打开占视口 75% 的「实时日志」抽屉；支持切换步骤或查看全部步骤、搜索、自动滚动和历史分页。打开历史执行不会逐条回放画布，关闭日志抽屉结束日志请求。
-- 执行详情继续提供产物下载；节点离线时显示错误，恢复连接后可重新查询。
-
-## 平滑发布
-
-- 新版本就绪后接新任务；已有任务、回复、重跑与子任务留在原 Runtime，多个版本共用节点容量与 FIFO。
-- 节点页的发布状态展示当前/候选版本、阶段、旧版本任务和回收失败；SSE 按游标自动续接。无任务后旧 Runtime 休眠，访问历史或续跑时自动唤醒。
-- 相同请求 ID/内容只受理一次，异内容返回冲突；兼容回滚只切回新流量，已经接收的任务保持原版本。资源不足或协议/数据不兼容时拒绝激活候选版本。
-- 首次迁移需要一次安全窗口；后续兼容发布不冻结节点，独立 NFS 保持运行。操作见 [平滑发布](../../docs/smooth-release.md)。
-- 管理员可以用 `deploy.sh --signal --bundle ...` 让当前 Server 接收信号完成发布，`--signal --rollback` 回滚；`--stage` 只准备候选。信号成功送达后仍需等待本次持久回执，旧回执不代表新操作完成。
-- 信号能力需要先通过普通平滑发布安装一次；不支持信号的旧二进制会在发信号前被工具拒绝。每次重新激活保留版本都使用新入口实例，旧请求和旧任务继续完成。
-- [opencoder-release skill](../../skills/opencoder-release/SKILL.md) 覆盖代码检查、构建、在线备份、生效、真实任务验证、15 分钟观察与回执。
-
-## 边界
-
-- 执行分配后固定节点，子执行与数据节点闭环
-- Server 索引仅创建时间/ID/类型/节点/状态，明细按 ID 回查节点
-- 节点离线时明细查询明确报错
-- 节点页删除仅移除节点注册；在线节点需先停止服务，执行索引和任务数据保留
-- 平滑发布通过独立资源服务的只读 NFS 共享 Agent 资源和 DAG WASM 制品；节点在受理时复制版本快照到本地执行目录，任务不写 NFS
-- 首次运行架构迁移保留原节点身份、凭证和节点历史；旧 daemon/CLI 的其他存储布局通过独立迁移命令处理。
+Server/Node 调度、DAG 定义管理、执行查看与平滑发布。细节以代码为准。
 
 ## 相关
-
-- [agents/control](../../agents/control/index.md)
-- [agents/worker](../../agents/worker/index.md)
-- [agents/node](../../agents/node/index.md)
-- [项目管理](../../agents/project/index.md)
-- [Agent Harness](../harness/index.md)
+- [agents/control](../../agents/control/index.md) — 控制面
+- [agents/worker](../../agents/worker/index.md)、[agents/node](../../agents/node/index.md)
+- 发布与回滚命令见系统级发布流程。

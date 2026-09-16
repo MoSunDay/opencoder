@@ -42,8 +42,8 @@ export const NAV_CATEGORIES = [
       { page: 'topics', menu: '全部执行', icon: ProfileOutlined },
       { page: 'dag', menu: 'DAG 工作流', icon: DeploymentUnitOutlined },
       { page: 'todos', menu: 'TODO 管理', icon: CheckSquareOutlined },
-      { page: 'team', menu: '团队组队', icon: TeamOutlined },
-      { page: 'chat', menu: '会话交互', icon: MessageOutlined },
+      { page: 'team', menu: 'Team 组队', icon: TeamOutlined },
+      { page: 'chat', menu: 'Agent', icon: MessageOutlined },
       { page: 'agents', menu: 'Agent 配置', icon: RobotOutlined },
     ],
   },
@@ -56,6 +56,12 @@ export const NAV_CATEGORIES = [
   },
 ];
 
+/// Flat registry of every page key (menu order, derived from NAV_CATEGORIES so
+/// the two lists can never drift). Doubles as the validity set for the
+/// persisted navigation selection (main.jsx): a stale or foreign stored value
+/// must fall back to the default page, never crash a renderer.
+export const ALL_PAGES = NAV_CATEGORIES.flatMap((c) => c.items.map((i) => i.page));
+
 /// Fallbacks mirror the pre-IA shell: unknown pages land on the node
 /// category / the nodes page.
 export const DEFAULT_CATEGORY = 'node';
@@ -63,6 +69,12 @@ export const DEFAULT_PAGE = 'nodes';
 
 /// antd Segmented options for the three categories (Sider + mobile row 1).
 export const CATEGORY_OPTIONS = NAV_CATEGORIES.map((c) => ({ value: c.key, label: c.label }));
+
+/// localStorage key mirroring the last explicitly chosen page (项目 / Agent /
+/// 节点 category + its page) so a reload restores the selection. Read and
+/// written exclusively through the usehooks-ts `useLocalStorage` hook in
+/// main.jsx — no other module touches localStorage for navigation state.
+export const NAV_STORAGE_KEY = 'oc_nav_page';
 
 /// Pages with no PageShell header: they are absent from PAGE_META, so
 /// pageShell.jsx renders only the bare `.oc-page` body. Skipping the header

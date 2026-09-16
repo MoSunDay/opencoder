@@ -7,20 +7,21 @@ use anyhow::Result;
 use async_trait::async_trait;
 
 use super::{
-    brain, brain_playbooks, dag, dag_events, events, inputs, messages, node_tasks, nodes, sessions,
-    subagent_tasks, team_runs, todos, users, LibsqlStore,
+    brain, brain_playbooks, dag, dag_events, events, inputs, messages, node_tasks, nodes, schedule,
+    sessions, subagent_tasks, team_runs, todos, users, LibsqlStore,
 };
 use crate::store::Store;
 use crate::types::{
-    ConvergedDagRun, DagDefRecord, DagEventRecord, DagRunRecord, Delivery, ImportReport,
-    InputAdmission, MessageChunkPage, MessageRow, NodeRecord, NodeTaskRecord, NodeTaskStatus,
-    SessionEventPage, SessionEventRecord, SessionFilter, SessionInput, SessionListItem,
-    SessionMeta, SessionPatch, SubagentTaskRecord,
+    ClearNodeDialogs, ConvergedDagRun, DagDefRecord, DagEventRecord, DagRunRecord, Delivery,
+    ImportReport, InputAdmission, MessageChunkPage, MessageRow, NodeRecord, NodeTaskRecord,
+    NodeTaskStatus, SessionEventPage, SessionEventRecord, SessionFilter, SessionInput,
+    SessionListItem, SessionMeta, SessionPatch, SubagentTaskRecord,
 };
 use crate::{
     BrainCapabilityDetail, BrainCapabilityRecord, BrainEngInputRecord, BrainPlanRecord,
-    BrainPlaybookRecord, BrainVectorHit, BrainVectorWrite, TeamTopicRunRecord, TodoEventPage,
-    TodoEventRecord, TodoItemRecord, TodoWorkflowDetail, TodoWorkflowRecord, TodoWorkflowSummary,
+    BrainPlaybookRecord, BrainVectorHit, BrainVectorWrite, ScheduleRunRecord, TeamTopicRunRecord,
+    TodoEventPage, TodoEventRecord, TodoItemRecord, TodoWorkflowDetail, TodoWorkflowRecord,
+    TodoWorkflowSummary,
 };
 
 #[async_trait]
@@ -674,6 +675,20 @@ impl Store for LibsqlStore {
         node_tasks::converge_lost(&self.conn, now_ms, stale_ms).await
     }
 
+    async fn clear_node_dialogs(&self, node_id: &str) -> Result<ClearNodeDialogs> {
+        let _guard = self.db_lock.lock().await;
+        node_tasks::clear_finished_sessions(&self.conn, node_id).await
+    }
+
+    async fn delete_sessions(&self, ids: &[String]) -> Result<u64> {
+        if ids.is_empty() {
+            return Ok(0);
+        }
+        let _guard = self.db_lock.lock().await;
+        let conn = self.conn().await?;
+        sessions::delete_many(&conn, ids).await
+    }
+
     async fn upsert_dag_def(&self, def: &DagDefRecord) -> Result<()> {
         let _guard = self.db_lock.lock().await;
         dag::upsert_def(&self.conn, def).await
@@ -768,6 +783,24 @@ impl Store for LibsqlStore {
     async fn list_team_topic_runs(&self, topic_id: &str) -> Result<Vec<TeamTopicRunRecord>> {
         let _guard = self.db_lock.lock().await;
         team_runs::list(&self.conn, topic_id).await
+    }
+
+    // Schedule runs (control-plane cron fire ledger).
+    async fn record_schedule_run(&self, rec: &ScheduleRunRecord) -> Result<()> {
+        let _guard = self.db_lock.lock().await;
+        schedule::record(&self.conn, rec).await
+    }
+    async fn last_schedule_run(&self, schedule_id: &str) -> Result<Option<ScheduleRunRecord>> {
+        let _guard = self.db_lock.lock().await;
+        schedule::last(&self.conn, schedule_id).await
+    }
+    async fn list_schedule_runs(
+        &self,
+        schedule_id: &str,
+        limit: u32,
+    ) -> Result<Vec<ScheduleRunRecord>> {
+        let _guard = self.db_lock.lock().await;
+        schedule::list(&self.conn, schedule_id, limit).await
     }
 
     async fn import_messages(

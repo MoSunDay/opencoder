@@ -114,6 +114,92 @@ pub async fn dialogs(State(state): State<Arc<AppState>>, Path(node): Path<String
         Err(e) => response(RpcReply::error(500, e.to_string())),
     }
 }
+/// DELETE /api/nodes/:id/dialogs — bulk-clear the node's console dialogs.
+/// Dialog rows live in the node's own runtime store, so the control plane
+/// decides what is safe to drop from its Operator execution index and forwards
+/// a `dialogs_clear` maintenance command to the node: executions still
+/// pending/running/cancelling (and interrupted, i.e. resumable) survive and
+/// are reported as `skipped`; idle/done/error/cancelled sessions are deleted
+/// on the node and their index rows are removed here, so the next full index
+/// report cannot resurrect them.
+pub async fn clear_dialogs(
+    State(state): State<Arc<AppState>>,
+    Path(node): Path<String>,
+) -> Response {
+    let known = state
+        .fleet
+        .nodes()
+        .await
+        .map(|nodes| nodes.iter().any(|n| n.id == node))
+        .unwrap_or(false);
+    if !known {
+        return response(RpcReply::error(404, "node not found"));
+    }
+    let indexes = match state
+        .fleet
+        .indexes(Some(&node), Some(ExecutionKind::Operator), 500)
+        .await
+    {
+        Ok(rows) => rows,
+        Err(e) => return response(RpcReply::error(500, e.to_string())),
+    };
+    let droppable = |status: &ExecutionStatus| {
+        matches!(
+            status,
+            ExecutionStatus::Idle
+                | ExecutionStatus::Done
+                | ExecutionStatus::Error
+                | ExecutionStatus::Cancelled
+        )
+    };
+    let drop_ids: Vec<String> = indexes
+        .iter()
+        .filter(|ix| droppable(&ix.status))
+        .map(|ix| ix.id.clone())
+        .collect();
+    let mut skipped: Vec<String> = indexes
+        .iter()
+        .filter(|ix| !droppable(&ix.status))
+        .map(|ix| ix.id.clone())
+        .collect();
+    let reply = state
+        .hub
+        .call(
+            &node,
+            NodeOperation::Maintenance {
+                command: ExecutionCommand {
+                    action: "dialogs_clear".into(),
+                    input: json!({ "sessions": drop_ids }),
+                },
+            },
+        )
+        .await;
+    if reply.status >= 300 {
+        return response(reply);
+    }
+    if let Some(extra) = reply.body["skipped"].as_array() {
+        for value in extra {
+            if let Some(id) = value.as_str() {
+                if !skipped.iter().any(|known| known == id) {
+                    skipped.push(id.to_owned());
+                }
+            }
+        }
+    }
+    match state
+        .fleet
+        .delete_terminal_indexes(&node, ExecutionKind::Operator, &drop_ids)
+        .await
+    {
+        Ok(_) => {}
+        Err(e) => return response(RpcReply::error(500, format!("delete_indexes: {e:#}"))),
+    }
+    let removed = reply.body.get("removed").and_then(Value::as_u64).unwrap_or(0);
+    response(RpcReply::ok(
+        json!({"ok": true, "removed": removed, "skipped": skipped}),
+    ))
+}
+
 pub async fn owner(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Response {
     match state.fleet.index(&id).await {
         Ok(Some(index)) => response(RpcReply::ok(

@@ -2,6 +2,7 @@
 //! admin user CRUD, the non-admin read/launch profile, and the operator-only
 //! submission/command rules for non-admin roles.
 
+use opencoder_core::fleet::{ExecutionKind, ExecutionStatus};
 use reqwest::Method;
 use serde_json::{json, Value};
 
@@ -211,7 +212,7 @@ async fn non_admins_get_the_read_and_operator_launch_profile() {
 }
 
 #[tokio::test]
-async fn non_admins_submit_and_command_operator_executions_only() {
+async fn non_admins_submit_and_command_operator_and_agent_executions() {
     let h = Harness::new().await;
     let token = user_token_h(&h, "op-user", "user").await;
 
@@ -236,20 +237,42 @@ async fn non_admins_submit_and_command_operator_executions_only() {
         .journal_ids()
         .contains(&"operator-nina-1".to_string()));
 
-    // agent (or any other kind) submissions are refused before placement.
-    let (status, body) = auth(
+    // agent submissions pass the same gate end to end.
+    let (status, receipt) = auth(
         &h,
         Method::POST,
         "/api/executions",
         &token,
-        Some(json!({"id": "agent-nina-1", "kind": "agent", "input": {"prompt": "hi"}})),
+        Some(json!({
+            "id": "agent-nina-1",
+            "kind": "agent",
+            "node_id": "node-e2e",
+            "input": {"prompt": "hi"}
+        })),
     )
     .await;
-    assert_eq!(status, 403, "{body}");
-    assert_eq!(
-        body["error"],
-        json!("non-admin roles may only submit operator executions")
-    );
+    assert_eq!(status, 202, "{receipt}");
+    assert_eq!(receipt["kind"], json!("agent"));
+    assert_eq!(receipt["node_id"], json!("node-e2e"));
+    assert!(h.node.journal_ids().contains(&"agent-nina-1".to_string()));
+
+    // dag/team (or any other kind) submissions are refused before placement
+    // with the documented message.
+    for kind in ["dag", "team"] {
+        let (status, body) = auth(
+            &h,
+            Method::POST,
+            "/api/executions",
+            &token,
+            Some(json!({"id": format!("{kind}-nina-1"), "kind": kind})),
+        )
+        .await;
+        assert_eq!(status, 403, "{kind}: {body}");
+        assert_eq!(
+            body["error"],
+            json!("non-admin roles may only submit operator or agent executions")
+        );
+    }
 
     // Reading the operator execution works; the id must keep the operator-
     // prefix (the scripted node supplies the inspect body).
@@ -266,33 +289,29 @@ async fn non_admins_submit_and_command_operator_executions_only() {
     assert_eq!(status, 200, "{body}");
     assert_eq!(body["status"], json!("running"));
 
-    // Commands on the operator execution pass the kind rule (the node's
-    // scripted 400 for an unknown command is the passthrough proof).
-    let (status, body) = auth(
-        &h,
-        Method::POST,
-        "/api/executions/operator-nina-1/commands",
-        &token,
-        Some(json!({"action": "prompt", "input": {"prompt": "more"}})),
-    )
-    .await;
-    assert_eq!(status, 400, "{body}");
-    assert_eq!(body["error"], json!("unknown execution command"));
+    // Commands on operator AND agent executions pass the kind rule (the
+    // node's scripted 400 for an unknown command is the passthrough proof).
+    for id in ["operator-nina-1", "agent-nina-1"] {
+        let (status, body) = auth(
+            &h,
+            Method::POST,
+            &format!("/api/executions/{id}/commands"),
+            &token,
+            Some(json!({"action": "prompt", "input": {"prompt": "more"}})),
+        )
+        .await;
+        assert_eq!(status, 400, "{id}: {body}");
+        assert_eq!(body["error"], json!("unknown execution command"));
+    }
 
-    // An admin-owned agent execution stays untouchable for commands.
-    let (status, _) = auth(
-        &h,
-        Method::POST,
-        "/api/executions",
-        TOKEN,
-        Some(json!({"id": "agent-admin-1", "kind": "agent", "input": {"prompt": "hi"}})),
-    )
-    .await;
-    assert_eq!(status, 202);
+    // An admin-owned non-operator/agent execution stays untouchable for
+    // commands (the gate reads the durable index kind).
+    h.put_index("team-admin-1", ExecutionKind::Team, ExecutionStatus::Idle)
+        .await;
     let (status, body) = auth(
         &h,
         Method::POST,
-        "/api/executions/agent-admin-1/commands",
+        "/api/executions/team-admin-1/commands",
         &token,
         Some(json!({"action": "prompt", "input": {"prompt": "more"}})),
     )
@@ -300,7 +319,7 @@ async fn non_admins_submit_and_command_operator_executions_only() {
     assert_eq!(status, 403, "{body}");
     assert_eq!(
         body["error"],
-        json!("non-admin roles may only command operator executions")
+        json!("non-admin roles may only command operator or agent executions")
     );
 }
 

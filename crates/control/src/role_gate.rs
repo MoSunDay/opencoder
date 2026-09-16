@@ -16,7 +16,7 @@ use serde_json::json;
 
 /// May this role touch this method+path? POST `/api/executions` and POST
 /// `/api/executions/:id/commands` pass here for non-admins and get their
-/// operator-only kind checks inside the executions handlers (the decision
+/// operator/agent kind checks inside the executions handlers (the decision
 /// needs the request body / execution index).
 pub fn allowed(role: Role, method: &Method, path: &str) -> bool {
     match role {
@@ -151,13 +151,18 @@ mod tests {
 
     #[test]
     fn non_admin_submissions_and_commands_pass_to_kind_checks() {
-        // These pass the gate; the executions handlers reject non-operator
-        // kinds for non-admins.
+        // These pass the gate; the executions handlers reject every kind
+        // beyond operator/agent for non-admins.
         assert!(allow(Role::User, "POST", "/api/executions"));
         assert!(allow(
             Role::User,
             "POST",
             "/api/executions/operator-x/commands"
+        ));
+        assert!(allow(
+            Role::User,
+            "POST",
+            "/api/executions/agent-x/commands"
         ));
         // Other mutations on executions stay closed.
         assert!(!allow(Role::User, "PUT", "/api/executions/operator-x"));

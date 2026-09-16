@@ -4,6 +4,9 @@
 // whole navigation derives from nav.js NAV_CATEGORIES; the active category
 // is derived from `page` itself, so there is no second navigation state to
 // keep in sync (mobile renders the same two levels as Segmented + Select).
+// The last explicitly chosen page is mirrored to localStorage through the
+// usehooks-ts `useLocalStorage` hook (nav.js NAV_STORAGE_KEY) and restored
+// pre-paint on mount, so 项目 / Agent / 节点 selections survive a reload.
 // Visual identity lives in theme.js (antd ThemeConfig) + app.css --oc-*;
 // no component here carries an inline color.
 //
@@ -18,16 +21,19 @@ import { Alert, App as AntdApp, Badge, Button, ConfigProvider, Layout, Menu, Seg
 import { MenuFoldOutlined, MenuUnfoldOutlined } from '@ant-design/icons';
 import zhCN from 'antd/locale/zh_CN';
 import dayjs from 'dayjs';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import 'dayjs/locale/zh-cn';
+import { useLocalStorage } from 'usehooks-ts';
 import { apiGet } from './api.js';
 import { LoginModal } from './login.jsx';
 import './app.css';
 import {
+  ALL_PAGES,
   allowedPages,
   categoryHome,
   menuItemsOf,
+  NAV_STORAGE_KEY,
   selectItemsOf,
   visibleCategories,
 } from './nav.js';
@@ -89,14 +95,28 @@ function PageBody({ page, onNotice }) {
 }
 
 /// Pages whose panels render bare flex surfaces (no Card of their own).
-/// They get a white sheet (.fleet-sheet) so they still read as a panel now
-/// that Content sits on the gray layout canvas. Card-bearing pages float
-/// their own white surfaces directly. chat.jsx is touched lightly in a
-/// later iteration; this keeps the shell visually whole meanwhile.
+/// They get a white sheet (.fleet-sheet) docked to the viewport bottom:
+/// Content drops its own bottom padding (fleet-content--flush) and the sheet
+/// squares off its bottom corners, so the panel reads as flush with the
+/// screen edge. Card-bearing pages float their own white surfaces directly
+/// inside the padded pane.
 const SHEET_PAGES = new Set(['chat']);
 
 function App() {
   const { token, page, identity } = useStore();
+  // 项目 / Agent / 节点 分类选择的持久化：显式导航（goPage）经 usehooks-ts 的
+  // useLocalStorage 把所选页写入 `oc_nav_page`（键与校验集都在 nav.js）；重新
+  // 挂载时在首帧绘制前恢复进 store——useLayoutEffect 先于绘制执行，默认页不
+  // 闪现。brain_run 深链优先于存储值；ALL_PAGES 之外的陌生/损坏值一律忽略。
+  // localStorage 的读写全部在 hook 库内完成，本文件不自管 getItem/setItem。
+  const [storedPage, setStoredPage] = useLocalStorage(NAV_STORAGE_KEY, null);
+  useLayoutEffect(() => {
+    const deepLink = new URLSearchParams(window.location.search).has('brain_run');
+    if (!deepLink && ALL_PAGES.includes(storedPage) && storedPage !== page) {
+      setState({ page: storedPage });
+    }
+    // 引导只做一次：后续 page 变化由 goPage 单向镜像，恢复不回环。
+  }, []);
   const [navCollapsed, setNavCollapsed] = useState(false);
   // Panel→shell notices carry {type, text} (notice.js); normalizeNotice
   // keeps legacy bare-string call sites safe. Empty text (the onNotice('')
@@ -116,7 +136,11 @@ function App() {
   const category = visible.find((c) => c.items.some((i) => i.page === shownPage)) || visible[0];
   const categoryOptions = visible.map((c) => ({ value: c.key, label: c.label }));
 
+  // Explicit navigation (Sider Segmented/Menu, mobile Segmented/Select) is
+  // the single writer of the persisted selection; programmatic jumps keep
+  // the store-only semantics they already had.
   const goPage = (key) => {
+    setStoredPage(key);
     setState({ page: key });
   };
 
@@ -200,7 +224,7 @@ function App() {
                 {navCollapsed ? null : '收起菜单'}
               </Button>
             </Sider>
-            <Content className="fleet-content">
+            <Content className={SHEET_PAGES.has(shownPage) ? 'fleet-content fleet-content--flush' : 'fleet-content'}>
               <Segmented
                 className="fleet-mobile-nav"
                 block

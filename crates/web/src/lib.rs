@@ -509,7 +509,10 @@ pub fn build_app(state: Arc<AppState>, token: Option<String>, web: bool) -> axum
             "/api/nodes/:id/control_result",
             post(api_control::post_control_result),
         )
-        .route("/api/nodes/:id/dialogs", get(api_control::list_dialogs))
+        .route(
+            "/api/nodes/:id/dialogs",
+            get(api_control::list_dialogs).delete(api_control::clear_dialogs),
+        )
         .route("/api/nodes/:id", delete(api_nodes::delete_node))
         // ── node-side DAG workflows (server stores + forwards only) ────
         .route(

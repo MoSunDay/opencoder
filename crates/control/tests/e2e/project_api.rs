@@ -1,7 +1,7 @@
 //! Project surface: goal→milestone→todo CRUD, overview aggregation, the
 //! plan/act node affinity lifecycle and run views.
 
-use opencoder_core::fleet::{ExecutionKind, ExecutionStatus};
+use opencoder_core::fleet::{ExecutionKind, ExecutionStatus, RpcReply};
 use reqwest::Method;
 use serde_json::json;
 
@@ -438,11 +438,13 @@ async fn overview_merges_live_todo_state_from_node_inspect() {
     assert_eq!(mine["active_session_id"], json!("s-7"));
 }
 
+/// A node that no longer holds the execution (lost journal / reprovision)
+/// answers Inspect with 404 execution-not-found: the overview keeps the
+/// durable index and degrades the row quietly — no `detail_error`.
 #[tokio::test]
-async fn overview_reports_detail_error_when_inspect_fails() {
+async fn overview_degrades_quietly_when_the_node_lost_the_execution() {
     let h = Harness::new().await;
     let todo_id = seed_todo(&h).await;
-    // Execution present in the index but the node holds no detail reply.
     let exec_id = format!("project-{todo_id}");
     h.put_index(&exec_id, ExecutionKind::Project, ExecutionStatus::Idle)
         .await;
@@ -456,11 +458,35 @@ async fn overview_reports_detail_error_when_inspect_fails() {
         .find(|t| t["id"] == json!(todo_id))
         .unwrap();
     assert!(mine["execution"].is_object(), "{mine}");
-    assert_eq!(mine["detail_error"]["error"], json!("execution not found"));
+    assert_eq!(mine["execution"]["status"], json!("idle"));
+    assert!(mine.get("detail_error").is_none(), "{mine}");
+}
+
+/// Real inspect failures (offline node → 503) stay loud: the row carries
+/// `detail_error` so the console can surface them.
+#[tokio::test]
+async fn overview_keeps_detail_error_for_real_inspect_failures() {
+    let h = Harness::new().await;
+    let todo_id = seed_todo(&h).await;
+    let exec_id = format!("project-{todo_id}");
+    h.put_index(&exec_id, ExecutionKind::Project, ExecutionStatus::Idle)
+        .await;
+    h.node
+        .set_inspect_reply(&exec_id, RpcReply::error(503, "node offline"));
+
+    let (status, body) = h.req(Method::GET, "/api/project/overview", None).await;
+    assert_eq!(status, 200, "{body}");
+    let mine = body["backlog"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["id"] == json!(todo_id))
+        .unwrap();
+    assert_eq!(mine["detail_error"]["error"], json!("node offline"));
 }
 
 #[tokio::test]
-async fn todo_runs_propagate_node_inspect_failure() {
+async fn todo_runs_degrade_to_an_empty_page_when_the_node_lost_the_run() {
     let h = Harness::new().await;
     let todo_id = seed_todo(&h).await;
     let exec_id = format!("project-{todo_id}");
@@ -474,8 +500,10 @@ async fn todo_runs_propagate_node_inspect_failure() {
             None,
         )
         .await;
-    assert_eq!(status, 404, "{body}");
-    assert_eq!(body["error"], json!("project execution not found"));
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["runs"], json!([]));
+    assert_eq!(body["next_version"], json!(null));
+    assert_eq!(body["more"], json!(false));
 }
 
 #[tokio::test]
@@ -578,10 +606,20 @@ async fn legacy_brain_todo_execute_rejects_without_default_agent() {
     let h = Harness::new().await;
     let todo_id = seed_todo_with_kind(&h, Some("brain")).await;
 
-    let (status, body) = h.req(Method::POST, &format!("/api/project/todos/{todo_id}/execute"), Some(json!({}))).await;
+    let (status, body) = h
+        .req(
+            Method::POST,
+            &format!("/api/project/todos/{todo_id}/execute"),
+            Some(json!({})),
+        )
+        .await;
     assert_eq!(status, 409, "{body}");
     assert!(body.to_string().contains("migration required"));
-    assert!(h.node.seen_commands().iter().all(|(_, action, _)| action != "execute"));
+    assert!(h
+        .node
+        .seen_commands()
+        .iter()
+        .all(|(_, action, _)| action != "execute"));
 }
 
 #[tokio::test]

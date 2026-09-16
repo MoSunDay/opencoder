@@ -48,6 +48,7 @@ const agentsFixture = { agents: [
 const teamsFixture = {
   teams: [
     { name: 't1', captain: 'act', members: [{ agent: 'act' }, { agent: 'review' }] },
+    { name: 't2', captain: 'explore', members: [{ agent: 'explore' }] },
   ],
 };
 
@@ -131,9 +132,10 @@ afterEach(() => {
 
 /// antd inserts a space inside two-CJK-char buttons ("编 辑"), so match
 /// buttons on whitespace-squashed textContent (same trick as
-/// agentDetail.dom.test.jsx / fleet.dom.test.jsx).
+/// agentDetail.dom.test.jsx / fleet.dom.test.jsx). 混排文案（如「启动 Team」）
+/// 自带空格，指针也一并去空白再比。
 const findButton = (txt) => screen.getAllByRole('button')
-  .find((b) => (b.textContent || '').replace(/\s+/g, '') === txt);
+  .find((b) => (b.textContent || '').replace(/\s+/g, '') === txt.replace(/\s+/g, ''));
 
 /// Open an antd Select and pick the dropdown option with the exact label —
 /// the same interaction helper agentDetail.dom.test.jsx uses (options render
@@ -163,16 +165,29 @@ describe('TeamPanel', () => {
     expect(screen.getByText('review')).toBeTruthy(); // member agent Tag
     expect(screen.queryByText(/协调任务并汇总结果/)).toBeNull(); // 职责由服务端固化，不再随成员下发
     expect(findButton('编辑')).toBeTruthy();
-    expect(findButton('启动团队')).toBeTruthy();
-    expect(findButton('创建团队')).toBeTruthy();
+    expect(findButton('启动 Team')).toBeTruthy();
+    expect(findButton('创建 Team')).toBeTruthy();
     expect(findButton('刷新')).toBeTruthy();
+  });
+
+  it('filters teams by name through the controlled team-search box (case-insensitive)', async () => {
+    render(<TeamPanel onNotice={() => {}} />);
+    expect(await screen.findByText('t1')).toBeTruthy();
+    // 大写输入命中小写 team 名：过滤忽略大小写，t2 行在、t1 行消失。
+    fireEvent.change(screen.getByLabelText('team-search'), { target: { value: 'T2' } });
+    await waitFor(() => expect(screen.queryByText('t1')).toBeNull());
+    expect(screen.getByText('t2')).toBeTruthy();
+    // 清空搜索后列表恢复。
+    fireEvent.change(screen.getByLabelText('team-search'), { target: { value: '' } });
+    expect(await screen.findByText('t1')).toBeTruthy();
+    expect(screen.getByText('t2')).toBeTruthy();
   });
 
   it('opens the create-team modal with the agent pickers fed by /api/brain/agents', async () => {
     render(<TeamPanel onNotice={() => {}} />);
-    fireEvent.click(await screen.findByText('创建团队'));
-    expect(await screen.findByText('团队成员')).toBeTruthy();
-    expect(screen.getByLabelText('团队名称')).toBeTruthy();
+    fireEvent.click(await screen.findByText('创建 Team'));
+    expect(await screen.findByText('Team 成员')).toBeTruthy();
+    expect(screen.getByLabelText('Team 名称')).toBeTruthy();
     expect(screen.getByLabelText('队长')).toBeTruthy();
     expect(screen.getByLabelText('队员')).toBeTruthy(); // multiple Select
     expect(screen.queryByPlaceholderText('成员 ID')).toBeNull(); // 成员身份即 agent，不再手填 ID
@@ -187,14 +202,14 @@ describe('TeamPanel', () => {
       expect(labels).toEqual(expect.arrayContaining(['act', 'explore'])); // from /api/brain/agents
     });
     expect(apiGetMock).toHaveBeenCalledWith('/api/brain/agents');
-    expect(findButton('保存团队')).toBeTruthy();
+    expect(findButton('保存 Team')).toBeTruthy();
   });
 
-  it('启动团队 arms the launch modal with the team name and node candidates from /api/nodes', async () => {
+  it('启动 Team arms the launch modal with the team name and node candidates from /api/nodes', async () => {
     render(<TeamPanel onNotice={() => {}} />);
-    fireEvent.click(await screen.findByText('启动团队'));
+    fireEvent.click((await screen.findAllByText('启动 Team'))[0]); // 两行各有同名操作按钮
     expect(await screen.findByText('启动 t1')).toBeTruthy();
-    expect(screen.getByText(/整个团队会在同一个执行节点内完成/)).toBeTruthy();
+    expect(screen.getByText(/整个 Team 会在同一个执行节点内完成/)).toBeTruthy();
     expect(screen.getByLabelText('任务要求')).toBeTruthy();
     await act(async () => {
       fireEvent.mouseDown(screen.getByRole('combobox')); // 执行节点 picker
@@ -208,7 +223,7 @@ describe('TeamPanel', () => {
   it('dispatches a team execution on confirm and opens its detail drawer', async () => {
     render(<TeamPanel onNotice={() => {}} />);
     await screen.findByText('t1');
-    fireEvent.click(screen.getByText('启动团队'));
+    fireEvent.click(findButton('启动 Team')); // 行操作按钮按去空白匹配唯一载体
     expect(await screen.findByText('启动 t1')).toBeTruthy();
     fireEvent.change(screen.getByLabelText('任务要求'), { target: { value: '准备发布' } });
     // antd inserts a space inside two-CJK-char buttons ("启 动"), so match the

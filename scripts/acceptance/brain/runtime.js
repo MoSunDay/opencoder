@@ -39,8 +39,10 @@ async function main() {
     await page.getByLabel('目标和交付物').fill('浏览器运行：提交经过验证的修复结果');
     await page.getByLabel('大脑所在节点').click();
     await page.locator('.ant-select-item-option').filter({ hasText: 'test-node' }).first().click();
-    await page.getByLabel('文档名称', { exact: true }).fill('回归需求');
-    await page.getByLabel('Markdown 正文').fill('# 问题\n修复后提交测试依据。');
+    await page.getByRole('button', { name: '添加工程参数' }).click();
+    await page.getByLabel('工程参数名').fill('document');
+    // 工程描述 KV 值按 JSON 解析；具名文档改为通过一层 KV 提交。
+    await page.getByLabel('工程参数值').fill('{"name":"回归需求","markdown":"# 问题\\n修复后提交测试依据。"}');
     const created = page.waitForResponse((r) => r.url().endsWith('/api/brain/runs') && r.request().method() === 'POST');
     await page.getByRole('button', { name: '执行指定版本' }).click();
     const createdResponse = await created;

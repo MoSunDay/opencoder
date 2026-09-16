@@ -224,8 +224,8 @@ describe('fleet execution boundaries', () => {
     apiPost.mockRejectedValueOnce(new Error('connection lost')).mockImplementation(async (_, body) => ({ ...body, node_id: 'n1', status: 'pending', created_at: 1 }));
     const onNotice = vi.fn();
     render(<FleetTeamsPanel onNotice={onNotice} />);
-    fireEvent.click(await screen.findByText('启动团队'));
-    expect(await screen.findByText(/整个团队会在同一个执行节点/)).toBeTruthy();
+    fireEvent.click(await screen.findByText('启动 Team'));
+    expect(await screen.findByText(/整个 Team 会在同一个执行节点/)).toBeTruthy();
     fireEvent.change(screen.getByLabelText('任务要求'), { target: { value: '准备发布' } });
     const submit = [...document.querySelectorAll('.ant-modal button')].find((button) => button.textContent.replace(/\s+/g, '') === '启动');
     expect(submit).toBeTruthy(); fireEvent.click(submit);
@@ -250,8 +250,8 @@ describe('fleet execution boundaries', () => {
     apiPost.mockResolvedValue({ ok: true });
     const onNotice = vi.fn();
     render(<FleetTeamsPanel onNotice={onNotice} />);
-    fireEvent.click(await screen.findByText('创建团队'));
-    fireEvent.change(await screen.findByLabelText('团队名称'), { target: { value: 'release' } });
+    fireEvent.click(await screen.findByText('创建 Team'));
+    fireEvent.change(await screen.findByLabelText('Team 名称'), { target: { value: 'release' } });
     /// 队长 Select 可搜索：先过滤再选中 plan。
     fireEvent.mouseDown(screen.getByLabelText('队长').closest('.ant-select'));
     fireEvent.change(document.activeElement, { target: { value: 'pl' } });
@@ -274,7 +274,7 @@ describe('fleet execution boundaries', () => {
     expect(rosterRow('plan').textContent).toContain('队长');
     expect(rosterRow('act').textContent).not.toContain('队长');
     expect(rosterRow('plan').compareDocumentPosition(rosterRow('act')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    fireEvent.click(screen.getByText('保存团队'));
+    fireEvent.click(screen.getByText('保存 Team'));
     await waitFor(() => expect(apiPost).toHaveBeenCalledWith('/api/teams', { name: 'release', captain: 'plan', members: [{ agent: 'plan' }, { agent: 'act' }, { agent: 'explore' }] }));
     expect(onNotice).toHaveBeenLastCalledWith(err(''));
   });

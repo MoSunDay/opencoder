@@ -165,7 +165,7 @@ async fn apply_report_tx(
     Ok(recovered)
 }
 
-async fn rollback(conn: &Connection) {
+pub(super) async fn rollback(conn: &Connection) {
     if let Err(error) = conn.execute("ROLLBACK", ()).await {
         tracing::warn!(%error, "index report rollback failed");
     }

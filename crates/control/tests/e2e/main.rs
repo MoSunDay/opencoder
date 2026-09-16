@@ -27,6 +27,8 @@ mod infra_static;
 mod project_api;
 mod project_crud_extra;
 mod project_store_failure;
+mod schedule_api;
+mod sessions_agent;
 mod sessions_compat_extra;
 mod sessions_relay;
 mod support_knobs;

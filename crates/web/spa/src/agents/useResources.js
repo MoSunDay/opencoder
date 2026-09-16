@@ -20,7 +20,7 @@ export function useResources(name, onChanged, onDirtyChange) {
   },[name,apply]);
   useEffect(() => { alive.current = true; load(); return () => { alive.current = false; generation.current++; }; },[load]);
   const dirty = Object.values(entries).some(isDirty);
-  const busy = Object.values(entries).some(entry => entry.saving || entry.uploading);
+  const busy = Object.values(entries).some(entry => entry.saving);
   useEffect(() => { reportDirty?.(dirty || busy); },[dirty,busy,reportDirty]);
   useEffect(() => {
     const beforeUnload = event => { if (dirty || busy) { event.preventDefault(); event.returnValue = ''; } };
@@ -30,7 +30,7 @@ export function useResources(name, onChanged, onDirtyChange) {
   const edit = (cat, draft) => setEntries(previous => ({...previous,[cat]:{...previous[cat],draft,saved:false}}));
   const save = async (cat, version) => {
     const entry = entries[cat];
-    if (!entry?.view || entry.loadError || entry.view.read_only || entry.saving || entry.uploading) return;
+    if (!entry?.view || entry.loadError || entry.view.read_only || entry.saving) return;
     if (version !== undefined && isDirty(entry) && !window.confirm('恢复历史版本会丢弃当前页签的未保存内容，继续？')) return;
     apply(cat,{...entry,saving:true,error:''});
     try {
@@ -43,6 +43,5 @@ export function useResources(name, onChanged, onDirtyChange) {
     } catch (error) { apply(cat,{...entry,error:error.message,saving:false}); }
   };
   const refresh = () => { if (!busy && (!dirty || window.confirm('刷新会丢弃未保存内容，继续？'))) load(); };
-  const working = (cat, uploading) => setEntries(previous => ({...previous,[cat]:{...previous[cat],uploading}}));
-  return {entries,edit,save,refresh,busy,working};
+  return {entries,edit,save,refresh,busy};
 }

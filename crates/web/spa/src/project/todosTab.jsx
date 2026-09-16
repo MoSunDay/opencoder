@@ -22,7 +22,7 @@ const todoPath = (id) => '/api/project/todos/' + encodeURIComponent(id);
 /// 文案；这里是纯数据以便单测断言四项齐全。
 export const EXECUTOR_OPTIONS = [
   { value: 'agent', label: '单Agent' },
-  { value: 'team', label: '团队' },
+  { value: 'team', label: 'Team' },
   { value: 'dag', label: 'DAG' },
 ];
 
@@ -132,7 +132,7 @@ function CreateTodoModal({ open, overview, onCancel, onNotice, onCreated }) {
             <Form.Item
               name="executor_ref"
               label="目标名"
-              tooltip="命名团队 / DAG 定义；留空则只看内联定义"
+              tooltip="命名 Team / DAG 定义；留空则只看内联定义"
             >
               <Input placeholder="可留空" style={{ width: 240 }} />
             </Form.Item>

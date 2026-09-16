@@ -101,6 +101,52 @@ async fn run_unscoped(worker: &Worker, command: ExecutionCommand) -> Result<RpcR
                 json!({"agents":opencoder_core::agent::list_agents(),"read_only":true}),
             ))
         }
+        // Bulk-clear console dialogs. `input.sessions` carries the ids the
+        // control plane decided are safe to drop (terminal index rows); ids of
+        // executions still active on this node are skipped so a live run can
+        // never lose its session. Journal records go with them, otherwise the
+        // next full index report would resurrect the deleted executions.
+        "dialogs_clear" => {
+            let requested: Vec<String> = command.input["sessions"]
+                .as_array()
+                .map(|rows| {
+                    rows.iter()
+                        .filter_map(|v| v.as_str().map(str::to_owned))
+                        .collect()
+                })
+                .unwrap_or_default();
+            let active: std::collections::HashSet<String> = worker
+                .inner
+                .active
+                .lock()
+                .await
+                .keys()
+                .cloned()
+                .collect();
+            let skipped: Vec<String> = requested
+                .iter()
+                .filter(|id| active.contains(*id))
+                .cloned()
+                .collect();
+            let deletable: Vec<String> = requested
+                .iter()
+                .filter(|id| !active.contains(*id))
+                .cloned()
+                .collect();
+            let removed = worker.inner.state.store.delete_sessions(&deletable).await?;
+            let mut forgotten = 0usize;
+            {
+                let mut journal = worker.inner.journal.lock().await;
+                for id in &deletable {
+                    if journal.forget(id).unwrap_or(false) {
+                        forgotten += 1;
+                    }
+                }
+            }
+            Ok(RpcReply::ok(
+                json!({"ok": true, "removed": removed, "skipped": skipped, "forgotten": forgotten}),
+            ))
+        }
         "ask" => {
             let id = command.input["id"]
                 .as_str()

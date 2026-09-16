@@ -100,6 +100,15 @@ impl MockNode {
             .insert(id.into(), RpcReply::ok(body));
     }
 
+    /// Raw-reply inspect override for non-200 degradation tests.
+    pub fn set_inspect_reply(&self, id: &str, reply: RpcReply) {
+        self.tables
+            .lock()
+            .unwrap()
+            .inspects
+            .insert(id.into(), reply);
+    }
+
     pub fn set_command(&self, id: &str, action: &str, status: u16, body: Value) {
         self.tables
             .lock()
@@ -444,7 +453,7 @@ impl NodeService for MockNode {
                 .project_runs
                 .get(&execution.id)
                 .cloned()
-                .unwrap_or_else(|| miss404("project execution not found")),
+                .unwrap_or_else(|| miss404("execution not found")),
             NodeOperation::TeamTurns { execution, .. } => t
                 .team_turns
                 .get(&execution.id)

@@ -55,13 +55,13 @@ function CreateAgentModal({ open, onClose, onCreated, onNotice }) {
 }
 
 export function AgentsPanel({ onNotice }) {
-  // Operator 页签仅对 admin 显示入口（产品选择）；后端允许 user/root 提交
-  // operator 执行（见 users_api e2e），SPA 不在此重复拦截。
+  // 「节点总览」页签（原 Operator，admin-only 入口，产品选择）；后端允许
+  // user/root 提交 operator 执行（见 users_api e2e），SPA 不在此重复拦截。
   const { identity } = useStore();
   return <PageShell page="agents"><Tabs destroyOnHidden items={[
     { key: 'agents', label: 'Agent 列表', children: <AgentListPanel onNotice={onNotice} /> },
     ...(identity?.role === 'admin' ? [
-      { key: 'operator', label: 'Operator', children: <OperatorPanel onNotice={onNotice} /> },
+      { key: 'operator', label: '节点总览', children: <OperatorPanel onNotice={onNotice} /> },
     ] : []),
     { key: 'harnesses', label: 'Harness 管理', children: <HarnessManagement onNotice={onNotice} /> },
     { key: 'nfs', label: 'NFS 配置', children: <AgentNfsCard onNotice={onNotice} /> },

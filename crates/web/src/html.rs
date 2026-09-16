@@ -24,6 +24,7 @@ const INDEX_HTML: &str = include_str!("../spa/dist/index.html");
 const APP_JS: &[u8] = include_bytes!("../spa/dist/static/app.js");
 const APP_CSS: &[u8] = include_bytes!("../spa/dist/static/app.css");
 const DOWNLOAD_SW: &[u8] = include_bytes!("../spa/dist/static/download-sw.js");
+const FAVICON_PNG: &[u8] = include_bytes!("../spa/dist/static/favicon.png");
 
 /// SPA shell: the compile-time-embedded `spa/dist/index.html`.
 pub async fn index(State(_state): State<Arc<AppState>>) -> Html<&'static str> {
@@ -45,6 +46,7 @@ pub async fn static_asset(Path(name): Path<String>) -> Response {
             DOWNLOAD_SW,
         )
             .into_response(),
+        "favicon.png" => asset_response(FAVICON_PNG, "image/png"),
         _ => StatusCode::NOT_FOUND.into_response(),
     }
 }
@@ -108,6 +110,16 @@ mod tests {
             Some("text/css")
         );
         assert!(!body(css).await.is_empty(), "app.css must be non-empty");
+
+        let ico = static_asset(Path("favicon.png".to_string())).await;
+        assert_eq!(ico.status(), StatusCode::OK);
+        assert_eq!(
+            ico.headers()
+                .get(header::CONTENT_TYPE)
+                .and_then(|v| v.to_str().ok()),
+            Some("image/png")
+        );
+        assert!(!body(ico).await.is_empty(), "favicon.png must be non-empty");
 
         for name in ["nope.js", "index.html"] {
             let miss = static_asset(Path(name.to_string())).await;

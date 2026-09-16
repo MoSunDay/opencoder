@@ -7,7 +7,7 @@ use anyhow::{Context, Result};
 use libsql::{params, Connection};
 
 use super::node_state::transition_allowed;
-use crate::types::{NodeTaskRecord, NodeTaskStatus, SessionMeta, TASK_TYPE_NODE};
+use crate::types::{ClearNodeDialogs, NodeTaskRecord, NodeTaskStatus, SessionMeta, TASK_TYPE_NODE};
 
 const TASK_COLS: &str = "id, node_id, session_id, title, prompt, agent, model, status, error, cancel_requested, created_at, claimed_at, finished_at";
 
@@ -293,6 +293,43 @@ pub async fn converge_lost(
             }
         }
         Ok(out)
+    })
+    .await
+}
+
+/// Bulk-clear a node's console dialogs in one transaction: delete the
+/// sessions of every TERMINAL task (done | error | cancelled) of `node_id`;
+/// sessions of pending/running/cancelling tasks are kept and reported as
+/// `skipped`. The `sessions` delete cascades to the node_tasks row and all
+/// child tables, so no per-row work is needed.
+pub async fn clear_finished_sessions(conn: &Connection, node_id: &str) -> Result<ClearNodeDialogs> {
+    super::tx::run_tx(conn, "BEGIN IMMEDIATE", || async move {
+        let skipped = {
+            let stmt = conn
+                .prepare(
+                    "SELECT session_id FROM node_tasks
+                     WHERE node_id = ?1 AND status NOT IN ('done','error','cancelled')
+                     ORDER BY created_at DESC",
+                )
+                .await?;
+            let mut rows = stmt.query(params![node_id]).await?;
+            let mut out = Vec::new();
+            while let Some(r) = rows.next().await? {
+                out.push(r.get::<String>(0)?);
+            }
+            out
+        };
+        let removed = conn
+            .execute(
+                "DELETE FROM sessions WHERE id IN (
+                   SELECT session_id FROM node_tasks
+                   WHERE node_id = ?1 AND status IN ('done','error','cancelled')
+                 )",
+                params![node_id],
+            )
+            .await
+            .context("clear finished node sessions")?;
+        Ok(ClearNodeDialogs { removed: removed as u64, skipped })
     })
     .await
 }

@@ -187,6 +187,32 @@ pub async fn list_dialogs(State(state): State<Arc<AppState>>, Path(id): Path<Str
     Json(json!({ "dialogs": group_dialogs(&tasks) })).into_response()
 }
 
+/// DELETE /api/nodes/:id/dialogs — bulk-clear the node's console dialogs.
+///
+/// One-click "delete all sessions" for the Operator page: only sessions bound
+/// to a TERMINAL node task (done | error | cancelled) are removed, with the
+/// same FK cascades as `DELETE /api/sessions/:id` (messages, events, inputs,
+/// subagent tasks, and the node_tasks row itself). Tasks still
+/// pending/running/cancelling are SKIPPED — their sessions survive so a
+/// running execution is never swept away. Unknown node answers 404.
+pub async fn clear_dialogs(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Response {
+    match state.store.get_node(&id).await {
+        Ok(Some(_)) => {}
+        Ok(None) => return error_404("node not found"),
+        Err(e) => return error_500(format!("get_node: {e:#}")),
+    }
+    let result = match state.store.clear_node_dialogs(&id).await {
+        Ok(r) => r,
+        Err(e) => return error_500(format!("clear_node_dialogs: {e:#}")),
+    };
+    Json(json!({
+        "ok": true,
+        "removed": result.removed,
+        "skipped": result.skipped,
+    }))
+    .into_response()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

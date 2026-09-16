@@ -11,6 +11,7 @@ use std::sync::Arc;
 
 pub fn build_app(state: Arc<AppState>, token: Option<String>, web: bool) -> Router {
     crate::release::outbox::start(&state);
+    crate::scheduler::start(&state);
     // Captured before the builder chains consume `state`: the bearer
     // middleware resolves platform users through the same store.
     let auth_store = state.store.clone();
@@ -20,6 +21,7 @@ pub fn build_app(state: Arc<AppState>, token: Option<String>, web: bool) -> Rout
     let mut app = Router::<Arc<AppState>>::new()
         .merge(api::compat::routes())
         .merge(api::brain_runs::routes())
+        .merge(api::schedules::routes())
         .route("/api/health", get(|| async { axum::Json(json!({"ok":true,"protocol_version":opencoder_core::fleet::PROTOCOL_VERSION,"role":"control","commit":opencoder_core::version::VERSION_LONG})) }))
         .route("/api/ready", get(admission::ready))
         .route("/api/admin/release", get(crate::release::status))

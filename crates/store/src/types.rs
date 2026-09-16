@@ -492,6 +492,15 @@ pub struct NodeTaskRecord {
     pub finished_at: Option<i64>,
 }
 
+/// Result of a node-dialog bulk clear ([`crate::Store::clear_node_dialogs`]):
+/// `removed` counts deleted session rows; `skipped` lists the session ids
+/// kept because their node task was still pending/running/cancelling.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ClearNodeDialogs {
+    pub removed: u64,
+    pub skipped: Vec<String>,
+}
+
 pub fn message_preview(msgs: &[Message], max_chars: usize) -> String {
     let mut out = String::new();
     for m in msgs {

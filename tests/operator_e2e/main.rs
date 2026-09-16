@@ -6,13 +6,16 @@
 //!   session-shaped result, messages and SSE agree.
 //! - O2 `relay_sse` — the `/api/sessions/:id/*` relay fallback: follow-up
 //!   prompts, reads, the operation-rejection contract and the live SSE.
-//! - O3 `gating` — the role gate: non-admin tokens submit operator
-//!   executions (positive) and are refused everywhere else.
+//! - O3 `gating` — the role gate: non-admin tokens submit operator and
+//!   agent executions (positive) and are refused everywhere else.
 //! - O4 `lifecycle` — interrupt mid-drain and agent-restart recovery.
+//! - O5 `agent_session` — `kind=agent` sessions: how_append injection,
+//!   output contract and the merged chat listing.
 
 #[path = "../support/mod.rs"]
 mod support;
 
+mod agent_session;
 mod flow;
 mod gating;
 mod lifecycle;

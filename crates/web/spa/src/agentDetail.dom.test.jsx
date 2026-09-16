@@ -7,11 +7,22 @@ vi.mock('./api.js',() => api);
 vi.mock('./ui/files/editor.jsx',() => ({FileEditor:({path,value,onChange,readOnly}) => <textarea aria-label={`文件内容 ${path}`} value={value} disabled={readOnly} onChange={e=>onChange(path,e.target.value)}/>}));
 import {AgentDetail} from './agentDetail.jsx';
 import {b64EncodeText} from './agentsItems.js';
+import {zipSync} from 'fflate';
 const file = (path,text,mode=0o600) => ({path,content_b64:b64EncodeText(text),mode});
 const snapshot = (cat,files=[],extra={}) => ({ok:true,category:cat,baseline:{resource:files.length ? 'shared' : null,version:files.length ? 2 : 0,revision:'revision'},versions:files.length ? [1,2] : [],files,read_only:false,...extra});
 let views;
 const button = name => screen.getByRole('button',{name:label=>label.replace(/\s/g,'')===name});
 const tab = name => fireEvent.click(screen.getByRole('tab',{name,exact:true}));
+const treeMenu = async (path,label) => {
+  if (path) await waitFor(()=>expect(document.querySelector(`[data-file-path="${path}"]`)).toBeTruthy());
+  fireEvent.contextMenu(path ? document.querySelector(`[data-file-path="${path}"]`).closest('.ant-tree-node-content-wrapper') : document.querySelector('.file-workspace-tree'));
+  fireEvent.click(await screen.findByText(label,{selector:'.ant-dropdown-menu-title-content'}));
+};
+const draftName = async text => {
+  const input = await screen.findByLabelText('新增文件名称');
+  fireEvent.change(input,{target:{value:text}});
+  fireEvent.keyDown(input,{key:'Enter',code:'Enter',keyCode:13});
+};
 const mount = async props => {
   const rendered = render(<AgentDetail name="coder" onNotice={vi.fn()} onChanged={vi.fn()} {...props}/>);
   await screen.findByLabelText('prompt-soul'); return rendered;
@@ -70,9 +81,8 @@ describe('AgentDetail direct resources',() => {
     expect(button('保存').disabled).toBe(true);
     fireEvent.change(screen.getByLabelText('prompt-how'),{target:{value:'FIRST'}}); fireEvent.click(button('保存'));
     await waitFor(()=>expect(api.apiPut.mock.calls[0][1].baseline.resource).toBeNull());
-    tab('Memory'); await screen.findByText('未配置，可新增文件或上传内容后保存。');
-    fireEvent.click(button('新增文件'));
-    fireEvent.change(screen.getByLabelText('文件路径'),{target:{value:'memory.md'}}); fireEvent.click(button('确认'));
+    tab('Memory'); await screen.findByText(/未配置，可在目录树右键新增文件/);
+    await treeMenu('','新增文件'); await draftName('memory.md');
     fireEvent.change(await screen.findByLabelText('文件内容 memory.md'),{target:{value:'NEW MEMORY'}}); fireEvent.click(button('保存'));
     await waitFor(()=>expect(api.apiPut.mock.calls.at(-1)[0]).toBe('/api/agents/coder/resources/memory'));
   });
@@ -113,19 +123,21 @@ describe('AgentDetail direct resources',() => {
     const body=api.apiPut.mock.calls[0][1]; expect(body.removed).toEqual(['probe/SKILL.md','probe/assets/data.bin']); expect(body.files[0].path).toBe('renamed/SKILL.md');
     expect(body.files[1]).toEqual(file('renamed/assets/data.bin','\0binary'));
   });
-  it('uploads binary replacements without changing executable permissions',async () => {
+  it('imports an archive that overwrites run.sh in place and keeps it executable',async () => {
     await mount(); tab('Tools'); await screen.findByLabelText('文件内容 run.sh');
-    fireEvent.change(screen.getByLabelText('上传替换'),{target:{files:[new File([new Uint8Array([0,255,2])],'new.bin')]}});
+    const input=document.querySelector('input[type=file]');
+    fireEvent.change(input,{target:{files:[new File([zipSync({'run.sh':new Uint8Array([0,255,2])})],'bundle.zip')]}});
+    await screen.findByText(/覆盖同名 1 个/); fireEvent.click(button('覆盖上传'));
     await screen.findByText(/二进制 · 权限 755/); fireEvent.click(button('保存'));
     await waitFor(()=>expect(api.apiPut).toHaveBeenCalled());
     expect(api.apiPut.mock.calls[0][1].files).toEqual([{path:'run.sh',content_b64:'AP8C',mode:0o755}]);
   });
-  it('adds and removes files and reopens saved contents',async () => {
-    views.tools=snapshot('tools'); const view=await mount(); tab('Tools'); fireEvent.click(button('新增文件'));
-    fireEvent.change(screen.getByLabelText('文件路径'),{target:{value:'new.sh'}}); fireEvent.click(button('确认'));
+  it('adds and removes files from the tree and reopens saved contents',async () => {
+    views.tools=snapshot('tools'); const view=await mount(); tab('Tools');
+    await treeMenu('','新增文件'); await draftName('new.sh');
     fireEvent.change(await screen.findByLabelText('文件内容 new.sh'),{target:{value:'echo new'}}); fireEvent.click(button('保存'));
     await screen.findByText('已保存'); view.unmount(); await mount(); tab('Tools'); expect((await screen.findByLabelText('文件内容 new.sh')).value).toBe('echo new');
-    fireEvent.click(button('移除')); fireEvent.click(button('确认')); fireEvent.click(button('保存'));
+    await treeMenu('new.sh','删除文件'); fireEvent.click(button('确认')); fireEvent.click(button('保存'));
     await waitFor(()=>expect(api.apiPut.mock.calls.at(-1)[1].removed).toEqual(['new.sh']));
   });
   // 全局激活已移除：详情不再提供「设为生效」（会话级 agent 切换走会话接口）。

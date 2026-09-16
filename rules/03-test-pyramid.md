@@ -41,7 +41,7 @@ mod tests {
 - **位置**：`crates/<crate>/tests/*.rs`（含目录目标 `tests/<dir>/main.rs`）
 - **对象**：跨模块协作、持久化、Mock 驱动的业务流程
 - **要求**：用 `MockChatClient`（非真网络）、`tempdir`（非真文件系统）、`LibsqlStore::open_memory()`（非真数据库文件）
-- **示例**：`steer_followup.rs`、`recovery.rs`、`web_contract.rs`、`store_integration/`
+- **示例**：`steer_followup.rs`、`recovery.rs`、`web_contract.rs`、`store_integration/`；根包进程级形态：`tests/operator_e2e/`、`tests/dag_e2e/`（真二进制子进程 + loopback LLM 桩，零外部服务 → 仍判第 2 层）
 
 ```rust
 // crates/session/tests/steer_followup.rs

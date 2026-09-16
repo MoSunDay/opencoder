@@ -107,10 +107,6 @@ fn expect_reload(rx: &mut tokio::sync::mpsc::UnboundedReceiver<opencoder_web::cm
     }
 }
 
-/// Assert NO further fan-out arrived (silence).
-// (`expect_silent` removed with the activation gate: every card write now
-// fans out unconditionally, so silence is never expected.)
-
 /// Write a live `prompts/<name>` pool (meta current=v1 + one version dir) —
 /// the minimum `resource_current_version_dir` needs to resolve.
 fn seed_prompt_pool(root: &std::path::Path, name: &str) {

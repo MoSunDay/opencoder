@@ -1,11 +1,11 @@
-Commit: c2bd85c234ea2394536308dd63c1122aa670ebc2
+Commit: cd2b20f9
 
 # OpenCoder 能力地图 — 业务能力总索引
 
 ## 平台与编排
 
 - [Agent 调度平台](agent-platform/index.md) — Server/Node 调度与按 ID 查执行明细。
-- [DAG 工作流](../agents/dag-runtime/index.md) — agent/wasm 步骤、依赖执行与产物、单步执行记录（`session.json` / `step_output`）；控制台点画布任一 step 打开单步执行记录抽屉（wasm=实时日志、agent=类 TUI 会话转写），走 SSE `/api/dag/runs/:id/steps/:step/events`。
+- [DAG 工作流](../agents/dag-runtime/index.md) — agent/wasm 步骤、依赖执行与产物、单步执行记录（`session.json` / `step_output`）；控制台点画布任一 step 打开单步执行记录抽屉（wasm=实时日志、agent=类 TUI 会话转写），走 SSE `/api/dag/runs/:id/steps/:step/events`。定义编辑器画布支持工具栏「连线」模式两段式点击建依赖边（armed 源高亮、合法目标提示，`canConnect` 拒自连/重复/成环，Esc/点空白取消），点 Handle 未拖动同样进入待目标模式，Handle 拖拽与 JSON 模式仍可用；运行画布保持只读、点节点开抽屉。
 - [持久化 TODO 工作流](todos/index.md) — 父会话调度验收、独立 TODO 执行。
 - [项目管理](../agents/project/index.md) — goal/milestone/todo 与多执行器。
 - [版本化 Agent 与 NFS](../agents/agents/index.md) — 按 Agent 编辑四类资源、专属版本与共享池、只读导出。

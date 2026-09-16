@@ -44,23 +44,23 @@ pub async fn deliver(
                 .await?
             {
                 version = saved;
+            } else {
+                if let Err(error) = plans::pin(&state, &mut version.plan).await {
+                    let reply = runs::call(
+                        &state,
+                        &execution.id,
+                        "publication_failed",
+                        json!({"error":format!("plan capability validation: {error:#}")}),
+                    )
+                    .await;
+                    ensure!(
+                        reply.status < 300,
+                        "publication failure receipt was not committed"
+                    );
+                    return Ok(());
+                }
+                state.fleet.save_brain_plan(&version).await?;
             }
-            if let Err(error) = plans::pin(&state, &mut version.plan).await {
-                let reply = runs::call(
-                    &state,
-                    &execution.id,
-                    "publication_failed",
-                    json!({"error":format!("plan capability validation: {error:#}")}),
-                )
-                .await;
-                ensure!(
-                    reply.status < 300,
-                    "publication failure receipt was not committed"
-                );
-                return Ok(());
-            }
-            state.fleet.save_brain_plan(&version).await?;
-            catalog::register_plan(&state, &version).await?;
             let reply = runs::call(&state, &execution.id, "published", json!(version)).await;
             ensure!(reply.status < 300, "plan adoption: {}", reply.body);
             Ok(())
@@ -78,9 +78,7 @@ pub async fn deliver(
             }
             let reply = match receipt.kind {
                 ActionKind::Execute => {
-                    let mut request: CreateExecution =
-                        serde_json::from_value(receipt.request.clone())?;
-                    request.node_id = Some(node.clone());
+                    let request: CreateExecution = serde_json::from_value(receipt.request.clone())?;
                     let resources: Vec<ResourceUse> =
                         serde_json::from_value(request.input["_brain"]["resources"].clone())?;
                     if !state

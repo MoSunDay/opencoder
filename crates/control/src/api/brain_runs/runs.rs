@@ -121,6 +121,7 @@ pub async fn create(State(state): State<Arc<AppState>>, Json(body): Json<CreateR
             None => None,
         };
         let request = BrainRequest {
+            schema_version: 2,
             mode: body.mode,
             objective: body.objective,
             inputs: body.inputs,

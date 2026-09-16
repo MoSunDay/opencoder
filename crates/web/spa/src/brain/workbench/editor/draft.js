@@ -8,7 +8,7 @@ export function readDraft(key, version, storage = localStorage) {
   const raw = storage.getItem(key);
   if (raw === null) return createDraft(version);
   const draft = JSON.parse(raw);
-  if (!draft?.version?.id || !Array.isArray(draft.version.plan?.steps) || !draft.positions || !draft.raw || !draft.metadata) throw new Error('浏览器草稿格式无效，原始缓存已保留');
+  if (!draft?.version?.id || !Array.isArray(draft.version.plan?.instances) || !draft.positions || !draft.raw || !draft.metadata) throw new Error('浏览器草稿格式无效，原始缓存已保留');
   checkDraftPlan(draft.version.plan);
   return draft;
 }

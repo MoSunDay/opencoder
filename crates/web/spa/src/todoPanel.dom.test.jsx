@@ -110,6 +110,7 @@ describe('TodoPanel 模板 tab', () => {
     await screen.findByText('demo');
     fireEvent.click(document.querySelector('.ant-table-row-expand-icon'));
     expect(await screen.findByText('未绑定 env')).toBeTruthy(); // 版本行 env 徽标
+    expect(screen.getByText('仅保留最近 10 个版本，超出的旧版本自动清理')).toBeTruthy(); // 保留策略提示
     // 「运行」既是 tab 名也是行按钮：只取 button 载体。
     const runBtn = screen.getAllByText('运行')
       .map((el) => el.closest('button'))
@@ -139,7 +140,7 @@ describe('TodoPanel 模板 tab', () => {
     await openDrawer();
     fireEvent.change(screen.getByLabelText('模板名'), { target: { value: 'spec-check' } });
     await screen.findByLabelText('文件内容 objective.md');
-    fireEvent.click(findButton('创建模板'));
+    fireEvent.click(findButton('保存'));
     await waitFor(() => {
       expect(apiPostMock).toHaveBeenCalledWith(
         '/api/todo/templates',
@@ -159,7 +160,7 @@ describe('TodoPanel 模板 tab', () => {
     fireEvent.click(screen.getByText('编辑'));
 
     const drawer = await openDrawer();
-    expect(screen.getByText('编辑模板 demo')).toBeTruthy(); // 抽屉标题接管 Card 标题
+    expect(drawer.querySelector('.ant-drawer-header')).toBeNull();
     // 编辑器本体已在抽屉里加载（context 回填 + 三模式切换可用）。
     expect(await screen.findByLabelText('文件内容 objective.md')).toBeTruthy();
     expect(document.querySelector('.file-workspace')).toBeTruthy();

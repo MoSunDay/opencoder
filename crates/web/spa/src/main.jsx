@@ -22,18 +22,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import 'dayjs/locale/zh-cn';
 import { apiGet } from './api.js';
-import { AgentsPanel } from './agentsConfig.jsx';
-import { FleetBrainPanel as BrainPanel } from './fleet/brain.jsx';
-import { ChatPanel } from './chat.jsx';
-import { DagPanel } from './dagPanel.jsx';
 import { LoginModal } from './login.jsx';
-import { FleetNodesPanel as NodesPanel } from './fleet/nodes.jsx';
-import { OwnerViewPanel } from './project/ownerViewPanel.jsx';
-import { ProgressPanel } from './project/progressPanel.jsx';
-import { ProjectPanel } from './project/project.jsx';
-import { FleetTeamsPanel as TeamPanel } from './fleet/teams.jsx';
-import { TodoPanel } from './todoPanel.jsx';
-import { ExecutionsPanel as TopicsPanel } from './fleet/executions.jsx';
 import './app.css';
 import {
   allowedPages,
@@ -42,6 +31,7 @@ import {
   selectItemsOf,
   visibleCategories,
 } from './nav.js';
+import { PANELS } from './shell/panels.jsx';
 import { clearCredentials, setState, setIdentity, useStore } from './store.js';
 import { UsersDrawer } from './admin/usersDrawer.jsx';
 import { normalizeNotice } from './notice.js';
@@ -93,24 +83,8 @@ function IdentityBadge() {
   return <Text type="secondary" style={{ fontSize: 12 }}>{identity.name} · {ROLE_LABELS[identity.role] || identity.role}</Text>;
 }
 
-/// Page components keyed by store `page` — one map instead of a ternary
-/// chain so adding a page stays one line.
-const PANELS = {
-  chat: ChatPanel,
-  team: TeamPanel,
-  topics: TopicsPanel,
-  project: ProjectPanel,
-  progress: ProgressPanel,
-  ownerview: OwnerViewPanel,
-  dag: DagPanel,
-  todos: TodoPanel,
-  agents: AgentsPanel,
-  nodes: NodesPanel,
-  brain: BrainPanel,
-};
-
 function PageBody({ page, onNotice }) {
-  const Panel = PANELS[page] || ChatPanel;
+  const Panel = PANELS[page] || PANELS.chat;
   return <Panel onNotice={onNotice} />;
 }
 

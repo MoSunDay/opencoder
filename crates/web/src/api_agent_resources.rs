@@ -1,10 +1,10 @@
 //! `/api/agents/resources/:cat` — the four shared, independently versioned
 //! pools (`prompts|skills|tools|memory`) that agent cards reference by
 //! name. Writes go through `opencoder_agents` (atomic temp-dir + rename
-//! version swaps); reads through `opencoder_core::agent`. ReloadConfig fans
-//! out only when the ACTIVE card's chain names the written resource (see
-//! [`crate::api_agents::active_chain_references`]) — every other write is
-//! a silent disk write.
+//! version swaps); reads through `opencoder_core::agent`. Every resource
+//! version write fans `DrainCmd::ReloadConfig` out unconditionally so live
+//! sessions' pool snapshots stay fresh (不依赖激活判断；全局激活 agent 已
+//! 移除，会话自身 agent 由会话级切换决定).
 
 use std::io;
 use std::sync::Arc;
@@ -18,13 +18,13 @@ use base64::Engine;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use opencoder_agents::{rollback_resource, save_resource_version, VersionFile};
+use opencoder_agents::{rollback_resource, write::save_shared_version, VersionFile};
 use opencoder_core::agent::{
-    category_dir, list_agents, list_resources, read_agent_meta, read_resource_meta,
-    resource_version_dir, validate_resource_name, AGENT_CATEGORIES,
+    list_agents, list_resources, read_agent_meta, read_resource_meta, validate_resource_name,
+    AGENT_CATEGORIES,
 };
 
-use crate::api_agents::{active_chain_references, fan_out_reload};
+use crate::api_agents::fan_out_reload;
 use crate::AppState;
 
 /// Decoded payload cap per request (1.5 MiB) — the whole `files` array,
@@ -68,6 +68,11 @@ fn io_error_response(ctx: &str, e: io::Error) -> Response {
         io::ErrorKind::InvalidInput | io::ErrorKind::InvalidData => {
             error_400(format!("{ctx}: {e}"))
         }
+        io::ErrorKind::PermissionDenied => (
+            StatusCode::FORBIDDEN,
+            Json(json!({"ok":false,"error":e.to_string()})),
+        )
+            .into_response(),
         _ => error_500(format!("{ctx}: {e}")),
     }
 }
@@ -75,13 +80,6 @@ fn io_error_response(ctx: &str, e: io::Error) -> Response {
 fn unknown_category(cat: &str) -> Option<Response> {
     (!AGENT_CATEGORIES.contains(&cat))
         .then(|| error_400(format!("unknown resource category: {cat}")))
-}
-
-/// ReloadConfig only when the ACTIVE card's chain names this resource.
-async fn maybe_fan_out(state: &AppState, cat: &str, resource: &str) {
-    if active_chain_references(cat, resource) {
-        fan_out_reload(state).await;
-    }
 }
 
 /// A file path is safe when non-empty, relative (no leading `/`), free of
@@ -110,12 +108,14 @@ fn safe_rel_path(path: &str) -> Result<(), String> {
 }
 
 /// Category-specific file shapes: prompts are exactly the three section
-/// files, memory a single `memory.md`, skills a standalone markdown file
-/// or a package with a `SKILL.md` entry; tools accept any safe path.
+/// files, memory any safe relative path (multi-file / nested dirs — the
+/// reader aggregates every `*.md` in the version dir), skills a standalone
+/// markdown file or a package with a `SKILL.md` entry; tools accept any
+/// safe path. `safe_rel_path` has already run in `decode_files`.
 fn check_shape(cat: &str, path: &str) -> Result<(), String> {
     let ok = match cat {
         "prompts" => matches!(path, "soul.md" | "how.md" | "output.md"),
-        "memory" => path == "memory.md",
+        "memory" => true,
         "skills" => {
             let segments: Vec<&str> = path.split('/').collect();
             (segments.len() >= 2) || (segments.len() == 1 && path.ends_with(".md"))
@@ -131,6 +131,7 @@ fn check_shape(cat: &str, path: &str) -> Result<(), String> {
 
 #[derive(Deserialize)]
 pub struct SaveBody {
+    #[serde(default)]
     pub name: String,
     pub files: Vec<SaveFile>,
 }
@@ -227,9 +228,9 @@ pub async fn create(
         )
             .into_response();
     }
-    match save_resource_version(&cat, &name, &files) {
+    match save_shared_version(&cat, &name, &files, Some(false)) {
         Ok(version) => {
-            maybe_fan_out(&state, &cat, &name).await;
+            fan_out_reload(&state).await;
             Json(json!({ "ok": true, "version": version })).into_response()
         }
         Err(e) => io_error_response("save resource", e),
@@ -242,8 +243,12 @@ pub async fn create(
 pub async fn put_version(
     State(state): State<Arc<AppState>>,
     Path((cat, name)): Path<(String, String)>,
-    Json(body): Json<SaveBody>,
+    Json(mut body): Json<SaveBody>,
 ) -> Response {
+    if !body.name.is_empty() && body.name.trim() != name {
+        return error_400("resource name must match URL".into());
+    }
+    body.name = name.clone();
     if let Some(resp) = unknown_category(&cat) {
         return resp;
     }
@@ -254,9 +259,9 @@ pub async fn put_version(
         Ok(v) => v,
         Err(msg) => return error_400(msg),
     };
-    match save_resource_version(&cat, &name, &files) {
+    match save_shared_version(&cat, &name, &files, Some(true)) {
         Ok(version) => {
-            maybe_fan_out(&state, &cat, &name).await;
+            fan_out_reload(&state).await;
             Json(json!({ "ok": true, "version": version })).into_response()
         }
         Err(e) => io_error_response("save resource", e),
@@ -287,13 +292,10 @@ pub async fn read_file(
     if let Some(resp) = unknown_category(&cat) {
         return resp;
     }
-    let Some(dir) = resource_version_dir(&cat, &name, version) else {
-        return error_404(&format!("unknown resource: {cat}/{name}"));
-    };
     if let Err(msg) = safe_rel_path(&path) {
         return error_400(msg);
     }
-    match std::fs::read(dir.join(&path)) {
+    match opencoder_agents::resources::read_file(&cat, &name, version, &path) {
         Ok(bytes) => Json(json!({
             "ok": true,
             "path": path,
@@ -301,7 +303,7 @@ pub async fn read_file(
             "size": bytes.len(),
         }))
         .into_response(),
-        Err(_) => error_404(&format!("no such file: {cat}/{name}/v{version}/{path}")),
+        Err(e) => io_error_response("read resource file", e),
     }
 }
 
@@ -322,7 +324,7 @@ pub async fn rollback(
     }
     match rollback_resource(&cat, &name, body.version) {
         Ok(()) => {
-            maybe_fan_out(&state, &cat, &name).await;
+            fan_out_reload(&state).await;
             Json(json!({ "ok": true, "current": body.version })).into_response()
         }
         Err(e) => io_error_response("rollback resource", e),
@@ -373,20 +375,17 @@ pub async fn delete(
         )
             .into_response();
     }
-    let Some(dir) = category_dir(&cat).map(|d| d.join(&name)) else {
-        return error_404(&format!("unknown resource: {cat}/{name}"));
-    };
-    match std::fs::remove_dir_all(&dir) {
+    match opencoder_agents::resources::delete_shared(&cat, &name) {
         Ok(()) => {
             // Unreachable while referenced (409 above), kept for symmetry
-            // with the reload policy: no card — let alone the active one —
-            // can name this resource anymore.
-            maybe_fan_out(&state, &cat, &name).await;
+            // with the reload policy: no card can name this resource
+            // anymore.
+            fan_out_reload(&state).await;
             Json(json!({ "ok": true, "deleted": name })).into_response()
         }
         Err(e) if e.kind() == io::ErrorKind::NotFound => {
             error_404(&format!("unknown resource: {cat}/{name}"))
         }
-        Err(e) => error_500(format!("delete resource: {e}")),
+        Err(e) => io_error_response("delete resource", e),
     }
 }

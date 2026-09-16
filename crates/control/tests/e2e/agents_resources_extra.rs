@@ -117,16 +117,18 @@ async fn resource_validation_matrix() {
     }
 
     // Per-category file shapes: prompts exactly the three sections,
-    // memory exactly `memory.md`, skills SKILL.md-bearing, tools any
-    // safe (incl. nested) path. (cat, path, expect 400?)
+    // memory any safe path (multi-file / nested dirs), skills
+    // SKILL.md-bearing, tools any safe (incl. nested) path.
+    // (cat, path, expect 400?)
     for (cat, path, bad) in [
         ("prompts", "soul.md", false),
         ("prompts", "evil.md", true),
         ("prompts", "nested/soul.md", true),
         ("prompts", "soul.txt", true),
         ("memory", "memory.md", false),
-        ("memory", "other.md", true),
-        ("memory", "mem/memory.md", true),
+        ("memory", "other.md", false),
+        ("memory", "mem/memory.md", false),
+        ("memory", "../escape.md", true),
         ("skills", "review/SKILL.md", false),
         ("skills", "tips.md", false),
         ("skills", "review/guide.md", true),
@@ -310,7 +312,8 @@ async fn resource_lifecycle_versions_rollback_and_file_fetch() {
 }
 
 /// The other three pools round-trip end to end: skills take both legal
-/// shapes, memory exactly `memory.md`, tools nested paths.
+/// shapes, memory is directory-shaped (multi-file, nested dirs, byte-exact
+/// read back, reference snapshot hit), tools nested paths.
 #[tokio::test]
 async fn resource_skills_memory_tools_pools_roundtrip() {
     let _guard = scoped().await;

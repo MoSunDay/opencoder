@@ -5,13 +5,10 @@ use opencoder_node::fleet::NodeService;
 use serde_json::{json, Value};
 use support::*;
 
-fn plan() -> Value {
-    json!({"id":"plan-integration","version":1,"plan":{"schema_version":1,"title":"Concurrent review","objective":"review and summarize","steps":[
-        {"id":"review","label":"Review","purpose":"Review evidence","action":{"kind":"agent","target":"act","prompt":"Return evidence"},"output":{"type":"string"},"acceptance":"evidence returned"},
-        {"id":"independent","label":"Independent","purpose":"Independent evidence","action":{"kind":"agent","target":"act","prompt":"Return evidence"},"output":{"type":"string"},"acceptance":"evidence returned"},
-        {"id":"summary","label":"Summary","purpose":"Summarize review","action":{"kind":"agent","target":"act","prompt":"Summarize"},"inputs":{"review":{"schema":{"type":"string"},"binding":{"source":"output","step":"review"}}},"output":{"type":"string"},"acceptance":"summary returned"}
-    ],"deliverables":{"report":{"description":"report","source":{"source":"output","step":"summary"},"schema":{"type":"string"}}}},"changelog":"initial reviewed plan","tags":[],"created_at":1,"author":"test"})
-}
+#[path = "support/brain.rs"]
+mod graph_support;
+use graph_support::{doc, plan, GraphClient};
+use std::sync::Arc;
 
 async fn wait_phase(fleet: &Fleet, id: &str, phase: &str) -> Value {
     let mut last = Value::Null;
@@ -38,30 +35,38 @@ async fn wait_phase(fleet: &Fleet, id: &str, phase: &str) -> Value {
 #[tokio::test]
 async fn fixed_plan_executes_through_real_node_channels_and_returns_verified_outputs() {
     let _config = support::isolated_config();
-    let client = mock();
+    let client = Arc::new(GraphClient::default());
     let fleet = Fleet::new(2, client.clone()).await;
     let saved = fleet.call("POST", "/api/brain/plan-defs", plan()).await;
     assert_eq!(saved.status, 200, "{saved:?}");
-    let body = json!({"id":"brain-integration","node_id":fleet.nodes[0].registration().id,"mode":"fixed","objective":"Review","plan":{"id":"plan-integration","version":1}});
+    let body = json!({"id":"brain-integration","node_id":fleet.nodes[0].registration().id,"mode":"fixed","objective":"Review","plan":{"id":"plan-integration","version":1},"inputs":doc()});
     let created = fleet.call("POST", "/api/brain/runs", body.clone()).await;
     assert_eq!(created.status, 202, "{created:?}");
     let snapshot = wait_phase(&fleet, "brain-integration", "completed").await;
-    assert_eq!(snapshot["deliverables"]["report"], "node-owned answer");
+    assert_eq!(
+        snapshot["deliverables"]
+            .as_object()
+            .unwrap()
+            .values()
+            .next()
+            .unwrap(),
+        "node-owned answer"
+    );
     assert_eq!(snapshot["plan"]["version"], 1);
-    assert_eq!(snapshot["total_instances"], 3);
+    assert_eq!(snapshot["total_instances"], 1);
     let index = fleet
         .state
         .fleet
         .indexes(None, Some(ExecutionKind::Agent), 100)
         .await
         .unwrap();
-    assert_eq!(index.len(), 3);
-    let calls = client.call_count();
+    assert_eq!(index.len(), 1);
+    let calls = client.requests.lock().unwrap().len();
     assert_eq!(
         fleet.call("POST", "/api/brain/runs", body).await.status,
         202
     );
-    assert_eq!(client.call_count(), calls);
+    assert_eq!(client.requests.lock().unwrap().len(), calls);
     let events = fleet
         .call(
             "GET",
@@ -79,13 +84,7 @@ async fn fixed_plan_executes_through_real_node_channels_and_returns_verified_out
 async fn input_wait_releases_slot_and_pause_fences_then_cancel_closes_root() {
     let _config = support::isolated_config();
     let fleet = Fleet::new(1, mock()).await;
-    let mut definition = plan();
-    definition["plan"]["inputs"] =
-        json!({"name":{"description":"User must supply a name","schema":{"type":"string"}}});
-    for step in definition["plan"]["steps"].as_array_mut().unwrap() {
-        step["inputs"] =
-            json!({"name":{"schema":{"type":"string"},"binding":{"source":"input","name":"name"}}});
-    }
+    let definition = plan();
     assert_eq!(
         fleet
             .call("POST", "/api/brain/plan-defs", definition)
@@ -111,7 +110,7 @@ async fn input_wait_releases_slot_and_pause_fences_then_cancel_closes_root() {
             .call(
                 "POST",
                 "/api/brain/runs/brain-input/inputs",
-                json!({"name":"name","value":"Ada"})
+                json!({"name":"document","value":{"name":"Ada","markdown":"body"}})
             )
             .await
             .status,
@@ -139,27 +138,21 @@ async fn input_wait_releases_slot_and_pause_fences_then_cancel_closes_root() {
 }
 
 #[tokio::test]
-async fn dynamic_plans_once_publishes_version_and_registers_draft_capabilities() {
+async fn dynamic_plans_once_publishes_version_and_uses_registered_capabilities() {
     let _config = support::isolated_config();
-    let client = mock();
+    let client = Arc::new(GraphClient::default());
     let fleet = Fleet::new(1, client.clone()).await;
-    let generated = plan()["plan"].clone();
-    client.queue_script(vec![opencoder_llm::LlmEvent::Completed {
-        text: generated.to_string(),
-        tool_calls: vec![],
-        usage: None,
-    }]);
-    let created=fleet.call("POST","/api/brain/runs",json!({"id":"brain-dynamic","node_id":fleet.nodes[0].registration().id,"mode":"dynamic","objective":"Review dynamically"})).await;
+    let created=fleet.call("POST","/api/brain/runs",json!({"id":"brain-dynamic","node_id":fleet.nodes[0].registration().id,"mode":"dynamic","objective":"Review dynamically","inputs":doc()})).await;
     assert_eq!(created.status, 202, "{created:?}");
     let snapshot = wait_phase(&fleet, "brain-dynamic", "completed").await;
     assert_eq!(snapshot["plan"]["id"], "plan-dynamic");
-    let requests = client.requests();
+    let requests = client.requests.lock().unwrap().clone();
     assert_eq!(
         requests
             .iter()
             .filter(|r| r.purpose == opencoder_llm::RequestPurpose::Planning)
             .count(),
-        1
+        2
     );
     assert!(fleet
         .state
@@ -173,7 +166,7 @@ async fn dynamic_plans_once_publishes_version_and_registers_draft_capabilities()
         .as_array()
         .unwrap()
         .iter()
-        .any(|c| c["source_plan"]["id"] == "plan-dynamic" && c["maturity"] == "draft"));
+        .all(|c| c.get("source_plan").is_none()));
     assert!(fleet
         .state
         .fleet

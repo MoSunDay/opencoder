@@ -37,6 +37,7 @@ export function ExecutionsPanel({ onNotice }) {
     <Table scroll={{ x: 'max-content' }} rowKey="id" dataSource={tableRows(loading, rows)} size="small" loading={tableLoading(loading)} columns={[
       { title: 'ID', dataIndex: 'id', render: (id, row) => <Button type="link" style={{ fontFamily: MONO_VAR }} onClick={() => setDetail(row)}>{id}</Button> },
       { title: '类型', dataIndex: 'kind', render: (v) => KIND_LABELS[v] || v },
+      { title: '名称', dataIndex: 'name', render: (v) => v || '-' },
       { title: '创建时间', dataIndex: 'created_at', render: (v) => <TimeText ts={v} /> },
       { title: '所属节点', dataIndex: 'node_id', render: (id) => <Space size={4}><span style={{ fontFamily: MONO_VAR }}>{id}</span><StatusTag status={nodes.find((node) => node.id === id)?.online ? 'online' : 'offline'} /></Space> },
       { title: '状态', dataIndex: 'status', render: (v) => <StatusTag status={v} /> },

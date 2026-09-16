@@ -1,6 +1,5 @@
-//! `brain` domain: capability library CRUD + target binding, semantic
-//! search, dynamic plan minting/preview and dispatch. Pure `plan()` mapping
-//! only; execution goes through the shared `exec_plan` transport.
+//! V2 graph plan versions, runs, registered capabilities and historical reads.
+//! CLI and Web share the same API contracts.
 
 use anyhow::Result;
 pub mod ontology;
@@ -24,7 +23,7 @@ pub enum BrainCmd {
     /// Event-driven ontology executions.
     #[command(subcommand)]
     Runs(ontology::RunsCmd),
-    /// Aggregate reusable Agent / DAG / TODO / Team capabilities.
+    /// Aggregate registered Agent / DAG / TODO / Team / Operator capabilities.
     Library,
     #[command(hide = true)]
     ActivateLocal {
@@ -44,7 +43,7 @@ pub enum BrainCmd {
         #[arg(long)]
         json: String,
     },
-    /// POST /api/brain/plans — {"situation","top_k"?,"model"?}.
+    /// Retired decision-tree writer; returns a v2 migration error.
     Plan {
         /// Body: inline JSON or @file.
         #[arg(long)]
@@ -52,15 +51,13 @@ pub enum BrainCmd {
     },
     /// GET /api/brain/plans/{id} — one cached plan.
     PlanGet { id: String },
-    /// POST /api/brain/preview — dispatch body ({"situation",...}),
-    /// decision preview without executing anything.
+    /// Retired decision-tree preview; returns a v2 migration error.
     Preview {
         /// Body: inline JSON or @file.
         #[arg(long)]
         json: String,
     },
-    /// POST /api/brain/dispatch — route a situation through a plan
-    /// ({"situation","plan_id"?,"top_k"?,"replan"?,"model"?}).
+    /// Retired decision-tree execution; use brain runs create instead.
     Dispatch {
         /// Body: inline JSON or @file.
         #[arg(long)]
@@ -110,16 +107,8 @@ pub fn plan(sub: &BrainCmd) -> Result<RequestPlan> {
         BrainCmd::Search { json } => {
             RequestPlan::post("/api/brain/search").with_body(required_body(json)?)
         }
-        BrainCmd::Plan { json } => {
-            RequestPlan::post("/api/brain/plans").with_body(required_body(json)?)
-        }
         BrainCmd::PlanGet { id } => RequestPlan::get(format!("/api/brain/plans/{id}")),
-        BrainCmd::Preview { json } => {
-            RequestPlan::post("/api/brain/preview").with_body(required_body(json)?)
-        }
-        BrainCmd::Dispatch { json } => {
-            RequestPlan::post("/api/brain/dispatch").with_body(required_body(json)?)
-        }
+        BrainCmd::Plan { .. } | BrainCmd::Preview { .. } | BrainCmd::Dispatch { .. } => anyhow::bail!(opencoder_brain::graph::MIGRATION),
     })
 }
 
@@ -205,6 +194,10 @@ mod tests {
                 "/api/brain/dispatch",
             ),
         ] {
+            if !matches!(sub, BrainCmd::Search { .. }) {
+                assert!(plan(&sub).unwrap_err().to_string().contains("migration required"));
+                continue;
+            }
             let planned = plan(&sub).unwrap();
             assert_eq!(planned.method, reqwest::Method::POST, "{path}");
             assert_eq!(planned.path, path);

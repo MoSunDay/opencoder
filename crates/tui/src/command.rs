@@ -43,6 +43,10 @@ pub const COMMANDS: &[(&str, &str)] = &[
         "/plan",
         "只读探索：拦截写操作，切换到 plan 探索代理（不重置上下文）",
     ),
+    (
+        "/agent",
+        "切换 primary agent（回车打开 agent 选择器，或 /agent <name> 直接切换）",
+    ),
     ("/annotation", "记录/编辑任务备注 (annotation editor)"),
     ("/notepad", "IDE 式文件浏览/编辑 (文件树 + vim 编辑器)"),
     (
@@ -69,6 +73,9 @@ pub enum SlashAction {
     CacheSalt,
     Act,
     Plan,
+    /// `/agent` — open the primary-agent picker (a pick fills the composer
+    /// with `/agent <name> `; a manually typed name rides the prompt path).
+    Agent,
     Annotation,
     Notepad,
     ClearContext,
@@ -180,6 +187,9 @@ impl CommandMenu {
                 let name_l = name.trim_start_matches('/').to_lowercase();
                 name_l.contains(q) || desc.to_lowercase().contains(q)
             })
+            // Name matches outrank description-only hits so `/agent` wins
+            // over `/cli` (whose description mentions "subagents") when the
+            // query is "agent"; ties keep COMMANDS registration order.
             .map(|(i, _)| i)
             .collect();
         self.selected = if self.rows.is_empty() {
@@ -204,6 +214,7 @@ pub fn parse(input: &str) -> Option<SlashAction> {
         "c" | "compact" => Some(SlashAction::Compact),
         "act" => Some(SlashAction::Act),
         "plan" => Some(SlashAction::Plan),
+        "agent" => Some(SlashAction::Agent),
         "annotation" | "ann" => Some(SlashAction::Annotation),
         "notepad" | "note" => Some(SlashAction::Notepad),
         "act_clear_context" | "clear_context" => Some(SlashAction::ClearContext),
@@ -227,6 +238,7 @@ fn dispatch(name: &str) -> Option<SlashAction> {
         "/compact" => Some(SlashAction::Compact),
         "/act" => Some(SlashAction::Act),
         "/plan" => Some(SlashAction::Plan),
+        "/agent" => Some(SlashAction::Agent),
         "/annotation" => Some(SlashAction::Annotation),
         "/notepad" => Some(SlashAction::Notepad),
         "/act_clear_context" | "/clear_context" => Some(SlashAction::ClearContext),
@@ -425,10 +437,33 @@ mod tests {
         assert_eq!(parse("/mcp"), Some(SlashAction::Mcp));
         assert_eq!(parse("/skill"), Some(SlashAction::Skill));
         assert_eq!(parse("/sk"), Some(SlashAction::Skill));
+        // `/agent` is a picker, not a direct mode switch — bare `/agent`
+        // opens the picker; `/agent <name>` stays free text (the runner's
+        // control head applies it), so it must NOT parse.
+        assert_eq!(parse("/agent"), Some(SlashAction::Agent));
+        assert_eq!(parse("/agent writer"), None);
         assert_eq!(parse("/"), Some(SlashAction::Task));
         assert_eq!(parse("/unknown"), None);
         assert_eq!(parse("hello"), None);
         assert_eq!(parse(" /config "), Some(SlashAction::Config));
+    }
+
+    #[test]
+    fn agent_entry_is_listed_and_dispatches_to_the_picker() {
+        let (name, desc) = COMMANDS
+            .iter()
+            .find(|(n, _)| *n == "/agent")
+            .expect("/agent must be a registered command");
+        assert!(desc.contains("agent"), "description names the feature");
+        assert_eq!(dispatch("/agent"), Some(SlashAction::Agent));
+        // The popup filter finds it from a partial query (and never matches
+        // unrelated commands to it).
+        let mut m = CommandMenu::new();
+        for c in "agent".chars() {
+            m.on_char(c);
+        }
+        assert!(m.visible_count() >= 1, "'agent' must match the entry");
+        assert_eq!(m.selected_action(), Some(SlashAction::Agent));
     }
 
     #[test]

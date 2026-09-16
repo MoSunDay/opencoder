@@ -29,15 +29,21 @@ export function formatJson(text) {
   return out;
 }
 
-export function fileTree(paths, errors = [], changed = []) {
+export function directoryPaths(files, directories = []) {
+  return [...new Set([...directories, ...Object.keys(files).flatMap(path =>
+    path.split('/').slice(0, -1).map((_, index) => path.split('/').slice(0, index + 1).join('/')))])].sort();
+}
+
+export function fileTree(paths, errors = [], changed = [], directories = []) {
   const roots = []; const nodes = new Map();
-  for (const path of paths) {
+  const folders = new Set(directoryPaths(Object.fromEntries(paths.map(path => [path, ''])), directories));
+  for (const path of [...new Set([...folders, ...paths])].sort()) {
     let parent = roots; let key = '';
     const parts = path.split('/');
     parts.forEach((part, i) => {
       key = key ? `${key}/${part}` : part;
       if (!nodes.has(key)) {
-        const leaf = i === parts.length - 1;
+        const leaf = i === parts.length - 1 && !folders.has(key);
         const error = errors.some(e => e.path === key || !leaf && e.path.startsWith(key + '/'));
         const node = { key, title: `${error ? '⚠ ' : ''}${part}${changed.includes(key) ? ' •' : ''}`, isLeaf: leaf, ...(leaf ? {} : { children: [] }) };
         nodes.set(key, node); parent.push(node);
@@ -45,5 +51,10 @@ export function fileTree(paths, errors = [], changed = []) {
       parent = nodes.get(key).children;
     });
   }
+  const sort = entries => {
+    entries.sort((a, b) => Number(a.isLeaf) - Number(b.isLeaf) || a.key.localeCompare(b.key));
+    entries.forEach(node => {if (node.children) sort(node.children);});
+  };
+  sort(roots);
   return roots;
 }

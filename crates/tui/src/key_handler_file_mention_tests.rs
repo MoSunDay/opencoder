@@ -61,6 +61,7 @@ impl Ctx {
             &mut self.queue_scroll,
             &mut self.file_menu,
             &self.workdir,
+            &mut None,
         )
     }
 }

@@ -17,6 +17,7 @@
 pub mod io;
 pub mod nfs;
 pub mod references;
+pub mod resources;
 pub mod rollback;
 pub mod serve;
 pub mod write;

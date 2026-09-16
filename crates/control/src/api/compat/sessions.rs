@@ -21,7 +21,7 @@ async fn metadata(state: Arc<AppState>, query: NodeQuery, action: &str) -> Respo
     let node = query.node_id.or_else(|| {
         select_node(
             &nodes,
-            ExecutionKind::Agent,
+            ExecutionKind::Operator,
             None,
             opencoder_core::message::now_ms(),
         )
@@ -69,7 +69,7 @@ pub async fn task(
     let id = sid
         .or(body["id"].as_str())
         .map(str::to_owned)
-        .unwrap_or_else(|| format!("agent-{}", ulid::Ulid::new()));
+        .unwrap_or_else(|| format!("operator-{}", ulid::Ulid::new()));
     let reply = if sid.is_some() {
         if !matches!(state.fleet.index(&id).await,Ok(Some(index)) if index.node_id==node) {
             return response(RpcReply::error(
@@ -91,7 +91,7 @@ pub async fn task(
             &state,
             CreateExecution {
                 id: id.clone(),
-                kind: ExecutionKind::Agent,
+                kind: ExecutionKind::Operator,
                 target: body["agent"].as_str().map(str::to_owned),
                 input: body,
                 node_id: Some(node.clone()),

@@ -23,7 +23,8 @@ const PROMPT_FILES: [&str; 3] = ["soul", "how", "output"];
 ///   dirs carrying a `SKILL.md`, mirroring how
 ///   `opencoder_core::skill::discover_in` names skills in a root;
 /// - `tools`: direct-child file/dir names (excluding `meta.json`);
-/// - `memory`: `["memory"]` iff `memory.md` is present.
+/// - `memory`: `["memory"]` iff the version dir holds at least one `*.md`
+///   file (recursively; hidden entries skipped).
 ///
 /// A missing dir (or unknown cat/name) scans as empty — reads degrade
 /// silently, the agents-root philosophy.
@@ -90,12 +91,40 @@ fn scan_tools(dir: &Path) -> Vec<String> {
     names
 }
 
+/// A memory reference counts when the version dir recursively contains
+/// at least one `*.md` (hidden entries skipped) — the pool is
+/// directory-shaped since T3.
 fn scan_memory(dir: &Path) -> Vec<String> {
-    if dir.join("memory.md").is_file() {
+    if has_markdown(dir) {
         vec!["memory".to_string()]
     } else {
         Vec::new()
     }
+}
+
+/// Recursively look for any non-hidden `*.md` regular file. Symlinks are
+/// neither descended nor counted (writes reject them anyway).
+fn has_markdown(dir: &Path) -> bool {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return false;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if name.starts_with('.') {
+            continue;
+        }
+        let Ok(kind) = entry.file_type() else {
+            continue;
+        };
+        if kind.is_dir() && has_markdown(&entry.path()) {
+            return true;
+        }
+        if kind.is_file() && name.ends_with(".md") {
+            return true;
+        }
+    }
+    false
 }
 
 /// Pure snapshot of what `meta.current` points at, per category: resolve
@@ -129,8 +158,10 @@ fn resolve_scan(reference: &Option<String>, cat: &str) -> Vec<String> {
 /// out-of-band changes to a pool's `current` version so the card's
 /// snapshot catches up.
 pub fn refresh_agent_references(name: &str) -> io::Result<AgentReferences> {
+    let _lock = crate::resources::lock::write_lock()?;
     validate_agent_name(name).map_err(invalid_input)?;
     let dir = agent_dir(name).ok_or_else(|| not_found("cannot resolve ~/.opencoder"))?;
+    crate::resources::filesystem::check_path(&dir.join("meta.json"))?;
     let Some(mut meta) = read_agent_meta(name) else {
         return Err(not_found(format!("unknown agent: {name}")));
     };
@@ -198,12 +229,18 @@ mod tests {
     }
 
     #[test]
-    fn scan_memory_requires_memory_md() {
+    fn scan_memory_hits_any_markdown_in_the_tree() {
         let (tmp, _g) = scoped();
         mkdir_files(tmp.path(), &["memory/bank/v1/memory.md"]);
         assert_eq!(scan_resource("memory", "bank", 1), vec!["memory"]);
-        mkdir_files(tmp.path(), &["memory/empty/v1/other.md"]);
-        assert!(scan_resource("memory", "empty", 1).is_empty());
+        // A nested `.md` inside a subdirectory also counts.
+        mkdir_files(tmp.path(), &["memory/nested/v1/topics/rust.md"]);
+        assert_eq!(scan_resource("memory", "nested", 1), vec!["memory"]);
+        // Non-markdown-only dirs and hidden-only subtrees scan empty.
+        mkdir_files(tmp.path(), &["memory/plain/v1/notes.txt"]);
+        assert!(scan_resource("memory", "plain", 1).is_empty());
+        mkdir_files(tmp.path(), &["memory/dot/v1/.stash/secret.md"]);
+        assert!(scan_resource("memory", "dot", 1).is_empty());
     }
 
     #[test]

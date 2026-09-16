@@ -291,12 +291,22 @@ pub fn build_app(state: Arc<AppState>, token: Option<String>, web: bool) -> axum
         .route("/api/skills", get(api_meta::get_skills))
         .route("/api/config", get(api_ops::get_config))
         .route("/api/config", patch(api_ops::patch_config))
-        // ── custom agents：reference cards + active marker + shared pools ──
+        // ── custom agents：reference cards + shared pools（会话级 agent 切换
+        //    走 /api/sessions/:id/agent，无全局激活端点）──
         .route(
             "/api/agents",
             get(api_agents::list).post(api_agents::create),
         )
-        .route("/api/agents/active", patch(api_agents::patch_active))
+        .route(
+            "/api/agents/:name/resources/:cat",
+            get(api_agents::resources::get)
+                .put(api_agents::resources::put)
+                .layer(axum::extract::DefaultBodyLimit::max(3 * 1024 * 1024)),
+        )
+        .route(
+            "/api/agents/:name/resources/:cat/restore",
+            post(api_agents::resources::restore),
+        )
         .route("/api/agents/:name/meta", get(api_agents::meta))
         .route(
             "/api/agents/:name",

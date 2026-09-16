@@ -14,7 +14,8 @@ pub fn fingerprint(value: &impl Serialize) -> String {
 pub fn context(run: &mut BrainRun) -> ActivationContext {
     run.activation += 1;
     ActivationContext {
-        schema_version: 1,
+        schema_version: run.request.schema_version,
+        routes: crate::graph::pending(run),
         run_id: run.id.clone(),
         activation: run.activation,
         control_epoch: run.control_epoch,
@@ -54,6 +55,17 @@ pub fn decide(run: &BrainRun, decision: &ActivationDecision) -> Result<()> {
         run.request.plan.is_none() || decision.plan.is_none(),
         "runtime replanning is not enabled"
     );
+    let mut receipts = std::collections::BTreeSet::new();
+    for route in &decision.routes {
+        ensure!(receipts.insert(&route.receipt), "duplicate routing receipt");
+        ensure!(
+            run.graph
+                .routes
+                .get(&route.receipt)
+                .is_some_and(|r| r.decision.is_none()),
+            "unknown or already decided route"
+        );
+    }
     let mut ids = std::collections::BTreeSet::new();
     for id in &decision.dispatch {
         ensure!(ids.insert(id), "duplicate dispatch id");
@@ -80,7 +92,7 @@ pub fn prepare(run: &mut BrainRun, instance_id: &str, owner: &str, now: i64) -> 
         .as_ref()
         .context("plan is missing")?
         .plan
-        .steps
+        .instances
         .iter()
         .find(|s| s.id == instance.step_id)
         .unwrap();
@@ -96,10 +108,15 @@ pub fn prepare(run: &mut BrainRun, instance_id: &str, owner: &str, now: i64) -> 
         instance_id: instance_id.into(),
         attempt: instance.attempt,
     };
-    let prompt = format!("{}\n\nInputs (immutable JSON):\n{}\n\nAcceptance: {}\nOutput schema: {}\nReturn the final output as {}.",
-        step.action.prompt,serde_json::to_string(&instance.inputs)?,step.acceptance,serde_json::to_string(&step.output)?,
-        if step.action.output_mode == OutputMode::Json { "one JSON value without markdown fences" } else { "text" });
-    let mut input = json!({"prompt":prompt,"parameters":instance.inputs,"_brain":{"capability_id":step.capability_id.clone().unwrap_or_else(||format!("cap-{}",&fingerprint(&step.action)[..24])),"parent":link,"action":step.action,"output_schema":step.output,"resources":step.resources}});
+    let outputs: std::collections::BTreeMap<_, _> = step
+        .outputs
+        .iter()
+        .map(|id| (id, &run.request.plan.as_ref().unwrap().plan.outputs[id]))
+        .collect();
+    let prompt = format!("{}\n\nInputs (immutable JSON):\n{}\n\nNamed output descriptions: {}\nReturn one JSON object keyed by output ID. Each value: {{\"content\":actual content,\"completion\":{{\"passed\":true/false/null,\"evidence\":[\"reason\"]}},\"verification\":{{\"passed\":true/false/null,\"evidence\":[\"reason\"]}}}}. Assessments without evidence are unknown. Do not infer verification from process completion.", step.action.prompt, serde_json::to_string(&instance.inputs)?, serde_json::to_string(&outputs)?);
+    let mut action = step.action.clone();
+    action.output_mode = OutputMode::Json;
+    let mut input = json!({"prompt":prompt,"parameters":instance.inputs,"_brain":{"schema_version":2,"capability_id":step.capability_id,"parent":link,"action":action,"output_schema":crate::graph::output_schema(),"outputs":outputs,"resources":step.resources}});
     if let Some(definition) = &step.action.definition {
         input[if step.action.kind == ExecutionKind::Todos {
             "spec"

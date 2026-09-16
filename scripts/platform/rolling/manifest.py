@@ -3,6 +3,7 @@ import importlib.util
 from pathlib import Path
 import re
 import shutil
+import json
 
 _spec = importlib.util.spec_from_file_location("bundle_installer", Path(__file__).parents[1] / "install_bundle.py")
 _installer = importlib.util.module_from_spec(_spec)
@@ -35,6 +36,34 @@ def compatible(candidate, retained):
                 raise ValueError(f"candidate cannot read retained release {previous['release_id']} {key}")
         if candidate["protocol_version"] != previous["protocol_version"]:
             raise ValueError("fleet protocol differs from a retained runtime")
+
+
+def brain_preflight(settings, candidate, releases=()):
+    """Read-only v2 cutover guard, before warming or changing any service.
+
+    Worker admission repeats this check to close the race with a journal that
+    changes after this preview. Incompatible fleet versions still cannot overlap.
+    """
+    if candidate.get("protocol_version", 0) < 10:
+        return
+    roots = {Path(r["runtime_data"]) for r in releases}
+    if settings.legacy_agent_data:
+        roots.add(settings.legacy_agent_data)
+    for root in sorted(roots):
+        paths = {path for kind in ("brain", "agent", "dag", "team", "todos", "project", "operator", "maintenance", "system") for path in (root / kind).glob("*/execution.json")}
+        paths.update((root / "executions").glob("*.json"))
+        for path in sorted(paths):
+            record = json.loads(path.read_text())
+            assignment = record["assignment"]
+            request = assignment["request"]
+            payload = request.get("input") or {}
+            if not isinstance(payload, dict):
+                payload = {}
+            legacy = ((request["kind"] == "brain" and payload.get("schema_version") != 2)
+                      or ("_brain" in payload and payload["_brain"].get("schema_version") != 2)
+                      or "brain_receipt" in payload or "playbook_receipt" in payload)
+            if legacy and assignment["index"]["status"] not in ("done", "error", "cancelled"):
+                raise ValueError(f"brain migration blocked by nonterminal legacy execution {request['id']}; let its old runtime converge before upgrading")
 
 
 def resources(settings, manifest):

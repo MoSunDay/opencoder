@@ -15,10 +15,10 @@ pub async fn create(State(state): State<Arc<AppState>>, Json(body): Json<Value>)
     let id = body["id"]
         .as_str()
         .map(str::to_owned)
-        .unwrap_or_else(|| format!("agent-{}", ulid::Ulid::new()));
+        .unwrap_or_else(|| format!("operator-{}", ulid::Ulid::new()));
     let request = CreateExecution {
         id: id.clone(),
-        kind: ExecutionKind::Agent,
+        kind: ExecutionKind::Operator,
         target: body["agent"].as_str().map(str::to_owned),
         input: body.clone(),
         node_id: body["node_id"].as_str().map(str::to_owned),
@@ -39,7 +39,7 @@ pub async fn list(State(state): State<Arc<AppState>>) -> Response {
 pub async fn summaries(state: &Arc<AppState>, node: Option<&str>) -> anyhow::Result<Vec<Value>> {
     let indexes = state
         .fleet
-        .indexes(node, Some(ExecutionKind::Agent), 500)
+        .indexes(node, Some(ExecutionKind::Operator), 500)
         .await?;
     Ok(stream::iter(indexes).map(|index| {let state=state.clone();async move {
         let reply=state.hub.call(&index.node_id,NodeOperation::Command{execution:index.execution_ref(),command:ExecutionCommand{action:"summary".into(),input:Value::Null}}).await;

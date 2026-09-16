@@ -1,5 +1,5 @@
 //! Pure topology helpers over a [`PlaybookSpec`]: deterministic topological
-//! order, the ready set, failure collapse, and the chain-depth / fan-out
+//! order and the chain-depth / fan-out
 //! width metrics [`super::spec::validate`] enforces. No I/O, no clocks —
 //! every function is a pure fold over the spec's `depends_on` edges.
 
@@ -68,7 +68,7 @@ pub fn topo_order(spec: &PlaybookSpec) -> Result<Vec<String>, String> {
 
 /// Steps not in `done` whose every dependency is in `done`, sorted
 /// lexicographically — the executor's entire next-batch decision.
-pub fn ready_steps(spec: &PlaybookSpec, done: &BTreeSet<String>) -> Vec<String> {
+fn topology_level(spec: &PlaybookSpec, done: &BTreeSet<String>) -> Vec<String> {
     let mut out: Vec<String> = spec
         .steps
         .iter()
@@ -78,27 +78,6 @@ pub fn ready_steps(spec: &PlaybookSpec, done: &BTreeSet<String>) -> Vec<String> 
         .collect();
     out.sort();
     out
-}
-
-/// The transitive downstream of `failed`: every step whose dependency
-/// closure intersects `failed`, plus the failed steps themselves. This is
-/// the collapse set the executor skips (they can never become ready).
-pub fn collapse_blocked(spec: &PlaybookSpec, failed: &BTreeSet<String>) -> BTreeSet<String> {
-    let mut blocked: BTreeSet<String> = failed.clone();
-    loop {
-        let mut grew = false;
-        for step in &spec.steps {
-            if blocked.contains(&step.name) {
-                continue;
-            }
-            if step.depends_on.iter().any(|d| blocked.contains(d)) {
-                grew |= blocked.insert(step.name.clone());
-            }
-        }
-        if !grew {
-            return blocked;
-        }
-    }
 }
 
 /// Longest dependency chain (Kahn levels minus one). Only meaningful for
@@ -130,7 +109,7 @@ fn kahn_levels(spec: &PlaybookSpec) -> Option<Vec<Vec<String>>> {
     let mut done: BTreeSet<String> = BTreeSet::new();
     let mut levels: Vec<Vec<String>> = Vec::new();
     while done.len() < spec.steps.len() {
-        let batch = ready_steps(spec, &done);
+        let batch = topology_level(spec, &done);
         if batch.is_empty() {
             return None;
         }

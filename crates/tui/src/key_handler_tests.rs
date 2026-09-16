@@ -71,6 +71,7 @@ fn handle_key_disabled_blocks_char() {
         &mut queue_scroll,
         &mut file_menu,
         workdir,
+        &mut None,
     );
     assert!(matches!(action, KeyAction::None));
     assert!(input.is_empty());
@@ -114,6 +115,7 @@ fn handle_key_disabled_blocks_enter() {
         &mut queue_scroll,
         &mut file_menu,
         workdir,
+        &mut None,
     );
     assert!(matches!(action, KeyAction::None));
 }
@@ -156,6 +158,7 @@ fn handle_key_disabled_allows_scroll() {
         &mut queue_scroll,
         &mut file_menu,
         workdir,
+        &mut None,
     );
     assert!(matches!(action, KeyAction::None));
     assert_eq!(scroll, 30);
@@ -200,6 +203,7 @@ fn handle_key_disabled_allows_quit() {
         &mut queue_scroll,
         &mut file_menu,
         workdir,
+        &mut None,
     );
     assert!(matches!(action, KeyAction::Quit));
 }
@@ -242,6 +246,7 @@ fn ctrl_v_returns_clip() {
         &mut queue_scroll,
         &mut file_menu,
         workdir,
+        &mut None,
     );
     assert!(matches!(action, KeyAction::Clip));
 }
@@ -290,6 +295,7 @@ fn undo_restores_previous_text() {
             &mut queue_scroll,
             &mut file_menu,
             workdir,
+            &mut None,
         );
     }
     assert_eq!(input, "hi");
@@ -318,6 +324,7 @@ fn undo_restores_previous_text() {
         &mut queue_scroll,
         &mut file_menu,
         workdir,
+        &mut None,
     );
     assert_eq!(input, "");
 
@@ -345,6 +352,7 @@ fn undo_restores_previous_text() {
         &mut queue_scroll,
         &mut file_menu,
         workdir,
+        &mut None,
     );
     assert_eq!(input, "hi");
 }
@@ -388,6 +396,7 @@ fn undo_after_backspace() {
         &mut queue_scroll,
         &mut file_menu,
         workdir,
+        &mut None,
     );
     assert_eq!(input, "hell");
 
@@ -415,6 +424,7 @@ fn undo_after_backspace() {
         &mut queue_scroll,
         &mut file_menu,
         workdir,
+        &mut None,
     );
     assert_eq!(input, "hello");
 }
@@ -462,6 +472,7 @@ fn up_arrow_browses_history_when_single_row() {
         &mut queue_scroll,
         &mut file_menu,
         workdir,
+        &mut None,
     );
     assert_eq!(input, "older");
     assert_eq!(hist_idx, Some(0));
@@ -509,6 +520,7 @@ fn up_arrow_moves_cursor_when_multi_row() {
         &mut queue_scroll,
         &mut file_menu,
         workdir,
+        &mut None,
     );
     // Cursor moved up, input unchanged, history not browsed.
     assert!(cursor < cursor_before, "cursor should move up");
@@ -557,6 +569,7 @@ fn handle_key_alt_char_is_dropped_not_inserted() {
         &mut queue_scroll,
         &mut file_menu,
         workdir,
+        &mut None,
     );
     assert!(matches!(action, KeyAction::None));
     assert!(input.is_empty());
@@ -603,6 +616,7 @@ fn handle_key_alt_f_still_moves_word() {
         &mut queue_scroll,
         &mut file_menu,
         workdir,
+        &mut None,
     );
     assert!(matches!(action, KeyAction::None));
     assert_eq!(input, "hello");
@@ -650,6 +664,7 @@ fn bang_prefix_returns_bash_action() {
         &mut queue_scroll,
         &mut file_menu,
         workdir,
+        &mut None,
     );
     assert!(matches!(action, KeyAction::Bash(ref cmd) if cmd == "ls"));
     assert!(
@@ -697,6 +712,7 @@ fn bang_prefix_with_spaces_returns_bash() {
         &mut queue_scroll,
         &mut file_menu,
         workdir,
+        &mut None,
     );
     assert!(matches!(action, KeyAction::Bash(ref cmd) if cmd == "echo hi"));
     assert!(
@@ -743,6 +759,7 @@ fn bare_bang_is_noop() {
         &mut queue_scroll,
         &mut file_menu,
         workdir,
+        &mut None,
     );
     assert!(matches!(action, KeyAction::None));
     assert!(input.is_empty(), "input must be cleared even on bare bang");
@@ -787,6 +804,7 @@ fn bang_prefix_works_while_running() {
         &mut queue_scroll,
         &mut file_menu,
         workdir,
+        &mut None,
     );
     assert!(matches!(action, KeyAction::Bash(ref cmd) if cmd == "ls"));
     assert!(

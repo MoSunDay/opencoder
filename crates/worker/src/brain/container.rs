@@ -148,7 +148,7 @@ mod tests {
             .unwrap()
             .join("opencoder-cli");
         assert!(cli.is_file(), "build workspace binaries first");
-        let context = json!({"schema_version":1,"run_id":"brain-runc-smoke","activation":1,"control_epoch":1,"revision":1,"plan_ref":{"id":"plan-smoke","version":1},"plan":{"title":"Smoke","objective":"finite dispatch","steps":[],"deliverables":{}},"objective":"finite dispatch","phase":"running","inputs":{},"instances":[],"ready":["ready-a","ready-b"],"references":[],"capabilities":[]});
+        let context = json!({"schema_version":2,"run_id":"brain-runc-smoke","activation":1,"control_epoch":1,"revision":1,"plan_ref":{"id":"plan-smoke","version":1},"plan":{"schema_version":2,"title":"Smoke","objective":"finite dispatch","instances":[],"inputs":{},"outputs":{},"routes":[],"entry":[]},"objective":"finite dispatch","phase":"running","inputs":{},"instances":[],"ready":["ready-a","ready-b"],"references":[],"capabilities":[],"routes":[]});
         private_json(&workspace.join("context.json"), &context).unwrap();
         private_json(&workspace.join("config.json"), &json!({})).unwrap();
         let bundle = dir.path().join("bundle");

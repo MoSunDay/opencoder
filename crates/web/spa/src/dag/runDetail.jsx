@@ -34,7 +34,7 @@ export function RunDetail({ run, onNotice, onClose, onFinished }) {
     <Space wrap>
       <Button size="small" onClick={onClose}>← 返回运行列表</Button>
       <Button size="small" onClick={() => setExecutionOpen(true)}>执行详情与产物</Button>
-      <Typography.Text strong>运行 {String(run.id).slice(0, 8)}</Typography.Text>
+      <Typography.Text strong>运行 {current?.name || detail?.definition?.spec?.name || String(run.id).slice(0, 8)}</Typography.Text>
       <RunStatusTag status={current.status} /><NodeBadge nodeId={current.node_id} status={current.status} />
       <Typography.Text type="secondary">创建于 {absTime(current.created_at)}</Typography.Text>
     </Space>

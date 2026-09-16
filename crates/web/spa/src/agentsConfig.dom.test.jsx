@@ -48,7 +48,6 @@ const pickSelectOption = async (selectEl, label) => {
 
 const agentsFixture = {
   ok: true,
-  active: 'coder',
   agents: [
     {
       name: 'coder',
@@ -82,6 +81,7 @@ const installApi = () => {
       const name = decodeURIComponent(path.split('/')[3]);
       return Promise.resolve({ meta: { name, current: {}, harness: 'opencoder', references: {}, history: [] } });
     }
+    if (/\/api\/agents\/[^/]+\/resources\//.test(path)) return Promise.resolve({ baseline: {resource:null,version:0,revision:''}, files:[],versions:[],read_only:false });
     if (path === '/api/harnesses/codex/profiles') return Promise.resolve({ items: [] });
     if (path === '/api/agents/resources/prompts') {
       return Promise.resolve(promptsFixture);
@@ -95,7 +95,7 @@ const installApi = () => {
     return Promise.resolve({ ok: true, resources: [] });
   });
   apiPostMock.mockReset().mockResolvedValue({ ok: true, name: 'x' });
-  apiPatchMock.mockReset().mockResolvedValue({ ok: true, active: 'reviewer' });
+  apiPatchMock.mockReset().mockResolvedValue({ ok: true });
   apiDelMock.mockReset().mockResolvedValue({ ok: true, deleted: 'coder' });
 };
 
@@ -110,10 +110,12 @@ afterEach(() => {
 describe('AgentsPanel', () => {
   it('renders only agent identity in the list and keeps detail-only data out of rows', async () => {
     render(<AgentsPanel onNotice={() => {}} />);
-    // 生效 Select 的选中项与表格行同名 —— 用 findAllByText 断言两处都在。
-    expect((await screen.findAllByText('coder')).length).toBeGreaterThanOrEqual(2);
+    // 表头筛选下拉与行内 Text 都可能渲染同名文本，用 findAllByText 宽匹配。
+    expect((await screen.findAllByText('coder')).length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText('reviewer')).toBeTruthy();
-    expect(screen.getByText('生效中')).toBeTruthy();
+    // 全局激活已删除：列表既没有「生效中」标记，也没有任何全局激活入口。
+    expect(screen.queryByText('生效中')).toBeNull();
+    expect(screen.queryByLabelText('active-agent')).toBeNull();
     expect(screen.queryByText('base · v2')).toBeNull();
     expect(screen.queryByText('2026-09-01T00:00:00Z')).toBeNull();
     expect(screen.getByRole('tab', { name: 'Agent 列表' })).toBeTruthy();
@@ -124,13 +126,27 @@ describe('AgentsPanel', () => {
     expect(await screen.findByText('已停止')).toBeTruthy();
   });
 
-  it('fires PATCH /api/agents/active when the active select changes', async () => {
-    const { container } = render(<AgentsPanel onNotice={() => {}} />);
+  it('renders registry cards only and offers no builtin scheduling roles', async () => {
+    render(<AgentsPanel onNotice={() => {}} />);
     await screen.findAllByText('coder');
-    await pickSelectOption(container.querySelector('.ant-select'), 'reviewer');
-    await waitFor(() => {
-      expect(apiPatchMock).toHaveBeenCalledWith('/api/agents/active', { active: 'reviewer' });
-    });
+    // /api/agents 只返回注册卡：内置调度角色（act/plan/command 等）永不入表。
+    for (const builtin of ['act', 'plan', 'explore', 'build', 'sidecar', 'command', 'workflow']) {
+      expect(screen.queryByText(builtin)).toBeNull();
+    }
+  });
+
+  it('filters agents by name through the controlled search box', async () => {
+    render(<AgentsPanel onNotice={() => {}} />);
+    await screen.findAllByText('coder');
+    const search = screen.getByLabelText('agent-search');
+    fireEvent.change(search, { target: { value: 'rev' } });
+    await waitFor(() => expect(screen.queryByText('coder')).toBeNull());
+    expect(screen.getByText('reviewer')).toBeTruthy();
+    fireEvent.change(search, { target: { value: 'CODER' } });
+    await waitFor(() => expect(screen.getByText('coder')).toBeTruthy());
+    expect(screen.queryByText('reviewer')).toBeNull();
+    fireEvent.change(search, { target: { value: 'no-such-agent' } });
+    expect(await screen.findByText('暂无 agent')).toBeTruthy();
   });
 
   it('deletes an agent only after the Popconfirm confirm', async () => {
@@ -143,19 +159,19 @@ describe('AgentsPanel', () => {
     });
   });
 
-  it('creates an agent through POST with null refs for untouched selects', async () => {
+  it('creates an agent by name and harness without resource selects', async () => {
     render(<AgentsPanel onNotice={() => {}} />);
     await screen.findAllByText('coder');
     fireEvent.click(findButton('新建'));
     fireEvent.change(await screen.findByLabelText('new-agent-name'), { target: { value: 'reviewer2' } });
-    // modal 的 prompt Select 是文档里第二个 .ant-select（首个是生效选择）。
-    await pickSelectOption(screen.getByLabelText('new-agent-prompt').closest('.ant-select'), 'base · v2');
+    expect(screen.queryByLabelText('new-agent-prompt')).toBeNull();
+    expect(screen.queryByLabelText('new-agent-skills')).toBeNull();
     fireEvent.click(findButton('创建'));
     await waitFor(() => {
       expect(apiPostMock).toHaveBeenCalledWith('/api/agents', {
         name: 'reviewer2',
         harness: 'opencoder',
-        current: { prompt: 'base', skills: null, tools: null, memory: null },
+        current: {},
       });
     });
     // Modal 两次动效（开/关）在 jsdom 里各吃 ~1.5s，机器高负载下更长（同
@@ -178,6 +194,18 @@ describe('AgentsPanel', () => {
     fireEvent.click(screen.getAllByText(/^编\s*辑$/)[1]);
     await within(await screen.findByRole('dialog')).findByText('编辑 Agent · reviewer');
     expect(apiGetMock).toHaveBeenCalledWith('/api/agents/reviewer/meta');
+  });
+
+  it('asks before closing a drawer with unsaved resource drafts', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    render(<AgentsPanel onNotice={() => {}} />);
+    await screen.findAllByText('coder'); fireEvent.click(screen.getAllByText(/^编\s*辑$/)[0]);
+    fireEvent.change(await screen.findByLabelText('prompt-soul'), { target: { value: 'draft' } });
+    const drawer = await screen.findByRole('dialog');
+    fireEvent.click(within(drawer).getByRole('button', { name: 'Close' }));
+    expect(confirm).toHaveBeenCalled(); expect(screen.getByLabelText('prompt-soul').value).toBe('draft');
+    confirm.mockReturnValue(true); fireEvent.click(within(drawer).getByRole('button', { name: 'Close' }));
+    await waitFor(() => expect(screen.queryByLabelText('prompt-soul')).toBeNull()); confirm.mockRestore();
   });
 
   it('starts a configured agent and opens its node-owned execution', async () => {

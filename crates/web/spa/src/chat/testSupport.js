@@ -32,7 +32,7 @@ const installRouter = () => {
       return jsonResponse({ task_id: 't1', session_id: 'rs1' });
     }
     if (url.includes('/api/nodes')) {
-      return jsonResponse({ nodes: [{ id: 'node-1', name: 'Worker', online: true, kinds: ['agent'], snapshot: { ready: true } }] });
+      return jsonResponse({ nodes: [{ id: 'node-1', name: 'Worker', online: true, kinds: ['agent', 'operator'], snapshot: { ready: true } }] });
     }
     if (url.includes('/seq')) {
       return jsonResponse({ seq: chatTestState.seqHead });

@@ -35,6 +35,10 @@ import App from './main.jsx';
 import { LoginModal } from './login.jsx';
 import { bootUrlCredential } from './boot.js';
 import { clearCredentials, embeddedBase, getState, setCredentials, setState } from './store.js';
+// Nav registry: HEADERLESS_REASONS['menu-only'] promises the sidebar Menu AND
+// the mobile Select label are that page's only name, so the mobile half of the
+// promise is asserted here (the panel half lives in shell/headerContract).
+import { HEADERLESS_REASONS, NAV_CATEGORIES } from './nav.js';
 // Locale/theme probe components — same wiring main.jsx uses for the shell,
 // imported here so the zh-CN assertion exercises the exact same objects.
 import { ConfigProvider, Popconfirm } from 'antd';
@@ -351,6 +355,54 @@ describe('App shell landmarks (antd 6 under jsdom)', () => {
     expect(segments.length).toBeGreaterThan(0);
     for (const el of segments) {
       expect(el.classList.contains('fleet-mobile-nav')).toBe(true);
+    }
+  });
+
+  it('names every menu-only page in the mobile page Select', async () => {
+    // 'menu-only' pages have no page header and no body title: the sidebar
+    // Menu item and, on a narrow viewport, the mobile Select label are the
+    // ONLY page names left — this case guards BOTH surfaces. Delete either
+    // one (or stop feeding it nav labels) and those pages go nameless with
+    // every other suite still green — headerContract.dom.test.jsx can only
+    // see the nav copy, not these DOM surfaces (it renders panels, not
+    // <App/>).
+    // Coupling note: this case mounts the real team/topics/chat/nodes panels,
+    // so a failure to MOUNT a panel (or an antd deprecation reported by the
+    // file-level afterEach) is not a navigation-contract failure — read the
+    // panel's own suite first.
+    setCredentials('smoke-token', '');
+    const menuOnly = Object.keys(HEADERLESS_REASONS)
+      .filter((page) => HEADERLESS_REASONS[page] === 'menu-only');
+    expect(menuOnly.length, 'no page declares the menu-only reason any more — delete this case rather than loosening it').toBeGreaterThan(0);
+    const labelOf = (page) => NAV_CATEGORIES.flatMap((c) => c.items)
+      .find((i) => i.page === page)?.menu || '';
+    // None of today's menu-only labels carries a regex special, but escape
+    // anyway so a future label still matches literally.
+    const escapeRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+    for (const page of menuOnly) {
+      cleanup();
+      setState({ page });
+      render(<App />);
+      await act(async () => {});
+      const select = document.querySelector('.fleet-content .ant-select.fleet-mobile-nav');
+      expect(select, `mobile page Select missing while on ${page}`).toBeTruthy();
+      // antd 6 renders the picked label into .ant-select-content (antd 5 used
+      // .ant-select-selection-item) — accept either so the guard outlives a
+      // class rename, but never an empty one.
+      const shown = select.querySelector('.ant-select-content, .ant-select-selection-item');
+      expect(
+        shown?.textContent,
+        `mobile page Select shows no label for ${page} (expected ${labelOf(page)})`,
+      ).toBe(labelOf(page));
+      // The sidebar half of the promise: the Sider Menu is scoped to the
+      // page's category and icon glyphs add their own aria-label, so match
+      // by regex within the sider.
+      const sider = within(document.querySelector('.fleet-sidebar'));
+      expect(
+        sider.queryByRole('menuitem', { name: new RegExp(escapeRegExp(labelOf(page))) }),
+        `sidebar Menu has no item for ${page} (expected ${labelOf(page)})`,
+      ).toBeTruthy();
     }
   });
 

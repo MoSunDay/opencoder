@@ -82,10 +82,17 @@ pub async fn dispatch_todos(
 fn dag_view(detail: Value) -> Value {
     let mut value = detail["execution"].clone();
     value["dag_id"] = detail["request"]["target"].clone();
-    value["spec"] = detail["definition"]
+    let spec = detail["definition"]
         .get("spec")
         .unwrap_or(&detail["definition"])
         .clone();
+    // The SPA table reads the run name from the row top level (same contract
+    // as the local daemon's `DagRunView`); the node snapshot keeps it inside
+    // `spec.name`, so lift it up when present.
+    if let Some(name) = spec.get("name").and_then(Value::as_str) {
+        value["name"] = json!(name);
+    }
+    value["spec"] = spec;
     value["error"] = detail["error"].clone();
     value
 }

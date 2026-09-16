@@ -202,45 +202,6 @@ async fn freeze_blocks_new_inputs_but_keeps_read_stop_and_question_answers() {
         status: ExecutionStatus::Idle,
     };
     harness.state.fleet.put_index(&index).await.unwrap();
-    #[derive(serde::Serialize)]
-    struct CanonicalIntent<'a> {
-        situation: &'a str,
-        node_id: Option<&'a str>,
-        plan_id: Option<&'a str>,
-        top_k: u32,
-        replan: bool,
-        model: Option<&'a str>,
-    }
-    let canonical = CanonicalIntent {
-        situation: "existing work",
-        node_id: None,
-        plan_id: None,
-        top_k: 10,
-        replan: false,
-        model: None,
-    };
-    let fingerprint =
-        opencoder_brain::situation_digest(&serde_json::to_string(&canonical).unwrap());
-    let intent = serde_json::to_value(canonical).unwrap();
-    let brain_index = ExecutionIndex {
-        id: "agent-frozen-retry".into(),
-        created_at: 2,
-        kind: ExecutionKind::Agent,
-        node_id: "node-a".into(),
-        status: ExecutionStatus::Idle,
-    };
-    harness.state.fleet.put_index(&brain_index).await.unwrap();
-    harness.service.accepted.lock().unwrap().insert(
-        brain_index.id.clone(),
-        json!({
-            "id":brain_index.id,"kind":"agent","receipt":{
-                "version":1,"request_id":"frozen-retry","fingerprint":fingerprint,"intent":intent,
-                "decision":{"plan_id":"plan-a","capability_id":"cap-a","reason":null,"path":[],
-                    "planned_fresh":false,"planner_model":"fixture","kind":"agent","target":"act"}
-            }
-        }),
-    );
-
     let frozen = harness
         .request(reqwest::Method::POST, "/api/admin/drain", json!({}))
         .await;
@@ -267,7 +228,6 @@ async fn freeze_blocks_new_inputs_but_keeps_read_stop_and_question_answers() {
             "/api/sessions/agent-existing/prompt?delivery=queue",
             json!({"prompt":"later"}),
         ),
-        ("/api/brain/preview", json!({"situation":"new planning"})),
     ] {
         let reply = harness.request(reqwest::Method::POST, path, body).await;
         assert_eq!(reply.status(), 503, "{path}");
@@ -282,8 +242,8 @@ async fn freeze_blocks_new_inputs_but_keeps_read_stop_and_question_answers() {
             )
             .await
             .status(),
-        202,
-        "an exact existing Brain receipt retry is a read of the original decision"
+        409,
+        "legacy dispatch stays read-only during admission freeze"
     );
 
     assert_eq!(

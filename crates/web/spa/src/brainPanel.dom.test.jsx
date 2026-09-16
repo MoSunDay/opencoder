@@ -20,7 +20,9 @@ beforeEach(() => {
   apiGet.mockImplementation(async (path) => {
     if (path === '/api/brain/capabilities') return { capabilities: [entry, second] };
     // Editor cascade listings: names per execution kind (dag is a bare array).
-    if (path === '/api/agents') return { agents: [{ name: 'act' }, { name: 'custom-agent' }] };
+    // /api/agents is registry-only; builtin primary roles (act/plan/command)
+    // are merged client-side by targetOptions.js, so 'act' stays pickable.
+    if (path === '/api/agents') return { agents: [{ name: 'custom-agent' }] };
     if (path === '/api/dag/defs') return [{ id: 'dag-build' }];
     if (path.endsWith('/target')) return { target: null };
     return entry;
@@ -140,7 +142,7 @@ describe('capability library table and editor', () => {
     await waitFor(() => expect(apiGet).toHaveBeenCalledWith('/api/agents'));
     await waitFor(() => expect(nameContent().textContent).toBe('act'));
     fireEvent.mouseDown(within(dialog).getByLabelText('名称').closest('.ant-select'));
-    // 'act' is offered as a real option of the agent listing.
+    // Builtin 'act' is offered even though the registry payload lacks it.
     fireEvent.click(await screen.findByText('act', { selector: '.ant-select-item-option-content' }));
     // Switching 执行类型 refetches names for that kind and clears the pick.
     fireEvent.mouseDown(screen.getByLabelText('执行类型').closest('.ant-select'));

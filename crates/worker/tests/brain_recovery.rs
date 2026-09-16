@@ -4,9 +4,10 @@ use opencoder_node::fleet::NodeService;
 use serde_json::{json, Value};
 use support::*;
 
-fn plan() -> Value {
-    json!({"id":"plan-recovery","version":1,"changelog":"initial","created_at":1,"author":"test","plan":{"title":"Recovery","objective":"finish once","steps":[{"id":"one","label":"One","purpose":"Return evidence","action":{"kind":"agent","target":"act","prompt":"Return result"},"output":{"type":"string"},"acceptance":"result exists"}],"deliverables":{"result":{"description":"result","source":{"source":"output","step":"one"},"schema":{"type":"string"}}}}})
-}
+#[path = "support/brain.rs"]
+mod graph_support;
+use graph_support::{doc, output, plan, GraphClient};
+use std::sync::Arc;
 async fn snapshot(node: &opencoder_worker::Worker, reference: &ExecutionRef) -> Value {
     node.handle(NodeOperation::Brain {
         execution: reference.clone(),
@@ -21,7 +22,7 @@ async fn snapshot(node: &opencoder_worker::Worker, reference: &ExecutionRef) -> 
 async fn prepared_action_replays_after_restart_and_duplicate_notice_keeps_watermark() {
     let _config = support::isolated_config();
     let dir = tempfile::tempdir().unwrap();
-    let client = mock();
+    let client = Arc::new(GraphClient::default());
     let node = worker(dir.path(), client.clone()).await;
     let reference = ExecutionRef {
         id: "brain-recovery".into(),
@@ -33,7 +34,7 @@ async fn prepared_action_replays_after_restart_and_duplicate_notice_keeps_waterm
                 &node,
                 &reference.id,
                 reference.kind,
-                json!({"mode":"fixed","objective":"finish once","plan":plan()}),
+                json!({"schema_version":2,"mode":"fixed","objective":"finish once","plan":plan(),"inputs":doc()}),
                 Some(json!({})),
             ),
         })
@@ -50,7 +51,7 @@ async fn prepared_action_replays_after_restart_and_duplicate_notice_keeps_waterm
         })
         .unwrap();
     assert_eq!(
-        client.call_count(),
+        client.requests.lock().unwrap().len(),
         0,
         "fixed activation does not call the model"
     );
@@ -104,7 +105,7 @@ async fn prepared_action_replays_after_restart_and_duplicate_notice_keeps_waterm
         200
     );
     assert_eq!(call("authorize", json!(receipt)).await.status, 409);
-    let notice = json!({"parent":receipt.request["input"]["_brain"]["parent"],"execution":{"id":receipt.id,"kind":"agent"},"node_id":"child-node","sequence":3,"status":"succeeded","output":{"value":"verified","artifacts":[],"evidence":["receipt"]},"error":null,"at_ms":5});
+    let notice = json!({"parent":receipt.request["input"]["_brain"]["parent"],"execution":{"id":receipt.id,"kind":"agent"},"node_id":"child-node","sequence":3,"status":"succeeded","output":{"value":{"report":output("verified",true)},"artifacts":[],"evidence":["receipt"]},"error":null,"at_ms":5});
     let first = node
         .handle(NodeOperation::Brain {
             execution: reference.clone(),
@@ -113,9 +114,17 @@ async fn prepared_action_replays_after_restart_and_duplicate_notice_keeps_waterm
         })
         .await;
     assert_eq!(first.status, 200, "{first:?}");
-    let completed = snapshot(&node, &reference).await;
+    let completed = graph_support::wait_phase(&node, &reference, "completed").await;
     assert_eq!(completed["phase"], "completed");
-    assert_eq!(completed["deliverables"]["result"], "verified");
+    assert_eq!(
+        completed["deliverables"]
+            .as_object()
+            .unwrap()
+            .values()
+            .next()
+            .unwrap(),
+        "verified"
+    );
     assert_eq!(
         call("published", completed["plan"].clone()).await.body["duplicate"],
         true
@@ -142,6 +151,7 @@ async fn prepared_action_replays_after_restart_and_duplicate_notice_keeps_waterm
 async fn planning_can_pause_before_activation_and_cancel_without_a_plan() {
     let _config = support::isolated_config();
     let request = BrainRequest {
+        schema_version: 2,
         mode: PlanningMode::Dynamic,
         objective: "plan later".into(),
         inputs: Default::default(),

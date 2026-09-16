@@ -1,4 +1,4 @@
-use super::{brain_dispatch as idem, error_400, error_404, error_500, response};
+use super::{error_400, error_404, error_500, response};
 use crate::AppState;
 use axum::{
     extract::{Path, State},
@@ -6,7 +6,7 @@ use axum::{
     Json,
 };
 use opencoder_core::fleet::*;
-use serde_json::{json, Value};
+use serde_json::json;
 use std::sync::Arc;
 
 pub async fn bind(
@@ -16,10 +16,16 @@ pub async fn bind(
 ) -> Response {
     if !matches!(
         target.kind,
-        ExecutionKind::Agent | ExecutionKind::Team | ExecutionKind::Dag | ExecutionKind::Todos
+        ExecutionKind::Agent
+            | ExecutionKind::Team
+            | ExecutionKind::Dag
+            | ExecutionKind::Todos
+            | ExecutionKind::Operator
     ) || target.target.trim().is_empty()
     {
-        return error_400("capability target must name an agent, team or workflow".into());
+        return error_400(
+            "capability target must name an agent, team, workflow or operator".into(),
+        );
     }
     // Targets are stored trimmed so bind and the agent grouping agree on one
     // agent key (a padded " act" would otherwise group apart from "act").
@@ -139,301 +145,15 @@ pub async fn get_playbook(State(state): State<Arc<AppState>>, Path(id): Path<Str
         Err(error) => error_500(error.to_string()),
     }
 }
-pub async fn dispatch(State(state): State<Arc<AppState>>, Json(body): Json<Value>) -> Response {
-    let normalized = match idem::normalize(&body) {
-        Ok(normalized) => normalized,
-        Err(reply) => return response(reply),
-    };
-    let Some(request_id) = normalized.request_id.clone() else {
-        return response(dispatch_unkeyed(&state, &normalized).await);
-    };
-    let _process_lock = match state.fleet.request_lock("brain", &request_id).await {
-        Ok(lock) => lock,
-        Err(error) => return error_500(error.to_string()),
-    };
-    let fingerprint = idem::fingerprint(&normalized.intent);
-    match state
-        .fleet
-        .claim_request("brain", &request_id, &fingerprint)
-        .await
-    {
-        Ok(true) => {}
-        Ok(false) => return response(idem::conflict()),
-        Err(error) => return error_500(error.to_string()),
-    }
-    let persisted_prepared = match state.fleet.receipt("brain", &request_id).await {
-        Ok(Some(receipt)) if receipt.phase == "prepared" => {
-            let prepared: idem::PreparedDispatch = match serde_json::from_value(receipt.payload) {
-                Ok(prepared) => prepared,
-                Err(error) => return error_500(error.to_string()),
-            };
-            Some(prepared)
-        }
-        Ok(_) => None,
-        Err(error) => return error_500(error.to_string()),
-    };
-    let mut gate = state.brain_gate.lock(&request_id).await;
-
-    let mut existing = Vec::new();
-    for (expected_kind, id) in idem::candidate_ids(&request_id) {
-        match state.fleet.index(&id).await {
-            Ok(Some(index)) if index.kind == expected_kind => existing.push(index),
-            Ok(Some(_)) => return response(idem::conflict()),
-            Ok(None) => {}
-            Err(error) => return error_500(error.to_string()),
-        }
-    }
-    if existing.len() > 1 {
-        return response(RpcReply::error(
-            409,
-            "request_id has multiple execution candidates",
-        ));
-    }
-    if let Some(prepared) = persisted_prepared {
-        return response(submit_prepared(&state, prepared).await);
-    }
-    if let Some(index) = existing.first() {
-        let accepted = state
-            .hub
-            .call(
-                &index.node_id,
-                NodeOperation::AcceptedRequest {
-                    execution: index.execution_ref(),
-                },
-            )
-            .await;
-        if accepted.status == 404 {
-            return response(RpcReply::error(
-                503,
-                "owning node has not confirmed this brain request",
-            ));
-        }
-        if accepted.status != 200 {
-            return response(accepted);
-        }
-        let receipt = match idem::receipt_from_accepted(
-            &accepted.body,
-            index,
-            &request_id,
-            &normalized.intent,
-        ) {
-            Ok(receipt) => receipt,
-            Err(reply) => return response(reply),
-        };
-        gate.remove(&request_id);
-        return response(idem::dispatch_reply(index, &receipt));
-    }
-
-    let planning_permit = {
-        let _placement = state.placement.lock().await;
-        match state.admission.enter().await {
-            Ok(permit) => permit,
-            Err(error) => return response(RpcReply::error(503, error)),
-        }
-    };
-
-    let cached = match idem::claim(&mut gate, &request_id, &normalized.intent) {
-        Ok(state) => state.prepared.clone(),
-        Err(reply) => return response(reply),
-    };
-    let prepared = match cached {
-        Some(prepared) => prepared,
-        None => {
-            let (result, target) = match plan(&state, &normalized).await {
-                Ok(result) => result,
-                Err(reply) => return response(reply),
-            };
-            let planner_model = normalized
-                .intent
-                .model
-                .clone()
-                .unwrap_or_else(|| state.brain.chat_model().to_string());
-            let prepared = match idem::prepare(
-                &normalized,
-                &request_id,
-                &result,
-                target.kind,
-                target.target,
-                planner_model,
-            ) {
-                Ok(prepared) => prepared,
-                Err(reply) => return response(reply),
-            };
-            idem::claim(&mut gate, &request_id, &normalized.intent)
-                .expect("brain gate claim remains stable")
-                .prepared = Some(prepared.clone());
-            prepared
-        }
-    };
-    if let Err(error) = state
-        .fleet
-        .save_receipt(
-            "brain",
-            &request_id,
-            &opencoder_store::fleet::handoff::Receipt {
-                fingerprint,
-                phase: "prepared".into(),
-                payload: json!(prepared),
-            },
-        )
-        .await
-    {
-        return error_500(error.to_string());
-    }
-    drop(planning_permit);
-    let execution = super::executions::submit(&state, prepared.request).await;
-    if execution.status != 202 {
-        return response(execution);
-    }
-    let index: ExecutionIndex = match serde_json::from_value(execution.body) {
-        Ok(index) => index,
-        Err(error) => return error_500(format!("invalid node acceptance: {error}")),
-    };
-    gate.remove(&request_id);
-    response(idem::dispatch_reply(&index, &prepared.receipt))
+pub async fn dispatch() -> Response {
+    migration()
 }
-
-async fn submit_prepared(state: &Arc<AppState>, prepared: idem::PreparedDispatch) -> RpcReply {
-    let execution = super::executions::submit(state, prepared.request).await;
-    if execution.status != 202 {
-        return execution;
-    }
-    match serde_json::from_value::<ExecutionIndex>(execution.body) {
-        Ok(index) => idem::dispatch_reply(&index, &prepared.receipt),
-        Err(error) => RpcReply::error(500, error.to_string()),
-    }
+pub async fn create_plan() -> Response {
+    migration()
 }
-
-pub async fn create_plan(
-    State(state): State<Arc<AppState>>,
-    Json(body): Json<crate::api_brain::PlanBody>,
-) -> Response {
-    let _permit = match planning_permit(&state).await {
-        Ok(permit) => permit,
-        Err(reply) => return response(reply),
-    };
-    crate::api_brain::create_plan(State(state), Json(body)).await
+pub async fn preview() -> Response {
+    migration()
 }
-
-pub async fn preview(
-    State(state): State<Arc<AppState>>,
-    Json(body): Json<crate::api_brain::DispatchBody>,
-) -> Response {
-    let _permit = match planning_permit(&state).await {
-        Ok(permit) => permit,
-        Err(reply) => return response(reply),
-    };
-    crate::api_brain::dispatch(State(state), Json(body)).await
-}
-
-async fn planning_permit(state: &AppState) -> Result<crate::admission::AdmissionPermit, RpcReply> {
-    let _placement = state.placement.lock().await;
-    state
-        .admission
-        .enter()
-        .await
-        .map_err(|error| RpcReply::error(503, error))
-}
-
-async fn plan(
-    state: &Arc<AppState>,
-    normalized: &idem::NormalizedRequest,
-) -> Result<(Value, CapabilityTarget), RpcReply> {
-    // An empty library is a normal first-use state: execute the request with
-    // the default agent on the requested node. Store/planner failures remain
-    // errors; an explicitly supplied plan is always resolved as requested.
-    if normalized.intent.plan_id.is_none() {
-        match state.store.list_brain_capabilities().await {
-            Ok(capabilities) if capabilities.is_empty() => {
-                return Ok((
-                    json!({
-                        "route": "default_agent", "plan_id": null, "capability_id": null,
-                        "reason": "能力库为空，由默认 Agent 执行需求", "path": [],
-                        "planned_fresh": false,
-                    }),
-                    default_target(),
-                ));
-            }
-            Ok(_) => {}
-            Err(error) => return Err(RpcReply::error(500, error.to_string())),
-        }
-    }
-    let preview =
-        crate::api_brain::dispatch(State(state.clone()), Json(normalized.preview())).await;
-    let status = preview.status();
-    let bytes = match axum::body::to_bytes(preview.into_body(), MAX_FRAME_BYTES).await {
-        Ok(bytes) => bytes,
-        Err(error) => return Err(RpcReply::error(500, error.to_string())),
-    };
-    let result: Value = match serde_json::from_slice(&bytes) {
-        Ok(value) => value,
-        Err(error) => return Err(RpcReply::error(500, error.to_string())),
-    };
-    if !status.is_success() {
-        return Err(RpcReply {
-            status: status.as_u16(),
-            body: result,
-        });
-    }
-    let Some(capability) = result["capability_id"]
-        .as_str()
-        .filter(|value| !value.is_empty())
-    else {
-        return Err(RpcReply::error(500, "brain result missing capability_id"));
-    };
-    let target: CapabilityTarget = match state
-        .fleet
-        .definition("capability_target", capability)
-        .await
-    {
-        Ok(Some(value)) => match serde_json::from_value(value) {
-            Ok(target) => target,
-            Err(error) => return Err(RpcReply::error(500, error.to_string())),
-        },
-        Ok(None) => default_target(),
-        Err(error) => return Err(RpcReply::error(500, error.to_string())),
-    };
-    Ok((result, target))
-}
-
-fn default_target() -> CapabilityTarget {
-    CapabilityTarget {
-        kind: ExecutionKind::Agent,
-        target: "act".into(),
-    }
-}
-
-async fn dispatch_unkeyed(state: &Arc<AppState>, normalized: &idem::NormalizedRequest) -> RpcReply {
-    let planning_permit = match planning_permit(state).await {
-        Ok(permit) => permit,
-        Err(reply) => return reply,
-    };
-    let (mut result, target) = match plan(state, normalized).await {
-        Ok(result) => result,
-        Err(reply) => return reply,
-    };
-    let id = normalized
-        .custom_id
-        .clone()
-        .unwrap_or_else(|| format!("{}-{}", target.kind.prefix(), ulid::Ulid::new()));
-    let request = CreateExecution {
-        id,
-        kind: target.kind,
-        target: Some(target.target),
-        input: json!({
-            "prompt": normalized.intent.situation,
-            "capability_id": result["capability_id"],
-        }),
-        node_id: normalized.intent.node_id.clone(),
-    };
-    drop(planning_permit);
-    let execution = super::executions::submit(state, request).await;
-    if execution.status != 202 {
-        return execution;
-    }
-    result["execution"] = execution.body;
-    RpcReply {
-        status: 202,
-        body: result,
-    }
+pub fn migration() -> Response {
+    response(RpcReply::error(409, opencoder_brain::graph::MIGRATION))
 }

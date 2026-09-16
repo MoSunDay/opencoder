@@ -62,7 +62,10 @@ async fn connection(
     .await?;
     let (tx, mut rx) = mpsc::channel::<NodeFrame>(128);
     let (report_trigger, mut report_requests) = mpsc::channel::<()>(1);
-    let mut report = futures::future::pending::<Result<PreparedReport>>().boxed();
+    // Admission is serialized on this connection. Collection must keep running
+    // while an admission call waits for a lock held or reserved by its report.
+    // JoinSet also cancels collection when this connection is closed.
+    let mut reports = tokio::task::JoinSet::new();
     let mut report_inflight = false;
     let mut report_pending = false;
     report_trigger.try_send(())?;
@@ -88,13 +91,12 @@ async fn connection(
                     report_pending = true;
                 } else {
                     report_inflight = true;
-                    report = prepare_owned_report(service.clone()).boxed();
+                    reports.spawn(prepare_owned_report(service.clone()));
                 }
             }
-            prepared = &mut report, if report_inflight => {
+            Some(prepared) = reports.join_next(), if report_inflight => {
                 report_inflight = false;
-                report = futures::future::pending::<Result<PreparedReport>>().boxed();
-                publish_report(&mut writer, prepared?, next_report_id).await?;
+                publish_report(&mut writer, prepared??, next_report_id).await?;
                 next_report_id = next_report_id.checked_add(1).context("index report id overflow")?;
                 if report_pending {
                     report_pending = false;

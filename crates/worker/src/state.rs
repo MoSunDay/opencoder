@@ -162,6 +162,13 @@ impl Worker {
         let cpu = opencoder_node::fleet::cpu::capacity();
         let max_runs = options.max_runs.unwrap_or(cpu.ceil() as usize).max(1);
         let scheduling = crate::runtime::SchedulingState::load(&data_dir, max_runs)?;
+        // The persisted scheduling workdir must exist before sessions run in
+        // it; a missing mount only degrades sessions, never node startup.
+        if let Some(dir) = &scheduling.get().workdir {
+            if let Err(error) = std::fs::create_dir_all(dir) {
+                tracing::warn!(workdir = %dir, error = %error, "scheduling workdir unavailable");
+            }
+        }
         let host_capacity = crate::runtime::capacity::HostCapacity::load(&data_dir).await?;
         let journal = Journal::open(layout.clone())?;
         for record in journal.records.values().filter(|r| {
@@ -366,7 +373,7 @@ impl Worker {
     }
     pub(crate) fn configuration(&self) -> Result<Config> {
         Ok(opencoder_core::agent::scope::with_root_sync(None, || {
-            Config::load(&self.inner.state.workdir)
+            Config::load(&crate::brain::workdir::node_workdir(self))
         })?)
     }
     pub(crate) fn client(&self, config: &Config) -> Result<Arc<dyn ChatStream>> {

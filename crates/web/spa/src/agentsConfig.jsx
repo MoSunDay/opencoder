@@ -1,14 +1,8 @@
-// agentsConfig.jsx — 菜单页「Agent 配置」：朴素表格列出 agent（名称列检索、
-// 头部新建/生效选择，行内 编辑/启动/删除）。新建 modal（name + 四类资源
-// Select，数据来自各池 GET /api/agents/resources/:cat）；编辑在右侧抽屉打开
-// agentDetail.jsx。Operator、Harness 与 NFS 分别管理。
-
 import {
-  Button, Drawer, Form, Input, Modal, Popconfirm, Select, Space, Table, Tabs, Tag, Typography,
+  Button, Drawer, Form, Input, Modal, Popconfirm, Select, Space, Table, Tabs, Typography,
 } from 'antd';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { apiDel, apiGet, apiPatch, apiPost } from './api.js';
-import { REF_FIELDS, resourceOptions } from './agentsItems.js';
+import { apiDel, apiGet, apiPost } from './api.js';
 import { AgentDetail } from './agentDetail.jsx';
 import { AgentNfsCard } from './agentNfsCard.jsx';
 import { ExecutionDetail } from './fleet/detail.jsx';
@@ -23,9 +17,9 @@ import { useStore } from './store.js';
 
 const { Text } = Typography;
 
-/// 新建 modal：name + 四类引用（可清空 ⇒ null）。409 重名等服务端
+/// 新建 modal：名称和执行方式，创建后直接进入资源配置。409 重名等服务端
 /// error 经 onNotice 透出。
-function CreateAgentModal({ open, resources, onClose, onCreated, onNotice }) {
+function CreateAgentModal({ open, onClose, onCreated, onNotice }) {
   const msg = useMessage();
   const [form] = Form.useForm();
   const [saving, setSaving] = useState(false);
@@ -33,14 +27,10 @@ function CreateAgentModal({ open, resources, onClose, onCreated, onNotice }) {
   const submit = async (values) => {
     setSaving(true);
     try {
-      const current = {};
-      REF_FIELDS.forEach(({ field }) => {
-        current[field] = values[field] || null;
-      });
-      await apiPost('/api/agents', { name: values.name, current, harness: values.harness });
+      await apiPost('/api/agents', { name: values.name.trim(), current: {}, harness: values.harness });
       msg.success('已创建');
       form.resetFields();
-      onCreated(values.name);
+      onCreated(values.name.trim());
     } catch (e) {
       onNotice(err('新建 agent 失败: ' + (e && e.message)));
     } finally {
@@ -55,16 +45,6 @@ function CreateAgentModal({ open, resources, onClose, onCreated, onNotice }) {
           <Input placeholder="reviewer" aria-label="new-agent-name" />
         </Form.Item>
         <HarnessFields environments={false} />
-        {REF_FIELDS.map(({ field, label, cat }) => (
-          <Form.Item key={field} name={field} label={label} initialValue={undefined}>
-            <Select
-              allowClear
-              placeholder="不引用"
-              options={resourceOptions(resources[cat])}
-              aria-label={`new-agent-${field}`}
-            />
-          </Form.Item>
-        ))}
         <Space>
           <Button type="primary" htmlType="submit" loading={saving}>创建</Button>
           <Button onClick={onClose}>取消</Button>
@@ -91,8 +71,8 @@ export function AgentsPanel({ onNotice }) {
 function AgentListPanel({ onNotice }) {
   const msg = useMessage();
   const [agents, setAgents] = useState([]);
-  const [active, setActive] = useState(null);
-  const [resources, setResources] = useState({ prompts: [], skills: [], tools: [], memory: [] });
+  const [search, setSearch] = useState('');
+  const [dirty, setDirty] = useState(false);
   const [loading, setLoading] = useState(false);
   const [creating, setCreating] = useState(false);
   const [detail, setDetail] = useState(''); // 打开详情的 agent 名；'' = 列表视图
@@ -106,23 +86,12 @@ function AgentListPanel({ onNotice }) {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [j, prompts, skills, tools, memory, fleet] = await Promise.all([
+      const [j, fleet] = await Promise.all([
         apiGet('/api/agents'),
-        apiGet('/api/agents/resources/prompts'),
-        apiGet('/api/agents/resources/skills'),
-        apiGet('/api/agents/resources/tools'),
-        apiGet('/api/agents/resources/memory'),
         apiGet('/api/nodes'),
       ]);
       setAgents((j && j.agents) || []);
-      setActive((j && j.active) || null);
       setNodes((fleet && fleet.nodes) || []);
-      setResources({
-        prompts: (prompts && prompts.resources) || [],
-        skills: (skills && skills.resources) || [],
-        tools: (tools && tools.resources) || [],
-        memory: (memory && memory.resources) || [],
-      });
     } catch (e) {
       onNotice(err('获取 agent 列表失败: ' + (e && e.message)));
     } finally {
@@ -133,18 +102,6 @@ function AgentListPanel({ onNotice }) {
   useEffect(() => {
     load();
   }, [load]);
-
-  const patchActive = async (value) => {
-    try {
-      const j = await apiPatch('/api/agents/active', { active: value || null });
-      setActive((j && j.active) || null);
-      msg.success(value ? `已激活 ${value}` : '已恢复默认链');
-      load();
-    } catch (e) {
-      onNotice(err('切换生效 agent 失败: ' + (e && e.message)));
-      load(); // 回滚到服务端视角
-    }
-  };
 
   const remove = async (name) => {
     try {
@@ -180,7 +137,6 @@ function AgentListPanel({ onNotice }) {
       render: (v) => (
         <Space size={4}>
           <Text strong>{v}</Text>
-          {active === v ? <Tag color="blue">生效中</Tag> : null}
         </Space>
       ),
     },
@@ -193,24 +149,29 @@ function AgentListPanel({ onNotice }) {
           <Button size="small" type="link" onClick={() => setDetail(r.name)}>编辑</Button>
           <Button size="small" type="link" onClick={() => { launchForm.resetFields(); setLaunch(r); }}>启动</Button>
           <Popconfirm title={`删除 agent ${r.name}？`} okText="确认删除" onConfirm={() => remove(r.name)}>
-            <Button size="small" type="link" danger disabled={r.builtin}>删除</Button>
+            <Button size="small" type="link" danger>删除</Button>
           </Popconfirm>
         </Space>
       ),
     },
   ];
 
+  // 搜索框为受控组件：按名称（忽略大小写）过滤本地列表，不入服务端。
+  const query = search.trim().toLowerCase();
+  const visible = query
+    ? agents.filter((a) => String(a.name).toLowerCase().includes(query))
+    : agents;
+
   return (
     <div>
         <Space style={{ marginBottom: 16 }} wrap>
-          <Select
+          <Input.Search
             allowClear
             style={{ minWidth: 220 }}
-            placeholder="生效 Agent：跟随默认链"
-            value={active || undefined}
-            onChange={patchActive}
-            options={agents.map((a) => ({ value: a.name, label: a.name }))}
-            aria-label="active-agent"
+            placeholder="搜索 agent 名称"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            aria-label="agent-search"
           />
           <Button type="primary" onClick={() => setCreating(true)}>新建</Button>
         </Space>
@@ -218,7 +179,7 @@ function AgentListPanel({ onNotice }) {
         rowKey="name"
         size="small"
         columns={columns}
-        dataSource={agents}
+        dataSource={visible}
         loading={loading}
         pagination={false}
         scroll={{ x: 'max-content' }}
@@ -228,21 +189,20 @@ function AgentListPanel({ onNotice }) {
         title={detail ? `编辑 Agent · ${detail}` : '编辑 Agent'}
         placement="right"
         open={!!detail}
-        onClose={() => setDetail('')}
+        onClose={() => { if (!dirty || window.confirm('关闭会丢弃未保存内容，继续？')) { setDetail(''); setDirty(false); } }}
         size="75%"
         styles={{ wrapper: { maxWidth: '100vw' } }}
         destroyOnHidden
       >
         {detail ? <AgentDetail
           name={detail}
-          resources={resources}
+          onDirtyChange={setDirty}
           onNotice={onNotice}
           onChanged={load}
         /> : null}
       </Drawer>
       <CreateAgentModal
         open={creating}
-        resources={resources}
         onNotice={onNotice}
         onClose={() => {
           setCreating(false);

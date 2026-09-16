@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 // Versioned fleet transport with immutable execution configuration.
-pub const PROTOCOL_VERSION: u32 = 9;
+pub const PROTOCOL_VERSION: u32 = 10;
 pub const HEARTBEAT_MS: u64 = 5_000;
 pub const STALE_MS: i64 = 20_000;
 pub const MAX_FRAME_BYTES: usize = 2 * 1024 * 1024;

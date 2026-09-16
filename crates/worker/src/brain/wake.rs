@@ -48,7 +48,8 @@ pub async fn recover_locked(worker: &Worker) -> Result<()> {
             )?;
             continue;
         }
-        if run.phase == RunPhase::Paused || run.candidate_plan.is_some() {
+        if matches!(run.phase, RunPhase::Paused | RunPhase::Blocked) || run.candidate_plan.is_some()
+        {
             continue;
         }
         if run.revision <= run.handled_revision

@@ -117,7 +117,7 @@ describe('TodosTab create modal', () => {
   it('offers the four executor kinds; conditional fields follow the pick', async () => {
     mountTab();
     await openCreate();
-    expect(EXECUTOR_OPTIONS.map((o) => o.value)).toEqual(['agent', 'team', 'dag', 'brain']);
+    expect(EXECUTOR_OPTIONS.map((o) => o.value)).toEqual(['agent', 'team', 'dag']);
     expect(screen.getByLabelText('executor_kind')).toBeTruthy();
     // agent default: the agent input, no ref/spec fields.
     expect(screen.getByPlaceholderText('act')).toBeTruthy();

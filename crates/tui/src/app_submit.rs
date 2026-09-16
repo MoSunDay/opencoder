@@ -68,6 +68,7 @@ pub(crate) async fn handle_submit_action(
     cancelled: &mut bool,
     follow: &mut bool,
     body_refresh_pending: &mut bool,
+    agent_menu: &mut Option<crate::agent_menu::AgentMenu>,
 ) -> LoopFlow {
     if *running {
         // Submit while running is unreachable (Enter/Tab map to
@@ -159,6 +160,7 @@ pub(crate) async fn handle_submit_action(
             pending_images,
             history,
             hist_idx,
+            agent_menu,
         )
         .await;
         match f {

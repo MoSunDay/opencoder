@@ -24,6 +24,7 @@ pub(crate) fn render_popups(
     task_picker: Option<&TaskPicker>,
     command_menu: Option<&CommandMenu>,
     file_menu: Option<&FileMenu>,
+    agent_menu: Option<&crate::agent_menu::AgentMenu>,
     model_menu: Option<&ModelMenu>,
     mcp_menu: Option<&crate::mcp_menu::McpMenu>,
     cli_menu: Option<&crate::cli_menu::CliMenu>,
@@ -41,6 +42,9 @@ pub(crate) fn render_popups(
     }
     if let Some(fm) = file_menu {
         crate::file_menu::render_file_popup(f, area, composer_top, fm);
+    }
+    if let Some(ag) = agent_menu {
+        crate::agent_menu::render_agent_popup(f, area, composer_top, ag);
     }
     if let Some(mm) = model_menu {
         crate::model_menu::render_model_popup(f, area, composer_top, mm);

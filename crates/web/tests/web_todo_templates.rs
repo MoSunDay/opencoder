@@ -468,3 +468,108 @@ async fn directory_errors_preserve_raw_files_and_never_publish_invalid_or_stale_
     assert!(tree.get("files").is_none());
     assert_eq!(tree["entries"].as_array().unwrap().len(), 7);
 }
+
+/// Fork helper: low-effort body (note only) is accepted without expectation
+/// guards and flips `current` to the fresh version.
+async fn fork(state: &Arc<opencoder_web::AppState>, note: &str) -> serde_json::Value {
+    let (status, v) = call(
+        app(state.clone()),
+        "POST",
+        "/api/todo/templates/demo/new-version",
+        Some(serde_json::json!({"note": note})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    v
+}
+
+fn version_names(meta: &serde_json::Value) -> Vec<&str> {
+    meta["template"]["versions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v["version"].as_str().unwrap())
+        .collect()
+}
+
+/// Retention keeps only the most recent 10 versions: forking past the cap
+/// prunes the oldest directories, `todo.json` stops advertising them and
+/// reads of a pruned version 404.
+#[tokio::test]
+async fn retention_keeps_recent_ten_versions_and_prunes_oldest() {
+    let (_g, root) = share().await;
+    let state = state().await;
+    create_demo(&state).await;
+    for i in 2..=10 {
+        fork(&state, &format!("v{i}")).await;
+    }
+
+    let v11 = fork(&state, "v11").await;
+    assert_eq!(v11["pruned"], serde_json::json!(["v1"]), "{v11}");
+    let v12 = fork(&state, "v12").await;
+    assert_eq!(v12["pruned"], serde_json::json!(["v2"]), "{v12}");
+
+    let (_, meta) = call(app(state.clone()), "GET", "/api/todo/templates/demo", None).await;
+    assert_eq!(
+        version_names(&meta),
+        vec!["v3", "v4", "v5", "v6", "v7", "v8", "v9", "v10", "v11", "v12"]
+    );
+    assert_eq!(meta["template"]["current"], "v12");
+
+    let mut on_disk: Vec<String> = std::fs::read_dir(root.join("todo/demo"))
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|n| root.join("todo/demo").join(n).is_dir())
+        .collect();
+    on_disk.sort();
+    assert_eq!(
+        on_disk,
+        vec!["v10", "v11", "v12", "v3", "v4", "v5", "v6", "v7", "v8", "v9"]
+    );
+
+    let (status, v) = call(
+        app(state.clone()),
+        "GET",
+        "/api/todo/templates/demo/v1/files",
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{v}");
+}
+
+/// Pinning `current` back to an old version never prunes by itself: only the
+/// next fork grows the list. The fork flips `current` to the fresh version,
+/// so the retention cut follows "most recent 10" — the formerly pinned
+/// version loses its slot the moment it is no longer current.
+#[tokio::test]
+async fn retention_pinned_current_is_untouched_until_next_fork() {
+    let (_g, root) = share().await;
+    let state = state().await;
+    create_demo(&state).await;
+    for i in 2..=10 {
+        fork(&state, &format!("v{i}")).await;
+    }
+
+    let (status, meta) = call(
+        app(state.clone()),
+        "PUT",
+        "/api/todo/templates/demo/todo.json",
+        Some(serde_json::json!({"current": "v1"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{meta}");
+    assert_eq!(meta["template"]["current"], "v1");
+    assert_eq!(
+        meta["template"]["versions"].as_array().unwrap().len(),
+        10,
+        "flipping current never prunes"
+    );
+    for i in 1..=10 {
+        assert!(root.join(format!("todo/demo/v{i}")).is_dir());
+    }
+
+    let v11 = fork(&state, "v11").await;
+    assert_eq!(v11["pruned"], serde_json::json!(["v1"]), "{v11}");
+    assert_eq!(v11["template"]["current"], "v11");
+    assert!(!root.join("todo/demo/v1").exists());
+}

@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { TARGET_ENDPOINTS, fetchTargetOptions, targetOptionsFrom } from './targetOptions.js';
 
 const fixtures = {
-  '/api/agents': { agents: [{ name: 'act' }, { name: 'custom-agent' }, null, { other: 1 }, { name: '  ' }] },
+  '/api/agents': { agents: [{ name: 'custom-agent' }, null, { other: 1 }, { name: '  ' }] },
   '/api/teams': { teams: [{ name: 'crew-a' }, { name: 'crew-b' }, {}] },
   '/api/dag/defs': [{ id: 'dag-build' }, null, { id: '' }, { name: 'not-an-id' }],
   '/api/todo/templates': {
@@ -21,9 +21,24 @@ const fixtures = {
 const fetchAll = vi.fn(async (path) => fixtures[path]);
 
 describe('targetOptionsFrom', () => {
-  it('extracts agent names', () => {
+  it('extracts agent names and prepends the builtin primary roles', () => {
     expect(targetOptionsFrom('agent', fixtures['/api/agents']))
-      .toEqual([{ value: 'act', label: 'act' }, { value: 'custom-agent', label: 'custom-agent' }]);
+      .toEqual([
+        { value: 'act', label: 'act' },
+        { value: 'plan', label: 'plan' },
+        { value: 'command', label: 'command' },
+        { value: 'custom-agent', label: 'custom-agent' },
+      ]);
+  });
+
+  it('does not duplicate a registered card that shares a builtin name', () => {
+    expect(targetOptionsFrom('agent', { agents: [{ name: 'act' }, { name: 'reviewer' }] }))
+      .toEqual([
+        { value: 'act', label: 'act' },
+        { value: 'plan', label: 'plan' },
+        { value: 'command', label: 'command' },
+        { value: 'reviewer', label: 'reviewer' },
+      ]);
   });
 
   it('extracts team names', () => {
@@ -47,8 +62,13 @@ describe('targetOptionsFrom', () => {
   });
 
   it('filters missing and odd entries instead of throwing', () => {
-    expect(targetOptionsFrom('agent', null)).toEqual([]);
-    expect(targetOptionsFrom('agent', { agents: 'oops' })).toEqual([]);
+    // Builtin primary roles are static dispatch targets — they survive a
+    // missing/garbled registry payload; registered names simply drop out.
+    expect(targetOptionsFrom('agent', null))
+      .toEqual([{ value: 'act', label: 'act' }, { value: 'plan', label: 'plan' }, { value: 'command', label: 'command' }]);
+    expect(targetOptionsFrom('agent', { agents: 'oops' })).toEqual(
+      [{ value: 'act', label: 'act' }, { value: 'plan', label: 'plan' }, { value: 'command', label: 'command' }]);
+    expect(targetOptionsFrom('todos', { templates: [{ versions: [] }] })).toEqual([]);
     expect(targetOptionsFrom('todos', { templates: [{ versions: [] }] })).toEqual([]);
     expect(targetOptionsFrom('dag', undefined)).toEqual([]);
   });
@@ -67,13 +87,21 @@ describe('fetchTargetOptions', () => {
       expect(fetchAll).toHaveBeenLastCalledWith(TARGET_ENDPOINTS[kind]);
     }
     await expect(fetchTargetOptions(fetchAll, 'agent')).resolves.toEqual([
-      { value: 'act', label: 'act' }, { value: 'custom-agent', label: 'custom-agent' },
+      { value: 'act', label: 'act' }, { value: 'plan', label: 'plan' },
+      { value: 'command', label: 'command' }, { value: 'custom-agent', label: 'custom-agent' },
     ]);
   });
 
   it('resolves [] for an unknown kind without calling apiGet', async () => {
     const apiGet = vi.fn();
-    expect(await fetchTargetOptions(apiGet, 'operator')).toEqual([]);
+    expect(await fetchTargetOptions(apiGet, 'unknown')).toEqual([]);
     expect(apiGet).not.toHaveBeenCalled();
+  });
+  it('lists registered agents and builtins as Operator targets', async () => {
+    const apiGet = vi.fn().mockResolvedValue({ agents: [{ name: 'host-review' }] });
+    const targets = await fetchTargetOptions(apiGet, 'operator');
+    expect(apiGet).toHaveBeenCalledWith('/api/agents');
+    expect(targets).toContainEqual({ value: 'host-review', label: 'host-review' });
+    expect(targets).toContainEqual({ value: 'act', label: 'act' });
   });
 });

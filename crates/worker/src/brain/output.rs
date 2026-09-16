@@ -23,7 +23,7 @@ pub async fn normalize(
     let id = &record.assignment.index.id;
     let mut artifacts = vec![];
     let native = match record.assignment.index.kind {
-        ExecutionKind::Agent => {
+        ExecutionKind::Agent | ExecutionKind::Operator => {
             let messages = worker.inner.state.store.load_messages(id).await?;
             let final_message = messages
                 .iter()
@@ -142,7 +142,8 @@ pub fn project_output(mut value: Value, action: &ActionSpec) -> Result<Value> {
     match action.output_mode {
         OutputMode::Json => {
             if let Some(text) = value.as_str() {
-                Ok(serde_json::from_str(text).unwrap_or(value))
+                serde_json::from_str(text)
+                    .context("declared JSON output contains invalid JSON text")
             } else {
                 Ok(value)
             }

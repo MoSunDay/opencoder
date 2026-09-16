@@ -37,7 +37,7 @@ async fn task_create_pins_node_and_continue_reuses_session() {
         .await;
     assert_eq!(status, 200, "{body}");
     let task_id = body["task_id"].as_str().unwrap().to_string();
-    assert!(task_id.starts_with("agent-"), "{body}");
+    assert!(task_id.starts_with("operator-"), "{body}");
     assert_eq!(body["node_id"], json!("node-e2e"));
     assert_eq!(body["session_id"], json!(task_id));
 
@@ -77,32 +77,36 @@ async fn task_create_pins_node_and_continue_reuses_session() {
 #[tokio::test]
 async fn dialogs_ledger_and_task_cancel() {
     let h = Harness::new().await;
-    h.put_index("agent-dlg-1", ExecutionKind::Agent, ExecutionStatus::Idle)
-        .await;
+    h.put_index(
+        "operator-dlg-1",
+        ExecutionKind::Operator,
+        ExecutionStatus::Idle,
+    )
+    .await;
     h.node.set_command(
-        "agent-dlg-1",
+        "operator-dlg-1",
         "summary",
         200,
-        json!({"id": "agent-dlg-1", "title": "ledger", "status": "idle", "last_created_at": 42}),
+        json!({"id": "operator-dlg-1", "title": "ledger", "status": "idle", "last_created_at": 42}),
     );
     let (status, body) = h
         .req(Method::GET, "/api/nodes/node-e2e/dialogs", None)
         .await;
     assert_eq!(status, 200, "{body}");
     let dialogs = body["dialogs"].as_array().unwrap();
-    assert_eq!(dialogs[0]["session_id"], json!("agent-dlg-1"));
+    assert_eq!(dialogs[0]["session_id"], json!("operator-dlg-1"));
     assert_eq!(dialogs[0]["title"], json!("ledger"));
 
     h.node.set_command(
-        "agent-dlg-1",
+        "operator-dlg-1",
         "cancel",
         200,
-        json!({"id": "agent-dlg-1", "status": "cancelled"}),
+        json!({"id": "operator-dlg-1", "status": "cancelled"}),
     );
     let (status, body) = h
         .req(
             Method::POST,
-            "/api/nodes/node-e2e/tasks/agent-dlg-1/cancel",
+            "/api/nodes/node-e2e/tasks/operator-dlg-1/cancel",
             None,
         )
         .await;
@@ -112,7 +116,7 @@ async fn dialogs_ledger_and_task_cancel() {
     let (status, body) = h
         .req(
             Method::POST,
-            "/api/nodes/node-other/tasks/agent-dlg-1/cancel",
+            "/api/nodes/node-other/tasks/operator-dlg-1/cancel",
             None,
         )
         .await;
@@ -122,14 +126,18 @@ async fn dialogs_ledger_and_task_cancel() {
 #[tokio::test]
 async fn task_events_stream_uses_the_shared_sse_handler() {
     let h = Harness::new().await;
-    h.put_index("agent-tevt-1", ExecutionKind::Agent, ExecutionStatus::Done)
-        .await;
+    h.put_index(
+        "operator-tevt-1",
+        ExecutionKind::Operator,
+        ExecutionStatus::Done,
+    )
+    .await;
     h.node.set_events(
-        "agent-tevt-1",
+        "operator-tevt-1",
         vec![json!({"seq": 1, "kind": "status", "data": {"phase": "done"}, "ts": 9})],
         true,
     );
-    let (status, text) = h.sse_text("/api/nodes/tasks/agent-tevt-1/events").await;
+    let (status, text) = h.sse_text("/api/nodes/tasks/operator-tevt-1/events").await;
     assert_eq!(status, 200);
     assert!(
         text.contains("id: 1") && text.contains("event: status"),
@@ -145,12 +153,12 @@ async fn task_create_validates_caller_ids_and_node_pins() {
         .req(
             Method::POST,
             "/api/nodes/node-e2e/tasks",
-            Some(json!({"id": "agent-task-named", "prompt": "hi"})),
+            Some(json!({"id": "operator-task-named", "prompt": "hi"})),
         )
         .await;
     assert_eq!(status, 200, "{body}");
-    assert_eq!(body["task_id"], json!("agent-task-named"));
-    assert_eq!(body["session_id"], json!("agent-task-named"));
+    assert_eq!(body["task_id"], json!("operator-task-named"));
+    assert_eq!(body["session_id"], json!("operator-task-named"));
     assert_eq!(body["node_id"], json!("node-e2e"));
 
     // Malformed caller ids never reach a node.
@@ -181,7 +189,7 @@ async fn task_create_validates_caller_ids_and_node_pins() {
         .req(
             Method::POST,
             "/api/nodes/node-e2e/tasks",
-            Some(json!({"session_id": "agent-ghost-9", "prompt": "x"})),
+            Some(json!({"session_id": "operator-ghost-9", "prompt": "x"})),
         )
         .await;
     assert_eq!(status, 409, "{body}");
@@ -193,7 +201,7 @@ async fn task_create_validates_caller_ids_and_node_pins() {
         .req(
             Method::POST,
             "/api/nodes/node-e2e/tasks",
-            Some(json!({"id": "agent-drained-1", "prompt": "x"})),
+            Some(json!({"id": "operator-drained-1", "prompt": "x"})),
         )
         .await;
     assert_eq!(status, 503, "{body}");

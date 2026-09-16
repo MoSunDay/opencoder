@@ -574,56 +574,20 @@ async fn cancel_unknown_project_run_is_404() {
 }
 
 #[tokio::test]
-async fn brain_todo_execute_preresolves_empty_library_to_default_agent() {
+async fn legacy_brain_todo_execute_rejects_without_default_agent() {
     let h = Harness::new().await;
     let todo_id = seed_todo_with_kind(&h, Some("brain")).await;
 
-    // Plan first (202) so the project-<todo> execution exists and execute
-    // takes the node-affinity command branch.
-    let (status, body) = h
-        .req(
-            Method::POST,
-            &format!("/api/project/todos/{todo_id}/plan"),
-            Some(json!({})),
-        )
-        .await;
-    assert_eq!(status, 202, "{body}");
-    let exec_id = format!("project-{todo_id}");
-
-    h.node.set_command(
-        &exec_id,
-        "execute",
-        200,
-        json!({"id": exec_id, "status": "running"}),
-    );
-    let (status, body) = h
-        .req(
-            Method::POST,
-            &format!("/api/project/todos/{todo_id}/execute"),
-            None,
-        )
-        .await;
-    assert_eq!(status, 200, "{body}");
-
-    // The harness store starts with an EMPTY capability library: execute
-    // pre-resolves to the default agent override (same first-use default
-    // as the brain dispatch surface) instead of a 400.
-    let seen = h.node.seen_commands();
-    let execute_cmd = seen
-        .iter()
-        .find(|(id, action, _)| id == &exec_id && action == "execute")
-        .expect("execute command forwarded");
-    assert_eq!(
-        execute_cmd.2["brain"],
-        json!({"kind": "agent", "ref": "act", "capability_id": null, "plan_id": null}),
-        "input.brain carries the default-agent resolution: {execute_cmd:?}"
-    );
+    let (status, body) = h.req(Method::POST, &format!("/api/project/todos/{todo_id}/execute"), Some(json!({}))).await;
+    assert_eq!(status, 409, "{body}");
+    assert!(body.to_string().contains("migration required"));
+    assert!(h.node.seen_commands().iter().all(|(_, action, _)| action != "execute"));
 }
 
 #[tokio::test]
 async fn keyed_project_routing_rejects_changed_intent_after_unconfirmed_command() {
     let h = Harness::new().await;
-    let todo = seed_todo_with_kind(&h, Some("brain")).await;
+    let todo = seed_todo_with_kind(&h, Some("agent")).await;
     let path = format!("/api/project/todos/{todo}");
     let (status, body) = h
         .req(Method::POST, &format!("{path}/plan"), Some(json!({})))

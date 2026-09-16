@@ -19,6 +19,7 @@ pub mod activation;
 pub mod domain;
 pub mod error;
 pub mod execution;
+pub mod graph;
 pub mod ontology;
 pub mod plan;
 pub mod planning;
@@ -33,8 +34,7 @@ pub use planning::{
     PLAYBOOK_FRAMEWORK_PROMPT,
 };
 pub use playbook::{
-    cosine_similarity, fires, match_text, scan, threshold, PlaybookInput, PlaybookOrigin,
-    PlaybookSpec, PlaybookStep, PlaybookTarget, PlaybookTrigger,
+    PlaybookInput, PlaybookOrigin, PlaybookSpec, PlaybookStep, PlaybookTarget, PlaybookTrigger,
 };
 pub use runtime::Runtime;
 pub use types::CapabilityInput;

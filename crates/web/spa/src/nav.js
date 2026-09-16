@@ -64,20 +64,39 @@ export const DEFAULT_PAGE = 'nodes';
 /// antd Segmented options for the three categories (Sider + mobile row 1).
 export const CATEGORY_OPTIONS = NAV_CATEGORIES.map((c) => ({ value: c.key, label: c.label }));
 
-/// Pages that carry their own title inside the body (the brain workbench uses
-/// Tabs), so they deliberately have no PAGE_META header copy. PageShell renders
-/// a headerless `.oc-page` body for any page missing from PAGE_META.
-export const HEADERLESS_PAGES = ['brain', 'topics', 'team', 'agents', 'nodes'];
+/// Pages with no PageShell header: they are absent from PAGE_META, so
+/// pageShell.jsx renders only the bare `.oc-page` body. Skipping the header
+/// also skips the in-content page title, so every entry must declare WHY the
+/// page still has a name — shell/headerContract.dom.test.jsx mounts the real
+/// panel of every page and fails on an unknown page, an unknown reason, or a
+/// PAGE_META entry no panel renders:
+///   - 'body-title': the panel renders its own title (antd Tabs) in the body;
+///   - 'menu-only' : full-bleed / operational page — the sidebar Menu and the
+///                    mobile Select label are deliberately the only title (a
+///                    page header would just repeat them, see fe00626e).
+export const HEADERLESS_REASONS = {
+  brain: 'body-title',
+  topics: 'menu-only',
+  dag: 'body-title',
+  todos: 'body-title',
+  team: 'menu-only',
+  chat: 'menu-only',
+  agents: 'body-title',
+  nodes: 'menu-only',
+};
 
-/// Per-page header copy (title + one-line description). Exported now so the
-/// IA has one name per page; the header UI itself arrives in iteration 3.
+/// Derived from the reasons registry so the two lists can never drift.
+export const HEADERLESS_PAGES = Object.keys(HEADERLESS_REASONS);
+
+/// Per-page header copy for the pages whose panel actually mounts PageShell
+/// with its own key (project / progress / ownerview): pageShell.jsx renders
+/// title + desc from here. An entry no panel renders is dead copy — the
+/// header contract test mounts every panel and fails on it, so this map
+/// stays truthful.
 export const PAGE_META = {
   project: { title: '项目', desc: '目标、里程碑与 TODO 的用户策展跟踪' },
   progress: { title: '进展', desc: '里程碑进度、进行中 TODO 与最近项目执行' },
   ownerview: { title: 'Owner 视角', desc: '按目标分组的健康度与待人工介入事项' },
-  dag: { title: 'DAG 工作流', desc: 'DAG 运行的图视图与步骤工件' },
-  todos: { title: 'TODO 管理', desc: '持久化 TODO 工作流的调度与验收' },
-  chat: { title: '会话交互', desc: '与舰队节点对话的会话工作台' },
 };
 
 /// Category lookup with the default as the safety net (unknown keys never

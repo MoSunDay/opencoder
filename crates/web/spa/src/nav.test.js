@@ -10,6 +10,7 @@ import {
   DEFAULT_CATEGORY,
   DEFAULT_PAGE,
   HEADERLESS_PAGES,
+  HEADERLESS_REASONS,
   NAV_CATEGORIES,
   PAGE_META,
   allowedPages,
@@ -149,6 +150,13 @@ describe('CATEGORY_OPTIONS / PAGE_META coverage', () => {
       expect(PAGE_META[page]).toBeUndefined();
       expect(ALL_PAGES).toContain(page);
     }
+  });
+
+  it('declares a headerless reason for every page missing from PAGE_META', () => {
+    for (const page of HEADERLESS_PAGES) {
+      expect(['body-title', 'menu-only']).toContain(HEADERLESS_REASONS[page]);
+    }
+    expect(Object.keys(HEADERLESS_REASONS).sort()).toEqual([...HEADERLESS_PAGES].sort());
   });
 
   it('gives every page a non-empty title and description', () => {

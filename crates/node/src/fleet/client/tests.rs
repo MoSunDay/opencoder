@@ -317,3 +317,98 @@ fn normal_retirement_and_error_close_codes_remain_distinct() {
         );
     }
 }
+
+struct AdmissionDuringReport {
+    base: SlowIndexes,
+    gate: tokio::sync::Mutex<()>,
+    admission_started: Semaphore,
+    release_report: Semaphore,
+}
+
+#[async_trait::async_trait]
+impl NodeService for AdmissionDuringReport {
+    fn registration(&self) -> NodeRegistration {
+        self.base.registration()
+    }
+    fn snapshot(&self) -> NodeSnapshot {
+        self.base.snapshot()
+    }
+    fn changes(&self) -> watch::Receiver<u64> {
+        self.base.changes()
+    }
+    async fn indexes(&self) -> Result<Vec<ExecutionIndex>> {
+        let _gate = self.gate.lock().await;
+        self.base.started.add_permits(1);
+        self.release_report.acquire().await?.forget();
+        Ok(vec![])
+    }
+    async fn handle(&self, operation: NodeOperation) -> RpcReply {
+        assert!(matches!(operation, NodeOperation::Admission { .. }));
+        self.admission_started.add_permits(1);
+        let _gate = self.gate.lock().await;
+        RpcReply::ok(serde_json::json!({"mode":"open"}))
+    }
+}
+
+#[tokio::test]
+async fn admission_keeps_inflight_report_running_until_shared_lock_is_released() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("ws://{}", listener.local_addr().unwrap());
+    let (changes, _) = watch::channel(0);
+    let service = Arc::new(AdmissionDuringReport {
+        base: SlowIndexes {
+            started: Arc::new(Semaphore::new(0)),
+            cancelled: Arc::new(Semaphore::new(0)),
+            changes,
+        },
+        gate: tokio::sync::Mutex::new(()),
+        admission_started: Semaphore::new(0),
+        release_report: Semaphore::new(0),
+    });
+    let client_service: Arc<dyn NodeService> = service.clone();
+    let client = tokio::spawn(async move {
+        connection(
+            &url,
+            "test-token",
+            client_service,
+            Arc::new(Semaphore::new(8)),
+        )
+        .await
+    });
+    let result = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        let (stream, _) = listener.accept().await.unwrap();
+        let mut socket = accept_async(stream).await.unwrap();
+        socket.next().await.unwrap().unwrap();
+        service.base.started.acquire().await.unwrap().forget();
+        socket
+            .send(Message::Text(
+                serde_json::to_string(&ServerFrame::Call {
+                    request_id: "admission-during-report".into(),
+                    operation: NodeOperation::Admission {
+                        command: NodeAdmissionCommand::Status,
+                    },
+                })
+                .unwrap(),
+            ))
+            .await
+            .unwrap();
+        service.admission_started.acquire().await.unwrap().forget();
+        service.release_report.add_permits(1);
+        loop {
+            let message = socket.next().await.unwrap().unwrap();
+            let frame: NodeFrame = serde_json::from_str(message.to_text().unwrap()).unwrap();
+            if let NodeFrame::Reply { request_id, reply } = frame {
+                assert_eq!(request_id, "admission-during-report");
+                assert_eq!(reply.status, 200);
+                break;
+            }
+        }
+        socket.close(None).await.unwrap();
+    })
+    .await;
+    if result.is_err() {
+        client.abort();
+    }
+    result.expect("admission must not suspend the report that owns its shared lock");
+    client.await.unwrap().unwrap();
+}

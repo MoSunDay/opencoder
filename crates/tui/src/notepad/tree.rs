@@ -59,6 +59,11 @@ pub enum TreeInput {
     /// Creating a new file — `buf` accumulates the name, `parent` is the
     /// directory it will be created in.
     Create { buf: String, parent: PathBuf },
+    /// Creating a new directory under `parent`.
+    CreateDir { buf: String, parent: PathBuf },
+    /// Renaming `path` in place; `buf` starts pre-filled with the old name and
+    /// `err` carries the last rejection reason (target already exists).
+    Rename { path: PathBuf, buf: String, err: Option<String> },
     /// Delete confirmation — `path` is the file/dir to remove.
     DeleteConfirm { path: PathBuf },
 }
@@ -266,6 +271,28 @@ pub fn render_tree(f: &mut Frame, area: Rect, state: &TreeState, focused: bool) 
                     format!(" new file: {}_", buf),
                     Style::default().fg(theme::ok_color()),
                 ));
+            }
+            TreeInput::CreateDir { buf, .. } => {
+                lines.push(Line::styled(
+                    format!(" new dir: {}_", buf),
+                    Style::default().fg(theme::ok_color()),
+                ));
+            }
+            TreeInput::Rename { path, buf, err } => {
+                let old = path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                lines.push(Line::styled(
+                    format!(" rename '{}' -> {}_", old, buf),
+                    Style::default().fg(theme::ok_color()),
+                ));
+                if let Some(msg) = err {
+                    lines.push(Line::styled(
+                        format!(" ! {}", msg),
+                        Style::default().fg(theme::err_color()),
+                    ));
+                }
             }
             TreeInput::DeleteConfirm { path } => {
                 let name = path

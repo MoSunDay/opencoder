@@ -4,8 +4,6 @@
 //! the serde wire shapes. No runtime, no store — the runtime CRUD over the
 //! same domain lives in `playbook_runtime.rs`.
 
-use std::collections::BTreeSet;
-
 use opencoder_brain::playbook::{
     spec, topology, PlaybookInput, PlaybookOrigin, PlaybookSpec, PlaybookStep, PlaybookTarget,
     PlaybookTrigger,
@@ -228,35 +226,6 @@ fn topo_order_is_deterministic_across_declaration_orders() {
     assert!(topology::topo_order(&unknown)
         .unwrap_err()
         .contains("unknown step"));
-}
-
-#[test]
-fn ready_steps_follow_the_done_set() {
-    let s = diamond();
-    let empty: BTreeSet<String> = BTreeSet::new();
-    assert_eq!(topology::ready_steps(&s, &empty), vec!["a"]);
-    let after_a: BTreeSet<String> = ["a".to_string()].into_iter().collect();
-    assert_eq!(topology::ready_steps(&s, &after_a), vec!["b", "c"]);
-    // d stays hidden until BOTH b and c are done.
-    let after_b: BTreeSet<String> = ["a".to_string(), "b".to_string()].into_iter().collect();
-    assert_eq!(topology::ready_steps(&s, &after_b), vec!["c"]);
-    let all: BTreeSet<String> = ["a", "b", "c", "d"]
-        .into_iter()
-        .map(|n| n.to_string())
-        .collect();
-    assert!(topology::ready_steps(&s, &all).is_empty());
-}
-
-#[test]
-fn collapse_blocked_takes_the_transitive_downstream() {
-    let s = diamond();
-    let failed: BTreeSet<String> = ["b".to_string()].into_iter().collect();
-    let blocked = topology::collapse_blocked(&s, &failed);
-    let expected: BTreeSet<String> = ["b", "d"].into_iter().map(str::to_string).collect();
-    assert_eq!(blocked, expected, "c survives, d collapses with b");
-    // Failing the root collapses everything.
-    let root: BTreeSet<String> = ["a".to_string()].into_iter().collect();
-    assert_eq!(topology::collapse_blocked(&s, &root).len(), 4);
 }
 
 #[test]

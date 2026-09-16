@@ -1,8 +1,10 @@
-// Node-owned conversations: selection is required before creating or sending.
+// Node-owned conversations: each session is an operator-kind execution on
+// the selected node (host-process agent loop, no runc sandbox). Selection is
+// required before creating or sending.
 import { Sender } from '@ant-design/x';
 import { Alert, Button, Input, Modal, Segmented, Space, Spin, Typography } from 'antd';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { apiGet, apiPost } from './api.js';
+import { apiDel, apiGet, apiPost } from './api.js';
 import { canUseNode, newId } from './fleet/model.js';
 import { useNodes } from './fleet/useNodes.js';
 import { useTranscriptStream } from './chat/useTranscriptStream.js';
@@ -13,6 +15,7 @@ import { QueuePanel } from './queuePanel.jsx';
 import { QuestionModal } from './questionModal.jsx';
 import { ModelModal } from './modelModal.jsx';
 import { commandsForInput, replaceToken, stripLastToken } from './commandMenu.js';
+import { mergeBuiltinPrimaryAgentCards } from './agents/builtins.js';
 import { clearPreselect, useStore } from './store.js';
 import { err, ok, warn } from './notice.js';
 import { MONO_VAR } from './ui/mono.js';
@@ -32,6 +35,7 @@ export function ChatPanel({ onNotice }) {
   const [input, setInput] = useState('');
   const [queueVersion, setQueueVersion] = useState(0);
   const [skills, setSkills] = useState([]);
+  const [agents, setAgents] = useState([]);
   const [sessionAgent, setSessionAgent] = useState('act');
   const [modelOpen, setModelOpen] = useState(false);
   const [apOpen, setApOpen] = useState(false);
@@ -44,7 +48,7 @@ export function ChatPanel({ onNotice }) {
   const aliveRef = useRef(true);
 
   const hasNode = !!nodeSel;
-  const nodeReady = canUseNode(nodes, nodeSel, 'agent');
+  const nodeReady = canUseNode(nodes, nodeSel, 'operator');
   const selectionRef = useRef({ node: nodeSel, dialog: dialogSel });
   selectionRef.current = { node: nodeSel, dialog: dialogSel };
 
@@ -80,6 +84,22 @@ export function ChatPanel({ onNotice }) {
       alive = false;
     };
   }, [nodeSel, onNotice]);
+
+  // Agent picker catalog source: GET /api/agents reference cards with the
+  // server-computed one-line description (prompt-pool soul.md first line).
+  // Cards are server-global (not node-scoped like skills), so one fetch per
+  // mount; builtin primary roles merge in through agents/builtins.js.
+  useEffect(() => {
+    let alive = true;
+    apiGet('/api/agents').then((j) => {
+      if (alive) {
+        setAgents((j && j.agents) || []);
+      }
+    }).catch((e) => { if (alive) onNotice?.(err('读取 agent 列表失败: ' + e.message)); });
+    return () => {
+      alive = false;
+    };
+  }, [onNotice]);
 
   const loadDialogs = useCallback(async (nodeId) => {
     setDialogs([]);
@@ -120,8 +140,11 @@ export function ChatPanel({ onNotice }) {
   const sendSession = async (prompt, delivery) => {
     let sid = dialogSel;
     if (!sid) {
-      createAttempt.current ||= { key: nodeSel, id: newId('agent') };
-      const j = await apiPost('/api/sessions', { id: createAttempt.current.id, node_id: nodeSel });
+      createAttempt.current ||= { key: nodeSel, id: newId('operator') };
+      // The staged act/plan choice rides creation: POST /api/sessions accepts
+      // `agent`, so the mode picked before any prompt exists is honored
+      // (server stamps meta.agent and initializes the harness with it).
+      const j = await apiPost('/api/sessions', { id: createAttempt.current.id, node_id: nodeSel, agent: sessionAgent });
       if (!j?.id) throw new Error('服务未返回会话 ID，请重试确认');
       createAttempt.current = null;
       sid = j.id;
@@ -256,23 +279,43 @@ export function ChatPanel({ onNotice }) {
     }
   };
 
-  /// Session commands are relayed to the selected conversation owner. agent/compact open a drain-facing POST; the picker
-  /// kinds just open their modal; 'text' kinds ride the normal prompt path.
+  /// Session commands are relayed to the selected conversation owner. agent/
+  /// agentpick (@name)/compact open a drain-facing POST; the picker kinds
+  /// just open their modal; 'text' kinds ride the normal prompt path.
   const execCommand = async (entry) => {
     const kind = entry && entry.kind;
     const sid = dialogSel;
-    if (kind === 'agent') {
-      if (busy || !sid) {
-        // Control heads are TEXT prompts for the runner: applied at the next
-        // turn boundary while a drain runs (control_cmd.rs parity).
-        send(entry.cmd, 'steer');
+    if (kind === 'agent' || kind === 'agentpick') {
+      const next = String((entry && entry.value) || '');
+      if (!next) {
+        return;
+      }
+      // Busy control heads are TEXT prompts for the runner: applied at the
+      // next turn boundary while a drain runs (control_cmd.rs parity). A
+      // custom agent rides the generic `/agent <name>` head; /act //plan are
+      // heads of their own. Posted directly — send() would wipe the composer
+      // draft (setInput('')).
+      const headText = kind === 'agentpick' ? '/agent ' + next : entry.cmd;
+      if (busy && sid) {
+        try {
+          await apiPost('/api/sessions/' + encodeURIComponent(sid) + '/prompt',
+            { prompt: headText, delivery: 'steer' });
+        } catch (e) {
+          notice(err('切换 agent 失败: ' + ((e && e.message) || '')));
+        }
+        return;
+      }
+      if (!sid) {
+        // No session yet: stage the agent locally — it rides creation
+        // (POST /api/sessions `agent`) with the next prompt.
+        setSessionAgent(next);
         return;
       }
       try {
-        await apiPost('/api/sessions/' + encodeURIComponent(sid) + '/agent', { value: entry.value });
-        setSessionAgent(entry.value === 'plan' ? 'plan' : 'act');
+        await apiPost('/api/sessions/' + encodeURIComponent(sid) + '/agent', { value: next });
+        setSessionAgent(next);
       } catch (e) {
-        notice(err('切换模式失败: ' + ((e && e.message) || '')));
+        notice(err('切换 agent 失败: ' + ((e && e.message) || '')));
       }
       return;
     }
@@ -337,6 +380,35 @@ export function ChatPanel({ onNotice }) {
     execCommand({ kind: 'agent', cmd: '/' + value, value });
   };
 
+  /// Sidebar hover 删除 → confirm → DELETE /api/sessions/:id. The server
+  /// cascades messages/events/inputs and cancels any running drain, so no
+  /// client-side interrupt is needed before the call.
+  const deleteDialog = (sid) => {
+    if (!sid) {
+      return;
+    }
+    Modal.confirm({
+      title: '删除会话',
+      content: '删除后该会话的消息、事件与队列输入将一并清除。',
+      okText: '删除',
+      okButtonProps: { danger: true },
+      cancelText: '取消',
+      onOk: async () => {
+        try {
+          await apiDel('/api/sessions/' + encodeURIComponent(sid));
+          if (sid === dialogSel) {
+            resetTranscript();
+            setDialogSel(null);
+          }
+          setDialogs((d) => d.filter((x) => x.session_id !== sid));
+          notice(ok('会话已删除'));
+        } catch (e) {
+          notice(err('删除会话失败: ' + ((e && e.message) || '')));
+        }
+      },
+    });
+  };
+
   const setAutopilot = async (mode) => {
     setApOpen(false);
     if (!dialogSel) {
@@ -366,13 +438,14 @@ export function ChatPanel({ onNotice }) {
     }
   };
 
-  /// Menu click: skills complete the token in place; everything else wipes
-  /// the token from the composer and executes immediately.
+  /// Menu click: skills and the `/agent` command entry complete the token in
+  /// place; agent picks (`@name`) and everything else wipe the token from the
+  /// composer and execute immediately.
   const pickCommand = (entry) => {
     if (!entry) {
       return;
     }
-    if (entry.kind === 'skill') {
+    if (entry.kind === 'skill' || entry.kind === 'agentcmd') {
       setInput((t) => replaceToken(t, entry));
       return;
     }
@@ -381,7 +454,12 @@ export function ChatPanel({ onNotice }) {
   };
 
   // Command completion uses the selected node’s catalog.
-  const menuEntries = hasNode ? commandsForInput(input, skills) : [];
+  // `@` agent entries: builtin primary roles first, then the resolvable
+  // primary cards from GET /api/agents — the switch endpoint
+  // (POST /api/sessions/:id/agent) rejects non-primary names, so the menu
+  // only ever offers switchable agents.
+  const agentCatalog = mergeBuiltinPrimaryAgentCards((agents || []).filter((a) => a && a.primary));
+  const menuEntries = hasNode ? commandsForInput(input, skills, agentCatalog) : [];
 
   return (
     <div style={{ display: 'flex', flexDirection: 'row', height: '100%', minHeight: 0, gap: 16 }}>
@@ -393,6 +471,7 @@ export function ChatPanel({ onNotice }) {
         dialogs={dialogs}
         activeKey={dialogSel}
         onActiveChange={openDialog}
+        onDelete={deleteDialog}
         onNew={() => { if (busy || !nodeReady) return; resetTranscript(); setDialogSel(null); setSessionAgent('act'); createAttempt.current = null; }}
         loading={dialogsLoading}
       />
@@ -403,14 +482,10 @@ export function ChatPanel({ onNotice }) {
             <Segmented
               size="small"
               value={sessionAgent}
-              disabled={!dialogSel}
               options={[{ label: 'act', value: 'act' }, { label: 'plan', value: 'plan' }]}
               onChange={switchAgent}
             />
             <Button size="small" disabled={!dialogSel} onClick={() => setModelOpen(true)}>模型</Button>
-            <Button size="small" disabled={!dialogSel} onClick={() => setAnnoOpen(true)}>批注</Button>
-            <Button size="small" disabled={!dialogSel} onClick={() => execCommand({ kind: 'compact', cmd: '/compact' })}>压缩</Button>
-            <Button size="small" disabled={!dialogSel} onClick={() => setApOpen(true)}>autopilot</Button>
           </div>
         ) : null}
 

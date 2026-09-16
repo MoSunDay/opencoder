@@ -3,16 +3,35 @@ const assert = require('assert/strict');
 const path = require('path');
 
 module.exports = async ({ page, api, until, root, envs }) => {
+  const workspace = path.join(root, 'workspace');
   await page.locator('.fleet-nav-category').getByText('节点', { exact: true }).click();
   await page.getByRole('menuitem', { name: '节点列表' }).click();
   await page.getByRole('button', { name: '调度配置', exact: true }).click();
   await page.getByLabel('node-max-runs').fill('2');
   await page.getByLabel('node-queue-order').click();
   await page.locator('.ant-select-item-option-content').getByText('后入先出 LIFO', { exact: true }).click();
+  await page.getByLabel('node-workdir').fill(workspace);
   await page.getByRole('button', { name: '保存调度配置', exact: true }).click();
   await until(async () => (await api('GET', '/api/nodes')).nodes.some((node) => node.snapshot.max_runs === 2 && node.snapshot.queue_order === 'lifo'), 'saved node scheduling');
+  await until(async () => {
+    const nodes = (await api('GET', '/api/nodes')).nodes;
+    const target = nodes.find((n) => n.snapshot.max_runs === 2);
+    return target && (await api('GET', `/api/nodes/${target.id}/scheduling`)).workdir === workspace;
+  }, 'saved node scheduling workdir');
   await page.getByRole('dialog').waitFor({ state: 'hidden' });
   await page.screenshot({ path: path.join(root, 'node-scheduling.png'), animations: 'disabled' });
+
+  // 清空工作空间后再保存，避免影响后续 Agent 等验收步骤。
+  await page.getByRole('button', { name: '调度配置', exact: true }).click();
+  await page.getByLabel('node-workdir').waitFor();
+  await page.getByLabel('node-workdir').fill('');
+  await page.getByRole('button', { name: '保存调度配置', exact: true }).click();
+  await until(async () => {
+    const nodes = (await api('GET', '/api/nodes')).nodes;
+    const target = nodes.find((n) => n.snapshot.max_runs === 2);
+    return target && (await api('GET', `/api/nodes/${target.id}/scheduling`)).workdir === null;
+  }, 'cleared node scheduling workdir');
+  await page.getByRole('dialog').waitFor({ state: 'hidden' });
 
   const file = (name, content) => ({ path: name, content_b64: Buffer.from(content).toString('base64') });
   await api('POST', '/api/agents/resources/prompts', { name: 'browser-prompt', files: [file('soul.md', 'Review files.')] });

@@ -17,6 +17,12 @@ pub async fn create(
     identity: Option<axum::Extension<opencoder_core::identity::Identity>>,
     Json(request): Json<CreateExecution>,
 ) -> Response {
+    if request.kind == ExecutionKind::Brain {
+        return response(RpcReply::error(
+            409,
+            "Brain runs require registered immutable plan versions; use /api/brain/runs",
+        ));
+    }
     if identity
         .as_ref()
         .map(|axum::Extension(i)| i)

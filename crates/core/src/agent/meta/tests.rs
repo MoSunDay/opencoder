@@ -47,8 +47,8 @@ fn make_resource(root: &std::path::Path, cat: &str, name: &str, v: u32, files: &
     .unwrap();
 }
 
-/// Agent names: charset/length rules hold; the marker name AND the four
-/// pool dir names are reserved in the agent namespace.
+/// Agent names: charset/length rules hold; the four pool dir names are
+/// reserved in the agent namespace.
 #[test]
 fn validate_agent_name_accepts_and_rejects() {
     assert!(validate_agent_name("work").is_ok());
@@ -61,7 +61,6 @@ fn validate_agent_name_accepts_and_rejects() {
         "../x",
         "a b",
         "中文",
-        "active",
         "prompts",
         "skills",
         "tools",
@@ -97,28 +96,6 @@ fn validate_resource_name_rules() {
     assert_eq!(category_dir("nosuch"), None);
 }
 
-/// Marker roundtrip: set → read back; clear → `None`; clearing an
-/// already-clear root is not an error; unknown agents are rejected
-/// *before* any marker write.
-#[test]
-fn marker_roundtrip_and_unknown_agent_rejected() {
-    let (dir, _g) = scoped();
-    let root = dir.path();
-    make_agent(root, "alpha");
-    set_active_agent(Some("alpha")).unwrap();
-    assert_eq!(active_agent().as_deref(), Some("alpha"));
-    // Unknown agent → InvalidInput, marker untouched.
-    let err = set_active_agent(Some("ghost")).unwrap_err();
-    assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
-    assert_eq!(active_agent().as_deref(), Some("alpha"));
-    // Reserved pool dir names are not agents either.
-    assert!(set_active_agent(Some("prompts")).is_err());
-    // Clear + idempotent clear.
-    set_active_agent(None).unwrap();
-    assert_eq!(active_agent(), None);
-    set_active_agent(None).unwrap();
-}
-
 /// `meta.json` parsing is backward-tolerant: unknown keys and partial
 /// reference cards parse; corrupt JSON degrades to `None`.
 #[test]
@@ -149,15 +126,16 @@ fn read_agent_meta_tolerant_and_corrupt() {
     assert_eq!(read_agent_meta("ghost"), None);
 }
 
-/// Listing is sorted and skips the reserved non-agent names (marker plus
-/// the four pool dirs); an invalid name never resolves to a path.
+/// Marker-less listing: sorted, skips the shared pool dirs, and skips a
+/// legacy leftover `active` entry (旧安装残留的激活 marker 不能被列为
+/// agent 卡); an invalid name never resolves to a path.
 #[test]
 fn list_agents_sorted_and_skips_reserved() {
     let (dir, _g) = scoped();
     let root = dir.path();
     make_agent(root, "beta");
     make_agent(root, "alpha");
-    std::fs::create_dir_all(root.join(ACTIVE_MARKER)).unwrap(); // legacy leftover
+    std::fs::create_dir_all(root.join("active")).unwrap(); // legacy leftover
     for cat in AGENT_CATEGORIES {
         std::fs::create_dir_all(root.join(cat)).unwrap();
     }
@@ -165,29 +143,6 @@ fn list_agents_sorted_and_skips_reserved() {
     assert_eq!(agent_dir("a/b"), None);
     assert_eq!(agent_dir(""), None);
     assert_eq!(agent_dir("prompts"), None);
-}
-
-/// Preflight rollback: a failing check restores the previous marker and
-/// returns `InvalidData`; a passing check keeps the new marker;
-/// deactivation passes the closure through untouched.
-#[test]
-fn preflight_failure_rolls_back_marker() {
-    let (dir, _g) = scoped();
-    let root = dir.path();
-    make_agent(root, "alpha");
-    make_agent(root, "beta");
-    set_active_agent(Some("alpha")).unwrap();
-    let err = set_active_agent_checked(Some("beta"), || Err("dry-run failed".into())).unwrap_err();
-    assert_eq!(err.kind(), io::ErrorKind::InvalidData);
-    assert_eq!(
-        active_agent().as_deref(),
-        Some("alpha"),
-        "marker must roll back"
-    );
-    set_active_agent_checked(Some("beta"), || Ok(())).unwrap();
-    assert_eq!(active_agent().as_deref(), Some("beta"));
-    set_active_agent_checked(None, || panic!("deactivation must not run the check")).unwrap();
-    assert_eq!(active_agent(), None);
 }
 
 /// Resource meta read + version-dir resolution: `current` follows the
@@ -258,9 +213,8 @@ fn list_resources_sorted_silent_and_filtered() {
 }
 
 /// Reference helpers shape: `agent_skill_roots`/`agent_tools_dirs` return
-/// 0 or 1 entries; the active-agent wrappers follow the marker; and
-/// `all_tools_dirs` unions every tools pool's current version dir,
-/// sorted, skipping version-less resources.
+/// 0 or 1 entries, and `all_tools_dirs` unions every tools pool's current
+/// version dir, sorted, skipping version-less resources.
 #[test]
 fn agent_ref_helpers_and_all_tools_dirs_shape() {
     let (dir, _g) = scoped();
@@ -294,11 +248,6 @@ fn agent_ref_helpers_and_all_tools_dirs_shape() {
     assert!(agent_tools_dirs("stale").is_empty());
     assert!(agent_skill_roots("bare").is_empty());
     assert!(agent_skill_roots("ghost").is_empty());
-    // Active-agent wrappers follow the marker; none active ⇒ empty.
-    assert!(active_skill_roots().is_empty() && active_tools_dirs().is_empty());
-    set_active_agent(Some("full")).unwrap();
-    assert_eq!(active_skill_roots(), agent_skill_roots("full"));
-    assert_eq!(active_tools_dirs(), agent_tools_dirs("full"));
     // Union surface for ToolsScope::All: every current tools dir, sorted.
     assert_eq!(
         all_tools_dirs(),

@@ -1,7 +1,7 @@
 //! Version + reference-card writes: the mutation core of the agents tree.
 
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use opencoder_core::agent::{
     agent_dir, agents_dir, read_agent_meta, read_resource_meta, validate_agent_name,
@@ -26,24 +26,7 @@ pub struct VersionFile {
 /// confined to the version dir (no `..` component) — path traversal is
 /// rejected before any filesystem work happens.
 fn validate_rel_path(rel: &str) -> io::Result<()> {
-    if rel.is_empty() {
-        return Err(invalid_input("rel_path 不能为空"));
-    }
-    if rel.starts_with('/') {
-        return Err(invalid_input(format!("rel_path 不能是绝对路径: {rel}")));
-    }
-    let confined = Path::new(rel).components().all(|c| {
-        !matches!(
-            c,
-            std::path::Component::ParentDir
-                | std::path::Component::RootDir
-                | std::path::Component::Prefix(_)
-        )
-    });
-    if !confined {
-        return Err(invalid_input(format!("rel_path 不能包含 ..: {rel}")));
-    }
-    Ok(())
+    crate::resources::model::validate_path(rel)
 }
 
 /// Resource dir `<agents_root>/<cat>/<name>` (category + name validated
@@ -51,7 +34,9 @@ fn validate_rel_path(rel: &str) -> io::Result<()> {
 pub(crate) fn resource_dir(cat: &str, name: &str) -> io::Result<PathBuf> {
     validate_resource_name(cat, name).map_err(invalid_input)?;
     let root = agents_dir().ok_or_else(|| not_found("cannot resolve ~/.opencoder"))?;
-    Ok(root.join(cat).join(name))
+    let path = root.join(cat).join(name);
+    crate::resources::filesystem::check_path(&path)?;
+    Ok(path)
 }
 
 /// Default meta for a first-time resource: `current: 0` (absent), empty
@@ -59,6 +44,7 @@ pub(crate) fn resource_dir(cat: &str, name: &str) -> io::Result<PathBuf> {
 fn default_resource_meta(name: &str) -> ResourceMeta {
     let now = now_rfc3339();
     ResourceMeta {
+        owner_agent: None,
         name: name.to_string(),
         created_at: now.clone(),
         updated_at: now,
@@ -86,6 +72,29 @@ fn next_version(meta: &ResourceMeta) -> u32 {
 /// `history += [n]`, `updated_at`. On any failure the temp dir is removed
 /// and the meta is untouched. Returns the new version number.
 pub fn save_resource_version(cat: &str, name: &str, files: &[VersionFile]) -> io::Result<u32> {
+    save_shared_version(cat, name, files, None)
+}
+
+/// A legacy HTTP create/update checks existence inside the same write lock.
+pub fn save_shared_version(
+    cat: &str,
+    name: &str,
+    files: &[VersionFile],
+    exists: Option<bool>,
+) -> io::Result<u32> {
+    let _lock = crate::resources::lock::write_lock()?;
+    crate::resources::require_shared(cat, name)?;
+    let present = resource_dir(cat, name)?.join("meta.json").exists();
+    if exists == Some(false) && present {
+        return Err(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            "resource already exists",
+        ));
+    }
+    if exists == Some(true) && !present {
+        return Err(not_found("resource does not exist"));
+    }
+
     if !AGENT_CATEGORIES.contains(&cat) {
         return Err(invalid_input(format!("未知资源类别: {cat}")));
     }
@@ -94,6 +103,7 @@ pub fn save_resource_version(cat: &str, name: &str, files: &[VersionFile]) -> io
         validate_rel_path(&file.rel_path)?;
     }
     let dir = resource_dir(cat, name)?;
+    crate::resources::filesystem::check_path(&dir.join("meta.json"))?;
     std::fs::create_dir_all(&dir)?;
     let mut meta = read_resource_meta(cat, name).unwrap_or_else(|| default_resource_meta(name));
     let next = next_version(&meta);
@@ -106,7 +116,7 @@ pub fn save_resource_version(cat: &str, name: &str, files: &[VersionFile]) -> io
     }
     let temp = dir.join(format!(".tmp-v{next}.{}", std::process::id()));
     let build = || -> io::Result<()> {
-        std::fs::create_dir_all(&temp)?;
+        std::fs::create_dir(&temp)?;
         for file in files {
             let target = temp.join(&file.rel_path);
             if let Some(parent) = target.parent() {
@@ -124,7 +134,10 @@ pub fn save_resource_version(cat: &str, name: &str, files: &[VersionFile]) -> io
     meta.current = next;
     meta.history.push(next);
     meta.updated_at = now_rfc3339();
-    atomic_write_json(&dir.join("meta.json"), &meta)?;
+    if let Err(error) = atomic_write_json(&dir.join("meta.json"), &meta) {
+        let _ = std::fs::remove_dir_all(&dest);
+        return Err(error);
+    }
     Ok(next)
 }
 
@@ -159,6 +172,8 @@ pub fn create_agent_with_profile(
     harness: opencoder_core::harness::Harness,
     profile: Option<String>,
 ) -> io::Result<()> {
+    let _lock = crate::resources::lock::write_lock()?;
+    crate::resources::validate_refs(name, &refs)?;
     if let Some(profile) = &profile {
         validate_agent_name(profile).map_err(invalid_input)?;
     }
@@ -168,6 +183,7 @@ pub fn create_agent_with_profile(
     validate_agent_name(name).map_err(invalid_input)?;
     let dir = agent_dir(name).ok_or_else(|| not_found("cannot resolve ~/.opencoder"))?;
     let card = dir.join("meta.json");
+    crate::resources::filesystem::check_path(&card)?;
     if card.exists() {
         return Err(io::Error::new(
             io::ErrorKind::AlreadyExists,
@@ -213,8 +229,10 @@ pub fn update_agent_with_profile(
     harness: Option<opencoder_core::harness::Harness>,
     profile: Option<Option<String>>,
 ) -> io::Result<()> {
+    let _lock = crate::resources::lock::write_lock()?;
     validate_agent_name(name).map_err(invalid_input)?;
     let dir = agent_dir(name).ok_or_else(|| not_found("cannot resolve ~/.opencoder"))?;
+    crate::resources::filesystem::check_path(&dir.join("meta.json"))?;
     let builtin = opencoder_core::builtin_agents()
         .iter()
         .any(|a| a.name == name);
@@ -227,6 +245,7 @@ pub fn update_agent_with_profile(
         None => return Err(not_found(format!("unknown agent: {name}"))),
     };
     let refs = refs.unwrap_or_else(|| meta.current.clone());
+    crate::resources::validate_refs(name, &refs)?;
     let now = now_rfc3339();
     let profile = if harness == Some(opencoder_core::harness::Harness::Opencoder) {
         Some(None)
@@ -285,10 +304,12 @@ pub fn update_agent_with_profile(
 /// idempotent. The caller (web layer) clears the active marker first;
 /// resource pools are shared and never touched here.
 pub fn delete_agent(name: &str) -> io::Result<()> {
+    let _lock = crate::resources::lock::write_lock()?;
     validate_agent_name(name).map_err(invalid_input)?;
     let Some(dir) = agent_dir(name) else {
         return Ok(());
     };
+    crate::resources::filesystem::check_path(&dir)?;
     match std::fs::remove_dir_all(&dir) {
         Ok(()) => Ok(()),
         Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
@@ -415,8 +436,8 @@ mod tests {
                 .kind(),
             io::ErrorKind::NotFound
         );
-        // Reserved / invalid names rejected.
-        assert!(create_agent("active", Default::default()).is_err());
+        // Invalid names rejected. `active` is no longer reserved: the global
+        // activation marker is gone, so it is just a regular card name.
         assert!(create_agent("../x", Default::default()).is_err());
     }
 
@@ -429,6 +450,5 @@ mod tests {
         delete_agent("gone").unwrap();
         assert!(!tmp.path().join("gone").exists());
         assert!(delete_agent("never-there").is_ok());
-        assert!(delete_agent("active").is_err());
     }
 }

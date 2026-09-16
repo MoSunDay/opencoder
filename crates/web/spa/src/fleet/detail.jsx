@@ -47,7 +47,9 @@ export function appendEvent(rows, frame) {
 }
 
 export function ExecutionDetail({ id, summary, onClose, onNotice }) {
-  return <Drawer rootClassName="oc-execution-detail" open={!!id} title={id} onClose={onClose} placement="right" size="75vw" styles={{ wrapper: { maxWidth: '100vw' } }}>
+  // Dispatch-time name (lifted by the list endpoint) reads better than the raw id.
+  const title = summary?.name ? `${summary.name} (${id})` : id;
+  return <Drawer rootClassName="oc-execution-detail" open={!!id} title={title} onClose={onClose} placement="right" size="75vw" styles={{ wrapper: { maxWidth: '100vw' } }}>
     <ExecutionView key={id} executionRef={{ id, kind: summary?.kind }} summary={summary} onNotice={onNotice} />
   </Drawer>;
 }

@@ -4,8 +4,11 @@
 // [{value,label}] with defensive filtering (non-arrays / nameless entries
 // are dropped instead of crashing the editor).
 
+import { mergeBuiltinPrimaryAgents } from '../agents/builtins.js';
+
 export const TARGET_ENDPOINTS = {
   agent: '/api/agents',
+  operator: '/api/agents',
   team: '/api/teams',
   dag: '/api/dag/defs',
   todos: '/api/todo/templates',
@@ -32,7 +35,9 @@ function todosOptions(payload) {
 }
 
 export function targetOptionsFrom(kind, payload) {
-  if (kind === 'agent') return toOptions(pluck(payload?.agents, 'name'));
+  // /api/agents 只返回注册卡；brain 步骤可合法调度内置 primary 角色
+  // （playbook 规范示例即 target 'act'），与 todoEditor 的 allowed 同语义。
+  if (kind === 'agent' || kind === 'operator') return toOptions(mergeBuiltinPrimaryAgents(pluck(payload?.agents, 'name')));
   if (kind === 'team') return toOptions(pluck(payload?.teams, 'name'));
   if (kind === 'dag') {
     const defs = Array.isArray(payload) ? payload : payload?.defs;

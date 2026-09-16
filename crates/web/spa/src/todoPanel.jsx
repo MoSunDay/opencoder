@@ -102,6 +102,7 @@ function VersionsBlock({ template, onNotice, onEdit, onChanged }) {
 
   return (
     <div style={{ padding: '4px 0' }}>
+      <Text type="secondary">仅保留最近 10 个版本，超出的旧版本自动清理</Text>
       {(versions || []).length === 0 ? <Text type="secondary">暂无版本</Text> : versions.map((v) => (
         <div key={v.version} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 0' }}>
           <Tag color={template.current === v.version ? 'blue' : 'default'}>{v.version}</Tag>
@@ -218,7 +219,7 @@ function TemplatesTab({ onNotice, onRan }) {
         }}
       />
       <Drawer
-        title="新建 TODO 模板"
+        closable={false}
         placement="right"
         open={creating}
         onClose={closeCreate}
@@ -239,7 +240,7 @@ function TemplatesTab({ onNotice, onRan }) {
         />
       </Drawer>
       <Drawer
-        title={editing ? `编辑模板 ${editing.name}` : ''}
+        closable={false}
         placement="right"
         open={!!editing}
         onClose={closeEditor}

@@ -1,4 +1,4 @@
-Commit: 187ee827bad0cb2ae0b1900284b1a20176706166
+Commit: e797e184412ac6df34cd5e8189634e1361945362
 
 # control 模块
 
@@ -7,7 +7,7 @@ Commit: 187ee827bad0cb2ae0b1900284b1a20176706166
 ## 索引
 - `src/bootstrap.rs` — control.db + definitions.db 装配
 - `src/transport/hub.rs` — Node WS Hub（协议校验、RPC）
-- `src/api/executions/` — 派发去重、选点冻结、回执
+- `src/api/executions/` — 派发去重、选点冻结、回执；列表端点在 JSON 层提升顶层 `name`（派发时快照，按 kind 取定义名/target，见 `paging.rs`），执行索引五字段协议不动
 - `src/api/catalog.rs` — 节点与定义目录
 - `src/api/compat/` — 旧 Chat/DAG/TODO/Project 兼容路由
 - `src/api/stream.rs` — 分页→SSE 事件流

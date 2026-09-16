@@ -10,6 +10,9 @@ axum HTTP + SSE 会话管理 + 内嵌 SPA。
 - `src/api_agents.rs` — agent 目录 API：列表项含 `description`
   （soul 首行，回退 "Custom agent <name>"）与 `primary`
   （`is_primary() && name != "workflow"`，与 TUI 选择器同规则）
+- `src/api_agent_resources.rs` — agent 资源文件 API：`safe_rel_path` 门
+  （拒绝绝对/`..`/`.`/空段/隐藏点前缀段/64 段超深，先于任何 fs 工作），
+  memory 目录化写侧，`section_body` 读侧降级见 core `agent/memory.rs`
 - `src/handle.rs` — `SessionHandle` ring 缓冲 + broadcast
 - `src/auth_mw.rs` — Bearer → Identity
 - `src/html.rs` — SPA 产物内嵌

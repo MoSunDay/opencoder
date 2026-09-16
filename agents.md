@@ -33,6 +33,12 @@ Rust 原生编码代理 workspace：`opencoder`（本地 CLI/TUI）、`opencode-
 
 业务能力见 [features/index.md](features/index.md)。
 
+## 根包进程级 e2e 套件（layer-2，随 cargo test 运行）
+
+- [tests/operator_e2e/](tests/operator_e2e/main.rs) — O1–O4：operator 创建→drain→idle、relay SSE 守卫、角色门禁 403、interrupt→cancelled + 重启恢复（真二进制 + 共享 LLM 桩）。
+- [tests/dag_e2e/](tests/dag_e2e/main.rs) — D1–D3/D5：spec 保存/dispatch 流、wasm 版本池（wat 现场编译）、cancel/失败折叠、runc preflight（无 runc 时 SKIP 运行段）。
+- [tests/support/](tests/support/mod.rs) — `llm_stub`（FIFO/Hold/Fail 流式桩）、`http_util`（Bearer JSON + SSE 解析）、`fleet_proc`（fleet 拉起/RAII）；`tests/running_mode_switch_e2e.rs` 已复用 `llm_stub`。
+
 ## 仓库规则
 
 - [rules/01-mandatory-tests.md](rules/01-mandatory-tests.md) — 每个业务功能必须有测试

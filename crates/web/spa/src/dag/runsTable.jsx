@@ -4,7 +4,7 @@
 // (runDetail.jsx). When a run id is focused (fresh dispatch / finished live
 // run), the detail view opens directly.
 
-import { Button, Popconfirm, Space, Table, Tag, Tooltip, Typography } from 'antd';
+import { Button, Input, Popconfirm, Space, Table, Tag, Tooltip, Typography } from 'antd';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiGet, apiPost } from '../api.js';
 import { TimeText } from '../ui/timeText.jsx';
@@ -21,6 +21,7 @@ const POLL_MS = 3000;
 export function RunsTable({ onNotice, refreshSignal, focusRunId, onDetailClosed }) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [search, setSearch] = useState('');
   const [detail, setDetail] = useState(null); // run row shown in RunDetail
   const detailOpen = useRef(false);
   detailOpen.current = !!detail;
@@ -184,9 +185,23 @@ export function RunsTable({ onNotice, refreshSignal, focusRunId, onDetailClosed 
     },
   ];
 
+  // 搜索框为受控组件：按运行 ID/名称/状态/执行节点（忽略大小写）过滤本地列表，不入服务端。
+  const query = search.trim().toLowerCase();
+  const visible = query
+    ? rows.filter((r) => [r.id, r.name, r.status, r.node_id].some((v) => String(v || '').toLowerCase().includes(query)))
+    : rows;
+
   return (
     <Space orientation="vertical" size={12} style={{ width: '100%' }}>
       <Space>
+        <Input.Search
+          allowClear
+          style={{ minWidth: 220 }}
+          placeholder="搜索运行 ID / 名称 / 状态"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          aria-label="dag-run-search"
+        />
         <Button onClick={() => load(false)}>刷新</Button>
         <Text type="secondary">每 3s 自动刷新，最多展示最近 50 条。</Text>
       </Space>
@@ -197,7 +212,7 @@ export function RunsTable({ onNotice, refreshSignal, focusRunId, onDetailClosed 
         // cannot shrink below their min-content on a phone viewport.
         scroll={{ x: 'max-content' }}
         columns={columns}
-        dataSource={tableRows(loading, rows)}
+        dataSource={tableRows(loading, visible)}
         loading={tableLoading(loading)}
         pagination={false}
         locale={{ emptyText: '暂无运行记录，先在「定义」页派发一个工作流' }}

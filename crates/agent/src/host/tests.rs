@@ -326,3 +326,125 @@ async fn host_scheduling_reports_workdir_unsupported_and_rejects_workdir_with_40
         "multi-runtime hosts require FIFO ordering"
     );
 }
+
+#[tokio::test]
+async fn host_dialogs_clear_deletes_live_runtime_and_trims_hibernated_inventory() {
+    let dir = tempfile::tempdir().unwrap();
+    let _scope = opencoder_core::config::scoped_config_home(dir.path().join("home"));
+    let host = Host::open(
+        &dir.path().join("host"),
+        "node".into(),
+        "test-token".into(),
+        1,
+    )
+    .await
+    .unwrap();
+    let fast = Arc::new(
+        MockChatClient::new().with_default(vec![LlmEvent::Completed {
+            text: "operator done".into(),
+            tool_calls: vec![],
+            usage: None,
+        }]),
+    );
+    let (live, _live_http) = runtime(&host, dir.path(), "r-live", fast.clone()).await;
+    host.store.activate_runtime("r-live").await.unwrap();
+
+    // A retired-but-hibernated runtime is only represented by its saved
+    // final inventory; it holds one droppable and one live operator row.
+    host.store
+        .register_runtime(&opencoder_store::fleet::handoff::RuntimeRecord {
+            id: "r-sleep".into(),
+            release_id: "r-sleep".into(),
+            mode: "staged".into(),
+            config: json!({"endpoint":"http://127.0.0.1:1","data_dir":dir.path().join("r-sleep"),"unit":"opencoder-runtime-r-sleep.service"}),
+        })
+        .await
+        .unwrap();
+    // Retire r-live's predecessor slot by promoting r-sleep then re-activating
+    // the real one, leaving r-sleep retired (and hibernated) in the catalog.
+    host.store.activate_runtime("r-sleep").await.unwrap();
+    host.store.activate_runtime("r-live").await.unwrap();
+    let saved = json!({
+        "registration": {"id": host.registration.id},
+        "snapshot": {"ready": false},
+        "indexes": [
+            {"id":"operator-done-1","created_at":1,"kind":"operator","node_id":host.registration.id,"status":"idle"},
+            {"id":"operator-live-1","created_at":2,"kind":"operator","node_id":host.registration.id,"status":"interrupted"}
+        ]
+    });
+    host.store
+        .put_definition("runtime_sleep", "r-sleep", &saved)
+        .await
+        .unwrap();
+
+    // One live operator execution on the active runtime.
+    let reply = host
+        .handle(NodeOperation::Create {
+            assignment: Assignment {
+                runtime: None,
+                codex: None,
+                definition: None,
+                request: CreateExecution {
+                    id: "operator-done-2".into(),
+                    kind: ExecutionKind::Operator,
+                    target: None,
+                    input: json!({"prompt":"hi"}),
+                    node_id: Some(host.registration.id.clone()),
+                },
+                index: ExecutionIndex {
+                    id: "operator-done-2".into(),
+                    kind: ExecutionKind::Operator,
+                    node_id: host.registration.id.clone(),
+                    created_at: 1,
+                    status: ExecutionStatus::Pending,
+                },
+            },
+        })
+        .await;
+    assert_eq!(reply.status, 200, "{:?}", reply);
+    let journal = dir.path().join("r-live/operator/operator-done-2/execution.json");
+    wait(async || journal.is_file()).await;
+    wait(async || {
+        let inspect = live
+            .indexes()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|i| i.id == "operator-done-2")
+            .map(|i| i.status);
+        inspect == Some(ExecutionStatus::Idle)
+    })
+    .await;
+
+    let maintenance = |input: serde_json::Value| NodeOperation::Maintenance {
+        command: ExecutionCommand {
+            action: "dialogs_clear".into(),
+            input,
+        },
+    };
+    let reply = host
+        .handle(maintenance(json!({"sessions": ["operator-done-1", "operator-done-2", "operator-live-1", "operator-ghost"]})))
+        .await;
+    assert_eq!(reply.status, 200, "{:?}", reply);
+    assert_eq!(reply.body["removed"], json!(2));
+    assert_eq!(reply.body["forgotten"], json!(1));
+    assert_eq!(reply.body["skipped"], json!(["operator-live-1"]));
+
+    // The live runtime lost its session and journal record.
+    assert!(!journal.exists());
+    // The hibernated inventory kept the live row and dropped the droppable one.
+    let kept = host
+        .store
+        .definition("runtime_sleep", "r-sleep")
+        .await
+        .unwrap()
+        .unwrap();
+    let ids: Vec<String> = kept["indexes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|i| i["id"].as_str().map(str::to_owned))
+        .collect();
+    assert_eq!(ids, vec!["operator-live-1".to_string()]);
+    live.shutdown().await.unwrap();
+}

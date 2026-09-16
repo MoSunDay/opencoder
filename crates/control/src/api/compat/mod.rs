@@ -12,7 +12,10 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/api/models", get(sessions::models))
         .route("/api/skills", get(sessions::skills))
         .route("/api/nodes/:id/tasks", post(sessions::task))
-        .route("/api/nodes/:id/dialogs", get(sessions::dialogs))
+        .route(
+            "/api/nodes/:id/dialogs",
+            get(sessions::dialogs).delete(sessions::clear_dialogs),
+        )
         .route("/api/nodes/:node/tasks/:id/cancel", post(sessions::cancel))
         .route("/api/nodes/tasks/:id/events", get(super::stream::events))
         .route("/api/sessions/:id/task", get(sessions::owner))

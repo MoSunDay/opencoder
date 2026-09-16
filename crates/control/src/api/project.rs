@@ -39,7 +39,15 @@ pub async fn overview(State(state): State<Arc<AppState>>) -> Response {
                             for key in ["status", "plan_md", "active_session_id"] {
                                 value[key] = reply.body["todo"][key].clone();
                             }
-                        } else {
+                        } else if !(reply.status == 404
+                            && reply.body["error"] == "execution not found")
+                        {
+                            // The node no longer holds this execution (journal
+                            // lost / node reprovisioned): the durable index
+                            // above stays the whole truth, so the row degrades
+                            // quietly — same recovery semantics as the pending
+                            // resubmit in `start`. Other failures (offline
+                            // node, transport errors) stay loud.
                             value["detail_error"] = reply.body;
                         }
                     }
@@ -76,13 +84,25 @@ pub async fn runs(
         Ok(None) => response(RpcReply::ok(
             json!({"runs":[],"next_version":null,"more":false}),
         )),
-        Ok(Some(_)) => response(
-            super::executions::for_id(&state, &id, |execution| NodeOperation::ProjectRuns {
-                execution,
-                before_version: query.before_version,
-            })
-            .await,
-        ),
+        Ok(Some(_)) => {
+            let reply =
+                super::executions::for_id(&state, &id, |execution| NodeOperation::ProjectRuns {
+                    execution,
+                    before_version: query.before_version,
+                })
+                .await;
+            // A node that lost the journal (node reprovision / maintenance
+            // switch) answers 404 execution-not-found: degrade to an empty
+            // page so the replay surface stays usable, same shape as a todo
+            // without any index entry.
+            if reply.status == 404 && reply.body["error"] == "execution not found" {
+                response(RpcReply::ok(
+                    json!({"runs":[],"next_version":null,"more":false}),
+                ))
+            } else {
+                response(reply)
+            }
+        }
         Err(error) => error_500(error.to_string()),
     }
 }

@@ -1,6 +1,7 @@
 use crate::AppState;
 use opencoder_core::{fleet::*, message::now_ms};
 use opencoder_store::fleet::handoff::dispatch_key;
+use serde_json::Value;
 use std::sync::Arc;
 
 pub async fn submit(state: &Arc<AppState>, request: CreateExecution) -> RpcReply {
@@ -17,6 +18,24 @@ pub async fn submit(state: &Arc<AppState>, request: CreateExecution) -> RpcReply
             400,
             "project execution id must be project-<todo id> to preserve plan/act affinity",
         );
+    }
+    // Agent-kind sessions carry the same workflow-declared `how_append`
+    // payload as a DAG agent step; enforce the identical 8 KiB budget at
+    // admission so both entry points (POST /api/executions and the chat
+    // /api/sessions facade) fail before placement.
+    if request.kind == ExecutionKind::Agent {
+        if let Some(text) = request.input.get("how_append").and_then(Value::as_str) {
+            if text.len() > opencoder_dag::spec::MAX_HOW_APPEND_BYTES {
+                return RpcReply::error(
+                    400,
+                    format!(
+                        "how_append exceeds {} bytes (got {})",
+                        opencoder_dag::spec::MAX_HOW_APPEND_BYTES,
+                        text.len()
+                    ),
+                );
+            }
+        }
     }
     if let Err(error) = request.validate() {
         return RpcReply::error(400, error);

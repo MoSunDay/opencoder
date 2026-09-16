@@ -1,4 +1,4 @@
-Commit: cd2b20f9
+Commit: 06c69a687d4e5b8416df9376a48f112bd8eb2618
 
 # OpenCoder 能力地图 — 业务能力总索引
 
@@ -19,7 +19,7 @@ Commit: cd2b20f9
 - [Agent Harness](harness/index.md) — opencode/codex 执行器与资源快照。
 - [CLI](../agents/local/index.md) — 无头运行、TODO 命令与工具安装。
 - [TUI](../agents/tui/index.md) — Turn 阶梯、模式切换与复制；`/agent` 命令模糊选择 primary agent。
-- [Web 会话](../agents/web/index.md) — 流式会话、SSE 与模型发现；输入框 `@`/`/agent` 模糊提及 agent（有会话即切、无会话入创建参数）。
+- [Web 会话](../agents/web/index.md) — 流式会话、SSE 与模型发现；节点对话侧栏支持悬停删除与底部一键清空（终态即删、运行中保留）；输入框 `@`/`/agent` 模糊提及 agent（有会话即切、无会话入创建参数）。
 
 ## 配置与基础能力
 

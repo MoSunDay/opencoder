@@ -1,7 +1,7 @@
 mod catalog;
 pub(crate) mod effects;
 mod plans;
-mod runs;
+pub(crate) mod runs;
 use crate::AppState;
 use axum::{
     routing::{get, post},

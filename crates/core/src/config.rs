@@ -26,6 +26,7 @@ mod merge;
 mod model_guard;
 mod provider;
 pub mod redact;
+mod schedule;
 mod skill;
 mod storage;
 
@@ -42,6 +43,10 @@ pub use keymap::KEYMAP_INFO;
 pub use mcp::McpServerConfig;
 pub use model_guard::is_suspicious_model;
 pub use provider::{Endpoint, HttpHeader, ProviderConfig};
+pub use schedule::{
+    load_schedules, schedules_path, validate_id as validate_schedule_id, ScheduleJob, ScheduleKind,
+    ScheduleOverlap, SchedulesConfig,
+};
 pub use skill::SkillConfig;
 pub use storage::{StorageBackend, StorageConfig};
 
@@ -169,6 +174,10 @@ pub struct Config {
     /// Autopilot loop (PLAN -> ACT -> VERIFY). Off by default.
     #[serde(default)]
     pub autopilot: AutoPilotConfig,
+    /// Cron-scheduled control-plane jobs. Hard-cut into the `schedules.json`
+    /// domain file (never carried in config.json); see [`config::domain`].
+    #[serde(default, skip_serializing_if = "SchedulesConfig::is_empty")]
+    pub schedules: SchedulesConfig,
     /// When true, bare `opencoder` wraps the TUI in a tmux session (so it
     /// survives SSH disconnect). Off by default; requires tmux installed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -289,6 +298,7 @@ impl Default for Config {
             replay_timeout_secs: None,
             subagent_drain_secs: None,
             autopilot: AutoPilotConfig::default(),
+            schedules: SchedulesConfig::default(),
             enable_tmux_session: None,
             keymap: KeymapConfig::default(),
             storage: StorageConfig::default(),

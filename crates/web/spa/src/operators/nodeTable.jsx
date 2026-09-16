@@ -1,5 +1,5 @@
-// nodeTable.jsx — Operator 节点表：复用 fleet/useNodes.js 的 5s 轮询快照。
-// 只读节点总览：会话交互工作台的会话即以 operator 执行在节点宿主机进程
+// nodeTable.jsx — 「节点总览」节点表：复用 fleet/useNodes.js 的 5s 轮询快照。
+// 只读节点总览：Agent 页（chat）的会话即以 operator 执行在节点宿主机进程
 // 内运行，本表不再提供启动入口，仅展示支持 operator 的在线节点与负载。
 
 import { Alert, Space, Table } from 'antd';

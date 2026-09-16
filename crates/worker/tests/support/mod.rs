@@ -249,7 +249,7 @@ pub async fn prompt(worker: &Worker, id: &str, text: &str) -> RpcReply {
         .await
 }
 
-async fn execution_ref(worker: &Worker, id: &str) -> ExecutionRef {
+pub async fn execution_ref(worker: &Worker, id: &str) -> ExecutionRef {
     worker
         .indexes()
         .await

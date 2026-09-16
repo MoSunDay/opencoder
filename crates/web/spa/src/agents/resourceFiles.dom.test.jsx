@@ -96,12 +96,12 @@ it('shows a multi-file memory pool as a tree and creates a file inline',async()=
   expect(next['topics/rust.md']).toEqual(entry('topics/rust.md'));
 });
 
-it('uploads a memory file into the files map under the selected folder',async()=>{
-  const onChange=mount({'memory.md':entry('memory.md')},'memory');
-  const input=[...document.querySelectorAll('input[type=file]')].find(i=>i.getAttribute('aria-label')==='上传文件');
-  fireEvent.change(input,{target:{files:[new File(['remember'], 'memo.md')]}});
-  await waitFor(()=>expect(onChange).toHaveBeenCalled());
-  const next=onChange.mock.calls[0][0];
-  expect(next['memo.md']).toEqual({path:'memo.md',content_b64:b64EncodeText('remember'),mode:0o600});
-  expect(next['memory.md']).toEqual(entry('memory.md'));
+it('leaves structure operations to the tree and offers no single-file upload',async()=>{
+  mount({'memory.md':entry('memory.md')},'memory');
+  expect(document.querySelector('input[type=file]')).toBeNull(); // 上传收敛到保存行「上传压缩包」
+  expect(screen.queryByRole('button',{name:'新增文件'})).toBeNull();
+  expect(screen.queryByRole('button',{name:'重命名'})).toBeNull();
+  expect(screen.queryByRole('button',{name:'移除'})).toBeNull();
+  expect(screen.getByText('memory.md · 1 字节 · 文本 · 权限 600')).toBeTruthy();
+  expect(screen.getByText('下载')).toBeTruthy();
 });

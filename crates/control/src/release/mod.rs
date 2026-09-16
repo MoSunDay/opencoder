@@ -22,6 +22,7 @@ use std::{
 #[derive(Default)]
 pub struct Lifecycle {
     pub outbox_started: AtomicBool,
+    pub schedule_started: AtomicBool,
     pub retiring: AtomicBool,
     pub requests: AtomicUsize,
     pub changed: tokio::sync::Notify,

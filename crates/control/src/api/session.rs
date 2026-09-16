@@ -11,14 +11,35 @@ use opencoder_core::fleet::*;
 use serde_json::{json, Value};
 use std::sync::Arc;
 
+/// The chat page's optional `kind` selector: default stays `operator`,
+/// `agent` launches the same session executor without the operator
+/// preamble. Every other value is a client error — dag/team/... keep
+/// their dedicated routes instead of this session surface.
+fn requested_kind(body: &Value) -> Result<ExecutionKind, String> {
+    match body["kind"].as_str() {
+        None | Some("operator") => Ok(ExecutionKind::Operator),
+        Some("agent") => Ok(ExecutionKind::Agent),
+        Some(other) => Err(format!(
+            "unsupported session kind {other:?}: use operator or agent"
+        )),
+    }
+}
+
 pub async fn create(State(state): State<Arc<AppState>>, Json(body): Json<Value>) -> Response {
+    let kind = match requested_kind(&body) {
+        Ok(kind) => kind,
+        Err(error) => return error_400(error),
+    };
+    // A caller-supplied id keeps its verbatim prefix; the prefix/kind
+    // mismatch is `CreateExecution::validate`'s job (same message as the
+    // generic POST /api/executions route).
     let id = body["id"]
         .as_str()
         .map(str::to_owned)
-        .unwrap_or_else(|| format!("operator-{}", ulid::Ulid::new()));
+        .unwrap_or_else(|| format!("{}-{}", kind.prefix(), ulid::Ulid::new()));
     let request = CreateExecution {
         id: id.clone(),
-        kind: ExecutionKind::Operator,
+        kind,
         target: body["agent"].as_str().map(str::to_owned),
         input: body.clone(),
         node_id: body["node_id"].as_str().map(str::to_owned),
@@ -37,10 +58,28 @@ pub async fn list(State(state): State<Arc<AppState>>) -> Response {
     }
 }
 pub async fn summaries(state: &Arc<AppState>, node: Option<&str>) -> anyhow::Result<Vec<Value>> {
-    let indexes = state
+    // The chat page lists live conversations: operator sessions and the
+    // kind=agent session executions. Every other family (system/
+    // maintenance/dag/team/...) stays off this surface — each kind has its
+    // own listing. Per-kind index reads are deduplicated by the index's
+    // primary key; the merged rows keep the durable ordering
+    // (`created_at DESC, id ASC`, matching the SQL) under the same 500 cap.
+    let mut indexes = state
         .fleet
         .indexes(node, Some(ExecutionKind::Operator), 500)
         .await?;
+    indexes.extend(
+        state
+            .fleet
+            .indexes(node, Some(ExecutionKind::Agent), 500)
+            .await?,
+    );
+    indexes.sort_by(|a, b| {
+        b.created_at
+            .cmp(&a.created_at)
+            .then_with(|| a.id.cmp(&b.id))
+    });
+    indexes.truncate(500);
     Ok(stream::iter(indexes).map(|index| {let state=state.clone();async move {
         let reply=state.hub.call(&index.node_id,NodeOperation::Command{execution:index.execution_ref(),command:ExecutionCommand{action:"summary".into(),input:Value::Null}}).await;
         let mut meta=reply.body.clone();

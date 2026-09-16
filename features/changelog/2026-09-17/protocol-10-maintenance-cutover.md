@@ -40,3 +40,12 @@ Commit: 82a30cf8（发布时基线）/ rel-a51016ca8878ff549460b47081c7a927813ae
 - **运行时注意**：节点对会话创建有短暂 `node request timed out/node offline`（控制面到 runtime 的稳定 ID 重试契约覆盖，同 ID 重试即成功）；未带 node_id 的自定义 Agent 首次请求可能超时，重试收敛。
 - 协议 10 的进一步发布恢复信号平滑通道；proto9 journal 与 unit 文件保留在 `systemctl list-unit-files`（disabled），仅新一代 active。
 - 证据：本目录、`/var/tmp/opencoder-prod-acceptance-20260917-013216/`、`/var/tmp/release-observe-5a761e213f539b17/`、各 backup 目录。
+
+## 追发：HEAD 逻辑生效（rel-2dc1323d，同日 08:40）
+
+维护切换上线的 a51016ca 落后 main 若干提交；按「仓库最新逻辑生效」要求，将 origin 同步后的 HEAD（`2dc1323d`，已推送 `940d8746..2dc1323d`）构建为 rel-2dc1323d 并经**信号平滑发布**（同协议 10，新旧可共存）上线，无停机：
+
+- 相对 a51016ca 的生产代码差异仅三处（均为按 Agent 身份编辑资源的契约收口，commit `01c14802`）：`web/api_agent_resources.rs` safe_rel_path 拒绝点前缀隐藏段、`agents/resources/model.rs` validate_path 同步拒绝 `.x`/`x/.y`、`core/agent/memory.rs` section_body 对不可读/非 UTF-8 文件 debug 降级（读侧 collect 本就跳过隐藏文件，堵上「可写不可注入」缺口）。其余提交为 docs/test/ops。
+- 发布前置：journal 文件属主修正为 opencoder-server:opencoder-server 0640（切换脚本 root 写入导致 `/api/admin/release` 500），恢复后 signal_protocol=1；HEAD 全量门 5224 passed / 0 failed、clippy 零告警（沿用当夜证据）。
+- 发布：`rolling_cli --signal --bundle rel-2dc1323d --wait-seconds 300`，phase complete，旧 a51016ca 进入退役；nginx 上游切到 3042/3044，健康检查 commit `0.1.0 (2dc1323d)` protocol 10，两节点（human-os-02、jyhub-macos-builder）在线。
+- 线上契约复验：隐藏段写入 `.hidden.md`/`dir/.dot.md`/`topics/.x.md` 全部 400「unsafe file path」；资源四类型 CRUD 14 步全 PASS；跨 Agent 隔离 16 步全 PASS；真实 gpt-6-astra 会话注入 canary `INJECT-HEAD-*` 模型原样回读；线上 app.js sha256 与 2dc1323d commit dist 字节一致（`04862d2e…`）。

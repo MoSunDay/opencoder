@@ -1,5 +1,5 @@
 use super::FleetStore;
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use libsql::params;
 use opencoder_core::fleet::{
     ExecutionCursor, ExecutionIndex, ExecutionKind, ExecutionPage, NodeRegistration,
@@ -50,6 +50,69 @@ impl FleetStore {
         self.conn.execute("INSERT INTO execution_index(id,created_at,kind,node_id,status) VALUES (?1,?2,?3,?4,?5) ON CONFLICT(id) DO UPDATE SET status=excluded.status",
             params![record.id.clone(), record.created_at, record.kind.prefix(), record.node_id.clone(), record.status.as_str()]).await?;
         Ok(())
+    }
+    /// Remove execution-index rows by id, ownership-guarded by `node_id` and
+    /// `kind`, together with their frozen dispatch assignments and execution
+    /// receipts (no foreign keys link these tables, so all three go in one
+    /// transaction). Rows whose stored status is NOT terminal are refused so a
+    /// stale id list can never drop a live execution. Returns the number of
+    /// deleted index rows.
+    pub async fn delete_terminal_indexes(
+        &self,
+        node_id: &str,
+        kind: ExecutionKind,
+        ids: &[String],
+    ) -> Result<u64> {
+        if ids.is_empty() {
+            return Ok(0);
+        }
+        let _guard = self.gate.lock().await;
+        self.conn
+            .execute("BEGIN IMMEDIATE", ())
+            .await
+            .context("begin index deletion transaction")?;
+        let result: anyhow::Result<u64> = async {
+            let mut removed = 0u64;
+            for id in ids {
+                let affected = self
+                    .conn
+                    .execute(
+                        "DELETE FROM execution_index
+                         WHERE id=?1 AND node_id=?2 AND kind=?3
+                           AND status IN ('idle','done','error','cancelled')",
+                        params![id.as_str(), node_id, kind.prefix()],
+                    )
+                    .await
+                    .context("delete execution index row")?;
+                if affected == 0 {
+                    continue;
+                }
+                removed += 1;
+                self.conn
+                    .execute("DELETE FROM execution_assignments WHERE id=?1", [id.as_str()])
+                    .await
+                    .context("delete execution assignment")?;
+                self.conn
+                    .execute(
+                        "DELETE FROM dispatch_receipts WHERE scope='execution' AND id=?1",
+                        [id.as_str()],
+                    )
+                    .await
+                    .context("delete dispatch receipt")?;
+            }
+            Ok(removed)
+        }
+        .await;
+        match result {
+            Ok(removed) => {
+                self.conn.execute("COMMIT", ()).await?;
+                Ok(removed)
+            }
+            Err(error) => {
+                crate::fleet::report::rollback(&self.conn).await;
+                Err(error)
+            }
+        }
     }
     pub async fn index(&self, id: &str) -> Result<Option<ExecutionIndex>> {
         let _guard = self.gate.lock().await;

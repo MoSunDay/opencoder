@@ -1,3 +1,6 @@
+use super::agent_how::{
+    agent_result, declared_how_append, default_title, transcript_tail, OUTPUT_TAIL_BYTES,
+};
 use crate::{journal::Record, operations::native, Worker};
 use anyhow::{bail, Result};
 use opencoder_core::{fleet::*, Config};
@@ -51,7 +54,11 @@ pub(super) async fn run(
     let _tools = (assignment.request.kind == ExecutionKind::Maintenance)
         .then(|| crate::maintenance_tools::install(worker, id));
     let input = &assignment.request.input;
+    let kind = assignment.request.kind;
     let agent = assignment.request.target.as_deref().unwrap_or("act");
+    // kind=agent only: the workflow-declared how.md append. Operator/
+    // maintenance inputs ignore the field (legacy behavior untouched).
+    let how_append = declared_how_append(kind, input)?;
     let fresh = worker.inner.state.store.get_session(id).await?.is_none();
     let before = worker
         .inner
@@ -68,14 +75,7 @@ pub(super) async fn run(
         id,
         agent,
         input["model"].as_str().map(str::to_owned),
-        input["title"]
-            .as_str()
-            .map(str::to_owned)
-            .or_else(|| match assignment.request.kind {
-                ExecutionKind::Maintenance => Some("节点维护".into()),
-                ExecutionKind::Operator => Some("Operator".into()),
-                _ => None,
-            }),
+        default_title(kind, input["title"].as_str()),
         assignment.index.created_at,
     )
     .await?;
@@ -84,11 +84,20 @@ pub(super) async fn run(
             .get("harness")
             .map(|v| serde_json::from_value(v.clone()))
             .transpose()?;
-        let envs = input
+        let mut envs: std::collections::BTreeMap<String, String> = input
             .get("envs")
             .map(|v| serde_json::from_value(v.clone()))
             .transpose()?
             .unwrap_or_default();
+        // The declared how.md append reaches the session's tool processes as
+        // OPENCODER_HOW_APPEND: persisted with the harness runtime so every
+        // resume rebuilds `SessionState::env_passthrough` from it — the same
+        // mechanism the DAG agent step uses, injected once at creation.
+        if let Some(text) = &how_append {
+            envs.extend(opencoder_dag_runtime::exec::how_append::env_pairs(Some(
+                text,
+            )));
+        }
         opencoder_core::agent::scope::with_root(
             config.agent.agents_dir.clone(),
             opencoder_session::harness::initialize(
@@ -125,7 +134,7 @@ pub(super) async fn run(
     }
     let mut initial_driver_ensured = false;
     if let Some(prompt) = input["prompt"].as_str().filter(|s| !s.trim().is_empty()) {
-        let prompt = match assignment.request.kind {
+        let prompt = match kind {
             ExecutionKind::Maintenance => format!("你是本节点的维护 agent。使用 node_maintenance 工具查询真实的状态、日志、资源和任务；只有用户明确要求时才修改配置或控制任务，不主动修复，不删除鉴权数据。\n\n用户指令：{prompt}"),
             // Operator runs the agent loop directly in the host process (no
             // runc sandbox, no node_maintenance tool), so the preamble asks
@@ -188,16 +197,43 @@ pub(super) async fn run(
     if let Some(error) = last_error {
         bail!("agent execution failed: {}", error.payload);
     }
-    Ok((
-        if cancel.is_cancelled()
-            || events.iter().any(|e| {
-                e.sse_kind.as_deref() == Some("status") && e.payload["status"] == "interrupted"
-            })
-        {
-            ExecutionStatus::Cancelled
-        } else {
-            ExecutionStatus::Idle
-        },
-        json!({"session_id":id}),
-    ))
+    let cancelled = cancel.is_cancelled()
+        || events.iter().any(|e| {
+            e.sse_kind.as_deref() == Some("status") && e.payload["status"] == "interrupted"
+        });
+    let status = if cancelled {
+        ExecutionStatus::Cancelled
+    } else {
+        ExecutionStatus::Idle
+    };
+    // Success surface for agent-kind sessions only: persist the declared
+    // how.md append (warn-only, exactly like the DAG agent step) and expose
+    // the bounded output contract. Operator/maintenance keep the plain
+    // session-pointer result.
+    if status == ExecutionStatus::Idle {
+        if let Some(delta) = how_append.as_deref().filter(|d| !d.trim().is_empty()) {
+            match opencoder_dag_runtime::exec::how_append::append_to_how_md(agent, delta) {
+                Ok(version) => {
+                    tracing::info!(%id, %agent, version, "how_append persisted to agent prompt pool")
+                }
+                Err(error) => tracing::warn!(
+                    %id,
+                    %agent,
+                    %error,
+                    "how_append persistence failed (execution outcome unchanged)"
+                ),
+            }
+        }
+        if kind == ExecutionKind::Agent {
+            // The turn's authoritative text lands via the per-turn messages
+            // append, so the store projection is the transcript of record.
+            let messages = worker.inner.state.store.load_messages(id).await?;
+            let text =
+                opencoder_session::handoff::last_assistant_text(&messages).unwrap_or_default();
+            let text = transcript_tail(&text, OUTPUT_TAIL_BYTES);
+            let output_json = opencoder_dag_runtime::exec::agent::extract_output_json_from(&text);
+            return Ok((status, agent_result(id, &text, output_json)));
+        }
+    }
+    Ok((status, json!({"session_id":id})))
 }

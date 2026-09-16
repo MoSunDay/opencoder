@@ -9,7 +9,7 @@ const LABELS = {
   result: '执行结果',
   'workflow.spec_json': '工作流定义',
   'workflow.state_json': '工作流状态',
-  'team.topic': '团队协作内容',
+  'team.topic': 'Team 协作内容',
   'project.todo': '项目任务内容',
   'project.run': '项目执行内容',
 };

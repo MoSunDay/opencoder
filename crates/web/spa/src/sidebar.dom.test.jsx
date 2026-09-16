@@ -7,7 +7,6 @@
 //   list root   <ul class="ant-conversations">
 //   item        <li class="ant-conversations-item">  (+ -active highlight)
 //   item label  .ant-conversations-label
-//   creation    <button class="ant-conversations-creation">
 // The two dialog sources stay wired to the real loaders:
 //   local  GET /api/sessions?limit=50 → {sessions}
 //   remote GET /api/nodes/:id/dialogs → {dialogs}
@@ -230,7 +229,10 @@ describe('Conversations sidebar (T5 two-column chat)', () => {
     });
   });
 
-  it('starts a new chat from the creation button and clears the active item', async () => {
+  it('has no dedicated creation button: sending from a selected node creates the chat', async () => {
+    // The old「新建对话」button is gone on purpose: picking a node and
+    // sending the first prompt already creates the dialog (see
+    // chat/nodeSelection.dom.test.jsx), so the button only duplicated that.
     fixtures.localSessions = localSessionsFixture();
     fixtures.snapshot = snapshotFixture();
     const { container } = await mountChat();
@@ -241,18 +243,15 @@ describe('Conversations sidebar (T5 two-column chat)', () => {
     await waitFor(() => {
       expect(container.querySelector('li.ant-conversations-item-active')).toBeTruthy();
     });
+    expect(container.querySelector('button.ant-conversations-creation')).toBeNull();
 
-    const create = container.querySelector('button.ant-conversations-creation');
-    expect(create).toBeTruthy();
-    expect(create.textContent).toContain('新建对话');
-    await act(async () => {
-      fireEvent.click(create);
-    });
-    // Same reset pair the old header button ran: empty state back, no active.
+    // Switch to a node with no dialogs → back to the empty state that invites
+    // a first prompt instead of a creation click.
+    await pickSelectOption(container, 'Fleet-1');
     await waitFor(() => {
       expect(container.querySelector('li.ant-conversations-item-active')).toBeNull();
     });
-    expect(screen.getByText('选择或新建对话，输入提示词开始')).toBeTruthy();
+    expect(screen.getByText('选中节点后输入提示词，即新建对话')).toBeTruthy();
   });
 
   it('lands the fleet tab preselect on the sidebar node select', async () => {

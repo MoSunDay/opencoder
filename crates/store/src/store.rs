@@ -12,8 +12,9 @@ use crate::types::{
 };
 use crate::{
     BrainCapabilityDetail, BrainCapabilityRecord, BrainEngInputRecord, BrainPlanRecord,
-    BrainPlaybookRecord, BrainVectorHit, BrainVectorWrite, TeamTopicRunRecord, TodoEventPage,
-    TodoEventRecord, TodoItemRecord, TodoWorkflowDetail, TodoWorkflowRecord, TodoWorkflowSummary,
+    BrainPlaybookRecord, BrainVectorHit, BrainVectorWrite, ScheduleRunRecord, TeamTopicRunRecord,
+    TodoEventPage, TodoEventRecord, TodoItemRecord, TodoWorkflowDetail, TodoWorkflowRecord,
+    TodoWorkflowSummary,
 };
 
 /// Storage abstraction — the single seam that lets us swap libsql for another
@@ -664,6 +665,23 @@ pub trait Store: Send + Sync {
         anyhow::bail!("node store API is not supported by {}", self.backend_name())
     }
 
+    /// Bulk-clear a node's console dialogs: delete every session bound to a
+    /// TERMINAL node task of `node_id` (done | error | cancelled) — the FK
+    /// cascades take the node_tasks row plus messages/inputs/events/subagent
+    /// tasks with it. Sessions whose node task is still pending/running/
+    /// cancelling are KEPT so a running execution survives the sweep.
+    /// Returns how many sessions were removed and which ids were skipped.
+    async fn clear_node_dialogs(&self, _node_id: &str) -> Result<crate::types::ClearNodeDialogs> {
+        anyhow::bail!("node store API is not supported by {}", self.backend_name())
+    }
+
+    /// Delete sessions by id in one batch (child rows — messages, inputs,
+    /// events, subagent_tasks, node_tasks — cascade via foreign keys).
+    /// Unknown ids are ignored. Returns the number of deleted session rows.
+    async fn delete_sessions(&self, _ids: &[String]) -> Result<u64> {
+        anyhow::bail!("node store API is not supported by {}", self.backend_name())
+    }
+
     // ---------------- DAG workflow store API (node-side scheduling) ----------
     //
     // The server stores defs/runs/events and runs the SAME claim /
@@ -787,6 +805,39 @@ pub trait Store: Send + Sync {
     /// All run rows of `topic_id`, oldest `created_at` first.
     async fn list_team_topic_runs(&self, _topic_id: &str) -> Result<Vec<TeamTopicRunRecord>> {
         anyhow::bail!("team store API is not supported by {}", self.backend_name())
+    }
+
+    // ------------- Schedule runs (control-plane cron ledger) ---------------
+    //
+    // The fire history of `schedules.json` jobs, persisted by the control
+    // plane's cron scheduler. Pure persistence: scheduling lives above the
+    // Store.
+
+    /// Insert or replace one fire row (keyed `(schedule_id, scheduled_for_ms)`,
+    /// so an error-retry of the same tick converges instead of duplicating).
+    async fn record_schedule_run(&self, _rec: &ScheduleRunRecord) -> Result<()> {
+        anyhow::bail!(
+            "schedule store API is not supported by {}",
+            self.backend_name()
+        )
+    }
+    /// The most recent row of `schedule_id`, or `None` before its first fire.
+    async fn last_schedule_run(&self, _schedule_id: &str) -> Result<Option<ScheduleRunRecord>> {
+        anyhow::bail!(
+            "schedule store API is not supported by {}",
+            self.backend_name()
+        )
+    }
+    /// History of `schedule_id`, newest tick first, at most `limit` rows.
+    async fn list_schedule_runs(
+        &self,
+        _schedule_id: &str,
+        _limit: u32,
+    ) -> Result<Vec<ScheduleRunRecord>> {
+        anyhow::bail!(
+            "schedule store API is not supported by {}",
+            self.backend_name()
+        )
     }
 
     async fn import_messages(&self, session_id: &str, msgs: &[Message]) -> Result<ImportReport> {

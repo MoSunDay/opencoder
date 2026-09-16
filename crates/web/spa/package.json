@@ -26,9 +26,11 @@
     "codemirror": "^6.0.2",
     "dayjs": "^1.11.13",
     "dompurify": "^3.4.14",
+    "fflate": "^0.8.3",
     "marked": "^15.0.12",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "usehooks-ts": "^3.1.1"
   },
   "devDependencies": {
     "@testing-library/dom": "^10.4.1",

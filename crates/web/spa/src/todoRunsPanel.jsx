@@ -4,7 +4,7 @@
 // 流在 workflow_completed/workflow_failed 后服务器即关流，这里主动 abort，
 // 避免 sse.js 把「干净关闭」当作断线去空重连。
 
-import { Button, Card, Col, Drawer, Empty, Row, Space, Table, Tooltip, Typography } from 'antd';
+import { Button, Card, Col, Drawer, Empty, Input, Row, Space, Table, Tooltip, Typography } from 'antd';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiGet } from './api.js';
 import { ExecutionDetail } from './fleet/detail.jsx';
@@ -66,6 +66,7 @@ export function TodoRunsPanel({ onNotice, focusWorkflowId, onFocusConsumed }) {
   const [rows, setRows] = useState([]);
   const [selectedId, setSelectedId] = useState('');
   const [loading, setLoading] = useState(false);
+  const [search, setSearch] = useState('');
   const rowsRef = useRef([]);
   const alive = useRef(true);
 
@@ -126,17 +127,35 @@ export function TodoRunsPanel({ onNotice, focusWorkflowId, onFocusConsumed }) {
       render: (ts) => <TimeText ts={ts} /> },
   ];
 
+  // 搜索框为受控组件：按工作流 ID/状态（忽略大小写）过滤本地列表，不入服务端。
+  const query = search.trim().toLowerCase();
+  const visible = query
+    ? rows.filter((r) => [r.id, r.status, r.execution_status].some((v) => String(v || '').toLowerCase().includes(query)))
+    : rows;
+
   return (
     <Row gutter={[16, 16]}>
       <Col span={24}>
-        <Card size="small" title="工作流" extra={<Button size="small" onClick={() => load(false)}>刷新</Button>}>
+        <Card size="small" title="工作流" extra={
+          <Space size={8}>
+            <Input.Search
+              allowClear
+              style={{ width: 200 }}
+              placeholder="搜索工作流 ID / 状态"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              aria-label="todo-run-search"
+            />
+            <Button size="small" onClick={() => load(false)}>刷新</Button>
+          </Space>
+        }>
           <Table
             className="oc-todo-runs"
             rowKey="id"
             size="small"
             loading={tableLoading(loading)}
             columns={wfCols}
-            dataSource={tableRows(loading, rows)}
+            dataSource={tableRows(loading, visible)}
             pagination={false}
             scroll={{ x: 'max-content' }}
             onRow={(r) => ({ onClick: () => setSelectedId(r.id), style: { cursor: 'pointer' } })}

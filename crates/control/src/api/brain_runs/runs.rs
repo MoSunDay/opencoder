@@ -25,6 +25,12 @@ pub struct CreateRun {
     pub references: Vec<PlanRef>,
 }
 pub async fn create(State(state): State<Arc<AppState>>, Json(body): Json<CreateRun>) -> Response {
+    create_inner(&state, body).await
+}
+
+/// Shared entry for the HTTP route and the cron scheduler (schedules.json
+/// `brain` kind): accepts-or-replays one run intent.
+pub async fn create_inner(state: &Arc<AppState>, body: CreateRun) -> Response {
     let intent = serde_json::to_value(&body).expect("serializable request intent");
     let id = body
         .id
@@ -55,7 +61,7 @@ pub async fn create(State(state): State<Arc<AppState>>, Json(body): Json<CreateR
     match state.fleet.receipt("brain-run", &id).await {
         Ok(Some(receipt)) if receipt.phase == "prepared" => {
             return match serde_json::from_value(receipt.payload) {
-                Ok(request) => response(crate::api::executions::submit(&state, request).await),
+                Ok(request) => response(crate::api::executions::submit(state, request).await),
                 Err(error) => error_500(error.to_string()),
             };
         }
@@ -127,7 +133,7 @@ pub async fn create(State(state): State<Arc<AppState>>, Json(body): Json<CreateR
             inputs: body.inputs,
             plan,
             references,
-            capabilities: super::catalog::capabilities(&state).await?,
+            capabilities: super::catalog::capabilities(state).await?,
         };
         opencoder_brain::execution::initialize(&id, request.clone(), 0)?;
         Ok::<_, anyhow::Error>(CreateExecution {
@@ -157,7 +163,7 @@ pub async fn create(State(state): State<Arc<AppState>>, Json(body): Json<CreateR
             {
                 return error_500(error.to_string());
             }
-            response(crate::api::executions::submit(&state, request).await)
+            response(crate::api::executions::submit(state, request).await)
         }
         Err(e) => error_400(e.to_string()),
     }

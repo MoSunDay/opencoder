@@ -14,8 +14,9 @@ export function FleetTeamsPanel({ onNotice }) {
   const [rows, setRows] = useState([]); const [nodes, setNodes] = useState([]); const [agents, setAgents] = useState([]);
   const [editing, setEditing] = useState(false); const [launch, setLaunch] = useState(null); const [detail, setDetail] = useState(null);
   const [busy, setBusy] = useState(false); const [form] = Form.useForm(); const [runForm] = Form.useForm(); const attempt = useRef(null);
-  /// 团队列表拉取态（首屏 + 保存/启动后的刷新），驱动表格 loading。
+  /// Team 列表拉取态（首屏 + 保存/启动后的刷新），驱动表格 loading。
   const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState('');
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -52,33 +53,49 @@ export function FleetTeamsPanel({ onNotice }) {
   const roster = rosterOf(captain, members);
   const summaryOf = (agent) => (agents.find((a) => a.agent === agent)?.capabilities || []).map((c) => c.summary).join('；');
   const options = agents.map((a) => ({ value: a.agent, label: a.agent }));
+  // 搜索框为受控组件：按 Team 名称（忽略大小写）过滤本地列表，不入服务端。
+  const query = search.trim().toLowerCase();
+  const visible = query
+    ? rows.filter((r) => [r.name].some((v) => String(v || '').toLowerCase().includes(query)))
+    : rows;
   return <PageShell page="team">
-    <Space style={{ marginBottom: 12 }}><Button type="primary" onClick={() => edit(null)}>创建团队</Button><Button onClick={() => load()}>刷新</Button></Space>
-    <Table scroll={{ x: 'max-content' }} rowKey="name" dataSource={tableRows(loading, rows)} loading={tableLoading(loading)} columns={[
-      { title: '团队', dataIndex: 'name' },
+    <Space style={{ marginBottom: 12 }}>
+      <Input.Search
+        allowClear
+        style={{ minWidth: 220 }}
+        placeholder="搜索 Team 名称"
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+        aria-label="team-search"
+      />
+      <Button type="primary" onClick={() => edit(null)}>创建 Team</Button>
+      <Button onClick={() => load()}>刷新</Button>
+    </Space>
+    <Table scroll={{ x: 'max-content' }} rowKey="name" dataSource={tableRows(loading, visible)} loading={tableLoading(loading)} columns={[
+      { title: 'Team', dataIndex: 'name' },
       { title: '成员', render: (_, row) => row.members.map((m) => <Tag key={m.agent}>{m.agent}</Tag>) },
       { title: '队长', dataIndex: 'captain' },
-      { title: '操作', render: (_, row) => <Space><Button onClick={() => edit(row)}>编辑</Button><Button onClick={() => { runForm.resetFields(); setLaunch(row); }}>启动团队</Button></Space> },
+      { title: '操作', render: (_, row) => <Space><Button onClick={() => edit(row)}>编辑</Button><Button onClick={() => { runForm.resetFields(); setLaunch(row); }}>启动 Team</Button></Space> },
     ]} />
-    <Modal open={editing} onCancel={() => { if (!busy) setEditing(false); }} title="团队成员" footer={null} width={720}>
+    <Modal open={editing} onCancel={() => { if (!busy) setEditing(false); }} title="Team 成员" footer={null} width={720}>
       <Form form={form} disabled={busy} onFinish={save} layout="vertical">
         <Space wrap>
-          <Form.Item name="name" label="团队名称" rules={[{ required: true }, { pattern: /^[a-z0-9][a-z0-9-]{0,63}$/, message: '使用小写字母、数字和连字符' }]}><Input /></Form.Item>
+          <Form.Item name="name" label="Team 名称" rules={[{ required: true }, { pattern: /^[a-z0-9][a-z0-9-]{0,63}$/, message: '使用小写字母、数字和连字符' }]}><Input /></Form.Item>
           <Form.Item name="captain" label="队长" rules={[{ required: true }]}><Select showSearch optionFilterProp="label" options={options} style={{ width: 200 }} placeholder="选择队长" /></Form.Item>
         </Space>
-        <Form.Item name="members" label="队员"><Select mode="multiple" showSearch optionFilterProp="label" options={options} placeholder="选择团队成员" /></Form.Item>
+        <Form.Item name="members" label="队员"><Select mode="multiple" showSearch optionFilterProp="label" options={options} placeholder="选择 Team 成员" /></Form.Item>
         {roster.length > 0 && <div style={{ marginBottom: 16 }}>
           {roster.map((agent) => <div key={agent} data-agent={agent} style={{ marginBottom: 4 }}>
             <Tag>{agent}</Tag>{agent === captain && <Tag color="gold">队长</Tag>}
             <span>{summaryOf(agent) || '暂无能力画像'}</span>
           </div>)}
         </div>}
-        <Button type="primary" htmlType="submit" loading={busy} style={{ marginTop: 16 }}>保存团队</Button>
+        <Button type="primary" htmlType="submit" loading={busy} style={{ marginTop: 16 }}>保存 Team</Button>
       </Form>
     </Modal>
     <Modal open={!!launch} title={`启动 ${launch?.name || ''}`} onCancel={() => setLaunch(null)} footer={null}>
       <Form form={runForm} onFinish={run} layout="vertical" initialValues={{ node: '' }}>
-        <Alert type="info" showIcon title="整个团队会在同一个执行节点内完成，成员不会跨节点运行" style={{ marginBottom: 12 }} />
+        <Alert type="info" showIcon title="整个 Team 会在同一个执行节点内完成，成员不会跨节点运行" style={{ marginBottom: 12 }} />
         <Form.Item name="node" label="执行节点"><Select options={nodeOptions(nodes, 'team')} /></Form.Item>
         <Form.Item name="prompt" label="任务要求" rules={[{ required: true }]}><Input.TextArea rows={5} /></Form.Item>
         <Button type="primary" htmlType="submit" loading={busy}>启动</Button>

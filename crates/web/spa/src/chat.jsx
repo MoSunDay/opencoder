@@ -1,9 +1,16 @@
-// Node-owned conversations: each session is an operator-kind execution on
-// the selected node (host-process agent loop, no runc sandbox). Selection is
-// required before creating or sending.
+// Node-owned conversations. Two creation lanes share this console:
+//   - Operator 模式（缺省）: operator-kind executions — newId('operator'), body
+//       without `kind` (legacy wire shape);
+//   - Agent 模式: agent-kind sessions — newId('agent'), body carries
+//     `kind: 'agent'` plus the staged `how_append` knowledge addendum.
+// Everything else (dialog list, transcript, act/plan, @ menu, model /
+// compact / fork / interrupt) is lane-agnostic and reused verbatim. Selection
+// is required before creating or sending.
+// This panel is the console's chat entry (nav label「Agent」, page key `chat`).
 import { Sender } from '@ant-design/x';
 import { Alert, Button, Input, Modal, Segmented, Space, Spin, Typography } from 'antd';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useLocalStorage } from 'usehooks-ts';
 import { apiDel, apiGet, apiPost } from './api.js';
 import { canUseNode, newId } from './fleet/model.js';
 import { useNodes } from './fleet/useNodes.js';
@@ -21,6 +28,24 @@ import { err, ok, warn } from './notice.js';
 import { MONO_VAR } from './ui/mono.js';
 
 const { Text } = Typography;
+
+/// Agent 模式创建链路的「知识追加 how_append」上限（UTF-8 字节数）。staged 值
+/// 只随创建请求（POST /api/sessions）提交；超限一律拦截，绝不随请求外发。
+export const HOW_APPEND_MAX = 8192;
+
+export function howAppendBytes(text) {
+  return new TextEncoder().encode(typeof text === 'string' ? text : '').length;
+}
+
+/// chat 模式持久化键（usehooks-ts useLocalStorage，与 nav 的 oc_nav_page 同
+/// 约定）：'operator' | 'agent'，缺省 'operator'。陌生/损坏值在读取处收敛为
+/// operator（modeKind），不写回覆盖。
+export const CHAT_MODE_STORAGE_KEY = 'oc_chat_mode';
+
+const MODE_OPTIONS = [
+  { label: 'Operator 模式', value: 'operator' },
+  { label: 'Agent 模式', value: 'agent' },
+];
 
 export function ChatPanel({ onNotice }) {
   const { preselectNode } = useStore();
@@ -41,6 +66,13 @@ export function ChatPanel({ onNotice }) {
   const [apOpen, setApOpen] = useState(false);
   const [annoOpen, setAnnoOpen] = useState(false);
   const [annoText, setAnnoText] = useState('');
+  // 创建链路模式（Operator / Agent）与 Agent 模式下的知识追加暂存。mode 经
+  // useLocalStorage 持久化（CHAT_MODE_STORAGE_KEY）；howAppend 只在 Agent
+  // 模式、且只在「创建」时随请求提交——选中已有会话的发送不受影响。
+  const [mode, setMode] = useLocalStorage(CHAT_MODE_STORAGE_KEY, 'operator');
+  const [howOpen, setHowOpen] = useState(false);
+  const [howText, setHowText] = useState('');
+  const [howStaged, setHowStaged] = useState('');
 
   const streamRef = useRef(null);
   const createAttempt = useRef(null);
@@ -48,7 +80,12 @@ export function ChatPanel({ onNotice }) {
   const aliveRef = useRef(true);
 
   const hasNode = !!nodeSel;
-  const nodeReady = canUseNode(nodes, nodeSel, 'operator');
+  // 创建链路执行类型：Agent 模式用 agent（节点 kinds 过滤 + newId('agent') +
+  // body.kind），其余一律收敛为 Operator 现状（含陌生持久化值）。
+  const modeKind = mode === 'agent' ? 'agent' : 'operator';
+  const nodeReady = canUseNode(nodes, nodeSel, modeKind);
+  const howStagedBytes = howAppendBytes(howStaged);
+
   const selectionRef = useRef({ node: nodeSel, dialog: dialogSel });
   selectionRef.current = { node: nodeSel, dialog: dialogSel };
 
@@ -135,16 +172,35 @@ export function ChatPanel({ onNotice }) {
     loadDialogs(nodeSel);
   }, [nodeSel, resetTranscript, loadDialogs]);
 
+  // 模式切换只影响下一次创建（进行中的流与已选会话不动）；重置未完成的创建
+  // 尝试，避免跨模式复用旧 id（attempt key 含模式，双保险）。
+  useEffect(() => {
+    createAttempt.current = null;
+    setHowOpen(false);
+  }, [modeKind]);
+
   const { reloadAfterDone, openSessionStream } = useTranscriptStream({ streamRef, aliveRef, setStream, setBusy, setConnecting, setQueueVersion, onNotice, selectionRef });
 
   const sendSession = async (prompt, delivery) => {
     let sid = dialogSel;
     if (!sid) {
-      createAttempt.current ||= { key: nodeSel, id: newId('operator') };
+      // Creation lanes: Agent 模式 → newId('agent') + body.kind + staged
+      // how_append；Operator 模式维持现状（newId('operator')，body 不带 kind）。
+      // attempt key 含模式：跨模式重试不复用旧 id。
+      createAttempt.current ||= { key: nodeSel + '|' + modeKind, id: newId(modeKind) };
+      if (modeKind === 'agent' && howStagedBytes > HOW_APPEND_MAX) {
+        // 超限的知识追加绝不随创建提交：拦截发送并提示修复（send 会恢复草稿）。
+        throw new Error(`知识追加超过 ${HOW_APPEND_MAX} 字节上限（当前 ${howStagedBytes} 字节），请修改或清空后再发送`);
+      }
       // The staged act/plan choice rides creation: POST /api/sessions accepts
       // `agent`, so the mode picked before any prompt exists is honored
       // (server stamps meta.agent and initializes the harness with it).
-      const j = await apiPost('/api/sessions', { id: createAttempt.current.id, node_id: nodeSel, agent: sessionAgent });
+      const body = { id: createAttempt.current.id, node_id: nodeSel, agent: sessionAgent };
+      if (modeKind === 'agent') {
+        body.kind = 'agent';
+        if (howStaged) body.how_append = howStaged;
+      }
+      const j = await apiPost('/api/sessions', body);
       if (!j?.id) throw new Error('服务未返回会话 ID，请重试确认');
       createAttempt.current = null;
       sid = j.id;
@@ -321,7 +377,7 @@ export function ChatPanel({ onNotice }) {
     }
     if (kind === 'compact') {
       if (!sid) {
-        notice(warn('先选择或新建对话'));
+        notice(warn('先发送一条提示词新建对话'));
         return;
       }
       try {
@@ -355,7 +411,7 @@ export function ChatPanel({ onNotice }) {
     }
     if (kind === 'fork') {
       if (!sid) {
-        notice(warn('先选择或新建对话'));
+        notice(warn('先发送一条提示词新建对话'));
         return;
       }
       try {
@@ -409,10 +465,45 @@ export function ChatPanel({ onNotice }) {
     });
   };
 
+  /// Bulk clear-all: DELETE /api/nodes/:id/dialogs removes every TERMINAL
+  /// (done | error | cancelled) dialog of the selected node in one call; the
+  /// server SKIPS sessions whose node task is still pending/running/cancelling
+  /// so running work survives the sweep. Secondary confirm mirrors the
+  /// per-dialog deleteDialog gate.
+  const deleteAllDialogs = () => {
+    if (!nodeSel || !dialogs.length) {
+      return;
+    }
+    Modal.confirm({
+      title: '删除全部会话',
+      content: '将删除当前节点的所有已完成会话（消息、事件与队列输入一并清除）；正在运行中的会话会保留。',
+      okText: '全部删除',
+      okButtonProps: { danger: true },
+      cancelText: '取消',
+      onOk: async () => {
+        try {
+          const j = await apiDel('/api/nodes/' + encodeURIComponent(nodeSel) + '/dialogs');
+          const skipped = (j && j.skipped) || [];
+          if (dialogSel && !skipped.includes(dialogSel)) {
+            resetTranscript();
+            setDialogSel(null);
+          }
+          loadDialogs(nodeSel);
+          const removed = (j && j.removed) || 0;
+          notice(ok(skipped.length
+            ? `已删除 ${removed} 个会话，${skipped.length} 个运行中的会话已保留`
+            : `已删除 ${removed} 个会话`));
+        } catch (e) {
+          notice(err('批量删除会话失败: ' + ((e && e.message) || '')));
+        }
+      },
+    });
+  };
+
   const setAutopilot = async (mode) => {
     setApOpen(false);
     if (!dialogSel) {
-      notice(warn('先选择或新建对话'));
+      notice(warn('先发送一条提示词新建对话'));
       return;
     }
     try {
@@ -426,7 +517,7 @@ export function ChatPanel({ onNotice }) {
   const setAnnotation = async (text) => {
     setAnnoOpen(false);
     if (!dialogSel) {
-      notice(warn('先选择或新建对话'));
+      notice(warn('先发送一条提示词新建对话'));
       return;
     }
     try {
@@ -466,28 +557,47 @@ export function ChatPanel({ onNotice }) {
       <DialogSidebar
         nodes={nodes}
         nodeSel={nodeSel}
+        nodeKind={modeKind}
         onNodeChange={setNodeSel}
         disabled={busy}
         dialogs={dialogs}
         activeKey={dialogSel}
         onActiveChange={openDialog}
         onDelete={deleteDialog}
-        onNew={() => { if (busy || !nodeReady) return; resetTranscript(); setDialogSel(null); setSessionAgent('act'); createAttempt.current = null; }}
+        onDeleteAll={deleteAllDialogs}
         loading={dialogsLoading}
       />
 
       <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
-        {hasNode ? (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-            <Segmented
-              size="small"
-              value={sessionAgent}
-              options={[{ label: 'act', value: 'act' }, { label: 'plan', value: 'plan' }]}
-              onChange={switchAgent}
-            />
-            <Button size="small" disabled={!dialogSel} onClick={() => setModelOpen(true)}>模型</Button>
-          </div>
-        ) : null}
+        {/* 页头操作区：模式 Segmented（Operator / Agent，持久化于 oc_chat_mode）
+            常驻；Agent 模式追加「知识追加」暂存入口；选中节点后再出现 act/plan
+            与 模型（会话级控制，语义不变）。 */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+          <Segmented
+            aria-label="会话模式"
+            size="small"
+            value={modeKind}
+            options={MODE_OPTIONS}
+            onChange={setMode}
+          />
+          {modeKind === 'agent' ? (
+            <Button size="small" onClick={() => { setHowText(howStaged); setHowOpen(true); }}>
+              知识追加{howStaged ? ' · 已暂存' : ''}
+            </Button>
+          ) : null}
+          {hasNode ? (
+            <>
+              <Segmented
+                aria-label="agent 切换"
+                size="small"
+                value={sessionAgent}
+                options={[{ label: 'act', value: 'act' }, { label: 'plan', value: 'plan' }]}
+                onChange={switchAgent}
+              />
+              <Button size="small" disabled={!dialogSel} onClick={() => setModelOpen(true)}>模型</Button>
+            </>
+          ) : null}
+        </div>
 
         {!nodeReady && <Alert type="info" showIcon style={{ marginBottom: 12 }} title={nodesError || (nodeSel ? '所选节点当前不可执行，请选择可用节点' : '请先选择执行节点')} />}
         <div style={{ flex: 1, minHeight: 0, overflow: 'auto', border: '1px solid var(--oc-border)', borderRadius: 10, padding: '12px 16px' }}>
@@ -497,7 +607,7 @@ export function ChatPanel({ onNotice }) {
               usage={stream.usage}
               status={stream.status}
               error={stream.error}
-              emptyText={dialogSel ? '该对话暂无消息，输入提示词开始' : '选择或新建对话，输入提示词开始'}
+              emptyText={dialogSel ? '该对话暂无消息，输入提示词开始' : '选中节点后输入提示词，即新建对话'}
             />
           </Spin>
         </div>
@@ -574,6 +684,39 @@ export function ChatPanel({ onNotice }) {
         <Space style={{ marginTop: 12 }}>
           <Button type="primary" onClick={() => setAnnotation(annoText.trim())}>保存</Button>
           <Button onClick={() => setAnnotation('')}>清除</Button>
+        </Space>
+      </Modal>
+
+      {/* Agent 模式「知识追加 how_append」暂存：保存即 staged，随下一次创建
+          （POST /api/sessions）提交；超限（HOW_APPEND_MAX 字节）禁止保存并在
+          创建前再拦一道。Operator 模式不渲染入口。 */}
+      <Modal
+        title="知识追加（how_append）"
+        open={howOpen}
+        footer={null}
+        onCancel={() => setHowOpen(false)}
+      >
+        <Input.TextArea
+          aria-label="知识追加内容"
+          value={howText}
+          rows={5}
+          placeholder="追加给本次 agent 会话的知识/上下文（随创建提交，留空即不携带）"
+          onChange={(e) => setHowText(e.target.value)}
+        />
+        <Text type={howAppendBytes(howText) > HOW_APPEND_MAX ? 'danger' : 'secondary'} style={{ fontSize: 12, display: 'block', marginTop: 4 }}>
+          {howAppendBytes(howText)} / {HOW_APPEND_MAX} 字节
+          {howAppendBytes(howText) > HOW_APPEND_MAX ? ' · 超过上限，无法保存' : ''}
+        </Text>
+        <Space style={{ marginTop: 12 }}>
+          <Button
+            type="primary"
+            disabled={howAppendBytes(howText) > HOW_APPEND_MAX}
+            onClick={() => { setHowStaged(howText); setHowOpen(false); notice(ok('知识追加已暂存，将随下一次创建提交')); }}
+          >
+            保存
+          </Button>
+          <Button onClick={() => { setHowText(''); setHowStaged(''); setHowOpen(false); notice(ok('知识追加已清空')); }}>清空</Button>
+          <Button onClick={() => setHowOpen(false)}>取消</Button>
         </Space>
       </Modal>
 

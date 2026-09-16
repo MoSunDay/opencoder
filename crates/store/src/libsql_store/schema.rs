@@ -5,11 +5,12 @@ use super::brain_playbooks::{CREATE_BRAIN_PLAYBOOKS, CREATE_INDEX_BRAIN_PLAYBOOK
 use super::chat_tables::{
     CREATE_EVENTS, CREATE_INPUTS, CREATE_MESSAGES, CREATE_SESSIONS, CREATE_SUBAGENT_TASKS,
 };
+use super::schedule::{CREATE_INDEX_SCHEDULE_RUNS_FIRED, CREATE_SCHEDULE_RUNS};
 use super::team_runs::{CREATE_INDEX_TEAM_TOPIC_RUNS_TOPIC, CREATE_TEAM_TOPIC_RUNS};
 
 mod project_relations;
 
-const SCHEMA_VERSION: i64 = 25;
+const SCHEMA_VERSION: i64 = 26;
 
 // Order invariant: busy_timeout must precede any locking statement, and
 // synchronous=NORMAL must be applied BEFORE journal_mode=WAL. Switching a
@@ -385,6 +386,7 @@ async fn bootstrap_tx(conn: &Connection) -> Result<()> {
     conn.execute(CREATE_DAG_RUNS, ()).await?;
     conn.execute(CREATE_DAG_EVENTS, ()).await?;
     conn.execute(CREATE_TEAM_TOPIC_RUNS, ()).await?;
+    conn.execute(CREATE_SCHEDULE_RUNS, ()).await?;
     conn.execute(CREATE_PLATFORM_USERS, ()).await?;
     conn.execute(CREATE_INDEX_MSG, ()).await?;
     conn.execute(CREATE_INDEX_IN, ()).await?;
@@ -447,6 +449,9 @@ async fn bootstrap_tx(conn: &Connection) -> Result<()> {
     // Same post-migrate placement: the team ledger physically exists either
     // via the CREATE batch (fresh DBs) or the v17 migration (old DBs).
     conn.execute(CREATE_INDEX_TEAM_TOPIC_RUNS_TOPIC, ()).await?;
+    // Same post-migrate placement: the schedule ledger physically exists
+    // either via the CREATE batch (fresh DBs) or the v26 migration (old DBs).
+    conn.execute(CREATE_INDEX_SCHEDULE_RUNS_FIRED, ()).await?;
     // Same post-migrate placement: brain plans physically exist either via
     // the CREATE batch (fresh DBs) or the v18 migration (old DBs).
     conn.execute(CREATE_INDEX_BRAIN_PLANS_DIGEST, ()).await?;
@@ -689,6 +694,12 @@ async fn migrate(conn: &Connection, from: i64) -> Result<()> {
         // (fresh databases already carry the table from bootstrap's CREATE
         // batch); the table is new, so no rows need backfilling.
         conn.execute(CREATE_BRAIN_PLAYBOOKS, ()).await?;
+    }
+    if from < 26 {
+        // v26: control-plane cron scheduler fire ledger. CREATE IF NOT
+        // EXISTS keeps this idempotent; the table is new (append-only
+        // history), so no rows need backfilling.
+        conn.execute(CREATE_SCHEDULE_RUNS, ()).await?;
     }
     if from < 24 {
         // v24: platform users. CREATE IF NOT EXISTS keeps this idempotent;

@@ -65,7 +65,7 @@ function AgentDetailSession({name,onNotice:noticeCallback,onChanged,onDirtyChang
     {meta && <AgentHarnessFields meta={meta} onNotice={onNotice} onSaved={onSaved}/>}
     <Tabs defaultActiveKey="prompts" items={[
       ...CATEGORIES.map(({cat,label}) => ({key:cat,label,children:<ResourceTab cat={cat} label={label}
-        entry={resources.entries[cat]} onEdit={files => resources.edit(cat,files)} onWorking={value => resources.working(cat,value)} onSave={version => resources.save(cat,version)}/>})),
+        entry={resources.entries[cat]} onEdit={files => resources.edit(cat,files)} onSave={version => resources.save(cat,version)}/>})),
       {key:'meta',label:'Meta',children:<MetaTab meta={meta}/>},
     ]}/>
   </div>;

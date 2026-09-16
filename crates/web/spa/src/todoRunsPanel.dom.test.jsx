@@ -248,4 +248,30 @@ describe('TodoRunsPanel 表格 loading 语义', () => {
     expect(outerMasked()).toBe(false);
     expect(innerMasked()).toBe(false);
   });
+
+  it('搜索框按工作流 ID/状态过滤本地行，清空后恢复', async () => {
+    render(<TodoRunsPanel onNotice={vi.fn()} />);
+    await flush();
+    expect(rowText('.oc-todo-runs')).toContain('todos-1');
+
+    // 按 ID 命中。
+    fireEvent.change(screen.getByLabelText('todo-run-search'), { target: { value: 'todos-1' } });
+    await flush();
+    expect(rowText('.oc-todo-runs')).toContain('todos-1');
+
+    // 按状态命中（status / execution_status 均为 running）。
+    fireEvent.change(screen.getByLabelText('todo-run-search'), { target: { value: 'running' } });
+    await flush();
+    expect(rowText('.oc-todo-runs')).toContain('todos-1');
+
+    // 无关关键词：数据行清空（只看这张表的数据行，跳过 measure/placeholder 行）。
+    fireEvent.change(screen.getByLabelText('todo-run-search'), { target: { value: 'zzz' } });
+    await flush();
+    expect(document.querySelectorAll('.oc-todo-runs tbody tr.ant-table-row')).toHaveLength(0);
+
+    // 清空后行回来。
+    fireEvent.change(screen.getByLabelText('todo-run-search'), { target: { value: '' } });
+    await flush();
+    expect(rowText('.oc-todo-runs')).toContain('todos-1');
+  });
 });

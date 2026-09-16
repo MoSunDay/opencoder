@@ -4,7 +4,7 @@
 //   运行 — todoRunsPanel.jsx 的工作流列表 + 事件流。
 // 版本行上的「运行」成功后带 workflow_id 跳到「运行」tab 并聚焦该工作流。
 
-import { Button, Drawer, Modal, Popconfirm, Space, Table, Tabs, Tag, Typography } from 'antd';
+import { Button, Drawer, Input, Modal, Popconfirm, Space, Table, Tabs, Tag, Typography } from 'antd';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiDel, apiGet, apiPost, apiPut } from './api.js';
 import { newId } from './fleet/model.js';
@@ -131,6 +131,7 @@ function TemplatesTab({ onNotice, onRan }) {
   const [loading, setLoading] = useState(false);
   const [editing, setEditing] = useState(null); // {name, version} → TodoEditor
   const [creating, setCreating] = useState(false);
+  const [search, setSearch] = useState('');
   const dirty=useRef(false);
   const onDirtyChange=useCallback(value=>{dirty.current=value;},[]);
   const closeDraft=callback=>{
@@ -189,9 +190,23 @@ function TemplatesTab({ onNotice, onRan }) {
     ) },
   ];
 
+  // 搜索框为受控组件：按模板名称/描述（忽略大小写）过滤本地列表，不入服务端。
+  const query = search.trim().toLowerCase();
+  const visible = query
+    ? rows.filter((r) => [r.name, r.description].some((v) => String(v || '').toLowerCase().includes(query)))
+    : rows;
+
   return (
     <div>
       <Space style={{ marginBottom: 12 }}>
+        <Input.Search
+          allowClear
+          style={{ minWidth: 220 }}
+          placeholder="搜索模板名称 / 描述"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          aria-label="todo-template-search"
+        />
         <Button type="primary" onClick={() => setCreating(true)}>新建模板</Button>
       </Space>
       <FileProblems problems={listProblems} onClose={()=>setListProblems([])}/>
@@ -200,7 +215,7 @@ function TemplatesTab({ onNotice, onRan }) {
         size="small"
         loading={loading}
         columns={columns}
-        dataSource={rows}
+        dataSource={visible}
         pagination={false}
         expandable={{
           expandedRowRender: (r) => (

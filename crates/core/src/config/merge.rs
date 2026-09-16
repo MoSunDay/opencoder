@@ -119,11 +119,12 @@ pub(super) fn merge_json(dst: &mut serde_json::Value, patch: &serde_json::Value)
     }
 }
 
-/// The legacy domain keys (`mcp_servers` / `cli` / `skills` / `autopilot`)
-/// present in a parsed config.json object with non-`null` values, in fixed
-/// order. Pure input inspection — callers decide what to do with the result.
+/// The domain keys (`mcp_servers` / `cli` / `skills` / `autopilot` /
+/// `schedules`) present in a parsed config.json object with non-`null`
+/// values, in fixed order. Pure input inspection — callers decide what to do
+/// with the result.
 fn legacy_domain_keys(obj: &serde_json::Map<String, serde_json::Value>) -> Vec<&'static str> {
-    ["mcp_servers", "cli", "skills", "autopilot"]
+    ["mcp_servers", "cli", "skills", "autopilot", "schedules"]
         .into_iter()
         .filter(|k| obj.get(*k).is_some_and(|v| !v.is_null()))
         .collect()
@@ -392,13 +393,14 @@ mod tests {
             "skills": {},
             "cli": {},
             "mcp_servers": {},
-            "autopilot": {}
+            "autopilot": {},
+            "schedules": {}
         }));
-        // Order is fixed (mcp_servers, cli, skills, autopilot) regardless of
-        // JSON order.
+        // Order is fixed (mcp_servers, cli, skills, autopilot, schedules)
+        // regardless of JSON order.
         assert_eq!(
             legacy_domain_keys(&all),
-            vec!["mcp_servers", "cli", "skills", "autopilot"]
+            vec!["mcp_servers", "cli", "skills", "autopilot", "schedules"]
         );
 
         let nulled = as_map(serde_json::json!({

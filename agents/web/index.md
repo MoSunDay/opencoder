@@ -1,4 +1,4 @@
-Commit: 187ee827bad0cb2ae0b1900284b1a20176706166
+Commit: e797e184412ac6df34cd5e8189634e1361945362
 
 # web 模块
 
@@ -16,6 +16,7 @@ axum HTTP + SSE 会话管理 + 内嵌 SPA。
 - `spa/src/` — React18+antd SPA（vitest），产物提交于 `spa/dist`；
   composer 命令菜单 `commandMenu.js` + `fuzzy.js`（与 TUI `/agent`、`@`
   agent 菜单同 fuzzy 语义；`@` sigil 条目只来自 agent 目录）
+- `spa/src/fleet/` — 全部执行表含「名称」列（列表端点提升的派发时快照，缺省渲染 `-`）；详情抽屉标题「名称 (id)」，缺名称回退裸 id
 
 ## 接缝
 - 会话执行复用 session 运行时；持久化经 `Arc<dyn Store>`。

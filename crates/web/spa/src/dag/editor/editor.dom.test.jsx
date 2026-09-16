@@ -106,6 +106,13 @@ describe('画布连线模式', () => {
     const onSave = vi.fn();
     mountEditor(onSave);
     await waitFor(() => expect(document.querySelectorAll('.dag-edit-node')).toHaveLength(2));
+    // add a fresh wasm step: review already depends on fetch, so only a
+    // review → <new> edge is acyclic and allowed
+    fireEvent.click(screen.getByText('Wasm 步骤'));
+    await waitFor(() => expect(document.querySelectorAll('.dag-edit-node')).toHaveLength(3));
+    // the fresh wasm step ships with an empty command — fill it so the save passes validation
+    const label = await screen.findByText('Wasm 命令 (command)');
+    fireEvent.change(label.closest('.ant-form-item').querySelector('input'), { target: { value: 'tool2.wasm' } });
     fireEvent.click(screen.getByRole('button', { name: /连线/ }));
     // pick the source: the armed card lights up and the hint bar appears
     fireEvent.click(document.querySelector('[data-id="review"] .dag-edit-node'));
@@ -116,7 +123,7 @@ describe('画布连线模式', () => {
     );
     expect(screen.getByText(/连线：review/)).toBeTruthy();
     // click the target → edge lands, armed state clears
-    fireEvent.click(document.querySelector('[data-id="fetch"] .dag-edit-node'));
+    fireEvent.click(document.querySelector('[data-id="step"] .dag-edit-node'));
     await waitFor(() =>
       expect(document.querySelector('[data-id="review"] .dag-edit-node').className).not.toContain(
         'dag-edit-node--linksrc',
@@ -125,7 +132,7 @@ describe('画布连线模式', () => {
     fireEvent.click(screen.getByText('保 存'));
     await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
     const spec = onSave.mock.calls[0][0];
-    expect(spec.steps.find((s) => s.name === 'fetch').depends_on).toEqual(['review']);
+    expect(spec.steps.find((s) => s.name === 'step').depends_on).toEqual(['review']);
   });
 
   it('连线模式拒绝成环依赖且不改 spec', async () => {
@@ -133,8 +140,9 @@ describe('画布连线模式', () => {
     mountEditor(onSave);
     await waitFor(() => expect(document.querySelectorAll('.dag-edit-node')).toHaveLength(2));
     fireEvent.click(screen.getByRole('button', { name: /连线/ }));
-    fireEvent.click(document.querySelector('[data-id="fetch"] .dag-edit-node'));
+    // review → fetch closes the existing fetch → review chain into a cycle
     fireEvent.click(document.querySelector('[data-id="review"] .dag-edit-node'));
+    fireEvent.click(document.querySelector('[data-id="fetch"] .dag-edit-node'));
     expect(await screen.findByText('不能形成循环依赖')).toBeTruthy();
     fireEvent.click(screen.getByText('保 存'));
     await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));

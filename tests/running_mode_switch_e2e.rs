@@ -11,175 +11,14 @@
 
 mod support;
 
-use std::collections::VecDeque;
 use std::io::{Read, Write};
-use std::net::{TcpListener, TcpStream};
+use std::net::TcpStream;
 use std::process::{Command, Stdio};
-use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
+use support::llm_stub::{LlmStub, Script};
+
 const TOKEN: &str = "running-mode-e2e-token";
-
-struct BlockingStub {
-    port: u16,
-    entered: Arc<(Mutex<bool>, Condvar)>,
-    release: Arc<(Mutex<bool>, Condvar)>,
-}
-
-impl BlockingStub {
-    fn spawn() -> Self {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let entered = Arc::new((Mutex::new(false), Condvar::new()));
-        let release = Arc::new((Mutex::new(false), Condvar::new()));
-        let entered_thread = entered.clone();
-        let release_thread = release.clone();
-        let port = listener.local_addr().unwrap().port();
-        std::thread::spawn(move || {
-            for stream in listener.incoming().flatten() {
-                let entered = entered_thread.clone();
-                let release = release_thread.clone();
-                std::thread::spawn(move || {
-                    let mut stream = stream;
-                    let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
-                    let _ = stream.read(&mut [0u8; 16 * 1024]);
-                    *entered.0.lock().unwrap() = true;
-                    entered.1.notify_all();
-                    let mut allowed = release.0.lock().unwrap();
-                    while !*allowed {
-                        allowed = release.1.wait(allowed).unwrap();
-                    }
-                    let body = br#"{"error":"released blocking stub"}"#;
-                    let head = format!(
-                        "HTTP/1.1 401 Unauthorized\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
-                        body.len()
-                    );
-                    let _ = stream.write_all(head.as_bytes());
-                    let _ = stream.write_all(body);
-                });
-            }
-        });
-        Self {
-            port,
-            entered,
-            release,
-        }
-    }
-
-    fn wait_until_entered(&self) {
-        let deadline = Instant::now() + Duration::from_secs(20);
-        let mut entered = self.entered.0.lock().unwrap();
-        while !*entered {
-            assert!(Instant::now() < deadline, "LLM stub was never called");
-            entered = self
-                .entered
-                .1
-                .wait_timeout(entered, Duration::from_millis(100))
-                .unwrap()
-                .0;
-        }
-    }
-
-    fn release(&self) {
-        *self.release.0.lock().unwrap() = true;
-        self.release.1.notify_all();
-    }
-}
-
-/// Minimal OpenAI-compatible streaming server for real-binary happy-path
-/// coverage. Each connection consumes one scripted reply and records the JSON
-/// request body so the test can verify what crossed the actual HTTP boundary.
-struct CompletionStub {
-    port: u16,
-    requests: Arc<(Mutex<Vec<String>>, Condvar)>,
-}
-
-impl CompletionStub {
-    fn spawn(replies: impl IntoIterator<Item = &'static str>) -> Self {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let port = listener.local_addr().unwrap().port();
-        let requests = Arc::new((Mutex::new(Vec::new()), Condvar::new()));
-        let requests_thread = requests.clone();
-        let replies = Arc::new(Mutex::new(replies.into_iter().collect::<VecDeque<_>>()));
-        std::thread::spawn(move || {
-            for stream in listener.incoming().flatten() {
-                let mut stream = stream;
-                let body = read_http_body(&mut stream);
-                requests_thread.0.lock().unwrap().push(body);
-                requests_thread.1.notify_all();
-                let reply = replies
-                    .lock()
-                    .unwrap()
-                    .pop_front()
-                    .expect("unexpected extra LLM request");
-                write_completion(&mut stream, reply);
-            }
-        });
-        Self { port, requests }
-    }
-
-    fn wait_for_requests(&self, count: usize) -> Vec<String> {
-        let deadline = Instant::now() + Duration::from_secs(20);
-        let mut requests = self.requests.0.lock().unwrap();
-        while requests.len() < count {
-            assert!(
-                Instant::now() < deadline,
-                "expected {count} LLM requests, got {}",
-                requests.len()
-            );
-            requests = self
-                .requests
-                .1
-                .wait_timeout(requests, Duration::from_millis(100))
-                .unwrap()
-                .0;
-        }
-        requests.clone()
-    }
-}
-
-fn read_http_body(stream: &mut TcpStream) -> String {
-    stream
-        .set_read_timeout(Some(Duration::from_secs(5)))
-        .unwrap();
-    let mut request = Vec::new();
-    let (header_end, content_len) = loop {
-        let mut chunk = [0u8; 8192];
-        let count = stream.read(&mut chunk).unwrap();
-        assert!(count > 0, "LLM request closed before headers completed");
-        request.extend_from_slice(&chunk[..count]);
-        let Some(end) = request.windows(4).position(|w| w == b"\r\n\r\n") else {
-            continue;
-        };
-        let headers = String::from_utf8_lossy(&request[..end]);
-        let content_len = headers
-            .lines()
-            .filter_map(|line| line.split_once(':'))
-            .find(|(name, _)| name.eq_ignore_ascii_case("content-length"))
-            .and_then(|(_, value)| value.trim().parse::<usize>().ok())
-            .expect("LLM request must carry content-length");
-        break (end + 4, content_len);
-    };
-    while request.len() < header_end + content_len {
-        let mut chunk = [0u8; 8192];
-        let count = stream.read(&mut chunk).unwrap();
-        assert!(count > 0, "LLM request closed before body completed");
-        request.extend_from_slice(&chunk[..count]);
-    }
-    String::from_utf8(request[header_end..header_end + content_len].to_vec()).unwrap()
-}
-
-fn write_completion(stream: &mut TcpStream, text: &str) {
-    let delta = serde_json::json!({"choices": [{"delta": {"content": text}}]});
-    let body = format!(
-        "data: {delta}\n\ndata: {{\"choices\":[{{\"delta\":{{}},\"finish_reason\":\"stop\"}}]}}\n\ndata: [DONE]\n\n"
-    );
-    let head = format!(
-        "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
-        body.len()
-    );
-    stream.write_all(head.as_bytes()).unwrap();
-    stream.write_all(body.as_bytes()).unwrap();
-}
 
 struct ServerGuard(std::process::Child);
 
@@ -343,15 +182,12 @@ fn wait_for_session(
 
 #[test]
 fn real_server_rejects_running_mode_switches_until_idle() {
-    let stub = BlockingStub::spawn();
+    let stub = LlmStub::spawn(vec![Script::Hold]);
     let tmp = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(tmp.path().join(".opencoder")).unwrap();
     std::fs::write(
         tmp.path().join(".opencoder/config.json"),
-        format!(
-            r#"{{"model":"stub/m1","providers":{{"stub":{{"base_url":"http://127.0.0.1:{}/v1","api_key":"test-key","model":"m1"}}}}}}"#,
-            stub.port
-        ),
+        format!("{{{}}}", stub.config_fragment()),
     )
     .unwrap();
     std::fs::write(tmp.path().join(".opencoder/ap.json"), r#"{"mode":"off"}"#).unwrap();
@@ -450,15 +286,12 @@ fn real_server_clear_context_executes_preserved_plan_in_act() {
     const RESULT: &str = "ACT_EXECUTION_COMPLETE_42";
     const RESUMED: &str = "RESUMED_ACT_COMPLETE_42";
 
-    let stub = CompletionStub::spawn([PLAN, RESULT, RESUMED]);
+    let stub = LlmStub::spawn_text(&[PLAN, RESULT, RESUMED]);
     let tmp = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(tmp.path().join(".opencoder")).unwrap();
     std::fs::write(
         tmp.path().join(".opencoder/config.json"),
-        format!(
-            r#"{{"model":"stub/m1","providers":{{"stub":{{"base_url":"http://127.0.0.1:{}/v1","api_key":"test-key","model":"m1"}}}}}}"#,
-            stub.port
-        ),
+        format!("{{{}}}", stub.config_fragment()),
     )
     .unwrap();
     std::fs::write(tmp.path().join(".opencoder/ap.json"), r#"{"mode":"off"}"#).unwrap();

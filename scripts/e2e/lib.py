@@ -134,6 +134,28 @@ def write_file(workdir: str, name: str, content: str) -> None:
         f.write(content)
 
 
+def run_split(bin_path: str, args: list[str], timeout: int = 900) -> tuple[int, str, str]:
+    """Run the binary with stdout/stderr captured SEPARATELY (lib.run merges).
+
+    Needed whenever a contract distinguishes the two streams (todos: stdout is
+    a pure state JSON document while stderr carries the workflow_id banner and
+    progress tails). Timeout maps to rc 124 with the partial streams.
+    """
+    try:
+        p = subprocess.run([bin_path] + args, capture_output=True, text=True, timeout=timeout)
+        return p.returncode, p.stdout or "", p.stderr or ""
+    except subprocess.TimeoutExpired:
+        return 124, "", f"TIMEOUT after {timeout}s"
+
+
+def json_or_none(text: str) -> Any | None:
+    """Parse a stdout document as JSON; None when stdout is not pure JSON."""
+    try:
+        return json.loads(text)
+    except Exception:
+        return None
+
+
 @dataclass
 class Counter:
     passed: int = 0

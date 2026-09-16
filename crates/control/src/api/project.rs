@@ -185,7 +185,7 @@ async fn resolve_brain_executor(
             .projects
             .get_todo(todo)
             .await
-            .map_err(|e| RpcReply::error(500, e.to_string()))?
+            .map_err(|e| RpcReply::error(500, format!("load todo {todo}: {e:#}")))?
         {
             if matches!(
                 record.executor_kind,

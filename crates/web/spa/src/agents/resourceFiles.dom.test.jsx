@@ -86,9 +86,9 @@ it('shows a multi-file memory pool as a tree and creates a file inline',async()=
   const onChange=mount({'memory.md':entry('memory.md'),'topics/rust.md':entry('topics/rust.md')},'memory');
   await waitFor(()=>expect(node('memory.md')).toBeTruthy());
   expect(await screen.findByText('rust.md')).toBeTruthy();
-  await contextMenu('memory.md','新增文件');
+  await contextMenu('topics/rust.md','新增文件');
   const input=await screen.findByLabelText('新增文件名称');
-  type(input,'topics/vim.md');commit(input);
+  type(input,'vim.md');commit(input);
   await waitFor(()=>expect(onChange).toHaveBeenCalled());
   const next=onChange.mock.calls[0][0];
   expect(next['topics/vim.md']).toEqual({path:'topics/vim.md',content_b64:b64EncodeText(''),mode:0o600});

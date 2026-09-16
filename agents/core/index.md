@@ -1,4 +1,4 @@
-Commit: f2d723ed2a32a5a394eac05f58bc5558e7cfe08f
+Commit: 187ee827bad0cb2ae0b1900284b1a20176706166
 
 # core 模块
 
@@ -12,6 +12,8 @@ Commit: f2d723ed2a32a5a394eac05f58bc5558e7cfe08f
 - `src/tool.rs` — Tool trait / ToolContext / ToolOutput
 - `src/net.rs`、`src/data_dir.rs` — HTTP 客户端与 per-workdir 数据目录
 - `src/fleet/protocol.rs` — Server/Node 协议（PROTOCOL_VERSION）
+- `src/brain/` — `schema_version: 2` 的 inputs/instances/outputs/routes、不可变计划版本、因果 visit/output 引用、局部路由回执与分别有依据的完成／验证判断。
 
 ## 接缝
 - Config 单一真源；`Arc<dyn Store>`、`Arc<dyn ChatStream>` 定义于相邻 crate。
+- Fleet 协议为 10；Brain 新运行显式携带 v2，旧协议节点不能接收。领域推进在 [brain](../brain/index.md)，存储与派发在 [worker](../worker/index.md)。

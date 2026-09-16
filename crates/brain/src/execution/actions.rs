@@ -113,10 +113,15 @@ pub fn prepare(run: &mut BrainRun, instance_id: &str, owner: &str, now: i64) -> 
         .iter()
         .map(|id| (id, &run.request.plan.as_ref().unwrap().plan.outputs[id]))
         .collect();
-    let prompt = format!("{}\n\nInputs (immutable JSON):\n{}\n\nNamed output descriptions: {}\nReturn one JSON object keyed by output ID. Each value: {{\"content\":actual content,\"completion\":{{\"passed\":true/false/null,\"evidence\":[\"reason\"]}},\"verification\":{{\"passed\":true/false/null,\"evidence\":[\"reason\"]}}}}. Assessments without evidence are unknown. Do not infer verification from process completion.", step.action.prompt, serde_json::to_string(&instance.inputs)?, serde_json::to_string(&outputs)?);
+    let source_outputs: std::collections::BTreeMap<_, _> = run.graph.visits[instance_id]
+        .inputs
+        .iter()
+        .map(|(input, id)| (input, &run.graph.outputs[id]))
+        .collect();
+    let prompt = format!("{}\n\nInputs (immutable JSON):\n{}\n\nSource output records and artifact references (immutable JSON):\n{}\n\nNamed output descriptions: {}\nReturn one JSON object keyed by output ID. Each value: {{\"content\":actual content,\"completion\":{{\"passed\":true/false/null,\"evidence\":[\"reason\"]}},\"verification\":{{\"passed\":true/false/null,\"evidence\":[\"reason\"]}}}}. Assessments without evidence are unknown. Do not infer verification from process completion.", step.action.prompt, serde_json::to_string(&instance.inputs)?, serde_json::to_string(&source_outputs)?, serde_json::to_string(&outputs)?);
     let mut action = step.action.clone();
     action.output_mode = OutputMode::Json;
-    let mut input = json!({"prompt":prompt,"parameters":instance.inputs,"_brain":{"schema_version":2,"capability_id":step.capability_id,"parent":link,"action":action,"output_schema":crate::graph::output_schema(),"outputs":outputs,"resources":step.resources}});
+    let mut input = json!({"prompt":prompt,"parameters":instance.inputs,"source_outputs":source_outputs,"_brain":{"schema_version":2,"capability_id":step.capability_id,"parent":link,"action":action,"output_schema":crate::graph::output_schema(),"outputs":outputs,"resources":step.resources}});
     if let Some(definition) = &step.action.definition {
         input[if step.action.kind == ExecutionKind::Todos {
             "spec"

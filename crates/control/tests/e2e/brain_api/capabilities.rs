@@ -246,7 +246,7 @@ async fn target_guard_rebind_and_unknown_id_is_null() {
     assert_eq!(status, 400, "{body}");
     assert_eq!(
         body["error"],
-        json!("capability target must name an agent, team or workflow")
+        json!("capability target must name an agent, team, workflow or operator")
     );
     let (status, body) = h
         .req(
@@ -279,6 +279,18 @@ async fn target_guard_rebind_and_unknown_id_is_null() {
     let (status, body) = h.req(Method::GET, &path, None).await;
     assert_eq!(status, 200, "{body}");
     assert_eq!(body["target"], json!({"kind": "team", "target": "crew"}));
+
+    let (status, body) = h
+        .req(
+            Method::PUT,
+            &path,
+            Some(json!({"kind": "operator", "target": "act"})),
+        )
+        .await;
+    assert_eq!(status, 200, "{body}");
+    let (status, body) = h.req(Method::GET, &path, None).await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["target"], json!({"kind": "operator", "target": "act"}));
 
     let (status, body) = h
         .req(Method::GET, "/api/brain/capabilities/cap-none/target", None)

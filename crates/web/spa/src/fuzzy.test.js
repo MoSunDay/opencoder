@@ -1,4 +1,4 @@
-// fuzzy.test.js — TUI parity contract for the subsequence scorer
+// fuzzy.test.js -- TUI parity contract for the subsequence scorer
 // (mirrors the fuzzy_score unit tests in crates/tui/src/menu.rs).
 import { describe, expect, it } from 'vitest';
 import { fuzzyScore } from './fuzzy.js';

@@ -11,17 +11,19 @@ async fn run_unscoped(worker: &Worker, command: ExecutionCommand) -> Result<RpcR
     match command.action.as_str() {
         "scheduling" => {
             if let Some(host) = &worker.inner.host_capacity {
+                // Same capability flag as the host side: no node-level workdir.
                 return Ok(RpcReply::ok(
-                    json!({"max_runs":host.store.capacity().await?.max_runs,"queue_order":"fifo"}),
+                    json!({"max_runs":host.store.capacity().await?.max_runs,"queue_order":"fifo","workdir":null,"workdir_supported":false}),
                 ));
             }
             Ok(RpcReply::ok(json!(worker.inner.scheduling.get())))
         }
         "configure_scheduling" => {
-            let settings: NodeScheduling = match serde_json::from_value(command.input) {
-                Ok(settings) => settings,
-                Err(error) => return Ok(RpcReply::error(400, error.to_string())),
-            };
+            let settings: NodeScheduling =
+                match serde_json::from_value::<NodeScheduling>(command.input) {
+                    Ok(settings) => settings.normalized(),
+                    Err(error) => return Ok(RpcReply::error(400, error.to_string())),
+                };
             if let Err(error) = settings.validate() {
                 return Ok(RpcReply::error(400, error));
             }
@@ -32,11 +34,21 @@ async fn run_unscoped(worker: &Worker, command: ExecutionCommand) -> Result<RpcR
                         "multi-runtime hosts require FIFO ordering",
                     ));
                 }
+                if settings.workdir.is_some() {
+                    return Ok(RpcReply::error(
+                        400,
+                        "multi-runtime hosts do not support a scheduling workdir",
+                    ));
+                }
                 host.store.configure_capacity(settings.max_runs).await?;
                 return Ok(RpcReply::ok(json!(settings)));
             }
             let _gate = worker.inner.admission.lock().await;
-            worker.inner.scheduling.save(settings)?;
+            if let Some(dir) = &settings.workdir {
+                std::fs::create_dir_all(dir)
+                    .map_err(|error| anyhow::anyhow!("scheduling workdir unavailable: {error}"))?;
+            }
+            worker.inner.scheduling.save(settings.clone())?;
             super::queue::dispatch_locked(worker).await?;
             opencoder_session::loop_registry::notify_change();
             Ok(RpcReply::ok(json!(settings)))

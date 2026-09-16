@@ -357,6 +357,21 @@ async fn wasm_step_output_is_mirrored_to_the_run_session() {
     .unwrap();
     assert_eq!(meta["outcome"], json!("done"));
     assert!(meta["session_id"].is_null());
+
+    // Single-writer guard: wasm output has exactly ONE writer — the node-store
+    // `step_output` mirror (`src/step_log.rs`). `step_log` (run-level Uplink
+    // report, mirrored back onto the run session) only carries an agent step's
+    // `text_delta`, so the two chains are mutually exclusive per step kind and
+    // neither the run-wide log nor a single-step record can show duplicate rows.
+    assert_eq!(
+        rows.iter()
+            .filter(|row| row.sse_kind.as_deref() == Some("step_log"))
+            .count(),
+        0,
+        "{rows:?}"
+    );
+    let c = shared.lock().unwrap();
+    assert_eq!(count_events(&c, "step_log", "build"), 0, "{rows:?}");
 }
 
 #[tokio::test]

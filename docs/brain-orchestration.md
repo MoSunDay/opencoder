@@ -1,93 +1,74 @@
-# 大脑调度契约与运行协议
+# 大脑固定图契约与运行协议
 
-## 最小固定计划
+大脑只使用 `input → 实例 → output → 路由 → 下一实例的 input`。手写与动态生成均采用 `schema_version: 2`、同一校验器和执行内核。动态生成一次产出完整计划；运行时固定版本，不新增实体或更改路线。
 
-`POST /api/brain/plan-defs` 保存版本。计划 ID 和版本构成固定引用，版本从 1 顺序递增，重复提交完全相同的版本幂等；同版本不同内容返回 409。
+## 四类概念
+
+- `inputs`：按名称索引的输入，包含 `description`、`schema`、`required`、`source: {kind: external|routed}`。实例通过 `inputs: [名称]` 引用。外部文档值是 `{name: "需求说明", markdown: "# 正文"}`。
+- `instances`：注册能力的一次引用，包含 `id`、`description`、`capability_id`、`action`、输入及输出名称、资源和 `max_visits`（默认 20，可设 1–100）。支持 Agent、DAG、Team、TODO、Operator。
+- `outputs`：按名称索引的一句话说明。每个输出只有一个实例拥有，实际内容可以是完整文档或结构化数据；结构化回执上限 256 KiB，较大内容通过产物引用提供。
+- `routes`：包含 `id`、`description`、连接的 `outputs`、候选 `targets` 和明确 `exits`。目标的 `bindings` 固定映射目标 input 名称到已连接 output 名称。多个实例的 output 接到同一路由即汇合；路由可选择多个候选实例并行执行，也可回到已有实例开始新轮次。
+
+完整可编辑示例：[修复与复测循环](../examples/brain/repair-loop.json)。`entry` 显式列出初次激活的实例。每个实例的输出由一个路由统一判断；不能用多个独立路由重复消费同一实例的完成回执。
+
+计划保存：`POST /api/brain/plan-defs`，请求为 `{id, version, plan, changelog, created_at, author, tags?, confidence?}`。同 ID/版本不可覆盖，相同内容重试幂等。发布时检查能力注册身份与描述，固定定义、执行配置和资源摘要。能力缺失或快照不符会明确报错。
+
+运行提交：
 
 ```json
 {
-  "id": "plan-review",
-  "version": 1,
-  "changelog": "并行收集两类证据后汇总",
-  "author": "user",
-  "created_at": 0,
-  "tags": ["review"],
-  "confidence": {"level": "unverified", "reason": "待验证", "evidence": []},
-  "plan": {
-    "schema_version": 1,
-    "title": "并行审查",
-    "objective": "生成有证据的审查报告",
-    "inputs": {},
-    "steps": [
-      {
-        "id": "requirements", "label": "需求审查", "purpose": "检查需求遗漏",
-        "action": {"kind": "agent", "target": "act", "prompt": "检查需求完整性，返回审查证据"},
-        "output": {"type": "string"}, "acceptance": "有明确结论和证据"
-      },
-      {
-        "id": "implementation", "label": "实现审查", "purpose": "检查实现边界",
-        "action": {"kind": "agent", "target": "act", "prompt": "检查实现与测试边界，返回审查证据"},
-        "output": {"type": "string"}, "acceptance": "有明确结论和证据"
-      },
-      {
-        "id": "report", "label": "汇总报告", "purpose": "形成交付物",
-        "action": {"kind": "agent", "target": "act", "prompt": "根据两份输入汇总问题、影响和验证证据"},
-        "inputs": {
-          "requirements": {"schema": {"type": "string"}, "binding": {"source": "output", "step": "requirements"}},
-          "implementation": {"schema": {"type": "string"}, "binding": {"source": "output", "step": "implementation"}}
-        },
-        "output": {"type": "string"}, "acceptance": "覆盖两份证据并给出交付结论"
-      }
-    ],
-    "deliverables": {
-      "report": {"description": "最终报告", "source": {"source": "output", "step": "report"}, "schema": {"type": "string"}}
-    }
+  "id": "brain-review-001",
+  "node_id": "node-example",
+  "mode": "fixed",
+  "objective": "完成修复并提供验证依据",
+  "plan": {"id": "repair-loop", "version": 1},
+  "inputs": {"document": {"name": "需求说明", "markdown": "# 问题\n修复失败的检查"}}
+}
+```
+
+动态模式设 `mode: dynamic`，省略 `plan`，可传 `references: [{id, version}]`。服务端取得注册目录后生成并发布同一格式的计划；不会创建临时能力或默认改派通用 Agent。
+
+## 输出和局部路由
+
+每种能力通过同一个接口提供具名输出：
+
+```json
+{
+  "verification": {
+    "content": "本轮测试通过；修复提交及测试报告见产物",
+    "completion": {"passed": true, "evidence": ["交付内容已生成"]},
+    "verification": {"passed": true, "evidence": ["本轮测试报告：全部通过"]},
+    "artifacts": []
   }
 }
 ```
 
-`POST /api/brain/runs`：
+完成与验证分别记录。`passed: null` 或缺失依据都为未知，进程结束不能推导为验证通过。Agent/Operator 读取最后回答，Team 读取 final_summary，DAG/TODO 通过固定输出投影适配原生产物；返回内容必须符合声明的具名输出接口。
+
+DAG/TODO 的原生结果按内部步骤名组织。实例的 `action.output_pointer` 固定指定提供统一输出的结果位置，例如 DAG 的 `/review` 或 TODO 的 `/t1`；该位置必须返回上述具名 JSON 对象。适配仅提取结果，不读取能力内部状态推断业务通过。
+
+路由模型只接收本次连接的 output 记录、路由语义、相邻候选实例的输入说明和声明的结束条件。完整计划、根目标、无关节点输出和能力内部状态不进入路由请求。路由回执：
 
 ```json
-{"id":"brain-review-001","node_id":"node-example","mode":"fixed","objective":"完成本次需求审查","plan":{"id":"plan-review","version":1},"inputs":{}}
+{"receipt":"route-...","reason":"本轮复测仍有两个问题，继续修复","selected":["fix"],"exit":null,"blocked":null}
 ```
 
-动态模式使用 `"mode":"dynamic"`，省略 `plan`，可传 `references:[{"id":"plan-review","version":1}]`。用户意图保留原始快照，相同 ID/意图重试不重复创建；更改意图应换 ID。
+`selected` 可选一个或多个相邻实例，或者 `exit` 指向声明的出口。越界选择、空选择、非法 JSON、缺失必要输出及未知交付结论均持久化阻塞原因，不重写计划或暗中降级。
 
-## 端口与动作
+## 汇合、循环与恢复
 
-| 字段 | 约定 |
-| --- | --- |
-| `inputs.<name>` | `description`、`schema`、`required`；缺失必填值产生持久用户请求 |
-| `steps[].inputs.<port>` | `schema`、`binding`、`required` |
-| `binding` | `source: literal/input/output/item`；对应 `value/name/step`，可选 JSON pointer `path` |
-| `output` 来源 | 隐含上游依赖，批量来源要求 `collect:true` |
-| `when` | `{value: binding, equals: JSON值}`，未命中记 skipped |
-| `foreach` | `{items: binding, key: JSON_pointer, allow_empty: true}`，字符串/整数项键不得重复 |
-| `resources` | `[{key: "repo:example:main", mode: "read"或"write"}]`，不同运行共享同一命名空间 |
-| `action` | `kind: agent/dag/todos/team`，`target`、`prompt`、定义快照、资源摘要、可选 `node_id` |
-| `output_mode` | `text` 或 `json`；`output_pointer` 对原生结果作字段投影 |
-| `max_attempts` | 默认 1，仅明确失败回执可重试；结果不确定时重发同一动作 ID |
-| `deliverables` | 绑定实际输出、schema、可选精确 `expected`；不是只看全部步骤“运行过” |
+- 汇合等待仍可能到达该路由的已激活分支；未选择的分支不参与等待。输入引用固定到实际执行轮次，禁止按实例名称读取“最近一次”输出。
+- 每次并行分流以路由回执建立因果作用域，汇合消费同一作用域的分支。并发进入同一子流程的两组输出分别汇合，通知乱序也不会串轮。
+- 回流创建新的 `~visit-NNNN` 执行轮次，旧输出、因果父节点、输入引用及路由判断全部保留。达到访问上限记为 blocked。
+- 路由上下文先持久化；判断、输入引用和 Prepared 执行回执在派发前提交。重复通知、乱序回执和恢复重放沿用原动作 ID。
+- 暂停阻止新派发；取消等待在途子执行明确结束。共享资源继续使用全局读写互斥与明确终态释放。
+- 根运行只有在命中声明出口、满足出口交付要求且全部激活分支收敛时 completed。出口可要求 `require_completed` 和 `require_verified`，必须有相应 output 依据。
+- `graph.outputs` 保存轮次与内容，`graph.visits` 保存输入引用和因果父节点，`graph.routes` 保存读集和选择理由，`graph.tokens` 表示当前分支。事件同步记录新增输出与路由回执。
 
-原生输出：Agent 最后助手答案，Team `final_summary`，TODO 各项已验收 candidate，DAG 各步骤 `output.json`/`output.txt`。每类都有 `brain-result/output.json` 产物与 SHA-256；DAG 还包含各步骤元数据和原生输出。通过现有 `/api/executions/:id/artifact` 分块下载。
+## 查询与迁移
 
-## 运行与恢复
+版本、快照、实例分页、动作、事件及控制入口保持 `/api/brain/plan-defs` 与 `/api/brain/runs`。CLI 使用 `brain plan-defs`、`brain runs`、`brain library`。工作台可编辑四类概念、具名文档、多输出、汇合和回流，并查看完成与验证依据。
 
-- Fleet 协议 9 增加 `brain` 根执行及 durable outbox 消息；控制面执行索引仍仅五字段。旧决策树 API 保留。
-- 根节点内部借用 TODO 工作流存储。状态、动作账本、来源游标、唤醒 revision 和因果事件在同一次提交中持久化。
-- 每次有合法唤醒，根节点执行一次短激活；生产环境必须使用 runc，挂载同目录 `opencoder-cli`，以独立 context 文件运行 `brain activate-local`。固定计划调度不调用模型；动态规划只请求一次完整计划。
-- Prepared 动作在派发前持久化。控制面按根串行处理派发/控制命令；受理未知时保留 ID。源节点在根提交成功前重放通知，提交后才确认 source 游标；分批轮转防止大量动作饿死后续通知。
-- 根应用依赖变化后，立即准备新就绪步骤，不等待同批无关步骤。激活以 activation/control_epoch 防过期，不以所有事件共同递增的 revision 丢弃合法结果。
-- 等待子执行、输入或资源时释放根节点运行槽。暂停阻止后续派发；取消进入 cancelling，等待所有在途执行有确定结束回执。
-- 同节点重启恢复既有状态和动作；runc bundle 放在节点所属目录，恢复时清理所属残留容器。没有跨节点所有权迁移或运行中计划替换。
-- 快照与事件水位在根锁内读取。实例页大小 100、历史事件页大小 100、版本页大小 20；V1 最多 200 个步骤模板、10,000 个展开实例、单次规划输出 1 MiB、结构化执行输出 256 KiB。
+历史 v1 计划、决策树、Playbook 和运行记录继续只读查询；旧写入和执行入口返回 migration required，包括旧 Project Brain/Playbook 路由和本地入口。既有数据不删除、不改写、不静默转换。显式重建为 v2 后通过统一运行入口执行。
 
-## 管理接口
-
-- `/api/brain/library` 与 `/:id/stable`：能力集合和成熟度；Web 工作台不展示成熟度/稳定标记，该接口仅供 API 与 CLI 使用。能力库页签对应 `/api/brain/capabilities`（含 `/search`）。
-- `/api/brain/plan-defs`、`/validate`、`/:id/versions`、`/:id/versions/:version`、`/:id/stable`、`/:id/diff?from=&to=`。
-- `/api/brain/runs/:id`、`/context`、`/actions`、`/instances?step=&offset=`、`/instances/:instance`、`/events-page?after=`、`/events`。
-- `POST /api/brain/runs/:id/inputs`：`{name,value}`；已提供输入不可换值。
-- `POST /api/brain/runs/:id/commands`：`{action:"pause"|"resume"|"cancel"}`。
-- CLI 对应 `opencoder-cli brain library`、`brain plan-defs ...`、`brain runs ...`；各命令 `--help` 查看 JSON 入参选项。
+Fleet 协议为 10；根运行请求带 `schema_version: 2`。旧节点不得受理新契约。发布工具在启动候选服务及切换前只读扫描旧运行；节点启动在恢复写入前再次检查。存在非终态旧运行时拒绝升级并列出执行 ID，须让所属旧运行正常收敛。协议不同的版本仍禁止滚动重叠，必须走既有维护迁移流程；本次变更不执行生产切换。

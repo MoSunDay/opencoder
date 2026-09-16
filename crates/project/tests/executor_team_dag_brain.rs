@@ -14,8 +14,8 @@ use std::{
 use opencoder_llm::{ChatStream, LlmEvent, MockChatClient};
 use opencoder_project::ProjectService;
 use opencoder_store::{
-    DagDefRecord, LibsqlStore, ProjectExecutorKind, ProjectStore, ProjectTodoRecord,
-    ProjectTodoRunStatus, ProjectTodoStatus, Store,
+    LibsqlStore, ProjectExecutorKind, ProjectStore, ProjectTodoRecord, ProjectTodoRunStatus,
+    ProjectTodoStatus, Store,
 };
 use serde_json::json;
 
@@ -42,6 +42,21 @@ async fn harness_on(
 ) -> Harness {
     let client: Arc<dyn ChatStream> = mock.clone();
     let dir = tempfile::tempdir().unwrap();
+    // Keep team data in this fixture as well: with no explicit team_root the
+    // team executor falls back to `<global data root>/<workdir-hash>/team`,
+    // which outlives the tempdir and litters the developer's global data
+    // directory with per-test `project-t-team` leftovers. A project-level
+    // `opencoder.json` (`Config::load` reads it from the workdir and merges
+    // per key) pins `team_root` inside the fixture, so team data is removed
+    // together with the tempdir just like the archived runs below.
+    std::fs::write(
+        dir.path().join("opencoder.json"),
+        serde_json::to_vec(&json!({
+            "team_root": dir.path().join("team").display().to_string(),
+        }))
+        .unwrap(),
+    )
+    .unwrap();
     let service = ProjectService::new();
     service
         .init(
@@ -239,7 +254,7 @@ async fn team_executor_runs_inline_spec_to_completion() {
     // output_ref 是 topic id（ULID），话题目录物化在 team_root 下。
     let topic_id = run.output_ref.clone().expect("team run output_ref");
     ulid::Ulid::from_string(&topic_id).expect("topic id is a ULID");
-    let team_root = opencoder_core::data_dir_for(&h.dir).join("team");
+    let team_root = h.dir.join("team");
     let topic_dir = team_root.join("project-t-team").join(&topic_id);
     assert!(topic_dir.is_dir(), "{topic_dir:?}");
     assert_eq!(
@@ -252,177 +267,28 @@ async fn team_executor_runs_inline_spec_to_completion() {
 }
 
 #[tokio::test]
-async fn brain_pinned_capability_routes_to_registered_dag() {
-    let store = Arc::new(LibsqlStore::open_memory().await.unwrap());
-    let mock = Arc::new(MockChatClient::new().push_script(done("done")));
-    let rt = opencoder_brain::Runtime::new(
-        store.clone(),
-        mock.clone() as Arc<dyn ChatStream>,
-        "mock-embed-v1",
-    );
-    // 能力入库（哈希嵌入，无需 LLM 脚本）。
-    let capability_id = rt
-        .upsert_capability(
-            &opencoder_brain::CapabilityInput {
-                capability_type: "tool-usage".into(),
-                summary: "整理项目目录结构".into(),
-                input_desc: "混乱的模块布局".into(),
-                output_desc: "清晰的分模块结构".into(),
-                eng_inputs: vec!["整理项目目录".into()],
-            },
-            1000,
-        )
-        .await
-        .unwrap()
-        .capability
-        .id;
-    let h = harness_on(store, mock, Some(rt)).await;
-
-    // 已登记 dag 定义 + 路由表：能力 → dag(ref=定义 id)。
-    let def_id = "dag-def-brain".to_string();
-    h.store
-        .upsert_dag_def(&DagDefRecord {
-            id: def_id.clone(),
-            name: "项目DAG".into(),
-            spec_json: one_step_dag_spec(),
-            created_at: 1000,
-            updated_at: 1000,
-        })
-        .await
-        .unwrap();
-    let routes = json!({"routes": [{"capability": capability_id, "kind": "dag", "ref": def_id}]});
-    let todo_id = "t-brain".to_string();
-    seed_todo(
-        &h.projects,
-        &todo_id,
-        ProjectExecutorKind::Brain,
-        Some(capability_id.clone()),
-        Some(routes.to_string()),
-    )
-    .await;
-
-    let run_id = h.service.start_execute(&todo_id).await.unwrap();
-    let run = wait_run_done(&h.projects, &run_id).await;
-
-    assert_eq!(run.status, ProjectTodoRunStatus::Done);
-    // run 行按「解析后的执行器」留痕：Dag + 能力钉住，无计划。
-    assert_eq!(run.executor_kind, ProjectExecutorKind::Dag);
-    assert_eq!(run.capability_id.as_deref(), Some(capability_id.as_str()));
-    assert_eq!(run.plan_id, None);
-    assert!(run.output_ref.is_some(), "dag artifacts ref");
-    let todo = h.projects.get_todo(&todo_id).await.unwrap().unwrap();
-    assert_eq!(todo.status, ProjectTodoStatus::Done);
-}
-
-#[tokio::test]
-async fn brain_without_runtime_is_rejected_before_claim() {
+async fn legacy_brain_todos_reject_before_claim_even_with_a_pinned_target_or_override() {
     let h = harness_with(vec![], None).await;
-    let todo_id = "t-brain-node".to_string();
-    seed_todo(
-        &h.projects,
-        &todo_id,
-        ProjectExecutorKind::Brain,
-        None,
-        None,
-    )
-    .await;
-
-    let err = h.service.start_execute(&todo_id).await.unwrap_err();
-    let msg = format!("{err:#}");
-    assert!(msg.contains("brain runtime"), "error: {msg}");
-    // claim 之前失败：无 run 行、todo 原样。
-    assert!(h
-        .projects
-        .list_todo_runs(&todo_id)
-        .await
-        .unwrap()
-        .is_empty());
-    let todo = h.projects.get_todo(&todo_id).await.unwrap().unwrap();
-    assert_eq!(todo.status, ProjectTodoStatus::Planned);
-    assert!(h
-        .projects
-        .list_running_todo_runs()
-        .await
-        .unwrap()
-        .is_empty());
-}
-
-/// D1：节点无 brain 运行时时，控制面 override（brain 预解析结果）随
-/// `start_execute_with` 交接进驱动——重解析直接采纳 override 分支，
-/// 未钉住的 brain todo 也能在节点上跑完，run 行留痕齐全，agent 标签
-/// 是 override 的代理名（D3②）。
-#[tokio::test]
-async fn brain_override_drives_on_node_without_runtime() {
-    let h = harness_with(vec![done("全部完成")], None).await;
-    let todo_id = "t-brain-ov".to_string();
-    seed_todo(
-        &h.projects,
-        &todo_id,
-        ProjectExecutorKind::Brain,
-        None,
-        None,
-    )
-    .await;
-    let ov: opencoder_project::service::ExecutorOverride = serde_json::from_value(json!({
-        "kind": "agent",
-        "ref": "act",
-        "capability_id": "cap-9",
-        "plan_id": "plan-9"
-    }))
-    .unwrap();
-
-    let run_id = h
-        .service
-        .start_execute_with(&todo_id, Some(ov))
-        .await
-        .unwrap();
-    let run = wait_run_done(&h.projects, &run_id).await;
-
-    assert_eq!(run.status, ProjectTodoRunStatus::Done);
-    assert_eq!(run.executor_kind, ProjectExecutorKind::Agent);
-    assert_eq!(run.capability_id.as_deref(), Some("cap-9"));
-    assert_eq!(run.plan_id.as_deref(), Some("plan-9"));
-    assert_eq!(run.agent, "act", "D3②：标签是解析出的代理名");
-    assert!(run.session_id.is_some(), "agent 执行有会话");
-    let todo = h.projects.get_todo(&todo_id).await.unwrap().unwrap();
-    assert_eq!(todo.status, ProjectTodoStatus::Done);
-}
-
-/// override 不能把 brain 预解析成 brain（禁止嵌套）：claim 之前拒绝，
-/// 无 run 行、todo 保持 Planned。
-#[tokio::test]
-async fn brain_override_of_kind_brain_is_rejected_before_claim() {
-    let h = harness_with(vec![], None).await;
-    let todo_id = "t-brain-ov-bad".to_string();
-    seed_todo(
-        &h.projects,
-        &todo_id,
-        ProjectExecutorKind::Brain,
-        None,
-        None,
-    )
-    .await;
-    let ov: opencoder_project::service::ExecutorOverride =
-        serde_json::from_value(json!({"kind": "brain"})).unwrap();
-
-    let err = h
-        .service
-        .start_execute_with(&todo_id, Some(ov))
-        .await
-        .unwrap_err();
-    let msg = format!("{err:#}");
-    assert!(
-        msg.contains("cannot pre-resolve the brain executor"),
-        "error: {msg}"
-    );
-    assert!(h
-        .projects
-        .list_todo_runs(&todo_id)
-        .await
-        .unwrap()
-        .is_empty());
-    let todo = h.projects.get_todo(&todo_id).await.unwrap().unwrap();
-    assert_eq!(todo.status, ProjectTodoStatus::Planned);
+    for (id, reference) in [
+        ("legacy-empty", None),
+        ("legacy-pinned", Some("cap".into())),
+    ] {
+        seed_todo(&h.projects, id, ProjectExecutorKind::Brain, reference, None).await;
+        assert!(h
+            .service
+            .start_execute(id)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("migration required"));
+        let ov = serde_json::from_value(json!({"kind":"agent","ref":"act"})).unwrap();
+        assert!(h.service.start_execute_with(id, Some(ov)).await.is_err());
+        assert!(h.projects.list_todo_runs(id).await.unwrap().is_empty());
+        assert_eq!(
+            h.projects.get_todo(id).await.unwrap().unwrap().status,
+            ProjectTodoStatus::Planned
+        );
+    }
 }
 
 /// D3①：dag 解析在宿主 session 创建之前失败（引用了不存在的 dag 定义）

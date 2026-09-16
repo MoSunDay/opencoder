@@ -53,7 +53,11 @@ Node 在返回接受前同步持久化任务、资源和 Harness 配置快照。
 
 ## NFS 资源共享
 
-Web「Agent 配置」顶部包含 Agent 列表、Agent Harness、Harness 管理、NFS 配置。主列表展示每个 Agent 的资源引用、当前版本、目录和内容；Codex 的二进制、模型、推理、权限参数和 env 在 Harness 管理中统一保存，正在运行、排队及续聊的会话保持已接受的参数。共享内容限于 agent 定义及 prompts/skills/tools/memory，不共享 runtime DB、对话、项目运行记录或 DAG 产物。
+Web「Agent 配置」按 Agent 名称打开配置抽屉，直接查看和编辑 Prompt（Soul、How、Output）、Skills 目录及附件、Tools 文件和 `memory.md`。新建只填写名称与执行方式，资源首次保存自动创建并绑定；Prompt 至少一部分非空。历史版本位于各页签的「历史版本」，恢复会生成新版本。文本支持编辑和预览，二进制支持下载与上传替换，工具保留执行权限；切换页签保留草稿，关闭或刷新未保存内容会提示。读取错误禁止覆盖保存，保存失败保留输入。内置 Agent 显示实际 Prompt、工具限制及已有 Agent 级资源，资源只读，缺少的类别标注未配置。
+
+旧资源默认共享。按 Agent 保存或恢复时，首次编辑会复制完整资源内容和版本历史到带 `owner_agent` 的独立资源，然后原子切换当前 Agent 的引用；后续保存递增版本，不改变其他 Agent。写入和引用变更使用同一资源根文件锁；资源基线不匹配返回 409。完整目录落盘后才发布，未编辑文件保持字节与权限，越界路径和符号链接被拒绝。`tools_scope=all` 保留共享工具，当前 Agent 的工具优先，排除其他 Agent 的专属工具。
+
+Codex 的二进制、模型、推理、权限参数和 env 在 Harness 管理中统一保存，正在运行、排队及续聊的会话保持已接受的参数。共享内容限于 agent 定义及 prompts/skills/tools/memory，不共享 runtime DB、对话、项目运行记录或 DAG 产物。
 
 使用页面提供的挂载命令，并保留 `ro`：
 
@@ -96,10 +100,14 @@ mount -t nfs -o ro,vers=3,tcp,port=2050,mountport=2050,nolock,soft,retrans=1,tim
 | 控制、事件与大字段 | `POST /api/executions/:id/commands`、`GET /api/executions/:id/events`、`GET /api/executions/:id/messages`、`GET /api/executions/:id/detail-field` |
 | drain 与就绪 | `GET /api/ready`、`GET/POST/DELETE /api/admin/drain` |
 | 节点并发与排队配置 | `PUT /api/nodes/:id/scheduling`，请求 `{ "max_runs": 4, "queue_order": "fifo" }` |
+| Agent 资源读取 / 保存 | `GET/PUT /api/agents/:name/resources/:cat`（`cat=prompts/skills/tools/memory`） |
+| Agent 资源恢复 | `POST /api/agents/:name/resources/:cat/restore` |
 | Harness 配置 | `GET /api/harnesses`、`PUT /api/harnesses/codex` |
 | 显式节点维护 | `POST /api/nodes/:id/maintenance` |
 | 团队定义 | `GET/POST /api/teams` |
 | 能力绑定、直接调度 | `PUT /api/brain/capabilities/:id/target`、`POST /api/brain/dispatch` |
+
+资源读取返回 `baseline: {resource, version, revision}`、`versions`、递归 `files: [{path, content_b64, mode}]` 和 `read_only`。保存提交读取时的 `baseline`、新增或修改的 `files` 和删除路径 `removed`；未提交文件保留。恢复提交 `baseline` 与历史 `version`，响应与读取相同。文件模式仅接受 `0o000–0o777`，合并后的资源上限为 1.5 MiB / 4096 文件。旧共享资源池 API 保留；PUT 以 URL 名称为准，可省略 body 名称，名称不匹配报错，专属资源必须经所属 Agent 接口修改。
 
 创建示例：
 

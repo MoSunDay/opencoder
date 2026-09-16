@@ -346,6 +346,7 @@ fn double_esc_while_running_cancels() {
         &mut queue_scroll,
         &mut file_menu,
         workdir,
+        &mut None,
     );
     assert!(
         matches!(first, KeyAction::None),
@@ -376,6 +377,7 @@ fn double_esc_while_running_cancels() {
         &mut queue_scroll,
         &mut file_menu,
         workdir,
+        &mut None,
     );
     assert!(
         matches!(second, KeyAction::Cancel),

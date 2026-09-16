@@ -3,19 +3,15 @@
 //! The agents root holds four shared, independently versioned resource
 //! pools — `prompts/<name>/v{n}/{soul,how,output}.md`,
 //! `skills/<name>/v{n}/<skill>/SKILL.md`, `tools/<name>/v{n}/…`,
-//! `memory/<name>/v{n}/memory.md` (see [`super::resource`]) — plus one
+//! `memory/<name>/v{n}/` (directory-shaped: any safe file tree, the
+//! reader aggregates every `*.md`; see [`super::resource`]) — plus one
 //! thin reference card per agent: `<agent>/meta.json` naming pool
 //! resources by *name* ([`AgentRefs`]). An agent directory holds ONLY its
 //! `meta.json`; two agents referencing the same prompt share it, and
-//! bumping the pool's `current` version updates both. The active agent is
-//! named by the single-line marker `agents/active` — same contract as the
-//! envs marker ([`crate::config::envs`]), including atomic writes and a
-//! preflight-checked variant that rolls the marker back on failure. Read
-//! paths degrade silently (stale marker, blank name, corrupt `meta.json`
-//! → `None` / empty lists). The agents root is resolved per call, never
-//! created.
+//! bumping the pool's `current` version updates both. Read paths degrade
+//! silently (blank name, corrupt `meta.json` → `None` / empty lists). The
+//! agents root is resolved per call, never created.
 
-use std::io;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
@@ -26,13 +22,10 @@ use crate::config::env::global_opencoder_home;
 // The shared-pool read path lives in `resource.rs`; re-exported here so
 // `agent::meta::*` remains the single import surface for the agents root.
 pub use super::resource::{
-    active_skill_roots, active_tools_dirs, agent_skill_roots, agent_tools_dirs, all_tools_dirs,
-    category_dir, list_resources, read_resource_meta, resource_current_version_dir,
-    resource_version_dir, validate_resource_name, ResourceMeta, AGENT_CATEGORIES,
+    agent_skill_roots, agent_tools_dirs, all_tools_dirs, category_dir, list_resources,
+    read_resource_meta, resource_current_version_dir, resource_version_dir,
+    validate_resource_name, ResourceMeta, AGENT_CATEGORIES,
 };
-
-/// Marker file under the agents root: one line, the active agent's name.
-const ACTIVE_MARKER: &str = "active";
 
 /// Agent/resource name length cap (keeps paths and TUI rows sane).
 pub(crate) const MAX_NAME_LEN: usize = 48;
@@ -147,7 +140,7 @@ pub fn agents_dir() -> Option<PathBuf> {
 }
 
 /// `agents/<name>/` for a validated name (validation first: no traversal
-/// paths, and the marker/pool names are reserved for non-agent dirs).
+/// paths, and the shared pool names are reserved for non-agent dirs).
 pub fn agent_dir(name: &str) -> Option<PathBuf> {
     validate_agent_name(name).ok()?;
     agents_dir().map(|root| root.join(name))
@@ -155,15 +148,11 @@ pub fn agent_dir(name: &str) -> Option<PathBuf> {
 
 /// Name contract: non-empty,
 /// ≤48 chars, not `.`/`..`, charset `[A-Za-z0-9._-]`, and none of the
-/// reserved non-agent names — the `active` marker plus the four shared
-/// pool dirs (`prompts`/`skills`/`tools`/`memory`) — so an agent
-/// directory can never collide with them.
+/// reserved shared pool dirs (`prompts`/`skills`/`tools`/`memory`) — so
+/// an agent directory can never collide with them.
 pub fn validate_agent_name(name: &str) -> Result<(), String> {
     if name.is_empty() {
         return Err("名称不能为空".to_string());
-    }
-    if name == ACTIVE_MARKER {
-        return Err("名称 active 与激活标记保留名冲突，请换一个名称".to_string());
     }
     if AGENT_CATEGORIES.contains(&name) {
         return Err(format!("名称 {name} 与共享资源池保留名冲突，请换一个名称"));
@@ -183,126 +172,6 @@ pub fn validate_agent_name(name: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// The active agent name, or `None` when no marker exists, the marker is
-/// blank/invalid, or the agent directory is gone (stale marker deactivates
-/// silently).
-pub fn active_agent() -> Option<String> {
-    let raw = std::fs::read_to_string(agents_dir()?.join(ACTIVE_MARKER)).ok()?;
-    let name = raw.trim().to_string();
-    if name.is_empty() || validate_agent_name(&name).is_err() {
-        return None;
-    }
-    match agent_dir(&name) {
-        Some(dir) if dir.is_dir() || super::builtin_agents().iter().any(|a| a.name == name) => {
-            Some(name)
-        }
-        _ => None,
-    }
-}
-
-/// Set (`Some`) or clear (`None`) the active-agent marker. Setting requires
-/// the agent directory to exist. The marker is written atomically (temp
-/// file + fsync + rename + dir fsync, owner-only 0o600 on unix) so an
-/// interrupted writer can never leave a torn marker.
-pub fn set_active_agent(name: Option<&str>) -> io::Result<()> {
-    let root = agents_dir()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "cannot resolve ~/.opencoder"))?;
-    match name {
-        Some(n) => {
-            validate_agent_name(n).map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
-            match agent_dir(n) {
-                Some(dir)
-                    if dir.is_dir() || super::builtin_agents().iter().any(|a| a.name == n) => {}
-                _ => {
-                    return Err(io::Error::new(
-                        io::ErrorKind::InvalidInput,
-                        format!("unknown agent: {n}"),
-                    ))
-                }
-            }
-            std::fs::create_dir_all(&root)?;
-            write_marker_atomic(&root, &format!("{n}\n"))
-        }
-        None => match std::fs::remove_file(root.join(ACTIVE_MARKER)) {
-            Ok(()) => Ok(()),
-            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
-            Err(e) => Err(e),
-        },
-    }
-}
-
-/// Atomically replace the marker (unique temp sibling + rename; best-effort
-/// directory fsync makes the rename durable; owner-only 0o600 on unix).
-fn write_marker_atomic(root: &std::path::Path, body: &str) -> io::Result<()> {
-    let marker = root.join(ACTIVE_MARKER);
-    let unique = format!(
-        "{ACTIVE_MARKER}.tmp-{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.subsec_nanos())
-            .unwrap_or(0)
-    );
-    let temp = root.join(unique);
-    let write = || -> io::Result<()> {
-        #[cfg(unix)]
-        let mut file = {
-            use std::os::unix::fs::OpenOptionsExt;
-            std::fs::OpenOptions::new()
-                .write(true)
-                .create(true)
-                .truncate(true)
-                .mode(0o600)
-                .open(&temp)?
-        };
-        #[cfg(not(unix))]
-        let mut file = std::fs::File::create(&temp)?;
-        io::Write::write_all(&mut file, body.as_bytes())?;
-        file.sync_all()?;
-        drop(file);
-        std::fs::rename(&temp, &marker)?;
-        #[cfg(unix)]
-        if let Ok(dir) = std::fs::File::open(root) {
-            let _ = dir.sync_all();
-        }
-        Ok(())
-    };
-    match write() {
-        Ok(()) => Ok(()),
-        Err(e) => {
-            // Never leave the temp sibling behind on failure.
-            let _ = std::fs::remove_file(&temp);
-            Err(e)
-        }
-    }
-}
-
-/// Set the active agent with a preflight check. After writing the marker
-/// to `Some(name)`, run `agents_root_check` (a dry-run meta parse +
-/// compose, supplied by the caller); on failure restore the previous marker
-/// and surface `InvalidData`. Deactivation (`None`) passes through
-/// unchanged.
-pub fn set_active_agent_checked(
-    name: Option<&str>,
-    agents_root_check: impl FnOnce() -> Result<(), String>,
-) -> io::Result<()> {
-    let previous = active_agent();
-    set_active_agent(name)?;
-    let Some(n) = name else {
-        return Ok(());
-    };
-    if let Err(e) = agents_root_check() {
-        // Roll back to the pre-activation marker state (ignore secondary
-        // errors — the check error is the one that matters).
-        let _ = set_active_agent(previous.as_deref());
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!("agent `{n}` fails the activation check: {e}"),
-        ));
-    }
-    Ok(())
-}
-
 /// Read and parse `<name>/meta.json`. Any failure (invalid name, missing,
 /// unreadable, unparseable) degrades to `None` — the envs philosophy: a
 /// broken file must never break resolution.
@@ -312,10 +181,25 @@ pub fn read_agent_meta(name: &str) -> Option<AgentMeta> {
     serde_json::from_str(&raw).ok()
 }
 
+/// The agent's one-line identity: the first non-empty line of the card's
+/// current `prompts/<ref>` pool version `soul.md`. Shared by the web
+/// reference-card listing (`GET /api/agents`) and the TUI `/agent` picker;
+/// `resolve_file_agent` derives the same description through it so the
+/// surfaces cannot drift. `None` = no description (invalid name, missing
+/// card, unresolvable prompt reference, or missing/blank `soul.md`) —
+/// callers fall back to their own generic label.
+pub fn agent_description(name: &str) -> Option<String> {
+    let card = read_agent_meta(name)?;
+    let prompt_ref = card.current.prompt?;
+    let dir = resource_current_version_dir("prompts", &prompt_ref)?;
+    let soul = std::fs::read_to_string(dir.join("soul.md")).ok()?;
+    soul.lines().map(str::trim).find(|l| !l.is_empty()).map(str::to_string)
+}
+
 /// List agent names (directories under the agents root), sorted. The
-/// reserved non-agent names are skipped: the marker (`active`) and the
-/// four shared pool dirs (`prompts`/`skills`/`tools`/`memory`) can never
-/// be legal agents, so leftovers must not surface in listings.
+/// reserved shared pool dirs (`prompts`/`skills`/`tools`/`memory`) are
+/// never legal agents; `active` is likewise skipped — 兼容旧安装残留的
+/// 激活 marker 文件（全局激活已移除，磁盘残留不能被列为 agent 卡）.
 pub fn list_agents() -> Vec<String> {
     let Some(root) = agents_dir() else {
         return Vec::new();
@@ -326,7 +210,7 @@ pub fn list_agents() -> Vec<String> {
         .filter_map(|e| e.ok())
         .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
         .filter_map(|e| e.file_name().into_string().ok())
-        .filter(|name| name != ACTIVE_MARKER && !AGENT_CATEGORIES.contains(&name.as_str()))
+        .filter(|name| name != "active" && !AGENT_CATEGORIES.contains(&name.as_str()))
         .collect();
     names.sort();
     names

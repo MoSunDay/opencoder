@@ -65,7 +65,7 @@ pub async fn save(
         seq: None,
         workflow_id: run.id.clone(),
         kind: kind.into(),
-        payload: json!({"revision":run.revision,"activation":run.activation,"phase":run.phase,"detail":payload}),
+        payload: json!({"revision":run.revision,"activation":run.activation,"phase":run.phase,"detail":payload,"outputs":run.graph.outputs.values().filter(|o|previous.as_ref().is_none_or(|p|p.state_json["graph"]["outputs"].get(&o.id).is_none())).collect::<Vec<_>>(),"routes":run.graph.routes.values().filter(|r|previous.as_ref().is_none_or(|p|p.state_json["graph"]["routes"].get(&r.context.receipt)!=Some(&json!(r)))).collect::<Vec<_>>()}),
         ts: now(),
     };
     let seq = if previous.is_some() {

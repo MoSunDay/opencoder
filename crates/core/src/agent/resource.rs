@@ -1,11 +1,11 @@
-//! Shared resource pools under the agents root.
+//! Shared and agent-owned resource pools under the agents root.
 //!
 //! Prompt packs, skill-sets, tool-sets and memory banks are shared,
 //! independently versioned pools (`prompts/<name>/v{n}/…`,
 //! `skills/<name>/v{n}/…`, `tools/<name>/v{n}/…`, `memory/<name>/v{n}/…`);
 //! agents reference them by *name* from their reference card
 //! ([`super::meta::AgentRefs`]). Two agents referencing the same prompt
-//! share one copy — bumping the pool's `current` version updates both.
+//! share one copy until an agent-identity edit forks an owned resource.
 //! Every read degrades silently (`None` / empty vec): a broken pool must
 //! never break agent resolution. The agents root is resolved per call,
 //! never created.
@@ -14,7 +14,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use super::meta::{active_agent, agents_dir, read_agent_meta, MAX_NAME_LEN};
+use super::meta::{agents_dir, read_agent_meta, MAX_NAME_LEN};
 
 /// Category tokens (used everywhere: pool dirs, helpers, REST later).
 pub const AGENT_CATEGORIES: [&str; 4] = ["prompts", "skills", "tools", "memory"];
@@ -25,6 +25,9 @@ pub const AGENT_CATEGORIES: [&str; 4] = ["prompts", "skills", "tools", "memory"]
 /// older readers.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ResourceMeta {
+    /// Absent for legacy shared resources; owned resources are private to this agent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner_agent: Option<String>,
     #[serde(default)]
     pub name: String,
     #[serde(default)]
@@ -124,15 +127,24 @@ pub fn list_resources(cat: &str) -> Vec<String> {
 
 /// One agent's `current.<cat>` reference → the pool's current version dir
 /// (0–1 entries; a missing/stale/empty ref yields `None`).
-fn agent_ref_current_dir(reference: Option<String>, cat: &str) -> Option<PathBuf> {
-    resource_current_version_dir(cat, &reference?)
+fn agent_ref_current_dir(reference: Option<String>, cat: &str, agent: &str) -> Option<PathBuf> {
+    let reference = reference?;
+    let meta = read_resource_meta(cat, &reference)?;
+    if meta
+        .owner_agent
+        .as_deref()
+        .is_some_and(|owner| owner != agent)
+    {
+        return None;
+    }
+    resource_current_version_dir(cat, &reference)
 }
 
 /// Skill roots for one agent: `current.skills` ref → shared skills pool
 /// current version dir (0–1 entries; silent empty).
 pub fn agent_skill_roots(agent_name: &str) -> Vec<PathBuf> {
     let reference = read_agent_meta(agent_name).and_then(|m| m.current.skills);
-    agent_ref_current_dir(reference, "skills")
+    agent_ref_current_dir(reference, "skills", agent_name)
         .into_iter()
         .collect()
 }
@@ -141,30 +153,19 @@ pub fn agent_skill_roots(agent_name: &str) -> Vec<PathBuf> {
 /// current version dir (0–1 entries; silent empty).
 pub fn agent_tools_dirs(agent_name: &str) -> Vec<PathBuf> {
     let reference = read_agent_meta(agent_name).and_then(|m| m.current.tools);
-    agent_ref_current_dir(reference, "tools")
+    agent_ref_current_dir(reference, "tools", agent_name)
         .into_iter()
         .collect()
 }
 
-/// Skill roots of the active agent (empty when there is none).
-pub fn active_skill_roots() -> Vec<PathBuf> {
-    active_agent()
-        .map(|name| agent_skill_roots(&name))
-        .unwrap_or_default()
-}
-
-/// Tool dirs of the active agent (empty when there is none).
-pub fn active_tools_dirs() -> Vec<PathBuf> {
-    active_agent()
-        .map(|name| agent_tools_dirs(&name))
-        .unwrap_or_default()
-}
-
-/// Current version dirs of EVERY tools resource, sorted — the union
-/// surface for `ToolsScope::All`.
+/// Current version dirs of shared tools resources, sorted. Owned pools are
+/// included only for their agent by `tools_paths`.
 pub fn all_tools_dirs() -> Vec<PathBuf> {
     list_resources("tools")
         .iter()
+        .filter(|name| {
+            read_resource_meta("tools", name).is_some_and(|meta| meta.owner_agent.is_none())
+        })
         .filter_map(|name| resource_current_version_dir("tools", name))
         .collect()
 }
@@ -172,15 +173,25 @@ pub fn all_tools_dirs() -> Vec<PathBuf> {
 /// Resolve the tool directories a session should expose (the read path
 /// behind `agent.tools_scope`):
 ///
-/// - `All` → current version dirs of **every** tools resource (union surface);
+/// - `All` → the named agent's tools first (when given), then all shared
+///   tools (deduplicated);
 /// - `Active` + explicit agent name → that agent's `current.tools` ref;
-/// - `Active` + `None` → the active agent's (empty when no marker).
+/// - `Active` + `None` → the shared pool set only (same as `All` without
+///   an agent).
 pub fn tools_paths(scope: crate::config::ToolsScope, agent: Option<&str>) -> Vec<PathBuf> {
     match scope {
-        crate::config::ToolsScope::All => all_tools_dirs(),
+        crate::config::ToolsScope::All => {
+            let mut dirs = agent.map(agent_tools_dirs).unwrap_or_default();
+            for dir in all_tools_dirs() {
+                if !dirs.contains(&dir) {
+                    dirs.push(dir);
+                }
+            }
+            dirs
+        }
         crate::config::ToolsScope::Active => match agent {
             Some(name) => agent_tools_dirs(name),
-            None => active_tools_dirs(),
+            None => all_tools_dirs(),
         },
     }
 }
@@ -189,7 +200,7 @@ pub fn tools_paths(scope: crate::config::ToolsScope, agent: Option<&str>) -> Vec
 mod tests {
     use super::*;
     use crate::agent::meta::tests::OVERRIDE_LOCK;
-    use crate::agent::meta::{set_active_agent, set_agents_dir_override, AgentMeta, AgentRefs};
+    use crate::agent::meta::{set_agents_dir_override, AgentMeta, AgentRefs};
     use crate::config::ToolsScope;
 
     /// Point the agents root at a fresh tempdir under the shared override
@@ -242,11 +253,11 @@ mod tests {
         .unwrap();
     }
 
-    /// Three scopes + no-ref emptiness + `current` bump all in one
-    /// fixture: `All` unions every pool's current dir, `Active` follows
-    /// the named/active agent's `current.tools` ref, and a bumped
-    /// `current` moves the resolved dir (the read side never consults
-    /// history).
+    /// Scope coverage + no-ref emptiness + `current` bump in one fixture:
+    /// `All` unions every shared pool's current dir, `Active` follows the
+    /// named agent's `current.tools` ref, `Active` + `None` degenerates to
+    /// the shared pool set, and a bumped `current` moves the resolved dir
+    /// (the read side never consults history).
     #[test]
     fn tools_paths_covers_all_three_scopes() {
         let (tmp, _g) = scoped();
@@ -255,16 +266,21 @@ mod tests {
         make_tools(root, "b", 1);
         make_agent(root, "worker", Some("b"));
         make_agent(root, "bare", None);
-        set_active_agent(Some("worker")).unwrap();
 
-        // All → union of every tools resource's current version dir.
+        // All → union of every shared tools resource's current version dir.
         let all = tools_paths(ToolsScope::All, None);
         assert_eq!(all.len(), 2);
-        // Active + explicit name → that agent's tools ref.
+        // All + explicit agent → that agent's tools ref first, then shared
+        // (deduplicated: `b` is already the agent's ref).
+        assert_eq!(
+            tools_paths(ToolsScope::All, Some("worker")),
+            vec![root.join("tools/b/v1"), root.join("tools/a/v1")]
+        );
+        // Active + explicit name → that agent's tools ref only.
         let named = tools_paths(ToolsScope::Active, Some("worker"));
         assert_eq!(named, vec![root.join("tools/b/v1")]);
-        // Active + None → the active agent's tools ref.
-        assert_eq!(tools_paths(ToolsScope::Active, None), named);
+        // Active + None → shared pool set only (same as `All` bare).
+        assert_eq!(tools_paths(ToolsScope::Active, None), all);
         // An agent with no tools ref resolves to the empty surface.
         assert!(tools_paths(ToolsScope::Active, Some("bare")).is_empty());
 

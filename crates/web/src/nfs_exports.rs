@@ -3,9 +3,10 @@
 //! `&'static str` key mapping to at most one live
 //! [`NfsServerHandle`]; today the keys are [`AGENTS_EXPORT`] (the
 //! agents root, `/api/agents/nfs`) and [`DAG_WASM_EXPORT`] (the DAG
-//! wasm pool, `/api/dag/wasm/nfs`). Keeping the map process-global (the
-//! same "static + tokio Mutex" pattern as `ACTIVATE_GATE`) leaves
-//! `AppState` untouched: every construction site stays valid.
+//! wasm pool, `/api/dag/wasm/nfs`). Keeping the map process-global (a
+//! "static + tokio Mutex", like the other process-wide slots in this
+//! crate) leaves `AppState` untouched: every construction site stays
+//! valid.
 //!
 //! Lifecycle invariants per key (same as the old single slot): start is
 //! idempotent (a live handle is reused, never respawned — same bound

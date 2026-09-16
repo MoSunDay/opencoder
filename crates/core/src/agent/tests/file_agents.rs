@@ -192,6 +192,83 @@ fn memory_section_appended_when_ref_resolves() {
     );
 }
 
+/// Memory pools are directory-shaped: every non-hidden `*.md` under the
+/// version dir (recursively, subdirectories included) is aggregated in
+/// relative-path lexicographic order, joined by one blank line. Hidden
+/// files, non-markdown files and `meta.json` never contribute.
+#[test]
+fn memory_multi_file_aggregation_orders_subtree_files() {
+    let (dir, _g) = scoped_agents();
+    let root = dir.path();
+    write_prompt_pack(root, "default", 1, Some("soul body"), None, None);
+    write_resource_meta(root, "memory", "longterm", 1);
+    let memdir = root.join("memory").join("longterm").join("v1");
+    std::fs::create_dir_all(memdir.join("topics").join("zeta")).unwrap();
+    std::fs::create_dir_all(memdir.join("topics").join("alpha")).unwrap();
+    std::fs::write(memdir.join("memory.md"), "core rules").unwrap();
+    std::fs::write(memdir.join("topics").join("zeta").join("deep.md"), "zeta notes").unwrap();
+    std::fs::write(memdir.join("topics").join("alpha").join("rust.md"), "rust notes").unwrap();
+    // Noise that must never leak into the prompt.
+    std::fs::write(memdir.join("topics").join("notes.txt"), "not markdown").unwrap();
+    std::fs::write(memdir.join(".hidden.md"), "hidden").unwrap();
+    std::fs::create_dir_all(memdir.join(".stash")).unwrap();
+    std::fs::write(memdir.join(".stash").join("secret.md"), "secret").unwrap();
+    write_agent_card(root, "polyglot", Some("default"), None, None, Some("longterm"));
+    let prompt = resolve_agent("polyglot").unwrap().prompt;
+    // Lexicographic by relative path: memory.md < topics/alpha/rust.md
+    // < topics/zeta/deep.md, joined by one blank line after the header.
+    assert_eq!(
+        prompt,
+        "# Soul\nsoul body\n\n# Memory\ncore rules\n\nrust notes\n\nzeta notes"
+    );
+}
+
+/// Single-file compatibility: a pool holding exactly one `memory.md`
+/// renders byte-for-byte like the pre-T3 read (`body.trim()` appended
+/// after the `# Memory` header).
+#[test]
+fn memory_single_file_matches_legacy_output_byte_for_byte() {
+    let (dir, _g) = scoped_agents();
+    let root = dir.path();
+    let soul = "Identity: reviewer.";
+    write_prompt_pack(root, "default", 1, Some(soul), Some("how body"), None);
+    write_resource_meta(root, "memory", "longterm", 1);
+    let memdir = root.join("memory").join("longterm").join("v1");
+    std::fs::create_dir_all(&memdir).unwrap();
+    let body = "  prefers small commits.  \n\n";
+    std::fs::write(memdir.join("memory.md"), body).unwrap();
+    write_agent_card(root, "withmem", Some("default"), None, None, Some("longterm"));
+    let legacy = format!("# Soul\n{soul}\n\n# How\nhow body\n\n# Memory\n{}", body.trim());
+    assert_eq!(resolve_agent("withmem").unwrap().prompt, legacy);
+}
+
+/// An aggregated memory body over 200 KiB is truncated on a char
+/// boundary and carries a truncation marker with the original size.
+#[test]
+fn memory_aggregate_over_200kib_is_truncated_with_marker() {
+    let (dir, _g) = scoped_agents();
+    let root = dir.path();
+    write_prompt_pack(root, "default", 1, Some("soul body"), None, None);
+    write_resource_meta(root, "memory", "huge", 1);
+    let memdir = root.join("memory").join("huge").join("v1");
+    std::fs::create_dir_all(memdir.join("sub")).unwrap();
+    std::fs::write(memdir.join("a.md"), "a".repeat(150_000)).unwrap();
+    std::fs::write(memdir.join("sub").join("b.md"), "b".repeat(100_000)).unwrap();
+    write_agent_card(root, "hoarder", Some("default"), None, None, Some("huge"));
+    let prompt = resolve_agent("hoarder").unwrap().prompt;
+    // 150_000 a's + separator + 100_000 b's = 250_002 bytes joined; the
+    // body is cut at exactly 200 * 1024 = 204_800 bytes and the marker
+    // carries the original size.
+    let head = format!("{}{}{}", "a".repeat(150_000), "\n\n", "b".repeat(54_798));
+    let memory_start = prompt.find("# Memory").unwrap() + "# Memory\n".len();
+    let body_end = prompt.find("\n\n[memory truncated:").unwrap();
+    assert_eq!(&prompt[memory_start..body_end], head);
+    assert_eq!(body_end - memory_start, 200 * 1024);
+    assert!(prompt.ends_with(
+        "[memory truncated: original size 250002 bytes exceeds 200KB limit]"
+    ));
+}
+
 /// Missing files degrade: sections are optional, but an agent with no
 /// readable section at all (missing, or a prompt version that does not
 /// exist, or no prompt reference in the card) is not a real agent →
@@ -237,30 +314,33 @@ fn builtin_wins_and_corrupt_file_agents_fall_back() {
     assert!(resolve_agent("").is_none());
 }
 
-/// All four tiers of [`effective_default_agent`]: CLI > active file
-/// agent > config default > `"act"`.
+/// All three tiers of [`effective_default_agent`]: CLI > config default >
+/// `"act"`, and a legacy on-disk `active` marker (全局激活已移除) must not
+/// influence the resolution.
 #[test]
 fn effective_default_agent_priority_tiers() {
     let (dir, _g) = scoped_agents();
     let cfg = Config::default();
-    // Tier 4: nothing set anywhere.
+    // Tier 3: nothing set anywhere.
     assert_eq!(effective_default_agent(None, &cfg), "act");
-    // Tier 3: config default (non-empty) beats "act".
+    // Tier 2: config default (non-empty) beats "act".
     let mut cfg_d = Config::default();
     cfg_d.agent.default = "plan".into();
     assert_eq!(effective_default_agent(None, &cfg_d), "plan");
-    // Blank config default is skipped → tier 4.
+    // Blank config default is skipped → tier 3.
     let mut cfg_blank = Config::default();
     cfg_blank.agent.default = "  ".into();
     assert_eq!(effective_default_agent(None, &cfg_blank), "act");
-    // Tier 2: the active file agent beats config.
-    write_file_agent(dir.path(), "mine", Some("soul line"), None, None);
-    meta::set_active_agent(Some("mine")).unwrap();
-    assert_eq!(effective_default_agent(None, &cfg_d), "mine");
-    // A stale marker deactivates silently → tier 3 again.
-    std::fs::remove_dir_all(dir.path().join("mine")).unwrap();
-    assert_eq!(effective_default_agent(None, &cfg_d), "plan");
     // Tier 1: the CLI override beats everything (and blank is skipped).
     assert_eq!(effective_default_agent(Some("cli"), &cfg_d), "cli");
     assert_eq!(effective_default_agent(Some("  "), &cfg_d), "plan");
+
+    // 磁盘残留的激活 marker（旧安装的 `active` 目录/文件）不再影响解析：
+    // default 链完全无视它。
+    write_file_agent(dir.path(), "mine", Some("soul line"), None, None);
+    std::fs::write(dir.path().join("active"), "mine\n").unwrap();
+    assert_eq!(effective_default_agent(None, &cfg_d), "plan");
+    let mut cfg_none = Config::default();
+    cfg_none.agent.default = String::new();
+    assert_eq!(effective_default_agent(None, &cfg_none), "act");
 }

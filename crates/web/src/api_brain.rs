@@ -30,7 +30,6 @@ use tokio::sync::mpsc;
 
 use anyhow::{bail, Result};
 
-use opencoder_brain::playbook;
 use opencoder_brain::{CapabilityInput, PlaybookInput, PlaybookSpec};
 use opencoder_llm::{ChatRequest, ChatStream, LlmEvent};
 use opencoder_store::{BrainCapabilityDetail, Store};
@@ -238,32 +237,10 @@ pub async fn list_playbooks(State(state): State<Arc<AppState>>) -> Response {
 /// would raise, minus its interleaved error classes). The minted id lives
 /// inside the echoed `spec`.
 pub async fn create_playbook(
-    State(state): State<Arc<AppState>>,
-    Json(input): Json<PlaybookInput>,
+    State(_state): State<Arc<AppState>>,
+    Json(_input): Json<PlaybookInput>,
 ) -> Response {
-    if let Err(errs) = playbook::validate_draft(&input) {
-        return error_400(errs.join("; "));
-    }
-    match state
-        .brain
-        .create_playbook(&input, opencoder_core::message::now_ms())
-        .await
-    {
-        Ok(spec) => {
-            let id = spec.id.clone();
-            let spec_json = serde_json::to_value(&spec).unwrap_or_default();
-            (
-                StatusCode::CREATED,
-                Json(json!({
-                    "ok": true,
-                    "playbook": { "id": id },
-                    "spec": spec_json,
-                })),
-            )
-                .into_response()
-        }
-        Err(e) => error_500(format!("create brain playbook: {e:#}")),
-    }
+    migration()
 }
 
 /// GET /api/brain/playbooks/:id — one playbook with its decoded spec.
@@ -286,37 +263,20 @@ pub async fn get_playbook(State(state): State<Arc<AppState>>, Path(id): Path<Str
 /// and created_at are preserved by the runtime). Unknown id → 404
 /// (`Ok(None)`), payload → 400.
 pub async fn update_playbook(
-    State(state): State<Arc<AppState>>,
-    Path(id): Path<String>,
-    Json(input): Json<PlaybookInput>,
+    State(_state): State<Arc<AppState>>,
+    Path(_id): Path<String>,
+    Json(_input): Json<PlaybookInput>,
 ) -> Response {
-    if let Err(errs) = playbook::validate_draft(&input) {
-        return error_400(errs.join("; "));
-    }
-    match state
-        .brain
-        .update_playbook(&id, &input, opencoder_core::message::now_ms())
-        .await
-    {
-        Ok(Some(spec)) => {
-            Json(json!({ "ok": true, "playbook": { "id": spec.id }, "spec": spec })).into_response()
-        }
-        Ok(None) => error_404(&format!("brain playbook not found: {id}")),
-        Err(e) => error_500(format!("update brain playbook: {e:#}")),
-    }
+    migration()
 }
 
 /// DELETE /api/brain/playbooks/:id — 200 ok / 404 (the store delete returns
 /// whether a row was removed, so no separate probe is needed).
 pub async fn delete_playbook(
-    State(state): State<Arc<AppState>>,
-    Path(id): Path<String>,
+    State(_state): State<Arc<AppState>>,
+    Path(_id): Path<String>,
 ) -> Response {
-    match state.brain.delete_playbook(&id).await {
-        Ok(true) => Json(json!({ "ok": true, "deleted": id })).into_response(),
-        Ok(false) => error_404(&format!("brain playbook not found: {id}")),
-        Err(e) => error_500(format!("delete brain playbook: {e:#}")),
-    }
+    migration()
 }
 
 // ─── dynamic planning (decision trees over the capability library) ──────
@@ -353,68 +313,15 @@ pub struct DispatchBody {
 /// `PlanNotFound`), embed outage and planner-LLM faults → 502 (typed
 /// `EmbeddingFailed` / `PlanGenerationFailed`), anything else (store I/O,
 /// corrupt stored tree) → 500.
-fn map_plan_error(op: &str, err: anyhow::Error) -> Response {
-    if let Some(e) = err.downcast_ref::<opencoder_brain::PlanNotFound>() {
-        error_404(&e.to_string())
-    } else if err
-        .downcast_ref::<opencoder_brain::EmbeddingFailed>()
-        .is_some()
-    {
-        error_502(format!("{err:#}"))
-    } else if err
-        .downcast_ref::<opencoder_brain::PlanGenerationFailed>()
-        .is_some()
-    {
-        error_502(format!("{op}: {err:#}"))
-    } else {
-        error_500(format!("{op}: {err:#}"))
-    }
-}
-
-/// Resolve the planner chat model from a request override, falling back to
-/// the runtime's configured default.
-fn planner_model(state: &AppState, model: &Option<String>) -> String {
-    model
-        .as_deref()
-        .map(str::trim)
-        .filter(|m| !m.is_empty())
-        .map(str::to_string)
-        .unwrap_or_else(|| state.brain.chat_model().to_string())
-}
-
 /// POST /api/brain/plans — plan a decision tree for one situation: embed →
 /// vector-retrieve candidates → framework-prompt LLM call → validated tree
 /// (branch topics pre-embedded) → persisted. Empty situation → 400; empty
 /// library / LLM faults → 502; embed outage → 502.
 pub async fn create_plan(
-    State(state): State<Arc<AppState>>,
-    Json(body): Json<PlanBody>,
+    State(_state): State<Arc<AppState>>,
+    Json(_body): Json<PlanBody>,
 ) -> Response {
-    let situation = body.situation.trim();
-    if situation.is_empty() {
-        return error_400("situation must not be empty".to_string());
-    }
-    let top_k = body
-        .top_k
-        .unwrap_or(DEFAULT_SEARCH_K)
-        .clamp(1, MAX_SEARCH_K);
-    match state
-        .brain
-        .plan_decision_tree(
-            &planner_model(&state, &body.model),
-            situation,
-            top_k,
-            opencoder_core::message::now_ms(),
-        )
-        .await
-    {
-        Ok((plan, tree)) => (
-            StatusCode::CREATED,
-            Json(json!({ "ok": true, "plan": plan, "tree": tree })),
-        )
-            .into_response(),
-        Err(e) => map_plan_error("plan decision tree", e),
-    }
+    migration()
 }
 
 /// GET /api/brain/plans/:id — one persisted plan (record + parsed tree) or
@@ -438,54 +345,10 @@ pub async fn get_plan(State(state): State<Arc<AppState>>, Path(id): Path<String>
 /// dynamic scheduler — reuse the newest cached plan for the situation
 /// digest, minting one first when needed (`replan` forces a fresh plan).
 pub async fn dispatch(
-    State(state): State<Arc<AppState>>,
-    Json(body): Json<DispatchBody>,
+    State(_state): State<Arc<AppState>>,
+    Json(_body): Json<DispatchBody>,
 ) -> Response {
-    let situation = body.situation.trim();
-    if situation.is_empty() {
-        return error_400("situation must not be empty".to_string());
-    }
-    let top_k = body
-        .top_k
-        .unwrap_or(DEFAULT_SEARCH_K)
-        .clamp(1, MAX_SEARCH_K);
-    let plan_id = body
-        .plan_id
-        .as_deref()
-        .map(str::trim)
-        .filter(|p| !p.is_empty())
-        .map(str::to_string);
-    let model = planner_model(&state, &body.model);
-    let outcome = match plan_id {
-        Some(id) => state
-            .brain
-            .dispatch_decision_tree(&id, situation)
-            .await
-            .map(|(plan, outcome)| (plan.id, outcome, false)),
-        None => state
-            .brain
-            .dispatch_or_plan(
-                &model,
-                situation,
-                top_k,
-                body.replan.unwrap_or(false),
-                opencoder_core::message::now_ms(),
-            )
-            .await
-            .map(|d| (d.record.id, d.outcome, d.planned_fresh)),
-    };
-    match outcome {
-        Ok((plan_id, outcome, planned_fresh)) => Json(json!({
-            "ok": true,
-            "plan_id": plan_id,
-            "capability_id": outcome.capability_id,
-            "reason": outcome.reason,
-            "path": outcome.path,
-            "planned_fresh": planned_fresh,
-        }))
-        .into_response(),
-        Err(e) => map_plan_error("dispatch brain plan", e),
-    }
+    migration()
 }
 
 // ─── client fallbacks ──────────────────────────────────────────────────
@@ -532,3 +395,5 @@ pub fn mock_brain(store: Arc<dyn Store>) -> opencoder_brain::Runtime {
         "mock-embed",
     )
 }
+
+fn migration() -> Response { (StatusCode::CONFLICT, Json(json!({"error":opencoder_brain::graph::MIGRATION}))).into_response() }

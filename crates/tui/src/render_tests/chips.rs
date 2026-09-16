@@ -160,6 +160,7 @@ fn ap_chip_reflects_autopilot_mode() {
             None, // task_picker
             None, // command_menu
             None, // file_menu
+            None, // agent_menu
             None, // model_menu
             None, // mcp_menu
             None, // cli_menu
@@ -306,6 +307,7 @@ fn mode_flash_chip_two_colour_only_for_definite_switch() {
             0,
             0,
             Some(mode_flash),
+            None,
             None,
             None,
             None,

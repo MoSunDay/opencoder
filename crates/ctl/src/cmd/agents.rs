@@ -1,7 +1,7 @@
-//! `agents` domain: versioned custom agents — reference cards, the active
-//! marker, versioned resource pools (prompts/skills/tools/memory) and the
-//! NFS read-only export. Pure `plan()` mapping only; execution goes through
-//! the shared `exec_plan` transport.
+//! `agents` domain: versioned custom agents — reference cards, versioned
+//! resource pools (prompts/skills/tools/memory) and the NFS read-only
+//! export. Pure `plan()` mapping only; execution goes through the shared
+//! `exec_plan` transport.
 
 use anyhow::{bail, Result};
 use clap::Subcommand;
@@ -18,7 +18,7 @@ fn required_body(raw: &str) -> Result<serde_json::Value> {
 
 #[derive(Subcommand, Debug)]
 pub enum AgentCmd {
-    /// GET /api/agents — every card plus the active marker.
+    /// GET /api/agents — every reference card.
     List,
     /// POST /api/agents — {"name","current"?} new reference card.
     Create {
@@ -35,12 +35,6 @@ pub enum AgentCmd {
     },
     /// DELETE /api/agents/{name}.
     Delete { name: String },
-    /// PATCH /api/agents/active — {"active":name|null}.
-    Active {
-        /// Body: inline JSON or @file.
-        #[arg(long)]
-        json: String,
-    },
     /// GET /api/agents/{name}/meta — full card, history included.
     Meta { name: String },
     /// Versioned resource pools.
@@ -139,9 +133,6 @@ pub fn plan(sub: &AgentCmd) -> Result<RequestPlan> {
             RequestPlan::put(format!("/api/agents/{name}")).with_body(required_body(json)?)
         }
         AgentCmd::Delete { name } => RequestPlan::delete(format!("/api/agents/{name}")),
-        AgentCmd::Active { json } => {
-            RequestPlan::patch("/api/agents/active").with_body(required_body(json)?)
-        }
         AgentCmd::Meta { name } => RequestPlan::get(format!("/api/agents/{name}/meta")),
         AgentCmd::Resources(sub) => plan_resources(sub)?,
         AgentCmd::Nfs(sub) => plan_nfs(sub)?,
@@ -228,12 +219,6 @@ mod tests {
             .unwrap(),
             RequestPlan::delete("/api/agents/reviewer")
         );
-        let active = plan(&AgentCmd::Active {
-            json: r#"{"active":null}"#.into(),
-        })
-        .unwrap();
-        assert_eq!(active.method, reqwest::Method::PATCH);
-        assert_eq!(active.path, "/api/agents/active");
     }
 
     #[test]

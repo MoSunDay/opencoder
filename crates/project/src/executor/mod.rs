@@ -1,17 +1,9 @@
-//! 执行器维度：把 todo 的执行从「写死的 act 会话直驱」泛化为四类执行器
-//! —— agent（既有会话直驱，`agent_drive`）、team（本地多人讨论，
-//! `team_drive`）、dag（本地工作流，`dag_drive`）、brain（能力库路由后
-//! 递归派发，`brain_drive`）。本模块承载纯解析（`resolve` 把 todo 的
-//! 执行器三字段收敛成一个目标、`retarget` 把目标回写进 todo 克隆）与
-//! 唯一派发入口 `drive`；spec 类型与校验在 `spec` 子模块。所有子驱动
-//! 保持同一 run 行生命周期（claim → drive → close_run → todo 回写）、
-//! 同一取消注册表与 panic/stale 兜底（recover.rs），差异只在「谁干活」。
+//! Project Agent, Team and DAG execution adapters. Legacy Brain/Playbook
+//! execution is rejected before claim; v2 orchestration uses brain runs.
 
 mod agent_drive;
 mod brain_drive;
 mod dag_drive;
-mod playbook_drive;
-mod playbook_step;
 mod team_drive;
 
 use std::sync::Arc;
@@ -58,10 +50,18 @@ pub fn resolve(
     todo: &ProjectTodoRecord,
     override_: Option<&crate::service::ExecutorOverride>,
 ) -> Result<ResolvedExecutor> {
+    if matches!(
+        todo.executor_kind,
+        ProjectExecutorKind::Brain | ProjectExecutorKind::Playbook
+    ) || override_.is_some_and(|ov| {
+        matches!(
+            ov.kind,
+            ProjectExecutorKind::Brain | ProjectExecutorKind::Playbook
+        )
+    }) {
+        bail!(opencoder_brain::graph::MIGRATION);
+    }
     if let Some(ov) = override_ {
-        if ov.kind == ProjectExecutorKind::Brain {
-            bail!("executor override cannot pre-resolve the brain executor");
-        }
         return Ok(ResolvedExecutor {
             kind: ov.kind,
             ref_: ov.ref_.clone(),
@@ -74,10 +74,9 @@ pub fn resolve(
         }),
         ProjectExecutorKind::Team => with_target(todo, ProjectExecutorKind::Team),
         ProjectExecutorKind::Dag => with_target(todo, ProjectExecutorKind::Dag),
-        ProjectExecutorKind::Playbook => with_target(todo, ProjectExecutorKind::Playbook),
-        ProjectExecutorKind::Brain => Err(anyhow::anyhow!(
-            "brain executor requires runtime resolution"
-        )),
+        ProjectExecutorKind::Brain | ProjectExecutorKind::Playbook => {
+            anyhow::bail!(opencoder_brain::graph::MIGRATION)
+        }
     }
 }
 
@@ -127,7 +126,7 @@ pub async fn drive(
     cx: ProjectContext,
     version: i64,
     resolved: ResolvedExecutor,
-    brain: Option<BrainHandoff>,
+    _brain: Option<BrainHandoff>,
     token: CancellationToken,
 ) {
     let todo = retarget(&todo, &resolved);
@@ -141,11 +140,17 @@ pub async fn drive(
         ProjectExecutorKind::Dag => {
             dag_drive::drive(deps, run_id, todo, cx, version, resolved, token).await
         }
-        ProjectExecutorKind::Brain => {
-            brain_drive::drive(deps, run_id, todo, cx, version, brain, token).await
-        }
-        ProjectExecutorKind::Playbook => {
-            playbook_drive::drive(deps, run_id, todo, cx, version, resolved, token).await
+        ProjectExecutorKind::Brain | ProjectExecutorKind::Playbook => {
+            crate::plan_gen::close_run(
+                &deps,
+                &run_id,
+                opencoder_store::ProjectTodoRunStatus::Failed,
+                Some(opencoder_brain::graph::MIGRATION.into()),
+                None,
+                None,
+            )
+            .await;
+            crate::plan_gen::forget_spawn(&deps, &run_id);
         }
     }
 }
@@ -214,10 +219,7 @@ mod tests {
     #[test]
     fn resolve_brain_errors_without_runtime_resolution() {
         let e = resolve(&todo(ProjectExecutorKind::Brain, None, None), None).unwrap_err();
-        assert!(
-            e.to_string().contains("brain executor requires runtime"),
-            "{e}"
-        );
+        assert!(e.to_string().contains("migration required"), "{e}");
     }
 
     #[test]

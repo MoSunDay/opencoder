@@ -1,6 +1,6 @@
 //! `/api/agents/nfs` contract tests: thin router + oneshot (same shape as
 //! `web_agents.rs`). The live-server slot is process-global (a static in
-//! `api_agent_nfs`, mirroring `ACTIVATE_GATE`), so the whole lifecycle —
+//! `api_agent_nfs`), so the whole lifecycle —
 //! initial GET, start, reuse, stop, idempotence, spawn failure — runs
 //! inside ONE test to stay deterministic. Config comes from the test
 //! workdir's `opencoder.json`: `agent.nfs.port = 0` forces an ephemeral

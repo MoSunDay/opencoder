@@ -9,6 +9,7 @@ from .state import Journal, atomic_bytes, write
 
 def receipt(settings, bundle):
     candidate = manifest.verify(bundle)
+    manifest.brain_preflight(settings, candidate)
     if not settings.legacy_agent_data or not (settings.legacy_agent_data / "node-id").is_file():
         raise ValueError("migration requires legacy_agent_data with its persisted node-id")
     if settings.legacy_agent_data in (settings.state_dir, settings.server_data) or settings.state_dir.is_relative_to(settings.legacy_agent_data):
@@ -62,6 +63,7 @@ def migrate(settings, bundle, operations, seconds=90):
         journal.save()
         stage = "stopping"
     if stage == "stopping":
+        manifest.brain_preflight(settings, candidate)
         # Remove the old Server PartOf linkage before stopping that Server.
         for path in settings.systemd_dir.glob("opencoder-agent.service.d/*resources.conf"):
             original = path.read_bytes()

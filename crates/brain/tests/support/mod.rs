@@ -23,6 +23,7 @@ pub fn run(plan: OntologyPlan) -> BrainRun {
     opencoder_brain::execution::initialize(
         "brain-test",
         BrainRequest {
+            schema_version: 2,
             mode: PlanningMode::Fixed,
             objective: plan.objective.clone(),
             plan: Some(version(plan)),

@@ -69,6 +69,19 @@ pub async fn handle(
         }
         None => return Ok(RpcReply::error(404, "brain run has not initialized")),
     };
+    if (run.request.schema_version != 2
+        || run
+            .request
+            .plan
+            .as_ref()
+            .is_some_and(|p| p.plan.schema_version != 2))
+        && !matches!(
+            action,
+            "snapshot" | "context" | "events" | "actions" | "instances" | "instance"
+        )
+    {
+        return Ok(RpcReply::error(409, opencoder_brain::graph::MIGRATION));
+    }
     match action {
         "authorize" => {
             let receipt: ActionReceipt = serde_json::from_value(input)?;
@@ -179,7 +192,12 @@ pub async fn handle(
                 .candidate_plan
                 .take()
                 .context("no pending plan publication")?;
-            for (old, new) in candidate.plan.steps.iter_mut().zip(&version.plan.steps) {
+            for (old, new) in candidate
+                .plan
+                .instances
+                .iter_mut()
+                .zip(&version.plan.instances)
+            {
                 if old.action.definition.is_none() {
                     old.action.definition = new.action.definition.clone();
                 }
@@ -202,7 +220,7 @@ pub async fn handle(
         "publication_failed" => {
             ensure!(run.candidate_plan.is_some(), "no pending publication");
             run.candidate_plan = None;
-            run.phase = RunPhase::Failed;
+            run.phase = RunPhase::Blocked;
             run.error = Some(
                 input["error"]
                     .as_str()
@@ -258,17 +276,17 @@ async fn snapshot_locked(worker: &Worker, run: &BrainRun, offset: usize) -> Resu
         .store
         .last_todo_event_seq(&run.id)
         .await?;
-    let groups: Vec<_> = run.request.plan.iter().flat_map(|p| &p.plan.steps).map(|step| {
+    let groups: Vec<_> = run.request.plan.iter().flat_map(|p| p.plan.instances.iter().map(|i|&i.id).chain(p.plan.steps.iter().map(|i|&i.id))).map(|step| {
         let mut counts = std::collections::BTreeMap::<String,usize>::new();
-        for instance in run.instances.values().filter(|i|i.step_id == step.id) { *counts.entry(serde_json::to_value(instance.status).unwrap().as_str().unwrap().into()).or_default() += 1; }
+        for instance in run.instances.values().filter(|i|i.step_id == *step) { *counts.entry(serde_json::to_value(instance.status).unwrap().as_str().unwrap().into()).or_default() += 1; }
         let total: usize = counts.values().sum();
-        json!({"id":step.id,"counts":counts,"sealed":run.expansions.contains_key(&step.id),"total":total,"current_instance":run.flow_current.as_ref().filter(|id|run.instances[*id].step_id == step.id)})
+        json!({"id":*step,"counts":counts,"sealed":run.expansions.contains_key(step),"total":total,"current_instance":run.expansions.get(step).and_then(|ids|ids.last()),"active_visits":run.graph.tokens.keys().filter(|id|run.instances[*id].step_id == *step).collect::<Vec<_>>()})
     }).collect();
     let instances: Vec<_> = run.instances.values().skip(offset).take(100).map(|i|json!({"id":i.id,"step_id":i.step_id,"status":i.status,"attempt":i.attempt,"execution":i.execution,"node_id":i.node_id,"reason":i.reason,"item_key":i.item_key})).collect();
     Ok(
         json!({"id":run.id,"phase":run.phase,"revision":run.revision,"activation":run.activation,"handled_revision":run.handled_revision,"control_epoch":run.control_epoch,
         "objective":run.request.objective,"mode":run.request.mode,"plan":run.request.plan,"candidate_plan":run.candidate_plan,"input_requests":run.input_requests,"groups":groups,
         "instances":instances,"total_instances":run.instances.len(),"next_offset":(offset+100<run.instances.len()).then_some(offset+100),"watermark":watermark,
-        "deliverables":run.deliverables,"error":run.error,"created_at":run.created_at,"updated_at":run.updated_at}),
+        "graph":run.graph,"deliverables":run.deliverables,"error":run.error,"created_at":run.created_at,"updated_at":run.updated_at}),
     )
 }

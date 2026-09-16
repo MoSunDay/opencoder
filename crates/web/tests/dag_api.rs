@@ -358,11 +358,14 @@ async fn claim_returns_spec_snapshot_and_second_claim_is_204() {
     assert_eq!(s, StatusCode::OK);
     assert_eq!(run["status"], "running");
     assert_eq!(run["node_id"], node.as_str());
+    assert_eq!(run["name"], "etl-demo");
     assert!(run["claimed_at"].is_i64());
 
-    // Newest-first listing sees the run.
+    // Newest-first listing sees the run, with the spec name at top level.
     let (_, runs) = send(&ctx.app, req("GET", "/api/dag/runs?limit=5", None)).await;
-    assert_eq!(runs.as_array().unwrap().len(), 1);
+    let rows = runs.as_array().unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["name"], "etl-demo", "{runs}");
 }
 
 // ── event upload validation ────────────────────────────────────────────────

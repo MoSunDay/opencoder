@@ -3,13 +3,14 @@
 //! so every test holds ONE static lock for its whole body (mirrors the
 //! `opencoder-agents` testutil). Thin router + oneshot (same shape as
 //! `web_envs.rs`); reload fan-out is observed through a stolen drain-cmd
-//! receiver, exactly like the envs activation test.
+//! receiver, exactly like the envs tests. 全局激活端点已移除，卡片写一律
+//! 无条件扇出 ReloadConfig。
 
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use axum::routing::{get, patch, put};
+use axum::routing::{get, put};
 use axum::Router;
 use tower::ServiceExt;
 
@@ -33,10 +34,6 @@ fn app(state: Arc<opencoder_web::AppState>) -> Router {
         .route(
             "/api/agents",
             get(opencoder_web::api_agents::list).post(opencoder_web::api_agents::create),
-        )
-        .route(
-            "/api/agents/active",
-            patch(opencoder_web::api_agents::patch_active),
         )
         .route(
             "/api/agents/:name/meta",
@@ -111,9 +108,8 @@ fn expect_reload(rx: &mut tokio::sync::mpsc::UnboundedReceiver<opencoder_web::cm
 }
 
 /// Assert NO further fan-out arrived (silence).
-fn expect_silent(rx: &mut tokio::sync::mpsc::UnboundedReceiver<opencoder_web::cmd::DrainCmd>) {
-    assert!(rx.try_recv().is_err(), "unexpected ReloadConfig fan-out");
-}
+// (`expect_silent` removed with the activation gate: every card write now
+// fans out unconditionally, so silence is never expected.)
 
 /// Write a live `prompts/<name>` pool (meta current=v1 + one version dir) —
 /// the minimum `resource_current_version_dir` needs to resolve.
@@ -129,18 +125,20 @@ fn seed_prompt_pool(root: &std::path::Path, name: &str) {
 }
 
 #[tokio::test]
-async fn empty_root_lists_null_active() {
+async fn empty_root_lists_cards_only_without_active_field() {
     let state = state().await;
     let _scoped = scoped();
     let (status, v) = call(app(state.clone()), "GET", "/api/agents", None).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(v["ok"], true);
-    assert_eq!(v["active"], serde_json::Value::Null);
+    // 全局激活已移除：list 响应不再携带 `active` 字段。
+    assert!(v.get("active").is_none(), "list must not carry `active`: {v}");
+    // Registry-only: no builtin scheduling roles leak into the list.
     let agents = v["agents"].as_array().unwrap();
-    assert_eq!(agents.len(), opencoder_core::builtin_agents().len());
-    assert!(agents
-        .iter()
-        .all(|a| a["builtin"] == true && a["harness"] == "opencoder"));
+    assert!(
+        agents.is_empty(),
+        "empty agents root must list no cards: {agents:?}"
+    );
 }
 
 #[tokio::test]
@@ -174,7 +172,7 @@ async fn cards_crud_activation_and_listing() {
     )
     .await;
     assert_eq!(status, StatusCode::CONFLICT, "{v}");
-    for bad in ["active", "prompts", "../x", "  "] {
+    for bad in ["prompts", "../x", "  "] {
         let (status, v) = call(
             app(state.clone()),
             "POST",
@@ -185,28 +183,23 @@ async fn cards_crud_activation_and_listing() {
         assert_eq!(status, StatusCode::BAD_REQUEST, "{bad}: {v}");
     }
 
-    // Activate ⇒ listing is sorted by name and carries the marker.
-    let (status, v) = call(
-        app(state.clone()),
-        "PATCH",
-        "/api/agents/active",
-        Some(serde_json::json!({ "active": "b" })),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "{v}");
-    assert_eq!(v["active"], "b");
-
+    // Listing is sorted by name; the global activation pointer is gone.
     let (status, v) = call(app(state.clone()), "GET", "/api/agents", None).await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(v["active"], "b");
+    assert!(v.get("active").is_none(), "list must not carry `active`: {v}");
+    // Registry-only: created cards are the whole list, no builtin roles.
     let names: Vec<&str> = v["agents"]
         .as_array()
         .unwrap()
         .iter()
-        .filter(|a| a["builtin"] != true)
         .map(|a| a["name"].as_str().unwrap())
         .collect();
     assert_eq!(names, vec!["a", "b"]);
+    assert!(v["agents"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|a| a["builtin"] == false));
     for key in ["current", "references", "updated_at"] {
         assert!(v["agents"][0].get(key).is_some(), "lacks {key}");
     }
@@ -232,7 +225,7 @@ async fn cards_crud_activation_and_listing() {
         .collect();
     assert_eq!(fields, vec!["prompt"]);
 
-    // Missing card ⇒ 404 on meta / PUT / DELETE; unknown activation ⇒ 404.
+    // Missing card ⇒ 404 on meta / PUT / DELETE.
     for (method, uri) in [
         ("GET", "/api/agents/ghost/meta"),
         ("PUT", "/api/agents/ghost"),
@@ -242,18 +235,87 @@ async fn cards_crud_activation_and_listing() {
         let (status, v) = call(app(state.clone()), method, uri, body).await;
         assert_eq!(status, StatusCode::NOT_FOUND, "{method} {uri}: {v}");
     }
-    let (status, _) = call(
+}
+
+/// Pickers (SPA `@`/`/agent`, TUI `/agent`) render the one-line identity:
+/// list items carry `description` taken from the card's prompt-pool
+/// `soul.md` FIRST non-empty line (leading blank lines skipped); a card
+/// without a resolvable prompt reference falls back to the generic
+/// `Custom agent <name>` label — the same fallback `resolve_file_agent`
+/// uses.
+#[tokio::test]
+async fn list_items_carry_soul_first_line_description_with_generic_fallback() {
+    let state = state().await;
+    let _scoped = scoped();
+    let root = _scoped.0.path();
+    // Multi-line soul: the description skips leading blank/whitespace lines.
+    let pool = root.join("prompts/writer");
+    std::fs::create_dir_all(pool.join("v1")).unwrap();
+    std::fs::write(
+        pool.join("meta.json"),
+        r#"{ "name": "writer", "current": 1, "history": [1] }"#,
+    )
+    .unwrap();
+    std::fs::write(
+        pool.join("v1").join("soul.md"),
+        "\n  \nWriter soul: small diffs.\n",
+    )
+    .unwrap();
+    let (status, v) = call(
+        app(state.clone()),
+        "POST",
+        "/api/agents",
+        Some(serde_json::json!({ "name": "writer", "current": { "prompt": "writer" } })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{v}");
+    // Plain card without a prompt reference: generic fallback label.
+    let (status, v) = call(
+        app(state.clone()),
+        "POST",
+        "/api/agents",
+        Some(serde_json::json!({ "name": "plain" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{v}");
+
+    let (status, v) = call(app(state.clone()), "GET", "/api/agents", None).await;
+    assert_eq!(status, StatusCode::OK);
+    let agents = v["agents"].as_array().unwrap();
+    let by_name = |n: &str| {
+        agents
+            .iter()
+            .find(|a| a["name"] == n)
+            .unwrap_or_else(|| panic!("missing card {n}: {agents:?}"))
+            .clone()
+    };
+    assert_eq!(by_name("writer")["description"], "Writer soul: small diffs.");
+    assert_eq!(by_name("plain")["description"], "Custom agent plain");
+}
+
+/// 全局激活端点已移除：PATCH /api/agents/active 落到 /api/agents/:name 的
+/// put/delete 路由上，PATCH 方法不被允许 ⇒ 405。
+#[tokio::test]
+async fn patch_active_endpoint_is_gone() {
+    let state = state().await;
+    let _scoped = scoped();
+    let (status, v) = call(
         app(state.clone()),
         "PATCH",
         "/api/agents/active",
-        Some(serde_json::json!({ "active": "ghost" })),
+        Some(serde_json::json!({ "active": "a" })),
     )
     .await;
-    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert!(
+        status == StatusCode::NOT_FOUND || status == StatusCode::METHOD_NOT_ALLOWED,
+        "activation endpoint must be gone: {status} {v}"
+    );
 }
 
+/// 卡片写入无条件 fan-out ReloadConfig：激活判断已移除，任何成功的
+/// PUT 都刷新活跃会话的池快照（重复写也各扇出一次）。
 #[tokio::test]
-async fn repeat_activation_fans_reload_once() {
+async fn put_fans_reload_on_every_write() {
     let state = state().await;
     let _scoped = scoped();
     seed_prompt_pool(_scoped.0.path(), "pack");
@@ -268,118 +330,19 @@ async fn repeat_activation_fans_reload_once() {
 
     let (status, v) = call(
         app(state.clone()),
-        "PATCH",
-        "/api/agents/active",
-        Some(serde_json::json!({ "active": "same" })),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "{v}");
-    expect_reload(&mut cmd_rx);
-
-    // Same value again ⇒ `unchanged`, no second fan-out.
-    let (status, v) = call(
-        app(state.clone()),
-        "PATCH",
-        "/api/agents/active",
-        Some(serde_json::json!({ "active": "same" })),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "{v}");
-    assert_eq!(v["unchanged"], true);
-    expect_silent(&mut cmd_rx);
-
-    // Deactivate (`null`) IS a change ⇒ one more fan-out.
-    let (status, v) = call(
-        app(state.clone()),
-        "PATCH",
-        "/api/agents/active",
-        Some(serde_json::json!({ "active": null })),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "{v}");
-    assert_eq!(v["active"], serde_json::Value::Null);
-    expect_reload(&mut cmd_rx);
-}
-
-#[tokio::test]
-async fn blank_active_name_is_400_not_deactivation() {
-    let state = state().await;
-    let _scoped = scoped();
-    seed_prompt_pool(_scoped.0.path(), "pack");
-    call(
-        app(state.clone()),
-        "POST",
-        "/api/agents",
-        Some(serde_json::json!({ "name": "on", "current": { "prompt": "pack" } })),
-    )
-    .await;
-    call(
-        app(state.clone()),
-        "PATCH",
-        "/api/agents/active",
-        Some(serde_json::json!({ "active": "on" })),
-    )
-    .await;
-    let (status, v) = call(
-        app(state.clone()),
-        "PATCH",
-        "/api/agents/active",
-        Some(serde_json::json!({ "active": "   " })),
-    )
-    .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST, "{v}");
-    assert_eq!(
-        opencoder_core::agent::active_agent().as_deref(),
-        Some("on"),
-        "blank must not deactivate"
-    );
-}
-
-/// PUT fans ReloadConfig only for the ACTIVE card — a non-active card
-/// cannot change any live session's chain.
-#[tokio::test]
-async fn put_fans_reload_only_for_active_card() {
-    let state = state().await;
-    let _scoped = scoped();
-    seed_prompt_pool(_scoped.0.path(), "old-pack");
-    seed_prompt_pool(_scoped.0.path(), "pack");
-    // "hot" holds a live prompt ref (activatable); "cold" stays plain.
-    let bodies = [
-        ("hot", serde_json::json!({ "prompt": "old-pack" })),
-        ("cold", serde_json::json!({})),
-    ];
-    for (name, current) in bodies {
-        call(
-            app(state.clone()),
-            "POST",
-            "/api/agents",
-            Some(serde_json::json!({ "name": name, "current": current })),
-        )
-        .await;
-    }
-    call(
-        app(state.clone()),
-        "PATCH",
-        "/api/agents/active",
-        Some(serde_json::json!({ "active": "hot" })),
-    )
-    .await;
-    let mut cmd_rx = live_handle(&state, "s1").await;
-
-    let (status, v) = call(
-        app(state.clone()),
         "PUT",
-        "/api/agents/cold",
+        "/api/agents/same",
         Some(serde_json::json!({ "current": { "prompt": "pack" } })),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{v}");
-    expect_silent(&mut cmd_rx);
+    expect_reload(&mut cmd_rx);
 
+    // 相同内容再写一次 ⇒ 仍然无条件扇出。
     let (status, v) = call(
         app(state.clone()),
         "PUT",
-        "/api/agents/hot",
+        "/api/agents/same",
         Some(serde_json::json!({ "current": { "prompt": "pack" } })),
     )
     .await;
@@ -387,10 +350,10 @@ async fn put_fans_reload_only_for_active_card() {
     expect_reload(&mut cmd_rx);
 }
 
-/// DELETE of the ACTIVE card clears the marker first and fans out; the
-/// shared pools are never touched by card deletion.
+/// DELETE fans ReloadConfig unconditionally（无激活 marker 可清）；共享
+/// 资源池不会被卡片删除触碰。
 #[tokio::test]
-async fn delete_active_card_clears_marker_and_fans_reload() {
+async fn delete_card_fans_reload_without_marker() {
     let state = state().await;
     let _scoped = scoped();
     seed_prompt_pool(_scoped.0.path(), "pack");
@@ -401,125 +364,19 @@ async fn delete_active_card_clears_marker_and_fans_reload() {
         Some(serde_json::json!({ "name": "gone", "current": { "prompt": "pack" } })),
     )
     .await;
-    call(
-        app(state.clone()),
-        "PATCH",
-        "/api/agents/active",
-        Some(serde_json::json!({ "active": "gone" })),
-    )
-    .await;
     let mut cmd_rx = live_handle(&state, "s1").await;
 
     let (status, v) = call(app(state.clone()), "DELETE", "/api/agents/gone", None).await;
     assert_eq!(status, StatusCode::OK, "{v}");
-    assert_eq!(opencoder_core::agent::active_agent(), None);
     expect_reload(&mut cmd_rx);
     let (_, v) = call(app(state.clone()), "GET", "/api/agents", None).await;
-    assert_eq!(v["active"], serde_json::Value::Null);
+    assert!(v.get("active").is_none(), "list must not carry `active`: {v}");
+    // Registry-only: deleting the last card empties the list, no builtin roles.
     let agents = v["agents"].as_array().unwrap();
-    assert_eq!(agents.len(), opencoder_core::builtin_agents().len());
-    assert!(agents
-        .iter()
-        .all(|a| a["builtin"] == true && a["harness"] == "opencoder"));
-}
-
-/// Activating a card whose prompt reference has no live version must fail
-/// (preflight) AND roll the marker back — the previous active survives.
-#[tokio::test]
-async fn patch_preflight_missing_prompt_rolls_back() {
-    let state = state().await;
-    let _scoped = scoped();
-    seed_prompt_pool(_scoped.0.path(), "pack");
-    call(
-        app(state.clone()),
-        "POST",
-        "/api/agents",
-        Some(serde_json::json!({ "name": "plain", "current": { "prompt": "pack" } })),
-    )
-    .await;
-    call(
-        app(state.clone()),
-        "POST",
-        "/api/agents",
-        Some(serde_json::json!({ "name": "broken", "current": { "prompt": "ghost-pack" } })),
-    )
-    .await;
-    let (status, v) = call(
-        app(state.clone()),
-        "PATCH",
-        "/api/agents/active",
-        Some(serde_json::json!({ "active": "plain" })),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "{v}");
-
-    let (status, v) = call(
-        app(state.clone()),
-        "PATCH",
-        "/api/agents/active",
-        Some(serde_json::json!({ "active": "broken" })),
-    )
-    .await;
     assert!(
-        status == StatusCode::BAD_REQUEST || status == StatusCode::UNPROCESSABLE_ENTITY,
-        "preflight failure must be 4xx: {status} {v}"
+        agents.is_empty(),
+        "list must contain no builtin roles: {agents:?}"
     );
-    assert_eq!(v["ok"], false);
-    // Rollback: the marker still names the previous agent.
-    let (_, v) = call(app(state.clone()), "GET", "/api/agents", None).await;
-    assert_eq!(v["active"], "plain", "marker must roll back: {v}");
-}
-
-/// Activating a card with NO prompt reference must be rejected (it would
-/// resolve to None and silently fall back to act) and roll the marker back.
-#[tokio::test]
-async fn patch_preflight_promptless_card_rejected_and_rolls_back() {
-    let state = state().await;
-    let _scoped = scoped();
-    seed_prompt_pool(_scoped.0.path(), "pack");
-    call(
-        app(state.clone()),
-        "POST",
-        "/api/agents",
-        Some(serde_json::json!({ "name": "plain", "current": { "prompt": "pack" } })),
-    )
-    .await;
-    let (status, v) = call(
-        app(state.clone()),
-        "PATCH",
-        "/api/agents/active",
-        Some(serde_json::json!({ "active": "plain" })),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "{v}");
-
-    // "empty" parses but has no prompt reference at all.
-    call(
-        app(state.clone()),
-        "POST",
-        "/api/agents",
-        Some(serde_json::json!({ "name": "empty" })),
-    )
-    .await;
-    let (status, v) = call(
-        app(state.clone()),
-        "PATCH",
-        "/api/agents/active",
-        Some(serde_json::json!({ "active": "empty" })),
-    )
-    .await;
-    assert!(
-        status == StatusCode::BAD_REQUEST || status == StatusCode::UNPROCESSABLE_ENTITY,
-        "promptless activation must be 4xx: {status} {v}"
-    );
-    assert_eq!(v["ok"], false);
-    assert!(
-        v["error"].as_str().unwrap().contains("prompt"),
-        "error must mention the missing prompt: {v}"
-    );
-    // Rollback: the marker still names the previous agent.
-    let (_, v) = call(app(state.clone()), "GET", "/api/agents", None).await;
-    assert_eq!(v["active"], "plain", "marker must roll back: {v}");
 }
 
 #[tokio::test]

@@ -110,6 +110,7 @@ pub(crate) fn handle_key(
     queue_scroll: &mut u32,
     file_menu: &mut Option<FileMenu>,
     workdir: &Path,
+    agent_menu: &mut Option<crate::agent_menu::AgentMenu>,
 ) -> KeyAction {
     // Modal skill picker: intercept all keys while open.
     if skill_menu.is_some() {
@@ -149,6 +150,26 @@ pub(crate) fn handle_key(
                 KeyAction::None
             }
             FileOutcome::Close | FileOutcome::Idle => KeyAction::None,
+        };
+    }
+    // Agent picker (`/agent`): intercept all keys while open, same slot
+    // pattern as the pickers above. A pick REPLACES the composer with the
+    // runner's `/agent <name> ` control head — the opener (command popup
+    // Enter or a bare `/agent` submit) left `/agent` behind, and the pick
+    // completes it with the chosen name so the normal submit path applies
+    // the switch at the runner's control boundary.
+    if agent_menu.is_some() {
+        return match crate::agent_menu::handle_agent_key(agent_menu, k) {
+            crate::agent_menu::AgentOutcome::Pick(name) => {
+                let token = crate::agent_menu::pick_token(&name);
+                input.clear();
+                input.push_str(&token);
+                *cursor_idx = input.len();
+                crate::undo::snapshot(undo_state, input, *cursor_idx, false);
+                KeyAction::None
+            }
+            crate::agent_menu::AgentOutcome::Quit => KeyAction::Quit,
+            crate::agent_menu::AgentOutcome::Idle => KeyAction::None,
         };
     }
     // Queue/steer panel scroll keys: Shift+PageUp looks at older pending

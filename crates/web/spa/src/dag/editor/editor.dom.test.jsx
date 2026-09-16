@@ -101,6 +101,75 @@ describe('DefEditor 画布模式', () => {
   });
 });
 
+describe('画布连线模式', () => {
+  it('连线模式点击两个步骤建立依赖并保存', async () => {
+    const onSave = vi.fn();
+    mountEditor(onSave);
+    await waitFor(() => expect(document.querySelectorAll('.dag-edit-node')).toHaveLength(2));
+    fireEvent.click(screen.getByRole('button', { name: /连线/ }));
+    // pick the source: the armed card lights up and the hint bar appears
+    fireEvent.click(document.querySelector('[data-id="review"] .dag-edit-node'));
+    await waitFor(() =>
+      expect(document.querySelector('[data-id="review"] .dag-edit-node').className).toContain(
+        'dag-edit-node--linksrc',
+      ),
+    );
+    expect(screen.getByText(/连线：review/)).toBeTruthy();
+    // click the target → edge lands, armed state clears
+    fireEvent.click(document.querySelector('[data-id="fetch"] .dag-edit-node'));
+    await waitFor(() =>
+      expect(document.querySelector('[data-id="review"] .dag-edit-node').className).not.toContain(
+        'dag-edit-node--linksrc',
+      ),
+    );
+    fireEvent.click(screen.getByText('保 存'));
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+    const spec = onSave.mock.calls[0][0];
+    expect(spec.steps.find((s) => s.name === 'fetch').depends_on).toEqual(['review']);
+  });
+
+  it('连线模式拒绝成环依赖且不改 spec', async () => {
+    const onSave = vi.fn();
+    mountEditor(onSave);
+    await waitFor(() => expect(document.querySelectorAll('.dag-edit-node')).toHaveLength(2));
+    fireEvent.click(screen.getByRole('button', { name: /连线/ }));
+    fireEvent.click(document.querySelector('[data-id="fetch"] .dag-edit-node'));
+    fireEvent.click(document.querySelector('[data-id="review"] .dag-edit-node'));
+    expect(await screen.findByText('不能形成循环依赖')).toBeTruthy();
+    fireEvent.click(screen.getByText('保 存'));
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+    const spec = onSave.mock.calls[0][0];
+    expect(spec.steps.find((s) => s.name === 'review').depends_on).toEqual(['fetch']);
+    expect(spec.steps.find((s) => s.name === 'fetch').depends_on).toBeUndefined();
+  });
+
+  it('Esc 取消待连接的源节点', async () => {
+    mountEditor(vi.fn());
+    await waitFor(() => expect(document.querySelectorAll('.dag-edit-node')).toHaveLength(2));
+    fireEvent.click(screen.getByRole('button', { name: /连线/ }));
+    fireEvent.click(document.querySelector('[data-id="fetch"] .dag-edit-node'));
+    await waitFor(() => expect(screen.getByText(/连线：fetch/)).toBeTruthy());
+    fireEvent.keyDown(window, { key: 'Escape' });
+    await waitFor(() =>
+      expect(document.querySelector('[data-id="fetch"] .dag-edit-node').className).not.toContain(
+        'dag-edit-node--linksrc',
+      ),
+    );
+    expect(screen.queryByText(/连线：fetch/)).toBeNull();
+  });
+
+  it('未开连线模式时点击节点仍是选中（不武装连线）', async () => {
+    mountEditor(vi.fn());
+    await waitFor(() => expect(document.querySelectorAll('.dag-edit-node')).toHaveLength(2));
+    fireEvent.click(document.querySelector('[data-id="fetch"] .dag-edit-node'));
+    await screen.findByDisplayValue('tool.wasm'); // inspector opened
+    expect(document.querySelector('[data-id="fetch"] .dag-edit-node').className).not.toContain(
+      'dag-edit-node--linksrc',
+    );
+    expect(screen.queryByText(/连线：/)).toBeNull();
+  });
+});
+
 describe('StepInspector how_append', () => {
   const mountInspector = (step, onChange) =>
     render(

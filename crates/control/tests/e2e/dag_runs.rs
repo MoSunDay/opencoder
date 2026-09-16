@@ -51,10 +51,14 @@ async fn dispatch_creates_run_and_ledger_views_route_to_the_node() {
     let runs = body.as_array().unwrap();
     let mine = runs.iter().find(|r| r["id"] == json!("dag-run-1")).unwrap();
     assert_eq!(mine["dag_id"], json!("etl-demo"));
+    // Row top-level name (lifted from definition.spec.name) matches the
+    // local daemon's DagRunView contract the SPA table reads.
+    assert_eq!(mine["name"], json!("etl-demo"), "{body}");
 
     let (status, body) = h.req(Method::GET, "/api/dag/runs/dag-run-1", None).await;
     assert_eq!(status, 200, "{body}");
     assert_eq!(body["dag_id"], json!("etl-demo"), "{body}");
+    assert_eq!(body["name"], json!("etl-demo"), "{body}");
     assert!(
         body["spec"]
             .as_object()

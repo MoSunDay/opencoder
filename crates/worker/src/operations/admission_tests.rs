@@ -6,6 +6,7 @@ use tokio_util::sync::CancellationToken;
 #[tokio::test]
 async fn rejected_project_commands_never_change_durable_admission() {
     let dir = tempfile::tempdir().unwrap();
+    let _config = opencoder_core::config::scoped_config_home(dir.path().join("config-home"));
     let worker = Worker::open(
         WorkerOptions {
             name: "admission-test".into(),
@@ -149,6 +150,7 @@ async fn rejected_project_commands_never_change_durable_admission() {
 #[tokio::test]
 async fn missing_runc_rootfs_is_rejected_before_durable_acceptance() {
     let dir = tempfile::tempdir().unwrap();
+    let _config = opencoder_core::config::scoped_config_home(dir.path().join("config-home"));
     let worker = Worker::open(
         WorkerOptions {
             name: "runc-preflight".into(),
@@ -204,6 +206,7 @@ async fn missing_runc_rootfs_is_rejected_before_durable_acceptance() {
 #[tokio::test]
 async fn create_never_adopts_an_unowned_execution_directory() {
     let dir = tempfile::tempdir().unwrap();
+    let _config = opencoder_core::config::scoped_config_home(dir.path().join("config-home"));
     let worker = Worker::open(
         WorkerOptions {
             name: "unowned-directory".into(),
@@ -253,6 +256,7 @@ async fn create_never_adopts_an_unowned_execution_directory() {
 #[tokio::test]
 async fn system_history_is_queryable_and_stoppable_but_cannot_restart() {
     let dir = tempfile::tempdir().unwrap();
+    let _config = opencoder_core::config::scoped_config_home(dir.path().join("config-home"));
     let worker = Worker::open(
         WorkerOptions {
             name: "retired-system".into(),

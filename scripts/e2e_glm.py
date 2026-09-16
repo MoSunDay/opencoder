@@ -8,7 +8,8 @@ Each scenario asserts an actual business contract (fork copy integrity, bundle
 roundtrip, resume context-load, compaction content-awareness, subagent DB
 tracking, plan read-only, web steer+queue delivery) rather than a surface
 marker. See scripts/e2e/{lib,cli_scenarios,web_scenarios,config_scenarios,todos_scenarios}.py
-for per-contract rationale. Stdlib only; no third-party Python dependency.
+for per-contract rationale (plus todos_{contract,runtime,web}_scenarios.py
+for the todos suites E21/E22/E23). Stdlib only; no third-party Python dependency.
 """
 
 from __future__ import annotations
@@ -18,7 +19,15 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from e2e import cli_scenarios, config_scenarios, todos_scenarios, web_scenarios  # noqa: E402
+from e2e import (  # noqa: E402
+    cli_scenarios,
+    config_scenarios,
+    todos_contract_scenarios,
+    todos_runtime_scenarios,
+    todos_scenarios,
+    todos_web_scenarios,
+    web_scenarios,
+)
 from e2e.lib import Counter, ensure_auth, resolve_bin  # noqa: E402
 
 
@@ -43,8 +52,17 @@ def main() -> int:
         # Todos workflow suite (E19b/E19c): CLI-mode only — it drives real
         # model sessions through `opencoder todos` and needs the API key.
         total += todos_scenarios.run_all(bin_path, api_key)
+        # E21 todos key-free contracts (validate/diagnostics/env binding/
+        # suspended records): pure local CLI, no LLM — run in cli mode too.
+        total += todos_contract_scenarios.run_all(bin_path)
+        # E22 todos runtime contracts (output docs, event catalog, local
+        # Ctrl-C, directory-format + env binding): needs the API key.
+        total += todos_runtime_scenarios.run_all(bin_path, api_key)
     if args.only != "cli" and not args.skip_web:
         total += web_scenarios.run_all(bin_path, api_key)
+        # E23 todos web surface (template/env lifecycle + node-less run
+        # contract): boots its own serve; lifecycle contracts are key-free.
+        total += todos_web_scenarios.run_all(bin_path, api_key)
     # Key-free config/env scenarios (E20): never call the LLM, so they run in
     # EVERY mode — deliberately outside the cli/web gates above.
     total += config_scenarios.run_all(bin_path)

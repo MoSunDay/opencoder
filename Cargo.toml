@@ -48,6 +48,9 @@ anyhow.workspace = true
 [dev-dependencies]
 serde_json.workspace = true
 tempfile.workspace = true
+# Fleet e2e (tests/dag_e2e) compiles tiny WASI modules on the fly, the same
+# fixture shape crates/worker/tests uses.
+wat.workspace = true
 
 [workspace.package]
 version = "0.1.0"
@@ -99,6 +102,7 @@ ulid = { version = "1", features = ["serde"] }
 dirs = "5"
 glob = "0.3"
 regex = "1"
+wat = "1.254"
 uuid = { version = "1", features = ["v4"] }
 pulldown-cmark = { version = "0.13", default-features = false }
 base64 = "0.22"

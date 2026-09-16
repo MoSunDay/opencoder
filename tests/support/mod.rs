@@ -33,6 +33,29 @@ pub const SERVER_BIN: &[&str] = &["opencoder-server", "opencoder-server"];
 #[allow(dead_code)]
 pub const AGENT_BIN: &[&str] = &["opencoder-agent", "opencoder-agent"];
 
+/// Candidate names for the control-plane CLI binary (DAG e2e drives the
+/// real CLI face at least once per feature).
+#[allow(dead_code)]
+pub const CLI_BIN: &[&str] = &["opencoder-cli"];
+
+/// Raw HTTP/SSE helpers shared by the e2e suites.
+/// Each integration-test binary compiles this shared module separately and
+/// exercises a different subset of its HTTP and lifecycle helpers.
+#[allow(dead_code)]
+pub mod http_util;
+
+/// Real fleet process management (server + agent + loopback LLM stub).
+/// Compiled separately per integration-test binary; not every target needs
+/// every lifecycle operation or fixture path.
+#[allow(dead_code)]
+pub mod fleet_proc;
+
+/// Deterministic OpenAI-compatible streaming stub.
+/// Suites use different scripting modes, so some control methods are unused
+/// within an individual integration-test binary.
+#[allow(dead_code)]
+pub mod llm_stub;
+
 /// Resolve a workspace-sibling binary from the same target dir as this
 /// test binary, trying `candidates` in priority order and returning the
 /// first one that exists.

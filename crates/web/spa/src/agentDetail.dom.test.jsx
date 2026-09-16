@@ -70,7 +70,10 @@ describe('AgentDetail direct resources',() => {
     expect(button('保存').disabled).toBe(true);
     fireEvent.change(screen.getByLabelText('prompt-how'),{target:{value:'FIRST'}}); fireEvent.click(button('保存'));
     await waitFor(()=>expect(api.apiPut.mock.calls[0][1].baseline.resource).toBeNull());
-    tab('Memory'); fireEvent.change(await screen.findByLabelText('文件内容 memory.md'),{target:{value:'NEW MEMORY'}}); fireEvent.click(button('保存'));
+    tab('Memory'); await screen.findByText('未配置，可新增文件或上传内容后保存。');
+    fireEvent.click(button('新增文件'));
+    fireEvent.change(screen.getByLabelText('文件路径'),{target:{value:'memory.md'}}); fireEvent.click(button('确认'));
+    fireEvent.change(await screen.findByLabelText('文件内容 memory.md'),{target:{value:'NEW MEMORY'}}); fireEvent.click(button('保存'));
     await waitFor(()=>expect(api.apiPut.mock.calls.at(-1)[0]).toBe('/api/agents/coder/resources/memory'));
   });
   it('displays read errors and never enables overwrite',async () => {

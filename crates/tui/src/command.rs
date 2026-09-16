@@ -177,21 +177,30 @@ impl CommandMenu {
     fn refilter(&mut self) {
         let q = self.query.trim().to_lowercase();
         let q = q.strip_prefix('/').unwrap_or(&q);
-        self.rows = COMMANDS
+        // Rank rows: name hits before description-only hits so `/agent`
+        // wins over `/cli` (whose description mentions "subagents") for the
+        // query "agent"; ties keep COMMANDS registration order.
+        let mut ranked = COMMANDS
             .iter()
             .enumerate()
-            .filter(|(_, (name, desc))| {
-                if q.is_empty() {
-                    return true;
-                }
-                let name_l = name.trim_start_matches('/').to_lowercase();
-                name_l.contains(q) || desc.to_lowercase().contains(q)
+            .filter_map(|(i, (name, desc))| {
+                let rank = if q.is_empty() {
+                    0
+                } else {
+                    let name_l = name.trim_start_matches('/').to_lowercase();
+                    if name_l.contains(q) {
+                        0
+                    } else if desc.to_lowercase().contains(q) {
+                        1
+                    } else {
+                        return None;
+                    }
+                };
+                Some((i, rank))
             })
-            // Name matches outrank description-only hits so `/agent` wins
-            // over `/cli` (whose description mentions "subagents") when the
-            // query is "agent"; ties keep COMMANDS registration order.
-            .map(|(i, _)| i)
-            .collect();
+            .collect::<Vec<_>>();
+        ranked.sort_by_key(|&(_, rank)| rank);
+        self.rows = ranked.into_iter().map(|(i, _)| i).collect();
         self.selected = if self.rows.is_empty() {
             0
         } else {
@@ -450,10 +459,11 @@ mod tests {
 
     #[test]
     fn agent_entry_is_listed_and_dispatches_to_the_picker() {
-        let (name, desc) = COMMANDS
+        let (entry, desc) = COMMANDS
             .iter()
             .find(|(n, _)| *n == "/agent")
             .expect("/agent must be a registered command");
+        assert_eq!(*entry, "/agent");
         assert!(desc.contains("agent"), "description names the feature");
         assert_eq!(dispatch("/agent"), Some(SlashAction::Agent));
         // The popup filter finds it from a partial query (and never matches
@@ -692,8 +702,8 @@ mod tests {
             }
         }
         // Query "ap" also matches "/config" (its description contains
-        // "api_key"), which sorts before "/ap" — move down once to it.
-        menu.as_mut().expect("menu open").move_down();
+        // "api_key"), but a name hit ranks first — "/ap" is already the
+        // highlighted row; moving down reaches the description hit.
         let (outcome, _quit) =
             handle_command_key(&mut menu, key(KeyCode::Enter, KeyModifiers::NONE));
         match outcome {
@@ -701,6 +711,20 @@ mod tests {
             other => panic!("expected Dispatch(Ap), got {:?}", other),
         }
         assert!(menu.is_none(), "popup closed after Enter-dispatch");
+
+        let mut menu = Some(CommandMenu::new());
+        for c in "ap".chars() {
+            if let Some(m) = menu.as_mut() {
+                m.on_char(c);
+            }
+        }
+        menu.as_mut().expect("menu open").move_down();
+        let (outcome, _quit) =
+            handle_command_key(&mut menu, key(KeyCode::Enter, KeyModifiers::NONE));
+        match outcome {
+            CommandOutcome::Dispatch(SlashAction::Config) => {}
+            other => panic!("expected Dispatch(Config) after move_down, got {:?}", other),
+        }
     }
 
     #[test]

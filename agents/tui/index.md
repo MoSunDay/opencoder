@@ -1,4 +1,4 @@
-Commit: f2d723ed2a32a5a394eac05f58bc5558e7cfe08f
+Commit: 30108c8b
 
 # tui 模块
 
@@ -9,10 +9,17 @@ ratatui + crossterm 交互界面。细节以代码为准。
 - `src/worker.rs` — worker actor 持 SessionState；事件桥接到 UI 通道
 - `src/key_handler.rs`、`src/keymap.rs` — 键盘分发与映射
 - `src/composer.rs`、`src/chat.rs`、`src/render.rs` — 输入、消息渲染、渲染入口
+- `src/agent_menu.rs` — `/agent` primary agent 选择器：目录 = builtin primary
+  (act/plan/command，排除 workflow) + `list_agents()` 文件卡（描述取
+  `agent_description`，回退 "Custom agent <name>"）；fuzzy 过滤与 SPA `@`
+  agent 菜单同语义；pick 产出 `/agent <name> `（经 composer 提交走 runner
+  控制头），自身不做 I/O
 - `src/notepad/` — 全屏文件树 + vim 编辑器
 - `src/vim/` — vim 引擎
 - `src/ts_mirror.rs` — tmux 会话冷启动恢复
-- `tests/` — 集成测试
+- `tests/` — 集成测试（`agent_mention_flow.rs` 钉 `/agent` 控制头切换 +
+  picker 键路径；`bootstrap_agent_override.rs` 钉默认 agent 三级链
+  `--agent` > config > "act"，legacy `active` marker 被忽略）
 
 ## 边界
 - 不持有 SessionState（worker 持有）；notepad/本地 `!cmd` 不进模型 context。

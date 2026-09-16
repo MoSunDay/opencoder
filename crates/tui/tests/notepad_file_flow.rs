@@ -165,7 +165,7 @@ async fn rename_file_flow() {
             assert_eq!(buf, "a.txt");
             assert!(err.is_none());
         }
-        other => panic!("expected rename input, got {:?}", v.tree.input),
+        other => panic!("expected rename input, got {other:?}"),
     }
     // Replace the pre-filled name with the new one.
     for _ in 0.."a.txt".len() {

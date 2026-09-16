@@ -79,31 +79,28 @@ fn agent_override_names_a_resolvable_file_agent() {
     );
 }
 
-/// Without an override, the active file-agent marker wins over the config
-/// default; with neither, the config default (then "act") decides.
+/// The legacy `active` marker file is no longer read: the default chain is
+/// `--agent` > config `agent.default` > builtin "act", so a leftover marker
+/// must not hijack fresh-session selection.
 #[test]
-fn without_override_the_marker_then_config_default_decide() {
+fn legacy_active_marker_is_ignored_config_default_decides() {
     let (dir, _g) = scoped_agents();
     write_file_agent(dir.path(), "writer", "Writer soul.");
 
-    // Marker tier: active file agent beats a non-empty config default.
+    // A leftover marker (even naming an existing agent) is ignored.
     std::fs::write(dir.path().join("active"), "writer").unwrap();
     assert_eq!(
         fresh_agent_name(&opts(None), &cfg_with_default("plan")),
-        "writer"
+        "plan",
+        "the config default must win over the ignored marker file"
     );
-    // Explicit --agent still outranks the marker.
+    // An explicit --agent still outranks the config default.
     assert_eq!(
         fresh_agent_name(&opts(Some("plan")), &cfg_with_default("plan")),
         "plan"
     );
 
-    // Config-default tier once the marker is gone.
-    std::fs::remove_file(dir.path().join("active")).unwrap();
-    assert_eq!(
-        fresh_agent_name(&opts(None), &cfg_with_default("plan")),
-        "plan"
-    );
-    // Final tier: nothing set anywhere -> builtin default "act".
+    // Final tier: even with the (ignored) marker still present, nothing
+    // set anywhere -> builtin default "act".
     assert_eq!(fresh_agent_name(&opts(None), &Config::default()), "act");
 }

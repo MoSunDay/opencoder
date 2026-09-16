@@ -8,11 +8,12 @@ use support::*;
 fn repair_retest_loop_preserves_rounds_and_uses_causal_feedback() {
     let mut r = run(fixture());
     for n in 1..=2 {
-        finish(
-            &mut r,
-            "fix",
-            json!({"fix-result":output(&format!("fix-{n}"),None)}),
-        );
+        let mut produced = output(&format!("fix-{n}"), None);
+        produced["artifacts"] = json!([{
+            "execution":{"id":format!("agent-fix-{n}"),"kind":"agent"},
+            "step":"fix","file":format!("patch-{n}.diff"),"sha256":"abc","bytes":42
+        }]);
+        finish(&mut r, "fix", json!({"fix-result":produced}));
         choose(&mut r, "after-fix", &["verify"], None);
         assert_eq!(
             r.instances[&visit(&r, "verify")].inputs["change"],
@@ -23,6 +24,17 @@ fn repair_retest_loop_preserves_rounds_and_uses_causal_feedback() {
             "verify",
             json!({"verification":output(if n==1{"still broken"}else{"verified fix-2"},Some(n==2))}),
         );
+        let execution = &r.instances[&visit(&r, "verify")]
+            .execution
+            .as_ref()
+            .unwrap()
+            .id;
+        let sources = &r.actions[execution].request["input"]["source_outputs"];
+        assert_eq!(sources.as_object().unwrap().len(), 1);
+        let source = &sources["change"];
+        assert_eq!(source["round"], n);
+        assert_eq!(source["value"], produced);
+        assert_eq!(source["id"], format!("fix~visit-{n:04}/fix-result"));
         if n == 1 {
             choose(&mut r, "after-verify", &["fix"], None);
             assert_eq!(

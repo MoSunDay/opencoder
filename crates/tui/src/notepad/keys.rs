@@ -209,7 +209,6 @@ fn handle_tree_input(view: &mut NotepadView, inp: TreeInput, k: KeyEvent) {
                         buf,
                         err: Some(format!("已存在同名文件或目录: {}", name)),
                     });
-                    return;
                 } else if std::fs::rename(&path, &target).is_ok() {
                     // Follow the rename in the editor if it had this file open.
                     if view.editor.file_path.as_deref() == Some(path.as_path()) {
@@ -222,7 +221,6 @@ fn handle_tree_input(view: &mut NotepadView, inp: TreeInput, k: KeyEvent) {
                         buf,
                         err: Some("重命名失败".to_string()),
                     });
-                    return;
                 }
             }
             KeyCode::Backspace => {

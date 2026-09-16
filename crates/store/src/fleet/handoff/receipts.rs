@@ -302,6 +302,17 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn execution_names_with_empty_ids_short_circuits() {
+        let store = store().await;
+        put_raw_assignment(&store, "agent-a", r#""target":"coder-x""#, "").await;
+        let names = store.execution_names(&[]).await.unwrap();
+        assert!(
+            names.is_empty(),
+            "an empty id list short-circuits to an empty map"
+        );
+    }
+
+    #[tokio::test]
     async fn execution_names_reads_assignments_written_by_prepare() {
         let store = store().await;
         let index = ExecutionIndex {

@@ -272,9 +272,15 @@ cargo test --workspace
 
 # 真实模型端到端契约测试（~3–5 min，需 API key）
 scripts/e2e-glm.sh
+
+# 仅跑某一层（--only cli|web）；E20 config 与 E21 todos 契约套件无 key 依赖，
+# 会随 cli/全量模式一起执行
+scripts/e2e-glm.sh --only cli
 ```
 
-测试分层规范见 [`rules/03-test-pyramid.md`](rules/03-test-pyramid.md)。
+todos 领域套件清单（validate 诊断 / 运行时事件目录 / 中断恢复 / web 生命周期）见
+[`agents/todos/index.md`](agents/todos/index.md)；测试分层规范见
+[`rules/03-test-pyramid.md`](rules/03-test-pyramid.md)。
 
 ## 📁 项目结构
 

@@ -1,3 +1,4 @@
+import { DeleteOutlined } from '@ant-design/icons';
 import { Conversations } from '@ant-design/x';
 import { Select, Spin } from 'antd';
 import { dialogsToItems } from './conversationItems.js';
@@ -10,11 +11,12 @@ export function DialogSidebar({
   dialogs,
   activeKey,
   onActiveChange,
+  onDelete,
   onNew,
   loading,
   disabled,
 }) {
-  const nodeOptions = explicitNodeOptions(nodes, 'agent');
+  const nodeOptions = explicitNodeOptions(nodes, 'operator');
 
   return (
     <div
@@ -46,6 +48,10 @@ export function DialogSidebar({
             items={dialogsToItems(dialogs)}
             activeKey={activeKey}
             onActiveChange={onActiveChange}
+            menu={(item) => ({
+              items: [{ key: 'delete', danger: true, icon: <DeleteOutlined />, label: '删除' }],
+              onClick: ({ key }) => { if (key === 'delete') onDelete?.(item.key); },
+            })}
             creation={{ label: '新建对话', onClick: onNew, disabled: disabled || !nodeSel }}
           />
         </Spin>

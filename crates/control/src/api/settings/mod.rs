@@ -70,11 +70,32 @@ pub async fn save_harness(
     }
 }
 
+pub async fn get_scheduling(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Response {
+    super::response(
+        state
+            .hub
+            .call(
+                &id,
+                NodeOperation::Maintenance {
+                    command: ExecutionCommand {
+                        action: "scheduling".into(),
+                        input: json!({}),
+                    },
+                },
+            )
+            .await,
+    )
+}
+
 pub async fn save_scheduling(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
     Json(settings): Json<NodeScheduling>,
 ) -> Response {
+    let settings = settings.normalized();
     if let Err(error) = settings.validate() {
         return super::error_400(error);
     }

@@ -196,3 +196,30 @@ fn wasm_only_dags_do_not_depend_on_unrelated_agent_pools() {
     assignment.request.kind = ExecutionKind::Todos;
     assert!(resources::requires_agent_pool(&assignment));
 }
+
+#[test]
+fn private_resources_are_pinned_but_unpublished_staging_is_excluded() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("export");
+    let target = dir.path().join("accepted");
+    resource(&source, "tools", "agent-private", "run", "saved");
+    std::fs::write(
+        source.join("tools/agent-private/meta.json"),
+        json!({"current":1,"history":[1],"owner_agent":"alpha"}).to_string(),
+    )
+    .unwrap();
+    std::fs::create_dir_all(source.join("tools/.staging~incomplete/v2")).unwrap();
+    resources::pin(Some(&source), &target).unwrap();
+    assert!(!target.join("tools/.staging~incomplete").exists());
+    let meta: opencoder_core::agent::ResourceMeta = serde_json::from_slice(
+        &std::fs::read(target.join("tools/agent-private/meta.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(meta.owner_agent.as_deref(), Some("alpha"));
+    std::fs::write(source.join("tools/agent-private/v1/run"), "changed").unwrap();
+    resources::pin(Some(&source), &target).unwrap();
+    assert_eq!(
+        std::fs::read_to_string(target.join("tools/agent-private/v1/run")).unwrap(),
+        "saved"
+    );
+}

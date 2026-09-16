@@ -28,6 +28,9 @@ export function Launch({ plans, onCreated, initialPlan }) {
         : <Form.Item name="references" label="参考已有计划（可选）"><Select mode="multiple" options={options} placeholder="用于规划参考" /></Form.Item>}
       <Form.Item name="objective" label="目标和交付物" rules={[{ required: true, whitespace: true, message: '请输入目标和交付物' }]}><Input.TextArea rows={4} placeholder="希望完成什么？哪些结果能证明任务完成？" /></Form.Item>
       <Form.Item name="node" label="大脑所在节点" rules={[{ required: true, message: '请选择节点' }]}><Select options={explicitNodeOptions(nodes, 'brain')} placeholder="选择持久保存本次运行的节点" /></Form.Item>
+      <Form.Item name="documentInput" label="input 名称" initialValue="document"><Input /></Form.Item>
+      <Form.Item name="documentName" label="文档名称"><Input aria-label="文档名称" placeholder="例如：需求说明" /></Form.Item>
+      <Form.Item name="documentMarkdown" label="Markdown 正文"><Input.TextArea aria-label="Markdown 正文" rows={6} /></Form.Item>
       <Collapse size="small" ghost className="brain-launch-advanced" items={[{ key: 'advanced', label: '高级选项', children: <Form.Item name="inputs" label="初始输入（可选）" tooltip="为计划已声明的输入端口预填参数（JSON 对象）。普通任务无需填写，运行中会按需询问。"><Input.TextArea rows={3} spellCheck={false} placeholder="留空即可，运行中会按需询问" /></Form.Item> }]} />
       <Space><Button type="primary" htmlType="submit" loading={busy}>{mode === 'dynamic' ? '规划并执行' : '执行指定版本'}</Button></Space>
     </Form>

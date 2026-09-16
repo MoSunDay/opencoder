@@ -53,9 +53,9 @@ const teamsFixture = {
 
 const executionsFixture = {
   executions: [
-    { id: 'ex-running', kind: 'agent', status: 'running', created_at: T0, node_id: 'n1' },
+    { id: 'ex-running', kind: 'agent', name: 'coder-x', status: 'running', created_at: T0, node_id: 'n1' },
     { id: 'ex-maint', kind: 'maintenance', status: 'done', created_at: T0, node_id: 'n1' },
-    { id: 'ex-error', kind: 'team', status: 'error', created_at: T0, node_id: 'n2' },
+    { id: 'ex-error', kind: 'team', name: 't1', status: 'error', created_at: T0, node_id: 'n2' },
   ],
 };
 
@@ -258,10 +258,21 @@ describe('TopicsPanel', () => {
     expect(screen.queryByText('ex-maint')).toBeNull(); // maintenance 行同样被 Team 筛选滤掉
   });
 
+  it('renders the name column with a dash fallback and titles the drawer by name', async () => {
+    setState({ page: 'topics' });
+    render(<TopicsPanel onNotice={() => {}} />);
+    expect(screen.getByRole('columnheader', { name: '名称' })).toBeTruthy();
+    await screen.findByText('coder-x'); // dispatch-time name rendered as-is
+    const unnamed = screen.getByText('ex-maint').closest('tr');
+    expect(unnamed.textContent).toContain('-'); // missing name falls back to '-'
+  });
+
   it('hits cancel then resume on the detail drawer action buttons', async () => {
+
     setState({ page: 'topics' });
     render(<TopicsPanel onNotice={() => {}} />);
     fireEvent.click(await screen.findByText('ex-running')); // ID link opens ExecutionDetail
+    expect(document.querySelector('.ant-drawer-title')?.textContent).toBe('coder-x (ex-running)');
     expect(findButton('刷新明细')).toBeTruthy();
     expect(findButton('取消（终止）').disabled).toBe(false); // running → cancel armed
     expect(findButton('在原节点恢复').disabled).toBe(true); // running → resume disarmed

@@ -36,12 +36,12 @@ async function main() {
   assert.equal(await wrapper.evaluate((node) => node.style.width), '100%');
   assert.equal(await dialog.getByLabel('计划名称').count(), 0);
   const beforeSaveRequests = requests.length;
-  await page.getByRole('button', { name: '修复—复测—发布示例' }).click();
+  await page.getByRole('button', { name: '修复—复测循环示例' }).click();
   await page.getByLabel('要做什么').fill('修复并提交可复测的证据');
   await page.getByRole('button', { name: '移动画布节点' }).count().catch(() => 0);
   const cacheKey = await page.evaluate(() => Object.keys(localStorage).find((key) => key.startsWith('oc:brain:plan-draft:')));
   const cached = await page.evaluate((key) => JSON.parse(localStorage.getItem(key)), cacheKey);
-  assert.equal(cached.version.plan.flow.transitions.length, 4);
+  assert.equal(cached.version.plan.routes.length, 2);
   assert.equal(requests.length, beforeSaveRequests);
   await page.getByRole('button', { name: '关闭画布' }).click();
   await page.getByRole('button', { name: '新建计划' }).click();

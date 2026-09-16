@@ -231,7 +231,7 @@ export function EmptyHint({ text }) {
   return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={text} style={{ marginBlock: 24 }} />;
 }
 
-export function TranscriptView({ turns, usage, status, error, emptyText }) {
+export function TranscriptView({ turns, usage, status, error, emptyText, active = true, autoScroll = true }) {
   const empty = isEmptyTranscript(turns, usage);
   // Collapse-all epoch: Ctrl/Cmd+L (or the ⤒ link) bumps the key on
   // Bubble.List, remounting every bubble so all Collapses reset closed —
@@ -239,6 +239,7 @@ export function TranscriptView({ turns, usage, status, error, emptyText }) {
   // too but hold no local state, so nothing visually changes for them.
   const [epoch, setEpoch] = useState(0);
   useEffect(() => {
+    if (!active) return undefined;
     const onKey = (e) => {
       if (e.key === 'l' && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
@@ -247,7 +248,7 @@ export function TranscriptView({ turns, usage, status, error, emptyText }) {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [epoch]);
+  }, [epoch, active]);
   return (
     <div>
       {empty ? (
@@ -263,7 +264,7 @@ export function TranscriptView({ turns, usage, status, error, emptyText }) {
               ⤒ 收起
             </Typography.Link>
           </div>
-          <Bubble.List key={epoch} items={itemsFromTurns(turns)} role={BUBBLE_ROLES} autoScroll />
+          <Bubble.List key={epoch} items={itemsFromTurns(turns)} role={BUBBLE_ROLES} autoScroll={autoScroll} />
         </>
       )}
       <UsageFooter usage={usage} />

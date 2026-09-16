@@ -76,5 +76,24 @@ async fn custom_agent_publication_uses_configured_root_without_cross_server_leak
         let meta = api(app, "GET", &format!("/api/agents/{name}/meta"), Value::Null).await;
         assert!(meta.to_string().contains(name));
         assert!(!meta.to_string().contains(other));
+        let path = format!("/api/agents/{name}/resources/prompts");
+        let view = api(app, "GET", &path, Value::Null).await;
+        let saved = api(app, "PUT", &path, json!({"baseline": view["baseline"], "files": [{"path":"how.md", "content_b64":base64::engine::general_purpose::STANDARD.encode("method")}]})).await;
+        assert_eq!(saved["baseline"]["version"], 2);
+        let private = saved["baseline"]["resource"].as_str().unwrap();
+        assert!(root
+            .join("prompts")
+            .join(private)
+            .join("v2/how.md")
+            .is_file());
+        let restored = api(
+            app,
+            "POST",
+            &format!("{path}/restore"),
+            json!({"baseline":saved["baseline"], "version":1}),
+        )
+        .await;
+        assert_eq!(restored["baseline"]["version"], 3);
+        assert_eq!(restored["files"].as_array().unwrap().len(), 1);
     }
 }

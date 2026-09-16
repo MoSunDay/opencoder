@@ -109,7 +109,17 @@ pub async fn save_dag(State(state): State<Arc<AppState>>, Json(body): Json<Value
     if let Err(errors) = opencoder_dag::validate(&spec) {
         return error_400(errors.join("; "));
     }
-    let definition = json!({"id":spec.name,"name":spec.name,"spec":spec});
+    // A rolling release may have multiple Server processes saving the same
+    // definition. Serialize the read/replace so creation time stays stable.
+    let _lock = match state.fleet.request_lock("dag_definition", &spec.name).await {
+        Ok(lock) => lock,
+        Err(error) => return error_500(error.to_string()),
+    };
+    let previous = match state.fleet.definition("dag", &spec.name).await {
+        Ok(previous) => previous,
+        Err(error) => return error_500(error.to_string()),
+    };
+    let definition = dag_definition(&spec, previous.as_ref(), opencoder_core::message::now_ms());
     match state
         .fleet
         .put_definition("dag", &spec.name, &definition)
@@ -118,6 +128,21 @@ pub async fn save_dag(State(state): State<Arc<AppState>>, Json(body): Json<Value
         Ok(()) => response(RpcReply::ok(definition)),
         Err(error) => error_500(error.to_string()),
     }
+}
+
+fn dag_definition(spec: &opencoder_dag::DagSpec, previous: Option<&Value>, now: i64) -> Value {
+    // Legacy definitions have no timestamps; their first save starts tracking
+    // them. Client-supplied timestamps never override server-owned metadata.
+    let created_at = previous
+        .and_then(|value| value["created_at"].as_i64())
+        .unwrap_or(now);
+    let updated_at = previous
+        .and_then(|value| value["updated_at"].as_i64())
+        .map_or(now, |last| now.max(last.saturating_add(1)));
+    json!({
+        "id": spec.name, "name": spec.name, "spec": spec,
+        "created_at": created_at, "updated_at": updated_at,
+    })
 }
 
 /// Resolve immutable global definitions before placement. Node-side validation

@@ -214,10 +214,32 @@ pub async fn save(
     }
     meta["versions"].as_array_mut().expect("validated versions").push(json!({"version":next,"note":body["note"].as_str().unwrap_or(""),"created_at":now_ms()}));
     meta["current"] = json!(next);
+    // Retention: only the most recent MAX_TEMPLATE_VERSIONS versions survive
+    // and `current` always keeps one of the slots. Metadata is written before
+    // the pruned directories go away, so a crash leaves orphan directories
+    // (tolerated by `next_version`), never dangling metadata references.
+    let pruned = prunable_versions(
+        meta["versions"].as_array().expect("validated versions"),
+        Some(&next),
+    );
+    if !pruned.is_empty() {
+        meta["versions"]
+            .as_array_mut()
+            .expect("validated versions")
+            .retain(|v| {
+                v.get("version")
+                    .and_then(Value::as_str)
+                    .is_none_or(|name| !pruned.iter().any(|p| p == name))
+            });
+    }
     if let Err(e) = share_fs::atomic_write_json(&path, &meta) {
         return error_500(format!("发布版本失败: {e:#}"));
     }
-    Json(json!({"version":next,"template":meta,"revision":revision(&meta)})).into_response()
+    for stale in &pruned {
+        let _ = tokio::fs::remove_dir_all(dir.join(stale)).await;
+    }
+    Json(json!({"version":next,"pruned":pruned,"template":meta,"revision":revision(&meta)}))
+        .into_response()
 }
 
 #[derive(Default, Deserialize)]

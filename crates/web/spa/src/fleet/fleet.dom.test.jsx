@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import '../test/setup-dom.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { err } from '../notice.js';
 import { ExecutionsPanel } from './executions.jsx';
 import { ExecutionTranscript, appendEvent, messageRefreshMode } from './detail.jsx';
@@ -19,6 +19,18 @@ vi.mock('./detail.jsx', async (importOriginal) => ({
 const node = { id: 'n1', name: 'worker', online: true, kinds: ['agent'], maintenance_agent_id: 'maintainer-n1', snapshot: { ready: true, cpu_capacity: 2, active_agent_loops: 3 } };
 afterEach(() => { cleanup(); vi.resetAllMocks(); vi.unstubAllGlobals(); });
 describe('fleet execution boundaries', () => {
+  it('renders the dispatch-time name column with a dash fallback', async () => {
+    apiGet.mockImplementation(async (path) => path === '/api/nodes' ? { nodes: [node] } : { executions: [
+      { id: 'dag-name-1', kind: 'dag', name: 'etl-demo', created_at: 1, node_id: 'n1', status: 'running' },
+      { id: 'agent-name-1', kind: 'agent', created_at: 2, node_id: 'n1', status: 'idle' },
+    ] });
+    render(<ExecutionsPanel onNotice={vi.fn()} />);
+    expect(screen.getByRole('columnheader', { name: '名称' })).toBeTruthy();
+    expect(await screen.findByText('etl-demo')).toBeTruthy(); // snapshot name rendered as-is
+    const unnamed = screen.getByText('agent-name-1').closest('tr');
+    expect(within(unnamed).getByText('-')).toBeTruthy(); // missing name falls back to '-'
+  });
+
   it('keeps execution browsing focused on filtering and refresh', async () => {
     apiGet.mockImplementation(async (path) => path === '/api/nodes' ? { nodes: [node] } : { executions: [] });
     const onNotice = vi.fn();

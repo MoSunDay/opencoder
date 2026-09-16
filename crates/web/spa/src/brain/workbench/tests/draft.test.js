@@ -13,10 +13,10 @@ it('separates user, server and plan-version drafts and rejects damaged cache wit
 it('projects library entities, actions and explicit return edges without flattening the loop', () => {
   const capabilities = [{ id: 'cap', kind: 'agent', target: 'act', summary: '执行实体' }];
   const plan = repairPlan(capabilities); const view = graph(plan, [], true, capabilities);
-  expect(view.nodes.filter((n) => n.data.entity).map((n) => n.id)).toEqual(['entity:cap']);
-  expect(view.nodes.filter((n) => n.data.step)).toHaveLength(3);
-  expect(view.edges).toContainEqual(expect.objectContaining({ source: 'verify', target: 'fix', label: '复测发现问题，回到修复' }));
+  expect(view.nodes.some((n) => n.id === 'route:after-verify')).toBe(true);
+  expect(view.nodes.filter((n) => n.data.step)).toHaveLength(2);
+  expect(view.edges).toContainEqual(expect.objectContaining({ source: 'route:after-verify', target: 'input:feedback' }));
   const draft = createDraft(); draft.version.plan = plan; draft.metadata = { title: ' 修复 ', summary: ' 复测后发布 ' };
   expect(submission(draft, capabilities).plan.title).toBe('修复');
-  expect(() => submission(draft, [])).toThrow('选择能力库');
+  expect(() => submission(draft, [])).toThrow('注册能力不可用');
 });

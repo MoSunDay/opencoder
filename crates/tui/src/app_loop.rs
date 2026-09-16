@@ -499,6 +499,7 @@ pub(crate) async fn dispatch_command(
     pending_images: &mut Vec<(String, String)>,
     history: &mut Vec<String>,
     hist_idx: &mut Option<usize>,
+    agent_menu: &mut Option<crate::agent_menu::AgentMenu>,
 ) -> LoopFlow {
     let (outcome, quit) = handle_command_key(command_menu, k);
     if quit {
@@ -539,6 +540,7 @@ pub(crate) async fn dispatch_command(
                 pending_images,
                 history,
                 hist_idx,
+                agent_menu,
             )
             .await;
         }

@@ -41,12 +41,6 @@ pub const CAP_UPDATED: &str = r#"{"capability_type":"tool-usage","summary":"upda
     "input_desc":"a work request","output_desc":"completed work",
     "eng_inputs":["exemplar input"]}"#;
 
-/// Prompts pool the alpha card activates against (activation preflight
-/// resolves `current.prompt` to a live pool version — see web api_agents.rs).
-/// `content_b64` is base64("ctl pack body").
-pub const PROMPT_PACK: &str = r#"{"name":"pack","files":[
-    {"path":"soul.md","content_b64":"Y3RsIHBhY2sgYm9keQ=="}]}"#;
-
 pub const CARD: &str = r#"{"name":"alpha","current":{"prompt":"pack"}}"#;
 
 /// One real control plane per test: own tempdir workspace (never the

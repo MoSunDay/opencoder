@@ -36,7 +36,10 @@ pub fn build_app(state: Arc<AppState>, token: Option<String>, web: bool) -> Rout
         .route("/api/users/:name", axum::routing::delete(api::users::delete))
         .route("/api/nodes", get(catalog::nodes))
         .route("/api/nodes/:id", axum::routing::delete(catalog::unregister))
-        .route("/api/nodes/:id/scheduling", put(api::settings::save_scheduling))
+        .route(
+            "/api/nodes/:id/scheduling",
+            get(api::settings::get_scheduling).put(api::settings::save_scheduling),
+        )
         .route("/api/harnesses", get(api::settings::get_harnesses))
         .route("/api/harnesses/:name", put(api::settings::save_harness))
         .route("/api/harnesses/codex/profiles", get(api::settings::registered::profiles))
@@ -67,7 +70,9 @@ pub fn build_app(state: Arc<AppState>, token: Option<String>, web: bool) -> Rout
         .route("/api/teams", get(catalog::teams).post(catalog::save_team))
         .route("/api/dag/defs", get(catalog::dag_defs).post(catalog::save_dag))
         .route("/api/agents", get(api_agents::list).post(api_agents::create))
-        .route("/api/agents/active", patch(api_agents::patch_active))
+        .route("/api/agents/:name/resources/:cat", get(api_agents::resources::get).put(api_agents::resources::put)
+            .layer(axum::extract::DefaultBodyLimit::max(3 * 1024 * 1024)))
+        .route("/api/agents/:name/resources/:cat/restore", post(api_agents::resources::restore))
         .route("/api/agents/:name/meta", get(api_agents::meta))
         .route("/api/agents/:name", put(api_agents::update).delete(api_agents::delete))
         .route("/api/agents/resources/:cat", get(api_agent_resources::list).post(api_agent_resources::create))

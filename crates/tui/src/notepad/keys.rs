@@ -55,6 +55,14 @@ fn handle_tree_key(view: &mut NotepadView, k: KeyEvent) -> NotepadOutcome {
             start_create(view);
             NotepadOutcome::Consumed
         }
+        KeyCode::Char('N') => {
+            start_create_dir(view);
+            NotepadOutcome::Consumed
+        }
+        KeyCode::Char('r') => {
+            start_rename(view);
+            NotepadOutcome::Consumed
+        }
         KeyCode::Char('d') => {
             start_delete(view);
             NotepadOutcome::Consumed
@@ -101,6 +109,36 @@ fn start_create(view: &mut NotepadView) {
     }
 }
 
+/// Start a rename inline: the input is pre-filled with the current name so the
+/// user edits it rather than retyping it (VSCode-style F2).
+fn start_rename(view: &mut NotepadView) {
+    if let Some(node) = view.tree.selected_node().cloned() {
+        view.tree.input = Some(TreeInput::Rename {
+            path: node.path.clone(),
+            buf: node.name.clone(),
+            err: None,
+        });
+    }
+}
+
+/// Start a directory creation: inside the selected dir, or next to the
+/// selected file. `N` (shift-n) — plain `n` stays create-file.
+fn start_create_dir(view: &mut NotepadView) {
+    if let Some(node) = view.tree.selected_node() {
+        let parent = if node.is_dir {
+            node.path.clone()
+        } else if let Some(p) = node.path.parent() {
+            p.to_path_buf()
+        } else {
+            node.path.clone()
+        };
+        view.tree.input = Some(TreeInput::CreateDir {
+            buf: String::new(),
+            parent,
+        });
+    }
+}
+
 fn start_delete(view: &mut NotepadView) {
     if let Some(node) = view.tree.selected_node().cloned() {
         view.tree.input = Some(TreeInput::DeleteConfirm { path: node.path });
@@ -128,6 +166,80 @@ fn handle_tree_input(view: &mut NotepadView, inp: TreeInput, k: KeyEvent) {
             KeyCode::Char(c) if !k.modifiers.contains(KeyModifiers::CONTROL) => {
                 buf.push(c);
                 view.tree.input = Some(TreeInput::Create { buf, parent });
+            }
+            _ => {}
+        },
+        TreeInput::CreateDir { mut buf, parent } => match k.code {
+            KeyCode::Esc => {}
+            KeyCode::Enter => {
+                if !buf.trim().is_empty() {
+                    let _ = std::fs::create_dir_all(parent.join(buf.trim()));
+                    view.tree.rebuild(&view.workdir);
+                }
+            }
+            KeyCode::Backspace => {
+                buf.pop();
+                view.tree.input = Some(TreeInput::CreateDir { buf, parent });
+            }
+            KeyCode::Char(c) if !k.modifiers.contains(KeyModifiers::CONTROL) => {
+                buf.push(c);
+                view.tree.input = Some(TreeInput::CreateDir { buf, parent });
+            }
+            _ => {}
+        },
+        TreeInput::Rename { path, mut buf, err } => match k.code {
+            KeyCode::Esc => {}
+            KeyCode::Enter => {
+                let name = buf.trim().to_string();
+                if name.is_empty() {
+                    view.tree.input = Some(TreeInput::Rename { path, buf, err });
+                    return;
+                }
+                let Some(parent) = path.parent().map(|p| p.to_path_buf()) else {
+                    return;
+                };
+                let target = parent.join(&name);
+                if target == path {
+                    // Same name — nothing to do, just close the input.
+                } else if target.exists() {
+                    // Reject visibly and keep the input open (and the buffer
+                    // intact) so the user can pick another name.
+                    view.tree.input = Some(TreeInput::Rename {
+                        path,
+                        buf,
+                        err: Some(format!("已存在同名文件或目录: {}", name)),
+                    });
+                    return;
+                } else if std::fs::rename(&path, &target).is_ok() {
+                    // Follow the rename in the editor if it had this file open.
+                    if view.editor.file_path.as_deref() == Some(path.as_path()) {
+                        view.editor.load(&target);
+                    }
+                    view.tree.rebuild(&view.workdir);
+                } else {
+                    view.tree.input = Some(TreeInput::Rename {
+                        path,
+                        buf,
+                        err: Some("重命名失败".to_string()),
+                    });
+                    return;
+                }
+            }
+            KeyCode::Backspace => {
+                buf.pop();
+                view.tree.input = Some(TreeInput::Rename {
+                    path,
+                    buf,
+                    err: None,
+                });
+            }
+            KeyCode::Char(c) if !k.modifiers.contains(KeyModifiers::CONTROL) => {
+                buf.push(c);
+                view.tree.input = Some(TreeInput::Rename {
+                    path,
+                    buf,
+                    err: None,
+                });
             }
             _ => {}
         },
@@ -521,6 +633,9 @@ mod tests {
     fn editor_j_moves_across_soft_wrapped_rows() {
         let d = tempfile::tempdir().unwrap();
         let mut v = make_view(d.path());
+        // Pinned viewport: with the host tty (width in 81..=159) 160 chars wrap
+        // to exactly 2 rows and the second `j` legitimately has nowhere to go.
+        v.size_override = Some((80, 24));
         v.focus = Focus::Editor;
         v.editor.vim = crate::vim::VimState::new("x".repeat(160));
         v.editor.vim.mode = VimMode::Normal;

@@ -24,7 +24,6 @@ export const EXECUTOR_OPTIONS = [
   { value: 'agent', label: '单Agent' },
   { value: 'team', label: '团队' },
   { value: 'dag', label: 'DAG' },
-  { value: 'brain', label: '大脑' },
 ];
 
 /// Build the executor slice of a create/patch body from form values (pure):
@@ -121,7 +120,7 @@ function CreateTodoModal({ open, overview, onCancel, onNotice, onCreated }) {
         <Form.Item name="milestone_id" label="里程碑">
           <Select {...searchSelect} placeholder="可不关联里程碑" options={msOptions} aria-label="milestone_id" />
         </Form.Item>
-        <Form.Item name="executor_kind" label="执行器" tooltip="agent 直驱会话；team/dag 走本地多人/DAG；brain 由能力库路由">
+        <Form.Item name="executor_kind" label="执行器" tooltip="agent 直驱会话；team/dag 走本地多人/DAG。大脑编排请使用大脑工作台的 v2 计划">
           <Select aria-label="executor_kind" options={EXECUTOR_OPTIONS} style={{ width: 160 }} />
         </Form.Item>
         {kind === 'agent' ? (
@@ -132,17 +131,17 @@ function CreateTodoModal({ open, overview, onCancel, onNotice, onCreated }) {
           <>
             <Form.Item
               name="executor_ref"
-              label={kind === 'brain' ? '钉定能力 id' : '目标名'}
-              tooltip={kind === 'brain' ? '留空则每次执行时由大脑按标题/草稿自动路由' : '命名团队 / DAG 定义；留空则只看内联定义'}
+              label="目标名"
+              tooltip="命名团队 / DAG 定义；留空则只看内联定义"
             >
-              <Input placeholder={kind === 'brain' ? '留空 = 自动路由' : '可留空'} style={{ width: 240 }} />
+              <Input placeholder="可留空" style={{ width: 240 }} />
             </Form.Item>
             <Form.Item
               name="executor_spec"
-              label={kind === 'brain' ? '路由表 JSON' : '内联定义 JSON'}
-              tooltip={kind === 'brain' ? '{"routes":[…],"default":{…}}，可留空' : 'team 定义 / DagSpec；留空则按目标名解析'}
+              label="内联定义 JSON"
+              tooltip="team 定义 / DagSpec；留空则按目标名解析"
             >
-              <TextArea rows={4} placeholder={kind === 'brain' ? '{"routes":[]}' : '{"name":"…","captain":{…}} / {"name":"…","steps":[…]}'} aria-label="executor_spec" />
+              <TextArea rows={4} placeholder='{"name":"…","captain":{…}} / {"name":"…","steps":[…]}'  aria-label="executor_spec" />
             </Form.Item>
           </>
         )}

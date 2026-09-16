@@ -96,6 +96,20 @@ const openTab = async (name) => {
 };
 
 describe('ProjectPanel', () => {
+  it('renders the PAGE_META page header above the four tabs', async () => {
+    const { container } = mountPanel();
+    // PageShell header title + desc from nav.js PAGE_META.project, pinned
+    // verbatim (same approach as progressPanel.dom.test.jsx) — this is the
+    // page's restored H1-equivalent.
+    expect(container.querySelector('.oc-page-title')?.textContent).toBe('项目');
+    expect(container.querySelector('.oc-page-desc')?.textContent).toBe('目标、里程碑与 TODO 的用户策展跟踪');
+    expect(screen.getByRole('heading', { name: '项目' })).toBeTruthy();
+    // The four tabs still render below the header.
+    await screen.findByText('工作流：');
+    const labels = [...document.querySelectorAll('.ant-tabs-tab')].map((t) => t.textContent);
+    expect(labels).toEqual(['总览', '项目目标', '里程碑', 'TODO']);
+  });
+
   it('renders the four tabs and the overview counters', async () => {
     mountPanel();
     await screen.findByText('工作流：');

@@ -6,7 +6,7 @@ import { capabilityBody, capabilityForm, needsTargetSave } from './model.js';
 import { fetchTargetOptions } from './targetOptions.js';
 
 const required = [{ required: true, whitespace: true, message: '请填写此项' }];
-const TARGET_KIND_OPTIONS = KINDS.filter((kind) => ['agent', 'team', 'dag', 'todos'].includes(kind.value));
+const TARGET_KIND_OPTIONS = KINDS.filter((kind) => ['agent', 'team', 'dag', 'todos', 'operator'].includes(kind.value));
 
 function CapabilityEditorSession({ entry, onClose, onSaved }) {
   const [form] = Form.useForm();

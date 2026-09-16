@@ -1,30 +1,14 @@
-Commit: bf757d2e8688496f8c1be8fc8926dbd9fb2e3c21
+Commit: f2d723ed2a32a5a394eac05f58bc5558e7cfe08f
 
 # team 模块
 
-可嵌入多 agent 讨论状态机，不决定节点调度。
+团队目录与消息扇出运行时；captain 是唯一规划者，成员恒 act 模式。
 
-## 关键路径
-
-- `crates/team/src/dispatcher.rs` — TeamDispatcher::ask 接缝；旧 NodeDispatcher 兼容
-- `crates/team/src/runtime.rs` + `runtime/stages.rs` — plan/sub-turn/closing 状态机
-- `crates/team/src/cursor.rs` — 从持久化计划/结果/summary 推导恢复位置
-- `crates/team/src/decide.rs` — 校验队长 JSON 决策
-- `crates/team/src/prompts.rs` — 计划/回答/对齐/总结提示
-- `crates/team/src/layout.rs` — 团队名与 topic 校验（ULID、team-/system-）
-- `crates/team/src/fs_store/` — 目录 IO；rename 原子替换、读取限尺寸
-- `crates/team/src/terminal.rs` — 统一写终态
-- `crates/team/src/profile.rs` — 成员能力画像（best-effort）
-- 目录形状 `<team_root>/<team>/<topic>/team.json` 及逐轮 plan/result/summary
+## 索引
+- `crates/team/src/runtime.rs` — plan/sub-turn/closing 状态机
+- `crates/team/src/decide.rs`、`src/prompts.rs` — 决策校验与提示
+- `crates/team/src/fs_store/` — 目录 IO；`<team>/<topic>/team.json` 布局
+- `crates/team/tests/topic_contract_flow.rs` — 话题推进合约回归
 
 ## 边界
-
-- system 团队执行已退役：control 与 worker 均拒绝。
-- 权威进度在 worker 本地团队目录；`team_topic_runs` 仅运行台账。
-- 成员以 agent 名标识（`MemberRef.node_id = name = agent`，团队内唯一）；不经 NFS 共享话题内容。
-- 成员 `capabilities` 是控制面 resolve 固化的大脑能力 summary 快照（非运行时画像）。
-
-## 相关
-
-- [control](../control/index.md) 团队定义与选点；[worker](../worker/index.md) 执行
-- [Agent 平台](../../features/agent-platform/index.md)
+- 权威进度在 worker 本地团队目录；成员以 agent 名标识。

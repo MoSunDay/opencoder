@@ -12,19 +12,19 @@ use serde::{Deserialize, Serialize};
 use crate::config::Config;
 
 pub mod compose;
+mod memory;
 pub mod meta;
 pub mod resource;
 
 pub use compose::compose_prompt;
 pub use meta::{
-    active_agent, agent_dir, agents_dir, list_agents, read_agent_meta, set_active_agent,
-    set_active_agent_checked, set_agents_dir_override, validate_agent_name, AgentHistoryEntry,
-    AgentMeta, AgentReferences, AgentRefs,
+    agent_description, agent_dir, agents_dir, list_agents, read_agent_meta, set_agents_dir_override,
+    validate_agent_name, AgentHistoryEntry, AgentMeta, AgentReferences, AgentRefs,
 };
 pub use resource::{
-    active_skill_roots, active_tools_dirs, agent_skill_roots, agent_tools_dirs, all_tools_dirs,
-    category_dir, list_resources, read_resource_meta, resource_current_version_dir,
-    resource_version_dir, tools_paths, validate_resource_name, ResourceMeta, AGENT_CATEGORIES,
+    agent_skill_roots, agent_tools_dirs, all_tools_dirs, category_dir, list_resources,
+    read_resource_meta, resource_current_version_dir, resource_version_dir, tools_paths,
+    validate_resource_name, ResourceMeta, AGENT_CATEGORIES,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -114,21 +114,23 @@ fn resolve_file_agent(name: &str) -> Option<Agent> {
     if prompt.is_empty() {
         return None; // all sections missing/blank — not a real agent
     }
-    // Shared memory pool: a resolving ref appends a `# Memory` section.
+    // Shared memory pool: a resolving ref appends a `# Memory` section —
+    // every non-hidden `*.md` in the version dir (recursively), ordered
+    // by relative path, joined by one blank line, capped at 200 KiB (see
+    // `memory::MEMORY_MAX_BYTES`). A single-`memory.md` pool renders
+    // exactly as the old single-file read.
     if let Some(memory_ref) = card.current.memory.as_deref() {
         if let Some(body) = meta::resource_current_version_dir("memory", memory_ref)
-            .and_then(|d| std::fs::read_to_string(d.join("memory.md")).ok())
+            .and_then(|dir| memory::section_body(&dir))
         {
             prompt.push_str("\n\n# Memory\n");
-            prompt.push_str(body.trim());
+            prompt.push_str(&body);
         }
     }
     // Description: the first non-empty soul line (a one-line identity),
-    // else a stable generic label.
-    let description = soul
-        .as_deref()
-        .and_then(|s| s.lines().map(str::trim).find(|l| !l.is_empty()))
-        .map(str::to_string)
+    // else a stable generic label — derived through meta::agent_description
+    // so the web card listing and the TUI picker share one implementation.
+    let description = meta::agent_description(name)
         .unwrap_or_else(|| format!("Custom agent {name}"));
     Some(Agent {
         name: name.into(),
@@ -140,17 +142,13 @@ fn resolve_file_agent(name: &str) -> Option<Agent> {
     })
 }
 
-/// The effective default agent name for a fresh session:
-/// `cli_override` > the active file agent ([`meta::active_agent`]) >
-/// `cfg.agent.default` (when non-empty) > `"act"`. Blank strings at any
-/// tier are skipped (an empty CLI flag or config value must not win over a
-/// real resolution).
+/// The effective default agent name for a fresh session, a three-tier
+/// chain: `cli_override` > `cfg.agent.default` (when non-empty) > `"act"`.
+/// Blank strings at any tier are skipped (an empty CLI flag or config
+/// value must not win over a real resolution).
 pub fn effective_default_agent(cli_override: Option<&str>, cfg: &Config) -> String {
     if let Some(o) = cli_override.map(str::trim).filter(|s| !s.is_empty()) {
         return o.to_string();
-    }
-    if let Some(active) = meta::active_agent() {
-        return active;
     }
     let cfg_default = cfg.agent.default.trim();
     if !cfg_default.is_empty() {

@@ -1,12 +1,5 @@
-//! Pure decision-tree domain for the brain's dynamic planner.
-//!
-//! A [`DecisionTree`] routes a live situation (one embedding) to exactly one
-//! capability: every branch node carries a short discriminative `topic`
-//! whose embedding is attached at plan time, and dispatch walks from the
-//! root taking the `yes` child whenever `cosine(situation, topic) ≥
-//! threshold`. Everything here is pure — validation, the topic walk, vector
-//! attachment and dispatch have no I/O, so the whole routing contract is
-//! unit-testable without a store or an LLM.
+//! Historical decision-tree decoding and structural validation.
+//! Execution is retired; new plans use the v2 graph kernel.
 
 use std::collections::HashSet;
 
@@ -206,119 +199,16 @@ fn attach_walk(node: &mut PlanNode, vecs: &[Vec<f32>], idx: &mut usize) {
     }
 }
 
-/// Route one situation embedding through the tree: at every branch take
-/// `yes` iff `cosine(situation, topic_vec) ≥ threshold`. The walk is total —
-/// every path bottoms out on a leaf.
-pub fn dispatch(tree: &DecisionTree, situation: &[f32]) -> Result<DispatchOutcome> {
-    if situation.is_empty() {
-        bail!("situation embedding is empty");
-    }
-    let mut sit = situation.to_vec();
-    normalize(&mut sit);
-    let mut path = Vec::new();
-    let mut node = &tree.root;
-    loop {
-        match node {
-            PlanNode::Branch {
-                id,
-                topic,
-                topic_vec,
-                yes,
-                no,
-                ..
-            } => {
-                let Some(tv) = topic_vec else {
-                    bail!("branch {id} is missing its topic vector — tree not fully planned");
-                };
-                let score = cosine(&sit, tv)?;
-                let taken = score >= tree.threshold;
-                path.push(DispatchStep {
-                    node_id: id.clone(),
-                    kind: "branch",
-                    topic: Some(topic.clone()),
-                    score: Some(score),
-                    taken: Some(taken),
-                });
-                node = if taken { yes } else { no };
-            }
-            PlanNode::Leaf {
-                id,
-                capability_id,
-                reason,
-            } => {
-                path.push(DispatchStep {
-                    node_id: id.clone(),
-                    kind: "leaf",
-                    topic: None,
-                    score: None,
-                    taken: None,
-                });
-                return Ok(DispatchOutcome {
-                    capability_id: capability_id.clone(),
-                    reason: reason.clone(),
-                    path,
-                });
-            }
-        }
-    }
+/// Retired decision-tree execution entry point; historical decoding remains.
+pub fn dispatch(_tree: &DecisionTree, _situation: &[f32]) -> Result<DispatchOutcome> {
+    bail!(crate::graph::MIGRATION)
 }
 
-/// L2-normalize in place; a zero vector is left as-is (callers that care
-/// reject emptiness beforehand — `cosine` then fails on the zero norm).
 fn normalize(v: &mut [f32]) {
-    let norm: f64 = v
-        .iter()
-        .map(|c| (*c as f64) * (*c as f64))
-        .sum::<f64>()
-        .sqrt();
+    let norm = v.iter().map(|x| (*x as f64).powi(2)).sum::<f64>().sqrt();
     if norm > 0.0 {
-        for c in v.iter_mut() {
-            *c = (*c as f64 / norm) as f32;
+        for x in v {
+            *x = (*x as f64 / norm) as f32;
         }
-    }
-}
-
-/// Cosine similarity over two vectors of equal length (length mismatch and
-/// zero/non-finite norms are errors, not silently-clamped values). `pub(crate)`
-/// so the playbook trigger scan reuses the exact same arithmetic (see
-/// `playbook::trigger::cosine_similarity`).
-pub(crate) fn cosine(a: &[f32], b: &[f32]) -> Result<f64> {
-    if a.len() != b.len() {
-        bail!("vector dimension mismatch: {} vs {}", a.len(), b.len());
-    }
-    let mut dot = 0.0f64;
-    let mut na = 0.0f64;
-    let mut nb = 0.0f64;
-    for (x, y) in a.iter().zip(b.iter()) {
-        dot += (*x as f64) * (*y as f64);
-        na += (*x as f64) * (*x as f64);
-        nb += (*y as f64) * (*y as f64);
-    }
-    let denom = na.sqrt() * nb.sqrt();
-    // NaN components fold the norms into NaN and ±Inf components into Inf;
-    // `Inf/Inf` would be NaN similarity, so finiteness is part of the guard
-    // (Cauchy-Schwarz bounds |dot| by denom, a finite denom ⇒ finite result).
-    if !(denom.is_finite() && denom > 0.0) {
-        bail!("cosine over a zero-or-non-finite vector");
-    }
-    Ok(dot / denom)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn cosine_rejects_nan_and_zero_vectors() {
-        // A NaN component poisons the norms (NaN fails `is_finite`), and a
-        // ±Inf component would make `Inf/Inf` a NaN similarity — both are
-        // rejected instead of leaking Some(NaN) into `fires`.
-        assert!(cosine(&[f32::NAN, 1.0], &[1.0, 0.0]).is_err());
-        assert!(cosine(&[f32::INFINITY, 1.0], &[1.0, 0.0]).is_err());
-        assert!(cosine(&[1.0, 0.0], &[f32::NEG_INFINITY, 1.0]).is_err());
-        assert!(cosine(&[1.0, 0.0], &[f32::NAN, 1.0]).is_err());
-        assert!(cosine(&[0.0, 0.0], &[1.0, 0.0]).is_err());
-        assert_eq!(cosine(&[1.0, 0.0], &[1.0, 0.0]).unwrap(), 1.0);
-        assert_eq!(cosine(&[1.0, 0.0], &[0.0, 1.0]).unwrap(), 0.0);
     }
 }

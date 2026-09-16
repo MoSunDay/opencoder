@@ -4,7 +4,9 @@
 // same snapshot; this panel renders four tabs: 总览 / 项目目标 / 里程碑 /
 // TODO. `refresh` is a silent reload handed to every tab so writes converge
 // into the single overview snapshot. The TODO drawer (详情/生成Plan 跳转) is
-// owned here and keyed by todoId.
+// owned here and keyed by todoId. The panel mounts PageShell with its own
+// `project` key, so the page header (title + desc) comes from nav.js
+// PAGE_META.
 
 import { Alert, Card, Col, Row, Spin, Statistic, Tabs, Typography } from 'antd';
 import { useState } from 'react';
@@ -72,18 +74,20 @@ export function ProjectPanel({ onNotice }) {
   ];
 
   return (
-    <div>
-      {error && <Alert type="error" showIcon title={error} description={updated ? `最近成功读取：${new Date(updated).toLocaleString()}` : null} />}
-      <Spin spinning={loading}>
-        <Tabs activeKey={activeTab} onChange={setActiveTab} items={tabs} />
-      </Spin>
-      <TodoDrawer
-        todoId={todoId}
-        overview={overview}
-        refresh={refresh}
-        onClose={() => setTodoId(null)}
-        onNotice={onNotice}
-      />
-    </div>
+    <PageShell page="project">
+      <div>
+        {error && <Alert type="error" showIcon title={error} description={updated ? `最近成功读取：${new Date(updated).toLocaleString()}` : null} />}
+        <Spin spinning={loading}>
+          <Tabs activeKey={activeTab} onChange={setActiveTab} items={tabs} />
+        </Spin>
+        <TodoDrawer
+          todoId={todoId}
+          overview={overview}
+          refresh={refresh}
+          onClose={() => setTodoId(null)}
+          onNotice={onNotice}
+        />
+      </div>
+    </PageShell>
   );
 }

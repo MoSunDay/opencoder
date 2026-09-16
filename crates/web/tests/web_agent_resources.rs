@@ -30,10 +30,6 @@ fn app(state: Arc<opencoder_web::AppState>) -> Router {
     Router::new()
         .route("/api/agents", post(opencoder_web::api_agents::create))
         .route(
-            "/api/agents/active",
-            axum::routing::patch(opencoder_web::api_agents::patch_active),
-        )
-        .route(
             "/api/agents/:name",
             put(opencoder_web::api_agents::update).delete(opencoder_web::api_agents::delete),
         )
@@ -128,11 +124,6 @@ fn expect_reload(rx: &mut tokio::sync::mpsc::UnboundedReceiver<opencoder_web::cm
         Ok(opencoder_web::cmd::DrainCmd::ReloadConfig) => {}
         other => panic!("expected ReloadConfig, got {other:?}"),
     }
-}
-
-/// Assert NO further fan-out arrived (silence).
-fn expect_silent(rx: &mut tokio::sync::mpsc::UnboundedReceiver<opencoder_web::cmd::DrainCmd>) {
-    assert!(rx.try_recv().is_err(), "unexpected ReloadConfig fan-out");
 }
 
 #[tokio::test]
@@ -275,12 +266,14 @@ async fn rejects_bad_category_paths_shape_and_oversize() {
         assert_eq!(status, StatusCode::BAD_REQUEST, "{path}: {v}");
     }
 
-    // Category shapes: prompts only the three sections, memory only
-    // memory.md, skills SKILL.md-bearing.
+    // Category shapes: prompts only the three sections, memory any safe
+    // path (multi-file / nested dirs), skills SKILL.md-bearing.
     let cases = [
         ("prompts", "evil.md", true),
         ("prompts", "nested/soul.md", true),
-        ("memory", "other.md", true),
+        ("memory", "other.md", false),
+        ("memory", "topics/rust.md", false),
+        ("memory", "../escape.md", true),
         ("skills", "alpha/doc.md", true),
         ("skills", "beta/SKILL.md", false),
         ("skills", "gamma.md", false),
@@ -346,9 +339,60 @@ async fn rejects_bad_category_paths_shape_and_oversize() {
     );
 }
 
-/// ReloadConfig fans out only for writes touching the ACTIVE card's chain.
+/// Memory pools are directory-shaped: a multi-file save with nested dirs
+/// succeeds and every file reads back byte-exact from its version path;
+/// traversal stays rejected and the decoded-total cap still applies to
+/// the whole request (the cap is per request, not per file).
 #[tokio::test]
-async fn reload_only_for_active_chain_writes() {
+async fn memory_pool_accepts_multi_file_trees_and_reads_them_back() {
+    let state = state().await;
+    let _scoped = scoped().await;
+    let body = serde_json::json!({
+        "name": "team-mem",
+        "files": [
+            { "path": "memory.md", "content_b64": B64.encode("core rules") },
+            { "path": "topics/rust.md", "content_b64": B64.encode("rust notes") },
+            { "path": "topics/notes.bin", "content_b64": B64.encode(vec![0u8, 255, 1]) },
+        ],
+    });
+    let (status, v) = call(app(state.clone()), "POST", "/api/agents/resources/memory", body).await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert_eq!(v["version"], 1);
+    // Byte-exact read back, nested markdown and binary sidecar included.
+    for (path, want) in [
+        ("memory.md", "core rules".as_bytes().to_vec()),
+        ("topics/rust.md", b"rust notes".to_vec()),
+        ("topics/notes.bin", vec![0u8, 255, 1]),
+    ] {
+        let (status, v) = call(
+            app(state.clone()),
+            "GET",
+            &format!("/api/agents/resources/memory/team-mem/versions/1/files/{path}"),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{path}: {v}");
+        assert_eq!(v["path"], path);
+        assert_eq!(v["content_b64"], B64.encode(want), "{path}");
+    }
+    // Traversal stays rejected on the memory pool too.
+    let (status, v) = call(
+        app(state.clone()),
+        "PUT",
+        "/api/agents/resources/memory/team-mem",
+        serde_json::json!({ "name": "team-mem", "files": [
+            { "path": "../escape.md", "content_b64": B64.encode("x") },
+        ]}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{v}");
+}
+
+/// ReloadConfig fans out only for writes touching the ACTIVE card's chain.
+/// 资源版本写无条件 fan-out ReloadConfig（激活判断已移除）：任何成功的
+/// create/PUT/rollback 都刷新活跃会话的池快照。
+#[tokio::test]
+async fn reload_fans_out_on_every_resource_write() {
     let state = state().await;
     let _scoped = scoped().await;
     call(
@@ -366,14 +410,6 @@ async fn reload_only_for_active_chain_writes() {
     )
     .await;
     let mut cmd_rx = live_handle(&state, "s1").await;
-    call(
-        app(state.clone()),
-        "PATCH",
-        "/api/agents/active",
-        serde_json::json!({ "active": "work" }),
-    )
-    .await;
-    expect_reload(&mut cmd_rx); // the activation itself fans out once
 
     // Referenced resource PUT ⇒ fan-out.
     call(
@@ -385,7 +421,8 @@ async fn reload_only_for_active_chain_writes() {
     .await;
     expect_reload(&mut cmd_rx);
 
-    // Unreferenced resource POST ⇒ silent disk write.
+    // Unreferenced resource POST ⇒ 同样无条件 fan-out（快照保持新鲜，
+    // 不做激活链判断）。
     call(
         app(state.clone()),
         "POST",
@@ -393,9 +430,9 @@ async fn reload_only_for_active_chain_writes() {
         save_body("other", "soul.md", "x"),
     )
     .await;
-    expect_silent(&mut cmd_rx);
+    expect_reload(&mut cmd_rx);
 
-    // Referenced rollback ⇒ fan-out; unreferenced rollback ⇒ silent.
+    // Rollback ⇒ fan-out，不论是否仍被引用。
     call(
         app(state.clone()),
         "POST",
@@ -411,7 +448,7 @@ async fn reload_only_for_active_chain_writes() {
         serde_json::json!({ "version": 1 }),
     )
     .await;
-    expect_silent(&mut cmd_rx);
+    expect_reload(&mut cmd_rx);
 }
 
 /// DELETE refuses (409 + referencing cards) while any card points at the

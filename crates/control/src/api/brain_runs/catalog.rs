@@ -14,6 +14,7 @@ use std::sync::Arc;
 pub async fn capabilities(state: &Arc<AppState>) -> anyhow::Result<Vec<Value>> {
     let mut capabilities = vec![
         json!({"id":"builtin-agent-act","kind":"agent","target":"act","summary":"General purpose agent","maturity":"stable"}),
+        json!({"id":"builtin-operator","kind":"operator","target":"act","summary":"Execute an explicit host operation using the registered Operator","maturity":"stable"}),
     ];
     for capability in state.store.list_brain_capabilities().await? {
         let Some(target) = state
@@ -38,7 +39,7 @@ pub async fn capabilities(state: &Arc<AppState>) -> anyhow::Result<Vec<Value>> {
                 .collect::<Vec<_>>()
         });
     for agent in agents {
-        capabilities.push(json!({"id":format!("agent-{}",agent.name),"kind":"agent","target":agent.name,"summary":agent.description,"maturity":"draft"}));
+        capabilities.push(json!({"id":format!("agent-{}",agent.name),"kind":"agent","target":agent.name,"summary":agent.description,"definition":{"name":agent.name,"kind":agent.kind,"mode":agent.mode,"prompt":agent.prompt,"tools":agent.tools},"maturity":"draft"}));
     }
     let (_, share) = crate::api_todo_util::share_root(&state.workdir).await?;
     for name in opencoder_core::list_child_dirs(&share.join("todo")) {
@@ -63,7 +64,19 @@ pub async fn capabilities(state: &Arc<AppState>) -> anyhow::Result<Vec<Value>> {
             if kind == "team" && target == "system" {
                 continue;
             }
-            capabilities.push(json!({"id":format!("{kind}-{target}"),"kind":kind,"target":target,"summary":target,"definition":definition,"maturity":"draft"}));
+            let snapshot = crate::api::catalog::resolve(
+                state,
+                &opencoder_core::fleet::CreateExecution {
+                    id: format!("{kind}-catalog"),
+                    kind: serde_json::from_value(json!(kind))?,
+                    target: Some(target.into()),
+                    input: json!({}),
+                    node_id: None,
+                },
+            )
+            .await
+            .map_err(|r| anyhow::anyhow!("capability {kind}/{target}: {}", r.body))?;
+            capabilities.push(json!({"id":format!("{kind}-{target}"),"kind":kind,"target":target,"summary":definition.get("description").or_else(||definition.get("spec").and_then(|s|s.get("description"))).cloned().unwrap_or(json!("")),"definition":snapshot,"maturity":"draft"}));
         }
     }
     capabilities.extend(state.fleet.definitions("brain_capability").await?);
@@ -115,32 +128,6 @@ pub async fn stable(
         Ok(()) => response(RpcReply::ok(metadata)),
         Err(e) => error_500(e.to_string()),
     }
-}
-
-pub async fn register_plan(
-    state: &Arc<AppState>,
-    plan: &opencoder_core::brain::PlanVersion,
-) -> anyhow::Result<()> {
-    for step in &plan.plan.steps {
-        if step.capability_id.is_some() {
-            continue;
-        }
-        let id = format!(
-            "cap-{}",
-            &opencoder_brain::execution::fingerprint(&step.action)[..24]
-        );
-        if state
-            .fleet
-            .definition("brain_capability", &id)
-            .await?
-            .is_some()
-        {
-            continue;
-        }
-        state.fleet.put_definition("brain_capability",&id,&json!({"id":id,"kind":step.action.kind,"target":step.action.target,"definition":step.action.definition,"summary":step.purpose,
-            "inputs":step.inputs,"output":step.output,"action":step.action,"maturity":"draft","source_plan":{"id":plan.id,"version":plan.version}})).await?;
-    }
-    Ok(())
 }
 
 pub async fn record_evidence(

@@ -28,27 +28,41 @@ beforeEach(() => {
 });
 
 for (const entry of ['run', 'execution']) describe(`${entry} result entry`, () => {
-  it('shows final states immediately and loads logs only in the 75vw right drawer', async () => {
+  it('shows final states immediately, opens the step drawer and loads run logs behind it', async () => {
     render(entry === 'run' ? <RunDetail run={run} onClose={vi.fn()} /> : <ExecutionView executionRef={run} />);
     await waitFor(() => expect(document.querySelectorAll('.dag-node--done')).toHaveLength(2));
     expect(open).not.toHaveBeenCalled();
     expect(document.querySelector('.dag-detail-side')).toBeNull();
     expect(screen.queryByRole('log')).toBeNull();
     expect(get.mock.calls.some(([path]) => path.includes('events-page'))).toBe(false);
+    // Clicking a step opens its node-side record drawer (StepDrawer), not the
+    // run-wide logs; the step event stream subscribes at the step path.
     fireEvent.click(document.querySelector('[data-id="fetch"] .dag-node'));
     const drawer = await screen.findByRole('dialog');
-    expect(within(drawer).getByText('实时日志')).toBeTruthy();
-    const root = document.querySelector('.dag-logs-drawer');
-    expect(root.classList.contains('ant-drawer-right')).toBe(true);
-    expect(root.querySelector('.ant-drawer-content-wrapper').style.width).toBe('75vw');
-    await waitFor(() => expect(within(drawer).getByRole('log').textContent).toContain('fetch output'));
-    expect(within(drawer).getByRole('log').textContent).not.toContain('review output');
-    fireEvent.mouseDown(within(drawer).getByRole('combobox', { name: '切换步骤日志' }));
+    expect(within(drawer).getByText('步骤 fetch')).toBeTruthy();
+    await waitFor(() => expect(open.mock.calls.some(([opts]) => opts.path === '/api/dag/runs/dag-result/steps/fetch/events')).toBe(true));
+    // The run-wide logs stay one click away behind 运行日志 (same 75vw right drawer).
+    fireEvent.click(within(drawer).getByRole('button', { name: '运行日志' }));
+    const logs = await waitFor(() => {
+      const dialogs = screen.getAllByRole('dialog');
+      const target = dialogs.find((dialog) => within(dialog).queryByText('实时日志'));
+      expect(target).toBeTruthy();
+      return target;
+    });
+    for (const root of document.querySelectorAll('.dag-logs-drawer')) {
+      expect(root.classList.contains('ant-drawer-right')).toBe(true);
+      expect(root.querySelector('.ant-drawer-content-wrapper').style.width).toBe('75vw');
+    }
+    expect(get.mock.calls.some(([path]) => path.includes('events-page'))).toBe(true);
+    await waitFor(() => expect(within(logs).getByRole('log').textContent).toContain('fetch output'));
+    expect(within(logs).getByRole('log').textContent).not.toContain('review output');
+    fireEvent.mouseDown(within(logs).getByRole('combobox', { name: '切换步骤日志' }));
     fireEvent.click(await screen.findByText('review', { selector: '.ant-select-item-option-content' }));
-    expect(within(drawer).getByRole('log').textContent).toContain('review output');
-    expect(within(drawer).getByRole('log').textContent).not.toContain('fetch output');
-    fireEvent.click(within(drawer).getByRole('button', { name: 'Close' }));
-    await waitFor(() => expect(document.querySelector('.dag-logs-drawer')).toBeNull());
+    expect(within(logs).getByRole('log').textContent).toContain('review output');
+    expect(within(logs).getByRole('log').textContent).not.toContain('fetch output');
+    fireEvent.click(within(logs).getByRole('button', { name: 'Close' }));
+    // Only the run-logs drawer closes; the step drawer stays open.
+    await waitFor(() => expect(screen.getAllByRole('dialog')).toHaveLength(1));
   });
 });
 

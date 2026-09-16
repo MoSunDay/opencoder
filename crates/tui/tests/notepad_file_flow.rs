@@ -153,3 +153,119 @@ async fn delete_directory_flow() {
     assert!(!v.tree.flat.iter().any(|n| n.name == "sub"));
     assert!(v.tree.input.is_none());
 }
+
+#[tokio::test]
+async fn rename_file_flow() {
+    let d = tempfile::tempdir().unwrap();
+    fs::write(d.path().join("a.txt"), "content").unwrap();
+    let mut v = NotepadView::new(d.path().to_path_buf());
+    press(&mut v, KeyCode::Char('r')).await;
+    match &v.tree.input {
+        Some(TreeInput::Rename { buf, err, .. }) => {
+            assert_eq!(buf, "a.txt");
+            assert!(err.is_none());
+        }
+        other => panic!("expected rename input, got {:?}", v.tree.input),
+    }
+    // Replace the pre-filled name with the new one.
+    for _ in 0.."a.txt".len() {
+        press(&mut v, KeyCode::Backspace).await;
+    }
+    type_str(&mut v, "renamed.txt").await;
+    press(&mut v, KeyCode::Enter).await;
+    assert!(!d.path().join("a.txt").exists());
+    assert!(d.path().join("renamed.txt").exists());
+    assert_eq!(
+        fs::read_to_string(d.path().join("renamed.txt")).unwrap(),
+        "content"
+    );
+    assert!(v.tree.flat.iter().any(|n| n.name == "renamed.txt"));
+    assert!(v.tree.input.is_none());
+}
+
+#[tokio::test]
+async fn rename_rejects_existing_target_and_keeps_input() {
+    let d = tempfile::tempdir().unwrap();
+    fs::write(d.path().join("a.txt"), "x").unwrap();
+    fs::write(d.path().join("b.txt"), "y").unwrap();
+    let mut v = NotepadView::new(d.path().to_path_buf());
+    press(&mut v, KeyCode::Char('r')).await;
+    for _ in 0.."a.txt".len() {
+        press(&mut v, KeyCode::Backspace).await;
+    }
+    type_str(&mut v, "b.txt").await;
+    press(&mut v, KeyCode::Enter).await;
+    // Old file still there, input stays open with an error for feedback.
+    assert!(d.path().join("a.txt").exists());
+    assert!(d.path().join("b.txt").exists());
+    match &v.tree.input {
+        Some(TreeInput::Rename { buf, err, .. }) => {
+            assert_eq!(buf, "b.txt");
+            assert!(err.is_some());
+        }
+        other => panic!("expected rename input to persist, got {:?}", other),
+    }
+    // Esc backs out without touching the filesystem.
+    press(&mut v, KeyCode::Esc).await;
+    assert!(v.tree.input.is_none());
+    assert!(d.path().join("a.txt").exists());
+}
+
+#[tokio::test]
+async fn rename_cancelled_by_esc() {
+    let d = tempfile::tempdir().unwrap();
+    fs::write(d.path().join("a.txt"), "x").unwrap();
+    let mut v = NotepadView::new(d.path().to_path_buf());
+    press(&mut v, KeyCode::Char('r')).await;
+    type_str(&mut v, "more").await;
+    press(&mut v, KeyCode::Esc).await;
+    assert!(d.path().join("a.txt").exists());
+    assert!(!d.path().join("a.txtmore").exists());
+    assert!(v.tree.input.is_none());
+}
+
+#[tokio::test]
+async fn rename_follows_editor_path() {
+    let d = tempfile::tempdir().unwrap();
+    fs::write(d.path().join("a.txt"), "content").unwrap();
+    let mut v = NotepadView::new(d.path().to_path_buf());
+    press(&mut v, KeyCode::Enter).await; // open a.txt in the editor
+    assert_eq!(v.editor.file_path, Some(d.path().join("a.txt")));
+    press(&mut v, KeyCode::Tab).await; // back to tree
+    press(&mut v, KeyCode::Char('r')).await;
+    for _ in 0.."a.txt".len() {
+        press(&mut v, KeyCode::Backspace).await;
+    }
+    type_str(&mut v, "moved.txt").await;
+    press(&mut v, KeyCode::Enter).await;
+    assert_eq!(v.editor.file_path, Some(d.path().join("moved.txt")));
+    assert_eq!(v.editor.vim.text, "content");
+}
+
+#[tokio::test]
+async fn create_directory_flow() {
+    let d = tempfile::tempdir().unwrap();
+    fs::write(d.path().join("a.txt"), "y").unwrap();
+    let mut v = NotepadView::new(d.path().to_path_buf());
+    press(&mut v, KeyCode::Char('N')).await;
+    assert!(matches!(v.tree.input, Some(TreeInput::CreateDir { .. })));
+    type_str(&mut v, "sub").await;
+    press(&mut v, KeyCode::Enter).await;
+    assert!(d.path().join("sub").is_dir());
+    assert!(v.tree.flat.iter().any(|n| n.name == "sub" && n.is_dir));
+    assert!(v.tree.input.is_none());
+    // Creating a directory makes no file side-effects.
+    assert_eq!(fs::read_dir(d.path().join("sub")).unwrap().count(), 0);
+}
+
+#[tokio::test]
+async fn create_directory_cancelled_by_esc() {
+    let d = tempfile::tempdir().unwrap();
+    fs::write(d.path().join("a.txt"), "y").unwrap();
+    let mut v = NotepadView::new(d.path().to_path_buf());
+    press(&mut v, KeyCode::Char('N')).await;
+    type_str(&mut v, "sub").await;
+    press(&mut v, KeyCode::Esc).await;
+    assert!(!d.path().join("sub").exists());
+    assert!(v.tree.input.is_none());
+}

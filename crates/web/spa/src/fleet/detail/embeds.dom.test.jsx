@@ -39,7 +39,7 @@ describe('执行明细内嵌运行视图', () => {
     expect(window.location.search).toBe('');
   });
 
-  it('todos 明细展示只读定义和任务过程目录', async () => {
+  it('todos 明细默认展示父 Agent 与清单，并保留只读原始记录', async () => {
     apiGet.mockImplementation(async (path) => {
       if (path.includes('section=files')) return {files:{'objective.md':'审核任务'}};
       if (path.startsWith('/api/todo/workflows/todos-1/review?section=node')) return {todo:{title:'实现',agent:'act',acceptance:{criteria:'通过'}},state:{status:'pending',attempt:0}};
@@ -50,6 +50,10 @@ describe('执行明细内嵌运行视图', () => {
       return {};
     });
     render(<TodoRunEmbed id="todos-1" />);
+    await waitFor(() => expect(document.querySelector('.todo-task-list [data-todo-id="t1"]')).toBeTruthy());
+    expect(screen.getByText('父 Agent 会话尚未就绪')).toBeTruthy();
+    expect(document.querySelector('[data-file-path]')).toBeNull();
+    fireEvent.click(screen.getByRole('tab',{name:'原始记录'}));
     await waitFor(() => expect(document.querySelector('[data-file-path="process/todos/t1/status.json"]')).toBeTruthy());
     expect(screen.getByText(/1\/2 已通过/)).toBeTruthy();
     fireEvent.click(document.querySelector('[data-file-path="process/todos/t2/status.json"]'));
@@ -99,7 +103,7 @@ describe('执行明细内嵌运行视图', () => {
     inline.unmount();
 
     const full = render(<ExecutionView executionRef={{ id: 'todos-insp', kind: 'todos' }} onNotice={vi.fn()} />);
-    await waitFor(()=>expect(full.container.querySelector('[data-file-path="process/todos/t1/status.json"]')).toBeTruthy()); // full（明细抽屉）模式挂画布
-    expect(full.container.querySelector('[data-file-path="process/todos/t1/status.json"]')).toBeTruthy();
+    await waitFor(()=>expect(full.container.querySelector('.todo-task-list [data-todo-id="t1"]')).toBeTruthy());
+    expect(full.container.querySelector('.todo-task-list [data-todo-id="t1"]').textContent).toContain('内联步骤');
   });
 });

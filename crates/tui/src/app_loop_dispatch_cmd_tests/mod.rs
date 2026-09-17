@@ -7,8 +7,8 @@
 //! 1. From idle, dispatching one of the three commands submits the
 //!    control-command text as a prompt (`UiCmd::Prompt`) after the usual
 //!    `ResetCancel` preamble.
-//! 2. While a turn is running, the busy gate refuses with a marker and
-//!    sends nothing.
+//! 2. While a turn is running, the busy gate refuses with the busy flash
+//!    and sends nothing.
 
 use super::super::*;
 use crate::chat::ChatBlock;
@@ -63,8 +63,6 @@ async fn dispatch_popup(
     Option<crate::clear_confirm::ClearConfirm>,
     Option<(String, u32)>,
     Vec<String>,
-    Vec<(i64, String)>,
-    mpsc::Receiver<crate::queue_admitter::AdmitReq>,
 ) {
     let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
     let mut running = running;
@@ -83,12 +81,6 @@ async fn dispatch_popup(
     let (sidecar_tx, _sidecar_rx) = mpsc::channel::<crate::sidecar_ui::SidecarCmd>(8);
     let mut cancel = CancellationToken::new();
     let mut clear_confirm: Option<crate::clear_confirm::ClearConfirm> = None;
-    let mut admit_st = crate::queue_admitter::AdmitUiState::default();
-    let (admit_tx, admit_rx) = mpsc::channel(8);
-    let mut queue_items: Vec<(i64, String)> = Vec::new();
-    let mut pending_images: Vec<(String, String)> = Vec::new();
-    let mut history: Vec<String> = Vec::new();
-    let mut hist_idx: Option<usize> = None;
 
     let flow = dispatch_command(
         command_menu,
@@ -120,26 +112,11 @@ async fn dispatch_popup(
         &mut None,
         &mut None,
         &mut clear_confirm,
-        &admit_tx,
-        &mut admit_st,
-        &mut queue_items,
-        &mut pending_images,
-        &mut history,
-        &mut hist_idx,
         &mut None,
     )
     .await;
     let chat_markers = marker_texts(chat);
-    (
-        flow,
-        cmd_rx,
-        running,
-        clear_confirm,
-        mode_flash,
-        chat_markers,
-        queue_items,
-        admit_rx,
-    )
+    (flow, cmd_rx, running, clear_confirm, mode_flash, chat_markers)
 }
 
 /// Marker lines currently in the chat, as flat strings (assert helper).
@@ -194,36 +171,33 @@ async fn slash_act_from_idle_submits_prompt() {
     }
 }
 
-/// `/plan` while running is submitted-but-not-applied (steer/queue
-/// semantics): the raw command text queues verbatim for the runner's
-/// idle-boundary intercept — no command is sent to the worker, `running`
-/// stays true, and no `[switch] busy` refusal marker is needed because the
-/// keystroke is never lost (it lands in the queue panel).
+/// `/plan` while running is refused outright: the busy flash
+/// ("任务运行中不可切换状态") is set, no command is sent to the worker,
+/// `running` stays true, and nothing queues — a mode switch never lands
+/// mid-flight and is never deferred to a boundary.
 #[tokio::test]
-async fn slash_plan_while_running_queues_for_idle_boundary() {
+async fn slash_plan_while_running_refuses_with_busy_flash() {
     let mut chat = ChatView::default();
     let mut menu = menu_for("plan");
-    let (flow, mut cmd_rx, running, .., queue_items, mut admit_rx) =
+    let (flow, mut cmd_rx, running, _, mode_flash, _) =
         dispatch_popup(&mut menu, &mut chat, true, "act").await;
     assert!(matches!(flow, LoopFlow::Proceed));
     assert!(running, "running must stay true (turn still active)");
+    let flash = mode_flash.expect("the busy refusal flash must be set");
+    assert!(
+        flash.0.contains("任务运行中不可切换状态"),
+        "flash must name the refusal; got {:?}",
+        flash.0
+    );
     assert!(
         cmd_rx.try_recv().is_err(),
         "no command should be sent while running"
     );
-    assert_eq!(
-        queue_items,
-        vec![(-1, "/plan".to_string())],
-        "the raw /plan row must be queued for the idle boundary"
-    );
-    let req = admit_rx.try_recv().expect("the admit request must fire");
-    assert_eq!(req.display, "/plan");
     assert!(
         !chat
             .blocks
             .iter()
-            .any(|b| matches!(b, ChatBlock::Marker(lines)
-        if lines.iter().any(|l| l.to_string().contains("busy")))),
-        "no busy refusal marker: the submit always lands (queued)"
+            .any(|b| matches!(b, ChatBlock::Marker(_))),
+        "the refusal is a status flash, not a transcript marker"
     );
 }

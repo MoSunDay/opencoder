@@ -156,9 +156,9 @@ pub fn gate_clear_all(running: bool) -> ClearAllGate {
 /// Pure so the running-guard is unit-testable independent of the async event
 /// loop.
 ///
-/// While busy the switch is SUBMITTED, not applied (steer/queue semantics):
-/// the dispatcher queues the raw command text for the runner's idle-boundary
-/// intercept instead of starting a turn — apply-at-idle, never refused.
+/// While busy the dispatcher REFUSES the switch with the shared busy flash
+/// (`mode_switch_busy_flash`) instead of queueing it: a mid-turn switch is
+/// never applied and never deferred — the user retries when idle.
 #[derive(Debug, PartialEq, Eq)]
 pub enum SwitchGate {
     Run,

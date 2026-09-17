@@ -435,9 +435,6 @@ pub(super) async fn run_app(
                                 &mut plan_edit,
                                 &mut notepad,
                                 &mut clear_confirm,
-                                &admit_tx, &mut admit_st,
-                                &mut queue_items, &mut pending_images,
-                                &mut history, &mut hist_idx,
                                 &mut agent_menu,
                             )
                             .await
@@ -630,9 +627,6 @@ pub(super) async fn run_app(
                                 if app_loop::dispatch_mode_switch(
                                     mode, &cmd_tx, &mut cancel, &mut running, &mut follow, &mut chat,
                                     &mut sys_tokens, &mut mode_flash, anim_tick, &workdir,
-                                    &session_id, &admit_tx, &mut admit_st,
-                                    &mut queue_items, &mut pending_images,
-                                    &mut history, &mut hist_idx,
                                 ).await == app_loop::LoopFlow::Quit { break; }
                             }
                             KeyAction::SetSkill(opt) => {

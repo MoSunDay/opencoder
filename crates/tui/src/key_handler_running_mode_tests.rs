@@ -104,21 +104,47 @@ fn ctrl_t_reaches_app_gate_while_running_or_subagent_focused() {
     }
 }
 
-/// Enter on a mode command while the parent runs admits it as a steer: the
-/// runner applies it at the next turn boundary (delayed application).
+/// Enter on a BARE act/plan switch while the parent runs is refused with
+/// `ModeSwitchBlocked`: a mode switch never applies mid-flight and is never
+/// queued. The typed text stays so the user can retry when idle.
 #[test]
-fn running_enter_mode_command_becomes_steer() {
-    for command in ["/plan", "/act", "/plan review this", "/clear_context now"] {
+fn running_enter_bare_mode_switch_blocked() {
+    for command in ["/plan", "/act"] {
+        let (action, input, cursor) = press_running_mode_command(command, KeyCode::Enter);
+        assert!(matches!(action, KeyAction::ModeSwitchBlocked), "{command}");
+        assert_eq!(input, command, "blocked switch keeps the input line");
+        assert_eq!(cursor, command.chars().count());
+    }
+}
+
+/// Enter on a COMPOUND mode command while the parent runs still steers: it
+/// is a task submission whose mode switch rides along at the idle boundary
+/// (the runner applies the command at the next turn boundary).
+#[test]
+fn running_enter_compound_mode_command_becomes_steer() {
+    for command in ["/plan review this", "/clear_context now"] {
         let (action, input, _) = press_running_mode_command(command, KeyCode::Enter);
         assert!(matches!(action, KeyAction::Steer(text) if text == command));
         assert!(input.is_empty(), "steer clears the input line");
     }
 }
 
-/// Tab on a mode command while running queues it: applied at the next idle
-/// boundary instead of being refused at admission.
+/// Tab on a BARE act/plan switch while running is refused like Enter: it
+/// would otherwise queue a mid-flight switch that lands unannounced at the
+/// idle boundary. The typed text stays.
 #[test]
-fn running_tab_mode_command_becomes_queue() {
+fn running_tab_bare_mode_switch_blocked() {
+    for command in ["/plan", "/act"] {
+        let (action, input, _) = press_running_mode_command(command, KeyCode::Tab);
+        assert!(matches!(action, KeyAction::ModeSwitchBlocked), "{command}");
+        assert_eq!(input, command, "blocked switch keeps the input line");
+    }
+}
+
+/// Tab on a compound mode command while running still queues it: applied at
+/// the next idle boundary as part of the task submission.
+#[test]
+fn running_tab_compound_mode_command_becomes_queue() {
     let command = "/plan later";
     let (action, input, _) = press_running_mode_command(command, KeyCode::Tab);
     assert!(matches!(action, KeyAction::Queue(text) if text == command));

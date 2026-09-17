@@ -10,7 +10,10 @@ ratatui + crossterm 交互界面。细节以代码为准。
   成功路径（`Ok(Some)`/`Ok(None)`）以终端 `SessionEvent::Done` 收尾（持久化 +
   实时转发，web `DrainCmd::Compact` 同语义，供 app_loop Done 处理器 resync
   pending Queue/Steer 并 arm `drain_pending`）；`Err` 仅发 Error 不发 Done
-- `src/key_handler.rs`、`src/keymap.rs` — 键盘分发与映射
+- `src/key_handler.rs`、`src/keymap.rs` — 键盘分发与映射。`is_bare_mode_switch`
+  判定裸 act/plan 切换（`SwitchAgent` 且无尾随任务文本）：turn 运行中 Enter/Tab
+  返回 `ModeSwitchBlocked`（输入保留）；复合形式 `/plan review` 仍按任务提交。
+  Ctrl+T / `/` 菜单在 `dispatch_mode_switch` 同语义拒绝（busy flash，不排队）
 - `src/composer.rs`、`src/chat.rs`、`src/render.rs` — 输入、消息渲染、渲染入口
 - `src/agent_menu.rs` — `/agent` primary agent 选择器：目录 = builtin primary
   (act/plan/command，排除 workflow) + `list_agents()` 文件卡（描述取

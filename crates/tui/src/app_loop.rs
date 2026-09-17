@@ -493,12 +493,6 @@ pub(crate) async fn dispatch_command(
     plan_edit: &mut Option<crate::plan_edit::PlanEdit>,
     notepad: &mut Option<crate::notepad::NotepadView>,
     clear_confirm: &mut Option<crate::clear_confirm::ClearConfirm>,
-    admit_tx: &mpsc::Sender<crate::queue_admitter::AdmitReq>,
-    admit_st: &mut crate::queue_admitter::AdmitUiState,
-    queue_items: &mut Vec<(i64, String)>,
-    pending_images: &mut Vec<(String, String)>,
-    history: &mut Vec<String>,
-    hist_idx: &mut Option<usize>,
     agent_menu: &mut Option<crate::agent_menu::AgentMenu>,
 ) -> LoopFlow {
     let (outcome, quit) = handle_command_key(command_menu, k);
@@ -534,12 +528,6 @@ pub(crate) async fn dispatch_command(
                 plan_edit,
                 notepad,
                 clear_confirm,
-                admit_tx,
-                admit_st,
-                queue_items,
-                pending_images,
-                history,
-                hist_idx,
                 agent_menu,
             )
             .await;

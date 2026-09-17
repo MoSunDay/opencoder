@@ -49,7 +49,7 @@ async fn slash_clear_context_while_running_arms_guard() {
         ..Default::default()
     };
     let mut menu = menu_for("clear");
-    let (flow, mut cmd_rx, running, confirm, _, _, _, _) =
+    let (flow, mut cmd_rx, running, confirm, _, _) =
         dispatch_popup(&mut menu, &mut chat, true, "act").await;
     assert!(matches!(flow, LoopFlow::Proceed));
     assert!(running, "running must stay true (turn still active)");

@@ -19,3 +19,17 @@ Commit: f0ccec4c76f583607f43022179c2c5c745f7a3ef
 
 - `cargo check -p opencoder-tui`：通过（dev profile，无错误/警告）。
 - 行为对齐参照：`crates/web` handle.rs DrainCmd::Compact 的 Ok/Err 分支发帧策略。
+
+## 测试
+
+- `crates/tui/src/worker/tests_compact_done.rs`：
+  - `compact_with_summary_emits_done`：预置 queued 行 + compact 成功 → `SessionEvent::Done` 实时转发 + `done` 帧落库（SSE 回放可重放）；并断言 compact 本身不消费 pending queue（由后续 drain turn 消费）。
+  - `compact_noop_still_emits_done`：`Ok(None)`（无可压缩内容）仍发 Done，idle 边界与 web 一致。
+  - `compact_failure_emits_error_without_done`：失败仅 Error、无 Done（不自动续跑，防错误循环）。
+- `crates/tui/src/app_loop_tests/compact_done_rekick.rs::compact_done_rekicks_drain_and_consumes_pending_queue`：全链回归——Done + store 滞留 queued → 队列镜像 resync 并 arm `drain_pending` → `TurnDone` 空 prompt rekick（ResetCancel 先行）→ drain turn 在 idle 边界 `QueueConsumed` 消费滞留行 → store 队列清空。
+- 修正：`compact_done_rekick.rs` 的 `cmd @ UiCmd::Prompt(ref prompt, ref images)` 绑定与 `cmd.clone()` 触发 E0505，改为解构 `Ok(UiCmd::Prompt(prompt, images))` 后按值重建（该文件随 `8bd5038d` 提交时编译不过，全量测试被阻断）。
+- 回归：`cargo test -p opencoder-tui --lib` 全量 1718 通过。
+
+## Release
+
+- `8bd5038d` 落 main（未发布）。

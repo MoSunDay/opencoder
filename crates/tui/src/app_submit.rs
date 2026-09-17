@@ -154,12 +154,6 @@ pub(crate) async fn handle_submit_action(
             plan_edit,
             notepad,
             clear_confirm,
-            admit_tx,
-            admit_st,
-            queue_items,
-            pending_images,
-            history,
-            hist_idx,
             agent_menu,
         )
         .await;

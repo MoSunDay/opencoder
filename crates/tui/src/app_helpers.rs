@@ -547,10 +547,12 @@ pub(crate) fn steer_submit_flash(
     }
 }
 
-/// Stable busy hint shared by direct shortcuts and textual mode commands.
+/// Stable busy hint shared by direct shortcuts and textual mode commands:
+/// a bare act/plan switch (Ctrl+T, `/act`, `/plan`) while a turn runs is
+/// refused, never queued.
 pub(crate) fn mode_switch_busy_flash(anim_tick: u32) -> (String, u32) {
     (
-        "\u{23f3} busy \u{2014} mode switch blocked, retry when idle".to_string(),
+        "\u{26a0} 任务运行中不可切换状态".to_string(),
         anim_tick,
     )
 }

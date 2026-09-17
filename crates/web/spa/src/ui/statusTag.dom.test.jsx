@@ -44,6 +44,15 @@ describe('StatusTag rendering', () => {
     expect(screen.getByText('-')).toBeTruthy();
   });
 
+  it('renders the schedule ledger statuses (fired / missed)', () => {
+    render(<div>
+      <StatusTag status="fired" />
+      <StatusTag status="missed" />
+    </div>);
+    expect(screen.getByText('已触发').className).toContain('ant-tag-success');
+    expect(screen.getByText('已错过').className).toContain('ant-tag');
+  });
+
   it('lets label and color override the table (nodes 在线态 pattern)', () => {
     render(<StatusTag status="online" label="resource_error" color="error" />);
     const el = screen.getByText('resource_error');

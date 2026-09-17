@@ -62,15 +62,13 @@ impl ModeSwitch {
 /// `AgentSwitch` / `TranscriptReset` + `Done`. No user echo — the popup path
 /// never calls `push_user`.
 ///
-/// SUBMIT-ALWAYS / APPLY-AT-IDLE (steer/queue semantics — mirrors the
-/// `fire_clear_confirm` running arm): the switch can always be submitted,
-/// but it only TAKES EFFECT at a non-running boundary. Idle starts the
-/// control-command turn now; while a turn is in flight (`running`) the raw
-/// command text queues verbatim and the runner applies it via the idle-boundary
-/// drain intercept — a mid-turn switch never lands at an arbitrary partial
-/// boundary, and the keystroke is never lost. A live subagent does not count
-/// as busy: the parent session is idle, exactly when steer/queue entries are
-/// consumed automatically.
+/// BUSY = REFUSED (never queued): idle starts the control-command turn now;
+/// while a turn is in flight (`running`) the switch is refused with the
+/// shared busy flash (`mode_switch_busy_flash`) — a mid-turn switch would
+/// re-aim the session the worker is streaming into, so it is neither applied
+/// nor deferred to a boundary; the user retries when idle. A live subagent
+/// does not count as busy: the parent session is idle, exactly when
+/// switching is safe.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn dispatch_mode_switch(
     mode: ModeSwitch,
@@ -83,13 +81,6 @@ pub(crate) async fn dispatch_mode_switch(
     mode_flash: &mut Option<(String, u32)>,
     anim_tick: u32,
     workdir: &Path,
-    session_id: &str,
-    admit_tx: &mpsc::Sender<crate::queue_admitter::AdmitReq>,
-    admit_st: &mut crate::queue_admitter::AdmitUiState,
-    queue_items: &mut Vec<(i64, String)>,
-    pending_images: &mut Vec<(String, String)>,
-    history: &mut Vec<String>,
-    hist_idx: &mut Option<usize>,
 ) -> LoopFlow {
     match gate_switch(*running) {
         SwitchGate::Run => {
@@ -111,23 +102,9 @@ pub(crate) async fn dispatch_mode_switch(
             chat.begin_turn();
         }
         SwitchGate::SkipRunning => {
-            // Queue the raw command text (steer/queue semantics: submit now,
-            // runner applies it at the idle boundary). No sys_tokens/mode
-            // flash here — the switch has not landed yet; the AgentSwitch
-            // event folds it when the runner consumes the row. Same running
-            // arm shape as `fire_clear_confirm`. A failed hand-off flashes;
-            // the temp row/images were already rolled back.
-            crate::app_helpers::queue_submit_flash(
-                mode.prompt(),
-                admit_tx,
-                admit_st,
-                queue_items,
-                pending_images,
-                session_id,
-                anim_tick,
-                mode_flash,
-            );
-            crate::app_helpers::push_history(history, hist_idx, mode.prompt());
+            // Refuse, don't queue: the in-flight turn owns the session and a
+            // mid-flight re-aim is exactly what the gate exists to prevent.
+            *mode_flash = Some(crate::app_helpers::mode_switch_busy_flash(anim_tick));
         }
     }
     LoopFlow::Proceed
@@ -145,7 +122,7 @@ pub(crate) async fn dispatch_mode_switch(
 /// (Act, Plan, ClearContext, Compact) returns whatever the gate-and-start
 /// flow yields (typically [`LoopFlow::Proceed`] or [`LoopFlow::Quit`]). While
 /// a turn is running, Act/Plan queue through `admit_tx` (apply at the idle
-/// boundary) instead of starting a turn — see `dispatch_mode_switch`.
+/// boundary) is refused with the busy flash — see `dispatch_mode_switch`.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn dispatch_slash_action(
     action: SlashAction,
@@ -173,12 +150,6 @@ pub(crate) async fn dispatch_slash_action(
     plan_edit: &mut Option<crate::plan_edit::PlanEdit>,
     notepad: &mut Option<crate::notepad::NotepadView>,
     clear_confirm: &mut Option<crate::clear_confirm::ClearConfirm>,
-    admit_tx: &mpsc::Sender<crate::queue_admitter::AdmitReq>,
-    admit_st: &mut crate::queue_admitter::AdmitUiState,
-    queue_items: &mut Vec<(i64, String)>,
-    pending_images: &mut Vec<(String, String)>,
-    history: &mut Vec<String>,
-    hist_idx: &mut Option<usize>,
     // `/agent` picker slot — the Agent arm fills it; every other action
     // leaves it untouched. (Trailing param so existing call sites can
     // append one argument instead of reshuffling.)
@@ -273,13 +244,6 @@ pub(crate) async fn dispatch_slash_action(
                 mode_flash,
                 anim_tick,
                 workdir,
-                session_id,
-                admit_tx,
-                admit_st,
-                queue_items,
-                pending_images,
-                history,
-                hist_idx,
             )
             .await;
         }
@@ -295,13 +259,6 @@ pub(crate) async fn dispatch_slash_action(
                 mode_flash,
                 anim_tick,
                 workdir,
-                session_id,
-                admit_tx,
-                admit_st,
-                queue_items,
-                pending_images,
-                history,
-                hist_idx,
             )
             .await;
         }

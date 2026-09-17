@@ -42,15 +42,18 @@ pub(crate) enum KeyAction {
     /// (destroy-on-entry: the previous conversation is reset and the empty
     /// panel shows its enter hint).
     SidecarAsk(String),
-    /// A textual mode command was submitted while a running subagent is
-    /// focused (subagents have no mode concept, so it can neither steer the
-    /// child nor be deferred to a parent boundary). The input remains
-    /// untouched so the user can retry at an idle boundary.
+    /// A bare act/plan switch (`/act`, `/plan`) was submitted while the
+    /// parent turn runs — refused with the busy flash: a mode switch never
+    /// applies mid-flight and is never queued. While a running subagent is
+    /// focused every mode command is blocked too (subagents have no mode
+    /// concept, so it can neither steer the child nor be deferred to a
+    /// parent boundary). The input remains untouched so the user can retry
+    /// at an idle boundary.
     ModeSwitchBlocked,
     /// Ctrl+T: preserve the transcript and toggle the parent between act and
-    /// plan. The dispatcher applies the switch now when the parent is idle;
-    /// while running it queues the raw command text (steer/queue semantics:
-    /// submit always, the runner applies it at the idle boundary).
+    /// plan. The dispatcher applies the switch when the parent is idle; while
+    /// running it refuses with the busy flash (mode switches never land
+    /// mid-flight).
     SwitchAgent(String),
     Cancel,
     /// Shift+Tab in plan mode: arm the clear-context countdown confirm instead
@@ -316,12 +319,17 @@ pub(crate) fn handle_key(
                 return KeyAction::None;
             }
             let text = input.trim().to_string();
-            // A mode command typed while a running subagent is focused stays
-            // blocked (subagents have no mode concept — it would otherwise
-            // steer the child as plain text). The parent session's running
-            // path steers freely: the runner applies the command at the next
-            // turn boundary.
-            if running && subagent_focused && opencoder_session::control_cmd::is_mode_control(&text)
+            // A bare act/plan switch while the parent turn runs is refused:
+            // a mid-flight switch would re-aim the session the worker is
+            // streaming into. Compound forms (`/plan review …`) are task
+            // submissions and steer as before. While a running subagent is
+            // focused every mode command stays blocked (subagents have no
+            // mode concept — it would otherwise steer the child as plain
+            // text). Either way the typed text stays for an idle retry.
+            if running
+                && (is_bare_mode_switch(&text)
+                    || (subagent_focused
+                        && opencoder_session::control_cmd::is_mode_control(&text)))
             {
                 return KeyAction::ModeSwitchBlocked;
             }
@@ -411,6 +419,12 @@ pub(crate) fn handle_key(
             // sidecar follow-up must never leak into — Enter asks the sidecar.
             if subagent_focused || sidecar_focused {
                 return KeyAction::QueueUnsupported;
+            }
+            // A bare act/plan switch never queues mid-flight: it would land
+            // at the next idle boundary unannounced. Refuse and keep the
+            // typed text (Enter on the same input shows the same flash).
+            if running && is_bare_mode_switch(&text) {
+                return KeyAction::ModeSwitchBlocked;
             }
             input.clear();
             *cursor_idx = 0;
@@ -589,6 +603,18 @@ fn next_primary_agent(agent: &str) -> &'static str {
     } else {
         "plan"
     }
+}
+
+/// A BARE act/plan switch input (`/act`, `/plan`): a control command whose
+/// target is the primary agent and that carries no trailing task text.
+/// Compound forms (`/plan review this`) are task submissions — the mode
+/// switch rides along at the idle boundary and is never gated here.
+pub(crate) fn is_bare_mode_switch(text: &str) -> bool {
+    matches!(
+        opencoder_session::control_cmd::split_control_prefix(text),
+        Some((opencoder_session::control_cmd::ControlCmd::SwitchAgent(_), rest))
+            if rest.as_deref().map_or(true, |r| r.trim().is_empty())
+    )
 }
 
 /// Whether typing `c` at char-index `cursor_idx` in `input` should open

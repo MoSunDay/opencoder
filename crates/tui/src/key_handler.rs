@@ -613,7 +613,7 @@ pub(crate) fn is_bare_mode_switch(text: &str) -> bool {
     matches!(
         opencoder_session::control_cmd::split_control_prefix(text),
         Some((opencoder_session::control_cmd::ControlCmd::SwitchAgent(_), rest))
-            if rest.as_deref().map_or(true, |r| r.trim().is_empty())
+            if rest.as_deref().is_none_or(|r| r.trim().is_empty())
     )
 }
 

@@ -9,6 +9,7 @@
 import { createElement } from 'react';
 import {
   CheckSquareOutlined,
+  ClockCircleOutlined,
   ClusterOutlined,
   DeploymentUnitOutlined,
   EyeOutlined,
@@ -40,6 +41,7 @@ export const NAV_CATEGORIES = [
     items: [
       { page: 'brain', menu: '大脑调度', icon: ThunderboltOutlined },
       { page: 'topics', menu: '全部执行', icon: ProfileOutlined },
+      { page: 'schedules', menu: '定时任务', icon: ClockCircleOutlined },
       { page: 'dag', menu: 'DAG 工作流', icon: DeploymentUnitOutlined },
       { page: 'todos', menu: 'TODO 管理', icon: CheckSquareOutlined },
       { page: 'team', menu: 'Team 组队', icon: TeamOutlined },
@@ -89,6 +91,7 @@ export const NAV_STORAGE_KEY = 'oc_nav_page';
 export const HEADERLESS_REASONS = {
   brain: 'body-title',
   topics: 'menu-only',
+  schedules: 'menu-only',
   dag: 'body-title',
   todos: 'body-title',
   team: 'menu-only',

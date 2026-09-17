@@ -8,7 +8,6 @@
 use opencoder_core::fleet::*;
 use opencoder_core::{ContentBlock, Message, Role};
 use opencoder_store::fleet::FleetStore;
-use opencoder_store::fleet::handoff::Receipt;
 use opencoder_store::{LibsqlStore, SessionFilter, SessionMeta, Store};
 
 async fn fresh() -> LibsqlStore {

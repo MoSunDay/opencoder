@@ -5,21 +5,13 @@
 mod support;
 
 use opencoder_core::fleet::*;
-use opencoder_llm::{ChatRequest, ChatStream, LlmEvent, MockChatClient};
+use opencoder_llm::{ChatRequest, ChatStream, LlmEvent};
 use opencoder_node::fleet::NodeService;
 use opencoder_store::{LibsqlStore, SessionFilter, Store};
 use opencoder_worker::Worker;
 use serde_json::json;
 use std::sync::Arc;
 use support::*;
-
-fn done(text: &str) -> Vec<LlmEvent> {
-    vec![LlmEvent::Completed {
-        text: text.into(),
-        tool_calls: vec![],
-        usage: None,
-    }]
-}
 
 /// A chat client that never answers until released, keeping an execution in
 /// the running state while the maintenance call is exercised.

@@ -313,8 +313,25 @@ pub async fn process_cmd(
                     let ev2 = SessionEvent::Compaction(summary);
                     let _ = sink.push(&ev2);
                     forward_event(&ui_tx, ev2);
+                    // Web parity (handle.rs DrainCmd::Compact): a successful
+                    // compact is a completed drain command, so it must end
+                    // with a terminal Done frame. The app_loop Done handler
+                    // re-syncs pending Queue/Steer rows from the store and
+                    // arms `drain_pending`; without Done, inputs admitted
+                    // while the compaction turn ran strand in the store
+                    // forever (TurnDone alone never resyncs).
+                    let ev3 = SessionEvent::Done;
+                    let _ = sink.push(&ev3);
+                    forward_event(&ui_tx, ev3);
                 }
-                Ok(None) => {}
+                Ok(None) => {
+                    // "Nothing to compact yet" is still a successful command:
+                    // web emits Done for every `Ok(_)` outcome, so the idle
+                    // boundary stays consistent across both frontends.
+                    let ev = SessionEvent::Done;
+                    let _ = sink.push(&ev);
+                    forward_event(&ui_tx, ev);
+                }
                 Err(e) => {
                     let ev = SessionEvent::Error(format!("compaction failed: {e:#}"));
                     let _ = sink.push(&ev);
@@ -498,3 +515,6 @@ mod tests_reload;
 #[cfg(test)]
 #[path = "worker/tests_sidecar.rs"]
 mod tests_sidecar;
+#[cfg(test)]
+#[path = "worker/tests_compact_done.rs"]
+mod tests_compact_done;

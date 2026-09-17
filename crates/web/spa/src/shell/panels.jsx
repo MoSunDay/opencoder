@@ -12,6 +12,7 @@ import { FleetTeamsPanel as TeamPanel } from '../fleet/teams.jsx';
 import { OwnerViewPanel } from '../project/ownerViewPanel.jsx';
 import { ProgressPanel } from '../project/progressPanel.jsx';
 import { ProjectPanel } from '../project/project.jsx';
+import { SchedulePanel } from '../schedule/panel.jsx';
 import { TodoPanel } from '../todoPanel.jsx';
 
 /// Page components keyed by store `page` — one map instead of a ternary chain
@@ -21,6 +22,7 @@ export const PANELS = {
   chat: ChatPanel,
   team: TeamPanel,
   topics: TopicsPanel,
+  schedules: SchedulePanel,
   project: ProjectPanel,
   progress: ProgressPanel,
   ownerview: OwnerViewPanel,

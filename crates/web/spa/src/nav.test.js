@@ -92,7 +92,8 @@ describe('categoryHome / pagesOf', () => {
   it('lists category pages in menu order', () => {
     // Iteration 4 widens the project category to 项目 / 进展 / Owner 视角.
     expect(pagesOf('project')).toEqual(['project', 'progress', 'ownerview']);
-    expect(pagesOf('agent')).toEqual(['brain', 'topics', 'dag', 'todos', 'team', 'chat', 'agents']);
+    // schedules（调度）挂在「全部执行」之后：cron 台账是执行面的时间维度。
+    expect(pagesOf('agent')).toEqual(['brain', 'topics', 'schedules', 'dag', 'todos', 'team', 'chat', 'agents']);
     expect(pagesOf('node')).toEqual(['nodes']);
   });
 });
@@ -117,6 +118,7 @@ describe('menuOf / selectOptionsOf scoping', () => {
     expect(selectOptionsOf('agent')).toEqual([
       { value: 'brain', label: '大脑调度' },
       { value: 'topics', label: '全部执行' },
+      { value: 'schedules', label: '定时任务' },
       { value: 'dag', label: 'DAG 工作流' },
       { value: 'todos', label: 'TODO 管理' },
       { value: 'team', label: 'Team 组队' },

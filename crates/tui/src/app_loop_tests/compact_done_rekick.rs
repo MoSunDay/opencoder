@@ -117,13 +117,13 @@ async fn compact_done_rekicks_drain_and_consumes_pending_queue() {
     let prompt_cmd = loop {
         match cmd_rx.try_recv() {
             Ok(UiCmd::ResetCancel(_)) => saw_reset = true,
-            Ok(cmd @ UiCmd::Prompt(ref prompt, ref images)) => {
+            Ok(UiCmd::Prompt(prompt, images)) => {
                 assert!(saw_reset, "ResetCancel must precede the drain prompt");
                 assert!(
                     prompt.is_empty() && images.is_empty(),
                     "the drain rekick uses an empty prompt, got {prompt:?}"
                 );
-                break cmd.clone();
+                break UiCmd::Prompt(prompt, images);
             }
             Ok(other) => panic!("unexpected cmd while rekick: {other:?}"),
             Err(_) => panic!("TurnDone must send the drain prompt"),

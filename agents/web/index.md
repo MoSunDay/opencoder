@@ -57,5 +57,11 @@ axum HTTP + SSE 会话管理 + 内嵌 SPA。
 
 ## 接缝
 - 会话执行复用 session 运行时；持久化经 `Arc<dyn Store>`。
+- `spa/src/schedule/panel.jsx` —「定时任务」页（Agent 分类，page key
+  `schedules`，menu-only）：`GET /api/schedules` 定义列表（id/cron/enabled/
+  kind/target/overlap/node_id/last_run/next_run，invalid cron 的 next_run
+  渲染「—」）+ `GET /api/schedules/:id/runs?limit=50` 触发历史 Drawer
+  （scheduled_for_ms/fired_at_ms/status/execution_id/error）；只读（事实源
+  schedules.json），5s 静默轮询；admin-only 端点与非 admin 导航裁剪天然对齐
 - `spa/src/brain/workbench/` 编辑 v2 的 input、实例、output、路由，能力选择使用注册目录；`editor/` 管理端口、映射、出口与草稿。提交具名文档后，画布和 inspector 按 visit、output、route 展示活跃分支、等待原因、完成／验证证据和局部路由读集。
 - Brain 的校验、快照发布和执行由 [control](../control/index.md) 与 [brain](../brain/index.md) 提供；前端不另行推断路由或验证结果。历史旧格式只读，新写入提示迁移。

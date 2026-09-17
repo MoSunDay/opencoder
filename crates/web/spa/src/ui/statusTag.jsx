@@ -49,6 +49,10 @@ export const STATUS_META = {
   // 节点在线态
   online: { color: 'success', label: '在线' },
   offline: { color: 'error', label: '离线' },
+  // 调度触发台账（crates/store schedule_types.rs：fired=已提交执行面 /
+  // missed=超出追补窗口被跳过；error 复用上面的「失败」行）
+  fired: { color: 'success', label: '已触发' },
+  missed: { color: 'default', label: '已错过' },
 };
 
 /// Legacy shape for fleet/model.js importers: status → antd Tag color token.

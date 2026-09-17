@@ -88,6 +88,7 @@ beforeEach(() => {
     plans: [], runs: [], capabilities: [], resources: [],
     goals: [], backlog: [], templates: [], workflows: [],
     dialogs: [], skills: [], sessions: [], messages: [], events: [],
+    schedules: [],
   });
   apiPostMock.mockResolvedValue({});
 });

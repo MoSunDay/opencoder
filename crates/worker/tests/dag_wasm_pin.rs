@@ -59,6 +59,8 @@ fn step_ctx(workflow_root: &std::path::Path, spec: DagSpec) -> StepCtx {
         states: opencoder_dag::StepStates::new(),
         outputs: opencoder_dag::StepOutputs::new(),
         workflow_root: workflow_root.to_path_buf(),
+        knowledge_root: None,
+        ops: Default::default(),
     }
 }
 

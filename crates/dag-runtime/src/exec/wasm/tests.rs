@@ -70,6 +70,64 @@ const SPIN_WAT: &str = r#"
   (func (export "_start") (loop $l br $l)))
 "#;
 
+/// Fixture: imports BOTH `opencoder` host imports, runs the registered
+/// `noop` op (args "echo-args") and probes a loopback URL, then writes
+/// the verdicts to `output.json`. Addresses: op id @64, args @192, url
+/// @320, path @448, ok json @576, fail json @704; scratch 0..31.
+const HOST_IMPORT_WAT: &str = r#"
+(module
+  (import "opencoder" "opencoder_run_op"
+    (func $run_op (param i32 i32 i32 i32) (result i32)))
+  (import "opencoder" "opencoder_http_probe"
+    (func $probe (param i32 i32 i32 i32 i32) (result i32)))
+  (import "wasi_snapshot_preview1" "path_open"
+    (func $path_open (param i32 i32 i32 i32 i32 i64 i64 i32 i32) (result i32)))
+  (import "wasi_snapshot_preview1" "fd_write"
+    (func $fd_write (param i32 i32 i32 i32) (result i32)))
+  (import "wasi_snapshot_preview1" "fd_close"
+    (func $fd_close (param i32) (result i32)))
+  (memory (export "memory") 1)
+  (data (i32.const 64) "noop")
+  (data (i32.const 192) "echo-args")
+  (data (i32.const 320) "http://127.0.0.1:9/ready")
+  (data (i32.const 448) "a/output.json")
+  (data (i32.const 576) "{\"op\": \"ok\"}")
+  (data (i32.const 704) "{\"op\": \"fail\"}")
+  (func (export "_start")
+    (local $op i32)
+    (i32.store (i32.const 0) (i32.const 0))
+    (local.set $op (call $run_op
+      (i32.const 64) (i32.const 4) (i32.const 192) (i32.const 9)))
+    (i32.store (i32.const 16) (i32.const 704))
+    (i32.store (i32.const 20) (i32.const 16))
+    (if (i32.eq (local.get $op) (i32.const 0))
+      (then
+        (drop (call $probe (i32.const 320) (i32.const 24)
+          (i32.const 200) (i32.const 50) (i32.const 0)))
+        ;; The probe target is dead on purpose: a non-200 verdict still
+        ;; proves the import resolved and returned; only `run_op` gates
+        ;; the ok/fail json here.
+        (i32.store (i32.const 16) (i32.const 576))
+        (i32.store (i32.const 20) (i32.const 12))))
+    (drop (call $path_open
+      (i32.const 3) (i32.const 0) (i32.const 448) (i32.const 13)
+      (i32.const 9) (i64.const 64) (i64.const 0) (i32.const 0) (i32.const 0)))
+    (drop (call $fd_write (i32.load (i32.const 0)) (i32.const 16) (i32.const 1) (i32.const 24)))
+    (drop (call $fd_close (i32.load (i32.const 0))))))
+"#;
+
+/// A guest importing an UNREGISTERED op id must trap with the whitelist
+/// error text and error the step (fail-closed).
+const UNKNOWN_OP_WAT: &str = r#"
+(module
+  (import "opencoder" "opencoder_run_op"
+    (func $run_op (param i32 i32 i32 i32) (result i32)))
+  (memory (export "memory") 1)
+  (data (i32.const 8) "ghost")
+  (func (export "_start")
+    (drop (call $run_op (i32.const 8) (i32.const 5) (i32.const 8) (i32.const 0)))))
+"#;
+
 /// Fixture: wasm step `a` (no upstreams) under a fresh workflow root.
 fn step_ctx(workflow_root: &std::path::Path, command: &str, timeout_secs: Option<u64>) -> StepCtx {
     let spec = DagSpec {
@@ -94,6 +152,8 @@ fn step_ctx(workflow_root: &std::path::Path, command: &str, timeout_secs: Option
         outputs: StepOutputs::new(),
         workflow_root: workflow_root.to_path_buf(),
         log: None,
+        knowledge_root: None,
+        ops: Default::default(),
     }
 }
 
@@ -294,4 +354,50 @@ async fn missing_module_is_a_clean_error() {
         "{res:?}"
     );
     drop(tmp);
+}
+
+// ---------------------------------------------------------------------------
+// opencoder host imports (in-process only)
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn host_imports_drive_a_registered_op_and_write_output_json() {
+    let (tmp, root) = temp_workflow_with_module(HOST_IMPORT_WAT);
+    let script = tmp.path().join("noop.sh");
+    std::fs::write(&script, "#!/bin/sh\necho \"argv=[$1]\"\n").unwrap();
+    make_executable(&script);
+    let mut ctx = step_ctx(&root, "tool.wat", None);
+    ctx.ops.insert(
+        "noop".into(),
+        opencoder_core::config::DagOpConfig {
+            command: script.to_str().unwrap().into(),
+            ..Default::default()
+        },
+    );
+    let res = execute_wasm_step(&ctx).await;
+    assert_eq!(res.outcome, StepOutcome::Done, "{res:?}");
+    assert_eq!(res.output_json.unwrap()["op"], serde_json::json!("ok"));
+    // The op ran with the guest-passed args and left evidence behind.
+    let log = std::fs::read_to_string(root.join("run-1/a/ops/noop.log")).unwrap();
+    assert!(log.contains("argv=[echo-args]"), "op log: {log}");
+    drop(tmp);
+}
+
+#[tokio::test]
+async fn unregistered_op_id_traps_and_errors_the_step() {
+    let (tmp, root) = temp_workflow_with_module(UNKNOWN_OP_WAT);
+    let ctx = step_ctx(&root, "tool.wat", None);
+    let res = execute_wasm_step(&ctx).await;
+    assert_eq!(res.outcome, StepOutcome::Error, "{res:?}");
+    let error = res.error.unwrap_or_default();
+    assert!(error.contains("unknown op `ghost`"), "error: {error}");
+    assert!(error.contains("dag.ops"), "error: {error}");
+    drop(tmp);
+}
+
+fn make_executable(path: &std::path::Path) {
+    use std::os::unix::fs::PermissionsExt;
+    let mut perms = std::fs::metadata(path).unwrap().permissions();
+    perms.set_mode(0o755);
+    std::fs::set_permissions(path, perms).unwrap();
 }

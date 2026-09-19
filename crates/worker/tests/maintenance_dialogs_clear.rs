@@ -20,7 +20,10 @@ struct Hold {
 }
 
 impl ChatStream for Hold {
-    fn chat_stream(&self, _request: ChatRequest) -> anyhow::Result<tokio::sync::mpsc::Receiver<LlmEvent>> {
+    fn chat_stream(
+        &self,
+        _request: ChatRequest,
+    ) -> anyhow::Result<tokio::sync::mpsc::Receiver<LlmEvent>> {
         let release = self.release.clone();
         let (tx, rx) = tokio::sync::mpsc::channel(2);
         tokio::spawn(async move {
@@ -40,7 +43,13 @@ impl ChatStream for Hold {
 async fn run_operator(node: &Worker, id: &str) {
     let reply = node
         .handle(NodeOperation::Create {
-            assignment: assignment(node, id, ExecutionKind::Operator, json!({"prompt":"hi"}), None),
+            assignment: assignment(
+                node,
+                id,
+                ExecutionKind::Operator,
+                json!({"prompt":"hi"}),
+                None,
+            ),
         })
         .await;
     assert_eq!(reply.status, 200, "{:?}", reply);
@@ -55,8 +64,12 @@ async fn dialogs_clear_deletes_sessions_and_journal_records() {
     let node = worker(dir.path(), mock()).await;
     run_operator(&node, "operator-drop").await;
     run_operator(&node, "operator-keep").await;
-    let drop_file = dir.path().join("node/operator/operator-drop/execution.json");
-    let keep_file = dir.path().join("node/operator/operator-keep/execution.json");
+    let drop_file = dir
+        .path()
+        .join("node/operator/operator-drop/execution.json");
+    let keep_file = dir
+        .path()
+        .join("node/operator/operator-keep/execution.json");
     assert!(drop_file.is_file());
     assert!(keep_file.is_file());
 
@@ -79,7 +92,9 @@ async fn dialogs_clear_deletes_sessions_and_journal_records() {
 
     // Session rows follow the journal: drop deleted, keep untouched.
     node.shutdown().await.unwrap();
-    let store = LibsqlStore::open(dir.path().join("node/runtime.db")).await.unwrap();
+    let store = LibsqlStore::open(dir.path().join("node/runtime.db"))
+        .await
+        .unwrap();
     let sessions = store
         .list_sessions(&SessionFilter {
             limit: 100,

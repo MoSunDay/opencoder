@@ -157,14 +157,18 @@ fn team_topic_runs_to_completion_with_turn_ledger() {
     assert_eq!(topic["final_summary"], json!("team completed"));
 
     // Member (and captain) sessions are indexed as agent executions.
-    let (status, body) =
-        fleet.http("GET", "/api/executions?kind=agent&limit=200", &json!({}));
+    let (status, body) = fleet.http("GET", "/api/executions?kind=agent&limit=200", &json!({}));
     assert_eq!(status, 200, "agent indexes: {body}");
     let members = body["executions"]
         .as_array()
         .expect("executions array")
         .iter()
-        .filter(|row| row["id"].as_str().unwrap_or_default().starts_with("member-"))
+        .filter(|row| {
+            row["id"]
+                .as_str()
+                .unwrap_or_default()
+                .starts_with("member-")
+        })
         .count();
     assert!(members >= 4, "expected the 4 team sessions, got {members}");
 
@@ -182,8 +186,5 @@ fn team_topic_runs_to_completion_with_turn_ledger() {
     // The topic metadata is also the execution's result payload.
     let (status, detail) = fleet.http("GET", &format!("/api/executions/{RUN}"), &json!({}));
     assert_eq!(status, 200, "inspect: {detail}");
-    assert_eq!(
-        detail["result"]["final_summary"],
-        json!("team completed")
-    );
+    assert_eq!(detail["result"]["final_summary"], json!("team completed"));
 }

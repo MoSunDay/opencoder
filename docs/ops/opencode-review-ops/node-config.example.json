@@ -1,0 +1,27 @@
+{
+  "dag": {
+    "agent_sandbox": "host",
+    "ops": {
+      "env_eob_deploy": {
+        "command": "/opt/opencode-review-ops/env_eob_deploy.sh",
+        "env_keys": ["REVIEW_DEPLOY_TOKEN"],
+        "timeout_secs": 900
+      },
+      "env_baremetal_deploy": {
+        "command": "/opt/opencode-review-ops/env_baremetal_deploy.sh",
+        "env_keys": ["REVIEW_DEPLOY_TOKEN"],
+        "timeout_secs": 900
+      },
+      "harness_run_quick": {
+        "command": "/opt/opencode-review-ops/harness_run.sh quick",
+        "env_keys": ["REVIEW_GITHUB_TOKEN"],
+        "timeout_secs": 1800
+      },
+      "harness_run_full": {
+        "command": "/opt/opencode-review-ops/harness_run.sh full",
+        "env_keys": ["REVIEW_GITHUB_TOKEN"],
+        "timeout_secs": 3600
+      }
+    }
+  }
+}

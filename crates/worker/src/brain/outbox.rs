@@ -16,7 +16,27 @@ pub async fn frames(worker: &Worker) -> Result<Vec<NodeFrame>> {
         .collect();
     let mut frames = Vec::new();
     for record in records {
-        if record.assignment.index.kind == ExecutionKind::Brain {
+        if record
+            .assignment
+            .request
+            .input
+            .get("brain_scheduler")
+            .is_some()
+        {
+            if let Some(terminal) = scheduler_terminal(&record)? {
+                if record.annotations["brain_scheduler_ack"]
+                    .as_u64()
+                    .unwrap_or(0)
+                    < terminal.source_sequence
+                {
+                    frames.push(frame(&record, "scheduler_terminal", json!(terminal)));
+                }
+            }
+        } else if record.assignment.index.kind == ExecutionKind::Brain
+            && record.assignment.request.input["schema_version"] == 3
+        {
+            frames.extend(super::v3::frames(worker, &record).await?);
+        } else if record.assignment.index.kind == ExecutionKind::Brain {
             let Some((_, run)) = persistence::load(worker, &record.assignment.index.id).await?
             else {
                 continue;
@@ -58,6 +78,40 @@ pub async fn frames(worker: &Worker) -> Result<Vec<NodeFrame>> {
         frames.truncate(64);
     }
     Ok(frames)
+}
+
+fn scheduler_terminal(record: &Record) -> Result<Option<BrainSchedulerTerminalEvent>> {
+    let Some(scheduler) = record.assignment.request.input.get("brain_scheduler") else {
+        return Ok(None);
+    };
+    let Some(run_id) = scheduler["run_id"].as_str() else {
+        return Ok(None);
+    };
+    let Some(operation_id) = scheduler["operation_id"].as_str() else {
+        return Ok(None);
+    };
+    let status = match record.assignment.index.status {
+        ExecutionStatus::Done => BrainOperationStatus::Done,
+        // Interrupted is a recovery state, not a child terminal event.  The
+        // owning node will emit this frame only after the execution reaches a
+        // durable Done, Error, or Cancelled state.
+        ExecutionStatus::Error => BrainOperationStatus::Error,
+        ExecutionStatus::Cancelled => BrainOperationStatus::Cancelled,
+        _ => return Ok(None),
+    };
+    let source_sequence = record
+        .events
+        .last()
+        .and_then(|event| event.seq)
+        .unwrap_or(0) as u64;
+    Ok(Some(BrainSchedulerTerminalEvent {
+        run_id: run_id.into(),
+        operation_id: operation_id.into(),
+        execution_kind: record.assignment.index.kind,
+        execution_id: record.assignment.index.id.clone(),
+        status,
+        source_sequence,
+    }))
 }
 
 fn frame(record: &Record, action: &str, input: Value) -> NodeFrame {
@@ -112,11 +166,22 @@ pub async fn ack(worker: &Worker, reference: &ExecutionRef, input: Value) -> Res
         sequence <= record.events.last().and_then(|e| e.seq).unwrap_or(0) as u64,
         "invalid acknowledgement cursor"
     );
-    if sequence > record.annotations["brain_notice_ack"].as_u64().unwrap_or(0) {
+    let key = if record
+        .assignment
+        .request
+        .input
+        .get("brain_scheduler")
+        .is_some()
+    {
+        "brain_scheduler_ack"
+    } else {
+        "brain_notice_ack"
+    };
+    if sequence > record.annotations[key].as_u64().unwrap_or(0) {
         if !record.annotations.is_object() {
             record.annotations = json!({});
         }
-        record.annotations["brain_notice_ack"] = json!(sequence);
+        record.annotations[key] = json!(sequence);
         journal.save(record)?;
     }
     Ok(RpcReply::ok(json!({"acknowledged":sequence})))

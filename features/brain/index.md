@@ -1,8 +1,8 @@
-Commit: 187ee827bad0cb2ae0b1900284b1a20176706166
+Commit: 896013049fe3bd0f3384c52e9638e3a7107aa6fc
 
 # 大脑调度工作台
 
-以 input、实例、output、路由四类概念编辑、发布和运行不可变计划。手写与动态生成共用 schema v2 和一个图执行内核，覆盖 Agent/DAG/Team/TODO/Operator；局部语义路由支持并行、按因果汇合与修复循环，回执先持久化后派发。
+平台同时支持两种脑运行。v2 以 input、实例、output、路由四类概念编辑、发布和运行不可变计划；v3 以工程输入和能力目录按轮次调度，等待子执行终态事件后再次判断。两者都覆盖 Agent/DAG/Team/TODO/Operator，v2 保留图内并行、因果汇合与修复循环。
 
 发起运行时输入由一段语义化描述（目标和交付物）与工程描述组成：工程描述在 Web 上以一层 KV 对的 itemlist 组织，键为计划声明的输入端口名，值支持 JSON 字面量；下游输入承接连线指定的输出内容和产物。每个实例来自已注册能力，发布时固定定义；运行期间不能增加节点或更改路线。
 
@@ -10,8 +10,15 @@ Commit: 187ee827bad0cb2ae0b1900284b1a20176706166
 
 历史计划与证据可只读查询，旧格式写入和执行要求迁移。存在旧非终态运行时阻止升级，待所属旧运行正常收敛后再切换协议。
 
+### v3 运行规则
+
+创建 v3 运行时必须声明 `schema_version: 3`。每轮只能派发能力目录中有真实 target、definition、版本及输入/输出描述的能力；输入只能绑定根请求命名输入、成功执行的 `execution_id` 输出路径或已有产物引用。当前轮次全部成功终态才进入下一次判断；任一 Error/Cancelled 终态立即失败并取消兄弟执行。`Complete` 必须引用成功终态执行，非法决策、无证据完成和超过轮次上限会阻塞。
+
+运行快照只展示脑状态、轮次和 operation 索引。消息、DAG 步骤、Team 对话、TODO 项和产物正文通过执行 ID 在所属节点查询；重复、乱序或迟到终态事件不会重复推进或改写已终态运行。CLI 和 Web 提供事件页、轮次查询及 pause/resume/cancel。
+
 ## 相关
 - [agents/brain](../../agents/brain/index.md) — 状态机与回归
 - [agents/control](../../agents/control/index.md) — 派发 API
 - [运行协议](../../docs/brain-orchestration.md)
 - [固定图 v2 与验收映射](../changelog/2026-09-16/brain-fixed-graph-v2.md)
+- [事件驱动调度 v3](../changelog/2026-09-18/brain-scheduler-v3.md)

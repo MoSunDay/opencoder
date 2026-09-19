@@ -75,6 +75,22 @@ pub enum ScheduleOverlap {
     Allow,
 }
 
+impl ScheduleOverlap {
+    pub fn parse(value: &str) -> Option<Self> {
+        Some(match value {
+            "skip" => Self::Skip,
+            "allow" => Self::Allow,
+            _ => return None,
+        })
+    }
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Skip => "skip",
+            Self::Allow => "allow",
+        }
+    }
+}
+
 /// One declared cronjob: target object + cron expression + params (string
 /// values may carry `{{now...}}` time templates resolved at fire time).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

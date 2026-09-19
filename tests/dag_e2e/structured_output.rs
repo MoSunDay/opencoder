@@ -73,12 +73,7 @@ fn agent_step_extracts_fenced_and_bare_json_output() {
     // slot order never matters.
     let stub = LlmStub::spawn(vec![reply_by_prompt(); 8]);
     let tmp = tempfile::tempdir().unwrap();
-    let fleet = Fleet::spawn_with_config(
-        tmp.path(),
-        stub.port(),
-        json!({}),
-        "dag-structured-node",
-    );
+    let fleet = Fleet::spawn_with_config(tmp.path(), stub.port(), json!({}), "dag-structured-node");
 
     let (status, body) = fleet.http("POST", "/api/dag/defs", &json!({"spec": spec()}));
     assert_eq!(status, 200, "save def: {body}");
@@ -108,19 +103,41 @@ fn agent_step_extracts_fenced_and_bare_json_output() {
     // Fallback form: narration + bare JSON tail (no fence anywhere) must
     // still produce a non-null output.json — the regression this suite pins.
     let bare = step_json(&fleet, RUN, "bare");
-    assert!(bare.is_object(), "bare output.json must not be null: {bare}");
+    assert!(
+        bare.is_object(),
+        "bare output.json must not be null: {bare}"
+    );
     assert_eq!(bare["depend_type"], json!("weak"));
     assert_eq!(bare["analysis_report"]["summary"], json!("bare"));
 
     // Both steps closed done with the extraction serving the artifact IO.
     for step in ["fenced", "bare"] {
-        let meta = read_json_at(&fleet.node_data.join("dag").join(RUN).join(step).join("meta.json"));
+        let meta = read_json_at(
+            &fleet
+                .node_data
+                .join("dag")
+                .join(RUN)
+                .join(step)
+                .join("meta.json"),
+        );
         assert_eq!(meta["outcome"], "done", "{step} meta: {meta}");
     }
 
     let requests = stub.wait_for_requests(2);
-    let fenced_reqs: Vec<&String> = requests.iter().filter(|r| r.contains("给出围栏结论")).collect();
-    let bare_reqs: Vec<&String> = requests.iter().filter(|r| r.contains("给出裸 JSON 结论")).collect();
-    assert!(!fenced_reqs.is_empty(), "fenced prompt never sent: {requests:?}");
-    assert!(!bare_reqs.is_empty(), "bare prompt never sent: {requests:?}");
+    let fenced_reqs: Vec<&String> = requests
+        .iter()
+        .filter(|r| r.contains("给出围栏结论"))
+        .collect();
+    let bare_reqs: Vec<&String> = requests
+        .iter()
+        .filter(|r| r.contains("给出裸 JSON 结论"))
+        .collect();
+    assert!(
+        !fenced_reqs.is_empty(),
+        "fenced prompt never sent: {requests:?}"
+    );
+    assert!(
+        !bare_reqs.is_empty(),
+        "bare prompt never sent: {requests:?}"
+    );
 }

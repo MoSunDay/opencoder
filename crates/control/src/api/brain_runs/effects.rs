@@ -14,10 +14,6 @@ pub async fn deliver(
     action: String,
     input: Value,
 ) -> Result<()> {
-    let _process_lock = state
-        .fleet
-        .request_lock("brain-control", &execution.id)
-        .await?;
     let index = state
         .fleet
         .index(&execution.id)
@@ -27,6 +23,13 @@ pub async fn deliver(
         index.node_id == node && index.kind == execution.kind,
         "outbox source ownership mismatch"
     );
+    if action.starts_with("scheduler_") {
+        return super::v3::delivery::deliver(&state, &node, &execution, &action, input).await;
+    }
+    let _process_lock = state
+        .fleet
+        .request_lock("brain-control", &execution.id)
+        .await?;
     match action.as_str() {
         "notice" => notice(&state, &node, &execution, input).await,
         "publish" => {

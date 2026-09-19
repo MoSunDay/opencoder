@@ -19,13 +19,36 @@ use crate::types::{
 };
 use crate::{
     BrainCapabilityDetail, BrainCapabilityRecord, BrainEngInputRecord, BrainPlanRecord,
-    BrainPlaybookRecord, BrainVectorHit, BrainVectorWrite, ScheduleRunRecord, TeamTopicRunRecord,
-    TodoEventPage, TodoEventRecord, TodoItemRecord, TodoWorkflowDetail, TodoWorkflowRecord,
-    TodoWorkflowSummary,
+    BrainPlaybookRecord, BrainVectorHit, BrainVectorWrite, ScheduleDefRecord, ScheduleRunRecord,
+    TeamTopicRunRecord, TodoEventPage, TodoEventRecord, TodoItemRecord, TodoWorkflowDetail,
+    TodoWorkflowRecord, TodoWorkflowSummary,
 };
 
 #[async_trait]
 impl Store for LibsqlStore {
+    async fn brain_scheduler(
+        &self,
+        id: &str,
+    ) -> Result<Option<opencoder_core::brain::BrainSchedulerSnapshot>> {
+        let _guard = self.db_lock.lock().await;
+        super::brain_scheduler::load(&self.conn, id).await
+    }
+    async fn commit_brain_scheduler(
+        &self,
+        change: &opencoder_core::brain::BrainSchedulerChange,
+    ) -> Result<opencoder_core::brain::BrainSchedulerSnapshot> {
+        let _guard = self.db_lock.lock().await;
+        super::brain_scheduler::commit(&self.conn, change).await
+    }
+    async fn brain_scheduler_events(
+        &self,
+        id: &str,
+        after: u64,
+        limit: u32,
+    ) -> Result<Vec<opencoder_core::brain::BrainSchedulerEvent>> {
+        let _guard = self.db_lock.lock().await;
+        super::brain_scheduler::page(&self.conn, id, after, limit).await
+    }
     async fn save_brain_playbook(&self, record: &BrainPlaybookRecord) -> Result<()> {
         let _guard = self.db_lock.lock().await;
         brain_playbooks::save(&self.conn, record).await
@@ -801,6 +824,28 @@ impl Store for LibsqlStore {
     ) -> Result<Vec<ScheduleRunRecord>> {
         let _guard = self.db_lock.lock().await;
         schedule::list(&self.conn, schedule_id, limit).await
+    }
+
+    // Schedule definitions (control-plane cron jobs, schema v27).
+    async fn upsert_schedule(
+        &self,
+        job: &opencoder_core::config::ScheduleJob,
+        now_ms: i64,
+    ) -> Result<()> {
+        let _guard = self.db_lock.lock().await;
+        schedule::upsert_def(&self.conn, job, now_ms).await
+    }
+    async fn get_schedule(&self, id: &str) -> Result<Option<ScheduleDefRecord>> {
+        let _guard = self.db_lock.lock().await;
+        schedule::get_def(&self.conn, id).await
+    }
+    async fn list_schedules(&self) -> Result<Vec<ScheduleDefRecord>> {
+        let _guard = self.db_lock.lock().await;
+        schedule::list_defs(&self.conn).await
+    }
+    async fn delete_schedule(&self, id: &str) -> Result<()> {
+        let _guard = self.db_lock.lock().await;
+        schedule::delete_def(&self.conn, id).await
     }
 
     async fn import_messages(

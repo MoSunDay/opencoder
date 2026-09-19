@@ -32,6 +32,11 @@ pub async fn execute_agent_step(
     deps: &ExecDeps,
     cancel: CancellationToken,
 ) -> StepResult {
+    // Node-configured sandbox dispatch: `dag.agent_sandbox = "runc"` moves
+    // the whole session into a container before any host-side session work.
+    if deps.config.dag.agent_sandbox == opencoder_core::config::AgentSandbox::Runc {
+        return super::agent_runc::execute_agent_step_runc(ctx, deps, cancel).await;
+    }
     let session_id = match create_session_meta(deps, &ctx.step, &ctx.run_id).await {
         Ok(id) => id,
         Err(e) => {
@@ -74,6 +79,12 @@ pub async fn execute_agent_step(
     };
     if how_append.is_some() {
         session.env_passthrough = super::how_append::env_pairs(how_append.as_deref());
+    }
+    // A read-only knowledge checkout must not attempt git index refreshes.
+    if ctx.knowledge_root.is_some() {
+        session
+            .env_passthrough
+            .push(("GIT_OPTIONAL_LOCKS".into(), "0".into()));
     }
 
     // Local durability of the event stream, exactly like a node task. The
@@ -155,7 +166,7 @@ pub async fn execute_agent_step(
 
 /// The step's executing agent name — `agent` field or the `act` default,
 /// the same resolution `create_session_meta` pins on the session row.
-fn step_agent_name(step: &StepSpec) -> String {
+pub(crate) fn step_agent_name(step: &StepSpec) -> String {
     match &step.kind {
         StepKind::Agent { agent, .. } => agent.clone().unwrap_or_else(|| "act".into()),
         _ => "act".into(),
@@ -165,22 +176,38 @@ fn step_agent_name(step: &StepSpec) -> String {
 /// Prompt = step prompt + upstream context header + structured-output
 /// instruction. The context is the same object a wasm step receives as its
 /// `context.json` input file (delivered under `/workspace/context`).
-fn build_prompt(ctx: &StepCtx) -> String {
+pub(crate) fn build_prompt(ctx: &StepCtx) -> String {
     let prompt = match &ctx.step.kind {
         StepKind::Agent { prompt, .. } => prompt.clone(),
         _ => String::new(),
     };
     let context = serde_json::to_string_pretty(&ctx.context()).unwrap_or_else(|_| "{}".into());
     format!(
-        "{}\n\n上游步骤输出（JSON）：\n{}\n\n如果本步骤需要产出结构化结果，请在最终回复的末尾追加一个 ```json 围栏代码块（fenced code block）包含该 JSON。",
-        prompt, context
+        "{}\n\n上游步骤输出（JSON）：\n{}\n\n{}\n\n如果本步骤需要产出结构化结果，请在最终回复的末尾追加一个 ```json 围栏代码块（fenced code block）包含该 JSON。",
+        prompt,
+        context,
+        knowledge_hint(ctx)
+    )
+}
+
+/// The read-only knowledge-root hint appended to agent prompts (host-path
+/// form: host-sandbox sessions read the node's real tree). The mount is
+/// READ-ONLY — the prompt states the contract, the kernel/FsPerms enforces
+/// it for sandboxed steps.
+fn knowledge_hint(ctx: &StepCtx) -> String {
+    let Some(root) = ctx.knowledge_root.as_ref() else {
+        return String::new();
+    };
+    format!(
+        "知识库（只读）：{} 可读取参考，但禁止写入或修改其中任何内容（git 操作请加 --no-optional-locks）；你的产物一律写入本步骤目录（OPENCODER_STEP_DIR）。",
+        root.display()
     )
 }
 
 /// Persist a fresh local session row for this step (the node executor's
 /// `create_local_meta` shape, but no `task_type` pin: a DAG step session is
 /// inspectable like any other).
-async fn create_session_meta(
+pub(crate) async fn create_session_meta(
     deps: &ExecDeps,
     step: &StepSpec,
     run_id: &str,

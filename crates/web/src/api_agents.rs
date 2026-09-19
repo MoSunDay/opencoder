@@ -25,9 +25,7 @@ use opencoder_agents::{
     delete_agent,
     write::{create_agent_with_profile, update_agent_with_profile},
 };
-use opencoder_core::agent::{
-    list_agents, read_agent_meta, validate_agent_name, AgentRefs,
-};
+use opencoder_core::agent::{list_agents, read_agent_meta, validate_agent_name, AgentRefs};
 
 use crate::AppState;
 

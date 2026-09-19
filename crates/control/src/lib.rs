@@ -7,6 +7,8 @@ mod resource_scope;
 pub mod role_gate;
 mod routes;
 pub mod scheduler;
+mod seed_dags;
+pub mod seed_schedules;
 pub mod transport;
 
 // Share the existing stateless/global-definition HTTP implementations with

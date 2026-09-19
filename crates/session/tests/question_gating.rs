@@ -112,14 +112,19 @@ async fn plan_sees_question_without_any_skill() {
 }
 
 /// Contract bridge: the REAL seeded assets must match the gating logic.
-/// Activating the built-in `task-plan` skill unlocks `question` for act;
-/// activating the built-in `review` skill must not (its clarification
-/// protocol is lookup-first + assumptions, never the interactive tool).
+/// Activating the built-in `task-plan` skill — or its delegation companion
+/// `task-plan-subagent` — unlocks `question` for act; activating the built-in
+/// `review` skill must not (its clarification protocol is lookup-first +
+/// assumptions, never the interactive tool).
 #[tokio::test]
 async fn builtin_seed_assets_match_question_gating() {
     let root = tempfile::tempdir().unwrap();
     opencoder_core::seed_builtin_skills_in(root.path()).expect("seed");
-    for (skill, unlocks) in [("task-plan", true), ("review", false)] {
+    for (skill, unlocks) in [
+        ("task-plan", true),
+        ("task-plan-subagent", true),
+        ("review", false),
+    ] {
         let path = root.path().join(skill).join("SKILL.md");
         let parsed =
             opencoder_core::skill::parse_skill(&path, "fallback").expect("seeded skill parses");

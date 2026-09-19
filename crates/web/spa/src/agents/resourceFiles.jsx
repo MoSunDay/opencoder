@@ -69,7 +69,8 @@ export function ResourceFiles({cat,files,onChange,readOnly,onSave}) {
     <FileWorkspace files={display} directories={directories} selected={selected} onSelect={setSelected}
       readOnly={readOnly || text === null} onChange={(path,value) => onChange(updateText(files,path,value))}
       onSave={onSave} operationsReadOnly={readOnly} onOperation={readOnly ? undefined : start}/>
-    {!Object.keys(files).length && <Typography.Text type="secondary">{readOnly ? '未配置。' : `未配置，可在目录树右键新增文件，或用上方「上传压缩包」导入后保存。${cat === 'skills' ? '技能目录必须包含 SKILL.md。' : ''}`}</Typography.Text>}
+    {/* Memory 空态不再展示引导文案；Skills/Tools 保留入口提示。 */}
+    {!Object.keys(files).length && (readOnly || cat !== 'memory') && <Typography.Text type="secondary">{readOnly ? '未配置。' : `未配置，可在目录树右键新增文件，或用上方「上传压缩包」导入后保存。${cat === 'skills' ? '技能目录必须包含 SKILL.md。' : ''}`}</Typography.Text>}
     <Modal open={!!confirming} title="移除文件或目录" onCancel={() => setConfirming(null)} onOk={commit} okText="确认">
       <p>移除 {confirming} 及其内容？保存后生效。</p>
       {error && <Alert type="error" title={error}/>}

@@ -81,7 +81,7 @@ describe('AgentDetail direct resources',() => {
     expect(button('保存').disabled).toBe(true);
     fireEvent.change(screen.getByLabelText('prompt-how'),{target:{value:'FIRST'}}); fireEvent.click(button('保存'));
     await waitFor(()=>expect(api.apiPut.mock.calls[0][1].baseline.resource).toBeNull());
-    tab('Memory'); await screen.findByText(/未配置，可在目录树右键新增文件/);
+    tab('Memory'); await screen.findByLabelText('文件目录'); expect(screen.queryByText(/可在目录树右键/)).toBeNull();
     await treeMenu('','新增文件'); await draftName('memory.md');
     fireEvent.change(await screen.findByLabelText('文件内容 memory.md'),{target:{value:'NEW MEMORY'}}); fireEvent.click(button('保存'));
     await waitFor(()=>expect(api.apiPut.mock.calls.at(-1)[0]).toBe('/api/agents/coder/resources/memory'));

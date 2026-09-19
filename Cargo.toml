@@ -15,6 +15,7 @@ members = [
     "crates/dag",
     "crates/dag-wasm",
     "crates/dag-runtime",
+    "crates/dag-review-tools",
     "crates/server",
     "crates/control",
     "crates/worker",
@@ -24,7 +25,7 @@ members = [
     "crates/team",
     "crates/ctl",
 ]
-exclude = ["examples/snake"]
+exclude = ["examples/snake", "examples/dag-modules/kb-index"]
 
 [package]
 name = "opencoder"

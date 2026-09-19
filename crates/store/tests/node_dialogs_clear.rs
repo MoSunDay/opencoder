@@ -48,14 +48,38 @@ async fn clears_terminal_keeps_non_terminal_and_reports_skipped() {
     let foreign = dispatch(&store, "t-other", &other, 5_000).await;
 
     let now = 10_000;
-    store.update_node_task_status(&running.id, NodeTaskStatus::Running, None, now).await.unwrap();
-    store.update_node_task_status(&done.id, NodeTaskStatus::Running, None, now).await.unwrap();
-    store.update_node_task_status(&done.id, NodeTaskStatus::Done, None, now).await.unwrap();
-    store.update_node_task_status(&errored.id, NodeTaskStatus::Running, None, now).await.unwrap();
-    store.update_node_task_status(&errored.id, NodeTaskStatus::Error, Some("boom"), now).await.unwrap();
-    store.update_node_task_status(&cancelled.id, NodeTaskStatus::Cancelled, None, now).await.unwrap();
-    store.update_node_task_status(&foreign.id, NodeTaskStatus::Running, None, now).await.unwrap();
-    store.update_node_task_status(&foreign.id, NodeTaskStatus::Done, None, now).await.unwrap();
+    store
+        .update_node_task_status(&running.id, NodeTaskStatus::Running, None, now)
+        .await
+        .unwrap();
+    store
+        .update_node_task_status(&done.id, NodeTaskStatus::Running, None, now)
+        .await
+        .unwrap();
+    store
+        .update_node_task_status(&done.id, NodeTaskStatus::Done, None, now)
+        .await
+        .unwrap();
+    store
+        .update_node_task_status(&errored.id, NodeTaskStatus::Running, None, now)
+        .await
+        .unwrap();
+    store
+        .update_node_task_status(&errored.id, NodeTaskStatus::Error, Some("boom"), now)
+        .await
+        .unwrap();
+    store
+        .update_node_task_status(&cancelled.id, NodeTaskStatus::Cancelled, None, now)
+        .await
+        .unwrap();
+    store
+        .update_node_task_status(&foreign.id, NodeTaskStatus::Running, None, now)
+        .await
+        .unwrap();
+    store
+        .update_node_task_status(&foreign.id, NodeTaskStatus::Done, None, now)
+        .await
+        .unwrap();
 
     let result = store.clear_node_dialogs(&node).await.unwrap();
     assert_eq!(result.removed, 3, "done + error + cancelled sessions go");
@@ -63,19 +87,43 @@ async fn clears_terminal_keeps_non_terminal_and_reports_skipped() {
     skipped.sort();
     assert_eq!(
         skipped,
-        [format!("sess-{}", pending.id), format!("sess-{}", running.id)],
+        [
+            format!("sess-{}", pending.id),
+            format!("sess-{}", running.id)
+        ],
         "running + pending survive, cancelling would too"
     );
 
-    for sid in [&format!("sess-{}", done.id), &format!("sess-{}", errored.id), &format!("sess-{}", cancelled.id)] {
-        assert!(store.get_session(sid).await.unwrap().is_none(), "{sid} swept");
+    for sid in [
+        &format!("sess-{}", done.id),
+        &format!("sess-{}", errored.id),
+        &format!("sess-{}", cancelled.id),
+    ] {
+        assert!(
+            store.get_session(sid).await.unwrap().is_none(),
+            "{sid} swept"
+        );
     }
-    for sid in [&format!("sess-{}", running.id), &format!("sess-{}", pending.id)] {
-        assert!(store.get_session(sid).await.unwrap().is_some(), "{sid} kept");
+    for sid in [
+        &format!("sess-{}", running.id),
+        &format!("sess-{}", pending.id),
+    ] {
+        assert!(
+            store.get_session(sid).await.unwrap().is_some(),
+            "{sid} kept"
+        );
     }
     // Other nodes' dialogs are untouched.
-    assert!(store.get_session(&format!("sess-{}", foreign.id)).await.unwrap().is_some());
-    assert!(store.get_node_task_by_session(&format!("sess-{}", foreign.id)).await.unwrap().is_some());
+    assert!(store
+        .get_session(&format!("sess-{}", foreign.id))
+        .await
+        .unwrap()
+        .is_some());
+    assert!(store
+        .get_node_task_by_session(&format!("sess-{}", foreign.id))
+        .await
+        .unwrap()
+        .is_some());
 }
 
 #[tokio::test]
@@ -114,5 +162,9 @@ async fn cascade_removes_session_children_and_task_row() {
     assert_eq!(result.removed, 1);
     assert!(store.get_session(&sid).await.unwrap().is_none());
     assert!(store.load_messages(&sid).await.unwrap().is_empty());
-    assert!(store.get_node_task_by_session(&sid).await.unwrap().is_none());
+    assert!(store
+        .get_node_task_by_session(&sid)
+        .await
+        .unwrap()
+        .is_none());
 }

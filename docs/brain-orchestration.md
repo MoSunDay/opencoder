@@ -1,6 +1,14 @@
 # 大脑固定图契约与运行协议
 
-大脑只使用 `input → 实例 → output → 路由 → 下一实例的 input`。手写与动态生成均采用 `schema_version: 2`、同一校验器和执行内核。动态生成一次产出完整计划；运行时固定版本，不新增实体或更改路线。
+大脑有两条协议。v2 使用 `input → 实例 → output → 路由 → 下一实例的 input` 的不可变图；v3 使用工程输入、能力目录和轮次终态事件的轻量调度。v2 计划仍按原校验器和执行内核运行，v3 不把完整 DAG 或子执行正文复制到脑状态。
+
+## 事件驱动调度 v3
+
+v3 请求必须明确 `schema_version: 3`，根输入使用命名 JSON 输入，`repo`、`commit`、`branch` 等工程信息只是普通输入。每轮模型只能返回严格的 `Dispatch`、`Complete` 或 `Fail`：能力必须来自目录，输入绑定只能引用根输入、成功执行的 `execution_id` 输出路径或已有产物引用。缺少目录描述、非法引用、无成功证据完成或超过轮次上限都会进入 `blocked`。
+
+运行投影只保存 `run`、`operation` 和 `event` 的索引、状态、序号、引用及有限摘要。创建一轮时 control 通过统一 gateway 调用真实 Agent、Team、DAG、TODO 或 Operator；调度器随后停止，只有节点持久化终态并经 outbox 确认的事件才能唤醒下一次判断。当前轮次全部成功才越过屏障；任一失败终态立即取消兄弟操作并终止运行，迟到事件只记录。执行详情、消息、DAG 步骤和产物正文通过 `GET /api/executions/{execution_id}` 及所属节点查询。
+
+v3 入口为 `POST /api/brain/runs`、`GET /api/brain/runs/:id`、`GET /api/brain/runs/:id/events-page`、`GET /api/brain/runs/:id/rounds/:round` 和 `POST /api/brain/runs/:id/commands`；CLI 的 `brain runs` 支持创建、最小快照、轮次、事件及 pause/resume/cancel。v2 数据不迁移、不删除，旧运行保持只读兼容。
 
 ## 四类概念
 

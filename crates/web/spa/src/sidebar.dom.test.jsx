@@ -140,7 +140,7 @@ const mountChat = async () => {
   setCredentials('smoke-token', '');
   const renderResult = render(<ChatPanel />);
   await waitFor(() => {
-    expect(hits.some((h) => h.url === '/api/nodes/node-local/dialogs')).toBe(true);
+    expect(hits.some((h) => h.url === '/api/nodes/node-local/dialogs?kind=operator')).toBe(true);
   });
   return renderResult;
 };

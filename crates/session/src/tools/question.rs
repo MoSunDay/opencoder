@@ -196,7 +196,7 @@ impl Tool for QuestionTool {
     }
 
     fn description(&self) -> &str {
-        "Ask the user a clarifying question. Usage guidance: task-plan skill."
+        "Ask the user a clarifying question. Usage guidance: task-plan / task-plan-subagent skill."
     }
 
     fn parameters(&self) -> Value {
@@ -341,6 +341,13 @@ mod tests {
         assert!(
             lower.contains("task-plan"),
             "schema must point at the task-plan skill for guidance: {d}"
+        );
+        // The delegation companion is a task-plan VARIANT and unlocks the same
+        // tool, so the pointer must name it too (a bare `task-plan` pointer
+        // sends a dispatched parent to a skill it never activated).
+        assert!(
+            lower.contains("task-plan-subagent"),
+            "schema must also point at the task-plan-subagent variant: {d}"
         );
         for banned in [
             "prefer asking over assuming",

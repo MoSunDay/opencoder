@@ -24,6 +24,27 @@ use crate::{
 /// `libsql_store` (primary) and any future backend.
 #[async_trait]
 pub trait Store: Send + Sync {
+    /// Atomic v3 projection read. No child bodies are stored here.
+    async fn brain_scheduler(
+        &self,
+        _id: &str,
+    ) -> Result<Option<opencoder_core::brain::BrainSchedulerSnapshot>> {
+        anyhow::bail!("v3 brain scheduler unsupported")
+    }
+    async fn commit_brain_scheduler(
+        &self,
+        _change: &opencoder_core::brain::BrainSchedulerChange,
+    ) -> Result<opencoder_core::brain::BrainSchedulerSnapshot> {
+        anyhow::bail!("v3 brain scheduler unsupported")
+    }
+    async fn brain_scheduler_events(
+        &self,
+        _id: &str,
+        _after: u64,
+        _limit: u32,
+    ) -> Result<Vec<opencoder_core::brain::BrainSchedulerEvent>> {
+        anyhow::bail!("v3 brain scheduler unsupported")
+    }
     fn backend_name(&self) -> &'static str;
 
     async fn create_session(&self, meta: &SessionMeta) -> Result<()>;
@@ -834,6 +855,52 @@ pub trait Store: Send + Sync {
         _schedule_id: &str,
         _limit: u32,
     ) -> Result<Vec<ScheduleRunRecord>> {
+        anyhow::bail!(
+            "schedule store API is not supported by {}",
+            self.backend_name()
+        )
+    }
+
+    // ------------- Schedule definitions (control-plane cron jobs) ----------
+    //
+    // Since schema v27 the `schedules` table IS the scheduler's definition
+    // source of truth; `schedules.json` is only a bootstrap seed. CRUD is
+    // admin-only at the HTTP layer; the Store stays policy-free.
+
+    /// Insert or update one definition by id. `created_at` is stamped on
+    /// first insert and preserved across updates; `updated_at` moves to
+    /// `now_ms`. No validation here — callers validate
+    /// (`ScheduleJob::validate`) before calling.
+    async fn upsert_schedule(
+        &self,
+        _job: &opencoder_core::config::ScheduleJob,
+        _now_ms: i64,
+    ) -> Result<()> {
+        anyhow::bail!(
+            "schedule store API is not supported by {}",
+            self.backend_name()
+        )
+    }
+    /// One definition (with timestamps) by id, or `None`.
+    async fn get_schedule(
+        &self,
+        _id: &str,
+    ) -> Result<Option<crate::schedule_types::ScheduleDefRecord>> {
+        anyhow::bail!(
+            "schedule store API is not supported by {}",
+            self.backend_name()
+        )
+    }
+    /// Every definition, stable id order.
+    async fn list_schedules(&self) -> Result<Vec<crate::schedule_types::ScheduleDefRecord>> {
+        anyhow::bail!(
+            "schedule store API is not supported by {}",
+            self.backend_name()
+        )
+    }
+    /// Delete one definition. Fire history (`schedule_runs`) is kept — the
+    /// ledger is an audit trail and has no FK by design.
+    async fn delete_schedule(&self, _id: &str) -> Result<()> {
         anyhow::bail!(
             "schedule store API is not supported by {}",
             self.backend_name()

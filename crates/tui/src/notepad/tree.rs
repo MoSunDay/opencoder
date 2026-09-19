@@ -63,7 +63,11 @@ pub enum TreeInput {
     CreateDir { buf: String, parent: PathBuf },
     /// Renaming `path` in place; `buf` starts pre-filled with the old name and
     /// `err` carries the last rejection reason (target already exists).
-    Rename { path: PathBuf, buf: String, err: Option<String> },
+    Rename {
+        path: PathBuf,
+        buf: String,
+        err: Option<String>,
+    },
     /// Delete confirmation — `path` is the file/dir to remove.
     DeleteConfirm { path: PathBuf },
 }

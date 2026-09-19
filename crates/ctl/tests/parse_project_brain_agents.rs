@@ -232,7 +232,6 @@ fn brain_search_plan_preview_dispatch() {
 
     let plan = planned_brain(&["plan-get", "p1"]);
     assert_eq!(plan, RequestPlan::get("/api/brain/plans/p1"));
-
 }
 
 // ── agents ─────────────────────────────────────────────────────────────

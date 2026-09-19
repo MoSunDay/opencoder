@@ -55,7 +55,7 @@ beforeEach(() => {
   setState({ preselectNode: null, nodes: [] });
   apiGet.mockImplementation(async (path) => {
     if (path === '/api/nodes') return { nodes };
-    if (path === '/api/nodes/n1/dialogs') {
+    if (path.startsWith('/api/nodes/n1/dialogs')) {
       return { dialogs: emptyNode ? [] : allDialogs.filter((d) => remaining.includes(d.session_id)) };
     }
     if (path.startsWith('/api/sessions/')) return snapshot;
@@ -63,7 +63,7 @@ beforeEach(() => {
     return {};
   });
   apiDel.mockImplementation(async (path) => {
-    if (path === '/api/nodes/n1/dialogs') {
+    if (path.startsWith('/api/nodes/n1/dialogs')) {
       remaining = ['s-run'];
       return { ok: true, removed: 1, skipped: ['s-run'] };
     }
@@ -82,7 +82,7 @@ describe('chat sidebar 删除全部会话', () => {
     expect(modal.textContent).toContain('正在运行中的会话会保留');
 
     await act(async () => { fireEvent.click(modal.querySelector('.ant-btn-dangerous')); });
-    await waitFor(() => expect(apiDel).toHaveBeenCalledWith('/api/nodes/n1/dialogs'));
+    await waitFor(() => expect(apiDel).toHaveBeenCalledWith('/api/nodes/n1/dialogs?kind=operator'));
     // List reloads from the server: the running dialog survives, the
     // terminal one is gone.
     await waitFor(() => expect(screen.queryByText('已完成会话')).toBeNull());

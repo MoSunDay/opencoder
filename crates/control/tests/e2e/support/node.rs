@@ -280,6 +280,12 @@ impl MockNode {
             .flatten()
     }
 
+    /// The journalled CreateExecution request for `id` — the wire-level
+    /// proof of what the control plane assigned (e.g. dispatch `input`).
+    pub fn journal_request(&self, id: &str) -> Option<Value> {
+        self.tables.lock().unwrap().journal.get(id).cloned()
+    }
+
     /// Overrides Freeze/Reopen/Status admission replies by command name
     /// ("freeze"/"reopen"/"status"); when present the default side effects
     /// (open flip, freeze counting) are skipped.

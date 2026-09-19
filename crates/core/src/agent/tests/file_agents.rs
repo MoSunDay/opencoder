@@ -206,14 +206,29 @@ fn memory_multi_file_aggregation_orders_subtree_files() {
     std::fs::create_dir_all(memdir.join("topics").join("zeta")).unwrap();
     std::fs::create_dir_all(memdir.join("topics").join("alpha")).unwrap();
     std::fs::write(memdir.join("memory.md"), "core rules").unwrap();
-    std::fs::write(memdir.join("topics").join("zeta").join("deep.md"), "zeta notes").unwrap();
-    std::fs::write(memdir.join("topics").join("alpha").join("rust.md"), "rust notes").unwrap();
+    std::fs::write(
+        memdir.join("topics").join("zeta").join("deep.md"),
+        "zeta notes",
+    )
+    .unwrap();
+    std::fs::write(
+        memdir.join("topics").join("alpha").join("rust.md"),
+        "rust notes",
+    )
+    .unwrap();
     // Noise that must never leak into the prompt.
     std::fs::write(memdir.join("topics").join("notes.txt"), "not markdown").unwrap();
     std::fs::write(memdir.join(".hidden.md"), "hidden").unwrap();
     std::fs::create_dir_all(memdir.join(".stash")).unwrap();
     std::fs::write(memdir.join(".stash").join("secret.md"), "secret").unwrap();
-    write_agent_card(root, "polyglot", Some("default"), None, None, Some("longterm"));
+    write_agent_card(
+        root,
+        "polyglot",
+        Some("default"),
+        None,
+        None,
+        Some("longterm"),
+    );
     let prompt = resolve_agent("polyglot").unwrap().prompt;
     // Lexicographic by relative path: memory.md < topics/alpha/rust.md
     // < topics/zeta/deep.md, joined by one blank line after the header.
@@ -237,8 +252,18 @@ fn memory_single_file_matches_legacy_output_byte_for_byte() {
     std::fs::create_dir_all(&memdir).unwrap();
     let body = "  prefers small commits.  \n\n";
     std::fs::write(memdir.join("memory.md"), body).unwrap();
-    write_agent_card(root, "withmem", Some("default"), None, None, Some("longterm"));
-    let legacy = format!("# Soul\n{soul}\n\n# How\nhow body\n\n# Memory\n{}", body.trim());
+    write_agent_card(
+        root,
+        "withmem",
+        Some("default"),
+        None,
+        None,
+        Some("longterm"),
+    );
+    let legacy = format!(
+        "# Soul\n{soul}\n\n# How\nhow body\n\n# Memory\n{}",
+        body.trim()
+    );
     assert_eq!(resolve_agent("withmem").unwrap().prompt, legacy);
 }
 
@@ -264,9 +289,7 @@ fn memory_aggregate_over_200kib_is_truncated_with_marker() {
     let body_end = prompt.find("\n\n[memory truncated:").unwrap();
     assert_eq!(&prompt[memory_start..body_end], head);
     assert_eq!(body_end - memory_start, 200 * 1024);
-    assert!(prompt.ends_with(
-        "[memory truncated: original size 250002 bytes exceeds 200KB limit]"
-    ));
+    assert!(prompt.ends_with("[memory truncated: original size 250002 bytes exceeds 200KB limit]"));
 }
 
 /// Missing files degrade: sections are optional, but an agent with no

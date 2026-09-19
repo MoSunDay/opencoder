@@ -396,4 +396,10 @@ pub fn mock_brain(store: Arc<dyn Store>) -> opencoder_brain::Runtime {
     )
 }
 
-fn migration() -> Response { (StatusCode::CONFLICT, Json(json!({"error":opencoder_brain::graph::MIGRATION}))).into_response() }
+fn migration() -> Response {
+    (
+        StatusCode::CONFLICT,
+        Json(json!({"error":opencoder_brain::graph::MIGRATION})),
+    )
+        .into_response()
+}

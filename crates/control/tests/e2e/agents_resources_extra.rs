@@ -414,7 +414,9 @@ async fn resource_skills_memory_tools_pools_roundtrip() {
         )
         .await;
     assert_eq!(status, 201, "{body}");
-    let (_, body) = h.req(Method::GET, "/api/agents/mem-reader/meta", None).await;
+    let (_, body) = h
+        .req(Method::GET, "/api/agents/mem-reader/meta", None)
+        .await;
     assert_eq!(body["meta"]["references"]["memory"], json!(true), "{body}");
 
     let (_, body) = post_save(&h, "tools", "nest-kit", "bin/run.sh", "#!/bin/sh").await;

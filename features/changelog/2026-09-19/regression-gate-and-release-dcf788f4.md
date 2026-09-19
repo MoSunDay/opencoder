@@ -14,6 +14,18 @@ rel-6c6ad744 发布缺少 live.py 真模型验收。本次补齐 main（squash `
 - bash 溢出测试最小环境 A/B：修复前 3/3 fail → 修复后 3/3 pass。
 - build.sh bundle `/tmp/opencoder-release-rel-dcf788f4`（4 二进制，protocol 10）；备份 `/tmp/opencoder-release-backups/backup-dcf788f4-20260919-2324`。
 
+## 测试覆盖
+
+| 功能 | 测试名 | 文件 |
+|------|--------|------|
+| brain v3 调度（clippy 修复，行为不变） | `root_emits_one_scheduler_wake_until_control_acknowledges_it` 等 3 例 | `crates/worker/tests/brain_scheduler_v3.rs` |
+| bash 后台输出 8MiB 上限（hermetic HOME） | `background_output_overflow_stops_process_and_caps_file` | `crates/session/src/tools/bash.rs` |
+| plan 模式写拦截（需 ambient HOME 的套件契约例证） | `plan_mode_blocks_write_command` 等 | `crates/session/tests/bash_guard_plan_mode.rs` |
+
+- 全量回归 @dcf788f4：`cargo test --workspace` → **5379 passed / 0 failed**
+- clippy：`cargo clippy --workspace --all-targets -- -D warnings` → 零警告
+- 平台 Python 单测 4 组 57 例全绿
+
 ## 发布
 - live.py `--signal --observe-seconds 900`：**PASS**；current `rel-dcf788f42eac069d518436accb649238a23780aa`，previous `rel-6c6ad744`。
 - 接收/调度间隔：max_accept 0.10s、max_accept_gap 0.20s、max_scheduling_delay 0.051s、max_scheduling_gap 0.201s（均 <1s）。

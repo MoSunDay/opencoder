@@ -281,3 +281,25 @@ async fn dialogs_delete_clears_node_and_terminal_indexes() {
         .unwrap()
         .is_empty());
 }
+
+#[tokio::test]
+async fn dialogs_delete_keeps_node_skipped_agent_reference() {
+    let h = Harness::new().await;
+    h.put_index("agent-race-1", ExecutionKind::Agent, ExecutionStatus::Idle)
+        .await;
+    h.node.set_maintenance(
+        "dialogs_clear",
+        200,
+        json!({"removed": 0, "skipped": ["agent-race-1"]}),
+    );
+    let (status, body) = h
+        .req(
+            Method::DELETE,
+            "/api/nodes/node-e2e/dialogs?kind=agent",
+            None,
+        )
+        .await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["skipped"], json!(["agent-race-1"]));
+    assert!(h.state.fleet.index("agent-race-1").await.unwrap().is_some());
+}

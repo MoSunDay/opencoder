@@ -127,6 +127,7 @@ pub async fn dialogs(
                         "last_created_at": r["updated_at"],
                         "status": r["status"],
                         "kind": r["kind"],
+                        "node_id": r["node_id"],
                         "execution_ref": r["execution_ref"],
                         "detail_error": r["detail_error"],
                     })
@@ -208,6 +209,12 @@ pub async fn clear_dialogs(
             }
         }
     }
+    // A node may have started an execution after our index read. Keep every
+    // node-skipped reference, including its control-plane index.
+    let drop_ids: Vec<_> = drop_ids
+        .into_iter()
+        .filter(|id| !skipped.contains(id))
+        .collect();
     if !drop_ids.is_empty() {
         if let Err(e) = state
             .fleet

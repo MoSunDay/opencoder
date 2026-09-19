@@ -94,6 +94,30 @@ describe('chat mode Segmented (Operator / Agent)', () => {
     expect(screen.getByRole('button', { name: '模 型' })).toBeTruthy();
   });
 
+  it('ignores a delayed Operator list after switching to Agent mode', async () => {
+    let finishOperator;
+    apiGet.mockImplementation(async (path) => {
+      if (path === '/api/nodes') return { nodes };
+      if (path.endsWith('/dialogs?kind=operator')) {
+        return new Promise((resolve) => { finishOperator = resolve; });
+      }
+      if (path.endsWith('/dialogs?kind=agent')) {
+        return { dialogs: [{ session_id: 'agent-row', title: 'Agent 记录' }] };
+      }
+      return {};
+    });
+    render(<ChatPanel />);
+    await pick('n1');
+    await waitFor(() => expect(finishOperator).toBeTypeOf('function'));
+    await switchMode('Agent 模式');
+    expect(await screen.findByText('Agent 记录')).toBeTruthy();
+    await act(async () => {
+      finishOperator({ dialogs: [{ session_id: 'operator-row', title: '迟到的 Operator 记录' }] });
+    });
+    expect(screen.queryByText('迟到的 Operator 记录')).toBeNull();
+    expect(screen.getByText('Agent 记录')).toBeTruthy();
+  });
+
   it('reloads an independent dialog lane when switching between Operator and Agent', async () => {
     apiGet.mockImplementation(async (path) => {
       if (path === '/api/nodes') return { nodes };
@@ -119,6 +143,21 @@ describe('chat mode Segmented (Operator / Agent)', () => {
 });
 
 describe('creation lanes', () => {
+  it('keeps a late creation receipt in its original mode', async () => {
+    let finishCreate;
+    apiPost.mockImplementation(async (path) => path === '/api/sessions'
+      ? new Promise((resolve) => { finishCreate = resolve; }) : { ok: true });
+    const { container } = render(<ChatPanel />);
+    await pick('n1');
+    await send(container, 'delayed operator prompt');
+    await waitFor(() => expect(finishCreate).toBeTypeOf('function'));
+    await switchMode('Agent 模式');
+    await act(async () => { finishCreate({ id: 'operator-delayed' }); });
+    expect(selectedMode(container)).toBe('Agent 模式');
+    expect(screen.queryByText('delayed operator prompt')).toBeNull();
+    expect(apiPost.mock.calls.some(([path]) => path === '/api/sessions/operator-delayed/prompt')).toBe(false);
+  });
+
   it('Operator mode keeps the legacy body: no kind, no how_append', async () => {
     const { container } = render(<ChatPanel />);
     await pick('n1');

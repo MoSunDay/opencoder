@@ -74,17 +74,24 @@ export function ChatPanel({ onNotice }) {
   const createAttempt = useRef(null);
   const sendingRef = useRef(false);
   const aliveRef = useRef(true);
+  const dialogsRequestRef = useRef(0);
 
   const hasNode = !!nodeSel;
   // 创建链路执行类型：Agent 模式用 agent（节点 kinds 过滤 + newId('agent') +
   // body.kind），其余一律收敛为 Operator 现状（含陌生持久化值）。
   const modeKind = mode === 'agent' ? 'agent' : 'operator';
+  const laneRef = useRef({ node: nodeSel, kind: modeKind });
+  if (laneRef.current.node !== nodeSel || laneRef.current.kind !== modeKind) {
+    laneRef.current = { node: nodeSel, kind: modeKind };
+  }
+  const lane = laneRef.current;
+  const isCurrentLane = () => aliveRef.current && laneRef.current === lane;
   const nodeReady = canUseNode(nodes, nodeSel, modeKind);
   const agentCatalog = mergeBuiltinPrimaryAgentCards((agents || []).filter((a) => a && a.primary));
   const selectedAgent = agentCatalog.find((agent) => agent.name === sessionAgent);
 
-  const selectionRef = useRef({ node: nodeSel, dialog: dialogSel });
-  selectionRef.current = { node: nodeSel, dialog: dialogSel };
+  const selectionRef = useRef({ node: nodeSel, kind: modeKind, dialog: dialogSel });
+  selectionRef.current = { node: nodeSel, kind: modeKind, dialog: dialogSel };
 
   // Tab 1's 打开对话 lands here with a preselected node.
   useEffect(() => {
@@ -136,18 +143,22 @@ export function ChatPanel({ onNotice }) {
   }, [onNotice]);
 
   const loadDialogs = useCallback(async (nodeId, kind = modeKind) => {
+    if (selectionRef.current.node !== nodeId || selectionRef.current.kind !== kind) return;
+    const request = ++dialogsRequestRef.current;
+    const current = () => aliveRef.current && dialogsRequestRef.current === request
+      && selectionRef.current.node === nodeId && selectionRef.current.kind === kind;
     setDialogs([]);
     if (!nodeId) { setDialogsLoading(false); return; }
     setDialogsLoading(true);
     try {
       const j = await apiGet('/api/nodes/' + encodeURIComponent(nodeId) + '/dialogs?kind=' + encodeURIComponent(kind));
-      if (aliveRef.current && selectionRef.current.node === nodeId) setDialogs(j?.dialogs || []);
+      if (current()) setDialogs(j?.dialogs || []);
     } catch (e) {
-      if (aliveRef.current && selectionRef.current.node === nodeId) {
+      if (current()) {
         onNotice?.(err('获取会话失败: ' + e.message));
       }
     } finally {
-      if (aliveRef.current && selectionRef.current.node === nodeId) setDialogsLoading(false);
+      if (current()) setDialogsLoading(false);
     }
   }, [modeKind, onNotice]);
 
@@ -168,12 +179,6 @@ export function ChatPanel({ onNotice }) {
     createAttempt.current = null;
     loadDialogs(nodeSel, modeKind);
   }, [nodeSel, modeKind, resetTranscript, loadDialogs]);
-
-  // 模式切换切换独立的 Operator/Agent 会话记录，并重置未完成的创建尝试，
-  // 避免跨模式复用旧 id（attempt key 含模式，双保险）。
-  useEffect(() => {
-    createAttempt.current = null;
-  }, [modeKind]);
 
   // Keep a concrete selection even while the registry request is loading or
   // when a persisted/remote value no longer resolves to a primary Agent.
@@ -205,15 +210,17 @@ export function ChatPanel({ onNotice }) {
       }
       const j = await apiPost('/api/sessions', body);
       if (!j?.id) throw new Error('服务未返回会话 ID，请重试确认');
-      createAttempt.current = null;
       sid = j.id;
-      selectionRef.current = { node: nodeSel, dialog: sid };
+      if (!isCurrentLane()) return;
+      createAttempt.current = null;
+      selectionRef.current = { node: nodeSel, kind: modeKind, dialog: sid };
       setDialogSel(sid);
       setDialogs((d) => [{
         session_id: sid, title: prompt.slice(0, 40),
         first_created_at: Date.now(), last_created_at: Date.now(), task_count: null,
       }].concat(d));
     }
+    if (!isCurrentLane()) return;
     // A fresh Agent-mode session carries no separate prompt POST: its first
     // prompt rode the creation request, so the cursor stays at 0 and the
     // stream replays the complete new session without a readiness
@@ -239,6 +246,7 @@ export function ChatPanel({ onNotice }) {
     // nothing → no bubble at all. `optimistic` marks the turn as a LOCAL
     // prediction: a later steer/queue_consumed frame echoing the SAME text
     // folds into it instead of pushing a duplicate (reduce.js dedup).
+    if (!isCurrentLane()) return;
     const echo = consumedEchoText(prompt);
     await openSessionStream(sid, after, [...stream.turns, ...(echo
       ? [{ kind: 'text', role: 'user', text: echo, optimistic: true }]
@@ -284,6 +292,7 @@ export function ChatPanel({ onNotice }) {
     try {
       await sendSession(prompt, delivery);
     } catch (e) {
+      if (!isCurrentLane()) return;
       setConnecting(false);
       setBusy(false);
       setInput(prompt);
@@ -317,8 +326,10 @@ export function ChatPanel({ onNotice }) {
 
   const openDialog = async (sid) => {
     if (busy) return;
-    selectionRef.current = { node: nodeSel, dialog: sid };
+    selectionRef.current = { node: nodeSel, kind: modeKind, dialog: sid };
     const owner = nodeSel;
+    const current = () => aliveRef.current && selectionRef.current.node === owner
+      && selectionRef.current.kind === modeKind && selectionRef.current.dialog === sid;
     setDialogSel(sid);
     resetTranscript();
     if (!sid) {
@@ -328,12 +339,12 @@ export function ChatPanel({ onNotice }) {
       const j = await apiGet('/api/sessions/' + encodeURIComponent(sid));
       const msgs = (j && j.messages) || [];
       const agent = j && j.meta && j.meta.agent;
-      if (aliveRef.current && selectionRef.current.node === owner && selectionRef.current.dialog === sid) {
+      if (current()) {
         setSessionAgent(agentCatalog.some((item) => item.name === agent) ? agent : agentCatalog[0]?.name || 'act');
         setStream({ ...emptyStream(), turns: turnsFromMessages(msgs), usage: usageFromMessages(msgs) });
       }
     } catch (e) {
-      if (aliveRef.current && selectionRef.current.node === owner && selectionRef.current.dialog === sid) {
+      if (current()) {
         setStream((s) => ({ ...s, status: 'error', error: '读取会话失败: ' + e.message }));
       }
     }
@@ -351,6 +362,8 @@ export function ChatPanel({ onNotice }) {
   const execCommand = async (entry) => {
     const kind = entry && entry.kind;
     const sid = dialogSel;
+    const current = () => aliveRef.current && selectionRef.current.node === nodeSel
+      && selectionRef.current.kind === modeKind && selectionRef.current.dialog === sid;
     if (kind === 'agent' || kind === 'agentpick') {
       const next = String((entry && entry.value) || '');
       if (!next) {
@@ -379,7 +392,7 @@ export function ChatPanel({ onNotice }) {
       }
       try {
         await apiPost('/api/sessions/' + encodeURIComponent(sid) + '/agent', { value: next });
-        setSessionAgent(next);
+        if (current()) setSessionAgent(next);
       } catch (e) {
         notice(err('切换 agent 失败: ' + ((e && e.message) || '')));
       }
@@ -397,10 +410,12 @@ export function ChatPanel({ onNotice }) {
         const q = await apiGet('/api/sessions/' + encodeURIComponent(sid) + '/seq');
         const after = q?.seq || 0;
         await apiPost('/api/sessions/' + encodeURIComponent(sid) + '/compact');
+        if (!current()) return;
         setBusy(true);
         setConnecting(true);
         await openSessionStream(sid, after); // compaction deltas arrive on the stream
       } catch (e) {
+        if (!current()) return;
         setConnecting(false);
         setBusy(false);
         notice(err('压缩失败: ' + ((e && e.message) || '')));
@@ -426,7 +441,7 @@ export function ChatPanel({ onNotice }) {
       }
       try {
         const j = await apiPost('/api/sessions/' + encodeURIComponent(sid) + '/fork');
-        if (j && j.id) {
+        if (j && j.id && current()) {
           setDialogs((d) => [{
             session_id: j.id, title: 'fork · ' + sid.slice(0, 12),
             first_created_at: Date.now(), last_created_at: Date.now(), task_count: null,
@@ -462,7 +477,8 @@ export function ChatPanel({ onNotice }) {
       onOk: async () => {
         try {
           await apiDel('/api/sessions/' + encodeURIComponent(sid));
-          if (sid === dialogSel) {
+          if (selectionRef.current.kind !== modeKind || selectionRef.current.node !== nodeSel) return;
+          if (sid === selectionRef.current.dialog) {
             resetTranscript();
             setDialogSel(null);
           }
@@ -486,14 +502,15 @@ export function ChatPanel({ onNotice }) {
     }
     Modal.confirm({
       title: '删除全部会话',
-      content: '将删除当前节点的所有已完成会话（消息、事件与队列输入一并清除）；正在运行中的会话会保留。',
+      content: `将删除当前节点 ${modeKind === 'agent' ? 'Agent' : 'Operator'} 模式的所有已完成会话（消息、事件与队列输入一并清除）；正在运行中的会话会保留。`,
       okText: '全部删除',
       okButtonProps: { danger: true },
       cancelText: '取消',
       onOk: async () => {
         try {
-      const j = await apiDel('/api/nodes/' + encodeURIComponent(nodeSel) + '/dialogs?kind=' + encodeURIComponent(modeKind));
+          const j = await apiDel('/api/nodes/' + encodeURIComponent(nodeSel) + '/dialogs?kind=' + encodeURIComponent(modeKind));
           const skipped = (j && j.skipped) || [];
+          if (selectionRef.current.node !== nodeSel || selectionRef.current.kind !== modeKind) return;
           if (dialogSel && !skipped.includes(dialogSel)) {
             resetTranscript();
             setDialogSel(null);

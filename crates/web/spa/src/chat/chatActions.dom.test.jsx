@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // Chat top bar + sidebar actions:
-//   page-level 模式 Segmented (Operator/Agent) + 知识追加 entry ride along the
-//   act/plan Segmented, which is clickable once a node is selected — with no
+//   page-level 模式 Segmented (Operator/Agent) + Operator act/plan Segmented,
+//   which is clickable once a node is selected — with no
 //   session the choice is staged locally and rides session creation (`agent`
 //   field); with an idle session it POSTs /agent. Sidebar rows expose a hover
 //   删除 menu confirmed via Modal.confirm.
@@ -39,7 +39,7 @@ beforeEach(() => {
   setState({ preselectNode: null, nodes: [] });
   apiGet.mockImplementation(async (path) => {
     if (path === '/api/nodes') return { nodes };
-    if (path === '/api/nodes/n1/dialogs') return { dialogs };
+    if (path.startsWith('/api/nodes/n1/dialogs')) return { dialogs };
     if (path === '/api/sessions/s1') return snapshot;
     if (path.endsWith('/seq')) return { seq: 0 };
     return {};

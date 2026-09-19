@@ -7,7 +7,7 @@
 use crate::support::fleet_proc::Fleet;
 use crate::support::http_util::wait_until;
 use crate::support::llm_stub::LlmStub;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 /// Poll one execution until `idle`, authenticated as `token`.
 fn wait_idle_as(fleet: &Fleet, id: &str, token: &str) -> Value {

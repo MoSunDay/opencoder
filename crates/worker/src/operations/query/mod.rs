@@ -135,8 +135,18 @@ pub(super) async fn events(
     let mut frames: Vec<Value> = if is_session {
         if worker.inner.state.store.get_session(id).await?.is_none() {
             return Ok(match record {
-                Some(_) => RpcReply::ok(json!({"events":[],"more":false,"head_seq":0,
-                    "finished":!worker.inner.active.lock().await.contains_key(id)})),
+                Some(record) => {
+                    // A session execution is accepted before its workload
+                    // task creates the local session row. Keep the event
+                    // stream open while that pending/running task is being
+                    // scheduled; reporting `finished: true` here makes the
+                    // control-plane SSE close before the Agent's first
+                    // prompt can produce any frames.
+                    let active = worker.inner.active.lock().await.contains_key(id);
+                    let pending = record.assignment.index.status == ExecutionStatus::Pending;
+                    RpcReply::ok(json!({"events":[],"more":false,"head_seq":0,
+                        "finished":!active && !pending}))
+                }
                 None => RpcReply::error(404, "session not found"),
             });
         }

@@ -56,6 +56,23 @@ fn create(index: &ExecutionIndex) -> NodeOperation {
     }
 }
 
+#[test]
+fn creation_rpc_uses_the_slow_admission_window() {
+    assert_eq!(
+        request_timeout(&create(&execution())),
+        CREATE_REQUEST_TIMEOUT
+    );
+    assert_eq!(
+        request_timeout(&NodeOperation::Maintenance {
+            command: ExecutionCommand {
+                action: "status".into(),
+                input: serde_json::Value::Null,
+            },
+        }),
+        DEFAULT_REQUEST_TIMEOUT
+    );
+}
+
 async fn call_request_id(rx: &mut mpsc::Receiver<SocketCommand>) -> String {
     let SocketCommand::Frame(frame) = rx.recv().await.expect("socket command") else {
         panic!("unexpected socket close")

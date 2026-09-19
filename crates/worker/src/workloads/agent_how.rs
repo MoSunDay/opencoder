@@ -18,14 +18,20 @@ pub(crate) const MAX_HOW_APPEND_BYTES: usize = opencoder_dag::spec::MAX_HOW_APPE
 pub(crate) const OUTPUT_TAIL_BYTES: usize = 8 * 1024;
 
 /// The declared `how_append` payload for AGENT executions only; operator/
-/// maintenance inputs ignore the field entirely. Oversized (or non-string)
-/// payloads bail here even though the control plane already rejects them —
-/// the node stays the admission authority.
+/// maintenance inputs ignore the field entirely. A fresh Agent chat carries
+/// its first requirement in `prompt`, so it becomes the how entry when no
+/// explicit append was supplied. Oversized (or non-string) payloads bail here
+/// even though the control plane already rejects them — the node stays the
+/// admission authority.
 pub(crate) fn declared_how_append(kind: ExecutionKind, input: &Value) -> Result<Option<String>> {
     if kind != ExecutionKind::Agent {
         return Ok(None);
     }
-    match input.get("how_append") {
+    let value = match input.get("how_append") {
+        None | Some(Value::Null) => input.get("prompt"),
+        Some(value) => Some(value),
+    };
+    match value {
         None | Some(Value::Null) => Ok(None),
         Some(Value::String(text)) if text.len() <= MAX_HOW_APPEND_BYTES => Ok(Some(text.clone())),
         Some(Value::String(text)) => bail!(
@@ -101,6 +107,12 @@ mod tests {
         assert_eq!(
             declared_how_append(ExecutionKind::Agent, &json!({"how_append": null})).unwrap(),
             None
+        );
+        // A fresh chat Agent uses its first requirement as the initial how
+        // entry when no explicit append is present.
+        assert_eq!(
+            declared_how_append(ExecutionKind::Agent, &json!({"prompt": "first request"})).unwrap(),
+            Some("first request".into())
         );
         // Exactly at the budget passes; sizes measure UTF-8 bytes.
         let at_limit = "a".repeat(MAX_HOW_APPEND_BYTES);

@@ -402,7 +402,9 @@ async fn host_dialogs_clear_deletes_live_runtime_and_trims_hibernated_inventory(
         })
         .await;
     assert_eq!(reply.status, 200, "{:?}", reply);
-    let journal = dir.path().join("r-live/operator/operator-done-2/execution.json");
+    let journal = dir
+        .path()
+        .join("r-live/operator/operator-done-2/execution.json");
     wait(async || journal.is_file()).await;
     wait(async || {
         let inspect = live

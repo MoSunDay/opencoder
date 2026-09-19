@@ -366,7 +366,13 @@ async fn memory_pool_accepts_multi_file_trees_and_reads_them_back() {
             { "path": "topics/notes.bin", "content_b64": B64.encode(vec![0u8, 255, 1]) },
         ],
     });
-    let (status, v) = call(app(state.clone()), "POST", "/api/agents/resources/memory", body).await;
+    let (status, v) = call(
+        app(state.clone()),
+        "POST",
+        "/api/agents/resources/memory",
+        body,
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "{v}");
     assert_eq!(v["version"], 1);
     // Byte-exact read back, nested markdown and binary sidecar included.

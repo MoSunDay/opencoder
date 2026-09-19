@@ -19,12 +19,19 @@ pub async fn submit(state: &Arc<AppState>, request: CreateExecution) -> RpcReply
             "project execution id must be project-<todo id> to preserve plan/act affinity",
         );
     }
-    // Agent-kind sessions carry the same workflow-declared `how_append`
-    // payload as a DAG agent step; enforce the identical 8 KiB budget at
-    // admission so both entry points (POST /api/executions and the chat
-    // /api/sessions facade) fail before placement.
+    // Agent-kind sessions carry the workflow-declared `how_append` payload
+    // as a DAG agent step. When the chat creates a fresh Agent session, the
+    // first prompt is also the initial how entry; validate that derived value
+    // here so an oversized request fails before placement.
     if request.kind == ExecutionKind::Agent {
-        if let Some(text) = request.input.get("how_append").and_then(Value::as_str) {
+        let text = match request.input.get("how_append") {
+            None | Some(Value::Null) => request.input.get("prompt").and_then(Value::as_str),
+            Some(Value::String(text)) => Some(text.as_str()),
+            Some(other) => {
+                return RpcReply::error(400, format!("how_append must be a string, got {other}"));
+            }
+        };
+        if let Some(text) = text {
             if text.len() > opencoder_dag::spec::MAX_HOW_APPEND_BYTES {
                 return RpcReply::error(
                     400,

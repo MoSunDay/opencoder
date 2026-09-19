@@ -37,7 +37,8 @@ pub use project_types::{
     ProjectTodoStatus, ProjectTodoSummary,
 };
 pub use schedule_types::{
-    ScheduleRunRecord, SCHEDULE_RUN_ERROR, SCHEDULE_RUN_FIRED, SCHEDULE_RUN_MISSED,
+    ScheduleDefRecord, ScheduleRunRecord, SCHEDULE_RUN_ERROR, SCHEDULE_RUN_FIRED,
+    SCHEDULE_RUN_MISSED,
 };
 pub use session_store::SessionStore;
 pub use store::Store;

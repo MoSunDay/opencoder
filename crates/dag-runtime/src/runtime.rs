@@ -204,6 +204,8 @@ async fn execute_run_inner(
                 outputs: outputs.clone(),
                 workflow_root: deps.workflow_root.clone(),
                 log: Some(sink.step_log(&name)),
+                knowledge_root: exec.config.dag.knowledge_root.clone(),
+                ops: exec.config.dag.ops.clone(),
             };
             sink.emit(step_started_event(&name));
             let exec = Arc::clone(&exec);

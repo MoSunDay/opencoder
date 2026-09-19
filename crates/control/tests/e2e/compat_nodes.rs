@@ -222,6 +222,8 @@ async fn dialogs_delete_clears_node_and_terminal_indexes() {
         ExecutionStatus::Running,
     )
     .await;
+    h.put_index("agent-dlg-1", ExecutionKind::Agent, ExecutionStatus::Done)
+        .await;
     h.node.set_maintenance(
         "dialogs_clear",
         200,
@@ -236,7 +238,68 @@ async fn dialogs_delete_clears_node_and_terminal_indexes() {
     assert_eq!(body["skipped"], json!(["operator-dlg-2"]));
 
     // The idle index row is gone, the running one survives.
-    let rows = h.state.fleet.indexes(Some("node-e2e"), Some(ExecutionKind::Operator), 500).await.unwrap();
+    let rows = h
+        .state
+        .fleet
+        .indexes(Some("node-e2e"), Some(ExecutionKind::Operator), 500)
+        .await
+        .unwrap();
     let ids: Vec<&str> = rows.iter().map(|r| r.id.as_str()).collect();
     assert_eq!(ids, vec!["operator-dlg-2"]);
+    let agent_rows = h
+        .state
+        .fleet
+        .indexes(Some("node-e2e"), Some(ExecutionKind::Agent), 500)
+        .await
+        .unwrap();
+    assert_eq!(
+        agent_rows.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(),
+        vec!["agent-dlg-1"]
+    );
+
+    // The Agent lane is cleared independently and never shares the
+    // Operator lane's index selection.
+    h.node.set_maintenance(
+        "dialogs_clear",
+        200,
+        json!({"ok": true, "removed": 1, "skipped": [], "forgotten": 1}),
+    );
+    let (status, body) = h
+        .req(
+            Method::DELETE,
+            "/api/nodes/node-e2e/dialogs?kind=agent",
+            None,
+        )
+        .await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["removed"], json!(1));
+    assert!(h
+        .state
+        .fleet
+        .indexes(Some("node-e2e"), Some(ExecutionKind::Agent), 500)
+        .await
+        .unwrap()
+        .is_empty());
+}
+
+#[tokio::test]
+async fn dialogs_delete_keeps_node_skipped_agent_reference() {
+    let h = Harness::new().await;
+    h.put_index("agent-race-1", ExecutionKind::Agent, ExecutionStatus::Idle)
+        .await;
+    h.node.set_maintenance(
+        "dialogs_clear",
+        200,
+        json!({"removed": 0, "skipped": ["agent-race-1"]}),
+    );
+    let (status, body) = h
+        .req(
+            Method::DELETE,
+            "/api/nodes/node-e2e/dialogs?kind=agent",
+            None,
+        )
+        .await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["skipped"], json!(["agent-race-1"]));
+    assert!(h.state.fleet.index("agent-race-1").await.unwrap().is_some());
 }

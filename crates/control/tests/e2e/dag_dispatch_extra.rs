@@ -206,3 +206,36 @@ async fn dispatch_surfaces_the_node_428_after_the_definition_retry() {
     assert_eq!(body["execution"]["node_id"], json!("node-e2e"));
     assert_eq!(h.node.journal_ids(), vec!["dag-428-1"]);
 }
+
+/// The compat dispatch surface passes the caller's `input` through to the
+/// assignment verbatim (the release gate sends
+/// `{"input":{"prompt":"base=.. head=.."}}`); an absent or null `input`
+/// degrades to the empty object, so old callers keep their shape.
+#[tokio::test]
+async fn dispatch_passes_input_through_to_the_assignment() {
+    let h = Harness::new().await;
+    seed_definition(&h).await;
+
+    let input = json!({"prompt": "base=abc123 head=def456 变更审查请求（发布门禁）"});
+    let (status, body) = dispatch(&h, json!({"id": "dag-input-1", "input": input})).await;
+    assert_eq!(status, 202, "{body}");
+    let request = h
+        .node
+        .journal_request("dag-input-1")
+        .expect("journalled create");
+    assert_eq!(request["input"], input, "request: {request}");
+
+    // Absent input and explicit null both land as {} on the assignment.
+    let (status, body) = dispatch(&h, json!({"id": "dag-input-2"})).await;
+    assert_eq!(status, 202, "{body}");
+    assert_eq!(
+        h.node.journal_request("dag-input-2").unwrap()["input"],
+        json!({})
+    );
+    let (status, body) = dispatch(&h, json!({"id": "dag-input-3", "input": null})).await;
+    assert_eq!(status, 202, "{body}");
+    assert_eq!(
+        h.node.journal_request("dag-input-3").unwrap()["input"],
+        json!({})
+    );
+}

@@ -71,7 +71,8 @@ fn foreign_receipt_blocks_and_cancel_folds_to_terminal() {
     // The instance itself succeeded; only the route decision was refused.
     let instances = snapshot["instances"].as_array().expect("instances");
     assert_eq!(
-        instances[0]["status"], json!("succeeded"),
+        instances[0]["status"],
+        json!("succeeded"),
         "instances: {snapshot}"
     );
 
@@ -83,10 +84,15 @@ fn foreign_receipt_blocks_and_cancel_folds_to_terminal() {
     );
     assert_eq!(status, 200, "cancel: {body}");
     let snapshot = fixtures::wait_phase(&fleet, run_id, "brain run cancels", 120, &["cancelled"]);
-    assert_eq!(snapshot["phase"], json!("cancelled"), "snapshot: {snapshot}");
+    assert_eq!(
+        snapshot["phase"],
+        json!("cancelled"),
+        "snapshot: {snapshot}"
+    );
     let doc = fleet.wait_terminal(run_id);
     assert_eq!(
-        doc["execution"]["status"], json!("cancelled"),
+        doc["execution"]["status"],
+        json!("cancelled"),
         "inspect: {doc}"
     );
 

@@ -18,6 +18,9 @@ pub(crate) async fn run(
     resume: bool,
 ) -> Result<(ExecutionStatus, Value)> {
     let (status, result) = match record.assignment.request.kind {
+        ExecutionKind::Brain if record.assignment.request.input["schema_version"] == 3 => {
+            crate::brain::v3::run(worker, record, config, cancel).await
+        }
         ExecutionKind::Brain => crate::brain::activate::run(worker, record, config, cancel).await,
         ExecutionKind::Agent | ExecutionKind::Maintenance | ExecutionKind::Operator => {
             agent::run(worker, record, config, cancel, resume).await

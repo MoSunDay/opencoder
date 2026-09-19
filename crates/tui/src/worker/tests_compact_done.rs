@@ -48,13 +48,14 @@ async fn compact_with_summary_emits_done() {
     let store = memory_store(sid).await;
     admit_queued(&store, sid, "q-1").await;
 
-    let mock: Arc<dyn opencoder_llm::ChatStream> = Arc::new(
-        opencoder_llm::MockChatClient::new().with_default(vec![opencoder_llm::LlmEvent::Completed {
-            text: "summary of old turns".into(),
-            tool_calls: Vec::<opencoder_llm::CompletedToolCall>::new(),
-            usage: None,
-        }]),
-    );
+    let mock: Arc<dyn opencoder_llm::ChatStream> =
+        Arc::new(opencoder_llm::MockChatClient::new().with_default(vec![
+            opencoder_llm::LlmEvent::Completed {
+                text: "summary of old turns".into(),
+                tool_calls: Vec::<opencoder_llm::CompletedToolCall>::new(),
+                usage: None,
+            },
+        ]));
     let mut sess = SessionState::new(
         sid,
         opencoder_core::resolve_agent("act").unwrap(),
@@ -64,9 +65,11 @@ async fn compact_with_summary_emits_done() {
     );
     sess.store = Some(store.clone());
     // Two turns so compaction_split finds a real head/tail split.
-    sess.messages.push(opencoder_core::Message::user("u1", "first turn"));
+    sess.messages
+        .push(opencoder_core::Message::user("u1", "first turn"));
     sess.messages.push(opencoder_core::Message::assistant("a1"));
-    sess.messages.push(opencoder_core::Message::user("u2", "second turn"));
+    sess.messages
+        .push(opencoder_core::Message::user("u2", "second turn"));
     sess.messages.push(opencoder_core::Message::assistant("a2"));
 
     let (evt_tx, mut evt_rx) = mpsc::channel::<UiEvent>(64);
@@ -169,9 +172,11 @@ async fn compact_failure_emits_error_without_done() {
         std::env::temp_dir(),
     );
     sess.store = Some(store.clone());
-    sess.messages.push(opencoder_core::Message::user("u1", "first turn"));
+    sess.messages
+        .push(opencoder_core::Message::user("u1", "first turn"));
     sess.messages.push(opencoder_core::Message::assistant("a1"));
-    sess.messages.push(opencoder_core::Message::user("u2", "second turn"));
+    sess.messages
+        .push(opencoder_core::Message::user("u2", "second turn"));
 
     let (evt_tx, mut evt_rx) = mpsc::channel::<UiEvent>(64);
     let _ = process_cmd(UiCmd::Compact, &mut sess, &evt_tx).await;

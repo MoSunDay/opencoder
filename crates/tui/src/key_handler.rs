@@ -328,8 +328,7 @@ pub(crate) fn handle_key(
             // text). Either way the typed text stays for an idle retry.
             if running
                 && (is_bare_mode_switch(&text)
-                    || (subagent_focused
-                        && opencoder_session::control_cmd::is_mode_control(&text)))
+                    || (subagent_focused && opencoder_session::control_cmd::is_mode_control(&text)))
             {
                 return KeyAction::ModeSwitchBlocked;
             }

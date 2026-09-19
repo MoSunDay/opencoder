@@ -56,9 +56,14 @@ pub enum DagCmd {
     Dispatch {
         /// Definition id.
         id: String,
-        /// Dispatch options ({"id","node_id"}); `{}` when omitted.
+        /// Dispatch options ({"id","node_id","input"}); `{}` when omitted.
         #[arg(long)]
         json: Option<String>,
+        /// Dispatch input object (e.g. {"prompt":"base=.. head=.."}),
+        /// written into the body's `input` key; inline JSON or @file.
+        /// Wins over an `input` key inside --json.
+        #[arg(long)]
+        input: Option<String>,
     },
     /// Runs: list / get / events / cancel.
     #[command(subcommand)]
@@ -79,8 +84,24 @@ pub fn plan(sub: &DagCmd) -> Result<RequestPlan> {
         }
         // The dispatch handler requires a JSON body; an omitted --json
         // degrades to `{}` (server then mints the run id).
-        DagCmd::Dispatch { id, json } => RequestPlan::post(format!("/api/dag/defs/{id}/dispatch"))
-            .with_body(parse_body(json.as_deref())?.unwrap_or_else(|| serde_json::json!({}))),
+        DagCmd::Dispatch { id, json, input } => {
+            let mut body = parse_body(json.as_deref())?.unwrap_or_else(|| serde_json::json!({}));
+            if let Some(raw) = input {
+                // `--input` carries the run input (e.g. the release gate's
+                // {"prompt":"base=.. head=.."}). The body must be an object
+                // to take the field, so a non-object --json degrades to {};
+                // --input then overwrites any `input` key --json carried.
+                if !body.is_object() {
+                    body = serde_json::json!({});
+                }
+                let value =
+                    parse_body(Some(raw.as_str()))?.unwrap_or_else(|| serde_json::json!({}));
+                if let Some(object) = body.as_object_mut() {
+                    object.insert("input".into(), value);
+                }
+            }
+            RequestPlan::post(format!("/api/dag/defs/{id}/dispatch")).with_body(body)
+        }
         DagCmd::Runs(DagRunsCmd::List) => RequestPlan::get("/api/dag/runs"),
         DagCmd::Runs(DagRunsCmd::Get { id }) => RequestPlan::get(format!("/api/dag/runs/{id}")),
         DagCmd::Runs(DagRunsCmd::Events { id, after }) => {

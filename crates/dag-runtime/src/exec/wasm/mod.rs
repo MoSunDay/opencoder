@@ -20,8 +20,12 @@
 //!   is an Error outcome. Writing `output.txt` / `meta.json` is the
 //!   RUNTIME's job.
 //! - `sandbox: runc` — fail-closed: no runc on the node means an Error
-//!   outcome, never a silent in-process fallback.
+//!   outcome, never a silent in-process fallback. The `opencoder` host
+//!   imports (`opencoder_run_op` / `opencoder_http_probe`, see
+//!   [`host_imports`]) exist ONLY in the in-process sandbox: a module
+//!   importing them fails to instantiate under `runc`.
 
+mod host_imports;
 mod in_process;
 #[cfg(test)]
 mod tests;
@@ -51,7 +55,7 @@ pub(crate) fn split_command(command: &str) -> Vec<String> {
 /// Env pairs injected into the wasm execution environment (in-process
 /// WasiCtx or the runc container process).
 pub(crate) fn step_env(ctx: &StepCtx) -> Vec<(String, String)> {
-    vec![
+    let mut env = vec![
         ("OPENCODER_RUN_ID".into(), ctx.run_id.clone()),
         (
             "OPENCODER_STEP_DIR".into(),
@@ -61,7 +65,14 @@ pub(crate) fn step_env(ctx: &StepCtx) -> Vec<(String, String)> {
             "OPENCODER_STEP_CONTEXT".into(),
             format!("{}/{}/context.json", CONTEXT_MOUNT, ctx.step.name),
         ),
-    ]
+    ];
+    if ctx.knowledge_root.is_some() {
+        env.push((
+            "OPENCODER_KNOWLEDGE_DIR".into(),
+            super::KNOWLEDGE_MOUNT.to_string(),
+        ));
+    }
+    env
 }
 
 /// Resolve the module token to a host path under the run root. Confined:
@@ -197,6 +208,33 @@ pub async fn execute_wasm_step_logged(
     }
 }
 
+/// The node's knowledge root as an OCI knowledge mount. Fail-closed at
+/// the step boundary: a configured-but-unusable root (missing / symlink /
+/// relative path) errors the step instead of silently mounting nothing.
+pub(crate) fn knowledge_mount(
+    ctx: &StepCtx,
+) -> Result<Option<crate::sandbox::oci::KnowledgeMount>, String> {
+    let Some(root) = ctx.knowledge_root.as_ref() else {
+        return Ok(None);
+    };
+    let usable = std::path::absolute(root)
+        .ok()
+        .filter(|p| {
+            std::fs::symlink_metadata(p)
+                .map(|meta| meta.is_dir())
+                .unwrap_or(false)
+        })
+        .map(|p| p.to_path_buf());
+    usable
+        .map(|host| Some(crate::sandbox::oci::KnowledgeMount { host }))
+        .ok_or_else(|| {
+            format!(
+                "knowledge_root unusable at {}: it must be a REAL absolute directory (missing or a symlink)",
+                root.display()
+            )
+        })
+}
+
 /// `sandbox: runc`: private OCI bundle + `wasmtime run` inside the
 /// container. Fail-closed: no runc binary means an Error outcome.
 async fn run_runc(
@@ -219,12 +257,18 @@ async fn run_runc(
         Err(e) => return error_result(e),
     };
     let run_root = provision_module(run_root, &module_path, &tokens[0]);
+    let knowledge = match knowledge_mount(ctx) {
+        Ok(k) => k,
+        Err(e) => return error_result(e),
+    };
     let spec = crate::sandbox::oci::BundleSpec {
         run_root: run_root.clone(),
         step_slug: ctx.step.name.clone(),
         command: tokens.to_vec(),
         env: step_env(ctx),
         timeout_hint: ctx.step.timeout_secs,
+        knowledge,
+        argv: crate::sandbox::oci::ArgvStyle::WasmModule,
     };
     // Bundles live next to the run root (never inside it — the run root is
     // the user-visible `/workspace/context` bind).

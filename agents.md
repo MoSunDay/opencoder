@@ -35,7 +35,7 @@ Rust 原生编码代理 workspace：`opencoder`（本地 CLI/TUI）、`opencode-
 
 ## 根包进程级 e2e 套件（layer-2，随 cargo test 运行）
 
-- [tests/operator_e2e/](tests/operator_e2e/main.rs) — O1–O5：operator 创建→drain→idle、relay SSE 守卫、角色门禁（operator/agent 提交与指令放行、dag/team 403）、interrupt→cancelled + 重启恢复、`kind=agent` 会话（how_append 注入、output_text/output_json、合并列表）（真二进制 + 共享 LLM 桩）。
+- [tests/operator_e2e/](tests/operator_e2e/main.rs) — O1–O5：operator 创建→drain→idle、relay SSE 守卫、角色门禁（operator/agent 提交与指令放行、dag/team 403）、interrupt→cancelled + 重启恢复、`kind=agent` 会话（how_append 注入、output_text/output_json、`?kind=agent` 分 lane 列表且不漏入 operator 泳道）（真二进制 + 共享 LLM 桩）。
 - [tests/dag_e2e/](tests/dag_e2e/main.rs) — D1–D3/D5：spec 保存/dispatch 流、wasm 版本池（wat 现场编译）、cancel/失败折叠、runc preflight（无 runc 时 SKIP 运行段）、structured_output（agent 步围栏/裸 JSON 两种形态 output.json 非 null）、agent runc 沙箱（`agent_runc.rs`：真实容器内 session 全链路，无 runc 时 SKIP）、code-review 门禁 DAG（`code_review.rs`：9 步 pass/blocked 两线 + compat input 透传 + 工单 not_required/created）、review 门禁三件套（`review_dags/`：R1 启动 seed、R2 host imports+fail-closed、R3/R5 池模块 dispatch seeded def、R4 六段 agent 链（api-impact→client 客户端分支汇入 verdict）上下文传递+五字段索引）。
 - [tests/todos_e2e/](tests/todos_e2e/main.rs) — T1–T3：模板→运行→完成、interrupt→节点重启→resume→done、子 LLM 失败→todo failed + workflow suspended（父决策重试链共 5 请求）。
 - [tests/team_e2e/](tests/team_e2e/main.rs) — M1：能力注册/绑定→pinned 定义冻结 capabilities→member prompt 能力前缀→四段 chat 决策→finished topic + 1-based turn 台账。

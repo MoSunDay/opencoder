@@ -1,4 +1,4 @@
-Commit: 896013049fe3bd0f3384c52e9638e3a7107aa6fc
+Commit: 981a285f199d5ee94449cb4852ea9b96a84da631
 
 # worker 模块
 
@@ -12,8 +12,10 @@ Commit: 896013049fe3bd0f3384c52e9638e3a7107aa6fc
   `OPENCODER_HOW_APPEND`，与 DAG agent 步同机制）、成功终态
   `append_to_how_md`（warn-only 不改结果）、`transcript_tail`/`agent_result` 产出
   `output_text`/`output_json`（Operator/Maintenance 仍只回 `{"session_id"}`）
-- `src/operations/maintenance.rs` — 维护命令执行：`dialogs_clear` 活跃执行跳过，
-  其余 `delete_sessions` + `journal.forget`（防下一次全量 IndexReport 复活）
+- `src/operations/maintenance.rs` — 维护命令执行：`dialogs_clear` 接收控制面按
+  Operator/Agent lane 筛选后的 id，活跃执行跳过，其余 `delete_sessions` +
+  `journal.forget`（防下一次全量 IndexReport 复活）；两类执行都由同一
+  Operator-capable 节点保存索引并以显式 `ExecutionRef` 提供明细路由
 - `crates/worker/src/state.rs` — runtime.db 与节点 ID
 - `crates/worker/src/layout.rs`、`src/journal/` — 执行布局与原子落盘
 - `crates/worker/src/runtime/capacity.rs`、`src/resources.rs` — Runtime 归属与资源固定

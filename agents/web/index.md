@@ -1,4 +1,4 @@
-Commit: 35377f739c15039b725df8c135a9a14cec8bf815
+Commit: 981a285f199d5ee94449cb4852ea9b96a84da631
 
 # web 模块
 
@@ -23,9 +23,9 @@ axum HTTP + SSE 会话管理 + 内嵌 SPA。
   composer 命令菜单 `commandMenu.js` + `fuzzy.js`（与 TUI `/agent`、`@`
   agent 菜单同 fuzzy 语义；`@` sigil 条目只来自 agent 目录）
 - `src/api_control.rs` — 节点对话 API：`GET/DELETE /api/nodes/:id/dialogs`。
-  DELETE 一键清空该节点对话：仅删终态（done/error/cancelled）节点任务的
-  synthetic session（FK 级联消息/任务行），pending/running/cancelling 保留
-  并入响应 `skipped`；未知节点 404
+  `?kind=operator|agent` 选择独立对话 lane（缺省 operator）；DELETE 只清理
+  所选 lane 的终态（done/error/cancelled）节点任务 synthetic session（FK 级联
+  消息/任务行），pending/running/cancelling 保留并入响应 `skipped`；未知节点 404
 - chat 页（nav menu「Agent」，原 Operator，page key 仍 `chat`）创建链路双模式：
   页头「模式 Segmented」（Operator 模式 / Agent 模式）经 usehooks-ts
   `useLocalStorage` 持久化（`oc_chat_mode`，缺省 `'operator'`，陌生/损坏值收敛
@@ -35,7 +35,8 @@ axum HTTP + SSE 会话管理 + 内嵌 SPA。
   首条需求作为 how 追加并在成功后持久化（显式 `how_append` 仍受 8192 字节预算约束）；
   首条需求随创建请求一次提交（契约由 operator_e2e O5 锁定；旧 create→seq→prompt 三步链
   会与节点异步启动竞态，首次提交偶发 404），SSE 游标直接用 0 回放全会话；Agent
-  与 Operator 共用 Say/transcript 输出，便于在 Web 调试具体执行能力；节点下拉
+  与 Operator 的列表/删除 lane 分开但共用 Say/transcript 输出，每行带 `kind` 与
+  `execution_ref`，Agent 明细仍定位到 Operator-capable 节点；节点下拉
   与可执行判定按 `canUseNode(nodes, id, kind)` 分模式取值（chatSidebar 收
   `nodeKind` prop）；无独立「新建对话」按钮——选中节点首次发送即建会话，
   creation 入口已移除（空态文案引导直接输入）；其余能力（会话列表、消息流、act/plan、@ 菜单、model/

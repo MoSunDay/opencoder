@@ -92,7 +92,10 @@ fn scheduler_terminal(record: &Record) -> Result<Option<BrainSchedulerTerminalEv
     };
     let status = match record.assignment.index.status {
         ExecutionStatus::Done => BrainOperationStatus::Done,
-        ExecutionStatus::Error | ExecutionStatus::Interrupted => BrainOperationStatus::Error,
+        // Interrupted is a recovery state, not a child terminal event.  The
+        // owning node will emit this frame only after the execution reaches a
+        // durable Done, Error, or Cancelled state.
+        ExecutionStatus::Error => BrainOperationStatus::Error,
         ExecutionStatus::Cancelled => BrainOperationStatus::Cancelled,
         _ => return Ok(None),
     };

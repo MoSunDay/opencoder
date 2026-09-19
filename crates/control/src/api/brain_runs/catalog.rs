@@ -13,8 +13,30 @@ use std::sync::Arc;
 
 pub async fn capabilities(state: &Arc<AppState>) -> anyhow::Result<Vec<Value>> {
     let mut capabilities = vec![
-        json!({"id":"builtin-agent-act","kind":"agent","target":"act","summary":"General purpose agent","maturity":"stable"}),
-        json!({"id":"builtin-operator","kind":"operator","target":"act","summary":"Execute an explicit host operation using the registered Operator","maturity":"stable"}),
+        json!({
+            "id":"builtin-agent-act",
+            "kind":"agent",
+            "target":"act",
+            "summary":"General purpose agent",
+            "input_desc":"Named engineering inputs for an agent task",
+            "output_desc":"A bounded task result with evidence",
+            "required_inputs":[],
+            "definition":{"name":"act","kind":"builtin-agent","target":"act"},
+            "version":"builtin",
+            "maturity":"stable"
+        }),
+        json!({
+            "id":"builtin-operator",
+            "kind":"operator",
+            "target":"act",
+            "summary":"Execute an explicit host operation using the registered Operator",
+            "input_desc":"Named inputs describing the host operation",
+            "output_desc":"The operation result and execution evidence",
+            "required_inputs":[],
+            "definition":{"name":"act","kind":"builtin-operator","target":"act"},
+            "version":"builtin",
+            "maturity":"stable"
+        }),
     ];
     for capability in state.store.list_brain_capabilities().await? {
         let Some(target) = state
@@ -27,6 +49,15 @@ pub async fn capabilities(state: &Arc<AppState>) -> anyhow::Result<Vec<Value>> {
         let mut value = json!(capability.capability);
         value["kind"] = target["kind"].clone();
         value["target"] = target["target"].clone();
+        value["required_inputs"] = json!([]);
+        value["definition"] = json!({
+            "id": value["id"],
+            "capability_type": value["capability_type"],
+            "summary": value["summary"],
+            "input_desc": value["input_desc"],
+            "output_desc": value["output_desc"]
+        });
+        value["version"] = json!("stored");
         value["maturity"] = json!("draft");
         capabilities.push(value);
     }
@@ -39,7 +70,7 @@ pub async fn capabilities(state: &Arc<AppState>) -> anyhow::Result<Vec<Value>> {
                 .collect::<Vec<_>>()
         });
     for agent in agents {
-        capabilities.push(json!({"id":format!("agent-{}",agent.name),"kind":"agent","target":agent.name,"summary":agent.description,"definition":{"name":agent.name,"kind":agent.kind,"mode":agent.mode,"prompt":agent.prompt,"tools":agent.tools},"maturity":"draft"}));
+        capabilities.push(json!({"id":format!("agent-{}",agent.name),"kind":"agent","target":agent.name,"summary":agent.description,"input_desc":"Named engineering inputs for this agent","output_desc":"The agent response and execution evidence","required_inputs":[],"definition":{"name":agent.name,"kind":agent.kind,"mode":agent.mode,"prompt":agent.prompt,"tools":agent.tools},"version":"current","maturity":"draft"}));
     }
     let (_, share) = crate::api_todo_util::share_root(&state.workdir).await?;
     for name in opencoder_core::list_child_dirs(&share.join("todo")) {
@@ -53,7 +84,7 @@ pub async fn capabilities(state: &Arc<AppState>) -> anyhow::Result<Vec<Value>> {
                 continue;
             }
             let definition = crate::api::template::snapshot(&share, &name, &version)?;
-            capabilities.push(json!({"id":format!("todos-{name}-{version}"),"kind":"todos","target":format!("{name}/{version}"),"summary":definition["objective"],"definition":definition,"maturity":"draft"}));
+            capabilities.push(json!({"id":format!("todos-{name}-{version}"),"kind":"todos","target":format!("{name}/{version}"),"summary":definition["objective"],"input_desc":"Named inputs for this TODO workflow","output_desc":"Accepted TODO results and evidence","required_inputs":[],"definition":definition,"version":version,"maturity":"draft"}));
         }
     }
     for kind in ["dag", "team"] {
@@ -76,7 +107,7 @@ pub async fn capabilities(state: &Arc<AppState>) -> anyhow::Result<Vec<Value>> {
             )
             .await
             .map_err(|r| anyhow::anyhow!("capability {kind}/{target}: {}", r.body))?;
-            capabilities.push(json!({"id":format!("{kind}-{target}"),"kind":kind,"target":target,"summary":definition.get("description").or_else(||definition.get("spec").and_then(|s|s.get("description"))).cloned().unwrap_or(json!("")),"definition":snapshot,"maturity":"draft"}));
+            capabilities.push(json!({"id":format!("{kind}-{target}"),"kind":kind,"target":target,"summary":definition.get("description").or_else(||definition.get("spec").and_then(|s|s.get("description"))).cloned().unwrap_or(json!("")),"input_desc":format!("Named inputs for this {kind} definition"),"output_desc":format!("The {kind} result and execution evidence"),"required_inputs":[],"definition":snapshot,"version":"current","maturity":"draft"}));
         }
     }
     capabilities.extend(state.fleet.definitions("brain_capability").await?);

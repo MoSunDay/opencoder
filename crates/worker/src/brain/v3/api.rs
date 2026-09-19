@@ -82,9 +82,12 @@ pub async fn handle(
                 .store
                 .brain_scheduler_events(id, input["after"].as_u64().unwrap_or(0), limit)
                 .await?;
-            return Ok(RpcReply::ok(
-                json!({"more":events.len()==limit as usize,"next_seq":events.last().map(|e|e.seq),"events":events}),
-            ));
+            return Ok(RpcReply::ok(json!({
+                "finished": snapshot.run.phase.terminal(),
+                "more": events.len() == limit as usize,
+                "next_seq": events.last().map(|e| e.seq),
+                "events": events
+            })));
         }
         "round" => {
             let round = input["round"].as_u64().context("round required")?;
@@ -228,5 +231,47 @@ pub async fn handle(
         .commit_brain_scheduler(&change)
         .await?;
     state::settle(worker, &next).await?;
+    if action == "scheduler_context" && next.run.phase == BrainSchedulerPhase::Deciding {
+        // The root is normally idle after emitting its wake.  Installing the
+        // context only changes the durable scheduler projection; enqueue a
+        // fresh activation so the node-local model runner consumes it.  Wait
+        // for a racing initial activation to finish before changing the
+        // journal status back to Pending.
+        drop(_guard);
+        requeue_decision(worker, id).await?;
+    }
     Ok(RpcReply::ok(json!(next)))
+}
+
+async fn requeue_decision(worker: &Worker, id: &str) -> Result<()> {
+    loop {
+        if worker.inner.active.lock().await.contains_key(id) {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            continue;
+        }
+        let gate = worker.lifecycle_gate(id).await;
+        let _guard = gate.lock().await;
+        if worker.inner.active.lock().await.contains_key(id) {
+            continue;
+        }
+        let record = worker
+            .inner
+            .journal
+            .lock()
+            .await
+            .records
+            .get(id)
+            .cloned()
+            .context("root execution missing while queueing scheduler decision")?;
+        if record.assignment.index.status != ExecutionStatus::Idle {
+            return Ok(());
+        }
+        let config = record
+            .queue
+            .as_ref()
+            .map(|queued| queued.config.clone())
+            .unwrap_or(worker.configuration()?);
+        crate::operations::queue::enqueue(worker, record, config, true).await?;
+        return Ok(());
+    }
 }

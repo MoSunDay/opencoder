@@ -183,3 +183,33 @@ fn late_terminal_event_only_appends_audit_event() {
         Some("late terminal event")
     );
 }
+
+#[test]
+fn cancelled_sibling_late_event_settles_after_run_failure() {
+    let mut s = snapshot();
+    s.run.phase = BrainSchedulerPhase::Failed;
+    s.run.round = 1;
+    s.operations = vec![BrainOperation {
+        operation_id: "sibling".into(),
+        run_id: s.run.run_id.clone(),
+        round: 1,
+        capability_id: "sibling".into(),
+        execution_kind: ExecutionKind::Agent,
+        execution_id: "agent-sibling".into(),
+        status: BrainOperationStatus::Running,
+        source_sequence: None,
+        cancel_requested: true,
+    }];
+    let notice = BrainSchedulerTerminalEvent {
+        run_id: s.run.run_id.clone(),
+        operation_id: "sibling".into(),
+        execution_kind: ExecutionKind::Agent,
+        execution_id: "agent-sibling".into(),
+        status: BrainOperationStatus::Cancelled,
+        source_sequence: 1,
+    };
+    let change = scheduler::terminal(&s, &notice, 4).unwrap().unwrap();
+    assert_eq!(change.operations[0].status, BrainOperationStatus::Cancelled);
+    assert_eq!(change.operations[0].source_sequence, Some(1));
+    assert_eq!(change.events[0].reason_summary, None);
+}

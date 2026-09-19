@@ -1,4 +1,4 @@
-Commit: 896013049fe3bd0f3384c52e9638e3a7107aa6fc
+Commit: 981a285f199d5ee94449cb4852ea9b96a84da631
 
 # control 模块
 
@@ -12,16 +12,18 @@ Commit: 896013049fe3bd0f3384c52e9638e3a7107aa6fc
 - `src/api/session.rs` — 会话执行面：`POST /api/sessions` 按 `kind` 映射（缺省
   operator；`agent` 走同一执行器，其余 400），缺省 id 按 `kind.prefix()` 生成
   （agent-{ulid}/operator-{ulid}），整个 body 即 execution input（`prompt`/
-  `how_append`/`agent`/`node_id` 在顶层）；列表合并 Operator+Agent 两族索引
-  （created_at DESC + id ASC，500 上限），dag/team/maintenance 不混入
+  `how_append`/`agent`/`node_id` 在顶层）；`GET /api/sessions` 按
+  `?kind=operator|agent` 严格分 lane（缺省 operator），每行返回 `kind`、`node_id`
+  与 `execution_ref`，Agent 明细仍由 Operator-capable 节点索引并按显式引用打开；
+  dag/team/maintenance 不混入
 - `src/api/executions/` — 派发去重、选点冻结、回执；列表端点在 JSON 层提升顶层 `name`（派发时快照，按 kind 取定义名/target，见 `paging.rs`），执行索引五字段协议不动；非 admin 角色门禁放行 Operator/Agent 两族（提交与命令同规则，dag/team 403）；Agent kind 的 `input["how_append"]` 在准入即校验 8 KiB 预算（对齐 `opencoder_dag::spec::MAX_HOW_APPEND_BYTES`）
 - `src/api/settings/` — Harness（codex）配置与节点调度配置：`GET/PUT /api/nodes/:id/scheduling`（admin-only）经 hub Maintenance RPC（`scheduling` 读 / `configure_scheduling` 写）转发节点；`NodeScheduling`（`crates/core/src/fleet/queue.rs`）`normalized()` 空白归一 null、`validate()` 要求 workdir 绝对路径，控制面预校验失败直接 400
 - `src/api/catalog.rs` — 节点与定义目录
 - `src/api/compat/` — 旧 Chat/DAG/TODO/Project 兼容路由；dispatch（DAG/TODO）
   的 execution input 取 body 顶层 `input`（null/缺失退化为 `{}`，worker 侧据此
   注入「执行要求」后缀并落 `input.json`）；`clear_dialogs` 是节点中继：
-  fleet.nodes 404 → indexes(Operator/Agent) 算 drop_ids → hub.call(Maintenance dialogs_clear) →
-  按 kind 删除终态控制面索引；节点不识别该操作时原样透传节点错误（fail-closed，防索引行复活）
+  fleet.nodes 404 → indexes(所选 kind) 算 drop_ids → hub.call(Maintenance dialogs_clear) →
+  只按所选 kind 删除终态控制面索引；节点不识别该操作时原样透传节点错误（fail-closed，防索引行复活）
 - `src/api/project.rs` — Project overview/runs 对节点 `404 execution not found`（journal 丢失/节点重建）按持久索引静默降级：overview 行不带 `detail_error`、runs 返回空页，与 `Ok(None)` 无索引同形；其余失败（节点离线 503 等）保持 `detail_error`/透传
 - `src/api/stream.rs` — 分页→SSE 事件流
 - `src/api/brain_runs/` — v2 计划注册与兼容查询，以及 v3 能力目录、轮次调度、最小快照、事件页和控制命令。v3 通过 `ExecutionGateway` 创建真实子执行，调度器只在终态事件确认后再次唤醒。

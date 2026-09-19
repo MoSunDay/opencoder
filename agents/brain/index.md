@@ -1,4 +1,4 @@
-Commit: 896013049fe3bd0f3384c52e9638e3a7107aa6fc
+Commit: 586e56014aaa9d2ec59047a24a8cb5ca644d1249
 
 # brain 模块
 
@@ -18,9 +18,9 @@ Commit: 896013049fe3bd0f3384c52e9638e3a7107aa6fc
 
 - `crates/core/src/brain/scheduler.rs` 定义 schema v3 的最小运行、操作和事件投影。根请求仍以命名工程输入保存于根执行；脑状态不复制子执行输入、消息、DAG 或产物正文。
 - `crates/brain/src/scheduler/` 以纯函数执行能力预筛、严格 `Dispatch`/`Complete`/`Fail` 校验、轮次屏障和终态处理。输入绑定只能引用根输入、成功执行的 `execution_id` 输出路径或已有产物。
-- `crates/control/src/api/brain_runs/v3/` 每轮查询目录并判断一次，通过 `ExecutionGateway` 创建真实 Agent、Team、DAG、TODO 或 Operator；大脑停止轮询，只有节点确认的终态事件唤醒下一轮。
+- `crates/control/src/api/brain_runs/v3/` 归一化能力目录、转发有限调度上下文并通过 `ExecutionGateway` 创建真实 Agent、Team、DAG、TODO 或 Operator；根节点持有投影并激活模型，大脑停止轮询，只有节点确认的终态事件唤醒下一轮。
 - Store 的 scheduler run/operation/event 三类记录支持 generation 栅栏、终态事件幂等和按序分页；事件只包含索引、引用和摘要。子执行详情通过 `GET /api/executions/{execution_id}` 查询。
-- `crates/worker/src/brain/v3/` 负责恢复未确认事件、创建请求和取消请求。失败终态立即取消同轮兄弟操作，迟到事件只记账，不改写已经终态的脑状态。
+- `crates/worker/src/brain/v3/` 负责恢复节点本地投影、模型上下文、未确认事件、创建请求和取消请求。失败终态立即取消同轮兄弟操作，迟到事件只记账，不改写已经终态的脑状态。
 - v2 运行保留只读兼容和原有回归路径；新运行必须明确 `schema_version: 3`。
 
 ## 索引

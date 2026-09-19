@@ -107,6 +107,61 @@ fn dag_dispatch_body_is_optional_and_defaults_to_empty_object() {
     );
 }
 
+/// `--input` carries the run input (the release gate's
+/// `{"prompt":"base=.. head=.."}`): it lands in the body's `input` key,
+/// merges with `--json`, and wins when both name the key. Malformed input
+/// JSON is a plan-time error, same as a malformed `--json`.
+#[test]
+fn dag_dispatch_input_lands_in_the_body_input_key() {
+    let input = json!({"prompt": "base=abc123 head=def456 变更审查请求"});
+    assert_plan(
+        &dag_plan(&dag(&[
+            "dispatch",
+            "code-review",
+            "--input",
+            r#"{"prompt":"base=abc123 head=def456 变更审查请求"}"#,
+        ]))
+        .unwrap(),
+        Method::POST,
+        "/api/dag/defs/code-review/dispatch",
+        &[],
+        Some(json!({"input": input})),
+    );
+    // --json keys survive; --input takes the `input` key.
+    assert_plan(
+        &dag_plan(&dag(&[
+            "dispatch",
+            "code-review",
+            "--json",
+            r#"{"id":"cr-gate-1","input":{"prompt":"stale"}}"#,
+            "--input",
+            r#"{"prompt":"base=a head=b"}"#,
+        ]))
+        .unwrap(),
+        Method::POST,
+        "/api/dag/defs/code-review/dispatch",
+        &[],
+        Some(json!({"id": "cr-gate-1", "input": {"prompt": "base=a head=b"}})),
+    );
+    // A non-object --json cannot carry the field, so it degrades to {}.
+    assert_plan(
+        &dag_plan(&dag(&[
+            "dispatch",
+            "code-review",
+            "--json",
+            r#"[1,2]"#,
+            "--input",
+            r#"{"prompt":"p"}"#,
+        ]))
+        .unwrap(),
+        Method::POST,
+        "/api/dag/defs/code-review/dispatch",
+        &[],
+        Some(json!({"input": {"prompt": "p"}})),
+    );
+    assert!(dag_plan(&dag(&["dispatch", "etl", "--input", "not json"])).is_err());
+}
+
 #[test]
 fn dag_runs_inspect_and_cancel() {
     assert_plan(

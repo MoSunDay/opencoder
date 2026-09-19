@@ -21,7 +21,8 @@ async fn sessions_create_and_list_through_node_summaries() {
     assert_eq!(body["execution"]["kind"], json!("operator"));
     assert_eq!(body["execution"]["node_id"], json!("node-e2e"));
 
-    // List merges the durable index with the node's `summary` command.
+    // The Operator lane joins its durable index with the node's `summary`
+    // command and keeps an explicit detail reference for the row.
     h.node.set_command(
         &id,
         "summary",
@@ -34,6 +35,8 @@ async fn sessions_create_and_list_through_node_summaries() {
     let mine = sessions.iter().find(|s| s["id"] == json!(id)).unwrap();
     assert_eq!(mine["title"], json!("e2e session"));
     assert_eq!(mine["node_id"], json!("node-e2e"));
+    assert_eq!(mine["kind"], json!("operator"));
+    assert_eq!(mine["execution_ref"], json!({"id": id, "kind": "operator"}));
 }
 
 #[tokio::test]

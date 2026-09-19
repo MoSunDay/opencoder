@@ -17,7 +17,8 @@ pub(super) async fn create(worker: &Worker, mut assignment: Assignment) -> Resul
         ));
     }
     let input = &assignment.request.input;
-    if (assignment.request.kind == ExecutionKind::Brain && input["schema_version"] != 2)
+    if (assignment.request.kind == ExecutionKind::Brain
+        && !matches!(input["schema_version"].as_u64(), Some(2) | Some(3)))
         || (input.get("_brain").is_some() && input["_brain"]["schema_version"] != 2)
         || input.get("brain_receipt").is_some()
         || input.get("playbook_receipt").is_some()
@@ -200,7 +201,8 @@ fn dag_spec_agents(spec: Option<&str>) -> Option<Vec<String>> {
 pub(super) fn prepare(worker: &Worker, assignment: &Assignment, legacy: bool) -> Result<Config> {
     let input = &assignment.request.input;
     anyhow::ensure!(
-        !(assignment.request.kind == ExecutionKind::Brain && input["schema_version"] != 2)
+        !(assignment.request.kind == ExecutionKind::Brain
+            && !matches!(input["schema_version"].as_u64(), Some(2) | Some(3)))
             && !(input.get("_brain").is_some() && input["_brain"]["schema_version"] != 2)
             && input.get("brain_receipt").is_none()
             && input.get("playbook_receipt").is_none(),
@@ -293,12 +295,18 @@ pub(super) fn prepare(worker: &Worker, assignment: &Assignment, legacy: bool) ->
             let mut agents = vec![];
             match assignment.request.kind {
                 ExecutionKind::Brain => {
-                    opencoder_brain::execution::initialize(
-                        &assignment.index.id,
-                        serde_json::from_value(assignment.request.input.clone())?,
-                        0,
-                    )?;
-                    if worker.inner.client.is_none() {
+                    if input["schema_version"] == 2 {
+                        opencoder_brain::execution::initialize(
+                            &assignment.index.id,
+                            serde_json::from_value(assignment.request.input.clone())?,
+                            0,
+                        )?;
+                    } else if input["schema_version"] == 3 {
+                        let request: opencoder_core::brain::BrainSchedulerRequest =
+                            serde_json::from_value(input["scheduler_request"].clone())?;
+                        opencoder_brain::scheduler::validate_request(&request)?;
+                    }
+                    if input["schema_version"] == 2 && worker.inner.client.is_none() {
                         crate::brain::activate::preflight()?;
                     }
                 }

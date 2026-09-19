@@ -2,12 +2,12 @@
 // chat 页「模式 Segmented」创建链路分流：
 //   - Operator 模式（缺省）：newId('operator')，POST /api/sessions body 不带
 //     kind / how_append（现状 wire 形状）；
-//   - Agent 模式：newId('agent') + body.kind='agent' + staged how_append；
+//   - Agent 模式：newId('agent') + body.kind='agent' + first prompt + concrete agent；
+//     首条需求随创建请求提交，并由 worker 追加到该 Agent 的 how；
 //     节点下拉/可执行判定按 canUseNode(nodes, id, 'agent') 过滤；
 //   - 模式经 usehooks-ts useLocalStorage 持久化（oc_chat_mode），陌生值收敛
 //     回 Operator；
-//   - 知识追加 how_append 超 8192 字节（UTF-8 字节，非字符数）被双重拦截：
-//     弹窗禁止保存 + 创建前 throw（send 恢复草稿、不发起创建 POST）。
+//   - Agent 模式不再渲染知识追加入口。
 import '../test/setup-dom.js';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -43,16 +43,6 @@ const switchMode = async (label) => {
   });
 };
 
-const stageHowAppend = async (text) => {
-  fireEvent.click(await screen.findByRole('button', { name: /知识追加/ }));
-  const area = await screen.findByLabelText('知识追加内容');
-  fireEvent.change(area, { target: { value: text } });
-  fireEvent.click(screen.getByRole('button', { name: /保\s*存/ }));
-  // 暂存回显：入口按钮带上「已暂存」标记（弹窗 DOM 会随退场动画驻留，不以其
-  // 消失为信号）。
-  await waitFor(() => expect(screen.getByRole('button', { name: '知识追加 · 已暂存' })).toBeTruthy());
-};
-
 const createHits = () => apiPost.mock.calls.filter(([path]) => path === '/api/sessions');
 
 beforeEach(() => {
@@ -61,7 +51,7 @@ beforeEach(() => {
   setState({ preselectNode: null, nodes: [] });
   apiGet.mockImplementation(async (path) => {
     if (path === '/api/nodes') return { nodes };
-    if (path === '/api/nodes/n1/dialogs' || path === '/api/nodes/n2/dialogs') return { dialogs: [] };
+    if (path.startsWith('/api/nodes/n1/dialogs') || path.startsWith('/api/nodes/n2/dialogs')) return { dialogs: [] };
     if (path === '/api/agents') return { agents: [] };
     if (path.endsWith('/seq')) return { seq: 0 };
     return {};
@@ -83,29 +73,91 @@ describe('chat mode Segmented (Operator / Agent)', () => {
     unmount();
     const { container: remounted } = render(<ChatPanel />);
     expect(selectedMode(remounted)).toBe('Agent 模式');
-    expect(screen.getByRole('button', { name: /知识追加/ })).toBeTruthy();
+    expect(screen.getByLabelText('执行 Agent')).toBeTruthy();
   });
 
   it('falls back to Operator display for a corrupt stored value (never crashes)', async () => {
     localStorage.setItem(CHAT_MODE_STORAGE_KEY, '"bogus"');
     const { container } = render(<ChatPanel />);
     expect(selectedMode(container)).toBe('Operator 模式');
-    expect(screen.queryByRole('button', { name: /知识追加/ })).toBeNull();
+    expect(screen.queryByLabelText('执行 Agent')).toBeNull();
   });
 
-  it('hides the 知识追加 entry in Operator mode and shows it in Agent mode', async () => {
+  it('shows a concrete Agent selector in Agent mode and removes knowledge staging', async () => {
     const { container } = render(<ChatPanel />);
     await pick('n1');
-    expect(screen.queryByRole('button', { name: /知识追加/ })).toBeNull();
+    expect(screen.queryByLabelText('执行 Agent')).toBeNull();
     await switchMode('Agent 模式');
-    expect(await screen.findByRole('button', { name: /知识追加/ })).toBeTruthy();
-    // 会话级控制（act/plan、模型）在两种模式下都还在。
-    expect(container.querySelector('.ant-segmented[aria-label="agent 切换"]')).toBeTruthy();
+    expect(await screen.findByLabelText('执行 Agent')).toBeTruthy();
+    expect(screen.queryByText('知识追加')).toBeNull();
+    expect(container.querySelector('.ant-segmented[aria-label="agent 切换"]')).toBeNull();
     expect(screen.getByRole('button', { name: '模 型' })).toBeTruthy();
+  });
+
+  it('ignores a delayed Operator list after switching to Agent mode', async () => {
+    let finishOperator;
+    apiGet.mockImplementation(async (path) => {
+      if (path === '/api/nodes') return { nodes };
+      if (path.endsWith('/dialogs?kind=operator')) {
+        return new Promise((resolve) => { finishOperator = resolve; });
+      }
+      if (path.endsWith('/dialogs?kind=agent')) {
+        return { dialogs: [{ session_id: 'agent-row', title: 'Agent 记录' }] };
+      }
+      return {};
+    });
+    render(<ChatPanel />);
+    await pick('n1');
+    await waitFor(() => expect(finishOperator).toBeTypeOf('function'));
+    await switchMode('Agent 模式');
+    expect(await screen.findByText('Agent 记录')).toBeTruthy();
+    await act(async () => {
+      finishOperator({ dialogs: [{ session_id: 'operator-row', title: '迟到的 Operator 记录' }] });
+    });
+    expect(screen.queryByText('迟到的 Operator 记录')).toBeNull();
+    expect(screen.getByText('Agent 记录')).toBeTruthy();
+  });
+
+  it('reloads an independent dialog lane when switching between Operator and Agent', async () => {
+    apiGet.mockImplementation(async (path) => {
+      if (path === '/api/nodes') return { nodes };
+      if (path.endsWith('/dialogs?kind=operator')) {
+        return { dialogs: [{ session_id: 'operator-row', title: 'Operator 记录' }] };
+      }
+      if (path.endsWith('/dialogs?kind=agent')) {
+        return { dialogs: [{ session_id: 'agent-row', title: 'Agent 记录' }] };
+      }
+      if (path === '/api/agents') return { agents: [] };
+      return {};
+    });
+    const { container } = render(<ChatPanel />);
+    await pick('n1');
+    expect(await screen.findByText('Operator 记录')).toBeTruthy();
+    await switchMode('Agent 模式');
+    expect(await screen.findByText('Agent 记录')).toBeTruthy();
+    expect(screen.queryByText('Operator 记录')).toBeNull();
+    expect(apiGet).toHaveBeenCalledWith('/api/nodes/n1/dialogs?kind=operator');
+    expect(apiGet).toHaveBeenCalledWith('/api/nodes/n1/dialogs?kind=agent');
+    expect(container.querySelector('textarea.ant-sender-input')).toBeTruthy();
   });
 });
 
 describe('creation lanes', () => {
+  it('keeps a late creation receipt in its original mode', async () => {
+    let finishCreate;
+    apiPost.mockImplementation(async (path) => path === '/api/sessions'
+      ? new Promise((resolve) => { finishCreate = resolve; }) : { ok: true });
+    const { container } = render(<ChatPanel />);
+    await pick('n1');
+    await send(container, 'delayed operator prompt');
+    await waitFor(() => expect(finishCreate).toBeTypeOf('function'));
+    await switchMode('Agent 模式');
+    await act(async () => { finishCreate({ id: 'operator-delayed' }); });
+    expect(selectedMode(container)).toBe('Agent 模式');
+    expect(screen.queryByText('delayed operator prompt')).toBeNull();
+    expect(apiPost.mock.calls.some(([path]) => path === '/api/sessions/operator-delayed/prompt')).toBe(false);
+  });
+
   it('Operator mode keeps the legacy body: no kind, no how_append', async () => {
     const { container } = render(<ChatPanel />);
     await pick('n1');
@@ -118,13 +170,10 @@ describe('creation lanes', () => {
     expect(createHits()[0][1].how_append).toBeUndefined();
   });
 
-  it('Agent mode creates with kind=agent, agent- id and the staged how_append', async () => {
+  it('Agent mode creates with kind=agent and the selected concrete Agent', async () => {
     const { container } = render(<ChatPanel />);
     await pick('n1');
     await switchMode('Agent 模式');
-    await stageHowAppend('仓库约定：回归前先跑 vitest');
-    // 暂存回显在入口按钮上。
-    expect(screen.getByRole('button', { name: '知识追加 · 已暂存' })).toBeTruthy();
 
     await send(container, 'agent lane');
     await waitFor(() => expect(createHits()).toHaveLength(1));
@@ -133,20 +182,26 @@ describe('creation lanes', () => {
       node_id: 'n1',
       agent: 'act',
       kind: 'agent',
-      how_append: '仓库约定：回归前先跑 vitest',
+      prompt: 'agent lane',
     });
   });
 
-  it('Agent mode without staged knowledge omits how_append but still sends kind=agent', async () => {
+  it('switches the Agent selector before creation', async () => {
     const { container } = render(<ChatPanel />);
     await pick('n1');
     await switchMode('Agent 模式');
-    await send(container, 'no addendum');
-    await waitFor(() => expect(createHits()).toHaveLength(1));
-    expect(createHits()[0][1]).toEqual({
-      id: expect.stringMatching(/^agent-/), node_id: 'n1', agent: 'act', kind: 'agent',
+    const select = screen.getByLabelText('执行 Agent').closest('.ant-select');
+    fireEvent.mouseDown(select);
+    const plan = await waitFor(() => {
+      const option = [...document.querySelectorAll('.ant-select-item-option')]
+        .find((item) => item.textContent?.trim().startsWith('plan'));
+      expect(option).toBeTruthy();
+      return option;
     });
-    expect(createHits()[0][1].how_append).toBeUndefined();
+    fireEvent.click(plan);
+    await send(container, 'plan this');
+    await waitFor(() => expect(createHits()).toHaveLength(1));
+    expect(createHits()[0][1]).toMatchObject({ agent: 'plan', kind: 'agent', prompt: 'plan this' });
   });
 });
 
@@ -155,44 +210,6 @@ describe('how_append guard (8192 UTF-8 bytes)', () => {
     expect(howAppendBytes('中'.repeat(2730))).toBe(8190);
     expect(howAppendBytes('中'.repeat(2731))).toBe(8193);
     expect(HOW_APPEND_MAX).toBe(8192);
-  });
-
-  it('shows the byte error, blocks saving, and keeps the over-limit text off the wire', async () => {
-    const { container } = render(<ChatPanel />);
-    await pick('n1');
-    await switchMode('Agent 模式');
-    fireEvent.click(await screen.findByRole('button', { name: /知识追加/ }));
-
-    const over = '中'.repeat(2731); // 8193 字节 > 8192（字符数 2731 < 8192，证明按字节计）
-    fireEvent.change(await screen.findByLabelText('知识追加内容'), { target: { value: over } });
-    expect(await screen.findByText(/8193 \/ 8192 字节/)).toBeTruthy();
-    expect(await screen.findByText(/超过上限，无法保存/)).toBeTruthy();
-    const save = screen.getByRole('button', { name: /保\s*存/ });
-    expect(save.disabled).toBe(true);
-
-    // 关闭弹窗（保存被禁 → 未暂存任何内容），入口不显示已暂存。
-    fireEvent.click(screen.getByRole('button', { name: /取\s*消/ }));
-    await waitFor(() => expect(screen.queryByRole('button', { name: /已暂存/ })).toBeNull());
-
-    // 超限内容无法经 UI 暂存 → 随创建提交的 body 永远不含 how_append。
-    await send(container, 'must not carry addendum');
-    await waitFor(() => expect(createHits()).toHaveLength(1));
-    expect(createHits()[0][1].kind).toBe('agent');
-    expect(createHits()[0][1].how_append).toBeUndefined();
-  });
-
-  it('clears the staged addendum via 清空 (empty save clears the entry)', async () => {
-    const { container } = render(<ChatPanel />);
-    await pick('n1');
-    await switchMode('Agent 模式');
-    await stageHowAppend('先暂存一段知识');
-    fireEvent.click(await screen.findByRole('button', { name: /知识追加/ }));
-    fireEvent.click(screen.getByRole('button', { name: /清\s*空/ }));
-    await waitFor(() => expect(screen.queryByRole('button', { name: /已暂存/ })).toBeNull());
-
-    await send(container, 'after clear');
-    await waitFor(() => expect(createHits()).toHaveLength(1));
-    expect(createHits()[0][1].how_append).toBeUndefined();
   });
 });
 

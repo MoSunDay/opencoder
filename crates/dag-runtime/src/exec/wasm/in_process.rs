@@ -22,11 +22,11 @@ use tokio::io::AsyncWrite;
 use tokio_util::sync::CancellationToken;
 use wasmtime::{Config, Engine, Linker, Module, Store};
 use wasmtime_wasi::p1::add_to_linker_sync;
-use wasmtime_wasi::p1::WasiP1Ctx;
 use wasmtime_wasi::{FsPerms, I32Exit, WasiCtxBuilder};
 
 use super::super::StepCtx;
 use super::super::StepResult;
+use super::host_imports::{HostState, HostStore};
 use super::{error_result, finish_from_output_json, resolve_module, step_env, CONTEXT_MOUNT};
 use crate::step_log::{StepOutputLog, Stream};
 
@@ -67,14 +67,22 @@ pub(crate) async fn execute(
     let run_root = run_root.to_path_buf();
     let tokens = tokens.to_vec();
     let env = step_env(ctx);
+    // Fail-closed knowledge resolution (same rules as the runc path).
+    let knowledge_host = match super::knowledge_mount(ctx) {
+        Ok(k) => k.map(|mount| mount.host),
+        Err(e) => return error_result(e),
+    };
     let step_name = ctx.step.name.clone();
+    let ops = ctx.ops.clone();
     let job = tokio::task::spawn_blocking(move || {
         run_sync(
             module_path,
             tokens,
             env,
             run_root,
+            knowledge_host,
             step_name,
+            ops,
             timeout_secs,
             cancel_flag,
             output,
@@ -98,7 +106,9 @@ fn run_sync(
     tokens: Vec<String>,
     env: Vec<(String, String)>,
     run_root: PathBuf,
+    knowledge_host: Option<PathBuf>,
     step_name: String,
+    ops: std::collections::BTreeMap<String, opencoder_core::config::DagOpConfig>,
     timeout_secs: Option<u64>,
     cancel_flag: Arc<AtomicBool>,
     output: Option<StepOutputLog>,
@@ -118,7 +128,7 @@ fn run_sync(
     // The step log (when the runtime supplied one) mirrors every guest write
     // as it lands, so a remote console sees output while the step runs.
     let stdout = SharedSink::with_output(limit, output.clone().map(|log| (log, Stream::Stdout)));
-    let stderr = SharedSink::with_output(limit, output.map(|log| (log, Stream::Stderr)));
+    let stderr = SharedSink::with_output(limit, output.clone().map(|log| (log, Stream::Stderr)));
 
     let mut builder = WasiCtxBuilder::new();
     builder
@@ -129,14 +139,35 @@ fn run_sync(
     if let Err(e) = builder.preopened_dir(&run_root, CONTEXT_MOUNT, FsPerms::ReadWrite) {
         return error_result(format!("cannot preopen run context root: {e}"));
     }
+    // The node's knowledge root, READ-ONLY, at the same guest path the
+    // runc sandbox binds it (kernel-enforced `ro` there; FsPerms here).
+    if let Some(host) = &knowledge_host {
+        if let Err(e) =
+            builder.preopened_dir(host, super::super::KNOWLEDGE_MOUNT, FsPerms::ReadOnly)
+        {
+            return error_result(format!("cannot preopen knowledge root: {e}"));
+        }
+    }
     let wasi = builder.build_p1();
 
-    let mut store = Store::new(&engine, wasi);
+    // Host capability state beside the WASI ctx: the dag.ops registry,
+    // the step's artifact dir (op evidence) and the cancel flag.
+    let host = HostState {
+        ops,
+        run_root: run_root.clone(),
+        step_dir: run_root.join(&step_name),
+        cancel: Arc::clone(&cancel_flag),
+        output: output.clone(),
+    };
+    let mut store = Store::new(&engine, (wasi, host));
     store.set_epoch_deadline(ticks);
 
-    let mut linker: Linker<WasiP1Ctx> = Linker::new(&engine);
-    if let Err(e) = add_to_linker_sync(&mut linker, |t| t) {
+    let mut linker: Linker<HostStore> = Linker::new(&engine);
+    if let Err(e) = add_to_linker_sync(&mut linker, |t| &mut t.0) {
         return error_result(format!("wasi linker init failed: {e}"));
+    }
+    if let Err(e) = super::host_imports::register(&mut linker) {
+        return error_result(format!("opencoder host imports init failed: {e}"));
     }
     let module = match Module::from_file(&engine, &module_path) {
         Ok(m) => m,
@@ -187,8 +218,8 @@ fn run_sync(
             let epoch_trapped = matches!(
                 err.downcast_ref::<wasmtime::Trap>(),
                 Some(wasmtime::Trap::Interrupt)
-            ) || format!("{err:#}").contains("epoch deadline");
-            let text = err.to_string();
+            ) || trap_chain_text(&err).contains("epoch deadline");
+            let text = trap_chain_text(&err);
             if epoch_trapped {
                 if cancel_flag.load(Ordering::SeqCst) {
                     return StepResult {
@@ -201,6 +232,18 @@ fn run_sync(
             error_result(super::tail(&text, ERROR_TAIL_BYTES))
         }
     }
+}
+
+/// Host traps (e.g. an unregistered `dag.ops` id) carry their reason in
+/// the error chain while `to_string()` only shows the wasm backtrace, so
+/// flatten the chain for both matching and reporting.
+fn trap_chain_text(err: &wasmtime::Error) -> String {
+    let parts: Vec<String> = err
+        .chain()
+        .map(|e| e.to_string())
+        .filter(|s| !s.trim().is_empty())
+        .collect();
+    parts.join(": ")
 }
 
 /// Combine captured streams into the artifact/event text.

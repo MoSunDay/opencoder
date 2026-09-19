@@ -47,17 +47,17 @@ Server 与 Node 都要求 `--token`、`--token-file` 或既有 `OPENCODER_SERVER
 
 节点每 5 秒报告心跳，并在 loop 进入/退出和任务状态变化时立即报告快照与索引。Server 在发出任务前记录归属并预留容量，收到节点确认后释放预留，避免并发请求集中投向同一空闲节点。指定 `node_id` 时只检查指定节点；节点不满足条件则报错，不改派其他节点。
 
-Node 在返回接受前同步持久化任务、资源和 Harness 配置快照。旧单进程节点可设置最大顶层并发数（1–65535）和 FIFO/LIFO；`scheduling.json` 保存配置，优先于重启时的启动默认值。超额任务以 pending 等待，释放容量后按配置顺序启动；降低上限不打断正在运行的任务。创建请求携带稳定 ID：同一 ID、相同输入重复提交不重复执行；不同输入返回 409。网络超时后归属仍保留，客户端必须用原 ID 重试，Server 不猜测任务是否接受而改派。
+Node 在返回接受前同步持久化任务、资源和 Harness 配置快照。旧单进程节点可设置最大顶层并发数（1–65535）、FIFO/LIFO 与可选工作空间 `workdir`（绝对路径，空白清空恢复节点启动目录；生效范围覆盖该节点非 brain 会话的工作目录、配置发现与会话归属，brain 工作负载仍用各自执行目录的 `workspace`；多运行时宿主不支持，配置返回 400）；`scheduling.json` 保存配置，优先于重启时的启动默认值。超额任务以 pending 等待，释放容量后按配置顺序启动；降低上限不打断正在运行的任务。创建请求携带稳定 ID：同一 ID、相同输入重复提交不重复执行；不同输入返回 409。网络超时后归属仍保留，客户端必须用原 ID 重试，Server 不猜测任务是否接受而改派。
 
 断线只影响传输，已接受的本地工作继续。Node 重启将原先运行中的执行标记 `interrupted`，由用户显式在原节点恢复；已接受但尚未开始的持久化 pending 队列继续等待，冻结节点在复开后才继续调度。DAG 恢复跳过已成功写入检查点的步骤。项目执行 ID 为 `project-<todo-id>`，Plan、Act 和新一轮 Plan 保持相同节点。节点存储出现持久化错误时上报不可调度，须处理存储故障后重启节点。项目页面与全部执行详情中的 Plan 均由 Server 解析当前草稿；Node 在忙碌及资源预检通过后才保存该轮快照，拒绝请求不修改之前的运行记录；容量不足会保存并排队，等待期间 Project 运行不会被失联清理误判。
 
 ## 定时调度
 
-`schedules.json`（server workdir 的 `.opencoder/` 域文件，或全局 `~/.opencoder/`）声明 cronjob；定义以文件为唯一事实来源，Server 控制面内置 cron 调度器（无文件即不运行，配置读取失败或条目非法仅告警跳过，不影响其余任务）。字段：`id`（1–40 字符，字母/数字/`-`/`_`，用于确定性执行 ID）、`cron`（5 字段为分 时 日 月 周；6/7 字段保留秒位）、`timezone`（仅固定偏移如 `+08:00`）、`enabled`（默认 true，关闭的条目不做校验）、`kind`（`brain`/`team`/`todos`/`agent`/`dag`）、`target`、`params`、`overlap`（`skip` 默认 / `allow`）、`node_id`（可选钉住节点）、`scan_interval_secs`（扫描间隔，默认 15s，最小 1s）。
+定时任务定义自 schema v27 起持久化在控制面 libsql `schedules` 表（事实源）；`schedules.json`（server workdir 的 `.opencoder/` 域文件，或全局 `~/.opencoder/`）降级为一次性 seed——仅表空时全量导入（非法条目告警跳过，不阻断启动），此后文件改动不再回灌（删除不会在重启时复活），但 `scan_interval_secs` 永远以文件为准（默认 15s，最小 1s，调度循环热读）。Server 控制面内置 cron 调度器（无定义即空转，配置读取失败或条目非法仅告警跳过，不影响其余任务）。字段：`id`（1–40 字符，字母/数字/`-`/`_`，用于确定性执行 ID）、`cron`（5 字段为分 时 日 月 周；6/7 字段保留秒位）、`timezone`（仅固定偏移如 `+08:00`）、`enabled`（默认 true，关闭的条目不做校验）、`kind`（`brain`/`team`/`todos`/`agent`/`dag`）、`target`、`params`、`overlap`（`skip` 默认 / `allow`）、`node_id`（可选钉住节点）、`scan_interval_secs`（扫描间隔，默认 15s，最小 1s）。
 
 触发复用既有入口：agent/team/todos/dag 走 `POST /api/executions` 同一条提交链路，brain 走 brain run 创建链路；`params` 支持时间模板 `{{now[±N<单位>][:格式]}}`（单位 s/m/h/d/w，缺省 RFC3339，另有 `unix`/`unix_ms`），在触发时刻渲染为执行 input。每次触发获得确定性执行 ID `<kind>-<schedule_id>-<scheduled_for_ms>`：同一 tick 重复提交幂等收敛，不重复执行。Server 停机重启后仅补跑最近一个错过的 tick，更早的记为 `missed`（24 小时补跑窗口）；提交失败的 tick 在 1 小时内重试，超窗后等待下一个 tick。新建条目首次扫描时没有历史台账，基线退化为 24 小时窗口起点：窗口内最近一个到期 tick 会在首次扫描立即补跑，更早的记为 `missed`。`overlap: skip` 时上一轮触发对应的执行未到终态则本轮不触发，`allow` 无条件触发。
 
-触发历史持久化在 `schedule_runs` 表（schema v26），按 `(schedule_id, scheduled_for_ms)` 主键覆盖写；`GET /api/schedules` 列出全部定义并附最近一次触发与下一次触发时刻，`GET /api/schedules/:id/runs?limit=` 返回倒序历史。两个端点均为 admin-only；CLI 对应 `opencoder-cli schedule list` 与 `opencoder-cli schedule runs <id>`。
+触发历史持久化在 `schedule_runs` 表（schema v26 起），按 `(schedule_id, scheduled_for_ms)` 主键覆盖写；定义持久化在 `schedules` 表（schema v27，主键 `id`，`job` JSON + created_at/updated_at，upsert 保留 created_at）。`GET /api/schedules` 列出全部定义并附最近一次触发与下一次触发时刻，`GET /api/schedules/:id/runs?limit=` 返回倒序历史；admin CRUD：`POST /api/schedules` 创建（缺省 id 自动生成 `schedule-<ULID>`，重名 409，非法 body 400）、`PUT /api/schedules/:id` 全量更新（404 未知 id，created_at 保留）、`PATCH /api/schedules/:id` 仅启停（`{"enabled": bool}`，重校验整个定义——坏 cron 的停用条目无法被直接启用）、`DELETE /api/schedules/:id` 删除定义（触发历史保留可查）、`POST /api/schedules/:id/run` 手动立即触发（绕过 enabled 与 overlap，属显式操作员动作）。全部端点 admin-only；CLI 对应 `opencoder-cli schedule list` 与 `opencoder-cli schedule runs <id>`；Web 控制台「定时任务」页（`spa/src/schedule/panel.jsx`）提供新建/编辑/启停/删除与手动触发的全功能管理。
 
 ## NFS 资源共享
 
@@ -107,14 +107,14 @@ mount -t nfs -o ro,vers=3,tcp,port=2050,mountport=2050,nolock,soft,retrans=1,tim
 | 创建、游标列表、明细 | `POST /api/executions`、`GET /api/executions?limit=&cursor_created_at=&cursor_id=`、`GET /api/executions/:id` |
 | 控制、事件与大字段 | `POST /api/executions/:id/commands`、`GET /api/executions/:id/events`、`GET /api/executions/:id/messages`、`GET /api/executions/:id/detail-field` |
 | drain 与就绪 | `GET /api/ready`、`GET/POST/DELETE /api/admin/drain` |
-| 节点并发与排队配置 | `PUT /api/nodes/:id/scheduling`，请求 `{ "max_runs": 4, "queue_order": "fifo" }` |
+| 节点并发与排队配置 | `GET/PUT /api/nodes/:id/scheduling`，请求 `{ "max_runs": 4, "queue_order": "fifo", "workdir": "/abs/workspace" }`；host 节点读接口返回 `workdir_supported:false` 且拒绝 workdir |
 | Agent 资源读取 / 保存 | `GET/PUT /api/agents/:name/resources/:cat`（`cat=prompts/skills/tools/memory`） |
 | Agent 资源恢复 | `POST /api/agents/:name/resources/:cat/restore` |
 | Harness 配置 | `GET /api/harnesses`、`PUT /api/harnesses/codex` |
 | 显式节点维护 | `POST /api/nodes/:id/maintenance` |
 | 团队定义 | `GET/POST /api/teams` |
 | 能力绑定、直接调度 | `PUT /api/brain/capabilities/:id/target`、`POST /api/brain/dispatch` |
-| 定时调度与触发历史 | `GET /api/schedules`、`GET /api/schedules/:id/runs?limit=` |
+| 定时调度定义 CRUD、手动触发与触发历史 | `GET/POST /api/schedules`、`PUT/PATCH/DELETE /api/schedules/:id`、`POST /api/schedules/:id/run`、`GET /api/schedules/:id/runs?limit=` |
 
 资源读取返回 `baseline: {resource, version, revision}`、`versions`、递归 `files: [{path, content_b64, mode}]` 和 `read_only`。保存提交读取时的 `baseline`、新增或修改的 `files` 和删除路径 `removed`；未提交文件保留。恢复提交 `baseline` 与历史 `version`，响应与读取相同。文件模式仅接受 `0o000–0o777`，合并后的资源上限为 1.5 MiB / 4096 文件。旧共享资源池 API 保留；PUT 以 URL 名称为准，可省略 body 名称，名称不匹配报错，专属资源必须经所属 Agent 接口修改。
 
@@ -138,7 +138,7 @@ DAG 的非 Agent 步骤为 WebAssembly WASI 命令模块。默认 `sandbox: in_p
 
 平滑发布使用固定 Nginx 入口、双版本 Server、稳定 Agent Host 和独立 Runtime。完整配置、首次迁移、发布、回滚、备份及验收见 [平滑发布](smooth-release.md)。
 
-兼容发布只激活候选版本并 reload 入口；旧任务原地完成，不调用全局 drain。原有两进程部署需要先执行一次安全迁移窗口，保留 Node ID、凭证和历史数据。跨版本 Host 共用并发上限和 FIFO；旧 Runtime 在任务、工具、写入及 Brain 回执全部结束后休眠，历史访问可唤醒。
+兼容发布只激活候选版本并 reload 入口；旧任务原地完成，不调用全局 drain。原有两进程部署需要先执行一次安全迁移窗口，保留 Node ID、凭证和历史数据。跨版本 Host 共用并发上限和 FIFO，不支持节点级 workdir（配置返回 400）；旧 Runtime 在任务、工具、写入及 Brain 回执全部结束后休眠，历史访问可唤醒。
 
 版本回滚切换新流量与新任务归属，不恢复旧数据库。NFS 资源服务及其升级使用独立维护流程。首次迁移后不要再用原 Agent/Server unit 重启命令代替发布工具。
 

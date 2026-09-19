@@ -24,8 +24,14 @@ pub struct CreateRun {
     #[serde(default)]
     pub references: Vec<PlanRef>,
 }
-pub async fn create(State(state): State<Arc<AppState>>, Json(body): Json<CreateRun>) -> Response {
-    create_inner(&state, body).await
+pub async fn create(State(state): State<Arc<AppState>>, Json(value): Json<Value>) -> Response {
+    if value.get("schema_version").and_then(Value::as_u64) == Some(3) {
+        return super::v3::create(State(state), Json(value)).await;
+    }
+    match serde_json::from_value(value) {
+        Ok(body) => create_inner(&state, body).await,
+        Err(error) => error_400(error.to_string()),
+    }
 }
 
 /// Shared entry for the HTTP route and the cron scheduler (schedules.json
@@ -212,12 +218,23 @@ pub struct Page {
     pub step: Option<String>,
     pub offset: Option<u64>,
     pub after: Option<i64>,
+    pub limit: Option<u32>,
 }
 pub async fn snapshot(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
     Query(page): Query<Page>,
 ) -> Response {
+    if state
+        .fleet
+        .assignment(&id)
+        .await
+        .ok()
+        .flatten()
+        .is_some_and(|a| a.request.input["schema_version"] == 3)
+    {
+        return super::v3::snapshot(State(state), Path(id)).await;
+    }
     response(
         call(
             &state,
@@ -251,6 +268,23 @@ pub async fn events(
     Path(id): Path<String>,
     Query(page): Query<Page>,
 ) -> Response {
+    if page.after.is_some_and(|after| after < 0) {
+        return error_400("event cursor must be nonnegative".into());
+    }
+    if state
+        .fleet
+        .assignment(&id)
+        .await
+        .ok()
+        .flatten()
+        .is_some_and(|a| a.request.input["schema_version"] == 3)
+    {
+        let page = super::v3::Page {
+            after: page.after.map(|v| v as u64),
+            limit: page.limit,
+        };
+        return super::v3::events(State(state), Path(id), Query(page)).await;
+    }
     response(
         call(
             &state,
@@ -279,6 +313,16 @@ pub async fn command(
     Path(id): Path<String>,
     Json(command): Json<ExecutionCommand>,
 ) -> Response {
+    if state
+        .fleet
+        .assignment(&id)
+        .await
+        .ok()
+        .flatten()
+        .is_some_and(|a| a.request.input["schema_version"] == 3)
+    {
+        return super::v3::command(State(state), Path(id), Json(command)).await;
+    }
     if !matches!(command.action.as_str(), "pause" | "resume" | "cancel") {
         return error_400("supported commands: pause, resume, cancel".into());
     }

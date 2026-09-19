@@ -329,7 +329,10 @@ pub async fn clear_finished_sessions(conn: &Connection, node_id: &str) -> Result
             )
             .await
             .context("clear finished node sessions")?;
-        Ok(ClearNodeDialogs { removed: removed as u64, skipped })
+        Ok(ClearNodeDialogs {
+            removed: removed as u64,
+            skipped,
+        })
     })
     .await
 }

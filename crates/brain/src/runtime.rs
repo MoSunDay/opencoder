@@ -7,7 +7,8 @@ use std::sync::Arc;
 
 use anyhow::{bail, Context, Result};
 
-use opencoder_llm::ChatStream;
+use opencoder_core::brain::{BrainSchedulerContext, BrainSchedulerDecision};
+use opencoder_llm::{ChatRequest, ChatStream, LlmEvent, Message, RequestPurpose};
 use opencoder_store::{
     BrainCapabilityDetail, BrainCapabilityRecord, BrainEngInputRecord, BrainPlaybookRecord,
     BrainVectorHit, BrainVectorWrite, Store,
@@ -72,6 +73,52 @@ impl Runtime {
     /// the web layer can log or validate it without re-deriving it.
     pub fn model(&self) -> &str {
         &self.model
+    }
+
+    /// One bounded model turn for a v3 scheduler. The caller supplies only
+    /// capability descriptors and execution references; detailed child data
+    /// remains behind the execution gateway.
+    pub async fn scheduler_decide(
+        &self,
+        context: &BrainSchedulerContext,
+    ) -> Result<BrainSchedulerDecision> {
+        anyhow::ensure!(
+            context.schema_version == 3,
+            "scheduler requires schema_version 3"
+        );
+        let payload = serde_json::to_string(context)?;
+        anyhow::ensure!(
+            payload.len() <= 512 * 1024,
+            "scheduler context exceeds 512 KiB"
+        );
+        let mut stream = self.client.chat_stream(ChatRequest {
+            purpose: RequestPurpose::Planning,
+            model: self.chat_model.clone(),
+            messages: vec![
+                Message::system("brain-scheduler-v3", crate::scheduler::PROMPT),
+                Message::user("scheduler-context", payload),
+            ],
+            tools: vec![],
+            tool_choice: None,
+            temperature: Some(0.0),
+            max_tokens: Some(16_384),
+            reasoning_effort: None,
+            cache_salt: None,
+        })?;
+        while let Some(event) = stream.recv().await {
+            match event {
+                LlmEvent::Completed { text, .. } => {
+                    anyhow::ensure!(
+                        text.len() <= 256 * 1024,
+                        "scheduler decision exceeds 256 KiB"
+                    );
+                    return Ok(serde_json::from_str(text.trim())?);
+                }
+                LlmEvent::Error(error) => anyhow::bail!("scheduler provider: {error}"),
+                _ => {}
+            }
+        }
+        anyhow::bail!("scheduler stream ended without completion")
     }
 
     /// Validate → compose → embed → persist (capability row, exemplar inputs

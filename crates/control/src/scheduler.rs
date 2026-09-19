@@ -4,9 +4,12 @@
 //!
 //! The loop reuses the outbox pattern (`release::outbox::start`): an
 //! `AtomicBool` lifecycle guard makes double-start a no-op, a weak handle
-//! lets the server exit, and `lifecycle.retired()` breaks the sleep. The
-//! config file is the definition source of truth; this loop only submits
-//! executions and writes the `schedule_runs` ledger (Store side).
+//! lets the server exit, and `lifecycle.retired()` breaks the sleep. Since
+//! schema v27 the libsql `schedules` table is the definition source of
+//! truth (CRUD via `POST/PUT/PATCH/DELETE /api/schedules`); the legacy
+//! `schedules.json` is only a one-time bootstrap seed, and its
+//! `scan_interval_secs` stays the ops knob (hot-read every loop). This loop
+//! only submits executions and writes the `schedule_runs` ledger.
 //!
 //! Timing contract: every fire gets a deterministic id
 //! `<kind>-<schedule_id>-<scheduled_for_ms>`, so re-firing a tick is
@@ -16,8 +19,9 @@
 
 use crate::{api, AppState};
 use opencoder_core::{
-    config::{load_schedules, ScheduleJob, ScheduleKind, ScheduleOverlap},
+    config::{ScheduleJob, ScheduleKind, ScheduleOverlap},
     fleet::*,
+    message::now_ms,
     schedule::{parse_timezone, render_params, to_utc, CronExpr},
 };
 use opencoder_store::{
@@ -76,11 +80,20 @@ pub fn start(state: &Arc<AppState>) {
     });
 }
 
-/// One scan pass: fire every enabled job's due tick. Per-job errors are
-/// logged and swallowed — a broken job must not starve the others.
+/// One scan pass: fire every enabled job's due tick. Definitions come from
+/// the Store (`schedules` table — the same source the list surface shows);
+/// per-job errors are logged and swallowed — a broken job must not starve
+/// the others, and a store read failure only delays this scan.
 async fn scan(state: &Arc<AppState>) -> Result<(), anyhow::Error> {
-    let config = load_schedules(&state.workdir);
-    for job in config.schedules.iter().filter(|job| job.enabled) {
+    let defs = match state.store.list_schedules().await {
+        Ok(defs) => defs,
+        Err(error) => {
+            tracing::error!(%error, "schedule scan read failed");
+            return Ok(());
+        }
+    };
+    for def in defs.iter().filter(|def| def.job.enabled) {
+        let job = &def.job;
         // Fail-soft: a structurally invalid job (bad cron / params / target
         // contract) is skipped with a warning; it must not starve the rest.
         if let Err(error) = job.validate() {
@@ -123,7 +136,7 @@ async fn fire_due(state: &Arc<AppState>, job: &ScheduleJob) -> anyhow::Result<()
         if last.status == SCHEDULE_RUN_ERROR
             && now.saturating_sub(last.scheduled_for_ms) < RETRY_WINDOW_MS
         {
-            fire_tick(state, job, last.scheduled_for_ms, now).await;
+            fire_tick(state, job, last.scheduled_for_ms, now).await?;
             return Ok(());
         }
     }
@@ -149,16 +162,22 @@ async fn fire_due(state: &Arc<AppState>, job: &ScheduleJob) -> anyhow::Result<()
         }
         _ => {}
     }
-    fire_tick(state, job, newest, now).await;
+    fire_tick(state, job, newest, now).await?;
     Ok(())
 }
 
 /// Fire one tick: submit through the existing entry and persist the ledger
 /// row (fired / error). A submission failure lands as an `error` row and
-/// retries on later scans (see `fire_due`).
-async fn fire_tick(state: &Arc<AppState>, job: &ScheduleJob, for_ms: i64, now: i64) {
+/// retries on later scans (see `fire_due`); the error also propagates so
+/// the manual-fire endpoint (`POST /api/schedules/:id/run`) can surface it.
+async fn fire_tick(
+    state: &Arc<AppState>,
+    job: &ScheduleJob,
+    for_ms: i64,
+    now: i64,
+) -> anyhow::Result<String> {
     let execution_id = format!("{}-{}-{}", job.kind.as_str(), job.id, for_ms);
-    let (status, error) = match dispatch(state, job, &execution_id, for_ms).await {
+    let (status, failure) = match dispatch(state, job, &execution_id, for_ms).await {
         Ok(()) => (SCHEDULE_RUN_FIRED.to_string(), None),
         Err(error) => (SCHEDULE_RUN_ERROR.to_string(), Some(error.to_string())),
     };
@@ -168,14 +187,27 @@ async fn fire_tick(state: &Arc<AppState>, job: &ScheduleJob, for_ms: i64, now: i
         target: job.target.clone(),
         scheduled_for_ms: for_ms,
         fired_at_ms: now,
-        execution_id: (status == SCHEDULE_RUN_FIRED).then_some(execution_id),
+        execution_id: (status == SCHEDULE_RUN_FIRED).then(|| execution_id.clone()),
         status,
-        error,
+        error: failure.clone(),
         missed: false,
     };
     if let Err(error) = state.store.record_schedule_run(&rec).await {
         tracing::error!(schedule = %job.id, for_ms, %error, "record schedule run failed");
     }
+    match failure {
+        Some(error) => Err(anyhow::anyhow!(error)),
+        None => Ok(execution_id),
+    }
+}
+
+/// Manual fire (`POST /api/schedules/:id/run`): submit one tick NOW and
+/// record it at `scheduled_for_ms = now` (the deterministic id keeps it
+/// idempotent with itself, and the ledger row doubles as the scan cursor).
+/// Deliberately bypasses `enabled` and `overlap: skip` — it is an explicit
+/// operator action, not a cron tick.
+pub(crate) async fn fire_now(state: &Arc<AppState>, job: &ScheduleJob) -> anyhow::Result<String> {
+    fire_tick(state, job, now_ms(), now_ms()).await
 }
 
 /// Record an older, skipped tick (`missed` rows carry no execution).

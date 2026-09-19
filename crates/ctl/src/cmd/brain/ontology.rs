@@ -45,6 +45,10 @@ pub enum RunsCmd {
         #[arg(long, default_value_t = 0)]
         offset: u64,
     },
+    Round {
+        id: String,
+        round: u32,
+    },
     Context {
         id: String,
     },
@@ -98,6 +102,7 @@ pub fn runs(command: &RunsCmd) -> Result<RequestPlan> {
         RunsCmd::List => RequestPlan::get(base),
         RunsCmd::Create { json } => RequestPlan::post(base).with_body(required_body(json)?),
         RunsCmd::Get { id, offset } => RequestPlan::get(format!("{base}/{id}?offset={offset}")),
+        RunsCmd::Round { id, round } => RequestPlan::get(format!("{base}/{id}/rounds/{round}")),
         RunsCmd::Context { id } => RequestPlan::get(format!("{base}/{id}/context")),
         RunsCmd::Actions { id } => RequestPlan::get(format!("{base}/{id}/actions")),
         RunsCmd::Instance { id, instance } => {
@@ -119,12 +124,29 @@ pub async fn activate(
     config: &std::path::Path,
     output: &std::path::Path,
 ) -> Result<i32> {
-    let context = serde_json::from_slice(&std::fs::read(context)?)?;
+    let context: serde_json::Value = serde_json::from_slice(&std::fs::read(context)?)?;
     let config: opencoder_core::Config = serde_json::from_slice(&std::fs::read(config)?)?;
     let client = LocalClient(config.clone());
-    let decision =
-        opencoder_brain::activation::activate(&context, &client, config.model_id()).await?;
-    opencoder_core::atomic_write_json(output, &serde_json::to_value(&decision)?)?;
+    let decision = if context["schema_version"] == 3 {
+        serde_json::to_value(
+            opencoder_brain::scheduler::activate(
+                &serde_json::from_value(context)?,
+                &client,
+                config.model_id(),
+            )
+            .await?,
+        )?
+    } else {
+        serde_json::to_value(
+            opencoder_brain::activation::activate(
+                &serde_json::from_value(context)?,
+                &client,
+                config.model_id(),
+            )
+            .await?,
+        )?
+    };
+    opencoder_core::atomic_write_json(output, &decision)?;
     Ok(0)
 }
 

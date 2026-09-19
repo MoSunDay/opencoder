@@ -1,0 +1,83 @@
+{
+  "name": "code-review",
+  "description": "发布门禁：知识库 base..head 变更审查（kb-index → 变更范围 → API/护网锚定 → 双路审查 → 重核 → 裁决 → 工单）",
+  "steps": [
+    {
+      "name": "kb-index",
+      "kind": { "type": "wasm", "command": "kb-index.wasm", "sandbox": "runc" },
+      "timeout_secs": 300
+    },
+    {
+      "name": "change-scope",
+      "depends_on": ["kb-index"],
+      "kind": {
+        "type": "agent",
+        "prompt": "圈定变更范围：从 input.json（或执行要求）里读取 base 与 head 两个提交；在知识库上执行 git -C <知识库> --no-optional-locks log 与 git -C <知识库> --no-optional-locks diff 对比 base..head，列出变更文件与增删行数，并归组到受影响模块。知识库只读，禁止任何写入或 git 索引刷新（已注入 GIT_OPTIONAL_LOCKS=0）。输出契约：最终回复末尾必须追加一个 ```json 围栏代码块，内容为 {\"changed_files\":[{\"path\":\"...\",\"add\":0,\"del\":0}],\"modules\":[\"...\"],\"base\":\"<sha>\",\"head\":\"<sha>\"}。"
+      },
+      "timeout_secs": 900
+    },
+    {
+      "name": "api-anchor",
+      "depends_on": ["change-scope", "kb-index"],
+      "kind": {
+        "type": "agent",
+        "prompt": "锚定对外 API 行为面：依据上游 change-scope 的变更范围，在知识库中定位本次变更触及的对外 API、协议与兼容性承诺（请求/响应形状、错误码、版本化行为、CLI/HTTP/事件契约），给出每条锚点的证据文件与理由。只读知识库。输出契约：最终回复末尾必须追加一个 ```json 围栏代码块，内容为 {\"anchors\":[{\"api\":\"<名称或路径>\",\"files\":[\"...\"],\"rationale\":\"<为什么这是行为面锚点>\"}]}。"
+      },
+      "timeout_secs": 900
+    },
+    {
+      "name": "harness-anchor",
+      "depends_on": ["change-scope", "kb-index"],
+      "kind": {
+        "type": "agent",
+        "prompt": "锚定回归护网：依据上游 change-scope 的变更范围，在知识库中定位覆盖这些文件的测试、回归护网与验收基准（单测/集成/e2e/金样数据），指出哪些护网恰好压在变更点上、哪些护网缺失。只读知识库。输出契约：最终回复末尾必须追加一个 ```json 围栏代码块，内容为 {\"anchors\":[{\"api\":\"<护网名称>\",\"files\":[\"...\"],\"rationale\":\"<它守护什么行为>\"}]}。"
+      },
+      "timeout_secs": 900
+    },
+    {
+      "name": "api-review",
+      "depends_on": ["api-anchor"],
+      "kind": {
+        "type": "agent",
+        "prompt": "审查对外影响：对照上游 api-anchor 的行为面锚点，逐条评估 change-scope 范围内的变更是否破坏或削弱对外 API/协议行为。问题分级：P0=业务中断（接口不可用/数据损坏/安全漏洞）、P1=业务有损（行为退化/兼容性破坏但可绕行）、P2=体验（报错文案、可观测性、性能轻微回退）。每条问题必须给出可指认的证据（file:line）、责任模块、修复建议与可复现步骤；没有实锤就输出空列表，禁止臆测。输出契约：最终回复末尾必须追加一个 ```json 围栏代码块，内容为 {\"issues\":[{\"id\":\"API-1\",\"severity\":\"P0\",\"summary\":\"...\",\"module\":\"...\",\"evidence\":\"file:line\",\"owner\":\"...\",\"fix_suggestion\":\"...\",\"repro\":\"...\"}]}。"
+      },
+      "timeout_secs": 1200
+    },
+    {
+      "name": "harness-review",
+      "depends_on": ["harness-anchor"],
+      "kind": {
+        "type": "agent",
+        "prompt": "审查护网影响：对照上游 harness-anchor 的护网锚点，逐条评估 change-scope 范围内的变更是否让既有回归护网失效（测试被删/被跳过/断言放松）、或变更点根本无护网覆盖。分级口径与 api-review 相同：P0=业务中断、P1=业务有损、P2=体验。每条问题给出证据（file:line）、责任模块、修复建议与可复现步骤；没有实锤就输出空列表，禁止臆测。输出契约：最终回复末尾必须追加一个 ```json 围栏代码块，内容为 {\"issues\":[{\"id\":\"HAR-1\",\"severity\":\"P1\",\"summary\":\"...\",\"module\":\"...\",\"evidence\":\"file:line\",\"owner\":\"...\",\"fix_suggestion\":\"...\",\"repro\":\"...\"}]}。"
+      },
+      "timeout_secs": 1200
+    },
+    {
+      "name": "confirm",
+      "depends_on": ["api-review", "harness-review"],
+      "kind": {
+        "type": "agent",
+        "prompt": "逐条重核：对上游 api-review 与 harness-review 输出的每条候选问题独立复核——(1) 证据是否真实落在 change-scope 变更范围内；(2) 复现步骤是否可行、能否按图索骥再次触发；(3) 分级是否与影响一致。通过的重核为 confirmed（保留原 id），不通过的移入 rejected 并写明否决理由；notes 汇总重核口径。禁止新增问题（本步骤只做复核）。输出契约：最终回复末尾必须追加一个 ```json 围栏代码块，内容为 {\"confirmed\":[\"API-1\"],\"rejected\":[{\"id\":\"HAR-1\",\"reason\":\"...\"}],\"notes\":\"...\"}。"
+      },
+      "timeout_secs": 1200
+    },
+    {
+      "name": "summary",
+      "depends_on": ["confirm"],
+      "kind": {
+        "type": "agent",
+        "prompt": "出口裁决：聚合上游 confirm 的重核结果与 api-review/harness-review 的分级，统计实锤问题的 P0/P1/P2 数量并生成发布门禁裁决。裁决规则（硬性）：任一 P0 或 P1 实锤 → verdict=blocked；仅 P2 实锤 → verdict=pass_with_tickets；无实锤 → verdict=pass。report 用人类可读的中文写清结论、风险与建议；confirmed_issues 逐条列出实锤问题的完整字段。输出契约：最终回复末尾必须追加一个 ```json 围栏代码块，内容为 {\"verdict\":\"pass|pass_with_tickets|blocked\",\"p0\":0,\"p1\":0,\"p2\":0,\"confirmed_issues\":[{\"id\":\"...\",\"severity\":\"...\",\"summary\":\"...\",\"evidence\":\"file:line\"}],\"report\":\"...\"}。"
+      },
+      "timeout_secs": 600
+    },
+    {
+      "name": "viking-ticket",
+      "depends_on": ["summary"],
+      "kind": {
+        "type": "agent",
+        "prompt": "创建工单：为上游 summary 中 confirmed_issues 的每条实锤问题创建 viking 工单，幂等键固定为 code-review:<head_sha>:<问题序号>（从 1 起），重复执行同一次审查不会重复建单。使用 viking-cli 工单创建命令：--type-version-id 参数必须实时查询获取（不要缓存旧值），并携带 --yes --viking-env prod --output json。鉴权令牌来自节点环境注入（如 VIKING_AUTH_PROD_ISSUED_TOKEN），只从环境读取，严禁把任何密钥写入步骤产物或回复正文。无实锤问题时不建单，直接输出 {\"tickets\":\"not_required\"}；建单成功输出工单 id 列表。输出契约：最终回复末尾必须追加一个 ```json 围栏代码块，内容为 {\"tickets\":\"created\",\"ids\":[\"...\"]} 或 {\"tickets\":\"not_required\"}。"
+      },
+      "timeout_secs": 600
+    }
+  ]
+}

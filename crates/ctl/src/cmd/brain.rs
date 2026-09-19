@@ -108,7 +108,9 @@ pub fn plan(sub: &BrainCmd) -> Result<RequestPlan> {
             RequestPlan::post("/api/brain/search").with_body(required_body(json)?)
         }
         BrainCmd::PlanGet { id } => RequestPlan::get(format!("/api/brain/plans/{id}")),
-        BrainCmd::Plan { .. } | BrainCmd::Preview { .. } | BrainCmd::Dispatch { .. } => anyhow::bail!(opencoder_brain::graph::MIGRATION),
+        BrainCmd::Plan { .. } | BrainCmd::Preview { .. } | BrainCmd::Dispatch { .. } => {
+            anyhow::bail!(opencoder_brain::graph::MIGRATION)
+        }
     })
 }
 
@@ -195,7 +197,10 @@ mod tests {
             ),
         ] {
             if !matches!(sub, BrainCmd::Search { .. }) {
-                assert!(plan(&sub).unwrap_err().to_string().contains("migration required"));
+                assert!(plan(&sub)
+                    .unwrap_err()
+                    .to_string()
+                    .contains("migration required"));
                 continue;
             }
             let planned = plan(&sub).unwrap();

@@ -3,10 +3,13 @@
 # `sandbox: runc` wasm steps and the manual runc tests.
 #
 # `opencoder-agent dag prepare-rootfs` writes the scaffold but leaves
-# usr/ empty (a wasm runtime is a provisioning concern). This script fills
-# that gap with the in-repo `wasmtime-cli` example — same wasmtime/wasi
-# crates as the in-process executor — plus the shared libs it needs, all
-# placed at their host-absolute paths inside the rootfs.
+# usr/ empty (runtimes are a provisioning concern). This script fills that
+# gap with two in-repo example binaries plus the shared libs they need, all
+# placed at their host-absolute paths inside the rootfs:
+#   - `wasmtime-cli` — the wasm runtime (same wasmtime/wasi crates as the
+#     in-process executor) for `sandbox: runc` wasm steps, at usr/bin/wasmtime;
+#   - `agent-step-runner` — the container-side agent-session runner for
+#     `dag.agent_sandbox = runc`, at usr/bin/agent-step-runner.
 #
 # Usage: scripts/prepare-dag-rootfs.sh <dir>        (dir must be named rootfs)
 # Then:  DAG_TEST_ROOTFS=<dir> cargo test -p opencoder-dag-runtime --lib \
@@ -24,20 +27,24 @@ out="$(cd "$out" && pwd)"
   exit 2
 }
 
-echo "==> building the wasmtime-cli example (debug profile reuses workspace artifacts)"
-cargo build --manifest-path "$repo_root/Cargo.toml" -p opencoder-dag-runtime --example wasmtime-cli
+echo "==> building the wasmtime-cli + agent-step-runner examples (debug profile reuses workspace artifacts)"
+cargo build --manifest-path "$repo_root/Cargo.toml" -p opencoder-dag-runtime \
+  --example wasmtime-cli --example agent-step-runner
 target_dir="$(cargo metadata --manifest-path "$repo_root/Cargo.toml" --no-deps --format-version 1 |
   python3 -c 'import json, sys; print(json.load(sys.stdin)["target_directory"])')"
-bin="$target_dir/debug/examples/wasmtime-cli"
+bins=("$target_dir/debug/examples/wasmtime-cli" "$target_dir/debug/examples/agent-step-runner")
 
 echo "==> writing the scaffold via 'opencoder-agent dag prepare-rootfs'"
 cargo run -q --manifest-path "$repo_root/Cargo.toml" -p opencoder-agent -- dag prepare-rootfs --out "$out" >/dev/null
 
-echo "==> installing the wasm runtime at usr/bin/wasmtime"
-cp "$bin" "$out/usr/bin/wasmtime"
+echo "==> installing the wasm runtime at usr/bin/wasmtime and the agent runner at usr/bin/agent-step-runner"
+cp "${bins[0]}" "$out/usr/bin/wasmtime"
+cp "${bins[1]}" "$out/usr/bin/agent-step-runner"
 
-echo "==> mirroring the binary's shared libs into the rootfs"
-ldd "$bin" | awk '/=> \//{print $3} /^[[:space:]]*\//{print $1}' | sort -u | while read -r lib; do
+echo "==> mirroring the binaries' shared libs into the rootfs"
+for bin in "${bins[@]}"; do
+  ldd "$bin" | awk '/=> \//{print $3} /^[[:space:]]*\//{print $1}'
+done | sort -u | while read -r lib; do
   dest="$out$lib"
   mkdir -p "$(dirname "$dest")"
   cp -L "$lib" "$dest"

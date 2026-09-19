@@ -232,7 +232,6 @@ async fn control_round_trip_dispatches_child_and_waits_for_terminal_barrier() {
         }
     })
     .await;
-    if snapshot.is_err() {}
     let snapshot = snapshot.expect("v3 round-trip timeout");
     let operations = snapshot["operations"].as_array().expect("operations");
     assert_eq!(operations.len(), 1, "{snapshot}");

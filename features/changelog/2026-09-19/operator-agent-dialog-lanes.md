@@ -14,3 +14,8 @@ Commit: 6c6ad7442dc043f9040f20f7d0aa29287ebda887
 - control e2e：sessions 18 passed，dialog lane delete passed。
 - SPA Vitest：114 files / 844 tests passed。
 - `npm run build`：完成，已更新 `crates/web/spa/dist/static/app.js`。
+
+## 回归补齐（2026-09-19 晚，766adbf4）
+
+- 根包 `tests/operator_e2e/agent_session.rs` 对齐分 lane 契约：agent 会话仅出现在 `GET /api/sessions?kind=agent`，断言不漏入 operator lane（981a285f 漏改的测试期望，全量回归时确定性失败后修复）。
+- 444e6b0e + 修复后全量回归：`cargo clippy --workspace --all-targets -- -D warnings` 通过；`cargo test --workspace` 426 套件 / 5376 passed / 0 failed / 7 ignored（runc 沙箱类按设计跳过）；`cargo build --workspace` 通过。

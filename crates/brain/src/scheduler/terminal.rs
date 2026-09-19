@@ -34,7 +34,17 @@ pub fn terminal(
     e.execution_id = Some(old.execution_id.clone());
     e.source_sequence = Some(notice.source_sequence);
     e.decision_summary = Some(format!("{:?}", notice.status).to_lowercase());
-    if old.status.terminal() || snapshot.run.phase.terminal() || old.round != snapshot.run.round {
+    // A cancellation request can race the child's admission.  In a terminal
+    // run the late cancellation notice still has to settle that sibling;
+    // successful/failed late notices remain index-only history.
+    let settle_cancelled = snapshot.run.phase.terminal()
+        && notice.status == BrainOperationStatus::Cancelled
+        && old.cancel_requested
+        && !old.status.terminal();
+    if old.status.terminal()
+        || (snapshot.run.phase.terminal() && !settle_cancelled)
+        || old.round != snapshot.run.round
+    {
         e.reason_summary = Some("late terminal event".into());
         update.events.push(e);
         return Ok(Some(update));

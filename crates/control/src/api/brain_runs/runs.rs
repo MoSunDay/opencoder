@@ -218,6 +218,7 @@ pub struct Page {
     pub step: Option<String>,
     pub offset: Option<u64>,
     pub after: Option<i64>,
+    pub limit: Option<u32>,
 }
 pub async fn snapshot(
     State(state): State<Arc<AppState>>,
@@ -225,12 +226,12 @@ pub async fn snapshot(
     Query(page): Query<Page>,
 ) -> Response {
     if state
-        .store
-        .brain_scheduler(&id)
+        .fleet
+        .assignment(&id)
         .await
         .ok()
         .flatten()
-        .is_some()
+        .is_some_and(|a| a.request.input["schema_version"] == 3)
     {
         return super::v3::snapshot(State(state), Path(id)).await;
     }
@@ -267,17 +268,20 @@ pub async fn events(
     Path(id): Path<String>,
     Query(page): Query<Page>,
 ) -> Response {
+    if page.after.is_some_and(|after| after < 0) {
+        return error_400("event cursor must be nonnegative".into());
+    }
     if state
-        .store
-        .brain_scheduler(&id)
+        .fleet
+        .assignment(&id)
         .await
         .ok()
         .flatten()
-        .is_some()
+        .is_some_and(|a| a.request.input["schema_version"] == 3)
     {
         let page = super::v3::Page {
             after: page.after.map(|v| v as u64),
-            limit: None,
+            limit: page.limit,
         };
         return super::v3::events(State(state), Path(id), Query(page)).await;
     }
@@ -310,12 +314,12 @@ pub async fn command(
     Json(command): Json<ExecutionCommand>,
 ) -> Response {
     if state
-        .store
-        .brain_scheduler(&id)
+        .fleet
+        .assignment(&id)
         .await
         .ok()
         .flatten()
-        .is_some()
+        .is_some_and(|a| a.request.input["schema_version"] == 3)
     {
         return super::v3::command(State(state), Path(id), Json(command)).await;
     }

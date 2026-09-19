@@ -35,11 +35,10 @@ pub async fn run(
     if snapshot.run.phase != BrainSchedulerPhase::Deciding {
         return Ok(state::outcome(&snapshot));
     }
-    // Control normally owns v3 model activation. A root can race with the
-    // control wake immediately after admission; without a durable context,
-    // leave it idle so that race cannot finalize the root as an execution
-    // error. Node-local activation is only resumed when its context marker is
-    // present.
+    // A root can race with the control wake immediately after admission;
+    // without a durable context, leave it idle so that race cannot finalize
+    // the root as an execution error. Node-local activation resumes only when
+    // its context marker is present.
     if record.annotations["scheduler_context"].is_null() {
         return Ok(state::outcome(&snapshot));
     }

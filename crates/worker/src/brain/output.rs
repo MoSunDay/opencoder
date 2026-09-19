@@ -11,6 +11,15 @@ pub async fn normalize(
     status: ExecutionStatus,
     mut result: Value,
 ) -> Result<(ExecutionStatus, Value)> {
+    if record
+        .assignment
+        .request
+        .input
+        .get("brain_scheduler")
+        .is_some()
+    {
+        return super::v3::output::normalize(worker, record, status, result).await;
+    }
     if record.assignment.request.input.get("_brain").is_none()
         || !matches!(status, ExecutionStatus::Done | ExecutionStatus::Idle)
     {
@@ -20,6 +29,45 @@ pub async fn normalize(
         serde_json::from_value(record.assignment.request.input["_brain"]["action"].clone())?;
     let schema: DataSchema =
         serde_json::from_value(record.assignment.request.input["_brain"]["output_schema"].clone())?;
+    let id = &record.assignment.index.id;
+    let (native, mut artifacts) = native_output(worker, record, &result).await?;
+    let value = project_output(native, &action)?;
+    opencoder_brain::ontology::accepts(&schema, &value)?;
+    ensure!(
+        serde_json::to_vec(&value)?.len() <= 256 * 1024,
+        "structured output exceeds 256 KiB; return artifact references instead"
+    );
+    let artifact_dir = worker
+        .inner
+        .layout
+        .execution_dir(record.assignment.index.kind, id)?
+        .join("brain-result");
+    std::fs::create_dir_all(&artifact_dir)?;
+    let artifact_path = artifact_dir.join("output.json");
+    opencoder_core::atomic_write_json(&artifact_path, &value)?;
+    artifacts.push(artifact(
+        &record.assignment.index.execution_ref(),
+        "brain-result",
+        "output.json",
+        &artifact_path,
+    )?);
+    let output = OutputEnvelope {
+        value,
+        artifacts,
+        evidence: vec![format!("execution:{}", id)],
+    };
+    if !result.is_object() {
+        result = json!({"native_result":result});
+    }
+    result["brain_output"] = json!(output);
+    Ok((ExecutionStatus::Done, result))
+}
+
+pub(super) async fn native_output(
+    worker: &Worker,
+    record: &Record,
+    result: &Value,
+) -> Result<(Value, Vec<ArtifactRef>)> {
     let id = &record.assignment.index.id;
     let mut artifacts = vec![];
     let native = match record.assignment.index.kind {
@@ -97,36 +145,7 @@ pub async fn normalize(
         }
         _ => anyhow::bail!("unsupported managed output kind"),
     };
-    let value = project_output(native, &action)?;
-    opencoder_brain::ontology::accepts(&schema, &value)?;
-    ensure!(
-        serde_json::to_vec(&value)?.len() <= 256 * 1024,
-        "structured output exceeds 256 KiB; return artifact references instead"
-    );
-    let artifact_dir = worker
-        .inner
-        .layout
-        .execution_dir(record.assignment.index.kind, id)?
-        .join("brain-result");
-    std::fs::create_dir_all(&artifact_dir)?;
-    let artifact_path = artifact_dir.join("output.json");
-    opencoder_core::atomic_write_json(&artifact_path, &value)?;
-    artifacts.push(artifact(
-        &record.assignment.index.execution_ref(),
-        "brain-result",
-        "output.json",
-        &artifact_path,
-    )?);
-    let output = OutputEnvelope {
-        value,
-        artifacts,
-        evidence: vec![format!("execution:{}", id)],
-    };
-    if !result.is_object() {
-        result = json!({"native_result":result});
-    }
-    result["brain_output"] = json!(output);
-    Ok((ExecutionStatus::Done, result))
+    Ok((native, artifacts))
 }
 
 pub fn project_output(mut value: Value, action: &ActionSpec) -> Result<Value> {

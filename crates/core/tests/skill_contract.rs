@@ -183,6 +183,7 @@ fn seed_in_writes_all_packs_on_fresh_dir() {
         .collect();
     for expected in [
         "task-plan",
+        "task-plan-subagent",
         "do-and-done",
         "repo-local-memory",
         "repo-local-dreaming",
@@ -211,6 +212,11 @@ fn seed_in_writes_all_packs_on_fresh_dir() {
     let task_plan = root.path().join("task-plan");
     assert!(task_plan
         .join("references/launch-closure-plan-checklist.md")
+        .exists());
+    let task_plan_subagent = root.path().join("task-plan-subagent");
+    assert!(task_plan_subagent.join("SKILL.md").exists());
+    assert!(task_plan_subagent
+        .join("references/subagent-delegation-checklist.md")
         .exists());
 }
 
@@ -491,28 +497,128 @@ fn seeded_say_and_replay_skill_requires_five_question_recap() {
 }
 
 #[test]
+fn seeded_task_plan_subagent_skill_requires_delegation_contract() {
+    // The companion pack turns a plan into parallel subagent dispatch: it
+    // must carry the parent/subagent contract, the write-set isolation rule
+    // and its own delegation checklist (progressive disclosure).
+    let root = tempfile::tempdir().unwrap();
+    seed_builtin_skills_in(root.path()).expect("seed");
+    let skill = root.path().join("task-plan-subagent");
+    let body = std::fs::read_to_string(skill.join("SKILL.md")).unwrap();
+    assert!(body.contains("name: task-plan-subagent"));
+    for section in [
+        "Parent Agent Contract",
+        "Stable Subtask Granularity",
+        "Workflow",
+        "Output Schema",
+        "owner 类型",
+        "写入范围",
+        "验收方式",
+        "回传格式",
+        // The parent stays a pure dispatcher: splitting/routing/collecting
+        // only, with write-set isolation between parallel subagents.
+        "父 agent 只作为 subagent 调度器",
+        "写集隔离",
+        "references/subagent-delegation-checklist.md",
+        // Sole sanctioned cross-skill reference: the companion inherits
+        // task-plan's launch-closure checklist as its planning baseline.
+        "../task-plan/references/launch-closure-plan-checklist.md",
+    ] {
+        assert!(
+            body.contains(section),
+            "task-plan-subagent missing `{section}`"
+        );
+    }
+    // The variant asks the user the same way the planner does, so its own
+    // dispatch-decision protocol ships IN the asset (the tool schema stays a
+    // one-line pointer). Asking is a PARENT action and is never delegated.
+    for guidance in [
+        "## 拆分前对齐（question 工具）",
+        "不把提问当侦察手段",
+        "`question`（string，必填）",
+        "`options`（string[]，可选）",
+        "同一轮可对多个独立决策点分别调用",
+        "工具结果即用户所选答案或原文答复",
+        "assumptions:",
+        "不得派一个 subagent 去替用户拍板",
+    ] {
+        assert!(
+            body.contains(guidance),
+            "task-plan-subagent missing question protocol `{guidance}`"
+        );
+    }
+    let checklist =
+        std::fs::read_to_string(skill.join("references/subagent-delegation-checklist.md")).unwrap();
+    for section in [
+        "## 1. 拆分前检查",
+        "## 3. Ownership 与写集隔离",
+        "## 6. 最终集成与验证派发",
+        "## Subagent Task Schema",
+    ] {
+        assert!(
+            checklist.contains(section),
+            "subagent checklist missing `{section}`"
+        );
+    }
+}
+
+#[test]
 fn seeded_task_plan_skill_requires_launch_closure_contract() {
-    // Task-plan delivers ONE plan-only closure roadmap whose output covers
-    // five anchors (goal, key context, TODO list, per-TODO verification,
-    // key-path actions), grades evidence without cross-level inference,
-    // audits omissions, and discloses hard blockers. Deep contract/freshness
-    // detail is progressively disclosed via the bundled checklist reference.
+    // Task-plan is the codex-isomorphic launch-closure planning full text
+    // again: plan-only guard, the `question` clarification protocol inside
+    // Overview, When To Use / Scope Rule, Workflow 1..8 (incl. 2.1 contract
+    // + freshness matrix), Final Output, Severity Guidance. The deep 4-8.1
+    // checklists stay OUT of the bundled reference: the shipped checklist
+    // keeps only 1..4 + Plan Output Schema, so progressive disclosure is
+    // carried by the SKILL.md workflow itself. Codex-proprietary Any Home
+    // planning stays retired and must never re-seed.
     let root = tempfile::tempdir().unwrap();
     seed_builtin_skills_in(root.path()).expect("seed");
     let body = std::fs::read_to_string(root.path().join("task-plan/SKILL.md")).unwrap();
     assert!(body.contains("name: task-plan"), "frontmatter name missing");
     for contract in [
-        "树立目标",
-        "关键 context",
-        "TODO List",
-        "TODO 验证手段",
-        "核心动作",
+        "只规划不执行",
+        "澄清协议",
+        "### 1. 建立规划上下文",
+        "### 2. 以上线标准审查当前现状",
+        "### 2.1 建立合约与保鲜矩阵",
+        "### 3. 提炼根因与缺口地图",
+        "### 4. 产出闭环执行规划",
+        "### 5. 输出线上或生产等价验证方案",
+        "### 6. 做遗漏复查",
+        "### 7. 收敛上线路径",
+        "### 8. 给出执行结论",
+        "## Final Output",
+        "## Severity Guidance",
         "证据成熟度",
         "线上 / 生产等价验证",
-        "做遗漏复查",
         "gating item",
+        // Final Output field names the closure roadmap must carry.
+        "问题定义",
+        "现状审查",
+        "影响面地图",
+        "闭环计划",
+        "逐步操作清单",
+        "上线路径",
+        "最终判断",
+        // Progressive-disclosure pointer to the bundled reference.
+        "references/launch-closure-plan-checklist.md",
     ] {
         assert!(body.contains(contract), "task-plan missing `{contract}`");
+    }
+    for severity in ["P0", "P1", "P2", "P3"] {
+        assert!(
+            body.contains(severity),
+            "task-plan missing severity guidance `{severity}`"
+        );
+    }
+    // Negative locks: the codex-proprietary Any Home planning protocol and
+    // the retired `verify-and-summary` step must not ride back in.
+    for retired in ["Any Home", "any_home_planning", "verify-and-summary"] {
+        assert!(
+            !body.contains(retired),
+            "task-plan must not carry the retired `{retired}` token"
+        );
     }
     let references = root.path().join("task-plan/references");
     let checklist =
@@ -644,9 +750,12 @@ fn seeded_review_skill_requires_no_question_tool() {
 }
 
 /// Built-in skills are SELF-CONTAINED: no skill asset may carry another
-/// built-in skill's name. The plan -> execute -> review -> submit workflow
-/// is orchestrated by the caller / system prompt, never encoded inside the
-/// skills themselves (不要在 skill 里写 skill 衔接). A stray cross-skill
+/// built-in skill's name — unless a documented companion has an intentional
+/// parent contract (the sole permitted reference is task-plan-subagent ->
+/// task-plan, which inherits its launch-closure checklist). The
+/// plan -> execute -> review -> submit workflow is orchestrated by the
+/// caller / system prompt, never encoded inside the skills themselves
+/// (不要在 skill 里写 skill 衔接). A stray cross-skill
 /// token is also an unlock hazard: `task-plan` inside another body's
 /// Source-less 500-char prefix would silently hijack the latent `question`
 /// unlock (see session-side `tools::latent`).
@@ -659,6 +768,7 @@ fn seeded_builtin_skills_carry_no_cross_skill_references() {
 
     let names = [
         "task-plan",
+        "task-plan-subagent",
         "do-and-done",
         "repo-local-memory",
         "repo-local-dreaming",
@@ -686,6 +796,9 @@ fn seeded_builtin_skills_carry_no_cross_skill_references() {
                     if other == skill {
                         continue;
                     }
+                    if skill == "task-plan-subagent" && other == "task-plan" {
+                        continue;
+                    }
                     assert!(
                         !body.contains(other),
                         "{skill} asset {:?} must not reference `{other}`: skills stay self-contained",
@@ -697,12 +810,13 @@ fn seeded_builtin_skills_carry_no_cross_skill_references() {
     }
 }
 
-/// The `question` tool is documented in exactly ONE place: the task-plan
-/// skill, its sole owner and unlocker. Every other built-in skill must stay
-/// silent about the tool — describing it elsewhere teaches models to call a
-/// tool that remains latent outside plan context.
+/// The `question` tool is documented in exactly ONE place: the planning pair
+/// — `task-plan` and its delegation variant `task-plan-subagent`, the only
+/// two skills that unlock it. Every other built-in skill must stay silent
+/// about the tool — describing it elsewhere teaches models to call a tool
+/// that remains latent outside planning context.
 #[test]
-fn seeded_question_tool_docs_live_only_in_task_plan() {
+fn seeded_question_tool_docs_live_only_in_the_planning_pair() {
     let root = tempfile::tempdir().unwrap();
     seed_builtin_skills_in(root.path()).expect("seed");
     for skill in [
@@ -717,7 +831,8 @@ fn seeded_question_tool_docs_live_only_in_task_plan() {
         let body = std::fs::read_to_string(root.path().join(skill).join("SKILL.md")).unwrap();
         assert!(
             !body.contains("question 工具") && !body.contains("`question`"),
-            "{skill} must not describe the `question` tool — task-plan is its only doc surface"
+            "{skill} must not describe the `question` tool \
+             (doc surface = the planning pair task-plan / task-plan-subagent)"
         );
     }
 }

@@ -1,8 +1,8 @@
-Commit: 187ee827bad0cb2ae0b1900284b1a20176706166
+Commit: 896013049fe3bd0f3384c52e9638e3a7107aa6fc
 
 # brain 模块
 
-注册能力目录、不可变 v2 计划与统一图执行内核。计划以 input、实例、output、路由组织；能力自身负责执行和验证，大脑只消费统一输出契约。
+注册能力目录、不可变 v2 计划与事件驱动 v3 调度器。v2 计划以 input、实例、output、路由组织；v3 只保存轮次、能力执行索引和调度事件，能力自身负责执行和验证。
 
 ## 执行边界
 
@@ -14,9 +14,18 @@ Commit: 187ee827bad0cb2ae0b1900284b1a20176706166
 - 非法路由、缺少输出、访问上限及能力契约错误进入 blocked，不创建回退能力。每实例默认最多访问 20 次。
 - 历史决策树和 Playbook 类型保留供只读查询，旧写入／调度入口统一报迁移错误；没有第二套执行内核。
 
+## v3 事件驱动调度
+
+- `crates/core/src/brain/scheduler.rs` 定义 schema v3 的最小运行、操作和事件投影。根请求仍以命名工程输入保存于根执行；脑状态不复制子执行输入、消息、DAG 或产物正文。
+- `crates/brain/src/scheduler/` 以纯函数执行能力预筛、严格 `Dispatch`/`Complete`/`Fail` 校验、轮次屏障和终态处理。输入绑定只能引用根输入、成功执行的 `execution_id` 输出路径或已有产物。
+- `crates/control/src/api/brain_runs/v3/` 每轮查询目录并判断一次，通过 `ExecutionGateway` 创建真实 Agent、Team、DAG、TODO 或 Operator；大脑停止轮询，只有节点确认的终态事件唤醒下一轮。
+- Store 的 scheduler run/operation/event 三类记录支持 generation 栅栏、终态事件幂等和按序分页；事件只包含索引、引用和摘要。子执行详情通过 `GET /api/executions/{execution_id}` 查询。
+- `crates/worker/src/brain/v3/` 负责恢复未确认事件、创建请求和取消请求。失败终态立即取消同轮兄弟操作，迟到事件只记账，不改写已经终态的脑状态。
+- v2 运行保留只读兼容和原有回归路径；新运行必须明确 `schema_version: 3`。
+
 ## 索引
-- `crates/core/src/brain/` — v2 计划、图状态、输出与路由 DTO
-- `crates/brain/tests/` — action_flow/execution/planning/ontology 行为回归
+- `crates/core/src/brain/` — v2 计划、图状态、输出与路由 DTO，以及 v3 调度契约
+- `crates/brain/tests/` — action_flow/execution/planning/ontology 与 scheduler_v3 行为回归
 
 ## 相关
 - [features/brain](../../features/brain/index.md) — 工作台操作面

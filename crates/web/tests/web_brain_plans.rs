@@ -71,9 +71,17 @@ async fn call(
 
 #[tokio::test]
 async fn legacy_planners_reject_writes_and_preserve_historical_queries() {
- let (state,mock)=state().await;
- let record=opencoder_store::BrainPlanRecord{id:"old".into(),situation:"old".into(),situation_digest:"old".into(),chat_model:"old".into(),tree_json:r#"{"threshold":0.5,"root":{"id":"leaf","kind":"leaf","capability_id":"old","reason":"old"}}"#.into(),created_at:1};
- state.store.save_brain_plan(&record).await.unwrap();let app=app(state.clone());
- for path in ["/api/brain/plans","/api/brain/dispatch"] {let(status,body)=call(&app,"POST",path,Some(json!({"situation":"work"}))).await;assert_eq!(status,StatusCode::CONFLICT,"{body}");assert!(body.to_string().contains("migration"));}
- let(status,body)=call(&app,"GET","/api/brain/plans/old",None).await;assert_eq!(status,StatusCode::OK);assert_eq!(body["plan"]["tree_json"],record.tree_json);assert_eq!(mock.call_count(),0);
+    let (state, mock) = state().await;
+    let record=opencoder_store::BrainPlanRecord{id:"old".into(),situation:"old".into(),situation_digest:"old".into(),chat_model:"old".into(),tree_json:r#"{"threshold":0.5,"root":{"id":"leaf","kind":"leaf","capability_id":"old","reason":"old"}}"#.into(),created_at:1};
+    state.store.save_brain_plan(&record).await.unwrap();
+    let app = app(state.clone());
+    for path in ["/api/brain/plans", "/api/brain/dispatch"] {
+        let (status, body) = call(&app, "POST", path, Some(json!({"situation":"work"}))).await;
+        assert_eq!(status, StatusCode::CONFLICT, "{body}");
+        assert!(body.to_string().contains("migration"));
+    }
+    let (status, body) = call(&app, "GET", "/api/brain/plans/old", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["plan"]["tree_json"], record.tree_json);
+    assert_eq!(mock.call_count(), 0);
 }

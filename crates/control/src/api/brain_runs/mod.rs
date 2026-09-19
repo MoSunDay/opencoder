@@ -2,6 +2,7 @@ mod catalog;
 pub(crate) mod effects;
 mod plans;
 pub(crate) mod runs;
+pub(crate) mod v3;
 use crate::AppState;
 use axum::{
     routing::{get, post},
@@ -38,4 +39,5 @@ pub fn routes() -> Router<Arc<AppState>> {
             get(crate::api::stream::events),
         )
         .route("/api/brain/runs/:id/events-page", get(runs::events))
+        .route("/api/brain/runs/:id/rounds/:round", get(v3::round))
 }

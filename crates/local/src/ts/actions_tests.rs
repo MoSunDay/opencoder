@@ -277,10 +277,11 @@ fn build_rows_unions_live_tmux_and_registered_stopped() {
 #[test]
 fn cleanup_targets_are_dead_registry_rows_grouped_by_store() {
     let records = vec![
-        // Dead used session -> targeted.
+        // Dead used session -> targeted, flagged as content.
         mk_record("DEAD_A", Some("/work/a"), "used", None, 4),
-        // Dead empty seed: the list hides it, but cleanup still removes it
-        // (the store row exists and would otherwise leak forever).
+        // Dead empty seed: the list hides it, but cleanup still selects it
+        // (the store row exists and would otherwise leak forever). Cleanup
+        // must probe its store for messages before purging.
         mk_record("EMPTY_B", Some("/work/b"), "", None, 3),
         // Live session -> never targeted.
         mk_record("LIVE_C", Some("/work/c"), "live", None, 2),
@@ -298,10 +299,30 @@ fn cleanup_targets_are_dead_registry_rows_grouped_by_store() {
         targets,
         BTreeMap::from([(
             PathBuf::from("/data/store"),
-            vec!["DEAD_A".to_string(), "EMPTY_B".to_string()]
+            vec![
+                TsSweepTarget {
+                    id: "DEAD_A".to_string(),
+                    has_content: true
+                },
+                TsSweepTarget {
+                    id: "EMPTY_B".to_string(),
+                    has_content: false
+                },
+            ]
         ),]),
         "both records share the mk_record store dir"
     );
+}
+
+#[test]
+fn sweep_decision_never_purges_a_contentless_row_with_store_messages() {
+    // Recorded task -> always purge, regardless of store state.
+    assert_eq!(sweep_decision(true, 0), SweepDecision::Purge);
+    assert_eq!(sweep_decision(true, 42), SweepDecision::Purge);
+    // Empty seed the store confirms never produced a message -> purge.
+    assert_eq!(sweep_decision(false, 0), SweepDecision::Purge);
+    // Empty row but real messages in the store -> keep (unmirrored work).
+    assert_eq!(sweep_decision(false, 1), SweepDecision::Keep);
 }
 
 #[test]

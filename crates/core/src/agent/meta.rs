@@ -23,8 +23,8 @@ use crate::config::env::global_opencoder_home;
 // `agent::meta::*` remains the single import surface for the agents root.
 pub use super::resource::{
     agent_skill_roots, agent_tools_dirs, all_tools_dirs, category_dir, list_resources,
-    read_resource_meta, resource_current_version_dir, resource_version_dir,
-    validate_resource_name, ResourceMeta, AGENT_CATEGORIES,
+    read_resource_meta, resource_current_version_dir, resource_version_dir, validate_resource_name,
+    ResourceMeta, AGENT_CATEGORIES,
 };
 
 /// Agent/resource name length cap (keeps paths and TUI rows sane).
@@ -193,7 +193,10 @@ pub fn agent_description(name: &str) -> Option<String> {
     let prompt_ref = card.current.prompt?;
     let dir = resource_current_version_dir("prompts", &prompt_ref)?;
     let soul = std::fs::read_to_string(dir.join("soul.md")).ok()?;
-    soul.lines().map(str::trim).find(|l| !l.is_empty()).map(str::to_string)
+    soul.lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty())
+        .map(str::to_string)
 }
 
 /// List agent names (directories under the agents root), sorted. The

@@ -25,6 +25,7 @@ pub mod plan;
 pub mod planning;
 pub mod playbook;
 pub mod runtime;
+pub mod scheduler;
 pub mod types;
 
 pub use error::{BrainNotFound, EmbeddingFailed, PlanGenerationFailed, PlanNotFound};

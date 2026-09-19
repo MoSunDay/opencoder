@@ -25,22 +25,31 @@ pub fn is_latent_tool(name: &str) -> bool {
 pub fn latent_tools_for_skill(skill_name: &str) -> &'static [&'static str] {
     match skill_name {
         "task-plan" => &["question"],
+        // The delegation companion asks the user the same way the planner
+        // does: split boundaries and ownership are user decisions, not
+        // inferences. It does NOT inherit the plan-only contract, so
+        // `task_plan_active` stays false and the `task` build subagent
+        // remains advertisable.
+        "task-plan-subagent" => &["question"],
         "ssh-pty" => &["ssh_pty"],
         _ => &[],
     }
 }
 
-/// Skill names whose body text unlocks the `question` tool.
-const QUESTION_SKILLS: &[&str] = &["task-plan"];
+/// Skill names whose body text unlocks the `question` tool. Ordered
+/// longest-name-first: `task-plan-subagent` contains `task-plan` as a
+/// substring, so the legacy prefix scan must try the specific skill first.
+const QUESTION_SKILLS: &[&str] = &["task-plan-subagent", "task-plan"];
 
 /// The full visibility rule for a registry tool under the latent-gating
 /// layer: agent allowlist ∧ latent unlock — with one plan exemption.
 /// `question` is ALWAYS visible for the plan agent (bypasses latent gating,
 /// matching the pre-refactor plan-mode behavior; its usage guidance lives in
-/// the task-plan skill text, not in any base prompt). Every other agent (act, subagents) must
-/// unlock `question` through the task-plan skill; `ssh_pty` is
-/// skill-gated everywhere. Shared by the runner's tool filter and the token
-/// estimator so the advertised schema array and its cost estimate never drift.
+/// the task-plan skill text, not in any base prompt). Every other agent
+/// (act, subagents) must unlock `question` through the task-plan skill or
+/// its delegation companion `task-plan-subagent`; `ssh_pty` is skill-gated
+/// everywhere. Shared by the runner's tool filter and the token estimator
+/// so the advertised schema array and its cost estimate never drift.
 pub fn is_visible(name: &str, agent: &opencoder_core::Agent, unlocked: &HashSet<&str>) -> bool {
     if name == "question" && agent.kind == opencoder_core::AgentKind::Plan {
         return true;
@@ -105,6 +114,7 @@ fn skill_name_from_source_line(line: &str) -> Option<&str> {
 fn known_skill_name(name: &str) -> Option<&'static str> {
     match name {
         "task-plan" => Some("task-plan"),
+        "task-plan-subagent" => Some("task-plan-subagent"),
         "ssh-pty" => Some("ssh-pty"),
         _ => None,
     }
@@ -139,8 +149,19 @@ pub fn active_skill_names(body: Option<&str>) -> HashSet<&'static str> {
     if prefix.contains("ssh_pty") || prefix.contains("ssh-pty") {
         out.insert("ssh-pty");
     }
-    if QUESTION_SKILLS.iter().any(|s| prefix.contains(s)) {
-        out.insert("task-plan");
+    // Substring hazard: a `task-plan-subagent` body also contains
+    // `task-plan`. Registering both would trip `task_plan_active` and hide
+    // the `task` build subagent the companion exists to dispatch, so the
+    // specific match wins outright.
+    let matched: Vec<&'static str> = QUESTION_SKILLS
+        .iter()
+        .copied()
+        .filter(|skill| prefix.contains(*skill))
+        .collect();
+    if matched.contains(&"task-plan-subagent") {
+        out.insert("task-plan-subagent");
+    } else if let Some(first) = matched.first() {
+        out.insert(first);
     }
     out
 }
@@ -199,9 +220,10 @@ mod tests {
     fn skill_to_tool_mapping() {
         assert_eq!(latent_tools_for_skill("ssh-pty"), &["ssh_pty"]);
         assert_eq!(latent_tools_for_skill("task-plan"), &["question"]);
+        assert_eq!(latent_tools_for_skill("task-plan-subagent"), &["question"]);
         assert!(
             latent_tools_for_skill("review").is_empty(),
-            "review must not unlock any latent tool (question is task-plan-only)"
+            "review must not unlock any latent tool (question belongs to the planning pair)"
         );
         assert!(latent_tools_for_skill("unknown").is_empty());
     }
@@ -247,6 +269,42 @@ mod tests {
         let review = Some("> Source: /skills/review/SKILL.md\n\nbody");
         assert!(!task_plan_active(review));
         assert!(!task_plan_active(None));
+    }
+
+    /// The delegation companion unlocks the SAME clarification tool as the
+    /// planner (split boundaries and ownership are user decisions) without
+    /// inheriting the plan-only contract: `task_plan_active` must stay false,
+    /// otherwise `hide_build_subagent` would strip the `task` build subagent
+    /// the companion exists to dispatch.
+    #[test]
+    fn task_plan_subagent_unlocks_question_and_keeps_delegation() {
+        let body = Some(
+            "> Source: /home/u/.opencoder/skills/task-plan-subagent/SKILL.md\n\nsplit and dispatch",
+        );
+        assert!(
+            unlocked_from_body(body).contains("question"),
+            "task-plan-subagent must unlock question"
+        );
+        assert!(latent_execution_allowed("question", body));
+        assert!(
+            !task_plan_active(body),
+            "the companion is not plan-only: build delegation must stay visible"
+        );
+        // Exact-match discipline: a lookalike user skill still unlocks nothing.
+        let lookalike = Some("> Source: /skills/my-task-plan-subagent/SKILL.md\n\nbody");
+        assert!(unlocked_from_body(lookalike).is_empty());
+    }
+
+    /// Legacy Source-less bodies keep the 500-char prefix scan, where
+    /// `task-plan-subagent` contains `task-plan` as a substring: the specific
+    /// skill must win outright, or the substring hit would hide delegation.
+    #[test]
+    fn legacy_prefix_scan_prefers_subagent_over_task_plan_substring() {
+        let body = Some("# task-plan-subagent\n\ndecompose into subagents");
+        assert!(unlocked_from_body(body).contains("question"));
+        assert!(!task_plan_active(body));
+        // A plain task-plan body keeps the plan-only contract.
+        assert!(task_plan_active(Some("# task-plan\nplan the work")));
     }
 
     #[test]

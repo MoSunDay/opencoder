@@ -1,4 +1,4 @@
-Commit: f2d723ed2a32a5a394eac05f58bc5558e7cfe08f
+Commit: 35377f739c15039b725df8c135a9a14cec8bf815
 
 # web 模块
 
@@ -30,9 +30,12 @@ axum HTTP + SSE 会话管理 + 内嵌 SPA。
   页头「模式 Segmented」（Operator 模式 / Agent 模式）经 usehooks-ts
   `useLocalStorage` 持久化（`oc_chat_mode`，缺省 `'operator'`，陌生/损坏值收敛
   回 Operator 展示与行为）；Operator 模式维持现状（`newId('operator')`，body
-  不带 `kind`），Agent 模式创建走 `newId('agent')` + body `kind:'agent'` + staged
-  `how_append`（「知识追加」弹窗暂存，UTF-8 字节 ≤8192（`HOW_APPEND_MAX`），
-  超限禁止保存并在创建前再拦一道，可清空，Operator 模式不展示入口）；节点下拉
+  不带 `kind`），Agent 模式创建走 `newId('agent')` + body `kind:'agent'` + 首条
+  `prompt`；页面必须选择具体可执行 primary Agent，worker 在建本地 session 后将
+  首条需求作为 how 追加并在成功后持久化（显式 `how_append` 仍受 8192 字节预算约束）；
+  首条需求随创建请求一次提交（契约由 operator_e2e O5 锁定；旧 create→seq→prompt 三步链
+  会与节点异步启动竞态，首次提交偶发 404），SSE 游标直接用 0 回放全会话；Agent
+  与 Operator 共用 Say/transcript 输出，便于在 Web 调试具体执行能力；节点下拉
   与可执行判定按 `canUseNode(nodes, id, kind)` 分模式取值（chatSidebar 收
   `nodeKind` prop）；无独立「新建对话」按钮——选中节点首次发送即建会话，
   creation 入口已移除（空态文案引导直接输入）；其余能力（会话列表、消息流、act/plan、@ 菜单、model/

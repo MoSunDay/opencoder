@@ -1,6 +1,7 @@
 //! Step executors and their shared plumbing.
 
 pub mod agent;
+pub mod agent_runc;
 pub mod how_append;
 pub mod logs;
 pub mod wasm;
@@ -22,6 +23,10 @@ pub struct ExecDeps {
     pub config: opencoder_core::Config,
 }
 
+/// Guest-visible mount point of the node's read-only knowledge root in
+/// every sandbox mode (runc bind / in-process preopen / agent prompt hint).
+pub(crate) const KNOWLEDGE_MOUNT: &str = "/workspace/knowledge";
+
 /// Pure per-step execution context handed to the executors.
 pub struct StepCtx {
     pub run_id: String,
@@ -32,6 +37,14 @@ pub struct StepCtx {
     pub workflow_root: PathBuf,
     /// Run-scoped event sink for incremental agent transcript frames.
     pub log: Option<crate::exec::logs::StepLog>,
+    /// Node-configured knowledge root (`dag.knowledge_root`): exposed
+    /// READ-ONLY to sandboxed steps at [`KNOWLEDGE_MOUNT`]. `None` = no
+    /// knowledge mount anywhere.
+    pub knowledge_root: Option<PathBuf>,
+    /// Node-configured op registry (`dag.ops`): the whitelist behind the
+    /// `opencoder_run_op` host import (in-process wasm steps only).
+    /// Empty = no op may run (fail-closed).
+    pub ops: std::collections::BTreeMap<String, opencoder_core::config::DagOpConfig>,
 }
 
 impl StepCtx {

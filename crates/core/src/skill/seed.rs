@@ -18,12 +18,12 @@ use super::skills_dir;
 /// Built-in skills shipped with the binary and embedded at compile time via
 /// [`include_str!`]. Each entry is `(skill_dir, &[(file_name, contents)])`.
 /// Seeded into `~/.opencoder/skills` on first startup so a fresh install ships
-/// the `task-plan -> do-and-done -> review -> submit` workflow, the orthogonal
-/// `summary` retrospective tool (read-only task recap at any checkpoint), and
-/// the `say-and-replay` alignment snapshot tool (read-only progress replay),
-/// plus the memory pair `repo-local-memory` (per-iteration repair-on-touch
-/// minimal updates) and `repo-local-dreaming` (periodic full memory
-/// consolidation).
+/// the `task-plan -> do-and-done -> review -> submit` workflow, the
+/// `task-plan-subagent` delegation companion, the orthogonal `summary`
+/// retrospective tool (read-only task recap at any checkpoint), and the
+/// `say-and-replay` alignment snapshot tool (read-only progress replay), plus
+/// the memory pair `repo-local-memory` (per-iteration repair-on-touch minimal
+/// updates) and `repo-local-dreaming` (periodic full memory consolidation).
 const BUILTIN_SKILLS: &[(&str, &[(&str, &str)])] = &[
     (
         "task-plan",
@@ -36,6 +36,21 @@ const BUILTIN_SKILLS: &[(&str, &[(&str, &str)])] = &[
                 "references/launch-closure-plan-checklist.md",
                 include_str!(
                     "../../assets/skills/task-plan/references/launch-closure-plan-checklist.md"
+                ),
+            ),
+        ],
+    ),
+    (
+        "task-plan-subagent",
+        &[
+            (
+                "SKILL.md",
+                include_str!("../../assets/skills/task-plan-subagent/SKILL.md"),
+            ),
+            (
+                "references/subagent-delegation-checklist.md",
+                include_str!(
+                    "../../assets/skills/task-plan-subagent/references/subagent-delegation-checklist.md"
                 ),
             ),
         ],

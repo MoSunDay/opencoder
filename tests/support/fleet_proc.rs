@@ -134,7 +134,19 @@ pub fn write_config(workdir: &Path, stub_port: u16, extra: Value) {
     });
     if let (Some(base), Some(extra)) = (config.as_object_mut(), extra.as_object()) {
         for (key, value) in extra {
-            base.insert(key.clone(), value.clone());
+            match (base.get_mut(key), value.as_object()) {
+                // Merge object sections one level deep (e.g. extra `dag.ops`
+                // must not clobber the default `dag.wasm_dir`) instead of
+                // replacing the whole default section.
+                (Some(serde_json::Value::Object(base_inner)), Some(extra_inner)) => {
+                    for (inner_key, inner_value) in extra_inner {
+                        base_inner.insert(inner_key.clone(), inner_value.clone());
+                    }
+                }
+                _ => {
+                    base.insert(key.clone(), value.clone());
+                }
+            }
         }
     }
     let dir = workdir.join(".opencoder");

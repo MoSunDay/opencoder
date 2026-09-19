@@ -263,6 +263,8 @@ mod tests {
             command: vec!["smoke/module.wasm".into()],
             env: Vec::new(),
             timeout_hint: Some(30),
+            knowledge: None,
+            argv: crate::sandbox::oci::ArgvStyle::WasmModule,
         };
         stage_module(&spec.run_root, "smoke", HELLO_WAT);
         let bundle = crate::sandbox::oci::write_bundle(&workflow_root.join("b"), &spec).unwrap();
@@ -290,6 +292,8 @@ mod tests {
                 command: vec!["loop/module.wasm".into()],
                 env: Vec::new(),
                 timeout_hint: timed_out.then_some(5),
+                knowledge: None,
+                argv: crate::sandbox::oci::ArgvStyle::WasmModule,
             };
             stage_module(&spec.run_root, "loop", SPIN_WAT);
             let bundle =
@@ -353,6 +357,8 @@ mod tests {
             command: vec!["overflow/module.wasm".into()],
             env: Vec::new(),
             timeout_hint: Some(30),
+            knowledge: None,
+            argv: crate::sandbox::oci::ArgvStyle::WasmModule,
         };
         stage_module(&spec.run_root, "overflow", OVERFLOW_WAT);
         let bundle = crate::sandbox::oci::write_bundle(&bundle_path, &spec).unwrap();

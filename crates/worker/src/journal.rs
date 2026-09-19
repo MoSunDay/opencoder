@@ -61,7 +61,7 @@ impl Journal {
         for record in journal.records.values() {
             let input = &record.assignment.request.input;
             let legacy = (record.assignment.index.kind == ExecutionKind::Brain
-                && input["schema_version"] != 2)
+                && !matches!(input["schema_version"].as_u64(), Some(2) | Some(3)))
                 || (input.get("_brain").is_some() && input["_brain"]["schema_version"] != 2)
                 || input.get("brain_receipt").is_some()
                 || input.get("playbook_receipt").is_some();

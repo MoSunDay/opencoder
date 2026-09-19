@@ -2,13 +2,14 @@
 //   - Operator 模式（缺省）: operator-kind executions — newId('operator'), body
 //       without `kind` (legacy wire shape);
 //   - Agent 模式: agent-kind sessions — newId('agent'), body carries
-//     `kind: 'agent'` plus the staged `how_append` knowledge addendum.
+//     `kind: 'agent'` plus the selected concrete Agent. The first prompt is
+//     persisted into that Agent's how by the worker.
 // Everything else (dialog list, transcript, act/plan, @ menu, model /
 // compact / fork / interrupt) is lane-agnostic and reused verbatim. Selection
 // is required before creating or sending.
 // This panel is the console's chat entry (nav label「Agent」, page key `chat`).
 import { Sender } from '@ant-design/x';
-import { Alert, Button, Input, Modal, Segmented, Space, Spin, Typography } from 'antd';
+import { Alert, Button, Input, Modal, Segmented, Select, Space, Spin, Typography } from 'antd';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocalStorage } from 'usehooks-ts';
 import { apiDel, apiGet, apiPost } from './api.js';
@@ -29,8 +30,7 @@ import { MONO_VAR } from './ui/mono.js';
 
 const { Text } = Typography;
 
-/// Agent 模式创建链路的「知识追加 how_append」上限（UTF-8 字节数）。staged 值
-/// 只随创建请求（POST /api/sessions）提交；超限一律拦截，绝不随请求外发。
+/// Agent how_append 的 UTF-8 字节上限，保留为公共常量供调用方校验。
 export const HOW_APPEND_MAX = 8192;
 
 export function howAppendBytes(text) {
@@ -66,13 +66,9 @@ export function ChatPanel({ onNotice }) {
   const [apOpen, setApOpen] = useState(false);
   const [annoOpen, setAnnoOpen] = useState(false);
   const [annoText, setAnnoText] = useState('');
-  // 创建链路模式（Operator / Agent）与 Agent 模式下的知识追加暂存。mode 经
-  // useLocalStorage 持久化（CHAT_MODE_STORAGE_KEY）；howAppend 只在 Agent
-  // 模式、且只在「创建」时随请求提交——选中已有会话的发送不受影响。
+  // 创建链路模式（Operator / Agent）。mode 经 useLocalStorage 持久化；
+  // Agent 首条 prompt 由 worker 自动写入选中的 Agent how。
   const [mode, setMode] = useLocalStorage(CHAT_MODE_STORAGE_KEY, 'operator');
-  const [howOpen, setHowOpen] = useState(false);
-  const [howText, setHowText] = useState('');
-  const [howStaged, setHowStaged] = useState('');
 
   const streamRef = useRef(null);
   const createAttempt = useRef(null);
@@ -84,7 +80,8 @@ export function ChatPanel({ onNotice }) {
   // body.kind），其余一律收敛为 Operator 现状（含陌生持久化值）。
   const modeKind = mode === 'agent' ? 'agent' : 'operator';
   const nodeReady = canUseNode(nodes, nodeSel, modeKind);
-  const howStagedBytes = howAppendBytes(howStaged);
+  const agentCatalog = mergeBuiltinPrimaryAgentCards((agents || []).filter((a) => a && a.primary));
+  const selectedAgent = agentCatalog.find((agent) => agent.name === sessionAgent);
 
   const selectionRef = useRef({ node: nodeSel, dialog: dialogSel });
   selectionRef.current = { node: nodeSel, dialog: dialogSel };
@@ -176,29 +173,35 @@ export function ChatPanel({ onNotice }) {
   // 尝试，避免跨模式复用旧 id（attempt key 含模式，双保险）。
   useEffect(() => {
     createAttempt.current = null;
-    setHowOpen(false);
   }, [modeKind]);
+
+  // Keep a concrete selection even while the registry request is loading or
+  // when a persisted/remote value no longer resolves to a primary Agent.
+  useEffect(() => {
+    if (agentCatalog.some((agent) => agent.name === sessionAgent)) return;
+    if (agentCatalog[0]) setSessionAgent(agentCatalog[0].name);
+  }, [agents, sessionAgent]);
 
   const { reloadAfterDone, openSessionStream } = useTranscriptStream({ streamRef, aliveRef, setStream, setBusy, setConnecting, setQueueVersion, onNotice, selectionRef });
 
   const sendSession = async (prompt, delivery) => {
     let sid = dialogSel;
     if (!sid) {
-      // Creation lanes: Agent 模式 → newId('agent') + body.kind + staged
-      // how_append；Operator 模式维持现状（newId('operator')，body 不带 kind）。
+      // Creation lanes: Agent 模式 → newId('agent') + body.kind + concrete
+      // agent；Operator 模式维持现状（newId('operator')，body 不带 kind）。
       // attempt key 含模式：跨模式重试不复用旧 id。
       createAttempt.current ||= { key: nodeSel + '|' + modeKind, id: newId(modeKind) };
-      if (modeKind === 'agent' && howStagedBytes > HOW_APPEND_MAX) {
-        // 超限的知识追加绝不随创建提交：拦截发送并提示修复（send 会恢复草稿）。
-        throw new Error(`知识追加超过 ${HOW_APPEND_MAX} 字节上限（当前 ${howStagedBytes} 字节），请修改或清空后再发送`);
-      }
       // The staged act/plan choice rides creation: POST /api/sessions accepts
       // `agent`, so the mode picked before any prompt exists is honored
-      // (server stamps meta.agent and initializes the harness with it).
+      // (server stamps meta.agent and initializes the harness with it). Agent
+      // mode also carries its first prompt in this request. The node can then
+      // initialize the session and start the drain atomically; the old
+      // create-then-seq-then-prompt chain could race the node's async launch
+      // and fail the first Agent submission with a transient 404.
       const body = { id: createAttempt.current.id, node_id: nodeSel, agent: sessionAgent };
       if (modeKind === 'agent') {
         body.kind = 'agent';
-        if (howStaged) body.how_append = howStaged;
+        body.prompt = prompt;
       }
       const j = await apiPost('/api/sessions', body);
       if (!j?.id) throw new Error('服务未返回会话 ID，请重试确认');
@@ -211,15 +214,22 @@ export function ChatPanel({ onNotice }) {
         first_created_at: Date.now(), last_created_at: Date.now(), task_count: null,
       }].concat(d));
     }
-    // Snapshot the persisted head BEFORE the POST: if /seq is fetched after
-    // the prompt is admitted, events emitted in between get seq ≤ head and
-    // are never replayed — this turn's first frames would be lost forever.
-    const q = await apiGet('/api/sessions/' + encodeURIComponent(sid) + '/seq');
-    const after = q?.seq || 0;
-    const ack = await apiPost('/api/sessions/' + encodeURIComponent(sid) + '/prompt',
-      { prompt, delivery: delivery === 'queue' ? 'queue' : 'steer' });
-    if (ack && ack.ok === false) {
-      throw new Error(ack.error || 'prompt 被拒绝');
+    // A fresh Agent-mode session carries no separate prompt POST: its first
+    // prompt rode the creation request, so the cursor stays at 0 and the
+    // stream replays the complete new session without a readiness
+    // round-trip to the node before its local session row exists.
+    let after = 0;
+    if (dialogSel || modeKind !== 'agent') {
+      // Snapshot the persisted head BEFORE the POST: if /seq is fetched after
+      // the prompt is admitted, events emitted in between get seq ≤ head and
+      // are never replayed — this turn's first frames would be lost forever.
+      const q = await apiGet('/api/sessions/' + encodeURIComponent(sid) + '/seq');
+      after = q?.seq || 0;
+      const ack = await apiPost('/api/sessions/' + encodeURIComponent(sid) + '/prompt',
+        { prompt, delivery: delivery === 'queue' ? 'queue' : 'steer' });
+      if (ack && ack.ok === false) {
+        throw new Error(ack.error || 'prompt 被拒绝');
+      }
     }
     // Optimistic echo, injected THROUGH the stream reset (TUI push_user
     // parity): a fresh run carries no steer/queue echo frame, so this echo is
@@ -319,7 +329,7 @@ export function ChatPanel({ onNotice }) {
       const msgs = (j && j.messages) || [];
       const agent = j && j.meta && j.meta.agent;
       if (aliveRef.current && selectionRef.current.node === owner && selectionRef.current.dialog === sid) {
-        setSessionAgent(agent === 'plan' ? 'plan' : 'act');
+        setSessionAgent(agentCatalog.some((item) => item.name === agent) ? agent : agentCatalog[0]?.name || 'act');
         setStream({ ...emptyStream(), turns: turnsFromMessages(msgs), usage: usageFromMessages(msgs) });
       }
     } catch (e) {
@@ -549,7 +559,6 @@ export function ChatPanel({ onNotice }) {
   // primary cards from GET /api/agents — the switch endpoint
   // (POST /api/sessions/:id/agent) rejects non-primary names, so the menu
   // only ever offers switchable agents.
-  const agentCatalog = mergeBuiltinPrimaryAgentCards((agents || []).filter((a) => a && a.primary));
   const menuEntries = hasNode ? commandsForInput(input, skills, agentCatalog) : [];
 
   return (
@@ -569,9 +578,9 @@ export function ChatPanel({ onNotice }) {
       />
 
       <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
-        {/* 页头操作区：模式 Segmented（Operator / Agent，持久化于 oc_chat_mode）
-            常驻；Agent 模式追加「知识追加」暂存入口；选中节点后再出现 act/plan
-            与 模型（会话级控制，语义不变）。 */}
+        {/* 页头操作区：模式与执行目标分开。Agent 模式必须明确选择一个
+            concrete Agent；首条需求会自动进入该 Agent 的 how，并沿用同一
+            transcript/Say 渲染，便于在网页中定位具体能力。 */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
           <Segmented
             aria-label="会话模式"
@@ -581,19 +590,39 @@ export function ChatPanel({ onNotice }) {
             onChange={setMode}
           />
           {modeKind === 'agent' ? (
-            <Button size="small" onClick={() => { setHowText(howStaged); setHowOpen(true); }}>
-              知识追加{howStaged ? ' · 已暂存' : ''}
-            </Button>
+            <Select
+              aria-label="执行 Agent"
+              size="small"
+              value={sessionAgent}
+              options={agentCatalog.map((agent) => ({
+                value: agent.name,
+                label: agent.name,
+                title: agent.description || agent.name,
+              }))}
+              optionRender={({ data }) => (
+                <div>
+                  <div>{data.label}</div>
+                  {data.title && <Text type="secondary" style={{ fontSize: 12 }}>{data.title}</Text>}
+                </div>
+              )}
+              onChange={switchAgent}
+              style={{ minWidth: 150 }}
+            />
           ) : null}
           {hasNode ? (
             <>
-              <Segmented
-                aria-label="agent 切换"
-                size="small"
-                value={sessionAgent}
-                options={[{ label: 'act', value: 'act' }, { label: 'plan', value: 'plan' }]}
-                onChange={switchAgent}
-              />
+              {modeKind !== 'agent' ? <Segmented
+                  aria-label="agent 切换"
+                  size="small"
+                  value={sessionAgent}
+                  options={[{ label: 'act', value: 'act' }, { label: 'plan', value: 'plan' }]}
+                  onChange={switchAgent}
+                /> : null}
+              {modeKind === 'agent' && selectedAgent?.description ? (
+                <Text type="secondary" ellipsis={{ tooltip: selectedAgent.description }} style={{ maxWidth: 360 }}>
+                  {selectedAgent.description}
+                </Text>
+              ) : null}
               <Button size="small" disabled={!dialogSel} onClick={() => setModelOpen(true)}>模型</Button>
             </>
           ) : null}
@@ -684,39 +713,6 @@ export function ChatPanel({ onNotice }) {
         <Space style={{ marginTop: 12 }}>
           <Button type="primary" onClick={() => setAnnotation(annoText.trim())}>保存</Button>
           <Button onClick={() => setAnnotation('')}>清除</Button>
-        </Space>
-      </Modal>
-
-      {/* Agent 模式「知识追加 how_append」暂存：保存即 staged，随下一次创建
-          （POST /api/sessions）提交；超限（HOW_APPEND_MAX 字节）禁止保存并在
-          创建前再拦一道。Operator 模式不渲染入口。 */}
-      <Modal
-        title="知识追加（how_append）"
-        open={howOpen}
-        footer={null}
-        onCancel={() => setHowOpen(false)}
-      >
-        <Input.TextArea
-          aria-label="知识追加内容"
-          value={howText}
-          rows={5}
-          placeholder="追加给本次 agent 会话的知识/上下文（随创建提交，留空即不携带）"
-          onChange={(e) => setHowText(e.target.value)}
-        />
-        <Text type={howAppendBytes(howText) > HOW_APPEND_MAX ? 'danger' : 'secondary'} style={{ fontSize: 12, display: 'block', marginTop: 4 }}>
-          {howAppendBytes(howText)} / {HOW_APPEND_MAX} 字节
-          {howAppendBytes(howText) > HOW_APPEND_MAX ? ' · 超过上限，无法保存' : ''}
-        </Text>
-        <Space style={{ marginTop: 12 }}>
-          <Button
-            type="primary"
-            disabled={howAppendBytes(howText) > HOW_APPEND_MAX}
-            onClick={() => { setHowStaged(howText); setHowOpen(false); notice(ok('知识追加已暂存，将随下一次创建提交')); }}
-          >
-            保存
-          </Button>
-          <Button onClick={() => { setHowText(''); setHowStaged(''); setHowOpen(false); notice(ok('知识追加已清空')); }}>清空</Button>
-          <Button onClick={() => setHowOpen(false)}>取消</Button>
         </Space>
       </Modal>
 

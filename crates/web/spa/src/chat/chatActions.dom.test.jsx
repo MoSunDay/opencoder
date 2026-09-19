@@ -39,7 +39,7 @@ beforeEach(() => {
   setState({ preselectNode: null, nodes: [] });
   apiGet.mockImplementation(async (path) => {
     if (path === '/api/nodes') return { nodes };
-    if (path === '/api/nodes/n1/dialogs') return { dialogs };
+    if (path.startsWith('/api/nodes/n1/dialogs')) return { dialogs };
     if (path === '/api/sessions/s1') return snapshot;
     if (path.endsWith('/seq')) return { seq: 0 };
     return {};

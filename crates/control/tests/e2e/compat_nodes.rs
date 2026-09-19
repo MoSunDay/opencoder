@@ -227,14 +227,14 @@ async fn dialogs_delete_clears_node_and_terminal_indexes() {
     h.node.set_maintenance(
         "dialogs_clear",
         200,
-        json!({"ok": true, "removed": 2, "skipped": [], "forgotten": 2}),
+        json!({"ok": true, "removed": 1, "skipped": [], "forgotten": 1}),
     );
     let (status, body) = h
         .req(Method::DELETE, "/api/nodes/node-e2e/dialogs", None)
         .await;
     assert_eq!(status, 200, "{body}");
     assert_eq!(body["ok"], json!(true));
-    assert_eq!(body["removed"], json!(2));
+    assert_eq!(body["removed"], json!(1));
     assert_eq!(body["skipped"], json!(["operator-dlg-2"]));
 
     // The idle index row is gone, the running one survives.
@@ -252,5 +252,32 @@ async fn dialogs_delete_clears_node_and_terminal_indexes() {
         .indexes(Some("node-e2e"), Some(ExecutionKind::Agent), 500)
         .await
         .unwrap();
-    assert!(agent_rows.is_empty());
+    assert_eq!(
+        agent_rows.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(),
+        vec!["agent-dlg-1"]
+    );
+
+    // The Agent lane is cleared independently and never shares the
+    // Operator lane's index selection.
+    h.node.set_maintenance(
+        "dialogs_clear",
+        200,
+        json!({"ok": true, "removed": 1, "skipped": [], "forgotten": 1}),
+    );
+    let (status, body) = h
+        .req(
+            Method::DELETE,
+            "/api/nodes/node-e2e/dialogs?kind=agent",
+            None,
+        )
+        .await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["removed"], json!(1));
+    assert!(h
+        .state
+        .fleet
+        .indexes(Some("node-e2e"), Some(ExecutionKind::Agent), 500)
+        .await
+        .unwrap()
+        .is_empty());
 }

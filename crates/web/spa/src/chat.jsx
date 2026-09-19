@@ -135,12 +135,12 @@ export function ChatPanel({ onNotice }) {
     };
   }, [onNotice]);
 
-  const loadDialogs = useCallback(async (nodeId) => {
+  const loadDialogs = useCallback(async (nodeId, kind = modeKind) => {
     setDialogs([]);
     if (!nodeId) { setDialogsLoading(false); return; }
     setDialogsLoading(true);
     try {
-      const j = await apiGet('/api/nodes/' + encodeURIComponent(nodeId) + '/dialogs');
+      const j = await apiGet('/api/nodes/' + encodeURIComponent(nodeId) + '/dialogs?kind=' + encodeURIComponent(kind));
       if (aliveRef.current && selectionRef.current.node === nodeId) setDialogs(j?.dialogs || []);
     } catch (e) {
       if (aliveRef.current && selectionRef.current.node === nodeId) {
@@ -149,7 +149,7 @@ export function ChatPanel({ onNotice }) {
     } finally {
       if (aliveRef.current && selectionRef.current.node === nodeId) setDialogsLoading(false);
     }
-  }, [onNotice]);
+  }, [modeKind, onNotice]);
 
   const resetTranscript = useCallback(() => {
     if (streamRef.current) {
@@ -166,11 +166,11 @@ export function ChatPanel({ onNotice }) {
     setDialogSel(null);
     setModelOpen(false); setApOpen(false); setAnnoOpen(false); setSessionAgent('act');
     createAttempt.current = null;
-    loadDialogs(nodeSel);
-  }, [nodeSel, resetTranscript, loadDialogs]);
+    loadDialogs(nodeSel, modeKind);
+  }, [nodeSel, modeKind, resetTranscript, loadDialogs]);
 
-  // 模式切换只影响下一次创建（进行中的流与已选会话不动）；重置未完成的创建
-  // 尝试，避免跨模式复用旧 id（attempt key 含模式，双保险）。
+  // 模式切换切换独立的 Operator/Agent 会话记录，并重置未完成的创建尝试，
+  // 避免跨模式复用旧 id（attempt key 含模式，双保险）。
   useEffect(() => {
     createAttempt.current = null;
   }, [modeKind]);
@@ -492,7 +492,7 @@ export function ChatPanel({ onNotice }) {
       cancelText: '取消',
       onOk: async () => {
         try {
-          const j = await apiDel('/api/nodes/' + encodeURIComponent(nodeSel) + '/dialogs');
+      const j = await apiDel('/api/nodes/' + encodeURIComponent(nodeSel) + '/dialogs?kind=' + encodeURIComponent(modeKind));
           const skipped = (j && j.skipped) || [];
           if (dialogSel && !skipped.includes(dialogSel)) {
             resetTranscript();

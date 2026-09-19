@@ -464,12 +464,27 @@ mod tests {
     async fn background_output_overflow_stops_process_and_caps_file() {
         let _g = test_registry_mutex().lock().await;
         let tool = BashTool;
+        // The tool spawns `bash -lc`. Under a minimal environment (systemd
+        // transient units, CI) HOME/SHELL are unset: the login shell then
+        // resolves the home from /etc/passwd and profile snippets emit
+        // stderr into the handoff file, busting the size budget below.
+        // Point HOME at an empty directory so the test stays independent
+        // of the ambient environment and profile content.
+        let home = std::env::temp_dir().join(format!(
+            "opencoder-bg-overflow-home-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&home).unwrap();
+        let bg_ctx = ToolContext {
+            extra_env: vec![("HOME".into(), home.to_string_lossy().into_owned())],
+            ..ctx()
+        };
         // Hide sleep behind a variable so the 1s test foreground timeout is
         // retained. The output overflow happens after handoff.
         let input = json!({
             "command": "d=2; s=sleep; \"$s\" \"$d\"; dd if=/dev/zero bs=8388609 count=1 2>/dev/null; \"$s\" 30"
         });
-        let out = tool.execute(input, &ctx()).await.unwrap();
+        let out = tool.execute(input, &bg_ctx).await.unwrap();
         assert!(
             !out.is_error,
             "handoff itself remains successful: {}",
@@ -502,6 +517,7 @@ mod tests {
             "background file must stop at the stream limit"
         );
         let _ = std::fs::remove_file(path);
+        let _ = std::fs::remove_dir_all(&home);
     }
 
     /// A short command (completes well under the test timeout of 1 s) returns

@@ -51,7 +51,7 @@ beforeEach(() => {
   setState({ preselectNode: null, nodes: [] });
   apiGet.mockImplementation(async (path) => {
     if (path === '/api/nodes') return { nodes };
-    if (path === '/api/nodes/n1/dialogs' || path === '/api/nodes/n2/dialogs') return { dialogs: [] };
+    if (path.startsWith('/api/nodes/n1/dialogs') || path.startsWith('/api/nodes/n2/dialogs')) return { dialogs: [] };
     if (path === '/api/agents') return { agents: [] };
     if (path.endsWith('/seq')) return { seq: 0 };
     return {};
@@ -92,6 +92,29 @@ describe('chat mode Segmented (Operator / Agent)', () => {
     expect(screen.queryByText('知识追加')).toBeNull();
     expect(container.querySelector('.ant-segmented[aria-label="agent 切换"]')).toBeNull();
     expect(screen.getByRole('button', { name: '模 型' })).toBeTruthy();
+  });
+
+  it('reloads an independent dialog lane when switching between Operator and Agent', async () => {
+    apiGet.mockImplementation(async (path) => {
+      if (path === '/api/nodes') return { nodes };
+      if (path.endsWith('/dialogs?kind=operator')) {
+        return { dialogs: [{ session_id: 'operator-row', title: 'Operator 记录' }] };
+      }
+      if (path.endsWith('/dialogs?kind=agent')) {
+        return { dialogs: [{ session_id: 'agent-row', title: 'Agent 记录' }] };
+      }
+      if (path === '/api/agents') return { agents: [] };
+      return {};
+    });
+    const { container } = render(<ChatPanel />);
+    await pick('n1');
+    expect(await screen.findByText('Operator 记录')).toBeTruthy();
+    await switchMode('Agent 模式');
+    expect(await screen.findByText('Agent 记录')).toBeTruthy();
+    expect(screen.queryByText('Operator 记录')).toBeNull();
+    expect(apiGet).toHaveBeenCalledWith('/api/nodes/n1/dialogs?kind=operator');
+    expect(apiGet).toHaveBeenCalledWith('/api/nodes/n1/dialogs?kind=agent');
+    expect(container.querySelector('textarea.ant-sender-input')).toBeTruthy();
   });
 });
 

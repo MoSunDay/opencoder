@@ -1,8 +1,8 @@
 //! The chat page's kind=agent face: `POST /api/sessions` accepts
 //! `kind: "agent"` (default stays operator), the id prefix follows the kind,
 //! unknown kinds are client errors, the oversized `how_append` payload is
-//! refused at admission, and GET /api/sessions lists operator AND agent
-//! sessions — never dag/team/system families.
+//! refused at admission, and GET /api/sessions keeps operator and agent
+//! sessions in separate lanes — never dag/team/system families.
 
 use opencoder_core::fleet::{ExecutionKind, ExecutionStatus};
 use reqwest::Method;
@@ -143,7 +143,7 @@ async fn sessions_create_maps_kind_and_prefix() {
 }
 
 #[tokio::test]
-async fn sessions_list_merges_operator_and_agent_kinds_only() {
+async fn sessions_list_separates_operator_and_agent_kinds() {
     let h = Harness::new().await;
     h.put_index(
         "operator-list-1",
@@ -165,7 +165,9 @@ async fn sessions_list_merges_operator_and_agent_kinds_only() {
     )
     .await;
 
-    let (status, body) = h.req(Method::GET, "/api/sessions", None).await;
+    let (status, body) = h
+        .req(Method::GET, "/api/sessions?kind=operator", None)
+        .await;
     assert_eq!(status, 200, "{body}");
     let ids: Vec<String> = body["sessions"]
         .as_array()
@@ -174,7 +176,7 @@ async fn sessions_list_merges_operator_and_agent_kinds_only() {
         .filter_map(|s| s["id"].as_str().map(str::to_string))
         .collect();
     assert!(ids.contains(&"operator-list-1".to_string()), "{ids:?}");
-    assert!(ids.contains(&"agent-list-1".to_string()), "{ids:?}");
+    assert!(!ids.contains(&"agent-list-1".to_string()), "{ids:?}");
     assert!(
         !ids.iter().any(|id| {
             id.starts_with("dag-")
@@ -184,7 +186,7 @@ async fn sessions_list_merges_operator_and_agent_kinds_only() {
         }),
         "foreign families leaked into the chat list: {ids:?}"
     );
-    // The merged rows keep the durable `created_at DESC` ordering.
+    // The selected lane keeps the durable `created_at DESC` ordering.
     let created: Vec<i64> = body["sessions"]
         .as_array()
         .unwrap()
@@ -194,4 +196,44 @@ async fn sessions_list_merges_operator_and_agent_kinds_only() {
     let mut sorted = created.clone();
     sorted.sort_by(|a, b| b.cmp(a));
     assert_eq!(created, sorted, "rows must stay created_at-descending");
+
+    let (status, body) = h.req(Method::GET, "/api/sessions?kind=agent", None).await;
+    assert_eq!(status, 200, "{body}");
+    let ids: Vec<String> = body["sessions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|s| s["id"].as_str().map(str::to_string))
+        .collect();
+    assert!(ids.contains(&"agent-list-1".to_string()), "{ids:?}");
+    assert!(!ids.contains(&"operator-list-1".to_string()), "{ids:?}");
+    assert!(
+        !ids.iter().any(|id| {
+            id.starts_with("dag-") || id.starts_with("team-") || id.starts_with("maintenance-")
+        }),
+        "foreign families leaked into the Agent chat list: {ids:?}"
+    );
+
+    // Agent details are still routed through the operator-capable node, with
+    // an explicit typed reference so the UI can open the right transcript.
+    h.node.set_command(
+        "agent-list-1",
+        "summary",
+        200,
+        json!({"id": "agent-list-1", "title": "agent e2e", "status": "idle"}),
+    );
+    let (status, body) = h.req(Method::GET, "/api/sessions?kind=agent", None).await;
+    assert_eq!(status, 200, "{body}");
+    let agent = body["sessions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["id"] == json!("agent-list-1"))
+        .unwrap();
+    assert_eq!(agent["kind"], json!("agent"));
+    assert_eq!(agent["node_id"], json!("node-e2e"));
+    assert_eq!(
+        agent["execution_ref"],
+        json!({"id": "agent-list-1", "kind": "agent"})
+    );
 }

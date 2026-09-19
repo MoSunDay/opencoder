@@ -106,25 +106,47 @@ pub async fn task(
         json!({"task_id":id,"session_id":id,"node_id":node}),
     ))
 }
-pub async fn dialogs(State(state): State<Arc<AppState>>, Path(node): Path<String>) -> Response {
-    match super::super::session::summaries(&state, Some(&node)).await {
-        Ok(rows) => response(RpcReply::ok(
-            json!({"dialogs":rows.into_iter().map(|r|json!({"session_id":r["id"],"title":r["title"],"first_created_at":r["created_at"],"last_created_at":r["updated_at"],"status":r["status"],"detail_error":r["detail_error"]})).collect::<Vec<_>>()}),
-        )),
+pub async fn dialogs(
+    State(state): State<Arc<AppState>>,
+    Path(node): Path<String>,
+    Query(query): Query<super::super::session::SessionKindQuery>,
+) -> Response {
+    let kind = match super::super::session::requested_query_kind(query.kind.as_deref()) {
+        Ok(kind) => kind,
+        Err(error) => return super::super::error_400(error),
+    };
+    match super::super::session::summaries(&state, Some(&node), kind).await {
+        Ok(rows) => response(RpcReply::ok(json!({
+            "dialogs": rows
+                .into_iter()
+                .map(|r| {
+                    json!({
+                        "session_id": r["id"],
+                        "title": r["title"],
+                        "first_created_at": r["created_at"],
+                        "last_created_at": r["updated_at"],
+                        "status": r["status"],
+                        "kind": r["kind"],
+                        "execution_ref": r["execution_ref"],
+                        "detail_error": r["detail_error"],
+                    })
+                })
+                .collect::<Vec<_>>(),
+        }))),
         Err(e) => response(RpcReply::error(500, e.to_string())),
     }
 }
 /// DELETE /api/nodes/:id/dialogs — bulk-clear the node's console dialogs.
 /// Dialog rows live in the node's own runtime store, so the control plane
-/// decides what is safe to drop from its Operator execution index and forwards
+/// decides what is safe to drop from the selected execution index and forwards
 /// a `dialogs_clear` maintenance command to the node: executions still
 /// pending/running/cancelling (and interrupted, i.e. resumable) survive and
-/// are reported as `skipped`; idle/done/error/cancelled Operator and Agent
-/// sessions are deleted on the node and their index rows are removed here, so
-/// the next full index report cannot resurrect them.
+/// are reported as `skipped`; only the requested Operator or Agent lane is
+/// deleted, so the two conversation lists never affect one another.
 pub async fn clear_dialogs(
     State(state): State<Arc<AppState>>,
     Path(node): Path<String>,
+    Query(query): Query<super::super::session::SessionKindQuery>,
 ) -> Response {
     let known = state
         .fleet
@@ -135,17 +157,14 @@ pub async fn clear_dialogs(
     if !known {
         return response(RpcReply::error(404, "node not found"));
     }
-    // The Agent tab shares this dialog surface with Operator. Collect both
-    // execution kinds before deciding what is safe to remove; keeping only
-    // Operator rows made Agent sessions look undeletable and left their
-    // terminal indexes behind.
-    let mut indexes = Vec::new();
-    for kind in [ExecutionKind::Operator, ExecutionKind::Agent] {
-        match state.fleet.indexes(Some(&node), Some(kind), 500).await {
-            Ok(rows) => indexes.extend(rows),
-            Err(e) => return response(RpcReply::error(500, e.to_string())),
-        }
-    }
+    let kind = match super::super::session::requested_query_kind(query.kind.as_deref()) {
+        Ok(kind) => kind,
+        Err(error) => return super::super::error_400(error),
+    };
+    let indexes = match state.fleet.indexes(Some(&node), Some(kind), 500).await {
+        Ok(rows) => rows,
+        Err(e) => return response(RpcReply::error(500, e.to_string())),
+    };
     let droppable = |status: &ExecutionStatus| {
         matches!(
             status,
@@ -158,16 +177,6 @@ pub async fn clear_dialogs(
     let drop_ids: Vec<String> = indexes
         .iter()
         .filter(|ix| droppable(&ix.status))
-        .map(|ix| ix.id.clone())
-        .collect();
-    let operator_drop_ids: Vec<String> = indexes
-        .iter()
-        .filter(|ix| ix.kind == ExecutionKind::Operator && droppable(&ix.status))
-        .map(|ix| ix.id.clone())
-        .collect();
-    let agent_drop_ids: Vec<String> = indexes
-        .iter()
-        .filter(|ix| ix.kind == ExecutionKind::Agent && droppable(&ix.status))
         .map(|ix| ix.id.clone())
         .collect();
     let mut skipped: Vec<String> = indexes
@@ -199,14 +208,12 @@ pub async fn clear_dialogs(
             }
         }
     }
-    for (kind, ids) in [
-        (ExecutionKind::Operator, operator_drop_ids),
-        (ExecutionKind::Agent, agent_drop_ids),
-    ] {
-        if ids.is_empty() {
-            continue;
-        }
-        if let Err(e) = state.fleet.delete_terminal_indexes(&node, kind, &ids).await {
+    if !drop_ids.is_empty() {
+        if let Err(e) = state
+            .fleet
+            .delete_terminal_indexes(&node, kind, &drop_ids)
+            .await
+        {
             return response(RpcReply::error(500, format!("delete_indexes: {e:#}")));
         }
     }

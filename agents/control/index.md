@@ -1,4 +1,4 @@
-Commit: 6c6ad7442dc043f9040f20f7d0aa29287ebda887
+Commit: 586e56014aaa9d2ec59047a24a8cb5ca644d1249
 
 # control 模块
 
@@ -26,7 +26,7 @@ Commit: 6c6ad7442dc043f9040f20f7d0aa29287ebda887
   只按所选 kind 删除终态控制面索引；节点不识别该操作时原样透传节点错误（fail-closed，防索引行复活）
 - `src/api/project.rs` — Project overview/runs 对节点 `404 execution not found`（journal 丢失/节点重建）按持久索引静默降级：overview 行不带 `detail_error`、runs 返回空页，与 `Ok(None)` 无索引同形；其余失败（节点离线 503 等）保持 `detail_error`/透传
 - `src/api/stream.rs` — 分页→SSE 事件流
-- `src/api/brain_runs/` — v2 计划注册与兼容查询，以及 v3 能力目录、轮次调度、最小快照、事件页和控制命令。v3 通过 `ExecutionGateway` 创建真实子执行，调度器只在终态事件确认后再次唤醒。
+- `src/api/brain_runs/` — v2 计划注册与兼容查询，以及 v3 能力目录、轮次调度、最小快照、事件页和控制命令。Control 只归一化能力目录、创建真实子执行并处理中继回执；根节点持有 v3 调度投影、generation 和模型激活，调度器只在终态事件确认后再次唤醒。
 - `src/scheduler.rs` — cron 调度循环（仅控制面运行）：定义读 libsql `schedules` 表（v27 起事实源），24h 追赶窗内只 fire 最新 due tick、更老 tick 折叠一条 `missed` 代表行；`overlap: skip` 看上一条 fired 行的执行索引；error 行 1h 重试窗内原地重试；`scan_interval_secs` 仍从 schedules.json 热读（运维旋钮）
 - `src/api/schedules/` — 定义 admin CRUD + 台账查询：`GET/POST /api/schedules`、`PUT/PATCH/DELETE /api/schedules/:id`（PATCH 仅 `{"enabled": bool}`，重名 409 / 非法 body 400 / 未知 id 404）、`POST /api/schedules/:id/run` 手动立即触发（绕过 enabled/overlap）、`GET /api/schedules/:id/runs?limit=`；admin-only
 - `src/seed_schedules.rs` — 一次性导入遗留 `schedules.json` 定义进 `schedules` 表：仅表空时执行（skip-don't-merge，删除不会在重启时复活），非法条目 warn 跳过不阻断启动；`ScheduleJob::validate` 是唯一校验门
@@ -41,7 +41,7 @@ Commit: 6c6ad7442dc043f9040f20f7d0aa29287ebda887
 
 旧决策树、Playbook 及 Project 的旧 Brain 执行模式返回迁移错误；历史查询保留。节点选点沿用 Fleet 规则，明确指定的子执行位置不会被根节点覆盖。
 
-v3 根请求必须显式带 `schema_version: 3`。control 的 scheduler projection 只保存 run/operation/event 索引和摘要；子执行输入、输出、消息和 DAG 状态留在所属节点，详情按 `execution_id` 查询。非法能力或引用、无成功证据完成、创建失败及终态失败都进入阻塞/失败路径，不自动降级到通用 Agent。
+v3 根请求必须显式带 `schema_version: 3`。根节点持有 scheduler projection、generation 和模型上下文；control 只保存并转发执行索引、输入绑定和终态回执。子执行输入、输出、消息和 DAG 状态留在所属节点，详情按 `execution_id` 查询。非法能力或引用、无成功证据完成、创建失败及终态失败都进入阻塞/失败路径，不自动降级到通用 Agent。
 
 ## 相关
 - [agents/node](../node/index.md)、[agents/worker](../worker/index.md)

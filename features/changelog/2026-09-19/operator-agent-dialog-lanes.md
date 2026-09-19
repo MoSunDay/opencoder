@@ -1,3 +1,5 @@
+Commit: 6c6ad7442dc043f9040f20f7d0aa29287ebda887
+
 # Operator 与 Agent 会话记录分 lane
 
 ## 变更

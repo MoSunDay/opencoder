@@ -5,7 +5,7 @@ mod support;
 use opencoder_core::{brain::BrainSchedulerRequest, fleet::*};
 use opencoder_llm::{LlmEvent, MockChatClient};
 use opencoder_node::fleet::NodeService;
-use serde_json::json;
+use serde_json::{json, Value};
 use std::sync::Arc;
 use support::*;
 
@@ -150,4 +150,117 @@ async fn scheduler_context_requeues_idle_root_for_node_decision() {
     .expect("scheduler decision timeout");
     assert_eq!(failed["run"]["error"], "test");
     node.shutdown().await.unwrap();
+}
+
+struct RoundTripClient;
+
+impl opencoder_llm::ChatStream for RoundTripClient {
+    fn chat_stream(
+        &self,
+        request: opencoder_llm::ChatRequest,
+    ) -> anyhow::Result<tokio::sync::mpsc::Receiver<LlmEvent>> {
+        let text = if request.purpose == opencoder_llm::RequestPurpose::Planning {
+            let context: serde_json::Value =
+                serde_json::from_str(&request.messages.last().unwrap().text())?;
+            if context["round"] == 0 {
+                json!({
+                    "decision":"dispatch",
+                    "capabilities":[{
+                        "capability_id":"builtin-agent-act",
+                        "inputs":{"request":{"kind":"root","name":"repo"}}
+                    }],
+                    "reason":"inspect the repository",
+                    "evidence_execution_ids":[]
+                })
+                .to_string()
+            } else {
+                let execution_id = context["operations"][0]["execution_id"]
+                    .as_str()
+                    .expect("successful child operation")
+                    .to_owned();
+                json!({
+                    "decision":"complete",
+                    "reason":"the child produced the requested evidence",
+                    "evidence_execution_ids":[execution_id]
+                })
+                .to_string()
+            }
+        } else {
+            "child scheduler output".into()
+        };
+        let (tx, rx) = tokio::sync::mpsc::channel(1);
+        tx.try_send(LlmEvent::Completed {
+            text,
+            tool_calls: vec![],
+            usage: None,
+        })?;
+        Ok(rx)
+    }
+}
+
+#[tokio::test]
+async fn control_round_trip_dispatches_child_and_waits_for_terminal_barrier() {
+    let client = Arc::new(RoundTripClient);
+    let fleet = Fleet::new(1, client).await;
+    let id = "brain-v3-round-trip";
+    let created = fleet
+        .call(
+            "POST",
+            "/api/brain/runs",
+            json!({
+                "schema_version":3,
+                "id":id,
+                "objective":"inspect repository",
+                "inputs":{"repo":"opencoder"},
+                "max_rounds":2
+            }),
+        )
+        .await;
+    assert_eq!(created.status, 202, "{created:?}");
+    let snapshot = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        loop {
+            let snapshot = fleet
+                .call("GET", &format!("/api/brain/runs/{id}"), Value::Null)
+                .await;
+            assert_eq!(snapshot.status, 200, "{snapshot:?}");
+            if snapshot.body["run"]["phase"] == "completed" {
+                break snapshot.body;
+            }
+            assert_ne!(snapshot.body["run"]["phase"], "failed", "{snapshot:?}");
+            assert_ne!(snapshot.body["run"]["phase"], "blocked", "{snapshot:?}");
+            tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+        }
+    })
+    .await;
+    if snapshot.is_err() {}
+    let snapshot = snapshot.expect("v3 round-trip timeout");
+    let operations = snapshot["operations"].as_array().expect("operations");
+    assert_eq!(operations.len(), 1, "{snapshot}");
+    assert_eq!(operations[0]["status"], "done", "{snapshot}");
+    let events = fleet
+        .call(
+            "GET",
+            &format!("/api/brain/runs/{id}/events-page?after=0&limit=100"),
+            Value::Null,
+        )
+        .await;
+    assert_eq!(events.status, 200, "{events:?}");
+    let event_types: Vec<_> = events.body["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|event| event["event_type"].as_str())
+        .collect();
+    assert!(event_types.contains(&"round_barrier_reached"), "{events:?}");
+    assert!(event_types.contains(&"run_completed"), "{events:?}");
+    assert!(
+        fleet.nodes[0]
+            .indexes()
+            .await
+            .unwrap()
+            .iter()
+            .any(|index| index.id == operations[0]["execution_id"]),
+        "child execution index missing"
+    );
+    fleet.shutdown().await;
 }

@@ -40,14 +40,14 @@ async fn wake(
         source.kind == ExecutionKind::Brain,
         "scheduler wake must be a root"
     );
-    let _lock = state
-        .fleet
-        .request_lock("brain-control", &source.id)
-        .await?;
     let generation = input["generation"]
         .as_u64()
         .context("wake generation required")?;
     runtime::wake(state, &source.id).await?;
+    let _lock = state
+        .fleet
+        .request_lock("brain-control", &source.id)
+        .await?;
     let snapshot = runs::call(state, &source.id, "snapshot", Value::Null).await;
     ensure!(
         snapshot.status < 300,

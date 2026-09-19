@@ -4,8 +4,8 @@
 
 - `GET /api/sessions` 与 `/api/nodes/:id/dialogs` 支持 `kind=operator|agent`，缺省仍为 Operator；列表不再把两类执行混在一起。
 - 对话行返回 `kind`、`node_id` 和 `execution_ref`。Agent 执行继续落在可执行 Agent 的 Operator-capable 节点，由该节点保留记录并路由明细。
-- 批量删除只作用于当前 lane，节点收到的 `dialogs_clear` 不再因为另一个 lane 的记录而失败或误删。
-- Web 切换 Operator/Agent 时重新加载对应 lane；Agent 模式保留具体 Agent 选择和统一 Say/transcript 输出。
+- 批量删除只作用于当前 lane，节点只收到当前类型的候选 id；节点报告跳过的记录保留控制面索引。
+- Web 切换 Operator/Agent 时重新加载对应 lane，并忽略之前模式的迟到列表与创建响应；Agent 模式保留具体 Agent 选择和统一 Say/transcript 输出。
 
 ## 验证
 

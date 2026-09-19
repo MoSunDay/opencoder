@@ -119,9 +119,9 @@ pub async fn dialogs(State(state): State<Arc<AppState>>, Path(node): Path<String
 /// decides what is safe to drop from its Operator execution index and forwards
 /// a `dialogs_clear` maintenance command to the node: executions still
 /// pending/running/cancelling (and interrupted, i.e. resumable) survive and
-/// are reported as `skipped`; idle/done/error/cancelled sessions are deleted
-/// on the node and their index rows are removed here, so the next full index
-/// report cannot resurrect them.
+/// are reported as `skipped`; idle/done/error/cancelled Operator and Agent
+/// sessions are deleted on the node and their index rows are removed here, so
+/// the next full index report cannot resurrect them.
 pub async fn clear_dialogs(
     State(state): State<Arc<AppState>>,
     Path(node): Path<String>,
@@ -135,14 +135,17 @@ pub async fn clear_dialogs(
     if !known {
         return response(RpcReply::error(404, "node not found"));
     }
-    let indexes = match state
-        .fleet
-        .indexes(Some(&node), Some(ExecutionKind::Operator), 500)
-        .await
-    {
-        Ok(rows) => rows,
-        Err(e) => return response(RpcReply::error(500, e.to_string())),
-    };
+    // The Agent tab shares this dialog surface with Operator. Collect both
+    // execution kinds before deciding what is safe to remove; keeping only
+    // Operator rows made Agent sessions look undeletable and left their
+    // terminal indexes behind.
+    let mut indexes = Vec::new();
+    for kind in [ExecutionKind::Operator, ExecutionKind::Agent] {
+        match state.fleet.indexes(Some(&node), Some(kind), 500).await {
+            Ok(rows) => indexes.extend(rows),
+            Err(e) => return response(RpcReply::error(500, e.to_string())),
+        }
+    }
     let droppable = |status: &ExecutionStatus| {
         matches!(
             status,
@@ -155,6 +158,16 @@ pub async fn clear_dialogs(
     let drop_ids: Vec<String> = indexes
         .iter()
         .filter(|ix| droppable(&ix.status))
+        .map(|ix| ix.id.clone())
+        .collect();
+    let operator_drop_ids: Vec<String> = indexes
+        .iter()
+        .filter(|ix| ix.kind == ExecutionKind::Operator && droppable(&ix.status))
+        .map(|ix| ix.id.clone())
+        .collect();
+    let agent_drop_ids: Vec<String> = indexes
+        .iter()
+        .filter(|ix| ix.kind == ExecutionKind::Agent && droppable(&ix.status))
         .map(|ix| ix.id.clone())
         .collect();
     let mut skipped: Vec<String> = indexes
@@ -186,15 +199,22 @@ pub async fn clear_dialogs(
             }
         }
     }
-    match state
-        .fleet
-        .delete_terminal_indexes(&node, ExecutionKind::Operator, &drop_ids)
-        .await
-    {
-        Ok(_) => {}
-        Err(e) => return response(RpcReply::error(500, format!("delete_indexes: {e:#}"))),
+    for (kind, ids) in [
+        (ExecutionKind::Operator, operator_drop_ids),
+        (ExecutionKind::Agent, agent_drop_ids),
+    ] {
+        if ids.is_empty() {
+            continue;
+        }
+        if let Err(e) = state.fleet.delete_terminal_indexes(&node, kind, &ids).await {
+            return response(RpcReply::error(500, format!("delete_indexes: {e:#}")));
+        }
     }
-    let removed = reply.body.get("removed").and_then(Value::as_u64).unwrap_or(0);
+    let removed = reply
+        .body
+        .get("removed")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
     response(RpcReply::ok(
         json!({"ok": true, "removed": removed, "skipped": skipped}),
     ))

@@ -29,12 +29,8 @@ fn interrupt_survives_node_restart_and_resumes_to_done() {
         Script::Text(PARENT_COMPLETE.into()),
     ]);
     let tmp = tempfile::tempdir().unwrap();
-    let mut fleet = Fleet::spawn_with_config(
-        tmp.path(),
-        stub.port(),
-        json!({}),
-        "todos-lifecycle-node",
-    );
+    let mut fleet =
+        Fleet::spawn_with_config(tmp.path(), stub.port(), json!({}), "todos-lifecycle-node");
     fleet.wait_ready(&["todos"]);
 
     install_template(&fleet, TEMPLATE);
@@ -57,12 +53,9 @@ fn interrupt_survives_node_restart_and_resumes_to_done() {
     assert_eq!(status, 200, "interrupt: {body}");
     assert_eq!(body["status"], json!("cancelling"));
 
-    let doc = fleet.wait_status(
-        INTERRUPT_RUN,
-        "interrupted status",
-        180,
-        |body| body["execution"]["status"] == json!("interrupted"),
-    );
+    let doc = fleet.wait_status(INTERRUPT_RUN, "interrupted status", 180, |body| {
+        body["execution"]["status"] == json!("interrupted")
+    });
     assert_eq!(doc["workflow"]["workflow"]["status"], json!("suspended"));
     // Draining the parked request folds the stub thread cleanly; the
     // interrupted session no longer consumes the reply.
@@ -210,4 +203,3 @@ fn child_model_failure_suspends_workflow_with_failed_todo() {
     );
     assert_eq!(kinds.last(), Some(&"stream_end"), "frames: {kinds:?}");
 }
-

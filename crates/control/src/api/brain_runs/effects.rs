@@ -28,6 +28,116 @@ pub async fn deliver(
         "outbox source ownership mismatch"
     );
     match action.as_str() {
+        "scheduler_dispatch" => {
+            let operation: BrainOperation = serde_json::from_value(input["operation"].clone())?;
+            let item: BrainDispatchItem = serde_json::from_value(input["item"].clone())?;
+            let capability: BrainCapabilityDescriptor =
+                serde_json::from_value(input["capability"].clone())?;
+            let run = state
+                .store
+                .brain_scheduler(&operation.run_id)
+                .await?
+                .context("scheduler run missing")?
+                .run;
+            let delivered = super::v3::runtime::dispatch_operation(
+                &state,
+                &run,
+                &operation,
+                &item,
+                &capability,
+            )
+            .await?;
+            if !delivered {
+                return Ok(());
+            }
+            let ack = state
+                .hub
+                .call(
+                    &node,
+                    NodeOperation::Brain {
+                        execution: execution.clone(),
+                        action: "scheduler_dispatch_ack".into(),
+                        input: json!({"operation_id":operation.operation_id}),
+                    },
+                )
+                .await;
+            ensure!(
+                ack.status < 300,
+                "scheduler dispatch acknowledgement failed"
+            );
+            Ok(())
+        }
+        "scheduler_cancel" => {
+            let operation: BrainOperation = serde_json::from_value(input)?;
+            if let Some(index) = state.fleet.index(&operation.execution_id).await? {
+                let _ = state
+                    .hub
+                    .call(
+                        &index.node_id,
+                        NodeOperation::Command {
+                            execution: index.execution_ref(),
+                            command: ExecutionCommand {
+                                action: "cancel".into(),
+                                input: Value::Null,
+                            },
+                        },
+                    )
+                    .await;
+            }
+            let ack = state
+                .hub
+                .call(
+                    &node,
+                    NodeOperation::Brain {
+                        execution: execution.clone(),
+                        action: "scheduler_cancel_ack".into(),
+                        input: serde_json::to_value(&operation)?,
+                    },
+                )
+                .await;
+            ensure!(ack.status < 300, "scheduler cancel acknowledgement failed");
+            Ok(())
+        }
+        "scheduler_wake" => {
+            let generation = input["generation"]
+                .as_u64()
+                .context("scheduler wake generation missing")?;
+            super::v3::runtime::wake(&state, &execution.id).await?;
+            let ack = state
+                .hub
+                .call(
+                    &node,
+                    NodeOperation::Brain {
+                        execution: execution.clone(),
+                        action: "scheduler_wake_ack".into(),
+                        input: json!({"generation":generation}),
+                    },
+                )
+                .await;
+            ensure!(ack.status < 300, "scheduler wake acknowledgement failed");
+            Ok(())
+        }
+        "scheduler_terminal" => {
+            let notice: BrainSchedulerTerminalEvent = serde_json::from_value(input)?;
+            let source_sequence = notice.source_sequence;
+            super::v3::runtime::apply_terminal(&state, notice).await?;
+            let ack = state
+                .hub
+                .call(
+                    &node,
+                    NodeOperation::Brain {
+                        execution: execution.clone(),
+                        action: "notice_ack".into(),
+                        input: json!({"sequence": source_sequence}),
+                    },
+                )
+                .await;
+            ensure!(
+                ack.status < 300,
+                "scheduler terminal acknowledgement failed"
+            );
+            Ok(())
+        }
         "notice" => notice(&state, &node, &execution, input).await,
         "publish" => {
             ensure!(

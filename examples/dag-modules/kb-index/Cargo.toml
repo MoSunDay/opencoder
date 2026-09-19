@@ -1,0 +1,13 @@
+[package]
+name = "kb-index"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+# Pure std, no dependencies: builds for any target (host check) and for
+# wasm32-wasip1 (the DAG node wasm runtime).
+[[bin]]
+name = "kb-index"
+path = "src/main.rs"
+
+[dependencies]

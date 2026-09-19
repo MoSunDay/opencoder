@@ -1,0 +1,34 @@
+# Deterministic orchestration modules for the code-review release-gate
+# DAGs (review-full-acceptance / review-harness-quick / review-code-quick).
+#
+# The LIB is pure, host-testable logic; the heavy actions go through the
+# node's `dag.ops` whitelist via the `opencoder` wasm host imports, so the
+# modules build for wasm32-wasip1 (the node wasm runtime) while native
+# builds of the bins just refuse to run (exit 2).
+[package]
+name = "opencoder-dag-review-tools"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "opencoder_dag_review_tools"
+path = "src/lib.rs"
+
+[[bin]]
+name = "env_eob_up"
+path = "src/bin/env_eob_up.rs"
+
+[[bin]]
+name = "env_baremetal_up"
+path = "src/bin/env_baremetal_up.rs"
+
+[[bin]]
+name = "harness_runner"
+path = "src/bin/harness_runner.rs"
+
+[dependencies]
+serde_json.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

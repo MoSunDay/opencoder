@@ -347,6 +347,13 @@ pub(crate) async fn ts_resume(cli: &Cli, target: &str) -> Result<()> {
 }
 
 /// `opencoder ts -c` -- delete stopped ts sessions from every workdir.
+///
+/// Dead rows come in two shapes and the report keeps them apart: stopped
+/// sessions whose registry row still records a task (the `-` rows a user
+/// sees in `ts -l`), and unused seeds that were registered at spawn but
+/// never ran, so `ts -l` never listed them. A seed is only purged after its
+/// store session is confirmed message-less; a contentless row whose store
+/// still holds messages is kept and reported, never deleted blind.
 pub(crate) async fn ts_cleanup(_cli: &Cli) -> Result<()> {
     let tmux = list_managed()?;
     let registry = open_registry().await?;
@@ -355,19 +362,51 @@ pub(crate) async fn ts_cleanup(_cli: &Cli) -> Result<()> {
     let live_ids: HashSet<&str> = tmux.iter().filter_map(|m| m.id()).collect();
     let targets = cleanup_targets(&records, &live_ids);
 
-    let mut removed = 0u32;
-    for (dir, ids) in targets {
+    let mut removed_stopped = 0u32;
+    let mut swept_seeds = 0u32;
+    let mut kept = Vec::<String>::new();
+    for (dir, entries) in targets {
         let db = dir.join("opencoder.db");
         let store = LibsqlStore::open(&db)
             .await
             .with_context(|| format!("open store for cleanup: {}", db.display()))?;
-        for id in &ids {
-            store
-                .delete_session(id)
-                .await
-                .with_context(|| format!("delete stopped ts session {id} from {}", db.display()))?;
-            registry.delete(id).await?;
-            removed += 1;
+        for entry in entries {
+            let decision = if entry.has_content {
+                SweepDecision::Purge
+            } else {
+                match store.last_message_seq(&entry.id).await {
+                    Ok(messages) => sweep_decision(false, messages),
+                    Err(error) => {
+                        tracing::warn!(
+                            session = %entry.id,
+                            error = %error,
+                            "ts: cleanup cannot probe store content; keeping row"
+                        );
+                        kept.push(entry.id.clone());
+                        continue;
+                    }
+                }
+            };
+            if decision == SweepDecision::Keep {
+                // The row lost its recorded task but the store session still
+                // holds messages. Keep both so the user can resume or delete
+                // it deliberately instead of losing unmirrored work.
+                kept.push(entry.id.clone());
+                continue;
+            }
+            store.delete_session(&entry.id).await.with_context(|| {
+                format!(
+                    "delete stopped ts session {} from {}",
+                    entry.id,
+                    db.display()
+                )
+            })?;
+            registry.delete(&entry.id).await?;
+            if entry.has_content {
+                removed_stopped += 1;
+            } else {
+                swept_seeds += 1;
+            }
         }
     }
     // Rows without an owning store dir have no content to purge; unregister
@@ -375,13 +414,26 @@ pub(crate) async fn ts_cleanup(_cli: &Cli) -> Result<()> {
     for record in &records {
         if record.store_dir.is_none() && !live_ids.contains(record.id.as_str()) {
             registry.delete(&record.id).await?;
-            removed += 1;
+            swept_seeds += 1;
         }
     }
-    if removed == 0 {
+
+    if removed_stopped == 0 && swept_seeds == 0 && kept.is_empty() {
         println!("no stopped sessions to clean up.");
-    } else {
-        println!("removed {removed} stopped session(s).");
+        return Ok(());
+    }
+    if removed_stopped > 0 {
+        println!("removed {removed_stopped} stopped session(s).");
+    }
+    if swept_seeds > 0 {
+        println!("swept {swept_seeds} unused seed row(s) (never started, hidden from `ts -l`).");
+    }
+    for id in &kept {
+        let id8 = &id[..id.len().min(8)];
+        println!(
+            "kept {id8}: store still holds messages but no task was recorded; \
+resume with `opencoder ts -r {id8}` or delete with `opencoder ts -d {id8}`"
+        );
     }
     Ok(())
 }
@@ -476,22 +528,51 @@ fn resolve_managed_id(
     }
 }
 
+/// A dead registry row selected by cleanup, with whether the row still
+/// records a task (`has_content`). Contentless rows are never listed by
+/// `ts -l`; cleanup probes their store before purging.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TsSweepTarget {
+    pub id: String,
+    pub has_content: bool,
+}
+
+/// Pure sweep decision shared by the cleanup implementation and tests.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SweepDecision {
+    /// Delete the store row and unregister the ts entry.
+    Purge,
+    /// Keep both: the registry row lost its task but the store session still
+    /// holds messages, so purging would destroy unmirrored work.
+    Keep,
+}
+
+/// Content rows are always purged; contentless rows are purged only when the
+/// store confirms the session never produced a message.
+pub(crate) fn sweep_decision(has_content: bool, store_messages: i64) -> SweepDecision {
+    match (has_content, store_messages > 0) {
+        (true, _) => SweepDecision::Purge,
+        (false, false) => SweepDecision::Purge,
+        (false, true) => SweepDecision::Keep,
+    }
+}
+
 /// Pure target selection shared by the cleanup implementation and tests: dead
 /// ts rows grouped by the store dir that owns their content.
 fn cleanup_targets(
     records: &[TsRecord],
     live_ids: &HashSet<&str>,
-) -> BTreeMap<PathBuf, Vec<String>> {
-    let mut targets = BTreeMap::<PathBuf, Vec<String>>::new();
+) -> BTreeMap<PathBuf, Vec<TsSweepTarget>> {
+    let mut targets = BTreeMap::<PathBuf, Vec<TsSweepTarget>>::new();
     for record in records {
         if live_ids.contains(record.id.as_str()) {
             continue;
         }
         if let Some(dir) = &record.store_dir {
-            targets
-                .entry(dir.clone())
-                .or_default()
-                .push(record.id.clone());
+            targets.entry(dir.clone()).or_default().push(TsSweepTarget {
+                id: record.id.clone(),
+                has_content: has_content(record),
+            });
         }
     }
     targets

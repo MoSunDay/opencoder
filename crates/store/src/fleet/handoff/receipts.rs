@@ -120,7 +120,10 @@ impl FleetStore {
              json_extract(assignment,'$.definition.spec.name') \
              FROM execution_assignments WHERE id IN ({placeholders})"
         );
-        let args: Vec<libsql::Value> = ids.iter().map(|id| libsql::Value::Text(id.clone())).collect();
+        let args: Vec<libsql::Value> = ids
+            .iter()
+            .map(|id| libsql::Value::Text(id.clone()))
+            .collect();
         let mut rows = self.conn.query(&sql, params_from_iter(args)).await?;
         let mut out = HashMap::with_capacity(ids.len());
         while let Some(row) = rows.next().await? {
@@ -356,7 +359,10 @@ mod tests {
             .unwrap();
         assert_eq!(names.len(), 1);
         assert_eq!(names["team-real-1"].target.as_deref(), Some("demo"));
-        assert_eq!(names["team-real-1"].definition_name.as_deref(), Some("demo"));
+        assert_eq!(
+            names["team-real-1"].definition_name.as_deref(),
+            Some("demo")
+        );
         assert_eq!(names["team-real-1"].spec_name, None);
     }
 }

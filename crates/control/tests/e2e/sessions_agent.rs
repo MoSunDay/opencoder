@@ -88,13 +88,35 @@ async fn sessions_create_maps_kind_and_prefix() {
         "{body}"
     );
 
-    // The oversized how_append budget is enforced before placement.
+    // The how budget is enforced before placement, including the implicit
+    // first-prompt append used by the Agent chat lane.
     let oversized = "x".repeat(8 * 1024 + 1);
     let (status, body) = h
         .req(
             Method::POST,
             "/api/sessions",
             Some(json!({"kind": "agent", "agent": "act", "prompt": "hi", "how_append": oversized})),
+        )
+        .await;
+    assert_eq!(status, 400, "{body}");
+    assert_eq!(
+        body["error"],
+        json!("how_append exceeds 8192 bytes (got 8193)")
+    );
+    let (status, body) = h
+        .req(
+            Method::POST,
+            "/api/sessions",
+            Some(json!({"kind": "agent", "agent": "act", "prompt": "hi", "how_append": 3})),
+        )
+        .await;
+    assert_eq!(status, 400, "{body}");
+    assert_eq!(body["error"], json!("how_append must be a string, got 3"));
+    let (status, body) = h
+        .req(
+            Method::POST,
+            "/api/sessions",
+            Some(json!({"kind": "agent", "agent": "act", "prompt": "x".repeat(8 * 1024 + 1)})),
         )
         .await;
     assert_eq!(status, 400, "{body}");

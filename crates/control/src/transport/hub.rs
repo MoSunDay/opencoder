@@ -4,6 +4,22 @@ use tokio::sync::{mpsc, oneshot, Mutex};
 
 use super::SocketCommand;
 
+/// Most node RPCs are local reads or control commands and should fail fast
+/// when a node stops responding.  Creation is different: the node snapshots
+/// the configured agent resources before it can acknowledge the assignment,
+/// and a first snapshot may legitimately take tens of seconds on NFS.  Keep
+/// that slow admission window separate so a large resource pool does not turn
+/// a successful operator/agent submission into a spurious 504.
+const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
+const CREATE_REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
+
+fn request_timeout(operation: &NodeOperation) -> Duration {
+    match operation {
+        NodeOperation::Create { .. } => CREATE_REQUEST_TIMEOUT,
+        _ => DEFAULT_REQUEST_TIMEOUT,
+    }
+}
+
 struct Connection {
     generation: String,
     tx: mpsc::Sender<SocketCommand>,
@@ -408,8 +424,8 @@ impl Hub {
         None
     }
     pub async fn call(&self, node_id: &str, operation: NodeOperation) -> RpcReply {
-        self.call_with_timeout(node_id, operation, Duration::from_secs(15))
-            .await
+        let timeout = request_timeout(&operation);
+        self.call_with_timeout(node_id, operation, timeout).await
     }
     async fn call_with_timeout(
         &self,

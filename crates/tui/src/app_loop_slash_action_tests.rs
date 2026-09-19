@@ -76,7 +76,7 @@ async fn slash_action_compact_idle_starts_turn() {
         &mut None,
         &mut None,
         &mut None,
-                &mut None,
+        &mut None,
     )
     .await;
 
@@ -140,7 +140,7 @@ async fn slash_action_compact_running_pushes_busy_marker() {
         &mut None,
         &mut None,
         &mut None,
-                &mut None,
+        &mut None,
     )
     .await;
 
@@ -211,7 +211,7 @@ async fn slash_action_skill_parses_and_opens_toggle_menu() {
         &mut None,
         &mut None,
         &mut None,
-                &mut None,
+        &mut None,
     )
     .await;
 
@@ -280,7 +280,7 @@ async fn slash_action_ap_parses_and_opens_mode_menu() {
         &mut None,
         &mut None,
         &mut None,
-                &mut None,
+        &mut None,
     )
     .await;
 
@@ -348,7 +348,7 @@ async fn slash_action_sidecar_idle_opens_fresh_panel() {
         &mut None,
         &mut None,
         &mut None,
-                &mut None,
+        &mut None,
     )
     .await;
 
@@ -425,7 +425,7 @@ async fn slash_action_sidecar_running_still_opens_panel() {
         &mut None,
         &mut None,
         &mut None,
-                &mut None,
+        &mut None,
     )
     .await;
 

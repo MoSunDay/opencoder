@@ -551,10 +551,7 @@ pub(crate) fn steer_submit_flash(
 /// a bare act/plan switch (Ctrl+T, `/act`, `/plan`) while a turn runs is
 /// refused, never queued.
 pub(crate) fn mode_switch_busy_flash(anim_tick: u32) -> (String, u32) {
-    (
-        "\u{26a0} 任务运行中不可切换状态".to_string(),
-        anim_tick,
-    )
+    ("\u{26a0} 任务运行中不可切换状态".to_string(), anim_tick)
 }
 
 pub(crate) fn push_history(history: &mut Vec<String>, hist_idx: &mut Option<usize>, text: &str) {

@@ -1,15 +1,17 @@
-//! Schedule fire persistence (`schedule_runs`) — the audit ledger of the
-//! control-plane cron scheduler.
+//! Schedule persistence: the DEFINITIONS table (`schedules`, schema v27 —
+//! the source of truth for the control-plane cron scheduler; the legacy
+//! `schedules.json` is only a bootstrap seed) and the fire ledger
+//! (`schedule_runs`, v26 — the audit trail).
 //!
 //! Free functions over a raw `Connection`, mirroring sibling submodules
-//! (`team_runs.rs` / `brain.rs`). The DDL constants live here (not in
-//! `schema.rs`) so the domain owns its table; `schema.rs` imports and
-//! registers it in the bootstrap batch + v26 migration.
+//! (`team_runs.rs` / `dag.rs`). The DDL constants live here (not in
+//! `schema.rs`) so the domain owns its tables; `schema.rs` imports and
+//! registers them in the bootstrap batch + migrations.
 
 use anyhow::{Context, Result};
 use libsql::{params, Connection, Row};
 
-use crate::schedule_types::ScheduleRunRecord;
+use crate::schedule_types::{ScheduleDefRecord, ScheduleRunRecord};
 
 /// Table DDL registered by `schema.rs` (bootstrap batch + v26 migration).
 /// One row per (schedule, tick): the PK makes re-firing the same
@@ -111,5 +113,128 @@ fn row_to_record(r: &Row) -> Result<ScheduleRunRecord> {
         status: r.get(6)?,
         error: r.get(7)?,
         missed: r.get::<i64>(8)? != 0,
+    })
+}
+
+// ----------------- Schedule DEFINITIONS (`schedules`, v27) ---------------
+
+/// Definition DDL registered by `schema.rs` (bootstrap batch + v27
+/// migration). No FK to `schedule_runs`: the ledger intentionally outlives
+/// its definitions (same contract as `dag_runs`), so deleting a schedule
+/// keeps its fire history queryable.
+pub(super) const CREATE_SCHEDULES: &str = "\
+CREATE TABLE IF NOT EXISTS schedules (
+  id TEXT PRIMARY KEY,
+  cron TEXT NOT NULL,
+  timezone TEXT,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  kind TEXT NOT NULL,
+  target TEXT NOT NULL,
+  params_json TEXT NOT NULL DEFAULT '{}',
+  overlap TEXT NOT NULL DEFAULT 'skip',
+  node_id TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+)";
+
+const DEF_COLS: &str =
+    "id, cron, timezone, enabled, kind, target, params_json, overlap, node_id, created_at, updated_at";
+
+/// Insert or update one definition by id. `created_at` is stamped on the
+/// first insert and PRESERVED on conflict (the API never lets a client
+/// rewrite creation metadata); `updated_at` always moves to `now_ms`.
+pub async fn upsert_def(
+    conn: &Connection,
+    job: &opencoder_core::config::ScheduleJob,
+    now_ms: i64,
+) -> Result<()> {
+    let params_json = serde_json::to_string(&job.params).context("serialize schedule params")?;
+    conn.execute(
+        "INSERT INTO schedules (
+           id, cron, timezone, enabled, kind, target, params_json, overlap, node_id,
+           created_at, updated_at
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+         ON CONFLICT(id) DO UPDATE SET
+           cron = excluded.cron, timezone = excluded.timezone, enabled = excluded.enabled,
+           kind = excluded.kind, target = excluded.target, params_json = excluded.params_json,
+           overlap = excluded.overlap, node_id = excluded.node_id, updated_at = excluded.updated_at",
+        params![
+            job.id.as_str(),
+            job.cron.as_str(),
+            job.timezone.as_deref(),
+            job.enabled as i64,
+            job.kind.as_str(),
+            job.target.as_str(),
+            params_json.as_str(),
+            job.overlap.as_str(),
+            job.node_id.as_deref(),
+            now_ms,
+            now_ms,
+        ],
+    )
+    .await
+    .context("upsert schedule")?;
+    Ok(())
+}
+
+/// One definition by id (with its timestamps), or `None`.
+pub async fn get_def(conn: &Connection, id: &str) -> Result<Option<ScheduleDefRecord>> {
+    let stmt = conn
+        .prepare(&format!(
+            "SELECT {DEF_COLS} FROM schedules WHERE id = ?1 LIMIT 1"
+        ))
+        .await?;
+    let mut rows = stmt.query(params![id]).await?;
+    match rows.next().await? {
+        Some(r) => Ok(Some(row_to_def(&r)?)),
+        None => Ok(None),
+    }
+}
+
+/// Every definition, stable `id` order (the list surface and the scheduler
+/// scan iterate it; order must not depend on insert history).
+pub async fn list_defs(conn: &Connection) -> Result<Vec<ScheduleDefRecord>> {
+    let stmt = conn
+        .prepare(&format!("SELECT {DEF_COLS} FROM schedules ORDER BY id ASC"))
+        .await?;
+    let mut rows = stmt.query(()).await?;
+    let mut out = Vec::new();
+    while let Some(r) = rows.next().await? {
+        out.push(row_to_def(&r)?);
+    }
+    Ok(out)
+}
+
+/// Delete one definition. Its `schedule_runs` ledger rows are KEPT (no FK):
+/// fire history is an audit trail and outlives the definition.
+pub async fn delete_def(conn: &Connection, id: &str) -> Result<()> {
+    conn.execute("DELETE FROM schedules WHERE id = ?1", params![id])
+        .await
+        .context("delete schedule")?;
+    Ok(())
+}
+
+fn row_to_def(r: &Row) -> Result<ScheduleDefRecord> {
+    let kind: String = r.get(4)?;
+    let overlap: String = r.get(7)?;
+    let params_json: String = r.get(6)?;
+    let id: String = r.get(0)?;
+    Ok(ScheduleDefRecord {
+        job: opencoder_core::config::ScheduleJob {
+            id: id.clone(),
+            cron: r.get(1)?,
+            timezone: r.get(2)?,
+            enabled: r.get::<i64>(3)? != 0,
+            kind: opencoder_core::config::ScheduleKind::parse(&kind)
+                .with_context(|| format!("parse schedule kind {kind:?}"))?,
+            target: r.get(5)?,
+            params: serde_json::from_str(&params_json)
+                .with_context(|| format!("parse schedule params json for {id}"))?,
+            overlap: opencoder_core::config::ScheduleOverlap::parse(&overlap)
+                .with_context(|| format!("parse schedule overlap {overlap:?}"))?,
+            node_id: r.get(8)?,
+        },
+        created_at: r.get(9)?,
+        updated_at: r.get(10)?,
     })
 }

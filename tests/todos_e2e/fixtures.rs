@@ -9,13 +9,15 @@ pub const TEMPLATE: &str = "demo";
 pub const TODO_ID: &str = "t1";
 
 /// Parent decision #1: dispatch the single todo in a fresh session.
-pub const PARENT_DISPATCH: &str = r#"{"operation":"dispatch","todos":[{"todo_id":"t1","context_mode":"new"}],"reason":"ready"}"#;
+pub const PARENT_DISPATCH: &str =
+    r#"{"operation":"dispatch","todos":[{"todo_id":"t1","context_mode":"new"}],"reason":"ready"}"#;
 
 /// Child reply: a candidate acceptance payload.
 pub const CHILD_CANDIDATE: &str = r#"{"status":"candidate","summary":"done","result":"ok","verification":"checked","evidence_refs":[],"recovery_context":{"summary":"done","refs":[]}}"#;
 
 /// Parent decision #2: accept the candidate and mark the milestone.
-pub const PARENT_ACCEPT: &str = r#"{"operation":"accept","reason":"meets criteria","mark_milestone":true}"#;
+pub const PARENT_ACCEPT: &str =
+    r#"{"operation":"accept","reason":"meets criteria","mark_milestone":true}"#;
 
 /// Parent decision #3: complete the workflow.
 pub const PARENT_COMPLETE: &str = r#"{"operation":"complete","reason":"all passed"}"#;
@@ -56,7 +58,11 @@ pub fn install_template(fleet: &Fleet, name: &str) {
         &json!({"name": name, "spec": spec()}),
     );
     assert_eq!(status, 200, "create template: {body}");
-    assert_eq!(body["template"]["current"], json!("v1"), "template pin: {body}");
+    assert_eq!(
+        body["template"]["current"],
+        json!("v1"),
+        "template pin: {body}"
+    );
     let revision: Value =
         serde_json::from_str(body["revision"].as_str().expect("revision json string"))
             .expect("revision payload");
@@ -76,7 +82,9 @@ pub fn assert_subsequence(kinds: &[&str], sub: &[&str], context: &str) {
         let found = kinds[cursor..]
             .iter()
             .position(|kind| kind == needle)
-            .unwrap_or_else(|| panic!("{context}: expected {needle:?} after {cursor} in {kinds:?}"));
+            .unwrap_or_else(|| {
+                panic!("{context}: expected {needle:?} after {cursor} in {kinds:?}")
+            });
         cursor += found + 1;
     }
 }
@@ -85,5 +93,6 @@ pub fn assert_subsequence(kinds: &[&str], sub: &[&str], context: &str) {
 pub fn read_json(path: &std::path::Path) -> Value {
     let bytes =
         std::fs::read(path).unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
-    serde_json::from_slice(&bytes).unwrap_or_else(|error| panic!("parse {}: {error}", path.display()))
+    serde_json::from_slice(&bytes)
+        .unwrap_or_else(|error| panic!("parse {}: {error}", path.display()))
 }

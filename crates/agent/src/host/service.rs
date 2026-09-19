@@ -123,7 +123,7 @@ impl Host {
                     // so node-level scheduling workdir never applies here.
                     return Ok(RpcReply::ok(
                         json!({"max_runs":self.store.capacity().await?.max_runs,"queue_order":"fifo","workdir":null,"workdir_supported":false}),
-                    ))
+                    ));
                 }
                 "dialogs_clear" => {
                     // Fan out across every runtime the host owns: live ones
@@ -175,8 +175,9 @@ impl Host {
                             .await?
                             .unwrap_or(serde_json::Value::Null);
                         let mut saved: serde_json::Value = serde_json::from_value(saved)?;
-                        let Some(rows) =
-                            saved.get_mut("indexes").and_then(serde_json::Value::as_array_mut)
+                        let Some(rows) = saved
+                            .get_mut("indexes")
+                            .and_then(serde_json::Value::as_array_mut)
                         else {
                             continue;
                         };

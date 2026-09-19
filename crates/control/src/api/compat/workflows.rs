@@ -45,7 +45,15 @@ async fn dispatch(
             id: id.clone(),
             kind,
             target: Some(target),
-            input: json!({}),
+            // Pass the caller's `input` through (e.g. the release gate's
+            // {"prompt": "base=.. head=.."}): the worker appends
+            // input.prompt to every agent step and persists input.json.
+            // Absent or explicit null degrades to the empty object.
+            input: body
+                .get("input")
+                .filter(|v| !v.is_null())
+                .cloned()
+                .unwrap_or_else(|| json!({})),
             node_id: body["node_id"].as_str().map(str::to_owned),
         },
     )

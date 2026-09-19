@@ -85,10 +85,7 @@ async fn delete_terminal_indexes_only_removes_droppable_rows() {
     ];
     for (index, (status, _)) in statuses.iter().enumerate() {
         let id = format!("operator-{index}");
-        fleet
-            .claim_request("execution", &id, "fp")
-            .await
-            .unwrap();
+        fleet.claim_request("execution", &id, "fp").await.unwrap();
         let assignment = Assignment {
             runtime: None,
             codex: None,
@@ -111,7 +108,9 @@ async fn delete_terminal_indexes_only_removes_droppable_rows() {
         fleet.prepare_assignment(&assignment, "fp").await.unwrap();
     }
 
-    let ids: Vec<String> = (0..statuses.len()).map(|i| format!("operator-{i}")).collect();
+    let ids: Vec<String> = (0..statuses.len())
+        .map(|i| format!("operator-{i}"))
+        .collect();
     let removed = fleet
         .delete_terminal_indexes("node-x", ExecutionKind::Operator, &ids)
         .await

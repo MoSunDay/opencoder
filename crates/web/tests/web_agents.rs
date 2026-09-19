@@ -128,7 +128,10 @@ async fn empty_root_lists_cards_only_without_active_field() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(v["ok"], true);
     // 全局激活已移除：list 响应不再携带 `active` 字段。
-    assert!(v.get("active").is_none(), "list must not carry `active`: {v}");
+    assert!(
+        v.get("active").is_none(),
+        "list must not carry `active`: {v}"
+    );
     // Registry-only: no builtin scheduling roles leak into the list.
     let agents = v["agents"].as_array().unwrap();
     assert!(
@@ -182,7 +185,10 @@ async fn cards_crud_activation_and_listing() {
     // Listing is sorted by name; the global activation pointer is gone.
     let (status, v) = call(app(state.clone()), "GET", "/api/agents", None).await;
     assert_eq!(status, StatusCode::OK);
-    assert!(v.get("active").is_none(), "list must not carry `active`: {v}");
+    assert!(
+        v.get("active").is_none(),
+        "list must not carry `active`: {v}"
+    );
     // Registry-only: created cards are the whole list, no builtin roles.
     let names: Vec<&str> = v["agents"]
         .as_array()
@@ -285,7 +291,10 @@ async fn list_items_carry_soul_first_line_description_with_generic_fallback() {
             .unwrap_or_else(|| panic!("missing card {n}: {agents:?}"))
             .clone()
     };
-    assert_eq!(by_name("writer")["description"], "Writer soul: small diffs.");
+    assert_eq!(
+        by_name("writer")["description"],
+        "Writer soul: small diffs."
+    );
     assert_eq!(by_name("plain")["description"], "Custom agent plain");
 }
 
@@ -366,7 +375,10 @@ async fn delete_card_fans_reload_without_marker() {
     assert_eq!(status, StatusCode::OK, "{v}");
     expect_reload(&mut cmd_rx);
     let (_, v) = call(app(state.clone()), "GET", "/api/agents", None).await;
-    assert!(v.get("active").is_none(), "list must not carry `active`: {v}");
+    assert!(
+        v.get("active").is_none(),
+        "list must not carry `active`: {v}"
+    );
     // Registry-only: deleting the last card empties the list, no builtin roles.
     let agents = v["agents"].as_array().unwrap();
     assert!(

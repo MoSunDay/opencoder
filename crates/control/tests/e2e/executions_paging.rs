@@ -298,8 +298,12 @@ async fn execution_list_lifts_dispatch_time_names() {
         assert_eq!(status, 202, "{body}");
     }
     // A historical row without a stored assignment (index-only) gains no name.
-    h.put_index("agent-legacy-1", ExecutionKind::Agent, ExecutionStatus::Done)
-        .await;
+    h.put_index(
+        "agent-legacy-1",
+        ExecutionKind::Agent,
+        ExecutionStatus::Done,
+    )
+    .await;
 
     let (status, body) = h.req(Method::GET, "/api/executions?limit=50", None).await;
     assert_eq!(status, 200, "{body}");
@@ -312,14 +316,19 @@ async fn execution_list_lifts_dispatch_time_names() {
     assert_eq!(name_of("agent-name-1"), Some(json!("coder-x")));
     assert_eq!(name_of("team-name-1"), Some(json!("demo")));
     assert_eq!(name_of("dag-name-1"), Some(json!("etl-demo")));
-    let legacy = rows.iter().find(|row| row["id"] == json!("agent-legacy-1")).unwrap();
+    let legacy = rows
+        .iter()
+        .find(|row| row["id"] == json!("agent-legacy-1"))
+        .unwrap();
     assert!(legacy.get("name").is_none());
 
     // The name survives deleting the definition: it comes from the
     // dispatch-time assignment snapshot, not the live definition table.
     let (status, body) = h.req(Method::DELETE, "/api/dag/defs/etl-demo", None).await;
     assert_eq!(status, 200, "{body}");
-    let (status, body) = h.req(Method::GET, "/api/executions?limit=50&kind=dag", None).await;
+    let (status, body) = h
+        .req(Method::GET, "/api/executions?limit=50&kind=dag", None)
+        .await;
     assert_eq!(status, 200, "{body}");
     assert_eq!(body["executions"][0]["name"], json!("etl-demo"));
 }

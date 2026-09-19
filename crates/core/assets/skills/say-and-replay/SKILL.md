@@ -1,14 +1,16 @@
 ---
 name: say-and-replay
-description: Read-only alignment snapshot at any checkpoint with a mandatory five-question recap. Restates the original goal/acceptance criteria, replays completed TODOs with verify-method + evidence, quantifies progress (completed/total + percent), exposes all encountered blockers (resolved and open, plus what/who is needed to clear the open ones), and lists the remaining TODOs to fully close the loop. Orthogonal to the main chain — use it to align progress, surface blockers, and support handoff/resume. Never edits code or commits.
+description: 输出当前需求完成百分比、足够细节的判断证据、评估逻辑、所有会阻止一次性交付的卡点和接下来需要做哪些事情才能完全解决；重点梳理授权、审批、权限、凭证、环境、数据、外部依赖、发布窗口和人为确认等需要提前对齐的内容，并以只读对齐快照复述原始目标、验收标准、完成点、验证证据和剩余闭环路径。Use when the user asks for a checkpoint replay, completion assessment, evidence-backed progress, blocker or authorization/approval/dependency alignment, handoff, or the remaining steps needed to fully close a requirement. Never edits code or commits.
 ---
 
 # say-and-replay —— 复述与回放（对齐快照）
 
+Alias intent: `say-and-reply`.
+
 ## 角色
 对齐快照契约。在任意检查点介入，**五问必答**——① 原始需求目标是什么（复述）② 做了哪些事情、做到了多少（回放 + 完成度 completed/total + 百分比）③ 过程中遇到了什么卡点（含已解除）④ 每个完成点怎么验证的、证据是什么 ⑤ 下一步 TODO——把当前任务「**说清楚原始需求目标本身 → 回放已做的 TODO 及验证方式与证据 → 暴露全程遇到的卡点与当前卡点 → 列出后续完全闭环所需 TODO**」一气呈现，用于对齐进度、暴露阻塞、支撑交接 / 恢复。
 
-> **只读**：本 skill 不修改代码、不提交、不推送、不重排 STATUS 块。它只做一次结构化复述 + 回放。需要实现时回实现循环；需要规划 / 重排时回规划；需要提交时走提交流程；需要回顾优化空间做任务回顾。
+> **只读**：本 skill 不修改代码、不提交、不推送、不重排规划状态。它只做一次结构化复述 + 回放。需要实现时回实现循环；需要规划 / 重排时回规划；需要提交时走提交流程；需要回顾优化空间做任务回顾。
 
 ## 何时使用
 - 需要对齐「这活到底要什么 / 做到哪了 / 卡在哪 / 还差什么」时（无论中途还是节点）。
@@ -18,15 +20,28 @@ description: Read-only alignment snapshot at any checkpoint with a mandatory fiv
 - 多轮长任务中，每隔一段时间主动对齐一次，防止偏航。
 
 ## 输入
-- **原始需求**：用户最初的 prompt / issue / 任务描述 —— `goal` 取自**这里**（原始诉求本身），不是派生的 STATUS goal。
-- **STATUS 块**（若会话中存在规划阶段产出的 STATUS 块）：作为 `done` / `doing` / `remaining` 的数据源——**有则复用，不另起清单**。
+- **原始需求**：用户最初的 prompt / issue / 任务描述 —— `goal` 取自**这里**（原始诉求本身），不是派生状态中的改写目标。
+- **规划状态**（若会话中存在规划阶段产出的闭环计划或状态摘要）：作为 `done` / `doing` / `remaining` 的数据源——**有则复用，不另起清单**。
 - 工作区实际状态：`git status`、`git diff`、`git log --oneline <base>..HEAD`。
 - 会话历史：已做的工具调用、改动文件、验证结果——**取证而非臆断**。
+
+## 评估维度
+
+按当前需求选择相关维度，不机械套用清单；可包括功能实现、业务规则、数据流与状态、错误与边界、兼容性、验证、发布或运行条件。完成百分比必须保守：可计数时使用有 `verify` 与 `evidence` 的通过项计算，不可精确时说明置信度和不确定性；只有相关目标、边界、验证、发布条件和卡点都闭环，才能给出 100%。把“代码存在”“候选可验证”“已部署”“行为已验收”“持续可承载”分开记录，不得用低成熟度证据替代高成熟度签收。
+
+## 卡点与对齐事项（必查类别）
+
+主动梳理会阻止一次性交付的卡点，而不是等失败后再说明现象。逐类检查：授权、审批、权限、凭证、账号、环境、数据准备、外部系统、发布或上线窗口、人为确认、跨团队依赖、不可自动执行的操作。
+
+- 每个卡点写清：当前状态、为什么阻塞、责任方或需要用户提供的输入、要对齐的具体事项、解除后如何验证——落到 REPLAY 块的 `blocked:` / `need:` 字段。
+- 无法确认的卡点标 `证据不足` 或 `待对齐`，不假设已满足；未闭环卡点必须说明它如何影响完成百分比与交付顺序。
+- 没有卡点时也要说明检查过哪些类别，以及该判断仍不能覆盖哪些外部状态。
+- 不用 fallback、兜底或绕过掩盖授权、审批、权限、凭证、环境、数据或外部依赖类卡点：暴露并对齐根因，避免后续交付被同一类问题再次打断。
 
 ## REPLAY 块（固定输出格式，每次必须产出）
 ```
 ## REPLAY
-goal: <复述原始需求目标本身 + 验收标准 —— 来自用户原始 prompt，而非派生的 STATUS goal>
+goal: <复述原始需求目标本身 + 验收标准 —— 来自用户原始 prompt，而非派生状态中的改写目标>
 progress: <completed 数>/<总数>（<0-100>%，向下取整）   ← 仅计入 verify+evidence 俱全的 completed
 done:                          ← 已完成且有验证方式+证据的 TODO
   - <已完成 TODO> | accept: <验收标准> | verify: <怎么验证的：命令 / 方法> | evidence: <当次证据：命令+结果 / file:line / 日志摘要>
@@ -42,7 +57,7 @@ verdict: <on-track | at-risk | blocked | done>   ← 一句话对齐判定 + 理
 ```
 
 ### 字段语义（精确映射用户诉求）
-- **goal（复述原始需求目标本身）**：逐字 / 贴近地复述用户**最初提出**的需求目标 + 验收标准。不是 STATUS 块里派生改写后的 `goal`，而是回溯到「用户到底要什么」。需求中途变化则一并标出。
+- **goal（复述原始需求目标本身）**：逐字 / 贴近地复述用户**最初提出**的需求目标 + 验收标准。不是规划状态里派生改写后的 `goal`，而是回溯到「用户到底要什么」。需求中途变化则一并标出。
 - **progress（进度）**：`completed/total` + 百分比（`floor(completed 数/总数 × 100)`）。只计入**有验收证据**的 completed；无证据项归入 `doing`，不得虚高进度。
 - **done（已做的回放）**：逐条列已完成 TODO + 验收标准 + **验证方式（`verify`）** + **可追溯证据（`evidence`）**。`verify` 回答「怎么验证的」（跑了什么命令 / 用了什么方法），`evidence` 回答「证据是什么」（命令 + 结果摘要、`file:line`、日志）。**两者缺一不计入 completed**，归入 `doing` 并写明 `reason`。
 - **doing（进行中）**：正在做但未完成、或证据不足的项，附 `reason:` 说明为何卡在这一步。
@@ -55,7 +70,7 @@ verdict: <on-track | at-risk | blocked | done>   ← 一句话对齐判定 + 理
 - **五问必答**：目标复述 / 做了什么 / 遇到的卡点 / 怎么验证+证据 / 下一步 TODO，五者缺一不可——任一缺失或空泛（无证据）即 REPLAY 不完整，必须补齐后再产出。
 - **复述而非改写目标**：`goal` 回溯用户**原始**需求，不擅自引申、缩减或重定义。需求变化时如实标注变化点。
 - **证据驱动**：`done` 的每条都有验证方式 + 可追溯证据（命令 + 结果 / `file:line`）；没有证据不算做完，归入 `doing` 并写明 `reason`。
+- **证据可核验到具体对象**：`evidence` 必须落到文件路径与行号、函数或类名、API/路由、配置键、命令与输出结论、测试名、日志时间点、响应字段、数据流节点或外部系统状态；泛泛写「看过代码」「跑了测试」「diff 显示已改」不算证据，粒度不足标 `证据不足`，对应项不计入 completed。
 - **诚实暴露卡点**：`encountered` + `blocked` 不回避、不弱化——把「遇到过什么、卡了什么、阻塞了谁、需要什么」说清楚，是本 skill 的核心价值。
-- **复用 STATUS 块、不另起清单**：会话中存在规划产出的 STATUS 块时，`done`/`doing`/`remaining` 以其为数据源直接回放，不重复造清单；无 STATUS 块时从 transcript + git 现场取证。
+- **复用规划状态、不另起清单**：会话中存在规划产出的闭环计划或状态摘要时，`done`/`doing`/`remaining` 以其为数据源直接回放，不重复造清单；无摘要时从 transcript + git 现场取证。
 - **只读对齐，不动手**：只产出 REPLAY 快照；发现问题要修复→转实现循环，要重排→转规划，要回顾优化→转任务回顾。
-

@@ -29,9 +29,30 @@ class Live(Operations):
     def __init__(self, settings):
         super().__init__(settings.token_file)
         self.settings = settings
+        state = Journal(settings.state_dir).data
+        current = state['releases'][state['current']]
+        inventory = self.http(f"http://127.0.0.1:{current['runtime_port']}", '/inventory')
+        self.node_id = inventory['registration']['id']
+
+    def http(self, base, path, method='GET', body=None, timeout=90):
+        return super().http(base, path, method, body, timeout=timeout)
 
     def api(self, path, method='GET', body=None):
+        if path == '/api/executions' and method == 'POST':
+            # The process and journal assertions below refer to this host's
+            # Runtime; other online nodes cannot own its acceptance work.
+            body = {'node_id': self.node_id, **body}
         return self.http(self.settings.public_url, path, method, body)
+
+    def submit_initial(self, request):
+        # The old Server may still have the 15s Create deadline. Recover its
+        # durable acceptance with the same frozen request before measuring
+        # traffic; measured submissions below deliberately never retry.
+        request = {'node_id': self.node_id, **request}
+        probes.submit_probe(self, self.settings.public_url, request['id'], request, 120)
+        receipt = self.api(f"/api/executions/{request['id']}/receipt")
+        assert receipt['phase'] == 'accepted', receipt
+        return receipt['receipt']['body']
 
     def completed(self, identifier):
         status = self.api('/api/executions/' + identifier)['execution']['status']
@@ -140,7 +161,7 @@ def exercise(args, settings, root):
     thread = None
     stream = None
     try:
-        receipt = env.api('/api/executions', 'POST', todo)
+        receipt = env.submit_initial(todo)
         env.wait(lambda: (root / 'model-shell.pid').exists(), 240)
         model_shell = process_identity(int((root / 'model-shell.pid').read_text()))
         assert not (root / 'first.done').exists(), 'model bypassed the release gate'

@@ -32,7 +32,12 @@ async fn setup() -> (Server, String, String, String, String) {
     let srv = spawn_server().await;
     let base = srv.base.clone();
     let store = srv.store.clone();
-    let (_, v) = post_json(&base, "/api/nodes/register", Some(serde_json::json!({ "name": "sweep-node" }))).await;
+    let (_, v) = post_json(
+        &base,
+        "/api/nodes/register",
+        Some(serde_json::json!({ "name": "sweep-node" })),
+    )
+    .await;
     let node_id = v["node_id"].as_str().unwrap().to_string();
     let mut ids = Vec::new();
     for prompt in ["task-a", "task-b", "task-c"] {
@@ -42,16 +47,28 @@ async fn setup() -> (Server, String, String, String, String) {
             Some(serde_json::json!({ "prompt": prompt })),
         )
         .await;
-        ids.push((d["task_id"].as_str().unwrap().to_string(), d["session_id"].as_str().unwrap().to_string()));
+        ids.push((
+            d["task_id"].as_str().unwrap().to_string(),
+            d["session_id"].as_str().unwrap().to_string(),
+        ));
     }
     let (tid_a, sid_a) = (ids[0].0.clone(), ids[0].1.clone());
     let sid_b = ids[1].1.clone();
     let (tid_c, sid_c) = (ids[2].0.clone(), ids[2].1.clone());
     // Walk the state machine: A stays running, C reaches its terminal done.
     let now = chrono::Utc::now().timestamp_millis();
-    store.update_node_task_status(&tid_a, NodeTaskStatus::Running, None, now).await.unwrap();
-    store.update_node_task_status(&tid_c, NodeTaskStatus::Running, None, now).await.unwrap();
-    store.update_node_task_status(&tid_c, NodeTaskStatus::Done, None, now).await.unwrap();
+    store
+        .update_node_task_status(&tid_a, NodeTaskStatus::Running, None, now)
+        .await
+        .unwrap();
+    store
+        .update_node_task_status(&tid_c, NodeTaskStatus::Running, None, now)
+        .await
+        .unwrap();
+    store
+        .update_node_task_status(&tid_c, NodeTaskStatus::Done, None, now)
+        .await
+        .unwrap();
     (srv, node_id, sid_a, sid_b, sid_c)
 }
 
@@ -86,12 +103,26 @@ async fn sweep_removes_terminal_and_skips_running() {
         .iter()
         .map(|d| d["session_id"].as_str().unwrap())
         .collect();
-    assert_eq!(ids, [sid_b.as_str(), sid_a.as_str()], "pending B is the newest dialog");
+    assert_eq!(
+        ids,
+        [sid_b.as_str(), sid_a.as_str()],
+        "pending B is the newest dialog"
+    );
 
     // Durable side: terminal session + its cascade are gone, survivors intact.
     assert!(store.get_session(&sid_c).await.unwrap().is_none());
-    assert!(store.load_messages(&sid_c).await.unwrap().is_empty(), "messages cascade");
-    assert!(store.get_node_task_by_session(&sid_c).await.unwrap().is_none(), "task row cascades");
+    assert!(
+        store.load_messages(&sid_c).await.unwrap().is_empty(),
+        "messages cascade"
+    );
+    assert!(
+        store
+            .get_node_task_by_session(&sid_c)
+            .await
+            .unwrap()
+            .is_none(),
+        "task row cascades"
+    );
     assert!(store.get_session(&sid_a).await.unwrap().is_some());
     assert!(store.get_session(&sid_b).await.unwrap().is_some());
 

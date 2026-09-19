@@ -181,6 +181,13 @@ pub async fn serve_release(
             .map_err(|_| anyhow::anyhow!("release configuration supplied twice"))?;
     }
     seed_admin(&state.store, &token).await?;
+    // Seed the built-in review release-gate DAG defs (skip-if-exists; a
+    // failure warns and never blocks boot) — see `seed_dags`.
+    crate::seed_dags::seed_review_dags(&state.fleet).await;
+    // One-time import of legacy `schedules.json` definitions into the
+    // libsql `schedules` table (only when the table is empty; a failure
+    // warns and never blocks boot) — see `seed_schedules`.
+    crate::seed_schedules::seed_schedules(&state.store, &workdir).await;
     let config = Config::load(&workdir)?;
     if let Some(platform) = state.lifecycle.platform.get() {
         let url = reqwest::Url::parse(&platform.resource_service)?;

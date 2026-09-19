@@ -2,7 +2,7 @@
 use super::{error_400, error_404, error_500, response};
 use crate::AppState;
 use axum::{
-    extract::{Request, State},
+    extract::{Query, Request, State},
     response::Response,
     Json,
 };
@@ -11,12 +11,27 @@ use opencoder_core::fleet::*;
 use serde_json::{json, Value};
 use std::sync::Arc;
 
+#[derive(Debug, Default, serde::Deserialize)]
+pub struct SessionKindQuery {
+    pub kind: Option<String>,
+}
+
 /// The chat page's optional `kind` selector: default stays `operator`,
 /// `agent` launches the same session executor without the operator
 /// preamble. Every other value is a client error — dag/team/... keep
 /// their dedicated routes instead of this session surface.
 fn requested_kind(body: &Value) -> Result<ExecutionKind, String> {
     match body["kind"].as_str() {
+        None | Some("operator") => Ok(ExecutionKind::Operator),
+        Some("agent") => Ok(ExecutionKind::Agent),
+        Some(other) => Err(format!(
+            "unsupported session kind {other:?}: use operator or agent"
+        )),
+    }
+}
+
+pub(crate) fn requested_query_kind(value: Option<&str>) -> Result<ExecutionKind, String> {
+    match value {
         None | Some("operator") => Ok(ExecutionKind::Operator),
         Some("agent") => Ok(ExecutionKind::Agent),
         Some(other) => Err(format!(
@@ -51,39 +66,35 @@ pub async fn create(State(state): State<Arc<AppState>>, Json(body): Json<Value>)
     response(RpcReply::ok(json!({"id":id,"execution":reply.body})))
 }
 
-pub async fn list(State(state): State<Arc<AppState>>) -> Response {
-    match summaries(&state, None).await {
+pub async fn list(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<SessionKindQuery>,
+) -> Response {
+    let kind = match requested_query_kind(query.kind.as_deref()) {
+        Ok(kind) => kind,
+        Err(error) => return error_400(error),
+    };
+    match summaries(&state, None, kind).await {
         Ok(sessions) => response(RpcReply::ok(json!({"sessions":sessions}))),
         Err(e) => error_500(e.to_string()),
     }
 }
-pub async fn summaries(state: &Arc<AppState>, node: Option<&str>) -> anyhow::Result<Vec<Value>> {
-    // The chat page lists live conversations: operator sessions and the
-    // kind=agent session executions. Every other family (system/
-    // maintenance/dag/team/...) stays off this surface — each kind has its
-    // own listing. Per-kind index reads are deduplicated by the index's
-    // primary key; the merged rows keep the durable ordering
-    // (`created_at DESC, id ASC`, matching the SQL) under the same 500 cap.
-    let mut indexes = state
-        .fleet
-        .indexes(node, Some(ExecutionKind::Operator), 500)
-        .await?;
-    indexes.extend(
-        state
-            .fleet
-            .indexes(node, Some(ExecutionKind::Agent), 500)
-            .await?,
-    );
-    indexes.sort_by(|a, b| {
-        b.created_at
-            .cmp(&a.created_at)
-            .then_with(|| a.id.cmp(&b.id))
-    });
-    indexes.truncate(500);
+pub async fn summaries(
+    state: &Arc<AppState>,
+    node: Option<&str>,
+    kind: ExecutionKind,
+) -> anyhow::Result<Vec<Value>> {
+    // Operator and Agent are separate conversation lanes. The caller chooses
+    // one kind; no other execution family can leak into either lane.
+    let indexes = state.fleet.indexes(node, Some(kind), 500).await?;
     Ok(stream::iter(indexes).map(|index| {let state=state.clone();async move {
         let reply=state.hub.call(&index.node_id,NodeOperation::Command{execution:index.execution_ref(),command:ExecutionCommand{action:"summary".into(),input:Value::Null}}).await;
         let mut meta=reply.body.clone();
         if reply.status!=200 || !meta.is_object() {meta=json!({"id":index.id,"created_at":index.created_at,"status":index.status,"detail_error":reply.body});}
+        // Keep the kind in the summary envelope so a dialog row always has
+        // an unambiguous reference to its control-plane execution detail.
+        meta["kind"] = json!(index.kind);
+        meta["execution_ref"] = json!({"id":index.id,"kind":index.kind});
         meta["node_id"]=json!(index.node_id); meta
     }}).buffered(8).collect().await)
 }

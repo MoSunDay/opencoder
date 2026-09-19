@@ -44,7 +44,11 @@ fn fixed_plan_run_completes_through_child_session_and_receipt_route() {
     let context: Value =
         serde_json::from_str(route_body["messages"][1]["content"].as_str().unwrap())
             .expect("RouteContext json");
-    assert_eq!(context["route"], json!("finish"), "route context: {context}");
+    assert_eq!(
+        context["route"],
+        json!("finish"),
+        "route context: {context}"
+    );
     assert!(
         context["receipt"]
             .as_str()
@@ -54,7 +58,11 @@ fn fixed_plan_run_completes_through_child_session_and_receipt_route() {
     );
 
     let snapshot = fixtures::wait_phase(&fleet, RUN_ID, "brain run completes", 240, &["completed"]);
-    assert_eq!(snapshot["phase"], json!("completed"), "snapshot: {snapshot}");
+    assert_eq!(
+        snapshot["phase"],
+        json!("completed"),
+        "snapshot: {snapshot}"
+    );
     assert_eq!(snapshot["mode"], json!("fixed"), "snapshot: {snapshot}");
     assert!(
         snapshot["watermark"].as_u64().unwrap_or(0) > 0,
@@ -66,9 +74,14 @@ fn fixed_plan_run_completes_through_child_session_and_receipt_route() {
 
     let instances = snapshot["instances"].as_array().expect("instances");
     assert_eq!(instances.len(), 1, "instances: {snapshot}");
-    assert_eq!(instances[0]["step_id"], json!("one"), "instances: {snapshot}");
     assert_eq!(
-        instances[0]["status"], json!("succeeded"),
+        instances[0]["step_id"],
+        json!("one"),
+        "instances: {snapshot}"
+    );
+    assert_eq!(
+        instances[0]["status"],
+        json!("succeeded"),
         "instances: {snapshot}"
     );
     let child = instances[0]["execution"]["id"]
@@ -119,5 +132,9 @@ fn fixed_plan_run_completes_through_child_session_and_receipt_route() {
         !page["events"].as_array().expect("events").is_empty(),
         "events: {page}"
     );
-    assert_eq!(page["more"], json!(false), "events page fully drained: {page}");
+    assert_eq!(
+        page["more"],
+        json!(false),
+        "events page fully drained: {page}"
+    );
 }

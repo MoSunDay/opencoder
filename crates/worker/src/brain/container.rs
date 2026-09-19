@@ -31,6 +31,48 @@ pub async fn activate(
             result = opencoder_brain::activation::activate(context,client.as_ref(),config.model_id()) => result,
         };
     }
+    activate_json(
+        worker,
+        config,
+        &context.run_id,
+        context.activation,
+        context,
+        cancel,
+    )
+    .await
+}
+
+pub async fn scheduler(
+    worker: &Worker,
+    config: &Config,
+    context: &BrainSchedulerContext,
+    cancel: CancellationToken,
+) -> Result<BrainSchedulerDecision> {
+    if let Some(client) = &worker.inner.client {
+        return tokio::select! {
+            _ = cancel.cancelled() => anyhow::bail!("brain activation cancelled"),
+            result = opencoder_brain::scheduler::activate(context, client.as_ref(), config.model_id()) => result,
+        };
+    }
+    activate_json(
+        worker,
+        config,
+        &context.run_id,
+        context.generation,
+        context,
+        cancel,
+    )
+    .await
+}
+
+async fn activate_json<T: serde::de::DeserializeOwned>(
+    worker: &Worker,
+    config: &Config,
+    run_id: &str,
+    generation: u64,
+    context: &impl serde::Serialize,
+    cancel: CancellationToken,
+) -> Result<T> {
     ensure!(
         opencoder_dag_runtime::sandbox::runc::runc_available(),
         "Brain requires runc"
@@ -39,22 +81,20 @@ pub async fn activate(
     let root = worker
         .inner
         .layout
-        .execution_dir(opencoder_core::fleet::ExecutionKind::Brain, &context.run_id)?;
-    let activation = root
-        .join("activations")
-        .join(context.activation.to_string());
+        .execution_dir(opencoder_core::fleet::ExecutionKind::Brain, run_id)?;
+    let activation = root.join("activations").join(generation.to_string());
     let bundle = worker
         .inner
         .layout
         .kind_root(opencoder_core::fleet::ExecutionKind::Brain)
         .join("bundles")
-        .join(&context.run_id)
-        .join(context.activation.to_string());
+        .join(run_id)
+        .join(generation.to_string());
     std::fs::create_dir_all(&activation)?;
     private_json(&activation.join("context.json"), context)?;
     private_json(&activation.join("config.json"), config)?;
     write_bundle(&bundle, &activation, &cli)?;
-    let id = format!("{}-a{}", context.run_id, context.activation);
+    let id = format!("{run_id}-a{generation}");
     let (code, output) =
         opencoder_dag_runtime::sandbox::runc::run_step_cancellable(&bundle, &id, Some(300), cancel)
             .await?;

@@ -80,7 +80,10 @@ fn display_name(kind: ExecutionKind, names: &ExecutionNames) -> Option<String> {
     }
 }
 
-async fn named_page(state: &AppState, page: ExecutionPage<ExecutionIndex>) -> Result<Value, String> {
+async fn named_page(
+    state: &AppState,
+    page: ExecutionPage<ExecutionIndex>,
+) -> Result<Value, String> {
     let mut body = serde_json::to_value(&page).map_err(|error| error.to_string())?;
     let rows = body
         .get_mut("executions")
@@ -267,7 +270,10 @@ mod tests {
         );
         // Dag: spec name first, then top-level name, then the target.
         assert_eq!(
-            display_name(ExecutionKind::Dag, &names(Some("dag-x"), Some("etl"), Some("etl-v2"))),
+            display_name(
+                ExecutionKind::Dag,
+                &names(Some("dag-x"), Some("etl"), Some("etl-v2"))
+            ),
             Some("etl-v2".into())
         );
         assert_eq!(
@@ -297,7 +303,10 @@ mod tests {
             Some("coder-x".into())
         );
         assert_eq!(
-            display_name(ExecutionKind::Project, &names(Some("todo-9"), Some("x"), None)),
+            display_name(
+                ExecutionKind::Project,
+                &names(Some("todo-9"), Some("x"), None)
+            ),
             Some("todo-9".into())
         );
         assert_eq!(
@@ -308,9 +317,18 @@ mod tests {
 
     #[test]
     fn brain_system_and_incomplete_snapshots_stay_unnamed() {
-        assert_eq!(display_name(ExecutionKind::Brain, &names(Some("x"), Some("y"), None)), None);
-        assert_eq!(display_name(ExecutionKind::System, &names(None, None, None)), None);
+        assert_eq!(
+            display_name(ExecutionKind::Brain, &names(Some("x"), Some("y"), None)),
+            None
+        );
+        assert_eq!(
+            display_name(ExecutionKind::System, &names(None, None, None)),
+            None
+        );
         // An agent assignment without a target names nothing (SPA renders `-`).
-        assert_eq!(display_name(ExecutionKind::Agent, &names(None, None, None)), None);
+        assert_eq!(
+            display_name(ExecutionKind::Agent, &names(None, None, None)),
+            None
+        );
     }
 }

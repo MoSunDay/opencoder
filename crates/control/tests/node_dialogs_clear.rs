@@ -31,13 +31,10 @@ async fn call(app: &axum::Router, method: &str, path: &str) -> (u16, Value) {
 #[tokio::test]
 async fn delete_dialogs_unknown_node_answers_404() {
     let dir = tempfile::tempdir().unwrap();
-    let state = opencoder_control::new_state(
-        dir.path().join("work"),
-        dir.path().join("data"),
-        None,
-    )
-    .await
-    .unwrap();
+    let state =
+        opencoder_control::new_state(dir.path().join("work"), dir.path().join("data"), None)
+            .await
+            .unwrap();
     let app = opencoder_control::build_app(state.clone(), Some("dialogs-clear-test".into()), false);
     let (status, body) = call(&app, "DELETE", "/api/nodes/no-such-node/dialogs").await;
     assert_eq!(status, 404);
@@ -47,13 +44,10 @@ async fn delete_dialogs_unknown_node_answers_404() {
 #[tokio::test]
 async fn delete_dialogs_offline_node_reports_hub_error() {
     let dir = tempfile::tempdir().unwrap();
-    let state = opencoder_control::new_state(
-        dir.path().join("work"),
-        dir.path().join("data"),
-        None,
-    )
-    .await
-    .unwrap();
+    let state =
+        opencoder_control::new_state(dir.path().join("work"), dir.path().join("data"), None)
+            .await
+            .unwrap();
     state
         .fleet
         .register(&NodeRegistration {

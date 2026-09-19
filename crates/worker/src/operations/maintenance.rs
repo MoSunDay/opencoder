@@ -115,14 +115,8 @@ async fn run_unscoped(worker: &Worker, command: ExecutionCommand) -> Result<RpcR
                         .collect()
                 })
                 .unwrap_or_default();
-            let active: std::collections::HashSet<String> = worker
-                .inner
-                .active
-                .lock()
-                .await
-                .keys()
-                .cloned()
-                .collect();
+            let active: std::collections::HashSet<String> =
+                worker.inner.active.lock().await.keys().cloned().collect();
             let skipped: Vec<String> = requested
                 .iter()
                 .filter(|id| active.contains(*id))

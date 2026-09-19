@@ -36,3 +36,16 @@ pub struct ScheduleRunRecord {
     /// Convenience boolean for skipped ticks (`status == missed`).
     pub missed: bool,
 }
+
+/// One stored schedule DEFINITION (`schedules` table): the cronjob body
+/// (`ScheduleJob`, the same type `schedules.json` parses) plus server-owned
+/// timestamps. The definition source of truth for the control-plane
+/// scheduler since schema v27 — the JSON file is only a bootstrap seed.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ScheduleDefRecord {
+    pub job: opencoder_core::config::ScheduleJob,
+    /// Unix-ms of the first insert; preserved across updates.
+    pub created_at: i64,
+    /// Unix-ms of the most recent upsert.
+    pub updated_at: i64,
+}

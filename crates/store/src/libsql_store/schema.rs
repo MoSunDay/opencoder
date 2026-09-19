@@ -5,12 +5,14 @@ use super::brain_playbooks::{CREATE_BRAIN_PLAYBOOKS, CREATE_INDEX_BRAIN_PLAYBOOK
 use super::chat_tables::{
     CREATE_EVENTS, CREATE_INPUTS, CREATE_MESSAGES, CREATE_SESSIONS, CREATE_SUBAGENT_TASKS,
 };
-use super::schedule::{CREATE_INDEX_SCHEDULE_RUNS_FIRED, CREATE_SCHEDULE_RUNS};
+use super::schedule::{CREATE_INDEX_SCHEDULE_RUNS_FIRED, CREATE_SCHEDULES, CREATE_SCHEDULE_RUNS};
 use super::team_runs::{CREATE_INDEX_TEAM_TOPIC_RUNS_TOPIC, CREATE_TEAM_TOPIC_RUNS};
 
 mod project_relations;
 
-const SCHEMA_VERSION: i64 = 26;
+// v3 scheduler tables are additive and bootstrap unconditionally; keep the
+// existing schema watermark so v2 database migration remains read-compatible.
+const SCHEMA_VERSION: i64 = 27;
 
 // Order invariant: busy_timeout must precede any locking statement, and
 // synchronous=NORMAL must be applied BEFORE journal_mode=WAL. Switching a
@@ -378,6 +380,7 @@ async fn bootstrap_tx(conn: &Connection) -> Result<()> {
     conn.execute(CREATE_BRAIN_VECTORS, ()).await?;
     conn.execute(CREATE_BRAIN_PLANS, ()).await?;
     conn.execute(CREATE_BRAIN_PLAYBOOKS, ()).await?;
+    super::brain_scheduler::initialize(conn).await?;
     conn.execute(CREATE_PROJECT_GOALS, ()).await?;
     conn.execute(CREATE_PROJECT_MILESTONES, ()).await?;
     conn.execute(CREATE_PROJECT_TODOS, ()).await?;
@@ -387,6 +390,7 @@ async fn bootstrap_tx(conn: &Connection) -> Result<()> {
     conn.execute(CREATE_DAG_EVENTS, ()).await?;
     conn.execute(CREATE_TEAM_TOPIC_RUNS, ()).await?;
     conn.execute(CREATE_SCHEDULE_RUNS, ()).await?;
+    conn.execute(CREATE_SCHEDULES, ()).await?;
     conn.execute(CREATE_PLATFORM_USERS, ()).await?;
     conn.execute(CREATE_INDEX_MSG, ()).await?;
     conn.execute(CREATE_INDEX_IN, ()).await?;
@@ -700,6 +704,14 @@ async fn migrate(conn: &Connection, from: i64) -> Result<()> {
         // EXISTS keeps this idempotent; the table is new (append-only
         // history), so no rows need backfilling.
         conn.execute(CREATE_SCHEDULE_RUNS, ()).await?;
+    }
+    if from < 27 {
+        // v27: schedule definitions move into the DB (the cron scheduler's
+        // source of truth; `schedules.json` degrades to a bootstrap seed).
+        // CREATE IF NOT EXISTS keeps this idempotent; the table is new, so
+        // no rows need backfilling. No FK to schedule_runs: the fire ledger
+        // outlives its definitions by design.
+        conn.execute(CREATE_SCHEDULES, ()).await?;
     }
     if from < 24 {
         // v24: platform users. CREATE IF NOT EXISTS keeps this idempotent;

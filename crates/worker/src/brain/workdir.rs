@@ -26,7 +26,14 @@ fn with_workdir(state: &opencoder_web::AppState, workdir: PathBuf) -> Arc<openco
 }
 
 pub fn for_record(worker: &Worker, record: &Record) -> Result<PathBuf> {
-    if record.assignment.request.input.get("_brain").is_none() {
+    if record.assignment.request.input.get("_brain").is_none()
+        && record
+            .assignment
+            .request
+            .input
+            .get("brain_scheduler")
+            .is_none()
+    {
         return Ok(node_workdir(worker));
     }
     let path = worker
@@ -45,11 +52,10 @@ pub async fn native_state(worker: &Worker, path: &str) -> Result<Arc<opencoder_w
         .and_then(|tail| tail.split('/').next())
     {
         let journal = worker.inner.journal.lock().await;
-        if let Some(record) = journal
-            .records
-            .get(id)
-            .filter(|r| r.assignment.request.input.get("_brain").is_some())
-        {
+        if let Some(record) = journal.records.get(id).filter(|r| {
+            r.assignment.request.input.get("_brain").is_some()
+                || r.assignment.request.input.get("brain_scheduler").is_some()
+        }) {
             return Ok(with_workdir(state, for_record(worker, record)?));
         }
     }

@@ -12,6 +12,7 @@ use anyhow::{bail, Context as _, Result};
 use serde_json::{json, Value};
 
 /// Everything needed to render one step's OCI bundle.
+#[derive(Clone)]
 pub struct BundleSpec {
     /// `<workflow_root>/<run_id>` — bind-mounted rw at `/workspace/context`
     /// so the step reads upstream artifacts and writes its own under
@@ -28,6 +29,35 @@ pub struct BundleSpec {
     /// Wall-clock budget hint recorded in `annotations`; the actual kill is
     /// performed by the runc runner, not by the container itself.
     pub timeout_hint: Option<u64>,
+    /// Optional read-only knowledge mount: the node's knowledge root
+    /// bind-mounted READ-ONLY at `/workspace/knowledge`. Kernel-enforced:
+    /// steps can read the tree but never modify it.
+    pub knowledge: Option<KnowledgeMount>,
+    /// How `command` is interpreted. `WasmModule` (default) rewrites the
+    /// first token under `/workspace/context` and wraps it in the
+    /// `wasmtime run` CLI; `Direct` runs the argv verbatim (native
+    /// step-runner binaries installed in the rootfs, e.g.
+    /// `agent-step-runner`).
+    pub argv: ArgvStyle,
+}
+
+/// A read-only bind of a host knowledge tree into the container.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KnowledgeMount {
+    /// Host path (absolute after [`write_bundle`] normalization; validated
+    /// as a REAL directory, fail-closed).
+    pub host: PathBuf,
+}
+
+/// Container argv style for [`BundleSpec::command`].
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ArgvStyle {
+    /// `wasmtime run --dir=... [--env K=V]... <module-under-context> ...`
+    #[default]
+    WasmModule,
+    /// The argv verbatim (a rootfs-installed binary); env pairs ride the
+    /// process env list instead of `--env` flags.
+    Direct,
 }
 
 /// Where the shared read-only rootfs lives for a given run root:
@@ -83,31 +113,7 @@ pub fn container_config(spec: &BundleSpec) -> Value {
             "cwd": "/workspace",
         },
         "root": { "path": "rootfs", "readonly": true },
-        "mounts": [
-            {
-                "destination": "/proc",
-                "type": "proc",
-                "source": "proc",
-            },
-            {
-                "destination": "/tmp",
-                "type": "tmpfs",
-                "source": "tmpfs",
-                "options": ["rw", "nosuid", "nodev", "size=64m"],
-            },
-            {
-                "destination": "/workspace/context",
-                "type": "bind",
-                "source": bind_source,
-                // "rbind" (MS_REC|MS_BIND): some kernels refuse the plain
-                // legacy MS_BIND path through runc's fd-based mount helper
-                // with ENODEV ("no such device") — the recursive variant
-                // goes through open_tree/move_mount and works everywhere
-                // we tested. The source is a plain dir (no submounts), so
-                // semantics are identical.
-                "options": ["rw", "rbind"],
-            },
-        ],
+        "mounts": mounts(spec, bind_source),
         "linux": {
             "namespaces": [
                 { "type": "pid" },
@@ -119,17 +125,79 @@ pub fn container_config(spec: &BundleSpec) -> Value {
     })
 }
 
-/// Container argv: run the module with the static `wasmtime` CLI —
-/// `wasmtime run --dir=<context> [--env K=V]... <module> [args...]`. The
-/// module token is rewritten to its guest-visible path under
-/// `/workspace/context`; later tokens pass through verbatim.
+/// The mounts array: proc + fresh /tmp + the rw context bind, plus the
+/// OPTIONAL read-only knowledge bind. Built imperatively because `json!`
+/// keeps `null` placeholders inside arrays.
+fn mounts(spec: &BundleSpec, bind_source: String) -> Value {
+    let mut mounts = vec![
+        json!({
+            "destination": "/proc",
+            "type": "proc",
+            "source": "proc",
+        }),
+        json!({
+            "destination": "/tmp",
+            "type": "tmpfs",
+            "source": "tmpfs",
+            "options": ["rw", "nosuid", "nodev", "size=64m"],
+        }),
+        json!({
+            "destination": "/workspace/context",
+            "type": "bind",
+            "source": bind_source,
+            // "rbind" (MS_REC|MS_BIND): some kernels refuse the plain
+            // legacy MS_BIND path through runc's fd-based mount helper
+            // with ENODEV ("no such device") — the recursive variant
+            // goes through open_tree/move_mount and works everywhere
+            // we tested. The source is a plain dir (no submounts), so
+            // semantics are identical.
+            "options": ["rw", "rbind"],
+        }),
+    ];
+    if let Some(knowledge) = knowledge_mount(spec) {
+        mounts.push(knowledge);
+    }
+    Value::Array(mounts)
+}
+
+/// The read-only knowledge bind entry, or `None` when no knowledge root is
+/// configured. `ro` + `rbind`: the kernel enforces read-only — a step can
+/// read the node's knowledge tree but never modify it.
+fn knowledge_mount(spec: &BundleSpec) -> Option<Value> {
+    let knowledge = spec.knowledge.as_ref()?;
+    let host = knowledge
+        .host
+        .to_string_lossy()
+        .trim_end_matches('/')
+        .to_string();
+    Some(json!({
+        "destination": crate::exec::KNOWLEDGE_MOUNT,
+        "type": "bind",
+        "source": host,
+        "options": ["ro", "rbind"],
+    }))
+}
+
+/// Container argv. `WasmModule` (the wasm step contract) runs the module
+/// with the static `wasmtime` CLI — `wasmtime run --dir=<context>
+/// [--env K=V]... <module> [args...]` — rewriting the module token to its
+/// guest-visible path under `/workspace/context`; later tokens pass
+/// through verbatim. `Direct` passes the argv through untouched for
+/// rootfs-installed step-runner binaries (their env pairs ride the
+/// process env list, not `--env` flags).
 fn wasm_args(spec: &BundleSpec) -> Vec<String> {
+    if spec.argv == ArgvStyle::Direct {
+        return spec.command.clone();
+    }
     let mut args = vec![
         "wasmtime".to_string(),
         "run".to_string(),
         format!("--dir={}", crate::exec::wasm::CONTEXT_MOUNT),
         "-Ccache-config=/opencoder-wasmtime-cache.toml".to_string(),
     ];
+    if spec.knowledge.is_some() {
+        args.push(format!("--dir={}", crate::exec::KNOWLEDGE_MOUNT));
+    }
     for (k, v) in &spec.env {
         args.push("--env".to_string());
         args.push(format!("{k}={v}"));
@@ -154,6 +222,27 @@ fn wasm_env(spec: &BundleSpec) -> Vec<String> {
     let mut env = vec!["PATH=/usr/local/bin:/usr/bin:/bin".to_string()];
     env.extend(spec.env.iter().map(|(k, v)| format!("{k}={v}")));
     env
+}
+
+/// Validate + absolutize the knowledge host path, returning an owned spec.
+fn normalize_knowledge(spec: &BundleSpec) -> Result<BundleSpec> {
+    let Some(knowledge) = &spec.knowledge else {
+        return Ok(spec.clone());
+    };
+    let abs = std::path::absolute(&knowledge.host)
+        .with_context(|| format!("knowledge_root {}", knowledge.host.display()))?;
+    let is_real_dir = fs::symlink_metadata(&abs)
+        .map(|meta| meta.is_dir())
+        .unwrap_or(false);
+    if !is_real_dir {
+        bail!(
+            "knowledge_root unusable at {}: it must be a REAL directory (missing or a symlink)",
+            knowledge.host.display()
+        );
+    }
+    let mut normalized = spec.clone();
+    normalized.knowledge = Some(KnowledgeMount { host: abs });
+    Ok(normalized)
 }
 
 /// Materialize the bundle at `dir`: `config.json` referencing the wasm
@@ -183,9 +272,23 @@ pub fn write_bundle(dir: &Path, spec: &BundleSpec) -> Result<PathBuf> {
         );
     }
 
+    // 0. Knowledge root: fail closed BEFORE any bundle work when the
+    //    configured tree is missing or a symlink — a knowledge mount that
+    //    silently no-ops (or points elsewhere) breaks the read-only
+    //    contract the node promised. Returns an owned, host-path-normalized
+    //    spec so `container_config` emits an absolute bind source.
+    let spec = normalize_knowledge(spec)?;
+
     // 1. A real, private root isolates runc device initialization and pins
     //    runtime files for retries. The source is never modified.
     let rootfs = super::rootfs::snapshot(&shared, &dir)?;
+    // The knowledge mountpoint inside the private root tree (runc would
+    // create it under the readonly root; pre-creating keeps the config
+    // self-contained and mount failure modes explicit).
+    if spec.knowledge.is_some() {
+        fs::create_dir_all(rootfs.join(crate::exec::KNOWLEDGE_MOUNT.trim_start_matches('/')))
+            .with_context(|| format!("mkdir knowledge mountpoint under {}", rootfs.display()))?;
+    }
     // The root image is read-only at execution time. Wasmtime's default
     // cache under /.cache cannot be created there; use the container's
     // existing private /tmp mount without changing the guest environment.
@@ -195,7 +298,7 @@ pub fn write_bundle(dir: &Path, spec: &BundleSpec) -> Result<PathBuf> {
     )?;
 
     // 2. config.json.
-    let config = container_config(spec);
+    let config = container_config(&spec);
     let config_path = dir.join("config.json");
     fs::write(&config_path, serde_json::to_vec_pretty(&config)?)
         .with_context(|| format!("write {}", config_path.display()))?;
@@ -282,6 +385,8 @@ mod tests {
             command: vec!["step-a/main.wasm".into(), "--flag".into()],
             env: vec![("OPENCODER_RUN_ID".into(), "run-1".into())],
             timeout_hint: Some(30),
+            knowledge: None,
+            argv: ArgvStyle::WasmModule,
         }
     }
 
@@ -423,5 +528,118 @@ mod tests {
             "readme explains wasmtime placement"
         );
         assert!(readme.contains("resolv.conf"));
+    }
+
+    #[test]
+    fn knowledge_mount_shapes_config_args_and_mountpoint() {
+        let tmp = tempfile::tempdir().unwrap();
+        let knowledge = tmp.path().join("kb");
+        fs::create_dir_all(&knowledge).unwrap();
+        // run_root under a workflow dir whose shared rootfs pre-exists, so
+        // the write_bundle section below is exercisable with the same spec.
+        let workflow_root = tmp.path().join("workflow");
+        fs::create_dir_all(workflow_root.join("rootfs")).unwrap();
+        let mut this = spec(&workflow_root);
+        this.knowledge = Some(KnowledgeMount {
+            host: knowledge.clone(),
+        });
+
+        let cfg = container_config(&this);
+        let mounts = cfg["mounts"].as_array().unwrap();
+        let kb = mounts
+            .iter()
+            .find(|m| m["destination"] == json!("/workspace/knowledge"))
+            .expect("knowledge bind present");
+        assert_eq!(kb["type"], "bind");
+        assert_eq!(kb["source"], knowledge.to_string_lossy().as_ref());
+        let opts = kb["options"].as_array().unwrap();
+        assert!(opts.contains(&json!("ro")), "{opts:?}");
+        assert!(opts.contains(&json!("rbind")), "{opts:?}");
+        // Wasm argv preopens the knowledge dir for the guest module.
+        let args = cfg["process"]["args"].as_array().unwrap();
+        assert!(
+            args.contains(&json!("--dir=/workspace/knowledge")),
+            "{args:?}"
+        );
+
+        // write_bundle normalizes the host path, creates the mountpoint in
+        // the private root tree, and keeps it out of the shared one.
+        let bundle = write_bundle(&workflow_root.join("run-1.bundle"), &this).unwrap();
+        let cfg2: Value =
+            serde_json::from_str(&fs::read_to_string(bundle.join("config.json")).unwrap()).unwrap();
+        let kb2 = cfg2["mounts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|m| m["destination"] == json!("/workspace/knowledge"))
+            .unwrap();
+        assert_eq!(kb2["source"], knowledge.to_string_lossy().as_ref());
+        assert!(bundle.join("rootfs/workspace/knowledge").is_dir());
+    }
+
+    #[test]
+    fn knowledge_mount_absent_without_configuration() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cfg = container_config(&spec(tmp.path()));
+        let mounts = cfg["mounts"].as_array().unwrap();
+        assert!(!mounts
+            .iter()
+            .any(|m| m["destination"] == json!("/workspace/knowledge")));
+        let args = cfg["process"]["args"].as_array().unwrap();
+        assert!(
+            !args
+                .iter()
+                .any(|a| a.as_str().unwrap_or("").contains("knowledge")),
+            "{args:?}"
+        );
+    }
+
+    #[test]
+    fn knowledge_mount_fails_closed_on_missing_or_symlink_root() {
+        let tmp = tempfile::tempdir().unwrap();
+        let workflow_root = tmp.path().join("workflow");
+        fs::create_dir_all(workflow_root.join("rootfs")).unwrap();
+        let mut missing = spec(&workflow_root);
+        missing.knowledge = Some(KnowledgeMount {
+            host: workflow_root.join("no-such-kb"),
+        });
+        let err = write_bundle(&workflow_root.join("b1"), &missing).unwrap_err();
+        assert!(
+            err.to_string().contains("knowledge_root unusable"),
+            "{err:#}"
+        );
+
+        // A symlinked knowledge root is rejected the same way.
+        fs::create_dir_all(workflow_root.join("real-kb")).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink("real-kb", workflow_root.join("kb-link")).unwrap();
+        let mut linked = spec(&workflow_root);
+        linked.knowledge = Some(KnowledgeMount {
+            host: workflow_root.join("kb-link"),
+        });
+        let err = write_bundle(&workflow_root.join("b2"), &linked).unwrap_err();
+        assert!(
+            err.to_string().contains("knowledge_root unusable"),
+            "{err:#}"
+        );
+    }
+
+    #[test]
+    fn direct_argv_passes_command_through_verbatim() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut this = spec(tmp.path());
+        this.argv = ArgvStyle::Direct;
+        this.command = vec!["/usr/bin/agent-step-runner".into()];
+        let cfg = container_config(&this);
+        let args = cfg["process"]["args"].as_array().unwrap();
+        assert_eq!(
+            serde_json::to_value(args).unwrap(),
+            json!(["/usr/bin/agent-step-runner"])
+        );
+        // Env pairs still ride the process env list.
+        assert!(cfg["process"]["env"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("OPENCODER_RUN_ID=run-1")));
     }
 }

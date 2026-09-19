@@ -36,6 +36,20 @@ pub async fn handle(
     if action == "notice_ack" {
         return super::outbox::ack(worker, reference, input).await;
     }
+    if matches!(action, "scheduler_output" | "scheduler_summary") {
+        return super::v3::output::query(worker, reference, action, input).await;
+    }
+    if worker
+        .inner
+        .journal
+        .lock()
+        .await
+        .records
+        .get(&reference.id)
+        .is_some_and(|record| record.assignment.request.input["schema_version"] == 3)
+    {
+        return super::v3::handle(worker, reference, action, input).await;
+    }
     ensure!(
         reference.kind == ExecutionKind::Brain,
         "expected brain root"
@@ -261,6 +275,9 @@ pub async fn handle(
 }
 
 pub async fn snapshot(worker: &Worker, id: &str, offset: usize) -> Result<Value> {
+    if let Some(snapshot) = worker.inner.state.store.brain_scheduler(id).await? {
+        return Ok(json!(snapshot));
+    }
     let gate = worker.lifecycle_gate(id).await;
     let _guard = gate.lock().await;
     let Some((_, run)) = persistence::load(worker, id).await? else {

@@ -130,7 +130,11 @@ pub async fn save_dag(State(state): State<Arc<AppState>>, Json(body): Json<Value
     }
 }
 
-fn dag_definition(spec: &opencoder_dag::DagSpec, previous: Option<&Value>, now: i64) -> Value {
+pub(crate) fn dag_definition(
+    spec: &opencoder_dag::DagSpec,
+    previous: Option<&Value>,
+    now: i64,
+) -> Value {
     // Legacy definitions have no timestamps; their first save starts tracking
     // them. Client-supplied timestamps never override server-owned metadata.
     let created_at = previous
@@ -154,6 +158,13 @@ pub async fn resolve(
     let fail = |e: anyhow::Error| RpcReply::error(500, format!("definition: {e:#}"));
     let mut definition = match request.kind {
         ExecutionKind::Brain => {
+            if request.input["schema_version"] == 3 {
+                let scheduler = serde_json::from_value(request.input["scheduler_request"].clone())
+                    .map_err(|e| RpcReply::error(400, format!("scheduler request: {e}")))?;
+                opencoder_brain::scheduler::validate_request(&scheduler)
+                    .map_err(|e| RpcReply::error(400, e.to_string()))?;
+                return Ok(Some(request.input.clone()));
+            }
             let body: opencoder_core::brain::BrainRequest =
                 serde_json::from_value(request.input.clone())
                     .map_err(|e| RpcReply::error(400, e.to_string()))?;

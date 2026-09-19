@@ -511,10 +511,10 @@ pub async fn process_cmd(
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
+#[path = "worker/tests_compact_done.rs"]
+mod tests_compact_done;
+#[cfg(test)]
 mod tests_reload;
 #[cfg(test)]
 #[path = "worker/tests_sidecar.rs"]
 mod tests_sidecar;
-#[cfg(test)]
-#[path = "worker/tests_compact_done.rs"]
-mod tests_compact_done;

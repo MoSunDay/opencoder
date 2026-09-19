@@ -37,7 +37,7 @@ describe('explicit conversation node selection', () => {
     await pick('n2');
     await send(container, 'do work');
     await waitFor(() => expect(apiPost).toHaveBeenCalledWith('/api/sessions', { id: expect.stringMatching(/^operator-/), node_id: 'n2', agent: 'act' }));
-    expect(apiGet).toHaveBeenCalledWith('/api/nodes/n2/dialogs');
+    expect(apiGet).toHaveBeenCalledWith('/api/nodes/n2/dialogs?kind=operator');
     expect(apiPost).toHaveBeenCalledWith('/api/sessions/operator-created/prompt', { prompt: 'do work', delivery: 'steer' });
   });
 
@@ -58,8 +58,8 @@ describe('explicit conversation node selection', () => {
     let resolveFirst;
     apiGet.mockImplementation(async (path) => {
       if (path === '/api/nodes') return { nodes };
-      if (path === '/api/nodes/n1/dialogs') return new Promise((resolve) => { resolveFirst = resolve; });
-      if (path === '/api/nodes/n2/dialogs') return { dialogs: [{ session_id: 'agent-b', title: 'node two conversation' }] };
+      if (path.startsWith('/api/nodes/n1/dialogs')) return new Promise((resolve) => { resolveFirst = resolve; });
+      if (path.startsWith('/api/nodes/n2/dialogs')) return { dialogs: [{ session_id: 'agent-b', title: 'node two conversation' }] };
       return {};
     });
     render(<ChatPanel />); await pick('n1'); await pick('n2');
@@ -97,7 +97,7 @@ describe('explicit conversation node selection', () => {
     let resolveSnapshot;
     apiGet.mockImplementation(async (path) => {
       if (path === '/api/nodes') return { nodes };
-      if (path === '/api/nodes/n1/dialogs') return { dialogs: [{ session_id: 'agent-old', title: 'old conversation' }] };
+      if (path.startsWith('/api/nodes/n1/dialogs')) return { dialogs: [{ session_id: 'agent-old', title: 'old conversation' }] };
       if (path === '/api/sessions/agent-old') return new Promise((resolve) => { resolveSnapshot = resolve; });
       return { dialogs: [] };
     });
@@ -112,7 +112,7 @@ describe('explicit conversation node selection', () => {
   it('reads the model catalog from the selected conversation node', async () => {
     apiGet.mockImplementation(async (path) => {
       if (path === '/api/nodes') return { nodes };
-      if (path === '/api/nodes/n2/dialogs') return { dialogs: [{ session_id: 'agent-two', title: 'selected conversation' }] };
+      if (path.startsWith('/api/nodes/n2/dialogs')) return { dialogs: [{ session_id: 'agent-two', title: 'selected conversation' }] };
       if (path === '/api/models?node_id=n2') return { models: ['node-two-model'], default: 'node-two-model' };
       return {};
     });

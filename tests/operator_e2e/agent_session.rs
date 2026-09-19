@@ -90,14 +90,23 @@ fn agent_session_runs_prompt_and_exposes_output() {
         requests[0]
     );
 
-    // The chat-page listing merges the agent session next to operator ones.
+    // The chat page keeps operator and agent dialogs in separate lanes: the
+    // agent session shows up only in the agent lane, never in the operator
+    // listing (fix(chat): separate operator and agent dialog lanes).
     let (status, sessions) = fleet.http("GET", "/api/sessions", &json!({}));
-    assert_eq!(status, 200, "sessions list: {sessions}");
+    assert_eq!(status, 200, "operator lane: {sessions}");
+    let rows = sessions["sessions"].as_array().expect("sessions");
+    assert!(
+        !rows.iter().any(|row| row["id"] == SESSION),
+        "agent session leaked into the operator lane: {sessions}"
+    );
+    let (status, sessions) = fleet.http("GET", "/api/sessions?kind=agent", &json!({}));
+    assert_eq!(status, 200, "agent lane: {sessions}");
     let rows = sessions["sessions"].as_array().expect("sessions");
     let row = rows
         .iter()
         .find(|row| row["id"] == SESSION)
-        .expect("agent session listed in /api/sessions");
+        .expect("agent session listed in the agent lane");
     assert_eq!(row["agent"], "act");
 
     // The declared how_append reached the session's tool env (injected at

@@ -89,7 +89,10 @@ impl FleetStore {
                 }
                 removed += 1;
                 self.conn
-                    .execute("DELETE FROM execution_assignments WHERE id=?1", [id.as_str()])
+                    .execute(
+                        "DELETE FROM execution_assignments WHERE id=?1",
+                        [id.as_str()],
+                    )
                     .await
                     .context("delete execution assignment")?;
                 self.conn

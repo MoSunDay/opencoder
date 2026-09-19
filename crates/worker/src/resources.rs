@@ -205,9 +205,8 @@ fn copy_version(source: &Path, destination: &Path) -> Result<()> {
     for entry in std::fs::read_dir(source)
         .with_context(|| format!("read resource version dir {}", source.display()))?
     {
-        let entry = entry.with_context(|| {
-            format!("read resource version entry in {}", source.display())
-        })?;
+        let entry = entry
+            .with_context(|| format!("read resource version entry in {}", source.display()))?;
         let path = entry.path();
         if entry.file_type()?.is_symlink() {
             bail!(
@@ -220,7 +219,11 @@ fn copy_version(source: &Path, destination: &Path) -> Result<()> {
         } else {
             let target = destination.join(entry.file_name());
             std::fs::copy(&path, &target).with_context(|| {
-                format!("copy resource file {} -> {}", path.display(), target.display())
+                format!(
+                    "copy resource file {} -> {}",
+                    path.display(),
+                    target.display()
+                )
             })?;
             std::fs::File::open(&target)
                 .with_context(|| format!("reopen copied resource file {}", target.display()))?
@@ -253,8 +256,11 @@ mod tests {
     #[test]
     fn copy_version_error_names_source_path() {
         let dest = tempfile::tempdir().unwrap();
-        let err = copy_version(Path::new("/nonexistent-resource-version"), &dest.path().join("v1"))
-            .unwrap_err();
+        let err = copy_version(
+            Path::new("/nonexistent-resource-version"),
+            &dest.path().join("v1"),
+        )
+        .unwrap_err();
         let msg = format!("{err:#}");
         assert!(
             msg.contains("/nonexistent-resource-version"),

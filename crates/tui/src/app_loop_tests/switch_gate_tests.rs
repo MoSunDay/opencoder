@@ -71,10 +71,7 @@ async fn mode_switch_while_running_refuses_with_busy_flash() {
         let (chat, running, sys_tokens, mode_flash, mut cmd_rx) =
             drive_mode_switch(mode, true, 0).await;
         assert!(running, "running must stay true (turn still active)");
-        assert_eq!(
-            sys_tokens, 42,
-            "sys_tokens untouched: switch not applied"
-        );
+        assert_eq!(sys_tokens, 42, "sys_tokens untouched: switch not applied");
         let flash = mode_flash.expect("the busy refusal flash must be set");
         assert!(
             flash.0.contains("任务运行中不可切换状态"),

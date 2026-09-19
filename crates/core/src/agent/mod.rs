@@ -18,8 +18,9 @@ pub mod resource;
 
 pub use compose::compose_prompt;
 pub use meta::{
-    agent_description, agent_dir, agents_dir, list_agents, read_agent_meta, set_agents_dir_override,
-    validate_agent_name, AgentHistoryEntry, AgentMeta, AgentReferences, AgentRefs,
+    agent_description, agent_dir, agents_dir, list_agents, read_agent_meta,
+    set_agents_dir_override, validate_agent_name, AgentHistoryEntry, AgentMeta, AgentReferences,
+    AgentRefs,
 };
 pub use resource::{
     agent_skill_roots, agent_tools_dirs, all_tools_dirs, category_dir, list_resources,
@@ -130,8 +131,8 @@ fn resolve_file_agent(name: &str) -> Option<Agent> {
     // Description: the first non-empty soul line (a one-line identity),
     // else a stable generic label — derived through meta::agent_description
     // so the web card listing and the TUI picker share one implementation.
-    let description = meta::agent_description(name)
-        .unwrap_or_else(|| format!("Custom agent {name}"));
+    let description =
+        meta::agent_description(name).unwrap_or_else(|| format!("Custom agent {name}"));
     Some(Agent {
         name: name.into(),
         kind: AgentKind::Act,

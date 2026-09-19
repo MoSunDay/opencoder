@@ -308,9 +308,26 @@ pub(super) fn merge_into(cfg: &mut Config, value: serde_json::Value) {
             if let Some(dir) = d.get("wasm_dir").and_then(|v| v.as_str()) {
                 cfg.dag.wasm_dir = Some(std::path::PathBuf::from(dir));
             }
+            if let Some(root) = d.get("knowledge_root").and_then(|v| v.as_str()) {
+                cfg.dag.knowledge_root = Some(std::path::PathBuf::from(root));
+            }
+            if let Some(sandbox) = d.get("agent_sandbox") {
+                if let Ok(parsed) =
+                    serde_json::from_value::<crate::config::dag::AgentSandbox>(sandbox.clone())
+                {
+                    cfg.dag.agent_sandbox = parsed;
+                }
+            }
             if let Some(n) = d.get("nfs") {
                 if let Ok(parsed) = serde_json::from_value(n.clone()) {
                     cfg.dag.nfs = parsed;
+                }
+            }
+            // The op registry replaces as a whole map: partial per-op
+            // merging would silently blend two operators' intents.
+            if let Some(ops) = d.get("ops") {
+                if let Ok(parsed) = serde_json::from_value(ops.clone()) {
+                    cfg.dag.ops = parsed;
                 }
             }
         }
@@ -558,6 +575,32 @@ mod tests {
     /// The `dag` block (wasm pool root + nfs exposure) must merge from
     /// disk: without it `dag.wasm_dir` was silently dropped and the
     /// serving daemons always fell back to the data-dir default pool.
+    /// `dag.ops` merges as a whole-map replacement and stays empty when no
+    /// file mentions it (fail-closed default: nothing registered).
+    #[test]
+    fn merge_dag_block_ops_registry() {
+        let mut cfg = Config::default();
+        merge_into(
+            &mut cfg,
+            serde_json::json!({ "dag": { "ops": { "noop": { "command": "/bin/true" } } } }),
+        );
+        assert_eq!(cfg.dag.ops.len(), 1);
+        assert_eq!(cfg.dag.ops["noop"].command, "/bin/true");
+        assert!(cfg.dag.ops["noop"].env_keys.is_empty());
+        // A later file replacing the registry swaps it wholesale.
+        merge_into(
+            &mut cfg,
+            serde_json::json!({ "dag": { "ops": {
+                "probe": { "command": "/bin/true", "env_keys": ["A"] } } } }),
+        );
+        assert_eq!(cfg.dag.ops.len(), 1);
+        assert_eq!(cfg.dag.ops["probe"].env_keys, vec!["A".to_string()]);
+        // Files without a dag block never invent an op.
+        let mut fresh = Config::default();
+        merge_into(&mut fresh, serde_json::json!({ "model": "x" }));
+        assert!(fresh.dag.ops.is_empty());
+    }
+
     #[test]
     fn merge_dag_block_wasm_dir_and_nfs() {
         let mut cfg = Config::default();
@@ -577,6 +620,22 @@ mod tests {
         assert_eq!(cfg.dag.nfs.host, "127.0.0.1");
         assert!(cfg.dag.nfs.read_only);
 
+        // The knowledge-root + agent-sandbox knobs merge too (node-local
+        // DAG sandbox configuration survives a config reload).
+        let mut cfg = Config::default();
+        merge_into(
+            &mut cfg,
+            serde_json::json!({ "dag": { "knowledge_root": "/kb/root", "agent_sandbox": "runc" } }),
+        );
+        assert_eq!(
+            cfg.dag.knowledge_root.as_deref(),
+            Some(std::path::Path::new("/kb/root"))
+        );
+        assert_eq!(
+            cfg.dag.agent_sandbox,
+            crate::config::dag::AgentSandbox::Runc
+        );
+
         // A partial dag block leaves the rest at defaults (no leakage
         // between config files).
         let mut cfg = Config::default();
@@ -585,6 +644,11 @@ mod tests {
             serde_json::json!({ "dag": { "nfs": { "port": 1 } } }),
         );
         assert_eq!(cfg.dag.wasm_dir, None);
+        assert_eq!(cfg.dag.knowledge_root, None);
+        assert_eq!(
+            cfg.dag.agent_sandbox,
+            crate::config::dag::AgentSandbox::Host
+        );
         assert!(!cfg.dag.nfs.enabled);
         assert_eq!(cfg.dag.nfs.port, 1);
     }

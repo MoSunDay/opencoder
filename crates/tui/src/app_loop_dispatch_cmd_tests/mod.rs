@@ -116,7 +116,14 @@ async fn dispatch_popup(
     )
     .await;
     let chat_markers = marker_texts(chat);
-    (flow, cmd_rx, running, clear_confirm, mode_flash, chat_markers)
+    (
+        flow,
+        cmd_rx,
+        running,
+        clear_confirm,
+        mode_flash,
+        chat_markers,
+    )
 }
 
 /// Marker lines currently in the chat, as flat strings (assert helper).

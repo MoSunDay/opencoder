@@ -41,7 +41,20 @@ pub fn validate(spec: &DagSpec) -> Result<(), Vec<String>> {
         if !validate_step_slug(&step.name) {
             errs.push(format!("step name {:?} is not a valid slug", step.name));
         }
-        match &step.kind {
+        if let StepKind::Dynamic { source, template } = &step.kind {
+            errs.extend(
+                crate::dynamic::validate_source(source, &step.depends_on)
+                    .into_iter()
+                    .map(|e| format!("step {:?}: {e}", step.name)),
+            );
+            if matches!(template.as_ref(), StepKind::Dynamic { .. }) {
+                errs.push(format!(
+                    "step {:?}: dynamic template must be agent or wasm",
+                    step.name
+                ));
+            }
+        }
+        match step.kind.executable() {
             StepKind::Agent { prompt, .. } if prompt.trim().is_empty() => {
                 errs.push(format!("agent step {:?} has an empty prompt", step.name));
             }

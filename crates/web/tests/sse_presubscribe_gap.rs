@@ -38,6 +38,7 @@ const LIVE_MARKER: &str = "__post_subscribe_live__";
 async fn make_state() -> Arc<AppState> {
     let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
     Arc::new(AppState {
+        config_home: None,
         client_override: None,
         brain: opencoder_web::api_brain::mock_brain(store.clone()),
         store,

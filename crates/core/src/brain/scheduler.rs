@@ -26,6 +26,34 @@ pub struct BrainSchedulerRequest {
     pub artifacts: BTreeMap<String, super::ArtifactRef>,
 }
 
+/// Reusable scheduler configuration; flow is fixed by the v3 scheduler.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct SchedulerPlan {
+    pub schema_version: u32,
+    pub title: String,
+    pub objective: String,
+    #[serde(default)]
+    pub inputs: BTreeMap<String, Value>,
+    pub capability_ids: Vec<String>,
+    #[serde(default = "max_rounds")]
+    pub max_rounds: u32,
+}
+impl SchedulerPlan {
+    pub fn request(&self, inputs: BTreeMap<String, Value>) -> BrainSchedulerRequest {
+        let mut resolved = self.inputs.clone();
+        resolved.extend(inputs);
+        BrainSchedulerRequest {
+            schema_version: self.schema_version,
+            objective: self.objective.clone(),
+            inputs: resolved,
+            max_rounds: self.max_rounds,
+            capability_ids: self.capability_ids.clone(),
+            artifacts: BTreeMap::new(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct BrainCapabilityDescriptor {

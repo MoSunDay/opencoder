@@ -9,6 +9,7 @@ use opencoder_core::fleet::*;
 use serde_json::json;
 use std::sync::Arc;
 
+pub(crate) mod capabilities;
 mod submit;
 pub use submit::submit;
 
@@ -255,10 +256,13 @@ pub(super) async fn for_id(
     match state.fleet.index(id).await {
         Ok(Some(index)) => {
             let node_id = index.node_id.clone();
-            state
-                .hub
-                .call(&node_id, operation(index.execution_ref()))
-                .await
+            let operation = operation(index.execution_ref());
+            if capabilities::operation_requires_dynamic(&operation) {
+                if let Err(reply) = capabilities::require_dynamic(state, &index).await {
+                    return reply;
+                }
+            }
+            state.hub.call(&node_id, operation).await
         }
         Ok(None) => RpcReply::error(404, "execution id not found"),
         Err(error) => RpcReply::error(500, format!("index: {error:#}")),

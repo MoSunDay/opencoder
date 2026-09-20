@@ -53,6 +53,7 @@ async fn spawn_file_server() -> Srv {
     let _ = raw.busy_timeout(Duration::from_secs(5));
     let store: Arc<dyn Store> = Arc::new(ls);
     let state = Arc::new(opencoder_web::AppState {
+        config_home: None,
         brain: opencoder_web::api_brain::mock_brain(Arc::clone(&store)),
         store: Arc::clone(&store),
         workdir: std::env::temp_dir(),

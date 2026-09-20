@@ -2,7 +2,12 @@ use crate::Worker;
 use anyhow::{bail, Result};
 use opencoder_core::fleet::ExecutionKind;
 
-pub(super) fn validate(worker: &Worker, spec: &opencoder_dag::DagSpec, legacy: bool) -> Result<()> {
+pub(super) fn validate(
+    worker: &Worker,
+    config: &opencoder_core::Config,
+    spec: &opencoder_dag::DagSpec,
+    legacy: bool,
+) -> Result<()> {
     if spec
         .steps
         .iter()
@@ -17,15 +22,19 @@ pub(super) fn validate(worker: &Worker, spec: &opencoder_dag::DagSpec, legacy: b
     };
     // Wasm modules are pinned at accept so already-running runs keep
     // their frozen `_modules` copies through later pool publishes.
-    crate::dag_wasm_pin::pin(&worker.configuration()?, spec, &workflow_root)?;
+    crate::dag_wasm_pin::pin(config, spec, &workflow_root)?;
     if !spec.steps.iter().any(|step| {
         matches!(
-            &step.kind,
+            step.kind.executable(),
             opencoder_dag::StepKind::Wasm {
                 sandbox: Some(opencoder_dag::SandboxMode::Runc),
                 ..
             }
-        )
+        ) || (config.dag.agent_sandbox == opencoder_core::config::AgentSandbox::Runc
+            && matches!(
+                step.kind.executable(),
+                opencoder_dag::StepKind::Agent { .. }
+            ))
     }) {
         return Ok(());
     }
@@ -38,6 +47,17 @@ pub(super) fn validate(worker: &Worker, spec: &opencoder_dag::DagSpec, legacy: b
     }
     if !opencoder_dag_runtime::sandbox::runc::runc_available() {
         bail!("runc executable unavailable for requested DAG sandbox");
+    }
+    if config.dag.agent_sandbox == opencoder_core::config::AgentSandbox::Runc {
+        for step in &spec.steps {
+            if let opencoder_dag::StepKind::Agent { agent, .. } = step.kind.executable() {
+                opencoder_dag_runtime::sandbox::codex::resolve(
+                    config,
+                    agent.as_deref().unwrap_or("act"),
+                    &rootfs,
+                )?;
+            }
+        }
     }
     Ok(())
 }

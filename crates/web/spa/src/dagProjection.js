@@ -14,7 +14,7 @@ export const STEP_ERROR = 'error';
 export const STEP_SKIPPED = 'skipped';
 
 /// Event kind vocabulary (server validates uploads against the same set).
-export const RUN_EVENT_KINDS = ['run_started', 'step_started', 'step_done', 'run_finished'];
+export const RUN_EVENT_KINDS = ['run_started', 'step_started', 'step_done', 'step_progress', 'run_finished'];
 const STEP_KINDS = ['step_started', 'step_done'];
 
 /// frameToEvent(frame) — normalize one sse.js frame ({event, data, seq}) into
@@ -26,7 +26,7 @@ export function frameToEvent(frame) {
   if (!RUN_EVENT_KINDS.includes(kind)) {
     return null;
   }
-  const stepKinds = ['step_started', 'step_done'];
+  const stepKinds = ['step_started', 'step_done', 'step_progress'];
   const step = d.step === undefined || d.step === null || d.step === '' ? null : String(d.step);
   if (stepKinds.includes(kind) && !step) {
     return null; // a step event without a step name cannot fold anywhere
@@ -201,6 +201,7 @@ export function graphFromSpec(spec, stepStates, opts = {}) {
       data: {
         label: s.name,
         kindType: (s.kind && s.kind.type) || '',
+        instances: st.instances || null,
         status: statuses.get(s.name) || STEP_PENDING,
         output: typeof st.output === 'string' ? st.output : '',
         error: typeof st.error === 'string' ? st.error : '',

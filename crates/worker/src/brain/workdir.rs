@@ -1,20 +1,35 @@
 use crate::{journal::Record, Worker};
 use anyhow::Result;
+use opencoder_core::Config;
 use std::{path::PathBuf, sync::Arc};
 
-/// Effective opencoder workspace for sessions this node runs: the
-/// scheduling-configured workdir when set, else the node's startup workdir.
+#[cfg(test)]
+mod tests;
+
 pub(crate) fn node_workdir(worker: &Worker) -> PathBuf {
-    match worker.inner.scheduling.get().workdir {
-        Some(dir) => PathBuf::from(dir),
-        None => worker.inner.state.workdir.clone(),
-    }
+    worker
+        .inner
+        .scheduling
+        .get()
+        .workdir
+        .map(PathBuf::from)
+        .unwrap_or_else(|| worker.inner.state.workdir.clone())
 }
 
-fn with_workdir(state: &opencoder_web::AppState, workdir: PathBuf) -> Arc<opencoder_web::AppState> {
+fn managed(record: &Record) -> bool {
+    let input = &record.assignment.request.input;
+    input.get("_brain").is_some() || input.get("brain_scheduler").is_some()
+}
+
+fn with_workdir(
+    state: &opencoder_web::AppState,
+    workdir: PathBuf,
+    config_home: Option<PathBuf>,
+) -> Arc<opencoder_web::AppState> {
     Arc::new(opencoder_web::AppState {
         store: state.store.clone(),
         workdir,
+        config_home,
         handles: state.handles.clone(),
         nodes: state.nodes.clone(),
         controls: state.controls.clone(),
@@ -25,15 +40,21 @@ fn with_workdir(state: &opencoder_web::AppState, workdir: PathBuf) -> Arc<openco
     })
 }
 
+fn operator_env(worker: &Worker, record: &Record) -> Result<Option<(PathBuf, PathBuf)>> {
+    crate::operations::operator_env::resolve(
+        &worker.inner.layout,
+        record.assignment.request.kind,
+        &record.assignment.index.id,
+        record.annotations.get("operator_environment_version"),
+    )
+}
+
 pub fn for_record(worker: &Worker, record: &Record) -> Result<PathBuf> {
-    if record.assignment.request.input.get("_brain").is_none()
-        && record
-            .assignment
-            .request
-            .input
-            .get("brain_scheduler")
-            .is_none()
-    {
+    if let Some((_, workspace)) = operator_env(worker, record)? {
+        return Ok(workspace);
+    }
+    // Historical Brain Operators keep their existing isolated workspace.
+    if !managed(record) {
         return Ok(node_workdir(worker));
     }
     let path = worker
@@ -45,23 +66,63 @@ pub fn for_record(worker: &Worker, record: &Record) -> Result<PathBuf> {
     Ok(path)
 }
 
-pub async fn native_state(worker: &Worker, path: &str) -> Result<Arc<opencoder_web::AppState>> {
+pub(crate) fn session_dirs(worker: &Worker, record: &Record) -> Result<(PathBuf, Option<PathBuf>)> {
+    if let Some((home, workspace)) = operator_env(worker, record)? {
+        return Ok((workspace, Some(home)));
+    }
+    Ok((for_record(worker, record)?, None))
+}
+
+/// Reuse frozen admission settings for every follow-up and explicit resume.
+pub(crate) fn execution_config(worker: &Worker, record: &Record) -> Result<Option<Config>> {
+    if let Some((home, workspace)) = operator_env(worker, record)? {
+        return Ok(Some(Config::load_with_home(&workspace, Some(&home))?));
+    }
+    if managed(record) {
+        return record
+            .queue
+            .as_ref()
+            .map(|queued| queued.config.clone())
+            .map(Ok)
+            .unwrap_or_else(|| worker.configuration())
+            .map(Some);
+    }
+    Ok(None)
+}
+
+pub async fn native_state(
+    worker: &Worker,
+    path: &str,
+) -> Result<(Arc<opencoder_web::AppState>, Option<Config>)> {
     let state = &worker.inner.state;
     if let Some(id) = path
         .strip_prefix("/api/sessions/")
         .and_then(|tail| tail.split('/').next())
     {
         let journal = worker.inner.journal.lock().await;
-        if let Some(record) = journal.records.get(id).filter(|r| {
-            r.assignment.request.input.get("_brain").is_some()
-                || r.assignment.request.input.get("brain_scheduler").is_some()
-        }) {
-            return Ok(with_workdir(state, for_record(worker, record)?));
+        if let Some(record) = journal.records.get(id) {
+            if let Some((home, workspace)) = operator_env(worker, record)? {
+                return Ok((with_workdir(state, workspace, Some(home)), None));
+            }
+            if managed(record) {
+                // Keep admitted model/provider/AP settings in process. They do
+                // not belong in the managed child workspace.
+                let config = record
+                    .queue
+                    .as_ref()
+                    .map(|queued| queued.config.clone())
+                    .map(Ok)
+                    .unwrap_or_else(|| worker.configuration())?;
+                return Ok((
+                    with_workdir(state, for_record(worker, record)?, None),
+                    Some(config),
+                ));
+            }
         }
     }
     let workdir = node_workdir(worker);
     if workdir == state.workdir {
-        return Ok(state.clone());
+        return Ok((state.clone(), None));
     }
-    Ok(with_workdir(state, workdir))
+    Ok((with_workdir(state, workdir, None), None))
 }

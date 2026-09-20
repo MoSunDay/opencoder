@@ -39,7 +39,7 @@ def compatible(candidate, retained):
 
 
 def brain_preflight(settings, candidate, releases=()):
-    """Read-only v2 cutover guard, before warming or changing any service.
+    """Read-only supported-brain guard, before warming or changing any service.
 
     Worker admission repeats this check to close the race with a journal that
     changes after this preview. Incompatible fleet versions still cannot overlap.
@@ -59,7 +59,7 @@ def brain_preflight(settings, candidate, releases=()):
             payload = request.get("input") or {}
             if not isinstance(payload, dict):
                 payload = {}
-            legacy = ((request["kind"] == "brain" and payload.get("schema_version") != 2)
+            legacy = ((request["kind"] == "brain" and payload.get("schema_version") not in (2, 3))
                       or ("_brain" in payload and payload["_brain"].get("schema_version") != 2)
                       or "brain_receipt" in payload or "playbook_receipt" in payload)
             if legacy and assignment["index"]["status"] not in ("done", "error", "cancelled"):

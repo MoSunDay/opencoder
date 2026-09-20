@@ -1,4 +1,4 @@
-# 大脑固定图契约与运行协议
+# 大脑调度计划与运行协议
 
 大脑有两条协议。v2 使用 `input → 实例 → output → 路由 → 下一实例的 input` 的不可变图；v3 使用工程输入、能力目录和轮次终态事件的轻量调度。v2 计划仍按原校验器和执行内核运行，v3 不把完整 DAG 或子执行正文复制到脑状态。
 
@@ -9,6 +9,32 @@ v3 请求必须明确 `schema_version: 3`，根输入使用命名 JSON 输入，
 运行投影只保存 `run`、`operation` 和 `event` 的索引、状态、序号、引用及有限摘要。创建一轮时 control 通过统一 gateway 调用真实 Agent、Team、DAG、TODO 或 Operator；调度器随后停止，只有节点持久化终态并经 outbox 确认的事件才能唤醒下一次判断。当前轮次全部成功才越过屏障；任一失败终态立即取消兄弟操作并终止运行，迟到事件只记录。执行详情、消息、DAG 步骤和产物正文通过 `GET /api/executions/{execution_id}` 及所属节点查询。
 
 v3 入口为 `POST /api/brain/runs`、`GET /api/brain/runs/:id`、`GET /api/brain/runs/:id/events-page`、`GET /api/brain/runs/:id/rounds/:round` 和 `POST /api/brain/runs/:id/commands`；CLI 的 `brain runs` 支持创建、最小快照、轮次、事件及 pause/resume/cancel。v2 数据不迁移、不删除，旧运行保持只读兼容。
+
+## 可复用调度计划与工作台
+
+`/api/brain/plan-defs` 的版本 envelope 保持 `{id, version, plan, changelog, created_at, ...}`。新增 v3 计划内容：
+
+```json
+{"schema_version":3,"title":"修复并复测","objective":"完成修复并提交测试依据","inputs":{"repo":"example"},"capability_ids":["builtin-agent-act"],"max_rounds":32}
+```
+
+计划要求非空能力范围，保存前校验目录；版本仍沿用现有不可覆盖、相同内容幂等及顺序递增规则。列表提供 `schema_version` 区分历史图计划和调度计划。查询历史版本、版本比较保持原 URL 和 envelope。
+
+引用版本启动：
+
+```json
+{"schema_version":3,"id":"brain-review-001","node_id":"node-example","plan":{"id":"review-plan","version":1},"inputs":{"repo":"override"}}
+```
+
+服务端从版本解析目标、能力范围和轮次上限，运行输入按名称覆盖默认输入；不允许同时传入目标等计划字段覆盖版本。根 assignment 保存来源版本、解析后的 scheduler_request、原始幂等意图和能力范围元数据。回执为 `202 {schema_version:3, run_id, execution}`，重试相同意图复用运行，冲突意图返回 409。既有直接提交 v3 请求的方式继续支持。
+
+`GET /api/brain/runs/:id/view` 展示来源计划、所选能力、轮次 operation 索引及持久化决策摘要。每项 operation 增补 `execution_created` 和派发时能力元数据；预分配 ID 不代表子执行已创建。`rounds/:round` 返回相同的单轮投影。详情仍按 execution_id 查询，不将消息或产物复制到大脑投影。
+
+计划画布固定显示核心调度循环，能力库连接调度环节。运行页按轮展开，在同页复用五类执行组件；切换 execution_id 会重新挂载明细和订阅。新计划草稿与旧版缓存隔离，历史图计划保留只读页面。
+
+## 历史 v2 图契约
+
+以下记录历史固定图协议，供历史版本、运行及兼容路径核对；新工作台创建与执行使用上面的 v3 调度计划。
 
 ## 四类概念
 

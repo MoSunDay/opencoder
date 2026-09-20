@@ -3,10 +3,10 @@ use anyhow::{bail, Context, Result};
 use opencoder_core::{fleet::*, Config};
 use serde_json::{json, Value};
 
+use super::admission::{preparation, replay::accepted_reply};
 pub(super) use super::launch::{launch_locked, LaunchOutcome};
 
 pub(super) async fn create(worker: &Worker, mut assignment: Assignment) -> Result<RpcReply> {
-    let _gate = worker.inner.admission.lock().await;
     if let Err(error) = assignment.request.validate() {
         return Ok(RpcReply::error(400, error));
     }
@@ -34,46 +34,27 @@ pub(super) async fn create(worker: &Worker, mut assignment: Assignment) -> Resul
             "assignment ownership or kind mismatch",
         ));
     }
-    if let Some(existing) = worker
-        .inner
-        .journal
-        .lock()
-        .await
-        .records
-        .get(&assignment.index.id)
-        .cloned()
-    {
-        if assignment.request.kind == ExecutionKind::Project
-            && assignment.request.input.get("run_id").is_none()
-        {
-            assignment.request.input["run_id"] =
-                existing.assignment.request.input["run_id"].clone();
-        }
-        if existing.assignment.request != assignment.request {
-            return Ok(RpcReply::error(
-                409,
-                "execution id already accepted with different input",
-            ));
-        }
-        let mut body = json!(existing.assignment.index);
-        if assignment.request.kind == ExecutionKind::Project {
-            body["run_id"] = existing.assignment.request.input["run_id"].clone();
-        }
-        return Ok(RpcReply::ok(body));
+    // A durable acceptance is a read-only replay. It must not queue behind
+    // unrelated resource snapshots; otherwise a lost reply can never recover
+    // under sustained admission load.
+    if let Some(reply) = accepted_reply(worker, &mut assignment).await {
+        return Ok(reply);
+    }
+    // Preparation precedes admission; execution lifecycle locks are taken
+    // inside admission by dispatch. Sharing these gates creates a lock cycle
+    // when a cold Create and its retry reach queue launch concurrently.
+    let preparation = worker.preparation_gate(&assignment.index.id).await;
+    let preparing = preparation.lock_owned().await;
+    if let Some(reply) = accepted_reply(worker, &mut assignment).await {
+        return Ok(reply);
+    }
+    let gate = worker.inner.admission.lock().await;
+    // Another Create may have accepted this ID while we waited for the gate.
+    if let Some(reply) = accepted_reply(worker, &mut assignment).await {
+        return Ok(reply);
     }
     if let Some(error) = worker.admission_error() {
         return Ok(RpcReply::error(503, error));
-    }
-    if worker
-        .inner
-        .layout
-        .execution_dir(assignment.index.kind, &assignment.index.id)?
-        .exists()
-    {
-        return Ok(RpcReply::error(
-            409,
-            "execution directory exists without a durable journal record",
-        ));
     }
     if assignment.definition.is_none()
         && !matches!(
@@ -94,18 +75,65 @@ pub(super) async fn create(worker: &Worker, mut assignment: Assignment) -> Resul
     {
         return Ok(RpcReply::error(400, "unsupported execution kind"));
     }
-    if assignment.request.kind == ExecutionKind::Project {
-        super::project_admission::ensure_id(&mut assignment.request.input)?;
+    assignment = match preparation::begin(worker, assignment)? {
+        Ok(assignment) => assignment,
+        Err(reply) => return Ok(reply),
+    };
+    // Cold filesystem reads are bounded per node and serialized per execution,
+    // but never hold the gate needed by WASI admission, pause or cancellation.
+    drop(gate);
+    // Classify the frozen definition, including an interrupted preparation's
+    // original snapshot, before reserving bounded resource-copy capacity.
+    let resource_slot = if crate::resources::requires_agent_pool(&assignment) {
+        Some(
+            worker
+                .inner
+                .resource_preparations
+                .clone()
+                .acquire_owned()
+                .await?,
+        )
+    } else {
+        None
+    };
+    if let Some(error) = worker.admission_error() {
+        return Ok(RpcReply::error(503, error));
     }
-    let config = match prepare(worker, &assignment, false) {
+    let (prepared, (preparing, resource_slot)) =
+        prepare_create(worker, &assignment, (preparing, resource_slot)).await?;
+    let config = match prepared {
         Ok(config) => config,
         Err(error) => {
+            preparation::reject_project(worker, &assignment)?;
             return Ok(RpcReply::error(
                 400,
                 format!("execution preflight: {error:#}"),
-            ))
+            ));
         }
     };
+    // Fresh creations of operator executions materialize the per-execution
+    // home/workspace (frozen config snapshot) BEFORE the record is enqueued,
+    // so the first turn — and every restart resume — already resolves the
+    // isolated paths. Deliberately NOT inside `prepare`: resume/command
+    // paths re-run prepare for in-flight records, and materializing there
+    // would flip a legacy execution's workdir mid-flight.
+    if let Err(error) = preparation::blocking(|| {
+        super::operator_env::materialize(
+            &worker.inner.layout,
+            assignment.request.kind,
+            &assignment.index.id,
+            &config,
+        )
+    }) {
+        return Ok(RpcReply::error(
+            400,
+            format!("execution preflight: {error:#}"),
+        ));
+    }
+    let _gate = worker.inner.admission.clone().lock_owned().await;
+    if let Some(error) = worker.admission_error() {
+        return Ok(RpcReply::error(503, error));
+    }
     let project_run = if assignment.request.kind == ExecutionKind::Project {
         let action = assignment.request.input["action"]
             .as_str()
@@ -120,7 +148,13 @@ pub(super) async fn create(worker: &Worker, mut assignment: Assignment) -> Resul
         .await
         {
             Ok(run) => Some(run),
-            Err(error) => return Ok(super::project_admission::error_reply(error)),
+            Err(error) => {
+                let reply = super::project_admission::error_reply(error);
+                if reply.status == 409 {
+                    preparation::reject_project(worker, &assignment)?;
+                }
+                return Ok(reply);
+            }
         }
     } else {
         None
@@ -133,7 +167,11 @@ pub(super) async fn create(worker: &Worker, mut assignment: Assignment) -> Resul
         Lifecycle::default()
     };
     let record = Record {
-        annotations: serde_json::Value::Null,
+        annotations: if assignment.request.kind == ExecutionKind::Operator {
+            json!({"operator_environment_version": 1})
+        } else {
+            Value::Null
+        },
         queue: None,
         assignment,
         result: project_run
@@ -145,7 +183,15 @@ pub(super) async fn create(worker: &Worker, mut assignment: Assignment) -> Resul
         lifecycle,
     };
     let record = super::queue::enqueue(worker, record, config, false).await?;
-    super::queue::dispatch_locked(worker).await?;
+    preparation::finish(
+        &worker
+            .inner
+            .layout
+            .execution_dir(record.assignment.index.kind, &record.assignment.index.id)?,
+    )?;
+    drop(preparing);
+    drop(resource_slot);
+    let _gate = super::queue::dispatch_owned(worker, _gate).await?;
     let mut body = json!(
         worker.inner.journal.lock().await.records[&record.assignment.index.id]
             .assignment
@@ -188,9 +234,9 @@ fn dag_spec_agents(spec: Option<&str>) -> Option<Vec<String>> {
     Some(
         spec.steps
             .into_iter()
-            .filter_map(|step| match step.kind {
+            .filter_map(|step| match step.kind.executable() {
                 opencoder_dag::StepKind::Agent { agent, .. } => {
-                    Some(agent.unwrap_or_else(|| "act".into()))
+                    Some(agent.clone().unwrap_or_else(|| "act".into()))
                 }
                 _ => None,
             })
@@ -199,6 +245,56 @@ fn dag_spec_agents(spec: Option<&str>) -> Option<Vec<String>> {
 }
 
 pub(super) fn prepare(worker: &Worker, assignment: &Assignment, legacy: bool) -> Result<Config> {
+    prepare_with_config(
+        worker,
+        assignment,
+        legacy,
+        worker.configuration()?,
+        opencoder_core::agent::agents_dir(),
+    )
+}
+
+async fn prepare_create(
+    worker: &Worker,
+    assignment: &Assignment,
+    lease: preparation::Lease,
+) -> Result<(Result<Config>, preparation::Lease)> {
+    // Capture caller-scoped configuration before slow resource I/O crosses threads.
+    let config = worker.configuration()?;
+    let source = opencoder_core::agent::agents_dir();
+    let worker = worker.clone();
+    let assignment = assignment.clone();
+    preparation::run(lease, move || {
+        prepare_with_config(&worker, &assignment, false, config, source)
+    })
+    .await
+}
+
+pub(super) fn prepare_record(
+    worker: &Worker,
+    record: &Record,
+    assignment: &Assignment,
+    legacy: bool,
+) -> Result<Config> {
+    let config = crate::brain::workdir::execution_config(worker, record)?
+        .map(Ok)
+        .unwrap_or_else(|| worker.configuration())?;
+    prepare_with_config(
+        worker,
+        assignment,
+        legacy,
+        config,
+        opencoder_core::agent::agents_dir(),
+    )
+}
+
+fn prepare_with_config(
+    worker: &Worker,
+    assignment: &Assignment,
+    legacy: bool,
+    mut config: Config,
+    implicit_source: Option<std::path::PathBuf>,
+) -> Result<Config> {
     let input = &assignment.request.input;
     anyhow::ensure!(
         !(assignment.request.kind == ExecutionKind::Brain
@@ -212,7 +308,6 @@ pub(super) fn prepare(worker: &Worker, assignment: &Assignment, legacy: bool) ->
     if let Some(error) = worker.inner.persistence_error.lock().unwrap().as_ref() {
         bail!("node persistence unavailable: {error}");
     }
-    let mut config = worker.configuration()?;
     if let Some(settings) = &assignment.runtime {
         config.agent.runtime = settings.as_ref().clone();
     }
@@ -239,7 +334,7 @@ pub(super) fn prepare(worker: &Worker, assignment: &Assignment, legacy: bool) ->
         .clone()
         // An absent implicit pool permits built-in agents. An explicitly
         // configured source remains Some so pin rejects its disappearance.
-        .or_else(|| opencoder_core::agent::agents_dir().filter(|path| path.exists()));
+        .or_else(|| implicit_source.filter(|path| path.exists()));
     let root = if legacy {
         worker
             .inner
@@ -263,11 +358,12 @@ pub(super) fn prepare(worker: &Worker, assignment: &Assignment, legacy: bool) ->
         root
     };
     let new_snapshot = !root.exists();
-    if new_snapshot {
+    let requires_agents = crate::resources::requires_agent_pool(assignment);
+    if new_snapshot && requires_agents {
         crate::resources::check_mount(config.agent.agents_dir.as_deref())?;
     }
     std::fs::create_dir_all(root.parent().unwrap())?;
-    let source = source.filter(|_| crate::resources::requires_agent_pool(assignment));
+    let source = source.filter(|_| requires_agents);
     config.agent.agents_dir = crate::resources::pin(source.as_deref(), &root)?;
     let validated = (|| -> Result<()> {
         let prompt = assignment.request.input["prompt"].as_str().unwrap_or("");
@@ -279,7 +375,11 @@ pub(super) fn prepare(worker: &Worker, assignment: &Assignment, legacy: bool) ->
                 .as_ref()
                 .and_then(|d| d.get("spec").unwrap_or(d).get("steps"))
                 .and_then(Value::as_array)
-                .is_some_and(|steps| steps.iter().any(|s| s["kind"]["type"] == "agent")),
+                .is_some_and(|steps| {
+                    steps.iter().any(|s| {
+                        s["kind"]["type"] == "agent" || s["kind"]["template"]["type"] == "agent"
+                    })
+                }),
             _ => true,
         };
         opencoder_core::agent::scope::with_root_sync(config.agent.agents_dir.clone(), || {
@@ -338,13 +438,15 @@ pub(super) fn prepare(worker: &Worker, assignment: &Assignment, legacy: bool) ->
                         opencoder_dag::decode_spec(value.get("spec").unwrap_or(value))
                             .map_err(|e| anyhow::anyhow!(e))?;
                     opencoder_dag::validate(&spec).map_err(|e| anyhow::anyhow!(e.join("; ")))?;
-                    super::dag_preflight::validate(worker, &spec, legacy)?;
-                    agents.extend(spec.steps.into_iter().filter_map(|s| match s.kind {
-                        opencoder_dag::StepKind::Agent { agent, .. } => {
-                            Some(agent.unwrap_or_else(|| "act".into()))
-                        }
-                        _ => None,
-                    }));
+                    super::dag_preflight::validate(worker, &config, &spec, legacy)?;
+                    agents.extend(spec.steps.into_iter().filter_map(
+                        |s| match s.kind.executable() {
+                            opencoder_dag::StepKind::Agent { agent, .. } => {
+                                Some(agent.clone().unwrap_or_else(|| "act".into()))
+                            }
+                            _ => None,
+                        },
+                    ));
                 }
                 ExecutionKind::Todos => {
                     agents.push("workflow".into());
@@ -452,6 +554,13 @@ pub(super) fn prepare(worker: &Worker, assignment: &Assignment, legacy: bool) ->
                 }
                 let mut effective_envs = settings.map(|s| s.envs.clone()).unwrap_or_default();
                 effective_envs.extend(envs.clone());
+                if assignment.request.kind == ExecutionKind::Dag
+                    && config.dag.agent_sandbox == opencoder_core::config::AgentSandbox::Runc
+                {
+                    // dag_preflight validated the guest executable and node
+                    // credentials; a host CLI is not used by this sandbox.
+                    continue;
+                }
                 opencoder_session::harness::codex::configured_binary(
                     settings,
                     &effective_envs,
@@ -483,7 +592,7 @@ pub(crate) async fn start(
     id: &str,
     command: ExecutionCommand,
 ) -> Result<RpcReply> {
-    let _gate = worker.inner.admission.lock().await;
+    let _gate = worker.inner.admission.clone().lock_owned().await;
     let mut command = command;
     if matches!(command.action.as_str(), "plan" | "execute") && id.starts_with("project-") {
         match super::project_admission::existing(worker, &id[8..], &command.action, &command.input)
@@ -595,7 +704,7 @@ pub(crate) async fn start(
         effective.request.input["run_id"] = command.input["run_id"].clone();
         effective.request.input["action"] = record.result["next_action"].clone();
     }
-    let config = match prepare(worker, &effective, legacy) {
+    let config = match prepare_record(worker, &record, &effective, legacy) {
         Ok(config) => config,
         Err(error) => {
             return Ok(RpcReply::error(
@@ -624,7 +733,7 @@ pub(crate) async fn start(
         None
     };
     super::queue::enqueue(worker, record, config, true).await?;
-    super::queue::dispatch_locked(worker).await?;
+    let _gate = super::queue::dispatch_owned(worker, _gate).await?;
     let status = worker.inner.journal.lock().await.records[id]
         .assignment
         .index

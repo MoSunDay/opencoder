@@ -180,6 +180,13 @@ pub(crate) fn step_agent_name(step: &StepSpec) -> String {
 /// instruction. The context is the same object a wasm step receives as its
 /// `context.json` input file (delivered under `/workspace/context`).
 pub(crate) fn build_prompt(ctx: &StepCtx) -> String {
+    build_prompt_with_knowledge(ctx, ctx.knowledge_root.as_deref())
+}
+
+pub(crate) fn build_prompt_with_knowledge(
+    ctx: &StepCtx,
+    knowledge: Option<&std::path::Path>,
+) -> String {
     let prompt = match &ctx.step.kind {
         StepKind::Agent { prompt, .. } => prompt.clone(),
         _ => String::new(),
@@ -189,7 +196,7 @@ pub(crate) fn build_prompt(ctx: &StepCtx) -> String {
         "{}\n\n上游步骤输出（JSON）：\n{}\n\n{}\n\n如果本步骤需要产出结构化结果，请在最终回复的末尾追加一个 ```json 围栏代码块（fenced code block）包含该 JSON。",
         prompt,
         context,
-        knowledge_hint(ctx)
+        knowledge_hint(knowledge)
     )
 }
 
@@ -197,8 +204,8 @@ pub(crate) fn build_prompt(ctx: &StepCtx) -> String {
 /// form: host-sandbox sessions read the node's real tree). The mount is
 /// READ-ONLY — the prompt states the contract, the kernel/FsPerms enforces
 /// it for sandboxed steps.
-fn knowledge_hint(ctx: &StepCtx) -> String {
-    let Some(root) = ctx.knowledge_root.as_ref() else {
+fn knowledge_hint(knowledge: Option<&std::path::Path>) -> String {
+    let Some(root) = knowledge else {
         return String::new();
     };
     format!(

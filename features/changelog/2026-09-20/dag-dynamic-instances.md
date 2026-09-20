@@ -37,6 +37,7 @@ Commit: 7e71cbcfd669dd2cbaa5c94ab01945fd139557f0
 
 - DAG、运行时、控制面相关 Rust 套件通过；实例运行时 7 项、Worker 日志/查询 11 项、运行进度 2 项通过。
 - 真实进程验收 2 项通过，包含可用 runc 下的实际容器执行；浏览器两种来源、输入提交、实例切换、历史回放和连接中断恢复通过。
+- 最终独立快照 `522cd534` 的 Server→Worker→Chromium 验收通过（`/tmp/dynamic-browser-complete.log`）；实例终态、分页选择及日志截图与回执位于 `/tmp/opencoder-todo-workbench-lsBkNO/`。
 - SPA 全量 118 个文件、871 项测试通过（`/tmp/dynamic-spa-resume-complete.log`）；最终 SPA 构建通过（`/tmp/dynamic-spa-build-complete.log`）。
 - `cargo clippy --workspace --all-targets -- -D warnings`：零告警通过。
 - 工作区全量测试与最终构建：验证中，完成后补充实际结果。
@@ -44,3 +45,5 @@ Commit: 7e71cbcfd669dd2cbaa5c94ab01945fd139557f0
 ## 相关说明
 
 [使用与 API](../../../docs/dag-dynamic.md) · [纯域](../../../agents/dag/index.md) · [运行时](../../../agents/dag-runtime/index.md) · [平台行为](../../agent-platform/index.md)
+
+全量回归中另行处理的 [Brain 回执与报告通知](brain-wake-receipts.md)、[Host 容量轮询](host-capacity-read-only.md)、[TODO 兼容接口测试准备](todo-interrupt-fixture.md) 均保留了对应测试和原因记录。

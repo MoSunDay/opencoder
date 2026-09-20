@@ -46,8 +46,11 @@ export function skillsToCommands(skills) {
     .map((s) => ({ cmd: '$' + s.name, desc: String(s.description || ''), kind: 'skill', value: s.name }));
 }
 
-/// GET /api/agents items (+ builtin primaries merged in by chat.jsx) →
-/// `@` entries. `value` is the switch target for POST /api/sessions/:id/agent
+/// Agent entries for the `@` menu — the input list is mode-dependent and
+/// the caller (chat.jsx) decides: Operator mode passes the builtin primaries
+/// merged in front of the registered cards
+/// (`mergeBuiltinPrimaryAgentCards`), Agent mode passes the registered
+/// cards only. `value` is the switch target for POST /api/sessions/:id/agent
 /// (or the staged creation `agent`); `desc` carries the server-computed
 /// one-line identity (prompt-pool soul.md first line). Only primary-capable
 /// cards are selectable — the switch endpoint 400s on anything else, so

@@ -13,7 +13,7 @@ Commit: 06c69a687d4e5b8416df9376a48f112bd8eb2618
   CLI 门禁（verdict=pass 才 exit 0）；入口为 compat dispatch 的
   `input.prompt=base=… head=…`。
 - [项目管理](../agents/project/index.md) — goal/milestone/todo 与多执行器。
-- [版本化 Agent 与 NFS](../agents/agents/index.md) — 按 Agent 编辑四类资源、专属版本与共享池、只读导出；无全局激活（默认 agent 走 `--agent` > `config.agent.default` > "act"），memory 支持目录化多文件（`.md` 字典序聚合注入），资源树行内新建/改名。
+- [版本化 Agent 与 NFS](../agents/agents/index.md) — 按 Agent 编辑四类资源、专属版本与共享池、只读导出；无全局激活（默认 agent 走 `--agent` > `config.agent.default` > "act"），memory 支持目录化多文件（`.md` 字典序聚合注入），资源树行内新建/改名；引用卡 `run_mode: agent` 的 `kind=agent` 会话在节点上每回合跑 runc 容器（fail-closed 准入，见 [worker](../agents/worker/index.md)）。
 - [大脑调度工作台](brain/index.md) — 版本化本体计划、并发执行画布与回执恢复。
 - [大脑能力库](../agents/brain/index.md) — 能力录入、语义检索与路由。
 - [远程管理 CLI](../agents/ctl/index.md) — 对接 Server API 与退出码契约。

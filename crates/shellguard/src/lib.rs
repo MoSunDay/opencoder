@@ -4,7 +4,10 @@
 //! (MIT license, copyright the rippy authors) and adapted to the sandbox
 //! policy: every risk-bearing write is blocked; writes targeting `/dev/null`
 //! or `/tmp` are released; the working directory is NOT a release set.
-//! `Allow` passes; `Ask`/`Deny` block.
+//! `Allow` passes; `Ask`/`Deny` block. Unregistered (unknown) commands are
+//! allow-by-default — a policy choice, surfaced as typed
+//! [`AllowReason::UnknownCommand`] provenance — while unparseable input and
+//! dynamic command names keep failing closed.
 //!
 //! Pipeline: [`nesting`] bounds the input shape, [`parser`] turns it into a
 //! rable AST, [`ast`] classifies nodes, [`resolve`] statically resolves shell

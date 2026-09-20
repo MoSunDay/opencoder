@@ -103,7 +103,8 @@ fn scheduler_terminal(record: &Record) -> Result<Option<BrainSchedulerTerminalEv
         .events
         .last()
         .and_then(|event| event.seq)
-        .unwrap_or(0) as u64;
+        .unwrap_or(1)
+        .max(1) as u64;
     Ok(Some(BrainSchedulerTerminalEvent {
         run_id: run_id.into(),
         operation_id: operation_id.into(),

@@ -33,6 +33,10 @@ pub struct BundleSpec {
     /// bind-mounted READ-ONLY at `/workspace/knowledge`. Kernel-enforced:
     /// steps can read the tree but never modify it.
     pub knowledge: Option<KnowledgeMount>,
+    /// Optional read-only bind of a pinned agents pool at `/workspace/agent`
+    /// (host path): agent cards + the four shared pools, kernel-enforced ro.
+    /// Agent-session workloads set this; DAG steps leave it `None`.
+    pub agents: Option<PathBuf>,
     /// How `command` is interpreted. `WasmModule` (default) rewrites the
     /// first token under `/workspace/context` and wraps it in the
     /// `wasmtime run` CLI; `Direct` runs the argv verbatim (native
@@ -126,8 +130,8 @@ pub fn container_config(spec: &BundleSpec) -> Value {
 }
 
 /// The mounts array: proc + fresh /tmp + the rw context bind, plus the
-/// OPTIONAL read-only knowledge bind. Built imperatively because `json!`
-/// keeps `null` placeholders inside arrays.
+/// OPTIONAL read-only knowledge and agents-pool binds. Built imperatively
+/// because `json!` keeps `null` placeholders inside arrays.
 fn mounts(spec: &BundleSpec, bind_source: String) -> Value {
     let mut mounts = vec![
         json!({
@@ -157,6 +161,9 @@ fn mounts(spec: &BundleSpec, bind_source: String) -> Value {
     if let Some(knowledge) = knowledge_mount(spec) {
         mounts.push(knowledge);
     }
+    if let Some(agents) = agents_mount(spec) {
+        mounts.push(agents);
+    }
     Value::Array(mounts)
 }
 
@@ -172,6 +179,25 @@ fn knowledge_mount(spec: &BundleSpec) -> Option<Value> {
         .to_string();
     Some(json!({
         "destination": crate::exec::KNOWLEDGE_MOUNT,
+        "type": "bind",
+        "source": host,
+        "options": ["ro", "rbind"],
+    }))
+}
+
+/// The read-only agents-pool bind entry, or `None` when no pinned pool is
+/// requested (DAG steps). Same `ro` + `rbind` shape as the knowledge mount:
+/// the kernel enforces read-only, so agent cards and the four shared
+/// resource pools are visible to the session runner but immutable.
+fn agents_mount(spec: &BundleSpec) -> Option<Value> {
+    let host = spec
+        .agents
+        .as_ref()?
+        .to_string_lossy()
+        .trim_end_matches('/')
+        .to_string();
+    Some(json!({
+        "destination": crate::exec::AGENTS_MOUNT,
         "type": "bind",
         "source": host,
         "options": ["ro", "rbind"],
@@ -289,6 +315,12 @@ pub fn write_bundle(dir: &Path, spec: &BundleSpec) -> Result<PathBuf> {
         fs::create_dir_all(rootfs.join(crate::exec::KNOWLEDGE_MOUNT.trim_start_matches('/')))
             .with_context(|| format!("mkdir knowledge mountpoint under {}", rootfs.display()))?;
     }
+    // The pinned agents-pool mountpoint: same pre-creation discipline —
+    // runc does not auto-create mountpoints under the readonly root.
+    if spec.agents.is_some() {
+        fs::create_dir_all(rootfs.join(crate::exec::AGENTS_MOUNT.trim_start_matches('/')))
+            .with_context(|| format!("mkdir agents mountpoint under {}", rootfs.display()))?;
+    }
     // The root image is read-only at execution time. Wasmtime's default
     // cache under /.cache cannot be created there; use the container's
     // existing private /tmp mount without changing the guest environment.
@@ -319,10 +351,12 @@ pub fn write_rootfs_template(out: &Path) -> Result<()> {
         "tmp",
         "usr/bin",
         "usr/lib",
-        // The bind-mount destination: runc does NOT auto-create mount
+        // The bind-mount destinations: runc does NOT auto-create mount
         // points inside the rootfs — a missing dir fails container init
-        // with a confusing "no such device" ENODEV.
+        // with a confusing "no such device" ENODEV. `workspace/agent` is
+        // the pinned read-only agents pool of agent-session workloads.
         "workspace/context",
+        "workspace/agent",
     ] {
         let dir = out.join(sub);
         fs::create_dir_all(&dir).with_context(|| format!("mkdir {}", dir.display()))?;
@@ -357,9 +391,11 @@ anything.
 2. Keep `etc/resolv.conf` in sync if your host resolver setup changes
    (copied from the host by `dag prepare-rootfs`; the sandbox shares the
    host network — there is no network namespace).
-3. `dev`, `proc`, `sys`, `tmp` and `workspace/context` are recreated as
-   empty runtime directories in each private copy. `proc` and `tmp` are
-   mounted at runtime; workspace/context receives the run artifacts bind.
+3. `dev`, `proc`, `sys`, `tmp`, `workspace/context` and `workspace/agent`
+   are recreated as empty runtime directories in each private copy. `proc`
+   and `tmp` are mounted at runtime; workspace/context receives the run
+   artifacts bind; workspace/agent is the (optional) read-only agents-pool
+   bind of agent-session workloads.
 4. Point `<workflow_root>/rootfs` at this tree. It must end up a REAL
    directory — runc rejects symlinked rootfs paths ("invalid rootfs: not an
    absolute path, or a symlink"), so move/copy the tree there or bind-mount
@@ -386,6 +422,7 @@ mod tests {
             env: vec![("OPENCODER_RUN_ID".into(), "run-1".into())],
             timeout_hint: Some(30),
             knowledge: None,
+            agents: None,
             argv: ArgvStyle::WasmModule,
         }
     }
@@ -519,6 +556,7 @@ mod tests {
             "usr/lib",
             "workspace",
             "workspace/context",
+            "workspace/agent",
         ] {
             assert!(out.join(sub).is_dir(), "missing {sub}");
         }
@@ -590,6 +628,72 @@ mod tests {
             !args
                 .iter()
                 .any(|a| a.as_str().unwrap_or("").contains("knowledge")),
+            "{args:?}"
+        );
+    }
+
+    #[test]
+    fn agents_mount_shapes_config_and_mountpoint() {
+        let tmp = tempfile::tempdir().unwrap();
+        let agents = tmp.path().join("agents-pool");
+        fs::create_dir_all(&agents).unwrap();
+        // run_root under a workflow dir whose shared rootfs pre-exists, so
+        // the write_bundle section below is exercisable with the same spec.
+        let workflow_root = tmp.path().join("workflow");
+        fs::create_dir_all(workflow_root.join("rootfs")).unwrap();
+        let mut this = spec(&workflow_root);
+        this.agents = Some(agents.clone());
+
+        let cfg = container_config(&this);
+        let mounts = cfg["mounts"].as_array().unwrap();
+        let bind = mounts
+            .iter()
+            .find(|m| m["destination"] == json!("/workspace/agent"))
+            .expect("agents bind present");
+        assert_eq!(bind["type"], "bind");
+        assert_eq!(bind["source"], agents.to_string_lossy().as_ref());
+        let opts = bind["options"].as_array().unwrap();
+        assert!(opts.contains(&json!("ro")), "{opts:?}");
+        assert!(opts.contains(&json!("rbind")), "{opts:?}");
+        // The agents pool serves the agent-session runner (Direct argv):
+        // the wasm argv never preopens it.
+        let args = cfg["process"]["args"].as_array().unwrap();
+        assert!(
+            !args
+                .iter()
+                .any(|a| a.as_str().unwrap_or("").contains("workspace/agent")),
+            "{args:?}"
+        );
+
+        // write_bundle creates the mountpoint in the private root tree and
+        // keeps it out of the shared one.
+        let bundle = write_bundle(&workflow_root.join("run-1.bundle"), &this).unwrap();
+        let cfg2: Value =
+            serde_json::from_str(&fs::read_to_string(bundle.join("config.json")).unwrap()).unwrap();
+        let ag2 = cfg2["mounts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|m| m["destination"] == json!("/workspace/agent"))
+            .unwrap();
+        assert_eq!(ag2["source"], agents.to_string_lossy().as_ref());
+        assert!(bundle.join("rootfs/workspace/agent").is_dir());
+        assert!(!workflow_root.join("rootfs/workspace").exists());
+    }
+
+    #[test]
+    fn agents_mount_absent_without_configuration() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cfg = container_config(&spec(tmp.path()));
+        let mounts = cfg["mounts"].as_array().unwrap();
+        assert!(!mounts
+            .iter()
+            .any(|m| m["destination"] == json!("/workspace/agent")));
+        let args = cfg["process"]["args"].as_array().unwrap();
+        assert!(
+            !args
+                .iter()
+                .any(|a| a.as_str().unwrap_or("").contains("agent")),
             "{args:?}"
         );
     }

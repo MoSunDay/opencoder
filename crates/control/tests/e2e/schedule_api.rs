@@ -349,6 +349,54 @@ async fn created_definition_fires_then_patch_disables() {
     assert_quiet(&h, "api_pinger", Duration::from_secs(4)).await;
 }
 
+/// dag schedules take `params.args` (appended to every wasm step's command
+/// line at fire time): create must accept it (previously any dag params were
+/// a 400) and the fire must land as a `fired` ledger row with the
+/// deterministic dag- id.
+#[tokio::test]
+async fn dag_schedule_with_args_creates_and_fires() {
+    let h = Harness::new().await;
+    write_fast_scan(&h);
+    // The dag fire path resolves the definition by target; seed one first.
+    let spec = json!({"name": "etl-args", "steps": [
+        {"name": "fetch", "kind": {"type": "wasm", "command": "tool.wasm"}},
+    ]});
+    let (status, body) = h
+        .req(
+            reqwest::Method::POST,
+            "/api/dag/defs",
+            Some(json!({"spec": spec})),
+        )
+        .await;
+    assert_eq!(status, 200, "seed dag def: {body}");
+
+    let (status, body) = create_schedule(
+        &h,
+        json!({"id": "dag_args", "cron": USER_AGENT_CRON, "kind": "dag",
+               "target": "etl-args", "params": {"args": "--date 2026-09-18"}}),
+    )
+    .await;
+    assert_eq!(status, 200, "create dag schedule with args: {body}");
+
+    let body = poll_runs(&h, "dag_args", |b| {
+        b["runs"]
+            .as_array()
+            .is_some_and(|runs| runs.iter().any(|r| r["status"] == "fired"))
+    })
+    .await;
+    let fired = body["runs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["status"] == "fired")
+        .expect("at least one fired tick: {body}");
+    let execution_id = fired["execution_id"].as_str().unwrap();
+    assert!(
+        execution_id.starts_with("dag-dag_args-"),
+        "deterministic id: {execution_id}"
+    );
+}
+
 /// DELETE stops the ticks but the ledger history remains queryable.
 #[tokio::test]
 async fn delete_stops_firing_but_keeps_history() {

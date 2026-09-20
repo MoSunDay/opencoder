@@ -264,6 +264,7 @@ mod tests {
             env: Vec::new(),
             timeout_hint: Some(30),
             knowledge: None,
+            agents: None,
             argv: crate::sandbox::oci::ArgvStyle::WasmModule,
         };
         stage_module(&spec.run_root, "smoke", HELLO_WAT);
@@ -293,6 +294,7 @@ mod tests {
                 env: Vec::new(),
                 timeout_hint: timed_out.then_some(5),
                 knowledge: None,
+                agents: None,
                 argv: crate::sandbox::oci::ArgvStyle::WasmModule,
             };
             stage_module(&spec.run_root, "loop", SPIN_WAT);
@@ -358,6 +360,7 @@ mod tests {
             env: Vec::new(),
             timeout_hint: Some(30),
             knowledge: None,
+            agents: None,
             argv: crate::sandbox::oci::ArgvStyle::WasmModule,
         };
         stage_module(&spec.run_root, "overflow", OVERFLOW_WAT);

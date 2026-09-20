@@ -6,6 +6,13 @@
 //! it. Builtin names always win — a custom agent can never shadow `act`
 //! or `plan`; file agents resolve read-only and degrade to `None` on any
 //! filesystem/parse failure, so callers fall back to builtin behavior.
+//!
+//! Boundary worth stating: builtin entries are the agent loop's runtime
+//! roles (the `act`/`plan`/`command` primary switch targets, the `workflow`
+//! TODO-internal scheduler, and the `explore`/`build` subagents), while
+//! file entries are registered capability cards — two different kinds of
+//! things that merely share this resolution layer as an implementation
+//! detail.
 
 use serde::{Deserialize, Serialize};
 
@@ -20,7 +27,7 @@ pub use compose::compose_prompt;
 pub use meta::{
     agent_description, agent_dir, agents_dir, list_agents, read_agent_meta,
     set_agents_dir_override, validate_agent_name, AgentHistoryEntry, AgentMeta, AgentReferences,
-    AgentRefs,
+    AgentRefs, RunMode,
 };
 pub use resource::{
     agent_skill_roots, agent_tools_dirs, all_tools_dirs, category_dir, list_resources,

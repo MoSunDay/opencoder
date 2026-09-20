@@ -131,6 +131,25 @@ impl Host {
                     // hibernated runtime is only represented by its saved
                     // final inventory — dropping the rows there is what
                     // stops the next sync from resurrecting the dialogs.
+                    let kind = match command.input.get("kind") {
+                        None => ExecutionKind::Operator,
+                        Some(value) => match serde_json::from_value::<ExecutionKind>(value.clone())
+                        {
+                            Ok(kind @ (ExecutionKind::Operator | ExecutionKind::Agent)) => kind,
+                            Ok(_) => {
+                                return Ok(RpcReply::error(
+                                    400,
+                                    "dialogs_clear only supports operator or agent",
+                                ))
+                            }
+                            Err(error) => {
+                                return Ok(RpcReply::error(
+                                    400,
+                                    format!("invalid dialogs_clear kind: {error}"),
+                                ))
+                            }
+                        },
+                    };
                     let requested: Vec<String> = command.input["sessions"]
                         .as_array()
                         .map(|rows| {
@@ -186,7 +205,9 @@ impl Host {
                             else {
                                 return true;
                             };
-                            if !requested.iter().any(|asked| asked == id) {
+                            if !requested.iter().any(|asked| asked == id)
+                                || index.get("kind").and_then(Value::as_str) != Some(kind.prefix())
+                            {
                                 return true;
                             }
                             let live = matches!(
@@ -207,7 +228,7 @@ impl Host {
                             .await?;
                     }
                     return Ok(opencoder_core::fleet::RpcReply::ok(
-                        json!({"ok":true,"removed":removed,"skipped":skipped,"forgotten":forgotten}),
+                        json!({"ok":true,"kind":kind,"removed":removed,"skipped":skipped,"forgotten":forgotten}),
                     ));
                 }
                 "configure_scheduling" => {

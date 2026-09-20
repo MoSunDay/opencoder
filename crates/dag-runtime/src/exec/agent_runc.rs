@@ -105,6 +105,9 @@ pub(crate) async fn execute_agent_step_runc(
         env,
         timeout_hint: ctx.step.timeout_secs,
         knowledge,
+        // DAG agent steps run against the node's normal agent resolution;
+        // only agent-session workloads pin a pool here.
+        agents: None,
         argv: crate::sandbox::oci::ArgvStyle::Direct,
     };
     // Bundles live next to the run root, never inside it (the run root is

@@ -162,10 +162,15 @@ pub async fn clear_dialogs(
         Ok(kind) => kind,
         Err(error) => return super::super::error_400(error),
     };
-    let indexes = match state.fleet.indexes(Some(&node), Some(kind), 500).await {
+    let mut indexes = match state.fleet.indexes(Some(&node), Some(kind), 500).await {
         Ok(rows) => rows,
         Err(e) => return response(RpcReply::error(500, e.to_string())),
     };
+    let visible = match super::super::session::visible_dialog_ids(&state, &node, kind).await {
+        Ok(ids) => ids,
+        Err(e) => return response(RpcReply::error(500, e.to_string())),
+    };
+    indexes.retain(|index| visible.contains(&index.id));
     let droppable = |status: &ExecutionStatus| {
         matches!(
             status,
@@ -185,6 +190,15 @@ pub async fn clear_dialogs(
         .filter(|ix| !droppable(&ix.status))
         .map(|ix| ix.id.clone())
         .collect();
+    if query.dry_run.unwrap_or(false) {
+        return response(RpcReply::ok(json!({
+            "ok": true,
+            "kind": kind,
+            "dry_run": true,
+            "selected": drop_ids,
+            "skipped": skipped,
+        })));
+    }
     let reply = state
         .hub
         .call(
@@ -192,7 +206,10 @@ pub async fn clear_dialogs(
             NodeOperation::Maintenance {
                 command: ExecutionCommand {
                     action: "dialogs_clear".into(),
-                    input: json!({ "sessions": drop_ids }),
+                    input: json!({
+                        "kind": kind,
+                        "sessions": drop_ids,
+                    }),
                 },
             },
         )
@@ -230,7 +247,7 @@ pub async fn clear_dialogs(
         .and_then(Value::as_u64)
         .unwrap_or(0);
     response(RpcReply::ok(
-        json!({"ok": true, "removed": removed, "skipped": skipped}),
+        json!({"ok": true, "kind": kind, "removed": removed, "skipped": skipped}),
     ))
 }
 

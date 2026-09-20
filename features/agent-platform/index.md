@@ -1,4 +1,4 @@
-Commit: c869027bad052c7ce91bdd0818f7be149b2b66dc
+Commit: f2d723ed2a32a5a394eac05f58bc5558e7cfe08f
 
 # Agent 调度平台
 
@@ -13,7 +13,7 @@ Web 控制台的 operator 与 agent 会话都通过控制面的执行派发入�
 
 ## 定时调度
 
-定时任务定义存控制面 libsql `schedules` 表（schema v27 事实源），`schedules.json` 降级为一次性 seed（表空才导入）；`id/cron/kind/target/params/enabled/timezone/overlap` 触发 agent/team/todos/dag/brain 既有执行入口，确定性执行 id `<kind>-<schedule_id>-<scheduled_for_ms>`；控制面统一调度，24h 追赶窗、密集 cron 折叠 `missed` 审计行、`overlap: skip` 防堆叠。新建条目首次扫描按同一 24h 窗口补跑最近一个到期 tick。台账 schema v26、定义 v27；admin CRUD + 手动立即触发 `POST /api/schedules/:id/run`（绕过 enabled/overlap），查询 `GET /api/schedules`、`/api/schedules/:id/runs`（admin-only），CLI `opencoder-cli schedule list|runs`，Web 控制台 Agent 分类「定时任务」页（`spa/src/schedule/panel.jsx`）全功能管理（新建/编辑/启停/删除/立即触发/触发历史 Drawer）。详见 [docs/agent-platform.md 定时调度](../../docs/agent-platform.md)。
+定时任务定义存控制面 libsql `schedules` 表（schema v27 事实源），`schedules.json` 降级为一次性 seed（表空才导入）；`id/cron/kind/target/params/enabled/timezone/overlap` 触发 agent/team/todos/dag/brain 既有执行入口（`params` 按类型消费：agent/team/todos 读 `prompt`——agent 触发即首轮消息、成功后回落追加进 how.md；dag 读 `args`——追加到每个 Wasm 步命令行；brain 读 `objective` 必填），确定性执行 id `<kind>-<schedule_id>-<scheduled_for_ms>`；控制面统一调度，24h 追赶窗、密集 cron 折叠 `missed` 审计行、`overlap: skip` 防堆叠。新建条目首次扫描按同一 24h 窗口补跑最近一个到期 tick。台账 schema v26、定义 v27；admin CRUD + 手动立即触发 `POST /api/schedules/:id/run`（绕过 enabled/overlap），查询 `GET /api/schedules`、`/api/schedules/:id/runs`（admin-only），CLI `opencoder-cli schedule list|runs`，Web 控制台 Agent 分类「定时任务」页（`spa/src/schedule/panel.jsx`）全功能管理（新建/编辑/启停/删除/立即触发/触发历史 Drawer）。详见 [docs/agent-platform.md 定时调度](../../docs/agent-platform.md)。
 
 ## 节点调度配置
 

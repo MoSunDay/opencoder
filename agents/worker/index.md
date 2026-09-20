@@ -1,4 +1,4 @@
-Commit: 586e56014aaa9d2ec59047a24a8cb5ca644d1249
+Commit: f2d723ed2a32a5a394eac05f58bc5558e7cfe08f
 
 # worker 模块
 
@@ -6,12 +6,28 @@ Commit: 586e56014aaa9d2ec59047a24a8cb5ca644d1249
 
 ## 索引
 - `crates/worker/src/service.rs` — 根执行与会话清单
-- `crates/worker/src/workloads/` — agent/team/dag/todos/project 适配器；`agent_how.rs` 是
+- `crates/worker/src/workloads/` — agent/team/dag/todos/project 适配器；`dag.rs`
+  的 `apply_input`（纯函数，带单测）把派发 input 折进冻结 spec：`prompt` 追加
+  各 Agent 步「执行要求」、`args`（非空字符串）追加到各 Wasm 步 command
+  （空白切分成 argv；每次 run/resume 基于冻结定义重新 decode，幂等）；
+  `agent_how.rs` 是
   `kind=agent` 会话的 how.md 契约：显式 `how_append` 缺失时以首条 `prompt` 作为 how
   追加内容；`declared_how_append`（8 KiB 预算，创建时经 harness envs 注入
   `OPENCODER_HOW_APPEND`，与 DAG agent 步同机制）、成功终态
   `append_to_how_md`（warn-only 不改结果）、`transcript_tail`/`agent_result` 产出
   `output_text`/`output_json`（Operator/Maintenance 仍只回 `{"session_id"}`）
+- `crates/worker/src/workloads/agent_runc.rs`（+ `agent_runc/events.rs` 事件尾随
+  解析）— `run_mode: agent` 会话运行时：目标 agent 卡钉 `Agent` 模式时
+  `kind=agent` 每个回合是一轮 runc 容器（`/usr/bin/agent-session-runner`、
+  `ArgvStyle::Direct`，bundle 在 `<workflow root>/bundles/agent-sessions/<id>`，
+  run root 种子 messages.json 全量 + 截断 events.ndjson + prompt.txt），host 只
+  tail `events.ndjson` 逐行经 `SessionEvent::from_sse` 还原入库（SSE 中继可看），
+  终局把 messages 增量折回 store；builtin agent 与缺卡/坏卡一律走 host。准入
+  fail-closed（`create.rs` prepare 与每轮 `preflight` 双检：runc、`<workflow
+  root>/rootfs`、LLM key）；`operations/command.rs` 与 `queue` 重放拦截 POST
+  prompt（staged 进执行 input 由 launch 执行，回 202 accepted；steer/queue/
+  compact/handoff 409），GET 保持原生。`events.rs`：只消费完整行、部分行留给
+  下次、坏行跳过仍计 offset、sidecar 帧丢弃、error 帧取最后一条
 - `src/operations/maintenance.rs` — 维护命令执行：`dialogs_clear` 接收控制面按
   Operator/Agent lane 筛选后的 id，活跃执行跳过，其余 `delete_sessions` +
   `journal.forget`（防下一次全量 IndexReport 复活）；两类执行都由同一

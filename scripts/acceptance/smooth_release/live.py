@@ -150,7 +150,13 @@ def exercise(args, settings, root):
     previous = Journal(settings.state_dir).data
     assert previous['current'] and previous['phase'] in ('complete', 'rolled_back'), 'first migration must already be complete'
     candidate = manifest.verify(args.bundle)
-    assert candidate['release_id'] != previous['current'], 'acceptance requires another release'
+    on_candidate = getattr(args, 'current_roundtrip', False)
+    if on_candidate:
+        assert args.signal and args.signal_roundtrip, 'current roundtrip requires signal rollback and republish'
+        assert candidate['release_id'] == previous['current'], 'current roundtrip requires the verified candidate already active'
+        assert previous.get('previous'), 'current roundtrip requires a rollback target'
+    else:
+        assert candidate['release_id'] != previous['current'], 'acceptance requires another release'
     old = previous['releases'][previous['current']]
     tag = root.name
     todo_id, dag_id = f'todos-{tag}', f'dag-{tag}-hold'
@@ -235,6 +241,8 @@ def exercise(args, settings, root):
     verify_stream(env, stream, dag_id)
     samples = observe(env, root, tag, args.observe_seconds)
     result = {'result': 'PASS', 'previous': old['id'], 'current': current['current'],
+        'started_on_candidate': on_candidate,
+        'rollback_target': previous['previous'] if on_candidate else old['id'],
         'signal': args.signal, 'signal_roundtrip': args.signal_roundtrip,
         'todo': todo_id, 'dag': dag_id, 'continuity': continuity['metrics'],
         'runtime_process': before, 'model_shell_process': model_shell,
@@ -252,11 +260,14 @@ def main():
     parser.add_argument('--observe-seconds', type=int, default=900)
     parser.add_argument('--signal', action='store_true', help='publish through the running Server signal protocol')
     parser.add_argument('--signal-roundtrip', action='store_true', help='also roll back and republish while old and new work remain running')
+    parser.add_argument('--current-roundtrip', action='store_true', help='verify rollback and republish after a separately verified initial activation')
     args = parser.parse_args()
     if args.observe_seconds < 900:
         parser.error('final acceptance requires at least 900 seconds of observation')
     if args.signal_roundtrip and not args.signal:
         parser.error('--signal-roundtrip requires --signal and two signal-capable releases')
+    if args.current_roundtrip and not (args.signal and args.signal_roundtrip):
+        parser.error('--current-roundtrip requires --signal --signal-roundtrip')
     settings = config.load(args.config)
     root = args.evidence_parent / ('release-live-' + secrets.token_hex(8))
     root.mkdir(parents=True)

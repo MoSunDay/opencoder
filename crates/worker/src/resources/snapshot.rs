@@ -19,9 +19,8 @@ pub(crate) fn pin(source: Option<&Path>, destination: &Path) -> Result<Option<Pa
         return Ok(Some(destination.into()));
     }
     let Some(source) = source else {
+        // This helper already syncs the new directory and its parent.
         opencoder_core::share_fs::durable_create_dir_all(destination)?;
-        std::fs::File::open(destination)?.sync_all()?;
-        std::fs::File::open(destination.parent().unwrap())?.sync_all()?;
         return Ok(Some(destination.into()));
     };
     let metadata = std::fs::symlink_metadata(source)

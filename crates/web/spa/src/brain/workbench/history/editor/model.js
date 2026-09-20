@@ -1,5 +1,5 @@
-import repairExample from '../../../../../../../examples/brain/repair-loop.json';
-import { newId } from '../../../fleet/model.js';
+import repairExample from '../../../../../../../../examples/brain/repair-loop.json';
+import { newId } from '../../../../fleet/model.js';
 export const documentPort = () => ({ description: '本次任务的具名 Markdown 文档', source: { kind: 'external' }, schema: { type: 'object', properties: { name: { type: 'string' }, markdown: { type: 'string' } }, required: ['name', 'markdown'] }, required: true });
 export function emptyPlan() { return { schema_version: 2, title: '', objective: '', inputs: {}, instances: [], outputs: {}, routes: [], entry: [] }; }
 export function createDraft(version) {

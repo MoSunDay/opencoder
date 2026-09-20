@@ -197,6 +197,25 @@ class DeploymentTests(unittest.TestCase):
             rollback(self.settings, self.operations)
         self.assertEqual(Journal(self.settings.state_dir).data["phase"], "rolling_back")
 
+    def test_failed_rollback_after_uncertain_activation_keeps_switch_recovery(self):
+        original = self.operations.http
+        def http(base, path, *args, **kwargs):
+            if path == "/runtimes/r2/activate":
+                raise TimeoutError("activation acknowledgement missing")
+            return original(base, path, *args, **kwargs)
+        self.operations.http = http
+        self.probes_candidate.side_effect = ["node-one", TimeoutError("rollback standby busy")]
+        with self.assertRaisesRegex(TimeoutError, "rollback standby busy"):
+            deploy(self.settings, Path("bundle"), self.operations)
+        result = Journal(self.settings.state_dir).data
+        self.assertEqual(self.operations.active, "r1")
+        self.assertEqual(result["current"], "r2", "journal contains switch intent, not confirmed ingress")
+        self.assertEqual(result["phase"], "rolling_back")
+        self.assertEqual(result["candidate"], "r2")
+        self.assertEqual(result["rollback_from_phase"], "switching")
+        self.assertFalse(result["rollback_switch_started"])
+        self.units_switch_ingress.assert_not_called()
+
     def test_republish_keeps_old_response_instances_and_retires_each_new_activation(self):
         endpoints = []
         original = self.operations.http

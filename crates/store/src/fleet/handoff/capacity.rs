@@ -3,6 +3,12 @@ use anyhow::{ensure, Context, Result};
 use libsql::{params, TransactionBehavior};
 use serde::Serialize;
 
+// The optimistic read and transactional update must use the same FIFO fence.
+const CLAIMABLE: &str = "ticket=?1 AND runtime_id=?2 AND phase='queued'
+    AND sequence=(SELECT min(sequence) FROM capacity_queue WHERE phase='queued')
+    AND (SELECT count(*) FROM capacity_queue WHERE phase='running')
+        < (SELECT max_runs FROM host_capacity WHERE singleton=1)";
+
 #[derive(Debug, Clone, Serialize)]
 pub struct CapacitySnapshot {
     pub max_runs: u64,
@@ -56,7 +62,28 @@ impl FleetStore {
         runtime: &str,
     ) -> Result<i64> {
         let _gate = self.gate.lock().await;
+        // Schedulers replay accepted tickets on every tick. An ignored INSERT
+        // still writes SQLite's AUTOINCREMENT counter and can starve admission.
+        if let Some(sequence) = self
+            .capacity_ticket_sequence(ticket, execution, runtime)
+            .await?
+        {
+            return Ok(sequence);
+        }
         self.conn.execute("INSERT INTO capacity_queue(ticket,execution_id,runtime_id,phase) VALUES (?1,?2,?3,'queued') ON CONFLICT(ticket) DO NOTHING", params![ticket,execution,runtime]).await?;
+        self.capacity_ticket_sequence(ticket, execution, runtime)
+            .await?
+            .context("capacity ticket disappeared after enqueue")
+    }
+
+    /// Caller holds this connection's gate; other connections may still race
+    /// the insertion, so ownership is checked on both reads.
+    async fn capacity_ticket_sequence(
+        &self,
+        ticket: &str,
+        execution: &str,
+        runtime: &str,
+    ) -> Result<Option<i64>> {
         let mut rows = self
             .conn
             .query(
@@ -64,28 +91,49 @@ impl FleetStore {
                 [ticket],
             )
             .await?;
-        let row = rows.next().await?.unwrap();
+        let Some(row) = rows.next().await? else {
+            return Ok(None);
+        };
         ensure!(
             row.get::<String>(1)? == execution
                 && row.get::<String>(2)? == runtime
                 && row.get::<String>(3)? != "done",
             "capacity ticket conflict"
         );
-        Ok(row.get(0)?)
+        Ok(Some(row.get(0)?))
     }
 
     /// Strict machine-wide FIFO, including retired runtimes. Heartbeat age is
     /// deliberately irrelevant: a missing host must never free live slots.
     pub async fn claim_capacity(&self, ticket: &str, runtime: &str) -> Result<bool> {
         let _gate = self.gate.lock().await;
+        let eligible = {
+            let mut rows = self
+                .conn
+                .query(
+                    &format!("SELECT EXISTS(SELECT 1 FROM capacity_queue WHERE {CLAIMABLE})"),
+                    params![ticket, runtime],
+                )
+                .await?;
+            rows.next()
+                .await?
+                .context("capacity eligibility missing")?
+                .get::<i64>(0)?
+                != 0
+        };
+        if !eligible {
+            return Ok(false);
+        }
         let tx = self
             .conn
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .await?;
-        let changed = tx.execute(
-            "UPDATE capacity_queue SET phase='running' WHERE ticket=?1 AND runtime_id=?2 AND phase='queued'
-             AND sequence=(SELECT min(sequence) FROM capacity_queue WHERE phase='queued')
-             AND (SELECT count(*) FROM capacity_queue WHERE phase='running') < (SELECT max_runs FROM host_capacity WHERE singleton=1)", params![ticket,runtime]).await?;
+        let changed = tx
+            .execute(
+                &format!("UPDATE capacity_queue SET phase='running' WHERE {CLAIMABLE}"),
+                params![ticket, runtime],
+            )
+            .await?;
         tx.commit().await?;
         Ok(changed == 1)
     }

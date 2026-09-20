@@ -145,6 +145,8 @@ fn step_ctx(workflow_root: &std::path::Path, command: &str, timeout_secs: Option
     };
     let step = spec.steps[0].clone();
     StepCtx {
+        instance: None,
+        instance_input: None,
         run_id: "run-1".into(),
         spec,
         step,
@@ -275,6 +277,17 @@ async fn cancel_token_maps_to_cancelled_outcome() {
     let res = execute_wasm_step_cancellable(&ctx, token).await;
     assert_eq!(res.outcome, StepOutcome::Cancelled, "{res:?}");
     drop(tmp);
+}
+
+#[tokio::test]
+async fn pre_cancelled_token_never_runs_guest() {
+    let (_tmp, root) = temp_workflow_with_module(OUTPUT_JSON_WAT);
+    let ctx = step_ctx(&root, "tool.wat", None);
+    let token = CancellationToken::new();
+    token.cancel();
+    let result = execute_wasm_step_cancellable(&ctx, token).await;
+    assert_eq!(result.outcome, StepOutcome::Cancelled, "{result:?}");
+    assert!(!ctx.dir().unwrap().join("output.json").exists());
 }
 
 /// In-memory node store for the `step_output` mirroring assertions.

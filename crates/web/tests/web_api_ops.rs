@@ -52,6 +52,7 @@ async fn state() -> Arc<opencoder_web::AppState> {
     let workdir = std::env::temp_dir().join(format!("oc-web-ops-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&workdir).ok();
     Arc::new(opencoder_web::AppState {
+        config_home: None,
         client_override: Some(Arc::new(MockChatClient::new()) as Arc<dyn ChatStream>),
         brain: opencoder_web::api_brain::mock_brain(store.clone()),
         store,
@@ -79,6 +80,7 @@ async fn state_with_reply(text: &str) -> Arc<opencoder_web::AppState> {
     let workdir = std::env::temp_dir().join(format!("oc-web-ops-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&workdir).ok();
     Arc::new(opencoder_web::AppState {
+        config_home: None,
         client_override: Some(mock),
         brain: opencoder_web::api_brain::mock_brain(store.clone()),
         store,

@@ -68,6 +68,7 @@ async fn streams_256_mib_artifact_with_bounded_frames_and_memory() {
     let page = fleet.nodes[0]
         .handle(NodeOperation::Artifact {
             request: ArtifactRequest {
+                index: None,
                 execution: index.execution_ref(),
                 step: "first".into(),
                 file: "output.txt".into(),
@@ -124,6 +125,7 @@ async fn streams_256_mib_artifact_with_bounded_frames_and_memory() {
     let stale = fleet.nodes[0]
         .handle(NodeOperation::Artifact {
             request: ArtifactRequest {
+                index: None,
                 execution: index.execution_ref(),
                 step: "first".into(),
                 file: "output.txt".into(),

@@ -36,3 +36,5 @@ mod teams_dag_defs;
 mod todo_templates_extra;
 mod todo_workflows;
 mod users_api;
+
+mod dag_instances;

@@ -56,7 +56,22 @@ pub async fn dispatch(
         bound_inputs.insert(name.clone(), value);
     }
     let prompt = format!(
-        "{}\nScheduler inputs:\n{}",
+        "You are executing one bounded capability task for the Brain scheduler.\n\
+         Capability: {} ({:?}), target: {}.\n\
+         Input contract: {}\nOutput contract: {}\n\
+         The Brain owns dispatching other capabilities, round barriers, collecting sibling execution IDs, \
+         and deciding completion of the root objective. Those duties are not part of this child task. \
+         Do not wait for sibling executions or repeat the root scheduling plan. \
+         Use the bound inputs and the registered capability instructions to produce this capability's \
+         result, then finish when that local result is verified. For a Team, completion and final_summary \
+         describe only this Team's assigned result.\n\
+         Root objective (context; apply only the portion assigned to this capability):\n{}\n\
+         Scheduler inputs:\n{}",
+        cap.capability_id,
+        cap.kind,
+        cap.target,
+        cap.input_desc,
+        cap.output_desc,
         scheduler_request["objective"].as_str().unwrap_or_default(),
         serde_json::to_string(&bound_inputs)?
     );

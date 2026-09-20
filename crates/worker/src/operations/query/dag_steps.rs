@@ -183,7 +183,7 @@ pub(in crate::operations) async fn execution_meta(
             anyhow::ensure!(
                 matches!(
                     value["outcome"].as_str(),
-                Some("pending" | "running" | "done" | "error" | "cancelled")
+                    Some("pending" | "running" | "done" | "error" | "cancelled")
                 ),
                 "unknown DAG step outcome"
             );

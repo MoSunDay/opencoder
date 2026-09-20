@@ -46,7 +46,7 @@ async fn state_with_config(agents_dir: &std::path::Path) -> Arc<opencoder_web::A
     )
     .unwrap();
     Arc::new(opencoder_web::AppState {
-                config_home: None,
+        config_home: None,
         client_override: Some(Arc::new(MockChatClient::new()) as Arc<dyn ChatStream>),
         brain: opencoder_web::api_brain::mock_brain(store.clone()),
         store,

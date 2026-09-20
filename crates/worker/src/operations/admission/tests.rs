@@ -357,12 +357,13 @@ async fn cancelled_preflight_holds_execution_and_copy_leases_until_io_finishes()
     assert!(lifecycle.try_lock().is_err());
     assert_eq!(capacity.available_permits(), 0);
     release.send(()).unwrap();
-    let _guard = tokio::time::timeout(std::time::Duration::from_secs(1), lifecycle.lock())
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(1);
+    let _guard = tokio::time::timeout_at(deadline, lifecycle.lock())
         .await
         .unwrap();
     // Tuple destruction releases the mutex before the semaphore. Observe
     // both releases instead of assuming the two drops are atomic.
-    let permit = tokio::time::timeout(std::time::Duration::from_secs(1), capacity.acquire())
+    let permit = tokio::time::timeout_at(deadline, capacity.acquire())
         .await
         .unwrap()
         .unwrap();

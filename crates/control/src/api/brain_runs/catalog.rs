@@ -50,13 +50,13 @@ pub async fn capabilities(state: &Arc<AppState>) -> anyhow::Result<Vec<Value>> {
         value["kind"] = target["kind"].clone();
         value["target"] = target["target"].clone();
         value["required_inputs"] = json!([]);
-        value["definition"] = json!({
-            "id": value["id"],
-            "capability_type": value["capability_type"],
-            "summary": value["summary"],
-            "input_desc": value["input_desc"],
-            "output_desc": value["output_desc"]
-        });
+        match registered_definition(state, &target).await {
+            Ok(definition) => value["definition"] = definition,
+            Err(error) => {
+                value["definition"] = Value::Null;
+                value["unavailable_reason"] = json!(error.to_string());
+            }
+        }
         value["version"] = json!("stored");
         value["maturity"] = json!("draft");
         capabilities.push(value);
@@ -126,6 +126,31 @@ pub async fn capabilities(state: &Arc<AppState>) -> anyhow::Result<Vec<Value>> {
     }
     Ok(capabilities)
 }
+async fn registered_definition(state: &Arc<AppState>, target: &Value) -> anyhow::Result<Value> {
+    let target: opencoder_core::fleet::CapabilityTarget = serde_json::from_value(target.clone())?;
+    let request = opencoder_core::fleet::CreateExecution {
+        id: format!("{}-catalog", target.kind.prefix()),
+        kind: target.kind,
+        target: Some(target.target.clone()),
+        input: json!({}),
+        node_id: None,
+    };
+    if let Some(definition) = crate::api::catalog::resolve(state, &request)
+        .await
+        .map_err(|reply| anyhow::anyhow!("capability target {}: {}", target.target, reply.body))?
+    {
+        return Ok(definition);
+    }
+    let config = opencoder_core::Config::load(&state.workdir)?;
+    let agent = opencoder_core::agent::scope::with_root_sync(config.agent.agents_dir, || {
+        opencoder_core::resolve_agent(&target.target)
+    })
+    .ok_or_else(|| anyhow::anyhow!("capability target {} unavailable", target.target))?;
+    Ok(
+        json!({"name":agent.name,"kind":agent.kind,"mode":agent.mode,"prompt":agent.prompt,"tools":agent.tools}),
+    )
+}
+
 pub async fn list(State(state): State<Arc<AppState>>) -> Response {
     match capabilities(&state).await {
         Ok(capabilities) => response(RpcReply::ok(json!({"capabilities":capabilities}))),

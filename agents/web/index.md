@@ -97,5 +97,5 @@ axum HTTP + SSE 会话管理 + 内嵌 SPA。
   （agent/team/todos→`prompt`、dag→`args`、brain→`objective` 必填），编辑
   合并 `initial.params` 其余键、agent 清 `how_append` 旧键；页面不再渲染
   种子语义提示
-- `spa/src/brain/workbench/` 编辑 v2 的 input、实例、output、路由，能力选择使用注册目录；`editor/` 管理端口、映射、出口与草稿。提交具名文档后，画布和 inspector 按 visit、output、route 展示活跃分支、等待原因、完成／验证证据和局部路由读集。v3 运行工作台只画目标、阶段、当前轮次和结果四个摘要节点，轮次按当前展开、历史折叠展示能力 operation 索引；点击 execution ID 复用 `ExecutionView` 托管抽屉读取节点明细，DAG 的步骤日志继续由原执行组件实时读取。
+- `spa/src/brain/workbench/` 使用固定核心调度循环；`scheduler/` 管理轻量计划表单、能力范围、v3 草稿、轮次记录和托管执行抽屉。`history/` 保留历史图查看与旧协议组件。新计划按版本复用，启动读取 `run_id`，原始图编辑入口退出主流程。轮次理由读取持久化事件，点击 execution ID 复用五类 `ExecutionView`；切换 ID 重新挂载，防止明细状态和订阅串用。
 - Brain 的校验、快照发布和执行由 [control](../control/index.md) 与 [brain](../brain/index.md) 提供；前端不另行推断路由或验证结果。历史旧格式只读，新写入提示迁移。

@@ -163,8 +163,26 @@ pub(in crate::operations) fn begin(
         .context("execution preparation parent missing")?;
     opencoder_core::share_fs::durable_create_dir_all(parent)?;
     let stage = parent.join(format!(".prepare-{}", ulid::Ulid::new()));
+    // A WASM-only request freezes an empty Agent namespace. Publish it with
+    // the reservation, sharing the same parent-directory durability barrier.
+    // Agent-bearing requests must still copy and validate their resource pool.
+    let empty_resources = if crate::resources::requires_agent_pool(&assignment) {
+        None
+    } else {
+        Some(
+            stage.join(
+                resource_root(worker, &assignment, false)?
+                    .strip_prefix(&root)
+                    .context("resource namespace must be inside execution root")?,
+            ),
+        )
+    };
     fs::create_dir(&stage)?;
     let result = (|| {
+        if let Some(resources) = &empty_resources {
+            fs::create_dir(resources)?;
+            fs::File::open(resources)?.sync_all()?;
+        }
         let mut options = fs::OpenOptions::new();
         options.create_new(true).write(true);
         #[cfg(unix)]
@@ -188,10 +206,33 @@ pub(in crate::operations) fn begin(
         // Only our unpublished reservation is removed; execution data and
         // existing journals are never deleted by admission recovery.
         let _ = fs::remove_file(stage.join(FILE));
+        if let Some(resources) = &empty_resources {
+            let _ = fs::remove_dir(resources);
+        }
         let _ = fs::remove_dir(&stage);
     }
     result?;
     Ok(Ok(assignment))
+}
+
+/// Undo the empty namespace published with a rejected Create reservation.
+/// Only Create calls this while holding its preparation lease. Accepted
+/// execution replays and Agent resource snapshots never enter this cleanup.
+pub(in crate::operations) fn discard_empty_resources(
+    worker: &Worker,
+    assignment: &Assignment,
+) -> Result<()> {
+    if crate::resources::requires_agent_pool(assignment) {
+        return Ok(());
+    }
+    let resources = resource_root(worker, assignment, false)?;
+    match fs::remove_dir(&resources) {
+        Ok(()) => fs::File::open(resources.parent().context("resource parent missing")?)?
+            .sync_all()
+            .map_err(Into::into),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error.into()),
+    }
 }
 
 /// Preserve rejected attempt identity without removing any execution data.
@@ -234,8 +275,12 @@ fn replace(path: &Path, pending: &PendingCreate) -> Result<()> {
 }
 
 pub(in crate::operations) fn finish(root: &Path) -> Result<()> {
+    // The accepted execution.json and its directory are already durable.
+    // If this unlink is lost on crash, journal recovery and accepted_reply
+    // still take precedence over the old reservation. Its removal needs no
+    // additional durability barrier in the acceptance path.
     match fs::remove_file(root.join(FILE)) {
-        Ok(()) => fs::File::open(root)?.sync_all().map_err(Into::into),
+        Ok(()) => Ok(()),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(error) => Err(error.into()),
     }

@@ -30,7 +30,8 @@ export function StepDrawer({ runId, step, specKind, onClose, onOpenRunLogs }) {
       .then((value) => {
         if (controller.signal.aborted) return;
         setReceipt(value);
-        if (value.kind === 'dynamic' && ['pending', 'running', 'cancelling'].includes(value.status)) timer = setTimeout(load, 2000);
+        // A terminal run can resume under the same identity while this drawer stays open.
+        if (value.kind === 'dynamic') timer = setTimeout(load, 2000);
       })
       .catch((e) => { if (!controller.signal.aborted) setReceiptError(e.message || '加载步骤回执失败'); });
     void load();

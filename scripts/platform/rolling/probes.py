@@ -173,13 +173,21 @@ def public(settings, record, operations, seconds):
     # Sending HUP confirms the reload request; the new workers may still be
     # starting. Verify the public version within the readiness budget.
     operations.wait(lambda: operations.http(settings.public_url, "/api/admin/release")["instance_release"] == record["id"],seconds)
+    inventory = operations.http(f"http://127.0.0.1:{record['runtime_port']}", "/inventory")
+    if inventory["runtime_id"] != record["id"] or inventory["build"]["git_commit"] != record["manifest"]["commit"]:
+        raise ValueError("public probe runtime differs from the activated release")
+    node_id = inventory["registration"]["id"]
     identifier = probe_id(record, public=True)
     submit_probe(operations, settings.public_url, identifier, {
-        "id": identifier, "kind": "dag", "input": {"definition": spec()}}, seconds)
+        "id": identifier, "kind": "dag", "node_id": node_id,
+        "input": {"definition": spec()}}, seconds)
     def finished():
         reply = operations.http(settings.public_url, f"/api/executions/{identifier}")
         # Inspection uses the shared five-field index plus runtime-owned detail.
-        phase = reply.get("execution", reply.get("index", reply)).get("status")
+        execution = reply.get("execution", reply.get("index", reply))
+        if execution.get("node_id") != node_id:
+            raise ValueError("public execution probe belongs to another node")
+        phase = execution.get("status")
         if phase in ("error", "interrupted", "cancelled"):
             raise ValueError(f"public execution probe failed: {phase}")
         return phase == "done"

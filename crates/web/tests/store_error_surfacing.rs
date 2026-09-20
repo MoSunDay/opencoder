@@ -161,6 +161,7 @@ impl Store for ErrorStore {
 async fn state_with_store(store: Arc<dyn Store>) -> Arc<opencoder_web::AppState> {
     let workdir = tempfile::tempdir().unwrap().keep();
     Arc::new(opencoder_web::AppState {
+                config_home: None,
         client_override: Some(Arc::new(MockChatClient::new()) as Arc<dyn ChatStream>),
         brain: opencoder_web::api_brain::mock_brain(store.clone()),
         store,

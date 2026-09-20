@@ -63,6 +63,7 @@ export function CanvasToolbar({ onAutoLayout, onFitView, problems, linkMode, onT
 }
 
 const PALETTE = [
+  { kindType: 'dynamic', icon: <NodeIndexOutlined />, title: '动态步骤', hint: '按文本或 argv 批次派生实例' },
   { kindType: 'agent', icon: <RobotOutlined />, title: 'Agent 步骤', hint: 'LLM 提示词执行' },
   { kindType: 'wasm', icon: <CodeOutlined />, title: 'Wasm 步骤', hint: '内嵌 wasm runtime / runc 沙箱' },
 ];

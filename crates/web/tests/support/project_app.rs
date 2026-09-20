@@ -53,6 +53,7 @@ pub async fn harness() -> Harness {
         .unwrap();
     *project.require().unwrap().archive_root.lock().unwrap() = dir.path().join("runs");
     let state = Arc::new(opencoder_web::AppState {
+                config_home: None,
         client_override: Some(mock.clone() as Arc<dyn ChatStream>),
         brain: opencoder_web::api_brain::mock_brain(store.clone()),
         store,

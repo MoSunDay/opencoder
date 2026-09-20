@@ -2,6 +2,7 @@ use super::FleetStore;
 use anyhow::{bail, ensure, Result};
 use libsql::params;
 use opencoder_core::{brain::*, fleet::valid_id};
+use serde_json::Value;
 
 pub(super) async fn initialize(conn: &libsql::Connection) -> Result<()> {
     conn.execute_batch("CREATE TABLE IF NOT EXISTS brain_plan_versions (id TEXT NOT NULL, version INTEGER NOT NULL, body TEXT NOT NULL, PRIMARY KEY(id,version));
@@ -14,6 +15,14 @@ impl FleetStore {
     /// Append-only, compare-and-swap version publication. Retrying the same
     /// exact version is idempotent; an existing version is never overwritten.
     pub async fn save_brain_plan(&self, version: &PlanVersion) -> Result<PlanDefinition> {
+        self.save_brain_plan_document(&serde_json::from_value(serde_json::to_value(version)?)?)
+            .await
+    }
+
+    pub async fn save_brain_plan_document(
+        &self,
+        version: &PlanVersion<Value>,
+    ) -> Result<PlanDefinition> {
         ensure!(
             valid_id(&version.id) && version.version > 0 && version.version <= i64::MAX as u64,
             "invalid plan identity"
@@ -40,7 +49,7 @@ impl FleetStore {
         }
     }
 
-    async fn save_brain_plan_tx(&self, version: &PlanVersion) -> Result<PlanDefinition> {
+    async fn save_brain_plan_tx(&self, version: &PlanVersion<Value>) -> Result<PlanDefinition> {
         let previous: Option<PlanDefinition> = self
             .definition_locked("brain_plan", &version.id)
             .await?
@@ -59,7 +68,10 @@ impl FleetStore {
         );
         let definition = PlanDefinition {
             id: version.id.clone(),
-            title: version.plan.title.clone(),
+            title: version.plan["title"]
+                .as_str()
+                .ok_or_else(|| anyhow::anyhow!("plan title missing"))?
+                .into(),
             latest_version: version.version,
             stable_version: previous.and_then(|p| p.stable_version),
             updated_at: version.created_at,
@@ -84,6 +96,16 @@ impl FleetStore {
     }
 
     pub async fn brain_plan_version(&self, id: &str, version: u64) -> Result<Option<PlanVersion>> {
+        self.brain_plan_document(id, version)
+            .await?
+            .map(|value| Ok(serde_json::from_value(serde_json::to_value(value)?)?))
+            .transpose()
+    }
+    pub async fn brain_plan_document(
+        &self,
+        id: &str,
+        version: u64,
+    ) -> Result<Option<PlanVersion<Value>>> {
         let _guard = self.gate.lock().await;
         self.brain_plan_version_locked(id, version).await
     }
@@ -91,7 +113,7 @@ impl FleetStore {
         &self,
         id: &str,
         version: u64,
-    ) -> Result<Option<PlanVersion>> {
+    ) -> Result<Option<PlanVersion<Value>>> {
         let mut rows = self
             .conn
             .query(
@@ -110,6 +132,17 @@ impl FleetStore {
         id: &str,
         before: Option<u64>,
     ) -> Result<Vec<PlanVersion>> {
+        self.brain_plan_documents(id, before)
+            .await?
+            .into_iter()
+            .map(|value| Ok(serde_json::from_value(serde_json::to_value(value)?)?))
+            .collect()
+    }
+    pub async fn brain_plan_documents(
+        &self,
+        id: &str,
+        before: Option<u64>,
+    ) -> Result<Vec<PlanVersion<Value>>> {
         let _guard = self.gate.lock().await;
         let mut rows = self.conn.query("SELECT body FROM brain_plan_versions WHERE id=?1 AND (?2 IS NULL OR version<?2) ORDER BY version DESC LIMIT 20",params![id,before.map(|v|v as i64)]).await?;
         let mut result = vec![];

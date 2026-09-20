@@ -27,6 +27,7 @@ async fn state(sid: &str) -> (Arc<opencoder_web::AppState>, Arc<SessionHandle>) 
     handles.lock().await.insert(sid.into(), handle.clone());
     (
         Arc::new(opencoder_web::AppState {
+            config_home: None,
             client_override: None,
             brain: opencoder_web::api_brain::mock_brain(store.clone()),
             store,

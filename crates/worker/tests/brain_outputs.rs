@@ -81,6 +81,7 @@ async fn managed_team_dag_todo_return_typed_downloadable_outputs() {
         let reply = node
             .handle(NodeOperation::Artifact {
                 request: ArtifactRequest {
+                    index: None,
                     execution: ExecutionRef { id, kind },
                     step: "brain-result".into(),
                     file: "output.json".into(),

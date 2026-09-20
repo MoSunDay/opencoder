@@ -52,6 +52,8 @@ fn spec(command: &str) -> DagSpec {
 /// A `StepCtx` built exactly like the dag-runtime wasm executor fixture.
 fn step_ctx(workflow_root: &std::path::Path, spec: DagSpec) -> StepCtx {
     StepCtx {
+        instance: None,
+        instance_input: None,
         log: None,
         run_id: "run-1".into(),
         step: spec.steps[0].clone(),

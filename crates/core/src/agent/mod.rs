@@ -71,7 +71,7 @@ impl ToolFilter {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Agent {
     pub name: String,
     pub kind: AgentKind,

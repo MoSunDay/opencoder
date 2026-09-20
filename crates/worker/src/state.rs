@@ -51,9 +51,12 @@ pub(crate) struct Inner {
     pub journal: Mutex<Journal>,
     pub active: Mutex<HashMap<String, CancellationToken>>,
     pub tasks: Arc<ExecutionTasks>,
+    pub background_tasks: Arc<ExecutionTasks>,
     pub lifecycle_gates: Mutex<HashMap<String, Arc<Mutex<()>>>>,
+    pub preparation_gates: Mutex<HashMap<String, Arc<Mutex<()>>>>,
     pub slots: Arc<Semaphore>,
-    pub admission: Mutex<()>,
+    pub admission: Arc<Mutex<()>>,
+    pub resource_preparations: Arc<Semaphore>,
     pub maintenance: std::sync::Mutex<HashMap<String, opencoder_session::extensions::Registration>>,
     pub _lock: File,
 }
@@ -135,6 +138,7 @@ impl Worker {
             .await?;
         *project.require()?.archive_root.lock().unwrap() = data_dir.join("project-runs");
         let state = Arc::new(opencoder_web::AppState {
+            config_home: None,
             store: store.clone(),
             workdir: options.workdir,
             handles: opencoder_web::handle::new_handle_map(),
@@ -219,9 +223,12 @@ impl Worker {
                 journal: Mutex::new(journal),
                 active: Mutex::new(HashMap::new()),
                 tasks: Arc::new(ExecutionTasks::new()),
+                background_tasks: Arc::new(ExecutionTasks::new()),
                 lifecycle_gates: Mutex::new(HashMap::new()),
+                preparation_gates: Mutex::new(HashMap::new()),
                 slots: Arc::new(Semaphore::new(MAX_NODE_RUNS)),
-                admission: Mutex::new(()),
+                admission: Arc::new(Mutex::new(())),
+                resource_preparations: Arc::new(Semaphore::new(4)),
                 maintenance: std::sync::Mutex::new(HashMap::new()),
                 _lock: lock,
             }),
@@ -336,11 +343,13 @@ impl Worker {
     }
 
     async fn wait_for_cleanup(&self, deadline: tokio::time::Instant) -> Result<()> {
-        let (tasks, owners) = tokio::join!(
+        let (tasks, background, owners) = tokio::join!(
             self.inner.tasks.wait(deadline),
+            self.inner.background_tasks.wait(deadline),
             opencoder_session::process::wait_for_owned_processes(deadline)
         );
         tasks?;
+        background?;
         owners?;
         anyhow::ensure!(
             self.inner.active.lock().await.is_empty(),
@@ -365,6 +374,15 @@ impl Worker {
     pub(crate) async fn lifecycle_gate(&self, id: &str) -> Arc<Mutex<()>> {
         self.inner
             .lifecycle_gates
+            .lock()
+            .await
+            .entry(id.to_string())
+            .or_insert_with(|| Arc::new(Mutex::new(())))
+            .clone()
+    }
+    pub(crate) async fn preparation_gate(&self, id: &str) -> Arc<Mutex<()>> {
+        self.inner
+            .preparation_gates
             .lock()
             .await
             .entry(id.to_string())
@@ -421,7 +439,9 @@ impl ChatStream for ConfiguredClient {
         request: opencoder_llm::ChatRequest,
     ) -> Result<tokio::sync::mpsc::Receiver<opencoder_llm::LlmEvent>> {
         let ep = self.0.resolve_endpoint()?;
-        opencoder_llm::ChatClient::from_config(&self.0, &ep)?.chat_stream(request)
+        opencoder_llm::ChatClient::from_config(&self.0, &ep)?.chat_stream(
+            opencoder_brain::activation::configured_request(&self.0, request),
+        )
     }
 }
 

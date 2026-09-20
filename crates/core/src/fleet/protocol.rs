@@ -254,6 +254,22 @@ pub enum NodeOperation {
         #[serde(default)]
         after_turn: u32,
     },
+    DagInstances {
+        execution: ExecutionRef,
+        step: String,
+        #[serde(default)]
+        index: Option<usize>,
+        #[serde(default)]
+        offset: usize,
+        limit: usize,
+    },
+    DagInstanceEvents {
+        execution: ExecutionRef,
+        step: String,
+        index: usize,
+        #[serde(default)]
+        after: i64,
+    },
     DagSteps {
         execution: ExecutionRef,
         #[serde(default)]

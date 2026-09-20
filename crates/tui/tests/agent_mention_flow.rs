@@ -10,9 +10,8 @@
 //!    `SessionEvent::AgentSwitch`, and persists the agent on the session
 //!    row. A name that resolves to nothing is rejected with an `Error`
 //!    event and leaves the session agent untouched.
-//! 2. Picker key path: the real catalog (`available_primary_agents`, which
-//!    mirrors the web `/api/agents` primary computation), the real
-//!    keystroke handler (`handle_agent_key`) and `pick_token` produce the
+//! 2. Picker key path: the custom-only catalog (`available_primary_agents`),
+//!    the real keystroke handler (`handle_agent_key`) and `pick_token` produce the
 //!    `/agent <name> ` composer text; submitting it applies the switch --
 //!    so a picker that drops its control head (tokens silently stop
 //!    switching) fails here, not just in unit tests.
@@ -227,12 +226,10 @@ async fn picker_pick_fills_control_head_and_switches() {
     let (dir, _g) = scoped_agents().await;
     write_file_agent(dir.path(), "writer", "Writer soul: drafts docs.");
 
-    // Catalog side: builtin primaries first, the file card appended, and
-    // every row is switchable (primary only -- no `workflow` scheduler row).
+    // Catalog side: only the registered file card is offered.
     let cards = available_primary_agents();
     let names: Vec<&str> = cards.iter().map(|c| c.name.as_str()).collect();
-    assert_eq!(&names[..3], &["act", "plan", "command"], "builtin order");
-    assert!(!names.contains(&"workflow"), "scheduler stays hidden");
+    assert_eq!(names, vec!["writer"], "builtin roles stay hidden");
     let writer = cards
         .iter()
         .find(|c| c.name == "writer")

@@ -43,6 +43,30 @@ fn options(root: &std::path::Path) -> WorkerOptions {
 }
 
 #[tokio::test]
+async fn stopping_scheduler_releases_node_ownership_while_admission_is_held() {
+    let root = tempfile::tempdir().unwrap();
+    let worker = Worker::open(options(root.path()), None).await.unwrap();
+    let admission = worker.inner.admission.lock().await;
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while Arc::strong_count(&worker.inner) == 1 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("scheduler must be waiting for admission with a Worker capture");
+    worker.inner.stopping.cancel();
+    worker
+        .wait_for_cleanup(tokio::time::Instant::now() + Duration::from_secs(1))
+        .await
+        .unwrap();
+    assert_eq!(Arc::strong_count(&worker.inner), 1);
+    drop(admission);
+    drop(worker);
+    let reopened = Worker::open(options(root.path()), None).await.unwrap();
+    reopened.shutdown().await.unwrap();
+}
+
+#[tokio::test]
 async fn shutdown_waits_for_the_entire_task_future_to_be_destroyed() {
     let root = tempfile::tempdir().unwrap();
     let worker = Worker::open(options(root.path()), None).await.unwrap();
@@ -70,4 +94,14 @@ async fn shutdown_waits_for_the_entire_task_future_to_be_destroyed() {
     drop(worker);
     let reopened = Worker::open(options(root.path()), None).await.unwrap();
     reopened.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn idle_scheduler_does_not_keep_runtime_awake() {
+    let root = tempfile::tempdir().unwrap();
+    let worker = Worker::open(options(root.path()), None).await.unwrap();
+    assert_eq!(worker.inner.background_tasks.active_count(), 1);
+    assert!(worker.can_hibernate().await);
+    worker.shutdown().await.unwrap();
+    assert_eq!(worker.inner.background_tasks.active_count(), 0);
 }

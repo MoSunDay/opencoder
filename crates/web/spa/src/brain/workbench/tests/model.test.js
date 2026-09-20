@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
-import { graph, launchBody, statusOf } from '../model.js';
-import { repairPlan } from '../editor/model.js';
+import { graph, launchBody, statusOf } from '../history/model.js';
+import { repairPlan } from '../history/editor/model.js';
 it('projects inputs, instances, multiple outputs and semantic loop routes with stable identities', () => {
  const plan = repairPlan([{ id: 'act', kind: 'agent', target: 'act', summary: '执行' }]);
  const a = graph(plan, [{ id: 'fix', counts: { running: 1 } }]); const b = graph(plan, [{ id: 'fix', counts: { succeeded: 1 } }]);

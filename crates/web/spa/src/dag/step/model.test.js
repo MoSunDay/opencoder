@@ -51,7 +51,7 @@ describe('dag step projections', () => {
     expect(finishedOf(frames)).toBe(done);
   });
   it('labels step kinds and detects agent steps', () => {
-    expect(STEP_KIND_LABEL).toEqual({ wasm: 'Wasm 步骤', agent: 'Agent 步骤' });
+    expect(STEP_KIND_LABEL).toEqual({ wasm: 'Wasm 步骤', agent: 'Agent 步骤', dynamic: '动态步骤' });
     expect(isAgentKind('agent')).toBe(true);
     expect(isAgentKind('wasm')).toBe(false);
     expect(isAgentKind(undefined)).toBe(false);

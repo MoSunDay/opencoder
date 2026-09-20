@@ -1,7 +1,9 @@
 //! Custom-only `/agent` catalog, using isolated on-disk registration cards.
 
 use opencoder_core::agent::set_agents_dir_override;
-use opencoder_tui::agent_menu::{available_primary_agents, AgentCard};
+use opencoder_tui::agent_menu::{
+    available_primary_agents, available_primary_agents_for, AgentCard,
+};
 
 static OVERRIDE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
@@ -87,5 +89,34 @@ fn builtin_named_directories_never_enter_the_catalog() {
             name: "writer".into(),
             description: "Writer soul.".into(),
         }]
+    );
+}
+
+#[test]
+fn configured_catalog_is_isolated_from_default_registration() {
+    let fixture = AgentsFixture::new();
+    fixture.write_agent("global-only", Some("Default registration"));
+    let configured = tempfile::tempdir().unwrap();
+    let mut config = opencoder_core::Config::default();
+    config.agent.agents_dir = Some(configured.path().to_path_buf());
+    assert!(available_primary_agents_for(&config).is_empty());
+
+    for name in ["writer", "act"] {
+        let card = configured.path().join(name);
+        std::fs::create_dir(&card).unwrap();
+        std::fs::write(card.join("meta.json"), format!(r#"{{"name":"{name}"}}"#)).unwrap();
+    }
+    assert_eq!(
+        available_primary_agents_for(&config),
+        vec![AgentCard {
+            name: "writer".into(),
+            description: "Custom agent writer".into(),
+        }]
+    );
+    assert_eq!(available_primary_agents()[0].name, "global-only");
+    config.agent.agents_dir = None;
+    assert_eq!(
+        available_primary_agents_for(&config),
+        available_primary_agents()
     );
 }

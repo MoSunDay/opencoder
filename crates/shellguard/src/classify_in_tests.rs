@@ -116,3 +116,58 @@ fn released_write_provenance_survives_compound_allow_ties() {
     assert!(!read.writes_state, "/dev/null does not persist state");
     cleanup_dir(&cwd);
 }
+
+// ---------------------------------------------------------------------------
+// Allow-by-default policy for unregistered (unknown) commands (2026-09-20):
+// a command name outside the handler registry no longer fails closed. Only
+// classified write surfaces block; unparseable input keeps failing closed.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn unknown_command_is_allowed_by_default() {
+    let cwd = plain_project_cwd("unknown-allow");
+    for cmd in ["pip list", "sudo ls", "kill -9 1234", "stdbuf -o0 grep -q x f"] {
+        let verdict = crate::classify_in(cmd, &cwd);
+        assert_eq!(verdict.decision, Decision::Allow, "{cmd}");
+        assert!(!verdict.writes_state, "{cmd} must not claim a write");
+        assert!(
+            verdict.reason.contains("unknown command"),
+            "{cmd} provenance must name the unknown command: {}",
+            verdict.reason
+        );
+    }
+    cleanup_dir(&cwd);
+}
+
+#[test]
+fn unknown_command_with_write_redirect_still_blocks() {
+    let cwd = plain_project_cwd("unknown-write");
+    // The unknown command's Allow must not launder a real write through the
+    // redirect pipeline (most-restrictive combination).
+    for cmd in ["unknown-prog > f", "unknown-prog > /var/x"] {
+        let verdict = crate::classify_in(cmd, &cwd);
+        assert_eq!(verdict.decision, Decision::Ask, "{cmd}");
+    }
+    cleanup_dir(&cwd);
+}
+
+#[test]
+fn unparseable_input_still_fails_closed() {
+    let cwd = plain_project_cwd("unparseable");
+    let verdict = crate::classify_in("make 2>&1)", &cwd);
+    assert_eq!(verdict.decision, Decision::Ask);
+    assert!(!verdict.reason.trim().is_empty());
+    cleanup_dir(&cwd);
+}
+
+#[test]
+fn registered_write_command_still_blocks_despite_unknown_default() {
+    let cwd = plain_project_cwd("known-write");
+    // `sudo touch x` is intentionally absent: sudo is unregistered, so under
+    // allow-by-default it passes without unwrapping (accepted policy risk).
+    for cmd in ["rm -rf x", "touch newfile"] {
+        let verdict = crate::classify_in(cmd, &cwd);
+        assert_ne!(verdict.decision, Decision::Allow, "{cmd} must block");
+    }
+    cleanup_dir(&cwd);
+}

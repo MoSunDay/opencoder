@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex};
 
 use opencoder_core::message::now_ms;
 use opencoder_dag::{StepKind, StepOutcome, StepSpec};
-use opencoder_session::{resume_and_replay as resume_session, run as run_session, SessionEvent};
+use opencoder_session::{run as run_session, SessionEvent, SessionState};
 use opencoder_store::{SessionMeta, TASK_TYPE_AGENT_STEP};
 use serde_json::Value;
 use tokio_util::sync::CancellationToken;
@@ -32,6 +32,13 @@ pub async fn execute_agent_step(
     deps: &ExecDeps,
     cancel: CancellationToken,
 ) -> StepResult {
+    let local_agent = match opencoder_core::agent::scope::with_root_sync(
+        deps.config.agent.agents_dir.clone(),
+        || super::how_copy::prepare(ctx),
+    ) {
+        Ok(agent) => agent,
+        Err(e) => return errored(format!("prepare local how.md: {e:#}")),
+    };
     // Node-configured sandbox dispatch: `dag.agent_sandbox = "runc"` moves
     // the whole session into a container before any host-side session work.
     if deps.config.dag.agent_sandbox == opencoder_core::config::AgentSandbox::Runc {
@@ -49,30 +56,38 @@ pub async fn execute_agent_step(
         &ctx.workflow_root,
         &ctx.run_id,
         &ctx.step.name,
+        ctx.instance,
         &session_id,
     );
     info!(run_id = %ctx.run_id, step = %ctx.step.name, %session_id, "dag agent step executing");
 
     // One token doubles as replay guard AND run-loop hard cancel (web parity:
     // the session owns its interrupt path through `session.cancel`).
-    let mut session = match resume_session(
-        deps.store.clone(),
-        &session_id,
-        deps.config.clone(),
-        deps.client.clone(),
-        deps.workdir.clone(),
-        Some(cancel.clone()),
-    )
-    .await
+    let mut config = deps.config.clone();
+    if let StepKind::Agent {
+        model: Some(model), ..
+    } = &ctx.step.kind
     {
-        Ok(s) => s,
-        Err(e) => return errored(format!("resume session: {e:#}")),
-    };
+        config.model = model.clone();
+    }
+    let mut session = SessionState::new(
+        session_id.clone(),
+        local_agent,
+        config,
+        deps.client.clone(),
+        if ctx.instance.is_some() {
+            ctx.dir().expect("validated execution path")
+        } else {
+            deps.workdir.clone()
+        },
+    )
+    .with_store(deps.store.clone())
+    .mark_session_created();
     session.cancel = Some(cancel.clone());
     // Fresh per-step turn token so an interrupt never leaks into later steps.
     session.turn_cancel = Some(Arc::new(Mutex::new(CancellationToken::new())));
     // Workflow-author-declared how.md append: visible to the session's
-    // tool processes as OPENCODER_HOW_APPEND, persisted after success.
+    // tool processes as OPENCODER_HOW_APPEND; the prompt reads the local copy.
     let how_append = match &ctx.step.kind {
         StepKind::Agent { how_append, .. } => how_append.clone(),
         _ => None,
@@ -80,6 +95,10 @@ pub async fn execute_agent_step(
     if how_append.is_some() {
         session.env_passthrough = super::how_append::env_pairs(how_append.as_deref());
     }
+    let dir = ctx.dir().expect("validated execution path");
+    session
+        .env_passthrough
+        .push(("OPENCODER_STEP_DIR".into(), dir.display().to_string()));
     // A read-only knowledge checkout must not attempt git index refreshes.
     if ctx.knowledge_root.is_some() {
         session
@@ -133,22 +152,6 @@ pub async fn execute_agent_step(
     }
     let output_json = extract_output_json_from(&text);
     let (outcome, error) = terminal_step(cancel.is_cancelled(), result.as_ref().err());
-    // Successful step: persist the declared how.md append (warn-only — a
-    // pool-write failure never flips a successful step to error).
-    if outcome == StepOutcome::Done {
-        if let Some(delta) = how_append.as_deref().filter(|d| !d.trim().is_empty()) {
-            match super::how_append::append_to_how_md(&step_agent_name(&ctx.step), delta) {
-                Ok(version) => info!(
-                    run_id = %ctx.run_id, step = %ctx.step.name, version,
-                    "how_append persisted to agent prompt pool"
-                ),
-                Err(e) => warn!(
-                    run_id = %ctx.run_id, step = %ctx.step.name, error = %e,
-                    "how_append persistence failed (step outcome unchanged)"
-                ),
-            }
-        }
-    }
     info!(
         run_id = %ctx.run_id,
         step = %ctx.step.name,

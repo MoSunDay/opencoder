@@ -112,7 +112,10 @@ pub struct DagEventView {
 }
 
 /// Event kind vocabulary (server validates uploads against this set).
-pub const DAG_EVENT_KINDS: [&str; 5] = [
+pub const DAG_EVENT_KINDS: [&str; 8] = [
+    "instance_started",
+    "instance_done",
+    "step_progress",
     "run_started",
     "step_started",
     "step_done",

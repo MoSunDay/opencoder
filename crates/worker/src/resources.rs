@@ -22,7 +22,7 @@ pub(crate) fn requires_agent_pool(assignment: &opencoder_core::fleet::Assignment
         .is_some_and(|spec| {
             spec.steps
                 .iter()
-                .all(|step| matches!(step.kind, opencoder_dag::StepKind::Wasm { .. }))
+                .all(|step| matches!(step.kind.executable(), opencoder_dag::StepKind::Wasm { .. }))
         })
 }
 

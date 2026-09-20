@@ -18,3 +18,5 @@ mod input_args;
 mod review_dags;
 mod structured_output;
 mod wasm_pool;
+
+mod dynamic;

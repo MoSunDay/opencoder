@@ -86,7 +86,8 @@ async function startMock() {
   mock = http.createServer(async (incoming, outgoing) => {
     const chunks = [];
     for await (const chunk of incoming) chunks.push(chunk);
-    const text = JSON.stringify(await responseFor(latestPrompt(Buffer.concat(chunks).toString())));
+    const raw = Buffer.concat(chunks).toString();
+    const text = JSON.stringify(await responseFor(latestPrompt(raw), JSON.parse(raw)));
     outgoing.writeHead(200, { 'content-type': 'text/event-stream' });
     outgoing.write(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { role: 'assistant', content: text }, finish_reason: null }] })}\n\n`);
     outgoing.write(`data: ${JSON.stringify({ choices: [{ index: 0, delta: {}, finish_reason: 'stop' }], usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } })}\n\n`);

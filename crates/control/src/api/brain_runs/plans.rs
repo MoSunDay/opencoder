@@ -114,9 +114,9 @@ fn agent_names(action: &ActionSpec) -> anyhow::Result<Vec<String>> {
                 .map_err(anyhow::Error::msg)?;
             spec.steps
                 .into_iter()
-                .filter_map(|s| match s.kind {
+                .filter_map(|s| match s.kind.executable() {
                     opencoder_dag::StepKind::Agent { agent, .. } => {
-                        Some(agent.unwrap_or_else(|| "act".into()))
+                        Some(agent.clone().unwrap_or_else(|| "act".into()))
                     }
                     _ => None,
                 })

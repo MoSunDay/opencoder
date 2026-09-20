@@ -256,7 +256,9 @@ pub async fn post_prompt(
     {
         return error_409("mode switch refused while drain running");
     }
-    let mut config = match Config::load(&state.workdir) {
+    // Operator isolation: sessions on a redirected state reload config from
+    // the execution's frozen home; other states have `config_home: None`.
+    let mut config = match Config::load_with_home(&state.workdir, state.config_home.as_deref()) {
         Ok(c) => c,
         Err(e) => return error_500(format!("config: {e:#}")),
     };
@@ -333,6 +335,7 @@ pub async fn post_prompt(
         delivery,
         client,
         state.workdir.clone(),
+        state.config_home.clone(),
         config,
         body.input_id,
         body.skill,

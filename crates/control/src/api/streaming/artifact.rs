@@ -12,6 +12,7 @@ use std::{io, sync::Arc};
 
 #[derive(Debug, Deserialize)]
 pub struct ArtifactQuery {
+    index: Option<usize>,
     step: String,
     file: Option<String>,
 }
@@ -30,7 +31,7 @@ pub async fn download(
         Ok(None) => return response(RpcReply::error(404, "execution id not found")),
         Err(error) => return response(RpcReply::error(500, format!("index: {error:#}"))),
     };
-    let first = fetch(&state, &index, &query.step, &file, 0, None).await;
+    let first = fetch(&state, &index, &query.step, query.index, &file, 0, None).await;
     let first = match decode_reply(first, 0, None, None) {
         Ok(chunk) => chunk,
         Err(reply) => return response(reply),
@@ -43,6 +44,7 @@ pub async fn download(
             state,
             index,
             step: query.step,
+            instance: query.index,
             file,
             total,
             version,
@@ -74,6 +76,7 @@ struct StreamState {
     state: Arc<AppState>,
     index: ExecutionIndex,
     step: String,
+    instance: Option<usize>,
     file: String,
     total: u64,
     version: String,
@@ -93,6 +96,7 @@ async fn next_chunk(mut state: StreamState) -> Option<(Result<Bytes, io::Error>,
                 &state.state,
                 &state.index,
                 &state.step,
+                state.instance,
                 &state.file,
                 state.next,
                 Some(&state.version),
@@ -113,16 +117,25 @@ async fn fetch(
     state: &AppState,
     index: &ExecutionIndex,
     step: &str,
+    instance: Option<usize>,
     file: &str,
     offset: u64,
     version: Option<&str>,
 ) -> RpcReply {
+    if instance.is_some() {
+        if let Err(reply) =
+            crate::api::executions::capabilities::require_dynamic(state, index).await
+        {
+            return reply;
+        }
+    }
     state
         .hub
         .call(
             &index.node_id,
             NodeOperation::Artifact {
                 request: ArtifactRequest {
+                    index: instance,
                     execution: index.execution_ref(),
                     step: step.to_owned(),
                     file: file.to_owned(),

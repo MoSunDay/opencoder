@@ -26,6 +26,7 @@ struct Ctx {
 async fn app(token: Option<&str>) -> Ctx {
     let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
     let state = Arc::new(opencoder_web::AppState {
+        config_home: None,
         brain: opencoder_web::api_brain::mock_brain(store.clone()),
         store: store.clone(),
         workdir: std::env::temp_dir(),

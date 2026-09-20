@@ -380,9 +380,13 @@ pub fn write_rootfs_template(out: &Path) -> Result<()> {
 const README_TEMPLATE: &str = r#"
 # DAG sandbox rootfs scaffold
 
-This directory is the provisioned rootfs template for `sandbox: runc` wasm
-steps. It is a scaffold: you must add a wasm runtime before runc can run
-anything.
+This directory is the provisioned rootfs template for runc DAG steps. It is
+a scaffold: install the runtime needed by the selected Wasm or Agent step.
+
+For Codex Agent steps, run `scripts/prepare-dag-rootfs.sh <rootfs> --codex
+<native-codex-binary>`. This installs the CLI, shell, Git, TLS and libraries.
+The executor mounts the node's original Codex home at launch; do not copy
+credentials into this image. Profile executable paths resolve inside it.
 
 1. Place a STATIC `wasmtime` CLI tree under `usr/` (build wasmtime with
    `cargo build --release` on the target arch and copy the binary plus any

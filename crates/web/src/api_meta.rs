@@ -133,7 +133,7 @@ pub async fn post_autopilot(
 /// "provider/model" ids. Sanitized by construction: api_key and header
 /// VALUES are never serialized — only provider name, model id, base_url.
 pub async fn get_models(State(state): State<Arc<AppState>>) -> Response {
-    let config = match Config::load(&state.workdir) {
+    let config = match Config::load_with_home(&state.workdir, state.config_home.as_deref()) {
         Ok(c) => c,
         Err(e) => return error_500(format!("config: {e:#}")),
     };
@@ -175,7 +175,7 @@ pub async fn get_models(State(state): State<Arc<AppState>>) -> Response {
 /// GET /api/skills — discovered skills with their enabled flag. Body text is
 /// deliberately omitted: the frontend only needs name + description.
 pub async fn get_skills(State(state): State<Arc<AppState>>) -> Response {
-    let config = match Config::load(&state.workdir) {
+    let config = match Config::load_with_home(&state.workdir, state.config_home.as_deref()) {
         Ok(c) => c,
         Err(e) => return error_500(format!("config: {e:#}")),
     };

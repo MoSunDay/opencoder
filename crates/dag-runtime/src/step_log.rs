@@ -106,8 +106,32 @@ impl StepOutputLog {
 
     /// [`StepOutputLog::new`] over an explicit writer (test seam).
     pub fn with_writer(writer: Arc<dyn EventWriter>, run_id: &str, step: &str) -> Self {
+        Self::with_identity(writer, run_id, step, None)
+    }
+
+    pub fn for_instance(
+        store: Arc<dyn Store>,
+        run_id: &str,
+        step: &str,
+        index: Option<usize>,
+    ) -> Self {
+        Self::with_identity(Arc::new(StoreWriter(store)), run_id, step, index)
+    }
+
+    fn with_identity(
+        writer: Arc<dyn EventWriter>,
+        run_id: &str,
+        step: &str,
+        index: Option<usize>,
+    ) -> Self {
         let (tx, rx) = mpsc::unbounded_channel();
-        let join = tokio::spawn(pump(writer, run_id.to_string(), step.to_string(), rx));
+        let join = tokio::spawn(pump(
+            writer,
+            run_id.to_string(),
+            step.to_string(),
+            index,
+            rx,
+        ));
         Self {
             tx,
             join: Arc::new(Mutex::new(Some(join))),
@@ -188,6 +212,7 @@ async fn pump(
     writer: Arc<dyn EventWriter>,
     run_id: String,
     step: String,
+    index: Option<usize>,
     mut rx: mpsc::UnboundedReceiver<Cmd>,
 ) {
     let mut pending = Pending::default();
@@ -199,7 +224,7 @@ async fn pump(
                 Some(Cmd::Push(stream, bytes)) => {
                     pending.push(stream, &bytes);
                     if pending.bytes >= FLUSH_BYTES {
-                        flush(&writer, &run_id, &step, &mut pending).await;
+                        flush(&writer, &run_id, &step, index, &mut pending).await;
                     }
                 }
                 // Stop (or every producer dropped): leave the loop so the
@@ -208,13 +233,13 @@ async fn pump(
             },
             _ = tick.tick() => {
                 if pending.due() {
-                    flush(&writer, &run_id, &step, &mut pending).await;
+                    flush(&writer, &run_id, &step, index, &mut pending).await;
                 }
             }
         }
     }
     pending.flush_partial();
-    flush(&writer, &run_id, &step, &mut pending).await;
+    flush(&writer, &run_id, &step, index, &mut pending).await;
 }
 
 /// Buffered output waiting for its batch: decoded segments in arrival order
@@ -284,7 +309,13 @@ impl Pending {
 }
 
 /// One append of everything buffered; failures are warn-and-drop.
-async fn flush(writer: &Arc<dyn EventWriter>, run_id: &str, step: &str, pending: &mut Pending) {
+async fn flush(
+    writer: &Arc<dyn EventWriter>,
+    run_id: &str,
+    step: &str,
+    index: Option<usize>,
+    pending: &mut Pending,
+) {
     pending.queued_at_ms = None;
     pending.bytes = 0;
     if pending.segments.is_empty() {
@@ -294,7 +325,11 @@ async fn flush(writer: &Arc<dyn EventWriter>, run_id: &str, step: &str, pending:
     let mut rows: Vec<SessionEventRecord> = Vec::new();
     for (stream, text) in std::mem::take(&mut pending.segments) {
         for chunk in split_chunks(&text, MAX_TEXT_BYTES) {
-            rows.push(event_record(run_id, step, stream, &chunk, at_ms));
+            let mut row = event_record(run_id, step, stream, &chunk, at_ms);
+            if let Some(index) = index {
+                row.payload["index"] = json!(index);
+            }
+            rows.push(row);
         }
     }
     if let Err(e) = writer.append(&rows).await {

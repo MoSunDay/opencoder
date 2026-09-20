@@ -177,7 +177,7 @@ async fn dag_run_progress_reports_running_step_while_in_flight() {
     assert_eq!(steps[1]["status"], json!("running"));
 
     // Running step without a terminal receipt: 200 with running status and null
-    // timings/output (no meta.json, no output.json on disk yet).
+    // output/finish time; the new attempt has a durable start receipt.
     let second = fleet
         .call(
             "GET",
@@ -188,7 +188,9 @@ async fn dag_run_progress_reports_running_step_while_in_flight() {
     assert_eq!(second.status, 200, "{second:?}");
     assert_eq!(second.body["status"], json!("running"));
     assert_eq!(second.body["output"], json!(null));
-    assert_eq!(second.body["started_at_ms"], json!(null));
+    assert!(second.body["started_at_ms"]
+        .as_i64()
+        .is_some_and(|at| at > 0));
     assert_eq!(second.body["finished_at_ms"], json!(null));
 
     // Wind the parked run down so the fleet can shut down cleanly.

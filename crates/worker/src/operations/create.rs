@@ -3,6 +3,7 @@ use anyhow::{bail, Context, Result};
 use opencoder_core::{fleet::*, Config};
 use serde_json::{json, Value};
 
+use super::admission::{preparation, replay::accepted_reply};
 pub(super) use super::launch::{launch_locked, LaunchOutcome};
 
 pub(super) async fn create(worker: &Worker, mut assignment: Assignment) -> Result<RpcReply> {
@@ -39,24 +40,15 @@ pub(super) async fn create(worker: &Worker, mut assignment: Assignment) -> Resul
     if let Some(reply) = accepted_reply(worker, &mut assignment).await {
         return Ok(reply);
     }
-    let _gate = worker.inner.admission.lock().await;
+    let lifecycle = worker.lifecycle_gate(&assignment.index.id).await;
+    let preparing = lifecycle.lock().await;
+    let gate = worker.inner.admission.lock().await;
     // Another Create may have accepted this ID while we waited for the gate.
     if let Some(reply) = accepted_reply(worker, &mut assignment).await {
         return Ok(reply);
     }
     if let Some(error) = worker.admission_error() {
         return Ok(RpcReply::error(503, error));
-    }
-    if worker
-        .inner
-        .layout
-        .execution_dir(assignment.index.kind, &assignment.index.id)?
-        .exists()
-    {
-        return Ok(RpcReply::error(
-            409,
-            "execution directory exists without a durable journal record",
-        ));
     }
     if assignment.definition.is_none()
         && !matches!(
@@ -77,16 +69,31 @@ pub(super) async fn create(worker: &Worker, mut assignment: Assignment) -> Resul
     {
         return Ok(RpcReply::error(400, "unsupported execution kind"));
     }
-    if assignment.request.kind == ExecutionKind::Project {
-        super::project_admission::ensure_id(&mut assignment.request.input)?;
+    assignment = match preparation::begin(worker, assignment)? {
+        Ok(assignment) => assignment,
+        Err(reply) => return Ok(reply),
+    };
+    // Cold filesystem reads are bounded per node and serialized per execution,
+    // but never hold the gate needed by WASI admission, pause or cancellation.
+    drop(gate);
+    // Classify the frozen definition, including an interrupted preparation's
+    // original snapshot, before reserving bounded resource-copy capacity.
+    let resource_slot = if crate::resources::requires_agent_pool(&assignment) {
+        Some(worker.inner.resource_preparations.acquire().await?)
+    } else {
+        None
+    };
+    if let Some(error) = worker.admission_error() {
+        return Ok(RpcReply::error(503, error));
     }
-    let config = match prepare(worker, &assignment, false) {
+    let config = match preparation::blocking(|| prepare(worker, &assignment, false)) {
         Ok(config) => config,
         Err(error) => {
+            preparation::reject_project(worker, &assignment)?;
             return Ok(RpcReply::error(
                 400,
                 format!("execution preflight: {error:#}"),
-            ))
+            ));
         }
     };
     // Fresh creations of operator executions materialize the per-execution
@@ -95,16 +102,22 @@ pub(super) async fn create(worker: &Worker, mut assignment: Assignment) -> Resul
     // isolated paths. Deliberately NOT inside `prepare`: resume/command
     // paths re-run prepare for in-flight records, and materializing there
     // would flip a legacy execution's workdir mid-flight.
-    if let Err(error) = super::operator_env::materialize(
-        &worker.inner.layout,
-        assignment.request.kind,
-        &assignment.index.id,
-        &config,
-    ) {
+    if let Err(error) = preparation::blocking(|| {
+        super::operator_env::materialize(
+            &worker.inner.layout,
+            assignment.request.kind,
+            &assignment.index.id,
+            &config,
+        )
+    }) {
         return Ok(RpcReply::error(
             400,
             format!("execution preflight: {error:#}"),
         ));
+    }
+    let _gate = worker.inner.admission.lock().await;
+    if let Some(error) = worker.admission_error() {
+        return Ok(RpcReply::error(503, error));
     }
     let project_run = if assignment.request.kind == ExecutionKind::Project {
         let action = assignment.request.input["action"]
@@ -120,7 +133,13 @@ pub(super) async fn create(worker: &Worker, mut assignment: Assignment) -> Resul
         .await
         {
             Ok(run) => Some(run),
-            Err(error) => return Ok(super::project_admission::error_reply(error)),
+            Err(error) => {
+                let reply = super::project_admission::error_reply(error);
+                if reply.status == 409 {
+                    preparation::reject_project(worker, &assignment)?;
+                }
+                return Ok(reply);
+            }
         }
     } else {
         None
@@ -149,6 +168,14 @@ pub(super) async fn create(worker: &Worker, mut assignment: Assignment) -> Resul
         lifecycle,
     };
     let record = super::queue::enqueue(worker, record, config, false).await?;
+    preparation::finish(
+        &worker
+            .inner
+            .layout
+            .execution_dir(record.assignment.index.kind, &record.assignment.index.id)?,
+    )?;
+    drop(preparing);
+    drop(resource_slot);
     super::queue::dispatch_locked(worker).await?;
     let mut body = json!(
         worker.inner.journal.lock().await.records[&record.assignment.index.id]
@@ -159,33 +186,6 @@ pub(super) async fn create(worker: &Worker, mut assignment: Assignment) -> Resul
         body["run_id"] = json!(run.id);
     }
     Ok(RpcReply::ok(body))
-}
-
-async fn accepted_reply(worker: &Worker, assignment: &mut Assignment) -> Option<RpcReply> {
-    let existing = worker
-        .inner
-        .journal
-        .lock()
-        .await
-        .records
-        .get(&assignment.index.id)
-        .cloned()?;
-    if assignment.request.kind == ExecutionKind::Project
-        && assignment.request.input.get("run_id").is_none()
-    {
-        assignment.request.input["run_id"] = existing.assignment.request.input["run_id"].clone();
-    }
-    if existing.assignment.request != assignment.request {
-        return Some(RpcReply::error(
-            409,
-            "execution id already accepted with different input",
-        ));
-    }
-    let mut body = json!(existing.assignment.index);
-    if assignment.request.kind == ExecutionKind::Project {
-        body["run_id"] = existing.assignment.request.input["run_id"].clone();
-    }
-    Some(RpcReply::ok(body))
 }
 
 /// List agents used by an inline Project executor. Legacy brain modes fail admission.
@@ -314,11 +314,12 @@ fn prepare_with_config(
         root
     };
     let new_snapshot = !root.exists();
-    if new_snapshot {
+    let requires_agents = crate::resources::requires_agent_pool(assignment);
+    if new_snapshot && requires_agents {
         crate::resources::check_mount(config.agent.agents_dir.as_deref())?;
     }
     std::fs::create_dir_all(root.parent().unwrap())?;
-    let source = source.filter(|_| crate::resources::requires_agent_pool(assignment));
+    let source = source.filter(|_| requires_agents);
     config.agent.agents_dir = crate::resources::pin(source.as_deref(), &root)?;
     let validated = (|| -> Result<()> {
         let prompt = assignment.request.input["prompt"].as_str().unwrap_or("");

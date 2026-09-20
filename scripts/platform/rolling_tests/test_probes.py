@@ -125,6 +125,37 @@ class CandidateProbeTests(unittest.TestCase):
             candidate_locked(None, self.record, operations, 1)
         self.assertEqual(operations.creates, 0)
 
+    def test_recovered_probe_still_requires_successful_runtime_execution(self):
+        operations = Candidate(self.record, accepted=True)
+        original = operations.http
+        def http(base, path, *args):
+            reply = original(base, path, *args)
+            if path == "/inventory":
+                reply["indexes"][0]["status"] = "error"
+            return reply
+        operations.http = http
+        with self.assertRaisesRegex(ValueError, "candidate probe failed"):
+            candidate_locked(None, self.record, operations, 1)
+        self.assertEqual(operations.creates, 0)
+
+    def test_recovered_probe_rejects_changed_input_and_activation_identity(self):
+        for field in ("input", "created_at", "node_id"):
+            operations = Candidate(self.record, accepted=True)
+            original = operations.http
+            def http(base, path, *args):
+                reply = original(base, path, *args)
+                if path == "/rpc":
+                    detail = reply["body"]
+                    if field == "input":
+                        detail["request"][field] = {"changed": True}
+                    else:
+                        detail["execution"][field] = "different"
+                return reply
+            operations.http = http
+            with self.subTest(field=field), self.assertRaisesRegex(ValueError, "conflicts"):
+                candidate_locked(None, self.record, operations, 1)
+            self.assertEqual(operations.creates, 0)
+
 
 if __name__ == "__main__":
     unittest.main()

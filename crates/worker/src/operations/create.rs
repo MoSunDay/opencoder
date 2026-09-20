@@ -44,7 +44,7 @@ pub(super) async fn create(worker: &Worker, mut assignment: Assignment) -> Resul
     // inside admission by dispatch. Sharing these gates creates a lock cycle
     // when a cold Create and its retry reach queue launch concurrently.
     let preparation = worker.preparation_gate(&assignment.index.id).await;
-    let preparing = preparation.lock().await;
+    let preparing = preparation.lock_owned().await;
     if let Some(reply) = accepted_reply(worker, &mut assignment).await {
         return Ok(reply);
     }
@@ -85,14 +85,23 @@ pub(super) async fn create(worker: &Worker, mut assignment: Assignment) -> Resul
     // Classify the frozen definition, including an interrupted preparation's
     // original snapshot, before reserving bounded resource-copy capacity.
     let resource_slot = if crate::resources::requires_agent_pool(&assignment) {
-        Some(worker.inner.resource_preparations.acquire().await?)
+        Some(
+            worker
+                .inner
+                .resource_preparations
+                .clone()
+                .acquire_owned()
+                .await?,
+        )
     } else {
         None
     };
     if let Some(error) = worker.admission_error() {
         return Ok(RpcReply::error(503, error));
     }
-    let config = match preparation::blocking(|| prepare(worker, &assignment, false)) {
+    let (prepared, (preparing, resource_slot)) =
+        prepare_create(worker, &assignment, (preparing, resource_slot)).await?;
+    let config = match prepared {
         Ok(config) => config,
         Err(error) => {
             preparation::reject_project(worker, &assignment)?;
@@ -236,7 +245,29 @@ fn dag_spec_agents(spec: Option<&str>) -> Option<Vec<String>> {
 }
 
 pub(super) fn prepare(worker: &Worker, assignment: &Assignment, legacy: bool) -> Result<Config> {
-    prepare_with_config(worker, assignment, legacy, worker.configuration()?)
+    prepare_with_config(
+        worker,
+        assignment,
+        legacy,
+        worker.configuration()?,
+        opencoder_core::agent::agents_dir(),
+    )
+}
+
+async fn prepare_create(
+    worker: &Worker,
+    assignment: &Assignment,
+    lease: preparation::Lease,
+) -> Result<(Result<Config>, preparation::Lease)> {
+    // Capture caller-scoped configuration before slow resource I/O crosses threads.
+    let config = worker.configuration()?;
+    let source = opencoder_core::agent::agents_dir();
+    let worker = worker.clone();
+    let assignment = assignment.clone();
+    preparation::run(lease, move || {
+        prepare_with_config(&worker, &assignment, false, config, source)
+    })
+    .await
 }
 
 pub(super) fn prepare_record(
@@ -248,7 +279,13 @@ pub(super) fn prepare_record(
     let config = crate::brain::workdir::execution_config(worker, record)?
         .map(Ok)
         .unwrap_or_else(|| worker.configuration())?;
-    prepare_with_config(worker, assignment, legacy, config)
+    prepare_with_config(
+        worker,
+        assignment,
+        legacy,
+        config,
+        opencoder_core::agent::agents_dir(),
+    )
 }
 
 fn prepare_with_config(
@@ -256,6 +293,7 @@ fn prepare_with_config(
     assignment: &Assignment,
     legacy: bool,
     mut config: Config,
+    implicit_source: Option<std::path::PathBuf>,
 ) -> Result<Config> {
     let input = &assignment.request.input;
     anyhow::ensure!(
@@ -296,7 +334,7 @@ fn prepare_with_config(
         .clone()
         // An absent implicit pool permits built-in agents. An explicitly
         // configured source remains Some so pin rejects its disappearance.
-        .or_else(|| opencoder_core::agent::agents_dir().filter(|path| path.exists()));
+        .or_else(|| implicit_source.filter(|path| path.exists()));
     let root = if legacy {
         worker
             .inner
@@ -400,7 +438,7 @@ fn prepare_with_config(
                         opencoder_dag::decode_spec(value.get("spec").unwrap_or(value))
                             .map_err(|e| anyhow::anyhow!(e))?;
                     opencoder_dag::validate(&spec).map_err(|e| anyhow::anyhow!(e.join("; ")))?;
-                    super::dag_preflight::validate(worker, &spec, legacy)?;
+                    super::dag_preflight::validate(worker, &config, &spec, legacy)?;
                     agents.extend(spec.steps.into_iter().filter_map(
                         |s| match s.kind.executable() {
                             opencoder_dag::StepKind::Agent { agent, .. } => {
@@ -516,6 +554,13 @@ fn prepare_with_config(
                 }
                 let mut effective_envs = settings.map(|s| s.envs.clone()).unwrap_or_default();
                 effective_envs.extend(envs.clone());
+                if assignment.request.kind == ExecutionKind::Dag
+                    && config.dag.agent_sandbox == opencoder_core::config::AgentSandbox::Runc
+                {
+                    // dag_preflight validated the guest executable and node
+                    // credentials; a host CLI is not used by this sandbox.
+                    continue;
+                }
                 opencoder_session::harness::codex::configured_binary(
                     settings,
                     &effective_envs,

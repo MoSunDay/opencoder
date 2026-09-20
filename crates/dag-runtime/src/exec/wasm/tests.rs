@@ -279,6 +279,17 @@ async fn cancel_token_maps_to_cancelled_outcome() {
     drop(tmp);
 }
 
+#[tokio::test]
+async fn pre_cancelled_token_never_runs_guest() {
+    let (_tmp, root) = temp_workflow_with_module(OUTPUT_JSON_WAT);
+    let ctx = step_ctx(&root, "tool.wat", None);
+    let token = CancellationToken::new();
+    token.cancel();
+    let result = execute_wasm_step_cancellable(&ctx, token).await;
+    assert_eq!(result.outcome, StepOutcome::Cancelled, "{result:?}");
+    assert!(!ctx.dir().unwrap().join("output.json").exists());
+}
+
 /// In-memory node store for the `step_output` mirroring assertions.
 async fn memory_store() -> std::sync::Arc<dyn opencoder_store::Store> {
     std::sync::Arc::new(opencoder_store::LibsqlStore::open_memory().await.unwrap())

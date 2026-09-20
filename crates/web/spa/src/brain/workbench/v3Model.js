@@ -7,6 +7,11 @@ export const V3_STATUS = {
   creating: '创建中', running: '执行中', done: '执行结束', error: '失败', cancelled: '已取消',
 };
 
+export const V3_CONNECTIONS = {
+  connecting: '连接中', reconnecting: '重连中', open: '实时连接', live: '实时连接',
+  closed: '连接已结束', failed: '连接失败',
+};
+
 export const V3_COLORS = {
   ready: 'cyan', deciding: 'purple', waiting: 'blue', paused: 'gold', blocked: 'red',
   completed: 'green', failed: 'red', cancelled: 'default', creating: 'gold', running: 'blue',

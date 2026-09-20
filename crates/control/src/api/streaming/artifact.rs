@@ -122,6 +122,13 @@ async fn fetch(
     offset: u64,
     version: Option<&str>,
 ) -> RpcReply {
+    if instance.is_some() {
+        if let Err(reply) =
+            crate::api::executions::capabilities::require_dynamic(state, index).await
+        {
+            return reply;
+        }
+    }
     state
         .hub
         .call(

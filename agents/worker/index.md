@@ -1,4 +1,4 @@
-Commit: 2f6b202def6c5e75d1411143570784a1576b3407
+Commit: 7e71cbcfd669dd2cbaa5c94ab01945fd139557f0
 
 # worker 模块
 
@@ -13,7 +13,7 @@ Commit: 2f6b202def6c5e75d1411143570784a1576b3407
   `agent_how.rs` 是
   `kind=agent` 会话的 how.md 契约：显式 `how_append` 缺失时以首条 `prompt` 作为 how
   追加内容；`declared_how_append`（8 KiB 预算，创建时经 harness envs 注入
-  `OPENCODER_HOW_APPEND`，与 DAG agent 步同机制）、成功终态
+  `OPENCODER_HOW_APPEND`）、成功终态
   `append_to_how_md`（warn-only 不改结果）、`transcript_tail`/`agent_result` 产出
   `output_text`/`output_json`（Operator/Maintenance 仍只回 `{"session_id"}`）
 - `crates/worker/src/workloads/agent_runc.rs`（+ `agent_runc/events.rs` 事件尾随
@@ -42,6 +42,12 @@ Commit: 2f6b202def6c5e75d1411143570784a1576b3407
   null，否则节点启动 workdir）；`_brain` 根执行固定用执行目录下 `workspace/`。
   保存时立即建目录，启动时确保存在，缺失仅告警降级不阻断节点启动；workdir 经
   `PUT /api/nodes/:id/scheduling`（maintenance `configure_scheduling`）设置。
+
+## DAG 实例查询
+
+`operations/query/instances/` 从原子展开清单和实例回执提供分页列表、详情与绝对进度；`DagInstances`、`DagInstanceEvents` 均携带逻辑步骤及实例 index。Agent 事件读取实例子会话，Wasm 按 step/index 和本次开始时间过滤运行日志；未开始的实例不借用旧日志游标。`operations/artifacts.rs` 复用带可选 index 的 `ArtifactRequest` 读取实例产物。
+
+资源准入和 Wasm 固定版本检查读取 `StepKind::executable()`，覆盖动态模板。DAG 的 how 追加由 [dag-runtime](../dag-runtime/index.md) 写入本地副本，普通 Agent 会话的资源追加仍由 `agent_how.rs` 管理。详见 [动态步骤接口](../../docs/dag-dynamic.md)。
 
 ## Brain 主流程
 

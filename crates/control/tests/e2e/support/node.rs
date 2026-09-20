@@ -50,6 +50,7 @@ struct Tables {
     artifacts_raw: HashMap<(String, String, String), Vec<RpcReply>>,
     /// When set, Create replies with this raw reply (no journaling).
     create_reply: Option<RpcReply>,
+    capability_reply: Option<RpcReply>,
     /// command name ("freeze"/"reopen"/"status") -> reply overriding the
     /// default admission behaviour (default side effects are skipped).
     admissions: HashMap<String, RpcReply>,
@@ -90,6 +91,10 @@ impl MockNode {
 
     pub fn seen_commands(&self) -> Vec<(String, String, Value)> {
         self.seen.lock().unwrap().clone()
+    }
+
+    pub fn set_capability_reply(&self, reply: RpcReply) {
+        self.tables.lock().unwrap().capability_reply = Some(reply);
     }
 
     pub fn set_inspect(&self, id: &str, body: Value) {
@@ -362,6 +367,13 @@ impl NodeService for MockNode {
     async fn handle(&self, operation: NodeOperation) -> RpcReply {
         let mut t = self.tables.lock().unwrap();
         match operation {
+            NodeOperation::Brain { action, .. } if action == "capability_probe" => {
+                t.capability_reply.clone().unwrap_or_else(|| {
+                    RpcReply::ok(json!({
+                        "compatible": true, "features": ["dag_dynamic_v1"]
+                    }))
+                })
+            }
             NodeOperation::Brain { .. } => {
                 RpcReply::error(501, "mock node does not implement brain activations")
             }

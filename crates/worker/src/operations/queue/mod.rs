@@ -268,7 +268,9 @@ pub(crate) async fn dispatch_locked(worker: &Worker) -> Result<()> {
 pub(crate) fn start_scheduler(worker: &Worker) {
     let weak = std::sync::Arc::downgrade(&worker.inner);
     let stop = worker.inner.stopping.clone();
-    worker.inner.tasks.spawn(async move {
+    // Track scheduler shutdown separately: an idle timer is not execution work
+    // and must not prevent an empty Runtime from hibernating.
+    worker.inner.background_tasks.spawn(async move {
         let mut tick = tokio::time::interval(std::time::Duration::from_millis(100));
         loop {
             tokio::select! { _ = stop.cancelled() => break, _ = tick.tick() => {} }

@@ -23,10 +23,7 @@ pub async fn create(State(state): State<Arc<AppState>>, Json(value): Json<Value>
         match state.fleet.assignment(id).await {
             Ok(Some(assignment)) => {
                 return response(if assignment.request.input["scheduler_intent"] == value {
-                    RpcReply {
-                        status: 202,
-                        body: json!({"schema_version":3,"run_id":id,"execution":assignment.index}),
-                    }
+                    replay(&state, assignment.request).await
                 } else {
                     RpcReply::error(409, "run id was already accepted with a different intent")
                 })
@@ -70,14 +67,7 @@ pub async fn create(State(state): State<Arc<AppState>>, Json(value): Json<Value>
                 return response(RpcReply::error(409, "run id is still being prepared"));
             };
             if assignment.request.input["scheduler_intent"] == value {
-                return response(RpcReply {
-                    status: 202,
-                    body: json!({
-                        "schema_version": 3,
-                        "run_id": id,
-                        "execution": assignment.index,
-                    }),
-                });
+                return response(replay(&state, assignment.request).await);
             }
             return response(RpcReply::error(
                 409,
@@ -112,6 +102,20 @@ pub async fn create(State(state): State<Arc<AppState>>, Json(value): Json<Value>
         status: 202,
         body: json!({"schema_version":3,"run_id":id,"execution":reply.body}),
     })
+}
+
+/// A frozen dispatch establishes ownership, not acceptance. Resolve retries
+/// through the durable receipt and its original node before reporting success.
+async fn replay(state: &Arc<AppState>, request: CreateExecution) -> RpcReply {
+    let id = request.id.clone();
+    let reply = crate::api::executions::submit(state, request).await;
+    if reply.status >= 300 {
+        return reply;
+    }
+    RpcReply {
+        status: 202,
+        body: json!({"schema_version":3,"run_id":id,"execution":reply.body}),
+    }
 }
 pub async fn snapshot(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Response {
     response(super::super::runs::call(&state, &id, "snapshot", Value::Null).await)

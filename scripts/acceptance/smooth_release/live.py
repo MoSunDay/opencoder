@@ -45,13 +45,17 @@ class Live(Operations):
         return self.http(self.settings.public_url, path, method, body)
 
     def submit_initial(self, request):
-        # The old Server may still have the 15s Create deadline. Recover its
-        # durable acceptance with the same frozen request before measuring
-        # traffic; measured submissions below deliberately never retry.
+        # Cold admission freezes the configured NFS resource pool and may wait
+        # behind another snapshot on the old Runtime. Recover the same frozen
+        # request before measurement; measured submissions never retry. Keep
+        # preparation latency visible instead of counting it as release traffic.
         request = {'node_id': self.node_id, **request}
-        probes.submit_probe(self, self.settings.public_url, request['id'], request, 120)
+        began = time.monotonic()
+        probes.submit_probe(self, self.settings.public_url, request['id'], request, 300)
         receipt = self.api(f"/api/executions/{request['id']}/receipt")
         assert receipt['phase'] == 'accepted', receipt
+        print(json.dumps({'initial_admission': request['id'],
+            'seconds': time.monotonic() - began}), flush=True)
         return receipt['receipt']['body']
 
     def completed(self, identifier):

@@ -51,6 +51,7 @@ pub(crate) struct Inner {
     pub journal: Mutex<Journal>,
     pub active: Mutex<HashMap<String, CancellationToken>>,
     pub tasks: Arc<ExecutionTasks>,
+    pub background_tasks: Arc<ExecutionTasks>,
     pub lifecycle_gates: Mutex<HashMap<String, Arc<Mutex<()>>>>,
     pub preparation_gates: Mutex<HashMap<String, Arc<Mutex<()>>>>,
     pub slots: Arc<Semaphore>,
@@ -222,6 +223,7 @@ impl Worker {
                 journal: Mutex::new(journal),
                 active: Mutex::new(HashMap::new()),
                 tasks: Arc::new(ExecutionTasks::new()),
+                background_tasks: Arc::new(ExecutionTasks::new()),
                 lifecycle_gates: Mutex::new(HashMap::new()),
                 preparation_gates: Mutex::new(HashMap::new()),
                 slots: Arc::new(Semaphore::new(MAX_NODE_RUNS)),
@@ -341,11 +343,13 @@ impl Worker {
     }
 
     async fn wait_for_cleanup(&self, deadline: tokio::time::Instant) -> Result<()> {
-        let (tasks, owners) = tokio::join!(
+        let (tasks, background, owners) = tokio::join!(
             self.inner.tasks.wait(deadline),
+            self.inner.background_tasks.wait(deadline),
             opencoder_session::process::wait_for_owned_processes(deadline)
         );
         tasks?;
+        background?;
         owners?;
         anyhow::ensure!(
             self.inner.active.lock().await.is_empty(),

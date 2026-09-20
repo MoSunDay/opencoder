@@ -13,7 +13,13 @@ async fn open(root: &Path) -> Worker {
             max_runs: Some(4),
             dag: true,
         },
-        Some(Arc::new(opencoder_llm::MockChatClient::new())),
+        Some(Arc::new(opencoder_llm::MockChatClient::new().with_default(
+            vec![opencoder_llm::LlmEvent::Completed {
+                text: "accepted".into(),
+                tool_calls: vec![],
+                usage: None,
+            }],
+        ))),
     )
     .await
     .unwrap()
@@ -69,7 +75,7 @@ async fn new_wasi_admission_and_freeze_bypass_cold_resource_waiters() {
     let _home = opencoder_core::config::scoped_config_home(root.path().join("home"));
     let worker = open(root.path()).await;
     let cold = assignment(&worker, "agent-cold", ExecutionKind::Agent);
-    let lifecycle = worker.lifecycle_gate(&cold.index.id).await;
+    let lifecycle = worker.preparation_gate(&cold.index.id).await;
     let busy = worker
         .inner
         .resource_preparations
@@ -206,6 +212,118 @@ async fn project_preparation_advances_only_after_explicit_rejection() {
             .status,
         409
     );
+}
+
+#[tokio::test]
+async fn cold_retry_and_disconnected_reply_do_not_strand_host_capacity() {
+    use opencoder_store::fleet::FleetStore;
+    let root = tempfile::tempdir().unwrap();
+    let _home = opencoder_core::config::scoped_config_home(root.path().join("home"));
+    let database = root.path().join("host.db");
+    let host = FleetStore::open(&database).await.unwrap();
+    host.initialize_capacity(1).await.unwrap();
+    std::fs::create_dir_all(root.path().join("node")).unwrap();
+    std::fs::write(
+        root.path().join("node/host-binding.json"),
+        serde_json::to_vec(&json!({"database": database, "runtime_id": "test-runtime"})).unwrap(),
+    )
+    .unwrap();
+    let worker = open(root.path()).await;
+    let mut original = assignment(&worker, "agent-cold-retry", ExecutionKind::Agent);
+    original.request.input = json!({"prompt":"one accepted request", "value":"quoted \"文本\""});
+    let lifecycle = worker.lifecycle_gate(&original.index.id).await;
+    let launch_blocked = lifecycle.lock().await;
+    let busy = worker
+        .inner
+        .resource_preparations
+        .acquire_many(4)
+        .await
+        .unwrap();
+    let first_worker = worker.clone();
+    let first_input = original.clone();
+    let first = tokio::spawn(async move { create(&first_worker, first_input).await });
+    let marker = root
+        .path()
+        .join("node/agent/agent-cold-retry/pending-create.json");
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while !marker.exists() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("preparation must not wait for the execution lifecycle gate");
+    let retry_worker = worker.clone();
+    let mut retry_input = original.clone();
+    retry_input.index.created_at = 99;
+    let retry = tokio::spawn(async move { create(&retry_worker, retry_input).await });
+    tokio::task::yield_now().await;
+    assert!(
+        !retry.is_finished(),
+        "retry must share the cold preparation"
+    );
+    drop(busy);
+    let reply = tokio::time::timeout(Duration::from_secs(5), retry)
+        .await
+        .expect("same-ID retry deadlocked with admission and launch")
+        .unwrap()
+        .unwrap();
+    assert_eq!(reply.status, 200, "{reply:?}");
+    assert_eq!(reply.body["created_at"], original.index.created_at);
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while host.capacity().await.unwrap().running != 1 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    assert!(
+        !first.is_finished(),
+        "launch must still wait for its lifecycle gate"
+    );
+    first.abort();
+    assert!(first.await.unwrap_err().is_cancelled());
+    assert!(
+        worker.inner.admission.try_lock().is_err(),
+        "disconnected RPC must leave dispatch admission with the runtime task"
+    );
+    drop(launch_blocked);
+    let completed = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let status = worker.inner.journal.lock().await.records[&original.index.id]
+                .assignment
+                .index
+                .status;
+            if status == ExecutionStatus::Idle && host.capacity().await.unwrap().running == 0 {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await;
+    if completed.is_err() {
+        let journal = worker.inner.journal.lock().await;
+        let record = &journal.records[&original.index.id];
+        panic!(
+            "request after disconnect: {:?}, error {:?}, tickets {:?}",
+            record.assignment.index.status,
+            record.error,
+            host.runtime_tickets("test-runtime").await.unwrap()
+        );
+    }
+    let journal = worker.inner.journal.lock().await;
+    let record = &journal.records[&original.index.id];
+    assert_eq!(journal.records.len(), 1);
+    assert_eq!(record.assignment.request, original.request);
+    assert_eq!(
+        record.assignment.index.created_at,
+        original.index.created_at
+    );
+    assert!(host
+        .runtime_tickets("test-runtime")
+        .await
+        .unwrap()
+        .is_empty());
+    assert!(!marker.exists());
 }
 
 #[tokio::test]

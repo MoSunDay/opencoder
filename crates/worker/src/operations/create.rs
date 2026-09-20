@@ -86,7 +86,7 @@ pub(super) async fn create(worker: &Worker, mut assignment: Assignment) -> Resul
     if let Some(error) = worker.admission_error() {
         return Ok(RpcReply::error(503, error));
     }
-    let config = match prepare(worker, &assignment, false) {
+    let config = match preparation::blocking(|| prepare(worker, &assignment, false)) {
         Ok(config) => config,
         Err(error) => {
             return Ok(RpcReply::error(
@@ -101,12 +101,14 @@ pub(super) async fn create(worker: &Worker, mut assignment: Assignment) -> Resul
     // isolated paths. Deliberately NOT inside `prepare`: resume/command
     // paths re-run prepare for in-flight records, and materializing there
     // would flip a legacy execution's workdir mid-flight.
-    if let Err(error) = super::operator_env::materialize(
-        &worker.inner.layout,
-        assignment.request.kind,
-        &assignment.index.id,
-        &config,
-    ) {
+    if let Err(error) = preparation::blocking(|| {
+        super::operator_env::materialize(
+            &worker.inner.layout,
+            assignment.request.kind,
+            &assignment.index.id,
+            &config,
+        )
+    }) {
         return Ok(RpcReply::error(
             400,
             format!("execution preflight: {error:#}"),
@@ -305,11 +307,12 @@ fn prepare_with_config(
         root
     };
     let new_snapshot = !root.exists();
-    if new_snapshot {
+    let requires_agents = crate::resources::requires_agent_pool(assignment);
+    if new_snapshot && requires_agents {
         crate::resources::check_mount(config.agent.agents_dir.as_deref())?;
     }
     std::fs::create_dir_all(root.parent().unwrap())?;
-    let source = source.filter(|_| crate::resources::requires_agent_pool(assignment));
+    let source = source.filter(|_| requires_agents);
     config.agent.agents_dir = crate::resources::pin(source.as_deref(), &root)?;
     let validated = (|| -> Result<()> {
         let prompt = assignment.request.input["prompt"].as_str().unwrap_or("");

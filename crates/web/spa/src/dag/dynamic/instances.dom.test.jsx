@@ -8,6 +8,7 @@ vi.mock('../../api.js', () => ({ apiGet: get }));
 vi.mock('../../sse.js', () => ({ openStream: open }));
 import { Instances } from './instances.jsx';
 import { StepPanel } from '../step/stepPanel.jsx';
+import { StepDrawer } from '../step/stepDrawer.jsx';
 
 beforeEach(() => { get.mockReset(); open.mockReset().mockImplementation(() => ({ abort: vi.fn() })); });
 it('cleans up old instance subscriptions and rejects late frames after selection changes', async () => {
@@ -68,4 +69,16 @@ it('does not hide a detail error when the instance list refresh succeeds', async
   await act(async () => { await new Promise((resolve) => setTimeout(resolve, 3100)); });
   expect(get.mock.calls.filter(([p]) => p.includes('?')).length).toBeGreaterThan(1);
   expect(screen.getByText('实例详情读取失败')).toBeTruthy();
+});
+
+it('updates a terminal template receipt when the same run resumes', async () => {
+  let receipt = { kind: 'dynamic', status: 'error', error: '旧执行错误', started_at_ms: 1 };
+  get.mockImplementation(async (path) => path.endsWith('/steps/process')
+    ? receipt : { expanded: false, total: 0, instances: [] });
+  render(<StepDrawer runId="r" step="process" specKind="dynamic" onClose={() => {}} onOpenRunLogs={() => {}} />);
+  expect(await screen.findByText('旧执行错误')).toBeTruthy();
+  receipt = { kind: 'dynamic', status: 'running', started_at_ms: 2 };
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 2100)); });
+  expect(screen.queryByText('旧执行错误')).toBeNull();
+  expect(screen.getByText('运行中')).toBeTruthy();
 });

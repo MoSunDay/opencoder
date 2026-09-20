@@ -92,6 +92,9 @@ impl NodeService for Node {
             NodeOperation::Brain { action, .. } if action == "intent" => {
                 RpcReply::error(404, "unconfirmed intent")
             }
+            NodeOperation::Brain { action, .. } if action == "capability_probe" => {
+                RpcReply::ok(json!({"compatible":true,"features":["brain_scheduler_v3"]}))
+            }
             NodeOperation::Events { after, .. } => {
                 if after == 0 {
                     RpcReply::ok(

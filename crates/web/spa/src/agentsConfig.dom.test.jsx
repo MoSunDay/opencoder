@@ -166,16 +166,42 @@ describe('AgentsPanel', () => {
     fireEvent.change(await screen.findByLabelText('new-agent-name'), { target: { value: 'reviewer2' } });
     expect(screen.queryByLabelText('new-agent-prompt')).toBeNull();
     expect(screen.queryByLabelText('new-agent-skills')).toBeNull();
+    // 运行模式 Segmented 默认 operator，创建请求始终携带 run_mode。
+    const seg = await screen.findByLabelText('new-agent-run-mode');
+    expect(seg.closest('.ant-segmented').textContent).toContain('Operator · 宿主机');
+    expect(seg.closest('.ant-segmented').textContent).toContain('Agent · runc 沙箱');
+    expect(seg.closest('.ant-segmented').querySelector('.ant-segmented-item-selected').textContent)
+      .toBe('Operator · 宿主机');
     fireEvent.click(findButton('创建'));
     await waitFor(() => {
       expect(apiPostMock).toHaveBeenCalledWith('/api/agents', {
         name: 'reviewer2',
         harness: 'opencoder',
         current: {},
+        run_mode: 'operator',
       });
     });
     // Modal 两次动效（开/关）在 jsdom 里各吃 ~1.5s，机器高负载下更长（同
     // chat.dom.test 的长测超时惯例，宽放到 20s）。
+  }, 20000);
+
+  it('creates an agent with the picked runc sandbox run mode', async () => {
+    render(<AgentsPanel onNotice={() => {}} />);
+    await screen.findAllByText('coder');
+    fireEvent.click(findButton('新建'));
+    fireEvent.change(await screen.findByLabelText('new-agent-name'), { target: { value: 'sandboxed' } });
+    fireEvent.click(screen.getByText('Agent · runc 沙箱'));
+    expect(screen.getByLabelText('new-agent-run-mode').closest('.ant-segmented')
+      .querySelector('.ant-segmented-item-selected').textContent).toBe('Agent · runc 沙箱');
+    fireEvent.click(findButton('创建'));
+    await waitFor(() => {
+      expect(apiPostMock).toHaveBeenCalledWith('/api/agents', {
+        name: 'sandboxed',
+        harness: 'opencoder',
+        current: {},
+        run_mode: 'agent',
+      });
+    });
   }, 20000);
 
   it('opens agent editing in a right-side 75 percent drawer', async () => {

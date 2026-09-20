@@ -29,7 +29,7 @@ use opencoder_dag_wasm as wasm_pool;
 pub(crate) fn module_tokens(spec: &DagSpec) -> Vec<String> {
     let mut tokens: Vec<String> = Vec::new();
     for step in &spec.steps {
-        if let StepKind::Wasm { command, .. } = &step.kind {
+        if let StepKind::Wasm { command, .. } = step.kind.executable() {
             if let Some(first) = command.split_whitespace().next() {
                 let token = first.to_string();
                 if !tokens.contains(&token) {

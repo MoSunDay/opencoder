@@ -4,6 +4,7 @@ mod create;
 mod dag_preflight;
 mod launch;
 mod maintenance;
+pub(super) mod operator_env;
 mod project_admission;
 mod query;
 pub(crate) mod queue;
@@ -48,6 +49,19 @@ pub(crate) async fn handle(worker: &Worker, operation: NodeOperation) -> Result<
             execution,
             after_turn,
         } => query::team_turns(worker, &execution, after_turn).await,
+        NodeOperation::DagInstances {
+            execution,
+            step,
+            index,
+            offset,
+            limit,
+        } => query::instances::query(worker, &execution, &step, index, offset, limit).await,
+        NodeOperation::DagInstanceEvents {
+            execution,
+            step,
+            index,
+            after,
+        } => query::dag_step_events::events(worker, &execution, &step, Some(index), after).await,
         NodeOperation::DagSteps { execution, step } => {
             query::dag_steps(worker, &execution, step).await
         }
@@ -117,3 +131,7 @@ mod artifacts;
 
 #[cfg(test)]
 mod admission_tests;
+#[cfg(test)]
+mod create_retry_tests;
+#[cfg(test)]
+mod sandbox_session;

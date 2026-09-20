@@ -92,6 +92,8 @@ pub struct DetailFieldChunk {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ArtifactRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub index: Option<usize>,
     pub execution: ExecutionRef,
     pub step: String,
     pub file: String,

@@ -39,7 +39,9 @@ function TodoEditorSession({templateName,version,creating=false,onNotice,onClose
         if (!bundle?.files || typeof bundle.files!=='object') throw new Error('模板文件响应缺少 files');
         // /api/agents 只返回注册卡；内置 primary 三角色（act/plan/command，
         // 见 agents/builtins.js 与 core::builtin_agents）由本层并回可选集，
-        // 否则模板里的 agent:'act'（如 EXAMPLE_SPEC）会被误判不可用。
+        // 否则模板里的 agent:'act'（如 EXAMPLE_SPEC）会被误判不可用。这里
+        // 选的是 TODO 步骤的调度执行器目标，不是 Agent 对话模式的能力选择
+        // 面（后者只列注册卡，分界见 agents/builtins.js 头注释）。
         const allowed=mergeBuiltinPrimaryAgents((agentData.agents||[]).filter(a=>a.primary && a.name!=='workflow').map(a=>a.name));
         setFiles(bundle.files);setOriginal(bundle.files);setRevision(bundle.revision);setAgents(allowed);
         const errors=[...(bundle.diagnostics||[]),...decodeFiles(bundle.files,allowed).diagnostics];

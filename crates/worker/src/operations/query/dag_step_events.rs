@@ -6,7 +6,7 @@
 //! additionally by the `step_output` kind). Frame shape, page caps and the
 //! 413 guards match `query::events` so the control SSE loop is reusable.
 
-use super::dag_steps::{outcome_status, step_meta, step_session_id};
+use super::dag_steps::{execution_meta, execution_session_id, outcome_status};
 use super::view::*;
 use crate::Worker;
 use anyhow::Result;
@@ -28,6 +28,16 @@ pub(in crate::operations) async fn dag_step_events(
     step: &str,
     after: i64,
 ) -> Result<RpcReply> {
+    events(worker, execution, step, None, after).await
+}
+
+pub(in crate::operations) async fn events(
+    worker: &Worker,
+    execution: &ExecutionRef,
+    step: &str,
+    index: Option<usize>,
+    after: i64,
+) -> Result<RpcReply> {
     if let Some(reply) = crate::operations::validate_reference(worker, execution).await? {
         return Ok(reply);
     }
@@ -37,7 +47,7 @@ pub(in crate::operations) async fn dag_step_events(
             "dag step events require a DAG execution",
         ));
     }
-    let (definition, legacy) = {
+    let (definition, legacy, run_status) = {
         let journal = worker.inner.journal.lock().await;
         let record = journal
             .records
@@ -47,6 +57,7 @@ pub(in crate::operations) async fn dag_step_events(
         (
             record.assignment.definition,
             journal.uses_legacy(&execution.id),
+            record.assignment.index.status.as_str().to_owned(),
         )
     };
     if !spec_step_names(definition.as_ref())
@@ -55,15 +66,40 @@ pub(in crate::operations) async fn dag_step_events(
     {
         return Ok(RpcReply::error(404, "step not found in run spec"));
     }
-    let kind = spec_step_kind(definition.as_ref(), step);
+    let mut kind = spec_step_kind(definition.as_ref(), step);
+    if let Some(index) = index {
+        let ctx = match super::instances::context(worker, execution, step).await? {
+            Ok(ctx) => ctx,
+            Err(reply) => return Ok(reply),
+        };
+        if !ctx.items.as_ref().is_some_and(|items| index < items.len()) {
+            return Ok(RpcReply::error(404, "instance not found"));
+        }
+        kind = Some(
+            match ctx.template {
+                opencoder_dag::StepKind::Agent { .. } => "agent",
+                _ => "wasm",
+            }
+            .into(),
+        );
+    } else if kind.as_deref() == Some("dynamic") {
+        return Ok(RpcReply::error(
+            400,
+            "select a dynamic instance to read its events",
+        ));
+    }
     let root = if legacy {
         worker.inner.layout.checked_legacy_workflow_root()?
     } else {
         worker.inner.layout.kind_root(ExecutionKind::Dag)
     };
-    let meta = step_meta(&root, &execution.id, step).await?;
-    let status = outcome_status(&meta);
-    let session_id = step_session_id(&root, &execution.id, step, &meta).await?;
+    let meta = execution_meta(&root, &execution.id, step, index).await?;
+    let status = if index.is_some() {
+        super::instances::status(&meta, &run_status)
+    } else {
+        outcome_status(&meta)
+    };
+    let session_id = execution_session_id(&root, &execution.id, step, index, &meta).await?;
     // An agent step streams its own child session once it exists; until then
     // (and for wasm) the run session is the only source.
     let child = kind.as_deref() == Some("agent") && session_id.is_some();
@@ -74,7 +110,9 @@ pub(in crate::operations) async fn dag_step_events(
     };
     let filter = (!child).then_some(StepFilter {
         step,
+        index,
         kind: kind.as_deref(),
+        since: index.and_then(|_| meta["started_at_ms"].as_i64()),
     });
 
     let store = &worker.inner.state.store;
@@ -83,7 +121,10 @@ pub(in crate::operations) async fn dag_step_events(
     let mut head_seq = 0i64;
     // A missing (not yet created) session is not an error: the step view still
     // answers, and the stream keeps polling instead of terminating early.
-    if store.get_session(&source).await?.is_some() {
+    if (index.is_none() || status != "pending")
+        && (index.is_none() || kind.as_deref() != Some("agent") || child)
+        && store.get_session(&source).await?.is_some()
+    {
         head_seq = store.last_event_seq(&source).await?;
         let mut cursor = after;
         for _ in 0..MAX_FILTER_PAGES {
@@ -150,7 +191,7 @@ pub(in crate::operations) async fn dag_step_events(
 
     // The step receipt, not the run's `active` map, decides termination: an
     // agent step's child session is never registered as an active execution.
-    let finished = !more && matches!(status, "done" | "error" | "cancelled");
+    let finished = !more && matches!(status, "done" | "error" | "cancelled" | "interrupted");
     if finished {
         let base = frames
             .iter()
@@ -197,17 +238,29 @@ pub(in crate::operations) async fn dag_step_events(
 #[derive(Clone, Copy)]
 struct StepFilter<'a> {
     step: &'a str,
+    index: Option<usize>,
     kind: Option<&'a str>,
+    since: Option<i64>,
 }
 
 impl StepFilter<'_> {
     fn matches(&self, event: &SessionEventRecord) -> bool {
+        if self.since.is_some_and(|start| event.ts < start) {
+            return false;
+        }
         if self.kind == Some("wasm")
             && !matches!(event.sse_kind.as_deref(), Some("step_output" | "step_log"))
         {
             return false;
         }
         event.payload["step"].as_str() == Some(self.step)
+            && event
+                .payload
+                .get("index")
+                .or_else(|| event.payload.get("payload").and_then(|p| p.get("index")))
+                .and_then(Value::as_u64)
+                .map(|i| i as usize)
+                == self.index
     }
 }
 

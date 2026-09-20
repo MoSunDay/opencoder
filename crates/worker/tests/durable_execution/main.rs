@@ -288,21 +288,27 @@ async fn todo_interrupt_compat_route_remains_resumable_once() {
             "acceptance": {"criteria":"done"}
         }]
     });
-    assert_eq!(
-        node.handle(NodeOperation::Create {
-            assignment: assignment(node, id, ExecutionKind::Todos, json!({}), Some(spec)),
-        })
+    // Compatibility routes resolve the Server-owned index. Public dispatch
+    // persists it before acknowledgement; direct Worker creation instead
+    // depends on the asynchronous inventory report during fixture setup.
+    let created = fleet
+        .call(
+            "POST",
+            "/api/executions",
+            json!({"id":id,"kind":"todos","node_id":node.registration().id,
+                "input":{"spec":spec}}),
+        )
+        .await;
+    assert_eq!(created.status, 202, "{created:?}");
+    let index = fleet
+        .state
+        .fleet
+        .index(id)
         .await
-        .status,
-        200
-    );
-    tokio::time::timeout(std::time::Duration::from_secs(10), async {
-        while fleet.state.fleet.index(id).await.unwrap().is_none() {
-            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-        }
-    })
-    .await
-    .unwrap();
+        .unwrap()
+        .expect("dispatch acknowledgement must include a persisted index");
+    assert_eq!(index.kind, ExecutionKind::Todos);
+    assert_eq!(index.node_id, node.registration().id);
     tokio::time::timeout(std::time::Duration::from_secs(10), async {
         while client.call_count() < 1 {
             tokio::task::yield_now().await;

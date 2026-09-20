@@ -29,7 +29,9 @@ pub async fn handle(
             },
         );
         return Ok(match matches {
-            Ok(()) => RpcReply::ok(json!({"compatible":true})),
+            Ok(()) => RpcReply::ok(
+                json!({"compatible":true,"features":["dag_dynamic_v1","brain_scheduler_v3"]}),
+            ),
             Err(error) => RpcReply::error(412, error.to_string()),
         });
     }

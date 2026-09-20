@@ -53,8 +53,8 @@ pub use types::{
     EventKind, ImportReport, InputAdmission, InputConflict, MessageChunkPage, MessageChunkRecord,
     MessageRow, NodeRecord, NodeTaskRecord, NodeTaskStatus, PayloadChunkRecord, SessionEventPage,
     SessionEventRecord, SessionFilter, SessionInput, SessionListItem, SessionMeta, SessionPatch,
-    SubagentStatus, SubagentTaskRecord, TASK_TYPE_NODE, TASK_TYPE_PARENT, TASK_TYPE_PROJECT,
-    TASK_TYPE_SUBAGENT, TASK_TYPE_TODO, TASK_TYPE_TODO_WORKFLOW,
+    SubagentStatus, SubagentTaskRecord, TASK_TYPE_AGENT_STEP, TASK_TYPE_NODE, TASK_TYPE_PARENT,
+    TASK_TYPE_PROJECT, TASK_TYPE_SUBAGENT, TASK_TYPE_TODO, TASK_TYPE_TODO_WORKFLOW,
 };
 pub use users::{GuardedDelete, PlatformUser};
 pub mod fleet;

@@ -36,7 +36,9 @@ function todosOptions(payload) {
 
 export function targetOptionsFrom(kind, payload) {
   // /api/agents 只返回注册卡；brain 步骤可合法调度内置 primary 角色
-  // （playbook 规范示例即 target 'act'），与 todoEditor 的 allowed 同语义。
+  // （playbook 规范示例即 target 'act'），与 todoEditor 的 allowed 同语义
+  // ——这里选的是调度执行器目标，不是 Agent 对话模式的能力选择面（后者
+  // 只列注册卡，分界见 agents/builtins.js 头注释）。
   if (kind === 'agent' || kind === 'operator') return toOptions(mergeBuiltinPrimaryAgents(pluck(payload?.agents, 'name')));
   if (kind === 'team') return toOptions(pluck(payload?.teams, 'name'));
   if (kind === 'dag') {

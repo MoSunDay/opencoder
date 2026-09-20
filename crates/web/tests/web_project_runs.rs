@@ -149,6 +149,7 @@ async fn cancel_unknown_run_returns_false_and_503_shape() {
     // Uninitialized service (AppState built without init) → 503 everywhere.
     let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
     let state = Arc::new(opencoder_web::AppState {
+        config_home: None,
         client_override: None,
         brain: opencoder_web::api_brain::mock_brain(store.clone()),
         store,

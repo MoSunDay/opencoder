@@ -13,8 +13,8 @@ use std::sync::{Arc, Mutex};
 
 use opencoder_core::message::now_ms;
 use opencoder_dag::{StepKind, StepOutcome, StepSpec};
-use opencoder_session::{resume_and_replay as resume_session, run as run_session, SessionEvent};
-use opencoder_store::SessionMeta;
+use opencoder_session::{run as run_session, SessionEvent, SessionState};
+use opencoder_store::{SessionMeta, TASK_TYPE_AGENT_STEP};
 use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
@@ -32,6 +32,13 @@ pub async fn execute_agent_step(
     deps: &ExecDeps,
     cancel: CancellationToken,
 ) -> StepResult {
+    let local_agent = match opencoder_core::agent::scope::with_root_sync(
+        deps.config.agent.agents_dir.clone(),
+        || super::how_copy::prepare(ctx),
+    ) {
+        Ok(agent) => agent,
+        Err(e) => return errored(format!("prepare local how.md: {e:#}")),
+    };
     // Node-configured sandbox dispatch: `dag.agent_sandbox = "runc"` moves
     // the whole session into a container before any host-side session work.
     if deps.config.dag.agent_sandbox == opencoder_core::config::AgentSandbox::Runc {
@@ -49,30 +56,38 @@ pub async fn execute_agent_step(
         &ctx.workflow_root,
         &ctx.run_id,
         &ctx.step.name,
+        ctx.instance,
         &session_id,
     );
     info!(run_id = %ctx.run_id, step = %ctx.step.name, %session_id, "dag agent step executing");
 
     // One token doubles as replay guard AND run-loop hard cancel (web parity:
     // the session owns its interrupt path through `session.cancel`).
-    let mut session = match resume_session(
-        deps.store.clone(),
-        &session_id,
-        deps.config.clone(),
-        deps.client.clone(),
-        deps.workdir.clone(),
-        Some(cancel.clone()),
-    )
-    .await
+    let mut config = deps.config.clone();
+    if let StepKind::Agent {
+        model: Some(model), ..
+    } = &ctx.step.kind
     {
-        Ok(s) => s,
-        Err(e) => return errored(format!("resume session: {e:#}")),
-    };
+        config.model = model.clone();
+    }
+    let mut session = SessionState::new(
+        session_id.clone(),
+        local_agent,
+        config,
+        deps.client.clone(),
+        if ctx.instance.is_some() {
+            ctx.dir().expect("validated execution path")
+        } else {
+            deps.workdir.clone()
+        },
+    )
+    .with_store(deps.store.clone())
+    .mark_session_created();
     session.cancel = Some(cancel.clone());
     // Fresh per-step turn token so an interrupt never leaks into later steps.
     session.turn_cancel = Some(Arc::new(Mutex::new(CancellationToken::new())));
     // Workflow-author-declared how.md append: visible to the session's
-    // tool processes as OPENCODER_HOW_APPEND, persisted after success.
+    // tool processes as OPENCODER_HOW_APPEND; the prompt reads the local copy.
     let how_append = match &ctx.step.kind {
         StepKind::Agent { how_append, .. } => how_append.clone(),
         _ => None,
@@ -80,6 +95,10 @@ pub async fn execute_agent_step(
     if how_append.is_some() {
         session.env_passthrough = super::how_append::env_pairs(how_append.as_deref());
     }
+    let dir = ctx.dir().expect("validated execution path");
+    session
+        .env_passthrough
+        .push(("OPENCODER_STEP_DIR".into(), dir.display().to_string()));
     // A read-only knowledge checkout must not attempt git index refreshes.
     if ctx.knowledge_root.is_some() {
         session
@@ -133,22 +152,6 @@ pub async fn execute_agent_step(
     }
     let output_json = extract_output_json_from(&text);
     let (outcome, error) = terminal_step(cancel.is_cancelled(), result.as_ref().err());
-    // Successful step: persist the declared how.md append (warn-only — a
-    // pool-write failure never flips a successful step to error).
-    if outcome == StepOutcome::Done {
-        if let Some(delta) = how_append.as_deref().filter(|d| !d.trim().is_empty()) {
-            match super::how_append::append_to_how_md(&step_agent_name(&ctx.step), delta) {
-                Ok(version) => info!(
-                    run_id = %ctx.run_id, step = %ctx.step.name, version,
-                    "how_append persisted to agent prompt pool"
-                ),
-                Err(e) => warn!(
-                    run_id = %ctx.run_id, step = %ctx.step.name, error = %e,
-                    "how_append persistence failed (step outcome unchanged)"
-                ),
-            }
-        }
-    }
     info!(
         run_id = %ctx.run_id,
         step = %ctx.step.name,
@@ -177,6 +180,13 @@ pub(crate) fn step_agent_name(step: &StepSpec) -> String {
 /// instruction. The context is the same object a wasm step receives as its
 /// `context.json` input file (delivered under `/workspace/context`).
 pub(crate) fn build_prompt(ctx: &StepCtx) -> String {
+    build_prompt_with_knowledge(ctx, ctx.knowledge_root.as_deref())
+}
+
+pub(crate) fn build_prompt_with_knowledge(
+    ctx: &StepCtx,
+    knowledge: Option<&std::path::Path>,
+) -> String {
     let prompt = match &ctx.step.kind {
         StepKind::Agent { prompt, .. } => prompt.clone(),
         _ => String::new(),
@@ -186,7 +196,7 @@ pub(crate) fn build_prompt(ctx: &StepCtx) -> String {
         "{}\n\n上游步骤输出（JSON）：\n{}\n\n{}\n\n如果本步骤需要产出结构化结果，请在最终回复的末尾追加一个 ```json 围栏代码块（fenced code block）包含该 JSON。",
         prompt,
         context,
-        knowledge_hint(ctx)
+        knowledge_hint(knowledge)
     )
 }
 
@@ -194,8 +204,8 @@ pub(crate) fn build_prompt(ctx: &StepCtx) -> String {
 /// form: host-sandbox sessions read the node's real tree). The mount is
 /// READ-ONLY — the prompt states the contract, the kernel/FsPerms enforces
 /// it for sandboxed steps.
-fn knowledge_hint(ctx: &StepCtx) -> String {
-    let Some(root) = ctx.knowledge_root.as_ref() else {
+fn knowledge_hint(knowledge: Option<&std::path::Path>) -> String {
+    let Some(root) = knowledge else {
         return String::new();
     };
     format!(
@@ -205,8 +215,8 @@ fn knowledge_hint(ctx: &StepCtx) -> String {
 }
 
 /// Persist a fresh local session row for this step (the node executor's
-/// `create_local_meta` shape, but no `task_type` pin: a DAG step session is
-/// inspectable like any other).
+/// `create_local_meta` shape, pinned as an internal Agent step so it cannot
+/// leak into the top-level Agent chat lane.
 pub(crate) async fn create_session_meta(
     deps: &ExecDeps,
     step: &StepSpec,
@@ -234,7 +244,7 @@ pub(crate) async fn create_session_meta(
             handoff_seq: None,
             handoff_plan: None,
             skill: None,
-            task_type: None,
+            task_type: Some(TASK_TYPE_AGENT_STEP.into()),
             requirement: None,
         })
         .await?;

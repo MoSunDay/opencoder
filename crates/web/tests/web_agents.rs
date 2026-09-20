@@ -51,6 +51,7 @@ async fn state() -> Arc<opencoder_web::AppState> {
     let workdir = std::env::temp_dir().join(format!("oc-web-agents-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&workdir).ok();
     Arc::new(opencoder_web::AppState {
+        config_home: None,
         client_override: Some(Arc::new(MockChatClient::new()) as Arc<dyn ChatStream>),
         brain: opencoder_web::api_brain::mock_brain(store.clone()),
         store,
@@ -425,4 +426,105 @@ async fn harness_settings_apply_to_builtin_and_custom_agents() {
     assert_eq!(status, StatusCode::CREATED);
     let (_, body) = call(app(state.clone()), "GET", "/api/agents/wrapped/meta", None).await;
     assert_eq!(body["meta"]["harness"], "codex");
+}
+
+/// `run_mode` rides the card through POST/PUT: create pins it (`operator`
+/// when omitted), PUT flips it with one `run_mode` history entry, an
+/// omitted PUT leaves it untouched, and a bogus string rejects through the
+/// typed enum exactly like `harness` does (axum Json data rejection, 422).
+#[tokio::test]
+async fn run_mode_flows_through_create_put_and_meta() {
+    let state = state().await;
+    let _scoped = scoped();
+    // Create with `agent`: meta carries it.
+    let (status, v) = call(
+        app(state.clone()),
+        "POST",
+        "/api/agents",
+        Some(serde_json::json!({ "name": "boxed", "run_mode": "agent" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{v}");
+    let (_, v) = call(app(state.clone()), "GET", "/api/agents/boxed/meta", None).await;
+    assert_eq!(v["meta"]["run_mode"], "agent");
+    // Create without: default `operator`.
+    let (status, v) = call(
+        app(state.clone()),
+        "POST",
+        "/api/agents",
+        Some(serde_json::json!({ "name": "hosted" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{v}");
+    let (_, v) = call(app(state.clone()), "GET", "/api/agents/hosted/meta", None).await;
+    assert_eq!(v["meta"]["run_mode"], "operator");
+
+    // PUT flips operator to agent: one `run_mode` history entry (from/to).
+    let (status, v) = call(
+        app(state.clone()),
+        "PUT",
+        "/api/agents/hosted",
+        Some(serde_json::json!({ "run_mode": "agent" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    let (_, v) = call(app(state.clone()), "GET", "/api/agents/hosted/meta", None).await;
+    assert_eq!(v["meta"]["run_mode"], "agent");
+    let fields: Vec<&str> = v["meta"]["history"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|h| h["field"].as_str().unwrap())
+        .collect();
+    assert_eq!(fields, vec!["run_mode"]);
+    assert_eq!(v["meta"]["history"][0]["from"], "operator");
+    assert_eq!(v["meta"]["history"][0]["to"], "agent");
+
+    // PUT without run_mode: unchanged, no extra history entries.
+    let (status, v) = call(
+        app(state.clone()),
+        "PUT",
+        "/api/agents/hosted",
+        Some(serde_json::json!({ "current": {} })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    let (_, v) = call(app(state.clone()), "GET", "/api/agents/hosted/meta", None).await;
+    assert_eq!(v["meta"]["run_mode"], "agent");
+    assert_eq!(v["meta"]["history"].as_array().unwrap().len(), 1, "{v}");
+
+    // List items carry run_mode alongside harness.
+    let (_, v) = call(app(state.clone()), "GET", "/api/agents", None).await;
+    let agents = v["agents"].as_array().unwrap();
+    let by_name = |n: &str| {
+        agents
+            .iter()
+            .find(|a| a["name"] == n)
+            .unwrap_or_else(|| panic!("missing card {n}: {agents:?}"))
+            .clone()
+    };
+    assert_eq!(by_name("boxed")["run_mode"], "agent");
+    assert_eq!(by_name("hosted")["run_mode"], "agent");
+
+    // Bogus values reject like `harness` (typed enum, axum Json data
+    // rejection, 422).
+    for (method, uri, body) in [
+        (
+            "POST",
+            "/api/agents",
+            serde_json::json!({ "name": "bad", "run_mode": "bogus" }),
+        ),
+        (
+            "PUT",
+            "/api/agents/boxed",
+            serde_json::json!({ "run_mode": "bogus" }),
+        ),
+    ] {
+        let (status, v) = call(app(state.clone()), method, uri, Some(body)).await;
+        assert_eq!(
+            status,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "{method} {uri}: {v}"
+        );
+    }
 }

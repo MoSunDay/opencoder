@@ -1,5 +1,7 @@
 //! V3 root execution keeps a recoverable wake marker and never embeds child
 //! execution output in the root journal.
+#[path = "scheduler/failure.rs"]
+mod failure;
 mod support;
 
 use opencoder_core::{brain::BrainSchedulerRequest, fleet::*};
@@ -50,11 +52,48 @@ async fn root_emits_one_scheduler_wake_until_control_acknowledges_it() {
         .expect("scheduler wake");
     assert_eq!(frames.iter().filter(|frame| matches!(frame, NodeFrame::Brain { action, .. } if action == "scheduler_wake")).count(), 1);
     node.handle(NodeOperation::Brain {
-        execution: reference,
+        execution: reference.clone(),
         action: "scheduler_wake_ack".into(),
         input: json!({"generation":generation}),
     })
     .await;
+    assert!(node.brain_frames().await.unwrap().is_empty());
+    // A delayed acknowledgement from an older activation must neither
+    // consume the resume wake nor move the acknowledged cursor backwards.
+    for action in ["pause", "resume"] {
+        let reply = node
+            .handle(NodeOperation::Brain {
+                execution: reference.clone(),
+                action: action.into(),
+                input: Value::Null,
+            })
+            .await;
+        assert_eq!(reply.status, 200, "{reply:?}");
+    }
+    node.handle(NodeOperation::Brain {
+        execution: reference.clone(),
+        action: "scheduler_wake_ack".into(),
+        input: json!({"generation":generation}),
+    })
+    .await;
+    let frames = node.brain_frames().await.unwrap();
+    let resumed_generation = frames
+        .iter()
+        .find_map(|frame| match frame {
+            NodeFrame::Brain { action, input, .. } if action == "scheduler_wake" => {
+                input["generation"].as_u64()
+            }
+            _ => None,
+        })
+        .expect("resume wake survived old acknowledgement");
+    for value in [json!(resumed_generation), generation] {
+        node.handle(NodeOperation::Brain {
+            execution: reference.clone(),
+            action: "scheduler_wake_ack".into(),
+            input: json!({"generation":value}),
+        })
+        .await;
+    }
     assert!(node.brain_frames().await.unwrap().is_empty());
     node.shutdown().await.unwrap();
 }
@@ -152,55 +191,13 @@ async fn scheduler_context_requeues_idle_root_for_node_decision() {
     node.shutdown().await.unwrap();
 }
 
-struct RoundTripClient;
-
-impl opencoder_llm::ChatStream for RoundTripClient {
-    fn chat_stream(
-        &self,
-        request: opencoder_llm::ChatRequest,
-    ) -> anyhow::Result<tokio::sync::mpsc::Receiver<LlmEvent>> {
-        let text = if request.purpose == opencoder_llm::RequestPurpose::Planning {
-            let context: serde_json::Value =
-                serde_json::from_str(&request.messages.last().unwrap().text())?;
-            if context["round"] == 0 {
-                json!({
-                    "decision":"dispatch",
-                    "capabilities":[{
-                        "capability_id":"builtin-agent-act",
-                        "inputs":{"request":{"kind":"root","name":"repo"}}
-                    }],
-                    "reason":"inspect the repository",
-                    "evidence_execution_ids":[]
-                })
-                .to_string()
-            } else {
-                let execution_id = context["operations"][0]["execution_id"]
-                    .as_str()
-                    .expect("successful child operation")
-                    .to_owned();
-                json!({
-                    "decision":"complete",
-                    "reason":"the child produced the requested evidence",
-                    "evidence_execution_ids":[execution_id]
-                })
-                .to_string()
-            }
-        } else {
-            "child scheduler output".into()
-        };
-        let (tx, rx) = tokio::sync::mpsc::channel(1);
-        tx.try_send(LlmEvent::Completed {
-            text,
-            tool_calls: vec![],
-            usage: None,
-        })?;
-        Ok(rx)
-    }
-}
+#[path = "support/scheduler.rs"]
+mod scheduler_support;
+use scheduler_support::SchedulerClient;
 
 #[tokio::test]
 async fn control_round_trip_dispatches_child_and_waits_for_terminal_barrier() {
-    let client = Arc::new(RoundTripClient);
+    let client = Arc::new(SchedulerClient::default());
     let fleet = Fleet::new(1, client).await;
     let id = "brain-v3-round-trip";
     let created = fleet
@@ -217,22 +214,7 @@ async fn control_round_trip_dispatches_child_and_waits_for_terminal_barrier() {
         )
         .await;
     assert_eq!(created.status, 202, "{created:?}");
-    let snapshot = tokio::time::timeout(std::time::Duration::from_secs(30), async {
-        loop {
-            let snapshot = fleet
-                .call("GET", &format!("/api/brain/runs/{id}"), Value::Null)
-                .await;
-            assert_eq!(snapshot.status, 200, "{snapshot:?}");
-            if snapshot.body["run"]["phase"] == "completed" {
-                break snapshot.body;
-            }
-            assert_ne!(snapshot.body["run"]["phase"], "failed", "{snapshot:?}");
-            assert_ne!(snapshot.body["run"]["phase"], "blocked", "{snapshot:?}");
-            tokio::time::sleep(std::time::Duration::from_millis(30)).await;
-        }
-    })
-    .await;
-    let snapshot = snapshot.expect("v3 round-trip timeout");
+    let snapshot = scheduler_support::wait_phase(&fleet, id, "completed").await;
     let operations = snapshot["operations"].as_array().expect("operations");
     assert_eq!(operations.len(), 1, "{snapshot}");
     assert_eq!(operations[0]["status"], "done", "{snapshot}");
@@ -252,6 +234,31 @@ async fn control_round_trip_dispatches_child_and_waits_for_terminal_barrier() {
         .collect();
     assert!(event_types.contains(&"round_barrier_reached"), "{events:?}");
     assert!(event_types.contains(&"run_completed"), "{events:?}");
+    let view = fleet
+        .call("GET", &format!("/api/brain/runs/{id}/view"), Value::Null)
+        .await;
+    assert_eq!(view.status, 200, "{view:?}");
+    assert_eq!(view.body["schema_version"], 3);
+    assert_eq!(view.body["objective"], "inspect repository");
+    assert_eq!(view.body["input_names"], json!(["repo"]));
+    assert_eq!(
+        view.body["rounds"][0]["operations"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert!(view.body["capabilities"][0].get("definition").is_none());
+    let stream = fleet
+        .response("GET", &format!("/api/brain/runs/{id}/events?after=0"))
+        .await;
+    assert_eq!(stream.status(), 200);
+    let body = axum::body::to_bytes(stream.into_body(), MAX_FRAME_BYTES)
+        .await
+        .unwrap();
+    let text = String::from_utf8_lossy(&body);
+    assert!(text.contains("operation_terminal"), "{text}");
+    assert!(text.contains("run_completed"), "{text}");
     assert!(
         fleet.nodes[0]
             .indexes()
@@ -261,5 +268,9 @@ async fn control_round_trip_dispatches_child_and_waits_for_terminal_barrier() {
             .any(|index| index.id == operations[0]["execution_id"]),
         "child execution index missing"
     );
+    let replay = fleet
+        .call("POST", "/api/brain/runs", scheduler_support::request(id))
+        .await;
+    assert_eq!(replay.status, 202, "{replay:?}");
     fleet.shutdown().await;
 }

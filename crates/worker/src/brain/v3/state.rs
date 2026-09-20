@@ -46,20 +46,12 @@ pub async fn settle(worker: &Worker, snapshot: &BrainSchedulerSnapshot) -> Resul
     let id = &snapshot.run.run_id;
     if snapshot.run.phase.terminal() && !worker.inner.active.lock().await.contains_key(id) {
         let mut journal = worker.inner.journal.lock().await;
-        if journal
-            .records
-            .get(id)
-            .context("root execution missing")?
-            .assignment
-            .index
-            .status
-            .terminal()
-        {
-            return Ok(());
+        let record = journal.records.get(id).context("root execution missing")?;
+        if !record.assignment.index.status.terminal() {
+            let (status, result) = outcome(snapshot);
+            journal.finalize(id, status, result, snapshot.run.error.clone())?;
+            opencoder_session::loop_registry::notify_change();
         }
-        let (status, result) = outcome(snapshot);
-        journal.finalize(id, status, result, snapshot.run.error.clone())?;
-        opencoder_session::loop_registry::notify_change();
     }
     Ok(())
 }

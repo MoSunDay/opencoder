@@ -87,7 +87,10 @@ fn operator_execution_isolates_home_and_workspace() {
         home.to_string_lossy(),
         "HOME must be the execution home"
     );
-    assert_ne!(read_probe(&fleet, "home-a.txt"), tmp.path().to_string_lossy());
+    assert_ne!(
+        read_probe(&fleet, "home-a.txt"),
+        tmp.path().to_string_lossy()
+    );
     // The frozen config snapshot is visible under the redirected HOME.
     assert_eq!(read_probe(&fleet, "cfg-a.txt"), "CONFIG_OK");
 
@@ -107,7 +110,10 @@ fn operator_execution_isolates_home_and_workspace() {
     let (status, detail) = fleet.http("GET", &format!("/api/sessions/{SESSION}"), &json!({}));
     assert_eq!(status, 200);
     let transcript = detail["messages"].to_string();
-    assert!(transcript.contains("PROBE-a-DONE"), "transcript: {transcript}");
+    assert!(
+        transcript.contains("PROBE-a-DONE"),
+        "transcript: {transcript}"
+    );
 
     // ── restart: the agent process comes back with the node daemon's own
     // HOME (= fleet workdir); the execution must rebuild its isolated pair.

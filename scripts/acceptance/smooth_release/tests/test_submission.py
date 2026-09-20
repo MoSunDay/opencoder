@@ -29,9 +29,14 @@ class SubmissionTests(unittest.TestCase):
         self.assertNotIn('node_id', request)
 
     def test_initial_lost_reply_recovers_exact_request_and_durable_receipt(self):
+        for kind in ['todos', 'dag']:
+            with self.subTest(kind=kind):
+                self.verify_lost_reply(kind)
+
+    def verify_lost_reply(self, kind):
         env = self.live()
         posts = []
-        result = {'id': 'todos-chain', 'status': 'pending'}
+        result = {'id': kind + '-chain', 'status': 'pending'}
 
         def http(base, path, method='GET', body=None):
             if method == 'GET':
@@ -44,7 +49,7 @@ class SubmissionTests(unittest.TestCase):
             return result
 
         env.http = http
-        request = {'id': 'todos-chain', 'kind': 'todos', 'input': {'prompt': 'fixed'}}
+        request = {'id': kind + '-chain', 'kind': kind, 'input': {'prompt': 'fixed'}}
         self.assertEqual(env.submit_initial(request), result)
         self.assertEqual(posts, [{'node_id': 'local-node', **request}] * 2)
         self.assertNotIn('node_id', request)

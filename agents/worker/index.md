@@ -8,7 +8,7 @@ Commit: 7e71cbcfd669dd2cbaa5c94ab01945fd139557f0
 - `crates/worker/src/service.rs` — 根执行与会话清单
 - `crates/worker/src/workloads/` — agent/team/dag/todos/project 适配器；`dag.rs`
   的 `apply_input`（纯函数，带单测）把派发 input 折进本次解码的 spec 副本，冻结定义不变：`prompt` 追加
-  各静态 Agent 步「执行要求」、`args`（非空字符串）追加到各静态 Wasm 步 command
+  各 Agent 步及动态 Agent 模板的「执行要求」、`args`（非空字符串）追加到各 Wasm 步及动态 Wasm 模板的 command
   （空白切分成 argv；每次 run/resume 基于冻结定义重新 decode，幂等）；
   `agent_how.rs` 是
   `kind=agent` 会话的 how.md 契约：显式 `how_append` 缺失时以首条 `prompt` 作为 how

@@ -356,19 +356,19 @@ impl Hub {
             .is_some_and(|s| s.connection.generation == generation)
         {
             state.standby.remove(id);
-            return;
         }
         if state
             .connections
             .get(id)
-            .is_none_or(|c| c.generation != generation)
+            .is_some_and(|c| c.generation == generation)
         {
-            return;
+            state.connections.remove(id);
+            if let Some(node) = state.nodes.get_mut(id) {
+                node.online = false;
+            }
         }
-        state.connections.remove(id);
-        if let Some(node) = state.nodes.get_mut(id) {
-            node.online = false;
-        }
+        // A promoted Host does not own the older socket's pending replies.
+        // Settle that socket's calls even when the current connection differs.
         let requests: Vec<_> = state
             .pending
             .iter()

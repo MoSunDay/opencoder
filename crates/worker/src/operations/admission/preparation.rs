@@ -25,6 +25,8 @@ pub(in crate::operations) fn blocking<T>(work: impl FnOnce() -> T) -> T {
 struct PendingCreate {
     schema_version: u8,
     assignment: Assignment,
+    #[serde(default)]
+    rejected: bool,
 }
 
 /// Caller holds this execution's lifecycle lock and the short admission gate.
@@ -59,7 +61,7 @@ pub(in crate::operations) fn begin(
                 metadata.is_file() && !metadata.file_type().is_symlink(),
                 "execution preparation must be a regular file"
             );
-            let saved: PendingCreate = serde_json::from_slice(&fs::read(file)?)
+            let saved: PendingCreate = serde_json::from_slice(&fs::read(&file)?)
                 .context("invalid pending execution preparation")?;
             ensure!(
                 saved.schema_version == 1,
@@ -71,6 +73,24 @@ pub(in crate::operations) fn begin(
                     && saved.assignment.index.node_id == assignment.index.node_id,
                 "execution preparation ownership mismatch"
             );
+            // Project roots span multiple attempts. Only an explicitly
+            // rejected attempt permits a new run ID with a new frozen input.
+            if saved.rejected
+                && assignment.request.kind == ExecutionKind::Project
+                && assignment.request.input["run_id"] != saved.assignment.request.input["run_id"]
+            {
+                super::super::project_admission::ensure_id(&mut assignment.request.input)?;
+                assignment.index.created_at = saved.assignment.index.created_at;
+                replace(
+                    &file,
+                    &PendingCreate {
+                        schema_version: 1,
+                        assignment: assignment.clone(),
+                        rejected: false,
+                    },
+                )?;
+                return Ok(Ok(assignment));
+            }
             if assignment.request.kind == ExecutionKind::Project
                 && assignment.request.input.get("run_id").is_none()
             {
@@ -109,6 +129,7 @@ pub(in crate::operations) fn begin(
         file.write_all(&serde_json::to_vec(&PendingCreate {
             schema_version: 1,
             assignment: assignment.clone(),
+            rejected: false,
         })?)?;
         file.sync_all()?;
         fs::File::open(&stage)?.sync_all()?;
@@ -124,6 +145,45 @@ pub(in crate::operations) fn begin(
     }
     result?;
     Ok(Ok(assignment))
+}
+
+/// Preserve rejected attempt identity without removing any execution data.
+pub(in crate::operations) fn reject_project(
+    worker: &Worker,
+    assignment: &Assignment,
+) -> Result<()> {
+    if assignment.request.kind != ExecutionKind::Project {
+        return Ok(());
+    }
+    let root = worker
+        .inner
+        .layout
+        .execution_dir(assignment.index.kind, &assignment.index.id)?;
+    replace(
+        &root.join(FILE),
+        &PendingCreate {
+            schema_version: 1,
+            assignment: assignment.clone(),
+            rejected: true,
+        },
+    )
+}
+
+fn replace(path: &Path, pending: &PendingCreate) -> Result<()> {
+    let temporary = path.with_extension(format!("tmp-{}", ulid::Ulid::new()));
+    let mut options = fs::OpenOptions::new();
+    options.create_new(true).write(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options.open(&temporary)?;
+    file.write_all(&serde_json::to_vec(pending)?)?;
+    file.sync_all()?;
+    fs::rename(temporary, path)?;
+    fs::File::open(path.parent().context("preparation parent missing")?)?.sync_all()?;
+    Ok(())
 }
 
 pub(in crate::operations) fn finish(root: &Path) -> Result<()> {

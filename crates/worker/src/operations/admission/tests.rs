@@ -167,3 +167,43 @@ async fn interrupted_preparation_recovers_its_original_request_after_restart() {
         "accepted journal now owns the frozen input"
     );
 }
+
+#[tokio::test]
+async fn project_preparation_advances_only_after_explicit_rejection() {
+    let root = tempfile::tempdir().unwrap();
+    let _home = opencoder_core::config::scoped_config_home(root.path().join("home"));
+    let worker = open(root.path()).await;
+    let mut first = assignment(&worker, "project-attempts", ExecutionKind::Project);
+    first.request.input = json!({"run_id":"prun-first","action":"execute"});
+    super::preparation::begin(&worker, first.clone())
+        .unwrap()
+        .unwrap();
+    let mut next = first.clone();
+    next.request.input = json!({"run_id":"prun-next","action":"plan"});
+    next.index.created_at = 2;
+    assert_eq!(
+        super::preparation::begin(&worker, next.clone())
+            .unwrap()
+            .unwrap_err()
+            .status,
+        409
+    );
+    super::preparation::reject_project(&worker, &first).unwrap();
+    worker.inner.stopping.cancel();
+    drop(worker);
+    let restarted = open(root.path()).await;
+    let accepted = super::preparation::begin(&restarted, next.clone())
+        .unwrap()
+        .unwrap();
+    assert_eq!(accepted.request, next.request);
+    assert_eq!(accepted.index.created_at, first.index.created_at);
+    let mut third = next;
+    third.request.input["run_id"] = json!("prun-third");
+    assert_eq!(
+        super::preparation::begin(&restarted, third)
+            .unwrap()
+            .unwrap_err()
+            .status,
+        409
+    );
+}

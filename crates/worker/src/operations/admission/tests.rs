@@ -41,6 +41,28 @@ fn assignment(worker: &Worker, id: &str, kind: ExecutionKind) -> Assignment {
     }
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn synchronous_preparation_releases_the_only_async_worker() {
+    let (started, waiting) = tokio::sync::oneshot::channel();
+    let (release, blocking) = std::sync::mpsc::channel();
+    let task = tokio::spawn(async move {
+        super::preparation::blocking(|| {
+            started.send(()).unwrap();
+            blocking.recv_timeout(Duration::from_secs(2))
+        })
+    });
+    let responsive = tokio::spawn(async move {
+        waiting.await.unwrap();
+        tokio::task::yield_now().await;
+        release.send(()).unwrap();
+    });
+    tokio::time::timeout(Duration::from_secs(1), responsive)
+        .await
+        .expect("cold preparation starved the async worker")
+        .unwrap();
+    task.await.unwrap().unwrap();
+}
+
 #[tokio::test]
 async fn new_wasi_admission_and_freeze_bypass_cold_resource_waiters() {
     let root = tempfile::tempdir().unwrap();

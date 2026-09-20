@@ -21,7 +21,7 @@ const view = {
 describe('v3 大脑运行总览', () => {
   it('只显示摘要画布和轮次索引，点击 execution ID 打开托管执行面板', async () => {
     apiGet.mockImplementation(async (path) => {
-      if (path === '/api/brain/runs/brain-v3') return { run: view.run, operations: view.rounds[0].operations };
+      if (path === '/api/brain/runs/brain-v3') return { schema_version: 3, run: view.run, operations: view.rounds[0].operations };
       if (path === '/api/brain/runs/brain-v3/view') return view;
       if (path.startsWith('/api/brain/runs/brain-v3/events-page')) return { events: [], more: false };
       if (path === '/api/executions/agent-1') return { execution: { id: 'agent-1', kind: 'agent', status: 'running', node_id: 'node-1', created_at: 1 }, request: { kind: 'agent', target: 'act', input: {} } };

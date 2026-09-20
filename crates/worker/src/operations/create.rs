@@ -40,8 +40,14 @@ pub(super) async fn create(worker: &Worker, mut assignment: Assignment) -> Resul
     if let Some(reply) = accepted_reply(worker, &mut assignment).await {
         return Ok(reply);
     }
-    let lifecycle = worker.lifecycle_gate(&assignment.index.id).await;
-    let preparing = lifecycle.lock().await;
+    // Preparation precedes admission; execution lifecycle locks are taken
+    // inside admission by dispatch. Sharing these gates creates a lock cycle
+    // when a cold Create and its retry reach queue launch concurrently.
+    let preparation = worker.preparation_gate(&assignment.index.id).await;
+    let preparing = preparation.lock().await;
+    if let Some(reply) = accepted_reply(worker, &mut assignment).await {
+        return Ok(reply);
+    }
     let gate = worker.inner.admission.lock().await;
     // Another Create may have accepted this ID while we waited for the gate.
     if let Some(reply) = accepted_reply(worker, &mut assignment).await {
@@ -115,7 +121,7 @@ pub(super) async fn create(worker: &Worker, mut assignment: Assignment) -> Resul
             format!("execution preflight: {error:#}"),
         ));
     }
-    let _gate = worker.inner.admission.lock().await;
+    let _gate = worker.inner.admission.clone().lock_owned().await;
     if let Some(error) = worker.admission_error() {
         return Ok(RpcReply::error(503, error));
     }
@@ -176,7 +182,7 @@ pub(super) async fn create(worker: &Worker, mut assignment: Assignment) -> Resul
     )?;
     drop(preparing);
     drop(resource_slot);
-    super::queue::dispatch_locked(worker).await?;
+    let _gate = super::queue::dispatch_owned(worker, _gate).await?;
     let mut body = json!(
         worker.inner.journal.lock().await.records[&record.assignment.index.id]
             .assignment
@@ -541,7 +547,7 @@ pub(crate) async fn start(
     id: &str,
     command: ExecutionCommand,
 ) -> Result<RpcReply> {
-    let _gate = worker.inner.admission.lock().await;
+    let _gate = worker.inner.admission.clone().lock_owned().await;
     let mut command = command;
     if matches!(command.action.as_str(), "plan" | "execute") && id.starts_with("project-") {
         match super::project_admission::existing(worker, &id[8..], &command.action, &command.input)
@@ -682,7 +688,7 @@ pub(crate) async fn start(
         None
     };
     super::queue::enqueue(worker, record, config, true).await?;
-    super::queue::dispatch_locked(worker).await?;
+    let _gate = super::queue::dispatch_owned(worker, _gate).await?;
     let status = worker.inner.journal.lock().await.records[id]
         .assignment
         .index

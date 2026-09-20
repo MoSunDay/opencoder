@@ -1,3 +1,4 @@
+import { newId } from '../../fleet/model.js';
 import { apiPost } from '../../api.js';
 
 // Keep the same receipt identity across a lost HTTP response, including reloads.
@@ -7,7 +8,7 @@ export function submitAttempt(todoId, action, input = {}, path) {
   const key = `project-attempt:${todoId}:${action}:${JSON.stringify(input)}`;
   if (inflight.has(key)) return inflight.get(key);
   let runId = pending.get(key) || sessionStorage.getItem(key);
-  if (!runId) runId = `prun-${crypto.randomUUID()}`;
+  if (!runId) runId = newId('prun');
   pending.set(key, runId);
   sessionStorage.setItem(key, runId);
   const request = path

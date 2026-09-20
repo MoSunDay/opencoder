@@ -11,7 +11,7 @@ import './style.css';
 export function BrainWorkbench({ onNotice }) {
   const [tab, setTab] = useState('workspace'); const [runCursor, setRunCursor] = useState(null); const [plans, setPlans] = useState([]); const [runs, setRuns] = useState([]); const [capabilities, setCapabilities] = useState([]); const [error, setError] = useState(''); const [runId, setRunId] = useState(() => new URLSearchParams(location.search).get('brain_run')); const [launch, setLaunch] = useState(false); const [initialPlan, setInitialPlan] = useState(null);
   const reload = useCallback(async () => { try { const [p, r, c] = await Promise.all([apiGet('/api/brain/plan-defs'), apiGet('/api/brain/runs'), apiGet('/api/brain/library')]); setPlans(p.plans); setRuns(r.runs); setRunCursor(r.next_cursor || null); setCapabilities(c.capabilities); setError(''); } catch (e) { setError(e.message); } }, []);
-  useEffect(() => { reload(); }, [reload]);
+  useEffect(() => { reload(); }, [reload, tab]);
   const olderRuns = async () => { try { const page = await apiGet(`/api/brain/runs?cursor_created_at=${runCursor.created_at}&cursor_id=${encodeURIComponent(runCursor.id)}`); setRuns(page.runs); setRunCursor(page.next_cursor || null); } catch (e) { setError(e.message); } };
   const executePlan = (plan) => { setInitialPlan(plan); setLaunch(true); };
   const back = () => { setRunId(null); const query = new URLSearchParams(location.search); query.delete('brain_run'); history.replaceState(null, '', `${location.pathname}${query.size ? `?${query}` : ''}${location.hash}`); reload(); };
@@ -25,6 +25,6 @@ export function BrainWorkbench({ onNotice }) {
       { key: 'capabilities', label: '能力库', children: <BrainPanel onNotice={onNotice} /> },
     ]} />
   </>}
-  <Drawer destroyOnHidden open={launch} onClose={() => setLaunch(false)} title="新建大脑运行" size={600}><Launch key={String(initialPlan)} plans={plans} initialPlan={initialPlan} onCreated={(id) => { setLaunch(false); setRunId(id); }} /></Drawer>
+  <Drawer destroyOnHidden open={launch} onClose={() => setLaunch(false)} title="新建大脑运行" size={600}><Launch key={String(initialPlan)} capabilities={capabilities} initialPlan={initialPlan} onCreated={(id) => { setLaunch(false); setRunId(id); }} /></Drawer>
   </PageShell>;
 }

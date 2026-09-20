@@ -79,6 +79,7 @@ async fn state(client: Arc<MockChatClient>) -> Arc<opencoder_web::AppState> {
     let workdir = std::env::temp_dir().join(format!("oc-web-run-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&workdir).ok();
     Arc::new(opencoder_web::AppState {
+        config_home: None,
         client_override: Some(client as Arc<dyn ChatStream>),
         store: store.clone(),
         workdir,

@@ -9,6 +9,7 @@ mod migration;
 mod migration_io;
 mod operations;
 mod resources;
+pub use resources::requires_agent_pool;
 mod runtime;
 mod service;
 mod state;

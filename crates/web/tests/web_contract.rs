@@ -30,6 +30,7 @@ async fn app() -> (Router, Arc<opencoder_web::AppState>) {
     let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
     let workdir = std::env::temp_dir();
     let state = Arc::new(opencoder_web::AppState {
+        config_home: None,
         client_override: None,
         brain: opencoder_web::api_brain::mock_brain(store.clone()),
         store: store.clone(),
@@ -503,6 +504,7 @@ async fn switch_model_refused_while_draining() {
 async fn app_with_workdir(workdir: std::path::PathBuf) -> (Router, Arc<opencoder_web::AppState>) {
     let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
     let state = Arc::new(opencoder_web::AppState {
+        config_home: None,
         client_override: None,
         brain: opencoder_web::api_brain::mock_brain(store.clone()),
         store: store.clone(),

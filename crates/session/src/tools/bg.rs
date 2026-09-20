@@ -156,7 +156,7 @@ pub async fn drain_output<R>(
 
 /// Path of the background output file for a given pid.
 pub fn output_path(pid: u32) -> PathBuf {
-    PathBuf::from(format!("/tmp/opencoder_bg_{pid}.output"))
+    std::env::temp_dir().join(format!("opencoder_bg_{pid}.output"))
 }
 
 struct BgEntry {

@@ -8,6 +8,7 @@ import { apiGet } from '../../api.js';
 import { absTime } from '../../format.js';
 import { StatusTag } from '../../ui/statusTag.jsx';
 import { STEP_KIND_LABEL } from './model.js';
+import { Instances } from '../dynamic/instances.jsx';
 import { StepPanel } from './stepPanel.jsx';
 
 // absTime(null) would read as 1970 — missing timestamps render as '—'.
@@ -22,12 +23,19 @@ export function StepDrawer({ runId, step, specKind, onClose, onOpenRunLogs }) {
   useEffect(() => { setFinished(null); }, [runId, step]);
   useEffect(() => {
     const controller = new AbortController();
+    let timer;
     setReceipt(null);
     setReceiptError('');
-    apiGet('/api/dag/runs/' + encodeURIComponent(runId) + '/steps/' + encodeURIComponent(step), { signal: controller.signal })
-      .then((value) => { if (!controller.signal.aborted) setReceipt(value); })
+    const load = () => apiGet('/api/dag/runs/' + encodeURIComponent(runId) + '/steps/' + encodeURIComponent(step), { signal: controller.signal })
+      .then((value) => {
+        if (controller.signal.aborted) return;
+        setReceipt(value);
+        // A terminal run can resume under the same identity while this drawer stays open.
+        if (value.kind === 'dynamic') timer = setTimeout(load, 2000);
+      })
       .catch((e) => { if (!controller.signal.aborted) setReceiptError(e.message || '加载步骤回执失败'); });
-    return () => controller.abort();
+    void load();
+    return () => { controller.abort(); clearTimeout(timer); };
   }, [runId, step, nonce]);
   // Terminal receipt from the stream: refetch the step receipt so status,
   // timestamps and output settle without a manual refresh.
@@ -57,7 +65,8 @@ export function StepDrawer({ runId, step, specKind, onClose, onOpenRunLogs }) {
         ]} />
         {receipt.error && <Alert type="error" title={receipt.error} />}
       </>}
-      <StepPanel runId={runId} step={step} kind={kind} onFinished={handleFinished} />
+      {kind === 'dynamic' ? <Instances key={`${runId}/${step}`} runId={runId} step={step} />
+        : <StepPanel runId={runId} step={step} kind={kind} onFinished={handleFinished} />}
     </div>
   </Drawer>;
 }

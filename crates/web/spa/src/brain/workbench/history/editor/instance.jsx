@@ -1,10 +1,11 @@
+import { newId } from '../../../../fleet/model.js';
 import { Button, Checkbox, Form, Input, InputNumber, Select, Space } from 'antd';
 import { bindEntity, removeInput, removeOutput } from './model.js';
 export function InstanceEditor({ instance, plan, capabilities, onChange }) {
   const set = (next) => onChange({ ...plan, instances: plan.instances.map((i) => i.id === next.id ? next : i) });
   const port = (id, next) => onChange({ ...plan, inputs: { ...plan.inputs, [id]: next } });
-  const addInput = () => { const id = `${instance.id}-input-${crypto.randomUUID().slice(0, 6)}`; onChange({ ...plan, instances: plan.instances.map((i) => i.id === instance.id ? { ...i, inputs: [...i.inputs, id] } : i), inputs: { ...plan.inputs, [id]: { description: '承接上游结果', source: { kind: 'routed' }, schema: { type: 'string' }, required: true } } }); };
-  const addOutput = () => { const id = `${instance.id}-output-${crypto.randomUUID().slice(0, 6)}`; onChange({ ...plan, instances: plan.instances.map((i) => i.id === instance.id ? { ...i, outputs: [...i.outputs, id] } : i), outputs: { ...plan.outputs, [id]: { description: '说明这个输出的内容' } } }); };
+  const addInput = () => { const id = newId(`${instance.id}-input`); onChange({ ...plan, instances: plan.instances.map((i) => i.id === instance.id ? { ...i, inputs: [...i.inputs, id] } : i), inputs: { ...plan.inputs, [id]: { description: '承接上游结果', source: { kind: 'routed' }, schema: { type: 'string' }, required: true } } }); };
+  const addOutput = () => { const id = newId(`${instance.id}-output`); onChange({ ...plan, instances: plan.instances.map((i) => i.id === instance.id ? { ...i, outputs: [...i.outputs, id] } : i), outputs: { ...plan.outputs, [id]: { description: '说明这个输出的内容' } } }); };
   return <Form layout="vertical">
     <Form.Item label="注册能力"><Select aria-label="注册能力" value={instance.capability_id} options={capabilities.filter((c) => c.target && c.summary).map((c) => ({ value: c.id, label: `${c.kind} · ${c.summary}` }))} onChange={(id) => set(bindEntity(instance, capabilities.find((c) => c.id === id)))} /></Form.Item>
     <Form.Item label="实例说明"><Input aria-label="实例说明" value={instance.description} onChange={(e) => set({ ...instance, description: e.target.value })} /></Form.Item>

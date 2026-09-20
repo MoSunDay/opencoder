@@ -1,4 +1,4 @@
-Commit: f2d723ed2a32a5a394eac05f58bc5558e7cfe08f
+Commit: 2f6b202def6c5e75d1411143570784a1576b3407
 
 # worker 模块
 
@@ -48,6 +48,8 @@ Commit: f2d723ed2a32a5a394eac05f58bc5558e7cfe08f
 接受 v2 根运行后，通过有限激活调用 [brain 纯函数内核](../brain/index.md)，保存路由读集、选择、因果输入和 Prepared 回执，再由 outbox 派发。重启重放保留动作 ID，重复和乱序通知不重启任务；暂停、取消与资源互斥仍由原执行边界管理。
 
 接受 schema v3 根运行后，worker 根节点维护调度 projection、generation、模型上下文和唤醒；control 只归一化能力目录、创建普通子执行并处理中继回执。子执行终态通过 outbox 发送给 control；节点重启只恢复未确认终态事件和未完成创建请求，失败终态取消同轮兄弟执行，迟到通知不改变已终态脑状态。
+
+v3 Brain 的通用 execution events 查询从 scheduler event projection 读取事件索引，并以 `{seq, kind, data, ts}` 适配现有 SSE；事件只含能力、执行 ID、终态和摘要，子执行正文仍由对应 execution 查询维护。
 
 Agent/Operator 最后回答、Team 最终总结以及 DAG/TODO 的固定 `output_pointer` 统一适配具名 output；不能从能力内部状态推断业务通过。输出事件包含轮次与完成／验证依据，下游承接实际内容及同轮产物引用。
 

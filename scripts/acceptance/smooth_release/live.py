@@ -19,7 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'platform'))
 from rolling import config, manifest, probes
 from rolling.io import Operations
 from rolling.state import Journal, atomic_bytes, write
-from fixture import HOLD_WASM, todo_spec
+from fixture import HOLD_WASM, release_wasi_gate, todo_spec
 from metrics import verify as verify_traffic
 from streams import Stream
 import transitions
@@ -160,12 +160,14 @@ def exercise(args, settings, root):
     stop = threading.Event()
     thread = None
     stream = None
+    wasm_submitted = False
     try:
         receipt = env.submit_initial(todo)
         env.wait(lambda: (root / 'model-shell.pid').exists(), 240)
         model_shell = process_identity(int((root / 'model-shell.pid').read_text()))
         assert not (root / 'first.done').exists(), 'model bypassed the release gate'
-        env.api('/api/executions', 'POST', {'id': dag_id, 'kind': 'dag', 'input': {'definition': {
+        wasm_submitted = True
+        env.submit_initial({'id': dag_id, 'kind': 'dag', 'input': {'definition': {
             'name': '跨发布真实 WASI 工具', 'steps': [{'name': 'hold', 'timeout_secs': 1800,
                 'kind': {'type': 'wasm', 'command': module}}]}}})
         env.wait(lambda: env.api('/api/executions/' + dag_id)['dag_steps']['running'] == 1, 90)
@@ -215,8 +217,8 @@ def exercise(args, settings, root):
         write(root / 'traffic.json', {'requests': traffic, 'failures': failures})
         (root / 'release').touch()
         # Release only this test's WASI gate, regardless of deployment outcome.
-        for context in (old_data / 'dag' / dag_id).glob('*/context.json'):
-            (context.parent.parent / 'release').touch()
+        if wasm_submitted:
+            release_wasi_gate(old_data, dag_id)
     assert not failures, failures
     env.wait(lambda: env.completed(todo_id), 300)
     env.wait(lambda: env.completed(dag_id), 90)

@@ -45,7 +45,7 @@ struct PendingCreate {
     rejected: bool,
 }
 
-/// Caller holds this execution's lifecycle lock and the short admission gate.
+/// Caller holds this execution's preparation lock and the short admission gate.
 /// Publishing the directory and reservation together keeps arbitrary orphan
 /// directories rejected, while an interrupted preparation can replay its input.
 pub(in crate::operations) fn begin(

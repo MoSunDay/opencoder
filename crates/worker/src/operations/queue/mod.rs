@@ -85,6 +85,29 @@ pub(crate) async fn enqueue_with_command(
     Ok(record)
 }
 
+/// Transfer admission to a runtime-owned task until claim and launch finish.
+/// Dropping an RPC response must not strand a claimed capacity ticket before
+/// its execution is journaled as running. The returned guard preserves the
+/// caller's serialization for any remaining acceptance/command work.
+pub(crate) async fn dispatch_owned(
+    worker: &Worker,
+    gate: tokio::sync::OwnedMutexGuard<()>,
+) -> Result<tokio::sync::OwnedMutexGuard<()>> {
+    let (send, receive) = tokio::sync::oneshot::channel();
+    let owned = worker.clone();
+    worker.inner.tasks.spawn(async move {
+        let result = dispatch_locked(&owned).await;
+        if let Err(error) = &result {
+            *owned.inner.persistence_error.lock().unwrap() =
+                Some(format!("pending dispatch: {error:#}"));
+        }
+        // If the receiver disconnected, dropping the result releases admission
+        // only after all claimed work was launched or explicitly failed.
+        let _ = send.send(result.map(|()| gate));
+    });
+    receive.await?
+}
+
 /// Caller holds node admission; a slot is reserved before any workload starts.
 pub(crate) async fn dispatch_locked(worker: &Worker) -> Result<()> {
     worker.reconcile_capacity().await?;

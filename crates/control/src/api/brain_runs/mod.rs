@@ -25,6 +25,7 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/api/brain/library/:id/stable", post(catalog::stable))
         .route("/api/brain/runs", get(runs::list).post(runs::create))
         .route("/api/brain/runs/:id", get(runs::snapshot))
+        .route("/api/brain/runs/:id/view", get(v3::view))
         .route("/api/brain/runs/:id/commands", post(runs::command))
         .route("/api/brain/runs/:id/inputs", post(runs::input))
         .route("/api/brain/runs/:id/context", get(runs::context))

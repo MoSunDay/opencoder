@@ -75,6 +75,7 @@ fn sse(
                     ));
                 }
                 if let Some(frame) = queue.pop_front() {
+                    let frame = normalize_frame(frame);
                     let seq = frame["seq"].as_i64().unwrap_or(cursor);
                     cursor = cursor.max(seq);
                     let event = Event::default()
@@ -130,6 +131,19 @@ fn sse(
     Sse::new(stream)
         .keep_alive(KeepAlive::new().interval(Duration::from_secs(5)))
         .into_response()
+}
+
+/// The generic execution stream uses `{seq, kind, data}` rows. V3 scheduler
+/// events are intentionally typed index rows, so adapt them at the transport
+/// boundary without changing the paged API or copying execution bodies.
+fn normalize_frame(mut frame: Value) -> Value {
+    if frame.get("kind").is_none() && frame.get("event_type").is_some() {
+        let kind = frame["event_type"].clone();
+        let data = frame.clone();
+        frame["kind"] = kind;
+        frame["data"] = data;
+    }
+    frame
 }
 
 pub async fn events(

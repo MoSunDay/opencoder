@@ -126,6 +126,23 @@ class CandidateProbeTests(unittest.TestCase):
             candidate_locked(None, self.record, operations, 1)
         self.assertEqual(operations.creates, 0)
 
+    def test_timeout_preserves_the_runtime_rejection(self):
+        operations = Candidate(self.record)
+        original = operations.http
+        def http(base, path, method="GET", body=None):
+            if body and body["operation"] == "create":
+                return {"status": 503, "body": {"error": "node admission is frozen"}}
+            return original(base, path, method, body)
+        def wait(check, seconds):
+            value = check()
+            if value:
+                return value
+            raise TimeoutError("deployment probe")
+        operations.http, operations.wait = http, wait
+        with self.assertRaisesRegex(TimeoutError, "create.*503.*node admission is frozen") as raised:
+            candidate_locked(None, self.record, operations, 1)
+        self.assertEqual(str(raised.exception.__cause__), "deployment probe")
+
     def test_recovered_probe_still_requires_successful_runtime_execution(self):
         operations = Candidate(self.record, accepted=True)
         original = operations.http

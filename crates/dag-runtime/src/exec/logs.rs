@@ -7,19 +7,29 @@ use tokio::sync::mpsc::UnboundedSender;
 #[derive(Clone)]
 pub struct StepLog {
     step: String,
+    instance: Option<usize>,
     tx: UnboundedSender<DagEventIn>,
 }
 
 impl StepLog {
     pub(crate) fn new(step: String, tx: UnboundedSender<DagEventIn>) -> Self {
-        Self { step, tx }
+        Self {
+            step,
+            tx,
+            instance: None,
+        }
+    }
+
+    pub(crate) fn with_instance(mut self, instance: Option<usize>) -> Self {
+        self.instance = instance;
+        self
     }
 
     pub(crate) fn push(&self, event: &str, data: &str) {
         let _ = self.tx.send(DagEventIn {
             kind: "step_log".into(),
             step: Some(self.step.clone()),
-            payload: json!({"event": event, "data": data}),
+            payload: json!({"event": event, "data": data, "index": self.instance}),
             at_ms: opencoder_core::message::now_ms(),
         });
     }
@@ -33,7 +43,7 @@ impl StepLog {
         let _ = self.tx.send(DagEventIn {
             kind: "step_log".into(),
             step: Some(self.step.clone()),
-            payload: json!({"event": "text_delta", "data": {"text": text}}),
+            payload: json!({"event": "text_delta", "data": {"text": text}, "index": self.instance}),
             at_ms: opencoder_core::message::now_ms(),
         });
     }

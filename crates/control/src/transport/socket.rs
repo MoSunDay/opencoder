@@ -56,7 +56,7 @@ async fn serve(
     let generation = snapshot.generation.clone();
     let mut report_sequence = snapshot.sequence;
     let mut reports = ReportCollector::default();
-    let brain_capacity = Arc::new(tokio::sync::Semaphore::new(32));
+    let brain_deliveries = super::brain_delivery::InFlight::default();
     let mut initial_admission_request;
     let (tx, mut rx) = tokio::sync::mpsc::channel::<SocketCommand>(128);
     {
@@ -103,16 +103,22 @@ async fn serve(
                     let frame = match incoming? {
                         Message::Text(text) => serde_json::from_str::<NodeFrame>(&text)?,
                         Message::Close(_) => break,
-                        Message::Ping(data) => { writer.send(Message::Pong(data)).await?; continue; }
+                        Message::Ping(data) => {
+                            // A verified connection can remain live while its
+                            // inventory/admission waits; keep load unchanged.
+                            state.hub.touch(&id, &generation).await;
+                            writer.send(Message::Pong(data)).await?;
+                            continue;
+                        }
                         _ => anyhow::bail!("invalid node frame"),
                     };
                     match frame {
                         NodeFrame::Brain { execution, action, input } => {
                             if !state.hub.touch(&id, &generation).await { continue; }
-                            if let Ok(permit) = brain_capacity.clone().try_acquire_owned() {
+                            if let Some(delivery) = brain_deliveries.start(&execution, &action, &input) {
                                 let state = state.clone(); let node = id.clone();
                                 tokio::spawn(async move {
-                                    let _permit = permit;
+                                    let _delivery = delivery;
                                     if let Err(error) = crate::api::brain_runs::effects::deliver(state,node,execution,action,input).await {
                                         tracing::warn!(%error,"brain delivery remains pending for replay");
                                     }

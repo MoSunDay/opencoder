@@ -2,12 +2,13 @@
 //! per-run snapshot `dag_runs.spec_json`).
 //!
 //! A spec is a named list of steps plus dependency edges (`depends_on`).
-//! Two step kinds exist today:
+//! Executable and logical step kinds:
 //! - `agent` — the step prompt runs through a full local session runner on
 //!   the executing node (same executor the node-task path uses).
 //! - `wasm`  — the step runs a WebAssembly module (`command` = the module
 //!   path plus args) in the embedded wasm runtime by default, or inside an
 //!   `runc` container when `sandbox: "runc"` is set.
+//! - `dynamic` — a logical node expands a frozen array into Agent/Wasm instances.
 //!
 //! Protocol note: the `python` step kind was REMOVED (breaking protocol
 //! change). Old specs containing python steps fail to decode with a
@@ -50,6 +51,11 @@ pub struct StepSpec {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum StepKind {
+    /// Expand a frozen array into isolated executions of an Agent/Wasm template.
+    Dynamic {
+        source: crate::dynamic::DynamicSource,
+        template: Box<StepKind>,
+    },
     /// Run a prompt through the local session runner on the node.
     Agent {
         prompt: String,
@@ -57,11 +63,8 @@ pub enum StepKind {
         agent: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         model: Option<String>,
-        /// Workflow-author-declared knowledge fragment. Injected into the
-        /// step session's child-process environment as
-        /// `OPENCODER_HOW_APPEND`; after the step finishes successfully the
-        /// node appends the declared value to the step agent's shared-pool
-        /// `how.md` (a new versioned resource, never a bare file write).
+        /// Execution-local knowledge fragment appended to the frozen how.md
+        /// copy. Shared Agent resources are never modified by DAG execution.
         /// Bounded by [`MAX_HOW_APPEND_BYTES`].
         #[serde(default, skip_serializing_if = "Option::is_none")]
         how_append: Option<String>,
@@ -123,6 +126,16 @@ pub fn decode_spec(value: &serde_json::Value) -> Result<DagSpec, String> {
 pub fn decode_spec_str(raw: &str) -> Result<DagSpec, String> {
     let value: serde_json::Value = serde_json::from_str(raw).map_err(|e| e.to_string())?;
     decode_spec(&value)
+}
+
+impl StepKind {
+    /// Resource resolution includes the executable template of dynamic nodes.
+    pub fn executable(&self) -> &Self {
+        match self {
+            Self::Dynamic { template, .. } => template,
+            _ => self,
+        }
+    }
 }
 
 #[cfg(test)]

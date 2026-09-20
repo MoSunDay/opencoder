@@ -3,8 +3,9 @@
 //! The host executes `agent` steps by launching THIS binary inside a
 //! read-only OCI container (`ArgvStyle::Direct`, argv
 //! `["/usr/bin/agent-step-runner"]`); the whole session — LLM loop, tools,
-//! artifacts — then runs confined to the container with only
-//! `/workspace/context/<step>` (rw) and `/workspace/knowledge` (ro) exposed.
+//! artifacts — then runs confined to the container with the run context (rw),
+//! optional knowledge/Agent pools (ro), and, for Codex, the node's login
+//! directory (rw for atomic refresh) plus private launch settings (ro).
 //!
 //! Contract (env, injected by the host executor; see `exec::agent_runc`):
 //! - `OPENCODER_STEP_PROMPT`  — container path of the step's prompt file
@@ -14,8 +15,8 @@
 //!   attachability survives; a fresh ULID when absent);
 //! - `OPENCODER_STEP_AGENT`   — executing agent name (default `act`);
 //! - `OPENCODER_HOW_APPEND`   — optional workflow-declared how.md payload;
-//! - `OPENAI_BASE_URL` / `OPENAI_API_KEY` / `OPENCODER_MODEL` — the host's
-//!   resolved LLM endpoint, applied through `Config`'s env overlay.
+//! - `OPENAI_BASE_URL` / `OPENAI_API_KEY` / `OPENCODER_MODEL` — the native
+//!   harness endpoint; Codex reads its private launch manifest instead.
 //!
 //! Artifacts written into the step dir (host-visible through the bind):
 //! `session.json` (`running` → `done`/`error`), `transcript.txt`, and the
@@ -23,10 +24,10 @@
 //! same extraction contract as the host path. Exit code: 0 success, 1 run
 //! failure, 2 contract violation.
 
+use std::io::Write;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use opencoder_llm::{ChatClient, ChatStream};
 use opencoder_session::{run as run_session, SessionEvent, SessionState};
 
 /// Bounded transcript artifact: keep the LAST bytes on a char boundary.
@@ -72,36 +73,22 @@ fn run() -> Result<(), i32> {
         return Err(2);
     }
     let session_id = env_or("OPENCODER_STEP_SESSION_ID", &ulid::Ulid::new().to_string());
-    let agent_name = env_or("OPENCODER_STEP_AGENT", "act");
 
     // 2. Config: the container carries no config files, so `/workspace`
     // discovery plus the host-injected env overlay defines the endpoint.
     let config = match opencoder_core::Config::load(std::path::Path::new("/workspace")) {
         Ok(config) => config,
         Err(error) => {
-            eprintln!("agent-step-runner: config load failed ({error}); falling back to defaults");
-            opencoder_core::Config::default()
+            eprintln!("agent-step-runner: config load failed: {error}");
+            return Err(2);
         }
     };
-    let endpoint = match config.resolve_endpoint() {
-        Ok(endpoint) => endpoint,
+    let client = opencoder_session::harness::configured_client(config.clone());
+    let agent = match opencoder_dag_runtime::exec::how_copy::load(&step_dir) {
+        Ok(agent) => agent,
         Err(error) => {
-            eprintln!("agent-step-runner: cannot resolve LLM endpoint: {error}");
-            return Err(1);
-        }
-    };
-    let client: Arc<dyn ChatStream> = match ChatClient::from_config(&config, &endpoint) {
-        Ok(client) => Arc::new(client),
-        Err(error) => {
-            eprintln!("agent-step-runner: cannot build LLM client: {error}");
-            return Err(1);
-        }
-    };
-    let agent = match opencoder_core::resolve_agent(&agent_name) {
-        Some(agent) => agent,
-        None => {
-            eprintln!("agent-step-runner: unknown agent `{agent_name}`");
-            return Err(1);
+            eprintln!("agent-step-runner: cannot load frozen agent/how.md: {error:#}");
+            return Err(2);
         }
     };
 
@@ -114,6 +101,14 @@ fn run() -> Result<(), i32> {
         client,
         step_dir.clone(),
     );
+    match opencoder_dag_runtime::sandbox::codex::load_runtime(session.harness.harness) {
+        Ok(Some(runtime)) => session.harness = runtime,
+        Ok(None) => {}
+        Err(error) => {
+            eprintln!("agent-step-runner: Codex launch failed: {error:#}");
+            return Err(2);
+        }
+    }
     if let Ok(how_append) = std::env::var("OPENCODER_HOW_APPEND") {
         if !how_append.is_empty() {
             session
@@ -129,19 +124,29 @@ fn run() -> Result<(), i32> {
 
     // 4. Publish the live pointer immediately (the host wrote a minimal
     // `session.json`; this richer body keeps the same `session_id` key).
-    write_session_json(
-        &step_dir,
-        &session_id,
-        &agent_name,
-        config.model_id(),
-        "running",
-        None,
-    );
+    write_session_json(&step_dir, &session, "running", None)?;
 
     // 5. Run exactly one turn, keeping a bounded transcript tail.
+    let file = std::fs::File::create(step_dir.join("events.ndjson")).map_err(|e| {
+        eprintln!("agent-step-runner: cannot create event stream: {e}");
+        2
+    })?;
+    let events = Arc::new(Mutex::new(file));
+    let event_error = Arc::new(Mutex::new(None));
+    let failure = event_error.clone();
+    let cancellation = tokio_util::sync::CancellationToken::new();
+    session.cancel = Some(cancellation.clone());
     let transcript = Arc::new(Mutex::new(String::new()));
     let tail = Arc::clone(&transcript);
     let on_event = move |ev: SessionEvent| {
+        if !ev.is_sidecar_frame() {
+            let line =
+                serde_json::json!({"kind":ev.sse_kind(),"payload":ev.sse_data()}).to_string();
+            if let Err(error) = writeln!(events.lock().unwrap(), "{line}") {
+                *failure.lock().unwrap() = Some(error.to_string());
+                cancellation.cancel();
+            }
+        }
         if let SessionEvent::TextDelta(text) = &ev {
             if let Ok(mut tail) = tail.lock() {
                 push_tail(&mut tail, text, MAX_TRANSCRIPT_BYTES);
@@ -162,6 +167,10 @@ fn run() -> Result<(), i32> {
         runtime.block_on(run_session(&mut session, prompt, on_event))
     };
 
+    if let Some(error) = event_error.lock().unwrap().as_ref() {
+        eprintln!("agent-step-runner: event persistence failed: {error}");
+        return Err(1);
+    }
     // 6. Artifacts: transcript (fallback to the last assistant message),
     // optional structured output, terminal session.json.
     let mut text = transcript.lock().map(|t| t.clone()).unwrap_or_default();
@@ -171,30 +180,14 @@ fn run() -> Result<(), i32> {
             text = completed;
         }
     }
-    let _ = std::fs::write(step_dir.join("transcript.txt"), &text);
+    write_artifact(&step_dir, "transcript.txt", text.as_bytes())?;
     if let Some(value) = opencoder_dag_runtime::exec::agent::extract_output_json_from(&text) {
-        if let Ok(bytes) = serde_json::to_vec_pretty(&value) {
-            let _ = std::fs::write(step_dir.join("output.json"), bytes);
-        }
+        write_artifact(&step_dir, "output.json", value.to_string().as_bytes())?;
     }
     match &result {
-        Ok(()) => write_session_json(
-            &step_dir,
-            &session_id,
-            &agent_name,
-            config.model_id(),
-            "done",
-            None,
-        ),
-        Err(error) => write_session_json(
-            &step_dir,
-            &session_id,
-            &agent_name,
-            config.model_id(),
-            "error",
-            Some(&format!("{error:#}")),
-        ),
-    }
+        Ok(()) => write_session_json(&step_dir, &session, "done", None),
+        Err(error) => write_session_json(&step_dir, &session, "error", Some(&format!("{error:#}"))),
+    }?;
     match result {
         Ok(()) => Ok(()),
         Err(error) => {
@@ -208,24 +201,29 @@ fn run() -> Result<(), i32> {
 /// with the runner's own liveness/status fields (additive keys).
 fn write_session_json(
     step_dir: &std::path::Path,
-    session_id: &str,
-    agent: &str,
-    model: &str,
+    session: &SessionState,
     status: &str,
     error: Option<&str>,
-) {
+) -> Result<(), i32> {
     let mut body = serde_json::json!({
-        "session_id": session_id,
-        "agent": agent,
-        "model": model,
+        "session_id": session.id,
+        "agent": session.agent.name,
+        "model": session.harness.model.as_deref().unwrap_or_else(|| session.config.model_id()),
+        "harness": session.harness.harness,
+        "thread_id": session.harness.thread_id,
         "status": status,
     });
     if let Some(error) = error {
         body["error"] = serde_json::Value::String(error.to_string());
     }
-    if let Ok(bytes) = serde_json::to_vec_pretty(&body) {
-        let _ = std::fs::write(step_dir.join("session.json"), bytes);
-    }
+    write_artifact(step_dir, "session.json", body.to_string().as_bytes())
+}
+
+fn write_artifact(step_dir: &std::path::Path, name: &str, bytes: &[u8]) -> Result<(), i32> {
+    opencoder_core::atomic_write(&step_dir.join(name), bytes).map_err(|error| {
+        eprintln!("agent-step-runner: cannot persist {name}: {error:#}");
+        1
+    })
 }
 
 /// Append `delta`, then trim to the last `max` bytes on a char boundary

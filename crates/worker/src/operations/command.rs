@@ -109,7 +109,20 @@ pub(super) async fn command(
             let Some(mut record) = journal.records.get(id).cloned() else {
                 return Ok(RpcReply::error(404, "execution not found"));
             };
+            if command.input.get("operator_environment_version").is_some() {
+                return Ok(RpcReply::error(
+                    400,
+                    "operator environment version is node-owned",
+                ));
+            }
+            let version = record
+                .annotations
+                .get("operator_environment_version")
+                .cloned();
             record.annotations = command.input;
+            if let Some(version) = version {
+                record.annotations["operator_environment_version"] = version;
+            }
             journal.save(record)?;
             Ok(RpcReply::ok(json!({"ok":true})))
         }
@@ -239,7 +252,7 @@ async fn http(
     {
         return Ok(RpcReply::error(400, "invalid session operation"));
     }
-    let _gate = worker.inner.admission.lock().await;
+    let mut _gate = worker.inner.admission.clone().lock_owned().await;
     let (mut record, legacy) = {
         let journal = worker.inner.journal.lock().await;
         (journal.records.get(id).cloned(), journal.uses_legacy(id))
@@ -344,7 +357,7 @@ async fn http(
         // FIFO gives earlier pending work newly freed slots. Under LIFO this
         // newest follow-up has priority, just like a freshly enqueued task.
         if worker.inner.scheduling.get().queue_order == QueueOrder::Fifo {
-            super::queue::dispatch_locked(worker).await?;
+            _gate = super::queue::dispatch_owned(worker, _gate).await?;
         }
         if sandbox {
             // Sandbox prompt: stage the turn text into the durable input so
@@ -382,7 +395,8 @@ async fn http(
                 if !crate::lifecycle::can_start(record.assignment.index.status) {
                     return Ok(RpcReply::error(409, "execution is not continuable"));
                 }
-                let config = super::create::prepare(worker, &record.assignment, legacy)?;
+                let config =
+                    super::create::prepare_record(worker, &record, &record.assignment, legacy)?;
                 record.result["monitor_after"] = json!(worker
                     .inner
                     .state
@@ -408,7 +422,7 @@ async fn http(
     let config = if needs_monitor {
         record
             .as_ref()
-            .map(|r| super::create::prepare(worker, &r.assignment, legacy))
+            .map(|r| super::create::prepare_record(worker, r, &r.assignment, legacy))
             .transpose()?
     } else {
         None

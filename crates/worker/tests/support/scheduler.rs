@@ -44,8 +44,15 @@ pub fn request(id: &str) -> Value {
         "inputs":{"repo":"opencoder"},"max_rounds":2})
 }
 pub async fn wait_phase(fleet: &super::Fleet, id: &str, phase: &str) -> Value {
+    wait_phase_within(fleet, id, phase, 30).await
+}
+
+/// Terminal notices travel through an acknowledgement-gated outbox that
+/// replays every heartbeat. Under heavy test-fleet load a convergence window
+/// longer than the default 30s budget is required.
+pub async fn wait_phase_within(fleet: &super::Fleet, id: &str, phase: &str, seconds: u64) -> Value {
     let mut last = Value::Null;
-    let waited = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+    let waited = tokio::time::timeout(std::time::Duration::from_secs(seconds), async {
         loop {
             let reply = fleet
                 .call("GET", &format!("/api/brain/runs/{id}"), Value::Null)

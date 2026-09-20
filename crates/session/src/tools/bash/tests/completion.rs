@@ -87,12 +87,9 @@ async fn background_output_overflow_stops_process_and_caps_file() {
         ..ctx()
     };
     // Hide sleep behind a variable so the 1s test foreground timeout is
-    // retained. The output overflow happens after handoff. Keep the final
-    // sleep longer than the assertion budget so a natural exit cannot pass.
-    // Writing the capped background file can take tens of seconds on a
-    // contended disk; the foreground pipe-only test does not incur that I/O.
+    // retained. The output overflow happens after handoff.
     let input = json!({
-        "command": "d=2; s=sleep; \"$s\" \"$d\"; dd if=/dev/zero bs=8388609 count=1 2>/dev/null; \"$s\" 120"
+        "command": "d=2; s=sleep; \"$s\" \"$d\"; dd if=/dev/zero bs=8388609 count=1 2>/dev/null; \"$s\" 30"
     });
     let out = tool.execute(input, &bg_ctx).await.unwrap();
     assert!(
@@ -108,7 +105,7 @@ async fn background_output_overflow_stops_process_and_caps_file() {
         .parse()
         .unwrap();
     let path = output_path(pid);
-    tokio::time::timeout(Duration::from_secs(60), async {
+    tokio::time::timeout(Duration::from_secs(10), async {
         while list().iter().any(|info| info.pid == pid) {
             tokio::time::sleep(Duration::from_millis(20)).await;
         }

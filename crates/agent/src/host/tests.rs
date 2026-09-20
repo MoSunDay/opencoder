@@ -108,6 +108,119 @@ async fn wait(mut check: impl AsyncFnMut() -> bool) {
     .unwrap();
 }
 
+async fn assert_stalled_forward_releases_its_lock(creation: bool) {
+    let dir = tempfile::tempdir().unwrap();
+    let host = Host::open(
+        &dir.path().join("host"),
+        "node".into(),
+        "test-token".into(),
+        1,
+    )
+    .await
+    .unwrap();
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let requests = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("http://{}", listener.local_addr().unwrap());
+    let seen = requests.clone();
+    let started = entered.clone();
+    let app = axum::Router::new().route(
+        "/rpc",
+        axum::routing::post(move |axum::Json(operation): axum::Json<NodeOperation>| {
+            let seen = seen.clone();
+            let started = started.clone();
+            async move {
+                let first = {
+                    let mut requests = seen.lock().unwrap();
+                    requests.push(serde_json::to_value(&operation).unwrap());
+                    requests.len() == 1
+                };
+                if first {
+                    started.notify_one();
+                    std::future::pending::<()>().await;
+                }
+                let body = match operation {
+                    NodeOperation::Create { assignment } => json!(assignment.index),
+                    NodeOperation::Inspect { execution } => json!({"id":execution.id}),
+                    _ => panic!("unexpected operation"),
+                };
+                axum::Json(RpcReply::ok(body))
+            }
+        }),
+    );
+    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    host.store
+        .register_runtime(&opencoder_store::fleet::handoff::RuntimeRecord {
+            id: "slow-runtime".into(),
+            release_id: "slow-release".into(),
+            mode: "staged".into(),
+            config: json!({"endpoint":endpoint,"data_dir":dir.path().join("runtime"),
+                "unit":"opencoder-runtime-slow.service"}),
+        })
+        .await
+        .unwrap();
+    host.store.activate_runtime("slow-runtime").await.unwrap();
+    let operation = if creation {
+        create(&host, "agent-slow-forward")
+    } else {
+        host.store
+            .assign_runtime("agent-slow-forward", None)
+            .await
+            .unwrap();
+        NodeOperation::Inspect {
+            execution: ExecutionRef {
+                id: "agent-slow-forward".into(),
+                kind: ExecutionKind::Agent,
+            },
+        }
+    };
+    let waiting = host.clone();
+    let original = operation.clone();
+    let call = tokio::spawn(async move { waiting.handle(original).await });
+    entered.notified().await;
+    tokio::time::pause();
+    tokio::time::advance(Duration::from_secs(if creation { 46 } else { 11 })).await;
+    let reply = call.await.unwrap();
+    tokio::time::resume();
+    assert_eq!(reply.status, 504, "{reply:?}");
+    assert!(reply.body["error"]
+        .as_str()
+        .unwrap()
+        .contains("runtime request timed out"));
+    let lock = tokio::time::timeout(
+        Duration::from_secs(1),
+        host.store.request_lock("runtime-use", "slow-runtime"),
+    )
+    .await
+    .expect("timed-out forwarding retained the shared runtime lock")
+    .unwrap();
+    drop(lock);
+    assert_eq!(
+        host.store
+            .owner("agent-slow-forward")
+            .await
+            .unwrap()
+            .unwrap()
+            .runtime_id,
+        "slow-runtime"
+    );
+    assert_eq!(host.handle(operation).await.status, 200);
+    let requests = requests.lock().unwrap();
+    assert_eq!(requests.len(), 2);
+    assert_eq!(requests[0], requests[1], "retry changed the frozen request");
+    server.abort();
+}
+
+#[tokio::test]
+async fn stalled_runtime_create_releases_its_lock_and_preserves_retry_ownership() {
+    assert_stalled_forward_releases_its_lock(true).await;
+}
+
+#[tokio::test]
+async fn stalled_runtime_inspection_releases_its_lock_before_server_read_timeout() {
+    assert_stalled_forward_releases_its_lock(false).await;
+}
+
 #[tokio::test]
 async fn three_runtime_versions_keep_live_model_calls_and_global_fifo() {
     let _ = tracing_subscriber::fmt()
@@ -497,9 +610,14 @@ async fn stalled_legacy_creates_are_bounded_and_cannot_fill_the_host_channel() {
     let old_endpoint = format!("http://{}", old_listener.local_addr().unwrap());
     let slow = axum::Router::new().route(
         "/rpc",
-        axum::routing::post(move || {
+        axum::routing::post(move |axum::Json(operation): axum::Json<NodeOperation>| {
             let entered = entered.clone();
             async move {
+                if matches!(&operation, NodeOperation::Create { assignment }
+                    if !opencoder_worker::requires_agent_pool(assignment))
+                {
+                    return axum::Json(RpcReply::ok(json!({"accepted":true})));
+                }
                 entered.send(()).await.unwrap();
                 std::future::pending::<axum::Json<RpcReply>>().await
             }
@@ -556,6 +674,24 @@ async fn stalled_legacy_creates_are_bounded_and_cannot_fill_the_host_channel() {
             .unwrap()
             .status,
         503
+    );
+    let mut wasi = create(&host, "dag-independent-wasi");
+    if let NodeOperation::Create { assignment } = &mut wasi {
+        assignment.index.kind = ExecutionKind::Dag;
+        assignment.request.kind = ExecutionKind::Dag;
+        assignment.request.target = None;
+        assignment.request.input = json!({});
+        assignment.definition = Some(json!({"name":"independent","steps":[{
+            "name":"run","kind":{"type":"wasm","command":"quick.wasm"}}]}));
+    }
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(1), host.call_runtime("legacy", &wasi))
+            .await
+            .unwrap()
+            .unwrap()
+            .status,
+        200,
+        "pure WASI admission waited for unrelated cold resource copies"
     );
     assert_eq!(
         host.call_runtime("current", &create(&host, "agent-current"))
@@ -642,6 +778,6 @@ fn host_creation_guard_releases_on_cancel_and_deduplicates_before_capacity_is_fu
     assert!(admissions.begin("legacy", &request).is_ok());
     assert_eq!(
         super::admission::request_timeout(&request),
-        Duration::from_secs(60)
+        Duration::from_secs(45)
     );
 }

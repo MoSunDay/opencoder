@@ -64,6 +64,8 @@ pub fn runner() -> PathBuf {
         .unwrap()
         .to_path_buf();
     let binary = target.join("examples/agent-step-runner");
+    let profile = target.file_name().unwrap().to_str().unwrap();
+    let profile = if profile == "debug" { "dev" } else { profile };
     let status = Command::new("cargo")
         .args([
             "build",
@@ -72,6 +74,15 @@ pub fn runner() -> PathBuf {
             "--example",
             "agent-step-runner",
         ])
+        // The outer invocation's --target-dir overrides CARGO_TARGET_DIR.
+        // Build next to this test executable so we cannot use a stale runner
+        // from a different target directory or build profile.
+        .arg("--target-dir")
+        .arg(target.parent().unwrap())
+        .args(["--profile", profile])
+        // Container fixtures strip symbols, so avoid generating them first.
+        .arg("--config")
+        .arg(format!("profile.{profile}.debug=0"))
         .current_dir(Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."))
         .status()
         .unwrap();

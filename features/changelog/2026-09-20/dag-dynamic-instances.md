@@ -1,4 +1,4 @@
-Commit: 7e71cbcfd669dd2cbaa5c94ab01945fd139557f0
+Commit: 1adc6126c1e36ff927a28fcf2b17ace4891e37be
 
 # Dynamic DAG：实例 how 副本与 argv 批次
 
@@ -30,6 +30,7 @@ Commit: 7e71cbcfd669dd2cbaa5c94ab01945fd139557f0
 | HTTP 页大小、SSE 游标和错误 | `instance_routes_preserve_identity_and_bound_pages`、`instance_sse_reconnects_at_cursor_and_returns_worker_errors` | [control e2e](../../../crates/control/tests/e2e/dag_instances.rs) |
 | 真实 Wasm/Agent/runc、实例产物和日志 | `dynamic_wasm_instances_have_http_pages_isolated_argv_artifacts_and_replay`、`runc_dynamic_agent_and_wasm_read_isolated_copies_and_argv` | [process e2e](../../../tests/dag_e2e/dynamic.rs) |
 | CLI 缓存选项及模块参数边界 | `parses_the_bundle_argv_shape` | [wasmtime-cli](../../../crates/dag-runtime/examples/wasmtime-cli.rs) |
+| 初始化与执行前取消，不运行已取消 guest | `pre_cancelled_token_never_runs_guest`、`cancel_mid_run_and_agent_step_failure` | [取消回归](wasm-cancellation-startup.md) |
 | 分页选择、切换清理、终态回放、错误保留及同 run 恢复 | `instances.dom.test.jsx` 的五项行为测试 | [SPA](../../../crates/web/spa/src/dag/dynamic/instances.dom.test.jsx) |
 | Server→Worker→浏览器、两种来源、历史与重连 | `dag_dynamic.js` | [Chromium 验收](../../../scripts/acceptance/dag_dynamic.js) |
 
@@ -37,13 +38,18 @@ Commit: 7e71cbcfd669dd2cbaa5c94ab01945fd139557f0
 
 - DAG、运行时、控制面相关 Rust 套件通过；实例运行时 7 项、Worker 日志/查询 11 项、运行进度 2 项通过。
 - 真实进程验收 2 项通过，包含可用 runc 下的实际容器执行；浏览器两种来源、输入提交、实例切换、历史回放和连接中断恢复通过。
-- 最终独立快照 `522cd534` 的 Server→Worker→Chromium 验收通过（`/tmp/dynamic-browser-complete.log`）；实例终态、分页选择及日志截图与回执位于 `/tmp/opencoder-todo-workbench-lsBkNO/`。
+- 最终构建后的 Server→Worker→Chromium 验收通过（`/tmp/dynamic-browser-accepted.log`）：两种来源、UI 批次派发、实例切换、终态回执、断线重连和历史回放全部通过。截图与 JSON 回执位于 `/tmp/opencoder-todo-workbench-y3LxMi/`，使用原 ext4 临时目录。
 - SPA 全量 118 个文件、871 项测试通过（`/tmp/dynamic-spa-resume-complete.log`）；最终 SPA 构建通过（`/tmp/dynamic-spa-build-complete.log`）。
-- `cargo clippy --workspace --all-targets -- -D warnings`：零告警通过。
-- 工作区全量测试与最终构建：验证中，完成后补充实际结果。
+- `cargo clippy --workspace --all-targets -- -D warnings`：零告警通过（`/tmp/dynamic-final-clippy.log`）。
+- `cargo test --workspace --no-fail-fast`：429 个测试套件汇总 **5,442 passed / 0 failed / 7 ignored**；保留原有手工用例的 ignored 标记（完整输出 `/tmp/dynamic-final-tests.log`，计数 `/tmp/dynamic-final-counts.json`）。
+- Wasm 相关 14 项及真实取消连续三次、动态 runc 一次均通过（`/tmp/dynamic-epoch-after.log`、`/tmp/dynamic-final-process.log`）。
+- 工作区二进制、测试及 examples 预构建通过；最终 `cargo build --workspace` 零错误通过（`/tmp/dynamic-final-prebuild.log`、`/tmp/dynamic-final-build.log`）。
+- 171 个受影响代码文件及 11 个新增源码所在目录符合规模约束；说明与测试映射链接检查通过。
+
+验收对应独立 Git 快照 `1adc6126`（本地引用 `refs/codex/dynamic-step-verified-1adc6126`），源目录 `/tmp/opencoder-dynamic-verified-3xgimxe6`，Cargo 产物目录 `/data00/rust-build/cargo/dynamic-final-private`。构建仅关闭 dev/test 调试符号，保留原有断言与超时；测试临时文件使用独立 4 GiB tmpfs（允许设备节点以执行真实 runc），兼容接口准备修正另在原 ext4 环境通过 6 项回归。未新增应用环境变量或数据库表。
 
 ## 相关说明
 
 [使用与 API](../../../docs/dag-dynamic.md) · [纯域](../../../agents/dag/index.md) · [运行时](../../../agents/dag-runtime/index.md) · [平台行为](../../agent-platform/index.md)
 
-全量回归中另行处理的 [Brain 回执与报告通知](brain-wake-receipts.md)、[Host 容量轮询](host-capacity-read-only.md)、[TODO 兼容接口测试准备](todo-interrupt-fixture.md) 均保留了对应测试和原因记录。
+全量回归中另行处理的 [Brain 回执与报告通知](brain-wake-receipts.md)、[Host 容量轮询](host-capacity-read-only.md)、[TODO 兼容接口测试准备](todo-interrupt-fixture.md)、[Wasm 初始化取消](wasm-cancellation-startup.md) 均保留了对应测试和原因记录。

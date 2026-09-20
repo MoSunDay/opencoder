@@ -41,7 +41,7 @@ pub(super) async fn create(worker: &Worker, mut assignment: Assignment) -> Resul
         return Ok(reply);
     }
     let lifecycle = worker.lifecycle_gate(&assignment.index.id).await;
-    let preparing = lifecycle.lock().await;
+    let preparing = lifecycle.lock_owned().await;
     let gate = worker.inner.admission.lock().await;
     // Another Create may have accepted this ID while we waited for the gate.
     if let Some(reply) = accepted_reply(worker, &mut assignment).await {
@@ -79,14 +79,23 @@ pub(super) async fn create(worker: &Worker, mut assignment: Assignment) -> Resul
     // Classify the frozen definition, including an interrupted preparation's
     // original snapshot, before reserving bounded resource-copy capacity.
     let resource_slot = if crate::resources::requires_agent_pool(&assignment) {
-        Some(worker.inner.resource_preparations.acquire().await?)
+        Some(
+            worker
+                .inner
+                .resource_preparations
+                .clone()
+                .acquire_owned()
+                .await?,
+        )
     } else {
         None
     };
     if let Some(error) = worker.admission_error() {
         return Ok(RpcReply::error(503, error));
     }
-    let config = match preparation::blocking(|| prepare(worker, &assignment, false)) {
+    let (prepared, (preparing, resource_slot)) =
+        prepare_create(worker, &assignment, (preparing, resource_slot)).await?;
+    let config = match prepared {
         Ok(config) => config,
         Err(error) => {
             preparation::reject_project(worker, &assignment)?;
@@ -230,7 +239,29 @@ fn dag_spec_agents(spec: Option<&str>) -> Option<Vec<String>> {
 }
 
 pub(super) fn prepare(worker: &Worker, assignment: &Assignment, legacy: bool) -> Result<Config> {
-    prepare_with_config(worker, assignment, legacy, worker.configuration()?)
+    prepare_with_config(
+        worker,
+        assignment,
+        legacy,
+        worker.configuration()?,
+        opencoder_core::agent::agents_dir(),
+    )
+}
+
+async fn prepare_create(
+    worker: &Worker,
+    assignment: &Assignment,
+    lease: preparation::Lease,
+) -> Result<(Result<Config>, preparation::Lease)> {
+    // Capture caller-scoped configuration before slow resource I/O crosses threads.
+    let config = worker.configuration()?;
+    let source = opencoder_core::agent::agents_dir();
+    let worker = worker.clone();
+    let assignment = assignment.clone();
+    preparation::run(lease, move || {
+        prepare_with_config(&worker, &assignment, false, config, source)
+    })
+    .await
 }
 
 pub(super) fn prepare_record(
@@ -242,7 +273,13 @@ pub(super) fn prepare_record(
     let config = crate::brain::workdir::execution_config(worker, record)?
         .map(Ok)
         .unwrap_or_else(|| worker.configuration())?;
-    prepare_with_config(worker, assignment, legacy, config)
+    prepare_with_config(
+        worker,
+        assignment,
+        legacy,
+        config,
+        opencoder_core::agent::agents_dir(),
+    )
 }
 
 fn prepare_with_config(
@@ -250,6 +287,7 @@ fn prepare_with_config(
     assignment: &Assignment,
     legacy: bool,
     mut config: Config,
+    implicit_source: Option<std::path::PathBuf>,
 ) -> Result<Config> {
     let input = &assignment.request.input;
     anyhow::ensure!(
@@ -290,7 +328,7 @@ fn prepare_with_config(
         .clone()
         // An absent implicit pool permits built-in agents. An explicitly
         // configured source remains Some so pin rejects its disappearance.
-        .or_else(|| opencoder_core::agent::agents_dir().filter(|path| path.exists()));
+        .or_else(|| implicit_source.filter(|path| path.exists()));
     let root = if legacy {
         worker
             .inner

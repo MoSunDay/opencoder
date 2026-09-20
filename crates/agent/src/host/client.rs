@@ -81,6 +81,24 @@ impl Host {
         runtime_id: &str,
         operation: &NodeOperation,
     ) -> Result<RpcReply> {
+        // The Server stops waiting after 60 seconds. Bound the entire forward
+        // before that deadline, including locks, wake-up and response body, so
+        // unresolved old-runtime retries cannot retain every control-channel
+        // permit. Ownership and the frozen request remain available for retry;
+        // cancelling this HTTP wait does not cancel a Runtime-owned execution.
+        tokio::time::timeout(
+            Duration::from_secs(45),
+            self.call_runtime_inner(runtime_id, operation),
+        )
+        .await
+        .context("runtime control request timed out; retry the same execution ID")?
+    }
+
+    async fn call_runtime_inner(
+        &self,
+        runtime_id: &str,
+        operation: &NodeOperation,
+    ) -> Result<RpcReply> {
         let _use = self
             .store
             .shared_request_lock("runtime-use", runtime_id)

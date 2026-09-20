@@ -51,6 +51,9 @@ pub(crate) async fn execute(
     cancel: CancellationToken,
     output: Option<StepOutputLog>,
 ) -> StepResult {
+    if cancel.is_cancelled() {
+        return cancelled_result();
+    }
     let module_path = match resolve_module(run_root, module_library, &tokens[0]) {
         Ok(p) => p,
         Err(e) => return error_result(e),
@@ -122,7 +125,6 @@ fn run_sync(
         Ok(e) => e,
         Err(e) => return error_result(format!("wasmtime engine init failed: {e}")),
     };
-    let _ticker = EpochTicker::spawn(engine.clone(), ticks, Arc::clone(&cancel_flag));
 
     let limit = crate::sandbox::output_limit::STREAM_OUTPUT_LIMIT_BYTES;
     // The step log (when the runtime supplied one) mirrors every guest write
@@ -161,6 +163,10 @@ fn run_sync(
     };
     let mut store = Store::new(&engine, (wasi, host));
     store.set_epoch_deadline(ticks);
+    // Arm the deadline before cancellation can advance the engine epoch.
+    // Otherwise a cancellation during WASI setup is consumed before the
+    // deadline exists, leaving a busy guest running for its entire budget.
+    let _ticker = EpochTicker::spawn(engine.clone(), ticks, Arc::clone(&cancel_flag));
 
     let mut linker: Linker<HostStore> = Linker::new(&engine);
     if let Err(e) = add_to_linker_sync(&mut linker, |t| &mut t.0) {
@@ -222,15 +228,19 @@ fn run_sync(
             let text = trap_chain_text(&err);
             if epoch_trapped {
                 if cancel_flag.load(Ordering::SeqCst) {
-                    return StepResult {
-                        outcome: StepOutcome::Cancelled,
-                        ..error_result("wasm step cancelled".into())
-                    };
+                    return cancelled_result();
                 }
                 return error_result(format!("step timeout after {budget_secs}s"));
             }
             error_result(super::tail(&text, ERROR_TAIL_BYTES))
         }
+    }
+}
+
+fn cancelled_result() -> StepResult {
+    StepResult {
+        outcome: StepOutcome::Cancelled,
+        ..error_result("wasm step cancelled".into())
     }
 }
 

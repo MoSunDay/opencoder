@@ -393,7 +393,7 @@ fn prepare_with_config(
                         opencoder_dag::decode_spec(value.get("spec").unwrap_or(value))
                             .map_err(|e| anyhow::anyhow!(e))?;
                     opencoder_dag::validate(&spec).map_err(|e| anyhow::anyhow!(e.join("; ")))?;
-                    super::dag_preflight::validate(worker, &spec, legacy)?;
+                    super::dag_preflight::validate(worker, &config, &spec, legacy)?;
                     agents.extend(spec.steps.into_iter().filter_map(
                         |s| match s.kind.executable() {
                             opencoder_dag::StepKind::Agent { agent, .. } => {
@@ -509,6 +509,13 @@ fn prepare_with_config(
                 }
                 let mut effective_envs = settings.map(|s| s.envs.clone()).unwrap_or_default();
                 effective_envs.extend(envs.clone());
+                if assignment.request.kind == ExecutionKind::Dag
+                    && config.dag.agent_sandbox == opencoder_core::config::AgentSandbox::Runc
+                {
+                    // dag_preflight validated the guest executable and node
+                    // credentials; a host CLI is not used by this sandbox.
+                    continue;
+                }
                 opencoder_session::harness::codex::configured_binary(
                     settings,
                     &effective_envs,

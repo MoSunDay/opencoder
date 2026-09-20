@@ -3,7 +3,7 @@
 //!
 //! The host side stays thin and fail-closed, mirroring the wasm `run_runc`
 //! posture: runc must exist, the knowledge root must be mountable, and the
-//! API key must resolve — anything else errors the step instead of falling
+//! selected harness credentials must resolve — anything else errors the step instead of falling
 //! back to the in-node host runner. The container launches the
 //! `agent-step-runner` example (installed at `/usr/bin/agent-step-runner` by
 //! `scripts/prepare-dag-rootfs.sh`) with `ArgvStyle::Direct`; the runner
@@ -12,11 +12,12 @@
 //! result (exit 0 → `finish_from_output_json`; cancel/timeout/non-zero map
 //! like the wasm branch).
 
+use anyhow::Context;
 use opencoder_dag::{StepKind, StepOutcome, StepSpec};
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 
-use super::agent::{build_prompt, create_session_meta, step_agent_name};
+use super::agent::{build_prompt_with_knowledge, create_session_meta, step_agent_name};
 use super::wasm::{self, CONTEXT_MOUNT};
 use super::{ExecDeps, StepCtx, StepResult};
 use crate::step_log::StepOutputLog;
@@ -65,7 +66,14 @@ pub(crate) async fn execute_agent_step_runc(
         Ok(dir) => dir,
         Err(e) => return wasm::error_result(format!("illegal step path: {e}")),
     };
-    if let Err(e) = std::fs::write(step_dir.join("prompt.txt"), build_prompt(ctx)) {
+    let knowledge_path = ctx
+        .knowledge_root
+        .as_ref()
+        .map(|_| std::path::Path::new(super::KNOWLEDGE_MOUNT));
+    if let Err(e) = std::fs::write(
+        step_dir.join("prompt.txt"),
+        build_prompt_with_knowledge(ctx, knowledge_path),
+    ) {
         return wasm::error_result(format!("cannot write prompt.txt: {e}"));
     }
 
@@ -76,22 +84,47 @@ pub(crate) async fn execute_agent_step_runc(
     {
         config.model = model.clone();
     }
-    // LLM allowlist: the container has no config file, so the host injects
-    // its own resolved endpoint (fail-closed on a missing API key).
-    let api_key = match config.api_key() {
-        Ok(key) => key,
-        Err(e) => return wasm::error_result(format!("agent sandbox needs an LLM API key: {e:#}")),
+    let mut codex = match crate::sandbox::codex::resolve(
+        &config,
+        &step_agent_name(&ctx.step),
+        &ctx.workflow_root.join("rootfs"),
+    ) {
+        Ok(launch) => launch,
+        Err(e) => return wasm::error_result(format!("Codex sandbox preflight: {e:#}")),
     };
+    if let Some(launch) = &mut codex {
+        if let StepKind::Agent {
+            model: Some(model), ..
+        } = &ctx.step.kind
+        {
+            launch.runtime.model = Some(model.clone());
+        }
+        if let Err(e) = deps
+            .store
+            .set_harness_runtime(&session_id, &launch.runtime)
+            .await
+        {
+            return wasm::error_result(format!("persist Codex sandbox settings: {e:#}"));
+        }
+    }
     let mut env = wasm::step_env(ctx);
     if deps.config.agent.agents_dir.is_some() {
         env.push(("OPENCODER_AGENTS_DIR".into(), super::AGENTS_MOUNT.into()));
     }
     env.push(("OPENCODER_MODEL".into(), config.model_id().to_string()));
-    env.push((
-        "OPENAI_BASE_URL".into(),
-        config.base_url_for(config.provider_id()),
-    ));
-    env.push(("OPENAI_API_KEY".into(), api_key));
+    if codex.is_none() {
+        let api_key = match config.api_key() {
+            Ok(key) => key,
+            Err(e) => {
+                return wasm::error_result(format!("agent sandbox needs an LLM API key: {e:#}"))
+            }
+        };
+        env.push((
+            "OPENAI_BASE_URL".into(),
+            config.base_url_for(config.provider_id()),
+        ));
+        env.push(("OPENAI_API_KEY".into(), api_key));
+    }
     env.push(("OPENCODER_STEP_SESSION_ID".into(), session_id.clone()));
     env.push(("OPENCODER_STEP_AGENT".into(), step_agent_name(&ctx.step)));
     env.push((
@@ -126,9 +159,12 @@ pub(crate) async fn execute_agent_step_runc(
         .join("bundles")
         .join(&ctx.run_id)
         .join(ctx.relative_dir());
-    let prepared =
-        tokio::task::spawn_blocking(move || crate::sandbox::oci::write_bundle(&bundle_dir, &spec))
-            .await;
+    let launch = codex.clone();
+    let prepared = tokio::task::spawn_blocking(move || match launch {
+        Some(launch) => launch.write_bundle(&bundle_dir, &spec),
+        None => crate::sandbox::oci::write_bundle(&bundle_dir, &spec),
+    })
+    .await;
     let bundle_dir = match prepared {
         Ok(Ok(dir)) => dir,
         Ok(Err(err)) => return wasm::error_result(format!("cannot build oci bundle: {err:#}")),
@@ -182,6 +218,40 @@ pub(crate) async fn execute_agent_step_runc(
         }
     }
     output.close().await;
+    if let Some(mut launch) = codex {
+        // Only the thread pointer returns from the guest; never import guest
+        // environment/settings into the node's private harness configuration.
+        let thread = (|| -> anyhow::Result<Option<String>> {
+            let bytes = std::fs::read(step_dir.join("session.json"))
+                .context("read Codex sandbox session receipt")?;
+            let meta: serde_json::Value =
+                serde_json::from_slice(&bytes).context("parse Codex sandbox session receipt")?;
+            anyhow::ensure!(
+                meta["session_id"] == session_id,
+                "Codex sandbox session id mismatch"
+            );
+            let thread = meta["thread_id"]
+                .as_str()
+                .filter(|s| !s.is_empty())
+                .map(str::to_owned);
+            anyhow::ensure!(
+                !matches!(&streamed, Ok((0, _))) || thread.is_some(),
+                "Codex sandbox completed without a thread receipt"
+            );
+            Ok(thread)
+        })();
+        match thread {
+            Ok(thread) => launch.runtime.thread_id = thread,
+            Err(error) => event_error = Some(error),
+        }
+        if let Err(error) = deps
+            .store
+            .set_harness_runtime(&session_id, &launch.runtime)
+            .await
+        {
+            event_error = Some(error.context("persist Codex sandbox thread"));
+        }
+    }
     if let Some(error) = event_error {
         let mut result = wasm::error_result(format!("container event persistence: {error:#}"));
         result.session_id = Some(session_id);

@@ -34,6 +34,6 @@ SPA 保留锁定 Terser，并将 CommonJS strictRequires 固定为 true。此前
 
 脚本保留验收执行和索引回执，不删除数据库、不记录凭证明文。生产发布状态以独立发布回执为准。
 
-本次同时整合动态 DAG 实例和 Operator 隔离。动态 DAG 通过现有 capability_probe 协商 dag_dynamic_v1，派发前排除旧节点，实例与产物接口避免向旧节点发送未知操作。动态模板收到能力的调度提示，根输入引用在直接派发与 Brain 派发时保持相同形状。
+本次同时整合动态 DAG 实例和 Operator 隔离。Brain v3 根运行与子执行通过 brain_scheduler_v3 排除未升级节点，普通任务保持原有路由。动态 DAG 通过现有 capability_probe 协商 dag_dynamic_v1，派发前排除旧节点，实例与产物接口避免向旧节点发送未知操作。动态模板收到能力的调度提示，根输入引用在直接派发与 Brain 派发时保持相同形状。
 
 补充验收：brain/fixture.js 从 Web 创建五类能力任务；brain/dynamic.js 验证 Brain 执行抽屉中的动态实例、实时日志、输入绑定和整组屏障；dag_dynamic.js 验证原 DAG 页面相同面板；brain/repair-loop.js 固化测试、修复、复测的三轮闭环。模型脚本与真实模型验收分别记录，不混用结果。

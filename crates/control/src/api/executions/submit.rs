@@ -163,9 +163,8 @@ async fn submit_inner(state: &Arc<AppState>, request: CreateExecution) -> anyhow
                     ));
                 };
                 let action = request.input.get("_brain").and_then(|b| b.get("action"));
-                let dynamic =
-                    super::capabilities::requires_dynamic(request.kind, definition.as_ref());
-                if action.is_some() || dynamic {
+                let required = super::capabilities::required(&request, definition.as_ref());
+                if action.is_some() || !required.is_empty() {
                     if let Err(reply) = super::capabilities::probe(
                         state,
                         &node.registration.id,
@@ -174,7 +173,7 @@ async fn submit_inner(state: &Arc<AppState>, request: CreateExecution) -> anyhow
                             kind: request.kind,
                         },
                         action.cloned().unwrap_or_else(|| serde_json::json!({})),
-                        dynamic,
+                        &required,
                     )
                     .await
                     {

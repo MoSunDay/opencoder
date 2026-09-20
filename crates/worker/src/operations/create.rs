@@ -109,6 +109,9 @@ pub(super) async fn create(worker: &Worker, mut assignment: Assignment) -> Resul
     let config = match prepared {
         Ok(config) => config,
         Err(error) => {
+            preparation::discard_empty_resources(worker, &assignment).map_err(|cleanup| {
+                anyhow::anyhow!("preflight failed: {error:#}; snapshot cleanup failed: {cleanup:#}")
+            })?;
             preparation::reject_project(worker, &assignment)?;
             return Ok(RpcReply::error(
                 400,

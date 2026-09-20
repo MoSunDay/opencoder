@@ -1,4 +1,4 @@
-Commit: 2f6b202def6c5e75d1411143570784a1576b3407
+Commit: 56675f34b38d4c62b04703f199999d12eb4d8a94
 
 # 大脑调度工作台
 
@@ -18,9 +18,14 @@ Commit: 2f6b202def6c5e75d1411143570784a1576b3407
 
 v3 Web 工作台先展示目标、阶段、当前轮次和结果的摘要画布，再按轮次展示关联能力索引。当前轮默认展开、历史轮次折叠；点击能力的 execution ID 打开只读执行抽屉，继续复用 Agent、Team、DAG、TODO、Operator 的执行组件，因此 DAG 步骤日志和其他执行明细仍从所属节点实时读取。
 
+### 浏览器草稿缓存
+
+计划编辑器草稿按 `oc:brain:plan-draft:<owner>:new|<id>@<version>` 键存于 localStorage，读取按当前协议校验，损坏或旧协议残留 fail-closed 不覆盖原文。旧协议（v1 `plan.steps`）残留不再死锁编辑器：错误指引文案 + 「丢弃缓存并重新开始」逃生口——原文先备份到 `<key>:legacy-v1` 单槽再重置为干净 v2 草稿（新建为空计划、编辑为服务端版本快照）。
+
 ## 相关
 - [agents/brain](../../agents/brain/index.md) — 状态机与回归
 - [agents/control](../../agents/control/index.md) — 派发 API
 - [运行协议](../../docs/brain-orchestration.md)
 - [固定图 v2 与验收映射](../changelog/2026-09-16/brain-fixed-graph-v2.md)
+- [草稿旧协议缓存恢复](../changelog/2026-09-20/brain-draft-legacy-cache-recovery.md)
 - [事件驱动调度 v3](../changelog/2026-09-18/brain-scheduler-v3.md)

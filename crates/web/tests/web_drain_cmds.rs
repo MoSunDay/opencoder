@@ -37,7 +37,7 @@ async fn hanging_app(notify: Arc<Notify>) -> Ctx {
         }]);
     let handles = opencoder_web::handle::new_handle_map();
     let state = Arc::new(opencoder_web::AppState {
-                config_home: None,
+        config_home: None,
         brain: opencoder_web::api_brain::mock_brain(store.clone()),
         store: store.clone(),
         workdir,

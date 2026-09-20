@@ -56,7 +56,11 @@ pub async fn handle(
             let generation = input["generation"]
                 .as_u64()
                 .context("generation required")?;
-            if generation <= snapshot.run.generation {
+            if generation <= snapshot.run.generation
+                && record.annotations["scheduler_wake_ack"]
+                    .as_u64()
+                    .is_none_or(|ack| generation > ack)
+            {
                 state::annotate(worker, id, "scheduler_wake_ack", json!(generation)).await?;
             }
             return Ok(RpcReply::ok(json!({"acknowledged":generation})));
@@ -230,10 +234,10 @@ pub async fn handle(
         .store
         .commit_brain_scheduler(&change)
         .await?;
-    state::settle(worker, &next).await?;
-    // Notify after a committed transition, never as a side effect of reading
-    // the outbox: report collection subscribes to this same change signal.
+    // Notify committed transitions, never projection reads performed while
+    // collecting an outbox report (which would trigger another report).
     opencoder_session::loop_registry::notify_change();
+    state::settle(worker, &next).await?;
     if action == "scheduler_context" && next.run.phase == BrainSchedulerPhase::Deciding {
         // The root is normally idle after emitting its wake.  Installing the
         // context only changes the durable scheduler projection; enqueue a

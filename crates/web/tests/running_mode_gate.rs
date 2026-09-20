@@ -131,7 +131,7 @@ fn seeded_state(
     llm: Arc<HangingStream>,
 ) -> Arc<opencoder_web::AppState> {
     Arc::new(opencoder_web::AppState {
-                config_home: None,
+        config_home: None,
         brain: opencoder_web::api_brain::mock_brain(store.clone()),
         store: store.clone(),
         workdir: tmp.path().to_path_buf(),

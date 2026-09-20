@@ -75,7 +75,7 @@ fn compat_mutating_rows_stay_blocked() {
         blocked("git reset --hard"),
         blocked("git checkout -- file"),
         blocked("git stash"),
-        readonly("apt install foo"),      // unknown command → allow-by-default
+        readonly("apt install foo"), // unknown command → allow-by-default
         readonly("pip install requests"), // unknown command → allow-by-default
         blocked("npm install express"),
         readonly("cargo install ripgrep"), // unknown command → allow-by-default
@@ -111,20 +111,20 @@ fn compat_wrapper_rows_stay_blocked() {
         readonly("ionice rm file"), // ionice unregistered → allow-by-default (no unwrap)
         readonly("env exec rm file"), // exec unregistered → allow-by-default (policy)
         readonly("exec eval 'rm x'"), // exec/eval unregistered → allow-by-default (policy)
-        readonly("eval 'rm x'"), // eval unregistered → allow-by-default (policy)
+        readonly("eval 'rm x'"),    // eval unregistered → allow-by-default (policy)
         readonly("source script.sh"), // source unregistered → allow-by-default (policy)
-        readonly("sudo exec ls"), // sudo unregistered → allow-by-default (policy)
+        readonly("sudo exec ls"),   // sudo unregistered → allow-by-default (policy)
         readonly("env eval 'rm file'"), // eval unregistered → allow-by-default (policy)
         readonly("exec source malicious.sh"), // exec/source unregistered → allow-by-default
         readonly("nohup . evil.sh"), // `.` unregistered → allow-by-default (policy)
-        readonly("exec ls"), // exec unregistered → allow-by-default (policy)
+        readonly("exec ls"),        // exec unregistered → allow-by-default (policy)
         blocked("env -i rm ./x"), // RETARGETED: was /tmp (now released); structural invariant must hold
         readonly("env -u FOO rm ./x"), // env handler mis-parses -u value; inner "FOO" unknown → allow-by-default
         blocked("env FOO=1 -i rm ./x"), // RETARGETED: was /tmp (now released); structural invariant must hold
         blocked("nice -n 5 rm ./x"), // RETARGETED: was /tmp (now released); structural invariant must hold
         readonly("nice -n5 rm ./x"), // nice mis-parses attached -n5; inner "-n5" unknown → allow-by-default
         blocked("timeout -k 1 5 rm ./x"), // RETARGETED: was /tmp (now released); structural invariant must hold
-        readonly("ionice -c 2 rm ./x"), // ionice unregistered → allow-by-default (no unwrap)
+        readonly("ionice -c 2 rm ./x"),   // ionice unregistered → allow-by-default (no unwrap)
         blocked("time rm ./x"), // RETARGETED: was /tmp (now released); structural invariant must hold
         readonly("stdbuf -o0 rm ./x"), // stdbuf unregistered → allow-by-default (no unwrap)
         readonly("setsid rm ./x"), // setsid unregistered → allow-by-default (no unwrap)

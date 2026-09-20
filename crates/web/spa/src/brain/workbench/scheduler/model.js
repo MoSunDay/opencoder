@@ -33,5 +33,5 @@ export function validatePlan(plan, capabilities) {
 export function launchBody(values, id, plan) {
   const base = { schema_version: 3, id, node_id: values.node, inputs: engineeringInputs(values.engineering) };
   return plan ? { ...base, plan: { id: plan.id, version: plan.version } }
-    : { ...base, objective: values.objective.trim(), capability_ids: values.capability_ids, max_rounds: 32 };
+    : { ...base, objective: values.objective.trim(), capability_ids: values.capability_ids, max_rounds: values.max_rounds ?? 32 };
 }

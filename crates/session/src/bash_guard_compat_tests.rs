@@ -198,46 +198,51 @@ fn compat_tmp_release_flips() {
 }
 
 // ---------------------------------------------------------------------------
-// OVER-BLOCK (safe): old ReadOnly → new WriteBlocked. Every row is a genuine
-// behavioral divergence and is kept visible on purpose. The dominant new
-// posture is fail-closed on commands outside the known-handler set (an
-// unknown command could do anything, so it asks).
+// Unknown commands are allow-by-default (policy 2026-09-20): a command name
+// outside the handler registry no longer fails closed — only classified
+// write surfaces (handlers, redirects, interpreter payloads, substitutions)
+// block. The `UnknownCommand` AllowReason keeps the relaxation typed and
+// auditable. Unparseable input still fails closed.
 // ---------------------------------------------------------------------------
 
 #[test]
-fn compat_over_blocks_unknown_command_fail_close() {
+fn compat_unknown_commands_allow_by_default() {
     run_rows(&[
-        // Package-manager reads the old guard allowed; their binaries are not
-        // in the new known-command set.
-        blocked("pip list"), // OVER-BLOCK (safe): pip is unknown → fail-closed
-        blocked("apt list --installed"), // OVER-BLOCK (safe): apt is unknown → fail-closed
-        // Privilege escalators are unknown → everything under sudo/doas asks.
-        blocked("sudo ls"), // OVER-BLOCK (safe): sudo is unknown → fail-closed
-        // Interpreters.
-        blocked("sh"), // OVER-BLOCK (safe): bare interactive shell reads stdin (code execution risk)
-        // Placeholder commands (`cmd`) the old guard only pattern-matched for
-        // redirects are now fail-closed; the /dev/null release rows above use
-        // real commands so the release itself stays observable.
-        blocked("cmd >/dev/null"), // OVER-BLOCK (safe): unknown command → fail-closed
-        blocked("cmd > /dev/null"),
-        blocked("cmd 2>/dev/null"),
-        blocked("cmd &>/dev/null"),
-        blocked("cmd 1>/dev/null"),
-        blocked("cmd 2>&1"),
-        blocked("cmd 1>&2"),
-        blocked("cmd >&1"),
-        blocked("cmd >/dev/null 2>/dev/null"),
-        blocked("(cmd >/dev/null)"),
-        blocked("{ cmd 2>/dev/null; }"),
-        // `[ cmd 2>/dev/null ]` keeps the old ReadOnly verdict: `[` is a known
+        // Package-manager reads the old guard over-blocked; their binaries are
+        // not in the known-command set and now pass.
+        readonly("pip list"),
+        readonly("apt list --installed"),
+        // Privilege escalators are unregistered too: allow-by-default means
+        // everything under sudo/doas passes (accepted policy risk; the
+        // write-classified inner commands still block when unwrapped).
+        readonly("sudo ls"),
+        // Registered interactive shells still ask (fail-closed).
+        blocked("sh"), // known shell, no args → interactive ask
+        // Placeholder commands (`cmd`) with device/fd redirects: the unknown
+        // command allows, the redirect pipeline releases /dev/null + fd dups.
+        readonly("cmd >/dev/null"),
+        readonly("cmd > /dev/null"),
+        readonly("cmd 2>/dev/null"),
+        readonly("cmd &>/dev/null"),
+        readonly("cmd 1>/dev/null"),
+        readonly("cmd 2>&1"),
+        readonly("cmd 1>&2"),
+        readonly("cmd >&1"),
+        readonly("cmd >/dev/null 2>/dev/null"),
+        readonly("(cmd >/dev/null)"),
+        readonly("{ cmd 2>/dev/null; }"),
+        // `[ cmd 2>/dev/null ]` keeps its ReadOnly verdict: `[` is a known
         // test-command and `cmd` is only its argument, so the /dev/null
         // redirect is all that is checked.
         readonly("[ cmd 2>/dev/null ]"),
-        // Old parse-artifact rows (trailing `)` / unknown binary) now fail closed.
-        blocked("make 2>&1)"), // OVER-BLOCK (safe): unrecognized construct → fail-closed
-        blocked("(make 2>&1)"), // OVER-BLOCK (safe): make is unknown → fail-closed
-        // Wrappers that are not in the new known-command set.
-        blocked("stdbuf -o0 grep -q x file"), // OVER-BLOCK (safe): stdbuf is unknown → fail-closed
+        // Unknown commands must NOT launder a real write through a redirect.
+        blocked("cmd > /var/x"),
+        blocked("cmd > file"),
+        // Unrecognized constructs still fail closed (unparseable → Ask).
+        blocked("make 2>&1)"),
+        // Unregistered wrappers pass through without unwrapping.
+        readonly("stdbuf -o0 grep -q x file"),
+        readonly("(make 2>&1)"),
     ]);
 }
 
@@ -266,8 +271,8 @@ fn compat_interpreter_rows() {
         blocked("node -e 'require(\"fs\").unlinkSync(\"x\")'"),
         blocked("perl -e 'system(\"rm x\")'"),
         blocked("perl -pe 's/a/b/'"),
-        blocked("php -r 'echo 1;'"), // blocked (unknown command) — over-block, harmless payload
-        blocked("sudo bash -c 'rm x'"), // blocked (unknown command) — over-block, dangerous payload
+        readonly("php -r 'echo 1;'"), // unknown command → allow-by-default (payload unanalyzed)
+        readonly("sudo bash -c 'rm x'"), // sudo unregistered → allow-by-default (policy)
         blocked("bash -s"),
         blocked("sh -c 'rm x'"),
         // RELAXED (verified safe): the classifier recurses into -c/-e payloads

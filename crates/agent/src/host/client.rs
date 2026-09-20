@@ -81,13 +81,17 @@ impl Host {
         runtime_id: &str,
         operation: &NodeOperation,
     ) -> Result<RpcReply> {
-        // The Server stops waiting after 60 seconds. Bound the entire forward
-        // before that deadline, including locks, wake-up and response body, so
+        // The Server waits 60 seconds for creation and 15 for other RPCs.
+        // Bound the entire forward, including locks, wake-up and response body, so
         // unresolved old-runtime retries cannot retain every control-channel
         // permit. Ownership and the frozen request remain available for retry;
         // cancelling this HTTP wait does not cancel a Runtime-owned execution.
+        let seconds = match operation {
+            NodeOperation::Create { .. } => 45,
+            _ => 10,
+        };
         tokio::time::timeout(
-            Duration::from_secs(45),
+            Duration::from_secs(seconds),
             self.call_runtime_inner(runtime_id, operation),
         )
         .await

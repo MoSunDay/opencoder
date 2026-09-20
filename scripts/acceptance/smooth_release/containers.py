@@ -26,9 +26,9 @@ class Containers:
             shutil.copy2(source,target)
 
     def state(self, runtime_data, execution, step='hold'):
-        # Explicit fixture container identity, never a fleet-wide cleanup/list.
+        # Static StepCtx.execution_key is step-<name>; retain the exact fixture owner.
         root = Path(runtime_data) / 'dag/bundles' / execution / step / 'runc-state'
-        result = subprocess.run(['runc','--root',str(root),'state',execution + '-' + step],capture_output=True,text=True)
+        result = subprocess.run(['runc','--root',str(root),'state',execution + '-step-' + step],capture_output=True,text=True)
         if result.returncode and 'does not exist' in result.stderr:
             return {'status':'not_created'}
         result.check_returncode()

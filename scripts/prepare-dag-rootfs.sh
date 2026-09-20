@@ -14,7 +14,7 @@
 #     runner for `run_mode: agent` custom agents, at
 #     usr/bin/agent-session-runner.
 #
-# Usage: scripts/prepare-dag-rootfs.sh <dir>        (dir must be named rootfs)
+# Usage: scripts/prepare-dag-rootfs.sh <dir> [--codex <native-codex-binary>]
 # Then:  DAG_TEST_ROOTFS=<dir> cargo test -p opencoder-dag-runtime --lib \
 #          sandbox::runc -- --ignored
 set -euo pipefail
@@ -22,7 +22,15 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 out="${1:-}"
-[ -n "$out" ] || { echo "usage: $0 <rootfs-dir>" >&2; exit 2; }
+[ -n "$out" ] || { echo "usage: $0 <rootfs-dir> [--codex <native-codex-binary>]" >&2; exit 2; }
+shift
+codex_binary=""
+if [ "$#" -gt 0 ]; then
+  [ "$#" -eq 2 ] && [ "$1" = "--codex" ] || {
+    echo "expected --codex <native-codex-binary>" >&2; exit 2;
+  }
+  codex_binary="$2"
+fi
 mkdir -p "$out"
 out="$(cd "$out" && pwd)"
 [ "$(basename "$out")" = "rootfs" ] || {
@@ -54,5 +62,9 @@ done | sort -u | while read -r lib; do
   mkdir -p "$(dirname "$dest")"
   cp -L "$lib" "$dest"
 done
+
+if [ -n "$codex_binary" ]; then
+  bash "$repo_root/scripts/dag-rootfs/install-codex.sh" "$out" "$codex_binary"
+fi
 
 echo "==> rootfs ready at $out (workflow root: $(dirname "$out"))"

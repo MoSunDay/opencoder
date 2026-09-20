@@ -54,6 +54,7 @@ pub(crate) struct Inner {
     pub lifecycle_gates: Mutex<HashMap<String, Arc<Mutex<()>>>>,
     pub slots: Arc<Semaphore>,
     pub admission: Mutex<()>,
+    pub resource_preparations: Semaphore,
     pub maintenance: std::sync::Mutex<HashMap<String, opencoder_session::extensions::Registration>>,
     pub _lock: File,
 }
@@ -223,6 +224,7 @@ impl Worker {
                 lifecycle_gates: Mutex::new(HashMap::new()),
                 slots: Arc::new(Semaphore::new(MAX_NODE_RUNS)),
                 admission: Mutex::new(()),
+                resource_preparations: Semaphore::new(4),
                 maintenance: std::sync::Mutex::new(HashMap::new()),
                 _lock: lock,
             }),

@@ -199,3 +199,35 @@ async fn automatic_dynamic_placement_skips_old_nodes() {
     );
     link.abort();
 }
+
+#[tokio::test]
+async fn old_nodes_are_excluded_from_brain_v3_children_before_assignment() {
+    use opencoder_core::fleet::RpcReply;
+    let h = Harness::new().await;
+    h.node
+        .set_capability_reply(RpcReply::ok(json!({"compatible":true})));
+    let (code, body) = h
+        .req(
+            Method::POST,
+            "/api/executions",
+            Some(json!({
+                "id":"agent-brain-incompatible", "kind":"agent", "target":"act",
+                "input":{"brain_scheduler":{"run_id":"root"},"prompt":"bounded task"}
+            })),
+        )
+        .await;
+    assert_eq!(code, 503, "{body}");
+    assert!(body.to_string().contains("brain_scheduler_v3"));
+    assert!(h
+        .state
+        .fleet
+        .assignment("agent-brain-incompatible")
+        .await
+        .unwrap()
+        .is_none());
+    assert!(h.node.journal_ids().is_empty());
+    let (code, body) = h.req(Method::POST, "/api/executions", Some(json!({
+        "id":"agent-ordinary", "kind":"agent", "target":"act", "input":{"prompt":"ordinary task"}
+    }))).await;
+    assert_eq!(code, 202, "{body}");
+}

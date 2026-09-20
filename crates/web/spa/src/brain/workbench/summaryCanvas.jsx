@@ -15,12 +15,12 @@ export function SummaryCanvas({ view, onCapabilities }) {
   return <section className="brain-core-flow" aria-label="大脑调度总览画布">
     <div className="brain-core-stages">{stages.map(([title, value, selected], index) => <div className="brain-core-stage" key={title}>
       {index > 0 && <span aria-hidden="true" className="brain-summary-arrow">→</span>}
-      <div className={`brain-summary-node${selected ? ' brain-stage-active' : ''}`}><Typography.Text type="secondary">{title}</Typography.Text><Typography.Text strong>{value}</Typography.Text></div>
+      <div className={`brain-summary-node${selected ? ' brain-stage-active' : ''}`}><Typography.Text type="secondary">{title}</Typography.Text><Typography.Text strong title={value}>{value}</Typography.Text></div>
     </div>)}</div>
     <div className="brain-core-loop" aria-label="继续下一轮，返回大脑调度">↖ 继续下一轮：结果判断 → 大脑调度</div>
     <div className="brain-flow-capabilities"><Space wrap><Typography.Text strong>关联能力库 → 大脑调度</Typography.Text><Tag>{count} 项能力</Tag>
       {onCapabilities && <Button size="small" onClick={onCapabilities}>查看关联能力</Button>}</Space>
-      <Space wrap>{caps.map((cap) => <Tag key={cap.capability_id || cap.id}>{cap.kind} · {cap.target || cap.capability_id || cap.id}</Tag>)}</Space>
+      <Space wrap className="brain-capability-preview">{caps.slice(0, 5).map((cap) => <Tag title={cap.target || cap.capability_id || cap.id} key={cap.capability_id || cap.id}>{cap.kind} · {cap.target || cap.capability_id || cap.id}</Tag>)}{caps.length > 5 && <Tag>+{caps.length - 5}</Tag>}</Space>
     </div>
     {active && <Space wrap><Tag color={V3_COLORS[phase]}>{V3_PHASES[phase] || phase}</Tag>{view.plan && <Typography.Text type="secondary">计划 {view.plan.id} · v{view.plan.version}</Typography.Text>}</Space>}
   </section>;

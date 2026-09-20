@@ -18,7 +18,7 @@ function LegacyPlanBody({ run, onNotice }) {
 
 export function BrainRunBody({ id, onNotice, header = null }) {
   const { run, events, error, connection, refresh } = useBrainRun(id);
-  return <div className="brain-run">{header}{error && <Alert type="error" showIcon title={error} action={<Button onClick={() => refresh()?.catch(() => {})}>重试</Button>} />}{!run ? <Spin /> : <>{!run.schema_version || run.schema_version < 3 ? <><div className="brain-run-header"><div><Typography.Title level={4}>{run.objective}</Typography.Title><Space wrap><Tag color={COLORS[run.phase]}>{PHASES[run.phase] || run.phase}</Tag><TimeText ts={run.updated_at} /></Space></div></div><LegacyPlanBody run={run} onNotice={onNotice} /></> : <V3RunBody view={run} id={id} onNotice={onNotice} events={events} connection={connection} refresh={refresh} />}</>}</div>;
+  return <div className="brain-run">{header}{error && <Alert type="error" showIcon title={error} action={<Button onClick={() => refresh()?.catch(() => {})}>重试</Button>} />}{!run ? <Spin /> : <>{!run.schema_version || run.schema_version < 3 ? <><div className="brain-run-header"><div><Typography.Title level={4}>{run.objective}</Typography.Title><Space wrap><Tag color={COLORS[run.phase]}>{PHASES[run.phase] || run.phase}</Tag><TimeText ts={run.updated_at} /></Space></div></div><Alert type="info" showIcon title="历史运行只读" /><LegacyPlanBody run={run} onNotice={onNotice} /></> : <V3RunBody view={run} id={id} onNotice={onNotice} events={events} connection={connection} refresh={refresh} />}</>}</div>;
 }
 
 export function BrainRunView({ id, onBack, onNotice }) {

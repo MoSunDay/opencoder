@@ -52,7 +52,7 @@ async fn register(env: &Env, name: &str) -> NodeRecord {
 
 fn app_for(env: &Env, dispatcher: Arc<dyn TeamDispatcher>) -> axum::Router {
     let state = Arc::new(opencoder_web::AppState {
-                config_home: None,
+        config_home: None,
         brain: opencoder_web::api_brain::mock_brain(env.store.clone()),
         store: env.store.clone(),
         workdir: std::env::temp_dir(),

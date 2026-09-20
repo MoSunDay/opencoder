@@ -190,7 +190,7 @@ async fn overlap_window_event_is_deduped_once() {
         seeded: AtomicBool::new(false),
     });
     let state = Arc::new(opencoder_web::AppState {
-                config_home: None,
+        config_home: None,
         client_override: None,
         brain: opencoder_web::api_brain::mock_brain(store.clone()),
         store,

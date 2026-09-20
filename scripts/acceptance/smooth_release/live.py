@@ -19,7 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'platform'))
 from rolling import config, manifest, probes
 from rolling.io import Operations
 from rolling.state import Journal, atomic_bytes, write
-from fixture import HOLD_WASM, todo_spec
+from fixture import HOLD_WASM, release_wasi_gate, todo_spec
 from metrics import verify as verify_traffic
 from streams import Stream
 import transitions
@@ -45,13 +45,17 @@ class Live(Operations):
         return self.http(self.settings.public_url, path, method, body)
 
     def submit_initial(self, request):
-        # The old Server may still have the 15s Create deadline. Recover its
-        # durable acceptance with the same frozen request before measuring
-        # traffic; measured submissions below deliberately never retry.
+        # Cold admission freezes the configured NFS resource pool and may wait
+        # behind another snapshot on the old Runtime. Recover the same frozen
+        # request before measurement; measured submissions never retry. Keep
+        # preparation latency visible instead of counting it as release traffic.
         request = {'node_id': self.node_id, **request}
-        probes.submit_probe(self, self.settings.public_url, request['id'], request, 120)
+        began = time.monotonic()
+        probes.submit_probe(self, self.settings.public_url, request['id'], request, 300)
         receipt = self.api(f"/api/executions/{request['id']}/receipt")
         assert receipt['phase'] == 'accepted', receipt
+        print(json.dumps({'initial_admission': request['id'],
+            'seconds': time.monotonic() - began}), flush=True)
         return receipt['receipt']['body']
 
     def completed(self, identifier):
@@ -146,7 +150,13 @@ def exercise(args, settings, root):
     previous = Journal(settings.state_dir).data
     assert previous['current'] and previous['phase'] in ('complete', 'rolled_back'), 'first migration must already be complete'
     candidate = manifest.verify(args.bundle)
-    assert candidate['release_id'] != previous['current'], 'acceptance requires another release'
+    on_candidate = getattr(args, 'current_roundtrip', False)
+    if on_candidate:
+        assert args.signal and args.signal_roundtrip, 'current roundtrip requires signal rollback and republish'
+        assert candidate['release_id'] == previous['current'], 'current roundtrip requires the verified candidate already active'
+        assert previous.get('previous'), 'current roundtrip requires a rollback target'
+    else:
+        assert candidate['release_id'] != previous['current'], 'acceptance requires another release'
     old = previous['releases'][previous['current']]
     tag = root.name
     todo_id, dag_id = f'todos-{tag}', f'dag-{tag}-hold'
@@ -160,12 +170,14 @@ def exercise(args, settings, root):
     stop = threading.Event()
     thread = None
     stream = None
+    wasm_submitted = False
     try:
         receipt = env.submit_initial(todo)
         env.wait(lambda: (root / 'model-shell.pid').exists(), 240)
         model_shell = process_identity(int((root / 'model-shell.pid').read_text()))
         assert not (root / 'first.done').exists(), 'model bypassed the release gate'
-        env.api('/api/executions', 'POST', {'id': dag_id, 'kind': 'dag', 'input': {'definition': {
+        wasm_submitted = True
+        env.submit_initial({'id': dag_id, 'kind': 'dag', 'input': {'definition': {
             'name': '跨发布真实 WASI 工具', 'steps': [{'name': 'hold', 'timeout_secs': 1800,
                 'kind': {'type': 'wasm', 'command': module}}]}}})
         env.wait(lambda: env.api('/api/executions/' + dag_id)['dag_steps']['running'] == 1, 90)
@@ -215,8 +227,8 @@ def exercise(args, settings, root):
         write(root / 'traffic.json', {'requests': traffic, 'failures': failures})
         (root / 'release').touch()
         # Release only this test's WASI gate, regardless of deployment outcome.
-        for context in (old_data / 'dag' / dag_id).glob('*/context.json'):
-            (context.parent.parent / 'release').touch()
+        if wasm_submitted:
+            release_wasi_gate(old_data, dag_id)
     assert not failures, failures
     env.wait(lambda: env.completed(todo_id), 300)
     env.wait(lambda: env.completed(dag_id), 90)
@@ -229,6 +241,8 @@ def exercise(args, settings, root):
     verify_stream(env, stream, dag_id)
     samples = observe(env, root, tag, args.observe_seconds)
     result = {'result': 'PASS', 'previous': old['id'], 'current': current['current'],
+        'started_on_candidate': on_candidate,
+        'rollback_target': previous['previous'] if on_candidate else old['id'],
         'signal': args.signal, 'signal_roundtrip': args.signal_roundtrip,
         'todo': todo_id, 'dag': dag_id, 'continuity': continuity['metrics'],
         'runtime_process': before, 'model_shell_process': model_shell,
@@ -246,11 +260,14 @@ def main():
     parser.add_argument('--observe-seconds', type=int, default=900)
     parser.add_argument('--signal', action='store_true', help='publish through the running Server signal protocol')
     parser.add_argument('--signal-roundtrip', action='store_true', help='also roll back and republish while old and new work remain running')
+    parser.add_argument('--current-roundtrip', action='store_true', help='verify rollback and republish after a separately verified initial activation')
     args = parser.parse_args()
     if args.observe_seconds < 900:
         parser.error('final acceptance requires at least 900 seconds of observation')
     if args.signal_roundtrip and not args.signal:
         parser.error('--signal-roundtrip requires --signal and two signal-capable releases')
+    if args.current_roundtrip and not (args.signal and args.signal_roundtrip):
+        parser.error('--current-roundtrip requires --signal --signal-roundtrip')
     settings = config.load(args.config)
     root = args.evidence_parent / ('release-live-' + secrets.token_hex(8))
     root.mkdir(parents=True)

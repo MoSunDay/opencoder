@@ -70,3 +70,71 @@ async fn scheduler_event_does_not_contain_execution_body() {
         .is_none());
     let _ = json!({"ok":true});
 }
+
+#[tokio::test]
+async fn terminal_dedup_rolls_back_projection_and_survives_reopen() {
+    use opencoder_core::fleet::ExecutionKind;
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("scheduler.db");
+    let store = opencoder_store::LibsqlStore::open(&path).await.unwrap();
+    store.commit_brain_scheduler(&change()).await.unwrap();
+    let mut terminal = change();
+    terminal.expected_generation = Some(0);
+    terminal.run.generation = 1;
+    terminal.run.round = 1;
+    terminal.operations.push(BrainOperation {
+        operation_id: "operation-a".into(),
+        run_id: terminal.run.run_id.clone(),
+        round: 1,
+        capability_id: "a".into(),
+        execution_kind: ExecutionKind::Agent,
+        execution_id: "agent-a".into(),
+        status: BrainOperationStatus::Done,
+        source_sequence: Some(9),
+        cancel_requested: false,
+    });
+    let event = &mut terminal.events[0];
+    event.event_type = "operation_terminal".into();
+    event.execution_id = Some("agent-a".into());
+    event.source_sequence = Some(9);
+    let saved = store.commit_brain_scheduler(&terminal).await.unwrap();
+    let mut replay = terminal.clone();
+    replay.expected_generation = Some(1);
+    replay.run.generation = 2;
+    replay.run.phase = BrainSchedulerPhase::Paused;
+    replay.operations[0].cancel_requested = true;
+    assert!(store.commit_brain_scheduler(&replay).await.is_err());
+    assert_eq!(
+        store
+            .brain_scheduler(&terminal.run.run_id)
+            .await
+            .unwrap()
+            .unwrap(),
+        saved
+    );
+    drop(store);
+    let reopened = opencoder_store::LibsqlStore::open(&path).await.unwrap();
+    assert_eq!(
+        reopened
+            .brain_scheduler(&terminal.run.run_id)
+            .await
+            .unwrap()
+            .unwrap(),
+        saved
+    );
+    let first = reopened
+        .brain_scheduler_events(&terminal.run.run_id, 0, 1)
+        .await
+        .unwrap();
+    let second = reopened
+        .brain_scheduler_events(&terminal.run.run_id, first[0].seq, 1)
+        .await
+        .unwrap();
+    assert_eq!(first[0].event_type, "run_created");
+    assert_eq!(second[0].event_type, "operation_terminal");
+    assert!(reopened
+        .brain_scheduler_events(&terminal.run.run_id, second[0].seq, 1)
+        .await
+        .unwrap()
+        .is_empty());
+}

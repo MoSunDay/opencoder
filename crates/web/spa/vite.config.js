@@ -29,9 +29,11 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     emptyOutDir: true,
-    // Keep the committed single-file artifact byte-stable across release
-    // builds. The pinned Terser version avoids esbuild's occasional race
-    // while assigning mangled identifiers.
+    // Conditional CommonJS detection can race (dayjs was sometimes hoisted,
+    // sometimes wrapped). Always preserve require initialization semantics so
+    // identical sources produce identical bundles in separate checkout paths.
+    commonjsOptions: { strictRequires: true },
+    // Pin the final compressor independently of CommonJS transformation.
     minify: 'terser',
     terserOptions: {
       format: { comments: false },

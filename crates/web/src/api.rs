@@ -231,6 +231,7 @@ pub struct SubagentSteerBody {
 pub async fn post_prompt(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
+    runtime_config: Option<axum::Extension<Config>>,
     Json(mut body): Json<PromptBody>,
 ) -> Response {
     if let Some(resp) = reject_node_session(&state, &id).await {
@@ -256,11 +257,9 @@ pub async fn post_prompt(
     {
         return error_409("mode switch refused while drain running");
     }
-    // Operator isolation: sessions on a redirected state reload config from
-    // the execution's frozen home; other states have `config_home: None`.
-    let mut config = match Config::load_with_home(&state.workdir, state.config_home.as_deref()) {
+    let mut config = match crate::api_ops::load_config(&state, runtime_config) {
         Ok(c) => c,
-        Err(e) => return error_500(format!("config: {e:#}")),
+        Err(response) => return *response,
     };
     let runtime = match state.store.harness_runtime(&id).await {
         Ok(runtime) => runtime.unwrap_or_default(),

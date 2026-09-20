@@ -13,7 +13,7 @@
 //! ```
 //!
 //! Differences from the real CLI are deliberate: no flags beyond
-//! `run`/`--dir`/`--env`, inherited stdio, and guest exit codes pass
+//! `run`/`--dir`/`--env`/`-Ccache-config`, inherited stdio, and guest exit codes pass
 //! through (the runc runner owns timeouts and output limits).
 
 use std::path::PathBuf;
@@ -27,7 +27,11 @@ fn main() -> anyhow::Result<()> {
     // `wasmtime::Error` deliberately does not implement std::error::Error,
     // so stringify at each boundary instead of relying on `?` conversion.
     let wrap = |e: wasmtime::Error| anyhow::anyhow!("{e}");
-    let engine = Engine::default();
+    let mut config = wasmtime::Config::new();
+    if let Some(path) = &spec.cache_config {
+        config.cache(Some(wasmtime::Cache::from_file(Some(path)).map_err(&wrap)?));
+    }
+    let engine = Engine::new(&config).map_err(&wrap)?;
     // Builder defaults DISCARD stdout/stderr; a CLI must inherit them.
     let mut builder = WasiCtxBuilder::new();
     builder
@@ -65,18 +69,27 @@ struct RunSpec {
     envs: Vec<(String, String)>,
     module: PathBuf,
     module_argv: Vec<String>,
+    cache_config: Option<PathBuf>,
 }
 
 fn parse_args(argv: impl Iterator<Item = String>) -> anyhow::Result<RunSpec> {
     let mut dirs = Vec::new();
     let mut envs = Vec::new();
     let mut module_argv: Vec<String> = Vec::new();
+    let mut cache_config = None;
     let mut tokens = argv.peekable();
     if tokens.peek().map(String::as_str) == Some("run") {
         tokens.next();
     }
     while let Some(token) = tokens.next() {
-        if let Some(spec) = token.strip_prefix("--dir=") {
+        if !module_argv.is_empty() {
+            module_argv.push(token);
+            module_argv.extend(tokens);
+            break;
+        } else if let Some(path) = token.strip_prefix("-Ccache-config=") {
+            anyhow::ensure!(!path.is_empty(), "cache config path is empty");
+            cache_config = Some(PathBuf::from(path));
+        } else if let Some(spec) = token.strip_prefix("--dir=") {
             dirs.push(match spec.split_once("::") {
                 Some((host, guest)) => (PathBuf::from(host), guest.to_string()),
                 None => (PathBuf::from(spec), spec.to_string()),
@@ -107,6 +120,7 @@ fn parse_args(argv: impl Iterator<Item = String>) -> anyhow::Result<RunSpec> {
         envs,
         module,
         module_argv,
+        cache_config,
     })
 }
 
@@ -124,6 +138,7 @@ mod tests {
     fn parses_the_bundle_argv_shape() {
         let spec = argv(&[
             "run",
+            "-Ccache-config=/opencoder-wasmtime-cache.toml",
             "--dir=/workspace/context",
             "--env",
             "OPENCODER_RUN_ID=dag-1",
@@ -155,6 +170,32 @@ mod tests {
             PathBuf::from("/workspace/context/step/module.wasm")
         );
         assert_eq!(spec.module_argv.len(), 3);
+        assert_eq!(
+            spec.cache_config,
+            Some(PathBuf::from("/opencoder-wasmtime-cache.toml"))
+        );
+        let spec = argv(&[
+            "run",
+            "m.wasm",
+            "--env",
+            "K=V",
+            "--dir=/target",
+            "-Ccache-config=module-arg",
+            "hello world",
+        ])
+        .unwrap();
+        assert_eq!(
+            spec.module_argv,
+            [
+                "m.wasm",
+                "--env",
+                "K=V",
+                "--dir=/target",
+                "-Ccache-config=module-arg",
+                "hello world"
+            ]
+        );
+        assert!(spec.envs.is_empty() && spec.dirs.is_empty() && spec.cache_config.is_none());
 
         // `--dir=host::guest` maps a host tree onto a different guest path.
         let spec = argv(&["--dir=/tmp/h::/workspace/context", "m.wasm"]).unwrap();

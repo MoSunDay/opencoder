@@ -26,6 +26,7 @@ fn dummy_client() -> Arc<dyn ChatStream> {
 async fn state() -> Arc<opencoder_web::AppState> {
     let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
     Arc::new(opencoder_web::AppState {
+                config_home: None,
         client_override: None,
         brain: opencoder_web::api_brain::mock_brain(store.clone()),
         store,
@@ -61,6 +62,7 @@ async fn resume_failure_broadcasts_terminal_error_frame() {
         sid,
         dummy_client(),
         std::env::temp_dir(),
+        None,
         Config::default(),
     )
     .await;

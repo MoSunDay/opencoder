@@ -283,7 +283,7 @@ function EditorCanvas({ spec, problems, positions, onSpecChange, onPositionsChan
   const onDrop = (e) => {
     e.preventDefault();
     const kind = e.dataTransfer.getData('application/opencoder-step');
-    if (!['agent', 'wasm'].includes(kind)) {
+    if (!['agent', 'wasm', 'dynamic'].includes(kind)) {
       return;
     }
     addStep(kind, screenToFlowPosition({ x: e.clientX, y: e.clientY }));
@@ -324,7 +324,14 @@ function EditorCanvas({ spec, problems, positions, onSpecChange, onPositionsChan
       return;
     }
     setNodes((cur) =>
-      cur.map((n) => (n.id === old ? { ...n, id: name, data: { ...n.data, step: { ...n.data.step, name } } } : n)),
+      cur.map((n) => {
+        let step = n.data.step;
+        if (step.kind?.type === 'dynamic' && step.kind.source?.type === 'step_output' && step.kind.source.step === old) {
+          step = { ...step, kind: { ...step.kind, source: { ...step.kind.source, step: name } } };
+        }
+        if (n.id === old) step = { ...step, name };
+        return { ...n, id: n.id === old ? name : n.id, data: { ...n.data, step } };
+      }),
     );
     setEdges((cur) =>
       cur.map((e) => {

@@ -24,6 +24,7 @@ async fn state() -> (Arc<opencoder_web::AppState>, Arc<MockChatClient>) {
         .with_chat_model("planner-chat");
     (
         Arc::new(opencoder_web::AppState {
+                        config_home: None,
             brain,
             store,
             workdir: std::env::temp_dir(),

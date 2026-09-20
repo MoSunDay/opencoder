@@ -72,7 +72,7 @@ pub(crate) async fn execute(
         Ok(k) => k.map(|mount| mount.host),
         Err(e) => return error_result(e),
     };
-    let step_name = ctx.step.name.clone();
+    let step_name = ctx.relative_dir();
     let ops = ctx.ops.clone();
     let job = tokio::task::spawn_blocking(move || {
         run_sync(

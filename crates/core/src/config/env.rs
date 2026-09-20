@@ -106,17 +106,37 @@ pub(crate) fn env_get(name: &str) -> Option<String> {
 
 /// Candidate chain: project files first, then `~/.opencoder/`, then XDG.
 pub(super) fn config_candidates(working_dir: &Path) -> Vec<PathBuf> {
+    candidates_with_home(working_dir, None)
+}
+
+/// [`config_candidates`] with the global home explicitly redirected: the
+/// `~/.opencoder` (and XDG fallback) entries resolve inside `home` instead
+/// of the real user home. Project candidates still resolve against
+/// `working_dir`. The explicit override wins over the thread-local test
+/// isolation, so production callers stay deterministic. Operator execution
+/// isolation (`Config::load_with_home`) uses this to pin a session's global
+/// config view to its frozen snapshot.
+pub(super) fn candidates_with_home(
+    working_dir: &Path,
+    home_override: Option<&Path>,
+) -> Vec<PathBuf> {
     let mut v = vec![
         working_dir.join(".opencoder").join("config.json"),
         working_dir.join("opencoder.json"),
     ];
-    if let Some(home) = config_home_dir() {
+    let home = home_override
+        .map(Path::to_path_buf)
+        .or_else(config_home_dir);
+    if let Some(home) = home {
         // ~/.opencoder/ (this binary's own config home) — highest-priority global,
         // so `opencoder` runs directly from any directory with no project config.
         v.push(home.join(".opencoder").join("config.json"));
         v.push(home.join(".opencoder").join("opencoder.json"));
     }
-    if let Some(cfg) = config_xdg_dir() {
+    let xdg = home_override
+        .map(Path::to_path_buf)
+        .or_else(config_xdg_dir);
+    if let Some(cfg) = xdg {
         v.push(cfg.join("opencoder").join("config.json"));
     }
     v

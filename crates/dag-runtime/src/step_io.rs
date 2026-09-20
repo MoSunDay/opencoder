@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 use anyhow::Context;
 use opencoder_core::message::now_ms;
 use opencoder_dag::artifacts::{
-    meta_value_with_session, output_snapshot, session_file, session_value, step_dir,
+    meta_value_with_session, output_snapshot, session_file, session_value,
 };
 use opencoder_dag::protocol::DagClaimedRun;
 use opencoder_dag::{DagSpec, StepOutcome, StepOutputs, StepStates};
@@ -33,6 +33,7 @@ pub(crate) async fn record_step(
 ) {
     let StepDone {
         name,
+        instance: _,
         started_at_ms,
         mut result,
     } = d;
@@ -68,7 +69,27 @@ pub(crate) async fn write_step_artifacts(
     started_at_ms: i64,
     result: &StepResult,
 ) -> anyhow::Result<()> {
-    let dir = step_dir(workflow_root, &run.run_id, name).map_err(anyhow::Error::msg)?;
+    write_execution_artifacts(
+        workflow_root,
+        &run.run_id,
+        name,
+        None,
+        started_at_ms,
+        result,
+    )
+    .await
+}
+
+pub(crate) async fn write_execution_artifacts(
+    workflow_root: &std::path::Path,
+    run_id: &str,
+    name: &str,
+    index: Option<usize>,
+    started_at_ms: i64,
+    result: &StepResult,
+) -> anyhow::Result<()> {
+    let dir = opencoder_dag::artifacts::execution_dir(workflow_root, run_id, name, index)
+        .map_err(anyhow::Error::msg)?;
     tokio::fs::create_dir_all(&dir)
         .await
         .with_context(|| format!("{}", dir.display()))?;
@@ -100,9 +121,11 @@ pub(crate) fn write_session_artifact(
     workflow_root: &std::path::Path,
     run_id: &str,
     step: &str,
+    index: Option<usize>,
     session_id: &str,
 ) {
-    let Ok(dir) = step_dir(workflow_root, run_id, step) else {
+    let Ok(dir) = opencoder_dag::artifacts::execution_dir(workflow_root, run_id, step, index)
+    else {
         warn!(%run_id, %step, "session.json skipped: step name is not a valid slug");
         return;
     };

@@ -6,7 +6,7 @@ use opencoder_store::{LibsqlStore, Store};
 use serde_json::{json, Value};
 use std::{
     path::PathBuf,
-    sync::{Arc, Mutex},
+    sync::{Arc, LazyLock, Mutex},
     time::Duration,
 };
 
@@ -29,9 +29,15 @@ pub struct Fixture {
     pub events: Arc<Events>,
     pub store: Arc<dyn Store>,
     pub config: opencoder_core::Config,
+    // Each scenario still runs its own concurrent instances. Keep independent
+    // scenarios from spending another scenario's deadlock budget on fsyncs.
+    _permit: tokio::sync::OwnedSemaphorePermit,
 }
 impl Fixture {
     pub async fn new() -> Self {
+        static SCENARIO: LazyLock<Arc<tokio::sync::Semaphore>> =
+            LazyLock::new(|| Arc::new(tokio::sync::Semaphore::new(1)));
+        let permit = SCENARIO.clone().acquire_owned().await.unwrap();
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path().join("workflow");
         let mut config = opencoder_core::Config::default();
@@ -42,6 +48,7 @@ impl Fixture {
             events: Arc::new(Events::default()),
             store: Arc::new(LibsqlStore::open_memory().await.unwrap()),
             config,
+            _permit: permit,
         }
     }
     pub fn run(&self, steps: Value, input: Value) -> DagClaimedRun {

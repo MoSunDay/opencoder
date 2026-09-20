@@ -21,6 +21,8 @@ Commit: f2881a67b660651274d5f0e11e2709054c639677
 | profile、代理、模型和策略保留 | `guest_settings_keep_profile_and_credentials_private` | 同上 |
 | rootfs 准入、私有挂载与权限、凭证不复制 | `profile_resolution_validates_guest_binary_and_builds_private_mounts` | 同上 |
 | Server 下发到真实 runc；默认登录、依赖输出、动态实例/profile、事件与产物、认证失败、异常流、超时、取消及容器回收 | `server_dispatches_codex_in_runc_with_node_login_profiles_and_cancellation` | `crates/worker/tests/dag_codex_runc.rs` |
+| 显式 `--target-dir` 与环境变量不同时，容器 runner 使用当前测试的目标目录与 profile | 同上，使用独立目标目录执行 | `crates/worker/tests/harness/runc_fixture.rs` |
+| 真实 runc 启动、运行中取消/超时、标准输出溢出及容器回收 | `runc_step_smoke`、`cancellation_and_timeout_remove_running_containers`、`stdout_overflow_fails_and_removes_container` | `crates/dag-runtime/src/sandbox/runc.rs` |
 
 ## 验证
 
@@ -31,6 +33,14 @@ Commit: f2881a67b660651274d5f0e11e2709054c639677
 - 主工作区 `cargo test -p opencoder-worker --test dag_codex_runc -- --nocapture`：`1 passed; 0 failed`，真实 Server → Worker → runc 全链路及最终同步超时断言通过。输出：`/tmp/opencoder-runc-codex-main-e2e-synchronized.log`。
 - 隔离基线全量 `cargo test --workspace`：退出码 0；按全部 `test result:` 行（含 doc-tests）汇总为 **5443 passed / 0 failed / 7 ignored**。7 项均为仓库既有的手动测试，新增测试全部执行。原始输出：`/tmp/opencoder-runc-codex-workspace-complete.log`；统计：`/tmp/opencoder-runc-codex-workspace-counts.json`。
 - 旧版 glibc 的 hosts/DNS 解析及真实 CLI 域名请求通过；原生 CLI 的 Shell/Git 工具调用退出码 0。输出：`/tmp/opencoder-codex-native-dns-check.log`、`/tmp/opencoder-codex-native-tool-dns-check.log`。
+
+## 补充回归
+
+- 修正测试 fixture 内嵌 `cargo build` 的目标目录和 profile：与当前测试可执行文件保持一致，避免外层 `--target-dir` 覆盖环境变量后读取错误或旧 runner；容器测试构建关闭无需保留的调试符号。独立目标目录下完整 runc Codex 测试通过，输出：`/tmp/opencoder-runc-codex-custom-target-e2e.log`。
+- 主工作区全量 `cargo test --workspace`：**5487 passed / 0 failed / 7 ignored**，退出码 0。同期完整 Clippy 和 workspace build 均通过。全量测试期间变化的 3 个 Worker 文件由后续 Worker 全套测试补验：**203 passed / 0 failed / 3 ignored**；再次完整 Clippy 通过。输出：`/tmp/opencoder-runc-codex-main-gate-evidence/`、`/tmp/opencoder-runc-codex-current-worker-tests.log`。
+- 默认忽略的 3 项 runc 手动测试已在独立 rootfs 中显式执行：**3 passed / 0 failed**；包含真实 Wasm 容器、取消/超时和输出溢出回收。其余 4 项既有手动测试不属于本次 Codex 接入回归。输出：`/tmp/opencoder-runc-codex-manual-tests.log`。
+- 后续合并 Worker 准入与调度锁改动后，在 `c047be99ab7228d060fdd9115881be0c6b1fdb39` 上再次运行 runc Codex 全链路及 `blocked_resource_read_does_not_starve_node_executor_or_lose_scoped_pool`：**2 passed / 0 failed**；Worker 全目标 Clippy 零警告，验证期间源码哈希无变化。输出：`/tmp/opencoder-runc-codex-post-merge-tests.log`、`/tmp/opencoder-runc-codex-post-merge-clippy.log`。
+- 汇总及源码版本证据：`/tmp/opencoder-runc-codex-main-gate-evidence/validation-summary.json`。全量、Worker 和专项结果分别统计，不累加重复执行的用例。
 
 本次只完成代码接入，不包含发布或生产 rootfs 替换。
 

@@ -7,7 +7,7 @@ Commit: 187ee827bad0cb2ae0b1900284b1a20176706166
 
 ## 索引
 - `src/message.rs` — Message/Role/ContentBlock
-- `src/config.rs` + `src/config/` — Config 加载与 mcp/cli/skills/ap 域文件（含 `config/dag.rs`）
+- `src/config.rs` + `src/config/` — Config 加载与 mcp/cli/skills/ap 域文件（含 `config/dag.rs`；`load_with_home` 将候选链重定向到执行 home，Operator 隔离用）
 - `src/harness/` — Harness::{Opencode,Codex} 与 Codex 运行态
 - `src/agent/`、`src/skill.rs` — agent 引用卡（`meta.json` `run_mode`）、memory 池聚合（`agent/memory.rs`）与技能发现
 - `src/skill/seed.rs` — 二进制内置 skill 增量 seed

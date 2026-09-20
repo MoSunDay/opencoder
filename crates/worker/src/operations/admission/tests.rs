@@ -207,3 +207,33 @@ async fn project_preparation_advances_only_after_explicit_rejection() {
         409
     );
 }
+
+#[tokio::test]
+async fn cancelled_preflight_holds_execution_and_copy_leases_until_io_finishes() {
+    use std::sync::Arc;
+    use tokio::sync::{Mutex, Semaphore};
+    let lifecycle = Arc::new(Mutex::new(()));
+    let capacity = Arc::new(Semaphore::new(1));
+    let lease = (
+        lifecycle.clone().lock_owned().await,
+        Some(capacity.clone().acquire_owned().await.unwrap()),
+    );
+    let (started, waiting) = tokio::sync::oneshot::channel();
+    let (release, receiver) = std::sync::mpsc::channel();
+    let call = tokio::spawn(super::preparation::run(lease, move || {
+        started.send(()).unwrap();
+        receiver
+            .recv_timeout(std::time::Duration::from_secs(3))
+            .unwrap();
+    }));
+    waiting.await.unwrap();
+    call.abort();
+    assert!(call.await.unwrap_err().is_cancelled());
+    assert!(lifecycle.try_lock().is_err());
+    assert_eq!(capacity.available_permits(), 0);
+    release.send(()).unwrap();
+    let _guard = tokio::time::timeout(std::time::Duration::from_secs(1), lifecycle.lock())
+        .await
+        .unwrap();
+    assert_eq!(capacity.available_permits(), 1);
+}

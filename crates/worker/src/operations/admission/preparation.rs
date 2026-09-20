@@ -7,6 +7,22 @@ use std::{fs, io::Write, path::Path};
 
 const FILE: &str = "pending-create.json";
 
+pub(in crate::operations) type Lease = (
+    tokio::sync::OwnedMutexGuard<()>,
+    Option<tokio::sync::OwnedSemaphorePermit>,
+);
+
+/// Blocking I/O owns admission leases until it ends, even if its caller drops.
+/// Returning them keeps the same execution serialized through durable acceptance.
+pub(in crate::operations) async fn run<T: Send + 'static>(
+    lease: Lease,
+    work: impl FnOnce() -> T + Send + 'static,
+) -> Result<(T, Lease)> {
+    tokio::task::spawn_blocking(move || (work(), lease))
+        .await
+        .context("execution preflight worker failed")
+}
+
 /// Hand off the async worker while preserving task-local resource roots and
 /// thread-local configuration isolation on the thread doing synchronous I/O.
 /// Single-threaded callers are used by in-memory unit tests only.

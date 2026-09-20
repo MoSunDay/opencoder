@@ -195,6 +195,31 @@ async fn control_round_trip_dispatches_child_and_waits_for_terminal_barrier() {
         .collect();
     assert!(event_types.contains(&"round_barrier_reached"), "{events:?}");
     assert!(event_types.contains(&"run_completed"), "{events:?}");
+    let view = fleet
+        .call("GET", &format!("/api/brain/runs/{id}/view"), Value::Null)
+        .await;
+    assert_eq!(view.status, 200, "{view:?}");
+    assert_eq!(view.body["schema_version"], 3);
+    assert_eq!(view.body["objective"], "inspect repository");
+    assert_eq!(view.body["input_names"], json!(["repo"]));
+    assert_eq!(
+        view.body["rounds"][0]["operations"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert!(view.body["capabilities"][0].get("definition").is_none());
+    let stream = fleet
+        .response("GET", &format!("/api/brain/runs/{id}/events?after=0"))
+        .await;
+    assert_eq!(stream.status(), 200);
+    let body = axum::body::to_bytes(stream.into_body(), MAX_FRAME_BYTES)
+        .await
+        .unwrap();
+    let text = String::from_utf8_lossy(&body);
+    assert!(text.contains("operation_terminal"), "{text}");
+    assert!(text.contains("run_completed"), "{text}");
     assert!(
         fleet.nodes[0]
             .indexes()

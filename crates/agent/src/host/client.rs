@@ -81,6 +81,29 @@ impl Host {
         runtime_id: &str,
         operation: &NodeOperation,
     ) -> Result<RpcReply> {
+        let _creation = match self.creations.begin(runtime_id, operation) {
+            Ok(creation) => creation,
+            Err(reply) => return Ok(reply),
+        };
+        match tokio::time::timeout(
+            super::admission::request_timeout(operation),
+            self.forward_runtime(runtime_id, operation),
+        )
+        .await
+        {
+            Ok(reply) => reply,
+            Err(_) => Ok(RpcReply::error(
+                504,
+                "runtime request timed out; retry using the same execution id",
+            )),
+        }
+    }
+
+    async fn forward_runtime(
+        &self,
+        runtime_id: &str,
+        operation: &NodeOperation,
+    ) -> Result<RpcReply> {
         let _use = self
             .store
             .shared_request_lock("runtime-use", runtime_id)

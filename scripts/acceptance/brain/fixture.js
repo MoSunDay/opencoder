@@ -74,6 +74,8 @@ async function main() {
   assert.equal((await api('GET', `/api/brain/runs/${request.id}`)).run.phase, 'paused');
   finishAnalysis();
   await page.locator('.dag-logs-drawer').getByText(request.inputs.request, { exact: false }).first().waitFor();
+  await page.locator('.dag-logs-drawer').getByText('已结束', { exact: true }).waitFor();
+  await page.locator('.dag-logs-drawer').getByText('开始', { exact: true }).waitFor();
   await page.screenshot({ path: path.join(h.root, 'brain-dag-step.png'), animations: 'disabled' });
   await page.locator('.dag-logs-drawer').getByRole('button', { name: '关闭', exact: true }).click();
   await page.locator('.ant-drawer:visible .ant-drawer-close').last().click();
@@ -96,9 +98,17 @@ async function main() {
   for (const operation of receipt.operations.filter((o) => o.round === 2)) {
     await page.getByRole('button', { name: `查看执行 ${operation.execution_id}` }).click();
     await page.getByText('所属节点', { exact: true }).waitFor();
-    if (operation.execution_kind === 'todos') await page.locator('.todo-workbench').waitFor();
-    else if (operation.execution_kind === 'team') await page.locator('.execution-team-turn').first().waitFor();
-    else await page.getByText('会话消息', { exact: true }).waitFor();
+    const panel = page.getByRole('dialog', { name: '能力执行明细', exact: true });
+    if (operation.execution_kind === 'todos') {
+      await panel.locator('.todo-parent-heading').waitFor();
+      await panel.getByText('1/1 已通过', { exact: true }).waitFor();
+    } else if (operation.execution_kind === 'team') {
+      await panel.locator('.execution-team-turn').first().waitFor();
+      await panel.getByText(request.inputs.request, { exact: false }).last().waitFor();
+    } else {
+      await panel.getByRole('img', { name: 'Agent', exact: true }).first().waitFor();
+      await panel.getByText(request.inputs.request, { exact: false }).last().waitFor();
+    }
     assert.equal(await page.getByRole('button', { name: '在原节点恢复' }).count(), 0);
     await page.screenshot({ path: path.join(h.root, `brain-${operation.execution_kind}.png`), animations: 'disabled' });
     await page.locator('.ant-drawer:visible .ant-drawer-close').last().click();

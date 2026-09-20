@@ -139,6 +139,21 @@ async fn durable_replay_does_not_wait_for_an_unrelated_cold_admission() {
         .unwrap();
     let journal = root.path().join("node/agent/agent-accepted/execution.json");
     let before = std::fs::read(&journal).unwrap();
+    // A crash may retain the obsolete reservation after durable acceptance.
+    // Loading the node and replaying the request must use execution.json.
+    let pending = journal.parent().unwrap().join("pending-create.json");
+    let mut original = assignment.clone();
+    original.index.status = ExecutionStatus::Pending;
+    let reservation = serde_json::to_vec(&json!({
+        "schema_version": 1, "assignment": original, "rejected": false
+    }))
+    .unwrap();
+    std::fs::write(&pending, &reservation).unwrap();
+    let recovered = crate::journal::Journal::open(worker.inner.layout.clone()).unwrap();
+    assert_eq!(
+        recovered.records[&assignment.index.id].assignment.index,
+        assignment.index
+    );
     let _busy = worker.inner.admission.lock().await;
     for (request, expected) in [
         (assignment.clone(), 200),
@@ -172,6 +187,7 @@ async fn durable_replay_does_not_wait_for_an_unrelated_cold_admission() {
         }
     }
     assert_eq!(std::fs::read(journal).unwrap(), before);
+    assert_eq!(std::fs::read(pending).unwrap(), reservation);
     let mut fresh = assignment;
     fresh.index.id = "agent-new".into();
     fresh.request.id = fresh.index.id.clone();

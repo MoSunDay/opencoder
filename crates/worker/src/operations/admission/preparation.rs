@@ -215,6 +215,26 @@ pub(in crate::operations) fn begin(
     Ok(Ok(assignment))
 }
 
+/// Undo the empty namespace published with a rejected Create reservation.
+/// Only Create calls this while holding its preparation lease. Accepted
+/// execution replays and Agent resource snapshots never enter this cleanup.
+pub(in crate::operations) fn discard_empty_resources(
+    worker: &Worker,
+    assignment: &Assignment,
+) -> Result<()> {
+    if crate::resources::requires_agent_pool(assignment) {
+        return Ok(());
+    }
+    let resources = resource_root(worker, assignment, false)?;
+    match fs::remove_dir(&resources) {
+        Ok(()) => fs::File::open(resources.parent().context("resource parent missing")?)?
+            .sync_all()
+            .map_err(Into::into),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error.into()),
+    }
+}
+
 /// Preserve rejected attempt identity without removing any execution data.
 pub(in crate::operations) fn reject_project(
     worker: &Worker,
@@ -255,8 +275,12 @@ fn replace(path: &Path, pending: &PendingCreate) -> Result<()> {
 }
 
 pub(in crate::operations) fn finish(root: &Path) -> Result<()> {
+    // The accepted execution.json and its directory are already durable.
+    // If this unlink is lost on crash, journal recovery and accepted_reply
+    // still take precedence over the old reservation. Its removal needs no
+    // additional durability barrier in the acceptance path.
     match fs::remove_file(root.join(FILE)) {
-        Ok(()) => fs::File::open(root)?.sync_all().map_err(Into::into),
+        Ok(()) => Ok(()),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(error) => Err(error.into()),
     }

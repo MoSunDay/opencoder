@@ -154,22 +154,8 @@ async fn serve(
                                 IndexReportPart::Batch { records } => reports.batch(report_id, records)?,
                                 IndexReportPart::End => {
                                     if let Some(complete) = reports.end(report_id)? {
-                                        let recovered = state.fleet.apply_index_report_fenced(
-                                            &id,
-                                            &complete.records,
-                                            complete.pending_at_begin.as_deref(),
-                                            generation.starts_with("host-").then_some((generation.as_str(), report_sequence)),
-                                        ).await?;
-                                        state.hub.acknowledge_report(&id, &complete.records).await;
-                                        // Initial sync settles claims whose old connection can no
-                                        // longer reply. Live calls settle only after the Node's
-                                        // ordered post-operation snapshot precedes its reply.
-                                        if complete.initial {
-                                            state.hub.clear_reservations(&complete.records).await;
-                                        }
-                                        state.hub.clear_reservations(&recovered).await;
-                                        if !state.hub.mark_index_synced(&id, &generation).await {
-                                            anyhow::bail!("index report belongs to a stale connection");
+                                        if !super::handoff_report::apply(&state, &id, &generation, report_sequence, &complete).await? {
+                                            continue;
                                         }
                                         if complete.initial && generation.starts_with("host-") {
                                             let server = state.lifecycle.platform.get().map(|p| p.release_id.clone()).unwrap_or_else(|| "legacy".into());

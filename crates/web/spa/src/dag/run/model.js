@@ -21,6 +21,10 @@ export function applyDagFrame(snapshot, frame) {
   if (event.kind === 'run_started') return { ...next, execution_status: 'running', execution_error: '' };
   next.steps = snapshot.steps.map((step) => {
     if (step.name !== event.step) return step;
+    if (event.kind === 'step_progress') {
+      if (event.at_ms < (step.instances_at_ms || 0)) return step;
+      return { ...step, instances: event.payload.instances, instances_at_ms: event.at_ms };
+    }
     // A receipt may land before its queued lifecycle events.
     if (event.at_ms < (step.at_ms || 0) || (event.kind === 'step_started'
       && event.at_ms === step.at_ms && ['done', 'error', 'cancelled'].includes(step.status))) return step;

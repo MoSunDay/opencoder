@@ -1,11 +1,11 @@
-Commit: 06c69a687d4e5b8416df9376a48f112bd8eb2618
+Commit: 7e71cbcfd669dd2cbaa5c94ab01945fd139557f0
 
 # OpenCoder 能力地图 — 业务能力总索引
 
 ## 平台与编排
 
 - [Agent 调度平台](agent-platform/index.md) — Server/Node 调度与按 ID 查执行明细。
-- [DAG 工作流](../agents/dag-runtime/index.md) — agent/wasm 步骤、依赖执行与产物、单步执行记录（`session.json` / `step_output`）；控制台点画布任一 step 打开单步执行记录抽屉（wasm=实时日志、agent=类 TUI 会话转写），走 SSE `/api/dag/runs/:id/steps/:step/events`。定义编辑器画布支持工具栏「连线」模式两段式点击建依赖边（armed 源高亮、合法目标提示，`canConnect` 拒自连/重复/成环，Esc/点空白取消），点 Handle 未拖动同样进入待目标模式，Handle 拖拽与 JSON 模式仍可用；运行画布保持只读、点节点开抽屉。
+- [DAG 工作流](../agents/dag-runtime/index.md) — agent/wasm 步骤、[dynamic 模板与实例批次](../docs/dag-dynamic.md)、依赖执行与产物、单步执行记录（`session.json` / `step_output`）；控制台点画布任一 step 打开单步执行记录抽屉（wasm=实时日志、agent=类 TUI 会话转写），走 SSE `/api/dag/runs/:id/steps/:step/events`。定义编辑器画布支持工具栏「连线」模式两段式点击建依赖边（armed 源高亮、合法目标提示，`canConnect` 拒自连/重复/成环，Esc/点空白取消），点 Handle 未拖动同样进入待目标模式，Handle 拖拽与 JSON 模式仍可用；运行画布保持只读、点节点开抽屉。
 - [持久化 TODO 工作流](todos/index.md) — 父会话调度验收、独立 TODO 执行。
 - 发布门禁（code-review DAG）— 内置 9 步知识库变更审查工作流
   （`examples/dag/code-review.json`：kb-index wasm 索引 → 范围 → API/护网双锚定 →

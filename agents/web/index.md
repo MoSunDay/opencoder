@@ -1,4 +1,4 @@
-Commit: 2f6b202def6c5e75d1411143570784a1576b3407
+Commit: 7e71cbcfd669dd2cbaa5c94ab01945fd139557f0
 
 # web 模块
 
@@ -17,7 +17,8 @@ axum HTTP + SSE 会话管理 + 内嵌 SPA。
 - `src/api_agent_resources.rs` — agent 资源文件 API：`safe_rel_path` 门
   （拒绝绝对/`..`/`.`/空段/隐藏点前缀段/64 段超深，先于任何 fs 工作），
   memory 目录化写侧，`section_body` 读侧降级见 core `agent/memory.rs`
-- `src/handle.rs` — `SessionHandle` ring 缓冲 + broadcast
+- `src/handle.rs` — `SessionHandle` ring 缓冲 + broadcast；`src/handle/drain.rs` 管理 drain 生命周期，以 `DrainContext` 携带执行目录和配置。
+- `spa/src/dag/dynamic/` — 来源及模板表单、文本/argv 派发批次、实例分页与单实例订阅；切换时清理旧流，列表与详情错误分别保留。模板终态通过回执刷新收敛，进度按绝对计数与快照时间归并。见 [动态 DAG 步骤](../../docs/dag-dynamic.md)。
 - `src/auth_mw.rs` — Bearer → Identity
 - `src/html.rs` — SPA 产物内嵌；`/static/:name` 白名单 app.js/app.css/download-sw.js/favicon.png（tab 图标，`logo/logo.png` 64×64 派生，shell `link rel=icon` 引用，白名单契约测试双向锁定）
 - `spa/src/` — React18+antd SPA（vitest），产物提交于 `spa/dist`；

@@ -48,22 +48,13 @@ async fn wake(
         .fleet
         .request_lock("brain-control", &source.id)
         .await?;
-    let snapshot = runs::call(state, &source.id, "snapshot", Value::Null).await;
-    ensure!(
-        snapshot.status < 300,
-        "scheduler wake snapshot: {}",
-        snapshot.body
-    );
-    let snapshot: BrainSchedulerSnapshot = serde_json::from_value(snapshot.body)?;
-    // Context admission increments the node generation.  Acknowledging the
-    // newest generation fences the durable wake without losing a concurrent
-    // model activation.
-    let acknowledged = snapshot.run.generation.max(generation);
+    // A fast child can finish between context admission and acknowledgement.
+    // Confirm only this frame: a newer Ready generation still needs a wake.
     let reply = runs::call(
         state,
         &source.id,
         "scheduler_wake_ack",
-        json!({"generation":acknowledged}),
+        json!({"generation":generation}),
     )
     .await;
     ensure!(

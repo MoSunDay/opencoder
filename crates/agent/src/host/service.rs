@@ -18,6 +18,8 @@ fn execution_id(operation: &NodeOperation) -> Option<&str> {
         | NodeOperation::TodoItems { execution, .. }
         | NodeOperation::ProjectRuns { execution, .. }
         | NodeOperation::TeamTurns { execution, .. }
+        | NodeOperation::DagInstances { execution, .. }
+        | NodeOperation::DagInstanceEvents { execution, .. }
         | NodeOperation::DagSteps { execution, .. }
         | NodeOperation::DagStepEvents { execution, .. } => Some(&execution.id),
         NodeOperation::EventPayload { request } => Some(&request.execution.id),

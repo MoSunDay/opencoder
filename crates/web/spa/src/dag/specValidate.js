@@ -66,34 +66,43 @@ export function validateSpec(spec) {
       problems.push(where + '.kind 必须是对象');
       return;
     }
-    if (s.kind.type === 'agent') {
-      if (typeof s.kind.prompt !== 'string' || !s.kind.prompt.trim()) {
+    let kind = s.kind;
+    if (kind.type === 'dynamic') {
+      const source = kind.source || {};
+      if (!['input', 'step_output'].includes(source.type)) problems.push(where + ' 派生来源必须是 input | step_output');
+      if (typeof source.pointer !== 'string' || (source.pointer && !source.pointer.startsWith('/')) || /~(?![01])/u.test(source.pointer)) problems.push(where + ' 数组路径必须是有效 JSON pointer');
+      if (source.type === 'step_output' && !(s.depends_on || []).includes(source.step)) problems.push(where + ' 上游来源必须在 depends_on 中');
+      kind = kind.template || {};
+      if (!['agent', 'wasm'].includes(kind.type)) problems.push(where + ' 动态模板必须是 agent | wasm');
+    }
+    if (kind.type === 'agent') {
+      if (typeof kind.prompt !== 'string' || !kind.prompt.trim()) {
         problems.push(where + ' (agent) 需要 non-empty kind.prompt');
       }
-      if (s.kind.agent !== undefined && typeof s.kind.agent !== 'string') {
+      if (kind.agent !== undefined && typeof kind.agent !== 'string') {
         problems.push(where + '.kind.agent 只能是字符串');
       }
-      if (s.kind.model !== undefined && typeof s.kind.model !== 'string') {
+      if (kind.model !== undefined && typeof kind.model !== 'string') {
         problems.push(where + '.kind.model 只能是字符串');
       }
-      if (s.kind.how_append !== undefined) {
-        if (typeof s.kind.how_append !== 'string') {
+      if (kind.how_append !== undefined) {
+        if (typeof kind.how_append !== 'string') {
           problems.push(where + '.kind.how_append 只能是字符串');
-        } else if (new Blob([s.kind.how_append]).size > MAX_HOW_APPEND_BYTES) {
+        } else if (new Blob([kind.how_append]).size > MAX_HOW_APPEND_BYTES) {
           problems.push(
             where + ' (agent) kind.how_append 超过 ' + MAX_HOW_APPEND_BYTES + ' 字节上限',
           );
         }
       }
-    } else if (s.kind.type === 'wasm') {
-      if (typeof s.kind.command !== 'string' || !s.kind.command.trim()) {
+    } else if (kind.type === 'wasm') {
+      if (typeof kind.command !== 'string' || !kind.command.trim()) {
         problems.push(where + ' (wasm) 需要 non-empty kind.command');
       }
-      if (s.kind.sandbox !== undefined && !['in_process', 'runc'].includes(s.kind.sandbox)) {
+      if (kind.sandbox !== undefined && !['in_process', 'runc'].includes(kind.sandbox)) {
         problems.push(where + '.kind.sandbox 只能是 in_process | runc');
       }
     } else {
-      problems.push(where + '.kind.type 必须是 agent | wasm');
+      problems.push(where + '.kind.type 必须是 agent | wasm | dynamic');
     }
     if (s.timeout_secs !== undefined && !(Number.isInteger(s.timeout_secs) && s.timeout_secs > 0)) {
       problems.push(where + '.timeout_secs 必须是正整数');

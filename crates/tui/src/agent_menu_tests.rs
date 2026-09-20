@@ -1,4 +1,4 @@
-//! Tests for the `/agent` picker: catalog order, fuzzy semantics
+//! Tests for the `/agent` picker: row order, fuzzy semantics
 //! (name-first, description fallback), key handling and the pick token.
 
 use super::*;
@@ -18,16 +18,16 @@ fn key(c: char) -> KeyEvent {
 #[test]
 fn empty_query_lists_every_agent_in_order() {
     let m = AgentMenu::new(vec![
-        card("act", "d"),
+        card("coder", "d"),
         card("writer", "w"),
-        card("plan", "p"),
+        card("reviewer", "p"),
     ]);
     assert_eq!(m.visible_count(), 3);
     assert_eq!(
         m.visible_agents()
             .map(|c| c.name.as_str())
             .collect::<Vec<_>>(),
-        vec!["act", "writer", "plan"]
+        vec!["coder", "writer", "reviewer"]
     );
 }
 
@@ -36,7 +36,7 @@ fn fuzzy_filter_matches_the_name_first_and_description_as_fallback() {
     let mut m = AgentMenu::new(vec![
         card("coder", "Custom agent coder"),
         card("writer", "small diffs"),
-        card("plan", "read-only explorer"),
+        card("inspector", "read-only explorer"),
     ]);
     for c in "wr".chars() {
         m.on_char(c);
@@ -49,13 +49,13 @@ fn fuzzy_filter_matches_the_name_first_and_description_as_fallback() {
     // a description ('read-only explorer' fuzzy-matches 'explr').
     let mut m = AgentMenu::new(vec![
         card("coder", "bash and subagents"),
-        card("plan", "Read-only plan agent. Explores code."),
+        card("inspector", "Read-only custom agent. Explores code."),
     ]);
     for c in "explr".chars() {
         m.on_char(c);
     }
     assert_eq!(m.visible_count(), 1);
-    assert_eq!(m.selected_agent().unwrap().name, "plan");
+    assert_eq!(m.selected_agent().unwrap().name, "inspector");
 }
 
 #[test]
@@ -88,23 +88,26 @@ fn best_fuzzy_score_sorts_first_and_a_miss_empties_the_menu() {
 #[test]
 fn enter_and_tab_pick_the_highlighted_agent_and_close_the_menu() {
     for close_key in [KeyCode::Enter, KeyCode::Tab] {
-        let mut slot = Some(AgentMenu::new(vec![card("writer", "w"), card("act", "a")]));
+        let mut slot = Some(AgentMenu::new(vec![
+            card("writer", "w"),
+            card("coder", "a"),
+        ]));
         m_down(&mut slot);
         let outcome = handle_agent_key(&mut slot, KeyEvent::new(close_key, KeyModifiers::NONE));
-        assert_eq!(outcome, AgentOutcome::Pick("act".into()));
+        assert_eq!(outcome, AgentOutcome::Pick("coder".into()));
         assert!(slot.is_none(), "pick closes the menu");
     }
 }
 
 #[test]
 fn esc_closes_without_picking_and_ctrl_d_quits() {
-    let mut slot = Some(AgentMenu::new(vec![card("act", "a")]));
+    let mut slot = Some(AgentMenu::new(vec![card("coder", "a")]));
     assert_eq!(
         handle_agent_key(&mut slot, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
         AgentOutcome::Idle
     );
     assert!(slot.is_none());
-    let mut slot = Some(AgentMenu::new(vec![card("act", "a")]));
+    let mut slot = Some(AgentMenu::new(vec![card("coder", "a")]));
     assert_eq!(
         handle_agent_key(
             &mut slot,
@@ -130,82 +133,53 @@ fn pick_token_carries_the_control_head_with_trailing_space() {
 }
 
 #[test]
-fn available_cards_start_with_builtin_primaries_without_workflow() {
-    let cards = available_primary_agents();
-    let names: Vec<&str> = cards.iter().map(|c| c.name.as_str()).collect();
-    assert_eq!(
-        &names[..3.min(names.len())],
-        &["act", "plan", "command"][..3.min(names.len())]
-    );
-    assert!(!names.contains(&"workflow"), "scheduler role is excluded");
-    assert!(!names.contains(&"explore"), "subagents are not switchable");
-    // Without an agents-root override there are no file cards, so builtin
-    // descriptions come through verbatim.
-    let act = cards.iter().find(|c| c.name == "act").unwrap();
-    assert!(act.description.contains("Default execution agent"));
-}
-
-#[test]
-fn file_agents_merge_in_with_soul_description_and_generic_fallback() {
-    let dir = tempfile::tempdir().unwrap();
-    let (_lock, _guard) = override_agents(dir.path());
-    // writer: a real prompt pool with a soul.md first line.
-    write_file_agent(dir.path(), "writer", "Writer soul: small diffs.\nmore");
-    // bare: a card with no prompt reference -> generic fallback.
-    std::fs::create_dir_all(dir.path().join("bare")).unwrap();
-    std::fs::write(
-        dir.path().join("bare").join("meta.json"),
-        r#"{ "name": "bare", "current": { "prompt": "missing" } }"#,
-    )
-    .unwrap();
-
-    let cards = available_primary_agents();
-    let writer = cards
-        .iter()
-        .find(|c| c.name == "writer")
-        .expect("writer listed");
-    assert_eq!(writer.description, "Writer soul: small diffs.");
-    let bare = cards
-        .iter()
-        .find(|c| c.name == "bare")
-        .expect("bare listed");
-    assert_eq!(bare.description, "Custom agent bare");
-}
-
-// -- fixtures ----------------------------------------------------------
-
-/// Override guard that RESETS the process-global root on drop, so the
-/// next test in this binary never sees a deleted tempdir.
-struct AgentRootGuard;
-
-impl Drop for AgentRootGuard {
-    fn drop(&mut self) {
-        opencoder_core::agent::set_agents_dir_override(None);
+fn enter_and_tab_close_empty_results_without_picking() {
+    for cards in [vec![], vec![card("writer", "w")]] {
+        for close_key in [KeyCode::Enter, KeyCode::Tab] {
+            let mut menu = AgentMenu::new(cards.clone());
+            menu.on_char('z');
+            menu.move_up();
+            menu.move_down();
+            assert_eq!(menu.visible_count(), 0);
+            assert_eq!(menu.selected_agent(), None);
+            let mut slot = Some(menu);
+            assert_eq!(
+                handle_agent_key(&mut slot, KeyEvent::new(close_key, KeyModifiers::NONE)),
+                AgentOutcome::Idle
+            );
+            assert!(slot.is_none());
+        }
     }
 }
 
-fn override_agents(root: &std::path::Path) -> (std::sync::MutexGuard<'static, ()>, AgentRootGuard) {
-    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-    let g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    opencoder_core::agent::set_agents_dir_override(Some(root.to_path_buf()));
-    (g, AgentRootGuard)
-}
-
-fn write_file_agent(root: &std::path::Path, name: &str, soul: &str) {
-    let pool = root.join("prompts").join(name);
-    let vdir = pool.join("v1");
-    std::fs::create_dir_all(&vdir).unwrap();
-    std::fs::write(vdir.join("soul.md"), soul).unwrap();
-    std::fs::write(
-        pool.join("meta.json"),
-        format!(r#"{{ "name": "{name}", "current": 1, "history": [1] }}"#),
-    )
-    .unwrap();
-    let adir = root.join(name);
-    std::fs::create_dir_all(&adir).unwrap();
-    std::fs::write(
-        adir.join("meta.json"),
-        format!(r#"{{ "name": "{name}", "current": {{ "prompt": "{name}" }} }}"#),
-    )
-    .unwrap();
+#[test]
+fn popup_distinguishes_no_custom_agents_from_no_search_matches() {
+    for (cards, expected, absent) in [
+        (vec![], "no custom agents available", "no matching agent"),
+        (
+            vec![card("writer", "w")],
+            "no matching agent",
+            "no custom agents available",
+        ),
+    ] {
+        let mut menu = AgentMenu::new(cards);
+        menu.on_char('z');
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 24)).unwrap();
+        terminal
+            .draw(|frame| {
+                let area = frame.area();
+                render_agent_popup(frame, area, 20, &menu);
+            })
+            .unwrap();
+        let text: String = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+        assert!(text.contains(expected), "{text}");
+        assert!(!text.contains(absent), "{text}");
+    }
 }

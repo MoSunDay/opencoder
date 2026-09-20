@@ -103,7 +103,13 @@ async fn serve(
                     let frame = match incoming? {
                         Message::Text(text) => serde_json::from_str::<NodeFrame>(&text)?,
                         Message::Close(_) => break,
-                        Message::Ping(data) => { writer.send(Message::Pong(data)).await?; continue; }
+                        Message::Ping(data) => {
+                            // A verified connection can remain live while its
+                            // inventory/admission waits; keep load unchanged.
+                            state.hub.touch(&id, &generation).await;
+                            writer.send(Message::Pong(data)).await?;
+                            continue;
+                        }
                         _ => anyhow::bail!("invalid node frame"),
                     };
                     match frame {

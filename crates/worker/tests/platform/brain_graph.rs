@@ -106,6 +106,11 @@ async fn concurrent_v3_runs_generate_once_and_replay_without_new_execution() {
         202
     );
     assert_eq!(client.requests.lock().unwrap().len(), requests.len());
+    fleet.disconnect(0).await;
+    let offline_replay = fleet.call("POST", "/api/brain/runs", body.clone()).await;
+    assert_eq!(offline_replay.status, 202, "{offline_replay:?}");
+    assert_eq!(offline_replay.body, left.body);
+    assert_eq!(client.requests.lock().unwrap().len(), requests.len());
     let mut changed = body;
     changed["objective"] = json!("Different requirement");
     assert_eq!(

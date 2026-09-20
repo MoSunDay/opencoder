@@ -1,3 +1,5 @@
+Commit: f2881a67b660651274d5f0e11e2709054c639677
+
 # DAG runc Codex 接入
 
 基线：`f2881a67`。此前 Codex DAG 仅能在 host 路径运行；runc 路径会要求原生 LLM API key，且容器没有 Codex CLI 和节点登录态。
@@ -27,6 +29,9 @@
 - `cargo clippy --workspace --all-targets -- -D warnings`：通过，零警告，包含最终测试修正。输出：`/tmp/opencoder-runc-codex-clippy-complete.log`。
 - `cargo build --workspace`：通过。输出：`/tmp/opencoder-runc-codex-build.log`。
 - 主工作区 `cargo test -p opencoder-worker --test dag_codex_runc -- --nocapture`：`1 passed; 0 failed`，真实 Server → Worker → runc 全链路及最终同步超时断言通过。输出：`/tmp/opencoder-runc-codex-main-e2e-synchronized.log`。
-- 全量测试结果待执行完成后补齐。
+- 隔离基线全量 `cargo test --workspace`：退出码 0；按全部 `test result:` 行（含 doc-tests）汇总为 **5443 passed / 0 failed / 7 ignored**。7 项均为仓库既有的手动测试，新增测试全部执行。原始输出：`/tmp/opencoder-runc-codex-workspace-complete.log`；统计：`/tmp/opencoder-runc-codex-workspace-counts.json`。
+- 旧版 glibc 的 hosts/DNS 解析及真实 CLI 域名请求通过；原生 CLI 的 Shell/Git 工具调用退出码 0。输出：`/tmp/opencoder-codex-native-dns-check.log`、`/tmp/opencoder-codex-native-tool-dns-check.log`。
 
 本次只完成代码接入，不包含发布或生产 rootfs 替换。
+
+相关说明：[接入与制备](../../../docs/registered-runners.md)、[Harness 能力](../../harness/index.md)、[DAG runtime](../../../agents/dag-runtime/index.md)。

@@ -1,5 +1,5 @@
 import {
-  Button, Drawer, Form, Input, Modal, Popconfirm, Select, Space, Table, Tabs, Typography,
+  Button, Drawer, Form, Input, Modal, Popconfirm, Segmented, Select, Space, Table, Tabs, Typography,
 } from 'antd';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiDel, apiGet, apiPost } from './api.js';
@@ -12,6 +12,7 @@ import { newId, nodeOptions } from './fleet/model.js';
 import { OperatorPanel } from './operators/panel.jsx';
 import { PageShell } from './shell/pageShell.jsx';
 import { HarnessFields, parseEnvs } from './harness/fields.jsx';
+import { RUN_MODE_HINT, RUN_MODE_OPTIONS } from './agents/runMode.js';
 import { HarnessManagement } from './harness/management.jsx';
 import { useStore } from './store.js';
 
@@ -27,7 +28,13 @@ function CreateAgentModal({ open, onClose, onCreated, onNotice }) {
   const submit = async (values) => {
     setSaving(true);
     try {
-      await apiPost('/api/agents', { name: values.name.trim(), current: {}, harness: values.harness });
+      // run_mode 始终随卡片提交（缺省 operator），会话创建请求不带该字段。
+      await apiPost('/api/agents', {
+        name: values.name.trim(),
+        current: {},
+        harness: values.harness,
+        run_mode: values.run_mode || 'operator',
+      });
       msg.success('已创建');
       form.resetFields();
       onCreated(values.name.trim());
@@ -45,6 +52,9 @@ function CreateAgentModal({ open, onClose, onCreated, onNotice }) {
           <Input placeholder="reviewer" aria-label="new-agent-name" />
         </Form.Item>
         <HarnessFields environments={false} />
+        <Form.Item name="run_mode" label="运行模式" initialValue="operator" extra={RUN_MODE_HINT}>
+          <Segmented options={RUN_MODE_OPTIONS} aria-label="new-agent-run-mode" />
+        </Form.Item>
         <Space>
           <Button type="primary" htmlType="submit" loading={saving}>创建</Button>
           <Button onClick={onClose}>取消</Button>

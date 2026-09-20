@@ -57,6 +57,11 @@ pub fn terminal(
     op.status = notice.status;
     op.source_sequence = Some(notice.source_sequence);
     update.events.push(e);
+    // A late cancellation settles the operation index only. The root's
+    // terminal phase and original error are immutable.
+    if snapshot.run.phase.terminal() {
+        return Ok(Some(update));
+    }
     if !notice.status.successful() {
         update.run.phase = BrainSchedulerPhase::Failed;
         update.run.error = Some("child execution failed".into());

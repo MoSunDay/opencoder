@@ -25,7 +25,9 @@ use opencoder_agents::{
     delete_agent,
     write::{create_agent_with_profile, update_agent_with_profile},
 };
-use opencoder_core::agent::{list_agents, read_agent_meta, validate_agent_name, AgentRefs};
+use opencoder_core::agent::{
+    list_agents, read_agent_meta, validate_agent_name, AgentRefs, RunMode,
+};
 
 use crate::AppState;
 
@@ -87,8 +89,10 @@ pub(crate) async fn fan_out_reload(state: &AppState) {
 /// Builtin scheduling roles (`act`/`plan`/`command`)
 /// stay in the runtime (`opencoder_core::agent::builtin_agents`) and are NOT
 /// listed here: this endpoint is the management surface for file cards, not
-/// a union with runtime roles. SPA consumers that offer "pick a primary
-/// agent" merge the builtin trio client-side (`spa/src/agents/builtins.js`).
+/// a union with runtime roles. The SPA's Agent-mode "执行 Agent" picker
+/// consumes this list as-is; only Operator-mode switch surfaces (`@` menu /
+/// fallbacks, todoEditor, brain targets) merge the builtin trio client-side
+/// (`spa/src/agents/builtins.js`).
 pub async fn list(State(_state): State<Arc<AppState>>) -> Response {
     let names: std::collections::BTreeSet<String> = list_agents().into_iter().collect();
     let agents: Vec<Value> = names
@@ -108,6 +112,7 @@ pub async fn list(State(_state): State<Arc<AppState>>) -> Response {
                 "description": description,
                 "harness": meta.harness,
                 "harness_profile": meta.harness_profile,
+                "run_mode": meta.run_mode,
                 "current": meta.current,
                 "references": opencoder_agents::references::references_snapshot(&meta),
                 "updated_at": meta.updated_at,
@@ -126,6 +131,11 @@ pub struct CreateBody {
     /// Initial references (all optional; empty card when omitted).
     #[serde(default)]
     pub current: AgentRefs,
+    /// Where sessions scheduled with this card run; omitted means
+    /// `operator`. Bad values ride the same axum Json data rejection as
+    /// `harness`.
+    #[serde(default)]
+    pub run_mode: Option<RunMode>,
 }
 
 /// POST /api/agents — create a reference card. 400 invalid name, 409
@@ -135,7 +145,13 @@ pub async fn create(State(_state): State<Arc<AppState>>, Json(body): Json<Create
     if let Err(e) = validate_agent_name(&name) {
         return error_400(format!("invalid agent name: {e}"));
     }
-    match create_agent_with_profile(&name, body.current, body.harness, body.harness_profile) {
+    match create_agent_with_profile(
+        &name,
+        body.current,
+        body.harness,
+        body.harness_profile,
+        body.run_mode.unwrap_or_default(),
+    ) {
         Ok(()) => (
             StatusCode::CREATED,
             Json(json!({ "ok": true, "name": name })),
@@ -162,6 +178,9 @@ pub struct UpdateBody {
     pub harness_profile: Option<Option<String>>,
     pub current: Option<AgentRefs>,
     pub harness: Option<opencoder_core::harness::Harness>,
+    /// `None` (omitted) leaves the card's run mode untouched.
+    #[serde(default)]
+    pub run_mode: Option<RunMode>,
 }
 
 fn profile_update<'de, D: serde::Deserializer<'de>>(
@@ -180,7 +199,13 @@ pub async fn update(
     Path(name): Path<String>,
     Json(body): Json<UpdateBody>,
 ) -> Response {
-    match update_agent_with_profile(&name, body.current, body.harness, body.harness_profile) {
+    match update_agent_with_profile(
+        &name,
+        body.current,
+        body.harness,
+        body.harness_profile,
+        body.run_mode,
+    ) {
         Ok(()) => {
             fan_out_reload(&state).await;
             Json(json!({ "ok": true })).into_response()

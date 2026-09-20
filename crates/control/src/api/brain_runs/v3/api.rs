@@ -54,10 +54,27 @@ pub async fn create(State(state): State<Arc<AppState>>, Json(value): Json<Value>
     {
         Ok(true) => {}
         Ok(false) => {
+            let assignment = match state.fleet.assignment(&id).await {
+                Ok(value) => value,
+                Err(error) => return error_500(error.to_string()),
+            };
+            let Some(assignment) = assignment else {
+                return response(RpcReply::error(409, "run id is still being prepared"));
+            };
+            if assignment.request.input["scheduler_intent"] == value {
+                return response(RpcReply {
+                    status: 202,
+                    body: json!({
+                        "schema_version": 3,
+                        "run_id": id,
+                        "execution": assignment.index,
+                    }),
+                });
+            }
             return response(RpcReply::error(
                 409,
                 "run id was already accepted with a different intent",
-            ))
+            ));
         }
         Err(error) => return error_500(error.to_string()),
     }

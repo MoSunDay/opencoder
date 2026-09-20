@@ -2,9 +2,9 @@ use super::*;
 use opencoder_core::fleet::*;
 use std::sync::Arc;
 
-#[path = "../support/brain.rs"]
-mod graph_support;
-use graph_support::{doc, GraphClient};
+#[path = "../support/scheduler.rs"]
+mod scheduler_support;
+use scheduler_support::SchedulerClient;
 
 #[tokio::test]
 async fn legacy_brain_planning_is_read_only_and_never_creates_execution() {
@@ -53,41 +53,32 @@ async fn legacy_brain_planning_is_read_only_and_never_creates_execution() {
 }
 
 #[tokio::test]
-async fn concurrent_v2_runs_generate_once_and_replay_without_new_execution() {
-    let client = Arc::new(GraphClient::default());
+async fn concurrent_v3_runs_generate_once_and_replay_without_new_execution() {
+    let client = Arc::new(SchedulerClient::default());
     let fleet = Fleet::new(1, client.clone()).await;
-    let body = json!({"id":"brain-concurrent","node_id":fleet.nodes[0].registration().id,"mode":"dynamic","objective":"Review","inputs":doc()});
+    let body = scheduler_support::request("brain-concurrent");
     let (left, right) = tokio::join!(
         fleet.call("POST", "/api/brain/runs", body.clone()),
         fleet.call("POST", "/api/brain/runs", body.clone())
     );
     assert_eq!(left.status, 202, "{left:?}");
     assert_eq!(right.status, 202, "{right:?}");
-    assert_eq!(left.body["id"], "brain-concurrent");
-    assert_eq!(right.body["id"], "brain-concurrent");
-    graph_support::wait_phase(
-        &fleet.nodes[0],
-        &ExecutionRef {
-            id: "brain-concurrent".into(),
-            kind: ExecutionKind::Brain,
-        },
-        "completed",
-    )
-    .await;
+    assert_eq!(left.body["run_id"], "brain-concurrent");
+    assert_eq!(right.body["run_id"], "brain-concurrent");
+    scheduler_support::wait_phase(&fleet, "brain-concurrent", "completed").await;
     let requests = client.requests.lock().unwrap().clone();
     assert_eq!(
         requests
             .iter()
             .filter(|r| {
                 r.purpose == opencoder_llm::RequestPurpose::Planning
-                    && serde_json::from_str::<Value>(&r.messages.last().unwrap().text())
-                        .unwrap()
-                        .get("receipt")
-                        .is_none()
+                    && serde_json::from_str::<Value>(&r.messages.last().unwrap().text()).unwrap()
+                        ["round"]
+                        == 0
             })
             .count(),
         1,
-        "concurrent callers must share one complete plan"
+        "concurrent callers must share one initial scheduler decision"
     );
     let indexes = fleet.state.fleet.indexes(None, None, 100).await.unwrap();
     assert_eq!(
@@ -123,8 +114,8 @@ async fn concurrent_v2_runs_generate_once_and_replay_without_new_execution() {
 }
 
 #[tokio::test]
-async fn an_unconfirmed_v2_run_never_moves_to_another_node_or_plans_offline() {
-    let client = Arc::new(GraphClient::default());
+async fn an_unconfirmed_v3_run_never_moves_to_another_node_or_plans_offline() {
+    let client = Arc::new(SchedulerClient::default());
     let fleet = Fleet::new(2, client.clone()).await;
     let owner = fleet.nodes[0].registration().id;
     fleet
@@ -140,8 +131,7 @@ async fn an_unconfirmed_v2_run_never_moves_to_another_node_or_plans_offline() {
         .await
         .unwrap();
     fleet.disconnect(0).await;
-    let body =
-        json!({"id":"brain-unconfirmed","mode":"dynamic","objective":"Review","inputs":doc()});
+    let body = scheduler_support::request("brain-unconfirmed");
     for _ in 0..2 {
         let reply = fleet.call("POST", "/api/brain/runs", body.clone()).await;
         assert_eq!(reply.status, 503, "{reply:?}");

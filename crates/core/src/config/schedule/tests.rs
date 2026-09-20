@@ -97,6 +97,39 @@ fn validate_accepts_each_kind_target_contract() {
 }
 
 #[test]
+fn dag_params_args_are_accepted_but_must_be_a_string() {
+    let build = |params: Value| -> ScheduleJob {
+        SchedulesConfig::from_value(&json!({
+            "schedules": [job_json("dag", "daily-etl", json!({
+                "cron": "*/5 * * * *",
+                "params": params,
+            }))]
+        }))
+        .schedules
+        .remove(0)
+    };
+    // dag now takes params: `args` is appended to every wasm step's command
+    // line at fire time (previously any dag params were rejected).
+    assert!(build(json!({"args": "--date 2026-09-18"}))
+        .validate()
+        .is_ok());
+    assert!(build(json!({})).validate().is_ok());
+    // A non-string would land as an `error` ledger row at 3am instead —
+    // reject it at config time.
+    for bad in [
+        json!({"args": ["--x"]}),
+        json!({"args": 7}),
+        json!({"args": true}),
+    ] {
+        let err = build(bad.clone()).validate().unwrap_err();
+        assert!(
+            err.contains("dag params.args must be a string"),
+            "{bad}: {err}"
+        );
+    }
+}
+
+#[test]
 fn validate_rejects_id_charset_length_and_kind_contract_violations() {
     let build = |id: &str, kind: &str, target: &str| -> SchedulesConfig {
         SchedulesConfig::from_value(&json!({

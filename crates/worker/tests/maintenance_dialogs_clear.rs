@@ -41,15 +41,13 @@ impl ChatStream for Hold {
 }
 
 async fn run_operator(node: &Worker, id: &str) {
+    run_session(node, id, ExecutionKind::Operator).await;
+}
+
+async fn run_session(node: &Worker, id: &str, kind: ExecutionKind) {
     let reply = node
         .handle(NodeOperation::Create {
-            assignment: assignment(
-                node,
-                id,
-                ExecutionKind::Operator,
-                json!({"prompt":"hi"}),
-                None,
-            ),
+            assignment: assignment(node, id, kind, json!({"prompt":"hi"}), None),
         })
         .await;
     assert_eq!(reply.status, 200, "{:?}", reply);
@@ -163,5 +161,77 @@ async fn dialogs_clear_spares_running_executions() {
     release.notify_one();
     let detail = settled(&node, "operator-live").await;
     assert_eq!(detail["execution"]["status"], "idle", "{detail}");
+    node.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn dialogs_clear_rejects_cross_lane_ids_and_protects_internal_sessions() {
+    let _config = isolated_config();
+    let dir = tempfile::tempdir().unwrap();
+    let node = worker(dir.path(), mock()).await;
+    run_session(&node, "operator-lane", ExecutionKind::Operator).await;
+    run_session(&node, "agent-lane", ExecutionKind::Agent).await;
+
+    let mismatch = node
+        .handle(NodeOperation::Maintenance {
+            command: ExecutionCommand {
+                action: "dialogs_clear".into(),
+                input: json!({"kind": "agent", "sessions": ["operator-lane"]}),
+            },
+        })
+        .await;
+    assert_eq!(mismatch.status, 409, "{mismatch:?}");
+    assert!(dir
+        .path()
+        .join("node/operator/operator-lane/execution.json")
+        .is_file());
+
+    let store = LibsqlStore::open(dir.path().join("node/runtime.db"))
+        .await
+        .unwrap();
+    store
+        .create_session(&opencoder_store::SessionMeta {
+            id: "internal-child".into(),
+            title: Some("child".into()),
+            agent: Some("act".into()),
+            task_type: Some("subagent".into()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    let internal = node
+        .handle(NodeOperation::Maintenance {
+            command: ExecutionCommand {
+                action: "dialogs_clear".into(),
+                input: json!({"kind": "agent", "sessions": ["internal-child"]}),
+            },
+        })
+        .await;
+    assert_eq!(internal.status, 200, "{internal:?}");
+    assert_eq!(internal.body["removed"], json!(0));
+    assert!(store.get_session("internal-child").await.unwrap().is_some());
+
+    let cleared = node
+        .handle(NodeOperation::Maintenance {
+            command: ExecutionCommand {
+                action: "dialogs_clear".into(),
+                input: json!({"kind": "agent", "sessions": ["agent-lane"]}),
+            },
+        })
+        .await;
+    assert_eq!(cleared.status, 200, "{cleared:?}");
+    assert_eq!(cleared.body["kind"], json!("agent"));
+    assert_eq!(cleared.body["removed"], json!(1));
+
+    let repeat = node
+        .handle(NodeOperation::Maintenance {
+            command: ExecutionCommand {
+                action: "dialogs_clear".into(),
+                input: json!({"kind": "agent", "sessions": ["agent-lane"]}),
+            },
+        })
+        .await;
+    assert_eq!(repeat.status, 200, "{repeat:?}");
+    assert_eq!(repeat.body["removed"], json!(0));
     node.shutdown().await.unwrap();
 }

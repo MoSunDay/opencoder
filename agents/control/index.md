@@ -1,4 +1,4 @@
-Commit: 586e56014aaa9d2ec59047a24a8cb5ca644d1249
+Commit: f2d723ed2a32a5a394eac05f58bc5558e7cfe08f
 
 # control 模块
 
@@ -28,7 +28,10 @@ Commit: 586e56014aaa9d2ec59047a24a8cb5ca644d1249
 - `src/api/stream.rs` — 分页→SSE 事件流
 - `src/api/brain_runs/` — v2 计划注册与兼容查询，以及 v3 能力目录、轮次调度、最小快照、事件页和控制命令。Control 只归一化能力目录、创建真实子执行并处理中继回执；根节点持有 v3 调度投影、generation 和模型激活，调度器只在终态事件确认后再次唤醒。
 - `src/scheduler.rs` — cron 调度循环（仅控制面运行）：定义读 libsql `schedules` 表（v27 起事实源），24h 追赶窗内只 fire 最新 due tick、更老 tick 折叠一条 `missed` 代表行；`overlap: skip` 看上一条 fired 行的执行索引；error 行 1h 重试窗内原地重试；`scan_interval_secs` 仍从 schedules.json 热读（运维旋钮）
-- `src/api/schedules/` — 定义 admin CRUD + 台账查询：`GET/POST /api/schedules`、`PUT/PATCH/DELETE /api/schedules/:id`（PATCH 仅 `{"enabled": bool}`，重名 409 / 非法 body 400 / 未知 id 404）、`POST /api/schedules/:id/run` 手动立即触发（绕过 enabled/overlap）、`GET /api/schedules/:id/runs?limit=`；admin-only
+- `src/api/schedules/` — 定义 admin CRUD + 台账查询：`params` 按 kind 消费
+  （agent/team/todos 读 `prompt`、dag 读 `args`——触发时由 worker 追加到
+  每个 Wasm 步命令行、brain 读 `objective`/`inputs`/`mode`/`plan`；字符串值
+  可带 `{{now…}}` 时间模板，fire 时刻渲染成执行 input），`GET/POST /api/schedules`、`PUT/PATCH/DELETE /api/schedules/:id`（PATCH 仅 `{"enabled": bool}`，重名 409 / 非法 body 400 / 未知 id 404）、`POST /api/schedules/:id/run` 手动立即触发（绕过 enabled/overlap）、`GET /api/schedules/:id/runs?limit=`；admin-only
 - `src/seed_schedules.rs` — 一次性导入遗留 `schedules.json` 定义进 `schedules` 表：仅表空时执行（skip-don't-merge，删除不会在重启时复活），非法条目 warn 跳过不阻断启动；`ScheduleJob::validate` 是唯一校验门
 
 ## 内置 seed

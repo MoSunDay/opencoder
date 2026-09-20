@@ -4,6 +4,8 @@
 //     kind / how_append（现状 wire 形状）；
 //   - Agent 模式：newId('agent') + body.kind='agent' + first prompt + concrete agent；
 //     首条需求随创建请求提交，并由 worker 追加到该 Agent 的 how；
+//     「执行 Agent」下拉只列 Agent 配置（GET /api/agents）的 primary 注册卡，
+//     内置 act/plan/command 不进入；配置为空时发送被拦截并提示；
 //     节点下拉/可执行判定按 canUseNode(nodes, id, 'agent') 过滤；
 //   - 模式经 usehooks-ts useLocalStorage 持久化（oc_chat_mode），陌生值收敛
 //     回 Operator；
@@ -170,38 +172,148 @@ describe('creation lanes', () => {
     expect(createHits()[0][1].how_append).toBeUndefined();
   });
 
-  it('Agent mode creates with kind=agent and the selected concrete Agent', async () => {
+  it('Agent mode creates with kind=agent and the first configured Agent', async () => {
+    apiGet.mockImplementation(async (path) => {
+      if (path === '/api/nodes') return { nodes };
+      if (path.startsWith('/api/nodes/n1/dialogs')) return { dialogs: [] };
+      if (path === '/api/agents') {
+        return { agents: [{ name: 'runner', description: 'configured runner', primary: true }] };
+      }
+      if (path.endsWith('/seq')) return { seq: 0 };
+      return {};
+    });
     const { container } = render(<ChatPanel />);
     await pick('n1');
     await switchMode('Agent 模式');
-
+    // 默认收敛到第一张注册卡，而不是内置 act。
+    await waitFor(() => expect(screen.getByLabelText('执行 Agent').closest('.ant-select')
+      .querySelector('.ant-select-content')?.textContent).toBe('runner'));
     await send(container, 'agent lane');
     await waitFor(() => expect(createHits()).toHaveLength(1));
     expect(createHits()[0][1]).toEqual({
       id: expect.stringMatching(/^agent-/),
       node_id: 'n1',
-      agent: 'act',
+      agent: 'runner',
       kind: 'agent',
       prompt: 'agent lane',
     });
   });
 
   it('switches the Agent selector before creation', async () => {
+    apiGet.mockImplementation(async (path) => {
+      if (path === '/api/nodes') return { nodes };
+      if (path.startsWith('/api/nodes/n1/dialogs')) return { dialogs: [] };
+      if (path === '/api/agents') {
+        return {
+          agents: [
+            { name: 'planner', description: 'configured planner', primary: true },
+            { name: 'runner', description: 'configured runner', primary: true },
+          ],
+        };
+      }
+      if (path.endsWith('/seq')) return { seq: 0 };
+      return {};
+    });
     const { container } = render(<ChatPanel />);
     await pick('n1');
     await switchMode('Agent 模式');
     const select = screen.getByLabelText('执行 Agent').closest('.ant-select');
     fireEvent.mouseDown(select);
-    const plan = await waitFor(() => {
+    const runner = await waitFor(() => {
       const option = [...document.querySelectorAll('.ant-select-item-option')]
-        .find((item) => item.textContent?.trim().startsWith('plan'));
+        .find((item) => item.textContent?.trim().startsWith('runner'));
       expect(option).toBeTruthy();
       return option;
     });
-    fireEvent.click(plan);
-    await send(container, 'plan this');
+    fireEvent.click(runner);
+    await send(container, 'switched go');
     await waitFor(() => expect(createHits()).toHaveLength(1));
-    expect(createHits()[0][1]).toMatchObject({ agent: 'plan', kind: 'agent', prompt: 'plan this' });
+    expect(createHits()[0][1]).toMatchObject({ agent: 'runner', kind: 'agent', prompt: 'switched go' });
+  });
+
+  // 「执行 Agent」下拉的候选集契约：只来自 Agent 配置的 primary 注册卡。
+  // 内置 act/plan/command（operator 宿主循环角色）与非 primary 卡都不进入。
+  it('lists only configured primary agents — builtin act/plan/command never appear', async () => {
+    apiGet.mockImplementation(async (path) => {
+      if (path === '/api/nodes') return { nodes };
+      if (path.startsWith('/api/nodes/n1/dialogs')) return { dialogs: [] };
+      if (path === '/api/agents') {
+        return {
+          agents: [
+            { name: 'reviewer', description: 'code review card', primary: true },
+            { name: 'helper', description: 'subagent-only card', primary: false },
+          ],
+        };
+      }
+      return {};
+    });
+    render(<ChatPanel />);
+    await pick('n1');
+    await switchMode('Agent 模式');
+    fireEvent.mouseDown(screen.getByLabelText('执行 Agent').closest('.ant-select'));
+    const labels = await waitFor(() => {
+      const items = [...document.querySelectorAll('.ant-select-item-option')];
+      expect(items.length).toBeGreaterThan(0);
+      return items.map((item) => item.textContent?.trim() || '');
+    });
+    expect(labels.some((l) => l.startsWith('reviewer'))).toBe(true);
+    // 非 primary 注册卡不进下拉。
+    expect(labels.some((l) => l.startsWith('helper'))).toBe(false);
+    // 内置角色永不进入（词边界匹配，避免 description 误伤）。
+    expect(labels.some((l) => /^(act|plan|command)\b/.test(l))).toBe(false);
+  });
+
+  // Agent 配置为空：下拉无可选项，发送被门禁拦截并给出指引，而不是回落
+  // 到内置 act 静默创建。
+  it('blocks Agent-mode creation with a hint when no configured agent exists', async () => {
+    const onNotice = vi.fn();
+    const { container } = render(<ChatPanel onNotice={onNotice} />);
+    await pick('n1');
+    await switchMode('Agent 模式');
+    await send(container, 'no agents');
+    await waitFor(() => expect(onNotice).toHaveBeenCalledTimes(1));
+    expect(onNotice.mock.calls[0][0].text).toContain('Agent 配置');
+    expect(createHits()).toHaveLength(0);
+  });
+
+  // run_mode 徽标：卡片带 run_mode → 沙箱/宿主机小 Tag；缺失收敛为宿主机。
+  // 默认选中第一张注册卡 runner（run_mode: agent → 沙箱），切换 hoster
+  // （无 run_mode → 宿主机）。会话创建请求不带 run_mode —— worker 从目标
+  // Agent 卡片读取。
+  it('badges the selected agent run mode and keeps it out of the create body', async () => {
+    apiGet.mockImplementation(async (path) => {
+      if (path === '/api/nodes') return { nodes };
+      if (path.startsWith('/api/nodes/n1/dialogs')) return { dialogs: [] };
+      if (path === '/api/agents') {
+        return {
+          agents: [
+            { name: 'runner', description: 'runs each turn in a runc sandbox', primary: true, run_mode: 'agent' },
+            { name: 'hoster', description: 'host process agent', primary: true },
+          ],
+        };
+      }
+      if (path.endsWith('/seq')) return { seq: 0 };
+      return {};
+    });
+    const { container } = render(<ChatPanel />);
+    await pick('n1');
+    await switchMode('Agent 模式');
+    // 默认选中第一张注册卡 runner（run_mode: agent）→ 沙箱徽标。
+    expect((await screen.findByLabelText('selected-agent-run-mode')).textContent).toBe('沙箱');
+    const select = screen.getByLabelText('执行 Agent').closest('.ant-select');
+    fireEvent.mouseDown(select);
+    const hoster = await waitFor(() => {
+      const hit = [...document.querySelectorAll('.ant-select-item-option')]
+        .find((item) => item.textContent?.trim().startsWith('hoster'));
+      expect(hit).toBeTruthy();
+      return hit;
+    });
+    fireEvent.click(hoster);
+    expect(screen.getByLabelText('selected-agent-run-mode').textContent).toBe('宿主机');
+    await send(container, 'host go');
+    await waitFor(() => expect(createHits()).toHaveLength(1));
+    expect(createHits()[0][1]).toMatchObject({ agent: 'hoster', kind: 'agent', prompt: 'host go' });
+    expect(createHits()[0][1].run_mode).toBeUndefined();
   });
 });
 
@@ -215,6 +327,15 @@ describe('how_append guard (8192 UTF-8 bytes)', () => {
 
 describe('per-mode node executability', () => {
   it('filters node usability by the mode kind: operator-only node blocks Agent mode', async () => {
+    apiGet.mockImplementation(async (path) => {
+      if (path === '/api/nodes') return { nodes };
+      if (path.startsWith('/api/nodes/')) return { dialogs: [] };
+      if (path === '/api/agents') {
+        return { agents: [{ name: 'runner', description: 'configured runner', primary: true }] };
+      }
+      if (path.endsWith('/seq')) return { seq: 0 };
+      return {};
+    });
     const { container } = render(<ChatPanel />);
     await pick('n2'); // kinds: ['operator']
     await send(container, 'operator ok');
@@ -231,7 +352,7 @@ describe('per-mode node executability', () => {
     await waitFor(() => expect(screen.queryByText('所选节点当前不可执行，请选择可用节点')).toBeNull());
     await send(container, 'agent ok');
     await waitFor(() => expect(createHits()).toHaveLength(2));
-    expect(createHits()[1][1]).toMatchObject({ kind: 'agent' });
+    expect(createHits()[1][1]).toMatchObject({ kind: 'agent', agent: 'runner' });
     expect(createHits()[1][1].id).toMatch(/^agent-/);
   });
 });

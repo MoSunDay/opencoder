@@ -44,13 +44,13 @@ async fn run_unscoped(worker: &Worker, command: ExecutionCommand) -> Result<RpcR
                 host.store.configure_capacity(settings.max_runs).await?;
                 return Ok(RpcReply::ok(json!(settings)));
             }
-            let _gate = worker.inner.admission.lock().await;
+            let _gate = worker.inner.admission.clone().lock_owned().await;
             if let Some(dir) = &settings.workdir {
                 std::fs::create_dir_all(dir)
                     .map_err(|error| anyhow::anyhow!("scheduling workdir unavailable: {error}"))?;
             }
             worker.inner.scheduling.save(settings.clone())?;
-            super::queue::dispatch_locked(worker).await?;
+            let _gate = super::queue::dispatch_owned(worker, _gate).await?;
             opencoder_session::loop_registry::notify_change();
             Ok(RpcReply::ok(json!(settings)))
         }
@@ -88,7 +88,7 @@ async fn run_unscoped(worker: &Worker, command: ExecutionCommand) -> Result<RpcR
         }
         "config" => super::native(worker, "GET", "/api/config", Value::Null).await,
         "configure" => {
-            let _gate = worker.inner.admission.lock().await;
+            let _gate = worker.inner.admission.clone().lock_owned().await;
             if let Some(error) = worker.admission_error() {
                 return Ok(RpcReply::error(503, error));
             }

@@ -52,8 +52,9 @@ pub(crate) struct Inner {
     pub active: Mutex<HashMap<String, CancellationToken>>,
     pub tasks: Arc<ExecutionTasks>,
     pub lifecycle_gates: Mutex<HashMap<String, Arc<Mutex<()>>>>,
+    pub preparation_gates: Mutex<HashMap<String, Arc<Mutex<()>>>>,
     pub slots: Arc<Semaphore>,
-    pub admission: Mutex<()>,
+    pub admission: Arc<Mutex<()>>,
     pub resource_preparations: Arc<Semaphore>,
     pub maintenance: std::sync::Mutex<HashMap<String, opencoder_session::extensions::Registration>>,
     pub _lock: File,
@@ -222,8 +223,9 @@ impl Worker {
                 active: Mutex::new(HashMap::new()),
                 tasks: Arc::new(ExecutionTasks::new()),
                 lifecycle_gates: Mutex::new(HashMap::new()),
+                preparation_gates: Mutex::new(HashMap::new()),
                 slots: Arc::new(Semaphore::new(MAX_NODE_RUNS)),
-                admission: Mutex::new(()),
+                admission: Arc::new(Mutex::new(())),
                 resource_preparations: Arc::new(Semaphore::new(4)),
                 maintenance: std::sync::Mutex::new(HashMap::new()),
                 _lock: lock,
@@ -368,6 +370,15 @@ impl Worker {
     pub(crate) async fn lifecycle_gate(&self, id: &str) -> Arc<Mutex<()>> {
         self.inner
             .lifecycle_gates
+            .lock()
+            .await
+            .entry(id.to_string())
+            .or_insert_with(|| Arc::new(Mutex::new(())))
+            .clone()
+    }
+    pub(crate) async fn preparation_gate(&self, id: &str) -> Arc<Mutex<()>> {
+        self.inner
+            .preparation_gates
             .lock()
             .await
             .entry(id.to_string())

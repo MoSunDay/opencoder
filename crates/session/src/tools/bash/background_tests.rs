@@ -13,7 +13,8 @@ fn have(tool: &str) -> bool {
 #[test]
 fn output_path_format() {
     let p = output_path(12345);
-    assert_eq!(p.to_str().unwrap(), "/tmp/opencoder_bg_12345.output");
+    assert_eq!(p.parent().unwrap(), std::env::temp_dir());
+    assert_eq!(p.file_name().unwrap(), "opencoder_bg_12345.output");
 }
 
 /// `register` adds a live entry that `list` exposes; `unregister` removes

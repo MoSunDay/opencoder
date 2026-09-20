@@ -153,14 +153,21 @@ async fn dag_run_progress_reports_running_step_while_in_flight() {
                 )
                 .await;
             assert_eq!(progress.status, 200, "{progress:?}");
-            if progress.body["done"] == json!(1) && progress.body["running"] == json!(1) {
+            // Receipts are durable before their events enter the batched
+            // journal. Wait for both observable barriers; reaching the step
+            // counts alone does not imply the 300 ms event flush has run.
+            let journal_ready = progress.body["head_seq"].as_i64().unwrap() > 0;
+            if progress.body["done"] == json!(1)
+                && progress.body["running"] == json!(1)
+                && journal_ready
+            {
                 return progress;
             }
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         }
     })
     .await
-    .expect("run never reached done=1 running=1");
+    .expect("run never reached done=1 running=1 with a persisted event cursor");
     assert_eq!(progress.body["total"], json!(2), "{progress:?}");
     assert_eq!(progress.body["execution_status"], json!("running"));
     assert_eq!(progress.body["done"], json!(1));

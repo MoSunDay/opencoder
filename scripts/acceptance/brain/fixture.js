@@ -89,6 +89,9 @@ async function main() {
   const receipt = await collect(api, request, until);
   assert.deepEqual(planning, [0, 1, 2]);
   await page.locator('.brain-run-header').getByText('已完成', { exact: true }).waitFor();
+  const overview = page.getByLabel('大脑调度总览画布');
+  assert((await overview.boundingBox()).height < 260, 'long goals must not stretch the overview');
+  await overview.scrollIntoViewIfNeeded();
   await page.screenshot({ path: path.join(h.root, 'brain-overview.png'), animations: 'disabled' });
   for (const operation of receipt.operations.filter((o) => o.round === 2)) {
     await page.getByRole('button', { name: `查看执行 ${operation.execution_id}` }).click();

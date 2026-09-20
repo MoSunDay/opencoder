@@ -2,6 +2,7 @@
 .brain-run { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 .brain-run-header { display: flex; justify-content: space-between; gap: 20px; align-items: flex-start; padding: 20px; background: var(--oc-surface, #fafcff); border: 1px solid #dce5ef; border-radius: 12px; }
 .brain-run-header h4 { margin-top: 0; }
+.brain-run-header > div:first-child { flex: 1; min-width: 0; }
 .brain-workspace-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 .brain-workspace { display: grid; grid-template-columns: 190px minmax(280px, 1fr) minmax(300px, 380px); border: 1px solid #dce5ef; border-radius: 12px; overflow: hidden; min-height: 560px; }
 .brain-canvas { height: 560px; min-width: 0; background: #f8fafc; }

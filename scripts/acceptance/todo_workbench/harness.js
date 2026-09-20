@@ -122,7 +122,14 @@ async function open(answer, { dag = false, modelConfig, withBrowser = true } = {
     await page.goto(base,{waitUntil:'networkidle'});
   }
   return {page,root,nodeId,api,request,until,pause,errors:browserErrors,
-    restart:async()=>{await stop(agent,'SIGKILL');agent=start('opencoder-agent',args,nodeWork,'agent-restarted');await until(async()=>(await api('GET','/api/nodes')).nodes.find(n=>n.id===nodeId)?.online,'node reconnected');}};
+    restart:async()=>{
+      const previous=(await api('GET','/api/nodes')).nodes.find(n=>n.id===nodeId)?.snapshot?.generation;
+      await stop(agent,'SIGKILL');agent=start('opencoder-agent',args,nodeWork,'agent-restarted');
+      await until(async()=>{
+        const node=(await api('GET','/api/nodes')).nodes.find(n=>n.id===nodeId);
+        return node?.online&&node.snapshot?.ready&&node.snapshot.generation!==previous;
+      },'restarted node index ready');
+    }};
 }
 async function close(){if(browser)await browser.close();for(const child of children.reverse())await stop(child,'SIGKILL');if(mock?.listening)await new Promise(resolve=>mock.close(resolve));}
 module.exports={open,close};

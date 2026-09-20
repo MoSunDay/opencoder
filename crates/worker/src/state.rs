@@ -421,7 +421,9 @@ impl ChatStream for ConfiguredClient {
         request: opencoder_llm::ChatRequest,
     ) -> Result<tokio::sync::mpsc::Receiver<opencoder_llm::LlmEvent>> {
         let ep = self.0.resolve_endpoint()?;
-        opencoder_llm::ChatClient::from_config(&self.0, &ep)?.chat_stream(request)
+        opencoder_llm::ChatClient::from_config(&self.0, &ep)?.chat_stream(
+            opencoder_brain::activation::configured_request(&self.0, request),
+        )
     }
 }
 

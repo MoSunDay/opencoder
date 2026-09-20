@@ -1,5 +1,7 @@
+pub mod ingress;
 pub(crate) mod outbox;
 mod proxy;
+mod relay;
 pub mod resources;
 pub mod signals;
 pub use proxy::{forward_resources, status};
@@ -12,7 +14,7 @@ use axum::{
 };
 use std::sync::{
     atomic::{AtomicBool, AtomicUsize, Ordering},
-    Arc, OnceLock,
+    Arc, Mutex, OnceLock,
 };
 use std::{
     pin::Pin,
@@ -24,6 +26,10 @@ pub struct Lifecycle {
     pub outbox_started: AtomicBool,
     pub schedule_started: AtomicBool,
     pub retiring: AtomicBool,
+    pub retirement: OnceLock<ingress::Retirement>,
+    pub request_gate: Mutex<()>,
+    pub listener_port: OnceLock<u16>,
+    pub channels_retiring: AtomicBool,
     pub requests: AtomicUsize,
     pub changed: tokio::sync::Notify,
     pub credential: OnceLock<String>,
@@ -36,11 +42,21 @@ impl Lifecycle {
         self.changed.notify_waiters();
     }
     pub async fn retired(&self) {
+        self.wait_for(&self.retiring).await;
+    }
+    pub fn retire_channels(&self) {
+        self.channels_retiring.store(true, Ordering::SeqCst);
+        self.changed.notify_waiters();
+    }
+    pub async fn channels_retired(&self) {
+        self.wait_for(&self.channels_retiring).await;
+    }
+    async fn wait_for(&self, flag: &AtomicBool) {
         loop {
             let changed = self.changed.notified();
             tokio::pin!(changed);
             changed.as_mut().enable();
-            if self.retiring.load(Ordering::SeqCst) {
+            if flag.load(Ordering::SeqCst) {
                 return;
             }
             changed.await;
@@ -92,7 +108,28 @@ pub async fn track(
     request: Request,
     next: Next,
 ) -> Response {
-    state.lifecycle.requests.fetch_add(1, Ordering::SeqCst);
+    let successor = {
+        let _gate = state.lifecycle.request_gate.lock().unwrap();
+        let successor = (!relay::local(request.uri().path()))
+            .then(|| {
+                state
+                    .lifecycle
+                    .retirement
+                    .get()
+                    .and_then(|value| value.successor_port)
+            })
+            .flatten();
+        if successor.is_none() {
+            state.lifecycle.requests.fetch_add(1, Ordering::SeqCst);
+        }
+        successor
+    };
+    if let Some(port) = successor {
+        return match relay::forward(port, request).await {
+            Ok(response) => response,
+            Err(error) => crate::api::error_500(format!("retired ingress relay: {error:#}")),
+        };
+    }
     let guard = RequestGuard(state.lifecycle.clone());
     let response = next.run(request).await;
     let (parts, body) = response.into_parts();
@@ -105,9 +142,37 @@ pub async fn track(
     )
 }
 
-pub async fn retire(State(state): State<Arc<crate::AppState>>) -> Json<serde_json::Value> {
+pub async fn retire(
+    State(state): State<Arc<crate::AppState>>,
+    body: axum::body::Bytes,
+) -> Result<Json<serde_json::Value>, (axum::http::StatusCode, &'static str)> {
+    let request: ingress::Retirement = if body.is_empty() {
+        Default::default()
+    } else {
+        serde_json::from_slice(&body).map_err(|_| {
+            (
+                axum::http::StatusCode::BAD_REQUEST,
+                "invalid retirement request",
+            )
+        })?
+    };
+    request
+        .validate()
+        .map_err(|error| (axum::http::StatusCode::BAD_REQUEST, error))?;
+    if request.successor_port.is_some()
+        && request.successor_port.as_ref() == state.lifecycle.listener_port.get()
+    {
+        return Err((
+            axum::http::StatusCode::BAD_REQUEST,
+            "retirement cannot relay to itself",
+        ));
+    }
+    // Retries preserve the first retirement frontier. Workers started after
+    // that frontier cannot route a request to this retired activation.
+    let _gate = state.lifecycle.request_gate.lock().unwrap();
+    let _ = state.lifecycle.retirement.set(request);
     state.lifecycle.retire();
-    Json(serde_json::json!({"retiring":true}))
+    Ok(Json(serde_json::json!({"retiring":true})))
 }
 
 #[cfg(test)]

@@ -4,6 +4,7 @@ import subprocess
 import time
 import urllib.error
 import urllib.request
+from . import ingress
 
 
 class HttpFailure(RuntimeError):
@@ -37,6 +38,14 @@ class Operations:
         result = subprocess.run(["systemctl", "show", "--property=ActiveState", "--value", unit],
             check=True, capture_output=True, text=True)
         return result.stdout.strip() == "inactive"
+
+    def ingress_workers(self):
+        result = subprocess.run(['systemctl', 'show', 'nginx', '-p', 'MainPID', '--value'],
+            check=True, capture_output=True, text=True)
+        return ingress.snapshot(int(result.stdout.strip()))
+
+    def ingress_drained(self, workers):
+        return ingress.drained(workers)
 
     def wait(self, check, seconds=90):
         deadline = time.monotonic() + seconds

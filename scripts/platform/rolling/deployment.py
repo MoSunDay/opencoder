@@ -6,7 +6,7 @@ and probe IDs. Retired runtimes remain independently owned systemd services.
 from pathlib import Path
 import copy
 import time
-from . import manifest, probes, units
+from . import ingress, manifest, probes, units
 from .state import Journal
 
 
@@ -24,7 +24,7 @@ def record_for(settings, bundle_manifest, ordinal):
         "created_at": int(time.time() * 1000)}
 
 
-def fresh_frontends(record, releases, reason):
+def fresh_frontends(record, releases, reason, retirement=None):
     """Keep old HTTP bodies/RPCs alive while starting another activation."""
     used = [int(r[k]) for r in releases for k in ("host_port", "server_port", "runtime_port")]
     used.extend(h["port"] for r in releases for key in ("previous_hosts", "previous_servers") for h in r.get(key, []))
@@ -33,7 +33,7 @@ def fresh_frontends(record, releases, reason):
         raise ValueError("no ports available for reactivation instances")
     result = copy.deepcopy(record)
     result.setdefault("previous_hosts", []).append({"unit":record["host_unit"],"port":record["host_port"]})
-    result.setdefault("previous_servers", []).append({"unit":record["server_unit"],"port":record["server_port"]})
+    result.setdefault("previous_servers", []).append({"unit":record["server_unit"],"port":record["server_port"], **(retirement or {})})
     result.update(host_port=port, server_port=port + 1,
         host_unit=f"opencoder-host-{record['id']}-{reason}-{len(result['previous_hosts'])}.service",
         server_unit=f"opencoder-server-{record['id']}-{reason}-{len(result['previous_servers'])}.service")
@@ -82,7 +82,7 @@ def deploy(settings, bundle, operations, seconds=90):
         raise ValueError("release ID already belongs to another bundle")
     if journal.data["candidate"] is None:
         if retained:
-            record = fresh_frontends(record, list(journal.data["releases"].values()), "activate")
+            record = fresh_frontends(record, list(journal.data["releases"].values()), "activate", journal.data.get("retirement", {}).get(identifier))
             journal.data["releases"][identifier] = record
         journal.data.get("retirement", {}).pop(identifier, None)
         record["probe_epoch"] = record.get("probe_epoch", 0) + 1
@@ -112,6 +112,8 @@ def deploy(settings, bundle, operations, seconds=90):
             journal.phase("ready")
         if journal.data["phase"] in ("ready", "switching"):
             manifest.brain_preflight(settings, candidate, journal.data["releases"].values())
+            if journal.data["phase"] == "ready":
+                journal.data["ingress_workers"] = operations.ingress_workers()
             # The transition intent is durable before changing Host or Nginx.
             journal.data["current"] = identifier
             journal.phase("switching")
@@ -139,18 +141,26 @@ def deploy(settings, bundle, operations, seconds=90):
 
 
 def retire_server(settings, journal, operations):
-    def retire_port(port, unit):
+    def retire_port(port, unit, retirement):
         try:
-            operations.http(f"http://127.0.0.1:{port}", "/api/admin/release/retire", "POST", {})
+            if "ingress_workers" not in retirement:
+                if "ingress_workers" not in journal.data:
+                    raise ValueError('retirement has no recorded ingress frontier')
+                retirement["ingress_workers"] = journal.data["ingress_workers"]
+            retirement.setdefault("successor_port", journal.record(journal.data["current"])["server_port"])
+            journal.save()
+            retiring = ingress.retire(operations, f"http://127.0.0.1:{port}", retirement["ingress_workers"], retirement["successor_port"])
         except OSError:
             if not operations.inactive(unit):
                 raise
+            retiring = True
         operations.run("systemctl", "disable", unit)
+        return "retiring" if retiring else "waiting_for_ingress"
     for identifier, record in journal.data["releases"].items():
         for previous in record.get("previous_servers", []):
             try:
-                retire_port(previous["port"], previous["unit"])
-                previous.update(phase="retiring", failure=None)
+                phase = retire_port(previous["port"], previous["unit"], previous)
+                previous.update(phase=phase, failure=None)
             except Exception as error:
                 previous.update(phase="failed", failure=str(error))
             journal.save()
@@ -163,10 +173,12 @@ def retire_server(settings, journal, operations):
             # POST returns immediately; old response bodies and RPCs drain
             # without a stop deadline. A lost response is safe to retry.
             if retirement.get("phase") != "retiring":
-                retire_port(record['server_port'],record['server_unit'])
+                phase = retire_port(record['server_port'],record['server_unit'],retirement)
+            else:
+                phase = "retiring"
             register_server(settings, record, operations, enabled=False)
             operations.run("systemctl", "disable", record["server_unit"], record["host_unit"])
-            retirement.update(phase="retiring", failure=None)
+            retirement.update(phase=phase, failure=None)
         except Exception as error:
             retirement.update(phase="failed", failure=str(error))
         journal.save()
@@ -190,7 +202,7 @@ def rollback(settings, operations, seconds=90):
     if not resuming:
         # Fresh standby instances let rollback proceed while older instances
         # finish response bodies and RPCs. Runtime units are never restarted.
-        old = fresh_frontends(old, list(journal.data["releases"].values()), "rollback")
+        old = fresh_frontends(old, list(journal.data["releases"].values()), "rollback", journal.data.get("retirement", {}).get(previous))
         journal.data["releases"][previous] = old
         journal.data.get("retirement", {}).pop(previous, None)
         old["probe_epoch"] = old.get("probe_epoch", 0) + 1
@@ -220,6 +232,8 @@ def rollback(settings, operations, seconds=90):
             journal.data["candidate"] = None
             journal.phase("failed")
         raise
+    if not journal.data.get("rollback_switch_started"):
+        journal.data["ingress_workers"] = operations.ingress_workers()
     journal.data["rollback_switch_started"] = True
     journal.save()
     operations.http(host_url, f"/runtimes/{previous}/activate", "POST", {})

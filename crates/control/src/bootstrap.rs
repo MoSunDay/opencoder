@@ -202,6 +202,10 @@ pub async fn serve_release(
     }
     let _signals = crate::release::signals::start(state.clone())?;
     let listener = tokio::net::TcpListener::bind((host.as_str(), port)).await?;
+    let _ = state
+        .lifecycle
+        .listener_port
+        .set(listener.local_addr()?.port());
     println!(
         "opencoder-server {} listening on http://{}",
         opencoder_core::version::VERSION_LONG,
@@ -229,10 +233,30 @@ pub async fn serve_release(
         _ = state.lifecycle.retired() => {},
     }
     state.lifecycle.retire();
+    tracing::info!("Server retirement started");
+    if let Some(retirement) = state.lifecycle.retirement.get() {
+        if retirement.successor_port.is_some() {
+            // New requests relay to the successor, so draining local work is
+            // finite. Release Node sockets before waiting on ingress workers:
+            // a Node behind Nginx would otherwise keep its worker alive forever.
+            state.lifecycle.drained().await;
+            state.lifecycle.retire_channels();
+            tracing::info!("local HTTP work drained; Node channels migrating");
+        }
+        // SSE migration starts at retirement, while this listener continues
+        // serving requests that an older ingress worker accepted earlier.
+        tokio::select! {
+            _ = crate::release::ingress::wait(&retirement.ingress_workers) => {},
+            result = shutdown_signal() => result?,
+        }
+    }
     let _ = stop.send(());
+    tracing::info!("ingress workers drained; listener closing");
     state.lifecycle.drained().await;
+    state.lifecycle.retire_channels();
     state.hub.close_connections().await;
     server.await.context("server task failed")??;
+    tracing::info!("Server HTTP retirement complete");
     Ok(())
 }
 

@@ -38,7 +38,13 @@ async fn serve(
     authenticated_node_id: String,
 ) -> anyhow::Result<()> {
     let (mut writer, mut reader) = socket.split();
-    let first = tokio::time::timeout(std::time::Duration::from_secs(10), reader.next()).await?;
+    let first = tokio::select! {
+        _ = state.lifecycle.channels_retired() => {
+            writer.send(Message::Close(None)).await?;
+            return Ok(());
+        }
+        first = tokio::time::timeout(std::time::Duration::from_secs(10), reader.next()) => first?,
+    };
     let Some(Ok(Message::Text(text))) = first else {
         anyhow::bail!("node hello required");
     };
@@ -89,6 +95,10 @@ async fn serve(
         state.fleet.register(&registration).await?;
         loop {
             tokio::select! {
+                _ = state.lifecycle.channels_retired() => {
+                    writer.send(Message::Close(None)).await?;
+                    break;
+                }
                 Some(frame) = rx.recv() => {
                     let SocketCommand::Frame(frame) = frame else {
                         writer.send(Message::Close(None)).await?;

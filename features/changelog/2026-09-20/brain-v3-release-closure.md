@@ -10,6 +10,8 @@ Agent/Operator 在隔离工作目录执行时通过内部请求沿用入队时�
 
 节点读取 outbox 不再无条件发送状态变化通知，消除“报告 → 通知 → 再报告”的循环；仅持久状态提交或终态首次收敛发送通知。Agent 恢复执行仍使用其隔离目录。
 
+子执行提示明确能力 ID、类型、target 和输入输出契约，并将根目标限制为上下文；Team 只判断自身产出完成，不再重复根任务调度或等待兄弟执行 ID。
+
 Control 合并处理中的重复 outbox 投递，避免查询触发的重复上报耗尽事件处理槽位。唤醒确认只覆盖来源事件或本次实际接收的 context generation，节点确认游标保持单调，防止旧确认吞掉新轮次或倒退。
 
 SPA 保留锁定 Terser，并将 CommonJS strictRequires 固定为 true。此前 dayjs 的条件引用检测会竞态地产生直接初始化或函数包装两种产物；单换压缩器不能解决。漂移门禁改为单次字节比对，不再通过重试接受不稳定产物。
@@ -20,7 +22,7 @@ SPA 保留锁定 Terser，并将 CommonJS strictRequires 固定为 true。此前
 | 首轮/次轮自动展开、历史 v2 只读、执行抽屉 | SPA workbench v3Run 测试 |
 | 页面创建 → 真实 Control/Worker → 执行索引 | Worker brain_browser 显式 Chromium 测试 |
 | DAG → Agent/Operator/Team/TODO、输出引用、屏障、暂停/恢复、Step 日志 | scripts/acceptance/brain/fixture.js（模型传输固定，执行器与 HTTP 真实） |
-| 同一五类能力场景的真实模型验收 | scripts/acceptance/brain/live.js（配置文件和证据目录参数） |
+| 同一五类能力场景的真实模型验收 | scripts/acceptance/brain/isolated-real.js（隔离进程）与 live.js（发布后的配置文件和证据目录参数） |
 | 可重复构建 | scripts/check-spa-drift.sh |
 | 并行屏障、重复/乱序/旧轮次事件、轮次上限、引用校验 | crates/brain/tests/scheduler/barriers.rs |
 | 终态事件唯一键、事务回滚、分页与重启恢复 | crates/store/tests/brain_scheduler_v3.rs |

@@ -87,7 +87,7 @@ def deploy(settings, bundle, operations, seconds=90):
         journal.data.get("retirement", {}).pop(identifier, None)
         record["probe_epoch"] = record.get("probe_epoch", 0) + 1
         journal.data.update(candidate=identifier, previous=journal.data["current"], failure=None,
-            rollback_from=None, rollback_switch_started=None)
+            rollback_from=None, rollback_from_phase=None, rollback_switch_started=None)
         journal.phase("validated")
     try:
         if journal.data["phase"] in ("validated", "warming", "failed"):
@@ -192,6 +192,7 @@ def rollback(settings, operations, seconds=90):
         journal.data.get("retirement", {}).pop(previous, None)
         old["probe_epoch"] = old.get("probe_epoch", 0) + 1
         journal.data["rollback_from"] = journal.data["current"]
+        journal.data["rollback_from_phase"] = journal.data["phase"]
         journal.data["rollback_switch_started"] = False
     journal.phase("rolling_back")
     host_url = f"http://127.0.0.1:{old['host_port']}"
@@ -211,7 +212,8 @@ def rollback(settings, operations, seconds=90):
         journal.fail(error)
         # A failed standby must not trap future deployments. Missing markers
         # belong to older deployers and cannot prove traffic was untouched.
-        if journal.data.get("rollback_switch_started") is False:
+        if (journal.data.get("rollback_switch_started") is False
+                and journal.data.get("rollback_from_phase") in ("complete", "rolled_back", "verifying")):
             journal.data["candidate"] = None
             journal.phase("failed")
         raise

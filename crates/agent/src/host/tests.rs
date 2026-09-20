@@ -5,6 +5,9 @@ use serde_json::json;
 use std::sync::atomic::AtomicUsize;
 use std::time::Duration;
 
+#[path = "tests/hibernation.rs"]
+mod hibernation;
+
 struct HeldModel {
     entered: AtomicUsize,
     release: Arc<tokio::sync::Notify>,

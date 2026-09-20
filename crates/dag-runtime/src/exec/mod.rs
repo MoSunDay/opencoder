@@ -27,6 +27,10 @@ pub struct ExecDeps {
 /// every sandbox mode (runc bind / in-process preopen / agent prompt hint).
 pub(crate) const KNOWLEDGE_MOUNT: &str = "/workspace/knowledge";
 
+/// Guest-visible mount point of a pinned, read-only agents pool
+/// (agent cards + four shared resource pools) in sandboxed sessions.
+pub(crate) const AGENTS_MOUNT: &str = "/workspace/agent";
+
 /// Pure per-step execution context handed to the executors.
 pub struct StepCtx {
     pub run_id: String,

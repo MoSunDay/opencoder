@@ -9,7 +9,7 @@
 // is required before creating or sending.
 // This panel is the console's chat entry (nav label「Agent」, page key `chat`).
 import { Sender } from '@ant-design/x';
-import { Alert, Button, Input, Modal, Segmented, Select, Space, Spin, Typography } from 'antd';
+import { Alert, Button, Input, Modal, Segmented, Select, Space, Spin, Tag, Tooltip, Typography } from 'antd';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocalStorage } from 'usehooks-ts';
 import { apiDel, apiGet, apiPost } from './api.js';
@@ -23,7 +23,8 @@ import { QueuePanel } from './queuePanel.jsx';
 import { QuestionModal } from './questionModal.jsx';
 import { ModelModal } from './modelModal.jsx';
 import { commandsForInput, replaceToken, stripLastToken } from './commandMenu.js';
-import { mergeBuiltinPrimaryAgentCards } from './agents/builtins.js';
+import { BUILTIN_AGENT_HEADS, mergeBuiltinPrimaryAgentCards } from './agents/builtins.js';
+import { RUN_MODE_HINT, runModeBadge } from './agents/runMode.js';
 import { clearPreselect, useStore } from './store.js';
 import { err, ok, warn } from './notice.js';
 import { MONO_VAR } from './ui/mono.js';
@@ -87,8 +88,13 @@ export function ChatPanel({ onNotice }) {
   const lane = laneRef.current;
   const isCurrentLane = () => aliveRef.current && laneRef.current === lane;
   const nodeReady = canUseNode(nodes, nodeSel, modeKind);
-  const agentCatalog = mergeBuiltinPrimaryAgentCards((agents || []).filter((a) => a && a.primary));
-  const selectedAgent = agentCatalog.find((agent) => agent.name === sessionAgent);
+  // Agent 模式「执行 Agent」的可选集：只认 Agent 配置（GET /api/agents）里
+  // primary 的注册卡。内置 act/plan/command 是 operator 宿主循环的角色，
+  // 不进入 Agent 执行泳道的下拉；agentCatalog（内置在前 + 注册卡）只服务
+  // Operator 模式的切换面（`@` 菜单与选中兜底）。
+  const registeredAgents = (agents || []).filter((a) => a && a.primary);
+  const agentCatalog = mergeBuiltinPrimaryAgentCards(registeredAgents);
+  const selectedAgent = registeredAgents.find((agent) => agent.name === sessionAgent);
 
   const selectionRef = useRef({ node: nodeSel, kind: modeKind, dialog: dialogSel });
   selectionRef.current = { node: nodeSel, kind: modeKind, dialog: dialogSel };
@@ -129,7 +135,8 @@ export function ChatPanel({ onNotice }) {
   // Agent picker catalog source: GET /api/agents reference cards with the
   // server-computed one-line description (prompt-pool soul.md first line).
   // Cards are server-global (not node-scoped like skills), so one fetch per
-  // mount; builtin primary roles merge in through agents/builtins.js.
+  // mount. The Agent-mode picker consumes this list as-is; only Operator-mode
+  // switch surfaces merge the builtin trio in (agents/builtins.js).
   useEffect(() => {
     let alive = true;
     apiGet('/api/agents').then((j) => {
@@ -175,17 +182,23 @@ export function ChatPanel({ onNotice }) {
   useEffect(() => {
     resetTranscript();
     setDialogSel(null);
-    setModelOpen(false); setApOpen(false); setAnnoOpen(false); setSessionAgent('act');
+    setModelOpen(false); setApOpen(false); setAnnoOpen(false);
+    setSessionAgent(modeKind === 'agent' ? (registeredAgents[0]?.name || '') : 'act');
     createAttempt.current = null;
     loadDialogs(nodeSel, modeKind);
   }, [nodeSel, modeKind, resetTranscript, loadDialogs]);
 
   // Keep a concrete selection even while the registry request is loading or
-  // when a persisted/remote value no longer resolves to a primary Agent.
+  // when a persisted/remote value no longer resolves to a selectable Agent.
+  // The selectable set is mode-scoped: Agent 模式只有注册卡（选不中就收敛到
+  // 第一张注册卡；配置为空收敛为 ''，交给发送门禁拦截）；Operator 模式沿用
+  // 内置在前 + 注册卡的目录。
   useEffect(() => {
-    if (agentCatalog.some((agent) => agent.name === sessionAgent)) return;
-    if (agentCatalog[0]) setSessionAgent(agentCatalog[0].name);
-  }, [agents, sessionAgent]);
+    const catalog = modeKind === 'agent' ? registeredAgents : agentCatalog;
+    if (catalog.some((agent) => agent.name === sessionAgent)) return;
+    if (catalog[0]) setSessionAgent(catalog[0].name);
+    else if (modeKind === 'agent' && sessionAgent) setSessionAgent('');
+  }, [agents, sessionAgent, modeKind]);
 
   const { reloadAfterDone, openSessionStream } = useTranscriptStream({ streamRef, aliveRef, setStream, setBusy, setConnecting, setQueueVersion, onNotice, selectionRef });
 
@@ -260,6 +273,12 @@ export function ChatPanel({ onNotice }) {
     }
     if (!nodeReady) {
       onNotice?.(warn(nodeSel ? '所选节点当前不可执行，请选择可用节点' : '请先选择执行节点'));
+      return;
+    }
+    // Agent 模式的执行目标必须落在一张配置的注册卡上：内置角色不是该泳道
+    // 的可选目标，配置为空时给出去配置的指引，而不是静默回落到内置 act。
+    if (modeKind === 'agent' && !registeredAgents.some((agent) => agent.name === sessionAgent)) {
+      onNotice?.(warn(registeredAgents.length ? '请先选择执行 Agent' : 'Agent 配置中还没有可用的 Agent，请先在「Agent 配置」页创建'));
       return;
     }
     if (busy && dialogSel) {
@@ -340,7 +359,8 @@ export function ChatPanel({ onNotice }) {
       const msgs = (j && j.messages) || [];
       const agent = j && j.meta && j.meta.agent;
       if (current()) {
-        setSessionAgent(agentCatalog.some((item) => item.name === agent) ? agent : agentCatalog[0]?.name || 'act');
+        const agentLane = modeKind === 'agent' ? registeredAgents : agentCatalog;
+        setSessionAgent(agentLane.some((item) => item.name === agent) ? agent : agentLane[0]?.name || '');
         setStream({ ...emptyStream(), turns: turnsFromMessages(msgs), usage: usageFromMessages(msgs) });
       }
     } catch (e) {
@@ -370,11 +390,12 @@ export function ChatPanel({ onNotice }) {
         return;
       }
       // Busy control heads are TEXT prompts for the runner: applied at the
-      // next turn boundary while a drain runs (control_cmd.rs parity). A
-      // custom agent rides the generic `/agent <name>` head; /act //plan are
-      // heads of their own. Posted directly — send() would wipe the composer
-      // draft (setInput('')).
-      const headText = kind === 'agentpick' ? '/agent ' + next : entry.cmd;
+      // next turn boundary while a drain runs (control_cmd.rs parity). Only
+      // act/plan own their heads (`/act`, `/plan`); every other target —
+      // configured cards and the builtin command role — rides the generic
+      // `/agent <name>` head. Posted directly — send() would wipe the
+      // composer draft (setInput('')).
+      const headText = BUILTIN_AGENT_HEADS.includes(next) ? '/' + next : '/agent ' + next;
       if (busy && sid) {
         try {
           await apiPost('/api/sessions/' + encodeURIComponent(sid) + '/prompt',
@@ -571,12 +592,15 @@ export function ChatPanel({ onNotice }) {
     execCommand(entry);
   };
 
-  // Command completion uses the selected node’s catalog.
-  // `@` agent entries: builtin primary roles first, then the resolvable
-  // primary cards from GET /api/agents — the switch endpoint
+  // Command completion uses the selected node’s catalog. `@` agent entries
+  // follow the mode's selectable set — Agent 模式只列 Agent 配置的注册卡
+  // （与「执行 Agent」下拉同源）；Operator 模式保持内置 primary 角色在前 +
+  // 注册卡（act/plan 切换与自定义 Agent 提及）。The switch endpoint
   // (POST /api/sessions/:id/agent) rejects non-primary names, so the menu
   // only ever offers switchable agents.
-  const menuEntries = hasNode ? commandsForInput(input, skills, agentCatalog) : [];
+  const menuEntries = hasNode
+    ? commandsForInput(input, skills, modeKind === 'agent' ? registeredAgents : agentCatalog)
+    : [];
 
   return (
     <div style={{ display: 'flex', flexDirection: 'row', height: '100%', minHeight: 0, gap: 16 }}>
@@ -596,8 +620,11 @@ export function ChatPanel({ onNotice }) {
 
       <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
         {/* 页头操作区：模式与执行目标分开。Agent 模式必须明确选择一个
-            concrete Agent；首条需求会自动进入该 Agent 的 how，并沿用同一
-            transcript/Say 渲染，便于在网页中定位具体能力。 */}
+            concrete Agent，候选只来自 Agent 配置（GET /api/agents）的
+            primary 注册卡——内置 act/plan/command 是 operator 宿主循环的
+            角色，不进入该下拉；配置为空时发送被拦截并提示先去配置。
+            首条需求会自动进入该 Agent 的 how，并沿用同一 transcript/Say
+            渲染，便于在网页中定位具体能力。 */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
           <Segmented
             aria-label="会话模式"
@@ -610,8 +637,9 @@ export function ChatPanel({ onNotice }) {
             <Select
               aria-label="执行 Agent"
               size="small"
-              value={sessionAgent}
-              options={agentCatalog.map((agent) => ({
+              value={sessionAgent || undefined}
+              placeholder={registeredAgents.length ? '选择执行 Agent' : '暂无可用 Agent'}
+              options={registeredAgents.map((agent) => ({
                 value: agent.name,
                 label: agent.name,
                 title: agent.description || agent.name,
@@ -635,6 +663,13 @@ export function ChatPanel({ onNotice }) {
                   options={[{ label: 'act', value: 'act' }, { label: 'plan', value: 'plan' }]}
                   onChange={switchAgent}
                 /> : null}
+              {modeKind === 'agent' && selectedAgent ? (
+                <Tooltip title={RUN_MODE_HINT}>
+                  <Tag aria-label="selected-agent-run-mode" style={{ marginInlineEnd: 0 }}>
+                    {runModeBadge(selectedAgent.run_mode)}
+                  </Tag>
+                </Tooltip>
+              ) : null}
               {modeKind === 'agent' && selectedAgent?.description ? (
                 <Text type="secondary" ellipsis={{ tooltip: selectedAgent.description }} style={{ maxWidth: 360 }}>
                   {selectedAgent.description}

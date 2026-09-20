@@ -1,5 +1,6 @@
 pub(crate) mod agent;
 mod agent_how;
+pub(crate) mod agent_runc;
 mod dag;
 mod project;
 mod team;

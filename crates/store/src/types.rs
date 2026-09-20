@@ -5,6 +5,9 @@ use serde::{Deserialize, Serialize};
 pub const TASK_TYPE_PARENT: &str = "parent";
 /// Child session spawned by a `task` subagent invocation.
 pub const TASK_TYPE_SUBAGENT: &str = "subagent";
+/// Session created for an Agent step inside a DAG. It is an execution detail,
+/// not a top-level chat conversation.
+pub const TASK_TYPE_AGENT_STEP: &str = "agent_step";
 /// Internal parent session used by the todos workflow scheduler.
 pub const TASK_TYPE_TODO_WORKFLOW: &str = "todo_workflow";
 /// Full primary session assigned to one focused TODO.

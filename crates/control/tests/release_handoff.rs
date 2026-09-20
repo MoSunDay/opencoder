@@ -183,13 +183,13 @@ fn client() -> reqwest::Client {
 }
 
 #[tokio::test]
-async fn brain_run_retry_keeps_original_capabilities_after_server_handoff() {
+async fn brain_v3_retry_keeps_original_intent_after_server_handoff() {
     let root = tempfile::tempdir().unwrap();
     let _scope = opencoder_core::config::scoped_config_home(root.path().join("home"));
     let node = Node::new();
     let old = start(root.path(), node.clone()).await;
     let request =
-        json!({"id":"brain-release","mode":"dynamic","objective":"preserve frozen capabilities"});
+        json!({"id":"brain-release","schema_version":3,"objective":"preserve frozen capabilities"});
     let post = |url: String, body: serde_json::Value| {
         client()
             .post(format!("{url}/api/brain/runs"))

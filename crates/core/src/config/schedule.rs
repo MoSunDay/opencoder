@@ -11,7 +11,9 @@ use std::path::{Path, PathBuf};
 
 use crate::fleet::ExecutionKind;
 use crate::schedule::{render_params, CronExpr};
-use validate::{base_instant, to_value_map, validate_brain_params, validate_target};
+use validate::{
+    base_instant, to_value_map, validate_brain_params, validate_dag_params, validate_target,
+};
 
 pub use validate::validate_id;
 
@@ -108,8 +110,10 @@ pub struct ScheduleJob {
     /// agent/team: target name; todos: `template/version`; dag: definition id;
     /// brain: plan-def id.
     pub target: String,
-    /// Passed to the target as `CreateExecution.input` (agent/team/todos).
-    /// brain reads `objective`/`inputs`/`plan{,version}`/`mode` from here.
+    /// Passed to the target as `CreateExecution.input`: agent/team/todos
+    /// read `prompt`, dag reads `args` (string appended to every wasm
+    /// step's command line at fire time). brain reads
+    /// `objective`/`inputs`/`plan{,version}`/`mode` from here.
     #[serde(default)]
     pub params: BTreeMap<String, Value>,
     #[serde(default)]
@@ -136,11 +140,10 @@ impl ScheduleJob {
             return Err(format!("schedule {}: target must not be empty", self.id));
         }
         validate_target(self)?;
-        if self.kind == ScheduleKind::Dag && !self.params.is_empty() {
-            return Err(format!(
-                "schedule {}: dag targets take no params (node pinning is the `node_id` field)",
-                self.id
-            ));
+        // dag params fold into the frozen spec at fire time (see
+        // `validate_dag_params`); node pinning stays the `node_id` field.
+        if self.kind == ScheduleKind::Dag {
+            validate_dag_params(self)?;
         }
         if self
             .node_id

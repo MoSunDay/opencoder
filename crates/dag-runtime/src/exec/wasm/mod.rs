@@ -268,6 +268,7 @@ async fn run_runc(
         env: step_env(ctx),
         timeout_hint: ctx.step.timeout_secs,
         knowledge,
+        agents: None,
         argv: crate::sandbox::oci::ArgvStyle::WasmModule,
     };
     // Bundles live next to the run root (never inside it — the run root is

@@ -59,6 +59,19 @@ pub(super) async fn run(
     // kind=agent only: the workflow-declared how.md append. Operator/
     // maintenance inputs ignore the field (legacy behavior untouched).
     let how_append = declared_how_append(kind, input)?;
+    // kind=agent against a `run_mode: agent` card: every turn is one runc
+    // sandbox round instead of a host session loop (see `agent_runc`).
+    // Operator/maintenance never take this path — their `kind` differs even
+    // when they share the host session code below.
+    if kind == ExecutionKind::Agent
+        && config
+            .agent
+            .agents_dir
+            .as_deref()
+            .is_some_and(|root| super::agent_runc::session_uses_sandbox(root, agent))
+    {
+        return super::agent_runc::run_round(worker, record, config, cancel, how_append).await;
+    }
     let fresh = worker.inner.state.store.get_session(id).await?.is_none();
     let before = worker
         .inner

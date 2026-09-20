@@ -470,8 +470,10 @@ async fn get_json(app: &axum::Router, uri: &str) -> (StatusCode, serde_json::Val
 
 /// Regression (sandbox -> plan rename): `POST /agent` accepts the `plan`
 /// agent — the persisted meta and the subsequent GET both reflect it — while
-/// the interlude `sandbox` name (`resolve_agent("sandbox")` is None) gets the
-/// standard unknown-agent 400 and leaves zero footprint.
+/// the interlude `sandbox` name (`resolve_agent("sandbox")` is None) and the
+/// `workflow` TODO-internal scheduler (a Primary builtin that every consumer
+/// excludes from its switchable set) both get the standard unknown-agent 400
+/// and leave zero footprint.
 #[tokio::test]
 async fn agent_switch_accepts_plan_and_rejects_legacy_sandbox() {
     let tmp = tempfile::tempdir().unwrap();
@@ -540,7 +542,35 @@ async fn agent_switch_accepts_plan_and_rejects_legacy_sandbox() {
         "400 must name the unknown agent, got: {err}"
     );
 
-    // Zero footprint: rejected switch left meta + live override untouched.
+    // `workflow` resolves as a Primary builtin but is the TODO-internal
+    // scheduler: rejected here exactly like every other consumer computes
+    // its switchable set (GET /api/agents `primary`, the TUI picker).
+    let scheduler = request(
+        &app,
+        "POST",
+        &format!("/api/sessions/{sid}/agent"),
+        r#"{"value":"workflow"}"#,
+    )
+    .await;
+    assert_eq!(
+        scheduler.status(),
+        StatusCode::BAD_REQUEST,
+        "workflow must not be a switch target"
+    );
+    let bytes = axum::body::to_bytes(scheduler.into_body(), 4096)
+        .await
+        .unwrap();
+    let err: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(err["ok"], false);
+    assert!(
+        err["error"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("unknown agent"),
+        "400 must name the unknown agent, got: {err}"
+    );
+
+    // Zero footprint: rejected switches left meta + live override untouched.
     let meta = store.get_session(sid).await.unwrap().unwrap();
     assert_eq!(meta.agent.as_deref(), Some("plan"));
     let handle = state.handles.lock().await.get(sid).cloned().unwrap();

@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use opencoder_core::agent::{
     agent_dir, agents_dir, read_agent_meta, read_resource_meta, validate_agent_name,
-    validate_resource_name, AgentHistoryEntry, AgentMeta, AgentRefs, ResourceMeta,
+    validate_resource_name, AgentHistoryEntry, AgentMeta, AgentRefs, ResourceMeta, RunMode,
     AGENT_CATEGORIES,
 };
 
@@ -163,7 +163,7 @@ pub fn create_agent_with_harness(
     refs: AgentRefs,
     harness: opencoder_core::harness::Harness,
 ) -> io::Result<()> {
-    create_agent_with_profile(name, refs, harness, None)
+    create_agent_with_profile(name, refs, harness, None, RunMode::default())
 }
 
 pub fn create_agent_with_profile(
@@ -171,6 +171,7 @@ pub fn create_agent_with_profile(
     refs: AgentRefs,
     harness: opencoder_core::harness::Harness,
     profile: Option<String>,
+    run_mode: RunMode,
 ) -> io::Result<()> {
     let _lock = crate::resources::lock::write_lock()?;
     crate::resources::validate_refs(name, &refs)?;
@@ -194,6 +195,7 @@ pub fn create_agent_with_profile(
     let meta = AgentMeta {
         harness_profile: profile,
         harness,
+        run_mode,
         name: name.to_string(),
         created_at: now.clone(),
         updated_at: now,
@@ -220,7 +222,7 @@ pub fn update_agent_settings(
     refs: Option<AgentRefs>,
     harness: Option<opencoder_core::harness::Harness>,
 ) -> io::Result<()> {
-    update_agent_with_profile(name, refs, harness, None)
+    update_agent_with_profile(name, refs, harness, None, None)
 }
 
 pub fn update_agent_with_profile(
@@ -228,6 +230,7 @@ pub fn update_agent_with_profile(
     refs: Option<AgentRefs>,
     harness: Option<opencoder_core::harness::Harness>,
     profile: Option<Option<String>>,
+    run_mode: Option<RunMode>,
 ) -> io::Result<()> {
     let _lock = crate::resources::lock::write_lock()?;
     validate_agent_name(name).map_err(invalid_input)?;
@@ -280,6 +283,19 @@ pub fn update_agent_with_profile(
             meta.harness = harness;
         }
     }
+    // Run mode mirrors harness: `Some(new)` appends one history entry when
+    // the value actually changes; `None` leaves the card untouched.
+    if let Some(run_mode) = run_mode {
+        if meta.run_mode != run_mode {
+            meta.history.push(AgentHistoryEntry {
+                at: now.clone(),
+                field: "run_mode".into(),
+                from: Some(meta.run_mode.as_str().into()),
+                to: Some(run_mode.as_str().into()),
+            });
+            meta.run_mode = run_mode;
+        }
+    }
     std::fs::create_dir_all(&dir)?;
     let changed = ref_fields(&meta.current)
         .into_iter()
@@ -318,137 +334,4 @@ pub fn delete_agent(name: &str) -> io::Result<()> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::testutil::scoped;
-
-    fn vf(rel: &str) -> VersionFile {
-        VersionFile {
-            rel_path: rel.into(),
-            bytes: rel.as_bytes().to_vec(),
-        }
-    }
-
-    fn meta_of(cat: &str, name: &str) -> ResourceMeta {
-        read_resource_meta(cat, name).unwrap()
-    }
-
-    #[test]
-    fn versions_increment_and_never_reuse() {
-        let (tmp, _g) = scoped();
-        assert_eq!(
-            save_resource_version("prompts", "pack", &[vf("soul.md")]).unwrap(),
-            1
-        );
-        assert_eq!(
-            save_resource_version("prompts", "pack", &[vf("soul.md")]).unwrap(),
-            2
-        );
-        assert_eq!(
-            save_resource_version("prompts", "pack", &[vf("soul.md")]).unwrap(),
-            3
-        );
-        crate::rollback::rollback_resource("prompts", "pack", 1).unwrap();
-        assert_eq!(
-            save_resource_version("prompts", "pack", &[vf("soul.md")]).unwrap(),
-            4
-        );
-        let meta = meta_of("prompts", "pack");
-        assert_eq!(meta.current, 4);
-        assert_eq!(meta.history, vec![1, 2, 3, 4]);
-        for v in 1..=4 {
-            assert!(tmp.path().join(format!("prompts/pack/v{v}")).is_dir());
-        }
-        // Unknown category rejected before touching the fs.
-        assert_eq!(
-            save_resource_version("nope", "pack", &[vf("x")])
-                .unwrap_err()
-                .kind(),
-            io::ErrorKind::InvalidInput
-        );
-    }
-
-    #[test]
-    fn failed_save_leaves_no_temp_and_meta_unchanged() {
-        let (tmp, _g) = scoped();
-        save_resource_version("tools", "kit", &[vf("run.sh")]).unwrap();
-        let before = meta_of("tools", "kit");
-        let err = save_resource_version("tools", "kit", &[vf("../escape")]).unwrap_err();
-        assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
-        let kit = tmp.path().join("tools/kit");
-        let temps: Vec<_> = std::fs::read_dir(&kit)
-            .unwrap()
-            .flatten()
-            .filter(|e| e.file_name().to_string_lossy().starts_with(".tmp-"))
-            .collect();
-        assert!(temps.is_empty(), "temp dirs left behind: {temps:?}");
-        assert_eq!(meta_of("tools", "kit"), before);
-        // Empty and absolute rel_paths are rejected too.
-        assert!(save_resource_version("tools", "kit", &[vf("")]).is_err());
-        assert!(save_resource_version("tools", "kit", &[vf("/etc/x")]).is_err());
-    }
-
-    #[test]
-    fn create_update_card_history() {
-        let (_tmp, _g) = scoped();
-        save_resource_version("prompts", "pack", &[vf("soul.md")]).unwrap();
-        save_resource_version("tools", "kit", &[vf("run.sh")]).unwrap();
-        let first = AgentRefs {
-            prompt: Some("pack".into()),
-            skills: None,
-            tools: None,
-            memory: None,
-        };
-        create_agent("work", first.clone()).unwrap();
-        let card = read_agent_meta("work").unwrap();
-        assert!(card.history.is_empty());
-        assert_eq!(card.current, first);
-        assert_eq!(card.references.prompt_files, vec!["soul"]);
-        // Duplicate create rejected.
-        assert_eq!(
-            create_agent("work", Default::default()).unwrap_err().kind(),
-            io::ErrorKind::AlreadyExists
-        );
-        // Change two fields → exactly two history entries.
-        update_agent_refs(
-            "work",
-            AgentRefs {
-                prompt: Some("pack".into()),
-                skills: None,
-                tools: Some("kit".into()),
-                memory: Some("bank".into()),
-            },
-        )
-        .unwrap();
-        let card = read_agent_meta("work").unwrap();
-        let fields: Vec<&str> = card.history.iter().map(|h| h.field.as_str()).collect();
-        assert_eq!(fields, vec!["tools", "memory"]);
-        assert_eq!(card.history[0].from, None);
-        assert_eq!(card.history[0].to.as_deref(), Some("kit"));
-        assert_eq!(card.references.tools, vec!["run.sh"]);
-        // Identical refs → no new history entries.
-        update_agent_refs("work", card.current.clone()).unwrap();
-        assert_eq!(read_agent_meta("work").unwrap().history.len(), 2);
-        // Unknown card rejected.
-        assert_eq!(
-            update_agent_refs("ghost", Default::default())
-                .unwrap_err()
-                .kind(),
-            io::ErrorKind::NotFound
-        );
-        // Invalid names rejected. `active` is no longer reserved: the global
-        // activation marker is gone, so it is just a regular card name.
-        assert!(create_agent("../x", Default::default()).is_err());
-    }
-
-    #[test]
-    fn delete_agent_is_idempotent() {
-        let (tmp, _g) = scoped();
-        create_agent("gone", Default::default()).unwrap();
-        assert!(tmp.path().join("gone").is_dir());
-        delete_agent("gone").unwrap();
-        delete_agent("gone").unwrap();
-        assert!(!tmp.path().join("gone").exists());
-        assert!(delete_agent("never-there").is_ok());
-    }
-}
+mod tests;

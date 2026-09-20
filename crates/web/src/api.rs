@@ -413,15 +413,21 @@ pub async fn post_agent(
     if let Some(response) = crate::api_ops::reject_codex_override(&state, &id).await {
         return response;
     }
-    // The switch surface carries the primary agents only: `act` (default) and
-    // `plan` (read-only). The interlude `sandbox` name no longer resolves
-    // (`resolve_agent("sandbox")` is None; the store normalizes stored rows to
-    // `plan` on read), and subagent kinds (explore/build) are unreachable as a
-    // session's primary agent — both get the standard unknown-agent 400
-    // before any persistence or handle mutation.
-    if !opencoder_core::resolve_agent(&body.value).is_some_and(|a| a.is_primary()) {
+    // The switch surface carries the primary agents only: `act` (default),
+    // `plan` (read-only), and `command` (one-shot). `workflow` resolves as a
+    // Primary builtin but is the TODO-internal scheduler — excluded here the
+    // same way every other consumer computes its primary set (`GET
+    // /api/agents`'s `primary` field, the TUI `/agent` picker). The interlude
+    // `sandbox` name no longer resolves (`resolve_agent("sandbox")` is None;
+    // the store normalizes stored rows to `plan` on read), and subagent kinds
+    // (explore/build) are unreachable as a session's primary agent — all of
+    // them get the standard unknown-agent 400 before any persistence or
+    // handle mutation.
+    if !opencoder_core::resolve_agent(&body.value)
+        .is_some_and(|a| a.is_primary() && a.name != "workflow")
+    {
         return error_400(format!(
-            "unknown agent {:?}: expected a builtin agent (act/plan) or a configured file agent name",
+            "unknown agent {:?}: expected a builtin primary agent (act/plan/command) or a registered file agent name",
             body.value
         ));
     }

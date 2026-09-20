@@ -131,7 +131,7 @@ pub(crate) async fn dispatch_locked(worker: &Worker) -> Result<()> {
             b.queue.as_ref().unwrap().sequence,
         )
     });
-    for record in records {
+    for mut record in records {
         let Some(permit) = worker.try_slot() else {
             break;
         };
@@ -162,20 +162,44 @@ pub(crate) async fn dispatch_locked(worker: &Worker) -> Result<()> {
                 worker.finish_slot(ticket.as_deref()).await?;
                 continue;
             }
-            let reply = opencoder_core::harness::scope::with_execution(
-                queued.config.agent.codex.clone(),
-                queued.config.agent.runtime.clone(),
-                opencoder_core::agent::scope::with_root(
-                    queued.config.agent.agents_dir.clone(),
-                    super::native(
-                        worker,
-                        "POST",
-                        &format!("/api/sessions/{id}/{}", command.tail),
-                        command.body.clone(),
+            // A queued sandbox prompt must replay as a sandbox round, not
+            // as a host web-app POST (which would start a HOST turn): stage
+            // the turn text into the record and skip the native call; the
+            // launch below runs `run_round`. Non-sandbox commands replay
+            // unchanged.
+            let reply = if command.tail == "prompt"
+                && crate::workloads::agent_runc::sandbox_session(
+                    &record,
+                    queued.config.agent.agents_dir.as_deref(),
+                ) {
+                let prompt = command.body["prompt"]
+                    .as_str()
+                    .map(str::trim)
+                    .filter(|p| !p.is_empty());
+                match prompt {
+                    Some(prompt) => {
+                        record.assignment.request.input["prompt"] = serde_json::json!(prompt);
+                        worker.inner.journal.lock().await.save(record.clone())?;
+                        RpcReply::ok(serde_json::json!({"status": "accepted"}))
+                    }
+                    None => RpcReply::error(400, "prompt is required for sandbox sessions"),
+                }
+            } else {
+                opencoder_core::harness::scope::with_execution(
+                    queued.config.agent.codex.clone(),
+                    queued.config.agent.runtime.clone(),
+                    opencoder_core::agent::scope::with_root(
+                        queued.config.agent.agents_dir.clone(),
+                        super::native(
+                            worker,
+                            "POST",
+                            &format!("/api/sessions/{id}/{}", command.tail),
+                            command.body.clone(),
+                        ),
                     ),
-                ),
-            )
-            .await?;
+                )
+                .await?
+            };
             if reply.status >= 300 {
                 worker.inner.journal.lock().await.finalize(
                     &id,

@@ -8,7 +8,7 @@ brain 图契约 v2（30108c8b）后，`readDraft` 按 `plan.instances` / `schema
 
 - `crates/web/spa/src/brain/workbench/editor/draft.js`：JSON 解析失败给出中文指引文案；校验失败文案标注「可能来自旧版协议缓存，可丢弃后重新开始」，保持 fail-closed 不覆盖原文。`useDraft` 新增 `discard()`：原始缓存原文备份到 `<key>:legacy-v1` 单槽后移除原 key，并重置为干净 v2 草稿（新建为空计划、编辑为服务端版本快照），错误清空。
 - `crates/web/spa/src/brain/workbench/editor.jsx`：草稿读取失败 Alert 增加「丢弃缓存并重新开始」按钮（danger），绑定 `discard`。
-- 重建内嵌 SPA dist（`crates/web/spa/dist/static/app.js`）。
+- 重建内嵌 SPA dist：注意 minifier 标识符命名与 antd CSS 提取顺序在本机非 bit-stable，提交产物必须来自 `scripts/check-spa-drift.sh` 同款镜像构建流程（多轮构建取稳定主流变体），否则发布门 `build.sh` 会以 `spa dist: DRIFT detected` 拒绝。本次 dist 修正链见提交 563ab375 / 07befc8e / 56675f34。
 
 ## 测试覆盖
 

@@ -84,15 +84,23 @@ function latestPrompt(raw) {
 
 async function startMock() {
   mock = http.createServer(async (incoming, outgoing) => {
-    const chunks = [];
-    for await (const chunk of incoming) chunks.push(chunk);
-    const raw = Buffer.concat(chunks).toString();
-    const response = await responseFor(latestPrompt(raw), JSON.parse(raw));
-    const text = typeof response === 'string' ? response : JSON.stringify(response);
-    outgoing.writeHead(200, { 'content-type': 'text/event-stream' });
-    outgoing.write(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { role: 'assistant', content: text }, finish_reason: null }] })}\n\n`);
-    outgoing.write(`data: ${JSON.stringify({ choices: [{ index: 0, delta: {}, finish_reason: 'stop' }], usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } })}\n\n`);
-    outgoing.end('data: [DONE]\n\n');
+    try {
+      const chunks = [];
+      for await (const chunk of incoming) chunks.push(chunk);
+      const raw = Buffer.concat(chunks).toString();
+      const response = await responseFor(latestPrompt(raw), JSON.parse(raw));
+      const text = typeof response === 'string' ? response : JSON.stringify(response);
+      outgoing.writeHead(200, { 'content-type': 'text/event-stream' });
+      outgoing.write(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { role: 'assistant', content: text }, finish_reason: null }] })}\n\n`);
+      outgoing.write(`data: ${JSON.stringify({ choices: [{ index: 0, delta: {}, finish_reason: 'stop' }], usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } })}\n\n`);
+      outgoing.end('data: [DONE]\n\n');
+    } catch (error) {
+      // A fixture assertion must fail the request and let main() clean up its
+      // real Server/Worker processes, rather than crash in an async callback.
+      console.error(error);
+      if (!outgoing.headersSent) outgoing.writeHead(500, { 'content-type': 'application/json' });
+      outgoing.end(JSON.stringify({ error: { message: `fixture response failed: ${error.message}` } }));
+    }
   });
   await new Promise((resolve) => mock.listen(0, '127.0.0.1', resolve));
 }

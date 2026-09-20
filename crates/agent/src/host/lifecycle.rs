@@ -4,7 +4,14 @@ use anyhow::{ensure, Result};
 impl Host {
     pub async fn hibernate(&self, id: &str) -> Result<()> {
         let _activation = self.store.request_lock("release", "activation").await?;
-        let _use = self.store.request_lock("runtime-use", id).await?;
+        // A long RPC must not let idle collection retain the fleet-wide
+        // activation lock. Retry collection after readers release ownership.
+        let _use = tokio::time::timeout(
+            std::time::Duration::from_millis(100),
+            self.store.request_lock("runtime-use", id),
+        )
+        .await
+        .map_err(|_| anyhow::anyhow!("runtime has in-flight requests; retry hibernation"))??;
         let runtime = self.runtime(id).await?;
         ensure!(
             runtime.mode == "retired",

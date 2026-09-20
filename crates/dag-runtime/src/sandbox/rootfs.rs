@@ -3,10 +3,12 @@
 use anyhow::{bail, ensure, Context, Result};
 use std::{
     fs,
+    io::{Read, Write},
     path::{Path, PathBuf},
 };
 
 const RUNTIME_DIRS: &[&str] = &["dev", "proc", "sys", "tmp", "workspace/context"];
+const COPY_CHUNK_BYTES: usize = 1024 * 1024;
 
 pub(super) fn snapshot(source: &Path, bundle: &Path) -> Result<PathBuf> {
     let destination = bundle.join("rootfs");
@@ -58,7 +60,7 @@ fn copy_directory(source: &Path, destination: &Path, relative: &Path) -> Result<
             copy_directory(&entry.path(), &target, &relative)?;
         } else if kind.is_file() {
             // Copy bytes, never hard-link shared files that can be updated.
-            fs::copy(entry.path(), target)?;
+            copy_file(&entry.path(), &target)?;
         } else if kind.is_symlink() {
             copy_symlink(&entry.path(), &target)?;
         } else {
@@ -73,6 +75,29 @@ fn copy_directory(source: &Path, destination: &Path, relative: &Path) -> Result<
         fs::create_dir_all(destination.join("context"))?;
     }
     fs::set_permissions(destination, fs::metadata(source)?.permissions())?;
+    Ok(())
+}
+
+fn copy_file(source: &Path, destination: &Path) -> Result<()> {
+    let mut input = fs::File::open(source)?;
+    let mut output = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(destination)?;
+    let mut buffer = vec![0; COPY_CHUNK_BYTES];
+    loop {
+        let count = input.read(&mut buffer)?;
+        if count == 0 {
+            break;
+        }
+        output.write_all(&buffer[..count])?;
+        // Large kernel copies can leave hundreds of MiB in the filesystem's
+        // ordered transaction, delaying unrelated admission fsyncs. Bound
+        // dirty image data while preserving the private staging tree.
+        output.sync_data()?;
+    }
+    output.set_permissions(input.metadata()?.permissions())?;
+    output.sync_all()?;
     Ok(())
 }
 
@@ -92,6 +117,36 @@ fn copy_symlink(source: &Path, destination: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn large_image_files_keep_independent_bytes_permissions_and_frozen_retry() {
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("image");
+        let bundle = temp.path().join("bundle");
+        fs::create_dir(&source).unwrap();
+        fs::create_dir(&bundle).unwrap();
+        let bytes: Vec<u8> = (0..3 * 1024 * 1024 + 37).map(|n| (n % 251) as u8).collect();
+        let executable = source.join("executable");
+        fs::write(&executable, &bytes).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&executable, fs::Permissions::from_mode(0o751)).unwrap();
+        }
+        let root = snapshot(&source, &bundle).unwrap();
+        assert_eq!(fs::read(root.join("executable")).unwrap(), bytes);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            let original = fs::metadata(&executable).unwrap();
+            let copied = fs::metadata(root.join("executable")).unwrap();
+            assert_ne!(original.ino(), copied.ino());
+            assert_eq!(copied.mode() & 0o777, 0o751);
+        }
+        fs::write(executable, b"new version").unwrap();
+        assert_eq!(snapshot(&source, &bundle).unwrap(), root);
+        assert_eq!(fs::read(root.join("executable")).unwrap(), bytes);
+    }
 
     #[test]
     fn snapshots_isolate_images_devices_and_retries() {

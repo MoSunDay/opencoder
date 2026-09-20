@@ -20,6 +20,31 @@ pub fn stdout_module_wat(message: &str) -> String {
     )
 }
 
+/// Wat for a module that dumps its whole WASI argv buffer to stdout: every
+/// argument NUL-separated, argv[0] first (the module token). The
+/// input-args e2e asserts dispatch `input.args` shows up as command-line
+/// tokens after the module token.
+pub fn args_echo_wat() -> String {
+    r#"(module
+  (import "wasi_snapshot_preview1" "args_sizes_get"
+    (func $args_sizes_get (param i32 i32) (result i32)))
+  (import "wasi_snapshot_preview1" "args_get"
+    (func $args_get (param i32 i32) (result i32)))
+  (import "wasi_snapshot_preview1" "fd_write"
+    (func $fd_write (param i32 i32 i32 i32) (result i32)))
+  (memory (export "memory") 1)
+  (func (export "_start")
+    ;; Layout: [0]=argc, [4]=buf size, [8..]=argv pointers, [4096..]=the
+    ;; packed NUL-terminated strings. One iovec at 2048 covers the whole
+    ;; buffer, so stdout is argv joined by NUL bytes.
+    (drop (call $args_sizes_get (i32.const 0) (i32.const 4)))
+    (drop (call $args_get (i32.const 8) (i32.const 4096)))
+    (i32.store (i32.const 2048) (i32.const 4096))
+    (i32.store (i32.const 2052) (i32.load (i32.const 4)))
+    (drop (call $fd_write (i32.const 1) (i32.const 2048) (i32.const 1) (i32.const 2056)))))"#
+        .to_string()
+}
+
 /// Wat for an endless loop — terminated only by cancellation (epoch
 /// interruption) or the step timeout.
 pub const SPIN_WAT: &str = r#"(module (func (export "_start") (loop $l (br $l))))"#;

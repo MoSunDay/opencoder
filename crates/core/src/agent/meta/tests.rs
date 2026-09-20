@@ -257,3 +257,35 @@ fn agent_ref_helpers_and_all_tools_dirs_shape() {
         ]
     );
 }
+
+/// Run mode card field: absent means `Operator` (the card contract - a new
+/// field must not brick old readers), `"agent"` parses and survives a
+/// serialize round trip, and unknown values fail loudly. `FromStr`/
+/// `as_str` round-trip both variants.
+#[test]
+fn run_mode_defaults_round_trips_and_rejects_unknown() {
+    // Partial/old card without `run_mode` -> default operator mode.
+    let partial: AgentMeta = serde_json::from_str(r#"{ "name": "old" }"#).unwrap();
+    assert_eq!(partial.run_mode, RunMode::Operator);
+    // `"agent"` parses...
+    let card: AgentMeta = serde_json::from_str(r#"{ "run_mode": "agent" }"#).unwrap();
+    assert_eq!(card.run_mode, RunMode::Agent);
+    // ...and a serialize/deserialize round trip keeps the value.
+    let raw = serde_json::to_string(&card).unwrap();
+    assert!(raw.contains(r#""run_mode":"agent""#));
+    assert_eq!(
+        serde_json::from_str::<AgentMeta>(&raw).unwrap().run_mode,
+        RunMode::Agent
+    );
+    // Unknown values fail to deserialize.
+    assert!(serde_json::from_str::<AgentMeta>(r#"{ "run_mode": "typo" }"#).is_err());
+    // FromStr/as_str round trip both variants; unknown strings carry the
+    // expected message.
+    for mode in [RunMode::Operator, RunMode::Agent] {
+        assert_eq!(mode.as_str().parse::<RunMode>().unwrap(), mode);
+    }
+    assert_eq!(
+        "typo".parse::<RunMode>().unwrap_err(),
+        "unknown run mode 'typo'; expected operator or agent"
+    );
+}

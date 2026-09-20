@@ -417,6 +417,16 @@ pub(super) fn prepare(worker: &Worker, assignment: &Assignment, legacy: bool) ->
                 if opencoder_core::resolve_agent(&agent).is_none() {
                     bail!("agent {agent} unavailable");
                 }
+                // A `run_mode: agent` card routes every turn through a runc
+                // sandbox round instead of the host session loop — reject
+                // the execution at admission when that runtime is not
+                // actually usable (fail closed, like the DAG preflights).
+                if assignment.request.kind == ExecutionKind::Agent
+                    && opencoder_core::agent::read_agent_meta(&agent)
+                        .is_some_and(|meta| meta.run_mode == opencoder_core::agent::RunMode::Agent)
+                {
+                    crate::workloads::agent_runc::preflight(worker, &config, legacy)?;
+                }
                 let harness = if assignment.request.kind == ExecutionKind::Agent {
                     selection
                 } else {

@@ -37,6 +37,10 @@ pub enum AllowReason {
     Heredoc,
     /// Approved by a per-command handler.
     Handler(String),
+    /// An unregistered command name: allow-by-default policy (unknown
+    /// commands pass; only the classified write surfaces block). The typed
+    /// provenance keeps the relaxation auditable instead of string-matched.
+    UnknownCommand(String),
 }
 
 impl AllowReason {
@@ -70,6 +74,7 @@ impl fmt::Display for AllowReason {
             Self::ReleasedWrite(detail) => f.write_str(detail),
             Self::Heredoc => f.write_str("heredoc"),
             Self::Handler(detail) => f.write_str(detail),
+            Self::UnknownCommand(cmd) => write!(f, "{cmd} (unknown command)"),
         }
     }
 }

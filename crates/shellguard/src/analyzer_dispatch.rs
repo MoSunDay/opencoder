@@ -2,7 +2,9 @@
 //! Ported from rippy `src/analyzer_dispatch.rs` (MIT,
 //! https://github.com/mpecan/rippy). Sandbox deltas: no self-protect or
 //! config-redirect layers, the release set is `/dev/null` + `/tmp` (never the
-//! cwd), and an unknown command always Asks.
+//! cwd), and an unknown command is allowed by default (allow-by-default
+//! policy: only classified writes, unparseable input and dynamic command
+//! names fail closed).
 
 use std::path::Path;
 
@@ -322,9 +324,12 @@ impl Analyzer {
         }
     }
 
-    /// Fail-closed default: an unregistered command always Asks (rippy let a
-    /// configured default action or allow decide; the sandbox has neither).
+    /// Allow-by-default for an unregistered command: unknown commands pass
+    /// unless a known write surface (redirect, interpreter payload, ...) in
+    /// the same pipeline asks. Provenance stays typed via
+    /// [`AllowReason::UnknownCommand`]; unparseable input still fails closed
+    /// in `lib.rs`.
     pub(super) fn default_verdict(&mut self, cmd_name: &str) -> Verdict {
-        Verdict::ask(format!("{cmd_name} (unknown command)"))
+        Verdict::allow(AllowReason::UnknownCommand(cmd_name.to_owned()))
     }
 }

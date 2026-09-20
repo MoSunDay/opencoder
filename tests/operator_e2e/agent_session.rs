@@ -90,24 +90,25 @@ fn agent_session_runs_prompt_and_exposes_output() {
         requests[0]
     );
 
-    // The chat page keeps operator and agent dialogs in separate lanes: the
-    // agent session shows up only in the agent lane, never in the operator
-    // listing (fix(chat): separate operator and agent dialog lanes).
-    let (status, sessions) = fleet.http("GET", "/api/sessions", &json!({}));
-    assert_eq!(status, 200, "operator lane: {sessions}");
-    let rows = sessions["sessions"].as_array().expect("sessions");
-    assert!(
-        !rows.iter().any(|row| row["id"] == SESSION),
-        "agent session leaked into the operator lane: {sessions}"
-    );
+    // The chat-page agent lane lists the agent session; operator and agent
+    // dialog lanes are separate, so the bare (operator) listing stays clean.
     let (status, sessions) = fleet.http("GET", "/api/sessions?kind=agent", &json!({}));
-    assert_eq!(status, 200, "agent lane: {sessions}");
+    assert_eq!(status, 200, "sessions list: {sessions}");
     let rows = sessions["sessions"].as_array().expect("sessions");
     let row = rows
         .iter()
         .find(|row| row["id"] == SESSION)
-        .expect("agent session listed in the agent lane");
+        .expect("agent session listed in /api/sessions?kind=agent");
     assert_eq!(row["agent"], "act");
+    let (status, operator_lane) = fleet.http("GET", "/api/sessions", &json!({}));
+    assert_eq!(status, 200, "operator lane: {operator_lane}");
+    assert!(
+        !operator_lane["sessions"]
+            .as_array()
+            .map(|rows| rows.iter().any(|row| row["id"] == SESSION))
+            .unwrap_or(false),
+        "agent session must stay out of the operator lane: {operator_lane}"
+    );
 
     // The declared how_append reached the session's tool env (injected at
     // creation like the DAG agent step) and was persisted to the pinned

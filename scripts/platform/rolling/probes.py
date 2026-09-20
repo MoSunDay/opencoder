@@ -119,12 +119,15 @@ def candidate_locked(settings, record, operations, seconds, container=False):
         "created_at": record["created_at"], "status": "pending"},
         "request": {"id": identifier, "kind": "dag", "input": {}, "node_id": node_id},
         "definition": definition}
+    last_reply = None
     def accepted():
+        nonlocal last_reply
         # Older Runtimes serialize Create replays behind resource snapshots.
         # Recover this activation's durable probe before resubmitting it; its
         # frozen request, definition and owner must all match, even when done.
         receipt = operations.http(endpoint, "/rpc", "POST", {"operation": "inspect",
             "execution": {"id": identifier, "kind": "dag"}})
+        last_reply = {"operation": "inspect", "reply": receipt}
         if receipt["status"] < 300:
             detail = receipt["body"]
             expected = {**assignment["request"], "target": None}
@@ -140,12 +143,16 @@ def candidate_locked(settings, record, operations, seconds, container=False):
         if receipt["status"] != 404:
             raise ValueError(f"candidate probe inspection rejected: {receipt}")
         receipt = operations.http(endpoint, "/rpc", "POST", {"operation": "create", "assignment": assignment})
+        last_reply = {"operation": "create", "reply": receipt}
         if ambiguous(receipt["status"]):
             return False
         if receipt["status"] >= 300:
             raise ValueError(f"candidate probe rejected: {receipt}")
         return True
-    operations.wait(accepted, seconds)
+    try:
+        operations.wait(accepted, seconds)
+    except TimeoutError as error:
+        raise TimeoutError(f"candidate probe {identifier} timed out; last RPC: {last_reply}; {error}") from error
 
     def finished():
         view = operations.http(endpoint, "/inventory")

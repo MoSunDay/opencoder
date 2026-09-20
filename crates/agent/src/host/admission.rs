@@ -26,6 +26,12 @@ impl Creations {
         let NodeOperation::Create { assignment } = operation else {
             return Ok(None);
         };
+        // Keep the same resource classification as Worker admission. A pure
+        // WASI creation must remain available while cold Agent copies fill
+        // this runtime's resource-preparation allowance.
+        if !opencoder_worker::requires_agent_pool(assignment) {
+            return Ok(None);
+        }
         let id = &assignment.index.id;
         let mut pending = self.0.lock().unwrap();
         let executions = pending.entry(runtime.into()).or_default();
@@ -56,12 +62,12 @@ impl Drop for Creation<'_> {
     }
 }
 
-/// Match the control-plane budgets. A disconnected/timed-out caller must not
-/// leave an unbounded Host HTTP request occupying a fleet channel permit.
+/// Finish before the control plane's 60-second creation / 15-second read
+/// budgets so abandoned HTTP waits cannot occupy fleet channel permits.
 pub(super) fn request_timeout(operation: &NodeOperation) -> Duration {
     Duration::from_secs(if matches!(operation, NodeOperation::Create { .. }) {
-        60
+        45
     } else {
-        15
+        10
     })
 }

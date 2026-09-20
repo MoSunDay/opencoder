@@ -1,7 +1,33 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiGet } from '../../api.js';
 import { openStream } from '../../sse.js';
-import { terminal } from './model.js';
+import { normalizeEvent, terminalV3 } from './v3Model.js';
+
+function legacyView(snapshot) {
+  if (!snapshot?.run) return snapshot;
+  const operations = snapshot.operations || [];
+  const rounds = [...new Set(operations.map((operation) => operation.round))].sort((a, b) => a - b)
+    .map((round) => ({ round, operations: operations.filter((operation) => operation.round === round) }));
+  return { schema_version: 3, objective: '', capabilities: [], rounds, run: snapshot.run };
+}
+
+async function readView(id) {
+  const snapshot = await apiGet(`/api/brain/runs/${encodeURIComponent(id)}`);
+  if (!snapshot?.run) return snapshot;
+  try {
+    const view = await apiGet(`/api/brain/runs/${encodeURIComponent(id)}/view`);
+    if (view?.run) return view;
+  } catch {
+    // A v3 snapshot is still useful while the presentation projection is
+    // temporarily unavailable; it contains the complete operation index.
+  }
+  return legacyView(snapshot);
+}
+
+function watermarkOf(value) {
+  return value?.run?.last_event_seq ?? value?.watermark ?? 0;
+}
+
 export function useBrainRun(id) {
   const [run, setRun] = useState(null); const [error, setError] = useState(''); const [connection, setConnection] = useState('connecting');
   const [events, setEvents] = useState([]); const lifetime = useRef(0);
@@ -12,7 +38,7 @@ export function useBrainRun(id) {
     setRun(null); setEvents([]); setError('');
     const load = async () => {
       if (loading) { pending = true; return null; } loading = true;
-      try { const value = await apiGet(`/api/brain/runs/${encodeURIComponent(id)}`); if (alive()) { finished = terminal(value.phase); setRun(value); setError(''); } return value.watermark || 0; }
+      try { const value = await readView(id); if (alive()) { finished = terminalV3(value); setRun(value); setError(''); } return watermarkOf(value); }
       catch (e) { if (alive()) setError(e.message); throw e; }
       finally { loading = false; if (pending && alive()) { pending = false; timer = setTimeout(() => load().catch(() => {}), 50); } }
     };
@@ -25,7 +51,7 @@ export function useBrainRun(id) {
         stream = openStream({ path: `/api/brain/runs/${encodeURIComponent(id)}/events`, after, executionHistory: true,
           onResync: async () => { const watermark = await load(); if (watermark === null) throw new Error('快照更新中，请重试同步'); return watermark; },
           onStatus: (status) => { if (alive()) { setConnection(status); if (status === 'closed' && !finished) { clearTimeout(retryTimer); retryTimer = setTimeout(start, 2000); } } },
-          onFrame: (frame) => { if (!alive()) return; setEvents((old) => old.some((e) => e.seq === frame.seq) ? old : [...old, frame].slice(-200)); load().catch(() => {}); },
+          onFrame: (frame) => { if (!alive()) return; const event = normalizeEvent(frame); if (!event) return; setEvents((old) => old.some((e) => e.seq === event.seq) ? old : [...old, event].slice(-200)); load().catch(() => {}); },
         });
       } catch { if (alive()) retryTimer = setTimeout(start, 2000); }
     };

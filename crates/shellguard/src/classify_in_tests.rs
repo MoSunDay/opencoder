@@ -126,7 +126,12 @@ fn released_write_provenance_survives_compound_allow_ties() {
 #[test]
 fn unknown_command_is_allowed_by_default() {
     let cwd = plain_project_cwd("unknown-allow");
-    for cmd in ["pip list", "sudo ls", "kill -9 1234", "stdbuf -o0 grep -q x f"] {
+    for cmd in [
+        "pip list",
+        "sudo ls",
+        "kill -9 1234",
+        "stdbuf -o0 grep -q x f",
+    ] {
         let verdict = crate::classify_in(cmd, &cwd);
         assert_eq!(verdict.decision, Decision::Allow, "{cmd}");
         assert!(!verdict.writes_state, "{cmd} must not claim a write");

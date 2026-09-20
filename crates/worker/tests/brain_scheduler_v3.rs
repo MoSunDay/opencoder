@@ -1,5 +1,7 @@
 //! V3 root execution keeps a recoverable wake marker and never embeds child
 //! execution output in the root journal.
+#[path = "scheduler/failure.rs"]
+mod failure;
 mod support;
 
 use opencoder_core::{brain::BrainSchedulerRequest, fleet::*};
@@ -50,11 +52,48 @@ async fn root_emits_one_scheduler_wake_until_control_acknowledges_it() {
         .expect("scheduler wake");
     assert_eq!(frames.iter().filter(|frame| matches!(frame, NodeFrame::Brain { action, .. } if action == "scheduler_wake")).count(), 1);
     node.handle(NodeOperation::Brain {
-        execution: reference,
+        execution: reference.clone(),
         action: "scheduler_wake_ack".into(),
         input: json!({"generation":generation}),
     })
     .await;
+    assert!(node.brain_frames().await.unwrap().is_empty());
+    // A delayed acknowledgement from an older activation must neither
+    // consume the resume wake nor move the acknowledged cursor backwards.
+    for action in ["pause", "resume"] {
+        let reply = node
+            .handle(NodeOperation::Brain {
+                execution: reference.clone(),
+                action: action.into(),
+                input: Value::Null,
+            })
+            .await;
+        assert_eq!(reply.status, 200, "{reply:?}");
+    }
+    node.handle(NodeOperation::Brain {
+        execution: reference.clone(),
+        action: "scheduler_wake_ack".into(),
+        input: json!({"generation":generation}),
+    })
+    .await;
+    let frames = node.brain_frames().await.unwrap();
+    let resumed_generation = frames
+        .iter()
+        .find_map(|frame| match frame {
+            NodeFrame::Brain { action, input, .. } if action == "scheduler_wake" => {
+                input["generation"].as_u64()
+            }
+            _ => None,
+        })
+        .expect("resume wake survived old acknowledgement");
+    for value in [json!(resumed_generation), generation] {
+        node.handle(NodeOperation::Brain {
+            execution: reference.clone(),
+            action: "scheduler_wake_ack".into(),
+            input: json!({"generation":value}),
+        })
+        .await;
+    }
     assert!(node.brain_frames().await.unwrap().is_empty());
     node.shutdown().await.unwrap();
 }

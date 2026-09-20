@@ -4,6 +4,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::{watch, Semaphore};
 use tokio_tungstenite::accept_async;
 
+#[path = "tests/heartbeat.rs"]
+mod heartbeat;
+
 struct Service {
     records: Vec<ExecutionIndex>,
     indexes_sampled: AtomicBool,

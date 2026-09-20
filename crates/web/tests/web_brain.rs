@@ -31,6 +31,7 @@ fn payload(summary: &str) -> serde_json::Value {
 async fn state() -> Arc<opencoder_web::AppState> {
     let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
     Arc::new(opencoder_web::AppState {
+        config_home: None,
         brain: opencoder_web::api_brain::mock_brain(store.clone()),
         store,
         workdir: std::env::temp_dir(),
@@ -48,6 +49,7 @@ async fn state() -> Arc<opencoder_web::AppState> {
 async fn degraded_state() -> Arc<opencoder_web::AppState> {
     let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
     Arc::new(opencoder_web::AppState {
+        config_home: None,
         brain: opencoder_web::api_brain::degraded_brain(store.clone()),
         store,
         workdir: std::env::temp_dir(),

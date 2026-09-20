@@ -136,6 +136,129 @@ class DeploymentTests(unittest.TestCase):
         self.assertIn("proxy_next_upstream off", configuration)
         self.assertIn("listen 127.0.0.1:18081", configuration)
 
+    def test_failed_rollback_standby_preserves_traffic_and_reuses_probe_on_retry(self):
+        deploy(self.settings, Path("bundle"), self.operations)
+        self.units_switch_ingress.reset_mock()
+        self.probes_candidate.side_effect = TimeoutError("legacy runtime busy")
+        with self.assertRaisesRegex(TimeoutError, "legacy runtime busy"):
+            rollback(self.settings, self.operations)
+        failed = Journal(self.settings.state_dir).data
+        self.assertEqual(failed["phase"], "failed")
+        self.assertEqual(failed["current"], "r2")
+        self.assertIsNone(failed["candidate"])
+        self.assertFalse(failed["rollback_switch_started"])
+        self.assertEqual(failed["failure"], "legacy runtime busy")
+        self.assertEqual(self.operations.active, "r2")
+        self.units_switch_ingress.assert_not_called()
+        self.probes_candidate.side_effect = None
+        result = rollback(self.settings, self.operations)
+        self.assertEqual(result["phase"], "rolled_back")
+        self.assertEqual(result["current"], "r1")
+        for key in ("server_unit", "host_unit", "probe_epoch"):
+            self.assertEqual(failed["releases"]["r1"][key], result["releases"]["r1"][key])
+
+    def test_failed_rollback_standby_allows_a_validated_forward_release(self):
+        deploy(self.settings, Path("bundle"), self.operations)
+        self.probes_candidate.side_effect = TimeoutError("legacy runtime busy")
+        with self.assertRaises(TimeoutError):
+            rollback(self.settings, self.operations)
+        self.probes_candidate.side_effect = None
+        self.manifest_verify.return_value = manifest("r3")
+        result = deploy(self.settings, Path("next-bundle"), self.operations)
+        self.assertEqual(result["current"], "r3")
+        self.assertEqual(result["previous"], "r2")
+        self.assertEqual(result["phase"], "complete")
+        self.assertIsNone(result["rollback_from"])
+        self.assertIsNone(result["rollback_switch_started"])
+
+    def test_same_release_retry_after_failed_rollback_retains_original_target(self):
+        deploy(self.settings, Path("bundle"), self.operations)
+        self.probes_candidate.side_effect = TimeoutError("legacy runtime busy")
+        with self.assertRaises(TimeoutError):
+            rollback(self.settings, self.operations)
+        self.probes_candidate.side_effect = None
+        result = deploy(self.settings, Path("bundle"), self.operations)
+        self.assertEqual(result["current"], "r2")
+        self.assertEqual(result["previous"], "r1")
+        self.assertEqual(result["phase"], "complete")
+        self.assertEqual(rollback(self.settings, self.operations)["current"], "r1")
+
+    def test_lost_activation_recovers_rollback_before_same_release_retry(self):
+        original = self.operations.http
+        def lose_activation_reply(base, path, *args, **kwargs):
+            result = original(base, path, *args, **kwargs)
+            if path == "/runtimes/r2/activate":
+                self.operations.http = original
+                raise TimeoutError("activation reply lost")
+            return result
+        self.operations.http = lose_activation_reply
+        self.probes_candidate.side_effect = ["node-one", TimeoutError("rollback standby busy")]
+        with self.assertRaisesRegex(TimeoutError, "rollback standby busy"):
+            deploy(self.settings, Path("bundle"), self.operations)
+        failed = Journal(self.settings.state_dir).data
+        self.assertEqual(failed["current"], "r2")
+        self.assertEqual(failed["previous"], "r1")
+        self.assertEqual(failed["phase"], "rolling_back")
+        self.assertEqual(failed["rollback_from_phase"], "switching")
+        self.assertFalse(failed["rollback_switch_started"])
+        self.units_switch_ingress.assert_not_called()
+        self.probes_candidate.side_effect = None
+        self.probes_candidate.return_value = "node-one"
+        recovered = deploy(self.settings, Path("bundle"), self.operations)
+        self.assertEqual(recovered["phase"], "rolled_back")
+        self.assertEqual(recovered["current"], "r1")
+        result = deploy(self.settings, Path("bundle"), self.operations)
+        self.assertEqual(result["current"], "r2")
+        self.assertEqual(result["previous"], "r1")
+        self.assertEqual(result["phase"], "complete")
+        self.assertEqual(result["releases"]["r2"]["runtime_unit"], failed["releases"]["r2"]["runtime_unit"])
+        self.assertEqual(rollback(self.settings, self.operations)["current"], "r1")
+
+    def test_interrupted_rollback_switch_cannot_be_treated_as_failed_standby(self):
+        deploy(self.settings, Path("bundle"), self.operations)
+        self.operations.crash = True
+        with self.assertRaises(PowerLoss):
+            rollback(self.settings, self.operations)
+        interrupted = Journal(self.settings.state_dir).data
+        self.assertEqual(interrupted["phase"], "rolling_back")
+        self.assertTrue(interrupted["rollback_switch_started"])
+        self.assertEqual(self.operations.active, "r1")
+        self.probes_candidate.side_effect = TimeoutError("retry not ready")
+        with self.assertRaises(TimeoutError):
+            rollback(self.settings, self.operations)
+        self.assertEqual(Journal(self.settings.state_dir).data["phase"], "rolling_back")
+        self.probes_candidate.side_effect = None
+        self.assertEqual(rollback(self.settings, self.operations)["phase"], "rolled_back")
+
+    def test_legacy_rollback_without_switch_checkpoint_stays_recoverable(self):
+        deploy(self.settings, Path("bundle"), self.operations)
+        journal = Journal(self.settings.state_dir)
+        journal.data.pop("rollback_switch_started", None)
+        journal.phase("rolling_back")
+        self.probes_candidate.side_effect = TimeoutError("legacy checkpoint unknown")
+        with self.assertRaises(TimeoutError):
+            rollback(self.settings, self.operations)
+        self.assertEqual(Journal(self.settings.state_dir).data["phase"], "rolling_back")
+
+    def test_failed_rollback_after_uncertain_activation_keeps_switch_recovery(self):
+        original = self.operations.http
+        def http(base, path, *args, **kwargs):
+            if path == "/runtimes/r2/activate":
+                raise TimeoutError("activation acknowledgement missing")
+            return original(base, path, *args, **kwargs)
+        self.operations.http = http
+        self.probes_candidate.side_effect = ["node-one", TimeoutError("rollback standby busy")]
+        with self.assertRaisesRegex(TimeoutError, "rollback standby busy"):
+            deploy(self.settings, Path("bundle"), self.operations)
+        result = Journal(self.settings.state_dir).data
+        self.assertEqual(self.operations.active, "r1")
+        self.assertEqual(result["current"], "r2", "journal contains switch intent, not confirmed ingress")
+        self.assertEqual(result["phase"], "rolling_back")
+        self.assertEqual(result["candidate"], "r2")
+        self.assertEqual(result["rollback_from_phase"], "switching")
+        self.assertFalse(result["rollback_switch_started"])
+        self.units_switch_ingress.assert_not_called()
+
     def test_republish_keeps_old_response_instances_and_retires_each_new_activation(self):
         endpoints = []
         original = self.operations.http

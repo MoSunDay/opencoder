@@ -203,7 +203,7 @@ pub(crate) async fn dispatch_slash_action(
             // itself rides the normal submit path — same contract as the SPA
             // `/agent` entry.
             *agent_menu = Some(crate::agent_menu::AgentMenu::new(
-                crate::agent_menu::available_primary_agents(),
+                crate::agent_menu::available_primary_agents_for(config),
             ));
         }
         SlashAction::Compact => match gate_compact(*running) {

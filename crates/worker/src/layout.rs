@@ -32,7 +32,7 @@ pub(crate) const ALL_KINDS: [ExecutionKind; 9] = [
 pub(crate) fn reserved_execution_entry(name: &str) -> bool {
     matches!(
         name,
-        "execution.json" | "migration.json" | "resources" | "team"
+        "execution.json" | "migration.json" | "resources" | "team" | "home" | "workspace"
     )
 }
 
@@ -82,6 +82,20 @@ impl DirectoryLayout {
 
     pub fn team_state_dir(&self, kind: ExecutionKind, id: &str) -> Result<PathBuf> {
         self.contained(self.execution_dir(kind, id)?.join("team"))
+    }
+
+    /// Per-execution private HOME for operator executions (see
+    /// `operations::operator_env`): tool subprocesses get `HOME` pointed
+    /// here so they never read/write the node daemon's own `~/.opencoder`.
+    pub fn home_dir(&self, kind: ExecutionKind, id: &str) -> Result<PathBuf> {
+        self.contained(self.execution_dir(kind, id)?.join("home"))
+    }
+
+    /// Per-execution private WORKSPACE for operator executions: the bash
+    /// cwd / session working directory, decoupled from the node workdir the
+    /// TUI-style sessions share.
+    pub fn workspace_dir(&self, kind: ExecutionKind, id: &str) -> Result<PathBuf> {
+        self.contained(self.execution_dir(kind, id)?.join("workspace"))
     }
 
     pub(crate) fn legacy_record_path(&self, id: &str) -> Result<PathBuf> {

@@ -114,9 +114,9 @@ fn agent_names(action: &ActionSpec) -> anyhow::Result<Vec<String>> {
                 .map_err(anyhow::Error::msg)?;
             spec.steps
                 .into_iter()
-                .filter_map(|s| match s.kind {
+                .filter_map(|s| match s.kind.executable() {
                     opencoder_dag::StepKind::Agent { agent, .. } => {
-                        Some(agent.unwrap_or_else(|| "act".into()))
+                        Some(agent.clone().unwrap_or_else(|| "act".into()))
                     }
                     _ => None,
                 })
@@ -126,14 +126,27 @@ fn agent_names(action: &ActionSpec) -> anyhow::Result<Vec<String>> {
     })
 }
 
-pub async fn save(
-    State(state): State<Arc<AppState>>,
-    Json(mut body): Json<PlanVersion>,
-) -> Response {
-    if let Err(error) = pin(&state, &mut body.plan).await {
-        return error_400(format!("{error:#}"));
+pub async fn save(State(state): State<Arc<AppState>>, Json(body): Json<Value>) -> Response {
+    let mut body: PlanVersion<Value> = match serde_json::from_value(body) {
+        Ok(body) => body,
+        Err(error) => return error_400(error.to_string()),
+    };
+    if body.plan["schema_version"] == 3 {
+        match validate_scheduler(&state, body.plan.clone()).await {
+            Ok(plan) => body.plan = json!(plan),
+            Err(error) => return error_400(error.to_string()),
+        }
+    } else {
+        let mut plan: OntologyPlan = match serde_json::from_value(body.plan) {
+            Ok(plan) => plan,
+            Err(error) => return error_400(error.to_string()),
+        };
+        if let Err(error) = pin(&state, &mut plan).await {
+            return error_400(format!("{error:#}"));
+        }
+        body.plan = json!(plan);
     }
-    match state.fleet.save_brain_plan(&body).await {
+    match state.fleet.save_brain_plan_document(&body).await {
         Ok(definition) => response(RpcReply::ok(
             json!({"definition":definition,"version":body}),
         )),
@@ -141,8 +154,22 @@ pub async fn save(
     }
 }
 
-pub async fn validate(Json(plan): Json<OntologyPlan>) -> Response {
-    match opencoder_brain::ontology::validate(&plan) {
+async fn validate_scheduler(state: &Arc<AppState>, value: Value) -> anyhow::Result<SchedulerPlan> {
+    let plan: SchedulerPlan = serde_json::from_value(value)?;
+    opencoder_brain::scheduler::validate_plan(&plan)?;
+    super::v3::catalog::available(state, &plan.request(Default::default())).await?;
+    Ok(plan)
+}
+
+pub async fn validate(State(state): State<Arc<AppState>>, Json(plan): Json<Value>) -> Response {
+    let result = if plan["schema_version"] == 3 {
+        validate_scheduler(&state, plan).await.map(|_| ())
+    } else {
+        serde_json::from_value::<OntologyPlan>(plan)
+            .map_err(anyhow::Error::from)
+            .and_then(|plan| opencoder_brain::ontology::validate(&plan))
+    };
+    match result {
         Ok(()) => response(RpcReply::ok(json!({"valid":true}))),
         Err(e) => error_400(e.to_string()),
     }
@@ -156,18 +183,34 @@ pub struct PlanQuery {
     pub to: Option<u64>,
 }
 pub async fn list(State(state): State<Arc<AppState>>, Query(query): Query<PlanQuery>) -> Response {
-    match state.fleet.definitions("brain_plan").await {
+    let result = async {
+        let mut definitions = state.fleet.definitions("brain_plan").await?;
+        for definition in &mut definitions {
+            if let (Some(id), Some(version)) = (
+                definition["id"].as_str(),
+                definition["latest_version"].as_u64(),
+            ) {
+                if let Some(plan) = state.fleet.brain_plan_document(id, version).await? {
+                    definition["schema_version"] = plan.plan["schema_version"].clone();
+                }
+            }
+        }
+        Ok::<_, anyhow::Error>(definitions)
+    }
+    .await;
+    match result {
         Ok(definitions) => response(RpcReply::ok(
             json!({"plans":definitions.into_iter().filter(|p|query.q.as_ref().is_none_or(|q|p.to_string().to_lowercase().contains(&q.to_lowercase()))).collect::<Vec<_>>()}),
         )),
         Err(e) => error_500(e.to_string()),
     }
 }
+
 pub async fn get(
     State(state): State<Arc<AppState>>,
     Path((id, version)): Path<(String, u64)>,
 ) -> Response {
-    match state.fleet.brain_plan_version(&id, version).await {
+    match state.fleet.brain_plan_document(&id, version).await {
         Ok(Some(p)) => response(RpcReply::ok(json!(p))),
         Ok(None) => response(RpcReply::error(404, "plan version not found")),
         Err(e) => error_500(e.to_string()),
@@ -178,7 +221,7 @@ pub async fn versions(
     Path(id): Path<String>,
     Query(query): Query<PlanQuery>,
 ) -> Response {
-    match state.fleet.brain_plan_versions(&id, query.before).await {
+    match state.fleet.brain_plan_documents(&id, query.before).await {
         Ok(versions) => response(RpcReply::ok(json!({"versions":versions}))),
         Err(e) => error_500(e.to_string()),
     }
@@ -191,8 +234,8 @@ pub async fn stable(
     let Some(version) = body["version"].as_u64() else {
         return error_400("version is required".into());
     };
-    match state.fleet.brain_plan_version(&id, version).await {
-        Ok(Some(p)) if p.plan.schema_version != 2 => {
+    match state.fleet.brain_plan_document(&id, version).await {
+        Ok(Some(p)) if p.plan["schema_version"] != 2 && p.plan["schema_version"] != 3 => {
             return response(RpcReply::error(409, opencoder_brain::graph::MIGRATION))
         }
         Ok(_) => {}
@@ -211,7 +254,7 @@ pub async fn diff(
     let result = async {
         let a = state
             .fleet
-            .brain_plan_version(
+            .brain_plan_document(
                 &id,
                 query.from.ok_or_else(|| anyhow::anyhow!("from required"))?,
             )
@@ -219,7 +262,7 @@ pub async fn diff(
             .ok_or_else(|| anyhow::anyhow!("from version not found"))?;
         let b = state
             .fleet
-            .brain_plan_version(&id, query.to.ok_or_else(|| anyhow::anyhow!("to required"))?)
+            .brain_plan_document(&id, query.to.ok_or_else(|| anyhow::anyhow!("to required"))?)
             .await?
             .ok_or_else(|| anyhow::anyhow!("to version not found"))?;
         let changes = diff_values(

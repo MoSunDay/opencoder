@@ -161,12 +161,18 @@ pub async fn activate(
 }
 
 struct LocalClient(opencoder_core::Config);
+
+#[cfg(test)]
+mod tests;
+
 impl opencoder_llm::ChatStream for LocalClient {
     fn chat_stream(
         &self,
         request: opencoder_llm::ChatRequest,
     ) -> Result<tokio::sync::mpsc::Receiver<opencoder_llm::LlmEvent>> {
         let endpoint = self.0.resolve_endpoint()?;
-        opencoder_llm::ChatClient::from_config(&self.0, &endpoint)?.chat_stream(request)
+        opencoder_llm::ChatClient::from_config(&self.0, &endpoint)?.chat_stream(
+            opencoder_brain::activation::configured_request(&self.0, request),
+        )
     }
 }

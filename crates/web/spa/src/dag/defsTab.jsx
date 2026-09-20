@@ -13,6 +13,8 @@ import { useStore } from '../store.js';
 import { newId, nodeOptions as buildNodeOptions } from '../fleet/model.js';
 import { DefEditor } from './defEditor.jsx';
 import { err } from '../notice.js';
+import { DynamicBatches } from './dynamic/batches.jsx';
+import { dispatchInput, inputNodes } from './dynamic/model.js';
 
 const { Text } = Typography;
 
@@ -28,6 +30,7 @@ export function DefsTab({ onNotice, onDispatched }) {
   const [dispatchNode, setDispatchNode] = useState(undefined);
   const [dispatching, setDispatching] = useState(false);
   const [search, setSearch] = useState('');
+  const [batches, setBatches] = useState({});
   const alive = useRef(true);
   const attempt = useRef(null);
 
@@ -92,13 +95,15 @@ export function DefsTab({ onNotice, onDispatched }) {
     if (!def) {
       return;
     }
-    const key = JSON.stringify([def.id, dispatchNode]);
+    let input;
+    try { input = dispatchInput(def.spec, batches); } catch (e) { msg.error(e.message); return; }
+    const key = JSON.stringify([def.id, dispatchNode, input]);
     if (attempt.current?.key !== key) attempt.current = { key, id: newId('dag') };
     setDispatching(true);
     try {
       const j = await apiPost(
         '/api/dag/defs/' + encodeURIComponent(def.id) + '/dispatch',
-        { id: attempt.current.id, ...(dispatchNode ? { node_id: dispatchNode } : {}) },
+        { id: attempt.current.id, ...(inputNodes(def.spec).length ? { input } : {}), ...(dispatchNode ? { node_id: dispatchNode } : {}) },
       );
       const runId = j && j.run_id ? j.run_id : '';
       if (onNotice) {
@@ -151,7 +156,7 @@ export function DefsTab({ onNotice, onDispatched }) {
             size="small"
             type="link"
             disabled={!!r.error}
-            onClick={() => { setDispatchNode(undefined); setDispatchFor(r); }}
+            onClick={() => { setDispatchNode(undefined); setBatches({}); setDispatchFor(r); }}
           >
             派发
           </Button>
@@ -247,6 +252,7 @@ export function DefsTab({ onNotice, onDispatched }) {
             options={dispatchNodeOptions}
             notFoundContent="暂无可用 DAG 节点"
           />
+          <DynamicBatches spec={dispatchFor?.spec} batches={batches} onChange={setBatches} />
         </Space>
       </Modal>
     </Space>

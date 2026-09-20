@@ -6,7 +6,6 @@ use serde_json::{json, Value};
 pub(super) use super::launch::{launch_locked, LaunchOutcome};
 
 pub(super) async fn create(worker: &Worker, mut assignment: Assignment) -> Result<RpcReply> {
-    let _gate = worker.inner.admission.lock().await;
     if let Err(error) = assignment.request.validate() {
         return Ok(RpcReply::error(400, error));
     }
@@ -34,32 +33,16 @@ pub(super) async fn create(worker: &Worker, mut assignment: Assignment) -> Resul
             "assignment ownership or kind mismatch",
         ));
     }
-    if let Some(existing) = worker
-        .inner
-        .journal
-        .lock()
-        .await
-        .records
-        .get(&assignment.index.id)
-        .cloned()
-    {
-        if assignment.request.kind == ExecutionKind::Project
-            && assignment.request.input.get("run_id").is_none()
-        {
-            assignment.request.input["run_id"] =
-                existing.assignment.request.input["run_id"].clone();
-        }
-        if existing.assignment.request != assignment.request {
-            return Ok(RpcReply::error(
-                409,
-                "execution id already accepted with different input",
-            ));
-        }
-        let mut body = json!(existing.assignment.index);
-        if assignment.request.kind == ExecutionKind::Project {
-            body["run_id"] = existing.assignment.request.input["run_id"].clone();
-        }
-        return Ok(RpcReply::ok(body));
+    // A durable acceptance is a read-only replay. It must not queue behind
+    // unrelated resource snapshots; otherwise a lost reply can never recover
+    // under sustained admission load.
+    if let Some(reply) = accepted_reply(worker, &mut assignment).await {
+        return Ok(reply);
+    }
+    let _gate = worker.inner.admission.lock().await;
+    // Another Create may have accepted this ID while we waited for the gate.
+    if let Some(reply) = accepted_reply(worker, &mut assignment).await {
+        return Ok(reply);
     }
     if let Some(error) = worker.admission_error() {
         return Ok(RpcReply::error(503, error));
@@ -176,6 +159,33 @@ pub(super) async fn create(worker: &Worker, mut assignment: Assignment) -> Resul
         body["run_id"] = json!(run.id);
     }
     Ok(RpcReply::ok(body))
+}
+
+async fn accepted_reply(worker: &Worker, assignment: &mut Assignment) -> Option<RpcReply> {
+    let existing = worker
+        .inner
+        .journal
+        .lock()
+        .await
+        .records
+        .get(&assignment.index.id)
+        .cloned()?;
+    if assignment.request.kind == ExecutionKind::Project
+        && assignment.request.input.get("run_id").is_none()
+    {
+        assignment.request.input["run_id"] = existing.assignment.request.input["run_id"].clone();
+    }
+    if existing.assignment.request != assignment.request {
+        return Some(RpcReply::error(
+            409,
+            "execution id already accepted with different input",
+        ));
+    }
+    let mut body = json!(existing.assignment.index);
+    if assignment.request.kind == ExecutionKind::Project {
+        body["run_id"] = existing.assignment.request.input["run_id"].clone();
+    }
+    Some(RpcReply::ok(body))
 }
 
 /// List agents used by an inline Project executor. Legacy brain modes fail admission.

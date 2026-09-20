@@ -19,23 +19,6 @@ pub struct Page {
 pub type Command = ExecutionCommand;
 
 pub async fn create(State(state): State<Arc<AppState>>, Json(value): Json<Value>) -> Response {
-    if let Some(id) = value.get("id").and_then(Value::as_str) {
-        match state.fleet.assignment(id).await {
-            Ok(Some(assignment)) => {
-                return response(if assignment.request.input["scheduler_intent"] == value {
-                    replay(&state, assignment.request).await
-                } else {
-                    RpcReply::error(409, "run id was already accepted with a different intent")
-                })
-            }
-            Ok(None) => {}
-            Err(error) => return error_500(error.to_string()),
-        }
-    }
-    let (request, capabilities) = match super::request::resolve(&state, &value).await {
-        Ok(request) => request,
-        Err(error) => return error_400(error.to_string()),
-    };
     let id = value
         .get("id")
         .and_then(Value::as_str)
@@ -51,6 +34,29 @@ pub async fn create(State(state): State<Arc<AppState>>, Json(value): Json<Value>
         Ok(lock) => lock,
         Err(error) => return error_500(error.to_string()),
     };
+    match state.fleet.assignment(&id).await {
+        Ok(Some(assignment)) => {
+            if assignment.request.kind != ExecutionKind::Brain
+                || assignment.request.input["scheduler_intent"] != value
+            {
+                return response(RpcReply::error(
+                    409,
+                    "run id was already claimed with a different intent",
+                ));
+            }
+            // A frozen assignment can still be unconfirmed. Reuse its exact
+            // request so the execution receipt, not the index, decides whether
+            // to replay acceptance or retry admission on the original node.
+            let reply = crate::api::executions::submit(&state, assignment.request).await;
+            return response(run_receipt(&id, reply));
+        }
+        Ok(None) => {}
+        Err(error) => return error_500(error.to_string()),
+    }
+    let (request, capabilities) = match super::request::resolve(&state, &value).await {
+        Ok(request) => request,
+        Err(error) => return error_400(error.to_string()),
+    };
     let fingerprint = opencoder_core::token_hash(&value.to_string());
     match state
         .fleet
@@ -59,19 +65,9 @@ pub async fn create(State(state): State<Arc<AppState>>, Json(value): Json<Value>
     {
         Ok(true) => {}
         Ok(false) => {
-            let assignment = match state.fleet.assignment(&id).await {
-                Ok(value) => value,
-                Err(error) => return error_500(error.to_string()),
-            };
-            let Some(assignment) = assignment else {
-                return response(RpcReply::error(409, "run id is still being prepared"));
-            };
-            if assignment.request.input["scheduler_intent"] == value {
-                return response(replay(&state, assignment.request).await);
-            }
             return response(RpcReply::error(
                 409,
-                "run id was already accepted with a different intent",
+                "run id was already claimed with a different intent",
             ));
         }
         Err(error) => return error_500(error.to_string()),
@@ -95,20 +91,10 @@ pub async fn create(State(state): State<Arc<AppState>>, Json(value): Json<Value>
         },
     )
     .await;
-    if reply.status >= 300 {
-        return response(reply);
-    }
-    response(RpcReply {
-        status: 202,
-        body: json!({"schema_version":3,"run_id":id,"execution":reply.body}),
-    })
+    response(run_receipt(&id, reply))
 }
 
-/// A frozen dispatch establishes ownership, not acceptance. Resolve retries
-/// through the durable receipt and its original node before reporting success.
-async fn replay(state: &Arc<AppState>, request: CreateExecution) -> RpcReply {
-    let id = request.id.clone();
-    let reply = crate::api::executions::submit(state, request).await;
+fn run_receipt(id: &str, reply: RpcReply) -> RpcReply {
     if reply.status >= 300 {
         return reply;
     }

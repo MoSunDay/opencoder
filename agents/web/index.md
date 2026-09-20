@@ -5,7 +5,7 @@ Commit: 7e71cbcfd669dd2cbaa5c94ab01945fd139557f0
 axum HTTP + SSE 会话管理 + 内嵌 SPA。
 
 ## 索引
-- `src/lib.rs` — `AppState` 装配
+- `src/lib.rs` — `AppState` 装配（`config_home`：Operator 执行 home，prompt/config 载入走 `Config::load_with_home`，drain 栈经 `DrainContext` 穿参）
 - `src/api.rs`、`src/api_*.rs` — 各域 HTTP API（prompt/events/agents/dag/todo/team/…）
 - `src/api_agents.rs`、`src/api_agent_resources.rs` — agent 目录/卡片与资源文件 API
 - `src/handle.rs`、`src/handle/drain.rs` — `SessionHandle` 与 drain 生命周期

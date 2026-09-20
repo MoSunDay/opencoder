@@ -252,7 +252,7 @@ async fn http(
     {
         return Ok(RpcReply::error(400, "invalid session operation"));
     }
-    let _gate = worker.inner.admission.lock().await;
+    let mut _gate = worker.inner.admission.clone().lock_owned().await;
     let (mut record, legacy) = {
         let journal = worker.inner.journal.lock().await;
         (journal.records.get(id).cloned(), journal.uses_legacy(id))
@@ -357,7 +357,7 @@ async fn http(
         // FIFO gives earlier pending work newly freed slots. Under LIFO this
         // newest follow-up has priority, just like a freshly enqueued task.
         if worker.inner.scheduling.get().queue_order == QueueOrder::Fifo {
-            super::queue::dispatch_locked(worker).await?;
+            _gate = super::queue::dispatch_owned(worker, _gate).await?;
         }
         if sandbox {
             // Sandbox prompt: stage the turn text into the durable input so

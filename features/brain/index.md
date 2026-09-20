@@ -1,4 +1,4 @@
-Commit: 896013049fe3bd0f3384c52e9638e3a7107aa6fc
+Commit: 2f6b202def6c5e75d1411143570784a1576b3407
 
 # 大脑调度工作台
 
@@ -15,6 +15,8 @@ Commit: 896013049fe3bd0f3384c52e9638e3a7107aa6fc
 创建 v3 运行时必须声明 `schema_version: 3`。每轮只能派发能力目录中有真实 target、definition、版本及输入/输出描述的能力；输入只能绑定根请求命名输入、成功执行的 `execution_id` 输出路径或已有产物引用。当前轮次全部成功终态才进入下一次判断；任一 Error/Cancelled 终态立即失败并取消兄弟执行。`Complete` 必须引用成功终态执行，非法决策、无证据完成和超过轮次上限会阻塞。
 
 运行快照只展示脑状态、轮次和 operation 索引。消息、DAG 步骤、Team 对话、TODO 项和产物正文通过执行 ID 在所属节点查询；重复、乱序或迟到终态事件不会重复推进或改写已终态运行。CLI 和 Web 提供事件页、轮次查询及 pause/resume/cancel。
+
+v3 Web 工作台先展示目标、阶段、当前轮次和结果的摘要画布，再按轮次展示关联能力索引。当前轮默认展开、历史轮次折叠；点击能力的 execution ID 打开只读执行抽屉，继续复用 Agent、Team、DAG、TODO、Operator 的执行组件，因此 DAG 步骤日志和其他执行明细仍从所属节点实时读取。
 
 ## 相关
 - [agents/brain](../../agents/brain/index.md) — 状态机与回归

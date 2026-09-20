@@ -55,7 +55,7 @@ function V3RunBody({ view, id, onNotice, events, connection, refresh }) {
   return <>
     {(commandError || view.error) && <Alert type="error" showIcon title={commandError || view.error} />}
     {run.error && <Alert type="error" showIcon title="运行阻塞或失败" description={run.error} />}
-    <div className="brain-run-header"><div><Typography.Title level={4}>{view.objective || run.run_id}</Typography.Title><Space wrap><Tag color={V3_COLORS[phase]}>{V3_PHASES[phase] || phase}</Tag><Tag>第 {currentRound(view)} 轮</Tag><Typography.Text type="secondary">{V3_CONNECTIONS[connection] || connection}</Typography.Text><TimeText ts={run.updated_at} /></Space></div>
+    <div className="brain-run-header"><div><Typography.Title level={4} ellipsis={{ rows: 2, expandable: true, symbol: '展开完整目标' }}>{view.objective || run.run_id}</Typography.Title><Space wrap><Tag color={V3_COLORS[phase]}>{V3_PHASES[phase] || phase}</Tag><Tag>第 {currentRound(view)} 轮</Tag><Typography.Text type="secondary">{V3_CONNECTIONS[connection] || connection}</Typography.Text><TimeText ts={run.updated_at} /></Space></div>
       <Space><Button disabled={busy || terminalV3(view)} onClick={() => command(phase === 'paused' ? 'resume' : 'pause')}>{phase === 'paused' ? '继续调度' : '暂停调度'}</Button><Button danger disabled={busy || terminalV3(view)} onClick={() => command('cancel')}>取消调度</Button></Space></div>
     <SummaryCanvas view={view} />
     <section className="brain-rounds"><Space className="brain-rounds-heading" wrap><Typography.Title level={5}>调度轮次与能力执行</Typography.Title><Typography.Text type="secondary">点击 execution ID 查看节点执行面板</Typography.Text></Space><RoundsPanel view={view} onOpen={setOperation} /></section>

@@ -2543,6 +2543,7 @@ dependencies = [
  "async-trait",
  "axum",
  "chrono",
+ "dirs",
  "futures",
  "libc",
  "opencoder-agents",

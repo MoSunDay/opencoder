@@ -25,13 +25,9 @@ fn menu_for(query: &str) -> Option<CommandMenu> {
     Some(cm)
 }
 
-/// Build a CommandMenu with query "act" and navigate past /compact (which
-/// also matches "act" since "comp**act**") to select /act specifically.
+/// Typing the complete command selects /act without navigating other matches.
 fn menu_for_act() -> Option<CommandMenu> {
-    let mut cm = CommandMenu::new();
-    cm.paste("act"); // rows: [/compact, /act]
-    cm.move_down(); // select /act (2nd match)
-    Some(cm)
+    menu_for("act")
 }
 
 fn enter_key() -> KeyEvent {

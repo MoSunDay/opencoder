@@ -46,6 +46,15 @@ pub fn available_primary_agents() -> Vec<AgentCard> {
         .collect()
 }
 
+/// Use the same configured resource root as the session that applies a pick.
+/// The scope is local to this catalog read and never changes another session.
+pub fn available_primary_agents_for(config: &opencoder_core::Config) -> Vec<AgentCard> {
+    opencoder_core::agent::scope::with_root_sync(
+        config.agent.agents_dir.clone(),
+        available_primary_agents,
+    )
+}
+
 /// The composer text a pick produces: the runner's `/agent <name>` control
 /// head with a trailing space (args may follow as a compound prompt).
 pub fn pick_token(name: &str) -> String {

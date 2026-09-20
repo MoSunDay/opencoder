@@ -71,6 +71,10 @@ async fn synchronous_preparation_releases_the_only_async_worker() {
 
 #[tokio::test]
 async fn new_wasi_admission_and_freeze_bypass_cold_resource_waiters() {
+    // All resource permits stay held until both operations finish, so the
+    // ordering proves bypass. The deadline only detects a deadlock; durable
+    // filesystem work on a busy runner need not satisfy a one-second SLO.
+    let deadline = Duration::from_secs(10);
     let root = tempfile::tempdir().unwrap();
     let _home = opencoder_core::config::scoped_config_home(root.path().join("home"));
     let worker = open(root.path()).await;
@@ -84,7 +88,7 @@ async fn new_wasi_admission_and_freeze_bypass_cold_resource_waiters() {
         .unwrap();
     let waiting = worker.clone();
     let task = tokio::spawn(async move { create(&waiting, cold).await });
-    tokio::time::timeout(Duration::from_secs(1), async {
+    tokio::time::timeout(deadline, async {
         while lifecycle.try_lock().is_ok() {
             tokio::task::yield_now().await;
         }
@@ -102,7 +106,7 @@ async fn new_wasi_admission_and_freeze_bypass_cold_resource_waiters() {
     let mut wasm = assignment(&worker, "dag-quick", ExecutionKind::Dag);
     wasm.definition = Some(json!({"name":"quick","steps":[{"name":"execute",
         "kind":{"type":"wasm","command":"quick.wasm"}}]}));
-    let reply = tokio::time::timeout(Duration::from_secs(1), create(&worker, wasm))
+    let reply = tokio::time::timeout(deadline, create(&worker, wasm))
         .await
         .expect("WASI admission waited for unrelated resource capacity")
         .unwrap();
@@ -111,7 +115,7 @@ async fn new_wasi_admission_and_freeze_bypass_cold_resource_waiters() {
         .path()
         .join("node/dag/dag-quick/execution.json")
         .is_file());
-    tokio::time::timeout(Duration::from_secs(1), worker.freeze_admission())
+    tokio::time::timeout(deadline, worker.freeze_admission())
         .await
         .unwrap()
         .unwrap();

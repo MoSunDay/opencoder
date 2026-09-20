@@ -151,7 +151,7 @@ async fn interrupted_preparation_recovers_its_original_request_after_restart() {
             0o600
         );
     }
-    worker.inner.stopping.cancel();
+    worker.shutdown().await.unwrap();
     drop(worker);
     let restarted = open(root.path()).await;
     let mut conflict = original.clone();
@@ -202,7 +202,7 @@ async fn project_preparation_advances_only_after_explicit_rejection() {
         409
     );
     super::preparation::reject_project(&worker, &first).unwrap();
-    worker.inner.stopping.cancel();
+    worker.shutdown().await.unwrap();
     drop(worker);
     let restarted = open(root.path()).await;
     let accepted = super::preparation::begin(&restarted, next.clone())

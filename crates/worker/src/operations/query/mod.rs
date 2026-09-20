@@ -1,5 +1,5 @@
 mod chunks;
-mod dag_step_events;
+pub(super) mod dag_step_events;
 mod dag_steps;
 mod inspect;
 mod pages;
@@ -275,3 +275,5 @@ pub(super) async fn events(
     }
     Ok(RpcReply::ok(body))
 }
+
+pub(super) mod instances;

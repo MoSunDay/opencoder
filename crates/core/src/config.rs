@@ -366,12 +366,25 @@ impl Config {
     }
 
     pub fn load(working_dir: &Path) -> Result<Config> {
+        Self::load_with_home(working_dir, None)
+    }
+
+    /// [`Config::load`] with the GLOBAL config home redirected to `home`:
+    /// the `~/.opencoder` candidates and the global domain files
+    /// (`mcp.json` / `cli.json` / ...) resolve inside `home`, while the
+    /// project candidates still resolve against `working_dir`. Env overlays
+    /// (`apply_env`) keep applying — isolation is about files, not env.
+    ///
+    /// Operator execution isolation uses this so a session's config
+    /// reloads reproduce the execution's frozen snapshot instead of the
+    /// node daemon user's live `~/.opencoder`.
+    pub fn load_with_home(working_dir: &Path, home: Option<&Path>) -> Result<Config> {
         let mut cfg = Config::default();
         // Merge ALL existing candidates, least-specific first so project files
         // override the global base (matches opencoder). This lets ~/.opencoder
         // provide the provider+key while a project opencoder.json overrides only
         // the model — `opencoder` then runs directly from any directory.
-        let mut candidates = env::config_candidates(working_dir);
+        let mut candidates = env::candidates_with_home(working_dir, home);
         candidates.reverse(); // global first, project last (wins)
         for p in candidates {
             if p.exists() {
@@ -406,7 +419,7 @@ impl Config {
         // it exists, else the global one (project shadows global entirely;
         // no per-key merge across files).
         for (key, _) in domain::DOMAIN_FILES {
-            if let Some(v) = domain::read_effective(working_dir, key) {
+            if let Some(v) = domain::read_effective_with_home(working_dir, key, home) {
                 domain::apply_domain(&mut cfg, key, &v);
             }
         }

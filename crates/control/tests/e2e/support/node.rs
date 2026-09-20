@@ -465,6 +465,36 @@ impl NodeService for MockNode {
                 .get(&execution.id)
                 .cloned()
                 .unwrap_or_else(|| miss404("team execution not found")),
+            NodeOperation::DagInstances {
+                execution,
+                step,
+                index,
+                offset,
+                limit,
+            } => RpcReply::ok(json!({
+                "run_id":execution.id, "step":step, "index":index, "offset":offset, "limit":limit, "instances":[]
+            })),
+            NodeOperation::DagInstanceEvents {
+                execution,
+                step,
+                index,
+                after,
+            } => {
+                let key = (execution.id, format!("{step}/instances/{index}"));
+                if let Some(reply) = t.step_events_status.get(&key) {
+                    return reply.clone();
+                }
+                let (rows, finished, more) =
+                    t.step_events
+                        .get(&key)
+                        .cloned()
+                        .unwrap_or((Vec::new(), true, false));
+                let rows: Vec<_> = rows
+                    .into_iter()
+                    .filter(|r| r["seq"].as_i64().unwrap_or(0) > after)
+                    .collect();
+                RpcReply::ok(json!({"events":rows,"finished":finished,"more":more,"head_seq":0}))
+            }
             NodeOperation::DagSteps { .. } => miss404("dag execution not found"),
             NodeOperation::DagStepEvents {
                 execution,

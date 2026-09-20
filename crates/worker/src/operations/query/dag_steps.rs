@@ -89,6 +89,8 @@ pub(in crate::operations) async fn dag_steps(
                 "output": bounded_value_ref(&output, "output"),
                 "head_seq": snapshot.head_seq,
             });
+            let progress = super::instances::summary(&root, &execution.id, &step).await?;
+            body["instances"] = progress["instances"].clone();
             if let Some(session_id) = session_id {
                 body["session_id"] = json!(session_id);
             }
@@ -99,12 +101,16 @@ pub(in crate::operations) async fn dag_steps(
             let mut statuses = Vec::with_capacity(names.len());
             for name in &names {
                 let meta = step_meta(&root, &execution.id, name).await?;
-                rows.push(projection::project(
+                let mut row = projection::project(
                     name,
                     &meta,
                     events.get(name.as_str()).copied(),
                     execution_status,
-                ));
+                );
+                let progress = super::instances::summary(&root, &execution.id, name).await?;
+                row["instances"] = progress["instances"].clone();
+                row["instances_at_ms"] = progress["at_ms"].clone();
+                rows.push(row);
             }
             statuses.extend(rows.iter().map(|row| row["status"].as_str().unwrap()));
             let (done, error, cancelled, pending) = count_statuses(&statuses);
@@ -130,6 +136,7 @@ pub(in crate::operations) async fn dag_steps(
 /// Shared with `dag_step_events`, which reports the same projection.
 pub(in crate::operations) fn outcome_status(meta: &Value) -> &'static str {
     match meta["outcome"].as_str() {
+        Some("running") => "running",
         Some("done") => "done",
         Some("error") => "error",
         Some("cancelled") => "cancelled",
@@ -159,14 +166,24 @@ pub(in crate::operations) async fn step_meta(
     run_id: &str,
     name: &str,
 ) -> Result<Value> {
-    let dir = opencoder_dag::artifacts::step_dir(root, run_id, name).map_err(anyhow::Error::msg)?;
+    execution_meta(root, run_id, name, None).await
+}
+
+pub(in crate::operations) async fn execution_meta(
+    root: &Path,
+    run_id: &str,
+    name: &str,
+    index: Option<usize>,
+) -> Result<Value> {
+    let dir = opencoder_dag::artifacts::execution_dir(root, run_id, name, index)
+        .map_err(anyhow::Error::msg)?;
     match tokio::fs::read(dir.join("meta.json")).await {
         Ok(bytes) => {
             let value: Value = serde_json::from_slice(&bytes)?;
             anyhow::ensure!(
                 matches!(
                     value["outcome"].as_str(),
-                    Some("done" | "error" | "cancelled")
+                Some("pending" | "running" | "done" | "error" | "cancelled")
                 ),
                 "unknown DAG step outcome"
             );
@@ -186,7 +203,18 @@ pub(in crate::operations) async fn step_session_id(
     name: &str,
     meta: &Value,
 ) -> Result<Option<String>> {
-    let dir = opencoder_dag::artifacts::step_dir(root, run_id, name).map_err(anyhow::Error::msg)?;
+    execution_session_id(root, run_id, name, None, meta).await
+}
+
+pub(in crate::operations) async fn execution_session_id(
+    root: &Path,
+    run_id: &str,
+    name: &str,
+    index: Option<usize>,
+    meta: &Value,
+) -> Result<Option<String>> {
+    let dir = opencoder_dag::artifacts::execution_dir(root, run_id, name, index)
+        .map_err(anyhow::Error::msg)?;
     match tokio::fs::read(dir.join("session.json")).await {
         // A torn write is transient: fall back to the committed receipt.
         Ok(bytes) => {

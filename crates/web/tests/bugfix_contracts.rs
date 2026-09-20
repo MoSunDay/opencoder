@@ -35,6 +35,7 @@ async fn state() -> Arc<opencoder_web::AppState> {
 /// AppState backed by a custom store (for the failing-store regression).
 async fn state_with_store(store: Arc<dyn Store>) -> Arc<opencoder_web::AppState> {
     Arc::new(opencoder_web::AppState {
+                config_home: None,
         client_override: None,
         brain: opencoder_web::api_brain::mock_brain(store.clone()),
         store,

@@ -62,6 +62,11 @@ pub use opencoder_project::ProjectService;
 pub struct AppState {
     pub store: Arc<dyn Store>,
     pub workdir: std::path::PathBuf,
+    /// Per-execution config home redirect (operator isolation): sessions
+    /// belonging to an operator execution reload their config from this
+    /// frozen snapshot instead of the daemon user's live `~/.opencoder`.
+    /// `None` = default discovery (TUI, web frontend, non-operator kinds).
+    pub config_home: Option<std::path::PathBuf>,
     pub handles: HandleMap,
     /// Broadcast hub for node-task sessions (they own no drain handle).
     pub nodes: Arc<NodeHub>,
@@ -176,6 +181,7 @@ pub async fn serve(
     let state = Arc::new(AppState {
         store,
         workdir: workdir.clone(),
+        config_home: None,
         handles: handle::new_handle_map(),
         nodes: Arc::new(NodeHub::new()),
         controls: Arc::new(ControlHub::new()),
@@ -625,6 +631,7 @@ mod tests {
             brain: crate::api_brain::mock_brain(store.clone()),
             store,
             workdir: std::env::temp_dir(),
+            config_home: None,
             handles: handle::new_handle_map(),
             nodes: Arc::new(crate::nodes_state::NodeHub::new()),
             controls: Arc::new(crate::control_state::ControlHub::new()),
@@ -641,6 +648,7 @@ mod tests {
             brain: crate::api_brain::mock_brain(store.clone()),
             store,
             workdir: std::env::temp_dir(),
+            config_home: None,
             handles: handle::new_handle_map(),
             nodes: Arc::new(crate::nodes_state::NodeHub::new()),
             controls: Arc::new(crate::control_state::ControlHub::new()),

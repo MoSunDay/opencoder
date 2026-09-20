@@ -66,6 +66,23 @@ pub fn step_dir(workflow_root: &Path, run_id: &str, step: &str) -> Result<PathBu
     Ok(run_root(workflow_root, run_id)?.join(step))
 }
 
+/// Validated path for an execution instance; logical step slugs remain unchanged.
+pub fn execution_dir(
+    root: &Path,
+    run: &str,
+    step: &str,
+    index: Option<usize>,
+) -> Result<PathBuf, String> {
+    let dir = step_dir(root, run, step)?;
+    match index {
+        Some(i) if i < crate::dynamic::MAX_INSTANCES => {
+            Ok(dir.join("instances").join(i.to_string()))
+        }
+        Some(_) => Err("instance index exceeds limit".into()),
+        None => Ok(dir),
+    }
+}
+
 /// The runc sandbox mounts THIS directory at `/workspace/context` (rw) with
 /// the container rootfs readonly: step code reads upstream outputs at
 /// `/workspace/context/<upstream>/output.json` and writes its own to

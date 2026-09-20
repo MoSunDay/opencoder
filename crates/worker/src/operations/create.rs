@@ -89,10 +89,11 @@ pub(super) async fn create(worker: &Worker, mut assignment: Assignment) -> Resul
     let config = match preparation::blocking(|| prepare(worker, &assignment, false)) {
         Ok(config) => config,
         Err(error) => {
+            preparation::reject_project(worker, &assignment)?;
             return Ok(RpcReply::error(
                 400,
                 format!("execution preflight: {error:#}"),
-            ))
+            ));
         }
     };
     // Fresh creations of operator executions materialize the per-execution
@@ -132,7 +133,13 @@ pub(super) async fn create(worker: &Worker, mut assignment: Assignment) -> Resul
         .await
         {
             Ok(run) => Some(run),
-            Err(error) => return Ok(super::project_admission::error_reply(error)),
+            Err(error) => {
+                let reply = super::project_admission::error_reply(error);
+                if reply.status == 409 {
+                    preparation::reject_project(worker, &assignment)?;
+                }
+                return Ok(reply);
+            }
         }
     } else {
         None

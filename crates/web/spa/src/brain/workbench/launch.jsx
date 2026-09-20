@@ -1,44 +1,45 @@
-import { Alert, Button, Form, Input, Select, Segmented, Space, Typography } from 'antd';
-import { useRef, useState } from 'react';
-import { apiPost } from '../../api.js';
+import { Alert, Button, Form, Input, Select, Space, Spin, Typography } from 'antd';
+import { useEffect, useRef, useState } from 'react';
+import { apiGet, apiPost } from '../../api.js';
 import { useNodes } from '../../fleet/useNodes.js';
 import { explicitNodeOptions, newId } from '../../fleet/model.js';
-import { launchBody } from './model.js';
-export function Launch({ plans, onCreated, initialPlan }) {
+import { CapabilityPicker, EngineeringFields } from './scheduler/fields.jsx';
+import { inputRows, launchBody } from './scheduler/model.js';
+import { SummaryCanvas } from './summaryCanvas.jsx';
+
+export function Launch({ capabilities = [], onCreated, initialPlan }) {
   const { nodes, error: nodeError } = useNodes(); const [form] = Form.useForm();
-  const [mode, setMode] = useState(initialPlan ? 'fixed' : 'dynamic'); const [error, setError] = useState(''); const [busy, setBusy] = useState(false); const attempt = useRef(null);
-  const options = plans.map((p) => ({ value: `${p.id}@${p.latest_version}`, label: `${p.title} · v${p.latest_version}${p.stable_version === p.latest_version ? ' · 稳定' : ' · 草稿'}` }));
-  if (initialPlan && !options.some((option) => option.value === initialPlan)) options.push({ value: initialPlan, label: initialPlan });
+  const [plan, setPlan] = useState(null); const [error, setError] = useState(''); const [busy, setBusy] = useState(false); const attempt = useRef(null);
+  const [loading, setLoading] = useState(!!initialPlan);
+  useEffect(() => {
+    if (!initialPlan) return;
+    let alive = true; const split = initialPlan.lastIndexOf('@');
+    apiGet(`/api/brain/plan-defs/${encodeURIComponent(initialPlan.slice(0, split))}/versions/${initialPlan.slice(split + 1)}`).then((value) => {
+      if (!alive) return;
+      if (value.plan.schema_version !== 3) throw new Error('历史计划只读，请创建新的调度计划');
+      setPlan(value); form.setFieldsValue({ engineering: inputRows(value.plan.inputs) });
+    }).catch((error) => { if (alive) setError(error.message); }).finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+  }, [initialPlan, form]);
   const submit = async (values) => {
-    if (busy) return; setBusy(true); setError('');
+    if (busy || (initialPlan && !plan)) return; setBusy(true); setError('');
     try {
-      const body = launchBody({ ...values, mode }, ''); const signature = JSON.stringify(body);
+      const body = launchBody(values, '', plan); const signature = JSON.stringify(body);
       if (attempt.current?.signature !== signature) attempt.current = { signature, id: newId('brain') };
-      const index = await apiPost('/api/brain/runs', { ...body, id: attempt.current.id });
-      if (!index.id) throw new Error('未收到运行回执'); attempt.current = null; onCreated(index.id);
-    } catch (e) { setError(e.message); } finally { setBusy(false); }
+      const receipt = await apiPost('/api/brain/runs', { ...body, id: attempt.current.id });
+      if (!receipt.run_id) throw new Error('未收到运行回执');
+      attempt.current = null; onCreated(receipt.run_id);
+    } catch (error) { setError(error.message); } finally { setBusy(false); }
   };
-  return <div className="brain-launch"><Typography.Title level={4}>让大脑组织这次执行</Typography.Title>
-    <Typography.Paragraph type="secondary">明确目标与交付物，大脑连接现有能力，展开可并行的步骤。</Typography.Paragraph>
+  return <div className="brain-launch"><Typography.Title level={4}>{plan?.plan.title || '开始大脑调度'}</Typography.Title>
     {(error || nodeError) && <Alert type="error" showIcon title={error || nodeError} />}
-    <Form form={form} layout="vertical" onFinish={submit} initialValues={{ engineering: [], plan: initialPlan }} disabled={busy}>
-      <Form.Item label="执行方式"><Segmented value={mode} onChange={setMode} options={[{ value: 'dynamic', label: '动态规划' }, { value: 'fixed', label: '固定计划' }]} /></Form.Item>
-      <Typography.Paragraph type="secondary">{mode === 'dynamic' ? '参考能力库和已有计划，一次生成完整计划，校验后自动执行。' : '直接执行指定计划版本，保留完整版本与运行记录。'}</Typography.Paragraph>
-      {mode === 'fixed' ? <Form.Item name="plan" label="计划版本" rules={[{ required: true, message: '请选择计划版本' }]}><Select showSearch optionFilterProp="label" options={options} placeholder="明确选择一个版本" /></Form.Item>
-        : <Form.Item name="references" label="参考已有计划（可选）"><Select mode="multiple" options={options} placeholder="用于规划参考" /></Form.Item>}
-      <Form.Item name="objective" label="目标和交付物" rules={[{ required: true, whitespace: true, message: '请输入目标和交付物' }]}><Input.TextArea rows={4} placeholder="希望完成什么？哪些结果能证明任务完成？" /></Form.Item>
-      <Form.Item name="node" label="大脑所在节点" rules={[{ required: true, message: '请选择节点' }]}><Select options={explicitNodeOptions(nodes, 'brain')} placeholder="选择持久保存本次运行的节点" /></Form.Item>
-      <Form.Item label="工程描述（可选）" tooltip="以一层 KV 对组织工程参数，键为计划声明的输入端口名，值支持 JSON；留空则运行中按需询问。">
-        <Form.List name="engineering">{(fields, { add, remove }) => <>
-          {fields.map((field) => <div key={field.key} style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-            <Form.Item name={[field.name, 'key']} style={{ flex: 1, marginBottom: 0 }}><Input aria-label="工程参数名" placeholder="参数名" /></Form.Item>
-            <Form.Item name={[field.name, 'value']} style={{ flex: 2, marginBottom: 0 }}><Input.TextArea autoSize={{ minRows: 1, maxRows: 5 }} aria-label="工程参数值" placeholder="JSON 值" /></Form.Item>
-            <Button type="text" danger onClick={() => remove(field.name)}>移除</Button>
-          </div>)}
-          <Button type="dashed" onClick={() => add({ key: '', value: '' })}>添加工程参数</Button>
-        </>}</Form.List>
-      </Form.Item>
-      <Space><Button type="primary" htmlType="submit" loading={busy}>{mode === 'dynamic' ? '规划并执行' : '执行指定版本'}</Button></Space>
-    </Form>
+    {loading ? <Spin /> : <Form form={form} layout="vertical" onFinish={submit} initialValues={{ engineering: [], capability_ids: [] }} disabled={busy}>
+      {plan ? <><Typography.Paragraph>{plan.plan.objective}</Typography.Paragraph><SummaryCanvas view={{ ...plan.plan, capabilities: capabilities.filter((cap) => plan.plan.capability_ids.includes(cap.id)) }} /><Typography.Paragraph type="secondary">使用计划 v{plan.version} 的能力范围；本次工程输入可以调整。</Typography.Paragraph></>
+        : <><Form.Item name="objective" label="目标和交付物" rules={[{ required: true, whitespace: true, message: '请输入目标和交付物' }]}><Input.TextArea rows={3} /></Form.Item>
+          <Form.Item name="capability_ids" label="关联能力库" rules={[{ type: 'array', min: 1, required: true, message: '请至少选择一项能力' }]}><CapabilityPicker capabilities={capabilities} /></Form.Item></>}
+      <Form.Item name="node" label="大脑所在节点" rules={[{ required: true, message: '请选择节点' }]}><Select options={explicitNodeOptions(nodes, 'brain')} placeholder="选择执行节点" /></Form.Item>
+      <EngineeringFields />
+      <Space><Button type="primary" htmlType="submit" loading={busy} disabled={!!initialPlan && !plan}>开始执行</Button></Space>
+    </Form>}
   </div>;
 }

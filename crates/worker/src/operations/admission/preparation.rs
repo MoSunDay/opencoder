@@ -7,6 +7,19 @@ use std::{fs, io::Write, path::Path};
 
 const FILE: &str = "pending-create.json";
 
+/// Hand off the async worker while preserving task-local resource roots and
+/// thread-local configuration isolation on the thread doing synchronous I/O.
+/// Single-threaded callers are used by in-memory unit tests only.
+pub(in crate::operations) fn blocking<T>(work: impl FnOnce() -> T) -> T {
+    if tokio::runtime::Handle::try_current()
+        .is_ok_and(|runtime| runtime.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread)
+    {
+        tokio::task::block_in_place(work)
+    } else {
+        work()
+    }
+}
+
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PendingCreate {

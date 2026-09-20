@@ -8,11 +8,14 @@
 //! thin reference card per agent: `<agent>/meta.json` naming pool
 //! resources by *name* ([`AgentRefs`]). An agent directory holds ONLY its
 //! `meta.json`; two agents referencing the same prompt share it, and
-//! bumping the pool's `current` version updates both. Read paths degrade
-//! silently (blank name, corrupt `meta.json` → `None` / empty lists). The
-//! agents root is resolved per call, never created.
+//! bumping the pool's `current` version updates both. A card also pins a
+//! [`RunMode`]: `operator` (default) keeps the host-process session
+//! runtime, `agent` confines each turn to a read-only runc sandbox. Read
+//! paths degrade silently (blank name, corrupt `meta.json` → `None` /
+//! empty lists). The agents root is resolved per call, never created.
 
 use std::path::PathBuf;
+use std::str::FromStr;
 use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
@@ -30,6 +33,40 @@ pub use super::resource::{
 /// Agent/resource name length cap (keeps paths and TUI rows sane).
 pub(crate) const MAX_NAME_LEN: usize = 48;
 
+/// Where a session scheduled with a card runs, modeled on
+/// [`crate::harness::Harness`]. `Operator` (default) keeps the
+/// host-process session runtime; `Agent` confines each turn to a
+/// read-only runc sandbox (the DAG agent-step mechanism).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RunMode {
+    #[default]
+    Operator,
+    Agent,
+}
+
+impl RunMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Operator => "operator",
+            Self::Agent => "agent",
+        }
+    }
+}
+
+impl FromStr for RunMode {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "operator" => Ok(Self::Operator),
+            "agent" => Ok(Self::Agent),
+            _ => Err(format!(
+                "unknown run mode '{s}'; expected operator or agent"
+            )),
+        }
+    }
+}
+
 /// `meta.json` for one agent — a reference card. Every field defaults so
 /// partial metas parse: a newer writer adding keys must not brick older
 /// readers. The card references shared pool resources by name
@@ -40,6 +77,11 @@ pub struct AgentMeta {
     pub harness_profile: Option<String>,
     #[serde(default)]
     pub harness: crate::harness::Harness,
+    /// Where sessions scheduled with this agent run: `Operator` keeps the
+    /// host-process session runtime (status quo); `Agent` confines each turn
+    /// to a read-only runc sandbox (the DAG agent-step mechanism).
+    #[serde(default)]
+    pub run_mode: RunMode,
     #[serde(default)]
     pub name: String,
     #[serde(default)]
@@ -76,7 +118,8 @@ pub struct AgentRefs {
 pub struct AgentHistoryEntry {
     #[serde(default)]
     pub at: String,
-    /// One of `prompt` | `skills` | `tools` | `memory`.
+    /// One of `prompt` | `skills` | `tools` | `memory` | `harness` |
+    /// `harness_profile` | `run_mode`.
     #[serde(default)]
     pub field: String,
     #[serde(default)]

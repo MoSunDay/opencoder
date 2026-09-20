@@ -11,6 +11,7 @@ import { Alert, Button, Form, Input, InputNumber, Popconfirm, Select, Typography
 import { useEffect, useState } from 'react';
 import { MONO_VAR } from '../../ui/mono.js';
 import { changeStepKind, renameStep } from './canvasModel.js';
+import { SourceFields } from '../dynamic/sourceFields.jsx';
 
 const { Text } = Typography;
 const { TextArea } = Input;
@@ -18,6 +19,7 @@ const { TextArea } = Input;
 const KIND_OPTIONS = [
   { value: 'agent', label: 'Agent 步骤' },
   { value: 'wasm', label: 'Wasm 步骤' },
+  { value: 'dynamic', label: '动态步骤' },
 ];
 const SANDBOX_OPTIONS = [
   { value: 'in_process', label: '内嵌 VM (in_process)' },
@@ -50,8 +52,13 @@ export function StepInspector({ step, allNames, problemList, onChange, onRename,
   if (!step || typeof step !== 'object') {
     return null;
   }
-  const kind = step.kind || {};
+  const dynamic = step.kind?.type === 'dynamic';
+  const kind = (dynamic ? step.kind.template : step.kind) || {};
   const kindType = kind.type || '';
+  const updateField = (key, value) => {
+    const next = withKindField({ ...step, kind }, key, value);
+    onChange(dynamic ? { ...step, kind: { ...step.kind, template: next.kind } } : next);
+  };
   const stepName = typeof step.name === 'string' ? step.name : '';
   const problems = Array.isArray(problemList) ? problemList : [];
   return (
@@ -75,42 +82,43 @@ export function StepInspector({ step, allNames, problemList, onChange, onRename,
         <Form.Item label="类型">
           <Select
             options={KIND_OPTIONS}
-            value={kindType}
+            value={step.kind?.type}
             onChange={(v) => onChange(changeStepKind(step, v))}
           />
         </Form.Item>
+        {dynamic && <SourceFields step={step} allNames={allNames} onChange={onChange} />}
         {kindType === 'agent' ? (
           <>
             <Form.Item label="提示词 (prompt)">
               <TextArea
                 rows={3}
                 value={kind.prompt || ''}
-                onChange={(e) => onChange(withKindField(step, 'prompt', e.target.value))}
+                onChange={(e) => updateField('prompt', e.target.value)}
               />
             </Form.Item>
             <Form.Item label="Agent 名">
               <Input
                 placeholder="可选：自定义 agent 名"
                 value={kind.agent || ''}
-                onChange={(e) => onChange(withKindField(step, 'agent', e.target.value))}
+                onChange={(e) => updateField('agent', e.target.value)}
               />
             </Form.Item>
             <Form.Item label="模型覆盖">
               <Input
                 placeholder="可选：模型覆盖"
                 value={kind.model || ''}
-                onChange={(e) => onChange(withKindField(step, 'model', e.target.value))}
+                onChange={(e) => updateField('model', e.target.value)}
               />
             </Form.Item>
             <Form.Item
               label="经验追加 (how_append)"
-              extra={'可选：步骤成功后追加到该 agent 共享池 how.md（≤8KB）'}
+              extra={'可选：执行前追加到本次 how.md 副本（≤8KB）'}
             >
               <TextArea
                 rows={2}
-                placeholder="可选：成功后追加到 how.md 的经验片段"
+                placeholder="可选：追加到本次 how.md 的文本"
                 value={kind.how_append || ''}
-                onChange={(e) => onChange(withKindField(step, 'how_append', e.target.value))}
+                onChange={(e) => updateField('how_append', e.target.value)}
               />
             </Form.Item>
           </>
@@ -125,7 +133,7 @@ export function StepInspector({ step, allNames, problemList, onChange, onRename,
                 placeholder="tool.wasm --flag"
                 style={{ fontFamily: MONO_VAR }}
                 value={kind.command || ''}
-                onChange={(e) => onChange(withKindField(step, 'command', e.target.value))}
+                onChange={(e) => updateField('command', e.target.value)}
               />
             </Form.Item>
             <Form.Item label="沙箱">
@@ -134,7 +142,7 @@ export function StepInspector({ step, allNames, problemList, onChange, onRename,
                 placeholder="默认 in_process"
                 options={SANDBOX_OPTIONS}
                 value={kind.sandbox || undefined}
-                onChange={(v) => onChange(withKindField(step, 'sandbox', v))}
+                onChange={(v) => updateField('sandbox', v)}
               />
             </Form.Item>
           </>

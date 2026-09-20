@@ -114,12 +114,14 @@ impl NodeService for Worker {
                 .inner
                 .state
                 .store
-                .list_sessions(&SessionFilter {
+                .list_execution_sessions(&SessionFilter {
                     limit: 500,
                     cursor,
                     workdir_hash: None,
                     search: None,
-                    include_subagents: true,
+                    // The execution inventory includes DAG Agent-step rows;
+                    // the public chat API applies its own visibility fence.
+                    include_subagents: false,
                 })
                 .await?;
             if rows.is_empty() {
@@ -130,6 +132,24 @@ impl NodeService for Worker {
                 .map(|row| format!("{}|{}", row.updated_at.max(row.created_at), row.id));
             for row in &rows {
                 if roots.contains(&row.id) {
+                    continue;
+                }
+                // A session that reaches this fallback path has no durable
+                // execution journal. Public Agent sessions use `agent-`;
+                // Team's node-local member sessions use `member-` and carry
+                // the coordinator/member title. Keep both as Agent indexes
+                // so their execution can be inspected through the parent
+                // Team without exposing them in the public chat lane.
+                let member_session = row.id.starts_with("member-")
+                    && row
+                        .title
+                        .as_deref()
+                        .is_some_and(|title| title.contains(" / "));
+                let dag_step_session = row
+                    .title
+                    .as_deref()
+                    .is_some_and(|title| title.starts_with("dag/"));
+                if !row.id.starts_with("agent-") && !member_session && !dag_step_session {
                     continue;
                 }
                 records.push(ExecutionIndex {

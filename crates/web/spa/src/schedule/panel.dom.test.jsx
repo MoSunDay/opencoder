@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 // schedule/panel.dom.test.jsx —「调度」页 DOM 契约：定义列表（GET
 // /api/schedules）、admin CRUD（POST/PUT/PATCH/DELETE + 手动 fire）、空态、
-// 错误通知、种子语义提示与触发历史 Drawer（GET /api/schedules/:id/runs）
-// 的三种台账 status。只断言可观测 DOM；api.js 模块级 mock，sse.js 不涉及
-// （本页无事件流）。
+// 错误通知、新建表单简化（隐藏 ID/时区 + params 按类型单键分流）与触发历史
+// Drawer（GET /api/schedules/:id/runs）的三种台账 status。只断言可观测
+// DOM；api.js 模块级 mock，sse.js 不涉及（本页无事件流）。
 
 import '../test/setup-dom.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -90,13 +90,28 @@ afterEach(() => {
 const findButton = (txt, root = document) => Array.from(root.querySelectorAll('button'))
   .find((b) => (b.textContent || '').replace(/\s+/g, '') === txt);
 
+/// Open an antd Select and pick the dropdown option with the exact label —
+/// options render in a body-level portal, so the search scopes to
+/// .ant-select-item-option（同 team.dom.test.jsx 的范式）。
+const pickSelectOption = async (selectEl, label) => {
+  await act(async () => { fireEvent.mouseDown(selectEl); });
+  const option = await waitFor(() => {
+    const hit = [...document.querySelectorAll('.ant-select-item-option')]
+      .find((o) => o.getAttribute('title') === label || o.textContent === label);
+    expect(hit).toBeTruthy();
+    return hit;
+  });
+  await act(async () => { fireEvent.click(option); });
+  return option;
+};
+
 describe('SchedulePanel', () => {
   it('lists the store-backed definitions with last/next fire', async () => {
     render(<SchedulePanel onNotice={vi.fn()} />);
     expect(apiGetMock).toHaveBeenCalledWith('/api/schedules');
-    // 种子语义提示 + 扫描间隔。
-    expect(await screen.findByText('定时任务存于控制面数据库（schedules.json 仅作首次导入种子），每 15 秒扫描一次')).toBeTruthy();
-    const row = screen.getByText('nightly-etl').closest('tr');
+    const row = (await screen.findByText('nightly-etl')).closest('tr');
+    // 种子语义提示已随页面简化整条移除。
+    expect(screen.queryByText(/schedules\.json 仅作首次导入种子/)).toBeNull();
     expect(within(row).getByText('0 3 * * *')).toBeTruthy();
     expect(within(row).getByText('启用')).toBeTruthy();
     expect(within(row).getByText('DAG')).toBeTruthy();
@@ -121,8 +136,7 @@ describe('SchedulePanel', () => {
     apiGetMock.mockResolvedValue({ schedules: [], scan_interval_secs: null });
     render(<SchedulePanel onNotice={vi.fn()} />);
     expect(await screen.findByText('暂无定时任务')).toBeTruthy();
-    // scan_interval_secs 为 null（服务端默认）时提示不拼扫描间隔。
-    expect(screen.getByText('定时任务存于控制面数据库（schedules.json 仅作首次导入种子）')).toBeTruthy();
+    expect(screen.queryByText(/schedules\.json 仅作首次导入种子/)).toBeNull();
     expect(findButton('新建任务')).toBeTruthy();
   });
 
@@ -133,7 +147,7 @@ describe('SchedulePanel', () => {
     await waitFor(() => expect(onNotice).toHaveBeenCalledWith(err('HTTP 500')));
   });
 
-  it('creates a schedule through the editor modal (POST)', async () => {
+  it('creates a schedule: id/timezone hidden, params land in prompt, +08:00 pinned', async () => {
     render(<SchedulePanel onNotice={vi.fn()} />);
     await screen.findByText('nightly-etl');
     await act(async () => { fireEvent.click(findButton('新建任务')); });
@@ -142,28 +156,58 @@ describe('SchedulePanel', () => {
       expect(el).toBeTruthy();
       return el;
     });
-    const idInput = within(modal).getAllByPlaceholderText('nightly-etl')[0];
-    const cronInput = within(modal).getAllByPlaceholderText('0 3 * * *')[0];
+    // 新建隐藏 ID 与时区：id 由后端生成 schedule-<ULID>，时区固定 +08:00。
+    expect(within(modal).queryByText('ID')).toBeNull();
+    expect(within(modal).queryByText('时区')).toBeNull();
     await act(async () => {
-      fireEvent.change(idInput, { target: { value: 'fresh-job' } });
-      fireEvent.change(cronInput, { target: { value: '*/5 * * * *' } });
+      fireEvent.change(within(modal).getAllByPlaceholderText('0 3 * * *')[0], { target: { value: '*/5 * * * *' } });
     });
     // 目标必填：直接保存先被 antd 拦下（不发请求）。
     await act(async () => { fireEvent.click(findButton('保存', modal)); });
     await waitFor(() => expect(apiPostMock).not.toHaveBeenCalled());
-    // 补齐目标后保存 → POST /api/schedules，成功通知 + 重新拉取列表。
+    // 补齐目标与提示词后保存 → POST /api/schedules，成功通知 + 重新拉取列表。
     await act(async () => {
       fireEvent.change(within(modal).getByLabelText('schedule_target'), { target: { value: 'act' } });
+      fireEvent.change(within(modal).getByLabelText('schedule_params'), { target: { value: '每日巡检' } });
     });
     await act(async () => { fireEvent.click(findButton('保存', modal)); });
     await waitFor(() => expect(apiPostMock).toHaveBeenCalledTimes(1));
     const [path, body] = apiPostMock.mock.calls[0];
     expect(path).toBe('/api/schedules');
-    expect(body.id).toBe('fresh-job');
+    expect(body.id).toBeUndefined(); // 后端自动生成 schedule-<ULID>
+    expect(body.timezone).toBe('+08:00');
     expect(body.cron).toBe('*/5 * * * *');
     expect(body.kind).toBe('agent');
+    expect(body.params).toEqual({ prompt: '每日巡检' });
     expect(body.overlap).toBe('skip');
     expect(body.enabled).toBe(true);
+  });
+
+  it('creates a dag schedule: params become command-line args', async () => {
+    render(<SchedulePanel onNotice={vi.fn()} />);
+    await screen.findByText('nightly-etl');
+    await act(async () => { fireEvent.click(findButton('新建任务')); });
+    const modal = await waitFor(() => {
+      const el = document.querySelector('.ant-modal');
+      expect(el).toBeTruthy();
+      return el;
+    });
+    // kind 下拉收敛为后端五种；切到 DAG（antd Select 需真开下拉再点选项）。
+    const kindSelect = within(modal).getByLabelText('类型').closest('.ant-select');
+    await pickSelectOption(kindSelect, 'DAG');
+    // 切换后 params 文案随之变为「命令行参数」。
+    expect(within(modal).getByText('命令行参数')).toBeTruthy();
+    await act(async () => {
+      fireEvent.change(within(modal).getAllByPlaceholderText('0 3 * * *')[0], { target: { value: '0 3 * * *' } });
+      fireEvent.change(within(modal).getByLabelText('schedule_target'), { target: { value: 'etl-demo' } });
+      fireEvent.change(within(modal).getByLabelText('schedule_params'), { target: { value: '--date {{now-1d:%Y-%m-%d}}' } });
+    });
+    await act(async () => { fireEvent.click(findButton('保存', modal)); });
+    await waitFor(() => expect(apiPostMock).toHaveBeenCalledTimes(1));
+    const [, body] = apiPostMock.mock.calls[0];
+    expect(body.kind).toBe('dag');
+    expect(body.params).toEqual({ args: '--date {{now-1d:%Y-%m-%d}}' });
+    expect(body.timezone).toBe('+08:00');
   });
 
   it('edits a schedule through the editor modal (PUT keeps the id)', async () => {
@@ -181,11 +225,54 @@ describe('SchedulePanel', () => {
       // 回填：cron 与目标已在表单里。
       expect(within(modal).getAllByDisplayValue('0 3 * * *').length).toBeGreaterThan(0);
     });
+    // 编辑保留 ID 与时区两字段（id 是主键、时区可改），并回填 +08:00。
+    expect(within(modal).getByText('ID')).toBeTruthy();
+    expect(within(modal).getAllByDisplayValue('+08:00').length).toBeGreaterThan(0);
     await act(async () => { fireEvent.click(findButton('保存', modal)); });
     await waitFor(() => expect(apiPutMock).toHaveBeenCalledTimes(1));
     const [path, body] = apiPutMock.mock.calls[0];
     expect(path).toBe('/api/schedules/nightly-etl');
+    expect(body.id).toBe('nightly-etl');
     expect(body.target).toBe('etl-demo');
+    expect(body.timezone).toBe('+08:00');
+    expect(body.params).toEqual({}); // dag 记录 params 为空，编辑不凭空造键
+  });
+
+  it('edits merge params: the other keys survive an objective change', async () => {
+    apiGetMock.mockResolvedValue({
+      schedules: [{
+        id: 'brain-job', cron: '0 3 * * *', timezone: '+08:00', enabled: true,
+        kind: 'brain', target: 'plan-x',
+        params: { objective: 'cut a plan', mode: 'fixed', inputs: { repo: 'opencoder' } },
+        overlap: 'skip', node_id: null, last_run: null, next_run: null,
+      }],
+      scan_interval_secs: null,
+    });
+    render(<SchedulePanel onNotice={vi.fn()} />);
+    await screen.findByText('brain-job');
+    const row = screen.getByText('brain-job').closest('tr');
+    await act(async () => { fireEvent.click(within(row).getByText('编辑')); });
+    const modal = await waitFor(() => {
+      const el = document.querySelector('.ant-modal');
+      expect(el).toBeTruthy();
+      return el;
+    });
+    // brain 的 params 是必填 objective，已按记录回填。
+    const paramsArea = within(modal).getByLabelText('schedule_params');
+    expect(paramsArea.value).toBe('cut a plan');
+    await act(async () => {
+      fireEvent.change(paramsArea, { target: { value: 'cut a better plan' } });
+    });
+    await act(async () => { fireEvent.click(findButton('保存', modal)); });
+    await waitFor(() => expect(apiPutMock).toHaveBeenCalledTimes(1));
+    const [path, body] = apiPutMock.mock.calls[0];
+    expect(path).toBe('/api/schedules/brain-job');
+    // objective 更新，mode/inputs 等其余键原样保留。
+    expect(body.params).toEqual({
+      objective: 'cut a better plan',
+      mode: 'fixed',
+      inputs: { repo: 'opencoder' },
+    });
   });
 
   it('toggles enable via PATCH and deletes via DELETE', async () => {

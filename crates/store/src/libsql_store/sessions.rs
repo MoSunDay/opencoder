@@ -2,7 +2,8 @@ use anyhow::{Context, Result};
 use libsql::{params, params_from_iter, Connection, Value};
 
 use crate::types::{
-    SessionFilter, SessionListItem, SessionMeta, SessionPatch, TASK_TYPE_PARENT, TASK_TYPE_SUBAGENT,
+    SessionFilter, SessionListItem, SessionMeta, SessionPatch, TASK_TYPE_AGENT_STEP,
+    TASK_TYPE_PARENT, TASK_TYPE_SUBAGENT,
 };
 
 const INSERT_SESSION: &str = "\
@@ -81,6 +82,24 @@ pub async fn get(conn: &Connection, id: &str) -> Result<Option<SessionMeta>> {
 }
 
 pub async fn list(conn: &Connection, filter: &SessionFilter) -> Result<Vec<SessionListItem>> {
+    list_inner(conn, filter, false).await
+}
+
+/// Execution inventory includes DAG Agent-step sessions in addition to
+/// top-level sessions. It remains separate from the public chat listing so
+/// internal execution details cannot become user-editable conversations.
+pub async fn list_execution_sessions(
+    conn: &Connection,
+    filter: &SessionFilter,
+) -> Result<Vec<SessionListItem>> {
+    list_inner(conn, filter, true).await
+}
+
+async fn list_inner(
+    conn: &Connection,
+    filter: &SessionFilter,
+    include_execution_details: bool,
+) -> Result<Vec<SessionListItem>> {
     let limit = filter.limit.clamp(1, 500) as i64;
     let mut where_clauses: Vec<String> = Vec::new();
     let mut args: Vec<Value> = Vec::new();
@@ -116,18 +135,21 @@ pub async fn list(conn: &Connection, filter: &SessionFilter) -> Result<Vec<Sessi
         args.push(id.into());
     }
     // `include_subagents` widens the visible types from "top-level parents
-    // only" to parents + subagent children — NEVER synthetic machine sessions
-    // (node dispatch / todo workflows): those are execution internals and must
-    // stay invisible to session listings at both settings.
-    if filter.include_subagents {
+    // only" to parents + subagent children. DAG Agent-step sessions are
+    // durable execution detail and remain queryable by their session ID; they
+    // are filtered from the chat lane by the control API's visibility fence.
+    if include_execution_details {
+        where_clauses.push(format!(
+            "((s.task_type = '{TASK_TYPE_PARENT}' AND NOT EXISTS (SELECT 1 FROM subagent_tasks st WHERE st.child_session_id = s.id)) OR s.task_type = '{TASK_TYPE_AGENT_STEP}')"
+        ));
+    } else if filter.include_subagents {
         where_clauses.push(format!(
             "s.task_type IN ('{TASK_TYPE_PARENT}','{TASK_TYPE_SUBAGENT}')"
         ));
     } else {
-        where_clauses.push(format!("s.task_type = '{TASK_TYPE_PARENT}'"));
-        where_clauses.push(
-            "NOT EXISTS (SELECT 1 FROM subagent_tasks st WHERE st.child_session_id = s.id)".into(),
-        );
+        where_clauses.push(format!(
+            "((s.task_type = '{TASK_TYPE_PARENT}' AND NOT EXISTS (SELECT 1 FROM subagent_tasks st WHERE st.child_session_id = s.id)) OR s.task_type = '{TASK_TYPE_AGENT_STEP}')"
+        ));
     }
 
     let mut sql = String::from(

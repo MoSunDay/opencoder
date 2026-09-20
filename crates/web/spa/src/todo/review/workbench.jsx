@@ -33,7 +33,7 @@ export function TodoWorkbench({id,onMutated,showControls=true}) {
       {key:'resume',label:'在原节点恢复',disabled:disabled||!['interrupted','error'].includes(current)||['completed','failed'].includes(wf?.status)},
       {key:'cancel',label:'取消（终止）',danger:true,disabled:disabled||['done','error','cancelled'].includes(current)||!wf},
     ]:[]),
-    {key:'rerun',label:'从选中任务重跑',disabled:disabled||!selectedTodo||current==='pending'||current==='cancelling'},
+    ...(showControls?[{key:'rerun',label:'从选中任务重跑',disabled:disabled||!selectedTodo||current==='pending'||current==='cancelling'}]:[]),
   ];
   const runAction=key=>key==='rerun'?setRerun(selectedTodo):control(key);
   return <section className="todo-workbench" aria-label="TODO 运行工作台">

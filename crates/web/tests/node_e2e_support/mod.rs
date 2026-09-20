@@ -29,6 +29,7 @@ pub async fn spawn_server() -> Server {
     let store: Arc<dyn opencoder_store::Store> =
         Arc::new(LibsqlStore::open_memory().await.unwrap());
     let state = Arc::new(opencoder_web::AppState {
+        config_home: None,
         brain: opencoder_web::api_brain::mock_brain(Arc::clone(&store)),
         store: Arc::clone(&store),
         workdir: std::env::temp_dir(),

@@ -29,6 +29,7 @@ async fn state() -> Arc<opencoder_web::AppState> {
             }]),
         );
     Arc::new(opencoder_web::AppState {
+        config_home: None,
         client_override: Some(mock),
         brain: opencoder_web::api_brain::mock_brain(store.clone()),
         store,
@@ -50,6 +51,7 @@ async fn post(
     let resp = opencoder_web::api::post_prompt(
         axum::extract::State(state.clone()),
         axum::extract::Path(sid.to_string()),
+        None,
         axum::Json(opencoder_web::api::PromptBody {
             input_id: None,
             prompt: "hi".into(),
@@ -157,6 +159,7 @@ async fn post_model(
     let resp = opencoder_web::api::post_prompt(
         axum::extract::State(state.clone()),
         axum::extract::Path(sid.to_string()),
+        None,
         axum::Json(opencoder_web::api::PromptBody {
             input_id: None,
             prompt: "hi".into(),
@@ -206,6 +209,7 @@ async fn model_error_precedes_and_differs_from_api_key_error() {
     let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
     let workdir = tempfile::tempdir().unwrap().keep();
     let state = Arc::new(opencoder_web::AppState {
+        config_home: None,
         client_override: None,
         brain: opencoder_web::api_brain::mock_brain(store.clone()),
         store,

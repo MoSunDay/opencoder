@@ -56,7 +56,11 @@ pub(super) fn validate_target(job: &ScheduleJob) -> Result<(), String> {
     if !job.params.is_empty()
         && !matches!(
             job.kind,
-            ScheduleKind::Agent | ScheduleKind::Team | ScheduleKind::Todos | ScheduleKind::Brain
+            ScheduleKind::Agent
+                | ScheduleKind::Team
+                | ScheduleKind::Todos
+                | ScheduleKind::Brain
+                | ScheduleKind::Dag
         )
     {
         return Err(format!(
@@ -64,6 +68,23 @@ pub(super) fn validate_target(job: &ScheduleJob) -> Result<(), String> {
             job.id,
             job.kind.as_str()
         ));
+    }
+    Ok(())
+}
+
+/// dag params fold into the frozen spec at fire time: `args` (optional
+/// string) is appended to every wasm step's command line, so a non-string
+/// must fail at config time instead of landing as an `error` ledger row
+/// that retries for an hour.
+pub(super) fn validate_dag_params(job: &ScheduleJob) -> Result<(), String> {
+    if let Some(args) = job.params.get("args") {
+        if !args.is_string() {
+            return Err(format!(
+                "schedule {}: dag params.args must be a string (it is appended to the wasm \
+                 step command line)",
+                job.id
+            ));
+        }
     }
     Ok(())
 }

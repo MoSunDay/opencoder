@@ -35,6 +35,12 @@ pub enum Script {
     /// (OpenAI chat-completions JSON) and returns the completion text.
     /// The lever for echo-style contracts such as brain route receipts.
     Dynamic(Arc<dyn Fn(&Value) -> String + Send + Sync>),
+    /// A completion that requests ONE tool call instead of assistant text:
+    /// the delta carries `tool_calls[0]` (id/name/arguments in a single
+    /// frame, the accumulator flushes it as start+delta), terminated with
+    /// `finish_reason=stop`. The session runner executes the tool and
+    /// re-prompts the LLM, so the NEXT script entry answers the follow-up.
+    ToolCall { name: String, arguments: String },
 }
 
 impl Script {
@@ -122,6 +128,9 @@ impl LlmStub {
                         Some(Script::Dynamic(respond)) => {
                             let parsed = serde_json::from_str(&body).unwrap_or(Value::Null);
                             write_completion(&mut stream, &respond(&parsed));
+                        }
+                        Some(Script::ToolCall { name, arguments }) => {
+                            write_tool_call(&mut stream, &name, &arguments)
                         }
                         None => write_completion(&mut stream, EXTRA_REPLY),
                     }
@@ -288,6 +297,28 @@ fn write_completion(stream: &mut TcpStream, text: &str) {
         "data: {delta}\n\ndata: {{\"choices\":[{{\"delta\":{{}},\"finish_reason\":\"stop\"}}]}}\n\ndata: [DONE]\n\n",
         delta = delta
     );
+    let head = format!(
+        "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+        body.len()
+    );
+    let _ = stream.write_all(head.as_bytes());
+    let _ = stream.write_all(body.as_bytes());
+    let _ = stream.flush();
+}
+
+/// Write a chat-completions SSE replay that requests one tool call. The
+/// single delta carries the full call (id + name + arguments); the client
+/// accumulator announces `ToolCallStart` and flushes the arguments, then
+/// `finish_all` completes it from the stop terminator.
+fn write_tool_call(stream: &mut TcpStream, name: &str, arguments: &str) {
+    let delta = serde_json::json!({"choices": [{"delta": {"tool_calls": [{
+        "index": 0,
+        "id": "call-e2e-stub",
+        "type": "function",
+        "function": {"name": name, "arguments": arguments}
+    }]}}]});
+    let stop = serde_json::json!({"choices": [{"delta": {}, "finish_reason": "stop"}]});
+    let body = format!("data: {delta}\n\ndata: {stop}\n\ndata: [DONE]\n\n");
     let head = format!(
         "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
         body.len()

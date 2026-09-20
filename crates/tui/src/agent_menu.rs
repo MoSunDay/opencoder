@@ -1,10 +1,10 @@
 //! Agent picker for the `/agent` slash command -- a dropdown anchored just
 //! above the composer (same geometry as `file_menu::render_file_popup`).
 //!
-//! Lists the switchable primary agents: builtin roles (act/plan/command --
-//! the `workflow` scheduler is Primary but excluded everywhere consumers
-//! offer switch targets) plus the file-based cards from
-//! `opencoder_core::list_agents`, each carrying its one-line identity from
+//! Lists only custom file-based cards from `opencoder_core::list_agents`,
+//! excluding every builtin name even if a same-named directory exists.
+//! Runtime mode switching has its own `/act` and `/plan` commands.
+//! Each card carries its one-line identity from
 //! [`opencoder_core::agent_description`] (prompt-pool soul.md first line).
 //! Rows filter through the same fuzzy matcher the `$` skill picker uses
 //! (`menu::fuzzy_score`), name first with the description as fallback --
@@ -15,7 +15,6 @@
 //! itself owns no I/O.
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use opencoder_core::AgentMode;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -32,29 +31,19 @@ pub struct AgentCard {
     pub description: String,
 }
 
-/// Switchable primary agents for the picker: builtin primary roles first
-/// (act/plan/command), then the resolvable file-agent cards. Mirrors the
-/// web `/api/agents` `primary` computation
-/// (`is_primary() && name != "workflow"`) so both surfaces offer the same
-/// switch targets -- the switch endpoint rejects anything else.
+/// Custom agent cards in directory-name order. Builtin roles stay out of
+/// this picker, including file cards whose names would resolve to builtins.
 pub fn available_primary_agents() -> Vec<AgentCard> {
-    let mut cards: Vec<AgentCard> = opencoder_core::builtin_agents()
+    let builtins = opencoder_core::builtin_agents();
+    opencoder_core::agent::list_agents()
         .into_iter()
-        .filter(|a| a.mode == AgentMode::Primary && a.name != "workflow")
-        .map(|a| AgentCard {
-            name: a.name,
-            description: a.description,
+        .filter(|name| !builtins.iter().any(|agent| agent.name == *name))
+        .map(|name| {
+            let description = opencoder_core::agent::agent_description(&name)
+                .unwrap_or_else(|| format!("Custom agent {name}"));
+            AgentCard { name, description }
         })
-        .collect();
-    for name in opencoder_core::agent::list_agents() {
-        if cards.iter().any(|c| c.name == name) {
-            continue; // builtin names can never be shadowed by file cards
-        }
-        let description = opencoder_core::agent::agent_description(&name)
-            .unwrap_or_else(|| format!("Custom agent {name}"));
-        cards.push(AgentCard { name, description });
-    }
-    cards
+        .collect()
 }
 
 /// The composer text a pick produces: the runner's `/agent <name>` control
@@ -237,7 +226,11 @@ pub fn render_agent_popup(f: &mut Frame, area: Rect, composer_top: u16, menu: &A
 
     let items = if items.is_empty() {
         vec![ListItem::new(Line::from(Span::styled(
-            "  no matching agent",
+            if menu.agents.is_empty() {
+                "  no custom agents available"
+            } else {
+                "  no matching agent"
+            },
             Style::default().fg(theme::muted()),
         )))]
     } else {

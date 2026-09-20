@@ -3,6 +3,7 @@ use anyhow::Result;
 use opencoder_core::{fleet::*, message::now_ms};
 use opencoder_node::fleet::NodeService;
 use serde_json::{json, Value};
+use std::collections::HashSet;
 
 pub(super) async fn run(worker: &Worker, command: ExecutionCommand) -> Result<RpcReply> {
     opencoder_core::agent::scope::with_root(None, run_unscoped(worker, command)).await
@@ -102,11 +103,16 @@ async fn run_unscoped(worker: &Worker, command: ExecutionCommand) -> Result<RpcR
             ))
         }
         // Bulk-clear console dialogs. `input.sessions` carries the ids the
-        // control plane decided are safe to drop (terminal index rows); ids of
-        // executions still active on this node are skipped so a live run can
-        // never lose its session. Journal records go with them, otherwise the
-        // next full index report would resurrect the deleted executions.
+        // control plane decided are safe to drop (terminal index rows), and
+        // `input.kind` fences the request to one public chat lane. The node
+        // rechecks both the durable journal kind and lifecycle while holding
+        // the admission gate, so a stale control-plane snapshot cannot delete
+        // a newly running or differently typed execution.
         "dialogs_clear" => {
+            let kind = match dialog_kind(&command.input) {
+                Ok(kind) => kind,
+                Err(reply) => return Ok(reply),
+            };
             let requested: Vec<String> = command.input["sessions"]
                 .as_array()
                 .map(|rows| {
@@ -115,18 +121,43 @@ async fn run_unscoped(worker: &Worker, command: ExecutionCommand) -> Result<RpcR
                         .collect()
                 })
                 .unwrap_or_default();
-            let active: std::collections::HashSet<String> =
+            let _admission = worker.inner.admission.lock().await;
+            let active: HashSet<String> =
                 worker.inner.active.lock().await.keys().cloned().collect();
-            let skipped: Vec<String> = requested
-                .iter()
-                .filter(|id| active.contains(*id))
-                .cloned()
-                .collect();
-            let deletable: Vec<String> = requested
-                .iter()
-                .filter(|id| !active.contains(*id))
-                .cloned()
-                .collect();
+            let journal = worker.inner.journal.lock().await;
+            let mut skipped = Vec::new();
+            let mut deletable = Vec::new();
+            for id in &requested {
+                // A session without a top-level journal is an internal child
+                // or an already-cleared id. It is intentionally ignored so a
+                // public bulk clear cannot erase a parent-owned transcript.
+                let Some(record) = journal.records.get(id) else {
+                    continue;
+                };
+                if record.assignment.index.kind != kind {
+                    return Ok(RpcReply::error(
+                        409,
+                        format!(
+                            "session {id} belongs to {} lane",
+                            record.assignment.index.kind.prefix()
+                        ),
+                    ));
+                }
+                if active.contains(id)
+                    || !matches!(
+                        record.assignment.index.status,
+                        ExecutionStatus::Idle
+                            | ExecutionStatus::Done
+                            | ExecutionStatus::Error
+                            | ExecutionStatus::Cancelled
+                    )
+                {
+                    skipped.push(id.clone());
+                } else {
+                    deletable.push(id.clone());
+                }
+            }
+            drop(journal);
             let removed = worker.inner.state.store.delete_sessions(&deletable).await?;
             let mut forgotten = 0usize;
             {
@@ -138,7 +169,7 @@ async fn run_unscoped(worker: &Worker, command: ExecutionCommand) -> Result<RpcR
                 }
             }
             Ok(RpcReply::ok(
-                json!({"ok": true, "removed": removed, "skipped": skipped, "forgotten": forgotten}),
+                json!({"ok": true, "kind": kind, "removed": removed, "skipped": skipped, "forgotten": forgotten}),
             ))
         }
         "ask" => {
@@ -179,6 +210,23 @@ async fn run_unscoped(worker: &Worker, command: ExecutionCommand) -> Result<RpcR
         }
         _ => Ok(RpcReply::error(400, "unknown maintenance operation")),
     }
+}
+
+fn dialog_kind(input: &Value) -> std::result::Result<ExecutionKind, RpcReply> {
+    let Some(value) = input.get("kind") else {
+        // Older control binaries omitted the selector; their endpoint always
+        // meant the legacy Operator lane.
+        return Ok(ExecutionKind::Operator);
+    };
+    let kind = serde_json::from_value::<ExecutionKind>(value.clone())
+        .map_err(|error| RpcReply::error(400, format!("invalid dialogs_clear kind: {error}")))?;
+    if !matches!(kind, ExecutionKind::Operator | ExecutionKind::Agent) {
+        return Err(RpcReply::error(
+            400,
+            "dialogs_clear only supports operator or agent",
+        ));
+    }
+    Ok(kind)
 }
 
 fn parse_execution_ref(input: &Value) -> std::result::Result<ExecutionRef, RpcReply> {

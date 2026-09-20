@@ -117,6 +117,14 @@ impl Store for LibsqlStore {
         let conn = self.conn().await?;
         sessions::list(&conn, filter).await
     }
+    async fn list_execution_sessions(
+        &self,
+        filter: &SessionFilter,
+    ) -> Result<Vec<SessionListItem>> {
+        let _guard = self.db_lock.lock().await;
+        let conn = self.conn().await?;
+        sessions::list_execution_sessions(&conn, filter).await
+    }
     async fn update_session(&self, id: &str, patch: &SessionPatch) -> Result<()> {
         let _guard = self.db_lock.lock().await;
         let conn = self.conn().await?;

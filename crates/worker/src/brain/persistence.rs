@@ -43,6 +43,7 @@ pub async fn save(
             None,
             Some(run.request.objective.clone()),
             run.created_at,
+            &crate::brain::workdir::node_workdir(worker),
         )
         .await?;
     }

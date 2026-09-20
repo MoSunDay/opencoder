@@ -2,6 +2,7 @@
 import json
 import shlex
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 
@@ -77,6 +78,19 @@ def todo_spec():
         'todos':[{'id':name,'title':name,'depends_on':depends,'agent':'act',
             'requirement_background':'release acceptance','instructions':'return verifiable evidence','max_attempts':2,'acceptance':{'criteria':'result complete'}}
             for name, depends in [('first',[]),('second',['first'])]]}
+
+
+def release_wasi_gate(runtime_root, identifier, seconds=120):
+    # A lost Create reply can precede the journal and the step context. Wait
+    # for admission, but not context.json: precreating an execution directory
+    # would correctly be rejected by the node's orphan-directory guard.
+    run = runtime_root / 'dag' / identifier
+    deadline = time.monotonic() + seconds
+    while not (run / 'execution.json').is_file():
+        if time.monotonic() >= deadline:
+            raise TimeoutError('cannot release unconfirmed WASI admission: ' + identifier)
+        time.sleep(.1)
+    (run / 'release').touch()
 
 
 # A real WASI invocation remains inside its original Runtime until the test

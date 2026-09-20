@@ -1,4 +1,4 @@
-Commit: 6c6ad7442dc043f9040f20f7d0aa29287ebda887
+Commit: 225718daffe42e0ba369666b557ed062b114134a
 
 # Operator 与 Agent 会话记录分 lane
 
@@ -19,3 +19,16 @@ Commit: 6c6ad7442dc043f9040f20f7d0aa29287ebda887
 
 - 根包 `tests/operator_e2e/agent_session.rs` 对齐分 lane 契约：agent 会话仅出现在 `GET /api/sessions?kind=agent`，断言不漏入 operator lane（981a285f 漏改的测试期望，全量回归时确定性失败后修复）。
 - 444e6b0e + 修复后全量回归：`cargo clippy --workspace --all-targets -- -D warnings` 通过；`cargo test --workspace` 426 套件 / 5376 passed / 0 failed / 7 ignored（runc 沙箱类按设计跳过）；`cargo build --workspace` 通过。
+
+## 关闭遗漏（2026-09-19）
+
+- `dialogs_clear` 在控制面、Host 休眠运行时和 Worker 三层统一携带 `kind`；缺省兼容旧 Operator 请求，跨 lane、活动或非终态记录拒绝/跳过，避免误删及索引复活。
+- Agent 列表只显示用户创建的顶层会话。新 DAG/子 Agent 会话标记为 `agent_step`，历史 `dag/` 标题继续兼容过滤；这些执行记录仍通过父 Operator-capable 节点的 `execution_ref`/步骤明细访问。
+- 批量删除增加 `dry_run=true` 只读预览，先按 lane 和可见性筛选，再由节点二次校验并删除终态记录；删除完成后仅清理对应 lane 的控制面索引。
+
+验证：`cargo test -p opencoder-control --test e2e sessions_ -- --nocapture`（18 passed）、
+`cargo test -p opencoder-control --test e2e dialogs_delete_ -- --nocapture`（3 passed）、
+`cargo test -p opencoder-worker --test maintenance_dialogs_clear -- --nocapture`（3 passed）、
+`cargo test -p opencoder-worker --test internal_session_index -- --nocapture`（2 passed）、
+`cargo test -p opencoder-agent --bin opencoder-agent host_dialogs_clear -- --nocapture`（1 passed）、
+`cargo test -p opencoder-dag-runtime --test run_loop -- --nocapture`（8 passed）。

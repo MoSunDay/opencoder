@@ -1,5 +1,5 @@
 mod chunks;
-mod dag_step_events;
+pub(super) mod dag_step_events;
 mod dag_steps;
 mod inspect;
 mod pages;
@@ -43,19 +43,19 @@ pub(crate) async fn native(
     } else {
         serde_json::to_string(&body)?
     };
-    let request = Request::builder()
+    let (state, config) = crate::brain::workdir::native_state(worker, path).await?;
+    let mut request = Request::builder()
         .method(method)
         .uri(path)
         .header("content-type", "application/json")
         .body(Body::from(text))?;
+    if let Some(config) = config {
+        request.extensions_mut().insert(config);
+    }
     read_reply(
-        opencoder_web::build_app(
-            crate::brain::workdir::native_state(worker, path).await?,
-            None,
-            false,
-        )
-        .oneshot(request)
-        .await?,
+        opencoder_web::build_app(state, None, false)
+            .oneshot(request)
+            .await?,
     )
     .await
 }
@@ -132,6 +132,7 @@ pub(super) async fn events(
     });
     let mut source_more = false;
     let mut head_seq = None;
+    let mut finished_override = None;
     let mut frames: Vec<Value> = if is_session {
         if worker.inner.state.store.get_session(id).await?.is_none() {
             return Ok(match record {
@@ -178,28 +179,58 @@ pub(super) async fn events(
             ExecutionKind::Todos | ExecutionKind::Brain
         )
     }) {
-        let page = match worker
-            .inner
-            .state
-            .store
-            .todo_events_page(id, after, EVENT_PAGE_MAX, QUERY_RESPONSE_BYTES - 64 * 1024)
-            .await
-        {
-            Ok(page) => page,
-            Err(error)
-                if error
-                    .to_string()
-                    .contains("exceeds the event page byte limit") =>
+        if record.as_ref().is_some_and(|r| {
+            r.assignment.request.kind == ExecutionKind::Brain
+                && r.assignment.request.input["schema_version"] == 3
+        }) {
+            let snapshot = worker.inner.state.store.brain_scheduler(id).await?;
+            finished_override = snapshot
+                .as_ref()
+                .map(|snapshot| snapshot.run.phase.terminal());
+            let page = worker
+                .inner
+                .state
+                .store
+                .brain_scheduler_events(id, after.max(0) as u64, EVENT_PAGE_MAX)
+                .await?;
+            source_more = page.len() == EVENT_PAGE_MAX as usize;
+            let frames: Vec<Value> = page
+                .into_iter()
+                .map(|event| {
+                    json!({
+                        "seq": event.seq,
+                        "kind": event.event_type,
+                        "data": event,
+                        "ts": event.at_ms,
+                    })
+                })
+                .collect();
+            head_seq = frames.last().and_then(|frame| frame["seq"].as_i64());
+            frames
+        } else {
+            let page = match worker
+                .inner
+                .state
+                .store
+                .todo_events_page(id, after, EVENT_PAGE_MAX, QUERY_RESPONSE_BYTES - 64 * 1024)
+                .await
             {
-                return Ok(RpcReply::error(413, error.to_string()));
-            }
-            Err(error) => return Err(error),
-        };
-        source_more = page.more;
-        page.events
-            .into_iter()
-            .map(|e| json!({"seq":e.seq,"kind":e.kind,"data":e.payload,"ts":e.ts}))
-            .collect()
+                Ok(page) => page,
+                Err(error)
+                    if error
+                        .to_string()
+                        .contains("exceeds the event page byte limit") =>
+                {
+                    return Ok(RpcReply::error(413, error.to_string()));
+                }
+                Err(error) => return Err(error),
+            };
+            source_more = page.more;
+            page.events
+                .into_iter()
+                .map(|e| json!({"seq":e.seq,"kind":e.kind,"data":e.payload,"ts":e.ts}))
+                .collect()
+        }
     } else {
         record
             .as_ref()
@@ -236,10 +267,13 @@ pub(super) async fn events(
         .await
         .get(id)
         .is_some_and(|h| h.draining.load(std::sync::atomic::Ordering::SeqCst));
-    let finished = !draining && !worker.inner.active.lock().await.contains_key(id);
+    let finished = finished_override
+        .unwrap_or(!draining && !worker.inner.active.lock().await.contains_key(id));
     let mut body = json!({"events":frames,"more":more,"finished":finished});
     if let Some(seq) = head_seq {
         body["head_seq"] = json!(seq);
     }
     Ok(RpcReply::ok(body))
 }
+
+pub(super) mod instances;

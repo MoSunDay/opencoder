@@ -1,5 +1,7 @@
 //! Durable handoff state. All databases and advisory locks must be on local disk.
 mod capacity;
+#[cfg(test)]
+mod capacity_tests;
 mod receipts;
 mod runtimes;
 pub use capacity::CapacitySnapshot;

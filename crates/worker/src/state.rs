@@ -135,6 +135,7 @@ impl Worker {
             .await?;
         *project.require()?.archive_root.lock().unwrap() = data_dir.join("project-runs");
         let state = Arc::new(opencoder_web::AppState {
+            config_home: None,
             store: store.clone(),
             workdir: options.workdir,
             handles: opencoder_web::handle::new_handle_map(),
@@ -421,7 +422,9 @@ impl ChatStream for ConfiguredClient {
         request: opencoder_llm::ChatRequest,
     ) -> Result<tokio::sync::mpsc::Receiver<opencoder_llm::LlmEvent>> {
         let ep = self.0.resolve_endpoint()?;
-        opencoder_llm::ChatClient::from_config(&self.0, &ep)?.chat_stream(request)
+        opencoder_llm::ChatClient::from_config(&self.0, &ep)?.chat_stream(
+            opencoder_brain::activation::configured_request(&self.0, request),
+        )
     }
 }
 

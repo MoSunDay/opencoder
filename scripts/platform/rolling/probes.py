@@ -120,6 +120,25 @@ def candidate_locked(settings, record, operations, seconds, container=False):
         "request": {"id": identifier, "kind": "dag", "input": {}, "node_id": node_id},
         "definition": definition}
     def accepted():
+        # Older Runtimes serialize Create replays behind resource snapshots.
+        # Recover this activation's durable probe before resubmitting it; its
+        # frozen request, definition and owner must all match, even when done.
+        receipt = operations.http(endpoint, "/rpc", "POST", {"operation": "inspect",
+            "execution": {"id": identifier, "kind": "dag"}})
+        if receipt["status"] < 300:
+            detail = receipt["body"]
+            expected = {**assignment["request"], "target": None}
+            actual = {"target": None, **detail.get("request", {})}
+            index = detail.get("execution", {})
+            if (actual != expected or detail.get("definition") != definition
+                    or any(index.get(key) != value for key, value in assignment["index"].items()
+                           if key != "status")):
+                raise ValueError("candidate probe conflicts with its frozen assignment")
+            return True
+        if ambiguous(receipt["status"]):
+            return False
+        if receipt["status"] != 404:
+            raise ValueError(f"candidate probe inspection rejected: {receipt}")
         receipt = operations.http(endpoint, "/rpc", "POST", {"operation": "create", "assignment": assignment})
         if ambiguous(receipt["status"]):
             return False

@@ -1,3 +1,4 @@
+mod dag_instances;
 use crate::AppState;
 use axum::{
     routing::{get, post},
@@ -28,6 +29,18 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/api/dag/runs/:id", get(workflows::dag))
         .route("/api/dag/runs/:id/progress", get(workflows::dag_progress))
         .route("/api/dag/runs/:id/steps/:step", get(workflows::dag_step))
+        .route(
+            "/api/dag/runs/:id/steps/:step/instances",
+            get(dag_instances::list),
+        )
+        .route(
+            "/api/dag/runs/:id/steps/:step/instances/:index",
+            get(dag_instances::detail),
+        )
+        .route(
+            "/api/dag/runs/:id/steps/:step/instances/:index/events",
+            get(super::stream::dag_instance_events),
+        )
         .route(
             "/api/dag/runs/:id/steps/:step/events",
             get(super::stream::dag_step_events),

@@ -29,6 +29,15 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     emptyOutDir: true,
+    // Conditional CommonJS detection can race (dayjs was sometimes hoisted,
+    // sometimes wrapped). Always preserve require initialization semantics so
+    // identical sources produce identical bundles in separate checkout paths.
+    commonjsOptions: { strictRequires: true },
+    // Pin the final compressor independently of CommonJS transformation.
+    minify: 'terser',
+    terserOptions: {
+      format: { comments: false },
+    },
     rollupOptions: {
       output: {
         entryFileNames: 'static/app.js',

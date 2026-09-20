@@ -369,6 +369,7 @@ async fn host_dialogs_clear_deletes_live_runtime_and_trims_hibernated_inventory(
         "snapshot": {"ready": false},
         "indexes": [
             {"id":"operator-done-1","created_at":1,"kind":"operator","node_id":host.registration.id,"status":"idle"},
+            {"id":"agent-done-1","created_at":1,"kind":"agent","node_id":host.registration.id,"status":"idle"},
             {"id":"operator-live-1","created_at":2,"kind":"operator","node_id":host.registration.id,"status":"interrupted"}
         ]
     });
@@ -435,6 +436,34 @@ async fn host_dialogs_clear_deletes_live_runtime_and_trims_hibernated_inventory(
     // The live runtime lost its session and journal record.
     assert!(!journal.exists());
     // The hibernated inventory kept the live row and dropped the droppable one.
+    let kept = host
+        .store
+        .definition("runtime_sleep", "r-sleep")
+        .await
+        .unwrap()
+        .unwrap();
+    let ids: Vec<String> = kept["indexes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|i| i["id"].as_str().map(str::to_owned))
+        .collect();
+    assert_eq!(
+        ids,
+        vec!["agent-done-1".to_string(), "operator-live-1".to_string()]
+    );
+    // A second lane clear is independent and can remove the hibernated Agent
+    // row without touching the surviving Operator record.
+    let reply = host
+        .handle(maintenance(json!({
+            "kind": "agent",
+            "sessions": ["agent-done-1", "operator-live-1"]
+        })))
+        .await;
+    assert_eq!(reply.status, 200, "{:?}", reply);
+    assert_eq!(reply.body["kind"], json!("agent"));
+    assert_eq!(reply.body["removed"], json!(1));
+    assert_eq!(reply.body["skipped"], json!([]));
     let kept = host
         .store
         .definition("runtime_sleep", "r-sleep")

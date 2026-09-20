@@ -11,12 +11,21 @@
 //! - O4 `lifecycle` — interrupt mid-drain and agent-restart recovery.
 //! - O5 `agent_session` — `kind=agent` sessions: how_append injection,
 //!   output contract and the merged chat listing.
+//! - O6 `agent_sandbox` — agent-card `run_mode` dispatch: fail-closed
+//!   admission without a sandbox runtime, the full runc round contract
+//!   (bundle shape, runner artifacts, follow-up turns) and the
+//!   operator-mode host loop.
+//! - O7 `isolation` — per-execution HOME/WORKSPACE: the frozen config
+//!   snapshot (0600, key preserved), bash cwd/HOME verified from inside a
+//!   real turn, and the pair rebuilt after an agent restart.
 
 #[path = "../support/mod.rs"]
 mod support;
 
+mod agent_sandbox;
 mod agent_session;
 mod flow;
 mod gating;
+mod isolation;
 mod lifecycle;
 mod relay_sse;

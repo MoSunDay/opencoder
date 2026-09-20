@@ -7,7 +7,7 @@ use axum::{
     response::Response,
     Json,
 };
-use opencoder_core::{brain::*, fleet::*};
+use opencoder_core::fleet::*;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -19,18 +19,6 @@ pub struct Page {
 pub type Command = ExecutionCommand;
 
 pub async fn create(State(state): State<Arc<AppState>>, Json(value): Json<Value>) -> Response {
-    let mut request_value = value.clone();
-    if let Some(object) = request_value.as_object_mut() {
-        object.remove("id");
-        object.remove("node_id");
-    }
-    let request: BrainSchedulerRequest = match serde_json::from_value(request_value) {
-        Ok(v) => v,
-        Err(e) => return error_400(e.to_string()),
-    };
-    if let Err(e) = opencoder_brain::scheduler::validate_request(&request) {
-        return error_400(e.to_string());
-    }
     let id = value
         .get("id")
         .and_then(Value::as_str)
@@ -46,6 +34,29 @@ pub async fn create(State(state): State<Arc<AppState>>, Json(value): Json<Value>
         Ok(lock) => lock,
         Err(error) => return error_500(error.to_string()),
     };
+    match state.fleet.assignment(&id).await {
+        Ok(Some(assignment)) => {
+            if assignment.request.kind != ExecutionKind::Brain
+                || assignment.request.input["scheduler_intent"] != value
+            {
+                return response(RpcReply::error(
+                    409,
+                    "run id was already claimed with a different intent",
+                ));
+            }
+            // A frozen assignment can still be unconfirmed. Reuse its exact
+            // request so the execution receipt, not the index, decides whether
+            // to replay acceptance or retry admission on the original node.
+            let reply = crate::api::executions::submit(&state, assignment.request).await;
+            return response(run_receipt(&id, reply));
+        }
+        Ok(None) => {}
+        Err(error) => return error_500(error.to_string()),
+    }
+    let (request, capabilities) = match super::request::resolve(&state, &value).await {
+        Ok(request) => request,
+        Err(error) => return error_400(error.to_string()),
+    };
     let fingerprint = opencoder_core::token_hash(&value.to_string());
     match state
         .fleet
@@ -56,12 +67,16 @@ pub async fn create(State(state): State<Arc<AppState>>, Json(value): Json<Value>
         Ok(false) => {
             return response(RpcReply::error(
                 409,
-                "run id was already accepted with a different intent",
-            ))
+                "run id was already claimed with a different intent",
+            ));
         }
         Err(error) => return error_500(error.to_string()),
     }
-    let input = json!({"schema_version":3,"scheduler_request":request,"scheduler_intent":value});
+    let scope = capabilities
+        .iter()
+        .map(super::view::capability_metadata)
+        .collect::<Vec<_>>();
+    let input = json!({"schema_version":3,"scheduler_request":request,"scheduler_intent":value,"plan":value.get("plan"),"capability_scope":scope});
     let reply = crate::api::executions::submit(
         &state,
         CreateExecution {
@@ -76,17 +91,22 @@ pub async fn create(State(state): State<Arc<AppState>>, Json(value): Json<Value>
         },
     )
     .await;
+    response(run_receipt(&id, reply))
+}
+
+fn run_receipt(id: &str, reply: RpcReply) -> RpcReply {
     if reply.status >= 300 {
-        return response(reply);
+        return reply;
     }
-    response(RpcReply {
+    RpcReply {
         status: 202,
         body: json!({"schema_version":3,"run_id":id,"execution":reply.body}),
-    })
+    }
 }
 pub async fn snapshot(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Response {
     response(super::super::runs::call(&state, &id, "snapshot", Value::Null).await)
 }
+
 pub async fn events(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
@@ -101,12 +121,6 @@ pub async fn events(
         )
         .await,
     )
-}
-pub async fn round(
-    State(state): State<Arc<AppState>>,
-    Path((id, round)): Path<(String, u32)>,
-) -> Response {
-    response(super::super::runs::call(&state, &id, "round", json!({"round":round})).await)
 }
 pub async fn command(
     State(state): State<Arc<AppState>>,

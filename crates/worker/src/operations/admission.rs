@@ -3,6 +3,11 @@ use anyhow::Result;
 use opencoder_core::fleet::{NodeAdmissionCommand, RpcReply};
 use serde_json::json;
 
+pub(super) mod preparation;
+pub(super) mod replay;
+#[cfg(test)]
+mod tests;
+
 pub(super) async fn update(worker: &Worker, command: NodeAdmissionCommand) -> Result<RpcReply> {
     match command {
         NodeAdmissionCommand::Freeze => worker.freeze_admission().await?,

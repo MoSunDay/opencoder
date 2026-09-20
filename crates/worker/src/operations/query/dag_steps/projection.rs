@@ -5,7 +5,10 @@ use serde_json::{json, Value};
 /// its queued event; retain its timestamp so the browser rejects that older
 /// step_started event when it later arrives above the snapshot watermark.
 pub(super) fn project(name: &str, meta: &Value, event: Option<&DagStepEvent>, run: &str) -> Value {
-    let receipt_at = meta["finished_at_ms"].as_i64().unwrap_or(0);
+    let receipt_at = meta["finished_at_ms"]
+        .as_i64()
+        .or_else(|| meta["started_at_ms"].as_i64())
+        .unwrap_or(0);
     let receipt_current = !meta.is_null()
         && event.is_none_or(|e| {
             if e.started {
@@ -40,6 +43,10 @@ pub(super) fn project(name: &str, meta: &Value, event: Option<&DagStepEvent>, ru
         (status, json!(event.error), event.at_ms)
     } else {
         ("pending", Value::Null, 0)
+    };
+    let status = match status {
+        "running" if matches!(run, "interrupted" | "cancelled" | "error") => run,
+        status => status,
     };
     json!({"name":name,"status":status,"error":error,"at_ms":at_ms,
         "seq":event.map_or(0, |e| e.seq)})

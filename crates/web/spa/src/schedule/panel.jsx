@@ -8,7 +8,7 @@
 // 降级为首次导入种子，只保留 scan_interval_secs 这个运维旋钮。页面
 // 5s 轮询对齐 topics 的口径（调度扫描本身最密 15s）。
 
-import { Alert, Button, Drawer, Popconfirm, Space, Table, Tag } from 'antd';
+import { Button, Drawer, Popconfirm, Space, Table, Tag } from 'antd';
 import { useCallback, useEffect, useState } from 'react';
 import { apiDel, apiGet, apiPatch, apiPost } from '../api.js';
 import { useNodes } from '../fleet/useNodes.js';
@@ -58,7 +58,6 @@ function ScheduleRunsDrawer({ schedule, onClose, onNotice }) {
 
 export function SchedulePanel({ onNotice }) {
   const [rows, setRows] = useState([]);
-  const [scanSecs, setScanSecs] = useState(null);
   const [history, setHistory] = useState(null);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(null);
@@ -71,7 +70,6 @@ export function SchedulePanel({ onNotice }) {
     try {
       const j = await apiGet('/api/schedules');
       setRows(j.schedules || []);
-      setScanSecs(j.scan_interval_secs ?? null);
     }
     catch (e) { onNotice(err(e.message)); }
     finally { if (mode !== 'poll') setLoading(false); }
@@ -118,12 +116,6 @@ export function SchedulePanel({ onNotice }) {
   };
 
   return <PageShell page="schedules">
-    <Alert
-      type="info"
-      showIcon
-      style={{ marginBottom: 12 }}
-      title={`定时任务存于控制面数据库（schedules.json 仅作首次导入种子）${scanSecs ? `，每 ${scanSecs} 秒扫描一次` : ''}`}
-    />
     <Space style={{ marginBottom: 12 }}>
       <Button type="primary" onClick={() => { setEditing(null); setOpen(true); }}>新建任务</Button>
       <Button onClick={() => load('reset')}>刷新</Button>

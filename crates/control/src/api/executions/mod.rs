@@ -9,6 +9,7 @@ use opencoder_core::fleet::*;
 use serde_json::json;
 use std::sync::Arc;
 
+pub(crate) mod capabilities;
 mod submit;
 pub use submit::submit;
 
@@ -20,7 +21,7 @@ pub async fn create(
     if request.kind == ExecutionKind::Brain {
         return response(RpcReply::error(
             409,
-            "Brain runs require registered immutable plan versions; use /api/brain/runs",
+            "Brain runs require schema_version: 3; use /api/brain/runs",
         ));
     }
     if identity
@@ -92,6 +93,11 @@ pub async fn dispatch_command_as(
                 400,
                 "historical system executions only support cancel or interrupt",
             );
+        }
+        Ok(Some(index)) if index.kind == ExecutionKind::Brain => {
+            if let Err(reply) = super::brain_runs::runs::require_v3(state, id).await {
+                return reply;
+            }
         }
         Ok(_) => {}
         Err(error) => return RpcReply::error(500, format!("index: {error:#}")),
@@ -168,6 +174,15 @@ pub async fn receipt(State(state): State<Arc<AppState>>, Path(id): Path<String>)
     }
 }
 pub async fn command_id(state: &AppState, id: &str, command: ExecutionCommand) -> RpcReply {
+    match state.fleet.index(id).await {
+        Ok(Some(index)) if index.kind == ExecutionKind::Brain => {
+            if let Err(reply) = super::brain_runs::runs::require_v3(state, id).await {
+                return reply;
+            }
+        }
+        Err(error) => return RpcReply::error(500, error.to_string()),
+        _ => {}
+    }
     let _process_lock = match state.fleet.request_lock("brain-control", id).await {
         Ok(lock) => lock,
         Err(error) => return RpcReply::error(500, error.to_string()),
@@ -241,10 +256,13 @@ pub(super) async fn for_id(
     match state.fleet.index(id).await {
         Ok(Some(index)) => {
             let node_id = index.node_id.clone();
-            state
-                .hub
-                .call(&node_id, operation(index.execution_ref()))
-                .await
+            let operation = operation(index.execution_ref());
+            if capabilities::operation_requires_dynamic(&operation) {
+                if let Err(reply) = capabilities::require_dynamic(state, &index).await {
+                    return reply;
+                }
+            }
+            state.hub.call(&node_id, operation).await
         }
         Ok(None) => RpcReply::error(404, "execution id not found"),
         Err(error) => RpcReply::error(500, format!("index: {error:#}")),

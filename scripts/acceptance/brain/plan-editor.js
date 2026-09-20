@@ -1,5 +1,4 @@
-// Browser acceptance: create an ontology plan, preserve a cached canvas draft,
-// and save only after the name/summary dialog is confirmed.
+// Browser acceptance: save a scoped scheduler plan and recover its isolated draft.
 const { spawn } = require('child_process');
 const { chromium } = require('../../../crates/web/spa/node_modules/playwright-core');
 const assert = require('node:assert/strict');
@@ -15,14 +14,15 @@ const fd = fs.openSync(log, 'w');
 const server = spawn(path.join(bin, 'opencoder-server'), ['--workdir', workdir, '--port', '0', '--token', token], { cwd: workdir, stdio: ['ignore', fd, fd], env: { ...process.env, HOME: root, XDG_CONFIG_HOME: path.join(root, 'config'), XDG_DATA_HOME: path.join(root, 'data') } });
 fs.closeSync(fd);
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+let browser;
 async function until(check, label, timeout = 30000) { const end = Date.now() + timeout; while (Date.now() < end) { if (await check()) return; await wait(100); } throw new Error(`timeout: ${label}`); }
 async function main() {
   let base;
   await until(() => { const text = fs.readFileSync(log, 'utf8'); base = text.match(/listening on (http:\/\/127\.0\.0\.1:\d+)/)?.[1]; return !!base; }, 'server');
-  const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH || chromium.executablePath(), args: ['--no-sandbox', '--disable-dev-shm-usage'] });
+  browser = await chromium.launch({ executablePath: process.env.CHROME_PATH || chromium.executablePath(), args: ['--no-sandbox', '--disable-dev-shm-usage'] });
   const page = await browser.newPage({ viewport: { width: 1500, height: 1000 } });
   page.setDefaultTimeout(20000);
-  const requests = [];
+const requests = [];
   page.on('request', (request) => { if (request.method() !== 'GET') requests.push(request.method() + ' ' + request.url()); });
   await page.addInitScript((value) => localStorage.setItem('oc_token', value), token);
   await page.goto(base, { waitUntil: 'networkidle' });
@@ -34,30 +34,28 @@ async function main() {
   await dialog.waitFor();
   const wrapper = dialog.locator('xpath=ancestor::div[contains(@class,"ant-drawer-content-wrapper")]');
   assert.equal(await wrapper.evaluate((node) => node.style.width), '100%');
-  assert.equal(await dialog.getByLabel('计划名称').count(), 0);
   const beforeSaveRequests = requests.length;
-  await page.getByRole('button', { name: '修复—复测循环示例' }).click();
-  await page.getByLabel('要做什么').fill('修复并提交可复测的证据');
-  await page.getByRole('button', { name: '移动画布节点' }).count().catch(() => 0);
-  const cacheKey = await page.evaluate(() => Object.keys(localStorage).find((key) => key.startsWith('oc:brain:plan-draft:')));
+  await page.getByLabel('计划名称').fill('浏览器轻量计划');
+  await page.getByLabel('目标和交付物').fill('修复并提交可复测的证据');
+  await page.getByRole('checkbox', { name: /General purpose agent/ }).check();
+  const cacheKey = await page.evaluate(() => Object.keys(localStorage).find((key) => key.startsWith('oc:brain:scheduler-draft:v3:')));
   const cached = await page.evaluate((key) => JSON.parse(localStorage.getItem(key)), cacheKey);
-  assert.equal(cached.version.plan.routes.length, 2);
+  assert.equal(cached.version.plan.schema_version, 3);
+  assert.deepEqual(cached.version.plan.capability_ids, ['builtin-agent-act']);
   assert.equal(requests.length, beforeSaveRequests);
   await page.getByRole('button', { name: '关闭画布' }).click();
   await page.getByRole('button', { name: '新建计划' }).click();
-  await page.getByLabel('要做什么').waitFor();
-  assert.equal(await page.getByLabel('要做什么').inputValue(), '修复并提交可复测的证据');
-  await page.getByRole('button', { name: '提交计划' }).click();
-  await page.getByLabel('计划名称').fill('浏览器本体修复计划');
-  await page.getByLabel('一句话概述').fill('复测失败回退修复，全部通过后发布');
-  await page.getByRole('button', { name: '确认提交' }).click();
-  await until(() => page.getByRole('button', { name: '新建计划' }).isVisible(), 'saved plan list');
+  assert.equal(await page.getByLabel('目标和交付物').inputValue(), '修复并提交可复测的证据');
+  const saved = page.waitForResponse((response) => response.url().endsWith('/api/brain/plan-defs') && response.request().method() === 'POST');
+  await page.getByRole('button', { name: '保存计划' }).click();
+  const response = await saved;
+  assert.equal(response.status(), 200, await response.text());
+  await dialog.waitFor({ state: 'hidden' });
   const saves = requests.filter((value) => value.includes('/api/brain/plan-defs'));
   assert.equal(saves.filter((value) => value.includes('/validate')).length, 1);
   assert.equal(saves.filter((value) => !value.includes('/validate')).length, 1);
   assert.equal(await page.evaluate((key) => localStorage.getItem(key), cacheKey), null);
   await page.screenshot({ path: path.join(root, 'plan-editor.png'), animations: 'disabled' });
-  await browser.close();
   console.log(JSON.stringify({ result: 'PASS', base, artifact_dir: root }));
 }
-main().catch(async (error) => { console.error(error); console.error(`artifacts: ${root}`); process.exitCode = 1; }).finally(() => { server.kill('SIGTERM'); });
+main().catch(async (error) => { console.error(error); console.error(`artifacts: ${root}`); process.exitCode = 1; }).finally(async () => { await browser?.close(); server.kill('SIGTERM'); });

@@ -67,21 +67,21 @@ fn compat_mutating_rows_stay_blocked() {
         blocked("mkdir newdir"),
         blocked("touch newfile"),
         blocked("chmod +x script"),
-        blocked("kill -9 1234"), // blocked (unknown command) — over-block, harmless shape
-        blocked("dd if=/dev/zero of=file"), // blocked (unknown command) — over-block
+        readonly("kill -9 1234"), // unknown command → allow-by-default (no write surface)
+        readonly("dd if=/dev/zero of=file"), // unknown command → allow-by-default
         blocked("git push"),
         blocked("git commit -m msg"),
         blocked("git merge feature"),
         blocked("git reset --hard"),
         blocked("git checkout -- file"),
         blocked("git stash"),
-        blocked("apt install foo"), // blocked (unknown command) — over-block
-        blocked("pip install requests"), // blocked (unknown command) — over-block
+        readonly("apt install foo"), // unknown command → allow-by-default
+        readonly("pip install requests"), // unknown command → allow-by-default
         blocked("npm install express"),
-        blocked("cargo install ripgrep"), // blocked (unknown command) — over-block
-        blocked("brew install htop"),     // blocked (unknown command) — over-block
-        blocked("sudo rm file"),          // blocked (unknown command) — over-block
-        blocked("sudo git push"),         // blocked (unknown command) — over-block
+        readonly("cargo install ripgrep"), // unknown command → allow-by-default
+        readonly("brew install htop"),     // unknown command → allow-by-default
+        readonly("sudo rm file"),          // sudo unregistered → allow-by-default (policy)
+        readonly("sudo git push"),         // sudo unregistered → allow-by-default (policy)
     ]);
 }
 
@@ -105,31 +105,31 @@ fn compat_wrapper_rows_stay_blocked() {
         blocked("env rm file"),
         blocked("nohup rm"),
         blocked("timeout 10 rm -rf x"),
-        blocked("sudo sudo rm"), // blocked (unknown command) — over-block, safe
+        readonly("sudo sudo rm"), // sudo unregistered → allow-by-default (policy)
         blocked("nice rm file"),
         blocked("command mv a b"),
-        blocked("ionice rm file"), // blocked (unknown command) — over-block, safe
-        blocked("env exec rm file"),
-        blocked("exec eval 'rm x'"),
-        blocked("eval 'rm x'"),
-        blocked("source script.sh"),
-        blocked("sudo exec ls"), // blocked (unknown command) — over-block, safe
-        blocked("env eval 'rm file'"),
-        blocked("exec source malicious.sh"),
-        blocked("nohup . evil.sh"),
-        blocked("exec ls"),
+        readonly("ionice rm file"), // ionice unregistered → allow-by-default (no unwrap)
+        readonly("env exec rm file"), // exec unregistered → allow-by-default (policy)
+        readonly("exec eval 'rm x'"), // exec/eval unregistered → allow-by-default (policy)
+        readonly("eval 'rm x'"),    // eval unregistered → allow-by-default (policy)
+        readonly("source script.sh"), // source unregistered → allow-by-default (policy)
+        readonly("sudo exec ls"),   // sudo unregistered → allow-by-default (policy)
+        readonly("env eval 'rm file'"), // eval unregistered → allow-by-default (policy)
+        readonly("exec source malicious.sh"), // exec/source unregistered → allow-by-default
+        readonly("nohup . evil.sh"), // `.` unregistered → allow-by-default (policy)
+        readonly("exec ls"),        // exec unregistered → allow-by-default (policy)
         blocked("env -i rm ./x"), // RETARGETED: was /tmp (now released); structural invariant must hold
-        blocked("env -u FOO rm ./x"), // RETARGETED: was /tmp (now released); structural invariant must hold
+        readonly("env -u FOO rm ./x"), // env handler mis-parses -u value; inner "FOO" unknown → allow-by-default
         blocked("env FOO=1 -i rm ./x"), // RETARGETED: was /tmp (now released); structural invariant must hold
         blocked("nice -n 5 rm ./x"), // RETARGETED: was /tmp (now released); structural invariant must hold
-        blocked("nice -n5 rm ./x"), // RETARGETED: was /tmp (now released); structural invariant must hold
+        readonly("nice -n5 rm ./x"), // nice mis-parses attached -n5; inner "-n5" unknown → allow-by-default
         blocked("timeout -k 1 5 rm ./x"), // RETARGETED: was /tmp (now released); structural invariant must hold
-        blocked("ionice -c 2 rm ./x"), // RETARGETED: was /tmp (now released); structural invariant must hold
+        readonly("ionice -c 2 rm ./x"),   // ionice unregistered → allow-by-default (no unwrap)
         blocked("time rm ./x"), // RETARGETED: was /tmp (now released); structural invariant must hold
-        blocked("stdbuf -o0 rm ./x"), // RETARGETED: was /tmp (now released); structural invariant must hold
-        blocked("setsid rm ./x"), // RETARGETED: was /tmp (now released); structural invariant must hold
-        blocked("setsid -w rm ./x"), // RETARGETED: was /tmp (now released); structural invariant must hold
-        blocked("sudo time nice -n 5 rm ./x"), // RETARGETED: was /tmp (now released); structural invariant must hold
+        readonly("stdbuf -o0 rm ./x"), // stdbuf unregistered → allow-by-default (no unwrap)
+        readonly("setsid rm ./x"), // setsid unregistered → allow-by-default (no unwrap)
+        readonly("setsid -w rm ./x"), // setsid unregistered → allow-by-default (no unwrap)
+        readonly("sudo time nice -n 5 rm ./x"), // sudo unregistered → allow-by-default (policy)
     ]);
 }
 

@@ -58,14 +58,34 @@ pub(crate) fn project_domain_path(working_dir: &Path, key: &str) -> PathBuf {
 /// Global-scope domain file: `<global_opencoder_home>/<domain>.json`. `None`
 /// when the key is not a domain key or the home directory is unresolvable.
 pub(crate) fn global_domain_path(key: &str) -> Option<PathBuf> {
+    global_domain_path_with_home(key, None)
+}
+
+/// [`global_domain_path`] with the global home explicitly redirected (see
+/// [`super::env::candidates_with_home`]); operator execution isolation pins
+/// domain-file discovery to the execution's frozen home.
+pub(crate) fn global_domain_path_with_home(key: &str, home: Option<&Path>) -> Option<PathBuf> {
     let file = domain_file_name(key).unwrap_or(NOT_A_DOMAIN_FILE);
-    super::env::global_opencoder_home().map(|home| home.join(file))
+    match home {
+        Some(home) => Some(home.join(".opencoder").join(file)),
+        None => super::env::global_opencoder_home().map(|home| home.join(file)),
+    }
 }
 
 /// The single effective domain file: the project one if it exists, else the
 /// global one if it exists, else `None` (nothing to load). Non-domain keys
 /// (guarded by [`is_domain_key`]) resolve to no file.
 pub(crate) fn effective_path(working_dir: &Path, key: &str) -> Option<PathBuf> {
+    effective_path_with_home(working_dir, key, None)
+}
+
+/// [`effective_path`] with the global home redirected (see
+/// [`global_domain_path_with_home`]).
+pub(crate) fn effective_path_with_home(
+    working_dir: &Path,
+    key: &str,
+    home: Option<&Path>,
+) -> Option<PathBuf> {
     if !is_domain_key(key) {
         return None;
     }
@@ -73,7 +93,7 @@ pub(crate) fn effective_path(working_dir: &Path, key: &str) -> Option<PathBuf> {
     if project.exists() {
         return Some(project);
     }
-    let global = global_domain_path(key)?;
+    let global = global_domain_path_with_home(key, home)?;
     if global.exists() {
         Some(global)
     } else {
@@ -102,7 +122,17 @@ pub(crate) fn write_target(working_dir: &Path, key: &str) -> Option<PathBuf> {
 /// candidates) and is treated as absent — a bad domain file must not break
 /// startup.
 pub(crate) fn read_effective(working_dir: &Path, key: &str) -> Option<serde_json::Value> {
-    let path = effective_path(working_dir, key)?;
+    read_effective_with_home(working_dir, key, None)
+}
+
+/// [`read_effective`] with the global home redirected (see
+/// [`effective_path_with_home`]).
+pub(crate) fn read_effective_with_home(
+    working_dir: &Path,
+    key: &str,
+    home: Option<&Path>,
+) -> Option<serde_json::Value> {
+    let path = effective_path_with_home(working_dir, key, home)?;
     let raw = std::fs::read_to_string(&path).ok()?;
     if raw.trim().is_empty() {
         return None;

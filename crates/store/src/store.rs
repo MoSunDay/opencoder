@@ -64,6 +64,15 @@ pub trait Store: Send + Sync {
         anyhow::bail!("harness persistence is unsupported by this store")
     }
     async fn list_sessions(&self, filter: &SessionFilter) -> Result<Vec<SessionListItem>>;
+    /// List top-level sessions plus execution-owned Agent step sessions.
+    /// Execution indexes use this narrow view to expose a typed child
+    /// reference without widening the public chat-session listing.
+    async fn list_execution_sessions(
+        &self,
+        filter: &SessionFilter,
+    ) -> Result<Vec<SessionListItem>> {
+        self.list_sessions(filter).await
+    }
     async fn update_session(&self, id: &str, patch: &SessionPatch) -> Result<()>;
     async fn delete_session(&self, id: &str) -> Result<()>;
     /// Delete every session except `keep_session_id` (the currently-active

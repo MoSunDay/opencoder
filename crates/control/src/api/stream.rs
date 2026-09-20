@@ -75,6 +75,7 @@ fn sse(
                     ));
                 }
                 if let Some(frame) = queue.pop_front() {
+                    let frame = normalize_frame(frame);
                     let seq = frame["seq"].as_i64().unwrap_or(cursor);
                     cursor = cursor.max(seq);
                     let event = Event::default()
@@ -132,6 +133,19 @@ fn sse(
         .into_response()
 }
 
+/// The generic execution stream uses `{seq, kind, data}` rows. V3 scheduler
+/// events are intentionally typed index rows, so adapt them at the transport
+/// boundary without changing the paged API or copying execution bodies.
+fn normalize_frame(mut frame: Value) -> Value {
+    if frame.get("kind").is_none() && frame.get("event_type").is_some() {
+        let kind = frame["event_type"].clone();
+        let data = frame.clone();
+        frame["kind"] = kind;
+        frame["data"] = data;
+    }
+    frame
+}
+
 pub async fn events(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
@@ -170,4 +184,35 @@ pub async fn dag_step_events(
         )
     });
     sse(first, fetch, after, lifecycle)
+}
+
+/// One selected dynamic instance uses the same bounded, replayable SSE transport.
+pub async fn dag_instance_events(
+    State(state): State<Arc<AppState>>,
+    Path((id, step, index)): Path<(String, String, usize)>,
+    Query(query): Query<Cursor>,
+    headers: HeaderMap,
+) -> Response {
+    let after = cursor_after(&query, &headers);
+    let fetch: PageFetch = {
+        let state = state.clone();
+        Arc::new(move |cursor| {
+            let state = state.clone();
+            let id = id.clone();
+            let step = step.clone();
+            Box::pin(async move {
+                super::executions::for_id(&state, &id, |execution| {
+                    opencoder_core::fleet::NodeOperation::DagInstanceEvents {
+                        execution,
+                        step,
+                        index,
+                        after: cursor,
+                    }
+                })
+                .await
+            })
+        })
+    };
+    let first = fetch(after).await;
+    sse(first, fetch, after, state.lifecycle.clone())
 }

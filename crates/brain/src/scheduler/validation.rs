@@ -24,6 +24,15 @@ pub fn validate_request(r: &BrainSchedulerRequest) -> Result<()> {
     );
     Ok(())
 }
+pub fn validate_plan(plan: &SchedulerPlan) -> Result<()> {
+    ensure!(!plan.title.trim().is_empty(), "plan title is required");
+    ensure!(
+        !plan.capability_ids.is_empty(),
+        "select at least one capability"
+    );
+    validate_request(&plan.request(Default::default()))
+}
+
 /// Catalog adapters resolve actual targets first. Missing descriptions or
 /// definitions never produce a generic substitute.
 pub fn prefilter(
@@ -77,7 +86,6 @@ pub(super) fn bindings(
     request: &BrainSchedulerRequest,
     ops: &[BrainOperation],
 ) -> Result<()> {
-    ensure!(!item.inputs.is_empty(), "missing input references");
     ensure!(
         capability
             .required_inputs

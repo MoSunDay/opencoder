@@ -59,11 +59,11 @@ pub(crate) fn step_env(ctx: &StepCtx) -> Vec<(String, String)> {
         ("OPENCODER_RUN_ID".into(), ctx.run_id.clone()),
         (
             "OPENCODER_STEP_DIR".into(),
-            format!("{}/{}/", CONTEXT_MOUNT, ctx.step.name),
+            format!("{}/{}/", CONTEXT_MOUNT, ctx.relative_dir()),
         ),
         (
             "OPENCODER_STEP_CONTEXT".into(),
-            format!("{}/{}/context.json", CONTEXT_MOUNT, ctx.step.name),
+            format!("{}/{}/context.json", CONTEXT_MOUNT, ctx.relative_dir()),
         ),
     ];
     if ctx.knowledge_root.is_some() {
@@ -137,8 +137,7 @@ pub(crate) fn resolve_module(
 pub(crate) fn write_context_json(ctx: &StepCtx) -> Result<(), String> {
     // `artifacts::step_dir` takes the WORKFLOW root; join from there so the
     // run id is not duplicated.
-    let dir = opencoder_dag::artifacts::step_dir(&ctx.workflow_root, &ctx.run_id, &ctx.step.name)
-        .map_err(|e| format!("illegal step path: {e}"))?;
+    let dir = ctx.dir().map_err(|e| format!("illegal step path: {e}"))?;
     std::fs::create_dir_all(&dir).map_err(|e| format!("cannot create step dir: {e}"))?;
     let pretty = serde_json::to_vec_pretty(&ctx.context()).map_err(|e| e.to_string())?;
     std::fs::write(dir.join("context.json"), pretty).map_err(|e| e.to_string())
@@ -167,7 +166,13 @@ pub async fn execute_wasm_step_logged(
         StepKind::Wasm { command, sandbox } => (command.clone(), sandbox.unwrap_or_default()),
         _ => return error_result("non-wasm step dispatched to the wasm executor".into()),
     };
-    let tokens = split_command(&command);
+    let mut tokens = split_command(&command);
+    if let Some(serde_json::Value::Array(argv)) = &ctx.instance_input {
+        tokens.extend(
+            argv.iter()
+                .map(|v| v.as_str().expect("validated argv").to_string()),
+        );
+    }
     if tokens.is_empty() {
         return error_result("wasm step has an empty command".into());
     }
@@ -263,11 +268,12 @@ async fn run_runc(
     };
     let spec = crate::sandbox::oci::BundleSpec {
         run_root: run_root.clone(),
-        step_slug: ctx.step.name.clone(),
+        step_slug: ctx.relative_dir(),
         command: tokens.to_vec(),
         env: step_env(ctx),
         timeout_hint: ctx.step.timeout_secs,
         knowledge,
+        agents: None,
         argv: crate::sandbox::oci::ArgvStyle::WasmModule,
     };
     // Bundles live next to the run root (never inside it — the run root is
@@ -276,7 +282,7 @@ async fn run_runc(
         .workflow_root
         .join("bundles")
         .join(&ctx.run_id)
-        .join(&ctx.step.name);
+        .join(ctx.relative_dir());
     // Copying a provisioned runtime tree can take time; keep node
     // heartbeats and unrelated executions responsive while preparing the
     // private tree.
@@ -291,7 +297,7 @@ async fn run_runc(
 
     // run_step owns the timeout here: on expiry it KILLS the container and
     // reaps it with `runc delete --force`.
-    let container_id = format!("{}-{}", ctx.run_id, ctx.step.name);
+    let container_id = format!("{}-{}", ctx.run_id, ctx.execution_key());
     match crate::sandbox::runc::run_step_streamed(
         &bundle_dir,
         &container_id,
@@ -301,7 +307,7 @@ async fn run_runc(
     )
     .await
     {
-        Ok((0, stdout)) => finish_from_output_json(&run_root.join(&ctx.step.name), stdout),
+        Ok((0, stdout)) => finish_from_output_json(&run_root.join(ctx.relative_dir()), stdout),
         Ok((code, output)) => error_result(format!(
             "runc step exited with {code}:\n{}",
             tail(&output, ERROR_TAIL_BYTES)

@@ -224,6 +224,7 @@ export function specLevelProblems(problems) {
 }
 
 function emptyKind(type) {
+  if (type === 'dynamic') return { type, source: { type: 'input', pointer: '/items' }, template: { type: 'agent', prompt: '' } };
   if (type === 'wasm') return { type, command: '' };
   return { type: 'agent', prompt: '' };
 }

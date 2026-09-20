@@ -100,7 +100,7 @@ pub fn runs(command: &RunsCmd) -> Result<RequestPlan> {
     let base = "/api/brain/runs";
     Ok(match command {
         RunsCmd::List => RequestPlan::get(base),
-        RunsCmd::Create { json } => RequestPlan::post(base).with_body(required_body(json)?),
+        RunsCmd::Create { json } => RequestPlan::post(base).with_body(scheduler_body(json)?),
         RunsCmd::Get { id, offset } => RequestPlan::get(format!("{base}/{id}?offset={offset}")),
         RunsCmd::Round { id, round } => RequestPlan::get(format!("{base}/{id}/rounds/{round}")),
         RunsCmd::Context { id } => RequestPlan::get(format!("{base}/{id}/context")),
@@ -117,6 +117,16 @@ pub fn runs(command: &RunsCmd) -> Result<RequestPlan> {
         RunsCmd::Command { id, action } => RequestPlan::post(format!("{base}/{id}/commands"))
             .with_body(serde_json::json!({"action":action})),
     })
+}
+
+fn scheduler_body(raw: &str) -> Result<serde_json::Value> {
+    let body = required_body(raw)?;
+    anyhow::ensure!(
+        body["schema_version"] == 3,
+        "{}",
+        opencoder_core::brain::SCHEDULER_MIGRATION
+    );
+    Ok(body)
 }
 
 pub async fn activate(
@@ -151,12 +161,18 @@ pub async fn activate(
 }
 
 struct LocalClient(opencoder_core::Config);
+
+#[cfg(test)]
+mod tests;
+
 impl opencoder_llm::ChatStream for LocalClient {
     fn chat_stream(
         &self,
         request: opencoder_llm::ChatRequest,
     ) -> Result<tokio::sync::mpsc::Receiver<opencoder_llm::LlmEvent>> {
         let endpoint = self.0.resolve_endpoint()?;
-        opencoder_llm::ChatClient::from_config(&self.0, &endpoint)?.chat_stream(request)
+        opencoder_llm::ChatClient::from_config(&self.0, &endpoint)?.chat_stream(
+            opencoder_brain::activation::configured_request(&self.0, request),
+        )
     }
 }

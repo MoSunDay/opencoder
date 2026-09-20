@@ -62,6 +62,15 @@ async fn connection(
     .await?;
     let (tx, mut rx) = mpsc::channel::<NodeFrame>(128);
     let (report_trigger, mut report_requests) = mpsc::channel::<()>(1);
+    let (admission_tx, admission_rx) = mpsc::channel(128);
+    let admission_capacity = Arc::new(tokio::sync::Semaphore::new(128));
+    let mut admissions = tokio::task::JoinSet::new();
+    admissions.spawn(execute_admissions(
+        service.clone(),
+        admission_rx,
+        tx.clone(),
+        report_trigger.clone(),
+    ));
     // Admission is serialized on this connection. Collection must keep running
     // while an admission call waits for a lock held or reserved by its report.
     // JoinSet also cancels collection when this connection is closed.
@@ -76,11 +85,23 @@ async fn connection(
     loop {
         tokio::select! {
             _ = tick.tick() => {
-                if service.retiring() && capacity.available_permits() == 128 && rx.is_empty() {
+                if service.retiring() && capacity.available_permits() == 128
+                    && admission_capacity.available_permits() == 128 && rx.is_empty() {
                     writer.send(Message::Close(None)).await?;
                     return Ok(());
                 }
+                // Inventory collection and admission may wait on slow disk/NFS.
+                // Transport liveness must not wait for either, or fabricate a
+                // fresh load/index report while they are still in progress.
+                tokio::time::timeout(
+                    std::time::Duration::from_secs(5),
+                    writer.send(Message::Ping(Vec::new())),
+                ).await??;
                 request_report(&report_trigger);
+            }
+            Some(finished) = admissions.join_next() => {
+                finished.context("node admission worker failed")?;
+                bail!("node admission worker stopped");
             }
             changed = changes.changed() => {
                 changed.context("node revision channel closed")?;
@@ -110,14 +131,10 @@ async fn connection(
                     Message::Text(text) if text.len() <= MAX_FRAME_BYTES => match serde_json::from_str::<ServerFrame>(&text)? {
                         ServerFrame::Call { request_id, operation } => {
                             if matches!(&operation, NodeOperation::Admission { .. }) {
-                                execute_admission(
-                                    &mut writer,
-                                    service.as_ref(),
-                                    operation,
-                                    request_id,
-                                    &report_trigger,
-                                )
-                                .await?;
+                                let permit = admission_capacity.clone().try_acquire_owned()
+                                    .context("node admission capacity exhausted")?;
+                                admission_tx.try_send((request_id, operation, permit))
+                                    .context("node admission queue unavailable")?;
                                 continue;
                             }
                             let tx = tx.clone(); let service = service.clone();
@@ -137,6 +154,7 @@ async fn connection(
                         }
                     },
                     Message::Ping(data) => writer.send(Message::Pong(data)).await?,
+                    Message::Pong(_) => {},
                     Message::Close(frame) => return close_outcome(frame.map(|frame| frame.code)),
                     _ => bail!("invalid server frame"),
                 }
@@ -152,27 +170,25 @@ fn close_outcome(code: Option<CloseCode>) -> Result<()> {
     }
 }
 
-async fn execute_admission<S>(
-    writer: &mut S,
-    service: &dyn NodeService,
-    operation: NodeOperation,
-    request_id: String,
-    report_trigger: &mpsc::Sender<()>,
-) -> Result<()>
-where
-    S: futures::Sink<Message> + Unpin,
-    S::Error: std::error::Error + Send + Sync + 'static,
-{
-    let reply = invoke(service, operation).await;
-    send(
-        writer,
-        &NodeFrame::Snapshot {
-            snapshot: service.snapshot(),
-        },
-    )
-    .await?;
-    request_report(report_trigger);
-    send(writer, &NodeFrame::Reply { request_id, reply }).await
+async fn execute_admissions(
+    service: Arc<dyn NodeService>,
+    mut requests: mpsc::Receiver<(String, NodeOperation, tokio::sync::OwnedSemaphorePermit)>,
+    tx: mpsc::Sender<NodeFrame>,
+    report_trigger: mpsc::Sender<()>,
+) {
+    // One connection-owned worker preserves FIFO admission transitions.
+    // Its JoinSet aborts pending calls on disconnect, before a new connection
+    // can apply its initial admission state.
+    while let Some((request_id, operation, _permit)) = requests.recv().await {
+        execute_call(
+            service.clone(),
+            operation,
+            request_id,
+            tx.clone(),
+            report_trigger.clone(),
+        )
+        .await;
+    }
 }
 
 async fn execute_call(

@@ -1,17 +1,21 @@
-Commit: 34f69db14b8c6818823c1eb01696131dabba7e23
+Commit: efe243b640c6e550770a3373e48c80773297bdfb
 
 # dag-runtime 模块
 
-节点侧 DAG 调度执行；server 不链接。
+节点侧 DAG 调度执行；server 不链接，执行只发生在 claiming 节点。
 
 ## 索引
-- `src/runtime.rs` — 步骤调度（并发上限、取消传播）
-- `src/exec/` — wasm（wasmtime WASI）与 agent 步执行；agent 步产出经 `extract_output_json_from` 三级提取：```json 围栏 → 尾部裸 JSON 兜底（`extract_tail_bare_json`，string-aware 括号平衡、取最后一个可解析顶层对象；坏围栏时从围栏体之后扫描）→ 整段解析
-- `src/exec/agent_runc.rs` — agent 步容器沙箱分支：`dag.agent_sandbox="runc"` 时整段 session 移入容器执行（`BundleSpec` argv=Direct、`/usr/bin/agent-step-runner` 入口），产物回写 step 目录；host 路径零变化
-- `examples/agent-step-runner.rs` — 容器内 session runner：读 step env（PROMPT/STEP_DIR/SESSION_ID/AGENT/HOW_APPEND）、跑 `opencoder_session::run`、写 transcript.txt/output.json/session.json（running→done/error），退出码 0/1/2
-- `src/exec/wasm/host_imports*` — 模块名 `opencoder` 的 host imports：`opencoder_run_op(op_id,args)->exit`（`dag.ops` 白名单命令，进程组整树击杀、`<step>/ops/<op>.log` 证据、256KiB 截尾、默认 600s）与 `opencoder_http_probe(url,expect,timeout_ms,retries)->HTTP码|-1..-4`；未注册 op fail-closed trap；`sandbox: runc` 不注入；`crates/dag-review-tools` 为配套 wasm 模块 crate
-- `src/step_log.rs`、`src/dag_events.rs` — 输出落库与批量上报
-- `src/sandbox/` — OCI bundle/rootfs；`BundleSpec.knowledge`（`dag.knowledge_root` → `/workspace/knowledge` 只读 bind，wasm argv 附 `--dir`；fail-closed 校验+预建挂载点）与 `argv: ArgvStyle`（WasmModule|Direct）；in-process 沙箱以 `FsPerms::ReadOnly` preopen 同路径，`OPENCODER_KNOWLEDGE_DIR` 契约 env；`scripts/prepare-dag-rootfs.sh` 制备 rootfs（wasmtime + agent-step-runner + ldd 镜像）
+- `src/runtime.rs`、`src/runtime/` — 调度、动态展开与恢复
+- `src/exec/` — wasm 与 agent 步执行（含产出提取）
+- `src/exec/wasm/in_process.rs` — 先设置 Store 的 epoch 截止点，再启动时钟线程，避免初始化阶段丢失取消；执行前已取消的令牌直接返回 Cancelled，不进入 guest。
+- `src/exec/agent_runc.rs`、`src/sandbox/` — runc 沙箱（fail-closed）与 rootfs/挂载装配
+- `src/sandbox/codex/` — 解析节点 Codex 登录目录与冻结 Harness/profile，校验 guest 可执行文件；原登录目录直接读写挂载，私有启动配置独立于 DAG 产物。`agent_runc` 保存线程回执、导入事件，并使用容器内知识库路径；纯 Codex 不创建原生模型请求。
+- `src/exec/how_copy.rs`、`src/exec/runc_events.rs` — 冻结资源副本与容器事件导入
+- `src/exec/wasm/host_imports*` — `opencoder` host imports
+- `src/step_log.rs`、`src/dag_events.rs` — 输出落库与事件上报
+- `examples/agent-step-runner.rs`、`examples/agent-session-runner.rs` — 容器内 session runner
+- `examples/wasmtime-cli.rs`、`scripts/prepare-dag-rootfs.sh` — WASI 运行器与 rootfs 制备
 
-## 边界
-- 执行只发生在 claiming 节点；runc fail-closed，不回落 in_process。
+## 相关
+- [动态步骤说明](../../docs/dag-dynamic.md) — 实例 API 与恢复契约
+- [Codex DAG 接入](../../docs/registered-runners.md) — host/runc 凭证、profile 与 rootfs 制备；安装脚本补齐 Shell、Git、TLS 和 NSS 解析依赖。

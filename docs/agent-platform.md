@@ -53,9 +53,9 @@ Node 在返回接受前同步持久化任务、资源和 Harness 配置快照。
 
 ## 定时调度
 
-定时任务定义自 schema v27 起持久化在控制面 libsql `schedules` 表（事实源）；`schedules.json`（server workdir 的 `.opencoder/` 域文件，或全局 `~/.opencoder/`）降级为一次性 seed——仅表空时全量导入（非法条目告警跳过，不阻断启动），此后文件改动不再回灌（删除不会在重启时复活），但 `scan_interval_secs` 永远以文件为准（默认 15s，最小 1s，调度循环热读）。Server 控制面内置 cron 调度器（无定义即空转，配置读取失败或条目非法仅告警跳过，不影响其余任务）。字段：`id`（1–40 字符，字母/数字/`-`/`_`，用于确定性执行 ID）、`cron`（5 字段为分 时 日 月 周；6/7 字段保留秒位）、`timezone`（仅固定偏移如 `+08:00`）、`enabled`（默认 true，关闭的条目不做校验）、`kind`（`brain`/`team`/`todos`/`agent`/`dag`）、`target`、`params`、`overlap`（`skip` 默认 / `allow`）、`node_id`（可选钉住节点）、`scan_interval_secs`（扫描间隔，默认 15s，最小 1s）。
+定时任务定义自 schema v27 起持久化在控制面 libsql `schedules` 表（事实源）；`schedules.json`（server workdir 的 `.opencoder/` 域文件，或全局 `~/.opencoder/`）降级为一次性 seed——仅表空时全量导入（非法条目告警跳过，不阻断启动），此后文件改动不再回灌（删除不会在重启时复活），但 `scan_interval_secs` 永远以文件为准（默认 15s，最小 1s，调度循环热读）。Server 控制面内置 cron 调度器（无定义即空转，配置读取失败或条目非法仅告警跳过，不影响其余任务）。字段：`id`（1–40 字符，字母/数字/`-`/`_`，用于确定性执行 ID）、`cron`（5 字段为分 时 日 月 周；6/7 字段保留秒位）、`timezone`（仅固定偏移如 `+08:00`）、`enabled`（默认 true，关闭的条目不做校验）、`kind`（`brain`/`team`/`todos`/`agent`/`dag`）、`target`、`params`（按 kind 消费：agent/team/todos 读 `prompt`——agent 触发时作为首轮消息提交并经回落机制补进 how.md，dag 读 `args`，brain 读 `objective`/`inputs`/`mode`/`plan`）、`overlap`（`skip` 默认 / `allow`）、`node_id`（可选钉住节点）、`scan_interval_secs`（扫描间隔，默认 15s，最小 1s）。
 
-触发复用既有入口：agent/team/todos/dag 走 `POST /api/executions` 同一条提交链路，brain 走 brain run 创建链路；`params` 支持时间模板 `{{now[±N<单位>][:格式]}}`（单位 s/m/h/d/w，缺省 RFC3339，另有 `unix`/`unix_ms`），在触发时刻渲染为执行 input。每次触发获得确定性执行 ID `<kind>-<schedule_id>-<scheduled_for_ms>`：同一 tick 重复提交幂等收敛，不重复执行。Server 停机重启后仅补跑最近一个错过的 tick，更早的记为 `missed`（24 小时补跑窗口）；提交失败的 tick 在 1 小时内重试，超窗后等待下一个 tick。新建条目首次扫描时没有历史台账，基线退化为 24 小时窗口起点：窗口内最近一个到期 tick 会在首次扫描立即补跑，更早的记为 `missed`。`overlap: skip` 时上一轮触发对应的执行未到终态则本轮不触发，`allow` 无条件触发。
+触发复用既有入口：agent/team/todos/dag 走 `POST /api/executions` 同一条提交链路，brain 走 brain run 创建链路；`params` 支持时间模板 `{{now[±N<单位>][:格式]}}`（单位 s/m/h/d/w，缺省 RFC3339，另有 `unix`/`unix_ms`），在触发时刻渲染为执行 input；dag 的 `args`（字符串，可选）在触发时追加到每个 Wasm 步的命令行（空白切分成 argv，幂等不重复追加）。每次触发获得确定性执行 ID `<kind>-<schedule_id>-<scheduled_for_ms>`：同一 tick 重复提交幂等收敛，不重复执行。Server 停机重启后仅补跑最近一个错过的 tick，更早的记为 `missed`（24 小时补跑窗口）；提交失败的 tick 在 1 小时内重试，超窗后等待下一个 tick。新建条目首次扫描时没有历史台账，基线退化为 24 小时窗口起点：窗口内最近一个到期 tick 会在首次扫描立即补跑，更早的记为 `missed`。`overlap: skip` 时上一轮触发对应的执行未到终态则本轮不触发，`allow` 无条件触发。
 
 触发历史持久化在 `schedule_runs` 表（schema v26 起），按 `(schedule_id, scheduled_for_ms)` 主键覆盖写；定义持久化在 `schedules` 表（schema v27，主键 `id`，`job` JSON + created_at/updated_at，upsert 保留 created_at）。`GET /api/schedules` 列出全部定义并附最近一次触发与下一次触发时刻，`GET /api/schedules/:id/runs?limit=` 返回倒序历史；admin CRUD：`POST /api/schedules` 创建（缺省 id 自动生成 `schedule-<ULID>`，重名 409，非法 body 400）、`PUT /api/schedules/:id` 全量更新（404 未知 id，created_at 保留）、`PATCH /api/schedules/:id` 仅启停（`{"enabled": bool}`，重校验整个定义——坏 cron 的停用条目无法被直接启用）、`DELETE /api/schedules/:id` 删除定义（触发历史保留可查）、`POST /api/schedules/:id/run` 手动立即触发（绕过 enabled 与 overlap，属显式操作员动作）。全部端点 admin-only；CLI 对应 `opencoder-cli schedule list` 与 `opencoder-cli schedule runs <id>`；Web 控制台「定时任务」页（`spa/src/schedule/panel.jsx`）提供新建/编辑/启停/删除与手动触发的全功能管理。
 
@@ -133,6 +133,8 @@ DAG 页和执行详情先展示节点结果快照，运行中只折叠快照之�
 真实 NFS 需要验证只读写入拒绝、版本资源快照，以及卸载后旧执行继续和新执行拒绝。依赖宿主权限的 NFS/runc 用例保留 manual 标记，验收记录必须对应当前执行后端和实际节点环境。
 
 DAG 的非 Agent 步骤为 WebAssembly WASI 命令模块。默认 `sandbox: in_process` 使用内嵌 wasmtime，通过 epoch deadline 处理取消和超时，无需单独安装 wasmtime CLI。`sandbox: runc` 需要节点上的 runc 和 `<workflow_root>/rootfs` 中可运行的静态 wasmtime 目录；缺失时报错，不回退到内嵌模式。每个 bundle 复制独立运行时目录并在重试中复用，rootfs 只读挂载，run 目录挂至 `/workspace/context`。模块读取 `OPENCODER_STEP_CONTEXT` 指向的 `context.json`，可写 `output.json` 返回结构化结果；不存在 `internal-python-step` 或 RustPython 执行入口。wasm 模块经 Server 模块池发布（`/api/dag/wasm` + 第二路 NFS 只读导出），节点配置 `dag.wasm_dir` 后受理时冻结到 `_modules/`，spec 中 `tool@v3.wasm` 形态可显式固定版本。详见 [DAG 运行时](../agents/dag-runtime/index.md) 与 [dag-wasm 模块](../agents/dag-wasm/index.md)。
+
+动态节点支持按派发输入或上游结构化输出批量展开 Agent/Wasm 实例，逐实例隔离 how、argv、状态和日志；四个并发名额在整个 run 内共享。定义示例、恢复规则和实例 API 见 [Dynamic DAG Step](dag-dynamic.md)。
 
 ## 发布与回滚
 

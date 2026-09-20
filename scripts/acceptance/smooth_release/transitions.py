@@ -4,7 +4,7 @@ import subprocess
 import sys
 from rolling import probes
 from rolling.state import Journal, atomic_bytes
-from fixture import HOLD_WASM
+from fixture import HOLD_WASM, release_wasi_gate
 
 
 def command(args, rollback=False):
@@ -21,7 +21,8 @@ def execute(args, root, env, continuity):
             subprocess.run(command(args, rollback), stdout=log, stderr=subprocess.STDOUT, check=True)
         continuity()
 
-    invoke('deployment')
+    if not getattr(args, 'current_roundtrip', False):
+        invoke('deployment')
     if not getattr(args, 'signal_roundtrip', False):
         return
     current = Journal(env.settings.state_dir).data
@@ -31,10 +32,10 @@ def execute(args, root, env, continuity):
     module = identifier + '.wasm'
     atomic_bytes(data / 'dag/_modules' / module, HOLD_WASM.encode(), 0o444)
     runtime_pid = subprocess.check_output(['systemctl','show',record['runtime_unit'],'-p','MainPID','--value']).strip()
-    env.api('/api/executions','POST',{'id':identifier,'kind':'dag','input':{'definition':{
-        'name':'signal rollback continuation','steps':[{'name':'hold','timeout_secs':1800,
-        'kind':{'type':'wasm','command':module}}]}}})
     try:
+        env.submit_initial({'id':identifier,'kind':'dag','input':{'definition':{
+            'name':'signal rollback continuation','steps':[{'name':'hold','timeout_secs':1800,
+            'kind':{'type':'wasm','command':module}}]}}})
         env.wait(lambda:env.api('/api/executions/' + identifier)['dag_steps']['running'] == 1,90)
         for label, rollback in [('signal-rollback',True),('signal-republish',False)]:
             invoke(label,rollback)
@@ -50,6 +51,5 @@ def execute(args, root, env, continuity):
             target = Path(active['releases'][active['current']]['runtime_data'])
             assert (target / 'dag' / probe / 'execution.json').is_file(), 'post-signal task has incorrect owner'
     finally:
-        for context in (data / 'dag' / identifier).glob('*/context.json'):
-            (context.parent.parent / 'release').touch()
+        release_wasi_gate(data, identifier)
     env.wait(lambda:env.completed(identifier),90)

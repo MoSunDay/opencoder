@@ -9,8 +9,8 @@ import { useStepStream } from './useStepStream.js';
 import { WasmLogs } from './wasmLogs.jsx';
 import { AgentTranscript } from './agentTranscript.jsx';
 
-export function StepPanel({ runId, step, kind, onFinished }) {
-  const stream = useStepStream({ runId, step });
+export function StepPanel({ runId, step, index, kind, onFinished }) {
+  const stream = useStepStream({ runId, step, index });
   const notify = useRef(onFinished);
   notify.current = onFinished;
   const finished = stream.finished;

@@ -47,6 +47,8 @@ Commit: 7e71cbcfd669dd2cbaa5c94ab01945fd139557f0
 
 v3 根请求必须显式带 `schema_version: 3`。根节点持有 scheduler projection、generation 和模型上下文；control 只保存并转发执行索引、输入绑定和终态回执。子执行输入、输出、消息和 DAG 状态留在所属节点，详情按 `execution_id` 查询。非法能力或引用、无成功证据完成、创建失败及终态失败都进入阻塞/失败路径，不自动降级到通用 Agent。
 
+`scheduler_wake_ack` 只确认收到的唤醒帧 generation；不以调用完成后的最新快照替代，防止快速子执行生成的新 Ready 轮次被旧回执提前确认。
+
 ## 相关
 - [agents/node](../node/index.md)、[agents/worker](../worker/index.md)
 - [agents/brain](../brain/index.md)、[运行协议](../../docs/brain-orchestration.md)

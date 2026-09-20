@@ -41,7 +41,9 @@ Commit: 7e71cbcfd669dd2cbaa5c94ab01945fd139557f0
 
 ## Brain 接缝
 
-计划发布检查 Agent/DAG/Team/TODO/Operator 注册身份并固定能力定义、执行配置和资源；相同版本重试复用既有快照。动态生成完整计划后也经过相同发布入口。运行经 `/api/brain/runs` 提交，通用执行 API 拒绝绕过该契约直接创建 Brain。
+`/api/brain/plan-defs` 支持轻量 v3 计划，沿用现有版本表和幂等写入；旧图版本可读。v3 计划保存目标、默认命名输入、显式能力范围及轮次上限。启动可传准确 plan 引用，服务端解析后保存最终请求和来源版本，回执使用 run_id。通用执行 API 继续拒绝旁路创建 Brain。
+
+`brain_runs/v3/catalog.rs` 共用目录适配与范围校验，保存、启动和每轮唤醒都验证选中的能力。注册能力解析真实目标定义，TODO 派发使用 spec 快照。`view.rs` 从持久化事件恢复轮次理由，从子执行 assignment 读取创建状态和历史能力元数据；根创建时保存能力范围的轻量描述。
 
 旧决策树、Playbook 及 Project 的旧 Brain 执行模式返回迁移错误；历史查询保留。节点选点沿用 Fleet 规则，明确指定的子执行位置不会被根节点覆盖。
 

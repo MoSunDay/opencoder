@@ -8,7 +8,7 @@ pub use decision::{decide, execution_id};
 use opencoder_core::brain::*;
 pub use terminal::admit;
 pub use terminal::{command, terminal};
-pub use validation::{prefilter, validate_request};
+pub use validation::{prefilter, validate_plan, validate_request};
 
 pub fn event(run: &BrainSchedulerRun, kind: &str, reason: Option<String>) -> BrainSchedulerEvent {
     BrainSchedulerEvent {

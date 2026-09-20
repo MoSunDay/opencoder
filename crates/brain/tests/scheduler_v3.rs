@@ -213,3 +213,43 @@ fn cancelled_sibling_late_event_settles_after_run_failure() {
     assert_eq!(change.operations[0].source_sequence, Some(1));
     assert_eq!(change.events[0].reason_summary, None);
 }
+
+#[test]
+fn objective_only_dispatch_is_allowed_only_without_required_inputs() {
+    let mut request = request();
+    request.inputs.clear();
+    request.capability_ids = vec!["a".into()];
+    let mut capability = cap("a");
+    let decision = BrainSchedulerDecision::Dispatch {
+        capabilities: vec![BrainDispatchItem {
+            capability_id: "a".into(),
+            inputs: BTreeMap::new(),
+        }],
+        reason: "perform the objective".into(),
+        evidence_execution_ids: vec![],
+    };
+    assert!(scheduler::decide(&snapshot(), &request, &[capability.clone()], &decision, 2).is_err());
+    capability.required_inputs.clear();
+    assert!(scheduler::decide(&snapshot(), &request, &[capability.clone()], &decision, 2).is_ok());
+    request.capability_ids = vec!["other".into()];
+    assert!(scheduler::decide(&snapshot(), &request, &[capability], &decision, 2).is_err());
+}
+
+#[test]
+fn saved_scheduler_plan_merges_inputs_and_requires_explicit_scope() {
+    let mut plan: SchedulerPlan = serde_json::from_value(json!({"schema_version":3,"title":"Reusable","objective":"Verify","inputs":{"repo":"default","flag":true},"capability_ids":["a"]})).unwrap();
+    scheduler::validate_plan(&plan).unwrap();
+    let request = plan.request([("repo".into(), json!("override"))].into());
+    assert_eq!(
+        request.inputs,
+        [
+            ("repo".into(), json!("override")),
+            ("flag".into(), json!(true))
+        ]
+        .into()
+    );
+    assert_eq!(request.max_rounds, 32);
+    assert_eq!(plan.inputs["repo"], "default");
+    plan.capability_ids.clear();
+    assert!(scheduler::validate_plan(&plan).is_err());
+}

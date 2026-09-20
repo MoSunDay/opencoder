@@ -2,12 +2,12 @@
 import '../../../test/setup-dom.js';
 import { afterEach, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { PlanEditor } from '../editor.jsx';
-import { draftKey, legacyDraftKey } from '../editor/draft.js';
-import { repairPlan } from '../editor/model.js';
+import { PlanEditor } from '../history/editor.jsx';
+import { draftKey, legacyDraftKey } from '../history/editor/draft.js';
+import { repairPlan } from '../history/editor/model.js';
 import { apiPost } from '../../../api.js';
 vi.mock('../../../api.js', () => ({ apiPost: vi.fn() }));
-vi.mock('../canvas.jsx', () => ({ PlanCanvas: () => <div>画布</div> }));
+vi.mock('../history/canvas.jsx', () => ({ PlanCanvas: () => <div>画布</div> }));
 afterEach(() => { cleanup(); localStorage.clear(); vi.resetAllMocks(); });
 it('blocks saving invalid JSON instead of submitting a stale valid binding', async () => {
   const plan = repairPlan([{ id: 'act', kind: 'agent', target: 'act', summary: '执行' }]);

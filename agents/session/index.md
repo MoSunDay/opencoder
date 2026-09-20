@@ -5,7 +5,7 @@ Commit: f2d723ed2a32a5a394eac05f58bc5558e7cfe08f
 会话运行时：drain 循环、工具注册、subagent、plan 写拦截、压缩、resume、cancel。
 
 ## 索引
-- `src/session.rs` — drain 主循环与 turn 流转
+- `src/bash_guard.rs` — plan/sidecar 只读 bash 门：薄适配 shellguard，`Ask`/`Deny` 与带写出处（`writes_state`，含 `/tmp` 持久写）的 `Allow` 一律拦截；unknown 命令随 shellguard allow-by-default 放行（2026-09-20）
 - `src/tools/` — 工具注册与实现
 - `src/subagent.rs` — 子代理
 - `src/compaction.rs` — 上下文压缩

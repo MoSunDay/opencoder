@@ -46,6 +46,7 @@ impl Dispatcher {
             None,
             Some(format!("{} / {}", self.coordinator, member.agent)),
             now_ms(),
+            &crate::brain::workdir::node_workdir(&self.worker),
         )
         .await?;
         let mut session = opencoder_session::resume(

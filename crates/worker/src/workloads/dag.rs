@@ -79,6 +79,7 @@ pub(super) async fn run(
         None,
         Some(spec.name.clone()),
         assignment.index.created_at,
+        &crate::brain::workdir::node_workdir(worker),
     )
     .await?;
     let failure = Arc::new(Mutex::new(None));

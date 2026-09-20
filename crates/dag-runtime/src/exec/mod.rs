@@ -3,7 +3,9 @@
 pub mod agent;
 pub mod agent_runc;
 pub mod how_append;
+pub mod how_copy;
 pub mod logs;
+mod runc_events;
 pub mod wasm;
 
 use std::path::PathBuf;
@@ -34,6 +36,8 @@ pub(crate) const AGENTS_MOUNT: &str = "/workspace/agent";
 /// Pure per-step execution context handed to the executors.
 pub struct StepCtx {
     pub run_id: String,
+    pub instance: Option<usize>,
+    pub instance_input: Option<Value>,
     pub spec: DagSpec,
     pub step: StepSpec,
     pub states: StepStates,
@@ -52,6 +56,27 @@ pub struct StepCtx {
 }
 
 impl StepCtx {
+    pub fn dir(&self) -> Result<PathBuf, String> {
+        opencoder_dag::artifacts::execution_dir(
+            &self.workflow_root,
+            &self.run_id,
+            &self.step.name,
+            self.instance,
+        )
+    }
+    pub fn relative_dir(&self) -> String {
+        match self.instance {
+            Some(i) => format!("{}/instances/{i}", self.step.name),
+            None => self.step.name.clone(),
+        }
+    }
+    pub fn execution_key(&self) -> String {
+        match self.instance {
+            Some(i) => format!("instance-{}-{i}", self.step.name),
+            None => format!("step-{}", self.step.name),
+        }
+    }
+
     /// The upstream `context` object delivered to the step (agent prompt
     /// header; wasm steps get the same object as a `context.json` file
     /// whose path arrives via `OPENCODER_STEP_CONTEXT`). Only declared

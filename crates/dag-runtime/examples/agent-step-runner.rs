@@ -23,6 +23,7 @@
 //! same extraction contract as the host path. Exit code: 0 success, 1 run
 //! failure, 2 contract violation.
 
+use std::io::Write;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -79,8 +80,8 @@ fn run() -> Result<(), i32> {
     let config = match opencoder_core::Config::load(std::path::Path::new("/workspace")) {
         Ok(config) => config,
         Err(error) => {
-            eprintln!("agent-step-runner: config load failed ({error}); falling back to defaults");
-            opencoder_core::Config::default()
+            eprintln!("agent-step-runner: config load failed: {error}");
+            return Err(2);
         }
     };
     let endpoint = match config.resolve_endpoint() {
@@ -97,11 +98,11 @@ fn run() -> Result<(), i32> {
             return Err(1);
         }
     };
-    let agent = match opencoder_core::resolve_agent(&agent_name) {
-        Some(agent) => agent,
-        None => {
-            eprintln!("agent-step-runner: unknown agent `{agent_name}`");
-            return Err(1);
+    let agent = match opencoder_dag_runtime::exec::how_copy::load(&step_dir) {
+        Ok(agent) => agent,
+        Err(error) => {
+            eprintln!("agent-step-runner: cannot load frozen agent/how.md: {error:#}");
+            return Err(2);
         }
     };
 
@@ -139,9 +140,26 @@ fn run() -> Result<(), i32> {
     );
 
     // 5. Run exactly one turn, keeping a bounded transcript tail.
+    let file = std::fs::File::create(step_dir.join("events.ndjson")).map_err(|e| {
+        eprintln!("agent-step-runner: cannot create event stream: {e}");
+        2
+    })?;
+    let events = Arc::new(Mutex::new(file));
+    let event_error = Arc::new(Mutex::new(None));
+    let failure = event_error.clone();
+    let cancellation = tokio_util::sync::CancellationToken::new();
+    session.cancel = Some(cancellation.clone());
     let transcript = Arc::new(Mutex::new(String::new()));
     let tail = Arc::clone(&transcript);
     let on_event = move |ev: SessionEvent| {
+        if !ev.is_sidecar_frame() {
+            let line =
+                serde_json::json!({"kind":ev.sse_kind(),"payload":ev.sse_data()}).to_string();
+            if let Err(error) = writeln!(events.lock().unwrap(), "{line}") {
+                *failure.lock().unwrap() = Some(error.to_string());
+                cancellation.cancel();
+            }
+        }
         if let SessionEvent::TextDelta(text) = &ev {
             if let Ok(mut tail) = tail.lock() {
                 push_tail(&mut tail, text, MAX_TRANSCRIPT_BYTES);
@@ -162,6 +180,10 @@ fn run() -> Result<(), i32> {
         runtime.block_on(run_session(&mut session, prompt, on_event))
     };
 
+    if let Some(error) = event_error.lock().unwrap().as_ref() {
+        eprintln!("agent-step-runner: event persistence failed: {error}");
+        return Err(1);
+    }
     // 6. Artifacts: transcript (fallback to the last assistant message),
     // optional structured output, terminal session.json.
     let mut text = transcript.lock().map(|t| t.clone()).unwrap_or_default();

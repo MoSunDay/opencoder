@@ -19,6 +19,10 @@ Web 控制台的 operator 与 agent 会话都通过控制面的执行派发入�
 
 节点并发与排队在节点侧配置：`GET/PUT /api/nodes/:id/scheduling`（admin-only，控制面经 Maintenance RPC 转发，见 [agents/control](../../agents/control/index.md)）读写 `max_runs`/`queue_order`，并可设置节点工作空间 `workdir`（绝对路径，空白即清空、恢复节点启动目录；持久化在节点 `scheduling.json`，重启后继续生效）。workdir 生效范围是该节点上非 brain 工作负载的会话工作目录、配置发现与会话归属（`workdir_hash`）；brain 工作负载仍用各执行目录的 `workspace`，节点自身数据目录与启动 workdir 不变（见 [agents/worker](../../agents/worker/index.md)）。多 runtime Host 不支持节点级 workdir：读接口返回 `workdir_supported:false`，配置带 workdir 返回 400，SPA 调度配置弹窗据此隐藏输入项。部署与 API 明细见 [docs/agent-platform.md](../../docs/agent-platform.md)。
 
+## 动态 DAG 步骤
+
+DAG 可从派发输入或上游输出派生最多 1,000 个 Agent/Wasm 实例，模板节点聚合进度，抽屉分页选择实例及日志。Agent 使用冻结原文的本地 how 副本，DAG `how_append` 不再回写共享资源；Wasm 逐项追加 argv。接口和恢复约定见 [Dynamic DAG Step](../../docs/dag-dynamic.md)。
+
 ## 相关
 - [agents/control](../../agents/control/index.md) — 控制面
 - [agents/worker](../../agents/worker/index.md)、[agents/node](../../agents/node/index.md)

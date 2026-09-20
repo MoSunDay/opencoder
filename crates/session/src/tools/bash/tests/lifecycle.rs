@@ -33,11 +33,14 @@ async fn bash_timeout_triggers_handoff() {
         "timeout output must contain the output path label: {}",
         out.content
     );
-    assert!(
-        out.content.contains("/tmp/opencoder_bg_"),
-        "timeout output must reference the background output file: {}",
-        out.content
-    );
+    let output = out
+        .content
+        .lines()
+        .find_map(|line| line.strip_prefix("output: "))
+        .expect("handoff output path");
+    let output = std::path::Path::new(output);
+    assert_eq!(output.parent().unwrap(), std::env::temp_dir());
+    assert!(output.is_file(), "handoff must expose its real output file");
     // Clean up: kill the backgrounded process so it does not linger.
     kill_all();
 }

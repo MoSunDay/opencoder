@@ -1,4 +1,5 @@
 mod brain_delivery;
+mod handoff_report;
 mod hub;
 mod report;
 #[cfg(test)]

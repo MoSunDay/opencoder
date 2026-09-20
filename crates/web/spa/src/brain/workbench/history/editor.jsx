@@ -1,6 +1,6 @@
 import { Alert, Button, Empty, Space, Tabs, Typography } from 'antd';
 import { forwardRef, useImperativeHandle, useState } from 'react';
-import { apiPost } from '../../api.js';
+import { apiPost } from '../../../api.js';
 import { PlanCanvas } from './canvas.jsx';
 import { useDraft } from './editor/draft.js';
 import { appendAction, checkDraftPlan, removeAction, repairPlan, submission } from './editor/model.js';

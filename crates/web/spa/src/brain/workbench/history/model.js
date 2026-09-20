@@ -45,10 +45,9 @@ export function graph(plan, groups = []) {
 }
 export function newPlan() { return { schema_version: 2, title: '新计划', objective: '', inputs: {}, instances: [], outputs: {}, routes: [], entry: [] }; }
 export function engineeringInputs(rows) {
-  const inputs = Object.create(null);
+  const inputs = {};
   for (const row of rows || []) {
     const key = String(row?.key || '').trim(); if (!key) continue;
-    if (Object.hasOwn(inputs, key)) throw new Error(`工程参数名重复：${key}`);
     const raw = String(row?.value ?? '').trim();
     let value; try { value = raw === '' ? '' : JSON.parse(raw); } catch { value = raw; }
     inputs[key] = value;
@@ -56,9 +55,6 @@ export function engineeringInputs(rows) {
   return inputs;
 }
 export function launchBody(values, id) {
-  const objective = values.objective.trim();
-  const inputs = engineeringInputs(values.engineering);
-  if (!Object.keys(inputs).length) inputs.request = objective;
-  return { id, schema_version: 3, node_id: values.node, objective, inputs,
-    capability_ids: values.capability_ids || [], max_rounds: values.max_rounds ?? 32 };
+  const reference = (raw) => { const [name, version] = raw.split('@'); return { id: name, version: Number(version) }; };
+  return { id, mode: values.mode, node_id: values.node, objective: values.objective.trim(), inputs: engineeringInputs(values.engineering), plan: values.mode === 'fixed' ? reference(values.plan) : null, references: values.mode === 'dynamic' ? (values.references || []).map(reference) : [] };
 }

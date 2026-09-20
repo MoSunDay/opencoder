@@ -38,8 +38,9 @@ describe('v3 大脑运行总览', () => {
     }] };
     await act(async () => frame({ seq: 10, event: 'round_started', data: {} }));
     await screen.findByRole('button', { name: /查看执行 agent-2/ });
-    expect(screen.getByRole('button', { name: /第 1 轮/ }).getAttribute('aria-expanded')).toBe('false');
+    expect(screen.getByRole('button', { name: /第 1 轮/ }).getAttribute('aria-expanded')).toBe('true');
     expect(screen.getByRole('button', { name: /第 2 轮/ }).getAttribute('aria-expanded')).toBe('true');
+    fireEvent.click(screen.getByRole('button', { name: /第 1 轮/ }));
     fireEvent.click(screen.getByRole('button', { name: /第 1 轮/ }));
     expect(screen.getByRole('button', { name: /查看执行 agent-1/ })).toBeTruthy();
   });
@@ -69,7 +70,7 @@ describe('v3 大脑运行总览', () => {
     expect(screen.getAllByText('第 1 轮').length).toBeGreaterThan(0);
     expect(screen.queryByText('步骤执行画布')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: /查看执行 agent-1/ }));
-    expect(await screen.findByText('agent-1')).toBeTruthy();
+    expect(await screen.findByRole('dialog', { name: '能力执行明细' })).toBeTruthy();
     expect(screen.getByText('所属节点')).toBeTruthy();
   });
 });

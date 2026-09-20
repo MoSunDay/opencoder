@@ -3,25 +3,14 @@ import { apiGet } from '../../api.js';
 import { openStream } from '../../sse.js';
 import { normalizeEvent, terminalV3 } from './v3Model.js';
 
-function legacyView(snapshot) {
-  if (!snapshot?.run) return snapshot;
-  const operations = snapshot.operations || [];
-  const rounds = [...new Set(operations.map((operation) => operation.round))].sort((a, b) => a - b)
-    .map((round) => ({ round, operations: operations.filter((operation) => operation.round === round) }));
-  return { schema_version: 3, objective: '', capabilities: [], rounds, run: snapshot.run };
-}
-
 async function readView(id) {
   const snapshot = await apiGet(`/api/brain/runs/${encodeURIComponent(id)}`);
-  if (!snapshot?.run) return snapshot;
-  try {
+  if (snapshot?.schema_version === 3 || (snapshot?.run && snapshot?.operations)) {
     const view = await apiGet(`/api/brain/runs/${encodeURIComponent(id)}/view`);
-    if (view?.run) return view;
-  } catch {
-    // A v3 snapshot is still useful while the presentation projection is
-    // temporarily unavailable; it contains the complete operation index.
+    if (!view?.run) throw new Error('v3 brain view is missing its scheduler run');
+    return view;
   }
-  return legacyView(snapshot);
+  return snapshot;
 }
 
 function watermarkOf(value) {

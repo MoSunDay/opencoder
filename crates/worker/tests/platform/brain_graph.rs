@@ -65,7 +65,10 @@ async fn concurrent_v3_runs_generate_once_and_replay_without_new_execution() {
     assert_eq!(right.status, 202, "{right:?}");
     assert_eq!(left.body["run_id"], "brain-concurrent");
     assert_eq!(right.body["run_id"], "brain-concurrent");
-    scheduler_support::wait_phase(&fleet, "brain-concurrent", "completed").await;
+    // The child terminal rides the ack-gated outbox replay; a 30s budget has
+    // been observed to expire under load spikes even though the delivery
+    // chain self-heals, so allow a wider convergence window here.
+    scheduler_support::wait_phase_within(&fleet, "brain-concurrent", "completed", 120).await;
     let requests = client.requests.lock().unwrap().clone();
     assert_eq!(
         requests

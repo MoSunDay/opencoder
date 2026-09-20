@@ -58,7 +58,7 @@
 .brain-plan-contracts { max-width: 760px; padding: 20px; }
 @media (max-width: 1150px) { .brain-workspace { grid-template-columns: 150px minmax(0, 1fr); } .brain-workspace > .brain-inspector { grid-column: 1 / -1; border-left: none; border-top: 1px solid #dce5ef; } }
 @media (max-width: 700px) { .brain-run-header { flex-direction: column; } .brain-workspace { display: block; } .brain-step-list { display: flex; max-height: 120px; overflow: auto; } .brain-step-list button { min-width: 140px; } .brain-canvas { height: 420px; } .brain-editor-workspace { display: block; } .brain-workspace-toolbar { flex-wrap: wrap; } }
-.brain-core-flow { display: flex; flex-direction: column; gap: 8px; padding: 12px; border: 1px solid #dce5ef; border-radius: 12px; background: #f8fafc; }
+.brain-core-flow { display: flex; flex-direction: column; gap: 6px; padding: 10px; border: 1px solid #dce5ef; border-radius: 12px; background: #f8fafc; }
 .brain-core-stages { display: flex; gap: 10px; align-items: stretch; }
 .brain-core-stage { display: flex; gap: 10px; flex: 1; min-width: 0; }
 .brain-core-stage .brain-summary-node { min-height: 74px; padding: 8px 10px; min-width: 0; max-width: none; width: 100%; }

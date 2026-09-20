@@ -101,12 +101,16 @@ pub async fn search(query: &str, workdir: &Path) -> Result<Vec<SearchHit>, Strin
 }
 
 async fn try_rg(query: &str, workdir: &Path) -> Result<Vec<SearchHit>, String> {
+    // An explicit directory keeps rg from choosing inherited piped stdin.
+    // End option parsing so a query beginning with '-' remains a pattern.
     let out = tokio::process::Command::new("rg")
         .arg("--line-number")
         .arg("--no-heading")
         .arg("--color=never")
         .arg("--max-count=500")
+        .arg("--")
         .arg(query)
+        .arg(".")
         .current_dir(workdir)
         .output()
         .await
@@ -139,6 +143,7 @@ async fn try_grep(query: &str, workdir: &Path) -> Result<Vec<SearchHit>, String>
     let out = tokio::process::Command::new("grep")
         .arg("-rn")
         .arg("--color=never")
+        .arg("--")
         .arg(query)
         .arg(".")
         .current_dir(workdir)
@@ -309,6 +314,16 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let hits = search("", d.path()).await.unwrap();
         assert!(hits.is_empty());
+    }
+
+    #[tokio::test]
+    async fn search_treats_a_leading_dash_as_the_query() {
+        let d = tempfile::tempdir().unwrap();
+        fs::write(d.path().join("options.txt"), "use --version to inspect\n").unwrap();
+        let hits = search("--version", d.path()).await.unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].path, d.path().join("options.txt"));
+        assert_eq!(hits[0].line_no, 1);
     }
 
     #[tokio::test]

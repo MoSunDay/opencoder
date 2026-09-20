@@ -143,7 +143,7 @@ pub async fn run_step_streamed(
 }
 
 pub(super) async fn delete_force(root: &Path, id: &str) -> Result<()> {
-    if !root.join(id).exists() {
+    if opencoder_session::process::remove_empty_runc_state(&root.join(id))? {
         return Ok(());
     }
     let mut child = Command::new("runc")
@@ -163,10 +163,8 @@ pub(super) async fn delete_force(root: &Path, id: &str) -> Result<()> {
             anyhow::bail!("runc delete exceeded 5s");
         }
     };
-    anyhow::ensure!(
-        status.success() || !root.join(id).exists(),
-        "runc delete failed: {status}"
-    );
+    let removed = opencoder_session::process::remove_empty_runc_state(&root.join(id))?;
+    anyhow::ensure!(status.success() || removed, "runc delete failed: {status}");
     anyhow::ensure!(
         !root.join(id).exists(),
         "runc container state remains after cleanup"
@@ -178,6 +176,18 @@ pub(super) async fn delete_force(root: &Path, id: &str) -> Result<()> {
 mod tests {
     use super::*;
     use std::path::PathBuf;
+
+    #[tokio::test]
+    async fn cleanup_removes_interrupted_creation_without_container_metadata() {
+        let root = tempfile::tempdir().unwrap();
+        let state = root.path().join("interrupted-create");
+        std::fs::create_dir(&state).unwrap();
+        delete_force(root.path(), "interrupted-create")
+            .await
+            .unwrap();
+        assert!(!state.exists());
+        assert!(root.path().is_dir());
+    }
 
     /// Candidate fixture roots checked by the explicitly invoked manual tests.
     /// Missing prerequisites fail the manual invocation.

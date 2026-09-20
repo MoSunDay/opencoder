@@ -7,8 +7,8 @@ use std::{
 };
 
 /// Delete residual containers below exact node-owned bundle roots before a
-/// restarted worker can register as ready. Sources are retained; only runc's
-/// private runtime state is changed through `runc delete --force`.
+/// restarted worker can register as ready. Sources are retained; populated
+/// state uses `runc delete --force`, while incomplete empty state uses rmdir.
 pub async fn cleanup_owned_containers(bundle_roots: &[PathBuf]) -> Result<usize> {
     let mut cleaned = 0;
     let mut seen = BTreeSet::new();

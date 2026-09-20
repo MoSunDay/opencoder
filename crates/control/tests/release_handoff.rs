@@ -320,3 +320,105 @@ async fn retirement_interrupts_a_slow_sse_poll_and_preserves_cursor_and_admissio
     assert!(old.state.admission.is_open().await);
     assert_eq!(node.freezes.load(Ordering::SeqCst), 0);
 }
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn retiring_server_accepts_late_ingress_connections_until_workers_exit() {
+    let root = tempfile::tempdir().unwrap();
+    let _scope = opencoder_core::config::scoped_config_home(root.path().join("home"));
+    let work = root.path().join("work");
+    std::fs::create_dir(&work).unwrap();
+    let node = Node::new();
+    let successor = start(root.path(), node.clone()).await;
+    let successor_port = reqwest::Url::parse(&successor.url).unwrap().port().unwrap();
+    let reserved = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = reserved.local_addr().unwrap().port();
+    drop(reserved);
+    let server = tokio::spawn(opencoder_control::serve(
+        "127.0.0.1".into(),
+        port,
+        false,
+        work,
+        Some(root.path().join("server")),
+        "release-test".into(),
+    ));
+    let url = format!("http://127.0.0.1:{port}");
+    until(async || {
+        client()
+            .get(format!("{url}/api/health"))
+            .bearer_auth("release-test")
+            .send()
+            .await
+            .is_ok_and(|response| response.status() == 200)
+    })
+    .await;
+    let mut worker = tokio::process::Command::new("/bin/sleep")
+        .arg("30")
+        .kill_on_drop(true)
+        .spawn()
+        .unwrap();
+    let pid = worker.id().unwrap();
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).unwrap();
+    let ticks: u64 = stat
+        .rsplit_once(") ")
+        .unwrap()
+        .1
+        .split_whitespace()
+        .nth(19)
+        .unwrap()
+        .parse()
+        .unwrap();
+    for body in [
+        json!({"unknown_frontier": []}),
+        json!({"ingress_workers": [{"pid": pid, "start_ticks": ticks}]}),
+        json!({"successor_port": port}),
+    ] {
+        let rejected = client()
+            .post(format!("{url}/api/admin/release/retire"))
+            .bearer_auth("release-test")
+            .json(&body)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(rejected.status(), 400);
+        assert!(
+            !server.is_finished(),
+            "invalid retirement stopped the listener"
+        );
+    }
+    let response = client()
+        .post(format!("{url}/api/admin/release/retire"))
+        .bearer_auth("release-test")
+        .json(&json!({"ingress_workers":[{"pid":pid,"start_ticks":ticks}],"successor_port":successor_port}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    let submitted = client()
+        .post(format!("{url}/api/executions"))
+        .bearer_auth("release-test")
+        .json(&assignment().request)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(submitted.status(), 202);
+    assert_eq!(node.starts.load(Ordering::SeqCst), 1);
+    for _ in 0..5 {
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        assert!(!server.is_finished(), "ingress still owns this listener");
+        let late = client()
+            .get(format!("{url}/api/health"))
+            .bearer_auth("release-test")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(late.status(), 200);
+    }
+    worker.kill().await.unwrap();
+    worker.wait().await.unwrap();
+    tokio::time::timeout(Duration::from_secs(5), server)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+}

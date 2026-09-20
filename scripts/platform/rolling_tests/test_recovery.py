@@ -33,11 +33,16 @@ class Faults(Operations):
         super().run(*args)
         self.after_effect()
 
+    def ingress_workers(self):
+        workers = super().ingress_workers()
+        self.after_effect()
+        return workers
+
 
 class RecoveryTests(unittest.TestCase):
     def test_every_external_switch_boundary_can_resume_without_duplicate_release(self):
-        for fault in range(1, 25):
-            with self.subTest(effect=fault), tempfile.TemporaryDirectory() as directory:
+        def exercise(fault):
+            with tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
                 settings = Settings(root,root/'work',root/'server',root/'agent',root/'token',
                     bin_dir=root/'bin',systemd_dir=root/'units')
@@ -57,12 +62,17 @@ class RecoveryTests(unittest.TestCase):
                         deployment.deploy(settings,root/'bundle',operations)
                     except PowerLoss:
                         pass
+                    effects = operations.effects
                     operations.fail_at = None
                     result = deployment.deploy(settings,root/'bundle',operations)
                 self.assertEqual(result['current'],'r2')
                 self.assertEqual(result['phase'],'complete')
                 self.assertEqual(set(result['releases']),{'r1','r2'})
                 self.assertFalse(any('/api/admin/drain' in c for c in operations.calls))
+                return effects
+        for fault in range(1, exercise(None) + 1):
+            with self.subTest(effect=fault):
+                exercise(fault)
 
     def test_stopped_backup_preserves_nested_databases_and_retry_never_reuses_partial(self):
         with tempfile.TemporaryDirectory() as directory:

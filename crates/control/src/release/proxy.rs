@@ -75,7 +75,7 @@ pub async fn status(State(state): State<Arc<AppState>>) -> Response {
         let response = forward(&state,&platform.host_service,reqwest::Method::GET,"/status",Vec::new()).await?;
         anyhow::ensure!(response.status().is_success(), "host status query failed");
         let host: serde_json::Value = serde_json::from_slice(&axum::body::to_bytes(response.into_body(), 16 * 1024 * 1024).await?)?;
-        Ok::<_,anyhow::Error>(serde_json::json!({"instance_release":platform.release_id,"release":release,"host":host,"signal_protocol":if cfg!(unix) { 1 } else { 0 },"retiring":state.lifecycle.retiring.load(std::sync::atomic::Ordering::SeqCst)}))
+        Ok::<_,anyhow::Error>(serde_json::json!({"instance_release":platform.release_id,"release":release,"host":host,"signal_protocol":if cfg!(unix) { 1 } else { 0 },"retirement_protocol":if cfg!(target_os="linux") { 2 } else { 1 },"retiring":state.lifecycle.retiring.load(std::sync::atomic::Ordering::SeqCst)}))
     }.await;
     match result {
         Ok(value) => crate::api::response(RpcReply::ok(value)),

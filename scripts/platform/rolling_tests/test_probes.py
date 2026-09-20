@@ -4,9 +4,10 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from types import SimpleNamespace
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from rolling.io import HttpFailure
-from rolling.probes import candidate_locked, probe_id, spec, submit_probe
+from rolling.probes import candidate_locked, probe_id, public, spec, submit_probe
 
 
 class LostReply:
@@ -155,6 +156,60 @@ class CandidateProbeTests(unittest.TestCase):
             with self.subTest(field=field), self.assertRaisesRegex(ValueError, "conflicts"):
                 candidate_locked(None, self.record, operations, 1)
             self.assertEqual(operations.creates, 0)
+
+
+class PublicProbeTests(unittest.TestCase):
+    def setUp(self):
+        self.record = {"id": "release-local", "runtime_port": 3100,
+                       "manifest": {"commit": "local-commit"}}
+        self.inventory = {"runtime_id": "release-local", "build": {"git_commit": "local-commit"},
+                          "registration": {"id": "node-local"}}
+        self.node_id = "node-local"
+        self.accepted = False
+        self.posts = []
+
+    def http(self, base, path, method="GET", body=None):
+        if path == "/api/admin/release":
+            return {"instance_release": "release-local"}
+        if path == "/inventory":
+            self.assertEqual(base, "http://127.0.0.1:3100")
+            return self.inventory
+        if path.endswith("/receipt"):
+            if self.accepted:
+                return {"phase": "accepted"}
+            raise HttpFailure(method, path, 404, "no receipt")
+        if method == "POST":
+            self.posts.append(copy.deepcopy(body))
+            self.accepted = True
+            return {"id": body["id"]}
+        return {"execution": {"status": "done", "node_id": self.node_id}}
+
+    def wait(self, check, seconds):
+        result = check()
+        self.assertTrue(result)
+        return result
+
+    def test_public_probe_uses_published_runtime_node_and_recovers_same_receipt(self):
+        settings = SimpleNamespace(public_url="http://public")
+        public(settings, self.record, self, 1)
+        public(settings, self.record, self, 1)
+        self.assertEqual(len(self.posts), 1)
+        self.assertEqual(self.posts[0]["node_id"], "node-local")
+        self.assertEqual(self.posts[0]["id"], probe_id(self.record, public=True))
+
+    def test_success_on_another_node_cannot_validate_this_release(self):
+        self.node_id = "node-unrelated"
+        with self.assertRaisesRegex(ValueError, "another node"):
+            public(SimpleNamespace(public_url="http://public"), self.record, self, 1)
+
+    def test_wrong_runtime_or_binary_is_rejected_before_submission(self):
+        for field in ("runtime_id", "build"):
+            original = copy.deepcopy(self.inventory)
+            self.inventory[field] = {"git_commit": "old"} if field == "build" else "other"
+            with self.subTest(field=field), self.assertRaisesRegex(ValueError, "activated release"):
+                public(SimpleNamespace(public_url="http://public"), self.record, self, 1)
+            self.inventory = original
+        self.assertEqual(self.posts, [])
 
 
 if __name__ == "__main__":

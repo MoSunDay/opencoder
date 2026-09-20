@@ -7,8 +7,8 @@ Commit: 7e71cbcfd669dd2cbaa5c94ab01945fd139557f0
 ## 索引
 - `crates/worker/src/service.rs` — 根执行与会话清单
 - `crates/worker/src/workloads/` — agent/team/dag/todos/project 适配器；`dag.rs`
-  的 `apply_input`（纯函数，带单测）把派发 input 折进冻结 spec：`prompt` 追加
-  各 Agent 步「执行要求」、`args`（非空字符串）追加到各 Wasm 步 command
+  的 `apply_input`（纯函数，带单测）把派发 input 折进本次解码的 spec 副本，冻结定义不变：`prompt` 追加
+  各静态 Agent 步「执行要求」、`args`（非空字符串）追加到各静态 Wasm 步 command
   （空白切分成 argv；每次 run/resume 基于冻结定义重新 decode，幂等）；
   `agent_how.rs` 是
   `kind=agent` 会话的 how.md 契约：显式 `how_append` 缺失时以首条 `prompt` 作为 how
@@ -54,6 +54,8 @@ Commit: 7e71cbcfd669dd2cbaa5c94ab01945fd139557f0
 接受 v2 根运行后，通过有限激活调用 [brain 纯函数内核](../brain/index.md)，保存路由读集、选择、因果输入和 Prepared 回执，再由 outbox 派发。重启重放保留动作 ID，重复和乱序通知不重启任务；暂停、取消与资源互斥仍由原执行边界管理。
 
 接受 schema v3 根运行后，worker 根节点维护调度 projection、generation、模型上下文和唤醒；control 只归一化能力目录、创建普通子执行并处理中继回执。子执行终态通过 outbox 发送给 control；节点重启只恢复未确认终态事件和未完成创建请求，失败终态取消同轮兄弟执行，迟到通知不改变已终态脑状态。
+
+v3 outbox 的重复读取不触发新的报告通知。实际状态转换提交后通知订阅者；`settle` 仅在首次同步终态 journal 时通知，已同步的终态保持幂等，避免多个并发根运行相互放大报告循环。
 
 v3 Brain 的通用 execution events 查询从 scheduler event projection 读取事件索引，并以 `{seq, kind, data, ts}` 适配现有 SSE；事件只含能力、执行 ID、终态和摘要，子执行正文仍由对应 execution 查询维护。
 

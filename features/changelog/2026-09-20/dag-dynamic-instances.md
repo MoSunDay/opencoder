@@ -30,14 +30,14 @@ Commit: 7e71cbcfd669dd2cbaa5c94ab01945fd139557f0
 | HTTP 页大小、SSE 游标和错误 | `instance_routes_preserve_identity_and_bound_pages`、`instance_sse_reconnects_at_cursor_and_returns_worker_errors` | [control e2e](../../../crates/control/tests/e2e/dag_instances.rs) |
 | 真实 Wasm/Agent/runc、实例产物和日志 | `dynamic_wasm_instances_have_http_pages_isolated_argv_artifacts_and_replay`、`runc_dynamic_agent_and_wasm_read_isolated_copies_and_argv` | [process e2e](../../../tests/dag_e2e/dynamic.rs) |
 | CLI 缓存选项及模块参数边界 | `parses_the_bundle_argv_shape` | [wasmtime-cli](../../../crates/dag-runtime/examples/wasmtime-cli.rs) |
-| 分页选择、切换清理、终态回放及错误保留 | `instances.dom.test.jsx` 的四项行为测试 | [SPA](../../../crates/web/spa/src/dag/dynamic/instances.dom.test.jsx) |
+| 分页选择、切换清理、终态回放、错误保留及同 run 恢复 | `instances.dom.test.jsx` 的五项行为测试 | [SPA](../../../crates/web/spa/src/dag/dynamic/instances.dom.test.jsx) |
 | Server→Worker→浏览器、两种来源、历史与重连 | `dag_dynamic.js` | [Chromium 验收](../../../scripts/acceptance/dag_dynamic.js) |
 
 ## 验证记录
 
 - DAG、运行时、控制面相关 Rust 套件通过；实例运行时 7 项、Worker 日志/查询 11 项、运行进度 2 项通过。
 - 真实进程验收 2 项通过，包含可用 runc 下的实际容器执行；浏览器两种来源、输入提交、实例切换、历史回放和连接中断恢复通过。
-- SPA 全量 118 个文件、870 项测试通过（`/tmp/dynamic-spa-full-complete.log`）；最终 SPA 构建通过。
+- SPA 全量 118 个文件、871 项测试通过（`/tmp/dynamic-spa-resume-complete.log`）；最终 SPA 构建通过（`/tmp/dynamic-spa-build-complete.log`）。
 - `cargo clippy --workspace --all-targets -- -D warnings`：零告警通过。
 - 工作区全量测试与最终构建：验证中，完成后补充实际结果。
 

@@ -32,6 +32,8 @@ class Operations:
 
     def http(self, base, path, method="GET", body=None):
         self.calls.append((method, path, copy.deepcopy(body)))
+        if path == '/api/admin/release':
+            return {'retirement_protocol': 2}
         if path.startswith("/runtimes/") and path.endswith("/activate"):
             self.active = path.split("/")[2]
             if self.crash:
@@ -47,6 +49,12 @@ class Operations:
 
     def wait(self, check, seconds=90):
         return check()
+
+    def ingress_workers(self):
+        return []
+
+    def ingress_drained(self, workers):
+        return not workers
 
 
 class DeploymentTests(unittest.TestCase):
@@ -100,6 +108,43 @@ class DeploymentTests(unittest.TestCase):
         self.assertEqual(result["phase"], "failed")
         self.assertEqual(self.operations.active, "r1")
         self.units_switch_ingress.assert_not_called()
+
+    def test_interrupted_switch_reuses_the_recorded_ingress_frontier(self):
+        workers = [{'pid': 17, 'start_ticks': 190}]
+        self.operations.ingress_workers = lambda: workers
+        self.operations.crash = True
+        with self.assertRaises(PowerLoss):
+            deploy(self.settings, Path('bundle'), self.operations)
+        pending = Journal(self.settings.state_dir).data
+        self.assertEqual(pending['ingress_workers'], workers)
+        self.operations.ingress_workers = lambda: self.fail('resumed switch changed its ingress frontier')
+        result = deploy(self.settings, Path('bundle'), self.operations)
+        self.assertEqual(result['retirement']['r1']['ingress_workers'], workers)
+        self.assertIn(('POST', '/api/admin/release/retire', {'ingress_workers': workers, 'successor_port': result['releases']['r2']['server_port']}),
+                      self.operations.calls)
+
+    def test_legacy_retirement_waits_for_its_original_frontier_on_later_passes(self):
+        workers = [{'pid': 17, 'start_ticks': 190}]
+        self.operations.ingress_workers = lambda: workers
+        original = self.operations.http
+        def http(base, path, *args, **kwargs):
+            result = original(base, path, *args, **kwargs)
+            return {'retirement_protocol': 1} if path == '/api/admin/release' else result
+        self.operations.http = http
+        self.operations.ingress_drained = lambda observed: False
+        result = deploy(self.settings, Path('bundle'), self.operations)
+        self.assertEqual(result['retirement']['r1']['phase'], 'waiting_for_ingress')
+        self.assertFalse(any('/api/admin/release/retire' in call for call in self.operations.calls))
+        journal = Journal(self.settings.state_dir)
+        journal.data['ingress_workers'] = [{'pid': 18, 'start_ticks': 200}]
+        journal.save()
+        def drained(observed):
+            self.assertEqual(observed, workers)
+            return True
+        self.operations.ingress_drained = drained
+        result = deploy(self.settings, Path('bundle'), self.operations)
+        self.assertEqual(result['retirement']['r1']['phase'], 'retiring')
+        self.assertIn(('POST', '/api/admin/release/retire', {}), self.operations.calls)
 
     def test_post_switch_failure_rolls_back_new_traffic_and_keeps_all_runtimes(self):
         self.probes_public.side_effect = [RuntimeError("public probe failed"), True]
@@ -268,14 +313,14 @@ class DeploymentTests(unittest.TestCase):
             return original(base, path, *args, **kwargs)
         self.operations.http = http
         first = deploy(self.settings, Path('bundle'), self.operations)['releases']['r2']
-        rollback(self.settings, self.operations)
+        rolled_back = rollback(self.settings, self.operations)
         second = deploy(self.settings, Path('bundle'), self.operations)['releases']['r2']
         self.assertNotEqual(first['server_unit'], second['server_unit'])
         self.assertNotEqual(first['host_unit'], second['host_unit'])
         self.assertEqual(first['runtime_unit'], second['runtime_unit'])
         self.assertEqual(first['runtime_data'], second['runtime_data'])
         self.assertIn({'unit':first['server_unit'],'port':first['server_port'],
-            'phase':'retiring','failure':None},second['previous_servers'])
+            'phase':'retiring','failure':None,'ingress_workers':[],'successor_port':rolled_back['releases']['r1']['server_port']},second['previous_servers'])
         resumed = deploy(self.settings, Path('bundle'), self.operations)['releases']['r2']
         self.assertEqual(resumed['server_unit'], second['server_unit'])
         rollback(self.settings, self.operations)
@@ -302,7 +347,7 @@ class DeploymentTests(unittest.TestCase):
         for key in ('server_unit','host_unit','runtime_unit','probe_epoch'):
             self.assertEqual(resumed[key], pending[key])
         self.assertEqual(resumed['previous_servers'], [
-            {**server,'phase':'retiring','failure':None} for server in pending['previous_servers']])
+            {**server,'phase':'retiring','failure':None,'ingress_workers':[],'successor_port':server['successor_port']} for server in pending['previous_servers']])
 
     def test_systemd_accepts_generated_working_directory_and_command(self):
         import subprocess

@@ -1,4 +1,4 @@
-Commit: f2d723ed2a32a5a394eac05f58bc5558e7cfe08f
+Commit: 7e71cbcfd669dd2cbaa5c94ab01945fd139557f0
 
 # control 模块
 
@@ -25,6 +25,7 @@ Commit: f2d723ed2a32a5a394eac05f58bc5558e7cfe08f
   fleet.nodes 404 → indexes(所选 kind) 算 drop_ids → hub.call(Maintenance dialogs_clear) →
   只按所选 kind 删除终态控制面索引；节点不识别该操作时原样透传节点错误（fail-closed，防索引行复活）
 - `src/api/project.rs` — Project overview/runs 对节点 `404 execution not found`（journal 丢失/节点重建）按持久索引静默降级：overview 行不带 `detail_error`、runs 返回空页，与 `Ok(None)` 无索引同形；其余失败（节点离线 503 等）保持 `detail_error`/透传
+- `src/api/compat/dag_instances.rs` — 动态实例列表和详情中继；列表默认 100、上限 200。`src/api/stream.rs` 中的实例 SSE 与 `src/api/streaming/artifact.rs` 的可选 index 贯穿 Server→Worker，详见 [动态步骤 API](../../docs/dag-dynamic.md)。
 - `src/api/stream.rs` — 分页→SSE 事件流
 - `src/api/brain_runs/` — v2 计划注册与兼容查询，以及 v3 能力目录、轮次调度、最小快照、事件页和控制命令。Control 只归一化能力目录、创建真实子执行并处理中继回执；根节点持有 v3 调度投影、generation 和模型激活，调度器只在终态事件确认后再次唤醒。
 - `src/scheduler.rs` — cron 调度循环（仅控制面运行）：定义读 libsql `schedules` 表（v27 起事实源），24h 追赶窗内只 fire 最新 due tick、更老 tick 折叠一条 `missed` 代表行；`overlap: skip` 看上一条 fired 行的执行索引；error 行 1h 重试窗内原地重试；`scan_interval_secs` 仍从 schedules.json 热读（运维旋钮）

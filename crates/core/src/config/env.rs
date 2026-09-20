@@ -133,9 +133,7 @@ pub(super) fn candidates_with_home(
         v.push(home.join(".opencoder").join("config.json"));
         v.push(home.join(".opencoder").join("opencoder.json"));
     }
-    let xdg = home_override
-        .map(Path::to_path_buf)
-        .or_else(config_xdg_dir);
+    let xdg = home_override.map(Path::to_path_buf).or_else(config_xdg_dir);
     if let Some(cfg) = xdg {
         v.push(cfg.join("opencoder").join("config.json"));
     }

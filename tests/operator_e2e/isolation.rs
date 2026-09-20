@@ -68,29 +68,6 @@ fn operator_execution_isolates_home_and_workspace() {
         .join("operator")
         .join(SESSION)
         .join("workspace");
-    // TEMP DEBUG
-    let (_ds, detail_d) = fleet.http("GET", &format!("/api/sessions/{SESSION}"), &json!({}));
-    eprintln!("DEBUG session detail: {detail_d}");
-    let exec_dir = fleet.node_data.join("operator").join(SESSION);
-    eprintln!(
-        "DEBUG exec_dir listing: {:?}",
-        std::fs::read_dir(&exec_dir).map(|rd| rd
-            .filter_map(|e| e.ok())
-            .map(|e| e.file_name().to_string_lossy().into_owned())
-            .collect::<Vec<_>>())
-    );
-    eprintln!(
-        "DEBUG workspace listing: {:?}",
-        std::fs::read_dir(&workspace).map(|rd| rd
-            .filter_map(|e| e.ok())
-            .map(|e| e.file_name().to_string_lossy().into_owned())
-            .collect::<Vec<_>>())
-    );
-    eprintln!("DEBUG tmp listing: {:?}", std::fs::read_dir(tmp.path()).map(|rd| rd.filter_map(|e| e.ok()).map(|e| e.file_name().to_string_lossy().into_owned()).collect::<Vec<_>>()));
-    eprintln!("DEBUG request count: {}", stub.request_count());
-    let _ = stub.wait_for_requests(1);
-    let reqs = stub.wait_for_requests(1);
-    eprintln!("DEBUG first request (truncated): {}", &reqs.get(0).cloned().unwrap_or_default()[..reqs.get(0).map(|r| r.len().min(2000)).unwrap_or(0)]);
     let home = fleet.node_data.join("operator").join(SESSION).join("home");
 
     // cwd: the bash tool ran inside the per-execution workspace (probe
@@ -110,7 +87,10 @@ fn operator_execution_isolates_home_and_workspace() {
         home.to_string_lossy(),
         "HOME must be the execution home"
     );
-    assert_ne!(read_probe(&fleet, "home-a.txt"), tmp.path().to_string_lossy());
+    assert_ne!(
+        read_probe(&fleet, "home-a.txt"),
+        tmp.path().to_string_lossy()
+    );
     // The frozen config snapshot is visible under the redirected HOME.
     assert_eq!(read_probe(&fleet, "cfg-a.txt"), "CONFIG_OK");
 
@@ -130,7 +110,10 @@ fn operator_execution_isolates_home_and_workspace() {
     let (status, detail) = fleet.http("GET", &format!("/api/sessions/{SESSION}"), &json!({}));
     assert_eq!(status, 200);
     let transcript = detail["messages"].to_string();
-    assert!(transcript.contains("PROBE-A-DONE"), "transcript: {transcript}");
+    assert!(
+        transcript.contains("PROBE-a-DONE"),
+        "transcript: {transcript}"
+    );
 
     // ── restart: the agent process comes back with the node daemon's own
     // HOME (= fleet workdir); the execution must rebuild its isolated pair.

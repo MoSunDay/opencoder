@@ -1,5 +1,6 @@
 use crate::{admission::AdmissionGate, transport::Hub, AppState};
 use anyhow::{Context, Result};
+use opencoder_brain::activation::configured_request as configured_planner_request;
 use opencoder_core::Config;
 use opencoder_llm::{ChatClient, ChatRequest, ChatStream, LlmEvent};
 use opencoder_store::{fleet::FleetStore, LibsqlStore, Store};
@@ -39,16 +40,6 @@ impl ChatStream for BrainClient {
     fn backend(&self) -> &'static str {
         "configured-brain"
     }
-}
-
-// Keep an explicit request override; otherwise inherit the server's existing
-// reasoning setting, just like node conversations. Omitting it can spend the
-// whole planner output budget on reasoning and leave an incomplete JSON tree.
-fn configured_planner_request(config: &Config, mut request: ChatRequest) -> ChatRequest {
-    if request.reasoning_effort.is_none() {
-        request.reasoning_effort = config.reasoning_effort.clone();
-    }
-    request
 }
 
 pub async fn new_state(

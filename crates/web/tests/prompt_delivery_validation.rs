@@ -50,6 +50,7 @@ async fn post(
     let resp = opencoder_web::api::post_prompt(
         axum::extract::State(state.clone()),
         axum::extract::Path(sid.to_string()),
+        None,
         axum::Json(opencoder_web::api::PromptBody {
             input_id: None,
             prompt: "hi".into(),
@@ -157,6 +158,7 @@ async fn post_model(
     let resp = opencoder_web::api::post_prompt(
         axum::extract::State(state.clone()),
         axum::extract::Path(sid.to_string()),
+        None,
         axum::Json(opencoder_web::api::PromptBody {
             input_id: None,
             prompt: "hi".into(),

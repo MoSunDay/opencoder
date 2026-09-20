@@ -4,6 +4,9 @@ use opencoder_core::fleet::ExecutionKind;
 use serde_json::json;
 use std::collections::BTreeMap;
 
+#[path = "scheduler/barriers.rs"]
+mod barriers;
+
 fn request() -> BrainSchedulerRequest {
     BrainSchedulerRequest {
         schema_version: 3,

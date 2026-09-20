@@ -2,6 +2,9 @@ use crate::{journal::Record, Worker};
 use anyhow::Result;
 use std::{path::PathBuf, sync::Arc};
 
+#[cfg(test)]
+mod tests;
+
 /// Effective opencoder workspace for sessions this node runs: the
 /// scheduling-configured workdir when set, else the node's startup workdir.
 pub(crate) fn node_workdir(worker: &Worker) -> PathBuf {
@@ -45,7 +48,10 @@ pub fn for_record(worker: &Worker, record: &Record) -> Result<PathBuf> {
     Ok(path)
 }
 
-pub async fn native_state(worker: &Worker, path: &str) -> Result<Arc<opencoder_web::AppState>> {
+pub async fn native_state(
+    worker: &Worker,
+    path: &str,
+) -> Result<(Arc<opencoder_web::AppState>, Option<opencoder_core::Config>)> {
     let state = &worker.inner.state;
     if let Some(id) = path
         .strip_prefix("/api/sessions/")
@@ -56,12 +62,24 @@ pub async fn native_state(worker: &Worker, path: &str) -> Result<Arc<opencoder_w
             r.assignment.request.input.get("_brain").is_some()
                 || r.assignment.request.input.get("brain_scheduler").is_some()
         }) {
-            return Ok(with_workdir(state, for_record(worker, record)?));
+            // The isolated directory owns task files, not node settings. Keep
+            // the admitted provider/model/AP configuration in process; never
+            // materialize credentials in the child workspace to make loading work.
+            let config = record
+                .queue
+                .as_ref()
+                .map(|queued| queued.config.clone())
+                .map(Ok)
+                .unwrap_or_else(|| worker.configuration())?;
+            return Ok((
+                with_workdir(state, for_record(worker, record)?),
+                Some(config),
+            ));
         }
     }
     let workdir = node_workdir(worker);
     if workdir == state.workdir {
-        return Ok(state.clone());
+        return Ok((state.clone(), None));
     }
-    Ok(with_workdir(state, workdir))
+    Ok((with_workdir(state, workdir), None))
 }

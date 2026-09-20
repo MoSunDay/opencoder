@@ -48,7 +48,11 @@ pub async fn fork_session(State(state): State<Arc<AppState>>, Path(id): Path<Str
 // ── compact ───────────────────────────────────────────────────────────────
 
 /// POST /api/sessions/:id/compact — queue a manual compaction command.
-pub async fn post_compact(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Response {
+pub async fn post_compact(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    runtime_config: Option<axum::Extension<Config>>,
+) -> Response {
     if let Some(resp) = crate::api::reject_node_session(&state, &id).await {
         return resp;
     }
@@ -60,7 +64,7 @@ pub async fn post_compact(State(state): State<Arc<AppState>>, Path(id): Path<Str
         Ok(None) => return error_404(&format!("session not found: {id}")),
         Err(e) => return error_500(format!("get_session: {e:#}")),
     }
-    let config = match load_config(&state) {
+    let config = match load_config(&state, runtime_config) {
         Ok(c) => c,
         Err(r) => return *r,
     };
@@ -101,6 +105,7 @@ pub struct HandoffBody {
 pub async fn post_handoff(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
+    runtime_config: Option<axum::Extension<Config>>,
     body: Option<Json<HandoffBody>>,
 ) -> Response {
     if let Some(resp) = crate::api::reject_node_session(&state, &id).await {
@@ -120,7 +125,7 @@ pub async fn post_handoff(
     if handle.draining.load(Ordering::SeqCst) {
         return error_409("handoff refused while drain running");
     }
-    let config = match load_config(&state) {
+    let config = match load_config(&state, runtime_config) {
         Ok(c) => c,
         Err(r) => return *r,
     };
@@ -264,8 +269,17 @@ pub async fn stop_bg(State(_state): State<Arc<AppState>>) -> Response {
 
 // ── helpers ───────────────────────────────────────────────────────────────
 
-fn load_config(state: &AppState) -> Result<Config, Box<Response>> {
-    Config::load(&state.workdir).map_err(|e| Box::new(error_500(format!("config: {e:#}"))))
+// Only the in-process execution adapter can install this extension. External
+// HTTP clients continue loading normal workspace configuration.
+pub(crate) fn load_config(
+    state: &AppState,
+    runtime_config: Option<axum::Extension<Config>>,
+) -> Result<Config, Box<Response>> {
+    runtime_config
+        .map(|axum::Extension(config)| config)
+        .map(Ok)
+        .unwrap_or_else(|| Config::load(&state.workdir))
+        .map_err(|e| Box::new(error_500(format!("config: {e:#}"))))
 }
 
 fn build_client(state: &AppState, config: &Config) -> Result<Arc<dyn ChatStream>, Box<Response>> {

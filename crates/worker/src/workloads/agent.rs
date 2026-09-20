@@ -183,7 +183,7 @@ pub(super) async fn run(
             worker.inner.state.store.clone(),
             id,
             worker.client(&config)?,
-            crate::brain::workdir::node_workdir(worker),
+            crate::brain::workdir::for_record(worker, record)?,
             config,
         )
         .await;

@@ -268,7 +268,7 @@ pub(crate) async fn dispatch_locked(worker: &Worker) -> Result<()> {
 pub(crate) fn start_scheduler(worker: &Worker) {
     let weak = std::sync::Arc::downgrade(&worker.inner);
     let stop = worker.inner.stopping.clone();
-    tokio::spawn(async move {
+    worker.inner.tasks.spawn(async move {
         let mut tick = tokio::time::interval(std::time::Duration::from_millis(100));
         loop {
             tokio::select! { _ = stop.cancelled() => break, _ = tick.tick() => {} }
@@ -276,7 +276,13 @@ pub(crate) fn start_scheduler(worker: &Worker) {
                 break;
             };
             let worker = Worker { inner };
-            let _gate = worker.inner.admission.lock().await;
+            // Shutdown holds admission while waiting for tracked cleanup.
+            // A waiting scheduler must release its Worker capture on stop.
+            let _gate = tokio::select! {
+                biased;
+                _ = stop.cancelled() => break,
+                gate = worker.inner.admission.lock() => gate,
+            };
             if let Err(error) = dispatch_locked(&worker).await {
                 tracing::error!(%error, "node pending dispatch failed");
                 *worker.inner.persistence_error.lock().unwrap() =

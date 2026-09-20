@@ -162,22 +162,22 @@ async fn submit_inner(state: &Arc<AppState>, request: CreateExecution) -> anyhow
                         },
                     ));
                 };
-                if let Some(action) = request.input.get("_brain").and_then(|b| b.get("action")) {
-                    let reply = state
-                        .hub
-                        .call(
-                            &node.registration.id,
-                            NodeOperation::Brain {
-                                execution: ExecutionRef {
-                                    id: request.id.clone(),
-                                    kind: request.kind,
-                                },
-                                action: "capability_probe".into(),
-                                input: action.clone(),
-                            },
-                        )
-                        .await;
-                    if reply.status >= 300 {
+                let action = request.input.get("_brain").and_then(|b| b.get("action"));
+                let dynamic =
+                    super::capabilities::requires_dynamic(request.kind, definition.as_ref());
+                if action.is_some() || dynamic {
+                    if let Err(reply) = super::capabilities::probe(
+                        state,
+                        &node.registration.id,
+                        ExecutionRef {
+                            id: request.id.clone(),
+                            kind: request.kind,
+                        },
+                        action.cloned().unwrap_or_else(|| serde_json::json!({})),
+                        dynamic,
+                    )
+                    .await
+                    {
                         incompatibilities.push(format!("{}: {}", node.registration.id, reply.body));
                         nodes.retain(|n| n.registration.id != node.registration.id);
                         continue;

@@ -1,4 +1,4 @@
-import { Alert, Breadcrumb, Button, Collapse, Descriptions, Drawer, Empty, Input, Space, Spin, Tag, Typography } from 'antd';
+import { Alert, Breadcrumb, Button, Collapse, Descriptions, Drawer, Empty, Space, Spin, Tag, Typography } from 'antd';
 import { useEffect, useState } from 'react';
 import { apiGet, apiPost } from '../../api.js';
 import { ExecutionView } from '../../fleet/detail.jsx';
@@ -8,14 +8,7 @@ import { Inspector } from './inspector.jsx';
 import { COLORS, PHASES, STATES, statusOf } from './model.js';
 import { TimeText } from '../../ui/timeText.jsx';
 import { SummaryCanvas } from './summaryCanvas.jsx';
-import { V3_COLORS, V3_PHASES, V3_STATUS, capabilityFor, currentRound, normalizeEvent, phaseOf, roundsOf, roundLabel, terminalV3 } from './v3Model.js';
-
-function InputRequests({ requests, onSubmit }) {
-  const [values, setValues] = useState({});
-  return Object.values(requests || {}).filter((request) => !request.answered).map((request) => <div key={request.name} className="brain-input-request"><Typography.Text strong>{request.name}</Typography.Text><Typography.Paragraph>{request.description}</Typography.Paragraph>
-    <Space.Compact style={{ width: '100%' }}><Input value={values[request.name] || ''} onChange={(event) => setValues({ ...values, [request.name]: event.target.value })} placeholder={request.schema.type === 'string' ? '输入内容' : `输入 ${request.schema.type} JSON 值`} /><Button onClick={() => onSubmit(request.name, values[request.name] || '', request.schema.type)}>提交输入</Button></Space.Compact>
-  </div>);
-}
+import { V3_COLORS, V3_CONNECTIONS, V3_PHASES, V3_STATUS, capabilityFor, currentRound, normalizeEvent, phaseOf, roundsOf, roundLabel, terminalV3 } from './v3Model.js';
 
 function Timeline({ id, liveEvents }) {
   const [history, setHistory] = useState([]); const [cursor, setCursor] = useState(0); const [more, setMore] = useState(true); const [error, setError] = useState(''); const [historical, setHistorical] = useState(false);
@@ -30,7 +23,7 @@ function ExecutionDrawer({ operation, capability, onClose, onNotice }) {
   const title = `${capability?.kind || operation.execution_kind} · ${capability?.target || capability?.capability_id || operation.capability_id}`;
   const summary = { id: operation.execution_id, kind: operation.execution_kind, status: operation.status === 'done' ? 'done' : operation.status === 'error' ? 'error' : operation.status === 'cancelled' ? 'cancelled' : 'running' };
   return <Drawer open title={<Space><span>{title}</span><Typography.Text code>{operation.execution_id}</Typography.Text></Space>} placement="right" size="78vw" onClose={onClose}>
-    <ExecutionView executionRef={{ id: operation.execution_id, kind: operation.execution_kind }} summary={summary} onNotice={onNotice} managed />
+    <ExecutionView key={operation.execution_id} executionRef={{ id: operation.execution_id, kind: operation.execution_kind }} summary={summary} onNotice={onNotice} managed />
   </Drawer>;
 }
 
@@ -45,10 +38,12 @@ function OperationCard({ operation, capability, onOpen }) {
 
 function RoundsPanel({ view, onOpen }) {
   const rounds = roundsOf(view); const current = currentRound(view);
+  const [expanded, setExpanded] = useState([String(current)]);
+  useEffect(() => { setExpanded([String(current)]); }, [current]);
   if (!rounds.length) return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="尚未产生调度轮次" />;
-  return <Collapse defaultActiveKey={[String(current)]} items={rounds.map((round) => ({
+  return <Collapse activeKey={expanded} onChange={setExpanded} items={rounds.map((round) => ({
     key: String(round.round),
-    label: <Space><Typography.Text strong>{roundLabel(round.round)}</Typography.Text><Tag color={V3_COLORS[round.status]}>{V3_PHASES[round.status] || round.status}</Tag><Typography.Text type="secondary">{round.operations.length} 个能力</Typography.Text></Space>,
+    label: <Space><Typography.Text strong>{roundLabel(round.round)}</Typography.Text><Tag color={V3_COLORS[round.status]}>{V3_PHASES[round.status] || V3_STATUS[round.status] || round.status}</Tag><Typography.Text type="secondary">{round.operations.length} 个能力</Typography.Text></Space>,
     children: <div className="brain-operation-list">{round.operations.map((operation) => <OperationCard key={operation.operation_id} operation={operation} capability={capabilityFor(view, operation)} onOpen={onOpen} />)}</div>,
   }))} />;
 }
@@ -60,7 +55,7 @@ function V3RunBody({ view, id, onNotice, events, connection, refresh }) {
   return <>
     {(commandError || view.error) && <Alert type="error" showIcon title={commandError || view.error} />}
     {run.error && <Alert type="error" showIcon title="运行阻塞或失败" description={run.error} />}
-    <div className="brain-run-header"><div><Typography.Title level={4}>{view.objective || run.run_id}</Typography.Title><Space wrap><Tag color={V3_COLORS[phase]}>{V3_PHASES[phase] || phase}</Tag><Tag>第 {currentRound(view)} 轮</Tag><Typography.Text type="secondary">{connection === 'live' ? '实时连接' : connection}</Typography.Text><TimeText ts={run.updated_at} /></Space></div>
+    <div className="brain-run-header"><div><Typography.Title level={4} ellipsis={{ rows: 2, expandable: true, symbol: '展开完整目标' }}>{view.objective || run.run_id}</Typography.Title><Space wrap><Tag color={V3_COLORS[phase]}>{V3_PHASES[phase] || phase}</Tag><Tag>第 {currentRound(view)} 轮</Tag><Typography.Text type="secondary">{V3_CONNECTIONS[connection] || connection}</Typography.Text><TimeText ts={run.updated_at} /></Space></div>
       <Space><Button disabled={busy || terminalV3(view)} onClick={() => command(phase === 'paused' ? 'resume' : 'pause')}>{phase === 'paused' ? '继续调度' : '暂停调度'}</Button><Button danger disabled={busy || terminalV3(view)} onClick={() => command('cancel')}>取消调度</Button></Space></div>
     <SummaryCanvas view={view} />
     <section className="brain-rounds"><Space className="brain-rounds-heading" wrap><Typography.Title level={5}>调度轮次与能力执行</Typography.Title><Typography.Text type="secondary">点击 execution ID 查看节点执行面板</Typography.Text></Space><RoundsPanel view={view} onOpen={setOperation} /></section>
@@ -80,9 +75,8 @@ function LegacyPlanBody({ run, onNotice }) {
 }
 
 export function BrainRunBody({ id, onNotice, header = null }) {
-  const { run, events, error, connection, refresh } = useBrainRun(id); const [commandError, setCommandError] = useState('');
-  const input = async (name, value, type) => { try { await apiPost(`/api/brain/runs/${encodeURIComponent(id)}/inputs`, { name, value: type === 'string' ? value : JSON.parse(value) }); await refresh(); } catch (event) { setCommandError(event.message); } };
-  return <div className="brain-run">{header}{(error || commandError) && <Alert type="error" showIcon title={commandError || error} action={<Button onClick={() => refresh()?.catch(() => {})}>重试</Button>} />}{!run ? <Spin /> : <>{!run.schema_version || run.schema_version < 3 ? <><div className="brain-run-header"><div><Typography.Title level={4}>{run.objective}</Typography.Title><Space wrap><Tag color={COLORS[run.phase]}>{PHASES[run.phase] || run.phase}</Tag><TimeText ts={run.updated_at} /></Space></div></div><InputRequests requests={run.input_requests} onSubmit={input} /><LegacyPlanBody run={run} onNotice={onNotice} /></> : <V3RunBody view={run} id={id} onNotice={onNotice} events={events} connection={connection} refresh={refresh} />}</>}</div>;
+  const { run, events, error, connection, refresh } = useBrainRun(id);
+  return <div className="brain-run">{header}{error && <Alert type="error" showIcon title={error} action={<Button onClick={() => refresh()?.catch(() => {})}>重试</Button>} />}{!run ? <Spin /> : <>{!run.schema_version || run.schema_version < 3 ? <><div className="brain-run-header"><div><Typography.Title level={4}>{run.objective}</Typography.Title><Space wrap><Tag color={COLORS[run.phase]}>{PHASES[run.phase] || run.phase}</Tag><Tag>历史运行只读</Tag><TimeText ts={run.updated_at} /></Space></div></div><LegacyPlanBody run={run} onNotice={onNotice} /></> : <V3RunBody key={id} view={run} id={id} onNotice={onNotice} events={events} connection={connection} refresh={refresh} />}</>}</div>;
 }
 
 export function BrainRunView({ id, onBack, onNotice }) {

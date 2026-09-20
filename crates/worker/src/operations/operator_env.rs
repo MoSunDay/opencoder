@@ -21,16 +21,12 @@
 //! to `None` and keep their node-level behavior.
 
 use crate::layout::DirectoryLayout;
-use anyhow::Result;
+use anyhow::{ensure, Context, Result};
 use opencoder_core::fleet::ExecutionKind;
 use std::io::Write;
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
-/// Snapshot file that marks an execution as isolated: `resolve` returns
-/// `Some` only when it exists, so a crash between directory creation and
-/// the snapshot write falls back to the legacy node-level paths instead of
-/// stranding a session on a HOME with no config.
 fn snapshot_path(home: &Path) -> PathBuf {
     home.join(".opencoder").join("config.json")
 }
@@ -39,7 +35,7 @@ fn snapshot_path(home: &Path) -> PathBuf {
 /// execution. Idempotent: existing directories are reused and the config
 /// snapshot is written once (mirroring `resources::pin` semantics). Returns
 /// `None` for every other kind.
-pub(super) fn materialize(
+pub(crate) fn materialize(
     layout: &DirectoryLayout,
     kind: ExecutionKind,
     id: &str,
@@ -60,49 +56,69 @@ pub(super) fn materialize(
         opencoder_core::share_fs::durable_create_dir_all(parent)?;
         write_snapshot(&snapshot, &serde_json::to_string_pretty(config)?)?;
     }
+    validate_snapshot(&snapshot)?;
     Ok(Some((home, workspace)))
 }
 
-/// Write the config snapshot 0600, durably. `create_new` keeps the
-/// once-only guarantee under concurrent callers; an `AlreadyExists` race is
-/// treated as success (the winner's snapshot is authoritative).
+/// Publish a complete private snapshot without replacing a concurrent winner.
 fn write_snapshot(path: &Path, body: &str) -> Result<()> {
-    let mut file = match std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(path)
-    {
-        Ok(file) => file,
-        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => return Ok(()),
-        Err(error) => return Err(error.into()),
-    };
-    file.write_all(body.as_bytes())?;
-    file.sync_all()?;
-    file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
-    if let Some(parent) = path.parent() {
-        std::fs::File::open(parent)?.sync_all()?;
-    }
+    let temporary = path.with_extension(format!("{}.tmp", ulid::Ulid::new()));
+    let result = (|| -> Result<()> {
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&temporary)?;
+        file.write_all(body.as_bytes())?;
+        file.sync_all()?;
+        match std::fs::hard_link(&temporary, path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(error.into()),
+        }
+        validate_snapshot(path)?;
+        Ok(())
+    })();
+    let cleanup = std::fs::remove_file(&temporary);
+    result?;
+    cleanup?;
+    std::fs::File::open(path.parent().context("snapshot parent missing")?)?.sync_all()?;
     Ok(())
 }
 
-/// Resolve the materialized per-execution env for an existing execution.
-/// `Some((home, workspace))` only when the snapshot exists (i.e. the
-/// execution was created after the isolation change and materialized
-/// successfully); legacy records resolve to `None` so resumed behavior is
-/// unchanged.
+fn validate_snapshot(path: &Path) -> Result<()> {
+    let metadata = std::fs::symlink_metadata(path).context("isolated operator config missing")?;
+    ensure!(
+        metadata.is_file() && metadata.permissions().mode() & 0o777 == 0o600,
+        "isolated operator config must be a private regular file (0600)"
+    );
+    let _: opencoder_core::Config = serde_json::from_slice(&std::fs::read(path)?)
+        .context("isolated operator config is invalid")?;
+    Ok(())
+}
+
+/// Only explicitly versioned executions use the new environment. A broken
+/// isolated execution must never resume in the shared node directory.
 pub(crate) fn resolve(
     layout: &DirectoryLayout,
     kind: ExecutionKind,
     id: &str,
+    version: Option<&serde_json::Value>,
 ) -> Result<Option<(PathBuf, PathBuf)>> {
-    if kind != ExecutionKind::Operator {
+    if kind != ExecutionKind::Operator || version.is_none() {
         return Ok(None);
     }
+    ensure!(
+        version.and_then(serde_json::Value::as_u64) == Some(1),
+        "unsupported operator environment version"
+    );
     let home = layout.home_dir(kind, id)?;
     let workspace = layout.workspace_dir(kind, id)?;
-    if !snapshot_path(&home).is_file() || !workspace.is_dir() {
-        return Ok(None);
-    }
+    ensure!(
+        home.is_dir() && workspace.is_dir(),
+        "isolated operator directories missing"
+    );
+    validate_snapshot(&snapshot_path(&home))?;
     Ok(Some((home, workspace)))
 }
 
@@ -160,22 +176,22 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let layout = layout(root.path());
         // No materialize yet: legacy record falls back.
-        assert!(resolve(&layout, ExecutionKind::Operator, "op-2")
+        assert!(resolve(&layout, ExecutionKind::Operator, "op-2", None)
             .unwrap()
             .is_none());
         // Workspace without a snapshot (crash mid-materialize) still falls
-        // back — HOME without a config would strand the session.
+        // back only for unversioned historical records.
         opencoder_core::share_fs::durable_create_dir_all(
             &layout
                 .workspace_dir(ExecutionKind::Operator, "op-3")
                 .unwrap(),
         )
         .unwrap();
-        assert!(resolve(&layout, ExecutionKind::Operator, "op-3")
+        assert!(resolve(&layout, ExecutionKind::Operator, "op-3", None)
             .unwrap()
             .is_none());
         materialize(&layout, ExecutionKind::Operator, "op-2", &config()).unwrap();
-        let (home, workspace) = resolve(&layout, ExecutionKind::Operator, "op-2")
+        let (home, workspace) = resolve(&layout, ExecutionKind::Operator, "op-2", Some(&json!(1)))
             .unwrap()
             .expect("materialized operator resolves");
         assert_eq!(
@@ -200,9 +216,69 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
-        assert!(resolve(&layout, ExecutionKind::Agent, "op-2")
+        assert!(resolve(&layout, ExecutionKind::Agent, "op-2", None)
             .unwrap()
             .is_none());
+    }
+
+    #[test]
+    fn versioned_environments_fail_closed_on_missing_or_corrupt_files() {
+        let root = tempfile::tempdir().unwrap();
+        let layout = layout(root.path());
+        let version = json!(1);
+        assert!(resolve(&layout, ExecutionKind::Operator, "missing", Some(&version)).is_err());
+        let (home, workspace) =
+            materialize(&layout, ExecutionKind::Operator, "op-broken", &config())
+                .unwrap()
+                .unwrap();
+        let snapshot = snapshot_path(&home);
+        std::fs::write(&snapshot, "{incomplete").unwrap();
+        assert!(resolve(
+            &layout,
+            ExecutionKind::Operator,
+            "op-broken",
+            Some(&version)
+        )
+        .is_err());
+        assert!(materialize(&layout, ExecutionKind::Operator, "op-broken", &config()).is_err());
+        std::fs::write(&snapshot, serde_json::to_vec(&config()).unwrap()).unwrap();
+        std::fs::remove_dir(&workspace).unwrap();
+        assert!(resolve(
+            &layout,
+            ExecutionKind::Operator,
+            "op-broken",
+            Some(&version)
+        )
+        .is_err());
+        assert!(resolve(&layout, ExecutionKind::Operator, "op-broken", None)
+            .unwrap()
+            .is_none());
+        assert!(resolve(
+            &layout,
+            ExecutionKind::Operator,
+            "op-broken",
+            Some(&json!(2))
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn concurrent_publishers_only_expose_one_complete_private_snapshot() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("config.json");
+        std::thread::scope(|scope| {
+            for i in 0..8 {
+                let path = &path;
+                scope.spawn(move || {
+                    let mut cfg = config();
+                    cfg.model = format!("fixture/model-{i}");
+                    write_snapshot(path, &serde_json::to_string(&cfg).unwrap()).unwrap();
+                    validate_snapshot(path).unwrap();
+                });
+            }
+        });
+        validate_snapshot(&path).unwrap();
+        assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 1);
     }
 
     #[test]

@@ -40,7 +40,7 @@ async fn web_prompt_builds_responses_client_executes_edit_and_persists_sse() {
     let handles = opencoder_web::handle::new_handle_map();
     let app = opencoder_web::build_app(
         Arc::new(opencoder_web::AppState {
-                        config_home: None,
+            config_home: None,
             brain: opencoder_web::api_brain::mock_brain(store.clone()),
             store: store.clone(),
             workdir: dir.path().to_path_buf(),

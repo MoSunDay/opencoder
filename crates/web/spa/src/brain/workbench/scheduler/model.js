@@ -1,3 +1,4 @@
+import { newId } from '../../../fleet/model.js';
 export const capabilityId = (capability) => capability.capability_id || capability.id;
 export function available(capability) {
   return ['agent', 'team', 'dag', 'todos', 'operator'].includes(capability.kind)
@@ -19,7 +20,7 @@ export function engineeringInputs(rows = []) {
 export const inputRows = (inputs = {}) => Object.entries(inputs).map(([key, value]) => ({ key, value: JSON.stringify(value) }));
 export function newVersion(version) {
   return version ? { ...version, version: version.version + 1, created_at: Date.now(), changelog: '更新调度计划' }
-    : { id: `plan-${crypto.randomUUID()}`, version: 1, created_at: Date.now(), changelog: '创建调度计划', tags: [], plan: { schema_version: 3, title: '', objective: '', inputs: {}, capability_ids: [], max_rounds: 32 } };
+    : { id: newId('plan'), version: 1, created_at: Date.now(), changelog: '创建调度计划', tags: [], plan: { schema_version: 3, title: '', objective: '', inputs: {}, capability_ids: [], max_rounds: 32 } };
 }
 export function validatePlan(plan, capabilities) {
   if (!plan.title.trim()) throw new Error('请输入计划名称');

@@ -21,7 +21,8 @@ def execute(args, root, env, continuity):
             subprocess.run(command(args, rollback), stdout=log, stderr=subprocess.STDOUT, check=True)
         continuity()
 
-    invoke('deployment')
+    if not getattr(args, 'current_roundtrip', False):
+        invoke('deployment')
     if not getattr(args, 'signal_roundtrip', False):
         return
     current = Journal(env.settings.state_dir).data

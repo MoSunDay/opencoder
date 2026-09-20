@@ -20,7 +20,7 @@ v3 Web 工作台先展示目标、阶段、当前轮次和结果的摘要画布�
 
 ### 浏览器草稿缓存
 
-计划编辑器草稿按 `oc:brain:plan-draft:<owner>:new|<id>@<version>` 键存于 localStorage，读取按当前协议校验，损坏或旧协议残留 fail-closed 不覆盖原文。旧协议（v1 `plan.steps`）残留不再死锁编辑器：错误指引文案 + 「丢弃缓存并重新开始」逃生口——原文先备份到 `<key>:legacy-v1` 单槽再重置为干净 v2 草稿（新建为空计划、编辑为服务端版本快照）。
+计划编辑器草稿按 `oc:brain:plan-draft:<owner>:new|<id>@<version>` 键存于 localStorage，读取按当前协议校验，损坏或旧协议残留 fail-closed 不覆盖原文。旧协议（v1 `plan.steps`）残留不再死锁编辑器：错误指引文案 + 「丢弃缓存并重新开始」逃生口——原文先备份到 `<key>:legacy-v1` 单槽再重置为干净 v2 草稿（新建为空计划、编辑为服务端版本快照）。已随 rel-5c7fc73f（0.1.0，2026-09-20）发布上线并完成验收：工作台 v2 通道（`/api/brain/plan-defs` validate→save）线上冒烟通过，观察期无 failure；v1 `/api/brain/plans` 的 409 为 schema_version:2 设计门禁。详见 [changelog](../changelog/2026-09-20/brain-draft-legacy-cache-recovery.md)。
 
 ## 相关
 - [agents/brain](../../agents/brain/index.md) — 状态机与回归

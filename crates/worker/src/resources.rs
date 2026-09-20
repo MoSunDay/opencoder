@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 /// WASM-only DAGs have no Agent resource dependency. Their modules are pinned
 /// separately; copying every prompt, skill and tool would block admission on
 /// unrelated files. Unknown definitions and declared agent pins fail closed.
-pub(crate) fn requires_agent_pool(assignment: &opencoder_core::fleet::Assignment) -> bool {
+pub fn requires_agent_pool(assignment: &opencoder_core::fleet::Assignment) -> bool {
     use opencoder_core::fleet::ExecutionKind;
     if assignment.request.kind != ExecutionKind::Dag
         || assignment.request.input["_brain"]["action"]["agent_manifests"]

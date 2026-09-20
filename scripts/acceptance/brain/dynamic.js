@@ -22,7 +22,9 @@ async function answer(prompt, request) {
       evidence_execution_ids: context.operations.map((o) => o.execution_id) };
   }
   const text = JSON.stringify(request.messages || []);
-  assert(prompt.includes(JSON.stringify(inputs)), 'dynamic template omitted scheduler inputs');
+  const marker = 'Scheduler inputs:\n';
+  assert(prompt.includes(marker), 'dynamic template omitted scheduler inputs');
+  assert.deepEqual(JSON.parse(prompt.slice(prompt.lastIndexOf(marker) + marker.length).split('\n')[0]), inputs);
   const one = text.includes('INSTANCE_ONE') && JSON.stringify((request.messages || []).filter((m) => m.role === 'system')).includes('INSTANCE_ONE');
   if (one) await held;
   return { instance: one ? 'one-result' : 'zero-result' };

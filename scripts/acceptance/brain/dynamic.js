@@ -51,7 +51,7 @@ async function main() {
   await page.getByRole('radiogroup').getByText('Agent', { exact: true }).click();
   await page.getByRole('menuitem', { name: '大脑调度' }).click();
   await page.getByLabel('大脑调度总览画布').waitFor();
-  assert.equal(await page.locator('.brain-summary-node').count(), 4);
+  assert.equal(await page.locator('.brain-summary-node').count(), 5);
   await page.getByRole('button', { name: `查看执行 ${execution}` }).click();
   await page.locator('[data-id="batch"]').getByText('1/2 成功').waitFor();
   await page.locator('[data-id="batch"] .dag-node').click();

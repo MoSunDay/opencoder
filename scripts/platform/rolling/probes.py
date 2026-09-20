@@ -102,25 +102,6 @@ def candidate(settings, record, operations, seconds):
         return node_id
 
 
-def persisted_probe(root, assignment):
-    """Recover acceptance from the runtime-owned journal after a lost reply."""
-    path = root / "dag" / assignment["index"]["id"] / "execution.json"
-    if path.is_symlink():
-        raise ValueError("candidate probe journal must be a regular file")
-    try:
-        saved = json.loads(path.read_text())["assignment"]
-    except FileNotFoundError:
-        return False
-    # Status evolves after acceptance; identity, input and definition do not.
-    for key in ("id", "kind", "node_id", "created_at"):
-        if saved["index"].get(key) != assignment["index"][key]:
-            raise ValueError("candidate probe persisted identity differs from activation")
-    expected = {"target": None, **assignment["request"]}
-    if saved["request"] != expected or saved["definition"] != assignment["definition"]:
-        raise ValueError("candidate probe persisted request differs from activation")
-    return True
-
-
 def candidate_locked(settings, record, operations, seconds, container=False):
     root = Path(record["runtime_data"])
     atomic_bytes(root / "dag/_modules/release-probe.wasm", WASM, 0o444)
@@ -139,8 +120,25 @@ def candidate_locked(settings, record, operations, seconds, container=False):
         "request": {"id": identifier, "kind": "dag", "input": {}, "node_id": node_id},
         "definition": definition}
     def accepted():
-        if persisted_probe(root, assignment):
+        # Older Runtimes serialize Create replays behind resource snapshots.
+        # Recover this activation's durable probe before resubmitting it; its
+        # frozen request, definition and owner must all match, even when done.
+        receipt = operations.http(endpoint, "/rpc", "POST", {"operation": "inspect",
+            "execution": {"id": identifier, "kind": "dag"}})
+        if receipt["status"] < 300:
+            detail = receipt["body"]
+            expected = {**assignment["request"], "target": None}
+            actual = {"target": None, **detail.get("request", {})}
+            index = detail.get("execution", {})
+            if (actual != expected or detail.get("definition") != definition
+                    or any(index.get(key) != value for key, value in assignment["index"].items()
+                           if key != "status")):
+                raise ValueError("candidate probe conflicts with its frozen assignment")
             return True
+        if ambiguous(receipt["status"]):
+            return False
+        if receipt["status"] != 404:
+            raise ValueError(f"candidate probe inspection rejected: {receipt}")
         receipt = operations.http(endpoint, "/rpc", "POST", {"operation": "create", "assignment": assignment})
         if ambiguous(receipt["status"]):
             return False

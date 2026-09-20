@@ -1,10 +1,8 @@
 """Lost network replies must reuse the durable public acceptance."""
 import copy
-import json
 from pathlib import Path
 import sys
 import tempfile
-from types import SimpleNamespace
 import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from rolling.io import HttpFailure
@@ -42,43 +40,6 @@ class LostReply:
 
 
 class ProbeTests(unittest.TestCase):
-    def test_candidate_recovers_durable_acceptance_and_checks_live_terminal_state(self):
-        with tempfile.TemporaryDirectory() as directory:
-            record = {"id": "release-one", "runtime_data": directory, "runtime_port": 1234,
-                      "manifest": {"commit": "abc"}, "created_at": 123, "probe_epoch": 2}
-            identifier = probe_id(record)
-            assignment = {"index": {"id": identifier, "kind": "dag", "node_id": "node-one",
-                                    "created_at": 123, "status": "done"},
-                          "request": {"id": identifier, "kind": "dag", "node_id": "node-one",
-                                      "target": None, "input": {}}, "definition": spec()}
-            path = Path(directory) / "dag" / identifier / "execution.json"
-            path.parent.mkdir(parents=True)
-            path.write_text(json.dumps({"assignment": assignment}))
-            calls = []
-            def http(base, route, *args):
-                calls.append(route)
-                self.assertEqual(route, "/inventory", "accepted probes must not be recreated")
-                return {"runtime_id": "release-one", "build": {"git_commit": "abc"},
-                        "registration": {"id": "node-one"}, "indexes": [assignment["index"]],
-                        "snapshot": {"ready": True}}
-            operations = SimpleNamespace(http=http, wait=lambda check, seconds: check())
-            self.assertEqual(candidate_locked(None, record, operations, 1), "node-one")
-            self.assertEqual(calls, ["/inventory", "/inventory"])
-            assignment["index"]["status"] = "error"
-            with self.assertRaisesRegex(ValueError, "candidate probe failed"):
-                candidate_locked(None, record, operations, 1)
-            for key in ("request", "definition", "index"):
-                conflicting = copy.deepcopy(assignment)
-                if key == "request":
-                    conflicting[key]["input"] = {"changed": True}
-                elif key == "definition":
-                    conflicting[key] = {}
-                else:
-                    conflicting[key]["created_at"] += 1
-                path.write_text(json.dumps({"assignment": conflicting}))
-                with self.subTest(key=key), self.assertRaisesRegex(ValueError, "differs from activation"):
-                    candidate_locked(None, record, operations, 1)
-
     def test_lost_acceptance_reply_is_recovered_by_receipt_without_resubmit(self):
         operations = LostReply()
         request = {"id": "dag-probe-fixed", "kind": "dag", "input": {"definition": "frozen"}}
@@ -100,6 +61,100 @@ class ProbeTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "409"):
             submit_probe(operations, "http://localhost", "fixed", {"id": "fixed"}, 1)
         self.assertEqual(len(operations.posts), 1)
+
+
+class Candidate:
+    def __init__(self, record, accepted=False, lose_reply=False):
+        self.record = record
+        self.accepted = accepted
+        self.lose_reply = lose_reply
+        self.creates = 0
+        self.definition = spec()
+
+    def http(self, base, path, method="GET", body=None):
+        index = {"id": probe_id(self.record), "kind": "dag", "node_id": "node-test",
+                 "created_at": self.record["created_at"], "status": "done"}
+        if path == "/inventory":
+            return {"runtime_id": self.record["id"], "build": {"git_commit": "commit"},
+                    "registration": {"id": "node-test"}, "snapshot": {"ready": True},
+                    "indexes": [index] if self.accepted else []}
+        if body["operation"] == "inspect":
+            if not self.accepted:
+                return {"status": 404}
+            return {"status": 200, "body": {"execution": index, "definition": self.definition,
+                    "request": {"id": index["id"], "kind": "dag", "node_id": "node-test", "input": {}, "target": None}}}
+        self.creates += 1
+        self.accepted = True
+        if self.lose_reply:
+            raise TimeoutError("acceptance reply lost")
+        return {"status": 200}
+
+    def wait(self, check, seconds):
+        for _ in range(3):
+            try:
+                result = check()
+                if result:
+                    return result
+            except TimeoutError:
+                pass
+        raise AssertionError("candidate did not become ready")
+
+
+class CandidateProbeTests(unittest.TestCase):
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.record = {"id": "release-test", "probe_epoch": 2, "runtime_port": 3100,
+                       "runtime_data": self.directory.name, "created_at": 123,
+                       "manifest": {"commit": "commit"}}
+
+    def test_resumed_activation_recovers_completed_probe_without_admission(self):
+        operations = Candidate(self.record, accepted=True)
+        self.assertEqual(candidate_locked(None, self.record, operations, 1), "node-test")
+        self.assertEqual(operations.creates, 0)
+
+    def test_lost_create_reply_is_recovered_without_duplicate_submission(self):
+        operations = Candidate(self.record, lose_reply=True)
+        self.assertEqual(candidate_locked(None, self.record, operations, 1), "node-test")
+        self.assertEqual(operations.creates, 1)
+
+    def test_same_id_with_different_definition_is_rejected(self):
+        operations = Candidate(self.record, accepted=True)
+        operations.definition = {"name": "another task", "steps": []}
+        with self.assertRaisesRegex(ValueError, "conflicts"):
+            candidate_locked(None, self.record, operations, 1)
+        self.assertEqual(operations.creates, 0)
+
+    def test_recovered_probe_still_requires_successful_runtime_execution(self):
+        operations = Candidate(self.record, accepted=True)
+        original = operations.http
+        def http(base, path, *args):
+            reply = original(base, path, *args)
+            if path == "/inventory":
+                reply["indexes"][0]["status"] = "error"
+            return reply
+        operations.http = http
+        with self.assertRaisesRegex(ValueError, "candidate probe failed"):
+            candidate_locked(None, self.record, operations, 1)
+        self.assertEqual(operations.creates, 0)
+
+    def test_recovered_probe_rejects_changed_input_and_activation_identity(self):
+        for field in ("input", "created_at", "node_id"):
+            operations = Candidate(self.record, accepted=True)
+            original = operations.http
+            def http(base, path, *args):
+                reply = original(base, path, *args)
+                if path == "/rpc":
+                    detail = reply["body"]
+                    if field == "input":
+                        detail["request"][field] = {"changed": True}
+                    else:
+                        detail["execution"][field] = "different"
+                return reply
+            operations.http = http
+            with self.subTest(field=field), self.assertRaisesRegex(ValueError, "conflicts"):
+                candidate_locked(None, self.record, operations, 1)
+            self.assertEqual(operations.creates, 0)
 
 
 if __name__ == "__main__":

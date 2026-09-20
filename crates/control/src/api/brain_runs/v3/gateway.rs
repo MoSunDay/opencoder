@@ -75,7 +75,10 @@ pub async fn dispatch(
         scheduler_request["objective"].as_str().unwrap_or_default(),
         serde_json::to_string(&bound_inputs)?
     );
-    let input = json!({"schema_version":3,"brain_scheduler":{"run_id":run.run_id,"operation_id":op.operation_id,"round":op.round},"bindings":bindings,"scheduler_inputs":bound_inputs,"prompt":prompt,"definition":cap.definition});
+    let mut input = json!({"schema_version":3,"brain_scheduler":{"run_id":run.run_id,"operation_id":op.operation_id,"round":op.round,"capability":super::view::capability_metadata(cap)},"bindings":bindings,"scheduler_inputs":bound_inputs,"prompt":prompt,"definition":cap.definition});
+    if op.execution_kind == ExecutionKind::Todos {
+        input["spec"] = cap.definition.clone();
+    }
     Ok(executions::submit(
         state,
         CreateExecution {

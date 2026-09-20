@@ -9,11 +9,11 @@ import { RouteEditor } from './editor/route.jsx';
 import { JsonField } from './editor/fields.jsx';
 import { PublishDialog } from './editor/publish.jsx';
 export const PlanEditor = forwardRef(function PlanEditor({ version, cacheKey = `oc:brain:v2:${version?.id || 'new'}`, capabilities, onSaved, onClose }, ref) {
-  const { draft, setDraft, error: cacheError, persist, retry, clear } = useDraft(cacheKey, version);
+  const { draft, setDraft, error: cacheError, persist, retry, clear, discard } = useDraft(cacheKey, version);
   const [error, setError] = useState(''); const [publishing, setPublishing] = useState(false); const [busy, setBusy] = useState(false);
   const close = () => { if (!busy && (!draft || persist())) onClose(); };
   useImperativeHandle(ref, () => ({ close }));
-  if (!draft) return <Alert type="error" title="无法读取浏览器草稿" description={cacheError} action={<Space><Button onClick={retry}>重试读取</Button><Button onClick={onClose}>关闭</Button></Space>} />;
+  if (!draft) return <Alert type="error" title="无法读取浏览器草稿" description={cacheError} action={<Space><Button onClick={retry}>重试读取</Button><Button danger onClick={discard}>丢弃缓存并重新开始</Button><Button onClick={onClose}>关闭</Button></Space>} />;
   const plan = draft.version.plan;
   if (plan.schema_version !== 2) return <Alert type="warning" title="旧计划只读，请新建 v2 计划" />;
   const instance = plan.instances.find((i) => i.id === draft.selected);

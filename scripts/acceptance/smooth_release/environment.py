@@ -13,7 +13,7 @@ import urllib.error
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'platform'))
 from rolling.config import Settings
-from rolling import probes, units
+from rolling import ingress, probes, units
 from rolling.state import atomic_bytes, write
 from fixture import Model, HOLD_WASM
 from resources import Resources
@@ -108,6 +108,23 @@ class Environment:
     def api(self,path,method='GET',body=None):
         return self.http(self.settings.public_url,path,method,body)
 
+    def diagnose(self):
+        evidence = {'processes': {label: {'pid': child.pid, 'exit_code': child.poll()}
+                                  for label, child in self.children.items()}}
+        if hasattr(self, 'last_ingress_workers'):
+            evidence['ingress_workers'] = [{**worker,
+                'drained': ingress.drained([worker])} for worker in self.last_ingress_workers]
+        for record in self.records:
+            probes = {}
+            for kind, paths in [('server', ['/api/nodes', '/api/ready']), ('host', ['/status'])]:
+                for path in paths:
+                    try:
+                        probes[kind + path] = self.http(f"http://127.0.0.1:{record[kind + '_port']}", path)
+                    except Exception as error:
+                        probes[kind + path] = {'error': str(error)}
+            evidence[record['id']] = probes
+        write(self.root / 'failure-state.json', evidence)
+
     def start(self,label,binary,args):
         log = (self.root / (label + '.log')).open('ab')
         self.children[label] = subprocess.Popen([self.bin / binary,*map(str,args)],env=self.env,stdout=log,stderr=log)
@@ -165,6 +182,8 @@ class Environment:
         host = f"http://127.0.0.1:{record['host_port']}"
         self.http(host,f"/runtimes/{record['id']}/activate",'POST',{})
         self.http(host,'/activate-host','POST',{})
+        self.last_ingress_workers = self.ingress_workers()
+        self.last_successor_port = record["server_port"]
         atomic_bytes(s.nginx_include,units.nginx(s,record['server_port'],record['host_port']).encode(),0o644)
         config = self.root / 'nginx.conf'
         if not config.exists():
@@ -177,6 +196,16 @@ class Environment:
         until(lambda:self.api('/api/admin/release')['instance_release'] == record['id'],'public version')
         self.resources.check()
         assert self.children['resources'].poll() is None, 'resource service exited during handoff'
+
+    def ingress_workers(self):
+        path = self.root / 'nginx.pid'
+        return ingress.snapshot(int(path.read_text())) if path.exists() else []
+
+    def ingress_drained(self, workers):
+        return ingress.drained(workers)
+
+    def retire(self, record):
+        return ingress.retire(self, f"http://127.0.0.1:{record['server_port']}", self.last_ingress_workers, self.last_successor_port)
 
     def runtime_pid(self,record):
         return int(subprocess.check_output(['systemctl','show',record['runtime_unit'],'-p','MainPID','--value']))

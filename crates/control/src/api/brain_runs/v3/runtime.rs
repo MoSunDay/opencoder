@@ -9,12 +9,12 @@ use opencoder_core::{brain::*, fleet::*};
 use serde_json::{json, Value};
 use std::sync::Arc;
 
-pub async fn wake(state: &Arc<AppState>, run_id: &str) -> Result<()> {
+pub async fn wake(state: &Arc<AppState>, run_id: &str) -> Result<Option<u64>> {
     let reply = runs::call(state, run_id, "snapshot", Value::Null).await;
     ensure!(reply.status < 300, "scheduler snapshot: {}", reply.body);
     let snapshot: BrainSchedulerSnapshot = serde_json::from_value(reply.body)?;
     if snapshot.run.phase != BrainSchedulerPhase::Ready {
-        return Ok(());
+        return Ok(None);
     }
     let assignment = state
         .fleet
@@ -112,5 +112,9 @@ pub async fn wake(state: &Arc<AppState>, run_id: &str) -> Result<()> {
     };
     let reply = runs::call(state, run_id, "scheduler_context", json!(context)).await;
     ensure!(reply.status < 300, "scheduler activation: {}", reply.body);
-    Ok(())
+    if reply.body["stale"] == true {
+        return Ok(None);
+    }
+    let admitted: BrainSchedulerSnapshot = serde_json::from_value(reply.body)?;
+    Ok(Some(admitted.run.generation))
 }

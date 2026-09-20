@@ -150,7 +150,11 @@ pub(super) async fn create(worker: &Worker, mut assignment: Assignment) -> Resul
         Lifecycle::default()
     };
     let record = Record {
-        annotations: serde_json::Value::Null,
+        annotations: if assignment.request.kind == ExecutionKind::Operator {
+            json!({"operator_environment_version": 1})
+        } else {
+            Value::Null
+        },
         queue: None,
         assignment,
         result: project_run
@@ -216,6 +220,27 @@ fn dag_spec_agents(spec: Option<&str>) -> Option<Vec<String>> {
 }
 
 pub(super) fn prepare(worker: &Worker, assignment: &Assignment, legacy: bool) -> Result<Config> {
+    prepare_with_config(worker, assignment, legacy, worker.configuration()?)
+}
+
+pub(super) fn prepare_record(
+    worker: &Worker,
+    record: &Record,
+    assignment: &Assignment,
+    legacy: bool,
+) -> Result<Config> {
+    let config = crate::brain::workdir::execution_config(worker, record)?
+        .map(Ok)
+        .unwrap_or_else(|| worker.configuration())?;
+    prepare_with_config(worker, assignment, legacy, config)
+}
+
+fn prepare_with_config(
+    worker: &Worker,
+    assignment: &Assignment,
+    legacy: bool,
+    mut config: Config,
+) -> Result<Config> {
     let input = &assignment.request.input;
     anyhow::ensure!(
         !(assignment.request.kind == ExecutionKind::Brain
@@ -229,7 +254,6 @@ pub(super) fn prepare(worker: &Worker, assignment: &Assignment, legacy: bool) ->
     if let Some(error) = worker.inner.persistence_error.lock().unwrap().as_ref() {
         bail!("node persistence unavailable: {error}");
     }
-    let mut config = worker.configuration()?;
     if let Some(settings) = &assignment.runtime {
         config.agent.runtime = settings.as_ref().clone();
     }
@@ -618,7 +642,7 @@ pub(crate) async fn start(
         effective.request.input["run_id"] = command.input["run_id"].clone();
         effective.request.input["action"] = record.result["next_action"].clone();
     }
-    let config = match prepare(worker, &effective, legacy) {
+    let config = match prepare_record(worker, &record, &effective, legacy) {
         Ok(config) => config,
         Err(error) => {
             return Ok(RpcReply::error(

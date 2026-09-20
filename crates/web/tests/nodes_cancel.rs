@@ -17,7 +17,7 @@ use tower::ServiceExt;
 
 async fn app() -> axum::Router {
     let state = Arc::new(opencoder_web::AppState {
-                config_home: None,
+        config_home: None,
         brain: opencoder_web::api_brain::mock_brain(Arc::new(
             LibsqlStore::open_memory().await.unwrap(),
         )),

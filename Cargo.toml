@@ -103,7 +103,8 @@ uuid = { version = "1", features = ["v4"] }
 pulldown-cmark = { version = "0.13", default-features = false }
 base64 = "0.22"
 arboard = "3"
-nfsserve = "0.11"
+# READDIR must forward the pagination cookie; see upstream pull request #50.
+nfsserve = { git = "https://github.com/huggingface/nfsserve", rev = "9833110399019cf67308aece811ffa47bfe365f1" }
 
 [profile.release]
 opt-level = 3

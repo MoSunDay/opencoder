@@ -16,12 +16,18 @@ pub(super) async fn read(worker: &Worker, id: &str, input: Value) -> Result<RpcR
     drop(journal);
     read_fields(
         worker,
-        id,
         legacy,
-        input["step"].as_str().unwrap_or(""),
-        input["file"].as_str().unwrap_or("output.txt"),
-        input["offset"].as_u64().unwrap_or(0),
-        None,
+        &ArtifactRequest {
+            execution: ExecutionRef {
+                id: id.into(),
+                kind: ExecutionKind::Dag,
+            },
+            step: input["step"].as_str().unwrap_or("").into(),
+            index: input["index"].as_u64().map(|i| i as usize),
+            file: input["file"].as_str().unwrap_or("output.txt").into(),
+            offset: input["offset"].as_u64().unwrap_or(0),
+            version: None,
+        },
     )
     .await
 }
@@ -68,34 +74,23 @@ pub(super) async fn read_request(worker: &Worker, request: ArtifactRequest) -> R
         .lock()
         .await
         .uses_legacy(&request.execution.id);
-    read_fields(
-        worker,
-        &request.execution.id,
-        legacy,
-        &request.step,
-        &request.file,
-        request.offset,
-        request.version.as_deref(),
-    )
-    .await
+    read_fields(worker, legacy, &request).await
 }
 
-async fn read_fields(
-    worker: &Worker,
-    id: &str,
-    legacy: bool,
-    step: &str,
-    name: &str,
-    offset: u64,
-    expected_version: Option<&str>,
-) -> Result<RpcReply> {
+async fn read_fields(worker: &Worker, legacy: bool, request: &ArtifactRequest) -> Result<RpcReply> {
+    let id = &request.execution.id;
+    let step = &request.step;
+    let index = request.index;
+    let name = request.file.as_str();
+    let offset = request.offset;
+    let expected_version = request.version.as_deref();
     let workflow_root = if legacy {
         worker.inner.layout.checked_legacy_workflow_root()?
     } else {
         worker.inner.layout.kind_root(ExecutionKind::Dag)
     };
-    let dir =
-        opencoder_dag::artifacts::step_dir(&workflow_root, id, step).map_err(anyhow::Error::msg)?;
+    let dir = opencoder_dag::artifacts::execution_dir(&workflow_root, id, step, index)
+        .map_err(anyhow::Error::msg)?;
     let path = if matches!(name, "output.txt" | "output.json" | "meta.json") {
         dir.join(name)
     } else {

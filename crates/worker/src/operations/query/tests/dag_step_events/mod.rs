@@ -94,3 +94,5 @@ fn frames(reply: &RpcReply) -> &Vec<Value> {
 
 mod paging;
 mod sources;
+
+mod instances;

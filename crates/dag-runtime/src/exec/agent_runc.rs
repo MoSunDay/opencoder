@@ -51,6 +51,7 @@ pub(crate) async fn execute_agent_step_runc(
         &ctx.workflow_root,
         &ctx.run_id,
         &ctx.step.name,
+        ctx.instance,
         &session_id,
     );
     info!(run_id = %ctx.run_id, step = %ctx.step.name, %session_id, "dag agent step executing (runc sandbox)");
@@ -60,33 +61,42 @@ pub(crate) async fn execute_agent_step_runc(
     if let Err(e) = wasm::write_context_json(ctx) {
         return wasm::error_result(format!("cannot write context.json: {e}"));
     }
-    let step_dir =
-        match opencoder_dag::artifacts::step_dir(&ctx.workflow_root, &ctx.run_id, &ctx.step.name) {
-            Ok(dir) => dir,
-            Err(e) => return wasm::error_result(format!("illegal step path: {e}")),
-        };
+    let step_dir = match ctx.dir() {
+        Ok(dir) => dir,
+        Err(e) => return wasm::error_result(format!("illegal step path: {e}")),
+    };
     if let Err(e) = std::fs::write(step_dir.join("prompt.txt"), build_prompt(ctx)) {
         return wasm::error_result(format!("cannot write prompt.txt: {e}"));
     }
 
+    let mut config = deps.config.clone();
+    if let StepKind::Agent {
+        model: Some(model), ..
+    } = &ctx.step.kind
+    {
+        config.model = model.clone();
+    }
     // LLM allowlist: the container has no config file, so the host injects
     // its own resolved endpoint (fail-closed on a missing API key).
-    let api_key = match deps.config.api_key() {
+    let api_key = match config.api_key() {
         Ok(key) => key,
         Err(e) => return wasm::error_result(format!("agent sandbox needs an LLM API key: {e:#}")),
     };
     let mut env = wasm::step_env(ctx);
-    env.push(("OPENCODER_MODEL".into(), deps.config.model_id().to_string()));
+    if deps.config.agent.agents_dir.is_some() {
+        env.push(("OPENCODER_AGENTS_DIR".into(), super::AGENTS_MOUNT.into()));
+    }
+    env.push(("OPENCODER_MODEL".into(), config.model_id().to_string()));
     env.push((
         "OPENAI_BASE_URL".into(),
-        deps.config.base_url_for(deps.config.provider_id()),
+        config.base_url_for(config.provider_id()),
     ));
     env.push(("OPENAI_API_KEY".into(), api_key));
     env.push(("OPENCODER_STEP_SESSION_ID".into(), session_id.clone()));
     env.push(("OPENCODER_STEP_AGENT".into(), step_agent_name(&ctx.step)));
     env.push((
         "OPENCODER_STEP_PROMPT".into(),
-        format!("{}/{}/prompt.txt", CONTEXT_MOUNT, ctx.step.name),
+        format!("{}/{}/prompt.txt", CONTEXT_MOUNT, ctx.relative_dir()),
     ));
     if let Some(pairs) = how_append_env(ctx) {
         env.extend(pairs);
@@ -100,14 +110,13 @@ pub(crate) async fn execute_agent_step_runc(
     };
     let spec = crate::sandbox::oci::BundleSpec {
         run_root: ctx.workflow_root.join(&ctx.run_id),
-        step_slug: ctx.step.name.clone(),
+        step_slug: ctx.relative_dir(),
         command: vec![RUNNER_ARGV.into()],
         env,
         timeout_hint: ctx.step.timeout_secs,
         knowledge,
-        // DAG agent steps run against the node's normal agent resolution;
-        // only agent-session workloads pin a pool here.
-        agents: None,
+        // Tools and skills resolve against the same read-only pinned pool.
+        agents: deps.config.agent.agents_dir.clone(),
         argv: crate::sandbox::oci::ArgvStyle::Direct,
     };
     // Bundles live next to the run root, never inside it (the run root is
@@ -116,7 +125,7 @@ pub(crate) async fn execute_agent_step_runc(
         .workflow_root
         .join("bundles")
         .join(&ctx.run_id)
-        .join(&ctx.step.name);
+        .join(ctx.relative_dir());
     let prepared =
         tokio::task::spawn_blocking(move || crate::sandbox::oci::write_bundle(&bundle_dir, &spec))
             .await;
@@ -128,21 +137,68 @@ pub(crate) async fn execute_agent_step_runc(
 
     // run_step owns the timeout (it kills + reaps the container); every
     // stdout/stderr byte is mirrored into the node store as it arrives.
-    let container_id = format!("{}-{}", ctx.run_id, ctx.step.name);
-    let output = StepOutputLog::new(deps.store.clone(), &ctx.run_id, &ctx.step.name);
-    let streamed = crate::sandbox::runc::run_step_streamed(
+    let container_id = format!("{}-{}", ctx.run_id, ctx.execution_key());
+    let output = StepOutputLog::for_instance(
+        deps.store.clone(),
+        &ctx.run_id,
+        &ctx.step.name,
+        ctx.instance,
+    );
+    let container = crate::sandbox::runc::run_step_streamed(
         &bundle_dir,
         &container_id,
         ctx.step.timeout_secs,
         cancel.clone(),
         Some(output.clone()),
-    )
-    .await;
+    );
+    tokio::pin!(container);
+    let mut offset = 0;
+    let events_path = step_dir.join("events.ndjson");
+    let mut tick = tokio::time::interval(std::time::Duration::from_millis(100));
+    let mut event_error = None;
+    let streamed = loop {
+        tokio::select! {
+            result = &mut container => break result,
+            _ = tick.tick() => {
+                if let Err(error) = super::runc_events::drain(&events_path, &mut offset, deps.store.as_ref(), &session_id).await {
+                    event_error = Some(error);
+                    cancel.cancel();
+                    break container.await;
+                }
+            }
+        }
+    };
+    loop {
+        let before = offset;
+        if let Err(error) =
+            super::runc_events::drain(&events_path, &mut offset, deps.store.as_ref(), &session_id)
+                .await
+        {
+            event_error = Some(error);
+            break;
+        }
+        if before == offset {
+            break;
+        }
+    }
     output.close().await;
+    if let Some(error) = event_error {
+        let mut result = wasm::error_result(format!("container event persistence: {error:#}"));
+        result.session_id = Some(session_id);
+        return result;
+    }
 
     let mut result = match streamed {
         Ok((0, stdout)) => {
-            let mut result = wasm::finish_from_output_json(&step_dir, stdout);
+            let transcript = match std::fs::read_to_string(step_dir.join("transcript.txt")) {
+                Ok(text) => text,
+                Err(error) => {
+                    return wasm::error_result(format!(
+                        "container transcript: {error:#}; stdout: {stdout}"
+                    ))
+                }
+            };
+            let mut result = wasm::finish_from_output_json(&step_dir, transcript);
             result.session_id = Some(session_id.clone());
             result
         }
@@ -165,22 +221,7 @@ pub(crate) async fn execute_agent_step_runc(
         }
     };
     result.session_id = Some(session_id);
-    // Successful step: persist the declared how.md append with the host
-    // path's warn-only posture (a pool-write failure never flips Done).
-    if result.outcome == StepOutcome::Done {
-        if let Some(delta) = how_append_declared(&ctx.step).filter(|d| !d.trim().is_empty()) {
-            match super::how_append::append_to_how_md(&step_agent_name(&ctx.step), delta) {
-                Ok(version) => info!(
-                    run_id = %ctx.run_id, step = %ctx.step.name, version,
-                    "how_append persisted to agent prompt pool"
-                ),
-                Err(e) => warn!(
-                    run_id = %ctx.run_id, step = %ctx.step.name, error = %e,
-                    "how_append persistence failed (step outcome unchanged)"
-                ),
-            }
-        }
-    }
+
     result
 }
 

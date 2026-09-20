@@ -106,6 +106,23 @@ pub(super) async fn create(worker: &Worker, mut assignment: Assignment) -> Resul
             ))
         }
     };
+    // Fresh creations of operator executions materialize the per-execution
+    // home/workspace (frozen config snapshot) BEFORE the record is enqueued,
+    // so the first turn — and every restart resume — already resolves the
+    // isolated paths. Deliberately NOT inside `prepare`: resume/command
+    // paths re-run prepare for in-flight records, and materializing there
+    // would flip a legacy execution's workdir mid-flight.
+    if let Err(error) = super::operator_env::materialize(
+        &worker.inner.layout,
+        assignment.request.kind,
+        &assignment.index.id,
+        &config,
+    ) {
+        return Ok(RpcReply::error(
+            400,
+            format!("execution preflight: {error:#}"),
+        ));
+    }
     let project_run = if assignment.request.kind == ExecutionKind::Project {
         let action = assignment.request.input["action"]
             .as_str()
@@ -188,9 +205,9 @@ fn dag_spec_agents(spec: Option<&str>) -> Option<Vec<String>> {
     Some(
         spec.steps
             .into_iter()
-            .filter_map(|step| match step.kind {
+            .filter_map(|step| match step.kind.executable() {
                 opencoder_dag::StepKind::Agent { agent, .. } => {
-                    Some(agent.unwrap_or_else(|| "act".into()))
+                    Some(agent.clone().unwrap_or_else(|| "act".into()))
                 }
                 _ => None,
             })
@@ -279,7 +296,11 @@ pub(super) fn prepare(worker: &Worker, assignment: &Assignment, legacy: bool) ->
                 .as_ref()
                 .and_then(|d| d.get("spec").unwrap_or(d).get("steps"))
                 .and_then(Value::as_array)
-                .is_some_and(|steps| steps.iter().any(|s| s["kind"]["type"] == "agent")),
+                .is_some_and(|steps| {
+                    steps.iter().any(|s| {
+                        s["kind"]["type"] == "agent" || s["kind"]["template"]["type"] == "agent"
+                    })
+                }),
             _ => true,
         };
         opencoder_core::agent::scope::with_root_sync(config.agent.agents_dir.clone(), || {
@@ -339,12 +360,14 @@ pub(super) fn prepare(worker: &Worker, assignment: &Assignment, legacy: bool) ->
                             .map_err(|e| anyhow::anyhow!(e))?;
                     opencoder_dag::validate(&spec).map_err(|e| anyhow::anyhow!(e.join("; ")))?;
                     super::dag_preflight::validate(worker, &spec, legacy)?;
-                    agents.extend(spec.steps.into_iter().filter_map(|s| match s.kind {
-                        opencoder_dag::StepKind::Agent { agent, .. } => {
-                            Some(agent.unwrap_or_else(|| "act".into()))
-                        }
-                        _ => None,
-                    }));
+                    agents.extend(spec.steps.into_iter().filter_map(
+                        |s| match s.kind.executable() {
+                            opencoder_dag::StepKind::Agent { agent, .. } => {
+                                Some(agent.clone().unwrap_or_else(|| "act".into()))
+                            }
+                            _ => None,
+                        },
+                    ));
                 }
                 ExecutionKind::Todos => {
                     agents.push("workflow".into());

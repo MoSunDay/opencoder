@@ -185,3 +185,34 @@ pub async fn dag_step_events(
     });
     sse(first, fetch, after, lifecycle)
 }
+
+/// One selected dynamic instance uses the same bounded, replayable SSE transport.
+pub async fn dag_instance_events(
+    State(state): State<Arc<AppState>>,
+    Path((id, step, index)): Path<(String, String, usize)>,
+    Query(query): Query<Cursor>,
+    headers: HeaderMap,
+) -> Response {
+    let after = cursor_after(&query, &headers);
+    let fetch: PageFetch = {
+        let state = state.clone();
+        Arc::new(move |cursor| {
+            let state = state.clone();
+            let id = id.clone();
+            let step = step.clone();
+            Box::pin(async move {
+                super::executions::for_id(&state, &id, |execution| {
+                    opencoder_core::fleet::NodeOperation::DagInstanceEvents {
+                        execution,
+                        step,
+                        index,
+                        after: cursor,
+                    }
+                })
+                .await
+            })
+        })
+    };
+    let first = fetch(after).await;
+    sse(first, fetch, after, state.lifecycle.clone())
+}

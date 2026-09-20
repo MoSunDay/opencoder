@@ -39,6 +39,7 @@ async fn state() -> Arc<opencoder_web::AppState> {
 async fn state_with_workdir(workdir: std::path::PathBuf) -> Arc<opencoder_web::AppState> {
     let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
     Arc::new(opencoder_web::AppState {
+                config_home: None,
         client_override: None,
         brain: opencoder_web::api_brain::mock_brain(store.clone()),
         store,
@@ -438,6 +439,7 @@ async fn drain_cmd_events_persisted_for_sse_replay() {
         sid,
         mock_reply("ok"),
         std::env::temp_dir(),
+        None,
         opencoder_core::Config {
             model: "m/g".into(),
             ..Default::default()

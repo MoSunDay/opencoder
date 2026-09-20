@@ -135,6 +135,7 @@ impl Worker {
             .await?;
         *project.require()?.archive_root.lock().unwrap() = data_dir.join("project-runs");
         let state = Arc::new(opencoder_web::AppState {
+                        config_home: None,
             store: store.clone(),
             workdir: options.workdir,
             handles: opencoder_web::handle::new_handle_map(),

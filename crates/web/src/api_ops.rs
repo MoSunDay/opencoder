@@ -81,6 +81,7 @@ pub async fn post_compact(State(state): State<Arc<AppState>>, Path(id): Path<Str
         &id,
         client,
         state.workdir.clone(),
+        state.config_home.clone(),
         config,
         &handle,
     )
@@ -137,6 +138,7 @@ pub async fn post_handoff(
         &id,
         client,
         state.workdir.clone(),
+        state.config_home.clone(),
         config,
         &handle,
     )
@@ -166,7 +168,7 @@ pub(crate) fn apply_prompt_model(config: &mut Config, model: Option<String>) -> 
 
 /// GET /api/config — return the current on-disk config as JSON.
 pub async fn get_config(State(state): State<Arc<AppState>>) -> Response {
-    match Config::load(&state.workdir) {
+    match Config::load_with_home(&state.workdir, state.config_home.as_deref()) {
         Ok(cfg) => {
             let val = serde_json::to_value(&cfg).unwrap_or_else(|_| json!({}));
             // Never echo provider secrets back: mask every `api_key` before
@@ -265,7 +267,8 @@ pub async fn stop_bg(State(_state): State<Arc<AppState>>) -> Response {
 // ── helpers ───────────────────────────────────────────────────────────────
 
 fn load_config(state: &AppState) -> Result<Config, Box<Response>> {
-    Config::load(&state.workdir).map_err(|e| Box::new(error_500(format!("config: {e:#}"))))
+    Config::load_with_home(&state.workdir, state.config_home.as_deref())
+        .map_err(|e| Box::new(error_500(format!("config: {e:#}"))))
 }
 
 fn build_client(state: &AppState, config: &Config) -> Result<Arc<dyn ChatStream>, Box<Response>> {

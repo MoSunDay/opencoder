@@ -6,10 +6,9 @@
 //!
 //! The fleet smokes in this package spawn the split server/agent binaries,
 //! which only exist in the shared target dir after a workspace build. Run
-//! what [`FLEET_BINS_HINT`] says before `cargo test -p opencoder`, or
-//! simply use `cargo test --workspace` (it builds every member binary
-//! first). A missing sibling fails fast via [`sibling_bin`] with the same
-//! hint.
+//! what [`FLEET_BINS_HINT`] says before running tests. `cargo test
+//! --workspace` can build only a sibling's test harness and leave its
+//! executable stale. Missing or mismatched siblings fail fast.
 
 use std::path::PathBuf;
 
@@ -18,8 +17,8 @@ use std::path::PathBuf;
 /// and reusable by any future preflight.
 pub const FLEET_BINS_HINT: &str = "build the workspace binaries first: \
      `cargo build --workspace --bins` (fleet e2e smokes need the split \
-     opencode-server/opencode-agent binaries; `cargo test -p opencode` \
-     alone does not build them)";
+     opencoder-server/opencoder-agent binaries; `cargo test --workspace` \
+     alone does not guarantee current sibling executables)";
 
 /// Candidate names for the fleet server binary, in priority order (see
 /// [`sibling_bin`] for why there is more than one).
@@ -62,10 +61,9 @@ pub mod llm_stub;
 ///
 /// Integration tests only get `CARGO_BIN_EXE_*` for targets of the package
 /// that owns the test, but the fleet smokes deliberately live in the root
-/// package while the server/agent binaries live in their own crates. The
-/// workspace regression (`cargo test --workspace`) builds every member
-/// binary into the same target dir before running any test, so resolving
-/// siblings of this test's own binary is deterministic there.
+/// package while the server/agent binaries live in their own crates. Verify
+/// their compiled source metadata so cached executables cannot validate an
+/// older revision while the test harness reports the current source.
 ///
 /// Candidates (not a single name) because the fleet binaries carry the
 /// package spelling (`opencoder-server`/`opencoder-agent`, matching the
@@ -79,6 +77,22 @@ pub fn sibling_bin(candidates: &[&str]) -> PathBuf {
     for name in candidates {
         let path = dir.join(name);
         if path.is_file() {
+            let output = std::process::Command::new(&path)
+                .arg("--build-info")
+                .output()
+                .expect(FLEET_BINS_HINT);
+            assert!(output.status.success(), "{FLEET_BINS_HINT}");
+            let actual: serde_json::Value =
+                serde_json::from_slice(&output.stdout).expect(FLEET_BINS_HINT);
+            let expected = serde_json::to_value(opencoder_core::version::build_info()).unwrap();
+            for key in ["git_commit", "git_dirty", "protocol_version"] {
+                assert_eq!(
+                    actual[key],
+                    expected[key],
+                    "{} has stale {key}; {FLEET_BINS_HINT}",
+                    path.display()
+                );
+            }
             return path;
         }
     }

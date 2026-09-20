@@ -163,8 +163,26 @@ pub(in crate::operations) fn begin(
         .context("execution preparation parent missing")?;
     opencoder_core::share_fs::durable_create_dir_all(parent)?;
     let stage = parent.join(format!(".prepare-{}", ulid::Ulid::new()));
+    // A WASM-only request freezes an empty Agent namespace. Publish it with
+    // the reservation, sharing the same parent-directory durability barrier.
+    // Agent-bearing requests must still copy and validate their resource pool.
+    let empty_resources = if crate::resources::requires_agent_pool(&assignment) {
+        None
+    } else {
+        Some(
+            stage.join(
+                resource_root(worker, &assignment, false)?
+                    .strip_prefix(&root)
+                    .context("resource namespace must be inside execution root")?,
+            ),
+        )
+    };
     fs::create_dir(&stage)?;
     let result = (|| {
+        if let Some(resources) = &empty_resources {
+            fs::create_dir(resources)?;
+            fs::File::open(resources)?.sync_all()?;
+        }
         let mut options = fs::OpenOptions::new();
         options.create_new(true).write(true);
         #[cfg(unix)]
@@ -188,6 +206,9 @@ pub(in crate::operations) fn begin(
         // Only our unpublished reservation is removed; execution data and
         // existing journals are never deleted by admission recovery.
         let _ = fs::remove_file(stage.join(FILE));
+        if let Some(resources) = &empty_resources {
+            let _ = fs::remove_dir(resources);
+        }
         let _ = fs::remove_dir(&stage);
     }
     result?;

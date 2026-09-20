@@ -81,24 +81,25 @@ impl Host {
         runtime_id: &str,
         operation: &NodeOperation,
     ) -> Result<RpcReply> {
-        // The Server waits 60 seconds for creation and 15 for other RPCs.
-        // Bound the entire forward, including locks, wake-up and response body, so
-        // unresolved old-runtime retries cannot retain every control-channel
-        // permit. Ownership and the frozen request remain available for retry;
-        // cancelling this HTTP wait does not cancel a Runtime-owned execution.
-        let seconds = match operation {
-            NodeOperation::Create { .. } => 45,
-            _ => 10,
+        let _creation = match self.creations.begin(runtime_id, operation) {
+            Ok(creation) => creation,
+            Err(reply) => return Ok(reply),
         };
-        tokio::time::timeout(
-            Duration::from_secs(seconds),
-            self.call_runtime_inner(runtime_id, operation),
+        match tokio::time::timeout(
+            super::admission::request_timeout(operation),
+            self.forward_runtime(runtime_id, operation),
         )
         .await
-        .context("runtime control request timed out; retry the same execution ID")?
+        {
+            Ok(reply) => reply,
+            Err(_) => Ok(RpcReply::error(
+                504,
+                "runtime request timed out; retry using the same execution id",
+            )),
+        }
     }
 
-    async fn call_runtime_inner(
+    async fn forward_runtime(
         &self,
         runtime_id: &str,
         operation: &NodeOperation,

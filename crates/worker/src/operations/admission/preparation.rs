@@ -3,7 +3,11 @@ use crate::Worker;
 use anyhow::{ensure, Context, Result};
 use opencoder_core::fleet::{Assignment, ExecutionKind, RpcReply};
 use serde::{Deserialize, Serialize};
-use std::{fs, io::Write, path::Path};
+use std::{
+    fs,
+    io::Write,
+    path::{Path, PathBuf},
+};
 
 const FILE: &str = "pending-create.json";
 
@@ -11,6 +15,33 @@ pub(in crate::operations) type Lease = (
     tokio::sync::OwnedMutexGuard<()>,
     Option<tokio::sync::OwnedSemaphorePermit>,
 );
+
+pub(in crate::operations) fn resource_root(
+    worker: &Worker,
+    assignment: &Assignment,
+    legacy: bool,
+) -> Result<PathBuf> {
+    if assignment.request.kind == ExecutionKind::Project {
+        let id = assignment.request.input["run_id"]
+            .as_str()
+            .context("project run id missing")?;
+        return opencoder_project::trace::archive::run_root(
+            &worker.inner.data_dir.join("project-resources"),
+            id,
+        );
+    }
+    if legacy {
+        worker
+            .inner
+            .layout
+            .legacy_resources_dir(&assignment.index.id)
+    } else {
+        worker
+            .inner
+            .layout
+            .resources_dir(assignment.index.kind, &assignment.index.id)
+    }
+}
 
 /// Blocking I/O owns admission leases until it ends, even if its caller drops.
 /// Returning them keeps the same execution serialized through durable acceptance.

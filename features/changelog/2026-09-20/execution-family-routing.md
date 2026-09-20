@@ -1,3 +1,5 @@
+Commit: 2866ae82c34999096efa8fe7e47003d114391120
+
 # DAG、TODO、Agent 与 Team 执行索引和传参
 
 ## 变更
@@ -20,4 +22,5 @@
 | 控制面输入透传 | `dispatch_passes_input_through_to_the_assignment` | `crates/control/tests/e2e/dag_dispatch_extra.rs` |
 
 - 上述专项回归均通过。
-- 工作区全量回归已发起；当前工作区存在其他并行改动和编译任务，需在共享编译锁释放后复核最终结果。
+- 工作区全量回归已完成：执行相关的 DAG、TODO、Agent、Team 专项均通过；首次全量运行中有一个并发脑调度用例偶发失败，单独复跑已通过。剩余失败集中在 `opencoder-session` 的 4 个 bash guard 兼容性用例，属于本次执行索引改动之外的现有门禁变更。
+- 针对本次触及的 Store/Worker 目标执行 `cargo clippy --offline -p opencoder-store -p opencoder-worker --all-targets -- -D warnings`，无告警。

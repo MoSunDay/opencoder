@@ -108,8 +108,7 @@ async fn wait(mut check: impl AsyncFnMut() -> bool) {
     .unwrap();
 }
 
-#[tokio::test]
-async fn stalled_runtime_forward_releases_its_lock_and_preserves_retry_ownership() {
+async fn assert_stalled_forward_releases_its_lock(creation: bool) {
     let dir = tempfile::tempdir().unwrap();
     let host = Host::open(
         &dir.path().join("host"),
@@ -140,10 +139,12 @@ async fn stalled_runtime_forward_releases_its_lock_and_preserves_retry_ownership
                     started.notify_one();
                     std::future::pending::<()>().await;
                 }
-                let NodeOperation::Create { assignment } = operation else {
-                    panic!("expected the same creation request");
+                let body = match operation {
+                    NodeOperation::Create { assignment } => json!(assignment.index),
+                    NodeOperation::Inspect { execution } => json!({"id":execution.id}),
+                    _ => panic!("unexpected operation"),
                 };
-                axum::Json(RpcReply::ok(json!(assignment.index)))
+                axum::Json(RpcReply::ok(body))
             }
         }),
     );
@@ -159,13 +160,26 @@ async fn stalled_runtime_forward_releases_its_lock_and_preserves_retry_ownership
         .await
         .unwrap();
     host.store.activate_runtime("slow-runtime").await.unwrap();
-    let operation = create(&host, "agent-slow-forward");
+    let operation = if creation {
+        create(&host, "agent-slow-forward")
+    } else {
+        host.store
+            .assign_runtime("agent-slow-forward", None)
+            .await
+            .unwrap();
+        NodeOperation::Inspect {
+            execution: ExecutionRef {
+                id: "agent-slow-forward".into(),
+                kind: ExecutionKind::Agent,
+            },
+        }
+    };
     let waiting = host.clone();
     let original = operation.clone();
     let call = tokio::spawn(async move { waiting.handle(original).await });
     entered.notified().await;
     tokio::time::pause();
-    tokio::time::advance(Duration::from_secs(46)).await;
+    tokio::time::advance(Duration::from_secs(if creation { 46 } else { 11 })).await;
     let reply = call.await.unwrap();
     tokio::time::resume();
     assert_eq!(reply.status, 503, "{reply:?}");
@@ -195,6 +209,16 @@ async fn stalled_runtime_forward_releases_its_lock_and_preserves_retry_ownership
     assert_eq!(requests.len(), 2);
     assert_eq!(requests[0], requests[1], "retry changed the frozen request");
     server.abort();
+}
+
+#[tokio::test]
+async fn stalled_runtime_create_releases_its_lock_and_preserves_retry_ownership() {
+    assert_stalled_forward_releases_its_lock(true).await;
+}
+
+#[tokio::test]
+async fn stalled_runtime_inspection_releases_its_lock_before_server_read_timeout() {
+    assert_stalled_forward_releases_its_lock(false).await;
 }
 
 #[tokio::test]

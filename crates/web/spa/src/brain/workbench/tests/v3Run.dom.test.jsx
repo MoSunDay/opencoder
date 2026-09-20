@@ -34,7 +34,7 @@ describe('v3 大脑运行总览', () => {
     expect(screen.getAllByText('第 1 轮').length).toBeGreaterThan(0);
     expect(screen.queryByText('步骤执行画布')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: /查看执行 agent-1/ }));
-    expect(await screen.findByText('agent-1')).toBeTruthy();
+    expect(await screen.findByRole('dialog', { name: '能力执行明细' })).toBeTruthy();
     expect(screen.getByText('所属节点')).toBeTruthy();
   });
 });

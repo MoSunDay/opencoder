@@ -1,8 +1,8 @@
 import { Alert, Button, Descriptions, Empty, Select, Space, Tabs, Tag, Typography } from 'antd';
 import { useEffect, useState } from 'react';
-import { apiGet } from '../../api.js';
-import { downloadArtifact } from '../../fleet/download.js';
-import { ExecutionView } from '../../fleet/detail.jsx';
+import { apiGet } from '../../../api.js';
+import { downloadArtifact } from '../../../fleet/download.js';
+import { ExecutionView } from '../../../fleet/detail.jsx';
 import { STATES, COLORS } from './model.js';
 const JsonView = ({ value }) => <pre className="brain-json">{JSON.stringify(value, null, 2)}</pre>;
 export function Inspector({ run, stepId, instanceId, onInstance, onNotice }) {

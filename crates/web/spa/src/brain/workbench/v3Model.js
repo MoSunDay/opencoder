@@ -34,6 +34,7 @@ export function currentRound(view) {
 }
 
 export function capabilityFor(view, operation) {
+  if (operation.capability) return operation.capability;
   const found = (view?.capabilities || []).find((capability) => (
     capability.capability_id === operation.capability_id
   ));
@@ -41,7 +42,7 @@ export function capabilityFor(view, operation) {
     capability_id: operation.capability_id,
     kind: operation.execution_kind,
     target: '索引中未保存目标',
-    version: 'unknown',
+    version: null,
   };
 }
 

@@ -134,6 +134,8 @@ DAG 页和执行详情先展示节点结果快照，运行中只折叠快照之�
 
 DAG 的非 Agent 步骤为 WebAssembly WASI 命令模块。默认 `sandbox: in_process` 使用内嵌 wasmtime，通过 epoch deadline 处理取消和超时，无需单独安装 wasmtime CLI。`sandbox: runc` 需要节点上的 runc 和 `<workflow_root>/rootfs` 中可运行的静态 wasmtime 目录；缺失时报错，不回退到内嵌模式。每个 bundle 复制独立运行时目录并在重试中复用，rootfs 只读挂载，run 目录挂至 `/workspace/context`。模块读取 `OPENCODER_STEP_CONTEXT` 指向的 `context.json`，可写 `output.json` 返回结构化结果；不存在 `internal-python-step` 或 RustPython 执行入口。wasm 模块经 Server 模块池发布（`/api/dag/wasm` + 第二路 NFS 只读导出），节点配置 `dag.wasm_dir` 后受理时冻结到 `_modules/`，spec 中 `tool@v3.wasm` 形态可显式固定版本。详见 [DAG 运行时](../agents/dag-runtime/index.md) 与 [dag-wasm 模块](../agents/dag-wasm/index.md)。
 
+动态节点支持按派发输入或上游结构化输出批量展开 Agent/Wasm 实例，逐实例隔离 how、argv、状态和日志；四个并发名额在整个 run 内共享。定义示例、恢复规则和实例 API 见 [Dynamic DAG Step](dag-dynamic.md)。
+
 ## 发布与回滚
 
 平滑发布使用固定 Nginx 入口、双版本 Server、稳定 Agent Host 和独立 Runtime。完整配置、首次迁移、发布、回滚、备份及验收见 [平滑发布](smooth-release.md)。

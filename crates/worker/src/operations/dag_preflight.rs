@@ -20,7 +20,7 @@ pub(super) fn validate(worker: &Worker, spec: &opencoder_dag::DagSpec, legacy: b
     crate::dag_wasm_pin::pin(&worker.configuration()?, spec, &workflow_root)?;
     if !spec.steps.iter().any(|step| {
         matches!(
-            &step.kind,
+            step.kind.executable(),
             opencoder_dag::StepKind::Wasm {
                 sandbox: Some(opencoder_dag::SandboxMode::Runc),
                 ..

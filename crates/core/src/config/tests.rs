@@ -575,3 +575,80 @@ fn embedding_model_id_returns_configured_value_stripping_prefix() {
     };
     assert_eq!(cfg.embedding_model_id(), "bge-m3");
 }
+
+// --- load_with_home: operator execution isolation -------------------------
+#[test]
+fn load_with_home_redirects_global_candidates_and_domain_files() {
+    let project = tempfile::tempdir().unwrap();
+    let isolated = tempfile::tempdir().unwrap(); // stands in for the real home
+    let execution = tempfile::tempdir().unwrap(); // the frozen execution home
+
+    // Isolated "real" global home (thread-local, no process-env mutation):
+    // a global config + a global mcp.json that must NOT be visible through
+    // the execution home.
+    let _guard = scoped_config_home(isolated.path().to_path_buf());
+    std::fs::create_dir_all(isolated.path().join(".opencoder")).unwrap();
+    std::fs::write(
+        isolated.path().join(".opencoder/config.json"),
+        serde_json::json!({"model": "real/home-model"}).to_string(),
+    )
+    .unwrap();
+    std::fs::write(
+        isolated.path().join(".opencoder/mcp.json"),
+        serde_json::json!({"real-mcp": {"command": "real"}}).to_string(),
+    )
+    .unwrap();
+
+    // The execution home carries the frozen snapshot + its own domain view.
+    std::fs::create_dir_all(execution.path().join(".opencoder")).unwrap();
+    std::fs::write(
+        execution.path().join(".opencoder/config.json"),
+        serde_json::json!({"model": "frozen/snapshot-model"}).to_string(),
+    )
+    .unwrap();
+    std::fs::write(
+        execution.path().join(".opencoder/mcp.json"),
+        serde_json::json!({"frozen-mcp": {"command": "frozen"}}).to_string(),
+    )
+    .unwrap();
+
+    // Project files still win over the redirected home.
+    std::fs::write(
+        project.path().join("opencoder.json"),
+        serde_json::json!({"fps": 12}).to_string(),
+    )
+    .unwrap();
+
+    let frozen = Config::load_with_home(project.path(), Some(execution.path())).unwrap();
+    assert_eq!(frozen.model, "frozen/snapshot-model");
+    assert_eq!(frozen.fps, Some(12), "project file still overrides");
+    assert!(
+        frozen.mcp_servers.contains_key("frozen-mcp"),
+        "domain files follow the redirected home: {:?}",
+        frozen.mcp_servers.keys().collect::<Vec<_>>()
+    );
+    assert!(
+        !frozen.mcp_servers.contains_key("real-mcp"),
+        "the real global home must not leak through the override"
+    );
+
+    // Without the override, discovery keeps using the (isolated) real home.
+    let live = Config::load(project.path()).unwrap();
+    assert_eq!(live.model, "real/home-model");
+    assert!(live.mcp_servers.contains_key("real-mcp"));
+}
+
+#[test]
+fn load_with_home_none_matches_plain_load() {
+    let dir = tempfile::tempdir().unwrap();
+    let _guard = scoped_config_home(dir.path().to_path_buf());
+    std::fs::write(
+        dir.path().join("opencoder.json"),
+        serde_json::json!({"model": "plain/load-model"}).to_string(),
+    )
+    .unwrap();
+    let plain = Config::load(dir.path()).unwrap();
+    let with_none = Config::load_with_home(dir.path(), None).unwrap();
+    assert_eq!(plain.model, with_none.model);
+    assert_eq!(with_none.model, "plain/load-model");
+}

@@ -5,7 +5,7 @@
 // only the wasm-side log projection lives here.
 
 /// Step kind → 中文 label (worker `spec_step_kind` vocabulary: wasm | agent).
-export const STEP_KIND_LABEL = { wasm: 'Wasm 步骤', agent: 'Agent 步骤' };
+export const STEP_KIND_LABEL = { wasm: 'Wasm 步骤', agent: 'Agent 步骤', dynamic: '动态步骤' };
 
 export function isAgentKind(kind) {
   return kind === 'agent';

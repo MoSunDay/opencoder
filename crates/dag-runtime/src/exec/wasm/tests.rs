@@ -145,6 +145,8 @@ fn step_ctx(workflow_root: &std::path::Path, command: &str, timeout_secs: Option
     };
     let step = spec.steps[0].clone();
     StepCtx {
+        instance: None,
+        instance_input: None,
         run_id: "run-1".into(),
         spec,
         step,

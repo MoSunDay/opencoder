@@ -10,6 +10,8 @@ brain 图契约 v2（30108c8b）后，`readDraft` 按 `plan.instances` / `schema
 - `crates/web/spa/src/brain/workbench/editor.jsx`：草稿读取失败 Alert 增加「丢弃缓存并重新开始」按钮（danger），绑定 `discard`。
 - 重建内嵌 SPA dist：注意 minifier 标识符命名与 antd CSS 提取顺序在本机非 bit-stable，提交产物必须来自 `scripts/check-spa-drift.sh` 同款镜像构建流程（多轮构建取稳定主流变体），否则发布门 `build.sh` 会以 `spa dist: DRIFT detected` 拒绝。本次 dist 修正链见提交 563ab375 / 07befc8e / 56675f34。
 
+> 后续（同日）：minifier 命名漂移已由提交 5c7fc73f（SPA dist 压缩器切换为固定版本 Terser，产物 byte-stable）根治，`scripts/check-spa-drift.sh` 三轮比对稳定通过，发布包重建为 `/srv/releases/opencoder-5c7fc73f` 对齐 HEAD（manifest commit=5c7fc73f、SHA256SUMS 全 OK、`opencode-server --version` = 0.1.0 (5c7fc73f)、二进制含「丢弃缓存并重新开始」）。bash guard 2 例失败亦由 d7872a64 对齐 unknown-command allow-by-default 语料后 11/11 全绿。
+
 ## 测试覆盖
 
 | 功能 | 测试名 | 文件 |

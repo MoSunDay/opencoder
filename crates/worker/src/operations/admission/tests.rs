@@ -3,6 +3,9 @@ use opencoder_core::fleet::*;
 use serde_json::{json, Value};
 use std::{path::Path, sync::Arc, time::Duration};
 
+#[path = "tests/pinned_retry.rs"]
+mod pinned_retry;
+
 async fn open(root: &Path) -> Worker {
     Worker::open(
         WorkerOptions {

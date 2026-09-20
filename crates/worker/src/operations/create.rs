@@ -1,5 +1,5 @@
 use crate::{journal::Record, lifecycle::Lifecycle, Worker};
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, Result};
 use opencoder_core::{fleet::*, Config};
 use serde_json::{json, Value};
 
@@ -84,7 +84,12 @@ pub(super) async fn create(worker: &Worker, mut assignment: Assignment) -> Resul
     drop(gate);
     // Classify the frozen definition, including an interrupted preparation's
     // original snapshot, before reserving bounded resource-copy capacity.
-    let resource_slot = if crate::resources::requires_agent_pool(&assignment) {
+    // A cancelled cold RPC may already have published its immutable snapshot.
+    // Its same-ID retry must not compete with new copies for another permit.
+    // The per-execution preparation guard keeps this check and reuse serialized.
+    let needs_copy = crate::resources::requires_agent_pool(&assignment)
+        && !preparation::resource_root(worker, &assignment, false)?.exists();
+    let resource_slot = if needs_copy {
         Some(
             worker
                 .inner
@@ -335,28 +340,7 @@ fn prepare_with_config(
         // An absent implicit pool permits built-in agents. An explicitly
         // configured source remains Some so pin rejects its disappearance.
         .or_else(|| implicit_source.filter(|path| path.exists()));
-    let root = if legacy {
-        worker
-            .inner
-            .layout
-            .legacy_resources_dir(&assignment.index.id)?
-    } else {
-        worker
-            .inner
-            .layout
-            .resources_dir(assignment.index.kind, &assignment.index.id)?
-    };
-    let root = if assignment.request.kind == ExecutionKind::Project {
-        let id = assignment.request.input["run_id"]
-            .as_str()
-            .context("project run id missing")?;
-        opencoder_project::trace::archive::run_root(
-            &worker.inner.data_dir.join("project-resources"),
-            id,
-        )?
-    } else {
-        root
-    };
+    let root = preparation::resource_root(worker, assignment, legacy)?;
     let new_snapshot = !root.exists();
     let requires_agents = crate::resources::requires_agent_pool(assignment);
     if new_snapshot && requires_agents {

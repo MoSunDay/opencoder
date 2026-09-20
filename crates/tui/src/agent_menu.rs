@@ -13,6 +13,11 @@
 //! path and the runner's control head applies the switch
 //! (`opencoder_session::control_cmd::split_control_prefix`), so the picker
 //! itself owns no I/O.
+//!
+//! The two row kinds are different things: builtin rows are the loop's
+//! runtime session-switch targets (operator semantics), file rows are
+//! registered capability cards; the SPA's Agent-mode "执行 Agent" picker
+//! lists registered cards only -- a separate surface from this one.
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use opencoder_core::AgentMode;
@@ -33,7 +38,9 @@ pub struct AgentCard {
 }
 
 /// Switchable primary agents for the picker: builtin primary roles first
-/// (act/plan/command), then the resolvable file-agent cards. Mirrors the
+/// (act/plan/command), then the resolvable file-agent cards -- runtime
+/// switch targets and registered cards, two kinds of rows (see the module
+/// header). Mirrors the
 /// web `/api/agents` `primary` computation
 /// (`is_primary() && name != "workflow"`) so both surfaces offer the same
 /// switch targets -- the switch endpoint rejects anything else.

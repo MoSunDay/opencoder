@@ -117,3 +117,5 @@ mod artifacts;
 
 #[cfg(test)]
 mod admission_tests;
+#[cfg(test)]
+mod sandbox_session;

@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex};
 use opencoder_core::message::now_ms;
 use opencoder_dag::{StepKind, StepOutcome, StepSpec};
 use opencoder_session::{resume_and_replay as resume_session, run as run_session, SessionEvent};
-use opencoder_store::SessionMeta;
+use opencoder_store::{SessionMeta, TASK_TYPE_AGENT_STEP};
 use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
@@ -205,8 +205,8 @@ fn knowledge_hint(ctx: &StepCtx) -> String {
 }
 
 /// Persist a fresh local session row for this step (the node executor's
-/// `create_local_meta` shape, but no `task_type` pin: a DAG step session is
-/// inspectable like any other).
+/// `create_local_meta` shape, pinned as an internal Agent step so it cannot
+/// leak into the top-level Agent chat lane.
 pub(crate) async fn create_session_meta(
     deps: &ExecDeps,
     step: &StepSpec,
@@ -234,7 +234,7 @@ pub(crate) async fn create_session_meta(
             handoff_seq: None,
             handoff_plan: None,
             skill: None,
-            task_type: None,
+            task_type: Some(TASK_TYPE_AGENT_STEP.into()),
             requirement: None,
         })
         .await?;

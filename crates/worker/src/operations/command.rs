@@ -240,7 +240,7 @@ async fn http(
         return Ok(RpcReply::error(400, "invalid session operation"));
     }
     let _gate = worker.inner.admission.lock().await;
-    let (record, legacy) = {
+    let (mut record, legacy) = {
         let journal = worker.inner.journal.lock().await;
         (journal.records.get(id).cloned(), journal.uses_legacy(id))
     };
@@ -287,6 +287,13 @@ async fn http(
             .resources_dir(ExecutionKind::Agent, id)?,
     };
     let scope = root.exists().then_some(root);
+    // `run_mode: agent` sessions execute every turn as a runc sandbox round
+    // (`workloads::agent_runc`), so the host web app has no session state
+    // for them: POSTs that would shape or start a host turn are intercepted
+    // below. GETs (messages/events/...) stay native — they read the store.
+    let sandbox = record
+        .as_ref()
+        .is_some_and(|r| crate::workloads::agent_runc::sandbox_session(r, scope.as_deref()));
     let path = format!(
         "/api/sessions/{id}{}{}",
         if tail.is_empty() { "" } else { "/" },
@@ -295,6 +302,28 @@ async fn http(
     let needs_monitor = method == "POST"
         && matches!(tail_path(tail), "prompt" | "compact" | "handoff")
         && !worker.inner.active.lock().await.contains_key(id);
+    // Sandbox session operations: a host turn cannot be steered, queued or
+    // compacted from outside the container, so v1 rejects these POSTs
+    // instead of pretending success against absent host state. Subagent
+    // steer paths (`subagents/<task>/steer`) are not intercepted: the
+    // container runner owns its subagents and the native call 404s.
+    if sandbox
+        && method == "POST"
+        && matches!(tail_path(tail), "steer" | "queue" | "compact" | "handoff")
+    {
+        return Ok(RpcReply::error(
+            409,
+            "runc sandbox sessions do not support this session operation (v1)",
+        ));
+    }
+    // A sandbox prompt while a round is active must not start a host turn.
+    if sandbox && method == "POST" && tail_path(tail) == "prompt" && !needs_monitor {
+        return Ok(RpcReply::error(
+            409,
+            "sandbox session is already running a turn",
+        ));
+    }
+    let mut sandbox_turn = false;
     let permit = if needs_monitor {
         let queued = super::queue::QueuedCommand {
             tail: tail.into(),
@@ -316,6 +345,27 @@ async fn http(
         // newest follow-up has priority, just like a freshly enqueued task.
         if worker.inner.scheduling.get().queue_order == QueueOrder::Fifo {
             super::queue::dispatch_locked(worker).await?;
+        }
+        if sandbox {
+            // Sandbox prompt: stage the turn text into the durable input so
+            // the launch below (immediate or queued replay) runs it as one
+            // runc round; v1 carries text only — images and input ids stay
+            // host-side. There is no host session to POST to.
+            let prompt = body["prompt"]
+                .as_str()
+                .map(str::trim)
+                .filter(|p| !p.is_empty());
+            let Some(prompt) = prompt else {
+                return Ok(RpcReply::error(
+                    400,
+                    "prompt is required for sandbox sessions",
+                ));
+            };
+            if let Some(record) = record.as_mut() {
+                record.assignment.request.input["prompt"] = json!(prompt);
+                worker.inner.journal.lock().await.save(record.clone())?;
+            }
+            sandbox_turn = true;
         }
         match worker
             .inner
@@ -363,7 +413,6 @@ async fn http(
     } else {
         None
     };
-    let mut record = record;
     if needs_monitor {
         if let Some(record) = &mut record {
             let after = worker
@@ -404,8 +453,13 @@ async fn http(
     } else {
         None
     };
-    let result =
-        opencoder_core::agent::scope::with_root(scope, native(worker, method, &path, body)).await;
+    let result = if sandbox_turn {
+        // The turn is the launch below (`run_round`); the reply mirrors the
+        // web layer's async-acceptance surface.
+        Ok(RpcReply::ok(json!({"id": id, "status": "accepted"})))
+    } else {
+        opencoder_core::agent::scope::with_root(scope, native(worker, method, &path, body)).await
+    };
     if result
         .as_ref()
         .is_ok_and(|reply| (200..300).contains(&reply.status))

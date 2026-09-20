@@ -1,6 +1,6 @@
 //! Control-plane cron scheduler: fires `schedules.json` jobs through the
 //! existing execution entries (`executions::submit` for agent/team/todos/dag,
-//! `brain_runs::create_inner` for brain).
+//! `brain_runs::create` for brain).
 //!
 //! The loop reuses the outbox pattern (`release::outbox::start`): an
 //! `AtomicBool` lifecycle guard makes double-start a no-op, a weak handle
@@ -261,9 +261,9 @@ async fn dispatch(
             anyhow::bail!("submit status {}: {}", reply.status, reply.body);
         }
         ScheduleKind::Brain => {
-            let response = api::brain_runs::runs::create_inner(
-                state,
-                brain_run(job, execution_id, node_id, &params)?,
+            let response = api::brain_runs::runs::create(
+                axum::extract::State(state.clone()),
+                axum::Json(brain_run(execution_id, node_id, &params)?),
             )
             .await;
             let status = response.status().as_u16();
@@ -306,53 +306,19 @@ fn json_params(job: &ScheduleJob) -> Value {
     )
 }
 
-/// `brain` params contract: `objective` (required), optional `plan`
-/// (`{"id","version"}`), `mode` (`fixed`|`dynamic`), `inputs` (object).
-fn brain_run(
-    job: &ScheduleJob,
-    execution_id: &str,
-    node_id: Option<String>,
-    params: &Value,
-) -> anyhow::Result<api::brain_runs::runs::CreateRun> {
-    use opencoder_core::brain::{PlanRef, PlanningMode};
-    let objective = params["objective"]
-        .as_str()
-        .filter(|s| !s.trim().is_empty())
-        .ok_or_else(|| anyhow::anyhow!("brain schedule {} needs an objective", job.id))?
-        .to_string();
-    let inputs = match params.get("inputs") {
-        Some(Value::Object(map)) => map
-            .iter()
-            .map(|(k, v)| (k.clone(), v.clone()))
-            .collect::<std::collections::BTreeMap<_, _>>(),
-        Some(_) => anyhow::bail!("brain inputs must be an object"),
-        None => Default::default(),
-    };
-    let mode = match params["mode"].as_str() {
-        Some("dynamic") => PlanningMode::Dynamic,
-        _ => PlanningMode::Fixed,
-    };
-    let plan = match params.get("plan") {
-        Some(Value::Null) | None => None,
-        Some(value) => Some(PlanRef {
-            id: value["id"]
-                .as_str()
-                .ok_or_else(|| anyhow::anyhow!("plan.id must be a string"))?
-                .to_string(),
-            version: value["version"]
-                .as_u64()
-                .ok_or_else(|| anyhow::anyhow!("plan.version must be a u64"))?,
-        }),
-    };
-    Ok(api::brain_runs::runs::CreateRun {
-        id: Some(execution_id.to_string()),
-        node_id,
-        mode,
-        objective,
-        inputs,
-        plan,
-        references: vec![],
-    })
+/// Scheduled runs use exactly the same v3 admission contract as HTTP/CLI.
+fn brain_run(execution_id: &str, node_id: Option<String>, params: &Value) -> anyhow::Result<Value> {
+    anyhow::ensure!(
+        params["schema_version"] == 3,
+        "{}",
+        opencoder_core::brain::SCHEDULER_MIGRATION
+    );
+    let mut request = params.clone();
+    request["id"] = serde_json::json!(execution_id);
+    if let Some(node) = node_id {
+        request["node_id"] = serde_json::json!(node);
+    }
+    Ok(request)
 }
 
 #[cfg(test)]

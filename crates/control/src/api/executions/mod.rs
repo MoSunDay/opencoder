@@ -20,7 +20,7 @@ pub async fn create(
     if request.kind == ExecutionKind::Brain {
         return response(RpcReply::error(
             409,
-            "Brain runs require registered immutable plan versions; use /api/brain/runs",
+            "Brain runs require schema_version: 3; use /api/brain/runs",
         ));
     }
     if identity
@@ -92,6 +92,11 @@ pub async fn dispatch_command_as(
                 400,
                 "historical system executions only support cancel or interrupt",
             );
+        }
+        Ok(Some(index)) if index.kind == ExecutionKind::Brain => {
+            if let Err(reply) = super::brain_runs::runs::require_v3(state, id).await {
+                return reply;
+            }
         }
         Ok(_) => {}
         Err(error) => return RpcReply::error(500, format!("index: {error:#}")),
@@ -168,6 +173,15 @@ pub async fn receipt(State(state): State<Arc<AppState>>, Path(id): Path<String>)
     }
 }
 pub async fn command_id(state: &AppState, id: &str, command: ExecutionCommand) -> RpcReply {
+    match state.fleet.index(id).await {
+        Ok(Some(index)) if index.kind == ExecutionKind::Brain => {
+            if let Err(reply) = super::brain_runs::runs::require_v3(state, id).await {
+                return reply;
+            }
+        }
+        Err(error) => return RpcReply::error(500, error.to_string()),
+        _ => {}
+    }
     let _process_lock = match state.fleet.request_lock("brain-control", id).await {
         Ok(lock) => lock,
         Err(error) => return RpcReply::error(500, error.to_string()),

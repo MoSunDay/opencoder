@@ -308,8 +308,8 @@ mod registry_tests {
             assert!(get_handler(name).is_some(), "{name} missing from registry");
         }
         // Sandbox delta: rm/chmod ARE registered (the sandbox release handler
-        // owns them); `sudo`/`shred` stay unhandled so they hit the fail-closed
-        // default Ask.
+        // owns them); `sudo`/`shred` stay unhandled so they hit the
+        // allow-by-default unknown-command verdict.
         for name in ["sudo", "shred"] {
             assert!(get_handler(name).is_none(), "{name} must stay unregistered");
         }

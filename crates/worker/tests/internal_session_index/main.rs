@@ -9,7 +9,7 @@ use opencoder_store::{LibsqlStore, SessionMeta, Store};
 use serde_json::json;
 
 #[tokio::test]
-async fn index_replays_all_session_pages_with_activity_order_and_ties() {
+async fn index_replays_top_level_session_pages_with_activity_order_and_ties() {
     let (_guard, _home) = support::isolated_config();
     let dir = tempfile::tempdir().unwrap();
     let worker = support::worker(dir.path(), support::mock()).await;
@@ -19,7 +19,9 @@ async fn index_replays_all_session_pages_with_activity_order_and_ties() {
     let mut expected = std::collections::HashSet::new();
     for index in 0..1001 {
         let id = format!("agent-paged-{index:04}");
-        expected.insert(id.clone());
+        if index % 2 == 0 {
+            expected.insert(id.clone());
+        }
         // Both page boundaries fall in a tied activity bucket. Half the rows
         // have an older/zero updated_at, and IDs differ from timestamp order.
         let activity = 100 + (index % 3);
@@ -108,14 +110,29 @@ async fn internal_session_is_running_only_while_its_loop_is_live() {
         })
         .await
         .unwrap();
+    store
+        .create_session(&SessionMeta {
+            id: "operator-orphan".into(),
+            title: Some("Operator".into()),
+            agent: Some("act".into()),
+            task_type: Some("parent".into()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
 
-    let status = |indexes: &[opencoder_core::fleet::ExecutionIndex]| {
-        indexes.iter().find(|index| index.id == id).unwrap().status
-    };
-    assert_eq!(
-        status(&worker.indexes().await.unwrap()),
-        ExecutionStatus::Done
-    );
+    assert!(!worker
+        .indexes()
+        .await
+        .unwrap()
+        .iter()
+        .any(|index| index.id == id));
+    assert!(!worker
+        .indexes()
+        .await
+        .unwrap()
+        .iter()
+        .any(|index| index.id == "operator-orphan"));
     let child = ExecutionRef {
         id: id.into(),
         kind: ExecutionKind::Agent,
@@ -149,15 +166,19 @@ async fn internal_session_is_running_only_while_its_loop_is_live() {
         "an internal session cannot accept public top-level input"
     );
     let loop_guard = opencoder_session::loop_registry::LoopGuard::enter(id);
-    assert_eq!(
-        status(&worker.indexes().await.unwrap()),
-        ExecutionStatus::Running
-    );
+    assert!(!worker
+        .indexes()
+        .await
+        .unwrap()
+        .iter()
+        .any(|index| index.id == id));
     drop(loop_guard);
-    assert_eq!(
-        status(&worker.indexes().await.unwrap()),
-        ExecutionStatus::Done
-    );
+    assert!(!worker
+        .indexes()
+        .await
+        .unwrap()
+        .iter()
+        .any(|index| index.id == id));
     let top_status = |indexes: &[opencoder_core::fleet::ExecutionIndex]| {
         indexes
             .iter()
@@ -174,8 +195,10 @@ async fn internal_session_is_running_only_while_its_loop_is_live() {
         top_status(&worker.indexes().await.unwrap()),
         ExecutionStatus::Interrupted
     );
-    assert_eq!(
-        status(&worker.indexes().await.unwrap()),
-        ExecutionStatus::Done
-    );
+    assert!(!worker
+        .indexes()
+        .await
+        .unwrap()
+        .iter()
+        .any(|index| index.id == id));
 }

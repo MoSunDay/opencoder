@@ -2,6 +2,7 @@ import {Button, Card, Space, Tabs, Tag, Timeline, Typography} from 'antd';
 import {useCallback, useEffect, useState} from 'react';
 import {apiGet} from './api.js';
 import {REF_FIELDS, resolvedNames} from './agentsItems.js';
+import {RUN_MODE_HINT, normalizeRunMode, runModeTagText} from './agents/runMode.js';
 import {useEvent} from './ui/editing/useEvent.js';
 import {AgentHarnessFields} from './harness/agentFields.jsx';
 import {CATEGORIES} from './agents/resourceModel.js';
@@ -9,13 +10,21 @@ import {useResources} from './agents/useResources.js';
 import {ResourceTab} from './agents/resourceTab.jsx';
 const {Text} = Typography;
 
-/// Meta tab：引用变更历史（field / from → to / at）+ references 汇总。
+/// Meta tab：运行模式 + 引用变更历史（field / from → to / at）+ references 汇总。
+/// run_mode 缺失/陌生值一律按 operator 展示（normalizeRunMode）。
 function MetaTab({ meta }) {
   const hist = (meta && meta.history) || [];
   const refs = (meta && meta.references) || {};
+  const runMode = normalizeRunMode(meta && meta.run_mode);
   return (
     <div>
-      <Card size="small" title="引用变更历史">
+      <Card size="small" title="运行模式">
+        <Space wrap size={4}>
+          <Tag color={runMode === 'agent' ? 'geekblue' : 'blue'}>{runModeTagText(meta && meta.run_mode)}</Tag>
+          <Text type="secondary" style={{ fontSize: 12 }}>{RUN_MODE_HINT}</Text>
+        </Space>
+      </Card>
+      <Card size="small" title="引用变更历史" style={{ marginTop: 12 }}>
         {hist.length === 0 ? <Text type="secondary">暂无变更</Text> : (
           <Timeline
             items={hist.map((h, i) => ({

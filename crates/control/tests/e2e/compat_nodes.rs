@@ -303,3 +303,50 @@ async fn dialogs_delete_keeps_node_skipped_agent_reference() {
     assert_eq!(body["skipped"], json!(["agent-race-1"]));
     assert!(h.state.fleet.index("agent-race-1").await.unwrap().is_some());
 }
+
+#[tokio::test]
+async fn dialogs_delete_dry_run_is_read_only_and_lane_scoped() {
+    let h = Harness::new().await;
+    h.put_index(
+        "operator-preview-1",
+        ExecutionKind::Operator,
+        ExecutionStatus::Done,
+    )
+    .await;
+    h.put_index(
+        "agent-preview-1",
+        ExecutionKind::Agent,
+        ExecutionStatus::Done,
+    )
+    .await;
+    // If the control plane called the node, this reply would fail the test.
+    h.node
+        .set_maintenance("dialogs_clear", 500, json!({"error": "must not run"}));
+
+    let (status, body) = h
+        .req(
+            Method::DELETE,
+            "/api/nodes/node-e2e/dialogs?kind=operator&dry_run=true",
+            None,
+        )
+        .await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["dry_run"], json!(true));
+    assert_eq!(body["kind"], json!("operator"));
+    assert_eq!(body["selected"], json!(["operator-preview-1"]));
+    assert_eq!(body["skipped"], json!([]));
+    assert!(h
+        .state
+        .fleet
+        .index("operator-preview-1")
+        .await
+        .unwrap()
+        .is_some());
+    assert!(h
+        .state
+        .fleet
+        .index("agent-preview-1")
+        .await
+        .unwrap()
+        .is_some());
+}

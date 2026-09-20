@@ -1,3 +1,4 @@
+mod admission;
 mod api;
 mod client;
 pub mod config;
@@ -26,6 +27,7 @@ pub struct Host {
     pub registration: NodeRegistration,
     pub token: String,
     pub client: reqwest::Client,
+    creations: admission::Creations,
     pub snapshot: RwLock<NodeSnapshot>,
     pub sequence: AtomicU64,
     pub changes: tokio::sync::watch::Sender<u64>,
@@ -85,6 +87,7 @@ impl Host {
             },
             token,
             client: reqwest::Client::builder().no_proxy().build()?,
+            creations: admission::Creations::default(),
             snapshot: RwLock::new(NodeSnapshot {
                 generation: String::new(),
                 sequence: 0,

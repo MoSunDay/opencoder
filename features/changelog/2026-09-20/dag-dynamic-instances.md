@@ -48,6 +48,15 @@ Commit: 1adc6126c1e36ff927a28fcf2b17ace4891e37be
 
 验收对应独立 Git 快照 `1adc6126`（本地引用 `refs/codex/dynamic-step-verified-1adc6126`），源目录 `/tmp/opencoder-dynamic-verified-3xgimxe6`，Cargo 产物目录 `/data00/rust-build/cargo/dynamic-final-private`。构建仅关闭 dev/test 调试符号，保留原有断言与超时；测试临时文件使用独立 4 GiB tmpfs（允许设备节点以执行真实 runc），兼容接口准备修正另在原 ext4 环境通过 6 项回归。未新增应用环境变量或数据库表。
 
+## 发布上线
+
+- 提交链：`0d98a658`（动态实例全链路）→ `fe12c78e`（tui changelog 补记）→ `65cb7c65`（changelog 修正 + codex harness 文档）→ `f2881a67`（dist minifier 变体对齐）。
+- 发布 bundle：`/srv/releases/opencoder-0d98a658`（manifest commit=`f2881a67`、SPA digest `bcaf417e…`，构建于独立 worktree `/tmp/rel-build-0d98`，bin 校验全 OK）。
+- 发布事务（`scripts/platform/rolling_cli.py`）：`--backup dag-dynamic-pre-rel-0d98a658`（回滚凭据已移至 `/srv/backups/`，勿入库）→ `--stage` → `--signal --bundle …`；`signal` CLI 曾报 `readiness check timed out` 但事务实际成功，终态 `phase=complete / current=rel-f2881a67… / failure=null`。
+- 上线验收：host/runtime/server 三单元 active；`GET /` 200；`/static/app.js` 与 `f2881a67` 提交树逐字节一致（sha256 前 16 位 `c13172f461b91dc1`，含「等待派生」特征串）；`GET /api/dag/runs/:id/steps/:step/instances` 对不存在执行返回规范 `{"error":"execution id not found"}`；`GET /api/dag/wasm` 200；Bearer 认证正常。
+- 观察期：上线后 22:37–22:53 五次采样（每约 3 分钟）`phase=complete / failure=null`、host/runtime/server 三单元 active、err 级日志为零、`/static/app.js` 指纹稳定 `c13172f4…`；deploy 回执（origin=rel-88234274 → current=rel-f2881a67，`signal-receipts/deploy--rel-88234274….json`）与 journal 一致，审计链闭环。
+- 注：SPA 内嵌于 server 二进制（`include_bytes!`），线上资源路径为 `/static/:name`（白名单），无 `/assets/` 路由；ingress 18081(nginx)→3120→release server 直连一致。
+
 ## 相关说明
 
 [使用与 API](../../../docs/dag-dynamic.md) · [纯域](../../../agents/dag/index.md) · [运行时](../../../agents/dag-runtime/index.md) · [平台行为](../../agent-platform/index.md)

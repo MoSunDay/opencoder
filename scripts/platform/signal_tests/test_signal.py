@@ -107,7 +107,11 @@ class SignalTests(unittest.TestCase):
         self.assertIn('"%i"', unit)
         self.assertIn(sys.executable, unit)
         self.assertTrue((target / 'rolling/deployment.py').is_file())
+        self.assertTrue((target / 'rolling/ingress/__init__.py').is_file())
         self.assertTrue((target / 'signal_release/runner.py').is_file())
+        subprocess.run([sys.executable, '-I', '-c',
+            'import sys; sys.path.insert(0, sys.argv[1]); import rolling.io; import signal_release.runner',
+            str(target)], capture_output=True, check=True)
         (target / 'rolling/deployment.py').write_text('changed')
         with self.assertRaisesRegex(ValueError, 'modified'):
             controller.install(self.settings, self.settings.state_dir / 'config.json', self.operations)

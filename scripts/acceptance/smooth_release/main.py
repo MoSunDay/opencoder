@@ -18,6 +18,8 @@ from fixture import todo_spec
 from streams import Stream
 from metrics import verify as verify_traffic
 from rolling import probes
+from ingress_requests import LateRequest
+from ingress_requests.node import NodeChannel
 
 
 def done(env, identifier):
@@ -65,6 +67,8 @@ def exercise(env):
             current = env.containers.state(first['runtime_data'],'dag-container-hold')
             assert current['status'] == 'running' and (current['pid'],current['process_start']) == (container['pid'],container['process_start']), 'OCI process changed'
     print('old TODO and WASI tasks running',flush=True)
+    late_id = 'dag-accepted-before-ingress-reload'
+    late, node_channel = None, None
     traffic, failures = [], []
     stop = threading.Event()
     def submit():
@@ -85,14 +89,26 @@ def exercise(env):
         second = env.warm('r2')
         assert 'second release bytes' in (Path(second['runtime_data']) / 'global-skills/release-reference/SKILL.md').read_text()
         assert 'first release bytes' in first_skill.read_text(), 'new startup changed old Runtime skills'
+        late = LateRequest(env, {'id':late_id,'kind':'dag','input':{'definition':probes.spec()}})
+        node_channel = NodeChannel(env, f"http://127.0.0.1:{first['host_port']}")
         env.switch(second)
         print('second release active',flush=True)
-        env.http(f"http://127.0.0.1:{first['server_port']}",'/api/admin/release/retire','POST',{})
+        assert env.retire(first), 'Server cannot retire while ingress still owns accepted requests'
         env.http(env.settings.host_url,'/servers/r1','POST',{
             'url':f"http://127.0.0.1:{first['server_port']}",'enabled':False})
         until(lambda:len(stream.reconnects) == 1,'SSE release notification')
         until(lambda:len(stream.resume_delays) == 1,'SSE resumed response')
         assert stream.resume_delays[0] < 5, 'SSE reconnect exceeded 5 seconds'
+        until(lambda:node_channel.closed.is_set() or node_channel.errors,'Node retirement notification',5)
+        assert not node_channel.errors, node_channel.errors
+        assert node_channel.closed.is_set(), 'Node channel prevents ingress retirement'
+        late.finish()
+        assert env.owner(late_id) == 'r2', 'late ingress request missed the active Runtime'
+        def retired():
+            code = env.children['r1-server'].poll()
+            assert code in [None, 0], f'retired Server exited with {code}'
+            return code == 0
+        until(retired,'old ingress and Server exit',5)
         assert env.runtime_pid(first) == pid, 'old execution process changed'
         unchanged_shell()
         unchanged_container()
@@ -134,6 +150,10 @@ def exercise(env):
         unchanged_shell()
         unchanged_container()
     finally:
+        if late:
+            late.close()
+        if node_channel:
+            node_channel.close()
         stop.set()
         thread.join(35)
         (env.root / 'traffic.json').write_text(json.dumps({'requests':traffic,'failures':failures},indent=2))
@@ -159,6 +179,7 @@ def exercise(env):
     assert stream.ids == expected, 'SSE replay lost or changed persisted events'
     for row in traffic:
         until(lambda:done(env,row['id']),'traffic completion')
+    until(lambda:done(env,late_id),'accepted ingress request completion')
     continuity = verify_traffic([record['runtime_data'] for record in env.records], traffic)
     (env.root / 'scheduling.json').write_text(json.dumps(continuity,indent=2))
     status = until(lambda:(lambda v:v if v['capacity']['running'] == 0 and v['capacity']['queued'] == 0 else None)(env.http(env.settings.host_url,'/status')),'global capacity release')
@@ -172,7 +193,7 @@ def exercise(env):
     result = {'result':'PASS','build':env.info,'cases':['three-runtime-processes','two-host-handovers',
         'real-wasi-continues','shell-process-continues','pinned-global-skills','todo-dependency-chain','continuous-submission','request-replay-conflict',
         'sse-cursor-reconnect','hibernate-history-wake','rollback-with-live-new-work','server-sigkill-recovery',
-        'independent-readonly-nfs'],'traffic':traffic,'failures':failures,
+        'independent-readonly-nfs','accepted-ingress-request-before-reload','node-channel-releases-ingress-worker'],'traffic':traffic,'failures':failures,
         'todo_calls':env.model.calls,'sse_ids':stream.ids,'sse_resume_seconds':stream.resume_delays,
         'continuity':continuity['metrics'],
         'runtime_pid_before':pid,'shell_pid':shell_pid,'shell_start':shell_start}
@@ -197,6 +218,7 @@ def main():
         exercise(env)
     except BaseException:
         (env.root / 'failure.txt').write_text(traceback.format_exc())
+        env.diagnose()
         raise
     finally:
         env.close()

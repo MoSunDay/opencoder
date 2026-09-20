@@ -26,7 +26,7 @@ def prefix(settings):
 
 def install(settings, config_path, operations):
     source = Path(__file__).resolve().parents[1]
-    files = sorted([*source.glob("rolling/*.py"), *source.glob("signal_release/*.py"),
+    files = sorted([*source.glob("rolling/**/*.py"), *source.glob("signal_release/**/*.py"),
                     source / "install_bundle.py", source / "rolling_cli.py"])
     contents = {str(path.relative_to(source)): path.read_bytes() for path in files}
     digest = hashlib.sha256()
@@ -43,7 +43,13 @@ def install(settings, config_path, operations):
     (settings.state_dir / "signal-receipts").mkdir(exist_ok=True)
     # Persist the new directory entries as well as their individual files
     # before publishing a unit that depends on this controller snapshot.
-    for directory in (target.parent, settings.state_dir):
+    directories = {target.parent, settings.state_dir, target}
+    for name in contents:
+        directory = (target / name).parent
+        while directory != target:
+            directories.add(directory)
+            directory = directory.parent
+    for directory in sorted(directories, key=lambda path: len(path.parts), reverse=True):
         fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
         try:
             os.fsync(fd)

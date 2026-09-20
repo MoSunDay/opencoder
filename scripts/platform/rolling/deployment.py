@@ -86,7 +86,10 @@ def deploy(settings, bundle, operations, seconds=90):
             journal.data["releases"][identifier] = record
         journal.data.get("retirement", {}).pop(identifier, None)
         record["probe_epoch"] = record.get("probe_epoch", 0) + 1
-        journal.data.update(candidate=identifier, previous=journal.data["current"], failure=None,
+        # Retrying the current release after failed rollback preparation must
+        # retain the distinct rollback target recorded before that attempt.
+        previous = journal.data["previous"] if journal.data["current"] == identifier else journal.data["current"]
+        journal.data.update(candidate=identifier, previous=previous, failure=None,
             rollback_from=None, rollback_from_phase=None, rollback_switch_started=None)
         journal.phase("validated")
     try:

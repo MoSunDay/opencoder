@@ -18,7 +18,7 @@ async function prepare(api, tag, nodeId) {
   for (const id of capabilities) assert(catalog.some((c) => (c.id || c.capability_id) === id), `missing registered capability ${id}`);
   return {
     id: `brain-${tag}`, schema_version: 3, node_id: nodeId, capability_ids: capabilities, max_rounds: 3,
-    objective: `Acceptance only. ${instruction} Follow exactly two dispatch rounds: round 1 dispatch dag-${tag}, binding request/repo/commit/branch from root inputs. Its analyze step returns {echo: value}. Round 2 dispatch ALL FOUR remaining allowed capabilities in parallel, binding request from the successful DAG execution at /analyze/echo and repo/commit/branch from root inputs. Agent and Operator final reply must be the request value. Team must discuss and set final_summary to that value. TODO must accept an echo candidate with that value. Complete only after all five operations succeeded, citing all five execution IDs. No other task is authorized.`,
+    objective: `Acceptance only. ${instruction} Follow exactly two dispatch rounds: round 1 dispatch dag-${tag}, binding request/repo/commit/branch from root inputs. Its analyze step returns {echo: value}. Round 2 dispatch ALL FOUR remaining allowed capabilities in parallel, binding request from the successful DAG execution at /analyze/echo and repo/commit/branch from root inputs. Agent and Operator final reply must include the request value verbatim. Team must discuss and include that value verbatim in final_summary. TODO must accept an echo candidate with exactly that value. Complete only after all five operations succeeded, citing all five execution IDs. No other task is authorized.`,
     inputs: { request: `echo-${tag}-参数 "quoted"`, repo: { name: 'fixture/repository', readonly: true }, commit: '0123456789abcdef', branch: 'feature/参数 with spaces' },
   };
 }
@@ -59,8 +59,16 @@ async function collect(api, request, until) {
     const input = detail.request.input;
     assert.deepEqual(input.scheduler_inputs, request.inputs);
     const output = detail.result.scheduler_output;
-    const echo = operation.execution_kind === 'dag' ? output.analyze.echo : operation.execution_kind === 'todos' ? output.echo : output;
-    assert.equal(echo, request.inputs.request, `${operation.execution_kind} output did not preserve input`);
+    // DAG/TODO expose structured output paths; conversations expose free text.
+    // Keep exact value checks on structured references and exact byte inclusion
+    // in conversation results, without rewriting any executor output.
+    if (operation.execution_kind === 'dag' || operation.execution_kind === 'todos') {
+      const echo = operation.execution_kind === 'dag' ? output.analyze.echo : output.echo;
+      assert.equal(echo, request.inputs.request, `${operation.execution_kind} output did not preserve input`);
+    } else {
+      assert.equal(typeof output, 'string');
+      assert(output.includes(request.inputs.request), `${operation.execution_kind} result omitted the exact input value`);
+    }
     if (operation.round === 2) assert.equal(input.bindings.request.kind, 'execution');
     const round = await api('GET', `/api/brain/runs/${id}/rounds/${operation.round}`);
     assert(JSON.stringify(round).includes(operation.execution_id));

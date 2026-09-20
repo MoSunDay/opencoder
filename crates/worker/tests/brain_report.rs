@@ -35,7 +35,7 @@ async fn reading_scheduler_outbox_does_not_trigger_another_node_report() {
     assert_eq!(reply.status, 200, "{reply:?}");
     settled(&node, id).await;
     tokio::time::timeout(std::time::Duration::from_secs(5), async {
-        while node.active_runs() != 0 {
+        while node.snapshot().active_runs != 0 {
             tokio::task::yield_now().await;
         }
     })

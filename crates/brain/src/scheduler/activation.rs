@@ -1,4 +1,4 @@
-use anyhow::{ensure, Result};
+use anyhow::{ensure, Context, Result};
 use opencoder_core::brain::*;
 use opencoder_llm::{ChatRequest, ChatStream, LlmEvent, Message, RequestPurpose};
 pub async fn activate(
@@ -28,7 +28,8 @@ pub async fn activate(
                     text.len() <= 256 * 1024,
                     "scheduler decision exceeds 256 KiB"
                 );
-                return Ok(serde_json::from_str(text.trim())?);
+                return serde_json::from_str(text.trim())
+                    .context("scheduler decision must be a strict JSON object");
             }
             LlmEvent::Error(error) => anyhow::bail!("scheduler provider: {error}"),
             _ => {}

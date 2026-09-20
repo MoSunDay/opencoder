@@ -6,7 +6,7 @@ import './style.css';
 const SummaryNode = memo(function SummaryNode({ title, value, color, detail }) {
   return <div className="brain-summary-node">
     <Typography.Text type="secondary">{title}</Typography.Text>
-    <Typography.Text strong>{value}</Typography.Text>
+    <Typography.Paragraph strong ellipsis={{ rows: 3, tooltip: value }} style={{ marginBottom: 0 }}>{value}</Typography.Paragraph>
     {color && <Tag color={color}>{detail || value}</Tag>}
   </div>;
 });
@@ -25,7 +25,6 @@ export function SummaryCanvas({ view }) {
     <SummaryNode title="结果" value={V3_PHASES[phase] || phase} color={V3_COLORS[phase]} detail={run.error || (phase === 'waiting' ? '等待本轮能力终态' : undefined)} />
     <Space className="brain-summary-meta" size={8} wrap>
       <Typography.Text type="secondary">运行 ID：{run.run_id || '—'}</Typography.Text>
-      <Typography.Text type="secondary">generation：{run.generation ?? '—'}</Typography.Text>
       <Typography.Text type="secondary">事件序号：{run.last_event_seq ?? '—'}</Typography.Text>
     </Space>
   </section>;

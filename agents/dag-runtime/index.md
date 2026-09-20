@@ -1,18 +1,27 @@
-Commit: 444e6b0e3aaaff7914d0ea4889f4f84818abebbd
+Commit: f2881a67b660651274d5f0e11e2709054c639677
 
 # dag-runtime 模块
 
-节点侧 DAG 调度执行；server 不链接。
+节点侧 DAG 调度执行；server 不链接，执行只发生在 claiming 节点。
 
 ## 索引
-- `src/runtime.rs` — 步骤调度（并发上限、取消传播）
-- `src/exec/` — wasm（wasmtime WASI）与 agent 步执行；agent 步产出经 `extract_output_json_from` 三级提取：```json 围栏 → 尾部裸 JSON 兜底（`extract_tail_bare_json`，string-aware 括号平衡、取最后一个可解析顶层对象；坏围栏时从围栏体之后扫描）→ 整段解析
-- `src/exec/agent_runc.rs` — agent 步容器沙箱分支：`dag.agent_sandbox="runc"` 时整段 session 移入容器执行（`BundleSpec` argv=Direct、`/usr/bin/agent-step-runner` 入口），产物回写 step 目录；host 路径零变化
-- `examples/agent-step-runner.rs` — 容器内 session runner：读 step env（PROMPT/STEP_DIR/SESSION_ID/AGENT/HOW_APPEND）、跑 `opencoder_session::run`、写 transcript.txt/output.json/session.json（running→done/error），退出码 0/1/2
-- `examples/agent-session-runner.rs` — 容器内多轮 agent session runner（`run_mode: agent` 自定义 agent 会话，host 以 `ArgvStyle::Direct` 拉起 `/usr/bin/agent-session-runner`，每轮一进程）：启动即 `set_var("OPENCODER_AGENTS_DIR")` 钉住只读 agents pool（resolve_agent/skill/tools/memory 全走 pool）；从 `<step_dir>/messages.json` 续接历史，跑一轮 `opencoder_session::run`，逐事件追加 `events.ndjson`（`{"kind": sse_kind, "payload": sse_data}` 一行一事件，host 用 `SessionEvent::from_sse` 还原并 tail），终局写全量 messages.json/transcript.txt/output.json/session.json；退出码 0/1/2
-- `src/exec/wasm/host_imports*` — 模块名 `opencoder` 的 host imports：`opencoder_run_op(op_id,args)->exit`（`dag.ops` 白名单命令，进程组整树击杀、`<step>/ops/<op>.log` 证据、256KiB 截尾、默认 600s）与 `opencoder_http_probe(url,expect,timeout_ms,retries)->HTTP码|-1..-4`；未注册 op fail-closed trap；`sandbox: runc` 不注入；`crates/dag-review-tools` 为配套 wasm 模块 crate
-- `src/step_log.rs`、`src/dag_events.rs` — 输出落库与批量上报
-- `src/sandbox/` — OCI bundle/rootfs；`BundleSpec.knowledge`（`dag.knowledge_root` → `/workspace/knowledge` 只读 bind，wasm argv 附 `--dir`；fail-closed 校验+预建挂载点）、`BundleSpec.agents`（host 路径 → `/workspace/agent` 只读 bind：pinned agents pool（卡片+四共享池），agent-session 负载设置、DAG 步保持 `None`；同样预建挂载点，不给 wasm argv 加 `--dir`）与 `argv: ArgvStyle`（WasmModule|Direct）；in-process 沙箱以 `FsPerms::ReadOnly` preopen 同路径，`OPENCODER_KNOWLEDGE_DIR` 契约 env；`scripts/prepare-dag-rootfs.sh` 制备 rootfs（wasmtime + agent-step-runner + agent-session-runner + ldd 镜像）
+- `src/runtime.rs`、`src/runtime/` — 调度、动态展开与恢复；静态/动态共享四名额轮询调度、原子展开清单、按实例恢复、同组失败取消并收齐退出
+- `src/exec/` — wasm 与 agent 步执行（含产出提取）
+- `src/exec/wasm/in_process.rs` — 先设置 Store 的 epoch 截止点，再启动时钟线程，避免初始化阶段丢失取消；执行前已取消的令牌直接返回 Cancelled，不进入 guest。
+- `src/exec/agent_runc.rs`、`src/sandbox/` — runc 沙箱（fail-closed）与 rootfs/挂载装配
+- `src/sandbox/codex/` — 解析节点 Codex 登录目录与冻结 Harness/profile，校验 guest 可执行文件；原登录目录直接读写挂载，私有启动配置独立于 DAG 产物。`agent_runc` 保存线程回执、导入事件，并使用容器内知识库路径；纯 Codex 不创建原生模型请求。
+- `src/exec/how_copy.rs` — 冻结原始 Agent/how；每次执行副本追加公共 how_append 与实例文本，Host/runc 共用且不回写资源。
+- `src/exec/runc_events.rs` — 容器 Agent 事件按实例子会话导入现有事件存储；与 `how_copy` 同为容器/宿主共用执行件。
+- `src/exec/wasm/host_imports*` — `opencoder` host imports
+- `src/step_log.rs`、`src/dag_events.rs` — 输出落库与事件上报
+- `examples/agent-step-runner.rs`、`examples/agent-session-runner.rs` — 容器内 session runner
+- `examples/wasmtime-cli.rs`、`scripts/prepare-dag-rootfs.sh` — WASI 运行器与 rootfs 制备（wasmtime + agent-step-runner + agent-session-runner + ldd 镜像）
 
 ## 边界
 - 执行只发生在 claiming 节点；runc fail-closed，不回落 in_process。
+- 默认 host 路径由 `SessionState::new` 读取 Agent 卡的 `harness`；`codex` 沿用 session 的 Codex 子进程驱动和节点服务进程环境，未显式覆盖时使用节点的 `CODEX_HOME` 或该用户的 `~/.codex` 登录态。纯 Codex DAG 不需要原生模型 API Key，Server 不分发自身登录文件；显式 Harness/profile 环境仍优先。跨 Server/节点的凭证继承、依赖结果与认证失败契约由 [dag_codex 回归](../../crates/worker/tests/dag_codex.rs) 覆盖。
+- runc Agent 路径仍要求原生 LLM endpoint/API Key，OCI 挂载仅包含步骤、知识库和 Agent 资源池，尚未接入 Codex 可执行文件、配置及宿主登录态；不能把 host 的默认凭证继承能力套用到容器路径。
+
+## 相关
+- [动态步骤说明](../../docs/dag-dynamic.md) — 实例 API、输入例子与恢复契约
+- [Codex DAG 接入](../../docs/registered-runners.md) — host/runc 凭证、profile 与 rootfs 制备；安装脚本补齐 Shell、Git、TLS 和 NSS 解析依赖。

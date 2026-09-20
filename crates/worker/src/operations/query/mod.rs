@@ -1,5 +1,5 @@
 mod chunks;
-mod dag_step_events;
+pub(super) mod dag_step_events;
 mod dag_steps;
 mod inspect;
 mod pages;
@@ -43,19 +43,19 @@ pub(crate) async fn native(
     } else {
         serde_json::to_string(&body)?
     };
-    let request = Request::builder()
+    let (state, config) = crate::brain::workdir::native_state(worker, path).await?;
+    let mut request = Request::builder()
         .method(method)
         .uri(path)
         .header("content-type", "application/json")
         .body(Body::from(text))?;
+    if let Some(config) = config {
+        request.extensions_mut().insert(config);
+    }
     read_reply(
-        opencoder_web::build_app(
-            crate::brain::workdir::native_state(worker, path).await?,
-            None,
-            false,
-        )
-        .oneshot(request)
-        .await?,
+        opencoder_web::build_app(state, None, false)
+            .oneshot(request)
+            .await?,
     )
     .await
 }
@@ -275,3 +275,5 @@ pub(super) async fn events(
     }
     Ok(RpcReply::ok(body))
 }
+
+pub(super) mod instances;

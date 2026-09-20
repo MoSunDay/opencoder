@@ -86,7 +86,11 @@ def deploy(settings, bundle, operations, seconds=90):
             journal.data["releases"][identifier] = record
         journal.data.get("retirement", {}).pop(identifier, None)
         record["probe_epoch"] = record.get("probe_epoch", 0) + 1
-        journal.data.update(candidate=identifier, previous=journal.data["current"], failure=None)
+        # Retrying the current release after failed rollback preparation must
+        # retain the distinct rollback target recorded before that attempt.
+        previous = journal.data["previous"] if journal.data["current"] == identifier else journal.data["current"]
+        journal.data.update(candidate=identifier, previous=previous, failure=None,
+            rollback_from=None, rollback_switch_started=None)
         journal.phase("validated")
     try:
         if journal.data["phase"] in ("validated", "warming", "failed"):
@@ -179,7 +183,11 @@ def rollback(settings, operations, seconds=90):
         raise ValueError("no compatible previous release is recorded")
     old = journal.record(previous)
     manifest.compatible(old["manifest"], [r["manifest"] for r in journal.data["releases"].values()])
-    if journal.data["phase"] != "rolling_back":
+    resuming = journal.data["phase"] == "rolling_back" or (
+        journal.data["phase"] == "failed" and journal.data.get("rollback_switch_started") is False
+        and journal.data.get("rollback_from") == journal.data["current"]
+        and journal.data["candidate"] is None)
+    if not resuming:
         # Fresh standby instances let rollback proceed while older instances
         # finish response bodies and RPCs. Runtime units are never restarted.
         old = fresh_frontends(old, list(journal.data["releases"].values()), "rollback")
@@ -187,19 +195,31 @@ def rollback(settings, operations, seconds=90):
         journal.data.get("retirement", {}).pop(previous, None)
         old["probe_epoch"] = old.get("probe_epoch", 0) + 1
         journal.data["rollback_from"] = journal.data["current"]
-        journal.phase("rolling_back")
-    units.prepare_host(settings, old)
-    units.prepare_server(settings, old)
-    units.validate(settings, old, operations)
-    operations.run("systemctl", "daemon-reload")
-    operations.run("systemctl", "enable", old["host_unit"], old["server_unit"], old["runtime_unit"])
-    operations.run("systemctl", "start", old["host_unit"])
-    operations.run("systemctl", "start", old["server_unit"], old["runtime_unit"])
+        journal.data["rollback_switch_started"] = False
+    journal.phase("rolling_back")
     host_url = f"http://127.0.0.1:{old['host_port']}"
-    operations.wait(lambda: operations.http(host_url, "/status"), seconds)
-    node_id = probes.candidate(settings, old, operations, seconds)
-    register_server(settings, old, operations, host_url=host_url)
-    probes.ready(settings, old, node_id, operations, seconds)
+    try:
+        units.prepare_host(settings, old)
+        units.prepare_server(settings, old)
+        units.validate(settings, old, operations)
+        operations.run("systemctl", "daemon-reload")
+        operations.run("systemctl", "enable", old["host_unit"], old["server_unit"], old["runtime_unit"])
+        operations.run("systemctl", "start", old["host_unit"])
+        operations.run("systemctl", "start", old["server_unit"], old["runtime_unit"])
+        operations.wait(lambda: operations.http(host_url, "/status"), seconds)
+        node_id = probes.candidate(settings, old, operations, seconds)
+        register_server(settings, old, operations, host_url=host_url)
+        probes.ready(settings, old, node_id, operations, seconds)
+    except Exception as error:
+        journal.fail(error)
+        # A failed standby must not trap future deployments. Missing markers
+        # belong to older deployers and cannot prove traffic was untouched.
+        if journal.data.get("rollback_switch_started") is False:
+            journal.data["candidate"] = None
+            journal.phase("failed")
+        raise
+    journal.data["rollback_switch_started"] = True
+    journal.save()
     operations.http(host_url, f"/runtimes/{previous}/activate", "POST", {})
     operations.http(host_url, "/activate-host", "POST", {})
     journal.data.update(current=previous, candidate=None)

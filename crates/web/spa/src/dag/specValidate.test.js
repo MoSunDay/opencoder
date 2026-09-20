@@ -158,5 +158,5 @@ describe('problemsFromApiError', () => {
 
 it('rejects Runner even with valid registered bindings', () => {
   const spec = { name: 'business', steps: [{ name: 'workflow', kind: { type: 'runner', runner: 'eval-diagnose', agent: 'eval-diagnose' } }] };
-  expect(validateSpec(spec)).toEqual(['steps[0].kind.type 必须是 agent | wasm']);
+  expect(validateSpec(spec)).toEqual(['steps[0].kind.type 必须是 agent | wasm | dynamic']);
 });

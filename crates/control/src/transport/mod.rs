@@ -1,5 +1,8 @@
+mod brain_delivery;
 mod hub;
 mod report;
+#[cfg(test)]
+mod scheduler_tests;
 mod socket;
 pub use hub::{Hub, UnregisterResult};
 pub use socket::upgrade;

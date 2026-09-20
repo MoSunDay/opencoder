@@ -15,6 +15,7 @@ pub(crate) async fn create_session(
     model: Option<String>,
     title: Option<String>,
     created_at: i64,
+    workdir: &std::path::Path,
 ) -> Result<()> {
     if worker.inner.state.store.get_session(id).await?.is_some() {
         return Ok(());
@@ -26,9 +27,7 @@ pub(crate) async fn create_session(
         model,
         created_at,
         updated_at: created_at,
-        workdir_hash: Some(opencoder_core::workdir_hash(
-            &crate::brain::workdir::node_workdir(worker),
-        )),
+        workdir_hash: Some(opencoder_core::workdir_hash(workdir)),
         autopilot_mode: None,
         summary: None,
         summary_seq: None,
@@ -59,6 +58,10 @@ pub(super) async fn run(
     // kind=agent only: the workflow-declared how.md append. Operator/
     // maintenance inputs ignore the field (legacy behavior untouched).
     let how_append = declared_how_append(kind, input)?;
+    // Operator isolation: the execution's frozen (workspace, config-home)
+    // pair when materialized; other kinds keep node/brain workdir resolution
+    // with live config discovery.
+    let (session_workdir, config_home) = crate::brain::workdir::session_dirs(worker, record)?;
     // kind=agent against a `run_mode: agent` card: every turn is one runc
     // sandbox round instead of a host session loop (see `agent_runc`).
     // Operator/maintenance never take this path — their `kind` differs even
@@ -90,6 +93,7 @@ pub(super) async fn run(
         input["model"].as_str().map(str::to_owned),
         default_title(kind, input["title"].as_str()),
         assignment.index.created_at,
+        &session_workdir,
     )
     .await?;
     if fresh {
@@ -110,6 +114,14 @@ pub(super) async fn run(
             envs.extend(opencoder_dag_runtime::exec::how_append::env_pairs(Some(
                 text,
             )));
+        }
+        // Operator isolation: HOME points at the execution's frozen home,
+        // injected LAST so a user-declared HOME cannot override it. Persisted
+        // with the harness runtime so every resume rebuilds
+        // `SessionState::env_passthrough` (the OPENCODER_HOW_APPEND
+        // mechanism, one layer up).
+        if let Some(home) = config_home.as_deref() {
+            envs.extend(crate::operations::operator_env::env_pairs(home));
         }
         opencoder_core::agent::scope::with_root(
             config.agent.agents_dir.clone(),
@@ -183,7 +195,8 @@ pub(super) async fn run(
             worker.inner.state.store.clone(),
             id,
             worker.client(&config)?,
-            crate::brain::workdir::node_workdir(worker),
+            session_workdir.clone(),
+            config_home.clone(),
             config,
         )
         .await;

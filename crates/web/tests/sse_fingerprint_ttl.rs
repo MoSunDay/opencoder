@@ -167,6 +167,7 @@ async fn seen_fingerprints_expire_at_first_forwarded_done() {
         seeded: AtomicBool::new(false),
     });
     let state = Arc::new(opencoder_web::AppState {
+        config_home: None,
         client_override: None,
         brain: opencoder_web::api_brain::mock_brain(store.clone()),
         store,

@@ -30,6 +30,7 @@ async fn app(mock: MockChatClient) -> (axum::Router, Arc<dyn Store>) {
     )
     .unwrap();
     let state = Arc::new(opencoder_web::AppState {
+        config_home: None,
         brain: opencoder_web::api_brain::mock_brain(store.clone()),
         store: store.clone(),
         workdir,

@@ -88,3 +88,46 @@ async fn cross_run_claims_allow_shared_reads_and_require_real_release_before_wri
         .await
         .is_err());
 }
+
+#[tokio::test]
+async fn scheduler_versions_share_storage_without_rewriting_historical_graphs() {
+    let store = FleetStore::open_memory().await.unwrap();
+    store.save_brain_plan(&version()).await.unwrap();
+    let mut scheduler: PlanVersion<serde_json::Value> = serde_json::from_value(json!({
+        "id":"scheduler", "version":1, "plan":{"schema_version":3,"title":"Simple","objective":"test","inputs":{},"capability_ids":["a"],"max_rounds":32},
+        "changelog":"initial", "created_at":1
+    })).unwrap();
+    store.save_brain_plan_document(&scheduler).await.unwrap();
+    store.save_brain_plan_document(&scheduler).await.unwrap();
+    scheduler.plan["title"] = json!("Modified");
+    assert!(store.save_brain_plan_document(&scheduler).await.is_err());
+    scheduler.version = 2;
+    store.save_brain_plan_document(&scheduler).await.unwrap();
+    assert_eq!(
+        store
+            .brain_plan_document("scheduler", 1)
+            .await
+            .unwrap()
+            .unwrap()
+            .plan["title"],
+        "Simple"
+    );
+    assert_eq!(
+        store
+            .brain_plan_documents("scheduler", Some(2))
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        store
+            .brain_plan_version("plan-a", 1)
+            .await
+            .unwrap()
+            .unwrap()
+            .plan
+            .schema_version,
+        1
+    );
+}

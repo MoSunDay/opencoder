@@ -109,6 +109,95 @@ async fn wait(mut check: impl AsyncFnMut() -> bool) {
 }
 
 #[tokio::test]
+async fn stalled_runtime_forward_releases_its_lock_and_preserves_retry_ownership() {
+    let dir = tempfile::tempdir().unwrap();
+    let host = Host::open(
+        &dir.path().join("host"),
+        "node".into(),
+        "test-token".into(),
+        1,
+    )
+    .await
+    .unwrap();
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let requests = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("http://{}", listener.local_addr().unwrap());
+    let seen = requests.clone();
+    let started = entered.clone();
+    let app = axum::Router::new().route(
+        "/rpc",
+        axum::routing::post(move |axum::Json(operation): axum::Json<NodeOperation>| {
+            let seen = seen.clone();
+            let started = started.clone();
+            async move {
+                let first = {
+                    let mut requests = seen.lock().unwrap();
+                    requests.push(serde_json::to_value(&operation).unwrap());
+                    requests.len() == 1
+                };
+                if first {
+                    started.notify_one();
+                    std::future::pending::<()>().await;
+                }
+                let NodeOperation::Create { assignment } = operation else {
+                    panic!("expected the same creation request");
+                };
+                axum::Json(RpcReply::ok(json!(assignment.index)))
+            }
+        }),
+    );
+    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    host.store
+        .register_runtime(&opencoder_store::fleet::handoff::RuntimeRecord {
+            id: "slow-runtime".into(),
+            release_id: "slow-release".into(),
+            mode: "staged".into(),
+            config: json!({"endpoint":endpoint,"data_dir":dir.path().join("runtime"),
+                "unit":"opencoder-runtime-slow.service"}),
+        })
+        .await
+        .unwrap();
+    host.store.activate_runtime("slow-runtime").await.unwrap();
+    let operation = create(&host, "agent-slow-forward");
+    let waiting = host.clone();
+    let original = operation.clone();
+    let call = tokio::spawn(async move { waiting.handle(original).await });
+    entered.notified().await;
+    tokio::time::pause();
+    tokio::time::advance(Duration::from_secs(46)).await;
+    let reply = call.await.unwrap();
+    tokio::time::resume();
+    assert_eq!(reply.status, 503, "{reply:?}");
+    assert!(reply.body["error"]
+        .as_str()
+        .unwrap()
+        .contains("runtime control request timed out"));
+    let lock = tokio::time::timeout(
+        Duration::from_secs(1),
+        host.store.request_lock("runtime-use", "slow-runtime"),
+    )
+    .await
+    .expect("timed-out forwarding retained the shared runtime lock")
+    .unwrap();
+    drop(lock);
+    assert_eq!(
+        host.store
+            .owner("agent-slow-forward")
+            .await
+            .unwrap()
+            .unwrap()
+            .runtime_id,
+        "slow-runtime"
+    );
+    assert_eq!(host.handle(operation).await.status, 200);
+    let requests = requests.lock().unwrap();
+    assert_eq!(requests.len(), 2);
+    assert_eq!(requests[0], requests[1], "retry changed the frozen request");
+    server.abort();
+}
+
+#[tokio::test]
 async fn three_runtime_versions_keep_live_model_calls_and_global_fifo() {
     let _ = tracing_subscriber::fmt()
         .with_max_level(tracing::Level::DEBUG)

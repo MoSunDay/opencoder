@@ -4,17 +4,47 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from live import chain
+from fixture import release_wasi_gate
 from metrics import summarize, verify
 from transitions import command
 from types import SimpleNamespace
 
 
 class AcceptanceTests(unittest.TestCase):
+    def test_late_admission_keeps_its_release_gate_without_touching_other_runs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            sibling = root / 'dag' / 'other'
+            sibling.mkdir(parents=True)
+            run = root / 'dag' / 'own'
+            def admit():
+                time.sleep(.02)
+                run.mkdir()
+                (run / 'execution.json').write_text('{}')
+            writer = threading.Thread(target=admit)
+            writer.start()
+            release_wasi_gate(root, 'own', seconds=2)
+            writer.join()
+            self.assertTrue((run / 'release').is_file())
+            self.assertFalse((sibling / 'release').exists())
+            (run / 'hold').mkdir()
+            (run / 'hold' / 'context.json').write_text('{}')
+            release_wasi_gate(root, 'own')
+            self.assertTrue((run / 'release').is_file())
+
+    def test_unconfirmed_admission_does_not_create_an_orphan_directory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with self.assertRaisesRegex(TimeoutError, 'unconfirmed'):
+                release_wasi_gate(root, 'absent', seconds=0)
+            self.assertFalse((root / 'dag' / 'absent').exists())
+
     def test_signal_acceptance_uses_operator_cli_for_publish_and_rollback(self):
         args = SimpleNamespace(config=Path('/config.json'), bundle=Path('/bundle'), signal=True)
         self.assertEqual(command(args)[-3:], ['--signal', '--bundle', '/bundle'])

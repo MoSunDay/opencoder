@@ -242,10 +242,10 @@ pub struct Deliverable {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-pub struct PlanVersion {
+pub struct PlanVersion<P = OntologyPlan> {
     pub id: String,
     pub version: u64,
-    pub plan: OntologyPlan,
+    pub plan: P,
     pub changelog: String,
     #[serde(default)]
     pub tags: Vec<String>,

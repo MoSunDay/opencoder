@@ -3,6 +3,18 @@ use anyhow::{ensure, Context, Result};
 use opencoder_core::brain::*;
 use opencoder_llm::{ChatRequest, ChatStream, LlmEvent, Message, RequestPurpose};
 
+/// Every finite planner transport, including isolated CLI activation, inherits
+/// the configured reasoning setting while preserving a request override.
+pub fn configured_request(
+    config: &opencoder_core::Config,
+    mut request: ChatRequest,
+) -> ChatRequest {
+    if request.reasoning_effort.is_none() {
+        request.reasoning_effort = config.reasoning_effort.clone();
+    }
+    request
+}
+
 pub async fn activate(
     context: &ActivationContext,
     client: &dyn ChatStream,

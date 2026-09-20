@@ -3,9 +3,9 @@ import '../../../test/setup-dom.js';
 import { expect, it } from 'vitest';
 import { act } from 'react';
 import { renderHook } from '@testing-library/react';
-import { createDraft, repairPlan, submission } from '../editor/model.js';
-import { draftKey, legacyDraftKey, readDraft, useDraft } from '../editor/draft.js';
-import { graph } from '../model.js';
+import { createDraft, repairPlan, submission } from '../history/editor/model.js';
+import { draftKey, legacyDraftKey, readDraft, useDraft } from '../history/editor/draft.js';
+import { graph } from '../history/model.js';
 it('separates user, server and plan-version drafts and rejects damaged cache without overwriting it', () => {
   expect(draftKey('server:a')).not.toBe(draftKey('server:b'));
   expect(draftKey('a', { id: 'p', version: 1 })).not.toBe(draftKey('a', { id: 'p', version: 2 }));

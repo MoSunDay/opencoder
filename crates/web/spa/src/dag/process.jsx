@@ -2,6 +2,7 @@ import { Background, Controls, Handle, Position, ReactFlow } from '@xyflow/react
 import '@xyflow/react/dist/style.css';
 import { useMemo } from 'react';
 import { graphFromSpec } from '../dagProjection.js';
+import { progressLabel } from './dynamic/model.js';
 import { statusLabel } from '../ui/statusTag.jsx';
 
 function Step({ data }) {
@@ -9,6 +10,7 @@ function Step({ data }) {
   return <div className={`dag-node dag-node--${data.status}`}>
     <Handle type="target" position={Position.Left} /><strong className="dag-node-name">{data.label}</strong>
     <div>{data.kindType} · {label}</div>
+    {data.kindType === 'dynamic' && <div>{progressLabel(data.instances)}</div>}
     {data.error && <div className="dag-node-error" title={data.error}>{data.error}</div>}
     <Handle type="source" position={Position.Right} />
   </div>;

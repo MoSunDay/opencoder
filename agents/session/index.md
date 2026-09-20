@@ -3,18 +3,12 @@ Commit: f2d723ed2a32a5a394eac05f58bc5558e7cfe08f
 # session 模块
 
 会话运行时：drain 循环、工具注册、subagent、plan 写拦截、压缩、resume、cancel。
+接缝：只依赖 `Arc<dyn Store>` 与 `Arc<dyn ChatStream>`，不做 HTTP/终端 IO；steer 打断进行中 turn、queue 等 idle。
 
 ## 索引
-- `src/bash_guard.rs` — plan/sidecar 只读 bash 门：薄适配 shellguard，`Ask`/`Deny` 与带写出处（`writes_state`，含 `/tmp` 持久写）的 `Allow` 一律拦截；unknown 命令随 shellguard allow-by-default 放行（2026-09-20）
+- `src/runner/` — drain/执行/sidecar/steer，subagent 在 `runner/subagent.rs`
 - `src/tools/` — 工具注册与实现
-- `src/subagent.rs` — 子代理
-- `src/compaction.rs` — 上下文压缩
-- `src/resume.rs`、`src/cancel.rs` — 恢复与取消
-
-## 接缝
-- 只依赖 `Arc<dyn Store>` 与 `Arc<dyn ChatStream>`，不做 HTTP/终端 IO。
-- steer 打断进行中 turn；queue 等 idle；均先 pending 落库。
-
-## 测试契约
-- bash 工具 spawn 为 `bash -lc` 登录 shell，会 source 宿主 profile；后台输出 8MiB 上限测试通过 `ToolContext.extra_env` 自带独立 `HOME`，不依赖宿主环境。
-- 集成测试套件隐含契约：需具备 `HOME`/`SHELL` 的登录式环境（`tests/bash_guard_plan_mode.rs` 显式断言 `$HOME set`）；CI/门禁最小环境须导出 `HOME SHELL USER LOGNAME TERM`。
+- `src/bash_guard.rs` — plan/sidecar 只读 bash 门（薄适配 shellguard，fail-closed 见 [shellguard](../shellguard/index.md)）
+- `src/compaction/` — 上下文压缩
+- `src/resume.rs` — 恢复；取消原语在 `src/lib.rs`
+- `tests/` — 集成回归（`bash_guard_plan_mode.rs`、`subagent.rs`、`compaction_*` 等），需登录式环境（`HOME`/`SHELL`）

@@ -85,6 +85,29 @@ pub(crate) async fn enqueue_with_command(
     Ok(record)
 }
 
+/// Transfer admission to a runtime-owned task until claim and launch finish.
+/// Dropping an RPC response must not strand a claimed capacity ticket before
+/// its execution is journaled as running. The returned guard preserves the
+/// caller's serialization for any remaining acceptance/command work.
+pub(crate) async fn dispatch_owned(
+    worker: &Worker,
+    gate: tokio::sync::OwnedMutexGuard<()>,
+) -> Result<tokio::sync::OwnedMutexGuard<()>> {
+    let (send, receive) = tokio::sync::oneshot::channel();
+    let owned = worker.clone();
+    worker.inner.tasks.spawn(async move {
+        let result = dispatch_locked(&owned).await;
+        if let Err(error) = &result {
+            *owned.inner.persistence_error.lock().unwrap() =
+                Some(format!("pending dispatch: {error:#}"));
+        }
+        // If the receiver disconnected, dropping the result releases admission
+        // only after all claimed work was launched or explicitly failed.
+        let _ = send.send(result.map(|()| gate));
+    });
+    receive.await?
+}
+
 /// Caller holds node admission; a slot is reserved before any workload starts.
 pub(crate) async fn dispatch_locked(worker: &Worker) -> Result<()> {
     worker.reconcile_capacity().await?;
@@ -245,7 +268,9 @@ pub(crate) async fn dispatch_locked(worker: &Worker) -> Result<()> {
 pub(crate) fn start_scheduler(worker: &Worker) {
     let weak = std::sync::Arc::downgrade(&worker.inner);
     let stop = worker.inner.stopping.clone();
-    tokio::spawn(async move {
+    // Track scheduler shutdown separately: an idle timer is not execution work
+    // and must not prevent an empty Runtime from hibernating.
+    worker.inner.background_tasks.spawn(async move {
         let mut tick = tokio::time::interval(std::time::Duration::from_millis(100));
         loop {
             tokio::select! { _ = stop.cancelled() => break, _ = tick.tick() => {} }
@@ -253,7 +278,13 @@ pub(crate) fn start_scheduler(worker: &Worker) {
                 break;
             };
             let worker = Worker { inner };
-            let _gate = worker.inner.admission.lock().await;
+            // Shutdown holds admission while waiting for tracked cleanup.
+            // A waiting scheduler must release its Worker capture on stop.
+            let _gate = tokio::select! {
+                biased;
+                _ = stop.cancelled() => break,
+                gate = worker.inner.admission.lock() => gate,
+            };
             if let Err(error) = dispatch_locked(&worker).await {
                 tracing::error!(%error, "node pending dispatch failed");
                 *worker.inner.persistence_error.lock().unwrap() =

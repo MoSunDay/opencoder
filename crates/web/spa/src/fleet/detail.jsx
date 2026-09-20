@@ -46,11 +46,11 @@ export function appendEvent(rows, frame) {
   return next;
 }
 
-export function ExecutionDetail({ id, summary, onClose, onNotice }) {
+export function ExecutionDetail({ id, summary, onClose, onNotice, managed = false }) {
   // Dispatch-time name (lifted by the list endpoint) reads better than the raw id.
   const title = summary?.name ? `${summary.name} (${id})` : id;
   return <Drawer rootClassName="oc-execution-detail" open={!!id} title={title} onClose={onClose} placement="right" size="75vw" styles={{ wrapper: { maxWidth: '100vw' } }}>
-    <ExecutionView key={id} executionRef={{ id, kind: summary?.kind }} summary={summary} onNotice={onNotice} />
+    <ExecutionView key={id} executionRef={{ id, kind: summary?.kind }} summary={summary} onNotice={onNotice} managed={managed} />
   </Drawer>;
 }
 
@@ -211,6 +211,6 @@ export function ExecutionView({ executionRef, summary, onNotice, mode = 'full', 
     {!isProjectRun && kind !== 'dag' && <Collapse style={{ marginTop: 16 }} items={[
       { key: 'events', label: `执行事件（最近 ${events.length} 条）`, children: events.map((e, i) => <div key={`${e.seq}-${i}`}><pre style={{ whiteSpace: 'pre-wrap' }}>#{e.seq} {e.event} {e.data?.omitted ? '内容较大，可分段查看' : e.text}</pre>{e.data?.omitted && e.data?.read_via === 'event_payload' ? <PayloadWindows id={id} marker={e.data} seq={e.seq} label="分段查看事件内容" /> : null}</div>) },
     ]} />}
-    {childId && <ExecutionDetail key={childId} id={childId} onClose={() => setChildId(null)} onNotice={onNotice} />}
+    {childId && <ExecutionDetail key={childId} id={childId} onClose={() => setChildId(null)} onNotice={onNotice} managed={managed} />}
   </div>;
 }

@@ -145,6 +145,7 @@ pub(super) async fn run_round(
         input["model"].as_str().map(str::to_owned),
         default_title(assignment.request.kind, input["title"].as_str()),
         assignment.index.created_at,
+        &crate::brain::workdir::node_workdir(worker),
     )
     .await?;
     if prompt.is_empty() {

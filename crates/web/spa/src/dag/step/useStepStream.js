@@ -9,7 +9,7 @@ import { openStream } from '../../sse.js';
 import { appendLog, initialLogs } from '../../ui/executionEvents/model.js';
 import { initialExecutionTranscript, reduceExecutionFrame } from '../../fleet/detail/transcript.js';
 
-export function useStepStream({ runId, step, enabled = true }) {
+export function useStepStream({ runId, step, index, enabled = true }) {
   const [connection, setConnection] = useState('connecting');
   const [error, setError] = useState('');
   const [logs, setLogs] = useState(initialLogs);
@@ -32,7 +32,7 @@ export function useStepStream({ runId, step, enabled = true }) {
     setError('');
     setConnection('connecting');
     const stream = openStream({
-      path: '/api/dag/runs/' + encodeURIComponent(runId) + '/steps/' + encodeURIComponent(step) + '/events',
+      path: '/api/dag/runs/' + encodeURIComponent(runId) + '/steps/' + encodeURIComponent(step) + (index === undefined ? '' : '/instances/' + index) + '/events',
       after: cursorRef.current,
       executionHistory: true,
       requireEnd: true,
@@ -54,7 +54,7 @@ export function useStepStream({ runId, step, enabled = true }) {
       },
     });
     return () => { controller.abort(); stream?.abort(); };
-  }, [runId, step, enabled, retryNonce]);
+  }, [runId, step, index, enabled, retryNonce]);
 
   const retry = useCallback(() => setRetryNonce((value) => value + 1), []);
   return { frames: logs.frames, cursor: logs.cursor, trimmed: logs.trimmed, transcript, finished, connection, error, retry };

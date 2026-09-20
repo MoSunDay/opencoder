@@ -84,42 +84,61 @@ function latestPrompt(raw) {
 
 async function startMock() {
   mock = http.createServer(async (incoming, outgoing) => {
-    const chunks = [];
-    for await (const chunk of incoming) chunks.push(chunk);
-    const text = JSON.stringify(await responseFor(latestPrompt(Buffer.concat(chunks).toString())));
-    outgoing.writeHead(200, { 'content-type': 'text/event-stream' });
-    outgoing.write(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { role: 'assistant', content: text }, finish_reason: null }] })}\n\n`);
-    outgoing.write(`data: ${JSON.stringify({ choices: [{ index: 0, delta: {}, finish_reason: 'stop' }], usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } })}\n\n`);
-    outgoing.end('data: [DONE]\n\n');
+    try {
+      const chunks = [];
+      for await (const chunk of incoming) chunks.push(chunk);
+      const raw = Buffer.concat(chunks).toString();
+      const response = await responseFor(latestPrompt(raw), JSON.parse(raw));
+      const text = typeof response === 'string' ? response : JSON.stringify(response);
+      outgoing.writeHead(200, { 'content-type': 'text/event-stream' });
+      outgoing.write(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { role: 'assistant', content: text }, finish_reason: null }] })}\n\n`);
+      outgoing.write(`data: ${JSON.stringify({ choices: [{ index: 0, delta: {}, finish_reason: 'stop' }], usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } })}\n\n`);
+      outgoing.end('data: [DONE]\n\n');
+    } catch (error) {
+      // A fixture assertion must fail the request and let main() clean up its
+      // real Server/Worker processes, rather than crash in an async callback.
+      console.error(error);
+      if (!outgoing.headersSent) outgoing.writeHead(500, { 'content-type': 'application/json' });
+      outgoing.end(JSON.stringify({ error: { message: `fixture response failed: ${error.message}` } }));
+    }
   });
   await new Promise((resolve) => mock.listen(0, '127.0.0.1', resolve));
 }
 
-function writeConfig(directory) {
+function writeConfig(directory, modelConfig) {
   fs.mkdirSync(directory, { recursive: true });
-  fs.writeFileSync(path.join(directory, 'opencoder.json'), JSON.stringify({
+  fs.writeFileSync(path.join(directory, 'opencoder.json'), JSON.stringify(modelConfig || {
     providers: { fixture: { base_url: `http://127.0.0.1:${mock.address().port}/v1`, api_key: 'fixture' } },
     model: 'fixture/model', cache_salt: false,
-  }));
+  }), { mode: 0o600 });
 }
 
 
-async function open(answer, { dag = false } = {}) {
-  responseFor=answer;await startMock();
+async function open(answer, { dag = false, modelConfig, withBrowser = true } = {}) {
+  responseFor=answer;if (!modelConfig) await startMock();
   const serverWork=path.join(root,'server-work'),nodeWork=path.join(root,'node-work');
-  writeConfig(serverWork);writeConfig(nodeWork);
+  writeConfig(serverWork,modelConfig);writeConfig(nodeWork,modelConfig);
   const server=start('opencoder-server',['--workdir',serverWork,'--data-dir',path.join(root,'server-data'),'--port','0','--token',token],serverWork,'server');
   await until(()=>{const m=fs.readFileSync(server.logPath,'utf8').match(/listening on (http:\/\/127\.0\.0\.1:\d+)/);if(m)base=m[1];return base;},'server ready');
   const args=['--remote',base,'--token',token,'--name','todo-review-node','--workdir',nodeWork,'--data-dir',path.join(root,'node-data'),...(dag ? [] : ['--no-dag'])];
   let agent=start('opencoder-agent',args,nodeWork,'agent');
   const nodeId=await until(async()=>(await api('GET','/api/nodes')).nodes.find(n=>n.online&&n.snapshot?.ready)?.id,'node ready');
-  browser=await chromium.launch({executablePath:process.env.CHROME_PATH||chromium.executablePath(),args:['--no-sandbox','--disable-dev-shm-usage']});
-  page=await browser.newPage({viewport:{width:1600,height:1000}});page.setDefaultTimeout(15000);
-  page.on('pageerror',error=>browserErrors.push(error.message));
-  await page.addInitScript(value=>localStorage.setItem('oc_token',value),token);
-  await page.goto(base,{waitUntil:'networkidle'});
+  if (withBrowser) {
+    browser=await chromium.launch({executablePath:process.env.CHROME_PATH||chromium.executablePath(),args:['--no-sandbox','--disable-dev-shm-usage']});
+    page=await browser.newPage({viewport:{width:1600,height:1000}});page.setDefaultTimeout(15000);
+    page.on('pageerror',error=>browserErrors.push(error.message));
+    await page.addInitScript(value=>localStorage.setItem('oc_token',value),token);
+    await page.goto(base,{waitUntil:'networkidle'});
+  }
   return {page,root,nodeId,api,request,until,pause,errors:browserErrors,
-    restart:async()=>{await stop(agent,'SIGKILL');agent=start('opencoder-agent',args,nodeWork,'agent-restarted');await until(async()=>(await api('GET','/api/nodes')).nodes.find(n=>n.id===nodeId)?.online,'node reconnected');}};
+    restart:async()=>{
+      const previous=(await api('GET','/api/nodes')).nodes.find(n=>n.id===nodeId)?.snapshot?.generation;
+      await stop(agent,'SIGKILL');agent=start('opencoder-agent',args,nodeWork,'agent-restarted');
+      await until(async()=>{
+        const node=(await api('GET','/api/nodes')).nodes.find(n=>n.id===nodeId);
+        return node?.online&&node.snapshot?.ready&&node.snapshot.generation!==previous;
+      },'restarted node index ready');
+    }};
 }
 async function close(){if(browser)await browser.close();for(const child of children.reverse())await stop(child,'SIGKILL');if(mock?.listening)await new Promise(resolve=>mock.close(resolve));}
 module.exports={open,close};

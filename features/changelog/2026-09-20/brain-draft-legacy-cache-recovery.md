@@ -23,3 +23,14 @@ brain 图契约 v2（30108c8b）后，`readDraft` 按 `plan.instances` / `schema
 - SPA 全量：`npm test`（vitest）114 文件 / 859 用例全部通过。
 - Rust 侧无代码改动（仅内嵌 dist 产物更新）：`cargo clippy --workspace --all-targets -- -D warnings` 零告警；`cargo test --workspace` 109 个套件 ok，唯一失败为 `opencoder-session --test bash_guard_plan_mode` 的 2 例，由工作区他人未提交的 shellguard 策略半成品（`bash_guard_compat_tests*.rs`）引入——干净 HEAD worktree 复核该套件 11/11 通过，与本次修复无关；受影响面 `cargo test -p opencoder-web`（内嵌新 dist 编译）全绿 EXIT=0。
 - 环境备注：e2e 兄弟二进制曾因陈旧构建（server `61e760cf-dirty` / agent `cc060ae1`）导致 brain_e2e lifecycle 假失败，重建 `cargo build --workspace --bins` 后 2/2 通过；会话默认 `CARGO_TARGET_DIR` 与 repo `target/` 不一致是陈旧产物的来源。
+
+## 发布上线（用户授权后执行，2026-09-20 15:30）
+
+- 前置：在线备份 `brain-draft-recovery-pre-rel-5c7fc73f`（`rolling_cli.py --backup`）；`--stage` 校验 bundle `/srv/releases/opencoder-5c7fc73f` 并保留 candidate。
+- 发布：`rolling_cli.py --signal --bundle /srv/releases/opencoder-5c7fc73f`，事务 `attempt=238bc597…` 约 18s 完成，`origin=rel-dcf788f4… → target=rel-5c7fc73f…`；终态 `phase=complete / current=rel-5c7fc73f… / candidate=null / failure=null`，兼容语义生效（旧 release 存量 Runtime 端口 3100 保留运行，新流量走 3101）。
+- 上线验收：
+  - SPA 产物：`GET /` 200，`static/app.js|app.css|favicon.png` 与仓库 dist 逐字节一致（terser 固定版）；线上 app.js 含 `legacy-v1`、`丢弃缓存并重新开始`、`schema_version` 特征串。
+  - brain 服务：`GET /api/brain/capabilities`、`/api/brain/playbooks` 200；v1 `POST /api/brain/plans` 按设计返回 409（schema_version:2 门禁，与 brain-e2e B2「旁路 409」语义一致）。
+  - 工作台新建计划全链路（v2 通道）：`POST /api/brain/plan-defs/validate` → 200 `{"valid":true}`；`POST /api/brain/plan-defs` → 200，`plan-smoke-rel5c7fc73f` v1 落库（pin 能力校验 + preflight agent manifest 注入正常）。旧缓存「丢弃后重新开始」交互行为由 `editor.dom.test.jsx` 覆盖，修复代码已确认在线上产物。
+- 观察期：发布后 33 分钟、10 轮采样全绿（unit active、phase=complete、failure=None、无 panic/fatal/未知 ERROR）；既有降级噪音 `node channel disconnected; local execution continues`（→127.0.0.1:3100/inventory）为存量 agent 通道重试日志，发布前 2 小时即存在 24 次，非本次引入，不阻塞。
+- 回滚命令（如需）：`python3 scripts/platform/rolling_cli.py --rollback --bundle /srv/releases/opencoder-5c7fc73f`（回退至 `previous=rel-dcf788f4…`，备份 `brain-draft-recovery-pre-rel-5c7fc73f` 可供数据恢复）。

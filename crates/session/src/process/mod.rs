@@ -43,6 +43,9 @@ use anyhow::{Context, Result};
 use std::ffi::{OsStr, OsString};
 use tokio::process::Command;
 
+mod runc_state;
+pub use runc_state::remove_empty_runc_state;
+
 /// Keep a hidden supervisor alive on outer future/handle drop so it can reap
 /// descendants. Direct child fallbacks retain Tokio's kill-on-drop behavior.
 pub fn configure_owned_command(command: &mut Command, supervised: bool) {

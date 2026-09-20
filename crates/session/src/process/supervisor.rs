@@ -204,7 +204,7 @@ fn reap_available() -> Result<bool> {
 }
 
 fn cleanup_runc(cleanup: &RuncCleanup) -> Result<()> {
-    if !cleanup.root.join(&cleanup.id).exists() {
+    if super::remove_empty_runc_state(&cleanup.root.join(&cleanup.id))? {
         return Ok(());
     }
     let mut child = Command::new("runc")
@@ -219,8 +219,9 @@ fn cleanup_runc(cleanup: &RuncCleanup) -> Result<()> {
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
         if let Some(status) = child.try_wait()? {
+            let removed = super::remove_empty_runc_state(&cleanup.root.join(&cleanup.id))?;
             anyhow::ensure!(
-                status.success() || !cleanup.root.join(&cleanup.id).exists(),
+                status.success() || removed,
                 "supervised runc cleanup failed: {status}"
             );
             break;

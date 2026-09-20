@@ -30,6 +30,9 @@
   3 + 3 + 3 passed。
 - 全量 clippy：`cargo clippy --workspace --all-targets -j 4 -- -D warnings`，通过。
 - 修改的 Rust 文件 rustfmt 检查及 `git diff --check`，通过。
-- Workspace 全量测试和构建仍在执行，结果待补充。
+- 全量构建：`cargo build --workspace -j 16`，通过；本轮校验设置
+  `CARGO_PROFILE_DEV_DEBUG=0`，减少调试符号造成的链接 I/O。
+- 首次全量测试在 `brain_e2e` 因独立 target 目录缺少 Server/Agent 运行二进制
+  失败；补齐上述 workspace 构建后重跑中，结果待补充。
 
 本次不包含发布。

@@ -29,6 +29,13 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     emptyOutDir: true,
+    // Keep the committed single-file artifact byte-stable across release
+    // builds. The pinned Terser version avoids esbuild's occasional race
+    // while assigning mangled identifiers.
+    minify: 'terser',
+    terserOptions: {
+      format: { comments: false },
+    },
     rollupOptions: {
       output: {
         entryFileNames: 'static/app.js',

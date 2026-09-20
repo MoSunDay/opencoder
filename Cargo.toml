@@ -109,7 +109,9 @@ uuid = { version = "1", features = ["v4"] }
 pulldown-cmark = { version = "0.13", default-features = false }
 base64 = "0.22"
 arboard = "3"
-nfsserve = "0.11"
+# nfsserve 0.11 drops READDIR's continuation cookie, looping on large
+# directories. Pin the reviewed one-line fix (upstream PR #50) until released.
+nfsserve = { git = "https://github.com/huggingface/nfsserve.git", rev = "9833110399019cf67308aece811ffa47bfe365f1" }
 
 [profile.release]
 opt-level = 3

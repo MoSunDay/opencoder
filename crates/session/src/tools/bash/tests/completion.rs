@@ -50,7 +50,7 @@ async fn bash_output_overflow_is_an_error_and_kills_the_group() {
     let _g = test_registry_mutex().lock().await;
     let tool = BashTool;
     let input = json!({
-        "command": "timeout 30; dd if=/dev/zero bs=8388609 count=1 2>/dev/null"
+        "command": "timeout 30; head -c 8388609 /dev/zero"
     });
     let out = tokio::time::timeout(Duration::from_secs(10), tool.execute(input, &ctx()))
         .await
@@ -87,9 +87,10 @@ async fn background_output_overflow_stops_process_and_caps_file() {
         ..ctx()
     };
     // Hide sleep behind a variable so the 1s test foreground timeout is
-    // retained. The output overflow happens after handoff.
+    // retained. The output overflow happens after handoff. `head -c` retries
+    // short reads; one dd block may end exactly at the limit after a signal.
     let input = json!({
-        "command": "d=2; s=sleep; \"$s\" \"$d\"; dd if=/dev/zero bs=8388609 count=1 2>/dev/null; \"$s\" 30"
+        "command": "d=2; s=sleep; \"$s\" \"$d\"; head -c 8388609 /dev/zero; \"$s\" 30"
     });
     let out = tool.execute(input, &bg_ctx).await.unwrap();
     assert!(

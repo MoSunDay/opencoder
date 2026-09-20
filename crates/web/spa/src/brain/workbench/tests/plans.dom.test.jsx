@@ -17,7 +17,7 @@ const fill = () => {
   fireEvent.click(screen.getByRole('checkbox', { name: /修复执行实体/ }));
 };
 beforeEach(() => { localStorage.clear(); vi.resetAllMocks(); reload = vi.fn(); apiPost.mockResolvedValue({ id: 'saved' }); });
-afterEach(cleanup);
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 it('restores the simple draft and selected capabilities without touching old graph caches', () => {
   const old = '{old-v2-draft}'; localStorage.setItem('oc:brain:plan-draft:old:new', old);
@@ -65,4 +65,14 @@ it('does not close or submit when browser storage is unavailable', async () => {
   expect(screen.getByRole('button', { name: '保存计划' }).disabled).toBe(true);
   write.mockRestore(); fireEvent.click(screen.getByRole('button', { name: '重试缓存' }));
   await waitFor(() => expect(screen.getByRole('button', { name: '保存计划' }).disabled).toBe(false));
+});
+
+it('creates and saves a plan on HTTP origins without randomUUID', async () => {
+  vi.stubGlobal('crypto', { getRandomValues: crypto.getRandomValues.bind(crypto) });
+  mount(); open(); fill();
+  const id = JSON.parse(localStorage.getItem(key())).version.id;
+  expect(id).toMatch(/^plan-[a-f0-9]{32}$/);
+  fireEvent.click(screen.getByRole('button', { name: '保存计划' }));
+  await waitFor(() => expect(reload).toHaveBeenCalledOnce());
+  expect(apiPost.mock.calls.find(([path]) => path === '/api/brain/plan-defs')[1].id).toBe(id);
 });

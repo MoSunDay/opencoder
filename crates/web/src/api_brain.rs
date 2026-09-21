@@ -30,7 +30,7 @@ use tokio::sync::mpsc;
 
 use anyhow::{bail, Result};
 
-use opencoder_brain::{CapabilityInput, PlaybookInput, PlaybookSpec};
+use opencoder_brain::CapabilityInput;
 use opencoder_llm::{ChatRequest, ChatStream, LlmEvent};
 use opencoder_store::{BrainCapabilityDetail, Store};
 
@@ -219,138 +219,6 @@ pub async fn search(State(state): State<Arc<AppState>>, Json(body): Json<SearchB
     }
 }
 
-// ─── playbooks (fixed orchestration graphs over the capability library) ──
-
-/// GET /api/brain/playbooks — every persisted playbook, newest first.
-/// Playbooks carry no embeddings (pure store reads), so the only failure
-/// class is store I/O → 500.
-pub async fn list_playbooks(State(state): State<Arc<AppState>>) -> Response {
-    match state.brain.list_playbooks().await {
-        Ok(books) => Json(json!({ "ok": true, "playbooks": books })).into_response(),
-        Err(e) => error_500(format!("list brain playbooks: {e:#}")),
-    }
-}
-
-/// POST /api/brain/playbooks — validate then persist a fresh fixed
-/// playbook. Domain rejections are aggregated by [`playbook::validate_draft`]
-/// and joined into one 400 message verbatim (the same report the runtime
-/// would raise, minus its interleaved error classes). The minted id lives
-/// inside the echoed `spec`.
-pub async fn create_playbook(
-    State(_state): State<Arc<AppState>>,
-    Json(_input): Json<PlaybookInput>,
-) -> Response {
-    migration()
-}
-
-/// GET /api/brain/playbooks/:id — one playbook with its decoded spec.
-/// Existence is probed through the store record (404 when absent); a stored
-/// spec that no longer parses is a server-side corruption → 500.
-pub async fn get_playbook(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Response {
-    match state.brain.get_playbook(&id).await {
-        Ok(Some(record)) => match serde_json::from_str::<PlaybookSpec>(&record.spec_json) {
-            Ok(spec) => {
-                Json(json!({ "ok": true, "playbook": record, "spec": spec })).into_response()
-            }
-            Err(e) => error_500(format!("get brain playbook: stored spec is corrupt: {e}")),
-        },
-        Ok(None) => error_404(&format!("brain playbook not found: {id}")),
-        Err(e) => error_500(format!("get brain playbook: {e:#}")),
-    }
-}
-
-/// PUT /api/brain/playbooks/:id — replace name/trigger/steps (id, origin
-/// and created_at are preserved by the runtime). Unknown id → 404
-/// (`Ok(None)`), payload → 400.
-pub async fn update_playbook(
-    State(_state): State<Arc<AppState>>,
-    Path(_id): Path<String>,
-    Json(_input): Json<PlaybookInput>,
-) -> Response {
-    migration()
-}
-
-/// DELETE /api/brain/playbooks/:id — 200 ok / 404 (the store delete returns
-/// whether a row was removed, so no separate probe is needed).
-pub async fn delete_playbook(
-    State(_state): State<Arc<AppState>>,
-    Path(_id): Path<String>,
-) -> Response {
-    migration()
-}
-
-// ─── dynamic planning (decision trees over the capability library) ──────
-
-/// Body of `POST /api/brain/plans`.
-#[derive(Debug, Deserialize)]
-pub struct PlanBody {
-    pub situation: String,
-    /// Vector candidates fed to the planner; `None` → [`DEFAULT_SEARCH_K`]
-    /// clamped to [`MAX_SEARCH_K`] (same policy as search).
-    pub top_k: Option<u32>,
-    /// Planner chat model; `None` → the runtime's configured default
-    /// (production: the config small model).
-    pub model: Option<String>,
-}
-
-/// Body of `POST /api/brain/dispatch`.
-#[derive(Debug, Deserialize)]
-pub struct DispatchBody {
-    pub situation: String,
-    /// Route through one persisted plan; omit to auto-pick: the newest
-    /// cached plan for this situation digest, planning one first when there
-    /// is nothing to reuse.
-    pub plan_id: Option<String>,
-    /// Candidate count when a fresh plan must be minted.
-    pub top_k: Option<u32>,
-    /// Force re-planning even when a cached plan exists (default false).
-    pub replan: Option<bool>,
-    /// Planner chat model override (same default chain as `POST /plans`).
-    pub model: Option<String>,
-}
-
-/// Map planner/dispatch failures: unknown plan id → 404 (typed
-/// `PlanNotFound`), embed outage and planner-LLM faults → 502 (typed
-/// `EmbeddingFailed` / `PlanGenerationFailed`), anything else (store I/O,
-/// corrupt stored tree) → 500.
-/// POST /api/brain/plans — plan a decision tree for one situation: embed →
-/// vector-retrieve candidates → framework-prompt LLM call → validated tree
-/// (branch topics pre-embedded) → persisted. Empty situation → 400; empty
-/// library / LLM faults → 502; embed outage → 502.
-pub async fn create_plan(
-    State(_state): State<Arc<AppState>>,
-    Json(_body): Json<PlanBody>,
-) -> Response {
-    migration()
-}
-
-/// GET /api/brain/plans/:id — one persisted plan (record + parsed tree) or
-/// 404. A record whose `tree_json` no longer parses is a 500 (storage
-/// corruption, never a client fault).
-pub async fn get_plan(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Response {
-    match state.store.get_brain_plan(&id).await {
-        Ok(Some(plan)) => {
-            match serde_json::from_str::<opencoder_brain::DecisionTree>(&plan.tree_json) {
-                Ok(tree) => Json(json!({ "ok": true, "plan": plan, "tree": tree })).into_response(),
-                Err(e) => error_500(format!("get brain plan {id}: stored tree is corrupt: {e}")),
-            }
-        }
-        Ok(None) => error_404(&format!("brain plan not found: {id}")),
-        Err(e) => error_500(format!("get brain plan: {e:#}")),
-    }
-}
-
-/// POST /api/brain/dispatch — route one situation to a capability. With
-/// `plan_id`: through that exact plan (unknown id → 404). Without: the
-/// dynamic scheduler — reuse the newest cached plan for the situation
-/// digest, minting one first when needed (`replan` forces a fresh plan).
-pub async fn dispatch(
-    State(_state): State<Arc<AppState>>,
-    Json(_body): Json<DispatchBody>,
-) -> Response {
-    migration()
-}
-
 // ─── client fallbacks ──────────────────────────────────────────────────
 
 /// Bail-only `ChatStream` for the degraded serve() path: when the LLM config
@@ -394,12 +262,4 @@ pub fn mock_brain(store: Arc<dyn Store>) -> opencoder_brain::Runtime {
         Arc::new(opencoder_llm::MockChatClient::new()),
         "mock-embed",
     )
-}
-
-fn migration() -> Response {
-    (
-        StatusCode::CONFLICT,
-        Json(json!({"error":opencoder_brain::graph::MIGRATION})),
-    )
-        .into_response()
 }

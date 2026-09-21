@@ -46,7 +46,8 @@ async fn layered_view_and_rounds_read_the_node_projection() {
         assert_eq!(nodes[0]["attempt"], json!(0));
         assert_eq!(nodes[0]["attempts"], json!(attempts));
         assert_eq!(nodes[0]["cancel_requested"], json!(false));
-        assert_eq!(nodes[0]["inputs"], json!({}));
+        assert!(nodes[0].get("inputs").is_none());
+        assert!(nodes[0].get("summary").is_none());
         assert!(nodes[0]["execution_id"].is_null());
     }
     // Layers are derived from the plan, so an out-of-range round is a miss.
@@ -122,7 +123,6 @@ async fn layered_routes_never_cross_serve_another_schema() {
         format!("/api/brain/runs/{RUN}/rounds/1"),
     ] {
         let (status, body) = h.req(Method::GET, &path, None).await;
-        assert_eq!(status, 409, "{path}: {body}");
-        assert!(body.to_string().contains("migration required"), "{body}");
+        assert_eq!(status, 404, "{path}: {body}");
     }
 }

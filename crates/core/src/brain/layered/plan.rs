@@ -40,8 +40,6 @@ pub struct LayeredNode {
     /// Exactly one capability; the node never picks a different one at runtime.
     pub capability_id: String,
     #[serde(default)]
-    pub instructions: String,
-    #[serde(default)]
     pub retry: LayeredRetry,
 }
 

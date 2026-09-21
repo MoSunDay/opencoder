@@ -11,7 +11,6 @@ mod admin_drain;
 mod agents_api;
 mod agents_resources_extra;
 mod brain_api;
-mod brain_dispatch_extra;
 mod compat_nodes;
 mod dag_dispatch_extra;
 mod dag_runs;

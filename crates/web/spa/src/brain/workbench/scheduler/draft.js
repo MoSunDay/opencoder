@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef, useState } from 'react';
 import { inputRows, newVersion } from './model.js';
-export const draftKey = (owner, version) => `oc:brain:scheduler-draft:v3:${encodeURIComponent(owner)}:${version ? `${version.id}@${version.version + 1}` : 'new'}`;
+export const draftKey = (owner, version) => `oc:brain:scheduler-draft:v4:${encodeURIComponent(owner)}:${version ? `${version.id}@${version.version + 1}` : 'new'}`;
 export function createDraft(version) {
   const next = newVersion(version);
   return { version: next, engineering: inputRows(next.plan.inputs) };
@@ -10,7 +10,7 @@ export function readDraft(key, version, storage = localStorage) {
   if (raw === null) return createDraft(version);
   let draft;
   try { draft = JSON.parse(raw); } catch { throw new Error('浏览器草稿已损坏，原文已保留'); }
-  if (!draft?.version?.id || draft.version.plan?.schema_version !== 3 || !Array.isArray(draft.version.plan.capability_ids)
+  if (!draft?.version?.id || draft.version.plan?.schema_version !== 4 || !Array.isArray(draft.version.plan.nodes)
     || !Array.isArray(draft.engineering) || typeof draft.version.plan.title !== 'string' || typeof draft.version.plan.objective !== 'string') throw new Error('浏览器草稿格式无效，原文已保留');
   return draft;
 }

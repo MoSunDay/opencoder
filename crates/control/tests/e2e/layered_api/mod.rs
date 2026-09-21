@@ -7,6 +7,7 @@ use reqwest::Method;
 use serde_json::{json, Value};
 
 mod commands;
+mod plans;
 mod surface;
 
 pub(super) const RUN: &str = "brain-layered-e2e";
@@ -19,9 +20,9 @@ pub(super) fn plan() -> Value {
         "objective": "prove the v4 layered surface",
         "nodes": [
             {"node_id":"scan","title":"Scan","capability_id":"builtin-agent-act",
-             "instructions":"scan the workspace","retry":{"max_attempts":2}},
+             "retry":{"max_attempts":2}},
             {"node_id":"apply","title":"Apply","capability_id":"builtin-operator",
-             "instructions":"apply the change","retry":{"max_attempts":3}}
+             "retry":{"max_attempts":3}}
         ],
         "edges": [{"from":"scan","to":"apply"}],
         "max_rounds": 8
@@ -142,7 +143,7 @@ async fn layered_admission_requires_the_v4_advertisement_and_freezes_the_scope()
 #[tokio::test]
 async fn unknown_or_legacy_schema_versions_are_explicit_errors() {
     let h = Harness::with_brain_kind().await;
-    for version in [1, 2, 5] {
+    for version in [1, 2, 3, 5] {
         let mut body = request();
         body["schema_version"] = json!(version);
         let (status, reply) = h.req(Method::POST, "/api/brain/runs", Some(body)).await;
@@ -185,7 +186,7 @@ async fn layered_nesting_is_bounded_and_requires_its_parent() {
         json!({"run_id":RUN,"operation_id":format!("{RUN}#l1#scan#a1"),"node_id":"scan","layer":1});
     for (depth, binding, expected) in [
         (4, Some(parent.clone()), "nesting depth exceeded"),
-        (1, None, "needs its parent"),
+        (1, None, "parent must agree"),
     ] {
         let mut body = request();
         body["id"] = json!(nested);
@@ -202,17 +203,12 @@ async fn layered_nesting_is_bounded_and_requires_its_parent() {
     }
     assert!(h.node.journal_request(nested).is_none());
 
-    // A depth-1 child is an ordinary run: same admission, frozen parent binding.
+    // A forged parent cannot create an unrelated nested run.
     let mut body = request();
     body["id"] = json!(nested);
     body["depth"] = json!(1);
     body["parent"] = parent;
     let (status, receipt) = h.req(Method::POST, "/api/brain/runs", Some(body)).await;
-    assert_eq!(status, 202, "{receipt}");
-    assert_eq!(receipt["run_id"], json!(nested));
-    let assignment = h.state.fleet.assignment(nested).await.unwrap().unwrap();
-    let frozen = &assignment.request.input["layered_request"];
-    assert_eq!(frozen["depth"], json!(1));
-    assert_eq!(frozen["parent"]["run_id"], json!(RUN));
-    assert_eq!(frozen["parent"]["node_id"], json!("scan"));
+    assert_eq!(status, 400, "{receipt}");
+    assert!(h.state.fleet.assignment(nested).await.unwrap().is_none());
 }

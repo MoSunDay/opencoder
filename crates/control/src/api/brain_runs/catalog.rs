@@ -111,6 +111,7 @@ pub async fn capabilities(state: &Arc<AppState>) -> anyhow::Result<Vec<Value>> {
         }
     }
     capabilities.extend(state.fleet.definitions("brain_capability").await?);
+    capabilities.extend(super::plan_capabilities::list(state).await?);
     for capability in &mut capabilities {
         if let Some(meta) = state
             .fleet
@@ -184,34 +185,4 @@ pub async fn stable(
         Ok(()) => response(RpcReply::ok(metadata)),
         Err(e) => error_500(e.to_string()),
     }
-}
-
-pub async fn record_evidence(
-    state: &Arc<AppState>,
-    id: &str,
-    notice: &opencoder_core::brain::BrainNotice,
-) -> anyhow::Result<()> {
-    let _process_lock = state.fleet.request_lock("capability", id).await?;
-    let _gate = state.brain_gate.lock(&format!("capability:{id}")).await;
-    let mut metadata = state
-        .fleet
-        .definition("brain_capability_meta", id)
-        .await?
-        .unwrap_or(json!({"maturity":"draft","evidence":[]}));
-    let mut evidence = metadata["evidence"].as_array().cloned().unwrap_or_default();
-    if !evidence
-        .iter()
-        .any(|e| e["execution_id"] == notice.execution.id)
-    {
-        evidence.push(json!({"execution_id":notice.execution.id,"run_id":notice.parent.run_id,"status":notice.status,"at_ms":notice.at_ms}));
-        if evidence.len() > 100 {
-            evidence.drain(..evidence.len() - 100);
-        }
-        metadata["evidence"] = json!(evidence);
-        state
-            .fleet
-            .put_definition("brain_capability_meta", id, &metadata)
-            .await?;
-    }
-    Ok(())
 }

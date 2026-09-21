@@ -44,7 +44,7 @@ async fn managed_session_keeps_admitted_settings_in_an_isolated_workspace() {
                 kind: ExecutionKind::Agent,
                 target: Some("act".into()),
                 node_id: None,
-                input: json!({"brain_scheduler":{"run_id":"root"}}),
+                input: json!({"brain_layered":{"run_id":"root"}}),
             },
             definition: None,
         },

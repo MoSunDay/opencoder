@@ -28,7 +28,7 @@ fn raw_brain_submissions_stay_rejected_for_the_layered_canvas() {
         body["error"]
             .as_str()
             .unwrap_or_default()
-            .contains("schema_version: 3"),
+            .contains("schema_version: 4"),
         "the layered canvas keeps the run endpoint: {body}"
     );
     assert_eq!(stub.request_count(), 0, "no model traffic");
@@ -40,9 +40,9 @@ fn unknown_schema_versions_never_fall_back_to_a_writer() {
     let tmp = tempfile::tempdir().unwrap();
     let fleet = fleet(&tmp, &stub, "layered-schema-node");
 
-    // Only 3 and 4 own a writer, and neither is a fallback for the other: an
+    // Only schema 4 owns a writer: an
     // absent or unknown version is an explicit error.
-    for version in [None, Some(0), Some(2), Some(5)] {
+    for version in [None, Some(0), Some(2), Some(3), Some(5)] {
         let mut body = request(RUN);
         match version {
             Some(version) => body["schema_version"] = json!(version),
@@ -56,7 +56,7 @@ fn unknown_schema_versions_never_fall_back_to_a_writer() {
             reply["error"]
                 .as_str()
                 .unwrap_or_default()
-                .contains("schema_version: 3"),
+                .contains("schema_version: 4"),
             "version {version:?} must name the migration: {reply}"
         );
         // A rejected submission leaves no projection behind.
@@ -95,11 +95,11 @@ fn invalid_canvases_are_rejected_before_any_dispatch() {
         (
             "capability",
             unknown_capability,
-            "node capability unavailable or ambiguous: not-registered-capability",
+            "node capability unavailable: not-registered-capability",
         ),
         ("cycle", cyclic, "cycle"),
         ("depth", too_deep, "nesting depth exceeded"),
-        ("parent", orphan, "a nested run needs its parent"),
+        ("parent", orphan, "nested depth and parent must agree"),
     ];
     for (label, body, expected) in cases {
         let (status, reply) = fleet.http("POST", "/api/brain/runs", &body);

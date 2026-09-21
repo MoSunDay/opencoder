@@ -132,8 +132,7 @@ pub async fn serve(
                     store.clone(),
                     Arc::new(c) as Arc<dyn opencoder_llm::ChatStream>,
                     cfg.embedding_model_id(),
-                )
-                .with_chat_model(cfg.small_model.as_deref().unwrap_or(&cfg.model)),
+                ),
                 Err(e) => {
                     tracing::warn!("brain degraded, llm client unavailable: {e:#}");
                     api_brain::degraded_brain(store.clone())
@@ -466,19 +465,6 @@ pub fn build_app(state: Arc<AppState>, token: Option<String>, web: bool) -> axum
                 .delete(api_brain::delete_capability),
         )
         .route("/api/brain/search", post(api_brain::search))
-        .route(
-            "/api/brain/playbooks",
-            get(api_brain::list_playbooks).post(api_brain::create_playbook),
-        )
-        .route(
-            "/api/brain/playbooks/:id",
-            get(api_brain::get_playbook)
-                .put(api_brain::update_playbook)
-                .delete(api_brain::delete_playbook),
-        )
-        .route("/api/brain/plans", post(api_brain::create_plan))
-        .route("/api/brain/plans/:id", get(api_brain::get_plan))
-        .route("/api/brain/dispatch", post(api_brain::dispatch))
         // ── multi-node fleet (Phase 2) ────────────────────────────────
         .route("/api/nodes", get(api_nodes::list_nodes))
         .route("/api/nodes/register", post(api_nodes::post_register))

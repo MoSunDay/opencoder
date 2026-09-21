@@ -219,9 +219,9 @@ fn layered_canvas_holds_the_barrier_then_completes_through_the_closing_activatio
     assert_eq!(scan_row["attempt"], json!(1), "{body}");
     assert_eq!(scan_row["attempts"], json!(2), "{body}");
     assert_eq!(scan_row["execution_id"], scan["execution_id"], "{body}");
-    assert_eq!(scan_row["inputs"], json!({}), "{body}");
+    assert!(scan_row.get("inputs").is_none(), "{body}");
     assert_eq!(scan_row["cancel_requested"], json!(false), "{body}");
-    assert_eq!(scan_row["summary"], json!(CHILD_TEXT), "{body}");
+    assert!(scan_row.get("summary").is_none(), "{body}");
     assert!(body["nodes"].as_array().unwrap().len() == 1, "{body}");
 
     let (status, body) = round(&fleet, RUN, 2);
@@ -241,7 +241,7 @@ fn layered_canvas_holds_the_barrier_then_completes_through_the_closing_activatio
     assert_eq!(apply_row["attempt"], json!(1), "{body}");
     assert_eq!(apply_row["attempts"], json!(3), "{body}");
     assert_eq!(apply_row["execution_id"], apply["execution_id"], "{body}");
-    assert_eq!(apply_row["summary"], json!(CHILD_TEXT), "{body}");
+    assert!(apply_row.get("summary").is_none(), "{body}");
 
     // The CLI face of the finished canvas is the same projection.
     let cli = cli_json(&fleet, &["brain", "runs", "layered", RUN]);

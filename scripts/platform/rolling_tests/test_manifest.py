@@ -19,7 +19,7 @@ class ResourceTests(unittest.TestCase):
             runtime = root / 'runtime'
             settings = Settings(root, root, root, root, root / 'token')
             originals = {}
-            for version in (2, 3):
+            for version in (4,):
                 for status in ('pending', 'running', 'idle'):
                     identifier = f'brain-v{version}-{status}'
                     path = runtime / 'brain' / identifier / 'execution.json'
@@ -36,18 +36,19 @@ class ResourceTests(unittest.TestCase):
     def test_supported_brain_still_rejects_legacy_embedded_receipts(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            path = root / 'brain' / 'brain-v3' / 'execution.json'
+            path = root / 'brain' / 'brain-v4' / 'execution.json'
             path.parent.mkdir(parents=True)
             settings = Settings(root, root, root, root, root / 'token')
-            for legacy in ({'_brain': {'schema_version': 1}},
+            for legacy in ({'_brain': {'schema_version': 1}}, {'_brain': {'schema_version': 2}},
+                           {'brain_scheduler': {}},
                            {'brain_receipt': {}}, {'playbook_receipt': {}}):
-                record = {'assignment': {'request': {'id': 'brain-v3',
-                    'kind': 'brain', 'input': {'schema_version': 3, **legacy}},
+                record = {'assignment': {'request': {'id': 'brain-v4',
+                    'kind': 'brain', 'input': {'schema_version': 4, **legacy}},
                     'index': {'status': 'running'}}}
                 path.write_text(json.dumps(record))
                 original = path.read_bytes()
                 with self.subTest(legacy=legacy), self.assertRaisesRegex(
-                        ValueError, 'migration blocked.*brain-v3'):
+                        ValueError, 'migration blocked.*brain-v4'):
                     brain_preflight(settings, {'protocol_version': 10},
                         [{'runtime_data': str(root)}])
                 self.assertEqual(path.read_bytes(), original)
@@ -59,15 +60,16 @@ class ResourceTests(unittest.TestCase):
             path = runtime / 'brain' / 'brain-old' / 'execution.json'
             path.parent.mkdir(parents=True)
             settings = Settings(root, root, root, root, root / 'token')
-            record = {'assignment': {'request': {'id': 'brain-old', 'kind': 'brain', 'input': {'schema_version': 1}}, 'index': {'status': 'idle'}}}
-            path.write_text(json.dumps(record))
-            original = path.read_bytes()
-            with self.assertRaisesRegex(ValueError, 'migration blocked.*brain-old'):
+            for version in (1, 2, 3, 5, None):
+                record = {'assignment': {'request': {'id': 'brain-old', 'kind': 'brain', 'input': {'schema_version': version}}, 'index': {'status': 'idle'}}}
+                path.write_text(json.dumps(record))
+                original = path.read_bytes()
+                with self.subTest(version=version), self.assertRaisesRegex(ValueError, 'migration blocked.*brain-old'):
+                    brain_preflight(settings, {'protocol_version': 10}, [{'runtime_data': str(runtime)}])
+                self.assertEqual(path.read_bytes(), original)
+                record['assignment']['index']['status'] = 'done'
+                path.write_text(json.dumps(record))
                 brain_preflight(settings, {'protocol_version': 10}, [{'runtime_data': str(runtime)}])
-            self.assertEqual(path.read_bytes(), original)
-            record['assignment']['index']['status'] = 'done'
-            path.write_text(json.dumps(record))
-            brain_preflight(settings, {'protocol_version': 10}, [{'runtime_data': str(runtime)}])
 
     def test_every_reported_mount_must_be_verified_local_storage(self):
         with tempfile.TemporaryDirectory() as directory:

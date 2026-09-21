@@ -53,7 +53,7 @@ const asCount = (value) => {
 /// snapshot is detectable no matter which of the three carries the field.
 export function schemaVersionOf(body) {
   for (const value of [body?.schema_version, body?.run?.schema_version, body?.plan?.schema_version]) {
-    if (value !== null && value !== undefined && Number.isFinite(Number(value))) return Number(value);
+    if (typeof value === 'number' && Number.isInteger(value)) return Number(value);
   }
   return null;
 }
@@ -181,9 +181,14 @@ export function layerRows(view) {
 /// layer has been dispatched.
 export function activeLayer(view) {
   const total = totalLayers(view);
-  if (!total) return null;
-  const next = asCount(view?.run?.layer) + 1;
-  return next > total ? null : next;
+  if (!total || terminalPhase(layeredPhase(view))) return null;
+  const dispatched = asCount(view?.run?.layer);
+  if (dispatched > 0) {
+    const ids = layerNodeIds(view)[dispatched - 1] || [];
+    const ops = operationsOf(view);
+    if (ids.some((id) => latestAttempt(ops, id)?.status !== 'done')) return dispatched;
+  }
+  return dispatched < total ? dispatched + 1 : null;
 }
 
 /// barrier — layer-barrier progress (completed layers / total layers).
@@ -222,12 +227,12 @@ const LAYER_HANDLE = 6;
 /// an inline style, keeps owning the card height. A FRESH object per call is
 /// required because React Flow mutates declared handle entries in place.
 function layerNodeBox() {
-  const y = (LAYER_NODE_H - LAYER_HANDLE) / 2;
+  const x = (LAYER_NODE_W - LAYER_HANDLE) / 2;
   return {
     width: LAYER_NODE_W,
     handles: [
-      { type: 'target', position: 'left', x: -LAYER_HANDLE / 2, y, width: LAYER_HANDLE, height: LAYER_HANDLE },
-      { type: 'source', position: 'right', x: LAYER_NODE_W - LAYER_HANDLE / 2, y, width: LAYER_HANDLE, height: LAYER_HANDLE },
+      { type: 'target', position: 'top', x, y: -LAYER_HANDLE / 2, width: LAYER_HANDLE, height: LAYER_HANDLE },
+      { type: 'source', position: 'bottom', x, y: LAYER_NODE_H - LAYER_HANDLE / 2, width: LAYER_HANDLE, height: LAYER_HANDLE },
     ],
   };
 }
@@ -237,7 +242,7 @@ function layerNodeBox() {
 export function layerGraph(view) {
   const rows = layerRows(view);
   const active = activeLayer(view);
-  const heights = rows.map((row) => Math.max(0, row.nodes.length * (LAYER_NODE_H + LAYER_GAP_Y) - LAYER_GAP_Y));
+  const heights = rows.map((row) => Math.max(0, row.nodes.length * (LAYER_NODE_W + LAYER_GAP_X) - LAYER_GAP_X));
   const height = heights.reduce((max, value) => Math.max(max, value), 0);
   const nodes = [];
   rows.forEach((row, index) => {
@@ -248,8 +253,8 @@ export function layerGraph(view) {
         type: 'layeredNode',
         ...layerNodeBox(),
         position: {
-          x: index * (LAYER_NODE_W + LAYER_GAP_X),
-          y: Math.round(top + position * (LAYER_NODE_H + LAYER_GAP_Y)),
+          x: Math.round(top + position * (LAYER_NODE_W + LAYER_GAP_X)),
+          y: index * (LAYER_NODE_H + 100),
         },
         data: {
           ...data, layer: row.layer, active: row.active, layerStatus: row.status,
@@ -319,8 +324,7 @@ export function roundDetail(payload) {
       capabilityId: asText(node.capability_id), status: asText(node.status) || PENDING_STATUS,
       attempt: Math.max(1, Math.trunc(Number(node.attempt)) || 1),
       executionId: asText(node.execution_id), executionKind: asText(node.execution_kind),
-      cancelRequested: !!node.cancel_requested, summary: asText(node.summary),
-      inputs: node.inputs && typeof node.inputs === 'object' ? node.inputs : {},
+      cancelRequested: !!node.cancel_requested,
     })),
   };
 }

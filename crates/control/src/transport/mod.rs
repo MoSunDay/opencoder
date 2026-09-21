@@ -4,8 +4,6 @@ mod hub;
 #[cfg(test)]
 mod layered_tests;
 mod report;
-#[cfg(test)]
-mod scheduler_tests;
 mod socket;
 pub use hub::{Hub, UnregisterResult};
 pub use socket::upgrade;

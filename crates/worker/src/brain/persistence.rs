@@ -41,10 +41,12 @@ pub async fn save(
             &run.id,
             "workflow",
             None,
-            Some(run.request.objective.clone()),
             run.created_at,
             &crate::brain::workdir::node_workdir(worker),
-            Some("brain".into()),
+            crate::workloads::agent::SessionLabels {
+                title: Some(run.request.objective.clone()),
+                kind: Some("brain".into()),
+            },
         )
         .await?;
     }

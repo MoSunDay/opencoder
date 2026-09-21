@@ -1,6 +1,6 @@
 # 大脑调度计划与运行协议
 
-大脑有两条协议。v2 使用 `input → 实例 → output → 路由 → 下一实例的 input` 的不可变图；v3 使用工程输入、能力目录和轮次终态事件的轻量调度。v2 计划仍按原校验器和执行内核运行，v3 不把完整 DAG 或子执行正文复制到脑状态。
+大脑有三条协议。v2 使用 `input → 实例 → output → 路由 → 下一实例的 input` 的不可变图；v3 使用工程输入、能力目录和轮次终态事件的轻量调度；v4 在 v3 语义上加一层「分层能力画布」，把计划先按依赖切层、以层屏障串行推进。v2 计划仍按原校验器和执行内核运行，v3 不把完整 DAG 或子执行正文复制到脑状态。
 
 ## 事件驱动调度 v3
 
@@ -9,6 +9,14 @@ v3 请求必须明确 `schema_version: 3`，根输入使用命名 JSON 输入，
 运行投影只保存 `run`、`operation` 和 `event` 的索引、状态、序号、引用及有限摘要。创建一轮时 control 通过统一 gateway 调用真实 Agent、Team、DAG、TODO 或 Operator；调度器随后停止，只有节点持久化终态并经 outbox 确认的事件才能唤醒下一次判断。当前轮次全部成功才越过屏障；任一失败终态立即取消兄弟操作并终止运行，迟到事件只记录。执行详情、消息、DAG 步骤和产物正文通过 `GET /api/executions/{execution_id}` 及所属节点查询。
 
 v3 入口为 `POST /api/brain/runs`、`GET /api/brain/runs/:id`、`GET /api/brain/runs/:id/events-page`、`GET /api/brain/runs/:id/rounds/:round` 和 `POST /api/brain/runs/:id/commands`；CLI 的 `brain runs` 支持创建、最小快照、轮次、事件及 pause/resume/cancel。v2 数据不迁移、不删除，旧运行保持只读兼容。
+
+## 分层能力画布 v4
+
+v4 请求同样在 `POST /api/brain/runs` 提交：可以内联 v4 计划、引用已固化计划版本（`{"schema_version":4,"plan":{"id","version"}}`），或回贴 control 冻结的信封；`schema_version` 不是 3 或 4 时显式报 migration required，绝不回落猜测。准入后 control 把 `layered_request`、`layered_intent`、计划与能力范围冻结成 assignment 输入交给持有该运行的节点。计划先按依赖由 Kahn 算法切层，层划分从不落库、每次重算；一层的节点只有在所属层被决策时才创建操作，层屏障要求整层终态才放行下一层，`run.layer` 记录已完成层数，正在决策的层恒为 `run.layer + 1`（线上层号从 1 起）。节点失败按 `retry.max_attempts`（1..=5，缺省 2）重试，重试是新尝试而非改写旧记录，操作身份为 `{run}#l{layer}#{node}#a{attempt}`。最后一层的收口由空 `nodes` 上下文触发，完成后冻结 `summary`。
+
+- 读取 `GET /api/brain/runs/:id/layered`（视图：层级、能力、操作与事件）与 `GET /api/brain/runs/:id/layered/rounds/:round`（单层明细）；v3 运行读这两个路由 404，v4 运行读 v3 的 `/view`、`/rounds/:round` 409。CLI 对应 `brain runs layered <id>` 与 `brain runs layered-round <id> <round>`。
+- 命令仍是 `pause`、`resume`、`cancel` 三个动作；节点侧只做投影与栅栏校验，层决策与准入裁决在 control。
+- 限额：节点 ≤ 256、单层宽度 ≤ 32、嵌套深度 ≤ 3、每节点尝试 1..=5；不满足的请求 400 且不建运行。
 
 ## 可复用调度计划与工作台
 

@@ -6,6 +6,7 @@ use serde_json::{json, Value};
 
 pub(super) const DYNAMIC_DAG: &str = "dag_dynamic_v1";
 const BRAIN_V3: &str = "brain_scheduler_v3";
+const BRAIN_V4: &str = "brain_scheduler_v4";
 
 pub(super) fn required(request: &CreateExecution, definition: Option<&Value>) -> Vec<&'static str> {
     let mut features = Vec::new();
@@ -16,6 +17,13 @@ pub(super) fn required(request: &CreateExecution, definition: Option<&Value>) ->
         || request.input.get("brain_scheduler").is_some()
     {
         features.push(BRAIN_V3);
+    }
+    if (request.kind == ExecutionKind::Brain
+        && request.input["schema_version"]
+            == opencoder_core::brain::layered::LAYERED_SCHEMA_VERSION)
+        || request.input.get("brain_layered").is_some()
+    {
+        features.push(BRAIN_V4);
     }
     features
 }
@@ -112,7 +120,7 @@ mod tests {
 
     #[test]
     fn old_positive_probes_do_not_advertise_new_protocol_operations() {
-        for feature in [DYNAMIC_DAG, BRAIN_V3] {
+        for feature in [DYNAMIC_DAG, BRAIN_V3, BRAIN_V4] {
             assert!(!supports(
                 &RpcReply::ok(json!({"compatible":true})),
                 feature
@@ -130,6 +138,42 @@ mod tests {
                 feature
             ));
         }
+    }
+
+    #[test]
+    fn layered_runs_require_the_v4_advertisement() {
+        let layered = CreateExecution {
+            id: "brain-v4".into(),
+            kind: ExecutionKind::Brain,
+            target: None,
+            input: json!({"schema_version":4,"layered_request":{}}),
+            node_id: None,
+        };
+        assert_eq!(required(&layered, None), vec![BRAIN_V4]);
+        let nested = CreateExecution {
+            id: "brain-nested".into(),
+            kind: ExecutionKind::Agent,
+            target: None,
+            input: json!({"brain_layered":{}}),
+            node_id: None,
+        };
+        assert_eq!(required(&nested, None), vec![BRAIN_V4]);
+        let scheduler = CreateExecution {
+            id: "brain-v3".into(),
+            kind: ExecutionKind::Brain,
+            target: None,
+            input: json!({"schema_version":3}),
+            node_id: None,
+        };
+        assert_eq!(required(&scheduler, None), vec![BRAIN_V3]);
+        let legacy = CreateExecution {
+            id: "brain-v2".into(),
+            kind: ExecutionKind::Brain,
+            target: None,
+            input: json!({"schema_version":2}),
+            node_id: None,
+        };
+        assert!(required(&legacy, None).is_empty());
     }
 
     #[test]

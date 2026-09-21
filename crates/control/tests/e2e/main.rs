@@ -24,6 +24,7 @@ mod executions_submit;
 mod fleet_admin_extra;
 mod fleet_maintenance;
 mod infra_static;
+mod layered_api;
 mod project_api;
 mod project_crud_extra;
 mod project_store_failure;

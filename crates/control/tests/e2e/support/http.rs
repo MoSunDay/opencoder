@@ -25,15 +25,24 @@ pub struct Harness {
 impl Harness {
     /// Full topology: server (auth + web assets) + one scripted WS node.
     pub async fn new() -> Arc<Self> {
-        Self::new_inner(None).await
+        Self::new_inner(None, false).await
     }
 
     /// Same topology with an injected project store (failure-path tests).
     pub async fn with_projects(projects: Arc<dyn opencoder_store::ProjectStore>) -> Arc<Self> {
-        Self::new_inner(Some(projects)).await
+        Self::new_inner(Some(projects), false).await
     }
 
-    async fn new_inner(projects: Option<Arc<dyn opencoder_store::ProjectStore>>) -> Arc<Self> {
+    /// Same topology, but the scripted node also advertises
+    /// `ExecutionKind::Brain`, so brain runs (v3/v4) can be placed on it.
+    pub async fn with_brain_kind() -> Arc<Self> {
+        Self::new_inner(None, true).await
+    }
+
+    async fn new_inner(
+        projects: Option<Arc<dyn opencoder_store::ProjectStore>>,
+        brain_kind: bool,
+    ) -> Arc<Self> {
         let dir = tempfile::tempdir().unwrap();
         // Resource APIs honor configuration, so never inherit the developer's
         // global (potentially read-only NFS) agents root in an HTTP test.
@@ -68,7 +77,11 @@ impl Harness {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let base = format!("http://{}", listener.local_addr().unwrap());
         let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
-        let node = MockNode::new("node-e2e");
+        let node = if brain_kind {
+            MockNode::with_brain_kind("node-e2e")
+        } else {
+            MockNode::new("node-e2e")
+        };
         let link = {
             let remote = base.clone();
             let service: Arc<dyn NodeService> = node.clone();

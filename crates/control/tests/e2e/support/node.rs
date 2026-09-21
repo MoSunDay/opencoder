@@ -25,6 +25,9 @@ struct Tables {
     inspects: HashMap<String, RpcReply>,
     /// (execution id, action) -> reply.
     commands: HashMap<(String, String), RpcReply>,
+    /// brain action ("snapshot", "layered_context", "pause", ...) -> reply.
+    /// Absent actions keep the default 501 so v3/v4 tests opt in explicitly.
+    brain: HashMap<String, RpcReply>,
     maintenance: HashMap<String, RpcReply>,
     /// id -> (rows, finished, more).
     events: HashMap<String, (Vec<Value>, bool, bool)>,
@@ -63,6 +66,14 @@ fn miss404(what: &str) -> RpcReply {
     RpcReply::error(404, what)
 }
 
+/// One `NodeOperation::Brain` the mock node answered.
+#[derive(Clone, Debug)]
+pub struct BrainCall {
+    pub execution: ExecutionRef,
+    pub action: String,
+    pub input: Value,
+}
+
 pub struct MockNode {
     pub id: String,
     pub open: AtomicBool,
@@ -72,11 +83,26 @@ pub struct MockNode {
     snapshot_seq: AtomicU64,
     tables: Mutex<Tables>,
     seen: Mutex<Vec<(String, String, Value)>>,
+    /// Brain actions the node answered (v4 reads/commands included), in order.
+    brain_calls: Mutex<Vec<BrainCall>>,
+    /// Registration opt-in for `ExecutionKind::Brain`. The kinds list is sent
+    /// once with the handshake, so it must be chosen before the node links.
+    brain_kind: bool,
     revision: tokio::sync::watch::Sender<u64>,
 }
 
 impl MockNode {
     pub fn new(id: &str) -> Arc<Self> {
+        Self::build(id, false)
+    }
+
+    /// Node that also advertises `ExecutionKind::Brain` in its registration,
+    /// so brain runs (v3 or v4) can be placed on it.
+    pub fn with_brain_kind(id: &str) -> Arc<Self> {
+        Self::build(id, true)
+    }
+
+    fn build(id: &str, brain_kind: bool) -> Arc<Self> {
         let (revision, _) = tokio::sync::watch::channel(0);
         Arc::new(Self {
             id: id.into(),
@@ -85,6 +111,8 @@ impl MockNode {
             snapshot_seq: AtomicU64::new(1),
             tables: Mutex::new(Tables::default()),
             seen: Mutex::new(Vec::new()),
+            brain_calls: Mutex::new(Vec::new()),
+            brain_kind,
             revision,
         })
     }
@@ -112,6 +140,20 @@ impl MockNode {
             .unwrap()
             .inspects
             .insert(id.into(), reply);
+    }
+
+    /// Scripts one `NodeOperation::Brain` action (v4 layered reads/commands).
+    pub fn set_brain(&self, action: &str, status: u16, body: Value) {
+        self.tables
+            .lock()
+            .unwrap()
+            .brain
+            .insert(action.into(), RpcReply { status, body });
+    }
+
+    /// Every brain action the node answered, in arrival order.
+    pub fn brain_calls(&self) -> Vec<BrainCall> {
+        self.brain_calls.lock().unwrap().clone()
     }
 
     pub fn set_command(&self, id: &str, action: &str, status: u16, body: Value) {
@@ -317,20 +359,24 @@ impl MockNode {
 #[async_trait::async_trait]
 impl NodeService for MockNode {
     fn registration(&self) -> NodeRegistration {
+        let mut kinds = vec![
+            ExecutionKind::Agent,
+            ExecutionKind::Dag,
+            ExecutionKind::Team,
+            ExecutionKind::Todos,
+            ExecutionKind::Project,
+            ExecutionKind::Operator,
+        ];
+        if self.brain_kind {
+            kinds.push(ExecutionKind::Brain);
+        }
         NodeRegistration {
             protocol_version: PROTOCOL_VERSION,
             id: self.id.clone(),
             name: self.id.clone(),
             version: "e2e".into(),
             maintenance_agent_id: "act".into(),
-            kinds: vec![
-                ExecutionKind::Agent,
-                ExecutionKind::Dag,
-                ExecutionKind::Team,
-                ExecutionKind::Todos,
-                ExecutionKind::Project,
-                ExecutionKind::Operator,
-            ],
+            kinds,
         }
     }
 
@@ -374,8 +420,19 @@ impl NodeService for MockNode {
                     }))
                 })
             }
-            NodeOperation::Brain { .. } => {
-                RpcReply::error(501, "mock node does not implement brain activations")
+            NodeOperation::Brain {
+                execution,
+                action,
+                input,
+            } => {
+                self.brain_calls.lock().unwrap().push(BrainCall {
+                    execution,
+                    action: action.clone(),
+                    input,
+                });
+                t.brain.get(&action).cloned().unwrap_or_else(|| {
+                    RpcReply::error(501, "mock node does not implement brain activations")
+                })
             }
             NodeOperation::Create { assignment } => {
                 if let Some(reply) = t.create_reply.clone() {

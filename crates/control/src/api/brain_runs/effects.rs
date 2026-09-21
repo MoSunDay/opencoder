@@ -26,6 +26,9 @@ pub async fn deliver(
     if action.starts_with("scheduler_") {
         return super::v3::delivery::deliver(&state, &node, &execution, &action, input).await;
     }
+    if action.starts_with("layered_") {
+        return super::v4::delivery::deliver(&state, &node, &execution, &action, input).await;
+    }
     let _process_lock = state
         .fleet
         .request_lock("brain-control", &execution.id)

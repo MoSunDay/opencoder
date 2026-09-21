@@ -95,7 +95,7 @@ pub async fn dispatch_command_as(
             );
         }
         Ok(Some(index)) if index.kind == ExecutionKind::Brain => {
-            if let Err(reply) = super::brain_runs::runs::require_v3(state, id).await {
+            if let Err(reply) = super::brain_runs::runs::require_brain(state, id).await {
                 return reply;
             }
         }
@@ -176,7 +176,7 @@ pub async fn receipt(State(state): State<Arc<AppState>>, Path(id): Path<String>)
 pub async fn command_id(state: &AppState, id: &str, command: ExecutionCommand) -> RpcReply {
     match state.fleet.index(id).await {
         Ok(Some(index)) if index.kind == ExecutionKind::Brain => {
-            if let Err(reply) = super::brain_runs::runs::require_v3(state, id).await {
+            if let Err(reply) = super::brain_runs::runs::require_brain(state, id).await {
                 return reply;
             }
         }

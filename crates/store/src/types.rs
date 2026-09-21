@@ -18,6 +18,12 @@ pub const TASK_TYPE_PROJECT: &str = "project";
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SessionMeta {
     pub id: String,
+    /// Lane tag for execution-owned sessions (`"operator"`, `"agent"`,
+    /// `"dag"`, `"team"`, ...). `None` for interactive/TUI sessions and rows
+    /// created before tagging existed. Store-level list filters use it to
+    /// keep operator sessions out of the default lanes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -169,6 +175,10 @@ pub struct SessionFilter {
     pub workdir_hash: Option<String>,
     pub search: Option<String>,
     pub include_subagents: bool,
+    /// Exact-match lane filter. When unset, rows tagged `operator` are
+    /// excluded from every list lane (they are execution detail, never
+    /// chat history); pass `Some("operator")` to inspect them.
+    pub kind: Option<String>,
 }
 
 impl Default for SessionFilter {
@@ -179,6 +189,7 @@ impl Default for SessionFilter {
             workdir_hash: None,
             search: None,
             include_subagents: false,
+            kind: None,
         }
     }
 }
@@ -186,6 +197,9 @@ impl Default for SessionFilter {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SessionListItem {
     pub id: String,
+    /// Lane tag written at session creation (`SessionMeta.kind`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
     pub title: Option<String>,
     pub agent: Option<String>,
     /// The session's active skill **body** (full instruction text), when one

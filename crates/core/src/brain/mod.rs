@@ -8,5 +8,8 @@ pub mod resources;
 
 mod graph;
 pub use graph::*;
+/// Schema version 4: layered capability canvas (namespaced to keep the v3
+/// glob export byte-compatible).
+pub mod layered;
 pub mod scheduler;
 pub use scheduler::*;

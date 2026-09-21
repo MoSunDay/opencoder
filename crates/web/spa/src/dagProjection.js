@@ -5,7 +5,7 @@
 // dep-failure skipping), and small display tokens map run/step statuses to
 // antd colors. No React, no DOM — fully unit-tested in dagProjection.test.js.
 
-import { layoutGraph } from './dag/dagLayout.js';
+import { NODE_H, NODE_W, layoutGraph } from './dag/dagLayout.js';
 
 export const STEP_PENDING = 'pending';
 export const STEP_RUNNING = 'running';
@@ -169,6 +169,36 @@ export function dropCycleEdges(edges) {
   return kept;
 }
 
+/// RUN_HANDLE — default React Flow handle size (6px, see
+/// @xyflow/react style.css); handles straddle the node border, hence the
+/// -size/2 x offsets. runNodeBox() returns a FRESH object per call: React
+/// Flow's toHandleBounds() mutates handle entries, so sharing one frozen
+/// array across nodes would leak writes.
+const RUN_HANDLE = 6;
+
+/// runNodeBox() → {width, handles} declaring the fixed run-view card box
+/// (mirrors .dag-node CSS and the dagre constants). React Flow only
+/// renders an edge once BOTH endpoint nodes are "initialized" (handle
+/// bounds + a width); declaring them makes that true on the first frame
+/// instead of after ResizeObserver measurement, so snapshot churn (3s
+/// polling + SSE step events rebuild every node object) can no longer
+/// un-initialize nodes and blank the whole graph. Height is deliberately
+/// NOT declared: getNodeInlineStyleDimensions() would bake a permanent
+/// inline height:52px onto the wrapper while .dag-node has no
+/// position:relative — error text grows cards past 52px, yet handles
+/// would stay pinned to the stale box and fitView would read the clamped
+/// measured.height. Width alone satisfies initialization, so RO keeps
+/// reporting the true DOM height like it did before this fix.
+function runNodeBox() {
+  return {
+    width: NODE_W,
+    handles: [
+      { type: 'target', position: 'left', x: -RUN_HANDLE / 2, y: (NODE_H - RUN_HANDLE) / 2, width: RUN_HANDLE, height: RUN_HANDLE },
+      { type: 'source', position: 'right', x: NODE_W - RUN_HANDLE / 2, y: (NODE_H - RUN_HANDLE) / 2, width: RUN_HANDLE, height: RUN_HANDLE },
+    ],
+  };
+}
+
 /// graphFromSpec(spec, stepStates, opts) → {nodes, edges} shaped for React
 /// Flow: node ids are step slugs, edges follow depends_on, positions come
 /// from the dagre layout, node.data carries the projected status plus the
@@ -187,7 +217,8 @@ export function graphFromSpec(spec, stepStates, opts = {}) {
         continue; // unknown dep (server rejects the spec) / duplicate edge
       }
       seen.add(id);
-      edges.push({ id: 'e-' + dep + '-' + s.name, source: dep, target: s.name });
+      // '>' never occurs in a slug, so 'a'→'b-c' and 'a-b'→'c' can't collide
+      edges.push({ id: 'e-' + dep + '>' + s.name, source: dep, target: s.name });
     }
   }
   edges = dropCycleEdges(edges);
@@ -197,6 +228,7 @@ export function graphFromSpec(spec, stepStates, opts = {}) {
       id: s.name,
       type: 'dagStep',
       position: { x: 0, y: 0 },
+      ...runNodeBox(),
       draggable: false,
       data: {
         label: s.name,

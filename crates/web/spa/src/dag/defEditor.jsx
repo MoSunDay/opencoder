@@ -17,6 +17,7 @@ const { TextArea } = Input;
 
 const EXAMPLE = `{
   "name": "示例工作流",
+  "max_concurrency": 4,
   "description": "可选：一段描述",
   "steps": [
     { "name": "fetch", "kind": { "type": "wasm", "command": "tool.wasm" } },

@@ -540,6 +540,7 @@ async fn skill_only_submit_while_running_drains_images_via_queue() {
             handoff_seq: None,
             handoff_plan: None,
             skill: None,
+            kind: None,
         })
         .await
         .unwrap();
@@ -617,6 +618,7 @@ async fn combined_skill_and_text_submit_while_running_queues_clean_text() {
             handoff_seq: None,
             handoff_plan: None,
             skill: None,
+            kind: None,
         })
         .await
         .unwrap();

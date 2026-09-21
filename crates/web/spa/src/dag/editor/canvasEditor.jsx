@@ -15,6 +15,7 @@ import {
   ReactFlow,
   ReactFlowProvider,
   useEdgesState,
+  useNodesInitialized,
   useNodesState,
   useReactFlow,
 } from '@xyflow/react';
@@ -23,7 +24,7 @@ import { LinkOutlined } from '@ant-design/icons';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useMessage } from '../../ui/appMessage.js';
 import { layoutEditorNodes } from './canvasLayout.js';
-import { canConnect, canvasToSpec, newStep, specProblemIndex, specToCanvas } from './canvasModel.js';
+import { canConnect, canvasToSpec, editNodeBox, newStep, specProblemIndex, specToCanvas } from './canvasModel.js';
 import { CanvasToolbar, StepPalette } from './canvasToolbar.jsx';
 import { SpecMetaForm, StepInspector } from './stepInspector.jsx';
 import { editNodeTypes } from './stepNode.jsx';
@@ -72,10 +73,12 @@ function EditorCanvas({ spec, problems, positions, onSpecChange, onPositionsChan
   const [selectedId, setSelectedId] = useState(null);
   const [linkMode, setLinkMode] = useState(false); // toolbar 连线 toggle
   const [linkFrom, setLinkFrom] = useState(null); // armed source node id
+  const [fitEpoch, setFitEpoch] = useState(0); // autoLayout → refit-after-commit
   const [meta, setMeta] = useState(spec); // SpecMetaForm base (name/description)
   const specRef = useRef(spec); // name/description carry-through for emit
   const dirtyRef = useRef(false); // structural change → emit on next commit
   const laidRef = useRef(false); // init effect ran; meta effect may touch nodes
+  const fittedRef = useRef(false); // mount-fit fired once; later re-measures must not refit
   const { fitView, screenToFlowPosition } = useReactFlow();
   const wrapRef = useRef(null);
 
@@ -132,12 +135,31 @@ function EditorCanvas({ spec, problems, positions, onSpecChange, onPositionsChan
     );
   }, [linkFrom, edges]);
 
-  // Fit once the first layout has committed (next macrotask keeps it calm).
+  // Fit once the nodes are actually measured — a fixed 60ms timer raced
+  // the antd Drawer animation and ResizeObserver, fitting to a partial
+  // graph and leaving later edges outside the viewport.
+  const nodesReady = useNodesInitialized();
   useEffect(() => {
-    const t = setTimeout(() => fitView({ padding: 0.18, duration: 200 }), 60);
-    return () => clearTimeout(t);
+    // Once-guard: nodesInitialized flips false again whenever a node lacks
+    // a measured height (e.g. addStep before RO runs); refitting then would
+    // hijack the viewport on every added step. The initial fit fires once
+    // per mount; fitEpoch (autoLayout) stays the refit channel.
+    if (nodesReady && !fittedRef.current) {
+      fittedRef.current = true;
+      fitView({ padding: 0.18, duration: 200 });
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [nodesReady]);
+
+  // Post-layout refit channel: the epoch bump re-renders AFTER setNodes has
+  // committed the new positions, so fitView reads them deterministically
+  // (no timer guess).
+  useEffect(() => {
+    if (fitEpoch > 0) {
+      fitView({ padding: 0.18, duration: 250 });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fitEpoch]);
 
   // Drawer resize → refit so nodes never drift off-screen.
   useEffect(() => {
@@ -185,7 +207,14 @@ function EditorCanvas({ spec, problems, positions, onSpecChange, onPositionsChan
         msg.warning(reason);
         return false;
       }
-      setEdges(addEdge({ ...params, type: 'smoothstep', markerEnd: { type: MarkerType.ArrowClosed } }, edges));
+      // Explicit '>' id keeps addEdge off the default getEdgeId, whose '-'
+      // separator collides for a→b-c vs a-b→c (spec edges use the same id).
+      setEdges(addEdge({
+        ...params,
+        id: 'e-' + params.source + '>' + params.target,
+        type: 'smoothstep',
+        markerEnd: { type: MarkerType.ArrowClosed },
+      }, edges));
       markDirty();
       return true;
     },
@@ -271,6 +300,7 @@ function EditorCanvas({ spec, problems, positions, onSpecChange, onPositionsChan
       id: step.name,
       type: 'stepEdit',
       position: position || { x: 60, y: 60 + taken.length * 24 },
+      ...editNodeBox(),
       selected: true, // keep React Flow's selection state in sync with selectedId
       data: { step, kindType, depNames: [], placed: true },
     };
@@ -299,7 +329,7 @@ function EditorCanvas({ spec, problems, positions, onSpecChange, onPositionsChan
     setNodes((cur) => layoutEditorNodes(cur, edges, {}));
     onPositionsChange({});
     markDirty();
-    setTimeout(() => fitView({ padding: 0.18, duration: 250 }), 50);
+    setFitEpoch((v) => v + 1); // refit AFTER the new positions commit (effect below)
   };
 
   // ---- Inspector wiring -------------------------------------------------
@@ -337,7 +367,7 @@ function EditorCanvas({ spec, problems, positions, onSpecChange, onPositionsChan
       cur.map((e) => {
         const s = e.source === old ? name : e.source;
         const t = e.target === old ? name : e.target;
-        return e.source === old || e.target === old ? { ...e, id: 'e-' + s + '-' + t, source: s, target: t } : e;
+        return e.source === old || e.target === old ? { ...e, id: 'e-' + s + '>' + t, source: s, target: t } : e;
       }),
     );
     if (positions && positions[old]) {
@@ -358,7 +388,8 @@ function EditorCanvas({ spec, problems, positions, onSpecChange, onPositionsChan
     markDirty();
   };
 
-  // SpecMetaForm edits name/description; `meta` state (not just the ref)
+  // SpecMetaForm edits name/description plus the whole-run 并发上限
+  // (max_concurrency); `meta` state (not just the ref)
   // keeps the controlled inputs re-rendering while the canvas emits.
   const applyMeta = (partial) => {
     const next = { ...meta, ...partial };
@@ -370,7 +401,12 @@ function EditorCanvas({ spec, problems, positions, onSpecChange, onPositionsChan
   return (
     <div className="dag-edit-wrap">
       <StepPalette onAdd={(k) => addStep(k)} />
-      <div className="dag-edit-stage" ref={wrapRef} onDrop={onDrop} onDragOver={onDragOver}>
+      <div
+        className={'dag-edit-stage' + (linkMode ? ' dag-edit-stage--linkmode' : '')}
+        ref={wrapRef}
+        onDrop={onDrop}
+        onDragOver={onDragOver}
+      >
         <CanvasToolbar
           problems={problems || []}
           onAutoLayout={autoLayout}

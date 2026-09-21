@@ -55,6 +55,31 @@ describe('v3 大脑运行总览', () => {
     expect(screen.queryByRole('textbox')).toBeNull();
   });
 
+  it('恢复运行后不把历史阻塞显示为当前失败，诊断仍可查看', async () => {
+    const error = 'model provider returned HTTP 429';
+    let current = { ...view, run: { ...view.run, phase: 'blocked', error } };
+    apiGet.mockImplementation(async (path) => {
+      if (path.endsWith('/view')) return current;
+      if (path.includes('/events-page')) return { events: [{ seq: 8, event_type: 'decision_blocked', reason_summary: error }], more: false };
+      return { schema_version: 3, run: current.run, operations: current.rounds[0].operations };
+    });
+    render(<BrainRunBody id="brain-v3" />);
+    await screen.findByText('运行阻塞或失败');
+    await waitFor(() => expect(openStream).toHaveBeenCalledOnce());
+    const frame = openStream.mock.calls[0][0].onFrame;
+    // Older persisted runs can still carry the error after successful recovery.
+    for (const [phase, event, seq] of [['waiting', 'run_resumed', 9], ['completed', 'run_completed', 10]]) {
+      current = { ...current, run: { ...current.run, phase } };
+      await act(async () => frame({ seq, event, data: {} }));
+      await waitFor(() => expect(screen.queryByText('运行阻塞或失败')).toBeNull());
+      expect(screen.getByRole('button', { name: /查看执行 agent-1/ })).toBeTruthy();
+    }
+    fireEvent.click(screen.getByText('调度诊断与事件'));
+    fireEvent.click(await screen.findByRole('button', { name: '从头查看' }));
+    await screen.findByText(error);
+    expect(screen.getByText('decision_blocked')).toBeTruthy();
+  });
+
   it('只显示摘要画布和轮次索引，点击 execution ID 打开托管执行面板', async () => {
     apiGet.mockImplementation(async (path) => {
       if (path === '/api/brain/runs/brain-v3') return { schema_version: 3, run: view.run, operations: view.rounds[0].operations };

@@ -309,6 +309,52 @@ async fn invalid_spec_is_400_with_the_problem_list() {
     );
 }
 
+/// `max_concurrency` round-trips through def storage (always serialized, so
+/// the SPA mirror stays honest); out-of-range values are a 400 with the
+/// aggregated problem list naming the field.
+#[tokio::test]
+async fn def_upsert_roundtrips_max_concurrency_and_rejects_out_of_range() {
+    let ctx = app().await;
+    let ok = r#"{"name":"conc","max_concurrency":8,"steps":[
+        {"name":"fetch","kind":{"type":"wasm","command":"tool.wasm"}}]}"#;
+    let (s, b) = send(
+        &ctx.app,
+        req("POST", "/api/dag/defs", Some(spec_body_of(ok))),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{b}");
+    let id = b["id"].as_str().unwrap().to_string();
+
+    let (s, one) = send(&ctx.app, req("GET", &format!("/api/dag/defs/{id}"), None)).await;
+    assert_eq!(s, StatusCode::OK, "{one}");
+    assert_eq!(one["spec"]["max_concurrency"], 8, "{one}");
+
+    let (_, list) = send(&ctx.app, req("GET", "/api/dag/defs", None)).await;
+    let row = list
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["name"] == "conc")
+        .unwrap();
+    assert_eq!(row["spec"]["max_concurrency"], 8, "{list}");
+
+    let bad = r#"{"name":"conc","max_concurrency":31,"steps":[
+        {"name":"fetch","kind":{"type":"wasm","command":"tool.wasm"}}]}"#;
+    let (s, b) = send(
+        &ctx.app,
+        req("POST", "/api/dag/defs", Some(spec_body_of(bad))),
+    )
+    .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "{b}");
+    assert!(
+        b["error"]
+            .as_str()
+            .unwrap()
+            .contains("max_concurrency must be 1..=30"),
+        "{b}"
+    );
+}
+
 // ── dispatch + claim ───────────────────────────────────────────────────────
 
 #[tokio::test]

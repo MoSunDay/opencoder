@@ -57,11 +57,19 @@ pub(crate) fn materialize(
         write_snapshot(&snapshot, &serde_json::to_string_pretty(config)?)?;
     }
     validate_snapshot(&snapshot)?;
+    // Freeze the execution's own skill pool: operator-plane packs plus this
+    // binary's embedded built-ins. The interactive user's global skill pool
+    // (`~/.opencoder/skills`, mirrored by the node-level snapshot) is
+    // deliberately NOT a source — an operator execution never sees it.
+    crate::operations::operator_config::freeze_skills(layout, &home)?;
     Ok(Some((home, workspace)))
 }
 
-/// Publish a complete private snapshot without replacing a concurrent winner.
-fn write_snapshot(path: &Path, body: &str) -> Result<()> {
+/// Atomically create `path` (0600, plain text) without ever replacing a
+/// concurrent winner: the first writer wins, later bootstrap attempts keep
+/// the existing file. Shared by the per-execution snapshot and the
+/// operator-plane bootstrap.
+pub(crate) fn write_snapshot(path: &Path, body: &str) -> Result<()> {
     let temporary = path.with_extension(format!("{}.tmp", ulid::Ulid::new()));
     let result = (|| -> Result<()> {
         let mut file = std::fs::OpenOptions::new()

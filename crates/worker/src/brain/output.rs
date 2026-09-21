@@ -20,6 +20,9 @@ pub async fn normalize(
     {
         return super::v3::output::normalize(worker, record, status, result).await;
     }
+    if super::v4::parent::leaf(&record.assignment.request.input) {
+        return super::v4::output::normalize(worker, record, status, result).await;
+    }
     if record.assignment.request.input.get("_brain").is_none()
         || !matches!(status, ExecutionStatus::Done | ExecutionStatus::Idle)
     {

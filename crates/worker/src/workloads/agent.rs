@@ -8,23 +8,28 @@ use opencoder_store::SessionMeta;
 use serde_json::{json, Value};
 use tokio_util::sync::CancellationToken;
 
+/// Optional labels a workload owner sets when it first creates a session row.
+pub(crate) struct SessionLabels {
+    pub title: Option<String>,
+    pub kind: Option<String>,
+}
+
 pub(crate) async fn create_session(
     worker: &Worker,
     id: &str,
     agent: &str,
     model: Option<String>,
-    title: Option<String>,
     created_at: i64,
     workdir: &std::path::Path,
-    kind: Option<String>,
+    labels: SessionLabels,
 ) -> Result<()> {
     if worker.inner.state.store.get_session(id).await?.is_some() {
         return Ok(());
     }
     let meta = SessionMeta {
         id: id.into(),
-        kind,
-        title,
+        kind: labels.kind,
+        title: labels.title,
         agent: Some(agent.into()),
         model,
         created_at,
@@ -93,10 +98,12 @@ pub(super) async fn run(
         id,
         agent,
         input["model"].as_str().map(str::to_owned),
-        default_title(kind, input["title"].as_str()),
         assignment.index.created_at,
         &session_workdir,
-        Some(kind.prefix().to_string()),
+        SessionLabels {
+            title: default_title(kind, input["title"].as_str()),
+            kind: Some(kind.prefix().to_string()),
+        },
     )
     .await?;
     if fresh {

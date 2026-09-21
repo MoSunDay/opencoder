@@ -20,6 +20,7 @@ pub mod domain;
 pub mod error;
 pub mod execution;
 pub mod graph;
+pub mod layered;
 pub mod ontology;
 pub mod plan;
 pub mod planning;

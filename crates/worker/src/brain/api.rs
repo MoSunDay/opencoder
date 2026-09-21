@@ -30,7 +30,7 @@ pub async fn handle(
         );
         return Ok(match matches {
             Ok(()) => RpcReply::ok(
-                json!({"compatible":true,"features":["dag_dynamic_v1","brain_scheduler_v3"]}),
+                json!({"compatible":true,"features":["dag_dynamic_v1","brain_scheduler_v3","brain_scheduler_v4"]}),
             ),
             Err(error) => RpcReply::error(412, error.to_string()),
         });
@@ -38,19 +38,39 @@ pub async fn handle(
     if action == "notice_ack" {
         return super::outbox::ack(worker, reference, input).await;
     }
-    if matches!(action, "scheduler_output" | "scheduler_summary") {
-        return super::v3::output::query(worker, reference, action, input).await;
+    if matches!(
+        action,
+        "scheduler_output" | "scheduler_summary" | "layered_output" | "layered_summary"
+    ) {
+        // The projection owner decides which reader serves the call: a v4 child
+        // keeps its bounded output, a v3 child its scheduler output.
+        let layered = worker
+            .inner
+            .journal
+            .lock()
+            .await
+            .records
+            .get(&reference.id)
+            .is_some_and(|record| super::v4::parent::reports(&record.assignment.request.input));
+        return if layered {
+            super::v4::output::query(worker, reference, action, input).await
+        } else {
+            super::v3::output::query(worker, reference, action, input).await
+        };
     }
-    if worker
+    let schema_version = worker
         .inner
         .journal
         .lock()
         .await
         .records
         .get(&reference.id)
-        .is_some_and(|record| record.assignment.request.input["schema_version"] == 3)
-    {
+        .and_then(|record| record.assignment.request.input["schema_version"].as_u64());
+    if schema_version == Some(3) {
         return super::v3::handle(worker, reference, action, input).await;
+    }
+    if schema_version == Some(4) {
+        return super::v4::handle(worker, reference, action, input).await;
     }
     ensure!(
         reference.kind == ExecutionKind::Brain,

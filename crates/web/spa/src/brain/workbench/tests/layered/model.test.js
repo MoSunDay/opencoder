@@ -111,7 +111,7 @@ describe('v4 分层分组与节点汇总', () => {
     expect(graph.nodes.map((node) => node.id)).toEqual(['n-fetch', 'n-api', 'n-ui', 'n-verdict']);
     const fetch = graph.nodes[0]; const api = graph.nodes[1];
     expect(fetch.position.y).toBe(0);
-    expect(api.position.y).toBe(108 + 100);
+    expect(api.position.y).toBe(156 + 100);
     expect(fetch.data).toMatchObject({ layer: 1, active: false, status: 'done', upstreamTitles: [] });
     expect(api.data.upstreamTitles).toEqual(['抓取仓库']);
     expect(graph.nodes[3].data.active).toBe(false);

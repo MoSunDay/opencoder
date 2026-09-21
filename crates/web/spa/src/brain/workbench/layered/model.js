@@ -212,7 +212,7 @@ export function downstreams(view, nodeId) {
 }
 
 export const LAYER_NODE_W = 216;
-export const LAYER_NODE_H = 108;
+export const LAYER_NODE_H = 156;
 export const LAYER_GAP_X = 88;
 export const LAYER_GAP_Y = 26;
 /// React Flow's own handle box (style.css does not resize .react-flow__handle);

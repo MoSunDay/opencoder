@@ -1,10 +1,12 @@
 """Apply a reviewed manifest with execution stores offline and shared ownership locked."""
+import contextlib
 import json
 import os
 import shutil
 import sqlite3
 from pathlib import Path
 from .model import ALLOWED_TABLES, digest
+from . import inventory
 
 
 def shared_ownership_databases(manifest):
@@ -100,18 +102,33 @@ def apply(manifest, approved_digest, backup):
                             raise ValueError('a previously cleared row reappeared')
             if any(Path(entry['path']).exists() for entry in manifest['directories']):
                 raise ValueError('a previously cleared journal reappeared')
+            for database in {entry['database'] for entry in manifest.get('cached_inventories', [])}:
+                with sqlite3.connect(Path(database).as_uri() + '?mode=ro', uri=True) as connection:
+                    inventory.verify(connection, [entry for entry in manifest['cached_inventories'] if entry['database'] == database])
             return
         raise ValueError('backup directory already exists without a matching completed receipt')
     databases = sorted({change['database'] for change in manifest['databases']})
     shared = shared_ownership_databases(manifest)
-    ensure_offline(set(databases) - shared)
-    backup.mkdir(mode=0o700, parents=True)
-    (backup / 'review.json').write_text(json.dumps(manifest, indent=2))
+    cached = manifest.get('cached_inventories', [])
+    approved_ids = {row['id'] for row in manifest.get('executions', [])}
+    for entry in cached:
+        if entry['database'] not in shared or not set(entry['removed_execution_ids']) <= approved_ids:
+            raise ValueError('inventory outside reviewed execution scope')
+    locks = contextlib.ExitStack()
+    locks.enter_context(inventory.locked(cached))
+    try:
+        ensure_offline(set(databases) - shared)
+    except Exception:
+        locks.close()
+        raise
     connections = {}
     moved = []
     backed_up = []
     ownership_rows = {}
+    inventory_rows = {}
     try:
+        backup.mkdir(mode=0o700, parents=True)
+        (backup / 'review.json').write_text(json.dumps(manifest, indent=2))
         # Keep shared ownership writes available while backing up and checking
         # the offline stores. No database commits before all checks pass.
         for index, database in enumerate(databases):
@@ -154,6 +171,8 @@ def apply(manifest, approved_digest, backup):
                 connection = connections[change['database']]
                 ownership_rows.setdefault(change['database'], []).extend(validated_rows(connection, change))
                 delete_rows(connection, change)
+        for entry in cached:
+            inventory_rows.setdefault(entry['database'], []).append(inventory.update(connections[entry['database']], entry))
         for database in shared:
             if list(connections[database].execute('PRAGMA foreign_key_check')):
                 raise RuntimeError('cleanup would leave ownership references')
@@ -170,6 +189,8 @@ def apply(manifest, approved_digest, backup):
         for database, snapshot in backed_up:
             if database in shared:
                 restore_ownership(database, ownership_rows.get(database, []))
+                with sqlite3.connect(database) as connection:
+                    inventory.restore(connection, inventory_rows.get(database, []))
                 continue
             with sqlite3.connect(snapshot) as source, sqlite3.connect(database) as destination:
                 source.backup(destination)
@@ -179,3 +200,4 @@ def apply(manifest, approved_digest, backup):
     finally:
         for connection in connections.values():
             connection.close()
+        locks.close()

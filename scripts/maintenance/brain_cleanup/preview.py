@@ -2,6 +2,7 @@
 import json
 import sqlite3
 from pathlib import Path
+from . import inventory
 from .model import ID_COLUMNS, ALLOWED_TABLES, RETIRED_TABLES, digest, execution_scope, selected_row
 
 
@@ -62,10 +63,13 @@ def scan(config_path, extra_roots=()):
     for root in runtime_roots:
         databases.update(root.glob('*.db'))
     changes = []
+    inventories = []
     allowed = ALLOWED_TABLES
     for database in sorted(path for path in databases if path.is_file()):
         with connect(database) as connection:
             tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            if database == state / "host" / "host.db":
+                inventories = inventory.preview(connection, database, executions)
             sessions = set(executions)
             if 'subagent_tasks' in tables:
                 links = list(connection.execute('SELECT parent_session_id,child_session_id FROM subagent_tasks'))
@@ -104,6 +108,6 @@ def scan(config_path, extra_roots=()):
                             'status': indexes[key]['status'], 'node_id': indexes[key]['node_id']}
                            for key in sorted(executions)],
             'plan_versions': sorted([list(key) for key in plans]), 'mixed_plan_definitions': sorted(mixed),
-            'databases': changes, 'directories': records,
+            'databases': changes, 'directories': records, 'cached_inventories': inventories,
             'index_only_executions': sorted(index_only),
             'missing_local_journals': sorted(executions - index_only - {entry['id'] for entry in records})}

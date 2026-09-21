@@ -25,7 +25,8 @@ CREATE TABLE IF NOT EXISTS sessions (
   plan_snapshot TEXT,
   plan_input_count INTEGER NOT NULL DEFAULT 0,
   autopilot_mode TEXT,
-  harness_runtime TEXT
+  harness_runtime TEXT,
+  kind TEXT
 )";
 pub(super) const CREATE_MESSAGES: &str = "\
 CREATE TABLE IF NOT EXISTS messages (

@@ -394,6 +394,26 @@ impl Worker {
             Config::load(&crate::brain::workdir::node_workdir(self))
         })?)
     }
+    /// Configuration for a FRESH admission of `kind`. Operator executions
+    /// read the dedicated operator-plane directory under the node data root
+    /// (bootstrapped once from the live node config); every other kind keeps
+    /// the shared node workdir view. See `operations::operator_config`.
+    pub(crate) fn configuration_for(&self, kind: ExecutionKind) -> Result<Config> {
+        match kind {
+            ExecutionKind::Operator => self.operator_configuration(),
+            _ => self.configuration(),
+        }
+    }
+    fn operator_configuration(&self) -> Result<Config> {
+        let dir = crate::operations::operator_config::dir(&self.inner.layout);
+        crate::operations::operator_config::bootstrap(
+            &dir,
+            &crate::brain::workdir::node_workdir(self),
+        )?;
+        Ok(opencoder_core::agent::scope::with_root_sync(None, || {
+            Config::load_operator(&dir)
+        })?)
+    }
     pub(crate) fn client(&self, config: &Config) -> Result<Arc<dyn ChatStream>> {
         if let Some(client) = &self.inner.client {
             return Ok(client.clone());

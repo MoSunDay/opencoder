@@ -497,6 +497,16 @@ body {
   width: 10px;
   height: 10px;
 }
+/* Link mode: the second click of click-to-connect must land on the node
+   card, but the 10px handles straddle the card edge and would swallow it
+   (feeding onConnectEnd a phantom "dropped" drag that silently re-arms).
+   Disable their hit-testing for the duration; handle-drag connecting stays
+   available outside link mode. */
+.dag-edit-stage--linkmode .react-flow__handle,
+.dag-edit-stage--linkmode .react-flow__handle.connectionindicator,
+.dag-edit-stage--linkmode .react-flow__handle.connectingfrom {
+  pointer-events: none !important;
+}
 .dag-edit-node--linksrc {
   border-color: var(--oc-primary);
   box-shadow: 0 0 0 2px var(--oc-primary), 0 0 14px rgba(22, 119, 255, 0.35);

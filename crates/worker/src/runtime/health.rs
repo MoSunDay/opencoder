@@ -3,7 +3,8 @@
 use anyhow::{Context, Result};
 use std::{ffi::CString, os::unix::ffi::OsStrExt, path::Path, sync::Arc};
 
-pub const MIN_AVAILABLE_RATIO: f64 = 0.20;
+pub const MIN_AVAILABLE_BLOCK_RATIO: f64 = 0.10;
+pub const MIN_AVAILABLE_INODE_RATIO: f64 = 0.20;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct StorageCapacity {
@@ -36,11 +37,11 @@ pub fn capacity_error(capacity: StorageCapacity) -> Option<String> {
     match (disk, inodes) {
         (None, _) => Some("node storage health unavailable: zero filesystem blocks".into()),
         (_, None) => Some("node storage health unavailable: zero filesystem inodes".into()),
-        (Some(value), _) if value < MIN_AVAILABLE_RATIO => Some(format!(
+        (Some(value), _) if value < MIN_AVAILABLE_BLOCK_RATIO => Some(format!(
             "node storage low: {:.1}% blocks available",
             value * 100.0
         )),
-        (_, Some(value)) if value < MIN_AVAILABLE_RATIO => Some(format!(
+        (_, Some(value)) if value < MIN_AVAILABLE_INODE_RATIO => Some(format!(
             "node storage low: {:.1}% inodes available",
             value * 100.0
         )),
@@ -57,19 +58,38 @@ mod tests {
     use super::*;
 
     #[test]
-    fn either_capacity_below_twenty_percent_is_unhealthy() {
+    fn storage_requires_ten_percent_blocks_and_twenty_percent_inodes() {
         let capacity = |blocks, inodes| StorageCapacity {
             available_blocks: blocks,
             total_blocks: 100,
             available_inodes: inodes,
             total_inodes: 100,
         };
-        assert!(capacity_error(capacity(19, 100))
-            .unwrap()
-            .contains("blocks"));
+        assert!(capacity_error(capacity(9, 100)).unwrap().contains("blocks"));
         assert!(capacity_error(capacity(100, 19))
             .unwrap()
             .contains("inodes"));
-        assert_eq!(capacity_error(capacity(20, 20)), None);
+        assert_eq!(capacity_error(capacity(10, 20)), None);
+        assert_eq!(capacity_error(capacity(19, 100)), None);
+    }
+
+    #[test]
+    fn unknown_storage_capacity_remains_unhealthy() {
+        let capacity = StorageCapacity {
+            available_blocks: 0,
+            total_blocks: 0,
+            available_inodes: 0,
+            total_inodes: 0,
+        };
+        assert!(capacity_error(capacity)
+            .unwrap()
+            .contains("zero filesystem blocks"));
+        assert!(capacity_error(StorageCapacity {
+            available_blocks: 100,
+            total_blocks: 100,
+            ..capacity
+        })
+        .unwrap()
+        .contains("zero filesystem inodes"));
     }
 }

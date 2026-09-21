@@ -3,6 +3,7 @@
 // DagRunView / DagSpec); the projection rules are the ones runDetail.jsx
 // renders (step colors, skipped deps, feed text).
 import { describe, expect, it } from 'vitest';
+import { NODE_W } from './dag/dagLayout.js';
 import {
   dropCycleEdges,
   foldStepStates,
@@ -195,6 +196,42 @@ describe('graphFromSpec', () => {
     expect(graphFromSpec(null, new Map())).toEqual({ nodes: [], edges: [] });
     expect(graphFromSpec({ steps: 'nope' }, new Map()).nodes).toEqual([]);
     expect(specSteps(undefined)).toEqual([]);
+  });
+
+  it('节点声明固定 width 与左右 handles 且不声明 height（边首帧即渲染、卡片高度归 RO）', () => {
+    const { nodes } = graphFromSpec(SPEC, new Map());
+    expect(nodes.length).toBeGreaterThan(0);
+    nodes.forEach((n, i) => {
+      expect(n.width).toBe(NODE_W);
+      // height MUST stay undeclared: a declared height bakes a permanent
+      // inline height onto the wrapper, clamping auto-height cards (error
+      // text grows them) and pinning handle centers + fitView measurement.
+      expect(n.height).toBeUndefined();
+      expect(n.handles).toHaveLength(2);
+      const target = n.handles.find((h) => h.type === 'target');
+      const source = n.handles.find((h) => h.type === 'source');
+      expect(target).toMatchObject({ position: 'left', width: 6, height: 6 });
+      expect(source).toMatchObject({ position: 'right', width: 6, height: 6 });
+      // fresh objects per node: React Flow mutates handle entries in place
+      expect(n.handles).not.toBe(nodes[(i + 1) % nodes.length].handles);
+    });
+  });
+
+  it('连字符命名不撞边 id（a→b-c 与 a-b→c 不再折叠成同一条边）', () => {
+    const spec = {
+      name: 'x',
+      steps: [
+        { name: 'a', kind: { type: 'agent', prompt: 'p' } },
+        { name: 'a-b', kind: { type: 'agent', prompt: 'p' } },
+        { name: 'b-c', depends_on: ['a'], kind: { type: 'agent', prompt: 'p' } },
+        { name: 'c', depends_on: ['a-b'], kind: { type: 'agent', prompt: 'p' } },
+      ],
+    };
+    const { edges } = graphFromSpec(spec, new Map());
+    expect(edges).toHaveLength(2);
+    const ids = edges.map((e) => e.id);
+    expect(new Set(ids).size).toBe(2);
+    expect(ids.sort()).toEqual(['e-a-b>c', 'e-a>b-c']);
   });
 
   it('projected node statuses include skipped (dep failure) without events', () => {

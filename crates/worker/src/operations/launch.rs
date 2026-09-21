@@ -71,6 +71,9 @@ pub(super) async fn launch_locked(
             | opencoder_core::fleet::ExecutionKind::Maintenance
     )
     .then(|| opencoder_session::loop_registry::LoopGuard::enter(&id));
+    // Operator executions discover skills from their own frozen pool
+    // (`<home>/.opencoder/skills`); every other kind keeps the node view.
+    let skills_root = crate::brain::workdir::execution_skill_root(&worker, &record);
     let tasks = worker.inner.tasks.clone();
     tasks.spawn(async move {
         let ticket = record.queue.as_ref().and_then(|q| q.ticket.clone());
@@ -80,12 +83,9 @@ pub(super) async fn launch_locked(
                 config.agent.runtime.clone(),
                 opencoder_core::agent::scope::with_root(
                     config.agent.agents_dir.clone(),
-                    Box::pin(crate::workloads::run(
-                        &worker,
-                        &record,
-                        config,
-                        cancel.clone(),
-                        resume,
+                    Box::pin(opencoder_core::skill::with_execution(
+                        skills_root,
+                        crate::workloads::run(&worker, &record, config, cancel.clone(), resume),
                     )),
                 ),
             )

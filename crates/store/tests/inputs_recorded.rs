@@ -36,6 +36,7 @@ async fn make_session(store: &LibsqlStore, id: &str, now: i64) {
         skill: None,
         task_type: None,
         requirement: None,
+        kind: None,
     };
     store.create_session(&meta).await.unwrap();
 }
@@ -293,7 +294,7 @@ async fn migration_v9_to_v10_backfills_recorded_for_promoted_rows() {
             .expect("version row")
             .get(0)
             .unwrap();
-        assert_eq!(v, 27, "schema version must be latest (27) after migration");
+        assert_eq!(v, 28, "schema version must be latest (28) after migration");
 
         // Backfill: pre-existing promoted row treated as consumed.
         let (p_prom, rec_prom) = input_state(&conn, seq_promoted).await;

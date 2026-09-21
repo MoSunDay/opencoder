@@ -67,6 +67,7 @@ async fn spawn_stub() -> (String, Shared) {
 /// One-step agent spec whose transcript ends in a ```json fence.
 fn one_step_spec() -> DagSpec {
     DagSpec {
+        max_concurrency: 4,
         name: "e2e-one".into(),
         description: None,
         steps: vec![StepSpec {
@@ -295,6 +296,7 @@ async fn wasm_step_output_is_mirrored_to_the_run_session() {
     let client: Arc<dyn opencoder_llm::ChatStream> = Arc::new(MockChatClient::new());
     let f = fixture(&base, &tmp).await;
     let spec = DagSpec {
+        max_concurrency: 4,
         name: "e2e-wasm".into(),
         description: None,
         steps: vec![StepSpec {
@@ -385,6 +387,7 @@ async fn failed_upstream_blocks_dependent_and_folds_run_error() {
     let f = fixture(&base, &tmp).await;
 
     let spec = DagSpec {
+        max_concurrency: 4,
         name: "e2e-chain".into(),
         description: None,
         steps: vec![
@@ -443,6 +446,7 @@ async fn invalid_spec_snapshot_fails_before_scheduling() {
     // Cycle: never dispatchable, but constructible in-memory — the runtime
     // must fold it into a clean error report instead of wedging.
     let spec = DagSpec {
+        max_concurrency: 4,
         name: "e2e-cycle".into(),
         description: None,
         steps: vec![agent_step("a", &["b"], None), agent_step("b", &["a"], None)],
@@ -545,6 +549,7 @@ async fn sibling_completion_never_redispatches_inflight_step() {
     let workflow_root = f.workflow_root.clone();
     // Spec order = spawn order = mock script consumption order.
     let spec = DagSpec {
+        max_concurrency: 4,
         name: "e2e-sibling".into(),
         description: None,
         steps: vec![agent_step("fast", &[], None), agent_step("slow", &[], None)],
@@ -651,6 +656,7 @@ async fn cancel_drain_persists_inflight_step_artifacts_and_frames() {
     let workflow_root = f.workflow_root.clone();
     // slow runs after fast so the captured frame order pins the schedule.
     let spec = DagSpec {
+        max_concurrency: 4,
         name: "e2e-cancel-drain".into(),
         description: None,
         steps: vec![
@@ -755,6 +761,7 @@ async fn status_delivery_failure_is_returned_to_the_execution_owner() {
     let tmp = tempfile::tempdir().unwrap();
     let f = fixture(&base, &tmp).await;
     let run = claimed(DagSpec {
+        max_concurrency: 4,
         name: "invalid-cycle".into(),
         description: None,
         steps: vec![agent_step("a", &["b"], None), agent_step("b", &["a"], None)],
@@ -783,3 +790,6 @@ async fn status_delivery_failure_is_returned_to_the_execution_owner() {
         "{error}"
     );
 }
+
+#[path = "run_loop/concurrency.rs"]
+mod concurrency;

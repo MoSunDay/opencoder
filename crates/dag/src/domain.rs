@@ -24,6 +24,9 @@ pub type StepOutputs = BTreeMap<String, Value>;
 /// complete report.
 pub fn validate(spec: &DagSpec) -> Result<(), Vec<String>> {
     let mut errs = Vec::new();
+    if !(1..=crate::policies::MAX_CONCURRENCY).contains(&spec.max_concurrency) {
+        errs.push("max_concurrency must be 1..=30".into());
+    }
     let name_len = spec.name.trim().chars().count();
     if name_len == 0 || name_len > 100 {
         errs.push(format!("spec.name must be 1..=100 chars, got {name_len}"));
@@ -298,6 +301,47 @@ mod tests {
         assert!(joined.contains("depends on itself"), "{joined}");
         assert!(joined.contains("unknown step \"missing\""), "{joined}");
         assert!(joined.contains("twice"), "{joined}");
+    }
+
+    #[test]
+    fn validate_rejects_out_of_range_max_concurrency() {
+        for bad in [0usize, 31] {
+            let spec = spec_from(json!({
+                "name": "ok",
+                "max_concurrency": bad,
+                "steps": [
+                    { "name": "a", "kind": { "type": "wasm", "command": "x.wasm" } },
+                    { "name": "b", "kind": { "type": "wasm", "command": "x.wasm" } }
+                ]
+            }));
+            let errs = validate(&spec).unwrap_err();
+            assert!(
+                errs.iter().any(|e| e == "max_concurrency must be 1..=30"),
+                "{errs:?}"
+            );
+        }
+        for good in [1usize, 30] {
+            let spec = spec_from(json!({
+                "name": "ok",
+                "max_concurrency": good,
+                "steps": [
+                    { "name": "a", "kind": { "type": "wasm", "command": "x.wasm" } },
+                    { "name": "b", "kind": { "type": "wasm", "command": "x.wasm" } }
+                ]
+            }));
+            assert!(validate(&spec).is_ok(), "{:?}", validate(&spec));
+        }
+    }
+
+    #[test]
+    fn max_concurrency_defaults_to_4() {
+        let spec = spec_from(json!({
+            "name": "ok",
+            "steps": [
+                { "name": "a", "kind": { "type": "wasm", "command": "x.wasm" } }
+            ]
+        }));
+        assert_eq!(spec.max_concurrency, 4);
     }
 
     #[test]

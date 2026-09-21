@@ -356,6 +356,7 @@ mod tests {
             updated_at: 0,
             preview: String::new(),
             skill: None,
+            kind: None,
         }
     }
 

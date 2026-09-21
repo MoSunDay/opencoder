@@ -26,6 +26,10 @@ pub const MAX_HOW_APPEND_BYTES: usize = 8 * 1024;
 /// Whole-workflow definition.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DagSpec {
+    /// Whole-run parallelism cap: at most this many steps execute at once.
+    /// Defaults to 4 for specs that omit it; validated to 1..=30.
+    #[serde(default = "crate::policies::default_concurrency")]
+    pub max_concurrency: usize,
     /// Human-readable workflow name (not required to be a slug; the def id is).
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]

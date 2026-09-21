@@ -291,6 +291,7 @@ async fn force_cancel_marks_task_and_prunes_registries() {
             skill: None,
             task_type: None,
             requirement: None,
+            kind: None,
         })
         .await
         .unwrap();
@@ -313,6 +314,7 @@ async fn force_cancel_marks_task_and_prunes_registries() {
             skill: None,
             task_type: None,
             requirement: None,
+            kind: None,
         })
         .await
         .unwrap();
@@ -393,6 +395,7 @@ async fn force_cancel_marks_task_and_prunes_registries() {
             skill: None,
             task_type: None,
             requirement: None,
+            kind: None,
         })
         .await
         .unwrap();

@@ -230,6 +230,7 @@ pub(crate) async fn create_session_meta(
     let now = now_ms();
     deps.store
         .create_session(&SessionMeta {
+            kind: Some("dag".into()),
             id: id.clone(),
             title: Some(format!("dag/{}/{}", run_id, step.name)),
             agent: agent.or_else(|| Some("act".into())),

@@ -6,9 +6,11 @@
 // ../specValidate.test.js — no React, no jsdom.
 
 import { describe, expect, it } from 'vitest';
+import { EDIT_NODE_W } from './canvasLayout.js';
 import {
   canConnect,
   canvasToSpec,
+  editNodeBox,
   changeStepKind,
   newStep,
   renameStep,
@@ -80,6 +82,18 @@ describe('canvasModel roundtrip', () => {
     expect(back.steps[1].depends_on).toBeUndefined();
   });
 
+  it('roundtrip 保留顶层 max_concurrency（画布结构编辑不丢并发配置）', () => {
+    const { spec } = roundtrip({ ...SPEC, max_concurrency: 8 });
+    expect(spec.max_concurrency).toBe(8);
+  });
+
+  it('roundtrip 省略未设置 / undefined 的 max_concurrency（落库走服务端默认 4）', () => {
+    const { spec } = roundtrip(SPEC);
+    expect('max_concurrency' in spec).toBe(false);
+    const { spec: back } = roundtrip({ ...SPEC, max_concurrency: undefined });
+    expect('max_concurrency' in back).toBe(false);
+  });
+
   it('重复依赖去重为单条连线', () => {
     const spec = {
       name: 'x',
@@ -93,6 +107,42 @@ describe('canvasModel roundtrip', () => {
     expect(back.steps[1].depends_on).toEqual(['a']);
   });
 
+  it('节点声明固定 width 与左右 handles 且不声明 height（边首帧即渲染、卡片高度归 RO）', () => {
+    const { nodes } = specToCanvas(SPEC);
+    expect(nodes.length).toBeGreaterThan(0);
+    nodes.forEach((n, i) => {
+      expect(n.width).toBe(EDIT_NODE_W);
+      // height MUST stay undeclared: a declared height bakes a permanent
+      // inline height onto the wrapper, clamping auto-height cards and
+      // pinning handle centers + fitView measurement.
+      expect(n.height).toBeUndefined();
+      expect(n.handles).toHaveLength(2);
+      expect(n.handles.find((h) => h.type === 'target')).toMatchObject({ position: 'left', width: 10, height: 10 });
+      expect(n.handles.find((h) => h.type === 'source')).toMatchObject({ position: 'right', width: 10, height: 10 });
+      // fresh per node: React Flow mutates handle entries in place
+      expect(n.handles).not.toBe(nodes[(i + 1) % nodes.length].handles);
+    });
+    expect(editNodeBox()).toEqual(editNodeBox()); // stable shape
+    expect(editNodeBox().handles).not.toBe(editNodeBox().handles); // fresh objects
+  });
+
+  it('连字符命名不撞边 id（a→b-c 与 a-b→c 不再折叠成同一条边）', () => {
+    const spec = {
+      name: 'x',
+      steps: [
+        { name: 'a', kind: { type: 'agent', prompt: 'p' } },
+        { name: 'a-b', kind: { type: 'agent', prompt: 'p' } },
+        { name: 'b-c', depends_on: ['a'], kind: { type: 'agent', prompt: 'p' } },
+        { name: 'c', depends_on: ['a-b'], kind: { type: 'agent', prompt: 'p' } },
+      ],
+    };
+    const { edges } = specToCanvas(spec);
+    expect(edges).toHaveLength(2);
+    const ids = edges.map((e) => e.id);
+    expect(new Set(ids).size).toBe(2);
+    expect(ids.sort()).toEqual(['e-a-b>c', 'e-a>b-c']);
+  });
+
   it('循环依赖的两条连线都被保留（编辑器要能渲染并标红）', () => {
     const spec = {
       name: 'x',
@@ -102,7 +152,7 @@ describe('canvasModel roundtrip', () => {
       ],
     };
     const { canvas, spec: back } = roundtrip(spec);
-    expect(canvas.edges.map((e) => e.id).sort()).toEqual(['e-a-b', 'e-b-a']);
+    expect(canvas.edges.map((e) => e.id).sort()).toEqual(['e-a>b', 'e-b>a']);
     expect(JSON.parse(JSON.stringify(back))).toEqual(spec);
   });
 });
@@ -116,8 +166,8 @@ describe('canvasModel canConnect', () => {
 
   it('三节点路径上反向成环也被拦截；合法连接返回 null', () => {
     const edges = [
-      { id: 'e-a-b', source: 'a', target: 'b' },
-      { id: 'e-b-c', source: 'b', target: 'c' },
+      { id: 'e-a>b', source: 'a', target: 'b' },
+      { id: 'e-b>c', source: 'b', target: 'c' },
     ];
     expect(canConnect(edges, 'c', 'a')).toContain('循环');
     expect(canConnect(edges, 'b', 'd')).toBeNull();

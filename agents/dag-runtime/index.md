@@ -1,11 +1,11 @@
-Commit: f2881a67b660651274d5f0e11e2709054c639677
+Commit: fc047704e4c583cb9e0c11293b3815916ce1659b
 
 # dag-runtime 模块
 
 节点侧 DAG 调度执行；server 不链接，执行只发生在 claiming 节点。
 
 ## 索引
-- `src/runtime.rs`、`src/runtime/` — 调度、动态展开与恢复；静态/动态共享四名额轮询调度、原子展开清单、按实例恢复、同组失败取消并收齐退出
+- `src/runtime.rs`、`src/runtime/` — 调度、动态展开与恢复；静态/动态共享冻结 spec 的 `max_concurrency` 名额（缺省 4、范围 1–30）轮询调度、原子展开清单、按实例恢复、同组失败取消并收齐退出
 - `src/exec/` — wasm 与 agent 步执行（含产出提取）
 - `src/exec/wasm/in_process.rs` — 先设置 Store 的 epoch 截止点，再启动时钟线程，避免初始化阶段丢失取消；执行前已取消的令牌直接返回 Cancelled，不进入 guest。
 - `src/exec/agent_runc.rs`、`src/sandbox/` — runc 沙箱（fail-closed）与 rootfs/挂载装配
@@ -20,7 +20,7 @@ Commit: f2881a67b660651274d5f0e11e2709054c639677
 ## 边界
 - 执行只发生在 claiming 节点；runc fail-closed，不回落 in_process。
 - 默认 host 路径由 `SessionState::new` 读取 Agent 卡的 `harness`；`codex` 沿用 session 的 Codex 子进程驱动和节点服务进程环境，未显式覆盖时使用节点的 `CODEX_HOME` 或该用户的 `~/.codex` 登录态。纯 Codex DAG 不需要原生模型 API Key，Server 不分发自身登录文件；显式 Harness/profile 环境仍优先。跨 Server/节点的凭证继承、依赖结果与认证失败契约由 [dag_codex 回归](../../crates/worker/tests/dag_codex.rs) 覆盖。
-- runc Agent 路径仍要求原生 LLM endpoint/API Key，OCI 挂载仅包含步骤、知识库和 Agent 资源池，尚未接入 Codex 可执行文件、配置及宿主登录态；不能把 host 的默认凭证继承能力套用到容器路径。
+- runc Agent 按冻结 Harness 分派：原生执行器使用 LLM endpoint/API Key；Codex 使用 `sandbox/codex` 解析的 guest 可执行文件、私有配置及节点登录目录挂载，不要求原生 provider 凭证。容器知识路径由挂载合同确定，不能直接套用 host 路径。
 
 ## 相关
 - [动态步骤说明](../../docs/dag-dynamic.md) — 实例 API、输入例子与恢复契约

@@ -53,6 +53,7 @@ async fn seed_session(state: &opencoder_web::AppState, sid: &str) {
             skill: None,
             task_type: None,
             requirement: None,
+            kind: None,
         })
         .await
         .unwrap();

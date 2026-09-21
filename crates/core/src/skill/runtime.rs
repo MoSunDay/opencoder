@@ -12,6 +12,23 @@ pub(super) fn pinned_root() -> Option<PathBuf> {
     ROOT.get().cloned()
 }
 
+// Execution-scoped skill root: operator executions freeze their own skill
+// packs into `<execution home>/.opencoder/skills`, and the sessions they
+// run discover skills from THAT root only — never the node-level snapshot
+// (which mirrors the interactive user's `~/.opencoder/skills`) and never
+// the daemon user's home. Scoped exactly like `agent::scope`.
+tokio::task_local! {
+    static EXECUTION_ROOT: Option<PathBuf>;
+}
+
+pub fn execution_root() -> Option<PathBuf> {
+    EXECUTION_ROOT.try_with(Clone::clone).ok().flatten()
+}
+
+pub async fn with_execution<F: std::future::Future>(root: Option<PathBuf>, future: F) -> F::Output {
+    EXECUTION_ROOT.scope(root, future).await
+}
+
 /// Called once before Runtime sessions start. Keep user skills and dependency
 /// opt-ins, then seed this binary's embedded packs into the private snapshot.
 /// Later startups reuse exactly these bytes; a newer CLI or Runtime may update

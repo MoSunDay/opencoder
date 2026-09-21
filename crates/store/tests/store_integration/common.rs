@@ -53,6 +53,7 @@ pub(crate) async fn make_session(store: &LibsqlStore, id: &str, now: i64) {
         skill: None,
         task_type: None,
         requirement: None,
+        kind: None,
     };
     store.create_session(&meta).await.unwrap();
 }

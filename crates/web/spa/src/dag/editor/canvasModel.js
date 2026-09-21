@@ -4,7 +4,36 @@
 // graphFromSpec, cycle edges are KEPT here: the editor must render them so
 // validateSpec (specValidate.js) can flag them on the canvas.
 
+import { EDIT_NODE_H, EDIT_NODE_W } from './canvasLayout.js';
 import { SLUG_RE } from '../specValidate.js';
+
+/// EDIT_HANDLE — the editor enlarges React Flow handles to 10px (app.css
+/// `.dag-edit-stage .react-flow__handle`); like the run view they straddle
+/// the node border. editNodeBox() returns a FRESH object per call because
+/// React Flow's toHandleBounds() mutates handle entries in place.
+const EDIT_HANDLE = 10;
+
+/// editNodeBox() → {width, handles} declaring the fixed editor card box
+/// (mirrors .dag-edit-node CSS and the dagre constants). React Flow
+/// gates every edge on BOTH endpoint nodes being "initialized" (handle
+/// bounds + a width); declaring them makes that true on frame one
+/// instead of after ResizeObserver measurement, so spec edits / drawer
+/// animation timing can no longer leave edges unrendered. Height is
+/// deliberately NOT declared: getNodeInlineStyleDimensions() would bake a
+/// permanent inline height:72px onto the wrapper while .dag-edit-node has
+/// no position:relative — growing cards (validation problems wrap) would
+/// keep handles pinned to the stale box and clamp measured.height for
+/// fitView. Width alone satisfies initialization, so RO keeps reporting
+/// the true DOM height like it did before this fix.
+export function editNodeBox() {
+  return {
+    width: EDIT_NODE_W,
+    handles: [
+      { type: 'target', position: 'left', x: -EDIT_HANDLE / 2, y: (EDIT_NODE_H - EDIT_HANDLE) / 2, width: EDIT_HANDLE, height: EDIT_HANDLE },
+      { type: 'source', position: 'right', x: EDIT_NODE_W - EDIT_HANDLE / 2, y: (EDIT_NODE_H - EDIT_HANDLE) / 2, width: EDIT_HANDLE, height: EDIT_HANDLE },
+    ],
+  };
+}
 
 /// specToCanvas(spec) → {nodes, edges} for the editor canvas. Nodes follow
 /// spec step order (steps without a string name are skipped); every node
@@ -19,6 +48,7 @@ export function specToCanvas(spec) {
     id: s.name,
     type: 'stepEdit',
     position: { x: 0, y: 0 },
+    ...editNodeBox(),
     data: { step: { ...s }, kindType: (s.kind && s.kind.type) || '' },
   }));
   const seen = new Set();
@@ -37,7 +67,8 @@ export function specToCanvas(spec) {
         continue;
       }
       seen.add(key);
-      edges.push({ id: 'e-' + dep + '-' + s.name, source: dep, target: s.name });
+      // '>' never occurs in a slug, so 'a'→'b-c' and 'a-b'→'c' can't collide
+      edges.push({ id: 'e-' + dep + '>' + s.name, source: dep, target: s.name });
     }
   }
   return { nodes, edges };
@@ -48,7 +79,9 @@ export function specToCanvas(spec) {
 /// source node's position) come first, then the original depends_on entries
 /// that reference non-canvas ids (ghost deps preserved for validation) —
 /// the key is omitted entirely when the result is empty. baseSpec only
-/// contributes name/description metadata.
+/// contributes name/description metadata plus the optional top-level
+/// max_concurrency (carried through so canvas edits keep the def's
+/// concurrency setting; omitted when absent).
 export function canvasToSpec(canvas, baseSpec) {
   const nodes = canvas && Array.isArray(canvas.nodes) ? canvas.nodes : [];
   const edges = canvas && Array.isArray(canvas.edges) ? canvas.edges : [];
@@ -97,6 +130,9 @@ export function canvasToSpec(canvas, baseSpec) {
   const spec = { name: baseSpec && typeof baseSpec.name === 'string' ? baseSpec.name : '' };
   if (baseSpec && typeof baseSpec.description === 'string') {
     spec.description = baseSpec.description;
+  }
+  if (baseSpec && typeof baseSpec.max_concurrency === 'number' && Number.isFinite(baseSpec.max_concurrency)) {
+    spec.max_concurrency = baseSpec.max_concurrency;
   }
   spec.steps = steps;
   return spec;

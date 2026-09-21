@@ -423,10 +423,10 @@ async fn migration_v14_to_v15_creates_brain_tables() {
 
     let store = LibsqlStore::open(&db_path).await.unwrap();
 
-    // Schema version bumped to the latest (27).
+    // Schema version bumped to the latest (28).
     assert_eq!(
         scalar_i64(&store, "SELECT version FROM schema_version LIMIT 1").await,
-        27
+        28
     );
 
     // All three brain tables now exist.
@@ -550,7 +550,7 @@ async fn migration_v17_to_v18_creates_brain_plans() {
     let store = LibsqlStore::open(&db_path).await.unwrap();
     assert_eq!(
         scalar_i64(&store, "SELECT version FROM schema_version LIMIT 1").await,
-        27
+        28
     );
     assert_eq!(
         scalar_i64(
@@ -720,7 +720,7 @@ async fn migration_v24_to_v25_creates_brain_playbooks() {
     let store = LibsqlStore::open(&db_path).await.unwrap();
     assert_eq!(
         scalar_i64(&store, "SELECT version FROM schema_version LIMIT 1").await,
-        27
+        28
     );
     let table = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='brain_playbooks'";
     assert_eq!(scalar_i64(&store, table).await, 1);

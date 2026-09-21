@@ -442,6 +442,7 @@ mod tests {
                 skill: None,
                 task_type: None,
                 requirement: None,
+                kind: None,
             })
             .await
             .unwrap();

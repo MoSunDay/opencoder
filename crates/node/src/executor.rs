@@ -259,6 +259,7 @@ async fn create_local_meta(
     let now = now_ms();
     store
         .create_session(&SessionMeta {
+            kind: Some("agent".into()),
             id: task.session_id.clone(),
             title: task.title.clone(),
             agent: task.agent.clone().or_else(|| Some("act".into())),

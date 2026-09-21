@@ -131,6 +131,7 @@ const UNKNOWN_OP_WAT: &str = r#"
 /// Fixture: wasm step `a` (no upstreams) under a fresh workflow root.
 fn step_ctx(workflow_root: &std::path::Path, command: &str, timeout_secs: Option<u64>) -> StepCtx {
     let spec = DagSpec {
+        max_concurrency: 4,
         name: "test-workflow".into(),
         description: None,
         steps: vec![StepSpec {

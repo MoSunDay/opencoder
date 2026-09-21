@@ -169,6 +169,7 @@ pub async fn prepare_session(
     let now = now_ms();
     store
         .create_session(&SessionMeta {
+            kind: Some("todos".into()),
             id: session_id.into(),
             title: Some(format!("{} / {}", workflow.name, todo.title)),
             agent: Some(todo.agent.clone()),

@@ -45,7 +45,7 @@ pub use skill_cache::discover_cached;
 
 mod runtime;
 mod seed;
-pub use runtime::pin_runtime_skills;
+pub use runtime::{execution_root, pin_runtime_skills, with_execution};
 
 pub use seed::{
     seed_builtin_skills, seed_builtin_skills_in, seed_dep_gated_skills, seed_dep_gated_skills_in,
@@ -61,14 +61,23 @@ pub struct Skill {
     pub source: PathBuf,
 }
 
-/// Default discovery root: the binary's own global config home
-/// (`~/.opencoder/skills`). `None` when no home directory can be resolved
-/// (no `HOME`, no passwd entry): callers must skip skill features gracefully
-/// — the old behavior of falling back to a *relative* `./.opencoder/skills`
-/// made seeding write into whatever the current working directory happened
-/// to be, so it is deliberately gone.
+/// Default discovery root, in priority order:
+///
+/// 1. the execution-scoped root (`skill::runtime::with_execution`) — an
+///    operator execution's frozen `<home>/.opencoder/skills`;
+/// 2. the node-level pinned runtime snapshot (once per runtime, mirrors the
+///    user's global dir at startup);
+/// 3. the real `~/.opencoder/skills` for interactive processes.
+///
+/// `None` only when no root can be resolved (no `HOME`, no passwd entry):
+/// callers must skip skill features gracefully — the old behavior of
+/// falling back to a *relative* `./.opencoder/skills` made seeding write
+/// into whatever the current working directory happened to be, so it is
+/// deliberately gone.
 pub fn skills_dir() -> Option<PathBuf> {
-    runtime::pinned_root().or_else(|| dirs::home_dir().map(|h| h.join(".opencoder").join("skills")))
+    runtime::execution_root()
+        .or_else(runtime::pinned_root)
+        .or_else(|| dirs::home_dir().map(|h| h.join(".opencoder").join("skills")))
 }
 
 /// Production discovery: scan the global `~/.opencoder/skills` through the
@@ -694,6 +703,33 @@ mod tests {
         )
         .unwrap();
         vdir
+    }
+
+    #[test]
+    fn execution_root_shadows_the_node_and_home_roots() {
+        let execution = tempfile::tempdir().unwrap();
+        let exec_skills = execution.path().join(".opencoder").join("skills");
+        fs::create_dir_all(&exec_skills).unwrap();
+        fs::write(exec_skills.join("only-operator.md"), "operator pack").unwrap();
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let inside =
+                crate::skill::with_execution(Some(exec_skills.clone()), async { skills_dir() })
+                    .await;
+            assert_eq!(
+                inside,
+                Some(exec_skills.clone()),
+                "the execution root must win inside its scope"
+            );
+            assert_ne!(
+                skills_dir(),
+                Some(exec_skills.clone()),
+                "outside the scope the node/home roots apply again"
+            );
+        });
     }
 
     #[test]

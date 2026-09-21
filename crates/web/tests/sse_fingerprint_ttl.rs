@@ -198,6 +198,7 @@ async fn seen_fingerprints_expire_at_first_forwarded_done() {
             skill: None,
             task_type: None,
             requirement: None,
+            kind: None,
         })
         .await
         .unwrap();

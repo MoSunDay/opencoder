@@ -22,6 +22,7 @@ async fn create_session(store: &LibsqlStore, id: &str) {
             skill: None,
             task_type: None,
             requirement: None,
+            kind: None,
         })
         .await
         .unwrap();

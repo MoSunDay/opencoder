@@ -471,6 +471,7 @@ impl SessionState {
         if !self.session_created {
             let now = now_ms();
             let meta = SessionMeta {
+                kind: None,
                 id: self.id.clone(),
                 title: first_user_text(self.messages.as_slice()),
                 agent: if self.ts_origin {

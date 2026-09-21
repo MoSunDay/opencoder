@@ -126,6 +126,19 @@ describe('validateSpec', () => {
     const spec = { name: 'x', steps: [{ name: 'a', timeout_secs: 0, kind: { type: 'wasm', command: 'tool.wasm' } }] };
     expect(validateSpec(spec)[0]).toContain('timeout_secs');
   });
+
+  it('accepts max_concurrency bounds 1 and 30 (absent stays legal)', () => {
+    expect(validateSpec({ ...GOOD, max_concurrency: 1 })).toEqual([]);
+    expect(validateSpec({ ...GOOD, max_concurrency: 30 })).toEqual([]);
+    expect(validateSpec(GOOD)).toEqual([]);
+  });
+
+  it('flags out-of-range / non-integer / non-number max_concurrency', () => {
+    for (const bad of [0, 31, 2.5, '4']) {
+      const problems = validateSpec({ ...GOOD, max_concurrency: bad });
+      expect(problems).toContain('spec.max_concurrency 必须是 1..=30 的整数');
+    }
+  });
 });
 
 describe('findCycle', () => {

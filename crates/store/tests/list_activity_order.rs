@@ -29,6 +29,7 @@ fn meta(id: &str, created_at: i64, updated_at: i64) -> SessionMeta {
         skill: None,
         task_type: Some(TASK_TYPE_PARENT.into()),
         requirement: None,
+        kind: None,
     }
 }
 

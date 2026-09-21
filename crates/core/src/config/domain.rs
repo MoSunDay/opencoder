@@ -125,15 +125,12 @@ pub(crate) fn read_effective(working_dir: &Path, key: &str) -> Option<serde_json
     read_effective_with_home(working_dir, key, None)
 }
 
-/// [`read_effective`] with the global home redirected (see
-/// [`effective_path_with_home`]).
-pub(crate) fn read_effective_with_home(
-    working_dir: &Path,
-    key: &str,
-    home: Option<&Path>,
-) -> Option<serde_json::Value> {
-    let path = effective_path_with_home(working_dir, key, home)?;
-    let raw = std::fs::read_to_string(&path).ok()?;
+/// Read one explicit domain file (operator-plane source: the operator dir's
+/// own `<domain>.json`). Same tolerate-corrupt semantics as
+/// [`read_effective_with_home`]: missing/empty -> `None`, bad JSON warns and
+/// reads as absent.
+pub(crate) fn read_effective_from(path: &Path) -> Option<serde_json::Value> {
+    let raw = std::fs::read_to_string(path).ok()?;
     if raw.trim().is_empty() {
         return None;
     }
@@ -148,10 +145,21 @@ pub(crate) fn read_effective_with_home(
             None
         }
         Err(e) => {
-            tracing::warn!("domain file {} is corrupt: {e}; ignoring", path.display());
+            tracing::warn!("domain file {} is corrupt: {e}; ignoring", path.display(),);
             None
         }
     }
+}
+
+/// [`read_effective`] with the global home redirected (see
+/// [`effective_path_with_home`]).
+pub(crate) fn read_effective_with_home(
+    working_dir: &Path,
+    key: &str,
+    home: Option<&Path>,
+) -> Option<serde_json::Value> {
+    let path = effective_path_with_home(working_dir, key, home)?;
+    read_effective_from(&path)
 }
 
 fn json_kind(v: &serde_json::Value) -> &'static str {

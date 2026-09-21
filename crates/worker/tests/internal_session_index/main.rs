@@ -43,6 +43,7 @@ async fn index_replays_top_level_session_pages_with_activity_order_and_ties() {
                 skill: None,
                 task_type: Some(if index % 2 == 0 { "parent" } else { "subagent" }.into()),
                 requirement: None,
+                kind: None,
             })
             .await
             .unwrap();
@@ -107,6 +108,7 @@ async fn internal_session_is_running_only_while_its_loop_is_live() {
             skill: None,
             task_type: Some("subagent".into()),
             requirement: None,
+            kind: None,
         })
         .await
         .unwrap();

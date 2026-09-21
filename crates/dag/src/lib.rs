@@ -24,6 +24,7 @@
 
 pub mod artifacts;
 pub mod domain;
+pub mod policies;
 pub mod protocol;
 pub mod spec;
 pub mod transitions;

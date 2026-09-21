@@ -379,6 +379,95 @@ impl Config {
     /// reloads reproduce the execution's frozen snapshot instead of the
     /// node daemon user's live `~/.opencoder`.
     pub fn load_with_home(working_dir: &Path, home: Option<&Path>) -> Result<Config> {
+        Self::load_inner(working_dir, home, true)
+    }
+
+    /// [`load_with_home`] with environment overlays skipped. This is the
+    /// versioned operator execution contract: the snapshot is the final
+    /// authority ("snapshot is final"), so `OPENCODER_MODEL` /
+    /// `OPENAI_BASE_URL` / `OPENAI_API_KEY` and friends only participate ONCE
+    /// — at creation time, when the snapshot is written. A later change to
+    /// the node daemon's environment can no longer shift a running or
+    /// resumed execution.
+    pub fn load_with_home_frozen(working_dir: &Path, home: Option<&Path>) -> Result<Config> {
+        Self::load_inner(working_dir, home, false)
+    }
+
+    /// Operator-plane configuration source: the ONLY file candidates are
+    /// `dir/config.json` + `dir/opencoder.json` and the domain files
+    /// `dir/<mcp|cli|skills|ap|schedules>.json`. Project candidates
+    /// (`<workdir>/opencoder.json`, `<workdir>/.opencoder/*`), the interactive
+    /// user's real `~/.opencoder`, XDG dirs and env overlays are all
+    /// deliberately out of scope: the node operator plane reads exclusively
+    /// its own directory, so TUI/CLI config writes can never reach an
+    /// operator execution.
+    pub fn load_operator(dir: &Path) -> Result<Config> {
+        let mut cfg = Config::default();
+        for p in [dir.join("config.json"), dir.join("opencoder.json")] {
+            if p.exists() {
+                let parsed: serde_json::Value =
+                    serde_json::from_str(&std::fs::read_to_string(&p)?)?;
+                crate::provider::validate_protocol_patch(&parsed)?;
+                if parsed.is_object() {
+                    merge::merge_into(&mut cfg, parsed);
+                }
+            }
+        }
+        for (key, file) in domain::DOMAIN_FILES {
+            let path = dir.join(file);
+            if path.is_file() {
+                if let Some(v) = domain::read_effective_from(&path) {
+                    domain::apply_domain(&mut cfg, key, &v);
+                }
+            }
+        }
+        Self::finalize_operator(cfg)
+    }
+
+    /// Shared tail of `load_with_home` / `load_operator`: scope overrides
+    /// from the harness, no env overlay for frozen/operator views.
+    fn finalize(mut cfg: Config, apply_environment: bool) -> Result<Config> {
+        if apply_environment {
+            env::apply_env(&mut cfg);
+        }
+        validate_team_turn_budgets(cfg.team_max_turns, cfg.team_max_sub_turns)?;
+        warn_if_suspicious_model(&cfg.model);
+        if let Some(root) = crate::agent::scope::current_root() {
+            cfg.agent.agents_dir = Some(root);
+        }
+        if let Some(runtime) = crate::harness::scope::current_runtime() {
+            cfg.agent.runtime = runtime;
+        }
+        if let Some(settings) = crate::harness::scope::current() {
+            cfg.agent.codex = Some(settings);
+        }
+        Ok(cfg)
+    }
+
+    /// Scope-only finalizer for `load_operator` (same overrides as
+    /// [`Config::load`]; the operator dir is authoritative, env is skipped).
+    fn finalize_operator(cfg: Config) -> Result<Config> {
+        Self::finalize(cfg, false)
+    }
+
+    /// Current effective domain value for `key` as seen from `working_dir`
+    /// (project file first, else the global one). Used by the node's
+    /// operator-plane bootstrap to carry the live domain view into the
+    /// operator config directory exactly once.
+    pub fn effective_domain_value(working_dir: &Path, key: &str) -> Option<serde_json::Value> {
+        domain::read_effective_with_home(working_dir, key, None)
+    }
+
+    /// Domain file name for a domain key (`mcp_servers` -> `mcp.json`).
+    pub fn domain_file_for(key: &str) -> Option<&'static str> {
+        domain::domain_file_name(key)
+    }
+
+    fn load_inner(
+        working_dir: &Path,
+        home: Option<&Path>,
+        apply_environment: bool,
+    ) -> Result<Config> {
         let mut cfg = Config::default();
         // Merge ALL existing candidates, least-specific first so project files
         // override the global base (matches opencoder). This lets ~/.opencoder
@@ -423,19 +512,7 @@ impl Config {
                 domain::apply_domain(&mut cfg, key, &v);
             }
         }
-        env::apply_env(&mut cfg);
-        validate_team_turn_budgets(cfg.team_max_turns, cfg.team_max_sub_turns)?;
-        warn_if_suspicious_model(&cfg.model);
-        if let Some(root) = crate::agent::scope::current_root() {
-            cfg.agent.agents_dir = Some(root);
-        }
-        if let Some(runtime) = crate::harness::scope::current_runtime() {
-            cfg.agent.runtime = runtime;
-        }
-        if let Some(settings) = crate::harness::scope::current() {
-            cfg.agent.codex = Some(settings);
-        }
-        Ok(cfg)
+        Self::finalize(cfg, apply_environment)
     }
     pub fn model_id(&self) -> &str {
         self.model

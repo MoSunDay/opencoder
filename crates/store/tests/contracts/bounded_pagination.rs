@@ -81,6 +81,7 @@ fn session(id: &str) -> SessionMeta {
         skill: None,
         task_type: None,
         requirement: None,
+        kind: None,
     }
 }
 

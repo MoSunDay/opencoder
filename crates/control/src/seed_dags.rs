@@ -97,6 +97,7 @@ fn agent_step(name: &str, depends_on: &[&str], prompt: &str) -> StepSpec {
 /// then run the full harness against it.
 fn spec_full_acceptance() -> DagSpec {
     DagSpec {
+        max_concurrency: 4,
         name: "review-full-acceptance".to_string(),
         description: None,
         steps: vec![
@@ -120,6 +121,7 @@ fn spec_full_acceptance() -> DagSpec {
 /// Quick harness loop: no environment bring-up, just the quick suite.
 fn spec_harness_quick() -> DagSpec {
     DagSpec {
+        max_concurrency: 4,
         name: "review-harness-quick".to_string(),
         description: None,
         steps: vec![wasm_step(
@@ -136,6 +138,7 @@ fn spec_harness_quick() -> DagSpec {
 /// read the checkout at the well-known path and must not modify files.
 fn spec_code_quick() -> DagSpec {
     DagSpec {
+        max_concurrency: 4,
         name: "review-code-quick".to_string(),
         description: None,
         steps: vec![

@@ -16,7 +16,7 @@ export function V3RunBody({ view, id, onNotice, events, connection, refresh }) {
   const command = async (action) => { setBusy(true); setCommandError(''); try { await apiPost(`/api/brain/runs/${encodeURIComponent(id)}/commands`, { action }); await refresh(); } catch (error) { setCommandError(error.message); } finally { setBusy(false); } };
   return <>
     {(commandError || view.error) && <Alert type="error" showIcon title={commandError || view.error} />}
-    {run.error && <Alert type="error" showIcon title="运行阻塞或失败" description={run.error} />}
+    {run.error && ['blocked', 'failed'].includes(phase) && <Alert type="error" showIcon title="运行阻塞或失败" description={run.error} />}
     <div className="brain-run-header"><div><Typography.Title level={4} ellipsis={{ rows: 2, expandable: 'collapsible', symbol: (expanded) => expanded ? '收起目标' : '展开目标' }}>{view.objective || run.run_id}</Typography.Title><Space wrap><Tag color={V3_COLORS[phase]}>{V3_PHASES[phase] || phase}</Tag><Tag>第 {currentRound(view)} 轮</Tag><Typography.Text type="secondary">{['open', 'live'].includes(connection) ? '实时连接' : connection === 'closed' ? '运行已结束' : '正在同步'}</Typography.Text><TimeText ts={run.updated_at} /></Space></div>
       <Space><Button disabled={busy || terminalV3(view)} onClick={() => command(phase === 'paused' ? 'resume' : 'pause')}>{phase === 'paused' ? '继续调度' : '暂停调度'}</Button><Button danger disabled={busy || terminalV3(view)} onClick={() => command('cancel')}>取消调度</Button></Space></div>
     <SummaryCanvas view={view} onCapabilities={() => setShowCapabilities(true)} />

@@ -178,6 +178,7 @@ async fn session_handoff_and_skill_fields_round_trip() {
             skill: None,
             task_type: None,
             requirement: None,
+            kind: None,
         })
         .await
         .unwrap();

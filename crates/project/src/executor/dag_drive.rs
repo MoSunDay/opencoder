@@ -113,6 +113,7 @@ async fn create_host_session(
         .collect();
     deps.store
         .create_session(&SessionMeta {
+            kind: Some("project".into()),
             id: run_id.to_string(),
             title: Some(format!("项目DAG / {}", todo.title)),
             agent: Some("act".into()),

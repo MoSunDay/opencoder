@@ -205,6 +205,7 @@ async fn create_plan_session(
     let now = opencoder_core::message::now_ms();
     deps.store
         .create_session(&SessionMeta {
+            kind: Some("project".into()),
             id: session_id.into(),
             title: Some(format!("项目计划 / {}", todo.title)),
             agent: Some("plan".into()),

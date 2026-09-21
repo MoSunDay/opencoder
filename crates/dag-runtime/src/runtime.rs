@@ -27,10 +27,6 @@ use crate::exec::{execute_agent_step, ExecDeps, StepCtx, StepResult};
 mod dynamic;
 mod scheduler;
 
-/// Upper bound on simultaneously executing steps; excess ready steps stay
-/// queued and are recomputed each round (fairness by spec order).
-pub const MAX_CONCURRENT_STEPS: usize = 4;
-
 /// Everything the run loop needs besides the claimed run itself.
 pub struct RunDeps {
     /// Bearer-authenticated uplink for event batches + the terminal status report.

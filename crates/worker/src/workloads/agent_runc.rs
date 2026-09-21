@@ -146,6 +146,7 @@ pub(super) async fn run_round(
         default_title(assignment.request.kind, input["title"].as_str()),
         assignment.index.created_at,
         &crate::brain::workdir::node_workdir(worker),
+        Some(assignment.request.kind.prefix().to_string()),
     )
     .await?;
     if prompt.is_empty() {

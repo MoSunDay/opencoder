@@ -33,6 +33,7 @@ pub async fn fork_session_with_id(store: &dyn Store, parent_id: &str, id: &str) 
     let new_id = id.to_string();
     let now = now_ms();
     let forked = SessionMeta {
+        kind: meta.kind.clone(),
         id: new_id.clone(),
         title: meta.title.as_deref().map(|t| format!("{t} (fork)")),
         agent: meta.agent.clone(),
@@ -93,6 +94,7 @@ mod tests {
                 skill: None,
                 task_type: task_type.map(String::from),
                 requirement: None,
+                kind: None,
             })
             .await
             .unwrap();

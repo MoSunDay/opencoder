@@ -16,12 +16,14 @@ pub(crate) async fn create_session(
     title: Option<String>,
     created_at: i64,
     workdir: &std::path::Path,
+    kind: Option<String>,
 ) -> Result<()> {
     if worker.inner.state.store.get_session(id).await?.is_some() {
         return Ok(());
     }
     let meta = SessionMeta {
         id: id.into(),
+        kind,
         title,
         agent: Some(agent.into()),
         model,
@@ -94,6 +96,7 @@ pub(super) async fn run(
         default_title(kind, input["title"].as_str()),
         assignment.index.created_at,
         &session_workdir,
+        Some(kind.prefix().to_string()),
     )
     .await?;
     if fresh {

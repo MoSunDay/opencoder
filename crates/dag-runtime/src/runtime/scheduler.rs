@@ -1,7 +1,7 @@
-//! Shared four-slot scheduler. Round-robin logical nodes, per-instance cancellation.
+//! Shared scheduler using the run concurrency limit; round-robin logical nodes.
 use super::{
     dynamic::{self, Group},
-    StepDone, MAX_CONCURRENT_STEPS,
+    StepDone,
 };
 use crate::{
     dag_events::{step_started_event, RunEventSink},
@@ -70,7 +70,7 @@ pub(super) async fn schedule(
         // expansion from monopolizing slots while another branch is ready.
         if !cancel.is_cancelled() {
             let mut misses = 0;
-            while tasks.len() < MAX_CONCURRENT_STEPS && misses < run.spec.steps.len() {
+            while tasks.len() < run.spec.max_concurrency && misses < run.spec.steps.len() {
                 let step = &run.spec.steps[cursor];
                 cursor = (cursor + 1) % run.spec.steps.len();
                 misses += 1;

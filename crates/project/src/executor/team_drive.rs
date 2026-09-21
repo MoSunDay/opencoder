@@ -53,6 +53,7 @@ impl TeamDispatcher for LocalTeamDispatcher {
         self.deps
             .store
             .create_session(&SessionMeta {
+                kind: Some("project".into()),
                 id: session_id.clone(),
                 title: Some(format!("项目团队 / {}", self.title)),
                 agent: Some(node_id.to_string()),

@@ -31,6 +31,7 @@ async fn bundle_export_import_roundtrip() {
         skill: None,
         task_type: None,
         requirement: None,
+        kind: None,
     };
     store.create_session(&parent_meta).await.unwrap();
     let msgs = conv("parent", 4);
@@ -54,6 +55,7 @@ async fn bundle_export_import_roundtrip() {
         skill: None,
         task_type: None,
         requirement: None,
+        kind: None,
     };
     store.create_session(&child_meta).await.unwrap();
     let child_msgs = conv("child", 2);

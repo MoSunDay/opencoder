@@ -48,6 +48,7 @@ pub async fn create_session(
     let now = opencoder_core::message::now_ms();
     let meta = SessionMeta {
         id: id.clone(),
+        kind: None,
         title: None,
         agent: body
             .as_ref()
@@ -112,6 +113,7 @@ pub async fn list_sessions(
             .map(|w| opencoder_core::workdir_hash(std::path::Path::new(w))),
         search: q.search,
         include_subagents: false,
+        kind: None,
     };
     let items = match state.store.list_sessions(&filter).await {
         Ok(items) => items,
@@ -369,6 +371,7 @@ async fn ensure_session_row(
     state
         .store
         .create_session(&SessionMeta {
+            kind: None,
             id: id.to_string(),
             title: Some(prompt.chars().take(80).collect()),
             agent: Some(config.agent.default.clone()),

@@ -59,6 +59,7 @@ async fn seed_session(root: &std::path::Path, id: &str, prompt: &str, seed: Seed
             skill: None,
             task_type: None,
             requirement: None,
+            kind: None,
         })
         .await
         .unwrap();

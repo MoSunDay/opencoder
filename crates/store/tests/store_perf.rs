@@ -48,6 +48,7 @@ async fn append_1000_messages_under_2ms_avg() {
             skill: None,
             task_type: None,
             requirement: None,
+            kind: None,
         })
         .await
         .unwrap();
@@ -82,6 +83,7 @@ async fn load_1000_messages_under_50ms() {
             skill: None,
             task_type: None,
             requirement: None,
+            kind: None,
         })
         .await
         .unwrap();
@@ -121,6 +123,7 @@ async fn list_200_sessions_under_100ms() {
                 skill: None,
                 task_type: None,
                 requirement: None,
+                kind: None,
             })
             .await
             .unwrap();

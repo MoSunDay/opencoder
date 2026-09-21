@@ -87,7 +87,7 @@ async fn schema_migration_is_idempotent_when_column_already_exists() {
         let mut rows = stmt.query(()).await.unwrap();
         let r = rows.next().await.unwrap().unwrap();
         let v: i64 = r.get(0).unwrap();
-        assert_eq!(v, 27, "schema version must be latest (27) after migration");
+        assert_eq!(v, 28, "schema version must be latest (28) after migration");
     }
 
     // A freshly appended event still round-trips its sse_kind.
@@ -117,7 +117,7 @@ async fn schema_migration_is_idempotent_when_column_already_exists() {
     let mut rows = stmt.query(()).await.unwrap();
     let r = rows.next().await.unwrap().unwrap();
     let v: i64 = r.get(0).unwrap();
-    assert_eq!(v, 27, "schema version stays (27) after idempotent re-open");
+    assert_eq!(v, 28, "schema version stays (28) after idempotent re-open");
 }
 
 /// v6 -> v7: reopening a faithful v6 database (sessions WITHOUT
@@ -201,8 +201,8 @@ async fn schema_migration_v6_to_v7_adds_summary_images() {
         let r = rows.next().await.unwrap().unwrap();
         let v: i64 = r.get(0).unwrap();
         assert_eq!(
-            v, 27,
-            "schema version must be latest (27) after v6->v7 migration"
+            v, 28,
+            "schema version must be latest (28) after v6->v7 migration"
         );
     }
 }

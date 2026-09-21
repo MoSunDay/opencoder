@@ -66,6 +66,16 @@ pub fn for_record(worker: &Worker, record: &Record) -> Result<PathBuf> {
     Ok(path)
 }
 
+/// Skill-discovery root for an execution: the frozen operator pool under
+/// the execution home, or `None` (node-level discovery) for every other
+/// kind. Scoped into the workload via `skill::with_execution`.
+pub(crate) fn execution_skill_root(worker: &Worker, record: &Record) -> Option<PathBuf> {
+    operator_env(worker, record)
+        .ok()
+        .flatten()
+        .map(|(home, _)| home.join(".opencoder").join("skills"))
+}
+
 pub(crate) fn session_dirs(worker: &Worker, record: &Record) -> Result<(PathBuf, Option<PathBuf>)> {
     if let Some((home, workspace)) = operator_env(worker, record)? {
         return Ok((workspace, Some(home)));
@@ -76,7 +86,13 @@ pub(crate) fn session_dirs(worker: &Worker, record: &Record) -> Result<(PathBuf,
 /// Reuse frozen admission settings for every follow-up and explicit resume.
 pub(crate) fn execution_config(worker: &Worker, record: &Record) -> Result<Option<Config>> {
     if let Some((home, workspace)) = operator_env(worker, record)? {
-        return Ok(Some(Config::load_with_home(&workspace, Some(&home))?));
+        // Versioned operator executions are "snapshot is final": env
+        // overlays never re-enter after creation (see
+        // `Config::load_with_home_frozen`).
+        return Ok(Some(Config::load_with_home_frozen(
+            &workspace,
+            Some(&home),
+        )?));
     }
     if managed(record) {
         return record

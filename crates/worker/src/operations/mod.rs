@@ -4,6 +4,7 @@ mod create;
 mod dag_preflight;
 mod launch;
 mod maintenance;
+pub(super) mod operator_config;
 pub(super) mod operator_env;
 mod project_admission;
 mod query;

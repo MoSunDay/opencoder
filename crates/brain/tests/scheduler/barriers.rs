@@ -111,6 +111,39 @@ fn pause_preserves_terminal_barrier_and_resume_wakes_once() {
 }
 
 #[test]
+fn resume_clears_blocked_error_without_replacing_execution_history() {
+    let mut state = parallel();
+    for index in 0..3 {
+        let change = scheduler::terminal(&state, &notice(&state, index, 1), 3)
+            .unwrap()
+            .unwrap();
+        fold(&mut state, change);
+    }
+    let operations = state.operations.clone();
+    let run_id = state.run.run_id.clone();
+    let round = state.run.round;
+    let reason = "model provider returned HTTP 429";
+    let blocked = scheduler::block(&state, reason.into(), 4);
+    let diagnostic = blocked.events[0].clone();
+    fold(&mut state, blocked);
+    assert!(scheduler::command(&state, "resume", 5).is_err());
+    let paused = scheduler::command(&state, "pause", 5).unwrap();
+    assert_eq!(paused.run.error.as_deref(), Some(reason));
+    fold(&mut state, paused);
+
+    let resumed = scheduler::command(&state, "resume", 6).unwrap();
+    assert_eq!(resumed.run.phase, BrainSchedulerPhase::Ready);
+    assert_eq!(resumed.run.error, None);
+    assert_eq!(resumed.run.run_id, run_id);
+    assert_eq!(resumed.run.round, round);
+    assert_eq!(resumed.operations, operations);
+    assert_eq!(resumed.events.len(), 1);
+    assert_eq!(resumed.events[0].event_type, "run_resumed");
+    assert_eq!(diagnostic.event_type, "decision_blocked");
+    assert_eq!(diagnostic.reason_summary.as_deref(), Some(reason));
+}
+
+#[test]
 fn old_round_and_mismatched_identity_cannot_advance_current_round() {
     let mut state = parallel();
     state.run.round = 2;

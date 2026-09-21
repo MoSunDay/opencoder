@@ -80,10 +80,12 @@ pub(super) async fn run(
         id,
         "act",
         None,
-        Some(spec.name.clone()),
         assignment.index.created_at,
         &crate::brain::workdir::node_workdir(worker),
-        Some("dag".into()),
+        super::agent::SessionLabels {
+            title: Some(spec.name.clone()),
+            kind: Some("dag".into()),
+        },
     )
     .await?;
     let failure = Arc::new(Mutex::new(None));

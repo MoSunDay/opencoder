@@ -158,6 +158,16 @@ pub async fn resolve(
     let fail = |e: anyhow::Error| RpcReply::error(500, format!("definition: {e:#}"));
     let mut definition = match request.kind {
         ExecutionKind::Brain => {
+            if request.input["schema_version"]
+                == opencoder_core::brain::layered::LAYERED_SCHEMA_VERSION
+            {
+                let layered: opencoder_core::brain::layered::LayeredRequest =
+                    serde_json::from_value(request.input["layered_request"].clone())
+                        .map_err(|e| RpcReply::error(400, format!("layered request: {e}")))?;
+                opencoder_brain::layered::validate_request(&layered)
+                    .map_err(|e| RpcReply::error(400, e.to_string()))?;
+                return Ok(Some(request.input.clone()));
+            }
             if request.input["schema_version"] == 3 {
                 let scheduler = serde_json::from_value(request.input["scheduler_request"].clone())
                     .map_err(|e| RpcReply::error(400, format!("scheduler request: {e}")))?;

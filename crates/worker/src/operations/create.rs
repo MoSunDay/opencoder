@@ -18,7 +18,10 @@ pub(super) async fn create(worker: &Worker, mut assignment: Assignment) -> Resul
     }
     let input = &assignment.request.input;
     if (assignment.request.kind == ExecutionKind::Brain
-        && !matches!(input["schema_version"].as_u64(), Some(2) | Some(3)))
+        && !matches!(
+            input["schema_version"].as_u64(),
+            Some(2) | Some(3) | Some(4)
+        ))
         || (input.get("_brain").is_some() && input["_brain"]["schema_version"] != 2)
         || input.get("brain_receipt").is_some()
         || input.get("playbook_receipt").is_some()
@@ -306,7 +309,10 @@ fn prepare_with_config(
     let input = &assignment.request.input;
     anyhow::ensure!(
         !(assignment.request.kind == ExecutionKind::Brain
-            && !matches!(input["schema_version"].as_u64(), Some(2) | Some(3)))
+            && !matches!(
+                input["schema_version"].as_u64(),
+                Some(2) | Some(3) | Some(4)
+            ))
             && !(input.get("_brain").is_some() && input["_brain"]["schema_version"] != 2)
             && input.get("brain_receipt").is_none()
             && input.get("playbook_receipt").is_none(),
@@ -392,6 +398,8 @@ fn prepare_with_config(
                         let request: opencoder_core::brain::BrainSchedulerRequest =
                             serde_json::from_value(input["scheduler_request"].clone())?;
                         opencoder_brain::scheduler::validate_request(&request)?;
+                    } else if input["schema_version"] == 4 {
+                        crate::brain::v4::state::parse_request(input)?;
                     }
                     if input["schema_version"] == 2 && worker.inner.client.is_none() {
                         crate::brain::activate::preflight()?;

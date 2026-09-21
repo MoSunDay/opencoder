@@ -1,6 +1,9 @@
 use crate::Worker;
 use anyhow::{ensure, Context, Result};
-use opencoder_core::{brain::*, Config};
+use opencoder_core::{
+    brain::{layered::*, *},
+    Config,
+};
 use serde_json::json;
 use std::path::{Path, PathBuf};
 use tokio_util::sync::CancellationToken;
@@ -63,6 +66,122 @@ pub async fn scheduler(
         cancel,
     )
     .await
+}
+
+/// One layer decision for a v4 root. The context carries the frozen
+/// descriptors of the layer being decided, so the model can only bind those.
+pub async fn layered(
+    worker: &Worker,
+    config: &Config,
+    context: &LayeredContext,
+    cancel: CancellationToken,
+) -> Result<LayeredDecision> {
+    if context.nodes.is_empty() {
+        return closing(worker, config, context, cancel).await;
+    }
+    if let Some(client) = &worker.inner.client {
+        return tokio::select! {
+            _ = cancel.cancelled() => anyhow::bail!("brain activation cancelled"),
+            result = opencoder_brain::layered::activate(context, client.as_ref(), config.model_id()) => result,
+        };
+    }
+    activate_json(
+        worker,
+        config,
+        &context.run_id,
+        context.generation,
+        context,
+        cancel,
+    )
+    .await
+}
+
+/// Closing instruction text. `nodes` is empty, so a dispatch_layer decision has
+/// nothing left to schedule.
+pub const CLOSING: &str =
+    "Every layer of the plan has been dispatched and every node has a successful attempt. \
+Return complete or fail; dispatch_layer is closed.";
+
+/// Closing instruction: the same DTO shape as a layer instruction so one
+/// strict-JSON contract covers both activations.
+pub fn closing_instruction(context: &LayeredContext) -> Result<String> {
+    Ok(json!({
+        "schema_version": LAYERED_SCHEMA_VERSION,
+        "closing": true,
+        "instruction": CLOSING,
+        "run_id": context.run_id,
+        "generation": context.generation,
+        "layer": context.layer,
+        "total_layers": context.total_layers,
+        "objective": context.request.plan.objective,
+        "operations": context.operations,
+        "summaries": context.summaries,
+    })
+    .to_string())
+}
+
+/// Closing activation for a v4 root: the layer being decided is `layer`
+/// (`total_layers + 1`), so only completion or failure remain. The context is
+/// handed to the model unchanged, which keeps the closing decision inside the
+/// same contract prompt as a layer decision.
+pub async fn closing(
+    worker: &Worker,
+    config: &Config,
+    context: &LayeredContext,
+    cancel: CancellationToken,
+) -> Result<LayeredDecision> {
+    if let Some(client) = &worker.inner.client {
+        return tokio::select! {
+            _ = cancel.cancelled() => anyhow::bail!("brain activation cancelled"),
+            result = closing_decision(client.as_ref(), config.model_id(), context) => result,
+        };
+    }
+    // The container activation runs the same closing request through the CLI.
+    activate_json(
+        worker,
+        config,
+        &context.run_id,
+        context.generation,
+        context,
+        cancel,
+    )
+    .await
+}
+
+/// Mirrors `crates/ctl/src/cmd/brain/ontology.rs::closing_decision` so the
+/// node-local and the in-container activation cannot drift apart.
+pub async fn closing_decision(
+    client: &dyn opencoder_llm::ChatStream,
+    model: &str,
+    context: &LayeredContext,
+) -> Result<LayeredDecision> {
+    use opencoder_llm::{ChatRequest, LlmEvent, Message, RequestPurpose};
+    let mut stream = client.chat_stream(ChatRequest {
+        purpose: RequestPurpose::Planning,
+        model: model.into(),
+        messages: vec![
+            Message::system("layered-contract", opencoder_brain::layered::PROMPT),
+            Message::user("layered-closing", closing_instruction(context)?),
+        ],
+        tools: vec![],
+        tool_choice: None,
+        temperature: Some(0.0),
+        max_tokens: Some(16384),
+        reasoning_effort: None,
+        cache_salt: None,
+    })?;
+    while let Some(event) = stream.recv().await {
+        match event {
+            LlmEvent::Completed { text, .. } => {
+                ensure!(text.len() <= 256 * 1024, "layered decision exceeds 256 KiB");
+                return serde_json::from_str(text.trim())
+                    .context("layered decision must be a strict JSON object");
+            }
+            LlmEvent::Error(error) => anyhow::bail!("layered provider: {error}"),
+            _ => {}
+        }
+    }
+    anyhow::bail!("layered stream ended without completion")
 }
 
 async fn activate_json<T: serde::de::DeserializeOwned>(

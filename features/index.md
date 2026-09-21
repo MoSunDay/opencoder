@@ -1,4 +1,4 @@
-Commit: 7e71cbcfd669dd2cbaa5c94ab01945fd139557f0
+Commit: 3b4775905c950f64433b5c9f4439f4396674b3c6
 
 # OpenCoder 能力地图 — 业务能力总索引
 ## 平台与编排
@@ -8,7 +8,7 @@ Commit: 7e71cbcfd669dd2cbaa5c94ab01945fd139557f0
 - 发布门禁（code-review DAG）— 内置 9 步审查流加 [CLI 门禁](../scripts/platform/code_review_gate.sh)。
 - [项目管理](../agents/project/index.md) — goal/milestone/todo 与多执行器。
 - [版本化 Agent 与 NFS](../agents/agents/index.md) — 资源版本、共享池与只读导出。
-- [大脑调度工作台](brain/index.md)、[大脑能力库](../agents/brain/index.md) — 本体计划与能力路由。
+- [大脑调度工作台](brain/index.md)、[大脑能力库](../agents/brain/index.md) — step/连线计划、分层能力调度与固定版本子计划。
 - [远程管理 CLI](../agents/ctl/index.md) — 对接 Server API 与退出码契约。
 ## 会话与交互
 - [会话运行时](../agents/session/index.md) — act/plan、压缩、subagent、恢复。

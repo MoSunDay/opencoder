@@ -1,4 +1,4 @@
-Commit: 7e71cbcfd669dd2cbaa5c94ab01945fd139557f0
+Commit: 3b4775905c950f64433b5c9f4439f4396674b3c6
 
 # control 模块
 
@@ -19,8 +19,7 @@ Commit: 7e71cbcfd669dd2cbaa5c94ab01945fd139557f0
 - `tests/e2e/` — 集成测试（含 v4 `layered_api` 家族：锁定读面、命令门禁、嵌套准入）
 
 ## 接缝
-- Brain v3：control 只归一化能力目录、创建子执行并处理中继回执；调度 projection/generation 留在 worker 根节点。
-- Brain 分层能力计划：节点须广告 `brain_scheduler_v4`；普通能力走统一执行提交，子计划走相同 Brain 准入并核验父 operation。层级纯函数重算，节点持有运行与操作投影；视图仅提供索引，详情由能力查询。
+- Brain 分层能力计划：节点须广告 `brain_scheduler_v4`；普通能力走统一执行提交，子计划走相同 Brain 准入并核验父 operation。层级纯函数重算，节点持有运行与操作投影；视图仅提供索引，详情由能力查询。Control 为每次激活解析能力及有界上游摘要，Worker 执行模型决策；子计划固定版本并验证父 operation、深度和终态。
 
 ## 相关
 - [agents/node](../node/index.md)、[agents/worker](../worker/index.md)

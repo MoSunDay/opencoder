@@ -16,144 +16,14 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use std::sync::Arc;
 
-pub async fn pin(state: &Arc<AppState>, plan: &mut OntologyPlan) -> anyhow::Result<()> {
-    opencoder_brain::ontology::validate(plan)?;
-    let config = opencoder_core::Config::load(&state.workdir)?;
-    let library = super::catalog::capabilities(state).await?;
-    for step in &mut plan.instances {
-        let capability = library
-            .iter()
-            .find(|c| c["id"].as_str() == Some(&step.capability_id))
-            .ok_or_else(|| anyhow::anyhow!("unregistered capability {}", step.capability_id))?;
-        anyhow::ensure!(
-            capability["summary"]
-                .as_str()
-                .is_some_and(|s| !s.trim().is_empty()),
-            "capability {} has no description",
-            step.capability_id
-        );
-        anyhow::ensure!(
-            capability["kind"] == json!(step.action.kind)
-                && capability["target"].as_str() == Some(&step.action.target),
-            "capability identity mismatch for {}",
-            step.id
-        );
-        {
-            let request = CreateExecution {
-                id: format!("{}-preflight", step.action.kind.prefix()),
-                kind: step.action.kind,
-                target: Some(step.action.target.clone()),
-                input: json!({}),
-                node_id: step.action.node_id.clone(),
-            };
-            let mut snapshot = crate::api::catalog::resolve(state, &request)
-                .await
-                .map_err(|r| anyhow::anyhow!("{}: {}", step.id, r.body))?;
-            if snapshot.is_none() {
-                let agent = opencoder_core::agent::scope::with_root_sync(
-                    config.agent.agents_dir.clone(),
-                    || opencoder_core::resolve_agent(&step.action.target),
-                )
-                .ok_or_else(|| {
-                    anyhow::anyhow!("capability target {} unavailable", step.action.target)
-                })?;
-                snapshot = Some(
-                    json!({"name":agent.name,"kind":agent.kind,"mode":agent.mode,"prompt":agent.prompt,"tools":agent.tools}),
-                );
-            }
-            anyhow::ensure!(
-                step.action
-                    .definition
-                    .as_ref()
-                    .is_none_or(|provided| Some(provided) == snapshot.as_ref()),
-                "capability definition snapshot mismatch for {}",
-                step.id
-            );
-            step.action.definition = snapshot;
-        }
-        if step.action.runtime.is_none() {
-            step.action.runtime = Some(serde_json::to_value(&config.agent.runtime)?);
-        }
-        if step.action.codex.is_none() {
-            step.action.codex = config
-                .agent
-                .codex
-                .as_ref()
-                .map(serde_json::to_value)
-                .transpose()?;
-        }
-        let names = agent_names(&step.action)?;
-        for name in names {
-            if !step.action.agent_manifests.contains_key(&name) {
-                step.action.agent_manifests.insert(
-                    name.clone(),
-                    opencoder_core::agent::scope::with_root_sync(
-                        config.agent.agents_dir.clone(),
-                        || opencoder_core::brain::resources::agent_manifest(&name),
-                    )
-                    .map_err(anyhow::Error::msg)?,
-                );
-            }
-        }
-    }
-    Ok(())
-}
-fn agent_names(action: &ActionSpec) -> anyhow::Result<Vec<String>> {
-    let definition = action.definition.as_ref().unwrap_or(&Value::Null);
-    Ok(match action.kind {
-        ExecutionKind::Agent | ExecutionKind::Operator => vec![action.target.clone()],
-        ExecutionKind::Team => serde_json::from_value::<TeamDefinition>(definition.clone())?
-            .members
-            .into_iter()
-            .map(|m| m.agent)
-            .collect(),
-        ExecutionKind::Todos => {
-            let spec: opencoder_todos::WorkflowSpec = serde_json::from_value(definition.clone())?;
-            let mut names = vec!["workflow".into()];
-            names.extend(spec.todos.into_iter().map(|s| s.agent));
-            names
-        }
-        ExecutionKind::Dag => {
-            let spec = opencoder_dag::decode_spec(definition.get("spec").unwrap_or(definition))
-                .map_err(anyhow::Error::msg)?;
-            spec.steps
-                .into_iter()
-                .filter_map(|s| match s.kind.executable() {
-                    opencoder_dag::StepKind::Agent { agent, .. } => {
-                        Some(agent.clone().unwrap_or_else(|| "act".into()))
-                    }
-                    _ => None,
-                })
-                .collect()
-        }
-        _ => anyhow::bail!("unsupported business kind"),
-    })
-}
-
 pub async fn save(State(state): State<Arc<AppState>>, Json(body): Json<Value>) -> Response {
     let mut body: PlanVersion<Value> = match serde_json::from_value(body) {
         Ok(body) => body,
         Err(error) => return error_400(error.to_string()),
     };
-    if body.plan["schema_version"] == 3 {
-        match validate_scheduler(&state, body.plan.clone()).await {
-            Ok(plan) => body.plan = json!(plan),
-            Err(error) => return error_400(error.to_string()),
-        }
-    } else if body.plan["schema_version"] == LAYERED_SCHEMA_VERSION {
-        match validate_layered(&state, body.plan.clone()).await {
-            Ok(plan) => body.plan = json!(plan),
-            Err(error) => return error_400(error.to_string()),
-        }
-    } else {
-        let mut plan: OntologyPlan = match serde_json::from_value(body.plan) {
-            Ok(plan) => plan,
-            Err(error) => return error_400(error.to_string()),
-        };
-        if let Err(error) = pin(&state, &mut plan).await {
-            return error_400(format!("{error:#}"));
-        }
-        body.plan = json!(plan);
+    match validate_layered(&state, body.plan.clone()).await {
+        Ok(plan) => body.plan = json!(plan),
+        Err(error) => return error_400(error.to_string()),
     }
     match state.fleet.save_brain_plan_document(&body).await {
         Ok(definition) => response(RpcReply::ok(
@@ -161,13 +31,6 @@ pub async fn save(State(state): State<Arc<AppState>>, Json(body): Json<Value>) -
         )),
         Err(error) => response(RpcReply::error(409, error.to_string())),
     }
-}
-
-async fn validate_scheduler(state: &Arc<AppState>, value: Value) -> anyhow::Result<SchedulerPlan> {
-    let plan: SchedulerPlan = serde_json::from_value(value)?;
-    opencoder_brain::scheduler::validate_plan(&plan)?;
-    super::v3::catalog::available(state, &plan.request(Default::default())).await?;
-    Ok(plan)
 }
 
 async fn validate_layered(state: &Arc<AppState>, value: Value) -> anyhow::Result<LayeredPlan> {
@@ -188,17 +51,9 @@ async fn validate_layered(state: &Arc<AppState>, value: Value) -> anyhow::Result
 }
 
 pub async fn validate(State(state): State<Arc<AppState>>, Json(plan): Json<Value>) -> Response {
-    let result = if plan["schema_version"] == 3 {
-        validate_scheduler(&state, plan).await.map(|_| ())
-    } else if plan["schema_version"] == LAYERED_SCHEMA_VERSION {
-        validate_layered(&state, plan).await.map(|_| ())
-    } else {
-        serde_json::from_value::<OntologyPlan>(plan)
-            .map_err(anyhow::Error::from)
-            .and_then(|plan| opencoder_brain::ontology::validate(&plan))
-    };
+    let result = validate_layered(&state, plan).await;
     match result {
-        Ok(()) => response(RpcReply::ok(json!({"valid":true}))),
+        Ok(_) => response(RpcReply::ok(json!({"valid":true}))),
         Err(e) => error_400(e.to_string()),
     }
 }
@@ -263,12 +118,11 @@ pub async fn stable(
         return error_400("version is required".into());
     };
     match state.fleet.brain_plan_document(&id, version).await {
-        Ok(Some(p))
-            if p.plan["schema_version"] != 2
-                && p.plan["schema_version"] != 3
-                && p.plan["schema_version"] != LAYERED_SCHEMA_VERSION =>
-        {
-            return response(RpcReply::error(409, opencoder_brain::graph::MIGRATION));
+        Ok(Some(p)) if p.plan["schema_version"] != LAYERED_SCHEMA_VERSION => {
+            return response(RpcReply::error(
+                409,
+                opencoder_core::brain::layered::LAYERED_MIGRATION,
+            ));
         }
         Ok(_) => {}
         Err(e) => return error_500(e.to_string()),

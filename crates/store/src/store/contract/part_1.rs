@@ -1,0 +1,318 @@
+// Method group 1; assembled before async_trait expands the complete contract.
+macro_rules! store_contract_0 {
+    ($($methods:tt)*) => {
+        store_contract_1! {
+            $($methods)*
+
+    /// Atomic v4 layered projection read. Layers are recomputed, never stored.
+    async fn brain_layered(
+        &self,
+        _id: &str,
+    ) -> Result<Option<opencoder_core::brain::layered::LayeredSnapshot>> {
+        anyhow::bail!("v4 layered scheduler unsupported")
+    }
+    async fn commit_brain_layered(
+        &self,
+        _change: &opencoder_core::brain::layered::LayeredChange,
+    ) -> Result<opencoder_core::brain::layered::LayeredSnapshot> {
+        anyhow::bail!("v4 layered scheduler unsupported")
+    }
+    async fn brain_layered_events(
+        &self,
+        _id: &str,
+        _after: u64,
+        _limit: u32,
+    ) -> Result<Vec<opencoder_core::brain::layered::LayeredEvent>> {
+        anyhow::bail!("v4 layered scheduler unsupported")
+    }
+    fn backend_name(&self) -> &'static str;
+
+    async fn create_session(&self, meta: &SessionMeta) -> Result<()>;
+    async fn get_session(&self, id: &str) -> Result<Option<SessionMeta>>;
+    /// Private harness state, deliberately separate from public session metadata.
+    async fn harness_runtime(
+        &self,
+        _id: &str,
+    ) -> Result<Option<opencoder_core::harness::HarnessRuntime>> {
+        Ok(None)
+    }
+    async fn set_harness_runtime(
+        &self,
+        _id: &str,
+        _runtime: &opencoder_core::harness::HarnessRuntime,
+    ) -> Result<()> {
+        anyhow::bail!("harness persistence is unsupported by this store")
+    }
+    async fn list_sessions(&self, filter: &SessionFilter) -> Result<Vec<SessionListItem>>;
+    /// List top-level sessions plus execution-owned Agent step sessions.
+    /// Execution indexes use this narrow view to expose a typed child
+    /// reference without widening the public chat-session listing.
+    async fn list_execution_sessions(
+        &self,
+        filter: &SessionFilter,
+    ) -> Result<Vec<SessionListItem>> {
+        self.list_sessions(filter).await
+    }
+    async fn update_session(&self, id: &str, patch: &SessionPatch) -> Result<()>;
+    async fn delete_session(&self, id: &str) -> Result<()>;
+    /// Delete every session except `keep_session_id` (the currently-active
+    /// one). Cascades to messages/inputs/events/subagent_tasks via the schema's
+    /// `ON DELETE CASCADE` foreign keys. Returns the number of sessions removed.
+    async fn clear_other_sessions(&self, keep_session_id: &str) -> Result<u64>;
+
+    async fn set_message_usage(
+        &self,
+        _session_id: &str,
+        _message_id: &str,
+        _usage: &opencoder_core::MessageUsage,
+    ) -> Result<()> {
+        anyhow::bail!("message usage update unsupported by this store")
+    }
+    async fn append_message(&self, session_id: &str, msg: &Message) -> Result<i64>;
+    async fn append_messages(&self, session_id: &str, msgs: &[Message]) -> Result<Vec<i64>>;
+    async fn load_messages(&self, session_id: &str) -> Result<Vec<Message>>;
+    /// Load messages for a session skipping the first `skip_count` persisted
+    /// rows (ordered by insertion `seq` ASC), returning only the tail. Used by
+    /// `resume` on the compaction path to avoid reloading the (potentially
+    /// huge) soft-deleted compacted head. The default impl falls back to a full
+    /// `load_messages` + in-memory drain so test fakes need not override it;
+    /// the libsql backend overrides with an `OFFSET` query that skips without
+    /// deserializing the dropped rows.
+    async fn load_messages_after(&self, session_id: &str, skip_count: i64) -> Result<Vec<Message>> {
+        Ok(message_projection::after(
+            self.load_messages(session_id).await?,
+            skip_count,
+        ))
+    }
+    async fn last_message_seq(&self, session_id: &str) -> Result<i64>;
+
+    /// Raw persisted message rows in `seq` order ([`MessageRow`] read model).
+    /// Backs the P3 node message relay: the caller needs the true per-session
+    /// `seq` (the resume boundary) plus the raw stored blocks, neither of
+    /// which the decoded [`Message`] view carries. Default impl reconstructs
+    /// from `load_messages` with positional seqs (1-based) so test fakes need
+    /// not override it; the primary backend reads the real columns.
+    async fn load_message_rows(&self, session_id: &str) -> Result<Vec<MessageRow>> {
+        let msgs = self.load_messages(session_id).await?;
+        Ok(message_projection::message_rows(msgs))
+    }
+    /// Read raw message JSON in bounded SQL slices. Implementations must not
+    /// materialize a whole oversized row before applying `raw_budget`.
+    async fn load_message_page(
+        &self,
+        _session_id: &str,
+        _cursor: opencoder_core::fleet::MessageCursor,
+        _chunk_bytes: usize,
+        _raw_budget: usize,
+    ) -> Result<MessageChunkPage> {
+        anyhow::bail!("bounded message pagination is unsupported by this store")
+    }
+
+    async fn admit_input(&self, input: &SessionInput) -> Result<i64>;
+    /// Atomically admit an input keyed by `(session_id, id)`. Implementations
+    /// must return the original row for an identical retry and reject a
+    /// different semantic payload. Unsupported backends fail explicitly.
+    async fn admit_input_once(&self, _input: &SessionInput) -> Result<crate::InputAdmission> {
+        anyhow::bail!("atomic idempotent input admission is unsupported by this store")
+    }
+    async fn pending_inputs(
+        &self,
+        session_id: &str,
+        delivery: crate::types::Delivery,
+    ) -> Result<Vec<SessionInput>>;
+    async fn promote_inputs(
+        &self,
+        session_id: &str,
+        up_to_admitted_seq: i64,
+        delivery: crate::types::Delivery,
+    ) -> Result<Vec<i64>>;
+    async fn promote_next_queued(&self, session_id: &str) -> Result<Option<i64>>;
+    /// Atomically return the oldest pending queued input (with its prompt) and
+    /// mark it promoted. Used by the runner drain at idle to consume exactly one
+    /// queued follow-up per cycle.
+    async fn claim_next_queue(&self, session_id: &str) -> Result<Option<(i64, SessionInput)>>;
+    /// Reset promoted inputs back to unpromoted (pending) state. Used by the
+    /// runner's error-recovery path when a steer/queue batch fails
+    /// mid-processing: items that were promoted but not yet consumed are
+    /// restored so the next run picks them up. Idempotent — only touches rows
+    /// that are currently promoted. Default no-op so test fakes need not
+    /// override unless they exercise the promote/unpromote path.
+    async fn unpromote_inputs(&self, _session_id: &str, _seqs: &[i64]) -> Result<()> {
+        Ok(())
+    }
+    /// Mark promoted inputs as durably consumed (recorded into the transcript
+    /// or applied as a control command). Idempotent. Best-effort callers may
+    /// ignore errors: an unmarked row is recoverable by
+    /// [`recover_orphan_inputs`]. Default no-op so test fakes keep compiling.
+    async fn mark_inputs_recorded(&self, _session_id: &str, _seqs: &[i64]) -> Result<()> {
+        Ok(())
+    }
+    /// Recover orphaned inputs (promoted but never recorded, e.g. after a
+    /// crash or hard-cancel between promote and consume) back to pending so
+    /// the next drain re-claims them. Idempotent; returns the number of
+    /// recovered rows. Default no-op returning 0 so test fakes keep compiling.
+    async fn recover_orphan_inputs(&self, _session_id: &str) -> Result<u64> {
+        Ok(0)
+    }
+    /// Delete a pending input by its row id. Used by the TUI queue panel
+    /// to let users remove a queued/steered prompt before it's consumed.
+    async fn delete_input(&self, input_id: i64) -> Result<()>;
+    /// Swap the drain order of two pending inputs by exchanging their
+    /// `admitted_seq`. Both rows must belong to `session_id` and be still
+    /// unpromoted. Used by the TUI queue panel to reorder follow-ups.
+    async fn swap_input_order(&self, session_id: &str, seq_a: i64, seq_b: i64) -> Result<()>;
+
+    /// Persist a batch of events atomically in a single transaction, returning
+    /// the assigned `seq` for each event in input order. This is the preferred
+    /// write path for high-frequency surfaces: one transaction (and thus one
+    /// fsync at commit) replaces N single inserts. All events in a batch must
+    /// share the same `session_id`.
+    async fn append_events(&self, events: &[SessionEventRecord]) -> Result<Vec<i64>>;
+
+    /// Persist a single event. Default impl delegates to [`append_events`].
+    async fn append_event(&self, event: &SessionEventRecord) -> Result<i64> {
+        let mut seqs = self.append_events(std::slice::from_ref(event)).await?;
+        Ok(seqs.pop().unwrap_or(0))
+    }
+    async fn events_after(
+        &self,
+        session_id: &str,
+        after_seq: i64,
+    ) -> Result<Vec<SessionEventRecord>>;
+    /// Read events after `after_seq` with both a row and payload byte bound.
+    async fn events_page(
+        &self,
+        _session_id: &str,
+        _after_seq: i64,
+        _limit: u32,
+        _payload_budget: usize,
+    ) -> Result<SessionEventPage> {
+        anyhow::bail!("bounded event pagination is unsupported by this store")
+    }
+    async fn event_payload_chunk(
+        &self,
+        _session_id: &str,
+        _seq: i64,
+        _offset: u64,
+        _max_bytes: usize,
+    ) -> Result<Option<crate::PayloadChunkRecord>> {
+        anyhow::bail!("bounded event payload reads are unsupported by this store")
+    }
+    /// The highest persisted event seq for a session (0 if none). Used by a
+    /// remote client to snapshot before posting a prompt so it only receives
+    /// events generated by its own turn (mirrors `last_message_seq`).
+    async fn last_event_seq(&self, session_id: &str) -> Result<i64>;
+
+    /// Current DAG lifecycle state and its exact run-session cursor.
+    async fn dag_step_snapshot(&self, _id: &str) -> Result<dag_snapshot::DagStepSnapshot> {
+        anyhow::bail!("DAG state snapshots are unsupported by this store")
+    }
+
+    /// Record a new subagent task (parent-child agent relationship) when a
+    /// subagent is spawned. The task starts in `Running` status.
+    async fn create_subagent_task(&self, record: &SubagentTaskRecord) -> Result<()>;
+    /// Mark a subagent task as completed with its final result text and
+    /// success/failure flag.
+    async fn complete_subagent_task(&self, task_id: &str, result: &str, ok: bool) -> Result<()>;
+    /// List all subagent tasks for a given parent session.
+    async fn list_subagent_tasks(&self, parent_session_id: &str)
+        -> Result<Vec<SubagentTaskRecord>>;
+    /// Look up a single subagent task by its `task_id`. Returns `None` if no
+    /// task matches. Used by `--session <task_id>` to resolve the parent
+    /// session for resume.
+    async fn get_subagent_task(&self, task_id: &str) -> Result<Option<SubagentTaskRecord>>;
+    /// Mark a subagent task as cancelled (interrupted mid-run). Unlike
+    /// `complete_subagent_task`, a cancelled task records no result -- its
+    /// parent `task` tool_use stays open so the child can be replayed on the
+    /// next user turn.
+    async fn cancel_subagent_task(&self, task_id: &str) -> Result<()>;
+
+    async fn create_todo_workflow(
+        &self,
+        _workflow: &TodoWorkflowRecord,
+        _items: &[TodoItemRecord],
+        _event: &TodoEventRecord,
+    ) -> Result<i64> {
+        anyhow::bail!(
+            "todo workflows are not supported by {}",
+            self.backend_name()
+        )
+    }
+    async fn get_todo_workflow(&self, _id: &str) -> Result<Option<TodoWorkflowRecord>> {
+        anyhow::bail!(
+            "todo workflows are not supported by {}",
+            self.backend_name()
+        )
+    }
+    async fn get_todo_workflow_detail(&self, _id: &str) -> Result<Option<TodoWorkflowDetail>> {
+        anyhow::bail!(
+            "bounded todo workflow inspection is not supported by {}",
+            self.backend_name()
+        )
+    }
+    async fn list_todo_workflows(&self, _limit: u32) -> Result<Vec<TodoWorkflowSummary>> {
+        anyhow::bail!(
+            "todo workflows are not supported by {}",
+            self.backend_name()
+        )
+    }
+    async fn list_todo_items(&self, _workflow_id: &str) -> Result<Vec<TodoItemRecord>> {
+        anyhow::bail!(
+            "todo workflows are not supported by {}",
+            self.backend_name()
+        )
+    }
+    async fn list_todo_items_page(
+        &self,
+        _workflow_id: &str,
+        _after_ordinal: Option<i64>,
+        _limit: u32,
+    ) -> Result<crate::TodoItemPage> {
+        anyhow::bail!("bounded todo item pagination is unsupported by this store")
+    }
+    async fn todo_workflow_field_chunk(
+        &self,
+        _workflow_id: &str,
+        _field: &str,
+        _offset: u64,
+        _max_bytes: usize,
+    ) -> Result<Option<crate::PayloadChunkRecord>> {
+        anyhow::bail!("bounded todo workflow field reads are unsupported by this store")
+    }
+    async fn todo_item_field_chunk(
+        &self,
+        _workflow_id: &str,
+        _todo_id: &str,
+        _field: &str,
+        _offset: u64,
+        _max_bytes: usize,
+    ) -> Result<Option<crate::PayloadChunkRecord>> {
+        anyhow::bail!("bounded todo item field reads are unsupported by this store")
+    }
+    /// Atomically replace the workflow projection and its item projections,
+    /// then append the transition event.
+    async fn commit_todo_transition(
+        &self,
+        _workflow: &TodoWorkflowRecord,
+        _items: &[TodoItemRecord],
+        _event: &TodoEventRecord,
+    ) -> Result<i64> {
+        anyhow::bail!(
+            "todo workflows are not supported by {}",
+            self.backend_name()
+        )
+    }
+    async fn todo_events_after(
+        &self,
+        _workflow_id: &str,
+        _after_seq: i64,
+    ) -> Result<Vec<TodoEventRecord>> {
+        anyhow::bail!(
+            "todo workflows are not supported by {}",
+            self.backend_name()
+        )
+    }
+
+        }
+    };
+}

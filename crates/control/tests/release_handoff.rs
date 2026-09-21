@@ -93,7 +93,7 @@ impl NodeService for Node {
                 RpcReply::error(404, "unconfirmed intent")
             }
             NodeOperation::Brain { action, .. } if action == "capability_probe" => {
-                RpcReply::ok(json!({"compatible":true,"features":["brain_scheduler_v3"]}))
+                RpcReply::ok(json!({"compatible":true,"features":["brain_scheduler_v4"]}))
             }
             NodeOperation::Events { after, .. } => {
                 if after == 0 {
@@ -186,13 +186,12 @@ fn client() -> reqwest::Client {
 }
 
 #[tokio::test]
-async fn brain_v3_retry_keeps_original_intent_after_server_handoff() {
+async fn layered_retry_keeps_original_intent_after_server_handoff() {
     let root = tempfile::tempdir().unwrap();
     let _scope = opencoder_core::config::scoped_config_home(root.path().join("home"));
     let node = Node::new();
     let old = start(root.path(), node.clone()).await;
-    let request =
-        json!({"id":"brain-release","schema_version":3,"objective":"preserve frozen capabilities"});
+    let request = json!({"id":"brain-release","schema_version":4,"plan":{"schema_version":4,"title":"handoff","objective":"preserve frozen capabilities","nodes":[{"node_id":"work","title":"perform the task","capability_id":"builtin-agent-act"}],"edges":[]}});
     let post = |url: String, body: serde_json::Value| {
         client()
             .post(format!("{url}/api/brain/runs"))
@@ -213,7 +212,7 @@ async fn brain_v3_retry_keeps_original_intent_after_server_handoff() {
     );
     assert_eq!(node.starts.load(Ordering::SeqCst), 1);
     let mut different = request;
-    different["objective"] = json!("changed");
+    different["plan"]["objective"] = json!("changed");
     let changed = post(new.url.clone(), different).await.unwrap();
     assert_eq!(changed.status(), 409);
 }

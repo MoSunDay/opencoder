@@ -20,43 +20,44 @@ pub struct Page {
 pub type Command = ExecutionCommand;
 
 pub async fn create(State(state): State<Arc<AppState>>, Json(value): Json<Value>) -> Response {
+    response(submit(state, value).await)
+}
+
+pub(super) async fn submit(state: Arc<AppState>, value: Value) -> RpcReply {
     let id = value
         .get("id")
         .and_then(Value::as_str)
         .map(str::to_owned)
         .unwrap_or_else(|| format!("brain-{}", ulid::Ulid::new()));
     if !valid_id(&id) || !id.starts_with("brain-") {
-        return error_400("invalid brain run id".into());
+        return RpcReply::error(400, "invalid brain run id");
     }
     // Keep the request idempotent across retries and concurrent control-plane
     // callers. The fleet receipt owns the original intent; the layered
     // projection is only created by that owner.
     let _lock = match state.fleet.request_lock("brain-run", &id).await {
         Ok(lock) => lock,
-        Err(error) => return error_500(error.to_string()),
+        Err(error) => return RpcReply::error(500, error.to_string()),
     };
     match state.fleet.assignment(&id).await {
         Ok(Some(assignment)) => {
             if assignment.request.kind != ExecutionKind::Brain
                 || assignment.request.input["layered_intent"] != value
             {
-                return response(RpcReply::error(
-                    409,
-                    "run id was already claimed with a different intent",
-                ));
+                return RpcReply::error(409, "run id was already claimed with a different intent");
             }
             // A frozen assignment can still be unconfirmed. Reuse its exact
             // request so the execution receipt, not the index, decides whether
             // to replay acceptance or retry admission on the original node.
             let reply = crate::api::executions::submit(&state, assignment.request).await;
-            return response(run_receipt(&id, reply));
+            return run_receipt(&id, reply);
         }
         Ok(None) => {}
-        Err(error) => return error_500(error.to_string()),
+        Err(error) => return RpcReply::error(500, error.to_string()),
     }
     let (request, capabilities) = match super::request::resolve(&state, &value).await {
         Ok(request) => request,
-        Err(error) => return error_400(error.to_string()),
+        Err(error) => return RpcReply::error(400, error.to_string()),
     };
     let fingerprint = opencoder_core::token_hash(&value.to_string());
     match state
@@ -66,12 +67,9 @@ pub async fn create(State(state): State<Arc<AppState>>, Json(value): Json<Value>
     {
         Ok(true) => {}
         Ok(false) => {
-            return response(RpcReply::error(
-                409,
-                "run id was already claimed with a different intent",
-            ));
+            return RpcReply::error(409, "run id was already claimed with a different intent");
         }
-        Err(error) => return error_500(error.to_string()),
+        Err(error) => return RpcReply::error(500, error.to_string()),
     }
     let scope = capabilities
         .iter()
@@ -92,7 +90,7 @@ pub async fn create(State(state): State<Arc<AppState>>, Json(value): Json<Value>
         },
     )
     .await;
-    response(run_receipt(&id, reply))
+    run_receipt(&id, reply)
 }
 
 fn run_receipt(id: &str, reply: RpcReply) -> RpcReply {

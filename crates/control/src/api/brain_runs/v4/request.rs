@@ -24,6 +24,7 @@ pub async fn resolve(
     state: &Arc<AppState>,
     value: &Value,
 ) -> Result<(LayeredRequest, Vec<BrainCapabilityDescriptor>)> {
+    let child_id = value["id"].as_str().map(str::to_owned);
     let mut value = value.clone();
     {
         let object = value
@@ -43,7 +44,7 @@ pub async fn resolve(
     let inline = value.get("plan").is_some_and(|plan| {
         plan["schema_version"].as_u64() == Some(u64::from(LAYERED_SCHEMA_VERSION))
     });
-    let request = match frozen {
+    let mut request: LayeredRequest = match frozen {
         Some(frozen) => serde_json::from_value(frozen)?,
         None if inline => serde_json::from_value(value)?,
         None if value.get("plan").is_some() => {
@@ -59,7 +60,7 @@ pub async fn resolve(
                 .context("plan version not found")?;
             ensure!(
                 version.plan["schema_version"] == LAYERED_SCHEMA_VERSION,
-                "historical plans are read-only; create a layered plan"
+                "unsupported plan version; expected schema 4"
             );
             let plan: LayeredPlan = serde_json::from_value(version.plan)?;
             opencoder_brain::layered::validate_plan(&plan)?;
@@ -80,7 +81,52 @@ pub async fn resolve(
         }
         None => serde_json::from_value(value)?,
     };
+    let mut inputs = request.plan.inputs.clone();
+    inputs.extend(request.inputs);
+    request.inputs = inputs;
     opencoder_brain::layered::validate_request(&request)?;
+    if let Some(parent) = &request.parent {
+        let snapshot = super::read::snapshot(state, &parent.run_id)
+            .await
+            .map_err(|reply| anyhow::anyhow!("parent run unavailable: {}", reply.body))?;
+        ensure!(!snapshot.run.phase.terminal(), "parent run is terminal");
+        ensure!(
+            request.depth == snapshot.run.depth + 1,
+            "parent depth mismatch"
+        );
+        let operation = snapshot
+            .operations
+            .iter()
+            .find(|op| op.operation_id == parent.operation_id)
+            .context("parent operation missing")?;
+        ensure!(
+            operation.execution_kind == opencoder_core::fleet::ExecutionKind::Brain
+                && child_id.as_deref() == Some(operation.execution_id.as_str())
+                && operation.node_id == parent.node_id
+                && operation.layer == parent.layer
+                && operation.status == LayeredOperationStatus::Creating
+                && !operation.cancel_requested,
+            "parent operation identity mismatch"
+        );
+        let origin = request
+            .origin
+            .as_ref()
+            .context("nested plan must name its saved version")?;
+        ensure!(
+            operation.capability_id == format!("plan-{}@{}", origin.plan_id, origin.version),
+            "nested capability version mismatch"
+        );
+        let saved = state
+            .fleet
+            .brain_plan_document(&origin.plan_id, origin.version)
+            .await?
+            .context("nested saved version missing")?;
+        ensure!(
+            serde_json::to_value(&request.plan)?
+                == serde_json::to_value(serde_json::from_value::<LayeredPlan>(saved.plan)?)?,
+            "nested plan does not match its saved version"
+        );
+    }
     let capabilities = super::catalog::available(state, &request).await?;
     Ok((request, capabilities))
 }

@@ -201,7 +201,7 @@ async fn automatic_dynamic_placement_skips_old_nodes() {
 }
 
 #[tokio::test]
-async fn old_nodes_are_excluded_from_brain_v3_children_before_assignment() {
+async fn old_nodes_are_excluded_from_layered_children_before_assignment() {
     use opencoder_core::fleet::RpcReply;
     let h = Harness::new().await;
     h.node
@@ -212,12 +212,12 @@ async fn old_nodes_are_excluded_from_brain_v3_children_before_assignment() {
             "/api/executions",
             Some(json!({
                 "id":"agent-brain-incompatible", "kind":"agent", "target":"act",
-                "input":{"brain_scheduler":{"run_id":"root"},"prompt":"bounded task"}
+                "input":{"schema_version":4,"brain_layered":{"run_id":"root"},"prompt":"bounded task"}
             })),
         )
         .await;
     assert_eq!(code, 503, "{body}");
-    assert!(body.to_string().contains("brain_scheduler_v3"));
+    assert!(body.to_string().contains("brain_scheduler_v4"));
     assert!(h
         .state
         .fleet

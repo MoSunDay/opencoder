@@ -3,12 +3,12 @@
 // fetched lazily when a layer is expanded and dropped whenever the view moves
 // on (generation / last_event_seq), so a stale decision can never be shown.
 import { Alert, Button, Collapse, Empty, Space, Spin, Tag, Typography } from 'antd';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiGet } from '../../../api.js';
 import { KIND_LABELS } from '../../../fleet/model.js';
 import { LAYERED_COLORS, LAYERED_STATUS, activeLayer, barrier, decisionLabel, layerLabel, layerRows, roundDetail } from './model.js';
 
-function NodeAttempt({ node }) {
+function NodeAttempt({ node, onExecution }) {
   return <article className="brain-operation-card brain-layer-attempt" data-node={node.nodeId}>
     <Space wrap>
       <Tag color={LAYERED_COLORS[node.status]}>{LAYERED_STATUS[node.status] || node.status}</Tag>
@@ -19,12 +19,12 @@ function NodeAttempt({ node }) {
     </Space>
     <Typography.Text type="secondary">能力 ID：{node.capabilityId || '未记录'}</Typography.Text>
     <Space wrap><Typography.Text type="secondary">执行 ID：</Typography.Text><Typography.Text code copyable>{node.executionId || '尚未创建'}</Typography.Text></Space>
-    {!!node.summary && <Typography.Paragraph>{node.summary}</Typography.Paragraph>}
-    {!!Object.keys(node.inputs).length && <details><summary>绑定输入</summary><pre className="brain-json">{JSON.stringify(node.inputs, null, 2)}</pre></details>}
+    <Button disabled={!node.executionId || node.status === 'creating'} onClick={() => onExecution?.(node.executionId)}>查看运行明细</Button>
+
   </article>;
 }
 
-function LayerDetail({ detail }) {
+function LayerDetail({ detail, onExecution }) {
   return <>
     <div className="brain-round-reason">
       <Typography.Text strong>本层决策：{decisionLabel(detail.phase)}</Typography.Text>
@@ -32,25 +32,28 @@ function LayerDetail({ detail }) {
       {!!detail.evidence.length && <Space wrap><Typography.Text type="secondary">依据执行：</Typography.Text>{detail.evidence.map((id) => <Typography.Text key={id} code>{id}</Typography.Text>)}</Space>}
     </div>
     {detail.nodes.length
-      ? <div className="brain-operation-list">{detail.nodes.map((node) => <NodeAttempt key={`${node.nodeId}:${node.attempt}`} node={node} />)}</div>
+      ? <div className="brain-operation-list">{detail.nodes.map((node) => <NodeAttempt key={`${node.nodeId}:${node.attempt}`} node={node} onExecution={onExecution} />)}</div>
       : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="该层没有节点记录" />}
   </>;
 }
 
-export function LayerRounds({ id, view }) {
+export function LayerRounds({ id, view, onExecution }) {
   const rows = layerRows(view); const progress = barrier(view); const active = activeLayer(view);
   const [open, setOpen] = useState(() => (active ? [String(active)] : []));
   const [details, setDetails] = useState({});
   const generation = `${view?.run?.generation ?? 0}:${view?.run?.last_event_seq ?? 0}`;
+  const stamp = `${id}:${generation}`; const current = useRef(stamp); current.current = stamp;
   const load = useCallback(async (layer) => {
     setDetails((old) => ({ ...old, [layer]: { loading: true, error: '', detail: old[layer]?.detail || null } }));
     try {
       const raw = await apiGet(`/api/brain/runs/${encodeURIComponent(id)}/layered/rounds/${layer}`);
+      if (current.current !== stamp) return;
       setDetails((old) => ({ ...old, [layer]: { loading: false, error: '', detail: roundDetail(raw) } }));
     } catch (error) {
+      if (current.current !== stamp) return;
       setDetails((old) => ({ ...old, [layer]: { loading: false, error: error?.status === 404 ? '该层还没有决策明细' : error.message, detail: null } }));
     }
-  }, [id]);
+  }, [id, stamp]);
   useEffect(() => { setDetails({}); }, [generation]);
   useEffect(() => { if (active) setOpen((old) => (old.includes(String(active)) ? old : [...old, String(active)])); }, [active]);
   useEffect(() => {
@@ -70,12 +73,12 @@ export function LayerRounds({ id, view }) {
     </Space>,
     children: row.layer > progress.dispatched
       ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={`${layerLabel(row.layer)} 尚未派发`} />
-      : <LayerRoundBody state={details[row.layer]} onReload={() => load(row.layer)} />,
+      : <LayerRoundBody onExecution={onExecution} state={details[row.layer]} onReload={() => load(row.layer)} />,
   }))} />;
 }
 
-function LayerRoundBody({ state, onReload }) {
+function LayerRoundBody({ state, onReload, onExecution }) {
   if (!state || state.loading) return <Spin />;
   if (state.error) return <Alert type="warning" showIcon title={state.error} action={<Button size="small" onClick={onReload}>重试</Button>} />;
-  return <LayerDetail detail={state.detail} />;
+  return <LayerDetail detail={state.detail} onExecution={onExecution} />;
 }

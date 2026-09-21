@@ -12,7 +12,7 @@ const LayerNode = memo(function LayerNode({ data, selected }) {
   if (data.active) classes.push('brain-layer-node--active');
   if (selected) classes.push('brain-layer-node--selected');
   return <div className={classes.join(' ')}>
-    <Handle type="target" position={Position.Left} isConnectable={false} />
+    <Handle type="target" position={Position.Top} isConnectable={false} />
     <div className="brain-layer-node-head">
       <span className="brain-layer-node-layer">层 {data.layer}</span>
       <Tag color={LAYERED_COLORS[data.status]}>{LAYERED_STATUS[data.status] || data.status}</Tag>
@@ -28,7 +28,7 @@ const LayerNode = memo(function LayerNode({ data, selected }) {
       {!data.started && <Tag>未派发</Tag>}
     </Space>
     {!!data.upstreamTitles?.length && <div className="brain-layer-node-upstream">上游：{data.upstreamTitles.join('、')}</div>}
-    <Handle type="source" position={Position.Right} isConnectable={false} />
+    <Handle type="source" position={Position.Bottom} isConnectable={false} />
   </div>;
 });
 

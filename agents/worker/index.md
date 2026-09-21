@@ -27,7 +27,7 @@ Commit: 40a688a77bfdbedc3f30f9f6b1e3a1ba67244d68
 - `operations/dag_preflight.rs` 使用本次冻结配置校验静态步骤和动态模板。runc 模式要求节点 rootfs 和 runc 可用；Codex Agent 额外校验 guest CLI 与节点登录目录，不检查 host CLI，也不要求原生 provider 凭证。实际执行和私有挂载由 dag-runtime 负责。
 - DAG 的 how 追加由 dag-runtime 写入本地副本；普通 Agent 会话资源追加由 `agent_how.rs` 管理。
 - Brain v3：worker 根节点持调度 projection/generation；control 只创建子执行并处理中继回执。
-- Brain v4（分层能力画布）：`brain/v4/` 承接 `schema_version == 4`，与 v3 共用 `brain/` 外层接缝，按 `schema_version` 分支（`==3`→v3，`==4`→v4，其余显式报错）。根节点持 `LayeredRun`（phase + 已完成层计数 `layer`）与 operations 投影；层划分从不落库（操作行只记自身 `layer`），一律用 `opencoder_brain::layered::layers` 重算。节点动作：`layered_wake/layered_dispatch/layered_cancel/layered_terminal`，ack/effect 为 `layered_wake_ack/layered_authorize/layered_receipt/layered_dispatch_ack/layered_cancel_ack`；root↔child RPC 为 `layered_context/layered_block/layered_summary`（+`layered_output`）。重试身份 `operation_id = "{run}#l{layer}#{node}#a{attempt}"`，`execution_id` 同源；`layered_authorize` 只需 `intent.generation <= snapshot.run.generation` 且只栅栏本层。收口（closing）由空 `nodes` 上下文触发（`run.layer == total_layers`）。
+- Brain：仅 `brain/v4/`，根节点持有运行、操作与事件投影；`layer` 是已派发层。每层并行、屏障后唤醒、重试耗尽失败并取消兄弟；空节点上下文作收口。既有 outbox 和 generation 保障恢复、重复回执幂等。
 - 上限（`opencoder_brain::layered` 纯域校验）：`LAYERED_MAX_NODES=256`、`LAYERED_MAX_LAYER_WIDTH`=32/层、`LAYERED_MAX_DEPTH=3`、`retry.max_attempts` 1..=5（默认 2）。节点侧只做投影与栅栏校验（伪造/越权派发帧 409，迟到回执丢弃），层决策与准入裁决在 control。
 
 ## 相关

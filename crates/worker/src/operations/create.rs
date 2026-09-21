@@ -18,15 +18,16 @@ pub(super) async fn create(worker: &Worker, mut assignment: Assignment) -> Resul
     }
     let input = &assignment.request.input;
     if (assignment.request.kind == ExecutionKind::Brain
-        && !matches!(
-            input["schema_version"].as_u64(),
-            Some(2) | Some(3) | Some(4)
-        ))
-        || (input.get("_brain").is_some() && input["_brain"]["schema_version"] != 2)
+        && !matches!(input["schema_version"].as_u64(), Some(4)))
+        || input.get("_brain").is_some()
+        || input.get("brain_scheduler").is_some()
         || input.get("brain_receipt").is_some()
         || input.get("playbook_receipt").is_some()
     {
-        return Ok(RpcReply::error(409, opencoder_brain::graph::MIGRATION));
+        return Ok(RpcReply::error(
+            409,
+            opencoder_core::brain::layered::LAYERED_MIGRATION,
+        ));
     }
     if assignment.index.node_id != worker.inner.registration.id
         || assignment.index.id != assignment.request.id
@@ -309,15 +310,13 @@ fn prepare_with_config(
     let input = &assignment.request.input;
     anyhow::ensure!(
         !(assignment.request.kind == ExecutionKind::Brain
-            && !matches!(
-                input["schema_version"].as_u64(),
-                Some(2) | Some(3) | Some(4)
-            ))
-            && !(input.get("_brain").is_some() && input["_brain"]["schema_version"] != 2)
+            && !matches!(input["schema_version"].as_u64(), Some(4)))
+            && !input.get("_brain").is_some()
+            && input.get("brain_scheduler").is_none()
             && input.get("brain_receipt").is_none()
             && input.get("playbook_receipt").is_none(),
         "{}",
-        opencoder_brain::graph::MIGRATION
+        opencoder_core::brain::layered::LAYERED_MIGRATION
     );
     if let Some(error) = worker.inner.persistence_error.lock().unwrap().as_ref() {
         bail!("node persistence unavailable: {error}");
@@ -376,34 +375,14 @@ fn prepare_with_config(
             _ => true,
         };
         opencoder_core::agent::scope::with_root_sync(config.agent.agents_dir.clone(), || {
-            if let Some(pins) =
-                assignment.request.input["_brain"]["action"]["agent_manifests"].as_object()
-            {
-                for (name, expected) in pins {
-                    let actual = opencoder_core::brain::resources::agent_manifest(name)
-                        .map_err(anyhow::Error::msg)?;
-                    anyhow::ensure!(expected.as_str()==Some(actual.as_str()), "pinned agent resource mismatch for {name}; select a node with the required version");
-                }
-            }
             let mut agents = vec![];
             match assignment.request.kind {
                 ExecutionKind::Brain => {
-                    if input["schema_version"] == 2 {
-                        opencoder_brain::execution::initialize(
-                            &assignment.index.id,
-                            serde_json::from_value(assignment.request.input.clone())?,
-                            0,
-                        )?;
-                    } else if input["schema_version"] == 3 {
-                        let request: opencoder_core::brain::BrainSchedulerRequest =
-                            serde_json::from_value(input["scheduler_request"].clone())?;
-                        opencoder_brain::scheduler::validate_request(&request)?;
-                    } else if input["schema_version"] == 4 {
-                        crate::brain::v4::state::parse_request(input)?;
-                    }
-                    if input["schema_version"] == 2 && worker.inner.client.is_none() {
-                        crate::brain::activate::preflight()?;
-                    }
+                    anyhow::ensure!(
+                        input["schema_version"] == 4,
+                        "unsupported brain schema; expected 4"
+                    );
+                    crate::brain::v4::state::parse_request(input)?;
                 }
                 ExecutionKind::Agent | ExecutionKind::Maintenance | ExecutionKind::Operator => {
                     agents.push(
@@ -475,7 +454,7 @@ fn prepare_with_config(
                                 | opencoder_store::ProjectExecutorKind::Playbook
                         ),
                         "{}",
-                        opencoder_brain::graph::MIGRATION
+                        opencoder_core::brain::layered::LAYERED_MIGRATION
                     );
                     let assigned = project_preflight_agents(&todo);
                     // Validate the complete definition even while planning;

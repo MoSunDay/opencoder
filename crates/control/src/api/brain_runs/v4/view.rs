@@ -34,7 +34,7 @@ async fn project(state: &Arc<AppState>, id: &str) -> Result<Value, RpcReply> {
     let (assignment, request, snapshot) = open(state, id).await?;
     let layers = plan_layers(&request.plan)?;
     let capabilities = scope(state, &assignment, &request).await?;
-    let events = read::events(state, id, snapshot.run.last_event_seq).await;
+    let events = read::events(state, id, snapshot.run.last_event_seq).await?;
     let mut run = serde_json::to_value(&snapshot.run).map_err(read::internal)?;
     run["total_layers"] = json!(layers.len());
     Ok(
@@ -50,13 +50,13 @@ async fn detail(state: &Arc<AppState>, id: &str, layer: u32) -> Result<Value, Rp
         .checked_sub(1)
         .and_then(|index| layers.get(index as usize))
         .ok_or_else(|| RpcReply::error(404, "layered layer not found"))?;
-    let events = read::events(state, id, snapshot.run.last_event_seq).await;
+    let events = read::events(state, id, snapshot.run.last_event_seq).await?;
     let decision = events
         .iter()
         .rfind(|event| event.layer == layer && event.decision_summary.is_some());
     let mut nodes = vec![];
     for node_id in node_ids {
-        nodes.push(node_row(state, &request, &snapshot, node_id).await?);
+        nodes.push(node_row(&request, &snapshot, node_id));
     }
     Ok(
         json!({"schema_version":LAYERED_SCHEMA_VERSION,"layer":layer,
@@ -76,38 +76,14 @@ fn decision_phase(event: &LayeredEvent) -> LayeredPhase {
     }
 }
 
-async fn node_row(
-    state: &Arc<AppState>,
-    request: &LayeredRequest,
-    snapshot: &LayeredSnapshot,
-    node_id: &str,
-) -> Result<Value, RpcReply> {
+fn node_row(request: &LayeredRequest, snapshot: &LayeredSnapshot, node_id: &str) -> Value {
     let plan = request.plan.node(node_id);
     let op = snapshot
         .operations
         .iter()
         .filter(|op| op.node_id == node_id)
         .max_by_key(|op| op.attempt);
-    let child = match op {
-        Some(op) => state
-            .fleet
-            .assignment(&op.execution_id)
-            .await
-            .map_err(read::internal)?,
-        None => None,
-    };
-    let summary = match (child.as_ref(), op) {
-        (Some(child), Some(op)) if op.status.successful() => {
-            read::summary(state, &child.index).await
-        }
-        _ => None,
-    };
-    let bindings = child
-        .as_ref()
-        .map(|child| child.request.input["bindings"].clone())
-        .filter(Value::is_object)
-        .unwrap_or_else(|| json!({}));
-    Ok(json!({
+    json!({
         "node_id":node_id,
         "title":plan.map(|node| node.title.clone()).unwrap_or_default(),
         "capability_id":op.map(|op| op.capability_id.clone()).unwrap_or_else(|| plan.map(|node| node.capability_id.clone()).unwrap_or_default()),
@@ -117,9 +93,7 @@ async fn node_row(
         "execution_id":op.map(|op| op.execution_id.clone()),
         "execution_kind":op.map(|op| op.execution_kind),
         "cancel_requested":op.map(|op| op.cancel_requested).unwrap_or(false),
-        "inputs":bindings,
-        "summary":summary,
-    }))
+    })
 }
 
 /// The frozen capability scope of the run, or the catalog view of its plan.

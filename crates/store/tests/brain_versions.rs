@@ -3,7 +3,7 @@ use opencoder_store::fleet::FleetStore;
 use serde_json::json;
 
 fn version() -> PlanVersion {
-    serde_json::from_value(json!({"id":"plan-a","version":1,"plan":{"schema_version":1,"title":"A","objective":"test","steps":[],"deliverables":{}},"changelog":"initial","created_at":1})).unwrap()
+    serde_json::from_value(json!({"id":"plan-a","version":1,"plan":{"schema_version":4,"title":"A","objective":"test","nodes":[],"edges":[]},"changelog":"initial","created_at":1})).unwrap()
 }
 #[tokio::test]
 async fn versions_are_append_only_conflicts_do_not_move_stable_pointer() {
@@ -43,91 +43,4 @@ async fn versions_are_append_only_conflicts_do_not_move_stable_pointer() {
         1
     );
     assert!(store.mark_brain_stable("plan-a", 3).await.is_err());
-}
-#[tokio::test]
-async fn cross_run_claims_allow_shared_reads_and_require_real_release_before_write() {
-    let store = FleetStore::open_memory().await.unwrap();
-    let read = vec![ResourceUse {
-        key: "repo:main".into(),
-        mode: AccessMode::Read,
-    }];
-    let write = vec![ResourceUse {
-        key: "repo:main".into(),
-        mode: AccessMode::Write,
-    }];
-    assert!(store
-        .claim_brain_resources("agent-a", "brain-a", &read)
-        .await
-        .unwrap());
-    assert!(store
-        .claim_brain_resources("agent-b", "brain-b", &read)
-        .await
-        .unwrap());
-    assert!(!store
-        .claim_brain_resources("agent-c", "brain-c", &write)
-        .await
-        .unwrap());
-    let waiters = store.release_brain_resources("agent-a").await.unwrap();
-    assert_eq!(waiters, vec!["brain-c"]);
-    assert!(!store
-        .claim_brain_resources("agent-c", "brain-c", &write)
-        .await
-        .unwrap());
-    store.release_brain_resources("agent-b").await.unwrap();
-    assert!(store
-        .claim_brain_resources("agent-c", "brain-c", &write)
-        .await
-        .unwrap());
-    assert!(store
-        .claim_brain_resources("agent-c", "brain-c", &write)
-        .await
-        .unwrap());
-    assert!(store.brain_resource_claims("brain-a").await.unwrap()[0].released);
-    assert!(store
-        .claim_brain_resources("agent-c", "brain-c", &read)
-        .await
-        .is_err());
-}
-
-#[tokio::test]
-async fn scheduler_versions_share_storage_without_rewriting_historical_graphs() {
-    let store = FleetStore::open_memory().await.unwrap();
-    store.save_brain_plan(&version()).await.unwrap();
-    let mut scheduler: PlanVersion<serde_json::Value> = serde_json::from_value(json!({
-        "id":"scheduler", "version":1, "plan":{"schema_version":3,"title":"Simple","objective":"test","inputs":{},"capability_ids":["a"],"max_rounds":32},
-        "changelog":"initial", "created_at":1
-    })).unwrap();
-    store.save_brain_plan_document(&scheduler).await.unwrap();
-    store.save_brain_plan_document(&scheduler).await.unwrap();
-    scheduler.plan["title"] = json!("Modified");
-    assert!(store.save_brain_plan_document(&scheduler).await.is_err());
-    scheduler.version = 2;
-    store.save_brain_plan_document(&scheduler).await.unwrap();
-    assert_eq!(
-        store
-            .brain_plan_document("scheduler", 1)
-            .await
-            .unwrap()
-            .unwrap()
-            .plan["title"],
-        "Simple"
-    );
-    assert_eq!(
-        store
-            .brain_plan_documents("scheduler", Some(2))
-            .await
-            .unwrap()
-            .len(),
-        1
-    );
-    assert_eq!(
-        store
-            .brain_plan_version("plan-a", 1)
-            .await
-            .unwrap()
-            .unwrap()
-            .plan
-            .schema_version,
-        1
-    );
 }

@@ -67,7 +67,6 @@ pub struct LayeredDownstream {
 pub struct LayeredNodeContext {
     pub node_id: String,
     pub title: String,
-    pub instructions: String,
     pub retry_max_attempts: u32,
     pub capability: crate::brain::BrainCapabilityDescriptor,
     pub upstream: Vec<LayeredUpstream>,

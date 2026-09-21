@@ -5,18 +5,12 @@ use opencoder_core::fleet::*;
 use serde_json::{json, Value};
 
 pub(super) const DYNAMIC_DAG: &str = "dag_dynamic_v1";
-const BRAIN_V3: &str = "brain_scheduler_v3";
 const BRAIN_V4: &str = "brain_scheduler_v4";
 
 pub(super) fn required(request: &CreateExecution, definition: Option<&Value>) -> Vec<&'static str> {
     let mut features = Vec::new();
     if requires_dynamic(request.kind, definition) {
         features.push(DYNAMIC_DAG);
-    }
-    if (request.kind == ExecutionKind::Brain && request.input["schema_version"] == 3)
-        || request.input.get("brain_scheduler").is_some()
-    {
-        features.push(BRAIN_V3);
     }
     if (request.kind == ExecutionKind::Brain
         && request.input["schema_version"]
@@ -120,7 +114,7 @@ mod tests {
 
     #[test]
     fn old_positive_probes_do_not_advertise_new_protocol_operations() {
-        for feature in [DYNAMIC_DAG, BRAIN_V3, BRAIN_V4] {
+        for feature in [DYNAMIC_DAG, BRAIN_V4] {
             assert!(!supports(
                 &RpcReply::ok(json!({"compatible":true})),
                 feature
@@ -165,7 +159,7 @@ mod tests {
             input: json!({"schema_version":3}),
             node_id: None,
         };
-        assert_eq!(required(&scheduler, None), vec![BRAIN_V3]);
+        assert!(required(&scheduler, None).is_empty());
         let legacy = CreateExecution {
             id: "brain-v2".into(),
             kind: ExecutionKind::Brain,

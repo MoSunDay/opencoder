@@ -102,8 +102,8 @@ pub(crate) fn validate_shape(plan: &LayeredPlan) -> Result<()> {
             "retry.max_attempts must be 1..5"
         );
         ensure!(
-            node.title.chars().count() <= 120,
-            "node title must not exceed 120 characters"
+            !node.title.trim().is_empty() && node.title.chars().count() <= 120,
+            "node title must contain 1..120 characters"
         );
     }
     for edge in &plan.edges {

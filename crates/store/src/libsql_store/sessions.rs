@@ -7,8 +7,8 @@ use crate::types::{
 };
 
 const INSERT_SESSION: &str = "\
-INSERT OR IGNORE INTO sessions (id, title, agent, model, autopilot_mode, workdir_hash, created_at, updated_at, summary, summary_seq, summary_images_json, handoff_seq, handoff_plan, skill, task_type, requirement)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+INSERT OR IGNORE INTO sessions (id, kind, title, agent, model, autopilot_mode, workdir_hash, created_at, updated_at, summary, summary_seq, summary_images_json, handoff_seq, handoff_plan, skill, task_type, requirement)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
 pub async fn harness_runtime(
     conn: &Connection,
@@ -48,6 +48,7 @@ pub async fn create(conn: &Connection, meta: &SessionMeta) -> Result<()> {
         INSERT_SESSION,
         params![
             meta.id.as_str(),
+            meta.kind.as_deref(),
             meta.title.as_deref(),
             meta.agent.as_deref(),
             meta.model.as_deref(),
@@ -72,7 +73,7 @@ pub async fn create(conn: &Connection, meta: &SessionMeta) -> Result<()> {
 
 pub async fn get(conn: &Connection, id: &str) -> Result<Option<SessionMeta>> {
     let stmt = conn
-        .prepare("SELECT id, title, agent, model, workdir_hash, created_at, updated_at, summary, summary_seq, summary_images_json, handoff_seq, handoff_plan, skill, task_type, requirement, autopilot_mode FROM sessions WHERE id = ?")
+        .prepare("SELECT id, kind, title, agent, model, workdir_hash, created_at, updated_at, summary, summary_seq, summary_images_json, handoff_seq, handoff_plan, skill, task_type, requirement, autopilot_mode FROM sessions WHERE id = ?")
         .await?;
     let mut rows = stmt.query(params![id]).await?;
     match rows.next().await? {
@@ -152,8 +153,18 @@ async fn list_inner(
         ));
     }
 
+    // Lane fence: operator-tagged sessions are execution detail, never chat
+    // history, so every lane hides them unless explicitly requested. Legacy
+    // rows (kind NULL) keep the caller-side prefix resolution.
+    match filter.kind.as_deref() {
+        Some(kind) => {
+            where_clauses.push("s.kind = ?".into());
+            args.push(kind.into());
+        }
+        None => where_clauses.push("(s.kind IS NULL OR s.kind <> 'operator')".into()),
+    }
     let mut sql = String::from(
-        "SELECT s.id, s.title, s.agent, s.model, s.created_at, s.updated_at, \
+        "SELECT s.id, s.kind, s.title, s.agent, s.model, s.created_at, s.updated_at, \
          (SELECT substr(m.blocks_json, 1, 8192) FROM messages m WHERE m.session_id = s.id AND m.role = 'user' ORDER BY m.seq ASC LIMIT 1) AS preview, \
          s.skill \
          FROM sessions s",
@@ -173,13 +184,14 @@ async fn list_inner(
     while let Some(r) = rows.next().await? {
         out.push(SessionListItem {
             id: r.get::<String>(0)?,
-            title: r.get::<Option<String>>(1)?,
-            agent: normalize_agent(r.get::<Option<String>>(2)?),
-            model: r.get::<Option<String>>(3)?,
-            created_at: r.get::<i64>(4)?,
-            updated_at: r.get::<i64>(5)?,
-            preview: extract_preview(&r.get::<Option<String>>(6)?),
-            skill: r.get::<Option<String>>(7)?,
+            kind: r.get::<Option<String>>(1)?,
+            title: r.get::<Option<String>>(2)?,
+            agent: normalize_agent(r.get::<Option<String>>(3)?),
+            model: r.get::<Option<String>>(4)?,
+            created_at: r.get::<i64>(5)?,
+            updated_at: r.get::<i64>(6)?,
+            preview: extract_preview(&r.get::<Option<String>>(7)?),
+            skill: r.get::<Option<String>>(8)?,
         });
     }
     Ok(out)
@@ -368,24 +380,25 @@ fn normalize_agent(agent: Option<String>) -> Option<String> {
 fn row_to_meta(r: &libsql::Row) -> Result<SessionMeta> {
     Ok(SessionMeta {
         id: r.get::<String>(0)?,
-        title: r.get::<Option<String>>(1)?,
-        agent: normalize_agent(r.get::<Option<String>>(2)?),
-        model: r.get::<Option<String>>(3)?,
-        autopilot_mode: r.get::<Option<String>>(15)?,
-        workdir_hash: r.get::<Option<String>>(4)?,
-        created_at: r.get::<i64>(5)?,
-        updated_at: r.get::<i64>(6)?,
-        summary: r.get::<Option<String>>(7)?,
-        summary_seq: r.get::<Option<i64>>(8)?,
+        kind: r.get::<Option<String>>(1)?,
+        title: r.get::<Option<String>>(2)?,
+        agent: normalize_agent(r.get::<Option<String>>(3)?),
+        model: r.get::<Option<String>>(4)?,
+        autopilot_mode: r.get::<Option<String>>(16)?,
+        workdir_hash: r.get::<Option<String>>(5)?,
+        created_at: r.get::<i64>(6)?,
+        updated_at: r.get::<i64>(7)?,
+        summary: r.get::<Option<String>>(8)?,
+        summary_seq: r.get::<Option<i64>>(9)?,
         summary_images: serde_json::from_str(
-            r.get::<Option<String>>(9)?.as_deref().unwrap_or("[]"),
+            r.get::<Option<String>>(10)?.as_deref().unwrap_or("[]"),
         )
         .unwrap_or_default(),
-        handoff_seq: r.get::<Option<i64>>(10)?,
-        handoff_plan: r.get::<Option<String>>(11)?,
-        skill: r.get::<Option<String>>(12)?,
-        task_type: r.get::<Option<String>>(13)?,
-        requirement: r.get::<Option<String>>(14)?,
+        handoff_seq: r.get::<Option<i64>>(11)?,
+        handoff_plan: r.get::<Option<String>>(12)?,
+        skill: r.get::<Option<String>>(13)?,
+        task_type: r.get::<Option<String>>(14)?,
+        requirement: r.get::<Option<String>>(15)?,
     })
 }
 

@@ -257,7 +257,7 @@ pub(super) fn prepare(worker: &Worker, assignment: &Assignment, legacy: bool) ->
         worker,
         assignment,
         legacy,
-        worker.configuration()?,
+        worker.configuration_for(assignment.request.kind)?,
         opencoder_core::agent::agents_dir(),
     )
 }
@@ -268,7 +268,7 @@ async fn prepare_create(
     lease: preparation::Lease,
 ) -> Result<(Result<Config>, preparation::Lease)> {
     // Capture caller-scoped configuration before slow resource I/O crosses threads.
-    let config = worker.configuration()?;
+    let config = worker.configuration_for(assignment.request.kind)?;
     let source = opencoder_core::agent::agents_dir();
     let worker = worker.clone();
     let assignment = assignment.clone();
@@ -286,7 +286,7 @@ pub(super) fn prepare_record(
 ) -> Result<Config> {
     let config = crate::brain::workdir::execution_config(worker, record)?
         .map(Ok)
-        .unwrap_or_else(|| worker.configuration())?;
+        .unwrap_or_else(|| worker.configuration_for(record.assignment.request.kind))?;
     prepare_with_config(
         worker,
         assignment,

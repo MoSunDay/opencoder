@@ -24,6 +24,7 @@ pub async fn create_session(
     let now = now_ms();
     store
         .create_session(&SessionMeta {
+            kind: Some("todos".into()),
             id: state.parent_session_id.clone(),
             title: Some(format!("todos workflow {}", state.workflow_id)),
             agent: Some("workflow".into()),

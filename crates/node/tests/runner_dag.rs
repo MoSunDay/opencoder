@@ -223,6 +223,7 @@ fn queued_run(run_id: &str) -> DagClaimedRun {
         run_id: run_id.to_string(),
         dag_id: "dag-1".to_string(),
         spec: DagSpec {
+            max_concurrency: 4,
             name: "stub-flow".into(),
             description: None,
             steps: vec![StepSpec {

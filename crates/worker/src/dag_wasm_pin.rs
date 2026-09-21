@@ -186,6 +186,7 @@ mod tests {
 
     fn spec(commands: &[&str]) -> DagSpec {
         DagSpec {
+            max_concurrency: 4,
             name: "test-workflow".into(),
             description: None,
             steps: commands
@@ -217,6 +218,7 @@ mod tests {
     #[test]
     fn module_tokens_takes_first_wasm_token_deduped() {
         let spec = DagSpec {
+            max_concurrency: 4,
             name: "wf".into(),
             description: None,
             steps: vec![

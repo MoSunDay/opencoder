@@ -1,4 +1,4 @@
-Commit: 187ee827bad0cb2ae0b1900284b1a20176706166
+Commit: 40a688a77bfdbedc3f30f9f6b1e3a1ba67244d68
 
 # core 模块
 
@@ -7,9 +7,9 @@ Commit: 187ee827bad0cb2ae0b1900284b1a20176706166
 
 ## 索引
 - `src/message.rs` — Message/Role/ContentBlock
-- `src/config.rs` + `src/config/` — Config 加载与 mcp/cli/skills/ap 域文件（含 `config/dag.rs`；`load_with_home` 将候选链重定向到执行 home，Operator 隔离用）
+- `src/config.rs` + `src/config/` — Config 加载与 mcp/cli/skills/ap 域文件（含 `config/dag.rs`）。`load_with_home` 将候选链重定向到执行 home；`load_with_home_frozen` 额外跳过 `apply_env`（快照即最终，版本化 Operator resume 用）；`load_operator(dir)` 只读 Operator 配置平面目录（`config.json` + 域文件，不做 env 合并）；`effective_domain_value`/`domain_file_for` 供节点 bootstrap 携带域视图
 - `src/harness/` — Harness::{Opencode,Codex} 与 Codex 运行态
-- `src/agent/`、`src/skill.rs` — agent 引用卡（`meta.json` `run_mode`）、memory 池聚合（`agent/memory.rs`）与技能发现
+- `src/agent/`、`src/skill.rs` — agent 引用卡（`meta.json` `run_mode`）、memory 池聚合（`agent/memory.rs`）与技能发现。技能根优先级：执行任务本地根（`skill::with_execution`/`execution_root`）→ 节点 pinned 根 → 真实 `~/.opencoder/skills`
 - `src/skill/seed.rs` — 二进制内置 skill 增量 seed
 - `src/tool.rs` — Tool trait / ToolContext / ToolOutput
 - `src/net.rs`、`src/data_dir.rs` — HTTP 客户端与 per-workdir 数据目录

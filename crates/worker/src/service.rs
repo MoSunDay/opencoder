@@ -121,7 +121,10 @@ impl NodeService for Worker {
                     search: None,
                     // The execution inventory includes DAG Agent-step rows;
                     // the public chat API applies its own visibility fence.
+                    // Operator sessions are lane-fenced at the store layer
+                    // (their executions live in the node journal).
                     include_subagents: false,
+                    kind: None,
                 })
                 .await?;
             if rows.is_empty() {
@@ -140,6 +143,25 @@ impl NodeService for Worker {
                 // the coordinator/member title. Keep both as Agent indexes
                 // so their execution can be inspected through the parent
                 // Team without exposing them in the public chat lane.
+                // Tagged rows resolve at the store layer (the store lane
+                // fence already dropped `operator`); untagged legacy rows
+                // keep the id-prefix/title resolution below.
+                let tagged = row.kind.as_deref();
+                if let Some(kind) = tagged {
+                    match kind {
+                        "agent" | "team" | "dag" => {
+                            records.push(ExecutionIndex {
+                                id: row.id.clone(),
+                                kind: ExecutionKind::Agent,
+                                node_id: self.inner.registration.id.clone(),
+                                created_at: row.created_at,
+                                status: internal_session_status(active.contains(&row.id)),
+                            });
+                        }
+                        _ => {}
+                    }
+                    continue;
+                }
                 let member_session = row.id.starts_with("member-")
                     && row
                         .title

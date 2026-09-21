@@ -173,6 +173,7 @@ async fn drain_events_persists_batches_and_tracks_the_offset() {
             skill: None,
             task_type: None,
             requirement: None,
+            kind: None,
         })
         .await
         .unwrap();

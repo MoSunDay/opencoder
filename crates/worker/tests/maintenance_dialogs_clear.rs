@@ -96,6 +96,9 @@ async fn dialogs_clear_deletes_sessions_and_journal_records() {
     let sessions = store
         .list_sessions(&SessionFilter {
             limit: 100,
+            // Operator executions live in their own lane since the kind tag;
+            // query that lane explicitly.
+            kind: Some("operator".into()),
             ..Default::default()
         })
         .await

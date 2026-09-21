@@ -31,6 +31,10 @@ for (const entry of ['run', 'execution']) describe(`${entry} result entry`, () =
   it('shows final states immediately, opens the step drawer and loads run logs behind it', async () => {
     render(entry === 'run' ? <RunDetail run={run} onClose={vi.fn()} /> : <ExecutionView executionRef={run} />);
     await waitFor(() => expect(document.querySelectorAll('.dag-node--done')).toHaveLength(2));
+    // Edge visibility: declared node boxes let React Flow render the
+    // fetch→review edge on frame one — no ResizeObserver dependency (the
+    // jsdom RO shim never fires, which used to mask this entirely).
+    expect(document.querySelectorAll('.react-flow__edge')).toHaveLength(1);
     expect(open).not.toHaveBeenCalled();
     expect(document.querySelector('.dag-detail-side')).toBeNull();
     expect(screen.queryByRole('log')).toBeNull();

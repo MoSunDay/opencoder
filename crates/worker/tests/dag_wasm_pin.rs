@@ -35,6 +35,7 @@ fn compile(message: &str) -> Vec<u8> {
 
 fn spec(command: &str) -> DagSpec {
     DagSpec {
+        max_concurrency: 4,
         name: "e2e-workflow".into(),
         description: None,
         steps: vec![StepSpec {

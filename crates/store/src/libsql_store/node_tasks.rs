@@ -33,6 +33,7 @@ pub async fn dispatch(
         super::sessions::create(
             conn,
             &SessionMeta {
+                kind: None,
                 id: session_id.to_string(),
                 title: title.map(str::to_string),
                 agent: agent.map(str::to_string),

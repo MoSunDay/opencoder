@@ -50,6 +50,7 @@ async fn make_session(id: &str) -> SessionState {
             skill: None,
             task_type: None,
             requirement: None,
+            kind: None,
         })
         .await
         .unwrap();

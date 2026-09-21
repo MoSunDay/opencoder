@@ -85,6 +85,7 @@ async fn seed_session(store: &Arc<dyn Store>) {
             skill: None,
             task_type: None,
             requirement: None,
+            kind: None,
         })
         .await
         .unwrap();

@@ -47,6 +47,7 @@ pub(super) async fn make_session(id: &str) -> (SessionState, Arc<dyn Store>) {
             skill: None,
             task_type: None,
             requirement: None,
+            kind: None,
         })
         .await
         .unwrap();

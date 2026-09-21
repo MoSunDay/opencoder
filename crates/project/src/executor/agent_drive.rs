@@ -29,6 +29,7 @@ async fn create_execute_session(
     let now = opencoder_core::message::now_ms();
     deps.store
         .create_session(&SessionMeta {
+            kind: Some("project".into()),
             id: session_id.into(),
             title: Some(format!("项目执行 / {}", todo.title)),
             agent: Some(todo.agent.clone()),

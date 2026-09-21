@@ -86,6 +86,7 @@ async fn resume_handoff_clears_stale_summary_seq() {
             skill: None,
             task_type: None,
             requirement: None,
+            kind: None,
         })
         .await
         .unwrap();
@@ -191,6 +192,7 @@ async fn clear_summary_prevents_offset_corruption() {
             skill: None,
             task_type: None,
             requirement: None,
+            kind: None,
         })
         .await
         .unwrap();

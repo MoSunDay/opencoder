@@ -34,6 +34,7 @@ fn meta(id: &str) -> SessionMeta {
         skill: None,
         task_type: None,
         requirement: None,
+        kind: None,
     }
 }
 
@@ -135,6 +136,7 @@ async fn create_persists_summary_images() {
             skill: None,
             task_type: None,
             requirement: None,
+            kind: None,
         })
         .await
         .unwrap();

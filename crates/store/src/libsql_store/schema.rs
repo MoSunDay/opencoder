@@ -12,7 +12,7 @@ mod project_relations;
 
 // v3 scheduler tables are additive and bootstrap unconditionally; keep the
 // existing schema watermark so v2 database migration remains read-compatible.
-const SCHEMA_VERSION: i64 = 27;
+const SCHEMA_VERSION: i64 = 28;
 
 // Order invariant: busy_timeout must precede any locking statement, and
 // synchronous=NORMAL must be applied BEFORE journal_mode=WAL. Switching a
@@ -692,6 +692,14 @@ async fn migrate(conn: &Connection, from: i64) -> Result<()> {
         // the DDL.
         conn.execute(CREATE_NODES, ()).await?;
         conn.execute(CREATE_NODE_TASKS, ()).await?;
+    }
+    if from < 28 {
+        // v28: lane tagging. Operator executions stamp their runtime.db
+        // sessions with `kind` so the control-plane swimlanes (and the
+        // default chat list) filter at the store layer instead of relying on
+        // `id`-prefix/title conventions. Old rows stay NULL and keep their
+        // existing fallback resolution.
+        add_column_if_absent(conn, "sessions", "kind", "TEXT").await?;
     }
     if from < 25 {
         // v25: brain playbooks. CREATE IF NOT EXISTS keeps this idempotent

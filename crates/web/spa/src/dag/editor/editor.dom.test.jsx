@@ -30,13 +30,17 @@ const mountEditor = (onSave) =>
   render(<DefEditor open def={DEF} saving={false} onClose={vi.fn()} onSave={onSave} />);
 
 describe('DefEditor 画布模式', () => {
-  it('画布模式默认渲染 spec 步骤节点', async () => {
+  it('画布模式默认渲染 spec 步骤节点与依赖连线', async () => {
     mountEditor(vi.fn());
     await waitFor(() => expect(document.querySelectorAll('.dag-edit-node')).toHaveLength(2));
     expect(screen.getByText('fetch')).toBeTruthy();
     expect(screen.getByText('review')).toBeTruthy();
     expect(document.querySelectorAll('.dag-edit-node--agent')).toHaveLength(1);
     expect(document.querySelectorAll('.dag-edit-node--wasm')).toHaveLength(1);
+    // Edge visibility: declared node boxes let React Flow render the
+    // fetch→review edge on frame one — no ResizeObserver dependency (the
+    // jsdom RO shim never fires, which used to mask this entirely).
+    expect(document.querySelectorAll('.react-flow__edge')).toHaveLength(1);
   });
 
   it('节点面板点击添加 Wasm 步骤并保存', async () => {
@@ -99,6 +103,23 @@ describe('DefEditor 画布模式', () => {
     expect(await screen.findByText(/JSON 解析失败/)).toBeTruthy();
     expect(onSave).not.toHaveBeenCalled();
   });
+
+  it('改名含连字符的步骤后边 id 仍唯一且随名更新', async () => {
+    mountEditor(vi.fn());
+    await waitFor(() => expect(document.querySelectorAll('.dag-edit-node')).toHaveLength(2));
+    expect(document.querySelector('.react-flow__edge[data-id="e-fetch>review"]')).toBeTruthy();
+    fireEvent.click(document.querySelector('[data-id="fetch"] .dag-edit-node'));
+    const name = await screen.findByDisplayValue('fetch');
+    fireEvent.change(name, { target: { value: 'a-b' } });
+    await waitFor(() =>
+      expect(document.querySelector('.react-flow__edge[data-id="e-a-b>review"]')).toBeTruthy(),
+    );
+    const ids = Array.from(document.querySelectorAll('.react-flow__edge')).map((e) =>
+      e.getAttribute('data-id'),
+    );
+    expect(ids).toEqual(['e-a-b>review']);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
 });
 
 describe('画布连线模式', () => {
@@ -129,6 +150,14 @@ describe('画布连线模式', () => {
         'dag-edit-node--linksrc',
       ),
     );
+    await waitFor(() => expect(document.querySelectorAll('.react-flow__edge')).toHaveLength(2));
+    // the onConnect/addEdge path must stamp the explicit '>' id as well:
+    // addEdge's default getEdgeId uses '-', so a→b-c vs a-b→c would collide
+    expect(document.querySelector('.react-flow__edge[data-id="e-review>step"]')).toBeTruthy();
+    const ids = Array.from(document.querySelectorAll('.react-flow__edge')).map((e) =>
+      e.getAttribute('data-id'),
+    );
+    expect(new Set(ids).size).toBe(ids.length);
     fireEvent.click(screen.getByText('保 存'));
     await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
     const spec = onSave.mock.calls[0][0];
@@ -175,6 +204,53 @@ describe('画布连线模式', () => {
       'dag-edit-node--linksrc',
     );
     expect(screen.queryByText(/连线：/)).toBeNull();
+  });
+
+  it('结构编辑保留顶层 max_concurrency（加步骤后保存不丢并发配置）', async () => {
+    const onSave = vi.fn();
+    render(
+      <DefEditor
+        open
+        def={{ ...DEF, spec: { ...DEF.spec, max_concurrency: 8 } }}
+        saving={false}
+        onClose={vi.fn()}
+        onSave={onSave}
+      />,
+    );
+    await waitFor(() => expect(document.querySelectorAll('.dag-edit-node')).toHaveLength(2));
+    fireEvent.click(await screen.findByText('Wasm 步骤')); // palette card
+    await waitFor(() => expect(document.querySelectorAll('.dag-edit-node')).toHaveLength(3));
+    // the fresh wasm step ships with empty command — fill it so validation passes
+    const label = await screen.findByText('Wasm 命令 (command)');
+    const area = label.closest('.ant-form-item').querySelector('input');
+    fireEvent.change(area, { target: { value: 'tool2.wasm' } });
+    fireEvent.click(screen.getByText('保 存'));
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+    const spec = onSave.mock.calls[0][0];
+    expect(spec.max_concurrency).toBe(8);
+    expect(spec.steps).toHaveLength(3);
+  });
+
+  it('基础信息面板可编辑并发上限并保存', async () => {
+    const onSave = vi.fn();
+    render(
+      <DefEditor
+        open
+        def={{ ...DEF, spec: { ...DEF.spec, max_concurrency: 8 } }}
+        saving={false}
+        onClose={vi.fn()}
+        onSave={onSave}
+      />,
+    );
+    await waitFor(() => expect(document.querySelectorAll('.dag-edit-node')).toHaveLength(2));
+    // nothing selected → SpecMetaForm shows the concurrency input (value 8)
+    const input = await screen.findByDisplayValue('8');
+    expect(input.getAttribute('role')).toBe('spinbutton');
+    fireEvent.change(input, { target: { value: '12' } });
+    await waitFor(() => expect(input.value).toBe('12'));
+    fireEvent.click(screen.getByText('保 存'));
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+    expect(onSave.mock.calls[0][0].max_concurrency).toBe(12);
   });
 });
 

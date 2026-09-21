@@ -12,6 +12,10 @@ export const SLUG_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
 /// crates/dag/src/spec.rs MAX_HOW_APPEND_BYTES).
 export const MAX_HOW_APPEND_BYTES = 8 * 1024;
 
+/// Whole-run concurrency bounds (mirror of crates/dag/src/policies.rs
+/// MAX_CONCURRENCY; default_concurrency is 4 server-side).
+export const MAX_CONCURRENCY = 30;
+
 /// parseSpecDraft(text) → {spec} on success or {error} with a readable
 /// Chinese message (JSON.parse's own message is English/noisy).
 export function parseSpecDraft(text) {
@@ -32,12 +36,19 @@ export function parseSpecDraft(text) {
 }
 
 /// validateSpec(spec) → problem string list. Checks, in server order:
-/// name/description shape, non-empty steps, per-step slug + kind payloads,
-/// depends_on references, self-deps and cycles.
+/// name/description shape, whole-run max_concurrency bounds, non-empty
+/// steps, per-step slug + kind payloads, depends_on references, self-deps
+/// and cycles.
 export function validateSpec(spec) {
   const problems = [];
   if (!spec || typeof spec !== 'object' || Array.isArray(spec)) {
     return ['spec 必须是 JSON 对象'];
+  }
+  if (spec.max_concurrency !== undefined) {
+    const mc = spec.max_concurrency;
+    if (typeof mc !== 'number' || !Number.isInteger(mc) || mc < 1 || mc > MAX_CONCURRENCY) {
+      problems.push(`spec.max_concurrency 必须是 1..=${MAX_CONCURRENCY} 的整数`);
+    }
   }
   if (typeof spec.name !== 'string' || !spec.name.trim()) {
     problems.push('spec.name 必须是非空字符串');

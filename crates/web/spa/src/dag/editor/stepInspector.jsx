@@ -205,9 +205,11 @@ function NameField({ stepName, allNames, onRename }) {
 }
 
 /// SpecMetaForm — fallback panel while nothing is selected: edits the spec
-/// name and optional description through onChange({name} / {description}).
+/// name, optional description and the whole-run max_concurrency bound
+/// through onChange({name} / {description} / {max_concurrency}).
 export function SpecMetaForm({ spec, onChange }) {
   const meta = spec && typeof spec === 'object' ? spec : {};
+  const concurrency = typeof meta.max_concurrency === 'number' ? meta.max_concurrency : undefined;
   return (
     <div className="dag-edit-inspector">
       <Text type="secondary" style={{ display: 'block', marginBottom: 8 }}>
@@ -225,6 +227,17 @@ export function SpecMetaForm({ spec, onChange }) {
             rows={2}
             value={typeof meta.description === 'string' ? meta.description : ''}
             onChange={(e) => onChange({ description: e.target.value || undefined })}
+          />
+        </Form.Item>
+        <Form.Item label="并发上限（1-30，默认 4）">
+          <InputNumber
+            min={1}
+            max={30}
+            precision={0}
+            style={{ width: '100%' }}
+            value={concurrency}
+            placeholder="默认 4"
+            onChange={(v) => onChange({ max_concurrency: typeof v === 'number' ? v : undefined })}
           />
         </Form.Item>
       </Form>

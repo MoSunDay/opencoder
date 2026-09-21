@@ -243,6 +243,7 @@ mod tests {
         };
         SessionBundle {
             meta: SessionMeta {
+                kind: None,
                 id: "sess1".into(),
                 title: Some("test".into()),
                 agent: Some("act".into()),
@@ -331,6 +332,7 @@ mod tests {
 
         let bundle = SessionBundle {
             meta: SessionMeta {
+                kind: None,
                 id: "sess-c1".into(),
                 title: Some("t".into()),
                 agent: Some("act".into()),
@@ -391,6 +393,7 @@ mod tests {
         // Child bundle carries its own workdir_hash.
         let child = SessionBundle {
             meta: SessionMeta {
+                kind: None,
                 id: "child-1".into(),
                 title: Some("t".into()),
                 agent: Some("act".into()),
@@ -416,6 +419,7 @@ mod tests {
 
         let bundle = SessionBundle {
             meta: SessionMeta {
+                kind: None,
                 id: "parent-1".into(),
                 title: Some("t".into()),
                 agent: Some("act".into()),
@@ -530,6 +534,7 @@ mod tests {
     fn rollback_bundle(event_session: &str) -> SessionBundle {
         SessionBundle {
             meta: SessionMeta {
+                kind: None,
                 id: "sess-rollback".into(),
                 title: Some("t".into()),
                 agent: Some("act".into()),
@@ -574,6 +579,7 @@ mod tests {
             let parent_id = format!("nest-{i}");
             bundle = SessionBundle {
                 meta: SessionMeta {
+                    kind: None,
                     id: parent_id.clone(),
                     ..sample_bundle().meta
                 },

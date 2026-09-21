@@ -127,6 +127,7 @@ pub(super) async fn run_subagent(
         // Seed the child session row so the FK on subagent_tasks resolves.
         let _ = store
             .create_session(&opencoder_store::SessionMeta {
+                kind: None,
                 id: child_session_id.clone(),
                 title: Some(prompt.chars().take(60).collect()),
                 agent: Some(kind.clone()),

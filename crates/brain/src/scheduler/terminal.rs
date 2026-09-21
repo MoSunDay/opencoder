@@ -134,6 +134,9 @@ pub fn command(
             } else {
                 BrainSchedulerPhase::Waiting
             };
+            // The blocked decision remains in event history; it is no longer
+            // the current run error after an explicit successful resume.
+            update.run.error = None;
         }
         "cancel" => {
             update.run.phase = BrainSchedulerPhase::Cancelled;

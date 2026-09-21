@@ -69,6 +69,13 @@ Commit: 7177f7987d3c3cdc7ed17864a4ffcf347bf4d182
 - Store `SCHEMA_VERSION` 为 28（发布提交自身携带，v4 未推动），v4 表由加性迁移创建；控制面不写层划分、不持 generation；层一律重算。
 - 迭代中文件 > 800 行的既有偏差（本轮只有加性增长，未新增超限文件）：`crates/store/src/store.rs` 923→944（+21）、`crates/store/src/libsql_store/impl_store.rs` 868→891（+23）、`crates/store/src/libsql_store/schema.rs` 822→823（+1）；三者在本轮开始前已超 800 行，拆分属独立重构，不在本轮范围。
 
+## 合并入主树后的收口复跑（2026-09-21）
+
+- 移植方式：worktree 变更以 `git diff --cached --binary` + `git apply --3way` 落到主树（基于 `f4e532d3`）。唯一冲突是 `crates/store/src/libsql_store/schema.rs` 的 `SCHEMA_VERSION`（worktree 27 / 主树 28），保留 28：v4 表是加性迁移，不得再推动该水位；`crates/store/tests/brain_layered_v4.rs` 的断言与文档措辞同步为 28。
+- 移植完整性：v4 变更集 105 个文件逐文件与 worktree 版本比对，仅 10 处差异且全部为预期——6 处文档把 27 改述为 28、2 处 `SCHEMA_VERSION` 冲突解决、2 处（`crates/worker/src/brain/workdir.rs`、`crates/worker/src/operations/create.rs`）与 `f4e532d3` 对同一区域的既有改动合流（新增/删除行与 worktree 逐字节一致）。
+- 主树收口 gate：`cargo build --workspace` EXIT=0；`cargo clippy --workspace --all-targets -- -D warnings` 干净；`cargo test --workspace` → 442 个测试目标 / 5578 passed / 0 failed / 8 ignored，脚本判定 EXIT=0（较上表 439 目标 / 5570 的差值来自迭代期间进入主树的 `f4e532d3`，不是本轮新增用例）；根 e2e 复跑 `brain_layered_e2e` 5、`brain_e2e` 2、`dag_e2e` 17、`team_e2e` 1、`todos_e2e` 3 全通过；`bash scripts/check-spa-drift.sh` → `spa dist: no drift`。
+- 交付提交：`552879e4`（105 files, +8550/-84）。
+
 ## 相关文档
 
 - [features/brain/index.md](../../brain/index.md) — 分层能力画布的用户可见行为

@@ -1,17 +1,29 @@
-# 大脑统一为 step 能力计划
+Commit: 3b4775905c950f64433b5c9f4439f4396674b3c6
 
-大脑计划只描述 step 与连线，每个 step 保存一句话任务、能力引用和重试上限。保留计划标题、目标、输入与轮数限制。能力库同时提供不可变版本的已保存计划，支持递归执行；保存和运行前检查引用、循环与嵌套深度。
+# Brain step/能力分层调度
 
-调度沿用事件驱动：按拓扑自上而下分层，同层并发，整层成功后激活下一轮；失败节点在预算内独立重试，尝试耗尽则根运行失败并取消同层未完成执行。子计划经同一 Server 提交入口，复用持久化回执，并校验父操作身份和固定计划版本。
+## 变化
 
-运行页仅展示调度节点与执行索引。点击 step 或历史尝试，复用各能力已有的运行明细组件；子计划亦可展开。计划编辑支持能力选择、连线、分层预览、草稿恢复和版本保存。
+计划统一为 schema 4 的 step 与连线：step 用一句话描述任务并关联一个能力，保存的固定版本计划也可作为能力。保留事件驱动和完整层屏障，同层并行、重试耗尽失败。Server 负责能力准入与索引，Worker 持有调度投影及模型激活；页面按执行索引复用现有运行明细。
 
-删除旧版计划、调度、读写接口、工作台、CLI 命令与相关存储实现，不提供兼容运行路径。发布预检与 Worker 统一只接受 schema 4，旧非终态运行必须在升级前处理。数据库版本没有增加，没有新增环境变量或鉴权变更。
+删除旧调度器及对应 API、CLI、UI、测试和旧表创建逻辑；旧数据无自动迁移，清理需审阅精确范围并保留备份，包含 Host 休眠库存引用。运行卡片固定尺寸为重试标记预留空间，避免标题被挤压。
 
-生产旧数据清理由 `scripts/maintenance/brain_cleanup` 生成只读精确清单。执行必须匹配已审核清单摘要、确认相关运行数据库离线，并先备份；共享 Host 所有权表通过事务锁按主键处理，无关 Runtime 持续运行；清理按主键校验记录，检查外键，失败恢复离线数据库备份及已删除的所有权行，重复执行核验已清除状态。生产删除和发布回执独立记录，代码变更本身不代表已经执行生产清理。
+生产清理按审核清单摘要及主键校验，离线运行库先备份，共享 Host 表短事务处理；休眠索引裁剪持有 `runtime-use` 排他锁。失败恢复离线库与受影响的 Host 行/库存，重复执行验证已清除状态。未增加数据库版本、环境变量或修改鉴权数据。
 
-生产清理同时裁剪 Host 休眠库存中的旧执行索引，并持有与 Host 查询、唤醒及回收一致的 `runtime-use` 独占锁，防止被清理索引重新上报。库存更新仅移除核准的执行 ID；失败回滚恢复原库存，重复执行核验缓存引用也已消失。
+## 测试覆盖
 
-本次保留既有 DAG 配置、进度投影、存储准入阈值、Brain 恢复错误重置与 Operator 执行隔离逻辑。
+| 功能 | 测试名 | 文件 |
+|---|---|---|
+| 拓扑分层 | `kahn_levels_follow_edges_not_json_order` | `crates/brain/tests/layered/validate.rs` |
+| 完整并行层屏障 | `parallel_nodes_in_layer_then_next_layer` | `crates/brain/tests/layered/barriers.rs` |
+| 重试耗尽、迟到回执 | `retry_schedules_next_attempt_then_fails_run`、`late_terminal_from_previous_attempt_ignored` | `crates/brain/tests/layered/barriers.rs` |
+| 嵌套真实执行 | `nested_plan_dispatches_a_real_child_and_reports_its_terminal_to_parent` | `crates/worker/tests/brain_nested.rs` |
+| Server/Worker 端到端画布 | `layered_canvas_holds_the_barrier_then_completes_through_the_closing_activation` | `tests/brain_layered_e2e/canvas.rs` |
 
-验证：Rust workspace 全量运行 5,504 项通过，1 项旧正文断言随本次引用模型更新后，所属 `brain_layered_e2e` 5 项全部复测通过，合计覆盖 5,505 项；7 项测试默认忽略，其中浏览器验收另行显式运行通过。Clippy workspace/all-targets 零警告；SPA 112 文件、886 项测试通过，构建及资源漂移检查通过；真实浏览器完成草稿恢复、保存计划、两层执行和打开能力明细；发布脚本 43 项及清理工具 5 项测试通过。
+SPA 112 文件、886 项测试通过，卡片调整后相关 18 项复测通过；Clippy 全 workspace/all-targets 零警告；发布脚本 43 项、维护脚本 5 项测试通过。先执行 `cargo build --workspace --bins` 校验四个进程版本，再执行 `cargo test --workspace`：5505 passed / 0 failed / 7 ignored（已有默认忽略，浏览器验收独立执行通过）。真实浏览器覆盖创建、草稿、连线、执行、详情、嵌套、失败及空状态；生产真实模型验证并行屏障、固定版本子计划和两次失败上限。最终发布版 15 分钟稳定观察通过。
+
+## 相关
+
+- [能力与业务规则](../../brain/index.md)
+- [Brain 逻辑](../../../agents/brain/index.md)
+- [运行协议](../../../docs/brain-orchestration.md)

@@ -1,4 +1,4 @@
-Commit: 40a688a77bfdbedc3f30f9f6b1e3a1ba67244d68
+Commit: 3b4775905c950f64433b5c9f4439f4396674b3c6
 
 # worker 模块
 
@@ -11,7 +11,7 @@ Commit: 40a688a77bfdbedc3f30f9f6b1e3a1ba67244d68
 - `crates/worker/src/operations/` — 准入/launch/维护命令/查询（含 `query/instances/`、`artifacts.rs`、`operator_env.rs` Operator 隔离快照、`operator_config.rs` 节点级 Operator 配置平面）
 - `crates/worker/src/state.rs`、`src/layout.rs`、`src/journal/` — runtime.db、执行布局与原子落盘（layout 含 `<data>/operator/<id>/{home,workspace}` 预留）
 - `crates/worker/src/runtime/`、`src/resources.rs` — Runtime 归属与资源快照
-- `crates/worker/src/brain/` — 图激活、路由、回执、输出适配与唤醒（`workdir.rs` 工作空间接缝）；`brain/v3/` 与 `brain/v4/` 为同一套接缝的两个版本模块
+- `crates/worker/src/brain/` — 唯一 schema 4 分层投影、模型激活、回执及唤醒；`brain/v4/` 实现节点调度，`workdir.rs` 提供能力工作空间接缝
 - `tests/` — 集成测试
 
 ## Operator 执行隔离
@@ -26,9 +26,8 @@ Commit: 40a688a77bfdbedc3f30f9f6b1e3a1ba67244d68
 - `runtime/health.rs` 统一计算节点存储准入：可用磁盘块低于 10% 或可用 inode 低于 20% 拒绝新执行；容量读取失败、零容量仍拒绝准入。健康查询和新执行入口共用纯函数判断，已接收的工作可继续完成。
 - `operations/dag_preflight.rs` 使用本次冻结配置校验静态步骤和动态模板。runc 模式要求节点 rootfs 和 runc 可用；Codex Agent 额外校验 guest CLI 与节点登录目录，不检查 host CLI，也不要求原生 provider 凭证。实际执行和私有挂载由 dag-runtime 负责。
 - DAG 的 how 追加由 dag-runtime 写入本地副本；普通 Agent 会话资源追加由 `agent_how.rs` 管理。
-- Brain v3：worker 根节点持调度 projection/generation；control 只创建子执行并处理中继回执。
 - Brain：仅 `brain/v4/`，根节点持有运行、操作与事件投影；`layer` 是已派发层。每层并行、屏障后唤醒、重试耗尽失败并取消兄弟；空节点上下文作收口。既有 outbox 和 generation 保障恢复、重复回执幂等。
-- 上限（`opencoder_brain::layered` 纯域校验）：`LAYERED_MAX_NODES=256`、`LAYERED_MAX_LAYER_WIDTH`=32/层、`LAYERED_MAX_DEPTH=3`、`retry.max_attempts` 1..=5（默认 2）。节点侧只做投影与栅栏校验（伪造/越权派发帧 409，迟到回执丢弃），层决策与准入裁决在 control。
+- 上限（`opencoder_brain::layered` 纯域校验）：`LAYERED_MAX_NODES=256`、`LAYERED_MAX_LAYER_WIDTH`=32/层、`LAYERED_MAX_DEPTH=3`、`retry.max_attempts` 1..=5（默认 2）。Worker 持有模型决策、投影及 generation 栅栏；Control 解析上下文并执行准入。伪造或越权派发帧被拒绝，迟到回执不推进当前尝试。
 
 ## 相关
 - [agents/node](../node/index.md)、[agents/dag-runtime](../dag-runtime/index.md)

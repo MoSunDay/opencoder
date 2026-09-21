@@ -35,7 +35,7 @@ class CleanupTests(unittest.TestCase):
         journal.mkdir(parents=True)
         record = {'assignment': {'index': {'id': 'old'}}}
         (journal / 'execution.json').write_text(json.dumps(record))
-        return {'mixed_plan_definitions': [], 'databases': [{'database': str(database), 'table': 'execution_index',
+        return {'mixed_plan_definitions': [], 'executions': [{'id': 'old'}], 'databases': [{'database': str(database), 'table': 'execution_index',
                  'rows': [{'key': {'id': 'old'}, 'digest': digest(row)}]}],
                 'directories': [{'path': str(journal), 'id': 'old', 'record_digest': digest(record)}]}
 
@@ -71,6 +71,7 @@ class CleanupTests(unittest.TestCase):
                 row = dict(connection.execute("SELECT rowid AS rowid,* FROM runtime_owners WHERE execution_id='old'").fetchone())
             manifest['databases'].append({'database': str(database), 'table': 'runtime_owners',
                 'rows': [{'key': {'execution_id': 'old'}, 'digest': digest(row)}]})
+            cache = self.cached_inventory(database, manifest)
             write = Path.write_text
             move = shutil.move
 
@@ -93,8 +94,35 @@ class CleanupTests(unittest.TestCase):
                 self.assertEqual(connection.execute('SELECT execution_id,status FROM runtime_owners ORDER BY execution_id').fetchall(),
                                  [('old', 'done'), ('other', 'done')])
             self.assertTrue((root / 'brain/old/execution.json').exists())
+            with sqlite3.connect(database) as connection:
+                self.assertEqual(json.loads(connection.execute("SELECT body FROM fleet_definitions WHERE id='runtime-old'").fetchone()[0]), cache)
             with sqlite3.connect(root / 'test.db') as connection:
                 self.assertEqual(connection.execute('SELECT count(*) FROM execution_index').fetchone()[0], 2)
+
+    def cached_inventory(self, database, manifest):
+        body = {'runtime_id': 'runtime-old', 'indexes': [{'id': 'old'}, {'id': 'other'}], 'build': {'commit': 'preserve'}}
+        with sqlite3.connect(database) as connection:
+            connection.execute('CREATE TABLE fleet_definitions(kind TEXT, id TEXT, body TEXT, PRIMARY KEY(kind,id))')
+            connection.execute('INSERT INTO fleet_definitions VALUES(?,?,?)', ('runtime_sleep', 'runtime-old', json.dumps(body)))
+        manifest['cached_inventories'] = [{'database': str(database), 'id': 'runtime-old', 'removed_execution_ids': ['old'], 'body_digest': digest(body)}]
+        return body
+
+    def test_cached_inventory_prunes_only_reviewed_ids_and_repeats(self):
+        with tempfile.TemporaryDirectory() as root:
+            root = Path(root); manifest = self.fixture(root); database = root / 'host.db'
+            with sqlite3.connect(database) as connection:
+                connection.execute('CREATE TABLE runtime_owners(execution_id TEXT PRIMARY KEY)')
+                connection.execute("INSERT INTO runtime_owners VALUES('old')")
+                connection.row_factory = sqlite3.Row
+                row = dict(connection.execute('SELECT rowid AS rowid,* FROM runtime_owners').fetchone())
+            manifest['databases'].append({'database': str(database), 'table': 'runtime_owners', 'rows': [{'key': {'execution_id': 'old'}, 'digest': digest(row)}]})
+            self.cached_inventory(database, manifest)
+            apply(manifest, digest(manifest), root / 'backup')
+            apply(manifest, digest(manifest), root / 'backup')
+            with sqlite3.connect(database) as connection:
+                cached = json.loads(connection.execute("SELECT body FROM fleet_definitions WHERE id='runtime-old'").fetchone()[0])
+                self.assertEqual(cached['indexes'], [{'id': 'other'}])
+                self.assertEqual(cached['build'], {'commit': 'preserve'})
 
 
 if __name__ == '__main__':

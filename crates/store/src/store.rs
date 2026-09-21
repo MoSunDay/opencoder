@@ -24,6 +24,27 @@ use crate::{
 /// `libsql_store` (primary) and any future backend.
 #[async_trait]
 pub trait Store: Send + Sync {
+    /// Atomic v4 layered projection read. Layers are recomputed, never stored.
+    async fn brain_layered(
+        &self,
+        _id: &str,
+    ) -> Result<Option<opencoder_core::brain::layered::LayeredSnapshot>> {
+        anyhow::bail!("v4 layered scheduler unsupported")
+    }
+    async fn commit_brain_layered(
+        &self,
+        _change: &opencoder_core::brain::layered::LayeredChange,
+    ) -> Result<opencoder_core::brain::layered::LayeredSnapshot> {
+        anyhow::bail!("v4 layered scheduler unsupported")
+    }
+    async fn brain_layered_events(
+        &self,
+        _id: &str,
+        _after: u64,
+        _limit: u32,
+    ) -> Result<Vec<opencoder_core::brain::layered::LayeredEvent>> {
+        anyhow::bail!("v4 layered scheduler unsupported")
+    }
     /// Atomic v3 projection read. No child bodies are stored here.
     async fn brain_scheduler(
         &self,

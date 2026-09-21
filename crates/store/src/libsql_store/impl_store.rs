@@ -49,6 +49,29 @@ impl Store for LibsqlStore {
         let _guard = self.db_lock.lock().await;
         super::brain_scheduler::page(&self.conn, id, after, limit).await
     }
+    async fn brain_layered(
+        &self,
+        id: &str,
+    ) -> Result<Option<opencoder_core::brain::layered::LayeredSnapshot>> {
+        let _guard = self.db_lock.lock().await;
+        super::brain_layered::load(&self.conn, id).await
+    }
+    async fn commit_brain_layered(
+        &self,
+        change: &opencoder_core::brain::layered::LayeredChange,
+    ) -> Result<opencoder_core::brain::layered::LayeredSnapshot> {
+        let _guard = self.db_lock.lock().await;
+        super::brain_layered::commit(&self.conn, change).await
+    }
+    async fn brain_layered_events(
+        &self,
+        id: &str,
+        after: u64,
+        limit: u32,
+    ) -> Result<Vec<opencoder_core::brain::layered::LayeredEvent>> {
+        let _guard = self.db_lock.lock().await;
+        super::brain_layered::page(&self.conn, id, after, limit).await
+    }
     async fn save_brain_playbook(&self, record: &BrainPlaybookRecord) -> Result<()> {
         let _guard = self.db_lock.lock().await;
         brain_playbooks::save(&self.conn, record).await

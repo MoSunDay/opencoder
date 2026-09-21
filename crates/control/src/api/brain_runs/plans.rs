@@ -7,7 +7,11 @@ use axum::{
     response::Response,
     Json,
 };
-use opencoder_core::{brain::*, fleet::*};
+use opencoder_core::{
+    brain::layered::{LayeredPlan, LayeredRequest, LAYERED_SCHEMA_VERSION},
+    brain::*,
+    fleet::*,
+};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -136,6 +140,11 @@ pub async fn save(State(state): State<Arc<AppState>>, Json(body): Json<Value>) -
             Ok(plan) => body.plan = json!(plan),
             Err(error) => return error_400(error.to_string()),
         }
+    } else if body.plan["schema_version"] == LAYERED_SCHEMA_VERSION {
+        match validate_layered(&state, body.plan.clone()).await {
+            Ok(plan) => body.plan = json!(plan),
+            Err(error) => return error_400(error.to_string()),
+        }
     } else {
         let mut plan: OntologyPlan = match serde_json::from_value(body.plan) {
             Ok(plan) => plan,
@@ -161,9 +170,28 @@ async fn validate_scheduler(state: &Arc<AppState>, value: Value) -> anyhow::Resu
     Ok(plan)
 }
 
+async fn validate_layered(state: &Arc<AppState>, value: Value) -> anyhow::Result<LayeredPlan> {
+    let plan: LayeredPlan = serde_json::from_value(value)?;
+    opencoder_brain::layered::validate_plan(&plan)?;
+    let request = LayeredRequest {
+        schema_version: LAYERED_SCHEMA_VERSION,
+        inputs: plan.inputs.clone(),
+        plan: plan.clone(),
+        artifacts: Default::default(),
+        origin: None,
+        parent: None,
+        depth: 0,
+    };
+    opencoder_brain::layered::validate_request(&request)?;
+    super::v4::catalog::available(state, &request).await?;
+    Ok(plan)
+}
+
 pub async fn validate(State(state): State<Arc<AppState>>, Json(plan): Json<Value>) -> Response {
     let result = if plan["schema_version"] == 3 {
         validate_scheduler(&state, plan).await.map(|_| ())
+    } else if plan["schema_version"] == LAYERED_SCHEMA_VERSION {
+        validate_layered(&state, plan).await.map(|_| ())
     } else {
         serde_json::from_value::<OntologyPlan>(plan)
             .map_err(anyhow::Error::from)
@@ -235,8 +263,12 @@ pub async fn stable(
         return error_400("version is required".into());
     };
     match state.fleet.brain_plan_document(&id, version).await {
-        Ok(Some(p)) if p.plan["schema_version"] != 2 && p.plan["schema_version"] != 3 => {
-            return response(RpcReply::error(409, opencoder_brain::graph::MIGRATION))
+        Ok(Some(p))
+            if p.plan["schema_version"] != 2
+                && p.plan["schema_version"] != 3
+                && p.plan["schema_version"] != LAYERED_SCHEMA_VERSION =>
+        {
+            return response(RpcReply::error(409, opencoder_brain::graph::MIGRATION));
         }
         Ok(_) => {}
         Err(e) => return error_500(e.to_string()),

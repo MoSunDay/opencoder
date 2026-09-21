@@ -44,10 +44,12 @@ impl Dispatcher {
             &id,
             &member.agent,
             None,
-            Some(format!("{} / {}", self.coordinator, member.agent)),
             now_ms(),
             &crate::brain::workdir::node_workdir(&self.worker),
-            Some("team".into()),
+            super::agent::SessionLabels {
+                title: Some(format!("{} / {}", self.coordinator, member.agent)),
+                kind: Some("team".into()),
+            },
         )
         .await?;
         let mut session = opencoder_session::resume(

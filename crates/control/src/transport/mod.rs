@@ -1,6 +1,8 @@
 mod brain_delivery;
 mod handoff_report;
 mod hub;
+#[cfg(test)]
+mod layered_tests;
 mod report;
 #[cfg(test)]
 mod scheduler_tests;

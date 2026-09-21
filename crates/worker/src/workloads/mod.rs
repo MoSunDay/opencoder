@@ -19,6 +19,9 @@ pub(crate) async fn run(
     resume: bool,
 ) -> Result<(ExecutionStatus, Value)> {
     let (status, result) = match record.assignment.request.kind {
+        ExecutionKind::Brain if record.assignment.request.input["schema_version"] == 4 => {
+            crate::brain::v4::run(worker, record, config, cancel).await
+        }
         ExecutionKind::Brain if record.assignment.request.input["schema_version"] == 3 => {
             crate::brain::v3::run(worker, record, config, cancel).await
         }

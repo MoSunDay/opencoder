@@ -15,3 +15,4 @@ Commit: 40a688a77bfdbedc3f30f9f6b1e3a1ba67244d68
 - `src/fleet/` — 节点容量/归属/派发回执（`handoff/`），容量领取在 `handoff/capacity.rs`
 - `src/fleet/records.rs` — 终态执行索引批删
 - `src/libsql_store/brain_scheduler.rs` — v3 调度 run/operation/event 投影
+- `src/libsql_store/brain_layered.rs` + `brain_layered/schema.rs` — v4 分层画布 run/operation/event 投影（additive 建表，不推动 `SCHEMA_VERSION`；`schema_watermark()` 仅供断言，当前值为 28）

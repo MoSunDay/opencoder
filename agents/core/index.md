@@ -14,4 +14,4 @@ Commit: 40a688a77bfdbedc3f30f9f6b1e3a1ba67244d68
 - `src/tool.rs` — Tool trait / ToolContext / ToolOutput
 - `src/net.rs`、`src/data_dir.rs` — HTTP 客户端与 per-workdir 数据目录
 - `src/fleet/protocol.rs` — Server/Node 协议（PROTOCOL_VERSION = 10）
-- `src/brain/` — brain 计划/图/输出/路由 DTO（推进调度见 [brain](../brain/index.md)，执行面在 [worker](../worker/index.md)）
+- `src/brain/` — brain 计划/图/输出/路由 DTO（推进调度见 [brain](../brain/index.md)，执行面在 [worker](../worker/index.md)）；`src/brain/layered/` — v4 分层能力画布线协议 DTO（LOCKED）

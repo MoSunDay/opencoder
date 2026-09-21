@@ -12,7 +12,7 @@ mod project_relations;
 
 // v3 scheduler tables are additive and bootstrap unconditionally; keep the
 // existing schema watermark so v2 database migration remains read-compatible.
-const SCHEMA_VERSION: i64 = 28;
+pub(crate) const SCHEMA_VERSION: i64 = 28;
 
 // Order invariant: busy_timeout must precede any locking statement, and
 // synchronous=NORMAL must be applied BEFORE journal_mode=WAL. Switching a
@@ -381,6 +381,7 @@ async fn bootstrap_tx(conn: &Connection) -> Result<()> {
     conn.execute(CREATE_BRAIN_PLANS, ()).await?;
     conn.execute(CREATE_BRAIN_PLAYBOOKS, ()).await?;
     super::brain_scheduler::initialize(conn).await?;
+    super::brain_layered::initialize(conn).await?;
     conn.execute(CREATE_PROJECT_GOALS, ()).await?;
     conn.execute(CREATE_PROJECT_MILESTONES, ()).await?;
     conn.execute(CREATE_PROJECT_TODOS, ()).await?;

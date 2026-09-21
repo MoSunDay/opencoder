@@ -46,6 +46,10 @@ pub async fn recover_locked(worker: &Worker) -> Result<()> {
             super::v3::recover(worker, record).await?;
             continue;
         }
+        if record.assignment.request.input["schema_version"] == 4 {
+            super::v4::recover(worker, record).await?;
+            continue;
+        }
         let Some((_, run)) = persistence::load(worker, &id).await? else {
             continue;
         };

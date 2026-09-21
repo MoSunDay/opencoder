@@ -207,6 +207,34 @@ pub(super) async fn events(
                 .collect();
             head_seq = frames.last().and_then(|frame| frame["seq"].as_i64());
             frames
+        } else if record.as_ref().is_some_and(|r| {
+            r.assignment.request.kind == ExecutionKind::Brain
+                && r.assignment.request.input["schema_version"] == 4
+        }) {
+            let snapshot = worker.inner.state.store.brain_layered(id).await?;
+            finished_override = snapshot
+                .as_ref()
+                .map(|snapshot| snapshot.run.phase.terminal());
+            let page = worker
+                .inner
+                .state
+                .store
+                .brain_layered_events(id, after.max(0) as u64, EVENT_PAGE_MAX)
+                .await?;
+            source_more = page.len() == EVENT_PAGE_MAX as usize;
+            let frames: Vec<Value> = page
+                .into_iter()
+                .map(|event| {
+                    json!({
+                        "seq": event.seq,
+                        "kind": event.event_type,
+                        "data": event,
+                        "ts": event.at_ms,
+                    })
+                })
+                .collect();
+            head_seq = frames.last().and_then(|frame| frame["seq"].as_i64());
+            frames
         } else {
             let page = match worker
                 .inner

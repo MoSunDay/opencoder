@@ -5,6 +5,7 @@ use libsql::Connection;
 use tokio::sync::Mutex;
 
 mod brain;
+mod brain_layered;
 mod brain_playbooks;
 mod brain_scheduler;
 mod chat_tables;
@@ -28,6 +29,11 @@ mod team_runs;
 mod todos;
 mod tx;
 mod users;
+
+/// Database schema watermark; v4 brain tables are additive and must not move it.
+pub fn schema_watermark() -> i64 {
+    schema::SCHEMA_VERSION
+}
 
 /// Primary `Store` implementation backed by libsql (embedded local SQLite, WAL).
 ///

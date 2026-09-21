@@ -32,6 +32,29 @@ pub async fn frames(worker: &Worker) -> Result<Vec<NodeFrame>> {
                     frames.push(frame(&record, "scheduler_terminal", json!(terminal)));
                 }
             }
+        } else if super::v4::parent::reports(&record.assignment.request.input) {
+            // Leaf children and nested runs share one terminal frame and one
+            // acknowledgement fence; a nested run also publishes its own
+            // projection frames for control.
+            if let Some(reporting) = super::v4::parent::reporting(&record.assignment.request.input)?
+            {
+                if let Some(terminal) = super::v4::parent::terminal(&record, &reporting)? {
+                    if record.annotations[super::v4::parent::ACK]
+                        .as_u64()
+                        .unwrap_or(0)
+                        < terminal.source_sequence
+                    {
+                        frames.push(frame(&record, "layered_terminal", json!(terminal)));
+                    }
+                }
+            }
+            if super::v4::parent::root(&record.assignment.request.input) {
+                frames.extend(super::v4::frames(worker, &record).await?);
+            }
+        } else if record.assignment.index.kind == ExecutionKind::Brain
+            && record.assignment.request.input["schema_version"] == 4
+        {
+            frames.extend(super::v4::frames(worker, &record).await?);
         } else if record.assignment.index.kind == ExecutionKind::Brain
             && record.assignment.request.input["schema_version"] == 3
         {
@@ -167,7 +190,9 @@ pub async fn ack(worker: &Worker, reference: &ExecutionRef, input: Value) -> Res
         sequence <= record.events.last().and_then(|e| e.seq).unwrap_or(0) as u64,
         "invalid acknowledgement cursor"
     );
-    let key = if record
+    let key = if super::v4::parent::reports(&record.assignment.request.input) {
+        super::v4::parent::ACK
+    } else if record
         .assignment
         .request
         .input

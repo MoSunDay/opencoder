@@ -13,7 +13,11 @@ fn policies_survive_registration_serialization_and_wait_for_terminal_dependencie
     assert_eq!(saved["steps"][0]["kind"]["failure_policy"], "collect_all");
     assert_eq!(saved["steps"][1]["trigger_rule"], "all_done");
     assert_eq!(ready_steps(&spec, &StepStates::new()), vec!["cases"]);
-    for outcome in [StepOutcome::Done, StepOutcome::Error, StepOutcome::Cancelled] {
+    for outcome in [
+        StepOutcome::Done,
+        StepOutcome::Error,
+        StepOutcome::Cancelled,
+    ] {
         let states = [("cases".into(), outcome)].into_iter().collect();
         assert_eq!(ready_steps(&spec, &states), vec!["summary"]);
     }

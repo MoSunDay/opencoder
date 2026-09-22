@@ -34,7 +34,7 @@ async function prepare() {
     objective: instruction, todos: [{ id: 'echo', title: 'Verify acceptance marker',
       requirement_background: 'Layered capability integration acceptance', instructions: `${instruction} Put the marker in candidate.result.`,
       max_attempts: 1, acceptance: { criteria: `The result contains ${marker}.` } }] } });
-  const node = (id, capability) => ({ node_id: id, title: `${id}: ${instruction}`, capability_id: capability, retry: { max_attempts: 2 } });
+  const node = (id, capability) => ({ node_id: id, title: `${id}: return ${marker} exactly; no tools, files or network.`, capability_id: capability, retry: { max_attempts: 2 } });
   const plan = (title, nodes, edges = []) => ({ schema_version: 4, title, objective: instruction, inputs: { request: marker }, nodes, edges, max_rounds: 8 });
   const child = `${tag}-child`;
   await api('POST', '/api/brain/plan-defs', { id: child, version: 1, created_at: Date.now(),

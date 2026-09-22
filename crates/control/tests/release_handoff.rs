@@ -39,7 +39,11 @@ impl NodeService for Node {
             version: "test".into(),
             maintenance_agent_id: "maintainer-node-release".into(),
             protocol_version: PROTOCOL_VERSION,
-            kinds: vec![ExecutionKind::Agent, ExecutionKind::Brain],
+            kinds: vec![
+                ExecutionKind::Agent,
+                ExecutionKind::Brain,
+                ExecutionKind::Dag,
+            ],
         }
     }
     fn snapshot(&self) -> NodeSnapshot {
@@ -277,6 +281,77 @@ async fn prepared_dispatch_recovers_on_another_server_and_retries_execute_once()
     assert_eq!(send(new.url.clone(), changed).await.status(), 409);
     assert_eq!(node.starts.load(Ordering::SeqCst), 1);
     assert_eq!(node.freezes.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn prepared_private_dispatch_recovers_with_its_frozen_grant() {
+    let root = tempfile::tempdir().unwrap();
+    let _scope = opencoder_core::config::scoped_config_home(root.path().join("home"));
+    std::fs::create_dir(root.path().join("work")).unwrap();
+    let node = Node::new();
+    let mut a = assignment();
+    a.index.id = "dag-private-handoff".into();
+    a.index.kind = ExecutionKind::Dag;
+    a.request.id = a.index.id.clone();
+    a.request.kind = ExecutionKind::Dag;
+    let definition = json!({"steps": []});
+    a.private_context = Some(PrivateExecutionContext {
+        expires_at_ms: opencoder_core::message::now_ms() + 60_000,
+        image_digest: format!("sha256:{}", "a".repeat(64)),
+        definition_sha256: opencoder_core::token_hash(&serde_json::to_string(&definition).unwrap()),
+        files: [("fixture.txt".into(), "private-recovery-fixture".into())].into(),
+    });
+    a.definition = Some(definition);
+    let fingerprint = opencoder_core::token_hash(
+        &serde_json::to_string(&(&a.request, &a.private_context)).unwrap(),
+    );
+    let crashed =
+        opencoder_control::new_state(root.path().join("work"), root.path().join("control"), None)
+            .await
+            .unwrap();
+    assert!(crashed
+        .fleet
+        .claim_request("execution", &a.index.id, &fingerprint)
+        .await
+        .unwrap());
+    crashed
+        .fleet
+        .prepare_assignment(&a, &fingerprint)
+        .await
+        .unwrap();
+    drop(crashed);
+    let server = start(root.path(), node.clone()).await;
+    until(async || {
+        server
+            .state
+            .fleet
+            .receipt("execution", &a.index.id)
+            .await
+            .unwrap()
+            .is_some_and(|r| r.phase == "accepted")
+    })
+    .await;
+    assert_eq!(
+        node.records.lock().unwrap()[&a.index.id].private_context,
+        a.private_context
+    );
+    let mut body = serde_json::to_value(&a.request).unwrap();
+    assert!(!body.to_string().contains("private-recovery-fixture"));
+    body["private_context"] = serde_json::to_value(&a.private_context).unwrap();
+    let reply = client()
+        .post(format!("{}/api/executions", server.url))
+        .bearer_auth("release-test")
+        .json(&body)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(reply.status(), 202);
+    assert!(!reply
+        .text()
+        .await
+        .unwrap()
+        .contains("private-recovery-fixture"));
+    assert_eq!(node.starts.load(Ordering::SeqCst), 1);
 }
 
 #[tokio::test]

@@ -18,9 +18,10 @@ async function inspectPanels({ base, token, id, view, operations, marker, eviden
     await page.getByRole('radiogroup').getByText('Agent', { exact: true }).click();
     await page.getByRole('menuitem', { name: '大脑调度' }).click();
     await page.locator('.brain-run-header').first().getByText('已完成', { exact: true }).waitFor();
+    await page.locator('.react-flow__controls-fitview').click();
     await page.screenshot({ path: path.join(evidence, 'overview.png'), animations: 'disabled' });
     for (const op of operations) {
-      await page.getByTestId(`rf__node-${op.node_id}`).click();
+      await page.getByTestId(`rf__node-${op.node_id}`).locator('.brain-layer-node-title').click();
       const drawer = page.getByRole('dialog', { name: '能力运行明细', exact: true });
       await drawer.waitFor();
       await drawer.locator('.execution-view-full').waitFor();

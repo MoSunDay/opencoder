@@ -26,7 +26,12 @@ pub(super) fn open(
     token: CancellationToken,
     resume: bool,
 ) -> Result<Group> {
-    let StepKind::Dynamic { source, template, failure_policy } = &step.kind else {
+    let StepKind::Dynamic {
+        source,
+        template,
+        failure_policy,
+    } = &step.kind
+    else {
         unreachable!()
     };
     let dir = opencoder_dag::artifacts::step_dir(root, &run.run_id, &step.name)
@@ -68,7 +73,9 @@ pub(super) fn open(
             if let Some(outcome) = saved_outcome {
                 group.outcomes[i] = Some(outcome);
                 if outcome == StepOutcome::Error {
-                    group.error.get_or_insert_with(|| format!("instance {i}: preserved failure"));
+                    group
+                        .error
+                        .get_or_insert_with(|| format!("instance {i}: preserved failure"));
                 }
                 group.outputs[i] =
                     serde_json::from_slice(&std::fs::read(dir.join("output.json"))?)?;

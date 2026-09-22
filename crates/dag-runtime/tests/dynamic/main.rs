@@ -1,5 +1,5 @@
-mod persistence;
 mod finalizers;
+mod persistence;
 mod recovery;
 mod support;
 use opencoder_dag::DagRunStatus;

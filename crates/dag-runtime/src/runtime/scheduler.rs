@@ -75,7 +75,7 @@ pub(super) async fn schedule(
                     || active.iter().any(|(name, _)| name == &step.name) {
                     continue;
                 }
-                let mut result = failed("run cancelled before step started".into());
+                let mut result = failed("run cancelled".into());
                 result.outcome = StepOutcome::Cancelled;
                 record_step(StepDone {name:step.name.clone(),instance:None,started_at_ms:now_ms(),result},
                             &mut states,&mut outputs,&mut errors,root,run,sink).await;

@@ -6,7 +6,7 @@ from unittest.mock import patch
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from rolling.config import Settings
-from rolling.deployment import deploy, record_for, rollback, fresh_frontends
+from rolling.deployment import deploy, record_for, rollback, fresh_frontends, retire_server, _deferred_disable
 from rolling.state import Journal, write
 from rolling.manifest import compatible
 from rolling.units import nginx
@@ -74,6 +74,37 @@ class DeploymentTests(unittest.TestCase):
             mocked = patch("rolling.deployment." + target, return_value=value)
             setattr(self, target.replace(".", "_"), mocked.start())
             self.addCleanup(mocked.stop)
+
+    def test_historical_retirements_reload_manager_once_without_stopping_runtimes(self):
+        for i in range(50):
+            record = record_for(self.settings, manifest(f"old-{i}"), i + 1)
+            record['previous_servers'] = [{'port': 9000+i, 'unit': f'previous-server-{i}.service'}]
+            record['previous_hosts'] = [{'unit': f'previous-host-{i}.service'}]
+            self.journal.data['releases'][record['id']] = record
+        self.journal.data['ingress_workers'] = []
+        retire_server(self.settings, self.journal, self.operations)
+        commands = [row for row in self.operations.calls if row[0] == 'systemctl']
+        self.assertEqual(commands.count(('systemctl', 'daemon-reload')), 1)
+        disabled = [row for row in commands if row[:3] == ('systemctl', '--no-reload', 'disable')]
+        self.assertEqual(len(disabled), 200)
+        self.assertTrue(all('runtime' not in unit for row in disabled for unit in row[3:]))
+        self.assertTrue(all(value['phase'] == 'retiring' for value in self.journal.data['retirement'].values()))
+
+    def test_partial_disable_failure_still_reloads_and_preserves_the_error(self):
+        operations = Operations()
+        def fail(*args):
+            operations.calls.append(args)
+            if '--no-reload' in args:
+                raise RuntimeError('disable failed after changing a link')
+        operations.run = fail
+        with self.assertRaisesRegex(RuntimeError, 'disable failed'):
+            with _deferred_disable(operations) as disable:
+                disable('old.service')
+        self.assertEqual(operations.calls[-1], ('systemctl', 'daemon-reload'))
+        operations.calls.clear()
+        with _deferred_disable(operations):
+            pass
+        self.assertEqual(operations.calls, [])
 
     def test_continuous_release_does_not_stop_active_server_or_runtime(self):
         result = deploy(self.settings, Path("bundle"), self.operations)

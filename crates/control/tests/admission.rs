@@ -242,8 +242,8 @@ async fn freeze_blocks_new_inputs_but_keeps_read_stop_and_question_answers() {
             )
             .await
             .status(),
-        409,
-        "legacy dispatch stays read-only during admission freeze"
+        404,
+        "retired dispatch route is absent during admission freeze"
     );
 
     assert_eq!(

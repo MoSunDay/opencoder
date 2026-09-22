@@ -51,6 +51,7 @@ impl NodeService for Service {
             NodeOperation::Create { assignment } => {
                 RpcReply::ok(serde_json::json!(assignment.index))
             }
+            NodeOperation::Inspect { .. } => RpcReply::ok(serde_json::json!({"status":"running"})),
             _ => unreachable!(),
         }
     }
@@ -148,6 +149,7 @@ async fn create_reply_is_queued_after_its_load_snapshot() {
         service,
         NodeOperation::Create {
             assignment: Assignment {
+                private_context: None,
                 runtime: None,
                 codex: None,
                 index: record(1),
@@ -414,4 +416,35 @@ async fn admission_keeps_inflight_report_running_until_shared_lock_is_released()
     }
     result.expect("admission must not suspend the report that owns its shared lock");
     client.await.unwrap().unwrap();
+}
+
+#[tokio::test]
+async fn inspection_returns_without_sampling_load_or_requesting_inventory() {
+    let service: Arc<dyn NodeService> = Arc::new(Service {
+        records: vec![record(1)],
+        // snapshot() would panic, so a read cannot silently sample stale load.
+        indexes_sampled: AtomicBool::new(false),
+    });
+    let (tx, mut rx) = mpsc::channel(1);
+    let (trigger, mut triggers) = mpsc::channel(1);
+    tokio::time::timeout(
+        std::time::Duration::from_secs(1),
+        execute_call(
+            service,
+            NodeOperation::Inspect {
+                execution: record(1).execution_ref(),
+            },
+            "read-1".into(),
+            tx,
+            trigger,
+        ),
+    )
+    .await
+    .unwrap();
+    assert!(
+        matches!(rx.recv().await, Some(NodeFrame::Reply { request_id, reply })
+        if request_id == "read-1" && reply.status == 200)
+    );
+    assert!(rx.recv().await.is_none());
+    assert!(triggers.recv().await.is_none());
 }

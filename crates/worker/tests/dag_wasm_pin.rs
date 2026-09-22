@@ -39,6 +39,7 @@ fn spec(command: &str) -> DagSpec {
         name: "e2e-workflow".into(),
         description: None,
         steps: vec![StepSpec {
+            trigger_rule: Default::default(),
             name: "run".into(),
             depends_on: vec![],
             kind: StepKind::Wasm {

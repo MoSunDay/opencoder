@@ -19,7 +19,6 @@ fn node(id: &str, capability: &str) -> LayeredNode {
         node_id: id.into(),
         title: id.into(),
         capability_id: capability.into(),
-        instructions: String::new(),
         retry: LayeredRetry::default(),
     }
 }

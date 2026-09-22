@@ -1,4 +1,4 @@
-Commit: f2d723ed2a32a5a394eac05f58bc5558e7cfe08f
+Commit: 3b4775905c950f64433b5c9f4439f4396674b3c6
 
 # OpenCoder 逻辑地图
 
@@ -21,7 +21,7 @@ Rust 原生编码代理 workspace：`opencoder`（本地 CLI/TUI）、`opencode-
 - [agents/dag-runtime](agents/dag-runtime/index.md) — 节点侧 DAG 调度执行；server 不链接。
 - [agents/todos](agents/todos/index.md) — 持久化 TODO 工作流：每 TODO 独立 Primary Session。
 - [agents/project](agents/project/index.md) — 项目跟踪：goal→milestone→todo，`ProjectStore` 接缝。
-- [agents/brain](agents/brain/index.md) — 能力库、版本化本体计划、有限调度状态机、v4 分层能力画布与兼容路由。
+- [agents/brain](agents/brain/index.md) — 能力库、版本化 step/连线计划、唯一 v4 分层调度与嵌套计划。
 - [agents/agents](agents/agents/index.md) — 版本化自定义 Agent：共享池 `v{n}` + meta.json 引用卡 + NFS 只读导出。
 - [agents/team](agents/team/index.md) — 团队目录与消息扇出运行时。
 - [agents/control](agents/control/index.md) — 平台控制面：节点调度、五字段执行索引。
@@ -39,8 +39,8 @@ Rust 原生编码代理 workspace：`opencoder`（本地 CLI/TUI）、`opencode-
 - [tests/dag_e2e/](tests/dag_e2e/main.rs) — D1–D3/D5：spec 保存/dispatch 流、wasm 版本池（wat 现场编译）、cancel/失败折叠、runc preflight（无 runc 时 SKIP 运行段）、structured_output（agent 步围栏/裸 JSON 两种形态 output.json 非 null）、agent runc 沙箱（`agent_runc.rs`：真实容器内 session 全链路，无 runc 时 SKIP）、code-review 门禁 DAG（`code_review.rs`：9 步 pass/blocked 两线 + compat input 透传 + 工单 not_required/created）、review 门禁三件套（`review_dags/`：R1 启动 seed、R2 host imports+fail-closed、R3/R5 池模块 dispatch seeded def、R4 六段 agent 链（api-impact→client 客户端分支汇入 verdict）上下文传递+五字段索引）。
 - [tests/todos_e2e/](tests/todos_e2e/main.rs) — T1–T3：模板→运行→完成、interrupt→节点重启→resume→done、子 LLM 失败→todo failed + workflow suspended（父决策重试链共 5 请求）。
 - [tests/team_e2e/](tests/team_e2e/main.rs) — M1：能力注册/绑定→pinned 定义冻结 capabilities→member prompt 能力前缀→四段 chat 决策→finished topic + 1-based turn 台账。
-- [tests/brain_e2e/](tests/brain_e2e/main.rs) — B1/B2：plan-defs 固化 v1→fixed run 经子会话+收据路由 completed→重放 202 零调用；旁路 409、异样 receipt→blocked→cancel→终态命令拒绝。子会话标题 pass 与 route 竞态，stub 按内容判别。
-- [tests/brain_layered_e2e/](tests/brain_layered_e2e/main.rs) — L1–L3：v4 分层画布准入与读取面（裸 `/api/executions` 提 Brain 仍 409、`schema_version` 非 3|4 → 409 且零模型调用、非法画布 → 400 不建运行；`/layered` 视图与 `/layered/rounds/:round` 键与拒绝面，v4 运行走 v3 `/view` → 409、v3 走 `/layered` → 404）、真实 runc 画布跑到 completed（层屏障先等待再放行、逐层事件序 `run_created→layer_started→node_dispatched→operation_terminal→layer_barrier_reached→…→run_completed`、子执行 `brain_layered` 绑定与 `scheduler_output`、CLI 与模型调用计数）。无 runc 时 SKIP 运行段。
+- [tests/brain_e2e/](tests/brain_e2e/main.rs) — 原始 Brain 提交和旧 schema 写入的拒绝守卫；拒绝时不产生模型调用。
+- [tests/brain_layered_e2e/](tests/brain_layered_e2e/main.rs) — schema 4 准入、画布与层索引读取、完整层屏障、收口激活和能力执行引用；旧 schema 与旧路由拒绝。
 - [tests/support/](tests/support/mod.rs) — `llm_stub`（FIFO/Hold/Fail/**Dynamic 请求感知**流式桩 + `/embeddings` canned、`Script: Clone`）、`http_util`（Bearer JSON + SSE 解析）、`fleet_proc`（fleet 拉起/RAII/kill+respawn）；`tests/running_mode_switch_e2e.rs` 与 todos/team/brain e2e 共用。
 
 ## 仓库规则

@@ -1,4 +1,4 @@
-//! V2 graph plan versions, runs, registered capabilities and historical reads.
+//! Layered plan versions, runs, registered capabilities and historical reads.
 //! CLI and Web share the same API contracts.
 
 use anyhow::Result;
@@ -39,26 +39,6 @@ pub enum BrainCmd {
     Caps(CapsCmd),
     /// POST /api/brain/search — {"query","k"?} nearest-neighbour search.
     Search {
-        /// Body: inline JSON or @file.
-        #[arg(long)]
-        json: String,
-    },
-    /// Retired decision-tree writer; returns a v2 migration error.
-    Plan {
-        /// Body: inline JSON or @file.
-        #[arg(long)]
-        json: String,
-    },
-    /// GET /api/brain/plans/{id} — one cached plan.
-    PlanGet { id: String },
-    /// Retired decision-tree preview; returns a v2 migration error.
-    Preview {
-        /// Body: inline JSON or @file.
-        #[arg(long)]
-        json: String,
-    },
-    /// Retired decision-tree execution; use brain runs create instead.
-    Dispatch {
         /// Body: inline JSON or @file.
         #[arg(long)]
         json: String,
@@ -106,10 +86,6 @@ pub fn plan(sub: &BrainCmd) -> Result<RequestPlan> {
         BrainCmd::Caps(sub) => plan_caps(sub)?,
         BrainCmd::Search { json } => {
             RequestPlan::post("/api/brain/search").with_body(required_body(json)?)
-        }
-        BrainCmd::PlanGet { id } => RequestPlan::get(format!("/api/brain/plans/{id}")),
-        BrainCmd::Plan { .. } | BrainCmd::Preview { .. } | BrainCmd::Dispatch { .. } => {
-            anyhow::bail!(opencoder_brain::graph::MIGRATION)
         }
     })
 }
@@ -169,48 +145,13 @@ mod tests {
     }
 
     #[test]
-    fn planning_endpoints_are_json_posts() {
-        for (sub, path) in [
-            (
-                BrainCmd::Search {
-                    json: r#"{"query":"auth"}"#.into(),
-                },
-                "/api/brain/search",
-            ),
-            (
-                BrainCmd::Plan {
-                    json: r#"{"situation":"deploy"}"#.into(),
-                },
-                "/api/brain/plans",
-            ),
-            (
-                BrainCmd::Preview {
-                    json: r#"{"situation":"deploy"}"#.into(),
-                },
-                "/api/brain/preview",
-            ),
-            (
-                BrainCmd::Dispatch {
-                    json: r#"{"situation":"deploy"}"#.into(),
-                },
-                "/api/brain/dispatch",
-            ),
-        ] {
-            if !matches!(sub, BrainCmd::Search { .. }) {
-                assert!(plan(&sub)
-                    .unwrap_err()
-                    .to_string()
-                    .contains("migration required"));
-                continue;
-            }
-            let planned = plan(&sub).unwrap();
-            assert_eq!(planned.method, reqwest::Method::POST, "{path}");
-            assert_eq!(planned.path, path);
-            assert!(planned.body.is_some());
-        }
-        assert_eq!(
-            plan(&BrainCmd::PlanGet { id: "p7".into() }).unwrap(),
-            RequestPlan::get("/api/brain/plans/p7")
-        );
+    fn search_posts_query() {
+        let planned = plan(&BrainCmd::Search {
+            json: r#"{"query":"auth"}"#.into(),
+        })
+        .unwrap();
+        assert_eq!(planned.method, reqwest::Method::POST);
+        assert_eq!(planned.path, "/api/brain/search");
+        assert_eq!(planned.body, Some(serde_json::json!({"query":"auth"})));
     }
 }

@@ -18,10 +18,7 @@ pub(crate) fn node_workdir(worker: &Worker) -> PathBuf {
 
 fn managed(record: &Record) -> bool {
     let input = &record.assignment.request.input;
-    input.get("_brain").is_some()
-        || input.get("brain_scheduler").is_some()
-        || input.get("brain_layered").is_some()
-        || input.get("layered_request").is_some()
+    input.get("brain_layered").is_some() || input.get("layered_request").is_some()
 }
 
 fn with_workdir(

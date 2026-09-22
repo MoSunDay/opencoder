@@ -1,9 +1,10 @@
 // run.jsx — the v4 workbench body: layered canvas, layer barrier progress,
 // layer decisions and the v4 event journal. v3 runs never reach this module.
-import { Alert, Button, Collapse, Progress, Space, Tag, Typography } from 'antd';
+import { Alert, Button, Collapse, Drawer, Select, Progress, Space, Tag, Typography } from 'antd';
 import { useState } from 'react';
 import { apiPost } from '../../../api.js';
 import { KIND_LABELS } from '../../../fleet/model.js';
+import { ExecutionView } from '../../../fleet/detail.jsx';
 import { TimeText } from '../../../ui/timeText.jsx';
 import { LayerCanvas } from './canvas.jsx';
 import { LayeredEvents } from './events.jsx';
@@ -11,8 +12,7 @@ import { LayerRounds } from './rounds.jsx';
 import { LAYERED_COLORS, LAYERED_PHASES, barrier, layeredPhase, planOf, terminalPhase } from './model.js';
 import './style.css';
 
-/// Connection badge text. A v4 run has no stream in the locked contract, so
-/// the hook also polls every 3s: a failed stream means "polling", not "broken".
+// Execution events refresh the view; periodic reads also report connection failures.
 const CONNECTION_TEXT = {
   live: '正在实时同步', open: '正在实时同步', connecting: '正在同步',
   reconnecting: '正在重连', closed: '运行已结束', polling: '定时同步', failed: '推送不可用，定时同步',
@@ -26,8 +26,12 @@ function CapabilityList({ capabilities = [] }) {
   </section>)}</div>;
 }
 
-export function LayeredRunBody({ view, id, connection, refresh }) {
+export function LayeredRunBody({ view, id, connection, refresh, onNotice }) {
   const [busy, setBusy] = useState(false); const [commandError, setCommandError] = useState(''); const [selected, setSelected] = useState(null);
+  const [executionId, setExecutionId] = useState(null);
+  const operations = view.operations || [];
+  const execution = operations.find((op) => op.execution_id === executionId);
+  const selectNode = (nodeId) => { setSelected(nodeId); const op = operations.filter((op) => op.node_id === nodeId).sort((a, b) => b.attempt - a.attempt)[0]; setExecutionId(op?.execution_id || null); };
   const run = view.run || {}; const plan = planOf(view); const phase = layeredPhase(view); const progress = barrier(view);
   const command = async (action) => {
     setBusy(true); setCommandError('');
@@ -43,7 +47,7 @@ export function LayeredRunBody({ view, id, connection, refresh }) {
         <Typography.Title level={4} ellipsis={{ rows: 2, expandable: 'collapsible', symbol: (expanded) => (expanded ? '收起目标' : '展开目标') }}>{plan.title || run.run_id}</Typography.Title>
         {!!plan.objective && <Typography.Paragraph className="brain-layer-objective">{plan.objective}</Typography.Paragraph>}
         <Space wrap>
-          <Tag color="purple">v4 分层能力画布</Tag>
+          <Tag color="purple">分层能力计划</Tag>
           <Tag color={LAYERED_COLORS[phase]}>{LAYERED_PHASES[phase] || phase}</Tag>
           <Tag>层屏障 {progress.label}</Tag>
           {run.parent && <Tag color="geekblue">子运行 · 父层 {run.parent.layer}</Tag>}
@@ -64,14 +68,18 @@ export function LayeredRunBody({ view, id, connection, refresh }) {
         {!!run.summary && <Typography.Text type="secondary">交付摘要：{run.summary}</Typography.Text>}
       </Space>
     </section>
-    <LayerCanvas view={view} selected={selected} onSelect={setSelected} />
+    <LayerCanvas view={view} selected={selected} onSelect={selectNode} />
     <section className="brain-rounds">
       <Typography.Title level={5}>分层决策与执行</Typography.Title>
-      <LayerRounds id={id} view={view} />
+      <LayerRounds id={id} view={view} onExecution={setExecutionId} />
     </section>
     <Collapse items={[
       { key: 'events', label: `分层事件（${(view.events || []).length}）`, children: <LayeredEvents view={view} /> },
       { key: 'capabilities', label: `本次运行关联能力（${(view.capabilities || []).length}）`, children: <CapabilityList capabilities={view.capabilities} /> },
     ]} />
+    <Drawer open={!!execution} onClose={() => setExecutionId(null)} title="能力运行明细" size="90vw" destroyOnHidden>
+      {execution && <><Select aria-label="选择执行尝试" style={{ width: '100%', marginBottom: 16 }} value={executionId} onChange={setExecutionId} options={operations.map((op) => ({ value: op.execution_id, label: `第 ${op.layer} 层 · ${plan.nodes.find((n) => n.node_id === op.node_id)?.title || op.node_id} · 第 ${op.attempt} 次尝试` }))} />
+        {execution.status === 'creating' ? <Alert type="info" title="等待派发，执行尚未创建" /> : <ExecutionView key={executionId} executionRef={{ id: executionId, kind: execution.execution_kind }} managed onNotice={onNotice} />}</>}
+    </Drawer>
   </>;
 }

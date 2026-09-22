@@ -129,7 +129,10 @@ pub async fn execute_agent_step(
         }
     };
 
-    let prompt = build_prompt(ctx);
+    let prompt = super::private_files::prompt(
+        build_prompt(ctx),
+        deps.config.dag.execution_private_root.as_deref(),
+    );
     let result = run_session(&mut session, prompt, on_event).await;
     // Guarantee the final local flush before reading the transcript.
     if let Err(e) = flusher.await {

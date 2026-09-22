@@ -1,9 +1,6 @@
 use crate::Worker;
 use anyhow::{ensure, Context, Result};
-use opencoder_core::{
-    brain::{layered::*, *},
-    Config,
-};
+use opencoder_core::{brain::layered::*, Config};
 use serde_json::json;
 use std::path::{Path, PathBuf};
 use tokio_util::sync::CancellationToken;
@@ -21,55 +18,6 @@ pub fn cli_path() -> Result<PathBuf> {
     Ok(path)
 }
 
-pub async fn activate(
-    worker: &Worker,
-    config: &Config,
-    context: &ActivationContext,
-    cancel: CancellationToken,
-) -> Result<ActivationDecision> {
-    // Same external-provider injection seam as the native execution adapters.
-    if let Some(client) = &worker.inner.client {
-        return tokio::select! {
-            _ = cancel.cancelled() => anyhow::bail!("brain activation cancelled"),
-            result = opencoder_brain::activation::activate(context,client.as_ref(),config.model_id()) => result,
-        };
-    }
-    activate_json(
-        worker,
-        config,
-        &context.run_id,
-        context.activation,
-        context,
-        cancel,
-    )
-    .await
-}
-
-pub async fn scheduler(
-    worker: &Worker,
-    config: &Config,
-    context: &BrainSchedulerContext,
-    cancel: CancellationToken,
-) -> Result<BrainSchedulerDecision> {
-    if let Some(client) = &worker.inner.client {
-        return tokio::select! {
-            _ = cancel.cancelled() => anyhow::bail!("brain activation cancelled"),
-            result = opencoder_brain::scheduler::activate(context, client.as_ref(), config.model_id()) => result,
-        };
-    }
-    activate_json(
-        worker,
-        config,
-        &context.run_id,
-        context.generation,
-        context,
-        cancel,
-    )
-    .await
-}
-
-/// One layer decision for a v4 root. The context carries the frozen
-/// descriptors of the layer being decided, so the model can only bind those.
 pub async fn layered(
     worker: &Worker,
     config: &Config,
@@ -288,44 +236,4 @@ fn write_bundle(bundle: &Path, activation: &Path, cli: &Path) -> Result<()> {
         "mounts":mounts,"linux":{"namespaces":[{"type":"pid"},{"type":"ipc"},{"type":"uts"},{"type":"mount"}]}});
     opencoder_core::atomic_write_json(&bundle.join("config.json"), &config)?;
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[tokio::test]
-    #[ignore = "requires workspace binaries and privileged runc; run explicitly on a node host"]
-    async fn mounted_cli_finishes_fixed_activation_without_model_credentials() {
-        let dir = tempfile::tempdir().unwrap();
-        let workspace = dir.path().join("activation");
-        std::fs::create_dir_all(&workspace).unwrap();
-        let cli = std::env::current_exe()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .join("opencoder-cli");
-        assert!(cli.is_file(), "build workspace binaries first");
-        let context = json!({"schema_version":2,"run_id":"brain-runc-smoke","activation":1,"control_epoch":1,"revision":1,"plan_ref":{"id":"plan-smoke","version":1},"plan":{"schema_version":2,"title":"Smoke","objective":"finite dispatch","instances":[],"inputs":{},"outputs":{},"routes":[],"entry":[]},"objective":"finite dispatch","phase":"running","inputs":{},"instances":[],"ready":["ready-a","ready-b"],"references":[],"capabilities":[],"routes":[]});
-        private_json(&workspace.join("context.json"), &context).unwrap();
-        private_json(&workspace.join("config.json"), &json!({})).unwrap();
-        let bundle = dir.path().join("bundle");
-        write_bundle(&bundle, &workspace, &cli).unwrap();
-        let (code, output) = opencoder_dag_runtime::sandbox::runc::run_step_cancellable(
-            &bundle,
-            &format!("brain-smoke-{}", ulid::Ulid::new()),
-            Some(20),
-            CancellationToken::new(),
-        )
-        .await
-        .unwrap();
-        assert_eq!(code, 0, "{output}");
-        let decision: ActivationDecision =
-            serde_json::from_slice(&std::fs::read(workspace.join("decision.json")).unwrap())
-                .unwrap();
-        assert_eq!(decision.dispatch, vec!["ready-a", "ready-b"]);
-        assert_eq!(decision.activation, 1);
-        assert!(decision.plan.is_none());
-    }
 }

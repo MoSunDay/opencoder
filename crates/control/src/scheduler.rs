@@ -309,9 +309,9 @@ fn json_params(job: &ScheduleJob) -> Value {
 /// Scheduled runs use exactly the same v3 admission contract as HTTP/CLI.
 fn brain_run(execution_id: &str, node_id: Option<String>, params: &Value) -> anyhow::Result<Value> {
     anyhow::ensure!(
-        params["schema_version"] == 3,
+        params["schema_version"] == 4,
         "{}",
-        opencoder_core::brain::SCHEDULER_MIGRATION
+        opencoder_core::brain::layered::LAYERED_MIGRATION
     );
     let mut request = params.clone();
     request["id"] = serde_json::json!(execution_id);

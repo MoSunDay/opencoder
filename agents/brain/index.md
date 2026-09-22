@@ -1,25 +1,18 @@
-Commit: 586e56014aaa9d2ec59047a24a8cb5ca644d1249
+Commit: 3b4775905c950f64433b5c9f4439f4396674b3c6
 
 # brain 模块
 
-能力目录、不可变 v2 计划与事件驱动 v3 调度器、v4 分层能力画布；能力自身负责执行与验证。
-契约：运行版本不可修改；非法路由/缺输出/访问上限/能力契约错误进入 blocked、不建回退能力；v2 只读兼容，新运行须 `schema_version: 3`（分层画布用 4）。
+能力目录与 schema_version 4 分层调度。计划由一句话节点、单一能力引用及连线构成；层级纯函数推导，整层成功越过屏障，重试耗尽失败并取消兄弟。执行与验证由能力自身负责。
 
-## 索引
-- `crates/core/src/brain/` — v2 计划/图/输出/路由 DTO、v3 调度契约（`scheduler.rs` SchedulerPlan）
-- `crates/brain/src/graph/` — 校验/推进/路由/因果/输出（纯函数）
-- `crates/brain/src/activation.rs`、`crates/brain/src/execution/` — 模型请求拆分与执行回执/暂停取消
-- `crates/brain/src/ontology/`、`crates/brain/src/playbook/` — 旧本体与 Playbook 只读兼容
-- `crates/brain/src/scheduler/` — 能力预筛与严格 Dispatch/Complete/Fail 校验
-- `crates/brain/src/layered/` — v4 纯域：层级（`layers`/`layer_of`/`ancestors`/`layer_context`）、校验（`validate_plan`/`validate_request`）、层决策（`decide`/`activate`/`terminal`/`admit`/`command`）、操作身份（`operation_id`/`execution_id`）与 `PROMPT`
-- `crates/core/src/brain/layered/` — v4 线协议 DTO（`LayeredRun`/`LayeredOperation`/`LayeredContext`/`LayeredDispatchIntent` 等，LOCKED）
-- `crates/control/src/api/brain_runs/v3/` — 能力目录归一与 ExecutionGateway 派发
-- `crates/control/src/api/brain_runs/v4/` — 分层画布读写、派发与视图（read 兼容别名：`snapshot|layered_snapshot`、`events|layered_events`、`layered_summary|scheduler_summary`、`layered_output|scheduler_output`）
-- `crates/worker/src/brain/v3/`、`crates/worker/src/brain/v4/` — 节点本地投影恢复与事件确认（按 `schema_version` 分支）
-- `crates/brain/tests/` — action_flow/execution/planning/ontology/scheduler_v3 回归 + `layered/`（validate/barriers/terminal）
+- `crates/core/src/brain/layered/`：计划、运行、操作与决策协议。
+- `crates/core/src/brain/capability.rs`：能力描述及输入引用。
+- `crates/brain/src/layered/`：图校验、分层、上下文、决策、终态、重试与命令纯函数。
+- `crates/brain/src/runtime.rs`：能力库持久化及向量检索。
+- `crates/control/src/api/brain_runs/plan_capabilities.rs`：保存计划能力化及嵌套引用校验。
+- `crates/control/src/api/brain_runs/v4/`：准入、派发、事件转交及索引视图。
+- `crates/worker/src/brain/v4/`：节点投影、恢复、模型调度与确认。
+- `crates/brain/tests/layered/`：图约束、层屏障、终态；`crates/worker/tests/brain_nested.rs`：真实嵌套计划链路。
 
-## 相关
-- [features/brain](../../features/brain/index.md) — 工作台操作面
-- [agents/control](../control/index.md) — 派发 API
-- [agents/worker](../worker/index.md) — 持久化、能力输出适配与恢复
-- [运行协议](../../docs/brain-orchestration.md) — 输入/输出/路由/迁移契约
+仅支持 schema 4，不提供旧调度器或数据迁移兼容分支。历史数据清理使用 `scripts/maintenance/brain_cleanup/` 的审阅清单、行摘要校验、备份与重复复核；清理范围必须同时覆盖运行数据、Server 索引及 Host 休眠索引，避免节点同步恢复已删除的 ID。清理不在存储初始化中自动执行。
+
+[运行协议](../../docs/brain-orchestration.md) · [工作台](../../features/brain/index.md)

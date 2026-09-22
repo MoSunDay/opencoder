@@ -7,27 +7,19 @@ use std::sync::Arc;
 
 use anyhow::{bail, Context, Result};
 
-use opencoder_core::brain::{BrainSchedulerContext, BrainSchedulerDecision};
-use opencoder_llm::{ChatRequest, ChatStream, LlmEvent, Message, RequestPurpose};
+use opencoder_llm::ChatStream;
 use opencoder_store::{
-    BrainCapabilityDetail, BrainCapabilityRecord, BrainEngInputRecord, BrainPlaybookRecord,
-    BrainVectorHit, BrainVectorWrite, Store,
+    BrainCapabilityDetail, BrainCapabilityRecord, BrainEngInputRecord, BrainVectorHit,
+    BrainVectorWrite, Store,
 };
 
 use crate::domain;
 use crate::error::{BrainNotFound, EmbeddingFailed};
-use crate::playbook::{PlaybookInput, PlaybookSpec};
 use crate::types::CapabilityInput;
 
 /// Prefix for every persisted capability id (`brain-{ULID}`) — ULID body keeps
 /// ids sortable and collision-free, mirroring the `todo-` id style.
 pub const ID_PREFIX: &str = "brain";
-
-/// Prefix for every persisted decision-tree plan id (`brain-plan-{ULID}`).
-pub const PLAN_ID_PREFIX: &str = "brain-plan";
-
-/// Prefix for every persisted playbook id (`playbook-{ULID}`).
-pub const PLAYBOOK_ID_PREFIX: &str = "playbook";
 
 /// Data struct of Arcs + strings: cloning shares the store/client handles
 /// (cheap) so the web layer can hand the same runtime to the project module
@@ -37,10 +29,6 @@ pub struct Runtime {
     pub(crate) store: Arc<dyn Store>,
     pub(crate) client: Arc<dyn ChatStream>,
     pub(crate) model: String,
-    /// Chat model the dynamic planner prompts under (the framework-prompt
-    /// LLM call in `planning.rs`). Defaults to the embedding model id; the
-    /// production wiring overrides it with the config's small model.
-    pub(crate) chat_model: String,
 }
 
 impl Runtime {
@@ -51,74 +39,16 @@ impl Runtime {
     ) -> Self {
         let model = model.into();
         Self {
-            chat_model: model.clone(),
             store,
             client,
             model,
         }
     }
 
-    /// Override the planner chat model (builder; see `chat_model`).
-    pub fn with_chat_model(mut self, model: impl Into<String>) -> Self {
-        self.chat_model = model.into();
-        self
-    }
-
-    /// The chat model the dynamic planner prompts under.
-    pub fn chat_model(&self) -> &str {
-        &self.chat_model
-    }
-
     /// The embedding model every vector write/search is scoped to. Exposed so
     /// the web layer can log or validate it without re-deriving it.
     pub fn model(&self) -> &str {
         &self.model
-    }
-
-    /// One bounded model turn for a v3 scheduler. The caller supplies only
-    /// capability descriptors and execution references; detailed child data
-    /// remains behind the execution gateway.
-    pub async fn scheduler_decide(
-        &self,
-        context: &BrainSchedulerContext,
-    ) -> Result<BrainSchedulerDecision> {
-        anyhow::ensure!(
-            context.schema_version == 3,
-            "scheduler requires schema_version 3"
-        );
-        let payload = serde_json::to_string(context)?;
-        anyhow::ensure!(
-            payload.len() <= 512 * 1024,
-            "scheduler context exceeds 512 KiB"
-        );
-        let mut stream = self.client.chat_stream(ChatRequest {
-            purpose: RequestPurpose::Planning,
-            model: self.chat_model.clone(),
-            messages: vec![
-                Message::system("brain-scheduler-v3", crate::scheduler::PROMPT),
-                Message::user("scheduler-context", payload),
-            ],
-            tools: vec![],
-            tool_choice: None,
-            temperature: Some(0.0),
-            max_tokens: Some(16_384),
-            reasoning_effort: None,
-            cache_salt: None,
-        })?;
-        while let Some(event) = stream.recv().await {
-            match event {
-                LlmEvent::Completed { text, .. } => {
-                    anyhow::ensure!(
-                        text.len() <= 256 * 1024,
-                        "scheduler decision exceeds 256 KiB"
-                    );
-                    return Ok(serde_json::from_str(text.trim())?);
-                }
-                LlmEvent::Error(error) => anyhow::bail!("scheduler provider: {error}"),
-                _ => {}
-            }
-        }
-        anyhow::bail!("scheduler stream ended without completion")
     }
 
     /// Validate → compose → embed → persist (capability row, exemplar inputs
@@ -213,59 +143,6 @@ impl Runtime {
         self.store
             .search_brain_vectors(&self.model, &domain::f32_slice_to_le_bytes(&emb), k)
             .await
-    }
-
-    // ---- Playbooks (dual-track scheduling: fixed + LLM-generated graphs).
-    // Pure store calls — no embeddings involved.
-
-    /// Validate + persist a fresh fixed playbook. The id is minted here
-    /// (`playbook-{ULID}`); every validation problem is aggregated into one
-    /// joined error so callers see the complete report.
-    pub async fn create_playbook(
-        &self,
-        _input: &PlaybookInput,
-        _now_ms: i64,
-    ) -> Result<PlaybookSpec> {
-        anyhow::bail!(crate::graph::MIGRATION)
-    }
-
-    /// Replace an existing playbook's content. The id, origin, situation
-    /// digest and `created_at` are preserved; name, trigger and steps come
-    /// from the input. `Ok(None)` for an unknown id.
-    pub async fn update_playbook(
-        &self,
-        _id: &str,
-        _input: &PlaybookInput,
-        _now_ms: i64,
-    ) -> Result<Option<PlaybookSpec>> {
-        anyhow::bail!(crate::graph::MIGRATION)
-    }
-
-    /// Fetch one persisted playbook record (`None` if absent).
-    pub async fn get_playbook(&self, id: &str) -> Result<Option<BrainPlaybookRecord>> {
-        self.store.get_brain_playbook(id).await
-    }
-
-    /// Fetch one playbook's decoded spec (`None` if absent; a corrupt stored
-    /// spec is an error naming the id).
-    pub async fn get_playbook_spec(&self, id: &str) -> Result<Option<PlaybookSpec>> {
-        match self.get_playbook(id).await? {
-            None => Ok(None),
-            Some(record) => Ok(Some(
-                serde_json::from_str(&record.spec_json)
-                    .with_context(|| format!("stored playbook {id} spec is corrupt"))?,
-            )),
-        }
-    }
-
-    /// Every persisted playbook, newest first.
-    pub async fn list_playbooks(&self) -> Result<Vec<BrainPlaybookRecord>> {
-        self.store.list_brain_playbooks().await
-    }
-
-    /// Delete one playbook; `true` when a row was removed.
-    pub async fn delete_playbook(&self, _id: &str) -> Result<bool> {
-        anyhow::bail!(crate::graph::MIGRATION)
     }
 
     /// Embed exactly one text. Every upstream failure class — an embed call

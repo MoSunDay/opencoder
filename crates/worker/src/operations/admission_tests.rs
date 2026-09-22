@@ -25,6 +25,7 @@ async fn rejected_project_commands_never_change_durable_admission() {
         annotations: serde_json::Value::Null,
         queue: None,
         assignment: Assignment {
+            private_context: None,
             runtime: None,
             codex: None,
             index: ExecutionIndex {
@@ -168,6 +169,7 @@ async fn missing_runc_rootfs_is_rejected_before_durable_acceptance() {
     let reply = super::create::create(
         &worker,
         Assignment {
+            private_context: None,
             runtime: None,
             codex: None,
             index: ExecutionIndex {
@@ -225,6 +227,7 @@ async fn create_never_adopts_an_unowned_execution_directory() {
     let reply = super::create::create(
         &worker,
         Assignment {
+            private_context: None,
             runtime: None,
             codex: None,
             index: ExecutionIndex {
@@ -279,6 +282,7 @@ async fn system_history_is_queryable_and_stoppable_but_cannot_restart() {
         annotations: serde_json::Value::Null,
         queue: None,
         assignment: Assignment {
+            private_context: None,
             runtime: None,
             codex: None,
             index: ExecutionIndex {

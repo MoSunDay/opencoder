@@ -198,14 +198,18 @@ async fn execute_call(
     tx: mpsc::Sender<NodeFrame>,
     report_trigger: mpsc::Sender<()>,
 ) {
+    let refresh = operation.refreshes_inventory();
     let reply = invoke(service.as_ref(), operation).await;
-    // Publish load before replies release reservations.
-    let _ = tx
-        .send(NodeFrame::Snapshot {
-            snapshot: service.snapshot(),
-        })
-        .await;
-    request_report(&report_trigger);
+    if refresh {
+        // Publish load before mutation replies release reservations. Reads
+        // must not amplify polling into repeated whole-inventory reports.
+        let _ = tx
+            .send(NodeFrame::Snapshot {
+                snapshot: service.snapshot(),
+            })
+            .await;
+        request_report(&report_trigger);
+    }
     let _ = tx.send(NodeFrame::Reply { request_id, reply }).await;
 }
 

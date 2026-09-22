@@ -94,6 +94,7 @@ fn record(worker: &Worker, id: &str, status: ExecutionStatus) -> Record {
         annotations: serde_json::Value::Null,
         queue: None,
         assignment: Assignment {
+            private_context: None,
             runtime: None,
             codex: None,
             index: ExecutionIndex {

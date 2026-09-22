@@ -70,10 +70,17 @@ pub(crate) async fn execute_agent_step_runc(
         .knowledge_root
         .as_ref()
         .map(|_| std::path::Path::new(super::KNOWLEDGE_MOUNT));
-    if let Err(e) = std::fs::write(
-        step_dir.join("prompt.txt"),
-        build_prompt_with_knowledge(ctx, knowledge_path),
-    ) {
+    if let Err(e) =
+        std::fs::write(
+            step_dir.join("prompt.txt"),
+            super::private_files::prompt(
+                build_prompt_with_knowledge(ctx, knowledge_path),
+                deps.config.dag.execution_private_root.as_ref().map(|_| {
+                    std::path::Path::new(opencoder_core::fleet::private_files::GUEST_ROOT)
+                }),
+            ),
+        )
+    {
         return wasm::error_result(format!("cannot write prompt.txt: {e}"));
     }
 
@@ -170,6 +177,12 @@ pub(crate) async fn execute_agent_step_runc(
         Ok(Err(err)) => return wasm::error_result(format!("cannot build oci bundle: {err:#}")),
         Err(err) => return wasm::error_result(format!("oci bundle preparation failed: {err}")),
     };
+
+    if let Some(root) = deps.config.dag.execution_private_root.as_deref() {
+        if let Err(error) = super::private_files::bind(&bundle_dir, root) {
+            return wasm::error_result(format!("private task mount failed: {error:#}"));
+        }
+    }
 
     // run_step owns the timeout (it kills + reaps the container); every
     // stdout/stderr byte is mirrored into the node store as it arrives.

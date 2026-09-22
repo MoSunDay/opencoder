@@ -135,6 +135,7 @@ fn step_ctx(workflow_root: &std::path::Path, command: &str, timeout_secs: Option
         name: "test-workflow".into(),
         description: None,
         steps: vec![StepSpec {
+            trigger_rule: Default::default(),
             name: "a".into(),
             depends_on: vec![],
             kind: StepKind::Wasm {

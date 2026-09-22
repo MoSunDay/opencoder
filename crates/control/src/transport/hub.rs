@@ -16,6 +16,11 @@ const CREATE_REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 fn request_timeout(operation: &NodeOperation) -> Duration {
     match operation {
         NodeOperation::Create { .. } => CREATE_REQUEST_TIMEOUT,
+        NodeOperation::Brain { action, input, .. }
+            if action == "capability_probe" && input["private_files"] == true =>
+        {
+            CREATE_REQUEST_TIMEOUT
+        }
         _ => DEFAULT_REQUEST_TIMEOUT,
     }
 }

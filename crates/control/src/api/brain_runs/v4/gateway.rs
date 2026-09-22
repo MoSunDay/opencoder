@@ -35,6 +35,21 @@ pub async fn dispatch(
         };
         bound_inputs.insert(name.clone(), value);
     }
+    let plan: LayeredPlan = serde_json::from_value(request["plan"].clone())?;
+    let step = plan.node(&op.node_id).context("dispatch step missing")?;
+    if cap.kind == ExecutionKind::Brain {
+        let mut child_inputs = cap.definition["plan"]["inputs"]
+            .as_object()
+            .cloned()
+            .unwrap_or_default();
+        child_inputs.extend(bound_inputs);
+        return Ok(super::api::submit(state.clone(), json!({
+            "id":op.execution_id, "schema_version":4,
+            "plan":{"id":cap.definition["plan_id"],"version":cap.definition["version"]},
+            "inputs":child_inputs, "depth":run.depth + 1,
+            "parent":{"run_id":run.run_id,"operation_id":op.operation_id,"node_id":op.node_id,"layer":op.layer}
+        })).await);
+    }
     let prompt = format!(
         "You are executing one bounded capability task of one layer of the layered Brain canvas.\n\
          Capability: {} ({:?}), target: {}.\n\
@@ -46,13 +61,14 @@ pub async fn dispatch(
          result, then finish when that local result is verified. For a Team, completion and final_summary \
          describe only this Team's assigned result.\n\
          Root objective (context; apply only the portion assigned to this capability):\n{}\n\
-         Layered inputs:\n{}",
+         Step task:\n{}\n\nLayered inputs:\n{}",
         cap.capability_id,
         cap.kind,
         cap.target,
         cap.input_desc,
         cap.output_desc,
         request["plan"]["objective"].as_str().unwrap_or_default(),
+        step.title,
         serde_json::to_string(&bound_inputs)?
     );
     let mut input = json!({"schema_version":4,"brain_layered":{"run_id":run.run_id,"operation_id":op.operation_id,"layer":op.layer,"node_id":op.node_id,"attempt":op.attempt,"capability":super::view::capability_metadata(cap)},"bindings":bindings,"layered_inputs":bound_inputs,"prompt":prompt,"definition":cap.definition});

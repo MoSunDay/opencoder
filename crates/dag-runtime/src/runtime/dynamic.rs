@@ -14,6 +14,7 @@ pub(super) struct Group {
     pub token: CancellationToken,
     pub error: Option<String>,
     pub started: i64,
+    pub collect_all: bool,
 }
 
 pub(super) fn open(
@@ -25,7 +26,12 @@ pub(super) fn open(
     token: CancellationToken,
     resume: bool,
 ) -> Result<Group> {
-    let StepKind::Dynamic { source, template } = &step.kind else {
+    let StepKind::Dynamic {
+        source,
+        template,
+        failure_policy,
+    } = &step.kind
+    else {
         unreachable!()
     };
     let dir = opencoder_dag::artifacts::step_dir(root, &run.run_id, &step.name)
@@ -42,6 +48,7 @@ pub(super) fn open(
         items
     };
     let mut group = Group {
+        collect_all: *failure_policy == opencoder_dag::FailurePolicy::CollectAll,
         outcomes: vec![None; items.len()],
         outputs: vec![Value::Null; items.len()],
         items,
@@ -58,8 +65,18 @@ pub(super) fn open(
                 continue;
             }
             let meta: Value = serde_json::from_slice(&std::fs::read(path)?)?;
-            if meta["outcome"] == "done" {
-                group.outcomes[i] = Some(StepOutcome::Done);
+            let saved_outcome = match meta["outcome"].as_str() {
+                Some("done") => Some(StepOutcome::Done),
+                Some("error") if group.collect_all => Some(StepOutcome::Error),
+                _ => None,
+            };
+            if let Some(outcome) = saved_outcome {
+                group.outcomes[i] = Some(outcome);
+                if outcome == StepOutcome::Error {
+                    group
+                        .error
+                        .get_or_insert_with(|| format!("instance {i}: preserved failure"));
+                }
                 group.outputs[i] =
                     serde_json::from_slice(&std::fs::read(dir.join("output.json"))?)?;
             }

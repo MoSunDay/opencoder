@@ -1,117 +1,46 @@
-# 大脑调度计划与运行协议
+# 大脑分层计划与运行协议
 
-大脑有三条协议。v2 使用 `input → 实例 → output → 路由 → 下一实例的 input` 的不可变图；v3 使用工程输入、能力目录和轮次终态事件的轻量调度；v4 在 v3 语义上加一层「分层能力画布」，把计划先按依赖切层、以层屏障串行推进。v2 计划仍按原校验器和执行内核运行，v3 不把完整 DAG 或子执行正文复制到脑状态。
+大脑仅支持 schema_version 4。计划保存 step（`nodes`）和连线（`edges`），每个 step 用一句话 `title` 描述任务并通过 `capability_id` 关联一个能力。计划保留名称、目标、默认工程输入、最多调度轮次；节点可配置尝试上限。层级由连线计算，不另存一份层表。
 
-## 事件驱动调度 v3
+## 计划与能力
 
-v3 请求必须明确 `schema_version: 3`，根输入使用命名 JSON 输入，`repo`、`commit`、`branch` 等工程信息只是普通输入。每轮模型只能返回严格的 `Dispatch`、`Complete` 或 `Fail`：能力必须来自目录，输入绑定只能引用根输入、成功执行的 `execution_id` 输出路径或已有产物引用。缺少目录描述、非法引用、无成功证据完成或超过轮次上限都会进入 `blocked`。
-
-运行投影只保存 `run`、`operation` 和 `event` 的索引、状态、序号、引用及有限摘要。创建一轮时 control 通过统一 gateway 调用真实 Agent、Team、DAG、TODO 或 Operator；调度器随后停止，只有节点持久化终态并经 outbox 确认的事件才能唤醒下一次判断。当前轮次全部成功才越过屏障；任一失败终态立即取消兄弟操作并终止运行，迟到事件只记录。执行详情、消息、DAG 步骤和产物正文通过 `GET /api/executions/{execution_id}` 及所属节点查询。
-
-v3 入口为 `POST /api/brain/runs`、`GET /api/brain/runs/:id`、`GET /api/brain/runs/:id/events-page`、`GET /api/brain/runs/:id/rounds/:round` 和 `POST /api/brain/runs/:id/commands`；CLI 的 `brain runs` 支持创建、最小快照、轮次、事件及 pause/resume/cancel。v2 数据不迁移、不删除，旧运行保持只读兼容。
-
-## 分层能力画布 v4
-
-v4 请求同样在 `POST /api/brain/runs` 提交：可以内联 v4 计划、引用已固化计划版本（`{"schema_version":4,"plan":{"id","version"}}`），或回贴 control 冻结的信封；`schema_version` 不是 3 或 4 时显式报 migration required，绝不回落猜测。准入后 control 把 `layered_request`、`layered_intent`、计划与能力范围冻结成 assignment 输入交给持有该运行的节点。计划先按依赖由 Kahn 算法切层，层划分从不落库、每次重算；一层的节点只有在所属层被决策时才创建操作，层屏障要求整层终态才放行下一层，`run.layer` 记录已完成层数，正在决策的层恒为 `run.layer + 1`（线上层号从 1 起）。节点失败按 `retry.max_attempts`（1..=5，缺省 2）重试，重试是新尝试而非改写旧记录，操作身份为 `{run}#l{layer}#{node}#a{attempt}`。最后一层的收口由空 `nodes` 上下文触发，完成后冻结 `summary`。
-
-- 读取 `GET /api/brain/runs/:id/layered`（视图：层级、能力、操作与事件）与 `GET /api/brain/runs/:id/layered/rounds/:round`（单层明细）；v3 运行读这两个路由 404，v4 运行读 v3 的 `/view`、`/rounds/:round` 409。CLI 对应 `brain runs layered <id>` 与 `brain runs layered-round <id> <round>`。
-- 命令仍是 `pause`、`resume`、`cancel` 三个动作；节点侧只做投影与栅栏校验，层决策与准入裁决在 control。
-- 限额：节点 ≤ 256、单层宽度 ≤ 32、嵌套深度 ≤ 3、每节点尝试 1..=5；不满足的请求 400 且不建运行。
-
-## 可复用调度计划与工作台
-
-`/api/brain/plan-defs` 的版本 envelope 保持 `{id, version, plan, changelog, created_at, ...}`。新增 v3 计划内容：
-
-```json
-{"schema_version":3,"title":"修复并复测","objective":"完成修复并提交测试依据","inputs":{"repo":"example"},"capability_ids":["builtin-agent-act"],"max_rounds":32}
-```
-
-计划要求非空能力范围，保存前校验目录；版本仍沿用现有不可覆盖、相同内容幂等及顺序递增规则。列表提供 `schema_version` 区分历史图计划和调度计划。查询历史版本、版本比较保持原 URL 和 envelope。
-
-引用版本启动：
-
-```json
-{"schema_version":3,"id":"brain-review-001","node_id":"node-example","plan":{"id":"review-plan","version":1},"inputs":{"repo":"override"}}
-```
-
-服务端从版本解析目标、能力范围和轮次上限，运行输入按名称覆盖默认输入；不允许同时传入目标等计划字段覆盖版本。根 assignment 保存来源版本、解析后的 scheduler_request、原始幂等意图和能力范围元数据。回执为 `202 {schema_version:3, run_id, execution}`，重试相同意图复用运行，冲突意图返回 409。既有直接提交 v3 请求的方式继续支持。
-
-`GET /api/brain/runs/:id/view` 展示来源计划、所选能力、轮次 operation 索引及持久化决策摘要。每项 operation 增补 `execution_created` 和派发时能力元数据；预分配 ID 不代表子执行已创建。`rounds/:round` 返回相同的单轮投影。详情仍按 execution_id 查询，不将消息或产物复制到大脑投影。
-
-计划画布固定显示核心调度循环，能力库连接调度环节。运行页按轮展开，在同页复用五类执行组件；切换 execution_id 会重新挂载明细和订阅。新计划草稿与旧版缓存隔离，历史图计划保留只读页面。
-
-## 历史 v2 图契约
-
-以下记录历史固定图协议，供历史版本、运行及兼容路径核对；新工作台创建与执行使用上面的 v3 调度计划。
-
-## 四类概念
-
-- `inputs`：按名称索引的输入，包含 `description`、`schema`、`required`、`source: {kind: external|routed}`。实例通过 `inputs: [名称]` 引用。外部文档值是 `{name: "需求说明", markdown: "# 正文"}`。
-- `instances`：注册能力的一次引用，包含 `id`、`description`、`capability_id`、`action`、输入及输出名称、资源和 `max_visits`（默认 20，可设 1–100）。支持 Agent、DAG、Team、TODO、Operator。
-- `outputs`：按名称索引的一句话说明。每个输出只有一个实例拥有，实际内容可以是完整文档或结构化数据；结构化回执上限 256 KiB，较大内容通过产物引用提供。
-- `routes`：包含 `id`、`description`、连接的 `outputs`、候选 `targets` 和明确 `exits`。目标的 `bindings` 固定映射目标 input 名称到已连接 output 名称。多个实例的 output 接到同一路由即汇合；路由可选择多个候选实例并行执行，也可回到已有实例开始新轮次。
-
-完整可编辑示例：[修复与复测循环](../examples/brain/repair-loop.json)。`entry` 显式列出初次激活的实例。每个实例的输出由一个路由统一判断；不能用多个独立路由重复消费同一实例的完成回执。
-
-计划保存：`POST /api/brain/plan-defs`，请求为 `{id, version, plan, changelog, created_at, author, tags?, confidence?}`。同 ID/版本不可覆盖，相同内容重试幂等。发布时检查能力注册身份与描述，固定定义、执行配置和资源摘要。能力缺失或快照不符会明确报错。
-
-运行提交：
+`POST /api/brain/plan-defs` 保存不可变版本，信封为 `{id, version, plan, changelog, created_at, author, tags, confidence}`；同 ID/版本不能覆盖，完全相同的重试幂等。`POST /api/brain/plan-defs/validate` 校验计划、能力可用性和嵌套引用。
 
 ```json
 {
-  "id": "brain-review-001",
-  "node_id": "node-example",
-  "mode": "fixed",
-  "objective": "完成修复并提供验证依据",
-  "plan": {"id": "repair-loop", "version": 1},
-  "inputs": {"document": {"name": "需求说明", "markdown": "# 问题\n修复失败的检查"}}
+  "schema_version": 4,
+  "title": "仓库检查",
+  "objective": "收集证据后验证结果",
+  "inputs": {"repo": "opencoder"},
+  "nodes": [
+    {"node_id": "collect", "title": "收集仓库证据", "capability_id": "builtin-operator"},
+    {"node_id": "verify", "title": "验证收集的证据", "capability_id": "builtin-operator", "retry": {"max_attempts": 2}}
+  ],
+  "edges": [{"from": "collect", "to": "verify"}],
+  "max_rounds": 32
 }
 ```
 
-动态模式设 `mode: dynamic`，省略 `plan`，可传 `references: [{id, version}]`。服务端取得注册目录后生成并发布同一格式的计划；不会创建临时能力或默认改派通用 Agent。
+能力 ID 以 `GET /api/brain/library` 返回为准。Agent、Team、DAG、TODO、Operator 使用现有执行接口；保存的计划版本也出现在能力库中，ID 为 `plan-{plan_id}@{version}`、kind 为 `brain`。选择该能力即执行固定版本的子计划。准入递归检查能力、引用环和深度（根深度 0，最多 3）；子计划绑定真实父 operation 身份，不能伪造父运行。
 
-## 输出和局部路由
+## 调度与屏障
 
-每种能力通过同一个接口提供具名输出：
+计划按拓扑顺序从上到下切层，同层并行。每层只作一次模型调度决策，明确该层所有节点的输入绑定；层内运行终态经持久化 outbox 交付。全部成功后才越过屏障并激活下一轮决策。单个节点失败按 `retry.max_attempts` 重试（1–5，默认 2），每次尝试使用新的 operation/execution ID；达到上限立即使根运行失败并请求取消同层尚未结束的执行，迟到回执不会重新开启运行。
 
-```json
-{
-  "verification": {
-    "content": "本轮测试通过；修复提交及测试报告见产物",
-    "completion": {"passed": true, "evidence": ["交付内容已生成"]},
-    "verification": {"passed": true, "evidence": ["本轮测试报告：全部通过"]},
-    "artifacts": []
-  }
-}
-```
+`run.layer` 记录已派发层，线上层号从 1 开始。等待期间仍显示当前层；越过屏障才进入下一层决策。最后一层成功后，以空节点上下文作完成决策，冻结结果摘要。暂停、恢复、取消沿用原命令；节点恢复依靠持久化投影、序号与确认记录，重复事件不产生重复派发。
 
-完成与验证分别记录。`passed: null` 或缺失依据都为未知，进程结束不能推导为验证通过。Agent/Operator 读取最后回答，Team 读取 final_summary，DAG/TODO 通过固定输出投影适配原生产物；返回内容必须符合声明的具名输出接口。
+输入绑定只能引用根输入、注册产物或成功祖先节点的 execution 输出 JSON pointer。运行输入覆盖计划默认输入。缺失能力、非法图或引用在准入时明确拒绝；运行中非法模型决策进入 blocked，可修正后恢复。限制：节点 1–256、每层最多 32、最多 32 层、调度预算 1–32。
 
-DAG/TODO 的原生结果按内部步骤名组织。实例的 `action.output_pointer` 固定指定提供统一输出的结果位置，例如 DAG 的 `/review` 或 TODO 的 `/t1`；该位置必须返回上述具名 JSON 对象。适配仅提取结果，不读取能力内部状态推断业务通过。
+## 接口与工作台
 
-路由模型只接收本次连接的 output 记录、路由语义、相邻候选实例的输入说明和声明的结束条件。完整计划、根目标、无关节点输出和能力内部状态不进入路由请求。路由回执：
+- `POST /api/brain/runs`：创建运行，推荐 `{schema_version:4, id, plan:{id,version}, inputs, node_id}`，也支持内联计划。相同 ID/意图重试复用回执，冲突返回 409。
+- `GET /api/brain/runs/:id/layered`：计划、层级、能力元数据、操作索引和事件。
+- `GET /api/brain/runs/:id/layered/rounds/:layer`：该层决策理由、证据 execution ID 与节点/尝试索引，不复制能力执行正文。
+- `GET /api/brain/runs/:id/events-page` 与事件流：运行事件；`POST /api/brain/runs/:id/commands`：pause、resume、cancel。
+- CLI：`brain plan-defs`、`brain library`、`brain runs create`、`brain runs layered`、`brain runs layered-round`。
 
-```json
-{"receipt":"route-...","reason":"本轮复测仍有两个问题，继续修复","selected":["fix"],"exit":null,"blocked":null}
-```
+工作台支持创建/编辑 step、选能力或保存计划、增删连线、浏览器草稿和固定版本启动。画布从上到下展示层级，点击节点或尝试复用现有 `ExecutionView` 查询真实能力明细；嵌套计划使用同一大脑运行组件。运行事件流与 3 秒轮询刷新索引，层明细按需读取。
 
-`selected` 可选一个或多个相邻实例，或者 `exit` 指向声明的出口。越界选择、空选择、非法 JSON、缺失必要输出及未知交付结论均持久化阻塞原因，不重写计划或暗中降级。
+层详情的 `decision` 为 `dispatch_layer` 或尚未派发时的 `null`。理由及依据固定读取本层 `layer_started` 事件，子执行终态、重试和整次运行完成均不覆盖；`phase` 保留该决策进入的阶段（派发为 `waiting`），不代表历史层当前仍在等待。当前执行状态由节点尝试和层屏障展示，完成摘要由运行总览展示。已经派发却缺失调度事件时接口明确报错，不生成替代理由。
 
-## 汇合、循环与恢复
-
-- 汇合等待仍可能到达该路由的已激活分支；未选择的分支不参与等待。输入引用固定到实际执行轮次，禁止按实例名称读取“最近一次”输出。
-- 每次并行分流以路由回执建立因果作用域，汇合消费同一作用域的分支。并发进入同一子流程的两组输出分别汇合，通知乱序也不会串轮。
-- 回流创建新的 `~visit-NNNN` 执行轮次，旧输出、因果父节点、输入引用及路由判断全部保留。达到访问上限记为 blocked。
-- 下游派发的 `parameters` 承接映射的实际内容，`source_outputs` 按 input 名称附带同轮次 output 记录及产物引用；不会混入其他上游历史。
-- 路由上下文先持久化；判断、输入引用和 Prepared 执行回执在派发前提交。重复通知、乱序回执和恢复重放沿用原动作 ID。
-- 暂停阻止新派发；取消等待在途子执行明确结束。共享资源继续使用全局读写互斥与明确终态释放。
-- 根运行只有在命中声明出口、满足出口交付要求且全部激活分支收敛时 completed。出口可要求 `require_completed` 和 `require_verified`，必须有相应 output 依据。
-- `graph.outputs` 保存轮次与内容，`graph.visits` 保存输入引用和因果父节点，`graph.routes` 保存读集和选择理由，`graph.tokens` 表示当前分支。事件同步记录新增输出与路由回执。
-
-## 查询与迁移
-
-版本、快照、实例分页、动作、事件及控制入口保持 `/api/brain/plan-defs` 与 `/api/brain/runs`。CLI 使用 `brain plan-defs`、`brain runs`、`brain library`。工作台可编辑四类概念、具名文档、多输出、汇合和回流，并查看完成与验证依据。
-
-历史 v1 计划、决策树、Playbook 和运行记录继续只读查询；旧写入和执行入口返回 migration required，包括旧 Project Brain/Playbook 路由和本地入口。既有数据不删除、不改写、不静默转换。显式重建为 v2 后通过统一运行入口执行。
-
-Fleet 协议为 10；根运行请求带 `schema_version: 2`。旧节点不得受理新契约。发布工具在启动候选服务及切换前只读扫描旧运行；节点启动在恢复写入前再次检查。存在非终态旧运行时拒绝升级并列出执行 ID，须让所属旧运行正常收敛。协议不同的版本仍禁止滚动重叠，必须走既有维护迁移流程；本次变更不执行生产切换。
+旧决策树、playbook、v2/v3 调度内核、命令和页面已删除。旧数据不自动迁移或删除；生产清理由 `scripts/maintenance/brain_cleanup` 先生成精确清单，核准后离线备份和清理，能力库、鉴权和无关任务保留。

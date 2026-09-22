@@ -41,6 +41,7 @@ fn execution() -> ExecutionIndex {
 fn create(index: &ExecutionIndex) -> NodeOperation {
     NodeOperation::Create {
         assignment: Assignment {
+            private_context: None,
             runtime: None,
             codex: None,
             index: index.clone(),
@@ -71,6 +72,21 @@ fn creation_rpc_uses_the_slow_admission_window() {
         }),
         DEFAULT_REQUEST_TIMEOUT
     );
+}
+
+#[test]
+fn only_private_file_probes_use_the_digest_window() {
+    for (private, expected) in [
+        (false, DEFAULT_REQUEST_TIMEOUT),
+        (true, CREATE_REQUEST_TIMEOUT),
+    ] {
+        let operation = NodeOperation::Brain {
+            execution: execution().execution_ref(),
+            action: "capability_probe".into(),
+            input: serde_json::json!({"private_files":private}),
+        };
+        assert_eq!(request_timeout(&operation), expected);
+    }
 }
 
 async fn call_request_id(rx: &mut mpsc::Receiver<SocketCommand>) -> String {

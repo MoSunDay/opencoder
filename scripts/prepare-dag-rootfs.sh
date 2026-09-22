@@ -63,6 +63,8 @@ done | sort -u | while read -r lib; do
   cp -L "$lib" "$dest"
 done
 
+bash "$repo_root/scripts/dag-rootfs/install-python.sh" "$out"
+
 if [ -n "$codex_binary" ]; then
   bash "$repo_root/scripts/dag-rootfs/install-codex.sh" "$out" "$codex_binary"
 fi

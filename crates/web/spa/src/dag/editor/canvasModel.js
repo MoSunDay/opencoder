@@ -222,6 +222,7 @@ export function changeStepKind(step, nextType) {
   if (step && step.timeout_secs !== undefined && step.timeout_secs !== null) {
     next.timeout_secs = step.timeout_secs;
   }
+  if (step?.trigger_rule !== undefined) next.trigger_rule = step.trigger_rule;
   return next;
 }
 

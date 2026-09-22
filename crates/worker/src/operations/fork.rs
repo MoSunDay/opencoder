@@ -59,6 +59,7 @@ pub(super) async fn fork(worker: &Worker, parent: &str) -> Result<RpcReply> {
         annotations: serde_json::Value::Null,
         queue: None,
         assignment: Assignment {
+            private_context: None,
             runtime,
             codex,
             index,

@@ -198,7 +198,10 @@ async fn resolve_brain_executor(
     input: Value,
 ) -> Result<Value, RpcReply> {
     if input.get("brain").is_some_and(|v| !v.is_null()) {
-        return Err(RpcReply::error(409, opencoder_brain::graph::MIGRATION));
+        return Err(RpcReply::error(
+            409,
+            opencoder_core::brain::layered::LAYERED_MIGRATION,
+        ));
     }
     if action == "execute" {
         if let Some(record) = state
@@ -211,7 +214,10 @@ async fn resolve_brain_executor(
                 record.executor_kind,
                 ProjectExecutorKind::Brain | ProjectExecutorKind::Playbook
             ) {
-                return Err(RpcReply::error(409, opencoder_brain::graph::MIGRATION));
+                return Err(RpcReply::error(
+                    409,
+                    opencoder_core::brain::layered::LAYERED_MIGRATION,
+                ));
             }
         }
     }

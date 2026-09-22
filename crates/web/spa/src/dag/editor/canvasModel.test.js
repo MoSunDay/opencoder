@@ -234,3 +234,8 @@ describe('canvasModel specProblemIndex', () => {
     expect(specLevelProblems([])).toEqual([]);
   });
 });
+
+it('preserves all_done when changing the executable kind', () => {
+  expect(changeStepKind({name:'summary',trigger_rule:'all_done',kind:{type:'agent',prompt:'review'}},'wasm'))
+    .toEqual({name:'summary',trigger_rule:'all_done',kind:{type:'wasm',command:''}});
+});

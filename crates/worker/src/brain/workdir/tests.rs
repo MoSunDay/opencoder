@@ -30,6 +30,7 @@ async fn managed_session_keeps_admitted_settings_in_an_isolated_workspace() {
     let id = "managed-agent";
     let record = Record {
         assignment: Assignment {
+            private_context: None,
             runtime: None,
             codex: None,
             index: ExecutionIndex {

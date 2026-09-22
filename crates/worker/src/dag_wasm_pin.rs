@@ -193,6 +193,7 @@ mod tests {
                 .iter()
                 .enumerate()
                 .map(|(i, command)| StepSpec {
+                    trigger_rule: Default::default(),
                     name: format!("step-{i}"),
                     depends_on: vec![],
                     kind: StepKind::Wasm {
@@ -223,6 +224,7 @@ mod tests {
             description: None,
             steps: vec![
                 StepSpec {
+                    trigger_rule: Default::default(),
                     name: "agent-step".into(),
                     depends_on: vec![],
                     kind: StepKind::Agent {
@@ -234,6 +236,7 @@ mod tests {
                     timeout_secs: None,
                 },
                 StepSpec {
+                    trigger_rule: Default::default(),
                     name: "first".into(),
                     depends_on: vec![],
                     kind: StepKind::Wasm {
@@ -243,6 +246,7 @@ mod tests {
                     timeout_secs: None,
                 },
                 StepSpec {
+                    trigger_rule: Default::default(),
                     name: "empty".into(),
                     depends_on: vec![],
                     kind: StepKind::Wasm {
@@ -252,6 +256,7 @@ mod tests {
                     timeout_secs: None,
                 },
                 StepSpec {
+                    trigger_rule: Default::default(),
                     name: "duplicate".into(),
                     depends_on: vec![],
                     kind: StepKind::Wasm {
@@ -261,6 +266,7 @@ mod tests {
                     timeout_secs: None,
                 },
                 StepSpec {
+                    trigger_rule: Default::default(),
                     name: "second".into(),
                     depends_on: vec![],
                     kind: StepKind::Wasm {

@@ -19,7 +19,9 @@ pub(in crate::operations) async fn accepted_reply(
     {
         assignment.request.input["run_id"] = existing.assignment.request.input["run_id"].clone();
     }
-    if existing.assignment.request != assignment.request {
+    if existing.assignment.request != assignment.request
+        || existing.assignment.private_context != assignment.private_context
+    {
         return Some(RpcReply::error(
             409,
             "execution id already accepted with different input",

@@ -136,6 +136,8 @@ pub fn valid_id(id: &str) -> bool {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Assignment {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub private_context: Option<super::PrivateExecutionContext>,
     #[serde(default)]
     pub runtime: Option<Box<crate::harness::RuntimeSettings>>,
     #[serde(default)]

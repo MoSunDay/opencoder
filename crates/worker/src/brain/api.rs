@@ -26,12 +26,18 @@ pub async fn handle(
                 Ok(())
             },
         );
-        return Ok(match matches {
-            Ok(()) => RpcReply::ok(
-                json!({"compatible":true,"features":["dag_dynamic_v1","brain_scheduler_v4"]}),
-            ),
-            Err(error) => RpcReply::error(412, error.to_string()),
-        });
+        if let Err(error) = matches {
+            return Ok(RpcReply::error(412, error.to_string()));
+        }
+        let mut body = json!({"compatible":true,"features":["dag_dynamic_v1","brain_scheduler_v4",opencoder_core::fleet::private_files::CAPABILITY]});
+        if input["private_files"] == true {
+            body["image_digest"] = json!(tokio::task::spawn_blocking(
+                opencoder_core::fleet::private_files::runtime_image_digest
+            )
+            .await?
+            .map_err(anyhow::Error::msg)?);
+        }
+        return Ok(RpcReply::ok(body));
     }
     if action == "notice_ack" {
         return super::outbox::ack(worker, reference, input).await;

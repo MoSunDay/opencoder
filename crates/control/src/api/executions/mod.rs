@@ -10,14 +10,16 @@ use serde_json::json;
 use std::sync::Arc;
 
 pub(crate) mod capabilities;
+mod private_context;
 mod submit;
 pub use submit::submit;
 
 pub async fn create(
     State(state): State<Arc<AppState>>,
     identity: Option<axum::Extension<opencoder_core::identity::Identity>>,
-    Json(request): Json<CreateExecution>,
+    Json(submission): Json<private_context::Submission>,
 ) -> Response {
+    let request = submission.request;
     if request.kind == ExecutionKind::Brain {
         return response(RpcReply::error(
             409,
@@ -36,7 +38,7 @@ pub async fn create(
             "non-admin roles may only submit operator or agent executions",
         ));
     }
-    response(submit(&state, request).await)
+    response(submit::submit_private(&state, request, submission.private_context).await)
 }
 
 mod paging;

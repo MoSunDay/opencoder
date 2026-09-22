@@ -7,6 +7,7 @@ use serde_json::json;
 
 fn assignment(run: &str) -> Assignment {
     Assignment {
+        private_context: None,
         runtime: None,
         codex: None,
         index: ExecutionIndex {

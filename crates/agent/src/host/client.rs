@@ -182,11 +182,14 @@ impl Host {
                     }
                 }
             };
-            for index in &inventory.indexes {
-                self.store
-                    .assign_runtime(&index.id, Some(&runtime.id))
-                    .await?;
-            }
+            let ids: Vec<_> = inventory
+                .indexes
+                .iter()
+                .map(|index| index.id.as_str())
+                .collect();
+            self.store
+                .assign_runtime_inventory(&runtime.id, &ids)
+                .await?;
             runtime_ready &= inventory.snapshot.ready;
             if let Some(error) = &inventory.snapshot.resource_error {
                 resource_errors.push(format!("{}: {error}", runtime.id));

@@ -1,4 +1,4 @@
-Commit: d9b366a66dc7defa4281f484dd00b2a3e208c092
+Commit: 1afd5d4375cd10885aee335d3d9dbf9d396bb563
 
 # control 模块
 
@@ -28,3 +28,9 @@ Commit: d9b366a66dc7defa4281f484dd00b2a3e208c092
 ## 私有任务文件
 
 `src/api/executions/private_context.rs` 接收 DAG 专用私有文件合同，公开 request 不含文件；定义先校验后预留，私有内容参与幂等指纹。`/api/nodes/{id}/execution-capabilities` 显式探测节点执行文件摘要；Hub 仅对该探测使用 60 秒窗口，普通探测保留 15 秒。
+
+## 派发与报告
+
+- [outbox.rs](../../crates/control/src/release/outbox.rs)、[retry.rs](../../crates/control/src/release/outbox/retry.rs)：按执行 ID 退避恢复派发，节点代次变化立即重试，保留冻结的私有上下文。
+- [socket.rs](../../crates/control/src/transport/socket.rs)：Host 库存持久化并通过代次栅栏后直接发送交接确认，避免 socket 循环等待自己消费的满队列。
+- [v4/view.rs](../../crates/control/src/api/brain_runs/v4/view.rs)：层调度理由只取本层 `layer_started` 事件，不被执行终态覆盖。

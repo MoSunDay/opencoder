@@ -4,6 +4,10 @@ use libsql::{params, Connection};
 use opencoder_core::fleet::{valid_id, ExecutionIndex};
 use std::collections::HashSet;
 
+mod rows;
+#[cfg(test)]
+mod tests;
+
 impl FleetStore {
     /// Snapshot the pending IDs eligible for first-sync recovery.
     pub async fn pending_ids(&self, node_id: &str) -> Result<Vec<String>> {
@@ -42,6 +46,9 @@ impl FleetStore {
         watermark: Option<(&str, u64)>,
     ) -> Result<Vec<ExecutionIndex>> {
         validate_report(node_id, records)?;
+        // Serialize outside the shared writer gate. Whole inventories can
+        // contain tens of thousands of rows during a Server handoff.
+        let encoded = serde_json::to_string(records)?;
         let _guard = self.gate.lock().await;
         self.conn
             .execute("BEGIN IMMEDIATE", ())
@@ -64,6 +71,7 @@ impl FleetStore {
             &self.conn,
             node_id,
             records,
+            &encoded,
             pending_at_begin.unwrap_or_default(),
         )
         .await
@@ -109,24 +117,11 @@ async fn apply_report_tx(
     conn: &Connection,
     node_id: &str,
     records: &[ExecutionIndex],
+    encoded: &str,
     pending_at_begin: &[String],
 ) -> Result<Vec<ExecutionIndex>> {
     let present: HashSet<_> = records.iter().map(|record| record.id.as_str()).collect();
-    for record in records {
-        if let Some(old) = read_index(conn, &record.id).await? {
-            if old.node_id != record.node_id
-                || old.created_at != record.created_at
-                || old.kind != record.kind
-            {
-                bail!("execution ownership conflict: {}", record.id);
-            }
-        }
-        conn.execute(
-            "INSERT INTO execution_index(id,created_at,kind,node_id,status) VALUES (?1,?2,?3,?4,?5) ON CONFLICT(id) DO UPDATE SET status=excluded.status",
-            params![record.id.clone(), record.created_at, record.kind.prefix(), record.node_id.clone(), record.status.as_str()],
-        )
-        .await?;
-    }
+    rows::apply(conn, encoded).await?;
 
     let mut recovered = Vec::new();
     let mut checked = HashSet::new();

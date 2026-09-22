@@ -5,6 +5,7 @@ mod hub;
 mod layered_tests;
 mod report;
 mod socket;
+mod socket_report;
 pub use hub::{Hub, UnregisterResult};
 pub use socket::upgrade;
 

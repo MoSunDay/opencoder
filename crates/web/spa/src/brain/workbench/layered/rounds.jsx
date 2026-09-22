@@ -27,7 +27,7 @@ function NodeAttempt({ node, onExecution }) {
 function LayerDetail({ detail, onExecution }) {
   return <>
     <div className="brain-round-reason">
-      <Typography.Text strong>本层决策：{decisionLabel(detail.phase)}</Typography.Text>
+      <Typography.Text strong>本层调度：{decisionLabel(detail.decision) || '调度记录缺失'}</Typography.Text>
       <Typography.Paragraph>{detail.reason || '未记录决策理由'}</Typography.Paragraph>
       {!!detail.evidence.length && <Space wrap><Typography.Text type="secondary">依据执行：</Typography.Text>{detail.evidence.map((id) => <Typography.Text key={id} code>{id}</Typography.Text>)}</Space>}
     </div>

@@ -10,6 +10,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { apiGet } from '../../../../api.js';
 import { openStream } from '../../../../sse.js';
 import { BrainRunBody } from '../../run.jsx';
+import { LayerRounds } from '../../layered/rounds.jsx';
 
 vi.mock('../../../../api.js', () => ({ apiGet: vi.fn(), apiPost: vi.fn(), apiPut: vi.fn(), apiDel: vi.fn() }));
 vi.mock('../../../../fleet/detail.jsx', () => ({ ExecutionView: ({ executionRef }) => <div data-testid="capability-detail">{executionRef.kind}:{executionRef.id}</div> }));
@@ -50,7 +51,7 @@ const view = {
 };
 
 const round = {
-  schema_version: 4, layer: 1, phase: 'dispatch_layer', reason: '抓取完成，进入并行层', evidence_execution_ids: ['exec-fetch-a1'],
+  schema_version: 4, layer: 1, phase: 'waiting', decision: 'dispatch_layer', reason: '抓取完成，进入并行层', evidence_execution_ids: ['exec-fetch-a1'],
   nodes: [{ node_id: 'n-fetch', title: '抓取仓库', capability_id: 'cap-n-fetch', status: 'done', attempt: 1, execution_id: 'exec-fetch-a1', execution_kind: 'agent', cancel_requested: false, summary: '仓库已抓取', inputs: { repo: { kind: 'root', name: 'repo' } } }],
 };
 
@@ -73,6 +74,23 @@ function route() {
 const mount = () => render(<BrainRunBody id="brain-v4" />);
 
 describe('分层能力计划', () => {
+  it('已完成运行的历史层展示派发理由，而不是等待或判断状态', async () => {
+    apiGet.mockResolvedValue(round);
+    render(<LayerRounds id="brain-v4" view={{ ...view, run: { ...view.run, phase: 'completed' } }} />);
+    fireEvent.click(screen.getByText('层 1'));
+    await screen.findByText('抓取完成，进入并行层');
+    expect(screen.getAllByText('本层调度：派发本层').length).toBeGreaterThan(0);
+    expect(screen.queryByText('本层调度：等待执行')).toBeNull();
+    expect(screen.queryByText('本层调度：判断中')).toBeNull();
+  });
+
+  it('已派发层缺少决策事件时展示实际接口错误', async () => {
+    apiGet.mockRejectedValue(new Error('layer 1 dispatch decision is missing from the event journal'));
+    render(<LayerRounds id="brain-v4" view={view} />);
+    await screen.findByText('layer 1 dispatch decision is missing from the event journal');
+    expect(screen.queryByText('本层调度：派发本层')).toBeNull();
+  });
+
   it('渲染分层画布、层屏障、重试徽标与分层事件，并按需拉取层决策明细', async () => {
     route();
     mount();
@@ -108,7 +126,7 @@ describe('分层能力计划', () => {
     fireEvent.click(screen.getByRole('button', { name: /^层 1/ }));
     expect(await screen.findByText('抓取完成，进入并行层')).toBeTruthy();
     expect(paths()).toContain('/api/brain/runs/brain-v4/layered/rounds/1');
-    expect(screen.getAllByText('本层决策：派发本层').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('本层调度：派发本层').length).toBeGreaterThan(0);
     expect(screen.queryByText('仓库已抓取')).toBeNull();
     expect(document.querySelector('[data-node="n-fetch"]').textContent).toContain('exec-fetch-a1');
     expect(document.querySelectorAll('[data-node="n-fetch"]')).toHaveLength(2);

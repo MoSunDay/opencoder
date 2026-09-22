@@ -71,6 +71,7 @@ fn one_step_spec() -> DagSpec {
         name: "e2e-one".into(),
         description: None,
         steps: vec![StepSpec {
+            trigger_rule: Default::default(),
             name: "analyze".into(),
             depends_on: vec![],
             kind: StepKind::Agent {
@@ -86,6 +87,7 @@ fn one_step_spec() -> DagSpec {
 
 fn agent_step(name: &str, deps: &[&str], timeout: Option<u64>) -> StepSpec {
     StepSpec {
+        trigger_rule: Default::default(),
         name: name.into(),
         depends_on: deps.iter().map(|d| d.to_string()).collect(),
         kind: StepKind::Agent {
@@ -300,6 +302,7 @@ async fn wasm_step_output_is_mirrored_to_the_run_session() {
         name: "e2e-wasm".into(),
         description: None,
         steps: vec![StepSpec {
+            trigger_rule: Default::default(),
             name: "build".into(),
             depends_on: vec![],
             kind: StepKind::Wasm {

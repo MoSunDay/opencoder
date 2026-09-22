@@ -30,6 +30,7 @@ async fn open(root: &Path) -> Worker {
 
 fn assignment(worker: &Worker, id: &str, kind: ExecutionKind) -> Assignment {
     Assignment {
+        private_context: None,
         runtime: None,
         codex: None,
         definition: None,

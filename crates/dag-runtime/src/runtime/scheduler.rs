@@ -75,10 +75,7 @@ pub(super) async fn schedule(
                 cursor = (cursor + 1) % run.spec.steps.len();
                 misses += 1;
                 if states.contains_key(&step.name)
-                    || !step
-                        .depends_on
-                        .iter()
-                        .all(|n| states.get(n) == Some(&StepOutcome::Done))
+                    || !opencoder_dag::ready_steps(&run.spec, &states).contains(&step.name)
                 {
                     continue;
                 }
@@ -232,6 +229,25 @@ pub(super) async fn schedule(
                 .await;
             }
         }
+        // Make failed dependency chains terminal one layer at a time so all_done
+        // finalizers can run even when an earlier preparation step failed.
+        if !cancel.is_cancelled() {
+            for name in opencoder_dag::topo_order(&run.spec).map_err(anyhow::Error::msg)? {
+                let step = run.spec.steps.iter().find(|s| s.name == name).unwrap();
+                if states.contains_key(&step.name)
+                    || active.iter().any(|(name, _)| name == &step.name)
+                    || step.trigger_rule != opencoder_dag::TriggerRule::AllSuccess
+                    || !step.depends_on.iter().all(|d| states.contains_key(d))
+                    || !step.depends_on.iter().any(|d| states.get(d) != Some(&StepOutcome::Done))
+                {
+                    continue;
+                }
+                record_step(StepDone {
+                    name: step.name.clone(), instance: None, started_at_ms: now_ms(),
+                    result: failed("blocked: upstream step did not succeed".into()),
+                }, &mut states, &mut outputs, &mut errors, root, run, sink).await;
+            }
+        }
         if tasks.is_empty() {
             if !cancel.is_cancelled() && !opencoder_dag::ready_steps(&run.spec, &states).is_empty()
             {
@@ -282,8 +298,10 @@ pub(super) async fn schedule(
                         if done.result.outcome != StepOutcome::Cancelled || !group.outcomes.contains(&Some(StepOutcome::Error)) {
                             group.outcomes[i] = Some(StepOutcome::Error);
                         }
-                        group.token.cancel();
-                        group.cancel_pending(root, run, &done.name).await?;
+                        if !group.collect_all {
+                            group.token.cancel();
+                            group.cancel_pending(root, run, &done.name).await?;
+                        }
                     }
                     group.progress(root, &run.run_id, &done.name, sink)?;
                 } else {

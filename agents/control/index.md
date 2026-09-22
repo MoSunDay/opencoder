@@ -1,4 +1,4 @@
-Commit: 3b4775905c950f64433b5c9f4439f4396674b3c6
+Commit: d9b366a66dc7defa4281f484dd00b2a3e208c092
 
 # control 模块
 
@@ -24,3 +24,7 @@ Commit: 3b4775905c950f64433b5c9f4439f4396674b3c6
 ## 相关
 - [agents/node](../node/index.md)、[agents/worker](../worker/index.md)
 - [agents/brain](../brain/index.md)、[运行协议](../../docs/brain-orchestration.md)
+
+## 私有任务文件
+
+`src/api/executions/private_context.rs` 接收 DAG 专用私有文件合同，公开 request 不含文件；定义先校验后预留，私有内容参与幂等指纹。`/api/nodes/{id}/execution-capabilities` 显式探测节点执行文件摘要；Hub 仅对该探测使用 60 秒窗口，普通探测保留 15 秒。

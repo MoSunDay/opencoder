@@ -98,6 +98,7 @@ fn snapshot(id: &str, phase: &str, generation: u64, layer: u32) -> Value {
 
 async fn attach_assignment(state: &Arc<crate::AppState>, id: &str) {
     let assignment = Assignment {
+        private_context: None,
         runtime: None,
         codex: None,
         definition: None,

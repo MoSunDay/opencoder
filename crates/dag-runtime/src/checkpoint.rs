@@ -16,11 +16,16 @@ pub(crate) fn restore(
             continue;
         }
         let meta: serde_json::Value = serde_json::from_slice(&std::fs::read(meta)?)?;
-        if meta["outcome"] != "done" {
+        let collected_failure = meta["outcome"] == "error" && matches!(
+            step.kind, opencoder_dag::StepKind::Dynamic {
+                failure_policy: opencoder_dag::FailurePolicy::CollectAll, ..
+            }
+        );
+        if meta["outcome"] != "done" && !collected_failure {
             continue;
         }
         let output = serde_json::from_slice(&std::fs::read(dir.join("output.json"))?)?;
-        states.insert(step.name.clone(), StepOutcome::Done);
+        states.insert(step.name.clone(), if collected_failure { StepOutcome::Error } else { StepOutcome::Done });
         outputs.insert(step.name.clone(), output);
     }
     Ok(())

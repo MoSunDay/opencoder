@@ -2,10 +2,7 @@ use super::response;
 use crate::{admission::AdmissionMode, AppState};
 use axum::{extract::State, response::Response};
 use futures::future::join_all;
-use opencoder_core::fleet::{
-    ExecutionCursor, ExecutionStatus, NodeAdmissionCommand, NodeOperation, RpcReply,
-    EXECUTION_PAGE_MAX,
-};
+use opencoder_core::fleet::{NodeAdmissionCommand, NodeOperation, RpcReply};
 use serde::Serialize;
 use serde_json::json;
 use std::sync::Arc;
@@ -45,34 +42,6 @@ async fn call_online_nodes(
     (join_all(calls).await, offline)
 }
 
-async fn active_execution_count(state: &AppState) -> anyhow::Result<u64> {
-    let mut cursor: Option<ExecutionCursor> = None;
-    let mut count = 0_u64;
-    loop {
-        let page = state
-            .fleet
-            .indexes_page(None, None, cursor.as_ref(), EXECUTION_PAGE_MAX)
-            .await?;
-        count += page
-            .executions
-            .iter()
-            .filter(|execution| {
-                matches!(
-                    execution.status,
-                    ExecutionStatus::Pending
-                        | ExecutionStatus::Running
-                        | ExecutionStatus::Idle
-                        | ExecutionStatus::Cancelling
-                )
-            })
-            .count() as u64;
-        match page.next_cursor {
-            Some(next) => cursor = Some(next),
-            None => return Ok(count),
-        }
-    }
-}
-
 async fn local_status(state: &Arc<AppState>) -> anyhow::Result<serde_json::Value> {
     let admission = state.admission.snapshot().await?;
     let views = state.hub.views().await;
@@ -87,7 +56,7 @@ async fn local_status(state: &Arc<AppState>) -> anyhow::Result<serde_json::Value
                     .is_some_and(|snapshot| snapshot.ready)
         })
         .count();
-    let active_executions = active_execution_count(state).await?;
+    let active_executions = state.fleet.active_execution_count().await?;
     Ok(json!({
         "mode": admission.mode,
         "inflight_admissions": admission.inflight_admissions,

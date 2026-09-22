@@ -52,7 +52,6 @@ pub fn layer_context(
         nodes.push(LayeredNodeContext {
             node_id: node.node_id.clone(),
             title: node.title.clone(),
-            instructions: node.instructions.clone(),
             retry_max_attempts: node.retry.max_attempts,
             capability,
             upstream,

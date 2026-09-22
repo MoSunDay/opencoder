@@ -70,8 +70,7 @@ pub async fn new_state_with_projects(
             config: config.clone(),
         })
     });
-    let brain = opencoder_brain::Runtime::new(store.clone(), client, config.embedding_model_id())
-        .with_chat_model(config.small_model.as_deref().unwrap_or(&config.model));
+    let brain = opencoder_brain::Runtime::new(store.clone(), client, config.embedding_model_id());
     let fleet = Arc::new(FleetStore::open(&data.join("control.db")).await?);
     let admission = Arc::new(AdmissionGate::load(data.join("admission.json"))?);
     let hub = Arc::new(Hub::new(fleet.nodes().await?));

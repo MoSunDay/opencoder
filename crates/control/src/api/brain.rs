@@ -125,35 +125,3 @@ pub async fn agents(State(state): State<Arc<AppState>>) -> Response {
         Err(error) => error_500(error.to_string()),
     }
 }
-
-/// GET /api/brain/playbooks — every persisted playbook, newest first.
-/// Thin store passthrough (playbooks carry no embeddings), so the only
-/// failure class is store I/O → 500.
-pub async fn list_playbooks(State(state): State<Arc<AppState>>) -> Response {
-    match state.store.list_brain_playbooks().await {
-        Ok(playbooks) => response(RpcReply::ok(json!({ "playbooks": playbooks }))),
-        Err(error) => error_500(error.to_string()),
-    }
-}
-
-/// GET /api/brain/playbooks/:id — one playbook record. `spec_json` stays
-/// opaque here (the brain crate owns decoding); 404 when absent.
-pub async fn get_playbook(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Response {
-    match state.store.get_brain_playbook(&id).await {
-        Ok(Some(record)) => response(RpcReply::ok(json!(record))),
-        Ok(None) => error_404(&format!("brain playbook not found: {id}")),
-        Err(error) => error_500(error.to_string()),
-    }
-}
-pub async fn dispatch() -> Response {
-    migration()
-}
-pub async fn create_plan() -> Response {
-    migration()
-}
-pub async fn preview() -> Response {
-    migration()
-}
-pub fn migration() -> Response {
-    response(RpcReply::error(409, opencoder_brain::graph::MIGRATION))
-}

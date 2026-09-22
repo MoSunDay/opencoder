@@ -14,9 +14,7 @@ async fn unchanged_brain_report_does_not_trigger_another_report() {
     let id = "brain-report-stable";
     let reply = node.handle(NodeOperation::Create {
         assignment: assignment(&node, id, ExecutionKind::Brain,
-            json!({"schema_version":3,"scheduler_request":{
-                "schema_version":3,"objective":"wait for control context","inputs":{},"max_rounds":1
-            }}), Some(json!({}))),
+            json!({"schema_version":4,"layered_request":{"schema_version":4,"plan":{"schema_version":4,"title":"report","objective":"wait","nodes":[{"node_id":"work","title":"work","capability_id":"builtin-agent-act"}]}}}), Some(json!({}))),
     }).await;
     assert_eq!(reply.status, 200, "{reply:?}");
     settled(&node, id).await;
@@ -26,7 +24,7 @@ async fn unchanged_brain_report_does_not_trigger_another_report() {
     for _ in 0..3 {
         let report = node.report().await.unwrap();
         assert!(report.brain.iter().any(|frame| matches!(frame,
-            NodeFrame::Brain { action, .. } if action == "scheduler_wake")));
+            NodeFrame::Brain { action, .. } if action == "layered_wake")));
         assert!(
             !changes.has_changed().unwrap(),
             "unchanged outbox reads must not cause a report loop"

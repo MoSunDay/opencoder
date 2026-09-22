@@ -22,10 +22,7 @@ pub(crate) async fn run(
         ExecutionKind::Brain if record.assignment.request.input["schema_version"] == 4 => {
             crate::brain::v4::run(worker, record, config, cancel).await
         }
-        ExecutionKind::Brain if record.assignment.request.input["schema_version"] == 3 => {
-            crate::brain::v3::run(worker, record, config, cancel).await
-        }
-        ExecutionKind::Brain => crate::brain::activate::run(worker, record, config, cancel).await,
+        ExecutionKind::Brain => anyhow::bail!("unsupported brain schema; expected 4"),
         ExecutionKind::Agent | ExecutionKind::Maintenance | ExecutionKind::Operator => {
             agent::run(worker, record, config, cancel, resume).await
         }

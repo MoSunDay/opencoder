@@ -5,7 +5,6 @@ use opencoder_node::fleet::NodeService;
 use serde_json::{json, Value};
 use support::*;
 
-mod brain_graph;
 mod dag_diamond_flow;
 mod dag_run_steps;
 mod dag_team_loop;

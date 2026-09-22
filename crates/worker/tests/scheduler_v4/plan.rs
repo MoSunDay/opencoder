@@ -25,15 +25,14 @@ pub fn request(_id: &str) -> Value {
                     "node_id": SCAN,
                     "title": "scan the repository",
                     "capability_id": "cap-scan",
-                    "instructions": "list the tracked crates",
+
                     "retry": {"max_attempts": 2}
                 },
                 {
                     "node_id": REVIEW,
                     "title": "review the scan",
                     "capability_id": "cap-review",
-                    "instructions": "review the crate list"
-                }
+                    }
             ],
             "edges": [{"from": SCAN, "to": REVIEW}],
             "max_rounds": 4

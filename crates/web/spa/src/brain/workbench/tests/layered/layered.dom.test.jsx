@@ -10,8 +10,10 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { apiGet } from '../../../../api.js';
 import { openStream } from '../../../../sse.js';
 import { BrainRunBody } from '../../run.jsx';
+import { LayerRounds } from '../../layered/rounds.jsx';
 
 vi.mock('../../../../api.js', () => ({ apiGet: vi.fn(), apiPost: vi.fn(), apiPut: vi.fn(), apiDel: vi.fn() }));
+vi.mock('../../../../fleet/detail.jsx', () => ({ ExecutionView: ({ executionRef }) => <div data-testid="capability-detail">{executionRef.kind}:{executionRef.id}</div> }));
 vi.mock('../../../../sse.js', () => ({ openStream: vi.fn(() => ({ abort() {} })) }));
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
@@ -27,10 +29,10 @@ const view = {
   plan: {
     title: '分层能力画布', objective: '按层交付画布与决策明细', todo: { id: 'todo-7' }, max_rounds: 32,
     nodes: [
-      { node_id: 'n-fetch', title: '抓取仓库', capability_id: 'cap-n-fetch', instructions: '', retry: { max_attempts: 2 } },
-      { node_id: 'n-api', title: 'API 影响面', capability_id: 'cap-n-api', instructions: '', retry: { max_attempts: 3 } },
-      { node_id: 'n-ui', title: '前端画布', capability_id: 'cap-n-ui', instructions: '', retry: { max_attempts: 2 } },
-      { node_id: 'n-verdict', title: '汇总裁决', capability_id: 'cap-n-verdict', instructions: '', retry: { max_attempts: 2 } },
+      { node_id: 'n-fetch', title: '抓取仓库', capability_id: 'cap-n-fetch', retry: { max_attempts: 2 } },
+      { node_id: 'n-api', title: 'API 影响面', capability_id: 'cap-n-api', retry: { max_attempts: 3 } },
+      { node_id: 'n-ui', title: '前端画布', capability_id: 'cap-n-ui', retry: { max_attempts: 2 } },
+      { node_id: 'n-verdict', title: '汇总裁决', capability_id: 'cap-n-verdict', retry: { max_attempts: 2 } },
     ],
     edges: [{ from: 'n-fetch', to: 'n-api' }, { from: 'n-fetch', to: 'n-ui' }, { from: 'n-api', to: 'n-verdict' }, { from: 'n-ui', to: 'n-verdict' }],
   },
@@ -49,7 +51,7 @@ const view = {
 };
 
 const round = {
-  schema_version: 4, layer: 1, phase: 'dispatch_layer', reason: '抓取完成，进入并行层', evidence_execution_ids: ['exec-fetch-a1'],
+  schema_version: 4, layer: 1, phase: 'waiting', decision: 'dispatch_layer', reason: '抓取完成，进入并行层', evidence_execution_ids: ['exec-fetch-a1'],
   nodes: [{ node_id: 'n-fetch', title: '抓取仓库', capability_id: 'cap-n-fetch', status: 'done', attempt: 1, execution_id: 'exec-fetch-a1', execution_kind: 'agent', cancel_requested: false, summary: '仓库已抓取', inputs: { repo: { kind: 'root', name: 'repo' } } }],
 };
 
@@ -71,7 +73,24 @@ function route() {
 
 const mount = () => render(<BrainRunBody id="brain-v4" />);
 
-describe('v4 分层能力画布', () => {
+describe('分层能力计划', () => {
+  it('已完成运行的历史层展示派发理由，而不是等待或判断状态', async () => {
+    apiGet.mockResolvedValue(round);
+    render(<LayerRounds id="brain-v4" view={{ ...view, run: { ...view.run, phase: 'completed' } }} />);
+    fireEvent.click(screen.getByText('层 1'));
+    await screen.findByText('抓取完成，进入并行层');
+    expect(screen.getAllByText('本层调度：派发本层').length).toBeGreaterThan(0);
+    expect(screen.queryByText('本层调度：等待执行')).toBeNull();
+    expect(screen.queryByText('本层调度：判断中')).toBeNull();
+  });
+
+  it('已派发层缺少决策事件时展示实际接口错误', async () => {
+    apiGet.mockRejectedValue(new Error('layer 1 dispatch decision is missing from the event journal'));
+    render(<LayerRounds id="brain-v4" view={view} />);
+    await screen.findByText('layer 1 dispatch decision is missing from the event journal');
+    expect(screen.queryByText('本层调度：派发本层')).toBeNull();
+  });
+
   it('渲染分层画布、层屏障、重试徽标与分层事件，并按需拉取层决策明细', async () => {
     route();
     mount();
@@ -82,8 +101,9 @@ describe('v4 分层能力画布', () => {
     // 画布：每层一列，正在决策的层高亮，重试与取消徽标来自最新尝试
     expect([...document.querySelectorAll('.brain-layer-node-title')].map((node) => node.textContent)).toEqual(['抓取仓库', 'API 影响面', '前端画布', '汇总裁决']);
     const active = document.querySelectorAll('.brain-layer-node--active');
-    expect(active).toHaveLength(1);
-    expect(active[0].textContent).toContain('汇总裁决');
+    expect(active).toHaveLength(2);
+    expect(active[0].textContent).toContain('API 影响面');
+    expect(active[1].textContent).toContain('前端画布');
     const retried = document.querySelector('.brain-layer-node--running');
     expect(retried.textContent).toContain('尝试 2/2');
     expect(retried.textContent).toContain('重试 1 次');
@@ -93,7 +113,7 @@ describe('v4 分层能力画布', () => {
     await waitFor(() => expect(document.querySelectorAll('.react-flow__edge')).toHaveLength(4));
 
     // 运行头部：版本、阶段、层屏障进度、TODO 与交付摘要
-    expect(screen.getByText('v4 分层能力画布')).toBeTruthy();
+    expect(screen.getByText('分层能力计划')).toBeTruthy();
     expect(screen.getByText('等待执行')).toBeTruthy();
     expect(screen.getByText('层屏障 1/3')).toBeTruthy();
     expect(screen.getByText('TODO todo-7')).toBeTruthy();
@@ -101,15 +121,15 @@ describe('v4 分层能力画布', () => {
     expect(screen.getByText('分层能力画布')).toBeTruthy();
 
     // 层决策：当前决策层自动展开，未派发的层不请求明细
-    expect(await screen.findByText('层 3 尚未派发')).toBeTruthy();
-    expect(paths().some((path) => path.includes('/layered/rounds/'))).toBe(false);
+    await waitFor(() => expect(paths()).toContain('/api/brain/runs/brain-v4/layered/rounds/2'));
+    expect(paths()).not.toContain('/api/brain/runs/brain-v4/layered/rounds/3');
     fireEvent.click(screen.getByRole('button', { name: /^层 1/ }));
     expect(await screen.findByText('抓取完成，进入并行层')).toBeTruthy();
     expect(paths()).toContain('/api/brain/runs/brain-v4/layered/rounds/1');
-    expect(screen.getByText('本层决策：派发本层')).toBeTruthy();
-    expect(screen.getByText('仓库已抓取')).toBeTruthy();
+    expect(screen.getAllByText('本层调度：派发本层').length).toBeGreaterThan(0);
+    expect(screen.queryByText('仓库已抓取')).toBeNull();
     expect(document.querySelector('[data-node="n-fetch"]').textContent).toContain('exec-fetch-a1');
-    expect(document.querySelectorAll('[data-node="n-fetch"]')).toHaveLength(1);
+    expect(document.querySelectorAll('[data-node="n-fetch"]')).toHaveLength(2);
 
     // 分层事件日志：类型、节点、尝试与缘由
     fireEvent.click(screen.getByRole('button', { name: /分层事件（2）/ }));
@@ -137,6 +157,15 @@ describe('v4 分层能力画布', () => {
     await act(async () => openStream.mock.calls[0][0].onStatus('closed'));
   });
 
+  it('点击 step 复用能力运行组件，并可查看重试前执行', async () => {
+    served = view; route(); mount();
+    await waitFor(() => expect(document.querySelectorAll('.brain-layer-node')).toHaveLength(4));
+    fireEvent.click(document.querySelector('[data-id="n-api"]'));
+    expect(await screen.findByTestId('capability-detail')).toBeTruthy();
+    expect(screen.getByTestId('capability-detail').textContent).toContain('agent:');
+    expect(screen.getByRole('combobox', { name: '选择执行尝试' })).toBeTruthy();
+  });
+
   it('没有事件流也不会冻结：分层视图每 3 秒轮询重取 /layered', async () => {
     served = { ...view, run: { ...view.run, layer: 1 }, operations: view.operations.slice(0, 1) };
     route();
@@ -154,43 +183,27 @@ describe('v4 分层能力画布', () => {
     } finally { vi.useRealTimers(); }
   });
 
-  it('v3 运行仍走 v3 快照 + /view，绝不请求 /layered', async () => {
-    apiGet.mockImplementation(async (path) => {
-      if (path.endsWith('/view')) return { schema_version: 3, run: { run_id: 'brain-v3', phase: 'ready', round: 0, generation: 1, last_event_seq: 0, updated_at: 1, error: null }, rounds: [] };
-      return { schema_version: 3, run: { run_id: 'brain-v3', phase: 'ready', round: 0, generation: 1, last_event_seq: 0 }, operations: [] };
-    });
-    render(<BrainRunBody id="brain-v3" />);
-    await screen.findByText('尚未产生调度轮次');
-    expect(paths()).toContain('/api/brain/runs/brain-v3/view');
-    expect(paths().some((path) => path.includes('/layered'))).toBe(false);
-    expect(document.querySelector('.brain-layer-canvas')).toBeNull();
+  it.each([3, 5, '4'])('拒绝不支持的版本 %s', async (version) => {
+    apiGet.mockResolvedValue({ schema_version: version, run: {} });
+    render(<BrainRunBody id="brain-unsupported" />);
+    await screen.findByText('运行缺少分层调度数据');
+    expect(paths().every((path) => path.endsWith('/layered'))).toBe(true);
   });
-
-  it('未知 schema_version 显式报错，v4 载荷缺 run 时失败关闭', async () => {
-    apiGet.mockImplementation(async (path) => {
-      if (path.endsWith('/layered')) return { schema_version: 4, plan: {} };
-      return { schema_version: 5, run: { run_id: 'brain-v5' }, unknown: true };
-    });
-    render(<BrainRunBody id="brain-v5" />);
-    await screen.findByText('无法显示该运行');
-    expect(screen.getByText(/schema_version=5/)).toBeTruthy();
-    cleanup();
-    apiGet.mockImplementation(async (path) => {
-      if (path.endsWith('/layered')) return { schema_version: 4, plan: {} };
-      return { schema_version: 4, run: { run_id: 'brain-broken' } };
-    });
+  it('缺少运行时明确报错', async () => {
+    apiGet.mockResolvedValue({ schema_version: 4 });
     render(<BrainRunBody id="brain-broken" />);
-    await screen.findByText('v4 brain view is missing its layered run');
+    await screen.findByText('运行缺少分层调度数据');
   });
 
-  it('基础运行快照 404 时回落到 /layered，v4 视图仍可打开', async () => {
+  it('直接查询分层视图，不查询旧版运行快照', async () => {
     apiGet.mockImplementation(async (path) => {
       if (path.endsWith('/layered')) return view;
       const missing = new Error('not found'); missing.status = 404; throw missing;
     });
     mount();
     await waitFor(() => expect(document.querySelectorAll('.brain-layer-node')).toHaveLength(4));
-    expect(paths()).toEqual(['/api/brain/runs/brain-v4', '/api/brain/runs/brain-v4/layered']);
+    expect(paths()).toContain('/api/brain/runs/brain-v4/layered');
+    expect(paths()).not.toContain('/api/brain/runs/brain-v4');
     expect(screen.getByText('层屏障 1/3')).toBeTruthy();
   });
 });

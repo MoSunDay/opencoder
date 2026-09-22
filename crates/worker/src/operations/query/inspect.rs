@@ -79,7 +79,8 @@ pub(in crate::operations) async fn inspect(
     let mut result = json!({"execution":index,"request":request,"definition":definition,"result":outcome,"error":error,"annotations":annotations});
     match kind {
         ExecutionKind::Brain => {
-            result["brain"] = crate::brain::api::snapshot(worker, id, 0).await?;
+            result["brain"] =
+                serde_json::to_value(worker.inner.state.store.brain_layered(id).await?)?;
         }
         ExecutionKind::Dag => {
             let steps = super::dag_steps::dag_steps(worker, execution, None).await?;

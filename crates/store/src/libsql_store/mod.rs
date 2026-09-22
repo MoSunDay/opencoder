@@ -6,8 +6,6 @@ use tokio::sync::Mutex;
 
 mod brain;
 mod brain_layered;
-mod brain_playbooks;
-mod brain_scheduler;
 mod chat_tables;
 mod connection;
 mod dag;

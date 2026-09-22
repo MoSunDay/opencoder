@@ -1,4 +1,4 @@
-Commit: 3b4775905c950f64433b5c9f4439f4396674b3c6
+Commit: d9b366a66dc7defa4281f484dd00b2a3e208c092
 
 # core 模块
 
@@ -15,3 +15,7 @@ Commit: 3b4775905c950f64433b5c9f4439f4396674b3c6
 - `src/net.rs`、`src/data_dir.rs` — HTTP 客户端与 per-workdir 数据目录
 - `src/fleet/protocol.rs` — Server/Node 协议（PROTOCOL_VERSION = 10）
 - `src/brain/` — 保存计划版本、能力描述与产物引用；`layered/` 是唯一分层计划及运行协议。节点只有一句话任务、能力 ID 和重试策略。调度见 [brain](../brain/index.md)，执行面见 [worker](../worker/index.md)。
+
+## 私有任务文件
+
+`src/fleet/private_files/` 定义 `PrivateExecutionContext`、期限/路径/容量纯校验及不可变存储。执行目录 0700、文件 0600，拒绝符号链接，写入同步并校验回读；Debug 脱敏。`image_digest` 指运行中节点可执行文件 SHA256。`Config.dag.execution_private_root` 仅运行态传递，不参与配置序列化。

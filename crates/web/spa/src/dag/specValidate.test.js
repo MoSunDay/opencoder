@@ -173,3 +173,11 @@ it('rejects Runner even with valid registered bindings', () => {
   const spec = { name: 'business', steps: [{ name: 'workflow', kind: { type: 'runner', runner: 'eval-diagnose', agent: 'eval-diagnose' } }] };
   expect(validateSpec(spec)).toEqual(['steps[0].kind.type 必须是 agent | wasm | dynamic']);
 });
+
+it('validates failure and dependency policies without discarding them', () => {
+  const step = {name:'cases',trigger_rule:'all_done',kind:{type:'dynamic',failure_policy:'collect_all',
+    source:{type:'input',pointer:'/items'},template:{type:'agent',prompt:'test'}}};
+  expect(validateSpec({name:'native',steps:[step]})).toEqual([]);
+  expect(validateSpec({name:'native',steps:[{...step,trigger_rule:'typo',kind:{...step.kind,failure_policy:'typo'}}]}))
+    .toEqual(['steps[0].trigger_rule 必须是 all_success | all_done','steps[0].kind.failure_policy 必须是 fail_fast | collect_all']);
+});

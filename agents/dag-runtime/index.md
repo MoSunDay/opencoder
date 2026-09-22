@@ -1,4 +1,4 @@
-Commit: fc047704e4c583cb9e0c11293b3815916ce1659b
+Commit: d9b366a66dc7defa4281f484dd00b2a3e208c092
 
 # dag-runtime 模块
 
@@ -25,3 +25,7 @@ Commit: fc047704e4c583cb9e0c11293b3815916ce1659b
 ## 相关
 - [动态步骤说明](../../docs/dag-dynamic.md) — 实例 API、输入例子与恢复契约
 - [Codex DAG 接入](../../docs/registered-runners.md) — host/runc 凭证、profile 与 rootfs 制备；安装脚本补齐 Shell、Git、TLS 和 NSS 解析依赖。
+
+## 私有任务文件
+
+`src/exec/private_files.rs` 只向 prompt 注入目录路径；host 使用执行目录，runc 将其只读挂载到 `/run/opencoder-task`（ro/nosuid/nodev），拒绝符号链接与重复挂载。`scripts/prepare-dag-rootfs.sh` 调用 `scripts/dag-rootfs/install-python.sh` 安装 Python 标准库和动态依赖，并执行 chroot 导入校验。

@@ -61,6 +61,12 @@ describe('bounded artifact downloads', () => {
       .toBe('/api/executions/dag-a/artifact?step=step%2Fx&file=output.json');
   });
 
+  it('addresses a dynamic instance without dropping its evidence path', () => {
+    expect(artifactPath('dag-a', 'cases', 'evidence/raw.json', 17))
+      .toBe('/api/executions/dag-a/artifact?step=cases&file=evidence%2Fraw.json&index=17');
+    for (const index of [-1, 1.5, NaN]) expect(() => artifactPath('a', 'cases', 'raw', index)).toThrow();
+  });
+
   it('keeps credentials ephemeral and rejects redirected or cross-origin upstreams', () => {
     const source = readFileSync('public/static/download-sw.js', 'utf8');
     expect(source).toContain("url.origin === origin");

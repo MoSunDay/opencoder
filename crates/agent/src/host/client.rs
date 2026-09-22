@@ -117,26 +117,28 @@ impl Host {
                 .json(operation)
                 .send()
         };
-        let response = match request().await {
-            Ok(response) => response,
+        let (response, awakened) = match request().await {
+            Ok(response) => (response, false),
             Err(error) if error.is_connect() => {
                 self.inventory(&runtime, true).await?;
-                request().await?
+                (request().await?, true)
             }
             Err(error) => return Err(error.into()),
         };
         let reply = response.error_for_status()?.json().await?;
-        if self
+        let was_asleep = self
             .store
             .definition("runtime_sleep", runtime_id)
             .await?
-            .is_some_and(|v| !v.is_null())
-        {
+            .is_some_and(|v| !v.is_null());
+        if was_asleep {
             self.store
                 .put_definition("runtime_sleep", runtime_id, &serde_json::Value::Null)
                 .await?;
         }
-        self.changes.send_modify(|n| *n += 1);
+        if awakened || was_asleep || operation.refreshes_inventory() {
+            self.changes.send_modify(|n| *n += 1);
+        }
         Ok(reply)
     }
 
@@ -182,11 +184,14 @@ impl Host {
                     }
                 }
             };
-            for index in &inventory.indexes {
-                self.store
-                    .assign_runtime(&index.id, Some(&runtime.id))
-                    .await?;
-            }
+            let ids: Vec<_> = inventory
+                .indexes
+                .iter()
+                .map(|index| index.id.as_str())
+                .collect();
+            self.store
+                .assign_runtime_inventory(&runtime.id, &ids)
+                .await?;
             runtime_ready &= inventory.snapshot.ready;
             if let Some(error) = &inventory.snapshot.resource_error {
                 resource_errors.push(format!("{}: {error}", runtime.id));

@@ -2,10 +2,11 @@ import { getState } from '../store.js';
 
 const ARTIFACT_PATH = /^\/api\/executions\/[A-Za-z0-9_-]+\/artifact\?/;
 
-function artifactPath(id, step, file) {
+function artifactPath(id, step, file, index) {
+  if (index != null && (!Number.isSafeInteger(index) || index < 0)) throw new Error('无效的实例索引');
   const path = `/api/executions/${encodeURIComponent(id)}/artifact?step=${encodeURIComponent(step)}&file=${encodeURIComponent(file)}`;
   if (!ARTIFACT_PATH.test(path)) throw new Error('无效的产物下载路径');
-  return path;
+  return index == null ? path : `${path}&index=${index}`;
 }
 
 function randomId() {
@@ -54,7 +55,7 @@ function register(worker, record) {
   });
 }
 
-export async function downloadArtifact(id, step, file) {
+export async function downloadArtifact(id, step, file, index) {
   const token = getState().token;
   if (!token) throw new Error('请先登录');
   let worker = navigator.serviceWorker?.controller;
@@ -65,7 +66,7 @@ export async function downloadArtifact(id, step, file) {
   const popup = retainsUserGesture ? window.open('about:blank', '_blank') : null;
   if (retainsUserGesture && !popup) throw new Error('浏览器阻止了下载窗口');
   const registered = register(worker, {
-    id: requestId, path: artifactPath(id, step, file), token,
+    id: requestId, path: artifactPath(id, step, file, index), token,
   });
   if (retainsUserGesture) {
     await registered;

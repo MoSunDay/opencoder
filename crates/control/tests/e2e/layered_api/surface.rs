@@ -8,7 +8,32 @@ async fn layered_view_and_rounds_read_the_node_projection() {
     let h = Harness::with_brain_kind().await;
     advertise_v4(&h);
     create(&h).await;
-    h.node.set_brain("snapshot", 200, snapshot("waiting", 1, 3));
+    let operation = json!({
+        "operation_id":format!("{RUN}#l1#scan#a1"), "run_id":RUN,
+        "layer":1, "node_id":"scan", "attempt":1,
+        "capability_id":"builtin-agent-act", "execution_kind":"agent",
+        "execution_id":"agent-layered-scan", "status":"creating",
+        "source_sequence":null, "cancel_requested":false
+    });
+    let events: Vec<opencoder_core::brain::layered::LayeredEvent> = serde_json::from_value(json!([
+        {"seq":1,"run_id":RUN,"layer":0,"event_type":"run_created",
+         "evidence_execution_ids":[],"at_ms":1},
+        {"seq":2,"run_id":RUN,"layer":1,"event_type":"decision_started",
+         "evidence_execution_ids":[],"at_ms":2},
+        {"seq":3,"run_id":RUN,"layer":1,"event_type":"layer_started",
+         "decision_summary":"dispatch_layer","reason_summary":"Scan before applying",
+         "evidence_execution_ids":[],"at_ms":3},
+        {"seq":4,"run_id":RUN,"layer":1,"event_type":"node_dispatched",
+         "node_id":"scan","attempt":1,"capability_id":"builtin-agent-act",
+         "execution_kind":"agent","execution_id":"agent-layered-scan",
+         "evidence_execution_ids":[],"at_ms":4}
+    ]))
+    .unwrap();
+    let mut projection = snapshot("waiting", 1, 3);
+    projection["run"]["last_event_seq"] = json!(4);
+    projection["operations"] = json!([operation]);
+    h.node.set_brain("snapshot", 200, projection);
+    h.node.set_brain("events", 200, json!({"events":events}));
     let path = format!("/api/brain/runs/{RUN}/layered");
     let (status, view) = h.req(Method::GET, &path, None).await;
     assert_eq!(status, 200, "{view}");
@@ -19,8 +44,8 @@ async fn layered_view_and_rounds_read_the_node_projection() {
     assert_eq!(view["run"]["generation"], json!(3));
     assert_eq!(view["run"]["total_layers"], json!(2));
     assert_eq!(view["layers"], json!([["scan"], ["apply"]]));
-    assert_eq!(view["operations"], json!([]));
-    assert_eq!(view["events"], json!([]));
+    assert_eq!(view["operations"], json!([operation]));
+    assert_eq!(view["events"], json!(events));
     assert_eq!(view["plan"]["nodes"].as_array().unwrap().len(), 2);
     let capabilities = view["capabilities"].as_array().unwrap();
     assert_eq!(capabilities.len(), 2);
@@ -39,15 +64,30 @@ async fn layered_view_and_rounds_read_the_node_projection() {
         assert_eq!(round["layer"], json!(layer));
         assert_eq!(round["phase"], json!("waiting"));
         assert_eq!(round["evidence_execution_ids"], json!([]));
+        if layer == 1 {
+            assert_eq!(round["decision"], json!("dispatch_layer"));
+            assert_eq!(round["reason"], json!("Scan before applying"));
+        } else {
+            assert!(round["decision"].is_null());
+            assert_eq!(round["reason"], json!(""));
+        }
         let nodes = round["nodes"].as_array().unwrap();
         assert_eq!(nodes.len(), 1);
         assert_eq!(nodes[0]["node_id"], json!(node));
-        assert_eq!(nodes[0]["status"], json!("pending"));
-        assert_eq!(nodes[0]["attempt"], json!(0));
+        assert_eq!(
+            nodes[0]["status"],
+            json!(if layer == 1 { "creating" } else { "pending" })
+        );
+        assert_eq!(nodes[0]["attempt"], json!(if layer == 1 { 1 } else { 0 }));
         assert_eq!(nodes[0]["attempts"], json!(attempts));
         assert_eq!(nodes[0]["cancel_requested"], json!(false));
-        assert_eq!(nodes[0]["inputs"], json!({}));
-        assert!(nodes[0]["execution_id"].is_null());
+        assert!(nodes[0].get("inputs").is_none());
+        assert!(nodes[0].get("summary").is_none());
+        if layer == 1 {
+            assert_eq!(nodes[0]["execution_id"], json!("agent-layered-scan"));
+        } else {
+            assert!(nodes[0]["execution_id"].is_null());
+        }
     }
     // Layers are derived from the plan, so an out-of-range round is a miss.
     for round in [0, 3] {
@@ -64,6 +104,21 @@ async fn layered_view_and_rounds_read_the_node_projection() {
     assert!(
         reads >= 3,
         "every layered read is a node projection read: {reads}"
+    );
+}
+
+#[tokio::test]
+async fn dispatched_layer_without_history_is_an_explicit_error() {
+    let h = Harness::with_brain_kind().await;
+    advertise_v4(&h);
+    create(&h).await;
+    h.node.set_brain("snapshot", 200, snapshot("waiting", 1, 3));
+    let path = format!("/api/brain/runs/{RUN}/layered/rounds/1");
+    let (status, body) = h.req(Method::GET, &path, None).await;
+    assert_eq!(status, 500, "{body}");
+    assert_eq!(
+        body["error"],
+        json!("layer 1 dispatch decision is missing from the event journal")
     );
 }
 
@@ -122,7 +177,6 @@ async fn layered_routes_never_cross_serve_another_schema() {
         format!("/api/brain/runs/{RUN}/rounds/1"),
     ] {
         let (status, body) = h.req(Method::GET, &path, None).await;
-        assert_eq!(status, 409, "{path}: {body}");
-        assert!(body.to_string().contains("migration required"), "{body}");
+        assert_eq!(status, 404, "{path}: {body}");
     }
 }

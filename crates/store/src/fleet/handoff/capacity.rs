@@ -4,9 +4,13 @@ use libsql::{params, TransactionBehavior};
 use serde::Serialize;
 
 // The optimistic read and transactional update must use the same FIFO fence.
+// Completed tickets remain durable history. Poll only the existing partial
+// live-ticket index; ORDER BY / min(sequence) still determines global FIFO.
 const CLAIMABLE: &str = "ticket=?1 AND runtime_id=?2 AND phase='queued'
-    AND sequence=(SELECT min(sequence) FROM capacity_queue WHERE phase='queued')
-    AND (SELECT count(*) FROM capacity_queue WHERE phase='running')
+    AND sequence=(SELECT min(sequence) FROM capacity_queue INDEXED BY one_live_slot
+        WHERE phase!='done' AND phase='queued')
+    AND (SELECT count(*) FROM capacity_queue INDEXED BY one_live_slot
+        WHERE phase!='done' AND phase='running')
         < (SELECT max_runs FROM host_capacity WHERE singleton=1)";
 
 #[derive(Debug, Clone, Serialize)]
@@ -43,7 +47,10 @@ impl FleetStore {
 
     pub async fn capacity(&self) -> Result<CapacitySnapshot> {
         let _gate = self.gate.lock().await;
-        let mut rows = self.conn.query("SELECT max_runs,(SELECT count(*) FROM capacity_queue WHERE phase='running'),(SELECT count(*) FROM capacity_queue WHERE phase='queued') FROM host_capacity WHERE singleton=1", ()).await?;
+        let mut rows = self.conn.query("SELECT max_runs,
+            (SELECT count(*) FROM capacity_queue INDEXED BY one_live_slot WHERE phase!='done' AND phase='running'),
+            (SELECT count(*) FROM capacity_queue INDEXED BY one_live_slot WHERE phase!='done' AND phase='queued')
+            FROM host_capacity WHERE singleton=1", ()).await?;
         let row = rows
             .next()
             .await?
@@ -155,7 +162,7 @@ impl FleetStore {
 
     pub async fn runtime_tickets(&self, runtime: &str) -> Result<Vec<(String, String, String)>> {
         let _gate = self.gate.lock().await;
-        let mut rows = self.conn.query("SELECT ticket,execution_id,phase FROM capacity_queue WHERE runtime_id=?1 AND phase!='done' ORDER BY sequence", [runtime]).await?;
+        let mut rows = self.conn.query("SELECT ticket,execution_id,phase FROM capacity_queue INDEXED BY one_live_slot WHERE runtime_id=?1 AND phase!='done' ORDER BY sequence", [runtime]).await?;
         let mut tickets = Vec::new();
         while let Some(row) = rows.next().await? {
             tickets.push((row.get(0)?, row.get(1)?, row.get(2)?));

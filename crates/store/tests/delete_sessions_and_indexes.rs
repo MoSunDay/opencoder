@@ -87,6 +87,7 @@ async fn delete_terminal_indexes_only_removes_droppable_rows() {
         let id = format!("operator-{index}");
         fleet.claim_request("execution", &id, "fp").await.unwrap();
         let assignment = Assignment {
+            private_context: None,
             runtime: None,
             codex: None,
             index: ExecutionIndex {
@@ -152,6 +153,7 @@ async fn delete_terminal_indexes_only_removes_droppable_rows() {
 async fn delete_terminal_indexes_is_ownership_guarded() {
     let fleet = FleetStore::open_memory().await.unwrap();
     let assignment = Assignment {
+        private_context: None,
         runtime: None,
         codex: None,
         index: ExecutionIndex {

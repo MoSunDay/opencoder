@@ -16,17 +16,42 @@ pub(super) async fn create(worker: &Worker, mut assignment: Assignment) -> Resul
             "system team execution is retired; use explicit node maintenance",
         ));
     }
+    if let Some(private) = &assignment.private_context {
+        if let Err(message) = private.validate(opencoder_core::message::now_ms()) {
+            return Ok(RpcReply::error(400, message));
+        }
+        let Some(definition) = assignment.definition.as_ref() else {
+            return Ok(RpcReply::error(400, "private DAG definition missing"));
+        };
+        let definition_sha = opencoder_core::token_hash(&serde_json::to_string(
+            definition.get("spec").unwrap_or(definition),
+        )?);
+        if definition_sha != private.definition_sha256 {
+            return Ok(RpcReply::error(409, "pinned DAG definition changed"));
+        }
+        if assignment.request.kind != ExecutionKind::Dag
+            || private.image_digest
+                != opencoder_core::fleet::private_files::runtime_image_digest()
+                    .map_err(anyhow::Error::msg)?
+        {
+            return Ok(RpcReply::error(
+                409,
+                "private task execution image mismatch",
+            ));
+        }
+    }
     let input = &assignment.request.input;
     if (assignment.request.kind == ExecutionKind::Brain
-        && !matches!(
-            input["schema_version"].as_u64(),
-            Some(2) | Some(3) | Some(4)
-        ))
-        || (input.get("_brain").is_some() && input["_brain"]["schema_version"] != 2)
+        && !matches!(input["schema_version"].as_u64(), Some(4)))
+        || input.get("_brain").is_some()
+        || input.get("brain_scheduler").is_some()
         || input.get("brain_receipt").is_some()
         || input.get("playbook_receipt").is_some()
     {
-        return Ok(RpcReply::error(409, opencoder_brain::graph::MIGRATION));
+        return Ok(RpcReply::error(
+            409,
+            opencoder_core::brain::layered::LAYERED_MIGRATION,
+        ));
     }
     if assignment.index.node_id != worker.inner.registration.id
         || assignment.index.id != assignment.request.id
@@ -37,6 +62,7 @@ pub(super) async fn create(worker: &Worker, mut assignment: Assignment) -> Resul
             "assignment ownership or kind mismatch",
         ));
     }
+    let mut timing = super::admission::timing::Timing::new(&assignment.index.id, "create");
     // A durable acceptance is a read-only replay. It must not queue behind
     // unrelated resource snapshots; otherwise a lost reply can never recover
     // under sustained admission load.
@@ -48,10 +74,12 @@ pub(super) async fn create(worker: &Worker, mut assignment: Assignment) -> Resul
     // when a cold Create and its retry reach queue launch concurrently.
     let preparation = worker.preparation_gate(&assignment.index.id).await;
     let preparing = preparation.lock_owned().await;
+    timing.mark("replay_and_preparation_lock");
     if let Some(reply) = accepted_reply(worker, &mut assignment).await {
         return Ok(reply);
     }
     let gate = worker.inner.admission.lock().await;
+    timing.mark("admission_lock");
     // Another Create may have accepted this ID while we waited for the gate.
     if let Some(reply) = accepted_reply(worker, &mut assignment).await {
         return Ok(reply);
@@ -82,6 +110,7 @@ pub(super) async fn create(worker: &Worker, mut assignment: Assignment) -> Resul
         Ok(assignment) => assignment,
         Err(reply) => return Ok(reply),
     };
+    timing.mark("durable_preparation");
     // Cold filesystem reads are bounded per node and serialized per execution,
     // but never hold the gate needed by WASI admission, pause or cancellation.
     drop(gate);
@@ -109,6 +138,7 @@ pub(super) async fn create(worker: &Worker, mut assignment: Assignment) -> Resul
     }
     let (prepared, (preparing, resource_slot)) =
         prepare_create(worker, &assignment, (preparing, resource_slot)).await?;
+    timing.mark("resource_preflight");
     let config = match prepared {
         Ok(config) => config,
         Err(error) => {
@@ -141,7 +171,9 @@ pub(super) async fn create(worker: &Worker, mut assignment: Assignment) -> Resul
             format!("execution preflight: {error:#}"),
         ));
     }
+    timing.mark("operator_materialization");
     let _gate = worker.inner.admission.clone().lock_owned().await;
+    timing.mark("queue_admission_lock");
     if let Some(error) = worker.admission_error() {
         return Ok(RpcReply::error(503, error));
     }
@@ -193,7 +225,9 @@ pub(super) async fn create(worker: &Worker, mut assignment: Assignment) -> Resul
         events: vec![],
         lifecycle,
     };
+    timing.mark("project_reservation");
     let record = super::queue::enqueue(worker, record, config, false).await?;
+    timing.mark("durable_queue");
     preparation::finish(
         &worker
             .inner
@@ -202,7 +236,9 @@ pub(super) async fn create(worker: &Worker, mut assignment: Assignment) -> Resul
     )?;
     drop(preparing);
     drop(resource_slot);
+    timing.mark("preparation_finish");
     let _gate = super::queue::dispatch_owned(worker, _gate).await?;
+    timing.mark("dispatch");
     let mut body = json!(
         worker.inner.journal.lock().await.records[&record.assignment.index.id]
             .assignment
@@ -271,11 +307,14 @@ async fn prepare_create(
     lease: preparation::Lease,
 ) -> Result<(Result<Config>, preparation::Lease)> {
     // Capture caller-scoped configuration before slow resource I/O crosses threads.
+    let mut timing = super::admission::timing::Timing::new(&assignment.index.id, "preflight");
     let config = worker.configuration_for(assignment.request.kind)?;
+    timing.mark("configuration");
     let source = opencoder_core::agent::agents_dir();
     let worker = worker.clone();
     let assignment = assignment.clone();
     preparation::run(lease, move || {
+        timing.mark("blocking_worker_wait");
         prepare_with_config(&worker, &assignment, false, config, source)
     })
     .await
@@ -306,18 +345,17 @@ fn prepare_with_config(
     mut config: Config,
     implicit_source: Option<std::path::PathBuf>,
 ) -> Result<Config> {
+    let mut timing = super::admission::timing::Timing::new(&assignment.index.id, "resources");
     let input = &assignment.request.input;
     anyhow::ensure!(
         !(assignment.request.kind == ExecutionKind::Brain
-            && !matches!(
-                input["schema_version"].as_u64(),
-                Some(2) | Some(3) | Some(4)
-            ))
-            && !(input.get("_brain").is_some() && input["_brain"]["schema_version"] != 2)
+            && !matches!(input["schema_version"].as_u64(), Some(4)))
+            && !input.get("_brain").is_some()
+            && input.get("brain_scheduler").is_none()
             && input.get("brain_receipt").is_none()
             && input.get("playbook_receipt").is_none(),
         "{}",
-        opencoder_brain::graph::MIGRATION
+        opencoder_core::brain::layered::LAYERED_MIGRATION
     );
     if let Some(error) = worker.inner.persistence_error.lock().unwrap().as_ref() {
         bail!("node persistence unavailable: {error}");
@@ -358,6 +396,7 @@ fn prepare_with_config(
     std::fs::create_dir_all(root.parent().unwrap())?;
     let source = source.filter(|_| requires_agents);
     config.agent.agents_dir = crate::resources::pin(source.as_deref(), &root)?;
+    timing.mark("snapshot");
     let validated = (|| -> Result<()> {
         let prompt = assignment.request.input["prompt"].as_str().unwrap_or("");
         let needs_llm = match assignment.request.kind {
@@ -376,34 +415,14 @@ fn prepare_with_config(
             _ => true,
         };
         opencoder_core::agent::scope::with_root_sync(config.agent.agents_dir.clone(), || {
-            if let Some(pins) =
-                assignment.request.input["_brain"]["action"]["agent_manifests"].as_object()
-            {
-                for (name, expected) in pins {
-                    let actual = opencoder_core::brain::resources::agent_manifest(name)
-                        .map_err(anyhow::Error::msg)?;
-                    anyhow::ensure!(expected.as_str()==Some(actual.as_str()), "pinned agent resource mismatch for {name}; select a node with the required version");
-                }
-            }
             let mut agents = vec![];
             match assignment.request.kind {
                 ExecutionKind::Brain => {
-                    if input["schema_version"] == 2 {
-                        opencoder_brain::execution::initialize(
-                            &assignment.index.id,
-                            serde_json::from_value(assignment.request.input.clone())?,
-                            0,
-                        )?;
-                    } else if input["schema_version"] == 3 {
-                        let request: opencoder_core::brain::BrainSchedulerRequest =
-                            serde_json::from_value(input["scheduler_request"].clone())?;
-                        opencoder_brain::scheduler::validate_request(&request)?;
-                    } else if input["schema_version"] == 4 {
-                        crate::brain::v4::state::parse_request(input)?;
-                    }
-                    if input["schema_version"] == 2 && worker.inner.client.is_none() {
-                        crate::brain::activate::preflight()?;
-                    }
+                    anyhow::ensure!(
+                        input["schema_version"] == 4,
+                        "unsupported brain schema; expected 4"
+                    );
+                    crate::brain::v4::state::parse_request(input)?;
                 }
                 ExecutionKind::Agent | ExecutionKind::Maintenance | ExecutionKind::Operator => {
                     agents.push(
@@ -475,7 +494,7 @@ fn prepare_with_config(
                                 | opencoder_store::ProjectExecutorKind::Playbook
                         ),
                         "{}",
-                        opencoder_brain::graph::MIGRATION
+                        opencoder_core::brain::layered::LAYERED_MIGRATION
                     );
                     let assigned = project_preflight_agents(&todo);
                     // Validate the complete definition even while planning;
@@ -742,52 +761,4 @@ pub(crate) async fn start(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use opencoder_store::{ProjectExecutorKind, ProjectTodoStatus};
-
-    fn todo(kind: ProjectExecutorKind, spec: Option<&str>) -> opencoder_store::ProjectTodoRecord {
-        opencoder_store::ProjectTodoRecord {
-            id: "pt-1".into(),
-            milestone_id: None,
-            title: "t".into(),
-            draft: "d".into(),
-            plan_md: None,
-            status: ProjectTodoStatus::Draft,
-            agent: "act".into(),
-            executor_kind: kind,
-            executor_ref: None,
-            executor_spec: spec.map(str::to_string),
-            active_session_id: None,
-            created_at: 0,
-            updated_at: 0,
-        }
-    }
-
-    #[test]
-    fn preflight_agents_follow_the_executor_kind() {
-        // Agent: the todo's own agent.
-        assert_eq!(
-            project_preflight_agents(&todo(ProjectExecutorKind::Agent, None)),
-            vec!["act".to_string()]
-        );
-        // Team spec: captain + members node_ids; spec-less → lazy skip.
-        let team = r#"{"name":"c","captain":{"node_id":"lead","name":"Lead"},"members":[{"node_id":"a1","name":"A"},{"node_id":"a2","name":"B"}]}"#;
-        assert_eq!(
-            project_preflight_agents(&todo(ProjectExecutorKind::Team, Some(team))),
-            vec!["lead".to_string(), "a1".to_string(), "a2".to_string()]
-        );
-        assert!(project_preflight_agents(&todo(ProjectExecutorKind::Team, None)).is_empty());
-        assert!(project_preflight_agents(&todo(ProjectExecutorKind::Team, Some("{"))).is_empty());
-        // Dag spec: agent steps with agent.unwrap_or("act"); wasm skipped.
-        let dag = r#"{"name":"d","steps":[
-            {"name":"w","kind":{"type":"wasm","command":"t.wasm"}},
-            {"name":"x","kind":{"type":"agent","prompt":"p","agent":"explore"}},
-            {"name":"y","kind":{"type":"agent","prompt":"p"}}]}"#;
-        assert_eq!(
-            project_preflight_agents(&todo(ProjectExecutorKind::Dag, Some(dag))),
-            vec!["explore".to_string(), "act".to_string()]
-        );
-        assert!(project_preflight_agents(&todo(ProjectExecutorKind::Dag, None)).is_empty());
-    }
-}
+mod tests;

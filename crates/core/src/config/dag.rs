@@ -9,6 +9,9 @@ use serde::{Deserialize, Serialize};
 /// DAG wasm-module pool + NFS exposure knobs (`Config::dag`).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DagConfig {
+    /// Runtime-only owning execution path, never accepted from the public configuration.
+    #[serde(skip)]
+    pub execution_private_root: Option<std::path::PathBuf>,
     /// Wasm module pool root (`<name>/v{n}/wasm.bin` tree). `None` = derive
     /// the default `<data_dir>/dag/wasm` at the serving daemon.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -58,6 +61,10 @@ pub struct DagOpConfig {
     /// errors the step on expiry. `None` = the runtime default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout_secs: Option<u64>,
+    /// On cancellation/timeout, signal the controller and allow bounded cleanup
+    /// before killing its process group. Zero keeps immediate termination.
+    #[serde(default)]
+    pub termination_grace_secs: u64,
 }
 
 /// Where an `agent` step's session runs. Node-local configuration; the

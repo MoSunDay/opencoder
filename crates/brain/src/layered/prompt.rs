@@ -25,7 +25,6 @@ pub fn instruction(context: &LayeredContext) -> Result<String> {
             json!({
                 "node_id": node.node_id,
                 "title": node.title,
-                "instructions": node.instructions,
                 "retry_max_attempts": node.retry_max_attempts,
                 "capability": {
                     "capability_id": node.capability.capability_id,

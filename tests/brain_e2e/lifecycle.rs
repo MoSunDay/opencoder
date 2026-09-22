@@ -1,12 +1,12 @@
 //! Process-level migration contract for the brain control surface. Historical
-//! v2 writes are rejected; v3 is the only public scheduler admission path.
+//! v2 writes are rejected; v4 is the only public scheduler admission path.
 
 use crate::support::fleet_proc::Fleet;
 use crate::support::llm_stub::LlmStub;
 use serde_json::json;
 
 #[test]
-fn raw_brain_submissions_are_rejected_in_favor_of_v3_runs() {
+fn raw_brain_submissions_are_rejected_in_favor_of_layered_runs() {
     let stub = LlmStub::spawn(vec![]);
     let tmp = tempfile::tempdir().unwrap();
     let fleet = Fleet::spawn_with_config(tmp.path(), stub.port(), json!({}), "brain-guard-node");
@@ -21,12 +21,12 @@ fn raw_brain_submissions_are_rejected_in_favor_of_v3_runs() {
     assert!(body["error"]
         .as_str()
         .unwrap_or_default()
-        .contains("schema_version: 3"));
+        .contains("schema_version: 4"));
     assert_eq!(stub.request_count(), 0, "no model traffic");
 }
 
 #[test]
-fn v2_run_writes_are_read_only_and_require_explicit_v3_schema() {
+fn old_run_writes_require_explicit_layered_schema() {
     let stub = LlmStub::spawn(vec![]);
     let tmp = tempfile::tempdir().unwrap();
     let fleet =
@@ -42,7 +42,7 @@ fn v2_run_writes_are_read_only_and_require_explicit_v3_schema() {
         assert!(body["error"]
             .as_str()
             .unwrap_or_default()
-            .contains("read-only"));
+            .contains("schema_version: 4"));
     }
     assert_eq!(stub.request_count(), 0, "migration rejection must not plan");
 }

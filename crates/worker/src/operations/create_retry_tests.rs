@@ -29,6 +29,7 @@ async fn pending_wasm_reservation_already_freezes_its_empty_resource_namespace()
         ),
     ] {
         let assignment = Assignment {
+            private_context: None,
             runtime: None,
             codex: None,
             definition: Some(json!({"name":id,"steps":[{"name":"work","kind":kind}]})),
@@ -104,6 +105,7 @@ async fn durable_replay_does_not_wait_for_an_unrelated_cold_admission() {
     .await
     .unwrap();
     let assignment = Assignment {
+        private_context: None,
         runtime: None,
         codex: None,
         definition: None,

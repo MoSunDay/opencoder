@@ -221,10 +221,10 @@ fn brain_caps_crud_and_target() {
     );
 }
 
-/// Schema 3 and the new schema 4 layering surface: the runs subcommands must
+/// The schema 4 layering surface: the runs subcommands must
 /// survive clap parsing and map to the locked method/path pairs.
 #[test]
-fn brain_run_create_accepts_v3_and_v4_and_layered_reads_match_the_contract() {
+fn brain_run_create_accepts_v4_and_layered_reads_match_the_contract() {
     let plan = planned_brain(&["runs", "create", "--json", r#"{"schema_version":4}"#]);
     assert_eq!(plan.method, reqwest::Method::POST);
     assert_eq!(plan.path, "/api/brain/runs");
@@ -246,13 +246,13 @@ fn brain_run_create_accepts_v3_and_v4_and_layered_reads_match_the_contract() {
         r#"{"schema_version":2}"#,
     ]))
     .expect_err("v2 must not be planned");
-    assert!(error.to_string().contains("schema_version: 3 or 4"));
+    assert!(error.to_string().contains("schema_version: 4"));
     rejects(&["brain", "runs", "layered"]);
     rejects(&["brain", "runs", "layered-round", "r1"]);
 }
 
 #[test]
-fn brain_search_plan_preview_dispatch() {
+fn brain_search_and_retired_command_rejection() {
     let plan = planned_brain(&["search", "--json", r#"{"query":"auth","k":5}"#]);
     assert_eq!(
         plan,
@@ -260,8 +260,9 @@ fn brain_search_plan_preview_dispatch() {
             .with_body(serde_json::json!({"query": "auth", "k": 5}))
     );
 
-    let plan = planned_brain(&["plan-get", "p1"]);
-    assert_eq!(plan, RequestPlan::get("/api/brain/plans/p1"));
+    for command in ["plan", "plan-get", "preview", "dispatch"] {
+        rejects(&["brain", command]);
+    }
 }
 
 // ── agents ─────────────────────────────────────────────────────────────

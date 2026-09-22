@@ -1,4 +1,4 @@
-//! Process-level confirmation of the brain v3 admission and migration gates.
+//! Process-level confirmation of the Brain schema admission gates.
 mod lifecycle;
 #[path = "../support/mod.rs"]
 mod support;

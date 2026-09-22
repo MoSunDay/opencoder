@@ -59,8 +59,8 @@ def brain_preflight(settings, candidate, releases=()):
             payload = request.get("input") or {}
             if not isinstance(payload, dict):
                 payload = {}
-            legacy = ((request["kind"] == "brain" and payload.get("schema_version") not in (2, 3))
-                      or ("_brain" in payload and payload["_brain"].get("schema_version") != 2)
+            legacy = ((request["kind"] == "brain" and payload.get("schema_version") != 4)
+                      or "_brain" in payload or "brain_scheduler" in payload
                       or "brain_receipt" in payload or "playbook_receipt" in payload)
             if legacy and assignment["index"]["status"] not in ("done", "error", "cancelled"):
                 raise ValueError(f"brain migration blocked by nonterminal legacy execution {request['id']}; let its old runtime converge before upgrading")

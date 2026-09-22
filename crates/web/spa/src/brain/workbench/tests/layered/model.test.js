@@ -23,10 +23,10 @@ const view = {
   plan: {
     title: '分层能力画布', objective: '按层交付画布与决策明细', todo: { id: 'todo-7' }, max_rounds: 32,
     nodes: [
-      { node_id: 'n-fetch', title: '抓取仓库', capability_id: 'cap-n-fetch', instructions: '', retry: { max_attempts: 2 } },
-      { node_id: 'n-api', title: 'API 影响面', capability_id: 'cap-n-api', instructions: '', retry: { max_attempts: 3 } },
-      { node_id: 'n-ui', title: '前端画布', capability_id: 'cap-n-ui', instructions: '', retry: { max_attempts: 2 } },
-      { node_id: 'n-verdict', title: '汇总裁决', capability_id: 'cap-n-verdict', instructions: '', retry: { max_attempts: 2 } },
+      { node_id: 'n-fetch', title: '抓取仓库', capability_id: 'cap-n-fetch', retry: { max_attempts: 2 } },
+      { node_id: 'n-api', title: 'API 影响面', capability_id: 'cap-n-api', retry: { max_attempts: 3 } },
+      { node_id: 'n-ui', title: '前端画布', capability_id: 'cap-n-ui', retry: { max_attempts: 2 } },
+      { node_id: 'n-verdict', title: '汇总裁决', capability_id: 'cap-n-verdict', retry: { max_attempts: 2 } },
     ],
     edges: [{ from: 'n-fetch', to: 'n-api' }, { from: 'n-fetch', to: 'n-ui' }, { from: 'n-api', to: 'n-verdict' }, { from: 'n-ui', to: 'n-verdict' }],
   },
@@ -68,8 +68,8 @@ describe('v4 分层分组与节点汇总', () => {
     expect(layerNodeIds(view)).toEqual([['n-fetch'], ['n-api', 'n-ui'], ['n-verdict']]);
     expect(totalLayers(view)).toBe(3);
     expect(totalLayers({ ...view, run: { ...view.run, total_layers: 0 } })).toBe(3);
-    expect(activeLayer(view)).toBe(3); // run.layer = 2 已完成，正在决策第 3 层
-    expect(activeLayer({ ...view, run: { ...view.run, layer: 3 } })).toBeNull();
+    expect(activeLayer(view)).toBe(2); // run.layer = 2 已派发，本层仍在等待
+    expect(activeLayer({ ...view, run: { ...view.run, layer: 3, phase: 'completed' } })).toBeNull();
   });
 
   it('层汇总按最新尝试滚动：全部 done 才完成，重试计入尝试次数', () => {
@@ -78,7 +78,7 @@ describe('v4 分层分组与节点汇总', () => {
     expect(rows.map((row) => row.status)).toEqual(['done', 'running', 'pending']);
     expect(rows.map((row) => row.complete)).toEqual([true, false, false]);
     expect(rows.map((row) => row.attempts)).toEqual([1, 3, 0]);
-    expect(rows.map((row) => row.active)).toEqual([false, false, true]);
+    expect(rows.map((row) => row.active)).toEqual([false, true, false]);
   });
 
   it('重试链保留全部尝试，最新一次尝试获胜且带重试徽标', () => {
@@ -106,18 +106,19 @@ describe('v4 分层分组与节点汇总', () => {
     expect(barrier({ schema_version: 4, run: { phase: 'ready' } })).toMatchObject({ total: 0, completed: 0, percent: 0, label: '0/0' });
   });
 
-  it('画布每层一列：列内居中、边带绑定标签、只连已声明的节点', () => {
+  it('画布从上到下：层内居中、边带绑定标签、只连已声明的节点', () => {
     const graph = layerGraph(view);
     expect(graph.nodes.map((node) => node.id)).toEqual(['n-fetch', 'n-api', 'n-ui', 'n-verdict']);
     const fetch = graph.nodes[0]; const api = graph.nodes[1];
-    expect(fetch.position.x).toBe(0);
-    expect(api.position.x).toBe(216 + 88); // LAYER_NODE_W + LAYER_GAP_X
+    expect(fetch.position.y).toBe(0);
+    expect(api.position.y).toBe(156 + 100);
     expect(fetch.data).toMatchObject({ layer: 1, active: false, status: 'done', upstreamTitles: [] });
     expect(api.data.upstreamTitles).toEqual(['抓取仓库']);
-    expect(graph.nodes[3].data.active).toBe(true);
+    expect(graph.nodes[3].data.active).toBe(false);
+    expect(api.data.active).toBe(true);
     expect(graph.edges.map((edge) => edge.id)).toEqual(['n-fetch->n-api', 'n-fetch->n-ui', 'n-api->n-verdict', 'n-ui->n-verdict']);
     expect(graph.edges[2].data).toMatchObject({ upstream: 'API 影响面', downstream: '汇总裁决' });
-    expect(graph.edges[2].animated).toBe(true);
+    expect(graph.edges[2].animated).toBe(false);
     const orphan = layerGraph({ ...view, plan: { ...view.plan, edges: [{ from: 'n-fetch', to: 'missing' }] } });
     expect(orphan.edges).toEqual([]);
   });
@@ -139,14 +140,14 @@ describe('v4 事件日志与层决策明细', () => {
 
   it('roundDetail 归一化层决策明细并补默认值', () => {
     const detail = roundDetail({
-      schema_version: 4, layer: 1, phase: 'dispatch_layer', reason: '抓取完成，进入并行层', evidence_execution_ids: ['exec-fetch-a1'],
-      nodes: [{ node_id: 'n-api', title: 'API 影响面', capability_id: 'cap-n-api', status: 'running', attempt: 2, execution_id: 'exec-api-a2', execution_kind: 'agent', cancel_requested: true, summary: '分析中', inputs: { repo: { kind: 'root', name: 'repo' } } }, { node_id: 'n-ui' }],
+      schema_version: 4, layer: 1, phase: 'waiting', decision: 'dispatch_layer', reason: '抓取完成，进入并行层', evidence_execution_ids: ['exec-fetch-a1'],
+      nodes: [{ node_id: 'n-api', title: 'API 影响面', capability_id: 'cap-n-api', status: 'running', attempt: 2, execution_id: 'exec-api-a2', execution_kind: 'agent', cancel_requested: true }, { node_id: 'n-ui' }],
     });
-    expect(detail).toMatchObject({ schemaVersion: 4, layer: 1, phase: 'dispatch_layer', reason: '抓取完成，进入并行层', evidence: ['exec-fetch-a1'] });
-    expect(detail.nodes[0]).toMatchObject({ nodeId: 'n-api', attempt: 2, cancelRequested: true, summary: '分析中', inputs: { repo: { kind: 'root', name: 'repo' } } });
-    expect(detail.nodes[1]).toMatchObject({ nodeId: 'n-ui', title: 'n-ui', status: 'pending', attempt: 1, executionId: '', inputs: {} });
+    expect(detail).toMatchObject({ schemaVersion: 4, layer: 1, phase: 'waiting', decision: 'dispatch_layer', reason: '抓取完成，进入并行层', evidence: ['exec-fetch-a1'] });
+    expect(detail.nodes[0]).toMatchObject({ nodeId: 'n-api', attempt: 2, cancelRequested: true });
+    expect(detail.nodes[1]).toMatchObject({ nodeId: 'n-ui', title: 'n-ui', status: 'pending', attempt: 1, executionId: '' });
     expect(decisionLabel('dispatch_layer')).toBe('派发本层');
-    expect(decisionLabel('waiting')).toBe('等待执行'); // round detail 的 phase 也可以直接展示
+    expect(decisionLabel('waiting')).toBe('等待执行'); // phase describes execution waiting, not the dispatch label
     expect(decisionLabel('')).toBe('');
   });
 });

@@ -87,6 +87,16 @@ export function StepInspector({ step, allNames, problemList, onChange, onRename,
           />
         </Form.Item>
         {dynamic && <SourceFields step={step} allNames={allNames} onChange={onChange} />}
+        <Form.Item label="依赖触发条件">
+          <Select value={step.trigger_rule || 'all_success'}
+            options={[{ value: 'all_success', label: '依赖全部成功' }, { value: 'all_done', label: '依赖全部结束（含失败）' }]}
+            onChange={(trigger_rule) => onChange({ ...step, trigger_rule })} />
+        </Form.Item>
+        {dynamic && <Form.Item label="实例失败策略">
+          <Select value={step.kind.failure_policy || 'fail_fast'}
+            options={[{ value: 'fail_fast', label: '首个失败停止其余实例' }, { value: 'collect_all', label: '继续执行并收集全部结果' }]}
+            onChange={(failure_policy) => onChange({ ...step, kind: { ...step.kind, failure_policy } })} />
+        </Form.Item>}
         {kindType === 'agent' ? (
           <>
             <Form.Item label="提示词 (prompt)">

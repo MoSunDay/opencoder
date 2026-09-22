@@ -19,8 +19,8 @@ pub mod types;
 mod users;
 
 pub use brain_types::{
-    BrainCapabilityDetail, BrainCapabilityRecord, BrainEngInputRecord, BrainPlanRecord,
-    BrainPlaybookRecord, BrainVectorHit, BrainVectorWrite,
+    BrainCapabilityDetail, BrainCapabilityRecord, BrainEngInputRecord, BrainVectorHit,
+    BrainVectorWrite,
 };
 pub use bundle::{
     export_bundle, import_bundle, read_bundle, write_bundle, SessionBundle, SubagentBundle,

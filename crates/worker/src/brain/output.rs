@@ -1,7 +1,7 @@
 use crate::{journal::Record, Worker};
-use anyhow::{ensure, Context, Result};
+use anyhow::{Context, Result};
 use opencoder_core::{brain::*, fleet::*, Role};
-use serde_json::{json, Value};
+use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::path::Path;
 
@@ -9,61 +9,12 @@ pub async fn normalize(
     worker: &Worker,
     record: &Record,
     status: ExecutionStatus,
-    mut result: Value,
+    result: Value,
 ) -> Result<(ExecutionStatus, Value)> {
-    if record
-        .assignment
-        .request
-        .input
-        .get("brain_scheduler")
-        .is_some()
-    {
-        return super::v3::output::normalize(worker, record, status, result).await;
-    }
     if super::v4::parent::leaf(&record.assignment.request.input) {
         return super::v4::output::normalize(worker, record, status, result).await;
     }
-    if record.assignment.request.input.get("_brain").is_none()
-        || !matches!(status, ExecutionStatus::Done | ExecutionStatus::Idle)
-    {
-        return Ok((status, result));
-    }
-    let action: ActionSpec =
-        serde_json::from_value(record.assignment.request.input["_brain"]["action"].clone())?;
-    let schema: DataSchema =
-        serde_json::from_value(record.assignment.request.input["_brain"]["output_schema"].clone())?;
-    let id = &record.assignment.index.id;
-    let (native, mut artifacts) = native_output(worker, record, &result).await?;
-    let value = project_output(native, &action)?;
-    opencoder_brain::ontology::accepts(&schema, &value)?;
-    ensure!(
-        serde_json::to_vec(&value)?.len() <= 256 * 1024,
-        "structured output exceeds 256 KiB; return artifact references instead"
-    );
-    let artifact_dir = worker
-        .inner
-        .layout
-        .execution_dir(record.assignment.index.kind, id)?
-        .join("brain-result");
-    std::fs::create_dir_all(&artifact_dir)?;
-    let artifact_path = artifact_dir.join("output.json");
-    opencoder_core::atomic_write_json(&artifact_path, &value)?;
-    artifacts.push(artifact(
-        &record.assignment.index.execution_ref(),
-        "brain-result",
-        "output.json",
-        &artifact_path,
-    )?);
-    let output = OutputEnvelope {
-        value,
-        artifacts,
-        evidence: vec![format!("execution:{}", id)],
-    };
-    if !result.is_object() {
-        result = json!({"native_result":result});
-    }
-    result["brain_output"] = json!(output);
-    Ok((ExecutionStatus::Done, result))
+    Ok((status, result))
 }
 
 pub(super) async fn native_output(
@@ -151,31 +102,6 @@ pub(super) async fn native_output(
     Ok((native, artifacts))
 }
 
-pub fn project_output(mut value: Value, action: &ActionSpec) -> Result<Value> {
-    if action.output_mode == OutputMode::Json {
-        if let Some(text) = value.as_str() {
-            value = serde_json::from_str(text).context("execution did not return valid JSON")?;
-        }
-    }
-    value = value
-        .pointer(&action.output_pointer)
-        .cloned()
-        .context("declared output pointer is absent")?;
-    match action.output_mode {
-        OutputMode::Json => {
-            if let Some(text) = value.as_str() {
-                serde_json::from_str(text)
-                    .context("declared JSON output contains invalid JSON text")
-            } else {
-                Ok(value)
-            }
-        }
-        OutputMode::Text => Ok(match value {
-            Value::String(_) => value,
-            _ => Value::String(serde_json::to_string(&value)?),
-        }),
-    }
-}
 fn artifact(execution: &ExecutionRef, step: &str, file: &str, path: &Path) -> Result<ArtifactRef> {
     let bytes = std::fs::read(path)?;
     Ok(ArtifactRef {

@@ -136,6 +136,8 @@ pub fn valid_id(id: &str) -> bool {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Assignment {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub private_context: Option<super::PrivateExecutionContext>,
     #[serde(default)]
     pub runtime: Option<Box<crate::harness::RuntimeSettings>>,
     #[serde(default)]
@@ -290,6 +292,34 @@ pub enum NodeOperation {
     Maintenance {
         command: ExecutionCommand,
     },
+}
+
+impl NodeOperation {
+    /// Queries do not change execution inventory. Mutations still publish load
+    /// before their reply; periodic and revision-driven reports remain active.
+    pub fn refreshes_inventory(&self) -> bool {
+        match self {
+            Self::Brain { .. }
+            | Self::Admission { .. }
+            | Self::Create { .. }
+            | Self::Command { .. }
+            | Self::Maintenance { .. } => true,
+            Self::Inspect { .. }
+            | Self::AcceptedRequest { .. }
+            | Self::Events { .. }
+            | Self::EventPayload { .. }
+            | Self::DetailField { .. }
+            | Self::Messages { .. }
+            | Self::TodoItems { .. }
+            | Self::ProjectRuns { .. }
+            | Self::TeamTurns { .. }
+            | Self::DagInstances { .. }
+            | Self::DagInstanceEvents { .. }
+            | Self::DagSteps { .. }
+            | Self::DagStepEvents { .. }
+            | Self::Artifact { .. } => false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

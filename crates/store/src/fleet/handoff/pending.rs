@@ -21,7 +21,7 @@ SELECT assignment FROM (
     SELECT a.id,a.assignment
     FROM pending p
     CROSS JOIN execution_assignments a ON a.id=p.id
-    WHERE a.id>?1 AND json_extract(a.assignment,'$.request.kind') IS NOT 'project'
+    WHERE a.id>?1 AND json_extract(a.assignment,'$.request.kind')<>'project'
     UNION ALL
     SELECT a.id,a.assignment
     FROM execution_index i

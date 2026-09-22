@@ -13,6 +13,111 @@ use support::*;
 
 const FIXTURE_BYTES: u64 = 256 * 1024 * 1024;
 
+#[tokio::test]
+async fn declared_report_and_nested_evidence_require_integrity_and_stay_in_the_step() {
+    let fleet = Fleet::new(1, mock()).await;
+    support::stage_stdout_wasm(&fleet.root().join("n0/node"), "tool.wasm", "small");
+    let assignment = assignment(
+        &fleet.nodes[0],
+        "dag-declared-artifacts",
+        ExecutionKind::Dag,
+        json!({}),
+        Some(
+            json!({"name":"reports","steps":[{"name":"first","kind":{"type":"wasm","command":"tool.wasm"}}]}),
+        ),
+    );
+    let execution = assignment.index.execution_ref();
+    assert_eq!(
+        fleet.nodes[0]
+            .handle(NodeOperation::Create { assignment })
+            .await
+            .status,
+        200
+    );
+    settled(&fleet.nodes[0], "dag-declared-artifacts").await;
+    let dir = fleet
+        .root()
+        .join("n0/node/dag/dag-declared-artifacts/first");
+    std::fs::create_dir_all(dir.join("evidence")).unwrap();
+    let bytes = b"original evidence";
+    let digest = format!("{:x}", Sha256::digest(bytes));
+    std::fs::write(dir.join("report.zip"), bytes).unwrap();
+    std::fs::write(dir.join("evidence/raw.bin"), bytes).unwrap();
+    std::fs::write(
+        dir.join("output.json"),
+        serde_json::to_vec(&json!({"report_archive":{
+        "file":"report.zip","bytes":bytes.len(),"sha256":digest}}))
+        .unwrap(),
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("artifacts.json"),
+        serde_json::to_vec(&json!({"files":[{
+        "path":"evidence/raw.bin","bytes":bytes.len(),"sha256":digest}]}))
+        .unwrap(),
+    )
+    .unwrap();
+    for (file, status) in [
+        ("report.zip", 200),
+        ("evidence/raw.bin", 200),
+        ("artifacts.json", 200),
+        ("undeclared.bin", 400),
+        ("../first/output.json", 400),
+        ("/etc/passwd", 400),
+    ] {
+        let reply = fleet.nodes[0]
+            .handle(NodeOperation::Artifact {
+                request: ArtifactRequest {
+                    execution: execution.clone(),
+                    step: "first".into(),
+                    index: None,
+                    file: file.into(),
+                    offset: 0,
+                    version: None,
+                },
+            })
+            .await;
+        assert_eq!(reply.status, status, "{file}: {reply:?}");
+    }
+    std::fs::write(dir.join("report.zip"), b"tampered evidence").unwrap();
+    let reply = fleet.nodes[0]
+        .handle(NodeOperation::Artifact {
+            request: ArtifactRequest {
+                execution: execution.clone(),
+                step: "first".into(),
+                index: None,
+                file: "report.zip".into(),
+                offset: 1,
+                version: None,
+            },
+        })
+        .await;
+    assert_eq!(reply.status, 409, "{reply:?}");
+    #[cfg(unix)]
+    {
+        std::fs::remove_file(dir.join("evidence/raw.bin")).unwrap();
+        std::os::unix::fs::symlink(
+            dir.parent().unwrap().join("input.json"),
+            dir.join("evidence/raw.bin"),
+        )
+        .unwrap();
+        let reply = fleet.nodes[0]
+            .handle(NodeOperation::Artifact {
+                request: ArtifactRequest {
+                    execution,
+                    step: "first".into(),
+                    index: None,
+                    file: "evidence/raw.bin".into(),
+                    offset: 0,
+                    version: None,
+                },
+            })
+            .await;
+        assert_ne!(reply.status, 200, "{reply:?}");
+    }
+    fleet.shutdown().await;
+}
+
 fn rss_bytes() -> u64 {
     std::fs::read_to_string("/proc/self/status")
         .ok()

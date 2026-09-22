@@ -59,6 +59,10 @@ fn plan_rejects_unknown_fields_and_foreign_todo() {
     extra["stray"] = json!(true);
     assert!(serde_json::from_value::<LayeredPlan>(extra).is_err());
 
+    let mut duplicate_description = value;
+    duplicate_description["nodes"][0]["instructions"] = json!("second task description");
+    assert!(serde_json::from_value::<LayeredPlan>(duplicate_description).is_err());
+
     let mut foreign = plan();
     foreign.todo = Some(LayeredTodoRef {
         id: "todo-1".into(),

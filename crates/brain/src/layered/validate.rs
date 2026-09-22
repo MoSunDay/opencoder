@@ -58,9 +58,10 @@ pub fn validate_request(request: &LayeredRequest) -> Result<()> {
     );
     validate_plan(&request.plan)?;
     ensure!(request.depth <= LAYERED_MAX_DEPTH, "nesting depth exceeded");
-    if request.depth > 0 {
-        ensure!(request.parent.is_some(), "a nested run needs its parent");
-    }
+    ensure!(
+        (request.depth > 0) == request.parent.is_some(),
+        "nested depth and parent must agree"
+    );
     for name in request.plan.inputs.keys() {
         ensure!(!name.trim().is_empty(), "empty plan input name");
     }

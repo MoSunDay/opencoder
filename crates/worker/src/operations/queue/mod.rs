@@ -37,7 +37,9 @@ pub(crate) async fn enqueue_with_command(
     resume: bool,
     command: Option<QueuedCommand>,
 ) -> Result<Record> {
+    let mut timing = super::admission::timing::Timing::new(&record.assignment.index.id, "enqueue");
     let mut journal = worker.inner.journal.lock().await;
+    timing.mark("journal_lock");
     if let Some(current) = journal.records.get(&record.assignment.index.id) {
         anyhow::ensure!(
             current.assignment.index.status == record.assignment.index.status
@@ -67,6 +69,7 @@ pub(crate) async fn enqueue_with_command(
         command,
     }));
     journal.save(record.clone())?;
+    timing.mark("journal_save");
     if let Some(host) = &worker.inner.host_capacity {
         let ticket = record
             .queue
@@ -110,9 +113,13 @@ pub(crate) async fn dispatch_owned(
 
 /// Caller holds node admission; a slot is reserved before any workload starts.
 pub(crate) async fn dispatch_locked(worker: &Worker) -> Result<()> {
+    let mut timing = super::admission::timing::Timing::new("", "dispatch");
     worker.reconcile_capacity().await?;
+    timing.mark("capacity_reconciliation");
     crate::brain::wake::recover_locked(worker).await?;
+    timing.mark("brain_recovery");
     super::todo::recover_locked(worker).await?;
+    timing.mark("todo_recovery");
     if worker.admission_error().is_some()
         || worker.inner.stopping.is_cancelled()
         || worker.inner.persistence_error.lock().unwrap().is_some()
@@ -154,7 +161,10 @@ pub(crate) async fn dispatch_locked(worker: &Worker) -> Result<()> {
             b.queue.as_ref().unwrap().sequence,
         )
     });
+    timing.mark("queue_snapshot");
     for mut record in records {
+        let mut entry =
+            super::admission::timing::Timing::new(&record.assignment.index.id, "queue_entry");
         let Some(permit) = worker.try_slot() else {
             break;
         };
@@ -171,6 +181,7 @@ pub(crate) async fn dispatch_locked(worker: &Worker) -> Result<()> {
                 break;
             }
         }
+        entry.mark("capacity_claim");
         let ticket = queued.ticket.clone();
         let outcome = if let Some(command) = &queued.command {
             let id = record.assignment.index.id.clone();

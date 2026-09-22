@@ -69,6 +69,7 @@ pub(crate) async fn seed_review_dags(fleet: &Arc<FleetStore>) {
 
 fn wasm_step(name: &str, depends_on: &[&str], command: &str, timeout_secs: u64) -> StepSpec {
     StepSpec {
+        trigger_rule: Default::default(),
         name: name.to_string(),
         depends_on: depends_on.iter().map(|s| s.to_string()).collect(),
         kind: StepKind::Wasm {
@@ -81,6 +82,7 @@ fn wasm_step(name: &str, depends_on: &[&str], command: &str, timeout_secs: u64) 
 
 fn agent_step(name: &str, depends_on: &[&str], prompt: &str) -> StepSpec {
     StepSpec {
+        trigger_rule: Default::default(),
         name: name.to_string(),
         depends_on: depends_on.iter().map(|s| s.to_string()).collect(),
         kind: StepKind::Agent {

@@ -22,19 +22,18 @@ afterEach(() => { cleanup(); vi.clearAllMocks(); });
 describe('执行明细内嵌运行视图', () => {
   it('brain 明细复用工作台运行主体，但不写 brain_run URL 参数', async () => {
     apiGet.mockImplementation(async (path) => {
-      if (path === '/api/brain/runs/brain-1') {
-        return { objective: '发布里程碑', phase: 'completed', activation: 1, revision: 1, handled_revision: 1, updated_at: 1, total_instances: 1, error: '', input_requests: {}, deliverables: {},
-          plan: { id: 'plan-1', version: 2, plan: { steps: [{ id: 's1', label: '第一步', action: { kind: 'agent' } }] } },
-          groups: [], instances: [] };
+      if (path === '/api/brain/runs/brain-1/layered') {
+        return { schema_version: 4, run: { run_id: 'brain-1', phase: 'completed', layer: 1 },
+          plan: { title: '发布里程碑', nodes: [{ node_id: 's1', title: '第一步', capability_id: 'cap-1' }], edges: [] },
+          layers: [['s1']], operations: [], events: [] };
       }
-      if (String(path).startsWith('/api/brain/runs/brain-1/events-page')) return { events: [], more: false };
       return {};
     });
     render(<BrainRunEmbed id="brain-1" onNotice={vi.fn()} />);
     // 画布节点也渲染同名 label，断言作用域化到步骤列表。
-    expect(await screen.findByText('第一步', { selector: '.brain-step-list strong' })).toBeTruthy();
-    expect(document.querySelector('.brain-workspace')).toBeTruthy(); // PlanCanvas + Inspector 容器
-    expect(apiGet).toHaveBeenCalledWith('/api/brain/runs/brain-1');
+    expect(await screen.findByText('第一步', { selector: '.brain-layer-node-title' })).toBeTruthy();
+    expect(document.querySelector('.brain-layer-canvas')).toBeTruthy(); // PlanCanvas + Inspector 容器
+    expect(apiGet).toHaveBeenCalledWith('/api/brain/runs/brain-1/layered');
     // Embed 不得写 brain_run 参数（BrainRunView 才同步浏览器地址）。
     expect(window.location.search).toBe('');
   });

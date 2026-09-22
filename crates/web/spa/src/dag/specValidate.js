@@ -78,7 +78,13 @@ export function validateSpec(spec) {
       return;
     }
     let kind = s.kind;
+    if (s.trigger_rule !== undefined && !['all_success', 'all_done'].includes(s.trigger_rule)) {
+      problems.push(where + '.trigger_rule 必须是 all_success | all_done');
+    }
     if (kind.type === 'dynamic') {
+      if (kind.failure_policy !== undefined && !['fail_fast', 'collect_all'].includes(kind.failure_policy)) {
+        problems.push(where + '.kind.failure_policy 必须是 fail_fast | collect_all');
+      }
       const source = kind.source || {};
       if (!['input', 'step_output'].includes(source.type)) problems.push(where + ' 派生来源必须是 input | step_output');
       if (typeof source.pointer !== 'string' || (source.pointer && !source.pointer.startsWith('/')) || /~(?![01])/u.test(source.pointer)) problems.push(where + ' 数组路径必须是有效 JSON pointer');

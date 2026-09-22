@@ -101,6 +101,7 @@ impl Host {
                     };
                     return Box::pin(self.route(NodeOperation::Create {
                         assignment: Assignment {
+                            private_context: None,
                             request,
                             index,
                             definition: None,

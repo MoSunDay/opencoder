@@ -7,6 +7,7 @@ pub(super) mod preparation;
 pub(super) mod replay;
 #[cfg(test)]
 mod tests;
+pub(super) mod timing;
 
 pub(super) async fn update(worker: &Worker, command: NodeAdmissionCommand) -> Result<RpcReply> {
     match command {

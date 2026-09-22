@@ -6,6 +6,7 @@ use std::path::Path;
 use tokio::sync::Mutex;
 
 mod brain;
+mod counts;
 pub mod handoff;
 mod records;
 mod report;

@@ -59,7 +59,7 @@ pub fn resolve(
             ProjectExecutorKind::Brain | ProjectExecutorKind::Playbook
         )
     }) {
-        bail!(opencoder_brain::graph::MIGRATION);
+        bail!(opencoder_core::brain::layered::LAYERED_MIGRATION);
     }
     if let Some(ov) = override_ {
         return Ok(ResolvedExecutor {
@@ -75,7 +75,7 @@ pub fn resolve(
         ProjectExecutorKind::Team => with_target(todo, ProjectExecutorKind::Team),
         ProjectExecutorKind::Dag => with_target(todo, ProjectExecutorKind::Dag),
         ProjectExecutorKind::Brain | ProjectExecutorKind::Playbook => {
-            anyhow::bail!(opencoder_brain::graph::MIGRATION)
+            anyhow::bail!(opencoder_core::brain::layered::LAYERED_MIGRATION)
         }
     }
 }
@@ -145,7 +145,7 @@ pub async fn drive(
                 &deps,
                 &run_id,
                 opencoder_store::ProjectTodoRunStatus::Failed,
-                Some(opencoder_brain::graph::MIGRATION.into()),
+                Some(opencoder_core::brain::layered::LAYERED_MIGRATION.into()),
                 None,
                 None,
             )

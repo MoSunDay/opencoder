@@ -21,6 +21,7 @@ fn agent_record(target: Option<&str>, kind: ExecutionKind) -> Record {
         annotations: Value::Null,
         queue: None,
         assignment: Assignment {
+            private_context: None,
             runtime: None,
             codex: None,
             index: ExecutionIndex {

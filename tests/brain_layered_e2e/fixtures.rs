@@ -9,10 +9,9 @@ use crate::support::{sibling_bin, CLI_BIN};
 use serde_json::{json, Value};
 use std::process::Command;
 
-/// Run id every layered scenario creates; ids must start with `brain-`.
+/// Fixed id for rejected admission scenarios; live runs use isolated ids.
 pub const RUN: &str = "brain-layered-e2e";
 /// Run id of the v3 run the cross-version rule reads.
-pub const LEGACY_RUN: &str = "brain-v3-in-the-canvas";
 /// What each leaf child answers; the canvas never inspects a child body.
 pub const CHILD_TEXT: &str = "e2e-layered-node-result";
 /// The closing summary the canvas folds into the run.
@@ -28,9 +27,9 @@ pub fn plan() -> Value {
         "objective": "prove the layered canvas through the control plane",
         "nodes": [
             {"node_id":"scan","title":"Scan","capability_id":"builtin-agent-act",
-             "instructions":"scan the workspace","retry":{"max_attempts":2}},
+             "retry":{"max_attempts":2}},
             {"node_id":"apply","title":"Apply","capability_id":"builtin-agent-act",
-             "instructions":"apply the change","retry":{"max_attempts":3}}
+             "retry":{"max_attempts":3}}
         ],
         "edges": [{"from":"scan","to":"apply"}],
         "max_rounds": 8
@@ -185,18 +184,4 @@ pub fn cli_json(fleet: &Fleet, args: &[&str]) -> Value {
             String::from_utf8_lossy(&output.stdout)
         )
     })
-}
-
-/// Admit one live v3 run (inline scheduler request, no capabilities): the
-/// cross-version rule reads it through `/view`, and no layered route may serve
-/// it. Same request shape as `crates/worker/tests/brain_scheduler_v3.rs`.
-pub fn create_legacy(fleet: &Fleet) -> Value {
-    let (status, body) = fleet.http(
-        "POST",
-        "/api/brain/runs",
-        &json!({"id":LEGACY_RUN,"schema_version":3,"objective":"verified report",
-            "inputs":{},"max_rounds":1}),
-    );
-    assert_eq!(status, 202, "create v3 run: {body}");
-    body
 }

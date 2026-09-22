@@ -154,17 +154,8 @@ async fn serve(
                                 IndexReportPart::Batch { records } => reports.batch(report_id, records)?,
                                 IndexReportPart::End => {
                                     if let Some(complete) = reports.end(report_id)? {
-                                        if !super::handoff_report::apply(&state, &id, &generation, report_sequence, &complete).await? {
+                                        if !super::socket_report::finish(&state, &id, &generation, report_sequence, &complete, &mut writer).await? {
                                             continue;
-                                        }
-                                        if complete.initial && generation.starts_with("host-") {
-                                            let server = state.lifecycle.platform.get().map(|p| p.release_id.clone()).unwrap_or_else(|| "legacy".into());
-                                            tx.send(SocketCommand::Frame(Box::new(ServerFrame::Call {
-                                                request_id:ulid::Ulid::new().to_string(),
-                                                operation:NodeOperation::Maintenance { command:ExecutionCommand {
-                                                    action:"host_handoff_ready".into(),input:serde_json::json!({"server":server})
-                                                }}
-                                            }))).await?;
                                         }
                                         tracing::debug!(node_id = %id, report_id = complete.report_id, records = complete.records.len(), "index report applied");
                                     }

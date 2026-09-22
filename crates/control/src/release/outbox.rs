@@ -1,7 +1,12 @@
 //! Recover dispatches whose accepting server died before writing the reply.
 use crate::AppState;
 use futures::{stream, StreamExt};
-use std::{sync::Arc, time::Duration};
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
+
+mod retry;
 
 pub fn start(state: &Arc<AppState>) {
     if state
@@ -14,6 +19,7 @@ pub fn start(state: &Arc<AppState>) {
     let weak = Arc::downgrade(state);
     tokio::spawn(async move {
         let mut after = String::new();
+        let mut retries = retry::Retries::default();
         loop {
             let Some(state) = weak.upgrade() else {
                 return;
@@ -37,24 +43,54 @@ pub fn start(state: &Arc<AppState>) {
                 .last()
                 .map(|a| a.index.id.clone())
                 .unwrap_or_default();
-            let ready: std::collections::HashSet<_> = state
+            if assignments.is_empty() {
+                retries.finish_scan();
+            } else {
+                retries.observe(assignments.iter().map(|a| a.index.id.clone()));
+            }
+            let ready: std::collections::HashMap<_, _> = state
                 .hub
                 .views()
                 .await
                 .into_iter()
-                .filter(|n| n.online && n.snapshot.as_ref().is_some_and(|s| s.ready))
-                .map(|n| n.registration.id)
+                .filter_map(|node| {
+                    let snapshot = node.snapshot?;
+                    (node.online && snapshot.ready)
+                        .then_some((node.registration.id, snapshot.generation))
+                })
                 .collect();
-            let dispatch = stream::iter(assignments.into_iter().filter(|a| ready.contains(&a.index.node_id)))
-                .for_each_concurrent(16, |assignment| {
-                    let state = state.clone();
-                    async move {
-                        let id = assignment.index.id.clone();
-                        let reply = crate::api::executions::submit(&state,assignment.request).await;
-                        if reply.status != 202 { tracing::warn!(%id,status=reply.status,"durable dispatch remains unresolved"); }
+            let now = Instant::now();
+            let due: Vec<_> = assignments
+                .into_iter()
+                .filter_map(|assignment| {
+                    let generation = ready.get(&assignment.index.node_id)?;
+                    retries
+                        .ready(&assignment.index.id, generation, now)
+                        .then_some((assignment, generation.clone()))
+                })
+                .collect();
+            let dispatch = stream::iter(due).map(|(assignment, generation)| {
+                let state = state.clone();
+                async move {
+                    let id = assignment.index.id.clone();
+                    // Recovery must preserve the frozen private grant as well
+                    // as the public request and its idempotency fingerprint.
+                    let reply = crate::api::executions::submit_private(
+                        &state, assignment.request, assignment.private_context,
+                    ).await;
+                    if reply.status != 202 {
+                        tracing::warn!(%id,status=reply.status,"durable dispatch remains unresolved");
                     }
-                });
-            tokio::select! { _ = dispatch => {}, _ = state.lifecycle.retired() => return }
+                    (id, generation, reply.status, Instant::now())
+                }
+            }).buffer_unordered(16).collect::<Vec<_>>();
+            let completed = tokio::select! {
+                completed = dispatch => completed,
+                _ = state.lifecycle.retired() => return,
+            };
+            for (id, generation, status, completed_at) in completed {
+                retries.completed(id, generation, status, completed_at);
+            }
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
     });

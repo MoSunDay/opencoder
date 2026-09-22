@@ -4,6 +4,7 @@ The journal records intent before every switch; replay uses the same release
 and probe IDs. Retired runtimes remain independently owned systemd services.
 """
 from pathlib import Path
+from contextlib import contextmanager
 import copy
 import time
 from . import ingress, manifest, probes, units
@@ -137,7 +138,29 @@ def deploy(settings, bundle, operations, seconds=90):
         raise
 
 
+@contextmanager
+def _deferred_disable(operations):
+    changed = False
+
+    def disable(*units):
+        nonlocal changed
+        # A failed multi-unit disable can still have removed some links.
+        changed = True
+        operations.run("systemctl", "--no-reload", "disable", *units)
+
+    try:
+        yield disable
+    finally:
+        if changed:
+            operations.run("systemctl", "daemon-reload")
+
+
 def retire_server(settings, journal, operations):
+    with _deferred_disable(operations) as disable:
+        _retire_server(settings, journal, operations, disable)
+
+
+def _retire_server(settings, journal, operations, disable):
     def retire_port(port, unit, retirement):
         try:
             if "ingress_workers" not in retirement:
@@ -151,7 +174,7 @@ def retire_server(settings, journal, operations):
             if not operations.inactive(unit):
                 raise
             retiring = True
-        operations.run("systemctl", "disable", unit)
+        disable(unit)
         return "retiring" if retiring else "waiting_for_ingress"
     for identifier, record in journal.data["releases"].items():
         for previous in record.get("previous_servers", []):
@@ -162,7 +185,7 @@ def retire_server(settings, journal, operations):
                 previous.update(phase="failed", failure=str(error))
             journal.save()
         for host in record.get("previous_hosts", []):
-            operations.run("systemctl", "disable", host["unit"])
+            disable(host["unit"])
         if identifier == journal.data["current"]:
             continue
         retirement = journal.data.setdefault("retirement", {}).setdefault(identifier, {})
@@ -174,7 +197,7 @@ def retire_server(settings, journal, operations):
             else:
                 phase = "retiring"
             register_server(settings, record, operations, enabled=False)
-            operations.run("systemctl", "disable", record["server_unit"], record["host_unit"])
+            disable(record["server_unit"], record["host_unit"])
             retirement.update(phase=phase, failure=None)
         except Exception as error:
             retirement.update(phase="failed", failure=str(error))

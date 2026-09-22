@@ -202,17 +202,18 @@ fn layered_canvas_holds_the_barrier_then_completes_through_the_closing_activatio
         "root view leaked a child body: {done}"
     );
 
-    // The per-layer detail of the finished canvas. Layer 1 stays past its
-    // barrier (the terminal fold is its last decision) and layer 2 carries the
-    // closing decision, with one frozen node row each.
+    // Completed layers retain their original dispatch reason, independently
+    // of child terminal receipts and the run's closing decision.
     let (status, body) = round(&fleet, RUN, 1);
     assert_eq!(status, 200, "{body}");
     assert_eq!(body["layer"], json!(1), "{body}");
     assert_eq!(
         body["phase"],
-        json!("deciding"),
-        "layer 1 folded past its barrier: {body}"
+        json!("waiting"),
+        "the frozen dispatch phase is preserved: {body}"
     );
+    assert_eq!(body["decision"], json!("dispatch_layer"), "{body}");
+    assert_eq!(body["reason"], json!("e2e layered dispatch"), "{body}");
     assert_eq!(body["evidence_execution_ids"], json!([]), "{body}");
     let scan_row = row(&body, "scan");
     assert_eq!(scan_row["status"], json!("done"), "{body}");
@@ -228,12 +229,13 @@ fn layered_canvas_holds_the_barrier_then_completes_through_the_closing_activatio
     assert_eq!(status, 200, "{body}");
     assert_eq!(
         body["phase"],
-        json!("completed"),
-        "the closing decision is the last layer-2 event: {body}"
+        json!("waiting"),
+        "closing does not replace the layer dispatch: {body}"
     );
+    assert_eq!(body["decision"], json!("dispatch_layer"), "{body}");
     assert_eq!(
         body["reason"],
-        json!("e2e closing decision after every layer"),
+        json!("e2e layered dispatch"),
         "{body}"
     );
     let apply_row = row(&body, "apply");

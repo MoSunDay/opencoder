@@ -140,14 +140,14 @@ describe('v4 事件日志与层决策明细', () => {
 
   it('roundDetail 归一化层决策明细并补默认值', () => {
     const detail = roundDetail({
-      schema_version: 4, layer: 1, phase: 'dispatch_layer', reason: '抓取完成，进入并行层', evidence_execution_ids: ['exec-fetch-a1'],
+      schema_version: 4, layer: 1, phase: 'waiting', decision: 'dispatch_layer', reason: '抓取完成，进入并行层', evidence_execution_ids: ['exec-fetch-a1'],
       nodes: [{ node_id: 'n-api', title: 'API 影响面', capability_id: 'cap-n-api', status: 'running', attempt: 2, execution_id: 'exec-api-a2', execution_kind: 'agent', cancel_requested: true }, { node_id: 'n-ui' }],
     });
-    expect(detail).toMatchObject({ schemaVersion: 4, layer: 1, phase: 'dispatch_layer', reason: '抓取完成，进入并行层', evidence: ['exec-fetch-a1'] });
+    expect(detail).toMatchObject({ schemaVersion: 4, layer: 1, phase: 'waiting', decision: 'dispatch_layer', reason: '抓取完成，进入并行层', evidence: ['exec-fetch-a1'] });
     expect(detail.nodes[0]).toMatchObject({ nodeId: 'n-api', attempt: 2, cancelRequested: true });
     expect(detail.nodes[1]).toMatchObject({ nodeId: 'n-ui', title: 'n-ui', status: 'pending', attempt: 1, executionId: '' });
     expect(decisionLabel('dispatch_layer')).toBe('派发本层');
-    expect(decisionLabel('waiting')).toBe('等待执行'); // round detail 的 phase 也可以直接展示
+    expect(decisionLabel('waiting')).toBe('等待执行'); // phase describes execution waiting, not the dispatch label
     expect(decisionLabel('')).toBe('');
   });
 });

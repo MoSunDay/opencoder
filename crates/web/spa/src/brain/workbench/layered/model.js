@@ -317,6 +317,7 @@ export function roundDetail(payload) {
     schemaVersion: Number(payload?.schema_version) || LAYERED_SCHEMA_VERSION,
     layer: asCount(payload?.layer),
     phase: asText(payload?.phase) || 'ready',
+    decision: asText(payload?.decision),
     reason: asText(payload?.reason),
     evidence: asArray(payload?.evidence_execution_ids).map(asText),
     nodes: asArray(payload?.nodes).filter((node) => node && asText(node.node_id)).map((node) => ({

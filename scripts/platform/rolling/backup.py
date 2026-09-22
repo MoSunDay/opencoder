@@ -1,5 +1,6 @@
 """SQLite online backups; independent files are never labelled one snapshot."""
 from pathlib import Path
+from contextlib import closing
 import hashlib
 import json
 import os
@@ -13,11 +14,16 @@ def database(source, target):
     target.parent.mkdir(parents=True, exist_ok=True)
     if target.exists():
         raise ValueError(f"backup output already exists: {target}")
-    with sqlite3.connect(source.resolve().as_uri() + "?mode=ro", uri=True) as reader:
-        with sqlite3.connect(target) as writer:
+    with closing(sqlite3.connect(source.resolve().as_uri() + "?mode=ro", uri=True)) as reader:
+        # Pin one read snapshot so writes between backup steps cannot restart
+        # the copy indefinitely. WAL writers may continue while it is copied.
+        reader.execute("BEGIN")
+        reader.execute("SELECT count(*) FROM sqlite_schema").fetchone()
+        with closing(sqlite3.connect(target)) as writer:
             reader.backup(writer, pages=256, sleep=0.01)
             if writer.execute("PRAGMA quick_check").fetchone() != ("ok",):
                 raise ValueError(f"backup verification failed: {source}")
+        reader.rollback()
     with target.open("rb") as stream:
         os.fsync(stream.fileno())
 

@@ -1,4 +1,4 @@
-Commit: 3b4775905c950f64433b5c9f4439f4396674b3c6
+Commit: 1afd5d4375cd10885aee335d3d9dbf9d396bb563
 
 # store 模块
 
@@ -16,3 +16,7 @@ Commit: 3b4775905c950f64433b5c9f4439f4396674b3c6
 - `src/fleet/records.rs` — 终态执行索引批删
 - `src/libsql_store/brain_layered.rs` + `brain_layered/schema.rs` — v4 分层画布 run/operation/event 投影（additive 建表，不推动 `SCHEMA_VERSION`；`schema_watermark()` 仅供断言，当前值为 28）
 - `src/store/contract/` 与 `src/libsql_store/impl_methods/` 分组组装 Store 接口和实现；`schema/migrations.rs` 保存共享表升级链。旧大脑专属表不再创建，历史数据由经过核准的维护清单单独清理。
+
+- [fleet/report/rows.rs](../../crates/store/src/fleet/report/rows.rs)：批量核验索引不可变字段，仅写入新增或变化行，冲突整批回滚。
+- [fleet/handoff/pending.rs](../../crates/store/src/fleet/handoff/pending.rs)：先筛选 prepared 回执，再读取冻结请求，校验 ID 与类型一致性。
+- [fleet/handoff/capacity.rs](../../crates/store/src/fleet/handoff/capacity.rs)：复用活跃票据部分索引，保持全机 FIFO 与事务内容量复核。

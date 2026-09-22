@@ -1,4 +1,4 @@
-Commit: 3b4775905c950f64433b5c9f4439f4396674b3c6
+Commit: 1afd5d4375cd10885aee335d3d9dbf9d396bb563
 
 # 大脑调度工作台
 
@@ -12,3 +12,5 @@ Commit: 3b4775905c950f64433b5c9f4439f4396674b3c6
 - [brain 模块](../../agents/brain/index.md)
 - [control 模块](../../agents/control/index.md)
 - [web 模块](../../agents/web/index.md)
+
+层详情保留首次派发时的原始调度动作与理由，并独立展示当前执行状态；完成、重试或失败不会替换派发依据。已派发层缺少调度事件时明确报错。

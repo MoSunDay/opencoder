@@ -34,15 +34,6 @@ pub struct ExecutionNames {
 }
 
 impl FleetStore {
-    pub async fn pending_assignments(&self, after: &str, limit: u32) -> Result<Vec<Assignment>> {
-        let _gate = self.gate.lock().await;
-        let mut rows = self.conn.query("SELECT a.assignment FROM execution_assignments a JOIN dispatch_receipts r ON r.scope='execution' AND r.id=CASE WHEN json_extract(a.assignment,'$.request.kind')='project' THEN COALESCE(json_extract(a.assignment,'$.request.input.run_id'),a.id) ELSE a.id END WHERE r.phase='prepared' AND a.id>?1 ORDER BY a.id LIMIT ?2", params![after,i64::from(limit.min(128))]).await?;
-        let mut assignments = Vec::new();
-        while let Some(row) = rows.next().await? {
-            assignments.push(serde_json::from_str(&row.get::<String>(0)?)?);
-        }
-        Ok(assignments)
-    }
     pub async fn receipt(&self, scope: &str, id: &str) -> Result<Option<Receipt>> {
         let _gate = self.gate.lock().await;
         let mut rows = self

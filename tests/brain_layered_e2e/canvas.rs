@@ -233,11 +233,7 @@ fn layered_canvas_holds_the_barrier_then_completes_through_the_closing_activatio
         "closing does not replace the layer dispatch: {body}"
     );
     assert_eq!(body["decision"], json!("dispatch_layer"), "{body}");
-    assert_eq!(
-        body["reason"],
-        json!("e2e layered dispatch"),
-        "{body}"
-    );
+    assert_eq!(body["reason"], json!("e2e layered dispatch"), "{body}");
     let apply_row = row(&body, "apply");
     assert_eq!(apply_row["status"], json!("done"), "{body}");
     assert_eq!(apply_row["attempt"], json!(1), "{body}");

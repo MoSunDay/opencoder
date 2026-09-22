@@ -3,6 +3,7 @@ use anyhow::{bail, Result};
 use base64::Engine;
 use opencoder_core::fleet::*;
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
 pub(super) async fn read(worker: &Worker, id: &str, input: Value) -> Result<RpcReply> {
     let journal = worker.inner.journal.lock().await;
@@ -59,6 +60,7 @@ pub(super) async fn read_request(worker: &Worker, request: ArtifactRequest) -> R
             &request.file,
             request.offset,
             request.version.as_deref(),
+            None,
         )
         .await;
     }
@@ -91,20 +93,91 @@ async fn read_fields(worker: &Worker, legacy: bool, request: &ArtifactRequest) -
     };
     let dir = opencoder_dag::artifacts::execution_dir(&workflow_root, id, step, index)
         .map_err(anyhow::Error::msg)?;
-    let path = if matches!(name, "output.txt" | "output.json" | "meta.json") {
-        dir.join(name)
+    if !dir.exists() {
+        return Ok(RpcReply::error(404, "artifact not available"));
+    }
+    let mut confined = workflow_root.clone();
+    for part in dir.strip_prefix(&workflow_root)?.components() {
+        confined.push(part);
+        anyhow::ensure!(
+            !std::fs::symlink_metadata(&confined)?
+                .file_type()
+                .is_symlink(),
+            "artifact directory cannot be a symlink"
+        );
+    }
+    if name.is_empty()
+        || name.contains('\\')
+        || name
+            .split('/')
+            .any(|p| p.is_empty() || p == "." || p == "..")
+        || std::path::Path::new(name).is_absolute()
+    {
+        return Ok(RpcReply::error(400, "invalid artifact path"));
+    }
+    let declared = if matches!(
+        name,
+        "output.txt" | "output.json" | "meta.json" | "artifacts.json"
+    ) {
+        None
     } else {
-        return Ok(RpcReply::error(400, "unknown artifact file"));
+        let Some(value) = declaration(&dir, name).await? else {
+            return Ok(RpcReply::error(400, "unknown artifact file"));
+        };
+        Some(value)
     };
+    let path = dir.join(name);
     if !path.exists() {
         return Ok(RpcReply::error(404, "artifact not available"));
     }
-    let root = workflow_root.join(id).canonicalize()?;
+    let root = dir.canonicalize()?;
     let path = path.canonicalize()?;
     if !path.starts_with(root) {
         bail!("artifact path escaped execution directory");
     }
-    read_chunk(&path, step, name, offset, expected_version).await
+    read_chunk(
+        &path,
+        step,
+        name,
+        offset,
+        expected_version,
+        declared.as_ref(),
+    )
+    .await
+}
+
+async fn declaration(dir: &std::path::Path, name: &str) -> Result<Option<(u64, String)>> {
+    for file in ["artifacts.json", "output.json"] {
+        if dir.join(file).is_symlink() {
+            bail!("artifact declaration cannot be a symlink");
+        }
+        let bytes = match tokio::fs::read(dir.join(file)).await {
+            Ok(bytes) => bytes,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error.into()),
+        };
+        let value: Value = serde_json::from_slice(&bytes)?;
+        let row = if file == "artifacts.json" {
+            value["files"]
+                .as_array()
+                .and_then(|rows| rows.iter().find(|row| row["path"] == name))
+        } else {
+            value
+                .get("report_archive")
+                .filter(|row| row["file"] == name)
+        };
+        if let Some(row) = row {
+            let (Some(bytes), Some(hash)) = (row["bytes"].as_u64(), row["sha256"].as_str()) else {
+                bail!("artifact declaration lacks bytes or SHA-256");
+            };
+            anyhow::ensure!(
+                hash.len() == 64 && hash.bytes().all(|c| c.is_ascii_hexdigit()),
+                "invalid artifact SHA-256"
+            );
+            return Ok(Some((bytes, hash.to_ascii_lowercase())));
+        }
+    }
+    Ok(None)
 }
 
 async fn read_chunk(
@@ -113,6 +186,7 @@ async fn read_chunk(
     name: &str,
     offset: u64,
     expected_version: Option<&str>,
+    declared: Option<&(u64, String)>,
 ) -> Result<RpcReply> {
     if !path.is_file() {
         return Ok(RpcReply::error(404, "artifact not available"));
@@ -121,6 +195,28 @@ async fn read_chunk(
     let metadata = file.metadata().await?;
     let total = metadata.len();
     let version = file_version(&metadata);
+    if let Some((bytes, hash)) = declared {
+        if *bytes != total {
+            return Ok(RpcReply::error(409, "artifact differs from declared size"));
+        }
+        if offset == 0 || expected_version.is_none() {
+            let mut digest = Sha256::new();
+            let mut buffer = vec![0; 64 * 1024];
+            loop {
+                let count = file.read(&mut buffer).await?;
+                if count == 0 {
+                    break;
+                }
+                digest.update(&buffer[..count]);
+            }
+            if format!("{:x}", digest.finalize()) != *hash {
+                return Ok(RpcReply::error(
+                    409,
+                    "artifact differs from declared SHA-256",
+                ));
+            }
+        }
+    }
     if expected_version.is_some_and(|expected| expected != version) {
         return Ok(RpcReply::error(
             409,
@@ -132,9 +228,13 @@ async fn read_chunk(
     }
     file.seek(std::io::SeekFrom::Start(offset)).await?;
     let mut bytes = Vec::new();
-    file.take(ARTIFACT_CHUNK_BYTES as u64)
+    (&mut file)
+        .take(ARTIFACT_CHUNK_BYTES as u64)
         .read_to_end(&mut bytes)
         .await?;
+    if file_version(&file.metadata().await?) != version {
+        return Ok(RpcReply::error(409, "artifact changed while reading"));
+    }
     let next = offset + bytes.len() as u64;
     Ok(RpcReply::ok(serde_json::to_value(ArtifactChunk {
         file: name.to_owned(),

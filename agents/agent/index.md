@@ -1,4 +1,4 @@
-Commit: 565c0eae44bf553002659597b92e1e01e4c6076a
+Commit: 1afd5d4375cd10885aee335d3d9dbf9d396bb563
 
 # agent 模块
 
@@ -14,3 +14,9 @@ Commit: 565c0eae44bf553002659597b92e1e01e4c6076a
 
 ## 相关
 - 陷阱案例：[release-0662b924-signal-deploy](../../features/changelog/2026-09-18/release-0662b924-signal-deploy.md)
+
+## 报告与发布边界
+
+- [host/client.rs](../../crates/agent/src/host/client.rs)：普通只读 RPC 不增加库存修订号；唤醒 Runtime 或清除休眠标记仍通知同步。
+- [rolling/deployment.py](../../scripts/platform/rolling/deployment.py)：历史 Server/Host 批量停用后统一重载 systemd；不停止保留 Runtime。
+- [rolling/backup.py](../../scripts/platform/rolling/backup.py)、[network/ports.py](../../scripts/platform/rolling/network/ports.py)：在线备份固定各数据库的 WAL 读取快照，端口分配探测整组可绑定性。

@@ -47,12 +47,29 @@ impl LocalDagPersistence for LocalEvents {
 pub(super) async fn run(
     worker: &Worker,
     record: &Record,
-    config: Config,
+    mut config: Config,
     cancel: CancellationToken,
     resume: bool,
 ) -> Result<(ExecutionStatus, Value)> {
     let assignment = &record.assignment;
     let id = &assignment.index.id;
+    if let Some(private) = &assignment.private_context {
+        anyhow::ensure!(
+            private.image_digest
+                == opencoder_core::fleet::private_files::runtime_image_digest()
+                    .map_err(anyhow::Error::msg)?,
+            "private task execution image mismatch"
+        );
+        config.dag.execution_private_root = Some(
+            opencoder_core::fleet::private_files::materialize(
+                worker.inner.layout.root(),
+                id,
+                private,
+                opencoder_core::message::now_ms(),
+            )
+            .map_err(anyhow::Error::msg)?,
+        );
+    }
     let legacy = worker.inner.journal.lock().await.uses_legacy(id);
     let workflow_root = if legacy {
         worker.inner.layout.checked_legacy_workflow_root()?
@@ -142,8 +159,8 @@ pub(super) async fn run(
 /// A registered DAG sees the same named input shape when dispatched directly
 /// or through the scheduler. Scheduling metadata remains in its owning record.
 fn execution_input(input: &Value) -> &Value {
-    if input["brain_scheduler"].is_object() && input["scheduler_inputs"].is_object() {
-        &input["scheduler_inputs"]
+    if input["brain_layered"].is_object() && input["layered_inputs"].is_object() {
+        &input["layered_inputs"]
     } else {
         input
     }
@@ -245,10 +262,10 @@ mod tests {
     #[test]
     fn scheduler_named_inputs_and_dynamic_templates_preserve_parameters() {
         let payload = json!({"items":["带空格 parameter", "quoted \"value\""]});
-        let managed = json!({"brain_scheduler":{"run_id":"root"},"scheduler_inputs":payload});
+        let managed = json!({"brain_layered":{"run_id":"root"},"layered_inputs":payload});
         assert_eq!(execution_input(&managed), &payload);
         assert_eq!(execution_input(&payload), &payload);
-        let ordinary = json!({"scheduler_inputs":payload});
+        let ordinary = json!({"layered_inputs":payload});
         assert_eq!(execution_input(&ordinary), &ordinary);
         let mut spec = opencoder_dag::decode_spec(&json!({"name":"dynamic","steps":[
             {"name":"a","kind":{"type":"dynamic","source":{"type":"input","pointer":"/items"},"template":{"type":"agent","prompt":"base"}}},

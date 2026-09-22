@@ -227,6 +227,7 @@ fn queued_run(run_id: &str) -> DagClaimedRun {
             name: "stub-flow".into(),
             description: None,
             steps: vec![StepSpec {
+                trigger_rule: Default::default(),
                 name: "only".into(),
                 depends_on: vec![],
                 kind: StepKind::Agent {

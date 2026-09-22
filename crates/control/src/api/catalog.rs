@@ -34,6 +34,32 @@ pub async fn nodes(State(state): State<Arc<AppState>>) -> Response {
         .collect();
     response(RpcReply::ok(json!({"nodes":nodes})))
 }
+/// Negotiates node task-file support and the executing node image digest.
+pub async fn execution_capabilities(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Response {
+    if !valid_id(&id) {
+        return error_400("invalid node id".into());
+    }
+    response(
+        state
+            .hub
+            .call(
+                &id,
+                NodeOperation::Brain {
+                    execution: ExecutionRef {
+                        id: "dag-capability-probe".into(),
+                        kind: ExecutionKind::Dag,
+                    },
+                    action: "capability_probe".into(),
+                    input: json!({"private_files":true}),
+                },
+            )
+            .await,
+    )
+}
+
 pub async fn unregister(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Response {
     use crate::transport::UnregisterResult;
     match state.hub.unregister(&id, &state.fleet).await {
@@ -168,19 +194,7 @@ pub async fn resolve(
                     .map_err(|e| RpcReply::error(400, e.to_string()))?;
                 return Ok(Some(request.input.clone()));
             }
-            if request.input["schema_version"] == 3 {
-                let scheduler = serde_json::from_value(request.input["scheduler_request"].clone())
-                    .map_err(|e| RpcReply::error(400, format!("scheduler request: {e}")))?;
-                opencoder_brain::scheduler::validate_request(&scheduler)
-                    .map_err(|e| RpcReply::error(400, e.to_string()))?;
-                return Ok(Some(request.input.clone()));
-            }
-            let body: opencoder_core::brain::BrainRequest =
-                serde_json::from_value(request.input.clone())
-                    .map_err(|e| RpcReply::error(400, e.to_string()))?;
-            opencoder_brain::execution::initialize(&request.id, body, 0)
-                .map_err(|e| RpcReply::error(400, e.to_string()))?;
-            Some(request.input.clone())
+            return Err(RpcReply::error(409, "unsupported brain schema; expected 4"));
         }
         ExecutionKind::Team | ExecutionKind::Dag => {
             if request.kind == ExecutionKind::Team && request.target.as_deref() == Some("system") {

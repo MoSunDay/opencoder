@@ -34,7 +34,7 @@ async fn project(state: &Arc<AppState>, id: &str) -> Result<Value, RpcReply> {
     let (assignment, request, snapshot) = open(state, id).await?;
     let layers = plan_layers(&request.plan)?;
     let capabilities = scope(state, &assignment, &request).await?;
-    let events = read::events(state, id, snapshot.run.last_event_seq).await;
+    let events = read::events(state, id, snapshot.run.last_event_seq).await?;
     let mut run = serde_json::to_value(&snapshot.run).map_err(read::internal)?;
     run["total_layers"] = json!(layers.len());
     Ok(
@@ -50,64 +50,50 @@ async fn detail(state: &Arc<AppState>, id: &str, layer: u32) -> Result<Value, Rp
         .checked_sub(1)
         .and_then(|index| layers.get(index as usize))
         .ok_or_else(|| RpcReply::error(404, "layered layer not found"))?;
-    let events = read::events(state, id, snapshot.run.last_event_seq).await;
-    let decision = events
-        .iter()
-        .rfind(|event| event.layer == layer && event.decision_summary.is_some());
+    let events = read::events(state, id, snapshot.run.last_event_seq).await?;
+    let decision = layer_dispatch(&events, layer, snapshot.run.layer)?;
     let mut nodes = vec![];
     for node_id in node_ids {
-        nodes.push(node_row(state, &request, &snapshot, node_id).await?);
+        nodes.push(node_row(&request, &snapshot, node_id));
     }
     Ok(
         json!({"schema_version":LAYERED_SCHEMA_VERSION,"layer":layer,
-        "phase":decision.map(decision_phase).unwrap_or(snapshot.run.phase),
+        "phase":if decision.is_some() { LayeredPhase::Waiting } else { snapshot.run.phase },
+        "decision":decision.map(|_| "dispatch_layer"),
         "reason":decision.and_then(|event| event.reason_summary.clone()).unwrap_or_default(),
         "evidence_execution_ids":decision.map(|event| event.evidence_execution_ids.clone()).unwrap_or_default(),
         "nodes":nodes}),
     )
 }
 
-/// The phase a decision moved the layer into, per the frozen decision summary.
-fn decision_phase(event: &LayeredEvent) -> LayeredPhase {
-    match event.decision_summary.as_deref() {
-        Some("dispatch_layer") => LayeredPhase::Waiting,
-        Some("complete") => LayeredPhase::Completed,
-        _ => LayeredPhase::Deciding,
+/// Child receipts and run completion never replace a layer's dispatch facts.
+fn layer_dispatch(
+    events: &[LayeredEvent],
+    layer: u32,
+    dispatched: u32,
+) -> Result<Option<&LayeredEvent>, RpcReply> {
+    let decision = events.iter().find(|event| {
+        event.layer == layer
+            && event.event_type == "layer_started"
+            && event.decision_summary.as_deref() == Some("dispatch_layer")
+    });
+    if decision.is_none() && layer <= dispatched {
+        return Err(RpcReply::error(
+            500,
+            format!("layer {layer} dispatch decision is missing from the event journal"),
+        ));
     }
+    Ok(decision)
 }
 
-async fn node_row(
-    state: &Arc<AppState>,
-    request: &LayeredRequest,
-    snapshot: &LayeredSnapshot,
-    node_id: &str,
-) -> Result<Value, RpcReply> {
+fn node_row(request: &LayeredRequest, snapshot: &LayeredSnapshot, node_id: &str) -> Value {
     let plan = request.plan.node(node_id);
     let op = snapshot
         .operations
         .iter()
         .filter(|op| op.node_id == node_id)
         .max_by_key(|op| op.attempt);
-    let child = match op {
-        Some(op) => state
-            .fleet
-            .assignment(&op.execution_id)
-            .await
-            .map_err(read::internal)?,
-        None => None,
-    };
-    let summary = match (child.as_ref(), op) {
-        (Some(child), Some(op)) if op.status.successful() => {
-            read::summary(state, &child.index).await
-        }
-        _ => None,
-    };
-    let bindings = child
-        .as_ref()
-        .map(|child| child.request.input["bindings"].clone())
-        .filter(Value::is_object)
-        .unwrap_or_else(|| json!({}));
-    Ok(json!({
+    json!({
         "node_id":node_id,
         "title":plan.map(|node| node.title.clone()).unwrap_or_default(),
         "capability_id":op.map(|op| op.capability_id.clone()).unwrap_or_else(|| plan.map(|node| node.capability_id.clone()).unwrap_or_default()),
@@ -117,9 +103,7 @@ async fn node_row(
         "execution_id":op.map(|op| op.execution_id.clone()),
         "execution_kind":op.map(|op| op.execution_kind),
         "cancel_requested":op.map(|op| op.cancel_requested).unwrap_or(false),
-        "inputs":bindings,
-        "summary":summary,
-    }))
+    })
 }
 
 /// The frozen capability scope of the run, or the catalog view of its plan.
@@ -167,4 +151,51 @@ async fn open(
             .map_err(read::internal)?;
     let snapshot = read::snapshot(state, id).await?;
     Ok((assignment, request, snapshot))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn event(layer: u32, kind: &str, decision: &str, reason: &str) -> LayeredEvent {
+        serde_json::from_value(json!({
+            "seq":1,"run_id":"brain-projection","layer":layer,"event_type":kind,
+            "decision_summary":decision,"reason_summary":reason,
+            "evidence_execution_ids":["agent-upstream"],"at_ms":1
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn dispatch_survives_child_receipts_retry_failure_and_closing() {
+        let dispatch = event(
+            1,
+            "layer_started",
+            "dispatch_layer",
+            "parallel evidence collection",
+        );
+        let mut events = vec![dispatch.clone()];
+        for (kind, summary) in [
+            ("operation_terminal", "done"),
+            ("operation_terminal", "error"),
+            ("operation_retry_scheduled", "dispatch_layer"),
+            ("run_failed", "error"),
+            ("run_completed", "complete"),
+        ] {
+            events.push(event(1, kind, summary, "later unrelated reason"));
+            let found = layer_dispatch(&events, 1, 1).unwrap().unwrap();
+            assert_eq!(found, &dispatch);
+            assert_eq!(found.evidence_execution_ids, ["agent-upstream"]);
+        }
+        events.push(event(2, "layer_started", "dispatch_layer", "next layer"));
+        assert_eq!(layer_dispatch(&events, 1, 2).unwrap(), Some(&dispatch));
+    }
+
+    #[test]
+    fn missing_dispatch_is_an_error_only_for_an_already_dispatched_layer() {
+        let events = vec![event(1, "operation_terminal", "done", "")];
+        assert!(layer_dispatch(&events, 1, 1).is_err());
+        assert!(layer_dispatch(&events, 2, 1).unwrap().is_none());
+        assert!(layer_dispatch(&[], 1, 0).unwrap().is_none());
+    }
 }

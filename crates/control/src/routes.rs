@@ -37,6 +37,7 @@ pub fn build_app(state: Arc<AppState>, token: Option<String>, web: bool) -> Rout
         .route("/api/users", get(api::users::list).post(api::users::create))
         .route("/api/users/:name", axum::routing::delete(api::users::delete))
         .route("/api/nodes", get(catalog::nodes))
+        .route("/api/nodes/:id/execution-capabilities", get(catalog::execution_capabilities))
         .route("/api/nodes/:id", axum::routing::delete(catalog::unregister))
         .route(
             "/api/nodes/:id/scheduling",
@@ -115,14 +116,6 @@ pub fn build_app(state: Arc<AppState>, token: Option<String>, web: bool) -> Rout
         .route("/api/brain/capabilities/:id/target", get(brain::target).put(brain::bind))
         .route("/api/brain/agents", get(brain::agents))
         .route("/api/brain/search", post(api_brain::search))
-        .route("/api/brain/plans", post(brain::create_plan))
-        .route("/api/brain/plans/:id", get(api_brain::get_plan))
-        .route("/api/brain/preview", post(brain::preview))
-        .route("/api/brain/dispatch", post(brain::dispatch))
-        .route("/api/brain/playbooks", get(brain::list_playbooks))
-        .route("/api/brain/playbooks/trigger-scan", post(api::brain_playbook_dispatch::trigger_scan))
-        .route("/api/brain/playbooks/:id", get(brain::get_playbook))
-        .route("/api/brain/playbooks/:id/dispatch", post(api::brain_playbook_dispatch::dispatch))
         .fallback(api::session::relay);
     if web {
         app = app

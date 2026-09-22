@@ -51,6 +51,7 @@ async fn worker_with_execution(agent: &str, run_mode: &str) -> (Worker, tempfile
         annotations: Value::Null,
         queue: None,
         assignment: Assignment {
+            private_context: None,
             runtime: None,
             codex: None,
             index: ExecutionIndex {

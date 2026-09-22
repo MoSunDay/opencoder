@@ -41,6 +41,7 @@ pub async fn available(
     request: &LayeredRequest,
 ) -> Result<Vec<BrainCapabilityDescriptor>> {
     let all = descriptors(catalog::capabilities(state).await?);
+    super::super::plan_capabilities::validate(&request.plan, request.depth, &all)?;
     let mut wanted: Vec<&str> = request
         .plan
         .nodes
@@ -55,7 +56,8 @@ pub async fn available(
             wanted.contains(&c.capability_id.as_str())
                 && matches!(
                     c.kind,
-                    ExecutionKind::Agent
+                    ExecutionKind::Brain
+                        | ExecutionKind::Agent
                         | ExecutionKind::Dag
                         | ExecutionKind::Team
                         | ExecutionKind::Todos

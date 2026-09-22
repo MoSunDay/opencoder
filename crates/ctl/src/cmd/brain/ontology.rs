@@ -45,10 +45,6 @@ pub enum RunsCmd {
         #[arg(long, default_value_t = 0)]
         offset: u64,
     },
-    Round {
-        id: String,
-        round: u32,
-    },
     /// Schema 4 layered canvas: run, plan, recomputed layers, operations.
     Layered {
         id: String,
@@ -58,25 +54,10 @@ pub enum RunsCmd {
         id: String,
         round: u32,
     },
-    Context {
-        id: String,
-    },
-    Actions {
-        id: String,
-    },
-    Instance {
-        id: String,
-        instance: String,
-    },
     Events {
         id: String,
         #[arg(long, default_value_t = 0)]
         after: i64,
-    },
-    Input {
-        id: String,
-        #[arg(long)]
-        json: String,
     },
     Command {
         id: String,
@@ -111,35 +92,24 @@ pub fn runs(command: &RunsCmd) -> Result<RequestPlan> {
         RunsCmd::List => RequestPlan::get(base),
         RunsCmd::Create { json } => RequestPlan::post(base).with_body(scheduler_body(json)?),
         RunsCmd::Get { id, offset } => RequestPlan::get(format!("{base}/{id}?offset={offset}")),
-        RunsCmd::Round { id, round } => RequestPlan::get(format!("{base}/{id}/rounds/{round}")),
         RunsCmd::Layered { id } => RequestPlan::get(format!("{base}/{id}/layered")),
         RunsCmd::LayeredRound { id, round } => {
             RequestPlan::get(format!("{base}/{id}/layered/rounds/{round}"))
         }
-        RunsCmd::Context { id } => RequestPlan::get(format!("{base}/{id}/context")),
-        RunsCmd::Actions { id } => RequestPlan::get(format!("{base}/{id}/actions")),
-        RunsCmd::Instance { id, instance } => {
-            RequestPlan::get(format!("{base}/{id}/instances/{instance}"))
-        }
         RunsCmd::Events { id, after } => {
             RequestPlan::get(format!("{base}/{id}/events-page?after={after}"))
-        }
-        RunsCmd::Input { id, json } => {
-            RequestPlan::post(format!("{base}/{id}/inputs")).with_body(required_body(json)?)
         }
         RunsCmd::Command { id, action } => RequestPlan::post(format!("{base}/{id}/commands"))
             .with_body(serde_json::json!({"action":action})),
     })
 }
 
-/// `schema_version` 3 (scheduler) and 4 (layered canvas) share the create
-/// endpoint; the server dispatches on the version. Anything else fails at plan
-/// time, never as a silent fallback.
+/// Only explicit layered requests reach the create endpoint.
 fn scheduler_body(raw: &str) -> Result<serde_json::Value> {
     let body = required_body(raw)?;
     anyhow::ensure!(
-        matches!(body["schema_version"].as_u64(), Some(3) | Some(4)),
-        "brain runs create requires an explicit schema_version: 3 or 4"
+        matches!(body["schema_version"].as_u64(), Some(4)),
+        "brain runs create requires an explicit schema_version: 4"
     );
     Ok(body)
 }
@@ -170,24 +140,8 @@ pub async fn activate(
             )
             .await?,
         )?
-    } else if context["schema_version"] == 3 {
-        serde_json::to_value(
-            opencoder_brain::scheduler::activate(
-                &serde_json::from_value(context)?,
-                &client,
-                config.model_id(),
-            )
-            .await?,
-        )?
     } else {
-        serde_json::to_value(
-            opencoder_brain::activation::activate(
-                &serde_json::from_value(context)?,
-                &client,
-                config.model_id(),
-            )
-            .await?,
-        )?
+        anyhow::bail!("unsupported brain schema; expected 4");
     };
     opencoder_core::atomic_write_json(output, &decision)?;
     Ok(0)

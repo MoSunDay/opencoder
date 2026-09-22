@@ -32,7 +32,7 @@ async fn blocked_resource_read_does_not_starve_node_executor_or_lose_scoped_pool
         // That read blocks until the delayed bytes arrive. The timeout also
         // makes the pre-fix case terminate so it fails rather than hanging CI.
         let mut file = std::fs::OpenOptions::new().write(true).open(fifo).unwrap();
-        let _ = reading.send(());
+        let _ = reading.send(Instant::now());
         let _ = receiver.recv_timeout(Duration::from_secs(3));
         file.write_all(b"{invalid metadata}").unwrap();
     });
@@ -43,7 +43,6 @@ async fn blocked_resource_read_does_not_starve_node_executor_or_lose_scoped_pool
         json!({"prompt":""}),
         None,
     );
-    let started = Instant::now();
     let control = async {
         let observed = tokio::time::timeout(Duration::from_secs(1), read_started).await;
         if observed.is_err() {
@@ -56,7 +55,9 @@ async fn blocked_resource_read_does_not_starve_node_executor_or_lose_scoped_pool
             let _ = release.send(());
             panic!("preflight did not read its caller-scoped resource pool");
         }
-        observed.unwrap().unwrap();
+        // Measure the blocked read itself, excluding durable admission setup.
+        // The writer thread's timestamp still exposes an executor blocked in read().
+        let started = observed.unwrap().unwrap();
         tokio::time::sleep(Duration::from_millis(50)).await;
         let elapsed = started.elapsed();
         let _ = release.send(());

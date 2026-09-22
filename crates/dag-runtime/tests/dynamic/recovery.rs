@@ -93,7 +93,9 @@ async fn timeout_is_per_instance_and_user_cancel_is_run_cancellation() {
     let client = Scripted::new(|_| (Duration::from_secs(10), Ok("{}".into())));
     let (_, rx) = tokio::sync::watch::channel(false);
     let status = tokio::time::timeout(
-        Duration::from_secs(5),
+        // The instance has a one-second budget; this outer watchdog also
+        // includes durable preparation and artifact fsync under shared-host load.
+        Duration::from_secs(30),
         execute_run(f.deps(client), run.clone(), rx),
     )
     .await

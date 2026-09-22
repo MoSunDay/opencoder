@@ -6,10 +6,6 @@ pub use plan::*;
 pub use run::*;
 pub mod resources;
 
-mod graph;
-pub use graph::*;
-/// Schema version 4: layered capability canvas (namespaced to keep the v3
-/// glob export byte-compatible).
+mod capability;
 pub mod layered;
-pub mod scheduler;
-pub use scheduler::*;
+pub use capability::*;

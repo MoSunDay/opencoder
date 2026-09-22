@@ -5,6 +5,17 @@ use serde_json::Value;
 use std::sync::Arc;
 
 pub async fn submit(state: &Arc<AppState>, request: CreateExecution) -> RpcReply {
+    submit_private(state, request, None).await
+}
+
+pub(crate) async fn submit_private(
+    state: &Arc<AppState>,
+    request: CreateExecution,
+    private_context: Option<PrivateExecutionContext>,
+) -> RpcReply {
+    if let Err(message) = super::private_context::validate(&request, private_context.as_ref()) {
+        return RpcReply::error(400, message);
+    }
     if request.kind == ExecutionKind::System {
         return RpcReply::error(
             400,
@@ -47,16 +58,24 @@ pub async fn submit(state: &Arc<AppState>, request: CreateExecution) -> RpcReply
     if let Err(error) = request.validate() {
         return RpcReply::error(400, error);
     }
-    match submit_inner(state, request).await {
+    match submit_inner(state, request, private_context).await {
         Ok(reply) => reply,
         Err(error) => RpcReply::error(500, format!("submit execution: {error:#}")),
     }
 }
 
-async fn submit_inner(state: &Arc<AppState>, request: CreateExecution) -> anyhow::Result<RpcReply> {
+async fn submit_inner(
+    state: &Arc<AppState>,
+    request: CreateExecution,
+    private_context: Option<PrivateExecutionContext>,
+) -> anyhow::Result<RpcReply> {
     let _request_lock = state.fleet.request_lock("execution", &request.id).await?;
     let key = dispatch_key(&request).to_owned();
-    let fingerprint = opencoder_core::token_hash(&serde_json::to_string(&request)?);
+    let fingerprint = if private_context.is_some() {
+        opencoder_core::token_hash(&serde_json::to_string(&(&request, &private_context))?)
+    } else {
+        opencoder_core::token_hash(&serde_json::to_string(&request)?)
+    };
     if !state
         .fleet
         .claim_request("execution", &key, &fingerprint)
@@ -74,7 +93,7 @@ async fn submit_inner(state: &Arc<AppState>, request: CreateExecution) -> anyhow
     }
     let mut frozen = state.fleet.assignment(&request.id).await?;
     if let Some(old) = &frozen {
-        if old.request != request {
+        if old.request != request || old.private_context != private_context {
             let rejected = state
                 .fleet
                 .receipt("execution", dispatch_key(&old.request))
@@ -116,8 +135,8 @@ async fn submit_inner(state: &Arc<AppState>, request: CreateExecution) -> anyhow
             }
             // The node compares the original request and returns its durable
             // acceptance. A newer definition must not replace its snapshot.
-            state.hub.reserve(&index).await;
-            let definition = if request.kind == ExecutionKind::Project {
+            let definition = if request.kind == ExecutionKind::Project || private_context.is_some()
+            {
                 match crate::api::catalog::resolve(state, &request).await {
                     Ok(definition) => definition,
                     Err(reply) => return Ok(reply),
@@ -126,6 +145,7 @@ async fn submit_inner(state: &Arc<AppState>, request: CreateExecution) -> anyhow
                 None
             };
             let assignment = Assignment {
+                private_context: private_context.clone(),
                 runtime: crate::api::settings::registered::snapshot(state).await?,
                 codex: crate::api::settings::codex(state).await?,
                 index,
@@ -163,7 +183,10 @@ async fn submit_inner(state: &Arc<AppState>, request: CreateExecution) -> anyhow
                     ));
                 };
                 let action = request.input.get("_brain").and_then(|b| b.get("action"));
-                let required = super::capabilities::required(&request, definition.as_ref());
+                let mut required = super::capabilities::required(&request, definition.as_ref());
+                if private_context.is_some() {
+                    required.push(opencoder_core::fleet::private_files::CAPABILITY);
+                }
                 if action.is_some() || !required.is_empty() {
                     if let Err(reply) = super::capabilities::probe(
                         state,
@@ -191,8 +214,8 @@ async fn submit_inner(state: &Arc<AppState>, request: CreateExecution) -> anyhow
                 node_id: node.registration.id.clone(),
                 status: ExecutionStatus::Pending,
             };
-            state.hub.reserve(&index).await;
             let assignment = Assignment {
+                private_context: private_context.clone(),
                 runtime: crate::api::settings::registered::snapshot(state).await?,
                 codex: crate::api::settings::codex(state).await?,
                 index,
@@ -202,6 +225,13 @@ async fn submit_inner(state: &Arc<AppState>, request: CreateExecution) -> anyhow
             (Some(permit), assignment)
         }
     };
+    if let Err(message) = super::private_context::validate_definition(
+        assignment.private_context.as_ref(),
+        assignment.definition.as_ref(),
+    ) {
+        return Ok(RpcReply::error(409, message));
+    }
+    state.hub.reserve(&assignment.index).await;
     state
         .fleet
         .prepare_assignment(&assignment, &fingerprint)
@@ -221,6 +251,12 @@ async fn submit_inner(state: &Arc<AppState>, request: CreateExecution) -> anyhow
             Ok(definition) => definition,
             Err(reply) => return Ok(reply),
         };
+        if let Err(message) = super::private_context::validate_definition(
+            assignment.private_context.as_ref(),
+            definition.as_ref(),
+        ) {
+            return Ok(RpcReply::error(409, message));
+        }
         state.hub.reserve(&index).await;
         reply = state
             .hub
@@ -228,6 +264,7 @@ async fn submit_inner(state: &Arc<AppState>, request: CreateExecution) -> anyhow
                 &index.node_id,
                 NodeOperation::Create {
                     assignment: Assignment {
+                        private_context: private_context.clone(),
                         definition,
                         ..assignment
                     },

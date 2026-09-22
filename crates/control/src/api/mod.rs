@@ -1,7 +1,6 @@
 pub mod admission;
 pub mod brain;
 pub(crate) mod brain_dispatch;
-pub mod brain_playbook_dispatch;
 pub mod brain_runs;
 pub mod catalog;
 pub mod executions;

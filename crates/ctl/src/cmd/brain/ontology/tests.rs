@@ -21,16 +21,7 @@ async fn isolated_activation_sends_configured_reasoning_to_the_provider() {
     let context = directory.path().join("context.json");
     let config = directory.path().join("config.json");
     let output = directory.path().join("decision.json");
-    std::fs::write(
-        &context,
-        json!({
-            "schema_version":3,"run_id":"brain-configured-planner","generation":1,"round":0,
-            "request":{"schema_version":3,"objective":"test finite decision"},
-            "capabilities":[],"operations":[],"summaries":{}
-        })
-        .to_string(),
-    )
-    .unwrap();
+    std::fs::write(&context, layered_context(node_context()).to_string()).unwrap();
     std::fs::write(&config, json!({
         "model":"fixture/planner","providers":{"fixture":{"base_url":format!("http://{address}"),"api_key":"fixture"}},
         "reasoning_effort":"low"
@@ -78,7 +69,7 @@ fn node_context() -> Value {
     json!([{
         "node_id": "n1",
         "title": "first",
-        "instructions": "do the first thing",
+
         "retry_max_attempts": 2,
         "capability": {
             "capability_id": "cap-1",
@@ -233,21 +224,14 @@ fn run_plan(body: &str) -> RequestPlan {
 /// Schema 3 stays byte-identical, schema 4 is accepted, everything else is an
 /// explicit plan-time error (never a silent fallback to v3).
 #[test]
-fn run_create_accepts_schema_versions_three_and_four() {
-    let v3 = run_plan(r#"{"schema_version":3,"plan_id":"p1"}"#);
-    assert_eq!(v3.method, reqwest::Method::POST);
-    assert_eq!(v3.path, "/api/brain/runs");
-    assert_eq!(
-        v3.body.unwrap(),
-        json!({"schema_version": 3, "plan_id": "p1"})
-    );
-
+fn run_create_accepts_only_layered_schema() {
     let v4 = run_plan(r#"{"schema_version":4,"plan":{"schema_version":4}}"#);
     assert_eq!(v4.method, reqwest::Method::POST);
     assert_eq!(v4.path, "/api/brain/runs");
     assert_eq!(v4.body.unwrap()["schema_version"], 4);
 
     for raw in [
+        r#"{"schema_version":3}"#,
         r#"{"schema_version":2,"plan_id":"p1"}"#,
         r#"{"schema_version":5}"#,
         r#"{"plan_id":"p1"}"#,
@@ -255,7 +239,7 @@ fn run_create_accepts_schema_versions_three_and_four() {
     ] {
         let error = runs(&RunsCmd::Create { json: raw.into() }).unwrap_err();
         assert!(
-            error.to_string().contains("schema_version: 3 or 4"),
+            error.to_string().contains("schema_version: 4"),
             "unexpected error for {raw}: {error}"
         );
     }
@@ -276,11 +260,4 @@ fn run_reads_map_to_the_locked_paths() {
     .unwrap();
     assert_eq!(plan.method, reqwest::Method::GET);
     assert_eq!(plan.path, "/api/brain/runs/r1/layered/rounds/2");
-
-    let plan = runs(&RunsCmd::Round {
-        id: "r1".into(),
-        round: 2,
-    })
-    .unwrap();
-    assert_eq!(plan.path, "/api/brain/runs/r1/rounds/2");
 }

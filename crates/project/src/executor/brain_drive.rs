@@ -18,5 +18,5 @@ pub async fn resolve_brain(
     _: &ProjectContext,
     _: Option<&ExecutorOverride>,
 ) -> Result<(ResolvedExecutor, BrainTrace)> {
-    anyhow::bail!(opencoder_brain::graph::MIGRATION)
+    anyhow::bail!(opencoder_core::brain::layered::LAYERED_MIGRATION)
 }

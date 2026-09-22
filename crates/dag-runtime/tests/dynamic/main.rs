@@ -1,3 +1,4 @@
+mod finalizers;
 mod persistence;
 mod recovery;
 mod support;

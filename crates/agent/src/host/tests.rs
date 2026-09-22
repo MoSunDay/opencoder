@@ -7,6 +7,8 @@ use std::time::Duration;
 
 #[path = "tests/hibernation.rs"]
 mod hibernation;
+#[path = "tests/read_reports.rs"]
+mod read_reports;
 
 struct HeldModel {
     entered: AtomicUsize,

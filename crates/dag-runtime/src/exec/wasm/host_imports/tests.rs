@@ -216,7 +216,10 @@ fn op_cancellation_grace_allows_durable_cleanup_receipt() {
     });
     let started = Instant::now();
     let err = run_op(&mut st, "cleanup", "").unwrap_err().to_string();
-    assert!(started.elapsed() < Duration::from_secs(2), "descendants retained output pipes after controller exit");
+    assert!(
+        started.elapsed() < Duration::from_secs(2),
+        "descendants retained output pipes after controller exit"
+    );
     trigger.join().unwrap();
     assert!(err.contains("cancelled"), "{err}");
     assert_eq!(

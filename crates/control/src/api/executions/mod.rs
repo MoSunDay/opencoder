@@ -13,6 +13,7 @@ pub(crate) mod capabilities;
 mod private_context;
 mod submit;
 pub use submit::submit;
+pub(crate) use submit::submit_private;
 
 pub async fn create(
     State(state): State<Arc<AppState>>,

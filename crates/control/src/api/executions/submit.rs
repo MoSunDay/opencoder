@@ -8,7 +8,7 @@ pub async fn submit(state: &Arc<AppState>, request: CreateExecution) -> RpcReply
     submit_private(state, request, None).await
 }
 
-pub(super) async fn submit_private(
+pub(crate) async fn submit_private(
     state: &Arc<AppState>,
     request: CreateExecution,
     private_context: Option<PrivateExecutionContext>,

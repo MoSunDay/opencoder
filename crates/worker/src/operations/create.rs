@@ -38,6 +38,7 @@ pub(super) async fn create(worker: &Worker, mut assignment: Assignment) -> Resul
             "assignment ownership or kind mismatch",
         ));
     }
+    let mut timing = super::admission::timing::Timing::new(&assignment.index.id, "create");
     // A durable acceptance is a read-only replay. It must not queue behind
     // unrelated resource snapshots; otherwise a lost reply can never recover
     // under sustained admission load.
@@ -49,10 +50,12 @@ pub(super) async fn create(worker: &Worker, mut assignment: Assignment) -> Resul
     // when a cold Create and its retry reach queue launch concurrently.
     let preparation = worker.preparation_gate(&assignment.index.id).await;
     let preparing = preparation.lock_owned().await;
+    timing.mark("replay_and_preparation_lock");
     if let Some(reply) = accepted_reply(worker, &mut assignment).await {
         return Ok(reply);
     }
     let gate = worker.inner.admission.lock().await;
+    timing.mark("admission_lock");
     // Another Create may have accepted this ID while we waited for the gate.
     if let Some(reply) = accepted_reply(worker, &mut assignment).await {
         return Ok(reply);
@@ -83,6 +86,7 @@ pub(super) async fn create(worker: &Worker, mut assignment: Assignment) -> Resul
         Ok(assignment) => assignment,
         Err(reply) => return Ok(reply),
     };
+    timing.mark("durable_preparation");
     // Cold filesystem reads are bounded per node and serialized per execution,
     // but never hold the gate needed by WASI admission, pause or cancellation.
     drop(gate);
@@ -110,6 +114,7 @@ pub(super) async fn create(worker: &Worker, mut assignment: Assignment) -> Resul
     }
     let (prepared, (preparing, resource_slot)) =
         prepare_create(worker, &assignment, (preparing, resource_slot)).await?;
+    timing.mark("resource_preflight");
     let config = match prepared {
         Ok(config) => config,
         Err(error) => {
@@ -142,7 +147,9 @@ pub(super) async fn create(worker: &Worker, mut assignment: Assignment) -> Resul
             format!("execution preflight: {error:#}"),
         ));
     }
+    timing.mark("operator_materialization");
     let _gate = worker.inner.admission.clone().lock_owned().await;
+    timing.mark("queue_admission_lock");
     if let Some(error) = worker.admission_error() {
         return Ok(RpcReply::error(503, error));
     }
@@ -194,7 +201,9 @@ pub(super) async fn create(worker: &Worker, mut assignment: Assignment) -> Resul
         events: vec![],
         lifecycle,
     };
+    timing.mark("project_reservation");
     let record = super::queue::enqueue(worker, record, config, false).await?;
+    timing.mark("durable_queue");
     preparation::finish(
         &worker
             .inner
@@ -203,7 +212,9 @@ pub(super) async fn create(worker: &Worker, mut assignment: Assignment) -> Resul
     )?;
     drop(preparing);
     drop(resource_slot);
+    timing.mark("preparation_finish");
     let _gate = super::queue::dispatch_owned(worker, _gate).await?;
+    timing.mark("dispatch");
     let mut body = json!(
         worker.inner.journal.lock().await.records[&record.assignment.index.id]
             .assignment
@@ -272,11 +283,14 @@ async fn prepare_create(
     lease: preparation::Lease,
 ) -> Result<(Result<Config>, preparation::Lease)> {
     // Capture caller-scoped configuration before slow resource I/O crosses threads.
+    let mut timing = super::admission::timing::Timing::new(&assignment.index.id, "preflight");
     let config = worker.configuration_for(assignment.request.kind)?;
+    timing.mark("configuration");
     let source = opencoder_core::agent::agents_dir();
     let worker = worker.clone();
     let assignment = assignment.clone();
     preparation::run(lease, move || {
+        timing.mark("blocking_worker_wait");
         prepare_with_config(&worker, &assignment, false, config, source)
     })
     .await
@@ -307,6 +321,7 @@ fn prepare_with_config(
     mut config: Config,
     implicit_source: Option<std::path::PathBuf>,
 ) -> Result<Config> {
+    let mut timing = super::admission::timing::Timing::new(&assignment.index.id, "resources");
     let input = &assignment.request.input;
     anyhow::ensure!(
         !(assignment.request.kind == ExecutionKind::Brain
@@ -357,6 +372,7 @@ fn prepare_with_config(
     std::fs::create_dir_all(root.parent().unwrap())?;
     let source = source.filter(|_| requires_agents);
     config.agent.agents_dir = crate::resources::pin(source.as_deref(), &root)?;
+    timing.mark("snapshot");
     let validated = (|| -> Result<()> {
         let prompt = assignment.request.input["prompt"].as_str().unwrap_or("");
         let needs_llm = match assignment.request.kind {
@@ -721,52 +737,4 @@ pub(crate) async fn start(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use opencoder_store::{ProjectExecutorKind, ProjectTodoStatus};
-
-    fn todo(kind: ProjectExecutorKind, spec: Option<&str>) -> opencoder_store::ProjectTodoRecord {
-        opencoder_store::ProjectTodoRecord {
-            id: "pt-1".into(),
-            milestone_id: None,
-            title: "t".into(),
-            draft: "d".into(),
-            plan_md: None,
-            status: ProjectTodoStatus::Draft,
-            agent: "act".into(),
-            executor_kind: kind,
-            executor_ref: None,
-            executor_spec: spec.map(str::to_string),
-            active_session_id: None,
-            created_at: 0,
-            updated_at: 0,
-        }
-    }
-
-    #[test]
-    fn preflight_agents_follow_the_executor_kind() {
-        // Agent: the todo's own agent.
-        assert_eq!(
-            project_preflight_agents(&todo(ProjectExecutorKind::Agent, None)),
-            vec!["act".to_string()]
-        );
-        // Team spec: captain + members node_ids; spec-less → lazy skip.
-        let team = r#"{"name":"c","captain":{"node_id":"lead","name":"Lead"},"members":[{"node_id":"a1","name":"A"},{"node_id":"a2","name":"B"}]}"#;
-        assert_eq!(
-            project_preflight_agents(&todo(ProjectExecutorKind::Team, Some(team))),
-            vec!["lead".to_string(), "a1".to_string(), "a2".to_string()]
-        );
-        assert!(project_preflight_agents(&todo(ProjectExecutorKind::Team, None)).is_empty());
-        assert!(project_preflight_agents(&todo(ProjectExecutorKind::Team, Some("{"))).is_empty());
-        // Dag spec: agent steps with agent.unwrap_or("act"); wasm skipped.
-        let dag = r#"{"name":"d","steps":[
-            {"name":"w","kind":{"type":"wasm","command":"t.wasm"}},
-            {"name":"x","kind":{"type":"agent","prompt":"p","agent":"explore"}},
-            {"name":"y","kind":{"type":"agent","prompt":"p"}}]}"#;
-        assert_eq!(
-            project_preflight_agents(&todo(ProjectExecutorKind::Dag, Some(dag))),
-            vec!["explore".to_string(), "act".to_string()]
-        );
-        assert!(project_preflight_agents(&todo(ProjectExecutorKind::Dag, None)).is_empty());
-    }
-}
+mod tests;

@@ -5,6 +5,7 @@ pub mod agent_runc;
 pub mod how_append;
 pub mod how_copy;
 pub mod logs;
+mod private_files;
 mod runc_events;
 pub mod wasm;
 

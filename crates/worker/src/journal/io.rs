@@ -19,6 +19,7 @@ pub(crate) fn read_record(path: &Path, allow_legacy_kind: bool) -> Result<Record
 
 pub(crate) fn same_execution(left: &Record, right: &Record) -> bool {
     left.assignment.request == right.assignment.request
+        && left.assignment.private_context == right.assignment.private_context
         && left.assignment.codex == right.assignment.codex
         && left.assignment.definition == right.assignment.definition
         && left.assignment.index.id == right.assignment.index.id
@@ -61,7 +62,12 @@ pub(super) fn durable_json(path: &Path, value: &Record) -> Result<()> {
     let parent = path.parent().context("journal path has no parent")?;
     opencoder_core::share_fs::durable_create_dir_all(parent)?;
     let temp = parent.join(format!(".execution.tmp-{}", ulid::Ulid::new()));
-    let mut file = std::fs::File::create(&temp)?;
+    use std::os::unix::fs::OpenOptionsExt;
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&temp)?;
     file.write_all(&serde_json::to_vec(value)?)?;
     file.sync_all()?;
     std::fs::rename(&temp, path)?;

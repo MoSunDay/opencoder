@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::mpsc;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use opencoder_core::config::DagOpConfig;
 
@@ -58,6 +58,7 @@ fn op(command: &str, env_keys: &[&str], timeout_secs: Option<u64>) -> DagOpConfi
         command: command.to_string(),
         env_keys: env_keys.iter().map(|k| k.to_string()).collect(),
         timeout_secs,
+        termination_grace_secs: 0,
     }
 }
 
@@ -195,6 +196,35 @@ fn op_cancellation_flag_kills_the_child() {
     st.cancel.store(true, std::sync::atomic::Ordering::SeqCst);
     let err = run_op(&mut st, "hang", "").unwrap_err().to_string();
     assert!(err.contains("cancelled"), "{err}");
+}
+
+#[test]
+fn op_cancellation_grace_allows_durable_cleanup_receipt() {
+    let tmp = tempfile::tempdir().unwrap();
+    let script = script(tmp.path(), "cleanup.sh", "trap 'echo restored > cleanup.txt; exit 0' TERM\nsleep 3 &\necho ready > ready.txt\nwhile :; do sleep 0.05; done");
+    let mut cfg = op(script.to_str().unwrap(), &[], None);
+    cfg.termination_grace_secs = 2;
+    let mut st = state(tmp.path(), ops(&[("cleanup", cfg)]));
+    let flag = st.cancel.clone();
+    let root = st.run_root.clone();
+    let trigger = std::thread::spawn(move || {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !root.join("ready.txt").exists() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        flag.store(true, std::sync::atomic::Ordering::SeqCst);
+    });
+    let started = Instant::now();
+    let err = run_op(&mut st, "cleanup", "").unwrap_err().to_string();
+    assert!(started.elapsed() < Duration::from_secs(2), "descendants retained output pipes after controller exit");
+    trigger.join().unwrap();
+    assert!(err.contains("cancelled"), "{err}");
+    assert_eq!(
+        std::fs::read_to_string(st.run_root.join("cleanup.txt"))
+            .unwrap()
+            .trim(),
+        "restored"
+    );
 }
 
 // ---------------------------------------------------------------------------

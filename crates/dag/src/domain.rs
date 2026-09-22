@@ -44,7 +44,7 @@ pub fn validate(spec: &DagSpec) -> Result<(), Vec<String>> {
         if !validate_step_slug(&step.name) {
             errs.push(format!("step name {:?} is not a valid slug", step.name));
         }
-        if let StepKind::Dynamic { source, template } = &step.kind {
+        if let StepKind::Dynamic { source, template, .. } = &step.kind {
             errs.extend(
                 crate::dynamic::validate_source(source, &step.depends_on)
                     .into_iter()
@@ -180,7 +180,10 @@ pub fn ready_steps(spec: &DagSpec, states: &StepStates) -> Vec<String> {
         .filter(|s| {
             s.depends_on
                 .iter()
-                .all(|d| states.get(d) == Some(&StepOutcome::Done))
+                .all(|d| match s.trigger_rule {
+                    crate::TriggerRule::AllSuccess => states.get(d) == Some(&StepOutcome::Done),
+                    crate::TriggerRule::AllDone => states.contains_key(d),
+                })
         })
         .map(|s| s.name.clone())
         .collect()

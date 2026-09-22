@@ -45,6 +45,8 @@ pub struct StepSpec {
     pub name: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub depends_on: Vec<String>,
+    #[serde(default)]
+    pub trigger_rule: TriggerRule,
     pub kind: StepKind,
     /// Optional per-step wall-clock budget in seconds (agent + wasm).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -57,6 +59,8 @@ pub struct StepSpec {
 pub enum StepKind {
     /// Expand a frozen array into isolated executions of an Agent/Wasm template.
     Dynamic {
+        #[serde(default)]
+        failure_policy: FailurePolicy,
         source: crate::dynamic::DynamicSource,
         template: Box<StepKind>,
     },
@@ -88,6 +92,24 @@ pub enum StepKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         sandbox: Option<SandboxMode>,
     },
+}
+
+/// Dependency readiness policy; all_done includes failed terminal dependencies.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum TriggerRule {
+    #[default]
+    AllSuccess,
+    AllDone,
+}
+
+/// Whether one failed dynamic instance stops its siblings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum FailurePolicy {
+    #[default]
+    FailFast,
+    CollectAll,
 }
 
 /// Execution sandbox for wasm steps.

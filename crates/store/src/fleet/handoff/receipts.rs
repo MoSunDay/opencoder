@@ -334,6 +334,7 @@ mod tests {
         store
             .prepare_assignment(
                 &Assignment {
+                    private_context: None,
                     runtime: None,
                     codex: None,
                     index: index.clone(),

@@ -72,6 +72,11 @@ pub(crate) fn run_op(state: &mut HostState, op_id: &str, args: &str) -> Result<i
             "unknown op `{op_id}`: not registered in dag.ops (fail-closed)"
         ));
     };
+    if cfg.termination_grace_secs > 900 {
+        return Err(anyhow!(
+            "op `{op_id}` termination grace exceeds 900 seconds"
+        ));
+    }
     let mut argv: Vec<String> = cfg.command.split_whitespace().map(str::to_string).collect();
     argv.extend(args.split_whitespace().map(str::to_string));
     let Some(program) = argv.first().cloned() else {
@@ -128,7 +133,13 @@ pub(crate) fn run_op(state: &mut HostState, op_id: &str, args: &str) -> Result<i
 
     let budget = Duration::from_secs(cfg.timeout_secs.unwrap_or(DEFAULT_OP_TIMEOUT_SECS));
     let deadline = Instant::now() + budget;
-    let mut exit = reap(&mut child, &capture, &state.cancel, deadline);
+    let mut exit = reap(
+        &mut child,
+        &capture,
+        &state.cancel,
+        deadline,
+        Duration::from_secs(cfg.termination_grace_secs),
+    );
     let _ = out_reader.join();
     let _ = err_reader.join();
     // A fast exit can beat the reaper's overflow poll (and the readers
@@ -198,10 +209,16 @@ fn reap(
     capture: &OpCapture,
     cancel: &AtomicBool,
     deadline: Instant,
+    grace: Duration,
 ) -> Result<i32, KillReason> {
+    let mut terminating: Option<(KillReason, Instant)> = None;
     loop {
         if let Ok(Some(status)) = child.try_wait() {
-            return Ok(status.code().unwrap_or(-1));
+            if terminating.is_some() {
+                // Cleanup may exit while descendants still hold the captured pipes.
+                kill_tree(child);
+            }
+            return terminating.map_or(Ok(status.code().unwrap_or(-1)), |(reason, _)| Err(reason));
         }
         let reason = if capture.overflow() {
             Some(KillReason::Overflow)
@@ -213,6 +230,19 @@ fn reap(
             None
         };
         if let Some(reason) = reason {
+            if reason != KillReason::Overflow && !grace.is_zero() {
+                let (_, sent_at) = terminating.get_or_insert_with(|| {
+                    #[cfg(unix)]
+                    unsafe {
+                        libc::kill(child.id() as i32, libc::SIGTERM);
+                    }
+                    (reason, Instant::now())
+                });
+                if sent_at.elapsed() < grace {
+                    std::thread::sleep(Duration::from_millis(REAP_POLL_MS));
+                    continue;
+                }
+            }
             kill_tree(child);
             let _ = child.wait();
             // A killed child still has a wait status; report the reason.

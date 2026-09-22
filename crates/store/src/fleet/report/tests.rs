@@ -105,7 +105,12 @@ async fn report_conflict_rolls_back_watermark_and_all_new_statuses() {
         assert_eq!(store.index(&original.id).await.unwrap().unwrap(), original);
         // The rejected generation/sequence must not suppress a valid report.
         store
-            .apply_index_report_fenced("node-scale", &[added.clone()], None, Some(("host-2", 9)))
+            .apply_index_report_fenced(
+                "node-scale",
+                std::slice::from_ref(&added),
+                None,
+                Some(("host-2", 9)),
+            )
             .await
             .unwrap();
         assert_eq!(store.index(&added.id).await.unwrap().unwrap(), added);

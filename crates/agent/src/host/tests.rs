@@ -80,6 +80,7 @@ async fn runtime(
 fn create(host: &Host, id: &str) -> NodeOperation {
     NodeOperation::Create {
         assignment: Assignment {
+            private_context: None,
             runtime: None,
             codex: None,
             definition: None,
@@ -498,6 +499,7 @@ async fn host_dialogs_clear_deletes_live_runtime_and_trims_hibernated_inventory(
     let reply = host
         .handle(NodeOperation::Create {
             assignment: Assignment {
+                private_context: None,
                 runtime: None,
                 codex: None,
                 definition: None,
@@ -751,6 +753,7 @@ fn host_creation_guard_releases_on_cancel_and_deduplicates_before_capacity_is_fu
     let admissions = super::admission::Creations::default();
     let make = |id: &str| NodeOperation::Create {
         assignment: Assignment {
+            private_context: None,
             runtime: None,
             codex: None,
             definition: None,

@@ -16,6 +16,30 @@ pub(super) async fn create(worker: &Worker, mut assignment: Assignment) -> Resul
             "system team execution is retired; use explicit node maintenance",
         ));
     }
+    if let Some(private) = &assignment.private_context {
+        if let Err(message) = private.validate(opencoder_core::message::now_ms()) {
+            return Ok(RpcReply::error(400, message));
+        }
+        let Some(definition) = assignment.definition.as_ref() else {
+            return Ok(RpcReply::error(400, "private DAG definition missing"));
+        };
+        let definition_sha = opencoder_core::token_hash(&serde_json::to_string(
+            definition.get("spec").unwrap_or(definition),
+        )?);
+        if definition_sha != private.definition_sha256 {
+            return Ok(RpcReply::error(409, "pinned DAG definition changed"));
+        }
+        if assignment.request.kind != ExecutionKind::Dag
+            || private.image_digest
+                != opencoder_core::fleet::private_files::runtime_image_digest()
+                    .map_err(anyhow::Error::msg)?
+        {
+            return Ok(RpcReply::error(
+                409,
+                "private task execution image mismatch",
+            ));
+        }
+    }
     let input = &assignment.request.input;
     if (assignment.request.kind == ExecutionKind::Brain
         && !matches!(input["schema_version"].as_u64(), Some(4)))

@@ -148,6 +148,7 @@ async fn create_reply_is_queued_after_its_load_snapshot() {
         service,
         NodeOperation::Create {
             assignment: Assignment {
+                private_context: None,
                 runtime: None,
                 codex: None,
                 index: record(1),

@@ -1,4 +1,4 @@
-Commit: 3b4775905c950f64433b5c9f4439f4396674b3c6
+Commit: d9b366a66dc7defa4281f484dd00b2a3e208c092
 
 # worker 模块
 
@@ -33,3 +33,7 @@ Commit: 3b4775905c950f64433b5c9f4439f4396674b3c6
 - [agents/node](../node/index.md)、[agents/dag-runtime](../dag-runtime/index.md)
 - [agents/brain](../brain/index.md)
 - [运行协议](../../docs/brain-orchestration.md)、[动态步骤接口](../../docs/dag-dynamic.md)
+
+## 私有任务文件
+
+DAG 私有文件：准入校验期限、定义及运行中节点执行文件摘要；执行与恢复再次核验摘要。`workloads/dag.rs` 将 owner 私有目录传给 DAG runtime，journal 以 0600 持久化。普通能力探测不计算执行文件摘要，显式私有探测使用异步阻塞任务。`tests/private_files.rs` 覆盖冻结、重放、重启、漂移拒绝与公开读面隔离。

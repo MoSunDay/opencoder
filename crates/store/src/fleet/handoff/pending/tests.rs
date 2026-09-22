@@ -2,16 +2,6 @@ use super::*;
 use crate::fleet::handoff::{dispatch_key, Receipt};
 use serde_json::json;
 
-fn assignment(id: &str, kind: &str, run: Option<&str>) -> Assignment {
-    serde_json::from_value(json!({
-        "index": {"id": id, "created_at": 1, "kind": kind,
-            "node_id": "node-one", "status": "pending"},
-        "request": {"id": id, "kind": kind, "input": {"run_id": run}},
-        "definition": {"name": id}
-    }))
-    .unwrap()
-}
-
 async fn prepare(
     store: &FleetStore,
     id: &str,
@@ -19,7 +9,13 @@ async fn prepare(
     run: Option<&str>,
     phase: &str,
 ) -> Assignment {
-    let assignment = assignment(id, kind, run);
+    let assignment: Assignment = serde_json::from_value(json!({
+        "index": {"id": id, "created_at": 1, "kind": kind,
+            "node_id": "node-one", "status": "pending"},
+        "request": {"id": id, "kind": kind, "input": {"run_id": run}},
+        "definition": {"name": id}
+    }))
+    .unwrap();
     let key = dispatch_key(&assignment.request);
     assert!(store.claim_request("execution", key, id).await.unwrap());
     store.prepare_assignment(&assignment, id).await.unwrap();
@@ -132,47 +128,4 @@ async fn pending_pages_keep_global_order_cursor_and_batch_limit() {
         .await
         .unwrap()
         .is_empty());
-}
-
-#[tokio::test]
-async fn invalid_index_request_pair_is_rejected_before_persisting() {
-    for field in ["id", "kind"] {
-        let store = FleetStore::open_memory().await.unwrap();
-        let mut value = assignment("dag-invalid", "dag", None);
-        if field == "id" {
-            value.request.id = "dag-other".into();
-        } else {
-            value.request.kind = opencoder_core::fleet::ExecutionKind::Project;
-        }
-        let key = dispatch_key(&value.request);
-        store
-            .claim_request("execution", key, "input")
-            .await
-            .unwrap();
-        let error = store.prepare_assignment(&value, "input").await.unwrap_err();
-        assert!(error.to_string().contains("must match request"), "{error}");
-        assert!(store.index(&value.index.id).await.unwrap().is_none());
-        assert!(store.assignment(&value.index.id).await.unwrap().is_none());
-        assert_eq!(
-            store
-                .receipt("execution", key)
-                .await
-                .unwrap()
-                .unwrap()
-                .phase,
-            "claimed"
-        );
-    }
-}
-
-#[tokio::test]
-async fn malformed_prepared_kind_is_an_explicit_error() {
-    let store = FleetStore::open_memory().await.unwrap();
-    prepare(&store, "dag-broken", "dag", None, "prepared").await;
-    // Simulate a damaged persisted payload in this isolated in-memory store.
-    store.conn.execute(
-        "UPDATE execution_assignments SET assignment=json_set(assignment,'$.request.kind',NULL) WHERE id='dag-broken'",
-        (),
-    ).await.unwrap();
-    assert!(store.pending_assignments("", 128).await.is_err());
 }

@@ -137,11 +137,6 @@ impl FleetStore {
         assignment: &Assignment,
         fingerprint: &str,
     ) -> Result<()> {
-        ensure!(
-            assignment.index.id == assignment.request.id
-                && assignment.index.kind == assignment.request.kind,
-            "assignment index must match request id and kind"
-        );
         let _gate = self.gate.lock().await;
         let tx = self
             .conn

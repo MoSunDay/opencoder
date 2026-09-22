@@ -2,6 +2,7 @@
 mod capacity;
 #[cfg(test)]
 mod capacity_tests;
+mod inventory;
 mod pending;
 mod receipts;
 mod runtimes;

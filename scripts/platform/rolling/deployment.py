@@ -8,13 +8,12 @@ import copy
 import time
 from . import ingress, manifest, probes, units
 from .state import Journal
+from .network.ports import first_available
 
 
 def record_for(settings, bundle_manifest, ordinal):
     identifier = bundle_manifest["release_id"]
-    port = settings.port_base + ordinal * 3
-    if port + 2 >= 65536:
-        raise ValueError("versioned port range exhausted")
+    port = first_available(settings.port_base + ordinal * 3, 3)
     return {"id": identifier, "manifest": bundle_manifest, "server_port": port,
         "runtime_port": port + 1, "host_port": port + 2,
         "runtime_data": str(settings.state_dir / "runtimes" / identifier),
@@ -28,9 +27,7 @@ def fresh_frontends(record, releases, reason, retirement=None):
     """Keep old HTTP bodies/RPCs alive while starting another activation."""
     used = [int(r[k]) for r in releases for k in ("host_port", "server_port", "runtime_port")]
     used.extend(h["port"] for r in releases for key in ("previous_hosts", "previous_servers") for h in r.get(key, []))
-    port = max(used) + 1
-    if port + 1 >= 65536:
-        raise ValueError("no ports available for reactivation instances")
+    port = first_available(max(used) + 1, 2)
     result = copy.deepcopy(record)
     result.setdefault("previous_hosts", []).append({"unit":record["host_unit"],"port":record["host_port"]})
     result.setdefault("previous_servers", []).append({"unit":record["server_unit"],"port":record["server_port"], **(retirement or {})})

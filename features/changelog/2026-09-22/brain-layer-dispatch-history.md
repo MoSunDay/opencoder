@@ -16,3 +16,7 @@
 | --- | --- | --- |
 | 并行容器隔离、层屏障与收口 | `layered_canvas_holds_the_barrier_then_completes_through_the_closing_activation` | `tests/brain_layered_e2e/canvas.rs` |
 | 并行容器隔离与真实层详情读取 | `layered_view_and_rounds_read_a_real_projection` | `tests/brain_layered_e2e/surface.rs` |
+
+发布观察期间发现 Runtime 匿名内存约 150 GiB 后被 OOM 杀死，原观察窗口判失败。故障前的原生 `search /tmp` 在 130 秒后超时；代码核实其阻塞搜索不随调用取消、默认不检测二进制、行缓冲无上限。未保存被杀进程的堆快照，不能断言具体触发文件。
+
+修复为二进制检测、1 MiB 行缓冲上限、64 KiB 搜索结果缓冲上限，并在遍历、分块读取和匹配处响应调用取消。超长文本行和读取错误明确报错。隔离输入为 256 MiB 连续 NUL：旧配置读完整个输入、峰值 RSS 425948 KiB；新配置读取 3 字节即停止、峰值 RSS 14788 KiB。新增回归覆盖二进制邻接文本、长行、UTF-8 输出边界、取消后阻塞读取退出与错误展示；原搜索契约仍需通过。生产稳定性必须在修复版重新发布后重新累计完整观察窗口。

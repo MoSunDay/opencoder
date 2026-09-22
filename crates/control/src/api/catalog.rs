@@ -34,6 +34,32 @@ pub async fn nodes(State(state): State<Arc<AppState>>) -> Response {
         .collect();
     response(RpcReply::ok(json!({"nodes":nodes})))
 }
+/// Negotiates node task-file support and the executing node image digest.
+pub async fn execution_capabilities(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Response {
+    if !valid_id(&id) {
+        return error_400("invalid node id".into());
+    }
+    response(
+        state
+            .hub
+            .call(
+                &id,
+                NodeOperation::Brain {
+                    execution: ExecutionRef {
+                        id: "dag-capability-probe".into(),
+                        kind: ExecutionKind::Dag,
+                    },
+                    action: "capability_probe".into(),
+                    input: json!({"private_files":true}),
+                },
+            )
+            .await,
+    )
+}
+
 pub async fn unregister(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Response {
     use crate::transport::UnregisterResult;
     match state.hub.unregister(&id, &state.fleet).await {

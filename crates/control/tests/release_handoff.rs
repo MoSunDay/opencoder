@@ -162,6 +162,7 @@ async fn until(mut predicate: impl AsyncFnMut() -> bool) {
 }
 fn assignment() -> Assignment {
     Assignment {
+        private_context: None,
         runtime: None,
         codex: None,
         definition: None,

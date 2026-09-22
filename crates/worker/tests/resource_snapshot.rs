@@ -162,6 +162,7 @@ fn version_root_symlink_cannot_escape_resource_mount() {
 fn wasm_only_dags_do_not_depend_on_unrelated_agent_pools() {
     use opencoder_core::fleet::*;
     let mut assignment = Assignment {
+        private_context: None,
         runtime: None,
         codex: None,
         index: ExecutionIndex {

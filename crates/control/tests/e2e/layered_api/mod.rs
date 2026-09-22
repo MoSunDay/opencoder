@@ -72,6 +72,7 @@ pub(super) async fn seed_v3_run(h: &Harness, id: &str) {
         node_id: None,
     };
     let assignment = opencoder_core::fleet::Assignment {
+        private_context: None,
         runtime: None,
         codex: None,
         definition: None,

@@ -47,12 +47,29 @@ impl LocalDagPersistence for LocalEvents {
 pub(super) async fn run(
     worker: &Worker,
     record: &Record,
-    config: Config,
+    mut config: Config,
     cancel: CancellationToken,
     resume: bool,
 ) -> Result<(ExecutionStatus, Value)> {
     let assignment = &record.assignment;
     let id = &assignment.index.id;
+    if let Some(private) = &assignment.private_context {
+        anyhow::ensure!(
+            private.image_digest
+                == opencoder_core::fleet::private_files::runtime_image_digest()
+                    .map_err(anyhow::Error::msg)?,
+            "private task execution image mismatch"
+        );
+        config.dag.execution_private_root = Some(
+            opencoder_core::fleet::private_files::materialize(
+                worker.inner.layout.root(),
+                id,
+                private,
+                opencoder_core::message::now_ms(),
+            )
+            .map_err(anyhow::Error::msg)?,
+        );
+    }
     let legacy = worker.inner.journal.lock().await.uses_legacy(id);
     let workflow_root = if legacy {
         worker.inner.layout.checked_legacy_workflow_root()?

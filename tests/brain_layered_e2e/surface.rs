@@ -1,7 +1,7 @@
 //! The frozen `/layered` read surface against a real server + node: the view
 //! keys the workbench codes against, per-layer detail, and the rule that a
 //! layered route never serves another schema version.
-use crate::fixtures::{cli_json, create, round, view, RUN};
+use crate::fixtures::{cli_json, create, round, view};
 use crate::support::fleet_proc::Fleet;
 use crate::support::llm_stub::LlmStub;
 use serde_json::json;
@@ -12,14 +12,24 @@ fn layered_view_and_rounds_read_a_real_projection() {
     // the read route, not the dispatch.
     let stub = LlmStub::spawn(vec![]);
     let tmp = tempfile::tempdir().unwrap();
+    // runc cgroups are global even when each Fleet has its own state directory.
+    let run_id = format!(
+        "brain-layered-surface-{}",
+        tmp.path()
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .trim_start_matches('.')
+    );
+    let run = run_id.as_str();
     let fleet =
         Fleet::spawn_with_config(tmp.path(), stub.port(), json!({}), "layered-surface-node");
     fleet.wait_ready(&["brain"]);
-    create(&fleet, RUN);
+    create(&fleet, run);
 
-    let view = view(&fleet, RUN);
+    let view = view(&fleet, run);
     assert_eq!(view["schema_version"], json!(4));
-    assert_eq!(view["run"]["run_id"], json!(RUN));
+    assert_eq!(view["run"]["run_id"], json!(run));
     assert_eq!(view["run"]["layer"], json!(0), "no layer is dispatched yet");
     assert_eq!(view["run"]["total_layers"], json!(2));
     assert_eq!(view["layers"], json!([["scan"], ["apply"]]));
@@ -51,7 +61,7 @@ fn layered_view_and_rounds_read_a_real_projection() {
     // Layer detail is derived from the same plan: one row per layer node, with
     // the retry budget the plan declared.
     for (layer, node, attempts) in [(1, "scan", 2), (2, "apply", 3)] {
-        let (status, body) = round(&fleet, RUN, layer);
+        let (status, body) = round(&fleet, run, layer);
         assert_eq!(status, 200, "{body}");
         assert_eq!(body["schema_version"], json!(4));
         assert_eq!(body["layer"], json!(layer));
@@ -69,7 +79,7 @@ fn layered_view_and_rounds_read_a_real_projection() {
         assert!(nodes[0]["execution_id"].is_null());
     }
     for layer in [0, 3] {
-        let (status, body) = round(&fleet, RUN, layer);
+        let (status, body) = round(&fleet, run, layer);
         assert_eq!(status, 404, "{layer}: {body}");
         assert_eq!(body["error"], json!("layered layer not found"));
     }
@@ -86,14 +96,14 @@ fn layered_view_and_rounds_read_a_real_projection() {
     // Retired presentation routes are absent.
     for tail in ["view", "rounds/1"] {
         let (status, body) =
-            fleet.http("GET", &format!("/api/brain/runs/{RUN}/{tail}"), &json!({}));
+            fleet.http("GET", &format!("/api/brain/runs/{run}/{tail}"), &json!({}));
         assert_eq!(status, 404, "{body}");
     }
 
     // The layered command surface accepts exactly pause, resume and cancel.
     let (status, body) = fleet.http(
         "POST",
-        &format!("/api/brain/runs/{RUN}/commands"),
+        &format!("/api/brain/runs/{run}/commands"),
         &json!({"action":"interrupt"}),
     );
     assert_eq!(status, 400, "{body}");
@@ -107,12 +117,12 @@ fn layered_view_and_rounds_read_a_real_projection() {
 
     // The new CLI reads map to the same route, so workbench and CLI cannot
     // drift apart.
-    let cli = cli_json(&fleet, &["brain", "runs", "layered", RUN]);
+    let cli = cli_json(&fleet, &["brain", "runs", "layered", run]);
     assert_eq!(cli["schema_version"], json!(4));
-    assert_eq!(cli["run"]["run_id"], json!(RUN));
+    assert_eq!(cli["run"]["run_id"], json!(run));
     assert_eq!(cli["layers"], json!([["scan"], ["apply"]]));
     assert!(cli["run"]["total_layers"].is_u64(), "{cli}");
-    let cli = cli_json(&fleet, &["brain", "runs", "layered-round", RUN, "2"]);
+    let cli = cli_json(&fleet, &["brain", "runs", "layered-round", run, "2"]);
     assert_eq!(cli["layer"], json!(2));
     assert_eq!(cli["nodes"][0]["node_id"], json!("apply"));
     assert_eq!(cli["nodes"][0]["attempts"], json!(3));

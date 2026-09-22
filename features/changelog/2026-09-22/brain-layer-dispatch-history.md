@@ -9,3 +9,10 @@
 生产验收脚本将 step 描述限制在接口允许的 120 字以内，完整任务要求保留在计划目标与能力定义中，避免验收在创建计划时被拒绝。
 
 全量回归发现旧接口夹具用空事件日志模拟已派发层，现补齐派发事件与执行索引。`layered_view_and_rounds_read_the_node_projection` 同时核验已派发层的理由和未来层的空决策；`dispatched_layer_without_history_is_an_explicit_error` 保证缺失历史仍明确返回错误，不伪造派发理由。
+
+真实容器测试的画布与读取场景改用各自临时目录生成运行 ID，避免独立 Fleet 在默认并行测试或不同测试进程间复用全局 runc cgroup。保留原有断言和并行执行方式。
+
+| 功能 | 测试名 | 文件 |
+| --- | --- | --- |
+| 并行容器隔离、层屏障与收口 | `layered_canvas_holds_the_barrier_then_completes_through_the_closing_activation` | `tests/brain_layered_e2e/canvas.rs` |
+| 并行容器隔离与真实层详情读取 | `layered_view_and_rounds_read_a_real_projection` | `tests/brain_layered_e2e/surface.rs` |

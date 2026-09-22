@@ -9,7 +9,7 @@ use crate::support::{sibling_bin, CLI_BIN};
 use serde_json::{json, Value};
 use std::process::Command;
 
-/// Run id every layered scenario creates; ids must start with `brain-`.
+/// Fixed id for rejected admission scenarios; live runs use isolated ids.
 pub const RUN: &str = "brain-layered-e2e";
 /// Run id of the v3 run the cross-version rule reads.
 /// What each leaf child answers; the canvas never inspects a child body.

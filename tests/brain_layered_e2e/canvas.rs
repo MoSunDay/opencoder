@@ -7,7 +7,7 @@
 
 use crate::fixtures::{
     cli_json, create, operation, round, runc_available, script, wait_phase, wait_view, CHILD_TEXT,
-    RUN, SUMMARY,
+    SUMMARY,
 };
 use crate::support::fleet_proc::Fleet;
 use crate::support::llm_stub::LlmStub;
@@ -58,13 +58,23 @@ fn layered_canvas_holds_the_barrier_then_completes_through_the_closing_activatio
     // decisions, one closing) and the two leaf turns.
     let stub = LlmStub::spawn(script());
     let tmp = tempfile::tempdir().unwrap();
+    // runc cgroups are global even when each Fleet has its own state directory.
+    let run_id = format!(
+        "brain-layered-canvas-{}",
+        tmp.path()
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .trim_start_matches('.')
+    );
+    let run = run_id.as_str();
     let fleet = Fleet::spawn_with_config(tmp.path(), stub.port(), json!({}), "layered-canvas-node");
     fleet.wait_ready(&["brain"]);
-    create(&fleet, RUN);
+    create(&fleet, run);
 
     // Layer 1 is dispatched alone: `apply` may not be scheduled while `scan` is
     // still in flight, which is the whole point of a layer barrier.
-    let first = wait_view(&fleet, RUN, "layer 1 dispatched", 300, |view| {
+    let first = wait_view(&fleet, run, "layer 1 dispatched", 300, |view| {
         view["run"]["layer"] == json!(1) && view["run"]["phase"] == json!("waiting")
     });
     assert!(
@@ -75,8 +85,8 @@ fn layered_canvas_holds_the_barrier_then_completes_through_the_closing_activatio
     assert_eq!(first["layers"], json!([["scan"], ["apply"]]), "{first}");
     assert_eq!(first["operations"].as_array().unwrap().len(), 1, "{first}");
     let scan = operation(&first, "scan").expect("scan dispatched").clone();
-    assert_eq!(scan["operation_id"], json!(format!("{RUN}#l1#scan#a1")));
-    assert_eq!(scan["run_id"], json!(RUN));
+    assert_eq!(scan["operation_id"], json!(format!("{run}#l1#scan#a1")));
+    assert_eq!(scan["run_id"], json!(run));
     assert_eq!(scan["layer"], json!(1));
     assert_eq!(scan["node_id"], json!("scan"));
     assert_eq!(scan["capability_id"], json!("builtin-agent-act"));
@@ -96,7 +106,7 @@ fn layered_canvas_holds_the_barrier_then_completes_through_the_closing_activatio
 
     // The barrier folds `scan`, the wake decides layer 2, and the closing
     // activation completes the run with the bounded summary.
-    let second = wait_view(&fleet, RUN, "layer 2 dispatched", 300, |view| {
+    let second = wait_view(&fleet, run, "layer 2 dispatched", 300, |view| {
         view["run"]["layer"] == json!(2) && operation(view, "apply").is_some()
     });
     assert!(
@@ -106,13 +116,13 @@ fn layered_canvas_holds_the_barrier_then_completes_through_the_closing_activatio
     let apply = operation(&second, "apply")
         .expect("apply dispatched")
         .clone();
-    assert_eq!(apply["operation_id"], json!(format!("{RUN}#l2#apply#a1")));
+    assert_eq!(apply["operation_id"], json!(format!("{run}#l2#apply#a1")));
     assert_eq!(apply["layer"], json!(2));
     assert_eq!(apply["execution_kind"], json!("agent"));
 
     let done = wait_phase(
         &fleet,
-        RUN,
+        run,
         "closing decision completes the canvas",
         600,
         &["completed"],
@@ -152,7 +162,7 @@ fn layered_canvas_holds_the_barrier_then_completes_through_the_closing_activatio
             .clone();
         assert_eq!(
             op["operation_id"],
-            json!(format!("{RUN}#l{layer}#{node_id}#a1"))
+            json!(format!("{run}#l{layer}#{node_id}#a1"))
         );
         assert_eq!(op["attempt"], json!(1), "{op}");
         assert_eq!(op["status"], json!("done"), "{op}");
@@ -174,7 +184,7 @@ fn layered_canvas_holds_the_barrier_then_completes_through_the_closing_activatio
         );
         let input = &doc["request"]["input"];
         assert_eq!(input["schema_version"], json!(4), "child {child}: {doc}");
-        assert_eq!(input["brain_layered"]["run_id"], json!(RUN), "{doc}");
+        assert_eq!(input["brain_layered"]["run_id"], json!(run), "{doc}");
         assert_eq!(input["brain_layered"]["node_id"], json!(node_id), "{doc}");
         assert_eq!(input["brain_layered"]["layer"], json!(layer), "{doc}");
         assert_eq!(
@@ -204,7 +214,7 @@ fn layered_canvas_holds_the_barrier_then_completes_through_the_closing_activatio
 
     // Completed layers retain their original dispatch reason, independently
     // of child terminal receipts and the run's closing decision.
-    let (status, body) = round(&fleet, RUN, 1);
+    let (status, body) = round(&fleet, run, 1);
     assert_eq!(status, 200, "{body}");
     assert_eq!(body["layer"], json!(1), "{body}");
     assert_eq!(
@@ -225,7 +235,7 @@ fn layered_canvas_holds_the_barrier_then_completes_through_the_closing_activatio
     assert!(scan_row.get("summary").is_none(), "{body}");
     assert!(body["nodes"].as_array().unwrap().len() == 1, "{body}");
 
-    let (status, body) = round(&fleet, RUN, 2);
+    let (status, body) = round(&fleet, run, 2);
     assert_eq!(status, 200, "{body}");
     assert_eq!(
         body["phase"],
@@ -242,7 +252,7 @@ fn layered_canvas_holds_the_barrier_then_completes_through_the_closing_activatio
     assert!(apply_row.get("summary").is_none(), "{body}");
 
     // The CLI face of the finished canvas is the same projection.
-    let cli = cli_json(&fleet, &["brain", "runs", "layered", RUN]);
+    let cli = cli_json(&fleet, &["brain", "runs", "layered", run]);
     assert_eq!(cli["run"]["phase"], json!("completed"), "{cli}");
     assert_eq!(cli["run"]["summary"], json!(SUMMARY), "{cli}");
 

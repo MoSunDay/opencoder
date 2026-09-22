@@ -51,6 +51,7 @@ pub(super) async fn schedule(
         }
     }
     let cancel = CancellationToken::new();
+    let finalizers = CancellationToken::new();
     let mut groups: BTreeMap<String, Group> = BTreeMap::new();
     let mut active: BTreeSet<Key> = BTreeSet::new();
     let mut tasks: JoinSet<StepDone> = JoinSet::new();
@@ -61,24 +62,42 @@ pub(super) async fn schedule(
         }
         if cancel.is_cancelled() {
             for (name, group) in &mut groups {
+                if run.spec.steps.iter().any(|s| s.name == *name && s.trigger_rule == opencoder_dag::TriggerRule::AllDone) {
+                    continue;
+                }
                 group.token.cancel();
                 group.cancel_pending(root, run, name).await?;
                 group.progress(root, &run.run_id, name, sink)?;
             }
+            for step in &run.spec.steps {
+                if step.trigger_rule == opencoder_dag::TriggerRule::AllDone
+                    || states.contains_key(&step.name) || groups.contains_key(&step.name)
+                    || active.iter().any(|(name, _)| name == &step.name) {
+                    continue;
+                }
+                let mut result = failed("run cancelled before step started".into());
+                result.outcome = StepOutcome::Cancelled;
+                record_step(StepDone {name:step.name.clone(),instance:None,started_at_ms:now_ms(),result},
+                            &mut states,&mut outputs,&mut errors,root,run,sink).await;
+            }
         }
         // One pass across nodes per slot. Advancing the cursor prevents a large
         // expansion from monopolizing slots while another branch is ready.
-        if !cancel.is_cancelled() {
+        {
             let mut misses = 0;
             while tasks.len() < run.spec.max_concurrency && misses < run.spec.steps.len() {
                 let step = &run.spec.steps[cursor];
                 cursor = (cursor + 1) % run.spec.steps.len();
                 misses += 1;
                 if states.contains_key(&step.name)
+                    || (cancel.is_cancelled() && step.trigger_rule != opencoder_dag::TriggerRule::AllDone)
                     || !opencoder_dag::ready_steps(&run.spec, &states).contains(&step.name)
                 {
                     continue;
                 }
+                let step_token = if step.trigger_rule == opencoder_dag::TriggerRule::AllDone {
+                    finalizers.child_token()
+                } else { cancel.child_token() };
                 let (instance, instance_input, kind, token) = match &step.kind {
                     StepKind::Dynamic { template, .. } => {
                         if !groups.contains_key(&step.name) {
@@ -88,7 +107,7 @@ pub(super) async fn schedule(
                                 step,
                                 &input,
                                 &outputs,
-                                cancel.child_token(),
+                                step_token,
                                 resume,
                             ) {
                                 Ok(group) => {
@@ -159,7 +178,7 @@ pub(super) async fn schedule(
                         if active.contains(&(step.name.clone(), None)) {
                             continue;
                         }
-                        (None, None, kind.clone(), cancel.child_token())
+                        (None, None, kind.clone(), step_token)
                     }
                 };
                 misses = 0;
@@ -249,7 +268,7 @@ pub(super) async fn schedule(
             }
         }
         if tasks.is_empty() {
-            if !cancel.is_cancelled() && !opencoder_dag::ready_steps(&run.spec, &states).is_empty()
+            if !opencoder_dag::ready_steps(&run.spec, &states).is_empty()
             {
                 continue;
             }
@@ -315,6 +334,7 @@ pub(super) async fn schedule(
         // Persistence failures must still cancel and reap live executors. Dropping
         // JoinSet here would abort their futures before subprocess cleanup.
         cancel.cancel();
+        finalizers.cancel();
         let mut error = error;
         while let Some(done) = tasks.join_next().await {
             match done {

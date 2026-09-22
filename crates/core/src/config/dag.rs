@@ -61,6 +61,10 @@ pub struct DagOpConfig {
     /// errors the step on expiry. `None` = the runtime default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout_secs: Option<u64>,
+    /// On cancellation/timeout, signal the controller and allow bounded cleanup
+    /// before killing its process group. Zero keeps immediate termination.
+    #[serde(default)]
+    pub termination_grace_secs: u64,
 }
 
 /// Where an `agent` step's session runs. Node-local configuration; the

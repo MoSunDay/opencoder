@@ -28,6 +28,17 @@ impl std::fmt::Debug for RuntimeSettings {
     }
 }
 
+/// Combine node-private profiles with the Server's frozen profile snapshot.
+/// A Server entry wins as a whole version; unspecified node entries remain local.
+impl RuntimeSettings {
+    pub fn with_server(&self, server: &Self) -> Self {
+        let mut combined = self.clone();
+        combined.profiles.extend(server.profiles.clone());
+        combined.archived.extend(server.archived.clone());
+        combined
+    }
+}
+
 /// Resolve only the explicitly selected profile. Missing references are errors.
 pub fn agent_settings<'a>(
     config: &'a crate::Config,
@@ -61,4 +72,57 @@ pub fn pin_agent_settings(
         })?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod composition_tests {
+    use super::*;
+    fn profile(revision: u64, model: &str) -> Versioned<CodexSettings> {
+        Versioned {
+            revision,
+            settings: CodexSettings {
+                model: Some(model.into()),
+                ..Default::default()
+            },
+        }
+    }
+    #[test]
+    fn server_profiles_win_whole_versions_and_node_private_profiles_survive() {
+        let node = RuntimeSettings {
+            profiles: BTreeMap::from([
+                ("device-cases".into(), profile(1, "node-private")),
+                ("shared".into(), profile(4, "node-shared")),
+            ]),
+            ..Default::default()
+        };
+        let server = RuntimeSettings {
+            profiles: BTreeMap::from([
+                ("shared".into(), profile(2, "server-frozen")),
+                ("server-only".into(), profile(1, "server-only")),
+            ]),
+            ..Default::default()
+        };
+        let merged = node.with_server(&server);
+        assert_eq!(
+            merged.profiles["device-cases"],
+            node.profiles["device-cases"]
+        );
+        assert_eq!(merged.profiles["shared"], server.profiles["shared"]);
+        assert_eq!(
+            merged.profiles["server-only"],
+            server.profiles["server-only"]
+        );
+        assert_eq!(node.profiles.len(), 2);
+        assert_eq!(server.profiles.len(), 2);
+    }
+    #[test]
+    fn ordinary_empty_node_configuration_keeps_exact_server_behavior() {
+        let node = RuntimeSettings::default();
+        let server = RuntimeSettings {
+            profiles: BTreeMap::from([("shared".into(), profile(3, "existing"))]),
+            ..Default::default()
+        };
+        assert_eq!(node.with_server(&server), server);
+        assert_eq!(node.with_server(&RuntimeSettings::default()), node);
+    }
 }

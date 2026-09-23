@@ -1,4 +1,4 @@
-//! v4 layered wake delivery. A wake may only acknowledge the generation its
+//! Milestone wake delivery. A wake may only acknowledge the generation its
 //! own activation admitted: a newer Ready generation that appears while the
 //! delivery is in flight gets its own wake and its own acknowledgement.
 use crate::transport::SocketCommand;
@@ -79,10 +79,11 @@ fn root(id: &str) -> ExecutionRef {
 /// One-node plan bound to the built-in agent capability, so no catalog seed
 /// is needed and layer 1 is always dispatchable.
 fn layered_request() -> Value {
-    json!({"schema_version":4,
-        "plan":{"schema_version":4,"title":"layered wake","objective":"admit one generation",
-            "nodes":[{"node_id":"scan","title":"Scan","capability_id":"builtin-agent-act",
-                "retry":{"max_attempts":2}}],
+    json!({"schema_version":5,
+        "plan":{"schema_version":5,"title":"layered wake","objective":"admit one generation",
+            "nodes":[{"node_id":"scan","title":"Scan","layer":1,
+                "objective":"inspect", "success_criteria":"evidence read",
+                "capability_ids":["builtin-agent-act"]}],
             "edges":[],"max_rounds":8},
         "inputs":{},"artifacts":{},"depth":0})
 }
@@ -90,7 +91,7 @@ fn layered_request() -> Value {
 /// A layered snapshot the node could own: `phase`, `generation` and `layer`
 /// are the only fields these tests vary.
 fn snapshot(id: &str, phase: &str, generation: u64, layer: u32) -> Value {
-    json!({"schema_version":4,
+    json!({"schema_version":5,
         "run":{"run_id":id,"phase":phase,"layer":layer,"generation":generation,
             "last_event_seq":0,"error":null,"created_at":1,"updated_at":2},
         "operations":[]})
@@ -113,7 +114,10 @@ async fn attach_assignment(state: &Arc<crate::AppState>, id: &str) {
             id: id.into(),
             kind: ExecutionKind::Brain,
             target: None,
-            input: json!({"schema_version":4,"layered_request":layered_request()}),
+            input: json!({"schema_version":5,"layered_request":layered_request(),
+                "frozen_capabilities":[{"capability_id":"builtin-agent-act","kind":"agent",
+                "target":"act","input_desc":"input","output_desc":"output","required_inputs":[],
+                "definition":{"name":"act"},"version":"1"}]}),
             node_id: None,
         },
     };
@@ -221,8 +225,15 @@ async fn layered_wake_acknowledges_the_generation_its_activation_admitted() {
                 "layered_context" => {
                     // The node admits the activation and publishes the next
                     // generation; control acknowledges the generation it saw.
-                    assert_eq!(input["layer"], json!(1), "wake must activate layer 1");
-                    assert_eq!(input["nodes"][0]["node_id"], json!("scan"));
+                    assert_eq!(
+                        input["layer"],
+                        json!(0),
+                        "context keeps the admitted layer watermark"
+                    );
+                    assert_eq!(
+                        input["request"]["plan"]["nodes"][0]["node_id"],
+                        json!("scan")
+                    );
                     snapshot("brain-layered-ack", "deciding", 3, 0)
                 }
                 "layered_wake_ack" => {

@@ -189,6 +189,7 @@ async fn cancel(
         .iter()
         .find(|op| op.operation_id == operation.operation_id)
         .context("layered operation missing")?;
+    super::super::pc_issue::cancel_children(state, current).await?;
     if !current.status.terminal() {
         if let Some(index) = state.fleet.index(&current.execution_id).await? {
             ensure!(index.kind == current.execution_kind, "child kind changed");

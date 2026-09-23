@@ -71,8 +71,6 @@ function LegacyRunBody({ view, id, connection, refresh, onNotice }) {
         {!!run.summary && <Typography.Text type="secondary">交付摘要：{run.summary}</Typography.Text>}
       </Space>
     </section>
-    <ProblemView problem={view.problem} />
-    <ProblemResults results={view.problem_results} />
     <LayerCanvas view={view} selected={selected} onSelect={selectNode} />
     <section className="brain-rounds">
       <Typography.Title level={5}>分层决策与执行</Typography.Title>
@@ -89,4 +87,7 @@ function LegacyRunBody({ view, id, connection, refresh, onNotice }) {
   </>;
 }
 
-export function LayeredRunBody(props) { return props.view.schema_version === 5 ? <MilestoneRunBody {...props} /> : <LegacyRunBody {...props} />; }
+export function LayeredRunBody(props) {
+  return <><ProblemView problem={props.view.problem} /><ProblemResults results={props.view.problem_results} />
+    {props.view.schema_version === 5 ? <MilestoneRunBody {...props} /> : <LegacyRunBody {...props} />}</>;
+}

@@ -30,7 +30,7 @@ export function MilestoneRunBody({ view, id, refresh, onNotice }) {
       <Button disabled={busy || terminal} onClick={() => command(['paused', 'blocked'].includes(run.phase) ? 'resume' : 'pause')}>{['paused', 'blocked'].includes(run.phase) ? '继续调度' : '暂停调度'}</Button>
       <Button danger disabled={busy || terminal} onClick={() => command('cancel')}>取消运行</Button>
     </Space>
-    {['paused', 'blocked'].includes(run.phase) && <Space><InputNumber aria-label="新的轮次预算" min={run.round + 1} max={32} precision={0} value={budget} onChange={setBudget} /><Button disabled={busy || !budget} onClick={() => command('set_round_budget', { max_rounds: budget })}>调整预算</Button></Space>}
+    {!view.problem && ['paused', 'blocked'].includes(run.phase) && <Space><InputNumber aria-label="新的轮次预算" min={run.round + 1} max={32} precision={0} value={budget} onChange={setBudget} /><Button disabled={busy || !budget} onClick={() => command('set_round_budget', { max_rounds: budget })}>调整预算</Button></Space>}
     {!!run.reflection && <Alert type="info" title="当前反思上下文" description={run.reflection} />}
     {!!run.summary && <Typography.Paragraph>交付摘要：{run.summary}</Typography.Paragraph>}
     <Select aria-label="选择历史层激活" style={{ minWidth: 360, margin: '16px 0' }} value={visit?.activation} onChange={setSelectedVisit}

@@ -44,7 +44,9 @@ async fn project(state: &Arc<AppState>, id: &str) -> Result<Value, RpcReply> {
     let mut run = serde_json::to_value(&snapshot.run).map_err(read::internal)?;
     run["total_layers"] = json!(layers.len());
     let mut problem_results = vec![];
-    if opencoder_core::brain::pc_issue::is_plan(&request.plan) {
+    let is_pc = opencoder_core::brain::pc_issue::is_plan(&request.plan);
+    let problem = is_pc.then(|| request.inputs.get("problem")).flatten();
+    if is_pc {
         for stage in opencoder_core::brain::pc_issue::STAGES {
             if let Some(op) = snapshot
                 .operations
@@ -67,7 +69,7 @@ async fn project(state: &Arc<AppState>, id: &str) -> Result<Value, RpcReply> {
     }
     Ok(
         json!({"schema_version":request.schema_version,"run":run,"plan":request.plan,
-        "layers":layers,"operations":snapshot.operations,"events":events,"capabilities":capabilities,"problem":request.inputs.get("problem"),"problem_results":problem_results}),
+        "layers":layers,"operations":snapshot.operations,"events":events,"capabilities":capabilities,"problem":problem,"problem_results":problem_results}),
     )
 }
 

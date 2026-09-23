@@ -67,6 +67,14 @@ def exercise(env):
             current = env.containers.state(first['runtime_data'],'dag-container-hold')
             assert current['status'] == 'running' and (current['pid'],current['process_start']) == (container['pid'],container['process_start']), 'OCI process changed'
     print('old TODO and WASI tasks running',flush=True)
+    # Cold admission may first snapshot the resource pool. Verify that path
+    # before measuring uninterrupted requests across release transitions.
+    preflight = 'dag-traffic-preflight'
+    preflight_started = time.monotonic()
+    env.api('/api/executions','POST',{'id':preflight,'kind':'dag','input':{'definition':probes.spec()}})
+    until(lambda:done(env,preflight),'traffic preflight completion')
+    (env.root / 'traffic-preflight.json').write_text(json.dumps({
+        'id':preflight,'seconds':time.monotonic()-preflight_started},indent=2))
     late_id = 'dag-accepted-before-ingress-reload'
     late, node_channel = None, None
     traffic, failures = [], []

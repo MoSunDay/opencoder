@@ -45,7 +45,6 @@ pub async fn dispatch(
             .cloned()
             .unwrap_or_default();
         child_inputs.extend(bound_inputs);
-        child_inputs.insert("brain_reflection".into(), json!(run.reflection));
         return Ok(super::api::submit(state.clone(), json!({
             "id":op.execution_id, "schema_version":5,
             "plan":{"id":cap.definition["plan_id"],"version":cap.definition["version"]},
@@ -53,31 +52,7 @@ pub async fn dispatch(
             "parent":{"run_id":run.run_id,"operation_id":op.operation_id,"node_id":op.node_id,"layer":op.layer}
         })).await);
     }
-    let mut prompt = format!(
-        "You are executing one bounded capability task of one layer of the layered Brain canvas.\n\
-         Capability: {} ({:?}), target: {}.\n\
-         Input contract: {}\nOutput contract: {}\n\
-         The Brain owns dispatching other nodes, layer barriers, collecting sibling execution IDs, \
-         and deciding completion of the root objective. Those duties are not part of this node task. \
-         Do not wait for sibling executions or repeat the root scheduling plan. \
-         Use the bound inputs and the registered capability instructions to produce this capability's \
-         result, then finish when that local result is verified. For a Team, completion and final_summary \
-         describe only this Team's assigned result.\n\
-         Root objective (context; apply only the portion assigned to this capability):\n{}\n\
-         Step task:\n{}\nMilestone objective:\n{}\nSuccess criteria:\n{}\nReflection:\n{}\n\nLayered inputs:\n{}",
-        cap.capability_id,
-        cap.kind,
-        cap.target,
-        cap.input_desc,
-        cap.output_desc,
-        request["plan"]["objective"].as_str().unwrap_or_default(),
-        step.title,
-        step.objective,
-        step.success_criteria,
-        run.reflection.as_deref().unwrap_or("Initial progression"),
-        serde_json::to_string(&bound_inputs)?
-    );
-    if let Some(stage) = pc_stage {
+    let prompt = if let Some(stage) = pc_stage {
         // Root problem/settings are authoritative, never model-rewritten bindings.
         bound_inputs.insert("problem".into(), request["inputs"]["problem"].clone());
         bound_inputs.insert("settings".into(), request["inputs"]["settings"].clone());
@@ -117,6 +92,7 @@ pub async fn dispatch(
         bound_inputs.insert("history".into(), json!(history));
         bound_inputs.insert("round".into(), json!(op.round));
         bound_inputs.insert("parent_execution_id".into(), json!(op.execution_id));
+        let mut prompt = execution_prompt(cap, step, &bound_inputs)?;
         let instructions = match stage {
             "impact" => include_str!(concat!(
                 env!("CARGO_MANIFEST_DIR"),
@@ -149,7 +125,10 @@ pub async fn dispatch(
             run.run_id,
             serde_json::to_string(&bound_inputs)?
         ));
-    }
+        prompt
+    } else {
+        execution_prompt(cap, step, &bound_inputs)?
+    };
     let mut input = json!({"schema_version":5,"brain_layered":{"run_id":run.run_id,"operation_id":op.operation_id,"layer":op.layer,"round":op.round,"activation":op.activation,"node_id":op.node_id,"attempt":op.attempt,"capability":super::view::capability_metadata(cap)},"bindings":bindings,"layered_inputs":bound_inputs,"prompt":prompt,"definition":cap.definition});
     if let Some(stage) = pc_stage {
         input["pc_issue_stage"] = json!(stage);
@@ -170,4 +149,67 @@ pub async fn dispatch(
         },
     )
     .await)
+}
+
+// Deliberately accepts no root plan or global reflection: the scheduler must
+// translate rework into explicit inputs for this capability's bounded task.
+fn execution_prompt(
+    cap: &BrainCapabilityDescriptor,
+    step: &LayeredNode,
+    bound_inputs: &serde_json::Map<String, serde_json::Value>,
+) -> Result<String> {
+    Ok(format!(
+        "You are executing one bounded capability task of one layer of the layered Brain canvas.\n\
+         Capability: {} ({:?}), target: {}.\n\
+         Input contract: {}\nOutput contract: {}\n\
+         The Brain owns dispatching other nodes, layer barriers, collecting sibling execution IDs, \
+         and deciding completion of the root objective. Those duties are not part of this node task. \
+         Do not wait for sibling executions or repeat the root scheduling plan. \
+         Use the bound inputs and the registered capability instructions to produce this capability's \
+         result, then finish when that local result is verified. For a Team, completion and final_summary \
+         describe only this Team's assigned result.\n\
+         Step task:\n{}\nMilestone objective:\n{}\nSuccess criteria:\n{}\n\nLayered inputs:\n{}",
+        cap.capability_id,
+        cap.kind,
+        cap.target,
+        cap.input_desc,
+        cap.output_desc,
+        step.title,
+        step.objective,
+        step.success_criteria,
+        serde_json::to_string(bound_inputs)?
+    ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn capability_receives_local_criteria_and_explicit_remediation_inputs() {
+        let cap: BrainCapabilityDescriptor = serde_json::from_value(json!({
+            "capability_id":"team-review","kind":"team","target":"review",
+            "input_desc":"Review the assigned patch","output_desc":"Review findings",
+            "definition":{},"version":"1"
+        }))
+        .unwrap();
+        let step: LayeredNode = serde_json::from_value(json!({
+            "node_id":"review","title":"Review","layer":2,
+            "objective":"Check the patch","success_criteria":"Report concrete findings",
+            "capability_ids":["team-review"]
+        }))
+        .unwrap();
+        let inputs = json!({"task":"Recheck the corrected null handling", "patch_id":"patch-2"});
+        let prompt = execution_prompt(&cap, &step, inputs.as_object().unwrap()).unwrap();
+        for expected in [
+            "Check the patch",
+            "Report concrete findings",
+            "Recheck the corrected null handling",
+            "patch-2",
+        ] {
+            assert!(prompt.contains(expected));
+        }
+        assert!(!prompt.contains("Root objective (context"));
+        assert!(!prompt.contains("Reflection:"));
+    }
 }

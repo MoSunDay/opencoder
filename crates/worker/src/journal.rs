@@ -61,7 +61,8 @@ impl Journal {
         for record in journal.records.values() {
             let input = &record.assignment.request.input;
             let legacy = (record.assignment.index.kind == ExecutionKind::Brain
-                && !matches!(input["schema_version"].as_u64(), Some(4)))
+                && input["schema_version"]
+                    != opencoder_core::brain::layered::LAYERED_SCHEMA_VERSION)
                 || input.get("_brain").is_some()
                 || input.get("brain_scheduler").is_some()
                 || input.get("brain_receipt").is_some()

@@ -5,7 +5,7 @@ use opencoder_core::fleet::*;
 use serde_json::{json, Value};
 
 pub(super) const DYNAMIC_DAG: &str = "dag_dynamic_v1";
-const BRAIN_V4: &str = "brain_scheduler_v4";
+const MILESTONE_BRAIN: &str = "brain_scheduler_v5";
 
 pub(super) fn required(request: &CreateExecution, definition: Option<&Value>) -> Vec<&'static str> {
     let mut features = Vec::new();
@@ -17,7 +17,7 @@ pub(super) fn required(request: &CreateExecution, definition: Option<&Value>) ->
             == opencoder_core::brain::layered::LAYERED_SCHEMA_VERSION)
         || request.input.get("brain_layered").is_some()
     {
-        features.push(BRAIN_V4);
+        features.push(MILESTONE_BRAIN);
     }
     features
 }
@@ -114,7 +114,7 @@ mod tests {
 
     #[test]
     fn old_positive_probes_do_not_advertise_new_protocol_operations() {
-        for feature in [DYNAMIC_DAG, BRAIN_V4] {
+        for feature in [DYNAMIC_DAG, MILESTONE_BRAIN] {
             assert!(!supports(
                 &RpcReply::ok(json!({"compatible":true})),
                 feature
@@ -140,10 +140,10 @@ mod tests {
             id: "brain-v4".into(),
             kind: ExecutionKind::Brain,
             target: None,
-            input: json!({"schema_version":4,"layered_request":{}}),
+            input: json!({"schema_version":5,"layered_request":{}}),
             node_id: None,
         };
-        assert_eq!(required(&layered, None), vec![BRAIN_V4]);
+        assert_eq!(required(&layered, None), vec![MILESTONE_BRAIN]);
         let nested = CreateExecution {
             id: "brain-nested".into(),
             kind: ExecutionKind::Agent,
@@ -151,7 +151,7 @@ mod tests {
             input: json!({"brain_layered":{}}),
             node_id: None,
         };
-        assert_eq!(required(&nested, None), vec![BRAIN_V4]);
+        assert_eq!(required(&nested, None), vec![MILESTONE_BRAIN]);
         let scheduler = CreateExecution {
             id: "brain-v3".into(),
             kind: ExecutionKind::Brain,

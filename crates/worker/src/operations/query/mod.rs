@@ -181,7 +181,10 @@ pub(super) async fn events(
     }) {
         if record.as_ref().is_some_and(|r| {
             r.assignment.request.kind == ExecutionKind::Brain
-                && r.assignment.request.input["schema_version"] == 4
+                && matches!(
+                    r.assignment.request.input["schema_version"].as_u64(),
+                    Some(4 | 5)
+                )
         }) {
             let snapshot = worker.inner.state.store.brain_layered(id).await?;
             finished_override = snapshot

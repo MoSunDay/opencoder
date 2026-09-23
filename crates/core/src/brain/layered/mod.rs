@@ -1,9 +1,6 @@
-//! Schema version 4: the layered capability canvas.
-//!
-//! A v4 plan is a DAG of single-capability nodes. The scheduler derives layers
-//! from the edges (Kahn), decides one layer at a time, dispatches every node of
-//! that layer in parallel, and only advances after the whole layer is done.
-//! Layers are never stored; they are recomputed from the plan everywhere.
+//! Schema 5: ordered parallel milestones with explicit reflection return paths.
+//! The Brain evaluates business criteria after every terminal layer barrier.
+//! Returning starts a fresh round while retaining every historical execution.
 mod decision;
 mod plan;
 mod run;
@@ -11,9 +8,9 @@ pub use decision::*;
 pub use plan::*;
 pub use run::*;
 
-pub const LAYERED_SCHEMA_VERSION: u32 = 4;
+pub const LAYERED_SCHEMA_VERSION: u32 = 5;
 pub const LAYERED_MIGRATION: &str =
-    "migration required: new layered brain runs require explicit schema_version: 4";
+    "migration required: new layered brain runs require explicit schema_version: 5";
 
 pub const LAYERED_MAX_NODES: usize = 256;
 pub const LAYERED_MAX_LAYER_WIDTH: usize = 32;

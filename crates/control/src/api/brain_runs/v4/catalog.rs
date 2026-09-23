@@ -46,7 +46,7 @@ pub async fn available(
         .plan
         .nodes
         .iter()
-        .map(|node| node.capability_id.as_str())
+        .flat_map(|node| node.capability_ids.iter().map(String::as_str))
         .collect();
     wanted.sort_unstable();
     wanted.dedup();

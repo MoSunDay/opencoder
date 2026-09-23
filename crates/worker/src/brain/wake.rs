@@ -41,7 +41,7 @@ pub async fn recover_locked(worker: &Worker) -> Result<()> {
         }) else {
             continue;
         };
-        if record.assignment.request.input["schema_version"] == 4 {
+        if record.assignment.request.input["schema_version"] == 5 {
             super::v4::recover(worker, record).await?;
         }
     }

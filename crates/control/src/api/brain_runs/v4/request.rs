@@ -60,7 +60,7 @@ pub async fn resolve(
                 .context("plan version not found")?;
             ensure!(
                 version.plan["schema_version"] == LAYERED_SCHEMA_VERSION,
-                "unsupported plan version; expected schema 4"
+                "unsupported plan version; expected schema 5"
             );
             let plan: LayeredPlan = serde_json::from_value(version.plan)?;
             opencoder_brain::layered::validate_plan(&plan)?;

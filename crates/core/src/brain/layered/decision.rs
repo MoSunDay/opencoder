@@ -1,13 +1,14 @@
-//! The v4 decision contract and the per-layer context handed to the model.
+//! Milestone decisions and the bounded context handed to the model.
 use super::{LayeredOperationStatus, LayeredPhase};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-/// A binding is only legal from a successful ancestor execution (or a root
-/// input / registered artifact); the edge flow is therefore real.
+/// Inputs bind root values, generated tasks, artifacts, or terminal execution outputs.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct LayeredAssignment {
+    #[serde(default)]
+    pub capability_id: String,
     pub node_id: String,
     #[serde(default)]
     pub inputs: BTreeMap<String, crate::brain::BrainInputBinding>,
@@ -17,16 +18,25 @@ pub struct LayeredAssignment {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "decision", rename_all = "snake_case", deny_unknown_fields)]
 pub enum LayeredDecision {
+    Block {
+        reason: String,
+    },
     DispatchLayer {
-        /// Must equal `run.layer + 1`.
+        /// Next layer, or a configured reflection target.
         layer: u32,
-        /// Exactly the nodes of that layer, one assignment each.
+        #[serde(default)]
+        reflection: Option<String>,
+        /// Every milestone in the target layer must select at least one capability.
         assignments: Vec<LayeredAssignment>,
+        #[serde(default)]
+        assessments: BTreeMap<String, MilestoneAssessment>,
         reason: String,
         #[serde(default)]
         evidence_execution_ids: Vec<String>,
     },
     Complete {
+        #[serde(default)]
+        assessments: BTreeMap<String, MilestoneAssessment>,
         reason: String,
         #[serde(default)]
         evidence_execution_ids: Vec<String>,
@@ -40,42 +50,11 @@ pub enum LayeredDecision {
     },
 }
 
-/// Direct upstream node of a layer node, with the binding material available.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct LayeredUpstream {
-    pub node_id: String,
-    pub title: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub execution_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub summary: Option<String>,
-}
-
-/// What a downstream node needs from this one; the model reads expectations,
-/// not bodies.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct LayeredDownstream {
-    pub node_id: String,
-    pub title: String,
-    pub needs: Vec<String>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct LayeredNodeContext {
-    pub node_id: String,
-    pub title: String,
-    pub retry_max_attempts: u32,
-    pub capability: crate::brain::BrainCapabilityDescriptor,
-    pub upstream: Vec<LayeredUpstream>,
-    pub downstream: Vec<LayeredDownstream>,
-}
-
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct LayeredContext {
+    #[serde(default)]
+    pub run: Option<super::LayeredRun>,
     pub schema_version: u32,
     pub run_id: String,
     pub generation: u64,
@@ -83,7 +62,7 @@ pub struct LayeredContext {
     pub layer: u32,
     pub total_layers: u32,
     pub request: crate::brain::layered::LayeredRequest,
-    pub nodes: Vec<LayeredNodeContext>,
+    pub capabilities: Vec<crate::brain::BrainCapabilityDescriptor>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub todo: Option<crate::brain::layered::LayeredTodoSummary>,
     /// Bounded necessary summaries fetched from the execution owners.
@@ -129,4 +108,12 @@ impl LayeredOperationStatus {
             _ => Self::Running,
         }
     }
+}
+
+/// Business assessment is distinct from a capability process exit status.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct MilestoneAssessment {
+    pub met: bool,
+    pub reason: String,
 }

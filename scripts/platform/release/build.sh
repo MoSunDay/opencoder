@@ -144,6 +144,7 @@ manifest = {
     "version": info["version"],
     "version_long": info["version_long"],
     "protocol_version": info["protocol_version"],
+    "brain_schema_version": info["brain_schema_version"],
     "spa_sha256": spa_digest,
     "files": files,
 }

@@ -55,7 +55,9 @@ pub async fn frames(worker: &Worker, record: &Record) -> Result<Vec<NodeFrame>> 
             let assignment = intent
                 .assignments
                 .iter()
-                .find(|assignment| assignment.node_id == op.node_id)
+                .find(|assignment| {
+                    assignment.node_id == op.node_id && assignment.capability_id == op.capability_id
+                })
                 .context("dispatch assignment missing")?;
             let capability = intent
                 .capabilities

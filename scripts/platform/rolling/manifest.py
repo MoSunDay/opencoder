@@ -24,6 +24,8 @@ def verify(bundle):
     info = _installer.build_info(bundle / "bin/opencoder-agent")
     if info.get("release_compatibility") != compatibility:
         raise ValueError("release compatibility does not match compiled binary")
+    if manifest.get("brain_schema_version", 4) != info.get("brain_schema_version", 4):
+        raise ValueError("brain schema does not match compiled binary")
     return manifest
 
 
@@ -59,7 +61,7 @@ def brain_preflight(settings, candidate, releases=()):
             payload = request.get("input") or {}
             if not isinstance(payload, dict):
                 payload = {}
-            legacy = ((request["kind"] == "brain" and payload.get("schema_version") != 4)
+            legacy = ((request["kind"] == "brain" and payload.get("schema_version") != candidate.get("brain_schema_version", 4))
                       or "_brain" in payload or "brain_scheduler" in payload
                       or "brain_receipt" in payload or "playbook_receipt" in payload)
             if legacy and assignment["index"]["status"] not in ("done", "error", "cancelled"):

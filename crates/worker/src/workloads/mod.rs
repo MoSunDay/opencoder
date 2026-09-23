@@ -19,10 +19,10 @@ pub(crate) async fn run(
     resume: bool,
 ) -> Result<(ExecutionStatus, Value)> {
     let (status, result) = match record.assignment.request.kind {
-        ExecutionKind::Brain if record.assignment.request.input["schema_version"] == 4 => {
+        ExecutionKind::Brain if record.assignment.request.input["schema_version"] == 5 => {
             crate::brain::v4::run(worker, record, config, cancel).await
         }
-        ExecutionKind::Brain => anyhow::bail!("unsupported brain schema; expected 4"),
+        ExecutionKind::Brain => anyhow::bail!("unsupported brain schema; expected 5"),
         ExecutionKind::Agent | ExecutionKind::Maintenance | ExecutionKind::Operator => {
             agent::run(worker, record, config, cancel, resume).await
         }

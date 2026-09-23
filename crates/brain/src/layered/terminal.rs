@@ -1,45 +1,11 @@
 //! Terminal folding, retries and the layer barrier.
-use super::{change, event, execution_id, operation_id};
+use super::{change, event};
 use anyhow::{ensure, Context, Result};
 use opencoder_core::brain::layered::*;
 
-/// Latest attempt of a node; attempts are monotonic per node.
-pub(crate) fn latest_attempt<'a>(
-    ops: &'a [LayeredOperation],
-    node_id: &str,
-) -> Option<&'a LayeredOperation> {
-    ops.iter()
-        .filter(|op| op.node_id == node_id)
-        .max_by_key(|op| op.attempt)
-}
-
-/// The whole completed layer has a successful latest attempt per node.
-pub(crate) fn layers_complete(
-    plan: &LayeredPlan,
-    ops: &[LayeredOperation],
-    layer: u32,
-) -> Result<bool> {
-    if layer == 0 {
-        return Ok(ops.is_empty());
-    }
-    let levels = super::layers(plan)?;
-    for index in 0..layer {
-        let level = levels
-            .get(index as usize)
-            .context("layer is out of the plan")?;
-        for node_id in level {
-            let done = latest_attempt(ops, node_id).is_some_and(|op| op.status.successful());
-            if !done {
-                return Ok(false);
-            }
-        }
-    }
-    Ok(true)
-}
-
 pub fn terminal(
     snapshot: &LayeredSnapshot,
-    request: &LayeredRequest,
+    _request: &LayeredRequest,
     notice: &LayeredTerminalEvent,
     now: i64,
 ) -> Result<Option<LayeredChange>> {
@@ -62,6 +28,11 @@ pub fn terminal(
     {
         return Ok(None);
     }
+    // Old activations and already terminal operations cannot invalidate a live
+    // decision generation, even if a producer sends a newer receipt sequence.
+    if old.status.terminal() || old.activation != snapshot.run.activation {
+        return Ok(None);
+    }
     let mut update = change(snapshot, now);
     let mut e = event(&update.run, "operation_terminal", None);
     e.layer = old.layer;
@@ -72,20 +43,16 @@ pub fn terminal(
     e.execution_id = Some(old.execution_id.clone());
     e.source_sequence = Some(notice.source_sequence);
     e.decision_summary = Some(format!("{:?}", notice.status).to_lowercase());
-    let settle_cancelled = snapshot.run.phase.terminal()
-        && notice.status == LayeredOperationStatus::Cancelled
-        && old.cancel_requested
-        && !old.status.terminal();
+    let settle_cancelled =
+        snapshot.run.phase.terminal() && old.cancel_requested && !old.status.terminal();
     if old.status.terminal()
         || (snapshot.run.phase.terminal() && !settle_cancelled)
-        || old.layer != snapshot.run.layer
+        || old.activation != snapshot.run.activation
     {
         e.reason_summary = Some("late terminal event".into());
         update.events.push(e);
         return Ok(Some(update));
     }
-    let attempt = old.attempt;
-    let node_id = old.node_id.clone();
     let op = update
         .operations
         .iter_mut()
@@ -97,49 +64,7 @@ pub fn terminal(
     if snapshot.run.phase.terminal() {
         return Ok(Some(update));
     }
-    if !notice.status.successful() {
-        let max_attempts = request
-            .plan
-            .node(&node_id)
-            .map(|node| node.retry.max_attempts)
-            .unwrap_or(1);
-        if attempt < max_attempts && notice.status != LayeredOperationStatus::Cancelled {
-            let retry = LayeredOperation {
-                operation_id: operation_id(&snapshot.run.run_id, old.layer, &node_id, attempt + 1),
-                run_id: snapshot.run.run_id.clone(),
-                layer: old.layer,
-                node_id: node_id.clone(),
-                attempt: attempt + 1,
-                capability_id: old.capability_id.clone(),
-                execution_kind: old.execution_kind,
-                execution_id: execution_id(
-                    &snapshot.run.run_id,
-                    old.layer,
-                    &node_id,
-                    attempt + 1,
-                    old.execution_kind,
-                ),
-                status: LayeredOperationStatus::Creating,
-                source_sequence: None,
-                cancel_requested: false,
-            };
-            let mut scheduled = event(&update.run, "operation_retry_scheduled", None);
-            scheduled.node_id = Some(node_id);
-            scheduled.attempt = Some(attempt + 1);
-            scheduled.capability_id = Some(retry.capability_id.clone());
-            scheduled.execution_kind = Some(retry.execution_kind);
-            scheduled.execution_id = Some(retry.execution_id.clone());
-            update.events.push(scheduled);
-            update.operations.push(retry);
-            return Ok(Some(update));
-        }
-        update.run.phase = LayeredPhase::Failed;
-        update.run.error = Some(format!("node {node_id} failed after {attempt} attempt(s)"));
-        update
-            .events
-            .push(event(&update.run, "run_failed", update.run.error.clone()));
-        cancel_pending(&mut update);
-    } else if layers_complete(&request.plan, &update.operations, update.run.layer)? {
+    if barrier_parts(&update.run, &update.operations) {
         update
             .events
             .push(event(&update.run, "layer_barrier_reached", None));
@@ -182,7 +107,7 @@ pub fn admit(snapshot: &LayeredSnapshot, operation_id: &str, now: i64) -> Result
 
 pub fn command(
     snapshot: &LayeredSnapshot,
-    plan: &LayeredPlan,
+    _plan: &LayeredPlan,
     action: &str,
     now: i64,
 ) -> Result<LayeredChange> {
@@ -192,10 +117,13 @@ pub fn command(
         "pause" => update.run.phase = LayeredPhase::Paused,
         "resume" => {
             ensure!(
-                snapshot.run.phase == LayeredPhase::Paused,
-                "only paused runs can resume"
+                matches!(
+                    snapshot.run.phase,
+                    LayeredPhase::Paused | LayeredPhase::Blocked
+                ),
+                "only paused or blocked runs can resume"
             );
-            update.run.phase = if layers_complete(plan, &snapshot.operations, snapshot.run.layer)? {
+            update.run.phase = if barrier(snapshot) {
                 LayeredPhase::Ready
             } else {
                 LayeredPhase::Waiting
@@ -236,4 +164,26 @@ pub(crate) fn cancel_pending(update: &mut LayeredChange) {
         }
     }
     update.events.extend(events);
+}
+
+fn barrier_parts(run: &LayeredRun, ops: &[LayeredOperation]) -> bool {
+    if run.activation == 0 {
+        return ops.is_empty();
+    }
+    let current: Vec<_> = ops
+        .iter()
+        .filter(|op| op.activation == run.activation)
+        .collect();
+    !current.is_empty() && current.iter().all(|op| op.status.terminal())
+}
+pub fn barrier(snapshot: &LayeredSnapshot) -> bool {
+    barrier_parts(&snapshot.run, &snapshot.operations)
+}
+pub fn current_successful(snapshot: &LayeredSnapshot) -> bool {
+    barrier(snapshot)
+        && snapshot
+            .operations
+            .iter()
+            .filter(|op| op.activation == snapshot.run.activation)
+            .all(|op| op.status.successful())
 }

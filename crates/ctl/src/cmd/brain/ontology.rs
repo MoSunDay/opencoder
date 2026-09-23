@@ -108,8 +108,8 @@ pub fn runs(command: &RunsCmd) -> Result<RequestPlan> {
 fn scheduler_body(raw: &str) -> Result<serde_json::Value> {
     let body = required_body(raw)?;
     anyhow::ensure!(
-        matches!(body["schema_version"].as_u64(), Some(4)),
-        "brain runs create requires an explicit schema_version: 4"
+        matches!(body["schema_version"].as_u64(), Some(5)),
+        "brain runs create requires an explicit schema_version: 5"
     );
     Ok(body)
 }
@@ -122,92 +122,21 @@ pub async fn activate(
     let context: serde_json::Value = serde_json::from_slice(&std::fs::read(context)?)?;
     let config: opencoder_core::Config = serde_json::from_slice(&std::fs::read(config)?)?;
     let client = LocalClient(config.clone());
-    let decision = if context["schema_version"] == 4 && context["nodes"] == serde_json::json!([]) {
-        serde_json::to_value(
-            closing_decision(
-                &serde_json::from_value(context)?,
-                &client,
-                config.model_id(),
-            )
-            .await?,
-        )?
-    } else if context["schema_version"] == 4 {
-        serde_json::to_value(
-            opencoder_brain::layered::activate(
-                &serde_json::from_value(context)?,
-                &client,
-                config.model_id(),
-            )
-            .await?,
-        )?
-    } else {
-        anyhow::bail!("unsupported brain schema; expected 4");
-    };
-    opencoder_core::atomic_write_json(output, &decision)?;
+    anyhow::ensure!(
+        context["schema_version"] == 5,
+        "unsupported brain schema; expected 5"
+    );
+    let decision = opencoder_brain::layered::activate(
+        &serde_json::from_value(context)?,
+        &client,
+        config.model_id(),
+    )
+    .await?;
+    opencoder_core::atomic_write_json(output, &serde_json::to_value(decision)?)?;
     Ok(0)
 }
 
 struct LocalClient(opencoder_core::Config);
-
-/// Closing instruction text. `nodes` is empty, so a dispatch_layer decision has
-/// nothing left to schedule.
-const CLOSING: &str =
-    "Every layer of the plan has been dispatched and every node has a successful attempt. \
-Return complete or fail; dispatch_layer is closed.";
-
-/// Closing activation: the layer being decided is `total_layers + 1`, so only
-/// completion or failure remain. Mirrors
-/// `opencoder_worker::brain::container::closing_decision` so the in-container
-/// and the node-local activation send the same request.
-async fn closing_decision(
-    context: &opencoder_core::brain::layered::LayeredContext,
-    client: &dyn opencoder_llm::ChatStream,
-    model: &str,
-) -> Result<opencoder_core::brain::layered::LayeredDecision> {
-    let instruction = serde_json::json!({
-        "schema_version": opencoder_core::brain::layered::LAYERED_SCHEMA_VERSION,
-        "closing": true,
-        "instruction": CLOSING,
-        "run_id": context.run_id,
-        "generation": context.generation,
-        "layer": context.layer,
-        "total_layers": context.total_layers,
-        "objective": context.request.plan.objective,
-        "operations": context.operations,
-        "summaries": context.summaries,
-    });
-    let mut stream = client.chat_stream(opencoder_llm::ChatRequest {
-        purpose: opencoder_llm::RequestPurpose::Planning,
-        model: model.into(),
-        messages: vec![
-            opencoder_llm::Message::system("layered-contract", opencoder_brain::layered::PROMPT),
-            opencoder_llm::Message::user("layered-closing", instruction.to_string()),
-        ],
-        tools: vec![],
-        tool_choice: None,
-        temperature: Some(0.0),
-        max_tokens: Some(16384),
-        reasoning_effort: None,
-        cache_salt: None,
-    })?;
-    while let Some(event) = stream.recv().await {
-        match event {
-            opencoder_llm::LlmEvent::Completed { text, .. } => {
-                anyhow::ensure!(text.len() <= 256 * 1024, "layered decision exceeds 256 KiB");
-                return serde_json::from_str(text.trim())
-                    .map_err(|error| anyhow::anyhow!("layered decision is not JSON: {error}"));
-            }
-            opencoder_llm::LlmEvent::Error(error) => {
-                anyhow::bail!("layered provider: {error}")
-            }
-            _ => {}
-        }
-    }
-    anyhow::bail!("layered stream ended without completion")
-}
-
-#[cfg(test)]
-mod tests;
 
 impl opencoder_llm::ChatStream for LocalClient {
     fn chat_stream(
@@ -220,3 +149,6 @@ impl opencoder_llm::ChatStream for LocalClient {
         )
     }
 }
+
+#[cfg(test)]
+mod tests;

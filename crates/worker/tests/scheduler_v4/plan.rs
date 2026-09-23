@@ -14,9 +14,9 @@ pub const REVIEW: &str = "review";
 /// `scan -> review`: two layers, one node per layer, both bound to an agent.
 pub fn request(_id: &str) -> Value {
     json!({
-        "schema_version": 4,
+        "schema_version": 5,
         "plan": {
-            "schema_version": 4,
+            "schema_version": 5,
             "title": "layered review",
             "objective": "inspect repository",
             "inputs": {"repo": "opencoder"},
@@ -24,17 +24,15 @@ pub fn request(_id: &str) -> Value {
                 {
                     "node_id": SCAN,
                     "title": "scan the repository",
-                    "capability_id": "cap-scan",
-
-                    "retry": {"max_attempts": 2}
+                    "capability_ids": ["cap-scan"], "layer":1, "objective":"scan repository", "success_criteria":"find relevant code"
                 },
                 {
                     "node_id": REVIEW,
                     "title": "review the scan",
-                    "capability_id": "cap-review",
+                    "capability_ids": ["cap-review"], "layer":2, "objective":"review changes", "success_criteria":"review passed",
                     }
             ],
-            "edges": [{"from": SCAN, "to": REVIEW}],
+            "edges": [{"from":SCAN,"to":SCAN,"condition":"scan needs rework"}, {"from": REVIEW, "to": SCAN, "condition":"review requires changes"}],
             "max_rounds": 4
         },
         "inputs": {"repo": "opencoder"}
@@ -76,26 +74,8 @@ pub fn total_layers(id: &str) -> u32 {
 /// validators use, so a node can never be handed a context control could not
 /// build. The closing context (every layer dispatched) has no nodes left.
 pub fn next_context(id: &str, snapshot: &LayeredSnapshot) -> LayeredContext {
-    if snapshot.run.layer >= total_layers(id) {
-        return closing(id, snapshot);
-    }
     opencoder_brain::layered::layer_context(snapshot, &parse(id), &catalog(), BTreeMap::new(), None)
         .expect("next layer context")
-}
-
-fn closing(id: &str, snapshot: &LayeredSnapshot) -> LayeredContext {
-    LayeredContext {
-        schema_version: LAYERED_SCHEMA_VERSION,
-        run_id: id.into(),
-        generation: snapshot.run.generation,
-        layer: snapshot.run.layer + 1,
-        total_layers: total_layers(id),
-        request: parse(id),
-        nodes: vec![],
-        todo: None,
-        summaries: BTreeMap::new(),
-        operations: snapshot.operations.clone(),
-    }
 }
 
 /// A dispatch frame is exactly the operation, its assignment and its frozen

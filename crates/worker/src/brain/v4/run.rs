@@ -19,11 +19,7 @@ use tokio_util::sync::CancellationToken;
 /// The frozen descriptors of the layer being decided; the layer context carries
 /// exactly the nodes a decision may dispatch.
 fn catalog(context: &LayeredContext) -> Vec<BrainCapabilityDescriptor> {
-    context
-        .nodes
-        .iter()
-        .map(|node| node.capability.clone())
-        .collect()
+    context.capabilities.clone()
 }
 
 pub async fn run(
@@ -103,19 +99,21 @@ pub async fn run(
             )
             .await?;
             if let LayeredDecision::DispatchLayer { assignments, .. } = &decision {
-                let intent = LayeredDispatchIntent {
-                    generation: change.run.generation,
-                    layer: change.run.layer,
-                    operations: change
-                        .operations
-                        .iter()
-                        .filter(|op| op.layer == change.run.layer)
-                        .cloned()
-                        .collect(),
-                    assignments: assignments.clone(),
-                    capabilities: catalog(&context),
-                };
-                state::annotate(worker, id, "layered_intent", json!(intent)).await?;
+                if change.run.phase == LayeredPhase::Waiting {
+                    let intent = LayeredDispatchIntent {
+                        generation: change.run.generation,
+                        layer: change.run.layer,
+                        operations: change
+                            .operations
+                            .iter()
+                            .filter(|op| op.activation == change.run.activation)
+                            .cloned()
+                            .collect(),
+                        assignments: assignments.clone(),
+                        capabilities: catalog(&context),
+                    };
+                    state::annotate(worker, id, "layered_intent", json!(intent)).await?;
+                }
             }
             change
         }

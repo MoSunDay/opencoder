@@ -2,7 +2,7 @@
 use super::read;
 use crate::{api::response, AppState};
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     response::Response,
 };
 use opencoder_core::{brain::layered::*, brain::*, fleet::*};
@@ -20,11 +20,17 @@ pub async fn view(State(state): State<Arc<AppState>>, Path(id): Path<String>) ->
     })
 }
 
+#[derive(serde::Deserialize, Default)]
+pub struct VisitQuery {
+    pub activation: Option<u64>,
+}
+
 pub async fn layer(
     State(state): State<Arc<AppState>>,
     Path((id, layer)): Path<(String, u32)>,
+    Query(query): Query<VisitQuery>,
 ) -> Response {
-    response(match detail(&state, &id, layer).await {
+    response(match detail(&state, &id, layer, query.activation).await {
         Ok(detail) => RpcReply::ok(detail),
         Err(reply) => reply,
     })
@@ -38,12 +44,17 @@ async fn project(state: &Arc<AppState>, id: &str) -> Result<Value, RpcReply> {
     let mut run = serde_json::to_value(&snapshot.run).map_err(read::internal)?;
     run["total_layers"] = json!(layers.len());
     Ok(
-        json!({"schema_version":LAYERED_SCHEMA_VERSION,"run":run,"plan":request.plan,
+        json!({"schema_version":request.schema_version,"run":run,"plan":request.plan,
         "layers":layers,"operations":snapshot.operations,"events":events,"capabilities":capabilities}),
     )
 }
 
-async fn detail(state: &Arc<AppState>, id: &str, layer: u32) -> Result<Value, RpcReply> {
+async fn detail(
+    state: &Arc<AppState>,
+    id: &str,
+    layer: u32,
+    activation: Option<u64>,
+) -> Result<Value, RpcReply> {
     let (_, request, snapshot) = open(state, id).await?;
     let layers = plan_layers(&request.plan)?;
     let node_ids = layer
@@ -51,13 +62,61 @@ async fn detail(state: &Arc<AppState>, id: &str, layer: u32) -> Result<Value, Rp
         .and_then(|index| layers.get(index as usize))
         .ok_or_else(|| RpcReply::error(404, "layered layer not found"))?;
     let events = read::events(state, id, snapshot.run.last_event_seq).await?;
+    if request.schema_version == 5 {
+        let visits: Vec<_> = events
+            .iter()
+            .filter(|e| e.layer == layer && e.event_type == "layer_started")
+            .collect();
+        if visits.is_empty()
+            && (layer <= snapshot.run.layer
+                || snapshot.operations.iter().any(|op| op.layer == layer))
+        {
+            return Err(RpcReply::error(
+                500,
+                format!("layer {layer} dispatch decision is missing from the event journal"),
+            ));
+        }
+        let selected = if let Some(activation) = activation {
+            Some(
+                *visits
+                    .iter()
+                    .find(|e| e.activation == activation)
+                    .ok_or_else(|| RpcReply::error(404, "layer activation not found"))?,
+            )
+        } else {
+            visits.last().copied()
+        };
+        let operations: Vec<_> = snapshot
+            .operations
+            .iter()
+            .filter(|op| selected.is_some_and(|visit| op.activation == visit.activation))
+            .collect();
+        let assessments = selected.and_then(|visit| {
+            events
+                .iter()
+                .rev()
+                .find(|e| e.activation == visit.activation && e.event_type == "milestones_assessed")
+        });
+        let nodes: Vec<_> = node_ids
+            .iter()
+            .map(|id| {
+                json!({"node_id":id,"milestone":request.plan.node(id),
+            "operations":operations.iter().filter(|op| &op.node_id == id).collect::<Vec<_>>(),
+            "assessment":assessments.and_then(|e| e.assessments.get(id))})
+            })
+            .collect();
+        return Ok(
+            json!({"schema_version":5,"layer":layer,"run_phase":snapshot.run.phase,
+            "visit":selected,"visits":visits,"nodes":nodes}),
+        );
+    }
     let decision = layer_dispatch(&events, layer, snapshot.run.layer)?;
     let mut nodes = vec![];
     for node_id in node_ids {
         nodes.push(node_row(&request, &snapshot, node_id));
     }
     Ok(
-        json!({"schema_version":LAYERED_SCHEMA_VERSION,"layer":layer,
+        json!({"schema_version":request.schema_version,"layer":layer,
         "phase":if decision.is_some() { LayeredPhase::Waiting } else { snapshot.run.phase },
         "decision":decision.map(|_| "dispatch_layer"),
         "reason":decision.and_then(|event| event.reason_summary.clone()).unwrap_or_default(),
@@ -99,7 +158,7 @@ fn node_row(request: &LayeredRequest, snapshot: &LayeredSnapshot, node_id: &str)
         "capability_id":op.map(|op| op.capability_id.clone()).unwrap_or_else(|| plan.map(|node| node.capability_id.clone()).unwrap_or_default()),
         "status":match op { Some(op) => json!(op.status), None => json!("pending") },
         "attempt":op.map(|op| op.attempt).unwrap_or(0),
-        "attempts":plan.map(|node| node.retry.max_attempts).unwrap_or_default(),
+        "attempts":plan.map(|node| node.retry.as_ref().map(|r| r.max_attempts).unwrap_or(2)).unwrap_or_default(),
         "execution_id":op.map(|op| op.execution_id.clone()),
         "execution_kind":op.map(|op| op.execution_kind),
         "cancel_requested":op.map(|op| op.cancel_requested).unwrap_or(false),
@@ -142,7 +201,10 @@ async fn open(
         .map_err(read::internal)?
         .ok_or_else(|| RpcReply::error(404, "layered run not found"))?;
     if assignment.request.kind != ExecutionKind::Brain
-        || assignment.request.input["schema_version"] != LAYERED_SCHEMA_VERSION
+        || !matches!(
+            assignment.request.input["schema_version"].as_u64(),
+            Some(4 | 5)
+        )
     {
         return Err(RpcReply::error(404, "layered run not found"));
     }

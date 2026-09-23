@@ -21,8 +21,7 @@ async fn saved_plan_versions_are_capabilities_and_nested_runs_pin_the_version() 
     assert_eq!(cap["kind"], "brain");
     assert_eq!(cap["definition"]["version"], 1);
     let mut request = request();
-    request["plan"]["nodes"] =
-        json!([{"node_id":"nested","title":"完成子计划","capability_id":"plan-plan-child@1"}]);
+    request["plan"]["nodes"] = json!([{"node_id":"nested","title":"完成子计划","capability_ids":["plan-plan-child@1"],"layer":1,"objective":"finish child","success_criteria":"child delivered"}]);
     request["plan"]["edges"] = json!([]);
     let (status, body) = h.req(Method::POST, "/api/brain/runs", Some(request)).await;
     assert_eq!(status, 202, "{body}");
@@ -47,7 +46,7 @@ async fn saved_plan_versions_are_capabilities_and_nested_runs_pin_the_version() 
 #[tokio::test]
 async fn old_plan_writes_are_rejected_without_persisting_a_version() {
     let h = Harness::with_brain_kind().await;
-    for version in [1, 2, 3] {
+    for version in [1, 2, 3, 4] {
         let body = json!({"id":"plan-old","version":1,"plan":{"schema_version":version,"title":"old","objective":"old","capability_ids":["builtin-agent-act"]},"changelog":"old","created_at":1});
         let (status, _) = h
             .req(Method::POST, "/api/brain/plan-defs", Some(body))

@@ -19,6 +19,29 @@ pub(super) fn required(request: &CreateExecution, definition: Option<&Value>) ->
     {
         features.push(MILESTONE_BRAIN);
     }
+    if request.input.get("pc_issue_stage").is_some()
+        || request.input["layered_request"]["plan"]["nodes"]
+            .as_array()
+            .is_some_and(|nodes| {
+                nodes.iter().any(|n| {
+                    n["capability_ids"].as_array().is_some_and(|ids| {
+                        ids.iter().any(|id| {
+                            id.as_str()
+                                .and_then(opencoder_core::brain::pc_issue::stage)
+                                .is_some()
+                        })
+                    })
+                })
+            })
+    {
+        features.push("brain_pc_issue_v1");
+    }
+    if request.kind == ExecutionKind::Dag
+        && request.target.as_deref() == Some("device-cases")
+        && request.input.get("candidate").is_some()
+    {
+        features.push("pc_candidate_v1");
+    }
     features
 }
 

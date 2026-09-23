@@ -38,6 +38,7 @@ pub async fn capabilities(state: &Arc<AppState>) -> anyhow::Result<Vec<Value>> {
             "maturity":"stable"
         }),
     ];
+    capabilities.extend(opencoder_core::brain::pc_issue::capabilities());
     for capability in state.store.list_brain_capabilities().await? {
         let Some(target) = state
             .fleet

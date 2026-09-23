@@ -19,12 +19,40 @@ pub async fn normalize(
     if !matches!(status, ExecutionStatus::Done | ExecutionStatus::Idle) {
         return Ok((status, result));
     }
-    let (mut output, artifacts) =
+    let (mut output, mut artifacts) =
         super::super::output::native_output(worker, record, &result).await?;
     if let Some(text) = output.as_str() {
         if let Ok(structured) = serde_json::from_str(text) {
             output = structured;
         }
+    }
+    if let Some(stage) = record.assignment.request.input["pc_issue_stage"].as_str() {
+        output = opencoder_core::brain::pc_issue::parse_output(output)?;
+        opencoder_core::brain::pc_issue::validate_output(stage, &output)?;
+        opencoder_core::brain::pc_issue::validate_transition(
+            stage,
+            &record.assignment.request.input["layered_inputs"]["history"],
+            &output,
+        )?;
+        if stage == "verify" && output["outcome"] == "verified" {
+            ensure!(
+                output["rounds"] == record.assignment.request.input["layered_inputs"]["round"],
+                "verification round differs from the authoritative stage round"
+            );
+        }
+        let mut evidence = output["evidence"].as_array().unwrap().clone();
+        let reference = record.assignment.index.execution_ref();
+        let root = worker
+            .inner
+            .layout
+            .execution_dir(reference.kind, &reference.id)?;
+        let (frozen, refs) = tokio::task::spawn_blocking(move || -> Result<_> {
+            let refs = super::evidence::freeze(&root, &reference, &mut evidence)?;
+            Ok((evidence, refs))
+        })
+        .await??;
+        output["evidence"] = json!(frozen);
+        artifacts.extend(refs);
     }
     if !result.is_object() {
         result = json!({"native_result":result});

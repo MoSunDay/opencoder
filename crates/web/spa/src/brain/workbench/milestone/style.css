@@ -14,7 +14,8 @@
 .brain-milestone-inspector .ant-select { width:100%; }
 .brain-milestone-inspector section { padding:10px 0; border-top:1px solid #e4e9ef; }
 .brain-milestone-preview { height:580px; }
-@media(max-width:800px) { .brain-method-workspace { flex-direction:column; overflow:auto; } .brain-milestone-inspector { width:auto; max-height:420px; flex-shrink:0; } .brain-milestone-canvas { flex-shrink:0; } .brain-milestone-tools span { display:none; } }
+@media(max-width:800px) { .brain-method-toolbar { flex-wrap:wrap; } .brain-method-toolbar > .ant-space { flex-wrap:wrap; } .brain-method-workspace { flex-direction:column; overflow:auto; } .brain-milestone-inspector { width:auto; max-height:420px; flex-shrink:0; } .brain-milestone-canvas { flex-shrink:0; } .brain-milestone-tools > span { display:none; } }
 
-.brain-milestone-canvas.is-editable > .react-flow { top:64px; height:calc(100% - 64px); }
+.brain-milestone-flow { position:absolute; inset:0; }
+.brain-milestone-canvas.is-editable > .brain-milestone-flow { top:64px; }
 .brain-milestone-barrier { width:150px; height:24px; text-align:center; font-size:11px; color:#52637b; background:#edf2f8; border-radius:12px; line-height:24px; }

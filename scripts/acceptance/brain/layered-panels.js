@@ -59,6 +59,17 @@ async function inspectPanels({ base, token, id, view, operations, marker, eviden
     assert.equal(await page.getByText('本层决策：判断中', { exact: true }).count(), 0);
     await page.screenshot({ path: path.join(evidence, 'history.png'), animations: 'disabled' });
     await page.setViewportSize({ width: 390, height: 844 });
+    await page.waitForTimeout(350);
+    const geometry = await page.locator('.brain-milestone-preview').first().evaluate((preview) => {
+      const canvas = preview.querySelector('.brain-milestone-canvas').getBoundingClientRect();
+      const flow = preview.querySelector('.react-flow').getBoundingClientRect();
+      const node = preview.querySelector('.brain-milestone-node').getBoundingClientRect();
+      return { canvas: { left: canvas.left, right: canvas.right, bottom: canvas.bottom },
+        flow: { bottom: flow.bottom }, node: { left: node.left, right: node.right } };
+    });
+    assert(geometry.node.left >= geometry.canvas.left - 1 && geometry.node.right <= geometry.canvas.right + 1,
+      'narrow canvas must keep milestones visible after resize');
+    assert(geometry.flow.bottom <= geometry.canvas.bottom + 1, 'canvas controls must stay inside the canvas');
     await page.screenshot({ path: path.join(evidence, 'narrow.png'), animations: 'disabled' });
     assert.deepEqual(errors, []); return panels;
   } catch (error) {

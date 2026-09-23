@@ -1,0 +1,9 @@
+{
+  "approval_policy": "never",
+  "auth_slot": null,
+  "envs": {},
+  "executable": "/usr/local/bin/codex",
+  "model": "gpt-6-astra",
+  "reasoning_effort": "medium",
+  "sandbox_mode": "danger-full-access"
+}

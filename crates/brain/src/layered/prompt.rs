@@ -2,7 +2,7 @@
 use anyhow::{ensure, Result};
 use opencoder_core::brain::layered::*;
 use serde_json::json;
-pub const PROMPT: &str = r#"You are the schema 5 milestone Brain. Return ONE strict JSON decision.
+pub const PROMPT: &str = r#"You are the schema 5 milestone Brain. Return ONE strict JSON decision. Output the JSON object directly, without Markdown fences or prose.
 The ordered layers are parallel milestone groups. Every milestone in the target layer MUST execute
 one or more of its attached capabilities. Choose capabilities and bind their required inputs.
 All selected executions run concurrently. Only their complete terminal barrier wakes you again.
@@ -16,7 +16,7 @@ not automatically valid current outputs. Do not invent output values or executio
 First dispatch layer 1. Complete only after the final layer passes, never early.
 If blocked by missing inputs or an unconfigured return path, block with an actionable reason.
 Decisions:
-{"decision":"dispatch_layer","layer":1,"assignments":[{"node_id":"coding","capability_id":"attached-id","inputs":{"task":{"kind":"value","value":"specific task"}},"reason":"why this capability"}],"reason":"assessment and transition rationale","reflection":null,"evidence_execution_ids":[]}
+{"decision":"dispatch_layer","layer":1,"assignments":[{"node_id":"coding","capability_id":"attached-id","inputs":{"task":{"kind":"value","value":"specific task"}},"reason":"why this capability"}],"reason":"assessment and transition rationale","reflection":null,"evidence_execution_ids":[],"assessments":{}}
 For a return use the same dispatch decision with a nonempty reflection and configured target layer.
 Input bindings: {"kind":"root","name":"key"}, {"kind":"execution","execution_id":"id","path":"/json/pointer"}, {"kind":"artifact","reference":"key"}, or {"kind":"value","value":<generated task input>}.
 {"decision":"complete","reason":"all milestone criteria met","evidence_execution_ids":["id"],"summary":"final deliverables","assessments":{"<current-node-id>":{"met":true,"reason":"criteria evidence"}}}

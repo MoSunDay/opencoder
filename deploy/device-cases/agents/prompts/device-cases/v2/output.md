@@ -1,0 +1,1 @@
+Return one JSON object. Allocate returns exactly the private client output. Execute returns case_results in assigned order and preserves all product failures and recovery failures. Include evidence paths, never credentials.

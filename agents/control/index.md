@@ -1,4 +1,4 @@
-Commit: 1afd5d4375cd10885aee335d3d9dbf9d396bb563
+Commit: c60e2162be48102badf53d8b97e7cfa030b59605
 
 # control 模块
 
@@ -15,7 +15,7 @@ Commit: 1afd5d4375cd10885aee335d3d9dbf9d396bb563
 - `src/api/brain_runs/` — 仅 v4 计划与运行；`plan_capabilities.rs` 注册保存计划版本能力，`v4/` 负责准入、派发、读取和事件确认。
 - `src/transport/layered_tests.rs` — v4 wake 的 generation 栅栏（只确认本次激活准入的那一轮）
 - `src/scheduler.rs`、`src/api/schedules/`、`src/seed_schedules.rs` — cron 调度、定义 CRUD 与遗留导入
-- `src/seed_dags.rs` — review 门禁 def seed
+- `src/seed_dags.rs` — 仅初始化 `review-harness-quick`；按名已存在则跳过，保留操作者定义
 - `tests/e2e/` — 集成测试（含 v4 `layered_api` 家族：锁定读面、命令门禁、嵌套准入）
 
 ## 接缝

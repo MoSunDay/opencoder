@@ -27,6 +27,7 @@ wasmtime-wasi = { version = "48", default-features = false, features = ["p1"] }
 libc = "0.2"
 sha2 = "0.10"
 dirs.workspace = true
+reqwest.workspace = true
 
 [dev-dependencies]
 wasmtime = { version = "48", default-features = false, features = ["cache"] }

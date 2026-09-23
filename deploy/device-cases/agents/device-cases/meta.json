@@ -1,0 +1,11 @@
+{
+  "name": "device-cases",
+  "harness": "codex",
+  "harness_profile": "device-cases",
+  "current": {
+    "prompt": "device-cases",
+    "skills": null,
+    "tools": null,
+    "memory": null
+  }
+}

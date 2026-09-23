@@ -157,3 +157,33 @@ async fn submit_resolves_catalog_targets_on_the_generic_route() {
     assert_eq!(status, 200, "{body}");
     assert_eq!(body["executions"], json!([]), "{body}");
 }
+
+#[tokio::test]
+async fn device_workflow_freezes_capacity_and_rejects_caller_definition() {
+    let h = Harness::new().await;
+    let (status, body) = submit(
+        &h,
+        json!({"id":"dag-device-fixture","kind":"dag","target":"device-cases",
+        "input":{"device_count":2,"case_ids":["a","b","c"],"case_source":"/frozen/cases.json"}}),
+    )
+    .await;
+    assert_eq!(status, 202, "{body}");
+    let spec = h.node.pinned_definition("dag-device-fixture").unwrap();
+    let spec = spec.get("spec").unwrap_or(&spec);
+    assert_eq!(spec["max_concurrency"], 2);
+    assert_eq!(spec["steps"].as_array().unwrap().len(), 2);
+    assert_eq!(spec["steps"][1]["kind"]["failure_policy"], "collect_all");
+    assert_eq!(spec["steps"][0]["kind"]["agent"], "device-cases");
+    for (index, input) in [
+        json!({"device_count":1,"case_ids":["a"],"definition":{}}),
+        json!({"device_count":19,"case_ids":["a"]}),
+        json!({"device_count":1,"case_ids":["a"],"prompt":"override"}),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let (status, _) = submit(&h,json!({"id":format!("dag-device-reject-{index}"),"kind":"dag","target":"device-cases","input":input})).await;
+        assert_eq!(status, 400);
+    }
+    assert_eq!(h.node.journal_ids(), vec!["dag-device-fixture"]);
+}

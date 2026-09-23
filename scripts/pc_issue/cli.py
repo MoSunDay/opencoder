@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 import sys
 from client import Client
-from contracts import build_request, device_request, identity
+from contracts import build_request, device_request, identity, inspection
 from evidence import evidence, freeze_source, verify_source
 
 
@@ -50,7 +50,7 @@ def run(args):
                 'nodes': client.call('GET', '/api/nodes'),
                 'teams': client.call('GET', '/api/teams'), 'devices': devices}
     if args.command == 'inspect':
-        return client.call('GET', '/api/executions/' + args.execution_id)
+        return inspection(client.call('GET', '/api/executions/' + args.execution_id))
     if args.command == 'cancel':
         return client.call('POST', '/api/executions/' + args.execution_id + '/commands', {'action': 'cancel'})
     if args.command == 'device':

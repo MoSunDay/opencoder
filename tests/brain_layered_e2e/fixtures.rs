@@ -1,6 +1,5 @@
-//! Shared layered-canvas fixtures: the two-layer plan, the content-keyed
-//! decision responder, the live v3 run the cross-version rule reads, and the
-//! read/dispatch helpers every scenario drives.
+//! Shared milestone fixtures: the two-layer plan, the content-keyed decision
+//! responder, and the read/dispatch helpers every scenario drives.
 
 use crate::support::fleet_proc::{Fleet, TOKEN};
 use crate::support::http_util::wait_until;
@@ -11,41 +10,39 @@ use std::process::Command;
 
 /// Fixed id for rejected admission scenarios; live runs use isolated ids.
 pub const RUN: &str = "brain-layered-e2e";
-/// Run id of the v3 run the cross-version rule reads.
 /// What each leaf child answers; the canvas never inspects a child body.
 pub const CHILD_TEXT: &str = "e2e-layered-node-result";
 /// The closing summary the canvas folds into the run.
 pub const SUMMARY: &str = "e2e-layered-canvas-complete";
 
-/// A two-layer canvas: `scan` feeds `apply` through one edge, so the run
-/// exercises the layer barrier and the closing activation, not only admission.
-/// Same shape as the control-plane fixture, up to the retry overrides.
+/// A two-layer canvas: `scan` then `apply` exercise the layer barrier and
+/// completion, without a configured transition edge.
 pub fn plan() -> Value {
     json!({
-        "schema_version": 4,
+        "schema_version": 6,
         "title": "layered canvas",
         "objective": "prove the layered canvas through the control plane",
         "nodes": [
-            {"node_id":"scan","title":"Scan","capability_id":"builtin-agent-act",
-             "retry":{"max_attempts":2}},
-            {"node_id":"apply","title":"Apply","capability_id":"builtin-agent-act",
-             "retry":{"max_attempts":3}}
+            {"node_id":"scan","title":"Scan","layer":1,"objective":"scan the input",
+             "success_criteria":"scan result is complete","capability_ids":["builtin-agent-act"]},
+            {"node_id":"apply","title":"Apply","layer":2,"objective":"apply the result",
+             "success_criteria":"apply result is complete","capability_ids":["builtin-agent-act"]}
         ],
-        "edges": [{"from":"scan","to":"apply"}],
+        "edges": [],
         "max_rounds": 8
     })
 }
 
 /// The inline-plan submission; `depth`/`parent` stay absent at depth 0.
 pub fn request(id: &str) -> Value {
-    json!({"id":id,"schema_version":4,"plan":plan(),"inputs":{}})
+    json!({"id":id,"schema_version":6,"plan":plan(),"inputs":{}})
 }
 
 /// Admit one layered root and assert the frozen receipt shape.
 pub fn create(fleet: &Fleet, id: &str) -> Value {
     let (status, body) = fleet.http("POST", "/api/brain/runs", &request(id));
     assert_eq!(status, 202, "create layered run: {body}");
-    assert_eq!(body["schema_version"], json!(4), "receipt: {body}");
+    assert_eq!(body["schema_version"], json!(6), "receipt: {body}");
     assert_eq!(body["run_id"], json!(id), "receipt: {body}");
     assert!(body["execution"].is_object(), "receipt: {body}");
     body
@@ -111,11 +108,8 @@ pub fn operation<'a>(view: &'a Value, node_id: &str) -> Option<&'a Value> {
         .find(|op| op["node_id"] == json!(node_id))
 }
 
-/// One request-aware responder for the whole canvas. A layered activation
-/// carries the one-layer context as its last user message, the closing
-/// activation carries `"closing": true`, and every leaf turn carries prose.
-/// Nodes and layer come from the context, so the answer cannot drift from the
-/// layer being decided.
+/// One request-aware responder for the whole canvas. Each Brain activation
+/// receives the frozen plan and current layer as JSON; leaf turns carry prose.
 pub fn responder() -> Script {
     Script::dynamic(|body| {
         let last = body["messages"]
@@ -124,29 +118,34 @@ pub fn responder() -> Script {
             .and_then(|message| message["content"].as_str())
             .unwrap_or_default();
         let context: Value = serde_json::from_str(last).unwrap_or(Value::Null);
-        if context["closing"] == json!(true) {
+        let layer = context["run"]["layer"].as_u64().unwrap_or(0);
+        if layer == 2 {
             return json!({
                 "decision":"complete",
                 "reason":"e2e closing decision after every layer",
                 "evidence_execution_ids":[],
                 "summary":SUMMARY,
+                "assessments":{"apply":{"met":true,"reason":"apply execution completed"}},
             })
             .to_string();
         }
-        if let Some(nodes) = context["nodes"].as_array() {
+        if let Some(nodes) = context["plan"]["nodes"].as_array() {
+            let target = layer + 1;
             let assignments: Vec<Value> = nodes
                 .iter()
+                .filter(|node| node["layer"] == json!(target))
                 .map(|node| {
-                    json!({"node_id":node["node_id"],"inputs":{},
+                    json!({"node_id":node["node_id"],"capability_id":"builtin-agent-act","inputs":{},
                         "reason":"e2e layered dispatch"})
                 })
                 .collect();
             return json!({
                 "decision":"dispatch_layer",
-                "layer":context["layer"],
+                "layer":target,
                 "assignments":assignments,
                 "reason":"e2e layered dispatch",
                 "evidence_execution_ids":[],
+                "assessments":if layer == 0 { json!({}) } else { json!({"scan":{"met":true,"reason":"scan execution completed"}}) },
             })
             .to_string();
         }

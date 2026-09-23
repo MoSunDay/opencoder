@@ -176,8 +176,14 @@ pub(super) fn dispatch_wasm(
     fleet.wait_terminal(run)
 }
 
-/// Dispatch a def by NAME (the seeded specs) and wait for the terminal doc.
-pub(super) fn dispatch_seeded(fleet: &Fleet, def: &str, run: &str) -> Value {
+/// Save a test-local definition without changing the production seed catalog.
+pub(super) fn save_def(fleet: &Fleet, spec: Value) {
+    let (status, body) = fleet.http("POST", "/api/dag/defs", &json!({"spec":spec}));
+    assert_eq!(status, 200, "save review def: {body}");
+}
+
+/// Dispatch a saved def by name and wait for its terminal document.
+pub(super) fn dispatch_def(fleet: &Fleet, def: &str, run: &str) -> Value {
     let (status, body) = fleet.http(
         "POST",
         &format!("/api/dag/defs/{def}/dispatch"),

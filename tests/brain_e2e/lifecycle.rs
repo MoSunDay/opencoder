@@ -1,5 +1,5 @@
 //! Process-level migration contract for the brain control surface. Historical
-//! v2 writes are rejected; v4 is the only public scheduler admission path.
+//! v2 writes are rejected; v6 is the only public scheduler admission path.
 
 use crate::support::fleet_proc::Fleet;
 use crate::support::llm_stub::LlmStub;
@@ -21,7 +21,7 @@ fn raw_brain_submissions_are_rejected_in_favor_of_layered_runs() {
     assert!(body["error"]
         .as_str()
         .unwrap_or_default()
-        .contains("schema_version: 4"));
+        .contains("schema_version: 6"));
     assert_eq!(stub.request_count(), 0, "no model traffic");
 }
 
@@ -42,7 +42,7 @@ fn old_run_writes_require_explicit_layered_schema() {
         assert!(body["error"]
             .as_str()
             .unwrap_or_default()
-            .contains("schema_version: 4"));
+            .contains("schema_version: 6"));
     }
     assert_eq!(stub.request_count(), 0, "migration rejection must not plan");
 }

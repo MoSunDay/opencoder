@@ -34,38 +34,44 @@ async function prepare() {
     objective: instruction, todos: [{ id: 'echo', title: 'Verify acceptance marker',
       requirement_background: 'Layered capability integration acceptance', instructions: `${instruction} Put the marker in candidate.result.`,
       max_attempts: 1, acceptance: { criteria: `The result contains ${marker}.` } }] } });
-  const node = (id, capability) => ({ node_id: id, title: `${id}: return ${marker} exactly; no tools, files or network.`, capability_id: capability, retry: { max_attempts: 2 } });
-  const plan = (title, nodes, edges = []) => ({ schema_version: 4, title, objective: instruction, inputs: { request: marker }, nodes, edges, max_rounds: 8 });
+  const node = (id, capability, layer = 1) => ({ node_id: id, layer, objective: instruction, success_criteria: `The output includes ${marker}.`, title: `${id}: return ${marker} exactly; no tools, files or network.`, capability_ids: [capability] });
+  const plan = (title, nodes, edges = []) => ({ schema_version: 5, title, objective: instruction, inputs: { request: marker }, nodes, edges, max_rounds: 5 });
   const child = `${tag}-child`;
   await api('POST', '/api/brain/plan-defs', { id: child, version: 1, created_at: Date.now(),
     changelog: 'Fixed child version acceptance', plan: plan('Acceptance child', [node('child', 'builtin-agent-act')]) });
-  const nodes = [node('agent', 'builtin-agent-act'), node('dag', `dag-${tag}`), node('team', `team-${tag}`),
-    node('operator', 'builtin-operator'), node('todos', `todos-${tag}-v1`), node('nested', `plan-${child}@1`)];
-  const edges = ['team', 'operator', 'todos'].flatMap((to) => ['agent', 'dag'].map((from) => ({ from, to })));
-  edges.push(...['team', 'operator', 'todos'].map((from) => ({ from, to: 'nested' })));
-  const rootPlan = plan('Six capability layer acceptance', nodes, edges);
+  const nodes = [node('agent', 'builtin-agent-act'), node('dag', `dag-${tag}`), node('team', `team-${tag}`, 2),
+    node('operator', 'builtin-operator', 2), node('todos', `todos-${tag}-v1`, 2), node('nested', `plan-${child}@1`, 3)];
+  const edges = [{ from: 'nested', to: 'agent', condition: 'First-round observation requires one deliberate rework pass' }];
+  nodes.at(-1).success_criteria = `The child output includes ${marker} AND this ROOT run is in round 2. In round 1 assess this milestone as not met and reflect back to layer 1.`;
+  const rootPlan = plan('Six capability milestone reflection acceptance', nodes, edges);
+  rootPlan.objective += ' Exercise exactly two rounds: dispatch every layer in round 1, then reflect from nested to agent (layer 1), re-execute all layers in round 2, then complete. Every dispatch binds the acceptance marker; final summary must include it. No external actions.';
   const planId = `plan-${tag}`;
   await api('POST', '/api/brain/plan-defs', { id: planId, version: 1, created_at: Date.now(),
     changelog: 'Layer dispatch history and six detail components', plan: rootPlan });
   const ready = await api('GET', '/api/nodes');
   const host = ready.nodes.find((node) => node.online && node.snapshot?.generation?.startsWith('host-'));
   assert(host, 'online Host node required');
-  const request = { id: `brain-${tag}`, node_id: host.id, schema_version: 4, plan: { id: planId, version: 1 }, inputs: { request: marker } };
+  const request = { id: `brain-${tag}`, node_id: host.id, schema_version: 5, plan: { id: planId, version: 1 }, inputs: { request: marker } };
   save('request', request); save('scenario', { marker, rootPlan });
   assert.equal((await api('POST', '/api/brain/runs', request)).run_id, request.id);
   return request.id;
 }
 function checkBarrier(view) {
-  const events = view.events;
-  for (let layer = 2; layer <= view.layers.length; layer++) {
-    const started = events.find((event) => event.layer === layer && event.event_type === 'layer_started');
-    const barrier = events.find((event) => event.layer === layer - 1 && event.event_type === 'layer_barrier_reached');
-    assert(barrier && started && barrier.seq < started.seq, 'next layer crossed an incomplete barrier');
-    for (const node of view.layers[layer - 2]) {
-      assert(events.some((event) => event.node_id === node && event.event_type === 'operation_terminal'
-        && event.decision_summary === 'done' && event.seq < barrier.seq), `missing successful terminal before barrier: ${node}`);
+  const visits = view.events.filter((event) => event.event_type === 'layer_started');
+  assert.equal(view.run.round, 2);
+  assert.equal(visits.length, 6);
+  assert.equal(new Set(view.operations.map((op) => op.execution_id)).size, view.operations.length);
+  assert.equal(view.operations.length, 12);
+  for (let i = 1; i < visits.length; i++) {
+    const previous = visits[i - 1]; const started = visits[i];
+    const barrier = view.events.find((event) => event.activation === previous.activation && event.event_type === 'layer_barrier_reached');
+    assert(barrier && barrier.seq < started.seq, 'next visit crossed an incomplete barrier');
+    for (const op of view.operations.filter((op) => op.activation === previous.activation)) {
+      assert(view.events.some((event) => event.execution_id === op.execution_id && event.event_type === 'operation_terminal'
+        && event.seq < barrier.seq), `missing terminal before barrier: ${op.execution_id}`);
     }
   }
+  assert(visits[3].reflection && visits[3].decision_summary === 'reflect_and_return');
 }
 async function main() {
   assertRelease();
@@ -73,7 +79,7 @@ async function main() {
   let view; const deadline = Date.now() + 1200000; const states = [];
   while (Date.now() < deadline) {
     view = await api('GET', `/api/brain/runs/${id}/layered`); save('view', view);
-    const state = { phase: view.run.phase, layer: view.run.layer, operations: view.operations.map((op) => [op.node_id, op.attempt, op.status]) };
+    const state = { phase: view.run.phase, round: view.run.round, layer: view.run.layer, operations: view.operations.map((op) => [op.node_id, op.attempt, op.status]) };
     if (JSON.stringify(state) !== JSON.stringify(states.at(-1)?.state)) {
       states.push({ at: Date.now(), state }); save('states', states); console.log(JSON.stringify(state));
     }
@@ -81,14 +87,14 @@ async function main() {
     await sleep(2000);
   }
   assert.equal(view.run.phase, 'completed', view.run.error || 'acceptance did not complete');
-  const operations = view.plan.nodes.map((node) => view.operations.filter((op) => op.node_id === node.node_id).sort((a, b) => b.attempt - a.attempt)[0]);
+  const operations = view.plan.nodes.map((node) => view.operations.filter((op) => op.node_id === node.node_id).sort((a, b) => b.activation - a.activation)[0]);
   assert.deepEqual(operations.map((op) => op.execution_kind).sort(), ['agent', 'brain', 'dag', 'operator', 'team', 'todos']);
   assert(operations.every((op) => op.status === 'done')); checkBarrier(view);
-  for (let layer = 1; layer <= view.layers.length; layer++) {
-    const detail = await api('GET', `/api/brain/runs/${id}/layered/rounds/${layer}`); save(`round-${layer}`, detail);
-    const event = view.events.find((row) => row.layer === layer && row.event_type === 'layer_started');
-    assert.equal(detail.decision, 'dispatch_layer'); assert.equal(detail.reason, event.reason_summary);
-    assert.deepEqual(detail.evidence_execution_ids, event.evidence_execution_ids);
+  for (const event of view.events.filter((row) => row.event_type === 'layer_started')) {
+    const detail = await api('GET', `/api/brain/runs/${id}/layered/rounds/${event.layer}?activation=${event.activation}`);
+    save(`visit-${event.activation}`, detail);
+    assert.deepEqual(detail.visit, event);
+    assert.equal(detail.nodes.flatMap((node) => node.operations).length, event.assignments.length);
   }
   const marker = view.plan.inputs.request;
   for (const op of operations) {

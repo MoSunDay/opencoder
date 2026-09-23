@@ -43,9 +43,31 @@ async fn project(state: &Arc<AppState>, id: &str) -> Result<Value, RpcReply> {
     let events = read::events(state, id, snapshot.run.last_event_seq).await?;
     let mut run = serde_json::to_value(&snapshot.run).map_err(read::internal)?;
     run["total_layers"] = json!(layers.len());
+    let mut problem_results = vec![];
+    if opencoder_core::brain::pc_issue::is_plan(&request.plan) {
+        for stage in opencoder_core::brain::pc_issue::STAGES {
+            if let Some(op) = snapshot
+                .operations
+                .iter()
+                .filter(|op| op.node_id == stage && op.status.successful())
+                .max_by_key(|op| op.activation)
+            {
+                let index = state
+                    .fleet
+                    .index(&op.execution_id)
+                    .await
+                    .map_err(read::internal)?
+                    .ok_or_else(|| read::internal("PC evidence execution missing"))?;
+                let result = read::output(state, &index, "")
+                    .await
+                    .map_err(read::internal)?;
+                problem_results.push(json!({"stage":stage,"execution_id":op.execution_id,"round":op.round,"result":result}));
+            }
+        }
+    }
     Ok(
         json!({"schema_version":request.schema_version,"run":run,"plan":request.plan,
-        "layers":layers,"operations":snapshot.operations,"events":events,"capabilities":capabilities}),
+        "layers":layers,"operations":snapshot.operations,"events":events,"capabilities":capabilities,"problem":request.inputs.get("problem"),"problem_results":problem_results}),
     )
 }
 

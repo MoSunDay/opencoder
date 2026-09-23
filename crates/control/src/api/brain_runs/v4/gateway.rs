@@ -38,6 +38,7 @@ pub async fn dispatch(
     }
     let plan: LayeredPlan = serde_json::from_value(request["plan"].clone())?;
     let step = plan.node(&op.node_id).context("dispatch step missing")?;
+    let pc_stage = opencoder_core::brain::pc_issue::stage(&cap.capability_id);
     if cap.kind == ExecutionKind::Brain {
         let mut child_inputs = cap.definition["plan"]["inputs"]
             .as_object()
@@ -52,7 +53,7 @@ pub async fn dispatch(
             "parent":{"run_id":run.run_id,"operation_id":op.operation_id,"node_id":op.node_id,"layer":op.layer}
         })).await);
     }
-    let prompt = format!(
+    let mut prompt = format!(
         "You are executing one bounded capability task of one layer of the layered Brain canvas.\n\
          Capability: {} ({:?}), target: {}.\n\
          Input contract: {}\nOutput contract: {}\n\
@@ -76,7 +77,85 @@ pub async fn dispatch(
         run.reflection.as_deref().unwrap_or("Initial progression"),
         serde_json::to_string(&bound_inputs)?
     );
+    if let Some(stage) = pc_stage {
+        // Root problem/settings are authoritative, never model-rewritten bindings.
+        bound_inputs.insert("problem".into(), request["inputs"]["problem"].clone());
+        bound_inputs.insert("settings".into(), request["inputs"]["settings"].clone());
+        let snapshot = super::read::snapshot(state, &run.run_id)
+            .await
+            .map_err(|reply| anyhow::anyhow!("PC issue history unavailable: {}", reply.body))?;
+        let stage_index = opencoder_core::brain::pc_issue::STAGES
+            .iter()
+            .position(|s| *s == stage)
+            .unwrap();
+        let mut history = serde_json::Map::new();
+        for prior in &opencoder_core::brain::pc_issue::STAGES[..stage_index] {
+            let operation = snapshot
+                .operations
+                .iter()
+                .filter(|item| item.node_id == *prior && item.status.successful())
+                .max_by_key(|item| item.activation)
+                .context("PC issue predecessor has no successful execution")?;
+            let index = state
+                .fleet
+                .index(&operation.execution_id)
+                .await?
+                .context("PC issue predecessor index missing")?;
+            let mut output = super::read::output(state, &index, "").await?;
+            opencoder_core::brain::pc_issue::validate_output(prior, &output)?;
+            if let Some(object) = output.as_object_mut() {
+                object.remove("history");
+            }
+            history.insert(prior.to_string(), output);
+        }
+        if stage_index > 0 {
+            bound_inputs.insert(
+                "previous".into(),
+                history[opencoder_core::brain::pc_issue::STAGES[stage_index - 1]].clone(),
+            );
+        }
+        bound_inputs.insert("history".into(), json!(history));
+        bound_inputs.insert("round".into(), json!(op.round));
+        bound_inputs.insert("parent_execution_id".into(), json!(op.execution_id));
+        let instructions = match stage {
+            "impact" => include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../deploy/pc-issue/prompts/impact.md"
+            )),
+            "reproduce" => include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../deploy/pc-issue/prompts/reproduce.md"
+            )),
+            "repair" => include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../deploy/pc-issue/prompts/repair.md"
+            )),
+            "verify" => include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../deploy/pc-issue/prompts/verify.md"
+            )),
+            _ => include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../deploy/pc-issue/prompts/conclude.md"
+            )),
+        };
+        prompt.push_str(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../deploy/pc-issue/prompts/common.md"
+        )));
+        prompt.push_str(instructions);
+        prompt.push_str(&format!(
+            "\nRoot run ID: {}\nAuthoritative stage inputs: {}",
+            run.run_id,
+            serde_json::to_string(&bound_inputs)?
+        ));
+    }
     let mut input = json!({"schema_version":5,"brain_layered":{"run_id":run.run_id,"operation_id":op.operation_id,"layer":op.layer,"round":op.round,"activation":op.activation,"node_id":op.node_id,"attempt":op.attempt,"capability":super::view::capability_metadata(cap)},"bindings":bindings,"layered_inputs":bound_inputs,"prompt":prompt,"definition":cap.definition});
+    if let Some(stage) = pc_stage {
+        input["pc_issue_stage"] = json!(stage);
+        input["images"] =
+            json!(super::super::attachments::images(state, &request["inputs"]["problem"]).await?);
+    }
     if op.execution_kind == ExecutionKind::Todos {
         input["spec"] = cap.definition.clone();
     }
@@ -87,7 +166,7 @@ pub async fn dispatch(
             kind: op.execution_kind,
             target: Some(cap.target.clone()),
             input,
-            node_id: None,
+            node_id: pc_stage.map(|_| root.index.node_id.clone()),
         },
     )
     .await)

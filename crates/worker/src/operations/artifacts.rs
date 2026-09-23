@@ -1,5 +1,5 @@
 use crate::Worker;
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use base64::Engine;
 use opencoder_core::fleet::*;
 use serde_json::Value;
@@ -36,6 +36,56 @@ pub(super) async fn read(worker: &Worker, id: &str, input: Value) -> Result<RpcR
 pub(super) async fn read_request(worker: &Worker, request: ArtifactRequest) -> Result<RpcReply> {
     if let Some(reply) = super::validate_reference(worker, &request.execution).await? {
         return Ok(reply);
+    }
+    if request.step == "pc-evidence" {
+        let journal = worker.inner.journal.lock().await;
+        let record = journal
+            .records
+            .get(&request.execution.id)
+            .context("execution missing")?;
+        if request.execution.kind != ExecutionKind::Operator
+            || record.assignment.request.input["pc_issue_stage"]
+                .as_str()
+                .is_none()
+        {
+            return Ok(RpcReply::error(404, "PC evidence not found"));
+        }
+        let artifact = record.result["scheduler_artifacts"]
+            .as_array()
+            .and_then(|items| {
+                items
+                    .iter()
+                    .find(|a| a["step"] == "pc-evidence" && a["file"] == request.file)
+            })
+            .cloned();
+        drop(journal);
+        let Some(artifact) = artifact else {
+            return Ok(RpcReply::error(404, "PC evidence not declared"));
+        };
+        let path = worker
+            .inner
+            .layout
+            .execution_dir(request.execution.kind, &request.execution.id)?
+            .join("pc-evidence")
+            .join(&request.file);
+        anyhow::ensure!(!path.is_symlink(), "PC evidence cannot be a symlink");
+        return read_chunk(
+            &path,
+            &request.step,
+            &request.file,
+            request.offset,
+            request.version.as_deref(),
+            Some(&(
+                artifact["bytes"]
+                    .as_u64()
+                    .context("artifact size missing")?,
+                artifact["sha256"]
+                    .as_str()
+                    .context("artifact hash missing")?
+                    .to_owned(),
+            )),
+        )
+        .await;
     }
     if request.step == "brain-result" && request.file == "output.json" {
         let managed = worker

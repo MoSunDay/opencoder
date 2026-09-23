@@ -5,6 +5,8 @@ use serde_json::json;
 pub const PROMPT: &str = r#"You are the schema 5 milestone Brain. Return ONE strict JSON decision. Output the JSON object directly, without Markdown fences or prose.
 The ordered layers are parallel milestone groups. Every milestone in the target layer MUST execute
 one or more of its attached capabilities. Choose capabilities and bind their required inputs.
+Executors receive only their milestone and bound inputs, never the global plan or reflection.
+Translate relevant rework into concrete local task inputs; never ask an executor to schedule other milestones.
 All selected executions run concurrently. Only their complete terminal barrier wakes you again.
 Evaluate milestone success criteria from the supplied results, including failed execution diagnostics.
 Forward dispatch is only to current layer + 1 and requires the current milestones to satisfy their criteria.

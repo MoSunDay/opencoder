@@ -1,7 +1,6 @@
-//! Process-level e2e for the three built-in review release-gate DAGs
-//! (`review-full-acceptance`, `review-harness-quick`, `review-code-quick`):
-//! startup seeding, host imports (`opencoder` module: run_op/http_probe),
-//! fail-closed `dag.ops`, seeded dispatch chains and the five-field
+//! Process-level e2e for the retained built-in review harness DAG and two
+//! test-local review chains: startup seeding, host imports (`opencoder`
+//! module: run_op/http_probe), fail-closed `dag.ops`, dispatch and five-field
 //! execution index.
 
 mod helpers;
@@ -10,16 +9,35 @@ use crate::fixtures::publish;
 use crate::support::fleet_proc::Fleet;
 use crate::support::llm_stub::{LlmStub, Script};
 use helpers::{
-    dispatch_seeded, dispatch_wasm, op_log, op_step_wat, probe_server, script, step_json,
+    dispatch_def, dispatch_wasm, op_log, op_step_wat, probe_server, save_def, script, step_json,
 };
 use serde_json::json;
 
-const SEED_FULL: &str = "review-full-acceptance";
+const DEF_FULL: &str = "review-full-acceptance";
 const SEED_HARNESS: &str = "review-harness-quick";
-const SEED_CODE: &str = "review-code-quick";
+const DEF_CODE: &str = "review-code-quick";
+
+fn code_spec() -> serde_json::Value {
+    json!({"name":DEF_CODE,"max_concurrency":4,"steps":[
+        {"name":"review-triage","kind":{"type":"agent","prompt":"定位评审范围"}},
+        {"name":"review-risks","depends_on":["review-triage"],"kind":{"type":"agent","prompt":"识别风险点"}},
+        {"name":"review-api-impact","depends_on":["review-triage"],"kind":{"type":"agent","prompt":"列出 API 影响面"}},
+        {"name":"review-client","depends_on":["review-api-impact"],"kind":{"type":"agent","prompt":"检查客户端"}},
+        {"name":"review-verdict","depends_on":["review-risks","review-client"],"kind":{"type":"agent","prompt":"给出评审结论"}},
+        {"name":"review-report","depends_on":["review-verdict"],"kind":{"type":"agent","prompt":"输出 Markdown 评审报告"}}
+    ]})
+}
+
+fn full_spec() -> serde_json::Value {
+    json!({"name":DEF_FULL,"steps":[
+        {"name":"env-eob-up","kind":{"type":"wasm","command":"env_eob_up.wasm"}},
+        {"name":"env-baremetal-up","depends_on":["env-eob-up"],"kind":{"type":"wasm","command":"env_baremetal_up.wasm"}},
+        {"name":"harness-full","depends_on":["env-baremetal-up"],"kind":{"type":"wasm","command":"harness_runner.wasm full"}}
+    ]})
+}
 
 // ---------------------------------------------------------------------------
-// R1 — the three review defs are seeded at startup, visible, idempotent
+// R1 — the retained quick harness is seeded; test-local chains are not
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -36,18 +54,12 @@ fn r1_review_defs_are_seeded_and_visible() {
             .find(|d| d["name"] == name)
             .unwrap_or_else(|| panic!("{name} missing: {defs:?}"))
     };
-    for name in [SEED_FULL, SEED_HARNESS, SEED_CODE] {
-        assert_eq!(
-            by_name(name)["id"],
-            name,
-            "seeded ids must be name-keyed: {defs:?}"
-        );
-    }
-    let full = by_name(SEED_FULL)["spec"]["steps"].as_array().unwrap();
-    assert_eq!(full.len(), 3);
-    assert_eq!(full[0]["name"], "env-eob-up");
-    assert_eq!(full[1]["depends_on"][0], "env-eob-up");
-    assert_eq!(full[2]["name"], "harness-full");
+    assert_eq!(
+        defs.len(),
+        1,
+        "only the supported harness is seeded: {defs:?}"
+    );
+    assert_eq!(by_name(SEED_HARNESS)["id"], SEED_HARNESS);
     assert_eq!(
         by_name(SEED_HARNESS)["spec"]["steps"]
             .as_array()
@@ -55,18 +67,6 @@ fn r1_review_defs_are_seeded_and_visible() {
             .len(),
         1
     );
-    let code = by_name(SEED_CODE)["spec"]["steps"].as_array().unwrap();
-    assert_eq!(code.len(), 6);
-    // Topology: risks and the client branch both grow from triage; the
-    // verdict joins them; the report closes the chain.
-    assert_eq!(code[1]["depends_on"][0], "review-triage");
-    assert_eq!(code[2]["name"], "review-api-impact");
-    assert_eq!(code[2]["depends_on"][0], "review-triage");
-    assert_eq!(code[3]["name"], "review-client");
-    assert_eq!(code[3]["depends_on"][0], "review-api-impact");
-    let verdict_deps = code[4]["depends_on"].as_array().unwrap();
-    assert!(verdict_deps.contains(&json!("review-risks")));
-    assert!(verdict_deps.contains(&json!("review-client")));
 }
 
 // ---------------------------------------------------------------------------
@@ -194,7 +194,7 @@ fn r3_harness_quick_chain_runs_the_seeded_def() {
     );
     publish(&fleet, "harness_runner", &wat);
 
-    let doc = dispatch_seeded(&fleet, SEED_HARNESS, "dag-r3-run-1");
+    let doc = dispatch_def(&fleet, SEED_HARNESS, "dag-r3-run-1");
     assert_eq!(doc["execution"]["status"], "done", "{doc:?}");
     let out = step_json(&fleet, "dag-r3-run-1", "harness-quick");
     assert_eq!(out["status"], "passed", "{out:?}");
@@ -210,7 +210,7 @@ fn r3_harness_quick_chain_runs_the_seeded_def() {
 }
 
 // ---------------------------------------------------------------------------
-// R4 — code-quick: the four seeded agent steps, content-keyed stub,
+// R4 — code-quick: six test-local agent steps, content-keyed stub,
 // structured outputs and upstream-context passing
 // ---------------------------------------------------------------------------
 
@@ -245,7 +245,19 @@ fn r4_code_quick_agent_chain_passes_context_downstream() {
     let tmp = tempfile::tempdir().unwrap();
     let fleet = Fleet::spawn(tmp.path(), stub.port(), "r4-code-node");
 
-    let doc = dispatch_seeded(&fleet, SEED_CODE, "dag-r4-run-1");
+    let spec = code_spec();
+    let steps = spec["steps"].as_array().unwrap();
+    assert_eq!(steps.len(), 6);
+    assert_eq!(steps[1]["depends_on"], json!(["review-triage"]));
+    assert_eq!(steps[2]["depends_on"], json!(["review-triage"]));
+    assert_eq!(steps[3]["depends_on"], json!(["review-api-impact"]));
+    assert_eq!(
+        steps[4]["depends_on"],
+        json!(["review-risks", "review-client"])
+    );
+    save_def(&fleet, spec);
+
+    let doc = dispatch_def(&fleet, DEF_CODE, "dag-r4-run-1");
     assert_eq!(doc["execution"]["status"], "done", "{doc:?}");
 
     let steps = [
@@ -317,7 +329,7 @@ fn r4_code_quick_agent_chain_passes_context_downstream() {
             "{field}: {run_doc:?}"
         );
     }
-    assert_eq!(run_doc["name"], SEED_CODE);
+    assert_eq!(run_doc["name"], DEF_CODE);
 
     // The protocol-locked five-field execution index also carries the run.
     let (_, page) = fleet.http("GET", "/api/executions?kind=dag&limit=50", &json!({}));
@@ -333,12 +345,12 @@ fn r4_code_quick_agent_chain_passes_context_downstream() {
 }
 
 // ---------------------------------------------------------------------------
-// R5 — full acceptance: publish all three modules, dispatch the seeded
+// R5 — full acceptance: publish all three modules, dispatch the test-local
 // spec verbatim, every step done with artifacts + evidence in place
 // ---------------------------------------------------------------------------
 
 #[test]
-fn r5_full_acceptance_dispatches_the_seeded_spec() {
+fn r5_full_acceptance_dispatches_the_test_local_spec() {
     let stub = LlmStub::spawn_text(&[]);
     let tmp = tempfile::tempdir().unwrap();
     let probe_port = probe_server();
@@ -409,7 +421,13 @@ fn r5_full_acceptance_dispatches_the_seeded_spec() {
         ),
     );
 
-    let doc = dispatch_seeded(&fleet, SEED_FULL, "dag-r5-run-1");
+    let spec = full_spec();
+    let steps = spec["steps"].as_array().unwrap();
+    assert_eq!(steps.len(), 3);
+    assert_eq!(steps[1]["depends_on"], json!(["env-eob-up"]));
+    assert_eq!(steps[2]["depends_on"], json!(["env-baremetal-up"]));
+    save_def(&fleet, spec);
+    let doc = dispatch_def(&fleet, DEF_FULL, "dag-r5-run-1");
     assert_eq!(doc["execution"]["status"], "done", "{doc:?}");
 
     assert_eq!(

@@ -85,7 +85,10 @@ fn layered_canvas_holds_the_barrier_then_completes_through_the_closing_activatio
     assert_eq!(first["layers"], json!([["scan"], ["apply"]]), "{first}");
     assert_eq!(first["operations"].as_array().unwrap().len(), 1, "{first}");
     let scan = operation(&first, "scan").expect("scan dispatched").clone();
-    assert_eq!(scan["operation_id"], json!(format!("{run}#l1#scan#a1")));
+    assert_eq!(
+        scan["operation_id"],
+        json!(format!("{run}#l1#scan#visit1#builtin-agent-act#a1"))
+    );
     assert_eq!(scan["run_id"], json!(run));
     assert_eq!(scan["layer"], json!(1));
     assert_eq!(scan["node_id"], json!("scan"));
@@ -116,7 +119,10 @@ fn layered_canvas_holds_the_barrier_then_completes_through_the_closing_activatio
     let apply = operation(&second, "apply")
         .expect("apply dispatched")
         .clone();
-    assert_eq!(apply["operation_id"], json!(format!("{run}#l2#apply#a1")));
+    assert_eq!(
+        apply["operation_id"],
+        json!(format!("{run}#l2#apply#visit2#builtin-agent-act#a1"))
+    );
     assert_eq!(apply["layer"], json!(2));
     assert_eq!(apply["execution_kind"], json!("agent"));
 
@@ -143,10 +149,12 @@ fn layered_canvas_holds_the_barrier_then_completes_through_the_closing_activatio
             ("node_dispatched".into(), 1, "scan".into()),
             ("operation_terminal".into(), 1, "scan".into()),
             ("layer_barrier_reached".into(), 1, String::new()),
+            ("milestones_assessed".into(), 1, String::new()),
             ("layer_started".into(), 2, String::new()),
             ("node_dispatched".into(), 2, "apply".into()),
             ("operation_terminal".into(), 2, "apply".into()),
             ("layer_barrier_reached".into(), 2, String::new()),
+            ("milestones_assessed".into(), 2, String::new()),
             ("run_completed".into(), 2, String::new()),
         ],
         "canvas event order: {done}"
@@ -162,7 +170,9 @@ fn layered_canvas_holds_the_barrier_then_completes_through_the_closing_activatio
             .clone();
         assert_eq!(
             op["operation_id"],
-            json!(format!("{run}#l{layer}#{node_id}#a1"))
+            json!(format!(
+                "{run}#l{layer}#{node_id}#visit{layer}#builtin-agent-act#a1"
+            ))
         );
         assert_eq!(op["attempt"], json!(1), "{op}");
         assert_eq!(op["status"], json!("done"), "{op}");
@@ -183,7 +193,7 @@ fn layered_canvas_holds_the_barrier_then_completes_through_the_closing_activatio
             "child {child}: {doc}"
         );
         let input = &doc["request"]["input"];
-        assert_eq!(input["schema_version"], json!(4), "child {child}: {doc}");
+        assert_eq!(input["schema_version"], json!(6), "child {child}: {doc}");
         assert_eq!(input["brain_layered"]["run_id"], json!(run), "{doc}");
         assert_eq!(input["brain_layered"]["node_id"], json!(node_id), "{doc}");
         assert_eq!(input["brain_layered"]["layer"], json!(layer), "{doc}");
@@ -218,51 +228,63 @@ fn layered_canvas_holds_the_barrier_then_completes_through_the_closing_activatio
     assert_eq!(status, 200, "{body}");
     assert_eq!(body["layer"], json!(1), "{body}");
     assert_eq!(
-        body["phase"],
-        json!("waiting"),
-        "the frozen dispatch phase is preserved: {body}"
+        body["visit"]["decision_summary"],
+        json!("dispatch_layer"),
+        "{body}"
     );
-    assert_eq!(body["decision"], json!("dispatch_layer"), "{body}");
-    assert_eq!(body["reason"], json!("e2e layered dispatch"), "{body}");
-    assert_eq!(body["evidence_execution_ids"], json!([]), "{body}");
+    assert_eq!(
+        body["visit"]["reason_summary"],
+        json!("e2e layered dispatch"),
+        "{body}"
+    );
+    assert_eq!(body["visit"]["evidence_execution_ids"], json!([]), "{body}");
     let scan_row = row(&body, "scan");
-    assert_eq!(scan_row["status"], json!("done"), "{body}");
-    assert_eq!(scan_row["attempt"], json!(1), "{body}");
-    assert_eq!(scan_row["attempts"], json!(2), "{body}");
-    assert_eq!(scan_row["execution_id"], scan["execution_id"], "{body}");
-    assert!(scan_row.get("inputs").is_none(), "{body}");
-    assert_eq!(scan_row["cancel_requested"], json!(false), "{body}");
-    assert!(scan_row.get("summary").is_none(), "{body}");
+    assert_eq!(scan_row["operations"][0]["status"], json!("done"), "{body}");
+    assert_eq!(scan_row["operations"][0]["attempt"], json!(1), "{body}");
+    assert_eq!(
+        scan_row["operations"][0]["execution_id"], scan["execution_id"],
+        "{body}"
+    );
+    assert_eq!(scan_row["assessment"]["met"], json!(true), "{body}");
     assert!(body["nodes"].as_array().unwrap().len() == 1, "{body}");
 
     let (status, body) = round(&fleet, run, 2);
     assert_eq!(status, 200, "{body}");
     assert_eq!(
-        body["phase"],
-        json!("waiting"),
-        "closing does not replace the layer dispatch: {body}"
+        body["visit"]["decision_summary"],
+        json!("dispatch_layer"),
+        "{body}"
     );
-    assert_eq!(body["decision"], json!("dispatch_layer"), "{body}");
-    assert_eq!(body["reason"], json!("e2e layered dispatch"), "{body}");
+    assert_eq!(
+        body["visit"]["reason_summary"],
+        json!("e2e layered dispatch"),
+        "{body}"
+    );
     let apply_row = row(&body, "apply");
-    assert_eq!(apply_row["status"], json!("done"), "{body}");
-    assert_eq!(apply_row["attempt"], json!(1), "{body}");
-    assert_eq!(apply_row["attempts"], json!(3), "{body}");
-    assert_eq!(apply_row["execution_id"], apply["execution_id"], "{body}");
-    assert!(apply_row.get("summary").is_none(), "{body}");
+    assert_eq!(
+        apply_row["operations"][0]["status"],
+        json!("done"),
+        "{body}"
+    );
+    assert_eq!(apply_row["operations"][0]["attempt"], json!(1), "{body}");
+    assert_eq!(
+        apply_row["operations"][0]["execution_id"], apply["execution_id"],
+        "{body}"
+    );
+    assert_eq!(apply_row["assessment"]["met"], json!(true), "{body}");
 
     // The CLI face of the finished canvas is the same projection.
     let cli = cli_json(&fleet, &["brain", "runs", "layered", run]);
     assert_eq!(cli["run"]["phase"], json!("completed"), "{cli}");
     assert_eq!(cli["run"]["summary"], json!(SUMMARY), "{cli}");
 
-    // Every model call is accounted for: the activations carry the v4 contract
+    // Every model call is accounted for: the activations carry the v6 contract
     // prompt and the leaf turns carry the bounded node prompt, so the canvas
     // stays a bounded number of calls.
     let requests = stub.wait_for_requests(5);
     let activations = requests
         .iter()
-        .filter(|body| body.contains("You are an event-driven brain scheduler, schema_version 4."))
+        .filter(|body| body.contains("You are the schema 6 milestone Brain."))
         .count();
     assert!(
         activations >= 3,

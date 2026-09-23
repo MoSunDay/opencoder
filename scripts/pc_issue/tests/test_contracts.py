@@ -12,7 +12,7 @@ from evidence import freeze_source
 class Contracts(unittest.TestCase):
     def test_inspection_exposes_failure_before_large_definition(self):
         snapshot = {'definition': {'prompt': 'x' * 10000},
-                    'execution': {'status': 'error', 'error': 'allocation failed'}}
+                    'execution': {'status': 'error'}, 'error': 'allocation failed'}
         result = inspection(snapshot)
         self.assertTrue(result['terminal'])
         self.assertIn('allocation failed', json.dumps(result)[:200])

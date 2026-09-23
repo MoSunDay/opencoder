@@ -11,7 +11,7 @@ def inspection(snapshot):
         raise ValueError('Execution response has no status')
     return {'status': status,
             'terminal': status in ('done', 'error', 'cancelled', 'interrupted'),
-            'error': execution.get('error'), 'details': snapshot}
+            'error': snapshot.get('error'), 'details': snapshot}
 
 
 def identity(root, stage, round_number, kind):

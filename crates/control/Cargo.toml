@@ -26,6 +26,8 @@ chrono.workspace = true
 ulid.workspace = true
 uuid.workspace = true
 base64.workspace = true
+sha2 = "0.10"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
 dirs.workspace = true
 axum = { version = "0.7", features = ["ws"] }
 reqwest.workspace = true

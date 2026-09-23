@@ -8,6 +8,7 @@ use serde_json::{json, Value};
 
 mod commands;
 mod plans;
+mod problem;
 mod surface;
 
 pub(super) const RUN: &str = "brain-layered-e2e";

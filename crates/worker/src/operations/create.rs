@@ -361,7 +361,7 @@ fn prepare_with_config(
         bail!("node persistence unavailable: {error}");
     }
     if let Some(settings) = &assignment.runtime {
-        config.agent.runtime = settings.as_ref().clone();
+        config.agent.runtime = config.agent.runtime.with_server(settings.as_ref());
     }
     if let Some(settings) = &assignment.codex {
         settings.validate().map_err(anyhow::Error::msg)?;

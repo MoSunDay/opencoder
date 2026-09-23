@@ -84,6 +84,34 @@ pub async fn resolve(
     let mut inputs = request.plan.inputs.clone();
     inputs.extend(request.inputs);
     request.inputs = inputs;
+    opencoder_core::brain::pc_issue::validate_plan(&request.plan)?;
+    if opencoder_core::brain::pc_issue::is_plan(&request.plan) {
+        let problem = request
+            .inputs
+            .get("problem")
+            .context("problem input required")?;
+        super::super::attachments::images(state, problem).await?;
+        let settings = request
+            .inputs
+            .get("settings")
+            .context("PC issue settings required")?;
+        for key in ["workspace", "helper", "device_node", "build_node"] {
+            ensure!(
+                settings[key].as_str().is_some_and(|s| !s.trim().is_empty()),
+                "PC issue setting {key} required"
+            );
+        }
+        ensure!(
+            settings["max_repair_rounds"]
+                .as_u64()
+                .is_some_and(|n| (1..=2).contains(&n)),
+            "PC repair rounds must be 1 or 2"
+        );
+        ensure!(
+            settings["max_repair_rounds"].as_u64() == Some(u64::from(request.plan.max_rounds)),
+            "PC repair budget must match plan.max_rounds"
+        );
+    }
     opencoder_brain::layered::validate_request(&request)?;
     if let Some(parent) = &request.parent {
         let snapshot = super::read::snapshot(state, &parent.run_id)

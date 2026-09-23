@@ -4,6 +4,14 @@ import { createDraft, readDraft } from '../scheduler/draft.js';
 const capability = { id: 'agent', kind: 'agent', target: 'act', input_desc: 'task', output_desc: 'result', definition: {}, version: '1' };
 const oldPlan = { schema_version: 4, title: '交付', objective: '验证', inputs: {}, nodes: [{ node_id: 'a', title: '实现', capability_id: 'agent' }, { node_id: 'b', title: '验证', capability_id: 'agent' }], edges: [{ from: 'a', to: 'b' }] };
 describe('milestone plan versions', () => {
+  it('PC 问题入口保留文本和图片引用，拒绝空问题', () => {
+    const saved = { id: 'pc-issue', version: 1, plan: { nodes: [{ capability_ids: ['pc-issue-impact'] }] } };
+    const images = [{ id: 'image-x', sha256: 'a'.repeat(64) }];
+    const values = { node: 'node-a', problemText: ' 原始问题 ', problemImages: images, engineering: [] };
+    expect(launchBody(values, 'brain-x', saved).inputs.problem).toEqual({ text: '原始问题', images });
+    expect(() => launchBody({ ...values, problemText: ' ' }, 'brain-x', saved)).toThrow('问题描述');
+  });
+
   it('explicit conversion preserves original version and requires success criteria', () => {
     const before = JSON.stringify(oldPlan); const converted = newVersion({ id: 'p', version: 1, plan: oldPlan });
     expect(converted.version).toBe(2); expect(converted.plan.max_rounds).toBe(5); expect(converted.plan.edges).toEqual([]);

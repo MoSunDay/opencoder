@@ -26,7 +26,7 @@ async fn child(
         .await
 }
 
-pub(super) async fn snapshot(
+pub(in crate::api::brain_runs) async fn snapshot(
     state: &Arc<AppState>,
     id: &str,
 ) -> std::result::Result<LayeredSnapshot, RpcReply> {

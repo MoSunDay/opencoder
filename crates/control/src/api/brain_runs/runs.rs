@@ -23,9 +23,7 @@ pub async fn create(State(state): State<Arc<AppState>>, Json(value): Json<Value>
 }
 pub async fn require_v4(state: &AppState, id: &str) -> Result<(), RpcReply> {
     match state.fleet.assignment(id).await {
-        Ok(Some(a)) if matches!(a.request.input["schema_version"].as_u64(), Some(4 | 5 | 6)) => {
-            Ok(())
-        }
+        Ok(Some(a)) if matches!(a.request.input["schema_version"].as_u64(), Some(4..=6)) => Ok(()),
         Ok(_) => Err(RpcReply::error(409, LAYERED_MIGRATION)),
         Err(error) => Err(RpcReply::error(500, error.to_string())),
     }

@@ -227,7 +227,7 @@ async fn open(
     if assignment.request.kind != ExecutionKind::Brain
         || !matches!(
             assignment.request.input["schema_version"].as_u64(),
-            Some(4 | 5 | 6)
+            Some(4..=6)
         )
     {
         return Err(RpcReply::error(404, "layered run not found"));

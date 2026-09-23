@@ -45,7 +45,7 @@ fn historical_layers(plan: &LayeredPlan) -> Result<Vec<Vec<String>>> {
 /// Structural shape shared by every entry point: identity, edges and bounds.
 pub(crate) fn validate_shape(plan: &LayeredPlan) -> Result<()> {
     ensure!(
-        matches!(plan.schema_version, 4 | 5 | 6),
+        matches!(plan.schema_version, 4..=6),
         "unsupported plan schema"
     );
     if plan.schema_version == 6 {

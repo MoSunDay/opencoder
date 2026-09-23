@@ -28,7 +28,7 @@ fn layered_view_and_rounds_read_a_real_projection() {
     create(&fleet, run);
 
     let view = view(&fleet, run);
-    assert_eq!(view["schema_version"], json!(4));
+    assert_eq!(view["schema_version"], json!(6));
     assert_eq!(view["run"]["run_id"], json!(run));
     assert_eq!(view["run"]["layer"], json!(0), "no layer is dispatched yet");
     assert_eq!(view["run"]["total_layers"], json!(2));
@@ -58,25 +58,24 @@ fn layered_view_and_rounds_read_a_real_projection() {
         );
     }
 
-    // Layer detail is derived from the same plan: one row per layer node, with
-    // the retry budget the plan declared.
-    for (layer, node, attempts) in [(1, "scan", 2), (2, "apply", 3)] {
+    // Layer detail is derived from the same plan: one row per milestone.
+    for (layer, node) in [(1, "scan"), (2, "apply")] {
         let (status, body) = round(&fleet, run, layer);
         assert_eq!(status, 200, "{body}");
-        assert_eq!(body["schema_version"], json!(4));
+        assert_eq!(body["schema_version"], json!(6));
         assert_eq!(body["layer"], json!(layer));
-        assert!(body["phase"].is_string(), "{body}");
-        assert_eq!(body["evidence_execution_ids"], json!([]));
+        assert_eq!(body["visit"], json!(null));
+        assert_eq!(body["visits"], json!([]));
         let nodes = body["nodes"].as_array().unwrap();
         assert_eq!(nodes.len(), 1);
         assert_eq!(nodes[0]["node_id"], json!(node));
-        assert_eq!(nodes[0]["status"], json!("pending"), "{body}");
-        assert_eq!(nodes[0]["attempt"], json!(0));
-        assert_eq!(nodes[0]["attempts"], json!(attempts));
-        assert_eq!(nodes[0]["cancel_requested"], json!(false));
-        assert!(nodes[0].get("inputs").is_none());
-        assert!(nodes[0].get("summary").is_none());
-        assert!(nodes[0]["execution_id"].is_null());
+        assert_eq!(nodes[0]["milestone"]["layer"], json!(layer));
+        assert_eq!(
+            nodes[0]["milestone"]["capability_ids"],
+            json!(["builtin-agent-act"])
+        );
+        assert_eq!(nodes[0]["operations"], json!([]));
+        assert_eq!(nodes[0]["assessment"], json!(null));
     }
     for layer in [0, 3] {
         let (status, body) = round(&fleet, run, layer);
@@ -100,7 +99,7 @@ fn layered_view_and_rounds_read_a_real_projection() {
         assert_eq!(status, 404, "{body}");
     }
 
-    // The layered command surface accepts exactly pause, resume and cancel.
+    // The layered command surface also permits explicit budget increases.
     let (status, body) = fleet.http(
         "POST",
         &format!("/api/brain/runs/{run}/commands"),
@@ -111,19 +110,22 @@ fn layered_view_and_rounds_read_a_real_projection() {
         body["error"]
             .as_str()
             .unwrap_or_default()
-            .contains("supported commands: pause, resume, cancel"),
+            .contains("supported commands: pause, resume, cancel, set_round_budget"),
         "{body}"
     );
 
     // The new CLI reads map to the same route, so workbench and CLI cannot
     // drift apart.
     let cli = cli_json(&fleet, &["brain", "runs", "layered", run]);
-    assert_eq!(cli["schema_version"], json!(4));
+    assert_eq!(cli["schema_version"], json!(6));
     assert_eq!(cli["run"]["run_id"], json!(run));
     assert_eq!(cli["layers"], json!([["scan"], ["apply"]]));
     assert!(cli["run"]["total_layers"].is_u64(), "{cli}");
     let cli = cli_json(&fleet, &["brain", "runs", "layered-round", run, "2"]);
     assert_eq!(cli["layer"], json!(2));
     assert_eq!(cli["nodes"][0]["node_id"], json!("apply"));
-    assert_eq!(cli["nodes"][0]["attempts"], json!(3));
+    assert_eq!(
+        cli["nodes"][0]["milestone"]["capability_ids"],
+        json!(["builtin-agent-act"])
+    );
 }

@@ -101,13 +101,10 @@ async fn device_cases_actual_admission_uses_registered_server_profile() {
         .join(&assignment.index.id)
         .join("execution.json")
         .exists());
-    assert_eq!(
-        effective
-            .agent
-            .agents_dir
-            .unwrap()
-            .join("device-cases/meta.json")
-            .is_file(),
-        true
-    );
+    assert!(effective
+        .agent
+        .agents_dir
+        .unwrap()
+        .join("device-cases/meta.json")
+        .is_file());
 }

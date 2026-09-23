@@ -21,14 +21,14 @@ fn raw_brain_submissions_stay_rejected_for_the_layered_canvas() {
     let (status, body) = fleet.http(
         "POST",
         "/api/executions",
-        &json!({"id":"brain-e2e-bypass","kind":"brain","input":{"schema_version":4}}),
+        &json!({"id":"brain-e2e-bypass","kind":"brain","input":{"schema_version":6}}),
     );
     assert_eq!(status, 409, "bypass guard: {body}");
     assert!(
         body["error"]
             .as_str()
             .unwrap_or_default()
-            .contains("schema_version: 4"),
+            .contains("schema_version: 6"),
         "the layered canvas keeps the run endpoint: {body}"
     );
     assert_eq!(stub.request_count(), 0, "no model traffic");
@@ -40,7 +40,7 @@ fn unknown_schema_versions_never_fall_back_to_a_writer() {
     let tmp = tempfile::tempdir().unwrap();
     let fleet = fleet(&tmp, &stub, "layered-schema-node");
 
-    // Only schema 4 owns a writer: an
+    // Only schema 6 owns a writer: an
     // absent or unknown version is an explicit error.
     for version in [None, Some(0), Some(2), Some(3), Some(5)] {
         let mut body = request(RUN);
@@ -56,7 +56,7 @@ fn unknown_schema_versions_never_fall_back_to_a_writer() {
             reply["error"]
                 .as_str()
                 .unwrap_or_default()
-                .contains("schema_version: 4"),
+                .contains("schema_version: 6"),
             "version {version:?} must name the migration: {reply}"
         );
         // A rejected submission leaves no projection behind.
@@ -75,7 +75,8 @@ fn invalid_canvases_are_rejected_before_any_dispatch() {
     let fleet = fleet(&tmp, &stub, "layered-admission-node");
 
     let mut unknown_capability = request(RUN);
-    unknown_capability["plan"]["nodes"][0]["capability_id"] = json!("not-registered-capability");
+    unknown_capability["plan"]["nodes"][0]["capability_ids"][0] =
+        json!("not-registered-capability");
 
     let mut cyclic = request(RUN);
     cyclic["plan"]["edges"] = json!([{"from":"scan","to":"apply"},{"from":"apply","to":"scan"}]);
@@ -97,7 +98,11 @@ fn invalid_canvases_are_rejected_before_any_dispatch() {
             unknown_capability,
             "node capability unavailable: not-registered-capability",
         ),
-        ("cycle", cyclic, "cycle"),
+        (
+            "configured return",
+            cyclic,
+            "remove configured return edges",
+        ),
         ("depth", too_deep, "nesting depth exceeded"),
         ("parent", orphan, "nested depth and parent must agree"),
     ];

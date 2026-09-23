@@ -15,22 +15,20 @@ pub(super) const RUN: &str = "brain-layered-e2e";
 /// A two-layer canvas: `scan` feeds `apply`.
 pub(super) fn plan() -> Value {
     json!({
-        "schema_version": 4,
+        "schema_version": 5,
         "title": "layered canvas",
         "objective": "prove the v4 layered surface",
         "nodes": [
-            {"node_id":"scan","title":"Scan","capability_id":"builtin-agent-act",
-             "retry":{"max_attempts":2}},
-            {"node_id":"apply","title":"Apply","capability_id":"builtin-operator",
-             "retry":{"max_attempts":3}}
+            {"node_id":"scan","title":"Scan","capability_ids":["builtin-agent-act"],"layer":1,"objective":"scan","success_criteria":"evidence found"},
+            {"node_id":"apply","title":"Apply","capability_ids":["builtin-operator"],"layer":2,"objective":"apply","success_criteria":"change verified"}
         ],
-        "edges": [{"from":"scan","to":"apply"}],
+        "edges": [{"from":"apply","to":"scan","condition":"change requires rework"}],
         "max_rounds": 8
     })
 }
 
 pub(super) fn request() -> Value {
-    json!({"id":RUN,"schema_version":4,"plan":plan(),"inputs":{}})
+    json!({"id":RUN,"schema_version":5,"plan":plan(),"inputs":{}})
 }
 
 /// The v4 run is only admitted on a node that advertises the protocol.
@@ -38,14 +36,14 @@ pub(super) fn advertise_v4(h: &Harness) {
     h.node
         .set_capability_reply(opencoder_core::fleet::RpcReply::ok(json!({
             "compatible": true,
-            "features": ["dag_dynamic_v1", "brain_scheduler_v3", "brain_scheduler_v4"]
+            "features": ["dag_dynamic_v1", "brain_scheduler_v3", "brain_scheduler_v5"]
         })));
 }
 
 /// The layered projection the owning node would own; `phase`/`layer`/
 /// `generation` are the only varying parts in these tests.
 pub(super) fn snapshot(phase: &str, layer: u32, generation: u64) -> Value {
-    json!({"schema_version":4,
+    json!({"schema_version":5,
         "run":{"run_id":RUN,"phase":phase,"layer":layer,"generation":generation,
             "last_event_seq":0,"error":null,"created_at":1,"updated_at":2},
         "operations":[]})
@@ -110,18 +108,18 @@ async fn layered_admission_requires_the_v4_advertisement_and_freezes_the_scope()
     // failure (exactly as in v3), and the reply names the missing feature.
     assert_eq!(status, 503, "{body}");
     assert!(
-        body.to_string().contains("brain_scheduler_v4"),
+        body.to_string().contains("brain_scheduler_v5"),
         "a v3-only node must not accept a v4 run: {body}"
     );
     assert!(h.state.fleet.index(RUN).await.unwrap().is_none());
 
     advertise_v4(&h);
     let receipt = create(&h).await;
-    assert_eq!(receipt["schema_version"], json!(4));
+    assert_eq!(receipt["schema_version"], json!(5));
     assert_eq!(receipt["run_id"], json!(RUN));
     let assignment = h.state.fleet.assignment(RUN).await.unwrap().unwrap();
     let input = &assignment.request.input;
-    assert_eq!(input["schema_version"], json!(4));
+    assert_eq!(input["schema_version"], json!(5));
     assert_eq!(
         input["layered_request"]["plan"]["title"],
         json!("layered canvas")
@@ -144,7 +142,7 @@ async fn layered_admission_requires_the_v4_advertisement_and_freezes_the_scope()
 #[tokio::test]
 async fn unknown_or_legacy_schema_versions_are_explicit_errors() {
     let h = Harness::with_brain_kind().await;
-    for version in [1, 2, 3, 5] {
+    for version in [1, 2, 3, 4, 6] {
         let mut body = request();
         body["schema_version"] = json!(version);
         let (status, reply) = h.req(Method::POST, "/api/brain/runs", Some(body)).await;
@@ -164,13 +162,14 @@ async fn layered_create_requires_a_well_formed_request() {
     advertise_v4(&h);
     // Cycles are rejected at admission, not on the owning node.
     let mut cyclic = request();
-    cyclic["plan"]["edges"] = json!([{"from":"scan","to":"apply"},{"from":"apply","to":"scan"}]);
+    cyclic["plan"]["edges"] =
+        json!([{"from":"scan","to":"apply","condition":"illegal forward return"}]);
     let (status, body) = h.req(Method::POST, "/api/brain/runs", Some(cyclic)).await;
     assert_eq!(status, 400, "{body}");
-    assert!(body.to_string().contains("cycle"), "{body}");
+    assert!(body.to_string().contains("return"), "{body}");
     // An unknown capability never reaches placement either.
     let mut unknown = request();
-    unknown["plan"]["nodes"][0]["capability_id"] = json!("not-registered");
+    unknown["plan"]["nodes"][0]["capability_ids"] = json!(["not-registered"]);
     let (status, body) = h.req(Method::POST, "/api/brain/runs", Some(unknown)).await;
     assert_eq!(status, 400, "{body}");
     assert!(body.to_string().contains("not-registered"), "{body}");

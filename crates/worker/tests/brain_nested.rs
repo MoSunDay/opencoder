@@ -7,8 +7,8 @@ use std::sync::Arc;
 use support::Fleet;
 
 fn plan(capability: &str) -> Value {
-    json!({"schema_version":4,"title":"Nested plan","objective":"produce verified output",
-        "nodes":[{"node_id":"work","title":"produce the assigned result","capability_id":capability}],"edges":[]})
+    json!({"schema_version":5,"title":"Nested plan","objective":"produce verified output",
+        "nodes":[{"node_id":"work","title":"produce the assigned result","capability_ids":[capability],"layer":1,"objective":"produce verified output","success_criteria":"result verified"}],"edges":[]})
 }
 
 #[tokio::test]
@@ -21,15 +21,17 @@ async fn nested_plan_dispatches_a_real_child_and_reports_its_terminal_to_parent(
         .call(
             "POST",
             "/api/brain/runs",
-            json!({"id":"brain-parent","schema_version":4,"plan":plan("plan-child-plan@1")}),
+            json!({"id":"brain-parent","schema_version":5,"plan":plan("plan-child-plan@1")}),
         )
         .await;
     assert_eq!(created.status, 202, "{created:?}");
+    let mut last = Value::Null;
     let view = tokio::time::timeout(std::time::Duration::from_secs(30), async {
         loop {
             let view = fleet
                 .call("GET", "/api/brain/runs/brain-parent/layered", Value::Null)
                 .await;
+            last = view.body.clone();
             if view.status == 200
                 && ["completed", "failed", "blocked"]
                     .contains(&view.body["run"]["phase"].as_str().unwrap_or(""))
@@ -40,7 +42,12 @@ async fn nested_plan_dispatches_a_real_child_and_reports_its_terminal_to_parent(
         }
     })
     .await
-    .expect("nested parent did not settle");
+    .unwrap_or_else(|_| {
+        panic!(
+            "nested parent did not settle: {last}; instructions: {:?}",
+            model.instructions()
+        )
+    });
     assert_eq!(view.body["run"]["phase"], "completed", "{view:?}");
     let operation = &view.body["operations"][0];
     assert_eq!(operation["execution_kind"], "brain");

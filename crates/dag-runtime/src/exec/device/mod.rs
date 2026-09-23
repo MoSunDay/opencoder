@@ -95,8 +95,9 @@ fn assignment(ctx: &StepCtx, input: &Value) -> Result<Value> {
             .and_then(Value::as_str)
             .context("Device assignment must be a JSON string")?,
     )?;
+    let instance_id = index.to_string();
     ensure!(
-        value["instance_id"] == index.to_string(),
+        value["instance_id"] == instance_id,
         "Device assignment belongs to a different instance"
     );
     let expected = opencoder_dag::devices::case_batch(input, index).map_err(anyhow::Error::msg)?;

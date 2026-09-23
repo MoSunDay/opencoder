@@ -52,6 +52,8 @@ pub async fn commit(conn: &Connection, change: &LayeredChange) -> Result<Layered
                         n.operation_id == o.operation_id
                             && n.run_id == o.run_id
                             && n.layer == o.layer
+                            && n.round == o.round
+                            && n.activation == o.activation
                             && n.node_id == o.node_id
                             && n.attempt == o.attempt
                             && n.capability_id == o.capability_id

@@ -102,14 +102,14 @@ pub async fn wait_phase(node: &Worker, id: &str, phase: LayeredPhase) -> Layered
     tokio::time::timeout(TIMEOUT, async {
         loop {
             let current = snapshot(node, id).await;
+            if current.run.phase == phase {
+                return current;
+            }
             assert_ne!(
                 current.run.phase,
                 LayeredPhase::Blocked,
                 "layered run blocked: {current:?}"
             );
-            if current.run.phase == phase {
-                return current;
-            }
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
     })
@@ -204,9 +204,22 @@ pub async fn ack_dispatch(node: &Worker, id: &str, operation_id: &str) -> Value 
 /// created, admitted and reported successful.
 pub async fn complete_layer(node: &Worker, id: &str) -> Vec<Value> {
     let context = decide_next_layer(node, id).await;
-    assert!(!context.nodes.is_empty(), "expected a layer context");
-    let dispatches = wait_dispatch(node, context.layer).await;
-    assert_eq!(dispatches.len(), context.nodes.len(), "{dispatches:?}");
+    assert!(
+        !context.request.plan.nodes.is_empty(),
+        "expected a layer context"
+    );
+    let dispatches = wait_dispatch(node, context.layer + 1).await;
+    assert_eq!(
+        dispatches.len(),
+        context
+            .request
+            .plan
+            .nodes
+            .iter()
+            .filter(|n| n.layer == context.layer + 1)
+            .count(),
+        "{dispatches:?}"
+    );
     for frame in &dispatches {
         authorize(node, id, frame).await;
         let operation = plan::operation(frame);

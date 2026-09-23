@@ -35,7 +35,7 @@ pub async fn frames(worker: &Worker) -> Result<Vec<NodeFrame>> {
                 frames.extend(super::v4::frames(worker, &record).await?);
             }
         } else if record.assignment.index.kind == ExecutionKind::Brain
-            && record.assignment.request.input["schema_version"] == 4
+            && record.assignment.request.input["schema_version"] == 5
         {
             frames.extend(super::v4::frames(worker, &record).await?);
         }

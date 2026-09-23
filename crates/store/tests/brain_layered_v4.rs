@@ -4,6 +4,11 @@ use opencoder_store::Store;
 
 fn run(phase: LayeredPhase, layer: u32, generation: u64) -> LayeredRun {
     LayeredRun {
+        round: 1,
+        activation: 0,
+        valid_layers: 0,
+        max_rounds: 5,
+        reflection: None,
         run_id: "brain-layered-store".into(),
         phase,
         layer,
@@ -20,6 +25,11 @@ fn run(phase: LayeredPhase, layer: u32, generation: u64) -> LayeredRun {
 
 fn event(event_type: &str, run: &LayeredRun) -> LayeredEvent {
     LayeredEvent {
+        reflection: None,
+        assessments: Default::default(),
+        assignments: vec![],
+        round: 1,
+        activation: 0,
         seq: 0,
         run_id: run.run_id.clone(),
         layer: run.layer,
@@ -53,6 +63,8 @@ fn operation(
     sequence: Option<u64>,
 ) -> LayeredOperation {
     LayeredOperation {
+        round: 1,
+        activation: 0,
         operation_id: format!("brain-layered-store#l1#impact#a{attempt}"),
         run_id: "brain-layered-store".into(),
         layer: 1,
@@ -126,6 +138,21 @@ async fn terminal_attempt_is_immutable_and_survives_reopen() {
     rewrite.run.generation = 2;
     rewrite.operations[0].status = LayeredOperationStatus::Error;
     assert!(store.commit_brain_layered(&rewrite).await.is_err());
+
+    for field in ["round", "activation"] {
+        let mut forged = terminal.clone();
+        forged.expected_generation = Some(1);
+        forged.run.generation = 2;
+        if field == "round" {
+            forged.operations[0].round += 1;
+        } else {
+            forged.operations[0].activation += 1;
+        }
+        assert!(
+            store.commit_brain_layered(&forged).await.is_err(),
+            "{field} is immutable"
+        );
+    }
 
     // ... and the run cannot leave a terminal phase.
     let mut completed = terminal.clone();

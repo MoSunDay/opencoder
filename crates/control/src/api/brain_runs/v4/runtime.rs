@@ -1,7 +1,7 @@
 //! The owning node is the only writer of layered state. Control resolves
 //! catalog metadata, bounded child summaries and the one-layer context for a
 //! finite root activation.
-use super::{catalog, read};
+use super::read;
 use crate::{api::brain_runs::runs, AppState};
 use anyhow::{ensure, Context, Result};
 use opencoder_core::{brain::layered::*, brain::*};
@@ -22,31 +22,24 @@ pub async fn wake(state: &Arc<AppState>, run_id: &str) -> Result<Option<u64>> {
         .context("root assignment missing")?;
     let request: LayeredRequest =
         serde_json::from_value(assignment.request.input["layered_request"].clone())?;
-    let capabilities = match catalog::available(state, &request).await {
-        Ok(capabilities) => capabilities,
-        Err(error) => {
-            let reply = runs::call(
-                state,
-                run_id,
-                "layered_block",
-                json!({"generation": snapshot.run.generation, "error": error.to_string()}),
-            )
-            .await;
-            ensure!(reply.status < 300, "layered block: {}", reply.body);
-            return Ok(None);
-        }
-    };
+    let capabilities: Vec<BrainCapabilityDescriptor> =
+        serde_json::from_value(assignment.request.input["frozen_capabilities"].clone())
+            .context("frozen capability descriptors missing")?;
     let mut summaries = BTreeMap::new();
-    for operation in snapshot
-        .operations
-        .iter()
-        .filter(|op| op.status.successful())
-    {
-        let index = state
-            .fleet
-            .index(&operation.execution_id)
-            .await?
-            .context("child index missing")?;
+    let relevant = opencoder_brain::layered::relevant_operations(&snapshot);
+    for operation in relevant.iter().filter(|op| op.status.terminal()) {
+        let Some(index) = state.fleet.index(&operation.execution_id).await? else {
+            ensure!(
+                operation.status == LayeredOperationStatus::Error,
+                "terminal execution index missing: {}",
+                operation.execution_id
+            );
+            summaries.insert(
+                operation.execution_id.clone(),
+                "Execution admission failed before an execution index was created".into(),
+            );
+            continue;
+        };
         let summary = read::summary(state, &index)
             .await
             .context("layered summary missing")?;
@@ -71,29 +64,13 @@ async fn context(
     capabilities: &[BrainCapabilityDescriptor],
     summaries: BTreeMap<String, String>,
 ) -> Result<LayeredContext> {
-    let total = opencoder_brain::layered::layers(&request.plan)?.len() as u32;
-    let todo = todo(state, request).await?;
-    if snapshot.run.layer < total {
-        return opencoder_brain::layered::layer_context(
-            snapshot,
-            request,
-            capabilities,
-            summaries,
-            todo,
-        );
-    }
-    Ok(LayeredContext {
-        schema_version: LAYERED_SCHEMA_VERSION,
-        run_id: snapshot.run.run_id.clone(),
-        generation: snapshot.run.generation,
-        layer: snapshot.run.layer + 1,
-        total_layers: total,
-        request: request.clone(),
-        nodes: vec![],
-        todo,
+    opencoder_brain::layered::layer_context(
+        snapshot,
+        request,
+        capabilities,
         summaries,
-        operations: snapshot.operations.clone(),
-    })
+        todo(state, request).await?,
+    )
 }
 
 /// Bounded project-todo projection of the plan; a plan that names no todo, or

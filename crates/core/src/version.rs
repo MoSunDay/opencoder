@@ -65,6 +65,7 @@ pub struct BuildInfo {
     pub git_commit: &'static str,
     pub git_dirty: bool,
     pub protocol_version: u32,
+    pub brain_schema_version: u32,
     pub spa_sha256: &'static str,
 }
 
@@ -76,6 +77,7 @@ pub fn build_info() -> BuildInfo {
         git_commit: GIT_COMMIT_FULL,
         git_dirty: is_dirty(),
         protocol_version: crate::fleet::PROTOCOL_VERSION,
+        brain_schema_version: crate::brain::layered::LAYERED_SCHEMA_VERSION,
         spa_sha256: SPA_SHA256,
     }
 }

@@ -1,5 +1,4 @@
-//! Pure layered scheduling for schema version 4: levels, bindings, one-layer
-//! decisions, retries and the layer barrier. No IO lives here.
+//! Pure milestone scheduling: layer barriers, business assessments, and reflection.
 mod activation;
 mod context;
 mod decide;
@@ -8,9 +7,9 @@ mod prompt;
 mod terminal;
 mod validate;
 pub use activation::activate;
-pub use context::layer_context;
+pub use context::{layer_context, relevant_operations};
 pub use decide::{decide, execution_id, operation_id};
-pub use levels::{ancestors, layer_of, layers};
+pub use levels::layers;
 use opencoder_core::brain::layered::*;
 pub use prompt::{instruction, PROMPT};
 pub use terminal::{admit, command, terminal};
@@ -18,6 +17,11 @@ pub use validate::{validate_plan, validate_request};
 
 pub fn event(run: &LayeredRun, kind: &str, reason: Option<String>) -> LayeredEvent {
     LayeredEvent {
+        reflection: None,
+        assessments: Default::default(),
+        assignments: vec![],
+        round: run.round,
+        activation: run.activation,
         seq: 0,
         run_id: run.run_id.clone(),
         layer: run.layer,
@@ -42,6 +46,11 @@ pub fn initialize(id: &str, request: &LayeredRequest, now: i64) -> anyhow::Resul
         "invalid brain run ID"
     );
     let run = LayeredRun {
+        round: 1,
+        activation: 0,
+        valid_layers: 0,
+        max_rounds: request.plan.max_rounds,
+        reflection: None,
         run_id: id.into(),
         phase: LayeredPhase::Ready,
         layer: 0,

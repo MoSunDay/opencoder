@@ -75,7 +75,7 @@ pub(super) async fn submit(state: Arc<AppState>, value: Value) -> RpcReply {
         .iter()
         .map(super::view::capability_metadata)
         .collect::<Vec<_>>();
-    let input = json!({"schema_version":4,"layered_request":request,"layered_intent":value,"plan":value.get("plan"),"capability_scope":scope});
+    let input = json!({"schema_version":5,"layered_request":request,"layered_intent":value,"plan":value.get("plan"),"capability_scope":scope,"frozen_capabilities":capabilities});
     let reply = crate::api::executions::submit(
         &state,
         CreateExecution {
@@ -99,7 +99,7 @@ fn run_receipt(id: &str, reply: RpcReply) -> RpcReply {
     }
     RpcReply {
         status: 202,
-        body: json!({"schema_version":4,"run_id":id,"execution":reply.body}),
+        body: json!({"schema_version":5,"run_id":id,"execution":reply.body}),
     }
 }
 
@@ -131,8 +131,11 @@ pub async fn command(
     Path(id): Path<String>,
     Json(body): Json<Command>,
 ) -> Response {
-    if !matches!(body.action.as_str(), "pause" | "resume" | "cancel") {
-        return error_400("supported commands: pause, resume, cancel".into());
+    if !matches!(
+        body.action.as_str(),
+        "pause" | "resume" | "cancel" | "set_round_budget"
+    ) {
+        return error_400("supported commands: pause, resume, cancel, set_round_budget".into());
     }
     let _lock = match state.fleet.request_lock("brain-control", &id).await {
         Ok(lock) => lock,

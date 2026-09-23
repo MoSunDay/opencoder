@@ -132,10 +132,11 @@ pub async fn handle(
             }
             ensure!(
                 context.run_id == *id
-                    && context.schema_version == 4
+                    && context.schema_version == 5
                     && context.request == request
-                    && context.operations == snapshot.operations
-                    && context.layer == snapshot.run.layer + 1,
+                    && context.operations == layered::relevant_operations(&snapshot)
+                    && context.layer == snapshot.run.layer
+                    && context.run.as_ref() == Some(&snapshot.run),
                 "layered context identity mismatch"
             );
             let mut change = layered::change(&snapshot, now_ms());
@@ -146,6 +147,30 @@ pub async fn handle(
             change
                 .events
                 .push(layered::event(&change.run, "decision_started", None));
+            change
+        }
+        "set_round_budget" => {
+            ensure!(
+                matches!(
+                    snapshot.run.phase,
+                    LayeredPhase::Blocked | LayeredPhase::Paused
+                ),
+                "pause or block before adjusting budget"
+            );
+            let budget = input["max_rounds"]
+                .as_u64()
+                .context("max_rounds required")?;
+            ensure!(
+                budget > u64::from(snapshot.run.round) && budget <= 32,
+                "budget must exceed current round and be at most 32"
+            );
+            let mut change = layered::change(&snapshot, now_ms());
+            change.run.max_rounds = budget as u32;
+            change.events.push(layered::event(
+                &change.run,
+                "round_budget_changed",
+                Some(format!("budget set to {budget}")),
+            ));
             change
         }
         "layered_block" => {
@@ -174,6 +199,10 @@ pub async fn handle(
             // layer, so it only fences the layer it was decided for: its
             // generation must never be newer than the committed projection.
             let allowed = snapshot.run.phase == LayeredPhase::Waiting
+                && op.activation == snapshot.run.activation
+                && op.capability_id == capability.capability_id
+                && assignment["node_id"] == op.node_id
+                && assignment["capability_id"] == op.capability_id
                 && intent.layer == snapshot.run.layer
                 && intent.generation <= snapshot.run.generation
                 && snapshot.operations.iter().any(|current| {

@@ -60,7 +60,18 @@ impl ChatStream for LayeredClient {
             let forced = self.forced.lock().unwrap().pop_front();
             match forced {
                 Some(decision) => decision.to_string(),
-                None if instruction["closing"] == true => complete(&instruction).to_string(),
+                None if !failed(&instruction)
+                    && instruction["run"]["layer"].as_u64().unwrap_or(0)
+                        == instruction["plan"]["nodes"]
+                            .as_array()
+                            .unwrap()
+                            .iter()
+                            .filter_map(|n| n["layer"].as_u64())
+                            .max()
+                            .unwrap_or(0) =>
+                {
+                    complete(&instruction).to_string()
+                }
                 None => dispatch(&instruction)?.to_string(),
             }
         } else {
@@ -81,39 +92,42 @@ impl ChatStream for LayeredClient {
 /// layer to its direct upstream execution result.
 fn dispatch(instruction: &Value) -> anyhow::Result<Value> {
     let mut assignments = vec![];
-    for node in instruction["nodes"]
+    let layer = if failed(instruction) {
+        1
+    } else {
+        instruction["run"]["layer"].as_u64().unwrap_or(0) + 1
+    };
+    for node in instruction["plan"]["nodes"]
         .as_array()
-        .ok_or_else(|| anyhow::anyhow!("layer instruction has no nodes: {instruction}"))?
+        .unwrap()
+        .iter()
+        .filter(|n| n["layer"] == layer)
     {
-        let execution = node["upstream"]
+        let cap_id = &node["capability_ids"][0];
+        let cap = instruction["capabilities"]
             .as_array()
-            .and_then(|upstream| upstream.first())
-            .and_then(|upstream| upstream["execution_id"].as_str())
-            .map(str::to_string);
-        let mut inputs = serde_json::Map::new();
-        for name in node["capability"]["required_inputs"]
+            .unwrap()
+            .iter()
+            .find(|c| c["capability_id"] == *cap_id)
+            .unwrap();
+        let inputs: serde_json::Map<_, _> = cap["required_inputs"]
             .as_array()
-            .cloned()
-            .unwrap_or_default()
-        {
-            let name = name.as_str().unwrap_or_default().to_string();
-            let binding = match &execution {
-                Some(execution_id) => {
-                    json!({"kind":"execution","execution_id":execution_id,"path":""})
-                }
-                None => json!({"kind":"root","name":"repo"}),
-            };
-            inputs.insert(name, binding);
-        }
-        assignments.push(json!({
-            "node_id": node["node_id"],
-            "inputs": inputs,
-            "reason": "one bounded node task",
-        }));
+            .unwrap()
+            .iter()
+            .map(|name| {
+                (
+                    name.as_str().unwrap().to_string(),
+                    json!({"kind":"root","name":"repo"}),
+                )
+            })
+            .collect();
+        assignments.push(json!({"node_id":node["node_id"],"capability_id":cap_id,"inputs":inputs,"reason":"one bounded milestone capability"}));
     }
     Ok(json!({
         "decision": "dispatch_layer",
-        "layer": instruction["layer"],
+        "layer": layer,
+        "assessments": assessments(instruction),
+        "reflection":if failed(instruction) {Some("repair the failed milestone using failure diagnostics")} else {None},
         "assignments": assignments,
         "reason": "dispatch every node of the next layer",
         "evidence_execution_ids": [],
@@ -132,8 +146,27 @@ fn complete(instruction: &Value) -> Value {
         .collect();
     json!({
         "decision": "complete",
+        "assessments": assessments(instruction),
         "reason": "every layer succeeded",
         "evidence_execution_ids": evidence,
         "summary": "layered run complete",
     })
+}
+
+fn assessments(instruction: &Value) -> Value {
+    let layer = &instruction["run"]["layer"];
+    let rows: serde_json::Map<_,_> = instruction["plan"]["nodes"].as_array().unwrap().iter().filter(|n| &n["layer"]==layer)
+        .map(|n| (n["node_id"].as_str().unwrap().to_string(),json!({"met":!instruction["operations"].as_array().unwrap().iter().any(|op| op["activation"] == instruction["run"]["activation"] && op["node_id"] == n["node_id"] && op["status"] != "done"),"reason":"verified execution outputs"}))).collect();
+    json!(rows)
+}
+
+fn failed(instruction: &Value) -> bool {
+    instruction["operations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|op| {
+            op["activation"] == instruction["run"]["activation"]
+                && matches!(op["status"].as_str(), Some("error" | "cancelled"))
+        })
 }

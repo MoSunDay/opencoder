@@ -1,11 +1,10 @@
-//! Layer derivation. Layers are never stored: save, run and view all call
-//! [`layers`], so the canvas cannot drift from the executed schedule.
+//! Validate explicit milestone groups; derive historical schema 4 layers for reads.
 use anyhow::{ensure, Result};
 use opencoder_core::brain::layered::*;
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet};
 
 /// Kahn layering with a deterministic tie-break on plan order.
-pub fn layers(plan: &LayeredPlan) -> Result<Vec<Vec<String>>> {
+fn historical_layers(plan: &LayeredPlan) -> Result<Vec<Vec<String>>> {
     validate_shape(plan)?;
     let mut indegree = BTreeMap::new();
     let mut next: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
@@ -43,43 +42,10 @@ pub fn layers(plan: &LayeredPlan) -> Result<Vec<Vec<String>>> {
     Ok(levels)
 }
 
-pub fn layer_of(plan: &LayeredPlan, node_id: &str) -> Result<u32> {
-    for (index, level) in layers(plan)?.iter().enumerate() {
-        if level.iter().any(|id| id == node_id) {
-            return Ok(index as u32 + 1);
-        }
-    }
-    anyhow::bail!("unknown node {node_id}")
-}
-
-/// Every ancestor of every node, computed from the same edge set.
-pub fn ancestors(plan: &LayeredPlan) -> Result<BTreeMap<String, BTreeSet<String>>> {
-    validate_shape(plan)?;
-    let mut incoming: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
-    for node in &plan.nodes {
-        incoming.insert(node.node_id.as_str(), vec![]);
-    }
-    for edge in &plan.edges {
-        incoming.get_mut(edge.to.as_str()).unwrap().push(&edge.from);
-    }
-    let mut result = BTreeMap::new();
-    for node in &plan.nodes {
-        let mut seen = BTreeSet::new();
-        let mut queue: VecDeque<&str> = incoming[node.node_id.as_str()].iter().copied().collect();
-        while let Some(id) = queue.pop_front() {
-            if seen.insert(id.to_string()) {
-                queue.extend(incoming[id].iter().copied());
-            }
-        }
-        result.insert(node.node_id.clone(), seen);
-    }
-    Ok(result)
-}
-
 /// Structural shape shared by every entry point: identity, edges and bounds.
 pub(crate) fn validate_shape(plan: &LayeredPlan) -> Result<()> {
     ensure!(
-        plan.schema_version == LAYERED_SCHEMA_VERSION,
+        matches!(plan.schema_version, 4 | 5),
         "unsupported plan schema"
     );
     ensure!(
@@ -94,20 +60,42 @@ pub(crate) fn validate_shape(plan: &LayeredPlan) -> Result<()> {
         );
         ensure!(ids.insert(node.node_id.as_str()), "duplicate node id");
         ensure!(
-            !node.capability_id.trim().is_empty() && node.capability_id.len() <= 128,
-            "each node requires exactly one capability"
+            if plan.schema_version == 4 {
+                !node.capability_id.trim().is_empty() && node.capability_id.len() <= 128
+            } else {
+                !node.capability_ids.is_empty()
+                    && node.capability_ids.len() <= 32
+                    && node
+                        .capability_ids
+                        .iter()
+                        .all(|id| !id.trim().is_empty() && id.len() <= 128)
+                    && node.capability_ids.iter().collect::<BTreeSet<_>>().len()
+                        == node.capability_ids.len()
+                    && node.capability_id.is_empty()
+            },
+            "milestones require 1..32 unique capabilities; legacy nodes require one capability"
         );
-        ensure!(
-            (1..=5).contains(&node.retry.max_attempts),
-            "retry.max_attempts must be 1..5"
-        );
+        if plan.schema_version == 4 {
+            ensure!(
+                (1..=5).contains(&node.retry.as_ref().map(|r| r.max_attempts).unwrap_or(2)),
+                "retry.max_attempts must be 1..5"
+            );
+        } else {
+            ensure!(
+                node.retry.is_none(),
+                "schema 5 uses Brain reflection rather than per-node retry policies"
+            );
+        }
         ensure!(
             !node.title.trim().is_empty() && node.title.chars().count() <= 120,
             "node title must contain 1..120 characters"
         );
     }
     for edge in &plan.edges {
-        ensure!(edge.from != edge.to, "self edges are not allowed");
+        ensure!(
+            plan.schema_version == 5 || edge.from != edge.to,
+            "self edges are not allowed"
+        );
         ensure!(
             ids.contains(edge.from.as_str()) && ids.contains(edge.to.as_str()),
             "edge references an unknown node"
@@ -121,4 +109,45 @@ pub(crate) fn validate_shape(plan: &LayeredPlan) -> Result<()> {
         );
     }
     Ok(())
+}
+
+/// Explicit parallel groups, independent of cyclic reflection paths.
+pub fn layers(plan: &LayeredPlan) -> Result<Vec<Vec<String>>> {
+    if plan.schema_version == 4 {
+        return historical_layers(plan);
+    }
+    validate_shape(plan)?;
+    let total = plan.nodes.iter().map(|n| n.layer).max().unwrap_or(0);
+    ensure!((1..=32).contains(&total), "plan requires 1..32 layers");
+    let mut groups = vec![vec![]; total as usize];
+    for node in &plan.nodes {
+        ensure!(node.layer > 0, "node layer must be positive");
+        ensure!(
+            !node.objective.trim().is_empty() && node.objective.chars().count() <= 4096,
+            "milestone objective required (max 4096)"
+        );
+        ensure!(
+            !node.success_criteria.trim().is_empty()
+                && node.success_criteria.chars().count() <= 4096,
+            "milestone success criteria required (max 4096)"
+        );
+        groups[node.layer as usize - 1].push(node.node_id.clone());
+    }
+    ensure!(
+        groups.iter().all(|g| !g.is_empty() && g.len() <= 32),
+        "layers must be contiguous nonempty groups of at most 32 milestones"
+    );
+    for edge in &plan.edges {
+        let from = plan.node(&edge.from).unwrap();
+        let to = plan.node(&edge.to).unwrap();
+        ensure!(
+            to.layer <= from.layer,
+            "reflection edges must return to current or previous layers"
+        );
+        ensure!(
+            !edge.condition.trim().is_empty() && edge.condition.chars().count() <= 1024,
+            "reflection edge condition required (max 1024)"
+        );
+    }
+    Ok(groups)
 }

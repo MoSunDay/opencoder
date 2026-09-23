@@ -32,13 +32,13 @@ pub fn parse_request(input: &Value) -> Result<LayeredRequest> {
     let value = ["layered_request", "request"]
         .iter()
         .filter_map(|key| input.get(*key))
-        .find(|value| value["schema_version"] == 4)
+        .find(|value| value["schema_version"] == 5)
         .cloned()
         .or_else(|| {
             let plan = input.get("plan")?;
-            (plan["schema_version"] == 4).then(|| {
+            (plan["schema_version"] == 5).then(|| {
                 json!({
-                    "schema_version":4,
+                    "schema_version":5,
                     "plan":plan,
                     "inputs":input.get("inputs").cloned().unwrap_or_else(|| json!({})),
                 })
@@ -72,7 +72,7 @@ pub async fn annotate(worker: &Worker, id: &str, key: &str, value: Value) -> Res
 /// phase and the summary are the only things a parent plan binds to.
 pub fn result(snapshot: &LayeredSnapshot) -> LayeredRunResult {
     LayeredRunResult {
-        schema_version: 4,
+        schema_version: 5,
         phase: snapshot.run.phase,
         layer: snapshot.run.layer,
         error: snapshot.run.error.clone(),

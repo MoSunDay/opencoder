@@ -49,15 +49,15 @@ pub fn validate(
     ) -> Result<()> {
         ensure!(depth <= LAYERED_MAX_DEPTH, "nesting depth exceeded");
         opencoder_brain::layered::validate_plan(plan)?;
-        for node in &plan.nodes {
+        for capability_id in plan.nodes.iter().flat_map(|node| &node.capability_ids) {
             let cap = catalog
                 .iter()
-                .find(|cap| cap.capability_id == node.capability_id)
-                .with_context(|| format!("node capability unavailable: {}", node.capability_id))?;
+                .find(|cap| cap.capability_id == *capability_id)
+                .with_context(|| format!("node capability unavailable: {}", *capability_id))?;
             ensure!(
                 catalog
                     .iter()
-                    .filter(|item| item.capability_id == node.capability_id)
+                    .filter(|item| item.capability_id == *capability_id)
                     .count()
                     == 1,
                 "ambiguous capability"
@@ -100,7 +100,7 @@ pub fn validate(
 mod tests {
     use super::*;
     fn plan(cap: &str) -> LayeredPlan {
-        serde_json::from_value(json!({"schema_version":4,"title":"nested","objective":"verify nesting", "nodes":[{"node_id":"step","title":"perform the plan","capability_id":cap}]})).unwrap()
+        serde_json::from_value(json!({"schema_version":5,"title":"nested","objective":"verify nesting", "nodes":[{"node_id":"step","title":"perform the plan","capability_ids":[cap],"layer":1,"objective":"execute","success_criteria":"verified"}]})).unwrap()
     }
     fn cap(id: &str, child: Option<LayeredPlan>) -> BrainCapabilityDescriptor {
         BrainCapabilityDescriptor {

@@ -8,12 +8,16 @@ pub fn parse_output(value: Value) -> Result<Value> {
     };
     ensure!(text.len() <= 256 * 1024, "PC output exceeds 256 KiB");
     let text = text.trim();
-    let document = if let Some(body) = text
-        .strip_prefix("```json\n")
-        .or_else(|| text.strip_prefix("```json\r\n"))
-    {
-        body.strip_suffix("\n```")
-            .context("PC JSON fence not closed")?
+    // A unique, explicitly marked JSON block is the machine report. Surrounding
+    // human-readable commentary is not part of that report. Never guess between
+    // multiple blocks or extract unmarked braces from prose.
+    let document = if text.contains("```") {
+        let parts: Vec<_> = text.split("```").collect();
+        ensure!(parts.len() == 3, "PC output requires one closed JSON fence");
+        parts[1]
+            .strip_prefix("json\n")
+            .or_else(|| parts[1].strip_prefix("json\r\n"))
+            .context("PC output fence must be marked json")?
             .trim()
     } else {
         text
@@ -217,18 +221,22 @@ mod tests {
         assert!(validate_transition("conclude", &history, &result).is_err());
     }
     #[test]
-    fn presentation_fence_preserves_json_but_prose_is_rejected() {
+    fn unique_explicit_fence_preserves_report_and_rejects_ambiguity() {
         let raw = r#"{"schema":"pc-issue.stage/v1","stage":"impact"}"#;
         let value = parse_output(json!(raw)).unwrap();
         for wrapped in [
             format!("```json\n{raw}\n```"),
             format!("```json\r\n{raw}\r\n```\n"),
+            format!("Report:\n```json\n{raw}\n```\nCompleted analysis."),
         ] {
             assert_eq!(parse_output(json!(wrapped)).unwrap(), value);
         }
         for bad in [
             format!("Result: {raw}"),
-            format!("```json\n{raw}\n``` trailing"),
+            format!("```json\n{raw}\n```\n```json\n{raw}\n```"),
+            format!("```text\n{raw}\n```"),
+            format!("```json\n{raw}"),
+            format!("```json\n{raw} {raw}\n```"),
             format!("{raw} {raw}"),
         ] {
             assert!(parse_output(json!(bad)).is_err());

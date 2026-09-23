@@ -71,6 +71,27 @@ class ResourceTests(unittest.TestCase):
                 path.write_text(json.dumps(record))
                 brain_preflight(settings, {'protocol_version': 10}, [{'runtime_data': str(runtime)}])
 
+    def test_milestone_upgrade_and_rollback_wait_for_incompatible_active_roots(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / 'brain' / 'brain-retained' / 'execution.json'
+            path.parent.mkdir(parents=True)
+            settings = Settings(root, root, root, root, root / 'token')
+            for candidate, active in ((5, 4), (4, 5)):
+                record = {'assignment': {'request': {'id': 'brain-retained', 'kind': 'brain',
+                    'input': {'schema_version': active}}, 'index': {'status': 'idle'}}}
+                path.write_text(json.dumps(record))
+                original = path.read_bytes()
+                with self.assertRaisesRegex(ValueError, 'migration blocked.*brain-retained'):
+                    brain_preflight(settings, {'protocol_version': 10, 'brain_schema_version': candidate}, [{'runtime_data': str(root)}])
+                self.assertEqual(original, path.read_bytes())
+                record['assignment']['index']['status'] = 'done'
+                path.write_text(json.dumps(record))
+                brain_preflight(settings, {'protocol_version': 10, 'brain_schema_version': candidate}, [{'runtime_data': str(root)}])
+            record['assignment']['index']['status'] = 'running'
+            path.write_text(json.dumps(record))
+            brain_preflight(settings, {'protocol_version': 10, 'brain_schema_version': 5}, [{'runtime_data': str(root)}])
+
     def test_every_reported_mount_must_be_verified_local_storage(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

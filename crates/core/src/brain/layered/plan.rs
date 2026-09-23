@@ -1,11 +1,11 @@
-//! The v4 canvas: nodes bound one-to-one to capabilities, edges as flow.
+//! Milestone objectives, allowed capabilities, and reflection return paths.
 use crate::fleet::ExecutionKind;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
 
 fn max_rounds() -> u32 {
-    32
+    5
 }
 fn default_attempts() -> u32 {
     2
@@ -17,7 +17,7 @@ pub struct LayeredTodoRef {
     pub id: String,
 }
 
-/// Per-node retry policy; attempts bound the child executions of one node.
+/// Retained only for reading historical schema 4 plans.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct LayeredRetry {
@@ -35,12 +35,21 @@ impl Default for LayeredRetry {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct LayeredNode {
+    #[serde(default)]
+    pub layer: u32,
+    #[serde(default)]
+    pub objective: String,
+    #[serde(default)]
+    pub success_criteria: String,
+    #[serde(default)]
+    pub capability_ids: Vec<String>,
     pub node_id: String,
     pub title: String,
-    /// Exactly one capability; the node never picks a different one at runtime.
+    /// Historical schema 4 binding; schema 5 uses capability_ids.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub capability_id: String,
-    #[serde(default)]
-    pub retry: LayeredRetry,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retry: Option<LayeredRetry>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -48,6 +57,8 @@ pub struct LayeredNode {
 pub struct LayeredEdge {
     pub from: String,
     pub to: String,
+    #[serde(default)]
+    pub condition: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -126,6 +137,7 @@ pub struct LayeredPlanCapability {
     pub version: u64,
     pub title: String,
     pub objective: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub capability_id: String,
     pub kind: ExecutionKind,
     pub node_count: usize,

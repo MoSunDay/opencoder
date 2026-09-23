@@ -49,6 +49,16 @@ impl LayeredOperationStatus {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct LayeredRun {
+    #[serde(default = "first_round")]
+    pub round: u32,
+    #[serde(default)]
+    pub activation: u64,
+    #[serde(default)]
+    pub valid_layers: u32,
+    #[serde(default = "default_budget")]
+    pub max_rounds: u32,
+    #[serde(default)]
+    pub reflection: Option<String>,
     pub run_id: String,
     pub phase: LayeredPhase,
     /// Completed layers; the layer being decided is always `layer + 1`.
@@ -74,6 +84,10 @@ pub struct LayeredRun {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct LayeredOperation {
+    #[serde(default = "first_round")]
+    pub round: u32,
+    #[serde(default)]
+    pub activation: u64,
     pub operation_id: String,
     pub run_id: String,
     pub layer: u32,
@@ -90,6 +104,16 @@ pub struct LayeredOperation {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct LayeredEvent {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reflection: Option<String>,
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub assessments: std::collections::BTreeMap<String, super::MilestoneAssessment>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub assignments: Vec<super::LayeredAssignment>,
+    #[serde(default = "first_round")]
+    pub round: u32,
+    #[serde(default)]
+    pub activation: u64,
     pub seq: u64,
     pub run_id: String,
     pub layer: u32,
@@ -145,4 +169,11 @@ pub struct LayeredRunResult {
     pub error: Option<String>,
     pub scheduler_output: serde_json::Value,
     pub scheduler_artifacts: serde_json::Value,
+}
+
+fn first_round() -> u32 {
+    1
+}
+fn default_budget() -> u32 {
+    5
 }

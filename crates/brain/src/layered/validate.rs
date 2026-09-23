@@ -7,6 +7,10 @@ use opencoder_core::brain::layered::*;
 use std::collections::BTreeSet;
 
 pub fn validate_plan(plan: &LayeredPlan) -> Result<()> {
+    ensure!(
+        plan.schema_version == LAYERED_SCHEMA_VERSION,
+        "new plans require schema 5; convert the saved version explicitly"
+    );
     validate_shape(plan)?;
     ensure!(
         !plan.title.trim().is_empty() && plan.title.chars().count() <= 120,
@@ -32,18 +36,6 @@ pub fn validate_plan(plan: &LayeredPlan) -> Result<()> {
         "plan depth {} exceeds the dispatch limit",
         levels.len()
     );
-    let ids: BTreeSet<&str> = plan.nodes.iter().map(|n| n.node_id.as_str()).collect();
-    for node in &plan.nodes {
-        let reachable = super::ancestors(plan)?
-            .get(&node.node_id)
-            .cloned()
-            .unwrap_or_default();
-        ensure!(
-            reachable.len() < ids.len(),
-            "node {} is part of a disconnected subgraph",
-            node.node_id
-        );
-    }
     Ok(())
 }
 
@@ -84,8 +76,8 @@ pub(crate) fn evidence(ids: &[String], ops: &[LayeredOperation]) -> Result<()> {
     ensure!(
         ids.iter().all(|id| ops
             .iter()
-            .any(|o| &o.execution_id == id && o.status.successful())),
-        "evidence must reference successful terminal executions"
+            .any(|o| &o.execution_id == id && o.status.terminal())),
+        "evidence must reference terminal executions"
     );
     Ok(())
 }
@@ -106,20 +98,20 @@ pub(crate) fn bindings(
             .all(|name| assignment.inputs.contains_key(name)),
         "missing required capability input"
     );
-    let ancestor_executions = ancestor_executions(plan, ops, &assignment.node_id)?;
+
     for (name, binding) in &assignment.inputs {
         ensure!(!name.trim().is_empty(), "empty binding name");
         match binding {
+            opencoder_core::brain::BrainInputBinding::Value { value } => ensure!(
+                serde_json::to_vec(value)?.len() <= 64 * 1024,
+                "generated input exceeds 64 KiB"
+            ),
             opencoder_core::brain::BrainInputBinding::Root { name } => ensure!(
                 request.inputs.contains_key(name) || plan.inputs.contains_key(name),
                 "unknown root input {name}"
             ),
             opencoder_core::brain::BrainInputBinding::Execution { execution_id, path } => {
                 evidence(std::slice::from_ref(execution_id), ops)?;
-                ensure!(
-                    ancestor_executions.contains(execution_id),
-                    "binding execution is not a successful ancestor of this node"
-                );
                 ensure!(
                     path.is_empty() || path.starts_with('/'),
                     "output path must be a JSON pointer"
@@ -140,24 +132,4 @@ pub(crate) fn bindings(
         }
     }
     Ok(())
-}
-
-/// Execution ids a node may bind: the latest successful attempt of every
-/// ancestor node.
-pub(crate) fn ancestor_executions(
-    plan: &LayeredPlan,
-    ops: &[LayeredOperation],
-    node_id: &str,
-) -> Result<BTreeSet<String>> {
-    let ancestors = super::ancestors(plan)?;
-    let nodes = ancestors.get(node_id).cloned().unwrap_or_default();
-    let mut ids = BTreeSet::new();
-    for node in nodes {
-        if let Some(op) =
-            super::terminal::latest_attempt(ops, &node).filter(|op| op.status.successful())
-        {
-            ids.insert(op.execution_id.clone());
-        }
-    }
-    Ok(ids)
 }

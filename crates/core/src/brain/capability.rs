@@ -19,6 +19,7 @@ pub struct BrainCapabilityDescriptor {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum BrainInputBinding {
+    Value { value: Value },
     Root { name: String },
     Execution { execution_id: String, path: String },
     Artifact { reference: String },

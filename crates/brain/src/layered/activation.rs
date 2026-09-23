@@ -12,7 +12,7 @@ pub async fn activate(
 ) -> Result<LayeredDecision> {
     ensure!(
         context.schema_version == LAYERED_SCHEMA_VERSION,
-        "layer context is not a v4 request"
+        "layer context is not a schema 5 request"
     );
     let mut stream = client.chat_stream(ChatRequest {
         purpose: RequestPurpose::Planning,

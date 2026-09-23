@@ -35,9 +35,10 @@ pub(super) fn validate(
     );
     let mut machines = std::collections::BTreeSet::new();
     for (index, item) in items.iter().enumerate() {
+        let instance_id = index.to_string();
         let matches: Vec<_> = assigned
             .iter()
-            .filter(|a| a["instance_id"] == index.to_string())
+            .filter(|a| a["instance_id"].as_str() == Some(instance_id.as_str()))
             .collect();
         ensure!(
             matches.len() == 1,

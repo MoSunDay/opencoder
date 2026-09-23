@@ -132,6 +132,10 @@ class Environment:
         return self.children[label]
 
     def warm(self, label):
+        timings = []
+        def mark(step):
+            timings.append({'step':step,'at':time.monotonic()})
+        mark('start')
         s = self.settings
         record = {'id':label,'server_port':port(),'runtime_port':port(),'host_port':port(),
             'runtime_data':str(s.state_dir / label),'manifest':{'commit':self.info['git_commit']},
@@ -142,6 +146,7 @@ class Environment:
             '--workdir',s.agent_workdir,'--remote',s.public_url,'--max-runs',s.max_runs,
             '--token-file',s.token_file,'host','--port',record['host_port'],'--standby'])
         status = until(lambda:self.http(host,'/status'),'candidate Host')
+        mark('host_ready')
         node_id = status['node']['id']
         data = Path(record['runtime_data'])
         atomic_bytes(data / 'node-id',node_id.encode())
@@ -149,8 +154,10 @@ class Environment:
         atomic_bytes(data / 'dag/_modules/release-probe.wasm',probes.WASM)
         atomic_bytes(data / 'dag/_modules/hold.wasm',HOLD_WASM.encode())
         self.containers.prepare(data)
+        mark('data_prepared')
         config = {'endpoint':f"http://127.0.0.1:{record['runtime_port']}",'data_dir':str(data),'unit':record['runtime_unit']}
         self.http(host,'/runtimes','POST',{'id':label,'release_id':label,'mode':'staged','config':config})
+        mark('runtime_registered')
         command = [self.bin / 'opencoder-agent','--workdir',s.agent_workdir,'--data-dir',data,
             '--max-runs',65535,'--token-file',s.token_file,'runtime','--port',record['runtime_port']]
         content = units.service(command,'Isolated release acceptance',True)
@@ -158,9 +165,13 @@ class Environment:
         unit = Path('/etc/systemd/system') / record['runtime_unit']
         atomic_bytes(unit,content.encode(),0o644)
         subprocess.run(['systemd-analyze','verify',str(unit)],check=True)
+        mark('unit_verified')
         subprocess.run(['systemctl','daemon-reload'],check=True)
+        mark('manager_reloaded')
         subprocess.run(['systemctl','start',record['runtime_unit']],check=True)
+        mark('runtime_started')
         probes.candidate(s,record,self,90)
+        mark('candidate_ready')
         platform = {'release_id':label,'state_dir':str(s.state_dir),'host_service':s.host_url,'resource_service':s.resource_url}
         write(data / 'release.json',platform)
         self.start(label+'-server','opencoder-server',['--host','127.0.0.1','--port',record['server_port'],
@@ -170,6 +181,8 @@ class Environment:
             self.http(host,f'/runtimes/{label}/activate','POST',{})
             self.http(host,'/activate-host','POST',{})
         probes.ready(s,record,node_id,self,90)
+        mark('ready')
+        (self.root / (label + '-warm-timings.json')).write_text(json.dumps(timings,indent=2))
         return record
 
     def wait(self,check,seconds=90):

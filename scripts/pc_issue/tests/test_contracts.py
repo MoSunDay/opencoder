@@ -5,11 +5,22 @@ import tempfile
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from contracts import build_request, device_request, identity
+from contracts import build_request, device_request, identity, inspection
 from evidence import freeze_source
 
 
 class Contracts(unittest.TestCase):
+    def test_inspection_exposes_failure_before_large_definition(self):
+        snapshot = {'definition': {'prompt': 'x' * 10000},
+                    'execution': {'status': 'error', 'error': 'allocation failed'}}
+        result = inspection(snapshot)
+        self.assertTrue(result['terminal'])
+        self.assertIn('allocation failed', json.dumps(result)[:200])
+        self.assertEqual(result['details'], snapshot)
+        self.assertFalse(inspection({'execution': {'status': 'running'}})['terminal'])
+        with self.assertRaises(ValueError):
+            inspection({})
+
     def test_device_request_is_pinned_and_reuses_identity(self):
         request = device_request('brain-demo', 'reproduce', 1, 'node-device', '/cases.json', ['case-original'])
         self.assertEqual(request['id'], 'dag-pc-demo-reproduce-1')

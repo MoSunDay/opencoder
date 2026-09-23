@@ -76,7 +76,8 @@ function checkBarrier(view) {
 async function main() {
   assertRelease();
   const id = existingRun || await prepare(); console.log(JSON.stringify({ stage: 'created', id, evidence }));
-  let view; const deadline = Date.now() + 1200000; const states = [];
+  // Two full six-capability rounds include two Team discussions and nested plans.
+  let view; const deadline = Date.now() + 2400000; const states = [];
   while (Date.now() < deadline) {
     view = await api('GET', `/api/brain/runs/${id}/layered`); save('view', view);
     const state = { phase: view.run.phase, round: view.run.round, layer: view.run.layer, operations: view.operations.map((op) => [op.node_id, op.attempt, op.status]) };

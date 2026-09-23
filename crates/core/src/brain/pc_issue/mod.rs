@@ -33,15 +33,15 @@ pub fn plan() -> Value {
         "证据验收",
     ];
     let objectives = [
-        "读取原始文本和图片，沿全局索引核对当前源码、版本和潜在影响面",
-        "通过设备预约执行原始问题并获取真实 UI、日志和抓包证据",
-        "根据实证决定最小修复、诊断改动或无需修改",
-        "有修改才调用 jy-builder 构建候选包，并在预约 Windows 上复测",
-        "核对权威前序结果并报告产品结论、前后证据及未解决项",
+        "提交影响面报告：读取原始文本和图片，沿全局索引核对当前源码与版本；无法定位时明确报告证据缺口",
+        "提交实机复现评估报告：通过预约 Windows 获取 UI、日志和抓包证据，或明确记录无法执行的原因；有证据的受阻报告也完成本里程碑，不要求必然复现成功",
+        "提交修改决策报告：依据实证给出隔离修复、诊断改动、无需修改或阻塞；无充分证据时明确不修改，也完成本里程碑",
+        "提交构建复测评估报告：有修改才调用 jy-builder 并实机复测；前序受阻或无需修改时如实报告无需执行或阻塞，也完成本里程碑",
+        "核对权威前序结果并提交最终产品结论，包括前后证据及未解决项；证据不足时必须以未解决结论完成报告",
     ];
     json!({"schema_version":5,"title":"PC 问题诊断与修复","objective":"从原始文本和图片出发，以当前源码及 Windows 运行证据定位问题；必要时隔离修复、Team 构建并复测。执行结束不等于产品修复成功。禁止自动合并或发布产品。证据不足时允许以明确未解决结论完成报告，禁止虚构成功。",
         "inputs":{"problem":{"text":"","images":[]},"settings":{"workspace":"/data00/workspace","helper":"/opt/opencoder-pc-issue/current/cli.py","device_node":"","build_node":"","max_repair_rounds":2}},
-        "nodes":STAGES.iter().enumerate().map(|(i,s)|json!({"node_id":s,"layer":i+1,"title":titles[i],"objective":objectives[i],"success_criteria":"输出通过 pc-issue.stage/v1 校验的真实结果和证据；明确区分产品成功、未复现、无需修改和阻塞。构建复测失败且有可执行修复时反思回退；达到两轮后保留失败证据进入最终报告。","capability_ids":[format!("pc-issue-{s}")]})).collect::<Vec<_>>(),
+        "nodes":STAGES.iter().enumerate().map(|(i,s)|json!({"node_id":s,"layer":i+1,"title":titles[i],"objective":objectives[i],"success_criteria":"以宿主接受的 pc-issue.stage/v1 报告完成里程碑。incomplete、blocked、not_needed、not_reproduced、unresolved 是有效产品结论，不能因此把已完成的报告判为里程碑失败；应向前传递缺口，直至最终报告。禁止从 impact 或 reproduce 回退。只有 verify 复测失败且存在可执行修复、轮次预算尚有余量时，才沿 verify→repair 反思回退。","capability_ids":[format!("pc-issue-{s}")]})).collect::<Vec<_>>(),
         "edges":[{"from":"verify","to":"repair","condition":"候选复测失败且存在证据充分的修复方案，尚未达到两轮预算"}],"max_rounds":2})
 }
 

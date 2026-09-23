@@ -90,4 +90,5 @@ mod tests {
     }
 }
 
+pub mod devices;
 pub mod dynamic;

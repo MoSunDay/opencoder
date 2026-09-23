@@ -32,7 +32,8 @@ pub struct Cli {
     /// Server base URL (e.g. http://127.0.0.1:8080); env OPENCODER_SERVER_URL.
     #[arg(long, global = true)]
     server: Option<String>,
-    /// Bearer token. Mutually exclusive with --token-file.
+    /// Bearer token; defaults to OPENCODER_SERVER_TOKEN when no token flag is supplied.
+    /// Mutually exclusive with --token-file.
     #[arg(long, global = true, conflicts_with = "token_file")]
     token: Option<String>,
     /// Read the Bearer token from a credential file.

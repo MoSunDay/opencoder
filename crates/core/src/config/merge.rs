@@ -305,6 +305,11 @@ pub(super) fn merge_into(cfg: &mut Config, value: serde_json::Value) {
         // object whose serde defaults fill the rest
         // (`{"dag":{"nfs":{"port":0}}}` only overrides the port).
         if let Some(d) = obj.get("dag").and_then(|v| v.as_object()) {
+            // A malformed or cleared authority disables device workflows; never
+            // retain an earlier credential endpoint after an invalid override.
+            if let Some(manager) = d.get("device_manager") {
+                cfg.dag.device_manager = serde_json::from_value(manager.clone()).ok();
+            }
             if let Some(dir) = d.get("wasm_dir").and_then(|v| v.as_str()) {
                 cfg.dag.wasm_dir = Some(std::path::PathBuf::from(dir));
             }
@@ -651,5 +656,23 @@ mod tests {
         );
         assert!(!cfg.dag.nfs.enabled);
         assert_eq!(cfg.dag.nfs.port, 1);
+    }
+    #[test]
+    fn device_manager_config_loads_whole_authority_and_invalid_override_disables_it() {
+        let mut cfg = Config::default();
+        merge_into(
+            &mut cfg,
+            serde_json::json!({"dag":{"device_manager":{
+            "host_endpoint":"http://127.0.0.1:18109", "step_endpoint":"http://127.0.0.1:18109", "token_file":"/private/device-token"}}}),
+        );
+        assert_eq!(
+            cfg.dag.device_manager.as_ref().unwrap().token_file,
+            std::path::PathBuf::from("/private/device-token")
+        );
+        merge_into(
+            &mut cfg,
+            serde_json::json!({"dag":{"device_manager":{"host_endpoint":"invalid-partial"}}}),
+        );
+        assert!(cfg.dag.device_manager.is_none());
     }
 }

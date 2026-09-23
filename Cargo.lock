@@ -2552,6 +2552,7 @@ dependencies = [
  "opencoder-node",
  "opencoder-session",
  "opencoder-store",
+ "reqwest",
  "serde",
  "serde_json",
  "sha2",

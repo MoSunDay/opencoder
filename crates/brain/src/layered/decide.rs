@@ -59,14 +59,12 @@ pub fn decide(
                     .as_ref()
                     .context("return requires a reflection")?;
                 validate::reason(reflection)?;
-                ensure!(
-                    request.plan.edges.iter().any(|e| request
-                        .plan
-                        .node(&e.from)
-                        .is_some_and(|n| n.layer == snapshot.run.layer)
-                        && request.plan.node(&e.to).is_some_and(|n| n.layer == *layer)),
-                    "return path is not configured"
-                );
+                if opencoder_core::brain::pc_issue::is_plan(&request.plan) {
+                    ensure!(
+                        snapshot.run.layer == 4 && *layer == 3,
+                        "PC issue method only permits verification to repair return"
+                    );
+                }
                 if snapshot.run.round >= snapshot.run.max_rounds {
                     let mut blocked = super::block(
                         snapshot,

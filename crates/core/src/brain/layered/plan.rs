@@ -1,4 +1,4 @@
-//! Milestone objectives, allowed capabilities, and reflection return paths.
+//! Milestone objectives and allowed capabilities.
 use crate::fleet::ExecutionKind;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -45,7 +45,7 @@ pub struct LayeredNode {
     pub capability_ids: Vec<String>,
     pub node_id: String,
     pub title: String,
-    /// Historical schema 4 binding; schema 5 uses capability_ids.
+    /// Historical schema 4 binding; schema 6 uses capability_ids.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub capability_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]

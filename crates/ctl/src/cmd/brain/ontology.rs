@@ -45,11 +45,11 @@ pub enum RunsCmd {
         #[arg(long, default_value_t = 0)]
         offset: u64,
     },
-    /// Schema 4 layered canvas: run, plan, recomputed layers, operations.
+    /// Layered canvas: run, plan, layers and operations.
     Layered {
         id: String,
     },
-    /// Schema 4 layered round detail for one layer.
+    /// Layered round detail for one layer.
     LayeredRound {
         id: String,
         round: u32,
@@ -108,8 +108,8 @@ pub fn runs(command: &RunsCmd) -> Result<RequestPlan> {
 fn scheduler_body(raw: &str) -> Result<serde_json::Value> {
     let body = required_body(raw)?;
     anyhow::ensure!(
-        matches!(body["schema_version"].as_u64(), Some(5)),
-        "brain runs create requires an explicit schema_version: 5"
+        matches!(body["schema_version"].as_u64(), Some(6)),
+        "brain runs create requires an explicit schema_version: 6"
     );
     Ok(body)
 }
@@ -123,8 +123,8 @@ pub async fn activate(
     let config: opencoder_core::Config = serde_json::from_slice(&std::fs::read(config)?)?;
     let client = LocalClient(config.clone());
     anyhow::ensure!(
-        context["schema_version"] == 5,
-        "unsupported brain schema; expected 5"
+        context["schema_version"] == 6,
+        "unsupported brain schema; expected 6"
     );
     let decision = opencoder_brain::layered::activate(
         &serde_json::from_value(context)?,

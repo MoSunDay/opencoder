@@ -1,4 +1,4 @@
-//! Read historical schema 4 projections without admitting or rewriting them.
+//! Read historical schema 4/5 projections without admitting or rewriting them.
 use crate::Worker;
 use anyhow::{ensure, Context, Result};
 use opencoder_core::fleet::*;
@@ -8,6 +8,7 @@ pub async fn read(
     reference: &ExecutionRef,
     action: &str,
     input: Value,
+    schema: u32,
 ) -> Result<RpcReply> {
     ensure!(
         reference.kind == ExecutionKind::Brain,
@@ -16,7 +17,7 @@ pub async fn read(
     if !matches!(action, "snapshot" | "events") {
         return Ok(RpcReply::error(
             409,
-            "historical schema 4 runs are read-only; convert the plan to schema 5",
+            "historical schema 4/5 runs are read-only; convert the plan to schema 6",
         ));
     }
     let mut snapshot = worker
@@ -26,7 +27,7 @@ pub async fn read(
         .brain_layered(&reference.id)
         .await?
         .context("historical layered projection missing")?;
-    snapshot.schema_version = 4;
+    snapshot.schema_version = schema;
     if action == "snapshot" {
         return Ok(RpcReply::ok(json!(snapshot)));
     }

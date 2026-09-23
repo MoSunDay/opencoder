@@ -75,7 +75,7 @@ pub(super) async fn submit(state: Arc<AppState>, value: Value) -> RpcReply {
         .iter()
         .map(super::view::capability_metadata)
         .collect::<Vec<_>>();
-    let input = json!({"schema_version":5,"layered_request":request,"layered_intent":value,"plan":value.get("plan"),"capability_scope":scope,"frozen_capabilities":capabilities});
+    let input = json!({"schema_version":6,"layered_request":request,"layered_intent":value,"plan":value.get("plan"),"capability_scope":scope,"frozen_capabilities":capabilities});
     let reply = crate::api::executions::submit(
         &state,
         CreateExecution {
@@ -99,7 +99,7 @@ fn run_receipt(id: &str, reply: RpcReply) -> RpcReply {
     }
     RpcReply {
         status: 202,
-        body: json!({"schema_version":5,"run_id":id,"execution":reply.body}),
+        body: json!({"schema_version":6,"run_id":id,"execution":reply.body}),
     }
 }
 

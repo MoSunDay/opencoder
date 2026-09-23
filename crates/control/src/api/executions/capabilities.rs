@@ -5,7 +5,7 @@ use opencoder_core::fleet::*;
 use serde_json::{json, Value};
 
 pub(super) const DYNAMIC_DAG: &str = "dag_dynamic_v1";
-const MILESTONE_BRAIN: &str = "brain_scheduler_v5";
+const MILESTONE_BRAIN: &str = "brain_scheduler_v6";
 
 pub(super) fn required(request: &CreateExecution, definition: Option<&Value>) -> Vec<&'static str> {
     let mut features = Vec::new();
@@ -163,7 +163,7 @@ mod tests {
             id: "brain-v4".into(),
             kind: ExecutionKind::Brain,
             target: None,
-            input: json!({"schema_version":5,"layered_request":{}}),
+            input: json!({"schema_version":6,"layered_request":{}}),
             node_id: None,
         };
         assert_eq!(required(&layered, None), vec![MILESTONE_BRAIN]);

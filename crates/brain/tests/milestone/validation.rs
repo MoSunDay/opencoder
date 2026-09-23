@@ -74,7 +74,7 @@ fn rejects_incomplete_or_forged_dispatches_and_bad_input_bindings() {
     );
 }
 #[test]
-fn partial_barrier_failed_milestone_and_unconfigured_return_cannot_advance() {
+fn partial_barrier_and_failed_milestone_cannot_advance_but_can_return() {
     let req = request();
     let initial = snap(initialize("brain-gates", &req, 1).unwrap());
     let mut waiting = snap(dispatch(&initial, &req, 1));
@@ -93,18 +93,9 @@ fn partial_barrier_failed_milestone_and_unconfigured_return_cannot_advance() {
             .to_string()
             .contains("did not meet")
     );
-    let mut no_return = req.clone();
-    no_return.plan.edges.clear();
-    assert!(decide(
-        &failed,
-        &no_return,
-        &catalog(),
-        &proposal(&failed, &no_return, 1),
-        4
-    )
-    .unwrap_err()
-    .to_string()
-    .contains("not configured"));
+    let returned = decide(&failed, &req, &catalog(), &proposal(&failed, &req, 1), 4).unwrap();
+    assert_eq!(returned.run.round, 2);
+    assert_eq!(returned.run.layer, 1);
 }
 #[test]
 fn pause_retains_the_barrier_and_cancellation_accepts_a_racing_success_receipt() {

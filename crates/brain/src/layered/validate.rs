@@ -9,7 +9,7 @@ use std::collections::BTreeSet;
 pub fn validate_plan(plan: &LayeredPlan) -> Result<()> {
     ensure!(
         plan.schema_version == LAYERED_SCHEMA_VERSION,
-        "new plans require schema 5; convert the saved version explicitly"
+        "new plans require schema 6; convert the saved version explicitly"
     );
     validate_shape(plan)?;
     ensure!(

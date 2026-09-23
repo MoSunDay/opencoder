@@ -29,7 +29,7 @@ pub async fn handle(
         if let Err(error) = matches {
             return Ok(RpcReply::error(412, error.to_string()));
         }
-        let mut body = json!({"compatible":true,"features":["dag_dynamic_v1","brain_scheduler_v5","brain_pc_issue_v1","pc_candidate_v1",opencoder_core::fleet::private_files::CAPABILITY]});
+        let mut body = json!({"compatible":true,"features":["dag_dynamic_v1","brain_scheduler_v6","brain_pc_issue_v1","pc_candidate_v1",opencoder_core::fleet::private_files::CAPABILITY]});
         if input["private_files"] == true {
             body["image_digest"] = json!(tokio::task::spawn_blocking(
                 opencoder_core::fleet::private_files::runtime_image_digest
@@ -53,11 +53,12 @@ pub async fn handle(
         .records
         .get(&reference.id)
         .and_then(|record| record.assignment.request.input["schema_version"].as_u64());
-    if schema == Some(4) {
-        return super::v4::history::read(worker, reference, action, input).await;
+    if matches!(schema, Some(4 | 5)) {
+        return super::v4::history::read(worker, reference, action, input, schema.unwrap() as u32)
+            .await;
     }
-    if schema != Some(5) {
-        return Ok(RpcReply::error(409, "unsupported brain schema; expected 5"));
+    if schema != Some(6) {
+        return Ok(RpcReply::error(409, "unsupported brain schema; expected 6"));
     }
     super::v4::handle(worker, reference, action, input).await
 }

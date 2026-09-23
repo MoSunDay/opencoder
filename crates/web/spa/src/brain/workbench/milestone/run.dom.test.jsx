@@ -9,7 +9,7 @@ vi.mock('../../../fleet/detail.jsx', () => ({ ExecutionView: ({ executionRef }) 
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 function view(kind) {
   const op = (activation) => ({ activation, round: activation, layer: 1, operation_id: `operation-${activation}`, node_id: 'code', capability_id: 'cap', execution_kind: kind, execution_id: `${kind}-visit-${activation}`, status: activation === 1 ? 'error' : 'running' });
-  return { schema_version: 5, plan: { schema_version: 5, title: '闭环计划', objective: '交付', nodes: [{ node_id: 'code', layer: 1, title: 'Coding', objective: '整改', success_criteria: '验证通过', capability_ids: ['cap'] }], edges: [{ from: 'code', to: 'code', condition: '需整改' }] },
+  return { schema_version: 6, plan: { schema_version: 6, title: '闭环计划', objective: '交付', nodes: [{ node_id: 'code', layer: 1, title: 'Coding', objective: '整改', success_criteria: '验证通过', capability_ids: ['cap'] }], edges: [{ from: 'code', to: 'code', condition: '需整改' }] },
     run: { phase: 'waiting', round: 2, max_rounds: 5, activation: 2, layer: 1, valid_layers: 0 }, layers: [['code']], operations: [op(1), op(2)],
     events: [1, 2].map((activation) => ({ activation, round: activation, layer: 1, event_type: 'layer_started', decision_summary: activation === 1 ? 'dispatch_layer' : 'reflect_and_return', reason_summary: '派发依据', reflection: activation === 2 ? '修复首轮问题' : null, evidence_execution_ids: activation === 1 ? [] : [`${kind}-visit-1`], assignments: [{ node_id: 'code', capability_id: 'cap', inputs: { task: { kind: 'value', value: `任务-${activation}` } } }] })) };
 }

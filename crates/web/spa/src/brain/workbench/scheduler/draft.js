@@ -10,7 +10,7 @@ export function readDraft(key, version, storage = localStorage) {
   if (raw === null) return createDraft(version);
   let draft;
   try { draft = JSON.parse(raw); } catch { throw new Error('浏览器草稿已损坏，原文已保留'); }
-  if (!draft?.version?.id || draft.version.plan?.schema_version !== 5 || !Array.isArray(draft.version.plan.nodes)
+  if (!draft?.version?.id || draft.version.plan?.schema_version !== 6 || !Array.isArray(draft.version.plan.nodes)
     || !Array.isArray(draft.engineering) || typeof draft.version.plan.title !== 'string' || typeof draft.version.plan.objective !== 'string') throw new Error('浏览器草稿格式无效，原文已保留');
   const plan = draft.version.plan;
   if (!Array.isArray(plan.edges) || plan.nodes.length > 256 || plan.nodes.some((node) =>

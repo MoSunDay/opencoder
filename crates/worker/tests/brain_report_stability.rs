@@ -14,7 +14,7 @@ async fn unchanged_brain_report_does_not_trigger_another_report() {
     let id = "brain-report-stable";
     let reply = node.handle(NodeOperation::Create {
         assignment: assignment(&node, id, ExecutionKind::Brain,
-            json!({"schema_version":5,"layered_request":{"schema_version":5,"plan":{"schema_version":5,"title":"report","objective":"wait","nodes":[{"node_id":"work","title":"work","capability_ids":["builtin-agent-act"],"layer":1,"objective":"work","success_criteria":"verified"}]}}}), Some(json!({}))),
+            json!({"schema_version":6,"layered_request":{"schema_version":6,"plan":{"schema_version":6,"title":"report","objective":"wait","nodes":[{"node_id":"work","title":"work","capability_ids":["builtin-agent-act"],"layer":1,"objective":"work","success_criteria":"verified"}]}}}), Some(json!({}))),
     }).await;
     assert_eq!(reply.status, 200, "{reply:?}");
     settled(&node, id).await;

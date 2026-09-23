@@ -100,7 +100,7 @@ pub fn validate(
 mod tests {
     use super::*;
     fn plan(cap: &str) -> LayeredPlan {
-        serde_json::from_value(json!({"schema_version":5,"title":"nested","objective":"verify nesting", "nodes":[{"node_id":"step","title":"perform the plan","capability_ids":[cap],"layer":1,"objective":"execute","success_criteria":"verified"}]})).unwrap()
+        serde_json::from_value(json!({"schema_version":6,"title":"nested","objective":"verify nesting", "nodes":[{"node_id":"step","title":"perform the plan","capability_ids":[cap],"layer":1,"objective":"execute","success_criteria":"verified"}]})).unwrap()
     }
     fn cap(id: &str, child: Option<LayeredPlan>) -> BrainCapabilityDescriptor {
         BrainCapabilityDescriptor {

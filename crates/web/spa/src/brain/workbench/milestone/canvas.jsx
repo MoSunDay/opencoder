@@ -1,4 +1,4 @@
-import { Background, BaseEdge, Controls, Handle, MarkerType, MiniMap, Position, ReactFlow, applyNodeChanges } from '@xyflow/react';
+import { Background, Controls, Handle, MarkerType, MiniMap, Position, ReactFlow, applyNodeChanges } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { Button, Tag } from 'antd';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -7,8 +7,6 @@ import './style.css';
 function MilestoneNode({ data, selected }) {
   return <article className={`brain-milestone-node ${selected ? 'selected' : ''}`}>
     <Handle id="forward-in" type="target" position={Position.Top} isConnectable={data.editable} />
-    <Handle id="return-in" type="target" position={Position.Right} style={{ top: "30%", background: "#d46b08" }} isConnectable={data.editable} />
-    <Handle id="return-out" type="source" position={Position.Right} style={{ top: "70%", background: "#d46b08" }} isConnectable={data.editable} />
     <Tag>第 {data.node.layer} 层</Tag><strong>{data.node.title || '新里程碑'}</strong>
     <p>{data.node.objective || '点击配置目标、达成标准和能力'}</p>
     <span>{data.node.capability_ids.length} 个挂载能力</span>
@@ -17,20 +15,13 @@ function MilestoneNode({ data, selected }) {
     <Handle id="forward-out" type="source" position={Position.Bottom} isConnectable={data.editable} />
   </article>;
 }
-function ReturnEdge({ id, sourceX, sourceY, targetX, targetY, markerEnd, style, data }) {
-  const lane = Math.max(sourceX, targetX, data.boundary) + 65 + data.index * 35;
-  const path = `M ${sourceX} ${sourceY} H ${lane - 12} Q ${lane} ${sourceY} ${lane} ${sourceY - 12} V ${targetY + 12} Q ${lane} ${targetY} ${lane - 12} ${targetY} H ${targetX}`;
-  return <><BaseEdge id={id} path={path} markerEnd={markerEnd} style={style} />
-    <text x={lane + 8} y={(sourceY + targetY) / 2 + data.index * 18} fontSize={12} fill="#ad4e00" style={{ cursor: 'pointer' }} onClick={() => data.edit?.(data.edge)}><title>{data.edge.condition}</title>↶ {data.edge.condition.slice(0, 28)}</text></>;
-}
-const edgeTypes = { reflection: ReturnEdge };
 const EMPTY = {};
 function BarrierNode() {
   return <div className="brain-milestone-barrier"><Handle id="in" type="target" position={Position.Top} isConnectable={false} />全层结束 · 大脑判断<Handle id="out" type="source" position={Position.Bottom} isConnectable={false} /></div>;
 }
 const nodeTypes = { milestone: MilestoneNode, barrier: BarrierNode };
-export function MilestoneCanvas({ plan, selected, onSelect, onConnect, onMove, onParallel, onAddLayer, onEdge, positions = EMPTY, onPositions, statuses = EMPTY }) {
-  const editable = !!onConnect;
+export function MilestoneCanvas({ plan, selected, onSelect, onMove, onParallel, onAddLayer, positions = EMPTY, onPositions, statuses = EMPTY }) {
+  const editable = !!onAddLayer;
   const flow = useRef(null);
   useEffect(() => { const timer = setTimeout(() => flow.current?.fitView({ padding: 0.2, maxZoom: 1, duration: 180 }), 60); return () => clearTimeout(timer); }, [plan.nodes.length]);
   const projected = useMemo(() => groups(plan).flatMap((layer, index) => layer.map((node, column) => ({
@@ -40,9 +31,7 @@ export function MilestoneCanvas({ plan, selected, onSelect, onConnect, onMove, o
   }))), [plan, selected, positions, onParallel, statuses, editable]);
   const [nodes, setNodes] = useState(projected);
   useEffect(() => setNodes(projected), [projected]);
-  const boundary = Math.max(0, ...nodes.map((node) => node.position.x + 292));
-  const edges = plan.edges.map((edge, index) => ({ id: `${edge.from}:${edge.to}`, source: edge.from, target: edge.to,
-    sourceHandle: 'return-out', targetHandle: 'return-in', type: 'reflection', style: { stroke: '#d46b08', strokeWidth: 2 }, markerEnd: { type: MarkerType.ArrowClosed }, data: { edge, index, boundary, edit: onEdge } }));
+  const edges = [];
   const levels = groups(plan);
   const barriers = [];
   const forward = (id, source, target, sourceHandle = 'forward-out', targetHandle = 'forward-in') => ({
@@ -62,14 +51,13 @@ export function MilestoneCanvas({ plan, selected, onSelect, onConnect, onMove, o
     for (const node of levels[i]) edges.push(forward(`from:${node.node_id}`, id, node.node_id, 'out', 'forward-in'));
   }
   return <div className={`brain-milestone-canvas ${editable ? "is-editable" : ""}`} aria-label="里程碑编辑画布">
-    {editable && <div className="brain-milestone-tools"><Button onClick={onAddLayer}>＋ 新增层级</Button><Button onClick={() => onPositions?.({})}>整理布局</Button><span>同层并行 · 实线为反思回退路径</span></div>}
-    <ReactFlow onInit={(instance) => { flow.current = instance; }} nodes={[...nodes, ...barriers]} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} nodesDraggable={editable} nodesConnectable={editable} fitView minZoom={0.15} maxZoom={2}
+    {editable && <div className="brain-milestone-tools"><Button onClick={onAddLayer}>＋ 新增层级</Button><Button onClick={() => onPositions?.({})}>整理布局</Button><span>同层并行 · 大脑可回退到已执行的层</span></div>}
+    <ReactFlow onInit={(instance) => { flow.current = instance; }} nodes={[...nodes, ...barriers]} edges={edges} nodeTypes={nodeTypes} nodesDraggable={editable} nodesConnectable={false} fitView minZoom={0.15} maxZoom={2}
       onNodesChange={(changes) => setNodes((old) => applyNodeChanges(changes, old))}
-      onNodeClick={(_, node) => node.type === 'milestone' && onSelect?.(node.id)} onConnect={(edge) => onConnect?.(edge.source, edge.target)}
-      onEdgeClick={(_, edge) => edge.data && onEdge?.(edge.data.edge)}
+      onNodeClick={(_, node) => node.type === 'milestone' && onSelect?.(node.id)}
       onNodeDragStop={(_, node) => { onMove?.(node.id, Math.max(1, Math.min(levels.length + 1, Math.round(node.position.y / 280) + 1)), node.position); }}>
       <Background /><Controls showInteractive={false} /><MiniMap pannable zoomable />
     </ReactFlow>
-    {!nodes.length && <div className="brain-milestone-empty"><h3>从第一个里程碑开始</h3><p>在画布配置目标、能力与反思回退路径</p><Button type="primary" onClick={onAddLayer}>添加第一个里程碑</Button></div>}
+    {!nodes.length && <div className="brain-milestone-empty"><h3>从第一个里程碑开始</h3><p>在画布配置里程碑目标与能力</p><Button type="primary" onClick={onAddLayer}>添加第一个里程碑</Button></div>}
   </div>;
 }

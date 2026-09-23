@@ -81,7 +81,7 @@ async fn activate_json<T: serde::de::DeserializeOwned>(
         bytes.len() <= 1024 * 1024,
         "activation decision exceeds 1 MiB"
     );
-    Ok(serde_json::from_slice(&bytes)?)
+    serde_json::from_slice(&bytes).context("invalid layered decision")
 }
 
 fn private_json(path: &Path, value: &impl serde::Serialize) -> Result<()> {

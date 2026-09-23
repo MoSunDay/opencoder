@@ -3,18 +3,18 @@ use opencoder_brain::layered::*;
 use opencoder_core::brain::{layered::*, BrainCapabilityDescriptor};
 use serde_json::json;
 fn request() -> LayeredRequest {
-    serde_json::from_value(json!({"schema_version":5,"plan":{"schema_version":5,"title":"delivery","objective":"ship verified change","max_rounds":5,
+    serde_json::from_value(json!({"schema_version":6,"plan":{"schema_version":6,"title":"delivery","objective":"ship verified change","max_rounds":5,
       "nodes":[{"node_id":"code","layer":1,"title":"Coding","objective":"implement","success_criteria":"change works","capability_ids":["agent","review"]},
                {"node_id":"docs","layer":1,"title":"Docs","objective":"document","success_criteria":"accurate","capability_ids":["agent"]},
                {"node_id":"test","layer":2,"title":"Test","objective":"verify","success_criteria":"tests pass","capability_ids":["agent"]}],
-      "edges":[{"from":"test","to":"code","condition":"test failure"},{"from":"code","to":"code","condition":"implementation failure"}]}})).unwrap()
+      "edges":[]}})).unwrap()
 }
 fn catalog() -> Vec<BrainCapabilityDescriptor> {
     ["agent","review"].iter().map(|id| serde_json::from_value(json!({"capability_id":id,"kind":"agent","target":"act","input_desc":"task","output_desc":"result","definition":{},"version":"1"})).unwrap()).collect()
 }
 fn snap(change: LayeredChange) -> LayeredSnapshot {
     LayeredSnapshot {
-        schema_version: 5,
+        schema_version: 6,
         run: change.run,
         operations: change.operations,
     }

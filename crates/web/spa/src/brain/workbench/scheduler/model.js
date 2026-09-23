@@ -21,10 +21,10 @@ export function engineeringInputs(rows = []) {
 export const inputRows = (inputs = {}) => Object.entries(inputs).map(([key, value]) => ({ key, value: JSON.stringify(value) }));
 export function newVersion(version) {
   return version ? { ...version, plan: convertPlan(version.plan), version: version.version + 1, created_at: Date.now(), changelog: version.plan.schema_version === 4 ? '转换为里程碑方法论' : '更新计划' }
-    : { id: newId('plan'), version: 1, created_at: Date.now(), changelog: '创建计划', tags: [], plan: { schema_version: 5, title: '', objective: '', inputs: {}, nodes: [], edges: [], max_rounds: 5 } };
+    : { id: newId('plan'), version: 1, created_at: Date.now(), changelog: '创建计划', tags: [], plan: { schema_version: 6, title: '', objective: '', inputs: {}, nodes: [], edges: [], max_rounds: 5 } };
 }
 export function planLayers(plan) {
-  if (plan.schema_version === 5) return groups(plan).map((g) => g.map((n) => n.node_id));
+  if (plan.schema_version >= 5) return groups(plan).map((g) => g.map((n) => n.node_id));
   const remaining = new Set(plan.nodes.map((n) => n.node_id)); const done = new Set(); const layers = [];
   if (remaining.size !== plan.nodes.length) throw new Error('step ID 重复');
   for (const edge of plan.edges) if (!remaining.has(edge.from) || !remaining.has(edge.to)) throw new Error('连线引用不存在的 step');
@@ -53,17 +53,18 @@ export function launchBody(values, id, plan) {
     inputs.problem = { text, images: values.problemImages || [] };
     inputs.settings = { ...plan.plan.inputs?.settings, ...values.settings };
   }
-  return { schema_version: 5, id, node_id: values.node, inputs, plan: { id: plan.id, version: plan.version } };
+  return { schema_version: 6, id, node_id: values.node, inputs, plan: { id: plan.id, version: plan.version } };
 }
 export function removeNode(plan, id) {
   return { ...plan, nodes: plan.nodes.filter((n) => n.node_id !== id), edges: plan.edges.filter((e) => e.from !== id && e.to !== id) };
 }
 
 export function convertPlan(plan) {
-  if (plan.schema_version === 5) return structuredClone(plan);
+  if (plan.schema_version === 6) return structuredClone(plan);
+  if (plan.schema_version === 5) return { ...structuredClone(plan), schema_version: 6, edges: [] };
   if (plan.schema_version !== 4) throw new Error('不支持此计划的转换');
   const levels = planLayers(plan);
-  return { ...plan, schema_version: 5, max_rounds: 5, edges: [], nodes: plan.nodes.map((n) => ({
+  return { ...plan, schema_version: 6, max_rounds: 5, edges: [], nodes: plan.nodes.map((n) => ({
     node_id: n.node_id, title: n.title, layer: levels.findIndex((g) => g.includes(n.node_id)) + 1,
     objective: n.title, success_criteria: '', capability_ids: [n.capability_id],
   })) };

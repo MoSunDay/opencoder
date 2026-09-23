@@ -212,12 +212,12 @@ async fn old_nodes_are_excluded_from_layered_children_before_assignment() {
             "/api/executions",
             Some(json!({
                 "id":"agent-brain-incompatible", "kind":"agent", "target":"act",
-                "input":{"schema_version":5,"brain_layered":{"run_id":"root"},"prompt":"bounded task"}
+                "input":{"schema_version":6,"brain_layered":{"run_id":"root"},"prompt":"bounded task"}
             })),
         )
         .await;
     assert_eq!(code, 503, "{body}");
-    assert!(body.to_string().contains("brain_scheduler_v5"));
+    assert!(body.to_string().contains("brain_scheduler_v6"));
     assert!(h
         .state
         .fleet

@@ -30,14 +30,6 @@ async function main() {
       await page.locator('.ant-select-dropdown:visible .ant-select-item-option').first().click();
       await page.locator('.brain-milestone-inspector h3').click();
     }
-    const nodes = page.locator('.react-flow__node-milestone');
-    const source = await nodes.nth(1).locator('[data-handleid="return-out"]').boundingBox();
-    const target = await nodes.nth(0).locator('[data-handleid="return-in"]').boundingBox();
-    await page.mouse.move(source.x + source.width / 2, source.y + source.height / 2);
-    await page.mouse.down(); await page.mouse.move(target.x + target.width / 2, target.y + target.height / 2, { steps: 20 }); await page.mouse.up();
-    const edge = page.getByRole('dialog', { name: '反思回退路径', exact: true });
-    await edge.getByLabel('回退适用情形', { exact: true }).fill('验证结果未达标');
-    await edge.locator('button.ant-drawer-close').click();
     await page.getByRole('button', { name: '关闭画布', exact: true }).click();
     await page.getByRole('button', { name: '新建计划', exact: true }).click();
     await page.locator('.brain-milestone-node strong').getByText('验证结果', { exact: true }).click();
@@ -50,7 +42,7 @@ async function main() {
     const response = await saved;
     assert.equal(response.status(), 200, await response.text());
     const { version } = await response.json();
-    assert.equal(version.plan.schema_version, 5); assert.equal(version.plan.edges.length, 1);
+    assert.equal(version.plan.schema_version, 6); assert.equal(version.plan.edges.length, 0);
     assert.deepEqual(version.plan.nodes.map((node) => node.layer), [1, 2]);
     assert.equal(version.plan.max_rounds, 5);
     await page.getByRole('button', { name: /^执\s*行$/ }).click();

@@ -14,9 +14,9 @@ pub const REVIEW: &str = "review";
 /// `scan -> review`: two layers, one node per layer, both bound to an agent.
 pub fn request(_id: &str) -> Value {
     json!({
-        "schema_version": 5,
+        "schema_version": 6,
         "plan": {
-            "schema_version": 5,
+            "schema_version": 6,
             "title": "layered review",
             "objective": "inspect repository",
             "inputs": {"repo": "opencoder"},
@@ -32,7 +32,7 @@ pub fn request(_id: &str) -> Value {
                     "capability_ids": ["cap-review"], "layer":2, "objective":"review changes", "success_criteria":"review passed",
                     }
             ],
-            "edges": [{"from":SCAN,"to":SCAN,"condition":"scan needs rework"}, {"from": REVIEW, "to": SCAN, "condition":"review requires changes"}],
+            "edges": [],
             "max_rounds": 4
         },
         "inputs": {"repo": "opencoder"}

@@ -39,10 +39,10 @@ pub fn plan() -> Value {
         "提交构建复测评估报告：有修改才调用 jy-builder 并实机复测；前序受阻或无需修改时如实报告无需执行或阻塞，也完成本里程碑",
         "核对权威前序结果并提交最终产品结论，包括前后证据及未解决项；证据不足时必须以未解决结论完成报告",
     ];
-    json!({"schema_version":5,"title":"PC 问题诊断与修复","objective":"从原始文本和图片出发，以当前源码及 Windows 运行证据定位问题；必要时隔离修复、Team 构建并复测。执行结束不等于产品修复成功。禁止自动合并或发布产品。证据不足时允许以明确未解决结论完成报告，禁止虚构成功。",
+    json!({"schema_version":6,"title":"PC 问题诊断与修复","objective":"从原始文本和图片出发，以当前源码及 Windows 运行证据定位问题；必要时隔离修复、Team 构建并复测。执行结束不等于产品修复成功。禁止自动合并或发布产品。证据不足时允许以明确未解决结论完成报告，禁止虚构成功。",
         "inputs":{"problem":{"text":"","images":[]},"settings":{"workspace":"/data00/workspace","helper":"/opt/opencoder-pc-issue/current/cli.py","device_node":"","build_node":"","max_repair_rounds":2}},
         "nodes":STAGES.iter().enumerate().map(|(i,s)|json!({"node_id":s,"layer":i+1,"title":titles[i],"objective":objectives[i],"success_criteria":"以宿主接受的 pc-issue.stage/v1 报告完成里程碑。incomplete、blocked、not_needed、not_reproduced、unresolved 是有效产品结论，不能因此把已完成的报告判为里程碑失败；应向前传递缺口，直至最终报告。禁止从 impact 或 reproduce 回退。只有 verify 复测失败且存在可执行修复、轮次预算尚有余量时，才沿 verify→repair 反思回退。","capability_ids":[format!("pc-issue-{s}")]})).collect::<Vec<_>>(),
-        "edges":[{"from":"verify","to":"repair","condition":"候选复测失败且存在证据充分的修复方案，尚未达到两轮预算"}],"max_rounds":2})
+        "edges":[],"max_rounds":2})
 }
 
 pub fn validate_problem(problem: &Value) -> Result<()> {
@@ -85,7 +85,7 @@ pub fn validate_plan(plan: &super::layered::LayeredPlan) -> Result<()> {
         return Ok(());
     }
     ensure!(
-        plan.schema_version == 5 && plan.nodes.len() == STAGES.len(),
+        plan.schema_version == 6 && plan.nodes.len() == STAGES.len(),
         "PC issue plan requires the complete five-stage evidence chain"
     );
     ensure!(
@@ -101,12 +101,8 @@ pub fn validate_plan(plan: &super::layered::LayeredPlan) -> Result<()> {
         );
     }
     ensure!(
-        plan.edges.len() <= 1
-            && plan
-                .edges
-                .iter()
-                .all(|e| e.from == "verify" && e.to == "repair"),
-        "PC issue reflection must return verification to repair"
+        plan.edges.is_empty(),
+        "PC issue schema 6 has no configured return edges"
     );
     Ok(())
 }

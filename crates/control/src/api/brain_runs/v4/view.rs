@@ -86,7 +86,7 @@ async fn detail(
         .and_then(|index| layers.get(index as usize))
         .ok_or_else(|| RpcReply::error(404, "layered layer not found"))?;
     let events = read::events(state, id, snapshot.run.last_event_seq).await?;
-    if request.schema_version == 5 {
+    if request.schema_version >= 5 {
         let visits: Vec<_> = events
             .iter()
             .filter(|e| e.layer == layer && e.event_type == "layer_started")
@@ -130,7 +130,7 @@ async fn detail(
             })
             .collect();
         return Ok(
-            json!({"schema_version":5,"layer":layer,"run_phase":snapshot.run.phase,
+            json!({"schema_version":request.schema_version,"layer":layer,"run_phase":snapshot.run.phase,
             "visit":selected,"visits":visits,"nodes":nodes}),
         );
     }
@@ -227,7 +227,7 @@ async fn open(
     if assignment.request.kind != ExecutionKind::Brain
         || !matches!(
             assignment.request.input["schema_version"].as_u64(),
-            Some(4 | 5)
+            Some(4 | 5 | 6)
         )
     {
         return Err(RpcReply::error(404, "layered run not found"));

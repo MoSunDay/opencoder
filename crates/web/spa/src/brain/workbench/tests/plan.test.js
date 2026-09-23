@@ -25,13 +25,13 @@ describe('milestone plan versions', () => {
     expect(() => convertPlan({ schema_version: 3 })).toThrow('转换');
   });
   it('creates new drafts with five rounds and explicitly rejects corrupt drafts', () => {
-    expect(createDraft().version.plan.schema_version).toBe(5);expect(createDraft().version.plan.max_rounds).toBe(5);
+    expect(createDraft().version.plan.schema_version).toBe(6);expect(createDraft().version.plan.max_rounds).toBe(5);
     expect(() => readDraft('k', null, { getItem: () => '{bad' })).toThrow('损坏');
   });
   it('launches a fixed version without mutating its saved inputs', () => {
     const saved = { id: 'p', version: 2, plan: { ...newVersion().plan, inputs: { repo: 'old' } } };
     const request = launchBody({ node: 'n', engineering: [{ key: 'repo', value: '"new"' }] }, 'brain-x', saved);
-    expect(request).toEqual({ schema_version: 5, id: 'brain-x', node_id: 'n', plan: { id: 'p', version: 2 }, inputs: { repo: 'new' } });
+    expect(request).toEqual({ schema_version: 6, id: 'brain-x', node_id: 'n', plan: { id: 'p', version: 2 }, inputs: { repo: 'new' } });
     expect(saved.plan.inputs.repo).toBe('old');
   });
 });

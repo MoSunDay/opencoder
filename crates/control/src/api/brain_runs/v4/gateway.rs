@@ -30,7 +30,7 @@ pub async fn dispatch(
             .unwrap_or_default();
         child_inputs.extend(bound_inputs);
         return Ok(super::api::submit(state.clone(), json!({
-            "id":op.execution_id, "schema_version":5,
+            "id":op.execution_id, "schema_version":6,
             "plan":{"id":cap.definition["plan_id"],"version":cap.definition["version"]},
             "inputs":child_inputs, "depth":run.depth + 1,
             "parent":{"run_id":run.run_id,"operation_id":op.operation_id,"node_id":op.node_id,"layer":op.layer}
@@ -113,7 +113,7 @@ pub async fn dispatch(
     } else {
         execution_prompt(cap, step, &bound_inputs)?
     };
-    let mut input = json!({"schema_version":5,"brain_layered":{"run_id":run.run_id,"operation_id":op.operation_id,"layer":op.layer,"round":op.round,"activation":op.activation,"node_id":op.node_id,"attempt":op.attempt,"capability":super::view::capability_metadata(cap)},"bindings":bindings,"layered_inputs":bound_inputs,"prompt":prompt,"definition":cap.definition});
+    let mut input = json!({"schema_version":6,"brain_layered":{"run_id":run.run_id,"operation_id":op.operation_id,"layer":op.layer,"round":op.round,"activation":op.activation,"node_id":op.node_id,"attempt":op.attempt,"capability":super::view::capability_metadata(cap)},"bindings":bindings,"layered_inputs":bound_inputs,"prompt":prompt,"definition":cap.definition});
     if let Some(stage) = pc_stage {
         input["pc_issue_stage"] = json!(stage);
         input["images"] =

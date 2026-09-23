@@ -68,7 +68,8 @@ pub async fn run(
     let decision = if stored["generation"] == context.generation {
         serde_json::from_value(stored["decision"].clone()).map_err(Into::into)
     } else {
-        super::super::container::layered(worker, &config, &context, cancel.clone()).await
+        super::correction::decide(worker, record, &config, &context, &snapshot, cancel.clone())
+            .await
     };
     if cancel.is_cancelled() {
         anyhow::bail!("brain activation interrupted");

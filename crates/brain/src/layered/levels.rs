@@ -45,9 +45,15 @@ fn historical_layers(plan: &LayeredPlan) -> Result<Vec<Vec<String>>> {
 /// Structural shape shared by every entry point: identity, edges and bounds.
 pub(crate) fn validate_shape(plan: &LayeredPlan) -> Result<()> {
     ensure!(
-        matches!(plan.schema_version, 4 | 5),
+        matches!(plan.schema_version, 4 | 5 | 6),
         "unsupported plan schema"
     );
+    if plan.schema_version == 6 {
+        ensure!(
+            plan.edges.is_empty(),
+            "schema 6 returns are chosen by Brain; remove configured return edges"
+        );
+    }
     ensure!(
         !plan.nodes.is_empty() && plan.nodes.len() <= LAYERED_MAX_NODES,
         "a layered plan needs 1..{LAYERED_MAX_NODES} nodes"
@@ -83,7 +89,7 @@ pub(crate) fn validate_shape(plan: &LayeredPlan) -> Result<()> {
         } else {
             ensure!(
                 node.retry.is_none(),
-                "schema 5 uses Brain reflection rather than per-node retry policies"
+                "schema 6 uses Brain reflection rather than per-node retry policies"
             );
         }
         ensure!(
@@ -93,7 +99,7 @@ pub(crate) fn validate_shape(plan: &LayeredPlan) -> Result<()> {
     }
     for edge in &plan.edges {
         ensure!(
-            plan.schema_version == 5 || edge.from != edge.to,
+            plan.schema_version >= 5 || edge.from != edge.to,
             "self edges are not allowed"
         );
         ensure!(

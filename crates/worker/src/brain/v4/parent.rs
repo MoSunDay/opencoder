@@ -27,20 +27,21 @@ pub struct Reporting {
 
 /// Does this execution report to a parent operation?
 pub fn reports(input: &Value) -> bool {
-    matches!(input["schema_version"].as_u64(), Some(4 | 5))
+    matches!(input["schema_version"].as_u64(), Some(4 | 5 | 6))
         && (input["brain_layered"].is_object() || input["layered_request"]["parent"].is_object())
 }
 
 /// Leaf child: reports to a parent and owns no layered projection.
 pub fn leaf(input: &Value) -> bool {
-    matches!(input["schema_version"].as_u64(), Some(4 | 5))
+    matches!(input["schema_version"].as_u64(), Some(4 | 5 | 6))
         && input["brain_layered"].is_object()
         && !input["layered_request"].is_object()
 }
 
 /// Root of a layered projection, either depth 0 or nested below a parent plan.
 pub fn root(input: &Value) -> bool {
-    matches!(input["schema_version"].as_u64(), Some(4 | 5)) && input["layered_request"].is_object()
+    matches!(input["schema_version"].as_u64(), Some(4 | 5 | 6))
+        && input["layered_request"].is_object()
 }
 
 pub fn reporting(input: &Value) -> Result<Option<Reporting>> {

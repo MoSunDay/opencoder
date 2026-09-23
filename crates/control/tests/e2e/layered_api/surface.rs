@@ -37,7 +37,7 @@ async fn layered_view_and_rounds_read_the_node_projection() {
     let path = format!("/api/brain/runs/{RUN}/layered");
     let (status, view) = h.req(Method::GET, &path, None).await;
     assert_eq!(status, 200, "{view}");
-    assert_eq!(view["schema_version"], json!(5));
+    assert_eq!(view["schema_version"], json!(6));
     assert_eq!(view["run"]["run_id"], json!(RUN));
     assert_eq!(view["run"]["phase"], json!("waiting"));
     assert_eq!(view["run"]["layer"], json!(1));
@@ -60,7 +60,7 @@ async fn layered_view_and_rounds_read_the_node_projection() {
         let path = format!("/api/brain/runs/{RUN}/layered/rounds/{layer}");
         let (status, detail) = h.req(Method::GET, &path, None).await;
         assert_eq!(status, 200, "{detail}");
-        assert_eq!(detail["schema_version"], 5);
+        assert_eq!(detail["schema_version"], 6);
         assert_eq!(detail["layer"], layer);
         assert_eq!(detail["run_phase"], "waiting");
         assert_eq!(detail["nodes"][0]["node_id"], node);
@@ -144,7 +144,7 @@ async fn layered_events_and_snapshot_routes_delegate_for_v4_runs() {
     let path = format!("/api/brain/runs/{RUN}?offset=0");
     let (status, body) = h.req(Method::GET, &path, None).await;
     assert_eq!(status, 200, "{body}");
-    assert_eq!(body["schema_version"], json!(5));
+    assert_eq!(body["schema_version"], json!(6));
     assert_eq!(body["run"]["run_id"], json!(RUN));
     assert_eq!(body["run"]["phase"], json!("deciding"));
 }

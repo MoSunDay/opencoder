@@ -27,7 +27,7 @@ fn root(id: &str) -> ExecutionRef {
 /// Create one v4 root the way control does: the canvas is frozen in the
 /// execution input, so the node never resolves a plan of its own.
 async fn create(node: &Worker, id: &str) {
-    let input = json!({"schema_version": 5, "layered_request": plan::request(id)});
+    let input = json!({"schema_version": 6, "layered_request": plan::request(id)});
     let reply = node
         .handle(NodeOperation::Create {
             assignment: assignment(node, id, ExecutionKind::Brain, input, Some(json!({}))),
@@ -76,6 +76,53 @@ async fn root_emits_one_layered_wake_until_control_acknowledges_it() {
         control::ok(&node, id, "layered_wake_ack", json!({"generation": value})).await;
     }
     assert!(control::actions(&control::frames(&node).await, "layered_wake").is_empty());
+    node.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn invalid_decision_is_corrected_before_any_capability_is_dispatched() {
+    let (_config, _home) = isolated_config();
+    let client = Arc::new(LayeredClient::with([json!({
+        "decision":"dispatch_layer","layer":2,"assignments":[],"reason":"skip the first layer"
+    })]));
+    let dir = tempfile::tempdir().unwrap();
+    let node = worker(dir.path(), client.clone()).await;
+    let id = "brain-v6-correction";
+    create(&node, id).await;
+    control::decide_next_layer(&node, id).await;
+    let waiting = control::wait_phase(&node, id, LayeredPhase::Waiting).await;
+    assert_eq!(waiting.run.layer, 1);
+    assert_eq!(waiting.run.activation, 1);
+    assert_eq!(client.decisions(), 2);
+    assert!(client.instructions()[1].contains("Previous decision rejected"));
+    assert_eq!(control::wait_dispatch(&node, 1).await.len(), 1);
+    node.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn three_invalid_decisions_block_without_dispatching_a_capability() {
+    let (_config, _home) = isolated_config();
+    let invalid = json!({"decision":"dispatch_layer","layer":2,"assignments":[],"reason":"skip"});
+    let client = Arc::new(LayeredClient::with([
+        invalid.clone(),
+        invalid.clone(),
+        invalid,
+    ]));
+    let dir = tempfile::tempdir().unwrap();
+    let node = worker(dir.path(), client.clone()).await;
+    let id = "brain-v6-exhausted";
+    create(&node, id).await;
+    control::decide_next_layer(&node, id).await;
+    let blocked = control::wait_phase(&node, id, LayeredPhase::Blocked).await;
+    assert_eq!(client.decisions(), 3);
+    assert_eq!(blocked.run.activation, 0);
+    assert!(blocked
+        .run
+        .error
+        .as_deref()
+        .unwrap_or("")
+        .contains("after 3 attempts"));
+    assert!(control::actions(&control::frames(&node).await, "layered_dispatch").is_empty());
     node.shutdown().await.unwrap();
 }
 

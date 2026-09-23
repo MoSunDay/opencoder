@@ -11,7 +11,7 @@ fn historical_dag_can_be_drawn_without_enabling_legacy_execution() {
     assert!(layered::validate_plan(&plan)
         .unwrap_err()
         .to_string()
-        .contains("schema 5"));
+        .contains("schema 6"));
 }
 #[test]
 fn historical_run_and_events_default_new_metadata_only_for_reading() {

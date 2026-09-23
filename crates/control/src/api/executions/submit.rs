@@ -13,6 +13,22 @@ pub(crate) async fn submit_private(
     request: CreateExecution,
     private_context: Option<PrivateExecutionContext>,
 ) -> RpcReply {
+    let _parent_lock = if let Some(owner) = request.input.get("pc_issue_parent") {
+        let Some(root) = owner["run_id"].as_str() else {
+            return RpcReply::error(400, "PC parent run required");
+        };
+        let lock = match state.fleet.request_lock("brain-control", root).await {
+            Ok(lock) => lock,
+            Err(error) => return RpcReply::error(500, error.to_string()),
+        };
+        if let Err(error) = crate::api::brain_runs::pc_issue::validate_child(state, &request).await
+        {
+            return RpcReply::error(409, error.to_string());
+        }
+        Some(lock)
+    } else {
+        None
+    };
     if let Err(message) = super::private_context::validate(&request, private_context.as_ref()) {
         return RpcReply::error(400, message);
     }

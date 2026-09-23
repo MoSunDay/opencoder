@@ -49,6 +49,17 @@ pub fn public_input(input: &Value) -> Result<Value, String> {
             .ok_or("case_source must be a nonempty path")?;
         value["case_source"] = Value::String(source.into());
     }
+    if let Some(candidate) = input.get("candidate") {
+        let path = candidate["manifest_path"]
+            .as_str()
+            .filter(|s| s.starts_with('/') && !s.contains(['\n', '\r', '\0']))
+            .ok_or("candidate manifest_path must be an absolute path")?;
+        let hash = candidate["sha256"]
+            .as_str()
+            .filter(|s| s.len() == 64 && s.bytes().all(|b| b.is_ascii_hexdigit()))
+            .ok_or("candidate manifest sha256 required")?;
+        value["candidate"] = serde_json::json!({"manifest_path":path,"sha256":hash});
+    }
     Ok(value)
 }
 
@@ -125,5 +136,14 @@ mod tests {
         ] {
             assert!(definition(&input).is_err());
         }
+    }
+
+    #[test]
+    fn candidate_identity_is_frozen_into_the_controlled_definition() {
+        let mut input = serde_json::json!({"device_count":1,"case_ids":["original"],"candidate":{"manifest_path":"/private/candidate.json","sha256":"a".repeat(64)}});
+        let original = definition(&input).unwrap();
+        assert!(original.description.unwrap().contains("candidate.json"));
+        input["candidate"]["sha256"] = serde_json::json!("changed");
+        assert!(definition(&input).is_err());
     }
 }

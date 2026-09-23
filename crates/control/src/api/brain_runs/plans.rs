@@ -36,6 +36,7 @@ pub async fn save(State(state): State<Arc<AppState>>, Json(body): Json<Value>) -
 async fn validate_layered(state: &Arc<AppState>, value: Value) -> anyhow::Result<LayeredPlan> {
     let plan: LayeredPlan = serde_json::from_value(value)?;
     opencoder_brain::layered::validate_plan(&plan)?;
+    opencoder_core::brain::pc_issue::validate_plan(&plan)?;
     let request = LayeredRequest {
         schema_version: LAYERED_SCHEMA_VERSION,
         inputs: plan.inputs.clone(),

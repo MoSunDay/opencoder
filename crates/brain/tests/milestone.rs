@@ -189,3 +189,35 @@ fn only_all_successful_layers_can_complete_and_cycles_do_not_affect_grouping() {
 
 #[path = "milestone/validation.rs"]
 mod validation;
+
+#[test]
+fn resumed_decision_receives_exact_assessment_keys_and_previous_rejection() {
+    let req = request();
+    let first = snap(initialize("brain-feedback", &req, 1).unwrap());
+    let first = snap(dispatch(&first, &req, 1));
+    let first = finish(first, &req, LayeredOperationStatus::Done);
+    let last = snap(dispatch(&first, &req, 2));
+    let last = finish(last, &req, LayeredOperationStatus::Done);
+    let rejected = snap(block(
+        &last,
+        "assess every current milestone exactly once".into(),
+        20,
+    ));
+    let resumed = snap(command(&rejected, &req.plan, "resume", 21).unwrap());
+    let mut admitted = resumed;
+    admitted.run.phase = LayeredPhase::Deciding;
+    let context = layer_context(&admitted, &req, &catalog(), Default::default(), None).unwrap();
+    let prompt: serde_json::Value = serde_json::from_str(&instruction(&context).unwrap()).unwrap();
+    assert_eq!(prompt["assessment_node_ids"], json!(["test"]));
+    assert_eq!(
+        prompt["run"]["error"],
+        "assess every current milestone exactly once"
+    );
+    let decision = serde_json::from_value(json!({"decision":"complete","reason":"verified",
+        "summary":"all done","assessments":{"test":{"met":true,"reason":"tests passed"}}}))
+    .unwrap();
+    admitted.run.phase = LayeredPhase::Deciding;
+    let completed = decide(&admitted, &req, &catalog(), &decision, 23).unwrap();
+    assert_eq!(completed.run.phase, LayeredPhase::Completed);
+    assert!(completed.run.error.is_none());
+}

@@ -19,26 +19,10 @@ pub async fn dispatch(
         .await?
         .context("layered root assignment missing")?;
     let request = root.request.input["layered_request"].clone();
-    let mut bound_inputs = serde_json::Map::new();
-    for (name, binding) in &assignment.inputs {
-        let value = match binding {
-            BrainInputBinding::Value { value } => value.clone(),
-            BrainInputBinding::Root { name: root_name } => request["inputs"][root_name].clone(),
-            BrainInputBinding::Artifact { reference } => request["artifacts"][reference].clone(),
-            BrainInputBinding::Execution { execution_id, path } => {
-                let index = state
-                    .fleet
-                    .index(execution_id)
-                    .await?
-                    .context("referenced execution index missing")?;
-                super::read::output(state, &index, path).await?
-            }
-        };
-        bound_inputs.insert(name.clone(), value);
-    }
+    let pc_stage = opencoder_core::brain::pc_issue::stage(&cap.capability_id);
+    let mut bound_inputs = resolve_inputs(state, assignment, &request, pc_stage).await?;
     let plan: LayeredPlan = serde_json::from_value(request["plan"].clone())?;
     let step = plan.node(&op.node_id).context("dispatch step missing")?;
-    let pc_stage = opencoder_core::brain::pc_issue::stage(&cap.capability_id);
     if cap.kind == ExecutionKind::Brain {
         let mut child_inputs = cap.definition["plan"]["inputs"]
             .as_object()
@@ -151,6 +135,38 @@ pub async fn dispatch(
     .await)
 }
 
+// PC stages have a fixed host-owned input contract. Resolving model-supplied
+// pointers first can stall dispatch forever (e.g. "/" is not the JSON root),
+// or read unrelated executions, even though those values would be overwritten.
+async fn resolve_inputs(
+    state: &Arc<AppState>,
+    assignment: &LayeredAssignment,
+    request: &serde_json::Value,
+    pc_stage: Option<&str>,
+) -> Result<serde_json::Map<String, serde_json::Value>> {
+    if pc_stage.is_some() {
+        return Ok(serde_json::Map::new());
+    }
+    let mut bound_inputs = serde_json::Map::new();
+    for (name, binding) in &assignment.inputs {
+        let value = match binding {
+            BrainInputBinding::Value { value } => value.clone(),
+            BrainInputBinding::Root { name: root_name } => request["inputs"][root_name].clone(),
+            BrainInputBinding::Artifact { reference } => request["artifacts"][reference].clone(),
+            BrainInputBinding::Execution { execution_id, path } => {
+                let index = state
+                    .fleet
+                    .index(execution_id)
+                    .await?
+                    .context("referenced execution index missing")?;
+                super::read::output(state, &index, path).await?
+            }
+        };
+        bound_inputs.insert(name.clone(), value);
+    }
+    Ok(bound_inputs)
+}
+
 // Deliberately accepts no root plan or global reflection: the scheduler must
 // translate rework into explicit inputs for this capability's bounded task.
 fn execution_prompt(
@@ -184,6 +200,34 @@ fn execution_prompt(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn pc_inputs_never_resolve_untrusted_execution_pointers() {
+        let directory = tempfile::tempdir().unwrap();
+        let _scope = opencoder_core::config::scoped_config_home(directory.path().join("config"));
+        let state = crate::new_state(
+            directory.path().join("work"),
+            directory.path().join("data"),
+            None,
+        )
+        .await
+        .unwrap();
+        let assignment: LayeredAssignment = serde_json::from_value(json!({
+            "node_id":"reproduce", "capability_id":"pc-issue-reproduce", "reason":"next",
+            "inputs":{"previous":{"kind":"execution","execution_id":"operator-unrelated","path":"/"}}
+        })).unwrap();
+        let request = json!({"inputs":{"problem":{"text":"original"}}});
+        assert!(
+            resolve_inputs(&state, &assignment, &request, Some("reproduce"))
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        // Generic capability bindings remain explicit and must resolve correctly.
+        assert!(resolve_inputs(&state, &assignment, &request, None)
+            .await
+            .is_err());
+    }
 
     #[test]
     fn capability_receives_local_criteria_and_explicit_remediation_inputs() {

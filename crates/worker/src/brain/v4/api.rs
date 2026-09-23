@@ -151,6 +151,10 @@ pub async fn handle(
         }
         "set_round_budget" => {
             ensure!(
+                !opencoder_core::brain::pc_issue::is_plan(&request.plan),
+                "PC issue repair budget is frozen with its input and cannot be extended"
+            );
+            ensure!(
                 matches!(
                     snapshot.run.phase,
                     LayeredPhase::Blocked | LayeredPhase::Paused

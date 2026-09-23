@@ -4,6 +4,16 @@ import json
 import re
 
 
+def inspection(snapshot):
+    execution = snapshot.get('execution', {})
+    status = execution.get('status')
+    if not isinstance(status, str):
+        raise ValueError('Execution response has no status')
+    return {'status': status,
+            'terminal': status in ('done', 'error', 'cancelled', 'interrupted'),
+            'error': execution.get('error'), 'details': snapshot}
+
+
 def identity(root, stage, round_number, kind):
     if not re.fullmatch(r'brain-[A-Za-z0-9_.-]+', root) or stage not in ('reproduce', 'verify'):
         raise ValueError('Expected root brain ID and reproduce/verify stage')

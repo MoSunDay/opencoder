@@ -13,6 +13,9 @@ Forward dispatch is only to current layer + 1 and requires the current milestone
 If results require rework, use an allowed reflection edge to the same or an earlier layer.
 Returning begins the next round, invalidating that layer and subsequent layers' earlier achievements.
 Every dispatch after the first and every completion MUST include assessments: an object keyed by EVERY current-layer node_id, each value {"met":true|false,"reason":"evidence-based assessment"}. Initial dispatch has assessments {}. Forward requires all met=true.
+The assessments keys MUST equal assessment_node_ids exactly, including on complete.
+Do not re-assess earlier layers; their evidence may appear in the summary only.
+If run.error records a rejected decision, correct that validation error; do not treat it as a capability failure.
 Explain the reflection, problems to fix and evidence. The context's previous results are historical evidence,
 not automatically valid current outputs. Do not invent output values or execution IDs.
 First dispatch layer 1. Complete only after the final layer passes, never early.
@@ -34,8 +37,16 @@ pub fn instruction(context: &LayeredContext) -> Result<String> {
         "capability_id":c.capability_id,"kind":c.kind,"version":c.version,"input_desc":c.input_desc,
         "output_desc":c.output_desc,"required_inputs":c.required_inputs
     })).collect::<Vec<_>>();
+    let assessment_node_ids: Vec<_> = context
+        .request
+        .plan
+        .nodes
+        .iter()
+        .filter(|node| node.layer == context.layer)
+        .map(|node| &node.node_id)
+        .collect();
     let instruction = serde_json::to_string(
-        &json!({"schema_version":5,"run":context.run,"plan":context.request.plan,
+        &json!({"schema_version":5,"run":context.run,"plan":context.request.plan,"assessment_node_ids":assessment_node_ids,
         "capabilities":capabilities,"root_inputs":context.request.inputs,"artifacts":context.request.artifacts,"todo":context.todo,
         "operations":context.operations,"summaries":context.summaries}),
     )?;

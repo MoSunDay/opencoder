@@ -1,6 +1,6 @@
 import { Alert, Button, Drawer, Empty, Input, Select, Space, Table, Tag, Typography } from 'antd';
 import { useRef, useState } from 'react';
-import { apiGet } from '../../api.js';
+import { apiGet, apiPost } from '../../api.js';
 import { useStore } from '../../store.js';
 import { draftKey } from './scheduler/draft.js';
 import { PlanEditor, PlanPreview } from './scheduler/editor.jsx';
@@ -19,7 +19,8 @@ export function Plans({ plans, capabilities, reload, onRun }) {
     } catch (error) { setError(error.message); }
   };
   const compare = async () => { try { setDiff(await apiGet(`/api/brain/plan-defs/${encodeURIComponent(view.id)}/diff?from=${view.version - 1}&to=${view.version}`)); } catch (error) { setError(error.message); } };
-  return <><Space style={{ marginBottom: 16 }}><Input.Search placeholder="搜索计划名称" value={search} onChange={(event) => setSearch(event.target.value)} /><Button type="primary" onClick={() => setEditor({ creating: true })}>新建计划</Button></Space>
+  return <><Space style={{ marginBottom: 16 }}><Input.Search placeholder="搜索计划名称" value={search} onChange={(event) => setSearch(event.target.value)} /><Button type="primary" onClick={() => setEditor({ creating: true })}>新建计划</Button>
+    <Button onClick={async () => { try { const result = await apiPost('/api/brain/pc-issue/plan'); await reload(); onRun(`${result.definition.id}@${result.definition.latest_version}`); } catch (e) { setError(e.message); } }}>PC 问题诊断与修复</Button></Space>
     {error && <Alert type="error" showIcon title={error} />}
     <Table rowKey="id" pagination={{ pageSize: 10 }} dataSource={plans.filter((p) => `${p.title} ${p.id}`.toLowerCase().includes(search.toLowerCase()))} columns={[
       { title: '计划', dataIndex: 'title', render: (title, p) => <Button type="link" onClick={() => open(p)}>{title}</Button> },

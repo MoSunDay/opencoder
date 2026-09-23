@@ -1,0 +1,17 @@
+[Unit]
+Description=Device cases Codex DAG execution node
+After=network-online.target device-manager.service
+Wants=network-online.target device-manager.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/var/lib/opencoder-device-cases/work
+ExecStart=@BUNDLE@/bin/opencoder-agent --workdir /var/lib/opencoder-device-cases/work --data-dir /var/lib/opencoder-device-cases/data --remote http://127.0.0.1:18081 --name device-cases --max-runs 2 --token-file /etc/opencoder/server.token
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=660
+KillMode=mixed
+
+[Install]
+WantedBy=multi-user.target

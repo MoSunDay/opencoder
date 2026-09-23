@@ -12,6 +12,8 @@ import { LayeredEvents } from './events.jsx';
 import { LayerRounds } from './rounds.jsx';
 import { LAYERED_COLORS, LAYERED_PHASES, barrier, layeredPhase, planOf, terminalPhase } from './model.js';
 import './style.css';
+import { ProblemView } from '../problem/view.jsx';
+import { ProblemResults } from '../problem/results.jsx';
 
 // Execution events refresh the view; periodic reads also report connection failures.
 const CONNECTION_TEXT = {
@@ -85,4 +87,7 @@ function LegacyRunBody({ view, id, connection, refresh, onNotice }) {
   </>;
 }
 
-export function LayeredRunBody(props) { return props.view.schema_version === 5 ? <MilestoneRunBody {...props} /> : <LegacyRunBody {...props} />; }
+export function LayeredRunBody(props) {
+  return <><ProblemView problem={props.view.problem} /><ProblemResults results={props.view.problem_results} />
+    {props.view.schema_version === 5 ? <MilestoneRunBody {...props} /> : <LegacyRunBody {...props} />}</>;
+}

@@ -17,12 +17,14 @@ async function inspectPanels({ base, token, id, view, operations, marker, eviden
     await page.goto(`${base}/?brain_run=${id}`, { waitUntil: 'domcontentloaded' });
     await page.getByRole('radiogroup').getByText('Agent', { exact: true }).click();
     await page.getByRole('menuitem', { name: '大脑调度' }).click();
-    await page.locator('.brain-run-header').first().getByText('已完成', { exact: true }).waitFor();
+    await page.locator('.brain-run').first().getByText('已完成', { exact: true }).waitFor();
     await page.locator('.react-flow__controls-fitview').click();
     await page.screenshot({ path: path.join(evidence, 'overview.png'), animations: 'disabled' });
     for (const op of operations) {
-      await page.getByTestId(`rf__node-${op.node_id}`).locator('.brain-layer-node-title').click();
-      const drawer = page.getByRole('dialog', { name: '能力运行明细', exact: true });
+      await page.getByLabel('选择历史层激活', { exact: true }).click();
+      await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: `第 ${op.round} 轮 · 第 ${op.layer} 层 ·` }).click();
+      await page.getByTestId(`rf__node-${op.node_id}`).locator('.brain-milestone-node strong').click();
+      const drawer = page.getByRole('dialog', { name: '能力执行明细', exact: true });
       await drawer.waitFor();
       await drawer.locator('.execution-view-full').waitFor();
       if (op.execution_kind === 'dag') {
@@ -39,8 +41,8 @@ async function inspectPanels({ base, token, id, view, operations, marker, eviden
         await drawer.locator('.execution-team-turn').first().waitFor();
         await drawer.getByText(marker, { exact: false }).last().waitFor();
       } else if (op.execution_kind === 'brain') {
-        await drawer.locator('.brain-layer-node').waitFor();
-        await drawer.locator('.brain-run-header').getByText('已完成', { exact: true }).waitFor();
+        await drawer.locator('.brain-milestone-node').waitFor();
+        await drawer.locator('.brain-run').getByText('已完成', { exact: true }).waitFor();
       } else {
         await drawer.getByRole('img', { name: 'Agent', exact: true }).first().waitFor();
         await drawer.getByText(marker, { exact: false }).last().waitFor();
@@ -50,7 +52,7 @@ async function inspectPanels({ base, token, id, view, operations, marker, eviden
       panels.push({ kind: op.execution_kind, id: op.execution_id, content: 'PASS' });
       await drawer.locator('button.ant-drawer-close').click(); await drawer.waitFor({ state: 'hidden' });
     }
-    const firstLayer = page.locator('.brain-rounds .ant-collapse-header').filter({ hasText: '层 1' });
+    const firstLayer = page.locator('.brain-run > .ant-collapse .ant-collapse-header').filter({ hasText: '第 1 轮 · 第 1 层 ·' });
     if (await firstLayer.getAttribute('aria-expanded') !== 'true') await firstLayer.click();
     const reason = view.events.find((event) => event.layer === 1 && event.event_type === 'layer_started').reason_summary;
     await page.getByText(reason, { exact: true }).waitFor();

@@ -9,6 +9,10 @@ pub(super) fn prompt(prompt: String, root: Option<&Path>) -> String {
 }
 
 pub(super) fn bind(bundle: &Path, root: &Path) -> Result<()> {
+    bind_at(bundle, root, GUEST_ROOT)
+}
+
+pub(super) fn bind_at(bundle: &Path, root: &Path, guest: &str) -> Result<()> {
     ensure!(root.is_absolute(), "private task root must be absolute");
     let meta = std::fs::symlink_metadata(root).context("private task directory unavailable")?;
     ensure!(
@@ -17,7 +21,11 @@ pub(super) fn bind(bundle: &Path, root: &Path) -> Result<()> {
     );
     let config_path = bundle.join("config.json");
     let mut config: serde_json::Value = serde_json::from_slice(&std::fs::read(&config_path)?)?;
-    let target = bundle.join("rootfs/run/opencoder-task");
+    ensure!(
+        matches!(guest, GUEST_ROOT | "/run/opencoder-device"),
+        "unsupported private mount"
+    );
+    let target = bundle.join("rootfs").join(guest.trim_start_matches('/'));
     for parent in target.ancestors().take_while(|path| *path != bundle) {
         if let Ok(meta) = std::fs::symlink_metadata(parent) {
             ensure!(
@@ -31,12 +39,10 @@ pub(super) fn bind(bundle: &Path, root: &Path) -> Result<()> {
         .as_array_mut()
         .context("OCI mount list missing")?;
     ensure!(
-        !mounts
-            .iter()
-            .any(|mount| mount["destination"] == GUEST_ROOT),
+        !mounts.iter().any(|mount| mount["destination"] == guest),
         "duplicate private task mount"
     );
-    mounts.push(serde_json::json!({"destination":GUEST_ROOT,"type":"bind","source":root,"options":["rbind","ro","nosuid","nodev"]}));
+    mounts.push(serde_json::json!({"destination":guest,"type":"bind","source":root,"options":["rbind","ro","nosuid","nodev"]}));
     opencoder_core::atomic_write(&config_path, &serde_json::to_vec_pretty(&config)?)?;
     Ok(())
 }

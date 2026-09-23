@@ -1,0 +1,27 @@
+{
+  "agent": {
+    "agents_dir": "/opt/device-cases/agents",
+    "runtime": {
+      "profiles": {
+        "device-cases": {
+          "revision": 1,
+          "settings": {
+            "executable": "/usr/local/bin/codex",
+            "model": "gpt-6-astra",
+            "reasoning_effort": "medium",
+            "sandbox_mode": "danger-full-access",
+            "approval_policy": "never"
+          }
+        }
+      }
+    }
+  },
+  "dag": {
+    "agent_sandbox": "host",
+    "device_manager": {
+      "host_endpoint": "http://127.0.0.1:18279",
+      "step_endpoint": "http://127.0.0.1:18279",
+      "token_file": "/etc/device-manager/admin.token"
+    }
+  }
+}

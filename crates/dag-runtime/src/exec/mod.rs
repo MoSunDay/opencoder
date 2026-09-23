@@ -2,6 +2,7 @@
 
 pub mod agent;
 pub mod agent_runc;
+mod device;
 pub mod how_append;
 pub mod how_copy;
 pub mod logs;

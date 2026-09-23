@@ -197,6 +197,15 @@ pub async fn resolve(
             return Err(RpcReply::error(409, "unsupported brain schema; expected 4"));
         }
         ExecutionKind::Team | ExecutionKind::Dag => {
+            if request.kind == ExecutionKind::Dag
+                && request.target.as_deref() == Some(opencoder_dag::devices::NAME)
+            {
+                let spec = opencoder_dag::devices::definition(&request.input)
+                    .map_err(|e| RpcReply::error(400, e))?;
+                return Ok(Some(
+                    serde_json::to_value(spec).map_err(|e| fail(e.into()))?,
+                ));
+            }
             if request.kind == ExecutionKind::Team && request.target.as_deref() == Some("system") {
                 return Err(RpcReply::error(400, "system team execution is retired"));
             }

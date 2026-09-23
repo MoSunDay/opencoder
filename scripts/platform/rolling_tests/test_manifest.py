@@ -77,7 +77,7 @@ class ResourceTests(unittest.TestCase):
             path = root / 'brain' / 'brain-retained' / 'execution.json'
             path.parent.mkdir(parents=True)
             settings = Settings(root, root, root, root, root / 'token')
-            for candidate, active in ((5, 4), (4, 5)):
+            for candidate, active in ((5, 4), (4, 5), (6, 5), (5, 6)):
                 record = {'assignment': {'request': {'id': 'brain-retained', 'kind': 'brain',
                     'input': {'schema_version': active}}, 'index': {'status': 'idle'}}}
                 path.write_text(json.dumps(record))
@@ -89,8 +89,9 @@ class ResourceTests(unittest.TestCase):
                 path.write_text(json.dumps(record))
                 brain_preflight(settings, {'protocol_version': 10, 'brain_schema_version': candidate}, [{'runtime_data': str(root)}])
             record['assignment']['index']['status'] = 'running'
+            record['assignment']['request']['input']['schema_version'] = 6
             path.write_text(json.dumps(record))
-            brain_preflight(settings, {'protocol_version': 10, 'brain_schema_version': 5}, [{'runtime_data': str(root)}])
+            brain_preflight(settings, {'protocol_version': 10, 'brain_schema_version': 6}, [{'runtime_data': str(root)}])
 
     def test_every_reported_mount_must_be_verified_local_storage(self):
         with tempfile.TemporaryDirectory() as directory:

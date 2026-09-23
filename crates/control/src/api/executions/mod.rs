@@ -24,7 +24,7 @@ pub async fn create(
     if request.kind == ExecutionKind::Brain {
         return response(RpcReply::error(
             409,
-            "Brain runs require schema_version: 5; use /api/brain/runs",
+            "Brain runs require schema_version: 6; use /api/brain/runs",
         ));
     }
     if identity

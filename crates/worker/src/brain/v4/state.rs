@@ -1,4 +1,4 @@
-//! Journal and projection access for a schema_version 4 layered root.
+//! Journal and projection access for the current layered root.
 //!
 //! The journal owns the frozen request and the finite activation markers; the
 //! layered tables own the run, the operation indexes and the events only.
@@ -19,7 +19,7 @@ pub async fn load(worker: &Worker, id: &str) -> Result<LayeredSnapshot> {
         .store
         .brain_layered(id)
         .await?
-        .context("v4 layered run missing")
+        .context("layered run missing")
 }
 
 /// Parse and validate a frozen layered request.
@@ -32,13 +32,13 @@ pub fn parse_request(input: &Value) -> Result<LayeredRequest> {
     let value = ["layered_request", "request"]
         .iter()
         .filter_map(|key| input.get(*key))
-        .find(|value| value["schema_version"] == 5)
+        .find(|value| value["schema_version"] == 6)
         .cloned()
         .or_else(|| {
             let plan = input.get("plan")?;
-            (plan["schema_version"] == 5).then(|| {
+            (plan["schema_version"] == 6).then(|| {
                 json!({
-                    "schema_version":5,
+                    "schema_version":6,
                     "plan":plan,
                     "inputs":input.get("inputs").cloned().unwrap_or_else(|| json!({})),
                 })
@@ -72,7 +72,7 @@ pub async fn annotate(worker: &Worker, id: &str, key: &str, value: Value) -> Res
 /// phase and the summary are the only things a parent plan binds to.
 pub fn result(snapshot: &LayeredSnapshot) -> LayeredRunResult {
     LayeredRunResult {
-        schema_version: 5,
+        schema_version: 6,
         phase: snapshot.run.phase,
         layer: snapshot.run.layer,
         error: snapshot.run.error.clone(),

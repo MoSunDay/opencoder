@@ -128,7 +128,7 @@ pub fn command(
             } else {
                 LayeredPhase::Waiting
             };
-            update.run.error = None;
+            // Keep the rejection visible to the next decision. A valid decision clears it.
         }
         "cancel" => {
             update.run.phase = LayeredPhase::Cancelled;

@@ -209,6 +209,7 @@ pub fn decide(
             assess(&mut update, snapshot, request, assessments, true)?;
             update.run.valid_layers = snapshot.run.layer;
             update.run.phase = LayeredPhase::Completed;
+            update.run.error = None;
             update.run.summary = Some(summary.clone());
             let mut e = event(&update.run, "run_completed", Some(reason.clone()));
             e.decision_summary = Some("complete".into());

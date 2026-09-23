@@ -98,15 +98,17 @@ def chain(root):
     for todo in spec['todos']:
         path = root / (todo['id'] + '.py')
         atomic_bytes(path, scripts[todo['id']].encode(), 0o644)
-        command = 'python3 ' + shlex.quote(str(path))
+        command = 'timeout 600; python3 ' + shlex.quote(str(path))
         todo['instructions'] = (
-            '必须使用 bash 工具执行下面的命令，并在脚本自然返回后才提交候选结果。'
-            '脚本可能等待发布程序自动释放信号，不需要用户操作，不得自行创建 release 文件。'
-            '若工具转为后台运行，请等待并检查脚本完成，不得提前声称完成。'
-            '不得修改脚本或项目文件。命令：' + command)
+            '唯一工作是使用 bash 工具原样执行下面的一条命令，前台等待脚本自然返回，然后提交结果。'
+            '命令中的 timeout 600; 是 bash 工具的前台等待预算，不得移除或改写。'
+            '禁止主动后台化：不得使用 &、nohup、setsid、额外 shell 或重定向。'
+            '脚本等待发布程序自动释放信号，不需要用户操作，不得自行创建 release 文件。'
+            '不得执行任何额外命令，不得查看其他验收目录或进程，不得修改脚本或项目文件。'
+            '命令：' + command)
         todo['acceptance'] = {
             'criteria': f'脚本已真实执行并自然返回，{root / (todo["id"] + ".done")} 存在且包含脚本输出；结果附真实工具证据。',
-            'required_tool_calls': [{'name': 'bash', 'arguments_contains': {}, 'result_ok': True}],
+            'required_tool_calls': [{'name': 'bash', 'arguments_contains': {'command': command}, 'result_ok': True}],
         }
     return spec
 

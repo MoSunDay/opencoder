@@ -5,6 +5,7 @@
 //! operation indexes and the events. Layers are recomputed from the plan with
 //! `opencoder_brain::layered::layers` and are never persisted.
 pub(crate) mod api;
+mod correction;
 mod evidence;
 pub(crate) mod history;
 pub(crate) mod outbox;

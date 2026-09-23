@@ -79,8 +79,8 @@ fn root(id: &str) -> ExecutionRef {
 /// One-node plan bound to the built-in agent capability, so no catalog seed
 /// is needed and layer 1 is always dispatchable.
 fn layered_request() -> Value {
-    json!({"schema_version":5,
-        "plan":{"schema_version":5,"title":"layered wake","objective":"admit one generation",
+    json!({"schema_version":6,
+        "plan":{"schema_version":6,"title":"layered wake","objective":"admit one generation",
             "nodes":[{"node_id":"scan","title":"Scan","layer":1,
                 "objective":"inspect", "success_criteria":"evidence read",
                 "capability_ids":["builtin-agent-act"]}],
@@ -91,7 +91,7 @@ fn layered_request() -> Value {
 /// A layered snapshot the node could own: `phase`, `generation` and `layer`
 /// are the only fields these tests vary.
 fn snapshot(id: &str, phase: &str, generation: u64, layer: u32) -> Value {
-    json!({"schema_version":5,
+    json!({"schema_version":6,
         "run":{"run_id":id,"phase":phase,"layer":layer,"generation":generation,
             "last_event_seq":0,"error":null,"created_at":1,"updated_at":2},
         "operations":[]})
@@ -114,7 +114,7 @@ async fn attach_assignment(state: &Arc<crate::AppState>, id: &str) {
             id: id.into(),
             kind: ExecutionKind::Brain,
             target: None,
-            input: json!({"schema_version":5,"layered_request":layered_request(),
+            input: json!({"schema_version":6,"layered_request":layered_request(),
                 "frozen_capabilities":[{"capability_id":"builtin-agent-act","kind":"agent",
                 "target":"act","input_desc":"input","output_desc":"output","required_inputs":[],
                 "definition":{"name":"act"},"version":"1"}]}),

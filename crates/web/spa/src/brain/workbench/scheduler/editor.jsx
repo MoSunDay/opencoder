@@ -5,21 +5,21 @@ import { newId } from '../../../fleet/model.js';
 import { LayerCanvas } from '../layered/canvas.jsx';
 import { MilestoneCanvas } from '../milestone/canvas.jsx';
 import { MilestoneInspector } from '../milestone/inspector.jsx';
-import { connect, groups, milestone, moveMilestone, removeMilestone, validateGraph } from '../milestone/model.js';
+import { groups, milestone, moveMilestone, removeMilestone, validateGraph } from '../milestone/model.js';
 import { useDraft } from './draft.js';
 import { EngineeringFields } from './fields.jsx';
 import { available, engineeringInputs, planLayers, validatePlan } from './model.js';
 
 export function PlanPreview({ plan }) {
   try {
-    if (plan.schema_version === 5) return <div className="brain-milestone-preview"><MilestoneCanvas plan={plan} /></div>;
+    if (plan.schema_version >= 5) return <div className="brain-milestone-preview"><MilestoneCanvas plan={plan} /></div>;
     return <LayerCanvas view={{ plan, layers: planLayers(plan), operations: [], run: {} }} />;
   } catch (error) { return <Alert type="error" title={error.message} />; }
 }
 export const PlanEditor = forwardRef(function PlanEditor({ version, cacheKey, capabilities, onSaved, onClose }, ref) {
   const { draft, setDraft, error: cacheError, persist, clear, discard } = useDraft(cacheKey, version);
   const [error, setError] = useState(''); const [busy, setBusy] = useState(false);
-  const [selected, setSelected] = useState(null); const [edge, setEdge] = useState(null); const [submitOpen, setSubmitOpen] = useState(false);
+  const [selected, setSelected] = useState(null); const [submitOpen, setSubmitOpen] = useState(false);
   const [form] = Form.useForm();
   const close = () => { if (!busy && (!draft || persist())) onClose(); };
   useImperativeHandle(ref, () => ({ close }));
@@ -42,23 +42,17 @@ export const PlanEditor = forwardRef(function PlanEditor({ version, cacheKey, ca
     } catch (e) { setError(e.message); } finally { setBusy(false); }
   };
   return <div className="brain-method-editor">
-    <div className="brain-method-toolbar"><Space><Button disabled={busy} onClick={close}>关闭画布</Button><Typography.Text strong>配置里程碑与反思路径</Typography.Text><Typography.Text type="secondary">草稿自动保存 · v{draft.version.version}</Typography.Text></Space><Button type="primary" disabled={busy || !!cacheError} onClick={next}>下一步：计划信息</Button></div>
+    <div className="brain-method-toolbar"><Space><Button disabled={busy} onClick={close}>关闭画布</Button><Typography.Text strong>配置里程碑与能力</Typography.Text><Typography.Text type="secondary">草稿自动保存 · v{draft.version.version}</Typography.Text></Space><Button type="primary" disabled={busy || !!cacheError} onClick={next}>下一步：计划信息</Button></div>
     {(error || cacheError) && <Alert type="error" showIcon title={cacheError || error} />}
     <div className="brain-method-workspace">
       <MilestoneCanvas plan={plan} selected={selected} onSelect={setSelected} positions={draft.layout || {}} onPositions={positions}
         onParallel={add} onAddLayer={() => add(groups(plan).length + 1)}
-        onConnect={(from, to) => attempt(() => { update(connect(plan, from, to)); setEdge({ from, to }); })}
         onMove={(id, layer, position) => attempt(() => { const moved = moveMilestone(plan, id, layer); update(moved); positions(moved.nodes.find((n) => n.node_id === id).layer !== plan.nodes.find((n) => n.node_id === id).layer ? {} : { ...draft.layout, [id]: { ...position, y: (layer - 1) * 280 } }); })}
-        onEdge={setEdge} />
+        />
       <MilestoneInspector node={plan.nodes.find((n) => n.node_id === selected)} capabilities={caps} onChange={change} layers={groups(plan).length}
         onLayer={(layer) => attempt(() => { update(moveMilestone(plan, selected, layer)); positions({}); })}
         onDelete={() => { update(removeMilestone(plan, selected)); setSelected(null); positions({}); }} />
     </div>
-    <Drawer open={!!edge} onClose={() => setEdge(null)} title="反思回退路径" size={400}>
-      {edge && <><Typography.Paragraph>当前层全部执行结束后，大脑可以沿此路径反思并回退，开启下一轮。</Typography.Paragraph>
-        <Input.TextArea aria-label="回退适用情形" value={plan.edges.find((e) => e.from === edge.from && e.to === edge.to)?.condition || ''} maxLength={1024} onChange={(e) => update({ ...plan, edges: plan.edges.map((item) => item.from === edge.from && item.to === edge.to ? { ...item, condition: e.target.value } : item) })} />
-        <Button danger onClick={() => { update({ ...plan, edges: plan.edges.filter((item) => item.from !== edge.from || item.to !== edge.to) }); setEdge(null); }}>删除回退线</Button></>}
-    </Drawer>
     <Drawer open={submitOpen} onClose={() => !busy && setSubmitOpen(false)} title="计划信息与提交" size={480}>
       {(error || cacheError) && <Alert type="error" title={cacheError || error} />}
       <Form form={form} layout="vertical" disabled={busy} onFinish={save} onValuesChange={(_, values) => setDraft((old) => ({ ...old, engineering: values.engineering || [], version: { ...old.version, plan: { ...old.version.plan, title: values.title, objective: values.objective, max_rounds: values.max_rounds } } }))}>

@@ -7,7 +7,7 @@ import { PlanEditor } from '../scheduler/editor.jsx';
 vi.mock('../../../api.js', () => ({ apiPost: vi.fn() }));
 afterEach(() => { cleanup(); localStorage.clear(); vi.clearAllMocks(); });
 const cap = { id: 'coding', kind: 'agent', target: 'Coder', summary: '编码能力', version: '1', input_desc: '任务', output_desc: '变更', definition: {} };
-const version = { id: 'plan-canvas', version: 1, plan: { schema_version: 5, title: '交付计划', objective: '交付经过验证的变更', inputs: {}, max_rounds: 5,
+const version = { id: 'plan-canvas', version: 1, plan: { schema_version: 6, title: '交付计划', objective: '交付经过验证的变更', inputs: {}, max_rounds: 5,
   nodes: [{ node_id: 'code', title: 'Coding', layer: 1, objective: '实现变更', success_criteria: '实现完成', capability_ids: ['coding'] }], edges: [] } };
 it('在真实画布编辑节点后，表单提交保存新版本且不会启动运行', async () => {
   const saved = vi.fn(); apiPost.mockResolvedValue({ id: 'plan-canvas', version: 2 });

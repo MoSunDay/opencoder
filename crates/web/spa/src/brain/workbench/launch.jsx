@@ -18,7 +18,7 @@ export function Launch({ onCreated, initialPlan }) {
     let alive = true; const split = initialPlan.lastIndexOf('@');
     apiGet(`/api/brain/plan-defs/${encodeURIComponent(initialPlan.slice(0, split))}/versions/${initialPlan.slice(split + 1)}`).then((value) => {
       if (!alive) return;
-      if (value.plan.schema_version !== 5) throw new Error('不支持的计划版本，请创建分层计划');
+      if (value.plan.schema_version !== 6) throw new Error('不支持的计划版本，请创建分层计划');
       setPlan(value); form.setFieldsValue({ engineering: isProblemPlan(value) ? [] : inputRows(value.plan.inputs), settings: value.plan.inputs?.settings, problemText: value.plan.inputs?.problem?.text || '', problemImages: value.plan.inputs?.problem?.images || [] });
     }).catch((error) => { if (alive) setError(error.message); }).finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
@@ -29,7 +29,7 @@ export function Launch({ onCreated, initialPlan }) {
       const body = launchBody(values, '', plan); const signature = JSON.stringify(body);
       if (attempt.current?.signature !== signature) attempt.current = { signature, id: newId('brain') };
       const receipt = await apiPost('/api/brain/runs', { ...body, id: attempt.current.id });
-      if (receipt.schema_version !== 5 || receipt.run_id !== attempt.current.id) throw new Error('未收到匹配的 运行回执');
+      if (receipt.schema_version !== 6 || receipt.run_id !== attempt.current.id) throw new Error('未收到匹配的 运行回执');
       attempt.current = null; onCreated(receipt.run_id);
     } catch (error) { setError(error.message); } finally { setBusy(false); }
   };

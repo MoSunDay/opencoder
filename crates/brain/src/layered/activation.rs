@@ -12,7 +12,7 @@ pub async fn activate(
 ) -> Result<LayeredDecision> {
     ensure!(
         context.schema_version == LAYERED_SCHEMA_VERSION,
-        "layer context is not a schema 5 request"
+        "layer context is not a schema 6 request"
     );
     let mut stream = client.chat_stream(ChatRequest {
         purpose: RequestPurpose::Planning,
@@ -31,7 +31,8 @@ pub async fn activate(
     while let Some(event) = stream.recv().await {
         match event {
             LlmEvent::Completed { text, .. } => {
-                return parse_decision(&text);
+                return parse_decision(&text)
+                    .map_err(|error| anyhow::anyhow!("invalid layered decision: {error:#}"));
             }
             LlmEvent::Error(error) => anyhow::bail!("layered provider: {error}"),
             _ => {}

@@ -8,8 +8,8 @@ vi.mock('../../../api.js', () => ({ apiGet: vi.fn(), apiPost: vi.fn() }));
 vi.mock('../../../fleet/download.js', () => ({ downloadArtifact: vi.fn().mockResolvedValue(undefined) }));
 vi.mock('../milestone/canvas.jsx', () => ({ MilestoneCanvas: () => <div>milestone canvas</div> }));
 afterEach(cleanup);
-it('shows original PC problem and downloadable outcomes on the schema 5 body', async () => {
-  const view = { schema_version: 5, run: { phase: 'paused', round: 1, max_rounds: 2, activation: 0, layer: 0, valid_layers: 0 },
+it('shows original PC problem and downloadable outcomes on the schema 6 body', async () => {
+  const view = { schema_version: 6, run: { phase: 'paused', round: 1, max_rounds: 2, activation: 0, layer: 0, valid_layers: 0 },
     plan: { title: 'PC 问题', nodes: [] }, layers: [], events: [], operations: [],
     problem: { text: '生成素材后无法导入时间线', images: [] },
     problem_results: [{ stage: 'conclude', round: 1, execution_id: 'operator-evidence', result: {

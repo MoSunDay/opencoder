@@ -37,29 +37,29 @@ async fn isolated_activation_sends_configured_reasoning_to_the_provider() {
     let _ = server.await;
 }
 
-const LAYERED_CONTRACT_MARKER: &str = "Choose \"complete\" only after the final layer is done";
+const LAYERED_CONTRACT_MARKER: &str = "Complete only after the final layer passes, never early.";
 
 /// Layer context for the CLI activation tests: one node, one layer.
 fn layered_context(nodes: Value) -> Value {
     json!({
-        "schema_version": 4,
+        "schema_version": 5,
         "run_id": "brain-layered-cli",
         "generation": 7,
         "layer": 1,
         "total_layers": 1,
         "request": {
-            "schema_version": 4,
+            "schema_version": 5,
             "plan": {
-                "schema_version": 4,
+                "schema_version": 5,
                 "title": "layered plan",
                 "objective": "ship the layered canvas",
                 "inputs": {},
-                "nodes": [{"node_id": "n1", "title": "first", "capability_id": "cap-1"}],
+                "nodes": [{"node_id": "n1", "title": "first", "capability_ids": ["cap-1"], "layer":1,"objective":"perform","success_criteria":"verified"}],
                 "edges": []
             },
             "inputs": {}
         },
-        "nodes": nodes,
+        "capabilities": nodes.as_array().unwrap().iter().map(|node| node["capability"].clone()).collect::<Vec<_>>(),
         "summaries": {},
         "operations": []
     })
@@ -177,10 +177,10 @@ async fn layered_context_sends_the_layer_contract_and_writes_the_decision() {
         .contains(LAYERED_CONTRACT_MARKER));
     let instruction: Value =
         serde_json::from_str(messages[1]["content"].as_str().unwrap()).unwrap();
-    assert_eq!(instruction["schema_version"], 4);
-    assert_eq!(instruction["layer"], 1);
-    assert_eq!(instruction["nodes"][0]["node_id"], "n1");
-    assert_eq!(instruction["nodes"][0]["retry_max_attempts"], 2);
+    assert_eq!(instruction["schema_version"], 5);
+    assert_eq!(instruction["plan"]["title"], "layered plan");
+    assert_eq!(instruction["plan"]["nodes"][0]["node_id"], "n1");
+    assert_eq!(instruction["capabilities"][0]["capability_id"], "cap-1");
     let written: Value = serde_json::from_slice(&std::fs::read(&fixture.output).unwrap()).unwrap();
     assert_eq!(written["decision"], "dispatch_layer");
     assert_eq!(written["assignments"][0]["node_id"], "n1");
@@ -188,10 +188,10 @@ async fn layered_context_sends_the_layer_contract_and_writes_the_decision() {
 }
 
 #[tokio::test]
-async fn closing_layered_context_uses_the_closing_instruction() {
+async fn final_context_retains_the_same_reflection_contract() {
     let decision =
         json!({"decision": "complete", "reason": "all nodes done", "summary": "canvas shipped"});
-    let mut fixture = fixture(layered_context(json!([])), decision).await;
+    let mut fixture = fixture(layered_context(node_context()), decision).await;
     assert_eq!(
         activate(&fixture.context, &fixture.config, &fixture.output)
             .await
@@ -206,11 +206,7 @@ async fn closing_layered_context_uses_the_closing_instruction() {
         .contains(LAYERED_CONTRACT_MARKER));
     let instruction: Value =
         serde_json::from_str(messages[1]["content"].as_str().unwrap()).unwrap();
-    assert_eq!(instruction["closing"], true);
-    assert!(instruction["instruction"]
-        .as_str()
-        .unwrap()
-        .contains("dispatch_layer is closed"));
+    assert_eq!(instruction["schema_version"], 5);
     let written: Value = serde_json::from_slice(&std::fs::read(&fixture.output).unwrap()).unwrap();
     assert_eq!(written["decision"], "complete");
     assert_eq!(written["summary"], "canvas shipped");
@@ -225,21 +221,21 @@ fn run_plan(body: &str) -> RequestPlan {
 /// explicit plan-time error (never a silent fallback to v3).
 #[test]
 fn run_create_accepts_only_layered_schema() {
-    let v4 = run_plan(r#"{"schema_version":4,"plan":{"schema_version":4}}"#);
+    let v4 = run_plan(r#"{"schema_version":5,"plan":{"schema_version":5}}"#);
     assert_eq!(v4.method, reqwest::Method::POST);
     assert_eq!(v4.path, "/api/brain/runs");
-    assert_eq!(v4.body.unwrap()["schema_version"], 4);
+    assert_eq!(v4.body.unwrap()["schema_version"], 5);
 
     for raw in [
         r#"{"schema_version":3}"#,
         r#"{"schema_version":2,"plan_id":"p1"}"#,
-        r#"{"schema_version":5}"#,
+        r#"{"schema_version":4}"#,
         r#"{"plan_id":"p1"}"#,
         r#"{"schema_version":"4"}"#,
     ] {
         let error = runs(&RunsCmd::Create { json: raw.into() }).unwrap_err();
         assert!(
-            error.to_string().contains("schema_version: 4"),
+            error.to_string().contains("schema_version: 5"),
             "unexpected error for {raw}: {error}"
         );
     }

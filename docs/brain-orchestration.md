@@ -1,46 +1,54 @@
-# 大脑分层计划与运行协议
+# 大脑里程碑计划与运行协议
 
-大脑仅支持 schema_version 4。计划保存 step（`nodes`）和连线（`edges`），每个 step 用一句话 `title` 描述任务并通过 `capability_id` 关联一个能力。计划保留名称、目标、默认工程输入、最多调度轮次；节点可配置尝试上限。层级由连线计算，不另存一份层表。
+新计划和新运行使用 `schema_version: 5`。节点是里程碑，保存 `title`、`objective`、`success_criteria`、`layer` 和允许调用的 `capability_ids`。层号从 1 连续递增，同层里程碑并行；正常推进按层顺序进行。`edges` 只保存返回当前或之前层的反思路径及 `condition`，因此允许环。
 
-## 计划与能力
+## 配置与能力
 
-`POST /api/brain/plan-defs` 保存不可变版本，信封为 `{id, version, plan, changelog, created_at, author, tags, confidence}`；同 ID/版本不能覆盖，完全相同的重试幂等。`POST /api/brain/plan-defs/validate` 校验计划、能力可用性和嵌套引用。
+先在画布添加、移动和配置里程碑，挂载能力，绘制回退线；再进入独立表单填写计划名称、整体目标、工程参数及轮次预算。浏览器保留画布和表单草稿，保存不可变计划版本后另行启动执行。节点坐标只用于浏览器布局，调度只读明确的层号。
+
+`POST /api/brain/plan-defs` 保存 `{id, version, plan, changelog, created_at, author, tags, confidence}`，同 ID/版本不可覆盖，相同提交幂等。`POST /api/brain/plan-defs/validate` 检查计划、能力及嵌套引用。
 
 ```json
 {
-  "schema_version": 4,
-  "title": "仓库检查",
-  "objective": "收集证据后验证结果",
+  "schema_version": 5,
+  "title": "开发与验证",
+  "objective": "交付经过验证的变更",
   "inputs": {"repo": "opencoder"},
+  "max_rounds": 5,
   "nodes": [
-    {"node_id": "collect", "title": "收集仓库证据", "capability_id": "builtin-operator"},
-    {"node_id": "verify", "title": "验证收集的证据", "capability_id": "builtin-operator", "retry": {"max_attempts": 2}}
+    {"node_id":"code","title":"Coding","layer":1,"objective":"实现或整改变更","success_criteria":"实现完成并提供验证证据","capability_ids":["builtin-agent-act"]},
+    {"node_id":"test","title":"测试","layer":2,"objective":"验证需求和变更","success_criteria":"测试通过","capability_ids":["builtin-operator"]}
   ],
-  "edges": [{"from": "collect", "to": "verify"}],
-  "max_rounds": 32
+  "edges": [{"from":"test","to":"code","condition":"测试未通过，需要整改"}]
 }
 ```
 
-能力 ID 以 `GET /api/brain/library` 返回为准。Agent、Team、DAG、TODO、Operator 使用现有执行接口；保存的计划版本也出现在能力库中，ID 为 `plan-{plan_id}@{version}`、kind 为 `brain`。选择该能力即执行固定版本的子计划。准入递归检查能力、引用环和深度（根深度 0，最多 3）；子计划绑定真实父 operation 身份，不能伪造父运行。
+能力 ID 和输入输出契约以 `GET /api/brain/library` 为准。运行准入冻结所引用能力的定义；调度从各里程碑允许的能力集中选择一项或多项。Agent、Team、DAG、TODO、Operator 复用现有执行接口；已保存的 schema 5 计划版本以 `plan-{plan_id}@{version}`、kind `brain` 出现在能力库中。嵌套引用在准入时递归验证，根深度为 0，最多深度 3，子计划必须绑定真实父 operation。
 
-## 调度与屏障
+## 决策、回退与轮次
 
-计划按拓扑顺序从上到下切层，同层并行。每层只作一次模型调度决策，明确该层所有节点的输入绑定；层内运行终态经持久化 outbox 交付。全部成功后才越过屏障并激活下一轮决策。单个节点失败按 `retry.max_attempts` 重试（1–5，默认 2），每次尝试使用新的 operation/execution ID；达到上限立即使根运行失败并请求取消同层尚未结束的执行，迟到回执不会重新开启运行。
+每次派发必须覆盖目标层的全部里程碑，每个里程碑至少选一个能力。所有选中执行都进入终态（包括失败、取消）后才触发一次大脑决策；部分完成只更新记录。没有节点自动重试或失败时自动取消同层任务。
 
-`run.layer` 记录已派发层，线上层号从 1 开始。等待期间仍显示当前层；越过屏障才进入下一层决策。最后一层成功后，以空节点上下文作完成决策，冻结结果摘要。暂停、恢复、取消沿用原命令；节点恢复依靠持久化投影、序号与确认记录，重复事件不产生重复派发。
+大脑通过 `assessments` 对当前层每个里程碑作业务判定，说明达成标准是否满足及依据。前进只能到下一层，且当前里程碑全部达标；回退必须匹配配置的路径，并提供非空 `reflection`。回退使目标层及其后续层此前的达成记录失效，保留前缀成果和全部历史执行。最终层仍可反思回退，只有全部有效层通过才能完成运行。
 
-输入绑定只能引用根输入、注册产物或成功祖先节点的 execution 输出 JSON pointer。运行输入覆盖计划默认输入。缺失能力、非法图或引用在准入时明确拒绝；运行中非法模型决策进入 blocked，可修正后恢复。限制：节点 1–256、每层最多 32、最多 32 层、调度预算 1–32。
+首轮为第 1 轮，正常前进不增加轮数，每次回退增加一轮。默认预算 5 轮，允许 1–32 轮；预算耗尽进入 `blocked`，不创建新执行。暂停或阻塞时可通过 `set_round_budget` 增加预算，再 `resume`。每次派发增加 `activation`，operation/execution ID 包含本次激活身份，同一里程碑重跑不会覆盖旧执行。旧激活及重复终态回执不会推进当前决策。
 
-## 接口与工作台
+输入绑定支持根输入、注册产物、终态 execution 输出的 JSON pointer，以及 `{kind:"value", value:...}` 形式的具体任务输入。失败结果可用于诊断和整改；历史结果不会自动成为有效成果。计划默认输入可由运行输入覆盖。模型上下文只保留各层最近一次激活及有界结果摘要，能力契约去重，完整历史仍保留在日志中。非法决策进入明确的 `blocked`，不作隐式降级。
 
-- `POST /api/brain/runs`：创建运行，推荐 `{schema_version:4, id, plan:{id,version}, inputs, node_id}`，也支持内联计划。相同 ID/意图重试复用回执，冲突返回 409。
-- `GET /api/brain/runs/:id/layered`：计划、层级、能力元数据、操作索引和事件。
-- `GET /api/brain/runs/:id/layered/rounds/:layer`：该层决策理由、证据 execution ID 与节点/尝试索引，不复制能力执行正文。
-- `GET /api/brain/runs/:id/events-page` 与事件流：运行事件；`POST /api/brain/runs/:id/commands`：pause、resume、cancel。
-- CLI：`brain plan-defs`、`brain library`、`brain runs create`、`brain runs layered`、`brain runs layered-round`。
+限制：1–256 个里程碑、每层最多 32 个里程碑、最多 32 层、每个里程碑允许 1–32 个能力、单次最多派发 256 项执行。新计划不接受旧的节点重试策略。
 
-工作台支持创建/编辑 step、选能力或保存计划、增删连线、浏览器草稿和固定版本启动。画布从上到下展示层级，点击节点或尝试复用现有 `ExecutionView` 查询真实能力明细；嵌套计划使用同一大脑运行组件。运行事件流与 3 秒轮询刷新索引，层明细按需读取。
+## 查询与工作台
 
-层详情的 `decision` 为 `dispatch_layer` 或尚未派发时的 `null`。理由及依据固定读取本层 `layer_started` 事件，子执行终态、重试和整次运行完成均不覆盖；`phase` 保留该决策进入的阶段（派发为 `waiting`），不代表历史层当前仍在等待。当前执行状态由节点尝试和层屏障展示，完成摘要由运行总览展示。已经派发却缺失调度事件时接口明确报错，不生成替代理由。
+- `POST /api/brain/runs`：`{schema_version:5, id, plan:{id,version}, inputs, node_id}`，也支持内联计划。相同 ID/意图重放回执，冲突返回 409。
+- `GET /api/brain/runs/:id/layered`：计划、层级、运行、操作索引、能力元数据和事件。
+- `GET /api/brain/runs/:id/layered/rounds/:layer?activation=:id`：指定层激活的 `visit`、该层全部 `visits`、里程碑判定及各能力执行索引；省略 activation 返回最新一次。路径中的 rounds 是历史接口名称，参数仍为层号。
+- `GET /api/brain/runs/:id/events-page` 与事件流：运行日志。
+- `POST /api/brain/runs/:id/commands`：`{action:"pause"|"resume"|"cancel"}`，或 `{action:"set_round_budget", input:{max_rounds:8}}`。
 
-旧决策树、playbook、v2/v3 调度内核、命令和页面已删除。旧数据不自动迁移或删除；生产清理由 `scripts/maintenance/brain_cleanup` 先生成精确清单，核准后离线备份和清理，能力库、鉴权和无关任务保留。
+工作台按轮次、层激活、里程碑和能力显示调度理由、输入绑定、反思及执行类型/ID。点击执行复用六类现有 `ExecutionView` 面板，正文按 ID 向所属执行查询。层激活历史取自不可变的 `layer_started` 事件，不会被后来回执或重跑覆盖。
+
+## 历史版本与升级
+
+schema 4 计划和已结束运行保持可读；编辑旧计划是显式创建 schema 5 新版本，需要补齐里程碑目标和达成标准。旧 DAG 连线不会被自动解释为回退线。旧数据不删除，不自动改写，也不能直接创建新的 schema 4 运行。
+
+发布包声明 `brain_schema_version`。升级和回滚前检查未结束运行；不支持的运行必须先在原 Runtime 收敛，不能由新内核接管或取消。历史运行仍由其所属 Runtime 提供查询；新 Worker 读取本地已结束 schema 4 日志时只开放查询。

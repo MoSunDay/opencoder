@@ -55,12 +55,15 @@ pub async fn query(
     let leaf = parent::leaf(frozen);
     ensure!(leaf || parent::root(frozen), "not a layered execution");
     ensure!(
-        record.assignment.index.status == ExecutionStatus::Done,
-        "execution has no successful terminal output"
+        record.assignment.index.status.terminal(),
+        "execution has no terminal output"
     );
     // A leaf child binds to its own bounded output; a nested run binds to its
     // `LayeredRunResult` receipt, so a parent can read phase, layer or summary.
-    let output = if leaf {
+    let failure = json!({"status":record.assignment.index.status, "result":record.result});
+    let output = if record.assignment.index.status != ExecutionStatus::Done {
+        &failure
+    } else if leaf {
         record
             .result
             .get("scheduler_output")
@@ -71,6 +74,7 @@ pub async fn query(
     };
     if action.ends_with("_summary") {
         let summary = match output.get("summary") {
+            _ if record.assignment.index.status != ExecutionStatus::Done => output,
             Some(value) => value,
             None if leaf => output,
             None => record

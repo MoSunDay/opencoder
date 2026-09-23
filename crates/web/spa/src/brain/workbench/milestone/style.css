@@ -1,0 +1,20 @@
+.brain-method-editor { height:100%; display:flex; flex-direction:column; min-height:640px; }
+.brain-method-toolbar { padding:12px 20px; display:flex; align-items:center; justify-content:space-between; border-bottom:1px solid #e4e9ef; gap:12px; }
+.brain-method-workspace { display:flex; flex:1; min-height:0; }
+.brain-milestone-canvas { position:relative; flex:1; min-width:0; height:100%; min-height:580px; background:#f6f8fb; }
+.brain-milestone-node { width:260px; border:1px solid #bdcbdc; border-radius:12px; padding:16px; background:white; box-shadow:0 3px 10px #23364e0d; }
+.brain-milestone-node.selected { border:2px solid #1677ff; padding:15px; }
+.brain-milestone-node strong { display:block; margin:8px 0; white-space:normal; overflow-wrap:anywhere; }
+.brain-milestone-node p { max-height:58px; overflow:hidden; color:#52637b; }
+.brain-milestone-node button { display:block; margin-top:12px; }
+.brain-milestone-tools { position:absolute; top:12px; left:12px; z-index:5; display:flex; gap:8px; align-items:center; background:white; padding:8px; border-radius:8px; }
+.brain-milestone-empty { position:absolute; top:40%; left:30%; text-align:center; }
+.brain-milestone-inspector { width:340px; padding:20px; overflow:auto; border-left:1px solid #e4e9ef; background:white; }
+.brain-milestone-inspector label { display:block; margin-bottom:16px; }
+.brain-milestone-inspector .ant-select { width:100%; }
+.brain-milestone-inspector section { padding:10px 0; border-top:1px solid #e4e9ef; }
+.brain-milestone-preview { height:580px; }
+@media(max-width:800px) { .brain-method-workspace { flex-direction:column; overflow:auto; } .brain-milestone-inspector { width:auto; max-height:420px; flex-shrink:0; } .brain-milestone-canvas { flex-shrink:0; } .brain-milestone-tools span { display:none; } }
+
+.brain-milestone-canvas.is-editable > .react-flow { top:64px; height:calc(100% - 64px); }
+.brain-milestone-barrier { width:150px; height:24px; text-align:center; font-size:11px; color:#52637b; background:#edf2f8; border-radius:12px; line-height:24px; }

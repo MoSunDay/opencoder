@@ -183,7 +183,7 @@ describe('分层能力计划', () => {
     } finally { vi.useRealTimers(); }
   });
 
-  it.each([3, 5, '4'])('拒绝不支持的版本 %s', async (version) => {
+  it.each([3, 6, '4'])('拒绝不支持的版本 %s', async (version) => {
     apiGet.mockResolvedValue({ schema_version: version, run: {} });
     render(<BrainRunBody id="brain-unsupported" />);
     await screen.findByText('运行缺少分层调度数据');

@@ -1,190 +1,24 @@
+//! Existing schema 4 data remains readable, but is never admitted as a new run.
 use opencoder_brain::layered;
 use opencoder_core::brain::layered::*;
-use opencoder_core::brain::BrainCapabilityDescriptor;
-use opencoder_core::fleet::ExecutionKind;
 use serde_json::json;
-use std::collections::BTreeMap;
-
-#[path = "layered/validate.rs"]
-mod validate;
-
-#[path = "layered/barriers.rs"]
-mod barriers;
-
-#[path = "layered/terminal.rs"]
-mod terminal;
-
-fn node(id: &str, capability: &str) -> LayeredNode {
-    LayeredNode {
-        node_id: id.into(),
-        title: id.into(),
-        capability_id: capability.into(),
-        retry: LayeredRetry::default(),
-    }
+#[test]
+fn historical_dag_can_be_drawn_without_enabling_legacy_execution() {
+    let plan: LayeredPlan=serde_json::from_value(json!({"schema_version":4,"title":"old","objective":"old",
+      "nodes":[{"node_id":"a","title":"first","capability_id":"agent"},{"node_id":"b","title":"second","capability_id":"agent"}],
+      "edges":[{"from":"a","to":"b"}]})).unwrap();
+    assert_eq!(layered::layers(&plan).unwrap(), vec![vec!["a"], vec!["b"]]);
+    assert!(layered::validate_plan(&plan)
+        .unwrap_err()
+        .to_string()
+        .contains("schema 5"));
 }
-
-fn edge(from: &str, to: &str) -> LayeredEdge {
-    LayeredEdge {
-        from: from.into(),
-        to: to.into(),
-    }
-}
-
-/// impact -> fix -> verify, plus a parallel pair on the first layer.
-fn plan() -> LayeredPlan {
-    LayeredPlan {
-        schema_version: 4,
-        title: "repair".into(),
-        objective: "repair and verify".into(),
-        inputs: [("repo".into(), json!("example"))].into(),
-        todo: Some(LayeredTodoRef { id: "pt-1".into() }),
-        nodes: vec![
-            node("impact", "agent-impact"),
-            node("audit", "agent-audit"),
-            node("fix", "plan-fix"),
-            node("verify", "dag-regression"),
-        ],
-        edges: vec![
-            edge("impact", "fix"),
-            edge("audit", "fix"),
-            edge("fix", "verify"),
-        ],
-        max_rounds: 8,
-    }
-}
-
-/// Two independent branches: `impact -> fix` and `audit -> check`.
-fn branching_plan() -> LayeredPlan {
-    LayeredPlan {
-        schema_version: 4,
-        title: "branches".into(),
-        objective: "two independent branches".into(),
-        inputs: [("repo".into(), json!("example"))].into(),
-        todo: None,
-        nodes: vec![
-            node("impact", "agent-impact"),
-            node("audit", "agent-audit"),
-            node("fix", "plan-fix"),
-            node("check", "dag-regression"),
-        ],
-        edges: vec![edge("impact", "fix"), edge("audit", "check")],
-        max_rounds: 8,
-    }
-}
-
-fn branching_request() -> LayeredRequest {
-    LayeredRequest {
-        schema_version: 4,
-        plan: branching_plan(),
-        inputs: BTreeMap::new(),
-        artifacts: BTreeMap::new(),
-        origin: None,
-        parent: None,
-        depth: 0,
-    }
-}
-
-fn request() -> LayeredRequest {
-    LayeredRequest {
-        schema_version: 4,
-        plan: plan(),
-        inputs: BTreeMap::new(),
-        artifacts: BTreeMap::new(),
-        origin: None,
-        parent: None,
-        depth: 0,
-    }
-}
-
-fn cap(id: &str, kind: ExecutionKind, required: &[&str]) -> BrainCapabilityDescriptor {
-    BrainCapabilityDescriptor {
-        capability_id: id.into(),
-        kind,
-        target: "act".into(),
-        input_desc: "repo".into(),
-        output_desc: "result".into(),
-        required_inputs: required.iter().map(|name| name.to_string()).collect(),
-        definition: json!({"name": id}),
-        version: "v1".into(),
-    }
-}
-
-fn catalog() -> Vec<BrainCapabilityDescriptor> {
-    vec![
-        cap("agent-impact", ExecutionKind::Agent, &[]),
-        cap("agent-audit", ExecutionKind::Agent, &[]),
-        cap("plan-fix", ExecutionKind::Agent, &[]),
-        cap("dag-regression", ExecutionKind::Dag, &[]),
-    ]
-}
-
-fn initialized() -> LayeredSnapshot {
-    let change = layered::initialize("brain-layered", &request(), 1).unwrap();
-    LayeredSnapshot {
-        schema_version: 4,
-        run: change.run,
-        operations: change.operations,
-    }
-}
-
-fn deciding() -> LayeredSnapshot {
-    let snapshot = initialized();
-    let mut run = snapshot.run.clone();
-    run.phase = LayeredPhase::Deciding;
-    run.generation = 1;
-    LayeredSnapshot { run, ..snapshot }
-}
-
-fn dispatch(layer: u32, nodes: &[&str]) -> LayeredDecision {
-    LayeredDecision::DispatchLayer {
-        layer,
-        assignments: nodes
-            .iter()
-            .map(|node_id| LayeredAssignment {
-                node_id: node_id.to_string(),
-                inputs: BTreeMap::new(),
-                reason: "layer dispatch".into(),
-            })
-            .collect(),
-        reason: "dispatch".into(),
-        evidence_execution_ids: vec![],
-    }
-}
-
-fn assignment(node_id: &str, execution_id: &str) -> LayeredAssignment {
-    LayeredAssignment {
-        node_id: node_id.into(),
-        inputs: [(
-            "input".to_string(),
-            opencoder_core::brain::BrainInputBinding::Execution {
-                execution_id: execution_id.into(),
-                path: String::new(),
-            },
-        )]
-        .into(),
-        reason: "bind upstream".into(),
-    }
-}
-
-fn apply(_snapshot: &LayeredSnapshot, change: LayeredChange) -> LayeredSnapshot {
-    LayeredSnapshot {
-        schema_version: 4,
-        run: change.run,
-        operations: change.operations,
-    }
-}
-
-fn notice(
-    op: &LayeredOperation,
-    status: LayeredOperationStatus,
-    sequence: u64,
-) -> LayeredTerminalEvent {
-    LayeredTerminalEvent {
-        run_id: op.run_id.clone(),
-        operation_id: op.operation_id.clone(),
-        execution_kind: op.execution_kind,
-        execution_id: op.execution_id.clone(),
-        status,
-        source_sequence: sequence,
-    }
+#[test]
+fn historical_run_and_events_default_new_metadata_only_for_reading() {
+    let run:LayeredRun=serde_json::from_value(json!({"run_id":"brain-old","phase":"completed","layer":2,"generation":4,"last_event_seq":9,"error":null,"created_at":1,"updated_at":9})).unwrap();
+    assert_eq!(run.activation, 0);
+    assert_eq!(run.phase, LayeredPhase::Completed);
+    let event:LayeredEvent=serde_json::from_value(json!({"seq":1,"run_id":"brain-old","layer":1,"event_type":"layer_started","evidence_execution_ids":[],"at_ms":1})).unwrap();
+    assert!(event.assignments.is_empty());
+    assert!(event.assessments.is_empty());
 }

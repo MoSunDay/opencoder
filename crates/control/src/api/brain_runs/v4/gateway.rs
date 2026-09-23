@@ -22,6 +22,7 @@ pub async fn dispatch(
     let mut bound_inputs = serde_json::Map::new();
     for (name, binding) in &assignment.inputs {
         let value = match binding {
+            BrainInputBinding::Value { value } => value.clone(),
             BrainInputBinding::Root { name: root_name } => request["inputs"][root_name].clone(),
             BrainInputBinding::Artifact { reference } => request["artifacts"][reference].clone(),
             BrainInputBinding::Execution { execution_id, path } => {
@@ -43,8 +44,9 @@ pub async fn dispatch(
             .cloned()
             .unwrap_or_default();
         child_inputs.extend(bound_inputs);
+        child_inputs.insert("brain_reflection".into(), json!(run.reflection));
         return Ok(super::api::submit(state.clone(), json!({
-            "id":op.execution_id, "schema_version":4,
+            "id":op.execution_id, "schema_version":5,
             "plan":{"id":cap.definition["plan_id"],"version":cap.definition["version"]},
             "inputs":child_inputs, "depth":run.depth + 1,
             "parent":{"run_id":run.run_id,"operation_id":op.operation_id,"node_id":op.node_id,"layer":op.layer}
@@ -61,7 +63,7 @@ pub async fn dispatch(
          result, then finish when that local result is verified. For a Team, completion and final_summary \
          describe only this Team's assigned result.\n\
          Root objective (context; apply only the portion assigned to this capability):\n{}\n\
-         Step task:\n{}\n\nLayered inputs:\n{}",
+         Step task:\n{}\nMilestone objective:\n{}\nSuccess criteria:\n{}\nReflection:\n{}\n\nLayered inputs:\n{}",
         cap.capability_id,
         cap.kind,
         cap.target,
@@ -69,9 +71,12 @@ pub async fn dispatch(
         cap.output_desc,
         request["plan"]["objective"].as_str().unwrap_or_default(),
         step.title,
+        step.objective,
+        step.success_criteria,
+        run.reflection.as_deref().unwrap_or("Initial progression"),
         serde_json::to_string(&bound_inputs)?
     );
-    let mut input = json!({"schema_version":4,"brain_layered":{"run_id":run.run_id,"operation_id":op.operation_id,"layer":op.layer,"node_id":op.node_id,"attempt":op.attempt,"capability":super::view::capability_metadata(cap)},"bindings":bindings,"layered_inputs":bound_inputs,"prompt":prompt,"definition":cap.definition});
+    let mut input = json!({"schema_version":5,"brain_layered":{"run_id":run.run_id,"operation_id":op.operation_id,"layer":op.layer,"round":op.round,"activation":op.activation,"node_id":op.node_id,"attempt":op.attempt,"capability":super::view::capability_metadata(cap)},"bindings":bindings,"layered_inputs":bound_inputs,"prompt":prompt,"definition":cap.definition});
     if op.execution_kind == ExecutionKind::Todos {
         input["spec"] = cap.definition.clone();
     }

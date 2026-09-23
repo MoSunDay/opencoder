@@ -1,3 +1,4 @@
+import { MilestoneRunBody } from '../milestone/run.jsx';
 // run.jsx — the v4 workbench body: layered canvas, layer barrier progress,
 // layer decisions and the v4 event journal. v3 runs never reach this module.
 import { Alert, Button, Collapse, Drawer, Select, Progress, Space, Tag, Typography } from 'antd';
@@ -26,7 +27,7 @@ function CapabilityList({ capabilities = [] }) {
   </section>)}</div>;
 }
 
-export function LayeredRunBody({ view, id, connection, refresh, onNotice }) {
+function LegacyRunBody({ view, id, connection, refresh, onNotice }) {
   const [busy, setBusy] = useState(false); const [commandError, setCommandError] = useState(''); const [selected, setSelected] = useState(null);
   const [executionId, setExecutionId] = useState(null);
   const operations = view.operations || [];
@@ -83,3 +84,5 @@ export function LayeredRunBody({ view, id, connection, refresh, onNotice }) {
     </Drawer>
   </>;
 }
+
+export function LayeredRunBody(props) { return props.view.schema_version === 5 ? <MilestoneRunBody {...props} /> : <LegacyRunBody {...props} />; }

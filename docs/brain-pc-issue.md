@@ -1,6 +1,6 @@
 # PC 问题诊断与修复
 
-Brain 工作台的「PC 问题诊断与修复」入口首次显式注册 `pc-issue@1`，已有计划则使用最新版本（当前生产为 `pc-issue@2`）。输入问题文本和最多四张图片，选择 Brain、设备和构建节点后运行。原始图片按内容摘要冻结，通过鉴权接口读取。
+Brain 工作台的「PC 问题诊断与修复」入口首次显式注册 `pc-issue@1`；已有旧 schema 计划会保留历史并追加 schema 6 版本，当前生产为 `pc-issue@3`。重复点击不会再创建版本。输入问题文本和最多四张图片，选择 Brain、设备和构建节点后运行。原始图片按内容摘要冻结，通过鉴权接口读取。
 
 五个里程碑依次为影响面定位、Windows 复现、隔离修复、构建复测和证据验收。影响面从 `/data00/workspace/index.md` 定位到实际源码及提交；设备执行沿 `device-cases` DAG 的 Node API 预约、工作注册、抓包、恢复与归还流程。修改保留在独立 worktree，由现有 `jy-builder` Team 构建，不自动合并或发布产品。
 
@@ -14,7 +14,7 @@ Brain 工作台的「PC 问题诊断与修复」入口首次显式注册 `pc-iss
 
 ## 接入依赖
 
-- Server 和 Brain 节点支持 schema 5 与 `brain_pc_issue_v1`；候选设备节点支持 `pc_candidate_v1`。
+- Server 和 Brain 节点支持 schema 6 与 `brain_pc_issue_v1`；候选设备节点支持 `pc_candidate_v1`。
 - 在设备控制宿主执行 `python3 scripts/pc_issue/install.py`，安装不可变内容摘要目录；运行的 settings.helper 可固定到返回的完整路径。
 - 设备节点使用 `deploy/device-cases` 的资源 v2 和私有运行配置；Native harness 入口为 `/opt/device-cases/harness`，设备管理工作目录为 `/data00/device_mananger/runtime/native-harness`。
 - helper 使用宿主已有凭证文件访问控制面和设备 API，凭证不进入问题、产物或 Git。设备和构建节点必须能访问冻结源码、用例和候选包路径。

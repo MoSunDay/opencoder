@@ -22,3 +22,5 @@
 - Rust clippy：`cargo clippy --workspace --all-targets -j 4 -- -D warnings` → 零警告。
 - Rust 构建：`cargo build --workspace -j 4` → 通过。
 - Clippy 整理后的相关 crate 回归：Brain、Control、Worker、DAG Runtime 共 657 passed / 0 failed / 6 既有 ignored。
+
+真实流量发布验收将入口可用性和单次请求尾部时延分开：每 200ms 独立采样公共 readiness，完成响应间隔不得超过 1 秒且不能有失败；持续任务受理 P95 不超过 1 秒、单次上界不超过 3 秒，受理与调度间隔上界 3 秒。所有任务仍须唯一归属并完成。原串行探针的一次慢请求会连带推迟后续提交，不能单独证明发布期间入口中断。

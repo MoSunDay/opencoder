@@ -1,0 +1,20 @@
+[Unit]
+Description=Authenticated single-authority Windows device manager
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=@BUNDLE@/device-manager
+StateDirectory=device-manager
+RuntimeDirectory=device-manager
+ExecStart=/usr/bin/flock --nonblock /var/lib/device-manager/service.lock /usr/local/bin/node @BUNDLE@/device-manager/src/server.mjs /etc/device-manager/config.json
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+UMask=0077
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

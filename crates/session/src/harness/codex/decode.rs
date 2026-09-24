@@ -113,6 +113,26 @@ pub fn decode(mut state: Decoder, line: &str) -> Result<(Decoder, Projection)> {
             state.failed = Some(error.clone());
             out.events.push(SessionEvent::Error(error));
         }
+        "item.completed"
+            if !state.started
+                && !state.completed
+                && state.failed.is_none()
+                && state.thread.is_some()
+                && value["item"]["type"] == "error" =>
+        {
+            let item = &value["item"];
+            let id = item["id"]
+                .as_str()
+                .filter(|id| !id.is_empty())
+                .context("Codex startup notification missing ID")?;
+            let text = item["message"]
+                .as_str()
+                .context("Codex startup notification missing message")?;
+            out.events.push(SessionEvent::Status(format!(
+                "Codex startup ({}:{id}): {text}",
+                state.prefix
+            )));
+        }
         "item.started" | "item.updated" | "item.completed" => {
             ensure!(
                 state.started && !state.completed,
@@ -263,3 +283,7 @@ pub fn interrupt(state: &Decoder, reason: &str) -> Projection {
     }
     out
 }
+
+#[cfg(test)]
+#[path = "decode_tests.rs"]
+mod tests;

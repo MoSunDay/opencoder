@@ -32,10 +32,15 @@ def validate_archive(path):
         raise ValueError('Candidate must be a portable ZIP app package')
     with zipfile.ZipFile(path) as archive:
         total=0
+        names=set()
         for info in archive.infolist():
             name=PureWindowsPath(info.filename)
             if name.is_absolute() or name.drive or '..' in name.parts or ':' in info.filename or stat.S_ISLNK(info.external_attr>>16):
                 raise ValueError('Candidate archive contains an escaping path or symbolic link')
+            canonical=str(name).casefold()
+            if canonical in names:
+                raise ValueError('Candidate archive contains duplicate Windows paths')
+            names.add(canonical)
             total+=info.file_size
         if not total or total>20*1024**3:
             raise ValueError('Candidate archive is empty or exceeds 20 GiB unpacked')
@@ -46,11 +51,18 @@ def deploy_candidate(driver, root, reference, registered_profile):
     manifest=load_manifest(reference)
     # Driver itself verifies the active scoped work before every remote action.
     remote=str(PureWindowsPath(r'C:\VikingHarness\candidates')/root.name)
-    archive=remote+r'\package.archive'
+    archive=remote+r'\package.zip'
     target=remote+r'\app'
+    save(root/'candidate-deployment.json',{'stage':'creating','manifest':reference,'remote':remote})
     driver.ps(f"if(Test-Path {ps_string(remote)}){{throw 'Candidate directory already exists; recover the same work'}};New-Item -ItemType Directory {ps_string(remote)}|Out-Null")
-    driver.upload(manifest['archive_path'],archive)
-    extract=f"Copy-Item {ps_string(archive)} {ps_string(archive+'.zip')};Expand-Archive {ps_string(archive+'.zip')} {ps_string(target)}"
+    save(root/'candidate-deployment.json',{'stage':'uploading','manifest':reference,'remote':remote})
+    from transfer_chunked import upload_candidate
+    upload_candidate(driver, manifest['archive_path'], archive, manifest['archive_sha256'])
+    actual=driver.json(f"$p={ps_string(archive)};@{{bytes=(Get-Item $p).Length;sha256=(Get-FileHash $p).Hash.ToLowerInvariant()}}|ConvertTo-Json")
+    if actual['bytes']!=manifest['archive_bytes'] or actual['sha256']!=manifest['archive_sha256']:
+        raise ValueError('Guest candidate archive differs before extraction')
+    save(root/'candidate-deployment.json',{'stage':'extracting','manifest':reference,'remote':remote})
+    extract=f"Expand-Archive {ps_string(archive)} {ps_string(target)}"
     # load_manifest validates every archive entry before any remote mutation.
     driver.ps(extract)
     driver.ps(f"$r={ps_string(target)};if(@(Get-ChildItem $r -Recurse -Force|Where-Object{{$_.Attributes -band [IO.FileAttributes]::ReparsePoint}}).Count){{throw 'Candidate contains a reparse point'}}")
@@ -66,4 +78,5 @@ def deploy_candidate(driver, root, reference, registered_profile):
                    registered_at=utc(),inventory=result)
     save(root/'candidate.json',{'manifest':manifest,'profile':profile,
                               'registered_profile_unchanged':registered_profile})
+    save(root/'candidate-deployment.json',{'stage':'verified','manifest':reference,'remote':remote})
     return profile

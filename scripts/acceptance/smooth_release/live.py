@@ -280,7 +280,8 @@ def exercise(args, settings, root):
     for row in traffic:
         env.wait(lambda: env.completed(row['id']), 30)
     current = Journal(settings.state_dir).data
-    continuity = verify_traffic([record['runtime_data'] for record in current['releases'].values()], traffic)
+    continuity = verify_traffic([record['runtime_data'] for record in current['releases'].values()], traffic,
+        latency_gate='p95')
     continuity['readiness'] = verify_ready(ready_samples, ready_failures)
     write(root / 'scheduling.json', continuity)
     verify_stream(env, stream, dag_id)

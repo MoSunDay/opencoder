@@ -5,6 +5,7 @@ Creates only uniquely named acceptance work. Retains all evidence and releases
 its own wait markers on failure; never cancels tasks or removes database data.
 """
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 import json
 from pathlib import Path
 import secrets
@@ -20,7 +21,7 @@ from rolling import config, manifest, probes
 from rolling.io import Operations
 from rolling.state import Journal, atomic_bytes, write
 from fixture import HOLD_WASM, release_wasi_gate, todo_spec
-from metrics import verify as verify_traffic
+from metrics import verify as verify_traffic, verify_ready
 from streams import Stream
 import transitions
 
@@ -147,6 +148,33 @@ def observe(env, root, tag, seconds):
     return samples
 
 
+def watch_ready(env, stop, samples, failures):
+    """Sample public admission independently of serial execution submissions."""
+    def probe():
+        started = time.monotonic()
+        try:
+            ready = env.http(env.settings.public_url, '/api/ready', timeout=4)
+            if ready['mode'] != 'open' or ready['ready_nodes'] < 1:
+                raise AssertionError(f'public readiness unavailable: {ready}')
+            return {'started_at': started, 'completed_at': time.monotonic()}, None
+        except Exception as error:
+            return None, str(error)
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        pending = []
+        next_at = time.monotonic()
+        while not stop.is_set():
+            pending.append(pool.submit(probe))
+            next_at += .2
+            stop.wait(max(0, next_at - time.monotonic()))
+        for future in pending:
+            sample, failure = future.result()
+            if sample:
+                samples.append(sample)
+            if failure:
+                failures.append(failure)
+
+
 def exercise(args, settings, root):
     env = Live(settings)
     previous = Journal(settings.state_dir).data
@@ -169,8 +197,11 @@ def exercise(args, settings, root):
     resources_before = process_identity(pid('opencoder-resources.service'))
     todo = {'id': todo_id, 'kind': 'todos', 'input': {'spec': chain(root)}}
     traffic, failures = [], []
+    ready_samples, ready_failures = [], []
     stop = threading.Event()
+    ready_stop = threading.Event()
     thread = None
+    ready_thread = None
     stream = None
     wasm_submitted = False
     try:
@@ -200,6 +231,9 @@ def exercise(args, settings, root):
 
         thread = threading.Thread(target=submit, daemon=True)
         thread.start()
+        ready_thread = threading.Thread(target=watch_ready,
+            args=(env, ready_stop, ready_samples, ready_failures), daemon=True)
+        ready_thread.start()
         # The reviewed bundle is built before starting long tasks. This is the
         # same public deployment command an operator uses for future releases.
         def continuity_check():
@@ -224,9 +258,14 @@ def exercise(args, settings, root):
         probes.resources(settings, env)
     finally:
         stop.set()
+        ready_stop.set()
         if thread:
             thread.join(35)
+        if ready_thread:
+            ready_thread.join(35)
+            assert not ready_thread.is_alive(), 'public readiness observer did not finish'
         write(root / 'traffic.json', {'requests': traffic, 'failures': failures})
+        write(root / 'readiness.json', {'samples': ready_samples, 'failures': ready_failures})
         (root / 'release').touch()
         # Release only this test's WASI gate, regardless of deployment outcome.
         if wasm_submitted:
@@ -238,7 +277,10 @@ def exercise(args, settings, root):
     for row in traffic:
         env.wait(lambda: env.completed(row['id']), 30)
     current = Journal(settings.state_dir).data
-    continuity = verify_traffic([record['runtime_data'] for record in current['releases'].values()], traffic)
+    continuity = verify_traffic([record['runtime_data'] for record in current['releases'].values()],
+        traffic, limits={'p95_accept_seconds': 1, 'max_accept_seconds': 3,
+                         'max_accept_gap_seconds': 3, 'max_scheduling_gap_seconds': 3})
+    continuity['readiness'] = verify_ready(ready_samples, ready_failures)
     write(root / 'scheduling.json', continuity)
     verify_stream(env, stream, dag_id)
     samples = observe(env, root, tag, args.observe_seconds)
@@ -247,6 +289,7 @@ def exercise(args, settings, root):
         'rollback_target': previous['previous'] if on_candidate else old['id'],
         'signal': args.signal, 'signal_roundtrip': args.signal_roundtrip,
         'todo': todo_id, 'dag': dag_id, 'continuity': continuity['metrics'],
+        'readiness': continuity['readiness'],
         'runtime_process': before, 'model_shell_process': model_shell,
         'sse_resume_seconds': stream.resume_delays, 'sse_ids': stream.ids,
         'observation_seconds': args.observe_seconds, 'observation_samples': len(samples)}

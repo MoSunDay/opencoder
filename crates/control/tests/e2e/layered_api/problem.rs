@@ -15,7 +15,7 @@ async fn pc_plan_install_is_idempotent_and_requires_original_problem() {
     assert_eq!(status, 200, "{second}");
     assert_eq!(first["definition"], second["definition"]);
     let (status,body)=h.req(Method::POST,"/api/brain/runs",Some(json!({
-        "schema_version":6,"id":"brain-pc-empty","plan":{"id":"pc-issue","version":1},"inputs":{}
+        "schema_version":7,"id":"brain-pc-empty","plan":{"id":"pc-issue","version":1},"inputs":{}
     }))).await;
     assert_eq!(status, 400, "{body}");
     assert!(body["error"].as_str().unwrap().contains("problem.text"));
@@ -49,7 +49,7 @@ async fn pc_plan_install_appends_schema_six_after_legacy_version() {
         .to_string()
         .contains("device_count"));
     let mut unavailable_plan = plan();
-    unavailable_plan["nodes"][0]["capability_ids"] = json!(["dag-uicase-regression"]);
+    unavailable_plan["nodes"][0]["capability_id"] = json!("dag-uicase-regression");
     let (status, rejection) = h
         .req(
             Method::POST,
@@ -98,7 +98,7 @@ async fn pc_plan_install_appends_schema_six_after_legacy_version() {
             .unwrap()
             .unwrap()
             .plan["schema_version"],
-        6
+        7
     );
     let (status, retried) = h
         .req(Method::POST, "/api/brain/pc-issue/plan", Some(json!({})))
@@ -129,7 +129,7 @@ async fn problem_attachments_are_immutable_and_tampered_references_rejected() {
     let mut altered = reference;
     altered["sha256"] = json!("0".repeat(64));
     let (status,body)=h.req(Method::POST,"/api/brain/runs",Some(json!({
-        "schema_version":6,"id":"brain-pc-altered","plan":opencoder_core::brain::pc_issue::plan(),
+        "schema_version":7,"id":"brain-pc-altered","plan":opencoder_core::brain::pc_issue::plan(),
         "inputs":{"problem":{"text":"real problem","images":[altered]}}
     }))).await;
     assert_eq!(status, 400, "{body}");

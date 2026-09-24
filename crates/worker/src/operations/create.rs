@@ -42,7 +42,7 @@ pub(super) async fn create(worker: &Worker, mut assignment: Assignment) -> Resul
     }
     let input = &assignment.request.input;
     if (assignment.request.kind == ExecutionKind::Brain
-        && !matches!(input["schema_version"].as_u64(), Some(6)))
+        && input["schema_version"] != opencoder_core::brain::layered::LAYERED_SCHEMA_VERSION)
         || input.get("_brain").is_some()
         || input.get("brain_scheduler").is_some()
         || input.get("brain_receipt").is_some()
@@ -349,7 +349,7 @@ fn prepare_with_config(
     let input = &assignment.request.input;
     anyhow::ensure!(
         !(assignment.request.kind == ExecutionKind::Brain
-            && !matches!(input["schema_version"].as_u64(), Some(6)))
+            && input["schema_version"] != opencoder_core::brain::layered::LAYERED_SCHEMA_VERSION)
             && !input.get("_brain").is_some()
             && input.get("brain_scheduler").is_none()
             && input.get("brain_receipt").is_none()
@@ -419,8 +419,9 @@ fn prepare_with_config(
             match assignment.request.kind {
                 ExecutionKind::Brain => {
                     anyhow::ensure!(
-                        input["schema_version"] == 6,
-                        "unsupported brain schema; expected 4"
+                        input["schema_version"]
+                            == opencoder_core::brain::layered::LAYERED_SCHEMA_VERSION,
+                        "unsupported brain schema; expected 7"
                     );
                     crate::brain::v4::state::parse_request(input)?;
                 }

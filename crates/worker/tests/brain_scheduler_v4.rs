@@ -27,7 +27,7 @@ fn root(id: &str) -> ExecutionRef {
 /// Create one v4 root the way control does: the canvas is frozen in the
 /// execution input, so the node never resolves a plan of its own.
 async fn create(node: &Worker, id: &str) {
-    let input = json!({"schema_version": 6, "layered_request": plan::request(id)});
+    let input = json!({"schema_version": 7, "layered_request": plan::request(id)});
     let reply = node
         .handle(NodeOperation::Create {
             assignment: assignment(node, id, ExecutionKind::Brain, input, Some(json!({}))),

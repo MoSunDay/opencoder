@@ -1,4 +1,4 @@
-//! Read historical schema 4/5 projections without admitting or rewriting them.
+//! Read historical schema 4/5/6 projections without admitting or rewriting them.
 use crate::Worker;
 use anyhow::{ensure, Context, Result};
 use opencoder_core::fleet::*;
@@ -17,7 +17,7 @@ pub async fn read(
     if !matches!(action, "snapshot" | "events") {
         return Ok(RpcReply::error(
             409,
-            "historical schema 4/5 runs are read-only; convert the plan to schema 6",
+            "historical schema 4/5/6 runs are read-only; convert the plan to schema 7",
         ));
     }
     let mut snapshot = worker

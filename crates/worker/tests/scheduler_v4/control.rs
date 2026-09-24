@@ -216,7 +216,7 @@ pub async fn complete_layer(node: &Worker, id: &str) -> Vec<Value> {
             .plan
             .nodes
             .iter()
-            .filter(|n| n.layer == context.layer + 1)
+            .filter(|n| n.layer_id == context.request.plan.layers[context.layer as usize].layer_id)
             .count(),
         "{dispatches:?}"
     );

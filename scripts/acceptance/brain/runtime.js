@@ -21,18 +21,21 @@ async function main() {
     await page.getByRole('tab', { name: '计划库' }).click();
     await page.getByRole('button', { name: '新建计划', exact: true }).click();
     for (let index = 1; index <= 2; index++) {
-      await page.getByRole('button', { name: index === 1 ? '添加第一个里程碑' : '＋ 新增层级', exact: true }).click();
+      await page.getByRole('button', { name: index === 1 ? '添加第一个里程碑' : '＋ 里程碑', exact: true }).click();
       await page.getByLabel('里程碑名称', { exact: true }).fill(index === 1 ? '收集证据' : '验证结果');
       await page.getByLabel('里程碑目标', { exact: true }).fill('返回一次明确的能力执行结果');
-      await page.getByLabel('达成标准', { exact: true }).fill('结果包含 node-owned child result');
-      const capability = page.getByRole('combobox', { name: '挂载能力', exact: true });
+      await page.getByLabel('里程碑达成标准', { exact: true }).fill('结果包含 node-owned child result');
+      await page.locator('.brain-layer-box.selected button').click();
+      await page.getByLabel('执行节点名称', { exact: true }).fill(index === 1 ? '收集任务' : '验证任务');
+      await page.getByLabel('执行节点任务', { exact: true }).fill('执行本层任务并返回证据');
+      const capability = page.getByRole('combobox', { name: '绑定能力', exact: true });
       await capability.fill('Execute an explicit host operation');
       await page.locator('.ant-select-dropdown:visible .ant-select-item-option').first().click();
       await page.locator('.brain-milestone-inspector h3').click();
     }
     await page.getByRole('button', { name: '关闭画布', exact: true }).click();
     await page.getByRole('button', { name: '新建计划', exact: true }).click();
-    await page.locator('.brain-milestone-node strong').getByText('验证结果', { exact: true }).click();
+    await page.locator('.brain-layer-box strong').getByText('验证结果', { exact: true }).click();
     assert.equal(await page.getByLabel('里程碑名称', { exact: true }).inputValue(), '验证结果');
     await page.getByRole('button', { name: '下一步：计划信息', exact: true }).click();
     await page.getByLabel('计划名称', { exact: true }).fill('里程碑计划浏览器验收');
@@ -42,8 +45,8 @@ async function main() {
     const response = await saved;
     assert.equal(response.status(), 200, await response.text());
     const { version } = await response.json();
-    assert.equal(version.plan.schema_version, 6); assert.equal(version.plan.edges.length, 0);
-    assert.deepEqual(version.plan.nodes.map((node) => node.layer), [1, 2]);
+    assert.equal(version.plan.schema_version, 7); assert.equal(version.plan.transitions.length, 1);
+    assert.deepEqual(version.plan.nodes.map((node) => node.layer_id), version.plan.layers.map((layer) => layer.layer_id));
     assert.equal(version.plan.max_rounds, 5);
     await page.getByRole('button', { name: /^执\s*行$/ }).click();
     await page.getByLabel('大脑所在节点', { exact: true }).click();
@@ -52,7 +55,7 @@ async function main() {
     await page.getByRole('button', { name: '开始执行', exact: true }).click();
     const receipt = await created; assert.equal(receipt.status(), 202, await receipt.text());
     await page.getByText('有效通过 2 / 2 层', { exact: true }).waitFor();
-    await page.locator('.brain-milestone-node').filter({ hasText: '验证结果' }).click();
+    await page.locator('.brain-execution-node').filter({ hasText: '验证任务' }).click();
     await page.getByText('能力执行明细', { exact: true }).waitFor();
     await page.waitForFunction(() => document.querySelector('.ant-drawer-body')?.textContent.includes('node-owned child result'));
     assert.ok(details.length > 0, 'existing execution detail API must be used');

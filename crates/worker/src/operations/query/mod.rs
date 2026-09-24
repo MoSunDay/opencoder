@@ -183,7 +183,7 @@ pub(super) async fn events(
             r.assignment.request.kind == ExecutionKind::Brain
                 && matches!(
                     r.assignment.request.input["schema_version"].as_u64(),
-                    Some(4..=6)
+                    Some(4..=7)
                 )
         }) {
             let snapshot = worker.inner.state.store.brain_layered(id).await?;

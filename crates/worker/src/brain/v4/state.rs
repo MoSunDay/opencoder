@@ -6,7 +6,9 @@
 use crate::{journal::Record, Worker};
 use anyhow::{Context, Result};
 use opencoder_core::{
-    brain::layered::{LayeredPhase, LayeredRequest, LayeredRunResult, LayeredSnapshot},
+    brain::layered::{
+        LayeredPhase, LayeredRequest, LayeredRunResult, LayeredSnapshot, LAYERED_SCHEMA_VERSION,
+    },
     fleet::ExecutionStatus,
 };
 use serde_json::{json, Value};
@@ -32,13 +34,13 @@ pub fn parse_request(input: &Value) -> Result<LayeredRequest> {
     let value = ["layered_request", "request"]
         .iter()
         .filter_map(|key| input.get(*key))
-        .find(|value| value["schema_version"] == 6)
+        .find(|value| value["schema_version"] == LAYERED_SCHEMA_VERSION)
         .cloned()
         .or_else(|| {
             let plan = input.get("plan")?;
-            (plan["schema_version"] == 6).then(|| {
+            (plan["schema_version"] == LAYERED_SCHEMA_VERSION).then(|| {
                 json!({
-                    "schema_version":6,
+                    "schema_version":LAYERED_SCHEMA_VERSION,
                     "plan":plan,
                     "inputs":input.get("inputs").cloned().unwrap_or_else(|| json!({})),
                 })
@@ -72,7 +74,7 @@ pub async fn annotate(worker: &Worker, id: &str, key: &str, value: Value) -> Res
 /// phase and the summary are the only things a parent plan binds to.
 pub fn result(snapshot: &LayeredSnapshot) -> LayeredRunResult {
     LayeredRunResult {
-        schema_version: 6,
+        schema_version: LAYERED_SCHEMA_VERSION,
         phase: snapshot.run.phase,
         layer: snapshot.run.layer,
         error: snapshot.run.error.clone(),

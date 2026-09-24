@@ -5,14 +5,14 @@ import { newId } from '../../../fleet/model.js';
 import { LayerCanvas } from '../layered/canvas.jsx';
 import { MilestoneCanvas } from '../milestone/canvas.jsx';
 import { MilestoneInspector } from '../milestone/inspector.jsx';
-import { groups, milestone, moveMilestone, removeMilestone, validateGraph } from '../milestone/model.js';
+import { addLayer, connect, executionNode, moveNode, removeLayer, removeNode, validateGraph } from '../milestone/model.js';
 import { useDraft } from './draft.js';
 import { EngineeringFields } from './fields.jsx';
-import { available, engineeringInputs, planLayers, validatePlan } from './model.js';
+import { available, convertPlan, engineeringInputs, planLayers, validatePlan } from './model.js';
 
 export function PlanPreview({ plan }) {
   try {
-    if (plan.schema_version >= 5) return <div className="brain-milestone-preview"><MilestoneCanvas plan={plan} /></div>;
+    if (plan.schema_version >= 5) return <div className="brain-milestone-preview"><MilestoneCanvas plan={plan.schema_version === 7 ? plan : convertPlan(plan)} /></div>;
     return <LayerCanvas view={{ plan, layers: planLayers(plan), operations: [], run: {} }} />;
   } catch (error) { return <Alert type="error" title={error.message} />; }
 }
@@ -26,9 +26,10 @@ export const PlanEditor = forwardRef(function PlanEditor({ version, cacheKey, ca
   if (!draft) return <Alert type="error" title="无法读取浏览器草稿" description={cacheError} action={<Space><Button onClick={discard}>备份草稿并重新开始</Button><Button onClick={close}>关闭画布</Button></Space>} />;
   const plan = draft.version.plan; const caps = capabilities.filter(available);
   const update = (next) => setDraft((old) => ({ ...old, version: { ...old.version, plan: next } }));
-  const attempt = (action) => { try { action(); setError(''); } catch (e) { setError(e.message); if (e.nodeId) setSelected(e.nodeId); } };
-  const add = (layer) => attempt(() => { if (plan.nodes.length >= 256 || layer > 32 || plan.nodes.filter((n) => n.layer === layer).length >= 32) throw new Error('最多 256 个里程碑、32 层，每层最多 32 个里程碑'); const node = milestone(newId('step'), layer); update({ ...plan, nodes: [...plan.nodes, node] }); setSelected(node.node_id); });
-  const change = (patch) => update({ ...plan, nodes: plan.nodes.map((n) => n.node_id === selected ? { ...n, ...patch } : n) });
+  const attempt = (action) => { try { action(); setError(''); } catch (e) { setError(e.message); if (e.nodeId) setSelected({ type: 'node', id: e.nodeId }); else if (e.layerId) setSelected({ type: 'layer', id: e.layerId }); } };
+  const addMilestone = () => attempt(() => { if (plan.layers.length >= 32) throw new Error('最多 32 层'); const id = newId('layer'); update(addLayer(plan, id)); setSelected({ type: 'layer', id }); });
+  const addExecution = (layerId) => attempt(() => { if (plan.nodes.length >= 256 || plan.nodes.filter((n) => n.layer_id === layerId).length >= 32) throw new Error('最多 256 个执行节点，每层最多 32 个'); const node = executionNode(newId('step'), layerId); update({ ...plan, nodes: [...plan.nodes, node] }); setSelected({ type: 'node', id: node.node_id }); });
+  const change = (key, field, patch) => update({ ...plan, [key]: plan[key].map((item) => item[field] === selected.id ? { ...item, ...patch } : item) });
   const positions = (layout) => setDraft((old) => ({ ...old, layout }));
   const next = () => attempt(() => { validateGraph(plan, caps); form.setFieldsValue({ ...plan, engineering: draft.engineering }); setSubmitOpen(true); });
   const save = async (values) => {
@@ -45,13 +46,13 @@ export const PlanEditor = forwardRef(function PlanEditor({ version, cacheKey, ca
     <div className="brain-method-toolbar"><Space><Button disabled={busy} onClick={close}>关闭画布</Button><Typography.Text strong>配置里程碑与能力</Typography.Text><Typography.Text type="secondary">草稿自动保存 · v{draft.version.version}</Typography.Text></Space><Button type="primary" disabled={busy || !!cacheError} onClick={next}>下一步：计划信息</Button></div>
     {(error || cacheError) && <Alert type="error" showIcon title={cacheError || error} />}
     <div className="brain-method-workspace">
-      <MilestoneCanvas plan={plan} selected={selected} onSelect={setSelected} positions={draft.layout || {}} onPositions={positions}
-        onParallel={add} onAddLayer={() => add(groups(plan).length + 1)}
-        onMove={(id, layer, position) => attempt(() => { const moved = moveMilestone(plan, id, layer); update(moved); positions(moved.nodes.find((n) => n.node_id === id).layer !== plan.nodes.find((n) => n.node_id === id).layer ? {} : { ...draft.layout, [id]: { ...position, y: (layer - 1) * 280 } }); })}
-        />
-      <MilestoneInspector node={plan.nodes.find((n) => n.node_id === selected)} capabilities={caps} onChange={change} layers={groups(plan).length}
-        onLayer={(layer) => attempt(() => { update(moveMilestone(plan, selected, layer)); positions({}); })}
-        onDelete={() => { update(removeMilestone(plan, selected)); setSelected(null); positions({}); }} />
+      <MilestoneCanvas plan={plan} selection={selected} onSelect={setSelected} positions={draft.layout || {}} onPositions={positions}
+        onAddLayer={addMilestone} onAddNode={addExecution} onConnect={(from, to) => attempt(() => { update(connect(plan, from, to)); setSelected({ type: 'transition', id: `${from}:${to}` }); })} />
+      <MilestoneInspector plan={plan} selection={selected} capabilities={caps}
+        onLayerChange={(patch) => change('layers', 'layer_id', patch)} onNodeChange={(patch) => change('nodes', 'node_id', patch)}
+        onTransitionChange={(patch) => update({ ...plan, transitions: plan.transitions.map((item) => `${item.from}:${item.to}` === selected.id ? { ...item, ...patch } : item) })}
+        onMoveNode={(layerId) => attempt(() => { update(moveNode(plan, selected.id, layerId)); positions({}); })}
+        onDelete={() => { update(selected.type === 'layer' ? removeLayer(plan, selected.id) : selected.type === 'node' ? removeNode(plan, selected.id) : { ...plan, transitions: plan.transitions.filter((item) => `${item.from}:${item.to}` !== selected.id) }); setSelected(null); positions({}); }} />
     </div>
     <Drawer open={submitOpen} onClose={() => !busy && setSubmitOpen(false)} title="计划信息与提交" size={480}>
       {(error || cacheError) && <Alert type="error" title={cacheError || error} />}

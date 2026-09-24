@@ -19,10 +19,13 @@ pub(crate) async fn run(
     resume: bool,
 ) -> Result<(ExecutionStatus, Value)> {
     let (status, result) = match record.assignment.request.kind {
-        ExecutionKind::Brain if record.assignment.request.input["schema_version"] == 6 => {
+        ExecutionKind::Brain
+            if record.assignment.request.input["schema_version"]
+                == opencoder_core::brain::layered::LAYERED_SCHEMA_VERSION =>
+        {
             crate::brain::v4::run(worker, record, config, cancel).await
         }
-        ExecutionKind::Brain => anyhow::bail!("unsupported brain schema; expected 5"),
+        ExecutionKind::Brain => anyhow::bail!("unsupported brain schema; expected 7"),
         ExecutionKind::Agent | ExecutionKind::Maintenance | ExecutionKind::Operator => {
             agent::run(worker, record, config, cancel, resume).await
         }

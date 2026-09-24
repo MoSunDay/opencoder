@@ -23,7 +23,7 @@ async function inspectPanels({ base, token, id, view, operations, marker, eviden
     for (const op of operations) {
       await page.getByLabel('选择历史层激活', { exact: true }).click();
       await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: `第 ${op.round} 轮 · 第 ${op.layer} 层 ·` }).click();
-      await page.getByTestId(`rf__node-${op.node_id}`).locator('.brain-milestone-node strong').click();
+      await page.getByTestId(`rf__node-${op.node_id}`).locator('.brain-execution-node strong').click();
       const drawer = page.getByRole('dialog', { name: '能力执行明细', exact: true });
       await drawer.waitFor();
       await drawer.locator('.execution-view-full').waitFor();
@@ -41,7 +41,7 @@ async function inspectPanels({ base, token, id, view, operations, marker, eviden
         await drawer.locator('.execution-team-turn').first().waitFor();
         await drawer.getByText(marker, { exact: false }).last().waitFor();
       } else if (op.execution_kind === 'brain') {
-        await drawer.locator('.brain-milestone-node').waitFor();
+        await drawer.locator('.brain-layer-box').waitFor();
         await drawer.locator('.brain-run').getByText('已完成', { exact: true }).waitFor();
       } else {
         await drawer.getByRole('img', { name: 'Agent', exact: true }).first().waitFor();
@@ -63,7 +63,7 @@ async function inspectPanels({ base, token, id, view, operations, marker, eviden
     const geometry = await page.locator('.brain-milestone-preview').first().evaluate((preview) => {
       const canvas = preview.querySelector('.brain-milestone-canvas').getBoundingClientRect();
       const flow = preview.querySelector('.react-flow').getBoundingClientRect();
-      const node = preview.querySelector('.brain-milestone-node').getBoundingClientRect();
+      const node = preview.querySelector('.brain-layer-box').getBoundingClientRect();
       return { canvas: { left: canvas.left, right: canvas.right, bottom: canvas.bottom },
         flow: { bottom: flow.bottom }, node: { left: node.left, right: node.right } };
     });

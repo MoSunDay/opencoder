@@ -14,9 +14,9 @@ pub const REVIEW: &str = "review";
 /// `scan -> review`: two layers, one node per layer, both bound to an agent.
 pub fn request(_id: &str) -> Value {
     json!({
-        "schema_version": 6,
+        "schema_version": 7,
         "plan": {
-            "schema_version": 6,
+            "schema_version": 7,
             "title": "layered review",
             "objective": "inspect repository",
             "inputs": {"repo": "opencoder"},
@@ -24,14 +24,16 @@ pub fn request(_id: &str) -> Value {
                 {
                     "node_id": SCAN,
                     "title": "scan the repository",
-                    "capability_ids": ["cap-scan"], "layer":1, "objective":"scan repository", "success_criteria":"find relevant code"
+                    "capability_id": "cap-scan", "layer_id":"scan-layer", "objective":"scan repository"
                 },
                 {
                     "node_id": REVIEW,
                     "title": "review the scan",
-                    "capability_ids": ["cap-review"], "layer":2, "objective":"review changes", "success_criteria":"review passed",
+                    "capability_id": "cap-review", "layer_id":"review-layer", "objective":"review changes",
                     }
             ],
+            "layers":[{"layer_id":"scan-layer","title":"Scan","objective":"scan repository","success_criteria":"find relevant code"},{"layer_id":"review-layer","title":"Review","objective":"review changes","success_criteria":"review passed"}],
+            "transitions":[{"from":"scan-layer","to":"review-layer","condition":"scan passed"},{"from":"scan-layer","to":"scan-layer","condition":"scan failed"},{"from":"review-layer","to":"scan-layer","condition":"review failed"}],
             "edges": [],
             "max_rounds": 4
         },

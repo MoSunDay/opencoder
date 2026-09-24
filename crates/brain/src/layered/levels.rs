@@ -45,10 +45,10 @@ fn historical_layers(plan: &LayeredPlan) -> Result<Vec<Vec<String>>> {
 /// Structural shape shared by every entry point: identity, edges and bounds.
 pub(crate) fn validate_shape(plan: &LayeredPlan) -> Result<()> {
     ensure!(
-        matches!(plan.schema_version, 4..=6),
+        matches!(plan.schema_version, 4..=7),
         "unsupported plan schema"
     );
-    if plan.schema_version == 6 {
+    if plan.schema_version >= 6 {
         ensure!(
             plan.edges.is_empty(),
             "schema 6 returns are chosen by Brain; remove configured return edges"
@@ -66,8 +66,9 @@ pub(crate) fn validate_shape(plan: &LayeredPlan) -> Result<()> {
         );
         ensure!(ids.insert(node.node_id.as_str()), "duplicate node id");
         ensure!(
-            if plan.schema_version == 4 {
+            if plan.schema_version == 4 || plan.schema_version == 7 {
                 !node.capability_id.trim().is_empty() && node.capability_id.len() <= 128
+                    && (plan.schema_version != 7 || node.capability_ids.is_empty())
             } else {
                 !node.capability_ids.is_empty()
                     && node.capability_ids.len() <= 32
@@ -79,7 +80,7 @@ pub(crate) fn validate_shape(plan: &LayeredPlan) -> Result<()> {
                         == node.capability_ids.len()
                     && node.capability_id.is_empty()
             },
-            "milestones require 1..32 unique capabilities; legacy nodes require one capability"
+            "schema 7 nodes require one capability; schema 6 nodes require 1..32 unique capabilities"
         );
         if plan.schema_version == 4 {
             ensure!(
@@ -114,6 +115,12 @@ pub(crate) fn validate_shape(plan: &LayeredPlan) -> Result<()> {
             "duplicate edge"
         );
     }
+    if plan.schema_version < 7 {
+        ensure!(
+            plan.layers.is_empty() && plan.transitions.is_empty(),
+            "legacy plans cannot contain layer milestones"
+        );
+    }
     Ok(())
 }
 
@@ -123,6 +130,87 @@ pub fn layers(plan: &LayeredPlan) -> Result<Vec<Vec<String>>> {
         return historical_layers(plan);
     }
     validate_shape(plan)?;
+    if plan.schema_version == 7 {
+        ensure!(
+            !plan.layers.is_empty() && plan.layers.len() <= 32,
+            "plan requires 1..32 milestone layers"
+        );
+        let mut ids = BTreeSet::new();
+        let mut groups = vec![vec![]; plan.layers.len()];
+        for (index, layer) in plan.layers.iter().enumerate() {
+            ensure!(
+                !layer.layer_id.trim().is_empty()
+                    && layer.layer_id.len() <= 64
+                    && ids.insert(layer.layer_id.as_str()),
+                "milestone layer IDs must be unique and 1..64 bytes"
+            );
+            ensure!(
+                !layer.title.trim().is_empty() && layer.title.chars().count() <= 120,
+                "milestone title required (max 120)"
+            );
+            ensure!(
+                !layer.objective.trim().is_empty() && layer.objective.chars().count() <= 4096,
+                "milestone objective required (max 4096)"
+            );
+            ensure!(
+                !layer.success_criteria.trim().is_empty()
+                    && layer.success_criteria.chars().count() <= 4096,
+                "milestone success criteria required (max 4096)"
+            );
+            for node in &plan.nodes {
+                if node.layer_id == layer.layer_id {
+                    ensure!(
+                        node.layer == 0
+                            && !node.objective.trim().is_empty()
+                            && node.objective.chars().count() <= 4096,
+                        "execution node task required (max 4096)"
+                    );
+                    groups[index].push(node.node_id.clone());
+                }
+            }
+        }
+        ensure!(
+            plan.nodes
+                .iter()
+                .all(|node| ids.contains(node.layer_id.as_str())),
+            "execution node references unknown layer"
+        );
+        ensure!(
+            groups
+                .iter()
+                .all(|group| !group.is_empty() && group.len() <= 32),
+            "every milestone requires 1..32 execution nodes"
+        );
+        let mut edges = BTreeSet::new();
+        for edge in &plan.transitions {
+            let from = plan
+                .layers
+                .iter()
+                .position(|layer| layer.layer_id == edge.from)
+                .ok_or_else(|| anyhow::anyhow!("transition source missing"))?;
+            let to = plan
+                .layers
+                .iter()
+                .position(|layer| layer.layer_id == edge.to)
+                .ok_or_else(|| anyhow::anyhow!("transition target missing"))?;
+            ensure!(
+                to <= from || to == from + 1,
+                "forward transition cannot skip a milestone"
+            );
+            ensure!(edges.insert((from, to)), "duplicate milestone transition");
+            ensure!(
+                !edge.condition.trim().is_empty() && edge.condition.chars().count() <= 1024,
+                "transition condition required (max 1024)"
+            );
+        }
+        for index in 0..plan.layers.len().saturating_sub(1) {
+            ensure!(
+                edges.contains(&(index, index + 1)),
+                "each nonfinal milestone needs a forward transition"
+            );
+        }
+        return Ok(groups);
+    }
     let total = plan.nodes.iter().map(|n| n.layer).max().unwrap_or(0);
     ensure!((1..=32).contains(&total), "plan requires 1..32 layers");
     let mut groups = vec![vec![]; total as usize];

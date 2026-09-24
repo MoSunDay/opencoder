@@ -108,8 +108,8 @@ pub fn runs(command: &RunsCmd) -> Result<RequestPlan> {
 fn scheduler_body(raw: &str) -> Result<serde_json::Value> {
     let body = required_body(raw)?;
     anyhow::ensure!(
-        matches!(body["schema_version"].as_u64(), Some(6)),
-        "brain runs create requires an explicit schema_version: 6"
+        body["schema_version"] == opencoder_core::brain::layered::LAYERED_SCHEMA_VERSION,
+        "brain runs create requires an explicit schema_version: 7"
     );
     Ok(body)
 }
@@ -123,8 +123,8 @@ pub async fn activate(
     let config: opencoder_core::Config = serde_json::from_slice(&std::fs::read(config)?)?;
     let client = LocalClient(config.clone());
     anyhow::ensure!(
-        context["schema_version"] == 6,
-        "unsupported brain schema; expected 6"
+        context["schema_version"] == opencoder_core::brain::layered::LAYERED_SCHEMA_VERSION,
+        "unsupported brain schema; expected 7"
     );
     let decision = opencoder_brain::layered::activate(
         &serde_json::from_value(context)?,

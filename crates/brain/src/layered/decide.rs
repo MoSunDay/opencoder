@@ -52,6 +52,21 @@ pub fn decide(
                 .checked_sub(1)
                 .and_then(|i| groups.get(i as usize))
                 .context("unknown target layer")?;
+            if request.schema_version == 7 && snapshot.run.layer > 0 {
+                let from = &request.plan.layers[snapshot.run.layer as usize - 1].layer_id;
+                let to = &request.plan.layers[*layer as usize - 1].layer_id;
+                ensure!(
+                    request
+                        .plan
+                        .transitions
+                        .iter()
+                        .any(|edge| &edge.from == from && &edge.to == to),
+                    "target layer is not an outgoing transition"
+                );
+            }
+            if request.schema_version == 7 && snapshot.run.layer == 0 {
+                ensure!(*layer == 1, "first dispatch must enter the first milestone");
+            }
             let back = *layer <= snapshot.run.layer;
             assess(&mut update, snapshot, request, assessments, !back)?;
             if back {
@@ -115,7 +130,8 @@ pub fn decide(
                     .node(&assignment.node_id)
                     .context("unknown milestone")?;
                 ensure!(
-                    node.capability_ids.contains(&assignment.capability_id),
+                    node.capability_refs()
+                        .contains(&assignment.capability_id.as_str()),
                     "capability not attached to milestone"
                 );
                 let cap = catalog
@@ -238,6 +254,39 @@ fn assess(
     assessments: &std::collections::BTreeMap<String, MilestoneAssessment>,
     advancing: bool,
 ) -> Result<()> {
+    if request.schema_version == 7 {
+        if snapshot.run.layer == 0 {
+            ensure!(
+                assessments.is_empty(),
+                "initial dispatch cannot assess a milestone"
+            );
+            return Ok(());
+        }
+        let layer = &request.plan.layers[snapshot.run.layer as usize - 1];
+        ensure!(
+            assessments.len() == 1,
+            "assess the current layer milestone exactly once"
+        );
+        let verdict = assessments
+            .get(&layer.layer_id)
+            .ok_or_else(|| anyhow::anyhow!("current layer assessment missing"))?;
+        validate::reason(&verdict.reason)?;
+        ensure!(
+            !advancing || verdict.met,
+            "layer milestone did not meet its criteria"
+        );
+        if verdict.met {
+            ensure!(
+                terminal::current_successful(snapshot),
+                "failed execution cannot satisfy a layer milestone"
+            );
+        }
+        let mut evaluated = event(&snapshot.run, "milestones_assessed", None);
+        evaluated.at_ms = update.run.updated_at;
+        evaluated.assessments = assessments.clone();
+        update.events.push(evaluated);
+        return Ok(());
+    }
     let current: Vec<_> = request
         .plan
         .nodes

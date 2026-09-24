@@ -309,7 +309,7 @@ fn json_params(job: &ScheduleJob) -> Value {
 /// Scheduled runs use exactly the same v3 admission contract as HTTP/CLI.
 fn brain_run(execution_id: &str, node_id: Option<String>, params: &Value) -> anyhow::Result<Value> {
     anyhow::ensure!(
-        params["schema_version"] == 6,
+        params["schema_version"] == opencoder_core::brain::layered::LAYERED_SCHEMA_VERSION,
         "{}",
         opencoder_core::brain::layered::LAYERED_MIGRATION
     );

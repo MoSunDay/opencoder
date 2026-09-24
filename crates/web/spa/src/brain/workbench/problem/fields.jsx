@@ -2,7 +2,7 @@ import { Alert, Button, Form, Image, Input, Select, Space, Typography, Upload } 
 import { useState } from 'react';
 import { apiPost } from '../../../api.js';
 
-export const isProblemPlan = (plan) => plan?.plan?.nodes?.some((node) => node.capability_ids?.some((id) => id.startsWith('pc-issue-')));
+export const isProblemPlan = (plan) => plan?.plan?.nodes?.some((node) => node.capability_id?.startsWith('pc-issue-') || node.capability_ids?.some((id) => id.startsWith('pc-issue-')));
 
 const read = (file) => new Promise((resolve, reject) => {
   const reader = new FileReader(); reader.onload = () => resolve(reader.result); reader.onerror = () => reject(new Error('图片读取失败')); reader.readAsDataURL(file);

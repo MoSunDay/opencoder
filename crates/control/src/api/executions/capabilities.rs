@@ -5,7 +5,7 @@ use opencoder_core::fleet::*;
 use serde_json::{json, Value};
 
 pub(super) const DYNAMIC_DAG: &str = "dag_dynamic_v1";
-const MILESTONE_BRAIN: &str = "brain_scheduler_v6";
+const MILESTONE_BRAIN: &str = "brain_scheduler_v7";
 
 pub(super) fn required(request: &CreateExecution, definition: Option<&Value>) -> Vec<&'static str> {
     let mut features = Vec::new();
@@ -24,33 +24,17 @@ pub(super) fn required(request: &CreateExecution, definition: Option<&Value>) ->
             .as_array()
             .is_some_and(|nodes| {
                 nodes.iter().any(|n| {
-                    n["capability_ids"].as_array().is_some_and(|ids| {
-                        ids.iter().any(|id| {
-                            id.as_str()
-                                .and_then(opencoder_core::brain::pc_issue::stage)
-                                .is_some()
-                        })
-                    })
-                })
-            })
-    {
-        features.push("brain_pc_issue_v1");
-    }
-    if request.kind == ExecutionKind::Dag
-        && request.target.as_deref() == Some("device-cases")
-        && request.input.get("candidate").is_some()
-    {
-        features.push("pc_candidate_v1");
-    }
-    if request.input.get("pc_issue_stage").is_some()
-        || request.input["layered_request"]["plan"]["nodes"]
-            .as_array()
-            .is_some_and(|nodes| {
-                nodes.iter().any(|n| {
                     n["capability_id"]
                         .as_str()
                         .and_then(opencoder_core::brain::pc_issue::stage)
                         .is_some()
+                        || n["capability_ids"].as_array().is_some_and(|ids| {
+                            ids.iter().any(|id| {
+                                id.as_str()
+                                    .and_then(opencoder_core::brain::pc_issue::stage)
+                                    .is_some()
+                            })
+                        })
                 })
             })
     {

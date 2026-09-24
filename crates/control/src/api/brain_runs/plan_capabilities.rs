@@ -49,11 +49,11 @@ pub fn validate(
     ) -> Result<()> {
         ensure!(depth <= LAYERED_MAX_DEPTH, "nesting depth exceeded");
         opencoder_brain::layered::validate_plan(plan)?;
-        for capability_id in plan.nodes.iter().flat_map(|node| &node.capability_ids) {
+        for capability_id in plan.nodes.iter().flat_map(|node| node.capability_refs()) {
             let cap = catalog
                 .iter()
                 .find(|cap| cap.capability_id == *capability_id)
-                .with_context(|| format!("node capability unavailable: {}", *capability_id))?;
+                .with_context(|| format!("node capability unavailable: {capability_id}"))?;
             ensure!(
                 catalog
                     .iter()

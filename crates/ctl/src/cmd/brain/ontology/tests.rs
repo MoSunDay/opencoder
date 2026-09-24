@@ -37,25 +37,26 @@ async fn isolated_activation_sends_configured_reasoning_to_the_provider() {
     let _ = server.await;
 }
 
-const LAYERED_CONTRACT_MARKER: &str = "Complete only after the final layer passes, never early.";
+const LAYERED_CONTRACT_MARKER: &str = "Complete only after the final layer passes";
 
 /// Layer context for the CLI activation tests: one node, one layer.
 fn layered_context(nodes: Value) -> Value {
     json!({
-        "schema_version": 6,
+        "schema_version": 7,
         "run_id": "brain-layered-cli",
         "generation": 7,
         "layer": 1,
         "total_layers": 1,
         "request": {
-            "schema_version": 6,
+            "schema_version": 7,
             "plan": {
-                "schema_version": 6,
+                "schema_version": 7,
                 "title": "layered plan",
                 "objective": "ship the layered canvas",
                 "inputs": {},
-                "nodes": [{"node_id": "n1", "title": "first", "capability_ids": ["cap-1"], "layer":1,"objective":"perform","success_criteria":"verified"}],
-                "edges": []
+                "layers": [{"layer_id":"first","title":"first","objective":"perform","success_criteria":"verified"}],
+                "nodes": [{"node_id": "n1", "layer_id":"first", "title": "first", "capability_id": "cap-1", "objective":"perform"}],
+                "transitions": []
             },
             "inputs": {}
         },
@@ -177,7 +178,7 @@ async fn layered_context_sends_the_layer_contract_and_writes_the_decision() {
         .contains(LAYERED_CONTRACT_MARKER));
     let instruction: Value =
         serde_json::from_str(messages[1]["content"].as_str().unwrap()).unwrap();
-    assert_eq!(instruction["schema_version"], 6);
+    assert_eq!(instruction["schema_version"], 7);
     assert_eq!(instruction["plan"]["title"], "layered plan");
     assert_eq!(instruction["plan"]["nodes"][0]["node_id"], "n1");
     assert_eq!(instruction["capabilities"][0]["capability_id"], "cap-1");
@@ -206,7 +207,7 @@ async fn final_context_retains_the_same_reflection_contract() {
         .contains(LAYERED_CONTRACT_MARKER));
     let instruction: Value =
         serde_json::from_str(messages[1]["content"].as_str().unwrap()).unwrap();
-    assert_eq!(instruction["schema_version"], 6);
+    assert_eq!(instruction["schema_version"], 7);
     let written: Value = serde_json::from_slice(&std::fs::read(&fixture.output).unwrap()).unwrap();
     assert_eq!(written["decision"], "complete");
     assert_eq!(written["summary"], "canvas shipped");
@@ -221,10 +222,10 @@ fn run_plan(body: &str) -> RequestPlan {
 /// explicit plan-time error (never a silent fallback to v3).
 #[test]
 fn run_create_accepts_only_layered_schema() {
-    let v4 = run_plan(r#"{"schema_version":6,"plan":{"schema_version":6}}"#);
+    let v4 = run_plan(r#"{"schema_version":7,"plan":{"schema_version":7}}"#);
     assert_eq!(v4.method, reqwest::Method::POST);
     assert_eq!(v4.path, "/api/brain/runs");
-    assert_eq!(v4.body.unwrap()["schema_version"], 6);
+    assert_eq!(v4.body.unwrap()["schema_version"], 7);
 
     for raw in [
         r#"{"schema_version":3}"#,
@@ -235,7 +236,7 @@ fn run_create_accepts_only_layered_schema() {
     ] {
         let error = runs(&RunsCmd::Create { json: raw.into() }).unwrap_err();
         assert!(
-            error.to_string().contains("schema_version: 6"),
+            error.to_string().contains("schema_version: 7"),
             "unexpected error for {raw}: {error}"
         );
     }

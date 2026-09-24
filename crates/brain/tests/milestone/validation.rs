@@ -27,7 +27,7 @@ fn rejects_incomplete_or_forged_dispatches_and_bad_input_bindings() {
             json!({"task":{"kind":"execution","execution_id":"agent-fake","path":""}}),
             "terminal executions",
         ),
-        ("/layer", json!(2), "skip layers"),
+        ("/layer", json!(2), "first milestone"),
     ] {
         let mut value_json = baseline.clone();
         *value_json.pointer_mut(pointer).unwrap() = value;
@@ -126,9 +126,9 @@ fn context_keeps_latest_visits_and_shared_capabilities_once() {
     let next = snap(dispatch(&first, &req, 1));
     let ctx = layer_context(&next, &req, &catalog(), Default::default(), None).unwrap();
     assert_eq!(ctx.capabilities.len(), 2);
-    assert_eq!(ctx.operations.len(), 3);
+    assert_eq!(ctx.operations.len(), 2);
     assert!(ctx.operations.iter().all(|op| op.activation == 2));
-    assert_eq!(next.operations.len(), 6, "history remains intact");
+    assert_eq!(next.operations.len(), 4, "history remains intact");
     let mut huge = ctx;
     huge.request
         .inputs
@@ -137,4 +137,40 @@ fn context_keeps_latest_visits_and_shared_capabilities_once() {
         .unwrap_err()
         .to_string()
         .contains("1 MiB"));
+}
+
+#[test]
+fn return_requires_a_drawn_outgoing_layer_transition() {
+    let req = request();
+    let first = finish(
+        snap(dispatch(
+            &snap(initialize("brain-edge", &req, 1).unwrap()),
+            &req,
+            1,
+        )),
+        &req,
+        LayeredOperationStatus::Done,
+    );
+    let tested = finish(
+        snap(dispatch(&first, &req, 2)),
+        &req,
+        LayeredOperationStatus::Error,
+    );
+    let mut missing = req.clone();
+    missing
+        .plan
+        .transitions
+        .retain(|edge| !(edge.from == "testing" && edge.to == "coding"));
+    let mut deciding = tested.clone();
+    deciding.run.phase = LayeredPhase::Deciding;
+    assert!(decide(
+        &deciding,
+        &missing,
+        &catalog(),
+        &proposal(&tested, &missing, 1),
+        42
+    )
+    .unwrap_err()
+    .to_string()
+    .contains("outgoing transition"));
 }

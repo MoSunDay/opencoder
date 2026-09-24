@@ -38,6 +38,8 @@ pub struct LayeredNode {
     #[serde(default)]
     pub layer: u32,
     #[serde(default)]
+    pub layer_id: String,
+    #[serde(default)]
     pub objective: String,
     #[serde(default)]
     pub success_criteria: String,
@@ -45,11 +47,37 @@ pub struct LayeredNode {
     pub capability_ids: Vec<String>,
     pub node_id: String,
     pub title: String,
-    /// Historical schema 4 binding; schema 6 uses capability_ids.
+    /// One execution capability in schema 7; historical schema 4 also uses this field.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub capability_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub retry: Option<LayeredRetry>,
+}
+impl LayeredNode {
+    pub fn capability_refs(&self) -> Vec<&str> {
+        if self.capability_id.is_empty() {
+            self.capability_ids.iter().map(String::as_str).collect()
+        } else {
+            vec![&self.capability_id]
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct LayeredMilestone {
+    pub layer_id: String,
+    pub title: String,
+    pub objective: String,
+    pub success_criteria: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct LayeredTransition {
+    pub from: String,
+    pub to: String,
+    pub condition: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -72,6 +100,10 @@ pub struct LayeredPlan {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub todo: Option<LayeredTodoRef>,
     pub nodes: Vec<LayeredNode>,
+    #[serde(default)]
+    pub layers: Vec<LayeredMilestone>,
+    #[serde(default)]
+    pub transitions: Vec<LayeredTransition>,
     #[serde(default)]
     pub edges: Vec<LayeredEdge>,
     #[serde(default = "max_rounds")]

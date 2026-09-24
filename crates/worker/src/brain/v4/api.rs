@@ -132,7 +132,7 @@ pub async fn handle(
             }
             ensure!(
                 context.run_id == *id
-                    && context.schema_version == 6
+                    && context.schema_version == 7
                     && context.request == request
                     && context.operations == layered::relevant_operations(&snapshot)
                     && context.layer == snapshot.run.layer

@@ -3,25 +3,26 @@ use opencoder_brain::layered::*;
 use opencoder_core::brain::{layered::*, BrainCapabilityDescriptor};
 use serde_json::json;
 fn request() -> LayeredRequest {
-    serde_json::from_value(json!({"schema_version":6,"plan":{"schema_version":6,"title":"delivery","objective":"ship verified change","max_rounds":5,
-      "nodes":[{"node_id":"code","layer":1,"title":"Coding","objective":"implement","success_criteria":"change works","capability_ids":["agent","review"]},
-               {"node_id":"docs","layer":1,"title":"Docs","objective":"document","success_criteria":"accurate","capability_ids":["agent"]},
-               {"node_id":"test","layer":2,"title":"Test","objective":"verify","success_criteria":"tests pass","capability_ids":["agent"]}],
-      "edges":[]}})).unwrap()
+    serde_json::from_value(json!({"schema_version":7,"plan":{"schema_version":7,"title":"delivery","objective":"ship verified change","max_rounds":5,
+      "layers":[{"layer_id":"coding","title":"Coding","objective":"implement and document","success_criteria":"change works"},{"layer_id":"testing","title":"Test","objective":"verify","success_criteria":"tests pass"}],
+      "nodes":[{"node_id":"code","layer_id":"coding","title":"Coding","objective":"implement","capability_id":"agent"},
+               {"node_id":"docs","layer_id":"coding","title":"Docs","objective":"document","capability_id":"review"},
+               {"node_id":"test","layer_id":"testing","title":"Test","objective":"verify","capability_id":"agent"}],
+      "transitions":[{"from":"coding","to":"testing","condition":"coding met"},{"from":"testing","to":"coding","condition":"test failed"},{"from":"coding","to":"coding","condition":"coding failed"}],"edges":[]}})).unwrap()
 }
 fn catalog() -> Vec<BrainCapabilityDescriptor> {
     ["agent","review"].iter().map(|id| serde_json::from_value(json!({"capability_id":id,"kind":"agent","target":"act","input_desc":"task","output_desc":"result","definition":{},"version":"1"})).unwrap()).collect()
 }
 fn snap(change: LayeredChange) -> LayeredSnapshot {
     LayeredSnapshot {
-        schema_version: 6,
+        schema_version: 7,
         run: change.run,
         operations: change.operations,
     }
 }
 fn proposal(current: &LayeredSnapshot, req: &LayeredRequest, layer: u32) -> LayeredDecision {
-    let assessments: serde_json::Map<_,_> = req.plan.nodes.iter().filter(|n| n.layer == current.run.layer).map(|n| (n.node_id.clone(),json!({"met":current.operations.iter().filter(|o| o.activation==current.run.activation && o.node_id==n.node_id).all(|o| o.status.successful()),"reason":"verified actual outputs"}))).collect();
-    let assignments: Vec<_> = req.plan.nodes.iter().filter(|n| n.layer == layer).flat_map(|n| n.capability_ids.iter().map(|cap| json!({"node_id":n.node_id,"capability_id":cap,"inputs":{},"reason":"use attached capability"}))).collect();
+    let assessments: serde_json::Map<_,_> = req.plan.layers.iter().nth(current.run.layer.saturating_sub(1) as usize).filter(|_| current.run.layer > 0).map(|milestone| (milestone.layer_id.clone(),json!({"met":current.operations.iter().filter(|o| o.activation==current.run.activation).all(|o| o.status.successful()),"reason":"verified actual outputs"}))).into_iter().collect();
+    let assignments: Vec<_> = req.plan.nodes.iter().filter(|n| n.layer_id == req.plan.layers[layer as usize - 1].layer_id).map(|n| json!({"node_id":n.node_id,"capability_id":n.capability_id,"inputs":{},"reason":"use attached capability"})).collect();
     let decision: LayeredDecision = serde_json::from_value(json!({"decision":"dispatch_layer","layer":layer,"assignments":assignments,"assessments":assessments,"reason":"evaluate milestone evidence","reflection":if layer <= current.run.layer {Some("fix issues with new context")} else {None},"evidence_execution_ids":[]})).unwrap();
     decision
 }
@@ -72,11 +73,11 @@ fn parallel_failures_wait_for_the_entire_frozen_dispatch_and_do_not_retry() {
     let req = request();
     let initial = snap(initialize("brain-method", &req, 1).unwrap());
     let current = snap(dispatch(&initial, &req, 1));
-    assert_eq!(current.operations.len(), 3);
+    assert_eq!(current.operations.len(), 2);
     let failed = notice(&current.operations[0], LayeredOperationStatus::Error);
     let partial = snap(terminal(&current, &req, &failed, 11).unwrap().unwrap());
     assert_eq!(partial.run.phase, LayeredPhase::Waiting);
-    assert_eq!(partial.operations.len(), 3);
+    assert_eq!(partial.operations.len(), 2);
     assert!(terminal(&partial, &req, &failed, 12).unwrap().is_none());
     let mut final_state = partial;
     for op in current.operations.iter().skip(1) {
@@ -160,7 +161,7 @@ fn only_all_successful_layers_can_complete_and_cycles_do_not_affect_grouping() {
     first.run.phase = LayeredPhase::Deciding;
     let complete = LayeredDecision::Complete {
         assessments: [(
-            "test".into(),
+            "testing".into(),
             MilestoneAssessment {
                 met: true,
                 reason: "tests pass".into(),
@@ -208,13 +209,13 @@ fn resumed_decision_receives_exact_assessment_keys_and_previous_rejection() {
     admitted.run.phase = LayeredPhase::Deciding;
     let context = layer_context(&admitted, &req, &catalog(), Default::default(), None).unwrap();
     let prompt: serde_json::Value = serde_json::from_str(&instruction(&context).unwrap()).unwrap();
-    assert_eq!(prompt["assessment_node_ids"], json!(["test"]));
+    assert_eq!(prompt["assessment_layer_id"], json!("testing"));
     assert_eq!(
         prompt["run"]["error"],
         "assess every current milestone exactly once"
     );
     let decision = serde_json::from_value(json!({"decision":"complete","reason":"verified",
-        "summary":"all done","assessments":{"test":{"met":true,"reason":"tests passed"}}}))
+        "summary":"all done","assessments":{"testing":{"met":true,"reason":"tests passed"}}}))
     .unwrap();
     admitted.run.phase = LayeredPhase::Deciding;
     let completed = decide(&admitted, &req, &catalog(), &decision, 23).unwrap();

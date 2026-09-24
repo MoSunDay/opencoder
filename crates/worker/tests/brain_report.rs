@@ -22,8 +22,8 @@ async fn reading_scheduler_outbox_does_not_trigger_another_node_report() {
                 &node,
                 id,
                 ExecutionKind::Brain,
-                json!({"schema_version":6,"layered_request":{"schema_version":6,
-                    "plan":{"schema_version":6,"title":"report","objective":"wait for a decision","nodes":[{"node_id":"work","title":"work","capability_ids":["builtin-agent-act"],"layer":1,"objective":"work","success_criteria":"verified"}]}}}),
+                json!({"schema_version":7,"layered_request":{"schema_version":7,
+                    "plan":{"schema_version":7,"title":"report","objective":"wait for a decision","nodes":[{"node_id":"work","title":"work","capability_id":"builtin-agent-act","layer_id":"work-layer","objective":"work"}],"layers":[{"layer_id":"work-layer","title":"Work","objective":"work","success_criteria":"verified"}],"transitions":[]}}}),
                 Some(json!({})),
             ),
         })

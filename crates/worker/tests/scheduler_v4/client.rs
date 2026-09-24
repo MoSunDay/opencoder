@@ -62,13 +62,7 @@ impl ChatStream for LayeredClient {
                 Some(decision) => decision.to_string(),
                 None if !failed(&instruction)
                     && instruction["run"]["layer"].as_u64().unwrap_or(0)
-                        == instruction["plan"]["nodes"]
-                            .as_array()
-                            .unwrap()
-                            .iter()
-                            .filter_map(|n| n["layer"].as_u64())
-                            .max()
-                            .unwrap_or(0) =>
+                        == instruction["plan"]["layers"].as_array().unwrap().len() as u64 =>
                 {
                     complete(&instruction).to_string()
                 }
@@ -101,9 +95,9 @@ fn dispatch(instruction: &Value) -> anyhow::Result<Value> {
         .as_array()
         .unwrap()
         .iter()
-        .filter(|n| n["layer"] == layer)
+        .filter(|n| n["layer_id"] == instruction["plan"]["layers"][layer as usize - 1]["layer_id"])
     {
-        let cap_id = &node["capability_ids"][0];
+        let cap_id = &node["capability_id"];
         let cap = instruction["capabilities"]
             .as_array()
             .unwrap()
@@ -154,10 +148,21 @@ fn complete(instruction: &Value) -> Value {
 }
 
 fn assessments(instruction: &Value) -> Value {
-    let layer = &instruction["run"]["layer"];
-    let rows: serde_json::Map<_,_> = instruction["plan"]["nodes"].as_array().unwrap().iter().filter(|n| &n["layer"]==layer)
-        .map(|n| (n["node_id"].as_str().unwrap().to_string(),json!({"met":!instruction["operations"].as_array().unwrap().iter().any(|op| op["activation"] == instruction["run"]["activation"] && op["node_id"] == n["node_id"] && op["status"] != "done"),"reason":"verified execution outputs"}))).collect();
-    json!(rows)
+    let Some(layer) = instruction["run"]["layer"]
+        .as_u64()
+        .filter(|layer| *layer > 0)
+    else {
+        return json!({});
+    };
+    let id = instruction["plan"]["layers"][layer as usize - 1]["layer_id"]
+        .as_str()
+        .unwrap();
+    let met = !instruction["operations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|op| op["activation"] == instruction["run"]["activation"] && op["status"] != "done");
+    json!({id:{"met":met,"reason":"verified execution outputs"}})
 }
 
 fn failed(instruction: &Value) -> bool {

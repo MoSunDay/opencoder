@@ -101,11 +101,14 @@ def chain(root):
         atomic_bytes(path, scripts[todo['id']].encode(), 0o644)
         command = 'timeout 600; python3 ' + shlex.quote(str(path))
         todo['instructions'] = (
-            '唯一工作是使用 bash 工具原样执行下面的一条命令，前台等待脚本自然返回，然后提交结果。'
+            '先使用 bash 工具原样执行下面的脚本命令，前台等待脚本自然返回。'
             '命令中的 timeout 600; 是 bash 工具的前台等待预算，不得移除或改写。'
+            f'随后使用 bash 只读执行 cat {shlex.quote(str(root / (todo["id"] + ".done")))}，'
+            '确认文件内容与脚本输出一致，并把这次真实读取写入证据。'
+            '如果是恢复修订且脚本已经成功执行，只补做只读文件核验，不重复运行脚本。'
             '禁止主动后台化：不得使用 &、nohup、setsid、额外 shell 或重定向。'
             '脚本等待发布程序自动释放信号，不需要用户操作，不得自行创建 release 文件。'
-            '不得执行任何额外命令，不得查看其他验收目录或进程，不得修改脚本或项目文件。'
+            '不得执行这两条之外的命令，不得查看其他验收目录或进程，不得修改脚本或项目文件。'
             '命令：' + command)
         todo['acceptance'] = {
             'criteria': f'脚本已真实执行并自然返回，{root / (todo["id"] + ".done")} 存在且包含脚本输出；结果附真实工具证据。',

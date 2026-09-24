@@ -23,6 +23,7 @@ fn prompt_mentions_transport_path_without_credential_contents() {
             step_endpoint: "http://127.0.0.1:18109".into(),
             token_file: "/private/root-token".into(),
         },
+        ui: false,
     };
     let text = access.prompt("task".into(), false);
     assert!(text.contains("/private/session/transport.json"));
@@ -166,6 +167,7 @@ async fn host_finish_sends_exact_identity_without_exposing_api_response() {
             step_endpoint: format!("http://{address}"),
             token_file: token,
         },
+        ui: false,
     };
     let mut result = super::super::StepResult {
         outcome: opencoder_dag::StepOutcome::Cancelled,

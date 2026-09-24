@@ -1,0 +1,14 @@
+{
+  "listen_host": "127.0.0.1",
+  "port": 18279,
+  "token_file": "/etc/device-manager/admin.token",
+  "state_file": "/var/lib/device-manager/state.json",
+  "evidence_root": "/data00/device_mananger/runtime/native-harness/runs",
+  "ui_workers_file": "/data00/workspace/test/ui/hub-canvas-fusion/system-regression/tooling/fleet/config.json",
+  "poll_ms": 5000,
+  "server": {
+    "endpoint": "http://127.0.0.1:18081",
+    "token_file": "/etc/opencoder/server.token",
+    "timeout_ms": 10000
+  }
+}

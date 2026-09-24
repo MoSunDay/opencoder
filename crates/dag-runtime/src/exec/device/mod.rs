@@ -14,6 +14,7 @@ pub(super) struct Access {
     identity: Value,
     input: Value,
     config: DagDeviceConfig,
+    ui: bool,
 }
 
 fn identity(ctx: &StepCtx, session_id: &str) -> Value {
@@ -22,13 +23,19 @@ fn identity(ctx: &StepCtx, session_id: &str) -> Value {
 }
 
 fn controlled_input(ctx: &StepCtx) -> Result<Option<Value>> {
-    if ctx.spec.name != opencoder_dag::devices::NAME {
+    let ui = ctx.spec.name == opencoder_dag::ui_cases::NAME;
+    if !ui && ctx.spec.name != opencoder_dag::devices::NAME {
         return Ok(None);
     }
     let input: Value = serde_json::from_slice(&std::fs::read(
         ctx.workflow_root.join(&ctx.run_id).join("input.json"),
     )?)?;
-    let expected = opencoder_dag::devices::definition(&input).map_err(anyhow::Error::msg)?;
+    let expected = if ui {
+        opencoder_dag::ui_cases::definition(&input)
+    } else {
+        opencoder_dag::devices::definition(&input)
+    }
+    .map_err(anyhow::Error::msg)?;
     ensure!(
         ctx.spec == expected,
         "Device authority requires the exact controlled workflow definition"
@@ -39,7 +46,12 @@ fn controlled_input(ctx: &StepCtx) -> Result<Option<Value>> {
         "Unknown device step identity"
     );
     Ok(Some(
-        opencoder_dag::devices::public_input(&input).map_err(anyhow::Error::msg)?,
+        if ui {
+            opencoder_dag::ui_cases::public_input(&input)
+        } else {
+            opencoder_dag::devices::public_input(&input)
+        }
+        .map_err(anyhow::Error::msg)?,
     ))
 }
 
@@ -89,20 +101,25 @@ async fn request(
 
 fn assignment(ctx: &StepCtx, input: &Value) -> Result<Value> {
     let index = ctx.instance.context("Device execution needs an instance")?;
+    let instance_id = index.to_string();
     let value: Value = serde_json::from_str(
         ctx.instance_input
             .as_ref()
             .and_then(Value::as_str)
             .context("Device assignment must be a JSON string")?,
     )?;
-    let instance_id = index.to_string();
     ensure!(
-        value["instance_id"].as_str() == Some(instance_id.as_str()),
+        value["instance_id"] == instance_id,
         "Device assignment belongs to a different instance"
     );
-    let expected = opencoder_dag::devices::case_batch(input, index).map_err(anyhow::Error::msg)?;
+    let ui = ctx.spec.name == opencoder_dag::ui_cases::NAME;
+    let expected = if ui {
+        json!(opencoder_dag::ui_cases::case_batch(input, index).map_err(anyhow::Error::msg)?)
+    } else {
+        json!(opencoder_dag::devices::case_batch(input, index).map_err(anyhow::Error::msg)?)
+    };
     ensure!(
-        value["case_ids"] == json!(expected),
+        value[if ui { "cases" } else { "case_ids" }] == expected,
         "Device case batch changed"
     );
     let machine = value["machine"]
@@ -144,18 +161,34 @@ pub(super) async fn prepare(
         .as_ref()
         .context("Device workflow requires host device_manager configuration")?;
     endpoint(&config.step_endpoint)?;
+    let ui = ctx.spec.name == opencoder_dag::ui_cases::NAME;
+    let harness_name = if ui {
+        opencoder_dag::ui_cases::NAME
+    } else {
+        opencoder_dag::devices::NAME
+    };
     let harness =
         opencoder_core::agent::scope::with_root_sync(deps.config.agent.agents_dir.clone(), || {
-            opencoder_core::harness::agent_harness(opencoder_dag::devices::NAME)
+            opencoder_core::harness::agent_harness(harness_name)
         });
     ensure!(
         harness == opencoder_core::harness::Harness::Codex,
-        "Device workflow requires the installed device-cases Codex agent"
+        "Device workflow requires its installed Codex agent"
     );
     let who = identity(ctx, session_id);
     let (scope, assignment) = if ctx.step.name == "allocate" {
-        let body = json!({"dag_id":ctx.run_id,"step_id":ctx.step.name,"instance_id":null,
+        let mut body = json!({"dag_id":ctx.run_id,"step_id":ctx.step.name,"instance_id":null,
             "session_id":session_id,"role":"allocate","target_step":"execute","count":input["device_count"]});
+        if ui {
+            body["work_type"] = json!("ui");
+            body["case_ids"] = json!(input["cases"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|c| c["case_id"].as_str().unwrap())
+                .collect::<Vec<_>>());
+            body["case_specs"] = input["cases"].clone();
+        }
         (
             request(
                 config,
@@ -219,6 +252,7 @@ pub(super) async fn prepare(
     }
     let transport = json!({"endpoint":config.step_endpoint,"capability":capability,"identity":who,
         "assignment":assignment,"input":input,
+        "work_type":if ui { "ui" } else { "native" },
         "recovery_only":scope["recovery_only"].as_bool().unwrap_or(false),
         "works":scope.get("works").cloned().unwrap_or(json!([]))});
     let file = root.join("transport.json");
@@ -234,6 +268,7 @@ pub(super) async fn prepare(
         identity: who,
         input,
         config: config.clone(),
+        ui,
     }))
 }
 
@@ -244,8 +279,17 @@ impl Access {
         } else {
             self.root.as_path()
         };
-        format!("{prompt}\n\nHost-authenticated step identity: {}\nDevice input: {}\nPrivate tool transport: {}. Never read its credential contents into context or logs. Use python3 {} reserve for allocate; execute cases with native-harness.py --device-context {}. Only API results without credentials may be returned.",self.identity,self.input,
-            root.join("transport.json").display(),root.join("client.py").display(),root.join("transport.json").display())
+        let transport = root.join("transport.json");
+        let execution = if self.ui {
+            "execute only the frozen UI cases through the scoped UI work transport".to_string()
+        } else {
+            format!(
+                "execute cases with native-harness.py --device-context {}",
+                transport.display()
+            )
+        };
+        format!("{prompt}\n\nHost-authenticated step identity: {}\nDevice input: {}\nPrivate tool transport: {}. Never read its credential contents into context or logs. Use python3 {} reserve for allocate; {execution}. Only API results without credentials may be returned.",
+            self.identity,self.input,transport.display(),root.join("client.py").display())
     }
     pub(super) fn bind(&self, bundle: &Path) -> Result<()> {
         super::private_files::bind_at(bundle, &self.root, GUEST)
@@ -263,14 +307,27 @@ impl Access {
         )
         .await?;
         if self.identity["step_id"] == "allocate" {
-            output::validate(
-                output.context("Allocator produced no structured output")?,
-                &reservation,
-                &self.input,
-                dag,
-            )
+            if self.ui {
+                output::validate_ui(
+                    output.context("Allocator produced no structured output")?,
+                    &reservation,
+                    &self.input,
+                    dag,
+                )
+            } else {
+                output::validate(
+                    output.context("Allocator produced no structured output")?,
+                    &reservation,
+                    &self.input,
+                    dag,
+                )
+            }
         } else {
-            output::completed(&reservation, &self.input, &self.identity)
+            if self.ui {
+                output::completed_ui(&reservation, &self.input, &self.identity)
+            } else {
+                output::completed(&reservation, &self.input, &self.identity)
+            }
         }
     }
 

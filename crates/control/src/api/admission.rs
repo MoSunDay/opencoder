@@ -69,6 +69,21 @@ async fn local_status(state: &Arc<AppState>) -> anyhow::Result<serde_json::Value
     }))
 }
 
+async fn ready_status(state: &Arc<AppState>) -> anyhow::Result<serde_json::Value> {
+    let admission = state.admission.snapshot().await?;
+    if admission.mode != AdmissionMode::Open {
+        return local_status(state).await;
+    }
+    let views = state.hub.views().await;
+    Ok(json!({
+        "mode": admission.mode,
+        "inflight_admissions": admission.inflight_admissions,
+        "online_nodes": views.iter().filter(|node| node.online).count(),
+        "ready_nodes": views.iter().filter(|node| node.online && node.snapshot.as_ref().is_some_and(|snapshot| snapshot.ready)).count(),
+        "control_drained": false,
+    }))
+}
+
 fn cluster_drained(server: &serde_json::Value, nodes: &[NodeAdmissionResult]) -> bool {
     server["control_drained"] == true
         && nodes.iter().all(|node| {
@@ -80,7 +95,7 @@ fn cluster_drained(server: &serde_json::Value, nodes: &[NodeAdmissionResult]) ->
 }
 
 pub async fn ready(State(state): State<Arc<AppState>>) -> Response {
-    match local_status(&state).await {
+    match ready_status(&state).await {
         Ok(status)
             if status["mode"] == "open"
                 && status["ready_nodes"]

@@ -57,6 +57,9 @@ class AcceptanceTests(unittest.TestCase):
             root = Path(directory)
             spec = chain(root)
             self.assertEqual(spec['todos'][1]['depends_on'], ['first'])
+            for todo in spec['todos']:
+                self.assertIn(f'cat {root / (todo["id"] + ".done")}', todo['instructions'])
+                self.assertIn('只补做只读文件核验', todo['instructions'])
             process = subprocess.Popen([sys.executable, str(root / 'first.py')],
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             try:

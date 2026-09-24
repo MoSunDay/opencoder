@@ -1,3 +1,5 @@
+Commit: c23acdf9647a182a91323db26fb7e46191ac5f19
+
 # UI 设备受控合同候选
 
 本次候选把设备管理服务源码纳入 `deploy/device-manager/`，并提供从 Git 提交构建可追溯源码包的脚本。候选已合并线上同期新增的设备准入转换与测试，预约上限及隔离核查按现有设备账本计算，保留新增设备和已有预约。Server 为 `uicase-regression` 生成严格的受控定义；Host 按冻结 case、spec SHA-256 和输入版本签发私有设备上下文。设备服务区分 Native 与 UI 预约，按预约绑定 case，先登记 UI 工作再签名代理到所属 Windows NodeAPI。操作 ID 在远程调用前落盘；未确认的操作不自动重发。未完成恢复的 UI 工作不能释放设备。Server 要求 `ui_device_v1`，当前 Worker 不声明该能力。
@@ -7,5 +9,3 @@
 验证：设备服务 Native/UI/准入测试 43/43（新增 `UI completion independently checks frozen assertions, capture, restoration, and hashes`，受控截图与抓包并入 `scoped UI action is signed, persisted once, and never replayed after a lost outcome`）；`opencoder-dag` UI 定义测试通过；`opencoder-dag-runtime` 设备相关 11 项测试通过；Python 私有客户端 7 项测试通过（UI 完成、截图、抓包和证据对账作用域检查）；`opencoder-control` 常规编译检查通过。共享 Cargo target 的 `opencoder-control --lib` 测试曾解析到旧 `opencoder-dag` 产物；改用独立 Cargo target 后 UI 能力门禁测试通过。
 
 尚未实现 UI 原始 case 执行器、截图与抓包证据生产、环境恢复的现场独立探针和 CLI 查询闭环。候选代码已随主平台发布，设备管理服务也已切到可追溯制品并保留原有 30 台设备及 40 条预约；Worker 仍不声明 `ui_device_v1`，不能用于真实 UI case 验收。Native 设备资源维持 v2。
-
-同次发布使大脑里程碑 schema 6、按轮执行查看和 PC 诊断链路生效。已有 PC 计划 v1/v2 为 schema 5，安装入口保留历史并追加 v3；能力库中无法解析的动态 DAG 会明确标为不可用，不能阻断其他计划，画布禁止挂载此类能力。

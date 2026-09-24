@@ -7,8 +7,8 @@ use std::sync::Arc;
 use support::Fleet;
 
 fn plan(capability: &str) -> Value {
-    json!({"schema_version":6,"title":"Nested plan","objective":"produce verified output",
-        "nodes":[{"node_id":"work","title":"produce the assigned result","capability_ids":[capability],"layer":1,"objective":"produce verified output","success_criteria":"result verified"}],"edges":[]})
+    json!({"schema_version":7,"title":"Nested plan","objective":"produce verified output",
+        "nodes":[{"node_id":"work","title":"produce the assigned result","capability_id":capability,"layer_id":"work-layer","objective":"produce verified output"}],"layers":[{"layer_id":"work-layer","title":"Work","objective":"produce verified output","success_criteria":"result verified"}],"transitions":[],"edges":[]})
 }
 
 #[tokio::test]
@@ -21,7 +21,7 @@ async fn nested_plan_dispatches_a_real_child_and_reports_its_terminal_to_parent(
         .call(
             "POST",
             "/api/brain/runs",
-            json!({"id":"brain-parent","schema_version":6,"plan":plan("plan-child-plan@1")}),
+            json!({"id":"brain-parent","schema_version":7,"plan":plan("plan-child-plan@1")}),
         )
         .await;
     assert_eq!(created.status, 202, "{created:?}");

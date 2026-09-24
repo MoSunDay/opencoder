@@ -39,9 +39,11 @@ pub fn plan() -> Value {
         "提交构建复测评估报告：有修改才调用 jy-builder 并实机复测；前序受阻或无需修改时如实报告无需执行或阻塞，也完成本里程碑",
         "核对权威前序结果并提交最终产品结论，包括前后证据及未解决项；证据不足时必须以未解决结论完成报告",
     ];
-    json!({"schema_version":6,"title":"PC 问题诊断与修复","objective":"从原始文本和图片出发，以当前源码及 Windows 运行证据定位问题；必要时隔离修复、Team 构建并复测。执行结束不等于产品修复成功。禁止自动合并或发布产品。证据不足时允许以明确未解决结论完成报告，禁止虚构成功。",
+    json!({"schema_version":7,"title":"PC 问题诊断与修复","objective":"从原始文本和图片出发，以当前源码及 Windows 运行证据定位问题；必要时隔离修复、Team 构建并复测。执行结束不等于产品修复成功。禁止自动合并或发布产品。证据不足时允许以明确未解决结论完成报告，禁止虚构成功。",
         "inputs":{"problem":{"text":"","images":[]},"settings":{"workspace":"/data00/workspace","helper":"/opt/opencoder-pc-issue/current/cli.py","device_node":"","build_node":"","max_repair_rounds":2}},
-        "nodes":STAGES.iter().enumerate().map(|(i,s)|json!({"node_id":s,"layer":i+1,"title":titles[i],"objective":objectives[i],"success_criteria":"以宿主接受的 pc-issue.stage/v1 报告完成里程碑。incomplete、blocked、not_needed、not_reproduced、unresolved 是有效产品结论，不能因此把已完成的报告判为里程碑失败；应向前传递缺口，直至最终报告。禁止从 impact 或 reproduce 回退。只有 verify 复测失败且存在可执行修复、轮次预算尚有余量时，才沿 verify→repair 反思回退。","capability_ids":[format!("pc-issue-{s}")]})).collect::<Vec<_>>(),
+        "layers":STAGES.iter().enumerate().map(|(i,s)|json!({"layer_id":s,"title":titles[i],"objective":objectives[i],"success_criteria":"以宿主接受的 pc-issue.stage/v1 报告完成里程碑。incomplete、blocked、not_needed、not_reproduced、unresolved 是有效产品结论，不能因此把已完成的报告判为里程碑失败；应向前传递缺口，直至最终报告。"})).collect::<Vec<_>>(),
+        "nodes":STAGES.iter().enumerate().map(|(i,s)|json!({"node_id":s,"layer_id":s,"title":titles[i],"objective":objectives[i],"capability_id":format!("pc-issue-{s}")})).collect::<Vec<_>>(),
+        "transitions":STAGES.windows(2).map(|pair|json!({"from":pair[0],"to":pair[1],"condition":"当前里程碑已达标，进入下一里程碑"})).chain(std::iter::once(json!({"from":"verify","to":"repair","condition":"复测失败且存在可执行修复、轮次预算尚有余量"}))).collect::<Vec<_>>(),
         "edges":[],"max_rounds":2})
 }
 
@@ -77,7 +79,7 @@ pub fn validate_problem(problem: &Value) -> Result<()> {
 pub fn is_plan(plan: &super::layered::LayeredPlan) -> bool {
     plan.nodes
         .iter()
-        .any(|n| n.capability_ids.iter().any(|c| stage(c).is_some()))
+        .any(|n| n.capability_refs().iter().any(|c| stage(c).is_some()))
 }
 
 pub fn validate_plan(plan: &super::layered::LayeredPlan) -> Result<()> {
@@ -85,7 +87,9 @@ pub fn validate_plan(plan: &super::layered::LayeredPlan) -> Result<()> {
         return Ok(());
     }
     ensure!(
-        plan.schema_version == 6 && plan.nodes.len() == STAGES.len(),
+        plan.schema_version == 7
+            && plan.nodes.len() == STAGES.len()
+            && plan.layers.len() == STAGES.len(),
         "PC issue plan requires the complete five-stage evidence chain"
     );
     ensure!(
@@ -94,15 +98,30 @@ pub fn validate_plan(plan: &super::layered::LayeredPlan) -> Result<()> {
     );
     for (i, name) in STAGES.iter().enumerate() {
         ensure!(
-            plan.nodes.iter().any(|n| n.node_id == *name
-                && n.layer == i as u32 + 1
-                && n.capability_ids == [format!("pc-issue-{name}")]),
+            plan.layers[i].layer_id == *name
+                && plan.nodes.iter().any(|n| n.node_id == *name
+                    && n.layer_id == *name
+                    && n.capability_id == format!("pc-issue-{name}")),
             "PC issue stage {name} is missing, reordered or rebound"
         );
     }
     ensure!(
         plan.edges.is_empty(),
-        "PC issue schema 6 has no configured return edges"
+        "PC issue schema 7 has no legacy node edges"
+    );
+    let expected: std::collections::BTreeSet<_> = STAGES
+        .windows(2)
+        .map(|pair| (pair[0], pair[1]))
+        .chain(std::iter::once(("verify", "repair")))
+        .collect();
+    let actual: std::collections::BTreeSet<_> = plan
+        .transitions
+        .iter()
+        .map(|edge| (edge.from.as_str(), edge.to.as_str()))
+        .collect();
+    ensure!(
+        actual == expected && plan.transitions.len() == expected.len(),
+        "PC issue transitions must retain the fixed evidence chain"
     );
     Ok(())
 }

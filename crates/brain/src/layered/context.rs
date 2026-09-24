@@ -18,13 +18,13 @@ pub fn layer_context(
         .plan
         .nodes
         .iter()
-        .flat_map(|node| &node.capability_ids)
+        .flat_map(|node| node.capability_refs())
     {
         let cap = descriptors
             .iter()
-            .find(|c| &c.capability_id == id)
+            .find(|c| c.capability_id == id)
             .with_context(|| format!("capability {id} unavailable"))?;
-        capabilities.insert(id.clone(), cap.clone());
+        capabilities.insert(id.to_owned(), cap.clone());
     }
     Ok(LayeredContext {
         run: Some(snapshot.run.clone()),

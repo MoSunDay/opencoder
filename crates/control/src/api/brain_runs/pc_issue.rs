@@ -3,7 +3,10 @@ use crate::{
     AppState,
 };
 use axum::{extract::State, response::Response, Json};
-use opencoder_core::{brain::pc_issue, fleet::RpcReply};
+use opencoder_core::{
+    brain::{layered::LAYERED_SCHEMA_VERSION, pc_issue},
+    fleet::RpcReply,
+};
 use serde_json::json;
 use std::sync::Arc;
 
@@ -59,16 +62,40 @@ pub(super) async fn cancel_children(
     Ok(())
 }
 
-/// Explicit installation, immutable and idempotent. Never overwrites a user's version.
+/// Explicit installation, immutable and idempotent. Upgrade legacy templates by appending.
 pub async fn install(State(state): State<Arc<AppState>>) -> Response {
-    match state
+    let previous = match state
         .fleet
         .definition("brain_plan", pc_issue::PLAN_ID)
         .await
     {
-        Ok(Some(definition)) => return response(RpcReply::ok(json!({"definition":definition}))),
+        Ok(definition) => definition,
         Err(e) => return error_500(e.to_string()),
-        Ok(None) => {}
+    };
+    let version = if let Some(definition) = &previous {
+        let Some(latest) = definition["latest_version"].as_u64() else {
+            return error_500("PC plan latest version missing".into());
+        };
+        match state
+            .fleet
+            .brain_plan_document(pc_issue::PLAN_ID, latest)
+            .await
+        {
+            Ok(Some(saved)) if saved.plan["schema_version"] == LAYERED_SCHEMA_VERSION => {
+                return response(RpcReply::ok(json!({"definition":definition})));
+            }
+            Ok(Some(_)) => match latest.checked_add(1) {
+                Some(next) => next,
+                None => return error_500("PC plan version exhausted".into()),
+            },
+            Ok(None) => return error_500("PC plan latest document missing".into()),
+            Err(e) => return error_500(e.to_string()),
+        }
+    } else {
+        1
+    };
+    if version > i64::MAX as u64 {
+        return error_500("PC plan version exhausted".into());
     }
     let mut plan = pc_issue::plan();
     let nodes = match state.fleet.nodes().await {
@@ -86,7 +113,7 @@ pub async fn install(State(state): State<Arc<AppState>>) -> Response {
     }
     super::plans::save(
         State(state),
-        Json(json!({"id":pc_issue::PLAN_ID,"version":1,
+        Json(json!({"id":pc_issue::PLAN_ID,"version":version,
         "plan":plan,"changelog":"接入 PC 问题诊断、修复与实证链路", "created_at":0})),
     )
     .await

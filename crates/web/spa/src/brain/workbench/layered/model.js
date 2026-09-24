@@ -58,7 +58,7 @@ export function schemaVersionOf(body) {
   return null;
 }
 
-export const isLayeredSnapshot = (body) => [4, 5, 6].includes(schemaVersionOf(body));
+export const isLayeredSnapshot = (body) => [4, 5, 6, 7].includes(schemaVersionOf(body));
 export const isLayeredView = (body) => isLayeredSnapshot(body) && !!body?.run;
 export const layeredPhase = (view) => asText(view?.run?.phase) || 'ready';
 export const terminalPhase = (phase) => LAYERED_TERMINAL.includes(phase);
@@ -125,7 +125,8 @@ export function attemptsOf(operations, nodeId) {
 /// latestAttempt — the live attempt; a superseded one never wins (mirrors
 /// opencoder_brain::layered::latest_attempt).
 export function latestAttempt(operations, nodeId) {
-  return attemptsOf(operations, nodeId).at(-1) || null;
+  const attempts = attemptsOf(operations, nodeId);
+  return attempts[attempts.length - 1] || null;
 }
 
 /// retryBadge(row) — the `attempt n/max_attempts` badge of one node row.
@@ -139,7 +140,7 @@ export function retryBadge(row) {
 export function nodeRow(view, nodeId, operations = operationsOf(view)) {
   const node = nodeOf(view, nodeId);
   const attempts = attemptsOf(operations, nodeId);
-  const latest = attempts.at(-1) || null;
+  const latest = attempts[attempts.length - 1] || null;
   const max = maxAttemptsOf(node);
   return {
     nodeId, title: asText(node?.title) || nodeId, capabilityId: asText(node?.capability_id),

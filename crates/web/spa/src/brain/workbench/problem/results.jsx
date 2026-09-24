@@ -16,7 +16,7 @@ export function ProblemResults({ results = [] }) {
     label: <Space>{labels[stage]}<Tag color={result.outcome === 'fixed' || result.outcome === 'verified' ? 'green' : 'default'}>{outcomes[result.outcome] || result.outcome}</Tag>第 {round} 轮</Space>,
     children: <><Typography.Paragraph>{result.summary}</Typography.Paragraph>
       {result.reason && <Typography.Paragraph>{result.reason}</Typography.Paragraph>}
-      <Space wrap>{(result.evidence || []).filter((e) => e.artifact).map((e, i) => <Button key={`${e.sha256}-${i}`} onClick={() => download(e.artifact)}>{e.path.split('/').at(-1)} · 下载证据</Button>)}</Space>
+      <Space wrap>{(result.evidence || []).filter((e) => e.artifact).map((e, i) => <Button key={`${e.sha256}-${i}`} onClick={() => download(e.artifact)}>{e.path.split('/').slice(-1)[0]} · 下载证据</Button>)}</Space>
       <pre style={{ whiteSpace: 'pre-wrap', maxHeight: 320, overflow: 'auto' }}>{JSON.stringify(result, null, 2)}</pre></>,
   }))} /></>;
 }

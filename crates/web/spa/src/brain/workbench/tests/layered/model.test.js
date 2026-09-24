@@ -49,6 +49,7 @@ describe('v4 分层画布的 schema_version 判定', () => {
     expect(schemaVersionOf(view)).toBe(4);
     expect(isLayeredSnapshot(view)).toBe(true);
     expect(isLayeredView(view)).toBe(true);
+    expect(isLayeredView({ schema_version: 7, run: { phase: 'completed' }, plan: { layers: [], nodes: [] } })).toBe(true);
     expect(isLayeredSnapshot({ schema_version: 3, run: { run_id: 'r' }, operations: [] })).toBe(false);
     expect(isLayeredSnapshot({ phase: 'completed', plan: { plan: { schema_version: 2 } } })).toBe(false);
     expect(schemaVersionOf({})).toBeNull();

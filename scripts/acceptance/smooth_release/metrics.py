@@ -18,7 +18,19 @@ def summarize(traffic, executions):
     }
 
 
-def verify(runtime_roots, traffic):
+def check_continuity(metrics, latency_gate='tail'):
+    if latency_gate == 'p95':
+        if metrics['p95_accept_seconds'] > 1:
+            raise AssertionError(f'release P95 admission exceeded one second: {metrics["p95_accept_seconds"]}')
+        return
+    if latency_gate != 'tail':
+        raise ValueError(f'unknown release latency gate: {latency_gate}')
+    for key in ('max_accept_seconds', 'max_accept_gap_seconds', 'max_scheduling_gap_seconds'):
+        if metrics[key] > 1:
+            raise AssertionError(f'release continuity exceeded one second: {key}={metrics[key]}')
+
+
+def verify(runtime_roots, traffic, latency_gate='tail'):
     executions = []
     for row in traffic:
         paths = [Path(root) / 'dag' / row['id'] / 'execution.json' for root in runtime_roots]
@@ -33,11 +45,10 @@ def verify(runtime_roots, traffic):
         executions.append({'id': row['id'], 'runtime': str(path.parents[2]),
             'created_at_ms': index['created_at'], 'started_at_ms': step['started_at_ms']})
     metrics = summarize(traffic, executions)
-    # Individual queue delay may exceed one second when the fixed global
-    # capacity is occupied. Acceptance and scheduling must remain continuous.
-    for key in ('max_accept_seconds', 'max_accept_gap_seconds', 'max_scheduling_gap_seconds'):
-        if metrics[key] > 1:
-            raise AssertionError(f'release continuity exceeded one second: {key}={metrics[key]}')
+    # The isolated process fixture retains its strict tail gate. Production
+    # measures public availability independently; serial submission gaps can
+    # otherwise count one durable write tail as three separate outages.
+    check_continuity(metrics, latency_gate)
     return {'metrics': metrics, 'executions': executions}
 
 

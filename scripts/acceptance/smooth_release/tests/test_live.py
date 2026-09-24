@@ -11,7 +11,7 @@ import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from live import chain
 from fixture import release_wasi_gate
-from metrics import summarize, verify, verify_ready
+from metrics import check_continuity, summarize, verify, verify_ready
 from transitions import command
 from types import SimpleNamespace
 
@@ -101,6 +101,13 @@ class AcceptanceTests(unittest.TestCase):
         executions = [{'created_at_ms': i * 200, 'started_at_ms': i * 200 + 100}
                       for i in range(20)]
         self.assertEqual(summarize(traffic, executions)['p95_accept_seconds'], .2)
+        metrics = summarize(traffic, executions)
+        with self.assertRaisesRegex(AssertionError, 'max_accept_seconds'):
+            check_continuity(metrics)
+        check_continuity(metrics, 'p95')
+        traffic[4]['seconds'] = 1.3
+        with self.assertRaisesRegex(AssertionError, 'P95 admission'):
+            check_continuity(summarize(traffic, executions), 'p95')
         self.assertLess(verify_ready(samples, [])['max_gap_seconds'], 1)
         samples[10:] = [{**row, 'started_at': row['started_at'] + 1.2,
                          'completed_at': row['completed_at'] + 1.2} for row in samples[10:]]

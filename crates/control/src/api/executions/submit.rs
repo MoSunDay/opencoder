@@ -3,6 +3,7 @@ use opencoder_core::{fleet::*, message::now_ms};
 use opencoder_store::fleet::handoff::dispatch_key;
 use serde_json::Value;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 pub async fn submit(state: &Arc<AppState>, request: CreateExecution) -> RpcReply {
     submit_private(state, request, None).await
@@ -85,6 +86,7 @@ async fn submit_inner(
     request: CreateExecution,
     private_context: Option<PrivateExecutionContext>,
 ) -> anyhow::Result<RpcReply> {
+    let started = Instant::now();
     let _request_lock = state.fleet.request_lock("execution", &request.id).await?;
     let key = dispatch_key(&request).to_owned();
     let fingerprint = if private_context.is_some() {
@@ -252,6 +254,7 @@ async fn submit_inner(
         .fleet
         .prepare_assignment(&assignment, &fingerprint)
         .await?;
+    let prepared_at = Instant::now();
     let index = assignment.index.clone();
     let mut reply = state
         .hub
@@ -288,6 +291,7 @@ async fn submit_inner(
             )
             .await;
     }
+    let node_reply_at = Instant::now();
     if (200..300).contains(&reply.status) {
         let accepted: ExecutionIndex = serde_json::from_value(reply.body.clone())?;
         if accepted.id != index.id
@@ -313,6 +317,15 @@ async fn submit_inner(
             .fleet
             .finish_dispatch(&key, &fingerprint, &reply)
             .await?;
+        if started.elapsed() > Duration::from_millis(500) {
+            tracing::warn!(
+                execution_id = %index.id,
+                preparation_ms = prepared_at.duration_since(started).as_millis(),
+                node_reply_ms = node_reply_at.duration_since(prepared_at).as_millis(),
+                settlement_ms = node_reply_at.elapsed().as_millis(),
+                "slow execution admission"
+            );
+        }
         return Ok(reply);
     }
     // The socket settles actual replies and complete reports own status. A

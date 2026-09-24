@@ -6,8 +6,8 @@ use opencoder_core::{brain::layered::*, brain::*};
 use serde_json::Value;
 use std::sync::Arc;
 
-pub fn descriptors(raw: Vec<Value>) -> Vec<BrainCapabilityDescriptor> {
-    raw.into_iter()
+pub fn descriptors(raw: &[Value]) -> Vec<BrainCapabilityDescriptor> {
+    raw.iter()
         .filter_map(|value| {
             Some(BrainCapabilityDescriptor {
                 capability_id: value
@@ -40,8 +40,8 @@ pub async fn available(
     state: &Arc<AppState>,
     request: &LayeredRequest,
 ) -> Result<Vec<BrainCapabilityDescriptor>> {
-    let all = descriptors(catalog::capabilities(state).await?);
-    super::super::plan_capabilities::validate(&request.plan, request.depth, &all)?;
+    let raw = catalog::capabilities(state).await?;
+    let all = descriptors(&raw);
     let mut wanted: Vec<&str> = request
         .plan
         .nodes
@@ -50,6 +50,18 @@ pub async fn available(
         .collect();
     wanted.sort_unstable();
     wanted.dedup();
+    for id in &wanted {
+        if let Some(reason) = raw
+            .iter()
+            .find(|c| c["id"] == *id && !c["unavailable_reason"].is_null())
+        {
+            anyhow::bail!(
+                "node capability unavailable: {id}: {}",
+                reason["unavailable_reason"]
+            );
+        }
+    }
+    super::super::plan_capabilities::validate(&request.plan, request.depth, &all)?;
     let capabilities: Vec<BrainCapabilityDescriptor> = all
         .into_iter()
         .filter(|c| {

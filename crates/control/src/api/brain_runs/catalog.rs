@@ -106,9 +106,14 @@ pub async fn capabilities(state: &Arc<AppState>) -> anyhow::Result<Vec<Value>> {
                     node_id: None,
                 },
             )
-            .await
-            .map_err(|r| anyhow::anyhow!("capability {kind}/{target}: {}", r.body))?;
-            capabilities.push(json!({"id":format!("{kind}-{target}"),"kind":kind,"target":target,"summary":definition.get("description").or_else(||definition.get("spec").and_then(|s|s.get("description"))).cloned().unwrap_or(json!("")),"input_desc":format!("Named inputs for this {kind} definition"),"output_desc":format!("The {kind} result and execution evidence"),"required_inputs":[],"definition":snapshot,"version":"current","maturity":"draft"}));
+            .await;
+            let mut capability = json!({"id":format!("{kind}-{target}"),"kind":kind,"target":target,"summary":definition.get("description").or_else(||definition.get("spec").and_then(|s|s.get("description"))).cloned().unwrap_or(json!("")),"input_desc":format!("Named inputs for this {kind} definition"),"output_desc":format!("The {kind} result and execution evidence"),"required_inputs":[],"definition":null,"version":"current","maturity":"draft"});
+            match snapshot {
+                Ok(Some(snapshot)) => capability["definition"] = snapshot,
+                Ok(None) => capability["unavailable_reason"] = json!("definition missing"),
+                Err(reply) => capability["unavailable_reason"] = reply.body,
+            }
+            capabilities.push(capability);
         }
     }
     capabilities.extend(state.fleet.definitions("brain_capability").await?);

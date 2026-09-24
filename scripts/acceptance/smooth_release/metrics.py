@@ -18,7 +18,7 @@ def summarize(traffic, executions):
     }
 
 
-def verify(runtime_roots, traffic, limits=None):
+def verify(runtime_roots, traffic):
     executions = []
     for row in traffic:
         paths = [Path(root) / 'dag' / row['id'] / 'execution.json' for root in runtime_roots]
@@ -35,10 +35,9 @@ def verify(runtime_roots, traffic, limits=None):
     metrics = summarize(traffic, executions)
     # Individual queue delay may exceed one second when the fixed global
     # capacity is occupied. Acceptance and scheduling must remain continuous.
-    limits = limits or {key: 1 for key in ('max_accept_seconds', 'max_accept_gap_seconds', 'max_scheduling_gap_seconds')}
-    for key, limit in limits.items():
-        if metrics[key] > limit:
-            raise AssertionError(f'release continuity exceeded {limit} seconds: {key}={metrics[key]}')
+    for key in ('max_accept_seconds', 'max_accept_gap_seconds', 'max_scheduling_gap_seconds'):
+        if metrics[key] > 1:
+            raise AssertionError(f'release continuity exceeded one second: {key}={metrics[key]}')
     return {'metrics': metrics, 'executions': executions}
 
 

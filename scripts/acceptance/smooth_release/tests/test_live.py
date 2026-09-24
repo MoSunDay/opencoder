@@ -11,7 +11,7 @@ import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from live import chain
 from fixture import release_wasi_gate
-from metrics import summarize, verify
+from metrics import summarize, verify, verify_ready
 from transitions import command
 from types import SimpleNamespace
 
@@ -89,6 +89,22 @@ class AcceptanceTests(unittest.TestCase):
         self.assertEqual(metrics['max_scheduling_delay_seconds'], 5)
         with self.assertRaisesRegex(AssertionError, 'at least two'):
             summarize([], [])
+
+    def test_public_readiness_measures_availability_independently_of_tail_latency(self):
+        samples = [{'started_at': i * .2, 'completed_at': i * .2 + .05}
+                   for i in range(20)]
+        traffic = [{'id': str(i), 'at': i * .2, 'seconds': .2} for i in range(20)]
+        traffic[5]['seconds'] = 2.3
+        executions = [{'created_at_ms': i * 200, 'started_at_ms': i * 200 + 100}
+                      for i in range(20)]
+        self.assertEqual(summarize(traffic, executions)['p95_accept_seconds'], .2)
+        self.assertLess(verify_ready(samples, [])['max_gap_seconds'], 1)
+        samples[10:] = [{**row, 'started_at': row['started_at'] + 1.2,
+                         'completed_at': row['completed_at'] + 1.2} for row in samples[10:]]
+        with self.assertRaisesRegex(AssertionError, 'readiness gap'):
+            verify_ready(samples, [])
+        with self.assertRaisesRegex(AssertionError, 'readiness failed'):
+            verify_ready(samples[:10], ['HTTP 503'])
 
     def test_durable_metrics_reject_duplicate_owners_and_scheduling_gaps(self):
         with tempfile.TemporaryDirectory() as directory:

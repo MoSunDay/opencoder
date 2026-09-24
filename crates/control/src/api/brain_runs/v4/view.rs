@@ -131,7 +131,9 @@ async fn detail(
             .collect();
         return Ok(
             json!({"schema_version":request.schema_version,"layer":layer,"run_phase":snapshot.run.phase,
-            "visit":selected,"visits":visits,"nodes":nodes}),
+            "visit":selected,"visits":visits,"nodes":nodes,
+            "milestone":request.plan.layers.get(layer as usize - 1),
+            "assessment":request.plan.layers.get(layer as usize - 1).and_then(|milestone| assessments.and_then(|event| event.assessments.get(&milestone.layer_id)))}),
         );
     }
     let decision = layer_dispatch(&events, layer, snapshot.run.layer)?;
@@ -227,7 +229,7 @@ async fn open(
     if assignment.request.kind != ExecutionKind::Brain
         || !matches!(
             assignment.request.input["schema_version"].as_u64(),
-            Some(4..=6)
+            Some(4..=7)
         )
     {
         return Err(RpcReply::error(404, "layered run not found"));

@@ -21,7 +21,12 @@ async fn saved_plan_versions_are_capabilities_and_nested_runs_pin_the_version() 
     assert_eq!(cap["kind"], "brain");
     assert_eq!(cap["definition"]["version"], 1);
     let mut request = request();
-    request["plan"]["nodes"] = json!([{"node_id":"nested","title":"完成子计划","capability_ids":["plan-plan-child@1"],"layer":1,"objective":"finish child","success_criteria":"child delivered"}]);
+    request["plan"]["nodes"] = json!([{"node_id":"nested","title":"完成子计划","capability_id":"plan-plan-child@1","layer_id":"scan-layer","objective":"finish child"}]);
+    request["plan"]["layers"]
+        .as_array_mut()
+        .unwrap()
+        .truncate(1);
+    request["plan"]["transitions"] = json!([]);
     request["plan"]["edges"] = json!([]);
     let (status, body) = h.req(Method::POST, "/api/brain/runs", Some(request)).await;
     assert_eq!(status, 202, "{body}");

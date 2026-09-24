@@ -277,9 +277,7 @@ def exercise(args, settings, root):
     for row in traffic:
         env.wait(lambda: env.completed(row['id']), 30)
     current = Journal(settings.state_dir).data
-    continuity = verify_traffic([record['runtime_data'] for record in current['releases'].values()],
-        traffic, limits={'p95_accept_seconds': 1, 'max_accept_seconds': 3,
-                         'max_accept_gap_seconds': 3, 'max_scheduling_gap_seconds': 3})
+    continuity = verify_traffic([record['runtime_data'] for record in current['releases'].values()], traffic)
     continuity['readiness'] = verify_ready(ready_samples, ready_failures)
     write(root / 'scheduling.json', continuity)
     verify_stream(env, stream, dag_id)

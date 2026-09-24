@@ -25,6 +25,43 @@ async fn pc_plan_install_is_idempotent_and_requires_original_problem() {
 async fn pc_plan_install_appends_schema_six_after_legacy_version() {
     let h = Harness::with_brain_kind().await;
     advertise_v4(&h);
+    h.state
+        .fleet
+        .put_definition(
+            "dag",
+            "uicase-regression",
+            &json!({
+                "id":"uicase-regression","name":"uicase-regression","spec":{}
+            }),
+        )
+        .await
+        .unwrap();
+    let (status, library) = h.req(Method::GET, "/api/brain/library", None).await;
+    assert_eq!(status, 200, "{library}");
+    let ui = library["capabilities"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|cap| cap["id"] == "dag-uicase-regression")
+        .unwrap();
+    assert!(ui["definition"].is_null());
+    assert!(ui["unavailable_reason"]
+        .to_string()
+        .contains("device_count"));
+    let mut unavailable_plan = plan();
+    unavailable_plan["nodes"][0]["capability_ids"] = json!(["dag-uicase-regression"]);
+    let (status, rejection) = h
+        .req(
+            Method::POST,
+            "/api/brain/plan-defs/validate",
+            Some(unavailable_plan),
+        )
+        .await;
+    assert_eq!(status, 400, "{rejection}");
+    assert!(
+        rejection.to_string().contains("device_count"),
+        "{rejection}"
+    );
     let mut legacy_plan = opencoder_core::brain::pc_issue::plan();
     legacy_plan["schema_version"] = json!(5);
     let legacy: opencoder_core::brain::PlanVersion<serde_json::Value> =

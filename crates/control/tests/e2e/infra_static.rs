@@ -66,6 +66,7 @@ async fn ready_reports_open_with_online_node() {
     assert_eq!(body["online_nodes"], json!(1));
     assert_eq!(body["ready_nodes"], json!(1));
     assert_eq!(body["control_drained"], json!(false));
+    assert!(body.get("active_executions").is_none());
 }
 
 #[tokio::test]

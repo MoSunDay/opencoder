@@ -1,8 +1,8 @@
-Commit: 3b4775905c950f64433b5c9f4439f4396674b3c6
+Commit: d26f8cb5a16a52072daad02c77ae63161973526b
 
 # brain 模块
 
-能力目录与 schema_version 4 分层调度。计划由一句话节点、单一能力引用及连线构成；层级纯函数推导，整层成功越过屏障，重试耗尽失败并取消兄弟。执行与验证由能力自身负责。
+能力目录与 schema_version 6 里程碑调度。计划用显式层级组织里程碑，每个里程碑定义名称、目标、达成标准及 1–32 个能力引用。层内能力执行结束后形成屏障，大脑评估当前结果，决定推进下一层或反思回退到先前层；回退开启新轮次，每次激活产生独立的能力执行 ID。能力负责具体执行，大脑负责输入绑定、状态评估与下一步决策。
 
 - `crates/core/src/brain/layered/`：计划、运行、操作与决策协议。
 - `crates/core/src/brain/capability.rs`：能力描述及输入引用。
@@ -13,6 +13,6 @@ Commit: 3b4775905c950f64433b5c9f4439f4396674b3c6
 - `crates/worker/src/brain/v4/`：节点投影、恢复、模型调度与确认。
 - `crates/brain/tests/layered/`：图约束、层屏障、终态；`crates/worker/tests/brain_nested.rs`：真实嵌套计划链路。
 
-仅支持 schema 4，不提供旧调度器或数据迁移兼容分支。历史数据清理使用 `scripts/maintenance/brain_cleanup/` 的审阅清单、行摘要校验、备份与重复复核；清理范围必须同时覆盖运行数据、Server 索引及 Host 休眠索引，避免节点同步恢复已删除的 ID。清理不在存储初始化中自动执行。
+新计划和运行入口要求 schema 6；`v4/` 是现存实现目录名，历史读取逻辑保留在代码中。历史数据清理使用 `scripts/maintenance/brain_cleanup/` 的审阅清单、行摘要校验、备份与重复复核；清理范围必须同时覆盖运行数据、Server 索引及 Host 休眠索引，避免节点同步恢复已删除的 ID。清理不在存储初始化中自动执行。
 
 [运行协议](../../docs/brain-orchestration.md) · [工作台](../../features/brain/index.md)

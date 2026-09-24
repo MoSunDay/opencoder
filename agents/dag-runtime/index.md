@@ -1,4 +1,4 @@
-Commit: d9b366a66dc7defa4281f484dd00b2a3e208c092
+Commit: c23acdf9647a182a91323db26fb7e46191ac5f19
 
 # dag-runtime 模块
 
@@ -7,6 +7,7 @@ Commit: d9b366a66dc7defa4281f484dd00b2a3e208c092
 ## 索引
 - `src/runtime.rs`、`src/runtime/` — 调度、动态展开与恢复；静态/动态共享冻结 spec 的 `max_concurrency` 名额（缺省 4、范围 1–30）轮询调度、原子展开清单、按实例恢复、同组失败取消并收齐退出
 - `src/exec/` — wasm 与 agent 步执行（含产出提取）
+- `src/exec/device/` — `device-cases` 与 `uicase-regression` 受控 DAG 的冻结定义核验、设备实例归属和私有客户端传输；UI 执行能力仍由 Worker 广告门禁控制。
 - `src/exec/wasm/in_process.rs` — 先设置 Store 的 epoch 截止点，再启动时钟线程，避免初始化阶段丢失取消；执行前已取消的令牌直接返回 Cancelled，不进入 guest。
 - `src/exec/agent_runc.rs`、`src/sandbox/` — runc 沙箱（fail-closed）与 rootfs/挂载装配
 - `src/sandbox/codex/` — 解析节点 Codex 登录目录与冻结 Harness/profile，校验 guest 可执行文件；原登录目录直接读写挂载，私有启动配置独立于 DAG 产物。`agent_runc` 保存线程回执、导入事件，并使用容器内知识库路径；纯 Codex 不创建原生模型请求。

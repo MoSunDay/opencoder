@@ -1,4 +1,4 @@
-Commit: c23acdf9647a182a91323db26fb7e46191ac5f19
+Commit: 48f6127cb5456123c4d083b871cce8b3f7fc527c
 
 # control 模块
 
@@ -12,14 +12,14 @@ Commit: c23acdf9647a182a91323db26fb7e46191ac5f19
 - `src/api/settings/` — Harness 配置与节点调度配置（Maintenance RPC 转发）
 - `src/api/catalog.rs`、`src/api/compat/`、`src/api/project.rs` — 节点/定义目录、兼容路由与 Project 中继
 - `src/api/compat/dag_instances.rs`、`src/api/stream.rs`、`src/api/streaming/` — 实例中继与 SSE（v4 运行沿用同一 `/events` 通道，负载由节点按运行版本给出）
-- `src/api/brain_runs/` — schema 6 计划与运行；`plan_capabilities.rs` 注册保存计划版本能力，`v4/` 实现目录负责准入、派发、读取和事件确认。
+- `src/api/brain_runs/` — schema 7 计划与运行；`plan_capabilities.rs` 注册保存计划版本能力，`v4/` 实现目录负责准入、派发、读取和事件确认。
 - `src/transport/layered_tests.rs` — 分层 wake 的 generation 栅栏（只确认本次激活准入的那一轮）
 - `src/scheduler.rs`、`src/api/schedules/`、`src/seed_schedules.rs` — cron 调度、定义 CRUD 与遗留导入
 - `src/seed_dags.rs` — 仅初始化 `review-harness-quick`；按名已存在则跳过，保留操作者定义
 - `tests/e2e/` — 集成测试（含 `layered_api` 家族：锁定读面、命令门禁、嵌套准入）
 
 ## 接缝
-- Brain 里程碑计划：节点须广告 `brain_scheduler_v6`；普通能力走统一执行提交，子计划走相同 Brain 准入并核验父 operation。节点持有运行与操作投影；视图按轮次和激活提供执行索引，详情由执行 ID 查询。Control 为每次激活解析能力及有界上游摘要，Worker 执行模型决策；子计划固定版本并验证父 operation、深度和终态。目录解析失败只标记对应能力不可用，计划引用它时返回原因，不阻断其他计划。PC 安装入口保留旧 schema 版本，追加并幂等返回最新 schema 6 版本。
+- Brain 里程碑计划：节点须广告 `brain_scheduler_v7`；普通能力走统一执行提交，子计划走相同 Brain 准入并核验父 operation。节点持有运行与操作投影；视图按轮次和激活提供执行索引，详情由执行 ID 查询。Control 为每次激活解析能力及有界上游摘要，Worker 执行模型决策；子计划固定版本并验证父 operation、深度和终态。目录解析失败只标记对应能力不可用，计划引用它时返回原因，不阻断其他计划。PC 安装入口保留旧 schema 版本，追加并幂等返回最新 schema 7 版本。
 - `src/api/admission.rs` — `/ready` 在开放模式读取准入与节点就绪快照；冻结模式读取完整 drain 状态和活动执行数。
 
 ## 相关

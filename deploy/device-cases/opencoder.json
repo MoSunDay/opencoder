@@ -1,20 +1,6 @@
 {
   "agent": {
-    "agents_dir": "/mnt/opencoder-device-cases",
-    "runtime": {
-      "profiles": {
-        "device-cases": {
-          "revision": 1,
-          "settings": {
-            "executable": "/usr/local/bin/codex",
-            "model": "gpt-6-astra",
-            "reasoning_effort": "medium",
-            "sandbox_mode": "danger-full-access",
-            "approval_policy": "never"
-          }
-        }
-      }
-    }
+    "agents_dir": "/mnt/opencoder-device-cases"
   },
   "dag": {
     "agent_sandbox": "host",

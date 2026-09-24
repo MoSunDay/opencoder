@@ -14,9 +14,10 @@ import time
 sys.path.insert(0, '/opt/device-cases/harness')
 from controller.storage import CODE, read, save, sha, ps_string, utc, exclusive, config
 from controller.cases import freeze, select_sources
-from controller.driver import Driver
+from focus_driver import CandidateDriver
 from controller.fleet import reserve, release
-from controller.package import launcher, payload
+from controller.package import launcher
+from candidate_runtime import guarded_payload as payload
 from controller.transport import termination
 from controller.workflow import child, monitor, resume_owned
 from controller.device.client import context as device_context
@@ -40,12 +41,16 @@ def launch_owned(args, settings):
     if args.run_id is not None and args.run_id!=run_id:
         raise ValueError('Native run ID must match its deterministic parent-assignment case identity: '+run_id)
     candidate = assigned.get('input', {}).get('candidate')
+    if not candidate:
+        raise ValueError('Candidate adapter requires a frozen candidate manifest')
     root=args.home/'runs'/run_id
     if (root/'run.json').exists():
         prior=root/'sources'/args.case_id[0]/'case.json'
         selected=select_sources(args.case_source,args.case_id)
         if not prior.is_file() or read(prior)!=selected[0][1]:
             raise ValueError('Native retry changed its original case input')
+        if read(root/'run.json').get('candidate') != candidate:
+            raise ValueError('Native retry changed its candidate input')
         return resume_owned(args.home,settings,run_id)
     if root.exists():
         from controller.fleet import recover_unstarted
@@ -75,20 +80,19 @@ def launch_owned(args, settings):
             time.sleep(5)
     remote=settings['guest_root']+'\\'+run_id
     state={'run_id':run_id,'status':'preparing','created_at':utc(),'machine':machine,'guest_root':remote,
-           'bundle_sha256':sha(bundle.read_bytes()),'task_start_attempted':False}
+           'bundle_sha256':sha(bundle.read_bytes()),'task_start_attempted':False,'candidate':candidate}
     save(root/'run.json',state)
     print(json.dumps({'run_id':run_id,'machine':machine['name'],'status':'preparing','directory':str(root)}),flush=True)
-    driver=Driver(settings,machine,root)
+    driver=CandidateDriver(settings,machine,root)
     try:
-        if candidate:
-            from candidate import deploy_candidate
-            profile=deploy_candidate(driver,root,candidate,profile)
         termination.checkpoint()
         driver.ps((CODE/'windows/Common.ps1').read_text()+'\n'
                   +(CODE/'windows/runtime/Occupancy.ps1').read_text()+'\n'
                   +'Assert-HomeOnly '+ps_string(profile['app_path']))
         from controller.inspection.occupancy import assert_idle
         assert_idle(driver,args.home,root,remote)
+        from candidate import deploy_candidate
+        profile=deploy_candidate(driver,root,candidate,profile)
         spec={'run_id':run_id,'case_ids':local_spec['case_ids'],'case_file':remote+'\\cases.json',
               'job_root':remote+'\\jobs','output_root':remote+'\\results','app_path':profile['app_path'],
               'app_commit':profile['app_commit'],'concurrency':args.concurrency,'timeout_ms':args.timeout_ms,

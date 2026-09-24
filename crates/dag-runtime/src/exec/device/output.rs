@@ -8,6 +8,160 @@ pub(super) fn reservation_id(dag_id: &str) -> String {
     format!("{:x}", Sha256::digest(key))[..32].into()
 }
 
+pub(super) fn ui_run_id(reservation: &str, instance: &str, case: &str) -> String {
+    let bytes = serde_json::to_vec(&[reservation, instance, case]).expect("string array JSON");
+    format!("ui-{}", &format!("{:x}", Sha256::digest(bytes))[..40])
+}
+
+pub(super) fn validate_ui(
+    output: &Value,
+    reservation: &Value,
+    input: &Value,
+    dag: &str,
+) -> Result<()> {
+    let frozen = opencoder_dag::ui_cases::public_input(input).map_err(anyhow::Error::msg)?;
+    let count = frozen["device_count"].as_u64().unwrap() as usize;
+    let id = reservation_id(dag);
+    ensure!(
+        reservation["reservation_id"] == id
+            && reservation["dag_id"] == dag
+            && reservation["target_step"] == "execute"
+            && reservation["count"] == count
+            && reservation["work_type"] == "ui",
+        "UI allocation authority mismatch"
+    );
+    let rows = reservation["assignments"]
+        .as_array()
+        .context("UI assignments missing")?;
+    let items = output["items"]
+        .as_array()
+        .context("UI allocator items missing")?;
+    ensure!(
+        rows.len() == count && items.len() == count,
+        "UI allocator omitted a device"
+    );
+    let mut machines = std::collections::BTreeSet::new();
+    for (index, item) in items.iter().enumerate() {
+        let instance_id = index.to_string();
+        let found: Vec<_> = rows
+            .iter()
+            .filter(|r| r["instance_id"] == instance_id)
+            .collect();
+        ensure!(found.len() == 1, "UI assignment missing or duplicated");
+        let row = found[0];
+        let machine = row["machine"].as_str().context("UI machine missing")?;
+        ensure!(
+            (2..=19).any(|i| machine == format!("win-{i:02}")) && machines.insert(machine),
+            "UI machine invalid or duplicated"
+        );
+        ensure!(
+            row["generation"].as_u64().is_some(),
+            "UI generation missing"
+        );
+        let cases =
+            opencoder_dag::ui_cases::case_batch(input, index).map_err(anyhow::Error::msg)?;
+        let ids: Vec<_> = cases.iter().map(|c| c["case_id"].clone()).collect();
+        ensure!(
+            row["case_ids"] == json!(ids),
+            "UI reservation case ownership changed"
+        );
+        let value: Value =
+            serde_json::from_str(item.as_str().context("UI item must be JSON string")?)?;
+        ensure!(
+            value
+                == json!({"instance_id":index.to_string(),"machine":machine,
+            "generation":row["generation"],"reservation_id":id,"cases":cases}),
+            "UI allocator output differs from host assignment"
+        );
+    }
+    Ok(())
+}
+
+pub(super) fn completed_ui(reservation: &Value, input: &Value, identity: &Value) -> Result<()> {
+    let dag = identity["dag_id"]
+        .as_str()
+        .context("UI DAG identity missing")?;
+    let instance = identity["instance_id"]
+        .as_str()
+        .context("UI instance missing")?;
+    let index: usize = instance.parse()?;
+    let id = reservation_id(dag);
+    ensure!(
+        reservation["reservation_id"] == id
+            && reservation["dag_id"] == dag
+            && reservation["work_type"] == "ui",
+        "UI completion authority mismatch"
+    );
+    let rows: Vec<_> = reservation["assignments"]
+        .as_array()
+        .context("UI assignments missing")?
+        .iter()
+        .filter(|r| r["instance_id"] == instance)
+        .collect();
+    ensure!(rows.len() == 1, "UI completion assignment missing");
+    let row = rows[0];
+    ensure!(
+        row["session_id"] == identity["session_id"] && row["released"] != true,
+        "UI session no longer owns assignment"
+    );
+    let cases = opencoder_dag::ui_cases::case_batch(input, index).map_err(anyhow::Error::msg)?;
+    let expected: Vec<_> = cases
+        .iter()
+        .map(|c| ui_run_id(&id, instance, c["case_id"].as_str().unwrap()))
+        .collect();
+    let works = row["works"]
+        .as_array()
+        .context("UI work receipts missing")?;
+    let actual: Vec<_> = works
+        .iter()
+        .map(|w| w["ui_run_id"].as_str().unwrap_or("").to_string())
+        .collect();
+    ensure!(
+        actual == expected && works.iter().all(|w| w["recovery_verified"] == true),
+        "UI cases missing, foreign, or not restored"
+    );
+    Ok(())
+}
+
+#[cfg(test)]
+mod ui_tests {
+    use super::*;
+    #[test]
+    fn ui_assignment_and_completion_require_exact_frozen_cases() {
+        let input = json!({"device_count":1,"case_source":"/private/specs",
+            "cases":[{"case_id":"BITS-1-a","spec_sha256":"a".repeat(64),"input_version":"v1"}]});
+        let dag = "dag-ui";
+        let id = reservation_id(dag);
+        let cases = opencoder_dag::ui_cases::case_batch(&input, 0).unwrap();
+        let run = ui_run_id(&id, "0", "BITS-1-a");
+        let mut reservation = json!({"reservation_id":id,"dag_id":dag,"target_step":"execute",
+            "count":1,"work_type":"ui","assignments":[{"instance_id":"0","machine":"win-02",
+            "generation":1,"case_ids":["BITS-1-a"],"session_id":"host","works":[{"ui_run_id":run,
+            "recovery_verified":true}]}]});
+        let item = json!({"instance_id":"0","machine":"win-02","generation":1,
+            "reservation_id":id,"cases":cases});
+        assert!(validate_ui(
+            &json!({"items":[item.to_string()]}),
+            &reservation,
+            &input,
+            dag
+        )
+        .is_ok());
+        let identity = json!({"dag_id":dag,"instance_id":"0","session_id":"host"});
+        assert!(completed_ui(&reservation, &input, &identity).is_ok());
+        reservation["assignments"][0]["works"][0]["recovery_verified"] = json!(false);
+        assert!(completed_ui(&reservation, &input, &identity).is_err());
+        reservation["assignments"][0]["case_ids"] = json!(["foreign"]);
+        assert!(validate_ui(
+            &json!({"items":[item.to_string()]}),
+            &reservation,
+            &input,
+            dag
+        )
+        .is_err());
+    }
+}
+
 pub(super) fn validate(
     output: &Value,
     reservation: &Value,
@@ -38,7 +192,7 @@ pub(super) fn validate(
         let instance_id = index.to_string();
         let matches: Vec<_> = assigned
             .iter()
-            .filter(|a| a["instance_id"].as_str() == Some(instance_id.as_str()))
+            .filter(|a| a["instance_id"] == instance_id)
             .collect();
         ensure!(
             matches.len() == 1,

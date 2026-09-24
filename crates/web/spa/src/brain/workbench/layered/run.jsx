@@ -71,6 +71,7 @@ function LegacyRunBody({ view, id, connection, refresh, onNotice }) {
         {!!run.summary && <Typography.Text type="secondary">交付摘要：{run.summary}</Typography.Text>}
       </Space>
     </section>
+    <ProblemView problem={view.problem} />
     <LayerCanvas view={view} selected={selected} onSelect={selectNode} />
     <section className="brain-rounds">
       <Typography.Title level={5}>分层决策与执行</Typography.Title>

@@ -4,7 +4,7 @@ Commit: 92b4ec156acd78b62031f257c3099863b6cda6b3
 
 控制面的 DAG 保存接口此前只持久化 `id/name/spec`，导致列表和详情缺少时间字段，页面的「更新时间」始终显示空值。现在由服务端记录毫秒级 `created_at`、`updated_at`：编辑保留创建时间，每次保存推进更新时间；没有历史时间字段的旧定义从下一次保存开始记录。非法请求不改变已保存内容或时间，客户端不能覆盖时间字段。同名保存复用跨进程锁，支持平滑发布期间的多个 Server。
 
-本次按用户指定清单执行一次性线上清理：删除 6 条大脑能力及其示例输入、向量、绑定，删除 8 个 DAG 定义，仅保留 `static-auto-test-pingce-0bdf3c65d217`、`viking-dependency-analysis`、`regression-test`、`eval-diagnose`。清理前备份保存在服务器本地；保留定义的工作流内容经过前后比对。清理没有加入启动或发布逻辑。
+本次按用户指定清单执行一次性线上清理：删除 6 条大脑能力及其示例输入、向量、绑定，删除 8 个 DAG 定义，仅保留 `static-auto-test-pingce-0bdf3c65d217`、`dependency-analysis`、`regression-test`、`eval-diagnose`。清理前备份保存在服务器本地；保留定义的工作流内容经过前后比对。清理没有加入启动或发布逻辑。
 
 ## 测试覆盖
 

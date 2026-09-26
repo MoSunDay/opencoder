@@ -31,7 +31,7 @@ Commit: c2bd85c234ea2394536308dd63c1122aa670ebc2
 - `cargo test --workspace --no-fail-fast`（同树、含全部本改动）：402 个测试二进制 ok，唯一失败 `tests/running_mode_switch_e2e.rs::real_server_clear_context_executes_preserved_plan_in_act`（`POST /api/sessions/:sid/prompt` 返回 400，plan→act clear-context 场景）。
 - 该失败与本改动无关的证据：① 用例全程不调用 `/api/agents`（grep 计数 0），断言点在 prompt 准入路径，本改动未触碰；② 同一工作区在 16:40 的上一次全量回归中该用例通过（当时 api_agents.rs 改动已在树中），而并行会话 16:40 后继续在同一工作区迭代 control/worker/session 等在途改动；③ 单独复跑两次均稳定 400，为确定性失败，属并行会话在途代码（agent-owned resources 等）引入，非本改动回归。
 - **发版暂缓（已按用户指令解除）**：SPA 与 API 均编入二进制，而当时工作树混有并行会话在途改动，曾记录暂缓发布。后续在途工作已在 `d31ec4e9` 落地、SPA dist 重建无漂移，用户明确指令跳过全量回归直接发布，本轮于 2026-09-16 18:08 信号发布 `rel-2868ebfd`（回归豁免与未复跑项见 [release-2868ebfd-signal-deploy](release-2868ebfd-signal-deploy.md)）。线上 `GET /api/agents` 复核为仅注册卡 + builtin 调度角色。
-- 发版 dev 后线上复核：`GET /api/agents` 仅含注册卡（当前 3 张：eval-diagnose / regression-test / viking-dependency-analysis-agent）。
+- 发版 dev 后线上复核：`GET /api/agents` 仅含注册卡（当前 3 张：eval-diagnose / regression-test / dependency-analysis-agent）。
 
 ## 测试清单
 
@@ -46,7 +46,7 @@ Commit: c2bd85c234ea2394536308dd63c1122aa670ebc2
 
 - **门转绿**：SID 修复 `de4dab6f`（用例名对齐 operator kind 会话命名）落地后，`real_server_clear_context_executes_preserved_plan_in_act` 单跑通过（0.88s）。随后在共享 target dir 上对 357 个 cargo test 目标逐二进制直跑复核（并行会话持续占用构建锁，改为绕过锁直接执行已编译测试二进制；`CARGO_BIN_EXE_*` 依赖手动注入）：**1571 项 passed / 0 failed**，含 root 6 个 e2e（running_mode_switch_e2e / daemon_smoke / nodes_smoke_proc / responses_cli / tui_exit_restore_e2e / skill_seed_startup_wiring）全绿。结果留档 `/tmp/test_results_all.txt`。
 - **发版（并行会话按用户指令执行）**：`rel-2868ebfd` 信号发布 18:08 上线，`/api/health` 返回 `commit 0.1.0 (2868ebfd)`、protocol 9，旧 Runtime（rel-79eee711）已 hibernate，详见 [release-2868ebfd-signal-deploy](release-2868ebfd-signal-deploy.md)。
-- **线上复核（`127.0.0.1:3039`，发版后）**：`GET /api/agents` 共 8 行、**builtin 行为空**（8 张注册卡：eval-diagnose / regression-test / viking-dependency-analysis-agent + 5 张 pingce 评审卡，均为今日新增注册卡的正常生长）；`DELETE /api/agents/act` → 400（builtin 保护在位）；`GET /api/agents/act` → 405（单卡路由为 `/:name/meta`，设计如此）；SPA `static/app.js` 200。
+- **线上复核（`127.0.0.1:3039`，发版后）**：`GET /api/agents` 共 8 行、**builtin 行为空**（8 张注册卡：eval-diagnose / regression-test / dependency-analysis-agent + 5 张 pingce 评审卡，均为今日新增注册卡的正常生长）；`DELETE /api/agents/act` → 400（builtin 保护在位）；`GET /api/agents/act` → 405（单卡路由为 `/:name/meta`，设计如此）；SPA `static/app.js` 200。
 - **active marker**：线上指向 `static-auto-test-pingce-prepare-context`（注册卡，非 builtin）——「生效下拉裸值」场景不适用；SPA 生效下拉 options 仅注册卡，且 `allowClear` 可恢复「跟随默认链」。
 - **数据收口**：agents root 存在 `act`（9 月 9 日）与 `sidecar`（14:43）两张**空引用** builtin 同名 file 卡（harness 试探残留，history 均为 3 秒内 opencoder→codex→opencoder 切换）。它们在管理列表显示为 `builtin:true` 行、API DELETE 被 builtin 保护拒绝（幽灵卡）。已移出至 `/var/tmp/agents-ghost-cards-backup-181636`（可回滚）；`resolve_agent` builtin 优先，删除对运行时零影响。移除后列表恰为注册卡。
 - **设计观察（不阻塞，留后续迭代）**：① `PUT /api/agents/:builtin-name` 走 `update_agent_with_profile` 的 `None if builtin` 分支自愈创建**覆盖卡**（web 层无 400，与本文件上文「PUT builtin 400」的原述不符，实测 200 并重建空卡）；空覆盖卡会以 `builtin:true` 行进入管理列表，与「仅注册卡」语义存在灰色地带；② 外部进程可能重建同名卡（备份目录 `/var/tmp/agents-ghost-cards-backup-*` 可观察再生长）。两者均属后续功能迭代议题。

@@ -38,7 +38,7 @@ Project 通过惰性客户端支持无原生凭据的 Plan/Execute；资源身�
 
 ## 最终验证与发布
 
-- 干净提交 `9046a052ae0605063c3ff091c42e7d7d45d53137` 已推送 main，并发布到本机 `18081` Server 和唯一节点 `human-os-02`。`/usr/local/bin` 与 `/root/.local/bin` 均安装同一包的四个二进制；实际进程哈希、build-info 和内嵌 SPA 与 manifest 一致。
+- 干净提交 `9046a052ae0605063c3ff091c42e7d7d45d53137` 已推送 main，并发布到本机 `18081` Server 和唯一本机节点。`/usr/local/bin` 与 `/root/.local/bin` 均安装同一包的四个二进制；实际进程哈希、build-info 和内嵌 SPA 与 manifest 一致。
 - Rust：353 个测试目标，**4,929 passed / 0 failed / 5 既有 ignored**；clippy 全 workspace/all-targets 零警告，workspace build 与 release build 通过。SPA 56 文件、473 项通过，发布重新构建并验证 dist 无漂移。平台安装/归档工具 19 项通过，真实四件套与旧三件套升级、回滚、再升级通过。
 - CI 修正后的干净提交 `be76fc1086cbf0d928c1d1e03ad5470563fd86df` 再次通过全 workspace 检查：**4,929 passed / 0 failed / 5 既有 ignored**，353 个测试目标，fmt、clippy、配套二进制预构建与 workspace build 均通过，记录为 `post-ci-gates.json` 和 `post-ci-*.log`。
 - 后续提交仅包含规范格式、测试和 CI 修正；`source-equivalence.json` 验证运行逻辑与已部署包一致。Mac 路径断言按规范路径比较，取消/steer 测试分离启动等待与五秒取消上限，使用三秒启动延迟和跨平台进程退出检查完成 8 项回归，旧 Bash 用例改用 getsid 验证独立会话并完成 18 项工具契约回归；MySQL 测试先验证旧运行阻止新领取，再结束旧运行后验证原子领取。真实 MySQL 8.4.11 契约及 SQL 可选后端 clippy 通过。最终 [macOS CI](https://github.com/MoSunDay/opencoder/actions/runs/34272427213) 与 [MySQL / fmt / clippy CI](https://github.com/MoSunDay/opencoder/actions/runs/34270311636) 均通过。

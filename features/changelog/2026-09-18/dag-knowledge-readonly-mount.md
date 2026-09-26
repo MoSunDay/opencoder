@@ -2,8 +2,8 @@
 
 ## 背景
 
-code-review 门禁 DAG 以节点知识库（human-os-02 `~/workspace`）为审查对象，
-要求「步骤可读、内核级不可写」。M0 打地基：节点配置一个只读挂载根，
+节点知识库（如 `~/workspace` 的 git 仓库）要求「步骤可读、内核级不可写」。
+M0 打地基：节点配置一个只读挂载根，
 所有沙箱形态（runc bind / in-process preopen / 宿主 agent 步）共享同一
 guest 路径 `/workspace/knowledge`，DTO（StepSpec）零变更。
 
@@ -31,4 +31,4 @@ guest 路径 `/workspace/knowledge`，DTO（StepSpec）零变更。
 - `opencoder-dag-runtime --lib sandbox::`：knowledge 有/无两形态的
   config/mountpoint/argv、缺失与符号链接 fail-closed、Direct argv 透传。
 - 进程级：`tests/dag_e2e/agent_runc.rs`（知识库 mtime/size 快照零写入断言 +
-  bundle config ro 挂载断言）、`code_review.rs`（宿主步 prompt 知识库提示）。
+  bundle config ro 挂载断言）。

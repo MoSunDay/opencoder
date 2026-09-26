@@ -31,7 +31,7 @@ Commit: 36e787432f7844ba5066433d36a43c24c05c115e
 
 ## 本机运行与兼容
 
-Server 在 18081 提供 Web，本机以 `human-os-02` 注册，Server 与 Node 均由 systemd 常驻并开机启动。Web 会话交互和全部执行两个入口均已通过真实模型与工具调用验收，包含同会话追问、刷新恢复历史和服务重启后续写。旧 8080 daemon 已停止，旧数据库与二进制保留。
+Server 在 18081 提供 Web，本机注册为节点，Server 与 Node 均由 systemd 常驻并开机启动。Web 会话交互和全部执行两个入口均已通过真实模型与工具调用验收，包含同会话追问、刷新恢复历史和服务重启后续写。旧 8080 daemon 已停止，旧数据库与二进制保留。
 
 正常停止会持久冻结接单；重启 Server 和 Node 后需显式复开。`active_executions` 包含等待继续的 idle 会话；停机前应检查节点 `active_runs` 与 `active_agent_loops`。本机运维说明、浏览器截图及验收 JSON 位于 `/data00/opencoder-delivery/20260907-local-18081/`，凭据仅保存在仓库外受限文件中。
 

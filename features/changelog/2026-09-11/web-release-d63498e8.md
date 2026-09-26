@@ -13,7 +13,7 @@ Commit: d63498e83d66aa3be7df652b20f83df0d4da47c1
 
 - `/api/health` → `0.1.0 (d63498e8)` / protocol 9 / role=control。
 - served `/static/app.css` 含 `todo-editor-toolbar`、`/static/app.js` 含 `oc-todo-run-node`（新 dist 特征）。
-- 节点 human-os-02：online / ready / idle，`resource_error: null`。
+- 节点在线：online / ready / idle，`resource_error: null`。
 
 ## 测试覆盖（发布轮，隔离 worktree @ d63498e8）
 

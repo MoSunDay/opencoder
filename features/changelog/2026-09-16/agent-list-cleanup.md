@@ -9,7 +9,7 @@ Commit: (working-tree)
 
 ## 预检（只读，全部通过）
 
-- `GET /api/dag/defs` 共 5 条定义，agent 引用合计 13 个，与删除名单零交集：`eval-diagnose`→`eval-diagnose`；`regression-test`→`regression-test`；`static-auto-test-pingce`→`pingce-6dd5896907b5-*`；`static-auto-test-pingce-0bdf3c65d217`→`pingce-0bdf3c65d217-*`；`viking-dependency-analysis`→`viking-dependency-analysis-agent`。
+- `GET /api/dag/defs` 共 5 条定义，agent 引用合计 13 个，与删除名单零交集：`eval-diagnose`→`eval-diagnose`；`regression-test`→`regression-test`；`static-auto-test-pingce`→`pingce-6dd5896907b5-*`；`static-auto-test-pingce-0bdf3c65d217`→`pingce-0bdf3c65d217-*`；`dependency-analysis`→`dependency-analysis-agent`。
 - `pingce-f492332d16e6-*` 删除闸门：`pingce-formal-empty-20260916` 相关 run 均已终态。control.db `execution_index` 中引用 f492332d16e6 / formal-empty 的 3 条 dag run（`dag-pingce-0517…`、`dag-pingce-229b…`、`dag-pingce-b25e…`）状态均为 `done`（实为 `static-auto-test-pingce` 保留组定义的 dispatch 载荷内提及该标签）；当前唯一 running 的 pingce run（`dag-pingce-1730…`，`static-auto-test-pingce`）引用保留组 `pingce-6dd5896907b5-*`，不阻塞删除。
 - `stat` 确认两个 agents 路径同视图（65 项列表一致：62 个 agent 目录 + `prompts`/`skills`/`tools` 共享池）。
 - brain 绑定 active=null（全部指向 builtin `act`），不受 file 卡删除影响。
@@ -17,12 +17,12 @@ Commit: (working-tree)
 ## 保留（builtin 7 + file 卡 13）
 
 - builtin：`act`、`plan`、`explore`、`build`、`sidecar`、`command`、`workflow`（`act`/`sidecar` 同名卡受 builtin 守卫保留，列表合并为单行）。
-- `pingce-0bdf3c65d217-{prepare,business,engineering,verify,finalize}`、`pingce-6dd5896907b5-{prepare,business,engineering,verify,finalize}`、`viking-dependency-analysis-agent`、`regression-test`、`eval-diagnose`。
+- `pingce-0bdf3c65d217-{prepare,business,engineering,verify,finalize}`、`pingce-6dd5896907b5-{prepare,business,engineering,verify,finalize}`、`dependency-analysis-agent`、`regression-test`、`eval-diagnose`。
 
 ## 删除（47 张，全部 `DELETE /api/agents/{name}` 返回 200）
 
 - 9 组过期评测卡 ×5（45 张）：`pingce-{2a6085b45e07, 3f7cb3e26900, 3ffa2a881a97, 5f7d596cb966, 69c28c41b386, 88274fd6266e, aa36dfd32ec6, fe90a149a0ad, f492332d16e6}-*`。
-- 2 张单卡：`viking-dependency-analysis-candidate`、`wrap-release-20260909`。
+- 2 张单卡：`dependency-analysis-candidate`、`wrap-release-20260909`。
 - 共享池（`prompts/`、`skills/`、`tools/`）不在本次范围，未触碰（其中孤儿池 `pingce-<hash>` 残留见「可选后续」）。
 
 ## 备份与验证
@@ -51,7 +51,7 @@ Commit: (working-tree)
 
 ## 第二阶段（同日 15:57）：按用户决策移除 pingce 评测机制
 
-用户决策：列表仅保留 `eval-diagnose`、`regression-test`、`viking-dependency-analysis-agent`（builtin 7 张为代码内置不可删）。
+用户决策：列表仅保留 `eval-diagnose`、`regression-test`、`dependency-analysis-agent`（builtin 7 张为代码内置不可删）。
 
 - 取消在跑 run：`dag-pingce-dcfdab9b…`（cancelling；其引用的组从未落盘，本已卡死）、`dag-pingce-57866e70…`（cancelled）。
 - 删除定义：`static-auto-test-pingce`、`static-auto-test-pingce-0bdf3c65d217`（`DELETE /api/dag/defs/:id`，均 200）。至此「每次 run 新建一组卡并改写定义」的再生长源头移除。

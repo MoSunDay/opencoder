@@ -37,6 +37,7 @@ describe('brain workbench capability tab', () => {
     await screen.findByRole('tab', { name: '工作台' });
     expect(screen.queryByRole('heading', { name: '大脑调度' })).toBeNull();
     expect(screen.queryByText('维护能力与版本化计划，观察并发执行和交付证据')).toBeNull();
+    expect(screen.queryByText('创建并执行计划')).toBeNull();
   });
 
   it('shows the capability CRUD table directly with no maturity rows or library mutations', async () => {

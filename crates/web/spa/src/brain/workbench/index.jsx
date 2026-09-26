@@ -18,7 +18,7 @@ export function BrainWorkbench({ onNotice }) {
   return <PageShell page="brain">{runId ? <BrainRunView key={runId} id={runId} onBack={back} onNotice={onNotice} /> : <>
     {error && <Alert type="error" showIcon title={error} action={<Button onClick={reload}>重试</Button>} />}
     <Tabs activeKey={tab} onChange={setTab} items={[
-      { key: 'workspace', label: '工作台', children: <><Space style={{ marginBottom: 16 }}><Button type="primary" onClick={() => { setTab('plans'); }}>创建并执行计划</Button><Button onClick={reload}>刷新运行</Button><Button disabled={!runCursor} onClick={olderRuns}>更早运行</Button></Space><Table rowKey="id" dataSource={runs} pagination={{ pageSize: 10 }} columns={[
+      { key: 'workspace', label: '工作台', children: <><Space style={{ marginBottom: 16 }}><Button onClick={reload}>刷新运行</Button><Button disabled={!runCursor} onClick={olderRuns}>更早运行</Button></Space><Table rowKey="id" dataSource={runs} pagination={{ pageSize: 10 }} columns={[
         { title: '运行', dataIndex: 'id', render: (id) => <Button type="link" onClick={() => setRunId(id)}>{id}</Button> }, { title: '节点', dataIndex: 'node_id' }, { title: '执行状态', dataIndex: 'status', render: (status) => status === 'idle' ? <Tag color="blue">等待事件</Tag> : <StatusTag status={status} /> },
       ]} locale={{ emptyText: <Empty description="从目标开始，让能力组成可观察的执行计划" /> }} /></> },
       { key: 'plans', label: '计划库', children: <Plans plans={plans} capabilities={capabilities} reload={reload} onRun={executePlan} /> },

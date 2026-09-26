@@ -33,7 +33,7 @@ export function Plans({ plans, capabilities, reload, onRun }) {
       {view.plan.schema_version === 7 ? <Button onClick={() => { onRun(`${view.id}@${view.version}`); setView(null); }}>执行此版本</Button> : <Tag>历史版本只读</Tag>}
       <Button disabled={view.version < 2} onClick={compare}>对比上一版本</Button>
     </Space><Typography.Paragraph>{view.plan.objective}</Typography.Paragraph>
-      <PlanPreview plan={view.plan} />
+      <PlanPreview plan={view.plan} capabilities={capabilities} />
       {diff && <pre className="brain-json">{JSON.stringify(diff, null, 2)}</pre>}
     </>}</Drawer>
     <Drawer className="brain-plan-drawer" title={editor?.creating ? '新建计划' : '编辑计划新版本'} placement="right" size="100%" open={!!editor} onClose={() => editorRef.current?.close()} destroyOnHidden styles={{ body: { padding: 0 } }}>

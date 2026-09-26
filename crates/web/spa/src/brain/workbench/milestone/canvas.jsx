@@ -2,7 +2,7 @@ import { Background, Controls, Handle, MarkerType, MiniMap, Position, ReactFlow,
 import '@xyflow/react/dist/style.css';
 import { Button, Tag } from 'antd';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { groups } from './model.js';
+import { capabilityLabel, groups } from './model.js';
 import './style.css';
 
 function LayerCard({ data, selected }) {
@@ -20,13 +20,18 @@ function ExecutionCard({ data, selected }) {
   return <article className={`brain-execution-node ${selected ? 'selected' : ''}`}>
     <strong>{data.node.title || '新执行节点'}</strong>
     <p>{data.node.objective || '点击配置执行任务'}</p>
-    <span>{data.node.capability_id || '选择泛化能力'}</span>
+    <span title={data.capabilityLabel}>{data.capabilityLabel || '选择泛化能力'}</span>
     {data.status && <Tag>{data.status}</Tag>}
   </article>;
 }
 const nodeTypes = { layer: LayerCard, execution: ExecutionCard };
 const EMPTY = {};
-export function MilestoneCanvas({ plan, selection, onSelect, onConnect, onAddLayer, onAddNode, positions = EMPTY, onPositions, statuses = EMPTY, layerStatuses = EMPTY }) {
+const EMPTY_CAPABILITIES = [];
+const capabilityLabelFor = (node, capabilities) => {
+  const capability = capabilities.find((item) => (item.capability_id || item.id) === node.capability_id);
+  return capability ? capabilityLabel(capability) : node.capability_id;
+};
+export function MilestoneCanvas({ plan, capabilities = EMPTY_CAPABILITIES, selection, onSelect, onConnect, onAddLayer, onAddNode, positions = EMPTY, onPositions, statuses = EMPTY, layerStatuses = EMPTY }) {
   const editable = !!onAddLayer;
   const flow = useRef(null);
   const container = useRef(null);
@@ -46,9 +51,9 @@ export function MilestoneCanvas({ plan, selection, onSelect, onConnect, onAddLay
       ...children.map((node, column) => ({ id: node.node_id, type: 'execution', parentId: layer.layer_id, extent: 'parent',
         position: { x: 24 + (column % columns) * 228, y: 132 + Math.floor(column / columns) * 140 },
         style: { width: 210, height: 120 }, selected: selection?.type === 'node' && selection.id === node.node_id,
-        data: { node, status: statuses[node.node_id] }, draggable: false }))];
+        data: { node, capabilityLabel: capabilityLabelFor(node, capabilities), status: statuses[node.node_id] }, draggable: false }))];
     });
-  }, [plan, levelGroups.length, selection, editable, positions, onAddNode, statuses, layerStatuses]);
+  }, [plan, levelGroups.length, capabilities, selection, editable, positions, onAddNode, statuses, layerStatuses]);
   const [nodes, setNodes] = useState(projected);
   useEffect(() => setNodes(projected), [projected]);
   useEffect(() => { const timer = setTimeout(() => flow.current?.fitView({ padding: 0.18, maxZoom: 1, duration: 180 }), 80); return () => clearTimeout(timer); }, [plan.layers.length, plan.nodes.length]);

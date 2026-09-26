@@ -3,7 +3,7 @@
 use anyhow::{anyhow, Result};
 use opencoder_core::{body_with_source, resolve_agent, skill, AgentMode, ApMode, Role, ToolFilter};
 
-use super::{new_id, run_with_registry, SessionEvent};
+use super::{new_id, SessionEvent};
 use crate::SessionState;
 
 pub(super) fn eligible(parent: &SessionState) -> bool {
@@ -57,7 +57,7 @@ pub(super) async fn after_task(
     on_event(SessionEvent::Status("updating local memory".into()));
     let mut child_error = None;
     let registry = super::registry::build_full_registry(&child).await;
-    let result = Box::pin(run_with_registry(
+    super::entry::run_without_memory(
         &mut child,
         "The main task is complete. Update repository local memory for this task using the active skill. Inspect the completed work and write only necessary memory changes. Do not redo the main task.".into(),
         Vec::new(),
@@ -67,9 +67,7 @@ pub(super) async fn after_task(
             SessionEvent::Error(error) => child_error = Some(error),
             _ => {}
         },
-    ))
-    .await;
-    result?;
+    ).await?;
     if let Some(error) = child_error {
         return Err(anyhow!("local-memory update failed: {error}"));
     }

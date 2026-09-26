@@ -145,9 +145,7 @@ fn enter_on_ap_dispatches() {
             m.on_char(c);
         }
     }
-    // Query "ap" also matches "/config" (its description contains
-    // "api_key"), but a name hit ranks first — "/ap" is already the
-    // highlighted row; moving down reaches the description hit.
+    // An exact name hit stays highlighted even when descriptions change.
     let (outcome, _quit) = handle_command_key(&mut menu, key(KeyCode::Enter, KeyModifiers::NONE));
     match outcome {
         CommandOutcome::Dispatch(SlashAction::Ap) => {}
@@ -156,16 +154,23 @@ fn enter_on_ap_dispatches() {
     assert!(menu.is_none(), "popup closed after Enter-dispatch");
 
     let mut menu = Some(CommandMenu::new());
-    for c in "ap".chars() {
+    for c in "co".chars() {
         if let Some(m) = menu.as_mut() {
             m.on_char(c);
         }
     }
+    assert_eq!(
+        menu.as_ref().unwrap().selected_action(),
+        Some(SlashAction::Config)
+    );
     menu.as_mut().expect("menu open").move_down();
     let (outcome, _quit) = handle_command_key(&mut menu, key(KeyCode::Enter, KeyModifiers::NONE));
     match outcome {
-        CommandOutcome::Dispatch(SlashAction::Config) => {}
-        other => panic!("expected Dispatch(Config) after move_down, got {:?}", other),
+        CommandOutcome::Dispatch(SlashAction::Compact) => {}
+        other => panic!(
+            "expected Dispatch(Compact) after move_down, got {:?}",
+            other
+        ),
     }
 }
 

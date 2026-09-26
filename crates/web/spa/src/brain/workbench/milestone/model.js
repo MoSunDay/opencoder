@@ -1,5 +1,15 @@
 // Canvas state is pure; positions never define execution order.
+import { KIND_LABELS } from '../../../fleet/model.js';
+
 export const SCHEMA = 7;
+export const capabilityName = (capability) => {
+  const id = capability?.capability_id || capability?.id || '';
+  if (capability?.name?.trim()) return capability.name.trim();
+  if (capability?.version === 'stored' && capability?.summary?.trim()) return capability.summary.trim();
+  if (id.startsWith('pc-issue-')) return id;
+  return capability?.target?.trim() || id;
+};
+export const capabilityLabel = (capability) => `${KIND_LABELS[capability.kind] || capability.kind} · ${capabilityName(capability)}`;
 export const layerMilestone = (layer_id) => ({ layer_id, title: '', objective: '', success_criteria: '' });
 export const executionNode = (node_id, layer_id) => ({ node_id, layer_id, title: '', objective: '', capability_id: '' });
 export const groups = (plan) => (plan.layers || []).map((layer) => (plan.nodes || []).filter((node) => node.layer_id === layer.layer_id));

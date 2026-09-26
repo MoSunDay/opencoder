@@ -72,6 +72,9 @@ pub struct Config {
     /// surfaced (as names in the context-tail skill catalog reminder).
     #[serde(default)]
     pub skills: HashMap<String, SkillConfig>,
+    /// Run repository memory maintenance in an isolated context after each task.
+    #[serde(default)]
+    pub local_memory: bool,
     #[serde(default = "default_model")]
     pub model: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -278,6 +281,7 @@ impl Default for Config {
             mcp_servers: HashMap::new(),
             cli: HashMap::new(),
             skills: HashMap::new(),
+            local_memory: false,
             model: default_model(),
             small_model: None,
             embedding_model: None,

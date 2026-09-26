@@ -50,6 +50,7 @@ pub(crate) enum KeyAction {
     /// parent boundary). The input remains untouched so the user can retry
     /// at an idle boundary.
     ModeSwitchBlocked,
+    AgentCommandUnavailable,
     /// Ctrl+T: preserve the transcript and toggle the parent between act and
     /// plan. The dispatcher applies the switch when the parent is idle; while
     /// running it refuses with the busy flash (mode switches never land
@@ -319,6 +320,9 @@ pub(crate) fn handle_key(
                 return KeyAction::None;
             }
             let text = input.trim().to_string();
+            if is_hidden_agent_command(&text) {
+                return KeyAction::AgentCommandUnavailable;
+            }
             // A bare act/plan switch while the parent turn runs is refused:
             // a mid-flight switch would re-aim the session the worker is
             // streaming into. Compound forms (`/plan review …`) are task
@@ -410,6 +414,9 @@ pub(crate) fn handle_key(
                 return KeyAction::None;
             }
             let text = input.trim().to_string();
+            if is_hidden_agent_command(&text) {
+                return KeyAction::AgentCommandUnavailable;
+            }
             // Focused running subagent: a queue would be admitted to the parent
             // session and affect the parent agent — reject it (mode commands
             // included) instead, leaving the typed text so Enter can submit it
@@ -554,6 +561,15 @@ pub(crate) fn handle_key(
         }
         _ => KeyAction::None,
     }
+}
+
+fn is_hidden_agent_command(text: &str) -> bool {
+    ["/agent", "/agents"].iter().any(|head| {
+        text == *head
+            || text
+                .strip_prefix(head)
+                .is_some_and(|rest| rest.starts_with(char::is_whitespace))
+    })
 }
 
 /// Shared Shift+Tab action — both spellings (`BackTab`, and `(Tab, SHIFT)`

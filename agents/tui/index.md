@@ -1,4 +1,4 @@
-Commit: 565c0eae44bf553002659597b92e1e01e4c6076a
+Commit: c60e2162be48102badf53d8b97e7cfa030b59605
 
 # tui 模块
 
@@ -10,7 +10,8 @@ ratatui + crossterm 交互界面。细节以代码为准。
 - `src/worker.rs` — worker actor 持 SessionState，事件桥接 UI 通道
 - `src/key_handler.rs`、`src/keymap.rs` — 键盘分发与映射（模式切换门禁）
 - `src/composer.rs`、`src/chat.rs`、`src/render.rs` — 输入、消息渲染、渲染入口
-- [agent_menu.rs](../../crates/tui/src/agent_menu.rs) — 从当前会话配置目录读取自定义卡，过滤内置同名项；选择结果交给现有 `/agent <name>` 提交路径。
+- `src/model_menu/` — `/config` 表单包含 `local-memory` 开关，写入顶层 `local_memory` 配置。
+- [agent_menu.rs](../../crates/tui/src/agent_menu.rs) — 自定义卡选择器实现保留；TUI 不展示 Agent 命令，手动提交 `/agent` 或 `/agents` 会被拦截。
 - `src/notepad/` — 全屏文件树 + vim 编辑器
 - `src/vim/` — vim 引擎
 - `src/ts_mirror.rs` — tmux 会话冷启动恢复

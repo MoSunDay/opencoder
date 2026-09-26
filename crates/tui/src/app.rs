@@ -570,6 +570,9 @@ pub(super) async fn run_app(
                             KeyAction::ModeSwitchBlocked => {
                                 mode_flash = Some(mode_switch_busy_flash(anim_tick));
                             }
+                            KeyAction::AgentCommandUnavailable => {
+                                mode_flash = Some(("Agent command is not available yet".into(), anim_tick));
+                            }
                             KeyAction::SidecarAsk(question) => {
                                 // Bare `/sidecar`: enter a FRESH panel — destroy
                                 // any previous conversation (the next ask rebuilds

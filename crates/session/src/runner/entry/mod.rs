@@ -27,14 +27,26 @@ pub async fn run_with_registry(
     user_text: String,
     images: Vec<String>,
     registry: &HashMap<String, ToolArc>,
-    on_event: impl FnMut(SessionEvent) + Send,
+    mut on_event: impl FnMut(SessionEvent) + Send,
 ) -> Result<()> {
     let root = session.config.agent.agents_dir.clone();
-    opencoder_core::agent::scope::with_root(
+    let memory_enabled = super::local_memory::eligible(session);
+    let result = opencoder_core::agent::scope::with_root(
         root,
-        run_with_registry_scoped(session, user_text, images, registry, on_event),
+        run_with_registry_scoped(session, user_text, images, registry, |event| {
+            if !memory_enabled || !matches!(event, SessionEvent::Done) {
+                on_event(event);
+            }
+        }),
     )
-    .await
+    .await;
+    if memory_enabled {
+        if let Err(error) = &result {
+            on_event(SessionEvent::Error(error.to_string()));
+        }
+        on_event(SessionEvent::Done);
+    }
+    result
 }
 
 async fn run_with_registry_scoped(
@@ -45,6 +57,7 @@ async fn run_with_registry_scoped(
     on_event: impl FnMut(SessionEvent) + Send,
 ) -> Result<()> {
     let mut on_event = on_event;
+    let baseline = session.messages.len();
     let _loop_guard = crate::loop_registry::LoopGuard::enter(&session.id);
     // True when ClearContext produced a synthetic input awaiting an LLM turn:
     // a neutral act-mode seed or a plan→act execution directive. This keeps
@@ -162,6 +175,7 @@ async fn run_with_registry_scoped(
     // idle window (see drain::reabsorb_tail).
     reabsorb_tail(session, registry, &mut on_event).await?;
     if session.harness.harness == opencoder_core::harness::Harness::Codex {
+        super::local_memory::after_task(session, baseline, &mut on_event).await?;
         return Ok(());
     }
 
@@ -180,5 +194,6 @@ async fn run_with_registry_scoped(
         }
         opencoder_core::ApMode::Off => {}
     }
+    super::local_memory::after_task(session, baseline, &mut on_event).await?;
     Ok(())
 }

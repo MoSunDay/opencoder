@@ -38,7 +38,7 @@ export function MilestoneRunBody({ view, id, refresh, onNotice }) {
     {!!run.summary && <Typography.Paragraph>交付摘要：{run.summary}</Typography.Paragraph>}
     <Select aria-label="选择历史层激活" style={{ minWidth: 360, margin: '16px 0' }} value={visit?.activation} onChange={setSelectedVisit}
       options={history.map((v) => ({ value: v.activation, label: `第 ${v.round} 轮 · 第 ${v.layer} 层 · ${v.decision_summary === 'reflect_and_return' ? '反思回退' : '正常推进'}` }))} />
-    <div className="brain-milestone-preview"><MilestoneCanvas plan={displayPlan} statuses={statuses} layerStatuses={layerStatuses} onSelect={(selection) => { if (selection.type === 'node') { const op = operations.find((item) => item.node_id === selection.id); setExecutionId(op?.execution_id || null); } }} /></div>
+    <div className="brain-milestone-preview"><MilestoneCanvas plan={displayPlan} capabilities={view.capabilities || []} statuses={statuses} layerStatuses={layerStatuses} onSelect={(selection) => { if (selection.type === 'node') { const op = operations.find((item) => item.node_id === selection.id); setExecutionId(op?.execution_id || null); } }} /></div>
     <h3>轮次、层级与能力执行</h3>
     <Collapse items={history.map((entry) => ({ key: entry.activation, label: `第 ${entry.round} 轮 · 第 ${entry.layer} 层 · ${entry.operations.length} 项执行`, children: <>
       <Typography.Paragraph>{entry.reason_summary}</Typography.Paragraph>

@@ -1,0 +1,61 @@
+name: brain schema 7 e2e
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'crates/**'
+      - 'scripts/acceptance/brain/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/brain-e2e.yml'
+  pull_request:
+    paths:
+      - 'crates/**'
+      - 'scripts/acceptance/brain/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/brain-e2e.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: brain-e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  schema-seven:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: crates/web/spa/package-lock.json
+      - name: Browser and native build dependencies
+        run: sudo apt-get update && sudo apt-get install -y libclang-dev cmake pkg-config
+      - name: Install SPA dependencies and Chromium
+        working-directory: crates/web/spa
+        run: |
+          npm ci
+          npx playwright-core install --with-deps chromium
+          npm run build
+      - name: Browser, API, scheduler and execution detail acceptance
+        run: |
+          cargo test -p opencoder-brain --test milestone
+          cargo test -p opencoder-worker --test brain_scheduler_v4
+          cargo test -p opencoder-worker --test brain_browser schema_seven_canvas_parallel_return_and_execution_detail -- --ignored --nocapture
+      - name: Preserve browser failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: brain-e2e-browser
+          path: /tmp/opencoder-brain-v7-browser-*
+          if-no-files-found: ignore
+          retention-days: 7

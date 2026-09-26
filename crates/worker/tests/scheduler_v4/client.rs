@@ -1,5 +1,5 @@
 #![allow(dead_code)]
-//! Deterministic v4 model stub.
+//! Deterministic layered model stub.
 //!
 //! Every decision is derived from the instruction the node handed the model, so
 //! a test never has to script the exact layer sequence: a layer context
@@ -14,11 +14,19 @@ use std::sync::Mutex;
 pub struct LayeredClient {
     pub requests: Mutex<Vec<ChatRequest>>,
     forced: Mutex<VecDeque<Value>>,
+    reflect_once: bool,
 }
 
 impl LayeredClient {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn reflecting_once() -> Self {
+        Self {
+            reflect_once: true,
+            ..Self::default()
+        }
     }
 
     /// Force the next decisions, in order, before the derived script resumes.
@@ -60,6 +68,13 @@ impl ChatStream for LayeredClient {
             let forced = self.forced.lock().unwrap().pop_front();
             match forced {
                 Some(decision) => decision.to_string(),
+                None if self.reflect_once
+                    && instruction["run"]["round"].as_u64() == Some(1)
+                    && instruction["run"]["layer"].as_u64()
+                        == Some(instruction["plan"]["layers"].as_array().unwrap().len() as u64) =>
+                {
+                    dispatch_to(&instruction, 1)?.to_string()
+                }
                 None if !failed(&instruction)
                     && instruction["run"]["layer"].as_u64().unwrap_or(0)
                         == instruction["plan"]["layers"].as_array().unwrap().len() as u64 =>
@@ -85,12 +100,17 @@ impl ChatStream for LayeredClient {
 /// Bind every required capability input: layer one to the root input, a later
 /// layer to its direct upstream execution result.
 fn dispatch(instruction: &Value) -> anyhow::Result<Value> {
-    let mut assignments = vec![];
     let layer = if failed(instruction) {
         1
     } else {
         instruction["run"]["layer"].as_u64().unwrap_or(0) + 1
     };
+    dispatch_to(instruction, layer)
+}
+
+fn dispatch_to(instruction: &Value, layer: u64) -> anyhow::Result<Value> {
+    let mut assignments = vec![];
+    let returning = layer <= instruction["run"]["layer"].as_u64().unwrap_or(0);
     for node in instruction["plan"]["nodes"]
         .as_array()
         .unwrap()
@@ -121,7 +141,7 @@ fn dispatch(instruction: &Value) -> anyhow::Result<Value> {
         "decision": "dispatch_layer",
         "layer": layer,
         "assessments": assessments(instruction),
-        "reflection":if failed(instruction) {Some("repair the failed milestone using failure diagnostics")} else {None},
+        "reflection":if returning {Some("repair coding with the latest milestone evidence")} else {None},
         "assignments": assignments,
         "reason": "dispatch every node of the next layer",
         "evidence_execution_ids": [],

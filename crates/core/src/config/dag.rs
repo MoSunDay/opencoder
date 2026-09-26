@@ -9,9 +9,6 @@ use serde::{Deserialize, Serialize};
 /// DAG wasm-module pool + NFS exposure knobs (`Config::dag`).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DagConfig {
-    /// Host-only device API authority. Never part of a caller-supplied DAG spec.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub device_manager: Option<DagDeviceConfig>,
     /// Runtime-only owning execution path, never accepted from the public configuration.
     #[serde(skip)]
     pub execution_private_root: Option<std::path::PathBuf>,
@@ -42,13 +39,6 @@ pub struct DagConfig {
     /// default (fail-closed: an unregistered op id errors the step).
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub ops: std::collections::BTreeMap<String, DagOpConfig>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct DagDeviceConfig {
-    pub host_endpoint: String,
-    pub step_endpoint: String,
-    pub token_file: std::path::PathBuf,
 }
 
 /// Launch configuration of ONE registered dag op (`dag.ops.<op_id>`).
@@ -210,19 +200,16 @@ mod tests {
     #[test]
     fn dag_ops_registry_parses_and_defaults_to_empty() {
         let dc: DagConfig = serde_json::from_str(
-            r#"{"ops": {"eob_deploy": {
-                 "command": "/root/workspace/tools/opencode-review-ops/eob_deploy.sh",
-                 "env_keys": ["EOB_TOKEN"],
+            r#"{"ops": {"deploy_release": {
+                 "command": "/opt/tools/release/deploy.sh",
+                 "env_keys": ["DEPLOY_TOKEN"],
                  "timeout_secs": 1800
                }}}"#,
         )
         .unwrap();
-        let op = &dc.ops["eob_deploy"];
-        assert_eq!(
-            op.command,
-            "/root/workspace/tools/opencode-review-ops/eob_deploy.sh"
-        );
-        assert_eq!(op.env_keys, vec!["EOB_TOKEN".to_string()]);
+        let op = &dc.ops["deploy_release"];
+        assert_eq!(op.command, "/opt/tools/release/deploy.sh");
+        assert_eq!(op.env_keys, vec!["DEPLOY_TOKEN".to_string()]);
         assert_eq!(op.timeout_secs, Some(1800));
         // A bare op falls back to the derived defaults.
         let bare: DagConfig =

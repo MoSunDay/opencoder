@@ -11,11 +11,9 @@ mod support;
 
 mod agent_runc;
 mod cancel_fail;
-mod code_review;
 mod fixtures;
 mod flow;
 mod input_args;
-mod review_dags;
 mod structured_output;
 mod wasm_pool;
 

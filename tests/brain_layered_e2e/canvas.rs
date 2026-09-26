@@ -193,7 +193,7 @@ fn layered_canvas_holds_the_barrier_then_completes_through_the_closing_activatio
             "child {child}: {doc}"
         );
         let input = &doc["request"]["input"];
-        assert_eq!(input["schema_version"], json!(6), "child {child}: {doc}");
+        assert_eq!(input["schema_version"], json!(7), "child {child}: {doc}");
         assert_eq!(input["brain_layered"]["run_id"], json!(run), "{doc}");
         assert_eq!(input["brain_layered"]["node_id"], json!(node_id), "{doc}");
         assert_eq!(input["brain_layered"]["layer"], json!(layer), "{doc}");
@@ -245,7 +245,8 @@ fn layered_canvas_holds_the_barrier_then_completes_through_the_closing_activatio
         scan_row["operations"][0]["execution_id"], scan["execution_id"],
         "{body}"
     );
-    assert_eq!(scan_row["assessment"]["met"], json!(true), "{body}");
+    assert_eq!(body["assessment"]["met"], json!(true), "{body}");
+    assert_eq!(scan_row["assessment"], json!(null), "{body}");
     assert!(body["nodes"].as_array().unwrap().len() == 1, "{body}");
 
     let (status, body) = round(&fleet, run, 2);
@@ -271,7 +272,8 @@ fn layered_canvas_holds_the_barrier_then_completes_through_the_closing_activatio
         apply_row["operations"][0]["execution_id"], apply["execution_id"],
         "{body}"
     );
-    assert_eq!(apply_row["assessment"]["met"], json!(true), "{body}");
+    assert_eq!(body["assessment"]["met"], json!(true), "{body}");
+    assert_eq!(apply_row["assessment"], json!(null), "{body}");
 
     // The CLI face of the finished canvas is the same projection.
     let cli = cli_json(&fleet, &["brain", "runs", "layered", run]);
@@ -284,7 +286,7 @@ fn layered_canvas_holds_the_barrier_then_completes_through_the_closing_activatio
     let requests = stub.wait_for_requests(5);
     let activations = requests
         .iter()
-        .filter(|body| body.contains("You are the schema 6 milestone Brain."))
+        .filter(|body| body.contains("You are the schema 7 milestone Brain."))
         .count();
     assert!(
         activations >= 3,

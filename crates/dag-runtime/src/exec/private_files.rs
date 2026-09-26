@@ -9,10 +9,6 @@ pub(super) fn prompt(prompt: String, root: Option<&Path>) -> String {
 }
 
 pub(super) fn bind(bundle: &Path, root: &Path) -> Result<()> {
-    bind_at(bundle, root, GUEST_ROOT)
-}
-
-pub(super) fn bind_at(bundle: &Path, root: &Path, guest: &str) -> Result<()> {
     ensure!(root.is_absolute(), "private task root must be absolute");
     let meta = std::fs::symlink_metadata(root).context("private task directory unavailable")?;
     ensure!(
@@ -21,10 +17,7 @@ pub(super) fn bind_at(bundle: &Path, root: &Path, guest: &str) -> Result<()> {
     );
     let config_path = bundle.join("config.json");
     let mut config: serde_json::Value = serde_json::from_slice(&std::fs::read(&config_path)?)?;
-    ensure!(
-        matches!(guest, GUEST_ROOT | "/run/opencoder-device"),
-        "unsupported private mount"
-    );
+    let guest = GUEST_ROOT;
     let target = bundle.join("rootfs").join(guest.trim_start_matches('/'));
     for parent in target.ancestors().take_while(|path| *path != bundle) {
         if let Ok(meta) = std::fs::symlink_metadata(parent) {

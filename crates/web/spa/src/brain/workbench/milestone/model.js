@@ -6,7 +6,6 @@ export const capabilityName = (capability) => {
   const id = capability?.capability_id || capability?.id || '';
   if (capability?.name?.trim()) return capability.name.trim();
   if (capability?.version === 'stored' && capability?.summary?.trim()) return capability.summary.trim();
-  if (id.startsWith('pc-issue-')) return id;
   return capability?.target?.trim() || id;
 };
 export const capabilityLabel = (capability) => `${KIND_LABELS[capability.kind] || capability.kind} · ${capabilityName(capability)}`;

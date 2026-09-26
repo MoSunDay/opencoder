@@ -11,10 +11,10 @@ spa="$repo_root/crates/web/spa"
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
-# Mirror the repo layout, not a bare "spa/" dir: src/ may import repo-root
-# fixtures with repo-relative depth (e.g. src/brain/workbench/editor/model.js
-# pulls ../../../../../../../examples/brain/repair-loop.json), which only
-# resolves when crates/web/spa sits at its real depth next to examples/.
+# Mirror the repo layout, not a bare "spa/" dir: src/ may reference repo-root
+# assets via repo-relative import depths (../../../.. style), which only
+# resolve when the copy sits at the real crates/web/spa depth with its repo
+# siblings (examples/, etc.) copied under the same temp root.
 mirror="$tmp/crates/web/spa"
 mkdir -p "$mirror"
 cp "$spa/package.json" "$spa/package-lock.json" "$spa/index.html" "$spa/vite.config.js" "$mirror/"

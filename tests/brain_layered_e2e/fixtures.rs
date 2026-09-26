@@ -16,18 +16,21 @@ pub const CHILD_TEXT: &str = "e2e-layered-node-result";
 pub const SUMMARY: &str = "e2e-layered-canvas-complete";
 
 /// A two-layer canvas: `scan` then `apply` exercise the layer barrier and
-/// completion, without a configured transition edge.
+/// completion through the closing activation.
 pub fn plan() -> Value {
     json!({
-        "schema_version": 6,
+        "schema_version": 7,
         "title": "layered canvas",
         "objective": "prove the layered canvas through the control plane",
         "nodes": [
-            {"node_id":"scan","title":"Scan","layer":1,"objective":"scan the input",
-             "success_criteria":"scan result is complete","capability_ids":["builtin-agent-act"]},
-            {"node_id":"apply","title":"Apply","layer":2,"objective":"apply the result",
-             "success_criteria":"apply result is complete","capability_ids":["builtin-agent-act"]}
+            {"node_id":"scan","title":"Scan","capability_id":"builtin-agent-act","layer_id":"scan-layer","objective":"scan the input"},
+            {"node_id":"apply","title":"Apply","capability_id":"builtin-agent-act","layer_id":"apply-layer","objective":"apply the result"}
         ],
+        "layers":[
+            {"layer_id":"scan-layer","title":"Scan","objective":"scan the input","success_criteria":"scan result is complete"},
+            {"layer_id":"apply-layer","title":"Apply","objective":"apply the result","success_criteria":"apply result is complete"}
+        ],
+        "transitions":[{"from":"scan-layer","to":"apply-layer","condition":"scan met"}],
         "edges": [],
         "max_rounds": 8
     })
@@ -35,14 +38,14 @@ pub fn plan() -> Value {
 
 /// The inline-plan submission; `depth`/`parent` stay absent at depth 0.
 pub fn request(id: &str) -> Value {
-    json!({"id":id,"schema_version":6,"plan":plan(),"inputs":{}})
+    json!({"id":id,"schema_version":7,"plan":plan(),"inputs":{}})
 }
 
 /// Admit one layered root and assert the frozen receipt shape.
 pub fn create(fleet: &Fleet, id: &str) -> Value {
     let (status, body) = fleet.http("POST", "/api/brain/runs", &request(id));
     assert_eq!(status, 202, "create layered run: {body}");
-    assert_eq!(body["schema_version"], json!(6), "receipt: {body}");
+    assert_eq!(body["schema_version"], json!(7), "receipt: {body}");
     assert_eq!(body["run_id"], json!(id), "receipt: {body}");
     assert!(body["execution"].is_object(), "receipt: {body}");
     body
@@ -118,38 +121,63 @@ pub fn responder() -> Script {
             .and_then(|message| message["content"].as_str())
             .unwrap_or_default();
         let context: Value = serde_json::from_str(last).unwrap_or(Value::Null);
-        let layer = context["run"]["layer"].as_u64().unwrap_or(0);
-        if layer == 2 {
+        let plan = &context["plan"];
+        if context["schema_version"] != json!(7) || !plan.is_object() {
+            return CHILD_TEXT.into();
+        }
+        // `assessment_layer_id` names the layer the decision must assess
+        // (null on the initial dispatch); `run.layer` is the 0-based cursor.
+        let current = context["run"]["layer"].as_u64().unwrap_or(0);
+        let assessed = context["assessment_layer_id"].as_str();
+        let milestones = plan["layers"].as_array().cloned().unwrap_or_default();
+        let total = milestones.len() as u64;
+        if current >= total {
+            let closing = assessed
+                .or_else(|| milestones.last().and_then(|m| m["layer_id"].as_str()))
+                .unwrap_or_default();
+            let mut assessments = serde_json::Map::new();
+            assessments.insert(
+                closing.into(),
+                json!({"met":true,"reason":"e2e closing assessment"}),
+            );
             return json!({
                 "decision":"complete",
                 "reason":"e2e closing decision after every layer",
                 "evidence_execution_ids":[],
                 "summary":SUMMARY,
-                "assessments":{"apply":{"met":true,"reason":"apply execution completed"}},
+                "assessments":assessments,
             })
             .to_string();
         }
-        if let Some(nodes) = context["plan"]["nodes"].as_array() {
-            let target = layer + 1;
-            let assignments: Vec<Value> = nodes
-                .iter()
-                .filter(|node| node["layer"] == json!(target))
-                .map(|node| {
-                    json!({"node_id":node["node_id"],"capability_id":"builtin-agent-act","inputs":{},
-                        "reason":"e2e layered dispatch"})
-                })
-                .collect();
-            return json!({
-                "decision":"dispatch_layer",
-                "layer":target,
-                "assignments":assignments,
-                "reason":"e2e layered dispatch",
-                "evidence_execution_ids":[],
-                "assessments":if layer == 0 { json!({}) } else { json!({"scan":{"met":true,"reason":"scan execution completed"}}) },
+        let target = current + 1;
+        let target_id = milestones[(target - 1) as usize]["layer_id"].clone();
+        let assignments: Vec<Value> = plan["nodes"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|node| node["layer_id"] == target_id)
+            .map(|node| {
+                json!({"node_id":node["node_id"],"capability_id":"builtin-agent-act","inputs":{},
+                    "reason":"e2e layered dispatch"})
             })
-            .to_string();
+            .collect();
+        let mut assessments = serde_json::Map::new();
+        if let Some(previous) = assessed {
+            assessments.insert(
+                previous.into(),
+                json!({"met":true,"reason":"e2e layer assessment"}),
+            );
         }
-        CHILD_TEXT.into()
+        json!({
+            "decision":"dispatch_layer",
+            "layer":target,
+            "assignments":assignments,
+            "reason":"e2e layered dispatch",
+            "evidence_execution_ids":[],
+            "assessments":assessments,
+        })
+        .to_string()
     })
 }
 

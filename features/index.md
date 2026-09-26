@@ -19,6 +19,7 @@ Commit: c60e2162be48102badf53d8b97e7cfa030b59605
 ## 配置与基础能力
 - [配置和资源作用域](../agents/core/index.md) — 模型/压缩/命名环境与 Skill 注入。
 - [模型客户端](../agents/llm/index.md)、[持久化](../agents/store/index.md) — 流式客户端与本地存储。
+- [本地仓库记忆](local-memory/index.md) — 任务完成后在独立上下文更新记忆，可在 `/config` 开关。
 - 内置 Skill 工作流 — task-plan / task-plan-subagent / say-and-replay。
 - [sandbox 命令分类](../agents/shellguard/index.md) — 只读模式写效应拦截。
 - [测试规则](../rules/) — 功能测试、回归 gate、测试分层。

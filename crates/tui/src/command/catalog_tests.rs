@@ -34,10 +34,8 @@ fn parse_known_commands() {
     assert_eq!(parse("/mcp"), Some(SlashAction::Mcp));
     assert_eq!(parse("/skill"), Some(SlashAction::Skill));
     assert_eq!(parse("/sk"), Some(SlashAction::Skill));
-    // `/agent` is a picker, not a direct mode switch — bare `/agent`
-    // opens the picker; `/agent <name>` stays free text (the runner's
-    // control head applies it), so it must NOT parse.
-    assert_eq!(parse("/agent"), Some(SlashAction::Agent));
+    // Agent commands are not exposed in the TUI yet.
+    assert_eq!(parse("/agent"), None);
     assert_eq!(parse("/agent writer"), None);
     assert_eq!(parse("/"), Some(SlashAction::Task));
     assert_eq!(parse("/unknown"), None);
@@ -46,22 +44,11 @@ fn parse_known_commands() {
 }
 
 #[test]
-fn agent_entry_is_listed_and_dispatches_to_the_picker() {
-    let (entry, desc) = COMMANDS
-        .iter()
-        .find(|(n, _)| *n == "/agent")
-        .expect("/agent must be a registered command");
-    assert_eq!(*entry, "/agent");
-    assert!(desc.contains("agent"), "description names the feature");
-    assert_eq!(dispatch("/agent"), Some(SlashAction::Agent));
-    // The popup filter finds it from a partial query (and never matches
-    // unrelated commands to it).
+fn agent_entry_is_hidden_from_picker() {
+    assert!(!COMMANDS.iter().any(|(name, _)| *name == "/agent"));
     let mut m = CommandMenu::new();
-    for c in "agent".chars() {
-        m.on_char(c);
-    }
-    assert!(m.visible_count() >= 1, "'agent' must match the entry");
-    assert_eq!(m.selected_action(), Some(SlashAction::Agent));
+    m.paste("agent");
+    assert_ne!(m.selected_action(), Some(SlashAction::Agent));
 }
 
 #[test]

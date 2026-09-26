@@ -99,12 +99,13 @@ pub enum ConfigField {
     Fps,
     ApMaxIter,
     EnableTmuxSession,
+    LocalMemory,
     Save,
     Cancel,
 }
 
 impl ConfigField {
-    const ORDER: [ConfigField; 10] = [
+    const ORDER: [ConfigField; 11] = [
         ConfigField::Reasoning,
         ConfigField::InterleavedThinking,
         ConfigField::MaxTokens,
@@ -113,6 +114,7 @@ impl ConfigField {
         ConfigField::Fps,
         ConfigField::ApMaxIter,
         ConfigField::EnableTmuxSession,
+        ConfigField::LocalMemory,
         ConfigField::Save,
         ConfigField::Cancel,
     ];
@@ -150,6 +152,7 @@ pub struct ConfigForm {
     /// Char-index edit cursor within `ap_max_iter_input`.
     pub ap_max_iter_cursor: usize,
     pub enable_tmux_session: bool,
+    pub local_memory: bool,
     pub focus: ConfigField,
     pub error: Option<String>,
 }
@@ -177,6 +180,7 @@ impl ConfigForm {
             ap_max_iter_input: ap_max_iter_input.clone(),
             ap_max_iter_cursor: ap_max_iter_input.chars().count(),
             enable_tmux_session: config.enable_tmux_session.unwrap_or(false),
+            local_memory: config.local_memory,
             focus: ConfigField::Reasoning,
             error: None,
         }
@@ -234,6 +238,7 @@ impl ConfigForm {
             fps,
             ap_max_iter,
             enable_tmux_session: Some(self.enable_tmux_session),
+            local_memory: self.local_memory,
         }
     }
 
@@ -321,6 +326,7 @@ pub fn handle_key(mut form: ConfigForm, k: KeyEvent) -> (ModelOutcome, Option<Mo
                 form.interleaved_thinking = !form.interleaved_thinking
             }
             ConfigField::EnableTmuxSession => form.enable_tmux_session = !form.enable_tmux_session,
+            ConfigField::LocalMemory => form.local_memory = !form.local_memory,
             ConfigField::MaxTokens
             | ConfigField::ContextSize
             | ConfigField::Threshold
@@ -334,6 +340,7 @@ pub fn handle_key(mut form: ConfigForm, k: KeyEvent) -> (ModelOutcome, Option<Mo
                 form.interleaved_thinking = !form.interleaved_thinking
             }
             ConfigField::EnableTmuxSession => form.enable_tmux_session = !form.enable_tmux_session,
+            ConfigField::LocalMemory => form.local_memory = !form.local_memory,
             ConfigField::MaxTokens
             | ConfigField::ContextSize
             | ConfigField::Threshold
@@ -370,6 +377,7 @@ pub fn handle_key(mut form: ConfigForm, k: KeyEvent) -> (ModelOutcome, Option<Mo
             ConfigField::EnableTmuxSession if c == ' ' => {
                 form.enable_tmux_session = !form.enable_tmux_session
             }
+            ConfigField::LocalMemory if c == ' ' => form.local_memory = !form.local_memory,
             ConfigField::MaxTokens
             | ConfigField::ContextSize
             | ConfigField::Threshold

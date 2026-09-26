@@ -32,7 +32,7 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ),
     (
         "/config",
-        "配置模型 / 思考深度 / base_url / api_key / 上下文阈值 / 渲染帧率 / tmux",
+        "配置思考深度 / 上下文阈值 / 渲染帧率 / tmux / local-memory",
     ),
     (
         "/compact",
@@ -42,10 +42,6 @@ pub const COMMANDS: &[(&str, &str)] = &[
     (
         "/plan",
         "只读探索：拦截写操作，切换到 plan 探索代理（不重置上下文）",
-    ),
-    (
-        "/agent",
-        "切换 primary agent（回车打开 agent 选择器，或 /agent <name> 直接切换）",
     ),
     ("/annotation", "记录/编辑任务备注 (annotation editor)"),
     ("/notepad", "IDE 式文件浏览/编辑 (文件树 + vim 编辑器)"),
@@ -227,7 +223,6 @@ pub fn parse(input: &str) -> Option<SlashAction> {
         "c" | "compact" => Some(SlashAction::Compact),
         "act" => Some(SlashAction::Act),
         "plan" => Some(SlashAction::Plan),
-        "agent" => Some(SlashAction::Agent),
         "annotation" | "ann" => Some(SlashAction::Annotation),
         "notepad" | "note" => Some(SlashAction::Notepad),
         "act_clear_context" | "clear_context" => Some(SlashAction::ClearContext),
@@ -251,7 +246,6 @@ fn dispatch(name: &str) -> Option<SlashAction> {
         "/compact" => Some(SlashAction::Compact),
         "/act" => Some(SlashAction::Act),
         "/plan" => Some(SlashAction::Plan),
-        "/agent" => Some(SlashAction::Agent),
         "/annotation" => Some(SlashAction::Annotation),
         "/notepad" => Some(SlashAction::Notepad),
         "/act_clear_context" | "/clear_context" => Some(SlashAction::ClearContext),

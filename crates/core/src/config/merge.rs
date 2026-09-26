@@ -18,6 +18,7 @@ pub(super) fn has_editable_key(root: &serde_json::Value) -> bool {
         || obj.contains_key("context_limit")
         || obj.contains_key("fps")
         || obj.contains_key("enable_tmux_session")
+        || obj.contains_key("local_memory")
         || obj.contains_key("stream_idle_timeout_secs")
         || obj.contains_key("task_timeout_secs")
         || obj.contains_key("replay_timeout_secs")
@@ -183,6 +184,9 @@ pub(super) fn merge_into(cfg: &mut Config, value: serde_json::Value) {
         }
         if let Some(v) = obj.get("enable_tmux_session").and_then(|v| v.as_bool()) {
             cfg.enable_tmux_session = Some(v);
+        }
+        if let Some(v) = obj.get("local_memory").and_then(|v| v.as_bool()) {
+            cfg.local_memory = v;
         }
         if let Some(fps) = obj.get("fps").and_then(|v| v.as_u64()) {
             cfg.fps = Some(fps.clamp(1, 30) as u32);
@@ -657,6 +661,16 @@ mod tests {
         assert!(!cfg.dag.nfs.enabled);
         assert_eq!(cfg.dag.nfs.port, 1);
     }
+    #[test]
+    fn local_memory_is_an_explicit_default_off_config_toggle() {
+        let mut cfg = Config::default();
+        assert!(!cfg.local_memory);
+        merge_into(&mut cfg, serde_json::json!({"local_memory": true}));
+        assert!(cfg.local_memory);
+        merge_into(&mut cfg, serde_json::json!({"local_memory": false}));
+        assert!(!cfg.local_memory);
+    }
+
     #[test]
     fn device_manager_config_loads_whole_authority_and_invalid_override_disables_it() {
         let mut cfg = Config::default();

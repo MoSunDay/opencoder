@@ -2475,7 +2475,6 @@ dependencies = [
  "dirs",
  "futures",
  "http-body",
- "image",
  "opencoder-agents",
  "opencoder-brain",
  "opencoder-core",
@@ -2525,15 +2524,6 @@ dependencies = [
  "anyhow",
  "serde",
  "serde_json",
- "tempfile",
-]
-
-[[package]]
-name = "opencoder-dag-review-tools"
-version = "0.1.0"
-dependencies = [
- "serde_json",
- "tempfile",
 ]
 
 [[package]]
@@ -2554,10 +2544,8 @@ dependencies = [
  "opencoder-node",
  "opencoder-session",
  "opencoder-store",
- "reqwest",
  "serde",
  "serde_json",
- "sha2",
  "tempfile",
  "tokio",
  "tokio-util",

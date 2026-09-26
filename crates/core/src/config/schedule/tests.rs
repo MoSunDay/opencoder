@@ -35,7 +35,7 @@ fn parse_covers_every_field_with_defaults() {
         "schedules": [{
             "id": "nightly",
             "kind": "brain",
-            "target": "release-plan",
+            "target": "nightly-index",
             "cron": "0 3 * * *",
             "enabled": false,
             "timezone": "+08:00",
@@ -49,7 +49,7 @@ fn parse_covers_every_field_with_defaults() {
     assert_eq!(cfg.scan_interval_secs, Some(17));
     let job = cfg.job("nightly").expect("job parsed");
     assert_eq!(job.kind, ScheduleKind::Brain);
-    assert_eq!(job.target, "release-plan");
+    assert_eq!(job.target, "nightly-index");
     assert_eq!(job.cron, "0 3 * * *");
     assert_eq!(job.timezone.as_deref(), Some("+08:00"));
     assert!(!job.enabled);
@@ -78,7 +78,7 @@ fn omitted_fields_take_their_defaults() {
 #[test]
 fn validate_accepts_each_kind_target_contract() {
     let cases: [(&str, &str, Value); 5] = [
-        ("brain", "release-plan", json!({"objective": "go"})),
+        ("brain", "nightly-index", json!({"objective": "go"})),
         ("team", "ops-team", json!(null)),
         ("todos", "hotfix/2", json!(null)),
         ("agent", "claude-opus", json!(null)),

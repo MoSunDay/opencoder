@@ -29,7 +29,7 @@ pub async fn handle(
         if let Err(error) = matches {
             return Ok(RpcReply::error(412, error.to_string()));
         }
-        let mut body = json!({"compatible":true,"features":["dag_dynamic_v1","brain_scheduler_v7","brain_pc_issue_v1","pc_candidate_v1",opencoder_core::fleet::private_files::CAPABILITY]});
+        let mut body = json!({"compatible":true,"features":["dag_dynamic_v1","brain_scheduler_v7",opencoder_core::fleet::private_files::CAPABILITY]});
         if input["private_files"] == true {
             body["image_digest"] = json!(tokio::task::spawn_blocking(
                 opencoder_core::fleet::private_files::runtime_image_digest
@@ -53,7 +53,7 @@ pub async fn handle(
         .records
         .get(&reference.id)
         .and_then(|record| record.assignment.request.input["schema_version"].as_u64());
-    if matches!(schema, Some(4 | 5 | 6)) {
+    if matches!(schema, Some(4..=6)) {
         return super::v4::history::read(worker, reference, action, input, schema.unwrap() as u32)
             .await;
     }

@@ -217,7 +217,7 @@ async fn old_nodes_are_excluded_from_layered_children_before_assignment() {
         )
         .await;
     assert_eq!(code, 503, "{body}");
-    assert!(body.to_string().contains("brain_scheduler_v6"));
+    assert!(body.to_string().contains("brain_scheduler_v7"));
     assert!(h
         .state
         .fleet

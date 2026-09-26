@@ -57,16 +57,7 @@ pub(crate) async fn execute_agent_step_runc(
     );
     info!(run_id = %ctx.run_id, step = %ctx.step.name, %session_id, "dag agent step executing (runc sandbox)");
 
-    let access = match super::device::prepare(ctx, deps, &session_id).await {
-        Ok(value) => value,
-        Err(error) => return wasm::error_result(format!("Device step authorization: {error:#}")),
-    };
-    let mut result =
-        execute_container_session(ctx, deps, cancel, session_id, access.as_ref()).await;
-    if let Some(access) = access {
-        access.finish(&mut result).await;
-    }
-    result
+    execute_container_session(ctx, deps, cancel, session_id).await
 }
 
 async fn execute_container_session(
@@ -74,7 +65,6 @@ async fn execute_container_session(
     deps: &ExecDeps,
     cancel: CancellationToken,
     session_id: String,
-    access: Option<&super::device::Access>,
 ) -> StepResult {
     // Inputs the runner reads inside the container: the shared context
     // object plus the step prompt (the exact host-path prompt text).
@@ -93,10 +83,7 @@ async fn execute_container_session(
         std::fs::write(
             step_dir.join("prompt.txt"),
             super::private_files::prompt(
-                {
-                    let prompt = build_prompt_with_knowledge(ctx, knowledge_path);
-                    access.map_or_else(|| prompt.clone(), |a| a.prompt(prompt.clone(), true))
-                },
+                build_prompt_with_knowledge(ctx, knowledge_path),
                 deps.config.dag.execution_private_root.as_ref().map(|_| {
                     std::path::Path::new(opencoder_core::fleet::private_files::GUEST_ROOT)
                 }),
@@ -203,11 +190,6 @@ async fn execute_container_session(
     if let Some(root) = deps.config.dag.execution_private_root.as_deref() {
         if let Err(error) = super::private_files::bind(&bundle_dir, root) {
             return wasm::error_result(format!("private task mount failed: {error:#}"));
-        }
-    }
-    if let Some(access) = access {
-        if let Err(error) = access.bind(&bundle_dir) {
-            return wasm::error_result(format!("Device transport mount failed: {error:#}"));
         }
     }
 

@@ -21,7 +21,7 @@ fn raw_brain_submissions_are_rejected_in_favor_of_layered_runs() {
     assert!(body["error"]
         .as_str()
         .unwrap_or_default()
-        .contains("schema_version: 6"));
+        .contains("schema_version: 7"));
     assert_eq!(stub.request_count(), 0, "no model traffic");
 }
 
@@ -42,7 +42,7 @@ fn old_run_writes_require_explicit_layered_schema() {
         assert!(body["error"]
             .as_str()
             .unwrap_or_default()
-            .contains("schema_version: 6"));
+            .contains("schema_version: 7"));
     }
     assert_eq!(stub.request_count(), 0, "migration rejection must not plan");
 }

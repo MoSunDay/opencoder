@@ -61,16 +61,7 @@ pub async fn execute_agent_step(
     );
     info!(run_id = %ctx.run_id, step = %ctx.step.name, %session_id, "dag agent step executing");
 
-    let access = match super::device::prepare(ctx, deps, &session_id).await {
-        Ok(value) => value,
-        Err(error) => return errored(format!("Device step authorization: {error:#}")),
-    };
-    let mut result =
-        execute_host_session(ctx, deps, cancel, session_id, local_agent, access.as_ref()).await;
-    if let Some(access) = access {
-        access.finish(&mut result).await;
-    }
-    result
+    execute_host_session(ctx, deps, cancel, session_id, local_agent).await
 }
 
 async fn execute_host_session(
@@ -79,7 +70,6 @@ async fn execute_host_session(
     cancel: CancellationToken,
     session_id: String,
     local_agent: opencoder_core::Agent,
-    access: Option<&super::device::Access>,
 ) -> StepResult {
     // One token doubles as replay guard AND run-loop hard cancel (web parity:
     // the session owns its interrupt path through `session.cancel`).
@@ -153,7 +143,6 @@ async fn execute_host_session(
         build_prompt(ctx),
         deps.config.dag.execution_private_root.as_deref(),
     );
-    let prompt = access.map_or_else(|| prompt.clone(), |a| a.prompt(prompt.clone(), false));
     let result = run_session(&mut session, prompt, on_event).await;
     // Guarantee the final local flush before reading the transcript.
     if let Err(e) = flusher.await {

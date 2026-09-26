@@ -24,10 +24,7 @@ pub async fn download(
 ) -> Response {
     let file = query.file.unwrap_or_else(|| "output.txt".into());
     let index = match state.fleet.index(&id).await {
-        Ok(Some(index))
-            if matches!(index.kind, ExecutionKind::Dag | ExecutionKind::Project)
-                || (index.kind == ExecutionKind::Operator && query.step == "pc-evidence") =>
-        {
+        Ok(Some(index)) if matches!(index.kind, ExecutionKind::Dag | ExecutionKind::Project) => {
             index
         }
         Ok(Some(_)) => return response(RpcReply::error(400, "artifacts require a DAG execution")),

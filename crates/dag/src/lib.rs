@@ -90,6 +90,4 @@ mod tests {
     }
 }
 
-pub mod devices;
 pub mod dynamic;
-pub mod ui_cases;

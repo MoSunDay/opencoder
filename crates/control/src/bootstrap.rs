@@ -172,8 +172,6 @@ pub async fn serve_release(
     }
     seed_admin(&state.store, &token).await?;
     // Seed the built-in review release-gate DAG defs (skip-if-exists; a
-    // failure warns and never blocks boot) — see `seed_dags`.
-    crate::seed_dags::seed_review_dags(&state.fleet).await;
     // One-time import of legacy `schedules.json` definitions into the
     // libsql `schedules` table (only when the table is empty; a failure
     // warns and never blocks boot) — see `seed_schedules`.

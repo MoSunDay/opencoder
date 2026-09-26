@@ -13,7 +13,7 @@ Commit: 1afd5d4375cd10885aee335d3d9dbf9d396bb563
 - [host/runtime.rs](../../crates/agent/src/host/runtime.rs) — Runtime inventory 提供执行、子进程及可休眠状态；排查同名进程时区分 Host、Runtime、节点及 internal-process-supervisor。
 
 ## 相关
-- 陷阱案例：[release-0662b924-signal-deploy](../../features/changelog/2026-09-18/release-0662b924-signal-deploy.md)
+- 陷阱案例：Host 为每条 enabled 的 `release_server` 定义各跑一路 fleet 循环；遗留已下线定义会向死端口每 2 秒重连刷屏并制造重复注册竞态，下线旧 release 时应同步禁用其定义。
 
 ## 报告与发布边界
 

@@ -17,7 +17,6 @@
 
 - SPA 全量回归：`npx vitest run` → 906 passed / 0 failed。
 - SPA 构建：`npm run build` → 通过；`scripts/check-spa-drift.sh` → 无漂移。
-- Review DAG 相邻回归：已移除的生产种子改由测试内显式创建，5 条测试通过；实现见 `tests/dag_e2e/review_dags/`。
 - Rust workspace 全量回归：先执行 `cargo build --workspace --bins -j 8` 更新进程级测试依赖的二进制，再执行 `cargo test --workspace -j 8 -- --test-threads=4` → 5,584 passed / 0 failed / 8 既有 ignored。
 - Rust clippy：`cargo clippy --workspace --all-targets -j 4 -- -D warnings` → 零警告。
 - Rust 构建：`cargo build --workspace -j 4` → 通过。

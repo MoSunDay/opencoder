@@ -24,12 +24,14 @@ fn config_patch_serializes_all_fields() {
         fps: 25,
         ap_max_iter: 15,
         enable_tmux_session: None,
+        local_memory: true,
     };
     let v = p.to_json();
     assert_eq!(v["reasoning_effort"], serde_json::json!("high"));
     assert_eq!(v["interleaved_thinking"], serde_json::json!(true));
     assert_eq!(v["max_tokens"], serde_json::json!(8192));
     assert_eq!(v["fps"], serde_json::json!(25));
+    assert_eq!(v["local_memory"], serde_json::json!(true));
     assert_eq!(
         v["compaction"]["context_threshold"],
         serde_json::json!(80_000)
@@ -57,6 +59,7 @@ fn config_patch_omits_max_tokens_when_none() {
         fps: 10,
         ap_max_iter: 10,
         enable_tmux_session: None,
+        local_memory: false,
     };
     let v = p.to_json();
     assert!(
@@ -78,6 +81,7 @@ fn config_patch_off_reasoning_emits_empty_string_not_null() {
         fps: 10,
         ap_max_iter: 10,
         enable_tmux_session: None,
+        local_memory: false,
     };
     let v = p.to_json();
     assert_eq!(
@@ -115,6 +119,7 @@ fn enter_chains_through_config_fields_to_save() {
         ConfigField::Fps,
         ConfigField::ApMaxIter,
         ConfigField::EnableTmuxSession,
+        ConfigField::LocalMemory,
         ConfigField::Save,
     ];
     for expect in &order {
@@ -742,4 +747,20 @@ fn config_form_tmux_patch_serializes_true_when_on() {
     form.enable_tmux_session = true;
     let v = form.build_patch().to_json();
     assert_eq!(v["enable_tmux_session"], serde_json::json!(true));
+}
+
+#[test]
+fn config_form_local_memory_toggle_is_saved() {
+    let mut form = ConfigForm::new(&cfg());
+    assert!(!form.local_memory);
+    form.focus = ConfigField::LocalMemory;
+    let (_, next) = crate::model_menu::config_form::handle_key(form, key(' '));
+    let ModelMenu::Config(form) = next.unwrap() else {
+        panic!("config form expected")
+    };
+    assert!(form.local_memory);
+    assert_eq!(
+        form.build_patch().to_json()["local_memory"],
+        serde_json::json!(true)
+    );
 }

@@ -47,6 +47,17 @@ fn press_running_mode_command(command: &str, code: KeyCode) -> (KeyAction, Strin
     press_running_command(command, code, false)
 }
 
+#[test]
+fn agent_commands_are_unavailable_on_enter_and_tab() {
+    for command in ["/agent", "/agent writer", "/agents", "/agents list"] {
+        for code in [KeyCode::Enter, KeyCode::Tab] {
+            let (action, input, _) = press_running_mode_command(command, code);
+            assert!(matches!(action, KeyAction::AgentCommandUnavailable));
+            assert_eq!(input, command);
+        }
+    }
+}
+
 fn press_ctrl_t(agent: &str, running: bool, input_disabled: bool) -> (KeyAction, String) {
     let mut input = "draft stays".to_string();
     let mut cursor = input.chars().count();

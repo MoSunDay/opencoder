@@ -8,7 +8,7 @@ import { inputRows, launchBody } from './scheduler/model.js';
 import { PlanPreview } from './scheduler/editor.jsx';
 import { ProblemFields, isProblemPlan } from './problem/fields.jsx';
 
-export function Launch({ onCreated, initialPlan }) {
+export function Launch({ onCreated, initialPlan, capabilities }) {
   const { nodes, error: nodeError } = useNodes(); const [form] = Form.useForm();
   const [plan, setPlan] = useState(null); const [error, setError] = useState(''); const [busy, setBusy] = useState(false); const attempt = useRef(null);
   const [loading, setLoading] = useState(!!initialPlan);
@@ -36,7 +36,7 @@ export function Launch({ onCreated, initialPlan }) {
   return <div className="brain-launch"><Typography.Title level={4}>{plan?.plan.title || '开始大脑调度'}</Typography.Title>
     {(error || nodeError) && <Alert type="error" showIcon title={error || nodeError} />}
     {loading ? <Spin /> : <Form form={form} layout="vertical" onFinish={submit} initialValues={{ engineering: [] }} disabled={busy}>
-      {plan && (isProblemPlan(plan) ? <><Typography.Paragraph>描述问题并添加截图，定位影响范围，在 Windows 客户端复现和收集证据；需要时构建修改包复测。</Typography.Paragraph><Collapse items={[{ key: 'flow', label: '查看诊断流程', children: <PlanPreview plan={plan.plan} /> }]} /><Typography.Paragraph type="secondary">问题描述和图片会保留在本次运行中。</Typography.Paragraph></> : <><Typography.Paragraph>{plan.plan.objective}</Typography.Paragraph><PlanPreview plan={plan.plan} /><Typography.Paragraph type="secondary">执行计划 v{plan.version}；本次工程输入可以调整。</Typography.Paragraph></>)}
+      {plan && (isProblemPlan(plan) ? <><Typography.Paragraph>描述问题并添加截图，定位影响范围，在 Windows 客户端复现和收集证据；需要时构建修改包复测。</Typography.Paragraph><Collapse items={[{ key: 'flow', label: '查看诊断流程', children: <PlanPreview plan={plan.plan} capabilities={capabilities} /> }]} /><Typography.Paragraph type="secondary">问题描述和图片会保留在本次运行中。</Typography.Paragraph></> : <><Typography.Paragraph>{plan.plan.objective}</Typography.Paragraph><PlanPreview plan={plan.plan} capabilities={capabilities} /><Typography.Paragraph type="secondary">执行计划 v{plan.version}；本次工程输入可以调整。</Typography.Paragraph></>)}
       <Form.Item name="node" label="大脑所在节点" rules={[{ required: true, message: '请选择节点' }]}><Select options={explicitNodeOptions(nodes, 'brain')} placeholder="选择执行节点" /></Form.Item>
       {isProblemPlan(plan) ? <ProblemFields onBusy={setUploading} nodes={nodes} /> : <EngineeringFields />}
       <Space><Button type="primary" htmlType="submit" loading={busy} disabled={uploading || (!!initialPlan && !plan)}>开始执行</Button></Space>

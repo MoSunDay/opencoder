@@ -1,5 +1,5 @@
 import { Alert, Button, Drawer, Form, Input, InputNumber, Space, Typography } from 'antd';
-import { forwardRef, useImperativeHandle, useState } from 'react';
+import { forwardRef, useImperativeHandle, useMemo, useState } from 'react';
 import { apiPost } from '../../../api.js';
 import { newId } from '../../../fleet/model.js';
 import { LayerCanvas } from '../layered/canvas.jsx';
@@ -10,9 +10,9 @@ import { useDraft } from './draft.js';
 import { EngineeringFields } from './fields.jsx';
 import { available, convertPlan, engineeringInputs, planLayers, validatePlan } from './model.js';
 
-export function PlanPreview({ plan }) {
+export function PlanPreview({ plan, capabilities }) {
   try {
-    if (plan.schema_version >= 5) return <div className="brain-milestone-preview"><MilestoneCanvas plan={plan.schema_version === 7 ? plan : convertPlan(plan)} /></div>;
+    if (plan.schema_version >= 5) return <div className="brain-milestone-preview"><MilestoneCanvas plan={plan.schema_version === 7 ? plan : convertPlan(plan)} capabilities={capabilities} /></div>;
     return <LayerCanvas view={{ plan, layers: planLayers(plan), operations: [], run: {} }} />;
   } catch (error) { return <Alert type="error" title={error.message} />; }
 }
@@ -24,7 +24,7 @@ export const PlanEditor = forwardRef(function PlanEditor({ version, cacheKey, ca
   const close = () => { if (!busy && (!draft || persist())) onClose(); };
   useImperativeHandle(ref, () => ({ close }));
   if (!draft) return <Alert type="error" title="无法读取浏览器草稿" description={cacheError} action={<Space><Button onClick={discard}>备份草稿并重新开始</Button><Button onClick={close}>关闭画布</Button></Space>} />;
-  const plan = draft.version.plan; const caps = capabilities.filter(available);
+  const plan = draft.version.plan; const caps = useMemo(() => capabilities.filter(available), [capabilities]);
   const update = (next) => setDraft((old) => ({ ...old, version: { ...old.version, plan: next } }));
   const attempt = (action) => { try { action(); setError(''); } catch (e) { setError(e.message); if (e.nodeId) setSelected({ type: 'node', id: e.nodeId }); else if (e.layerId) setSelected({ type: 'layer', id: e.layerId }); } };
   const addMilestone = () => attempt(() => { if (plan.layers.length >= 32) throw new Error('最多 32 层'); const id = newId('layer'); update(addLayer(plan, id)); setSelected({ type: 'layer', id }); });
@@ -46,7 +46,7 @@ export const PlanEditor = forwardRef(function PlanEditor({ version, cacheKey, ca
     <div className="brain-method-toolbar"><Space><Button disabled={busy} onClick={close}>关闭画布</Button><Typography.Text strong>配置里程碑与能力</Typography.Text><Typography.Text type="secondary">草稿自动保存 · v{draft.version.version}</Typography.Text></Space><Button type="primary" disabled={busy || !!cacheError} onClick={next}>下一步：计划信息</Button></div>
     {(error || cacheError) && <Alert type="error" showIcon title={cacheError || error} />}
     <div className="brain-method-workspace">
-      <MilestoneCanvas plan={plan} selection={selected} onSelect={setSelected} positions={draft.layout || {}} onPositions={positions}
+      <MilestoneCanvas plan={plan} capabilities={caps} selection={selected} onSelect={setSelected} positions={draft.layout || {}} onPositions={positions}
         onAddLayer={addMilestone} onAddNode={addExecution} onConnect={(from, to) => attempt(() => { update(connect(plan, from, to)); setSelected({ type: 'transition', id: `${from}:${to}` }); })} />
       <MilestoneInspector plan={plan} selection={selected} capabilities={caps}
         onLayerChange={(patch) => change('layers', 'layer_id', patch)} onNodeChange={(patch) => change('nodes', 'node_id', patch)}

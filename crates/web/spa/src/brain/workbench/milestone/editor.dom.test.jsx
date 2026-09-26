@@ -47,9 +47,10 @@ it('在里程碑容器内添加并配置并行执行节点', async () => {
   fireEvent.change(screen.getByLabelText('执行节点名称'), { target: { value: '补充审查' } });
   fireEvent.change(screen.getByLabelText('执行节点任务'), { target: { value: '并行审查变更' } });
   fireEvent.mouseDown(screen.getByLabelText('绑定能力'));
-  fireEvent.click(await screen.findByText(/agent · 编码能力/));
+  fireEvent.click((await screen.findAllByText('Agent · Coder')).find((item) => item.classList.contains('ant-select-item-option-content')));
   const draft = JSON.parse(localStorage.getItem('canvas-parallel'));
   expect(draft.version.plan.nodes).toHaveLength(2);
   expect(draft.version.plan.nodes[1]).toMatchObject({ layer_id: 'coding', title: '补充审查', objective: '并行审查变更', capability_id: 'coding' });
   expect(container.querySelectorAll('.react-flow__node-execution')).toHaveLength(2);
+  expect(container.querySelector('.brain-execution-node span')?.textContent).toBe('Agent · Coder');
 });

@@ -1,5 +1,6 @@
 import { Button, Input, Select, Typography } from 'antd';
 import { capabilityId } from '../scheduler/model.js';
+import { capabilityLabel } from './model.js';
 
 export function MilestoneInspector({ plan, selection, capabilities, onLayerChange, onNodeChange, onTransitionChange, onMoveNode, onDelete }) {
   if (!selection) return <aside className="brain-milestone-inspector"><h3>配置方法论</h3><p>点击里程碑、执行节点或层间连线，配置目标、能力与扭转条件。</p></aside>;
@@ -21,7 +22,7 @@ export function MilestoneInspector({ plan, selection, capabilities, onLayerChang
       <label>名称<Input aria-label="执行节点名称" value={node.title} maxLength={120} onChange={(event) => onNodeChange({ title: event.target.value })} /></label>
       <label>执行任务<Input.TextArea aria-label="执行节点任务" rows={4} maxLength={4096} value={node.objective} onChange={(event) => onNodeChange({ objective: event.target.value })} /></label>
       <label>所属里程碑<Select aria-label="所属里程碑" value={node.layer_id} options={plan.layers.map((item) => ({ value: item.layer_id, label: item.title || item.layer_id }))} onChange={onMoveNode} /></label>
-      <label>泛化能力<Select aria-label="绑定能力" showSearch optionFilterProp="label" value={node.capability_id || undefined} onChange={(capability_id) => onNodeChange({ capability_id })} options={capabilities.map((item) => ({ value: capabilityId(item), label: `${item.kind} · ${item.summary || item.target} · ${item.version}` }))} /></label>
+      <label>泛化能力<Select aria-label="绑定能力" showSearch optionFilterProp="label" value={node.capability_id || undefined} onChange={(capability_id) => onNodeChange({ capability_id })} options={capabilities.map((item) => ({ value: capabilityId(item), label: capabilityLabel(item) }))} /></label>
       {capability && <section><Typography.Text strong>能力契约</Typography.Text><p>输入：{capability.input_desc}</p><p>输出：{capability.output_desc}</p>{!!capability.required_inputs?.length && <p>必填：{capability.required_inputs.join('、')}</p>}</section>}
       <Button danger onClick={onDelete}>删除执行节点</Button>
     </aside>;

@@ -34,15 +34,24 @@ async function prepare() {
     objective: instruction, todos: [{ id: 'echo', title: 'Verify acceptance marker',
       requirement_background: 'Layered capability integration acceptance', instructions: `${instruction} Put the marker in candidate.result.`,
       max_attempts: 1, acceptance: { criteria: `The result contains ${marker}.` } }] } });
-  const node = (id, capability, layer = 1) => ({ node_id: id, layer, objective: instruction, success_criteria: `The output includes ${marker}.`, title: `${id}: return ${marker} exactly; no tools, files or network.`, capability_ids: [capability] });
-  const plan = (title, nodes, edges = []) => ({ schema_version: 6, title, objective: instruction, inputs: { request: marker }, nodes, edges, max_rounds: 5 });
+  const node = (id, capability, layer = 1) => ({ node_id: id, layer_id: `layer-${layer}`, objective: instruction,
+    title: `${id}: return ${marker} exactly; no tools, files or network.`, capability_id: capability });
+  const plan = (title, nodes) => {
+    const count = Math.max(...nodes.map((item) => Number(item.layer_id.slice(6))));
+    const layers = Array.from({ length: count }, (_, index) => ({ layer_id: `layer-${index + 1}`, title: `Milestone ${index + 1}`,
+      objective: instruction, success_criteria: `The output includes ${marker}.` }));
+    const transitions = layers.slice(1).map((layer, index) => ({ from: layers[index].layer_id, to: layer.layer_id,
+      condition: 'The prior milestone is met.' }));
+    return { schema_version: 7, title, objective: instruction, inputs: { request: marker }, layers, nodes, transitions, max_rounds: 5 };
+  };
   const child = `${tag}-child`;
   await api('POST', '/api/brain/plan-defs', { id: child, version: 1, created_at: Date.now(),
     changelog: 'Fixed child version acceptance', plan: plan('Acceptance child', [node('child', 'builtin-agent-act')]) });
   const nodes = [node('agent', 'builtin-agent-act'), node('dag', `dag-${tag}`), node('team', `team-${tag}`, 2),
     node('operator', 'builtin-operator', 2), node('todos', `todos-${tag}-v1`, 2), node('nested', `plan-${child}@1`, 3)];
-  nodes.at(-1).success_criteria = `The child output includes ${marker} AND this ROOT run is in round 2. In round 1 assess this milestone as not met and reflect back to layer 1.`;
   const rootPlan = plan('Six capability milestone reflection acceptance', nodes);
+  rootPlan.layers[2].success_criteria = `The child output includes ${marker} AND this ROOT run is in round 2. In round 1 assess this milestone as not met and reflect back to layer 1.`;
+  rootPlan.transitions.push({ from: 'layer-3', to: 'layer-1', condition: 'Round 1 needs another pass through the first milestone.' });
   rootPlan.objective += ' Exercise exactly two rounds: dispatch every layer in round 1, then reflect from nested to agent (layer 1), re-execute all layers in round 2, then complete. Every dispatch binds the acceptance marker; final summary must include it. No external actions.';
   const planId = `plan-${tag}`;
   await api('POST', '/api/brain/plan-defs', { id: planId, version: 1, created_at: Date.now(),
@@ -50,7 +59,7 @@ async function prepare() {
   const ready = await api('GET', '/api/nodes');
   const host = ready.nodes.find((node) => node.online && node.snapshot?.generation?.startsWith('host-'));
   assert(host, 'online Host node required');
-  const request = { id: `brain-${tag}`, node_id: host.id, schema_version: 6, plan: { id: planId, version: 1 }, inputs: { request: marker } };
+  const request = { id: `brain-${tag}`, node_id: host.id, schema_version: 7, plan: { id: planId, version: 1 }, inputs: { request: marker } };
   save('request', request); save('scenario', { marker, rootPlan });
   assert.equal((await api('POST', '/api/brain/runs', request)).run_id, request.id);
   return request.id;

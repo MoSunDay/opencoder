@@ -8,8 +8,10 @@ use std::sync::Arc;
 /// Only the model transport is deterministic; browser network is not intercepted.
 #[tokio::test]
 #[ignore = "requires Chromium and the built SPA; run explicitly for browser acceptance"]
-async fn save_layered_plan_and_open_capability_detail_in_browser() {
-    let fleet = support::Fleet::new_with_ui(1, Arc::new(client::LayeredClient::new()), true).await;
+async fn schema_seven_canvas_parallel_return_and_execution_detail() {
+    let fleet =
+        support::Fleet::new_with_ui(1, Arc::new(client::LayeredClient::reflecting_once()), true)
+            .await;
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let result = tokio::time::timeout(
         std::time::Duration::from_secs(300),

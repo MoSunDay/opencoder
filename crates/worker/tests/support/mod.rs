@@ -268,6 +268,7 @@ pub struct Fleet {
     app: axum::Router,
     server: tokio::task::JoinHandle<()>,
     channels: Vec<tokio::task::JoinHandle<anyhow::Result<()>>>,
+    client: Arc<dyn ChatStream>,
     _config: opencoder_core::config::ScopedConfigHome,
     _dir: tempfile::TempDir,
 }
@@ -330,9 +331,54 @@ impl Fleet {
             app,
             server,
             channels,
+            client,
             _config: config,
             _dir: dir,
         }
+    }
+    /// Replace only Control; the Workers and their channel loops keep running.
+    pub async fn stop_server(&mut self) {
+        self.state.lifecycle.retire();
+        self.state.lifecycle.retire_channels();
+        self.server.abort();
+        let _ = (&mut self.server).await;
+    }
+
+    pub async fn restart_server(&mut self) {
+        let state = opencoder_control::new_state(
+            self._dir.path().join("server-work"),
+            self._dir.path().join("server"),
+            Some(self.client.clone()),
+        )
+        .await
+        .unwrap();
+        let app = opencoder_control::build_app(state.clone(), None, false);
+        let address = reqwest::Url::parse(&self.url).unwrap();
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", address.port().unwrap()))
+            .await
+            .unwrap();
+        let serve_app = app.clone();
+        self.server = tokio::spawn(async move {
+            axum::serve(listener, serve_app).await.unwrap();
+        });
+        self.state = state;
+        self.app = app;
+        tokio::time::timeout(Duration::from_secs(15), async {
+            while self
+                .state
+                .hub
+                .views()
+                .await
+                .iter()
+                .filter(|node| node.online && node.snapshot.as_ref().is_some_and(|s| s.ready))
+                .count()
+                != self.nodes.len()
+            {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("node did not reconnect to restarted server");
     }
     pub async fn call(&self, method: &str, path: &str, body: Value) -> RpcReply {
         use tower::ServiceExt;

@@ -50,6 +50,7 @@ jobs:
         run: |
           cargo test -p opencoder-brain --test milestone
           cargo test -p opencoder-worker --test brain_scheduler_v4
+          cargo test -p opencoder-worker --test brain_server_restart
           cargo test -p opencoder-worker --test brain_browser schema_seven_canvas_parallel_return_and_execution_detail -- --ignored --nocapture
       - name: Preserve browser failure evidence
         if: failure()

@@ -29,7 +29,12 @@ pub async fn run_with_registry(
     registry: &HashMap<String, ToolArc>,
     mut on_event: impl FnMut(SessionEvent) + Send,
 ) -> Result<()> {
-    let memory_enabled = super::local_memory::eligible(session);
+    // The gate keys on the agent the task will actually run under: a
+    // compound control input (`/act task` submitted from plan mode) switches
+    // the agent inside the run, so eligibility probes the switch target.
+    // `Done` must still fire synchronously at its original point (before the
+    // re-absorb tail) — only the eligibility snapshot is probe-aware.
+    let memory_enabled = super::local_memory::eligible_for_run(session, &user_text);
     let baseline = session.messages.len();
     let result = run_without_memory(session, user_text, images, registry, |event| {
         if !memory_enabled || !matches!(event, SessionEvent::Done) {

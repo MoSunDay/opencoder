@@ -128,6 +128,11 @@ pub async fn delete_todo(conn: &Connection, id: &str) -> Result<bool> {
             return Ok(false);
         }
         conn.execute(
+            "DELETE FROM project_todo_executions WHERE todo_id = ?1",
+            params![id],
+        )
+        .await?;
+        conn.execute(
             "DELETE FROM project_todo_runs WHERE todo_id = ?1",
             params![id],
         )

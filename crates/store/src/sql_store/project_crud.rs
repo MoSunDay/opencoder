@@ -140,13 +140,14 @@ pub async fn create_milestone(
     pool: &MySqlPool,
     starrocks: bool,
     rec: &ProjectMilestoneRecord,
+    kind: &str,
 ) -> Result<()> {
     exec_write(
         pool,
         starrocks,
         "INSERT INTO project_milestones \
-         (id, goal_id, title, detail_md, status, sort_key, created_at, updated_at) \
-         VALUES (?,?,?,?,?,?,?,?)",
+         (id, goal_id, title, detail_md, status, sort_key, created_at, updated_at, kind) \
+         VALUES (?,?,?,?,?,?,?,?,?)",
         vec![
             Arg::Text(rec.id.clone()),
             Arg::TextOrNull(rec.goal_id.clone()),
@@ -156,6 +157,7 @@ pub async fn create_milestone(
             Arg::Int(rec.sort),
             Arg::Int(rec.created_at),
             Arg::Int(rec.updated_at),
+            Arg::Text(kind.to_owned()),
         ],
     )
     .await
@@ -169,6 +171,7 @@ pub async fn patch_milestone(
     id: &str,
     patch: &ProjectMilestonePatch,
     now_ms: i64,
+    kind: &str,
 ) -> Result<bool> {
     let mut sets: Vec<&'static str> = Vec::new();
     let mut args: Vec<Arg> = Vec::new();
@@ -195,8 +198,9 @@ pub async fn patch_milestone(
     sets.push("updated_at = ?");
     args.push(Arg::Int(now_ms));
     args.push(Arg::Text(id.to_string()));
+    args.push(Arg::Text(kind.to_owned()));
     let sql = format!(
-        "UPDATE project_milestones SET {} WHERE id = ?",
+        "UPDATE project_milestones SET {} WHERE id = ? AND kind = ?",
         sets.join(", ")
     );
     let n = exec_write(pool, starrocks, &sql, args)
@@ -206,16 +210,21 @@ pub async fn patch_milestone(
 }
 
 /// Nonempty milestones are protected from deletion.
-pub async fn delete_milestone(pool: &MySqlPool, starrocks: bool, id: &str) -> Result<bool> {
+pub async fn delete_milestone(
+    pool: &MySqlPool,
+    starrocks: bool,
+    id: &str,
+    kind: &str,
+) -> Result<bool> {
     if starrocks {
-        if !row_exists(
+        let rows = exec_read_all(
             pool,
             true,
-            "SELECT 1 FROM project_milestones WHERE id = ?",
-            id,
+            "SELECT id FROM project_milestones WHERE id = ? AND kind = ?",
+            &[Arg::Text(id.to_owned()), Arg::Text(kind.to_owned())],
         )
-        .await?
-        {
+        .await?;
+        if rows.is_empty() {
             return Ok(false);
         }
         if row_exists(
@@ -231,17 +240,19 @@ pub async fn delete_milestone(pool: &MySqlPool, starrocks: bool, id: &str) -> Re
         exec_write(
             pool,
             true,
-            "DELETE FROM project_milestones WHERE id = ?",
-            vec![Arg::Text(id.to_owned())],
+            "DELETE FROM project_milestones WHERE id = ? AND kind = ?",
+            vec![Arg::Text(id.to_owned()), Arg::Text(kind.to_owned())],
         )
         .await?;
         return Ok(true);
     }
     let mut tx = pool.begin().await?;
-    let existing = sqlx::query("SELECT id FROM project_milestones WHERE id = ? FOR UPDATE")
-        .bind(id)
-        .fetch_optional(&mut *tx)
-        .await?;
+    let existing =
+        sqlx::query("SELECT id FROM project_milestones WHERE id = ? AND kind = ? FOR UPDATE")
+            .bind(id)
+            .bind(kind)
+            .fetch_optional(&mut *tx)
+            .await?;
     if existing.is_none() {
         return Ok(false);
     }
@@ -252,8 +263,9 @@ pub async fn delete_milestone(pool: &MySqlPool, starrocks: bool, id: &str) -> Re
     if !children.is_empty() {
         return Err(crate::project::MilestoneNotEmpty.into());
     }
-    sqlx::query("DELETE FROM project_milestones WHERE id = ?")
+    sqlx::query("DELETE FROM project_milestones WHERE id = ? AND kind = ?")
         .bind(id)
+        .bind(kind)
         .execute(&mut *tx)
         .await?;
     tx.commit().await?;
@@ -266,11 +278,12 @@ pub async fn list_milestones(
     pool: &MySqlPool,
     starrocks: bool,
     goal_id: Option<&str>,
+    kind: &str,
 ) -> Result<Vec<ProjectMilestoneRecord>> {
-    let mut sql = format!("SELECT {MILESTONE_COLS} FROM project_milestones");
-    let mut args: Vec<Arg> = Vec::new();
+    let mut sql = format!("SELECT {MILESTONE_COLS} FROM project_milestones WHERE kind = ?");
+    let mut args: Vec<Arg> = vec![Arg::Text(kind.to_owned())];
     if let Some(g) = goal_id {
-        sql.push_str(" WHERE goal_id = ?");
+        sql.push_str(" AND goal_id = ?");
         args.push(Arg::Text(g.to_string()));
     }
     sql.push_str(" ORDER BY sort_key, created_at");

@@ -18,14 +18,13 @@ async function chooseCapability(page, label) {
 
 async function addNode(page, layerName, nodeName, label) {
   await page.locator('.brain-layer-box').filter({ hasText: layerName }).getByRole('button', { name: '＋ 并行执行节点' }).click();
-  await page.getByLabel('执行节点名称', { exact: true }).fill(nodeName);
-  await page.getByLabel('执行节点任务', { exact: true }).fill(`执行 ${nodeName} 并返回证据`);
   await chooseCapability(page, label);
 }
 
 async function addLayer(page, index, name) {
   await page.getByRole('button', { name: index === 1 ? '添加第一个里程碑' : '＋ 里程碑', exact: true }).click();
   await page.getByLabel('里程碑名称', { exact: true }).fill(name);
+  await page.getByLabel('里程碑要做什么', { exact: true }).fill(`执行 ${name} 的工作`);
   await page.getByLabel('里程碑目标', { exact: true }).fill(`完成 ${name} 的能力调度`);
   await page.getByLabel('里程碑达成标准', { exact: true }).fill('所有执行结果都有 node-owned child result');
 }
@@ -54,9 +53,11 @@ function assertRun(view) {
   return visits;
 }
 
-async function selectVisit(page, round, layer) {
-  await page.getByRole('combobox', { name: '选择历史层激活' }).click();
-  await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: `第 ${round} 轮 · 第 ${layer} 层 ·` }).click();
+async function openRound(page, round) {
+  const drawer = page.getByRole('dialog', { name: '计划运行详情', exact: true });
+  const entry = drawer.locator('.brain-run-details > .ant-collapse > .ant-collapse-item').filter({ hasText: `第 ${round} 轮 ·` }).first();
+  if (await entry.locator('.ant-collapse-header').getAttribute('aria-expanded') !== 'true') await entry.locator('.ant-collapse-header').click();
+  return drawer;
 }
 
 async function main() {
@@ -81,8 +82,9 @@ async function main() {
     await addNode(page, 'Coding', '并行检查', 'Operator · act');
     await addLayer(page, 2, '测试');
     await addNode(page, '测试', '验证任务', 'Operator · act');
-    const layers = page.locator('.react-flow__node-layer');
-    await layers.nth(1).locator('[data-handleid="return-out"]').dragTo(layers.nth(0).locator('[data-handleid="return-in"]'));
+    await page.locator('.brain-layer-box header').nth(1).click();
+    await page.getByRole('combobox', { name: '添加流转连线' }).click();
+    await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Coding' }).click();
     await page.getByLabel('扭转条件', { exact: true }).fill('测试证据要求回到 Coding 整改');
     await page.screenshot({ path: path.join(artifacts, 'canvas.png'), animations: 'disabled' });
 
@@ -112,7 +114,7 @@ async function main() {
     const receipt = await created;
     assert.equal(receipt.status(), 202, await receipt.text());
     const id = (await receipt.json()).run_id;
-    await page.getByText('有效通过 2 / 2 层', { exact: true }).waitFor({ timeout: 120000 });
+    await page.locator('.brain-run-status').getByText('已完成', { exact: true }).waitFor({ timeout: 120000 });
     const view = await page.evaluate(async (runId) => {
       const response = await fetch(`/api/brain/runs/${runId}/layered`, { headers: { Authorization: `Bearer ${localStorage.getItem('oc_token')}` } });
       if (!response.ok) throw new Error(`GET layered: ${response.status}`);
@@ -130,22 +132,29 @@ async function main() {
       assert.equal(detail.visit.activation, event.activation);
       assert.equal(detail.nodes.flatMap((node) => node.operations).length, event.layer === 1 ? 2 : 1);
     }
+    await page.getByRole('button', { name: '打开大脑对话' }).click();
+    const composer = page.getByRole('dialog', { name: '计划运行详情' }).getByLabel('大脑人工输入');
+    await composer.waitFor();
+    assert(await composer.isDisabled(), 'completed Brain must keep the conversation read-only');
+    await page.setViewportSize({ width: 390, height: 844 });
+    const drawerBox = await page.getByRole('dialog', { name: '计划运行详情' }).boundingBox();
+    assert(drawerBox && drawerBox.x >= -1 && drawerBox.x + drawerBox.width <= 391,
+      'Brain conversation drawer must fit a narrow viewport');
+    await page.screenshot({ path: path.join(artifacts, 'conversation-narrow.png'), animations: 'disabled' });
+    await page.setViewportSize({ width: 1650, height: 1100 });
     for (const round of [1, 2]) {
-      await selectVisit(page, round, 1);
-      await page.locator('.brain-execution-node').filter({ hasText: '实现任务' }).getByText('Agent · act', { exact: true }).waitFor();
+      const drawer = await openRound(page, round);
       const operation = view.operations.find((op) => op.round === round && op.node_id === version.plan.nodes[0].node_id);
-      await page.locator('.brain-execution-node').filter({ hasText: '实现任务' }).click();
-      const drawer = page.getByRole('dialog', { name: '能力执行明细', exact: true });
-      await drawer.locator('.execution-view-full').waitFor();
-      await drawer.getByText('node-owned child result', { exact: false }).last().waitFor();
+      await drawer.getByRole('button', { name: operation.execution_id, exact: true }).click();
+      const executionDrawer = page.getByRole('dialog', { name: '能力执行明细', exact: true });
+      await executionDrawer.locator('.execution-view-full').waitFor();
+      await executionDrawer.getByText('node-owned child result', { exact: false }).last().waitFor();
       assert(details.some((url) => url.endsWith(`/api/executions/${operation.execution_id}`)), 'execution panel must fetch the selected attempt by ID');
-      await drawer.locator('button.ant-drawer-close').click();
-      await drawer.waitFor({ state: 'hidden' });
+      await executionDrawer.getByRole('button', { name: '返回轮次列表' }).click();
     }
-    await selectVisit(page, 2, 2);
+    const finalDrawer = await openRound(page, 2);
     const operator = view.operations.find((op) => op.round === 2 && op.node_id === version.plan.nodes[2].node_id);
-    await page.locator('.brain-execution-node').filter({ hasText: '验证任务' }).getByText('Operator · act', { exact: true }).waitFor();
-    await page.locator('.brain-execution-node').filter({ hasText: '验证任务' }).click();
+    await finalDrawer.getByRole('button', { name: operator.execution_id, exact: true }).click();
     const operatorDrawer = page.getByRole('dialog', { name: '能力执行明细', exact: true });
     await operatorDrawer.locator('.execution-view-full').waitFor();
     await operatorDrawer.getByText('node-owned child result', { exact: false }).last().waitFor();

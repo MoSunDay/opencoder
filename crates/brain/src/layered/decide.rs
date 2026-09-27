@@ -31,13 +31,57 @@ pub fn decide(
         snapshot.run.phase == LayeredPhase::Deciding,
         "run is not deciding"
     );
+    if let LayeredDecision::Guide { reason, guidance } = decision {
+        ensure!(
+            !terminal::barrier(snapshot),
+            "guidance is only valid before the layer barrier"
+        );
+        validate::reason(reason)?;
+        ensure!(
+            guidance.len() <= 32,
+            "guide can address at most 32 executions"
+        );
+        let mut targets = BTreeSet::new();
+        for action in guidance {
+            ensure!(
+                targets.insert(&action.execution_id),
+                "duplicate guidance target"
+            );
+            ensure!(
+                !action.message.trim().is_empty() && action.message.len() <= 4096,
+                "guidance message must contain 1..4096 bytes"
+            );
+            ensure!(
+                snapshot.operations.iter().any(|op| {
+                    op.execution_id == action.execution_id
+                        && op.activation == snapshot.run.activation
+                        && op.status == LayeredOperationStatus::Running
+                        && matches!(
+                            op.execution_kind,
+                            ExecutionKind::Agent | ExecutionKind::Operator | ExecutionKind::Team
+                        )
+                }),
+                "guidance target must be a running Agent, Operator or Team in the current activation"
+            );
+        }
+        let mut update = change(snapshot, now);
+        update.run.phase = LayeredPhase::Waiting;
+        update.run.pending_guidance = false;
+        let mut note = event(&update.run, "guidance_processed", Some(reason.clone()));
+        note.decision_summary = Some("guide".into());
+        note.guidance = guidance.clone();
+        update.events.push(note);
+        return Ok(update);
+    }
     ensure!(
         terminal::barrier(snapshot),
         "all dispatched executions must terminate before deciding"
     );
     let groups = super::layers(&request.plan)?;
     let mut update = change(snapshot, now);
+    update.run.pending_guidance = false;
     match decision {
+        LayeredDecision::Guide { .. } => unreachable!(),
         LayeredDecision::DispatchLayer {
             layer,
             assignments,

@@ -149,6 +149,10 @@ pub fn layers(plan: &LayeredPlan) -> Result<Vec<Vec<String>>> {
                 "milestone title required (max 120)"
             );
             ensure!(
+                !layer.task.trim().is_empty() && layer.task.chars().count() <= 4096,
+                "milestone task required (max 4096)"
+            );
+            ensure!(
                 !layer.objective.trim().is_empty() && layer.objective.chars().count() <= 4096,
                 "milestone objective required (max 4096)"
             );

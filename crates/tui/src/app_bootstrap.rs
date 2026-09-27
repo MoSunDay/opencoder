@@ -178,7 +178,7 @@ pub(super) async fn run(opts: &TuiOpts) -> Result<()> {
     };
     if stored.is_some() {
         anyhow::ensure!(
-            opts.envs.is_empty() || opts.envs == session.harness.envs,
+            opencoder_core::harness::matches_requested_env(&session.harness, &opts.envs),
             "environment is fixed when the session starts"
         );
         anyhow::ensure!(
@@ -188,11 +188,12 @@ pub(super) async fn run(opts: &TuiOpts) -> Result<()> {
             "Codex model is fixed when the session starts"
         );
     } else if session.messages.is_empty() {
-        session.harness.harness = harness;
-        session.harness.envs = opts.envs.clone();
-        if harness == opencoder_core::harness::Harness::Codex {
-            session.harness.model = opts.model.clone();
-        }
+        session.harness = opencoder_core::harness::fresh_runtime(
+            harness,
+            Some(harness),
+            opts.envs.clone(),
+            opts.model.clone(),
+        );
     }
     let session_ms = t_session.elapsed().as_millis() as u64;
 
@@ -256,6 +257,7 @@ pub(super) async fn run(opts: &TuiOpts) -> Result<()> {
     }
 
     let result = super::run_app(
+        opts,
         &mut active_terminal.terminal,
         session,
         store,

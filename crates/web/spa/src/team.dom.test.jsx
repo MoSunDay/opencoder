@@ -228,7 +228,7 @@ describe('TeamPanel', () => {
     fireEvent.change(screen.getByLabelText('任务要求'), { target: { value: '准备发布' } });
     // antd inserts a space inside two-CJK-char buttons ("启 动"), so match the
     // squashed text the same way fleet.dom.test.jsx does.
-    const submit = [...document.querySelectorAll('.ant-modal button')]
+    const submit = [...document.querySelectorAll('.ant-drawer button')]
       .find((button) => button.textContent.replace(/\s+/g, '') === '启动');
     expect(submit).toBeTruthy();
     fireEvent.click(submit);

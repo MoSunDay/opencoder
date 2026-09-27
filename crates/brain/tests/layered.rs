@@ -8,10 +8,10 @@ fn historical_dag_can_be_drawn_without_enabling_legacy_execution() {
       "nodes":[{"node_id":"a","title":"first","capability_id":"agent"},{"node_id":"b","title":"second","capability_id":"agent"}],
       "edges":[{"from":"a","to":"b"}]})).unwrap();
     assert_eq!(layered::layers(&plan).unwrap(), vec![vec!["a"], vec!["b"]]);
-    assert!(layered::validate_plan(&plan)
-        .unwrap_err()
-        .to_string()
-        .contains("schema 6"));
+    assert_eq!(
+        layered::validate_plan(&plan).unwrap_err().to_string(),
+        "new plans require schema 7; convert the saved version explicitly"
+    );
 }
 #[test]
 fn historical_run_and_events_default_new_metadata_only_for_reading() {

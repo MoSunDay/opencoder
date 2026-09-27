@@ -1,10 +1,33 @@
 mod support;
 use opencoder_core::fleet::*;
-use opencoder_llm::{CompletedToolCall, LlmEvent, MockChatClient};
+use opencoder_llm::{ChatRequest, ChatStream, CompletedToolCall, LlmEvent, MockChatClient};
 use opencoder_node::fleet::NodeService;
 use serde_json::{json, Value};
 use std::sync::Arc;
 use support::*;
+
+struct HeldTeamClient {
+    inner: MockChatClient,
+    first: std::sync::atomic::AtomicBool,
+    sender: std::sync::Mutex<Option<tokio::sync::mpsc::Sender<LlmEvent>>>,
+    requests: std::sync::Mutex<Vec<ChatRequest>>,
+}
+
+impl ChatStream for HeldTeamClient {
+    fn chat_stream(
+        &self,
+        request: ChatRequest,
+    ) -> anyhow::Result<tokio::sync::mpsc::Receiver<LlmEvent>> {
+        self.requests.lock().unwrap().push(request.clone());
+        if !self.first.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            let (sender, receiver) = tokio::sync::mpsc::channel(1);
+            *self.sender.lock().unwrap() = Some(sender);
+            Ok(receiver)
+        } else {
+            self.inner.chat_stream(request)
+        }
+    }
+}
 fn done(text: &str) -> Vec<LlmEvent> {
     vec![LlmEvent::Completed {
         text: text.into(),
@@ -58,6 +81,76 @@ async fn team_members_execute_locally_with_capability_prefixes() {
         .any(|r| serde_json::to_string(&r.messages)
             .unwrap()
             .contains("review implementation")));
+    node.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn team_steer_is_durable_and_reaches_the_next_member_turn() {
+    let _host_config = support::isolated_config();
+    let dir = tempfile::tempdir().unwrap();
+    let answer = r#"{"question":"inspect","participants":["plan"],"summary":"aligned","aligned":true,"complete":true,"final_summary":"team completed"}"#;
+    let client = Arc::new(HeldTeamClient {
+        inner: MockChatClient::new().with_default(done(answer)),
+        first: std::sync::atomic::AtomicBool::new(false),
+        sender: std::sync::Mutex::new(None),
+        requests: std::sync::Mutex::new(vec![]),
+    });
+    let node = worker(dir.path(), client.clone()).await;
+    let definition =
+        json!({"name":"review","captain":"act","members":[{"agent":"act"},{"agent":"plan"}]});
+    let created = node
+        .handle(NodeOperation::Create {
+            assignment: assignment(
+                &node,
+                "team-guided",
+                ExecutionKind::Team,
+                json!({"prompt":"review change"}),
+                Some(definition),
+            ),
+        })
+        .await;
+    assert_eq!(created.status, 200, "{created:?}");
+    let sender = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        loop {
+            if let Some(sender) = client.sender.lock().unwrap().take() {
+                break sender;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    let steer = || NodeOperation::Command {
+        execution: ExecutionRef {
+            id: "team-guided".into(),
+            kind: ExecutionKind::Team,
+        },
+        command: ExecutionCommand {
+            action: "steer".into(),
+            input: json!({
+                "prompt":"Verify the new constraint", "input_id":"brain-42-0"
+            }),
+        },
+    };
+    assert_eq!(node.handle(steer()).await.status, 200);
+    let duplicate = node.handle(steer()).await;
+    assert_eq!(duplicate.body["duplicate"], true);
+    sender.send(done(answer).remove(0)).await.unwrap();
+    drop(sender);
+    let detail = settled(&node, "team-guided").await;
+    assert_eq!(detail["execution"]["status"], "done", "{detail}");
+    assert!(client
+        .requests
+        .lock()
+        .unwrap()
+        .iter()
+        .skip(1)
+        .any(|request| {
+            request
+                .messages
+                .iter()
+                .any(|message| message.text().contains("Verify the new constraint"))
+        }));
     node.shutdown().await.unwrap();
 }
 

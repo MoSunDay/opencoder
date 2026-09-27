@@ -108,6 +108,48 @@ async fn pc_plan_install_appends_schema_six_after_legacy_version() {
 }
 
 #[tokio::test]
+async fn pc_plan_install_upgrades_schema_seven_without_milestone_tasks() {
+    let h = Harness::with_brain_kind().await;
+    let mut old_plan = opencoder_core::brain::pc_issue::plan();
+    for layer in old_plan["layers"].as_array_mut().unwrap() {
+        layer.as_object_mut().unwrap().remove("task");
+    }
+    let old: opencoder_core::brain::PlanVersion<serde_json::Value> =
+        serde_json::from_value(json!({
+            "id":"pc-issue","version":1,"plan":old_plan,"changelog":"previous","created_at":1
+        }))
+        .unwrap();
+    h.state.fleet.save_brain_plan_document(&old).await.unwrap();
+
+    let (status, installed) = h
+        .req(Method::POST, "/api/brain/pc-issue/plan", Some(json!({})))
+        .await;
+    assert_eq!(status, 200, "{installed}");
+    assert_eq!(installed["definition"]["latest_version"], 2);
+    assert_eq!(
+        h.state
+            .fleet
+            .brain_plan_document("pc-issue", 1)
+            .await
+            .unwrap()
+            .unwrap(),
+        old
+    );
+    let current = h
+        .state
+        .fleet
+        .brain_plan_document("pc-issue", 2)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(current.plan["layers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|layer| layer["task"].as_str().is_some_and(|task| !task.is_empty())));
+}
+
+#[tokio::test]
 async fn problem_attachments_are_immutable_and_tampered_references_rejected() {
     let h = Harness::with_brain_kind().await;
     let (status,reference)=h.req(Method::POST,"/api/brain/attachments",Some(json!({

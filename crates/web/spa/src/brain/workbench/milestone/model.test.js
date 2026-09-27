@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { addLayer, connect, executionNode, groups, moveNode, removeLayer, removeNode, validateGraph, visits } from './model.js';
+import { addLayer, connect, executionNode, groups, moveNode, removeLayer, removeNode, transitionLabel, validateGraph, visits } from './model.js';
 const cap = { id: 'a' };
-const layer = (id) => ({ layer_id: id, title: id, objective: '目标', success_criteria: '通过证据验收' });
+const layer = (id) => ({ layer_id: id, title: id, task: '执行里程碑工作', objective: '目标', success_criteria: '通过证据验收' });
 const node = (id, layer_id) => ({ ...executionNode(id, layer_id), title: id, objective: '执行任务', capability_id: 'a' });
 const plan = () => ({ schema_version: 7, layers: [layer('code'), layer('test')], nodes: [node('code-a', 'code'), node('code-b', 'code'), node('test-a', 'test')], transitions: [{ from: 'code', to: 'test', condition: '编码达标' }] });
 describe('milestone canvas methodology', () => {
@@ -30,6 +30,17 @@ describe('milestone canvas methodology', () => {
     const p = plan(); p.nodes[1].capability_id = '';
     try { validateGraph(p, [cap]); throw new Error('expected validation error'); }
     catch (error) { expect(error.nodeId).toBe('code-b'); }
+  });
+  it('requires each milestone task independently of its goal', () => {
+    const p = plan(); p.layers[0].task = '';
+    expect(() => validateGraph(p, [cap])).toThrow('要做什么');
+  });
+  it('shortens only the canvas label while keeping the full transition condition', () => {
+    const condition = '第二阶段证据不足时回到第一阶段重新处理';
+    const p = connect(plan(), 'test', 'code');
+    p.transitions.at(-1).condition = condition;
+    expect(transitionLabel(condition)).toBe('第二阶段证据不足时回…');
+    expect(validateGraph(p, [cap]).transitions.at(-1).condition).toBe(condition);
   });
   it('separates repeated visits and concurrent operations', () => {
     const view = { events: [{ event_type: 'layer_started', activation: 1 }, { event_type: 'layer_started', activation: 3 }], operations: [{ activation: 1 }, { activation: 3 }, { activation: 3 }] };

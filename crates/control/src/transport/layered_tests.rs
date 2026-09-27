@@ -83,7 +83,7 @@ fn layered_request() -> Value {
         "plan":{"schema_version":7,"title":"layered wake","objective":"admit one generation",
             "nodes":[{"node_id":"scan","title":"Scan","layer_id":"scan-layer",
                 "objective":"inspect", "capability_id":"builtin-agent-act"}],
-            "layers":[{"layer_id":"scan-layer","title":"Scan","objective":"inspect","success_criteria":"evidence read"}],"transitions":[],"edges":[],"max_rounds":8},
+            "layers":[{"layer_id":"scan-layer","title":"Scan","task":"inspect","objective":"inspect","success_criteria":"evidence read"}],"transitions":[],"edges":[],"max_rounds":8},
         "inputs":{},"artifacts":{},"depth":0})
 }
 

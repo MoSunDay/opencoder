@@ -1,4 +1,4 @@
-Commit: c60e2162be48102badf53d8b97e7cfa030b59605
+Commit: 24a1081aff7fd8591f860723bae5eb787edf68e9
 
 # ctl 模块
 
@@ -9,7 +9,7 @@ Commit: c60e2162be48102badf53d8b97e7cfa030b59605
 - `src/http.rs` — `RequestPlan` + Bearer + 退出码
 - `src/cmd/` — 按域子命令（纯 plan() 映射）
 - `src/cmd/brain.rs` — brain 子命令，与 Web 共用 API
-- `src/cmd/brain/ontology.rs` — 仅受理 schema_version 4；CLI 读分层视图、层明细及事件，隔离激活运行分层模型决策。
+- `src/cmd/brain/ontology.rs` — 仅受理 schema_version 7；CLI 读分层视图、层明细及事件，隔离激活通过 OpenCoder session agent loop 输出一次分层模型决策。
 - `tests/` — 子命令→RequestPlan 契约与集成 e2e
 
 连接参数由 [ctx.rs](../../crates/ctl/src/ctx.rs) 解析：`--server` 优先于 `OPENCODER_SERVER_URL`；`--token` 或 `--token-file` 优先于 `OPENCODER_SERVER_TOKEN`，两个 token 参数互斥。省略 token 参数即可直接使用环境变量。

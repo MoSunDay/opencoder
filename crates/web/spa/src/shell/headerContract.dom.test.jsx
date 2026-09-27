@@ -2,8 +2,8 @@
 // Header contract for the fleet IA — this file mounts the REAL panel of every
 // menu page, so both regression classes fail here instead of shipping:
 //   1. dead config: a PAGE_META entry no panel renders (e.g. a PageShell
-//      import that never got wired up) — only project / progress / ownerview
-//      panels mount PageShell with their own key, so PAGE_META holds exactly
+//      import that never got wired up) — only the project panel mounts
+//      PageShell with its own key, so PAGE_META holds exactly
 //      those;
 //   2. silently lost title: a page moved into HEADERLESS_REASONS without its
 //      declared reason actually holding in the DOM.

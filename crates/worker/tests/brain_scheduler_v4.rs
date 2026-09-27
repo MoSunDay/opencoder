@@ -17,6 +17,37 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 use support::*;
 
+struct HoldSecondDecision {
+    inner: LayeredClient,
+    calls: std::sync::atomic::AtomicUsize,
+    held: std::sync::Mutex<Option<tokio::sync::mpsc::Sender<opencoder_llm::LlmEvent>>>,
+}
+
+impl HoldSecondDecision {
+    fn new() -> Self {
+        Self {
+            inner: LayeredClient::new(),
+            calls: std::sync::atomic::AtomicUsize::new(0),
+            held: std::sync::Mutex::new(None),
+        }
+    }
+}
+
+impl opencoder_llm::ChatStream for HoldSecondDecision {
+    fn chat_stream(
+        &self,
+        request: opencoder_llm::ChatRequest,
+    ) -> anyhow::Result<tokio::sync::mpsc::Receiver<opencoder_llm::LlmEvent>> {
+        if self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 1 {
+            let (sender, receiver) = tokio::sync::mpsc::channel(1);
+            *self.held.lock().unwrap() = Some(sender);
+            Ok(receiver)
+        } else {
+            opencoder_llm::ChatStream::chat_stream(&self.inner, request)
+        }
+    }
+}
+
 fn root(id: &str) -> ExecutionRef {
     ExecutionRef {
         id: id.into(),
@@ -76,6 +107,212 @@ async fn root_emits_one_layered_wake_until_control_acknowledges_it() {
         control::ok(&node, id, "layered_wake_ack", json!({"generation": value})).await;
     }
     assert!(control::actions(&control::frames(&node).await, "layered_wake").is_empty());
+    node.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn human_input_wakes_brain_before_barrier_without_dispatching_next_layer() {
+    let (_config, _home) = isolated_config();
+    let client = Arc::new(LayeredClient::new());
+    let dir = tempfile::tempdir().unwrap();
+    let node = worker(dir.path(), client.clone()).await;
+    let id = "brain-human-input";
+    create(&node, id).await;
+    control::decide_next_layer(&node, id).await;
+    let waiting = control::wait_phase(&node, id, LayeredPhase::Waiting).await;
+    assert_eq!(waiting.run.layer, 1);
+    let changed = control::ok(
+        &node,
+        id,
+        "human_input",
+        json!({"text":"Prioritize the new verification constraint"}),
+    )
+    .await;
+    assert_eq!(changed["run"]["phase"], "ready");
+    let generation = control::wait_wake(&node).await["generation"]
+        .as_u64()
+        .unwrap();
+    control::ok(
+        &node,
+        id,
+        "layered_wake_ack",
+        json!({"generation":generation}),
+    )
+    .await;
+    let mut context = plan::next_context(id, &control::snapshot(&node, id).await);
+    context.guidance_only = true;
+    context
+        .human_inputs
+        .push("Prioritize the new verification constraint".into());
+    control::ok(&node, id, "layered_context", json!(context)).await;
+    let guided = control::wait_phase(&node, id, LayeredPhase::Waiting).await;
+    assert_eq!(guided.run.layer, 1);
+    assert_eq!(guided.run.activation, 1);
+    assert_eq!(guided.operations, waiting.operations);
+    assert_eq!(client.decisions(), 2);
+    let events = control::events(&node, id).await;
+    assert!(events
+        .iter()
+        .any(|event| event["event_type"] == "human_input"
+            && event["user_input"] == "Prioritize the new verification constraint"));
+    assert!(events
+        .iter()
+        .any(|event| event["event_type"] == "guidance_processed"));
+    assert!(control::actions(&control::frames(&node).await, "layered_dispatch").len() <= 1);
+    node.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn human_input_reopens_a_blocked_brain_decision() {
+    let (_config, _home) = isolated_config();
+    let client = Arc::new(LayeredClient::with([json!({
+        "decision":"block","reason":"Need an operator supplied verification constraint"
+    })]));
+    let dir = tempfile::tempdir().unwrap();
+    let node = worker(dir.path(), client.clone()).await;
+    let id = "brain-blocked-human-input";
+    create(&node, id).await;
+    control::decide_next_layer(&node, id).await;
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        while control::snapshot(&node, id).await.run.phase != LayeredPhase::Blocked {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    }).await.unwrap();
+    let updated = control::ok(&node, id, "human_input", json!({"text":"Use the supplied constraint"})).await;
+    assert_eq!(updated["run"]["phase"], "ready");
+    control::decide_next_layer(&node, id).await;
+    control::wait_phase(&node, id, LayeredPhase::Waiting).await;
+    assert_eq!(client.decisions(), 2);
+    node.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn guidance_to_running_agent_replays_until_acknowledged() {
+    let (_config, _home) = isolated_config();
+    let client = Arc::new(LayeredClient::new());
+    let dir = tempfile::tempdir().unwrap();
+    let node = worker(dir.path(), client).await;
+    let id = "brain-guidance-outbox";
+    create(&node, id).await;
+    control::decide_next_layer(&node, id).await;
+    let frame = control::wait_dispatch(&node, 1).await.remove(0);
+    let op = plan::operation(&frame);
+    control::authorize(&node, id, &frame).await;
+    control::admit(&node, id, &op.operation_id).await;
+    control::ok(
+        &node,
+        id,
+        "human_input",
+        json!({"text":"Verify the new constraint"}),
+    )
+    .await;
+    let generation = control::wait_wake(&node).await["generation"]
+        .as_u64()
+        .unwrap();
+    control::ok(
+        &node,
+        id,
+        "layered_wake_ack",
+        json!({"generation":generation}),
+    )
+    .await;
+    let mut context = plan::next_context(id, &control::snapshot(&node, id).await);
+    context.guidance_only = true;
+    context
+        .human_inputs
+        .push("Verify the new constraint".into());
+    control::ok(&node, id, "layered_context", json!(context)).await;
+    control::wait_phase(&node, id, LayeredPhase::Waiting).await;
+    let sent = control::wait_frames(&node, "layered_guidance", |_| true)
+        .await
+        .remove(0);
+    assert_eq!(sent["guidance"][0]["execution_id"], op.execution_id);
+    assert_eq!(
+        sent["guidance"][0]["message"],
+        "Apply the new human verification constraint now"
+    );
+    assert_eq!(
+        control::actions(&control::frames(&node).await, "layered_guidance"),
+        vec![sent.clone()]
+    );
+    control::ok(
+        &node,
+        id,
+        "layered_guidance_ack",
+        json!({"seq":sent["seq"]}),
+    )
+    .await;
+    assert!(control::actions(&control::frames(&node).await, "layered_guidance").is_empty());
+    node.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn newer_human_input_cancels_an_in_flight_guidance_decision() {
+    let (_config, _home) = isolated_config();
+    let client = Arc::new(HoldSecondDecision::new());
+    let dir = tempfile::tempdir().unwrap();
+    let node = worker(dir.path(), client.clone()).await;
+    let id = "brain-human-correction";
+    create(&node, id).await;
+    control::decide_next_layer(&node, id).await;
+    control::wait_phase(&node, id, LayeredPhase::Waiting).await;
+    control::ok(&node, id, "human_input", json!({"text":"First guidance"})).await;
+    let generation = control::wait_wake(&node).await["generation"]
+        .as_u64()
+        .unwrap();
+    control::ok(
+        &node,
+        id,
+        "layered_wake_ack",
+        json!({"generation":generation}),
+    )
+    .await;
+    let mut context = plan::next_context(id, &control::snapshot(&node, id).await);
+    context.guidance_only = true;
+    context.human_inputs = vec!["First guidance".into()];
+    control::ok(&node, id, "layered_context", json!(context)).await;
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        while client.calls.load(std::sync::atomic::Ordering::SeqCst) < 2 {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    control::ok(
+        &node,
+        id,
+        "human_input",
+        json!({"text":"Replace with second guidance"}),
+    )
+    .await;
+    let generation = control::wait_wake(&node).await["generation"]
+        .as_u64()
+        .unwrap();
+    control::ok(
+        &node,
+        id,
+        "layered_wake_ack",
+        json!({"generation":generation}),
+    )
+    .await;
+    let mut context = plan::next_context(id, &control::snapshot(&node, id).await);
+    context.guidance_only = true;
+    context.human_inputs = vec![
+        "First guidance".into(),
+        "Replace with second guidance".into(),
+    ];
+    control::ok(&node, id, "layered_context", json!(context)).await;
+    let guided = control::wait_phase(&node, id, LayeredPhase::Waiting).await;
+    assert_eq!(guided.run.layer, 1);
+    assert!(client.calls.load(std::sync::atomic::Ordering::SeqCst) >= 3);
+    let events = control::events(&node, id).await;
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| event["event_type"] == "guidance_processed")
+            .count(),
+        1
+    );
     node.shutdown().await.unwrap();
 }
 

@@ -4,10 +4,39 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 from types import SimpleNamespace
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from rolling.io import HttpFailure
-from rolling.probes import candidate_locked, probe_id, public, spec, submit_probe
+from rolling.probes import candidate_locked, probe_id, public, ready, spec, submit_probe
+
+
+class ReadyProbeTests(unittest.TestCase):
+    def test_retired_runtime_error_on_old_host_allows_ready_candidate_host(self):
+        record = {"id": "rel-new", "server_port": 3100, "host_port": 3101,
+                  "runtime_port": 3102}
+
+        class Operations:
+            def http(self, base, path):
+                if path == "/api/nodes":
+                    return {"nodes": [{"id": "node-test", "online": True,
+                                       "snapshot": {"ready": False}}]}
+                if path == "/status":
+                    return {"snapshot": {"ready": True}}
+                if path == "/inventory":
+                    return {"runtime_id": "rel-new", "registration": {"id": "node-test"},
+                            "snapshot": {"ready": True}}
+                if path == "/api/admin/release":
+                    return {"instance_release": "rel-new"}
+                raise AssertionError((base, path))
+
+            def wait(self, check, seconds):
+                self.ready = check()
+
+        operations = Operations()
+        with patch("rolling.probes.resources"):
+            ready(SimpleNamespace(), record, "node-test", operations, 1)
+        self.assertTrue(operations.ready)
 
 
 class LostReply:

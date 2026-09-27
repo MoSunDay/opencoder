@@ -6,7 +6,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { BrainRunEmbed } from './brainRun.jsx';
 import { TodoRunEmbed } from './todoFiles.jsx';
 import { ExecutionView } from '../detail.jsx';
-import { apiGet } from '../../api.js';
+import { apiGet, apiPost } from '../../api.js';
 
 vi.mock('../../api.js', () => ({ apiGet: vi.fn(), apiPost: vi.fn(), apiPut: vi.fn(), apiDel: vi.fn() }));
 vi.mock('../../sse.js', () => ({ openStream: vi.fn(() => ({ abort() {} })) }));
@@ -20,6 +20,20 @@ Range.prototype.getBoundingClientRect=()=>({left:0,right:0,top:0,bottom:0});
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
 describe('执行明细内嵌运行视图', () => {
+  it.each(['agent', 'operator', 'team'])('计划管理的 %s 执行仍可提交引导', async (kind) => {
+    apiGet.mockImplementation(async (path) => path === `/api/executions/${kind}-guided`
+      ? { execution: { id: `${kind}-guided`, kind, status: 'running', created_at: 1 }, request: { kind, input: {} } }
+      : { messages: [] });
+    apiPost.mockResolvedValue({});
+    const onGuidance = vi.fn().mockResolvedValue(true);
+    render(<ExecutionView executionRef={{ id: `${kind}-guided`, kind }} managed allowGuidance onGuidance={onGuidance} onNotice={vi.fn()} />);
+    const input = await screen.findByPlaceholderText('补充信息，由大脑决定后续调度');
+    expect(screen.queryByText('取消（终止）')).toBeNull();
+    fireEvent.change(input, { target: { value: '请补充验证结果' } });
+    fireEvent.click(screen.getByRole('button', { name: '提交给大脑' }));
+    await waitFor(() => expect(onGuidance).toHaveBeenCalledWith('请补充验证结果'));
+    expect(apiPost).not.toHaveBeenCalled();
+  });
   it('brain 明细复用工作台运行主体，但不写 brain_run URL 参数', async () => {
     apiGet.mockImplementation(async (path) => {
       if (path === '/api/brain/runs/brain-1/layered') {

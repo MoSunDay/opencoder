@@ -2,24 +2,24 @@ import { Background, Controls, Handle, MarkerType, MiniMap, Position, ReactFlow,
 import '@xyflow/react/dist/style.css';
 import { Button, Tag } from 'antd';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { capabilityLabel, groups } from './model.js';
+import { capabilityLabel, capabilityName, capabilityTask, groups, transitionLabel } from './model.js';
 import './style.css';
 
 function LayerCard({ data, selected }) {
   return <article className={`brain-layer-box ${selected ? 'selected' : ''}`}>
     <Handle id="forward-in" type="target" position={Position.Top} isConnectable={data.editable} />
-    <Handle id="return-in" type="target" position={Position.Right} isConnectable={data.editable} />
+    <Handle id="return-in" type="target" position={Position.Left} style={{ top: '30%' }} isConnectable={data.editable} />
     <header><Tag>第 {data.index + 1} 层</Tag><strong>{data.layer.title || '新里程碑'}</strong>{data.status && <Tag>{data.status}</Tag>}</header>
-    <p>{data.layer.objective || '点击配置里程碑目标与达成标准'}</p>
+    <p>{data.layer.task || '点击配置里程碑要做什么'}</p>
     {data.editable && <Button className="nodrag" size="small" onClick={(event) => { event.stopPropagation(); data.onAddNode(data.layer.layer_id); }}>＋ 并行执行节点</Button>}
     <Handle id="forward-out" type="source" position={Position.Bottom} isConnectable={data.editable} />
-    <Handle id="return-out" type="source" position={Position.Left} isConnectable={data.editable} />
+    <Handle id="return-out" type="source" position={Position.Left} style={{ top: '70%' }} isConnectable={data.editable} />
   </article>;
 }
 function ExecutionCard({ data, selected }) {
   return <article className={`brain-execution-node ${selected ? 'selected' : ''}`}>
-    <strong>{data.node.title || '新执行节点'}</strong>
-    <p>{data.node.objective || '点击配置执行任务'}</p>
+    <strong>{data.capability ? capabilityName(data.capability) : '选择泛化能力'}</strong>
+    <p>{data.capability ? capabilityTask(data.capability) : '点击绑定能力'}</p>
     <span title={data.capabilityLabel}>{data.capabilityLabel || '选择泛化能力'}</span>
     {data.status && <Tag>{data.status}</Tag>}
   </article>;
@@ -31,7 +31,7 @@ const capabilityLabelFor = (node, capabilities) => {
   const capability = capabilities.find((item) => (item.capability_id || item.id) === node.capability_id);
   return capability ? capabilityLabel(capability) : node.capability_id;
 };
-export function MilestoneCanvas({ plan, capabilities = EMPTY_CAPABILITIES, selection, onSelect, onConnect, onAddLayer, onAddNode, positions = EMPTY, onPositions, statuses = EMPTY, layerStatuses = EMPTY }) {
+export function MilestoneCanvas({ plan, capabilities = EMPTY_CAPABILITIES, selection, onSelect, onConnect, onDeleteConnection, onAddLayer, onAddNode, positions = EMPTY, onPositions, statuses = EMPTY, layerStatuses = EMPTY }) {
   const editable = !!onAddLayer;
   const flow = useRef(null);
   const container = useRef(null);
@@ -51,7 +51,7 @@ export function MilestoneCanvas({ plan, capabilities = EMPTY_CAPABILITIES, selec
       ...children.map((node, column) => ({ id: node.node_id, type: 'execution', parentId: layer.layer_id, extent: 'parent',
         position: { x: 24 + (column % columns) * 228, y: 132 + Math.floor(column / columns) * 140 },
         style: { width: 210, height: 120 }, selected: selection?.type === 'node' && selection.id === node.node_id,
-        data: { node, capabilityLabel: capabilityLabelFor(node, capabilities), status: statuses[node.node_id] }, draggable: false }))];
+        data: { node, capability: capabilities.find((item) => (item.capability_id || item.id) === node.capability_id), capabilityLabel: capabilityLabelFor(node, capabilities), status: statuses[node.node_id] }, draggable: false }))];
     });
   }, [plan, levelGroups.length, capabilities, selection, editable, positions, onAddNode, statuses, layerStatuses]);
   const [nodes, setNodes] = useState(projected);
@@ -66,13 +66,20 @@ export function MilestoneCanvas({ plan, capabilities = EMPTY_CAPABILITIES, selec
   }, []);
   const edges = plan.transitions.map((edge) => {
     const forward = plan.layers.findIndex((item) => item.layer_id === edge.to) > plan.layers.findIndex((item) => item.layer_id === edge.from);
+    const retry = edge.from === edge.to;
+    const labelOffset = retry ? 'translate(20px, -12px)' : 'translate(75px, -12px)';
     return { id: `transition:${edge.from}:${edge.to}`, source: edge.from, target: edge.to,
       sourceHandle: forward ? 'forward-out' : 'return-out', targetHandle: forward ? 'forward-in' : 'return-in',
-      type: 'smoothstep', label: edge.condition || '填写扭转条件', selectable: true,
-      style: { stroke: forward ? '#87a3c2' : '#d77948', strokeWidth: 2 }, markerEnd: { type: MarkerType.ArrowClosed } };
+      type: 'smoothstep', label: retry ? '重试' : transitionLabel(edge.condition), selectable: true,
+      ariaLabel: `${edge.from} → ${edge.to}：${edge.condition || '填写扭转条件'}`,
+      domAttributes: { title: edge.condition || '填写扭转条件' },
+      labelStyle: forward ? undefined : { transform: labelOffset },
+      labelBgStyle: forward ? undefined : { transform: labelOffset },
+      style: { stroke: forward ? '#87a3c2' : retry ? '#8568ab' : '#d77948', strokeWidth: 2, strokeDasharray: retry ? '5 4' : undefined },
+      markerEnd: { type: MarkerType.ArrowClosed } };
   });
   return <div ref={container} className={`brain-milestone-canvas ${editable ? 'is-editable' : ''}`} aria-label="里程碑编辑画布">
-    {editable && <div className="brain-milestone-tools"><Button onClick={onAddLayer}>＋ 里程碑</Button><Button onClick={() => onPositions?.({})}>整理布局</Button><span>连线描述可选流转；每层节点并行执行</span></div>}
+    {editable && <div className="brain-milestone-tools"><Button onClick={onAddLayer}>＋ 里程碑</Button><Button onClick={() => onPositions?.({})}>整理布局</Button>{onDeleteConnection && <Button danger onClick={onDeleteConnection}>删除选中连线</Button>}<span>选中里程碑添加前进或回退连线</span></div>}
     <div className="brain-milestone-flow"><ReactFlow onInit={(instance) => { flow.current = instance; }} nodes={nodes} edges={edges} nodeTypes={nodeTypes} nodesDraggable={editable} nodesConnectable={editable} fitView minZoom={0.15} maxZoom={2}
       onNodesChange={(changes) => setNodes((old) => applyNodeChanges(changes, old))}
       onNodeClick={(_, node) => onSelect?.({ type: node.type === 'layer' ? 'layer' : 'node', id: node.id })}

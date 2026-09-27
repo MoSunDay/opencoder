@@ -172,6 +172,21 @@ describe('creation lanes', () => {
     expect(createHits()[0][1].how_append).toBeUndefined();
   });
 
+  it('Operator mode creates a Codex session with injected env', async () => {
+    const { container } = render(<ChatPanel />);
+    await pick('n1');
+    fireEvent.click(screen.getByRole('button', { name: '启动配置' }));
+    fireEvent.mouseDown(screen.getByLabelText('Operator Harness').closest('.ant-select'));
+    fireEvent.click(await screen.findByText('Codex', { selector: '.ant-select-item-option-content' }));
+    fireEvent.change(screen.getByLabelText('Operator 环境变量'), { target: { value: 'CODEX_HOME=/tmp/codex-login\nNOTE=literal=value' } });
+    fireEvent.click(document.querySelector('.ant-modal-footer .ant-btn-primary'));
+    await send(container, 'codex operator');
+    await waitFor(() => expect(createHits()).toHaveLength(1));
+    expect(createHits()[0][1]).toMatchObject({
+      harness: 'codex', envs: { CODEX_HOME: '/tmp/codex-login', NOTE: 'literal=value' },
+    });
+  });
+
   it('Agent mode creates with kind=agent and the first configured Agent', async () => {
     apiGet.mockImplementation(async (path) => {
       if (path === '/api/nodes') return { nodes };

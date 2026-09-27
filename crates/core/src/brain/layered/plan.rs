@@ -68,6 +68,8 @@ impl LayeredNode {
 pub struct LayeredMilestone {
     pub layer_id: String,
     pub title: String,
+    #[serde(default)]
+    pub task: String,
     pub objective: String,
     pub success_criteria: String,
 }

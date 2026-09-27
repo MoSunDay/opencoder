@@ -1,8 +1,10 @@
-Commit: 48f6127cb5456123c4d083b871cce8b3f7fc527c
+Commit: 24a1081aff7fd8591f860723bae5eb787edf68e9
 
 # brain 模块
 
-能力目录与 schema_version 7 里程碑调度。`layers` 是有序的里程碑容器，分别持有目标和达成标准；`nodes` 通过 `layer_id` 归属一层，每个节点仅绑定一个泛化能力。`transitions` 限定层间出边，Brain 在整层并行执行终态后评估当前层，再从出边决定前进、回退或本层重试。回退开启新轮次，每次激活保留独立执行 ID；能力负责具体任务，大脑负责绑定输入、判断状态与选择下一层。
+能力目录与 schema_version 7 里程碑调度。`layers` 是有序的里程碑容器，必填名称、任务、目标和达成标准；`nodes` 通过 `layer_id` 归属一层，每个节点仅绑定一个泛化能力，节点标题与任务由所选能力生成。`transitions` 限定层间出边，Brain 在整层并行执行终态后评估当前层，再从出边决定前进、回退或本层重试。回退开启新轮次，每次激活保留独立执行 ID；能力负责具体任务，大脑负责绑定输入、判断状态与选择下一层。
+
+运行创建、层屏障和人工输入是决策唤醒事件。人工输入持久化后令当前决策失效并重新组装上下文；层屏障未满足时只允许 `guide`，不能派发下一层。`guide` 可向当前运行中的 Agent/Operator 投递 steer，或让 Team 在下一次成员发问时应用引导，投递事件按序确认并可重放。生产模型激活经 OpenCoder session agent loop，每次唤醒只产生一个有限决策。
 
 - `crates/core/src/brain/layered/`：计划、运行、操作与决策协议。
 - `crates/core/src/brain/capability.rs`：能力描述及输入引用。

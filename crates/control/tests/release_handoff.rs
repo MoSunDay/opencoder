@@ -196,7 +196,7 @@ async fn layered_retry_keeps_original_intent_after_server_handoff() {
     let _scope = opencoder_core::config::scoped_config_home(root.path().join("home"));
     let node = Node::new();
     let old = start(root.path(), node.clone()).await;
-    let request = json!({"id":"brain-release","schema_version":7,"plan":{"schema_version":7,"title":"handoff","objective":"preserve frozen capabilities","nodes":[{"node_id":"work","title":"perform the task","capability_id":"builtin-agent-act","layer_id":"work-layer","objective":"work"}],"layers":[{"layer_id":"work-layer","title":"Work","objective":"work","success_criteria":"verified"}],"transitions":[],"edges":[]}});
+    let request = json!({"id":"brain-release","schema_version":7,"plan":{"schema_version":7,"title":"handoff","objective":"preserve frozen capabilities","nodes":[{"node_id":"work","title":"perform the task","capability_id":"builtin-agent-act","layer_id":"work-layer","objective":"work"}],"layers":[{"layer_id":"work-layer","title":"Work","task":"work","objective":"work","success_criteria":"verified"}],"transitions":[],"edges":[]}});
     let post = |url: String, body: serde_json::Value| {
         client()
             .post(format!("{url}/api/brain/runs"))

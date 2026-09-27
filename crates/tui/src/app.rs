@@ -49,6 +49,7 @@ pub async fn run(opts: &TuiOpts) -> Result<()> {
 
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn run_app(
+    opts: &TuiOpts,
     terminal: &mut Term,
     session: SessionState,
     store: Arc<dyn Store>,
@@ -328,6 +329,7 @@ pub(super) async fn run_app(
 
                                     app_task::switch_session(
                                         pick,
+                                        opts,
                                         &mut cmd_tx,
                                         &mut evt_rx,
                                         &workdir,

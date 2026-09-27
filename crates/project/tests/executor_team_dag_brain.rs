@@ -53,6 +53,9 @@ async fn harness_on(
         dir.path().join("opencoder.json"),
         serde_json::to_vec(&json!({
             "team_root": dir.path().join("team").display().to_string(),
+            // Pin local-memory off (a global ~/.opencoder merge would fire
+            // memory maintenance after act executes and skew call counts).
+            "local_memory": false,
         }))
         .unwrap(),
     )

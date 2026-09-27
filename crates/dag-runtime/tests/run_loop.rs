@@ -171,6 +171,15 @@ async fn fixture(base: &str, tmp: &tempfile::TempDir) -> Fixture {
     let workdir = tmp.path().to_path_buf();
     let store: Arc<dyn opencoder_store::Store> =
         Arc::new(LibsqlStore::open(workdir.join("store.db")).await.unwrap());
+    // Pin the config surface that global-merge would otherwise leak in: a
+    // dev box with `local-memory` enabled in ~/.opencoder would run memory
+    // maintenance after every act step and skew the mock call-count
+    // assertions (same class as the TUI session-switch HOME isolation).
+    std::fs::write(
+        workdir.join("opencoder.json"),
+        br#"{"local_memory": false}"#,
+    )
+    .unwrap();
     let config = opencoder_core::Config::load(&workdir).unwrap();
     Fixture {
         uplink: Arc::new(Uplink::new(base, "test-token").unwrap()),

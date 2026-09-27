@@ -236,7 +236,9 @@ pub fn node_opts(
 
 /// Pin autopilot off via the project domain file so a developer's global
 /// `~/.opencoder/ap.json` cannot append a review turn to the scripted mock
-/// round (same trick as `crates/node/tests`).
+/// round (same trick as `crates/node/tests`). ALSO pins `local_memory` off:
+/// a global `local-memory: true` would run memory maintenance after every
+/// act task (an extra mock call the scripts don't provide → task Error).
 pub fn pin_autopilot_off(workdir: &std::path::Path) {
     std::fs::create_dir_all(workdir.join(".opencoder")).unwrap();
     std::fs::write(
@@ -244,6 +246,7 @@ pub fn pin_autopilot_off(workdir: &std::path::Path) {
         r#"{"mode":"off"}"#,
     )
     .unwrap();
+    std::fs::write(workdir.join("opencoder.json"), r#"{"local_memory": false}"#).unwrap();
 }
 
 /// One SSE unit of the fleet API as the browser sees it.

@@ -1,0 +1,7 @@
+# Deep stacks for every process cargo spawns (rustc, build scripts, and the
+# test binaries themselves): the bundled SQLite query planner's debug-build C
+# frames overflow the 2 MiB libtest/thread default while PREPAREing the
+# subagent-task query (found by the full-workspace gate; 4 MiB suffices,
+# 16 MiB matches the binaries' explicit tokio `thread_stack_size`).
+[env]
+RUST_MIN_STACK = "16777216"

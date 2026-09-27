@@ -37,7 +37,10 @@ async fn app(mock: MockChatClient) -> Ctx {
     .unwrap();
     std::fs::write(
         workdir.join(".opencoder").join("config.json"),
-        json!({"model": "a/big", "small_model": "a/mini"}).to_string(),
+        // local_memory pinned off: a global ~/.opencoder merge would run
+        // memory maintenance after the act task (extra mock round the
+        // two-script fixture never provides).
+        json!({"model": "a/big", "small_model": "a/mini", "local_memory": false}).to_string(),
     )
     .unwrap();
     let mock = Arc::new(mock);

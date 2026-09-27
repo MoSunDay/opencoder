@@ -18,4 +18,5 @@ TUI 在父回合进入最终空闲状态时触发 `turn_done`，在 `question` �
 
 - TUI 单测：`cargo test -p opencoder-tui --lib` → 1728 passed / 0 failed。
 - Clippy：`cargo clippy --workspace --all-targets -- -D warnings` → 零警告。
+- 构建与格式：`cargo build --offline --workspace`、`cargo fmt --all --check` → 通过。
 - 隔离代码快照与空的 `/data00` HOME 下，`cargo test --offline --workspace` → 5605 passed / 0 failed / 8 ignored。快照包含后续的 schema 7 测试、Worker 栈、DAG rootfs 与测试 fixture 修复。

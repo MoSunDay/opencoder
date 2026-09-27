@@ -12,6 +12,7 @@ path = "src/main.rs"
 opencoder-core.workspace = true
 opencoder-brain.workspace = true
 opencoder-llm.workspace = true
+opencoder-session.workspace = true
 anyhow.workspace = true
 clap.workspace = true
 futures.workspace = true

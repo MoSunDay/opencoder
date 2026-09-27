@@ -26,20 +26,22 @@ function assertRelease() {
 }
 async function prepare() {
   const tag = `layered-${Date.now()}`; const marker = `BRAIN-${tag}`;
-  const instruction = `Acceptance only. Do not read or modify files, use tools or network. Reply with ${marker} and finish this task.`;
+  const instruction = `Acceptance only. Do not read or modify files, use tools or network. Include ${marker} in the final output and follow each capability's required response format.`;
+  const leafInstruction = `Acceptance only. Do not read or modify files, use tools or network. Reply with ${marker} and finish this task.`;
   await api('POST', '/api/dag/defs', { spec: { name: tag, description: 'Layered capability acceptance',
-    steps: [{ name: 'analyze', kind: { type: 'agent', prompt: instruction } }] } });
+    steps: [{ name: 'analyze', kind: { type: 'agent', prompt: leafInstruction } }] } });
   await api('POST', '/api/teams', { name: tag, captain: 'act', members: [{ agent: 'act' }, { agent: 'plan' }] });
   await api('POST', '/api/todo/templates', { name: tag, spec: { schema_version: 1, id: tag, name: tag,
     objective: instruction, todos: [{ id: 'echo', title: 'Verify acceptance marker',
-      requirement_background: 'Layered capability integration acceptance', instructions: `${instruction} Put the marker in candidate.result.`,
+      requirement_background: 'Layered capability integration acceptance', instructions: `${leafInstruction} Put the marker in candidate.result.`,
       max_attempts: 1, acceptance: { criteria: `The result contains ${marker}.` } }] } });
   const node = (id, capability, layer = 1) => ({ node_id: id, layer_id: `layer-${layer}`, objective: instruction,
-    title: `${id}: return ${marker} exactly; no tools, files or network.`, capability_id: capability });
+    title: id === 'team' ? `Follow Team JSON decisions; include ${marker} in final_summary.`
+      : `${id}: return ${marker} exactly; no tools, files or network.`, capability_id: capability });
   const plan = (title, nodes) => {
     const count = Math.max(...nodes.map((item) => Number(item.layer_id.slice(6))));
     const layers = Array.from({ length: count }, (_, index) => ({ layer_id: `layer-${index + 1}`, title: `Milestone ${index + 1}`,
-      objective: instruction, success_criteria: `The output includes ${marker}.` }));
+      task: instruction, objective: instruction, success_criteria: `The output includes ${marker}.` }));
     const transitions = layers.slice(1).map((layer, index) => ({ from: layers[index].layer_id, to: layer.layer_id,
       condition: 'The prior milestone is met.' }));
     return { schema_version: 7, title, objective: instruction, inputs: { request: marker }, layers, nodes, transitions, max_rounds: 5 };

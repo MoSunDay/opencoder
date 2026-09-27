@@ -23,7 +23,7 @@ export function readDraft(key, version, storage = localStorage) {
     || !Array.isArray(draft.engineering) || typeof draft.version.plan.title !== 'string' || typeof draft.version.plan.objective !== 'string') throw new Error('浏览器草稿格式无效，原文已保留');
   const plan = draft.version.plan;
   if (!Array.isArray(plan.layers) || !Array.isArray(plan.transitions) || plan.layers.length > 32 || plan.nodes.length > 256 ||
-    plan.layers.some((layer) => ['layer_id', 'title', 'objective', 'success_criteria'].some((field) => typeof layer[field] !== 'string')) ||
+    plan.layers.some((layer) => ['layer_id', 'title', 'objective', 'success_criteria'].some((field) => typeof layer[field] !== 'string') || (layer.task !== undefined && typeof layer.task !== 'string')) ||
     plan.nodes.some((node) => ['node_id', 'layer_id', 'title', 'objective', 'capability_id'].some((field) => typeof node[field] !== 'string')) ||
     plan.transitions.some((edge) => ['from', 'to', 'condition'].some((field) => typeof edge[field] !== 'string'))) throw new Error('浏览器画布草稿格式无效，原文已保留');
   return draft;

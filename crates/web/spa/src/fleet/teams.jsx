@@ -1,4 +1,4 @@
-import { Alert, Button, Form, Input, Modal, Select, Space, Table, Tag } from 'antd';
+import { Alert, Button, Drawer, Form, Input, Modal, Select, Space, Table, Tag } from 'antd';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiGet, apiPost } from '../api.js';
 import { PageShell } from '../shell/pageShell.jsx';
@@ -10,7 +10,7 @@ import { err } from '../notice.js';
 /// 实时成员名单：captain 永远置顶，其余按已选顺序排列，整体按 agent 去重。
 const rosterOf = (captain, members) => [...new Set([captain, ...(members || [])].filter(Boolean))];
 
-export function FleetTeamsPanel({ onNotice }) {
+export function FleetTeamsPanel({ onNotice, onCreated, initialPrompt = '' }) {
   const [rows, setRows] = useState([]); const [nodes, setNodes] = useState([]); const [agents, setAgents] = useState([]);
   const [editing, setEditing] = useState(false); const [launch, setLaunch] = useState(null); const [detail, setDetail] = useState(null);
   const [busy, setBusy] = useState(false); const [form] = Form.useForm(); const [runForm] = Form.useForm(); const attempt = useRef(null);
@@ -44,7 +44,7 @@ export function FleetTeamsPanel({ onNotice }) {
     const signature = JSON.stringify(request);
     if (attempt.current?.signature !== signature) attempt.current = { signature, id: newId('team') };
     setBusy(true);
-    try { const result = await apiPost('/api/executions', { ...request, id: attempt.current.id }); onNotice(err('')); attempt.current = null; setLaunch(null); setDetail(result); }
+    try { const result = await apiPost('/api/executions', { ...request, id: attempt.current.id }); onNotice(err('')); attempt.current = null; setLaunch(null); if (onCreated) onCreated(result.id); else setDetail(result); }
     catch (e) { onNotice(err(`${e.message}；再次启动会继续确认同一执行`)); }
     finally { setBusy(false); }
   };
@@ -75,7 +75,7 @@ export function FleetTeamsPanel({ onNotice }) {
       { title: 'Team', dataIndex: 'name' },
       { title: '成员', render: (_, row) => row.members.map((m) => <Tag key={m.agent}>{m.agent}</Tag>) },
       { title: '队长', dataIndex: 'captain' },
-      { title: '操作', render: (_, row) => <Space><Button onClick={() => edit(row)}>编辑</Button><Button onClick={() => { runForm.resetFields(); setLaunch(row); }}>启动 Team</Button></Space> },
+      { title: '操作', render: (_, row) => <Space><Button onClick={() => edit(row)}>编辑</Button><Button onClick={() => { runForm.resetFields(); runForm.setFieldsValue({ prompt: initialPrompt }); setLaunch(row); }}>启动 Team</Button></Space> },
     ]} />
     <Modal open={editing} onCancel={() => { if (!busy) setEditing(false); }} title="Team 成员" footer={null} width={720}>
       <Form form={form} disabled={busy} onFinish={save} layout="vertical">
@@ -93,14 +93,14 @@ export function FleetTeamsPanel({ onNotice }) {
         <Button type="primary" htmlType="submit" loading={busy} style={{ marginTop: 16 }}>保存 Team</Button>
       </Form>
     </Modal>
-    <Modal open={!!launch} title={`启动 ${launch?.name || ''}`} onCancel={() => setLaunch(null)} footer={null}>
+    <Drawer open={!!launch} title={`启动 ${launch?.name || ''}`} onClose={() => setLaunch(null)} size={560} destroyOnHidden>
       <Form form={runForm} onFinish={run} layout="vertical" initialValues={{ node: '' }}>
         <Alert type="info" showIcon title="整个 Team 会在同一个执行节点内完成，成员不会跨节点运行" style={{ marginBottom: 12 }} />
         <Form.Item name="node" label="执行节点"><Select options={nodeOptions(nodes, 'team')} /></Form.Item>
         <Form.Item name="prompt" label="任务要求" rules={[{ required: true }]}><Input.TextArea rows={5} /></Form.Item>
         <Button type="primary" htmlType="submit" loading={busy}>启动</Button>
       </Form>
-    </Modal>
+    </Drawer>
     {detail && <ExecutionDetail id={detail.id} summary={detail} onClose={() => setDetail(null)} onNotice={onNotice} />}
   </PageShell>;
 }

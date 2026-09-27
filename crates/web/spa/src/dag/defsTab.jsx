@@ -4,7 +4,7 @@
 // Endpoints: GET /api/dag/defs, POST /api/dag/defs, DELETE /api/dag/defs/:id,
 // POST /api/dag/defs/:id/dispatch {node_id?} → {run_id}.
 
-import { Button, Input, Modal, Popconfirm, Select, Space, Table, Tag, Typography } from 'antd';
+import { Button, Drawer, Input, Popconfirm, Select, Space, Table, Tag, Typography } from 'antd';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiDel, apiGet, apiPost } from '../api.js';
 import { TimeText } from '../ui/timeText.jsx';
@@ -232,14 +232,13 @@ export function DefsTab({ onNotice, onDispatched }) {
         onClose={() => setEditorOpen(false)}
         onSave={save}
       />
-      <Modal
+      <Drawer
         title={'派发「' + ((dispatchFor && dispatchFor.name) || '') + '」'}
         open={!!dispatchFor}
-        onOk={dispatch}
-        onCancel={() => setDispatchFor(null)}
-        okText="确认派发"
-        cancelText="取消"
-        confirmLoading={dispatching}
+        onClose={() => setDispatchFor(null)}
+        size={600}
+        destroyOnHidden
+        extra={<Space><Button onClick={() => setDispatchFor(null)}>取消</Button><Button type="primary" loading={dispatching} onClick={dispatch}>确认派发</Button></Space>}
       >
         <Space orientation="vertical" size={8} style={{ width: '100%' }}>
           <Text type="secondary">整个工作流会在同一个节点完成。留空时由服务端选择当前可用节点。</Text>
@@ -254,7 +253,7 @@ export function DefsTab({ onNotice, onDispatched }) {
           />
           <DynamicBatches spec={dispatchFor?.spec} batches={batches} onChange={setBatches} />
         </Space>
-      </Modal>
+      </Drawer>
     </Space>
   );
 }

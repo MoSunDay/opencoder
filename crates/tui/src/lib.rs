@@ -20,6 +20,7 @@ pub mod copy_wrap;
 pub mod file_menu;
 pub mod fmt;
 pub mod frame;
+mod hooks;
 pub mod idle_rekick;
 pub mod image_chunk;
 pub mod image_render;

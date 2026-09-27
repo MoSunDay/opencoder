@@ -277,14 +277,15 @@ function TemplatesTab({ onNotice, onRan }) {
   );
 }
 
-export function TodoPanel({ onNotice }) {
+export function TodoPanel({ onNotice, onCreated }) {
   const [tab, setTab] = useState('templates');
   const [focusWorkflowId, setFocusWorkflowId] = useState('');
 
   const onRan = useCallback((workflowId) => {
     setFocusWorkflowId(workflowId || '');
     setTab('runs');
-  }, []);
+    if (workflowId) onCreated?.(workflowId);
+  }, [onCreated]);
 
   return (
     <Tabs

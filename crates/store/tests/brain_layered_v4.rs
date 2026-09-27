@@ -4,6 +4,7 @@ use opencoder_store::Store;
 
 fn run(phase: LayeredPhase, layer: u32, generation: u64) -> LayeredRun {
     LayeredRun {
+        pending_guidance: false,
         round: 1,
         activation: 0,
         valid_layers: 0,
@@ -25,6 +26,8 @@ fn run(phase: LayeredPhase, layer: u32, generation: u64) -> LayeredRun {
 
 fn event(event_type: &str, run: &LayeredRun) -> LayeredEvent {
     LayeredEvent {
+        user_input: None,
+        guidance: vec![],
         reflection: None,
         assessments: Default::default(),
         assignments: vec![],
@@ -239,7 +242,7 @@ async fn unknown_run_reads_as_none_and_forged_operations_rejected() {
 #[test]
 fn store_schema_version_is_untouched() {
     // v4 tables bootstrap unconditionally, so they must not move the
-    // database watermark: 28 is the release line's own bump (operator config
-    // plane), and a v4-induced bump would fail here.
-    assert_eq!(opencoder_store::libsql_store::schema_watermark(), 28);
+    // database watermark: 29 is the project initiative bump, and a v4-induced
+    // bump would fail here.
+    assert_eq!(opencoder_store::libsql_store::schema_watermark(), 29);
 }

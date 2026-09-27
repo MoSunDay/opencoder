@@ -19,6 +19,42 @@ pub struct Page {
 }
 pub type Command = ExecutionCommand;
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HumanInput {
+    pub text: String,
+}
+
+pub async fn input(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Json(body): Json<HumanInput>,
+) -> Response {
+    let text = body.text.trim();
+    if text.is_empty() || text.len() > 4096 {
+        return error_400("text must contain 1..4096 bytes".into());
+    }
+    let _lock = match state.fleet.request_lock("brain-control", &id).await {
+        Ok(lock) => lock,
+        Err(error) => return error_500(error.to_string()),
+    };
+    let snapshot = match super::read::snapshot(&state, &id).await {
+        Ok(snapshot) if snapshot.schema_version == LAYERED_SCHEMA_VERSION => snapshot,
+        Ok(_) => return response(RpcReply::error(409, "human input requires schema 7")),
+        Err(reply) => return response(reply),
+    };
+    if snapshot.run.phase.terminal() {
+        return response(RpcReply::error(409, "run is terminal"));
+    }
+    let recorded = super::super::runs::call(&state, &id, "human_input", json!({"text":text})).await;
+    if recorded.status >= 300 {
+        return response(recorded);
+    }
+    response(RpcReply::ok(
+        json!({"recorded":true,"phase":recorded.body["run"]["phase"],"delivery":"brain_event"}),
+    ))
+}
+
 pub async fn create(State(state): State<Arc<AppState>>, Json(value): Json<Value>) -> Response {
     response(submit(state, value).await)
 }

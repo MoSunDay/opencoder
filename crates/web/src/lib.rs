@@ -15,6 +15,7 @@ pub mod api_nodes_dag;
 pub mod api_nodes_ops;
 pub mod api_ops;
 pub mod api_project;
+pub mod api_project_initiatives;
 pub mod api_project_runs;
 pub mod api_project_todos;
 pub mod api_project_util;
@@ -428,6 +429,14 @@ pub fn build_app(state: Arc<AppState>, token: Option<String>, web: bool) -> axum
         .route(
             "/api/project/milestones/:id",
             patch(api_project::patch_milestone).delete(api_project::delete_milestone),
+        )
+        .route(
+            "/api/project/initiatives",
+            get(api_project_initiatives::list).post(api_project_initiatives::create),
+        )
+        .route(
+            "/api/project/initiatives/:id",
+            patch(api_project_initiatives::patch).delete(api_project_initiatives::delete),
         )
         .route(
             "/api/project/todos",

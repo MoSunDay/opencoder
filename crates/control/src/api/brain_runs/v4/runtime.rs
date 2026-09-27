@@ -45,7 +45,17 @@ pub async fn wake(state: &Arc<AppState>, run_id: &str) -> Result<Option<u64>> {
             .context("layered summary missing")?;
         summaries.insert(operation.execution_id.clone(), summary);
     }
-    let context = context(state, &snapshot, &request, &capabilities, summaries).await?;
+    let mut context = context(state, &snapshot, &request, &capabilities, summaries).await?;
+    context.guidance_only = !opencoder_brain::layered::barrier(&snapshot);
+    let history = read::events(state, run_id, snapshot.run.last_event_seq)
+        .await
+        .map_err(|reply| anyhow::anyhow!("layered input history: {}", reply.body))?;
+    context.human_inputs = latest(history.iter().filter_map(|event| event.user_input.clone()), 32);
+    context.guidance_notes = latest(
+        history.into_iter().filter(|event| event.event_type == "guidance_processed")
+            .filter_map(|event| event.reason_summary),
+        32,
+    );
     let reply = runs::call(state, run_id, "layered_context", json!(context)).await;
     ensure!(reply.status < 300, "layered activation: {}", reply.body);
     if reply.body["stale"] == true {
@@ -53,6 +63,13 @@ pub async fn wake(state: &Arc<AppState>, run_id: &str) -> Result<Option<u64>> {
     }
     let admitted: LayeredSnapshot = serde_json::from_value(reply.body)?;
     Ok(Some(admitted.run.generation))
+}
+
+fn latest<T>(items: impl Iterator<Item = T>, limit: usize) -> Vec<T> {
+    let mut items: Vec<T> = items.collect();
+    let excess = items.len().saturating_sub(limit);
+    items.drain(..excess);
+    items
 }
 
 /// Dispatchable nodes for the next layer, or the empty context that only

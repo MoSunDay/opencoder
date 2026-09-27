@@ -4,13 +4,12 @@ import { beforeEach, expect, it, vi } from 'vitest';
 import '../../test/setup-dom.js';
 const api = vi.hoisted(() => ({ apiGet: vi.fn(), apiPatch: vi.fn(), apiPost: vi.fn(), apiDel: vi.fn() }));
 vi.mock('../../api.js', () => api);
-vi.mock('../../fleet/detail.jsx', () => ({ ExecutionDetail: () => null }));
+vi.mock('../../fleet/detail.jsx', () => ({ ExecutionView: () => null }));
 import { ProjectPanel } from '../project.jsx';
 import { RelationSelect } from './relationSelect.jsx';
-import { flattenTodos, flattenMilestones, milestoneOptions } from '../model/relations.js';
-import { milestoneCards, ownerLabel } from '../progressPanel.jsx';
+import { flattenTodos, flattenInitiatives, flattenMilestones, groupOptions, initiativeOptions } from '../model/relations.js';
 
-const snapshot = { goals: [], standalone_milestones: [{ id: 'm1', goal_id: null, title: '独立专项', status: 'planned', todos: [
+const snapshot = { goals: [], standalone_initiatives: [{ id: 'm1', goal_id: null, title: '独立专项', status: 'planned', todos: [
   { id: 't1', title: '专项任务', draft: 'd', status: 'draft', milestone_id: 'm1' },
 ] }], backlog: [{ id: 't2', title: '独立任务', draft: 'd', status: 'draft' }] };
 const button = (label) => [...document.querySelectorAll('button')].find((b) => b.textContent.replace(/\s/g, '') === label);
@@ -18,23 +17,29 @@ beforeEach(() => { Object.values(api).forEach((fn) => fn.mockReset()); api.apiGe
 
 it('projects, selectors and rollups include independent work exactly once', () => {
   expect(flattenTodos(snapshot).map((t) => t.id)).toEqual(['t1', 't2']);
-  expect(flattenMilestones(snapshot)).toHaveLength(1);
-  expect(milestoneCards(snapshot)[0]).toMatchObject({ total: 1, goal_title: '独立专项' });
-  expect(ownerLabel(flattenTodos(snapshot)[0])).toBe('独立专项');
-  expect(milestoneOptions(snapshot)[0]).toMatchObject({ value: 'm1' });
+  expect(flattenInitiatives(snapshot)).toHaveLength(1);
+  expect(flattenInitiatives(snapshot)[0].todos).toHaveLength(1);
+  expect(initiativeOptions(snapshot)[0]).toMatchObject({ value: 'm1' });
 });
 
-it('creates a standalone milestone without any project and navigates its TODO list', async () => {
+it('keeps milestone and initiative selectors separate while offering both to TODOs', () => {
+  const groups = {
+    goals: [{ id: 'p1', title: '项目', milestones: [{ id: 'm1', title: '阶段' }], initiatives: [{ id: 'i1', title: '专项' }] }],
+    standalone_milestones: [], standalone_initiatives: [], backlog: [],
+  };
+  expect(flattenMilestones(groups).map((item) => item.id)).toEqual(['m1']);
+  expect(flattenInitiatives(groups).map((item) => item.id)).toEqual(['i1']);
+  expect(groupOptions(groups).map((item) => item.value)).toEqual(['m1', 'i1']);
+});
+
+it('creates a standalone initiative without any project and navigates its TODO list', async () => {
   render(<ProjectPanel onNotice={vi.fn()} />);
-  fireEvent.click(screen.getByRole('tab', { name: '里程碑' }));
+  fireEvent.click(screen.getByRole('tab', { name: '专项' }));
   await screen.findByText('独立专项', { exact: true });
-  fireEvent.click(button('新建里程碑'));
+  fireEvent.click(button('新建专项'));
   fireEvent.change(screen.getByPlaceholderText('一句话标题'), { target: { value: '新独立专项' } });
   fireEvent.click(button('保存'));
-  await waitFor(() => expect(api.apiPost).toHaveBeenCalledWith('/api/project/milestones', expect.objectContaining({ title: '新独立专项', goal_id: null })));
-  // jsdom does not complete CSS transitions; the leave state proves the save closed it.
-  await waitFor(() => expect(document.querySelector('.ant-modal')?.className).toContain('leave'));
-  fireEvent.animationEnd(document.querySelector('.ant-modal'));
+  await waitFor(() => expect(api.apiPost).toHaveBeenCalledWith('/api/project/initiatives', expect.objectContaining({ title: '新独立专项', goal_id: null })));
   fireEvent.click(button('1条TODO'));
   await screen.findByText('专项任务', { exact: true });
   expect(screen.queryByText('独立任务', { exact: true })).toBeNull();

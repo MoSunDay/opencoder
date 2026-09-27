@@ -96,8 +96,10 @@ mod tests {
                     usage: None,
                 }]),
             );
-            let mut config = Config::default();
-            config.local_memory = true;
+            let config = Config {
+                local_memory: true,
+                ..Config::default()
+            };
             let mut parent = SessionState::new(
                 "main-memory-test",
                 resolve_agent("act").unwrap(),

@@ -2,6 +2,15 @@
 use super::*;
 
 pub(super) async fn migrate(conn: &Connection, from: i64) -> Result<()> {
+    if from < 29 {
+        add_column_if_absent(
+            conn,
+            "project_milestones",
+            "kind",
+            "TEXT NOT NULL DEFAULT 'milestone'",
+        )
+        .await?;
+    }
     if from < 24 {
         add_column_if_absent(conn, "messages", "provider_state_json", "TEXT").await?;
     }

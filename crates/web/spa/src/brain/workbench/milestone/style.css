@@ -4,6 +4,8 @@
 .brain-milestone-canvas { position:relative; flex:1; min-width:0; height:100%; min-height:580px; background:#f6f8fb; }
 .brain-layer-box { box-sizing:border-box; width:100%; height:100%; border:2px solid #91a8c4; border-radius:18px; padding:18px; background:#eaf0f8; box-shadow:0 5px 22px #23364e15; }
 .brain-layer-box.selected { border-color:#1677ff; box-shadow:0 0 0 3px #1677ff25; }
+.brain-milestone-canvas.is-editable .brain-layer-box > .react-flow__handle { width:16px; height:16px; border:2px solid white; background:#1677ff; z-index:10; cursor:crosshair; }
+.brain-milestone-canvas.is-editable .brain-layer-box > .react-flow__handle:hover { width:20px; height:20px; background:#0958d9; }
 .brain-layer-box header { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
 .brain-layer-box strong { font-size:16px; overflow-wrap:anywhere; }
 .brain-layer-box p { margin:8px 0 10px; max-height:42px; overflow:hidden; color:#52637b; }
@@ -19,6 +21,13 @@
 .brain-milestone-inspector .ant-select { width:100%; }
 .brain-milestone-inspector section { padding:10px 0; border-top:1px solid #e4e9ef; }
 .brain-milestone-preview { height:580px; }
+.brain-run-status { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+.brain-human-input { margin:16px 0; padding:16px; border:1px solid #d9e2ee; border-radius:10px; background:#fbfcff; }
+.brain-input-count { font-size:12px; color:#63758d; }
+.brain-input-count.over-limit { color:#cf1322; }
+.brain-human-message { padding:8px 10px; border-radius:8px; background:#edf3fb; overflow-wrap:anywhere; }
+.brain-run-details .ant-table-cell { overflow-wrap:anywhere; }
+.brain-run-details .ant-btn-link { padding-inline:0; text-align:left; white-space:normal; height:auto; }
 @media(max-width:800px) { .brain-method-toolbar { flex-wrap:wrap; } .brain-method-toolbar > .ant-space { flex-wrap:wrap; } .brain-method-workspace { flex-direction:column; overflow:auto; } .brain-milestone-inspector { width:auto; max-height:420px; flex-shrink:0; } .brain-milestone-canvas { flex-shrink:0; } .brain-milestone-tools > span { display:none; } .brain-milestone-canvas .react-flow__minimap { display:none; } }
 
 .brain-milestone-flow { position:absolute; inset:0; }

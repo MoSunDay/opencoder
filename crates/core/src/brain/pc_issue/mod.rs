@@ -41,7 +41,7 @@ pub fn plan() -> Value {
     ];
     json!({"schema_version":7,"title":"PC 问题诊断与修复","objective":"从原始文本和图片出发，以当前源码及 Windows 运行证据定位问题；必要时隔离修复、Team 构建并复测。执行结束不等于产品修复成功。禁止自动合并或发布产品。证据不足时允许以明确未解决结论完成报告，禁止虚构成功。",
         "inputs":{"problem":{"text":"","images":[]},"settings":{"workspace":"/data00/workspace","helper":"/opt/opencoder-pc-issue/current/cli.py","device_node":"","build_node":"","max_repair_rounds":2}},
-        "layers":STAGES.iter().enumerate().map(|(i,s)|json!({"layer_id":s,"title":titles[i],"objective":objectives[i],"success_criteria":"以宿主接受的 pc-issue.stage/v1 报告完成里程碑。incomplete、blocked、not_needed、not_reproduced、unresolved 是有效产品结论，不能因此把已完成的报告判为里程碑失败；应向前传递缺口，直至最终报告。"})).collect::<Vec<_>>(),
+        "layers":STAGES.iter().enumerate().map(|(i,s)|json!({"layer_id":s,"title":titles[i],"task":objectives[i],"objective":objectives[i],"success_criteria":"以宿主接受的 pc-issue.stage/v1 报告完成里程碑。incomplete、blocked、not_needed、not_reproduced、unresolved 是有效产品结论，不能因此把已完成的报告判为里程碑失败；应向前传递缺口，直至最终报告。"})).collect::<Vec<_>>(),
         "nodes":STAGES.iter().enumerate().map(|(i,s)|json!({"node_id":s,"layer_id":s,"title":titles[i],"objective":objectives[i],"capability_id":format!("pc-issue-{s}")})).collect::<Vec<_>>(),
         "transitions":STAGES.windows(2).map(|pair|json!({"from":pair[0],"to":pair[1],"condition":"当前里程碑已达标，进入下一里程碑"})).chain(std::iter::once(json!({"from":"verify","to":"repair","condition":"复测失败且存在可执行修复、轮次预算尚有余量"}))).collect::<Vec<_>>(),
         "edges":[],"max_rounds":2})

@@ -104,21 +104,22 @@ describe('导航选择持久化（项目 / Agent / 节点）', () => {
     // usehooks-ts 的 JSON 序列化形状（引号内为页面键）。
     expect(localStorage.getItem(NAV_STORAGE_KEY)).toBe(JSON.stringify('project'));
 
-    fireEvent.click(screen.getByRole('menuitem', { name: /进展/ })); // 分类内换页同样记录
-    expect(getState().page).toBe('progress');
-    expect(localStorage.getItem(NAV_STORAGE_KEY)).toBe(JSON.stringify('progress'));
+    fireEvent.click(sider.getByText('Agent'));
+    fireEvent.click(screen.getByRole('menuitem', { name: /DAG 工作流/ }));
+    expect(getState().page).toBe('dag');
+    expect(localStorage.getItem(NAV_STORAGE_KEY)).toBe(JSON.stringify('dag'));
   });
 
   it('重新挂载后恢复上次的分类与页面选择', async () => {
     setCredentials('smoke-token', '');
-    localStorage.setItem(NAV_STORAGE_KEY, JSON.stringify('progress'));
+    localStorage.setItem(NAV_STORAGE_KEY, JSON.stringify('dag'));
     render(<App />);
     // 恢复发生在首帧绘制前：store page 回位，菜单高亮与移动端 Select 同步。
-    expect(getState().page).toBe('progress');
-    expect(screen.getByRole('menuitem', { name: /进展/ }).classList.contains('ant-menu-item-selected')).toBe(true);
+    expect(getState().page).toBe('dag');
+    expect(screen.getByRole('menuitem', { name: /DAG 工作流/ }).classList.contains('ant-menu-item-selected')).toBe(true);
     // antd 6: aria-label 落在内部 input，可见标签在 .ant-select-content。
     const pageNav = screen.getByLabelText('页面导航').closest('.ant-select-content');
-    expect(pageNav.textContent).toContain('进展');
+    expect(pageNav.textContent).toContain('DAG 工作流');
   });
 
   it('陌生或损坏的存储值回退默认页（nodes）', async () => {

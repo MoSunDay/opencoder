@@ -1,4 +1,4 @@
-// markdown.jsx — project-module markdown renderer (goal/milestone detail,
+// markdown.jsx — project-module markdown renderer (project/initiative detail,
 // plan_md, run snapshots). This is the SPA's ONLY dangerouslySetInnerHTML
 // sink: marked GFM output is sanitized through DOMPurify before rendering
 // (defense in depth), so even if user- or LLM-authored content carries

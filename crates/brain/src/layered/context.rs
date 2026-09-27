@@ -27,6 +27,9 @@ pub fn layer_context(
         capabilities.insert(id.to_owned(), cap.clone());
     }
     Ok(LayeredContext {
+        guidance_only: false,
+        guidance_notes: vec![],
+        human_inputs: vec![],
         run: Some(snapshot.run.clone()),
         schema_version: LAYERED_SCHEMA_VERSION,
         run_id: snapshot.run.run_id.clone(),

@@ -24,6 +24,7 @@ const GOAL_COLUMNS: &str = "\
 
 const MILESTONE_COLUMNS: &str = "\
   id VARCHAR(64) NOT NULL,
+  kind VARCHAR(32) NOT NULL DEFAULT 'milestone',
   goal_id VARCHAR(64) NULL,
   title VARCHAR(512) NOT NULL,
   detail_md {text} NULL,
@@ -66,6 +67,11 @@ const RUN_COLUMNS: &str = "\
   output_ref VARCHAR(255) NULL,
   input_snapshot {text} NULL,
   trace_manifest {text} NULL";
+const TODO_EXECUTION_COLUMNS: &str = "\
+  id VARCHAR(255) NOT NULL,
+  todo_id VARCHAR(64) NOT NULL,
+  execution_id VARCHAR(128) NOT NULL,
+  created_at BIGINT NOT NULL";
 
 /// `(table, columns, secondary-index clause)`; the index clause is MySQL-only.
 const TABLES: &[(&str, &str, &str)] = &[
@@ -85,6 +91,11 @@ const TABLES: &[(&str, &str, &str)] = &[
         RUN_COLUMNS,
         "KEY idx_project_todo_runs_todo (todo_id, version)",
     ),
+    (
+        "project_todo_executions",
+        TODO_EXECUTION_COLUMNS,
+        "KEY idx_project_todo_executions_todo (todo_id)",
+    ),
 ];
 
 /// Columns added after the initial table shape (the executor dimension):
@@ -93,6 +104,10 @@ const TABLES: &[(&str, &str, &str)] = &[
 /// Definitions MUST mirror the CREATE TABLE column consts above — the
 /// drift test below enforces the names line up.
 const UPGRADE_COLUMNS: &[(&str, &[&str])] = &[
+    (
+        "project_milestones",
+        &["kind VARCHAR(32) NOT NULL DEFAULT 'milestone'"],
+    ),
     (
         "project_todos",
         &[
@@ -152,7 +167,7 @@ fn create_table(name: &str, columns: &str, index: &str, starrocks: bool) -> Stri
     }
 }
 
-/// Apply the four `CREATE TABLE IF NOT EXISTS` statements sequentially.
+/// Apply project `CREATE TABLE IF NOT EXISTS` statements sequentially.
 pub async fn apply(pool: &MySqlPool, starrocks: bool) -> Result<()> {
     for (name, columns, index) in TABLES {
         let sql = create_table(name, columns, index, starrocks);
@@ -340,7 +355,10 @@ mod tests {
 
     #[test]
     fn missing_columns_drives_idempotent_upgrade_shape() {
-        let (todos, todo_cols) = &UPGRADE_COLUMNS[0];
+        let (todos, todo_cols) = UPGRADE_COLUMNS
+            .iter()
+            .find(|(table, _)| *table == "project_todos")
+            .unwrap();
         assert_eq!(*todos, "project_todos");
         // Everything already present (fresh deployment after `apply`):
         // nothing to ALTER — the idempotent no-op.

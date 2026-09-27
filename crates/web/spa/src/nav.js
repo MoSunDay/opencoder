@@ -2,9 +2,8 @@
 // architecture (IA): three top categories (项目 / Agent / 节点), each owning
 // an ordered page list. The Sider renders a category Segmented above a Menu
 // scoped to the active category; the active category is PURELY derived from
-// the store `page` (no extra global navigation state). Appending a page
-// (iteration 4 adds 进展 / Owner 视角 under project) is one new row in
-// `items` — every consumer below is a pure function over that data.
+// the store `page` (no extra global navigation state). `items` is the single
+// source for every navigation consumer below.
 
 import { createElement } from 'react';
 import {
@@ -12,8 +11,6 @@ import {
   ClockCircleOutlined,
   ClusterOutlined,
   DeploymentUnitOutlined,
-  EyeOutlined,
-  FundViewOutlined,
   MessageOutlined,
   ProfileOutlined,
   ProjectOutlined,
@@ -31,8 +28,6 @@ export const NAV_CATEGORIES = [
     label: '项目',
     items: [
       { page: 'project', menu: '项目', icon: ProjectOutlined },
-      { page: 'progress', menu: '进展', icon: FundViewOutlined },
-      { page: 'ownerview', menu: 'Owner 视角', icon: EyeOutlined },
     ],
   },
   {
@@ -104,14 +99,12 @@ export const HEADERLESS_REASONS = {
 export const HEADERLESS_PAGES = Object.keys(HEADERLESS_REASONS);
 
 /// Per-page header copy for the pages whose panel actually mounts PageShell
-/// with its own key (project / progress / ownerview): pageShell.jsx renders
+/// with its own key: pageShell.jsx renders
 /// title + desc from here. An entry no panel renders is dead copy — the
 /// header contract test mounts every panel and fails on it, so this map
 /// stays truthful.
 export const PAGE_META = {
-  project: { title: '项目', desc: '目标、里程碑与 TODO 的用户策展跟踪' },
-  progress: { title: '进展', desc: '里程碑进度、进行中 TODO 与最近项目执行' },
-  ownerview: { title: 'Owner 视角', desc: '按目标分组的健康度与待人工介入事项' },
+  project: { title: '项目', desc: '项目、专项与 TODO 工作台' },
 };
 
 /// Category lookup with the default as the safety net (unknown keys never

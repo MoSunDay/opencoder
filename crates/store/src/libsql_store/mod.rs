@@ -18,6 +18,7 @@ mod node_state;
 mod node_tasks;
 mod nodes;
 mod project;
+mod project_links;
 mod project_runs;
 mod schedule;
 pub(crate) mod schema;

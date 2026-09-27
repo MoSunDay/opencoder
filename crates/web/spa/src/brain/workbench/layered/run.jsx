@@ -89,6 +89,8 @@ function LegacyRunBody({ view, id, connection, refresh, onNotice }) {
 }
 
 export function LayeredRunBody(props) {
-  return <><ProblemView problem={props.view.problem} /><ProblemResults results={props.view.problem_results} />
-    {props.view.schema_version >= 5 ? <MilestoneRunBody {...props} /> : <LegacyRunBody {...props} />}</>;
+  return props.view.schema_version >= 5 ? <MilestoneRunBody {...props} /> : <>
+    <ProblemView problem={props.view.problem} /><ProblemResults results={props.view.problem_results} />
+    <LegacyRunBody {...props} />
+  </>;
 }

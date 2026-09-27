@@ -1,4 +1,4 @@
-Commit: f2d723ed2a32a5a394eac05f58bc5558e7cfe08f
+Commit: 2aa44247d199d782881b9ee64921c4c6de2e6199
 
 # local 模块
 
@@ -8,6 +8,7 @@ Commit: f2d723ed2a32a5a394eac05f58bc5558e7cfe08f
 ## 索引
 - `src/lib.rs` — clap `Cli` 与子命令
 - `src/run.rs` — `run_headless` 主入口
+- `src/daemon.rs` — `daemon --server/--client` 迁移提示：指向 `opencoder-server`/`opencoder-agent`；凭据一律不回显，显式 token 时提示 `--token-file`
 - `src/ts/` — tmux 会话与中央注册表
 - `src/todos_cmd.rs` — todos 子命令
 - 仓库根 `src/main.rs` — 二进制 `opencoder` 入口

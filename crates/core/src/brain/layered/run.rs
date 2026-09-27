@@ -49,6 +49,8 @@ impl LayeredOperationStatus {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct LayeredRun {
+    #[serde(default)]
+    pub pending_guidance: bool,
     #[serde(default = "first_round")]
     pub round: u32,
     #[serde(default)]
@@ -104,6 +106,10 @@ pub struct LayeredOperation {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct LayeredEvent {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user_input: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub guidance: Vec<super::LayeredGuidance>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reflection: Option<String>,
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]

@@ -350,6 +350,38 @@ function usageOf(data) {
   return { input, output, total, contextWindow: window };
 }
 
+/// Fold one llm_usage frame into the running footer usage. The footer is a
+/// session-lifetime accumulator (TUI `[tok cost]` parity: every provider
+/// round adds in; rounds without usage contribute nothing and keep an
+/// absent footer absent).
+function accumulateUsage(current, data) {
+  const frame = usageOf(data);
+  if (!frame.input && !frame.output && !frame.total) {
+    return current;
+  }
+  if (!current) {
+    return frame;
+  }
+  return {
+    input: current.input + frame.input,
+    output: current.output + frame.output,
+    total: current.total + frame.total,
+    contextWindow: frame.contextWindow || current.contextWindow,
+  };
+}
+
+/// Snapshot → footer usage. The server aggregate (`usage`, derived from the
+/// event log) is the only reload source for child spend — task-tool
+/// subagents and local-memory maintenance rounds never land on a parent
+/// message row. Absent/zero → per-message fallback (legacy sessions).
+export function usageFromSnapshot(snapshot, messages) {
+  const u = snapshot && snapshot.usage;
+  if (u && (num(u.total_tokens) || num(u.input_tokens) || num(u.output_tokens))) {
+    return usageOf(u);
+  }
+  return usageFromMessages(messages);
+}
+
 /// Fold one SSE frame ({event, data}) into the stream state. `nowMs` is
 /// injected (purity): tool duration falls back to arrival-time delta when the
 /// frames carry no duration field (none do today — verified in runner/event.rs).
@@ -474,7 +506,7 @@ function foldFrame(state, frame, nowMs) {
       return withTurns(state, turns);
     }
     case 'llm_usage':
-      return { ...state, usage: usageOf(data) };
+      return { ...state, usage: accumulateUsage(state.usage, data) };
     case 'queue_consumed':
     case 'steer_consumed': {
       const text = typeof data.text === 'string' ? data.text : '';
@@ -562,7 +594,13 @@ function foldFrame(state, frame, nowMs) {
         usage: child.usage || t.usage,
         status: child.status === 'done' || child.status === 'error' ? child.status : t.status,
       };
-      return withTurns(state, turns);
+      // Child cost lands on the main task as well (TUI parity: the live
+      // footer folds every child round, and a reload recovers the same
+      // spend from the snapshot's event-log aggregate).
+      const usage = nested.event === 'llm_usage'
+        ? accumulateUsage(state.usage, nested.data)
+        : state.usage;
+      return withTurns({ ...state, usage }, turns);
     }
     case 'subagent_end': {
       const idx = subagentIndex(state.turns, data.id);
@@ -711,14 +749,14 @@ export function ensurePendingEcho(turns, echo) {
 /// releases busy instead of latching 'streaming' forever. The in-flight
 /// turn's partial text truncates at the watermark (its message row lands
 /// only at turn end) and converges on the done → snapshot reload. Pure.
-export function resyncState({ messages, draining, headSeq, pendingEcho }) {
+export function resyncState({ messages, draining, headSeq, pendingEcho, usage }) {
   const msgs = Array.isArray(messages) ? messages : [];
   const echo = typeof pendingEcho === 'string' ? pendingEcho : null;
   return {
     ...emptyStream(),
     status: draining ? 'streaming' : 'done',
     turns: ensurePendingEcho(turnsFromMessages(msgs), echo),
-    usage: usageFromMessages(msgs),
+    usage: usageFromSnapshot({ usage }, msgs),
     applySeq: Number.isFinite(headSeq) ? headSeq : null,
     pendingEcho: draining ? echo : null,
   };

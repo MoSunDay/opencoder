@@ -336,3 +336,41 @@ fn is_sidecar_frame_marks_exactly_the_sidecar_variants() {
     ];
     assert!(keep.iter().all(|e| !e.is_sidecar_frame()));
 }
+
+/// `from_stored` must round-trip both persisted payload encodings: the SSE
+/// wire form the sink/TUI worker/web flusher write (`sse_kind` + `sse_data`)
+/// and the whole-event `serde` form `resume.rs` writes.
+#[test]
+fn from_stored_parses_sse_form_and_enum_form_rows() {
+    let mk =
+        |sse_kind: Option<&str>, payload: serde_json::Value| opencoder_store::SessionEventRecord {
+            session_id: "s".into(),
+            kind: opencoder_store::EventKind::Step,
+            payload,
+            ts: 1,
+            seq: None,
+            sse_kind: sse_kind.map(str::to_string),
+        };
+    let ev = SessionEvent::SubagentChild {
+        id: "m1".into(),
+        ev: Box::new(SessionEvent::LlmUsage {
+            total_tokens: 1234,
+            input_tokens: 1000,
+            output_tokens: 234,
+        }),
+    };
+    // Production sink row: SSE form.
+    let sse_row = mk(Some(ev.sse_kind()), ev.sse_data());
+    let sse_back = SessionEvent::from_stored(&sse_row).expect("sse row parses");
+    assert_eq!(
+        serde_json::to_value(&sse_back).unwrap(),
+        serde_json::to_value(&ev).unwrap()
+    );
+    // `resume.rs` row: enum form, sse_kind still tagged.
+    let enum_row = mk(Some(ev.sse_kind()), serde_json::to_value(&ev).unwrap());
+    let enum_back = SessionEvent::from_stored(&enum_row).expect("enum row parses");
+    assert_eq!(
+        serde_json::to_value(&enum_back).unwrap(),
+        serde_json::to_value(&ev).unwrap()
+    );
+}

@@ -2,7 +2,7 @@
 import { useCallback } from 'react';
 import { apiGet } from '../api.js';
 import { openStream } from '../sse.js';
-import { emptyStream, ensurePendingEcho, reduceFrame, resyncState, turnsFromMessages, usageFromMessages } from '../reduce.js';
+import { emptyStream, ensurePendingEcho, reduceFrame, resyncState, turnsFromMessages, usageFromSnapshot } from '../reduce.js';
 import { err } from '../notice.js';
 
 export function useTranscriptStream({ streamRef, aliveRef, setStream, setBusy, setConnecting, setQueueVersion, onNotice, selectionRef }) {
@@ -25,7 +25,7 @@ export function useTranscriptStream({ streamRef, aliveRef, setStream, setBusy, s
           // pendingEcho; on the done path it is already null and the snapshot
           // itself carries the echo → no-op, behavior unchanged.
           turns: ensurePendingEcho(turnsFromMessages(msgs), s.pendingEcho),
-          usage: usageFromMessages(msgs),
+          usage: usageFromSnapshot(j, msgs),
         }));
       }
     } catch (e) {

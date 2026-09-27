@@ -9,6 +9,7 @@ Commit: 1afd5d4375cd10885aee335d3d9dbf9d396bb563
 - `src/lib.rs` — `Store` trait
 - `src/libsql_store/` — libsql 实现（WAL）
 - `src/libsql_store/sessions.rs` — 会话批删（FK 级联）；`node_tasks.rs` — 节点任务与终态清扫
+- `events_of_kinds`（trait 默认实现 + libsql SQL 覆写）— 按 `sse_kind` 取事件行子集（如 `llm_usage`+`subagent_child` 汇总生命周期用量、`subagent_*` 重建 memory 块），避免全量 delta 扫描；未打 `sse_kind` 的存量行不匹配
 - `src/types.rs` — `SessionMeta.kind` 泳道标签（schema v28 起 `sessions.kind TEXT`；创建时定值：`operator`/`agent`/`team`/`dag`/`todos`/`project`/`brain`，存量行为 NULL）
 - `src/libsql_store/sessions.rs` 泳道栅栏 — `SessionFilter.kind=None` 的默认清单排除 `kind='operator'`（`s.kind IS NULL OR s.kind <> 'operator'`），精确泳道用 `s.kind = ?`；存量 NULL 行仍走 id 前缀/标题回退
 - `src/schedule_types.rs`、`src/libsql_store/schedule.rs` — 调度台账与定义表（schema v26/v27）

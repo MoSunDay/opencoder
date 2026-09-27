@@ -15,6 +15,7 @@ ratatui + crossterm 交互界面。细节以代码为准。
 - `src/notepad/` — 全屏文件树 + vim 编辑器
 - `src/vim/` — vim 引擎
 - `src/ts_mirror.rs` — tmux 会话冷启动恢复
+- `src/session_ui/memory_replay.rs` — 恢复时从父会话事件行重建 local-memory 维护块（无子会话行的唯一痕迹源），维护用量折回父视图 `[tok cost]`（`replay_into_chat` 按时间锚点交错进消息流）
 - `tests/` — 集成测试（agent_menu_catalog / agent_mention_flow /
   agent_switch_persist / bootstrap_agent_override 等）
 

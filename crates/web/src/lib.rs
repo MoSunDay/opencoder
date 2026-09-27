@@ -38,12 +38,14 @@ mod handle_questions;
 pub mod html;
 pub mod nfs_exports;
 pub mod nodes_state;
+pub mod snapshot;
 pub mod sse_dag;
 pub mod sse_dedup;
 pub mod sse_nodes;
 pub mod team_hub;
 pub mod team_state;
 pub mod todo_hub;
+pub mod usage_totals;
 
 use std::sync::Arc;
 

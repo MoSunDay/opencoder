@@ -252,6 +252,15 @@ macro_rules! store_implementation_0 {
         let conn = self.conn().await?;
         events::last_seq(&conn, session_id).await
     }
+    async fn events_of_kinds(
+        &self,
+        session_id: &str,
+        kinds: &[&str],
+    ) -> Result<Vec<SessionEventRecord>> {
+        let _guard = self.db_lock.lock().await;
+        let conn = self.conn().await?;
+        events::of_kinds(&conn, session_id, kinds).await
+    }
 
     async fn dag_step_snapshot(
         &self,

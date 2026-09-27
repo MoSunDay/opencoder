@@ -330,7 +330,12 @@ pub async fn replay_into_chat(
     // replay. Data URIs are handled inline by `render_image_from_url`.
     let prefetched = prefetch_image_bytes(messages).await;
 
-    for msg in messages {
+    // Local-memory maintenance runs: no `SubagentTaskRecord` and no child
+    // rows exist (store-less context copy), so they rebuild from the
+    // parent's own persisted `subagent_*` frames instead.
+    let mut memory = super::memory_replay::memory_runs(store, session_id).await;
+
+    for (idx, msg) in messages.iter().enumerate() {
         replay_one(&mut chat, msg, &prefetched);
         // Interleave child blocks under their parent assistant message.
         if msg.role == Role::Assistant {
@@ -341,11 +346,30 @@ pub async fn replay_into_chat(
                 }
             }
         }
+        // A maintenance run fired right after the task's last message:
+        // flush every run anchored before the NEXT message's timestamp
+        // (all of them when this is the final message) so blocks land in
+        // the same slot the live stream put them. A tie with the next
+        // message's timestamp waits for that message — visually identical,
+        // never before the task it followed.
+        let boundary = messages.get(idx + 1).map(|next| next.created_at);
+        while memory
+            .first()
+            .is_some_and(|run| boundary.is_none_or(|b| run.anchor_ts < b))
+        {
+            let run = memory.remove(0);
+            push_subagent_block(&mut chat, run.block);
+        }
     }
 
     for task in orphan_tasks {
         let block = build_subagent_block(&task, store).await;
         push_subagent_block(&mut chat, block);
+    }
+    // Tail runs anchored at/after the last message (the newest task's
+    // maintenance) close the transcript, after any orphan task blocks.
+    for run in memory.drain(..) {
+        push_subagent_block(&mut chat, run.block);
     }
 
     // Fold replayed blocks into the step model: trailing `Thinking` runs

@@ -293,7 +293,7 @@ describe('deltaTextOf/withUserTurn', () => {
   });
 });
 
-import { usageFromMessages } from './reduce.js';
+import { usageFromMessages, usageFromSnapshot } from './reduce.js';
 
 describe('usageFromMessages (store snapshot → footer)', () => {
   it('sums per-message usage from the wire shape', () => {
@@ -527,5 +527,57 @@ describe('resyncState (snapshot rebuild at the watermark)', () => {
     const s = resyncState({ messages: [], draining: true });
     expect(s.applySeq).toBe(null);
     expect(s.turns).toEqual([]);
+  });
+});
+
+describe('footer usage accumulation (lifetime cost, TUI parity)', () => {
+  it('accumulates llm_usage frames instead of replacing with the latest round', () => {
+    let s = emptyStream();
+    s = reduceFrame(s, { event: 'llm_usage', data: { input_tokens: 900, output_tokens: 100, total_tokens: 1000 } }, 0);
+    s = reduceFrame(s, { event: 'llm_usage', data: { input_tokens: 200, output_tokens: 50, total_tokens: 250 } }, 1);
+    expect(s.usage).toMatchObject({ input: 1100, output: 150, total: 1250 });
+  });
+
+  it('keeps an absent footer absent for zero-usage rounds', () => {
+    const s = reduceFrame(emptyStream(), { event: 'llm_usage', data: { input_tokens: 0, output_tokens: 0, total_tokens: 0 } }, 0);
+    expect(s.usage).toBeNull();
+  });
+
+  it('folds subagent/memory child rounds into the parent footer AND the block', () => {
+    let s = reduceFrame(emptyStream(), { event: 'llm_usage', data: { input_tokens: 900, output_tokens: 100, total_tokens: 1000 } }, 0);
+    s = reduceFrame(s, { event: 'subagent_start', data: { id: 'm1', kind: 'memory', prompt: 'update memory', child_session_id: 'memory-1' } }, 1);
+    s = reduceFrame(s, { event: 'subagent_child', data: { id: 'm1', event: { LlmUsage: { total_tokens: 1234, input_tokens: 1000, output_tokens: 234 } } } }, 2);
+    // Parent footer: own round + child round.
+    expect(s.usage).toMatchObject({ input: 1900, output: 334, total: 2234 });
+    // The foldable memory block keeps its own spend for its Σ line.
+    expect(s.turns[0].usage).toMatchObject({ input: 1000, output: 234, total: 1234 });
+  });
+});
+
+describe('usageFromSnapshot (server event-log aggregate → footer)', () => {
+  const msgs = [
+    { role: 'assistant', blocks: [], usage: { input_tokens: 100, output_tokens: 0, total_tokens: 100 } },
+  ];
+
+  it('prefers the server aggregate (includes child/memory spend)', () => {
+    const u = usageFromSnapshot({ usage: { total_tokens: 2234, input_tokens: 1900, output_tokens: 334 } }, msgs);
+    expect(u).toEqual({ input: 1900, output: 334, total: 2234, contextWindow: null });
+  });
+
+  it('falls back to per-message sums when the aggregate is absent or zero', () => {
+    expect(usageFromSnapshot({}, msgs)).toEqual({ input: 100, output: 0, total: 100, contextWindow: null });
+    expect(usageFromSnapshot({ usage: null }, msgs).total).toBe(100);
+    expect(usageFromSnapshot({ usage: { total_tokens: 0, input_tokens: 0, output_tokens: 0 } }, msgs).total).toBe(100);
+  });
+
+  it('resyncState prefers the snapshot aggregate over message sums', () => {
+    const s = resyncState({
+      messages: msgs,
+      draining: false,
+      headSeq: 30,
+      pendingEcho: null,
+      usage: { total_tokens: 2234, input_tokens: 1900, output_tokens: 334 },
+    });
+    expect(s.usage).toMatchObject({ total: 2234 });
   });
 });

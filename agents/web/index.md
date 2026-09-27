@@ -19,6 +19,8 @@ axum HTTP + SSE 会话管理 + 内嵌 SPA。
 - `spa/src/dag/` spec 顶层 `max_concurrency` — 整跑并发上限（1..=30，缺省省略键、走服务端默认 4）：画布基础信息面板 `editor/stepInspector.jsx#SpecMetaForm` 可编辑；`editor/canvasModel.js#canvasToSpec` 透传 baseSpec 值（画布结构编辑不丢并发配置）；`specValidate.js` 镜像常量 `MAX_CONCURRENCY = 30` 在 `validateSpec` 校验（先于 name 检查）；只改定义、不影响在跑 run（run 持有 `dag_runs.spec_json` 快照，服务端整跑并发上限现状见 `crates/dag-runtime/src/runtime/scheduler.rs#schedule`）
 - `spa/src/dag/dynamic/`、`spa/src/brain/workbench/` — 动态 DAG 与 Brain 工作台
 - `spa/src/brain/workbench/` — schema 7 工作台。`scheduler/editor.jsx` 在 `milestone/` 画布上配置大容器里程碑、层内并行执行节点（各绑定一个能力）与层间扭转连线，随后用表单提交计划信息；`milestone/inspector.jsx` 标明并禁止挂载无法解析的能力；`milestone/run.jsx` 按轮次、层和激活展示调度及执行 ID，并复用 `ExecutionView` 查看各类型明细。`useRun.js` 读取 `/layered`，由事件流及轮询刷新。
+- `src/snapshot.rs` — `GET /api/sessions/:id` 快照装配（meta/messages/draining + `usage`：事件日志口径的会话生命周期 token 汇总，含子代理与 local-memory 维护开销——子代理花费从不落父消息行，消息求和口径恢复不出来）
+- `src/usage_totals.rs` — `usage` 汇总的纯函数核心（裸 `llm_usage` + 包裹 `subagent_child(llm_usage)` 行）；SPA 成本栏实时累计每轮（`reduce.js` accumulateUsage），重载优先取快照 `usage`
 - `tests/` — 集成测试
 
 ## 接缝

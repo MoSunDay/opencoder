@@ -21,7 +21,7 @@ fn snap(change: LayeredChange) -> LayeredSnapshot {
     }
 }
 fn proposal(current: &LayeredSnapshot, req: &LayeredRequest, layer: u32) -> LayeredDecision {
-    let assessments: serde_json::Map<_,_> = req.plan.layers.iter().nth(current.run.layer.saturating_sub(1) as usize).filter(|_| current.run.layer > 0).map(|milestone| (milestone.layer_id.clone(),json!({"met":current.operations.iter().filter(|o| o.activation==current.run.activation).all(|o| o.status.successful()),"reason":"verified actual outputs"}))).into_iter().collect();
+    let assessments: serde_json::Map<_,_> = req.plan.layers.get(current.run.layer.saturating_sub(1) as usize).filter(|_| current.run.layer > 0).map(|milestone| (milestone.layer_id.clone(),json!({"met":current.operations.iter().filter(|o| o.activation==current.run.activation).all(|o| o.status.successful()),"reason":"verified actual outputs"}))).into_iter().collect();
     let assignments: Vec<_> = req.plan.nodes.iter().filter(|n| n.layer_id == req.plan.layers[layer as usize - 1].layer_id).map(|n| json!({"node_id":n.node_id,"capability_id":n.capability_id,"inputs":{},"reason":"use attached capability"})).collect();
     let decision: LayeredDecision = serde_json::from_value(json!({"decision":"dispatch_layer","layer":layer,"assignments":assignments,"assessments":assessments,"reason":"evaluate milestone evidence","reflection":if layer <= current.run.layer {Some("fix issues with new context")} else {None},"evidence_execution_ids":[]})).unwrap();
     decision

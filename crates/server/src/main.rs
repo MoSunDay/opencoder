@@ -82,43 +82,51 @@ fn resolve_token(flag: Option<String>, file: Option<PathBuf>) -> Result<String> 
     }
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
-    let args = Args::parse();
-    if args.build_info {
-        println!("{}", opencoder_core::version::build_info_json());
-        return Ok(());
-    }
-    logging::init_logging(args.verbose);
-    let workdir = args
-        .workdir
-        .clone()
-        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-    let token = resolve_token(args.token, args.token_file)?;
-    if args.resources {
-        return opencoder_control::release::resources::serve(
-            workdir,
-            args.data_dir
-                .context("resource service requires --data-dir")?,
-            args.port,
-            token,
-        )
-        .await;
-    }
-    let platform = args
-        .release_config
-        .map(|path| -> Result<_> { Ok(serde_json::from_slice(&std::fs::read(path)?)?) })
-        .transpose()?;
-    opencoder_control::serve_release(
-        args.host,
-        args.port,
-        args.web,
-        workdir,
-        args.data_dir,
-        token,
-        platform,
-    )
-    .await
+fn main() -> Result<()> {
+    // Same stack budget as the agent binary: server-driven sessions run the
+    // identical runtime (shellguard AST recursion, nested JSON decoding) on
+    // tokio threads whose 2 MiB default overflows (see the agent main).
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .thread_stack_size(16 * 1024 * 1024)
+        .build()?
+        .block_on(async {
+            let args = Args::parse();
+            if args.build_info {
+                println!("{}", opencoder_core::version::build_info_json());
+                return Ok(());
+            }
+            logging::init_logging(args.verbose);
+            let workdir = args
+                .workdir
+                .clone()
+                .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+            let token = resolve_token(args.token, args.token_file)?;
+            if args.resources {
+                return opencoder_control::release::resources::serve(
+                    workdir,
+                    args.data_dir
+                        .context("resource service requires --data-dir")?,
+                    args.port,
+                    token,
+                )
+                .await;
+            }
+            let platform = args
+                .release_config
+                .map(|path| -> Result<_> { Ok(serde_json::from_slice(&std::fs::read(path)?)?) })
+                .transpose()?;
+            opencoder_control::serve_release(
+                args.host,
+                args.port,
+                args.web,
+                workdir,
+                args.data_dir,
+                token,
+                platform,
+            )
+            .await
+        })
 }
 
 /// Tiny local logging bootstrap (the local crate owns the shared one; the

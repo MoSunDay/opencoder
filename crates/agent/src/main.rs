@@ -230,8 +230,14 @@ fn main() -> Result<()> {
     {
         opencoder_session::process::configure_supervisor_binary(std::env::current_exe()?)?;
     }
+    // Deep synchronous recursion lives on this runtime's threads (rable
+    // AST parsing in shellguard, nested-JSON skill/config decoding). Tokio's
+    // 2 MiB worker default overflows there — found by the todos_e2e fleet
+    // gate (`tokio-rt-worker has overflowed its stack`); 16 MiB matches the
+    // process main-thread convention and applies to worker + blocking pool.
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
+        .thread_stack_size(16 * 1024 * 1024)
         .build()?
         .block_on(run(args))
 }

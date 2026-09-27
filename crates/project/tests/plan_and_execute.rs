@@ -54,6 +54,15 @@ async fn harness(scripts: Vec<Vec<LlmEvent>>) -> Harness {
     let mock = Arc::new(mock);
     let client: Arc<dyn ChatStream> = mock.clone();
     let dir = tempfile::tempdir().unwrap();
+    // Pin local-memory off: `Config::load` merges ~/.opencoder, so a dev box
+    // with `local-memory` enabled would run memory maintenance after every
+    // act execute and fail the executor's child-link bookkeeping
+    // ("project child task record missing: memory-*").
+    std::fs::write(
+        dir.path().join("opencoder.json"),
+        br#"{"local_memory": false}"#,
+    )
+    .unwrap();
     let service = ProjectService::new();
     service
         .init(

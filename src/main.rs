@@ -2,136 +2,155 @@ use anyhow::Result;
 use clap::Parser;
 use opencoder_local::{init_logging, Cli, Command};
 
-#[tokio::main]
-async fn main() -> Result<()> {
-    let internal: Vec<_> = std::env::args_os().skip(1).collect();
-    if internal
-        .first()
-        .is_some_and(|a| a == "internal-process-supervisor")
-    {
-        anyhow::ensure!(
-            internal.get(1).is_some_and(|a| a == "--"),
-            "invalid supervisor arguments"
-        );
-        let code = opencoder_session::process::supervisor_main(internal[2..].to_vec(), None)?;
-        std::process::exit(code);
-    }
-    #[cfg(target_os = "linux")]
-    opencoder_session::process::configure_supervisor_binary(std::env::current_exe()?)?;
-    let cli = Cli::parse();
-    if cli.build_info {
-        println!("{}", opencoder_core::version::build_info_json());
-        return Ok(());
-    }
-
-    // The TUI runs in the alternate screen + raw mode, so any log line written
-    // to stdout/stderr overlays the interface as garbage. Route TUI logs to a
-    // file instead; headless commands keep logging on stdout.
-    let is_tui = matches!(cli.command, Some(Command::Tui) | Some(Command::Ts { .. }))
-        || (cli.command.is_none() && cli.prompt.is_empty() && cli.cmd.is_none());
-    let log_sink = if is_tui {
-        opencoder_local::tui_log_path()
-    } else {
-        None
-    };
-    init_logging(cli.verbose, log_sink.as_deref());
-
-    // Seed the built-in skill packs into ~/.opencoder/skills. Incremental
-    // with update-on-drift: missing skills are written, drifted files are
-    // backed up to <file>.user.bak and overwritten with the shipped asset,
-    // so a binary upgrade lands new/fixed built-in skills on the next
-    // startup (dep-gated skills stay never-clobbered).
-    opencoder_core::seed_builtin_skills();
-    opencoder_core::seed_dep_gated_skills();
-    opencoder_core::write_install_script();
-
-    let result = if let Some(prompt) = &cli.cmd {
-        anyhow::ensure!(
-            matches!(cli.command, None | Some(Command::Run { .. })),
-            "--cmd requires the default entry or run"
-        );
-        require(prompt)?;
-        opencoder_local::run::run_headless(&cli, prompt.clone()).await
-    } else {
-        match &cli.command {
-            Some(Command::Run { prompt }) => {
-                let parts = if prompt.is_empty() {
-                    cli.prompt.clone()
-                } else {
-                    prompt.clone()
-                };
-                let p = join(parts);
-                require(&p)?;
-                opencoder_local::run::run_headless(&cli, p).await
+fn main() -> Result<()> {
+    // Same stack budget as the agent/server binaries: the TUI drives the
+    // identical session runtime in-process (see the agent main for the
+    // overflow this prevents).
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .thread_stack_size(16 * 1024 * 1024)
+        .build()?
+        .block_on(async {
+            let internal: Vec<_> = std::env::args_os().skip(1).collect();
+            if internal
+                .first()
+                .is_some_and(|a| a == "internal-process-supervisor")
+            {
+                anyhow::ensure!(
+                    internal.get(1).is_some_and(|a| a == "--"),
+                    "invalid supervisor arguments"
+                );
+                let code =
+                    opencoder_session::process::supervisor_main(internal[2..].to_vec(), None)?;
+                std::process::exit(code);
             }
-            Some(Command::Daemon {
-                server,
-                client,
-                opts,
-            }) => {
-                match opencoder_local::daemon::daemon_mode(*server, *client, opts.remote.as_deref())
-                {
-                    Ok(action) => {
-                        println!("{}", opencoder_local::daemon::migration_hint(action, opts));
+            #[cfg(target_os = "linux")]
+            opencoder_session::process::configure_supervisor_binary(std::env::current_exe()?)?;
+            let cli = Cli::parse();
+            if cli.build_info {
+                println!("{}", opencoder_core::version::build_info_json());
+                return Ok(());
+            }
+
+            // The TUI runs in the alternate screen + raw mode, so any log line written
+            // to stdout/stderr overlays the interface as garbage. Route TUI logs to a
+            // file instead; headless commands keep logging on stdout.
+            let is_tui = matches!(cli.command, Some(Command::Tui) | Some(Command::Ts { .. }))
+                || (cli.command.is_none() && cli.prompt.is_empty() && cli.cmd.is_none());
+            let log_sink = if is_tui {
+                opencoder_local::tui_log_path()
+            } else {
+                None
+            };
+            init_logging(cli.verbose, log_sink.as_deref());
+
+            // Seed the built-in skill packs into ~/.opencoder/skills. Incremental
+            // with update-on-drift: missing skills are written, drifted files are
+            // backed up to <file>.user.bak and overwritten with the shipped asset,
+            // so a binary upgrade lands new/fixed built-in skills on the next
+            // startup (dep-gated skills stay never-clobbered).
+            opencoder_core::seed_builtin_skills();
+            opencoder_core::seed_dep_gated_skills();
+            opencoder_core::write_install_script();
+
+            let result = if let Some(prompt) = &cli.cmd {
+                anyhow::ensure!(
+                    matches!(cli.command, None | Some(Command::Run { .. })),
+                    "--cmd requires the default entry or run"
+                );
+                require(prompt)?;
+                opencoder_local::run::run_headless(&cli, prompt.clone()).await
+            } else {
+                match &cli.command {
+                    Some(Command::Run { prompt }) => {
+                        let parts = if prompt.is_empty() {
+                            cli.prompt.clone()
+                        } else {
+                            prompt.clone()
+                        };
+                        let p = join(parts);
+                        require(&p)?;
+                        opencoder_local::run::run_headless(&cli, p).await
+                    }
+                    Some(Command::Daemon {
+                        server,
+                        client,
+                        opts,
+                    }) => {
+                        match opencoder_local::daemon::daemon_mode(
+                            *server,
+                            *client,
+                            opts.remote.as_deref(),
+                        ) {
+                            Ok(action) => {
+                                println!(
+                                    "{}",
+                                    opencoder_local::daemon::migration_hint(action, opts)
+                                );
+                                Ok(())
+                            }
+                            // Unreachable while clap enforces exactly-one-of, but the pure
+                            // validator stays total so this arm can never panic.
+                            Err(usage) => Err(anyhow::anyhow!("{usage}")),
+                        }
+                    }
+                    Some(Command::Tui) => opencoder_tui::run_tui(&opts_from_cli(&cli)).await,
+                    Some(Command::Ts {
+                        list,
+                        resume,
+                        clean,
+                        delete,
+                    }) => {
+                        opencoder_local::ts::ts_dispatch(
+                            &cli,
+                            *list,
+                            resume.as_deref(),
+                            *clean,
+                            delete.as_deref(),
+                        )
+                        .await
+                    }
+                    Some(Command::Config { sub }) => {
+                        opencoder_local::session_cmd::config_dispatch(&cli, sub).await
+                    }
+                    Some(Command::Models) => {
+                        opencoder_local::session_cmd::models_dispatch(&cli).await
+                    }
+                    Some(Command::Session { sub }) => {
+                        opencoder_local::session_cmd::session_dispatch(sub, &cli).await
+                    }
+                    Some(Command::Todos { sub }) => {
+                        opencoder_local::todos_cmd::dispatch(&cli, sub).await
+                    }
+                    Some(Command::InstallTools) => {
+                        let code = opencoder_local::install_tools::install_tools_run()?;
+                        if code != 0 {
+                            std::process::exit(code);
+                        }
                         Ok(())
                     }
-                    // Unreachable while clap enforces exactly-one-of, but the pure
-                    // validator stays total so this arm can never panic.
-                    Err(usage) => Err(anyhow::anyhow!("{usage}")),
+                    Some(Command::Update) => opencoder_local::update::update_run(&cli).await,
+                    None => {
+                        if !cli.prompt.is_empty() {
+                            let p = join(cli.prompt.clone());
+                            require(&p)?;
+                            opencoder_local::run::run_headless(&cli, p).await
+                        } else if maybe_wrap_tui_in_tmux(&cli).await? {
+                            return Ok(());
+                        } else {
+                            opencoder_tui::run_tui(&opts_from_cli(&cli)).await
+                        }
+                    }
                 }
+            };
+            if is_tui {
+                opencoder_local::exit_tips::print_exit_tips();
             }
-            Some(Command::Tui) => opencoder_tui::run_tui(&opts_from_cli(&cli)).await,
-            Some(Command::Ts {
-                list,
-                resume,
-                clean,
-                delete,
-            }) => {
-                opencoder_local::ts::ts_dispatch(
-                    &cli,
-                    *list,
-                    resume.as_deref(),
-                    *clean,
-                    delete.as_deref(),
-                )
-                .await
-            }
-            Some(Command::Config { sub }) => {
-                opencoder_local::session_cmd::config_dispatch(&cli, sub).await
-            }
-            Some(Command::Models) => opencoder_local::session_cmd::models_dispatch(&cli).await,
-            Some(Command::Session { sub }) => {
-                opencoder_local::session_cmd::session_dispatch(sub, &cli).await
-            }
-            Some(Command::Todos { sub }) => opencoder_local::todos_cmd::dispatch(&cli, sub).await,
-            Some(Command::InstallTools) => {
-                let code = opencoder_local::install_tools::install_tools_run()?;
-                if code != 0 {
-                    std::process::exit(code);
-                }
-                Ok(())
-            }
-            Some(Command::Update) => opencoder_local::update::update_run(&cli).await,
-            None => {
-                if !cli.prompt.is_empty() {
-                    let p = join(cli.prompt.clone());
-                    require(&p)?;
-                    opencoder_local::run::run_headless(&cli, p).await
-                } else if maybe_wrap_tui_in_tmux(&cli).await? {
-                    return Ok(());
-                } else {
-                    opencoder_tui::run_tui(&opts_from_cli(&cli)).await
-                }
-            }
-        }
-    };
-    if is_tui {
-        opencoder_local::exit_tips::print_exit_tips();
-    }
-    // Kill any backgrounded bash commands (timeout handoff) and remove their
-    // temp output files before the process exits.
-    opencoder_session::tools::bg::cleanup_all();
-    result
+            // Kill any backgrounded bash commands (timeout handoff) and remove their
+            // temp output files before the process exits.
+            opencoder_session::tools::bg::cleanup_all();
+            result
+        })
 }
 
 fn opts_from_cli(cli: &Cli) -> opencoder_tui::TuiOpts {

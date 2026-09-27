@@ -90,8 +90,7 @@ describe('categoryHome / pagesOf', () => {
   });
 
   it('lists category pages in menu order', () => {
-    // Iteration 4 widens the project category to 项目 / 进展 / Owner 视角.
-    expect(pagesOf('project')).toEqual(['project', 'progress', 'ownerview']);
+    expect(pagesOf('project')).toEqual(['project']);
     // schedules（调度）挂在「全部执行」之后：cron 台账是执行面的时间维度。
     expect(pagesOf('agent')).toEqual(['brain', 'topics', 'schedules', 'dag', 'todos', 'team', 'chat', 'agents']);
     expect(pagesOf('node')).toEqual(['nodes']);
@@ -108,7 +107,7 @@ describe('menuOf / selectOptionsOf scoping', () => {
 
   it('never leaks other categories into a menu', () => {
     const labels = menuOf('project').map((i) => i.label);
-    expect(labels).toEqual(['项目', '进展', 'Owner 视角']);
+    expect(labels).toEqual(['项目']);
     for (const foreign of ['大脑调度', '全部执行', '节点列表']) {
       expect(labels).not.toContain(foreign);
     }

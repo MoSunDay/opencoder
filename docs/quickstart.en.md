@@ -35,9 +35,9 @@ opencoder --image screenshot.png "look at this screenshot"  # attach an image (v
 ### Remote and tmux
 
 ```bash
-# Remote: one machine runs the server, another connects with the client
-opencoder server --host 0.0.0.0 --port 8080
-opencoder client --remote http://127.0.0.1:8080 "summarize this repo's architecture"
+# Fleet: one machine runs the server, another connects an execution node
+opencoder-server --host 0.0.0.0 --port 8080 --token-file /secure/path/token
+opencoder-agent --remote http://SERVER:8080 --name worker-1 --token-file /secure/path/token
 
 # tmux: the session survives SSH disconnects and reattaches on reconnect
 opencoder ts          # create/resume a tmux session

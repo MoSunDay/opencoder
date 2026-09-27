@@ -23,6 +23,7 @@ export function DialogSidebar({
 
   return (
     <div
+      className="oc-chat-sidebar"
       style={{
         width: 264,
         flexShrink: 0,

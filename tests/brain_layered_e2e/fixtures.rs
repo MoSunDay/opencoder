@@ -15,19 +15,23 @@ pub const CHILD_TEXT: &str = "e2e-layered-node-result";
 /// The closing summary the canvas folds into the run.
 pub const SUMMARY: &str = "e2e-layered-canvas-complete";
 
-/// A two-layer canvas: `scan` then `apply` exercise the layer barrier and
-/// completion, without a configured transition edge.
+/// A two-layer canvas: `scan` then `apply` exercise the layer barrier and completion.
 pub fn plan() -> Value {
     json!({
-        "schema_version": 6,
+        "schema_version": 7,
         "title": "layered canvas",
         "objective": "prove the layered canvas through the control plane",
         "nodes": [
-            {"node_id":"scan","title":"Scan","layer":1,"objective":"scan the input",
-             "success_criteria":"scan result is complete","capability_ids":["builtin-agent-act"]},
-            {"node_id":"apply","title":"Apply","layer":2,"objective":"apply the result",
-             "success_criteria":"apply result is complete","capability_ids":["builtin-agent-act"]}
+            {"node_id":"scan","title":"Scan","layer_id":"scan-layer","objective":"scan the input",
+             "capability_id":"builtin-agent-act"},
+            {"node_id":"apply","title":"Apply","layer_id":"apply-layer","objective":"apply the result",
+             "capability_id":"builtin-agent-act"}
         ],
+        "layers": [
+            {"layer_id":"scan-layer","title":"Scan","task":"scan the input","objective":"scan the input","success_criteria":"scan result is complete"},
+            {"layer_id":"apply-layer","title":"Apply","task":"apply the result","objective":"apply the result","success_criteria":"apply result is complete"}
+        ],
+        "transitions": [{"from":"scan-layer","to":"apply-layer","condition":"scan result is complete"}],
         "edges": [],
         "max_rounds": 8
     })
@@ -35,14 +39,14 @@ pub fn plan() -> Value {
 
 /// The inline-plan submission; `depth`/`parent` stay absent at depth 0.
 pub fn request(id: &str) -> Value {
-    json!({"id":id,"schema_version":6,"plan":plan(),"inputs":{}})
+    json!({"id":id,"schema_version":7,"plan":plan(),"inputs":{}})
 }
 
 /// Admit one layered root and assert the frozen receipt shape.
 pub fn create(fleet: &Fleet, id: &str) -> Value {
     let (status, body) = fleet.http("POST", "/api/brain/runs", &request(id));
     assert_eq!(status, 202, "create layered run: {body}");
-    assert_eq!(body["schema_version"], json!(6), "receipt: {body}");
+    assert_eq!(body["schema_version"], json!(7), "receipt: {body}");
     assert_eq!(body["run_id"], json!(id), "receipt: {body}");
     assert!(body["execution"].is_object(), "receipt: {body}");
     body
@@ -125,15 +129,16 @@ pub fn responder() -> Script {
                 "reason":"e2e closing decision after every layer",
                 "evidence_execution_ids":[],
                 "summary":SUMMARY,
-                "assessments":{"apply":{"met":true,"reason":"apply execution completed"}},
+                "assessments":{"apply-layer":{"met":true,"reason":"apply execution completed"}},
             })
             .to_string();
         }
         if let Some(nodes) = context["plan"]["nodes"].as_array() {
             let target = layer + 1;
+            let target_id = &context["plan"]["layers"][layer as usize]["layer_id"];
             let assignments: Vec<Value> = nodes
                 .iter()
-                .filter(|node| node["layer"] == json!(target))
+                .filter(|node| &node["layer_id"] == target_id)
                 .map(|node| {
                     json!({"node_id":node["node_id"],"capability_id":"builtin-agent-act","inputs":{},
                         "reason":"e2e layered dispatch"})
@@ -145,7 +150,7 @@ pub fn responder() -> Script {
                 "assignments":assignments,
                 "reason":"e2e layered dispatch",
                 "evidence_execution_ids":[],
-                "assessments":if layer == 0 { json!({}) } else { json!({"scan":{"met":true,"reason":"scan execution completed"}}) },
+                "assessments":if layer == 0 { json!({}) } else { json!({"scan-layer":{"met":true,"reason":"scan execution completed"}}) },
             })
             .to_string();
         }

@@ -88,7 +88,7 @@ fn plan(parallel: bool) -> Value {
     json!({
         "schema_version":7, "title":"Restart recovery", "objective":"finish the work",
         "nodes":nodes,
-        "layers":[{"layer_id":"work","title":"Work","objective":"finish the work","success_criteria":"both executions completed"}],
+        "layers":[{"layer_id":"work","title":"Work","task":"finish the work","objective":"finish the work","success_criteria":"both executions completed"}],
         "transitions":[], "edges":[]
     })
 }

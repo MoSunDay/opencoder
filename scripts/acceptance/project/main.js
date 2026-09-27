@@ -6,7 +6,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { harness, until, pause } = require('./harness');
-const { openBrowser, createHierarchy, projectPage, replayOldest } = require('./browser');
+const { openBrowser, createHierarchy, projectPage, verifyWorkbench } = require('./browser');
 const { audit } = require('./audit');
 let h, browser;
 const errors = [];
@@ -17,8 +17,10 @@ async function main() {
   const node = (await api('GET', '/api/nodes')).nodes.find((node) => node.name === 'node-a');
   const opened = await openBrowser(h, errors); browser = opened.browser;
   const browserPage = opened.page;
-  const { goal, milestone, todo, backlog } = await createHierarchy(browserPage);
+  const { goal, milestone, initiative, standaloneInitiative, todo, initiativeTodo, standaloneTodo, backlog } = await createHierarchy(browserPage);
   assert.equal(milestone.goal_id, goal.id);
+  assert.equal(initiative.goal_id, goal.id); assert.equal(standaloneInitiative.goal_id, null);
+  assert.equal(initiativeTodo.milestone_id, initiative.id); assert.equal(standaloneTodo.milestone_id, standaloneInitiative.id);
   assert.equal(todo.milestone_id, milestone.id); assert.equal(backlog.milestone_id, null);
   const root = `project-${todo.id}`;
   const runs = [];
@@ -120,10 +122,14 @@ async function main() {
   const allRuns = runs.map((run) => run.id).concat(failed, interrupted, cancelled);
   const audited = await audit(h, allRuns);
   const originalStorage = JSON.parse(fs.readFileSync(path.join(h.root, 'storage-audit.json'), 'utf8'));
-  // Browser exercises the built SPA and exact run replay entry.
+  const linkedId = `agent-${crypto.randomUUID()}`;
+  const linked = await api('POST', '/api/executions', { id: linkedId, kind: 'agent', node_id: node.id, input: { prompt: 'Linked project acceptance' } });
+  assert.equal(linked.id, linkedId);
+  await until(async () => (await api('GET', `/api/executions/${linkedId}/index`).catch(() => null))?.id === linkedId, 'linked execution index');
+  await api('POST', `/api/project/todos/${todo.id}/executions`, { execution_id: linkedId });
   await browserPage.goto(h.base, { waitUntil: 'networkidle' });
   await projectPage(browserPage);
-  await replayOldest(browserPage, h.root);
+  await verifyWorkbench(browserPage, h.root, linkedId);
   const started = Date.now();
   const indexes = (await api('GET', '/api/executions?kind=project')).executions;
   assert.equal(new Set(indexes.map((index) => index.id)).size, indexes.length);

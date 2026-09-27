@@ -1,5 +1,8 @@
 use crate::{
-    api::{self, admission, brain, catalog, executions, project, session, stream, streaming},
+    api::{
+        self, admission, brain, catalog, executions, project, project_links, session, stream,
+        streaming,
+    },
     *,
 };
 use axum::{
@@ -51,6 +54,7 @@ pub fn build_app(state: Arc<AppState>, token: Option<String>, web: bool) -> Rout
         .route("/api/nodes/:id/maintenance", post(catalog::maintain))
         .route("/api/executions", get(executions::list).post(executions::create))
         .route("/api/executions/:id", get(executions::inspect))
+        .route("/api/executions/:id/index", get(executions::index))
         .route("/api/executions/:id/receipt", get(executions::receipt))
         .route("/api/executions/:id/commands", post(executions::command))
         .route("/api/executions/:id/events", get(stream::events))
@@ -107,8 +111,12 @@ pub fn build_app(state: Arc<AppState>, token: Option<String>, web: bool) -> Rout
         .route("/api/project/goals/:id", patch(api_project::patch_goal).delete(api_project::delete_goal))
         .route("/api/project/milestones", get(api_project::list_milestones).post(api_project::create_milestone))
         .route("/api/project/milestones/:id", patch(api_project::patch_milestone).delete(api_project::delete_milestone))
+        .route("/api/project/initiatives", get(api_project_initiatives::list).post(api_project_initiatives::create))
+        .route("/api/project/initiatives/:id", patch(api_project_initiatives::patch).delete(api_project_initiatives::delete))
         .route("/api/project/todos", get(api_project_todos::list_todos).post(api_project_todos::create_todo))
         .route("/api/project/todos/:id", patch(api_project_todos::patch_todo).delete(api_project_todos::delete_todo))
+        .route("/api/project/todos/:id/executions", get(project_links::list).post(project_links::link))
+        .route("/api/project/todos/:id/executions/:execution_id", axum::routing::delete(project_links::unlink))
         .route("/api/project/todos/:id/plan", post(project::plan))
         .route("/api/project/todos/:id/execute", post(project::execute))
         .route("/api/brain/capabilities", get(api_brain::list_capabilities).post(api_brain::create_capability))

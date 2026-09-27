@@ -22,6 +22,7 @@ use crate::theme;
 use crate::worker::{
     gate_clear_all, process_cmd, rebind_session, ChildRuntimeHandles, ClearAllGate, UiCmd, UiEvent,
 };
+use crate::TuiOpts;
 
 /// The `TaskOutcome::Pick(pick)` arm: perform a session switch. Builds a new
 /// `SessionState` (New or Resume), spawns a fresh worker for it, saves the
@@ -44,9 +45,24 @@ fn new_task_config(mut loaded: Config, active: &Config) -> Config {
     loaded
 }
 
+/// A new task follows the TUI launch selection. Runtime state such as a Codex
+/// thread ID belongs to the previous task and is never copied here.
+fn new_task_harness(
+    default: opencoder_core::harness::Harness,
+    opts: &TuiOpts,
+) -> opencoder_core::harness::HarnessRuntime {
+    opencoder_core::harness::fresh_runtime(
+        default,
+        opts.harness,
+        opts.envs.clone(),
+        opts.model.clone(),
+    )
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn switch_session(
     pick: crate::task::TaskPick,
+    opts: &TuiOpts,
     cmd_tx: &mut mpsc::Sender<UiCmd>,
     evt_rx: &mut mpsc::Receiver<UiEvent>,
     workdir: &Path,
@@ -90,12 +106,13 @@ pub(crate) async fn switch_session(
     let (new_session, pending_replay) = match &pick {
         crate::task::TaskPick::New => {
             let new_session_id = opencoder_session::runner::new_id();
-            let new_agent = resolve_agent("act").context("agent")?;
             let new_config = new_task_config(
                 Config::load(workdir).unwrap_or_else(|_| config.clone()),
                 config,
             );
-            let sess = SessionState::new(
+            let agent_name = crate::fresh_agent_name(opts, &new_config);
+            let new_agent = resolve_agent(&agent_name).context("agent")?;
+            let mut sess = SessionState::new(
                 new_session_id,
                 new_agent,
                 new_config,
@@ -103,6 +120,7 @@ pub(crate) async fn switch_session(
                 workdir.to_path_buf(),
             )
             .with_store(store.clone());
+            sess.harness = new_task_harness(sess.harness.harness, opts);
             (sess, 0)
         }
         crate::task::TaskPick::Resume(id) => {
@@ -407,6 +425,7 @@ pub(crate) fn pending_replay_hint(n: usize) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use opencoder_core::harness::Harness;
     use opencoder_core::Message;
     use opencoder_llm::MockChatClient;
     use opencoder_store::LibsqlStore;
@@ -428,6 +447,30 @@ mod tests {
         assert_eq!(config.model, "prov-x/model-x");
         assert_eq!(config.model_id(), "model-x");
         assert_eq!(config.max_tokens, Some(8192));
+    }
+
+    #[test]
+    fn new_task_keeps_codex_selection_and_injected_environment() {
+        let opts = TuiOpts::new(None)
+            .with_harness(
+                Some(Harness::Codex),
+                [("CODEX_HOME".into(), "/tmp/codex-auth".into())]
+                    .into_iter()
+                    .collect(),
+            )
+            .with_model(Some("codex-model".into()));
+        let mut session = SessionState::new(
+            "fresh-codex-task",
+            resolve_agent("act").unwrap(),
+            Config::default(),
+            Arc::new(MockChatClient::new()),
+            std::env::temp_dir(),
+        );
+        session.harness = new_task_harness(session.harness.harness, &opts);
+        assert_eq!(session.harness.harness, Harness::Codex);
+        assert_eq!(session.harness.envs["CODEX_HOME"], "/tmp/codex-auth");
+        assert_eq!(session.harness.model.as_deref(), Some("codex-model"));
+        assert!(session.harness.thread_id.is_none());
     }
 
     #[test]

@@ -8,5 +8,5 @@ mod request;
 pub(crate) mod runtime;
 mod view;
 pub use api::Page;
-pub use api::{command, create, events, snapshot};
+pub use api::{command, create, events, input, snapshot};
 pub use view::{layer, view};

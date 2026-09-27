@@ -10,8 +10,15 @@ export const capabilityName = (capability) => {
   return capability?.target?.trim() || id;
 };
 export const capabilityLabel = (capability) => `${KIND_LABELS[capability.kind] || capability.kind} · ${capabilityName(capability)}`;
-export const layerMilestone = (layer_id) => ({ layer_id, title: '', objective: '', success_criteria: '' });
+export const layerMilestone = (layer_id) => ({ layer_id, title: '', task: '', objective: '', success_criteria: '' });
 export const executionNode = (node_id, layer_id) => ({ node_id, layer_id, title: '', objective: '', capability_id: '' });
+export const capabilityTask = (capability) => capability?.summary?.trim() || `输入：${capability?.input_desc || ''}；输出：${capability?.output_desc || ''}`;
+export const transitionLabel = (condition) => {
+  const characters = Array.from(condition || '填写扭转条件');
+  return characters.length > 10 ? `${characters.slice(0, 10).join('')}…` : characters.join('');
+};
+export const bindCapability = (node, capability) => ({ ...node, capability_id: capability.capability_id || capability.id,
+  title: capabilityName(capability).slice(0, 120), objective: capabilityTask(capability).slice(0, 4096) });
 export const groups = (plan) => (plan.layers || []).map((layer) => (plan.nodes || []).filter((node) => node.layer_id === layer.layer_id));
 
 export function addLayer(plan, layer_id) {
@@ -48,6 +55,7 @@ export function validateGraph(plan, capabilities) {
   for (const layer of plan.layers) {
     const fail = (message) => { const error = new Error(`${layer.title || '未命名里程碑'}：${message}`); error.layerId = layer.layer_id; throw error; };
     if (!layer.title?.trim() || layer.title.length > 120) fail('名称需要 1–120 字');
+    if (!layer.task?.trim() || layer.task.length > 4096) fail('请填写要做什么（不超过 4096 字）');
     if (!layer.objective?.trim() || !layer.success_criteria?.trim()) fail('请填写目标和达成标准');
     if (layer.objective.length > 4096 || layer.success_criteria.length > 4096) fail('目标和达成标准各不超过 4096 字');
     const nodes = plan.nodes.filter((node) => node.layer_id === layer.layer_id);

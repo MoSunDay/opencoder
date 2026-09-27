@@ -222,7 +222,7 @@ export function StatusTag({ status, error }) {
 }
 
 /// Empty-state hint: the console-wide antd Empty idiom (same as
-/// project/goalsTab.jsx). antd's Empty already carries marginBlock: 32, so the
+/// project/projectsTab.jsx). antd's Empty already carries marginBlock: 32, so the
 /// old outer 48px padding was double breathing room (~230px total). We drop
 /// the wrapper div and pin the Empty's own margin to 24 — the vertical space
 /// is now ONE spacing decision, not two stacked ones. `text` still lands in

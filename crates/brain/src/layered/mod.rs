@@ -7,16 +7,20 @@ mod prompt;
 mod terminal;
 mod validate;
 pub use activation::activate;
+pub use activation::parse_decision;
 pub use context::{layer_context, relevant_operations};
 pub use decide::{decide, execution_id, operation_id};
 pub use levels::layers;
 use opencoder_core::brain::layered::*;
 pub use prompt::{instruction, PROMPT};
+pub use terminal::barrier;
 pub use terminal::{admit, command, terminal};
 pub use validate::{validate_plan, validate_request};
 
 pub fn event(run: &LayeredRun, kind: &str, reason: Option<String>) -> LayeredEvent {
     LayeredEvent {
+        user_input: None,
+        guidance: vec![],
         reflection: None,
         assessments: Default::default(),
         assignments: vec![],
@@ -46,6 +50,7 @@ pub fn initialize(id: &str, request: &LayeredRequest, now: i64) -> anyhow::Resul
         "invalid brain run ID"
     );
     let run = LayeredRun {
+        pending_guidance: false,
         round: 1,
         activation: 0,
         valid_layers: 0,

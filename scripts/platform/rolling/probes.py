@@ -170,9 +170,20 @@ def ready(settings, record, node_id, operations, seconds):
     def complete_index():
         nodes = operations.http(endpoint, "/api/nodes")["nodes"]
         current = next((n for n in nodes if n["id"] == node_id), None)
-        if not current or not current["online"] or not current.get("snapshot", {}).get("ready"):
+        if not current or not current["online"]:
             return False
-        return operations.http(endpoint, "/api/ready")["ready_nodes"] >= 1
+        if current.get("snapshot", {}).get("ready"):
+            return operations.http(endpoint, "/api/ready")["ready_nodes"] >= 1
+        # The old Host can be unready because of a retired Runtime. The new
+        # standby Host does not connect to this Server until the switch, so
+        # verify its active Runtime and the candidate Server directly.
+        host = operations.http(f"http://127.0.0.1:{record['host_port']}", "/status")
+        runtime = operations.http(f"http://127.0.0.1:{record['runtime_port']}", "/inventory")
+        release = operations.http(endpoint, "/api/admin/release")
+        return (host["snapshot"]["ready"] and runtime["snapshot"]["ready"]
+                and runtime["registration"]["id"] == node_id
+                and runtime["runtime_id"] == record["id"]
+                and release["instance_release"] == record["id"])
     operations.wait(complete_index, seconds)
 
 

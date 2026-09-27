@@ -18,9 +18,10 @@ it('shows original PC problem and downloadable outcomes on the schema 6 body', a
     } }],
   };
   render(<LayeredRunBody view={view} id="brain-pc" refresh={vi.fn()} />);
-  expect(screen.getByText('生成素材后无法导入时间线')).toBeTruthy();
   expect(screen.getByText('milestone canvas')).toBeTruthy();
   expect(screen.queryByLabelText('新的轮次预算')).toBeNull();
+  fireEvent.click(screen.getByText('查看详情'));
+  expect(screen.getByText('生成素材后无法导入时间线')).toBeTruthy();
   fireEvent.click(screen.getByText('未解决'));
   await screen.findByText('真实证据不足，尚未修复');
   fireEvent.click(screen.getByText('receipt.json · 下载证据').closest('button'));

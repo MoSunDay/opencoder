@@ -53,7 +53,7 @@ pub async fn handle(
         .records
         .get(&reference.id)
         .and_then(|record| record.assignment.request.input["schema_version"].as_u64());
-    if matches!(schema, Some(4 | 5 | 6)) {
+    if matches!(schema, Some(4..=6)) {
         return super::v4::history::read(worker, reference, action, input, schema.unwrap() as u32)
             .await;
     }

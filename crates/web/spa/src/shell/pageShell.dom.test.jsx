@@ -18,9 +18,9 @@ afterEach(() => cleanup());
 
 describe('PageShell', () => {
   it('renders the PAGE_META title, description and children', () => {
-    render(<PageShell page="progress">body-content</PageShell>);
-    expect(screen.getByRole('heading', { name: '进展' })).toBeTruthy();
-    expect(screen.getByText('里程碑进度、进行中 TODO 与最近项目执行')).toBeTruthy();
+    render(<PageShell page="project">body-content</PageShell>);
+    expect(screen.getByRole('heading', { name: '项目' })).toBeTruthy();
+    expect(screen.getByText('项目、专项与 TODO 工作台')).toBeTruthy();
     expect(screen.getByText('body-content')).toBeTruthy();
   });
 
@@ -46,13 +46,13 @@ describe('PageShell', () => {
     // Anchored on a PAGE_META key on purpose: against a headerless key (the
     // old `page="nodes"`) this case passed even if `bare` was ignored, i.e. it
     // proved nothing. Assert both sides so the prop cannot rot silently.
-    const withHeader = render(<PageShell page="progress">x</PageShell>);
-    expect(withHeader.container.querySelector('.oc-page-title')?.textContent).toBe('进展');
+    const withHeader = render(<PageShell page="project">x</PageShell>);
+    expect(withHeader.container.querySelector('.oc-page-title')?.textContent).toBe('项目');
     withHeader.unmount();
 
-    render(<PageShell page="progress" bare>bare-content</PageShell>);
+    render(<PageShell page="project" bare>bare-content</PageShell>);
     expect(screen.queryByRole('heading')).toBeNull();
-    expect(screen.queryByText('进展')).toBeNull();
+    expect(screen.queryByText('项目')).toBeNull();
     expect(screen.getByText('bare-content')).toBeTruthy();
   });
 

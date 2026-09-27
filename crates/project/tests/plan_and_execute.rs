@@ -470,6 +470,21 @@ impl ProjectStore for CreateRunFailingStore {
     fn project_backend_name(&self) -> &'static str {
         self.inner.project_backend_name()
     }
+    async fn list_todo_execution_ids(&self, todo_id: &str) -> anyhow::Result<Vec<String>> {
+        self.inner.list_todo_execution_ids(todo_id).await
+    }
+    async fn link_todo_execution(&self, todo_id: &str, execution_id: &str) -> anyhow::Result<()> {
+        self.inner.link_todo_execution(todo_id, execution_id).await
+    }
+    async fn unlink_todo_execution(
+        &self,
+        todo_id: &str,
+        execution_id: &str,
+    ) -> anyhow::Result<bool> {
+        self.inner
+            .unlink_todo_execution(todo_id, execution_id)
+            .await
+    }
     async fn create_goal(&self, rec: &ProjectGoalRecord) -> anyhow::Result<()> {
         self.inner.create_goal(rec).await
     }
@@ -506,6 +521,26 @@ impl ProjectStore for CreateRunFailingStore {
         goal_id: Option<&str>,
     ) -> anyhow::Result<Vec<ProjectMilestoneRecord>> {
         self.inner.list_milestones(goal_id).await
+    }
+    async fn create_initiative(&self, rec: &ProjectMilestoneRecord) -> anyhow::Result<()> {
+        self.inner.create_initiative(rec).await
+    }
+    async fn patch_initiative(
+        &self,
+        id: &str,
+        patch: &ProjectMilestonePatch,
+        now_ms: i64,
+    ) -> anyhow::Result<bool> {
+        self.inner.patch_initiative(id, patch, now_ms).await
+    }
+    async fn delete_initiative(&self, id: &str) -> anyhow::Result<bool> {
+        self.inner.delete_initiative(id).await
+    }
+    async fn list_initiatives(
+        &self,
+        goal_id: Option<&str>,
+    ) -> anyhow::Result<Vec<ProjectMilestoneRecord>> {
+        self.inner.list_initiatives(goal_id).await
     }
     async fn create_todo(&self, rec: &ProjectTodoRecord) -> anyhow::Result<()> {
         self.inner.create_todo(rec).await

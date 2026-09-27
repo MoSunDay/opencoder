@@ -12,7 +12,7 @@ pub async fn activate(
 ) -> Result<LayeredDecision> {
     ensure!(
         context.schema_version == LAYERED_SCHEMA_VERSION,
-        "layer context is not a schema 6 request"
+        "layer context is not a schema 7 request"
     );
     let mut stream = client.chat_stream(ChatRequest {
         purpose: RequestPurpose::Planning,
@@ -43,7 +43,7 @@ pub async fn activate(
 
 /// Accept one JSON document, optionally wrapped in a single explicit JSON fence.
 /// Never extract a substring from prose or repair an invalid decision.
-fn parse_decision(text: &str) -> Result<LayeredDecision> {
+pub fn parse_decision(text: &str) -> Result<LayeredDecision> {
     ensure!(text.len() <= 256 * 1024, "layered decision exceeds 256 KiB");
     let text = text.trim();
     let document = if let Some(body) = text

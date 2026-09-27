@@ -44,17 +44,14 @@ pub fn daemon_mode(
 }
 
 /// The operator-facing migration pointer for the migrated daemon roles.
-/// Echoes the parsed flags into the suggested command line so the hint is
-/// copy-pasteable.
+/// Includes non-secret flags in the suggested command line. Credentials are
+/// intentionally omitted from output that may be copied into terminal logs.
 pub fn migration_hint(action: DaemonAction, opts: &DaemonOpts) -> String {
-    match action {
+    let hint = match action {
         DaemonAction::Server => {
             let mut cmd = format!("opencoder-server --host {} --port {}", opts.host, opts.port);
             if !opts.web {
                 cmd.push_str(" --web=false");
-            }
-            if let Some(t) = &opts.token {
-                cmd.push_str(&format!(" --token {t}"));
             }
             format!(
                 "daemon --server has moved to the dedicated server binary.\n  run: {cmd}\n  (opencode no longer embeds the web API; see `opencoder-server --help`)"
@@ -66,13 +63,15 @@ pub fn migration_hint(action: DaemonAction, opts: &DaemonOpts) -> String {
             if let Some(n) = &opts.name {
                 cmd.push_str(&format!(" --name {n}"));
             }
-            if let Some(t) = &opts.token {
-                cmd.push_str(&format!(" --token {t}"));
-            }
             format!(
                 "daemon --client has moved to the dedicated agent binary.\n  run: {cmd}\n  (prompt tasks and DAG workflow runs now execute on `opencoder-agent`; see `opencoder-agent --help`)"
             )
         }
+    };
+    if opts.token.is_some() {
+        format!("{hint}\n  credential: pass the token with --token-file on the new binary")
+    } else {
+        hint
     }
 }
 
@@ -143,24 +142,27 @@ mod tests {
     }
 
     #[test]
-    fn server_hint_echoes_token_and_web_off() {
+    fn server_hint_omits_token_and_preserves_web_off() {
         let mut o = opts(None);
         o.token = Some("TKN".into());
         o.web = false;
         let hint = migration_hint(DaemonAction::Server, &o);
-        assert!(hint.contains("--token TKN"), "{hint}");
+        assert!(!hint.contains("TKN"), "{hint}");
+        assert!(hint.contains("--token-file"), "{hint}");
         assert!(hint.contains("--web=false"), "{hint}");
     }
 
     #[test]
-    fn client_hint_carries_remote_name_token() {
+    fn client_hint_carries_remote_name_without_token() {
         let mut o = opts(Some("http://s:8080"));
         o.name = Some("gpu-1".into());
         o.token = Some("TKN".into());
         let hint = migration_hint(DaemonAction::Client, &o);
         assert!(
-            hint.contains("opencoder-agent --remote http://s:8080 --name gpu-1 --token TKN"),
+            hint.contains("opencoder-agent --remote http://s:8080 --name gpu-1"),
             "{hint}"
         );
+        assert!(!hint.contains("TKN"), "{hint}");
+        assert!(hint.contains("--token-file"), "{hint}");
     }
 }

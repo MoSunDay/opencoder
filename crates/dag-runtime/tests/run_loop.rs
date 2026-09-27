@@ -171,7 +171,8 @@ async fn fixture(base: &str, tmp: &tempfile::TempDir) -> Fixture {
     let workdir = tmp.path().to_path_buf();
     let store: Arc<dyn opencoder_store::Store> =
         Arc::new(LibsqlStore::open(workdir.join("store.db")).await.unwrap());
-    let config = opencoder_core::Config::load(&workdir).unwrap();
+    let mut config = opencoder_core::Config::load(&workdir).unwrap();
+    config.local_memory = false;
     Fixture {
         uplink: Arc::new(Uplink::new(base, "test-token").unwrap()),
         workdir: workdir.clone(),

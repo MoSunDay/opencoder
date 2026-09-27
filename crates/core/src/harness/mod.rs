@@ -57,6 +57,39 @@ pub fn agent_harness(name: &str) -> Harness {
         .unwrap_or_default()
 }
 
+/// Build fresh, frontend-independent harness state from an explicit selection
+/// and launch environment. Thread and settings snapshots are pinned later by
+/// the shared session runner when the first turn starts.
+pub fn fresh_runtime(
+    agent_default: Harness,
+    selection: Option<Harness>,
+    envs: BTreeMap<String, String>,
+    model: Option<String>,
+) -> HarnessRuntime {
+    let harness = selection.unwrap_or(agent_default);
+    HarnessRuntime {
+        harness,
+        envs,
+        model: if harness == Harness::Codex {
+            model
+        } else {
+            None
+        },
+        ..Default::default()
+    }
+}
+
+/// A resumed session may contain managed profile variables in addition to
+/// those supplied at launch. Explicitly supplied values must still match.
+pub fn matches_requested_env(
+    runtime: &HarnessRuntime,
+    requested: &BTreeMap<String, String>,
+) -> bool {
+    requested
+        .iter()
+        .all(|(key, value)| runtime.envs.get(key) == Some(value))
+}
+
 /// Only fresh Codex sessions take managed defaults. Existing threads keep their snapshot.
 pub fn pin_settings(runtime: &mut HarnessRuntime, settings: Option<&CodexSettings>) {
     if runtime.harness != Harness::Codex
@@ -108,5 +141,44 @@ mod tests {
             Harness::Opencoder
         );
         assert!(serde_json::from_str::<HarnessRuntime>(r#"{"harness":"typo"}"#).is_err());
+    }
+    #[test]
+    fn fresh_runtime_keeps_explicit_selection_and_literal_environment() {
+        let envs = BTreeMap::from([("NOTE".into(), "literal $(value)".into())]);
+        let runtime = fresh_runtime(
+            Harness::Opencoder,
+            Some(Harness::Codex),
+            envs.clone(),
+            Some("codex-model".into()),
+        );
+        assert_eq!(runtime.harness, Harness::Codex);
+        assert_eq!(runtime.envs, envs);
+        assert_eq!(runtime.model.as_deref(), Some("codex-model"));
+        assert!(runtime.thread_id.is_none());
+        assert!(runtime.codex.is_none());
+        assert_eq!(
+            fresh_runtime(Harness::Opencoder, None, BTreeMap::new(), Some("x".into())).model,
+            None
+        );
+    }
+    #[test]
+    fn resume_environment_matches_requested_values_with_managed_defaults() {
+        let runtime = fresh_runtime(
+            Harness::Codex,
+            None,
+            BTreeMap::from([
+                ("CODEX_HOME".into(), "/auth".into()),
+                ("MANAGED".into(), "default".into()),
+            ]),
+            None,
+        );
+        assert!(matches_requested_env(
+            &runtime,
+            &BTreeMap::from([("CODEX_HOME".into(), "/auth".into())])
+        ));
+        assert!(!matches_requested_env(
+            &runtime,
+            &BTreeMap::from([("CODEX_HOME".into(), "/other".into())])
+        ));
     }
 }

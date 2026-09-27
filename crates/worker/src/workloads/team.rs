@@ -70,6 +70,26 @@ impl Dispatcher {
         } else {
             format!("你的能力：{}\n\n{prompt}", member.capabilities.join("；"))
         };
+        let guidance = self
+            .worker
+            .inner
+            .journal
+            .lock()
+            .await
+            .records
+            .get(&self.coordinator)
+            .and_then(|record| record.annotations["team_guidance"].as_array().cloned())
+            .unwrap_or_default();
+        let prompt = if guidance.is_empty() {
+            prompt
+        } else {
+            let notes = guidance
+                .iter()
+                .filter_map(|item| item["message"].as_str())
+                .collect::<Vec<_>>()
+                .join("\n");
+            format!("来自大脑的最新人工引导，请在本轮任务中应用：\n{notes}\n\n{prompt}")
+        };
         let outcome = opencoder_session::run(&mut session, prompt, move |event| {
             if let Err(error) = sink.push(&event) {
                 tracing::error!(%error,"team event persistence channel failed");

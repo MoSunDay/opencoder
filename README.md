@@ -46,7 +46,7 @@ OpenCoder 是一个完全独立、从零实现的 Rust 原生编码代理。它�
 
 ## ✨ 特性
 
-- **🧠 多形态运行时** — TUI 交互、headless `run`、`server`（HTTP/JSON + SSE）、`client` 远程瘦前端，四种入口共享同一套 session 运行时。
+- **🧠 多形态运行时** — 本地 TUI 与 headless `run` 共享会话运行时；独立的 `opencoder-server` 和 `opencoder-agent` 提供 Fleet 控制面与节点执行。
 - **🔄 会话恢复与分叉** — `--session <id>` / `--continue` / `--fork` 跨进程从 libsql 重建历史；title 由 small model 异步生成。
 - **📦 Session 二进制导出/导入** — `session export/import` 以 `.opencoder` 二进制（`OPENCODR` magic）携带完整 subagent 树迁移会话，幂等且不导出 Config（API key 安全）。
 - **🛠️ Subagent 调度** — `explore`（只读探查）与 `build`（实现执行）两类子代理，DB 追踪生命周期、可折叠查看。
@@ -86,6 +86,15 @@ curl -fsSL https://raw.githubusercontent.com/MoSunDay/opencoder/main/scripts/ins
 
 首次交互式启动时，OpenCoder 会创建 `~/.opencoder/config.json`；若合并后的配置尚不可用，会在 TUI 内引导填写第一个模型。provider、model、端点和 API key 通过本地校验后，将在同一个 TUI 中直接进入任务输入界面；已有可用的项目配置或环境变量配置则不会重复提示。
 
+TUI 事件命令可写在 `~/.opencoder/hooks.json`：`turn_done` 在最终回合结束时触发，`question` 在提问工具等待回答时触发。每个事件接受命令字符串数组，使用 `sh -c` 执行，单条命令最多等待 3 秒；命令失败不影响会话。例如在 terminator-rust 的非活动 tab 上显示提示：
+
+```json
+{
+  "turn_done": ["if [ -n \"${TERMINATOR_PANE_ID:-}\" ]; then \"${TERMINATOR_CTL:-terminator-ctl}\" notice; fi"],
+  "question": ["if [ -n \"${TERMINATOR_PANE_ID:-}\" ]; then \"${TERMINATOR_CTL:-terminator-ctl}\" notice; fi"]
+}
+```
+
 在项目根目录或 `~/.opencoder/` 放置 `opencoder.json`（环境变量与 CLI flag 优先级更高）：
 
 ```jsonc
@@ -120,9 +129,9 @@ opencoder
 # 2) 无头一次性运行，输出到 stdout
 opencoder run "用 Rust 实现一个 LRU cache 并写测试"
 
-# 3) 启动服务端（集中存储 + LLM 网关 + SSE），另一台机器用 client 接入
-opencoder server --host 0.0.0.0 --port 8080
-opencoder client --remote http://127.0.0.1:8080 "总结这个仓库的架构"
+# 3) 启动 Fleet 服务端，并在另一台机器接入执行节点
+opencoder-server --host 0.0.0.0 --port 8080 --token-file /secure/path/token
+opencoder-agent --remote http://SERVER:8080 --name worker-1 --token-file /secure/path/token
 
 # 4) 在 tmux 里跑 TUI：SSH 断线后会话存活，重连后 opencoder ts 自动 reattach
 opencoder ts            # 新建/恢复 tmux 会话
@@ -132,7 +141,7 @@ opencoder ts -r <id>    # 恢复指定会话
 
 ## 🧱 架构
 
-OpenCoder 是一个 Cargo workspace，由 8 个 crate 组成，依赖严格分层：
+OpenCoder 是一个依赖分层的 Cargo workspace。主要 crate 包括：
 
 | Crate | 职责 |
 | --- | --- |
@@ -142,8 +151,10 @@ OpenCoder 是一个 Cargo workspace，由 8 个 crate 组成，依赖严格分�
 | `session` | 运行时核心：drain 主循环、工具注册、subagent 调度、plan bash 守卫、压缩、resume |
 | `tui` | ratatui 交互界面（3 区域布局、subagent 折叠、steer/followup、plan/act 切换） |
 | `web` | axum HTTP + SSE 会话管理（prompt admit / 事件流 / 运行时切换 / interrupt） |
-| `client` | 远程瘦客户端：提交 prompt 并流式回放，本地不存储、不调 LLM |
-| `cli` | clap 前端 + headless 运行时（run / tui / server / client / config / models / session） |
+| `control` / `server` | Fleet HTTP 控制面与独立服务端二进制 |
+| `node` / `worker` / `agent` | 节点连接、执行适配与独立节点二进制 |
+| `local` / `ctl` | 本地交互与无头前端、Fleet 管理 CLI |
+| `brain` / `dag` / `team` / `todos` | 编排能力与执行契约 |
 
 **关键抽象：**
 
@@ -158,8 +169,9 @@ opencoder [OPTIONS] [PROMPT]...        # 默认进入 TUI
 opencoder run <PROMPT>                  # 无头一次性运行
 opencoder tui                           # 显式启动 TUI
 opencoder ts                            # 在 tmux 里跑 TUI（SSH 断线存活；-l 列出，-r <id> 恢复）
-opencoder server [--host] [--port]      # 服务端（别名：serve）
-opencoder client --remote <URL> <PROMPT># 远程瘦客户端
+opencoder-server --host <ADDR> --port <PORT> --token-file <PATH>  # Fleet 服务端
+opencoder-agent --remote <URL> --name <NAME> --token-file <PATH> # Fleet 执行节点
+opencoder-cli --help                    # Fleet 管理 CLI
 opencoder config [show]                 # 查看合并后的配置
 opencoder models                        # 列出已知模型
 opencoder session <list|show|delete>    # 会话管理（show --json 为深度观测面）
@@ -292,9 +304,12 @@ opencoder/
 │   ├── store/     # Store trait + libsql 实现
 │   ├── session/   # 会话运行时核心
 │   ├── tui/       # ratatui 交互界面
-│   ├── web/       # axum HTTP + SSE
-│   ├── client/    # 远程瘦客户端
-│   └── cli/       # clap 前端 + headless 运行时
+│   ├── web/       # HTTP/SSE 与 SPA 模块
+│   ├── control/   # Fleet 控制面
+│   ├── server/    # 独立服务端二进制
+│   ├── agent/     # 独立执行节点二进制
+│   ├── local/     # 本地 CLI 与 headless 运行时
+│   └── ctl/       # Fleet 管理 CLI
 ├── docs/          # 性能 profile 等文档
 ├── features/      # 能力地图 + 按日期归档的 changelog
 ├── rules/         # 开发规则（测试 / 回归 / 分层）

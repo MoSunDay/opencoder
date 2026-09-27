@@ -81,7 +81,16 @@ pub async fn install(State(state): State<Arc<AppState>>) -> Response {
             .brain_plan_document(pc_issue::PLAN_ID, latest)
             .await
         {
-            Ok(Some(saved)) if saved.plan["schema_version"] == LAYERED_SCHEMA_VERSION => {
+            Ok(Some(saved))
+                if saved.plan["schema_version"] == LAYERED_SCHEMA_VERSION
+                    && saved.plan["layers"].as_array().is_some_and(|layers| {
+                        layers.iter().all(|layer| {
+                            layer["task"]
+                                .as_str()
+                                .is_some_and(|task| !task.trim().is_empty())
+                        })
+                    }) =>
+            {
                 return response(RpcReply::ok(json!({"definition":definition})));
             }
             Ok(Some(_)) => match latest.checked_add(1) {

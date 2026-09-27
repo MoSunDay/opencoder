@@ -71,6 +71,9 @@ pub fn terminal(
         if update.run.phase != LayeredPhase::Paused {
             update.run.phase = LayeredPhase::Ready;
         }
+    } else if snapshot.run.phase == LayeredPhase::Deciding && snapshot.run.pending_guidance {
+        // New child evidence invalidates the in-flight guidance context.
+        update.run.phase = LayeredPhase::Ready;
     }
     Ok(Some(update))
 }
@@ -123,7 +126,7 @@ pub fn command(
                 ),
                 "only paused or blocked runs can resume"
             );
-            update.run.phase = if barrier(snapshot) {
+            update.run.phase = if barrier(snapshot) || snapshot.run.pending_guidance {
                 LayeredPhase::Ready
             } else {
                 LayeredPhase::Waiting

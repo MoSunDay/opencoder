@@ -5,7 +5,6 @@ use axum::{
     response::Response,
     Json,
 };
-use futures::{stream, StreamExt};
 use opencoder_core::fleet::*;
 use opencoder_store::ProjectExecutorKind;
 use serde_json::{json, Value};
@@ -17,51 +16,18 @@ pub async fn overview(State(state): State<Arc<AppState>>) -> Response {
     let result = async {
         let goals = state.projects.list_goals().await?;
         let milestones = state.projects.list_milestones(None).await?;
-        let todos = state.projects.list_todos(None).await?;
-        let items: Vec<Value> = stream::iter(todos)
-            .map(|todo| {
-                let state = state.clone();
-                async move {
-                    let mut value = json!(todo);
-                    let id = format!("project-{}", todo.id);
-                    if let Some(index) = state.fleet.index(&id).await? {
-                        value["execution"] = json!(index);
-                        let reply = state
-                            .hub
-                            .call(
-                                &index.node_id,
-                                NodeOperation::Inspect {
-                                    execution: index.execution_ref(),
-                                },
-                            )
-                            .await;
-                        if reply.status == 200 {
-                            for key in ["status", "plan_md", "active_session_id"] {
-                                value[key] = reply.body["todo"][key].clone();
-                            }
-                        } else if !(reply.status == 404
-                            && reply.body["error"] == "execution not found")
-                        {
-                            // The node no longer holds this execution (journal
-                            // lost / node reprovisioned): the durable index
-                            // above stays the whole truth, so the row degrades
-                            // quietly — same recovery semantics as the pending
-                            // resubmit in `start`. Other failures (offline
-                            // node, transport errors) stay loud.
-                            value["detail_error"] = reply.body;
-                        }
-                    }
-                    Ok::<_, anyhow::Error>(value)
-                }
-            })
-            .buffered(8)
-            .collect::<Vec<_>>()
-            .await
+        let initiatives = state.projects.list_initiatives(None).await?;
+        let items: Vec<Value> = state
+            .projects
+            .list_todos(None)
+            .await?
             .into_iter()
-            .collect::<anyhow::Result<_>>()?;
+            .map(|todo| json!(todo))
+            .collect();
         Ok::<_, anyhow::Error>(opencoder_store::project::overview::overview(
             &goals,
             &milestones,
+            &initiatives,
             &items,
         ))
     }

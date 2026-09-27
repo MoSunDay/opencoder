@@ -544,7 +544,10 @@ fn prepare_with_config(
                 {
                     crate::workloads::agent_runc::preflight(worker, &config, legacy)?;
                 }
-                let harness = if assignment.request.kind == ExecutionKind::Agent {
+                let harness = if matches!(
+                    assignment.request.kind,
+                    ExecutionKind::Agent | ExecutionKind::Operator
+                ) {
                     selection
                 } else {
                     None

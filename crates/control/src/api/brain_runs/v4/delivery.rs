@@ -23,11 +23,73 @@ pub async fn deliver(
     );
     match action {
         "layered_wake" => wake(state, node, source, input).await,
+        "layered_guidance" => guidance(state, source, input).await,
         "layered_dispatch" => dispatch(state, node, source, input).await,
         "layered_cancel" => cancel(state, node, source, input).await,
         "layered_terminal" => terminal(state, node, source, input).await,
         _ => anyhow::bail!("unknown v4 layered outbox action {action}"),
     }
+}
+
+async fn guidance(state: &Arc<AppState>, source: &ExecutionRef, input: Value) -> Result<()> {
+    ensure!(
+        source.kind == ExecutionKind::Brain,
+        "layered guidance must be a root"
+    );
+    let seq = input["seq"]
+        .as_u64()
+        .context("guidance event seq required")?;
+    let actions: Vec<LayeredGuidance> = serde_json::from_value(input["guidance"].clone())?;
+    let _lock = state
+        .fleet
+        .request_lock("brain-control", &source.id)
+        .await?;
+    let current = snapshot(state, &source.id).await?;
+    let history = read::events(state, &source.id, current.run.last_event_seq)
+        .await
+        .map_err(|reply| anyhow::anyhow!("layered guidance history: {}", reply.body))?;
+    let superseded = history
+        .iter()
+        .any(|event| event.seq > seq && event.event_type == "human_input");
+    for (index, action) in actions.iter().enumerate().filter(|_| !superseded) {
+        if !current.operations.iter().any(|op| {
+            op.execution_id == action.execution_id
+                && op.activation == current.run.activation
+                && op.status == LayeredOperationStatus::Running
+                && matches!(
+                    op.execution_kind,
+                    ExecutionKind::Agent | ExecutionKind::Operator | ExecutionKind::Team
+                )
+        }) {
+            continue;
+        }
+        let reply = crate::api::executions::dispatch_command(
+            state,
+            &action.execution_id,
+            ExecutionCommand {
+                action: "steer".into(),
+                input: json!({
+                    "prompt":action.message,"input_id":format!("brain-{seq}-{index}")
+                }),
+            },
+        )
+        .await;
+        ensure!(
+            reply.status < 300,
+            "guidance delivery to {}: {}",
+            action.execution_id,
+            reply.body
+        );
+    }
+    let ack = runs::call(
+        state,
+        &source.id,
+        "layered_guidance_ack",
+        json!({"seq":seq}),
+    )
+    .await;
+    ensure!(ack.status < 300, "guidance acknowledgement: {}", ack.body);
+    Ok(())
 }
 
 async fn snapshot(state: &Arc<AppState>, id: &str) -> Result<LayeredSnapshot> {

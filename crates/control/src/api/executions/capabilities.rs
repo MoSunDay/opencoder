@@ -167,12 +167,12 @@ mod tests {
     }
 
     #[test]
-    fn layered_runs_require_the_v4_advertisement() {
+    fn layered_runs_require_the_v7_advertisement() {
         let layered = CreateExecution {
-            id: "brain-v4".into(),
+            id: "brain-v7".into(),
             kind: ExecutionKind::Brain,
             target: None,
-            input: json!({"schema_version":6,"layered_request":{}}),
+            input: json!({"schema_version":7,"layered_request":{}}),
             node_id: None,
         };
         assert_eq!(required(&layered, None), vec![MILESTONE_BRAIN]);

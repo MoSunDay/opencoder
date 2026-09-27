@@ -149,6 +149,44 @@ pub(super) async fn command(
             durable_stop(worker, id, intent).await
         }
         "resume" | "plan" | "execute" => super::start(worker, id, command).await,
+        "steer" if execution.kind == ExecutionKind::Team => {
+            let message = command.input["prompt"].as_str().unwrap_or("").trim();
+            let input_id = command.input["input_id"].as_str().unwrap_or("").trim();
+            if message.is_empty()
+                || message.len() > 4096
+                || input_id.is_empty()
+                || input_id.len() > 128
+            {
+                return Ok(RpcReply::error(
+                    400,
+                    "team steer requires prompt and input_id",
+                ));
+            }
+            let mut journal = worker.inner.journal.lock().await;
+            let Some(mut record) = journal.records.get(id).cloned() else {
+                return Ok(RpcReply::error(404, "team execution not found"));
+            };
+            if record.assignment.index.status != ExecutionStatus::Running {
+                return Ok(RpcReply::error(409, "team execution is not running"));
+            }
+            let mut guidance = record.annotations["team_guidance"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default();
+            if guidance.iter().any(|item| item["input_id"] == input_id) {
+                return Ok(RpcReply::ok(json!({"accepted":true,"duplicate":true})));
+            }
+            if guidance.len() >= 32 {
+                guidance.remove(0);
+            }
+            guidance.push(json!({"input_id":input_id,"message":message}));
+            if !record.annotations.is_object() {
+                record.annotations = json!({});
+            }
+            record.annotations["team_guidance"] = json!(guidance);
+            journal.save(record)?;
+            Ok(RpcReply::ok(json!({"accepted":true})))
+        }
         "prompt" | "steer" | "queue" => {
             let mut body = command.input;
             if command.action != "prompt" {

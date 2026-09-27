@@ -1,4 +1,4 @@
-Commit: d9b366a66dc7defa4281f484dd00b2a3e208c092
+Commit: 2aa44247d199d782881b9ee64921c4c6de2e6199
 
 # Agent 调度平台
 
@@ -9,10 +9,13 @@ Server/Node 调度、DAG 定义管理、执行查看与平滑发布；细节以�
 - 节点磁盘可用块至少 10%、可用 inode 至少 20% 才接收新执行；容量读取失败或零容量拒绝准入，已有任务继续完成。
 - DAG 定义的 `max_concurrency` 可配置为 1–30，缺省 4；画布和 JSON 编辑保存同一字段。每次运行冻结定义，修改定义不会改变在跑任务的上限。
 - 兼容发布由当前 Server 信号触发独立作业；新任务转入新版本，既有任务保留所属 runtime。
+- Host 的新任务就绪状态由活动 Runtime 决定；已退休 Runtime 的休眠库存仍用于历史执行索引，但其中的旧资源错误不阻断新任务。候选 Host 在切换前以自身与 Runtime 状态验证，切换后再由公共入口验证。
 
 ## Operator 执行隔离
 
 - 每个 Operator 执行获得独立的 HOME（冻结配置快照，0600）与 workspace；bash 工具 cwd 即 workspace，resume 重建同一对目录。
+- Operator 会话创建前可选择 OpenCoder 或 Codex，并注入逐项环境变量；Codex 执行继承托管 Harness 设置，显式注入值覆盖同名托管 env，HOME 始终指向该 Operator 的隔离目录。启动选择与注入 env 随会话固定，续会话沿用。
+- 窄屏会话页将节点与会话列表置于输入区上方，Operator 启动配置与发送输入均可操作。
 - Operator 配置来自节点数据根下的专用平面（首个执行引导一次后冻结），交互端（TUI/CLI）后续保存的配置与新增的全局技能包不再影响 Operator 执行；执行技能池 = 平面包 + 内置技能。
 - 会话按创建时打上的 `kind` 泳道隔离（`operator`/`agent`/`team`/`dag`/`todos`/`project`/`brain`）；默认会话清单不显示 operator 泳道。
 

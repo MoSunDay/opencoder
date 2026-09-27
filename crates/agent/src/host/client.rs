@@ -192,9 +192,11 @@ impl Host {
             self.store
                 .assign_runtime_inventory(&runtime.id, &ids)
                 .await?;
-            runtime_ready &= inventory.snapshot.ready;
-            if let Some(error) = &inventory.snapshot.resource_error {
-                resource_errors.push(format!("{}: {error}", runtime.id));
+            if runtime.mode == "active" {
+                runtime_ready &= inventory.snapshot.ready;
+                if let Some(error) = &inventory.snapshot.resource_error {
+                    resource_errors.push(format!("{}: {error}", runtime.id));
+                }
             }
             active_loops += inventory.snapshot.active_agent_loops;
             indexes.extend(inventory.indexes);

@@ -1,4 +1,5 @@
-import { Alert, Breadcrumb, Button, Space, Spin } from 'antd';
+import { Alert, Button, Spin } from 'antd';
+import { ArrowLeftOutlined } from '@ant-design/icons';
 import { useEffect } from 'react';
 import { LayeredRunBody } from './layered/run.jsx';
 import { isLayeredView } from './layered/model.js';
@@ -11,5 +12,5 @@ export function BrainRunBody({ id, onNotice, header = null }) {
 }
 export function BrainRunView({ id, onBack, onNotice }) {
   useEffect(() => { const params = new URLSearchParams(location.search); params.set('brain_run', id); history.replaceState(null, '', `${location.pathname}?${params}${location.hash}`); }, [id]);
-  return <BrainRunBody id={id} onNotice={onNotice} header={<Space wrap><Button onClick={onBack}>返回工作台</Button><Breadcrumb items={[{ title: '大脑调度' }, { title: id }]} /></Space>} />;
+  return <BrainRunBody id={id} onNotice={onNotice} header={<Button className="brain-run-back" aria-label="返回工作台" icon={<ArrowLeftOutlined />} onClick={onBack} />} />;
 }

@@ -59,7 +59,8 @@ export function schemaVersionOf(body) {
 }
 
 export const isLayeredSnapshot = (body) => [4, 5, 6, 7].includes(schemaVersionOf(body));
-export const isLayeredView = (body) => isLayeredSnapshot(body) && !!body?.run;
+export const isLayeredView = (body) => isLayeredSnapshot(body) && !!body?.run
+  && (schemaVersionOf(body) !== 7 || (Array.isArray(body?.plan?.layers) && Array.isArray(body?.plan?.nodes) && Array.isArray(body?.layers)));
 export const layeredPhase = (view) => asText(view?.run?.phase) || 'ready';
 export const terminalPhase = (phase) => LAYERED_TERMINAL.includes(phase);
 

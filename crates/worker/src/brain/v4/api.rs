@@ -74,6 +74,20 @@ pub async fn handle(
             }
             return Ok(RpcReply::ok(json!({"acknowledged":generation})));
         }
+        "layered_guidance_ack" => {
+            let seq = input["seq"].as_u64().context("guidance seq required")?;
+            ensure!(
+                seq <= snapshot.run.last_event_seq,
+                "guidance acknowledgement exceeds event watermark"
+            );
+            if record.annotations["layered_guidance_ack"]
+                .as_u64()
+                .is_none_or(|ack| seq > ack)
+            {
+                state::annotate(worker, id, "layered_guidance_ack", json!(seq)).await?;
+            }
+            return Ok(RpcReply::ok(json!({"acknowledged":seq})));
+        }
         "layered_dispatch_ack" => {
             let operation_id = input["operation_id"]
                 .as_str()
@@ -135,6 +149,7 @@ pub async fn handle(
                     && context.schema_version == 7
                     && context.request == request
                     && context.operations == layered::relevant_operations(&snapshot)
+                    && context.guidance_only == !layered::barrier(&snapshot)
                     && context.layer == snapshot.run.layer
                     && context.run.as_ref() == Some(&snapshot.run),
                 "layered context identity mismatch"
@@ -147,6 +162,29 @@ pub async fn handle(
             change
                 .events
                 .push(layered::event(&change.run, "decision_started", None));
+            change
+        }
+        "human_input" => {
+            ensure!(!snapshot.run.phase.terminal(), "run is terminal");
+            let text = input["text"].as_str().context("text required")?.trim();
+            ensure!(
+                !text.is_empty() && text.len() <= 4096,
+                "text must contain 1..4096 bytes"
+            );
+            let mut change = layered::change(&snapshot, now_ms());
+            change.run.pending_guidance = true;
+            let mut event = layered::event(&change.run, "human_input", None);
+            event.user_input = Some(text.to_owned());
+            change.events.push(event);
+            if matches!(
+                snapshot.run.phase,
+                LayeredPhase::Deciding | LayeredPhase::Waiting | LayeredPhase::Blocked
+            ) {
+                change.run.phase = LayeredPhase::Ready;
+                if snapshot.run.phase == LayeredPhase::Deciding {
+                    state::annotate(worker, id, "layered_context", Value::Null).await?;
+                }
+            }
             change
         }
         "set_round_budget" => {
@@ -202,7 +240,12 @@ pub async fn handle(
             // The durable intent outlives every admission and retry of its own
             // layer, so it only fences the layer it was decided for: its
             // generation must never be newer than the committed projection.
-            let allowed = snapshot.run.phase == LayeredPhase::Waiting
+            let allowed = (snapshot.run.phase == LayeredPhase::Waiting
+                || (snapshot.run.pending_guidance
+                    && matches!(
+                        snapshot.run.phase,
+                        LayeredPhase::Ready | LayeredPhase::Deciding
+                    )))
                 && op.activation == snapshot.run.activation
                 && op.capability_id == capability.capability_id
                 && assignment["node_id"] == op.node_id
@@ -261,6 +304,10 @@ pub async fn handle(
                 .context("rejected dispatch already terminal")?
             } else {
                 let mut change = layered::change(&snapshot, now_ms());
+                if snapshot.run.phase == LayeredPhase::Deciding && snapshot.run.pending_guidance {
+                    // Admission changes the finite guidance context; wake a fresh one.
+                    change.run.phase = LayeredPhase::Ready;
+                }
                 change
                     .operations
                     .iter_mut()
@@ -315,6 +362,11 @@ pub async fn handle(
     // collecting an outbox report (which would trigger another report).
     opencoder_session::loop_registry::notify_change();
     state::settle(worker, &next).await?;
+    if action == "human_input" && snapshot.run.phase == LayeredPhase::Deciding {
+        if let Some(active) = worker.inner.active.lock().await.get(id).cloned() {
+            active.cancel();
+        }
+    }
     if action == "layered_context" && next.run.phase == LayeredPhase::Deciding {
         // The root is normally idle after emitting its wake. Installing the
         // context only changes the durable projection; enqueue a fresh
@@ -347,7 +399,10 @@ async fn requeue_decision(worker: &Worker, id: &str) -> Result<()> {
             .get(id)
             .cloned()
             .context("root execution missing while queueing layered decision")?;
-        if record.assignment.index.status != ExecutionStatus::Idle {
+        if !matches!(
+            record.assignment.index.status,
+            ExecutionStatus::Idle | ExecutionStatus::Interrupted
+        ) {
             return Ok(());
         }
         let config = record

@@ -133,6 +133,10 @@ pub async fn delete_todo(pool: &MySqlPool, starrocks: bool, id: &str) -> Result<
     }
     let stmts = [
         (
+            "DELETE FROM project_todo_executions WHERE todo_id = ?",
+            id.to_string(),
+        ),
+        (
             "DELETE FROM project_todo_runs WHERE todo_id = ?",
             id.to_string(),
         ),

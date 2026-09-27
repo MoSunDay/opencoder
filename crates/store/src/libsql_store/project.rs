@@ -126,9 +126,13 @@ fn row_to_goal(r: &libsql::Row) -> Result<ProjectGoalRecord> {
 
 // ---- milestones ----
 
-pub async fn create_milestone(conn: &Connection, rec: &ProjectMilestoneRecord) -> Result<()> {
+pub async fn create_milestone(
+    conn: &Connection,
+    rec: &ProjectMilestoneRecord,
+    kind: &str,
+) -> Result<()> {
     conn.execute(
-        "INSERT INTO project_milestones (id, goal_id, title, detail_md, status, sort_key, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)",
+        "INSERT INTO project_milestones (id, goal_id, title, detail_md, status, sort_key, created_at, updated_at, kind) VALUES (?,?,?,?,?,?,?,?,?)",
         params![
             rec.id.as_str(),
             rec.goal_id.as_deref(),
@@ -137,7 +141,8 @@ pub async fn create_milestone(conn: &Connection, rec: &ProjectMilestoneRecord) -
             rec.status.as_str(),
             rec.sort,
             rec.created_at,
-            rec.updated_at
+            rec.updated_at,
+            kind
         ],
     )
     .await
@@ -150,6 +155,7 @@ pub async fn patch_milestone(
     id: &str,
     patch: &ProjectMilestonePatch,
     now_ms: i64,
+    kind: &str,
 ) -> Result<bool> {
     let mut sets: Vec<&'static str> = Vec::new();
     let mut vals: Vec<Value> = Vec::new();
@@ -176,10 +182,11 @@ pub async fn patch_milestone(
     sets.push("updated_at = ?");
     vals.push(now_ms.into());
     let sql = format!(
-        "UPDATE project_milestones SET {} WHERE id = ?",
+        "UPDATE project_milestones SET {} WHERE id = ? AND kind = ?",
         sets.join(", ")
     );
     vals.push(id.into());
+    vals.push(kind.into());
     let n = conn
         .execute(&sql, vals)
         .await
@@ -188,9 +195,15 @@ pub async fn patch_milestone(
 }
 
 /// Only empty milestones can be deleted; associations must be changed explicitly.
-pub async fn delete_milestone(conn: &Connection, id: &str) -> Result<bool> {
+pub async fn delete_milestone(conn: &Connection, id: &str, kind: &str) -> Result<bool> {
     super::tx::run_tx(conn, "BEGIN IMMEDIATE", || async move {
-        if !exists(conn, "SELECT 1 FROM project_milestones WHERE id = ?1", id).await? {
+        let stmt = conn
+            .prepare("SELECT 1 FROM project_milestones WHERE id = ?1 AND kind = ?2")
+            .await?;
+        let mut rows = stmt.query(params![id, kind]).await?;
+        let found = rows.next().await?.is_some();
+        drop(rows);
+        if !found {
             return Ok(false);
         }
         if exists(
@@ -214,16 +227,17 @@ pub async fn delete_milestone(conn: &Connection, id: &str) -> Result<bool> {
 pub async fn list_milestones(
     conn: &Connection,
     goal_id: Option<&str>,
+    kind: &str,
 ) -> Result<Vec<ProjectMilestoneRecord>> {
-    let mut sql = format!("SELECT {MILESTONE_COLS} FROM project_milestones");
+    let mut sql = format!("SELECT {MILESTONE_COLS} FROM project_milestones WHERE kind = ?");
     if goal_id.is_some() {
-        sql.push_str(" WHERE goal_id = ?");
+        sql.push_str(" AND goal_id = ?");
     }
     sql.push_str(" ORDER BY sort_key, created_at");
     let stmt = conn.prepare(&sql).await?;
     let mut rows = match goal_id {
-        Some(g) => stmt.query(params![g]).await?,
-        None => stmt.query(()).await?,
+        Some(g) => stmt.query(params![kind, g]).await?,
+        None => stmt.query(params![kind]).await?,
     };
     let mut out = Vec::new();
     while let Some(r) = rows.next().await? {
@@ -261,6 +275,21 @@ impl ProjectStore for LibsqlStore {
         "libsql"
     }
 
+    async fn list_todo_execution_ids(&self, todo_id: &str) -> Result<Vec<String>> {
+        let _guard = self.db_lock.lock().await;
+        super::project_links::list(&self.conn().await?, todo_id).await
+    }
+
+    async fn link_todo_execution(&self, todo_id: &str, execution_id: &str) -> Result<()> {
+        let _guard = self.db_lock.lock().await;
+        super::project_links::link(&self.conn().await?, todo_id, execution_id).await
+    }
+
+    async fn unlink_todo_execution(&self, todo_id: &str, execution_id: &str) -> Result<bool> {
+        let _guard = self.db_lock.lock().await;
+        super::project_links::unlink(&self.conn().await?, todo_id, execution_id).await
+    }
+
     async fn create_goal(&self, rec: &ProjectGoalRecord) -> Result<()> {
         let _guard = self.db_lock.lock().await;
         let conn = self.conn().await?;
@@ -285,7 +314,7 @@ impl ProjectStore for LibsqlStore {
     async fn create_milestone(&self, rec: &ProjectMilestoneRecord) -> Result<()> {
         let _guard = self.db_lock.lock().await;
         let conn = self.conn().await?;
-        create_milestone(&conn, rec).await
+        create_milestone(&conn, rec, "milestone").await
     }
     async fn patch_milestone(
         &self,
@@ -295,17 +324,39 @@ impl ProjectStore for LibsqlStore {
     ) -> Result<bool> {
         let _guard = self.db_lock.lock().await;
         let conn = self.conn().await?;
-        patch_milestone(&conn, id, patch, now_ms).await
+        patch_milestone(&conn, id, patch, now_ms, "milestone").await
     }
     async fn delete_milestone(&self, id: &str) -> Result<bool> {
         let _guard = self.db_lock.lock().await;
         let conn = self.conn().await?;
-        delete_milestone(&conn, id).await
+        delete_milestone(&conn, id, "milestone").await
     }
     async fn list_milestones(&self, goal_id: Option<&str>) -> Result<Vec<ProjectMilestoneRecord>> {
         let _guard = self.db_lock.lock().await;
         let conn = self.conn().await?;
-        list_milestones(&conn, goal_id).await
+        list_milestones(&conn, goal_id, "milestone").await
+    }
+
+    async fn create_initiative(&self, rec: &ProjectMilestoneRecord) -> Result<()> {
+        let _guard = self.db_lock.lock().await;
+        create_milestone(&self.conn().await?, rec, "initiative").await
+    }
+    async fn patch_initiative(
+        &self,
+        id: &str,
+        patch: &ProjectMilestonePatch,
+        now_ms: i64,
+    ) -> Result<bool> {
+        let _guard = self.db_lock.lock().await;
+        patch_milestone(&self.conn().await?, id, patch, now_ms, "initiative").await
+    }
+    async fn delete_initiative(&self, id: &str) -> Result<bool> {
+        let _guard = self.db_lock.lock().await;
+        delete_milestone(&self.conn().await?, id, "initiative").await
+    }
+    async fn list_initiatives(&self, goal_id: Option<&str>) -> Result<Vec<ProjectMilestoneRecord>> {
+        let _guard = self.db_lock.lock().await;
+        list_milestones(&self.conn().await?, goal_id, "initiative").await
     }
 
     async fn create_todo(&self, rec: &ProjectTodoRecord) -> Result<()> {

@@ -1,6 +1,4 @@
 import { DagRunResult } from '../dag/run/result.jsx';
-import { RunReplay } from '../project/replay/run.jsx';
-import { submitAttempt } from '../project/replay/attempt.js';
 import { Alert, Button, Collapse, Descriptions, Drawer, Empty, Input, Progress, Select, Space, Spin, Typography } from 'antd';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { apiGet, apiPost } from '../api.js';
@@ -54,7 +52,7 @@ export function ExecutionDetail({ id, summary, onClose, onNotice, managed = fals
   </Drawer>;
 }
 
-export function ExecutionView({ executionRef, summary, onNotice, mode = 'full', managed = false }) {
+export function ExecutionView({ executionRef, summary, onNotice, mode = 'full', managed = false, allowGuidance = false, onGuidance }) {
   const id = executionRef.id;
   const [childId, setChildId] = useState(null);
   const [detail, setDetail] = useState(null);
@@ -82,10 +80,9 @@ export function ExecutionView({ executionRef, summary, onNotice, mode = 'full', 
   const index = detail?.execution || summary || null;
   const kind = detail?.request?.kind || index?.kind;
   const detailReady = detail?.execution?.id === id;
-  const isProjectRun = kind === 'project' && id.startsWith('prun-');
-  const hasMessages = detailReady && (['agent', 'maintenance', 'operator'].includes(kind) || (isProjectRun && !!detail?.run?.session_id));
+  const hasMessages = detailReady && ['agent', 'maintenance', 'operator'].includes(kind);
   useEffect(() => {
-    if (!detailReady || !id || !kind || isProjectRun || ['agent', 'maintenance', 'dag', 'operator'].includes(kind)) return undefined;
+    if (!detailReady || !id || !kind || ['agent', 'maintenance', 'dag', 'operator'].includes(kind)) return undefined;
     const stream = openStream({ path: `/api/executions/${encodeURIComponent(id)}/events`, after: 0, executionHistory: true,
       onFrame: (frame) => {
         setEvents((rows) => appendEvent(rows, frame));
@@ -95,7 +92,7 @@ export function ExecutionView({ executionRef, summary, onNotice, mode = 'full', 
       onStatus: (status) => { if (status === 'failed') setError('节点事件流连接失败，可刷新重试'); },
     });
     return () => stream.abort();
-  }, [id, kind, isProjectRun, detailReady, load]);
+  }, [id, kind, detailReady, load]);
   const loadMessages = useCallback(async ({ reset = false, rewind = false, cursor = null, leading = new Uint8Array(), windowIndex = 0 } = {}) => {
     if (!id || !hasMessages) return;
     setMessagesBusy(true);
@@ -148,14 +145,18 @@ export function ExecutionView({ executionRef, summary, onNotice, mode = 'full', 
     setBusy(true);
     try {
       const path = `/api/executions/${encodeURIComponent(id)}/commands`;
-      if (kind === 'project' && ['plan', 'execute'].includes(action)) await submitAttempt(id.slice(8), action, input, path);
-      else await apiPost(path, { action, input }); setPrompt(''); setRevision((v) => v + 1); await load(); }
+      await apiPost(path, { action, input }); setPrompt(''); setRevision((v) => v + 1); await load(); }
     catch (e) { onNotice?.(err(e.message)); }
     finally { setBusy(false); }
   };
+  const submitGuidance = async () => {
+    if (!prompt.trim() || !onGuidance) return;
+    setBusy(true);
+    try { if (await onGuidance(prompt)) setPrompt(''); }
+    finally { setBusy(false); }
+  };
   const execution = index;
-  const projectRunnable = ['idle', 'interrupted', 'error'].includes(execution?.status);
-  const actions = isProjectRun ? {} : executionActions(execution);
+  const actions = executionActions(execution);
   const unavailable = !detail && !!error;
   return <div className={`execution-view-${mode}`}>
     {error && <Alert type="error" showIcon title={error} />}
@@ -171,7 +172,6 @@ export function ExecutionView({ executionRef, summary, onNotice, mode = 'full', 
       <Button disabled={busy || unavailable || !actions.resume} onClick={() => command('resume')}>在原节点恢复</Button>
       <Button disabled={busy || unavailable || !actions.interrupt} onClick={() => command('interrupt')}>中断（可恢复）</Button>
       <Button danger disabled={busy || unavailable || !actions.cancel} onClick={() => command('cancel')}>取消（终止）</Button>
-      {kind === 'project' && !isProjectRun && <><Button disabled={busy || unavailable || !projectRunnable} onClick={() => command('plan')}>生成计划</Button><Button disabled={busy || unavailable || !projectRunnable || !detail?.todo?.plan_md} onClick={() => command('execute')}>执行计划</Button></>}
     </Space>}
     {detail?.error && <Alert type="error" title={detail.error} />}
     {hasMessages && <div className="execution-messages">
@@ -191,9 +191,9 @@ export function ExecutionView({ executionRef, summary, onNotice, mode = 'full', 
       {!messages.large?.length && (messages.more || messages.partial) && <Button block loading={messagesBusy} onClick={nextMessages}>继续加载消息</Button>}
       {messagesBusy && !messages.messages.length && !messages.partial ? <Spin size="small" /> : null}
     </div>}
-    {!managed && ['agent', 'maintenance', 'operator'].includes(kind) && <Space orientation="vertical" style={{ width: '100%', marginTop: 16 }}>
-      <Input.TextArea disabled={unavailable} value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="继续会话" rows={3} />
-      <Space><Select value={delivery} onChange={setDelivery} options={[{ value: 'prompt', label: '发送' }, { value: 'steer', label: '指导当前执行' }, { value: 'queue', label: '加入队列' }]} /><Button type="primary" disabled={!prompt.trim()} loading={busy} onClick={() => command(delivery, { prompt })}>提交</Button></Space>
+    {((!managed && ['agent', 'maintenance', 'operator'].includes(kind)) || (allowGuidance && !!onGuidance && ['agent', 'operator', 'team'].includes(kind))) && <Space orientation="vertical" style={{ width: '100%', marginTop: 16 }}>
+      <Input.TextArea disabled={!managed && unavailable} value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder={managed ? '补充信息，由大脑决定后续调度' : '继续会话'} rows={3} />
+      <Space>{!managed && <Select value={delivery} onChange={setDelivery} options={[{ value: 'prompt', label: '发送' }, { value: 'steer', label: '指导当前执行' }, { value: 'queue', label: '加入队列' }]} />}<Button type="primary" disabled={!prompt.trim() || busy} loading={busy} onClick={managed ? submitGuidance : () => command(delivery, { prompt })}>{managed ? '提交给大脑' : '提交'}</Button></Space>
     </Space>}
     {kind === 'dag' && (detail?.definition?.spec || detail?.definition)?.steps && <DagRunResult key={id} id={id}
       spec={detail.definition.spec || detail.definition} status={execution?.status}
@@ -206,9 +206,8 @@ export function ExecutionView({ executionRef, summary, onNotice, mode = 'full', 
     {mode === 'full' && kind === 'brain' && <BrainRunEmbed id={id} onNotice={onNotice} />}
     {mode === 'full' && kind === 'todos' && <TodoRunEmbed id={id} />}
     <WorkloadDetail id={id} detail={detail} kind={kind} onOpen={setChildId} />
-    {isProjectRun && detail?.run && <RunReplay id={id} detail={detail} onOpen={setChildId} />}
     <DetailFields id={id} detail={detail} />
-    {!isProjectRun && kind !== 'dag' && <Collapse style={{ marginTop: 16 }} items={[
+    {kind !== 'dag' && <Collapse style={{ marginTop: 16 }} items={[
       { key: 'events', label: `执行事件（最近 ${events.length} 条）`, children: events.map((e, i) => <div key={`${e.seq}-${i}`}><pre style={{ whiteSpace: 'pre-wrap' }}>#{e.seq} {e.event} {e.data?.omitted ? '内容较大，可分段查看' : e.text}</pre>{e.data?.omitted && e.data?.read_via === 'event_payload' ? <PayloadWindows id={id} marker={e.data} seq={e.seq} label="分段查看事件内容" /> : null}</div>) },
     ]} />}
     {childId && <ExecutionDetail key={childId} id={childId} onClose={() => setChildId(null)} onNotice={onNotice} managed={managed} />}

@@ -32,7 +32,7 @@ pub fn request(_id: &str) -> Value {
                     "capability_id": "cap-review", "layer_id":"review-layer", "objective":"review changes",
                     }
             ],
-            "layers":[{"layer_id":"scan-layer","title":"Scan","objective":"scan repository","success_criteria":"find relevant code"},{"layer_id":"review-layer","title":"Review","objective":"review changes","success_criteria":"review passed"}],
+            "layers":[{"layer_id":"scan-layer","title":"Scan","task":"scan repository","objective":"scan repository","success_criteria":"find relevant code"},{"layer_id":"review-layer","title":"Review","task":"review changes","objective":"review changes","success_criteria":"review passed"}],
             "transitions":[{"from":"scan-layer","to":"review-layer","condition":"scan passed"},{"from":"scan-layer","to":"scan-layer","condition":"scan failed"},{"from":"review-layer","to":"scan-layer","condition":"review failed"}],
             "edges": [],
             "max_rounds": 4

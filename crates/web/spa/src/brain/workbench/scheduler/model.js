@@ -64,6 +64,7 @@ export function convertPlan(plan) {
   if (![4, 5, 6].includes(plan.schema_version)) throw new Error('不支持此计划的转换');
   const levels = planLayers(plan);
   const layers = levels.map((ids, index) => ({ layer_id: `layer-${index + 1}`, title: plan.nodes.find((n) => n.node_id === ids[0])?.title || `里程碑 ${index + 1}`,
+    task: plan.nodes.filter((n) => ids.includes(n.node_id)).map((n) => n.objective || n.title).join('；'),
     objective: plan.nodes.filter((n) => ids.includes(n.node_id)).map((n) => n.objective || n.title).join('；'),
     success_criteria: plan.nodes.filter((n) => ids.includes(n.node_id)).map((n) => n.success_criteria).filter(Boolean).join('；') || '本层执行项全部达标' }));
   const nodes = plan.nodes.flatMap((node) => (node.capability_ids?.length ? node.capability_ids : [node.capability_id]).map((capability_id, index) => ({

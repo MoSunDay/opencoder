@@ -275,9 +275,9 @@ describe('App shell landmarks (antd 6 under jsdom)', () => {
     // Real interaction flow: open the goals tab, 新建目标 modal, fill the
     // form, submit — the fetch router answers 200 so GoalsTab reports
     // ok('目标已创建') and the shell paints it green (R1 fix).
-    fireEvent.click(await screen.findByRole('tab', { name: '项目目标' }));
+    fireEvent.click(await screen.findByRole('tab', { name: '项目' }));
     await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
-    fireEvent.click(await screen.findByText('新建目标'));
+    fireEvent.click(await screen.findByText('新建项目'));
     await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
     fireEvent.change(screen.getByPlaceholderText('一句话标题'), { target: { value: '新目标' } });
     // antd auto-inserts a space between the CJK glyphs (保 存) — strip it.
@@ -285,7 +285,7 @@ describe('App shell landmarks (antd 6 under jsdom)', () => {
     expect(save).toBeTruthy();
     fireEvent.click(save);
     const alert = await screen.findByRole('alert');
-    expect(alert.textContent).toContain('目标已创建');
+    expect(alert.textContent).toContain('项目已创建');
     expect(alert.className).toContain('ant-alert-success');
     expect(alert.className).not.toContain('ant-alert-error');
   });
@@ -448,7 +448,7 @@ describe('App shell landmarks (antd 6 under jsdom)', () => {
     expect(await screen.findByText('工作台')).toBeTruthy();
   });
 
-  it('scopes the project category to its three menu items', async () => {
+  it('scopes the project category to its workbench', async () => {
     setCredentials('smoke-token', '');
     render(<App />);
     const sider = within(document.querySelector('.fleet-sidebar'));
@@ -457,9 +457,6 @@ describe('App shell landmarks (antd 6 under jsdom)', () => {
     // Menuitem names carry the icon glyph's own aria-label → match by regex
     // (same convention as the surrounding landmark assertions).
     expect(await screen.findByRole('menuitem', { name: /项目/ })).toBeTruthy();
-    // Iteration 4 pages ride under the same category menu.
-    expect(screen.getByRole('menuitem', { name: /进展/ })).toBeTruthy();
-    expect(screen.getByRole('menuitem', { name: /Owner 视角/ })).toBeTruthy();
     expect(screen.queryByRole('menuitem', { name: /大脑调度/ })).toBeNull();
     expect(screen.queryByRole('menuitem', { name: /节点列表/ })).toBeNull();
   });

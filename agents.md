@@ -1,8 +1,8 @@
-Commit: 3b4775905c950f64433b5c9f4439f4396674b3c6
+Commit: 6ab6ec63595b45b7440f047d768fff7108a6ab04
 
 # OpenCoder 逻辑地图
 
-Rust 原生编码代理 workspace：`opencoder`（本地 CLI/TUI）、`opencode-cli`（远程管理）、`opencoder-server`（控制面）、`opencoder-agent`（节点执行）。
+Rust 原生编码代理 workspace：`opencoder`（本地 CLI/TUI）、`opencoder-cli`（远程管理）、`opencoder-server`（控制面）、`opencoder-agent`（节点执行）。
 
 抽象口子：`Arc<dyn Store>`、`Arc<dyn ChatStream>`。细节见各模块索引，代码是最终事实。
 
@@ -19,8 +19,9 @@ Rust 原生编码代理 workspace：`opencoder`（本地 CLI/TUI）、`opencode-
 - [agents/dag](agents/dag/index.md) — DAG 纯域 + 线协议（DTO LOCKED）。
 - [agents/dag-wasm](agents/dag-wasm/index.md) — DAG wasm 模块版本池：发布、NFS 导出、节点冻结分发。
 - [agents/dag-runtime](agents/dag-runtime/index.md) — 节点侧 DAG 调度执行；server 不链接。
+- [agents/dag-review-tools](agents/dag-review-tools/index.md) — code-review 发布门禁 wasm 模块的纯编排逻辑与 op 证据契约。
 - [agents/todos](agents/todos/index.md) — 持久化 TODO 工作流：每 TODO 独立 Primary Session。
-- [agents/project](agents/project/index.md) — 项目跟踪：goal→milestone→todo，`ProjectStore` 接缝。
+- [agents/project](agents/project/index.md) — 项目、里程碑、专项与 TODO 数据；旧执行链独立保留。
 - [agents/brain](agents/brain/index.md) — 能力库、版本化 step/连线计划、唯一 v4 分层调度与嵌套计划。
 - [agents/agents](agents/agents/index.md) — 版本化自定义 Agent：共享池 `v{n}` + meta.json 引用卡 + NFS 只读导出。
 - [agents/team](agents/team/index.md) — 团队目录与消息扇出运行时。

@@ -44,7 +44,7 @@ OpenCoder is a fully independent, Rust-native coding agent implemented from scra
 
 ## ✨ Features
 
-- **🧠 Multi-mode runtime** — TUI interaction, headless `run`, `server` (HTTP/JSON + SSE), and `client` remote thin frontend; all four entry points share the same session runtime.
+- **🧠 Multi-mode runtime** — Local TUI and headless `run` share the session runtime; dedicated `opencoder-server` and `opencoder-agent` binaries provide Fleet control and node execution.
 - **🔄 Session resume & fork** — `--session <id>` / `--continue` / `--fork` rebuild history from libsql across processes; titles are generated asynchronously by the small model.
 - **📦 Session binary export/import** — `session export/import` carries the full subagent tree in a `.opencoder` binary (`OPENCODR` magic) for migration; idempotent and never exports Config (API key safe).
 - **🛠️ Subagent scheduling** — two subagent kinds, `explore` (read-only investigation) and `build` (implementation execution), with DB-tracked lifecycles and collapsible views.
@@ -116,14 +116,14 @@ opencoder
 # 2) Headless one-shot run, output to stdout
 opencoder run "Implement an LRU cache in Rust with tests"
 
-# 3) Start the server (centralized storage + LLM gateway + SSE); another machine connects via client
-opencoder server --host 0.0.0.0 --port 8080
-opencoder client --remote http://127.0.0.1:8080 "Summarize this repo's architecture"
+# 3) Start the Fleet server and connect an execution node from another machine
+opencoder-server --host 0.0.0.0 --port 8080 --token-file /secure/path/token
+opencoder-agent --remote http://SERVER:8080 --name worker-1 --token-file /secure/path/token
 ```
 
 ## 🧱 Architecture
 
-OpenCoder is a Cargo workspace composed of 8 crates with strictly layered dependencies:
+OpenCoder is a Cargo workspace with layered dependencies. Its main crates include:
 
 | Crate | Responsibility |
 | --- | --- |
@@ -133,8 +133,10 @@ OpenCoder is a Cargo workspace composed of 8 crates with strictly layered depend
 | `session` | Runtime core: drain main loop, tool registration, subagent scheduling, plan bash guard, compaction, resume |
 | `tui` | ratatui interactive UI (3-pane layout, subagent folding, steer/follow-up, plan/act switch) |
 | `web` | axum HTTP + SSE session management (prompt admit / event stream / runtime switch / interrupt) |
-| `client` | Remote thin client: submits prompts and replays the stream; stores nothing locally, calls no LLM |
-| `cli` | clap frontend + headless runtime (run / tui / server / client / config / models / session) |
+| `control` / `server` | Fleet HTTP control plane and dedicated server binary |
+| `node` / `worker` / `agent` | Node connection, execution adapters, and dedicated node binary |
+| `local` / `ctl` | Local interactive and headless frontend, Fleet management CLI |
+| `brain` / `dag` / `team` / `todos` | Orchestration capabilities and execution contracts |
 
 **Key abstractions:**
 
@@ -148,8 +150,9 @@ OpenCoder is a Cargo workspace composed of 8 crates with strictly layered depend
 opencoder [OPTIONS] [PROMPT]...        # Default: enter the TUI
 opencoder run <PROMPT>                  # Headless one-shot run
 opencoder tui                           # Explicitly launch the TUI
-opencoder server [--host] [--port]      # Server (alias: serve)
-opencoder client --remote <URL> <PROMPT># Remote thin client
+opencoder-server --host <ADDR> --port <PORT> --token-file <PATH>  # Fleet server
+opencoder-agent --remote <URL> --name <NAME> --token-file <PATH> # Fleet execution node
+opencoder-cli --help                    # Fleet management CLI
 opencoder config [show]                 # Inspect merged config
 opencoder models                        # List known models
 opencoder session <list|show|delete>    # Session management (show --json is a deep-inspection view)

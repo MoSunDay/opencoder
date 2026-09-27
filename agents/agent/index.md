@@ -1,4 +1,4 @@
-Commit: 1afd5d4375cd10885aee335d3d9dbf9d396bb563
+Commit: 1565c74a3f348aeb0d550a2aae6bdcdabaf52ff5
 
 # agent 模块
 
@@ -17,6 +17,7 @@ Commit: 1afd5d4375cd10885aee335d3d9dbf9d396bb563
 
 ## 报告与发布边界
 
-- [host/client.rs](../../crates/agent/src/host/client.rs)：普通只读 RPC 不增加库存修订号；唤醒 Runtime 或清除休眠标记仍通知同步。
+- [host/client.rs](../../crates/agent/src/host/client.rs)：普通只读 RPC 不增加库存修订号；唤醒 Runtime 或清除休眠标记仍通知同步。Host 汇总全部 Runtime 索引，但只用活动 Runtime 的健康状态决定新任务准入；退休 Runtime 的休眠快照错误不阻断当前版本。
 - [rolling/deployment.py](../../scripts/platform/rolling/deployment.py)：历史 Server/Host 批量停用后统一重载 systemd；不停止保留 Runtime。
+- [rolling/probes.py](../../scripts/platform/rolling/probes.py)：切换前优先检查候选 Server 上的就绪节点；旧 Host 因退休 Runtime 状态不就绪时，改为核验已完成执行探针的候选 Runtime、候选 Host 与候选 Server 身份，切换后仍执行公共入口探针。
 - [rolling/backup.py](../../scripts/platform/rolling/backup.py)、[network/ports.py](../../scripts/platform/rolling/network/ports.py)：在线备份固定各数据库的 WAL 读取快照，端口分配探测整组可绑定性。

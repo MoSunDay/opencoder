@@ -73,3 +73,63 @@ async fn delivery_parse_and_as_str_roundtrip() {
     assert_eq!(Delivery::parse("   "), None);
     assert_eq!(Delivery::parse(" stear "), None, "a typo must stay invalid");
 }
+
+/// `events_of_kinds` (SQL override) must agree with the trait's default
+/// filter semantics: only tagged `sse_kind` rows, in seq order, empty kinds
+/// → no rows, legacy untagged rows never match.
+#[tokio::test]
+async fn events_of_kinds_filters_tagged_rows_in_seq_order() {
+    let (_dir, store) = fresh().await;
+    make_session(&store, "k", 1).await;
+    use opencoder_store::{EventKind, SessionEventRecord};
+    let row = |kind: &str, ts: i64| SessionEventRecord {
+        session_id: "k".into(),
+        kind: EventKind::Step,
+        payload: serde_json::json!({ "ts": ts }),
+        ts,
+        seq: None,
+        sse_kind: Some(kind.to_string()),
+    };
+    let legacy = SessionEventRecord {
+        session_id: "k".into(),
+        kind: EventKind::Step,
+        payload: serde_json::json!({ "legacy": true }),
+        ts: 99,
+        seq: None,
+        sse_kind: None,
+    };
+    store
+        .append_events(&[
+            row("text_delta", 1),
+            row("llm_usage", 2),
+            row("subagent_child", 3),
+            row("llm_usage", 4),
+            legacy,
+        ])
+        .await
+        .unwrap();
+
+    let picked = store
+        .events_of_kinds("k", &["llm_usage", "subagent_child"])
+        .await
+        .unwrap();
+    assert_eq!(picked.len(), 3);
+    assert_eq!(
+        picked
+            .iter()
+            .map(|r| r.sse_kind.as_deref())
+            .collect::<Vec<_>>(),
+        vec![Some("llm_usage"), Some("subagent_child"), Some("llm_usage")]
+    );
+    let seqs: Vec<i64> = picked.iter().map(|r| r.seq.unwrap()).collect();
+    assert!(seqs.windows(2).all(|w| w[0] < w[1]), "seq order preserved");
+
+    // The default-impl semantics on the same rows: untagged never matches,
+    // an empty kind list matches nothing, other sessions stay isolated.
+    assert!(store.events_of_kinds("k", &[]).await.unwrap().is_empty());
+    assert!(store
+        .events_of_kinds("missing", &["llm_usage"])
+        .await
+        .unwrap()
+        .is_empty());
+}

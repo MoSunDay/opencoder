@@ -122,6 +122,8 @@ pub async fn list_sessions(
     Json(json!({ "sessions": items })).into_response()
 }
 
+use crate::snapshot::messages_response;
+
 pub async fn get_session(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
@@ -171,33 +173,6 @@ pub async fn get_messages(
     Path(id): Path<String>,
 ) -> impl IntoResponse {
     messages_response(&state, &id).await
-}
-
-async fn messages_response(state: &AppState, id: &str) -> Response {
-    let meta = match state.store.get_session(id).await {
-        Ok(m) => m,
-        Err(e) => return error_500(format!("get_session: {e:#}")),
-    };
-    let messages = match state.store.load_messages(id).await {
-        Ok(messages) => messages,
-        Err(e) => return error_500(format!("load_messages: {e:#}")),
-    };
-    // Run-state flag for the console: lets a client tell "stream live" from
-    // "stream ended" without inferring from frames (found by real-browser
-    // acceptance of the interrupt/reconnect flow).
-    let draining = state
-        .handles
-        .lock()
-        .await
-        .get(id)
-        .map(|h| h.draining.load(std::sync::atomic::Ordering::SeqCst))
-        .unwrap_or(false);
-    let harness = match state.store.harness_runtime(id).await {
-        Ok(runtime) => runtime.unwrap_or_default().harness,
-        Err(e) => return error_500(format!("harness state: {e:#}")),
-    };
-    Json(json!({ "id": id, "meta": meta, "harness": harness, "messages": messages, "draining": draining }))
-        .into_response()
 }
 
 #[derive(Deserialize)]

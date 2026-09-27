@@ -4,6 +4,7 @@
 
 use crate::chat::ChatView;
 
+mod memory_replay;
 mod replay;
 pub use replay::rebuild_after_reset;
 pub use replay::replay_into_chat;

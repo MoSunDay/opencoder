@@ -16,7 +16,7 @@ import { apiDel, apiGet, apiPost } from './api.js';
 import { canUseNode, newId } from './fleet/model.js';
 import { useNodes } from './fleet/useNodes.js';
 import { useTranscriptStream } from './chat/useTranscriptStream.js';
-import { consumedEchoText, emptyStream, turnsFromMessages, usageFromMessages } from './reduce.js';
+import { consumedEchoText, emptyStream, turnsFromMessages, usageFromSnapshot } from './reduce.js';
 import { TranscriptView } from './transcript.jsx';
 import { DialogSidebar } from './chatSidebar.jsx';
 import { QueuePanel } from './queuePanel.jsx';
@@ -361,7 +361,7 @@ export function ChatPanel({ onNotice }) {
       if (current()) {
         const agentLane = modeKind === 'agent' ? registeredAgents : agentCatalog;
         setSessionAgent(agentLane.some((item) => item.name === agent) ? agent : agentLane[0]?.name || '');
-        setStream({ ...emptyStream(), turns: turnsFromMessages(msgs), usage: usageFromMessages(msgs) });
+        setStream({ ...emptyStream(), turns: turnsFromMessages(msgs), usage: usageFromSnapshot(j, msgs) });
       }
     } catch (e) {
       if (current()) {

@@ -258,3 +258,49 @@ fn parse_kind(s: &str) -> EventKind {
         _ => EventKind::Step,
     }
 }
+
+/// Persisted events of the given SSE kinds in seq order (the SQL override of
+/// the `events_of_kinds` default). One indexed-by-session scan filtered at
+/// the engine, so delta-heavy logs never cross the wire for kind queries.
+pub async fn of_kinds(
+    conn: &Connection,
+    session_id: &str,
+    kinds: &[&str],
+) -> Result<Vec<SessionEventRecord>> {
+    if kinds.is_empty() {
+        return Ok(Vec::new());
+    }
+    let placeholders = vec!["?"; kinds.len()].join(",");
+    let sql = format!(
+        "SELECT seq, type, payload_json, sse_kind, ts FROM session_events \
+         WHERE session_id = ? AND sse_kind IN ({placeholders}) ORDER BY seq ASC"
+    );
+    let mut args: Vec<libsql::Value> = Vec::with_capacity(kinds.len() + 1);
+    args.push(libsql::Value::Text(session_id.to_string()));
+    for kind in kinds {
+        args.push(libsql::Value::Text((*kind).to_string()));
+    }
+    let stmt = conn.prepare(&sql).await?;
+    let mut rows = stmt.query(libsql::params_from_iter(args)).await?;
+    let mut out = Vec::new();
+    while let Some(r) = rows.next().await? {
+        let seq: i64 = r.get(0)?;
+        let kind_s: String = r.get(1)?;
+        let payload_json: String = r.get(2)?;
+        let sse_kind: Option<String> = r.get(3)?;
+        let ts: i64 = r.get(4)?;
+        let payload: serde_json::Value = serde_json::from_str(&payload_json).unwrap_or_else(|e| {
+            tracing::warn!(session_id, seq, error = %e, "failed to deserialize event payload, using null");
+            serde_json::Value::Null
+        });
+        out.push(SessionEventRecord {
+            session_id: session_id.to_string(),
+            kind: parse_kind(&kind_s),
+            payload,
+            ts,
+            seq: Some(seq),
+            sse_kind,
+        });
+    }
+    Ok(out)
+}

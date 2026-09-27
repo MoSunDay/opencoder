@@ -404,6 +404,18 @@ impl SessionEvent {
         })
     }
 
+    /// Parse a persisted [`opencoder_store::SessionEventRecord`] payload back
+    /// into the event. Production rows (event sink, TUI worker, web flusher)
+    /// store the SSE wire form (`sse_kind` + `sse_data`); `resume.rs`
+    /// persists whole-event `serde` payloads instead. Try the SSE parse
+    /// first, then the enum form, so every writer round-trips.
+    pub fn from_stored(rec: &opencoder_store::SessionEventRecord) -> Option<Self> {
+        rec.sse_kind
+            .as_deref()
+            .and_then(|kind| Self::from_sse(kind, rec.payload.clone()))
+            .or_else(|| serde_json::from_value::<SessionEvent>(rec.payload.clone()).ok())
+    }
+
     /// Coarse [`EventKind`] for backward-compatible DB `type` column.
     pub fn coarse_kind(&self) -> EventKind {
         match self {

@@ -1,4 +1,4 @@
-Commit: pending
+Commit: c799d510
 
 # 记忆维护：计时、成本可证与上下文隔离
 

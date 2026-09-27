@@ -1,4 +1,4 @@
-Commit: 48f6127cb5456123c4d083b871cce8b3f7fc527c
+Commit: 24a1081aff7fd8591f860723bae5eb787edf68e9
 
 # worker 模块
 
@@ -18,7 +18,7 @@ Commit: 48f6127cb5456123c4d083b871cce8b3f7fc527c
 
 配置平面（P1）：`operations/operator_config.rs` 维护节点数据根下的 `<data>/operator-config/`（`config.json` + `mcp|cli|skills|ap|schedules` 五域文件 + `skills/` 技能包目录）。首个 Operator 执行准入时（`state.rs::configuration_for` → `operator_configuration`）从节点 live 视图 `bootstrap` 一次（0600 first-writer-wins），此后冻结：TUI/CLI 对共享 workdir 配置的保存不再进入 Operator 执行；技能冻结（P2）`freeze_skills` 把平面 `skills/` 包 + 内置 seed 写入执行 home（用户全局池永远不是来源）；`operations/launch.rs` 用 `core::skill::with_execution` 把 workload 包进执行技能根。
 
-`operations/operator_env.rs` 为 `ExecutionKind::Operator` 提供按执行的 HOME/WORKSPACE 隔离：`create()` 准入通过后把冻结配置快照（明文含 provider api key）以 0600 写入 `<data_dir>/operator/<id>/home/.opencoder/config.json`，`resolve()` 双门（快照 + workspace 目录同时存在）失败即回退节点级默认。`env_pairs()` 产出 HOME 覆盖对，fresh 会话在 how_append 之后注入 envs 尾部、经 harness envs 持久化，resume 由 `resume.rs` 重建 env_passthrough。配置加载走 core `Config::load_with_home`（候选链重定向到执行 home），web drain 栈经 `AppState.config_home` 穿参（`handle/drain.rs` `DrainContext`），执行目录由 `brain/workdir.rs` `session_dirs()` 统一裁定（Operator→workspace，缺失回退 node workdir）。Maintenance/Agent/Brain 不受影响。
+`operations/operator_env.rs` 为 `ExecutionKind::Operator` 提供按执行的 HOME/WORKSPACE 隔离：`materialize()` 在准入通过后把冻结配置快照（明文含 provider api key）以 0600 写入 `<data_dir>/operator/<id>/home/.opencoder/config.json`，`resolve()` 核验快照与 workspace。`env_pairs()` 产出 HOME 覆盖对，fresh 会话在输入 envs 之后注入，随后经 harness envs 持久化，resume 由 `resume.rs` 重建 env_passthrough。`operations/create.rs` 准入接受 Operator 的显式 Harness 选择，Codex 预检合并托管设置与输入 envs；`workloads/agent.rs` 固定所选 Harness 和环境。配置加载走 core `Config::load_with_home`，web drain 栈经 `AppState.config_home` 穿参，执行目录由 `brain/workdir.rs` `session_dirs()` 裁定。Maintenance/Agent/Brain 不受影响。
 
 会话泳道（P4）：Operator 执行的 Primary Session 创建时打 `kind='operator'`（其他 kind 同理，见 store 索引），默认清单泳道排除 operator 行；`service.rs::indexes()` 按 `row.kind` 精确解析已打标行，存量 NULL 行保留 id 前缀/标题回退。
 
@@ -26,7 +26,8 @@ Commit: 48f6127cb5456123c4d083b871cce8b3f7fc527c
 - `runtime/health.rs` 统一计算节点存储准入：可用磁盘块低于 10% 或可用 inode 低于 20% 拒绝新执行；容量读取失败、零容量仍拒绝准入。健康查询和新执行入口共用纯函数判断，已接收的工作可继续完成。
 - `operations/dag_preflight.rs` 使用本次冻结配置校验静态步骤和动态模板。runc 模式要求节点 rootfs 和 runc 可用；Codex Agent 额外校验 guest CLI 与节点登录目录，不检查 host CLI，也不要求原生 provider 凭证。实际执行和私有挂载由 dag-runtime 负责。
 - DAG 的 how 追加由 dag-runtime 写入本地副本；普通 Agent 会话资源追加由 `agent_how.rs` 管理。
-- Brain：仅 `brain/v4/`，根节点持有运行、操作与事件投影；`layer` 是已派发层。每层并行执行，全部终态后唤醒决策；模型只可选择当前层已配置的出边，回退消耗轮次；末层达标收口。既有 outbox 和 generation 保障恢复、重复回执幂等。
+- Brain：仅 `brain/v4/`，根节点持有运行、操作与事件投影；`layer` 是已派发层。每层并行执行，全部终态后唤醒决策；人工输入也唤醒一次决策，并取消正在生成的旧决策。层屏障未满足时只可 `guide`，引导动作经 `layered_guidance` outbox 按事件序列投递和确认；模型只可选择当前层已配置的出边，回退消耗轮次；末层达标收口。generation 栅栏保障恢复与重复回执幂等。
+- Team 的 `steer` 命令按 `input_id` 去重并写入执行 journal，保留最近 32 条引导；`workloads/team.rs` 在下一次成员发问时读取，正在生成的成员回答不会被打断。
 - 上限（`opencoder_brain::layered` 纯域校验）：`LAYERED_MAX_NODES=256`、`LAYERED_MAX_LAYER_WIDTH`=32/层、`LAYERED_MAX_DEPTH=3`、每节点恰好一个能力。Worker 持有模型决策、投影及 generation 栅栏；Control 解析上下文并执行准入。伪造或越权派发帧被拒绝，迟到回执不推进当前尝试。
 
 ## 相关

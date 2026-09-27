@@ -1,7 +1,5 @@
-//! `/api/project/todos` CRUD — backlog and milestone todos. `status` and
-//! `plan_md` are deliberately NOT patchable here: the todo state machine
-//! (`draft → planned → running → done|failed`) is owned by the project
-//! service's plan/execute runs (see [`crate::api_project_runs`]).
+//! `/api/project/todos` CRUD. TODO status is user-managed; execution history
+//! is linked by ID and inspected through the execution index.
 
 use std::sync::Arc;
 
@@ -13,7 +11,7 @@ use serde_json::json;
 
 use opencoder_core::message::now_ms;
 use opencoder_store::{
-    ProjectExecutorKind, ProjectTodoPatch, ProjectTodoRecord, ProjectTodoStatus,
+    ProjectExecutorKind, ProjectStore, ProjectTodoPatch, ProjectTodoRecord, ProjectTodoStatus,
 };
 
 use crate::api_project_util::{error_400, error_404, error_500, rec_list, require_deps, to_json};
@@ -22,6 +20,22 @@ use crate::AppState;
 #[derive(Deserialize)]
 pub struct TodoQuery {
     pub milestone_id: Option<String>,
+}
+
+async fn group_exists(projects: &dyn ProjectStore, id: &str) -> anyhow::Result<bool> {
+    if projects
+        .list_milestones(None)
+        .await?
+        .iter()
+        .any(|item| item.id == id)
+    {
+        return Ok(true);
+    }
+    Ok(projects
+        .list_initiatives(None)
+        .await?
+        .iter()
+        .any(|item| item.id == id))
 }
 
 /// GET /api/project/todos?milestone_id= — one milestone's todos; without the
@@ -63,7 +77,7 @@ pub struct CreateTodoBody {
     pub executor_spec: Option<Option<String>>,
 }
 
-/// POST /api/project/todos — new `draft` todo; unknown milestone → 404.
+/// POST /api/project/todos — new `draft` todo; unknown parent group → 404.
 pub async fn create_todo(
     State(state): State<Arc<AppState>>,
     Json(body): Json<CreateTodoBody>,
@@ -77,9 +91,9 @@ pub async fn create_todo(
         return error_400("todo title must not be empty");
     }
     if let Some(mid) = &body.milestone_id {
-        match deps.projects.list_milestones(None).await {
-            Ok(items) if items.iter().any(|m| &m.id == mid) => {}
-            Ok(_) => return error_404(format!("milestone not found: {mid}")),
+        match group_exists(deps.projects.as_ref(), mid).await {
+            Ok(true) => {}
+            Ok(false) => return error_404(format!("TODO group not found: {mid}")),
             Err(e) => return error_500(format!("verify milestone: {e:#}")),
         }
     }
@@ -126,6 +140,8 @@ pub struct PatchTodoBody {
     pub title: Option<String>,
     #[serde(default)]
     pub draft: Option<String>,
+    #[serde(default)]
+    pub status: Option<ProjectTodoStatus>,
     #[serde(default)]
     pub agent: Option<String>,
     /// Executor triple, same triple semantics (absent / null-clear / value).
@@ -205,10 +221,18 @@ pub async fn patch_todo(
         Some(s) if s.trim().is_empty() => return error_400("todo title must not be empty"),
         Some(s) => Some(s.trim().to_string()),
     };
+    if body.status.is_some_and(|status| {
+        !matches!(
+            status,
+            ProjectTodoStatus::Draft | ProjectTodoStatus::Planned | ProjectTodoStatus::Done
+        )
+    }) {
+        return error_400("unsupported manual todo status");
+    }
     if let Some(Some(mid)) = &body.milestone_id {
-        match deps.projects.list_milestones(None).await {
-            Ok(items) if items.iter().any(|m| &m.id == mid) => {}
-            Ok(_) => return error_404(format!("milestone not found: {mid}")),
+        match group_exists(deps.projects.as_ref(), mid).await {
+            Ok(true) => {}
+            Ok(false) => return error_404(format!("TODO group not found: {mid}")),
             Err(e) => return error_500(format!("verify milestone: {e:#}")),
         }
     }
@@ -255,9 +279,9 @@ pub async fn patch_todo(
     let patch = ProjectTodoPatch {
         title,
         draft: body.draft,
-        // Service-owned on purpose (see module doc).
+        // Old project-run snapshots are not writable through TODO CRUD.
         plan_md: None,
-        status: None,
+        status: body.status,
         agent: body.agent,
         executor_kind,
         executor_ref,

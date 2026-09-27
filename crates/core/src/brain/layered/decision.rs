@@ -18,6 +18,11 @@ pub struct LayeredAssignment {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "decision", rename_all = "snake_case", deny_unknown_fields)]
 pub enum LayeredDecision {
+    Guide {
+        reason: String,
+        #[serde(default)]
+        guidance: Vec<LayeredGuidance>,
+    },
     Block {
         reason: String,
     },
@@ -52,7 +57,20 @@ pub enum LayeredDecision {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
+pub struct LayeredGuidance {
+    pub execution_id: String,
+    pub message: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct LayeredContext {
+    #[serde(default)]
+    pub guidance_only: bool,
+    #[serde(default)]
+    pub guidance_notes: Vec<String>,
+    #[serde(default)]
+    pub human_inputs: Vec<String>,
     #[serde(default)]
     pub run: Option<super::LayeredRun>,
     pub schema_version: u32,

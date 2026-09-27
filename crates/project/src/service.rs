@@ -149,6 +149,11 @@ impl ProjectService {
             .list_milestones(None)
             .await
             .context("list milestones")?;
+        let initiatives = deps
+            .projects
+            .list_initiatives(None)
+            .await
+            .context("list initiatives")?;
         let todos = deps.projects.list_todos(None).await.context("list todos")?;
         let todos = todos
             .iter()
@@ -157,6 +162,7 @@ impl ProjectService {
         Ok(opencoder_store::project::overview::overview(
             &goals,
             &milestones,
+            &initiatives,
             &todos,
         ))
     }

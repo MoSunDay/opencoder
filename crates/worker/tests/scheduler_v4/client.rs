@@ -68,6 +68,26 @@ impl ChatStream for LayeredClient {
             let forced = self.forced.lock().unwrap().pop_front();
             match forced {
                 Some(decision) => decision.to_string(),
+                None if instruction["guidance_only"] == true => {
+                    let guidance: Vec<_> = instruction["operations"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .filter(|op| op["status"] == "running" && op["execution_kind"] == "agent")
+                        .map(|op| {
+                            json!({
+                                "execution_id":op["execution_id"],
+                                "message":"Apply the new human verification constraint now"
+                            })
+                        })
+                        .collect();
+                    json!({
+                        "decision":"guide",
+                        "reason":"Use the new human input at the next layer decision",
+                        "guidance":guidance
+                    })
+                    .to_string()
+                }
                 None if self.reflect_once
                     && instruction["run"]["round"].as_u64() == Some(1)
                     && instruction["run"]["layer"].as_u64()

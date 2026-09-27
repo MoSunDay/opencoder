@@ -30,14 +30,17 @@ opencoder --session <id> "继续"    # 恢复指定会话
 opencoder --fork "继续"            # 恢复前复制会话，原会话保持不变
 opencoder --model anthropic/claude-3 "..."   # 覆盖模型（{provider}/{model_id}）
 opencoder --image screenshot.png "看看这个截图"  # 附带图片（需 vision 模型）
+opencoder tui --wrap codex --envs CODEX_HOME=/path/to/codex-home  # 用 Codex 启动 TUI
 ```
+
+`--envs KEY=VALUE` 可重复指定；值会原样传给 Codex 子进程。会话创建后，执行器与环境变量固定；TUI 内 `/task` 新建任务会沿用启动参数，恢复已有任务则使用该任务保存的参数。
 
 ### 远程与 tmux
 
 ```bash
-# 远程：一台机器起 server，另一台用 client 接入
-opencoder server --host 0.0.0.0 --port 8080
-opencoder client --remote http://127.0.0.1:8080 "总结这个仓库的架构"
+# Fleet：一台机器起服务端，另一台接入执行节点
+opencoder-server --host 0.0.0.0 --port 8080 --token-file /secure/path/token
+opencoder-agent --remote http://SERVER:8080 --name worker-1 --token-file /secure/path/token
 
 # tmux：SSH 断线后会话存活，重连后自动 reattach
 opencoder ts          # 新建/恢复 tmux 会话

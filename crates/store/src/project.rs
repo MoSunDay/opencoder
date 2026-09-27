@@ -50,7 +50,7 @@ pub trait ProjectStore: Send + Sync {
     async fn create_goal(&self, rec: &ProjectGoalRecord) -> Result<()>;
     /// `false` = id not found. Always stamps `updated_at = now_ms`.
     async fn patch_goal(&self, id: &str, patch: &ProjectGoalPatch, now_ms: i64) -> Result<bool>;
-    /// Detach milestones and delete only the goal, preserving all work.
+    /// Detach milestones and initiatives; preserve their TODOs.
     async fn delete_goal(&self, id: &str) -> Result<bool>;
     /// Ordered by `sort` then `created_at`.
     async fn list_goals(&self) -> Result<Vec<ProjectGoalRecord>>;
@@ -69,6 +69,16 @@ pub trait ProjectStore: Send + Sync {
     /// `goal_id == None` lists across all goals; ordered by `sort` then
     /// `created_at`.
     async fn list_milestones(&self, goal_id: Option<&str>) -> Result<Vec<ProjectMilestoneRecord>>;
+
+    async fn create_initiative(&self, rec: &ProjectMilestoneRecord) -> Result<()>;
+    async fn patch_initiative(
+        &self,
+        id: &str,
+        patch: &ProjectMilestonePatch,
+        now_ms: i64,
+    ) -> Result<bool>;
+    async fn delete_initiative(&self, id: &str) -> Result<bool>;
+    async fn list_initiatives(&self, goal_id: Option<&str>) -> Result<Vec<ProjectMilestoneRecord>>;
 
     // ---- todos ----
 
@@ -116,6 +126,10 @@ pub trait ProjectStore: Send + Sync {
     /// `milestone_id == None` lists ALL todos (backlog included); ordered by
     /// `created_at`.
     async fn list_todos(&self, milestone_id: Option<&str>) -> Result<Vec<ProjectTodoRecord>>;
+
+    async fn list_todo_execution_ids(&self, todo_id: &str) -> Result<Vec<String>>;
+    async fn link_todo_execution(&self, todo_id: &str, execution_id: &str) -> Result<()>;
+    async fn unlink_todo_execution(&self, todo_id: &str, execution_id: &str) -> Result<bool>;
 
     // ---- todo runs ----
 

@@ -35,6 +35,7 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/api/brain/runs", get(runs::list).post(runs::create))
         .route("/api/brain/runs/:id", get(runs::snapshot))
         .route("/api/brain/runs/:id/commands", post(runs::command))
+        .route("/api/brain/runs/:id/inputs", post(v4::input))
         .route(
             "/api/brain/runs/:id/events",
             get(crate::api::stream::events),

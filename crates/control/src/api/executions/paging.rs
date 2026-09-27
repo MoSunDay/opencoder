@@ -56,7 +56,7 @@ pub async fn list(State(state): State<Arc<AppState>>, Query(query): Query<ListQu
 /// Kind-aware display name from the dispatch-time snapshot. The five-field
 /// index DTO stays protocol-locked; the name is lifted at the JSON layer only
 /// (same contract as compat `dag_view`).
-fn display_name(kind: ExecutionKind, names: &ExecutionNames) -> Option<String> {
+pub(crate) fn display_name(kind: ExecutionKind, names: &ExecutionNames) -> Option<String> {
     match kind {
         // Team/Dag prefer the frozen definition name; the target is only a
         // fallback for assignments that predate the definition snapshot.
@@ -111,6 +111,34 @@ async fn named_page(
 }
 pub async fn inspect(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Response {
     response(super::inspect_id(&state, &id).await)
+}
+pub async fn index(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Response {
+    let index = match state.fleet.index(&id).await {
+        Ok(Some(index)) => index,
+        Ok(None) => return super::super::error_404("execution not found"),
+        Err(error) => return super::super::error_500(error.to_string()),
+    };
+    let names = match state.fleet.execution_names(&[id]).await {
+        Ok(names) => names,
+        Err(error) => return super::super::error_500(error.to_string()),
+    };
+    let mut value = json!(index);
+    let mut name = names
+        .get(&index.id)
+        .and_then(|names| display_name(index.kind, names));
+    if name.is_none() && index.kind == ExecutionKind::Brain {
+        name = match state.fleet.assignment(&index.id).await {
+            Ok(Some(assignment)) => assignment.request.input["layered_request"]["plan"]["title"]
+                .as_str()
+                .map(str::to_owned),
+            Ok(None) => None,
+            Err(error) => return super::super::error_500(error.to_string()),
+        };
+    }
+    if let Some(name) = name {
+        value["name"] = json!(name);
+    }
+    response(RpcReply::ok(value))
 }
 #[derive(Deserialize)]
 pub struct MessageQuery {

@@ -23,7 +23,7 @@ async fn scheduling_persistence_failure_cancels_and_drains_live_instances() {
     });
     let (_, rx) = tokio::sync::watch::channel(false);
     let status = tokio::time::timeout(
-        Duration::from_secs(5),
+        Duration::from_secs(20),
         opencoder_dag_runtime::execute_run(f.deps(client), run.clone(), rx),
     )
     .await

@@ -451,6 +451,15 @@ body {
 @media (max-width: 767px) {
   .fleet-sidebar { display: none; }
   .fleet-content > .fleet-mobile-nav { display: inline-flex; width: 100%; margin-bottom: 8px; }
+  .oc-chat-layout { flex-direction: column !important; }
+  .oc-chat-sidebar {
+    width: 100% !important;
+    flex: 0 0 130px;
+    border-right: 0 !important;
+    border-bottom: 1px solid var(--oc-border);
+    padding-right: 0 !important;
+    padding-bottom: 10px;
+  }
   /* Brand (163px, nowrap) + the five status/identity/action chips need ~425px
      at their min-content width, so a single row overflows 390px -- and Chromium
      mobile emulation then grows the layout viewport to the overflow (413px),

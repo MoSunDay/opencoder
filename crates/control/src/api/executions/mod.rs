@@ -44,8 +44,8 @@ pub async fn create(
 
 mod paging;
 pub use paging::{
-    detail_field, event_payload, events_page, inspect, list, messages, project_runs, team_turns,
-    todo_items, ProjectRunsQuery,
+    detail_field, event_payload, events_page, index, inspect, list, messages, project_runs,
+    team_turns, todo_items, ProjectRunsQuery,
 };
 pub async fn command(
     State(state): State<Arc<AppState>>,

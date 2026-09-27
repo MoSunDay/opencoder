@@ -14,6 +14,86 @@ fn todo(id: &str) -> ProjectTodoRecord {
 }
 
 #[tokio::test]
+async fn milestones_and_initiatives_remain_distinct_and_both_hold_todos() {
+    let store = LibsqlStore::open_memory().await.unwrap();
+    let group = ProjectMilestoneRecord {
+        id: "m1".into(),
+        goal_id: None,
+        title: "里程碑".into(),
+        detail_md: None,
+        status: ProjectMilestoneStatus::Planned,
+        sort: 0,
+        created_at: 1,
+        updated_at: 1,
+    };
+    store.create_milestone(&group).await.unwrap();
+    let initiative = ProjectMilestoneRecord {
+        id: "i1".into(),
+        title: "专项".into(),
+        ..group
+    };
+    store.create_initiative(&initiative).await.unwrap();
+    assert_eq!(
+        store
+            .list_milestones(None)
+            .await
+            .unwrap()
+            .iter()
+            .map(|item| item.id.as_str())
+            .collect::<Vec<_>>(),
+        ["m1"]
+    );
+    assert_eq!(
+        store
+            .list_initiatives(None)
+            .await
+            .unwrap()
+            .iter()
+            .map(|item| item.id.as_str())
+            .collect::<Vec<_>>(),
+        ["i1"]
+    );
+    assert!(!store
+        .patch_initiative(
+            "m1",
+            &ProjectMilestonePatch {
+                title: Some("错误类型".into()),
+                ..Default::default()
+            },
+            2,
+        )
+        .await
+        .unwrap());
+    store
+        .create_todo(&ProjectTodoRecord {
+            milestone_id: Some("i1".into()),
+            ..todo("t1")
+        })
+        .await
+        .unwrap();
+    assert!(store.delete_milestone("i1").await.unwrap() == false);
+    assert!(store.delete_initiative("i1").await.is_err());
+    let todos = store
+        .list_todos(None)
+        .await
+        .unwrap()
+        .iter()
+        .map(|item| serde_json::to_value(item).unwrap())
+        .collect::<Vec<_>>();
+    let view = opencoder_store::project::overview::overview(
+        &[],
+        &store.list_milestones(None).await.unwrap(),
+        &store.list_initiatives(None).await.unwrap(),
+        &todos,
+    );
+    assert_eq!(view["standalone_initiatives"][0]["todos"][0]["id"], "t1");
+    assert_eq!(
+        view["standalone_milestones"][0]["todos"],
+        serde_json::json!([])
+    );
+}
+
+#[tokio::test]
 async fn standalone_milestone_and_optional_todo_association_roundtrip() {
     let store = LibsqlStore::open_memory().await.unwrap();
     let milestone = ProjectMilestoneRecord {
@@ -59,7 +139,7 @@ async fn standalone_milestone_and_optional_todo_association_roundtrip() {
         .iter()
         .map(|v| serde_json::to_value(v).unwrap())
         .collect::<Vec<_>>();
-    let view = opencoder_store::project::overview::overview(&[], &rows, &todos);
+    let view = opencoder_store::project::overview::overview(&[], &rows, &[], &todos);
     assert_eq!(view["standalone_milestones"][0]["todos"][0]["id"], "t");
     assert_eq!(view["backlog"].as_array().unwrap().len(), 0);
     store
@@ -78,6 +158,42 @@ async fn standalone_milestone_and_optional_todo_association_roundtrip() {
         store.get_todo("t").await.unwrap().unwrap().draft,
         todo("t").draft
     );
+}
+
+#[tokio::test]
+async fn todo_execution_links_store_only_ids_and_cascade_on_delete() {
+    let store = LibsqlStore::open_memory().await.unwrap();
+    store.create_todo(&todo("linked")).await.unwrap();
+    store
+        .link_todo_execution("linked", "agent-a")
+        .await
+        .unwrap();
+    store
+        .link_todo_execution("linked", "agent-a")
+        .await
+        .unwrap();
+    store
+        .link_todo_execution("linked", "brain-b")
+        .await
+        .unwrap();
+    let ids = store.list_todo_execution_ids("linked").await.unwrap();
+    assert_eq!(ids.len(), 2);
+    assert!(ids.contains(&"agent-a".to_string()));
+    assert!(ids.contains(&"brain-b".to_string()));
+    assert!(store
+        .unlink_todo_execution("linked", "agent-a")
+        .await
+        .unwrap());
+    assert!(!store
+        .unlink_todo_execution("linked", "agent-a")
+        .await
+        .unwrap());
+    store.delete_todo("linked").await.unwrap();
+    assert!(store
+        .list_todo_execution_ids("linked")
+        .await
+        .unwrap()
+        .is_empty());
 }
 
 #[tokio::test]

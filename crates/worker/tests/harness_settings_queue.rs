@@ -52,6 +52,73 @@ async fn managed(fleet: &Fleet) -> (Value, std::path::PathBuf) {
 }
 
 #[tokio::test]
+async fn operator_codex_receives_launch_env_and_isolated_home() {
+    let _config = isolated_config();
+    let fleet = Fleet::new(1, mock()).await;
+    let binary = binary::fake_binary(fleet.root()).join("codex");
+    let log = fleet.root().join("operator-codex.jsonl");
+    let codex_home = fleet.root().join("codex-auth");
+    std::fs::create_dir_all(&codex_home).unwrap();
+    let saved = fleet
+        .call(
+            "PUT",
+            "/api/harnesses/codex",
+            json!({
+                "executable":binary,"envs":{"CAPTURE":log,"EXAMPLE":"managed","HOME":"/wrong/home"}
+            }),
+        )
+        .await;
+    assert_eq!(saved.status, 200, "{saved:?}");
+    let id = "operator-codex-env";
+    let created = fleet
+        .call(
+            "POST",
+            "/api/sessions",
+            json!({
+                "id":id,"node_id":fleet.nodes[0].registration().id,"agent":"act",
+                "harness":"codex","prompt":"inspect node",
+                "envs":{"EXAMPLE":"injected","CODEX_HOME":codex_home}
+            }),
+        )
+        .await;
+    assert_eq!(created.status, 200, "{created:?}");
+    let detail = settled(&fleet.nodes[0], id).await;
+    assert_eq!(detail["execution"]["status"], "idle", "{detail}");
+    let rows = capture(&log);
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert_eq!(rows[0]["env"], "injected");
+    assert_eq!(rows[0]["codex_home"], json!(codex_home));
+    assert_eq!(
+        rows[0]["home"],
+        json!(fleet.root().join("n0/node/operator").join(id).join("home"))
+    );
+    assert_eq!(
+        rows[0]["cwd"],
+        json!(fleet
+            .root()
+            .join("n0/node/operator")
+            .join(id)
+            .join("workspace"))
+    );
+    let follow_up = fleet
+        .call(
+            "POST",
+            &format!("/api/sessions/{id}/prompt"),
+            json!({"prompt":"inspect again","input_id":"operator-codex-follow-up"}),
+        )
+        .await;
+    assert_eq!(follow_up.status, 200, "{follow_up:?}");
+    let detail = settled(&fleet.nodes[0], id).await;
+    assert_eq!(detail["execution"]["status"], "idle", "{detail}");
+    let resumed = capture(&log);
+    assert_eq!(resumed.len(), 2, "{resumed:?}");
+    assert_eq!(resumed[1]["env"], "injected");
+    assert_eq!(resumed[1]["codex_home"], json!(codex_home));
+    assert_eq!(resumed[1]["home"], rows[0]["home"]);
+    fleet.shutdown().await;
+}
+
+#[tokio::test]
 async fn managed_codex_is_pinned_and_node_obeys_fifo_lifo() {
     for (order, expected) in [("fifo", ["autoA", "autoB"]), ("lifo", ["autoB", "autoA"])] {
         let client = mock();

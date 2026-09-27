@@ -274,6 +274,7 @@ pub(crate) async fn fold_ui_events(
                 match &sev {
                     SessionEvent::ToolStart { id, name, input } if name == "question" => {
                         crate::question_menu::on_tool_start(question_menu, id, input);
+                        crate::hooks::emit(crate::hooks::Event::Question);
                     }
                     SessionEvent::ToolEnd { id, .. } => {
                         crate::question_menu::on_tool_end(question_menu, id, question_hub);
@@ -447,6 +448,7 @@ pub(crate) async fn fold_ui_events(
                     *cancelled = false;
                 } else {
                     *running = false;
+                    crate::hooks::emit(crate::hooks::Event::TurnDone);
                 }
             }
         }

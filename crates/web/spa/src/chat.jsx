@@ -25,6 +25,7 @@ import { ModelModal } from './modelModal.jsx';
 import { commandsForInput, replaceToken, stripLastToken } from './commandMenu.js';
 import { BUILTIN_AGENT_HEADS, mergeBuiltinPrimaryAgentCards } from './agents/builtins.js';
 import { RUN_MODE_HINT, runModeBadge } from './agents/runMode.js';
+import { parseEnvs } from './harness/fields.jsx';
 import { clearPreselect, useStore } from './store.js';
 import { err, ok, warn } from './notice.js';
 import { MONO_VAR } from './ui/mono.js';
@@ -48,7 +49,7 @@ const MODE_OPTIONS = [
   { label: 'Agent 模式', value: 'agent' },
 ];
 
-export function ChatPanel({ onNotice }) {
+export function ChatPanel({ onNotice, onCreated, initialPrompt = '' }) {
   const { preselectNode } = useStore();
   const { nodes, error: nodesError } = useNodes();
   const [nodeSel, setNodeSel] = useState(null);
@@ -58,12 +59,15 @@ export function ChatPanel({ onNotice }) {
   const [stream, setStream] = useState(emptyStream);
   const [busy, setBusy] = useState(false);
   const [connecting, setConnecting] = useState(false);
-  const [input, setInput] = useState('');
+  const [input, setInput] = useState(initialPrompt);
   const [queueVersion, setQueueVersion] = useState(0);
   const [skills, setSkills] = useState([]);
   const [agents, setAgents] = useState([]);
   const [sessionAgent, setSessionAgent] = useState('act');
   const [modelOpen, setModelOpen] = useState(false);
+  const [launchOpen, setLaunchOpen] = useState(false);
+  const [operatorHarness, setOperatorHarness] = useState('opencoder');
+  const [operatorEnvs, setOperatorEnvs] = useState('');
   const [apOpen, setApOpen] = useState(false);
   const [annoOpen, setAnnoOpen] = useState(false);
   const [annoText, setAnnoText] = useState('');
@@ -80,7 +84,7 @@ export function ChatPanel({ onNotice }) {
   const hasNode = !!nodeSel;
   // 创建链路执行类型：Agent 模式用 agent（节点 kinds 过滤 + newId('agent') +
   // body.kind），其余一律收敛为 Operator 现状（含陌生持久化值）。
-  const modeKind = mode === 'agent' ? 'agent' : 'operator';
+  const modeKind = onCreated ? 'agent' : (mode === 'agent' ? 'agent' : 'operator');
   const laneRef = useRef({ node: nodeSel, kind: modeKind });
   if (laneRef.current.node !== nodeSel || laneRef.current.kind !== modeKind) {
     laneRef.current = { node: nodeSel, kind: modeKind };
@@ -207,8 +211,10 @@ export function ChatPanel({ onNotice }) {
     if (!sid) {
       // Creation lanes: Agent 模式 → newId('agent') + body.kind + concrete
       // agent；Operator 模式维持现状（newId('operator')，body 不带 kind）。
-      // attempt key 含模式：跨模式重试不复用旧 id。
-      createAttempt.current ||= { key: nodeSel + '|' + modeKind, id: newId(modeKind) };
+      // A changed launch configuration needs a fresh ID; identical retries
+      // retain their ID for the server's idempotent create path.
+      const attemptKey = JSON.stringify([nodeSel, modeKind, sessionAgent, operatorHarness, operatorEnvs]);
+      if (createAttempt.current?.key !== attemptKey) createAttempt.current = { key: attemptKey, id: newId(modeKind) };
       // The staged act/plan choice rides creation: POST /api/sessions accepts
       // `agent`, so the mode picked before any prompt exists is honored
       // (server stamps meta.agent and initializes the harness with it). Agent
@@ -217,6 +223,11 @@ export function ChatPanel({ onNotice }) {
       // create-then-seq-then-prompt chain could race the node's async launch
       // and fail the first Agent submission with a transient 404.
       const body = { id: createAttempt.current.id, node_id: nodeSel, agent: sessionAgent };
+      if (modeKind === 'operator') {
+        if (operatorHarness === 'codex') body.harness = 'codex';
+        const envs = parseEnvs(operatorEnvs);
+        if (Object.keys(envs).length) body.envs = envs;
+      }
       if (modeKind === 'agent') {
         body.kind = 'agent';
         body.prompt = prompt;
@@ -225,6 +236,7 @@ export function ChatPanel({ onNotice }) {
       if (!j?.id) throw new Error('服务未返回会话 ID，请重试确认');
       sid = j.id;
       if (!isCurrentLane()) return;
+      if (modeKind === 'agent') onCreated?.(sid);
       createAttempt.current = null;
       selectionRef.current = { node: nodeSel, kind: modeKind, dialog: sid };
       setDialogSel(sid);
@@ -603,7 +615,7 @@ export function ChatPanel({ onNotice }) {
     : [];
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'row', height: '100%', minHeight: 0, gap: 16 }}>
+    <div className="oc-chat-layout" style={{ display: 'flex', flexDirection: 'row', height: '100%', minHeight: 0, gap: 16 }}>
       <DialogSidebar
         nodes={nodes}
         nodeSel={nodeSel}
@@ -625,14 +637,14 @@ export function ChatPanel({ onNotice }) {
             角色，不进入该下拉；配置为空时发送被拦截并提示先去配置。
             首条需求会自动进入该 Agent 的 how，并沿用同一 transcript/Say
             渲染，便于在网页中定位具体能力。 */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-          <Segmented
+        <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
+          {!onCreated && <Segmented
             aria-label="会话模式"
             size="small"
             value={modeKind}
             options={MODE_OPTIONS}
             onChange={setMode}
-          />
+          />}
           {modeKind === 'agent' ? (
             <Select
               aria-label="执行 Agent"
@@ -676,6 +688,7 @@ export function ChatPanel({ onNotice }) {
                 </Text>
               ) : null}
               <Button size="small" disabled={!dialogSel} onClick={() => setModelOpen(true)}>模型</Button>
+              {modeKind === 'operator' && <Button size="small" disabled={!!dialogSel || busy} onClick={() => setLaunchOpen(true)}>启动配置</Button>}
             </>
           ) : null}
         </div>
@@ -735,6 +748,13 @@ export function ChatPanel({ onNotice }) {
       </div>
 
       <ModelModal open={modelOpen} sessionId={dialogSel} nodeId={nodeSel} onClose={() => setModelOpen(false)} onNotice={notice} />
+
+      <Modal title="Operator 启动配置" open={launchOpen} onCancel={() => setLaunchOpen(false)} onOk={() => { try { parseEnvs(operatorEnvs); setLaunchOpen(false); } catch (e) { notice(err(e.message)); } }}>
+        <Space orientation="vertical" style={{ width: '100%' }}>
+          <Select aria-label="Operator Harness" value={operatorHarness} options={[{ value: 'opencoder', label: 'OpenCoder' }, { value: 'codex', label: 'Codex' }]} onChange={setOperatorHarness} popupMatchSelectWidth={180} style={{ width: '100%' }} />
+          <Input.TextArea aria-label="Operator 环境变量" value={operatorEnvs} onChange={(e) => setOperatorEnvs(e.target.value)} rows={5} placeholder="每行一个 KEY=VALUE；仅在创建会话时注入" autoComplete="off" spellCheck={false} />
+        </Space>
+      </Modal>
 
       <Modal
         title="autopilot 模式"

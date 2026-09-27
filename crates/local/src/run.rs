@@ -142,7 +142,7 @@ pub async fn run_headless(cli: &Cli, prompt: String) -> Result<()> {
     let envs: std::collections::BTreeMap<_, _> = cli.envs.iter().cloned().collect();
     if resume_id.is_some() {
         anyhow::ensure!(
-            envs.is_empty() || envs == session.harness.envs,
+            opencoder_core::harness::matches_requested_env(&session.harness, &envs),
             "environment is fixed when the session starts"
         );
         anyhow::ensure!(
@@ -152,11 +152,12 @@ pub async fn run_headless(cli: &Cli, prompt: String) -> Result<()> {
             "Codex model is fixed when the session starts"
         );
     } else {
-        session.harness.harness = selected;
-        session.harness.envs = envs;
-        if selected == opencoder_core::harness::Harness::Codex {
-            session.harness.model = cli.model.clone();
-        }
+        session.harness = opencoder_core::harness::fresh_runtime(
+            selected,
+            Some(selected),
+            envs,
+            cli.model.clone(),
+        );
     }
     session.env_passthrough.extend(
         session

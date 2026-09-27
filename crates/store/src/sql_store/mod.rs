@@ -26,6 +26,7 @@ pub mod ddl;
 mod project_crud;
 mod project_crud_runs;
 mod project_crud_todo;
+mod project_links;
 
 /// A pooled MySQL/StarRocks project store. The pool is cheap to clone and
 /// the struct is stateless besides the `starrocks` behavior flag.
@@ -89,6 +90,18 @@ impl ProjectStore for SqlProjectStore {
         }
     }
 
+    async fn list_todo_execution_ids(&self, todo_id: &str) -> Result<Vec<String>> {
+        project_links::list(&self.pool, self.starrocks, todo_id).await
+    }
+
+    async fn link_todo_execution(&self, todo_id: &str, execution_id: &str) -> Result<()> {
+        project_links::link(&self.pool, self.starrocks, todo_id, execution_id).await
+    }
+
+    async fn unlink_todo_execution(&self, todo_id: &str, execution_id: &str) -> Result<bool> {
+        project_links::unlink(&self.pool, self.starrocks, todo_id, execution_id).await
+    }
+
     async fn create_goal(&self, rec: &ProjectGoalRecord) -> Result<()> {
         project_crud::create_goal(&self.pool, self.starrocks, rec).await
     }
@@ -103,7 +116,7 @@ impl ProjectStore for SqlProjectStore {
     }
 
     async fn create_milestone(&self, rec: &ProjectMilestoneRecord) -> Result<()> {
-        project_crud::create_milestone(&self.pool, self.starrocks, rec).await
+        project_crud::create_milestone(&self.pool, self.starrocks, rec, "milestone").await
     }
     async fn patch_milestone(
         &self,
@@ -111,13 +124,33 @@ impl ProjectStore for SqlProjectStore {
         patch: &ProjectMilestonePatch,
         now_ms: i64,
     ) -> Result<bool> {
-        project_crud::patch_milestone(&self.pool, self.starrocks, id, patch, now_ms).await
+        project_crud::patch_milestone(&self.pool, self.starrocks, id, patch, now_ms, "milestone")
+            .await
     }
     async fn delete_milestone(&self, id: &str) -> Result<bool> {
-        project_crud::delete_milestone(&self.pool, self.starrocks, id).await
+        project_crud::delete_milestone(&self.pool, self.starrocks, id, "milestone").await
     }
     async fn list_milestones(&self, goal_id: Option<&str>) -> Result<Vec<ProjectMilestoneRecord>> {
-        project_crud::list_milestones(&self.pool, self.starrocks, goal_id).await
+        project_crud::list_milestones(&self.pool, self.starrocks, goal_id, "milestone").await
+    }
+
+    async fn create_initiative(&self, rec: &ProjectMilestoneRecord) -> Result<()> {
+        project_crud::create_milestone(&self.pool, self.starrocks, rec, "initiative").await
+    }
+    async fn patch_initiative(
+        &self,
+        id: &str,
+        patch: &ProjectMilestonePatch,
+        now_ms: i64,
+    ) -> Result<bool> {
+        project_crud::patch_milestone(&self.pool, self.starrocks, id, patch, now_ms, "initiative")
+            .await
+    }
+    async fn delete_initiative(&self, id: &str) -> Result<bool> {
+        project_crud::delete_milestone(&self.pool, self.starrocks, id, "initiative").await
+    }
+    async fn list_initiatives(&self, goal_id: Option<&str>) -> Result<Vec<ProjectMilestoneRecord>> {
+        project_crud::list_milestones(&self.pool, self.starrocks, goal_id, "initiative").await
     }
 
     async fn create_todo(&self, rec: &ProjectTodoRecord) -> Result<()> {

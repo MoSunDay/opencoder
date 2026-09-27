@@ -22,13 +22,15 @@ pub(super) async fn migrate(conn: &Connection) -> Result<()> {
         )
         .await?;
         conn.execute(
-            "INSERT INTO project_milestones_v23 SELECT * FROM project_milestones",
+            "INSERT INTO project_milestones_v23 (id,goal_id,title,detail_md,status,sort_key,created_at,updated_at,kind)
+             SELECT id,goal_id,title,detail_md,status,sort_key,created_at,updated_at,kind FROM project_milestones",
             (),
         )
         .await?;
         let mut diff = conn
             .query(
-                "SELECT * FROM project_milestones EXCEPT SELECT * FROM project_milestones_v23",
+                "SELECT id,goal_id,title,detail_md,status,sort_key,created_at,updated_at,kind FROM project_milestones
+                 EXCEPT SELECT id,goal_id,title,detail_md,status,sort_key,created_at,updated_at,kind FROM project_milestones_v23",
                 (),
             )
             .await?;

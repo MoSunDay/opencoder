@@ -32,7 +32,7 @@ pub use control_cmd::{
 };
 pub use event_sink::{run_flusher, spawn_checked_event_flusher, spawn_event_flusher, EventSink};
 pub use resume::{generate_title, resume, resume_and_replay};
-pub use runner::{run, run_once, run_with_images, SessionEvent};
+pub use runner::{run, run_once, run_with_images, run_with_registry, SessionEvent};
 // Sidecar (TUI `/sidecar`): temporary Q&A loop over a context snapshot.
 // Zero persistence; cost flows to the parent as bare `LlmUsage` events.
 pub use runner::sidecar::{

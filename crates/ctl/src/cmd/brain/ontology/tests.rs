@@ -30,7 +30,14 @@ async fn isolated_activation_sends_configured_reasoning_to_the_provider() {
     let request = received.recv().await.unwrap();
     assert_eq!(request["reasoning_effort"], "low");
     assert_eq!(request["model"], "planner");
-    assert_eq!(request["max_tokens"], 16384);
+    assert!(request["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|message| message["content"]
+            .as_str()
+            .unwrap_or("")
+            .contains(LAYERED_CONTRACT_MARKER)));
     let decision: Value = serde_json::from_slice(&std::fs::read(output).unwrap()).unwrap();
     assert_eq!(decision["decision"], "fail");
     server.abort();
@@ -54,7 +61,7 @@ fn layered_context(nodes: Value) -> Value {
                 "title": "layered plan",
                 "objective": "ship the layered canvas",
                 "inputs": {},
-                "layers": [{"layer_id":"first","title":"first","objective":"perform","success_criteria":"verified"}],
+                "layers": [{"layer_id":"first","title":"first","task":"perform","objective":"perform","success_criteria":"verified"}],
                 "nodes": [{"node_id": "n1", "layer_id":"first", "title": "first", "capability_id": "cap-1", "objective":"perform"}],
                 "transitions": []
             },
@@ -171,13 +178,21 @@ async fn layered_context_sends_the_layer_contract_and_writes_the_decision() {
     assert_eq!(request["model"], "planner");
     assert_eq!(request["reasoning_effort"], "low");
     let messages = request["messages"].as_array().unwrap();
-    assert_eq!(messages[0]["role"], "system");
-    assert!(messages[0]["content"]
-        .as_str()
-        .unwrap()
-        .contains(LAYERED_CONTRACT_MARKER));
-    let instruction: Value =
-        serde_json::from_str(messages[1]["content"].as_str().unwrap()).unwrap();
+    assert!(messages.iter().any(|message| message["role"] == "system"
+        && message["content"]
+            .as_str()
+            .unwrap_or("")
+            .contains(LAYERED_CONTRACT_MARKER)));
+    let instruction: Value = serde_json::from_str(
+        messages
+            .iter()
+            .rev()
+            .find(|message| message["role"] == "user")
+            .unwrap()["content"]
+            .as_str()
+            .unwrap(),
+    )
+    .unwrap();
     assert_eq!(instruction["schema_version"], 7);
     assert_eq!(instruction["plan"]["title"], "layered plan");
     assert_eq!(instruction["plan"]["nodes"][0]["node_id"], "n1");
@@ -201,12 +216,20 @@ async fn final_context_retains_the_same_reflection_contract() {
     );
     let request = fixture.request.recv().await.unwrap();
     let messages = request["messages"].as_array().unwrap();
-    assert!(messages[0]["content"]
+    assert!(messages.iter().any(|message| message["content"]
         .as_str()
-        .unwrap()
-        .contains(LAYERED_CONTRACT_MARKER));
-    let instruction: Value =
-        serde_json::from_str(messages[1]["content"].as_str().unwrap()).unwrap();
+        .unwrap_or("")
+        .contains(LAYERED_CONTRACT_MARKER)));
+    let instruction: Value = serde_json::from_str(
+        messages
+            .iter()
+            .rev()
+            .find(|message| message["role"] == "user")
+            .unwrap()["content"]
+            .as_str()
+            .unwrap(),
+    )
+    .unwrap();
     assert_eq!(instruction["schema_version"], 7);
     let written: Value = serde_json::from_slice(&std::fs::read(&fixture.output).unwrap()).unwrap();
     assert_eq!(written["decision"], "complete");

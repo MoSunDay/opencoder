@@ -201,7 +201,7 @@ pub struct ProjectGoalPatch {
     pub sort: Option<i64>,
 }
 
-/// A standalone initiative, optionally belonging to a goal (`project_milestones` row).
+/// A milestone or initiative group, optionally belonging to a project.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectMilestoneRecord {
     pub id: String,

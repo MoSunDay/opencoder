@@ -111,6 +111,7 @@ pub(super) async fn after_task(
         prompt: MEMORY_INSTRUCTION.into(),
         child_session_id: id.clone(),
     });
+    let started = std::time::Instant::now();
     let mut child_error = None;
     let mut summary = String::new();
     let registry = super::registry::build_full_registry(&child).await;
@@ -145,7 +146,16 @@ pub(super) async fn after_task(
         id: id.clone(),
         ok: failure.is_none(),
         cancelled: false,
-        summary: failure.unwrap_or_else(|| summary.trim().to_string()),
+        // Success carries the elapsed time as a prefix (the sibling subagent
+        // summary convention "({n} tool calls) {summary}"); failure keeps the
+        // raw error text so the reason stays legible.
+        summary: failure.unwrap_or_else(|| {
+            format!(
+                "({}) {}",
+                super::execute::fmt_dur(started.elapsed()),
+                summary.trim()
+            )
+        }),
     });
     if let Some(error) = child_error {
         return Err(anyhow!("local-memory update failed: {error}"));
@@ -160,7 +170,7 @@ mod tests {
     use std::sync::Arc;
 
     use opencoder_core::{resolve_agent, Config};
-    use opencoder_llm::{ChatStream, LlmEvent, MockChatClient};
+    use opencoder_llm::{ChatStream, LlmEvent, MockChatClient, Usage};
 
     use super::*;
 
@@ -210,6 +220,71 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn memory_output_never_enters_the_parent_transcript() {
+        let root = tempfile::tempdir().unwrap();
+        skill::seed_builtin_skills_in(root.path()).unwrap();
+        skill::with_execution(Some(root.path().to_path_buf()), async {
+            let client = Arc::new(
+                MockChatClient::new()
+                    .push_script(vec![LlmEvent::Completed {
+                        text: "done".into(),
+                        tool_calls: Vec::new(),
+                        usage: None,
+                    }])
+                    .push_script(vec![
+                        LlmEvent::TextDelta("memory notes written".into()),
+                        LlmEvent::Completed {
+                            text: "memory notes written".into(),
+                            tool_calls: Vec::new(),
+                            usage: None,
+                        },
+                    ]),
+            );
+            let config = Config {
+                local_memory: true,
+                ..Config::default()
+            };
+            let mut parent = SessionState::new(
+                "parent-memory-isolation-test",
+                resolve_agent("act").unwrap(),
+                config,
+                client.clone() as Arc<dyn ChatStream>,
+                root.path().to_path_buf(),
+            );
+            super::super::run(&mut parent, "complete task".into(), |_| {})
+                .await
+                .unwrap();
+            assert_eq!(
+                client.call_count(),
+                2,
+                "main task followed by the maintenance round"
+            );
+            assert_eq!(
+                parent.messages.len(),
+                2,
+                "only the task's own User/Assistant pair remains"
+            );
+            assert_eq!(parent.messages[0].role, Role::User);
+            assert_eq!(parent.messages[1].role, Role::Assistant);
+            assert!(
+                parent
+                    .messages
+                    .iter()
+                    .all(|m| !m.text().contains("memory notes written")),
+                "the maintenance delta never lands in any parent message"
+            );
+            assert!(
+                parent
+                    .messages
+                    .iter()
+                    .all(|m| !m.text().contains("Update repository local memory")),
+                "the maintenance instruction never lands in any parent message"
+            );
+        })
+        .await;
+    }
+
+    #[tokio::test]
     async fn memory_run_echoes_its_progress_as_a_subagent_block() {
         let root = tempfile::tempdir().unwrap();
         skill::seed_builtin_skills_in(root.path()).unwrap();
@@ -226,7 +301,12 @@ mod tests {
                         LlmEvent::Completed {
                             text: "memory updated".into(),
                             tool_calls: Vec::new(),
-                            usage: None,
+                            usage: Some(Usage {
+                                input_tokens: 600,
+                                output_tokens: 634,
+                                total_tokens: 1234,
+                                ..Default::default()
+                            }),
                         },
                     ]),
             );
@@ -271,6 +351,19 @@ mod tests {
                 )),
                 "the child's frames stream into the block"
             );
+            assert!(
+                events.iter().any(|e| matches!(
+                    e,
+                    SessionEvent::SubagentChild { id, ev }
+                        if id == &block_id
+                            && matches!(
+                                ev.as_ref(),
+                                SessionEvent::LlmUsage { total_tokens: 1234, .. }
+                            )
+                )),
+                "the child's LlmUsage is forwarded wrapped as SubagentChild — \
+                 the exact input the TUI folds into the parent tok cost"
+            );
             let (ok, summary) = events
                 .iter()
                 .find_map(|e| match e {
@@ -282,8 +375,12 @@ mod tests {
                 .expect("memory maintenance closes its block");
             assert!(ok, "the maintenance run succeeded");
             assert!(
+                summary.starts_with('('),
+                "the block footer leads with the timed duration, got: {summary}"
+            );
+            assert!(
                 summary.contains("memory notes written"),
-                "the block footer summarizes what the run said"
+                "the block footer summarizes what the run said after the duration prefix"
             );
         })
         .await;

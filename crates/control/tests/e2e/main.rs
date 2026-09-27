@@ -26,6 +26,7 @@ mod infra_static;
 mod layered_api;
 mod project_api;
 mod project_crud_extra;
+mod project_links;
 mod project_store_failure;
 mod schedule_api;
 mod sessions_agent;

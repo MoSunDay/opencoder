@@ -5,7 +5,7 @@ import { newId } from '../../../fleet/model.js';
 import { LayerCanvas } from '../layered/canvas.jsx';
 import { MilestoneCanvas } from '../milestone/canvas.jsx';
 import { MilestoneInspector } from '../milestone/inspector.jsx';
-import { addLayer, connect, executionNode, moveNode, removeLayer, removeNode, validateGraph } from '../milestone/model.js';
+import { addLayer, bindCapability, connect, executionNode, moveNode, removeLayer, removeNode, validateGraph } from '../milestone/model.js';
 import { useDraft } from './draft.js';
 import { EngineeringFields } from './fields.jsx';
 import { available, convertPlan, engineeringInputs, planLayers, validatePlan } from './model.js';
@@ -30,6 +30,7 @@ export const PlanEditor = forwardRef(function PlanEditor({ version, cacheKey, ca
   const addMilestone = () => attempt(() => { if (plan.layers.length >= 32) throw new Error('最多 32 层'); const id = newId('layer'); update(addLayer(plan, id)); setSelected({ type: 'layer', id }); });
   const addExecution = (layerId) => attempt(() => { if (plan.nodes.length >= 256 || plan.nodes.filter((n) => n.layer_id === layerId).length >= 32) throw new Error('最多 256 个执行节点，每层最多 32 个'); const node = executionNode(newId('step'), layerId); update({ ...plan, nodes: [...plan.nodes, node] }); setSelected({ type: 'node', id: node.node_id }); });
   const change = (key, field, patch) => update({ ...plan, [key]: plan[key].map((item) => item[field] === selected.id ? { ...item, ...patch } : item) });
+  const addConnection = (from, to) => attempt(() => { update(connect(plan, from, to)); setSelected({ type: 'transition', id: `${from}:${to}` }); });
   const positions = (layout) => setDraft((old) => ({ ...old, layout }));
   const next = () => attempt(() => { validateGraph(plan, caps); form.setFieldsValue({ ...plan, engineering: draft.engineering }); setSubmitOpen(true); });
   const save = async (values) => {
@@ -47,12 +48,14 @@ export const PlanEditor = forwardRef(function PlanEditor({ version, cacheKey, ca
     {(error || cacheError) && <Alert type="error" showIcon title={cacheError || error} />}
     <div className="brain-method-workspace">
       <MilestoneCanvas plan={plan} capabilities={caps} selection={selected} onSelect={setSelected} positions={draft.layout || {}} onPositions={positions}
-        onAddLayer={addMilestone} onAddNode={addExecution} onConnect={(from, to) => attempt(() => { update(connect(plan, from, to)); setSelected({ type: 'transition', id: `${from}:${to}` }); })} />
+        onAddLayer={addMilestone} onAddNode={addExecution} onConnect={addConnection}
+        onDeleteConnection={selected?.type === 'transition' ? () => { update({ ...plan, transitions: plan.transitions.filter((item) => `${item.from}:${item.to}` !== selected.id) }); setSelected(null); } : undefined} />
       <MilestoneInspector plan={plan} selection={selected} capabilities={caps}
-        onLayerChange={(patch) => change('layers', 'layer_id', patch)} onNodeChange={(patch) => change('nodes', 'node_id', patch)}
+        onLayerChange={(patch) => change('layers', 'layer_id', patch)} onNodeChange={(capability) => change('nodes', 'node_id', bindCapability(plan.nodes.find((item) => item.node_id === selected.id), capability))}
+        onConnect={addConnection}
         onTransitionChange={(patch) => update({ ...plan, transitions: plan.transitions.map((item) => `${item.from}:${item.to}` === selected.id ? { ...item, ...patch } : item) })}
         onMoveNode={(layerId) => attempt(() => { update(moveNode(plan, selected.id, layerId)); positions({}); })}
-        onDelete={() => { update(selected.type === 'layer' ? removeLayer(plan, selected.id) : selected.type === 'node' ? removeNode(plan, selected.id) : { ...plan, transitions: plan.transitions.filter((item) => `${item.from}:${item.to}` !== selected.id) }); setSelected(null); positions({}); }} />
+        onDelete={() => { update(selected.type === 'layer' ? removeLayer(plan, selected.id) : removeNode(plan, selected.id)); setSelected(null); positions({}); }} />
     </div>
     <Drawer open={submitOpen} onClose={() => !busy && setSubmitOpen(false)} title="计划信息与提交" size={480}>
       {(error || cacheError) && <Alert type="error" title={cacheError || error} />}

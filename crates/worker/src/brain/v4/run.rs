@@ -5,7 +5,7 @@
 //! the exact attempt identities.
 use super::state;
 use crate::{journal::Record, Worker};
-use anyhow::{ensure, Context, Result};
+use anyhow::{Context, Result};
 use opencoder_brain::layered;
 use opencoder_core::{
     brain::{layered::*, BrainCapabilityDescriptor},
@@ -55,21 +55,36 @@ pub async fn run(
     // without a durable context, leave it idle so that race cannot finalize the
     // root as an execution error. Node-local activation resumes only when its
     // context marker is present.
-    if record.annotations["layered_context"].is_null() {
+    let latest = worker
+        .inner
+        .journal
+        .lock()
+        .await
+        .records
+        .get(id)
+        .cloned()
+        .context("root execution missing")?;
+    if latest.annotations["layered_context"].is_null() {
         return Ok(state::outcome(&snapshot));
     }
     let context: LayeredContext =
-        serde_json::from_value(record.annotations["layered_context"].clone())?;
-    ensure!(
-        context.generation == snapshot.run.generation,
-        "stale layered context"
-    );
-    let stored = &record.annotations["layered_decision"];
+        serde_json::from_value(latest.annotations["layered_context"].clone())?;
+    if context.generation != snapshot.run.generation {
+        return Ok(state::outcome(&snapshot));
+    }
+    let stored = &latest.annotations["layered_decision"];
     let decision = if stored["generation"] == context.generation {
         serde_json::from_value(stored["decision"].clone()).map_err(Into::into)
     } else {
-        super::correction::decide(worker, record, &config, &context, &snapshot, cancel.clone())
-            .await
+        super::correction::decide(
+            worker,
+            &latest,
+            &config,
+            &context,
+            &snapshot,
+            cancel.clone(),
+        )
+        .await
     };
     if cancel.is_cancelled() {
         anyhow::bail!("brain activation interrupted");

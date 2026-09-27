@@ -9,8 +9,6 @@ import { FleetBrainPanel as BrainPanel } from '../fleet/brain.jsx';
 import { ExecutionsPanel as TopicsPanel } from '../fleet/executions.jsx';
 import { FleetNodesPanel as NodesPanel } from '../fleet/nodes.jsx';
 import { FleetTeamsPanel as TeamPanel } from '../fleet/teams.jsx';
-import { OwnerViewPanel } from '../project/ownerViewPanel.jsx';
-import { ProgressPanel } from '../project/progressPanel.jsx';
 import { ProjectPanel } from '../project/project.jsx';
 import { SchedulePanel } from '../schedule/panel.jsx';
 import { TodoPanel } from '../todoPanel.jsx';
@@ -24,8 +22,6 @@ export const PANELS = {
   topics: TopicsPanel,
   schedules: SchedulePanel,
   project: ProjectPanel,
-  progress: ProgressPanel,
-  ownerview: OwnerViewPanel,
   dag: DagPanel,
   todos: TodoPanel,
   agents: AgentsPanel,

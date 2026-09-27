@@ -1,4 +1,4 @@
-Commit: c23acdf9647a182a91323db26fb7e46191ac5f19
+Commit: 720c3f03f784d857bbcac52fbf6bdc8992b2bcc6
 
 # dag-runtime 模块
 
@@ -16,7 +16,7 @@ Commit: c23acdf9647a182a91323db26fb7e46191ac5f19
 - `src/exec/wasm/host_imports*` — `opencoder` host imports
 - `src/step_log.rs`、`src/dag_events.rs` — 输出落库与事件上报
 - `examples/agent-step-runner.rs`、`examples/agent-session-runner.rs` — 容器内 session runner
-- `examples/wasmtime-cli.rs`、`scripts/prepare-dag-rootfs.sh` — WASI 运行器与 rootfs 制备（wasmtime + agent-step-runner + agent-session-runner + ldd 镜像）
+- `examples/wasmtime-cli.rs`、`scripts/prepare-dag-rootfs.sh` — WASI 运行器与 rootfs 制备（wasmtime + agent-step-runner + agent-session-runner + ldd 镜像）；只在安装进 rootfs 的副本上移除调试符号，避免每步私有 rootfs 复制放大体积
 
 ## 边界
 - 执行只发生在 claiming 节点；runc fail-closed，不回落 in_process。

@@ -5,6 +5,7 @@ pub mod brain_runs;
 pub mod catalog;
 pub mod executions;
 pub mod project;
+pub mod project_links;
 pub mod project_util;
 pub mod schedules;
 pub mod session;

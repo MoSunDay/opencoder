@@ -1,22 +1,16 @@
-// goalsTab.jsx — 项目 tab 2「项目目标」: one antd Card per goal (title +
-// status Tag + Markdown detail) with 编辑 / 归档·激活 / 删除 actions, plus a
-// 新建目标 button opening the shared MdEditModal. All writes go through
-// /api/project/goals* and end with refresh() so the parent overview state
-// (goals + milestones + todos) stays the single source of truth.
-
 import { Button, Card, Empty, Popconfirm, Space, Typography } from 'antd';
 import { useState } from 'react';
 import { apiDel, apiPatch, apiPost } from '../api.js';
-import { GoalStatusTag } from './labels.jsx';
+import { StatusTag } from '../ui/statusTag.jsx';
 import { Markdown } from './markdown.jsx';
-import { MdEditModal } from './views/mdModal.jsx';
+import { MdEditDrawer } from './views/mdDrawer.jsx';
 import { err, ok } from '../notice.js';
 
 const { Text } = Typography;
 
 const goalPath = (id) => '/api/project/goals/' + encodeURIComponent(id);
 
-export function GoalsTab({ overview, refresh, onNotice, openMilestones }) {
+export function ProjectsTab({ overview, refresh, onNotice, openInitiatives, openMilestones }) {
   const goals = (overview && overview.goals) || [];
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(null); // goal record | null = create
@@ -34,10 +28,10 @@ export function GoalsTab({ overview, refresh, onNotice, openMilestones }) {
     try {
       if (editing) {
         await apiPatch(goalPath(editing.id), v);
-        onNotice(ok('目标已更新'));
+        onNotice(ok('项目已更新'));
       } else {
         await apiPost('/api/project/goals', v);
-        onNotice(ok('目标已创建'));
+        onNotice(ok('项目已创建'));
       }
       setOpen(false);
       refresh();
@@ -52,7 +46,7 @@ export function GoalsTab({ overview, refresh, onNotice, openMilestones }) {
     const next = g.status === 'archived' ? 'active' : 'archived';
     try {
       await apiPatch(goalPath(g.id), { status: next });
-      onNotice(ok(next === 'archived' ? '目标已归档' : '目标已重新激活'));
+      onNotice(ok(next === 'archived' ? '项目已归档' : '项目已重新激活'));
       refresh();
     } catch (e) {
       onNotice(err('切换状态失败: ' + (e && e.message)));
@@ -62,7 +56,7 @@ export function GoalsTab({ overview, refresh, onNotice, openMilestones }) {
   const remove = async (g) => {
     try {
       await apiDel(goalPath(g.id));
-      onNotice(ok('目标已删除'));
+      onNotice(ok('项目已删除'));
       refresh();
     } catch (e) {
       onNotice(err('删除目标失败: ' + (e && e.message)));
@@ -72,28 +66,29 @@ export function GoalsTab({ overview, refresh, onNotice, openMilestones }) {
   return (
     <Space orientation="vertical" style={{ width: '100%' }} size={16}>
       <div>
-        <Button type="primary" onClick={startCreate}>新建目标</Button>
+        <Button type="primary" onClick={startCreate}>新建项目</Button>
         <Text type="secondary" style={{ marginLeft: 12 }}>
-          里程碑可独立存在，也可随时关联项目
+          里程碑与专项同级，均可独立存在或关联项目
         </Text>
       </div>
-      {!goals.length && <Empty description="还没有项目，可以直接创建里程碑或 TODO" />}
+      {!goals.length && <Empty description="还没有项目，可以直接创建专项或 TODO" />}
       {goals.map((g) => (
         <Card
           key={g.id}
           size="small"
           title={<span>{g.title} <Text type="secondary">#{g.id.slice(0, 8)}</Text></span>}
-          extra={<Space size={8}><GoalStatusTag status={g.status} /><Text type="secondary">sort {g.sort}</Text></Space>}
+          extra={<Space size={8}><StatusTag status={g.status} /><Text type="secondary">sort {g.sort}</Text></Space>}
           actions={[
             <Button key="milestones" type="link" size="small" onClick={() => openMilestones?.(g.id)}>查看里程碑</Button>,
+            <Button key="initiatives" type="link" size="small" onClick={() => openInitiatives?.(g.id)}>查看专项</Button>,
             <Button key="edit" type="link" size="small" onClick={() => startEdit(g)}>编辑</Button>,
             <Button key="toggle" type="link" size="small" onClick={() => toggleStatus(g)}>
               {g.status === 'archived' ? '激活' : '归档'}
             </Button>,
             <Popconfirm
               key="del"
-              title="删除该目标？"
-              description="只删除项目，里程碑转为独立专项；TODO 和执行记录保留。"
+              title="删除该项目？"
+              description="只删除项目，专项变为独立专项；TODO 和执行关联保留。"
               okText="删除"
               okButtonProps={{ danger: true }}
               cancelText="取消"
@@ -106,9 +101,9 @@ export function GoalsTab({ overview, refresh, onNotice, openMilestones }) {
           <Markdown text={g.detail_md} />
         </Card>
       ))}
-      <MdEditModal
+      <MdEditDrawer
         open={open}
-        title={editing ? '编辑目标' : '新建目标'}
+        title={editing ? '编辑项目' : '新建项目'}
         initial={editing}
         onCancel={() => setOpen(false)}
         onOk={save}

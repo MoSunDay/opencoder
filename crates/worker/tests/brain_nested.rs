@@ -8,7 +8,7 @@ use support::Fleet;
 
 fn plan(capability: &str) -> Value {
     json!({"schema_version":7,"title":"Nested plan","objective":"produce verified output",
-        "nodes":[{"node_id":"work","title":"produce the assigned result","capability_id":capability,"layer_id":"work-layer","objective":"produce verified output"}],"layers":[{"layer_id":"work-layer","title":"Work","objective":"produce verified output","success_criteria":"result verified"}],"transitions":[],"edges":[]})
+        "nodes":[{"node_id":"work","title":"produce the assigned result","capability_id":capability,"layer_id":"work-layer","objective":"produce verified output"}],"layers":[{"layer_id":"work-layer","title":"Work","task":"produce verified output","objective":"produce verified output","success_criteria":"result verified"}],"transitions":[],"edges":[]})
 }
 
 #[tokio::test]

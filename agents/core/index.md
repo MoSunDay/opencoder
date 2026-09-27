@@ -1,4 +1,4 @@
-Commit: c60e2162be48102badf53d8b97e7cfa030b59605
+Commit: 2aa44247d199d782881b9ee64921c4c6de2e6199
 
 # core 模块
 
@@ -8,7 +8,7 @@ Commit: c60e2162be48102badf53d8b97e7cfa030b59605
 ## 索引
 - `src/message.rs` — Message/Role/ContentBlock
 - `src/config.rs` + `src/config/` — Config 加载与 mcp/cli/skills/ap 域文件（含 `config/dag.rs`）；顶层 `local_memory` 默认关闭，供会话完成钩子读取。`load_with_home` 将候选链重定向到执行 home；`load_with_home_frozen` 额外跳过 `apply_env`（快照即最终，版本化 Operator resume 用）；`load_operator(dir)` 只读 Operator 配置平面目录（`config.json` + 域文件，不做 env 合并）；`effective_domain_value`/`domain_file_for` 供节点 bootstrap 携带域视图
-- `src/harness/` — Harness::{Opencode,Codex} 与 Codex 运行态
+- `src/harness/` — `Harness::{Opencoder,Codex}` 与私有运行态；`fresh_runtime` 统一前端新会话的执行器、env、model 选择，`matches_requested_env` 校验续会话显式 env，托管配置可补充其他变量
 - `src/agent/`、`src/skill.rs` — agent 引用卡（`meta.json` `run_mode`）、memory 池聚合（`agent/memory.rs`）与技能发现。技能根优先级：执行任务本地根（`skill::with_execution`/`execution_root`）→ 节点 pinned 根 → 真实 `~/.opencoder/skills`
 - `src/skill/seed.rs` — 二进制内置 skill 增量 seed
 - `src/tool.rs` — Tool trait / ToolContext / ToolOutput

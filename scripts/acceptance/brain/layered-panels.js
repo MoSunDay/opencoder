@@ -20,10 +20,11 @@ async function inspectPanels({ base, token, id, view, operations, marker, eviden
     await page.locator('.brain-run').first().getByText('已完成', { exact: true }).waitFor();
     await page.locator('.react-flow__controls-fitview').click();
     await page.screenshot({ path: path.join(evidence, 'overview.png'), animations: 'disabled' });
+    await page.getByRole('button', { name: '查看详情' }).click();
     for (const op of operations) {
-      await page.getByLabel('选择历史层激活', { exact: true }).click();
-      await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: `第 ${op.round} 轮 · 第 ${op.layer} 层 ·` }).click();
-      await page.getByTestId(`rf__node-${op.node_id}`).locator('.brain-execution-node strong').click();
+      const round = page.locator('.brain-run-details > .ant-collapse > .ant-collapse-item').filter({ hasText: `第 ${op.round} 轮 ·` }).first();
+      if (await round.locator('.ant-collapse-header').first().getAttribute('aria-expanded') !== 'true') await round.locator('.ant-collapse-header').first().click();
+      await round.getByRole('button', { name: op.execution_id, exact: true }).click();
       const drawer = page.getByRole('dialog', { name: '能力执行明细', exact: true });
       await drawer.waitFor();
       await drawer.locator('.execution-view-full').waitFor();
@@ -50,9 +51,9 @@ async function inspectPanels({ base, token, id, view, operations, marker, eviden
       assert.equal(fetched.get(op.execution_id)?.kind, op.execution_kind, 'detail must come from its real execution ID');
       await page.screenshot({ path: path.join(evidence, `${op.execution_kind}.png`), animations: 'disabled' });
       panels.push({ kind: op.execution_kind, id: op.execution_id, content: 'PASS' });
-      await drawer.locator('button.ant-drawer-close').click(); await drawer.waitFor({ state: 'hidden' });
+      await drawer.getByRole('button', { name: '返回轮次列表' }).click();
     }
-    const firstLayer = page.locator('.brain-run > .ant-collapse .ant-collapse-header').filter({ hasText: '第 1 轮 · 第 1 层 ·' });
+    const firstLayer = page.locator('.brain-run-details .ant-collapse-header').filter({ hasText: '第 1 层 · 调度依据' }).first();
     if (await firstLayer.getAttribute('aria-expanded') !== 'true') await firstLayer.click();
     const reason = view.events.find((event) => event.layer === 1 && event.event_type === 'layer_started').reason_summary;
     await page.getByText(reason, { exact: true }).waitFor();

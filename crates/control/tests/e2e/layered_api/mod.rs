@@ -23,7 +23,7 @@ pub(super) fn plan() -> Value {
             {"node_id":"scan","title":"Scan","capability_id":"builtin-agent-act","layer_id":"scan-layer","objective":"scan"},
             {"node_id":"apply","title":"Apply","capability_id":"builtin-operator","layer_id":"apply-layer","objective":"apply"}
         ],
-        "layers":[{"layer_id":"scan-layer","title":"Scan","objective":"scan","success_criteria":"evidence found"},{"layer_id":"apply-layer","title":"Apply","objective":"apply","success_criteria":"change verified"}],
+        "layers":[{"layer_id":"scan-layer","title":"Scan","task":"scan","objective":"scan","success_criteria":"evidence found"},{"layer_id":"apply-layer","title":"Apply","task":"apply","objective":"apply","success_criteria":"change verified"}],
         "transitions":[{"from":"scan-layer","to":"apply-layer","condition":"scan met"}],"edges": [],
         "max_rounds": 8
     })

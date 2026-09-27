@@ -13,7 +13,7 @@ use migrations::migrate;
 
 // v3 scheduler tables are additive and bootstrap unconditionally; keep the
 // existing schema watermark so v2 database migration remains read-compatible.
-pub(crate) const SCHEMA_VERSION: i64 = 28;
+pub(crate) const SCHEMA_VERSION: i64 = 29;
 
 // Order invariant: busy_timeout must precede any locking statement, and
 // synchronous=NORMAL must be applied BEFORE journal_mode=WAL. Switching a
@@ -136,6 +136,7 @@ CREATE TABLE IF NOT EXISTS project_goals (
 const CREATE_PROJECT_MILESTONES: &str = "\
 CREATE TABLE IF NOT EXISTS project_milestones (
   id TEXT PRIMARY KEY,
+  kind TEXT NOT NULL DEFAULT 'milestone',
   goal_id TEXT,
   title TEXT NOT NULL,
   detail_md TEXT,
@@ -180,6 +181,13 @@ CREATE TABLE IF NOT EXISTS project_todo_runs (
   output_ref TEXT,
   input_snapshot TEXT,
   trace_manifest TEXT
+)";
+const CREATE_PROJECT_TODO_EXECUTIONS: &str = "\
+CREATE TABLE IF NOT EXISTS project_todo_executions (
+  todo_id TEXT NOT NULL,
+  execution_id TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (todo_id, execution_id)
 )";
 const CREATE_INDEX_PROJECT_MILESTONES_GOAL: &str =
     "CREATE INDEX IF NOT EXISTS idx_project_milestones_goal ON project_milestones(goal_id)";
@@ -369,6 +377,7 @@ async fn bootstrap_tx(conn: &Connection) -> Result<()> {
     conn.execute(CREATE_PROJECT_MILESTONES, ()).await?;
     conn.execute(CREATE_PROJECT_TODOS, ()).await?;
     conn.execute(CREATE_PROJECT_TODO_RUNS, ()).await?;
+    conn.execute(CREATE_PROJECT_TODO_EXECUTIONS, ()).await?;
     conn.execute(CREATE_DAG_DEFS, ()).await?;
     conn.execute(CREATE_DAG_RUNS, ()).await?;
     conn.execute(CREATE_DAG_EVENTS, ()).await?;

@@ -4,7 +4,7 @@ use opencoder_core::brain::{layered::*, BrainCapabilityDescriptor};
 use serde_json::json;
 fn request() -> LayeredRequest {
     serde_json::from_value(json!({"schema_version":7,"plan":{"schema_version":7,"title":"delivery","objective":"ship verified change","max_rounds":5,
-      "layers":[{"layer_id":"coding","title":"Coding","objective":"implement and document","success_criteria":"change works"},{"layer_id":"testing","title":"Test","objective":"verify","success_criteria":"tests pass"}],
+      "layers":[{"layer_id":"coding","title":"Coding","task":"implement and document","objective":"implement and document","success_criteria":"change works"},{"layer_id":"testing","title":"Test","task":"verify","objective":"verify","success_criteria":"tests pass"}],
       "nodes":[{"node_id":"code","layer_id":"coding","title":"Coding","objective":"implement","capability_id":"agent"},
                {"node_id":"docs","layer_id":"coding","title":"Docs","objective":"document","capability_id":"review"},
                {"node_id":"test","layer_id":"testing","title":"Test","objective":"verify","capability_id":"agent"}],
@@ -21,7 +21,7 @@ fn snap(change: LayeredChange) -> LayeredSnapshot {
     }
 }
 fn proposal(current: &LayeredSnapshot, req: &LayeredRequest, layer: u32) -> LayeredDecision {
-    let assessments: serde_json::Map<_,_> = req.plan.layers.iter().nth(current.run.layer.saturating_sub(1) as usize).filter(|_| current.run.layer > 0).map(|milestone| (milestone.layer_id.clone(),json!({"met":current.operations.iter().filter(|o| o.activation==current.run.activation).all(|o| o.status.successful()),"reason":"verified actual outputs"}))).into_iter().collect();
+    let assessments: serde_json::Map<_,_> = req.plan.layers.get(current.run.layer.saturating_sub(1) as usize).filter(|_| current.run.layer > 0).map(|milestone| (milestone.layer_id.clone(),json!({"met":current.operations.iter().filter(|o| o.activation==current.run.activation).all(|o| o.status.successful()),"reason":"verified actual outputs"}))).into_iter().collect();
     let assignments: Vec<_> = req.plan.nodes.iter().filter(|n| n.layer_id == req.plan.layers[layer as usize - 1].layer_id).map(|n| json!({"node_id":n.node_id,"capability_id":n.capability_id,"inputs":{},"reason":"use attached capability"})).collect();
     let decision: LayeredDecision = serde_json::from_value(json!({"decision":"dispatch_layer","layer":layer,"assignments":assignments,"assessments":assessments,"reason":"evaluate milestone evidence","reflection":if layer <= current.run.layer {Some("fix issues with new context")} else {None},"evidence_execution_ids":[]})).unwrap();
     decision
@@ -94,6 +94,95 @@ fn parallel_failures_wait_for_the_entire_frozen_dispatch_and_do_not_retry() {
     }
     assert_eq!(final_state.run.phase, LayeredPhase::Ready);
     assert!(final_state.operations.iter().all(|op| !op.cancel_requested));
+}
+#[test]
+fn human_guidance_can_wake_without_crossing_the_layer_barrier() {
+    let req = request();
+    let first = snap(dispatch(
+        &snap(initialize("brain-guidance", &req, 1).unwrap()),
+        &req,
+        1,
+    ));
+    let mut deciding = first.clone();
+    deciding.run.phase = LayeredPhase::Deciding;
+    deciding.run.pending_guidance = true;
+    let guide = LayeredDecision::Guide {
+        reason: "Apply the new human constraint at the next layer decision".into(),
+        guidance: vec![],
+    };
+    let targeted = LayeredDecision::Guide {
+        reason: "Direct the active Agent now".into(),
+        guidance: vec![LayeredGuidance {
+            execution_id: deciding.operations[0].execution_id.clone(),
+            message: "Check the new constraint".into(),
+        }],
+    };
+    assert!(decide(&deciding, &req, &catalog(), &targeted, 10).is_err());
+    let mut running = deciding.clone();
+    running.operations[0].status = LayeredOperationStatus::Running;
+    let directed = decide(&running, &req, &catalog(), &targeted, 10).unwrap();
+    assert_eq!(directed.events[0].guidance.len(), 1);
+    let directed = snap(directed);
+    assert_eq!(directed.run.phase, LayeredPhase::Waiting);
+    running.operations[0].execution_kind = opencoder_core::fleet::ExecutionKind::Team;
+    assert!(decide(&running, &req, &catalog(), &targeted, 10).is_ok());
+    let guided = snap(decide(&deciding, &req, &catalog(), &guide, 11).unwrap());
+    assert_eq!(guided.run.phase, LayeredPhase::Waiting);
+    assert_eq!(guided.operations, first.operations);
+    assert_eq!(guided.run.layer, first.run.layer);
+    assert_eq!(guided.run.activation, first.run.activation);
+    assert!(!guided.run.pending_guidance);
+    assert!(decide(
+        &deciding,
+        &req,
+        &catalog(),
+        &proposal(&deciding, &req, 2),
+        12
+    )
+    .is_err());
+    let completed = finish(guided, &req, LayeredOperationStatus::Done);
+    assert_eq!(completed.run.phase, LayeredPhase::Ready);
+}
+
+#[test]
+fn paused_run_keeps_pending_human_guidance_for_resume() {
+    let req = request();
+    let mut waiting = snap(dispatch(
+        &snap(initialize("brain-guidance-resume", &req, 1).unwrap()),
+        &req,
+        1,
+    ));
+    waiting.run.pending_guidance = true;
+    let paused = snap(command(&waiting, &req.plan, "pause", 2).unwrap());
+    let resumed = snap(command(&paused, &req.plan, "resume", 3).unwrap());
+    assert_eq!(resumed.run.phase, LayeredPhase::Ready);
+    assert!(resumed.run.pending_guidance);
+    assert!(!barrier(&resumed));
+}
+
+#[test]
+fn child_receipt_restarts_guidance_after_its_context_becomes_stale() {
+    let req = request();
+    let mut deciding = snap(dispatch(
+        &snap(initialize("brain-guidance-receipt", &req, 1).unwrap()),
+        &req,
+        1,
+    ));
+    deciding.run.phase = LayeredPhase::Deciding;
+    deciding.run.pending_guidance = true;
+    let partial = snap(
+        terminal(
+            &deciding,
+            &req,
+            &notice(&deciding.operations[0], LayeredOperationStatus::Done),
+            2,
+        )
+        .unwrap()
+        .unwrap(),
+    );
+    assert_eq!(partial.run.phase, LayeredPhase::Ready);
+    assert!(partial.run.pending_guidance);
+    assert!(!barrier(&partial));
 }
 #[test]
 fn return_starts_a_new_round_with_distinct_ids_and_old_receipts_cannot_advance_it() {

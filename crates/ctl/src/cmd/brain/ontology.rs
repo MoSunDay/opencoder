@@ -120,18 +120,49 @@ pub async fn activate(
     output: &std::path::Path,
 ) -> Result<i32> {
     let context: serde_json::Value = serde_json::from_slice(&std::fs::read(context)?)?;
-    let config: opencoder_core::Config = serde_json::from_slice(&std::fs::read(config)?)?;
+    let mut config: opencoder_core::Config = serde_json::from_slice(&std::fs::read(config)?)?;
+    config.local_memory = false;
+    config.autopilot.mode = opencoder_core::ApMode::Off;
+    config.compaction.auto = false;
     let client = LocalClient(config.clone());
     anyhow::ensure!(
         context["schema_version"] == opencoder_core::brain::layered::LAYERED_SCHEMA_VERSION,
         "unsupported brain schema; expected 7"
     );
-    let decision = opencoder_brain::layered::activate(
-        &serde_json::from_value(context)?,
-        &client,
-        config.model_id(),
+    let context: opencoder_core::brain::layered::LayeredContext = serde_json::from_value(context)?;
+    let agent = opencoder_core::Agent {
+        name: "act".into(),
+        kind: opencoder_core::AgentKind::Act,
+        mode: opencoder_core::agent::AgentMode::Primary,
+        description: "One event-driven Brain decision".into(),
+        prompt: opencoder_brain::layered::PROMPT.into(),
+        tools: opencoder_core::agent::ToolFilter::Allow(vec![]),
+    };
+    let mut session = opencoder_session::SessionState::new(
+        format!("{}-a{}", context.run_id, context.generation),
+        agent,
+        config,
+        std::sync::Arc::new(client),
+        std::env::current_dir()?,
+    );
+    session.harness.harness = opencoder_core::harness::Harness::Opencoder;
+    opencoder_session::run_with_registry(
+        &mut session,
+        opencoder_brain::layered::instruction(&context)?,
+        vec![],
+        &std::collections::HashMap::new(),
+        |_| {},
     )
     .await?;
+    let text = session
+        .messages
+        .iter()
+        .rev()
+        .find(|message| message.role == opencoder_core::Role::Assistant)
+        .map(|message| message.text())
+        .ok_or_else(|| anyhow::anyhow!("Brain agent loop produced no assistant decision"))?;
+    let decision = opencoder_brain::layered::parse_decision(&text)
+        .map_err(|error| anyhow::anyhow!("invalid layered decision: {error:#}"))?;
     opencoder_core::atomic_write_json(output, &serde_json::to_value(decision)?)?;
     Ok(0)
 }

@@ -7,7 +7,7 @@ pub mod title;
 use crate::SessionState;
 use anyhow::Result;
 pub use client::configured_client;
-use opencoder_core::harness::{Harness, HarnessRuntime};
+use opencoder_core::harness::Harness;
 use opencoder_store::Store;
 
 pub async fn save(session: &SessionState) -> Result<()> {
@@ -55,7 +55,7 @@ pub async fn initialize(
             "harness is fixed when the session starts"
         );
         anyhow::ensure!(
-            envs.is_empty() || envs == existing.envs,
+            opencoder_core::harness::matches_requested_env(&existing, &envs),
             "environment is fixed when the session starts"
         );
         return Ok(());
@@ -65,14 +65,15 @@ pub async fn initialize(
         !legacy || selection.is_none_or(|h| h == Harness::Opencoder),
         "harness is fixed when the session starts"
     );
-    let runtime = HarnessRuntime {
-        harness: if legacy {
+    let runtime = opencoder_core::harness::fresh_runtime(
+        if legacy {
             Harness::Opencoder
         } else {
-            selection.unwrap_or_else(|| opencoder_core::harness::agent_harness(agent))
+            opencoder_core::harness::agent_harness(agent)
         },
+        selection,
         envs,
-        ..Default::default()
-    };
+        None,
+    );
     store.set_harness_runtime(id, &runtime).await
 }

@@ -31,6 +31,7 @@ pub async fn dispatch(
         child_inputs.extend(bound_inputs);
         return Ok(super::api::submit(state.clone(), json!({
             "id":op.execution_id, "schema_version":LAYERED_SCHEMA_VERSION,
+            "node_id":root.index.node_id,
             "plan":{"id":cap.definition["plan_id"],"version":cap.definition["version"]},
             "inputs":child_inputs, "depth":run.depth + 1,
             "parent":{"run_id":run.run_id,"operation_id":op.operation_id,"node_id":op.node_id,"layer":op.layer}

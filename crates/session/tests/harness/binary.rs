@@ -11,7 +11,7 @@ if '--version' in sys.argv:
     print('codex-cli fixture'); sys.exit(0)
 prompt = sys.stdin.read()
 with open(os.environ['CAPTURE'], 'a') as f:
-    f.write(json.dumps({'args':sys.argv[1:], 'prompt':prompt, 'env':os.environ.get('EXAMPLE'), 'cwd':os.getcwd()})+'\n')
+    f.write(json.dumps({'args':sys.argv[1:], 'prompt':prompt, 'env':os.environ.get('EXAMPLE'), 'cwd':os.getcwd(), 'home':os.environ.get('HOME'), 'codex_home':os.environ.get('CODEX_HOME')})+'\n')
 def emit(v): print(json.dumps(v), flush=True)
 thread = 'fork-thread' if 'fork' in sys.argv else 'fixture-thread'
 emit({'type':'thread.started','thread_id':thread})

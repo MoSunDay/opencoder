@@ -53,6 +53,7 @@ async fn harness_on(
         dir.path().join("opencoder.json"),
         serde_json::to_vec(&json!({
             "team_root": dir.path().join("team").display().to_string(),
+            "local_memory": false,
         }))
         .unwrap(),
     )

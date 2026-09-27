@@ -53,6 +53,11 @@ echo "==> installing the wasm runtime at usr/bin/wasmtime and the agent runners 
 cp "${bins[0]}" "$out/usr/bin/wasmtime"
 cp "${bins[1]}" "$out/usr/bin/agent-step-runner"
 cp "${bins[2]}" "$out/usr/bin/agent-session-runner"
+# Debug symbols belong in the build tree, not in each container's private
+# rootfs copy. These examples are otherwise over 1 GiB together.
+strip --strip-debug "$out/usr/bin/wasmtime" \
+  "$out/usr/bin/agent-step-runner" \
+  "$out/usr/bin/agent-session-runner"
 
 echo "==> mirroring the binaries' shared libs into the rootfs"
 for bin in "${bins[@]}"; do

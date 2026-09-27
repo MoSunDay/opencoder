@@ -18,4 +18,4 @@ TUI 在父回合进入最终空闲状态时触发 `turn_done`，在 `question` �
 
 - TUI 单测：`cargo test -p opencoder-tui --lib` → 1728 passed / 0 failed。
 - Clippy：`cargo clippy --workspace --all-targets -- -D warnings` → 零警告。
-- 原全量回归暴露的 `brain_layered_e2e` 旧 schema 6 用例已更新到 schema 7，定向复测 5/5 通过；完整工作区回归仍在执行。
+- 隔离代码快照与空的 `/data00` HOME 下，`cargo test --offline --workspace` → 5605 passed / 0 failed / 8 ignored。快照包含后续的 schema 7 测试、Worker 栈、DAG rootfs 与测试 fixture 修复。

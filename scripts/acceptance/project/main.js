@@ -6,7 +6,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { harness, until, pause } = require('./harness');
-const { openBrowser, createHierarchy, projectPage, verifyWorkbench } = require('./browser');
+const { openBrowser, createHierarchy, projectPage, verifyWorkbench, verifyNativeAgentLaunch } = require('./browser');
 const { audit } = require('./audit');
 let h, browser;
 const errors = [];
@@ -130,6 +130,8 @@ async function main() {
   await browserPage.goto(h.base, { waitUntil: 'networkidle' });
   await projectPage(browserPage);
   await verifyWorkbench(browserPage, h.root, linkedId);
+  const launchedId = await verifyNativeAgentLaunch(browserPage, initiativeTodo.title);
+  assert.equal((await api('GET', `/api/project/todos/${initiativeTodo.id}/executions`)).execution_ids.includes(launchedId), true);
   const started = Date.now();
   const indexes = (await api('GET', '/api/executions?kind=project')).executions;
   assert.equal(new Set(indexes.map((index) => index.id)).size, indexes.length);

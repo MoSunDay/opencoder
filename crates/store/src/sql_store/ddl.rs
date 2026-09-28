@@ -46,7 +46,10 @@ const TODO_COLUMNS: &str = "\
   updated_at BIGINT NOT NULL,
   executor_kind VARCHAR(32) NOT NULL DEFAULT 'agent',
   executor_ref VARCHAR(255) NULL,
-  executor_spec {text} NULL";
+  executor_spec {text} NULL,
+  board_status VARCHAR(32) NOT NULL DEFAULT 'backlog',
+  position BIGINT NOT NULL DEFAULT 0,
+  capability_id VARCHAR(255) NULL";
 
 const RUN_COLUMNS: &str = "\
   id VARCHAR(64) NOT NULL,
@@ -114,6 +117,9 @@ const UPGRADE_COLUMNS: &[(&str, &[&str])] = &[
             "executor_kind VARCHAR(32) NOT NULL DEFAULT 'agent'",
             "executor_ref VARCHAR(255) NULL",
             "executor_spec {text} NULL",
+            "board_status VARCHAR(32) NOT NULL DEFAULT 'backlog'",
+            "position BIGINT NOT NULL DEFAULT 0",
+            "capability_id VARCHAR(255) NULL",
         ],
     ),
     (

@@ -14,7 +14,7 @@ use super::{
 };
 use crate::project_types::{ProjectExecutorKind, ProjectTodoRecord, ProjectTodoStatus};
 
-const TODO_COLS: &str = "id, milestone_id, title, draft, plan_md, status, agent, active_session_id, created_at, updated_at, executor_kind, executor_ref, executor_spec";
+const TODO_COLS: &str = "id, milestone_id, title, draft, plan_md, status, agent, active_session_id, created_at, updated_at, executor_kind, executor_ref, executor_spec, board_status, position, capability_id";
 
 // ---- todos ----
 
@@ -23,8 +23,8 @@ pub async fn create_todo(pool: &MySqlPool, starrocks: bool, rec: &ProjectTodoRec
         pool,
         starrocks,
         "INSERT INTO project_todos \
-         (id, milestone_id, title, draft, plan_md, status, agent, active_session_id, created_at, updated_at, executor_kind, executor_ref, executor_spec) \
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+         (id, milestone_id, title, draft, plan_md, status, agent, active_session_id, created_at, updated_at, executor_kind, executor_ref, executor_spec, board_status, position, capability_id) \
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         vec![
             Arg::Text(rec.id.clone()),
             Arg::TextOrNull(rec.milestone_id.clone()),
@@ -39,6 +39,9 @@ pub async fn create_todo(pool: &MySqlPool, starrocks: bool, rec: &ProjectTodoRec
             Arg::Text(rec.executor_kind.as_str().to_string()),
             Arg::TextOrNull(rec.executor_ref.clone()),
             Arg::TextOrNull(rec.executor_spec.clone()),
+            Arg::Text(rec.board_status.clone()),
+            Arg::Int(rec.position),
+            Arg::TextOrNull(rec.capability_id.clone()),
         ],
     )
     .await
@@ -70,6 +73,15 @@ fn todo_set_fragment(
     if let Some(v) = patch.status {
         sets.push("status = ?");
         args.push(Arg::Text(v.as_str().to_string()));
+    }
+    if let Some(v) = &patch.board_status {
+        sets.push("board_status = ?"); args.push(Arg::Text(v.clone()));
+    }
+    if let Some(v) = patch.position {
+        sets.push("position = ?"); args.push(Arg::Int(v));
+    }
+    if let Some(v) = &patch.capability_id {
+        sets.push("capability_id = ?"); args.push(Arg::TextOrNull(v.clone()));
     }
     if let Some(v) = &patch.agent {
         sets.push("agent = ?");
@@ -253,7 +265,7 @@ pub async fn list_todos(
         sql.push_str(" WHERE milestone_id = ?");
         args.push(Arg::Text(m.to_string()));
     }
-    sql.push_str(" ORDER BY created_at");
+    sql.push_str(" ORDER BY board_status, position, created_at, id");
     let rows = exec_read_all(pool, starrocks, &sql, &args).await?;
     rows.iter().map(row_to_todo).collect()
 }
@@ -275,6 +287,9 @@ fn row_to_todo(r: &sqlx::mysql::MySqlRow) -> Result<ProjectTodoRecord> {
         })?,
         executor_ref: r.try_get::<Option<String>, _>("executor_ref")?,
         executor_spec: r.try_get::<Option<String>, _>("executor_spec")?,
+        board_status: r.try_get("board_status")?,
+        position: r.try_get("position")?,
+        capability_id: r.try_get("capability_id")?,
         active_session_id: r.try_get::<Option<String>, _>("active_session_id")?,
         created_at: r.try_get("created_at")?,
         updated_at: r.try_get("updated_at")?,

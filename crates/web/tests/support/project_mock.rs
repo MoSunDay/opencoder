@@ -124,6 +124,9 @@ async fn direct_todo(
             id: id.into(), milestone_id, title: title.into(), draft: draft.into(),
             plan_md: None, status: ProjectTodoStatus::Draft, agent: "act".into(),
             executor_kind: ProjectExecutorKind::Agent, executor_ref: None, executor_spec: None,
+            active_session_id: None, board_status: "backlog".into(),
+            active_session_id: None, position: 0,
+            active_session_id: None, capability_id: None,
             active_session_id: None, created_at: at, updated_at: at,
         })
         .await

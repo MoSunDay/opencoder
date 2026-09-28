@@ -137,9 +137,15 @@ async function main() {
     await composer.waitFor();
     assert(await composer.isDisabled(), 'completed Brain must keep the conversation read-only');
     await page.setViewportSize({ width: 390, height: 844 });
-    const drawerBox = await page.getByRole('dialog', { name: '计划运行详情' }).boundingBox();
+    const drawer = page.getByRole('dialog', { name: '计划运行详情' });
+    let drawerBox;
+    for (let attempt = 0; attempt < 60; attempt++) {
+      drawerBox = await drawer.boundingBox();
+      if (drawerBox && drawerBox.x >= -1 && drawerBox.x + drawerBox.width <= 391) break;
+      await page.waitForTimeout(50);
+    }
     assert(drawerBox && drawerBox.x >= -1 && drawerBox.x + drawerBox.width <= 391,
-      'Brain conversation drawer must fit a narrow viewport');
+      `Brain conversation drawer must fit a narrow viewport: ${JSON.stringify(drawerBox)}`);
     await page.screenshot({ path: path.join(artifacts, 'conversation-narrow.png'), animations: 'disabled' });
     await page.setViewportSize({ width: 1650, height: 1100 });
     for (const round of [1, 2]) {

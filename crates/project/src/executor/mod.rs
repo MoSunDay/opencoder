@@ -177,6 +177,9 @@ mod tests {
             executor_ref: ref_.map(Into::into),
             executor_spec: spec.map(Into::into),
             active_session_id: None,
+            board_status: "backlog".into(),
+            position: 0,
+            capability_id: None,
             created_at: 1,
             updated_at: 1,
         }

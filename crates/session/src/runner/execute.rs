@@ -394,8 +394,9 @@ async fn force_cancel_subagent(
 
 /// Render a duration compactly (seconds when >= 1 s, milliseconds otherwise) so
 /// the timeout message reads naturally for both the 10-minute default and the
-/// sub-second durations used in tests.
-fn fmt_dur(d: Duration) -> String {
+/// sub-second durations used in tests. Shared with local_memory for
+/// block-footer durations.
+pub(super) fn fmt_dur(d: Duration) -> String {
     if d.as_secs() >= 1 {
         format!("{}s", d.as_secs())
     } else {

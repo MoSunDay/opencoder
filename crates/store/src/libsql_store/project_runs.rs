@@ -12,14 +12,14 @@ use crate::project_types::{
     ProjectTodoRunRecord, ProjectTodoRunStatus, ProjectTodoStatus,
 };
 
-const TODO_COLS: &str = "id, milestone_id, title, draft, plan_md, status, agent, active_session_id, created_at, updated_at, executor_kind, executor_ref, executor_spec";
+const TODO_COLS: &str = "id, milestone_id, title, draft, plan_md, status, agent, active_session_id, created_at, updated_at, executor_kind, executor_ref, executor_spec, board_status, position, capability_id";
 const RUN_COLS: &str = "id, todo_id, kind, version, plan_md, output_md, agent, session_id, status, started_at, finished_at, created_at, executor_kind, capability_id, plan_id, output_ref, input_snapshot, trace_manifest";
 
 // ---- todos ----
 
 pub async fn create_todo(conn: &Connection, rec: &ProjectTodoRecord) -> Result<()> {
     conn.execute(
-        "INSERT INTO project_todos (id, milestone_id, title, draft, plan_md, status, agent, active_session_id, created_at, updated_at, executor_kind, executor_ref, executor_spec) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO project_todos (id, milestone_id, title, draft, plan_md, status, agent, active_session_id, created_at, updated_at, executor_kind, executor_ref, executor_spec, board_status, position, capability_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         params![
             rec.id.as_str(),
             rec.milestone_id.as_deref(),
@@ -33,7 +33,10 @@ pub async fn create_todo(conn: &Connection, rec: &ProjectTodoRecord) -> Result<(
             rec.updated_at,
             rec.executor_kind.as_str(),
             rec.executor_ref.as_deref(),
-            rec.executor_spec.as_deref()
+            rec.executor_spec.as_deref(),
+            rec.board_status.as_str(),
+            rec.position,
+            rec.capability_id.as_deref()
         ],
     )
     .await
@@ -65,6 +68,15 @@ fn todo_set_fragment(
     if let Some(v) = patch.status {
         sets.push("status = ?");
         vals.push(v.as_str().into());
+    }
+    if let Some(v) = patch.board_status.as_deref() {
+        sets.push("board_status = ?"); vals.push(v.into());
+    }
+    if let Some(v) = patch.position {
+        sets.push("position = ?"); vals.push(v.into());
+    }
+    if let Some(v) = patch.capability_id.as_ref() {
+        sets.push("capability_id = ?"); vals.push(v.as_deref().into());
     }
     if let Some(v) = patch.agent.as_deref() {
         sets.push("agent = ?");
@@ -303,7 +315,7 @@ pub async fn list_todos(
     if milestone_id.is_some() {
         sql.push_str(" WHERE milestone_id = ?");
     }
-    sql.push_str(" ORDER BY created_at");
+    sql.push_str(" ORDER BY board_status, position, created_at, id");
     let stmt = conn.prepare(&sql).await?;
     let mut rows = match milestone_id {
         Some(m) => stmt.query(params![m]).await?,
@@ -330,6 +342,9 @@ fn row_to_todo(r: &libsql::Row) -> Result<ProjectTodoRecord> {
             .context("project_todos.executor_kind")?,
         executor_ref: r.get(11)?,
         executor_spec: r.get(12)?,
+        board_status: r.get(13)?,
+        position: r.get(14)?,
+        capability_id: r.get(15)?,
         active_session_id: r.get(7)?,
         created_at: r.get(8)?,
         updated_at: r.get(9)?,

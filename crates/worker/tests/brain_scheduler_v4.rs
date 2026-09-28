@@ -177,8 +177,16 @@ async fn human_input_reopens_a_blocked_brain_decision() {
         while control::snapshot(&node, id).await.run.phase != LayeredPhase::Blocked {
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }
-    }).await.unwrap();
-    let updated = control::ok(&node, id, "human_input", json!({"text":"Use the supplied constraint"})).await;
+    })
+    .await
+    .unwrap();
+    let updated = control::ok(
+        &node,
+        id,
+        "human_input",
+        json!({"text":"Use the supplied constraint"}),
+    )
+    .await;
     assert_eq!(updated["run"]["phase"], "ready");
     control::decide_next_layer(&node, id).await;
     control::wait_phase(&node, id, LayeredPhase::Waiting).await;

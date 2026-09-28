@@ -1,8 +1,8 @@
 # 项目工作台与执行留存验收
 
-在独立临时目录中启动构建后的 Server、两个 Node、只读 NFSv3 Agent 资源池、HTTP 模型夹具和 Chromium，覆盖项目、里程碑、关联项目与独立专项、分组 TODO 与 backlog 的真实浏览器创建，以及 Agent 执行关联与原生详情入口。模型响应由本地夹具确定性提供，不调用外部 LLM。
+在独立临时目录中启动构建后的 Server、两个 Node、只读 NFSv3 Agent 资源池、HTTP 模型夹具和 Chromium，覆盖项目、里程碑、关联项目与独立专项、分组 TODO 与 backlog 的真实浏览器创建，以及 Agent 原生提交、自动关联与详情入口。模型响应由本地夹具确定性提供，不调用外部 LLM。
 
-先完成 SPA 构建与 `cargo build --workspace`。运行环境需要 Linux NFS 客户端、挂载权限、Python 3、支持 `Array.prototype.toReversed` 的 Node.js、SPA 的 `playwright-core` 依赖及 Chromium。临时目录所在卷须满足 Node 的存储就绪检查（至少 20% 可用空间）。
+先完成 SPA 构建与 `cargo build --workspace`。运行环境需要 Linux NFS 客户端、挂载权限、Python 3、支持 `Array.prototype.toReversed` 的 Node.js、SPA 的 `playwright-core` 依赖及其配套的 Chromium；旧系统 Chromium 可能不支持 `marked` 所需的 `Array.prototype.at`。临时目录所在卷须满足 Node 的存储就绪检查（至少 20% 可用空间）。
 
 ```sh
 TMPDIR=/path/to/isolated/tmp \

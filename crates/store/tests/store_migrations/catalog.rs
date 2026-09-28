@@ -328,6 +328,9 @@ async fn schema_migration_v19_to_v20_adds_project_executor_columns() {
             executor_ref: Some("feature-team".into()),
             executor_spec: Some("{\"members\":[]}".into()),
             active_session_id: None,
+            board_status: "backlog".into(),
+            position: 0,
+            capability_id: None,
             created_at: 5,
             updated_at: 5,
         })

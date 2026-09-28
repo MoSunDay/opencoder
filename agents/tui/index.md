@@ -1,4 +1,4 @@
-Commit: 2aa44247d199d782881b9ee64921c4c6de2e6199
+Commit: fe2d39f62a57f9d1ca273e2dddee32172b74b367
 
 # tui 模块
 
@@ -15,8 +15,10 @@ ratatui + crossterm 交互界面。细节以代码为准。
 - `src/notepad/` — 全屏文件树 + vim 编辑器
 - `src/vim/` — vim 引擎
 - `src/ts_mirror.rs` — tmux 会话冷启动恢复
-- `src/hooks.rs` — 从 `~/.opencoder/hooks.json` 读取 TUI 事件命令并异步执行；
-  `app_loop.rs` 在 `question` 工具开始和最终 `TurnDone` 空闲边界触发
+- `src/hooks.rs` — 从 `~/.opencoder/hooks.json` 读取 TUI 事件命令（`sh -c`、3 秒超时、
+  失败仅 debug 日志）异步执行；`turn_done` 仅在 `app_loop.rs` 的最终空闲分支触发——
+  drain 重启（`drain_pending`）与用户取消（`cancelled`）路径不发射；`question` 仅在
+  live `question` ToolStart 触发，store replay 不触发
 - `tests/` — 集成测试（agent_menu_catalog / agent_mention_flow /
   agent_switch_persist / bootstrap_agent_override 等）
 

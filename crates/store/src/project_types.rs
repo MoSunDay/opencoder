@@ -276,6 +276,12 @@ pub struct ProjectTodoRecord {
     pub draft: String,
     pub plan_md: Option<String>,
     pub status: ProjectTodoStatus,
+    #[serde(default = "default_board_status")]
+    pub board_status: String,
+    #[serde(default)]
+    pub position: i64,
+    #[serde(default)]
+    pub capability_id: Option<String>,
     pub agent: String,
     #[serde(default)]
     pub executor_kind: ProjectExecutorKind,
@@ -298,12 +304,19 @@ pub struct ProjectTodoPatch {
     pub draft: Option<String>,
     pub plan_md: Option<Option<String>>,
     pub status: Option<ProjectTodoStatus>,
+    pub board_status: Option<String>,
+    pub position: Option<i64>,
+    pub capability_id: Option<Option<String>>,
     pub agent: Option<String>,
     pub executor_kind: Option<ProjectExecutorKind>,
     pub executor_ref: Option<Option<String>>,
     pub executor_spec: Option<Option<String>>,
     pub milestone_id: Option<Option<String>>,
     pub active_session_id: Option<Option<String>>,
+}
+
+fn default_board_status() -> String {
+    "backlog".into()
 }
 
 /// One plan/execute attempt against a todo (`project_todo_runs` row);

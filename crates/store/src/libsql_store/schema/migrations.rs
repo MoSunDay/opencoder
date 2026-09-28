@@ -2,6 +2,12 @@
 use super::*;
 
 pub(super) async fn migrate(conn: &Connection, from: i64) -> Result<()> {
+    if from < 30 {
+        add_column_if_absent(conn, "project_todos", "board_status", "TEXT NOT NULL DEFAULT 'backlog'").await?;
+        add_column_if_absent(conn, "project_todos", "position", "INTEGER NOT NULL DEFAULT 0").await?;
+        add_column_if_absent(conn, "project_todos", "capability_id", "TEXT").await?;
+        conn.execute("UPDATE project_todos SET board_status = CASE status WHEN 'draft' THEN 'backlog' WHEN 'running' THEN 'in_progress' WHEN 'done' THEN 'done' ELSE 'todo' END, position = created_at WHERE position = 0", ()).await?;
+    }
     if from < 29 {
         add_column_if_absent(
             conn,

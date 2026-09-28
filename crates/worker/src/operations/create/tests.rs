@@ -14,6 +14,9 @@ fn todo(kind: ProjectExecutorKind, spec: Option<&str>) -> opencoder_store::Proje
         executor_ref: None,
         executor_spec: spec.map(str::to_string),
         active_session_id: None,
+        board_status: "backlog".into(),
+        position: 0,
+        capability_id: None,
         created_at: 0,
         updated_at: 0,
     }

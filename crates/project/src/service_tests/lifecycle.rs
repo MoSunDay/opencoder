@@ -255,6 +255,9 @@ fn label_todo() -> ProjectTodoRecord {
         executor_ref: Some("cap-1".into()),
         executor_spec: None,
         active_session_id: None,
+        board_status: "backlog".into(),
+        position: 0,
+        capability_id: None,
         created_at: 1,
         updated_at: 1,
     }

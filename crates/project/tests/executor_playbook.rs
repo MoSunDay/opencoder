@@ -70,6 +70,9 @@ async fn seed_todo(h: &Harness, id: &str, executor_ref: &str) {
             executor_ref: Some(executor_ref.into()),
             executor_spec: None,
             active_session_id: None,
+            board_status: "backlog".into(),
+            position: 0,
+            capability_id: None,
             created_at: now,
             updated_at: now,
         })

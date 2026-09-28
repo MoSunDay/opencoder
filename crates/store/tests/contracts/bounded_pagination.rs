@@ -306,6 +306,9 @@ async fn todo_items_and_project_runs_use_bounded_keyset_pages() {
             executor_ref: None,
             executor_spec: None,
             active_session_id: None,
+            board_status: "backlog".into(),
+            position: 0,
+            capability_id: None,
             created_at: 1,
             updated_at: 1,
         })

@@ -257,6 +257,9 @@ mod gated {
             executor_ref: Some("team-a".into()),
             executor_spec: Some(spec.into()),
             active_session_id: None,
+            board_status: "backlog".into(),
+            position: 0,
+            capability_id: None,
             created_at: ts,
             updated_at: ts,
         })

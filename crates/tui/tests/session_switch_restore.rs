@@ -45,6 +45,26 @@ const MODEL_B_BARE: &str = "model-y";
 const SESSION_A: &str = "switch-restore-a";
 const SESSION_B: &str = "switch-restore-b";
 
+/// Env mutation is process-global; serialize HOME-manipulating tests (same
+/// pattern as `crates/core/tests/skill_contract.rs`).
+static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Point HOME at a fresh tempdir; returns `(home, previous HOME)` for the
+/// caller to hand to [`restore_home`] when done (`None` => remove_var).
+fn isolated_home() -> (tempfile::TempDir, Option<std::ffi::OsString>) {
+    let home = tempfile::tempdir().unwrap();
+    let prev = std::env::var_os("HOME");
+    std::env::set_var("HOME", home.path());
+    (home, prev)
+}
+
+fn restore_home(prev: Option<std::ffi::OsString>) {
+    match prev {
+        Some(h) => std::env::set_var("HOME", h),
+        None => std::env::remove_var("HOME"),
+    }
+}
+
 async fn mem_store() -> Arc<dyn Store> {
     Arc::new(LibsqlStore::open_memory().await.unwrap())
 }
@@ -197,6 +217,14 @@ async fn switch_restores_model_and_agent_both_ways() {
 /// restored model: the request body the mock LLM captures carries it.
 #[tokio::test]
 async fn switched_model_used_by_next_turn() {
+    // The switch path runs `Config::load(workdir)`, which merges the REAL
+    // `~/.opencoder` global config (see `Config::load_with_home`). On a dev
+    // machine with `local_memory: true` the resumed "act" session fires a
+    // maintenance child after the mock turn — a second LLM call this test's
+    // `call_count == 1` assertion must not see. HOME points at a fresh
+    // tempdir for the whole body (including awaits) to keep that out.
+    let _env = ENV_LOCK.lock().unwrap();
+    let (home, prev_home) = isolated_home();
     let dir = tempfile::tempdir().unwrap();
     let store = mem_store().await;
     seed_session(&store, SESSION_A, "act", "plan", MODEL_A).await;
@@ -230,6 +258,8 @@ async fn switched_model_used_by_next_turn() {
         requests[0].model, MODEL_B,
         "the next turn after the switch must use the restored model"
     );
+    restore_home(prev_home);
+    drop(home);
 }
 
 /// The chat view is rebuilt from the target session's store transcript (never

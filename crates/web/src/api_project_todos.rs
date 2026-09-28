@@ -113,6 +113,9 @@ pub async fn create_todo(
         draft: body.draft,
         plan_md: None,
         status: ProjectTodoStatus::Draft,
+        board_status: "backlog".into(),
+        position: now,
+        capability_id: None,
         agent: body.agent.unwrap_or_else(|| "act".into()),
         executor_kind,
         executor_ref: normalize_ref(body.executor_ref.as_deref()),
@@ -142,6 +145,8 @@ pub struct PatchTodoBody {
     pub draft: Option<String>,
     #[serde(default)]
     pub status: Option<ProjectTodoStatus>,
+    pub board_status: Option<String>,
+    pub position: Option<i64>,
     #[serde(default)]
     pub agent: Option<String>,
     /// Executor triple, same triple semantics (absent / null-clear / value).
@@ -229,6 +234,9 @@ pub async fn patch_todo(
     }) {
         return error_400("unsupported manual todo status");
     }
+    if body.board_status.as_deref().is_some_and(|status| !matches!(status, "backlog" | "todo" | "in_progress" | "done")) {
+        return error_400("unsupported board status");
+    }
     if let Some(Some(mid)) = &body.milestone_id {
         match group_exists(deps.projects.as_ref(), mid).await {
             Ok(true) => {}
@@ -282,6 +290,9 @@ pub async fn patch_todo(
         // Old project-run snapshots are not writable through TODO CRUD.
         plan_md: None,
         status: body.status,
+        board_status: body.board_status,
+        position: body.position,
+        capability_id: None,
         agent: body.agent,
         executor_kind,
         executor_ref,

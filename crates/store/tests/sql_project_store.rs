@@ -155,6 +155,9 @@ mod gated {
             executor_ref: Some("feature-team".into()),
             executor_spec: Some("{\"members\":[]}".into()),
             active_session_id: None,
+            board_status: "backlog".into(),
+            position: 0,
+            capability_id: None,
             created_at: ts + 4,
             updated_at: ts + 4,
         })

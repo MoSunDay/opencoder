@@ -50,9 +50,14 @@ pub async fn wake(state: &Arc<AppState>, run_id: &str) -> Result<Option<u64>> {
     let history = read::events(state, run_id, snapshot.run.last_event_seq)
         .await
         .map_err(|reply| anyhow::anyhow!("layered input history: {}", reply.body))?;
-    context.human_inputs = latest(history.iter().filter_map(|event| event.user_input.clone()), 32);
+    context.human_inputs = latest(
+        history.iter().filter_map(|event| event.user_input.clone()),
+        32,
+    );
     context.guidance_notes = latest(
-        history.into_iter().filter(|event| event.event_type == "guidance_processed")
+        history
+            .into_iter()
+            .filter(|event| event.event_type == "guidance_processed")
             .filter_map(|event| event.reason_summary),
         32,
     );

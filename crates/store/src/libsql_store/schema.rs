@@ -13,7 +13,7 @@ use migrations::migrate;
 
 // v3 scheduler tables are additive and bootstrap unconditionally; keep the
 // existing schema watermark so v2 database migration remains read-compatible.
-pub(crate) const SCHEMA_VERSION: i64 = 29;
+pub(crate) const SCHEMA_VERSION: i64 = 30;
 
 // Order invariant: busy_timeout must precede any locking statement, and
 // synchronous=NORMAL must be applied BEFORE journal_mode=WAL. Switching a
@@ -159,7 +159,10 @@ CREATE TABLE IF NOT EXISTS project_todos (
   updated_at INTEGER NOT NULL,
   executor_kind TEXT NOT NULL DEFAULT 'agent',
   executor_ref TEXT,
-  executor_spec TEXT
+  executor_spec TEXT,
+  board_status TEXT NOT NULL DEFAULT 'backlog',
+  position INTEGER NOT NULL DEFAULT 0,
+  capability_id TEXT
 )";
 const CREATE_PROJECT_TODO_RUNS: &str = "\
 CREATE TABLE IF NOT EXISTS project_todo_runs (

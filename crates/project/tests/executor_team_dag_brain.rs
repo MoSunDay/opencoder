@@ -114,6 +114,9 @@ async fn seed_todo(
             executor_ref,
             executor_spec,
             active_session_id: None,
+            board_status: "backlog".into(),
+            position: 0,
+            capability_id: None,
             created_at: now,
             updated_at: now,
         })

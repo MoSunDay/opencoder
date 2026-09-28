@@ -6,6 +6,10 @@ Rust 原生编码代理 workspace：`opencoder`（本地 CLI/TUI）、`opencoder
 
 抽象口子：`Arc<dyn Store>`、`Arc<dyn ChatStream>`。细节见各模块索引，代码是最终事实。
 
+## 仓库记忆范围
+
+`agents.md`、`agents/` 和 `features/`（含 changelog）只记录 OpenCoder 本身的模块、通用基建能力、接口契约及其演进。外部业务系统的需求、业务逻辑、数据结论、部署现场、巡检结果和一次性执行回执不得写入本仓库记忆。涉及外部系统的工作，仅在解释 OpenCoder 自身接口或能力边界所必需时记录通用事实，不沉淀具体业务状态。
+
 ## 模块索引
 
 - [agents/core](agents/core/index.md) — 共享类型与 Config。
@@ -32,7 +36,7 @@ Rust 原生编码代理 workspace：`opencoder`（本地 CLI/TUI）、`opencoder
 - [agents/agent](agents/agent/index.md) — 稳定 Host、独立版本 Runtime 与兼容节点入口。
 - [agents/ctl](agents/ctl/index.md) — `opencoder-cli`：Server API + Bearer + 退出码约定。
 
-业务能力见 [features/index.md](features/index.md)。
+OpenCoder 能力入口见 [features/index.md](features/index.md)。
 
 ## 根包进程级 e2e 套件（layer-2，随 cargo test 运行）
 

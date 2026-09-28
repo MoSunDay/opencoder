@@ -11,6 +11,9 @@ async function openBrowser(h, errors) {
   page.on('pageerror', (error) => errors.push(error.message));
   await page.addInitScript((token) => localStorage.setItem('oc_token', token), h.token);
   try {
+    if (!(await page.evaluate(() => typeof Array.prototype.at === 'function'))) {
+      throw new Error('Chromium lacks Array.prototype.at; use Playwright Chromium or a newer browser');
+    }
     await page.goto(h.base, { waitUntil: 'networkidle' });
     await projectPage(page);
   } catch (error) {
@@ -87,4 +90,24 @@ async function verifyWorkbench(page, root, executionId) {
   await page.screenshot({ path: path.join(root, 'project-workbench.png'), fullPage: true });
   fs.writeFileSync(path.join(root, 'workbench-browser.json'), JSON.stringify({ linked_execution_id: executionId, detail_opened: true }, null, 2));
 }
-module.exports = { openBrowser, createHierarchy, projectPage, verifyWorkbench };
+async function verifyNativeAgentLaunch(page, todoTitle) {
+  await page.getByRole('button', { name: '返回 TODO' }).click();
+  await page.locator('.ant-drawer-close').click();
+  await page.getByRole('button', { name: todoTitle, exact: true }).click();
+  await page.getByRole('button', { name: '从能力发起执行' }).click();
+  await page.getByRole('combobox', { name: '执行节点' }).click();
+  await page.locator('.ant-select-item-option-content').filter({ hasText: 'node-a' }).click();
+  await page.getByRole('combobox', { name: '执行 Agent' }).click();
+  await page.locator('.ant-select-item-option-content').filter({ hasText: 'acceptance-agent' }).click();
+  const sent = page.waitForResponse((response) => response.url().endsWith('/api/sessions') && response.request().method() === 'POST');
+  await page.getByPlaceholder('输入提示词，Enter 发送，Shift+Enter 换行').fill('通过专项 TODO 发起 Agent 验收');
+  await page.getByPlaceholder('输入提示词，Enter 发送，Shift+Enter 换行').press('Enter');
+  const receipt = await sent;
+  if (!receipt.ok()) throw new Error(`browser agent launch: ${await receipt.text()}`);
+  const execution = await receipt.json();
+  await page.getByRole('button', { name: '返回 TODO' }).waitFor();
+  await page.getByRole('button', { name: '返回 TODO' }).click();
+  await page.locator('tr').filter({ hasText: execution.id }).waitFor();
+  return execution.id;
+}
+module.exports = { openBrowser, createHierarchy, projectPage, verifyWorkbench, verifyNativeAgentLaunch };

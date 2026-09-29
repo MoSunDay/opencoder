@@ -5,16 +5,19 @@ import '../test/setup-dom.js';
 
 const api = vi.hoisted(() => ({ apiGet: vi.fn(), apiPost: vi.fn(), apiPatch: vi.fn(), apiDel: vi.fn() }));
 vi.mock('../api.js', () => api);
-vi.mock('../fleet/detail.jsx', () => ({ ExecutionView: ({ executionRef }) => <div>execution:{executionRef.id}</div> }));
-vi.mock('./execute/launcher.jsx', () => ({ CAPABILITIES: [{ value: 'agent', label: 'Agent' }], CapabilityLauncher: ({ onCreated }) => <button onClick={() => onCreated('agent-created')}>模拟发起</button> }));
+vi.mock('../fleet/detail.jsx', () => ({ ExecutionView: ({ executionRef, onGuidance }) => <div>execution:{executionRef.id}{executionRef.kind === 'team' && <button onClick={() => onGuidance('补充说明')}>提交引导</button>}</div> }));
+vi.mock('./execute/launcher.jsx', () => ({
+  CAPABILITIES: [{ value: 'agent', label: 'Agent' }, { value: 'operator', label: 'Operator' }],
+  CapabilityLauncher: ({ prompt }) => <div data-testid="native-prompt">{prompt}</div>,
+}));
 import { TodoDrawer } from './todoDrawer.jsx';
 
-const overview = { goals: [], standalone_milestones: [], backlog: [{ id: 'todo-1', title: '任务', draft: '说明', status: 'draft' }] };
+const overview = { goals: [], standalone_milestones: [], backlog: [{ id: 'todo-1', title: '任务', draft: '说明', status: 'draft', capability_id: 'agent' }] };
 
 beforeEach(() => {
   Object.values(api).forEach((method) => method.mockReset());
   api.apiGet.mockImplementation((path) => Promise.resolve(path.endsWith('/executions')
-    ? { execution_ids: ['agent-1'] }
+    ? { assignments: [{ execution_id: 'agent-1', kind: 'agent', name: '构建 Agent', sync_state: 'complete', result_md: '已完成' }] }
     : { id: 'agent-1', kind: 'agent', name: '构建 Agent', status: 'done' }));
   api.apiPost.mockResolvedValue({ execution_id: 'agent-2' });
   api.apiPatch.mockResolvedValue({ ok: true });
@@ -24,32 +27,74 @@ beforeEach(() => {
 it('displays execution type, name and ID resolved from the index', async () => {
   render(<TodoDrawer todoId="todo-1" overview={overview} refresh={vi.fn()} onClose={vi.fn()} onNotice={vi.fn()} />);
   expect(await screen.findByText('构建 Agent')).toBeTruthy();
+  expect(screen.getAllByText('已完成').length).toBeGreaterThan(0);
+  expect(screen.getByText('结论已回写')).toBeTruthy();
   expect(screen.getAllByText('agent-1').length).toBeGreaterThan(0);
   fireEvent.click(screen.getByRole('button', { name: '查看' }));
   expect(await screen.findByText('execution:agent-1')).toBeTruthy();
 }, 20000);
 
-it('links an existing execution ID without storing a duplicate snapshot', async () => {
+it('links an existing execution ID', async () => {
   render(<TodoDrawer todoId="todo-1" overview={overview} refresh={vi.fn()} onClose={vi.fn()} onNotice={vi.fn()} />);
   fireEvent.change(screen.getByLabelText('已有执行 ID'), { target: { value: 'agent-2' } });
   fireEvent.click(screen.getByRole('button', { name: /关\s*联/ }));
   await waitFor(() => expect(api.apiPost).toHaveBeenCalledWith('/api/project/todos/todo-1/executions', { execution_id: 'agent-2' }));
 });
 
+it('reads the previous execution_ids response during a service rollback', async () => {
+  api.apiGet.mockImplementation((path) => Promise.resolve(path.endsWith('/executions')
+    ? { execution_ids: ['operator-1'] }
+    : { id: 'operator-1', kind: 'operator', status: 'running' }));
+  render(<TodoDrawer todoId="todo-1" overview={overview} refresh={vi.fn()} onClose={vi.fn()} onNotice={vi.fn()} />);
+  expect((await screen.findAllByText('operator-1')).length).toBeGreaterThan(0);
+  fireEvent.click(screen.getByRole('button', { name: '查看' }));
+  expect(await screen.findByText('execution:operator-1')).toBeTruthy();
+}, 20000);
+
+it('submits Team guidance with a stable input ID from the execution detail', async () => {
+  api.apiGet.mockImplementation((path) => Promise.resolve(path.endsWith('/executions')
+    ? { assignments: [{ execution_id: 'team-1', kind: 'team', name: '审核', sync_state: 'pending' }] }
+    : { id: 'team-1', kind: 'team', name: '审核', status: 'running' }));
+  render(<TodoDrawer todoId="todo-1" overview={overview} refresh={vi.fn()} onClose={vi.fn()} onNotice={vi.fn()} />);
+  fireEvent.click(await screen.findByRole('button', { name: '查看' }));
+  fireEvent.click(await screen.findByRole('button', { name: '提交引导' }));
+  await waitFor(() => expect(api.apiPost).toHaveBeenCalledWith('/api/executions/team-1/commands', {
+    action: 'steer', input: { prompt: '补充说明', input_id: expect.stringMatching(/^input-/) },
+  }));
+}, 20000);
+
 it('preserves a missing execution ID but does not open an unknown detail type', async () => {
   api.apiGet.mockImplementation((path) => path.endsWith('/executions')
-    ? Promise.resolve({ execution_ids: ['lost-1'] })
+    ? Promise.resolve({ assignments: [{ execution_id: 'lost-1', kind: '', name: 'lost-1', sync_state: 'pending' }] })
     : Promise.reject(new Error('index unavailable')));
   render(<TodoDrawer todoId="todo-1" overview={overview} refresh={vi.fn()} onClose={vi.fn()} onNotice={vi.fn()} />);
   await waitFor(() => expect(screen.getAllByText('lost-1').length).toBeGreaterThan(0));
   expect(screen.getByRole('button', { name: '查看' }).disabled).toBe(true);
 }, 20000);
 
-it('retries auto-linking until a newly submitted execution reaches the index', async () => {
-  api.apiPost.mockRejectedValueOnce(Object.assign(new Error('not indexed'), { status: 404 })).mockResolvedValue({ execution_id: 'agent-created' });
+it('saves TODO changes before opening the native capability UI', async () => {
   render(<TodoDrawer todoId="todo-1" overview={overview} refresh={vi.fn()} onClose={vi.fn()} onNotice={vi.fn()} />);
-  fireEvent.click(screen.getByRole('button', { name: '从能力发起执行' }));
-  fireEvent.click(screen.getByRole('button', { name: '模拟发起' }));
-  await waitFor(() => expect(api.apiPost).toHaveBeenCalledTimes(2), { timeout: 4000 });
-  expect(api.apiPost).toHaveBeenCalledWith('/api/project/todos/todo-1/executions', { execution_id: 'agent-created' });
+  fireEvent.change(screen.getByLabelText('任务说明'), { target: { value: '新说明' } });
+  fireEvent.click(screen.getByRole('button', { name: '指派所选能力' }));
+  await waitFor(() => expect(api.apiPatch).toHaveBeenCalledWith('/api/project/todos/todo-1', expect.objectContaining({ draft: '新说明' })));
+  expect((await screen.findByTestId('native-prompt')).textContent).toBe('任务\n\n新说明');
 });
+
+it('keeps the TODO open when saving before a native launch fails', async () => {
+  api.apiPatch.mockRejectedValue(new Error('保存失败'));
+  render(<TodoDrawer todoId="todo-1" overview={overview} refresh={vi.fn()} onClose={vi.fn()} onNotice={vi.fn()} />);
+  fireEvent.click(screen.getByRole('button', { name: '指派所选能力' }));
+  expect(await screen.findByText('保存失败')).toBeTruthy();
+  expect(screen.queryByTestId('native-prompt')).toBeNull();
+});
+
+it('saves a selected Operator before allowing assignment', async () => {
+  const unbound = { ...overview, backlog: [{ ...overview.backlog[0], capability_id: null }] };
+  render(<TodoDrawer todoId="todo-1" overview={unbound} refresh={vi.fn()} onClose={vi.fn()} onNotice={vi.fn()} />);
+  expect(screen.getByRole('button', { name: '指派所选能力' }).disabled).toBe(true);
+  fireEvent.mouseDown(screen.getByRole('combobox', { name: '执行能力' }));
+  fireEvent.click(await screen.findByText('Operator', { selector: '.ant-select-item-option-content' }));
+  fireEvent.click(screen.getByRole('button', { name: '保存 TODO' }));
+  await waitFor(() => expect(api.apiPatch).toHaveBeenCalledWith('/api/project/todos/todo-1', expect.objectContaining({ capability_id: 'operator' })));
+  await waitFor(() => expect(screen.getByRole('button', { name: /指派所选能力/ }).disabled).toBe(false));
+}, 20000);

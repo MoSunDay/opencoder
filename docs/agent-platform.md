@@ -59,6 +59,8 @@ Node 在返回接受前同步持久化任务、资源和 Harness 配置快照。
 
 触发历史持久化在 `schedule_runs` 表（schema v26 起），按 `(schedule_id, scheduled_for_ms)` 主键覆盖写；定义持久化在 `schedules` 表（schema v27，主键 `id`，`job` JSON + created_at/updated_at，upsert 保留 created_at）。`GET /api/schedules` 列出全部定义并附最近一次触发与下一次触发时刻，`GET /api/schedules/:id/runs?limit=` 返回倒序历史；admin CRUD：`POST /api/schedules` 创建（缺省 id 自动生成 `schedule-<ULID>`，重名 409，非法 body 400）、`PUT /api/schedules/:id` 全量更新（404 未知 id，created_at 保留）、`PATCH /api/schedules/:id` 仅启停（`{"enabled": bool}`，重校验整个定义——坏 cron 的停用条目无法被直接启用）、`DELETE /api/schedules/:id` 删除定义（触发历史保留可查）、`POST /api/schedules/:id/run` 手动立即触发（绕过 enabled 与 overlap，属显式操作员动作）。全部端点 admin-only；CLI 对应 `opencoder-cli schedule list` 与 `opencoder-cli schedule runs <id>`；Web 控制台「定时任务」页（`spa/src/schedule/panel.jsx`）提供新建/编辑/启停/删除与手动触发的全功能管理。
 
+`GET /api/metrics/scheduler` 返回调度总览 JSON，`GET /metrics` 返回相同数据的 Prometheus 文本；两者均需管理员 Bearer。指标分开统计调度循环扫描/派发错误、每个日程最近一次派发失败或错过、最近一次成功派发对应执行的运行中/完成/失败数量、下一次触发时间，以及在线节点容量和运行负载。`active_executions` 是数据库中未终态执行索引数，可能包含历史遗留记录，不能当作设备实时运行数；设备运行数看 `node_active_runs`。扫描与派发计数器仅覆盖当前 Server 进程，重启归零；日程状态来自持久化记录。Prometheus 指标不带日程或执行 ID 标签，避免时间序列随任务增长。
+
 ## NFS 资源共享
 
 Web「Agent 配置」按 Agent 名称打开配置抽屉，直接查看和编辑 Prompt（Soul、How、Output）、Skills 目录及附件、Tools 文件和 `memory.md`。新建只填写名称与执行方式，资源首次保存自动创建并绑定；Prompt 至少一部分非空。历史版本位于各页签的「历史版本」，恢复会生成新版本。文本支持编辑和预览，二进制支持下载与上传替换，工具保留执行权限；切换页签保留草稿，关闭或刷新未保存内容会提示。读取错误禁止覆盖保存，保存失败保留输入。内置 Agent 显示实际 Prompt、工具限制及已有 Agent 级资源，资源只读，缺少的类别标注未配置。

@@ -193,7 +193,7 @@ export function ExecutionView({ executionRef, summary, onNotice, mode = 'full', 
     </div>}
     {((!managed && ['agent', 'maintenance', 'operator'].includes(kind)) || (allowGuidance && !!onGuidance && ['agent', 'operator', 'team'].includes(kind))) && <Space orientation="vertical" style={{ width: '100%', marginTop: 16 }}>
       <Input.TextArea disabled={!managed && unavailable} value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder={managed ? '补充信息，由大脑决定后续调度' : '继续会话'} rows={3} />
-      <Space>{!managed && <Select value={delivery} onChange={setDelivery} options={[{ value: 'prompt', label: '发送' }, { value: 'steer', label: '指导当前执行' }, { value: 'queue', label: '加入队列' }]} />}<Button type="primary" disabled={!prompt.trim() || busy} loading={busy} onClick={managed ? submitGuidance : () => command(delivery, { prompt })}>{managed ? '提交给大脑' : '提交'}</Button></Space>
+      <Space>{!managed && kind !== 'team' && <Select value={delivery} onChange={setDelivery} options={[{ value: 'prompt', label: '发送' }, { value: 'steer', label: '指导当前执行' }, { value: 'queue', label: '加入队列' }]} />}<Button type="primary" disabled={!prompt.trim() || busy} loading={busy} onClick={managed || kind === 'team' ? submitGuidance : () => command(delivery, { prompt })}>{managed ? '提交给大脑' : '提交'}</Button></Space>
     </Space>}
     {kind === 'dag' && (detail?.definition?.spec || detail?.definition)?.steps && <DagRunResult key={id} id={id}
       spec={detail.definition.spec || detail.definition} status={execution?.status}

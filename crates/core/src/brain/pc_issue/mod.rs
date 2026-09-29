@@ -43,7 +43,6 @@ pub fn plan() -> Value {
         "inputs":{"problem":{"text":"","images":[]},"settings":{"workspace":"/data00/workspace","helper":"/opt/opencoder-pc-issue/current/cli.py","device_node":"","build_node":"","max_repair_rounds":2}},
         "layers":STAGES.iter().enumerate().map(|(i,s)|json!({"layer_id":s,"title":titles[i],"task":objectives[i],"objective":objectives[i],"success_criteria":"以宿主接受的 pc-issue.stage/v1 报告完成里程碑。incomplete、blocked、not_needed、not_reproduced、unresolved 是有效产品结论，不能因此把已完成的报告判为里程碑失败；应向前传递缺口，直至最终报告。"})).collect::<Vec<_>>(),
         "nodes":STAGES.iter().enumerate().map(|(i,s)|json!({"node_id":s,"layer_id":s,"title":titles[i],"objective":objectives[i],"capability_id":format!("pc-issue-{s}")})).collect::<Vec<_>>(),
-        "transitions":STAGES.windows(2).map(|pair|json!({"from":pair[0],"to":pair[1],"condition":"当前里程碑已达标，进入下一里程碑"})).chain(std::iter::once(json!({"from":"verify","to":"repair","condition":"复测失败且存在可执行修复、轮次预算尚有余量"}))).collect::<Vec<_>>(),
         "edges":[],"max_rounds":2})
 }
 
@@ -108,20 +107,6 @@ pub fn validate_plan(plan: &super::layered::LayeredPlan) -> Result<()> {
     ensure!(
         plan.edges.is_empty(),
         "PC issue schema 7 has no legacy node edges"
-    );
-    let expected: std::collections::BTreeSet<_> = STAGES
-        .windows(2)
-        .map(|pair| (pair[0], pair[1]))
-        .chain(std::iter::once(("verify", "repair")))
-        .collect();
-    let actual: std::collections::BTreeSet<_> = plan
-        .transitions
-        .iter()
-        .map(|edge| (edge.from.as_str(), edge.to.as_str()))
-        .collect();
-    ensure!(
-        actual == expected && plan.transitions.len() == expected.len(),
-        "PC issue transitions must retain the fixed evidence chain"
     );
     Ok(())
 }

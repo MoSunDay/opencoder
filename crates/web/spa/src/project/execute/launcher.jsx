@@ -8,6 +8,7 @@ import { TodoPanel } from '../../todoPanel.jsx';
 import { Launch } from '../../brain/workbench/launch.jsx';
 
 export const CAPABILITIES = [
+  { value: 'operator', label: 'Operator' },
   { value: 'agent', label: 'Agent' },
   { value: 'team', label: 'Team' },
   { value: 'dag', label: 'DAG 工作流' },
@@ -30,21 +31,18 @@ function BrainLaunch({ onCreated, prompt }) {
   if (error) return <Alert type="error" title={error} />;
   if (loading) return <Spin />;
   return <div>
-    {prompt && <Alert type="info" title="请将 TODO 说明填入计划的工程输入" description={prompt} style={{ marginBottom: 16 }} />}
     <Select aria-label="大脑计划" placeholder="选择计划" value={plan} onChange={setPlan} style={{ width: 350, marginBottom: 16 }}
       options={plans.filter((item) => item.schema_version === 7).map((item) => ({ value: `${item.id}@${item.latest_version}`, label: item.title }))} />
-    {plan && <Launch key={plan} onCreated={onCreated} capabilities={capabilities} initialPlan={plan} />}
+    {plan && <Launch key={plan} onCreated={onCreated} capabilities={capabilities} initialPlan={plan} initialPrompt={prompt} />}
   </div>;
 }
 
-export function CapabilityLauncher({ kind, onKind, onCreated, onNotice, prompt }) {
+export function CapabilityLauncher({ kind, onCreated, onNotice, prompt }) {
   return <div>
-    <Select aria-label="执行能力" value={kind} onChange={onKind} options={CAPABILITIES} style={{ width: 210, marginBottom: 16 }} />
-    {prompt && ['dag', 'todos'].includes(kind) && <Alert type="info" title="任务说明" description={prompt} style={{ marginBottom: 16 }} />}
     {kind === 'brain' && <BrainLaunch onCreated={onCreated} prompt={prompt} />}
-    {kind === 'dag' && <DefsTab onNotice={onNotice} onDispatched={onCreated} />}
-    {kind === 'todos' && <TodoPanel onNotice={onNotice} onCreated={onCreated} />}
+    {kind === 'dag' && <DefsTab onNotice={onNotice} onDispatched={onCreated} initialPrompt={prompt} />}
+    {kind === 'todos' && <TodoPanel onNotice={onNotice} onCreated={onCreated} initialPrompt={prompt} />}
     {kind === 'team' && <FleetTeamsPanel onNotice={onNotice} onCreated={onCreated} initialPrompt={prompt} />}
-    {kind === 'agent' && <ChatPanel onNotice={onNotice} onCreated={onCreated} initialPrompt={prompt} />}
+    {(kind === 'agent' || kind === 'operator') && <ChatPanel onNotice={onNotice} onCreated={onCreated} initialPrompt={prompt} launchKind={kind} />}
   </div>;
 }

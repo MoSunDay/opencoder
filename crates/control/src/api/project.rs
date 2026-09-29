@@ -17,12 +17,26 @@ pub async fn overview(State(state): State<Arc<AppState>>) -> Response {
         let goals = state.projects.list_goals().await?;
         let milestones = state.projects.list_milestones(None).await?;
         let initiatives = state.projects.list_initiatives(None).await?;
+        let assignment_states = state
+            .projects
+            .latest_todo_assignment_states()
+            .await?
+            .into_iter()
+            .map(|item| (item.todo_id.clone(), item))
+            .collect::<std::collections::HashMap<_, _>>();
         let items: Vec<Value> = state
             .projects
             .list_todos(None)
             .await?
             .into_iter()
-            .map(|todo| json!(todo))
+            .map(|todo| {
+                let todo_id = todo.id.clone();
+                let mut value = json!(todo);
+                if let Some(assignment) = assignment_states.get(&todo_id) {
+                    value["latest_assignment"] = json!(assignment);
+                }
+                value
+            })
             .collect();
         Ok::<_, anyhow::Error>(opencoder_store::project::overview::overview(
             &goals,

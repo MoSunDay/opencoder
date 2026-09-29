@@ -58,7 +58,8 @@ async fn project_plan_act_and_new_draft_stay_on_the_assigned_node() {
     let overview = fleet
         .call("GET", "/api/project/overview", Value::Null)
         .await;
-    assert_eq!(overview.body["backlog"][0]["plan_md"], "node-owned answer");
+    assert_eq!(overview.body["backlog"][0]["id"], todo);
+    assert!(overview.body["backlog"][0]["plan_md"].is_null());
     assert_eq!(
         fleet
             .call(

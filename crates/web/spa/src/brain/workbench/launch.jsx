@@ -8,7 +8,7 @@ import { inputRows, launchBody } from './scheduler/model.js';
 import { PlanPreview } from './scheduler/editor.jsx';
 import { ProblemFields, isProblemPlan } from './problem/fields.jsx';
 
-export function Launch({ onCreated, initialPlan, capabilities }) {
+export function Launch({ onCreated, initialPlan, capabilities, initialPrompt = '' }) {
   const { nodes, error: nodeError } = useNodes(); const [form] = Form.useForm();
   const [plan, setPlan] = useState(null); const [error, setError] = useState(''); const [busy, setBusy] = useState(false); const attempt = useRef(null);
   const [loading, setLoading] = useState(!!initialPlan);
@@ -19,10 +19,10 @@ export function Launch({ onCreated, initialPlan, capabilities }) {
     apiGet(`/api/brain/plan-defs/${encodeURIComponent(initialPlan.slice(0, split))}/versions/${initialPlan.slice(split + 1)}`).then((value) => {
       if (!alive) return;
       if (value.plan.schema_version !== 7) throw new Error('历史计划只读，请创建新版里程碑计划');
-      setPlan(value); form.setFieldsValue({ engineering: isProblemPlan(value) ? [] : inputRows(value.plan.inputs), settings: value.plan.inputs?.settings, problemText: value.plan.inputs?.problem?.text || '', problemImages: value.plan.inputs?.problem?.images || [] });
+      setPlan(value); form.setFieldsValue({ engineering: isProblemPlan(value) ? [] : inputRows({ ...value.plan.inputs, ...(initialPrompt ? { todo: initialPrompt } : {}) }), settings: value.plan.inputs?.settings, problemText: initialPrompt || value.plan.inputs?.problem?.text || '', problemImages: value.plan.inputs?.problem?.images || [] });
     }).catch((error) => { if (alive) setError(error.message); }).finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
-  }, [initialPlan, form]);
+  }, [initialPlan, initialPrompt, form]);
   const submit = async (values) => {
     if (busy || uploading || (initialPlan && !plan)) return; setBusy(true); setError('');
     try {

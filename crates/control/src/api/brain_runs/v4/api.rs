@@ -59,7 +59,7 @@ pub async fn create(State(state): State<Arc<AppState>>, Json(value): Json<Value>
     response(submit(state, value).await)
 }
 
-pub(super) async fn submit(state: Arc<AppState>, value: Value) -> RpcReply {
+pub(crate) async fn submit(state: Arc<AppState>, value: Value) -> RpcReply {
     let id = value
         .get("id")
         .and_then(Value::as_str)

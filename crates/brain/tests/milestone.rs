@@ -8,7 +8,7 @@ fn request() -> LayeredRequest {
       "nodes":[{"node_id":"code","layer_id":"coding","title":"Coding","objective":"implement","capability_id":"agent"},
                {"node_id":"docs","layer_id":"coding","title":"Docs","objective":"document","capability_id":"review"},
                {"node_id":"test","layer_id":"testing","title":"Test","objective":"verify","capability_id":"agent"}],
-      "transitions":[{"from":"coding","to":"testing","condition":"coding met"},{"from":"testing","to":"coding","condition":"test failed"},{"from":"coding","to":"coding","condition":"coding failed"}],"edges":[]}})).unwrap()
+      "edges":[]}})).unwrap()
 }
 fn catalog() -> Vec<BrainCapabilityDescriptor> {
     ["agent","review"].iter().map(|id| serde_json::from_value(json!({"capability_id":id,"kind":"agent","target":"act","input_desc":"task","output_desc":"result","definition":{},"version":"1"})).unwrap()).collect()
@@ -235,7 +235,7 @@ fn fifth_round_blocks_rework_without_creating_executions() {
     assert_eq!(next.run.phase, LayeredPhase::Waiting);
 }
 #[test]
-fn only_all_successful_layers_can_complete_and_cycles_do_not_affect_grouping() {
+fn only_all_successful_layers_can_complete_without_configured_routes() {
     let req = request();
     assert_eq!(
         layers(&req.plan).unwrap(),

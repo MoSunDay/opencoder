@@ -81,6 +81,7 @@ pub async fn resolve(
         }
         None => serde_json::from_value(value)?,
     };
+    request.plan = request.plan.with_rollback_paths();
     let mut inputs = request.plan.inputs.clone();
     inputs.extend(request.inputs);
     request.inputs = inputs;

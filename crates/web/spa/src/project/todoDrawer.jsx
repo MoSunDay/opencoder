@@ -1,15 +1,17 @@
 import { Alert, Button, Drawer, Input, Select, Space, Spin, Table, Typography } from 'antd';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiDel, apiGet, apiPatch, apiPost } from '../api.js';
 import { ExecutionView } from '../fleet/detail.jsx';
+import { KIND_LABELS, newId } from '../fleet/model.js';
 import { err, ok } from '../notice.js';
 import { flattenTodos, groupOptions, searchSelect } from './model/relations.js';
 import { CapabilityLauncher, CAPABILITIES } from './execute/launcher.jsx';
+import { Markdown } from './markdown.jsx';
 
-const { TextArea } = Input;
 const STATUS_OPTIONS = [
-  { value: 'draft', label: '待处理' },
-  { value: 'planned', label: '已规划' },
+  { value: 'backlog', label: '待整理' },
+  { value: 'todo', label: '待办' },
+  { value: 'in_progress', label: '进行中' },
   { value: 'done', label: '已完成' },
 ];
 const linkPath = (todoId) => `/api/project/todos/${encodeURIComponent(todoId)}/executions`;
@@ -19,23 +21,25 @@ function TodoDrawerSession({ todoId, overview, refresh, onClose, onNotice }) {
   const [draft, setDraft] = useState(todo?.draft || '');
   const [title, setTitle] = useState(todo?.title || '');
   const [groupId, setGroupId] = useState(todo?.milestone_id || null);
-  const [status, setStatus] = useState(todo?.status || 'draft');
+  const [status, setStatus] = useState(todo?.board_status || 'backlog');
   const [mode, setMode] = useState('overview');
-  const [kind, setKind] = useState('agent');
+  const [kind, setKind] = useState(todo?.capability_id || null);
   const [linkInput, setLinkInput] = useState('');
   const [pendingId, setPendingId] = useState('');
   const [executionId, setExecutionId] = useState('');
   const [links, setLinks] = useState([]);
   const [indexes, setIndexes] = useState({});
   const [busy, setBusy] = useState(false);
+  const guidanceAttempt = useRef(null);
   const [error, setError] = useState('');
 
   const loadLinks = useCallback(async () => {
     try {
       const result = await apiGet(linkPath(todoId));
-      const ids = result.execution_ids || [];
-      setLinks(ids);
-      const found = await Promise.all(ids.map(async (id) => {
+      const assignments = result.assignments || (result.execution_ids || []).map((execution_id) => ({ execution_id, kind: '', name: '', sync_state: 'pending' }));
+      setLinks(assignments);
+      const found = await Promise.all(assignments.map(async (assignment) => {
+        const id = assignment.execution_id;
         try { return [id, await apiGet(`/api/executions/${encodeURIComponent(id)}/index`)]; }
         catch { return [id, { id, missing: true }]; }
       }));
@@ -55,12 +59,13 @@ function TodoDrawerSession({ todoId, overview, refresh, onClose, onNotice }) {
     setBusy(true);
     try {
       await apiPatch(`/api/project/todos/${encodeURIComponent(todoId)}`, {
-        title: title.trim(), draft, milestone_id: groupId, status,
+        title: title.trim(), draft, milestone_id: groupId, board_status: status, capability_id: kind,
       });
       await refresh();
       setError('');
       onNotice(ok('TODO 已保存'));
-    } catch (failure) { setError(failure.message); }
+      return true;
+    } catch (failure) { setError(failure.message); return false; }
     finally { setBusy(false); }
   };
   const link = async (id, retryIndex = false) => {
@@ -101,39 +106,52 @@ function TodoDrawerSession({ todoId, overview, refresh, onClose, onNotice }) {
     finally { setBusy(false); }
   };
   const columns = [
-    { title: '类型', render: (_, row) => CAPABILITIES.find((item) => item.value === row.kind)?.label || row.kind || '不可读取' },
+    { title: '类型', render: (_, row) => KIND_LABELS[row.kind] || row.kind || '不可读取' },
     { title: '名称', render: (_, row) => row.name || row.id },
     { title: '执行 ID', dataIndex: 'id', render: (id) => <Typography.Text copyable={{ text: id }}>{id}</Typography.Text> },
-    { title: '状态', dataIndex: 'status', render: (value) => value || '—' },
+    { title: '状态', render: (_, row) => row.result_md ? '结论已回写' : ({ error: '失败', cancelled: '已取消', empty: '已结束，无结论' }[row.sync_state] || row.status || '等待执行') },
     { title: '操作', render: (_, row) => <Space>
-      <Button type="link" disabled={!row.kind} onClick={() => { setExecutionId(row.id); setMode('execution'); }}>查看</Button>
+      <Button type="link" disabled={!row.kind || row.missing} onClick={() => { setExecutionId(row.id); setMode('execution'); }}>查看</Button>
       <Button danger type="link" disabled={busy} onClick={() => unlink(row.id)}>解除关联</Button>
     </Space> },
   ];
-  return <Drawer open title={`TODO · ${todo?.title || todoId}`} onClose={onClose} size="min(100vw, 1000px)" destroyOnHidden>
+  return <Drawer open title={`TODO · ${todo?.title || todoId}`} onClose={onClose} placement="right" size="100vw" styles={{ wrapper: { maxWidth: 1000 } }} destroyOnHidden>
     <Space style={{ marginBottom: 16 }}>
       {mode !== 'overview' && <Button onClick={() => setMode('overview')}>返回 TODO</Button>}
-      {mode !== 'launch' && <Button type="primary" onClick={() => setMode('launch')}>从能力发起执行</Button>}
+      {mode === 'overview' && <Button type="primary" disabled={!kind} loading={busy} onClick={async () => { if (await save()) setMode('launch'); }}>指派所选能力</Button>}
     </Space>
     {error && <Alert type="error" showIcon title={error} style={{ marginBottom: 16 }} />}
     {pendingId && <Button loading={busy} onClick={() => link(pendingId)}>重试关联 {pendingId}</Button>}
     {mode === 'overview' && <Space orientation="vertical" size={16} style={{ width: '100%' }}>
       <Input aria-label="TODO 标题" value={title} onChange={(event) => setTitle(event.target.value)} />
       <Select {...searchSelect} aria-label="所属里程碑或专项" placeholder="未分组" value={groupId} onChange={(value) => setGroupId(value || null)} options={groupOptions(overview)} style={{ width: 320 }} />
-      <Select aria-label="TODO 状态" value={status} onChange={setStatus} options={STATUS_OPTIONS} style={{ width: 180 }} />
-      <TextArea aria-label="任务说明" value={draft} onChange={(event) => setDraft(event.target.value)} rows={6} />
+      <Select aria-label="TODO 看板列" value={status} onChange={setStatus} options={STATUS_OPTIONS} style={{ width: 180 }} />
+      <Select aria-label="执行能力" placeholder="选择能力后可指派" value={kind} onChange={(value) => setKind(value || null)} allowClear options={CAPABILITIES} style={{ width: 210 }} />
+      <Input.TextArea aria-label="任务说明" value={draft} onChange={(event) => setDraft(event.target.value)} rows={6} placeholder="写下任务要求，指派时会带入执行界面" />
       <Button type="primary" loading={busy} onClick={save}>保存 TODO</Button>
-      <Typography.Title level={5}>关联执行</Typography.Title>
+      <Typography.Title level={5}>指派记录</Typography.Title>
+      {links[0]?.result_md && <div><Typography.Text strong>最新结论</Typography.Text><Markdown text={links[0].result_md} /></div>}
       <Space.Compact style={{ width: '100%' }}>
         <Input aria-label="已有执行 ID" placeholder="粘贴已有执行 ID" value={linkInput} onChange={(event) => setLinkInput(event.target.value)} />
         <Button disabled={!linkInput.trim()} loading={busy} onClick={() => link(linkInput)}>关联</Button>
       </Space.Compact>
-      <Table rowKey="id" size="small" pagination={false} dataSource={links.map((id) => indexes[id] || { id })} columns={columns} scroll={{ x: 'max-content' }} />
+      <Table rowKey="id" size="small" pagination={false} dataSource={links.map((record) => ({ ...indexes[record.execution_id], ...record, id: record.execution_id, kind: record.kind || indexes[record.execution_id]?.kind, name: record.name || indexes[record.execution_id]?.name, status: indexes[record.execution_id]?.status, missing: indexes[record.execution_id]?.missing }))} columns={columns} scroll={{ x: 'max-content' }} />
     </Space>}
-    {mode === 'launch' && <CapabilityLauncher key={kind} kind={kind} onKind={setKind} onNotice={onNotice}
+    {mode === 'launch' && <CapabilityLauncher key={kind} kind={kind} onNotice={onNotice}
       prompt={[title, draft].filter(Boolean).join('\n\n')} onCreated={(id) => link(id, true)} />}
     {mode === 'execution' && (indexes[executionId]
-      ? <ExecutionView key={executionId} executionRef={{ id: executionId, kind: indexes[executionId].kind }} summary={indexes[executionId]} onNotice={onNotice} />
+      ? <ExecutionView key={executionId} executionRef={{ id: executionId, kind: indexes[executionId].kind }} summary={indexes[executionId]} onNotice={onNotice}
+        allowGuidance={indexes[executionId].kind === 'team' && indexes[executionId].status === 'running'}
+        onGuidance={async (prompt) => {
+          try {
+            const signature = `${executionId}:${prompt}`;
+            if (guidanceAttempt.current?.signature !== signature) guidanceAttempt.current = { signature, id: newId('input') };
+            await apiPost(`/api/executions/${encodeURIComponent(executionId)}/commands`, { action: 'steer', input: { prompt, input_id: guidanceAttempt.current.id } });
+            guidanceAttempt.current = null;
+            onNotice(ok('引导已提交'));
+            return true;
+          } catch (failure) { onNotice(err(failure.message)); return false; }
+        }} />
       : <Spin />)}
   </Drawer>;
 }

@@ -43,6 +43,9 @@ struct Args {
     /// Read the Bearer token from a credential file.
     #[arg(long, value_name = "PATH")]
     token_file: Option<PathBuf>,
+    /// Read a bearer token allowed only for GET /metrics.
+    #[arg(long, value_name = "PATH")]
+    metrics_token_file: Option<PathBuf>,
     /// Directory the server operates on (config + data dir discovery).
     #[arg(long)]
     workdir: Option<PathBuf>,
@@ -95,6 +98,18 @@ async fn main() -> Result<()> {
         .clone()
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
     let token = resolve_token(args.token, args.token_file)?;
+    let metrics_token = args
+        .metrics_token_file
+        .map(|path| -> Result<_> {
+            let value = std::fs::read_to_string(&path)
+                .with_context(|| format!("read metrics token file {}", path.display()))?;
+            token_value(value, "metrics token file")
+        })
+        .transpose()?;
+    anyhow::ensure!(
+        metrics_token.as_deref() != Some(token.as_str()),
+        "metrics token must differ from server token"
+    );
     if args.resources {
         return opencoder_control::release::resources::serve(
             workdir,
@@ -115,7 +130,10 @@ async fn main() -> Result<()> {
         args.web,
         workdir,
         args.data_dir,
-        token,
+        opencoder_control::ServerCredentials {
+            server: token,
+            metrics: metrics_token,
+        },
         platform,
     )
     .await

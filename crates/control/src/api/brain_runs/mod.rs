@@ -1,5 +1,5 @@
 mod attachments;
-mod catalog;
+pub(crate) mod catalog;
 pub(crate) mod effects;
 pub(crate) mod pc_issue;
 mod plan_capabilities;

@@ -22,6 +22,38 @@ pub struct TodoQuery {
     pub milestone_id: Option<String>,
 }
 
+#[derive(Deserialize)]
+pub struct ReorderBody {
+    pub board_status: String,
+    pub ids: Vec<String>,
+}
+
+pub async fn reorder_todos(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<ReorderBody>,
+) -> Response {
+    if !matches!(
+        body.board_status.as_str(),
+        "backlog" | "todo" | "in_progress" | "done"
+    ) || body.ids.is_empty()
+        || body.ids.len() > 1000
+    {
+        return error_400("invalid board reorder");
+    }
+    let deps = match require_deps(&state) {
+        Ok(deps) => deps,
+        Err(reply) => return *reply,
+    };
+    match deps
+        .projects
+        .reorder_todos(&body.board_status, &body.ids, now_ms())
+        .await
+    {
+        Ok(()) => Json(json!({"ok":true})).into_response(),
+        Err(error) => error_500(format!("reorder TODOs: {error:#}")),
+    }
+}
+
 async fn group_exists(projects: &dyn ProjectStore, id: &str) -> anyhow::Result<bool> {
     if projects
         .list_milestones(None)
@@ -61,6 +93,9 @@ pub struct CreateTodoBody {
     pub milestone_id: Option<String>,
     pub title: String,
     pub draft: String,
+    /// Optional capability selected for later explicit assignment.
+    #[serde(default)]
+    pub capability_id: Option<String>,
     /// Executor agent; defaults to `act`.
     #[serde(default)]
     pub agent: Option<String>,
@@ -90,6 +125,10 @@ pub async fn create_todo(
     if title.is_empty() {
         return error_400("todo title must not be empty");
     }
+    let capability_id = match validate_capability(body.capability_id.as_deref()) {
+        Ok(value) => value,
+        Err(reply) => return reply,
+    };
     if let Some(mid) = &body.milestone_id {
         match group_exists(deps.projects.as_ref(), mid).await {
             Ok(true) => {}
@@ -115,7 +154,7 @@ pub async fn create_todo(
         status: ProjectTodoStatus::Draft,
         board_status: "backlog".into(),
         position: now,
-        capability_id: None,
+        capability_id,
         agent: body.agent.unwrap_or_else(|| "act".into()),
         executor_kind,
         executor_ref: normalize_ref(body.executor_ref.as_deref()),
@@ -147,6 +186,8 @@ pub struct PatchTodoBody {
     pub status: Option<ProjectTodoStatus>,
     pub board_status: Option<String>,
     pub position: Option<i64>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub capability_id: Option<Option<String>>,
     #[serde(default)]
     pub agent: Option<String>,
     /// Executor triple, same triple semantics (absent / null-clear / value).
@@ -184,6 +225,22 @@ fn flatten_spec(spec: Option<Option<String>>) -> Option<String> {
 fn normalize_ref(raw: Option<&str>) -> Option<String> {
     let trimmed = raw.unwrap_or("").trim();
     (!trimmed.is_empty()).then(|| trimmed.to_string())
+}
+
+#[allow(clippy::result_large_err)]
+fn validate_capability(raw: Option<&str>) -> Result<Option<String>, Response> {
+    match raw.map(str::trim) {
+        None | Some("") => Ok(None),
+        Some(value)
+            if matches!(
+                value,
+                "operator" | "agent" | "team" | "dag" | "todos" | "brain"
+            ) =>
+        {
+            Ok(Some(value.to_owned()))
+        }
+        Some(_) => Err(error_400("unsupported TODO capability")),
+    }
 }
 
 /// Parse `executor_kind` (absent ⇒ default agent; unknown string → 400
@@ -226,6 +283,13 @@ pub async fn patch_todo(
         Some(s) if s.trim().is_empty() => return error_400("todo title must not be empty"),
         Some(s) => Some(s.trim().to_string()),
     };
+    let capability_id = match body.capability_id.as_ref() {
+        None => None,
+        Some(value) => match validate_capability(value.as_deref()) {
+            Ok(value) => Some(value),
+            Err(reply) => return reply,
+        },
+    };
     if body.status.is_some_and(|status| {
         !matches!(
             status,
@@ -234,8 +298,15 @@ pub async fn patch_todo(
     }) {
         return error_400("unsupported manual todo status");
     }
-    if body.board_status.as_deref().is_some_and(|status| !matches!(status, "backlog" | "todo" | "in_progress" | "done")) {
+    if body
+        .board_status
+        .as_deref()
+        .is_some_and(|status| !matches!(status, "backlog" | "todo" | "in_progress" | "done"))
+    {
         return error_400("unsupported board status");
+    }
+    if body.position.is_some_and(|position| position < 0) {
+        return error_400("todo position must not be negative");
     }
     if let Some(Some(mid)) = &body.milestone_id {
         match group_exists(deps.projects.as_ref(), mid).await {
@@ -292,7 +363,7 @@ pub async fn patch_todo(
         status: body.status,
         board_status: body.board_status,
         position: body.position,
-        capability_id: None,
+        capability_id,
         agent: body.agent,
         executor_kind,
         executor_ref,

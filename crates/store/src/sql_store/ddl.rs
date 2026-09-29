@@ -74,7 +74,11 @@ const TODO_EXECUTION_COLUMNS: &str = "\
   id VARCHAR(255) NOT NULL,
   todo_id VARCHAR(64) NOT NULL,
   execution_id VARCHAR(128) NOT NULL,
-  created_at BIGINT NOT NULL";
+  created_at BIGINT NOT NULL,
+  kind VARCHAR(32) NOT NULL DEFAULT '',
+  name VARCHAR(255) NOT NULL DEFAULT '',
+  result_md {text} NULL,
+  sync_state VARCHAR(32) NOT NULL DEFAULT 'pending'";
 
 /// `(table, columns, secondary-index clause)`; the index clause is MySQL-only.
 const TABLES: &[(&str, &str, &str)] = &[
@@ -108,6 +112,15 @@ const TABLES: &[(&str, &str, &str)] = &[
 /// drift test below enforces the names line up.
 const UPGRADE_COLUMNS: &[(&str, &[&str])] = &[
     (
+        "project_todo_executions",
+        &[
+            "kind VARCHAR(32) NOT NULL DEFAULT ''",
+            "name VARCHAR(255) NOT NULL DEFAULT ''",
+            "result_md {text} NULL",
+            "sync_state VARCHAR(32) NOT NULL DEFAULT 'pending'",
+        ],
+    ),
+    (
         "project_milestones",
         &["kind VARCHAR(32) NOT NULL DEFAULT 'milestone'"],
     ),
@@ -118,7 +131,7 @@ const UPGRADE_COLUMNS: &[(&str, &[&str])] = &[
             "executor_ref VARCHAR(255) NULL",
             "executor_spec {text} NULL",
             "board_status VARCHAR(32) NOT NULL DEFAULT 'backlog'",
-            "position BIGINT NOT NULL DEFAULT 0",
+            "position BIGINT NOT NULL DEFAULT -1",
             "capability_id VARCHAR(255) NULL",
         ],
     ),
@@ -257,6 +270,11 @@ pub async fn upgrade(pool: &MySqlPool, starrocks: bool) -> Result<()> {
             };
             res.with_context(|| format!("upgrade table {table}: add {col}"))?;
         }
+        if *table == "project_todos" {
+            super::exec_write(pool, starrocks,
+                "UPDATE project_todos SET board_status = CASE status WHEN 'draft' THEN 'backlog' WHEN 'running' THEN 'in_progress' WHEN 'done' THEN 'done' ELSE 'todo' END, position = created_at WHERE position = -1",
+                vec![]).await?;
+        }
     }
     relations::upgrade(pool, starrocks).await
 }
@@ -373,7 +391,6 @@ mod tests {
             .map(|c| column_name(c).to_lowercase())
             .collect();
         assert!(missing_columns(todo_cols, &existing).is_empty());
-        // Pre-executor table: only the executor columns are missing, in order.
         let pre_executor: Vec<String> = vec![
             "id".into(),
             "milestone_id".into(),
@@ -383,7 +400,12 @@ mod tests {
         ];
         assert_eq!(
             missing_columns(todo_cols, &pre_executor),
-            vec!["executor_spec {text} NULL"]
+            vec![
+                "executor_spec {text} NULL",
+                "board_status VARCHAR(32) NOT NULL DEFAULT 'backlog'",
+                "position BIGINT NOT NULL DEFAULT -1",
+                "capability_id VARCHAR(255) NULL",
+            ]
         );
     }
 }

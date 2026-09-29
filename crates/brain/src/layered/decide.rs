@@ -96,18 +96,6 @@ pub fn decide(
                 .checked_sub(1)
                 .and_then(|i| groups.get(i as usize))
                 .context("unknown target layer")?;
-            if request.schema_version == 7 && snapshot.run.layer > 0 {
-                let from = &request.plan.layers[snapshot.run.layer as usize - 1].layer_id;
-                let to = &request.plan.layers[*layer as usize - 1].layer_id;
-                ensure!(
-                    request
-                        .plan
-                        .transitions
-                        .iter()
-                        .any(|edge| &edge.from == from && &edge.to == to),
-                    "target layer is not an outgoing transition"
-                );
-            }
             if request.schema_version == 7 && snapshot.run.layer == 0 {
                 ensure!(*layer == 1, "first dispatch must enter the first milestone");
             }
@@ -141,7 +129,7 @@ pub fn decide(
             } else {
                 ensure!(
                     *layer == snapshot.run.layer + 1,
-                    "forward transitions cannot skip layers"
+                    "forward dispatch cannot skip layers"
                 );
                 ensure!(
                     terminal::current_successful(snapshot),

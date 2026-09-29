@@ -13,6 +13,15 @@ use serde_json::json;
 use std::sync::Arc;
 
 pub fn build_app(state: Arc<AppState>, token: Option<String>, web: bool) -> Router {
+    build_app_with_metrics(state, token, None, web)
+}
+
+pub fn build_app_with_metrics(
+    state: Arc<AppState>,
+    token: Option<String>,
+    metrics_token: Option<String>,
+    web: bool,
+) -> Router {
     crate::release::outbox::start(&state);
     crate::scheduler::start(&state);
     // Captured before the builder chains consume `state`: the bearer
@@ -25,6 +34,8 @@ pub fn build_app(state: Arc<AppState>, token: Option<String>, web: bool) -> Rout
         .merge(api::compat::routes())
         .merge(api::brain_runs::routes())
         .merge(api::schedules::routes())
+        .route("/api/metrics/scheduler", get(api::scheduler_metrics::json))
+        .route("/metrics", get(api::scheduler_metrics::prometheus))
         .route("/api/health", get(|| async { axum::Json(json!({"ok":true,"protocol_version":opencoder_core::fleet::PROTOCOL_VERSION,"role":"control","commit":opencoder_core::version::VERSION_LONG})) }))
         .route("/api/ready", get(admission::ready))
         .route("/api/admin/release", get(crate::release::status))
@@ -114,6 +125,7 @@ pub fn build_app(state: Arc<AppState>, token: Option<String>, web: bool) -> Rout
         .route("/api/project/initiatives", get(api_project_initiatives::list).post(api_project_initiatives::create))
         .route("/api/project/initiatives/:id", patch(api_project_initiatives::patch).delete(api_project_initiatives::delete))
         .route("/api/project/todos", get(api_project_todos::list_todos).post(api_project_todos::create_todo))
+        .route("/api/project/todos/order", put(api_project_todos::reorder_todos))
         .route("/api/project/todos/:id", patch(api_project_todos::patch_todo).delete(api_project_todos::delete_todo))
         .route("/api/project/todos/:id/executions", get(project_links::list).post(project_links::link))
         .route("/api/project/todos/:id/executions/:execution_id", axum::routing::delete(project_links::unlink))
@@ -155,7 +167,9 @@ pub fn build_app(state: Arc<AppState>, token: Option<String>, web: bool) -> Rout
         .layer(axum::middleware::from_fn(crate::role_gate::require_role));
     if let Some(token) = token {
         app = app.layer(axum::middleware::from_fn_with_state(
-            Some(Arc::new(auth_mw::AuthState::new(token, auth_store))),
+            Some(Arc::new(
+                auth_mw::AuthState::new(token, auth_store).with_metrics_token(metrics_token),
+            )),
             auth_mw::require_bearer,
         ));
     }

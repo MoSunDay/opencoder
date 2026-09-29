@@ -14,7 +14,7 @@ describe('milestone plan versions', () => {
 
   it('explicit conversion preserves original version and requires success criteria', () => {
     const before = JSON.stringify(oldPlan); const converted = newVersion({ id: 'p', version: 1, plan: oldPlan });
-    expect(converted.version).toBe(2); expect(converted.plan.max_rounds).toBe(5); expect(converted.plan.transitions).toHaveLength(1);
+    expect(converted.version).toBe(2); expect(converted.plan.max_rounds).toBe(5); expect(converted.plan).not.toHaveProperty('transitions');
     expect(converted.plan.layers.map((layer) => layer.layer_id)).toEqual(['layer-1', 'layer-2']); expect(JSON.stringify(oldPlan)).toBe(before);
     expect(validatePlan(converted.plan, [capability])).toEqual(converted.plan);
     const ready = { ...converted.plan, layers: converted.plan.layers.map((layer) => ({ ...layer, success_criteria: '通过检查' })) };
@@ -27,6 +27,12 @@ describe('milestone plan versions', () => {
   it('creates new drafts with five rounds and explicitly rejects corrupt drafts', () => {
     expect(createDraft().version.plan.schema_version).toBe(7);expect(createDraft().version.plan.max_rounds).toBe(5);
     expect(() => readDraft('k', null, { getItem: () => '{bad' })).toThrow('损坏');
+  });
+  it('drops old routing conditions when reopening a schema 7 draft', () => {
+    const draft = createDraft();
+    draft.version.plan.transitions = [{ from: 'a', to: 'b', condition: 'old condition' }];
+    const restored = readDraft('k', null, { getItem: () => JSON.stringify(draft) });
+    expect(restored.version.plan).not.toHaveProperty('transitions');
   });
   it('launches a fixed version without mutating its saved inputs', () => {
     const saved = { id: 'p', version: 2, plan: { ...newVersion().plan, inputs: { repo: 'old' } } };

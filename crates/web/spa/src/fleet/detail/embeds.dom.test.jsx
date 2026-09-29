@@ -20,6 +20,14 @@ Range.prototype.getBoundingClientRect=()=>({left:0,right:0,top:0,bottom:0});
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
 describe('执行明细内嵌运行视图', () => {
+  it('unmanaged Team detail sends guidance through the provided callback', async () => {
+    apiGet.mockResolvedValue({ execution: { id: 'team-guided', kind: 'team', status: 'running', created_at: 1 }, request: { kind: 'team', input: {} } });
+    const onGuidance = vi.fn().mockResolvedValue(true);
+    render(<ExecutionView executionRef={{ id: 'team-guided', kind: 'team' }} allowGuidance onGuidance={onGuidance} onNotice={vi.fn()} />);
+    fireEvent.change(await screen.findByPlaceholderText('继续会话'), { target: { value: '补充要求' } });
+    fireEvent.click(screen.getByRole('button', { name: /提\s*交/ }));
+    await waitFor(() => expect(onGuidance).toHaveBeenCalledWith('补充要求'));
+  });
   it.each(['agent', 'operator', 'team'])('计划管理的 %s 执行仍可提交引导', async (kind) => {
     apiGet.mockImplementation(async (path) => path === `/api/executions/${kind}-guided`
       ? { execution: { id: `${kind}-guided`, kind, status: 'running', created_at: 1 }, request: { kind, input: {} } }

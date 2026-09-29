@@ -16,6 +16,48 @@ use crate::project_types::{ProjectExecutorKind, ProjectTodoRecord, ProjectTodoSt
 
 const TODO_COLS: &str = "id, milestone_id, title, draft, plan_md, status, agent, active_session_id, created_at, updated_at, executor_kind, executor_ref, executor_spec, board_status, position, capability_id";
 
+// A single UPDATE keeps a cross-column drop and destination order together.
+pub async fn reorder_todos(
+    pool: &MySqlPool,
+    starrocks: bool,
+    board_status: &str,
+    ids: &[String],
+    now_ms: i64,
+) -> Result<()> {
+    anyhow::ensure!(
+        !ids.is_empty() && ids.len() <= 1000,
+        "invalid TODO reorder size"
+    );
+    let mut seen = std::collections::HashSet::new();
+    anyhow::ensure!(ids.iter().all(|id| seen.insert(id)), "duplicate TODO id");
+    let mut args = vec![Arg::Text(board_status.to_string())];
+    let mut cases = Vec::new();
+    for (index, id) in ids.iter().enumerate() {
+        cases.push("WHEN id = ? THEN ?");
+        args.push(Arg::Text(id.clone()));
+        args.push(Arg::Int((index + 1) as i64 * 1000));
+    }
+    args.push(Arg::Int(now_ms));
+    args.extend(ids.iter().cloned().map(Arg::Text));
+    let marks = vec!["?"; ids.len()].join(",");
+    let count_sql = format!("SELECT COUNT(*) AS count FROM project_todos WHERE id IN ({marks})");
+    let count_rows = exec_read_all(
+        pool,
+        starrocks,
+        &count_sql,
+        &ids.iter().cloned().map(Arg::Text).collect::<Vec<_>>(),
+    )
+    .await?;
+    let count: i64 = count_rows[0].try_get("count")?;
+    anyhow::ensure!(
+        count == ids.len() as i64,
+        "TODO reorder contains missing id"
+    );
+    let sql = format!("UPDATE project_todos SET board_status = ?, position = CASE {} END, updated_at = ? WHERE id IN ({marks})", cases.join(" "));
+    exec_write(pool, starrocks, &sql, args).await?;
+    Ok(())
+}
+
 // ---- todos ----
 
 pub async fn create_todo(pool: &MySqlPool, starrocks: bool, rec: &ProjectTodoRecord) -> Result<()> {
@@ -75,13 +117,16 @@ fn todo_set_fragment(
         args.push(Arg::Text(v.as_str().to_string()));
     }
     if let Some(v) = &patch.board_status {
-        sets.push("board_status = ?"); args.push(Arg::Text(v.clone()));
+        sets.push("board_status = ?");
+        args.push(Arg::Text(v.clone()));
     }
     if let Some(v) = patch.position {
-        sets.push("position = ?"); args.push(Arg::Int(v));
+        sets.push("position = ?");
+        args.push(Arg::Int(v));
     }
     if let Some(v) = &patch.capability_id {
-        sets.push("capability_id = ?"); args.push(Arg::TextOrNull(v.clone()));
+        sets.push("capability_id = ?");
+        args.push(Arg::TextOrNull(v.clone()));
     }
     if let Some(v) = &patch.agent {
         sets.push("agent = ?");

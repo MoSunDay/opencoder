@@ -96,6 +96,17 @@ afterEach(() => {
 });
 
 describe('TodoPanel 模板 tab', () => {
+  it('submits editable TODO context through the native workflow run', async () => {
+    render(<TodoPanel onNotice={noopNotice} initialPrompt="原任务" />);
+    await screen.findByText('demo');
+    fireEvent.click(document.querySelector('.ant-table-row-expand-icon'));
+    fireEvent.change(await screen.findByLabelText('工作流任务要求'), { target: { value: '修改后的任务' } });
+    const runButton = screen.getAllByText('运行').map((element) => element.closest('button')).filter(Boolean).pop();
+    fireEvent.click(runButton);
+    await waitFor(() => expect(apiPostMock).toHaveBeenCalledWith('/api/todo/templates/demo/v1/run', {
+      id: expect.stringMatching(/^todos-/), input: { prompt: '修改后的任务' },
+    }));
+  });
   it('renders the template table with name and current version', async () => {
     render(<TodoPanel onNotice={noopNotice} />);
     expect(await screen.findByText('demo')).toBeTruthy();

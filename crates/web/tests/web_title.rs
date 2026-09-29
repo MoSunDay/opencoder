@@ -22,13 +22,14 @@ struct Ctx {
     mock: Arc<MockChatClient>,
 }
 
-/// App with a scripted mock and a pinned-off autopilot (a developer's global
-/// ap.json must not append a review round to this two-call sequence). The
+/// App with a scripted mock and developer-wide autopilot/local memory disabled
+/// so extra model rounds cannot consume the two scripted replies. The
 /// project config pins model + small_model so the title request's model is
 /// assertable.
 async fn app(mock: MockChatClient) -> Ctx {
     let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
     let workdir = tempfile::tempdir().unwrap().keep();
+    std::fs::write(workdir.join("opencoder.json"), r#"{"local_memory":false}"#).unwrap();
     std::fs::create_dir_all(workdir.join(".opencoder")).unwrap();
     std::fs::write(
         workdir.join(".opencoder").join("ap.json"),

@@ -49,7 +49,7 @@ const MODE_OPTIONS = [
   { label: 'Agent 模式', value: 'agent' },
 ];
 
-export function ChatPanel({ onNotice, onCreated, initialPrompt = '' }) {
+export function ChatPanel({ onNotice, onCreated, initialPrompt = '', launchKind }) {
   const { preselectNode } = useStore();
   const { nodes, error: nodesError } = useNodes();
   const [nodeSel, setNodeSel] = useState(null);
@@ -84,7 +84,7 @@ export function ChatPanel({ onNotice, onCreated, initialPrompt = '' }) {
   const hasNode = !!nodeSel;
   // 创建链路执行类型：Agent 模式用 agent（节点 kinds 过滤 + newId('agent') +
   // body.kind），其余一律收敛为 Operator 现状（含陌生持久化值）。
-  const modeKind = onCreated ? 'agent' : (mode === 'agent' ? 'agent' : 'operator');
+  const modeKind = launchKind || (onCreated ? 'agent' : (mode === 'agent' ? 'agent' : 'operator'));
   const laneRef = useRef({ node: nodeSel, kind: modeKind });
   if (laneRef.current.node !== nodeSel || laneRef.current.kind !== modeKind) {
     laneRef.current = { node: nodeSel, kind: modeKind };
@@ -236,7 +236,7 @@ export function ChatPanel({ onNotice, onCreated, initialPrompt = '' }) {
       if (!j?.id) throw new Error('服务未返回会话 ID，请重试确认');
       sid = j.id;
       if (!isCurrentLane()) return;
-      if (modeKind === 'agent') onCreated?.(sid);
+      onCreated?.(sid);
       createAttempt.current = null;
       selectionRef.current = { node: nodeSel, kind: modeKind, dialog: sid };
       setDialogSel(sid);

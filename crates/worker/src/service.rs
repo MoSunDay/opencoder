@@ -149,7 +149,24 @@ impl NodeService for Worker {
                 let tagged = row.kind.as_deref();
                 if let Some(kind) = tagged {
                     match kind {
-                        "agent" | "team" | "dag" => {
+                        "agent" | "team" => {
+                            records.push(ExecutionIndex {
+                                id: row.id.clone(),
+                                kind: ExecutionKind::Agent,
+                                node_id: self.inner.registration.id.clone(),
+                                created_at: row.created_at,
+                                status: internal_session_status(active.contains(&row.id)),
+                            });
+                        }
+                        // DAG roots are owned by the durable execution journal.
+                        // A stale root session must not be reintroduced as an
+                        // Agent index when its journal record is absent.
+                        "dag"
+                            if row
+                                .title
+                                .as_deref()
+                                .is_some_and(|title| title.starts_with("dag/")) =>
+                        {
                             records.push(ExecutionIndex {
                                 id: row.id.clone(),
                                 kind: ExecutionKind::Agent,
@@ -267,6 +284,56 @@ mod tests {
         );
         assert!(ids.contains("agent-inventory-0000"));
         assert!(ids.contains("agent-inventory-0502"));
+        worker.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn orphan_dag_root_is_not_reported_as_agent_but_agent_step_is() {
+        let root = tempfile::tempdir().unwrap();
+        let _scope = opencoder_core::config::scoped_config_home(root.path().join("home"));
+        let workdir = root.path().join("work");
+        std::fs::create_dir_all(workdir.join(".opencoder")).unwrap();
+        std::fs::write(workdir.join(".opencoder/ap.json"), r#"{"mode":"off"}"#).unwrap();
+        let worker = Worker::open(
+            WorkerOptions {
+                name: "dag-inventory".into(),
+                workdir,
+                data_dir: root.path().join("node"),
+                workflow_root: None,
+                max_runs: Some(1),
+                dag: true,
+            },
+            Some(Arc::new(MockChatClient::new())),
+        )
+        .await
+        .unwrap();
+        for (id, title) in [
+            ("dag-orphan-root", "harness-native-test"),
+            (
+                "01KORPHANSTEP00000000000000",
+                "dag/dag-orphan-root/diagnose",
+            ),
+        ] {
+            worker
+                .inner
+                .state
+                .store
+                .create_session(&SessionMeta {
+                    id: id.into(),
+                    title: Some(title.into()),
+                    kind: Some("dag".into()),
+                    created_at: 1000,
+                    updated_at: 1000,
+                    ..Default::default()
+                })
+                .await
+                .unwrap();
+        }
+        let indexes = worker.indexes().await.unwrap();
+        assert!(!indexes.iter().any(|index| index.id == "dag-orphan-root"));
+        assert!(indexes.iter().any(|index| {
+            index.id == "01KORPHANSTEP00000000000000" && index.kind == ExecutionKind::Agent
+        }));
         worker.shutdown().await.unwrap();
     }
 }

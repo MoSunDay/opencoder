@@ -69,7 +69,10 @@ fn non_admin_role_gates_the_surface() {
     assert_eq!(status, 202, "non-admin operator create: {body}");
     let doc = wait_idle_as(&fleet, "operator-e2e-gated", &token);
     assert_eq!(doc["execution"]["status"], "idle");
-    assert_eq!(doc["result"], json!({"session_id": "operator-e2e-gated"}));
+    assert_eq!(
+        doc["result"],
+        json!({"session_id": "operator-e2e-gated", "output_text": "gated-reply", "output_json": null})
+    );
     let (status, detail) = fleet.http_as(
         "GET",
         "/api/executions/operator-e2e-gated/messages",

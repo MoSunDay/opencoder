@@ -7,8 +7,28 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 
 pub mod overview;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProjectAssignment {
+    pub todo_id: String,
+    pub execution_id: String,
+    pub kind: String,
+    pub name: String,
+    pub created_at: i64,
+    pub result_md: Option<String>,
+    pub sync_state: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProjectAssignmentState {
+    pub todo_id: String,
+    pub execution_id: String,
+    pub has_result: bool,
+    pub sync_state: String,
+}
 
 #[derive(Debug)]
 pub struct MilestoneNotEmpty;
@@ -84,6 +104,14 @@ pub trait ProjectStore: Send + Sync {
 
     async fn create_todo(&self, rec: &ProjectTodoRecord) -> Result<()>;
     async fn patch_todo(&self, id: &str, patch: &ProjectTodoPatch, now_ms: i64) -> Result<bool>;
+    async fn reorder_todos(
+        &self,
+        _board_status: &str,
+        _ids: &[String],
+        _now_ms: i64,
+    ) -> Result<()> {
+        anyhow::bail!("atomic TODO reorder is unsupported by this store")
+    }
     /// Expected-status CAS for execute starts: a single conditional UPDATE
     /// `SET status = 'running', updated_at = ? WHERE id = ? AND status <>
     /// 'running'`. Returns `true` only when this caller won the claim;
@@ -126,9 +154,21 @@ pub trait ProjectStore: Send + Sync {
     /// `milestone_id == None` lists ALL todos (backlog included); ordered by
     /// `created_at`.
     async fn list_todos(&self, milestone_id: Option<&str>) -> Result<Vec<ProjectTodoRecord>>;
-
-    async fn list_todo_execution_ids(&self, todo_id: &str) -> Result<Vec<String>>;
-    async fn link_todo_execution(&self, todo_id: &str, execution_id: &str) -> Result<()>;
+    async fn list_todo_assignments(&self, todo_id: &str) -> Result<Vec<ProjectAssignment>>;
+    async fn latest_todo_assignment_states(&self) -> Result<Vec<ProjectAssignmentState>>;
+    async fn link_todo_execution(&self, assignment: &ProjectAssignment) -> Result<()>;
+    async fn pending_todo_assignments(
+        &self,
+        after: &str,
+        limit: usize,
+    ) -> Result<Vec<ProjectAssignment>>;
+    async fn finish_todo_assignment(
+        &self,
+        todo_id: &str,
+        execution_id: &str,
+        state: &str,
+        result_md: Option<&str>,
+    ) -> Result<()>;
     async fn unlink_todo_execution(&self, todo_id: &str, execution_id: &str) -> Result<bool>;
 
     // ---- todo runs ----

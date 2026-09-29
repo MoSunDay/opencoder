@@ -275,14 +275,48 @@ impl ProjectStore for LibsqlStore {
         "libsql"
     }
 
-    async fn list_todo_execution_ids(&self, todo_id: &str) -> Result<Vec<String>> {
+    async fn list_todo_assignments(
+        &self,
+        todo_id: &str,
+    ) -> Result<Vec<crate::project::ProjectAssignment>> {
         let _guard = self.db_lock.lock().await;
         super::project_links::list(&self.conn().await?, todo_id).await
     }
 
-    async fn link_todo_execution(&self, todo_id: &str, execution_id: &str) -> Result<()> {
+    async fn latest_todo_assignment_states(
+        &self,
+    ) -> Result<Vec<crate::project::ProjectAssignmentState>> {
         let _guard = self.db_lock.lock().await;
-        super::project_links::link(&self.conn().await?, todo_id, execution_id).await
+        super::project_links::latest(&self.conn().await?).await
+    }
+
+    async fn link_todo_execution(
+        &self,
+        assignment: &crate::project::ProjectAssignment,
+    ) -> Result<()> {
+        let _guard = self.db_lock.lock().await;
+        super::project_links::link(&self.conn().await?, assignment).await
+    }
+
+    async fn pending_todo_assignments(
+        &self,
+        after: &str,
+        limit: usize,
+    ) -> Result<Vec<crate::project::ProjectAssignment>> {
+        let _guard = self.db_lock.lock().await;
+        super::project_links::pending(&self.conn().await?, after, limit).await
+    }
+
+    async fn finish_todo_assignment(
+        &self,
+        todo_id: &str,
+        execution_id: &str,
+        state: &str,
+        result_md: Option<&str>,
+    ) -> Result<()> {
+        let _guard = self.db_lock.lock().await;
+        super::project_links::finish(&self.conn().await?, todo_id, execution_id, state, result_md)
+            .await
     }
 
     async fn unlink_todo_execution(&self, todo_id: &str, execution_id: &str) -> Result<bool> {
@@ -403,6 +437,11 @@ impl ProjectStore for LibsqlStore {
         let _guard = self.db_lock.lock().await;
         let conn = self.conn().await?;
         super::project_runs::get_todo(&conn, id).await
+    }
+    async fn reorder_todos(&self, board_status: &str, ids: &[String], now_ms: i64) -> Result<()> {
+        let _guard = self.db_lock.lock().await;
+        let conn = self.conn().await?;
+        super::project_runs::reorder_todos(&conn, board_status, ids, now_ms).await
     }
     async fn get_todo_summary(&self, id: &str) -> Result<Option<crate::ProjectTodoSummary>> {
         let _guard = self.db_lock.lock().await;

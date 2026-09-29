@@ -242,10 +242,8 @@ pub(super) async fn run(
     } else {
         ExecutionStatus::Idle
     };
-    // Success surface for agent-kind sessions only: persist the declared
-    // how.md append (warn-only, exactly like the DAG agent step) and expose
-    // the bounded output contract. Operator/maintenance keep the plain
-    // session-pointer result.
+    // Successful Agent and Operator turns expose the bounded answer for
+    // linked project TODOs. Maintenance keeps the session-pointer result.
     if status == ExecutionStatus::Idle {
         if let Some(delta) = how_append.as_deref().filter(|d| !d.trim().is_empty()) {
             match opencoder_dag_runtime::exec::how_append::append_to_how_md(agent, delta) {
@@ -260,7 +258,7 @@ pub(super) async fn run(
                 ),
             }
         }
-        if kind == ExecutionKind::Agent {
+        if matches!(kind, ExecutionKind::Agent | ExecutionKind::Operator) {
             // The turn's authoritative text lands via the per-turn messages
             // append, so the store projection is the transcript of record.
             let messages = worker.inner.state.store.load_messages(id).await?;

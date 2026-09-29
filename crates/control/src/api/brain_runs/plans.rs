@@ -22,7 +22,9 @@ pub async fn save(State(state): State<Arc<AppState>>, Json(body): Json<Value>) -
         Err(error) => return error_400(error.to_string()),
     };
     match validate_layered(&state, body.plan.clone()).await {
-        Ok(plan) => body.plan = json!(plan),
+        Ok(plan) => {
+            body.plan = json!(plan.with_rollback_paths());
+        }
         Err(error) => return error_400(error.to_string()),
     }
     match state.fleet.save_brain_plan_document(&body).await {

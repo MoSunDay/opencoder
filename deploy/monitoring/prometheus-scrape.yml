@@ -1,0 +1,13 @@
+- job_name: opencoder-scheduler
+  scrape_interval: 30s
+  scrape_timeout: 10s
+  metrics_path: /metrics
+  authorization:
+    type: Bearer
+    credentials_file: /etc/prometheus/opencoder/token
+  static_configs:
+  - targets:
+    - 10.199.71.70:18081
+    labels:
+      env: prod
+      app: opencoder

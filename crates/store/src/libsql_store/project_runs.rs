@@ -15,6 +15,11 @@ use crate::project_types::{
 const TODO_COLS: &str = "id, milestone_id, title, draft, plan_md, status, agent, active_session_id, created_at, updated_at, executor_kind, executor_ref, executor_spec, board_status, position, capability_id";
 const RUN_COLS: &str = "id, todo_id, kind, version, plan_md, output_md, agent, session_id, status, started_at, finished_at, created_at, executor_kind, capability_id, plan_id, output_ref, input_snapshot, trace_manifest";
 
+mod board;
+mod summary;
+pub use board::reorder_todos;
+use summary::{summary_text, todo_text};
+
 // ---- todos ----
 
 pub async fn create_todo(conn: &Connection, rec: &ProjectTodoRecord) -> Result<()> {
@@ -70,13 +75,16 @@ fn todo_set_fragment(
         vals.push(v.as_str().into());
     }
     if let Some(v) = patch.board_status.as_deref() {
-        sets.push("board_status = ?"); vals.push(v.into());
+        sets.push("board_status = ?");
+        vals.push(v.into());
     }
     if let Some(v) = patch.position {
-        sets.push("position = ?"); vals.push(v.into());
+        sets.push("position = ?");
+        vals.push(v.into());
     }
     if let Some(v) = patch.capability_id.as_ref() {
-        sets.push("capability_id = ?"); vals.push(v.as_deref().into());
+        sets.push("capability_id = ?");
+        vals.push(v.as_deref().into());
     }
     if let Some(v) = patch.agent.as_deref() {
         sets.push("agent = ?");
@@ -750,45 +758,5 @@ fn row_to_run_summary(r: &libsql::Row) -> Result<crate::ProjectTodoRunSummary> {
         started_at: r.get(11)?,
         finished_at: r.get(12)?,
         created_at: r.get(13)?,
-    })
-}
-
-fn summary_text(
-    value: Option<String>,
-    bytes: Option<i64>,
-    run_id: &str,
-    field: &str,
-) -> Option<crate::ProjectRunText> {
-    bytes.map(|bytes| {
-        if bytes > 64 * 1024 {
-            crate::ProjectRunText::Omitted {
-                omitted: true,
-                total_bytes: bytes.max(0) as u64,
-                read_via: "detail_field",
-                field: format!("project.run.{run_id}.{field}"),
-            }
-        } else {
-            crate::ProjectRunText::Text(value.unwrap_or_default())
-        }
-    })
-}
-
-fn todo_text(
-    value: Option<String>,
-    bytes: Option<i64>,
-    todo_id: &str,
-    field: &str,
-) -> Option<crate::ProjectRunText> {
-    bytes.map(|bytes| {
-        if bytes > 64 * 1024 {
-            crate::ProjectRunText::Omitted {
-                omitted: true,
-                total_bytes: bytes.max(0) as u64,
-                read_via: "detail_field",
-                field: format!("project.todo.{todo_id}.{field}"),
-            }
-        } else {
-            crate::ProjectRunText::Text(value.unwrap_or_default())
-        }
     })
 }

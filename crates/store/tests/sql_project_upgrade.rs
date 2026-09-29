@@ -210,6 +210,21 @@ mod gated {
                 .await
                 .expect("create legacy table");
         }
+        sqlx::raw_sql("INSERT INTO project_todos (id, title, draft, status, agent, created_at, updated_at) VALUES ('legacy-board', 'Legacy', 'task', 'running', 'act', 1234, 1234)")
+            .execute(&pool)
+            .await
+            .expect("insert legacy TODO");
+        // Crash after both board columns are added but before the backfill:
+        // the sentinel must make the next open resume the data step.
+        for column in [
+            "board_status VARCHAR(32) NOT NULL DEFAULT 'backlog'",
+            "position BIGINT NOT NULL DEFAULT -1",
+        ] {
+            sqlx::raw_sql(&format!("ALTER TABLE project_todos ADD COLUMN {column}"))
+                .execute(&pool)
+                .await
+                .expect("simulate interrupted board upgrade");
+        }
 
         // Fixture check: none of the upgrade columns exist yet.
         let todos = table_columns(&pool, starrocks, "project_todos").await;
@@ -225,6 +240,21 @@ mod gated {
         let p = sql_store::open(&storage(backend, dsn))
             .await
             .expect("open upgrades legacy tables in place");
+        eventually("interrupted board upgrade resumes", || async {
+            matches!(p.get_todo("legacy-board").await, Ok(Some(todo)) if todo.board_status == "in_progress" && todo.position == 1234)
+        })
+        .await;
+        sqlx::raw_sql("UPDATE project_todos SET board_status = 'todo', position = 0 WHERE id = 'legacy-board'")
+            .execute(&pool)
+            .await
+            .expect("set intentional board position");
+        let reopened = sql_store::open(&storage(backend, dsn))
+            .await
+            .expect("repeat upgrade must preserve the board");
+        eventually("intentional zero position survives restart", || async {
+            matches!(reopened.get_todo("legacy-board").await, Ok(Some(todo)) if todo.board_status == "todo" && todo.position == 0)
+        })
+        .await;
 
         // Poll until every upgrade column is visible (StarRocks publishes
         // schema metadata asynchronously).

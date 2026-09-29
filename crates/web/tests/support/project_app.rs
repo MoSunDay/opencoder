@@ -40,6 +40,11 @@ pub async fn harness() -> Harness {
     let mock = Arc::new(MockChatClient::new());
     let client: Arc<dyn ChatStream> = mock.clone();
     let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("opencoder.json"),
+        r#"{"local_memory":false}"#,
+    )
+    .unwrap();
     let project = opencoder_web::ProjectService::new();
     project
         .init(

@@ -51,7 +51,7 @@ pub(super) fn validate_ui(
         let row = found[0];
         let machine = row["machine"].as_str().context("UI machine missing")?;
         ensure!(
-            (2..=19).any(|i| machine == format!("win-{i:02}")) && machines.insert(machine),
+            super::valid_machine(machine) && machines.insert(machine),
             "UI machine invalid or duplicated"
         );
         ensure!(
@@ -168,7 +168,8 @@ pub(super) fn validate(
     input: &Value,
     dag: &str,
 ) -> Result<()> {
-    let (count, _) = opencoder_dag::devices::parameters(input).map_err(anyhow::Error::msg)?;
+    let frozen = opencoder_dag::devices::public_input(input).map_err(anyhow::Error::msg)?;
+    let count = frozen["device_count"].as_u64().unwrap() as usize;
     let id = reservation_id(dag);
     ensure!(
         reservation["reservation_id"] == id
@@ -187,6 +188,10 @@ pub(super) fn validate(
         assigned.len() == count && items.len() == count,
         "Allocator output must contain every requested device exactly once"
     );
+    ensure!(
+        reservation.get("eligible_machines") == frozen.get("eligible_machines"),
+        "Allocator eligible machine scope changed"
+    );
     let mut machines = std::collections::BTreeSet::new();
     for (index, item) in items.iter().enumerate() {
         let instance_id = index.to_string();
@@ -203,9 +208,15 @@ pub(super) fn validate(
             .as_str()
             .context("Authority machine missing")?;
         ensure!(
-            (2..=19).any(|i| machine == format!("win-{i:02}")) && machines.insert(machine),
+            super::valid_machine(machine) && machines.insert(machine),
             "Authority machine invalid or duplicated"
         );
+        if let Some(eligible) = frozen.get("eligible_machines").and_then(Value::as_array) {
+            ensure!(
+                eligible.iter().any(|item| item.as_str() == Some(machine)),
+                "Authority machine outside eligible scope"
+            );
+        }
         ensure!(
             row["generation"].as_u64().is_some(),
             "Authority generation missing"
@@ -262,6 +273,55 @@ mod tests {
             )
             .is_err());
         }
+    }
+
+    #[test]
+    fn accepts_admitted_windows_beyond_initial_fleet() {
+        assert!(super::super::valid_machine("win-20"));
+        assert!(super::super::valid_machine("win-31"));
+        assert!(super::super::valid_machine("win-41"));
+        for machine in ["win-01", "win-002", "win-20x", "win-00", "linux-20"] {
+            assert!(!super::super::valid_machine(machine));
+        }
+    }
+
+    #[test]
+    fn allocation_stays_within_frozen_eligible_machines() {
+        let input = json!({"device_count":1,"case_ids":["a"],"eligible_machines":["win-21"]});
+        let id = reservation_id("dag-test");
+        let assignment =
+            |machine: &str| json!({"instance_id":"0","machine":machine,"generation":1});
+        let item = |machine: &str| {
+            json!({"instance_id":"0","machine":machine,
+            "generation":1,"reservation_id":id,"case_ids":["a"]})
+            .to_string()
+        };
+        let reservation = |machine: &str, scope: Value| {
+            json!({"reservation_id":id,
+            "dag_id":"dag-test","target_step":"execute","count":1,
+            "eligible_machines":scope,"assignments":[assignment(machine)]})
+        };
+        assert!(validate(
+            &json!({"items":[item("win-21")]}),
+            &reservation("win-21", json!(["win-21"])),
+            &input,
+            "dag-test"
+        )
+        .is_ok());
+        assert!(validate(
+            &json!({"items":[item("win-22")]}),
+            &reservation("win-22", json!(["win-21"])),
+            &input,
+            "dag-test"
+        )
+        .is_err());
+        assert!(validate(
+            &json!({"items":[item("win-21")]}),
+            &reservation("win-21", json!(["win-22"])),
+            &input,
+            "dag-test"
+        )
+        .is_err());
     }
 }
 

@@ -42,7 +42,7 @@ pub async fn create(
     response(submit::submit_private(&state, request, submission.private_context).await)
 }
 
-mod paging;
+pub(crate) mod paging;
 pub use paging::{
     detail_field, event_payload, events_page, index, inspect, list, messages, project_runs,
     team_turns, todo_items, ProjectRunsQuery,
@@ -251,7 +251,7 @@ pub async fn event_payload_id(state: &AppState, id: &str, seq: i64, offset: u64)
     })
     .await
 }
-pub(super) async fn for_id(
+pub(crate) async fn for_id(
     state: &AppState,
     id: &str,
     operation: impl FnOnce(ExecutionRef) -> NodeOperation,

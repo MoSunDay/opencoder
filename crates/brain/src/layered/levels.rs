@@ -185,34 +185,6 @@ pub fn layers(plan: &LayeredPlan) -> Result<Vec<Vec<String>>> {
                 .all(|group| !group.is_empty() && group.len() <= 32),
             "every milestone requires 1..32 execution nodes"
         );
-        let mut edges = BTreeSet::new();
-        for edge in &plan.transitions {
-            let from = plan
-                .layers
-                .iter()
-                .position(|layer| layer.layer_id == edge.from)
-                .ok_or_else(|| anyhow::anyhow!("transition source missing"))?;
-            let to = plan
-                .layers
-                .iter()
-                .position(|layer| layer.layer_id == edge.to)
-                .ok_or_else(|| anyhow::anyhow!("transition target missing"))?;
-            ensure!(
-                to <= from || to == from + 1,
-                "forward transition cannot skip a milestone"
-            );
-            ensure!(edges.insert((from, to)), "duplicate milestone transition");
-            ensure!(
-                !edge.condition.trim().is_empty() && edge.condition.chars().count() <= 1024,
-                "transition condition required (max 1024)"
-            );
-        }
-        for index in 0..plan.layers.len().saturating_sub(1) {
-            ensure!(
-                edges.contains(&(index, index + 1)),
-                "each nonfinal milestone needs a forward transition"
-            );
-        }
         return Ok(groups);
     }
     let total = plan.nodes.iter().map(|n| n.layer).max().unwrap_or(0);

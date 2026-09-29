@@ -21,7 +21,7 @@ export function engineeringInputs(rows = []) {
 export const inputRows = (inputs = {}) => Object.entries(inputs).map(([key, value]) => ({ key, value: JSON.stringify(value) }));
 export function newVersion(version) {
   return version ? { ...version, plan: convertPlan(version.plan), version: version.version + 1, created_at: Date.now(), changelog: version.plan.schema_version === 4 ? '转换为里程碑方法论' : '更新计划' }
-    : { id: newId('plan'), version: 1, created_at: Date.now(), changelog: '创建计划', tags: [], plan: { schema_version: SCHEMA, title: '', objective: '', inputs: {}, nodes: [], layers: [], transitions: [], max_rounds: 5 } };
+    : { id: newId('plan'), version: 1, created_at: Date.now(), changelog: '创建计划', tags: [], plan: { schema_version: SCHEMA, title: '', objective: '', inputs: {}, nodes: [], layers: [], max_rounds: 5 } };
 }
 export function planLayers(plan) {
   if (plan.schema_version >= 5) return Array.from({ length: Math.max(0, ...plan.nodes.map((n) => n.layer)) }, (_, i) => plan.nodes.filter((n) => n.layer === i + 1).map((n) => n.node_id));
@@ -60,7 +60,10 @@ export function removeNode(plan, id) {
 }
 
 export function convertPlan(plan) {
-  if (plan.schema_version === SCHEMA) return structuredClone(plan);
+  if (plan.schema_version === SCHEMA) {
+    const { transitions: _oldTransitions, ...current } = plan;
+    return structuredClone(current);
+  }
   if (![4, 5, 6].includes(plan.schema_version)) throw new Error('不支持此计划的转换');
   const levels = planLayers(plan);
   const layers = levels.map((ids, index) => ({ layer_id: `layer-${index + 1}`, title: plan.nodes.find((n) => n.node_id === ids[0])?.title || `里程碑 ${index + 1}`,
@@ -71,10 +74,5 @@ export function convertPlan(plan) {
     node_id: index ? `${node.node_id}-${index + 1}` : node.node_id, layer_id: layers[levels.findIndex((group) => group.includes(node.node_id))].layer_id,
     title: index ? `${node.title} ${index + 1}` : node.title, objective: node.objective || node.title, capability_id,
   })));
-  const transitions = layers.slice(1).map((layer, index) => ({ from: layers[index].layer_id, to: layer.layer_id, condition: '本层达标后进入下一里程碑' }));
-  if (plan.schema_version === 5) for (const edge of plan.edges || []) {
-    const from = levels.findIndex((group) => group.includes(edge.from)); const to = levels.findIndex((group) => group.includes(edge.to));
-    if (from >= 0 && to >= 0 && to <= from && !transitions.some((item) => item.from === layers[from].layer_id && item.to === layers[to].layer_id)) transitions.push({ from: layers[from].layer_id, to: layers[to].layer_id, condition: edge.condition || '需要整改' });
-  }
-  return { schema_version: SCHEMA, title: plan.title, objective: plan.objective, inputs: structuredClone(plan.inputs || {}), todo: plan.todo, nodes, layers, transitions, max_rounds: plan.max_rounds || 5 };
+  return { schema_version: SCHEMA, title: plan.title, objective: plan.objective, inputs: structuredClone(plan.inputs || {}), todo: plan.todo, nodes, layers, max_rounds: plan.max_rounds || 5 };
 }

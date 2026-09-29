@@ -175,6 +175,8 @@ def prepare_server(settings, record):
     command = [root / "bundle/bin/opencoder-server", "--host", "127.0.0.1", "--port", record["server_port"],
         "--workdir", settings.server_workdir, "--release-config", release_config,
         "--data-dir", settings.server_data, "--token-file", settings.token_file]
+    if settings.metrics_token_file:
+        command.extend(["--metrics-token-file", settings.metrics_token_file])
     content = service(command,record["server_unit"],user=settings.server_user,workdir=settings.server_workdir)
     content = content.replace("Type=simple", "Type=simple\n" + inherited_environment(settings,settings.legacy_server_unit))
     atomic_bytes(settings.systemd_dir / record["server_unit"],content.encode(),0o644)

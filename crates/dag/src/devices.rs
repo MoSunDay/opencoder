@@ -42,6 +42,29 @@ pub fn parameters(input: &Value) -> Result<(usize, Vec<String>), String> {
 pub fn public_input(input: &Value) -> Result<Value, String> {
     let (count, cases) = parameters(input)?;
     let mut value = serde_json::json!({"device_count":count,"case_ids":cases});
+    if let Some(machines) = input.get("eligible_machines") {
+        let machines = machines
+            .as_array()
+            .filter(|items| items.len() >= count && !items.is_empty())
+            .ok_or("eligible_machines must include at least device_count machines")?;
+        let mut distinct = BTreeSet::new();
+        for machine in machines {
+            let name = machine
+                .as_str()
+                .filter(|name| {
+                    name.strip_prefix("win-")
+                        .and_then(|number| number.parse::<u32>().ok())
+                        .is_some_and(|number| {
+                            (2..=99).contains(&number) && *name == format!("win-{number:02}")
+                        })
+                })
+                .ok_or("Invalid eligible machine")?;
+            if !distinct.insert(name) {
+                return Err("Duplicate eligible machine".into());
+            }
+        }
+        value["eligible_machines"] = Value::Array(machines.clone());
+    }
     if let Some(source) = input.get("case_source") {
         let source = source
             .as_str()
@@ -145,5 +168,27 @@ mod tests {
         assert!(original.description.unwrap().contains("candidate.json"));
         input["candidate"]["sha256"] = serde_json::json!("changed");
         assert!(definition(&input).is_err());
+    }
+
+    #[test]
+    fn eligible_machines_are_frozen_and_validated() {
+        let input =
+            json!({"device_count":2,"case_ids":["a","b"],"eligible_machines":["win-21","win-30"]});
+        let spec = definition(&input).unwrap();
+        assert!(spec.description.unwrap().contains("win-21"));
+        assert_eq!(
+            public_input(&input).unwrap()["eligible_machines"],
+            input["eligible_machines"]
+        );
+        for machines in [
+            json!(["win-21"]),
+            json!(["win-21", "win-21"]),
+            json!(["win-01", "win-30"]),
+            json!(["win-021", "win-30"]),
+        ] {
+            let mut invalid = input.clone();
+            invalid["eligible_machines"] = machines;
+            assert!(definition(&invalid).is_err());
+        }
     }
 }

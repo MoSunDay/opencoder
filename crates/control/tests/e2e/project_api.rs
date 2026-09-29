@@ -23,6 +23,46 @@ async fn seed_todo_with_kind(h: &Harness, executor_kind: Option<&str>) -> String
 }
 
 #[tokio::test]
+async fn todo_capability_can_be_saved_before_execution_and_cleared() {
+    let h = Harness::new().await;
+    let (status, created) = h
+        .req(
+            Method::POST,
+            "/api/project/todos",
+            Some(json!({
+                "title": "operator task", "draft": "work", "capability_id": "operator"
+            })),
+        )
+        .await;
+    assert_eq!(status, 200, "{created}");
+    assert_eq!(created["capability_id"], "operator");
+    let id = created["id"].as_str().unwrap();
+    let path = format!("/api/project/todos/{id}");
+    let (_, overview) = h.req(Method::GET, "/api/project/overview", None).await;
+    assert_eq!(overview["backlog"][0]["capability_id"], "operator");
+    let (status, _) = h
+        .req(Method::PATCH, &path, Some(json!({"capability_id":"agent"})))
+        .await;
+    assert_eq!(status, 200);
+    let (_, changed) = h.req(Method::GET, "/api/project/todos", None).await;
+    assert_eq!(changed["todos"][0]["capability_id"], "agent");
+    let (status, _) = h
+        .req(Method::PATCH, &path, Some(json!({"capability_id":null})))
+        .await;
+    assert_eq!(status, 200);
+    let (_, cleared) = h.req(Method::GET, "/api/project/todos", None).await;
+    assert!(cleared["todos"][0]["capability_id"].is_null());
+    let (status, _) = h
+        .req(
+            Method::PATCH,
+            &path,
+            Some(json!({"capability_id":"unknown"})),
+        )
+        .await;
+    assert_eq!(status, 400);
+}
+
+#[tokio::test]
 async fn goals_milestones_todos_crud_roundtrip() {
     let h = Harness::new().await;
     let (status, goal) = h
@@ -91,7 +131,7 @@ async fn goals_milestones_todos_crud_roundtrip() {
         .req(
             Method::PATCH,
             &format!("/api/project/todos/{todo_id}"),
-            Some(json!({"status": "in_progress"})),
+            Some(json!({"board_status": "in_progress"})),
         )
         .await;
     assert_eq!(status, 200, "{body}");
@@ -291,12 +331,13 @@ async fn overview_aggregates_backlog_and_plan_act_lifecycle() {
     assert_eq!(status, 404, "{body}");
     assert_eq!(body["error"], json!("todo not found"));
 
-    // Overview lists the backlog todo with its execution view merged.
+    // Overview lists the saved TODO; execution details are loaded by ID.
     let (status, body) = h.req(Method::GET, "/api/project/overview", None).await;
     assert_eq!(status, 200, "{body}");
     let backlog = body["backlog"].as_array().unwrap();
     let mine = backlog.iter().find(|t| t["id"] == json!(todo_id)).unwrap();
-    assert!(mine["execution"].is_object(), "{mine}");
+    assert_eq!(mine["board_status"], "backlog");
+    assert!(mine.get("execution").is_none(), "{mine}");
 }
 
 #[tokio::test]
@@ -406,7 +447,7 @@ async fn overview_nests_goals_milestones_and_backlog() {
 }
 
 #[tokio::test]
-async fn overview_merges_live_todo_state_from_node_inspect() {
+async fn overview_keeps_saved_todo_state_independent_of_node_inspect() {
     let h = Harness::new().await;
     let todo_id = seed_todo(&h).await;
     let (status, _) = h
@@ -431,18 +472,16 @@ async fn overview_merges_live_todo_state_from_node_inspect() {
         .iter()
         .find(|t| t["id"] == json!(todo_id))
         .unwrap();
-    assert!(mine["execution"].is_object(), "{mine}");
-    assert_eq!(mine["execution"]["id"], json!(exec_id));
-    assert_eq!(mine["status"], json!("running"));
-    assert_eq!(mine["plan_md"], json!("# plan"));
-    assert_eq!(mine["active_session_id"], json!("s-7"));
+    assert!(mine.get("execution").is_none(), "{mine}");
+    assert_eq!(mine["status"], json!("draft"));
+    assert_eq!(mine["board_status"], json!("backlog"));
+    assert!(mine["plan_md"].is_null());
+    assert!(mine["active_session_id"].is_null());
 }
 
-/// A node that no longer holds the execution (lost journal / reprovision)
-/// answers Inspect with 404 execution-not-found: the overview keeps the
-/// durable index and degrades the row quietly — no `detail_error`.
+/// The overview reads saved TODOs even when a linked node loses its journal.
 #[tokio::test]
-async fn overview_degrades_quietly_when_the_node_lost_the_execution() {
+async fn overview_keeps_saved_todo_when_the_node_lost_the_execution() {
     let h = Harness::new().await;
     let todo_id = seed_todo(&h).await;
     let exec_id = format!("project-{todo_id}");
@@ -457,15 +496,19 @@ async fn overview_degrades_quietly_when_the_node_lost_the_execution() {
         .iter()
         .find(|t| t["id"] == json!(todo_id))
         .unwrap();
-    assert!(mine["execution"].is_object(), "{mine}");
-    assert_eq!(mine["execution"]["status"], json!("idle"));
+    assert!(mine.get("execution").is_none(), "{mine}");
+    assert_eq!(mine["status"], "draft");
     assert!(mine.get("detail_error").is_none(), "{mine}");
+    let (detail_status, detail) = h
+        .req(Method::GET, &format!("/api/executions/{exec_id}"), None)
+        .await;
+    assert_eq!(detail_status, 404, "{detail}");
+    assert_eq!(detail["error"], "execution not found");
 }
 
-/// Real inspect failures (offline node → 503) stay loud: the row carries
-/// `detail_error` so the console can surface them.
+/// Inspect failures stay on the execution endpoint and do not rewrite TODOs.
 #[tokio::test]
-async fn overview_keeps_detail_error_for_real_inspect_failures() {
+async fn overview_ignores_execution_inspect_failures() {
     let h = Harness::new().await;
     let todo_id = seed_todo(&h).await;
     let exec_id = format!("project-{todo_id}");
@@ -482,7 +525,13 @@ async fn overview_keeps_detail_error_for_real_inspect_failures() {
         .iter()
         .find(|t| t["id"] == json!(todo_id))
         .unwrap();
-    assert_eq!(mine["detail_error"]["error"], json!("node offline"));
+    assert_eq!(mine["status"], "draft");
+    assert!(mine.get("detail_error").is_none(), "{mine}");
+    let (detail_status, detail) = h
+        .req(Method::GET, &format!("/api/executions/{exec_id}"), None)
+        .await;
+    assert_eq!(detail_status, 503, "{detail}");
+    assert_eq!(detail["error"], "node offline");
 }
 
 #[tokio::test]

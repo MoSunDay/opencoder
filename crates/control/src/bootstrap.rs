@@ -149,7 +149,24 @@ pub async fn serve(
     data: Option<PathBuf>,
     token: String,
 ) -> Result<()> {
-    serve_release(host, port, web, workdir, data, token, None).await
+    serve_release(
+        host,
+        port,
+        web,
+        workdir,
+        data,
+        ServerCredentials {
+            server: token,
+            metrics: None,
+        },
+        None,
+    )
+    .await
+}
+
+pub struct ServerCredentials {
+    pub server: String,
+    pub metrics: Option<String>,
 }
 
 pub async fn serve_release(
@@ -158,9 +175,17 @@ pub async fn serve_release(
     web: bool,
     workdir: PathBuf,
     data: Option<PathBuf>,
-    token: String,
+    credentials: ServerCredentials,
     platform: Option<opencoder_core::fleet::release::PlatformConfig>,
 ) -> Result<()> {
+    let ServerCredentials {
+        server: token,
+        metrics: metrics_token,
+    } = credentials;
+    anyhow::ensure!(
+        metrics_token.as_deref() != Some(token.as_str()),
+        "metrics credential must differ from the administrator token"
+    );
     let data = resolve_data_dir(&workdir, data)?;
     let state = new_state(workdir.clone(), data, None).await?;
     if let Some(platform) = platform {
@@ -215,7 +240,7 @@ pub async fn serve_release(
     let mut server = tokio::spawn(async move {
         axum::serve(
             listener,
-            crate::build_app(server_state, Some(token), web)
+            crate::build_app_with_metrics(server_state, Some(token), metrics_token, web)
                 .into_make_service_with_connect_info::<std::net::SocketAddr>(),
         )
         .with_graceful_shutdown(async {

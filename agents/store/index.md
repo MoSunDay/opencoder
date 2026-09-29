@@ -1,4 +1,4 @@
-Commit: 1afd5d4375cd10885aee335d3d9dbf9d396bb563
+Commit: 51cb1e361e0774effa9f4eb38e93cc75e432b068
 
 # store 模块
 
@@ -14,7 +14,9 @@ Commit: 1afd5d4375cd10885aee335d3d9dbf9d396bb563
 - `src/schedule_types.rs`、`src/libsql_store/schedule.rs` — 调度台账与定义表（schema v26/v27）
 - `src/fleet/` — 节点容量/归属/派发回执（`handoff/`），容量领取在 `handoff/capacity.rs`
 - `src/fleet/records.rs` — 终态执行索引批删
-- `src/libsql_store/brain_layered.rs` + `brain_layered/schema.rs` — v4 分层画布 run/operation/event 投影（additive 建表，不推动 `SCHEMA_VERSION`；`schema_watermark()` 仅供断言，当前值为 28）
+- `src/libsql_store/brain_layered.rs` + `brain_layered/schema.rs` — v4 分层画布 run/operation/event 投影（additive 建表，不推动 `SCHEMA_VERSION`；`schema_watermark()` 仅供断言，当前值为 31）
+- `src/project.rs`、`src/libsql_store/project_links.rs`、`src/sql_store/project_links.rs` — TODO 看板列与排序、执行指派记录及结论；SQLite 排序在事务内提交，schema v31 为存量执行关联补齐类型、名称、结论和同步状态，MySQL/StarRocks 同步升级
+- `src/sql_store/ddl.rs` — MySQL/StarRocks 存量 TODO 排序列升级以 `-1` 标记待回填行；重试只处理标记行，不改动用户已保存的第 0 位
 - `src/store/contract/` 与 `src/libsql_store/impl_methods/` 分组组装 Store 接口和实现；`schema/migrations.rs` 保存共享表升级链。旧大脑专属表不再创建，历史数据由经过核准的维护清单单独清理。
 
 - [fleet/report/rows.rs](../../crates/store/src/fleet/report/rows.rs)：批量核验索引不可变字段，仅写入新增或变化行，冲突整批回滚。

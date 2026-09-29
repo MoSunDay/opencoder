@@ -116,7 +116,12 @@ fn pause_retains_the_barrier_and_cancellation_accepts_a_racing_success_receipt()
 }
 #[test]
 fn context_keeps_latest_visits_and_shared_capabilities_once() {
-    let req = request();
+    let mut req = request();
+    req.plan.transitions.push(LayeredTransition {
+        from: "coding".into(),
+        to: "testing".into(),
+        condition: "obsolete route".into(),
+    });
     let initial = snap(initialize("brain-context", &req, 1).unwrap());
     let first = finish(
         snap(dispatch(&initial, &req, 1)),
@@ -129,6 +134,8 @@ fn context_keeps_latest_visits_and_shared_capabilities_once() {
     assert_eq!(ctx.operations.len(), 2);
     assert!(ctx.operations.iter().all(|op| op.activation == 2));
     assert_eq!(next.operations.len(), 4, "history remains intact");
+    let prompt_plan: serde_json::Value = serde_json::from_str(&instruction(&ctx).unwrap()).unwrap();
+    assert!(prompt_plan["plan"].get("transitions").is_none());
     let mut huge = ctx;
     huge.request
         .inputs
@@ -140,7 +147,7 @@ fn context_keeps_latest_visits_and_shared_capabilities_once() {
 }
 
 #[test]
-fn return_requires_a_drawn_outgoing_layer_transition() {
+fn return_uses_execution_evidence_without_a_drawn_transition() {
     let req = request();
     let first = finish(
         snap(dispatch(
@@ -156,21 +163,99 @@ fn return_requires_a_drawn_outgoing_layer_transition() {
         &req,
         LayeredOperationStatus::Error,
     );
-    let mut missing = req.clone();
-    missing
-        .plan
-        .transitions
-        .retain(|edge| !(edge.from == "testing" && edge.to == "coding"));
+    let mut no_routes = req.clone();
+    no_routes.plan.transitions.clear();
     let mut deciding = tested.clone();
     deciding.run.phase = LayeredPhase::Deciding;
-    assert!(decide(
+    let returned = decide(
         &deciding,
-        &missing,
+        &no_routes,
         &catalog(),
-        &proposal(&tested, &missing, 1),
-        42
+        &proposal(&tested, &no_routes, 1),
+        42,
     )
-    .unwrap_err()
-    .to_string()
-    .contains("outgoing transition"));
+    .unwrap();
+    assert_eq!(returned.run.layer, 1);
+    assert_eq!(returned.run.round, 2);
+}
+
+#[test]
+fn return_can_choose_any_previously_executed_layer() {
+    let mut req = request();
+    req.plan.layers.push(
+        serde_json::from_value(json!({
+            "layer_id":"review","title":"Review","task":"review","objective":"verify",
+            "success_criteria":"approved"
+        }))
+        .unwrap(),
+    );
+    req.plan.nodes.push(
+        serde_json::from_value(json!({
+            "node_id":"review","layer_id":"review","title":"Review",
+            "objective":"review results","capability_id":"review"
+        }))
+        .unwrap(),
+    );
+    let first = finish(
+        snap(dispatch(
+            &snap(initialize("brain-free-return", &req, 1).unwrap()),
+            &req,
+            1,
+        )),
+        &req,
+        LayeredOperationStatus::Done,
+    );
+    let second = finish(
+        snap(dispatch(&first, &req, 2)),
+        &req,
+        LayeredOperationStatus::Done,
+    );
+    let third = finish(
+        snap(dispatch(&second, &req, 3)),
+        &req,
+        LayeredOperationStatus::Error,
+    );
+    let mut deciding = third.clone();
+    deciding.run.phase = LayeredPhase::Deciding;
+    let returned = decide(&deciding, &req, &catalog(), &proposal(&third, &req, 1), 42).unwrap();
+    assert_eq!(returned.run.layer, 1);
+    assert_eq!(returned.run.round, 2);
+}
+
+#[test]
+fn pc_issue_keeps_its_fixed_return_rule_without_plan_transitions() {
+    use opencoder_core::brain::pc_issue;
+    let req: LayeredRequest = serde_json::from_value(json!({
+        "schema_version":7,"plan":pc_issue::plan()
+    }))
+    .unwrap();
+    let caps: Vec<BrainCapabilityDescriptor> = pc_issue::STAGES
+        .iter()
+        .map(|stage| {
+            serde_json::from_value(json!({
+                "capability_id":format!("pc-issue-{stage}"),"kind":"operator","target":"act",
+                "input_desc":"task","output_desc":"report","definition":{},"version":"1"
+            }))
+            .unwrap()
+        })
+        .collect();
+    let mut current = snap(initialize("brain-pc-route", &req, 1).unwrap());
+    for layer in 1..=4 {
+        let mut deciding = current.clone();
+        deciding.run.phase = LayeredPhase::Deciding;
+        current = finish(
+            snap(decide(&deciding, &req, &caps, &proposal(&current, &req, layer), 10).unwrap()),
+            &req,
+            if layer == 4 {
+                LayeredOperationStatus::Error
+            } else {
+                LayeredOperationStatus::Done
+            },
+        );
+    }
+    let mut deciding = current.clone();
+    deciding.run.phase = LayeredPhase::Deciding;
+    let error = decide(&deciding, &req, &caps, &proposal(&current, &req, 1), 42).unwrap_err();
+    assert!(error.to_string().contains("verification to repair return"));
+    assert!(decide(&deciding, &req, &caps, &proposal(&current, &req, 3), 42).is_ok());
 }

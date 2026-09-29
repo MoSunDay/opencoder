@@ -16,7 +16,15 @@ async function harness() {
   const token = crypto.randomBytes(24).toString('hex');
   const sourceBin = process.env.PLATFORM_BIN_DIR || path.resolve(__dirname, '../../../target/debug');
   const bin = path.join(root, 'bin'); fs.mkdirSync(bin);
-  for (const name of ['opencoder-server', 'opencoder-agent']) fs.copyFileSync(path.join(sourceBin, name), path.join(bin, name), fs.constants.COPYFILE_FICLONE);
+  for (const name of ['opencoder-server', 'opencoder-agent']) {
+    const source = path.join(sourceBin, name);
+    const destination = path.join(bin, name);
+    try { fs.linkSync(source, destination); }
+    catch (error) {
+      if (error.code !== 'EXDEV') throw error;
+      fs.copyFileSync(source, destination, fs.constants.COPYFILE_FICLONE);
+    }
+  }
   const children = [];
   process.once("exit", () => { for (const child of children) if (child.exitCode === null && !child.signalCode) child.kill("SIGKILL"); });
   const mode = { kind: 'normal', text: 'fixture completed', requests: 0 };
@@ -61,14 +69,14 @@ async function harness() {
     children.push(child); return child;
   }
   let base;
-  const server = start('opencoder-server', ['--workdir', dirs[0], '--port', '0', '--token', token], dirs[0]);
+  const server = start('opencoder-server', ['--web', '--workdir', dirs[0], '--port', '0', '--token', token], dirs[0]);
   await until(async () => {
     assert.equal(server.exitCode, null, fs.readFileSync(server.logPath, 'utf8'));
     const match = fs.readFileSync(server.logPath, 'utf8').match(/listening on (http:\/\/127\.0\.0\.1:\d+)/);
     if (match) base = match[1]; return !!base;
   }, 'server listening', 30000);
   async function api(method, route, body, expected) {
-    const response = await fetch(base + route, { method, signal: AbortSignal.timeout(10000), headers: {
+    const response = await fetch(base + route, { method, signal: AbortSignal.timeout(30000), headers: {
       authorization: `Bearer ${token}`, 'content-type': 'application/json',
     }, body: body === undefined ? undefined : JSON.stringify(body) });
     const raw = await response.text();

@@ -25,6 +25,7 @@ use std::{
 pub struct Lifecycle {
     pub outbox_started: AtomicBool,
     pub schedule_started: AtomicBool,
+    pub scheduler: crate::scheduler::telemetry::SchedulerTelemetry,
     pub retiring: AtomicBool,
     pub retirement: OnceLock<ingress::Retirement>,
     pub request_gate: Mutex<()>,

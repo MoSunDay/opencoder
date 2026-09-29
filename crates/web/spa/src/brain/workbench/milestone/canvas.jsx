@@ -2,18 +2,16 @@ import { Background, Controls, Handle, MarkerType, MiniMap, Position, ReactFlow,
 import '@xyflow/react/dist/style.css';
 import { Button, Tag } from 'antd';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { capabilityLabel, capabilityName, capabilityTask, groups, transitionLabel } from './model.js';
+import { capabilityLabel, capabilityName, capabilityTask, groups } from './model.js';
 import './style.css';
 
 function LayerCard({ data, selected }) {
   return <article className={`brain-layer-box ${selected ? 'selected' : ''}`}>
-    <Handle id="forward-in" type="target" position={Position.Top} isConnectable={data.editable} />
-    <Handle id="return-in" type="target" position={Position.Left} style={{ top: '30%' }} isConnectable={data.editable} />
+    <Handle id="forward-in" type="target" position={Position.Top} isConnectable={false} />
     <header><Tag>第 {data.index + 1} 层</Tag><strong>{data.layer.title || '新里程碑'}</strong>{data.status && <Tag>{data.status}</Tag>}</header>
     <p>{data.layer.task || '点击配置里程碑要做什么'}</p>
     {data.editable && <Button className="nodrag" size="small" onClick={(event) => { event.stopPropagation(); data.onAddNode(data.layer.layer_id); }}>＋ 并行执行节点</Button>}
-    <Handle id="forward-out" type="source" position={Position.Bottom} isConnectable={data.editable} />
-    <Handle id="return-out" type="source" position={Position.Left} style={{ top: '70%' }} isConnectable={data.editable} />
+    <Handle id="forward-out" type="source" position={Position.Bottom} isConnectable={false} />
   </article>;
 }
 function ExecutionCard({ data, selected }) {
@@ -34,7 +32,7 @@ const capabilityLabelFor = (node, capabilities) => {
   const capability = capabilities.find((item) => (item.capability_id || item.id) === node.capability_id);
   return capability ? capabilityLabel(capability) : node.capability_id;
 };
-export function MilestoneCanvas({ plan, capabilities = EMPTY_CAPABILITIES, selection, onSelect, onConnect, onDeleteConnection, onAddLayer, onAddNode, positions = EMPTY, onPositions, statuses = EMPTY, layerStatuses = EMPTY }) {
+export function MilestoneCanvas({ plan, capabilities = EMPTY_CAPABILITIES, selection, onSelect, onAddLayer, onAddNode, positions = EMPTY, onPositions, statuses = EMPTY, layerStatuses = EMPTY }) {
   const editable = !!onAddLayer;
   const flow = useRef(null);
   const container = useRef(null);
@@ -67,30 +65,21 @@ export function MilestoneCanvas({ plan, capabilities = EMPTY_CAPABILITIES, selec
     observer.observe(container.current);
     return () => { clearTimeout(timer); observer.disconnect(); };
   }, []);
-  const edges = plan.transitions.map((edge) => {
-    const forward = plan.layers.findIndex((item) => item.layer_id === edge.to) > plan.layers.findIndex((item) => item.layer_id === edge.from);
-    const retry = edge.from === edge.to;
-    const labelOffset = retry ? 'translate(20px, -12px)' : 'translate(75px, -12px)';
-    return { id: `transition:${edge.from}:${edge.to}`, source: layerFlowId(edge.from), target: layerFlowId(edge.to),
-      sourceHandle: forward ? 'forward-out' : 'return-out', targetHandle: forward ? 'forward-in' : 'return-in',
-      type: 'smoothstep', label: retry ? '重试' : transitionLabel(edge.condition), selectable: true,
-      ariaLabel: `${edge.from} → ${edge.to}：${edge.condition || '填写扭转条件'}`,
-      domAttributes: { title: edge.condition || '填写扭转条件' },
-      labelStyle: forward ? undefined : { transform: labelOffset },
-      labelBgStyle: forward ? undefined : { transform: labelOffset },
-      style: { stroke: forward ? '#87a3c2' : retry ? '#8568ab' : '#d77948', strokeWidth: 2, strokeDasharray: retry ? '5 4' : undefined },
-      markerEnd: { type: MarkerType.ArrowClosed } };
-  });
+  const edges = plan.layers.slice(1).map((layer, index) => ({
+    id: `sequence:${plan.layers[index].layer_id}:${layer.layer_id}`,
+    source: layerFlowId(plan.layers[index].layer_id), target: layerFlowId(layer.layer_id),
+    sourceHandle: 'forward-out', targetHandle: 'forward-in', type: 'smoothstep',
+    selectable: false, ariaLabel: `第 ${index + 1} 层 → 第 ${index + 2} 层`,
+    style: { stroke: '#87a3c2', strokeWidth: 2 }, markerEnd: { type: MarkerType.ArrowClosed },
+  }));
   return <div ref={container} className={`brain-milestone-canvas ${editable ? 'is-editable' : ''}`} aria-label="里程碑编辑画布">
-    {editable && <div className="brain-milestone-tools"><Button onClick={onAddLayer}>＋ 里程碑</Button><Button onClick={() => onPositions?.({})}>整理布局</Button>{onDeleteConnection && <Button danger onClick={onDeleteConnection}>删除选中连线</Button>}<span>选中里程碑添加前进或回退连线</span></div>}
-    <div className="brain-milestone-flow"><ReactFlow onInit={(instance) => { flow.current = instance; }} nodes={nodes} edges={edges} nodeTypes={nodeTypes} nodesDraggable={editable} nodesConnectable={editable} fitView minZoom={0.15} maxZoom={2}
+    {editable && <div className="brain-milestone-tools"><Button onClick={onAddLayer}>＋ 里程碑</Button><Button onClick={() => onPositions?.({})}>整理布局</Button><span>大脑根据执行结果决定前进或回到已执行的里程碑</span></div>}
+    <div className="brain-milestone-flow"><ReactFlow onInit={(instance) => { flow.current = instance; }} nodes={nodes} edges={edges} nodeTypes={nodeTypes} nodesDraggable={editable} nodesConnectable={false} fitView minZoom={0.15} maxZoom={2}
       onNodesChange={(changes) => setNodes((old) => applyNodeChanges(changes, old))}
       onNodeClick={(_, node) => onSelect?.({ type: node.type === 'layer' ? 'layer' : 'node', id: originalFlowId(node.id) })}
-      onEdgeClick={(_, edge) => onSelect?.({ type: 'transition', id: `${originalFlowId(edge.source)}:${originalFlowId(edge.target)}` })}
-      onConnect={(edge) => onConnect?.(originalFlowId(edge.source), originalFlowId(edge.target))}
       onNodeDragStop={(_, node) => { if (node.type === 'layer') onPositions?.({ ...positions, [originalFlowId(node.id)]: node.position }); }}>
       <Background /><Controls showInteractive={false} /><MiniMap pannable zoomable />
     </ReactFlow></div>
-    {!plan.layers.length && <div className="brain-milestone-empty"><h3>从第一个里程碑开始</h3><p>在画布配置里程碑、并行节点和扭转关系</p><Button type="primary" onClick={onAddLayer}>添加第一个里程碑</Button></div>}
+    {!plan.layers.length && <div className="brain-milestone-empty"><h3>从第一个里程碑开始</h3><p>在画布配置里程碑和并行节点</p><Button type="primary" onClick={onAddLayer}>添加第一个里程碑</Button></div>}
   </div>;
 }

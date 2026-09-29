@@ -22,6 +22,7 @@ use std::sync::Arc;
 /// Shared verifier state. Neither token nor digests are returned or logged.
 pub struct AuthState {
     seed_token: Option<String>,
+    metrics_token: Option<String>,
     lookup: Arc<dyn Store>,
 }
 
@@ -29,8 +30,14 @@ impl AuthState {
     pub fn new(seed_token: String, lookup: Arc<dyn Store>) -> Self {
         Self {
             seed_token: Some(seed_token),
+            metrics_token: None,
             lookup,
         }
+    }
+
+    pub fn with_metrics_token(mut self, token: Option<String>) -> Self {
+        self.metrics_token = token;
+        self
     }
 }
 
@@ -97,6 +104,20 @@ pub async fn require_bearer(
         return next.run(req).await;
     }
     let token = bearer_token(&req).map(str::to_owned);
+    if token
+        .as_deref()
+        .zip(auth.metrics_token.as_deref())
+        .is_some_and(|(actual, expected)| token_eq(expected, actual))
+    {
+        if req.method() == axum::http::Method::GET && req.uri().path() == "/metrics" {
+            return next.run(req).await;
+        }
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({ "ok": false, "error": "invalid bearer token" })),
+        )
+            .into_response();
+    }
     let identity = match token {
         None => None,
         Some(token) => identify(auth.seed_token.clone(), auth.lookup.clone(), token).await,

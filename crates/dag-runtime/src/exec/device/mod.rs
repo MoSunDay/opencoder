@@ -125,10 +125,7 @@ fn assignment(ctx: &StepCtx, input: &Value) -> Result<Value> {
     let machine = value["machine"]
         .as_str()
         .context("Device machine missing")?;
-    ensure!(
-        (2..=19).any(|i| machine == format!("win-{i:02}")),
-        "Device outside allowed fleet"
-    );
+    ensure!(valid_machine(machine), "Device outside allowed fleet");
     let reservation = value["reservation_id"]
         .as_str()
         .context("Device reservation missing")?;
@@ -144,6 +141,13 @@ fn assignment(ctx: &StepCtx, input: &Value) -> Result<Value> {
         "Device generation missing"
     );
     Ok(value)
+}
+
+pub(super) fn valid_machine(machine: &str) -> bool {
+    machine
+        .strip_prefix("win-")
+        .and_then(|number| number.parse::<u32>().ok())
+        .is_some_and(|number| (2..=99).contains(&number) && machine == format!("win-{number:02}"))
 }
 
 pub(super) async fn prepare(
@@ -179,6 +183,9 @@ pub(super) async fn prepare(
     let (scope, assignment) = if ctx.step.name == "allocate" {
         let mut body = json!({"dag_id":ctx.run_id,"step_id":ctx.step.name,"instance_id":null,
             "session_id":session_id,"role":"allocate","target_step":"execute","count":input["device_count"]});
+        if let Some(machines) = input.get("eligible_machines") {
+            body["eligible_machines"] = machines.clone();
+        }
         if ui {
             body["work_type"] = json!("ui");
             body["case_ids"] = json!(input["cases"]

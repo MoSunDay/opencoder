@@ -2,7 +2,7 @@
 //! AND its operator execution in one call; the node runs the prompt
 //! through the real agent loop against the LLM stub; the execution folds
 //! to `idle` (the operator's success state), the inspect document exposes
-//! `{session_id}` as the result, and the decoded transcript (via the
+//! the session pointer and final answer as the result, and the decoded transcript (via the
 //! native session GET) contains both sides of the exchange.
 
 use crate::support::fleet_proc::{Fleet, TOKEN};
@@ -36,8 +36,11 @@ fn operator_session_runs_prompt_to_idle() {
     let doc = fleet.wait_idle(SESSION);
     assert_eq!(doc["execution"]["status"], "idle", "inspect: {doc}");
     assert_eq!(doc["execution"]["kind"], "operator");
-    // The operator result contract: just the session pointer.
-    assert_eq!(doc["result"], json!({"session_id": SESSION}));
+    // The result exposes the answer to consumers such as project TODOs.
+    assert_eq!(
+        doc["result"],
+        json!({"session_id": SESSION, "output_text": REPLY, "output_json": null})
+    );
     // The session projection carries the Operator title.
     assert_eq!(doc["session"]["meta"]["id"], SESSION);
     assert_eq!(doc["session"]["meta"]["title"], "Operator");

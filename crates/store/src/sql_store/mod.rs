@@ -90,12 +90,50 @@ impl ProjectStore for SqlProjectStore {
         }
     }
 
-    async fn list_todo_execution_ids(&self, todo_id: &str) -> Result<Vec<String>> {
+    async fn list_todo_assignments(
+        &self,
+        todo_id: &str,
+    ) -> Result<Vec<crate::project::ProjectAssignment>> {
         project_links::list(&self.pool, self.starrocks, todo_id).await
     }
 
-    async fn link_todo_execution(&self, todo_id: &str, execution_id: &str) -> Result<()> {
-        project_links::link(&self.pool, self.starrocks, todo_id, execution_id).await
+    async fn latest_todo_assignment_states(
+        &self,
+    ) -> Result<Vec<crate::project::ProjectAssignmentState>> {
+        project_links::latest(&self.pool, self.starrocks).await
+    }
+
+    async fn link_todo_execution(
+        &self,
+        assignment: &crate::project::ProjectAssignment,
+    ) -> Result<()> {
+        project_links::link(&self.pool, self.starrocks, assignment).await
+    }
+
+    async fn pending_todo_assignments(
+        &self,
+        after: &str,
+        limit: usize,
+    ) -> Result<Vec<crate::project::ProjectAssignment>> {
+        project_links::pending(&self.pool, self.starrocks, after, limit).await
+    }
+
+    async fn finish_todo_assignment(
+        &self,
+        todo_id: &str,
+        execution_id: &str,
+        state: &str,
+        result_md: Option<&str>,
+    ) -> Result<()> {
+        project_links::finish(
+            &self.pool,
+            self.starrocks,
+            todo_id,
+            execution_id,
+            state,
+            result_md,
+        )
+        .await
     }
 
     async fn unlink_todo_execution(&self, todo_id: &str, execution_id: &str) -> Result<bool> {
@@ -185,6 +223,10 @@ impl ProjectStore for SqlProjectStore {
     }
     async fn get_todo(&self, id: &str) -> Result<Option<ProjectTodoRecord>> {
         project_crud_todo::get_todo(&self.pool, self.starrocks, id).await
+    }
+    async fn reorder_todos(&self, board_status: &str, ids: &[String], now_ms: i64) -> Result<()> {
+        project_crud_todo::reorder_todos(&self.pool, self.starrocks, board_status, ids, now_ms)
+            .await
     }
     async fn get_todo_summary(&self, id: &str) -> Result<Option<crate::ProjectTodoSummary>> {
         project_crud_todo::get_todo_summary(&self.pool, self.starrocks, id).await

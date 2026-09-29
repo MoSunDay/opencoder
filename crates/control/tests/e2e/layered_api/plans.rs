@@ -4,12 +4,22 @@ use super::*;
 async fn saved_plan_versions_are_capabilities_and_nested_runs_pin_the_version() {
     let h = Harness::with_brain_kind().await;
     advertise_v4(&h);
-    let saved =
+    let mut saved =
         json!({"id":"plan-child","version":1,"plan":plan(),"changelog":"initial","created_at":1});
+    saved["plan"]["transitions"] =
+        json!([{"from":"scan-layer","to":"apply-layer","condition":"obsolete condition"}]);
     let (status, body) = h
         .req(Method::POST, "/api/brain/plan-defs", Some(saved.clone()))
         .await;
     assert_eq!(status, 200, "{body}");
+    assert_eq!(
+        body["version"]["plan"]["transitions"],
+        saved["plan"]["transitions"]
+    );
+    let (status, retried) = h
+        .req(Method::POST, "/api/brain/plan-defs", Some(saved.clone()))
+        .await;
+    assert_eq!(status, 200, "{retried}");
     let (status, body) = h.req(Method::GET, "/api/brain/library", None).await;
     assert_eq!(status, 200, "{body}");
     let cap = body["capabilities"]
@@ -32,6 +42,10 @@ async fn saved_plan_versions_are_capabilities_and_nested_runs_pin_the_version() 
     assert_eq!(status, 202, "{body}");
     let assignment = h.state.fleet.assignment(RUN).await.unwrap().unwrap();
     assert_eq!(
+        assignment.request.input["layered_request"]["plan"]["transitions"],
+        json!([{"from":"scan-layer","to":"scan-layer","condition":"Evidence requires rework in this previously executed milestone"}])
+    );
+    assert_eq!(
         assignment.request.input["capability_scope"][0]["version"],
         "1"
     );
@@ -46,6 +60,35 @@ async fn saved_plan_versions_are_capabilities_and_nested_runs_pin_the_version() 
     let caps = body["capabilities"].as_array().unwrap();
     assert!(caps.iter().any(|c| c["id"] == "plan-plan-child@1"));
     assert!(caps.iter().any(|c| c["id"] == "plan-plan-child@2"));
+}
+
+#[tokio::test]
+async fn new_plan_save_is_idempotent_and_keeps_paths_for_retained_runtimes() {
+    let h = Harness::with_brain_kind().await;
+    advertise_v4(&h);
+    let submitted = json!({"id":"plan-autonomous","version":1,"plan":plan(),
+        "changelog":"initial","created_at":1});
+    let (status, first) = h
+        .req(
+            Method::POST,
+            "/api/brain/plan-defs",
+            Some(submitted.clone()),
+        )
+        .await;
+    assert_eq!(status, 200, "{first}");
+    let paths = first["version"]["plan"]["transitions"].as_array().unwrap();
+    assert_eq!(paths.len(), 4);
+    assert!(paths
+        .iter()
+        .any(|edge| edge["from"] == "scan-layer" && edge["to"] == "apply-layer"));
+    assert!(paths
+        .iter()
+        .any(|edge| edge["from"] == "apply-layer" && edge["to"] == "scan-layer"));
+    let (status, retried) = h
+        .req(Method::POST, "/api/brain/plan-defs", Some(submitted))
+        .await;
+    assert_eq!(status, 200, "{retried}");
+    assert_eq!(retried["version"], first["version"]);
 }
 
 #[tokio::test]

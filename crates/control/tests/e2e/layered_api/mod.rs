@@ -24,7 +24,7 @@ pub(super) fn plan() -> Value {
             {"node_id":"apply","title":"Apply","capability_id":"builtin-operator","layer_id":"apply-layer","objective":"apply"}
         ],
         "layers":[{"layer_id":"scan-layer","title":"Scan","task":"scan","objective":"scan","success_criteria":"evidence found"},{"layer_id":"apply-layer","title":"Apply","task":"apply","objective":"apply","success_criteria":"change verified"}],
-        "transitions":[{"from":"scan-layer","to":"apply-layer","condition":"scan met"}],"edges": [],
+        "edges": [],
         "max_rounds": 8
     })
 }

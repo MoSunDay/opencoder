@@ -8,7 +8,7 @@ vi.mock('../../../api.js', () => ({ apiPost: vi.fn() }));
 afterEach(() => { cleanup(); localStorage.clear(); vi.clearAllMocks(); });
 const cap = { id: 'coding', kind: 'agent', target: 'Coder', summary: '编码能力', version: '1', input_desc: '任务', output_desc: '变更', definition: {} };
 const version = { id: 'plan-canvas', version: 1, plan: { schema_version: 7, title: '交付计划', objective: '交付经过验证的变更', inputs: {}, max_rounds: 5,
-  layers: [{ layer_id: 'coding', title: 'Coding', task: '完成编码', objective: '实现变更', success_criteria: '实现完成' }], nodes: [{ node_id: 'code', title: 'Coding 任务', layer_id: 'coding', objective: '实现变更', capability_id: 'coding' }], transitions: [] } };
+  layers: [{ layer_id: 'coding', title: 'Coding', task: '完成编码', objective: '实现变更', success_criteria: '实现完成' }], nodes: [{ node_id: 'code', title: 'Coding 任务', layer_id: 'coding', objective: '实现变更', capability_id: 'coding' }] } };
 it('在真实画布编辑节点后，表单提交保存新版本且不会启动运行', async () => {
   const saved = vi.fn(); apiPost.mockResolvedValue({ id: 'plan-canvas', version: 2 });
   const { container } = render(<PlanEditor version={version} cacheKey="canvas-test" capabilities={[cap]} onSaved={saved} onClose={() => {}} />);
@@ -56,17 +56,15 @@ it('在里程碑容器内添加并配置并行执行节点', async () => {
   expect(container.querySelectorAll('.react-flow__node-execution')).toHaveLength(2);
   expect(container.querySelector('.brain-execution-node span')?.textContent).toBe('Agent · Coder');
 });
-it('可从里程碑手动添加回退线，并在选中连线后删除', async () => {
+it('多层计划自动显示顺序，保存时无需决策条件', async () => {
   const twoLayers = { ...version, plan: { ...version.plan,
     layers: [...version.plan.layers, { layer_id: 'test', title: '测试', task: '验证变更', objective: '测试通过', success_criteria: '证据完整' }],
-    nodes: [...version.plan.nodes, { node_id: 'test-node', layer_id: 'test', title: 'Coder', objective: '编码能力', capability_id: 'coding' }],
-    transitions: [{ from: 'coding', to: 'test', condition: '编码达标' }] } };
+    nodes: [...version.plan.nodes, { node_id: 'test-node', layer_id: 'test', title: 'Coder', objective: '编码能力', capability_id: 'coding' }] } };
   const { container } = render(<PlanEditor version={twoLayers} cacheKey="canvas-return" capabilities={[cap]} onSaved={vi.fn()} onClose={() => {}} />);
   fireEvent.click(container.querySelectorAll('.react-flow__node-layer')[1]);
-  fireEvent.mouseDown(screen.getByLabelText('添加流转连线'));
-  fireEvent.click((await screen.findAllByText('Coding')).find((item) => item.classList.contains('ant-select-item-option-content')));
-  expect(JSON.parse(localStorage.getItem('canvas-return')).version.plan.transitions).toContainEqual({ from: 'test', to: 'coding', condition: '' });
-  expect(screen.queryByText('删除连线')).toBeNull();
-  fireEvent.click(screen.getByRole('button', { name: '删除选中连线' }));
-  expect(JSON.parse(localStorage.getItem('canvas-return')).version.plan.transitions).toHaveLength(1);
+  expect(screen.queryByLabelText('扭转条件')).toBeNull();
+  expect(screen.getByText('大脑根据执行结果决定前进或回到已执行的里程碑')).toBeTruthy();
+  expect(JSON.parse(localStorage.getItem('canvas-return')).version.plan).not.toHaveProperty('transitions');
+  fireEvent.click(screen.getByText('下一步：计划信息'));
+  expect(await screen.findByText('计划信息与提交')).toBeTruthy();
 });

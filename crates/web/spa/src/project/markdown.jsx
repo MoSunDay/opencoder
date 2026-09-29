@@ -12,12 +12,13 @@ import './project.css';
 /// <Markdown text={md}/> — empty/absent text renders an em-dash placeholder
 /// (the panel convention for "nothing here yet"), anything else renders GFM.
 export function Markdown({ text }) {
-  const html = useMemo(
-    () => DOMPurify.sanitize(marked.parse(String(text || ''), { gfm: true, breaks: true, async: false })),
-    [text],
-  );
+  const html = useMemo(() => {
+    try { return DOMPurify.sanitize(marked.parse(String(text || ''), { gfm: true, breaks: true, async: false })); }
+    catch { return null; }
+  }, [text]);
   if (!text) {
     return <div className="md-body md-body--empty">—</div>;
   }
+  if (html === null) return <div className="md-body" style={{ whiteSpace: 'pre-wrap' }}>{String(text)}</div>;
   return <div className="md-body" dangerouslySetInnerHTML={{ __html: html }} />;
 }

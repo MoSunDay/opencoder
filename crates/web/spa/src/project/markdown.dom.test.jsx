@@ -47,4 +47,15 @@ describe('Markdown DOMPurify sanitization', () => {
     expect(absent.container.querySelector('.md-body--empty')).not.toBeNull();
     expect(absent.container.textContent).toBe('—');
   });
+
+  it('shows escaped plain text when the browser cannot parse Markdown', () => {
+    const original = Array.prototype.at;
+    Array.prototype.at = undefined;
+    try {
+      const { container } = render(<Markdown text={'# 状态\n<script>alert(1)</script>'} />);
+      expect(container.textContent).toContain('# 状态');
+      expect(container.innerHTML).not.toContain('<script');
+      expect(container.querySelector('.md-body')?.style.whiteSpace).toBe('pre-wrap');
+    } finally { Array.prototype.at = original; }
+  });
 });

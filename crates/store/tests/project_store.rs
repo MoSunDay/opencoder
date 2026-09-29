@@ -74,6 +74,9 @@ fn todo(id: &str, milestone_id: Option<&str>, created_at: i64) -> ProjectTodoRec
         draft: format!("draft {id}"),
         plan_md: None,
         status: ProjectTodoStatus::Draft,
+        board_status: "backlog".into(),
+        position: created_at,
+        capability_id: None,
         agent: "act".to_string(),
         executor_kind: ProjectExecutorKind::Agent,
         executor_ref: None,
@@ -614,7 +617,7 @@ async fn reopen_is_idempotent_and_serves_v15() {
         .unwrap();
     let mut rows = stmt.query(()).await.unwrap();
     let v: i64 = rows.next().await.unwrap().unwrap().get(0).unwrap();
-    assert_eq!(v, 29, "schema_version must be latest (29) after reopen");
+    assert_eq!(v, 31, "schema_version must be latest (31) after reopen");
 
     let iface: Arc<dyn ProjectStore> = Arc::new(store);
     iface.create_goal(&goal("g1", 0, 1)).await.unwrap();
@@ -757,4 +760,25 @@ async fn executor_dimension_round_trips() {
         .unwrap();
         assert!(store2.get_todo("t-bad").await.is_err());
     }
+}
+
+#[tokio::test]
+async fn board_reorder_moves_once_and_rolls_back_on_unknown_id() {
+    let (_dir, _store, p) = fresh().await;
+    p.create_todo(&todo("a", None, 1)).await.unwrap();
+    p.create_todo(&todo("b", None, 2)).await.unwrap();
+    p.reorder_todos("todo", &["b".into(), "a".into()], 5)
+        .await
+        .unwrap();
+    let rows = p.list_todos(None).await.unwrap();
+    assert_eq!(
+        rows.iter().map(|row| row.id.as_str()).collect::<Vec<_>>(),
+        ["b", "a"]
+    );
+    assert!(rows.iter().all(|row| row.board_status == "todo"));
+    assert!(p
+        .reorder_todos("done", &["a".into(), "missing".into()], 6)
+        .await
+        .is_err());
+    assert_eq!(p.get_todo("a").await.unwrap().unwrap().board_status, "todo");
 }

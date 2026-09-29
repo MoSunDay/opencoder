@@ -10,6 +10,89 @@ use serde_json::{json, Value};
 use support::project_app::{call, done, harness, todo_row};
 
 #[tokio::test]
+async fn todo_board_reorder_moves_cards_and_rejects_missing_ids() {
+    let h = harness().await;
+    let mut ids = Vec::new();
+    for title in ["first", "second"] {
+        let (status, todo) = call(
+            &h.app,
+            "POST",
+            "/api/project/todos",
+            Some(json!({"title":title,"draft":"work"})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{todo}");
+        ids.push(todo["id"].as_str().unwrap().to_owned());
+    }
+    let (status, body) = call(
+        &h.app,
+        "PUT",
+        "/api/project/todos/order",
+        Some(json!({"board_status":"in_progress","ids":[ids[1],ids[0]]})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (_, listed) = call(&h.app, "GET", "/api/project/todos", None).await;
+    assert_eq!(todo_row(&listed, &ids[1])["board_status"], "in_progress");
+    assert!(
+        todo_row(&listed, &ids[1])["position"].as_i64().unwrap()
+            < todo_row(&listed, &ids[0])["position"].as_i64().unwrap()
+    );
+
+    let (status, _) = call(
+        &h.app,
+        "PUT",
+        "/api/project/todos/order",
+        Some(json!({"board_status":"done","ids":[ids[0],"missing"]})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+    let (_, listed) = call(&h.app, "GET", "/api/project/todos", None).await;
+    assert_eq!(todo_row(&listed, &ids[0])["board_status"], "in_progress");
+    let (status, body) = call(
+        &h.app,
+        "PATCH",
+        &format!("/api/project/todos/{}", ids[0]),
+        Some(json!({"position": -1})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    let (status, body) = call(
+        &h.app,
+        "PATCH",
+        &format!("/api/project/todos/{}", ids[0]),
+        Some(json!({"position": 0})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+}
+
+#[tokio::test]
+async fn todo_draft_does_not_dispatch_mentions() {
+    let h = harness().await;
+    let (status, todo) = call(
+        &h.app,
+        "POST",
+        "/api/project/todos",
+        Some(json!({"title":"bound","draft":"work\n@operator"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{todo}");
+    assert_eq!(todo["capability_id"], Value::Null);
+    let id = todo["id"].as_str().unwrap();
+    let (status, _) = call(
+        &h.app,
+        "PATCH",
+        &format!("/api/project/todos/{id}"),
+        Some(json!({"draft":"ordinary @operator mention"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, listed) = call(&h.app, "GET", "/api/project/todos", None).await;
+    assert_eq!(todo_row(&listed, id)["capability_id"], Value::Null);
+}
+
+#[tokio::test]
 async fn goal_milestone_todo_crud_contract() {
     let h = harness().await;
 

@@ -6,7 +6,7 @@ async function projectPage(page) {
   await page.getByRole('menuitem').filter({ hasText: '项目' }).click();
 }
 async function openBrowser(h, errors) {
-  const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH || chromium.executablePath(), args: ['--no-sandbox', '--disable-dev-shm-usage'] });
+  const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH || chromium.executablePath(), args: ['--no-sandbox', '--disable-dev-shm-usage', '--no-proxy-server'] });
   const page = await browser.newPage({ viewport: { width: 1500, height: 1000 } });
   page.on('pageerror', (error) => errors.push(error.message));
   await page.addInitScript((token) => localStorage.setItem('oc_token', token), h.token);
@@ -17,8 +17,9 @@ async function openBrowser(h, errors) {
     await page.goto(h.base, { waitUntil: 'networkidle' });
     await projectPage(page);
   } catch (error) {
-    fs.writeFileSync(path.join(h.root, 'browser-failure.html'), await page.content());
-    await page.screenshot({ path: path.join(h.root, 'browser-failure.png'), fullPage: true });
+    fs.writeFileSync(path.join(h.root, 'browser-failure.json'), JSON.stringify({ url: page.url(), pageErrors: errors, error: error.message }, null, 2));
+    try { fs.writeFileSync(path.join(h.root, 'browser-failure.html'), await page.content()); } catch { /* browser may already be closed */ }
+    try { await page.screenshot({ path: path.join(h.root, 'browser-failure.png'), fullPage: true }); } catch { /* retain the original failure */ }
     await browser.close(); throw error;
   }
   return { browser, page };
@@ -57,7 +58,7 @@ async function createHierarchy(page) {
   await page.getByPlaceholder('一句话标题').fill('Standalone initiative');
   const standaloneInitiative = await save('/api/project/initiatives', /保\s*存/);
   await page.getByRole('tab', { name: 'TODO', exact: true }).click();
-  async function todo(title, draft, groupId) {
+  async function todo(title, draft, groupId, capability) {
     await page.getByRole('button', { name: '新建 TODO', exact: true }).click();
     const drawer = page.locator('.ant-drawer:visible').last();
     await drawer.locator('input#title').fill(title);
@@ -66,35 +67,52 @@ async function createHierarchy(page) {
       await drawer.locator('#milestone_id').click();
       await page.locator('.ant-select-item-option-content').filter({ hasText: groupId }).click();
     }
+    if (capability) {
+      await drawer.getByRole('combobox', { name: '执行能力' }).click();
+      await page.locator('.ant-select-item-option-content').filter({ hasText: capability }).click();
+    }
     const created = await save('/api/project/todos', /创\s*建/);
     await page.getByText(`TODO · ${title}`, { exact: true }).waitFor();
     await page.locator('.ant-drawer-close').click();
     await page.getByText(`TODO · ${title}`, { exact: true }).waitFor({ state: 'hidden' });
     return created;
   }
-  const main = await todo('Acceptance TODO', 'input 界 '.repeat(10000), milestone.id);
-  const initiativeTodo = await todo('Initiative acceptance', 'specialized work', initiative.id);
+  const main = await todo('Acceptance TODO', 'input 界 '.repeat(10000), milestone.id, 'Agent');
+  const initiativeTodo = await todo('Initiative acceptance', 'specialized work', initiative.id, 'Agent');
   const standaloneTodo = await todo('Standalone initiative TODO', 'independent work', standaloneInitiative.id);
-  const backlog = await todo('Backlog acceptance', 'standalone TODO', null);
+  const backlog = await todo('Backlog acceptance', 'standalone TODO', null, 'Operator');
   return { goal, milestone, initiative, standaloneInitiative, todo: main, initiativeTodo, standaloneTodo, backlog };
 }
 async function verifyWorkbench(page, root, executionId) {
   await page.getByRole('tab', { name: 'TODO', exact: true }).click();
   await page.getByRole('button', { name: 'Acceptance TODO', exact: true }).click();
-  await page.getByText('关联执行', { exact: true }).waitFor();
-  await page.getByRole('button', { name: '从能力发起执行' }).waitFor();
+  await page.getByText('指派记录', { exact: true }).waitFor();
+  await page.getByRole('button', { name: '指派所选能力' }).waitFor();
   const row = page.locator('tr').filter({ hasText: executionId });
   await row.getByText('Agent', { exact: true }).waitFor();
   await row.getByRole('button', { name: '查看' }).click();
   await page.getByRole('button', { name: '返回 TODO' }).waitFor();
   await page.screenshot({ path: path.join(root, 'project-workbench.png'), fullPage: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.waitForTimeout(350);
+  await page.screenshot({ path: path.join(root, 'project-workbench-mobile.png'), fullPage: true });
+  const mobile = await page.evaluate(() => {
+    const drawer = document.querySelector('.ant-drawer-content-wrapper');
+    const title = document.querySelector('.ant-drawer-title');
+    const bounds = (element) => { const { left, right, width } = element.getBoundingClientRect(); return { left, right, width }; };
+    return { viewport: window.innerWidth, drawer: bounds(drawer), title: bounds(title) };
+  });
+  if (mobile.drawer.left < -1 || mobile.drawer.right > mobile.viewport + 1 || mobile.title.left < 0 || mobile.title.right > mobile.viewport) {
+    throw new Error(`Mobile workbench drawer is clipped: ${JSON.stringify(mobile)}`);
+  }
+  await page.setViewportSize({ width: 1500, height: 1000 });
   fs.writeFileSync(path.join(root, 'workbench-browser.json'), JSON.stringify({ linked_execution_id: executionId, detail_opened: true }, null, 2));
 }
 async function verifyNativeAgentLaunch(page, todoTitle) {
   await page.getByRole('button', { name: '返回 TODO' }).click();
   await page.locator('.ant-drawer-close').click();
   await page.getByRole('button', { name: todoTitle, exact: true }).click();
-  await page.getByRole('button', { name: '从能力发起执行' }).click();
+  await page.getByRole('button', { name: '指派所选能力' }).click();
   await page.getByRole('combobox', { name: '执行节点' }).click();
   await page.locator('.ant-select-item-option-content').filter({ hasText: 'node-a' }).click();
   await page.getByRole('combobox', { name: '执行 Agent' }).click();
@@ -110,4 +128,21 @@ async function verifyNativeAgentLaunch(page, todoTitle) {
   await page.locator('tr').filter({ hasText: execution.id }).waitFor();
   return execution.id;
 }
-module.exports = { openBrowser, createHierarchy, projectPage, verifyWorkbench, verifyNativeAgentLaunch };
+async function verifyNativeOperatorLaunch(page, todoTitle) {
+  await page.locator('.ant-drawer-close').click();
+  await page.getByRole('button', { name: todoTitle, exact: true }).click();
+  await page.getByRole('button', { name: '指派所选能力' }).click();
+  await page.getByRole('combobox', { name: '执行节点' }).click();
+  await page.locator('.ant-select-item-option-content').filter({ hasText: 'node-a' }).click();
+  const created = page.waitForResponse((response) => response.url().endsWith('/api/sessions') && response.request().method() === 'POST');
+  await page.getByPlaceholder('输入提示词，Enter 发送，Shift+Enter 换行').fill('通过 TODO 发起 Operator 验收');
+  await page.getByPlaceholder('输入提示词，Enter 发送，Shift+Enter 换行').press('Enter');
+  const response = await created;
+  if (!response.ok()) throw new Error(`browser operator launch: ${await response.text()}`);
+  const execution = await response.json();
+  await page.getByRole('button', { name: '返回 TODO' }).waitFor();
+  await page.getByRole('button', { name: '返回 TODO' }).click();
+  await page.locator('tr').filter({ hasText: execution.id }).waitFor();
+  return execution.id;
+}
+module.exports = { openBrowser, createHierarchy, projectPage, verifyWorkbench, verifyNativeAgentLaunch, verifyNativeOperatorLaunch };

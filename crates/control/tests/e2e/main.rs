@@ -29,6 +29,7 @@ mod project_crud_extra;
 mod project_links;
 mod project_store_failure;
 mod schedule_api;
+mod scheduler_metrics;
 mod sessions_agent;
 mod sessions_compat_extra;
 mod sessions_relay;

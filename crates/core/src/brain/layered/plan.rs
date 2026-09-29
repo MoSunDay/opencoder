@@ -104,7 +104,7 @@ pub struct LayeredPlan {
     pub nodes: Vec<LayeredNode>,
     #[serde(default)]
     pub layers: Vec<LayeredMilestone>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub transitions: Vec<LayeredTransition>,
     #[serde(default)]
     pub edges: Vec<LayeredEdge>,
@@ -114,6 +114,77 @@ pub struct LayeredPlan {
 impl LayeredPlan {
     pub fn node(&self, node_id: &str) -> Option<&LayeredNode> {
         self.nodes.iter().find(|node| node.node_id == node_id)
+    }
+
+    /// Persist paths understood by retained schema-7 runtimes. The current
+    /// Brain ignores these paths and decides from evidence and capabilities.
+    /// Existing paths stay intact so retries of historical versions are exact.
+    pub fn with_rollback_paths(mut self) -> Self {
+        if self.schema_version != 7 || !self.transitions.is_empty() {
+            return self;
+        }
+        for (index, layer) in self.layers.iter().enumerate() {
+            if let Some(next) = self.layers.get(index + 1) {
+                self.transitions.push(LayeredTransition {
+                    from: layer.layer_id.clone(),
+                    to: next.layer_id.clone(),
+                    condition: "Current milestone meets its success criteria".into(),
+                });
+            }
+            for target in self.layers.iter().take(index + 1) {
+                self.transitions.push(LayeredTransition {
+                    from: layer.layer_id.clone(),
+                    to: target.layer_id.clone(),
+                    condition: "Evidence requires rework in this previously executed milestone"
+                        .into(),
+                });
+            }
+        }
+        self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rollback_paths_cover_every_executed_layer_without_changing_old_versions() {
+        let mut plan: LayeredPlan = serde_json::from_value(serde_json::json!({
+            "schema_version": 7, "title": "work", "objective": "finish",
+            "nodes": [], "layers": [
+                {"layer_id":"a","title":"A","objective":"A","success_criteria":"done"},
+                {"layer_id":"b","title":"B","objective":"B","success_criteria":"done"},
+                {"layer_id":"c","title":"C","objective":"C","success_criteria":"done"}
+            ]
+        }))
+        .unwrap();
+        let generated = plan.clone().with_rollback_paths();
+        let paths = generated
+            .transitions
+            .iter()
+            .map(|edge| (edge.from.as_str(), edge.to.as_str()))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            paths,
+            [
+                ("a", "b"),
+                ("a", "a"),
+                ("b", "c"),
+                ("b", "a"),
+                ("b", "b"),
+                ("c", "a"),
+                ("c", "b"),
+                ("c", "c"),
+            ]
+        );
+        assert_eq!(generated.clone().with_rollback_paths(), generated);
+        plan.transitions.push(LayeredTransition {
+            from: "a".into(),
+            to: "b".into(),
+            condition: "historical rule".into(),
+        });
+        assert_eq!(plan.clone().with_rollback_paths(), plan);
     }
 }
 

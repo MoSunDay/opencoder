@@ -68,6 +68,15 @@ beforeEach(() => {
 });
 
 describe('DefsTab', () => {
+  it('includes editable TODO context in the native DAG dispatch', async () => {
+    render(<DefsTab onNotice={vi.fn()} onDispatched={vi.fn()} initialPrompt="原任务" />);
+    fireEvent.click((await screen.findAllByText('派发'))[0]);
+    fireEvent.change(screen.getByLabelText('DAG 任务要求'), { target: { value: '修改后的任务' } });
+    fireEvent.click(await screen.findByText('确认派发'));
+    await waitFor(() => expect(apiPostMock).toHaveBeenCalledWith('/api/dag/defs/dag-etl/dispatch', {
+      id: expect.stringMatching(/^dag-/), input: { prompt: '修改后的任务' },
+    }));
+  });
   it('renders the defs table and dispatches to any node by default', async () => {
     const onDispatched = vi.fn();
     const onNotice = vi.fn();

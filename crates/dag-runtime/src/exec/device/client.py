@@ -15,6 +15,8 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 def reserve(transport):
     identity, inputs = transport['identity'], transport['input']
     body = {'dag_id': identity['dag_id'], 'target_step': 'execute', 'count': inputs['device_count']}
+    if 'eligible_machines' in inputs:
+        body['eligible_machines'] = inputs['eligible_machines']
     ui = transport.get('work_type') == 'ui'
     if ui:
         body.update(work_type='ui', case_ids=[case['case_id'] for case in inputs['cases']],

@@ -443,6 +443,10 @@ pub fn build_app(state: Arc<AppState>, token: Option<String>, web: bool) -> axum
             get(api_project_todos::list_todos).post(api_project_todos::create_todo),
         )
         .route(
+            "/api/project/todos/order",
+            axum::routing::put(api_project_todos::reorder_todos),
+        )
+        .route(
             "/api/project/todos/:id",
             patch(api_project_todos::patch_todo).delete(api_project_todos::delete_todo),
         )

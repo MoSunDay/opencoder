@@ -6,7 +6,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { harness, until, pause } = require('./harness');
-const { openBrowser, createHierarchy, projectPage, verifyWorkbench, verifyNativeAgentLaunch } = require('./browser');
+const { openBrowser, createHierarchy, projectPage, verifyWorkbench, verifyNativeAgentLaunch, verifyNativeOperatorLaunch } = require('./browser');
 const { audit } = require('./audit');
 let h, browser;
 const errors = [];
@@ -22,6 +22,31 @@ async function main() {
   assert.equal(initiative.goal_id, goal.id); assert.equal(standaloneInitiative.goal_id, null);
   assert.equal(initiativeTodo.milestone_id, initiative.id); assert.equal(standaloneTodo.milestone_id, standaloneInitiative.id);
   assert.equal(todo.milestone_id, milestone.id); assert.equal(backlog.milestone_id, null);
+  if (process.argv.includes('--workbench-only')) {
+    const files = [{ path: 'soul.md', content_b64: Buffer.from('Acceptance Agent').toString('base64') }];
+    await api('POST', '/api/agents/resources/prompts', { name: 'acceptance-pack', files });
+    await api('POST', '/api/agents', { name: 'acceptance-agent', current: { prompt: 'acceptance-pack' } });
+    const linkedId = `agent-${crypto.randomUUID()}`;
+    await api('POST', '/api/executions', { id: linkedId, kind: 'agent', node_id: node.id, input: { prompt: 'Linked project acceptance' } });
+    await until(async () => (await api('GET', `/api/executions/${linkedId}/index`).catch(() => null))?.id === linkedId, 'linked execution index', 30000);
+    await api('POST', `/api/project/todos/${todo.id}/executions`, { execution_id: linkedId });
+    await browserPage.goto(h.base, { waitUntil: 'networkidle' });
+    await projectPage(browserPage);
+    await verifyWorkbench(browserPage, h.root, linkedId);
+    const launchedId = await verifyNativeAgentLaunch(browserPage, initiativeTodo.title);
+    const operatorId = await verifyNativeOperatorLaunch(browserPage, backlog.title);
+    await until(async () => (await api('GET', `/api/project/todos/${initiativeTodo.id}/executions`)).assignments.some((record) => record.execution_id === launchedId && record.result_md === 'fixture completed' && record.sync_state === 'complete'), 'native Agent conclusion', 60000);
+    await until(async () => (await api('GET', `/api/project/todos/${backlog.id}/executions`)).assignments.some((record) => record.execution_id === operatorId && record.result_md === 'fixture completed' && record.sync_state === 'complete'), 'native Operator conclusion', 60000);
+    const board = await api('GET', '/api/project/overview');
+    const card = board.goals.flatMap((goal) => goal.initiatives).flatMap((item) => item.todos).find((item) => item.id === initiativeTodo.id);
+    assert.equal(card.latest_assignment.execution_id, launchedId);
+    assert.equal(card.latest_assignment.has_result, true);
+    assert.deepEqual(errors, []);
+    const report = { acceptance: 'project workbench', linked_execution_id: linkedId, launched_execution_id: launchedId, operator_execution_id: operatorId, browser_errors: errors };
+    fs.writeFileSync(path.join(h.root, 'report.json'), JSON.stringify(report, null, 2));
+    console.log(JSON.stringify({ stage: 'complete', ...report }));
+    return;
+  }
   const root = `project-${todo.id}`;
   const runs = [];
   async function run(action, target = todo.id) {
@@ -131,7 +156,7 @@ async function main() {
   await projectPage(browserPage);
   await verifyWorkbench(browserPage, h.root, linkedId);
   const launchedId = await verifyNativeAgentLaunch(browserPage, initiativeTodo.title);
-  assert.equal((await api('GET', `/api/project/todos/${initiativeTodo.id}/executions`)).execution_ids.includes(launchedId), true);
+  assert.equal((await api('GET', `/api/project/todos/${initiativeTodo.id}/executions`)).assignments.some((record) => record.execution_id === launchedId), true);
   const started = Date.now();
   const indexes = (await api('GET', '/api/executions?kind=project')).executions;
   assert.equal(new Set(indexes.map((index) => index.id)).size, indexes.length);

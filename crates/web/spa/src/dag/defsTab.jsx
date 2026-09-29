@@ -18,7 +18,7 @@ import { dispatchInput, inputNodes } from './dynamic/model.js';
 
 const { Text } = Typography;
 
-export function DefsTab({ onNotice, onDispatched }) {
+export function DefsTab({ onNotice, onDispatched, initialPrompt = '' }) {
   const msg = useMessage();
   const { nodes } = useStore();
   const [rows, setRows] = useState([]);
@@ -31,6 +31,7 @@ export function DefsTab({ onNotice, onDispatched }) {
   const [dispatching, setDispatching] = useState(false);
   const [search, setSearch] = useState('');
   const [batches, setBatches] = useState({});
+  const [prompt, setPrompt] = useState(initialPrompt);
   const alive = useRef(true);
   const attempt = useRef(null);
 
@@ -96,14 +97,20 @@ export function DefsTab({ onNotice, onDispatched }) {
       return;
     }
     let input;
-    try { input = dispatchInput(def.spec, batches); } catch (e) { msg.error(e.message); return; }
+    try {
+      input = dispatchInput(def.spec, batches);
+      if (prompt.trim()) {
+        if (Array.isArray(input)) throw new Error('该 DAG 使用根数组输入，不能同时带入任务说明');
+        input.prompt = prompt.trim();
+      }
+    } catch (e) { msg.error(e.message); return; }
     const key = JSON.stringify([def.id, dispatchNode, input]);
     if (attempt.current?.key !== key) attempt.current = { key, id: newId('dag') };
     setDispatching(true);
     try {
       const j = await apiPost(
         '/api/dag/defs/' + encodeURIComponent(def.id) + '/dispatch',
-        { id: attempt.current.id, ...(inputNodes(def.spec).length ? { input } : {}), ...(dispatchNode ? { node_id: dispatchNode } : {}) },
+        { id: attempt.current.id, ...(inputNodes(def.spec).length || prompt.trim() ? { input } : {}), ...(dispatchNode ? { node_id: dispatchNode } : {}) },
       );
       const runId = j && j.run_id ? j.run_id : '';
       if (onNotice) {
@@ -252,6 +259,7 @@ export function DefsTab({ onNotice, onDispatched }) {
             notFoundContent="暂无可用 DAG 节点"
           />
           <DynamicBatches spec={dispatchFor?.spec} batches={batches} onChange={setBatches} />
+          {initialPrompt && <Input.TextArea aria-label="DAG 任务要求" rows={5} value={prompt} onChange={(event) => setPrompt(event.target.value)} />}
         </Space>
       </Drawer>
     </Space>

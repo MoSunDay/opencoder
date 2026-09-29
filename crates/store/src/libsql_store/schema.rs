@@ -13,7 +13,7 @@ use migrations::migrate;
 
 // v3 scheduler tables are additive and bootstrap unconditionally; keep the
 // existing schema watermark so v2 database migration remains read-compatible.
-pub(crate) const SCHEMA_VERSION: i64 = 30;
+pub(crate) const SCHEMA_VERSION: i64 = 31;
 
 // Order invariant: busy_timeout must precede any locking statement, and
 // synchronous=NORMAL must be applied BEFORE journal_mode=WAL. Switching a
@@ -190,6 +190,10 @@ CREATE TABLE IF NOT EXISTS project_todo_executions (
   todo_id TEXT NOT NULL,
   execution_id TEXT NOT NULL,
   created_at INTEGER NOT NULL,
+  kind TEXT NOT NULL DEFAULT '',
+  name TEXT NOT NULL DEFAULT '',
+  result_md TEXT,
+  sync_state TEXT NOT NULL DEFAULT 'pending',
   PRIMARY KEY (todo_id, execution_id)
 )";
 const CREATE_INDEX_PROJECT_MILESTONES_GOAL: &str =

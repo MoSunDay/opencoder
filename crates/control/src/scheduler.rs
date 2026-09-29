@@ -30,6 +30,9 @@ use opencoder_store::{
 use serde_json::Value;
 use std::{sync::Arc, time::Duration};
 
+mod project_assignments;
+pub mod telemetry;
+
 /// How far back a tick can be and still fire: server downtime up to a day
 /// still catches up on the last cron tick; anything older is `missed`.
 const CATCHUP_WINDOW_MS: i64 = 24 * 60 * 60 * 1000;
@@ -50,6 +53,36 @@ pub fn start(state: &Arc<AppState>) {
     {
         return;
     }
+    let assignment_state = Arc::downgrade(state);
+    tokio::spawn(async move {
+        let mut after = String::new();
+        loop {
+            let Some(state) = assignment_state.upgrade() else {
+                return;
+            };
+            if state
+                .lifecycle
+                .retiring
+                .load(std::sync::atomic::Ordering::SeqCst)
+            {
+                return;
+            }
+            match tokio::time::timeout(
+                Duration::from_secs(70),
+                project_assignments::scan(&state, &after),
+            )
+            .await
+            {
+                Ok(Ok(next)) => after = next,
+                Ok(Err(error)) => tracing::error!(%error, "project assignment sync failed"),
+                Err(_) => tracing::warn!("project assignment sync timed out"),
+            }
+            tokio::select! {
+                _ = tokio::time::sleep(Duration::from_secs(DEFAULT_SCAN_SECS)) => {}
+                _ = state.lifecycle.retired() => return,
+            }
+        }
+    });
     let weak = Arc::downgrade(state);
     tokio::spawn(async move {
         let mut interval = DEFAULT_SCAN_SECS;
@@ -64,9 +97,12 @@ pub fn start(state: &Arc<AppState>) {
             {
                 return;
             }
+            state.lifecycle.scheduler.scan_started(now_ms());
             if let Err(error) = scan(&state).await {
+                state.lifecycle.scheduler.scan_error();
                 tracing::error!(%error, "schedule scan failed");
             }
+            state.lifecycle.scheduler.scan_completed(now_ms());
             tokio::select! {
                 _ = tokio::time::sleep(Duration::from_secs(interval)) => {}
                 _ = state.lifecycle.retired() => return,
@@ -88,6 +124,7 @@ async fn scan(state: &Arc<AppState>) -> Result<(), anyhow::Error> {
     let defs = match state.store.list_schedules().await {
         Ok(defs) => defs,
         Err(error) => {
+            state.lifecycle.scheduler.scan_error();
             tracing::error!(%error, "schedule scan read failed");
             return Ok(());
         }
@@ -97,10 +134,12 @@ async fn scan(state: &Arc<AppState>) -> Result<(), anyhow::Error> {
         // Fail-soft: a structurally invalid job (bad cron / params / target
         // contract) is skipped with a warning; it must not starve the rest.
         if let Err(error) = job.validate() {
+            state.lifecycle.scheduler.scan_error();
             tracing::warn!(schedule = %job.id, %error, "invalid schedule skipped");
             continue;
         }
         if let Err(error) = fire_due(state, job).await {
+            state.lifecycle.scheduler.scan_error();
             tracing::warn!(schedule = %job.id, %error, "schedule fire failed");
         }
     }
@@ -176,6 +215,7 @@ async fn fire_tick(
     for_ms: i64,
     now: i64,
 ) -> anyhow::Result<String> {
+    state.lifecycle.scheduler.fire_attempt();
     let execution_id = format!("{}-{}-{}", job.kind.as_str(), job.id, for_ms);
     let (status, failure) = match dispatch(state, job, &execution_id, for_ms).await {
         Ok(()) => (SCHEDULE_RUN_FIRED.to_string(), None),
@@ -196,7 +236,10 @@ async fn fire_tick(
         tracing::error!(schedule = %job.id, for_ms, %error, "record schedule run failed");
     }
     match failure {
-        Some(error) => Err(anyhow::anyhow!(error)),
+        Some(error) => {
+            state.lifecycle.scheduler.fire_error();
+            Err(anyhow::anyhow!(error))
+        }
         None => Ok(execution_id),
     }
 }
@@ -212,6 +255,7 @@ pub(crate) async fn fire_now(state: &Arc<AppState>, job: &ScheduleJob) -> anyhow
 
 /// Record an older, skipped tick (`missed` rows carry no execution).
 async fn record_missed(state: &Arc<AppState>, job: &ScheduleJob, for_ms: i64, now: i64) {
+    state.lifecycle.scheduler.missed_tick();
     let rec = ScheduleRunRecord {
         schedule_id: job.id.clone(),
         kind: job.kind.as_str().to_string(),

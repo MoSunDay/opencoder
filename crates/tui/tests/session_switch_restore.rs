@@ -47,7 +47,7 @@ const SESSION_B: &str = "switch-restore-b";
 
 /// Env mutation is process-global; serialize HOME-manipulating tests (same
 /// pattern as `crates/core/tests/skill_contract.rs`).
-static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+static ENV_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 /// Point HOME at a fresh tempdir; returns `(home, previous HOME)` for the
 /// caller to hand to [`restore_home`] when done (`None` => remove_var).
@@ -223,7 +223,7 @@ async fn switched_model_used_by_next_turn() {
     // maintenance child after the mock turn — a second LLM call this test's
     // `call_count == 1` assertion must not see. HOME points at a fresh
     // tempdir for the whole body (including awaits) to keep that out.
-    let _env = ENV_LOCK.lock().unwrap();
+    let _env = ENV_LOCK.lock().await;
     let (home, prev_home) = isolated_home();
     let dir = tempfile::tempdir().unwrap();
     let store = mem_store().await;

@@ -19,12 +19,13 @@ const { Text } = Typography;
 export { EXAMPLE_SPEC } from './todo/directory/model.js';
 
 /// 展开行：某模板的版本列表（env 绑定来自 GET /api/todo/templates/:name）。
-function VersionsBlock({ template, onNotice, onEdit, onChanged }) {
+function VersionsBlock({ template, onNotice, onEdit, onChanged, initialPrompt = '' }) {
   const [detail, setDetail] = useState(null);
   const name = template.name;
   const attempts = useRef(new Map());
   const [fileProblems,setFileProblems]=useState([]);
   const [problemVersion,setProblemVersion]=useState(template.current);
+  const [prompt,setPrompt]=useState(initialPrompt);
 
   useEffect(() => {
     let alive = true;
@@ -85,12 +86,13 @@ function VersionsBlock({ template, onNotice, onEdit, onChanged }) {
 
   const run = async (v) => {
     setProblemVersion(v);
-    if (!attempts.current.has(v)) attempts.current.set(v, newId('todos'));
+    const key = JSON.stringify([v, prompt.trim()]);
+    if (attempts.current.get(v)?.key !== key) attempts.current.set(v, { key, id: newId('todos') });
     try {
       const bundle=await apiGet(`/api/todo/templates/${encodeURIComponent(name)}/${encodeURIComponent(v)}/files`);
       if(bundle.diagnostics?.length){setFileProblems(bundle.diagnostics);return;}
       await apiPost('/api/todo/validate-files',{files:bundle.files});
-      const j = await apiPost(`/api/todo/templates/${encodeURIComponent(name)}/${encodeURIComponent(v)}/run`, { id: attempts.current.get(v) });
+      const j = await apiPost(`/api/todo/templates/${encodeURIComponent(name)}/${encodeURIComponent(v)}/run`, { id: attempts.current.get(v).id, ...(prompt.trim() ? { input: { prompt: prompt.trim() } } : {}) });
       attempts.current.delete(v);
       onNotice(info(`已启动工作流: ${(j && j.workflow_id) || ''}`));
       onChanged((j && j.workflow_id) || '');
@@ -102,6 +104,7 @@ function VersionsBlock({ template, onNotice, onEdit, onChanged }) {
 
   return (
     <div style={{ padding: '4px 0' }}>
+      {initialPrompt && <Input.TextArea aria-label="工作流任务要求" rows={4} value={prompt} onChange={(event) => setPrompt(event.target.value)} />}
       <Text type="secondary">仅保留最近 10 个版本，超出的旧版本自动清理</Text>
       {(versions || []).length === 0 ? <Text type="secondary">暂无版本</Text> : versions.map((v) => (
         <div key={v.version} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 0' }}>
@@ -125,7 +128,7 @@ function VersionsBlock({ template, onNotice, onEdit, onChanged }) {
   );
 }
 
-function TemplatesTab({ onNotice, onRan }) {
+function TemplatesTab({ onNotice, onRan, initialPrompt = '' }) {
   const [rows, setRows] = useState([]);
   const [listProblems,setListProblems]=useState([]);
   const [loading, setLoading] = useState(false);
@@ -221,6 +224,7 @@ function TemplatesTab({ onNotice, onRan }) {
           expandedRowRender: (r) => (
             <VersionsBlock
               template={r}
+              initialPrompt={initialPrompt}
               onNotice={onNotice}
               onEdit={(name, version) => setEditing({ name, version })}
               onChanged={(workflowId) => {
@@ -277,7 +281,7 @@ function TemplatesTab({ onNotice, onRan }) {
   );
 }
 
-export function TodoPanel({ onNotice, onCreated }) {
+export function TodoPanel({ onNotice, onCreated, initialPrompt = '' }) {
   const [tab, setTab] = useState('templates');
   const [focusWorkflowId, setFocusWorkflowId] = useState('');
 
@@ -293,7 +297,7 @@ export function TodoPanel({ onNotice, onCreated }) {
       onChange={setTab}
       items={[
         { key: 'envs', label: '模板环境与工具', children: <TodoEnvsPanel onNotice={onNotice} /> },
-        { key: 'templates', label: '模板', children: <TemplatesTab onNotice={onNotice} onRan={onRan} /> },
+        { key: 'templates', label: '模板', children: <TemplatesTab onNotice={onNotice} onRan={onRan} initialPrompt={initialPrompt} /> },
         {
           key: 'runs',
           label: '运行',

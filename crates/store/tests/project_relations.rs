@@ -1,8 +1,21 @@
 //! All mutations in this suite target freshly-created temporary databases.
+use opencoder_store::project::ProjectAssignment;
 use opencoder_store::{
     LibsqlStore, ProjectMilestonePatch, ProjectMilestoneRecord, ProjectMilestoneStatus,
     ProjectStore, ProjectTodoPatch, ProjectTodoRecord,
 };
+
+fn assignment(todo_id: &str, execution_id: &str, kind: &str) -> ProjectAssignment {
+    ProjectAssignment {
+        todo_id: todo_id.into(),
+        execution_id: execution_id.into(),
+        kind: kind.into(),
+        name: execution_id.into(),
+        created_at: 10,
+        result_md: None,
+        sync_state: "pending".into(),
+    }
+}
 
 fn todo(id: &str) -> ProjectTodoRecord {
     serde_json::from_value(serde_json::json!({
@@ -71,7 +84,7 @@ async fn milestones_and_initiatives_remain_distinct_and_both_hold_todos() {
         })
         .await
         .unwrap();
-    assert!(store.delete_milestone("i1").await.unwrap() == false);
+    assert!(!store.delete_milestone("i1").await.unwrap());
     assert!(store.delete_initiative("i1").await.is_err());
     let todos = store
         .list_todos(None)
@@ -161,25 +174,52 @@ async fn standalone_milestone_and_optional_todo_association_roundtrip() {
 }
 
 #[tokio::test]
-async fn todo_execution_links_store_only_ids_and_cascade_on_delete() {
+async fn todo_assignments_record_result_and_cascade_on_delete() {
     let store = LibsqlStore::open_memory().await.unwrap();
     store.create_todo(&todo("linked")).await.unwrap();
     store
-        .link_todo_execution("linked", "agent-a")
+        .link_todo_execution(&assignment("linked", "agent-a", "agent"))
         .await
         .unwrap();
     store
-        .link_todo_execution("linked", "agent-a")
+        .link_todo_execution(&assignment("linked", "agent-a", "agent"))
         .await
         .unwrap();
     store
-        .link_todo_execution("linked", "brain-b")
+        .link_todo_execution(&assignment("linked", "brain-b", "brain"))
         .await
         .unwrap();
-    let ids = store.list_todo_execution_ids("linked").await.unwrap();
-    assert_eq!(ids.len(), 2);
-    assert!(ids.contains(&"agent-a".to_string()));
-    assert!(ids.contains(&"brain-b".to_string()));
+    let rows = store.list_todo_assignments("linked").await.unwrap();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].kind, "brain");
+    store
+        .finish_todo_assignment("linked", "brain-b", "complete", Some("完成"))
+        .await
+        .unwrap();
+    assert_eq!(
+        store.list_todo_assignments("linked").await.unwrap()[0]
+            .result_md
+            .as_deref(),
+        Some("完成")
+    );
+    let latest = store.latest_todo_assignment_states().await.unwrap();
+    assert_eq!(latest.len(), 1);
+    assert!(latest[0].has_result);
+    assert_eq!(latest[0].execution_id, "brain-b");
+    assert_eq!(
+        store.pending_todo_assignments("", 10).await.unwrap().len(),
+        1
+    );
+    let mut retry = assignment("linked", "agent-new", "agent");
+    retry.created_at = 11;
+    store.link_todo_execution(&retry).await.unwrap();
+    store
+        .finish_todo_assignment("linked", "agent-new", "error", None)
+        .await
+        .unwrap();
+    let latest = store.latest_todo_assignment_states().await.unwrap();
+    assert_eq!(latest[0].execution_id, "agent-new");
+    assert!(!latest[0].has_result);
     assert!(store
         .unlink_todo_execution("linked", "agent-a")
         .await
@@ -190,10 +230,81 @@ async fn todo_execution_links_store_only_ids_and_cascade_on_delete() {
         .unwrap());
     store.delete_todo("linked").await.unwrap();
     assert!(store
-        .list_todo_execution_ids("linked")
+        .list_todo_assignments("linked")
         .await
         .unwrap()
         .is_empty());
+}
+
+#[tokio::test]
+async fn pending_assignments_continue_after_a_full_batch() {
+    let store = LibsqlStore::open_memory().await.unwrap();
+    store.create_todo(&todo("linked")).await.unwrap();
+    for index in 0..30 {
+        let execution_id = format!("agent-{index:02}");
+        store
+            .link_todo_execution(&assignment("linked", &execution_id, "agent"))
+            .await
+            .unwrap();
+    }
+    let first = store.pending_todo_assignments("", 25).await.unwrap();
+    assert_eq!(first.len(), 25);
+    let cursor = format!("{}:{}", first[24].todo_id, first[24].execution_id);
+    let second = store.pending_todo_assignments(&cursor, 25).await.unwrap();
+    assert_eq!(second.len(), 5);
+    assert_eq!(second[0].execution_id, "agent-25");
+    assert_eq!(second[4].execution_id, "agent-29");
+}
+
+#[tokio::test]
+async fn pending_assignment_cursor_respects_todo_id_order() {
+    let store = LibsqlStore::open_memory().await.unwrap();
+    for todo_id in ["a", "a-older"] {
+        store.create_todo(&todo(todo_id)).await.unwrap();
+        store
+            .link_todo_execution(&assignment(todo_id, "agent-1", "agent"))
+            .await
+            .unwrap();
+    }
+    let first = store.pending_todo_assignments("", 1).await.unwrap();
+    assert_eq!(first[0].todo_id, "a");
+    let second = store
+        .pending_todo_assignments("a:agent-1", 1)
+        .await
+        .unwrap();
+    assert_eq!(second[0].todo_id, "a-older");
+}
+
+#[tokio::test]
+async fn v30_execution_links_upgrade_without_losing_ids() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("links.db");
+    {
+        let store = LibsqlStore::open(&path).await.unwrap();
+        store.create_todo(&todo("old-link")).await.unwrap();
+        let conn = store.conn().await.unwrap();
+        conn.execute_batch("DROP TABLE project_todo_executions;
+            CREATE TABLE project_todo_executions (todo_id TEXT NOT NULL, execution_id TEXT NOT NULL, created_at INTEGER NOT NULL, PRIMARY KEY (todo_id, execution_id));
+            INSERT INTO project_todo_executions VALUES ('old-link','agent-old',1);
+            UPDATE schema_version SET version=30;").await.unwrap();
+    }
+    let store = LibsqlStore::open(&path).await.unwrap();
+    let rows = store.list_todo_assignments("old-link").await.unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].execution_id, "agent-old");
+    assert_eq!(rows[0].sync_state, "pending");
+    store
+        .finish_todo_assignment("old-link", "agent-old", "complete", Some("legacy answer"))
+        .await
+        .unwrap();
+    drop(store);
+    let reopened = LibsqlStore::open(&path).await.unwrap();
+    assert_eq!(
+        reopened.list_todo_assignments("old-link").await.unwrap()[0]
+            .result_md
+            .as_deref(),
+        Some("legacy answer")
+    );
 }
 
 #[tokio::test]

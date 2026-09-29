@@ -2,11 +2,55 @@
 use super::*;
 
 pub(super) async fn migrate(conn: &Connection, from: i64) -> Result<()> {
+    if from < 31 {
+        add_column_if_absent(
+            conn,
+            "project_todo_executions",
+            "kind",
+            "TEXT NOT NULL DEFAULT ''",
+        )
+        .await?;
+        add_column_if_absent(
+            conn,
+            "project_todo_executions",
+            "name",
+            "TEXT NOT NULL DEFAULT ''",
+        )
+        .await?;
+        add_column_if_absent(conn, "project_todo_executions", "result_md", "TEXT").await?;
+        add_column_if_absent(
+            conn,
+            "project_todo_executions",
+            "sync_state",
+            "TEXT NOT NULL DEFAULT 'pending'",
+        )
+        .await?;
+    }
     if from < 30 {
-        add_column_if_absent(conn, "project_todos", "board_status", "TEXT NOT NULL DEFAULT 'backlog'").await?;
-        add_column_if_absent(conn, "project_todos", "position", "INTEGER NOT NULL DEFAULT 0").await?;
+        let add_board_status = !column_exists(conn, "project_todos", "board_status").await?;
+        let add_position = !column_exists(conn, "project_todos", "position").await?;
+        add_column_if_absent(
+            conn,
+            "project_todos",
+            "board_status",
+            "TEXT NOT NULL DEFAULT 'backlog'",
+        )
+        .await?;
+        add_column_if_absent(
+            conn,
+            "project_todos",
+            "position",
+            "INTEGER NOT NULL DEFAULT 0",
+        )
+        .await?;
         add_column_if_absent(conn, "project_todos", "capability_id", "TEXT").await?;
-        conn.execute("UPDATE project_todos SET board_status = CASE status WHEN 'draft' THEN 'backlog' WHEN 'running' THEN 'in_progress' WHEN 'done' THEN 'done' ELSE 'todo' END, position = created_at WHERE position = 0", ()).await?;
+        if add_board_status {
+            conn.execute("UPDATE project_todos SET board_status = CASE status WHEN 'draft' THEN 'backlog' WHEN 'running' THEN 'in_progress' WHEN 'done' THEN 'done' ELSE 'todo' END", ()).await?;
+        }
+        if add_position {
+            conn.execute("UPDATE project_todos SET position = created_at", ())
+                .await?;
+        }
     }
     if from < 29 {
         add_column_if_absent(

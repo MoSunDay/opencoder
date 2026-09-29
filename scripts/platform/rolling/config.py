@@ -13,6 +13,7 @@ class Settings:
     server_data: Path
     agent_workdir: Path
     token_file: Path
+    metrics_token_file: Path | None = None
     bin_dir: Path = Path("/usr/local/bin")
     node_name: str = "local"
     server_user: str = "opencoder-server"
@@ -44,12 +45,22 @@ def load(path):
     if unknown:
         raise ValueError(f"unknown deployment settings: {sorted(unknown)}")
     for key in ("state_dir", "server_workdir", "server_data", "agent_workdir",
-                "token_file", "bin_dir", "nginx_include", "systemd_dir", "legacy_agent_data"):
+                "token_file", "metrics_token_file", "bin_dir", "nginx_include", "systemd_dir", "legacy_agent_data"):
         if raw.get(key) is not None:
             raw[key] = Path(raw[key])
             if not raw[key].is_absolute() or any(c in str(raw[key]) for c in "\n\r%"):
                 raise ValueError(f"{key} must be an absolute path without control characters or %")
     settings = Settings(**raw)
+    if settings.metrics_token_file is not None:
+        if settings.metrics_token_file == settings.token_file:
+            raise ValueError("metrics token file must differ from server token file")
+        try:
+            metrics = settings.metrics_token_file.read_bytes().strip()
+            server = settings.token_file.read_bytes().strip()
+        except OSError as error:
+            raise ValueError("configured metrics and server token files must be readable") from error
+        if not metrics or metrics == server:
+            raise ValueError("metrics token must be nonempty and distinct from server token")
     if not re.fullmatch(r"[a-z_][a-z0-9_-]*", settings.server_user):
         raise ValueError("invalid server service account")
     if settings.max_runs < 1 or settings.min_memory_mb < 1:

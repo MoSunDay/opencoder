@@ -1,4 +1,4 @@
-Commit: 2aa44247d199d782881b9ee64921c4c6de2e6199
+Commit: 51cb1e361e0774effa9f4eb38e93cc75e432b068
 
 # Agent 调度平台
 
@@ -10,6 +10,11 @@ Server/Node 调度、DAG 定义管理、执行查看与平滑发布；细节以�
 - DAG 定义的 `max_concurrency` 可配置为 1–30，缺省 4；画布和 JSON 编辑保存同一字段。每次运行冻结定义，修改定义不会改变在跑任务的上限。
 - 兼容发布由当前 Server 信号触发独立作业；新任务转入新版本，既有任务保留所属 runtime。
 - Host 的新任务就绪状态由活动 Runtime 决定；已退休 Runtime 的休眠库存仍用于历史执行索引，但其中的旧资源错误不阻断新任务。候选 Host 在切换前以自身与 Runtime 状态验证，切换后再由公共入口验证。
+
+## 调度监控
+
+- 管理员可通过 `GET /api/metrics/scheduler` 读取调度总览，Prometheus 使用独立 Bearer 凭据抓取 `GET /metrics`；该凭据不能访问其他接口，且不能与管理员凭据相同。Grafana“OpenCoder 调度总览”区分派发失败与执行失败，展示节点容量、运行数及下一次触发时间；指标不带任务 ID 标签。
+- 扫描与派发计数随 Server 进程重启归零；日程最近状态来自持久化记录。`active_executions` 包含未终态执行索引，可能有历史遗留；实际设备运行数以 `node_active_runs` 为准。
 
 ## Operator 执行隔离
 

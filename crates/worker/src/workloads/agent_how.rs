@@ -67,7 +67,7 @@ pub(crate) fn transcript_tail(text: &str, max: usize) -> String {
     text[cut..].to_string()
 }
 
-/// Terminal result for agent-kind sessions: the session pointer plus the
+/// Terminal result for Agent and Operator sessions: the session pointer plus the
 /// DAG StepResult-shaped output contract. An empty transcript yields an
 /// empty `output_text` and a JSON `null` (the DAG step's empty-transcript
 /// semantics), never a missing key.

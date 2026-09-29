@@ -158,7 +158,7 @@ async fn run_one_task() -> (Server, String, String, Runner, Dirs) {
                         | opencoder_store::NodeTaskStatus::Cancelled
                 ) =>
             {
-                panic!("task ended {:#?}", r.status)
+                panic!("task ended {:?}: {:?}", r.status, r.error)
             }
             _ => None,
         }

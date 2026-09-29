@@ -227,7 +227,7 @@ describe('fleet execution boundaries', () => {
     fireEvent.click(await screen.findByText('启动 Team'));
     expect(await screen.findByText(/整个 Team 会在同一个执行节点/)).toBeTruthy();
     fireEvent.change(screen.getByLabelText('任务要求'), { target: { value: '准备发布' } });
-    const submit = [...document.querySelectorAll('.ant-modal button')].find((button) => button.textContent.replace(/\s+/g, '') === '启动');
+    const submit = within(document.querySelector('.ant-drawer')).getByRole('button', { name: /启\s*动/ });
     expect(submit).toBeTruthy(); fireEvent.click(submit);
     await waitFor(() => expect(apiPost).toHaveBeenCalledTimes(1));
     expect(onNotice).toHaveBeenLastCalledWith(err(expect.stringContaining('connection lost')));

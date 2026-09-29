@@ -24,7 +24,7 @@ it('人工输入从运行页送入大脑事件', async () => {
   const refresh = vi.fn(); apiPost.mockResolvedValue({});
   render(<MilestoneRunBody view={view('agent')} id="brain-run" refresh={refresh} />);
   expect(screen.queryByLabelText('大脑人工输入')).toBeNull();
-  fireEvent.click(screen.getByLabelText('打开大脑对话'));
+  fireEvent.click(screen.getByText('查看详情'));
   fireEvent.change(screen.getByLabelText('大脑人工输入'), { target: { value: '优先核对验证结果' } });
   fireEvent.click(screen.getByRole('button', { name: '发送大脑输入' }));
   await waitFor(() => expect(apiPost).toHaveBeenCalledWith('/api/brain/runs/brain-run/inputs',
@@ -33,7 +33,7 @@ it('人工输入从运行页送入大脑事件', async () => {
 });
 it('大脑对话按 UTF-8 字节限制输入并保留超限草稿', async () => {
   render(<MilestoneRunBody view={view('agent')} id="brain-run" refresh={vi.fn()} />);
-  fireEvent.click(screen.getByLabelText('打开大脑对话'));
+  fireEvent.click(screen.getByText('查看详情'));
   const input = screen.getByLabelText('大脑人工输入');
   fireEvent.change(input, { target: { value: '中'.repeat(1366) } });
   expect(screen.getByText('4098 / 4096 字节')).toBeTruthy();
@@ -93,6 +93,21 @@ it('同一轮的多层执行在同一张表中展示', async () => {
   expect(screen.getByText('agent-visit-2')).toBeTruthy();
   expect(screen.getByText('agent-visit-3')).toBeTruthy();
   expect(screen.getByText('第 2 层 · Verify')).toBeTruthy();
+});
+it('层级与执行节点同名时画布仍展示两层全部执行状态', () => {
+  const data = view('agent');
+  data.plan.layers.push({ layer_id: 'verify', title: 'Verify', task: '验证', objective: '验证', success_criteria: '通过' });
+  data.plan.nodes.push({ node_id: 'verify', layer_id: 'verify', title: '核验任务', objective: '验证', capability_id: 'cap' });
+  data.plan.transitions = [{ from: 'coding', to: 'verify', condition: '编码完成' }];
+  data.operations.push({ ...data.operations[1], activation: 3, round: 2, layer: 2, operation_id: 'operation-3', node_id: 'verify', execution_id: 'agent-visit-3', status: 'done' });
+  data.events.push({ activation: 3, round: 2, layer: 2, event_type: 'layer_started', evidence_execution_ids: [] });
+  data.run = { ...data.run, activation: 3, layer: 2, phase: 'completed' };
+  const { container } = render(<MilestoneRunBody view={data} id="brain-run" refresh={vi.fn()} />);
+  expect(container.querySelectorAll('.react-flow__node-layer')).toHaveLength(2);
+  expect(container.querySelectorAll('.react-flow__node-execution')).toHaveLength(2);
+  expect(container.querySelector('[data-id="execution:verify"]')).toBeTruthy();
+  expect(container.querySelector('[data-id="execution:code"]')?.textContent).toContain('执行中');
+  expect(container.querySelector('[data-id="execution:verify"]')?.textContent).toContain('执行结束');
 });
 it('耗尽预算后可以显式增加预算并继续调度', async () => {
   const data = view('agent'); data.run = { ...data.run, round: 5, phase: 'blocked', error: 'round budget exhausted' };

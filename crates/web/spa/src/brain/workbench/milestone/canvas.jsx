@@ -27,6 +27,9 @@ function ExecutionCard({ data, selected }) {
 const nodeTypes = { layer: LayerCard, execution: ExecutionCard };
 const EMPTY = {};
 const EMPTY_CAPABILITIES = [];
+const layerFlowId = (id) => `layer:${id}`;
+const executionFlowId = (id) => `execution:${id}`;
+const originalFlowId = (id) => id.slice(id.indexOf(':') + 1);
 const capabilityLabelFor = (node, capabilities) => {
   const capability = capabilities.find((item) => (item.capability_id || item.id) === node.capability_id);
   return capability ? capabilityLabel(capability) : node.capability_id;
@@ -46,9 +49,9 @@ export function MilestoneCanvas({ plan, capabilities = EMPTY_CAPABILITIES, selec
       const width = Math.max(420, columns * 228 + 48), height = 150 + rows * 140;
       const position = positions[layer.layer_id] || { x: (widest - width) / 2 + 40, y };
       y += height + 120;
-      return [{ id: layer.layer_id, type: 'layer', position, style: { width, height }, selected: selection?.type === 'layer' && selection.id === layer.layer_id,
+      return [{ id: layerFlowId(layer.layer_id), type: 'layer', position, style: { width, height }, selected: selection?.type === 'layer' && selection.id === layer.layer_id,
         data: { layer, index, editable, onAddNode, status: layerStatuses[layer.layer_id] } },
-      ...children.map((node, column) => ({ id: node.node_id, type: 'execution', parentId: layer.layer_id, extent: 'parent',
+      ...children.map((node, column) => ({ id: executionFlowId(node.node_id), type: 'execution', parentId: layerFlowId(layer.layer_id), extent: 'parent',
         position: { x: 24 + (column % columns) * 228, y: 132 + Math.floor(column / columns) * 140 },
         style: { width: 210, height: 120 }, selected: selection?.type === 'node' && selection.id === node.node_id,
         data: { node, capability: capabilities.find((item) => (item.capability_id || item.id) === node.capability_id), capabilityLabel: capabilityLabelFor(node, capabilities), status: statuses[node.node_id] }, draggable: false }))];
@@ -68,7 +71,7 @@ export function MilestoneCanvas({ plan, capabilities = EMPTY_CAPABILITIES, selec
     const forward = plan.layers.findIndex((item) => item.layer_id === edge.to) > plan.layers.findIndex((item) => item.layer_id === edge.from);
     const retry = edge.from === edge.to;
     const labelOffset = retry ? 'translate(20px, -12px)' : 'translate(75px, -12px)';
-    return { id: `transition:${edge.from}:${edge.to}`, source: edge.from, target: edge.to,
+    return { id: `transition:${edge.from}:${edge.to}`, source: layerFlowId(edge.from), target: layerFlowId(edge.to),
       sourceHandle: forward ? 'forward-out' : 'return-out', targetHandle: forward ? 'forward-in' : 'return-in',
       type: 'smoothstep', label: retry ? '重试' : transitionLabel(edge.condition), selectable: true,
       ariaLabel: `${edge.from} → ${edge.to}：${edge.condition || '填写扭转条件'}`,
@@ -82,10 +85,10 @@ export function MilestoneCanvas({ plan, capabilities = EMPTY_CAPABILITIES, selec
     {editable && <div className="brain-milestone-tools"><Button onClick={onAddLayer}>＋ 里程碑</Button><Button onClick={() => onPositions?.({})}>整理布局</Button>{onDeleteConnection && <Button danger onClick={onDeleteConnection}>删除选中连线</Button>}<span>选中里程碑添加前进或回退连线</span></div>}
     <div className="brain-milestone-flow"><ReactFlow onInit={(instance) => { flow.current = instance; }} nodes={nodes} edges={edges} nodeTypes={nodeTypes} nodesDraggable={editable} nodesConnectable={editable} fitView minZoom={0.15} maxZoom={2}
       onNodesChange={(changes) => setNodes((old) => applyNodeChanges(changes, old))}
-      onNodeClick={(_, node) => onSelect?.({ type: node.type === 'layer' ? 'layer' : 'node', id: node.id })}
-      onEdgeClick={(_, edge) => onSelect?.({ type: 'transition', id: `${edge.source}:${edge.target}` })}
-      onConnect={(edge) => onConnect?.(edge.source, edge.target)}
-      onNodeDragStop={(_, node) => { if (node.type === 'layer') onPositions?.({ ...positions, [node.id]: node.position }); }}>
+      onNodeClick={(_, node) => onSelect?.({ type: node.type === 'layer' ? 'layer' : 'node', id: originalFlowId(node.id) })}
+      onEdgeClick={(_, edge) => onSelect?.({ type: 'transition', id: `${originalFlowId(edge.source)}:${originalFlowId(edge.target)}` })}
+      onConnect={(edge) => onConnect?.(originalFlowId(edge.source), originalFlowId(edge.target))}
+      onNodeDragStop={(_, node) => { if (node.type === 'layer') onPositions?.({ ...positions, [originalFlowId(node.id)]: node.position }); }}>
       <Background /><Controls showInteractive={false} /><MiniMap pannable zoomable />
     </ReactFlow></div>
     {!plan.layers.length && <div className="brain-milestone-empty"><h3>从第一个里程碑开始</h3><p>在画布配置里程碑、并行节点和扭转关系</p><Button type="primary" onClick={onAddLayer}>添加第一个里程碑</Button></div>}

@@ -26,11 +26,11 @@ export function MilestoneRunBody({ view, id, refresh, onNotice }) {
     try { await apiPost(`/api/brain/runs/${encodeURIComponent(id)}/commands`, { action, input }); await refresh(); }
     catch (e) { setError(e.message); } finally { setBusy(false); }
   };
-  const assessments = (view.events || []).find((event) => event.activation === visit?.activation && event.event_type === 'milestones_assessed')?.assessments || {};
+  const assessments = (view.events || []).filter((event) => event.event_type === 'milestones_assessed')
+    .reduce((latest, event) => ({ ...latest, ...event.assessments }), {});
   const statuses = Object.fromEntries(plan.nodes.map((node) => {
-    const attempts = operations.filter((op) => op.node_id === node.node_id);
-    const assessment = assessments[node.node_id];
-    const label = assessment ? (assessment.met ? '已达标' : '需整改') : !attempts.length ? '本次未派发' : attempts.some((op) => !['done', 'error', 'cancelled'].includes(op.status)) ? '执行中' : attempts.some((op) => op.status !== 'done') ? '执行有失败，等待判断' : '执行结束';
+    const attempts = (view.operations || []).filter((op) => op.node_id === node.node_id);
+    const label = !attempts.length ? '本次未派发' : attempts.some((op) => !['done', 'error', 'cancelled'].includes(op.status)) ? '执行中' : attempts.some((op) => op.status !== 'done') ? '执行有失败，等待判断' : '执行结束';
     return [node.node_id, label];
   }));
   const layerStatuses = Object.fromEntries(displayPlan.layers.map((layer, index) => [layer.layer_id,
@@ -53,7 +53,6 @@ export function MilestoneRunBody({ view, id, refresh, onNotice }) {
       <Space wrap>
         <Button disabled={busy || terminal} onClick={() => command(['paused', 'blocked'].includes(run.phase) ? 'resume' : 'pause')}>{['paused', 'blocked'].includes(run.phase) ? '继续调度' : '暂停调度'}</Button>
         <Button danger disabled={busy || terminal} onClick={() => command('cancel')}>取消运行</Button>
-        <Button aria-label="打开大脑对话" onClick={() => { setExecutionId(null); setDetailsOpen(true); }}>与大脑对话</Button>
         <Button onClick={() => { setExecutionId(null); setDetailsOpen(true); }}>查看详情</Button>
       </Space>
     </div>

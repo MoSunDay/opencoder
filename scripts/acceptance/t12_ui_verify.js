@@ -87,8 +87,7 @@ function answerFor(raw) {
   const prompt = latestPrompt(raw);
   // 规划器提示是 system 消息（brain-contract），latestPrompt 只取 user，需整个请求体匹配。
   if (raw.includes('You are the Brain planner')) {
-    // 动态运行规划器：完整 OntologyPlan（单 agent 文本步骤 + 交付物，对照
-    // examples/brain/repair-loop.json 的契约）。
+    // 动态运行规划器：内联计划包含单 agent 文本步骤和交付物。
     return JSON.stringify({ schema_version: 1, title: 'verify brain run', objective: 'BRAIN-STABLE', inputs: {},
       steps: [{ id: 'act', label: '执行', purpose: '处理目标', capability_id: null,
         action: { kind: 'agent', target: 'act', prompt: '处理目标并汇报', max_attempts: 1 },

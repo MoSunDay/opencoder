@@ -1,10 +1,10 @@
-Commit: (working-tree, 内网 HTTP 原生可用——纯 JS 签名回退 + 明文警示移除)
+Commit: 7687b5f581254ee6d826d8644789e7d498e761ba
 
 # 内网 HTTP 原生可用：纯 JS 签名回退 + 明文 HTTP 警示移除
 
 ## 背景
 
-LAN 部署验收（`http://192.168.31.159:18733`）暴露两问题：
+非 localhost 的 HTTP 部署验收暴露两问题：
 
 1. **signature mismatch**：非 localhost 的明文 `http://` 源是 insecure context，`crypto.subtle` 为
    undefined（chromium 实证 `isSecureContext:false`），`sign.js` 的 WebCrypto 签名路径必炸——

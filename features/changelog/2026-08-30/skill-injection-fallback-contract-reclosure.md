@@ -4,7 +4,7 @@ Commit: (working-tree, skill 注入 fallback 指针契约测试收口 + 树创�
 
 ## 背景
 
-上一轮（task-plan 去 Any Home + question 门控收敛）评审遗留 blocker：`skill_body_injection::small_skill_body_rides_payload_and_persists` 稳定失败。归属结论成立——被测实现 `skill_context.rs` 的 marker 抑制语义（并发工作流 +59 行）自洽且正确：`ensure_full_body_loaded` 在**每轮 LLM 调用前**注入 `[skill loaded]` marker，因此首轮 payload 构建时 marker 已在 transcript，`[active skill]` 尾部指针被抑制（目录为空时 tail 整体为 `None`）；旧集成测试仍断言「tail 是 payload 最后一条 user 消息且携带 `[active skill]`」，与实现新契约矛盾。单测 `tail_reminder_is_fallback_only_while_loaded_marker_present` 即该契约的权威表述。
+上一轮（task-plan 资源清理与 question 门控收敛）评审遗留 blocker：`skill_body_injection::small_skill_body_rides_payload_and_persists` 稳定失败。归属结论成立——被测实现 `skill_context.rs` 的 marker 抑制语义（并发工作流 +59 行）自洽且正确：`ensure_full_body_loaded` 在**每轮 LLM 调用前**注入 `[skill loaded]` marker，因此首轮 payload 构建时 marker 已在 transcript，`[active skill]` 尾部指针被抑制（目录为空时 tail 整体为 `None`）；旧集成测试仍断言「tail 是 payload 最后一条 user 消息且携带 `[active skill]`」，与实现新契约矛盾。单测 `tail_reminder_is_fallback_only_while_loaded_marker_present` 即该契约的权威表述。
 
 ## 收口
 

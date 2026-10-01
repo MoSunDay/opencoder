@@ -22,7 +22,7 @@ Commit: 7687b5f581254ee6d826d8644789e7d498e761ba
 - `tests/e2e/` — 集成测试（含 `layered_api` 家族：锁定读面、命令门禁、嵌套准入）
 
 ## 接缝
-- Brain 里程碑计划：节点须广告 `brain_scheduler_v7`；保存版本和直接运行准入均规范化内部层间路径，旧版本显式路径保持原样。普通能力走统一执行提交，子计划走相同 Brain 准入并核验父 operation，且沿用父运行的节点。节点持有运行与操作投影；视图按轮次和激活提供执行索引，详情由执行 ID 查询。Control 为每次激活解析能力及有界上游摘要，Worker 执行模型决策；子计划固定版本并验证父 operation、深度和终态。目录解析失败只标记对应能力不可用，计划引用它时返回原因，不阻断其他计划。PC 安装入口保留旧 schema 版本，追加并幂等返回最新 schema 7 版本。
+- Brain 里程碑计划：节点须广告 `brain_scheduler_v7`；保存版本和直接运行准入均规范化内部层间路径，旧版本显式路径保持原样。普通能力走统一执行提交，子计划走相同 Brain 准入并核验父 operation，且沿用父运行的节点。节点持有运行与操作投影；视图按轮次和激活提供执行索引，详情由执行 ID 查询。Control 为每次激活解析能力及有界上游摘要，Worker 执行模型决策；子计划固定版本并验证父 operation、深度和终态。目录解析失败只标记对应能力不可用，计划引用它时返回原因，不阻断其他计划。
 - `POST /api/brain/runs/:id/inputs` 将人工文本提交给根运行的事件日志。`v4/runtime.rs` 组装新上下文，`v4/delivery.rs` 对当前运行中的 Agent/Operator/Team 投递大脑确认的引导；后到的人工输入会使尚未投递的旧引导失效，投递与输入共用运行锁。
 - `src/api/admission.rs` — `/ready` 在开放模式读取准入与节点就绪快照；冻结模式读取完整 drain 状态和活动执行数。
 - [api/executions/capabilities.rs](../../crates/control/src/api/executions/capabilities.rs) — 静态与动态 DAG 均要求 `dag_container_v1`，动态还要求 `dag_dynamic_v1`；通用兼容响应不能代替原生容器能力。定义由用户维护，启动不自动注册评审 DAG。

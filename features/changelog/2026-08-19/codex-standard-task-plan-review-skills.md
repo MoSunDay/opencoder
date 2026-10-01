@@ -11,11 +11,11 @@ Commit: (working-tree, post-3320cbb)
 ## Change Summary
 
 - `crates/core/assets/skills/task-plan/`：内置正文更新为 Codex 上线闭环规划协议，覆盖问题与事件流重建、五级证据成熟度、合约/保鲜矩阵、根因与缺口地图、生产等价验证、遗漏复查和发布关键路径。
-- `task-plan/references/`：随包增加 `launch-closure-plan-checklist.md` 与可选 `any-home-plan-run.md`，按 progressive disclosure 承载细节，避免主 skill 继续膨胀。
+- `task-plan/references/`：随包提供 `launch-closure-plan-checklist.md`，按 progressive disclosure 承载细节，避免主 skill 继续膨胀。
 - `crates/core/assets/skills/review/SKILL.md`：由固定五问升级为证据驱动评审；强制给出保守完成百分比，区分验证方法与证据，检查影响面、发布责任、已解除/当前卡点，并裁决 `go-live ready` 或 `not ready`。
 - `crates/core/src/skill/seed.rs`：抽取统一 `seed_skill_packs` 写入路径，支持 `references/*` 等嵌套 bundled resources；仍逐文件增量写入，任何已有用户文件均不覆盖。
 - `do-and-done` / `summary` / `submit`：直接消费者同步从已退役的固定 STATUS 块切到闭环计划、当次证据与 review 上线结论，避免内置工作流等待新 task-plan 不再产出的字段。
-- `crates/core/tests/skill_contract.rs`：契约断言改为新 task-plan / review 语义；新增嵌套 references 首次 seed、never-clobber 和下游不再依赖 STATUS 块的覆盖。
+- `crates/core/tests/skill_contract/`：契约断言改为新 task-plan / review 语义；新增嵌套 references 首次 seed、never-clobber 和下游不再依赖 STATUS 块的覆盖。
 
 ## Impact Surface
 

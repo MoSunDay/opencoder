@@ -6,7 +6,7 @@ Commit: 2fae46b5
 - `KINDS` 补 `maintenance → 维护执行`：节点维护产生的真实 kind 在类型列显示中文标签且可筛选（仍不可手动启动，CREATABLE_KINDS 不变）。
 - 执行明细补齐两类过程视图：`brain` 内嵌工作台 `BrainRunBody`（run.jsx 拆出 Body/View，抽屉复用步骤列表 + PlanCanvas + Inspector + 调度事件 Timeline，**不写** `brain_run` URL 参数）；`todos` 内嵌 `TodoRunEmbed`（拉 `/api/todo/workflows/:id`，复用 runProjection 折叠 + TodoRunCanvas/TodoRunInspector + SSE 实时帧，404/分体部署拉取失败静默返回 null，TodoDetail 列表仍在下方回退，零回归）。
 - 删除合并遗留死代码 `fleet/brain.jsx` 的 `BrainDispatch`（main 实挂 BrainWorkbench，且其期望的 `result.execution.id` 与现 `/api/brain/dispatch` 返回形状不符）。
-- 修复 `scripts/check-spa-drift.sh`：HEAD 里 `workbench/editor/model.js` 以仓库相对深度 import `examples/brain/repair-loop.json`，旧临时树（裸 `spa/`）解析失败导致门禁误报 harness error；临时树改为镜像 `crates/web/spa` + `examples/` 布局。
+- 修复 `scripts/check-spa-drift.sh`：当时工作台使用仓库相对导入，旧临时树（裸 `spa/`）解析失败导致门禁误报 harness error；临时树改为保留 `crates/web/spa` 的相对位置。当前构建只需要 SPA 源码和包内资源。
 - 验收脚本（platform / harness/codex / t12_ui_verify）适配 Modal：先点工具栏 `启动执行` 开窗，提交限定 dialog 作用域，`chooseInForm` 在 dialog 内取 combobox。
 - 评审跟进（P2）：过程视图挂载加 `mode === 'full'` 门控——brain 工作台 Inspector「执行过程」页以 inline 复用 `ExecutionView`，而 brain 能力含 todos，否则 todos 实例会在 ~380px 窄列里嵌 TODO 画布 + 第二条 SSE；门控后 inline 只保留轻量块（Transcript/WorkloadDetail/TodoDetail），full（明细抽屉）行为不变。`embeds.dom.test.jsx` 补 inline/full 双态断言（inline 连画布数据都不拉）。
 - 评审跟进（P3 清理）：`BrainRunView` 收敛为单层 `.brain-run`——返回栏/面包屑经 `header` 槽渲染进 Body 的唯一容器（旧双层嵌套是 Body/View 拆分残留，flex/gap 逐层等价但 DOM 冗余）；新增 `workbench/tests/run.dom.test.jsx` 锁单层容器 + `brain_run` 参数只由 View 写 + 返回回调。

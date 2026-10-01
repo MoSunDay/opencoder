@@ -1,3 +1,5 @@
+Commit: 7687b5f581254ee6d826d8644789e7d498e761ba
+
 # 大脑里程碑计划与自由回退
 
 计划画布按层配置里程碑及挂载能力；编辑节点后，通过计划信息表单保存版本。运行时大脑在整层执行结束后判断下一层，可回退到已执行层开启新轮，并为重跑能力生成独立执行 ID，保留历史输入与结果。无效决策最多纠正两次，不派发无效能力。运行视图按轮、层和能力 ID 打开原有类型执行面板。
@@ -17,7 +19,6 @@
 
 - SPA 全量回归：`npx vitest run` → 906 passed / 0 failed。
 - SPA 构建：`npm run build` → 通过；`scripts/check-spa-drift.sh` → 无漂移。
-- Review DAG 相邻回归：已移除的生产种子改由测试内显式创建，5 条测试通过；实现见 `tests/dag_e2e/review_dags/`。
 - Rust workspace 全量回归：先执行 `cargo build --workspace --bins -j 8` 更新进程级测试依赖的二进制，再执行 `cargo test --workspace -j 8 -- --test-threads=4` → 5,584 passed / 0 failed / 8 既有 ignored。
 - Rust clippy：`cargo clippy --workspace --all-targets -j 4 -- -D warnings` → 零警告。
 - Rust 构建：`cargo build --workspace -j 4` → 通过。

@@ -64,29 +64,6 @@ pub fn runner() -> PathBuf {
         .unwrap()
         .to_path_buf();
     let binary = target.join("examples/agent-step-runner");
-    let profile = target.file_name().unwrap().to_str().unwrap();
-    let profile = if profile == "debug" { "dev" } else { profile };
-    let status = Command::new("cargo")
-        .args([
-            "build",
-            "-p",
-            "opencoder-dag-runtime",
-            "--example",
-            "agent-step-runner",
-        ])
-        // The outer invocation's --target-dir overrides CARGO_TARGET_DIR.
-        // Build next to this test executable so we cannot use a stale runner
-        // from a different target directory or build profile.
-        .arg("--target-dir")
-        .arg(target.parent().unwrap())
-        .args(["--profile", profile])
-        // Container fixtures strip symbols, so avoid generating them first.
-        .arg("--config")
-        .arg(format!("profile.{profile}.debug=0"))
-        .current_dir(Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."))
-        .status()
-        .unwrap();
-    assert!(status.success(), "build container runner");
     assert!(binary.is_file(), "missing runner {}", binary.display());
     binary
 }
@@ -94,6 +71,11 @@ pub fn runner() -> PathBuf {
 pub fn rootfs(root: &Path, runner: &Path) {
     opencoder_dag_runtime::sandbox::oci::write_rootfs_template(root).unwrap();
     install(root, runner, "/usr/bin/agent-step-runner");
+    install(
+        root,
+        &runner.parent().unwrap().join("dag-runner"),
+        "/usr/bin/dag-runner",
+    );
     for binary in ["/bin/sh", "/usr/bin/cat", "/usr/bin/mv", "/usr/bin/sleep"] {
         install(root, Path::new(binary), binary);
     }

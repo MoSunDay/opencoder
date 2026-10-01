@@ -1,63 +1,36 @@
-//! Wasm-step fixtures shared by the DAG e2e scenarios: tiny WASI modules
-//! compiled from wat on the fly (`wat` is a dev-dependency), plus the
-//! stdlib base64 encoder the `/api/dag/wasm` upload contract needs.
-
-/// Wat for a module that writes `message` (plus newline) to stdout — the
-/// captured bytes become the step's `output.txt`.
-pub fn stdout_module_wat(message: &str) -> String {
-    format!(
-        r#"(module
-  (import "wasi_snapshot_preview1" "fd_write"
-    (func $fd_write (param i32 i32 i32 i32) (result i32)))
-  (memory (export "memory") 1)
-  (data (i32.const 0) "{msg}\n")
-  (func (export "_start")
-    (i32.store (i32.const 64) (i32.const 0))
-    (i32.store (i32.const 68) (i32.const {len}))
-    (drop (call $fd_write (i32.const 1) (i32.const 64) (i32.const 1) (i32.const 72)))))"#,
-        msg = message,
-        len = message.len() + 1
-    )
+pub fn stdout_source(message: &str) -> String {
+    let message = serde_json::to_string(message).unwrap();
+    format!("#include <stdio.h>\nint main(void) {{ puts({message}); return 0; }}")
 }
-
-/// Wat for a module that dumps its whole WASI argv buffer to stdout: every
-/// argument NUL-separated, argv[0] first (the module token). The
-/// input-args e2e asserts dispatch `input.args` shows up as command-line
-/// tokens after the module token.
-pub fn args_echo_wat() -> String {
-    r#"(module
-  (import "wasi_snapshot_preview1" "args_sizes_get"
-    (func $args_sizes_get (param i32 i32) (result i32)))
-  (import "wasi_snapshot_preview1" "args_get"
-    (func $args_get (param i32 i32) (result i32)))
-  (import "wasi_snapshot_preview1" "fd_write"
-    (func $fd_write (param i32 i32 i32 i32) (result i32)))
-  (memory (export "memory") 1)
-  (func (export "_start")
-    ;; Layout: [0]=argc, [4]=buf size, [8..]=argv pointers, [4096..]=the
-    ;; packed NUL-terminated strings. One iovec at 2048 covers the whole
-    ;; buffer, so stdout is argv joined by NUL bytes.
-    (drop (call $args_sizes_get (i32.const 0) (i32.const 4)))
-    (drop (call $args_get (i32.const 8) (i32.const 4096)))
-    (i32.store (i32.const 2048) (i32.const 4096))
-    (i32.store (i32.const 2052) (i32.load (i32.const 4)))
-    (drop (call $fd_write (i32.const 1) (i32.const 2048) (i32.const 1) (i32.const 2056)))))"#
-        .to_string()
+pub fn args_source() -> String {
+    "#include <stdio.h>\n#include <string.h>\nint main(int argc, char **argv) { for (int index=0; index<argc; index++) fwrite(argv[index],1,strlen(argv[index])+1,stdout); return 0; }".into()
 }
+pub const SPIN_C: &str = "#include <unistd.h>\nint main(void) { for (;;) pause(); }";
 
-/// Wat for an endless loop — terminated only by cancellation (epoch
-/// interruption) or the step timeout.
-pub const SPIN_WAT: &str = r#"(module (func (export "_start") (loop $l (br $l))))"#;
-
-/// Compile `wat` source to wasm bytes.
-pub fn compile(wat: &str) -> Vec<u8> {
-    wat::parse_str(wat).expect("wat fixture must compile")
+pub fn compile(source: &str) -> Vec<u8> {
+    let temp = tempfile::tempdir().unwrap();
+    let input = temp.path().join("fixture.c");
+    let binary = temp.path().join("fixture");
+    std::fs::write(&input, source).unwrap();
+    let status = std::process::Command::new("cc")
+        .args(["-O2", "-static", "-s", "-Wl,--build-id=none"])
+        .arg(input)
+        .arg("-o")
+        .arg(&binary)
+        .output()
+        .unwrap();
+    assert!(
+        status.status.success(),
+        "{}",
+        String::from_utf8_lossy(&status.stderr)
+    );
+    std::fs::read(binary).unwrap()
 }
 
 const B64_ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
 /// Minimal standard base64 encoder (padded): the pool API takes
-/// `wasm_b64`, and the root package has no base64 dev-dependency.
+/// `binary_b64`, and the root package has no base64 dev-dependency.
 pub fn base64_encode(bytes: &[u8]) -> String {
     let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
     for chunk in bytes.chunks(3) {
@@ -81,27 +54,27 @@ pub fn base64_encode(bytes: &[u8]) -> String {
     out
 }
 
-/// The `/api/dag/wasm` create body for `name` serving `wat`.
-pub fn pool_create_body(name: &str, description: &str, wat: &str) -> serde_json::Value {
+/// The `/api/dag/binaries` create body for a compiled Linux resource.
+pub fn pool_create_body(name: &str, description: &str, source: &str) -> serde_json::Value {
     serde_json::json!({
         "name": name,
         "description": description,
-        "wasm_b64": base64_encode(&compile(wat)),
+        "binary_b64": base64_encode(&compile(source)),
     })
 }
 
 /// Publish `name` at v1 through the real pool API; returns the version.
-pub fn publish(fleet: &crate::support::fleet_proc::Fleet, name: &str, wat: &str) -> u32 {
+pub fn publish(fleet: &crate::support::fleet_proc::Fleet, name: &str, source: &str) -> u32 {
     let (status, body) = fleet.http(
         "POST",
-        "/api/dag/wasm",
-        &pool_create_body(name, "e2e fixture", wat),
+        "/api/dag/binaries",
+        &pool_create_body(name, "e2e fixture", source),
     );
     assert_eq!(status, 201, "pool publish {name}: {body}");
     body["version"].as_u64().unwrap_or(0) as u32
 }
 
-/// Raw binary HTTP GET (Content-Length framed) — for the wasm download
+/// Raw binary HTTP GET (Content-Length framed) — for the binary download
 /// endpoint, whose body is arbitrary module bytes, not JSON.
 #[allow(dead_code)]
 pub fn download_bytes(base: &str, path: &str, token: &str) -> (u16, Vec<u8>) {

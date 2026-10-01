@@ -4,7 +4,9 @@ use std::{collections::BTreeMap, path::PathBuf, str::FromStr};
 pub mod scope;
 mod settings;
 pub use settings::CodexSettings;
+mod remote;
 mod runtime;
+pub use remote::{RemoteSession, ServerCapability, ServerConnection};
 pub use runtime::{agent_settings, pin_agent_settings, RuntimeSettings, Versioned};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -40,6 +42,10 @@ impl FromStr for Harness {
 #[derive(Clone, Default, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct HarnessRuntime {
+    /// Frontend input policy, pinned with the session.
+    pub literal_mentions: bool,
+    /// TUI task binding only; no credentials or remote harness overrides.
+    pub remote: Option<RemoteSession>,
     pub codex: Option<CodexSettings>,
     pub harness: Harness,
     pub thread_id: Option<String>,

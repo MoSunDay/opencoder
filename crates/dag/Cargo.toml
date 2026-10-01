@@ -8,6 +8,7 @@ license.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 anyhow.workspace = true
+opencoder-dag-binary.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

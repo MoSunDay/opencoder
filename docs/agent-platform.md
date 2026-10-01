@@ -55,7 +55,7 @@ Node 在返回接受前同步持久化任务、资源和 Harness 配置快照。
 
 定时任务定义自 schema v27 起持久化在控制面 libsql `schedules` 表（事实源）；`schedules.json`（server workdir 的 `.opencoder/` 域文件，或全局 `~/.opencoder/`）降级为一次性 seed——仅表空时全量导入（非法条目告警跳过，不阻断启动），此后文件改动不再回灌（删除不会在重启时复活），但 `scan_interval_secs` 永远以文件为准（默认 15s，最小 1s，调度循环热读）。Server 控制面内置 cron 调度器（无定义即空转，配置读取失败或条目非法仅告警跳过，不影响其余任务）。字段：`id`（1–40 字符，字母/数字/`-`/`_`，用于确定性执行 ID）、`cron`（5 字段为分 时 日 月 周；6/7 字段保留秒位）、`timezone`（仅固定偏移如 `+08:00`）、`enabled`（默认 true，关闭的条目不做校验）、`kind`（`brain`/`team`/`todos`/`agent`/`dag`）、`target`、`params`（按 kind 消费：agent/team/todos 读 `prompt`——agent 触发时作为首轮消息提交并经回落机制补进 how.md，dag 读 `args`，brain 读 `schema_version:4`、固定版本 `plan` 和 `inputs`）、`overlap`（`skip` 默认 / `allow`）、`node_id`（可选钉住节点）、`scan_interval_secs`（扫描间隔，默认 15s，最小 1s）。
 
-触发复用既有入口：agent/team/todos/dag 走 `POST /api/executions` 同一条提交链路，brain 走 brain run 创建链路；`params` 支持时间模板 `{{now[±N<单位>][:格式]}}`（单位 s/m/h/d/w，缺省 RFC3339，另有 `unix`/`unix_ms`），在触发时刻渲染为执行 input；dag 的 `args`（字符串，可选）在触发时追加到每个 Wasm 步的命令行（空白切分成 argv，幂等不重复追加）。每次触发获得确定性执行 ID `<kind>-<schedule_id>-<scheduled_for_ms>`：同一 tick 重复提交幂等收敛，不重复执行。Server 停机重启后仅补跑最近一个错过的 tick，更早的记为 `missed`（24 小时补跑窗口）；提交失败的 tick 在 1 小时内重试，超窗后等待下一个 tick。新建条目首次扫描时没有历史台账，基线退化为 24 小时窗口起点：窗口内最近一个到期 tick 会在首次扫描立即补跑，更早的记为 `missed`。`overlap: skip` 时上一轮触发对应的执行未到终态则本轮不触发，`allow` 无条件触发。
+触发复用既有入口：agent/team/todos/dag 走 `POST /api/executions` 同一条提交链路，brain 走 brain run 创建链路；`params` 支持时间模板 `{{now[±N<单位>][:格式]}}`（单位 s/m/h/d/w，缺省 RFC3339，另有 `unix`/`unix_ms`），在触发时刻渲染为执行 input；dag 的 `args`（字符串数组，可选）在触发时追加到每个二进制步骤的参数数组（幂等不重复追加）。每次触发获得确定性执行 ID `<kind>-<schedule_id>-<scheduled_for_ms>`：同一 tick 重复提交幂等收敛，不重复执行。Server 停机重启后仅补跑最近一个错过的 tick，更早的记为 `missed`（24 小时补跑窗口）；提交失败的 tick 在 1 小时内重试，超窗后等待下一个 tick。新建条目首次扫描时没有历史台账，基线退化为 24 小时窗口起点：窗口内最近一个到期 tick 会在首次扫描立即补跑，更早的记为 `missed`。`overlap: skip` 时上一轮触发对应的执行未到终态则本轮不触发，`allow` 无条件触发。
 
 触发历史持久化在 `schedule_runs` 表（schema v26 起），按 `(schedule_id, scheduled_for_ms)` 主键覆盖写；定义持久化在 `schedules` 表（schema v27，主键 `id`，`job` JSON + created_at/updated_at，upsert 保留 created_at）。`GET /api/schedules` 列出全部定义并附最近一次触发与下一次触发时刻，`GET /api/schedules/:id/runs?limit=` 返回倒序历史；admin CRUD：`POST /api/schedules` 创建（缺省 id 自动生成 `schedule-<ULID>`，重名 409，非法 body 400）、`PUT /api/schedules/:id` 全量更新（404 未知 id，created_at 保留）、`PATCH /api/schedules/:id` 仅启停（`{"enabled": bool}`，重校验整个定义——坏 cron 的停用条目无法被直接启用）、`DELETE /api/schedules/:id` 删除定义（触发历史保留可查）、`POST /api/schedules/:id/run` 手动立即触发（绕过 enabled 与 overlap，属显式操作员动作）。全部端点 admin-only；CLI 对应 `opencoder-cli schedule list` 与 `opencoder-cli schedule runs <id>`；Web 控制台「定时任务」页（`spa/src/schedule/panel.jsx`）提供新建/编辑/启停/删除与手动触发的全功能管理。
 
@@ -79,13 +79,13 @@ mount -t nfs -o ro,vers=3,tcp,port=<port>,mountport=<port>,nolock,soft,retrans=1
 
 NFS 资源服务的导出支持完整深层资源路径，短路径句柄保持兼容，长路径句柄在导出重启后可恢复。目录读取失败明确返回错误，不以漏文件的列表代替成功。
 
-DAG wasm 模块池是第二路只读导出：Server 侧 `dag.nfs.enabled` 开启（默认 `127.0.0.1:2050`、只读，导出根为 `dag.wasm_dir` 或数据目录默认 `<data>/dag/wasm`）。节点用同样的只读参数挂载后，在 `opencoder.json` 设置 `dag.wasm_dir` 指向挂载点：
+DAG 二进制池是第二路只读导出：Server 侧 `dag.nfs.enabled` 开启（默认 `127.0.0.1:2050`），导出根为 `dag.binary_dir` 或 `<data>/dag/binary`。源工作区由 `dag.workspace_nfs` 只读导出（默认端口 2051），路径是 `dag.workspace_dir`。节点挂载后配置这两个目录和 `dag.rootfs_dir`：
 
 ```bash
-mount -t nfs -o ro,vers=3,tcp,port=2050,mountport=2050,nolock,soft,retrans=1,timeo=50,actimeo=0,lookupcache=none server:/ /mnt/opencoder-dag-wasm
+mount -t nfs -o ro,vers=3,tcp,port=2050,mountport=2050,nolock,soft,retrans=1,timeo=50,actimeo=0,lookupcache=none server:/ /mnt/opencoder-dag-binary
 ```
 
-该路径不做挂载表强制校验，但节点必须以 `ro` 挂载并只读加载：未配置时 wasm 模块维持 out-of-band 投放；配置后节点受理 DAG 时把 spec 引用的池模块冻结进 `<workflow_root>/_modules/`（`tool.wasm` 取 current，`tool@v3.wasm` 取显式版本），池缺名或缺该版本视为 out-of-band 跳过，导出内容损坏（sha256 不符）则拒绝受理。WASM 和 Agent 任务都只执行节点本地快照，不向 NFS 写入或直接依赖 NFS 运行。发布/回滚只影响之后的新受理，不影响已接受 run；本机部署可参照 agents 挂载单元模板复制第二路挂载。
+节点受理前强制校验只读 NFS 挂载和资源摘要。`tool` 取池当前版本，`tool@v3` 固定显式版本；缺失资源直接拒绝，不支持本机投放或宿主执行。每次运行仅固定需要的二进制、Agent 及其依赖；恢复只读取已固定版本，之后发布或回滚不影响已受理运行。
 
 本机部署可使用 `scripts/platform/systemd/` 的只读挂载单元及 Agent 依赖配置；跨主机部署调整 `What` 为实际 Server。每个挂载点只保留一个挂载，关闭目录与属性缓存使资源发布及时对新任务生效。回滚不支持长句柄的旧 Server 时，先停止依赖该挂载的 Node，再受控重新挂载。
 
@@ -126,7 +126,7 @@ mount -t nfs -o ro,vers=3,tcp,port=2050,mountport=2050,nolock,soft,retrans=1,tim
 {"id":"agent-client-request-1","kind":"agent","target":"act","input":{"prompt":"检查当前仓库"},"node_id":null}
 ```
 
-DAG 页和执行详情先展示节点结果快照，运行中只折叠快照之后的状态事件，不逐条回放历史来绘制画布。`GET /api/dag/runs/:id/progress` 和执行详情的 `dag_steps` 返回 `head_seq`、步骤状态及 `running` 计数；新一轮步骤开始可覆盖旧回执，断线后重新同步快照。点击步骤打开右侧占视口 75% 的「实时日志」抽屉，共用步骤切换、全部步骤、搜索、自动滚动和历史分页；历史记录整批展示，关闭抽屉即结束日志请求。日志展示 Agent 输出、思考与工具事件以及 Wasm stdout/stderr。日志沿 Node WebSocket 与浏览器 SSE 增量传输，断线从已接收的 seq 续传；服务端明确发送流结束标记，网络断开不会显示为正常结束。事件支持 seq 回放；超大事件、消息和详情字段由 64 KiB chunk 及游标分段读取。DAG 产物通过 Bearer 保护的流式下载端点传输，256 MiB 验收不会在浏览器或 Server 聚合完整文件。原会话、DAG、TODO、Team 和项目页面 API 均由 Server 依据五字段索引转发到归属节点。
+DAG 页和执行详情先展示节点结果快照，运行中只折叠快照之后的状态事件，不逐条回放历史来绘制画布。`GET /api/dag/runs/:id/progress` 和执行详情的 `dag_steps` 返回 `head_seq`、步骤状态及 `running` 计数；新一轮步骤开始可覆盖旧回执，断线后重新同步快照。点击步骤打开右侧占视口 75% 的「实时日志」抽屉，共用步骤切换、全部步骤、搜索、自动滚动和历史分页；历史记录整批展示，关闭抽屉即结束日志请求。日志展示 Agent 输出、思考与工具事件以及 二进制 stdout/stderr。日志沿 Node WebSocket 与浏览器 SSE 增量传输，断线从已接收的 seq 续传；服务端明确发送流结束标记，网络断开不会显示为正常结束。事件支持 seq 回放；超大事件、消息和详情字段由 64 KiB chunk 及游标分段读取。DAG 产物通过 Bearer 保护的流式下载端点传输，256 MiB 验收不会在浏览器或 Server 聚合完整文件。原会话、DAG、TODO、Team 和项目页面 API 均由 Server 依据五字段索引转发到归属节点。
 
 ## 验证边界
 
@@ -134,9 +134,11 @@ DAG 页和执行详情先展示节点结果快照，运行中只折叠快照之�
 
 真实 NFS 需要验证只读写入拒绝、版本资源快照，以及卸载后旧执行继续和新执行拒绝。依赖宿主权限的 NFS/runc 用例保留 manual 标记，验收记录必须对应当前执行后端和实际节点环境。
 
-DAG 的非 Agent 步骤为 WebAssembly WASI 命令模块。默认 `sandbox: in_process` 使用内嵌 wasmtime，通过 epoch deadline 处理取消和超时，无需单独安装 wasmtime CLI。`sandbox: runc` 需要节点上的 runc 和 `<workflow_root>/rootfs` 中可运行的静态 wasmtime 目录；缺失时报错，不回退到内嵌模式。每个 bundle 复制独立运行时目录并在重试中复用，rootfs 只读挂载，run 目录挂至 `/workspace/context`。模块读取 `OPENCODER_STEP_CONTEXT` 指向的 `context.json`，可写 `output.json` 返回结构化结果；不存在 `internal-python-step` 或 RustPython 执行入口。wasm 模块经 Server 模块池发布（`/api/dag/wasm` + 第二路 NFS 只读导出），节点配置 `dag.wasm_dir` 后受理时冻结到 `_modules/`，spec 中 `tool@v3.wasm` 形态可显式固定版本。详见 [DAG 运行时](../agents/dag-runtime/index.md) 与 [dag-wasm 模块](../agents/dag-wasm/index.md)。
+DAG 的非 Agent 步骤使用 Linux 原生二进制。一次运行只有一个 `runc` 容器，所有步骤和动态实例通过 `runc exec` 共享 `/workspace/<step_name>`。Server 原路径通过只读 NFS 提供，节点 OverlayFS 写层承担文件修改，不改写源文件或整目录复制。
 
-动态节点支持按派发输入或上游结构化输出批量展开 Agent/Wasm 实例，逐实例隔离 how、argv、状态和日志；四个并发名额在整个 run 内共享。定义示例、恢复规则和实例 API 见 [Dynamic DAG Step](dag-dynamic.md)。
+执行节点的启动命令通过 `unshare --mount --propagation private` 建立私有挂载命名空间，运行时挂载不会向宿主的其他容器传播；NFS 源挂载在节点启动前准备。原生 DAG 页面与平滑发布验收也在私有挂载命名空间内运行，不能借用宿主共享挂载进行测试。
+
+动态节点支持按派发输入或上游结构化输出批量展开 Agent/二进制实例，逐实例保存 how、argv、状态和日志，共享运行级容器；四个并发名额在整个 run 内共享。定义示例、恢复规则和实例 API 见 [Dynamic DAG Step](dag-dynamic.md)。
 
 ## 发布与回滚
 
@@ -151,7 +153,8 @@ DAG 的非 Agent 步骤为 WebAssembly WASI 命令模块。默认 `sandbox: in_p
 ```bash
 cargo test -p opencoder-worker --test nfs_mount -- --ignored --nocapture
 DAG_TEST_ROOTFS=/path/to/rootfs cargo test -p opencoder-dag-runtime sandbox::runc::tests:: -- --ignored --nocapture
-PLATFORM_BIN_DIR=/path/to/target/debug node scripts/acceptance/platform.js
+PLATFORM_BIN_DIR=/path/to/target/debug node scripts/acceptance/platform.js /path/to/rootfs
 PLATFORM_BIN_DIR=/path/to/target/debug node scripts/acceptance/node_drain.js
-FIXTURE_BYTES=268435456 PLATFORM_BIN_DIR=/path/to/target/debug node scripts/acceptance/artifact_stream.js
+FIXTURE_BYTES=268435456 PLATFORM_BIN_DIR=/path/to/target/debug node scripts/acceptance/artifact_stream.js /path/to/rootfs
+python3 scripts/acceptance/runc_scheduling/main.py --root /root/.cache/opencoder-e2e/20260930-native --bin-dir /path/to/target/debug --rootfs /path/to/rootfs
 ```

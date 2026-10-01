@@ -108,6 +108,15 @@ macro_rules! store_contract_0 {
         anyhow::bail!("bounded message pagination is unsupported by this store")
     }
 
+    /// Read full display messages in bounded SQL slices, including synthetic,
+    /// display and usage metadata. No provider-private state is exposed.
+    async fn load_transcript_page(
+        &self, _session_id: &str, _cursor: opencoder_core::fleet::MessageCursor,
+        _chunk_bytes: usize, _raw_budget: usize,
+    ) -> Result<MessageChunkPage> {
+        anyhow::bail!("bounded transcript pagination is unsupported by this store")
+    }
+
     async fn admit_input(&self, input: &SessionInput) -> Result<i64>;
     /// Atomically admit an input keyed by `(session_id, id)`. Implementations
     /// must return the original row for an identical retry and reject a

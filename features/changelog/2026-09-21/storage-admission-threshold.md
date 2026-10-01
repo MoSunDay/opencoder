@@ -15,8 +15,6 @@ Commit: fc047704e4c583cb9e0c11293b3815916ce1659b
 | 所有新执行入口及持久化冻结 | `storage_and_durable_freeze_reject_every_new_work_entry` | `crates/worker/tests/drain_health/main.rs` |
 | 低容量下已有工作继续完成 | `low_storage_blocks_new_work_while_existing_work_finishes_naturally` | `crates/worker/tests/drain_health/main.rs` |
 
-验证回执位于 `/root/workspace/artifacts/test-agent/2026-09-20/skill-driven-four-repo-review/deployment/storage-threshold/`。
-
 - 定向容量测试：2 passed / 0 failed。
 - 全量 Clippy：`cargo clippy --workspace --all-targets --jobs 8 -- -D warnings` → 零警告。
 - 全量回归：`cargo test --workspace --jobs 8` → 5,530 passed / 0 failed，仓库原有 8 ignored；未新增跳过项。

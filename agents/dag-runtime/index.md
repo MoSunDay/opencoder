@@ -1,32 +1,37 @@
-Commit: 720c3f03f784d857bbcac52fbf6bdc8992b2bcc6
+Commit: 7687b5f581254ee6d826d8644789e7d498e761ba
 
 # dag-runtime 模块
 
-节点侧 DAG 调度执行；server 不链接，执行只发生在 claiming 节点。
+节点侧 DAG 调度与执行。一次运行归属一个节点、一个 `runc` 容器；Server 不链接此运行时。
 
-## 索引
-- `src/runtime.rs`、`src/runtime/` — 调度、动态展开与恢复；静态/动态共享冻结 spec 的 `max_concurrency` 名额（缺省 4、范围 1–30）轮询调度、原子展开清单、按实例恢复、同组失败取消并收齐退出
-- `src/exec/` — wasm 与 agent 步执行（含产出提取）
-- `src/exec/device/` — `device-cases` 与 `uicase-regression` 受控 DAG 的冻结定义核验、设备实例归属和私有客户端传输；UI 执行能力仍由 Worker 广告门禁控制。
-- `src/exec/wasm/in_process.rs` — 先设置 Store 的 epoch 截止点，再启动时钟线程，避免初始化阶段丢失取消；执行前已取消的令牌直接返回 Cancelled，不进入 guest。
-- `src/exec/agent_runc.rs`、`src/sandbox/` — runc 沙箱（fail-closed）与 rootfs/挂载装配
-- `src/sandbox/codex/` — 解析节点 Codex 登录目录与冻结 Harness/profile，校验 guest 可执行文件；原登录目录直接读写挂载，私有启动配置独立于 DAG 产物。`agent_runc` 保存线程回执、导入事件，并使用容器内知识库路径；纯 Codex 不创建原生模型请求。
-- `src/exec/how_copy.rs` — 冻结原始 Agent/how；每次执行副本追加公共 how_append 与实例文本，Host/runc 共用且不回写资源。
-- `src/exec/runc_events.rs` — 容器 Agent 事件按实例子会话导入现有事件存储；与 `how_copy` 同为容器/宿主共用执行件。
-- `src/exec/wasm/host_imports*` — `opencoder` host imports
-- `src/step_log.rs`、`src/dag_events.rs` — 输出落库与事件上报
-- `examples/agent-step-runner.rs`、`examples/agent-session-runner.rs` — 容器内 session runner
-- `examples/wasmtime-cli.rs`、`scripts/prepare-dag-rootfs.sh` — WASI 运行器与 rootfs 制备（wasmtime + agent-step-runner + agent-session-runner + ldd 镜像）；只在安装进 rootfs 的副本上移除调试符号，避免每步私有 rootfs 复制放大体积
+## 主要流程
 
-## 边界
-- 执行只发生在 claiming 节点；runc fail-closed，不回落 in_process。
-- 默认 host 路径由 `SessionState::new` 读取 Agent 卡的 `harness`；`codex` 沿用 session 的 Codex 子进程驱动和节点服务进程环境，未显式覆盖时使用节点的 `CODEX_HOME` 或该用户的 `~/.codex` 登录态。纯 Codex DAG 不需要原生模型 API Key，Server 不分发自身登录文件；显式 Harness/profile 环境仍优先。跨 Server/节点的凭证继承、依赖结果与认证失败契约由 [dag_codex 回归](../../crates/worker/tests/dag_codex.rs) 覆盖。
-- runc Agent 按冻结 Harness 分派：原生执行器使用 LLM endpoint/API Key；Codex 使用 `sandbox/codex` 解析的 guest 可执行文件、私有配置及节点登录目录挂载，不要求原生 provider 凭证。容器知识路径由挂载合同确定，不能直接套用 host 路径。
+1. [resources.rs](../../crates/dag-runtime/src/resources.rs) 固定本次二进制、Agent 和所需依赖的版本与摘要。[layout.rs](../../crates/dag-runtime/src/layout.rs) 用创建时间的 UTC 日期和 DAG 标识生成稳定目录。
+2. [sandbox/run](../../crates/dag-runtime/src/sandbox/run/mod.rs) 校验只读 NFS 源和镜像，在节点本地建立 OverlayFS 写层，再启动共享容器。源路径不移动、不改权限、不整目录复制；镜像与步骤元数据只读挂载。
+3. [runtime.rs](../../crates/dag-runtime/src/runtime.rs) 与 [scheduler.rs](../../crates/dag-runtime/src/runtime/scheduler.rs) 按依赖调度。静态步骤与动态实例共享 `max_concurrency` 名额；动态展开清单先落盘，再按实例恢复。
+4. [exec/native](../../crates/dag-runtime/src/exec/native/mod.rs) 与 [exec/agent_runc.rs](../../crates/dag-runtime/src/exec/agent_runc.rs) 都通过同一容器执行。工作目录为 `/workspace/<step>` 或 `/workspace/<step>/instances/<index>`，步骤之间没有额外安全边界。
+5. [sandbox/supervisor.rs](../../crates/dag-runtime/src/sandbox/supervisor.rs) 管理步骤进程树。单步取消只终止该步骤；结束运行才关闭容器。恢复核验进程身份并清理遗留容器与挂载，不从新配置重新选择路径或版本。
+
+[sandbox/run](../../crates/dag-runtime/src/sandbox/run/mod.rs) 等待内核卸载完成后才标记清理结束，随后才能提交终态并释放容量；卸载错误保留清理归属供重试，不按固定超时提前释放。
+
+## 输入、输出与资源
+
+- [resources.rs](../../crates/dag-runtime/src/resources.rs) 的 `frozen_resources` 只读取本次 `resources.json`，限制为 32 MiB 普通文件并拒绝软链接；缺失和损坏分别返回未准备与错误，不读取池的当前版本作为替代。
+- [exec/how_copy.rs](../../crates/dag-runtime/src/exec/how_copy.rs)：在运行副本上追加 `how_append` 与实例文本，不回写资源池。
+- [exec/native/artifacts.rs](../../crates/dag-runtime/src/exec/native/artifacts.rs)：只归档 `artifacts.json` 声明的文件，核对路径、大小和摘要；大文件流式复制。
+- [step_log.rs](../../crates/dag-runtime/src/step_log.rs)、[dag_events.rs](../../crates/dag-runtime/src/dag_events.rs)：有界输出落库与实例事件。二进制输出写 `step_output`，Agent 事件通过 [runc_events.rs](../../crates/dag-runtime/src/exec/runc_events.rs) 导入子会话。
+- [exec/private_files.rs](../../crates/dag-runtime/src/exec/private_files.rs)：私有任务文件只读挂载到 `/run/opencoder-task`，模型只接收目录路径；系统不自动归档私有目录，公开记录不返回私有内容。
+- Agent 资源与知识库分别使用容器内 `/run/opencoder/agents` 和 `/run/opencoder/knowledge`，不占用步骤名称。
+
+## 执行器与镜像
+
+- 原生 Agent 使用节点固定的模型配置；纯二进制和纯 Codex DAG 不额外要求原生模型凭证。
+- [sandbox/codex](../../crates/dag-runtime/src/sandbox/codex/mod.rs) 校验容器内 Codex CLI、固定 Harness/profile，并挂载实际执行节点的登录目录以支持认证刷新。Server 不分发自身登录文件，配置或认证失败不会退回宿主执行。
+- 镜像的 `dag-runner` 和 `agent-step-runner` 必须与节点完整构建信息一致，不能是软链接。[制备脚本](../../scripts/prepare-dag-rootfs.sh) 安装运行器、Shell、Git、TLS、NSS 与 Python 依赖。
+- [tests/preflight.rs](../../crates/dag-runtime/tests/preflight.rs)、[tests/run_loop](../../crates/dag-runtime/tests/run_loop/main.rs) 和 [两节点验收](../../scripts/acceptance/runc_scheduling/main.py) 覆盖版本拒绝、共享容器与实际恢复。
 
 ## 相关
-- [动态步骤说明](../../docs/dag-dynamic.md) — 实例 API、输入例子与恢复契约
-- [Codex DAG 接入](../../docs/registered-runners.md) — host/runc 凭证、profile 与 rootfs 制备；安装脚本补齐 Shell、Git、TLS 和 NSS 解析依赖。
 
-## 私有任务文件
-
-`src/exec/private_files.rs` 只向 prompt 注入目录路径；host 使用执行目录，runc 将其只读挂载到 `/run/opencoder-task`（ro/nosuid/nodev），拒绝符号链接与重复挂载。`scripts/prepare-dag-rootfs.sh` 调用 `scripts/dag-rootfs/install-python.sh` 安装 Python 标准库和动态依赖，并执行 chroot 导入校验。
+- [执行约定](../../rules/04-dag-execution-contract.md)、[DAG 能力](../../features/dag/index.md)
+- [dag-binary](../dag-binary/index.md)、[worker](../worker/index.md)
+- [动态步骤说明](../../docs/dag-dynamic.md)、[Codex 与 rootfs 配置](../../docs/registered-runners.md)

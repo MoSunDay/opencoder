@@ -16,7 +16,7 @@ async function chooseCapability(page, label) {
   await page.locator('.brain-execution-node.selected span').getByText(label, { exact: true }).waitFor();
 }
 
-async function addNode(page, layerName, nodeName, label) {
+async function addNode(page, layerName, label) {
   await page.locator('.brain-layer-box').filter({ hasText: layerName }).getByRole('button', { name: '＋ 并行执行节点' }).click();
   await chooseCapability(page, label);
 }
@@ -78,20 +78,16 @@ async function main() {
     await page.getByRole('button', { name: '新建计划', exact: true }).click();
 
     await addLayer(page, 1, 'Coding');
-    await addNode(page, 'Coding', '实现任务', 'Agent · act');
-    await addNode(page, 'Coding', '并行检查', 'Operator · act');
+    await addNode(page, 'Coding', 'Agent · act');
+    await addNode(page, 'Coding', 'Operator · act');
     await addLayer(page, 2, '测试');
-    await addNode(page, '测试', '验证任务', 'Operator · act');
-    await page.locator('.brain-layer-box header').nth(1).click();
-    await page.getByRole('combobox', { name: '添加流转连线' }).click();
-    await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Coding' }).click();
-    await page.getByLabel('扭转条件', { exact: true }).fill('测试证据要求回到 Coding 整改');
+    await addNode(page, '测试', 'Operator · act');
     await page.screenshot({ path: path.join(artifacts, 'canvas.png'), animations: 'disabled' });
 
     await page.getByRole('button', { name: '关闭画布', exact: true }).click();
     await page.getByRole('button', { name: '新建计划', exact: true }).click();
     assert.equal(await page.locator('.brain-execution-node').count(), 3, 'canvas draft must survive closing');
-    assert.equal(await page.locator('.react-flow__edge').count(), 2, 'forward and return transitions must survive closing');
+    assert.equal(await page.locator('.react-flow__edge').count(), 1, 'milestone order must survive closing');
     await page.getByRole('button', { name: '下一步：计划信息', exact: true }).click();
     await page.getByLabel('计划名称', { exact: true }).fill('大脑 schema 7 闭环验收');
     await page.getByLabel('整体目标与交付物', { exact: true }).fill('层内并行、测试回退、再次验证后完成');
@@ -102,9 +98,12 @@ async function main() {
     const { version } = await response.json();
     assert.equal(version.plan.schema_version, 7);
     assert.deepEqual(version.plan.nodes.map((node) => node.capability_id), ['builtin-agent-act', 'builtin-operator', 'builtin-operator']);
-    assert.equal(version.plan.transitions.length, 2);
-    assert(version.plan.transitions.some((edge) => edge.from === version.plan.layers[1].layer_id && edge.to === version.plan.layers[0].layer_id
-      && edge.condition === '测试证据要求回到 Coding 整改'));
+    assert.equal(version.plan.transitions.length, 4);
+    const [coding, testing] = version.plan.layers.map((layer) => layer.layer_id);
+    assert.deepEqual(version.plan.transitions.map(({ from, to }) => [from, to]).sort(),
+      [[coding, testing], [testing, coding], [coding, coding], [testing, testing]].sort(),
+      'saved plan must support forward progress, return and retry of either milestone');
+    assert(version.plan.transitions.every((edge) => edge.condition.trim()), 'saved paths require decision criteria');
 
     await page.getByRole('button', { name: /^执\s*行$/ }).click();
     await page.getByLabel('大脑所在节点', { exact: true }).click();
@@ -132,7 +131,7 @@ async function main() {
       assert.equal(detail.visit.activation, event.activation);
       assert.equal(detail.nodes.flatMap((node) => node.operations).length, event.layer === 1 ? 2 : 1);
     }
-    await page.getByRole('button', { name: '打开大脑对话' }).click();
+    await page.getByRole('button', { name: '查看详情', exact: true }).click();
     const composer = page.getByRole('dialog', { name: '计划运行详情' }).getByLabel('大脑人工输入');
     await composer.waitFor();
     assert(await composer.isDisabled(), 'completed Brain must keep the conversation read-only');

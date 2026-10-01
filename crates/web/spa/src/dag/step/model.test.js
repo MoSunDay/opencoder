@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { STEP_KIND_LABEL, finishedOf, isAgentKind, outputRows } from './model.js';
 
-// Flat node-side wasm capture frame.
+// Flat node-side binary capture frame.
 const out = (seq, stream, text) => ({ seq, event: 'step_output', data: { step: 'build', stream, text, at_ms: seq } });
 // Nested run-session mirror frame (step_log envelope).
 const nested = (seq, event, data) => ({ seq, event: 'step_log', data: { kind: 'step_log', step: 'build', payload: { event, data }, at_ms: seq } });
@@ -51,9 +51,9 @@ describe('dag step projections', () => {
     expect(finishedOf(frames)).toBe(done);
   });
   it('labels step kinds and detects agent steps', () => {
-    expect(STEP_KIND_LABEL).toEqual({ wasm: 'Wasm 步骤', agent: 'Agent 步骤', dynamic: '动态步骤' });
+    expect(STEP_KIND_LABEL).toEqual({ binary: 'Binary 步骤', agent: 'Agent 步骤', dynamic: '动态步骤' });
     expect(isAgentKind('agent')).toBe(true);
-    expect(isAgentKind('wasm')).toBe(false);
+    expect(isAgentKind('binary')).toBe(false);
     expect(isAgentKind(undefined)).toBe(false);
   });
 });

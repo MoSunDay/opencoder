@@ -203,7 +203,7 @@ export function DefsTab({ onNotice, onDispatched, initialPrompt = '' }) {
 
   return (
     <Space orientation="vertical" size={12} style={{ width: '100%' }}>
-      <Space>
+      <Space wrap style={{ maxWidth: '100%' }}>
         <Input.Search
           allowClear
           style={{ minWidth: 220 }}

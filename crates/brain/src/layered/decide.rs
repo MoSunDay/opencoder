@@ -106,12 +106,6 @@ pub fn decide(
                     .as_ref()
                     .context("return requires a reflection")?;
                 validate::reason(reflection)?;
-                if opencoder_core::brain::pc_issue::is_plan(&request.plan) {
-                    ensure!(
-                        snapshot.run.layer == 4 && *layer == 3,
-                        "PC issue method only permits verification to repair return"
-                    );
-                }
                 if snapshot.run.round >= snapshot.run.max_rounds {
                     let mut blocked = super::block(
                         snapshot,

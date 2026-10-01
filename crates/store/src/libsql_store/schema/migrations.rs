@@ -297,5 +297,8 @@ pub(super) async fn migrate(conn: &Connection, from: i64) -> Result<()> {
         project_relations::migrate(conn).await?;
     }
 
+    if from < 32 {
+        catalog::upgrade(conn).await?;
+    }
     Ok(())
 }

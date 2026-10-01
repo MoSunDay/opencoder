@@ -50,15 +50,37 @@ scripts/platform/deploy.sh --status
 scripts/platform/deploy.sh --signal --rollback --wait-seconds 300
 ```
 
-发布包包含四个二进制、摘要、`release_id`、协议及数据兼容范围。发布工具核验所有仍保留的版本，取得互斥锁，检查磁盘和可用内存，再依次执行：
+Linux 发布包包含四个应用二进制及 `dag-runner`、`agent-step-runner`，附带摘要、`release_id`、协议及数据兼容范围。发布工具核验所有仍运行的版本，取得互斥锁，检查磁盘和可用内存，再依次执行：
 
-1. **校验、预热：**启动候选 Runtime，执行确定 ID 的 WASM 探针；启动候选 Host 和 Server，连接并同步完整索引，核验资源可读且导出只读。
+1. **校验、预热：**启动候选 Runtime，执行确定 ID 的 Linux 二进制探针；启动候选 Host 和 Server，连接并同步完整索引，核验资源可读且导出只读。
 2. **就绪、切换：**先落盘切换意图，再激活 Runtime/Host，graceful reload Nginx。Host 通道按递增交接编号切换；旧 Host 等待各 Server 的完整索引确认及入口确认。
 3. **验证、完成：**公共入口核对版本并实际执行探针，更新命令行二进制入口，记录完成。旧 Server 停止监听并等现有响应结束；旧 Runtime 单独回收。
 
 候选探针使用统一任务容量，不能抢占旧任务。候选所需资源不足或探针在等待预算内未完成时，预热报错，当前版本继续服务。同一次发布可以中断续跑；请求与探针保持原 ID。回滚或重新激活会持久化新的探针批次，确保通过当前入口真正执行新任务。
 
 切换前失败保留当前服务；切换后验证失败回到上一兼容版本。回滚或再发布保留版本时，都启动额外 Server/Host 实例，不等待仍在处理请求的旧实例退出；同一操作中断续跑保持实例和探针身份。已被新版本接收的任务留在新 Runtime。回滚不恢复数据库，不撤销已发生的工具副作用。不兼容版本直接拒绝平滑发布。
+
+## 不兼容版本的维护发布
+
+原生 DAG 与项目 schema v32 将发布数据契约从 1 升到 2。普通滚动发布和暂存会在启动候选进程前拒绝跨契约升级。已完成首次迁移的单机安装可用 `--migration-receipt` 查看维护范围，使用 `--migrate` 执行；信号发布可使用维护模式：
+
+```bash
+scripts/platform/deploy.sh --maintenance --stage --bundle /srv/releases/opencoder-native
+scripts/platform/deploy.sh --maintenance --signal --bundle /srv/releases/opencoder-native --wait-seconds 600
+# 也可由独立 root 作业直接执行，崩溃后用同一命令继续。
+scripts/platform/deploy.sh --maintenance --bundle /srv/releases/opencoder-native --wait-seconds 600
+scripts/platform/deploy.sh --rollback --wait-seconds 600
+```
+
+迁移新旧配置分开放置：可在 deployment 配置中指定绝对路径 `agent_config`、`server_config`，指向本次维护的候选配置 JSON；DAG 段是完整的新声明，其余服务设置在原配置基础上覆盖。预检固定摘要和私有快照，停止旧服务并完成备份后才安装，续跑读取同一快照。停服前必须已有完整的候选配置：Agent 的 `dag.rootfs_dir`、`dag.binary_dir`、`dag.workspace_dir`、`agent.agents_dir` 都是绝对路径；Server 显式配置三个资源目录，启用各自独立端口的只读 NFS。既有 Agent 客户端目录必须已经挂载为可读的只读 NFS。原生二进制目录和工作区目录在预检时保存挂载计划；停止旧服务并完成备份后，先升级资源服务，再建立这两个只读挂载并核验实际资源。镜像中的本版本两个 runner 必须能够启动。缺失配置、旧 DAG 配置、远程写入节点和 MySQL/StarRocks 项目后端都会提前拒绝；外部数据库尚无真实恢复验收，不能进入此维护流程。
+
+维护发布先将公共业务入口关闭为 503（保留节点通道），冻结新任务并等待已接纳任务结束，再停止所有保留版本的 Server、Host、Runtime 和资源服务。停服前确认 Runtime 没有运行进程或保留容量，并保存它的最终库存信息。停服后保存独立备份目录，包含数据库、旧包校验、配置、systemd 服务、挂载信息、控制器模板和命令行入口；随后使用现有休眠记录保留旧 Runtime 的索引，让新 Host 可以启动。资源服务二进制和 unit 随候选一起升级；每个 Runtime 使用独立镜像。候选 Server 执行事务迁移后，通过私有 DAG 探针、项目读取和资源验证，才重新开放 admission 和公共入口。
+
+`release-state.json` 的 `maintenance` 保存候选、备份地址、阶段和阶段时间。中断后续跑使用同一备份、配置快照和候选；完整备份不被重试覆盖。启动候选 Server 的迁移意图先落盘；从此即使启动回复丢失、写入尚未开放或公共探针失败，也拒绝用旧备份回滚，必须继续同一候选或用兼容新 schema 的版本修复。
+
+候选 Server 的迁移启动前，`--rollback` 可以停止候选，恢复维护前的项目表、索引和 schema 版本，再恢复资源服务、Host 状态、配置、控制器和入口。非项目表只校验一致性，不写入认证表；不一致或备份校验失败时停止恢复。旧 Server 通过项目读取和 admission 复开验证后才恢复公共入口。迁移启动后只允许向前恢复；维护完成后的滚动发布与回滚仅接受数据契约 2、schema v32 的兼容版本，已停止的旧版本不再参与。
+
+Server 的源工作区必须预先存在，并允许实际资源服务账号读取和进入；预检及资源服务升级都会检查这项权限。维护工具不创建源目录、不修改源目录所有者或权限，也不移动源路径。二进制池、客户端挂载、服务配置文件和会备份恢复的状态目录不能与源工作区重合，也不能互相包含。只有应用管理的二进制池和服务状态目录会自动准备权限。
 
 ## Server 信号入口
 
@@ -78,9 +100,9 @@ scripts/platform/deploy.sh --signal --rollback --wait-seconds 300
 - Host 的 `host.db` 保存 Runtime 注册、不可变执行归属和全机容量队列。所有版本合计使用同一个并发上限和 FIFO；降低上限不会停止当前执行。多版本 Host 不支持 LIFO。
 - 跨进程长操作使用本机文件锁；SQLite 的写事务仅覆盖短提交，不覆盖模型或网络调用。锁文件不能被清理；进程退出由内核释放锁。
 - Runtime 写入 `host-binding.json` 后使用共享容量账本，在启动执行前取得槽位，完成持久化后释放。心跳失联、Server 退出、发布或回滚均不释放运行槽位。
-- Runtime 的 `global-skills` 固定全局用户技能及本版本内嵌技能；Host 启动不会改写共享技能目录。后续发布继承当前 Runtime 已配置的 OCI 镜像并保留私有副本；存在镜像时，预热还必须通过真实 runc 探针。wasmtime 缓存位于容器私有 `/tmp`，无需修改环境变量或根目录只读属性。
+- Runtime 的 `global-skills` 固定全局用户技能及本版本内嵌技能；Host 启动不会改写共享技能目录。后续发布继承当前 Runtime 已配置的 OCI 镜像并保留私有副本；镜像为必需项，预热必须通过真实 runc 探针，且镜像中的两个运行器必须来自同一版本包。
 - Runtime 意外退出遗留运行槽位时，启动明确拒绝未解决的状态；需在独立维护流程中核实原进程和容器已退出，不能直接按超时回收或自动重跑。
-- 休眠要求无运行、排队、工具进程、执行 future、持久化错误和待确认 Brain outbox。Host 保留最终索引、版本包和数据；原执行查询或续跑会通过独立 unit 唤醒 Runtime。回收与使用同一 Runtime 的 RPC 使用互斥/共享文件锁协调。
+- 节点冻结或重新开放任务时保持休眠 Runtime 停止；实际访问并唤醒时，在放行请求前同步当前任务开关。休眠要求无运行、排队、工具进程、执行 future、持久化错误和待确认 Brain outbox。Host 保留最终索引、版本包和数据；原执行查询或续跑会通过独立 unit 唤醒 Runtime。回收与使用同一 Runtime 的 RPC 使用互斥/共享文件锁协调。
 
 ## 页面、事件与接口
 
@@ -110,8 +132,10 @@ scripts/platform/deploy.sh --backup /srv/backups/opencoder-online-001
 
 发布验收必须包含跨切换 TODO 依赖链、持续 DAG 工具任务和持续新任务流，并核对原进程、执行归属、FIFO、容量、日志游标、历史与产物。模拟故障覆盖发布工具/Server 中断、重复请求、回滚和三版并存。最终切换后观察 15 分钟。仓库测试与真实运行证据分别记录，不能用启动成功或模拟测试代替真实验收。
 
-隔离进程演练入口为 `scripts/acceptance/smooth_release/main.py --bin-dir <已构建二进制目录> --nginx <nginx路径>`。它启动私有 Server/Host、独立 systemd Runtime、只读 NFS 和持续请求流，保留日志与数据库。加 `--wasmtime <已核验的可执行文件>` 验证真实 OCI 容器；工具为各 Runtime 复制私有运行时目录。`--data-parent` 可选择隔离测试存储；使用内存文件系统的结果仅用于功能与竞态验证，不能充当生产磁盘的延迟或持久性验收。
+平滑切换允许最多 30 秒的受理延迟、连续受理间隔和调度间隔，不设 1 秒门槛。隔离进程演练检查最大值；真实入口验收另行记录 P95，并要求公共探测无失败、连续成功探测间隔不超过 30 秒。30 秒边界通过，超过即失败。
 
-首次迁移完成后，使用 `python3 scripts/acceptance/smooth_release/live.py --config <现有配置> --bundle <下一兼容版本包>` 做真实模型验收。该命令创建专用 TODO 依赖链和长 WASI 任务，运行正式发布命令，核对原 Runtime/Shell 进程、新任务归属和 SSE 游标，然后持续提交探针观察至少 900 秒。验收失败也只释放自身等待信号，保留执行与证据，不删除数据库或取消任务。应提前构建好下一版本包。
+隔离进程演练入口为 `scripts/acceptance/smooth_release/main.py --bin-dir <已构建二进制目录> --nginx <nginx路径> --rootfs <已准备的原生镜像>`。它启动私有 Server/Host、独立 systemd Runtime、只读 NFS 和持续请求流，保留日志与数据库。所有 DAG 探针均验证真实 OCI 容器；工具为各 Runtime 准备私有镜像。`--data-parent` 可选择隔离测试存储；使用内存文件系统的结果仅用于功能与竞态验证，不能充当生产磁盘的延迟或持久性验收。
+
+首次迁移完成后，使用 `python3 scripts/acceptance/smooth_release/live.py --config <现有配置> --bundle <下一兼容版本包>` 做真实模型验收。该命令创建专用 TODO 依赖链和长原生二进制任务，运行正式发布命令，核对原 Runtime/Shell 进程、新任务归属和 SSE 游标，然后持续提交探针观察至少 900 秒。验收失败也只释放自身等待信号，保留执行与证据，不删除数据库或取消任务。应提前构建好下一版本包。
 
 加入 `--signal` 使用 Server 信号发布；两版均支持信号时，再加入 `--signal-roundtrip`，在新旧长任务仍运行时执行发布、回滚、再发布。验收脚本应由独立 systemd 作业运行，避免终端退出中断观察。独立信号失败演练入口为 `scripts/acceptance/signal_release/main.py`，验证真实 USR1/USR2、重复信号、失败回执和 Server 继续服务。

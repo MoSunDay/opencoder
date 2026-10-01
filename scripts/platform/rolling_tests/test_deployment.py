@@ -32,6 +32,9 @@ class Operations:
 
     def http(self, base, path, method="GET", body=None):
         self.calls.append((method, path, copy.deepcopy(body)))
+        if path == '/api/health':
+            return {'ok': True, 'role': 'resources', 'build': {
+                'protocol_version': 9, 'release_compatibility': manifest('resources')['compatibility']}}
         if path == '/api/admin/release':
             return {'retirement_protocol': 2}
         if path.startswith("/runtimes/") and path.endswith("/activate"):
@@ -211,6 +214,19 @@ class DeploymentTests(unittest.TestCase):
         self.assertNotIn("worker_shutdown_timeout", configuration)
         self.assertIn("proxy_next_upstream off", configuration)
         self.assertIn("listen 127.0.0.1:18081", configuration)
+
+    def test_old_resource_service_is_rejected_before_candidate_or_service_changes(self):
+        original = self.operations.http
+        def old(base, path, method='GET', body=None):
+            if path == '/api/health':
+                return {'ok': True, 'role': 'resources'}
+            return original(base, path, method, body)
+        self.operations.http = old
+        before = self.journal.path.read_bytes()
+        with self.assertRaisesRegex(ValueError, 'maintenance upgrade'):
+            deploy(self.settings, Path('bundle'), self.operations)
+        self.assertEqual(self.operations.calls, [])
+        self.assertEqual(self.journal.path.read_bytes(), before)
 
     def test_failed_rollback_standby_preserves_traffic_and_reuses_probe_on_retry(self):
         deploy(self.settings, Path("bundle"), self.operations)
@@ -394,15 +410,15 @@ class DeploymentTests(unittest.TestCase):
         source = root / 'old/dag/rootfs'
         (source / 'usr/bin').mkdir(parents=True)
         (source / 'dev').mkdir()
-        (source / 'usr/bin/wasmtime').write_bytes(b'first-version')
+        (source / 'usr/bin/dag-runner').write_bytes(b'first-version')
         (source / 'dev/ptmx').write_bytes(b'live-device')
         (source / 'bin').symlink_to('usr/bin')
         record = {'runtime_data':str(root / 'new'),'resource_source':str(root / 'old')}
-        freeze_rootfs(record)
-        (source / 'usr/bin/wasmtime').write_bytes(b'second-version')
-        freeze_rootfs(record)
+        freeze_rootfs(record, source)
+        (source / 'usr/bin/dag-runner').write_bytes(b'second-version')
+        freeze_rootfs(record, source)
         target = root / 'new/dag/rootfs'
-        self.assertEqual((target / 'usr/bin/wasmtime').read_bytes(),b'first-version')
+        self.assertEqual((target / 'usr/bin/dag-runner').read_bytes(),b'first-version')
         self.assertFalse((target / 'dev/ptmx').exists())
         self.assertEqual((target / 'bin').readlink(),Path('usr/bin'))
         self.assertEqual((source / 'dev/ptmx').read_bytes(),b'live-device')
@@ -410,7 +426,7 @@ class DeploymentTests(unittest.TestCase):
         outside.mkdir()
         (source / 'workspace').symlink_to(outside)
         with self.assertRaisesRegex(ValueError,'workspace'):
-            freeze_rootfs({'runtime_data':str(root / 'third'),'resource_source':str(root / 'old')})
+            freeze_rootfs({'runtime_data':str(root / 'third')}, source)
         self.assertFalse((outside / 'context').exists())
 
 

@@ -1,28 +1,4 @@
-//! Container-side single-step agent session runner (`dag.agent_sandbox = runc`).
-//!
-//! The host executes `agent` steps by launching THIS binary inside a
-//! read-only OCI container (`ArgvStyle::Direct`, argv
-//! `["/usr/bin/agent-step-runner"]`); the whole session — LLM loop, tools,
-//! artifacts — then runs confined to the container with the run context (rw),
-//! optional knowledge/Agent pools (ro), and, for Codex, the node's login
-//! directory (rw for atomic refresh) plus private launch settings (ro).
-//!
-//! Contract (env, injected by the host executor; see `exec::agent_runc`):
-//! - `OPENCODER_STEP_PROMPT`  — container path of the step's prompt file
-//!   (REQUIRED; missing = contract violation, exit code 2);
-//! - `OPENCODER_STEP_DIR`     — the step artifact dir (writable mount);
-//! - `OPENCODER_STEP_SESSION_ID` — host-preallocated session id (console
-//!   attachability survives; a fresh ULID when absent);
-//! - `OPENCODER_STEP_AGENT`   — executing agent name (default `act`);
-//! - `OPENCODER_HOW_APPEND`   — optional workflow-declared how.md payload;
-//! - `OPENAI_BASE_URL` / `OPENAI_API_KEY` / `OPENCODER_MODEL` — the native
-//!   harness endpoint; Codex reads its private launch manifest instead.
-//!
-//! Artifacts written into the step dir (host-visible through the bind):
-//! `session.json` (`running` → `done`/`error`), `transcript.txt`, and the
-//! optional `output.json` recovered from the final assistant text with the
-//! same extraction contract as the host path. Exit code: 0 success, 1 run
-//! failure, 2 contract violation.
+//! Agent session runner executed inside the shared DAG container.
 
 use std::io::Write;
 use std::path::PathBuf;
@@ -38,6 +14,13 @@ fn env_or(name: &str, default: &str) -> String {
 }
 
 fn main() {
+    if std::env::args().skip(1).collect::<Vec<_>>() == ["--build-info"] {
+        println!(
+            "{}",
+            serde_json::to_string(&opencoder_core::version::build_info()).unwrap()
+        );
+        return;
+    }
     match run() {
         Ok(()) => {}
         Err(code) => std::process::exit(code),
@@ -64,7 +47,8 @@ fn run() -> Result<(), i32> {
             return Err(2);
         }
     };
-    let step_dir = PathBuf::from(env_or("OPENCODER_STEP_DIR", "/workspace/context/step"));
+    let step_dir = PathBuf::from(env_or("OPENCODER_STEP_DIR", "/workspace/step"));
+    let meta_dir = PathBuf::from(env_or("OPENCODER_STEP_META", "/workspace/step/meta"));
     if let Err(error) = std::fs::create_dir_all(&step_dir) {
         eprintln!(
             "agent-step-runner: cannot create step dir {}: {error}",
@@ -74,9 +58,13 @@ fn run() -> Result<(), i32> {
     }
     let session_id = env_or("OPENCODER_STEP_SESSION_ID", &ulid::Ulid::new().to_string());
 
-    // 2. Config: the container carries no config files, so `/workspace`
-    // discovery plus the host-injected env overlay defines the endpoint.
-    let config = match opencoder_core::Config::load(std::path::Path::new("/workspace")) {
+    let config = match std::env::var("OPENCODER_STEP_CONFIG")
+        .map_err(anyhow::Error::from)
+        .and_then(|path| {
+            Ok(serde_json::from_slice::<opencoder_core::Config>(
+                &std::fs::read(path)?,
+            )?)
+        }) {
         Ok(config) => config,
         Err(error) => {
             eprintln!("agent-step-runner: config load failed: {error}");
@@ -84,7 +72,7 @@ fn run() -> Result<(), i32> {
         }
     };
     let client = opencoder_session::harness::configured_client(config.clone());
-    let agent = match opencoder_dag_runtime::exec::how_copy::load(&step_dir) {
+    let agent = match opencoder_dag_runtime::exec::how_copy::load(&meta_dir) {
         Ok(agent) => agent,
         Err(error) => {
             eprintln!("agent-step-runner: cannot load frozen agent/how.md: {error:#}");
@@ -136,6 +124,7 @@ fn run() -> Result<(), i32> {
     let failure = event_error.clone();
     let cancellation = tokio_util::sync::CancellationToken::new();
     session.cancel = Some(cancellation.clone());
+    let signal_cancel = cancellation.clone();
     let transcript = Arc::new(Mutex::new(String::new()));
     let tail = Arc::clone(&transcript);
     let on_event = move |ev: SessionEvent| {
@@ -164,7 +153,17 @@ fn run() -> Result<(), i32> {
                 return Err(1);
             }
         };
-        runtime.block_on(run_session(&mut session, prompt, on_event))
+        runtime.block_on(async {
+            let mut terminate =
+                tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+            let signal = tokio::spawn(async move {
+                terminate.recv().await;
+                signal_cancel.cancel();
+            });
+            let result = run_session(&mut session, prompt, on_event).await;
+            signal.abort();
+            result
+        })
     };
 
     if let Some(error) = event_error.lock().unwrap().as_ref() {
@@ -181,6 +180,15 @@ fn run() -> Result<(), i32> {
         }
     }
     write_artifact(&step_dir, "transcript.txt", text.as_bytes())?;
+    let messages = serde_json::to_vec(&session.messages).map_err(|error| {
+        eprintln!("agent-step-runner: cannot encode messages: {error}");
+        1
+    })?;
+    if messages.len() > 8 * 1024 * 1024 {
+        eprintln!("agent-step-runner: messages exceed 8 MiB");
+        return Err(1);
+    }
+    write_artifact(&step_dir, "messages.json", &messages)?;
     if let Some(value) = opencoder_dag_runtime::exec::agent::extract_output_json_from(&text) {
         write_artifact(&step_dir, "output.json", value.to_string().as_bytes())?;
     }

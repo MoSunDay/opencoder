@@ -199,8 +199,9 @@ pub fn load_runtime(selected: Harness) -> Result<Option<HarnessRuntime>> {
     if selected != Harness::Codex {
         return Ok(None);
     }
+    let launch = std::env::var("OPENCODER_CODEX_LAUNCH").unwrap_or_else(|_| LAUNCH_MOUNT.into());
     let runtime: HarnessRuntime = serde_json::from_slice(
-        &std::fs::read(LAUNCH_MOUNT).context("Codex sandbox launch settings missing")?,
+        &std::fs::read(launch).context("Codex sandbox launch settings missing")?,
     )?;
     ensure!(
         runtime.harness == Harness::Codex && runtime.codex.is_some(),

@@ -2,7 +2,7 @@ import argparse
 import contextlib
 import json
 from pathlib import Path
-from . import backup, config, deployment, migration
+from . import backup, config, deployment, migration, maintenance
 from .io import Operations
 from .state import Journal, locked
 from signal_release import controller
@@ -15,8 +15,9 @@ def main():
     parser.add_argument("--bundle", type=Path)
     parser.add_argument("--wait-seconds", type=int, default=90)
     parser.add_argument("--signal", action="store_true", help="ask the running Server to launch an independent release job")
+    parser.add_argument("--maintenance", action="store_true", help="stop writers and back up before an incompatible upgrade")
     actions = parser.add_mutually_exclusive_group()
-    actions.add_argument("--migrate", action="store_true", help="execute the one-time safe migration window")
+    actions.add_argument("--migrate", action="store_true", help="execute first migration or a stopped maintenance upgrade")
     actions.add_argument("--migration-receipt", action="store_true", help="print the concrete migration scope without stopping services")
     actions.add_argument("--rollback", action="store_true")
     actions.add_argument("--status", action="store_true")
@@ -29,6 +30,8 @@ def main():
         parser.error("--signal supports deploy or --rollback only")
     if args.rollback and args.bundle:
         parser.error("--rollback does not accept --bundle")
+    if args.maintenance and (args.migrate or args.migration_receipt or args.backup or args.status or args.rollback):
+        parser.error('--maintenance supports deploy or --stage only; --rollback detects maintenance recovery')
     settings = config.load(args.config)
     if args.status:
         print(json.dumps({**Journal(settings.state_dir).data, "signals": controller.status(settings)}, indent=2))
@@ -45,17 +48,26 @@ def main():
                 backup.snapshot(settings, args.backup)
                 result = {"backup": str(args.backup), "cross_database_snapshot": False}
             elif args.rollback:
-                controller.install(settings, args.config, operations)
+                if args.signal:
+                    controller.install(settings, args.config, operations)
                 result = None if args.signal else deployment.rollback(settings, operations, args.wait_seconds)
             else:
                 if not args.bundle:
                     parser.error("--bundle is required")
-                controller.install(settings, args.config, operations)
                 if args.stage or args.signal:
-                    result = controller.stage(settings, args.bundle)
+                    result = (controller.stage(settings, args.bundle, maintenance=True) if args.maintenance
+                              else controller.stage(settings, args.bundle))
+                    controller.install(settings, args.config, operations)
                 else:
-                    action = migration.migrate if args.migrate else deployment.deploy
+                    current = Journal(settings.state_dir).data
+                    stopped = args.maintenance or (args.migrate and current['current']
+                                and current.get('migration_stage') != 'switching')
+                    if not stopped:
+                        controller.install(settings, args.config, operations)
+                    action = maintenance.deploy if args.maintenance else migration.migrate if args.migrate else deployment.deploy
                     result = action(settings, args.bundle, operations, args.wait_seconds)
+                    if stopped:
+                        controller.install(settings, args.config, operations)
         if args.signal:
             target = result["release_id"] if result else None
             result = trigger(settings, "rollback" if args.rollback else "deploy", operations, args.wait_seconds)

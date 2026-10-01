@@ -5,7 +5,7 @@ use opencoder_llm::ChatStream;
 use opencoder_session::SessionState;
 use opencoder_store::Store;
 use std::path::PathBuf;
-use std::sync::{atomic::AtomicBool, Arc};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
@@ -13,7 +13,6 @@ use tokio_util::sync::CancellationToken;
 use crate::cache_salt_menu::{handle_cache_salt_key, CacheSaltMenu, CacheSaltOutcome};
 use crate::chat::ChatView;
 use crate::command::CommandMenu;
-use crate::input::spawn_input_pump;
 use crate::key_handler::{handle_key, KeyAction};
 use crate::menu::SkillMenu;
 use crate::model_menu::ModelMenu;
@@ -22,7 +21,7 @@ use crate::render::{MouseHits, Term};
 use crate::skill_persist::{act_plan_highlight, initial_skill_state};
 use crate::task::{handle_task_key, TaskOutcome, TaskPicker};
 use crate::terminal::consume_modifier_or_release;
-use crate::worker::{process_cmd, UiCmd, UiEvent};
+use crate::worker::{UiCmd, UiEvent};
 use crate::TuiOpts;
 #[path = "app_bootstrap.rs"]
 mod app_bootstrap;
@@ -61,21 +60,15 @@ pub(super) async fn run_app(
     mut config: Config,
     mut client: Arc<dyn ChatStream>,
 ) -> Result<String> {
-    // Cancellation token for double-Esc hard-abort (mid-stream/mid-tool).
-    // Reassigned by `rebind_session` on every `/task` session switch.
     let mut cancel = CancellationToken::new();
     let session = session.with_cancel(cancel.clone());
-    // Parent turn-level interrupt: TUI `>` steer fires this (not a hard `cancel`) so a
-    // pending steer is absorbed at the next boundary; the run loop continues, unlike
-    // double-Esc. Reassigned by `rebind_session` on every `/task` switch.
+    // These session handles are rebound together on task switches.
     let mut turn_cancel = session
         .turn_cancel
         .clone()
         .unwrap_or_else(|| Arc::new(std::sync::Mutex::new(CancellationToken::new())));
     let mut child_runtime = crate::worker::ChildRuntimeHandles::from_session(&session);
     let mut skill_handle = session.skill_prompt.clone();
-    // Question hub: the TUI is the interactive question listener, attached
-    // before the worker spawns so the first turn may already ask the user.
     let mut question_hub = session.question_hub.clone();
     question_hub.attach();
     let mut question_menu = crate::question_menu::dialog_state();
@@ -95,7 +88,6 @@ pub(super) async fn run_app(
     let mut undo_state = crate::undo::init(&input, cursor_idx);
     let mut scroll: u32 = 0;
     let mut follow = true;
-    // Queue/steer panel scroll offset (0 = pinned to top (oldest)); snapshot/restored per-session.
     let mut queue_scroll: u32 = 0;
     let mut plan_edit: Option<crate::plan_edit::PlanEdit> = None;
     let mut notepad: Option<crate::notepad::NotepadView> = None;
@@ -108,19 +100,15 @@ pub(super) async fn run_app(
     let mut queue_items =
         crate::queue_panel::restore_pending_mirrors(&store, &session_id, &mut chat.steer_items)
             .await;
-    // Off-loop queue admission: Tab / Enter-while-running submits go through a
-    // dedicated actor so this event loop never waits on the store-wide db_lock
-    // (held in bursts by the running turn's message/subagent flushers). The
-    // optimistic temp row appears instantly; reconciliation arrives on
-    // `admit_done_rx` (select branch below).
-    let (admit_tx, mut admit_done_rx) = queue_admitter::spawn_admitter(Arc::clone(&store));
+    // Queue and steer admission run outside the render loop.
+    let (admit_tx, mut admit_done_rx) =
+        queue_admitter::spawn_admitter(Arc::clone(&store), config.network.proxy.clone());
     let mut admit_st = queue_admitter::AdmitUiState::default();
     let mut clear_confirm: Option<crate::clear_confirm::ClearConfirm> = None; // countdown guard
     let mut admitter_alive = true;
     let mut skill_menu: Option<SkillMenu> = None;
     let mut task_picker: Option<TaskPicker> = None;
     let mut command_menu: Option<CommandMenu> = None;
-    let mut file_menu: Option<crate::file_menu::FileMenu> = None;
     let mut agent_menu: Option<crate::agent_menu::AgentMenu> = None;
     let mut model_menu: Option<ModelMenu> = None;
     let mut mcp_menu: Option<crate::mcp_menu::McpMenu> = None;
@@ -140,39 +128,17 @@ pub(super) async fn run_app(
     let mut copy_mode = false;
     let mut session_states: std::collections::HashMap<String, crate::session_ui::SessionUiState> =
         std::collections::HashMap::new();
-    let (mut cmd_tx, mut cmd_rx) = mpsc::channel::<UiCmd>(64);
+    let (mut cmd_tx, cmd_rx) = mpsc::channel::<UiCmd>(64);
     let (evt_tx, mut evt_rx) = mpsc::channel::<UiEvent>(crate::worker::UI_EVENT_CAPACITY);
 
-    // Sidecar actor for THIS session — spawned before the worker task takes
-    // ownership of `evt_tx`/`session` (the actor clones what it needs from
-    // them). Reassigned by `app_task::switch_session` on every `/task` swap;
-    // dropping the old sender lets the old actor drain and exit.
-    let mut sidecar_ask =
-        crate::sidecar_ui::spawn_actor(&session, evt_tx.clone(), Some(Arc::clone(&store)));
+    let (mut sidecar_ask, worker) =
+        crate::app_helpers::start_worker(session, evt_tx, cmd_rx, store.clone());
 
-    let worker = tokio::spawn(async move {
-        let mut sess = session;
-        while let Some(cmd) = cmd_rx.recv().await {
-            if process_cmd(cmd, &mut sess, &evt_tx).await {
-                break;
-            }
-        }
-    });
-
-    // Input uses a dedicated OS thread. A liveness supervisor handles pty-close
-    // stalls by restoring the terminal and exiting cleanly.
-    let heartbeat = crate::supervisor::Heartbeat::new();
-    let supervisor_active = Arc::new(AtomicBool::new(true));
-    crate::supervisor::spawn(heartbeat.clone(), Arc::clone(&supervisor_active));
-    let (mut input_rx, _input_handle) = spawn_input_pump(heartbeat);
+    let (mut input_rx, supervisor_active) = crate::app_helpers::start_input();
     let mut anim_ticker = tokio::time::interval(Duration::from_millis(app_loop::ANIM_TICK_MS));
-    // Frame-rate limiter: redraw cadence is decided by the `/config` fps
-    // (default 10 FPS). `Skip` prevents burst-fire catch-up after a stall.
     let mut frame_ms = config.tui_frame_ms();
     let mut frame_ticker = tokio::time::interval(Duration::from_millis(frame_ms));
     frame_ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-    // Body cache refresh ticker: rebuilds the cached ChatView snapshot at 3 FPS.
-    // `Skip` prevents burst-fire catch-up after a stall.
     let mut body_ticker = tokio::time::interval(Duration::from_millis(app_loop::BODY_REFRESH_MS));
     body_ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut quitting = false; // render "shutting down…" frame before worker-shutdown wait
@@ -185,7 +151,78 @@ pub(super) async fn run_app(
     let mut hits = MouseHits::default();
 
     let mut last_size: Option<(u16, u16)> = terminal.size().ok().map(|r| (r.width, r.height));
+    let mut pending_task_pick = None;
+    let mut selection: crate::remote::Selection = None;
     loop {
+        let (changed, pick) =
+            crate::remote::poll_ui(&mut agent_menu, &mut selection, &mut mode_flash, anim_tick);
+        if changed {
+            dirty = true;
+            render_pending = true;
+        }
+        if pick.is_some() {
+            pending_task_pick = pick;
+        }
+        if let Some(pick) = pending_task_pick.take() {
+            if chat.remote {
+                question_menu = None;
+            } else {
+                crate::question_menu::abandon_dialog(&mut question_menu, &question_hub);
+            }
+
+            let switched = app_task::switch_session(
+                pick,
+                opts,
+                &mut cmd_tx,
+                &mut evt_rx,
+                &workdir,
+                &config,
+                &client,
+                &store,
+                &mut model_label,
+                &mut session_states,
+                &mut running,
+                &mut chat,
+                &mut history,
+                &mut scroll,
+                &mut follow,
+                &mut queue_scroll,
+                &mut sys_tokens,
+                &mut queue_items,
+                &mut active_skill,
+                &mut active_skill_body,
+                &mut session_id,
+                &mut input,
+                &mut cursor_idx,
+                &mut hist_idx,
+                &mut cancel,
+                &mut turn_cancel,
+                &mut child_runtime,
+                &mut skill_handle,
+                &mut question_hub,
+                &mut sidecar_ask,
+            )
+            .await;
+            match switched {
+                Ok(()) => {
+                    mode_flash = None;
+                    pending_images.clear();
+                    subagent_focus = None;
+                    cancelled = false;
+                    drain_pending = false;
+                    clear_confirm = None;
+                    plan_edit = None;
+                    last_esc = None;
+                    task_elapsed_ms = 0;
+                    plan_skill_active = false;
+                    admit_st = Default::default();
+                    dirty = true;
+                    render_pending = true;
+                    body_refresh_pending = true;
+                }
+                Err(error) => mode_flash = Some((format!("{error:#}"), anim_tick)),
+            }
+        }
         app_loop::tick_clock(
             running,
             &mut prev_running,
@@ -248,7 +285,6 @@ pub(super) async fn run_app(
                     skill_menu.as_ref(),
                     task_picker.as_ref(),
                     command_menu.as_ref(),
-                    file_menu.as_ref(),
                     agent_menu.as_ref(),
                     model_menu.as_ref(),
                     mcp_menu.as_ref(),
@@ -323,43 +359,7 @@ pub(super) async fn run_app(
                         if task_picker.is_some() {
                             match handle_task_key(&mut task_picker, k) {
                                 TaskOutcome::Pick(pick) => {
-                                    // Drop any pending question dialog: abandoning its hub
-                                    // entry unblocks the tool with the skip reply.
-                                    crate::question_menu::abandon_dialog(&mut question_menu, &question_hub);
-
-                                    app_task::switch_session(
-                                        pick,
-                                        opts,
-                                        &mut cmd_tx,
-                                        &mut evt_rx,
-                                        &workdir,
-                                        &config,
-                                        &client,
-                                        &store,
-                                        &mut model_label,
-                                        &mut session_states,
-                                        &mut running,
-                                        &mut chat,
-                                        &mut history,
-                                        &mut scroll,
-                                        &mut follow,
-                                        &mut queue_scroll,
-                                        &mut sys_tokens,
-                                        &mut queue_items,
-                                        &mut active_skill,
-                                        &mut active_skill_body,
-                                        &mut session_id,
-                                        &mut input,
-                                        &mut cursor_idx,
-                                        &mut hist_idx,
-                                        &mut cancel,
-                                        &mut turn_cancel,
-                                        &mut child_runtime,
-                                        &mut skill_handle,
-                                        &mut question_hub,
-                                        &mut sidecar_ask,
-                                    )
-                                    .await?;
+                                    selection = None; pending_task_pick = Some(pick);
                                 }
                                 TaskOutcome::Quit => { let _ = cmd_tx.send(UiCmd::Quit).await; break; }
                                 TaskOutcome::ClearAll { keep_session_id } => {
@@ -468,7 +468,7 @@ pub(super) async fn run_app(
                             );
                             continue;
                         }
-                        match handle_key(
+                        let action = handle_key(
                             k,
                             &keymap,
                             &mut input,
@@ -493,10 +493,13 @@ pub(super) async fn run_app(
                             input_disabled,
                             &mut undo_state,
                             &mut queue_scroll,
-                            &mut file_menu,
-                            &workdir,
                             &mut agent_menu,
-                        ) {
+                        );
+                        if chat.remote && crate::remote::local_control(&action) {
+                            mode_flash = Some(("This control is available for /agent self tasks".into(), anim_tick));
+                            continue;
+                        }
+                        match action {
                             KeyAction::Submit(text) => {
                                 if app_submit::handle_submit_action(
                                     text, &mut running, &admit_tx, &mut admit_st,
@@ -563,29 +566,28 @@ pub(super) async fn run_app(
                                 follow = true;
                             }
                             KeyAction::QueueUnsupported => {
-                                // Tab-queue rejected: a running subagent is
-                                // focused — transient hint only, the parent
-                                // session stays untouched (string lives in
-                                // app_helpers::queue_unsupported_flash).
                                 mode_flash = Some(queue_unsupported_flash(anim_tick));
                             }
                             KeyAction::ModeSwitchBlocked => {
                                 mode_flash = Some(mode_switch_busy_flash(anim_tick));
                             }
-                            KeyAction::AgentCommandUnavailable => {
-                                mode_flash = Some(("Agent command is not available yet".into(), anim_tick));
+                            KeyAction::OpenTask => {
+                                selection = None;
+                                let sessions = store.list_sessions(&opencoder_store::SessionFilter::default()).await.unwrap_or_default();
+                                task_picker = Some(TaskPicker::new(sessions,session_id.clone()));
+                            }
+                            KeyAction::SelectAgent(name) => {
+                                match name.as_str() {
+                                    "" => { selection = None; agent_menu = Some(crate::agent_menu::AgentMenu::configured(config.clone())); }
+                                    "self" => { selection = None; pending_task_pick = Some(crate::task::TaskPick::New); }
+                                    _ => { selection = Some(crate::remote::request(config.clone(),name)); mode_flash = Some(("Connecting to Server…".into(),anim_tick)); }
+                                }
                             }
                             KeyAction::SidecarAsk(question) => {
-                                // Bare `/sidecar`: enter a FRESH panel — destroy
-                                // any previous conversation (the next ask rebuilds
-                                // from a fresh store snapshot) and show the empty
-                                // panel.
                                 if question.is_empty() {
                                     crate::sidecar_ui::enter_panel(&mut chat, &sidecar_ask);
                                     follow = true;
                                 } else if !chat.sidecar_focus {
-                                    // Entering WITH a question: same fresh-panel
-                                    // contract, then fire the ask immediately.
                                     crate::sidecar_ui::enter_panel(&mut chat, &sidecar_ask);
                                     match sidecar_ask
                                         .try_send(crate::sidecar_ui::SidecarCmd::Ask(question.clone()))

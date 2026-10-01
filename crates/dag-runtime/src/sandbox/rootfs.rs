@@ -154,13 +154,13 @@ mod tests {
         let source = temp.path().join("image");
         fs::create_dir_all(source.join("usr/bin")).unwrap();
         fs::create_dir_all(source.join("dev")).unwrap();
-        fs::write(source.join("usr/bin/wasmtime"), "version-1").unwrap();
+        fs::write(source.join("usr/bin/native-tool"), "version-1").unwrap();
         fs::write(source.join("dev/ptmx"), "old runtime device").unwrap();
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
             fs::set_permissions(
-                source.join("usr/bin/wasmtime"),
+                source.join("usr/bin/native-tool"),
                 fs::Permissions::from_mode(0o755),
             )
             .unwrap();
@@ -174,14 +174,14 @@ mod tests {
             })
             .into();
         let a = snapshot(&source, &bundles[0]).unwrap();
-        fs::write(source.join("usr/bin/wasmtime"), "version-2").unwrap();
+        fs::write(source.join("usr/bin/native-tool"), "version-2").unwrap();
         let b = snapshot(&source, &bundles[1]).unwrap();
         assert_eq!(
-            fs::read_to_string(a.join("usr/bin/wasmtime")).unwrap(),
+            fs::read_to_string(a.join("usr/bin/native-tool")).unwrap(),
             "version-1"
         );
         assert_eq!(
-            fs::read_to_string(b.join("usr/bin/wasmtime")).unwrap(),
+            fs::read_to_string(b.join("usr/bin/native-tool")).unwrap(),
             "version-2"
         );
         assert!(!a.join("dev/ptmx").exists());
@@ -193,7 +193,7 @@ mod tests {
         );
         assert_eq!(snapshot(&source, &bundles[0]).unwrap(), a);
         assert_eq!(
-            fs::read_to_string(a.join("usr/bin/wasmtime")).unwrap(),
+            fs::read_to_string(a.join("usr/bin/native-tool")).unwrap(),
             "version-1"
         );
         #[cfg(unix)]
@@ -201,7 +201,7 @@ mod tests {
             use std::os::unix::fs::PermissionsExt;
             assert_eq!(fs::read_link(a.join("bin")).unwrap(), Path::new("usr/bin"));
             assert_eq!(
-                fs::metadata(a.join("usr/bin/wasmtime"))
+                fs::metadata(a.join("usr/bin/native-tool"))
                     .unwrap()
                     .permissions()
                     .mode()

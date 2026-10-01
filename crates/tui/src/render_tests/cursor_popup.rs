@@ -45,8 +45,7 @@ fn draw(
         None, // mode_flash
         None, // skill_menu
         None, // task_picker
-        None, // command_menu
-        None, // file_menu
+        None,
         None, // agent_menu
         None, // model_menu
         mcp_menu,

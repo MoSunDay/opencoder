@@ -9,7 +9,6 @@ Commit: 82a30cf8（发布时基线）/ rel-a51016ca8878ff549460b47081c7a927813ae
 - **发布包**：`scripts/platform/release/build.sh --output /srv/releases/rel-a51016ca...`，manifest `protocol_version: 10`、编译 commit a51016ca 无 dirty、SPA digest 与 dist 树一致；四二进制 SHA256SUMS 校验通过。
 - **全量门（a51016ca 干净树）**：`cargo clippy --workspace --all-targets -- -D warnings` 零告警；`cargo test --workspace` 406 二进制 5223 passed / 0 failed / 7 ignored；`cargo build --workspace` rc=0。SPA 109 文件 799 用例全绿、vite build 后 `check-spa-drift.sh` no drift。发布工具链 signal 12 / rolling 20 / platform 19 / smooth_release 4 全绿；todos 契约 e2e 44/44。
 - **旧 brain 守卫数据处理（用户授权）**：9 个 2026-09-08/09 的 interrupted v1 brain agent 运行（带 brain_receipt）阻塞升级；在 `/var/lib/opencoder-node/agent/<id>/execution.json` 把状态归档为 cancelled 并写 `lifecycle.archive_reason`（审计时间 + 授权），独立归档目录 `/var/lib/opencoder-platform/backups/legacy-brain-v1-archive-20260916/`。worker journal 守卫复扫 4343 条 execution.json 零阻塞。
-- **业务窗口对齐**：等待在途真实评审 DAG `dag-pingce-82ef...` 五步全部 done（00:22 受理，01:05 终态）后才冻结受理，未打断任何用户工作。
 - **备份**：冻结后 `deploy.sh --backup pre-v10-20260917-0107`（host/runtimes/server 全量在线备份）；切换证据目录 `/var/tmp/opencoder-cutover-20260917-0106/`（health/ready/release-state 前置快照、host.db 各阶段备份）。
 
 ## 切换序列
@@ -29,10 +28,7 @@ Commit: 82a30cf8（发布时基线）/ rel-a51016ca8878ff549460b47081c7a927813ae
 | 在线 SPA | served app.js sha256 与 a51016ca commit dist 逐字节一致 |
 | 资源四类型 CRUD | 14 步全 PASS（创建/首存/二改保留/409/restore v1→v3/危险路径 400/内置 act 只读 403/注册卡列表/删卡孤儿留存） |
 | 跨 Agent 隔离 | fork 完整历史、旧池 API 写专属资源 403、绑他人私有资源 400、被引用资源 409 全 PASS |
-| 真实模型注入 | 自定义 Agent 四类资源（含 256 字节 blob、0755 tool、多文件 memory：memory.md+topics/a.md+b.md）受理后 pin 入 runtime 快照，eval-diagnose profile 驱动 gpt-6-astra 原样返回 canary `INJECT-V10-*` |
 | 会话级 Agent 切换 | `POST /api/sessions/<id>/agent {"value":"act"}` 200，inspect 投影 meta.agent=act；agents 列表不再有全局 active 字段 |
-| 历史连续性 | pingce DAG 及全部旧 execution 经新 runtime 可读；节点身份 node-01M1WV... 不变；第二节点 jyhub-macos-builder 以协议 10 重连 |
-| 平台观察 | 900 秒 161 个真实 release-probe 全部 done，最大受理 0.17s；期间真实业务 pingce DAG 持续在新栈正常跑完多轮 |
 
 ## 已知事项与回滚
 
@@ -47,5 +43,4 @@ Commit: 82a30cf8（发布时基线）/ rel-a51016ca8878ff549460b47081c7a927813ae
 
 - 相对 a51016ca 的生产代码差异仅三处（均为按 Agent 身份编辑资源的契约收口，commit `01c14802`）：`web/api_agent_resources.rs` safe_rel_path 拒绝点前缀隐藏段、`agents/resources/model.rs` validate_path 同步拒绝 `.x`/`x/.y`、`core/agent/memory.rs` section_body 对不可读/非 UTF-8 文件 debug 降级（读侧 collect 本就跳过隐藏文件，堵上「可写不可注入」缺口）。其余提交为 docs/test/ops。
 - 发布前置：journal 文件属主修正为 opencoder-server:opencoder-server 0640（切换脚本 root 写入导致 `/api/admin/release` 500），恢复后 signal_protocol=1；HEAD 全量门 5224 passed / 0 failed、clippy 零告警（沿用当夜证据）。
-- 发布：`rolling_cli --signal --bundle rel-2dc1323d --wait-seconds 300`，phase complete，旧 a51016ca 进入退役；nginx 上游切到 3042/3044，健康检查 commit `0.1.0 (2dc1323d)` protocol 10，两节点（human-os-02、jyhub-macos-builder）在线。
 - 线上契约复验：隐藏段写入 `.hidden.md`/`dir/.dot.md`/`topics/.x.md` 全部 400「unsafe file path」；资源四类型 CRUD 14 步全 PASS；跨 Agent 隔离 16 步全 PASS；真实 gpt-6-astra 会话注入 canary `INJECT-HEAD-*` 模型原样回读；线上 app.js sha256 与 2dc1323d commit dist 字节一致（`04862d2e…`）。

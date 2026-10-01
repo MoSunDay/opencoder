@@ -187,7 +187,7 @@ async fn missing_runc_rootfs_is_rejected_before_durable_acceptance() {
                 node_id: None,
             },
             definition: Some(json!({"name":"runc","steps":[{
-                "name":"step","kind":{"type":"wasm","command":"tool.wasm", "sandbox":"runc"}
+                "name":"step","kind":{"type":"binary","resource":"tool"}
             }]})),
         },
     )
@@ -197,7 +197,7 @@ async fn missing_runc_rootfs_is_rejected_before_durable_acceptance() {
     assert!(reply
         .body
         .to_string()
-        .contains(&dir.path().join("node/dag/rootfs").display().to_string()));
+        .contains("DAG rootfs_dir is required"));
     assert!(!dir
         .path()
         .join("node/dag/dag-rootfs/execution.json")

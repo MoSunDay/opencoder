@@ -31,7 +31,7 @@ pub use project::ProjectStore;
 pub use project_factory::open_project_store;
 pub use project_types::{
     ProjectExecutorKind, ProjectGoalPatch, ProjectGoalRecord, ProjectGoalStatus,
-    ProjectMilestonePatch, ProjectMilestoneRecord, ProjectMilestoneStatus, ProjectRunText,
+    ProjectInitiativePatch, ProjectInitiativeRecord, ProjectInitiativeStatus, ProjectRunText,
     ProjectTodoPatch, ProjectTodoRecord, ProjectTodoRunKind, ProjectTodoRunPage,
     ProjectTodoRunPatch, ProjectTodoRunRecord, ProjectTodoRunStatus, ProjectTodoRunSummary,
     ProjectTodoStatus, ProjectTodoSummary,

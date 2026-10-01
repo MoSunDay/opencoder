@@ -57,3 +57,35 @@
 }
 .md-body a { color: var(--oc-primary); }
 .md-body img { max-width: 100%; }
+
+.project-table { width: 100%; min-width: 0; }
+.project-table .ant-table { width: 100%; }
+.project-table .ant-table-cell { overflow-wrap: anywhere; padding: 10px 8px; }
+.project-table .ant-table-column-title { min-width: 0; overflow-wrap: anywhere; }
+.project-table .ant-space, .project-table .ant-select { max-width: 100%; min-width: 0; }
+.project-table .ant-tag { max-width: 100%; white-space: normal; overflow-wrap: anywhere; margin-inline-end: 4px; }
+.project-table-text { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-name { display: flex; justify-content: flex-start; padding-inline: 0; max-width: 100%; min-width: 0; height: auto; text-align: start; }
+.project-name > span { min-width: 0; }
+.project-table-row { cursor: pointer; }
+.project-column-filter { width: 280px; max-width: calc(100vw - 32px); padding: 12px; }
+.project-column-filter .ant-input-number { width: 115px; }
+.project-progress { min-width: 0; width: 100%; max-width: 320px; }
+.project-progress .ant-progress { margin-bottom: 0; }
+.project-progress .ant-progress-text { font-size: 12px; }
+.project-board-columns { display: grid; grid-template-columns: repeat(4, minmax(210px, 1fr)); gap: 12px; overflow-x: auto; padding-bottom: 8px; }
+.project-board-lane { min-height: 220px; min-width: 0; border-radius: 8px; padding: 10px; background: var(--oc-bg-layout); border: 1px solid var(--oc-border); }
+.project-board-lane-over { border-color: var(--oc-primary); }
+.project-todo-card { margin-top: 10px; }
+.project-todo-card .ant-card-head-title { min-width: 0; }
+.project-todo-card .ant-card-head { padding-inline: 10px; }
+.project-todo-card .ant-card-body { padding: 10px; }
+.project-tag-manager { width: 100%; }
+@media (max-width: 800px) {
+  .project-table .ant-table-content { overflow-x: auto; }
+  .project-table table { min-width: 760px; }
+  .project-table .ant-table-cell { padding: 8px 4px; font-size: 12px; }
+  .project-table .ant-select-selection-item { font-size: 12px; }
+  .project-table .ant-btn { padding-inline: 3px; }
+  .project-table .ant-table-column-sorters { gap: 2px; }
+}

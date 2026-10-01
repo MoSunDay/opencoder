@@ -1,78 +1,48 @@
-import { Button, Form, Input, Popconfirm, Segmented, Select, Space, Table, Typography } from 'antd';
+import { Button, Form, Popconfirm, Select, Space, Tag } from 'antd';
 import { useState } from 'react';
 import { apiDel, apiPatch, apiPost } from '../api.js';
-import { Markdown } from './markdown.jsx';
 import { MdEditDrawer } from './views/mdDrawer.jsx';
-import { flattenInitiatives, flattenMilestones, projectOptions, matchesText, searchSelect } from './model/relations.js';
-import { RelationSelect } from './views/relationSelect.jsx';
+import { ProjectTable, TableText, dateColumn } from './views/projectTable.jsx';
+import { TodoProgress } from './views/progress.jsx';
+import { flattenInitiatives, projectOptions, searchSelect } from './model/relations.js';
+import { progressOf } from './model/catalog.js';
 import { err, ok } from '../notice.js';
 
-const STATUS_OPTIONS = [
-  { label: '未开始', value: 'planned' },
-  { label: '进行中', value: 'in_progress' },
-  { label: '已完成', value: 'done' },
-];
-function GroupTab({ overview, refresh, onNotice, goalFilter, setGoalFilter, openTodos, groupType }) {
-  const initiative = groupType === 'initiative';
-  const label = initiative ? '专项' : '里程碑';
-  const base = initiative ? '/api/project/initiatives' : '/api/project/milestones';
-  const path = (id) => `${base}/${encodeURIComponent(id)}`;
+const statusLabel = (status) => ({ planned: '未开始', in_progress: '进行中', done: '已完成' }[status] || status);
+export function initiativeColumns({ openInitiative }) {
+  return [
+    { title: '专项', key: 'title', searchValue: (r) => r.title, render: (_, r) => <Button type="link" className="project-name" onClick={(e) => { e.stopPropagation(); openInitiative(r.id); }}><TableText>{r.title}</TableText></Button> },
+    { title: '所属项目', key: 'project', width: '20%', kind: 'enum', searchValue: (r) => r.goal_title || '未关联', render: (_, r) => <TableText>{r.goal_title}</TableText> },
+    { title: '状态', key: 'status', width: '13%', kind: 'enum', searchValue: (r) => statusLabel(r.status), render: (_, r) => <Tag>{statusLabel(r.status)}</Tag> },
+    { title: 'TODO 数', key: 'todos', width: '11%', kind: 'number', searchValue: (r) => r.progress.total, render: (_, r) => r.progress.total },
+    { title: '进度', key: 'progress', width: '20%', kind: 'number', searchValue: (r) => r.progress.percent, render: (_, r) => <TodoProgress progress={r.progress} /> },
+  ];
+}
+export function InitiativesTab({ overview, refresh, onNotice, openInitiative }) {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(null);
-  const [query, setQuery] = useState('');
-  const [status, setStatusFilter] = useState(null);
-  const projects = projectOptions(overview);
-  const rows = (initiative ? flattenInitiatives(overview) : flattenMilestones(overview)).filter((m) =>
-    matchesText(query, m.title, m.id) && (!status || m.status === status)
-    && (!goalFilter || (goalFilter === 'unlinked' ? !m.goal_id : m.goal_id === goalFilter)));
+  const rows = flattenInitiatives(overview).map((i) => ({ ...i, progress: progressOf(i.todos) }));
   const save = async (values) => {
-    const body = { ...values, goal_id: values.goal_id ?? null };
     try {
-      if (editing) await apiPatch(path(editing.id), body);
-      else await apiPost(base, body);
-      setOpen(false); onNotice(ok(`${label}已保存`)); await refresh();
-      return true;
-    } catch (e) { onNotice(err(`保存${label}失败: ` + e.message)); return false; }
-  };
-  const setStatus = async (row, next) => {
-    try { await apiPatch(path(row.id), { status: next }); await refresh(); }
-    catch (e) { onNotice(err(`切换${label}状态失败: ` + e.message)); }
+      const body = { ...values, goal_id: values.goal_id ?? null };
+      if (editing) await apiPatch(`/api/project/initiatives/${encodeURIComponent(editing.id)}`, body);
+      else await apiPost('/api/project/initiatives', body);
+      setOpen(false); await refresh(); onNotice(ok('专项已保存，TODO 标签已按归属重新匹配')); return true;
+    } catch (error) { onNotice(err(error.message)); return false; }
   };
   const remove = async (row) => {
-    try { await apiDel(path(row.id)); onNotice(ok(`${label}已删除`)); await refresh(); }
-    catch (e) { onNotice(err(`删除${label}失败: ` + e.message)); }
+    try { await apiDel(`/api/project/initiatives/${encodeURIComponent(row.id)}`); await refresh(); onNotice(ok('专项已删除')); }
+    catch (error) { onNotice(err(error.message)); }
   };
-  const columns = [
-    { title: label, dataIndex: 'title', render: (title) => <Typography.Text strong>{title}</Typography.Text> },
-    { title: '所属项目', key: 'project', render: (_, row) => <RelationSelect key={row.id} path={path(row.id)}
-      field="goal_id" value={row.goal_id} options={projects} refresh={refresh} onNotice={onNotice} label={`${label} ${row.title} 所属项目`} /> },
-    { title: '状态', dataIndex: 'status', render: (value, row) => <Segmented size="small" value={value} options={STATUS_OPTIONS} onChange={(next) => setStatus(row, next)} /> },
-    { title: 'TODO', key: 'todos', render: (_, row) => <Button type="link" onClick={() => openTodos?.(row.id)}>{row.todos?.length || 0} 条 TODO</Button> },
-    { title: '操作', key: 'actions', render: (_, row) => <Space>
-      <Button type="link" onClick={() => { setEditing(row); setOpen(true); }}>编辑</Button>
-      <Popconfirm title={`删除该${label}？`} description={`仅可删除没有关联 TODO 的${label}。`} onConfirm={() => remove(row)} okText="删除" cancelText="取消">
-        <Button danger type="link" disabled={!!row.todos?.length}>删除</Button>
-      </Popconfirm>
-    </Space> },
-  ];
-  return <Space orientation="vertical" style={{ width: '100%' }} size={16}>
-    <Space wrap>
-      <Button type="primary" onClick={() => { setEditing(null); setOpen(true); }}>新建{label}</Button>
-      <Input.Search aria-label={`搜索${label}`} placeholder="搜索名称或 ID" value={query} onChange={(e) => setQuery(e.target.value)} allowClear style={{ width: 220 }} />
-      <Select {...searchSelect} aria-label={`筛选${label}项目`} placeholder="全部项目" style={{ width: 210 }} value={goalFilter}
-        options={[{ value: 'unlinked', label: '未关联项目' }, ...projects]} onChange={setGoalFilter} />
-      <Select allowClear aria-label={`筛选${label}状态`} placeholder="全部状态" style={{ width: 140 }} value={status} options={STATUS_OPTIONS} onChange={setStatusFilter} />
-    </Space>
-    <Typography.Text type="secondary">{label}聚拢 TODO，可独立存在，也可关联项目。</Typography.Text>
-    <Table rowKey="id" columns={columns} dataSource={rows} scroll={{ x: 'max-content' }}
-      locale={{ emptyText: `还没有${label}` }}
-      expandable={{ expandedRowRender: (row) => <Markdown text={row.detail_md} /> }} />
-    <MdEditDrawer open={open} title={editing ? `编辑${label}` : `新建${label}`}
-      initial={editing || { goal_id: goalFilter && goalFilter !== 'unlinked' ? goalFilter : null }}
-      extraTop={<Form.Item name="goal_id" label="所属项目"><Select {...searchSelect} aria-label="goal_id" placeholder="可不关联项目" options={projects} /></Form.Item>}
+  const columns = [...initiativeColumns({ openInitiative }), dateColumn, { title: '操作', key: 'actions', width: '15%', render: (_, row) => <Space onClick={(e) => e.stopPropagation()} wrap size={0}>
+    <Button type="link" size="small" onClick={() => { setEditing(row); setOpen(true); }}>编辑</Button>
+    <Popconfirm title="删除该专项？" onConfirm={() => remove(row)}><Button danger type="link" size="small" disabled={!!row.todos?.length} title={row.todos?.length ? '先迁移或移除 TODO，再删除专项' : ''}>删除</Button></Popconfirm>
+  </Space> }];
+  return <Space orientation="vertical" style={{ width: '100%' }} size={12}>
+    <Button type="primary" onClick={() => { setEditing(null); setOpen(true); }}>新建专项</Button>
+    <ProjectTable label="专项表格" rows={rows} columns={columns} onRowClick={(row) => openInitiative(row.id)} locale={{ emptyText: '还没有专项' }} />
+    <MdEditDrawer open={open} title={editing ? '编辑专项' : '新建专项'} initial={editing}
+      extraTop={<><Form.Item name="goal_id" label="所属项目"><Select {...searchSelect} aria-label="goal_id" placeholder="独立专项" options={projectOptions(overview)} /></Form.Item><Form.Item name="status" label="状态"><Select options={['planned', 'in_progress', 'done'].map((value) => ({ value, label: statusLabel(value) }))} /></Form.Item></>}
       onCancel={() => setOpen(false)} onOk={save} />
   </Space>;
 }
-
-export function InitiativesTab(props) { return <GroupTab {...props} groupType="initiative" />; }
-export function MilestonesTab(props) { return <GroupTab {...props} groupType="milestone" />; }

@@ -1,7 +1,4 @@
-//! Key-level tests for the `@` file-mention picker: opening at a token
-//! start, NOT opening mid-token (emails), and the pick → token insertion
-//! round-trip. Split out of `key_handler_tests.rs` to keep files under the
-//! 800-line cap.
+//! @ is literal input and never opens a picker.
 
 use super::*;
 
@@ -15,12 +12,10 @@ struct Ctx {
     skill_menu: Option<SkillMenu>,
     undo_state: crate::undo::UndoState,
     queue_scroll: u32,
-    file_menu: Option<crate::file_menu::FileMenu>,
-    workdir: std::path::PathBuf,
 }
 
 impl Ctx {
-    fn new(workdir: &std::path::Path, input: &str) -> Self {
+    fn new(_workdir: &std::path::Path, input: &str) -> Self {
         Ctx {
             input: input.to_string(),
             cursor: input.chars().count(),
@@ -31,8 +26,6 @@ impl Ctx {
             skill_menu: None,
             undo_state: crate::undo::init(input, input.chars().count()),
             queue_scroll: 0,
-            file_menu: None,
-            workdir: workdir.to_path_buf(),
         }
     }
 
@@ -59,8 +52,6 @@ impl Ctx {
             false,
             &mut self.undo_state,
             &mut self.queue_scroll,
-            &mut self.file_menu,
-            &self.workdir,
             &mut None,
         )
     }
@@ -75,62 +66,26 @@ fn workdir_with_files() -> tempfile::TempDir {
 }
 
 #[test]
-fn at_at_token_start_opens_menu_without_inserting() {
+fn at_is_literal_at_empty_token_boundary_and_inside_email() {
     let dir = workdir_with_files();
-    let mut c = Ctx::new(dir.path(), "read ");
-    let a = c.key(KeyCode::Char('@'), KeyModifiers::NONE);
-    assert!(matches!(a, KeyAction::None));
-    assert!(c.file_menu.is_some(), "menu must open");
-    assert_eq!(c.input, "read ", "the '@' itself is consumed");
-    assert!(c.file_menu.as_ref().unwrap().visible_count() >= 3);
-}
-
-#[test]
-fn at_at_start_of_empty_input_opens_menu() {
-    let dir = workdir_with_files();
-    let mut c = Ctx::new(dir.path(), "");
-    c.key(KeyCode::Char('@'), KeyModifiers::NONE);
-    assert!(c.file_menu.is_some());
-    assert!(c.input.is_empty());
-}
-
-#[test]
-fn at_mid_token_never_opens_menu() {
-    let dir = workdir_with_files();
-    // Email: cursor sits after `a` — non-whitespace before the '@'.
-    let mut c = Ctx::new(dir.path(), "a");
-    c.key(KeyCode::Char('@'), KeyModifiers::NONE);
-    assert!(
-        c.file_menu.is_none(),
-        "mid-token '@' must not open the menu"
-    );
-    assert_eq!(c.input, "a@", "the '@' inserts literally");
-}
-
-#[test]
-fn filter_then_pick_pins_token_into_input() {
-    let dir = workdir_with_files();
-    let mut c = Ctx::new(dir.path(), "open ");
-    c.key(KeyCode::Char('@'), KeyModifiers::NONE);
-    // Type "notes" — filtered rows shrink to notes.md.
-    for ch in "notes".chars() {
-        c.key(KeyCode::Char(ch), KeyModifiers::NONE);
+    for (before, after) in [("", "@"), ("read ", "read @"), ("a", "a@")] {
+        let mut context = Ctx::new(dir.path(), before);
+        assert!(matches!(
+            context.key(KeyCode::Char('@'), KeyModifiers::NONE),
+            KeyAction::None
+        ));
+        assert_eq!(context.input, after);
+        assert_eq!(context.cursor, after.chars().count());
     }
-    assert_eq!(c.file_menu.as_ref().unwrap().visible_count(), 1);
-    let a = c.key(KeyCode::Enter, KeyModifiers::NONE);
-    assert!(matches!(a, KeyAction::None));
-    assert!(c.file_menu.is_none(), "pick closes the menu");
-    assert_eq!(c.input, "open @notes.md ");
-    assert_eq!(c.cursor, c.input.chars().count(), "cursor trails the token");
 }
-
 #[test]
-fn esc_closes_menu_and_leaves_input_untouched() {
+fn at_path_typing_submits_verbatim_without_a_picker() {
     let dir = workdir_with_files();
-    let mut c = Ctx::new(dir.path(), "see ");
-    c.key(KeyCode::Char('@'), KeyModifiers::NONE);
-    let a = c.key(KeyCode::Esc, KeyModifiers::NONE);
-    assert!(matches!(a, KeyAction::None));
-    assert!(c.file_menu.is_none());
-    assert_eq!(c.input, "see ", "no '@' leaks after cancel");
+    let mut context = Ctx::new(dir.path(), "open ");
+    for ch in "@notes.md".chars() {
+        context.key(KeyCode::Char(ch), KeyModifiers::NONE);
+    }
+    let action = context.key(KeyCode::Enter, KeyModifiers::NONE);
+    assert!(matches!(action,KeyAction::Submit(text) if text == "open @notes.md"));
+    assert!(context.input.is_empty());
 }

@@ -212,7 +212,7 @@ export function renameStep(name, allNames) {
 }
 
 /// changeStepKind(step, nextType) → new step keeping name/timeout_secs with
-/// a RESET kind payload (agent → empty prompt, wasm → empty command). Deps
+/// a RESET kind payload (agent → empty prompt, binary → empty resource). Deps
 /// live on the canvas edges, so they are intentionally not carried over.
 export function changeStepKind(step, nextType) {
   const next = {
@@ -262,6 +262,6 @@ export function specLevelProblems(problems) {
 
 function emptyKind(type) {
   if (type === 'dynamic') return { type, source: { type: 'input', pointer: '/items' }, template: { type: 'agent', prompt: '' } };
-  if (type === 'wasm') return { type, command: '' };
+  if (type === 'binary') return { type, resource: '', args: [] };
   return { type: 'agent', prompt: '' };
 }

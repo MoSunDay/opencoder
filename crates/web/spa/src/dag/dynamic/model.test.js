@@ -2,9 +2,9 @@ import { expect, it } from 'vitest';
 import { batchError, dispatchInput, progressLabel } from './model.js';
 import { validateSpec } from '../specValidate.js';
 import { applyDagFrame } from '../run/model.js';
-const step = (name, pointer, type = 'agent') => ({ name, kind: { type: 'dynamic', source: { type: 'input', pointer }, template: { type, prompt: 'common', command: 'tool.wasm' } } });
+const step = (name, pointer, type = 'agent') => ({ name, kind: { type: 'dynamic', source: { type: 'input', pointer }, template: type === 'agent' ? { type, prompt: 'common' } : { type, resource: 'tool' } } });
 it('assembles nested batch input and preserves argv elements verbatim', () => {
-  const spec = { steps: [step('a', '/items'), step('b', '/nested/a~1b', 'wasm')] };
+  const spec = { steps: [step('a', '/items'), step('b', '/nested/a~1b', 'binary')] };
   expect(dispatchInput(spec, { a: '["first","second"]', b: '[["--title","hello world"]]' }))
     .toEqual({ items: ['first', 'second'], nested: { 'a/b': [['--title', 'hello world']] } });
   expect(dispatchInput({ steps: [step('a', '')] }, { a: '[]' })).toEqual([]);
@@ -14,7 +14,7 @@ it('assembles nested batch input and preserves argv elements verbatim', () => {
 });
 it('rejects invalid types, limits, and conflicting source paths before dispatch', () => {
   expect(batchError({ type: 'agent' }, ['text', 1])).toContain('实例 1');
-  expect(batchError({ type: 'wasm' }, [['ok'], ['bad', 1]])).toContain('实例 1');
+  expect(batchError({ type: 'binary' }, [['ok'], ['bad', 1]])).toContain('实例 1');
   expect(batchError({ type: 'agent' }, Array(1000).fill('x'))).toBe('');
   expect(batchError({ type: 'agent' }, Array(1001).fill('x'))).toContain('1,000');
   expect(() => dispatchInput({ steps: [step('a', '/items'), step('b', '/items')] }, { a: '["a"]', b: '["b"]' })).toThrow('必须一致');

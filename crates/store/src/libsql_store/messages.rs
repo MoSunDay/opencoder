@@ -161,9 +161,49 @@ pub async fn load_rows(conn: &Connection, session_id: &str) -> Result<Vec<Messag
 pub async fn load_page(
     conn: &Connection,
     session_id: &str,
+    cursor: MessageCursor,
+    chunk_bytes: usize,
+    raw_budget: usize,
+) -> Result<MessageChunkPage> {
+    load_page_value(
+        conn,
+        session_id,
+        cursor,
+        chunk_bytes,
+        raw_budget,
+        "blocks_json",
+    )
+    .await
+}
+
+/// Full display transcript, including verbatim input and usage. JSON is
+/// sliced in SQL so even large display strings remain within the page budget.
+pub async fn load_transcript_page(
+    conn: &Connection,
+    session_id: &str,
+    cursor: MessageCursor,
+    chunk_bytes: usize,
+    raw_budget: usize,
+) -> Result<MessageChunkPage> {
+    const MESSAGE_JSON: &str = "json_object('id',id,'role',role,'blocks',json(blocks_json),        'agent',agent,'model',model,'usage',json(COALESCE(usage_json,'{\"input_tokens\":0,\"output_tokens\":0,\"total_tokens\":0}')),        'created_at',created_at,'synthetic',json(CASE WHEN synthetic=1 THEN 'true' ELSE 'false' END),        'display',display)";
+    load_page_value(
+        conn,
+        session_id,
+        cursor,
+        chunk_bytes,
+        raw_budget,
+        MESSAGE_JSON,
+    )
+    .await
+}
+
+async fn load_page_value(
+    conn: &Connection,
+    session_id: &str,
     mut cursor: MessageCursor,
     chunk_bytes: usize,
     raw_budget: usize,
+    value: &str,
 ) -> Result<MessageChunkPage> {
     if chunk_bytes == 0 || raw_budget < chunk_bytes {
         anyhow::bail!("message page budget must contain at least one non-empty chunk");
@@ -172,7 +212,7 @@ pub async fn load_page(
     let mut used = 0usize;
     while used < raw_budget {
         let take = chunk_bytes.min(raw_budget - used);
-        let Some(chunk) = read_chunk(conn, session_id, cursor, take).await? else {
+        let Some(chunk) = read_chunk(conn, session_id, cursor, take, value).await? else {
             return Ok(MessageChunkPage {
                 chunks,
                 next_cursor: None,
@@ -211,30 +251,35 @@ async fn read_chunk(
     session_id: &str,
     cursor: MessageCursor,
     chunk_bytes: usize,
+    value: &str,
 ) -> Result<Option<MessageChunkRecord>> {
     let (sql, seq, offset) = if cursor.offset == 0 {
         (
-            "SELECT seq,role,created_at,length(CAST(blocks_json AS BLOB)),\
-             CAST(substr(CAST(blocks_json AS BLOB),1,?3) AS BLOB) FROM messages \
-             WHERE session_id=?1 AND seq>?2 ORDER BY seq ASC LIMIT 1",
+            format!(
+                "SELECT seq,role,created_at,length(CAST({value} AS BLOB)),\
+             CAST(substr(CAST({value} AS BLOB),1,?3) AS BLOB) FROM messages \
+             WHERE session_id=?1 AND seq>?2 ORDER BY seq ASC LIMIT 1"
+            ),
             cursor.seq,
             0,
         )
     } else {
         (
-            "SELECT seq,role,created_at,length(CAST(blocks_json AS BLOB)),\
-             CAST(substr(CAST(blocks_json AS BLOB),?3+1,?4) AS BLOB) FROM messages \
-             WHERE session_id=?1 AND seq=?2 LIMIT 1",
+            format!(
+                "SELECT seq,role,created_at,length(CAST({value} AS BLOB)),\
+             CAST(substr(CAST({value} AS BLOB),?3+1,?4) AS BLOB) FROM messages \
+             WHERE session_id=?1 AND seq=?2 LIMIT 1"
+            ),
             cursor.seq,
             cursor.offset,
         )
     };
     let mut rows = if offset == 0 {
-        conn.query(sql, params![session_id, seq, chunk_bytes as i64])
+        conn.query(&sql, params![session_id, seq, chunk_bytes as i64])
             .await?
     } else {
         conn.query(
-            sql,
+            &sql,
             params![session_id, seq, offset as i64, chunk_bytes as i64],
         )
         .await?

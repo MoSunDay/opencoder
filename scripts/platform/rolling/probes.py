@@ -1,14 +1,27 @@
-"""Readiness requires a real, durable WASM execution in the candidate."""
+"""Readiness requires a durable native execution in the candidate's DAG container."""
 import hashlib
 import time
 import json
 import socket
 import urllib.error
 from pathlib import Path
-from .state import atomic_bytes, runtime_use
+from .state import runtime_use
+from .native import publish_probe
 from .io import HttpFailure
 
-WASM = bytes.fromhex("0061736d0100000001040160000003020100070a01065f737461727400000a040102000b")
+
+def resource_service(settings, candidate, operations):
+    """Read-only producer check, before any candidate process is warmed."""
+    from .manifest import compatible
+    health = operations.http(settings.resource_url, '/api/health')
+    build = health.get('build', {})
+    if health.get('role') != 'resources' or not build.get('release_compatibility'):
+        raise ValueError('resource service lacks version metadata; maintenance upgrade is required')
+    compatible(candidate, [{'release_id': 'resource-service',
+                            'protocol_version': build.get('protocol_version'),
+                            'compatibility': build['release_compatibility']}])
+    # A healthy listener alone does not prove the native management API exists.
+    operations.http(settings.resource_url, '/api/dag/binaries')
 
 
 def ambiguous(status):
@@ -50,16 +63,17 @@ def resource_paths(settings):
             Path.home() / ".opencoder/config.json",settings.agent_workdir / "opencoder.json",
             settings.agent_workdir / ".opencoder/config.json"]:
         config = json.loads(path.read_text()) if path.exists() else {}
-        for section, key in (("agent", "agents_dir"), ("dag", "wasm_dir")):
+        for section, key in (("agent", "agents_dir"), ("dag", "binary_dir"), ("dag", "workspace_dir")):
             if config.get(section, {}).get(key):
-                paths[section] = Path(config[section][key])
+                paths[key] = Path(config[section][key])
     return list(paths.values())
 
 
 def resources(settings, operations):
     config = json.loads((settings.server_workdir / "opencoder.json").read_text())
-    for section, endpoint in (("agent", "/api/agents/nfs"), ("dag", "/api/dag/wasm/nfs")):
-        expected = config.get(section, {}).get("nfs", {})
+    for section, key, endpoint in (("agent", "nfs", "/api/agents/nfs"),
+            ("dag", "nfs", "/api/dag/binaries/nfs"), ("dag", "workspace_nfs", "/api/dag/workspace/nfs")):
+        expected = config.get(section, {}).get(key, {})
         if not expected.get("enabled"):
             continue
         if expected.get("read_only", True) is not True:
@@ -79,9 +93,9 @@ def resources(settings, operations):
         next(root.iterdir(), None)
 
 
-def spec():
+def spec(resource="release-probe"):
     return {"name": "release-probe", "steps": [{"name": "execute", "kind": {
-        "type": "wasm", "command": "release-probe.wasm"}}]}
+        "type": "binary", "resource": resource, "args": ["probe"]}}]}
 
 
 def probe_id(record, public=False):
@@ -97,23 +111,18 @@ def probe_id(record, public=False):
 def candidate(settings, record, operations, seconds):
     with runtime_use(settings.state_dir, record["id"]):
         node_id = candidate_locked(settings, record, operations, seconds)
-        if (Path(record["runtime_data"]) / 'dag/rootfs').is_dir():
-            candidate_locked(settings, record, operations, seconds, container=True)
         return node_id
 
 
-def candidate_locked(settings, record, operations, seconds, container=False):
-    root = Path(record["runtime_data"])
-    atomic_bytes(root / "dag/_modules/release-probe.wasm", WASM, 0o444)
+def candidate_locked(settings, record, operations, seconds):
+    resource = publish_probe(settings, record, operations)
     endpoint = f"http://127.0.0.1:{record['runtime_port']}"
     inventory = operations.wait(lambda: operations.http(endpoint, "/inventory"), seconds)
     if inventory.get("runtime_id") != record["id"] or inventory["build"]["git_commit"] != record["manifest"]["commit"]:
         raise ValueError("candidate runtime identity or compiled commit differs from release")
     node_id = inventory["registration"]["id"]
-    identifier = probe_id(record) + ('-oci' if container else '')
-    definition = spec()
-    if container:
-        definition['steps'][0]['kind']['sandbox'] = 'runc'
+    identifier = probe_id(record)
+    definition = spec(resource)
     # Creation time comes from the durable release record, never from a retry.
     assignment = {"index": {"id": identifier, "kind": "dag", "node_id": node_id,
         "created_at": record["created_at"], "status": "pending"},
@@ -196,9 +205,10 @@ def public(settings, record, operations, seconds):
         raise ValueError("public probe runtime differs from the activated release")
     node_id = inventory["registration"]["id"]
     identifier = probe_id(record, public=True)
+    resource = publish_probe(settings, record, operations)
     submit_probe(operations, settings.public_url, identifier, {
         "id": identifier, "kind": "dag", "node_id": node_id,
-        "input": {"definition": spec()}}, seconds)
+        "input": {"definition": spec(resource)}}, seconds)
     def finished():
         reply = operations.http(settings.public_url, f"/api/executions/{identifier}")
         # Inspection uses the shared five-field index plus runtime-owned detail.

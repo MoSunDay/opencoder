@@ -17,11 +17,10 @@ async function main() {
   const node = (await api('GET', '/api/nodes')).nodes.find((node) => node.name === 'node-a');
   const opened = await openBrowser(h, errors); browser = opened.browser;
   const browserPage = opened.page;
-  const { goal, milestone, initiative, standaloneInitiative, todo, initiativeTodo, standaloneTodo, backlog } = await createHierarchy(browserPage);
-  assert.equal(milestone.goal_id, goal.id);
+  const { goal, initiative, standaloneInitiative, todo, initiativeTodo, standaloneTodo, backlog } = await createHierarchy(browserPage);
   assert.equal(initiative.goal_id, goal.id); assert.equal(standaloneInitiative.goal_id, null);
-  assert.equal(initiativeTodo.milestone_id, initiative.id); assert.equal(standaloneTodo.milestone_id, standaloneInitiative.id);
-  assert.equal(todo.milestone_id, milestone.id); assert.equal(backlog.milestone_id, null);
+  assert.equal(initiativeTodo.initiative_id, initiative.id); assert.equal(standaloneTodo.initiative_id, standaloneInitiative.id);
+  assert.equal(todo.initiative_id, initiative.id); assert.equal(backlog.initiative_id, null);
   if (process.argv.includes('--workbench-only')) {
     const files = [{ path: 'soul.md', content_b64: Buffer.from('Acceptance Agent').toString('base64') }];
     await api('POST', '/api/agents/resources/prompts', { name: 'acceptance-pack', files });

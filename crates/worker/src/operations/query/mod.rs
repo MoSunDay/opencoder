@@ -1,4 +1,5 @@
 mod chunks;
+mod dag_context;
 pub(super) mod dag_step_events;
 mod dag_steps;
 mod inspect;

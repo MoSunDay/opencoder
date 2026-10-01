@@ -2,7 +2,6 @@
 //! within the 800-line limit. Contains the `KeyAction` enum, the main
 //! `handle_key` dispatcher, and the `move_hist` history-cycle helper.
 
-use std::path::Path;
 use std::time::{Duration, Instant};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -12,7 +11,6 @@ use crate::keymap::KeyBindings;
 use opencoder_core::discover_skills;
 
 use crate::composer;
-use crate::file_menu::{handle_file_key, FileMenu, FileOutcome};
 use crate::menu::{handle_menu_key, MenuOutcome, SkillMenu};
 
 /// Window for double-Esc hard-abort (milliseconds).
@@ -50,7 +48,8 @@ pub(crate) enum KeyAction {
     /// parent boundary). The input remains untouched so the user can retry
     /// at an idle boundary.
     ModeSwitchBlocked,
-    AgentCommandUnavailable,
+    SelectAgent(String),
+    OpenTask,
     /// Ctrl+T: preserve the transcript and toggle the parent between act and
     /// plan. The dispatcher applies the switch when the parent is idle; while
     /// running it refuses with the busy flash (mode switches never land
@@ -112,8 +111,6 @@ pub(crate) fn handle_key(
     input_disabled: bool,
     undo_state: &mut crate::undo::UndoState,
     queue_scroll: &mut u32,
-    file_menu: &mut Option<FileMenu>,
-    workdir: &Path,
     agent_menu: &mut Option<crate::agent_menu::AgentMenu>,
 ) -> KeyAction {
     // Modal skill picker: intercept all keys while open.
@@ -139,23 +136,6 @@ pub(crate) fn handle_key(
             MenuOutcome::Idle => KeyAction::None,
         };
     }
-    // File-mention picker (`@`): intercept all keys while open, mirroring
-    // the `$` skill picker above. A pick inserts the `@relative/path `
-    // token at the cursor — the trigger `@` was consumed on open, so the
-    // pick re-emits it; the marker keeps the token expandable to an
-    // absolute path at submit time (mention_resolve).
-    if file_menu.is_some() {
-        return match handle_file_key(file_menu, k) {
-            FileOutcome::Pick(token) => {
-                let (s, i) = composer::insert_str(input, *cursor_idx, &token);
-                *input = s;
-                *cursor_idx = i;
-                crate::undo::snapshot(undo_state, input, *cursor_idx, false);
-                KeyAction::None
-            }
-            FileOutcome::Close | FileOutcome::Idle => KeyAction::None,
-        };
-    }
     // Agent picker (`/agent`): intercept all keys while open, same slot
     // pattern as the pickers above. A pick REPLACES the composer with the
     // runner's `/agent <name> ` control head — the opener (command popup
@@ -165,12 +145,10 @@ pub(crate) fn handle_key(
     if agent_menu.is_some() {
         return match crate::agent_menu::handle_agent_key(agent_menu, k) {
             crate::agent_menu::AgentOutcome::Pick(name) => {
-                let token = crate::agent_menu::pick_token(&name);
                 input.clear();
-                input.push_str(&token);
-                *cursor_idx = input.len();
-                crate::undo::snapshot(undo_state, input, *cursor_idx, false);
-                KeyAction::None
+                *cursor_idx = 0;
+                crate::undo::reset(undo_state, input, *cursor_idx);
+                KeyAction::SelectAgent(name)
             }
             crate::agent_menu::AgentOutcome::Quit => KeyAction::Quit,
             crate::agent_menu::AgentOutcome::Idle => KeyAction::None,
@@ -320,8 +298,31 @@ pub(crate) fn handle_key(
                 return KeyAction::None;
             }
             let text = input.trim().to_string();
-            if is_hidden_agent_command(&text) {
-                return KeyAction::AgentCommandUnavailable;
+            if (agent.starts_with("agent:") || agent.starts_with("operator:")) && text == "/stop" {
+                input.clear();
+                *cursor_idx = 0;
+                *hist_idx = None;
+                crate::undo::reset(undo_state, input, *cursor_idx);
+                return KeyAction::Cancel;
+            }
+            if matches!(
+                crate::command::parse(&text),
+                Some(crate::command::SlashAction::Task)
+            ) {
+                input.clear();
+                *cursor_idx = 0;
+                *hist_idx = None;
+                crate::undo::reset(undo_state, input, *cursor_idx);
+                return KeyAction::OpenTask;
+            }
+            if is_agent_command(&text) {
+                input.clear();
+                *cursor_idx = 0;
+                *hist_idx = None;
+                crate::undo::reset(undo_state, input, *cursor_idx);
+                return KeyAction::SelectAgent(
+                    text.strip_prefix("/agent").unwrap_or("").trim().to_owned(),
+                );
             }
             // A bare act/plan switch while the parent turn runs is refused:
             // a mid-flight switch would re-aim the session the worker is
@@ -414,8 +415,31 @@ pub(crate) fn handle_key(
                 return KeyAction::None;
             }
             let text = input.trim().to_string();
-            if is_hidden_agent_command(&text) {
-                return KeyAction::AgentCommandUnavailable;
+            if (agent.starts_with("agent:") || agent.starts_with("operator:")) && text == "/stop" {
+                input.clear();
+                *cursor_idx = 0;
+                *hist_idx = None;
+                crate::undo::reset(undo_state, input, *cursor_idx);
+                return KeyAction::Cancel;
+            }
+            if matches!(
+                crate::command::parse(&text),
+                Some(crate::command::SlashAction::Task)
+            ) {
+                input.clear();
+                *cursor_idx = 0;
+                *hist_idx = None;
+                crate::undo::reset(undo_state, input, *cursor_idx);
+                return KeyAction::OpenTask;
+            }
+            if is_agent_command(&text) {
+                input.clear();
+                *cursor_idx = 0;
+                *hist_idx = None;
+                crate::undo::reset(undo_state, input, *cursor_idx);
+                return KeyAction::SelectAgent(
+                    text.strip_prefix("/agent").unwrap_or("").trim().to_owned(),
+                );
             }
             // Focused running subagent: a queue would be admitted to the parent
             // session and affect the parent agent — reject it (mode commands
@@ -536,16 +560,8 @@ pub(crate) fn handle_key(
             if c == 'I' && agent == "plan" && !running && !input_disabled && input.is_empty() {
                 return KeyAction::EnterPlanEdit;
             }
-            if c == '$' {
+            if c == '$' && !agent.starts_with("agent:") && !agent.starts_with("operator:") {
                 *skill_menu = Some(SkillMenu::new(discover_skills()));
-                return KeyAction::None;
-            }
-            // `@` at a token start opens the file-mention picker; the
-            // character itself is consumed — the pick later re-emits it as
-            // part of the `@relative/path ` token. A mid-token `@` (emails
-            // like a@b.com) never triggers.
-            if char_opens_file_menu(input, *cursor_idx, c) {
-                *file_menu = Some(FileMenu::new(workdir));
                 return KeyAction::None;
             }
             // `/` on empty input opens the slash-command picker. Bare `/` +
@@ -563,8 +579,8 @@ pub(crate) fn handle_key(
     }
 }
 
-fn is_hidden_agent_command(text: &str) -> bool {
-    ["/agent", "/agents"].iter().any(|head| {
+fn is_agent_command(text: &str) -> bool {
+    ["/agent"].iter().any(|head| {
         text == *head
             || text
                 .strip_prefix(head)
@@ -632,22 +648,7 @@ pub(crate) fn is_bare_mode_switch(text: &str) -> bool {
     )
 }
 
-/// Whether typing `c` at char-index `cursor_idx` in `input` should open
-/// the file-mention picker: `@` at a token start (start of input or right
-/// after whitespace). Mid-token `@` (emails like `a@b.com`) never
-/// triggers. Public so the file-mention e2e (`tests/file_mention_flow.rs`)
-/// drives the production trigger predicate instead of re-implementing it.
-pub fn char_opens_file_menu(input: &str, cursor_idx: usize, c: char) -> bool {
-    c == '@'
-        && (cursor_idx == 0
-            || input
-                .chars()
-                .nth(cursor_idx - 1)
-                .is_some_and(char::is_whitespace))
-}
-
-/// Handle body-scroll keys (PageUp / PageDown) uniformly.
-/// Returns `true` when the key was consumed and scroll/follow updated.
+/// Handle body-scroll keys uniformly.
 pub(crate) fn apply_scroll(k: &KeyEvent, scroll: &mut u32, follow: &mut bool) -> bool {
     match k.code {
         KeyCode::PageUp => {

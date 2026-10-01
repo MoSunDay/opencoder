@@ -30,7 +30,7 @@ pub(super) const MAX_CONSUME_STREAK: u32 = 32;
 pub(super) async fn claim_one_queued(
     session: &mut SessionState,
     on_event: &mut (dyn FnMut(SessionEvent) + Send),
-) -> Option<(i64, String, Vec<String>)> {
+) -> Option<(i64, opencoder_store::SessionInput)> {
     let store = session.store.clone()?;
     let sid = session.id.clone();
     // No cancel-guard select here. claim_next_queue runs
@@ -41,7 +41,7 @@ pub(super) async fn claim_one_queued(
     // transaction completes in <1ms on local SQLite; the run loop's
     // top-of-loop interrupt check catches cancellation on the next iteration.
     match store.claim_next_queue(&sid).await {
-        Ok(Some((seq, input))) => Some((seq, input.prompt, input.images.clone())),
+        Ok(Some((seq, input))) => Some((seq, input)),
         Ok(None) => None,
         Err(e) => {
             // Transient contention (e.g. a concurrent writer racing the
@@ -52,7 +52,7 @@ pub(super) async fn claim_one_queued(
             // stranding is never silent (P2-4).
             tracing::warn!(error = %e, "claim_one_queued failed, retrying once");
             match store.claim_next_queue(&sid).await {
-                Ok(Some((seq, input))) => Some((seq, input.prompt, input.images.clone())),
+                Ok(Some((seq, input))) => Some((seq, input)),
                 Ok(None) => None,
                 Err(e2) => {
                     tracing::warn!(error = %e2, "claim_one_queued retry failed");
@@ -93,7 +93,10 @@ pub(super) async fn drain_one_queued(
     session: &mut SessionState,
     on_event: &mut (dyn FnMut(SessionEvent) + Send),
 ) -> Result<DrainOutcome> {
-    if let Some((seq, q, imgs)) = claim_one_queued(session, on_event).await {
+    if let Some((seq, input)) = claim_one_queued(session, on_event).await {
+        let q = input.prompt;
+        let imgs = input.images;
+        let display = input.display_text;
         // Hard-cancel guard between claim and apply: a cancel that fired
         // after the atomic claim must NOT apply a queued control command
         // (mode switch under a cancelled run). Unpromote the claimed row so
@@ -115,7 +118,8 @@ pub(super) async fn drain_one_queued(
         // suppress empty echoes).
         on_event(SessionEvent::QueueConsumed {
             seq,
-            text: crate::control_cmd::consumed_echo_text(&q).unwrap_or_default(),
+            text: crate::control_cmd::consumed_echo_text(display.as_deref().unwrap_or(&q))
+                .unwrap_or_default(),
         });
         if let Some((cmd, rest)) = crate::control_cmd::split_control_prefix(&q) {
             if let Err(e) = crate::control_cmd::apply(session, &cmd, &mut *on_event).await {
@@ -151,7 +155,8 @@ pub(super) async fn drain_one_queued(
         }
         // Real prompt: resolve `$skill` tokens, record, break.
         // F2: per-item marking (mirrors the steer loop) — never lost on failure.
-        crate::skill_resolve::record_compound(session, &q, &imgs).await;
+        crate::skill_resolve::record_compound_with_display(session, &q, &imgs, display.as_deref())
+            .await;
         mark_input_recorded(session, seq).await;
         return Ok(DrainOutcome::Prompt);
     }

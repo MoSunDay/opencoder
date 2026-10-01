@@ -3,6 +3,38 @@ mod resources;
 use serde_json::json;
 
 #[test]
+fn selected_agent_snapshot_ignores_unrelated_broken_resources_and_rejects_missing_card() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("export");
+    let target = dir.path().join("selected");
+    resource(&source, "prompts", "review", "soul.md", "selected prompt");
+    std::fs::create_dir_all(source.join("reviewer")).unwrap();
+    std::fs::write(
+        source.join("reviewer/meta.json"),
+        json!({"name":"reviewer","current":{"prompt":"review"}}).to_string(),
+    )
+    .unwrap();
+    std::fs::create_dir_all(source.join("tools/broken")).unwrap();
+    std::fs::write(source.join("tools/broken/meta.json"), "invalid").unwrap();
+    assert!(
+        resources::pin_selected(Some(&source), &target, Some(&["missing".into()]))
+            .unwrap_err()
+            .to_string()
+            .contains("selected agent card unavailable")
+    );
+    assert!(!target.exists());
+    let pinned = resources::pin_selected(Some(&source), &target, Some(&["reviewer".into()]))
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        std::fs::read_to_string(pinned.join("prompts/review/v1/soul.md")).unwrap(),
+        "selected prompt"
+    );
+    assert!(pinned.join("reviewer/meta.json").is_file());
+    assert!(!pinned.join("tools").exists());
+}
+
+#[test]
 fn absent_configured_source_is_not_an_empty_successful_snapshot() {
     let dir = tempfile::tempdir().unwrap();
     let source = dir.path().join("lost-export");
@@ -159,28 +191,28 @@ fn version_root_symlink_cannot_escape_resource_mount() {
 }
 
 #[test]
-fn wasm_only_dags_do_not_depend_on_unrelated_agent_pools() {
+fn binary_only_dags_do_not_depend_on_unrelated_agent_pools() {
     use opencoder_core::fleet::*;
     let mut assignment = Assignment {
         private_context: None,
         runtime: None,
         codex: None,
         index: ExecutionIndex {
-            id: "dag-wasm".into(),
+            id: "dag-binary".into(),
             kind: ExecutionKind::Dag,
             node_id: "node-one".into(),
             created_at: 1,
             status: ExecutionStatus::Pending,
         },
         request: CreateExecution {
-            id: "dag-wasm".into(),
+            id: "dag-binary".into(),
             kind: ExecutionKind::Dag,
             target: None,
             node_id: None,
             input: json!({}),
         },
         definition: Some(
-            json!({"name":"wasm","steps":[{"name":"tool","kind":{"type":"wasm","command":"tool.wasm"}}]}),
+            json!({"name":"binary","steps":[{"name":"tool","kind":{"type":"binary","resource":"tool"}}]}),
         ),
     };
     assert!(!resources::requires_agent_pool(&assignment));

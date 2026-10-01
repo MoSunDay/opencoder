@@ -31,11 +31,11 @@ async fn agent_inputs_enter_distinct_how_copies_and_outputs_keep_input_order() {
         DagRunStatus::Done
     );
     assert_eq!(
-        f.text(&run, "process/instances/0/how.md"),
+        f.text(&run, "process/meta/instances/0/how.md"),
         "common-how\n\nITEM-ZERO"
     );
     assert_eq!(
-        f.text(&run, "process/instances/1/how.md"),
+        f.text(&run, "process/meta/instances/1/how.md"),
         "common-how\n\nITEM-ONE"
     );
     assert_eq!(
@@ -57,13 +57,13 @@ async fn agent_inputs_enter_distinct_how_copies_and_outputs_keep_input_order() {
 }
 
 #[tokio::test]
-async fn upstream_output_expands_wasm_argv_without_splitting_spaces() {
+async fn upstream_output_expands_native_argv_without_splitting_spaces() {
     let f = Fixture::new().await;
     let run = f.run(json!([
         {"name":"discover","kind":{"type":"agent","prompt":"discover"}},
-        {"name":"process","depends_on":["discover"],"kind":{"type":"dynamic","source":{"type":"step_output","step":"discover","pointer":"/items"},"template":{"type":"wasm","command":"args.wasm --format json"}}}
+        {"name":"process","depends_on":["discover"],"kind":{"type":"dynamic","source":{"type":"step_output","step":"discover","pointer":"/items"},"template":{"type":"binary","resource":"args","args":["--format","json"]}}}
     ]), json!({}));
-    f.module(&run, "args.wasm", ARGV_WAT);
+    f.binary("args", ARGV_C);
     let client = Scripted::new(|_| {
         (
             Duration::ZERO,
@@ -77,11 +77,11 @@ async fn upstream_output_expands_wasm_argv_without_splitting_spaces() {
     );
     assert_eq!(
         f.text(&run, "process/instances/0/output.txt"),
-        "args.wasm\0--format\0json\0--title\0hello world\0"
+        "/workspace/process/meta/program\0--format\0json\0--title\0hello world\0"
     );
     assert_eq!(
         f.text(&run, "process/instances/1/output.txt"),
-        "args.wasm\0--format\0json\0"
+        "/workspace/process/meta/program\0--format\0json\0"
     );
     let rows = f.store.events_after(&run.run_id, 0).await.unwrap();
     assert!(rows.iter().any(|r| r.payload["index"] == 0

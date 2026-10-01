@@ -24,7 +24,7 @@ async fn forward(
         .credential
         .get()
         .ok_or_else(|| anyhow::anyhow!("service credential unavailable"))?;
-    let response = reqwest::Client::builder()
+    let mut response = reqwest::Client::builder()
         .no_proxy()
         .build()?
         .request(method, format!("{}{path}", base.trim_end_matches('/')))
@@ -33,10 +33,28 @@ async fn forward(
         .body(body)
         .send()
         .await?;
-    Ok(Response::builder()
-        .status(response.status().as_u16())
-        .header("content-type", "application/json")
-        .body(axum::body::Body::from(response.bytes().await?))?)
+    let limit = 48 * 1024 * 1024;
+    anyhow::ensure!(
+        response
+            .content_length()
+            .is_none_or(|length| length <= limit),
+        "internal response is too large"
+    );
+    let mut builder = Response::builder().status(response.status().as_u16());
+    for name in ["content-type", "content-disposition"] {
+        if let Some(value) = response.headers().get(name) {
+            builder = builder.header(name, value.clone());
+        }
+    }
+    let mut bytes = Vec::new();
+    while let Some(chunk) = response.chunk().await? {
+        anyhow::ensure!(
+            bytes.len() + chunk.len() <= limit as usize,
+            "internal response is too large"
+        );
+        bytes.extend_from_slice(&chunk);
+    }
+    Ok(builder.body(axum::body::Body::from(bytes))?)
 }
 
 pub async fn forward_resources(
@@ -44,18 +62,27 @@ pub async fn forward_resources(
     request: Request,
     next: Next,
 ) -> Response {
-    if !matches!(
-        request.uri().path(),
-        "/api/agents/nfs" | "/api/dag/wasm/nfs"
-    ) {
+    let path = request.uri().path();
+    let binary = path == "/api/dag/binaries" || path.starts_with("/api/dag/binaries/");
+    if !binary && !matches!(path, "/api/agents/nfs" | "/api/dag/workspace/nfs") {
         return next.run(request).await;
     }
     let Some(platform) = state.lifecycle.platform.get() else {
         return next.run(request).await;
     };
-    let path = request.uri().path().to_owned();
+    let path = request
+        .uri()
+        .path_and_query()
+        .map(|path| path.as_str())
+        .unwrap_or(path)
+        .to_owned();
     let method = request.method().clone();
-    let body = match axum::body::to_bytes(request.into_body(), 16 * 1024).await {
+    let body = match axum::body::to_bytes(
+        request.into_body(),
+        if binary { 48 * 1024 * 1024 } else { 16 * 1024 },
+    )
+    .await
+    {
         Ok(body) => body.to_vec(),
         Err(error) => return crate::api::error_400(error.to_string()),
     };

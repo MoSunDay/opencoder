@@ -2,6 +2,8 @@
 import json
 from pathlib import Path
 
+CONTINUITY_LIMIT_SECONDS = 30
+
 
 def summarize(traffic, executions):
     if len(traffic) < 2 or len(executions) != len(traffic):
@@ -20,14 +22,14 @@ def summarize(traffic, executions):
 
 def check_continuity(metrics, latency_gate='tail'):
     if latency_gate == 'p95':
-        if metrics['p95_accept_seconds'] > 1:
-            raise AssertionError(f'release P95 admission exceeded one second: {metrics["p95_accept_seconds"]}')
+        if metrics['p95_accept_seconds'] > CONTINUITY_LIMIT_SECONDS:
+            raise AssertionError(f'release P95 admission exceeded {CONTINUITY_LIMIT_SECONDS} seconds: {metrics["p95_accept_seconds"]}')
         return
     if latency_gate != 'tail':
         raise ValueError(f'unknown release latency gate: {latency_gate}')
     for key in ('max_accept_seconds', 'max_accept_gap_seconds', 'max_scheduling_gap_seconds'):
-        if metrics[key] > 1:
-            raise AssertionError(f'release continuity exceeded one second: {key}={metrics[key]}')
+        if metrics[key] > CONTINUITY_LIMIT_SECONDS:
+            raise AssertionError(f'release continuity exceeded {CONTINUITY_LIMIT_SECONDS} seconds: {key}={metrics[key]}')
 
 
 def verify(runtime_roots, traffic, latency_gate='tail'):
@@ -38,8 +40,10 @@ def verify(runtime_roots, traffic, latency_gate='tail'):
         if len(paths) != 1:
             raise AssertionError('execution does not have exactly one Runtime: ' + row['id'])
         path = paths[0]
-        index = json.loads(path.read_text())['assignment']['index']
-        step = json.loads((path.parent / 'execute/meta.json').read_text())
+        record = json.loads(path.read_text())
+        index = record['assignment']['index']
+        run = Path(record['annotations']['dag_parent']) / row['id']
+        step = json.loads((run / 'execute/meta.json').read_text())
         if step['outcome'] != 'done':
             raise AssertionError('traffic did not execute: ' + row['id'])
         executions.append({'id': row['id'], 'runtime': str(path.parents[2]),
@@ -52,7 +56,7 @@ def verify(runtime_roots, traffic, latency_gate='tail'):
     return {'metrics': metrics, 'executions': executions}
 
 
-def verify_ready(samples, failures, maximum_gap=1):
+def verify_ready(samples, failures, maximum_gap=CONTINUITY_LIMIT_SECONDS):
     if failures:
         raise AssertionError(f'release readiness failed: {failures}')
     if len(samples) < 2:

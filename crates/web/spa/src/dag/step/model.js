@@ -1,11 +1,11 @@
 // Pure projections for the DAG single-step stream (node-side records).
-// wasm steps deliver `step_output` frames ({step, stream, text, at_ms}) plus
+// binary steps deliver `step_output` frames ({step, stream, text, at_ms}) plus
 // run-session `step_log` mirrors ({kind, step, payload:{event,data}, at_ms});
 // agent steps deliver child-session frames that feed reduce.js directly, so
-// only the wasm-side log projection lives here.
+// only the binary-side log projection lives here.
 
-/// Step kind → 中文 label (worker `spec_step_kind` vocabulary: wasm | agent).
-export const STEP_KIND_LABEL = { wasm: 'Wasm 步骤', agent: 'Agent 步骤', dynamic: '动态步骤' };
+/// Step kind → 中文 label (worker `spec_step_kind` vocabulary: binary | agent).
+export const STEP_KIND_LABEL = { binary: 'Binary 步骤', agent: 'Agent 步骤', dynamic: '动态步骤' };
 
 export function isAgentKind(kind) {
   return kind === 'agent';
@@ -14,7 +14,7 @@ export function isAgentKind(kind) {
 const OUTPUT_LABEL = { stdout: 'stdout', stderr: 'stderr', text_delta: '输出' };
 
 /// Normalize one frame into {stream, text}, or null when it carries no
-/// output text. Accepts flat `step_output` (node-side wasm capture) and the
+/// output text. Accepts flat `step_output` (node-side binary capture) and the
 /// nested `step_log` mirror (run-session shape) alike; every other kind is
 /// ignored so agent-session frames never leak into the log view.
 function outputOf(frame) {
@@ -33,7 +33,7 @@ function outputOf(frame) {
   return null;
 }
 
-/// Project frames into wasm log rows {seq, at, stream, label, text}.
+/// Project frames into binary log rows {seq, at, stream, label, text}.
 /// Adjacent same-stream fragments merge into one row (logRows parity);
 /// stdout/stderr never merge into each other. `query` is a case-insensitive
 /// substring filter over label + text.

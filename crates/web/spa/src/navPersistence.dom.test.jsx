@@ -98,6 +98,8 @@ describe('导航选择持久化（项目 / Agent / 节点）', () => {
     render(<App />);
     expect(localStorage.getItem(NAV_STORAGE_KEY)).toBeNull();
 
+    await screen.findByRole('menuitem', { name: /节点列表/ });
+
     const sider = within(document.querySelector('.fleet-sidebar'));
     fireEvent.click(sider.getByText('项目')); // 分类 Segmented → 落在首页
     expect(getState().page).toBe('project');
@@ -116,9 +118,9 @@ describe('导航选择持久化（项目 / Agent / 节点）', () => {
     render(<App />);
     // 恢复发生在首帧绘制前：store page 回位，菜单高亮与移动端 Select 同步。
     expect(getState().page).toBe('dag');
-    expect(screen.getByRole('menuitem', { name: /DAG 工作流/ }).classList.contains('ant-menu-item-selected')).toBe(true);
+    expect((await screen.findByRole('menuitem', { name: /DAG 工作流/ })).classList.contains('ant-menu-item-selected')).toBe(true);
     // antd 6: aria-label 落在内部 input，可见标签在 .ant-select-content。
-    const pageNav = screen.getByLabelText('页面导航').closest('.ant-select-content');
+    const pageNav = (await screen.findByLabelText('页面导航')).closest('.ant-select-content');
     expect(pageNav.textContent).toContain('DAG 工作流');
   });
 
@@ -127,7 +129,7 @@ describe('导航选择持久化（项目 / Agent / 节点）', () => {
     localStorage.setItem(NAV_STORAGE_KEY, JSON.stringify('fleet')); // 旧构建遗留页
     render(<App />);
     expect(getState().page).toBe('nodes');
-    const pageNav = screen.getByLabelText('页面导航').closest('.ant-select-content');
+    const pageNav = (await screen.findByLabelText('页面导航')).closest('.ant-select-content');
     expect(pageNav.textContent).toContain('节点列表');
 
     localStorage.setItem(NAV_STORAGE_KEY, '{corrupt');

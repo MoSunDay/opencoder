@@ -196,9 +196,6 @@ pub async fn serve_release(
             .map_err(|_| anyhow::anyhow!("release configuration supplied twice"))?;
     }
     seed_admin(&state.store, &token).await?;
-    // Seed the built-in review release-gate DAG defs (skip-if-exists; a
-    // failure warns and never blocks boot) — see `seed_dags`.
-    crate::seed_dags::seed_review_dags(&state.fleet).await;
     // One-time import of legacy `schedules.json` definitions into the
     // libsql `schedules` table (only when the table is empty; a failure
     // warns and never blocks boot) — see `seed_schedules`.
@@ -284,20 +281,18 @@ pub async fn serve_release(
     Ok(())
 }
 
-/// Start the two server-owned read-only NFS exports before accepting HTTP
-/// traffic. Agent NFS failures remain startup errors for compatibility;
-/// DAG-WASM autostart keeps its existing fail-open behavior and logs the
-/// failure internally.
+/// Start the configured read-only NFS exports before accepting HTTP traffic.
 async fn autostart_nfs_exports(workdir: &Path, config: &Config) -> Result<()> {
     if config.agent.nfs.enabled {
         crate::api_agent_nfs::start_locked(config)
             .await
             .map_err(anyhow::Error::msg)?;
     }
-    // The control-plane server owns the DAG wasm pool. Expose it through
+    // The control-plane server owns the DAG binary pool. Expose it through
     // the second read-only NFS export before the HTTP listener accepts
     // requests, matching the standalone web server startup path.
-    crate::api_dag_wasm_nfs::autostart(workdir).await;
+    crate::api_dag_binaries_nfs::autostart(workdir).await?;
+    crate::api_dag_workspace_nfs::autostart(workdir).await?;
     Ok(())
 }
 
@@ -398,19 +393,19 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn server_startup_starts_the_dag_wasm_export() {
-        let _ = crate::nfs_exports::stop(crate::nfs_exports::DAG_WASM_EXPORT).await;
+    async fn server_startup_starts_the_dag_binary_export() {
+        let _ = crate::nfs_exports::stop(crate::nfs_exports::DAG_BINARY_EXPORT).await;
         let dir = tempfile::tempdir().unwrap();
         let _scope = opencoder_core::config::scoped_config_home(dir.path().into());
         let workdir = dir.path().join("work");
-        let pool = dir.path().join("wasm");
+        let pool = dir.path().join("binary");
         std::fs::create_dir_all(&workdir).unwrap();
         std::fs::create_dir_all(&pool).unwrap();
         std::fs::write(
             workdir.join("opencoder.json"),
             serde_json::json!({
                 "dag": {
-                    "wasm_dir": pool,
+                    "binary_dir": pool,
                     "nfs": {"enabled": true, "port": 0, "read_only": true}
                 }
             })
@@ -420,11 +415,11 @@ mod tests {
         let config = Config::load(&workdir).unwrap();
 
         autostart_nfs_exports(&workdir, &config).await.unwrap();
-        let status = crate::nfs_exports::status(crate::nfs_exports::DAG_WASM_EXPORT).await;
+        let status = crate::nfs_exports::status(crate::nfs_exports::DAG_BINARY_EXPORT).await;
         assert!(status.running);
         assert!(status.read_only);
         assert!(status.port > 0);
-        assert!(crate::nfs_exports::stop(crate::nfs_exports::DAG_WASM_EXPORT).await);
+        assert!(crate::nfs_exports::stop(crate::nfs_exports::DAG_BINARY_EXPORT).await);
     }
 }
 

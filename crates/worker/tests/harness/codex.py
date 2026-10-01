@@ -29,8 +29,10 @@ elif '你是团队队长' in prompt:
               'complete': True, 'final_summary': 'MATRIX_TEAM_DONE'}
 else:
     answer = 'MATRIX_ANSWER'
-record = {'args': args, 'prompt': prompt, 'cwd': os.getcwd(), 'pid': os.getpid(), 'thread': thread, 'answer': answer}
-with Path(os.environ['MATRIX_CAPTURE']).open('a') as stream:
+record = {'args': args, 'prompt': prompt, 'cwd': os.getcwd(), 'pid': os.getpid(),
+          'pid_namespace': os.readlink('/proc/self/ns/pid'), 'thread': thread, 'answer': answer}
+capture = Path(os.environ['MATRIX_CAPTURE']) if 'MATRIX_CAPTURE' in os.environ else Path(os.environ['CODEX_HOME']) / 'capture.jsonl'
+with capture.open('a') as stream:
     stream.write(json.dumps(record) + '\n')
 def emit(value):
     print(json.dumps(value), flush=True)

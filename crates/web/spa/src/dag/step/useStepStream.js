@@ -1,6 +1,6 @@
 // Live subscription to one DAG step's node-side event stream. The frame
 // window (appendLog) and the TUI transcript fold (reduceExecutionFrame) are
-// updated in the SAME onFrame so the wasm log view and the agent transcript
+// updated in the SAME onFrame so the binary log view and the agent transcript
 // can never drift apart; agent-session frames flow straight into the shared
 // execution reducer, and the unknown kinds (step_output/step_finished) hit
 // its default branch and pass through untouched.

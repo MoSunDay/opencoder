@@ -9,6 +9,12 @@ const MILESTONE_BRAIN: &str = "brain_scheduler_v7";
 
 pub(super) fn required(request: &CreateExecution, definition: Option<&Value>) -> Vec<&'static str> {
     let mut features = Vec::new();
+    if request.kind == ExecutionKind::Dag
+        || (request.kind == ExecutionKind::Project
+            && definition.is_some_and(|definition| definition["todo"]["executor_kind"] == "dag"))
+    {
+        features.push("dag_container_v1");
+    }
     if requires_dynamic(request.kind, definition) {
         features.push(DYNAMIC_DAG);
     }
@@ -18,38 +24,6 @@ pub(super) fn required(request: &CreateExecution, definition: Option<&Value>) ->
         || request.input.get("brain_layered").is_some()
     {
         features.push(MILESTONE_BRAIN);
-    }
-    if request.input.get("pc_issue_stage").is_some()
-        || request.input["layered_request"]["plan"]["nodes"]
-            .as_array()
-            .is_some_and(|nodes| {
-                nodes.iter().any(|n| {
-                    n["capability_id"]
-                        .as_str()
-                        .and_then(opencoder_core::brain::pc_issue::stage)
-                        .is_some()
-                        || n["capability_ids"].as_array().is_some_and(|ids| {
-                            ids.iter().any(|id| {
-                                id.as_str()
-                                    .and_then(opencoder_core::brain::pc_issue::stage)
-                                    .is_some()
-                            })
-                        })
-                })
-            })
-    {
-        features.push("brain_pc_issue_v1");
-    }
-    if request.kind == ExecutionKind::Dag
-        && request.target.as_deref() == Some("device-cases")
-        && request.input.get("candidate").is_some()
-    {
-        features.push("pc_candidate_v1");
-    }
-    if request.kind == ExecutionKind::Dag
-        && request.target.as_deref() == Some(opencoder_dag::ui_cases::NAME)
-    {
-        features.push("ui_device_v1");
     }
     features
 }
@@ -200,23 +174,6 @@ mod tests {
             node_id: None,
         };
         assert!(required(&legacy, None).is_empty());
-    }
-
-    #[test]
-    fn ui_case_execution_requires_a_new_device_capability() {
-        let request = CreateExecution {
-            id: "dag-ui".into(),
-            kind: ExecutionKind::Dag,
-            target: Some(opencoder_dag::ui_cases::NAME.into()),
-            input: json!({"device_count":1}),
-            node_id: None,
-        };
-        assert_eq!(required(&request, None), vec!["ui_device_v1"]);
-        assert!(!supports(
-            &RpcReply::ok(json!({"compatible":true,
-            "features":["dag_dynamic_v1"]})),
-            "ui_device_v1"
-        ));
     }
 
     #[test]

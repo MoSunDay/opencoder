@@ -1,5 +1,5 @@
 //! Step event source selection: an `agent` step streams its own child
-//! session, while `wasm`/`runner` steps are filtered out of the run session.
+//! session, while `binary`/`runner` steps are filtered out of the run session.
 
 use super::*;
 use serde_json::{json, Value};
@@ -12,7 +12,7 @@ async fn dag_step_events_agent_step_streams_its_child_session() {
     dag_run(
         &worker,
         run,
-        vec![step_spec("plan", "agent"), step_spec("build", "wasm")],
+        vec![step_spec("plan", "agent"), step_spec("build", "binary")],
     )
     .await;
     session(&worker, run).await;
@@ -63,13 +63,13 @@ async fn dag_step_events_agent_step_streams_its_child_session() {
 }
 
 #[tokio::test]
-async fn dag_step_events_wasm_step_keeps_only_its_own_step_output() {
+async fn dag_step_events_binary_step_keeps_only_its_own_step_output() {
     let (_root, worker) = worker().await;
-    let run = "dag-step-wasm";
+    let run = "dag-step-binary";
     dag_run(
         &worker,
         run,
-        vec![step_spec("fetch", "wasm"), step_spec("load", "wasm")],
+        vec![step_spec("fetch", "binary"), step_spec("load", "binary")],
     )
     .await;
     session(&worker, run).await;
@@ -109,7 +109,7 @@ async fn dag_step_events_wasm_step_keeps_only_its_own_step_output() {
     );
     assert_eq!(frames(&reply)[1]["data"]["stream"], json!("stderr"));
     assert_eq!(reply.body["head_seq"], json!(*seqs.last().unwrap()));
-    assert_eq!(reply.body["step"]["kind"], json!("wasm"));
+    assert_eq!(reply.body["step"]["kind"], json!("binary"));
     assert!(reply.body["step"].get("session_id").is_none(), "{reply:?}");
 
     // The cursor is honored: everything at or below seq 1 is behind us.

@@ -62,7 +62,7 @@ scripts/platform/deploy.sh --signal --rollback --wait-seconds 300
 
 ## 4. 完成验收
 
-对一般新包，以以下脚本完成真实 TODO 依赖链、长 WASI、持续提交、SSE 游标和 900 秒观察；它自身执行发布，因此不要提前把候选激活。通过 `systemd-run` 以独立作业启动，使用 Python 的绝对路径、仓库绝对路径、唯一 unit 和证据目录。
+对一般新包，以以下脚本完成真实 TODO 依赖链、长时间原生 DAG、持续提交、SSE 游标和 900 秒观察；它自身执行发布，因此不要提前把候选激活。通过 `systemd-run` 以独立作业启动，使用 Python 的绝对路径、仓库绝对路径、唯一 unit 和证据目录。
 
 ```sh
 python3 scripts/acceptance/smooth_release/live.py \

@@ -13,7 +13,7 @@ Commit: 366737a414f92dfcbb61a4a738b142a2664dff1d
 - 新增 `opencoder todos validate/run/resume/show/events/list/interrupt`；文件投影仅由 `run/resume --debug` 开启。
 - 支持依赖 DAG、父决定并发批次、new/resume/fork、milestone 回退、硬工具门禁和持久化中断恢复。
 - 外部 `interrupt` 会刷新已经存在的 debug 投影；结构化响应兼容全文中唯一一个标准 JSON fence，同时拒绝多个 fence 或无法唯一定位的输出。
-- 父 workflow 不接收执行工具或 registered CLI 指令；新增内置 `$fk-cli` skill，使 UI TODO 通过精确 `fk-session --args` 的 `bash` 门禁执行，不依赖 FK MCP。
+- 父 workflow 不接收执行工具或 registered CLI 指令；执行工具仅向实际处理任务的子 Session 开放。
 
 ## Impact Surface
 
@@ -21,7 +21,6 @@ Commit: 366737a414f92dfcbb61a4a738b142a2664dff1d
 - `crates/store`
 - `crates/cli` 与根 binary 分发
 - builtin `workflow` agent
-- builtin `fk-cli` skill
 
 ## Tests
 

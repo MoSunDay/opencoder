@@ -7,7 +7,6 @@
     credentials_file: /etc/prometheus/opencoder/token
   static_configs:
   - targets:
-    - 10.199.71.70:18081
+    - 127.0.0.1:18081
     labels:
-      env: prod
       app: opencoder

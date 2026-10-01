@@ -1,4 +1,4 @@
-//! M1 — `dag.agent_sandbox = "runc"` end to end: a single agent step's
+//! Shared DAG container end to end: a single agent step's
 //! WHOLE session (LLM loop + tools) runs inside the read-only OCI container
 //! via the rootfs-installed `agent-step-runner`, while the host keeps the
 //! session row + artifacts contract. Pins: structured output recovered from
@@ -11,7 +11,7 @@
 //! provisioning concern, not a test prerequisite.
 
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use crate::support::fleet_proc::Fleet;
 use crate::support::llm_stub::{LlmStub, Script};
@@ -105,27 +105,11 @@ fn agent_step_session_runs_inside_runc_container() {
     let knowledge_abs = std::fs::canonicalize(&knowledge).unwrap();
     let before = snapshot_tree(&knowledge_abs);
 
-    let fleet = Fleet::spawn_with_config(
+    let fleet = Fleet::spawn_native(
         tmp.path(),
         stub.port(),
-        json!({"dag": {"agent_sandbox": "runc", "knowledge_root": knowledge_abs}}),
+        json!({"dag": { "knowledge_root": knowledge_abs}}),
         "agent-runc-node",
-    );
-
-    // Rootfs provisioning (scaffold + wasmtime + agent-step-runner + libs)
-    // through the repo script, into the node's shared-rootfs slot.
-    let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let rootfs = fleet.node_data.join("dag").join("rootfs");
-    let prep = std::process::Command::new("bash")
-        .arg(repo.join("scripts").join("prepare-dag-rootfs.sh"))
-        .arg(&rootfs)
-        .output()
-        .expect("spawn prepare-dag-rootfs.sh");
-    assert!(
-        prep.status.success(),
-        "prepare-dag-rootfs.sh failed:\n-- stdout --\n{}\n-- stderr --\n{}",
-        String::from_utf8_lossy(&prep.stdout),
-        String::from_utf8_lossy(&prep.stderr),
     );
 
     let spec = json!({
@@ -147,7 +131,7 @@ fn agent_step_session_runs_inside_runc_container() {
     let doc = fleet.wait_terminal(RUN);
     assert_eq!(doc["execution"]["status"], "done", "inspect: {doc}");
 
-    let step_dir = fleet.node_data.join("dag").join(RUN).join(STEP);
+    let step_dir = fleet.run_root(RUN).join(STEP);
     // Structured output recovered from the container-side runner's reply.
     let output = read_json(&step_dir.join("output.json"));
     assert_eq!(output["verdict"], json!("ok"), "output.json: {output}");
@@ -183,18 +167,10 @@ fn agent_step_session_runs_inside_runc_container() {
     );
 
     // Bundle shape: direct argv, injected LLM env, ro knowledge mount.
-    let bundle = read_json(
-        &fleet
-            .node_data
-            .join("dag")
-            .join("bundles")
-            .join(RUN)
-            .join(STEP)
-            .join("config.json"),
-    );
+    let bundle = read_json(&fleet.run_root(RUN).join("bundle/config.json"));
     assert_eq!(
         bundle["process"]["args"],
-        json!(["/usr/bin/agent-step-runner"]),
+        json!(["/usr/bin/dag-runner", "init"]),
         "bundle process.args: {bundle}"
     );
     let env = bundle["process"]["env"]
@@ -202,19 +178,14 @@ fn agent_step_session_runs_inside_runc_container() {
         .cloned()
         .unwrap_or_default();
     assert!(
-        env.iter()
-            .any(|e| e.as_str().unwrap_or("").starts_with("OPENAI_BASE_URL=")),
-        "bundle env must carry OPENAI_BASE_URL: {env:?}"
-    );
-    assert!(
-        env.iter()
-            .any(|e| e.as_str().unwrap_or("").starts_with("OPENAI_API_KEY=")),
-        "bundle env must carry OPENAI_API_KEY: {env:?}"
+        !env.iter()
+            .any(|entry| entry.as_str().unwrap_or_default().contains("API_KEY=")),
+        "{env:?}"
     );
     let mounts = bundle["mounts"].as_array().cloned().unwrap_or_default();
     let knowledge_mount = mounts
         .iter()
-        .find(|m| m["destination"] == json!("/workspace/knowledge"))
+        .find(|m| m["destination"] == json!("/run/opencoder/knowledge"))
         .unwrap_or_else(|| panic!("no knowledge mount in bundle: {mounts:?}"));
     let options = knowledge_mount["options"]
         .as_array()

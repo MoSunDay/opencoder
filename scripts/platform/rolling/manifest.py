@@ -13,14 +13,15 @@ _spec.loader.exec_module(_installer)
 def verify(bundle):
     manifest = _installer.verify_bundle(bundle)
     if set(_installer.bundle_names(manifest)) != set(_installer.NAMES):
-        raise ValueError("smooth deployment requires all four platform binaries")
+        raise ValueError("smooth deployment requires platform binaries and both native DAG runners")
     if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", manifest.get("release_id", "")):
         raise ValueError("bundle lacks a valid release_id; first build a handoff-capable release")
     compatibility = manifest.get("compatibility", {})
     for key in ("protocol", "data_format"):
         limits = compatibility.get(key, {})
-        if limits.get("min") != 1 or limits.get("max") != 1:
-            raise ValueError(f"unsupported handoff {key}; maintenance migration is required")
+        supported = (1,) if key == "protocol" else (1, 2)
+        if limits.get("min") not in supported or limits.get("max") != limits.get("min"):
+            raise ValueError(f"unsupported handoff {key}")
     info = _installer.build_info(bundle / "bin/opencoder-agent")
     if info.get("release_compatibility") != compatibility:
         raise ValueError("release compatibility does not match compiled binary")
@@ -34,10 +35,14 @@ def compatible(candidate, retained):
         for key in ("protocol", "data_format"):
             new = candidate["compatibility"][key]
             old = previous["compatibility"][key]
-            if not (new["min"] <= old["min"] <= old["max"] <= new["max"]):
-                raise ValueError(f"candidate cannot read retained release {previous['release_id']} {key}")
+            if new != old:
+                raise ValueError(f"release {previous['release_id']} has a different {key}; use --maintenance")
         if candidate["protocol_version"] != previous["protocol_version"]:
             raise ValueError("fleet protocol differs from a retained runtime")
+
+
+def overlapping(journal):
+    return [r['manifest'] for r in journal['releases'].values() if not r.get('maintenance_retired')]
 
 
 def brain_preflight(settings, candidate, releases=()):
@@ -58,6 +63,9 @@ def brain_preflight(settings, candidate, releases=()):
             record = json.loads(path.read_text())
             assignment = record["assignment"]
             request = assignment["request"]
+            if (request['kind'] == 'dag' and assignment['index']['status'] not in ('done', 'error', 'cancelled')
+                    and not record.get('annotations', {}).get('dag_parent')):
+                raise ValueError(f"DAG migration blocked by nonterminal execution {request['id']}; terminate it with the previous runtime before upgrading")
             payload = request.get("input") or {}
             if not isinstance(payload, dict):
                 payload = {}

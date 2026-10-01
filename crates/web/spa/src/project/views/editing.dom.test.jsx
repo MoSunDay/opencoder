@@ -25,12 +25,12 @@ it('preserves a project edit buffer when the record object refreshes', () => {
 });
 
 it('saves TODO title, description, initiative and board column together', async () => {
-  const overview = { goals: [], standalone_milestones: [], backlog: [{ id: 't1', title: '原任务', draft: '原说明', status: 'draft' }] };
+  const overview = { goals: [], standalone_initiatives: [], backlog: [{ id: 't1', title: '原任务', draft: '原说明', status: 'draft' }] };
   render(<TodoDrawer todoId="t1" overview={overview} refresh={vi.fn()} onClose={vi.fn()} onNotice={vi.fn()} />);
   fireEvent.change(screen.getByLabelText('TODO 标题'), { target: { value: '新任务' } });
   fireEvent.change(screen.getByLabelText('任务说明'), { target: { value: '新说明' } });
   fireEvent.click(screen.getByRole('button', { name: '保存 TODO' }));
   await waitFor(() => expect(api.apiPatch).toHaveBeenCalledWith('/api/project/todos/t1', {
-    title: '新任务', draft: '新说明', milestone_id: null, board_status: 'backlog', capability_id: null,
+    title: '新任务', draft: '新说明', initiative_id: null, board_status: 'backlog', capability_id: null, tag_ids: [],
   }));
 });

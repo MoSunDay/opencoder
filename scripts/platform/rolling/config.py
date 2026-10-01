@@ -29,6 +29,8 @@ class Settings:
     legacy_agent_data: Path | None = None
     legacy_server_unit: str = "opencoder-server.service"
     legacy_agent_unit: str = "opencoder-agent.service"
+    agent_config: Path | None = None
+    server_config: Path | None = None
 
     @property
     def host_url(self):
@@ -45,7 +47,8 @@ def load(path):
     if unknown:
         raise ValueError(f"unknown deployment settings: {sorted(unknown)}")
     for key in ("state_dir", "server_workdir", "server_data", "agent_workdir",
-                "token_file", "metrics_token_file", "bin_dir", "nginx_include", "systemd_dir", "legacy_agent_data"):
+                "token_file", "metrics_token_file", "bin_dir", "nginx_include", "systemd_dir", "legacy_agent_data",
+                "agent_config", "server_config"):
         if raw.get(key) is not None:
             raw[key] = Path(raw[key])
             if not raw[key].is_absolute() or any(c in str(raw[key]) for c in "\n\r%"):

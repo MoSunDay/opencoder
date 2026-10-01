@@ -20,7 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'platform'))
 from rolling import config, manifest, probes
 from rolling.io import Operations
 from rolling.state import Journal, atomic_bytes, write
-from fixture import HOLD_WASM, release_wasi_gate, todo_spec
+from fixture import publish_hold, release_native_gate, todo_spec
 from metrics import verify as verify_traffic, verify_ready
 from streams import Stream
 import transitions
@@ -138,7 +138,7 @@ def observe(env, root, tag, seconds):
     while time.monotonic() < deadline:
         identifier = f'dag-{tag}-observe-{len(samples)}'
         began = time.monotonic()
-        env.api('/api/executions', 'POST', {'id': identifier, 'kind': 'dag', 'input': {'definition': probes.spec()}})
+        env.api('/api/executions', 'POST', {'id': identifier, 'kind': 'dag', 'input': {'definition': probe}})
         env.wait(lambda: env.completed(identifier), 30)
         ready = env.api('/api/ready')
         assert ready['mode'] == 'open' and ready['ready_nodes'] >= 1, 'scheduling became unavailable'
@@ -193,9 +193,9 @@ def exercise(args, settings, root):
     old = previous['releases'][previous['current']]
     tag = root.name
     todo_id, dag_id = f'todos-{tag}', f'dag-{tag}-hold'
-    module = tag + '.wasm'
     old_data = Path(old['runtime_data'])
-    atomic_bytes(old_data / 'dag/_modules' / module, HOLD_WASM.encode(), 0o444)
+    resource = publish_hold(env)
+    probe = probes.spec(probes.publish_probe(settings, old, env))
     before = process_identity(pid(old['runtime_unit']))
     resources_before = process_identity(pid('opencoder-resources.service'))
     todo = {'id': todo_id, 'kind': 'todos', 'input': {'spec': chain(root)}}
@@ -206,16 +206,16 @@ def exercise(args, settings, root):
     thread = None
     ready_thread = None
     stream = None
-    wasm_submitted = False
+    native_submitted = False
     try:
         receipt = env.submit_initial(todo)
         env.wait(lambda: (root / 'model-shell.pid').exists(), 240)
         model_shell = process_identity(int((root / 'model-shell.pid').read_text()))
         assert not (root / 'first.done').exists(), 'model bypassed the release gate'
-        wasm_submitted = True
+        native_submitted = True
         env.submit_initial({'id': dag_id, 'kind': 'dag', 'input': {'definition': {
-            'name': '跨发布真实 WASI 工具', 'steps': [{'name': 'hold', 'timeout_secs': 1800,
-                'kind': {'type': 'wasm', 'command': module}}]}}})
+            'name': '跨发布真实 native 工具', 'steps': [{'name': 'hold', 'timeout_secs': 1800,
+                'kind': {'type': 'binary', 'resource': resource}}]}}})
         env.wait(lambda: env.api('/api/executions/' + dag_id)['dag_steps']['running'] == 1, 90)
         stream = Stream(env, dag_id)
         env.wait(lambda: bool(stream.ids), 30)
@@ -225,7 +225,7 @@ def exercise(args, settings, root):
                 identifier = f'dag-{tag}-traffic-{len(traffic)}'
                 began = time.monotonic()
                 try:
-                    env.api('/api/executions', 'POST', {'id': identifier, 'kind': 'dag', 'input': {'definition': probes.spec()}})
+                    env.api('/api/executions', 'POST', {'id': identifier, 'kind': 'dag', 'input': {'definition': probe}})
                     traffic.append({'id': identifier, 'seconds': time.monotonic() - began, 'at': began})
                 except Exception as error:
                     failures.append(str(error))
@@ -253,7 +253,7 @@ def exercise(args, settings, root):
         assert process_identity(pid('opencoder-resources.service')) == resources_before, 'NFS service restarted'
         assert env.api('/api/executions', 'POST', todo) == receipt, 'TODO receipt changed'
         latest = f'dag-{tag}-latest'
-        env.api('/api/executions', 'POST', {'id': latest, 'kind': 'dag', 'input': {'definition': probes.spec()}})
+        env.api('/api/executions', 'POST', {'id': latest, 'kind': 'dag', 'input': {'definition': probe}})
         env.wait(lambda: env.completed(latest), 30)
         new_data = Path(current['releases'][current['current']]['runtime_data'])
         assert (new_data / 'dag' / latest / 'execution.json').is_file(), 'new task missed the new Runtime'
@@ -270,9 +270,9 @@ def exercise(args, settings, root):
         write(root / 'traffic.json', {'requests': traffic, 'failures': failures})
         write(root / 'readiness.json', {'samples': ready_samples, 'failures': ready_failures})
         (root / 'release').touch()
-        # Release only this test's WASI gate, regardless of deployment outcome.
-        if wasm_submitted:
-            release_wasi_gate(old_data, dag_id)
+        # Release only this test's native gate, regardless of deployment outcome.
+        if native_submitted:
+            release_native_gate(old_data, dag_id)
     assert not failures, failures
     env.wait(lambda: env.completed(todo_id), 300)
     env.wait(lambda: env.completed(dag_id), 90)

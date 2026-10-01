@@ -242,6 +242,6 @@ async fn unknown_run_reads_as_none_and_forged_operations_rejected() {
 #[test]
 fn brain_v4_tables_do_not_increment_current_schema_version() {
     // v4 tables bootstrap unconditionally, so they must not move the
-    // database watermark: 31 is the project TODO assignment bump.
-    assert_eq!(opencoder_store::libsql_store::schema_watermark(), 31);
+    // database watermark: 32 is the initiative and Tag catalog migration.
+    assert_eq!(opencoder_store::libsql_store::schema_watermark(), 32);
 }

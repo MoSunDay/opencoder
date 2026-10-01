@@ -12,7 +12,7 @@ async fn dag_step_events_scans_past_a_fully_filtered_page() {
     dag_run(
         &worker,
         run,
-        vec![step_spec("noise", "wasm"), step_spec("fetch", "wasm")],
+        vec![step_spec("noise", "binary"), step_spec("fetch", "binary")],
     )
     .await;
     session(&worker, run).await;
@@ -52,7 +52,7 @@ async fn dag_step_events_caps_the_filter_scan_and_reports_more() {
     dag_run(
         &worker,
         run,
-        vec![step_spec("noise", "wasm"), step_spec("fetch", "wasm")],
+        vec![step_spec("noise", "binary"), step_spec("fetch", "binary")],
     )
     .await;
     session(&worker, run).await;
@@ -81,7 +81,7 @@ async fn dag_step_events_terminal_step_appends_step_finished() {
     dag_run(
         &worker,
         run,
-        vec![step_spec("build", "wasm"), step_spec("noise", "wasm")],
+        vec![step_spec("build", "binary"), step_spec("noise", "binary")],
     )
     .await;
     session(&worker, run).await;
@@ -203,7 +203,7 @@ async fn dag_step_events_withholds_step_finished_until_the_last_page() {
 async fn dag_step_events_rejects_unknown_runs_steps_and_kinds() {
     let (_root, worker) = worker().await;
     let run = "dag-step-errors";
-    dag_run(&worker, run, vec![step_spec("fetch", "wasm")]).await;
+    dag_run(&worker, run, vec![step_spec("fetch", "binary")]).await;
 
     let unknown_step = dag_step_events(&worker, &dag_ref(run), "nope", 0)
         .await

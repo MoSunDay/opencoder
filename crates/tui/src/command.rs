@@ -22,6 +22,7 @@ use ratatui::Frame;
 /// the default highlight when the popup opens with an empty query.
 pub const COMMANDS: &[(&str, &str)] = &[
     ("/task", "切换 / 新建 / 恢复会话 (task picker)"),
+    ("/agent", "新建本地任务，或选择 Server 的 Agent / Operator"),
     ("/fork", "从已有会话复制上下文创建新任务 (fork picker)"),
     ("/model", "切换供应商 / 模型 (provider picker)"),
     ("/mcp", "管理 MCP server 列表 (enable/disable/增删改)"),
@@ -216,7 +217,8 @@ pub fn parse(input: &str) -> Option<SlashAction> {
     let t = input.trim();
     let bare = t.strip_prefix('/')?;
     match bare {
-        "" | "t" | "task" => Some(SlashAction::Task),
+        "" | "t" | "task" | "tasks" => Some(SlashAction::Task),
+        "agent" => Some(SlashAction::Agent),
         "fork" | "fk" => Some(SlashAction::Fork),
         "model" | "mdl" => Some(SlashAction::Model),
         "config" | "cfg" => Some(SlashAction::Config),
@@ -240,6 +242,7 @@ pub fn parse(input: &str) -> Option<SlashAction> {
 fn dispatch(name: &str) -> Option<SlashAction> {
     match name {
         "/task" => Some(SlashAction::Task),
+        "/agent" => Some(SlashAction::Agent),
         "/fork" => Some(SlashAction::Fork),
         "/model" => Some(SlashAction::Model),
         "/config" => Some(SlashAction::Config),

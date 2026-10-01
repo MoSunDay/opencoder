@@ -117,7 +117,7 @@ fn degraded_def_row(d: &DagDefRecord, error: String) -> serde_json::Value {
 
 /// GET /api/dag/defs — all definitions ordered by name. Decodable defs
 /// serialize to the exact `DagDefView` wire shape (LOCKED protocol DTO);
-/// undecodable ones (e.g. stored pre-wasm python definitions) degrade
+/// undecodable ones (e.g. stored pre-binary python definitions) degrade
 /// via [`degraded_def_row`] and are deleted via the normal endpoint.
 pub async fn list_defs(State(state): State<Arc<AppState>>) -> Response {
     match state.store.list_dag_defs().await {

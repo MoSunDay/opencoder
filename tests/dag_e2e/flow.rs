@@ -1,11 +1,11 @@
 //! D1 — the full DAG face: save a spec through `POST /api/dag/defs`,
-//! dispatch it, watch one wasm step and one agent step execute on the real
+//! dispatch it, watch one binary step and one agent step execute on the real
 //! node, then verify the artifacts, the progress/step projections, the run
 //! event stream and the control-plane CLI all agree.
 
-use crate::fixtures::{publish, stdout_module_wat};
+use crate::fixtures::{publish, stdout_source};
 use crate::support::fleet_proc::{Fleet, TOKEN};
-use crate::support::http_util::sse_read;
+use crate::support::http_util::{sse_read, wait_until};
 use crate::support::llm_stub::{LlmStub, EXTRA_REPLY};
 use crate::support::{sibling_bin, CLI_BIN};
 use serde_json::{json, Value};
@@ -19,9 +19,9 @@ const RUN: &str = "dag-e2e-flow-1";
 fn spec() -> Value {
     json!({
         "name": DEF,
-        "description": "e2e wasm + agent flow",
+        "description": "e2e binary + agent flow",
         "steps": [
-            {"name": "echo", "kind": {"type": "wasm", "command": "echo.wasm"}},
+            {"name": "echo", "kind": {"type":"binary","resource":"echo"}},
             {"name": "greet", "depends_on": ["echo"],
              "kind": {"type": "agent", "prompt": "报告 echo 步骤的输出"}},
         ],
@@ -30,7 +30,7 @@ fn spec() -> Value {
 
 /// The node-local artifact root: `<node-data>/dag/<run_id>`.
 fn run_dir(fleet: &Fleet, run: &str) -> std::path::PathBuf {
-    fleet.node_data.join("dag").join(run)
+    fleet.run_root(run)
 }
 
 /// Read a node artifact and parse it as JSON.
@@ -54,20 +54,20 @@ fn cli(fleet: &Fleet, args: &[&str]) -> (i32, String) {
 }
 
 #[test]
-fn dag_spec_dispatch_runs_wasm_and_agent_steps_to_done() {
+fn dag_spec_dispatch_runs_binary_and_agent_steps_to_done() {
     // The agent step is the only LLM consumer (the run session never
-    // drains; the wasm step does not call the model).
+    // drains; the binary step does not call the model).
     let stub = LlmStub::spawn_text(&[AGENT_TEXT, EXTRA_REPLY]);
     let tmp = tempfile::tempdir().unwrap();
     // Both fleet processes share this workdir config, so the pool root is
     // identical server-side (API writes) and node-side (freeze-on-accept).
-    let fleet = Fleet::spawn_with_config(
+    let fleet = Fleet::spawn_native(
         tmp.path(),
         stub.port(),
-        json!({"dag": {"wasm_dir": tmp.path().join("wasm-pool")}}),
+        json!({"dag": {"binary_dir": tmp.path().join("binary-pool")}}),
         "dag-flow-node",
     );
-    publish(&fleet, "echo", &stdout_module_wat(ECHO_TEXT));
+    publish(&fleet, "echo", &stdout_source(ECHO_TEXT));
 
     // Save the definition through the real surface.
     let (status, definition) = fleet.http("POST", "/api/dag/defs", &json!({"spec": spec()}));
@@ -100,6 +100,16 @@ fn dag_spec_dispatch_runs_wasm_and_agent_steps_to_done() {
     assert_eq!(doc["result"]["run_id"], RUN);
     assert_eq!(doc["result"]["status"], "done");
     assert_eq!(doc["definition"]["name"], DEF);
+    assert_eq!(doc["dag_context"]["state"], "ready");
+    assert_eq!(doc["dag_context"]["container_id"], format!("dag-run-{RUN}"));
+    assert_eq!(doc["dag_context"]["steps"][0]["cwd"], "/workspace/echo");
+    assert_eq!(doc["dag_context"]["steps"][0]["resource"]["version"], 1);
+    assert_eq!(
+        doc["dag_context"]["steps"][0]["resource"]["sha256"],
+        read_json(&run_dir(&fleet, RUN).join("resources.json"))["echo"]["sha256"]
+    );
+    assert!(doc["annotations"].get("dag_parent").is_none());
+    assert!(doc["annotations"].get("dag_config").is_none());
 
     // Progress projection: both steps done, none left behind.
     let (status, progress) =
@@ -111,7 +121,7 @@ fn dag_spec_dispatch_runs_wasm_and_agent_steps_to_done() {
     assert_eq!(progress["error"], 0);
     assert_eq!(progress["pending"], 0);
 
-    // Wasm step: the module's stdout became the step output end to end.
+    // Binary step: the module's stdout became the step output end to end.
     let (status, echo) = fleet.http(
         "GET",
         &format!("/api/dag/runs/{RUN}/steps/echo"),
@@ -136,6 +146,18 @@ fn dag_spec_dispatch_runs_wasm_and_agent_steps_to_done() {
         .as_str()
         .expect("agent step publishes session_id")
         .to_string();
+    let index = wait_until(&fleet.log, "Agent step ownership index", 30, || {
+        let (status, body) = fleet.http(
+            "GET",
+            &format!("/api/executions/{session_id}/index"),
+            &json!({}),
+        );
+        assert!(matches!(status, 200 | 404), "step index: {body}");
+        (status == 200).then_some(body)
+    });
+    assert_eq!(index["id"], session_id);
+    assert_eq!(index["kind"], "agent");
+    assert_eq!(index["node_id"], fleet.node_id());
 
     // Node-local artifacts (the LOCKED step-io contract).
     let echo_out = std::fs::read_to_string(run_dir(&fleet, RUN).join("echo/output.txt"))
@@ -151,7 +173,7 @@ fn dag_spec_dispatch_runs_wasm_and_agent_steps_to_done() {
     assert_eq!(live_pointer["session_id"], session_id.as_str());
     assert!(run_dir(&fleet, RUN).join("input.json").is_file());
     // Freeze-on-accept staged the referenced module into the library.
-    assert!(fleet.node_data.join("dag/_modules/echo.wasm").is_file());
+    assert!(fleet.run_root(RUN).join("echo/meta/program").is_file());
 
     // The step's sub-session is a real session: readable through the relay
     // (record is None → GET passes) with the step-scoped title.
@@ -201,7 +223,7 @@ fn dag_spec_dispatch_runs_wasm_and_agent_steps_to_done() {
     assert_eq!(run_doc["status"], "done");
     assert_eq!(run_doc["name"], DEF);
 
-    // The only model call was the greet step (the wasm step never calls).
+    // The only model call was the greet step (the binary step never calls).
     let requests = stub.wait_for_requests(1);
     assert!(
         requests[0].contains("报告 echo 步骤的输出"),

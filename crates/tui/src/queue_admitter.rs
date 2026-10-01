@@ -60,12 +60,13 @@ pub struct AdmitUiState {
 /// UI queue ordering. If the done-send fails the UI is gone — break.
 pub fn spawn_admitter(
     store: Arc<dyn Store>,
+    proxy: Option<String>,
 ) -> (mpsc::Sender<AdmitReq>, mpsc::Receiver<AdmitDone>) {
     let (req_tx, mut req_rx) = mpsc::channel::<AdmitReq>(32);
     let (done_tx, done_rx) = mpsc::channel(32);
     tokio::spawn(async move {
         while let Some(req) = req_rx.recv().await {
-            let result = store.admit_input(&req.input).await;
+            let result = crate::remote::admit(store.as_ref(), &req.input, proxy.as_deref()).await;
             if done_tx
                 .send(AdmitDone {
                     temp_seq: req.temp_seq,
@@ -579,7 +580,7 @@ mod tests {
     #[tokio::test]
     async fn actor_round_trip_admits_and_reconciles() {
         let store = mem_store("s").await;
-        let (tx, mut done_rx) = spawn_admitter(Arc::clone(&store) as Arc<dyn Store>);
+        let (tx, mut done_rx) = spawn_admitter(Arc::clone(&store) as Arc<dyn Store>, None);
         let mut st = AdmitUiState::default();
         let mut queue_items = vec![];
         let mut pending_images = vec![("img.png".to_string(), "alt".to_string())];
@@ -607,7 +608,7 @@ mod tests {
     #[tokio::test]
     async fn handle_queue_admits_raw_text_and_defers_skill() {
         let store = mem_store("s").await;
-        let (tx, mut done_rx) = spawn_admitter(Arc::clone(&store) as Arc<dyn Store>);
+        let (tx, mut done_rx) = spawn_admitter(Arc::clone(&store) as Arc<dyn Store>, None);
         let mut st = AdmitUiState::default();
         let mut queue_items = vec![];
         let mut pending_images = vec![];
@@ -653,7 +654,7 @@ mod tests {
     #[tokio::test]
     async fn handle_queue_pure_skill_admits_token_not_trigger() {
         let store = mem_store("s").await;
-        let (tx, mut done_rx) = spawn_admitter(Arc::clone(&store) as Arc<dyn Store>);
+        let (tx, mut done_rx) = spawn_admitter(Arc::clone(&store) as Arc<dyn Store>, None);
         let mut st = AdmitUiState::default();
         let mut queue_items = vec![];
         let mut pending_images = vec![];

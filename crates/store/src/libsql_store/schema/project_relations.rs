@@ -3,6 +3,19 @@
 use anyhow::{ensure, Result};
 use libsql::{params, Connection};
 
+pub(super) const CREATE_PROJECT_MILESTONES: &str = "\
+CREATE TABLE IF NOT EXISTS project_milestones (
+  id TEXT PRIMARY KEY,
+  kind TEXT NOT NULL DEFAULT 'milestone',
+  goal_id TEXT,
+  title TEXT NOT NULL,
+  detail_md TEXT,
+  status TEXT NOT NULL,
+  sort_key INTEGER NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+)";
+
 pub(super) async fn migrate(conn: &Connection) -> Result<()> {
     let mut columns = conn
         .query("PRAGMA table_info(project_milestones)", ())
@@ -16,8 +29,7 @@ pub(super) async fn migrate(conn: &Connection) -> Result<()> {
     drop(columns);
     if required {
         conn.execute(
-            &super::CREATE_PROJECT_MILESTONES
-                .replace("project_milestones (", "project_milestones_v23 ("),
+            &CREATE_PROJECT_MILESTONES.replace("project_milestones (", "project_milestones_v23 ("),
             (),
         )
         .await?;

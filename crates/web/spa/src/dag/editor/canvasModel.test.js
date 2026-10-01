@@ -24,9 +24,9 @@ const SPEC = {
   name: 'etl',
   description: 'demo',
   steps: [
-    { name: 'fetch', kind: { type: 'wasm', command: 'tool.wasm', sandbox: 'runc' }, timeout_secs: 120 },
+    { name: 'fetch', kind: { type: 'binary', resource: 'tool', sandbox: 'runc' }, timeout_secs: 120 },
     { name: 'review', kind: { type: 'agent', prompt: 'review it', agent: 'reviewer', model: 'gpt' } },
-    { name: 'load', depends_on: ['fetch', 'review'], kind: { type: 'wasm', command: 'tool.wasm' } },
+    { name: 'load', depends_on: ['fetch', 'review'], kind: { type: 'binary', resource: 'tool' } },
   ],
 };
 
@@ -36,7 +36,7 @@ const roundtrip = (spec) => {
 };
 
 describe('canvasModel roundtrip', () => {
-  it('specToCanvas → canvasToSpec 无损还原代表 spec（wasm 沙箱/超时 + agent 字段 + 依赖）', () => {
+  it('specToCanvas → canvasToSpec 无损还原代表 spec（binary 沙箱/超时 + agent 字段 + 依赖）', () => {
     const { spec } = roundtrip(SPEC);
     expect(JSON.parse(JSON.stringify(spec))).toEqual(SPEC);
   });
@@ -45,8 +45,8 @@ describe('canvasModel roundtrip', () => {
     const spec = {
       name: 'x',
       steps: [
-        { name: 's1', kind: { type: 'wasm', command: 'tool.wasm' } },
-        { name: 's2', depends_on: ['s1'], kind: { type: 'wasm', command: 'tool.wasm' } },
+        { name: 's1', kind: { type: 'binary', resource: 'tool' } },
+        { name: 's2', depends_on: ['s1'], kind: { type: 'binary', resource: 'tool' } },
         { name: 's3', depends_on: ['s1'], kind: { type: 'agent', prompt: 'c' } },
         { name: 's4', depends_on: ['s2', 's3'], kind: { type: 'agent', prompt: 'd' } },
       ],
@@ -60,8 +60,8 @@ describe('canvasModel roundtrip', () => {
     const spec = {
       name: 'x',
       steps: [
-        { name: 'a', kind: { type: 'wasm', command: 'tool.wasm' } },
-        { name: 'b', depends_on: ['ghost'], kind: { type: 'wasm', command: 'tool.wasm' } },
+        { name: 'a', kind: { type: 'binary', resource: 'tool' } },
+        { name: 'b', depends_on: ['ghost'], kind: { type: 'binary', resource: 'tool' } },
       ],
     };
     const { canvas, spec: back } = roundtrip(spec);
@@ -73,8 +73,8 @@ describe('canvasModel roundtrip', () => {
     const spec = {
       name: 'x',
       steps: [
-        { name: 'a', kind: { type: 'wasm', command: 'tool.wasm' } },
-        { name: 'b', depends_on: ['b'], kind: { type: 'wasm', command: 'tool.wasm' } },
+        { name: 'a', kind: { type: 'binary', resource: 'tool' } },
+        { name: 'b', depends_on: ['b'], kind: { type: 'binary', resource: 'tool' } },
       ],
     };
     const { canvas, spec: back } = roundtrip(spec);
@@ -98,8 +98,8 @@ describe('canvasModel roundtrip', () => {
     const spec = {
       name: 'x',
       steps: [
-        { name: 'a', kind: { type: 'wasm', command: 'tool.wasm' } },
-        { name: 'b', depends_on: ['a', 'a'], kind: { type: 'wasm', command: 'tool.wasm' } },
+        { name: 'a', kind: { type: 'binary', resource: 'tool' } },
+        { name: 'b', depends_on: ['a', 'a'], kind: { type: 'binary', resource: 'tool' } },
       ],
     };
     const { canvas, spec: back } = roundtrip(spec);
@@ -147,8 +147,8 @@ describe('canvasModel roundtrip', () => {
     const spec = {
       name: 'x',
       steps: [
-        { name: 'a', depends_on: ['b'], kind: { type: 'wasm', command: 'tool.wasm' } },
-        { name: 'b', depends_on: ['a'], kind: { type: 'wasm', command: 'tool.wasm' } },
+        { name: 'a', depends_on: ['b'], kind: { type: 'binary', resource: 'tool' } },
+        { name: 'b', depends_on: ['a'], kind: { type: 'binary', resource: 'tool' } },
       ],
     };
     const { canvas, spec: back } = roundtrip(spec);
@@ -192,31 +192,31 @@ describe('canvasModel renameStep / uniqueSlug / newStep', () => {
 
   it('newStep 生成唯一 slug 名与对应类型的空负载', () => {
     expect(newStep('agent', [])).toEqual({ name: 'step', kind: { type: 'agent', prompt: '' } });
-    const py = newStep('wasm', ['step']);
+    const py = newStep('binary', ['step']);
     expect(py.name).toBe('step-2');
-    expect(py.kind).toEqual({ type: 'wasm', command: '' });
+    expect(py.kind).toEqual({ type: 'binary', resource: '', args: [] });
   });
 });
 
 describe('canvasModel changeStepKind', () => {
-  it('agent → wasm 重置负载但保留 name 与 timeout_secs', () => {
+  it('agent → binary 重置负载但保留 name 与 timeout_secs', () => {
     const step = { name: 'a', timeout_secs: 60, kind: { type: 'agent', prompt: 'p', agent: 'g', model: 'm' } };
-    expect(changeStepKind(step, 'wasm')).toEqual({
+    expect(changeStepKind(step, 'binary')).toEqual({
       name: 'a',
       timeout_secs: 60,
-      kind: { type: 'wasm', command: '' },
+      kind: { type: 'binary', resource: '', args: [] },
     });
   });
 
-  it('wasm → agent 同样重置负载并保留 name', () => {
-    const step = { name: 'b', kind: { type: 'wasm', command: 'tool.wasm', sandbox: 'runc' } };
+  it('binary → agent 同样重置负载并保留 name', () => {
+    const step = { name: 'b', kind: { type: 'binary', resource: 'tool', sandbox: 'runc' } };
     expect(changeStepKind(step, 'agent')).toEqual({ name: 'b', kind: { type: 'agent', prompt: '' } });
   });
 });
 
 describe('canvasModel specProblemIndex', () => {
   const PROBLEMS = [
-    'steps[0].kind.type 必须是 agent | wasm',
+    'steps[0].kind.type 必须是 agent | binary',
     'spec.name 必须是非空字符串',
     'steps[1].depends_on 存在重复项',
   ];
@@ -224,7 +224,7 @@ describe('canvasModel specProblemIndex', () => {
 
   it('steps[N] 前缀的问题按节点序号挂到对应节点 id 上', () => {
     const idx = specProblemIndex(PROBLEMS, NODES);
-    expect(idx.get('a')).toEqual(['steps[0].kind.type 必须是 agent | wasm']);
+    expect(idx.get('a')).toEqual(['steps[0].kind.type 必须是 agent | binary']);
     expect(idx.get('b')).toEqual(['steps[1].depends_on 存在重复项']);
     expect(idx.size).toBe(2);
   });
@@ -236,6 +236,6 @@ describe('canvasModel specProblemIndex', () => {
 });
 
 it('preserves all_done when changing the executable kind', () => {
-  expect(changeStepKind({name:'summary',trigger_rule:'all_done',kind:{type:'agent',prompt:'review'}},'wasm'))
-    .toEqual({name:'summary',trigger_rule:'all_done',kind:{type:'wasm',command:''}});
+  expect(changeStepKind({name:'summary',trigger_rule:'all_done',kind:{type:'agent',prompt:'review'}},'binary'))
+    .toEqual({name:'summary',trigger_rule:'all_done',kind:{type:'binary',resource:'',args:[]}});
 });

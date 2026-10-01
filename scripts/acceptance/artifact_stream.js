@@ -6,13 +6,15 @@ const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { stageWasm } = require('./harness/wasm');
+const { prepareNative, artifactPath } = require('./harness/native');
+require('./harness/namespace').isolateFixture();
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'opencoder-artifact-browser-'));
 const bin = process.env.PLATFORM_BIN_DIR || path.join(__dirname, '../../target/debug');
 const token = crypto.randomBytes(24).toString('hex');
 const children = [];
 const fixtureBytes = Number(process.env.FIXTURE_BYTES || 256 * 1024 * 1024);
+let native;
 let browser;
 let base;
 let page;
@@ -74,6 +76,7 @@ async function main() {
   const nodeDir = path.join(root, 'node');
   fs.mkdirSync(serverDir);
   fs.mkdirSync(nodeDir);
+  native = await prepareNative(root, serverDir, [nodeDir], process.argv[2], 'seed');
   const server = start('opencoder-server', ['--workdir', serverDir, '--port', '0', '--token', token], serverDir);
   await until(() => {
     if (server.exitCode !== null) throw new Error(fs.readFileSync(server.logPath, 'utf8'));
@@ -81,7 +84,7 @@ async function main() {
     if (match) base = match[1];
     return !!base;
   }, 'server');
-  stageWasm(path.join(nodeDir, 'state'), 'seed');
+  native.mount();
   const node = start('opencoder-agent', [
     '--remote', base, '--token', token, '--name', 'artifact-node',
     '--workdir', nodeDir, '--data-dir', path.join(nodeDir, 'state'),
@@ -91,11 +94,11 @@ async function main() {
   await api('POST', '/api/executions', {
     id: 'dag-browser-artifact', kind: 'dag', input: { definition: {
       name: 'browser-artifact',
-      steps: [{ name: 'first', kind: { type: 'wasm', command: 'stdout.wasm' } }],
+      steps: [{ name: 'first', kind: { type: 'binary', resource: 'stdout' } }],
     } },
   });
   await until(async () => (await api('GET', '/api/executions/dag-browser-artifact')).execution.status === 'done', 'dag', 90_000);
-  const artifact = path.join(nodeDir, 'state/dag/dag-browser-artifact/first/output.txt');
+  const artifact = artifactPath(path.join(nodeDir, 'state'), 'dag-browser-artifact', 'first/output.txt');
   fs.truncateSync(artifact, fixtureBytes);
 
   browser = await chromium.launch({
@@ -169,7 +172,12 @@ async function main() {
     max_js_heap_growth: peak - baseline, root }));
 }
 
-const deadline = setTimeout(() => { children.forEach((child) => child.kill('SIGKILL')); process.exit(1); }, 240_000);
+const deadline = setTimeout(() => {
+  process.exitCode = 1;
+  console.error(`acceptance exceeded 240s: ${root}`);
+  children.forEach((child) => child.kill('SIGTERM'));
+  if (browser) browser.close().catch(console.error);
+}, 240_000);
 main().catch(async (error) => {
   console.error(error);
   if (page) console.error((await page.locator('body').innerText()).slice(-4000));
@@ -179,5 +187,6 @@ main().catch(async (error) => {
   if (sampler) clearInterval(sampler);
   if (browser) await browser.close();
   for (const child of children.reverse()) await stop(child);
+  if (native) native.close();
   clearTimeout(deadline);
 });

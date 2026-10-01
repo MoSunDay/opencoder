@@ -14,6 +14,7 @@ async fn dag_run(worker: &Worker, id: &str, steps: Vec<Value>) {
     accepted.assignment.index.kind = ExecutionKind::Dag;
     accepted.assignment.request.kind = ExecutionKind::Dag;
     accepted.assignment.definition = Some(json!({"spec": {"name": id, "steps": steps}}));
+    accepted.annotations["dag_parent"] = json!(worker.inner.layout.kind_root(ExecutionKind::Dag));
     worker.inner.journal.lock().await.save(accepted).unwrap();
 }
 
@@ -23,7 +24,7 @@ fn step_spec(name: &str, kind: &str) -> Value {
     spec.insert(
         "kind".into(),
         match kind {
-            "wasm" => json!({"type": "wasm", "command": "tool.wasm"}),
+            "binary" => json!({"type":"binary","resource":"tool"}),
             "runner" => json!({"type": "runner", "command": "codex exec"}),
             _ => json!({"type": "agent", "prompt": "go"}),
         },

@@ -13,9 +13,8 @@ members = [
     "crates/project",
     "crates/node",
     "crates/dag",
-    "crates/dag-wasm",
+    "crates/dag-binary",
     "crates/dag-runtime",
-    "crates/dag-review-tools",
     "crates/server",
     "crates/control",
     "crates/worker",
@@ -25,7 +24,6 @@ members = [
     "crates/team",
     "crates/ctl",
 ]
-exclude = ["examples/snake", "examples/dag-modules/kb-index"]
 
 [package]
 name = "opencoder"
@@ -49,9 +47,6 @@ anyhow.workspace = true
 [dev-dependencies]
 serde_json.workspace = true
 tempfile.workspace = true
-# Fleet e2e (tests/dag_e2e) compiles tiny WASI modules on the fly, the same
-# fixture shape crates/worker/tests uses.
-wat.workspace = true
 
 [workspace.package]
 version = "0.1.0"
@@ -72,7 +67,7 @@ opencoder-todos  = { path = "crates/todos" }
 opencoder-project = { path = "crates/project" }
 opencoder-node   = { path = "crates/node" }
 opencoder-dag    = { path = "crates/dag" }
-opencoder-dag-wasm = { path = "crates/dag-wasm" }
+opencoder-dag-binary = { path = "crates/dag-binary" }
 opencoder-dag-runtime = { path = "crates/dag-runtime" }
 opencoder-server = { path = "crates/server" }
 opencoder-control = { path = "crates/control" }
@@ -88,6 +83,7 @@ tokio-stream = "0.1"
 tokio-util = "0.7"
 futures = "0.3"
 async-trait = "0.1"
+axum = { version = "0.7", features = ["json", "ws"] }
 libsql = { version = "0.9.30", default-features = false, features = ["core", "libsql-sys", "parser", "serde"] }
 tempfile = "3"
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls-native-roots", "gzip", "socks"] }
@@ -103,7 +99,6 @@ ulid = { version = "1", features = ["serde"] }
 dirs = "5"
 glob = "0.3"
 regex = "1"
-wat = "1.254"
 cron = "0.15"
 uuid = { version = "1", features = ["v4"] }
 pulldown-cmark = { version = "0.13", default-features = false }

@@ -2,8 +2,8 @@
 //! the former single `NFS_SLOT` in `api_agent_nfs`. Each export is a
 //! `&'static str` key mapping to at most one live
 //! [`NfsServerHandle`]; today the keys are [`AGENTS_EXPORT`] (the
-//! agents root, `/api/agents/nfs`) and [`DAG_WASM_EXPORT`] (the DAG
-//! wasm pool, `/api/dag/wasm/nfs`). Keeping the map process-global (a
+//! agents root, `/api/agents/nfs`) and [`DAG_BINARY_EXPORT`] (the DAG
+//! binary pool, `/api/dag/binaries/nfs`). Keeping the map process-global (a
 //! "static + tokio Mutex", like the other process-wide slots in this
 //! crate) leaves `AppState` untouched: every construction site stays
 //! valid.
@@ -21,8 +21,9 @@ use opencoder_agents::{
 
 /// Key of the agents-root export (`/api/agents/nfs`).
 pub const AGENTS_EXPORT: &str = "agents";
-/// Key of the DAG wasm-pool export (`/api/dag/wasm/nfs`).
-pub const DAG_WASM_EXPORT: &str = "dag-wasm";
+/// Key of the DAG binary-pool export (`/api/dag/binaries/nfs`).
+pub const DAG_BINARY_EXPORT: &str = "dag-binary";
+pub const DAG_WORKSPACE_EXPORT: &str = "dag-workspace";
 
 /// Live NFS servers by export key. `spawn_nfs_server` runs the accept
 /// loop on a dedicated OS thread (independent of any runtime), so the
@@ -33,12 +34,13 @@ static EXPORTS: std::sync::LazyLock<tokio::sync::Mutex<HashMap<&'static str, Nfs
 
 /// Stopped snapshot for `key`: the [`nfs_status(None)`] shape, with the
 /// port swapped for the export's own config default so a stopped
-/// dag-wasm export never advertises the agents port (2049).
+/// dag-binary export never advertises the agents port (2049).
 fn stopped(key: &'static str) -> NfsServerStatus {
     let mut status = nfs_status(None);
     status.port = match key {
         AGENTS_EXPORT => 2049,
-        DAG_WASM_EXPORT => 2050,
+        DAG_BINARY_EXPORT => 2050,
+        DAG_WORKSPACE_EXPORT => 2051,
         _ => 0,
     };
     status
@@ -119,7 +121,7 @@ mod tests {
     /// reuses the live handle (started=false, same port), status reports
     /// running, stop parks it and reports stopped defaults again. The
     /// crate's other tests are sync `#[test]`s, so the runtime is built
-    /// by hand (same pattern as `dag-wasm`'s scope tests).
+    /// by hand (same pattern as `dag-binary`'s scope tests).
     #[test]
     fn named_export_start_reuse_stop() {
         let dir = tempfile::tempdir().unwrap();

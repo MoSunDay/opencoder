@@ -10,7 +10,7 @@ import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from live import chain
-from fixture import release_wasi_gate
+from fixture import release_native_gate
 from metrics import check_continuity, summarize, verify, verify_ready
 from transitions import command
 from types import SimpleNamespace
@@ -26,23 +26,24 @@ class AcceptanceTests(unittest.TestCase):
             def admit():
                 time.sleep(.02)
                 run.mkdir()
-                (run / 'execution.json').write_text('{}')
+                (run / 'execution.json').write_text(json.dumps({'annotations': {'dag_parent': str(root / 'runs' / '2026-09-30')}}))
+                (root / 'runs/2026-09-30/own/workspace/hold').mkdir(parents=True)
             writer = threading.Thread(target=admit)
             writer.start()
-            release_wasi_gate(root, 'own', seconds=2)
+            release_native_gate(root, 'own', seconds=2)
             writer.join()
-            self.assertTrue((run / 'release').is_file())
+            self.assertTrue((root / 'runs/2026-09-30/own/workspace/hold/release').is_file())
             self.assertFalse((sibling / 'release').exists())
             (run / 'hold').mkdir()
             (run / 'hold' / 'context.json').write_text('{}')
-            release_wasi_gate(root, 'own')
-            self.assertTrue((run / 'release').is_file())
+            release_native_gate(root, 'own')
+            self.assertTrue((root / 'runs/2026-09-30/own/workspace/hold/release').is_file())
 
     def test_unconfirmed_admission_does_not_create_an_orphan_directory(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             with self.assertRaisesRegex(TimeoutError, 'unconfirmed'):
-                release_wasi_gate(root, 'absent', seconds=0)
+                release_native_gate(root, 'absent', seconds=0)
             self.assertFalse((root / 'dag' / 'absent').exists())
 
     def test_signal_acceptance_uses_operator_cli_for_publish_and_rollback(self):
@@ -97,7 +98,7 @@ class AcceptanceTests(unittest.TestCase):
         samples = [{'started_at': i * .2, 'completed_at': i * .2 + .05}
                    for i in range(20)]
         traffic = [{'id': str(i), 'at': i * .2, 'seconds': .2} for i in range(20)]
-        traffic[5]['seconds'] = 2.3
+        traffic[5]['seconds'] = 32.3
         executions = [{'created_at_ms': i * 200, 'started_at_ms': i * 200 + 100}
                       for i in range(20)]
         self.assertEqual(summarize(traffic, executions)['p95_accept_seconds'], .2)
@@ -105,16 +106,35 @@ class AcceptanceTests(unittest.TestCase):
         with self.assertRaisesRegex(AssertionError, 'max_accept_seconds'):
             check_continuity(metrics)
         check_continuity(metrics, 'p95')
-        traffic[4]['seconds'] = 1.3
+        traffic[4]['seconds'] = 31.3
         with self.assertRaisesRegex(AssertionError, 'P95 admission'):
             check_continuity(summarize(traffic, executions), 'p95')
         self.assertLess(verify_ready(samples, [])['max_gap_seconds'], 1)
-        samples[10:] = [{**row, 'started_at': row['started_at'] + 1.2,
-                         'completed_at': row['completed_at'] + 1.2} for row in samples[10:]]
+        samples[10:] = [{**row, 'started_at': row['started_at'] + 31.2,
+                         'completed_at': row['completed_at'] + 31.2} for row in samples[10:]]
         with self.assertRaisesRegex(AssertionError, 'readiness gap'):
             verify_ready(samples, [])
         with self.assertRaisesRegex(AssertionError, 'readiness failed'):
             verify_ready(samples[:10], ['HTTP 503'])
+
+    def test_continuity_accepts_thirty_seconds_and_rejects_only_over_budget(self):
+        keys = ('max_accept_seconds', 'max_accept_gap_seconds', 'max_scheduling_gap_seconds')
+        metrics = {key: 6.81 for key in (*keys, 'p95_accept_seconds')}
+        check_continuity(metrics)
+        check_continuity(metrics, 'p95')
+        for key in keys:
+            with self.subTest(key=key):
+                check_continuity({**metrics, key: 30})
+                with self.assertRaisesRegex(AssertionError, 'exceeded 30 seconds'):
+                    check_continuity({**metrics, key: 30.001})
+        check_continuity({**metrics, 'p95_accept_seconds': 30}, 'p95')
+        with self.assertRaisesRegex(AssertionError, 'exceeded 30 seconds'):
+            check_continuity({**metrics, 'p95_accept_seconds': 30.001}, 'p95')
+        samples = [{'started_at': 0, 'completed_at': 0},
+                   {'started_at': 30, 'completed_at': 30}]
+        self.assertEqual(verify_ready(samples, [])['max_gap_seconds'], 30)
+        with self.assertRaisesRegex(AssertionError, 'exceeded 30 seconds'):
+            verify_ready([samples[0], {'started_at': 30, 'completed_at': 30.001}], [])
 
     def test_durable_metrics_reject_duplicate_owners_and_scheduling_gaps(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -124,15 +144,17 @@ class AcceptanceTests(unittest.TestCase):
 
             def save(runtime, identifier, started):
                 run = root / runtime / 'dag' / identifier
-                (run / 'execute').mkdir(parents=True, exist_ok=True)
-                (run / 'execution.json').write_text(json.dumps({'assignment': {'index': {'created_at': 0}}}))
-                (run / 'execute/meta.json').write_text(json.dumps({'outcome': 'done', 'started_at_ms': started}))
+                actual = root / runtime / 'runs/2026-09-30' / identifier
+                (actual / 'execute').mkdir(parents=True, exist_ok=True)
+                run.mkdir(parents=True, exist_ok=True)
+                (run / 'execution.json').write_text(json.dumps({'assignment': {'index': {'created_at': 0}}, 'annotations': {'dag_parent': str(actual.parent)}}))
+                (actual / 'execute/meta.json').write_text(json.dumps({'outcome': 'done', 'started_at_ms': started}))
 
             save('r1', 'dag-a', 100)
             save('r2', 'dag-b', 300)
             runtimes = [root / 'r1', root / 'r2']
             self.assertEqual(verify(runtimes, traffic)['metrics']['max_scheduling_gap_seconds'], .2)
-            save('r2', 'dag-b', 2100)
+            save('r2', 'dag-b', 31100)
             with self.assertRaisesRegex(AssertionError, 'scheduling_gap'):
                 verify(runtimes, traffic)
             save('r2', 'dag-a', 100)

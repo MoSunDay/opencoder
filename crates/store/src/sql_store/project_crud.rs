@@ -1,4 +1,4 @@
-//! Project-module persistence — goals & milestones CRUD (MySQL dialect).
+//! Project-module persistence — goals & initiatives CRUD (MySQL dialect).
 //!
 //! Companion of [`super::project_crud_runs`] (todos & runs). Free functions
 //! over a `MySqlPool`; deletes cascade explicitly and run through
@@ -8,14 +8,14 @@
 use anyhow::{Context, Result};
 use sqlx::{MySqlPool, Row};
 
-use super::{corrupt_status, exec_read_all, exec_write, row_exists, run_cascade, Arg};
+use super::{corrupt_status, exec_read_all, exec_write, Arg};
 use crate::project_types::{
-    ProjectGoalPatch, ProjectGoalRecord, ProjectGoalStatus, ProjectMilestonePatch,
-    ProjectMilestoneRecord, ProjectMilestoneStatus,
+    ProjectGoalPatch, ProjectGoalRecord, ProjectGoalStatus, ProjectInitiativeRecord,
+    ProjectInitiativeStatus,
 };
 
 const GOAL_COLS: &str = "id, title, detail_md, status, sort_key, created_at, updated_at";
-const MILESTONE_COLS: &str =
+const INITIATIVE_COLS: &str =
     "id, goal_id, title, detail_md, status, sort_key, created_at, updated_at";
 
 // ---- goals ----
@@ -81,33 +81,6 @@ pub async fn patch_goal(
     Ok(n > 0)
 }
 
-/// Preserve independent work when removing a project.
-pub async fn delete_goal(pool: &MySqlPool, starrocks: bool, id: &str) -> Result<bool> {
-    if !row_exists(
-        pool,
-        starrocks,
-        "SELECT 1 FROM project_goals WHERE id = ?",
-        id,
-    )
-    .await?
-    {
-        return Ok(false);
-    }
-    run_cascade(
-        pool,
-        starrocks,
-        &[
-            (
-                "UPDATE project_milestones SET goal_id = NULL WHERE goal_id = ?",
-                id.to_owned(),
-            ),
-            ("DELETE FROM project_goals WHERE id = ?", id.to_owned()),
-        ],
-    )
-    .await?;
-    Ok(true)
-}
-
 /// Ordered by `sort_key` then `created_at`.
 pub async fn list_goals(pool: &MySqlPool, starrocks: bool) -> Result<Vec<ProjectGoalRecord>> {
     let rows = exec_read_all(
@@ -134,20 +107,19 @@ fn row_to_goal(r: &sqlx::mysql::MySqlRow) -> Result<ProjectGoalRecord> {
     })
 }
 
-// ---- milestones ----
+// ---- initiatives ----
 
-pub async fn create_milestone(
+pub async fn create_initiative(
     pool: &MySqlPool,
     starrocks: bool,
-    rec: &ProjectMilestoneRecord,
-    kind: &str,
+    rec: &ProjectInitiativeRecord,
 ) -> Result<()> {
     exec_write(
         pool,
         starrocks,
-        "INSERT INTO project_milestones \
-         (id, goal_id, title, detail_md, status, sort_key, created_at, updated_at, kind) \
-         VALUES (?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO project_initiatives \
+         (id, goal_id, title, detail_md, status, sort_key, created_at, updated_at) \
+         VALUES (?,?,?,?,?,?,?,?)",
         vec![
             Arg::Text(rec.id.clone()),
             Arg::TextOrNull(rec.goal_id.clone()),
@@ -157,149 +129,40 @@ pub async fn create_milestone(
             Arg::Int(rec.sort),
             Arg::Int(rec.created_at),
             Arg::Int(rec.updated_at),
-            Arg::Text(kind.to_owned()),
         ],
     )
     .await
-    .context("insert project milestone")?;
+    .context("insert project initiative")?;
     Ok(())
-}
-
-pub async fn patch_milestone(
-    pool: &MySqlPool,
-    starrocks: bool,
-    id: &str,
-    patch: &ProjectMilestonePatch,
-    now_ms: i64,
-    kind: &str,
-) -> Result<bool> {
-    let mut sets: Vec<&'static str> = Vec::new();
-    let mut args: Vec<Arg> = Vec::new();
-    if let Some(v) = &patch.goal_id {
-        sets.push("goal_id = ?");
-        args.push(Arg::TextOrNull(v.clone()));
-    }
-    if let Some(v) = &patch.title {
-        sets.push("title = ?");
-        args.push(Arg::Text(v.clone()));
-    }
-    if let Some(v) = &patch.detail_md {
-        sets.push("detail_md = ?");
-        args.push(Arg::Text(v.clone()));
-    }
-    if let Some(v) = patch.status {
-        sets.push("status = ?");
-        args.push(Arg::Text(v.as_str().to_string()));
-    }
-    if let Some(v) = patch.sort {
-        sets.push("sort_key = ?");
-        args.push(Arg::Int(v));
-    }
-    sets.push("updated_at = ?");
-    args.push(Arg::Int(now_ms));
-    args.push(Arg::Text(id.to_string()));
-    args.push(Arg::Text(kind.to_owned()));
-    let sql = format!(
-        "UPDATE project_milestones SET {} WHERE id = ? AND kind = ?",
-        sets.join(", ")
-    );
-    let n = exec_write(pool, starrocks, &sql, args)
-        .await
-        .context("patch project milestone")?;
-    Ok(n > 0)
-}
-
-/// Nonempty milestones are protected from deletion.
-pub async fn delete_milestone(
-    pool: &MySqlPool,
-    starrocks: bool,
-    id: &str,
-    kind: &str,
-) -> Result<bool> {
-    if starrocks {
-        let rows = exec_read_all(
-            pool,
-            true,
-            "SELECT id FROM project_milestones WHERE id = ? AND kind = ?",
-            &[Arg::Text(id.to_owned()), Arg::Text(kind.to_owned())],
-        )
-        .await?;
-        if rows.is_empty() {
-            return Ok(false);
-        }
-        if row_exists(
-            pool,
-            true,
-            "SELECT 1 FROM project_todos WHERE milestone_id = ?",
-            id,
-        )
-        .await?
-        {
-            return Err(crate::project::MilestoneNotEmpty.into());
-        }
-        exec_write(
-            pool,
-            true,
-            "DELETE FROM project_milestones WHERE id = ? AND kind = ?",
-            vec![Arg::Text(id.to_owned()), Arg::Text(kind.to_owned())],
-        )
-        .await?;
-        return Ok(true);
-    }
-    let mut tx = pool.begin().await?;
-    let existing =
-        sqlx::query("SELECT id FROM project_milestones WHERE id = ? AND kind = ? FOR UPDATE")
-            .bind(id)
-            .bind(kind)
-            .fetch_optional(&mut *tx)
-            .await?;
-    if existing.is_none() {
-        return Ok(false);
-    }
-    let children = sqlx::query("SELECT id FROM project_todos WHERE milestone_id = ? FOR UPDATE")
-        .bind(id)
-        .fetch_all(&mut *tx)
-        .await?;
-    if !children.is_empty() {
-        return Err(crate::project::MilestoneNotEmpty.into());
-    }
-    sqlx::query("DELETE FROM project_milestones WHERE id = ? AND kind = ?")
-        .bind(id)
-        .bind(kind)
-        .execute(&mut *tx)
-        .await?;
-    tx.commit().await?;
-    Ok(true)
 }
 
 /// `goal_id == None` lists across all goals; ordered by `sort_key` then
 /// `created_at`.
-pub async fn list_milestones(
+pub async fn list_initiatives(
     pool: &MySqlPool,
     starrocks: bool,
     goal_id: Option<&str>,
-    kind: &str,
-) -> Result<Vec<ProjectMilestoneRecord>> {
-    let mut sql = format!("SELECT {MILESTONE_COLS} FROM project_milestones WHERE kind = ?");
-    let mut args: Vec<Arg> = vec![Arg::Text(kind.to_owned())];
+) -> Result<Vec<ProjectInitiativeRecord>> {
+    let mut sql = format!("SELECT {INITIATIVE_COLS} FROM project_initiatives ");
+    let mut args: Vec<Arg> = vec![];
     if let Some(g) = goal_id {
-        sql.push_str(" AND goal_id = ?");
+        sql.push_str(" WHERE goal_id = ?");
         args.push(Arg::Text(g.to_string()));
     }
     sql.push_str(" ORDER BY sort_key, created_at");
     let rows = exec_read_all(pool, starrocks, &sql, &args).await?;
-    rows.iter().map(row_to_milestone).collect()
+    rows.iter().map(row_to_initiative).collect()
 }
 
-fn row_to_milestone(r: &sqlx::mysql::MySqlRow) -> Result<ProjectMilestoneRecord> {
+pub(super) fn row_to_initiative(r: &sqlx::mysql::MySqlRow) -> Result<ProjectInitiativeRecord> {
     let status: String = r.try_get("status")?;
-    Ok(ProjectMilestoneRecord {
+    Ok(ProjectInitiativeRecord {
         id: r.try_get("id")?,
         goal_id: r.try_get("goal_id")?,
         title: r.try_get("title")?,
         detail_md: r.try_get::<Option<String>, _>("detail_md")?,
-        status: ProjectMilestoneStatus::parse(&status)
-            .ok_or_else(|| corrupt_status("project_milestones.status", &status))?,
+        status: ProjectInitiativeStatus::parse(&status)
+            .ok_or_else(|| corrupt_status("project_initiatives.status", &status))?,
         sort: r.try_get("sort_key")?,
         created_at: r.try_get("created_at")?,
         updated_at: r.try_get("updated_at")?,

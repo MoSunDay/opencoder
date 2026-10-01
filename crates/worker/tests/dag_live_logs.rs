@@ -1,4 +1,4 @@
-//! Real Node WebSocket -> control SSE, observed before the Wasm step exits.
+//! Real Node WebSocket -> control SSE, observed before the Binary step exits.
 mod support;
 use futures::StreamExt;
 use opencoder_llm::LlmEvent;
@@ -13,7 +13,7 @@ fn ids(text: &str) -> Vec<i64> {
 }
 
 #[tokio::test]
-async fn dag_agent_and_wasm_logs_stream_before_completion_and_resume_by_sequence() {
+async fn dag_agent_and_binary_logs_stream_before_completion_and_resume_by_sequence() {
     let _config = isolated_config();
     let client = mock();
     client.queue_script(vec![
@@ -25,22 +25,10 @@ async fn dag_agent_and_wasm_logs_stream_before_completion_and_resume_by_sequence
         },
     ]);
     let fleet = Fleet::new(1, client).await;
-    let modules = fleet.root().join("n0/node/dag/_modules");
-    std::fs::create_dir_all(&modules).unwrap();
-    let wasm = wat::parse_str(r#"(module
-        (import "wasi_snapshot_preview1" "fd_write" (func $write (param i32 i32 i32 i32) (result i32)))
-        (memory (export "memory") 1)
-        (data (i32.const 8) "wasm-live-output")
-        (func (export "_start")
-            (i32.store (i32.const 0) (i32.const 8))
-            (i32.store (i32.const 4) (i32.const 16))
-            (drop (call $write (i32.const 1) (i32.const 0) (i32.const 1) (i32.const 28)))
-            (drop (call $write (i32.const 2) (i32.const 0) (i32.const 1) (i32.const 28)))
-            (loop $spin (br $spin))))"#).unwrap();
-    std::fs::write(modules.join("live.wasm"), wasm).unwrap();
+    support::stage_binary(&fleet.root().join("n0/node"), "live", "#include <stdio.h>\n#include <unistd.h>\nint main(void) { puts(\"native-live-output\"); fflush(stdout); fputs(\"native-live-output\",stderr); for (;;) pause(); }");
     let saved = fleet.call("POST", "/api/dag/defs", json!({"spec":{"name":"live-logs","steps":[
         {"name":"answer","kind":{"type":"agent","prompt":"answer"}},
-        {"name":"watch","depends_on":["answer"],"timeout_secs":30,"kind":{"type":"wasm","command":"live.wasm"}}
+        {"name":"watch","depends_on":["answer"],"timeout_secs":30,"kind":{"type":"binary","resource":"live"}}
     ]}})).await;
     assert_eq!(saved.status, 200, "{saved:?}");
     let reply = fleet
@@ -58,7 +46,7 @@ async fn dag_agent_and_wasm_logs_stream_before_completion_and_resume_by_sequence
     let mut stream = response.into_body().into_data_stream();
     let mut text = String::new();
     tokio::time::timeout(Duration::from_secs(15), async {
-        while !text.contains("\"stream\":\"stderr\"") {
+        while !(text.contains("\"stream\":\"stderr\"") && text.contains("\"stream\":\"stdout\"")) {
             let bytes = stream
                 .next()
                 .await
@@ -68,9 +56,9 @@ async fn dag_agent_and_wasm_logs_stream_before_completion_and_resume_by_sequence
         }
     })
     .await
-    .expect("stdout and stderr must arrive while Wasm is still running");
+    .expect("stdout and stderr must arrive while Binary is still running");
     assert!(text.contains("agent-live-answer"), "{text}");
-    assert!(text.contains("wasm-live-output"), "{text}");
+    assert!(text.contains("native-live-output"), "{text}");
     assert!(text.contains("\"stream\":\"stdout\""), "{text}");
     assert!(!text.contains("event: run_finished"), "{text}");
     let detail = fleet

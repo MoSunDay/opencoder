@@ -12,13 +12,13 @@ import { StepDrawer } from '../step/stepDrawer.jsx';
 
 beforeEach(() => { get.mockReset(); open.mockReset().mockImplementation(() => ({ abort: vi.fn() })); });
 it('cleans up old instance subscriptions and rejects late frames after selection changes', async () => {
-  const { rerender } = render(<StepPanel runId="r" step="process" index={0} kind="wasm" />);
+  const { rerender } = render(<StepPanel runId="r" step="process" index={0} kind="binary" />);
   await waitFor(() => expect(open).toHaveBeenCalledTimes(1));
   const first = open.mock.calls[0][0];
   const abort = open.mock.results[0].value.abort;
   expect(first.path).toBe('/api/dag/runs/r/steps/process/instances/0/events');
   act(() => first.onFrame({seq:1,event:'step_output',data:{text:'first output'}}));
-  rerender(<StepPanel runId="r" step="process" index={1} kind="wasm" />);
+  rerender(<StepPanel runId="r" step="process" index={1} kind="binary" />);
   await waitFor(() => expect(open).toHaveBeenCalledTimes(2));
   expect(abort).toHaveBeenCalledOnce();
   act(() => {
@@ -37,7 +37,7 @@ it('paginates a thousand instances and subscribes only to the selected item', as
       return { expanded:true,total:1000,progress:{total:1000,done:4,running:4,error:0,cancelled:0,pending:992},
         instances:Array.from({length:100},(_,i)=>({index:offset+i,status:'running'})) };
     }
-    return { kind:'wasm', status:'running', input:['--title','hello world'], started_at_ms:1 };
+    return { kind:'binary', status:'running', input:['--title','hello world'], started_at_ms:1 };
   });
   render(<Instances runId="r" step="process" />);
   await waitFor(() => expect(open).toHaveBeenCalledTimes(1));
@@ -51,7 +51,7 @@ it('paginates a thousand instances and subscribes only to the selected item', as
 it('keeps a completed instance replay mounted after its terminal frame', async () => {
   get.mockImplementation(async (path) => path.includes('?')
     ? { expanded:true, total:1, progress:{total:1,done:1}, instances:[{index:0,status:'done'}] }
-    : { kind:'wasm', status:'done', input:[], started_at_ms:1 });
+    : { kind:'binary', status:'done', input:[], started_at_ms:1 });
   render(<Instances runId="r" step="process" />);
   await waitFor(() => expect(open).toHaveBeenCalledTimes(1));
   act(() => open.mock.calls[0][0].onFrame({seq:2,event:'step_finished',data:{status:'done'}}));

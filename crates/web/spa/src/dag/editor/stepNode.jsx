@@ -10,7 +10,7 @@
 import { CodeOutlined, RobotOutlined } from '@ant-design/icons';
 import { Handle, Position } from '@xyflow/react';
 
-const KIND_LABEL = { agent: 'Agent', wasm: 'Wasm' };
+const KIND_LABEL = { agent: 'Agent', binary: 'Binary' };
 
 /// StepEditNode — one editable step card. Kept module-level and stable via
 /// editNodeTypes so React Flow does not remount nodes on parent re-renders.
@@ -22,7 +22,7 @@ export function StepEditNode({ data, selected }) {
   const linkTarget = !!(data && data.linkTarget);
   const depNames = Array.isArray(data && data.depNames) ? data.depNames : [];
   const icon =
-    kindType === 'wasm' ? <CodeOutlined /> : kindType === 'agent' ? <RobotOutlined /> : null;
+    kindType === 'binary' ? <CodeOutlined /> : kindType === 'agent' ? <RobotOutlined /> : null;
   const cls =
     'dag-edit-node dag-edit-node--' +
     kindType +

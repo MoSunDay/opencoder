@@ -9,7 +9,7 @@ use tokio::sync::Barrier;
 fn todo(id: &str, status: ProjectTodoStatus, now: i64) -> ProjectTodoRecord {
     ProjectTodoRecord {
         id: id.into(),
-        milestone_id: None,
+        initiative_id: None,
         title: id.into(),
         draft: "draft".into(),
         plan_md: Some("# plan".into()),

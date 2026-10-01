@@ -9,6 +9,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
+vi.mock('../../api.js', () => ({ apiGet: vi.fn(async (path) => path === '/api/dag/binaries'
+  ? { pools: [{ name: 'tool', current: 2 }, { name: 'tool2', current: 1 }] }
+  : { name: path.split('/').at(-1), current: 2, history: [{ version: 1 }, { version: 2 }] }) }));
+
 import '../../test/setup-dom.js';
 import { DefEditor } from '../defEditor.jsx';
 import { StepInspector } from './stepInspector.jsx';
@@ -20,7 +24,7 @@ const DEF = {
     name: 'etl',
     description: 'demo',
     steps: [
-      { name: 'fetch', kind: { type: 'wasm', command: 'tool.wasm' } },
+      { name: 'fetch', kind: { type: 'binary', resource: 'tool' } },
       { name: 'review', depends_on: ['fetch'], kind: { type: 'agent', prompt: 'review the artifacts' } },
     ],
   },
@@ -29,6 +33,12 @@ const DEF = {
 const mountEditor = (onSave) =>
   render(<DefEditor open def={DEF} saving={false} onClose={vi.fn()} onSave={onSave} />);
 
+async function selectResource(name) {
+  await waitFor(() => expect(screen.getByRole('combobox', { name: '二进制资源' }).closest('.ant-select').className).not.toContain('ant-select-disabled'));
+  fireEvent.mouseDown(screen.getByRole('combobox', { name: '二进制资源' }));
+  fireEvent.click(await screen.findByText(name, { selector: '.ant-select-item-option-content' }));
+}
+
 describe('DefEditor 画布模式', () => {
   it('画布模式默认渲染 spec 步骤节点与依赖连线', async () => {
     mountEditor(vi.fn());
@@ -36,41 +46,40 @@ describe('DefEditor 画布模式', () => {
     expect(screen.getByText('fetch')).toBeTruthy();
     expect(screen.getByText('review')).toBeTruthy();
     expect(document.querySelectorAll('.dag-edit-node--agent')).toHaveLength(1);
-    expect(document.querySelectorAll('.dag-edit-node--wasm')).toHaveLength(1);
+    expect(document.querySelectorAll('.dag-edit-node--binary')).toHaveLength(1);
     // Edge visibility: declared node boxes let React Flow render the
     // fetch→review edge on frame one — no ResizeObserver dependency (the
     // jsdom RO shim never fires, which used to mask this entirely).
     expect(document.querySelectorAll('.react-flow__edge')).toHaveLength(1);
   });
 
-  it('节点面板点击添加 Wasm 步骤并保存', async () => {
+  it('节点面板点击添加 Binary 步骤并保存', async () => {
     const onSave = vi.fn();
     mountEditor(onSave);
-    fireEvent.click(await screen.findByText('Wasm 步骤')); // palette card
+    fireEvent.click(await screen.findByText('Binary 步骤')); // palette card
     await waitFor(() => expect(document.querySelectorAll('.dag-edit-node')).toHaveLength(3));
-    // the fresh wasm step ships with empty command — fill it so validation passes
-    const label = await screen.findByText('Wasm 命令 (command)');
-    const area = label.closest('.ant-form-item').querySelector('input');
-    fireEvent.change(area, { target: { value: 'tool2.wasm' } });
+    // the fresh binary step ships with empty resource — fill it so validation passes
+    await selectResource('tool2');
     fireEvent.click(screen.getByText('保 存'));
     await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
     const spec = onSave.mock.calls[0][0];
     expect(spec.steps).toHaveLength(3);
     const added = spec.steps.find((s) => /^step/.test(s.name) && s.name !== 'fetch');
-    expect(added.kind.type).toBe('wasm');
-    expect(added.kind.command).toBe('tool2.wasm');
+    expect(added.kind.type).toBe('binary');
+    expect(added.kind.resource).toBe('tool2');
   });
 
   it('选中节点后属性面板编辑命令并保存', async () => {
     const onSave = vi.fn();
     mountEditor(onSave);
     await waitFor(() => expect(document.querySelectorAll('.dag-edit-node')).toHaveLength(2));
-    fireEvent.click(document.querySelector('.dag-edit-node')); // fetch (wasm step)
-    const area = await screen.findByDisplayValue('tool.wasm');
-    fireEvent.change(area, { target: { value: 'tool.wasm --v2' } });
+    fireEvent.click(document.querySelector('.dag-edit-node')); // fetch (binary step)
+    await waitFor(() => expect(screen.getByRole('combobox', { name: '二进制资源版本' }).closest('.ant-select').className).not.toContain('ant-select-disabled'));
+    fireEvent.mouseDown(screen.getByRole('combobox', { name: '二进制资源版本' }));
+    fireEvent.click(await screen.findByText('固定 v2', { selector: '.ant-select-item-option-content' }));
     fireEvent.click(screen.getByText('保 存'));
     await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
-    expect(onSave.mock.calls[0][0].steps[0].kind.command).toBe('tool.wasm --v2');
+    expect(onSave.mock.calls[0][0].steps[0].kind.resource).toBe('tool@v2');
   });
 
   it('JSON 与画布模式往返无损', async () => {
@@ -127,13 +136,12 @@ describe('画布连线模式', () => {
     const onSave = vi.fn();
     mountEditor(onSave);
     await waitFor(() => expect(document.querySelectorAll('.dag-edit-node')).toHaveLength(2));
-    // add a fresh wasm step: review already depends on fetch, so only a
+    // add a fresh binary step: review already depends on fetch, so only a
     // review → <new> edge is acyclic and allowed
-    fireEvent.click(screen.getByText('Wasm 步骤'));
+    fireEvent.click(screen.getByText('Binary 步骤'));
     await waitFor(() => expect(document.querySelectorAll('.dag-edit-node')).toHaveLength(3));
-    // the fresh wasm step ships with an empty command — fill it so the save passes validation
-    const label = await screen.findByText('Wasm 命令 (command)');
-    fireEvent.change(label.closest('.ant-form-item').querySelector('input'), { target: { value: 'tool2.wasm' } });
+    // the fresh binary step ships with an empty resource — fill it so the save passes validation
+    await selectResource('tool2');
     fireEvent.click(screen.getByRole('button', { name: /连线/ }));
     // pick the source: the armed card lights up and the hint bar appears
     fireEvent.click(document.querySelector('[data-id="review"] .dag-edit-node'));
@@ -199,7 +207,8 @@ describe('画布连线模式', () => {
     mountEditor(vi.fn());
     await waitFor(() => expect(document.querySelectorAll('.dag-edit-node')).toHaveLength(2));
     fireEvent.click(document.querySelector('[data-id="fetch"] .dag-edit-node'));
-    await screen.findByDisplayValue('tool.wasm'); // inspector opened
+    const resource = await screen.findByRole('combobox', { name: '二进制资源' });
+    expect(resource.closest('.ant-select').textContent).toContain('tool');
     expect(document.querySelector('[data-id="fetch"] .dag-edit-node').className).not.toContain(
       'dag-edit-node--linksrc',
     );
@@ -218,12 +227,10 @@ describe('画布连线模式', () => {
       />,
     );
     await waitFor(() => expect(document.querySelectorAll('.dag-edit-node')).toHaveLength(2));
-    fireEvent.click(await screen.findByText('Wasm 步骤')); // palette card
+    fireEvent.click(await screen.findByText('Binary 步骤')); // palette card
     await waitFor(() => expect(document.querySelectorAll('.dag-edit-node')).toHaveLength(3));
-    // the fresh wasm step ships with empty command — fill it so validation passes
-    const label = await screen.findByText('Wasm 命令 (command)');
-    const area = label.closest('.ant-form-item').querySelector('input');
-    fireEvent.change(area, { target: { value: 'tool2.wasm' } });
+    // the fresh binary step ships with empty resource — fill it so validation passes
+    await selectResource('tool2');
     fireEvent.click(screen.getByText('保 存'));
     await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
     const spec = onSave.mock.calls[0][0];
@@ -280,8 +287,8 @@ describe('StepInspector how_append', () => {
     expect(next.kind.how_append).toBe('cache the build dir');
   });
 
-  it('wasm 步骤不渲染经验追加输入', () => {
-    mountInspector({ name: 'fetch', kind: { type: 'wasm', command: 'tool.wasm' } }, vi.fn());
+  it('binary 步骤不渲染经验追加输入', () => {
+    mountInspector({ name: 'fetch', kind: { type: 'binary', resource: 'tool' } }, vi.fn());
     expect(screen.queryByText('经验追加 (how_append)')).toBeNull();
   });
 });

@@ -18,7 +18,7 @@ async fn max_concurrency_gates_simultaneous_step_starts() {
         },
     ]));
     let client: Arc<dyn opencoder_llm::ChatStream> = mock.clone();
-    let f = fixture(&base, &tmp).await;
+    let f = fixture(&base, &tmp, client.clone()).await;
     let spec = DagSpec {
         max_concurrency: 2,
         name: "e2e-capped".into(),
@@ -37,7 +37,7 @@ async fn max_concurrency_gates_simultaneous_step_starts() {
             uplink: Arc::clone(&f.uplink),
             exec: ExecDeps {
                 store: Arc::clone(&f.store),
-                client,
+
                 workdir: f.workdir.clone(),
                 config: f.config.clone(),
             },
@@ -100,7 +100,7 @@ async fn max_concurrency_one_runs_strictly_serial() {
         },
     ]));
     let client: Arc<dyn opencoder_llm::ChatStream> = mock.clone();
-    let f = fixture(&base, &tmp).await;
+    let f = fixture(&base, &tmp, client.clone()).await;
     let spec = DagSpec {
         max_concurrency: 1,
         name: "e2e-serial".into(),
@@ -118,7 +118,7 @@ async fn max_concurrency_one_runs_strictly_serial() {
             uplink: Arc::clone(&f.uplink),
             exec: ExecDeps {
                 store: Arc::clone(&f.store),
-                client,
+
                 workdir: f.workdir.clone(),
                 config: f.config.clone(),
             },

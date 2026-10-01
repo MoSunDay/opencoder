@@ -4,7 +4,7 @@ use serde_json::{json, Value};
 use std::{sync::Arc, time::Duration};
 
 #[tokio::test]
-async fn pending_wasm_reservation_already_freezes_its_empty_resource_namespace() {
+async fn pending_binary_reservation_already_freezes_its_empty_resource_namespace() {
     let root = tempfile::tempdir().unwrap();
     let _config = opencoder_core::config::scoped_config_home(root.path().join("config"));
     let worker = Worker::open(
@@ -21,7 +21,7 @@ async fn pending_wasm_reservation_already_freezes_its_empty_resource_namespace()
     .await
     .unwrap();
     for (id, kind, empty) in [
-        ("wasm", json!({"type":"wasm","command":"probe.wasm"}), true),
+        ("binary", json!({"type":"binary","resource":"probe"}), true),
         (
             "agent",
             json!({"type":"agent","prompt":"use resources"}),

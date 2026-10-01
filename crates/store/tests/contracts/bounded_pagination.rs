@@ -296,7 +296,7 @@ async fn todo_items_and_project_runs_use_bounded_keyset_pages() {
     store
         .create_todo(&ProjectTodoRecord {
             id: "project-item".into(),
-            milestone_id: None,
+            initiative_id: None,
             title: "project item".into(),
             draft: "d".repeat(65_537),
             plan_md: Some("p".repeat(65_536)),

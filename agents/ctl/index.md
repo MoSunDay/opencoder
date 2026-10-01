@@ -1,4 +1,4 @@
-Commit: 24a1081aff7fd8591f860723bae5eb787edf68e9
+Commit: 7687b5f581254ee6d826d8644789e7d498e761ba
 
 # ctl 模块
 
@@ -9,6 +9,7 @@ Commit: 24a1081aff7fd8591f860723bae5eb787edf68e9
 - `src/http.rs` — `RequestPlan` + Bearer + 退出码
 - `src/cmd/` — 按域子命令（纯 plan() 映射）
 - `src/cmd/brain.rs` — brain 子命令，与 Web 共用 API
+- `src/cmd/project.rs` — 项目、专项及 TODO API 映射；专项使用 `initiatives` 路由，TODO 查询和编辑使用 `initiative_id`，不提供项目里程碑命令别名
 - `src/cmd/brain/ontology.rs` — 仅受理 schema_version 7；CLI 读分层视图、层明细及事件，隔离激活通过 OpenCoder session agent loop 输出一次分层模型决策。
 - `tests/` — 子命令→RequestPlan 契约与集成 e2e
 

@@ -245,7 +245,7 @@ async fn repeated_cancel_does_not_converge_a_driver_still_flushing_output() {
 fn label_todo() -> ProjectTodoRecord {
     ProjectTodoRecord {
         id: "t1".into(),
-        milestone_id: None,
+        initiative_id: None,
         title: "待办".into(),
         draft: "草稿".into(),
         plan_md: Some("# 方案".into()),

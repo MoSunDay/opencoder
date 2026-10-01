@@ -58,8 +58,19 @@ pub(crate) struct Inner {
     pub admission: Arc<Mutex<()>>,
     pub resource_preparations: Arc<Semaphore>,
     pub maintenance: std::sync::Mutex<HashMap<String, opencoder_session::extensions::Registration>>,
-    pub _lock: File,
+    _lock: NodeLock,
 }
+
+struct NodeLock(File);
+
+impl Drop for NodeLock {
+    fn drop(&mut self) {
+        if let Err(error) = fs2::FileExt::unlock(&self.0) {
+            tracing::error!(%error, "failed to release node data directory lock");
+        }
+    }
+}
+
 impl Worker {
     pub async fn open(options: WorkerOptions, client: Option<Arc<dyn ChatStream>>) -> Result<Self> {
         Self::open_with_runtime(options, client, WorkerRuntime::default()).await
@@ -89,6 +100,7 @@ impl Worker {
         let lock = crate::migration_io::open_lock_file(&data_dir.join("node.lock"))?;
         fs2::FileExt::try_lock_exclusive(&lock)
             .map_err(|e| anyhow::anyhow!("node data directory already in use: {e}"))?;
+        let lock = NodeLock(lock);
         let admission_state = AdmissionState::load(&data_dir)?;
         opencoder_dag_runtime::sandbox::runc::cleanup_owned_containers(&[
             layout
@@ -174,7 +186,20 @@ impl Worker {
             }
         }
         let host_capacity = crate::runtime::capacity::HostCapacity::load(&data_dir).await?;
-        let journal = Journal::open(layout.clone())?;
+        let journal = Journal::load(layout.clone())?;
+        for record in journal.records.values().filter(|record| {
+            record.assignment.index.kind == ExecutionKind::Dag
+                && record.annotations.get("dag_parent").is_some()
+        }) {
+            let parent = crate::layout::dag::accepted_parent(record)?;
+            let run_id = &record.assignment.index.id;
+            if parent.join(run_id).exists() {
+                opencoder_dag_runtime::sandbox::run::cleanup_run(&parent.join(run_id), run_id)
+                    .await?;
+            }
+        }
+        state.project.cleanup_dag_containers().await?;
+        let journal = journal.recover()?;
         for record in journal.records.values().filter(|r| {
             r.assignment.index.kind == ExecutionKind::Project
                 && r.assignment.index.status == ExecutionStatus::Pending

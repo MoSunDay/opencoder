@@ -12,7 +12,7 @@ async function main() {
     const full = JSON.stringify((request.messages || []).filter((m) => m.role === "system"));
     if (full.includes('INSTANCE_ONE') && !prompt.includes('DISCOVER_BATCH')) await held;
     return { instance: full.includes('INSTANCE_ZERO') ? 'zero-result' : 'one-result' };
-  }, { dag: true });
+  }, { dag: true, rootfs: process.argv[2] });
   const { page, api, root, until } = h;
   console.log(JSON.stringify({ root }));
   const id = 'dag-dynamic-browser';

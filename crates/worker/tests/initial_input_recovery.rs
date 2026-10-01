@@ -10,6 +10,8 @@ use support::{assignment, mock, settled, worker};
 enum Seed {
     NoSession,
     EmptySession,
+    HarnessInitialized,
+    Prepared,
     Admitted,
     Promoted,
 }
@@ -63,16 +65,28 @@ async fn seed_session(root: &std::path::Path, id: &str, prompt: &str, seed: Seed
         })
         .await
         .unwrap();
+    if matches!(seed, Seed::HarnessInitialized | Seed::Prepared) {
+        let mut envs = std::collections::BTreeMap::from([("EXAMPLE".into(), "frozen".into())]);
+        envs.extend(opencoder_dag_runtime::exec::how_append::env_pairs(Some(
+            prompt,
+        )));
+        let runtime = opencoder_core::harness::HarnessRuntime {
+            literal_mentions: matches!(seed, Seed::Prepared),
+            envs,
+            ..Default::default()
+        };
+        store.set_harness_runtime(id, &runtime).await.unwrap();
+    }
     if matches!(seed, Seed::Admitted | Seed::Promoted) {
         let outcome = store
             .admit_input_once(&SessionInput {
                 seq: None,
                 id: format!("initial-{id}"),
                 session_id: id.into(),
-                delivery: Delivery::Steer,
+                delivery: Delivery::Queue,
                 prompt: prompt.into(),
                 images: vec![],
-                display_text: None,
+                display_text: Some(prompt.into()),
                 admitted_seq: 0,
                 promoted_seq: None,
             })
@@ -81,7 +95,7 @@ async fn seed_session(root: &std::path::Path, id: &str, prompt: &str, seed: Seed
         assert!(outcome.inserted);
         if matches!(seed, Seed::Promoted) {
             let promoted = store
-                .promote_inputs(id, outcome.seq, Delivery::Steer)
+                .promote_inputs(id, outcome.seq, Delivery::Queue)
                 .await
                 .unwrap();
             assert_eq!(promoted, vec![outcome.seq]);
@@ -92,11 +106,13 @@ async fn seed_session(root: &std::path::Path, id: &str, prompt: &str, seed: Seed
 async fn resume(root: &std::path::Path, id: &str, prompt: &str, seed: Seed) {
     let client = mock();
     let bootstrap = worker(root, client.clone()).await;
+    std::fs::write(root.join("work/notes.md"), "must not be expanded").unwrap();
     let assignment = assignment(
         &bootstrap,
         id,
         ExecutionKind::Agent,
-        json!({"prompt":prompt,"title":"recovery"}),
+        json!({"prompt":prompt,"title":"recovery","literal_mentions":true,
+            "envs":{"EXAMPLE":"frozen"}}),
         None,
     );
     write_accepted(root, &assignment);
@@ -129,6 +145,16 @@ async fn resume(root: &std::path::Path, id: &str, prompt: &str, seed: Seed) {
     let detail = settled(&recovered, id).await;
     assert_eq!(detail["execution"]["status"], "idle", "{detail}");
     assert_eq!(client.call_count(), 1, "initial input must execute once");
+    assert!(
+        client.requests()[0].messages.iter().any(|message| {
+            message.role == Role::User
+                && message
+                    .blocks
+                    .iter()
+                    .any(|block| block.as_text() == Some(prompt))
+        }),
+        "model must receive the literal input"
+    );
     recovered.shutdown().await.unwrap();
     drop(recovered);
 
@@ -136,11 +162,15 @@ async fn resume(root: &std::path::Path, id: &str, prompt: &str, seed: Seed) {
         .await
         .unwrap();
     let messages = store.load_messages(id).await.unwrap();
+    let runtime = store.harness_runtime(id).await.unwrap().unwrap();
+    assert!(runtime.literal_mentions);
+    assert_eq!(runtime.envs["EXAMPLE"], "frozen");
     let users: Vec<_> = messages
         .iter()
         .filter(|message| message.role == Role::User)
         .collect();
     assert_eq!(users.len(), 1, "one durable user prompt: {messages:?}");
+    assert_eq!(users[0].display.as_deref(), Some(prompt));
     assert!(users[0]
         .blocks
         .iter()
@@ -153,12 +183,14 @@ async fn recovery_admits_once_from_every_pre_execution_fault_point() {
     let cases = [
         ("no-session", Seed::NoSession),
         ("empty-session", Seed::EmptySession),
+        ("harness-initialized", Seed::HarnessInitialized),
+        ("prepared", Seed::Prepared),
         ("already-admitted", Seed::Admitted),
         ("promoted-not-recorded", Seed::Promoted),
     ];
     for (name, seed) in cases {
         let dir = tempfile::tempdir().unwrap();
-        resume(dir.path(), name, "recover this prompt", seed).await;
+        resume(dir.path(), name, "recover @notes.md", seed).await;
     }
 
     // Fleet ids allow 64 bytes. The derived `initial-` key is 72 bytes and

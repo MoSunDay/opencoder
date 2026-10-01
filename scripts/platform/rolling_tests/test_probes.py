@@ -132,6 +132,9 @@ class Candidate:
 
 class CandidateProbeTests(unittest.TestCase):
     def setUp(self):
+        mocked = patch('rolling.probes.publish_probe', return_value='release-probe')
+        mocked.start()
+        self.addCleanup(mocked.stop)
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
         self.record = {"id": "release-test", "probe_epoch": 2, "runtime_port": 3100,
@@ -206,6 +209,9 @@ class CandidateProbeTests(unittest.TestCase):
 
 class PublicProbeTests(unittest.TestCase):
     def setUp(self):
+        mocked = patch('rolling.probes.publish_probe', return_value='release-probe')
+        mocked.start()
+        self.addCleanup(mocked.stop)
         self.record = {"id": "release-local", "runtime_port": 3100,
                        "manifest": {"commit": "local-commit"}}
         self.inventory = {"runtime_id": "release-local", "build": {"git_commit": "local-commit"},

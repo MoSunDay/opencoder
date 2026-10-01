@@ -124,6 +124,8 @@ function App() {
   const [notice, setNotice] = useState(null);
   // 后台管理抽屉（平台用户），仅 admin 身份可见入口。
   const [usersOpen, setUsersOpen] = useState(false);
+  const [identityError, setIdentityError] = useState('');
+  const [identityRevision, setIdentityRevision] = useState(0);
   // Stable identity: panels key useCallback/useEffect deps on onNotice — a
   // fresh inline arrow per render would re-arm their load effects forever.
   const notify = useCallback((v) => setNotice(normalizeNotice(v)), []);
@@ -154,17 +156,20 @@ function App() {
       return undefined;
     }
     let live = true;
+    setIdentityError('');
     apiGet('/api/me')
       .then((me) => {
         if (live) {
+          if (typeof me?.name !== 'string' || !me.name || !['admin', 'root', 'user'].includes(me.role)) throw new Error('登录身份响应格式错误，请重试');
+          setIdentityError('');
           setIdentity(me);
         }
       })
-      .catch(() => {});
+      .catch((failure) => { if (live) setIdentityError(failure.message); });
     return () => {
       live = false;
     };
-  }, [token]);
+  }, [token, identityRevision]);
 
   return (
     <ConfigProvider theme={theme} locale={zhCN}>
@@ -184,7 +189,7 @@ function App() {
             </div>
           </Header>
           <Layout style={{ minHeight: 0 }}>
-            <Sider
+            {identity && <Sider
               className="fleet-sidebar"
               width={200}
               collapsedWidth={64}
@@ -195,8 +200,7 @@ function App() {
               theme="light"
             >
               <div className="fleet-nav-category" aria-hidden={navCollapsed}>
-                <Segmented
-                  block
+                <Segmented block
                   value={category.key}
                   options={categoryOptions}
                   onChange={(v) => goPage(categoryHome(v))}
@@ -223,22 +227,21 @@ function App() {
               >
                 {navCollapsed ? null : '收起菜单'}
               </Button>
-            </Sider>
+            </Sider>}
             <Content className={SHEET_PAGES.has(shownPage) ? 'fleet-content fleet-content--flush' : 'fleet-content'}>
-              <Segmented
+              {identity && <Segmented block
                 className="fleet-mobile-nav"
-                block
                 value={category.key}
                 options={categoryOptions}
                 onChange={(v) => goPage(categoryHome(v))}
-              />
-              <Select
+              />}
+              {identity && <Select
                 className="fleet-mobile-nav"
                 aria-label="页面导航"
                 value={shownPage}
                 options={selectItemsOf(category.items)}
                 onChange={goPage}
-              />
+              />}
               {notice && notice.text ? (
                 <Alert
                   className="fleet-notice"
@@ -249,7 +252,9 @@ function App() {
                   onClose={() => setNotice(null)}
                 />
               ) : null}
-              {token ? (
+              {token && !identity && <Alert type={identityError ? 'error' : 'info'} showIcon title={identityError ? `身份确认失败：${identityError}` : '正在确认登录身份…'}
+                action={identityError ? <Button onClick={() => { setIdentityError(''); setIdentityRevision((value) => value + 1); }}>重试身份确认</Button> : null} />}
+              {token && identity ? (
                 <div className={SHEET_PAGES.has(shownPage) ? 'fleet-sheet' : undefined}>
                   <PageBody page={shownPage} onNotice={notify} />
                 </div>

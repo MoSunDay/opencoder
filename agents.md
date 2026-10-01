@@ -1,4 +1,4 @@
-Commit: 6ab6ec63595b45b7440f047d768fff7108a6ab04
+Commit: 7687b5f581254ee6d826d8644789e7d498e761ba
 
 # OpenCoder 逻辑地图
 
@@ -21,11 +21,10 @@ Rust 原生编码代理 workspace：`opencoder`（本地 CLI/TUI）、`opencoder
 - [agents/local](agents/local/index.md) — 本地 CLI 前端：参数解析、headless、tmux 会话入口。
 - [agents/web](agents/web/index.md) — axum HTTP + SSE 会话管理 + 内嵌 SPA。
 - [agents/dag](agents/dag/index.md) — DAG 纯域 + 线协议（DTO LOCKED）。
-- [agents/dag-wasm](agents/dag-wasm/index.md) — DAG wasm 模块版本池：发布、NFS 导出、节点冻结分发。
-- [agents/dag-runtime](agents/dag-runtime/index.md) — 节点侧 DAG 调度执行；server 不链接。
-- [agents/dag-review-tools](agents/dag-review-tools/index.md) — code-review 发布门禁 wasm 模块的纯编排逻辑与 op 证据契约。
+- [agents/dag-binary](agents/dag-binary/index.md) — Linux 二进制版本池、只读资源分发与版本固定。
+- [agents/dag-runtime](agents/dag-runtime/index.md) — 单 DAG 单容器、共享写时复制工作区与原生步骤调度；Server 不链接。
 - [agents/todos](agents/todos/index.md) — 持久化 TODO 工作流：每 TODO 独立 Primary Session。
-- [agents/project](agents/project/index.md) — 项目、里程碑、专项与 TODO 数据；旧执行链独立保留。
+- [agents/project](agents/project/index.md) — 项目、专项、TODO 与 Tag 数据；旧执行链独立保留。
 - [agents/brain](agents/brain/index.md) — 能力库、版本化 step/连线计划、唯一 v4 分层调度与嵌套计划。
 - [agents/agents](agents/agents/index.md) — 版本化自定义 Agent：共享池 `v{n}` + meta.json 引用卡 + NFS 只读导出。
 - [agents/team](agents/team/index.md) — 团队目录与消息扇出运行时。
@@ -38,18 +37,9 @@ Rust 原生编码代理 workspace：`opencoder`（本地 CLI/TUI）、`opencoder
 
 OpenCoder 能力入口见 [features/index.md](features/index.md)。
 
-## 根包进程级 e2e 套件（layer-2，随 cargo test 运行）
-
-- [tests/operator_e2e/](tests/operator_e2e/main.rs) — O1–O5：operator 创建→drain→idle、relay SSE 守卫、角色门禁（operator/agent 提交与指令放行、dag/team 403）、interrupt→cancelled + 重启恢复、`kind=agent` 会话（how_append 注入、output_text/output_json、`?kind=agent` 泳道列表且不漏入 operator 泳道）（真二进制 + 共享 LLM 桩）；O6：agent 卡 `run_mode` 分派（`agent_sandbox.rs`：无沙箱运行时准入 fail-closed、runc 全回合契约 + follow-up 二轮续会话、operator 卡保持宿主循环，无 runc 时 SKIP 运行段）。
-- [tests/dag_e2e/](tests/dag_e2e/main.rs) — D1–D3/D5：spec 保存/dispatch 流、wasm 版本池（wat 现场编译）、cancel/失败折叠、runc preflight（无 runc 时 SKIP 运行段）、structured_output（agent 步围栏/裸 JSON 两种形态 output.json 非 null）、agent runc 沙箱（`agent_runc.rs`：真实容器内 session 全链路，无 runc 时 SKIP）、code-review 门禁 DAG（`code_review.rs`：9 步 pass/blocked 两线 + compat input 透传 + 工单 not_required/created）、review 门禁三件套（`review_dags/`：R1 启动 seed、R2 host imports+fail-closed、R3/R5 池模块 dispatch seeded def、R4 六段 agent 链（api-impact→client 客户端分支汇入 verdict）上下文传递+五字段索引）。
-- [tests/todos_e2e/](tests/todos_e2e/main.rs) — T1–T3：模板→运行→完成、interrupt→节点重启→resume→done、子 LLM 失败→todo failed + workflow suspended（父决策重试链共 5 请求）。
-- [tests/team_e2e/](tests/team_e2e/main.rs) — M1：能力注册/绑定→pinned 定义冻结 capabilities→member prompt 能力前缀→四段 chat 决策→finished topic + 1-based turn 台账。
-- [tests/brain_e2e/](tests/brain_e2e/main.rs) — 原始 Brain 提交和旧 schema 写入的拒绝守卫；拒绝时不产生模型调用。
-- [tests/brain_layered_e2e/](tests/brain_layered_e2e/main.rs) — schema 4 准入、画布与层索引读取、完整层屏障、收口激活和能力执行引用；旧 schema 与旧路由拒绝。
-- [tests/support/](tests/support/mod.rs) — `llm_stub`（FIFO/Hold/Fail/**Dynamic 请求感知**流式桩 + `/embeddings` canned、`Script: Clone`）、`http_util`（Bearer JSON + SSE 解析）、`fleet_proc`（fleet 拉起/RAII/kill+respawn）；`tests/running_mode_switch_e2e.rs` 与 todos/team/brain e2e 共用。
-
 ## 仓库规则
 
 - [rules/01-mandatory-tests.md](rules/01-mandatory-tests.md) — 每个业务功能必须有测试
 - [rules/02-regression-gate.md](rules/02-regression-gate.md) — 迭代结束全量回归 + changelog 附测试清单
 - [rules/03-test-pyramid.md](rules/03-test-pyramid.md) — 测试分层（unit/integration/e2e）
+- [rules/04-dag-execution-contract.md](rules/04-dag-execution-contract.md) — DAG 单节点单容器与原生步骤执行约定

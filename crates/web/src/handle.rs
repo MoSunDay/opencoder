@@ -285,7 +285,7 @@ pub async fn admit_and_drain(
 ) -> Result<i64> {
     admit_and_drain_guarded(
         handles, store, session_id, prompt, images, delivery, client, workdir, None, config, None,
-        None, false,
+        None, None, false,
     )
     .await
     .map(|admission| admission.seq)
@@ -316,6 +316,7 @@ pub async fn admit_and_drain_guarded(
     config: Config,
     input_id: Option<String>,
     skill: Option<String>,
+    display: Option<String>,
     agent_override: bool,
 ) -> std::result::Result<DrainAdmission, AdmissionError> {
     let (handle, lifecycle) =
@@ -346,7 +347,7 @@ pub async fn admit_and_drain_guarded(
         delivery,
         prompt,
         images,
-        display_text: None,
+        display_text: display,
         admitted_seq: 0,
         promoted_seq: None,
     };

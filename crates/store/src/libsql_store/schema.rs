@@ -7,13 +7,15 @@ use super::chat_tables::{
 use super::schedule::{CREATE_INDEX_SCHEDULE_RUNS_FIRED, CREATE_SCHEDULES, CREATE_SCHEDULE_RUNS};
 use super::team_runs::{CREATE_INDEX_TEAM_TOPIC_RUNS_TOPIC, CREATE_TEAM_TOPIC_RUNS};
 
+mod catalog;
 mod migrations;
 mod project_relations;
 use migrations::migrate;
+use project_relations::CREATE_PROJECT_MILESTONES;
 
 // v3 scheduler tables are additive and bootstrap unconditionally; keep the
 // existing schema watermark so v2 database migration remains read-compatible.
-pub(crate) const SCHEMA_VERSION: i64 = 31;
+pub(crate) const SCHEMA_VERSION: i64 = 32;
 
 // Order invariant: busy_timeout must precede any locking statement, and
 // synchronous=NORMAL must be applied BEFORE journal_mode=WAL. Switching a
@@ -133,10 +135,9 @@ CREATE TABLE IF NOT EXISTS project_goals (
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 )";
-const CREATE_PROJECT_MILESTONES: &str = "\
-CREATE TABLE IF NOT EXISTS project_milestones (
+const CREATE_PROJECT_INITIATIVES: &str = "\
+CREATE TABLE IF NOT EXISTS project_initiatives (
   id TEXT PRIMARY KEY,
-  kind TEXT NOT NULL DEFAULT 'milestone',
   goal_id TEXT,
   title TEXT NOT NULL,
   detail_md TEXT,
@@ -148,7 +149,7 @@ CREATE TABLE IF NOT EXISTS project_milestones (
 const CREATE_PROJECT_TODOS: &str = "\
 CREATE TABLE IF NOT EXISTS project_todos (
   id TEXT PRIMARY KEY,
-  milestone_id TEXT,
+  initiative_id TEXT,
   title TEXT NOT NULL,
   draft TEXT NOT NULL,
   plan_md TEXT,
@@ -196,10 +197,10 @@ CREATE TABLE IF NOT EXISTS project_todo_executions (
   sync_state TEXT NOT NULL DEFAULT 'pending',
   PRIMARY KEY (todo_id, execution_id)
 )";
-const CREATE_INDEX_PROJECT_MILESTONES_GOAL: &str =
-    "CREATE INDEX IF NOT EXISTS idx_project_milestones_goal ON project_milestones(goal_id)";
-const CREATE_INDEX_PROJECT_TODOS_MILESTONE: &str =
-    "CREATE INDEX IF NOT EXISTS idx_project_todos_milestone ON project_todos(milestone_id)";
+const CREATE_INDEX_PROJECT_INITIATIVES_GOAL: &str =
+    "CREATE INDEX IF NOT EXISTS idx_project_initiatives_goal ON project_initiatives(goal_id)";
+const CREATE_INDEX_PROJECT_TODOS_INITIATIVE: &str =
+    "CREATE INDEX IF NOT EXISTS idx_project_todos_initiative ON project_todos(initiative_id)";
 const CREATE_INDEX_PROJECT_TODO_RUNS_TODO: &str =
     "CREATE INDEX IF NOT EXISTS idx_project_todo_runs_todo ON project_todo_runs(todo_id)";
 const CREATE_BRAIN_CAPABILITIES: &str = "\
@@ -366,6 +367,11 @@ async fn bootstrap_tx(conn: &Connection) -> Result<()> {
     // sufficient marker of a pre-tracking database.
     let preexisting = table_exists(conn, "sessions").await?;
     conn.execute(CREATE_SCHEMA_VERSION, ()).await?;
+    let current = current_version(conn).await?;
+    anyhow::ensure!(
+        current.is_none_or(|version| version <= SCHEMA_VERSION),
+        "database schema is newer than supported version {SCHEMA_VERSION}; use a compatible release"
+    );
     conn.execute(CREATE_SESSIONS, ()).await?;
     conn.execute(CREATE_MESSAGES, ()).await?;
     conn.execute(CREATE_INPUTS, ()).await?;
@@ -381,7 +387,16 @@ async fn bootstrap_tx(conn: &Connection) -> Result<()> {
     conn.execute(CREATE_BRAIN_VECTORS, ()).await?;
     super::brain_layered::initialize(conn).await?;
     conn.execute(CREATE_PROJECT_GOALS, ()).await?;
-    conn.execute(CREATE_PROJECT_MILESTONES, ()).await?;
+    if current.map_or(preexisting, |version| version < 32) {
+        conn.execute(CREATE_PROJECT_MILESTONES, ()).await?;
+        conn.execute(
+            &CREATE_PROJECT_TODOS.replace("initiative_id", "milestone_id"),
+            (),
+        )
+        .await?;
+    }
+    conn.execute(CREATE_PROJECT_INITIATIVES, ()).await?;
+    catalog::initialize_tags(conn).await?;
     conn.execute(CREATE_PROJECT_TODOS, ()).await?;
     conn.execute(CREATE_PROJECT_TODO_RUNS, ()).await?;
     conn.execute(CREATE_PROJECT_TODO_EXECUTIONS, ()).await?;
@@ -402,7 +417,6 @@ async fn bootstrap_tx(conn: &Connection) -> Result<()> {
     // Incremental migrations: only run when upgrading from a prior version.
     // Fresh databases (version None) already have the full schema from the
     // CREATE TABLE statements above, so migrations are skipped for them.
-    let current = current_version(conn).await?;
     if let Some(prev) = current {
         if prev < SCHEMA_VERSION {
             migrate(conn, prev).await?;
@@ -439,9 +453,9 @@ async fn bootstrap_tx(conn: &Connection) -> Result<()> {
     // Same post-migrate placement: brain tables physically exist either via
     // the CREATE batch above (fresh DBs) or the v15 migration (old DBs).
     conn.execute(CREATE_INDEX_BRAIN_ENG_INPUTS, ()).await?;
-    conn.execute(CREATE_INDEX_PROJECT_MILESTONES_GOAL, ())
+    conn.execute(CREATE_INDEX_PROJECT_INITIATIVES_GOAL, ())
         .await?;
-    conn.execute(CREATE_INDEX_PROJECT_TODOS_MILESTONE, ())
+    conn.execute(CREATE_INDEX_PROJECT_TODOS_INITIATIVE, ())
         .await?;
     conn.execute(CREATE_INDEX_PROJECT_TODO_RUNS_TODO, ())
         .await?;

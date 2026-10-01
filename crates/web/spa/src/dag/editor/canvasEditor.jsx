@@ -76,7 +76,8 @@ function EditorCanvas({ spec, problems, positions, onSpecChange, onPositionsChan
   const [fitEpoch, setFitEpoch] = useState(0); // autoLayout → refit-after-commit
   const [meta, setMeta] = useState(spec); // SpecMetaForm base (name/description)
   const specRef = useRef(spec); // name/description carry-through for emit
-  const dirtyRef = useRef(false); // structural change → emit on next commit
+  const dirtyRef = useRef(false); // observe structural edits after the first change
+  const emittedRef = useRef(JSON.stringify(canvasToSpec(specToCanvas(spec), spec)));
   const laidRef = useRef(false); // init effect ran; meta effect may touch nodes
   const fittedRef = useRef(false); // mount-fit fired once; later re-measures must not refit
   const { fitView, screenToFlowPosition } = useReactFlow();
@@ -96,8 +97,13 @@ function EditorCanvas({ spec, problems, positions, onSpecChange, onPositionsChan
     if (!dirtyRef.current) {
       return;
     }
-    dirtyRef.current = false;
-    onSpecChange(canvasToSpec({ nodes, edges }, specRef.current));
+    // React Flow can commit node metadata before its pending edge update.
+    // Keep observing the graph, so that earlier commit cannot consume the edit.
+    const next = canvasToSpec({ nodes, edges }, specRef.current);
+    const serialized = JSON.stringify(next);
+    if (serialized === emittedRef.current) return;
+    emittedRef.current = serialized;
+    onSpecChange(next);
   }, [nodes, edges, onSpecChange]);
 
   // Node card meta (dep summary + red invalid dot) follows edges/problems.
@@ -313,7 +319,7 @@ function EditorCanvas({ spec, problems, positions, onSpecChange, onPositionsChan
   const onDrop = (e) => {
     e.preventDefault();
     const kind = e.dataTransfer.getData('application/opencoder-step');
-    if (!['agent', 'wasm', 'dynamic'].includes(kind)) {
+    if (!['agent', 'binary', 'dynamic'].includes(kind)) {
       return;
     }
     addStep(kind, screenToFlowPosition({ x: e.clientX, y: e.clientY }));

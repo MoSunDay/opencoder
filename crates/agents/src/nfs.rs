@@ -29,6 +29,7 @@ use nfsserve::fs_util::metadata_to_fattr3;
 use nfsserve::nfs::{fattr3, fileid3, filename3, nfs_fh3, nfspath3, nfsstat3, nfsstring, sattr3};
 use nfsserve::vfs::{DirEntry, NFSFileSystem, ReadDirResult, VFSCapabilities};
 
+pub(crate) mod acl;
 mod handles;
 
 /// Payload budget for the relative path inside a file handle. NFSv3 caps
@@ -44,6 +45,17 @@ const MAX_READ: usize = 1024 * 1024;
 pub struct ReadOnlyAgentsFs {
     root: PathBuf,
     ids: RwLock<HashMap<fileid3, PathBuf>>,
+}
+
+impl ReadOnlyAgentsFs {
+    pub(crate) fn local_acl_path(&self, id: fileid3) -> Result<PathBuf, nfsstat3> {
+        let relative = path_of(&self.ids, id)?;
+        let metadata = stat(&self.root, &relative)?;
+        if !metadata.is_file() && !metadata.is_dir() {
+            return Err(nfsstat3::NFS3ERR_INVAL);
+        }
+        Ok(self.root.join(relative))
+    }
 }
 
 /// Build an exporter for `root`. The root is not validated here — spawn
@@ -230,13 +242,22 @@ impl NFSFileSystem for ReadOnlyAgentsFs {
         if !meta.is_file() {
             return Err(nfsstat3::NFS3ERR_ACCES);
         }
-        let mut f = std::fs::File::open(self.root.join(&rel)).map_err(|_| nfsstat3::NFS3ERR_IO)?;
-        f.seek(SeekFrom::Start(offset))
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut file = std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+            .open(self.root.join(&rel))
+            .map_err(|_| nfsstat3::NFS3ERR_IO)?;
+        let metadata = file.metadata().map_err(|_| nfsstat3::NFS3ERR_IO)?;
+        if !metadata.is_file() {
+            return Err(nfsstat3::NFS3ERR_ACCES);
+        }
+        file.seek(SeekFrom::Start(offset))
             .map_err(|_| nfsstat3::NFS3ERR_IO)?;
         let mut buf = vec![0u8; (count as usize).min(MAX_READ)];
-        let n = f.read(&mut buf).map_err(|_| nfsstat3::NFS3ERR_IO)?;
+        let n = file.read(&mut buf).map_err(|_| nfsstat3::NFS3ERR_IO)?;
         buf.truncate(n);
-        let eof = offset.saturating_add(n as u64) >= meta.len();
+        let eof = offset.saturating_add(n as u64) >= metadata.len();
         Ok((buf, eof))
     }
 

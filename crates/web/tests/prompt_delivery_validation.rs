@@ -53,6 +53,7 @@ async fn post(
         axum::extract::Path(sid.to_string()),
         None,
         axum::Json(opencoder_web::api::PromptBody {
+            display: None,
             input_id: None,
             prompt: "hi".into(),
             images: Vec::new(),
@@ -161,6 +162,7 @@ async fn post_model(
         axum::extract::Path(sid.to_string()),
         None,
         axum::Json(opencoder_web::api::PromptBody {
+            display: None,
             input_id: None,
             prompt: "hi".into(),
             images: Vec::new(),

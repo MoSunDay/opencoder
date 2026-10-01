@@ -112,7 +112,7 @@ pub(super) async fn create(worker: &Worker, mut assignment: Assignment) -> Resul
     };
     timing.mark("durable_preparation");
     // Cold filesystem reads are bounded per node and serialized per execution,
-    // but never hold the gate needed by WASI admission, pause or cancellation.
+    // but never hold the gate needed by binary admission, pause or cancellation.
     drop(gate);
     // Classify the frozen definition, including an interrupted preparation's
     // original snapshot, before reserving bounded resource-copy capacity.
@@ -210,7 +210,9 @@ pub(super) async fn create(worker: &Worker, mut assignment: Assignment) -> Resul
         Lifecycle::default()
     };
     let record = Record {
-        annotations: if assignment.request.kind == ExecutionKind::Operator {
+        annotations: if assignment.request.kind == ExecutionKind::Dag {
+            json!({"dag_parent":crate::layout::dag::parent(worker, &config, &assignment)?, "dag_config":config.dag})
+        } else if assignment.request.kind == ExecutionKind::Operator {
             json!({"operator_environment_version": 1})
         } else {
             Value::Null
@@ -326,9 +328,17 @@ pub(super) fn prepare_record(
     assignment: &Assignment,
     legacy: bool,
 ) -> Result<Config> {
-    let config = crate::brain::workdir::execution_config(worker, record)?
+    let mut config = crate::brain::workdir::execution_config(worker, record)?
         .map(Ok)
         .unwrap_or_else(|| worker.configuration_for(record.assignment.request.kind))?;
+    if assignment.request.kind == ExecutionKind::Dag {
+        config.dag = serde_json::from_value(record.annotations["dag_config"].clone())?;
+        anyhow::ensure!(
+            crate::layout::dag::parent(worker, &config, assignment)?
+                == crate::layout::dag::accepted_parent(record)?,
+            "accepted DAG location changed"
+        );
+    }
     prepare_with_config(
         worker,
         assignment,
@@ -391,11 +401,35 @@ fn prepare_with_config(
     let new_snapshot = !root.exists();
     let requires_agents = crate::resources::requires_agent_pool(assignment);
     if new_snapshot && requires_agents {
-        crate::resources::check_mount(config.agent.agents_dir.as_deref())?;
+        crate::resources::check_mount(if assignment.request.kind == ExecutionKind::Dag {
+            source.as_deref()
+        } else {
+            config.agent.agents_dir.as_deref()
+        })?;
     }
     std::fs::create_dir_all(root.parent().unwrap())?;
     let source = source.filter(|_| requires_agents);
-    config.agent.agents_dir = crate::resources::pin(source.as_deref(), &root)?;
+    config.agent.agents_dir = if assignment.request.kind == ExecutionKind::Dag {
+        let value = assignment
+            .definition
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("DAG definition missing"))?;
+        let spec = opencoder_dag::decode_spec(value.get("spec").unwrap_or(value))
+            .map_err(anyhow::Error::msg)?;
+        let names: Vec<_> = spec
+            .steps
+            .iter()
+            .filter_map(|step| match step.kind.executable() {
+                opencoder_dag::StepKind::Agent { agent, .. } => {
+                    Some(agent.clone().unwrap_or_else(|| "act".into()))
+                }
+                _ => None,
+            })
+            .collect();
+        crate::resources::pin_selected(source.as_deref(), &root, Some(&names))?
+    } else {
+        crate::resources::pin(source.as_deref(), &root)?
+    };
     timing.mark("snapshot");
     let validated = (|| -> Result<()> {
         let prompt = assignment.request.input["prompt"].as_str().unwrap_or("");
@@ -453,7 +487,7 @@ fn prepare_with_config(
                         opencoder_dag::decode_spec(value.get("spec").unwrap_or(value))
                             .map_err(|e| anyhow::anyhow!(e))?;
                     opencoder_dag::validate(&spec).map_err(|e| anyhow::anyhow!(e.join("; ")))?;
-                    super::dag_preflight::validate(worker, &config, &spec, legacy)?;
+                    super::dag_preflight::validate(worker, &config, &spec, assignment, legacy)?;
                     agents.extend(spec.steps.into_iter().filter_map(
                         |s| match s.kind.executable() {
                             opencoder_dag::StepKind::Agent { agent, .. } => {
@@ -486,7 +520,7 @@ fn prepare_with_config(
                     }
                     let _: Vec<opencoder_store::ProjectGoalRecord> =
                         serde_json::from_value(snapshot["goals"].clone())?;
-                    let _: Vec<opencoder_store::ProjectMilestoneRecord> =
+                    let _: Vec<opencoder_store::ProjectInitiativeRecord> =
                         serde_json::from_value(snapshot["milestones"].clone())?;
                     anyhow::ensure!(
                         !matches!(
@@ -572,9 +606,7 @@ fn prepare_with_config(
                 }
                 let mut effective_envs = settings.map(|s| s.envs.clone()).unwrap_or_default();
                 effective_envs.extend(envs.clone());
-                if assignment.request.kind == ExecutionKind::Dag
-                    && config.dag.agent_sandbox == opencoder_core::config::AgentSandbox::Runc
-                {
+                if assignment.request.kind == ExecutionKind::Dag {
                     // dag_preflight validated the guest executable and node
                     // credentials; a host CLI is not used by this sandbox.
                     continue;

@@ -7,7 +7,6 @@ mod resource_scope;
 pub mod role_gate;
 mod routes;
 pub mod scheduler;
-mod seed_dags;
 pub mod seed_schedules;
 pub mod transport;
 
@@ -21,14 +20,18 @@ pub mod api_agent_resources;
 pub mod api_agents;
 #[path = "../../web/src/api_brain.rs"]
 pub mod api_brain;
-#[path = "../../web/src/api_dag_wasm.rs"]
-pub mod api_dag_wasm;
-#[path = "../../web/src/api_dag_wasm_nfs.rs"]
-pub mod api_dag_wasm_nfs;
+#[path = "../../web/src/api_dag_binaries.rs"]
+pub mod api_dag_binaries;
+#[path = "../../web/src/api_dag_binaries_nfs.rs"]
+pub mod api_dag_binaries_nfs;
+#[path = "../../web/src/api_dag_workspace_nfs.rs"]
+pub mod api_dag_workspace_nfs;
 #[path = "../../web/src/api_project.rs"]
 pub mod api_project;
 #[path = "../../web/src/api_project_initiatives.rs"]
 pub mod api_project_initiatives;
+#[path = "../../web/src/api_project_tags.rs"]
+pub mod api_project_tags;
 #[path = "../../web/src/api_project_todos.rs"]
 pub mod api_project_todos;
 #[path = "../../web/src/api_todo_directory/mod.rs"]

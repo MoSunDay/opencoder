@@ -1,36 +1,29 @@
-"""Provision a private real wasmtime image; never touch production rootfs."""
+"""Private, mandatory DAG images and one container per run."""
 import json
 from pathlib import Path
-import re
-import shutil
 import subprocess
+from rolling.units import freeze_rootfs
 
 
 class Containers:
-    def __init__(self, wasmtime):
-        self.wasmtime = wasmtime
-        self.sources = []
-        if wasmtime:
-            result = subprocess.run(['ldd',str(wasmtime)],capture_output=True,text=True)
-            if result.returncode and 'not a dynamic executable' not in result.stderr + result.stdout:
-                raise ValueError('could not inspect wasmtime dependencies: ' + result.stderr)
-            self.sources = [Path(p) for p in re.findall(r'(/[^\s()]+)',result.stdout)]
+    def __init__(self, rootfs):
+        self.rootfs = Path(rootfs).resolve()
+        for name in ['dag-runner', 'agent-step-runner']:
+            if not (self.rootfs / 'usr/bin' / name).is_file():
+                raise ValueError('native DAG rootfs is missing ' + name)
 
     def prepare(self, data):
-        if not self.wasmtime:
-            return
-        rootfs = data / 'dag/rootfs'
-        for source, target in [(self.wasmtime,rootfs / 'usr/bin/wasmtime'),
-                *((p,rootfs / str(p).lstrip('/')) for p in self.sources)]:
-            target.parent.mkdir(parents=True,exist_ok=True)
-            shutil.copy2(source,target)
+        return freeze_rootfs({'runtime_data': str(data)}, self.rootfs)
 
-    def state(self, runtime_data, execution, step='hold'):
-        # Static StepCtx.execution_key is step-<name>; retain the exact fixture owner.
-        root = Path(runtime_data) / 'dag/bundles' / execution / step / 'runc-state'
-        result = subprocess.run(['runc','--root',str(root),'state',execution + '-step-' + step],capture_output=True,text=True)
+    def state(self, runtime_data, execution):
+        journal = Path(runtime_data) / 'dag' / execution / 'execution.json'
+        if not journal.is_file():
+            return {'status': 'not_created'}
+        record = json.loads(journal.read_text())
+        root = Path(record['annotations']['dag_parent']) / execution / 'runc-state'
+        result = subprocess.run(['runc', '--root', str(root), 'state', 'dag-run-' + execution], capture_output=True, text=True)
         if result.returncode and 'does not exist' in result.stderr:
-            return {'status':'not_created'}
+            return {'status': 'not_created'}
         result.check_returncode()
         state = json.loads(result.stdout)
         if state['status'] == 'running':

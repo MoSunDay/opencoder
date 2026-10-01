@@ -85,6 +85,13 @@ pub(crate) async fn initial_chat_view(
     session: &SessionState,
     store: &Arc<dyn Store>,
 ) -> crate::chat::ChatView {
+    if let Some(remote) = &session.harness.remote {
+        return crate::chat::ChatView {
+            agent: remote.label(),
+            remote: true,
+            ..Default::default()
+        };
+    }
     let view = if !session.messages.is_empty() {
         crate::session_ui::replay_into_chat(
             &session.agent.name,
@@ -630,3 +637,31 @@ pub(crate) use app_mouse::{handle_mouse, MouseOutcome};
 #[cfg(test)]
 #[path = "app_helpers_tests/mod.rs"]
 mod tests;
+
+/// Both startup and task switches use the same task worker routing.
+pub(crate) fn start_worker(
+    session: opencoder_session::SessionState,
+    events: tokio::sync::mpsc::Sender<crate::worker::UiEvent>,
+    commands: tokio::sync::mpsc::Receiver<crate::worker::UiCmd>,
+    store: Arc<dyn Store>,
+) -> (
+    tokio::sync::mpsc::Sender<crate::sidecar_ui::SidecarCmd>,
+    tokio::task::JoinHandle<()>,
+) {
+    let sidecar = crate::sidecar_ui::spawn_actor(&session, events.clone(), Some(store));
+    (
+        sidecar,
+        crate::worker::spawn_task(session, commands, events),
+    )
+}
+
+pub(crate) fn start_input() -> (
+    tokio::sync::mpsc::Receiver<crossterm::event::Event>,
+    Arc<std::sync::atomic::AtomicBool>,
+) {
+    let heartbeat = crate::supervisor::Heartbeat::new();
+    let active = Arc::new(std::sync::atomic::AtomicBool::new(true));
+    crate::supervisor::spawn(heartbeat.clone(), active.clone());
+    let (input, _) = crate::input::spawn_input_pump(heartbeat);
+    (input, active)
+}

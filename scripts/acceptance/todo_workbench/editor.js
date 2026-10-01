@@ -23,7 +23,7 @@ async function verifyEditor(h,definition){
     await page.getByRole('menuitem',{name:label,exact:true}).click();
   }
   async function name(kind,value){
-    const input=page.getByLabel(`${kind}名称`,{exact:true});
+    const input=page.getByLabel(new RegExp(`^(新增|重命名)${kind}名称$`));
     await input.fill(value);await input.press('Enter');await input.waitFor({state:'hidden'});
   }
   async function edit(file,text){

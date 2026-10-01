@@ -17,6 +17,8 @@ tracing.workspace = true
 sha2 = "0.10"
 base64.workspace = true
 uuid.workspace = true
+ulid.workspace = true
+libc = "0.2"
 
 [dev-dependencies]
 tempfile.workspace = true

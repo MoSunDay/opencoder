@@ -1,13 +1,13 @@
-//! Functional tests for the project-module store API (goals / milestones /
+//! Functional tests for the project-module store API (goals / initiatives /
 //! todos / runs) against the libsql backend, exercised through the
 //! `Arc<dyn ProjectStore>` seam upper layers will use.
 //!
 //! Behavior contracts:
 //! - goal_crud_patch_and_missing_id: CRUD + patch (title/detail/status/sort),
 //!   patch/delete of a missing id returns false
-//! - milestone_crud_and_goal_filter: CRUD under a goal + list_milestones filter
+//! - initiative_crud_and_goal_filter: CRUD under a goal + list_initiatives filter
 //! - todo_patch_semantics_including_clear_to_null: Option<Option<String>>
-//!   clears plan_md/milestone_id to NULL; backlog vs milestone todos list
+//!   clears plan_md/initiative_id to NULL; backlog vs initiative todos list
 //! - claim_todo_running_cas_and_running_run_listing: expected-status CAS
 //!   (planned -> claim true, re-claim/unknown -> false, no re-stamp) and
 //!   list_running_todo_runs filters to running rows only
@@ -19,8 +19,8 @@
 //! - executor_dimension_round_trips: todo executor_kind/ref/spec and run
 //!   executor_kind/capability_id/plan_id/output_ref persist exactly (team todo
 //!   + dag run), unknown kind text fails closed on read
-//! - deletion: delete_goal detaches milestones and retains TODOs/runs;
-//!   nonempty milestones reject deletion; delete_todo removes its runs
+//! - deletion: delete_goal detaches initiatives and retains TODOs/runs;
+//!   nonempty initiatives reject deletion; delete_todo removes its runs
 //! - reopen_is_idempotent_and_serves_v15: second `open` on the same file
 //!   migrates 14→15 cleanly and the project tables keep working
 //! - libsql_store_coerces_to_project_store: compile-level trait-object check
@@ -29,7 +29,7 @@ use std::sync::Arc;
 
 use opencoder_store::{
     LibsqlStore, ProjectExecutorKind, ProjectGoalPatch, ProjectGoalRecord, ProjectGoalStatus,
-    ProjectMilestonePatch, ProjectMilestoneRecord, ProjectMilestoneStatus, ProjectStore,
+    ProjectInitiativePatch, ProjectInitiativeRecord, ProjectInitiativeStatus, ProjectStore,
     ProjectTodoPatch, ProjectTodoRecord, ProjectTodoRunKind, ProjectTodoRunPatch,
     ProjectTodoRunRecord, ProjectTodoRunStatus, ProjectTodoStatus,
 };
@@ -53,23 +53,23 @@ fn goal(id: &str, sort: i64, created_at: i64) -> ProjectGoalRecord {
     }
 }
 
-fn milestone(id: &str, goal_id: &str, sort: i64, created_at: i64) -> ProjectMilestoneRecord {
-    ProjectMilestoneRecord {
+fn initiative(id: &str, goal_id: &str, sort: i64, created_at: i64) -> ProjectInitiativeRecord {
+    ProjectInitiativeRecord {
         id: id.to_string(),
         goal_id: Some(goal_id.to_string()),
-        title: format!("milestone {id}"),
+        title: format!("initiative {id}"),
         detail_md: None,
-        status: ProjectMilestoneStatus::Planned,
+        status: ProjectInitiativeStatus::Planned,
         sort,
         created_at,
         updated_at: created_at,
     }
 }
 
-fn todo(id: &str, milestone_id: Option<&str>, created_at: i64) -> ProjectTodoRecord {
+fn todo(id: &str, initiative_id: Option<&str>, created_at: i64) -> ProjectTodoRecord {
     ProjectTodoRecord {
         id: id.to_string(),
-        milestone_id: milestone_id.map(str::to_string),
+        initiative_id: initiative_id.map(str::to_string),
         title: format!("todo {id}"),
         draft: format!("draft {id}"),
         plan_md: None,
@@ -114,671 +114,22 @@ async fn run(store: &dyn ProjectStore, id: &str, todo_id: &str, created_at: i64)
         .unwrap();
 }
 
-#[tokio::test]
-async fn goal_crud_patch_and_missing_id() {
-    let (_dir, _store, p) = fresh().await;
-    p.create_goal(&goal("g1", 2, 100)).await.unwrap();
-    p.create_goal(&goal("g2", 1, 200)).await.unwrap();
-
-    // Ordered by sort first, created_at as tiebreak.
-    let goals = p.list_goals().await.unwrap();
-    assert_eq!(goals.len(), 2);
-    assert_eq!(goals[0].id, "g2");
-    assert_eq!(goals[1].id, "g1");
-
-    let ok = p
-        .patch_goal(
-            "g1",
-            &ProjectGoalPatch {
-                title: Some("renamed".to_string()),
-                detail_md: Some("details".to_string()),
-                status: Some(ProjectGoalStatus::Archived),
-                sort: Some(9),
-            },
-            999,
-        )
-        .await
-        .unwrap();
-    assert!(ok);
-    let g1 = &p.list_goals().await.unwrap()[1];
-    assert_eq!(g1.title, "renamed");
-    assert_eq!(g1.detail_md.as_deref(), Some("details"));
-    assert_eq!(g1.status, ProjectGoalStatus::Archived);
-    assert_eq!(g1.sort, 9);
-    assert_eq!(g1.updated_at, 999);
-    assert!(g1.status.is_terminal());
-
-    // Missing ids: false, not an error.
-    assert!(!p
-        .patch_goal("nope", &ProjectGoalPatch::default(), 1)
-        .await
-        .unwrap());
-    assert!(!p.delete_goal("nope").await.unwrap());
-}
-
-#[tokio::test]
-async fn milestone_crud_and_goal_filter() {
-    let (_dir, _store, p) = fresh().await;
-    p.create_goal(&goal("g1", 0, 1)).await.unwrap();
-    p.create_goal(&goal("g2", 0, 2)).await.unwrap();
-    p.create_milestone(&milestone("m1", "g1", 2, 10))
-        .await
-        .unwrap();
-    p.create_milestone(&milestone("m2", "g1", 1, 20))
-        .await
-        .unwrap();
-    p.create_milestone(&milestone("m3", "g2", 0, 30))
-        .await
-        .unwrap();
-
-    let for_g1 = p.list_milestones(Some("g1")).await.unwrap();
-    assert_eq!(
-        for_g1.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
-        vec!["m2", "m1"],
-        "filtered by goal and ordered by sort_key"
-    );
-    assert_eq!(p.list_milestones(None).await.unwrap().len(), 3);
-
-    assert!(p
-        .patch_milestone(
-            "m1",
-            &ProjectMilestonePatch {
-                title: Some("renamed".to_string()),
-                status: Some(ProjectMilestoneStatus::InProgress),
-                ..Default::default()
-            },
-            77,
-        )
-        .await
-        .unwrap());
-    let m1 = p.list_milestones(Some("g1")).await.unwrap()[1].clone();
-    assert_eq!(m1.title, "renamed");
-    assert_eq!(m1.status, ProjectMilestoneStatus::InProgress);
-    assert_eq!(m1.updated_at, 77);
-    assert!(!m1.status.is_terminal());
-}
-
-#[tokio::test]
-async fn todo_patch_semantics_including_clear_to_null() {
-    let (_dir, _store, p) = fresh().await;
-    p.create_goal(&goal("g1", 0, 1)).await.unwrap();
-    p.create_milestone(&milestone("m1", "g1", 0, 2))
-        .await
-        .unwrap();
-    p.create_todo(&todo("t1", Some("m1"), 3)).await.unwrap();
-    p.create_todo(&todo("t2", None, 4)).await.unwrap();
-
-    // Backlog + milestone todos are both covered by the unfiltered list.
-    assert_eq!(p.list_todos(None).await.unwrap().len(), 2);
-    let for_m1 = p.list_todos(Some("m1")).await.unwrap();
-    assert_eq!(for_m1.len(), 1);
-    assert_eq!(for_m1[0].id, "t1");
-
-    // Set plan_md + active_session_id, then clear them to NULL.
-    assert!(p
-        .patch_todo(
-            "t1",
-            &ProjectTodoPatch {
-                plan_md: Some(Some("plan v1".to_string())),
-                active_session_id: Some(Some("sess-1".to_string())),
-                status: Some(ProjectTodoStatus::Running),
-                ..Default::default()
-            },
-            50,
-        )
-        .await
-        .unwrap());
-    let t1 = p.get_todo("t1").await.unwrap().unwrap();
-    assert_eq!(t1.plan_md.as_deref(), Some("plan v1"));
-    assert_eq!(t1.active_session_id.as_deref(), Some("sess-1"));
-    assert_eq!(t1.status, ProjectTodoStatus::Running);
-
-    assert!(p
-        .patch_todo(
-            "t1",
-            &ProjectTodoPatch {
-                plan_md: Some(None),
-                active_session_id: Some(None),
-                milestone_id: Some(None), // back to the backlog
-                ..Default::default()
-            },
-            60,
-        )
-        .await
-        .unwrap());
-    let t1 = p.get_todo("t1").await.unwrap().unwrap();
-    assert_eq!(t1.plan_md, None, "Some(None) clears plan_md to NULL");
-    assert_eq!(t1.active_session_id, None);
-    assert_eq!(t1.milestone_id, None, "Some(None) clears milestone_id");
-    assert_eq!(t1.updated_at, 60);
-
-    assert!(p.get_todo("missing").await.unwrap().is_none());
-    assert!(!p
-        .patch_todo("missing", &ProjectTodoPatch::default(), 1)
-        .await
-        .unwrap());
-}
-
-#[tokio::test]
-async fn run_versions_and_listing_order() {
-    let (_dir, _store, p) = fresh().await;
-    p.create_todo(&todo("t1", None, 1)).await.unwrap();
-
-    // Empty todo starts at version 1.
-    assert_eq!(p.next_todo_version("t1").await.unwrap(), 1);
-    run(p.as_ref(), "r1", "t1", 10).await;
-    assert_eq!(p.next_todo_version("t1").await.unwrap(), 2);
-    run(p.as_ref(), "r2", "t1", 20).await;
-    assert_eq!(p.next_todo_version("t1").await.unwrap(), 3);
-
-    // Newest version first.
-    let runs = p.list_todo_runs("t1").await.unwrap();
-    assert_eq!(
-        runs.iter().map(|r| r.version).collect::<Vec<_>>(),
-        vec![2, 1]
-    );
-    assert_eq!(runs[0].id, "r2");
-
-    assert!(p
-        .patch_todo_run(
-            "r2",
-            &ProjectTodoRunPatch {
-                status: Some(ProjectTodoRunStatus::Done),
-                finished_at: Some(99),
-                output_md: Some("done".to_string()),
-                ..Default::default()
-            },
-            99,
-        )
-        .await
-        .unwrap());
-    let r2 = p.get_todo_run("r2").await.unwrap().unwrap();
-    assert_eq!(r2.status, ProjectTodoRunStatus::Done);
-    assert_eq!(r2.finished_at, Some(99));
-    assert!(r2.status.is_terminal());
-    assert!(p.get_todo_run("missing").await.unwrap().is_none());
-}
-
-#[tokio::test]
-async fn claim_todo_running_cas_and_running_run_listing() {
-    let (_dir, _store, p) = fresh().await;
-    p.create_todo(&todo("t1", None, 1)).await.unwrap();
-    assert!(p
-        .patch_todo(
-            "t1",
-            &ProjectTodoPatch {
-                status: Some(ProjectTodoStatus::Planned),
-                ..Default::default()
-            },
-            10,
-        )
-        .await
-        .unwrap());
-
-    // Planned -> the claim wins and flips the row to running.
-    assert!(p.claim_todo_running("t1", 20).await.unwrap());
-    let t1 = p.get_todo("t1").await.unwrap().unwrap();
-    assert_eq!(t1.status, ProjectTodoStatus::Running);
-    assert_eq!(t1.updated_at, 20);
-
-    // Already running -> no claim; the row is not re-stamped.
-    assert!(!p.claim_todo_running("t1", 30).await.unwrap());
-    let t1 = p.get_todo("t1").await.unwrap().unwrap();
-    assert_eq!(t1.status, ProjectTodoStatus::Running);
-    assert_eq!(t1.updated_at, 20, "a lost claim must not re-stamp");
-
-    // Unknown id -> no claim, not an error (patch_* convention).
-    assert!(!p.claim_todo_running("nope", 40).await.unwrap());
-
-    // list_running_todo_runs: only the running rows, across todos.
-    p.create_todo(&todo("t2", None, 2)).await.unwrap();
-    run(p.as_ref(), "r1", "t1", 50).await; // helper seeds status running
-    run(p.as_ref(), "r2", "t2", 60).await;
-    assert!(p
-        .patch_todo_run(
-            "r2",
-            &ProjectTodoRunPatch {
-                status: Some(ProjectTodoRunStatus::Done),
-                finished_at: Some(99),
-                ..Default::default()
-            },
-            99,
-        )
-        .await
-        .unwrap());
-    let running = p.list_running_todo_runs().await.unwrap();
-    assert_eq!(
-        running.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(),
-        vec!["r1"],
-        "only the still-running run row is listed"
-    );
-    assert_eq!(running[0].todo_id, "t1");
-    assert_eq!(running[0].status, ProjectTodoRunStatus::Running);
-}
-
-#[tokio::test]
-async fn conditional_patch_cas_applies_only_in_expected_state() {
-    let (_dir, _store, p) = fresh().await;
-    p.create_todo(&todo("t1", None, 1)).await.unwrap();
-
-    // Lost CAS (wrong expected status): false, and the row is untouched —
-    // still Draft with its original updated_at.
-    assert!(!p
-        .patch_todo_when(
-            "t1",
-            ProjectTodoStatus::Planned,
-            &ProjectTodoPatch {
-                status: Some(ProjectTodoStatus::Failed),
-                ..Default::default()
-            },
-            10,
-        )
-        .await
-        .unwrap());
-    let t1 = p.get_todo("t1").await.unwrap().unwrap();
-    assert_eq!(t1.status, ProjectTodoStatus::Draft);
-    assert_eq!(t1.updated_at, 1, "a lost CAS must not re-stamp");
-
-    // Won CAS: matching expected status applies and flips the row.
-    assert!(p
-        .patch_todo_when(
-            "t1",
-            ProjectTodoStatus::Draft,
-            &ProjectTodoPatch {
-                status: Some(ProjectTodoStatus::Planned),
-                ..Default::default()
-            },
-            11,
-        )
-        .await
-        .unwrap());
-    assert_eq!(
-        p.get_todo("t1").await.unwrap().unwrap().status,
-        ProjectTodoStatus::Planned
-    );
-
-    // Claim-rollback shape: the claim wins (Running), then a CAS still
-    // expecting Running rolls the row back to the pre-claim status.
-    assert!(p.claim_todo_running("t1", 12).await.unwrap());
-    assert!(p
-        .patch_todo_when(
-            "t1",
-            ProjectTodoStatus::Running,
-            &ProjectTodoPatch {
-                status: Some(ProjectTodoStatus::Planned),
-                ..Default::default()
-            },
-            13,
-        )
-        .await
-        .unwrap());
-
-    // Unknown id: false, not an error (patch_* convention).
-    assert!(!p
-        .patch_todo_when(
-            "missing",
-            ProjectTodoStatus::Running,
-            &ProjectTodoPatch {
-                status: Some(ProjectTodoStatus::Failed),
-                ..Default::default()
-            },
-            14,
-        )
-        .await
-        .unwrap());
-
-    // Plan-writeback racing execute: after a fresh claim the todo is
-    // Running, so a writeback still expecting Planned loses and must not
-    // clobber plan_md.
-    assert!(p.claim_todo_running("t1", 15).await.unwrap());
-    assert!(!p
-        .patch_todo_when(
-            "t1",
-            ProjectTodoStatus::Planned,
-            &ProjectTodoPatch {
-                status: Some(ProjectTodoStatus::Planned),
-                plan_md: Some(Some("# new".to_string())),
-                ..Default::default()
-            },
-            15,
-        )
-        .await
-        .unwrap());
-    let t1 = p.get_todo("t1").await.unwrap().unwrap();
-    assert_eq!(t1.status, ProjectTodoStatus::Running);
-    assert_eq!(t1.plan_md, None, "a lost plan writeback keeps plan_md");
-
-    // Run CAS: seed a running run, then try to converge it as if it were
-    // already Done — lost, the row stays Running/finished_at None.
-    run(p.as_ref(), "r1", "t1", 20).await;
-    assert!(!p
-        .patch_todo_run_when(
-            "r1",
-            ProjectTodoRunStatus::Done,
-            &ProjectTodoRunPatch {
-                status: Some(ProjectTodoRunStatus::Failed),
-                finished_at: Some(99),
-                ..Default::default()
-            },
-            20,
-        )
-        .await
-        .unwrap());
-    let r1 = p.get_todo_run("r1").await.unwrap().unwrap();
-    assert_eq!(r1.status, ProjectTodoRunStatus::Running);
-    assert_eq!(r1.finished_at, None);
-
-    // Panic/stale convergence on a running row: wins, flips to Failed.
-    assert!(p
-        .patch_todo_run_when(
-            "r1",
-            ProjectTodoRunStatus::Running,
-            &ProjectTodoRunPatch {
-                status: Some(ProjectTodoRunStatus::Failed),
-                output_md: Some("converged".to_string()),
-                finished_at: Some(21),
-                ..Default::default()
-            },
-            21,
-        )
-        .await
-        .unwrap());
-    let r1 = p.get_todo_run("r1").await.unwrap().unwrap();
-    assert_eq!(r1.status, ProjectTodoRunStatus::Failed);
-    assert_eq!(r1.output_md.as_deref(), Some("converged"));
-    assert_eq!(r1.finished_at, Some(21));
-
-    // The same convergence replayed on the now-terminal row must not
-    // relabel it — the row is no longer Running.
-    assert!(!p
-        .patch_todo_run_when(
-            "r1",
-            ProjectTodoRunStatus::Running,
-            &ProjectTodoRunPatch {
-                status: Some(ProjectTodoRunStatus::Failed),
-                output_md: Some("converged".to_string()),
-                finished_at: Some(21),
-                ..Default::default()
-            },
-            22,
-        )
-        .await
-        .unwrap());
-    assert_eq!(
-        p.get_todo_run("r1").await.unwrap().unwrap().status,
-        ProjectTodoRunStatus::Failed
-    );
-}
-
-#[tokio::test]
-async fn delete_goal_preserves_milestone_todo_and_runs() {
-    let (_dir, _store, p) = fresh().await;
-    p.create_goal(&goal("g1", 0, 1)).await.unwrap();
-    p.create_milestone(&milestone("m1", "g1", 0, 2))
-        .await
-        .unwrap();
-    p.create_todo(&todo("t1", Some("m1"), 3)).await.unwrap();
-    run(p.as_ref(), "r1", "t1", 4).await;
-
-    assert!(p.delete_goal("g1").await.unwrap());
-    assert!(p.list_goals().await.unwrap().is_empty());
-    let milestones = p.list_milestones(None).await.unwrap();
-    assert_eq!(milestones.len(), 1);
-    assert_eq!(milestones[0].goal_id, None);
-    assert_eq!(p.list_todos(None).await.unwrap().len(), 1);
-    assert_eq!(p.list_todo_runs("t1").await.unwrap().len(), 1);
-    assert_eq!(
-        p.get_todo("t1")
-            .await
-            .unwrap()
-            .unwrap()
-            .milestone_id
-            .as_deref(),
-        Some("m1")
-    );
-}
-
-#[tokio::test]
-async fn delete_todo_cascades_runs() {
-    let (_dir, _store, p) = fresh().await;
-    p.create_todo(&todo("t1", None, 1)).await.unwrap();
-    run(p.as_ref(), "r1", "t1", 2).await;
-    run(p.as_ref(), "r2", "t1", 3).await;
-
-    assert!(p.delete_todo("t1").await.unwrap());
-    assert!(p.list_todos(None).await.unwrap().is_empty());
-    assert!(p.list_todo_runs("t1").await.unwrap().is_empty());
-    assert!(!p.delete_todo("t1").await.unwrap(), "second delete: gone");
-}
-
-#[tokio::test]
-async fn delete_milestone_requires_explicit_unlink_and_preserves_runs() {
-    let (_dir, _store, p) = fresh().await;
-    p.create_goal(&goal("g1", 0, 1)).await.unwrap();
-    p.create_milestone(&milestone("m1", "g1", 0, 2))
-        .await
-        .unwrap();
-    p.create_milestone(&milestone("m2", "g1", 1, 3))
-        .await
-        .unwrap();
-    p.create_todo(&todo("t1", Some("m1"), 4)).await.unwrap();
-    p.create_todo(&todo("t2", Some("m2"), 5)).await.unwrap();
-    run(p.as_ref(), "r1", "t1", 6).await;
-
-    assert!(p
-        .delete_milestone("m1")
-        .await
-        .unwrap_err()
-        .is::<opencoder_store::project::MilestoneNotEmpty>());
-    assert_eq!(p.list_milestones(None).await.unwrap().len(), 2);
-    assert_eq!(
-        p.get_todo("t1")
-            .await
-            .unwrap()
-            .unwrap()
-            .milestone_id
-            .as_deref(),
-        Some("m1")
-    );
-    assert_eq!(p.list_todo_runs("t1").await.unwrap().len(), 1);
-    p.patch_todo(
-        "t1",
-        &ProjectTodoPatch {
-            milestone_id: Some(None),
-            ..Default::default()
-        },
-        7,
-    )
-    .await
-    .unwrap();
-    assert!(p.delete_milestone("m1").await.unwrap());
-    assert_eq!(p.list_todos(None).await.unwrap().len(), 2);
-    assert_eq!(p.list_todo_runs("t1").await.unwrap().len(), 1);
-    assert_eq!(p.list_milestones(Some("g1")).await.unwrap().len(), 1);
-}
-
-#[tokio::test]
-async fn reopen_is_idempotent_and_serves_v15() {
-    let dir = tempfile::tempdir().unwrap();
-    let db_path = dir.path().join("migrate.db");
-
-    // First open creates the file at the latest schema.
-    {
-        let store = LibsqlStore::open(&db_path).await.unwrap();
-        drop(store);
-    }
-    // Second open re-runs bootstrap/migrate on the existing file; creating and
-    // listing a goal proves the v15 tables are live after the reopen.
-    let store = LibsqlStore::open(&db_path).await.unwrap();
-    let conn = store.conn().await.unwrap();
-    let stmt = conn
-        .prepare("SELECT version FROM schema_version LIMIT 1")
-        .await
-        .unwrap();
-    let mut rows = stmt.query(()).await.unwrap();
-    let v: i64 = rows.next().await.unwrap().unwrap().get(0).unwrap();
-    assert_eq!(v, 31, "schema_version must be latest (31) after reopen");
-
-    let iface: Arc<dyn ProjectStore> = Arc::new(store);
-    iface.create_goal(&goal("g1", 0, 1)).await.unwrap();
-    let goals = iface.list_goals().await.unwrap();
-    assert_eq!(goals.len(), 1);
-    assert_eq!(goals[0].id, "g1");
-
-    // Third open: still idempotent, data intact.
-    drop(iface);
-    let store3 = LibsqlStore::open(&db_path).await.unwrap();
-    let iface3: Arc<dyn ProjectStore> = Arc::new(store3);
-    assert_eq!(iface3.list_goals().await.unwrap().len(), 1);
-}
-
-/// Compile-level: the concrete store coerces to the trait object upper
-/// layers hold (`Arc<dyn ProjectStore>`).
+// Compile-level: the concrete store coerces to the trait object upper
+// layers hold (`Arc<dyn ProjectStore>`).
 #[allow(dead_code)]
 fn libsql_store_coerces_to_project_store(store: Arc<LibsqlStore>) -> Arc<dyn ProjectStore> {
     store
 }
 
-/// The v20 executor dimension must persist exactly through the libsql backend:
-/// a team todo keeps its executor_ref + inline executor_spec, and a dag run
-/// claimed under it keeps brain provenance (capability_id/plan_id) and the
-/// workflow artifact root (output_ref). Unknown kind text in the row is
-/// corruption and fails closed on read.
-#[tokio::test]
-async fn executor_dimension_round_trips() {
-    let (_dir, _store, iface) = fresh().await;
+// The v20 executor dimension must persist exactly through the libsql backend:
+// a team todo keeps its executor_ref + inline executor_spec, and a dag run
+// claimed under it keeps brain provenance (capability_id/plan_id) and the
+// workflow artifact root (output_ref). Unknown kind text in the row is
+// corruption and fails closed on read.
 
-    // Todo side: team executor with a ref and an inline spec.
-    let mut team = todo("t-team", None, 1);
-    team.executor_kind = ProjectExecutorKind::Team;
-    team.executor_ref = Some("feature-team".to_string());
-    team.executor_spec = Some(r#"{"name":"feature-team"}"#.to_string());
-    iface.create_todo(&team).await.unwrap();
-
-    let back = iface.get_todo("t-team").await.unwrap().unwrap();
-    assert_eq!(back.executor_kind, ProjectExecutorKind::Team);
-    assert_eq!(back.executor_ref.as_deref(), Some("feature-team"));
-    assert_eq!(
-        back.executor_spec.as_deref(),
-        Some(r#"{"name":"feature-team"}"#)
-    );
-
-    // Patching executor_ref through Option<Option<String>> (set + clear).
-    iface
-        .patch_todo(
-            "t-team",
-            &ProjectTodoPatch {
-                executor_ref: Some(Some("other-team".to_string())),
-                ..Default::default()
-            },
-            10,
-        )
-        .await
-        .unwrap();
-    assert_eq!(
-        iface
-            .get_todo("t-team")
-            .await
-            .unwrap()
-            .unwrap()
-            .executor_ref,
-        Some("other-team".to_string())
-    );
-    iface
-        .patch_todo(
-            "t-team",
-            &ProjectTodoPatch {
-                executor_ref: Some(None),
-                ..Default::default()
-            },
-            11,
-        )
-        .await
-        .unwrap();
-    assert_eq!(
-        iface
-            .get_todo("t-team")
-            .await
-            .unwrap()
-            .unwrap()
-            .executor_ref,
-        None
-    );
-
-    // Run side: dag run with brain provenance and an artifact root.
-    let mut dag_run = ProjectTodoRunRecord {
-        input_snapshot: None,
-        trace_manifest: None,
-        id: "run-dag".to_string(),
-        todo_id: "t-team".to_string(),
-        kind: ProjectTodoRunKind::Execute,
-        version: 1,
-        plan_md: None,
-        output_md: None,
-        agent: "act".to_string(),
-        executor_kind: ProjectExecutorKind::Dag,
-        capability_id: Some("cap-brain".to_string()),
-        plan_id: Some("plan-42".to_string()),
-        output_ref: Some("/workflow/run-9/step-2/".to_string()),
-        session_id: None,
-        status: ProjectTodoRunStatus::Running,
-        started_at: 2,
-        finished_at: None,
-        created_at: 2,
-    };
-    assert!(iface
-        .claim_todo_running_with_run(&dag_run, 2)
-        .await
-        .unwrap());
-    dag_run.executor_kind = ProjectExecutorKind::Brain;
-    assert!(!iface
-        .claim_todo_running_with_run(&dag_run, 3)
-        .await
-        .unwrap());
-
-    let run_back = iface.get_todo_run("run-dag").await.unwrap().unwrap();
-    assert_eq!(run_back.executor_kind, ProjectExecutorKind::Dag);
-    assert_eq!(run_back.capability_id.as_deref(), Some("cap-brain"));
-    assert_eq!(run_back.plan_id.as_deref(), Some("plan-42"));
-    assert_eq!(
-        run_back.output_ref.as_deref(),
-        Some("/workflow/run-9/step-2/")
-    );
-
-    // Unknown executor_kind text fails closed instead of guessing.
-    {
-        let store2 = LibsqlStore::open(tempfile::tempdir().unwrap().path().join("x.db"))
-            .await
-            .unwrap();
-        store2.create_todo(&todo("t-bad", None, 1)).await.unwrap();
-        let conn = store2.conn().await.unwrap();
-        conn.execute(
-            "UPDATE project_todos SET executor_kind = 'workflow' WHERE id = 't-bad'",
-            (),
-        )
-        .await
-        .unwrap();
-        assert!(store2.get_todo("t-bad").await.is_err());
-    }
-}
-
-#[tokio::test]
-async fn board_reorder_moves_once_and_rolls_back_on_unknown_id() {
-    let (_dir, _store, p) = fresh().await;
-    p.create_todo(&todo("a", None, 1)).await.unwrap();
-    p.create_todo(&todo("b", None, 2)).await.unwrap();
-    p.reorder_todos("todo", &["b".into(), "a".into()], 5)
-        .await
-        .unwrap();
-    let rows = p.list_todos(None).await.unwrap();
-    assert_eq!(
-        rows.iter().map(|row| row.id.as_str()).collect::<Vec<_>>(),
-        ["b", "a"]
-    );
-    assert!(rows.iter().all(|row| row.board_status == "todo"));
-    assert!(p
-        .reorder_todos("done", &["a".into(), "missing".into()], 6)
-        .await
-        .is_err());
-    assert_eq!(p.get_todo("a").await.unwrap().unwrap().board_status, "todo");
-}
+#[path = "project_store/suite_1.rs"]
+mod suite_1;
+#[path = "project_store/suite_2.rs"]
+mod suite_2;
+#[path = "project_store/suite_3.rs"]
+mod suite_3;

@@ -10,7 +10,8 @@ usage() {
 Usage: scripts/platform/release/build.sh [--output DIR]
 
 Builds the release binaries for the current platform from a clean commit
-(Linux: opencoder, opencoder-cli, opencoder-server, opencoder-agent; macOS:
+(Linux: opencoder, opencoder-cli, opencoder-server, opencoder-agent,
+dag-runner and agent-step-runner; macOS:
 opencoder, opencoder-cli and opencoder-server, the agent binary is Linux-only), verifies their compiled
 build metadata, and writes checksums plus manifest.json to an atomic bundle.
 USAGE
@@ -82,6 +83,11 @@ for binary in "${binaries[@]}"; do
   packages+=(-p "$binary")
 done
 OPENCODER_SPA_SHA256="$spa_digest" cargo build --release --locked "${packages[@]}"
+if [[ "$(uname -s)" = Linux ]]; then
+  OPENCODER_SPA_SHA256="$spa_digest" cargo build --release --locked -p opencoder-dag-runtime \
+    --example dag-runner --example agent-step-runner
+  binaries+=(dag-runner agent-step-runner)
+fi
 target_dir="$(cargo metadata --no-deps --format-version 1 | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')"
 
 stage="$(mktemp -d "${output}.tmp.XXXXXX")"
@@ -91,6 +97,9 @@ mkdir -p "$stage/bin"
 
 for binary in "${binaries[@]}"; do
   source_path="$target_dir/release/$binary"
+  if [[ "$binary" = dag-runner || "$binary" = agent-step-runner ]]; then
+    source_path="$target_dir/release/examples/$binary"
+  fi
   [[ -x "$source_path" ]] || { echo "missing release binary: $source_path" >&2; exit 5; }
   cp "$source_path" "$stage/bin/$binary"
   chmod 0755 "$stage/bin/$binary"

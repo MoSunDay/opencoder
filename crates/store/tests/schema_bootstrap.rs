@@ -35,7 +35,30 @@
 
 use opencoder_store::{LibsqlStore, SessionMeta, Store, TASK_TYPE_PARENT, TASK_TYPE_SUBAGENT};
 
-/// Read a single-row single-column scalar pragma off a raw connection.
+#[tokio::test]
+async fn newer_schema_is_rejected_before_creating_or_modifying_tables() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("future.db");
+    let conn = raw_open(&path).await;
+    conn.execute_batch("CREATE TABLE schema_version(version INTEGER NOT NULL); INSERT INTO schema_version VALUES(999);
+        CREATE TABLE future_data(value TEXT); INSERT INTO future_data VALUES('unchanged');").await.unwrap();
+    let error = match LibsqlStore::open(&path).await {
+        Ok(_) => panic!("future database was accepted"),
+        Err(error) => error,
+    };
+    assert!(
+        error.to_string().contains("newer than supported"),
+        "{error:#}"
+    );
+    assert!(!table_named(&conn, "sessions").await);
+    assert_eq!(version_of(&conn).await, 999);
+    assert_eq!(
+        scalar(&conn, "SELECT value FROM future_data").await,
+        "unchanged"
+    );
+}
+
+// Read a single-row single-column scalar pragma off a raw connection.
 async fn scalar(conn: &libsql::Connection, pragma: &str) -> String {
     let stmt = conn.prepare(pragma).await.unwrap();
     let mut rows = stmt.query(()).await.unwrap();
@@ -52,106 +75,17 @@ async fn count_schema_version_rows(conn: &libsql::Connection) -> i64 {
     rows.next().await.unwrap().unwrap().get::<i64>(0).unwrap()
 }
 
-/// Contract 1: pragma order invariant holds on the *opened* connection, not
-/// just in the PRAGMAS const — synchronous must read back NORMAL (1) and the
-/// journal must actually be WAL after a cold open.
-#[tokio::test]
-async fn synchronous_is_normal_after_open() {
-    let dir = tempfile::tempdir().unwrap();
-    let store = LibsqlStore::open(dir.path().join("cold.db")).await.unwrap();
-    let conn = store.conn().await.unwrap();
+// Contract 1: pragma order invariant holds on the *opened* connection, not
+// just in the PRAGMAS const — synchronous must read back NORMAL (1) and the
+// journal must actually be WAL after a cold open.
 
-    let synchronous: i64 = {
-        let stmt = conn.prepare("PRAGMA synchronous").await.unwrap();
-        let mut rows = stmt.query(()).await.unwrap();
-        rows.next().await.unwrap().unwrap().get::<i64>(0).unwrap()
-    };
-    assert_eq!(synchronous, 1, "synchronous must be NORMAL (1) after open");
+// Contract 2: bootstrap re-runs (two re-opens on the same path) stay
+// idempotent and leave a healthy, single-versioned database.
 
-    assert_eq!(
-        scalar(&conn, "PRAGMA journal_mode").await.to_lowercase(),
-        "wal",
-        "journal_mode must be wal after open"
-    );
-}
-
-/// Contract 2: bootstrap re-runs (two re-opens on the same path) stay
-/// idempotent and leave a healthy, single-versioned database.
-#[tokio::test]
-async fn fresh_open_then_reopen_is_idempotent() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("reopen.db");
-
-    // Fresh open + one durable session through the Store trait.
-    {
-        let store = LibsqlStore::open(&path).await.unwrap();
-        store
-            .create_session(&SessionMeta {
-                id: "boot-s1".into(),
-                created_at: 1,
-                updated_at: 1,
-                ..Default::default()
-            })
-            .await
-            .unwrap();
-    }
-
-    // Two re-opens on the same path: each re-runs the (single-transaction)
-    // bootstrap. A nested BEGIN would fail the whole open loudly.
-    for reopen in 1..=2 {
-        let store = LibsqlStore::open(&path).await.unwrap();
-        let conn = store.conn().await.unwrap();
-
-        let session = store.get_session("boot-s1").await.unwrap();
-        assert!(session.is_some(), "session must survive re-open #{reopen}");
-        assert_eq!(
-            count_schema_version_rows(&conn).await,
-            1,
-            "schema_version must hold exactly one row after re-open #{reopen}"
-        );
-        assert_eq!(
-            scalar(&conn, "PRAGMA integrity_check").await,
-            "ok",
-            "integrity_check must be ok after re-open #{reopen}"
-        );
-    }
-}
-
-/// Contract 3: concurrent-open path — bootstrap twice against the same file
-/// with the first store still alive. The second bootstrap's BEGIN IMMEDIATE
-/// must queue on the write lock (busy_timeout) instead of erroring, proving
-/// the single-transaction wrapper leaves no transaction state behind.
-#[tokio::test]
-async fn second_open_on_live_path_succeeds() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("live.db");
-
-    let first = LibsqlStore::open(&path).await.unwrap();
-    let second = LibsqlStore::open(&path).await.unwrap();
-
-    assert!(
-        first.get_session("none").await.unwrap().is_none(),
-        "baseline read on the first store"
-    );
-    second
-        .create_session(&SessionMeta {
-            id: "live-s1".into(),
-            created_at: 1,
-            updated_at: 1,
-            ..Default::default()
-        })
-        .await
-        .unwrap();
-    let seen = first.get_session("live-s1").await.unwrap();
-    assert!(seen.is_some(), "both handles must see the same database");
-
-    let conn = first.conn().await.unwrap();
-    assert_eq!(
-        count_schema_version_rows(&conn).await,
-        1,
-        "double bootstrap must not duplicate the version row"
-    );
-}
+// Contract 3: concurrent-open path — bootstrap twice against the same file
+// with the first store still alive. The second bootstrap's BEGIN IMMEDIATE
+// must queue on the write lock (busy_timeout) instead of erroring, proving
+// the single-transaction wrapper leaves no transaction state behind.
 
 // ===========================================================================
 // Bug 04: legacy shape, version row absent
@@ -167,8 +101,8 @@ async fn raw_open(db_path: &std::path::Path) -> libsql::Connection {
     db.connect().unwrap()
 }
 
-/// Mirror of the crate-internal `column_exists`: reads `PRAGMA table_info`,
-/// where the column name lives at result index 1.
+// Mirror of the crate-internal `column_exists`: reads `PRAGMA table_info`,
+// where the column name lives at result index 1.
 async fn has_column(conn: &libsql::Connection, table: &str, column: &str) -> bool {
     let stmt = conn
         .prepare(&format!("PRAGMA table_info({table})"))
@@ -192,7 +126,7 @@ async fn table_named(conn: &libsql::Connection, name: &str) -> bool {
     rows.next().await.unwrap().is_some()
 }
 
-/// `Some(v)` from the version row; caller ensures the table exists.
+// `Some(v)` from the version row; caller ensures the table exists.
 async fn version_of(conn: &libsql::Connection) -> i64 {
     let stmt = conn
         .prepare("SELECT version FROM schema_version LIMIT 1")
@@ -202,11 +136,11 @@ async fn version_of(conn: &libsql::Connection) -> i64 {
     rows.next().await.unwrap().unwrap().get::<i64>(0).unwrap()
 }
 
-/// Hand-write a pre-versioning database: the five core tables in their old
-/// shapes (sessions without `task_type`, session_events without `sse_kind`,
-/// session_inputs without `images_json`/`display_text`/`recorded`) and NO
-/// schema_version table at all. A parent + subagent child pair exercises the
-/// v5 backfill during the repair.
+// Hand-write a pre-versioning database: the five core tables in their old
+// shapes (sessions without `task_type`, session_events without `sse_kind`,
+// session_inputs without `images_json`/`display_text`/`recorded`) and NO
+// schema_version table at all. A parent + subagent child pair exercises the
+// v5 backfill during the repair.
 async fn seed_legacy_db(db_path: &std::path::Path, inputs_without_promoted_seq: bool) {
     let conn = raw_open(db_path).await;
     conn.execute(
@@ -284,178 +218,28 @@ async fn seed_legacy_db(db_path: &std::path::Path, inputs_without_promoted_seq: 
     .unwrap();
 }
 
-/// Bug 04 regression: tables present but version row absent must converge on
-/// open - the legacy shape is detected before the DDL batch and upgraded
-/// through a full `migrate(0)` pass (safe because every migrate step is
-/// `IF NOT EXISTS` / `add_column_if_absent` / converging backfill), instead
-/// of being version-stamped and then dying on the task-type index.
-#[tokio::test]
-async fn legacy_tables_without_version_row_converge_on_open() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("legacy.db");
-    seed_legacy_db(&path, false).await;
+// Bug 04 regression: tables present but version row absent must converge on
+// open - the legacy shape is detected before the DDL batch and upgraded
+// through a full `migrate(0)` pass (safe because every migrate step is
+// `IF NOT EXISTS` / `add_column_if_absent` / converging backfill), instead
+// of being version-stamped and then dying on the task-type index.
 
-    // First open: previously failed inside the bootstrap transaction with
-    // "no such column: task_type" (index over the stale sessions shape).
-    let store = LibsqlStore::open(&path).await.unwrap();
-    let conn = store.conn().await.unwrap();
+// Bug 04, rollback side: a DDL failure mid-bootstrap rolls the WHOLE
+// transaction back and leaves the old state intact, so the database is
+// reopenable once the defect is repaired.
+//
+// Injection note: the "pre-create a same-name object" route is impossible -
+// every bootstrap DDL is `IF NOT EXISTS` or `add_column_if_absent`-guarded,
+// so a colliding name is silently skipped. The deterministic injection point
+// is a shape mismatch a later statement cannot tolerate: a legacy
+// session_inputs lacking `promoted_seq` fails `idx_inputs_pending` creation
+// several statements AFTER `schema_version` and `todo_workflows` were
+// created - which is exactly what the rollback assertions below witness.
 
-    assert_eq!(
-        version_of(&conn).await,
-        31,
-        "version row must be stamped at the latest version"
-    );
-    for (table, column) in [
-        ("sessions", "task_type"),
-        ("sessions", "handoff_seq"),
-        ("sessions", "autopilot_mode"),
-        ("sessions", "harness_runtime"),
-        ("session_events", "sse_kind"),
-        ("session_inputs", "images_json"),
-        ("session_inputs", "recorded"),
-    ] {
-        assert!(
-            has_column(&conn, table, column).await,
-            "{table}.{column} must exist after the legacy repair"
-        );
-    }
-    let stmt = conn
-        .prepare("SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_sessions_task_type'")
-        .await
-        .unwrap();
-    let mut rows = stmt.query(()).await.unwrap();
-    assert_eq!(
-        rows.next().await.unwrap().unwrap().get::<i64>(0).unwrap(),
-        1,
-        "idx_sessions_task_type must be built"
-    );
+// Bug 10: `open`'s `if existed` checkpoint gate. The decision itself is
+// unit-pinned on `should_checkpoint_wal`; this proves the gate's inputs in
+// situ and that an existing-path reopen (checkpoint branch taken) converges
+// with a healthy database.
 
-    // Legacy data survives; the subagent child is backfilled, the parent keeps
-    // the column default.
-    let parent = store.get_session("parent").await.unwrap().unwrap();
-    assert!(
-        store.harness_runtime("parent").await.unwrap().is_none(),
-        "legacy sessions have no external harness state"
-    );
-    assert_eq!(parent.task_type.as_deref(), Some(TASK_TYPE_PARENT));
-    let child = store.get_session("child").await.unwrap().unwrap();
-    assert_eq!(child.task_type.as_deref(), Some(TASK_TYPE_SUBAGENT));
-    let stmt = conn.prepare("SELECT COUNT(*) FROM messages").await.unwrap();
-    let mut rows = stmt.query(()).await.unwrap();
-    assert_eq!(
-        rows.next().await.unwrap().unwrap().get::<i64>(0).unwrap(),
-        1
-    );
-
-    // Second open is idempotent: same version, no duplicate row, healthy db.
-    drop(store);
-    let store = LibsqlStore::open(&path).await.unwrap();
-    let conn = store.conn().await.unwrap();
-    assert_eq!(
-        version_of(&conn).await,
-        31,
-        "re-open must not move the version"
-    );
-    assert_eq!(count_schema_version_rows(&conn).await, 1);
-    assert!(has_column(&conn, "sessions", "task_type").await);
-    assert_eq!(scalar(&conn, "PRAGMA integrity_check").await, "ok");
-}
-
-/// Bug 04, rollback side: a DDL failure mid-bootstrap rolls the WHOLE
-/// transaction back and leaves the old state intact, so the database is
-/// reopenable once the defect is repaired.
-///
-/// Injection note: the "pre-create a same-name object" route is impossible -
-/// every bootstrap DDL is `IF NOT EXISTS` or `add_column_if_absent`-guarded,
-/// so a colliding name is silently skipped. The deterministic injection point
-/// is a shape mismatch a later statement cannot tolerate: a legacy
-/// session_inputs lacking `promoted_seq` fails `idx_inputs_pending` creation
-/// several statements AFTER `schema_version` and `todo_workflows` were
-/// created - which is exactly what the rollback assertions below witness.
-#[tokio::test]
-async fn failed_bootstrap_rolls_back_and_reopens_after_repair() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("rollback.db");
-    seed_legacy_db(&path, true).await;
-
-    let first = LibsqlStore::open(&path).await;
-    assert!(
-        first.is_err(),
-        "index over the missing promoted_seq column must fail the open"
-    );
-
-    // Whole-transaction rollback: the db is exactly as hand-written. Nothing
-    // the failed bootstrap created (schema_version, todo_workflows, ...)
-    // survived, no migration column leaked, and the legacy row is untouched.
-    let conn = raw_open(&path).await;
-    assert!(
-        !table_named(&conn, "schema_version").await,
-        "the CREATE earlier in the tx must roll back"
-    );
-    assert!(
-        !table_named(&conn, "todo_workflows").await,
-        "mid-tx created tables must roll back"
-    );
-    assert!(
-        !has_column(&conn, "sessions", "task_type").await,
-        "no migration DDL may leak"
-    );
-    let stmt = conn.prepare("SELECT COUNT(*) FROM sessions").await.unwrap();
-    let mut rows = stmt.query(()).await.unwrap();
-    assert_eq!(
-        rows.next().await.unwrap().unwrap().get::<i64>(0).unwrap(),
-        2
-    );
-
-    // Repair the injected defect; the legacy path then converges normally.
-    conn.execute(
-        "ALTER TABLE session_inputs ADD COLUMN promoted_seq INTEGER",
-        (),
-    )
-    .await
-    .unwrap();
-    drop(conn);
-
-    let store = LibsqlStore::open(&path).await.unwrap();
-    let conn = store.conn().await.unwrap();
-    assert_eq!(version_of(&conn).await, 31);
-    assert!(has_column(&conn, "sessions", "task_type").await);
-    assert!(store.get_session("parent").await.unwrap().is_some());
-    assert_eq!(scalar(&conn, "PRAGMA integrity_check").await, "ok");
-}
-
-/// Bug 10: `open`'s `if existed` checkpoint gate. The decision itself is
-/// unit-pinned on `should_checkpoint_wal`; this proves the gate's inputs in
-/// situ and that an existing-path reopen (checkpoint branch taken) converges
-/// with a healthy database.
-#[tokio::test]
-async fn checkpoint_gate_existing_path_reopen_converges() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("gate.db");
-
-    // Fresh file: gate input false - open skips the checkpoint.
-    assert!(
-        !path.exists(),
-        "gate input must be false before the first open"
-    );
-    {
-        let store = LibsqlStore::open(&path).await.unwrap();
-        store
-            .create_session(&SessionMeta {
-                id: "gate-1".into(),
-                created_at: 1,
-                updated_at: 1,
-                ..Default::default()
-            })
-            .await
-            .unwrap();
-    }
-    // The file now pre-exists: the reopen below takes the checkpoint branch.
-    assert!(path.exists(), "gate input must be true for the reopen");
-
-    let store = LibsqlStore::open(&path).await.unwrap();
-    let conn = store.conn().await.unwrap();
-    assert!(store.get_session("gate-1").await.unwrap().is_some());
-    assert_eq!(count_schema_version_rows(&conn).await, 1);
-    assert_eq!(scalar(&conn, "PRAGMA integrity_check").await, "ok");
-}
+#[path = "schema_bootstrap/suite_1.rs"]
+mod suite_1;

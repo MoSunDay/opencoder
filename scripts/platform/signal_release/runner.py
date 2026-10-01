@@ -5,7 +5,7 @@ import re
 import time
 import uuid
 from pathlib import Path
-from rolling import config, deployment
+from rolling import config, deployment, maintenance
 from rolling.io import Operations
 from rolling.state import Journal, locked, write
 
@@ -26,6 +26,10 @@ def target_for(settings, action, origin, journal):
     resume_deploy = (action == "deploy" and journal["previous"] == origin
         and journal["candidate"] == pending["release_id"]
         and journal["phase"] in ("switching", "verifying"))
+    stopped = journal.get('maintenance', {})
+    resume_deploy = resume_deploy or (action == 'deploy' and stopped.get('origin') == origin
+        and stopped.get('target') == pending['release_id']
+        and stopped.get('stage') not in ('complete', 'rolled_back'))
     resume_rollback = (action == "rollback" and journal.get("rollback_from") == origin
         and journal["phase"] == "rolling_back")
     if journal["current"] != origin and not (resume_deploy or resume_rollback):
@@ -49,7 +53,11 @@ def run(settings, instance, operations, seconds=90):
             target, bundle = target_for(settings, action, origin, Journal(settings.state_dir).data)
             receipt.update(target=target, phase="running")
             write(path, receipt)
-            result = (deployment.deploy(settings, bundle, operations, seconds) if action == "deploy"
+            mode = (json.loads((settings.state_dir / 'signal-pending.json').read_text()).get('maintenance', False)
+                    if action == 'deploy' else False)
+            receipt['maintenance'] = mode
+            deploy = maintenance.deploy if mode else deployment.deploy
+            result = (deploy(settings, bundle, operations, seconds) if action == "deploy"
                       else deployment.rollback(settings, operations, seconds))
             if result["current"] != target or result["phase"] not in ("complete", "rolled_back"):
                 raise RuntimeError("release did not reach its requested target")

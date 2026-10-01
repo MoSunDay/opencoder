@@ -36,7 +36,7 @@ export function useOverview({ onNotice } = {}) {
     try {
       const j = await apiGet('/api/project/overview');
       if (alive.current && request === serial.current) {
-        setOverview(j || { goals: [], standalone_milestones: [], standalone_initiatives: [], backlog: [] });
+        setOverview(j || { goals: [], standalone_initiatives: [], backlog: [] });
         setError('');
         setUpdated(Date.now());
       }

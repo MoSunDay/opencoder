@@ -22,7 +22,7 @@ const LABELS = { run_started: '运行开始', step_started: '步骤开始', step
 export function logEntry(frame) {
   const envelope = frame.data || {};
   const nested = frame.event === 'step_log';
-  // Node-side wasm capture (`step_output`) projects onto the stdout/stderr
+  // Node-side binary capture (`step_output`) projects onto the stdout/stderr
   // vocabulary so LABELS and logRows' adjacent-fragment merging apply as-is.
   const event = nested ? (envelope.payload?.event || frame.event)
     : frame.event === 'step_output' ? (envelope.stream === 'stderr' ? 'stderr' : 'stdout') : frame.event;

@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'platform'))
 from rolling.config import Settings
 from rolling import ingress, probes, units
 from rolling.state import atomic_bytes, write
-from fixture import Model, HOLD_WASM
+from fixture import Model, publish_hold
 from resources import Resources
 from containers import Containers
 
@@ -56,7 +56,7 @@ def until(check, label, seconds=90):
 
 
 class Environment:
-    def __init__(self, binaries, nginx, data_parent=None, wasmtime=None):
+    def __init__(self, binaries, nginx, rootfs, data_parent=None):
         self.root = Path(tempfile.mkdtemp(prefix='opencoder-smooth-',dir=data_parent))
         self.root.chmod(0o755)
         print(json.dumps({'evidence':str(self.root)}), flush=True)
@@ -65,7 +65,7 @@ class Environment:
         self.records = []
         self.nginx = nginx
         self.model = Model(self.root)
-        self.containers = Containers(wasmtime)
+        self.containers = Containers(rootfs)
         self.shared_skill = self.root / '.opencoder/skills/release-reference/SKILL.md'
         self.shared_skill.parent.mkdir(parents=True)
         self.shared_skill.write_text('---\nname: release-reference\ndescription: fixture\n---\nfirst release bytes\n')
@@ -89,10 +89,15 @@ class Environment:
             write(directory / '.opencoder/ap.json',{'mode':'off'})
         self.env = {**os.environ,'HOME':str(self.root),'XDG_CONFIG_HOME':str(self.root / 'config'),
             'XDG_DATA_HOME':str(self.root / 'data')}
-        self.start('resources','opencoder-server',['--resources','--workdir',s.server_workdir,
-            '--data-dir',self.root / 'resources','--port',s.resource_port,'--token-file',s.token_file])
-        until(lambda:self.http(s.resource_url,'/api/health'),'resource service')
-        self.resources.mount()
+        try:
+            self.start('resources','opencoder-server',['--resources','--workdir',s.server_workdir,
+                '--data-dir',self.root / 'resources','--port',s.resource_port,'--token-file',s.token_file])
+            until(lambda:self.http(s.resource_url,'/api/health'),'resource service')
+            self.resources.mount()
+            self.hold_resource = publish_hold(self)
+        except BaseException:
+            self.close()
+            raise
 
     def http(self, base, path, method='GET', body=None):
         data = json.dumps(body).encode() if body is not None else None
@@ -151,14 +156,15 @@ class Environment:
         data = Path(record['runtime_data'])
         atomic_bytes(data / 'node-id',node_id.encode())
         write(data / 'host-binding.json',{'database':str(s.state_dir / 'host/host.db'),'runtime_id':label})
-        atomic_bytes(data / 'dag/_modules/release-probe.wasm',probes.WASM)
-        atomic_bytes(data / 'dag/_modules/hold.wasm',HOLD_WASM.encode())
-        self.containers.prepare(data)
+        rootfs = self.containers.prepare(data)
+        from rolling.native import runtime_config
+        runtime_workdir = runtime_config(s, record, rootfs, home=self.root)
         mark('data_prepared')
         config = {'endpoint':f"http://127.0.0.1:{record['runtime_port']}",'data_dir':str(data),'unit':record['runtime_unit']}
         self.http(host,'/runtimes','POST',{'id':label,'release_id':label,'mode':'staged','config':config})
         mark('runtime_registered')
-        command = [self.bin / 'opencoder-agent','--workdir',s.agent_workdir,'--data-dir',data,
+        process = f"/proc/{self.children['resources'].pid}"
+        command = ['/usr/bin/nsenter', '--mount=' + process + '/ns/mnt', '--root=' + process + '/root', '--wd=/', '--', self.bin / 'opencoder-agent','--workdir',runtime_workdir,'--data-dir',data,
             '--max-runs',65535,'--token-file',s.token_file,'runtime','--port',record['runtime_port']]
         content = units.service(command,'Isolated release acceptance',True)
         content = content.replace('Type=simple','Type=simple\n'+'\n'.join('Environment='+units.argument(k+'='+self.env[k]) for k in ['HOME','XDG_CONFIG_HOME','XDG_DATA_HOME']))
@@ -259,9 +265,13 @@ class Environment:
         self.model.release.set()
         (self.root / 'shell.release').touch()
         for record in self.records:
-            for context in Path(record['runtime_data']).rglob('context.json'):
-                if any(name in str(context) for name in ['dag-hold','dag-r3-hold','dag-container-hold']):
-                    (context.parent.parent / 'release').touch()
+            for journal in Path(record['runtime_data']).glob('dag/*/execution.json'):
+                saved = json.loads(journal.read_text())
+                parent = saved.get('annotations', {}).get('dag_parent')
+                if parent:
+                    gate = Path(parent) / journal.parent.name / 'workspace/hold/release'
+                    if gate.parent.is_dir():
+                        gate.touch()
 
     def close(self):
         self.release_work()

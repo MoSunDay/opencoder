@@ -96,7 +96,7 @@ async fn old_node_cannot_accept_dynamic_dispatch_or_instance_queries() {
         )
         .await;
     assert_eq!(code, 503, "{body}");
-    assert!(body.to_string().contains("dag_dynamic_v1"));
+    assert!(body.to_string().contains("dag_container_v1"));
     assert!(h.node.journal_ids().is_empty());
     assert!(h
         .state
@@ -124,20 +124,21 @@ async fn old_node_cannot_accept_dynamic_dispatch_or_instance_queries() {
         assert_eq!(code, 409, "{tail}: {body}");
         assert!(body.to_string().contains("dag_dynamic_v1"));
     }
-    // Existing static DAGs continue using the unchanged protocol.
     let (code, body) = h
         .req(
             Method::POST,
             "/api/executions",
             Some(json!({
                 "id":"dag-static-old", "kind":"dag", "target":"static",
-                "input":{"definition":{"name":"static","steps":[{"name":"work","kind":{
+                "input":{"definition":{"name":"static","steps":[{"name":"task","kind":{
                     "type":"agent", "prompt":"work"
                 }}]}}
             })),
         )
         .await;
-    assert_eq!(code, 202, "{body}");
+    assert_eq!(code, 503, "{body}");
+    assert!(body.to_string().contains("dag_container_v1"));
+    assert!(h.node.journal_ids().is_empty());
 }
 
 #[tokio::test]

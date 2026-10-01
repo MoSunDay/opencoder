@@ -1,4 +1,4 @@
-// One step's live record body: picks the agent transcript or the wasm log
+// One step's live record body: picks the agent transcript or the binary log
 // view by step kind, surfaces stream failures with a reconnect action and
 // reports the terminal `step_finished` receipt upward (the drawer refetches
 // the step receipt on it).
@@ -6,7 +6,7 @@ import { Alert, Button } from 'antd';
 import { useEffect, useRef } from 'react';
 import { isAgentKind } from './model.js';
 import { useStepStream } from './useStepStream.js';
-import { WasmLogs } from './wasmLogs.jsx';
+import { BinaryLogs } from './binaryLogs.jsx';
 import { AgentTranscript } from './agentTranscript.jsx';
 
 export function StepPanel({ runId, step, index, kind, onFinished }) {
@@ -24,6 +24,6 @@ export function StepPanel({ runId, step, index, kind, onFinished }) {
     )}
     {isAgentKind(kind)
       ? <AgentTranscript transcript={stream.transcript} finished={stream.finished} connection={stream.connection} />
-      : <WasmLogs frames={stream.frames} trimmed={stream.trimmed} connection={stream.connection} />}
+      : <BinaryLogs frames={stream.frames} trimmed={stream.trimmed} connection={stream.connection} />}
   </>;
 }

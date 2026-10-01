@@ -97,7 +97,7 @@ fn validate_accepts_each_kind_target_contract() {
 }
 
 #[test]
-fn dag_params_args_are_accepted_but_must_be_a_string() {
+fn dag_params_preserve_argument_arrays_and_reject_shell_strings() {
     let build = |params: Value| -> ScheduleJob {
         SchedulesConfig::from_value(&json!({
             "schedules": [job_json("dag", "daily-etl", json!({
@@ -108,16 +108,19 @@ fn dag_params_args_are_accepted_but_must_be_a_string() {
         .schedules
         .remove(0)
     };
-    // dag now takes params: `args` is appended to every wasm step's command
+    // dag now takes params: `args` is appended to every binary step's command
     // line at fire time (previously any dag params were rejected).
-    assert!(build(json!({"args": "--date 2026-09-18"}))
-        .validate()
-        .is_ok());
+    assert!(
+        build(json!({"args": ["--date", "2026-09-18", "", "with space"]}))
+            .validate()
+            .is_ok()
+    );
     assert!(build(json!({})).validate().is_ok());
     // A non-string would land as an `error` ledger row at 3am instead —
     // reject it at config time.
     for bad in [
-        json!({"args": ["--x"]}),
+        json!({"args": "--x"}),
+        json!({"args": ["nul\u{0000}"]}),
         json!({"args": 7}),
         json!({"args": true}),
     ] {

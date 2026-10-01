@@ -12,8 +12,6 @@ import { LayeredEvents } from './events.jsx';
 import { LayerRounds } from './rounds.jsx';
 import { LAYERED_COLORS, LAYERED_PHASES, barrier, layeredPhase, planOf, terminalPhase } from './model.js';
 import './style.css';
-import { ProblemView } from '../problem/view.jsx';
-import { ProblemResults } from '../problem/results.jsx';
 
 // Execution events refresh the view; periodic reads also report connection failures.
 const CONNECTION_TEXT = {
@@ -71,7 +69,6 @@ function LegacyRunBody({ view, id, connection, refresh, onNotice }) {
         {!!run.summary && <Typography.Text type="secondary">交付摘要：{run.summary}</Typography.Text>}
       </Space>
     </section>
-    <ProblemView problem={view.problem} />
     <LayerCanvas view={view} selected={selected} onSelect={selectNode} />
     <section className="brain-rounds">
       <Typography.Title level={5}>分层决策与执行</Typography.Title>
@@ -90,7 +87,6 @@ function LegacyRunBody({ view, id, connection, refresh, onNotice }) {
 
 export function LayeredRunBody(props) {
   return props.view.schema_version >= 5 ? <MilestoneRunBody {...props} /> : <>
-    <ProblemView problem={props.view.problem} /><ProblemResults results={props.view.problem_results} />
     <LegacyRunBody {...props} />
   </>;
 }

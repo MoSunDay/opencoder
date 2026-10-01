@@ -2,7 +2,7 @@
 //!
 //! The run half of the project tables; companions are
 //! [`super::project_crud_todo`] (todos) and [`super::project_crud`]
-//! (goals & milestones). Behavior mirrors `libsql_store::project_runs`:
+//! (goals & initiatives). Behavior mirrors `libsql_store::project_runs`:
 //! dynamic SET patches, newest-first run listing,
 //! `COALESCE(MAX(version), 0) + 1` versioning.
 

@@ -28,12 +28,12 @@ pub(in crate::operations) async fn context(
             "instances require a DAG execution",
         )));
     }
-    let (definition, legacy, status) = {
+    let (definition, root, status) = {
         let journal = worker.inner.journal.lock().await;
         let record = journal.records.get(&execution.id).unwrap();
         (
             record.assignment.definition.clone(),
-            journal.uses_legacy(&execution.id),
+            crate::layout::dag::accepted_parent(record)?,
             record.assignment.index.status.as_str().to_owned(),
         )
     };
@@ -47,11 +47,6 @@ pub(in crate::operations) async fn context(
     };
     let StepKind::Dynamic { template, .. } = &node.kind else {
         return Ok(Err(RpcReply::error(400, "step is not dynamic")));
-    };
-    let root = if legacy {
-        worker.inner.layout.checked_legacy_workflow_root()?
-    } else {
-        worker.inner.layout.kind_root(ExecutionKind::Dag)
     };
     let items = manifest(&root, &execution.id, step).await?;
     Ok(Ok(InstanceContext {
@@ -119,7 +114,7 @@ pub(in crate::operations) async fn query(
         result["input"] = input.clone();
         result["kind"] = json!(match ctx.template {
             StepKind::Agent { .. } => "agent",
-            _ => "wasm",
+            _ => "binary",
         });
         result["session_id"] = json!(session);
         result["execution_status"] = json!(ctx.execution_status);

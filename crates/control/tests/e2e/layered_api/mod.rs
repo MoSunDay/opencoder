@@ -6,9 +6,9 @@ use opencoder_core::fleet::{ExecutionKind, ExecutionStatus};
 use reqwest::Method;
 use serde_json::{json, Value};
 
+mod attachments;
 mod commands;
 mod plans;
-mod problem;
 mod surface;
 
 pub(super) const RUN: &str = "brain-layered-e2e";
@@ -38,7 +38,7 @@ pub(super) fn advertise_v4(h: &Harness) {
     h.node
         .set_capability_reply(opencoder_core::fleet::RpcReply::ok(json!({
             "compatible": true,
-            "features": ["dag_dynamic_v1", "brain_scheduler_v3", "brain_scheduler_v7"]
+            "features": ["dag_container_v1", "dag_dynamic_v1", "brain_scheduler_v3", "brain_scheduler_v7"]
         })));
 }
 

@@ -269,7 +269,7 @@ async fn execution_list_lifts_dispatch_time_names() {
             Method::POST,
             "/api/dag/defs",
             Some(json!({"spec": {"name": "etl-demo", "steps": [
-                {"name": "fetch", "kind": {"type": "wasm", "command": "tool.wasm"}},
+                {"name": "fetch", "kind": {"type":"binary","resource":"tool"}},
             ]}})),
         )
         .await;

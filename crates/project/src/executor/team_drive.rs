@@ -128,7 +128,7 @@ fn materialized_team_name(todo_id: &str) -> String {
     name
 }
 
-/// 话题 requirement：目标→里程碑→待办上下文（对齐 execute_prompt 的背景
+/// 话题 requirement：目标→专项→待办上下文（对齐 execute_prompt 的背景
 /// 段）+ 方案正文（缺失时回退草稿）。
 fn team_requirement(cx: &ProjectContext, todo: &ProjectTodoRecord) -> String {
     let mut out = String::new();
@@ -136,8 +136,8 @@ fn team_requirement(cx: &ProjectContext, todo: &ProjectTodoRecord) -> String {
     if let Some(title) = &cx.goal_title {
         out.push_str(&format!("- 目标：{title}\n"));
     }
-    if let Some(title) = &cx.milestone_title {
-        out.push_str(&format!("- 里程碑：{}\n", title));
+    if let Some(title) = &cx.initiative_title {
+        out.push_str(&format!("- 专项：{}\n", title));
     }
     out.push_str(&format!("- 待办：{}\n", cx.todo_title));
     let body = todo

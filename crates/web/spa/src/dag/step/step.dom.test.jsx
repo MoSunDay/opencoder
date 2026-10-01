@@ -9,12 +9,12 @@ vi.mock('../../sse.js', () => ({ openStream: open }));
 import { StepPanel } from './stepPanel.jsx';
 import { StepDrawer } from './stepDrawer.jsx';
 
-// Flat node-side wasm capture frame (control SSE frame shape from sse.js).
+// Flat node-side binary capture frame (control SSE frame shape from sse.js).
 const out = (seq, stream, text) => ({ seq, event: 'step_output', data: { step: 'build', stream, text, at_ms: seq } });
 beforeEach(() => { open.mockReset().mockImplementation(() => ({ abort: vi.fn() })); get.mockReset(); });
 
-it('renders wasm stdout/stderr rows and merges adjacent stdout fragments', async () => {
-  render(<StepPanel runId="run1" step="build" kind="wasm" />);
+it('renders binary stdout/stderr rows and merges adjacent stdout fragments', async () => {
+  render(<StepPanel runId="run1" step="build" kind="binary" />);
   await waitFor(() => expect(open).toHaveBeenCalledOnce());
   expect(open.mock.calls[0][0]).toMatchObject({
     path: '/api/dag/runs/run1/steps/build/events', after: 0, executionHistory: true, requireEnd: true,
@@ -39,7 +39,7 @@ it('folds agent child-session frames into a TUI say/tool transcript', async () =
   const stream = open.mock.calls[0][0];
   act(() => {
     stream.onFrame({ seq: 1, event: 'text_delta', data: { text: 'inspecting artifacts' } });
-    stream.onFrame({ seq: 2, event: 'tool_start', data: { id: 't1', name: 'bash', input: { command: 'ls' } } });
+    stream.onFrame({ seq: 2, event: 'tool_start', data: { id: 't1', name: 'bash', input: { resource: 'ls' } } });
     stream.onFrame({ seq: 3, event: 'tool_end', data: { id: 't1', name: 'bash', output: 'ok' } });
   });
   // The Say stays visible (body or ladder-header preview), never folded away.

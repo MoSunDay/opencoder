@@ -351,12 +351,12 @@ async fn cancelled_project_execution_cannot_resume() {
 async fn completed_execution_wins_a_late_cancel_without_rewriting_results() {
     let _config = support::isolated_config();
     let dir = tempfile::tempdir().unwrap();
-    let node = worker(dir.path(), support::mock()).await;
+    let (node, _native, _bridge) = support::dag_worker(dir.path(), support::mock()).await;
     let id = "dag-finish-wins";
-    support::stage_stdout_wasm(&dir.path().join("node"), "tool.wasm", "done");
+    support::stage_stdout_binary(&dir.path().join("node"), "tool", "done");
     let spec = json!({
         "name": "finish-wins",
-        "steps": [{"name":"done","kind":{"type":"wasm","command":"tool.wasm"}}]
+        "steps": [{"name":"done","kind":{"type":"binary","resource":"tool"}}]
     });
     assert_eq!(
         node.handle(NodeOperation::Create {

@@ -17,7 +17,7 @@ use axum::http::StatusCode;
 use axum::Router;
 use opencoder_core::message::now_ms;
 use opencoder_store::{
-    ProjectExecutorKind, ProjectMilestoneRecord, ProjectMilestoneStatus, ProjectStore,
+    ProjectExecutorKind, ProjectInitiativeRecord, ProjectInitiativeStatus, ProjectStore,
     ProjectTodoPatch, ProjectTodoRecord, ProjectTodoRunKind, ProjectTodoRunRecord,
     ProjectTodoRunStatus, ProjectTodoStatus,
 };
@@ -25,10 +25,10 @@ use serde_json::{json, Value};
 
 use super::project_app::call;
 
-/// goal_id 指向不存在 goal 的悬空里程碑（投影应静默丢弃，平铺列表仍在）。
-pub const DANGLING_MILESTONE: &str = "pm-dangling-goal";
-/// 指向不存在里程碑的孤儿 todo id。
-pub const ORPHAN_TODO: &str = "pt-orphan-milestone";
+/// goal_id 指向不存在 goal 的悬空专项（投影应静默丢弃，平铺列表仍在）。
+pub const DANGLING_INITIATIVE: &str = "pm-dangling-goal";
+/// 指向不存在专项的孤儿 todo id。
+pub const ORPHAN_TODO: &str = "pt-orphan-initiative";
 /// 最小合法内联 DagSpec（通过 `opencode_dag::validate`），作 executor_spec
 /// 的往返探针。
 pub const DAG_SPEC: &str =
@@ -39,7 +39,7 @@ pub const DAG_SPEC: &str =
 pub struct Dataset {
     /// goals；g0 已归档且 sort=0（总览第一位）。
     pub g0: String, pub g1: String, pub g2: String,
-    /// milestones；ms 为无 goal 的独立专项。
+    /// initiatives；ms 为无 goal 的独立专项。
     pub m1a: String, pub m1b: String, pub m2: String, pub ms: String,
     /// 覆盖 draft/planned/running/done/failed 五态的五个 todo。
     pub t_draft: String, pub t_planned: String, pub t_running: String,
@@ -117,11 +117,11 @@ async fn seed_run(projects: &Arc<dyn ProjectStore>, row: RunRow) {
 #[rustfmt::skip]
 async fn direct_todo(
     projects: &Arc<dyn ProjectStore>,
-    id: &str, milestone_id: Option<String>, title: &str, draft: &str, at: i64,
+    id: &str, initiative_id: Option<String>, title: &str, draft: &str, at: i64,
 ) {
     projects
         .create_todo(&ProjectTodoRecord {
-            id: id.into(), milestone_id, title: title.into(), draft: draft.into(),
+            id: id.into(), initiative_id, title: title.into(), draft: draft.into(),
             plan_md: None, status: ProjectTodoStatus::Draft, agent: "act".into(),
             executor_kind: ProjectExecutorKind::Agent, executor_ref: None, executor_spec: None,
             active_session_id: None, board_status: "backlog".into(), position: at,
@@ -155,7 +155,7 @@ async fn advance(
     assert!(applied, "store patch_todo({id}) hit nothing");
 }
 
-/// 构造全量矩阵数据集：3 goals / 4 milestones / 8 todos / 31 runs。
+/// 构造全量矩阵数据集：3 goals / 4 initiatives / 8 todos / 31 runs。
 #[rustfmt::skip]
 pub async fn seed(app: &Router, projects: &Arc<dyn ProjectStore>) -> Dataset {
     // ── A. goals：create 默认 active；归档靠 PATCH ───────────────────
@@ -174,38 +174,38 @@ pub async fn seed(app: &Router, projects: &Arc<dyn ProjectStore>) -> Dataset {
     assert_eq!(v["status"], "active", "archived goal starts active");
     patch_ok(app, &format!("/api/project/goals/{g0}"), json!({ "status": "archived" })).await;
 
-    // ── milestones：create 默认 planned；无 goal_id 即独立专项 ────────
+    // ── initiatives：create 默认 planned；无 goal_id 即独立专项 ────────
     let (m1a, v) = post_id(
         app,
-        "/api/project/milestones",
-        json!({ "goal_id": g1, "title": "里程碑一甲", "sort": 1 }),
+        "/api/project/initiatives",
+        json!({ "goal_id": g1, "title": "专项一甲", "sort": 1 }),
     )
     .await;
-    assert_eq!(v["status"], "planned", "milestone create default");
+    assert_eq!(v["status"], "planned", "initiative create default");
     let (m1b, _) = post_id(
         app,
-        "/api/project/milestones",
-        json!({ "goal_id": g1, "title": "里程碑一乙", "sort": 2 }),
+        "/api/project/initiatives",
+        json!({ "goal_id": g1, "title": "专项一乙", "sort": 2 }),
     )
     .await;
-    patch_ok(app, &format!("/api/project/milestones/{m1b}"), json!({ "status": "in_progress" }))
+    patch_ok(app, &format!("/api/project/initiatives/{m1b}"), json!({ "status": "in_progress" }))
         .await;
     let (m2, _) = post_id(
         app,
-        "/api/project/milestones",
-        json!({ "goal_id": g2, "title": "里程碑二", "sort": 1 }),
+        "/api/project/initiatives",
+        json!({ "goal_id": g2, "title": "专项二", "sort": 1 }),
     )
     .await;
-    patch_ok(app, &format!("/api/project/milestones/{m2}"), json!({ "status": "done" })).await;
+    patch_ok(app, &format!("/api/project/initiatives/{m2}"), json!({ "status": "done" })).await;
     let (ms, v) =
-        post_id(app, "/api/project/milestones", json!({ "title": "独立专项", "sort": 1 })).await;
+        post_id(app, "/api/project/initiatives", json!({ "title": "独立专项", "sort": 1 })).await;
     assert!(v["goal_id"].is_null(), "standalone create keeps goal_id null");
 
     // ── todos：四种 executor_kind 全覆盖 ─────────────────────────────
     let (t_draft, v) = post_id(
         app,
         "/api/project/todos",
-        json!({ "milestone_id": m1a, "title": "草稿任务", "draft": "还没想清楚" }),
+        json!({ "initiative_id": m1a, "title": "草稿任务", "draft": "还没想清楚" }),
     )
     .await;
     assert_eq!(v["status"], "draft", "todo create default");
@@ -214,7 +214,7 @@ pub async fn seed(app: &Router, projects: &Arc<dyn ProjectStore>) -> Dataset {
     let (t_planned, v) = post_id(
         app,
         "/api/project/todos",
-        json!({ "milestone_id": m1a, "title": "团队任务", "draft": "交给团队跑",
+        json!({ "initiative_id": m1a, "title": "团队任务", "draft": "交给团队跑",
                 "executor_kind": "team", "executor_ref": "fleet-x" }),
     )
     .await;
@@ -226,7 +226,7 @@ pub async fn seed(app: &Router, projects: &Arc<dyn ProjectStore>) -> Dataset {
     let (t_running, v) = post_id(
         app,
         "/api/project/todos",
-        json!({ "milestone_id": m1b, "title": "DAG任务", "draft": "走内联DAG",
+        json!({ "initiative_id": m1b, "title": "DAG任务", "draft": "走内联DAG",
                 "executor_kind": "dag", "executor_spec": format!("  {DAG_SPEC}  ") }),
     )
     .await;
@@ -234,13 +234,13 @@ pub async fn seed(app: &Router, projects: &Arc<dyn ProjectStore>) -> Dataset {
     let (t_done, _) = post_id(
         app,
         "/api/project/todos",
-        json!({ "milestone_id": m2, "title": "完成任务", "draft": "已经搞定" }),
+        json!({ "initiative_id": m2, "title": "完成任务", "draft": "已经搞定" }),
     )
     .await;
     let (t_failed, v) = post_id(
         app,
         "/api/project/todos",
-        json!({ "milestone_id": ms, "title": "大脑任务", "draft": "能力路由执行",
+        json!({ "initiative_id": ms, "title": "大脑任务", "draft": "能力路由执行",
                 "executor_kind": "brain", "executor_ref": "cap-1" }),
     )
     .await;
@@ -251,18 +251,18 @@ pub async fn seed(app: &Router, projects: &Arc<dyn ProjectStore>) -> Dataset {
     // backlog 对：created_at 拉开 100ms，钉住总览 backlog 排序。
     direct_todo(projects, "pt-backlog-early", None, "积压任务", "最早的积压", base + 100).await;
     direct_todo(projects, "pt-backlog-late", None, "积压任务", "稍晚的积压", base + 200).await;
-    // 悬空里程碑：goal_id 指向不存在的 pg-gone（表结构刻意无外键）。
+    // 悬空专项：goal_id 指向不存在的 pg-gone（表结构刻意无外键）。
     projects
-        .create_milestone(&ProjectMilestoneRecord {
-            id: DANGLING_MILESTONE.into(), goal_id: Some("pg-gone".into()),
+        .create_initiative(&ProjectInitiativeRecord {
+            id: DANGLING_INITIATIVE.into(), goal_id: Some("pg-gone".into()),
             title: "悬空专项".into(), detail_md: None,
-            status: ProjectMilestoneStatus::Planned, sort: 99,
+            status: ProjectInitiativeStatus::Planned, sort: 99,
             created_at: base, updated_at: base,
         })
         .await
         .unwrap();
-    // 孤儿 todo：milestone_id 指向不存在的 pm-gone。
-    direct_todo(projects, ORPHAN_TODO, Some("pm-gone".into()), "孤儿任务", "指向不存在的里程碑", base)
+    // 孤儿 todo：initiative_id 指向不存在的 pm-gone。
+    direct_todo(projects, ORPHAN_TODO, Some("pm-gone".into()), "孤儿任务", "指向不存在的专项", base)
         .await;
     // 状态机回写：模拟 plan/execute 运行时落下的痕迹。
     advance(projects, &t_planned, ProjectTodoStatus::Planned, Some("# 团队方案"), None).await;

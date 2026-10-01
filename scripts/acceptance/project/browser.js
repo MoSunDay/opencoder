@@ -3,7 +3,7 @@ const fs = require('fs');
 const path = require('path');
 async function projectPage(page) {
   await page.locator('.fleet-nav-category').getByText('项目', { exact: true }).click();
-  await page.getByRole('menuitem').filter({ hasText: '项目' }).click();
+  await page.getByRole('tab', { name: '项目', exact: true }).waitFor();
 }
 async function openBrowser(h, errors) {
   const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH || chromium.executablePath(), args: ['--no-sandbox', '--disable-dev-shm-usage', '--no-proxy-server'] });
@@ -26,7 +26,7 @@ async function openBrowser(h, errors) {
 }
 async function createHierarchy(page) {
   async function save(route, button) {
-    const dialog = page.locator('.ant-drawer').last();
+    const dialog = page.locator('.ant-drawer:visible').last();
     const response = page.waitForResponse((r) => r.url().endsWith(route) && r.request().method() === 'POST');
     await dialog.getByRole('button', { name: button }).click();
     const saved = await response;
@@ -37,20 +37,14 @@ async function createHierarchy(page) {
   await page.getByRole('button', { name: '新建项目', exact: true }).click();
   await page.getByPlaceholder('一句话标题').fill('Project replay acceptance');
   const goal = await save('/api/project/goals', /保\s*存/);
-  await page.locator('.ant-card-head-title').filter({ hasText: 'Project replay acceptance' }).waitFor();
+  await page.getByRole('button', { name: 'Project replay acceptance', exact: true }).waitFor();
   await page.getByRole('button', { name: '新建项目', exact: true }).click();
   await page.getByPlaceholder('一句话标题').fill('Another project');
   await save('/api/project/goals', /保\s*存/);
-  await page.getByRole('tab', { name: '里程碑', exact: true }).click();
-  await page.getByRole('button', { name: '新建里程碑', exact: true }).click();
-  await page.getByRole('combobox', { name: 'goal_id' }).click();
-  await page.locator('.ant-select-item-option-content').filter({ hasText: goal.id }).click();
-  await page.getByPlaceholder('一句话标题').fill('Complete replay');
-  const milestone = await save('/api/project/milestones', /保\s*存/);
   await page.getByRole('tab', { name: '专项', exact: true }).click();
   await page.getByRole('button', { name: '新建专项', exact: true }).click();
   await page.getByRole('combobox', { name: 'goal_id' }).click();
-  await page.locator('.ant-select-item-option-content').filter({ hasText: goal.id }).click();
+  await page.locator('.ant-select-item-option-content').getByText('Project replay acceptance', { exact: true }).click();
   await page.getByPlaceholder('一句话标题').fill('Project initiative');
   const initiative = await save('/api/project/initiatives', /保\s*存/);
   await page.getByPlaceholder('一句话标题').waitFor({ state: 'hidden' });
@@ -64,24 +58,29 @@ async function createHierarchy(page) {
     await drawer.locator('input#title').fill(title);
     await drawer.locator('textarea#draft').fill(draft);
     if (groupId) {
-      await drawer.locator('#milestone_id').click();
-      await page.locator('.ant-select-item-option-content').filter({ hasText: groupId }).click();
-    }
-    if (capability) {
-      await drawer.getByRole('combobox', { name: '执行能力' }).click();
-      await page.locator('.ant-select-item-option-content').filter({ hasText: capability }).click();
+      await drawer.getByRole('combobox', { name: '所属专项' }).click();
+      const label = groupId === initiative.id ? 'Project initiative' : 'Standalone initiative';
+      await page.locator('.ant-select-dropdown:visible .ant-select-item-option-content').filter({ hasText: label }).click();
     }
     const created = await save('/api/project/todos', /创\s*建/);
     await page.getByText(`TODO · ${title}`, { exact: true }).waitFor();
+    if (capability) {
+      const detail = page.getByRole('dialog', { name: `TODO · ${title}` });
+      await detail.getByRole('combobox', { name: '执行能力' }).click();
+      await page.locator('.ant-select-dropdown:visible .ant-select-item-option-content').getByText(capability, { exact: true }).click();
+      const updated = page.waitForResponse((r) => r.url().endsWith(`/api/project/todos/${created.id}`) && r.request().method() === 'PATCH');
+      await detail.getByRole('button', { name: '保存 TODO' }).click();
+      if (!(await updated).ok()) throw new Error('Failed to save TODO capability');
+    }
     await page.locator('.ant-drawer-close').click();
     await page.getByText(`TODO · ${title}`, { exact: true }).waitFor({ state: 'hidden' });
     return created;
   }
-  const main = await todo('Acceptance TODO', 'input 界 '.repeat(10000), milestone.id, 'Agent');
+  const main = await todo('Acceptance TODO', 'input 界 '.repeat(10000), initiative.id, 'Agent');
   const initiativeTodo = await todo('Initiative acceptance', 'specialized work', initiative.id, 'Agent');
   const standaloneTodo = await todo('Standalone initiative TODO', 'independent work', standaloneInitiative.id);
   const backlog = await todo('Backlog acceptance', 'standalone TODO', null, 'Operator');
-  return { goal, milestone, initiative, standaloneInitiative, todo: main, initiativeTodo, standaloneTodo, backlog };
+  return { goal, initiative, standaloneInitiative, todo: main, initiativeTodo, standaloneTodo, backlog };
 }
 async function verifyWorkbench(page, root, executionId) {
   await page.getByRole('tab', { name: 'TODO', exact: true }).click();

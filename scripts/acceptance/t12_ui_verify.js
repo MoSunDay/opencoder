@@ -1,6 +1,7 @@
 // Independent T12 browser acceptance: real server, two nodes and loopback LLM.
 const { spawn } = require('child_process');
-const { stageWasm } = require('./harness/wasm');
+const { prepareNative } = require('./harness/native');
+require('./harness/namespace').isolateFixture();
 const { chromium } = require('../../crates/web/spa/node_modules/playwright-core');
 const assert = require('assert/strict');
 const crypto = require('crypto');
@@ -18,6 +19,7 @@ const httpFailures = [];
 const expectedConsoleErrors = [];
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 let base;
+let native;
 let browser;
 let page;
 let mock;
@@ -225,7 +227,7 @@ async function verifyAgent(nodeName) {
 }
 
 async function verifyDag(nodeId, nodeName) {
-  await api('POST', '/api/dag/defs', { spec: { name: 'verify-dag', steps: [{ name: 'first', kind: { type: 'wasm', command: 'stdout.wasm' } }] } });
+  await api('POST', '/api/dag/defs', { spec: { name: 'verify-dag', steps: [{ name: 'first', kind: { type: 'binary', resource: 'stdout' } }] } });
   const node = (await api('GET', '/api/nodes')).nodes.find((candidate) => candidate.name === nodeName);
   await api('POST', '/api/executions', { id: 'dag-browser', kind: 'dag', target: 'verify-dag', node_id: node.id, input: { prompt: 'DAG-SAME-NODE' } });
   await page.getByRole('button', { name: /^刷\s*新$/ }).click();
@@ -349,11 +351,12 @@ async function main() {
   // 只能落到 HOME 全局 ~/.opencoder/config.json —— 否则子会话回退 openai 默认模型并因缺 key 失败。
   fs.mkdirSync(path.join(root, '.opencoder'), { recursive: true });
   fs.writeFileSync(path.join(root, '.opencoder', 'config.json'), JSON.stringify({ providers: { fixture: { base_url: `http://127.0.0.1:${mock.address().port}/v1`, api_key: 'fixture' } }, model: 'fixture/model', cache_salt: false }));
+  native = await prepareNative(root, dirs[0], dirs.slice(1), process.argv[2]);
   const server = start('opencoder-server', ['--workdir', dirs[0], '--port', '0', '--token', token], dirs[0]);
   await until(() => { const found = fs.readFileSync(server.logPath, 'utf8').match(/listening on (http:\/\/127\.0\.0\.1:\d+)/); if (found) base = found[1]; return !!base; }, 'server');
+  native.mount();
   const nodes = dirs.slice(1).map((dir) => start('opencoder-agent', ['--remote', base, '--token', token, '--name', path.basename(dir), '--workdir', dir, '--data-dir', path.join(dir, 'state')], dir));
   await until(async () => (await api('GET', '/api/nodes')).nodes.filter((node) => node.online && node.snapshot?.ready).length === 2, 'nodes');
-  dirs.slice(1).forEach((dir) => stageWasm(path.join(dir, 'state'))); // python 步骤已下线：DAG 用 staged wasm 模块跑通
   const views = (await api('GET', '/api/nodes')).nodes;
   await seedIndexes(views.map((node) => node.id));
   browser = await chromium.launch({ executablePath: process.env.CHROME_PATH || chromium.executablePath(), args: ['--no-sandbox', '--disable-dev-shm-usage'] });
@@ -380,10 +383,16 @@ async function main() {
   console.log(JSON.stringify({ result: 'PASS', root, httpFailures, expectedConsoleErrors, screenshots: fs.readdirSync(root).filter((name) => name.endsWith('.png')) }));
 }
 
-const deadline = setTimeout(() => { children.forEach((child) => child.kill('SIGKILL')); process.exit(1); }, 480_000);
+const deadline = setTimeout(() => {
+  process.exitCode = 1;
+  console.error(`acceptance exceeded 480s: ${root}`);
+  children.forEach((child) => child.kill('SIGTERM'));
+  if (browser) browser.close().catch(console.error);
+}, 480_000);
 main().catch(async (error) => { console.error(error); console.error(JSON.stringify({ browserErrors: errors, httpFailures })); if (page) { await page.screenshot({ path: path.join(root, 'failure.png') }); console.error((await page.locator('body').innerText()).slice(-5000)); } console.error(`artifacts: ${root}`); process.exitCode = 1; }).finally(async () => {
   if (browser) await browser.close();
   for (const child of children.reverse()) await stop(child);
+  if (native) native.close();
   if (mock) await new Promise((resolve) => mock.close(resolve));
   clearTimeout(deadline);
 });

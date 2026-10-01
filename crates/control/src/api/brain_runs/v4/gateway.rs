@@ -19,8 +19,7 @@ pub async fn dispatch(
         .await?
         .context("layered root assignment missing")?;
     let request = root.request.input["layered_request"].clone();
-    let pc_stage = opencoder_core::brain::pc_issue::stage(&cap.capability_id);
-    let mut bound_inputs = resolve_inputs(state, assignment, &request, pc_stage).await?;
+    let bound_inputs = resolve_inputs(state, assignment, &request).await?;
     let plan: LayeredPlan = serde_json::from_value(request["plan"].clone())?;
     let step = plan.node(&op.node_id).context("dispatch step missing")?;
     if cap.kind == ExecutionKind::Brain {
@@ -37,89 +36,8 @@ pub async fn dispatch(
             "parent":{"run_id":run.run_id,"operation_id":op.operation_id,"node_id":op.node_id,"layer":op.layer}
         })).await);
     }
-    let prompt = if let Some(stage) = pc_stage {
-        // Root problem/settings are authoritative, never model-rewritten bindings.
-        bound_inputs.insert("problem".into(), request["inputs"]["problem"].clone());
-        bound_inputs.insert("settings".into(), request["inputs"]["settings"].clone());
-        let snapshot = super::read::snapshot(state, &run.run_id)
-            .await
-            .map_err(|reply| anyhow::anyhow!("PC issue history unavailable: {}", reply.body))?;
-        let stage_index = opencoder_core::brain::pc_issue::STAGES
-            .iter()
-            .position(|s| *s == stage)
-            .unwrap();
-        let mut history = serde_json::Map::new();
-        for prior in &opencoder_core::brain::pc_issue::STAGES[..stage_index] {
-            let operation = snapshot
-                .operations
-                .iter()
-                .filter(|item| item.node_id == *prior && item.status.successful())
-                .max_by_key(|item| item.activation)
-                .context("PC issue predecessor has no successful execution")?;
-            let index = state
-                .fleet
-                .index(&operation.execution_id)
-                .await?
-                .context("PC issue predecessor index missing")?;
-            let mut output = super::read::output(state, &index, "").await?;
-            opencoder_core::brain::pc_issue::validate_output(prior, &output)?;
-            if let Some(object) = output.as_object_mut() {
-                object.remove("history");
-            }
-            history.insert(prior.to_string(), output);
-        }
-        if stage_index > 0 {
-            bound_inputs.insert(
-                "previous".into(),
-                history[opencoder_core::brain::pc_issue::STAGES[stage_index - 1]].clone(),
-            );
-        }
-        bound_inputs.insert("history".into(), json!(history));
-        bound_inputs.insert("round".into(), json!(op.round));
-        bound_inputs.insert("parent_execution_id".into(), json!(op.execution_id));
-        let mut prompt = execution_prompt(cap, step, &bound_inputs)?;
-        let instructions = match stage {
-            "impact" => include_str!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/../../deploy/pc-issue/prompts/impact.md"
-            )),
-            "reproduce" => include_str!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/../../deploy/pc-issue/prompts/reproduce.md"
-            )),
-            "repair" => include_str!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/../../deploy/pc-issue/prompts/repair.md"
-            )),
-            "verify" => include_str!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/../../deploy/pc-issue/prompts/verify.md"
-            )),
-            _ => include_str!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/../../deploy/pc-issue/prompts/conclude.md"
-            )),
-        };
-        prompt.push_str(include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../deploy/pc-issue/prompts/common.md"
-        )));
-        prompt.push_str(instructions);
-        prompt.push_str(&format!(
-            "\nRoot run ID: {}\nAuthoritative stage inputs: {}",
-            run.run_id,
-            serde_json::to_string(&bound_inputs)?
-        ));
-        prompt
-    } else {
-        execution_prompt(cap, step, &bound_inputs)?
-    };
+    let prompt = execution_prompt(cap, step, &bound_inputs)?;
     let mut input = json!({"schema_version":LAYERED_SCHEMA_VERSION,"brain_layered":{"run_id":run.run_id,"operation_id":op.operation_id,"layer":op.layer,"round":op.round,"activation":op.activation,"node_id":op.node_id,"attempt":op.attempt,"capability":super::view::capability_metadata(cap)},"bindings":bindings,"layered_inputs":bound_inputs,"prompt":prompt,"definition":cap.definition});
-    if let Some(stage) = pc_stage {
-        input["pc_issue_stage"] = json!(stage);
-        input["images"] =
-            json!(super::super::attachments::images(state, &request["inputs"]["problem"]).await?);
-    }
     if op.execution_kind == ExecutionKind::Todos {
         input["spec"] = cap.definition.clone();
     }
@@ -130,24 +48,17 @@ pub async fn dispatch(
             kind: op.execution_kind,
             target: Some(cap.target.clone()),
             input,
-            node_id: pc_stage.map(|_| root.index.node_id.clone()),
+            node_id: None,
         },
     )
     .await)
 }
 
-// PC stages have a fixed host-owned input contract. Resolving model-supplied
-// pointers first can stall dispatch forever (e.g. "/" is not the JSON root),
-// or read unrelated executions, even though those values would be overwritten.
 async fn resolve_inputs(
     state: &Arc<AppState>,
     assignment: &LayeredAssignment,
     request: &serde_json::Value,
-    pc_stage: Option<&str>,
 ) -> Result<serde_json::Map<String, serde_json::Value>> {
-    if pc_stage.is_some() {
-        return Ok(serde_json::Map::new());
-    }
     let mut bound_inputs = serde_json::Map::new();
     for (name, binding) in &assignment.inputs {
         let value = match binding {
@@ -201,34 +112,6 @@ fn execution_prompt(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[tokio::test]
-    async fn pc_inputs_never_resolve_untrusted_execution_pointers() {
-        let directory = tempfile::tempdir().unwrap();
-        let _scope = opencoder_core::config::scoped_config_home(directory.path().join("config"));
-        let state = crate::new_state(
-            directory.path().join("work"),
-            directory.path().join("data"),
-            None,
-        )
-        .await
-        .unwrap();
-        let assignment: LayeredAssignment = serde_json::from_value(json!({
-            "node_id":"reproduce", "capability_id":"pc-issue-reproduce", "reason":"next",
-            "inputs":{"previous":{"kind":"execution","execution_id":"operator-unrelated","path":"/"}}
-        })).unwrap();
-        let request = json!({"inputs":{"problem":{"text":"original"}}});
-        assert!(
-            resolve_inputs(&state, &assignment, &request, Some("reproduce"))
-                .await
-                .unwrap()
-                .is_empty()
-        );
-        // Generic capability bindings remain explicit and must resolve correctly.
-        assert!(resolve_inputs(&state, &assignment, &request, None)
-            .await
-            .is_err());
-    }
 
     #[test]
     fn capability_receives_local_criteria_and_explicit_remediation_inputs() {

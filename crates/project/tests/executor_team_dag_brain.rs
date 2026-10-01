@@ -18,6 +18,11 @@ use opencoder_store::{
     ProjectTodoStatus, Store,
 };
 use serde_json::json;
+#[path = "../../dag-runtime/tests/support/model.rs"]
+mod model_fixture;
+#[path = "../../dag-runtime/tests/support/container.rs"]
+#[allow(dead_code)]
+mod native_fixture;
 
 fn done(text: &str) -> Vec<LlmEvent> {
     vec![LlmEvent::Completed {
@@ -33,6 +38,8 @@ struct Harness {
     projects: Arc<dyn ProjectStore>,
     dir: PathBuf,
     _keep: tempfile::TempDir,
+    _native: native_fixture::ContainerFixture,
+    _bridge: model_fixture::ModelBridge,
 }
 
 async fn harness_on(
@@ -42,6 +49,14 @@ async fn harness_on(
 ) -> Harness {
     let client: Arc<dyn ChatStream> = mock.clone();
     let dir = tempfile::tempdir().unwrap();
+    let native = native_fixture::ContainerFixture::open(dir.path());
+    let bridge = model_fixture::ModelBridge::start(client.clone());
+    let mut config = opencoder_core::Config::default();
+    native.configure(&mut config);
+    bridge.configure(&mut config);
+    config.dag.data_dir = Some(dir.path().join("dag/runs"));
+    config.team_root = dir.path().join("team");
+    config.agent.agents_dir = native.config.agent.agents_dir.clone();
     // Keep team data in this fixture as well: with no explicit team_root the
     // team executor falls back to `<global data root>/<workdir-hash>/team`,
     // which outlives the tempdir and litters the developer's global data
@@ -51,11 +66,7 @@ async fn harness_on(
     // together with the tempdir just like the archived runs below.
     std::fs::write(
         dir.path().join("opencoder.json"),
-        serde_json::to_vec(&json!({
-            "team_root": dir.path().join("team").display().to_string(),
-            "local_memory": false,
-        }))
-        .unwrap(),
+        serde_json::to_vec(&config).unwrap(),
     )
     .unwrap();
     let service = ProjectService::new();
@@ -78,6 +89,8 @@ async fn harness_on(
         projects: store,
         dir: dir.path().to_path_buf(),
         _keep: dir,
+        _native: native,
+        _bridge: bridge,
     }
 }
 
@@ -104,7 +117,7 @@ async fn seed_todo(
     projects
         .create_todo(&ProjectTodoRecord {
             id: id.into(),
-            milestone_id: None,
+            initiative_id: None,
             title: format!("待办 {id}"),
             draft: "整理项目结构".into(),
             plan_md: Some("# 方案\n1. 落地目录约定".into()),
@@ -173,7 +186,10 @@ async fn dag_executor_runs_inline_spec_and_writes_artifacts() {
     assert_eq!(run.executor_kind, ProjectExecutorKind::Dag);
     assert!(run.agent.starts_with("dag:"), "label {}", run.agent);
     let out_ref = run.output_ref.clone().expect("dag run output_ref");
-    assert!(out_ref.contains("workflow"), "output_ref {out_ref}");
+    assert!(
+        out_ref.contains("dag/runs") && out_ref.ends_with(&run_id),
+        "output_ref {out_ref}"
+    );
     let output = run.output_md.as_deref().unwrap_or("");
     assert!(output.contains("run"), "output_md {output:?}");
     // 宿主 session 以 run id 落库（DAG 事件挂在它名下）。
@@ -186,10 +202,8 @@ async fn dag_executor_runs_inline_spec_and_writes_artifacts() {
     assert_eq!(todo.status, ProjectTodoStatus::Done);
 }
 
-/// 存量 python 步骤的内联 spec 走专用迁移错误（fail-closed，绝不静默
-/// 迁移），运行失败且错误信息含哨兵文案。
 #[tokio::test]
-async fn dag_executor_python_spec_fails_with_dedicated_migration_error() {
+async fn dag_executor_rejects_an_unsupported_step_without_a_session() {
     let h = harness_with(vec![], None).await;
     let todo_id = "t-dag-python".to_string();
     seed_todo(
@@ -209,7 +223,10 @@ async fn dag_executor_python_spec_fails_with_dedicated_migration_error() {
 
     assert_eq!(run.status, ProjectTodoRunStatus::Failed);
     let output = run.output_md.as_deref().unwrap_or("");
-    assert!(output.contains("已下线的 python 步骤"), "output {output:?}");
+    assert!(
+        output.contains("unknown variant `python`"),
+        "output {output:?}"
+    );
     // 会话未创建时不留悬挂引用。
     assert!(run.session_id.is_none(), "session_id {:?}", run.session_id);
 }

@@ -47,12 +47,6 @@ export function validatePlan(plan, capabilities) {
 export function launchBody(values, id, plan) {
   if (!plan) throw new Error('请先选择可执行计划');
   const inputs = engineeringInputs(values.engineering);
-  if (plan.plan?.nodes?.some((node) => node.capability_id?.startsWith('pc-issue-'))) {
-    const text = String(values.problemText || '').trim();
-    if (!text) throw new Error('请输入问题描述');
-    inputs.problem = { text, images: values.problemImages || [] };
-    inputs.settings = { ...plan.plan.inputs?.settings, ...values.settings };
-  }
   return { schema_version: SCHEMA, id, node_id: values.node, inputs, plan: { id: plan.id, version: plan.version } };
 }
 export function removeNode(plan, id) {

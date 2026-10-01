@@ -2,11 +2,9 @@
 use anyhow::{bail, Context, Result};
 use std::path::{Path, PathBuf};
 
-#[path = "resources/snapshot.rs"]
-mod snapshot;
-pub(crate) use snapshot::pin;
+pub(crate) use opencoder_agents::snapshot::{pin, pin_selected};
 
-/// WASM-only DAGs have no Agent resource dependency. Their modules are pinned
+/// native-only DAGs have no Agent resource dependency. Their modules are pinned
 /// separately; copying every prompt, skill and tool would block admission on
 /// unrelated files. Unknown definitions and declared agent pins fail closed.
 pub fn requires_agent_pool(assignment: &opencoder_core::fleet::Assignment) -> bool {
@@ -23,9 +21,12 @@ pub fn requires_agent_pool(assignment: &opencoder_core::fleet::Assignment) -> bo
         .as_ref()
         .and_then(|value| opencoder_dag::decode_spec(value.get("spec").unwrap_or(value)).ok())
         .is_some_and(|spec| {
-            spec.steps
-                .iter()
-                .all(|step| matches!(step.kind.executable(), opencoder_dag::StepKind::Wasm { .. }))
+            spec.steps.iter().all(|step| {
+                matches!(
+                    step.kind.executable(),
+                    opencoder_dag::StepKind::Binary { .. }
+                )
+            })
         })
 }
 

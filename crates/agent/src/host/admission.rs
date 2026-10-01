@@ -27,7 +27,7 @@ impl Creations {
             return Ok(None);
         };
         // Keep the same resource classification as Worker admission. A pure
-        // WASI creation must remain available while cold Agent copies fill
+        // binary creation must remain available while cold Agent copies fill
         // this runtime's resource-preparation allowance.
         if !opencoder_worker::requires_agent_pool(assignment) {
             return Ok(None);

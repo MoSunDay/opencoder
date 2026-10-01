@@ -8,7 +8,7 @@
 // 降级为首次导入种子，只保留 scan_interval_secs 这个运维旋钮。页面
 // 5s 轮询对齐 topics 的口径（调度扫描本身最密 15s）。
 
-import { Button, Drawer, Popconfirm, Space, Table, Tag } from 'antd';
+import { Alert, Button, Popconfirm, Space, Table, Tag } from 'antd';
 import { useCallback, useEffect, useState } from 'react';
 import { apiDel, apiGet, apiPatch, apiPost } from '../api.js';
 import { useNodes } from '../fleet/useNodes.js';
@@ -20,47 +20,16 @@ import { StatusTag } from '../ui/statusTag.jsx';
 import { tableLoading, tableRows } from '../ui/tableLoading.js';
 import { TimeText } from '../ui/timeText.jsx';
 import { ScheduleEditorModal, OVERLAP_LABELS } from './editor.jsx';
+import { ScheduleRunsDrawer } from './history.jsx';
 
 /// 触发历史 Drawer：最新 tick 在前，最多 50 条；行键是台账主键的
 /// 时间半边（schedule_id 已由 Drawer 限定）。
-function ScheduleRunsDrawer({ schedule, onClose, onNotice }) {
-  const [rows, setRows] = useState([]);
-  const [loading, setLoading] = useState(true);
-  useEffect(() => {
-    let live = true;
-    setLoading(true);
-    apiGet(`/api/schedules/${encodeURIComponent(schedule.id)}/runs?limit=50`)
-      .then((j) => { if (live) setRows(j.runs || []); })
-      .catch((e) => { if (live) onNotice(err(e.message)); })
-      .finally(() => { if (live) setLoading(false); });
-    return () => { live = false; };
-  }, [schedule.id, onNotice]);
-  return (
-    <Drawer title={`调度 ${schedule.id} 的触发历史`} width={760} open onClose={onClose}>
-      <Table
-        size="small"
-        scroll={{ x: 'max-content' }}
-        rowKey="scheduled_for_ms"
-        loading={tableLoading(loading)}
-        dataSource={tableRows(loading, rows)}
-        locale={{ emptyText: '暂无触发记录' }}
-        columns={[
-          { title: '计划时间', dataIndex: 'scheduled_for_ms', render: (v) => <TimeText ts={v} /> },
-          { title: '实际触发', dataIndex: 'fired_at_ms', render: (v) => <TimeText ts={v} /> },
-          { title: '状态', dataIndex: 'status', render: (v) => <StatusTag status={v} /> },
-          { title: '执行 ID', dataIndex: 'execution_id', render: (v) => (v ? <span style={{ fontFamily: MONO_VAR }}>{v}</span> : '—') },
-          { title: '失败原因', dataIndex: 'error', render: (v) => (v || '—') },
-        ]}
-      />
-    </Drawer>
-  );
-}
-
 export function SchedulePanel({ onNotice }) {
   const [rows, setRows] = useState([]);
   const [history, setHistory] = useState(null);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(null);
+  const [error, setError] = useState('');
   const { nodes } = useNodes();
   /// 首屏与手动刷新遮罩表格；5s 轮询静默（对齐 topics 3s 的语义，调度
   /// 扫描本身最密 15s，5s 足够跟上下次触发时间）。
@@ -69,9 +38,11 @@ export function SchedulePanel({ onNotice }) {
     if (mode !== 'poll') setLoading(true);
     try {
       const j = await apiGet('/api/schedules');
-      setRows(j.schedules || []);
+      if (!Array.isArray(j?.schedules)) throw new Error('定时任务列表格式错误');
+      setRows(j.schedules);
+      setError('');
     }
-    catch (e) { onNotice(err(e.message)); }
+    catch (e) { setError(e.message); onNotice(err(e.message)); }
     finally { if (mode !== 'poll') setLoading(false); }
   }, [onNotice]);
   useEffect(() => {
@@ -116,6 +87,7 @@ export function SchedulePanel({ onNotice }) {
   };
 
   return <PageShell page="schedules">
+    {error && <Alert type="error" showIcon title={error} action={<Button onClick={() => load('reset')}>重试定时任务</Button>} />}
     <Space style={{ marginBottom: 12 }}>
       <Button type="primary" onClick={() => { setEditing(null); setOpen(true); }}>新建任务</Button>
       <Button onClick={() => load('reset')}>刷新</Button>
@@ -126,7 +98,7 @@ export function SchedulePanel({ onNotice }) {
       rowKey="id"
       dataSource={tableRows(loading, rows)}
       loading={tableLoading(loading)}
-      locale={{ emptyText: '暂无定时任务' }}
+      locale={{ emptyText: error ? '定时任务读取失败，请重试' : '暂无定时任务' }}
       columns={[
         { title: 'ID', dataIndex: 'id', render: (v) => <span style={{ fontFamily: MONO_VAR }}>{v}</span> },
         { title: 'cron', dataIndex: 'cron', render: (v) => <span style={{ fontFamily: MONO_VAR }}>{v}</span> },

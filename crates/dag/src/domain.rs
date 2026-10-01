@@ -44,6 +44,12 @@ pub fn validate(spec: &DagSpec) -> Result<(), Vec<String>> {
         if !validate_step_slug(&step.name) {
             errs.push(format!("step name {:?} is not a valid slug", step.name));
         }
+        if crate::artifacts::reserved_step_name(&step.name) {
+            errs.push(format!(
+                "step name {:?} is reserved by the container runtime",
+                step.name
+            ));
+        }
         if let StepKind::Dynamic {
             source, template, ..
         } = &step.kind
@@ -55,7 +61,7 @@ pub fn validate(spec: &DagSpec) -> Result<(), Vec<String>> {
             );
             if matches!(template.as_ref(), StepKind::Dynamic { .. }) {
                 errs.push(format!(
-                    "step {:?}: dynamic template must be agent or wasm",
+                    "step {:?}: dynamic template must be agent or binary",
                     step.name
                 ));
             }
@@ -64,8 +70,16 @@ pub fn validate(spec: &DagSpec) -> Result<(), Vec<String>> {
             StepKind::Agent { prompt, .. } if prompt.trim().is_empty() => {
                 errs.push(format!("agent step {:?} has an empty prompt", step.name));
             }
-            StepKind::Wasm { command, .. } if command.trim().is_empty() => {
-                errs.push(format!("wasm step {:?} has an empty command", step.name));
+            StepKind::Binary { resource, args } => {
+                if opencoder_dag_binary::parse_resource_token(resource).is_none() {
+                    errs.push(format!(
+                        "binary step {:?} has an invalid resource",
+                        step.name
+                    ));
+                }
+                if args.iter().any(|argument| argument.contains('\0')) {
+                    errs.push(format!("binary step {:?} arguments contain NUL", step.name));
+                }
             }
             StepKind::Agent {
                 how_append: Some(h),
@@ -225,7 +239,7 @@ fn terminal_fold(states: &StepStates) -> Option<DagRunStatus> {
 
 /// Build the upstream `context` object delivered to steps as a
 /// `context.json` file whose path is passed via the `OPENCODER_STEP_CONTEXT`
-/// env variable (wasm steps; agent steps get it embedded in the prompt
+/// env variable (binary steps; agent steps get it embedded in the prompt
 /// header instead):
 /// `{"steps": {"<name>": {"json": <output.json | null>, "ok": bool}}}`.
 /// Only DIRECT and transitive upstream steps of `step` are included, so a
@@ -293,7 +307,7 @@ mod tests {
             "name": "",
             "steps": [
                 { "name": "Bad Name", "kind": { "type": "agent", "prompt": " " } },
-                { "name": "b", "depends_on": ["b", "missing", "a", "missing"], "kind": { "type": "wasm", "command": "" } }
+                { "name": "b", "depends_on": ["b", "missing", "a", "missing"], "kind": { "type":"binary","resource":"","args":[] } }
             ]
         }));
         let errs = validate(&spec).unwrap_err();
@@ -301,7 +315,7 @@ mod tests {
         assert!(joined.contains("spec.name"), "{joined}");
         assert!(joined.contains("Bad Name"), "{joined}");
         assert!(joined.contains("empty prompt"), "{joined}");
-        assert!(joined.contains("empty command"), "{joined}");
+        assert!(joined.contains("invalid resource"), "{joined}");
         assert!(joined.contains("depends on itself"), "{joined}");
         assert!(joined.contains("unknown step \"missing\""), "{joined}");
         assert!(joined.contains("twice"), "{joined}");
@@ -314,8 +328,8 @@ mod tests {
                 "name": "ok",
                 "max_concurrency": bad,
                 "steps": [
-                    { "name": "a", "kind": { "type": "wasm", "command": "x.wasm" } },
-                    { "name": "b", "kind": { "type": "wasm", "command": "x.wasm" } }
+                    { "name": "a", "kind": { "type":"binary","resource":"x","args":[] } },
+                    { "name": "b", "kind": { "type":"binary","resource":"x","args":[] } }
                 ]
             }));
             let errs = validate(&spec).unwrap_err();
@@ -329,8 +343,8 @@ mod tests {
                 "name": "ok",
                 "max_concurrency": good,
                 "steps": [
-                    { "name": "a", "kind": { "type": "wasm", "command": "x.wasm" } },
-                    { "name": "b", "kind": { "type": "wasm", "command": "x.wasm" } }
+                    { "name": "a", "kind": { "type":"binary","resource":"x","args":[] } },
+                    { "name": "b", "kind": { "type":"binary","resource":"x","args":[] } }
                 ]
             }));
             assert!(validate(&spec).is_ok(), "{:?}", validate(&spec));
@@ -342,7 +356,7 @@ mod tests {
         let spec = spec_from(json!({
             "name": "ok",
             "steps": [
-                { "name": "a", "kind": { "type": "wasm", "command": "x.wasm" } }
+                { "name": "a", "kind": { "type":"binary","resource":"x","args":[] } }
             ]
         }));
         assert_eq!(spec.max_concurrency, 4);
@@ -353,9 +367,9 @@ mod tests {
         let spec = spec_from(json!({
             "name": "cyc",
             "steps": [
-                { "name": "a", "depends_on": ["c"], "kind": { "type": "wasm", "command": "x.wasm" } },
-                { "name": "b", "depends_on": ["a"], "kind": { "type": "wasm", "command": "x.wasm" } },
-                { "name": "c", "depends_on": ["b"], "kind": { "type": "wasm", "command": "x.wasm" } }
+                { "name": "a", "depends_on": ["c"], "kind": { "type":"binary","resource":"x","args":[] } },
+                { "name": "b", "depends_on": ["a"], "kind": { "type":"binary","resource":"x","args":[] } },
+                { "name": "c", "depends_on": ["b"], "kind": { "type":"binary","resource":"x","args":[] } }
             ]
         }));
         let errs = validate(&spec).unwrap_err();
@@ -367,9 +381,9 @@ mod tests {
         let spec = spec_from(json!({
             "name": "dag",
             "steps": [
-                { "name": "c", "depends_on": ["b"], "kind": { "type": "wasm", "command": "x.wasm" } },
-                { "name": "a", "kind": { "type": "wasm", "command": "x.wasm" } },
-                { "name": "b", "depends_on": ["a"], "kind": { "type": "wasm", "command": "x.wasm" } }
+                { "name": "c", "depends_on": ["b"], "kind": { "type":"binary","resource":"x","args":[] } },
+                { "name": "a", "kind": { "type":"binary","resource":"x","args":[] } },
+                { "name": "b", "depends_on": ["a"], "kind": { "type":"binary","resource":"x","args":[] } }
             ]
         }));
         assert_eq!(topo_order(&spec).unwrap(), vec!["a", "b", "c"]);
@@ -382,10 +396,10 @@ mod tests {
         let spec = spec_from(json!({
             "name": "diamond",
             "steps": [
-                { "name": "a", "kind": { "type": "wasm", "command": "x.wasm" } },
-                { "name": "b", "depends_on": ["a"], "kind": { "type": "wasm", "command": "x.wasm" } },
-                { "name": "c", "depends_on": ["a"], "kind": { "type": "wasm", "command": "x.wasm" } },
-                { "name": "d", "depends_on": ["b", "c"], "kind": { "type": "wasm", "command": "x.wasm" } }
+                { "name": "a", "kind": { "type":"binary","resource":"x","args":[] } },
+                { "name": "b", "depends_on": ["a"], "kind": { "type":"binary","resource":"x","args":[] } },
+                { "name": "c", "depends_on": ["a"], "kind": { "type":"binary","resource":"x","args":[] } },
+                { "name": "d", "depends_on": ["b", "c"], "kind": { "type":"binary","resource":"x","args":[] } }
             ]
         }));
         assert_eq!(ready_steps(&spec, &states(&[])), vec!["a"]);
@@ -421,9 +435,9 @@ mod tests {
         let spec = spec_from(json!({
             "name": "ctx",
             "steps": [
-                { "name": "a", "kind": { "type": "wasm", "command": "x.wasm" } },
-                { "name": "b", "kind": { "type": "wasm", "command": "x.wasm" } },
-                { "name": "c", "depends_on": ["a"], "kind": { "type": "wasm", "command": "x.wasm" } }
+                { "name": "a", "kind": { "type":"binary","resource":"x","args":[] } },
+                { "name": "b", "kind": { "type":"binary","resource":"x","args":[] } },
+                { "name": "c", "depends_on": ["a"], "kind": { "type":"binary","resource":"x","args":[] } }
             ]
         }));
         let st = states(&[("a", StepOutcome::Done)]);

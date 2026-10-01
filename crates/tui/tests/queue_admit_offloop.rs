@@ -179,7 +179,7 @@ async fn setup(admit_delay: Duration) -> Arc<DelayStore> {
 async fn blocked_admit_does_not_stall_ui_loop() {
     let wrapper = setup(Duration::from_millis(120)).await;
     let store: Arc<dyn Store> = wrapper.clone();
-    let (tx, mut done_rx) = queue_admitter::spawn_admitter(store);
+    let (tx, mut done_rx) = queue_admitter::spawn_admitter(store, None);
     let mut st = AdmitUiState::default();
     let mut queue_items: Vec<(i64, String)> = vec![];
     let mut pending: Vec<(String, String)> = vec![];
@@ -271,7 +271,7 @@ async fn blocked_admit_does_not_stall_ui_loop() {
 async fn consumed_before_completion_does_not_resurrect() {
     let wrapper = setup(Duration::from_millis(30)).await;
     let store: Arc<dyn Store> = wrapper.clone();
-    let (tx, mut done_rx) = queue_admitter::spawn_admitter(store);
+    let (tx, mut done_rx) = queue_admitter::spawn_admitter(store, None);
     let mut st = AdmitUiState::default();
     let mut queue_items: Vec<(i64, String)> = vec![];
     let mut pending: Vec<(String, String)> = vec![];
@@ -312,7 +312,7 @@ async fn consumed_before_completion_does_not_resurrect() {
 async fn second_submit_lines_up_behind_blocked_first() {
     let wrapper = setup(Duration::from_millis(120)).await;
     let store: Arc<dyn Store> = wrapper.clone();
-    let (tx, mut done_rx) = queue_admitter::spawn_admitter(store);
+    let (tx, mut done_rx) = queue_admitter::spawn_admitter(store, None);
     let mut st = AdmitUiState::default();
     let mut queue_items: Vec<(i64, String)> = vec![];
     let mut pending: Vec<(String, String)> = vec![];

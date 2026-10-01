@@ -28,6 +28,8 @@ pub(crate) fn freeze(root: &Path, run: &str, step: &StepSpec) -> Result<()> {
     let dir =
         opencoder_dag::artifacts::step_dir(root, run, &step.name).map_err(anyhow::Error::msg)?;
     std::fs::create_dir_all(&dir)?;
+    let dir = dir.join("meta");
+    std::fs::create_dir_all(&dir)?;
     let path = dir.join("frozen-agent.json");
     if path.exists() {
         serde_json::from_slice::<FrozenAgent>(&std::fs::read(path)?)?;
@@ -38,12 +40,12 @@ pub(crate) fn freeze(root: &Path, run: &str, step: &StepSpec) -> Result<()> {
         opencoder_core::resolve_agent(name).with_context(|| format!("unknown agent {name}"))?;
     let how = if opencoder_core::builtin_agents()
         .iter()
-        .any(|a| a.name == name)
+        .any(|agent| agent.name == name)
     {
         String::new()
     } else {
         let pool = agent::read_agent_meta(name)
-            .and_then(|m| m.current.prompt)
+            .and_then(|metadata| metadata.current.prompt)
             .context("agent prompt resource missing")?;
         let source = agent::resource_current_version_dir("prompts", &pool)
             .context("agent prompt version missing")?;
@@ -53,16 +55,12 @@ pub(crate) fn freeze(root: &Path, run: &str, step: &StepSpec) -> Result<()> {
 }
 
 pub(crate) fn prepare(ctx: &StepCtx) -> Result<Agent> {
-    let dir = ctx.dir().map_err(anyhow::Error::msg)?;
+    let dir = super::native::io::meta_dir(ctx).map_err(anyhow::Error::msg)?;
     std::fs::create_dir_all(&dir)?;
     let source =
         opencoder_dag::artifacts::step_dir(&ctx.workflow_root, &ctx.run_id, &ctx.step.name)
             .map_err(anyhow::Error::msg)?
-            .join("frozen-agent.json");
-    // Direct executor callers also freeze resources before creating a copy.
-    if !source.exists() {
-        freeze(&ctx.workflow_root, &ctx.run_id, &ctx.step)?;
-    }
+            .join("meta/frozen-agent.json");
     let bytes = std::fs::read(source)?;
     let frozen: FrozenAgent = serde_json::from_slice(&bytes)?;
     let how_path = dir.join("how.md");
@@ -78,7 +76,7 @@ pub(crate) fn prepare(ctx: &StepCtx) -> Result<Agent> {
         );
         crate::checkpoint::write(&how_path, how.as_bytes())?;
     }
-    crate::checkpoint::write(&dir.join("agent.json"), &bytes)?;
+    crate::checkpoint::write(&dir.join("agent.json"), &serde_json::to_vec(&frozen)?)?;
     load(&dir)
 }
 

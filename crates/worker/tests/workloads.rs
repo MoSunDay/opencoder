@@ -159,10 +159,10 @@ async fn dag_artifacts_and_checkpoints_survive_node_restart() {
     let _host_config = support::isolated_config();
     let dir = tempfile::tempdir().unwrap();
     let client = mock();
-    let node = worker(dir.path(), client.clone()).await;
-    // Stage the wasm module into the run context root before execution.
-    support::stage_stdout_wasm(&dir.path().join("node"), "tool.wasm", "artifact on node");
-    let spec = json!({"name":"local-dag","steps":[{"name":"first","kind":{"type":"wasm","command":"tool.wasm"}},{"name":"review","depends_on":["first"],"kind":{"type":"agent","prompt":"review result"}}]});
+    let (node, _native, _bridge) = dag_worker(dir.path(), client.clone()).await;
+    // Stage the binary module into the run context root before execution.
+    support::stage_stdout_binary(&dir.path().join("node"), "tool", "artifact on node");
+    let spec = json!({"name":"local-dag","steps":[{"name":"first","kind":{"type":"binary","resource":"tool"}},{"name":"review","depends_on":["first"],"kind":{"type":"agent","prompt":"review result"}}]});
     assert_eq!(
         node.handle(NodeOperation::Create {
             assignment: assignment(
@@ -179,7 +179,8 @@ async fn dag_artifacts_and_checkpoints_survive_node_restart() {
     );
     let detail = settled(&node, "dag-checkpoint").await;
     assert_eq!(detail["execution"]["status"], "done", "{detail}");
-    let path = dir.path().join("node/dag/dag-checkpoint/first/output.txt");
+    let path =
+        support::dag_run(&dir.path().join("node"), "dag-checkpoint").join("first/output.txt");
     assert!(std::fs::read_to_string(path)
         .unwrap()
         .contains("artifact on node"));
@@ -298,14 +299,14 @@ async fn maintenance_agent_has_real_local_query_tool() {
 }
 
 #[tokio::test]
-async fn dag_cancel_interrupts_wasm_step_and_releases_node_capacity() {
+async fn dag_cancel_interrupts_binary_step_and_releases_node_capacity() {
     let _host_config = support::isolated_config();
     let dir = tempfile::tempdir().unwrap();
-    let node = worker(dir.path(), mock()).await;
-    let id = "dag-cancel-wasm";
-    // A spinning wasm step: only epoch interruption (cancel/timeout) ends it.
-    support::stage_spin_wasm(&dir.path().join("node"));
-    let spec = json!({"name":"cancel-wasm","steps":[{"name":"loop","kind":{"type":"wasm","command":"spin.wasm"}}]});
+    let (node, _native, _bridge) = dag_worker(dir.path(), mock()).await;
+    let id = "dag-cancel-binary";
+    // A spinning binary step: only epoch interruption (cancel/timeout) ends it.
+    support::stage_spin_binary(&dir.path().join("node"));
+    let spec = json!({"name":"cancel-binary","steps":[{"name":"loop","kind":{"type":"binary","resource":"spin"}}]});
     assert_eq!(
         node.handle(NodeOperation::Create {
             assignment: assignment(&node, id, ExecutionKind::Dag, json!({}), Some(spec)),
@@ -315,7 +316,7 @@ async fn dag_cancel_interrupts_wasm_step_and_releases_node_capacity() {
         200
     );
     // context.json lands just before the module starts — the run signal.
-    let started = dir.path().join(format!("node/dag/{id}/loop/context.json"));
+    let started = support::dag_run(&dir.path().join("node"), id).join("loop/meta/context.json");
     tokio::time::timeout(std::time::Duration::from_secs(10), async {
         while !started.is_file() {
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
@@ -342,7 +343,8 @@ async fn dag_cancel_interrupts_wasm_step_and_releases_node_capacity() {
     assert_eq!(detail["execution"]["status"], "cancelled", "{detail}");
     assert_eq!(node.snapshot().active_runs, 0);
     let meta: Value = serde_json::from_slice(
-        &std::fs::read(dir.path().join(format!("node/dag/{id}/loop/meta.json"))).unwrap(),
+        &std::fs::read(support::dag_run(&dir.path().join("node"), id).join("loop/meta.json"))
+            .unwrap(),
     )
     .unwrap();
     assert_eq!(meta["outcome"], "cancelled");

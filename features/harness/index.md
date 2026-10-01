@@ -1,4 +1,4 @@
-Commit: 2aa44247d199d782881b9ee64921c4c6de2e6199
+Commit: 7687b5f581254ee6d826d8644789e7d498e761ba
 
 # Agent Harness
 
@@ -8,9 +8,11 @@ Operator 会话也可在创建时显式选择 Codex，并将启动 env 传给 Co
 
 本地 TUI 可用 `opencoder tui --wrap codex --envs KEY=VALUE` 启动 Codex 会话；`--envs` 可重复，按原值传递。`/task` 新建任务沿用本次 TUI 的执行器与注入变量；恢复已有任务沿用其保存的运行态，显式重传的变量值必须与保存值一致。Codex 登录目录可通过 `CODEX_HOME` 指定。
 
-DAG 的静态 Agent 步和动态 Agent 实例均支持 Codex，host 与 runc 都默认复用实际执行节点的 Codex 登录态；显式 Harness/profile 可覆盖设置。Server 与节点分离时不自动分发 Server 登录文件。步骤模型优先于 profile 模型。
+[TUI 的 Server 任务](../agent-platform/index.md#tui-任务入口) 使用注册能力的执行器和托管设置；Operator 的 Codex 模型、环境与续会话由 Server 管理。恢复远端任务时，本地 `--wrap` 选择不会改变该绑定。
 
-runc 需要预置原生 Codex CLI 及运行依赖，直接挂载节点登录目录以支持认证刷新；缺失依赖、认证失败或异常事件流使步骤失败，取消和超时回收容器。纯 Codex DAG 不要求 OpenCoder 原生模型凭证。详见 [配置与 rootfs 制备](../../docs/registered-runners.md)。
+DAG 的静态 Agent 步和动态 Agent 实例均在本次共享 runc 容器内运行，并支持 Codex；默认复用实际执行节点的 Codex 登录态，显式 Harness/profile 可覆盖设置。Server 与节点分离时不自动分发 Server 登录文件。步骤模型优先于 profile 模型。
+
+runc 需要预置原生 Codex CLI 及运行依赖，直接挂载节点登录目录以支持认证刷新；缺失依赖、认证失败或异常事件流使步骤失败。单步取消和超时只结束该步骤进程树，整次 DAG 结束才回收共享容器。纯 Codex DAG 不要求 OpenCoder 原生模型凭证。详见 [配置与 rootfs 制备](../../docs/registered-runners.md)、[DAG 执行约定](../../rules/04-dag-execution-contract.md)。
 
 ## 相关
 - [agents/core](../../agents/core/index.md) — Harness 类型与 Codex 设置

@@ -7,6 +7,8 @@ const fs = require('fs');
 const http = require('http');
 const os = require('os');
 const path = require('path');
+const { prepareNative } = require('../harness/native');
+require('../harness/namespace').isolateFixture();
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'opencoder-todo-workbench-'));
 const bin = process.env.PLATFORM_BIN_DIR || path.join(__dirname, '../../../target/debug');
@@ -20,6 +22,7 @@ let browser;
 let page;
 let mock;
 let responseFor;
+let native;
 
 async function until(check, label, timeout = 40_000) {
   const deadline = Date.now() + timeout;
@@ -50,7 +53,14 @@ function start(binary, args, cwd, label) {
 async function stop(child, signal = 'SIGTERM') {
   if (child.exitCode !== null || child.signalCode) return;
   child.kill(signal);
-  await until(() => child.exitCode !== null || child.signalCode, `stop ${child.pid}`, 40_000);
+  try {
+    await until(() => child.exitCode !== null || child.signalCode, `stop ${child.pid}`, 40_000);
+  } catch (error) {
+    child.kill('SIGKILL');
+    await until(() => child.exitCode !== null || child.signalCode, `kill ${child.pid}`, 5_000);
+    process.exitCode = 1;
+    console.error(error.message);
+  }
 }
 
 async function request(method, route, body) {
@@ -114,12 +124,14 @@ function writeConfig(directory, modelConfig) {
 }
 
 
-async function open(answer, { dag = false, modelConfig, withBrowser = true } = {}) {
+async function open(answer, { dag = false, rootfs, modelConfig, withBrowser = true } = {}) {
   responseFor=answer;if (!modelConfig) await startMock();
   const serverWork=path.join(root,'server-work'),nodeWork=path.join(root,'node-work');
   writeConfig(serverWork,modelConfig);writeConfig(nodeWork,modelConfig);
+  if (dag) native = await prepareNative(root, serverWork, [nodeWork], rootfs, 'node artifact', { [nodeWork]: path.join(root, 'node-data') });
   const server=start('opencoder-server',['--workdir',serverWork,'--data-dir',path.join(root,'server-data'),'--port','0','--token',token],serverWork,'server');
   await until(()=>{const m=fs.readFileSync(server.logPath,'utf8').match(/listening on (http:\/\/127\.0\.0\.1:\d+)/);if(m)base=m[1];return base;},'server ready');
+  if (native) native.mount();
   const args=['--remote',base,'--token',token,'--name','todo-review-node','--workdir',nodeWork,'--data-dir',path.join(root,'node-data'),...(dag ? [] : ['--no-dag'])];
   let agent=start('opencoder-agent',args,nodeWork,'agent');
   const nodeId=await until(async()=>(await api('GET','/api/nodes')).nodes.find(n=>n.online&&n.snapshot?.ready)?.id,'node ready');
@@ -140,5 +152,15 @@ async function open(answer, { dag = false, modelConfig, withBrowser = true } = {
       },'restarted node index ready');
     }};
 }
-async function close(){if(browser)await browser.close();for(const child of children.reverse())await stop(child,'SIGKILL');if(mock?.listening)await new Promise(resolve=>mock.close(resolve));}
+async function close() {
+  const errors = [];
+  const attempt = async (action) => { try { await action(); } catch (error) { errors.push(error); } };
+  if (browser) await attempt(() => browser.close());
+  const servers = children.filter((child) => path.basename(child.spawnargs[0]) === 'opencoder-server');
+  for (const child of children.filter((child) => !servers.includes(child)).reverse()) await attempt(() => stop(child));
+  if (native) await attempt(() => native.close());
+  for (const child of servers.reverse()) await attempt(() => stop(child));
+  if (mock?.listening) await attempt(() => new Promise((resolve) => mock.close(resolve)));
+  if (errors.length) throw new AggregateError(errors, 'fixture cleanup failed');
+}
 module.exports={open,close};

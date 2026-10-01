@@ -52,9 +52,13 @@ def register_server(settings, record, operations, enabled=True, host_url=None):
 
 def deploy(settings, bundle, operations, seconds=90):
     journal = Journal(settings.state_dir)
+    state = journal.data.get('maintenance')
+    if state and state['stage'] not in ('complete', 'rolled_back'):
+        raise ValueError('unfinished maintenance requires --maintenance resume or --rollback')
     candidate = manifest.verify(bundle)
     manifest.brain_preflight(settings, candidate, journal.data["releases"].values())
-    manifest.compatible(candidate, [r["manifest"] for r in journal.data["releases"].values()])
+    manifest.compatible(candidate, manifest.overlapping(journal.data))
+    probes.resource_service(settings, candidate, operations)
     manifest.resources(settings, candidate)
     if journal.data["phase"] == "rolling_back":
         return rollback(settings, operations, seconds)
@@ -76,6 +80,8 @@ def deploy(settings, bundle, operations, seconds=90):
         record["resource_source"] = journal.record(journal.data["current"])["runtime_data"]
         journal.data["releases"][identifier] = record
     record = journal.record(identifier)
+    if record.get('maintenance_retired'):
+        raise ValueError('release was retired by maintenance and cannot be activated')
     if record["manifest"] != candidate:
         raise ValueError("release ID already belongs to another bundle")
     if journal.data["candidate"] is None:
@@ -177,6 +183,8 @@ def _retire_server(settings, journal, operations, disable):
         disable(unit)
         return "retiring" if retiring else "waiting_for_ingress"
     for identifier, record in journal.data["releases"].items():
+        if record.get('maintenance_retired'):
+            continue
         for previous in record.get("previous_servers", []):
             try:
                 phase = retire_port(previous["port"], previous["unit"], previous)
@@ -206,6 +214,11 @@ def _retire_server(settings, journal, operations, disable):
 
 def rollback(settings, operations, seconds=90):
     journal = Journal(settings.state_dir)
+    state = journal.data.get('maintenance')
+    if state and (state['stage'] not in ('complete', 'rolled_back') or
+                  (journal.data['current'] == state['target'] and journal.data['previous'] in (None, state['origin']))):
+        from .maintenance import rollback as restore_maintenance
+        return restore_maintenance(settings, operations, seconds)
     if journal.data["phase"] == "rolled_back":
         probes.public(settings, journal.record(journal.data["current"]), operations, seconds)
         retire_server(settings, journal, operations)
@@ -214,7 +227,8 @@ def rollback(settings, operations, seconds=90):
     if not previous:
         raise ValueError("no compatible previous release is recorded")
     old = journal.record(previous)
-    manifest.compatible(old["manifest"], [r["manifest"] for r in journal.data["releases"].values()])
+    manifest.compatible(old["manifest"], manifest.overlapping(journal.data))
+    probes.resource_service(settings, old['manifest'], operations)
     resuming = journal.data["phase"] == "rolling_back" or (
         journal.data["phase"] == "failed" and journal.data.get("rollback_switch_started") is False
         and journal.data.get("rollback_from") == journal.data["current"]

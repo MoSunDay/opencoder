@@ -2,33 +2,30 @@
 
 pub mod agent;
 pub mod agent_runc;
-mod device;
 pub mod how_append;
 pub mod how_copy;
 pub mod logs;
+pub mod native;
 mod private_files;
 mod runc_events;
-pub mod wasm;
 
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use opencoder_dag::{render_context, DagSpec, StepOutcome, StepOutputs, StepSpec, StepStates};
-use opencoder_llm::ChatStream;
 use opencoder_store::Store;
 use serde_json::Value;
 
 /// Everything step execution needs that does not change per step (mirrors
 /// the node-task executor's `ExecDeps`).
+#[derive(Clone)]
 pub struct ExecDeps {
     pub store: Arc<dyn Store>,
-    pub client: Arc<dyn ChatStream>,
     pub workdir: PathBuf,
     pub config: opencoder_core::Config,
 }
 
-/// Guest-visible mount point of the node's read-only knowledge root in
-/// every sandbox mode (runc bind / in-process preopen / agent prompt hint).
+/// Guest-visible mount point of the node's read-only knowledge root.
 pub(crate) const KNOWLEDGE_MOUNT: &str = "/workspace/knowledge";
 
 /// Guest-visible mount point of a pinned, read-only agents pool
@@ -51,10 +48,6 @@ pub struct StepCtx {
     /// READ-ONLY to sandboxed steps at [`KNOWLEDGE_MOUNT`]. `None` = no
     /// knowledge mount anywhere.
     pub knowledge_root: Option<PathBuf>,
-    /// Node-configured op registry (`dag.ops`): the whitelist behind the
-    /// `opencoder_run_op` host import (in-process wasm steps only).
-    /// Empty = no op may run (fail-closed).
-    pub ops: std::collections::BTreeMap<String, opencoder_core::config::DagOpConfig>,
 }
 
 impl StepCtx {
@@ -80,7 +73,7 @@ impl StepCtx {
     }
 
     /// The upstream `context` object delivered to the step (agent prompt
-    /// header; wasm steps get the same object as a `context.json` file
+    /// header; binary steps get the same object as a `context.json` file
     /// whose path arrives via `OPENCODER_STEP_CONTEXT`). Only declared
     /// upstream steps leak.
     pub fn context(&self) -> Value {
@@ -98,13 +91,12 @@ pub struct StepResult {
     pub output_text: String,
     /// Parsed `output.json` when the step produced one.
     pub output_json: Option<Value>,
-    /// Session id for agent steps (None for wasm).
+    /// Session id for agent steps (None for binary).
     pub session_id: Option<String>,
 }
 
 /// Execute an `agent` step through the real session runner.
 pub use agent::execute_agent_step;
 
-/// Execute a `wasm` step (embedded wasm runtime by default; `runc` when
-/// the step opts in via `sandbox: runc`).
-pub use wasm::execute_wasm_step;
+/// Execute a Linux binary inside the shared DAG container.
+pub use native::binary::execute_binary_step_logged;

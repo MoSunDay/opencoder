@@ -14,6 +14,7 @@ use ratatui::Frame;
 #[derive(Clone, Debug)]
 pub enum TaskPick {
     New,
+    Remote(opencoder_core::harness::RemoteSession),
     Resume(String),
     /// Fork (clone) the selected session's context into a brand-new session.
     Fork(String),
@@ -73,7 +74,17 @@ impl TaskPicker {
     /// Build a fork-mode picker (`/fork`): every listed session is a fork
     /// source, and Enter forks the highlighted session's context.
     pub fn new_fork(sessions: Vec<SessionListItem>, current_session_id: String) -> Self {
-        let mut p = Self::new(sessions, current_session_id);
+        let mut p = Self::new(
+            sessions
+                .into_iter()
+                .filter(|s| {
+                    !s.kind
+                        .as_deref()
+                        .is_some_and(|k| k.starts_with("tui_remote_"))
+                })
+                .collect(),
+            current_session_id,
+        );
         p.mode = PickerMode::Fork;
         p
     }
@@ -275,7 +286,17 @@ pub fn render_task_picker(f: &mut Frame, area: Rect, picker: &TaskPicker) {
             task_row::activity_ts(s.updated_at, s.created_at),
             picker.now_ms,
         );
-        let mut headline = vec![Span::styled(age, Style::default().fg(theme::muted()))];
+        let label = match s.kind.as_deref().unwrap_or("") {
+            "tui_remote_agent" => format!("agent:{} · Server", s.title.as_deref().unwrap_or("")),
+            "tui_remote_operator" => {
+                format!("operator:{} · Server", s.title.as_deref().unwrap_or(""))
+            }
+            _ => "self · local".into(),
+        };
+        let mut headline = vec![Span::styled(
+            format!("{label}  {age}"),
+            Style::default().fg(theme::muted()),
+        )];
         if is_current {
             headline.push(Span::styled(
                 "  (current)",
@@ -630,5 +651,20 @@ mod tests {
         let out = handle_task_key(&mut picker, key(KeyCode::Enter));
         assert!(matches!(out, TaskOutcome::Idle));
         assert!(picker.is_none(), "empty fork picker closes without a pick");
+    }
+    #[test]
+    fn picker_distinguishes_local_and_server_records_and_excludes_remote_forks() {
+        let local = item("local");
+        let mut remote = item("operator-r");
+        remote.kind = Some("tui_remote_operator".into());
+        remote.title = Some("ops".into());
+        let picker = TaskPicker::new(vec![local.clone(), remote.clone()], remote.id.clone());
+        let text = render_picker_to_text(&picker);
+        assert!(text.contains("self · local"));
+        assert!(text.contains("operator:ops · Server"));
+        assert!(text.contains("(current)"));
+        let fork = TaskPicker::new_fork(vec![remote, local], "local".into());
+        assert_eq!(fork.row_count(), 1);
+        assert!(matches!(fork.selection(),Some(TaskPick::Fork(id)) if id=="local"));
     }
 }

@@ -9,10 +9,29 @@ async fn queries_preserve_revision_but_mutations_and_wakeups_notify() {
         .unwrap();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let endpoint = format!("http://{}", listener.local_addr().unwrap());
-    let app = axum::Router::new().route(
-        "/rpc",
-        axum::routing::post(|| async { axum::Json(RpcReply::ok(json!({"status":"running"}))) }),
-    );
+    let inventory = serde_json::to_value(super::super::config::Inventory {
+        runtime_id: Some("reads".into()),
+        build: serde_json::to_value(opencoder_core::version::build_info()).unwrap(),
+        owned_processes: 0,
+        registration: host.registration.clone(),
+        snapshot: host.snapshot(),
+        indexes: vec![],
+        can_hibernate: true,
+    })
+    .unwrap();
+    let report = inventory.clone();
+    let app = axum::Router::new()
+        .route(
+            "/rpc",
+            axum::routing::post(|| async { axum::Json(RpcReply::ok(json!({"status":"running"}))) }),
+        )
+        .route(
+            "/inventory",
+            axum::routing::get(move || {
+                let report = report.clone();
+                async move { axum::Json(report) }
+            }),
+        );
     let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
     host.store
         .register_runtime(&opencoder_store::fleet::handoff::RuntimeRecord {
@@ -68,7 +87,7 @@ async fn queries_preserve_revision_but_mutations_and_wakeups_notify() {
     // A successful query that discovers a formerly sleeping Runtime is a
     // real inventory change even though the operation itself is read-only.
     host.store
-        .put_definition("runtime_sleep", "reads", &json!({"sleeping":true}))
+        .put_definition("runtime_sleep", "reads", &inventory)
         .await
         .unwrap();
     assert_eq!(

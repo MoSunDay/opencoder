@@ -82,6 +82,13 @@ pub(crate) async fn dispatch_mode_switch(
     anim_tick: u32,
     workdir: &Path,
 ) -> LoopFlow {
+    if chat.remote {
+        *mode_flash = Some((
+            "Mode controls are available for /agent self tasks".into(),
+            anim_tick,
+        ));
+        return LoopFlow::Proceed;
+    }
     match gate_switch(*running) {
         SwitchGate::Run => {
             let name = mode.prompt().trim_start_matches('/');
@@ -155,6 +162,18 @@ pub(crate) async fn dispatch_slash_action(
     // append one argument instead of reshuffling.)
     agent_menu: &mut Option<crate::agent_menu::AgentMenu>,
 ) -> LoopFlow {
+    if chat.remote
+        && !matches!(
+            action,
+            SlashAction::Task | SlashAction::Agent | SlashAction::Notepad | SlashAction::Stop
+        )
+    {
+        *mode_flash = Some((
+            "This control is available for /agent self tasks".into(),
+            anim_tick,
+        ));
+        return LoopFlow::Proceed;
+    }
     match action {
         SlashAction::Task => {
             let sessions = store
@@ -198,13 +217,7 @@ pub(crate) async fn dispatch_slash_action(
             ));
         }
         SlashAction::Agent => {
-            // Open the primary-agent picker. The pick fills the composer with
-            // the `/agent <name> ` control head (key_handler), so the switch
-            // itself rides the normal submit path — same contract as the SPA
-            // `/agent` entry.
-            *agent_menu = Some(crate::agent_menu::AgentMenu::new(
-                crate::agent_menu::available_primary_agents_for(config),
-            ));
+            *agent_menu = Some(crate::agent_menu::AgentMenu::configured(config.clone()));
         }
         SlashAction::Compact => match gate_compact(*running) {
             CompactGate::Run => {
@@ -283,7 +296,11 @@ pub(crate) async fn dispatch_slash_action(
             local_cmd::run("/ps", chat).await;
         }
         SlashAction::Stop => {
-            local_cmd::run("/stop", chat).await;
+            if chat.remote {
+                cancel.cancel();
+            } else {
+                local_cmd::run("/stop", chat).await;
+            }
         }
         SlashAction::Ap => {
             *ap_menu = Some(crate::ap_menu::ApMenu::new(config));

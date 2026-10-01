@@ -1,4 +1,4 @@
-Commit: 3b0b2d03699400e58c2b9593969309ea8adb1ef9
+Commit: 7687b5f581254ee6d826d8644789e7d498e761ba
 
 # agent 模块
 
@@ -15,6 +15,11 @@ Commit: 3b0b2d03699400e58c2b9593969309ea8adb1ef9
 ## 报告与发布边界
 
 - [host/client.rs](../../crates/agent/src/host/client.rs)：普通只读 RPC 不增加库存修订号；唤醒 Runtime 或清除休眠标记仍通知同步。Host 汇总全部 Runtime 索引，但只用活动 Runtime 的健康状态决定新任务准入；退休 Runtime 的休眠快照错误不阻断当前版本。
+- [host/service.rs](../../crates/agent/src/host/service.rs)、[host/client.rs](../../crates/agent/src/host/client.rs)：节点冻结、查询准入和重新开放跳过已休眠 Runtime；实际访问唤醒时，先依次取得 Host 准入锁和 Runtime 使用锁，再同步当前准入模式，成功后清除休眠标记并转发请求。
+- [host/mod.rs](../../crates/agent/src/host/mod.rs)：关闭信号 future 在主循环外固定，库存和通道变化不会丢弃已到达的 SIGTERM。
 - [rolling/deployment.py](../../scripts/platform/rolling/deployment.py)：历史 Server/Host 批量停用后统一重载 systemd；不停止保留 Runtime。
 - [rolling/probes.py](../../scripts/platform/rolling/probes.py)：切换前优先检查候选 Server 上的就绪节点；旧 Host 因退休 Runtime 状态不就绪时，改为核验已完成执行探针的候选 Runtime、候选 Host 与候选 Server 身份，切换后仍执行公共入口探针。
 - [rolling/backup.py](../../scripts/platform/rolling/backup.py)、[network/ports.py](../../scripts/platform/rolling/network/ports.py)：在线备份固定各数据库的 WAL 读取快照，端口分配探测整组可绑定性。
+- [rolling/native](../../scripts/platform/rolling/native/__init__.py)：每个 Runtime 使用本版本私有镜像与固定配置，校验已发布副本后才复用。Runtime unit 通过 `unshare --mount --propagation private` 运行，防止 DAG 挂载传播到其他服务；不依赖会遮蔽资源服务进程的 systemd `PrivateMounts`。
+
+原生 DAG 约定见 [规则 04](../../rules/04-dag-execution-contract.md)，发布与维护边界见 [平滑发布](../../docs/smooth-release.md)。

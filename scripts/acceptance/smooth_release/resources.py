@@ -8,7 +8,7 @@ class Resources:
         self.mounts = {}
         self.ports = {}
         self.mounted = []
-        for section in ['agent','dag']:
+        for section in ['agent','dag','workspace']:
             source = root / 'exports' / section
             mount = root / 'mounts' / section
             source.mkdir(parents=True)
@@ -18,15 +18,20 @@ class Resources:
             self.ports[section] = allocate_port()
 
     def server_config(self):
-        return {section:{key:str(self.roots[section]),'nfs':{
+        config = {section:{key:str(self.roots[section]),'nfs':{
             'enabled':True,'host':'127.0.0.1','port':self.ports[section],'read_only':True}}
-            for section,key in [('agent','agents_dir'),('dag','wasm_dir')]}
+            for section,key in [('agent','agents_dir'),('dag','binary_dir')]}
+        config['dag'].update(workspace_dir=str(self.roots['workspace']), workspace_nfs={
+            'enabled':True,'host':'127.0.0.1','port':self.ports['workspace']})
+        return config
 
     def client_config(self):
-        return {section:{key:str(self.mounts[section])} for section,key in [('agent','agents_dir'),('dag','wasm_dir')]}
+        config = {section:{key:str(self.mounts[section])} for section,key in [('agent','agents_dir'),('dag','binary_dir')]}
+        config['dag']['workspace_dir'] = str(self.mounts['workspace'])
+        return config
 
     def mount(self):
-        for section in ['agent','dag']:
+        for section in ['agent','dag','workspace']:
             port = self.ports[section]
             subprocess.run(['mount','-t','nfs','-o',
                 f'ro,vers=3,tcp,port={port},mountport={port},nolock,soft,retrans=1,timeo=50,actimeo=0,lookupcache=none',

@@ -4,6 +4,7 @@
 mod agent_drive;
 mod brain_drive;
 mod dag_drive;
+pub(crate) mod dag_state;
 mod team_drive;
 
 use std::sync::Arc;
@@ -167,7 +168,7 @@ mod tests {
     ) -> ProjectTodoRecord {
         ProjectTodoRecord {
             id: "t1".into(),
-            milestone_id: None,
+            initiative_id: None,
             title: "待办".into(),
             draft: "草稿".into(),
             plan_md: Some("# 方案".into()),

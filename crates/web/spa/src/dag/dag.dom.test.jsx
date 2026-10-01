@@ -31,7 +31,7 @@ import { RunDetail } from './runDetail.jsx';
 import { setNodes } from '../store.js';
 
 const DEFS = [
-  { id: 'dag-etl', name: 'etl', spec: { name: 'etl', steps: [{ name: 'fetch', kind: { type: 'wasm', command: 'tool.wasm' } }, { name: 'review', depends_on: ['fetch'], kind: { type: 'agent', prompt: 'r' } }] }, updated_at: 1700000000000 },
+  { id: 'dag-etl', name: 'etl', spec: { name: 'etl', steps: [{ name: 'fetch', kind: { type: 'binary', resource: 'tool' } }, { name: 'review', depends_on: ['fetch'], kind: { type: 'agent', prompt: 'r' } }] }, updated_at: 1700000000000 },
   { id: 'dag-other', name: 'nightly', spec: { name: 'nightly', steps: [{ name: 'only', kind: { type: 'agent', prompt: 'r' } }] }, updated_at: 1700000100000 },
 ];
 
@@ -175,7 +175,7 @@ describe('DefEditor', () => {
 
     // a spec-level problem list renders the same way
     fireEvent.change(area, {
-      target: { value: JSON.stringify({ name: 'x', steps: [{ name: 'Bad', kind: { type: 'wasm', command: 'tool.wasm' } }] }) },
+      target: { value: JSON.stringify({ name: 'x', steps: [{ name: 'Bad', kind: { type: 'binary', resource: 'tool' } }] }) },
     });
     fireEvent.click(screen.getByText('保 存'));
     expect(await screen.findByText(/steps\[0\]\.name 必须匹配/)).toBeTruthy();
@@ -189,7 +189,7 @@ describe('DefEditor', () => {
     render(<DefEditor open def={null} saving={false} onClose={vi.fn()} onSave={onSave} />);
     fireEvent.click(screen.getByText('JSON')); // default is now the canvas mode
     fireEvent.change(screen.getByRole('textbox'), {
-      target: { value: JSON.stringify({ name: 'ok', steps: [{ name: 'a', kind: { type: 'wasm', command: 'tool.wasm' } }] }) },
+      target: { value: JSON.stringify({ name: 'ok', steps: [{ name: 'a', kind: { type: 'binary', resource: 'tool' } }] }) },
     });
     fireEvent.click(screen.getByText('保 存'));
     expect(await screen.findByText('spec.steps 不能为空')).toBeTruthy();

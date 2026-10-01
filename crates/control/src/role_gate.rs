@@ -29,12 +29,20 @@ fn non_admin_allowed(method: &Method, path: &str) -> bool {
     if crate::auth_mw::exempt(path) {
         return true;
     }
-    if (path == "/api/me" || path == "/api/nodes") && method == Method::GET {
+    if matches!(
+        path,
+        "/api/me" | "/api/nodes" | "/api/tui/agent-capabilities"
+    ) && method == Method::GET
+    {
         return true;
     }
-    // Wasm pool surface is read-only for non-admins: list/get/download (and
+    // Binary pool surface is read-only for non-admins: list/get/download (and
     // the `/nfs` status snapshot); every write stays admin-only.
-    if (path == "/api/dag/wasm" || path.starts_with("/api/dag/wasm/")) && method == Method::GET {
+    if (path == "/api/dag/binaries"
+        || path.starts_with("/api/dag/binaries/")
+        || path == "/api/dag/workspace/nfs")
+        && method == Method::GET
+    {
         return true;
     }
     if path == "/api/executions" {
@@ -107,6 +115,8 @@ mod tests {
     fn non_admins_read_identity_nodes_and_executions() {
         for role in [Role::User, Role::Root] {
             assert!(allow(role, "GET", "/api/me"));
+            assert!(allow(role, "GET", "/api/tui/agent-capabilities"));
+            assert!(!allow(role, "POST", "/api/tui/agent-capabilities"));
             assert!(allow(role, "GET", "/api/nodes"));
             assert!(allow(role, "GET", "/api/executions"));
             assert!(allow(role, "GET", "/api/executions/agent-x"));
@@ -118,14 +128,18 @@ mod tests {
             ));
             assert!(allow(role, "GET", "/api/executions/agent-x/messages"));
             assert!(allow(role, "GET", "/static/app.js"));
-            // Wasm pool: read-only (list/get/download, nfs status).
-            assert!(allow(role, "GET", "/api/dag/wasm"));
-            assert!(allow(role, "GET", "/api/dag/wasm/tool"));
-            assert!(allow(role, "GET", "/api/dag/wasm/tool/versions/1/wasm.bin"));
-            assert!(!allow(role, "POST", "/api/dag/wasm"));
-            assert!(!allow(role, "PUT", "/api/dag/wasm/tool"));
-            assert!(!allow(role, "DELETE", "/api/dag/wasm/tool"));
-            assert!(!allow(role, "POST", "/api/dag/wasm/tool/rollback"));
+            // Binary pool: read-only (list/get/download, nfs status).
+            assert!(allow(role, "GET", "/api/dag/binaries"));
+            assert!(allow(role, "GET", "/api/dag/binaries/tool"));
+            assert!(allow(
+                role,
+                "GET",
+                "/api/dag/binaries/tool/versions/1/binary.bin"
+            ));
+            assert!(!allow(role, "POST", "/api/dag/binaries"));
+            assert!(!allow(role, "PUT", "/api/dag/binaries/tool"));
+            assert!(!allow(role, "DELETE", "/api/dag/binaries/tool"));
+            assert!(!allow(role, "POST", "/api/dag/binaries/tool/rollback"));
             // Writes outside the execution surface stay admin-only.
             assert!(!allow(role, "GET", "/api/agents"));
             assert!(!allow(role, "GET", "/api/sessions/agent-x/events"));

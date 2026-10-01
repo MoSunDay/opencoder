@@ -115,6 +115,18 @@ impl ProjectService {
             .ok_or_else(|| anyhow::anyhow!("project service not initialized"))
     }
 
+    pub async fn cleanup_dag_containers(&self) -> Result<()> {
+        let deps = self.require()?;
+        anyhow::ensure!(
+            deps.spawns.lock().unwrap().is_empty(),
+            "cannot recover DAG containers while project drivers are active"
+        );
+        for run in deps.projects.list_running_todo_runs().await? {
+            crate::executor::dag_state::cleanup(&deps, &run).await?;
+        }
+        Ok(())
+    }
+
     /// 取消一个运行中的 run。返回是否实际取消：注册令牌存在并已触发
     /// cancel；或（lost-driver 形态）令牌不在注册表而 run 行仍 Running——
     /// 驱动已丢失（重启/panic 收敛后仍未终态），此时机会式收敛 run →
@@ -137,34 +149,13 @@ impl ProjectService {
         Ok(crate::recover::converge_lost_run(deps, run_id).await)
     }
 
-    /// 全量总览：项目下的里程碑、独立里程碑，以及未关联里程碑的 TODO。
+    /// 全量总览：项目下的专项、独立专项，以及未关联专项的 TODO。
     pub async fn overview(&self) -> Result<Value> {
         let deps = self.require()?;
         // 机会式 stale run 清扫（无后台定时器）：读路径触发，失败只告警，
         // 不让总览因为清扫抖动而 500（镜像 converge_lost_node_tasks 思路）。
         let _ = crate::recover::sweep_stale_runs(&deps, STALE_RUN_GRACE_MS).await;
-        let goals = deps.projects.list_goals().await.context("list goals")?;
-        let milestones = deps
-            .projects
-            .list_milestones(None)
-            .await
-            .context("list milestones")?;
-        let initiatives = deps
-            .projects
-            .list_initiatives(None)
-            .await
-            .context("list initiatives")?;
-        let todos = deps.projects.list_todos(None).await.context("list todos")?;
-        let todos = todos
-            .iter()
-            .map(serde_json::to_value)
-            .collect::<std::result::Result<Vec<_>, _>>()?;
-        Ok(opencoder_store::project::overview::overview(
-            &goals,
-            &milestones,
-            &initiatives,
-            &todos,
-        ))
+        opencoder_store::project::overview::load(deps.projects.as_ref()).await
     }
 }
 
@@ -250,23 +241,23 @@ pub(crate) fn run_agent_label(resolved: &ResolvedExecutor, todo: &ProjectTodoRec
     }
 }
 
-/// 组装 plan/execute 提示词所需的目标→里程碑→待办上下文。里程碑与目标
-/// 均可省略：独立专项保留里程碑上下文，无项目时不构造虚假目标。
+/// 组装 plan/execute 提示词所需的目标→专项→待办上下文。专项与目标
+/// 均可省略：独立专项保留专项上下文，无项目时不构造虚假目标。
 pub(crate) async fn build_context(
     deps: &Arc<Deps>,
     todo: &ProjectTodoRecord,
 ) -> Result<ProjectContext> {
-    let milestone = match &todo.milestone_id {
+    let initiative = match &todo.initiative_id {
         Some(mid) => deps
             .projects
-            .list_milestones(None)
+            .list_initiatives(None)
             .await
-            .context("list milestones")?
+            .context("list initiatives")?
             .into_iter()
             .find(|m| m.id == *mid),
         None => None,
     };
-    let goal = match &milestone {
+    let goal = match &initiative {
         Some(ms) => deps
             .projects
             .list_goals()
@@ -279,8 +270,8 @@ pub(crate) async fn build_context(
     Ok(ProjectContext {
         goal_title: goal.as_ref().map(|g| g.title.clone()),
         goal_detail_md: goal.as_ref().and_then(|g| g.detail_md.clone()),
-        milestone_title: milestone.as_ref().map(|m| m.title.clone()),
-        milestone_detail_md: milestone.as_ref().and_then(|m| m.detail_md.clone()),
+        initiative_title: initiative.as_ref().map(|m| m.title.clone()),
+        initiative_detail_md: initiative.as_ref().and_then(|m| m.detail_md.clone()),
         todo_title: todo.title.clone(),
         todo_draft: todo.draft.clone(),
     })

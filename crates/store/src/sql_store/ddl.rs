@@ -11,7 +11,7 @@
 use anyhow::{Context, Result};
 use sqlx::{MySqlPool, Row};
 
-mod relations;
+mod catalog;
 
 const GOAL_COLUMNS: &str = "\
   id VARCHAR(64) NOT NULL,
@@ -22,9 +22,8 @@ const GOAL_COLUMNS: &str = "\
   created_at BIGINT NOT NULL,
   updated_at BIGINT NOT NULL";
 
-const MILESTONE_COLUMNS: &str = "\
+const INITIATIVE_COLUMNS: &str = "\
   id VARCHAR(64) NOT NULL,
-  kind VARCHAR(32) NOT NULL DEFAULT 'milestone',
   goal_id VARCHAR(64) NULL,
   title VARCHAR(512) NOT NULL,
   detail_md {text} NULL,
@@ -35,7 +34,7 @@ const MILESTONE_COLUMNS: &str = "\
 
 const TODO_COLUMNS: &str = "\
   id VARCHAR(64) NOT NULL,
-  milestone_id VARCHAR(64) NULL,
+  initiative_id VARCHAR(64) NULL,
   title VARCHAR(512) NOT NULL,
   draft {text} NOT NULL,
   plan_md {text} NULL,
@@ -84,14 +83,14 @@ const TODO_EXECUTION_COLUMNS: &str = "\
 const TABLES: &[(&str, &str, &str)] = &[
     ("project_goals", GOAL_COLUMNS, ""),
     (
-        "project_milestones",
-        MILESTONE_COLUMNS,
-        "KEY idx_project_milestones_goal (goal_id)",
+        "project_initiatives",
+        INITIATIVE_COLUMNS,
+        "KEY idx_project_initiatives_goal (goal_id)",
     ),
     (
         "project_todos",
         TODO_COLUMNS,
-        "KEY idx_project_todos_milestone (milestone_id)",
+        "KEY idx_project_todos_initiative (initiative_id)",
     ),
     (
         "project_todo_runs",
@@ -119,10 +118,6 @@ const UPGRADE_COLUMNS: &[(&str, &[&str])] = &[
             "result_md {text} NULL",
             "sync_state VARCHAR(32) NOT NULL DEFAULT 'pending'",
         ],
-    ),
-    (
-        "project_milestones",
-        &["kind VARCHAR(32) NOT NULL DEFAULT 'milestone'"],
     ),
     (
         "project_todos",
@@ -276,7 +271,7 @@ pub async fn upgrade(pool: &MySqlPool, starrocks: bool) -> Result<()> {
                 vec![]).await?;
         }
     }
-    relations::upgrade(pool, starrocks).await
+    catalog::upgrade(pool, starrocks).await
 }
 
 #[cfg(test)]
@@ -393,7 +388,7 @@ mod tests {
         assert!(missing_columns(todo_cols, &existing).is_empty());
         let pre_executor: Vec<String> = vec![
             "id".into(),
-            "milestone_id".into(),
+            "initiative_id".into(),
             "title".into(),
             "EXECUTOR_KIND".into(), // case-insensitive match, as StarRocks
             "executor_ref".into(),  // reports mixed-case names

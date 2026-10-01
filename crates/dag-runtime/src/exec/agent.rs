@@ -9,190 +9,37 @@
 //! Transcript capture keeps a bounded tail (last ~8KB) and scans it for a
 //! ```json fenced block to recover structured output.
 
-use std::sync::{Arc, Mutex};
-
 use opencoder_core::message::now_ms;
-use opencoder_dag::{StepKind, StepOutcome, StepSpec};
-use opencoder_session::{run as run_session, SessionEvent, SessionState};
+use opencoder_dag::{StepKind, StepSpec};
 use opencoder_store::{SessionMeta, TASK_TYPE_AGENT_STEP};
 use serde_json::Value;
 use tokio_util::sync::CancellationToken;
-use tracing::{info, warn};
 
 use super::{ExecDeps, StepCtx, StepResult};
 
-/// Bounded transcript tail: the artifact/event payload only needs the end of
-/// the conversation, never the whole history.
-const MAX_TRANSCRIPT_TAIL: usize = 8 * 1024;
-
-/// Execute an `agent` step: one fresh session, one drain, artifacts handled
-/// by the caller (the run loop); here we only produce the [`StepResult`].
 pub async fn execute_agent_step(
     ctx: &StepCtx,
     deps: &ExecDeps,
     cancel: CancellationToken,
 ) -> StepResult {
-    let local_agent = match opencoder_core::agent::scope::with_root_sync(
-        deps.config.agent.agents_dir.clone(),
-        || super::how_copy::prepare(ctx),
-    ) {
-        Ok(agent) => agent,
-        Err(e) => return errored(format!("prepare local how.md: {e:#}")),
-    };
-    // Node-configured sandbox dispatch: `dag.agent_sandbox = "runc"` moves
-    // the whole session into a container before any host-side session work.
-    if deps.config.dag.agent_sandbox == opencoder_core::config::AgentSandbox::Runc {
-        return super::agent_runc::execute_agent_step_runc(ctx, deps, cancel).await;
-    }
-    let session_id = match create_session_meta(deps, &ctx.step, &ctx.run_id).await {
-        Ok(id) => id,
-        Err(e) => {
-            return errored(format!("create session: {e:#}"));
+    match super::how_copy::prepare(ctx) {
+        Ok(_) => {}
+        Err(error) => {
+            return super::native::io::error_result(format!(
+                "prepare local Agent resources: {error:#}"
+            ))
         }
-    };
-    // Publish the live-session pointer immediately so a remote console can
-    // attach while the step runs (meta.json's session_id lands on finish).
-    crate::step_io::write_session_artifact(
-        &ctx.workflow_root,
-        &ctx.run_id,
-        &ctx.step.name,
-        ctx.instance,
-        &session_id,
-    );
-    info!(run_id = %ctx.run_id, step = %ctx.step.name, %session_id, "dag agent step executing");
-
-    let access = match super::device::prepare(ctx, deps, &session_id).await {
-        Ok(value) => value,
-        Err(error) => return errored(format!("Device step authorization: {error:#}")),
-    };
-    let mut result =
-        execute_host_session(ctx, deps, cancel, session_id, local_agent, access.as_ref()).await;
-    if let Some(access) = access {
-        access.finish(&mut result).await;
     }
-    result
-}
-
-async fn execute_host_session(
-    ctx: &StepCtx,
-    deps: &ExecDeps,
-    cancel: CancellationToken,
-    session_id: String,
-    local_agent: opencoder_core::Agent,
-    access: Option<&super::device::Access>,
-) -> StepResult {
-    // One token doubles as replay guard AND run-loop hard cancel (web parity:
-    // the session owns its interrupt path through `session.cancel`).
-    let mut config = deps.config.clone();
+    let mut selected = deps.clone();
     if let StepKind::Agent {
         model: Some(model), ..
-    } = &ctx.step.kind
+    } = ctx.step.kind.executable()
     {
-        config.model = model.clone();
+        selected.config.model = model.clone();
     }
-    let mut session = SessionState::new(
-        session_id.clone(),
-        local_agent,
-        config,
-        deps.client.clone(),
-        if ctx.instance.is_some() {
-            ctx.dir().expect("validated execution path")
-        } else {
-            deps.workdir.clone()
-        },
-    )
-    .with_store(deps.store.clone())
-    .mark_session_created();
-    session.cancel = Some(cancel.clone());
-    // Fresh per-step turn token so an interrupt never leaks into later steps.
-    session.turn_cancel = Some(Arc::new(Mutex::new(CancellationToken::new())));
-    // Workflow-author-declared how.md append: visible to the session's
-    // tool processes as OPENCODER_HOW_APPEND; the prompt reads the local copy.
-    let how_append = match &ctx.step.kind {
-        StepKind::Agent { how_append, .. } => how_append.clone(),
-        _ => None,
-    };
-    if how_append.is_some() {
-        session.env_passthrough = super::how_append::env_pairs(how_append.as_deref());
-    }
-    let dir = ctx.dir().expect("validated execution path");
-    session
-        .env_passthrough
-        .push(("OPENCODER_STEP_DIR".into(), dir.display().to_string()));
-    // A read-only knowledge checkout must not attempt git index refreshes.
-    if ctx.knowledge_root.is_some() {
-        session
-            .env_passthrough
-            .push(("GIT_OPTIONAL_LOCKS".into(), "0".into()));
-    }
-
-    // Local durability of the event stream, exactly like a node task. The
-    // sink moves into the event callback and drops with it at run end.
-    let (sink, flusher) =
-        opencoder_session::spawn_event_flusher(Some(deps.store.clone()), session_id.clone());
-
-    let transcript = Arc::new(Mutex::new(String::new()));
-    let on_event = {
-        let sink = sink;
-        let transcript = Arc::clone(&transcript);
-        let log = ctx.log.clone();
-        move |ev: SessionEvent| {
-            let _ = sink.push(&ev);
-            if let SessionEvent::TextDelta(text) = &ev {
-                if let Ok(mut tail) = transcript.lock() {
-                    push_tail(&mut tail, text, MAX_TRANSCRIPT_TAIL);
-                }
-                if let Some(log) = &log {
-                    log.text_delta(text);
-                }
-            }
-        }
-    };
-
-    let prompt = super::private_files::prompt(
-        build_prompt(ctx),
-        deps.config.dag.execution_private_root.as_deref(),
-    );
-    let prompt = access.map_or_else(|| prompt.clone(), |a| a.prompt(prompt.clone(), false));
-    let result = run_session(&mut session, prompt, on_event).await;
-    // Guarantee the final local flush before reading the transcript.
-    if let Err(e) = flusher.await {
-        warn!(run_id = %ctx.run_id, step = %ctx.step.name, error = %e, "local event flush failed");
-    }
-
-    // Providers normally stream `TextDelta` frames, but a valid provider (and
-    // the deterministic test client) may deliver only a completed message.
-    // Recover that persisted assistant text so structured output and the
-    // run-scoped step log do not depend on streaming granularity.
-    let mut text = transcript.lock().map(|t| t.clone()).unwrap_or_default();
-    if text.trim().is_empty() {
-        if let Some(completed) = opencoder_session::handoff::last_assistant_text(&session.messages)
-        {
-            text = completed;
-            if let Some(log) = &ctx.log {
-                log.text_delta(&text);
-            }
-        }
-    }
-    let output_json = extract_output_json_from(&text);
-    let (outcome, error) = terminal_step(cancel.is_cancelled(), result.as_ref().err());
-    info!(
-        run_id = %ctx.run_id,
-        step = %ctx.step.name,
-        outcome = outcome_str(&outcome),
-        "dag agent step finished"
-    );
-    StepResult {
-        outcome,
-        error,
-        output_text: text,
-        output_json,
-        session_id: Some(session_id),
-    }
+    super::agent_runc::execute_agent_step_runc(ctx, &selected, cancel).await
 }
 
-/// The step's executing agent name — `agent` field or the `act` default,
-/// the same resolution `create_session_meta` pins on the session row.
 pub(crate) fn step_agent_name(step: &StepSpec) -> String {
     match &step.kind {
         StepKind::Agent { agent, .. } => agent.clone().unwrap_or_else(|| "act".into()),
@@ -201,12 +48,8 @@ pub(crate) fn step_agent_name(step: &StepSpec) -> String {
 }
 
 /// Prompt = step prompt + upstream context header + structured-output
-/// instruction. The context is the same object a wasm step receives as its
-/// `context.json` input file (delivered under `/workspace/context`).
-pub(crate) fn build_prompt(ctx: &StepCtx) -> String {
-    build_prompt_with_knowledge(ctx, ctx.knowledge_root.as_deref())
-}
-
+/// instruction. The context is the same object a binary step receives as its
+/// `context.json` input file in the step's read-only metadata directory.
 pub(crate) fn build_prompt_with_knowledge(
     ctx: &StepCtx,
     knowledge: Option<&std::path::Path>,
@@ -246,8 +89,8 @@ pub(crate) async fn create_session_meta(
     step: &StepSpec,
     run_id: &str,
 ) -> anyhow::Result<String> {
-    let (agent, model) = match &step.kind {
-        StepKind::Agent { agent, model, .. } => (agent.clone(), model.clone()),
+    let agent = match &step.kind {
+        StepKind::Agent { agent, .. } => agent.clone(),
         _ => anyhow::bail!("non-agent step dispatched to the agent executor"),
     };
     let id = ulid::Ulid::new().to_string();
@@ -258,7 +101,7 @@ pub(crate) async fn create_session_meta(
             id: id.clone(),
             title: Some(format!("dag/{}/{}", run_id, step.name)),
             agent: agent.or_else(|| Some("act".into())),
-            model,
+            model: Some(deps.config.model.clone()),
             autopilot_mode: None,
             workdir_hash: Some(opencoder_core::workdir_hash(&deps.workdir)),
             created_at: now,
@@ -276,27 +119,6 @@ pub(crate) async fn create_session_meta(
     Ok(id)
 }
 
-/// Append `delta`, then trim to the last `max` bytes on a char boundary.
-fn push_tail(tail: &mut String, delta: &str, max: usize) {
-    tail.push_str(delta);
-    if tail.len() > max {
-        let mut cut = tail.len() - max;
-        while cut < tail.len() && !tail.is_char_boundary(cut) {
-            cut += 1;
-        }
-        let kept = tail[cut..].to_string();
-        *tail = kept;
-    }
-}
-
-/// Recover structured output from the final assistant text. Precedence: the
-/// LAST ```json fenced block wins (the output contract's primary form); else
-/// the last balanced top-level `{...}` object in the reply tail (bare JSON
-/// after narration); else the whole trimmed text when it parses as JSON
-/// (arrays, scalars); else `None` (the step simply had no structured output).
-///
-/// Public so the node's agent-kind session executor shares the DAG step's
-/// output contract byte for byte.
 pub fn extract_output_json_from(text: &str) -> Option<Value> {
     // When a fence exists but its body fails to parse, the bare-JSON scan
     // runs on the text AFTER the fence body: an unclosed `{` inside the dead
@@ -380,35 +202,6 @@ fn extract_tail_bare_json(text: &str) -> Option<Value> {
 
 /// Terminal decision by precedence: cancelled > error > done (the node
 /// executor's `terminal_report`, step-flavored).
-fn terminal_step(cancelled: bool, err: Option<&anyhow::Error>) -> (StepOutcome, Option<String>) {
-    if cancelled {
-        (StepOutcome::Cancelled, None)
-    } else {
-        match err {
-            Some(e) => (StepOutcome::Error, Some(format!("{e:#}"))),
-            None => (StepOutcome::Done, None),
-        }
-    }
-}
-
-fn errored(msg: String) -> StepResult {
-    StepResult {
-        outcome: StepOutcome::Error,
-        error: Some(msg),
-        output_text: String::new(),
-        output_json: None,
-        session_id: None,
-    }
-}
-
-fn outcome_str(o: &StepOutcome) -> &'static str {
-    match o {
-        StepOutcome::Done => "done",
-        StepOutcome::Error => "error",
-        StepOutcome::Cancelled => "cancelled",
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -490,16 +283,5 @@ mod tests {
             .unwrap());
         let early = format!("{{\"head_only\": true}}\n{}", "y".repeat(9000));
         assert!(extract_output_json_from(&early).is_none());
-    }
-
-    /// The transcript tail keeps the LAST bytes on a char boundary.
-    #[test]
-    fn transcript_tail_is_bounded_and_char_safe() {
-        let mut t = String::new();
-        push_tail(&mut t, &"ab".repeat(100), 16);
-        assert_eq!(t.len(), 16);
-        push_tail(&mut t, "é", 16); // multi-byte at the seam must not panic
-        assert!(t.len() >= 16 && t.len() <= 18);
-        assert!(t.chars().last().is_some());
     }
 }

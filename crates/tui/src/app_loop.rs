@@ -144,11 +144,15 @@ pub(crate) fn compute_display<'a>(
                 ),
             }
         } else {
-            let title = super::app_display::compose_top_title(
-                workdir,
-                config.model_id(),
-                config.reasoning_effort.as_deref(),
-            );
+            let title = if chat.remote {
+                Line::from(format!("Server · {}", chat.agent))
+            } else {
+                super::app_display::compose_top_title(
+                    workdir,
+                    config.model_id(),
+                    config.reasoning_effort.as_deref(),
+                )
+            };
             (
                 chat,
                 title,
@@ -267,6 +271,16 @@ pub(crate) async fn fold_ui_events(
         *skip_next_render = false;
         let mut hidden_reasoning_append = false;
         match ev {
+            UiEvent::RemoteSnapshot {
+                chat: restored,
+                running: active,
+            } => {
+                *chat = *restored;
+                *running = active;
+                *cancelled = false;
+                *drain_pending = false;
+                queue_items.clear();
+            }
             UiEvent::Session(sev) => {
                 // Question dialogs ride on ToolStart/ToolEnd (no new event
                 // kind): open on `question` start, close on its end. Only
@@ -281,8 +295,23 @@ pub(crate) async fn fold_ui_events(
                     }
                     _ => {}
                 }
+                if chat.remote
+                    && matches!(
+                        sev,
+                        SessionEvent::LlmRoundStart { .. } | SessionEvent::TextDelta(_)
+                    )
+                {
+                    *running = true;
+                }
                 if let SessionEvent::TranscriptReset(msgs) = &sev {
-                    crate::session_ui::rebuild_after_reset(chat, msgs, store, session_id).await;
+                    if chat.remote {
+                        let label = chat.agent.clone();
+                        *chat = crate::session_ui::replay_messages(&label, msgs);
+                        chat.remote = true;
+                        chat.submitted = true;
+                    } else {
+                        crate::session_ui::rebuild_after_reset(chat, msgs, store, session_id).await;
+                    }
                 } else {
                     hidden_reasoning_append = matches!(sev, SessionEvent::ReasoningDelta(_))
                         && chat.last_open_thinking_collapsed();
@@ -352,7 +381,11 @@ pub(crate) async fn fold_ui_events(
                     *plan_skill_active =
                         crate::skill_persist::plan_highlight_from_consumed_text(text);
                 }
-                if matches!(sev, SessionEvent::Done | SessionEvent::Error(_)) {
+                if chat.remote && matches!(sev, SessionEvent::Done | SessionEvent::Error(_)) {
+                    *running = false;
+                    *cancelled = false;
+                    *drain_pending = false;
+                } else if matches!(sev, SessionEvent::Done | SessionEvent::Error(_)) {
                     if *cancelled {
                         // Stale event from a cancelled turn — consume without
                         // affecting running or clearing items belonging to a
@@ -556,7 +589,7 @@ pub(crate) async fn handle_quit(
     chat: &mut ChatView,
     cmd_tx: &mpsc::Sender<UiCmd>,
 ) {
-    if running {
+    if running && !chat.remote {
         cancel.cancel();
         chat.push_marker(Line::from(Span::styled(
             "[exiting…]",

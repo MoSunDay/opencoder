@@ -154,10 +154,8 @@ fn validate_legacy_roots<'a>(
             if known.contains(id.as_str()) {
                 continue;
             }
-            // `rootfs`/`bundles` are shared runc-sandbox scaffolding and
-            // `_modules` is the node's wasm module library — none of them
-            // are executions.
-            if workflow && matches!(id.as_str(), "rootfs" | "bundles" | "_modules") {
+            // `rootfs`/`bundles` are shared runc-sandbox scaffolding.
+            if workflow && matches!(id.as_str(), "rootfs" | "bundles") {
                 continue;
             }
             bail!("legacy data has no execution record: {id}");

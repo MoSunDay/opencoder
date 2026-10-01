@@ -1,3 +1,5 @@
+mod initialization;
+
 use super::agent_how::{
     agent_result, declared_how_append, default_title, transcript_tail, OUTPUT_TAIL_BYTES,
 };
@@ -106,67 +108,18 @@ pub(super) async fn run(
         },
     )
     .await?;
-    if fresh {
-        let selection = input
-            .get("harness")
-            .map(|v| serde_json::from_value(v.clone()))
-            .transpose()?;
-        let mut envs: std::collections::BTreeMap<String, String> = input
-            .get("envs")
-            .map(|v| serde_json::from_value(v.clone()))
-            .transpose()?
-            .unwrap_or_default();
-        // The declared how.md append reaches the session's tool processes as
-        // OPENCODER_HOW_APPEND: persisted with the harness runtime so every
-        // resume rebuilds `SessionState::env_passthrough` from it — the same
-        // mechanism the DAG agent step uses, injected once at creation.
-        if let Some(text) = &how_append {
-            envs.extend(opencoder_dag_runtime::exec::how_append::env_pairs(Some(
-                text,
-            )));
-        }
-        // Operator isolation: HOME points at the execution's frozen home,
-        // injected LAST so a user-declared HOME cannot override it. Persisted
-        // with the harness runtime so every resume rebuilds
-        // `SessionState::env_passthrough` (the OPENCODER_HOW_APPEND
-        // mechanism, one layer up).
-        if let Some(home) = config_home.as_deref() {
-            envs.extend(crate::operations::operator_env::env_pairs(home));
-        }
-        opencoder_core::agent::scope::with_root(
-            config.agent.agents_dir.clone(),
-            opencoder_session::harness::initialize(
-                worker.inner.state.store.as_ref(),
-                id,
-                agent,
-                selection,
-                envs,
-            ),
-        )
-        .await?;
-        {
-            let mut runtime = worker
-                .inner
-                .state
-                .store
-                .harness_runtime(id)
-                .await?
-                .unwrap_or_default();
-            if runtime.harness == opencoder_core::harness::Harness::Codex {
-                opencoder_core::harness::pin_agent_settings(&mut runtime, &config, agent)
-                    .map_err(anyhow::Error::msg)?;
-                if config.agent.codex.is_none() {
-                    runtime.model = input["model"].as_str().map(str::to_owned);
-                }
-                worker
-                    .inner
-                    .state
-                    .store
-                    .set_harness_runtime(id, &runtime)
-                    .await?;
-            }
-        }
-    }
+    // A session row can survive a crash before its runtime is saved.
+    // Complete the durable initialization before admitting any input.
+    initialization::ensure(
+        worker,
+        id,
+        agent,
+        input,
+        &config,
+        how_append.as_deref(),
+        config_home.as_deref(),
+    )
+    .await?;
     let mut initial_driver_ensured = false;
     if let Some(prompt) = input["prompt"].as_str().filter(|s| !s.trim().is_empty()) {
         let prompt = match kind {
@@ -184,6 +137,8 @@ pub(super) async fn run(
             json!({
                 "input_id": format!("initial-{id}"),
                 "prompt": prompt,
+                "display": input["prompt"],
+                "delivery": "queue",
                 "images": input.get("images").cloned().unwrap_or(json!([])),
             }),
         )

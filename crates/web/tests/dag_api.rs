@@ -4,154 +4,15 @@
 //! piggyback on the heartbeat. Store-backed (the libsql DAG impl is live);
 //! harness mirrors `nodes_ops.rs`.
 
-use std::sync::Arc;
+#[path = "dag_api/support.rs"]
+mod support;
 
-use axum::body::Body;
-use axum::http::{Request, StatusCode};
-use opencoder_llm::MockChatClient;
-use opencoder_store::{DagDefRecord, LibsqlStore, Store};
+use axum::http::StatusCode;
+use opencoder_store::DagDefRecord;
+use support::{
+    app, claim, dispatch, register, req, send, spec_body, spec_body_of, upload, upsert_def,
+};
 use tower::ServiceExt;
-
-/// Two wasm steps with one dependency — the minimal valid workflow.
-const SPEC: &str = r#"{"name":"etl-demo","steps":[
-    {"name":"fetch","kind":{"type":"wasm","command":"tool.wasm"}},
-    {"name":"load","depends_on":["fetch"],"kind":{"type":"wasm","command":"tool.wasm"}}]}"#;
-
-/// Wrap a raw spec literal in the `DagDefUpsertRequest` envelope.
-fn spec_body_of(spec: &str) -> String {
-    format!(r#"{{"spec":{spec}}}"#)
-}
-
-fn spec_body() -> String {
-    spec_body_of(SPEC)
-}
-
-struct Ctx {
-    app: axum::Router,
-    store: Arc<dyn Store>,
-}
-
-async fn app() -> Ctx {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
-    let state = Arc::new(opencoder_web::AppState {
-        config_home: None,
-        brain: opencoder_web::api_brain::mock_brain(store.clone()),
-        store: store.clone(),
-        workdir: std::env::temp_dir(),
-        handles: opencoder_web::handle::new_handle_map(),
-        nodes: Arc::new(opencoder_web::nodes_state::NodeHub::new()),
-        controls: Arc::new(opencoder_web::control_state::ControlHub::new()),
-        team: opencoder_web::team_state::mock(),
-        project: opencoder_web::ProjectService::new(),
-        client_override: Some(Arc::new(MockChatClient::new())),
-    });
-    Ctx {
-        app: opencoder_web::build_app(state, None, false),
-        store,
-    }
-}
-
-async fn send(app: &axum::Router, req: Request<Body>) -> (StatusCode, serde_json::Value) {
-    let resp = app.clone().oneshot(req).await.expect("router must answer");
-    let status = resp.status();
-    let bytes = axum::body::to_bytes(resp.into_body(), 1 << 20)
-        .await
-        .unwrap();
-    let body = if bytes.is_empty() {
-        serde_json::json!({})
-    } else {
-        serde_json::from_slice(&bytes).unwrap_or(serde_json::json!({}))
-    };
-    (status, body)
-}
-
-fn req(method: &str, uri: &str, body: Option<String>) -> Request<Body> {
-    match body {
-        Some(json) => Request::builder()
-            .method(method)
-            .uri(uri)
-            .header("content-type", "application/json")
-            .body(Body::from(json)),
-        None => Request::builder()
-            .method(method)
-            .uri(uri)
-            .body(Body::empty()),
-    }
-    .unwrap()
-}
-
-async fn register(app: &axum::Router, name: &str) -> String {
-    let (_, b) = send(
-        app,
-        req(
-            "POST",
-            "/api/nodes/register",
-            Some(format!(r#"{{"name":"{name}"}}"#)),
-        ),
-    )
-    .await;
-    b["node_id"].as_str().unwrap().into()
-}
-
-/// Upsert the sample def; returns its (stable) id.
-async fn upsert_def(app: &axum::Router) -> String {
-    let (s, b) = send(app, req("POST", "/api/dag/defs", Some(spec_body()))).await;
-    assert_eq!(s, StatusCode::OK, "{b}");
-    b["id"].as_str().unwrap().into()
-}
-
-async fn dispatch(app: &axum::Router, def_id: &str, node_id: Option<&str>) -> String {
-    let body = match node_id {
-        Some(n) => format!(r#"{{"node_id":"{n}"}}"#),
-        None => "{}".to_string(),
-    };
-    let (s, b) = send(
-        app,
-        req(
-            "POST",
-            &format!("/api/dag/defs/{def_id}/dispatch"),
-            Some(body),
-        ),
-    )
-    .await;
-    assert_eq!(s, StatusCode::OK, "{b}");
-    b["run_id"].as_str().unwrap().into()
-}
-
-/// Claim for `node_id`; `None` models the 204 idle answer.
-async fn claim(app: &axum::Router, node_id: &str) -> Option<serde_json::Value> {
-    let (s, b) = send(
-        app,
-        req(
-            "GET",
-            &format!("/api/nodes/dag/claim?node_id={node_id}"),
-            None,
-        ),
-    )
-    .await;
-    if s == StatusCode::NO_CONTENT {
-        return None;
-    }
-    assert_eq!(s, StatusCode::OK, "{b}");
-    Some(b)
-}
-
-/// Upload one event; returns the raw (status, body).
-async fn upload(
-    app: &axum::Router,
-    rid: &str,
-    events: serde_json::Value,
-) -> (StatusCode, serde_json::Value) {
-    send(
-        app,
-        req(
-            "POST",
-            &format!("/api/nodes/dag/runs/{rid}/events"),
-            Some(serde_json::json!({ "run_id": rid, "events": events }).to_string()),
-        ),
-    )
-    .await
-}
 
 // ── defs CRUD ──────────────────────────────────────────────────────────────
 
@@ -194,12 +55,8 @@ async fn defs_crud_upsert_keeps_id_and_delete_404s() {
     assert_eq!(s, StatusCode::NOT_FOUND);
 }
 
-/// Stored pre-wasm python definitions no longer decode: posting one is a
-/// 400 with the dedicated migration message (not a raw serde variant
-/// error), and a seeded legacy row degrades the LIST to an error-marked
-/// row instead of 500-ing the whole page; get_def fails closed on it.
 #[tokio::test]
-async fn python_defs_fail_closed_with_dedicated_errors() {
+async fn unsupported_defs_fail_closed_on_create_list_and_get() {
     let ctx = app().await;
 
     // POST a python spec: dedicated 400 message, nothing stored.
@@ -215,7 +72,7 @@ async fn python_defs_fail_closed_with_dedicated_errors() {
         b["error"]
             .as_str()
             .unwrap()
-            .contains("已下线的 python 步骤"),
+            .contains("unknown variant `python`"),
         "{b}"
     );
     let (_, list) = send(&ctx.app, req("GET", "/api/dag/defs", None)).await;
@@ -239,7 +96,7 @@ async fn python_defs_fail_closed_with_dedicated_errors() {
     assert_eq!(rows.len(), 1);
     assert!(rows[0]["spec"].is_null(), "{list}");
     let err = rows[0]["error"].as_str().unwrap();
-    assert!(err.contains("已下线的 python 步骤"), "{err}");
+    assert!(err.contains("unknown variant `python`"), "{err}");
     // The degraded row keeps its identity: flatten-None used to drop
     // id/name entirely, sending the SPA delete button to `…/defs/undefined`.
     assert_eq!(rows[0]["id"], "legacy-python", "{list}");
@@ -254,7 +111,7 @@ async fn python_defs_fail_closed_with_dedicated_errors() {
         one["error"]
             .as_str()
             .unwrap()
-            .contains("已下线的 python 步骤"),
+            .contains("unknown variant `python`"),
         "{one}"
     );
 
@@ -289,7 +146,8 @@ async fn invalid_spec_is_400_with_the_problem_list() {
         "{b}"
     );
 
-    let bad_slug = r#"{"name":"x","steps":[{"name":"Bad Slug","kind":{"type":"wasm","command":"tool.wasm"}}]}"#;
+    let bad_slug =
+        r#"{"name":"x","steps":[{"name":"Bad Slug","kind":{"type":"binary","resource":"tool"}}]}"#;
     let (s, b) = send(
         &ctx.app,
         req("POST", "/api/dag/defs", Some(spec_body_of(bad_slug))),
@@ -316,7 +174,7 @@ async fn invalid_spec_is_400_with_the_problem_list() {
 async fn def_upsert_roundtrips_max_concurrency_and_rejects_out_of_range() {
     let ctx = app().await;
     let ok = r#"{"name":"conc","max_concurrency":8,"steps":[
-        {"name":"fetch","kind":{"type":"wasm","command":"tool.wasm"}}]}"#;
+        {"name":"fetch","kind":{"type":"binary","resource":"tool"}}]}"#;
     let (s, b) = send(
         &ctx.app,
         req("POST", "/api/dag/defs", Some(spec_body_of(ok))),
@@ -339,7 +197,7 @@ async fn def_upsert_roundtrips_max_concurrency_and_rejects_out_of_range() {
     assert_eq!(row["spec"]["max_concurrency"], 8, "{list}");
 
     let bad = r#"{"name":"conc","max_concurrency":31,"steps":[
-        {"name":"fetch","kind":{"type":"wasm","command":"tool.wasm"}}]}"#;
+        {"name":"fetch","kind":{"type":"binary","resource":"tool"}}]}"#;
     let (s, b) = send(
         &ctx.app,
         req("POST", "/api/dag/defs", Some(spec_body_of(bad))),

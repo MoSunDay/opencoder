@@ -91,9 +91,8 @@ async fn dag_saved_definition_dispatch_runs_to_done() {
 
     // Artifact contract: `<workflow_root>/<run>/<step>/output.json` holds the
     // fenced JSON recovered from the agent transcript.
-    let output_path = fleet
-        .root()
-        .join("n0/node/dag/dag-saved-loop/answer/output.json");
+    let output_path = support::dag_run(&fleet.root().join("n0/node"), "dag-saved-loop")
+        .join("answer/output.json");
     let output: Value =
         serde_json::from_str(&std::fs::read_to_string(&output_path).unwrap()).unwrap();
     assert_eq!(output, json!({"answer":"saved-def-ok"}));

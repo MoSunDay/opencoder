@@ -6,9 +6,12 @@ import { err } from '../../notice.js';
 export function NodeSchedulingModal({ node, onClose, onSaved, onNotice }) {
   const [saving, setSaving] = useState(false);
   const [initials, setInitials] = useState(null);
+  const [error, setError] = useState('');
+  const [revision, setRevision] = useState(0);
   useEffect(() => {
     let alive = true;
     setInitials(null);
+    setError('');
     // 节点快照（/api/nodes）不带 workdir，当前配置必须从节点的
     // maintenance "scheduling" 读接口获取；读取失败再退回快照字段。
     // workdir_supported=false 表示 multi-runtime host：会话目录由各
@@ -20,12 +23,13 @@ export function NodeSchedulingModal({ node, onClose, onSaved, onNotice }) {
         workdir: s?.workdir || '',
         workdir_supported: s?.workdir_supported !== false,
       });
-    }).catch(() => {
-      if (alive) setInitials({ max_runs: node.snapshot?.max_runs, queue_order: node.snapshot?.queue_order || 'fifo', workdir: '', workdir_supported: true });
+    }).catch((failure) => {
+      if (alive) setError(failure.message);
     });
     return () => { alive = false; };
-  }, [node.id]);
+  }, [node.id, revision]);
   const save = async (values) => {
+    if (saving || !initials || error) return;
     setSaving(true);
     try {
       const payload = { max_runs: values.max_runs, queue_order: values.queue_order };
@@ -36,7 +40,7 @@ export function NodeSchedulingModal({ node, onClose, onSaved, onNotice }) {
     finally { setSaving(false); }
   };
   return <Modal open title={`节点调度 · ${node.name}`} onCancel={onClose} footer={null}>
-    {initials === null ? <div style={{ textAlign: 'center', padding: 32 }}>加载中…</div> : <>
+    {error ? <Alert type="error" showIcon title={`读取调度配置失败：${error}`} action={<Button onClick={() => setRevision((value) => value + 1)}>重试读取配置</Button>} /> : initials === null ? <div style={{ textAlign: 'center', padding: 32 }}>加载中…</div> : <>
       <Alert type="info" showIcon title="超过并发上限的任务进入 pending" description={initials.workdir_supported === false
         ? '多运行时宿主不支持节点级工作空间，会话目录由各运行时自身决定。'
         : '设置工作空间后，该节点的 opencoder 会话在指定目录中运行。空出执行名额后自动调度。降低上限不会中断已运行任务；设置与待执行队列在节点重启后保留。'} style={{ marginBottom: 16 }} />

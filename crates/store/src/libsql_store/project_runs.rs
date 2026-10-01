@@ -1,6 +1,6 @@
 //! Project-module persistence — todos & todo runs CRUD (libsql).
 //!
-//! Companion of [`super::project`] (which holds goals/milestones and the
+//! Companion of [`super::project`] (which holds goals/initiatives and the
 //! `ProjectStore` impl). Free functions over a raw `Connection`; deletes run
 //! via [`super::tx::run_tx`] (`BEGIN IMMEDIATE`) with explicit cascades.
 
@@ -12,7 +12,7 @@ use crate::project_types::{
     ProjectTodoRunRecord, ProjectTodoRunStatus, ProjectTodoStatus,
 };
 
-const TODO_COLS: &str = "id, milestone_id, title, draft, plan_md, status, agent, active_session_id, created_at, updated_at, executor_kind, executor_ref, executor_spec, board_status, position, capability_id";
+const TODO_COLS: &str = "id, initiative_id, title, draft, plan_md, status, agent, active_session_id, created_at, updated_at, executor_kind, executor_ref, executor_spec, board_status, position, capability_id";
 const RUN_COLS: &str = "id, todo_id, kind, version, plan_md, output_md, agent, session_id, status, started_at, finished_at, created_at, executor_kind, capability_id, plan_id, output_ref, input_snapshot, trace_manifest";
 
 mod board;
@@ -24,10 +24,10 @@ use summary::{summary_text, todo_text};
 
 pub async fn create_todo(conn: &Connection, rec: &ProjectTodoRecord) -> Result<()> {
     conn.execute(
-        "INSERT INTO project_todos (id, milestone_id, title, draft, plan_md, status, agent, active_session_id, created_at, updated_at, executor_kind, executor_ref, executor_spec, board_status, position, capability_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO project_todos (id, initiative_id, title, draft, plan_md, status, agent, active_session_id, created_at, updated_at, executor_kind, executor_ref, executor_spec, board_status, position, capability_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         params![
             rec.id.as_str(),
-            rec.milestone_id.as_deref(),
+            rec.initiative_id.as_deref(),
             rec.title.as_str(),
             rec.draft.as_str(),
             rec.plan_md.as_deref(),
@@ -102,8 +102,8 @@ fn todo_set_fragment(
         sets.push("executor_spec = ?");
         vals.push(v.as_deref().into()); // Some(None) -> NULL
     }
-    if let Some(v) = patch.milestone_id.as_ref() {
-        sets.push("milestone_id = ?");
+    if let Some(v) = patch.initiative_id.as_ref() {
+        sets.push("initiative_id = ?");
         vals.push(v.as_deref().into());
     }
     if let Some(v) = patch.active_session_id.as_ref() {
@@ -158,6 +158,11 @@ pub async fn delete_todo(conn: &Connection, id: &str) -> Result<bool> {
         )
         .await
         .context("cascade delete todo runs")?;
+        conn.execute(
+            "DELETE FROM project_todo_tags WHERE todo_id = ?1",
+            params![id],
+        )
+        .await?;
         conn.execute("DELETE FROM project_todos WHERE id = ?1", params![id])
             .await
             .context("delete project todo")?;
@@ -185,7 +190,7 @@ pub async fn get_todo_summary(
 ) -> Result<Option<crate::ProjectTodoSummary>> {
     let mut rows = conn
         .query(
-            "SELECT id,milestone_id,title, \
+            "SELECT id,initiative_id,title, \
              CASE WHEN length(CAST(draft AS BLOB))<=65536 THEN draft END, \
              length(CAST(draft AS BLOB)), \
              CASE WHEN length(CAST(plan_md AS BLOB))<=65536 THEN plan_md END, \
@@ -201,7 +206,7 @@ pub async fn get_todo_summary(
     let todo_id: String = row.get(0)?;
     Ok(Some(crate::ProjectTodoSummary {
         id: todo_id.clone(),
-        milestone_id: row.get(1)?,
+        initiative_id: row.get(1)?,
         title: row.get(2)?,
         draft: todo_text(row.get(3)?, row.get(4)?, &todo_id, "draft")
             .context("project todo draft is null")?,
@@ -313,19 +318,19 @@ pub async fn patch_todo_when(
     Ok(n > 0)
 }
 
-/// `milestone_id == None` lists ALL todos (backlog included); ordered by
+/// `initiative_id == None` lists ALL todos (backlog included); ordered by
 /// `created_at`.
 pub async fn list_todos(
     conn: &Connection,
-    milestone_id: Option<&str>,
+    initiative_id: Option<&str>,
 ) -> Result<Vec<ProjectTodoRecord>> {
     let mut sql = format!("SELECT {TODO_COLS} FROM project_todos");
-    if milestone_id.is_some() {
-        sql.push_str(" WHERE milestone_id = ?");
+    if initiative_id.is_some() {
+        sql.push_str(" WHERE initiative_id = ?");
     }
     sql.push_str(" ORDER BY board_status, position, created_at, id");
     let stmt = conn.prepare(&sql).await?;
-    let mut rows = match milestone_id {
+    let mut rows = match initiative_id {
         Some(m) => stmt.query(params![m]).await?,
         None => stmt.query(()).await?,
     };
@@ -339,7 +344,7 @@ pub async fn list_todos(
 fn row_to_todo(r: &libsql::Row) -> Result<ProjectTodoRecord> {
     Ok(ProjectTodoRecord {
         id: r.get(0)?,
-        milestone_id: r.get(1)?,
+        initiative_id: r.get(1)?,
         title: r.get(2)?,
         draft: r.get(3)?,
         plan_md: r.get(4)?,

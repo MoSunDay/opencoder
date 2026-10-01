@@ -48,7 +48,12 @@ pub(crate) struct Journal {
 }
 
 impl Journal {
+    #[cfg(test)]
     pub fn open(layout: DirectoryLayout) -> Result<Self> {
+        Self::load(layout)?.recover()
+    }
+
+    pub fn load(layout: DirectoryLayout) -> Result<Self> {
         let mut journal = Self {
             layout,
             locations: BTreeMap::new(),
@@ -59,6 +64,15 @@ impl Journal {
         // Check before recovery writes. An older binary must finish legacy
         // nonterminal brain work; upgrading must not reinterpret its state.
         for record in journal.records.values() {
+            if record.assignment.index.kind == ExecutionKind::Dag
+                && !matches!(
+                    record.assignment.index.status,
+                    ExecutionStatus::Done | ExecutionStatus::Error | ExecutionStatus::Cancelled
+                )
+                && record.annotations.get("dag_parent").is_none()
+            {
+                bail!("DAG migration blocked by nonterminal execution {}; terminate it with the previous runtime before upgrading", record.assignment.index.id);
+            }
             let input = &record.assignment.request.input;
             let legacy = (record.assignment.index.kind == ExecutionKind::Brain
                 && input["schema_version"]
@@ -76,9 +90,13 @@ impl Journal {
                 bail!("brain migration blocked by nonterminal legacy execution {}; let its owning old runtime converge before upgrading", record.assignment.index.id);
             }
         }
-        let ids: Vec<_> = journal.records.keys().cloned().collect();
+        Ok(journal)
+    }
+
+    pub fn recover(mut self) -> Result<Self> {
+        let ids: Vec<_> = self.records.keys().cloned().collect();
         for id in ids {
-            let mut record = journal.records[&id].clone();
+            let mut record = self.records[&id].clone();
             if record.assignment.index.status == ExecutionStatus::Pending
                 && record.queue.is_some()
                 && record.lifecycle.stop_intent.is_none()
@@ -102,10 +120,10 @@ impl Journal {
                     _ => record.error,
                 };
                 append_status_event(&mut record);
-                journal.save(record)?;
+                self.save(record)?;
             }
         }
-        Ok(journal)
+        Ok(self)
     }
 
     pub fn save(&mut self, record: Record) -> Result<()> {

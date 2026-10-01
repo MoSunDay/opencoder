@@ -3,7 +3,7 @@
 mod gated {
     use opencoder_core::{StorageBackend, StorageConfig};
     use opencoder_store::{
-        sql_store, ProjectGoalRecord, ProjectGoalStatus, ProjectMilestonePatch, ProjectTodoPatch,
+        sql_store, ProjectGoalRecord, ProjectGoalStatus, ProjectInitiativePatch, ProjectTodoPatch,
     };
     use sqlx::{mysql::MySqlConnectOptions, MySqlPool, Row};
 
@@ -38,7 +38,7 @@ mod gated {
             ", PRIMARY KEY(id)) ENGINE=InnoDB"
         };
         sqlx::raw_sql(&format!(
-            "CREATE TABLE project_milestones (
+            "CREATE TABLE project_initiatives (
             id VARCHAR(64) NOT NULL,goal_id VARCHAR(64) NOT NULL,title VARCHAR(512) NOT NULL,
             detail_md VARCHAR(2048) NULL,status VARCHAR(32) NOT NULL,sort_key BIGINT NOT NULL,
             created_at BIGINT NOT NULL,updated_at BIGINT NOT NULL{suffix}"
@@ -47,9 +47,9 @@ mod gated {
         .await
         .unwrap();
         sql_store::ddl::apply(&pool, starrocks).await.unwrap();
-        sqlx::raw_sql("INSERT INTO project_milestones VALUES('old-m','old-g','existing','retained text','planned',0,1,2)")
+        sqlx::raw_sql("INSERT INTO project_initiatives VALUES('old-m','old-g','existing','retained text','planned',0,1,2)")
             .execute(&pool).await.unwrap();
-        sqlx::raw_sql("INSERT INTO project_todos (id,milestone_id,title,draft,plan_md,status,agent,created_at,updated_at)
+        sqlx::raw_sql("INSERT INTO project_todos (id,initiative_id,title,draft,plan_md,status,agent,created_at,updated_at)
             VALUES('old-t',NULL,'old task','retained draft','retained plan','planned','act',3,4)")
             .execute(&pool).await.unwrap();
         let mut url = url_dsn(&dsn, &db);
@@ -67,8 +67,8 @@ mod gated {
         assert_eq!(old.draft, "retained draft");
         assert_eq!(old.plan_md.as_deref(), Some("retained plan"));
         assert_eq!(old.updated_at, 4);
-        assert!(old.milestone_id.is_some());
-        let all = store.list_milestones(None).await.unwrap();
+        assert!(old.initiative_id.is_some());
+        let all = store.list_initiatives(None).await.unwrap();
         assert_eq!(all.len(), 2);
         assert_eq!(
             all.iter()
@@ -80,10 +80,10 @@ mod gated {
         );
         let standalone = all.iter().find(|m| m.goal_id.is_none()).unwrap();
         assert!(store
-            .delete_milestone(&standalone.id)
+            .delete_initiative(&standalone.id)
             .await
             .unwrap_err()
-            .is::<opencoder_store::project::MilestoneNotEmpty>());
+            .is::<opencoder_store::project::InitiativeNotEmpty>());
         store
             .create_goal(&ProjectGoalRecord {
                 id: "old-g".into(),
@@ -97,9 +97,9 @@ mod gated {
             .await
             .unwrap();
         store
-            .patch_milestone(
+            .patch_initiative(
                 &standalone.id,
-                &ProjectMilestonePatch {
+                &ProjectInitiativePatch {
                     goal_id: Some(Some("old-g".into())),
                     ..Default::default()
                 },
@@ -109,7 +109,7 @@ mod gated {
             .unwrap();
         assert!(store.delete_goal("old-g").await.unwrap());
         assert!(store
-            .list_milestones(None)
+            .list_initiatives(None)
             .await
             .unwrap()
             .iter()
@@ -119,9 +119,9 @@ mod gated {
             serde_json::to_value(&old).unwrap()
         );
         store
-            .patch_milestone(
+            .patch_initiative(
                 "old-m",
-                &ProjectMilestonePatch {
+                &ProjectInitiativePatch {
                     goal_id: Some(None),
                     ..Default::default()
                 },
@@ -133,7 +133,7 @@ mod gated {
             .patch_todo(
                 "old-t",
                 &ProjectTodoPatch {
-                    milestone_id: Some(None),
+                    initiative_id: Some(None),
                     ..Default::default()
                 },
                 6,
@@ -147,9 +147,9 @@ mod gated {
             .await
             .unwrap()
             .unwrap()
-            .milestone_id
+            .initiative_id
             .is_none());
-        let columns = sqlx::raw_sql("SELECT IS_NULLABLE FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name='project_milestones' AND column_name='goal_id'")
+        let columns = sqlx::raw_sql("SELECT IS_NULLABLE FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name='project_initiatives' AND column_name='goal_id'")
             .fetch_all(&pool).await.unwrap();
         assert_eq!(columns[0].try_get::<String, _>(0).unwrap(), "YES");
     }

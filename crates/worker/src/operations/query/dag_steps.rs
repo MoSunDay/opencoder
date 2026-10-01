@@ -23,7 +23,7 @@ pub(in crate::operations) async fn dag_steps(
     if execution.kind != ExecutionKind::Dag {
         return Ok(RpcReply::error(400, "dag steps require a DAG execution"));
     }
-    let (status, definition, legacy, execution_error) = {
+    let (status, definition, root, execution_error) = {
         let journal = worker.inner.journal.lock().await;
         let record = journal
             .records
@@ -32,8 +32,8 @@ pub(in crate::operations) async fn dag_steps(
             .ok_or_else(|| anyhow::anyhow!("dag execution not found"))?;
         (
             record.assignment.index.status,
-            record.assignment.definition,
-            journal.uses_legacy(&execution.id),
+            record.assignment.definition.clone(),
+            crate::layout::dag::accepted_parent(&record)?,
             record.error,
         )
     };
@@ -43,11 +43,6 @@ pub(in crate::operations) async fn dag_steps(
             return Ok(RpcReply::error(404, "step not found in run spec"));
         }
     }
-    let root = if legacy {
-        worker.inner.layout.checked_legacy_workflow_root()?
-    } else {
-        worker.inner.layout.kind_root(ExecutionKind::Dag)
-    };
     let execution_status = status.as_str();
     let snapshot = worker
         .inner

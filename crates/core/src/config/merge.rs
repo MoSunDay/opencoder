@@ -318,8 +318,6 @@ pub(super) fn merge_into(cfg: &mut Config, value: serde_json::Value) {
         // object whose serde defaults fill the rest
         // (`{"dag":{"nfs":{"port":0}}}` only overrides the port).
         if let Some(d) = obj.get("dag").and_then(|v| v.as_object()) {
-            // A malformed or cleared authority disables device workflows; never
-            // retain an earlier credential endpoint after an invalid override.
             if let Some(dir) = d.get("binary_dir").and_then(|v| v.as_str()) {
                 cfg.dag.binary_dir = Some(std::path::PathBuf::from(dir));
             }

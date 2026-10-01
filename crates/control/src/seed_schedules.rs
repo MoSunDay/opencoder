@@ -7,7 +7,7 @@
 //! and skipped — the file was previously fail-soft too). Once definitions
 //! exist, the file is dead weight for job bodies; a server restart must
 //! never resurrect a definition the operator deleted, so the import is
-//! strictly table-empty gated (skip-don't-merge, like `seed_review_dags`).
+//! strictly table-empty gated: skip the import instead of merging definitions.
 //! `scan_interval_secs` keeps its file role forever — see `scheduler`.
 
 use opencoder_store::Store;

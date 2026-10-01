@@ -1,3 +1,5 @@
+Commit: 7687b5f581254ee6d826d8644789e7d498e761ba
+
 # M0：DAG 知识库只读挂载（`dag.knowledge_root`）
 
 ## 背景
@@ -26,4 +28,4 @@
 - `opencoder-dag-runtime --lib sandbox::`：knowledge 有/无两形态的
   config/mountpoint/argv、缺失与符号链接 fail-closed、Direct argv 透传。
 - 进程级：`tests/dag_e2e/agent_runc.rs`（知识库 mtime/size 快照零写入断言 +
-  bundle config ro 挂载断言）、`code_review.rs`（宿主步 prompt 知识库提示）。
+  bundle config ro 挂载断言）。

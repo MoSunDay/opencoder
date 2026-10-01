@@ -4,7 +4,7 @@ Commit: (working-tree, task-plan 强调只规划不执行——交付 0 到上�
 
 ## 背景
 
-上一轮把 question 收敛进 task-plan、去掉了 Any Home 死协议；本轮按用户要求进一步锚定该 skill 的交付语义：task-plan 的产出物是唯一一份覆盖从 0（当前现状）到交付/可上线全路径的全局计划，本轮调用只规划、不执行——避免 skill 被调用后立刻滑进实现。
+上一轮把 question 收敛进 task-plan、清理了无实现支撑的外部协议；本轮按用户要求进一步锚定该 skill 的交付语义：task-plan 的产出物是唯一一份覆盖从 0（当前现状）到交付/可上线全路径的全局计划，本轮调用只规划、不执行——避免 skill 被调用后立刻滑进实现。
 
 ## 实现（仅 `crates/core/assets/skills/task-plan/SKILL.md`，本地 seed 副本同步、保持逐字节一致）
 
@@ -16,6 +16,6 @@ Commit: (working-tree, task-plan 强调只规划不执行——交付 0 到上�
 
 ## 测试
 
-- `cargo test -p opencoder-core --test skill_contract` → 23 passed / 0 failed（含 `seeded_task_plan_body_unlocks_question_in_prefix_window`、Any Home 不回种、review 无 question 守护）
+- `cargo test -p opencoder-core --test skill_contract` → 23 passed / 0 failed（含 `seeded_task_plan_body_unlocks_question_in_prefix_window`、引用文件清单、review 无 question 守护）
 - `cargo test -p opencoder-session --test question_gating` → 6 passed / 0 failed（真实种子资产端到端：无 skill 隐藏、task-plan 解锁 act/sandbox、review 不解锁）
-- 本轮无 Rust 代码变更；workspace 级 clippy 门禁前置（shellguard 收口）已解除并终验复绿：`cargo clippy --workspace --all-targets -- -D warnings` → 0 告警（见同日 task-plan-drops-anyhome-question-latent-only.md 终验补录）。
+- 本轮无 Rust 代码变更；workspace 级 clippy 门禁前置（shellguard 收口）已解除并终验复绿：`cargo clippy --workspace --all-targets -- -D warnings` → 0 告警（见同日 task-plan-question-skill-gating.md 的测试记录）。

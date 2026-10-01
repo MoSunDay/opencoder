@@ -290,7 +290,7 @@ mod registry_tests {
     use super::*;
 
     /// The ported registry must cover exactly the command-name surface of
-    /// rippy's `build_registry` (link_repos/rippy/src/handlers/mod.rs): 90
+    /// rippy's original `build_registry` in `src/handlers/mod.rs`: 90
     /// unique command names over the same handler statics.
     #[test]
     fn registry_matches_rippy_command_surface() {
